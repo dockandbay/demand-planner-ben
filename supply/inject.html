@@ -9992,7 +9992,7 @@
   function renderProdDetailShell(c,d,seed){ var it=d.item; var inline=(c!==document.getElementById('product-content'));
     var _u=Number(d.unread_supplier)||0;
     var _mAct=d._sizesLoaded?prodDetailActs(d):(seed?prodOpenActs(seed).n:0);   // seed's action count until the real sizes land
-    var tabs=[['master','Master data'+(_mAct?' <span class="ex-badge">'+_mAct+'</span>':'')],['samples','Samples'],['timeline','Timeline'+(_u?' <span class="ex-badge">'+_u+'</span>':'')],['documents','Documents']];
+    var tabs=[['master','Master data'],['sizes','Size &amp; variants'+(_mAct?' <span class="ex-badge">'+_mAct+'</span>':'')],['samples','Samples'],['timeline','Timeline'+(_u?' <span class="ex-badge">'+_u+'</span>':'')],['documents','Documents']];
     // inline (expanded under the grid row) shows just the sub-tabs — no header; the grid row above already shows ref/colour/etc.
     var header=inline?'':('<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px"><button class="save-btn light" id="pd-back">← Back</button>'
       +(it.has_swatch?'<img src="/api/product/swatch/'+encodeURIComponent(it.ref)+'?t='+encodeURIComponent(it.updated_at)+'" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">':'')
@@ -10005,6 +10005,7 @@
     if(_prodDetailTab==='timeline')return renderProdTimeline(body,it.ref);
     if(_prodDetailTab==='documents')return renderProdDocs(body,it.ref);
     if(_prodDetailTab==='samples')return renderProdSamplesTab(body,it.ref);
+    if(_prodDetailTab==='sizes')return renderProdMaster(body,d,'sizes');
     if(!d._coreLoaded && d._partial){ body.innerHTML='<div class="pd-skel">'+Array(5).join('x').split('x').map(function(){return '<div class="pd-skel-row"></div>';}).join('')+'</div>'; return; }   // master fields wait on the tiny core call
     renderProdMaster(body,d); }
   function renderProdSamplesTab(body,ref){ body.innerHTML='<div style="color:#94a3b8">Loading…</div>';
@@ -10034,7 +10035,7 @@
       body.querySelectorAll('.psamp-img').forEach(function(im){ im.onclick=function(){ openImgZoom(im.dataset.src); }; });
       body.querySelectorAll('.samp-open').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); gotoSample(a.dataset.ref); }; });   // sample-shipment ref → SUPPLY ▸ Samples
     }).catch(function(e){ body.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
-  function renderProdMaster(body,d){ var it=d.item; ensureSuppliers(function(){ loadProdCfg(function(cfg){
+  function renderProdMaster(body,d,mode){ mode=mode||'master'; var it=d.item; ensureSuppliers(function(){ loadProdCfg(function(cfg){
     var seasons=(cfg.seasons||[]), cats=(cfg.categories||[]);
     function selOf(id,val,opts,valKey,lblFn){ return '<select class="fci" id="'+id+'">'+opts.map(function(o){ var v=valKey?o[valKey]:o; return '<option value="'+esc(v)+'"'+(String(v)===String(val)?' selected':'')+'>'+esc(lblFn?lblFn(o):v)+'</option>'; }).join('')+'</select>'; }
     // ── Component matrix: each size = a header row + one sub-row per component (Product / Packaging / Labels /
@@ -10095,7 +10096,7 @@
     var swatchVal='<input type="file" id="pm-swatch" accept="image/png,image/jpeg" style="font-size:12px"> <span id="pm-sw-msg" style="font-size:11px"></span>'
       +(it.has_swatch?' <img class="pm-swatch-zoom" data-src="'+swUrl+'" src="'+swUrl+'" style="width:36px;height:36px;object-fit:cover;border-radius:5px;border:1px solid #e5e7eb;cursor:zoom-in;vertical-align:middle" title="click to enlarge"> <a href="'+swUrl+'" download title="download swatch" style="color:#1d4ed8;text-decoration:none;font-size:15px;vertical-align:middle">⬇</a>':'')
       +'<div id="pm-swatch-paste" tabindex="0" style="margin-top:6px;border:1px dashed #cbd5e1;border-radius:6px;padding:8px 11px;font-size:11px;color:#94a3b8;max-width:340px;cursor:text">…or click here and paste an image (⌘/Ctrl+V)</div>';
-    body.innerHTML=prodSupList()+'<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start"><div style="flex:1 1 340px;min-width:320px;max-width:600px">'
+    var _masterHtml=prodSupList()+'<div style="max-width:660px">'
       +pRow('Season','<select class="fci pm-field pm-fld" data-f="season" id="pm-season">'+seasonOpts+'</select>')
       +pRow('Category','<select class="fci pm-field pm-fld" data-f="category" id="pm-cat">'+catOpts+'</select>')
       +pRow('Supplier','<span class="pm-sup-pick" style="display:inline-block;min-width:200px;border:1px solid #cbd5e1;border-radius:5px;padding:4px 8px">'+prodPickBtn(it.ref,'supplier',it.supplier,'supplier')+'</span> <span style="color:#94a3b8;font-size:11px;margin-left:6px">ref keeps its original code'+(it.supplier_code?' ('+esc(it.supplier_code)+')':'')+'</span>')
@@ -10109,13 +10110,12 @@
       +pRow('Description','<textarea class="fci pm-fld" data-f="description" id="pm-desc" rows="3" style="width:100%;max-width:620px;box-sizing:border-box">'+esc(it.description)+'</textarea>')
       +pRow('Reference','<input class="fci" id="pm-ref" value="'+esc(it.ref)+'" style="width:220px;font-family:ui-monospace,monospace"> <button class="save-btn" id="pm-ref-save">Rename</button> <span id="pm-ref-msg" style="font-size:11px;margin-left:4px"></span><div style="font-size:11px;color:#94a3b8;margin-top:3px">Renaming updates this product everywhere (samples, timeline, documents). Must be unique.</div>')
       +'<div style="font-size:11px;color:#94a3b8;margin:2px 0 12px">Changes save automatically. <span id="pm-msg" style="margin-left:6px"></span></div>'
-      +'</div>'
-      +'<div style="flex:2 1 520px;min-width:360px">'
-      +'<div style="font-weight:700;font-size:13px;margin:0 0 6px">Size variants &amp; components <span style="color:#94a3b8;font-weight:400;font-size:11px">(approval = internal D&amp;B sign-off)</span></div>'
+      +'</div>';
+    var _sizesHtml='<div style="font-weight:700;font-size:13px;margin:0 0 6px">Size variants &amp; components <span style="color:#94a3b8;font-weight:400;font-size:11px">(approval = internal D&amp;B sign-off)</span></div>'
       +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;min-width:1460px;table-layout:fixed"><thead><tr>'+[['Component','width:470px'],['Description','width:14%'],['Req','width:46px'],['Status','width:175px'],['Actions','width:110px'],['Files',''],['Samples','width:15%']].map(function(h){return '<th style="text-align:left;padding:2px 8px 4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7;white-space:nowrap;'+h[1]+'">'+h[0]+'</th>';}).join('')+'</tr></thead><tbody id="pm-sztbody">'+(sizeRows||(_szLoading?'<tr><td colspan="7" style="color:#94a3b8;padding:8px 4px">Loading size variants &amp; components…</td></tr>':'<tr><td colspan="7" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>'))+'</tbody></table></div>'
-      +'<div style="margin-top:8px"><input class="fci" id="pm-newsz" placeholder="add size…" style="width:130px"> <button class="save-btn" id="pm-addsz">+ Add size</button></div>'
-      +'</div></div>'
-      +'<div style="margin-top:16px;padding-top:12px;border-top:1px solid #eef2f7;max-width:660px"><button class="save-btn light" id="pm-del" style="color:#dc2626">Delete product</button></div>';
+      +'<div style="margin-top:8px"><input class="fci" id="pm-newsz" placeholder="add size…" style="width:130px"> <button class="save-btn" id="pm-addsz">+ Add size</button></div>';
+    var _delHtml='<div style="margin-top:16px;padding-top:12px;border-top:1px solid #eef2f7;max-width:660px"><button class="save-btn light" id="pm-del" style="color:#dc2626">Delete product</button></div>';
+    body.innerHTML=(mode==='sizes')?_sizesHtml:(_masterHtml+_delHtml);
     body.querySelectorAll('.pm-fld').forEach(function(el){ el.onchange=function(){ var msg=body.querySelector('#pm-msg'); if(msg){msg.style.color='#64748b';msg.textContent='Saving…';}
       var payload={}; payload[el.dataset.f]=el.value; shipPost('/api/product/item/'+encodeURIComponent(it.ref),payload,function(j){ if(msg){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;} else { msg.style.color='#16a34a'; msg.textContent='Saved ✓'; setTimeout(function(){ if(msg)msg.textContent=''; },1200); prodSyncGridCell(it.ref,el.dataset.f,el.value); } } _prodCfg=null; }); }; });
     body.querySelectorAll('.pm-rec').forEach(function(cb){ cb.onchange=function(){ var vals=[]; body.querySelectorAll('.pm-rec:checked').forEach(function(x){ vals.push(x.value); });

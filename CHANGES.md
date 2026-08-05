@@ -1,3 +1,6 @@
+## v26.560 — PRODUCT: Size & variants as its own tab
+- Size variants & components moved out of Master data into a dedicated 'Size & variants' tab (renderProdMaster takes a mode). Master data reverts to a single column. The size-approval action badge moves to the new tab.
+
 ## v26.559 — SUPPLY ▸ Samples detail: sectioned 2-col grid + merged timeline
 - Details sub-tab: 4 distinct bordered sections in a responsive 2-col grid — Recipient & address · SKUs & quantities · Status & Fulfilment · Other details (Purpose + Notes moved here). Second recipient is its own card when present.
 - Timeline: record of change is now integrated INTO the timeline in one descending-time list (was a separate block on top); the record-of-change badge sits before the date/time · user; per-sample hide-record-of-change checkbox retained. Timeline dates now dd-mmm-yy HH:MM (were raw ISO); internal author shows the user (ben@) not 'D&B'.
