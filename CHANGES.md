@@ -1,3 +1,7 @@
+## v26.572.0 — PRODUCT Size & variants: fix clipped component labels + header-style size rows
+- Size/component table column widths were set via th styles under table-layout:fixed and not reliably honoured, clipping the Component labels (Labels/wraps, ✓ Product, ● Packaging). Switched to an authoritative <colgroup> (Component col = 230px) so labels always fit.
+- Each SIZE row is now a darker grey band (background #e2e8f0, thicker top border) so it reads as a little sub-header above its component rows.
+
 ## v26.571.0 — PO Client/FBA: Custom-order product picker only when Custom ticked
 - The "Custom order product(s)" row on the PO Client/FBA tab now shows only when Direct-to-Client type = Custom is ticked (hidden otherwise). Toggling the Custom checkbox shows/hides it live without a re-render.
 
