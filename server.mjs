@@ -3993,6 +3993,14 @@ app.get('/api/product/item/:ref/core', async (req, res) => {
     res.json({ item, unread_supplier: unreadR.rows[0].n });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Light docs-only endpoint — the Documents tab used to re-fetch the whole heavy /item/:ref (5 queries) just for
+// this. One indexed query instead → the tab loads fast (esp. on the remote sandbox pooler ~330ms/query).
+app.get('/api/product/item/:ref/docs', async (req, res) => {
+  try {
+    const docs = (await pool.query(`SELECT id, filename, mime, byte_size, coalesce(uploaded_by,'') uploaded_by, coalesce(uploader_kind,'internal') uploader_kind, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments WHERE po=$1 AND category='product' ORDER BY uploaded_at DESC`, [req.params.ref])).rows;
+    res.json({ docs });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // The heavy part — sizes + component dimensions + files + samples (for the shipments column). Loaded after the core.
 app.get('/api/product/item/:ref/sizes', async (req, res) => {
   const ref = req.params.ref;
@@ -4042,8 +4050,8 @@ app.post('/api/product/item', async (req, res) => {
     await client.query('BEGIN');
     const seq = (await client.query(`SELECT coalesce(max(seq_in_group),0)+1 n FROM planner.product_dev_items WHERE season=$1 AND category_code=$2`, [season, code])).rows[0].n;
     const ref = season + '-' + code + (supCode ? '-' + supCode : '') + '-' + String(seq).padStart(2, '0');
-    const ins = await client.query(`INSERT INTO planner.product_dev_items (ref, season, category, category_code, seq_in_group, colour_name, description, supplier, supplier_code, created_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, [ref, season, category, code, seq, (b.colour_name || '').trim() || null, (b.description || '').trim() || null, supplier || null, supCode, (b.created_by || '').trim() || null]);
+    const ins = await client.query(`INSERT INTO planner.product_dev_items (ref, season, category, category_code, seq_in_group, colour_name, description, supplier, supplier_code, created_by, approval_method)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`, [ref, season, category, code, seq, (b.colour_name || '').trim() || null, (b.description || '').trim() || null, supplier || null, supCode, (b.created_by || '').trim() || null, (b.approval_method || '').trim() || null]);
     const id = ins.rows[0].id, sizes = Array.isArray(b.sizes) ? b.sizes : [];
     for (let k = 0; k < sizes.length; k++) { const sl = String(sizes[k] || '').trim(); if (sl) await client.query(`INSERT INTO planner.product_dev_sizes (item_id, size_label, sort) VALUES ($1,$2,$3)`, [id, sl, k]); }
     // Auto timeline note (author_kind='internal' = from D&B → shows as an UNREAD action for the supplier in the

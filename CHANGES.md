@@ -1,3 +1,8 @@
+## v26.558 — PRODUCT: perf, approval on create, 2-col master
+- PERF: product tabs no longer re-fetch on every click. New light GET /api/product/item/:ref/docs (1 query vs the 5-query full item — Documents tab was 2.5-4s). Per-tab JSON cache (_prodCachedJson, 2-min TTL) makes re-clicking Documents/Samples/Timeline instant; invalidated on writes (upload/note/sample) via prodItemInvalidate + _prodJsonBust.
+- Add-new-product form now has an Approval method field (photo|samples), saved on create (server insert updated).
+- Master data view is now two responsive columns: Master data left, Size variants & components right where width permits, stacked otherwise.
+
 ## v26.557 — 3PL invoice tab: condensed desktop layout (Option B)
 - Steps 1 & 2/3 no longer stack full-width: Step 1 (Upload + files) sits left; Steps 2 (Import) + 3 (Clean-up sweep) stack in a narrower right column; Step 4 (Review) stays full width. Responsive — flex-wraps to full-width stacked on mobile. Data-weighted per Ben's mockup approval.
 

@@ -9517,6 +9517,11 @@
     return {t:t, h:h||'This SUPPLY section.'}; };
   // ════════ PRODUCT module (top-level; migration 128) ════════
   var PRODUCT_SUB='plan', _prodCfg=null, _prodDetail=null, _prodSeed=null, _prodDetailTab='master', _prodDetailBox=null, _pendingProdRef=null, _prodDraw=null, _prodRows=null;
+  // Per-tab JSON cache: switching between a product's tabs used to re-fetch every click (slow on the remote pooler).
+  // Cache the payload per URL (2-min TTL); _prodJsonBust(ref) clears a product's entries after a write (upload/note/sample).
+  var _prodJsonCache={};
+  function _prodCachedJson(url,ttl){ ttl=ttl||120000; var c=_prodJsonCache[url]; if(c&&Date.now()-c.t<ttl)return Promise.resolve(c.d); return fetch(url).then(function(r){return r.json();}).then(function(d){ _prodJsonCache[url]={t:Date.now(),d:d}; return d; }); }
+  function _prodJsonBust(ref){ if(!ref)return; var e=encodeURIComponent(ref); Object.keys(_prodJsonCache).forEach(function(k){ if(k.indexOf(e)>=0||k.indexOf(ref)>=0)delete _prodJsonCache[k]; }); }
   // Keep the grid ⇄ detail views in sync for the fields shown in both (season / category / colour). No disruptive full redraw.
   function prodSyncGridCell(ref,field,val){
     if(_prodRows){ var ro=_prodRows.filter(function(x){return x.ref===ref;})[0]; if(ro)ro[field]=val; }
@@ -9529,7 +9534,7 @@
   function prodSyncDetailField(ref,field,val){ if(_prodDetail&&_prodDetail.item&&_prodDetail.item.ref===ref){ _prodDetail.item[field]=val; var fld=document.querySelector('.pm-fld[data-f="'+field+'"]'); if(fld&&fld.value!==val){ fld.value=val; if(field==='status')fld.setAttribute('style',prodStatusStyle(val)); } } if(_prodSeed&&_prodSeed.ref===ref)_prodSeed[field]=val; }
   // Product item cache (A) — expand re-open is instant; entries expire after TTL and are cleared on any save to that ref.
   var _prodItemCache={}, _PROD_ITEM_TTL=60000;
-  function prodItemInvalidate(ref){ if(ref)delete _prodItemCache[ref]; }
+  function prodItemInvalidate(ref){ if(ref){ delete _prodItemCache[ref]; _prodJsonBust(ref); } }
   function prodItemCached(ref){ var e=_prodItemCache[ref]; return (e && (Date.now()-e.t)<_PROD_ITEM_TTL) ? e.d : null; }
   function loadProdItem(ref,cb,force){ var c=force?null:prodItemCached(ref);   // returns cached data synchronously via cb when fresh
     if(c)return cb(c,true);
@@ -9941,6 +9946,7 @@
       +pRow('Colour way name','<input class="fci" id="pn-colour" style="width:360px" placeholder="e.g. Ibiza Glow — comma-separate to create several at once"><div style="color:#94a3b8;font-size:11px;margin-top:2px">Multiple colour ways separated by commas each create their own product (same season, category &amp; sizes).</div>')
       +pRow('Sizes','<input class="fci" id="pn-sizes" style="width:280px" placeholder="comma-separated, e.g. S, M, L, XL">')
       +pRow('Description','<textarea class="fci" id="pn-desc" rows="3" style="width:100%" placeholder="detailed description…"></textarea>')
+      +pRow('Approval method','<select class="fci" id="pn-approval" style="width:210px"><option value="">— not set —</option><option value="photo">Approval by photo</option><option value="samples">Send samples</option></select> <span style="color:#94a3b8;font-size:11px;margin-left:6px">how sign-off happens — shown to the supplier</span>')
       +'<div style="margin-top:12px"><button class="save-btn" id="pn-save" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Create</button> <button class="save-btn light" id="pn-cancel">Cancel</button> <span id="pn-msg" style="font-size:12px;margin-left:8px"></span></div></div>';
     document.getElementById('pn-cancel').onclick=function(){ selectProductSub('plan'); };
     var pnSupplier=''; var _pns=c.querySelector('.pn-sup-box .prod-cell-pick'); if(_pns)_pns.onclick=function(e){ e.stopPropagation(); openProdCellPick(_pns,null,function(val){ pnSupplier=val||''; _pns.innerHTML = pnSupplier?esc(pnSupplier)+' ▾':'<span class="mut">— <span style="background:#fee2e2;color:#991b1b;font-weight:700;border-radius:3px;padding:0 3px">set</span></span> ▾'; }); };
@@ -9948,7 +9954,7 @@
       var season=document.getElementById('pn-season').value, cat=document.getElementById('pn-cat').value;
       if(!season||!cat){ msg.style.color='#dc2626'; msg.textContent='Season and category required.'; return; }
       var sizes=document.getElementById('pn-sizes').value.split(',').map(function(s){return s.trim();}).filter(Boolean);
-      var desc=document.getElementById('pn-desc').value, supplier=pnSupplier;
+      var desc=document.getElementById('pn-desc').value, supplier=pnSupplier, approval=document.getElementById('pn-approval').value;
       var colours=document.getElementById('pn-colour').value.split(',').map(function(s){return s.trim();}).filter(Boolean);
       if(!colours.length)colours=[''];   // no colour → still create one product
       btn.disabled=true; msg.style.color='#64748b'; msg.textContent=colours.length>1?('Creating '+colours.length+' products…'):'Creating…';
@@ -9956,7 +9962,7 @@
       // sequential (not parallel) so the per-(season,category) counter increments cleanly without a race
       (function next(){
         if(i>=colours.length){ if(created.length===1){ _prodDetailTab='master'; renderProductDetail(created[0]); } else { selectProductSub('plan'); } return; }
-        shipPost('/api/product/item',{season:season,category:cat,supplier:supplier,colour_name:colours[i],description:desc,sizes:sizes,created_by:(window.ME&&ME.email)||''},function(j){
+        shipPost('/api/product/item',{season:season,category:cat,supplier:supplier,colour_name:colours[i],description:desc,sizes:sizes,approval_method:approval,created_by:(window.ME&&ME.email)||''},function(j){
           if(j&&j.error){ msg.style.color='#dc2626'; msg.textContent='Failed on “'+(colours[i]||'(no colour)')+'”: '+j.error; btn.disabled=false; return; }
           if(j&&j.ref)created.push(j.ref); i++; msg.textContent='Created '+created.length+' of '+colours.length+'…'; next(); });
       })(); }; }); }); }
@@ -9995,7 +10001,7 @@
     if(!d._coreLoaded && d._partial){ body.innerHTML='<div class="pd-skel">'+Array(5).join('x').split('x').map(function(){return '<div class="pd-skel-row"></div>';}).join('')+'</div>'; return; }   // master fields wait on the tiny core call
     renderProdMaster(body,d); }
   function renderProdSamplesTab(body,ref){ body.innerHTML='<div style="color:#94a3b8">Loading…</div>';
-    fetch('/api/product/samples/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(list){ list=Array.isArray(list)?list:[];
+    _prodCachedJson('/api/product/samples/'+encodeURIComponent(ref)).then(function(list){ list=Array.isArray(list)?list:[];
       list.sort(function(a,b){ var d=String(b.sample_date||'').localeCompare(String(a.sample_date||'')); return d||((b.version||0)-(a.version||0)); });   // newest first
       body.innerHTML='<div style="font-size:12px;color:#94a3b8;margin-bottom:10px">Sample versions submitted by the supplier in the portal — each colour + quality verified before submission.</div>'
         +(list.length?list.map(function(s){ var ph=(s.photos||[]).map(function(p){ var url='/api/supply/portal-attachment/'+p.id;
@@ -10016,7 +10022,7 @@
               +' <span class="ps-adm-fb-msg" data-id="'+s.id+'" style="font-size:11px;color:#16a34a"></span></div>'
             +((s.shipments&&s.shipments.length)?'<div style="margin-top:6px;display:flex;flex-direction:column;gap:4px">'+s.shipments.map(function(sh){return '<div style="padding:6px 9px;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;font-size:12px">📦 Shipment <a class="samp-open" data-ref="'+esc(sh.ref)+'" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;font-weight:600" title="open this sample shipment">'+esc(sh.ref)+'</a>'+(sh.carrier?' · '+esc(sh.carrier):'')+(sh.tracking?' · '+carrierTrackLinkInj(sh.carrier,sh.tracking):'')+'</div>';}).join('')+'</div>':'')
             +'</div>'; }).join(''):'<div style="color:#94a3b8;padding:6px 2px">No sample versions submitted yet.</div>');
-      body.querySelectorAll('.ps-adm-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this sample version?'))return; shipPost('/api/product/sample/'+a.dataset.id+'/delete',{},function(){ renderProdSamplesTab(body,ref); }); }; });
+      body.querySelectorAll('.ps-adm-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this sample version?'))return; shipPost('/api/product/sample/'+a.dataset.id+'/delete',{},function(){ _prodJsonBust(ref); renderProdSamplesTab(body,ref); }); }; });
       body.querySelectorAll('.ps-adm-fb').forEach(function(t){ t.onchange=function(){ var msg=body.querySelector('.ps-adm-fb-msg[data-id="'+t.dataset.id+'"]'); if(msg){msg.style.color='#94a3b8';msg.textContent='saving…';} shipPost('/api/product/sample/'+t.dataset.id+'/feedback',{admin_feedback:t.value},function(j){ if(msg){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;} else {msg.style.color='#16a34a';msg.textContent='✓ saved';setTimeout(function(){msg.textContent='';},1800);} } }); }; });
       body.querySelectorAll('.psamp-img').forEach(function(im){ im.onclick=function(){ openImgZoom(im.dataset.src); }; });
       body.querySelectorAll('.samp-open').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); gotoSample(a.dataset.ref); }; });   // sample-shipment ref → SUPPLY ▸ Samples
@@ -10082,7 +10088,7 @@
     var swatchVal='<input type="file" id="pm-swatch" accept="image/png,image/jpeg" style="font-size:12px"> <span id="pm-sw-msg" style="font-size:11px"></span>'
       +(it.has_swatch?' <img class="pm-swatch-zoom" data-src="'+swUrl+'" src="'+swUrl+'" style="width:36px;height:36px;object-fit:cover;border-radius:5px;border:1px solid #e5e7eb;cursor:zoom-in;vertical-align:middle" title="click to enlarge"> <a href="'+swUrl+'" download title="download swatch" style="color:#1d4ed8;text-decoration:none;font-size:15px;vertical-align:middle">⬇</a>':'')
       +'<div id="pm-swatch-paste" tabindex="0" style="margin-top:6px;border:1px dashed #cbd5e1;border-radius:6px;padding:8px 11px;font-size:11px;color:#94a3b8;max-width:340px;cursor:text">…or click here and paste an image (⌘/Ctrl+V)</div>';
-    body.innerHTML=prodSupList()+'<div style="max-width:660px">'
+    body.innerHTML=prodSupList()+'<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start"><div style="flex:1 1 340px;min-width:320px;max-width:600px">'
       +pRow('Season','<select class="fci pm-field pm-fld" data-f="season" id="pm-season">'+seasonOpts+'</select>')
       +pRow('Category','<select class="fci pm-field pm-fld" data-f="category" id="pm-cat">'+catOpts+'</select>')
       +pRow('Supplier','<span class="pm-sup-pick" style="display:inline-block;min-width:200px;border:1px solid #cbd5e1;border-radius:5px;padding:4px 8px">'+prodPickBtn(it.ref,'supplier',it.supplier,'supplier')+'</span> <span style="color:#94a3b8;font-size:11px;margin-left:6px">ref keeps its original code'+(it.supplier_code?' ('+esc(it.supplier_code)+')':'')+'</span>')
@@ -10097,9 +10103,11 @@
       +pRow('Reference','<input class="fci" id="pm-ref" value="'+esc(it.ref)+'" style="width:220px;font-family:ui-monospace,monospace"> <button class="save-btn" id="pm-ref-save">Rename</button> <span id="pm-ref-msg" style="font-size:11px;margin-left:4px"></span><div style="font-size:11px;color:#94a3b8;margin-top:3px">Renaming updates this product everywhere (samples, timeline, documents). Must be unique.</div>')
       +'<div style="font-size:11px;color:#94a3b8;margin:2px 0 12px">Changes save automatically. <span id="pm-msg" style="margin-left:6px"></span></div>'
       +'</div>'
-      +'<div style="font-weight:700;font-size:13px;margin:14px 0 6px">Size variants &amp; components <span style="color:#94a3b8;font-weight:400;font-size:11px">(approval = internal D&amp;B sign-off)</span></div>'
+      +'<div style="flex:2 1 520px;min-width:360px">'
+      +'<div style="font-weight:700;font-size:13px;margin:0 0 6px">Size variants &amp; components <span style="color:#94a3b8;font-weight:400;font-size:11px">(approval = internal D&amp;B sign-off)</span></div>'
       +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;min-width:1460px;table-layout:fixed"><thead><tr>'+[['Component','width:470px'],['Description','width:14%'],['Req','width:46px'],['Status','width:175px'],['Actions','width:110px'],['Files',''],['Samples','width:15%']].map(function(h){return '<th style="text-align:left;padding:2px 8px 4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7;white-space:nowrap;'+h[1]+'">'+h[0]+'</th>';}).join('')+'</tr></thead><tbody id="pm-sztbody">'+(sizeRows||(_szLoading?'<tr><td colspan="7" style="color:#94a3b8;padding:8px 4px">Loading size variants &amp; components…</td></tr>':'<tr><td colspan="7" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>'))+'</tbody></table></div>'
       +'<div style="margin-top:8px"><input class="fci" id="pm-newsz" placeholder="add size…" style="width:130px"> <button class="save-btn" id="pm-addsz">+ Add size</button></div>'
+      +'</div></div>'
       +'<div style="margin-top:16px;padding-top:12px;border-top:1px solid #eef2f7;max-width:660px"><button class="save-btn light" id="pm-del" style="color:#dc2626">Delete product</button></div>';
     body.querySelectorAll('.pm-fld').forEach(function(el){ el.onchange=function(){ var msg=body.querySelector('#pm-msg'); if(msg){msg.style.color='#64748b';msg.textContent='Saving…';}
       var payload={}; payload[el.dataset.f]=el.value; shipPost('/api/product/item/'+encodeURIComponent(it.ref),payload,function(j){ if(msg){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;} else { msg.style.color='#16a34a'; msg.textContent='Saved ✓'; setTimeout(function(){ if(msg)msg.textContent=''; },1200); prodSyncGridCell(it.ref,el.dataset.f,el.value); } } _prodCfg=null; }); }; });
@@ -10175,7 +10183,7 @@
     var _pz=body.querySelector('#pm-swatch-paste'); if(_pz)_pz.addEventListener('paste',function(e){ var items=(e.clipboardData&&e.clipboardData.items)||[]; for(var k=0;k<items.length;k++){ if(items[k].type&&items[k].type.indexOf('image')===0){ var f=items[k].getAsFile(); if(f){ e.preventDefault(); swUp(f); return; } } } });
   }); }); }
   function renderProdDocs(body,ref){ body.innerHTML='<div class="count" style="color:#94a3b8;padding:6px 2px">Loading…</div>';
-    fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ if(!d||!d.item){ body.innerHTML='<div style="color:#dc2626">Not found</div>'; return; } var docs=d.docs||[];
+    _prodCachedJson('/api/product/item/'+encodeURIComponent(ref)+'/docs').then(function(d){ if(!d||d.error){ body.innerHTML='<div style="color:#dc2626">Failed to load documents</div>'; return; } var docs=d.docs||[];
     var dnb=docs.filter(function(x){return (x.uploader_kind||'internal')!=='supplier';}), sup=docs.filter(function(x){return x.uploader_kind==='supplier';});
     function isImg(m){ return /^image\//i.test(String(m||'')); }
     function dt(s){ if(!s)return '<span class="mut tiny">—</span>'; var t=/(\d{2}:\d{2})/.exec(String(s)); return esc(fd(s)+(t?' '+t[1]:'')); }   // YYYY-MM-DD HH:MM -> dd-mmm-yy HH:MM
@@ -10216,7 +10224,7 @@
     }).catch(function(e){ body.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
   // Mirrors the PO timeline (timelinePanel): newest-first cards, Escalate sits on YOUR latest message (not the compose box), compose posts at the bottom.
   function renderProdTimeline(body,ref){ body.innerHTML='<div style="color:#94a3b8">Loading…</div>';
-    fetch('/api/product/notes/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){ notes=Array.isArray(notes)?notes:[];
+    _prodCachedJson('/api/product/notes/'+encodeURIComponent(ref)).then(function(notes){ notes=Array.isArray(notes)?notes:[];
       var unreadSup=notes.filter(function(n){return n.author_kind==='supplier'&&!n.read;}).length;
       var _ownNotes=notes.filter(function(n){return n.author_kind==='internal';});
       var recentOwnId=_ownNotes.length?tlDesc(_ownNotes)[0].id:null;   // escalate only on the most-recent D&B message
@@ -10232,7 +10240,7 @@
         +'<div class="mut tiny" style="margin:4px 2px 12px">To escalate to the supplier, post the message then use ⚑ Escalate on it.</div>';
       body.innerHTML='<div class="sect-h">Timeline <span class="mut tiny">— message thread for this product</span></div>'+compose+list;
       if(unreadSup>0){ shipPost('/api/product/notes-read-supplier',{ref:ref},function(){ if(typeof loadProductUnread==='function')loadProductUnread(); }); }   // D&B has now seen them → clear the unread badges
-      body.querySelector('#pt-post').onclick=function(){ var t=body.querySelector('#pt-in').value.trim(); if(!t)return; shipPost('/api/product/note',{ref:ref,body:t,author_email:(window.ME&&ME.email)||''},function(){ renderProdTimeline(body,ref); }); };
+      body.querySelector('#pt-post').onclick=function(){ var t=body.querySelector('#pt-in').value.trim(); if(!t)return; shipPost('/api/product/note',{ref:ref,body:t,author_email:(window.ME&&ME.email)||''},function(){ _prodJsonBust(ref); renderProdTimeline(body,ref); }); };
       var eb=body.querySelector('.prod-esc'); if(eb)eb.onclick=function(){ var msg=eb.dataset.msg||''; if(!msg){alert('No message to escalate.');return;} if(!confirm('Escalate this message for '+ref+' to the supplier (emails their portal user)?'))return; eb.disabled=true; var t=eb.textContent; eb.textContent='Sending…'; shipPost('/api/product/escalate',{ref:ref,message:msg},function(j){ if(j&&j.error){alert(j.error);eb.disabled=false;eb.textContent=t;return;} alert(j&&j.sent?('Escalated — emailed '+j.emails.join(', ')):(j&&j.note)||'Escalated (no recipients configured).'); renderProdTimeline(body,ref); }); };
     }).catch(function(e){ body.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
   // hz-preboot masks the DEMAND plan filter rows. It must persist on EVERY non-demand view (not just lift at boot) — else
