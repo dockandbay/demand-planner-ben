@@ -1,3 +1,6 @@
+## v26.578.0 — PO Order Plan: approving an exception (p/s/d/c) is now instant
+- Clicking the p/s/d/c exception badge in a PO’s ORDER PLAN did fetch→poRefetchPanel (a full server re-fetch of the whole PO detail, ~5s — felt like the click didn’t register). Now OPTIMISTIC: flips the cached line flag + re-renders the order-plan panel from cache instantly, then persists in the background and reverts on error. Partial UNDO keeps the correct refetch path (needs the server-recomputed carton check). Approve is the common action → now instant.
+
 ## v26.577.0 — ACTION ITEMS counts items (not POs) + fix Payment-invalid false positives
 - ACTION ITEMS badge/count now counts total action ITEMS across all POs (sum of poActions per PO), so closing one item decrements it. Was counting POs-with-actions, so it barely moved when you resolved individual items.
 - "Payment invalid — amount set with no date": dropped the final-invoice branch (final_payment_due / balance_due_date_overide is an OPTIONAL override — blank = calculated balance due date), which was firing on essentially every invoiced PO (e.g. PO-1672805). A genuinely assigned-but-undated balance is still caught by the balance milestone checks. Fixed in both the client action condition AND the server ACTIONS-feed UNION query.

@@ -3957,8 +3957,25 @@
         .then(function(){ OP_EDIT=null; invalidateDerived(); poRefetchPanel(po,i); })
         .catch(function(e){ b.disabled=false; b.textContent='✓ Save'; alert('Save failed: '+(e.message||e)); }); }; });
     // ORDER PLAN panel risk flags — approve / undo (partial / supplier / discontinue / country), then silent panel refresh
-    function _poRiskPost(psku,field,on,btn){ if(btn)btn.disabled=true;
-      fetch('/api/supply/po-line/'+encodeURIComponent(psku)+'/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({approved:on,field:field})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); }).catch(function(e){ if(btn)btn.disabled=false; alert('Failed: '+(e.message||e)); }); }
+    function _poRiskPost(psku,field,on,btn){
+      // OPTIMISTIC: was fetch→poRefetchPanel (full server re-fetch of the PO detail, ~5s, felt like the button didn't register).
+      // Now flip the cached line flag + re-render the order-plan panel from cache INSTANTLY, then persist in the background;
+      // revert on error. (Partial UNDO needs the server-recomputed carton check, so it keeps the correct refetch path.)
+      var box=document.getElementById('podet-'+i), d=box&&box._poDetail;
+      var line=d&&d.lines&&d.lines.filter(function(x){return (po+'|'+x.sku)===psku;})[0];
+      var FMAP={partial:'partial_carton_approved',supplier:'supplier_risk_approved',discontinue:'discontinue_approved',country:'country_risk_approved'};
+      var fld=FMAP[field];
+      var persist=function(onOk,onErr){ return fetch('/api/supply/po-line/'+encodeURIComponent(psku)+'/approve',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({approved:on,field:field})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); onOk&&onOk(); }).catch(onErr); };
+      if(d&&line&&(on||field!=='partial')){   // optimistic path (all approves; non-partial undos)
+        var prevFlag=fld?line[fld]:undefined, prevFcc=line.full_carton_check;
+        if(fld)line[fld]=on;
+        if(field==='partial'&&on)line.full_carton_check=(line.full_carton_check||'').replace(/⚠/g,'').trim();   // strip the ⚠ so the partial badge reads as approved (mirrors the server recompute)
+        rerenderOrderPlan(po,i);   // instant, no server round-trip
+        persist(function(){ invalidateDerived(); }, function(e){ if(fld)line[fld]=prevFlag; line.full_carton_check=prevFcc; rerenderOrderPlan(po,i); alert('Failed: '+(e.message||e)); });
+        return;
+      }
+      if(btn)btn.disabled=true;   // fallback (partial undo / no cache): correct-but-slower refetch
+      persist(function(){ invalidateDerived(); poRefetchPanel(po,i); }, function(e){ if(btn)btn.disabled=false; alert('Failed: '+(e.message||e)); }); }
     document.querySelectorAll('#podet-'+i+' .op-csv').forEach(function(b){ b.onclick=function(){ var csv=decodeURIComponent(b.dataset.csv||''); var blob=new Blob([csv],{type:'text/csv;charset=utf-8'}); var url=URL.createObjectURL(blob); var a=document.createElement('a'); a.href=url; a.download='OrderPlan-'+String(b.dataset.po||'PO')+'.csv'; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(function(){URL.revokeObjectURL(url);},1000); }; });
     document.querySelectorAll('#podet-'+i+' .oprisk-approve').forEach(function(b){ b.onclick=function(){ _poRiskPost(b.dataset.ps,b.dataset.field,true,b); }; });
     document.querySelectorAll('#podet-'+i+' .oprisk-undo').forEach(function(b){ b.onclick=function(){ _poRiskPost(b.dataset.ps,b.dataset.field,false,b); }; });
