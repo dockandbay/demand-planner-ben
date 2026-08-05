@@ -1,3 +1,5 @@
+## v26.604.0 — SCENARIO ▸ B2B: air rush rate is an editable USD input (£ from settings rate)
+- Replaced the hardcoded "$10/kg · £7/kg" rush-rate pills with a single editable USD $/kg input (default 10). The £ equivalent shows in brackets — "(≈ £X.XX/kg)" — computed from the settings USD→GBP rate (app_settings.usd_gbp_rate, default 1.34) via new GET /api/scenario/fx. The analysis air cost uses the USD rate; editing it re-renders live.
 ## v26.603.0 — Paper Store labels: key-account-linked gating + hide Crossdock when no crossdock SKUs
 - CONFIG ▸ Key Accounts: new "Carton label format" dropdown (None / Paper Store carton labels). Migration 185 adds planner.key_accounts.carton_label_format; KA_FIELDS += carton_label_format.
 - The "Paper Store carton labels" button on a PO's Client/FBA ▸ Labels row now shows ONLY when the PO's client is a key account linked to 'paper_store' (was a hardcoded name match). PO_ROWS_SQL exposes client_label_format (key_accounts join by client name).

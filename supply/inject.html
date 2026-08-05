@@ -9095,7 +9095,7 @@
   var scenExpCo=new Set();  // Financial Forecast: which channel|country rows are expanded to sub-categories
   var SCEN_ANNOT={
     prime:'<b>SCENARIO ▸ Prime Day.</b> Enter a SKU list or filter by category / market to see available inventory split by FBA, AWD and 3PL.',
-    b2b:'<b>SCENARIO ▸ B2B Allocation.</b> Should we take this order? Models stock impact, whether it\'s worth it after the air cost to rush in any shortfall, and a take/decline verdict. Switch market to re-analyse (stock + price are market-specific). Air rate $10/kg · £7/kg.',
+    b2b:'<b>SCENARIO ▸ B2B Allocation.</b> Should we take this order? Models stock impact, whether it\'s worth it after the air cost to rush in any shortfall, and a take/decline verdict. Switch market to re-analyse (stock + price are market-specific). Air rush rate is an editable USD $/kg (£ equivalent from the settings USD→GBP rate).',
     finmodel:'<b>SCENARIO ▸ Financial Forecast Model.</b> FY (Mar–Feb) units &amp; revenue by category × market in the exec-summary style — overlay a <b>growth %</b> and <b>price change %</b> per category × quarter to model the year vs last-year actuals; YoY badges + FY total. Forecast only; saves live to the database.',
     postock:'<b>SCENARIO ▸ PO Stock Priority.</b> Pick a <b>production</b> PO (not yet shipped) to see, per SKU, how much of its ordered quantity is actually needed — comparing <b>stock on hand</b> + <b>OTHER inbound</b> (this PO removed) against <b>forecast demand</b> to the cover window. Flags each line <b>HIGH / MEDIUM / LOW / NOT REQUIRED</b> so over-ordered lines can be trimmed. Sort by SKU or priority; export the full analysis to CSV.',
     salesplan:'<b>SCENARIO ▸ Sales Planning.</b> For a chosen <b>country</b>, <b>channel</b> and <b>month</b>: current on-hand, the <b>projected stock at the start of that month</b> (on-hand + inbound landing before then − forecast sell-through), <b>weeks of cover</b> at that date, and whether the SKU is <b>discontinued</b> by then. FBA cover uses FBA + AWD (US); <b>3PL is a separate column</b> (stock you could transfer to FBA), not in the cover. Also flags <b>Slow moving</b> (>26wk trailing cover / no recent sales) and <b>Rec. clearance</b> (discontinued with stock left, or a badly overstocked slow mover). Forecast = latest committed run. Sort by on-hand or weeks; group by discontinued; filter to slow-moving / clearance; export to CSV.'};
@@ -9378,13 +9378,13 @@
   var B2B_COS=['UK','US','EU','AU','CA'];
   var _b2bLast=null;
   function b2bWholesale(co,retail){ if(retail==null||retail==='')return null; var r=Number(retail); return (co==='UK'||co==='EU')?(r/1.2*0.5):(r*0.5); }
-  function renderB2B(c){ var st={co:'UK',cur:'USD',keep:9,src:'mix'};
+  function renderB2B(c){ var st={co:'UK',cur:'USD',keep:9,src:'mix',rushUsd:10,fxRate:1.34};
     c.innerHTML=scenAnnot('b2b')
       +'<div class="bar"><span class="pill-lbl">Client</span><input class="fci txt" id="b2b-client" placeholder="client name" style="width:130px">'
         +'<span class="pill-lbl" style="margin-left:6px">Required by</span><input class="fci" id="b2b-date" type="date" style="width:120px;text-align:left" title="inbound landing on/before this date can fulfil the order">'
         +'<span class="pill-lbl" style="margin-left:6px">Market</span>'+B2B_COS.map(function(co){return '<span class="pill'+(co==='UK'?' active':'')+'" data-co="'+co+'">'+co+'</span>';}).join('')
         +'<span class="pill-lbl" style="margin-left:6px">Keep cover</span><input class="fci" id="b2b-keep" value="9" style="width:38px;text-align:right" title="weeks of own-channel cover to reserve before allocating to B2B">wk'
-        +'<span class="pill-lbl" style="margin-left:6px">Rush rate</span><span class="pill active" data-cur="USD">$10/kg</span><span class="pill" data-cur="GBP">£7/kg</span>'
+        +'<span class="pill-lbl" style="margin-left:6px">Air rush rate</span><span class="pill-lbl">$</span><input class="fci" id="b2b-rush" value="10" style="width:48px;text-align:right" inputmode="decimal" title="air freight rush cost per kg (USD)"><span class="pill-lbl">/kg</span><span class="mut tiny" id="b2b-rush-gbp" style="margin-left:2px"></span>'
         +'<span class="pill-lbl" style="margin-left:6px" title="which stock to count when deciding if the order can be fulfilled">Fulfil from</span><span class="pill'+(st.src==='onhand'?' active':'')+'" data-src="onhand">On-hand + inbound</span><span class="pill'+(st.src==='inproduction'?' active':'')+'" data-src="inproduction">In production</span><span class="pill'+(st.src==='mix'?' active':'')+'" data-src="mix">Mix</span></div>'
       +'<div class="bar" style="align-items:flex-start"><textarea id="b2b-lines" placeholder="one per line:  SKU, qty   (e.g.  TOWLB-CAB-LG-NAVY-R, 500)" style="width:340px;height:78px;font:11px ui-monospace,monospace;border:1px solid #d0d0d0;border-radius:5px;padding:6px"></textarea>'
         +'<div style="display:flex;flex-direction:column;gap:6px">'
@@ -9405,7 +9405,10 @@
           _b2bLast={data:data,co:st.co,date:dt}; b2bRender(_b2bLast,st); var _sv=document.getElementById('b2b-save'); if(_sv)_sv.style.display=''; })
         .catch(function(e){document.getElementById('b2b-out').innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>';}); }
     c.querySelectorAll('.bar .pill[data-co]').forEach(function(p){p.onclick=function(){c.querySelectorAll('.pill[data-co]').forEach(function(x){x.classList.remove('active');});p.classList.add('active');st.co=p.dataset.co; runB2B(false);};});
-    c.querySelectorAll('.bar .pill[data-cur]').forEach(function(p){p.onclick=function(){c.querySelectorAll('.pill[data-cur]').forEach(function(x){x.classList.remove('active');});p.classList.add('active');st.cur=p.dataset.cur; if(_b2bLast)b2bRender(_b2bLast,st);};});
+    // Air rush rate: USD input; show the £ equivalent (from the settings USD→GBP rate) in brackets.
+    function updateRushGbp(){ var el=document.getElementById('b2b-rush-gbp'); if(!el)return; var u=Number(st.rushUsd)||0, r=st.fxRate||1.34; el.textContent=u>0?('(≈ £'+(u/r).toFixed(2)+'/kg)'):''; }
+    fetch('/api/scenario/fx').then(function(r){return r.json();}).then(function(d){ if(d&&d.usd_gbp>0){ st.fxRate=Number(d.usd_gbp); updateRushGbp(); } }).catch(function(){});
+    var rushEl=document.getElementById('b2b-rush'); if(rushEl){ updateRushGbp(); rushEl.onchange=function(){ var v=parseFloat(this.value); st.rushUsd=(isNaN(v)||v<0)?0:v; updateRushGbp(); if(_b2bLast)b2bRender(_b2bLast,st); }; }
     c.querySelectorAll('.bar .pill[data-src]').forEach(function(p){p.onclick=function(){c.querySelectorAll('.pill[data-src]').forEach(function(x){x.classList.remove('active');});p.classList.add('active');st.src=p.dataset.src; if(_b2bLast)b2bRender(_b2bLast,st);};});
     var _bd=document.getElementById('b2b-date'); if(_bd&&!_bd.value)_bd.value=new Date().toISOString().slice(0,10);   // default required-by = today
     document.getElementById('b2b-date').onchange=function(){ if(_b2bLast)runB2B(false); };
@@ -9451,7 +9454,7 @@
     loadRecent();
   }
   function b2bRender(last,st){ var data=last.data, co=last.co, orderDate=last.date;
-    var rate=st.cur==='USD'?10:7, sym=st.cur==='USD'?'$':'£';
+    var rate=Number(st.rushUsd)||10, sym='$';   // air rush cost per kg — USD input (£ equivalent shown in the toolbar)
     var csym=(co==='US'?'$':co==='EU'?'€':co==='AU'?'A$':co==='CA'?'C$':'£'), keepW=(st.keep==null?6:st.keep);
     var tReq=0,tStock=0,tInb=0,tFul=0,tShort=0,tAir=0,tRev=0,tMar=0,nShort=0,nTight=0,nOOS=0,nOK=0,nInb=0;
     var rowsH=data.map(function(x){ var d=x.d, qty=x.qty;

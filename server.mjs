@@ -8002,6 +8002,11 @@ app.get('/api/scenario/b2b/open/:id', async (req, res) => {
     res.set('Cache-Control', 'no-store').json({ ok: true, ...r });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// settings USD→GBP rate (app_settings.usd_gbp_rate; USD per GBP) for the B2B air-rush £ bracket
+app.get('/api/scenario/fx', async (req, res) => {
+  try { res.set('Cache-Control', 'no-store').json({ ok: true, usd_gbp: await gbpRate() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 // all-SKU search for the B2B SKU picker (not supplier-scoped) — sku code or name
 app.get('/api/scenario/b2b/sku-search', async (req, res) => {
   try {
