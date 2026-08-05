@@ -7973,6 +7973,46 @@ app.post('/api/scenario/b2b', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── Shared B2B analyses (migration 184) — "Save & share" a run so the team sees recent analyses by others.
+app.get('/api/scenario/b2b/recent', async (req, res) => {
+  try {
+    const rows = (await pool.query(`SELECT id, coalesce(client,'') client, coalesce(market,'') market,
+        to_char(required_by,'YYYY-MM-DD') required_by, coalesce(jsonb_array_length(lines),0) n_skus,
+        coalesce(created_by,'') created_by, to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') created_at
+      FROM planner.b2b_analysis ORDER BY created_at DESC LIMIT 20`)).rows;
+    res.set('Cache-Control', 'no-store').json({ ok: true, rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/scenario/b2b/save', async (req, res) => {
+  try {
+    const b = req.body || {}; if (!Array.isArray(b.lines) || !b.lines.length) return res.status(400).json({ error: 'lines required' });
+    const r = (await pool.query(`INSERT INTO planner.b2b_analysis (client, market, required_by, lines, result, created_by)
+        VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6) RETURNING id`,
+      [String(b.client || ''), String(b.market || ''), b.date || null, JSON.stringify(b.lines), JSON.stringify(b.result || null), authUser(req) || ''])).rows[0];
+    res.json({ ok: true, id: r.id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/scenario/b2b/open/:id', async (req, res) => {
+  try {
+    const r = (await pool.query(`SELECT coalesce(client,'') client, coalesce(market,'') market, to_char(required_by,'YYYY-MM-DD') required_by,
+        lines, result, coalesce(created_by,'') created_by, to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') created_at
+      FROM planner.b2b_analysis WHERE id=$1`, [req.params.id])).rows[0];
+    if (!r) return res.status(404).json({ error: 'not found' });
+    res.set('Cache-Control', 'no-store').json({ ok: true, ...r });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// all-SKU search for the B2B SKU picker (not supplier-scoped) — sku code or name
+app.get('/api/scenario/b2b/sku-search', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim(); if (q.length < 2) return res.json({ ok: true, rows: [] });
+    const rows = (await pool.query(`SELECT sku, coalesce(product_name,'') name FROM planner.products
+      WHERE coalesce(sku,'')<>'' AND coalesce(variant_type,'') NOT ILIKE 'set'
+        AND (sku ILIKE '%'||$1||'%' OR product_name ILIKE '%'||$1||'%')
+      ORDER BY (sku ILIKE $1||'%') DESC, sku LIMIT 40`, [q])).rows;
+    res.set('Cache-Control', 'no-store').json({ ok: true, rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // (Removed dead /api/scenario/fin-model GET/POST/import — old FY×category×quarter model on
 //  planner.financial_model, superseded by fin-overlay below. Code archived in
 //  archive/financial-model-routes.mjs.txt for revert. Table not dropped. v25.653)

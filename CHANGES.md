@@ -1,3 +1,8 @@
+## v26.602.0 — SCENARIO ▸ B2B: shared recent analyses + SKU picker + default cover 9wk
+- "💾 Save & share" button (appears after a run) stores the analysis to a SHARED log (planner.b2b_analysis — migration 184). A "Recent analyses (shared with the team)" panel lists the last 20 (client · market · required-by · #SKUs · by whom · when). Click one → repopulates client/market/date/SKUs and shows the saved point-in-time result with a "↻ Re-run live" button.
+- SKU picker (like samples): search box → results with checkbox + qty → "+ Add selected" appends "SKU, qty" lines into the entry box (coexists with paste entry). All-SKU search (not supplier-scoped) via new GET /api/scenario/b2b/sku-search.
+- Default "Keep cover" 6 → 9 weeks (Ben).
+- New endpoints: POST /api/scenario/b2b/save, GET /api/scenario/b2b/recent, GET /api/scenario/b2b/open/:id, GET /api/scenario/b2b/sku-search. Migration 184 applied to sandbox. Endpoints round-trip verified.
 ## v26.601.0 — Paper Store carton labels (client-specific, PO ▸ Client/FBA tab)
 - New "⤓ Paper Store carton labels" button on the PO ▸ Client/FBA tab, shown ONLY for Paper Store client POs.
 - Popup asks Distribution Center Number + DC Address Line 1/2 (prefilled from the PO's Final delivery address, editable — cleans the tab/paste junk in the stored value; client_po_ref cleaned to its first token).

@@ -9376,16 +9376,20 @@
   var B2B_COS=['UK','US','EU','AU','CA'];
   var _b2bLast=null;
   function b2bWholesale(co,retail){ if(retail==null||retail==='')return null; var r=Number(retail); return (co==='UK'||co==='EU')?(r/1.2*0.5):(r*0.5); }
-  function renderB2B(c){ var st={co:'UK',cur:'USD',keep:6,src:'mix'};
+  function renderB2B(c){ var st={co:'UK',cur:'USD',keep:9,src:'mix'};
     c.innerHTML=scenAnnot('b2b')
       +'<div class="bar"><span class="pill-lbl">Client</span><input class="fci txt" id="b2b-client" placeholder="client name" style="width:130px">'
         +'<span class="pill-lbl" style="margin-left:6px">Required by</span><input class="fci" id="b2b-date" type="date" style="width:120px;text-align:left" title="inbound landing on/before this date can fulfil the order">'
         +'<span class="pill-lbl" style="margin-left:6px">Market</span>'+B2B_COS.map(function(co){return '<span class="pill'+(co==='UK'?' active':'')+'" data-co="'+co+'">'+co+'</span>';}).join('')
-        +'<span class="pill-lbl" style="margin-left:6px">Keep cover</span><input class="fci" id="b2b-keep" value="6" style="width:38px;text-align:right" title="weeks of own-channel cover to reserve before allocating to B2B">wk'
+        +'<span class="pill-lbl" style="margin-left:6px">Keep cover</span><input class="fci" id="b2b-keep" value="9" style="width:38px;text-align:right" title="weeks of own-channel cover to reserve before allocating to B2B">wk'
         +'<span class="pill-lbl" style="margin-left:6px">Rush rate</span><span class="pill active" data-cur="USD">$10/kg</span><span class="pill" data-cur="GBP">£7/kg</span>'
         +'<span class="pill-lbl" style="margin-left:6px" title="which stock to count when deciding if the order can be fulfilled">Fulfil from</span><span class="pill'+(st.src==='onhand'?' active':'')+'" data-src="onhand">On-hand + inbound</span><span class="pill'+(st.src==='inproduction'?' active':'')+'" data-src="inproduction">In production</span><span class="pill'+(st.src==='mix'?' active':'')+'" data-src="mix">Mix</span></div>'
-      +'<div class="bar"><textarea id="b2b-lines" placeholder="one per line:  SKU, qty   (e.g.  TOWLB-CAB-LG-NAVY-R, 500)" style="width:340px;height:78px;font:11px ui-monospace,monospace;border:1px solid #d0d0d0;border-radius:5px;padding:6px"></textarea>'
-        +'<button class="pill active" id="b2b-run" style="background:#1a1a1a;color:#fff">Analyse order</button></div>'
+      +'<div class="bar" style="align-items:flex-start"><textarea id="b2b-lines" placeholder="one per line:  SKU, qty   (e.g.  TOWLB-CAB-LG-NAVY-R, 500)" style="width:340px;height:78px;font:11px ui-monospace,monospace;border:1px solid #d0d0d0;border-radius:5px;padding:6px"></textarea>'
+        +'<div style="display:flex;flex-direction:column;gap:6px">'
+          +'<div style="position:relative"><input class="fci txt" id="b2b-skq" placeholder="search SKU to add…" style="width:250px" autocomplete="off"><div id="b2b-skres" style="display:none;position:absolute;z-index:30;left:0;top:26px;width:340px;max-height:260px;overflow:auto;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 6px 22px rgba(0,0,0,.18)"></div></div>'
+          +'<div style="display:flex;gap:6px"><button class="pill active" id="b2b-run" style="background:#1a1a1a;color:#fff">Analyse order</button><button class="pill" id="b2b-save" style="display:none">💾 Save &amp; share</button></div>'
+        +'</div></div>'
+      +'<div id="b2b-recent" style="margin-bottom:10px"></div>'
       +'<div id="b2b-out"></div>';
     function parseLines(){ return (document.getElementById('b2b-lines').value||'').split(/\n/).map(function(l){var m=l.trim().split(/[\s,]+/).filter(Boolean); if(!m.length)return null; return {sku:m[0].toUpperCase(), qty:parseInt(m[m.length-1],10)||0};}).filter(function(x){return x&&x.sku;}); }
     // re-fetch against the selected market — stock, recent sales and retail price are all market-specific,
@@ -9396,7 +9400,7 @@
       fetch('/api/scenario/b2b',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({market:st.co,date:dt,skus:lines.map(function(l){return l.sku;})})})
         .then(function(r){return r.json();}).then(function(d){ var by={}; (d.rows||[]).forEach(function(r){by[(r.sku||'').toUpperCase()]=r;});
           var data=lines.map(function(l){ return {qty:l.qty, d:by[l.sku]||{sku:l.sku,name:'(not found)',available:0,recent_units:0,weight:null,retail:null,cogs:null,avg_cost:null,inbound_by_date:0,inbound_total:0,next_inbound_date:null,next_inbound_qty:0,production:[]}}; });
-          _b2bLast={data:data,co:st.co,date:dt}; b2bRender(_b2bLast,st); })
+          _b2bLast={data:data,co:st.co,date:dt}; b2bRender(_b2bLast,st); var _sv=document.getElementById('b2b-save'); if(_sv)_sv.style.display=''; })
         .catch(function(e){document.getElementById('b2b-out').innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>';}); }
     c.querySelectorAll('.bar .pill[data-co]').forEach(function(p){p.onclick=function(){c.querySelectorAll('.pill[data-co]').forEach(function(x){x.classList.remove('active');});p.classList.add('active');st.co=p.dataset.co; runB2B(false);};});
     c.querySelectorAll('.bar .pill[data-cur]').forEach(function(p){p.onclick=function(){c.querySelectorAll('.pill[data-cur]').forEach(function(x){x.classList.remove('active');});p.classList.add('active');st.cur=p.dataset.cur; if(_b2bLast)b2bRender(_b2bLast,st);};});
@@ -9405,6 +9409,44 @@
     document.getElementById('b2b-date').onchange=function(){ if(_b2bLast)runB2B(false); };
     document.getElementById('b2b-keep').onchange=function(){ var v=parseFloat(this.value); st.keep=(isNaN(v)||v<0)?0:v; if(_b2bLast)b2bRender(_b2bLast,st); };
     document.getElementById('b2b-run').onclick=function(){ runB2B(true); };
+    // ---- SKU picker (search + qty + multi-select) → appends "SKU, qty" lines to the entry box ----
+    var skq=document.getElementById('b2b-skq'), skres=document.getElementById('b2b-skres'), _skT=null;
+    if(skq)skq.oninput=function(){ clearTimeout(_skT); var q=this.value.trim(); if(q.length<2){ skres.style.display='none'; return; }
+      _skT=setTimeout(function(){ fetch('/api/scenario/b2b/sku-search?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(d){ var rows=(d&&d.rows)||[];
+        if(!rows.length){ skres.innerHTML='<div class="mut tiny" style="padding:8px">No matches</div>'; skres.style.display='block'; return; }
+        skres.innerHTML=rows.map(function(x){ return '<label style="display:flex;align-items:center;gap:6px;padding:4px 8px;border-bottom:1px solid #f1f5f9;font-size:11px;cursor:pointer"><input type="checkbox" class="b2b-skcb" data-sku="'+esc(x.sku)+'"><span style="flex:1"><b>'+esc(x.sku)+'</b> <span class="mut">'+esc(String(x.name||'').slice(0,42))+'</span></span><input class="b2b-skqty fci" placeholder="qty" style="width:56px;text-align:right" inputmode="numeric"></label>'; }).join('')
+          +'<div style="position:sticky;bottom:0;background:#f8fafc;padding:6px 8px;border-top:1px solid #e2e8f0"><button class="pill active" id="b2b-skadd" style="background:#1a1a1a;color:#fff">+ Add selected</button></div>';
+        skres.style.display='block';
+        skres.querySelector('#b2b-skadd').onclick=function(){ var ta=document.getElementById('b2b-lines'), add=[];
+          skres.querySelectorAll('.b2b-skcb:checked').forEach(function(cb){ var lab=cb.closest('label'), qi=lab&&lab.querySelector('.b2b-skqty'); var qv=qi?(parseInt(qi.value,10)||0):0; add.push(cb.dataset.sku+(qv?', '+qv:', ')); });
+          if(!add.length){ alert('Tick at least one SKU (add a qty too).'); return; }
+          ta.value=(ta.value?ta.value.replace(/\s*$/,'')+'\n':'')+add.join('\n'); skres.style.display='none'; skq.value=''; ta.focus(); };
+      }).catch(function(){}); },300); };
+    document.addEventListener('click',function(e){ if(skres&&skq&&!skres.contains(e.target)&&e.target!==skq)skres.style.display='none'; });
+    // ---- Recent (shared) analyses ----
+    function loadRecent(){ var el=document.getElementById('b2b-recent'); if(!el)return;
+      fetch('/api/scenario/b2b/recent').then(function(r){return r.json();}).then(function(d){ var rows=(d&&d.rows)||[]; if(!rows.length){ el.innerHTML=''; return; }
+        el.innerHTML='<div style="border:1px solid #e2e8f0;border-radius:8px;background:#fff;padding:8px 10px;max-width:760px"><div style="font-weight:700;font-size:12px;margin-bottom:5px">Recent analyses <span class="mut tiny">(shared with the team — click to open)</span></div>'
+          +rows.map(function(x){ var d2=x.created_at?String(x.created_at).slice(0,10):''; return '<div class="b2b-rec" data-id="'+x.id+'" style="display:flex;gap:10px;align-items:center;padding:4px 0;font-size:11px;cursor:pointer;border-top:1px solid #f4f4f5"><span style="flex:1"><b>'+esc(x.client||'(no client)')+'</b> &middot; '+esc(x.market||'—')+' &middot; '+(x.required_by?esc(fd(x.required_by)):'—')+' &middot; '+x.n_skus+' SKU'+(x.n_skus===1?'':'s')+'</span><span class="mut tiny">'+esc((typeof shortUser==='function'?shortUser(x.created_by):x.created_by)||'')+(d2?' &middot; '+esc(fd(d2)):'')+'</span></div>'; }).join('')+'</div>';
+        el.querySelectorAll('.b2b-rec').forEach(function(rw){ rw.onclick=function(){ openRecent(rw.dataset.id); }; });
+      }).catch(function(){}); }
+    function openRecent(id){ fetch('/api/scenario/b2b/open/'+encodeURIComponent(id)).then(function(r){return r.json();}).then(function(d){ if(!d||!d.ok)return;
+      var cl=document.getElementById('b2b-client'); if(cl)cl.value=d.client||'';
+      if(d.market){ c.querySelectorAll('.pill[data-co]').forEach(function(x){x.classList.toggle('active',x.dataset.co===d.market);}); st.co=d.market; }
+      if(d.required_by){ var bd=document.getElementById('b2b-date'); if(bd)bd.value=d.required_by; }
+      document.getElementById('b2b-lines').value=((d.lines)||[]).map(function(l){ return l.sku+', '+(l.qty||''); }).join('\n');
+      if(d.result&&d.result.length){ _b2bLast={data:d.result,co:d.market,date:d.required_by}; b2bRender(_b2bLast,st);
+        var out=document.getElementById('b2b-out'); if(out){ out.insertAdjacentHTML('afterbegin','<div class="mut tiny" style="margin:2px 0 8px;padding:6px 9px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px">Saved analysis by <b>'+esc((typeof shortUser==='function'?shortUser(d.created_by):d.created_by)||'?')+'</b>'+(d.created_at?' on '+esc(fd(String(d.created_at).slice(0,10))):'')+' — shown as run. <button class="pill" id="b2b-rerun" style="margin-left:6px">↻ Re-run live</button></div>'); var rr=document.getElementById('b2b-rerun'); if(rr)rr.onclick=function(){ runB2B(true); }; }
+        var sv=document.getElementById('b2b-save'); if(sv)sv.style.display=''; }
+    }).catch(function(){}); }
+    var saveBtn=document.getElementById('b2b-save');
+    if(saveBtn)saveBtn.onclick=function(){ if(!_b2bLast||!_b2bLast.data||!_b2bLast.data.length){ alert('Run an analysis first.'); return; }
+      var btn=this, o=btn.textContent; btn.disabled=true; btn.textContent='Saving…';
+      var lines=_b2bLast.data.map(function(x){ return {sku:(x.d&&x.d.sku)||'', qty:x.qty||0}; });
+      fetch('/api/scenario/b2b/save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({client:(document.getElementById('b2b-client')||{}).value||'', market:_b2bLast.co, date:_b2bLast.date, lines:lines, result:_b2bLast.data})})
+        .then(function(r){return r.json();}).then(function(j){ btn.disabled=false; if(j&&j.ok){ btn.textContent='✓ Shared'; loadRecent(); setTimeout(function(){btn.textContent=o;},1500); } else { btn.textContent=o; alert('Save failed'); } })
+        .catch(function(){ btn.disabled=false; btn.textContent=o; alert('Save failed'); }); };
+    loadRecent();
   }
   function b2bRender(last,st){ var data=last.data, co=last.co, orderDate=last.date;
     var rate=st.cur==='USD'?10:7, sym=st.cur==='USD'?'$':'£';
