@@ -1,3 +1,5 @@
+## v26.595.0 — Zalando tab: halve SKU column width (min-width 320px -> 160px; auto layout still expands for longer SKUs)
+
 ## v26.594.0 — Zalando tab polish: SKU column width fix + grey zero-suggested + ticked total
 - SKU column width now actually expands. Root cause of the clipping: a GLOBAL `table{table-layout:fixed}` (+ `td{overflow:hidden}`) was overriding the inline `min-width:320px`, so the SKU was clipped under the EAN. Set this table to `table-layout:auto;width:max-content;min-width:100%` → column sizes to the SKU (no-wrap) and the .tw wrapper scrolls if needed.
 - Suggested send of 0 is now grey (#94a3b8); blue only when there's a real send (>0).
