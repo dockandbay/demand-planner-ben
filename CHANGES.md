@@ -1,3 +1,8 @@
+## v26.564 — Test-feedback fixes: DEMAND download error, 3PL align, in-flight popup
+- DEMAND plan download (#11): a subcategory whose calc() returned undefined threw and failed the whole export — now guarded (per-subcat try/catch) and the real error is surfaced instead of a bare 'Failed'.
+- 3PL Review (#5): parsed-data summary card top-margin removed so it aligns with the top of the Xero-preview column (box 4).
+- FBA in-flight transfers popup (#10): all columns + headers left-aligned; added a clear '⟳ Refresh data' button that refreshes from Cin7 and re-renders the popup (fbaTrfRefresh gained a completion callback).
+
 ## v26.563 — Auto Forecast (F3): normalise goods cost to USD
 - The payments-plan cash-out is a USD report (GBP report = USD ÷ usd_gbp_rate). Costs are held in each supplier default_currency; now every subcategory unit cost is converted to USD via its dominant supplier currency (USD ×1, GBP ×usd_gbp_rate, AUD ×usd_aud_rate). Freight (container tiers) + duty were already USD. New config key usd_aud_rate (default 0.66 USD/AUD) alongside usd_gbp_rate. Fixes the currency-blended USD total.
 

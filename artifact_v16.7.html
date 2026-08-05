@@ -1519,9 +1519,9 @@ function fbaTrfLoad(cb){ fetch('/api/supply/fba-transfers/list').then(function(r
     FBA_PENDING_ROWS.forEach(function(r){ var k=r.sku+'|'+String(r.market||'').toLowerCase()+'_fba'; FBA_PENDING[k]=(FBA_PENDING[k]||0)+(Number(r.qty)||0); });
     if(cb)cb();
   }).catch(function(){ _fbaTrfLoaded=true; if(cb)cb(); }); }
-function fbaTrfRefresh(silent){ if(_fbaTrfBusy)return; if(_fbaDlTimer){clearTimeout(_fbaDlTimer);_fbaDlTimer=null;}   // any refresh (esp. manual) supersedes a scheduled post-download run
+function fbaTrfRefresh(silent,cb){ if(_fbaTrfBusy)return; if(_fbaDlTimer){clearTimeout(_fbaDlTimer);_fbaDlTimer=null;}   // any refresh (esp. manual) supersedes a scheduled post-download run
   _fbaTrfBusy=true; _fbaTrfRenderBox();
-  fetch('/api/supply/fba-transfers/refresh',{method:'POST'}).then(function(r){return r.json();}).then(function(){ fbaTrfLoad(function(){ _fbaTrfBusy=false; if(typeof render==='function')render(); }); }).catch(function(){ _fbaTrfBusy=false; _fbaTrfRenderBox(); }); }
+  fetch('/api/supply/fba-transfers/refresh',{method:'POST'}).then(function(r){return r.json();}).then(function(){ fbaTrfLoad(function(){ _fbaTrfBusy=false; if(typeof render==='function')render(); if(cb)cb(); }); }).catch(function(){ _fbaTrfBusy=false; _fbaTrfRenderBox(); }); }
 function _fbaTrfAgo(iso){ var t=Date.parse(iso); if(!t)return ''; var m=Math.round((Date.now()-t)/60000); return m<1?'just now':(m<60?(m+'m ago'):(Math.round(m/60)+'h ago')); }
 function _fbaTrfMaybeRefresh(){ if(_fbaTrfBusy)return; var lr=FBA_PENDING_LR?Date.parse(FBA_PENDING_LR):0; if(!lr||(Date.now()-lr)>3600000)fbaTrfRefresh(true); }   // auto-refresh on FBA visit if last run > 1h
 function _fbaTrfOnView(){ if(!_fbaTrfLoaded){ fbaTrfLoad(function(){ if(typeof render==='function')render(); _fbaTrfMaybeRefresh(); }); } else { _fbaTrfMaybeRefresh(); } _fbaTrfRenderBox(); }
@@ -1536,9 +1536,10 @@ function _fbaTrfRenderBox(){ var el=document.getElementById('fba-trf-box'); if(!
 function _fbaTrfShowList(){ var p=document.getElementById('fba-trf-list');
   if(!p){ p=document.createElement('div'); p.id='fba-trf-list'; p.style.cssText='position:fixed;z-index:9000;right:12px;top:96px;max-height:70vh;overflow:auto;background:#fff;border:1px solid #bae6fd;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.18);padding:10px 12px;font-size:11px;width:440px;text-align:left'; document.body.appendChild(p); }
   if(p.style.display==='block'){ p.style.display='none'; return; }
-  var rows=FBA_PENDING_ROWS.map(function(r){ return '<tr><td style="padding:2px 8px 2px 0">'+(r.reference||'')+'</td><td style="padding:2px 8px 2px 0">'+(r.warehouse||'')+'</td><td style="padding:2px 8px 2px 0">'+(r.sku||'')+'</td><td style="padding:2px 8px 2px 0;text-align:right">'+(r.qty||0)+'</td><td style="padding:2px 0;color:#64748b;white-space:nowrap">'+(r.eta||'')+'</td></tr>'; }).join('')||'<tr><td colspan="5" style="color:#94a3b8;padding:6px 0">No in-flight transfers not yet in the inbound feed.</td></tr>';
-  p.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b>In-flight FBA transfers (not yet inbound)</b><a id="fba-trf-close" style="cursor:pointer;color:#dc2626">✕</a></div><div class="mut" style="font-size:10px;margin-bottom:6px">Processed in Cin7 in the last 48h, into FBA/AWD, not yet showing as inbound. Counted as FBA cover so they aren’t re-recommended.</div><table style="border-collapse:collapse;width:100%"><thead><tr style="color:#64748b;text-transform:uppercase;font-size:9px"><th style="text-align:left;padding:2px 8px 2px 0">Ref</th><th style="text-align:left;padding:2px 8px 2px 0">Warehouse</th><th style="text-align:left;padding:2px 8px 2px 0">SKU</th><th style="text-align:right;padding:2px 8px 2px 0">Qty</th><th style="text-align:left">ETA</th></tr></thead><tbody>'+rows+'</tbody></table>';
+  var rows=FBA_PENDING_ROWS.map(function(r){ return '<tr><td style="padding:2px 8px 2px 0;text-align:left">'+(r.reference||'')+'</td><td style="padding:2px 8px 2px 0;text-align:left">'+(r.warehouse||'')+'</td><td style="padding:2px 8px 2px 0;text-align:left">'+(r.sku||'')+'</td><td style="padding:2px 8px 2px 0;text-align:left">'+(r.qty||0)+'</td><td style="padding:2px 0;color:#64748b;white-space:nowrap;text-align:left">'+(r.eta||'')+'</td></tr>'; }).join('')||'<tr><td colspan="5" style="color:#94a3b8;padding:6px 0;text-align:left">No in-flight transfers not yet in the inbound feed.</td></tr>';
+  p.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:8px"><b>In-flight FBA transfers (not yet inbound)</b><span style="display:flex;gap:8px;align-items:center"><button id="fba-trf-list-refresh" style="font-size:10px;padding:2px 9px;border:1px solid #7dd3fc;background:#e0f2fe;color:#075985;border-radius:4px;cursor:pointer;font-weight:700">⟳ Refresh data</button><a id="fba-trf-close" style="cursor:pointer;color:#dc2626">✕</a></span></div><div class="mut" style="font-size:10px;margin-bottom:6px;text-align:left">Processed in Cin7 in the last 48h, into FBA/AWD, not yet showing as inbound. Counted as FBA cover so they aren’t re-recommended.</div><table style="border-collapse:collapse;width:100%"><thead><tr style="color:#64748b;text-transform:uppercase;font-size:9px"><th style="text-align:left;padding:2px 8px 2px 0">Ref</th><th style="text-align:left;padding:2px 8px 2px 0">Warehouse</th><th style="text-align:left;padding:2px 8px 2px 0">SKU</th><th style="text-align:left;padding:2px 8px 2px 0">Qty</th><th style="text-align:left">ETA</th></tr></thead><tbody>'+rows+'</tbody></table>';
   p.style.display='block'; var c=document.getElementById('fba-trf-close'); if(c)c.onclick=function(){ p.style.display='none'; };
+  var _rb=document.getElementById('fba-trf-list-refresh'); if(_rb)_rb.onclick=function(){ if(_fbaTrfBusy)return; _rb.textContent='⟳ Refreshing…'; _rb.disabled=true; fbaTrfRefresh(false,function(){ if(p.style.display==='block'){ p.style.display='none'; _fbaTrfShowList(); } }); };
 }
 // Clear all overrides + ticks, then re-render.
 // SKU filter supports a LIST: split on whitespace/commas/semicolons/newlines; match if the SKU
@@ -5723,8 +5724,8 @@ function buildPlanDownload(fyStarts){
   var head=['SKU','Product','Subcategory','Category','Country','Channel','Metric'];
   months.forEach(function(m){ head.push(_planMonLabel(m)+(isActualMonth(m)?' (A)':' (F)')); });
   var grid=[head], nSku=0;
-  subs.forEach(function(sub){
-    var cat=_subcatParent(sub)||'', subcatFU=(calc(sub,co,ch).fu)||{}, skus=filteredSkus(sub,co,ch)||[];
+  subs.forEach(function(sub){ try{
+    var cat=_subcatParent(sub)||'', subcatFU=((calc(sub,co,ch)||{}).fu)||{}, skus=filteredSkus(sub,co,ch)||[];
     var shares=buildSkuShares(skus,co,ch,lyYM);
     skus.forEach(function(sku){
       if(q&&!skuMatchQ(sku,q))return;
@@ -5738,7 +5739,7 @@ function buildPlanDownload(fyStarts){
       });
       grid.push(uRow); grid.push(rRow); nSku++;
     });
-  });
+  }catch(_e){ try{ if(window.console)console.warn('plan download: skipped subcategory',sub,_e); }catch(x){} } });
   if(nSku===0){ alert('No SKUs in the current filters to download.'); return; }
   var fname='demand_plan_'+co+'_'+ch+'_'+fyStarts.map(function(Y){return fyLabel(Y).replace('/','-');}).join('_')+'.xlsx';
   var bytes=buildXlsx('Demand plan', grid), blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
@@ -5756,7 +5757,7 @@ function openPlanDownload(ev){ if(ev)ev.stopPropagation(); var p=document.getEle
   var r=(ev&&ev.target&&ev.target.getBoundingClientRect)?ev.target.getBoundingClientRect():{left:200,bottom:110};
   p.style.left=Math.max(8,Math.min(window.innerWidth-320,r.left))+'px'; p.style.top=(r.bottom+6)+'px'; p.style.display='block';
   p.querySelector('#pdl-cancel').onclick=function(){ p.style.display='none'; };
-  p.querySelector('#pdl-go').onclick=function(){ var ys=Array.prototype.slice.call(p.querySelectorAll('.pdl-fy:checked')).map(function(x){return parseInt(x.value);}); if(!ys.length){ p.querySelector('#pdl-msg').textContent='Pick at least one FY.'; return; } p.querySelector('#pdl-msg').textContent='Building…'; setTimeout(function(){ try{ buildPlanDownload(ys); p.style.display='none'; }catch(e){ p.querySelector('#pdl-msg').textContent='Failed'; } },20); };
+  p.querySelector('#pdl-go').onclick=function(){ var ys=Array.prototype.slice.call(p.querySelectorAll('.pdl-fy:checked')).map(function(x){return parseInt(x.value);}); if(!ys.length){ p.querySelector('#pdl-msg').textContent='Pick at least one FY.'; return; } p.querySelector('#pdl-msg').textContent='Building…'; setTimeout(function(){ try{ buildPlanDownload(ys); p.style.display='none'; }catch(e){ p.querySelector('#pdl-msg').textContent='Failed: '+(e&&e.message||e); if(window.console)console.error('plan download failed',e); } },20); };
 }
 
 // Active SKU months (past 6 actuals: Nov25-May26, next 12 forecast: Jun26-May27)
@@ -9520,7 +9521,7 @@ function render3plInvoice(body){
       var costAcc={}; ((_cfg&&_cfg.cost_accounts)||[]).forEach(function(c){ costAcc[c.cost_type]={code:c.account_code||'',name:c.account_name||''}; });
       function ctype(nm){ nm=String(nm||''); if(/invoice|layout|setting|summary/i.test(nm))return 'skip'; if(/order/i.test(nm))return 'orders'; if(/storage/i.test(nm))return 'storage'; if(/return/i.test(nm))return 'returns'; if(/goods\s*in|inbound|rework/i.test(nm))return 'inbound'; return 'other'; }
       var grand={};
-      var html='<div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-top:12px;background:#fff;max-width:820px;text-align:left">'
+      var html='<div style="border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-top:0;background:#fff;max-width:820px;text-align:left">'
         +'<div style="font-weight:700;font-size:13px;margin-bottom:4px">Parsed summary — '+e(d.filename)+'</div>';
       (d.sheets||[]).forEach(function(sh){ var h=sh.highlights||{}; if(h.total!=null){ var _c=sh.currency||'?'; grand[_c]=(grand[_c]||0)+Number(h.total); }
         var cur=(sh.currencies&&sh.currencies.length)?(' · '+sh.currencies.join('/')):'';
