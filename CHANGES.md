@@ -1,3 +1,7 @@
+## v26.561 — PRODUCT: record of change (Ben)
+- Migration 181: product_dev_change_log. Server logProductChange() captures D&B edits to a product dev item (per changed field on POST /api/product/item/:ref, + rename); new light GET /api/product/item/:ref/changes.
+- PRODUCT ▸ Timeline now merges the record of change INTO the note thread in one descending-time list (record-of-change badge before date · user), with a per-item hide-record-of-change checkbox (mirrors Samples). Timeline dates now dd-mmm-yy HH:MM. Change cache busts on a field edit so the new entry shows.
+
 ## v26.560 — PRODUCT: Size & variants as its own tab
 - Size variants & components moved out of Master data into a dedicated 'Size & variants' tab (renderProdMaster takes a mode). Master data reverts to a single column. The size-approval action badge moves to the new tab.
 

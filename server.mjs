@@ -4001,6 +4001,13 @@ app.get('/api/product/item/:ref/docs', async (req, res) => {
     res.json({ docs });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Record of change (PRODUCT ▸ Timeline). Light — its own endpoint so the timeline can merge it with the notes.
+app.get('/api/product/item/:ref/changes', async (req, res) => {
+  try {
+    const change_log = (await pool.query(`SELECT event, coalesce(detail,'') detail, coalesce(changed_by,'') changed_by, to_char(changed_at,'YYYY-MM-DD HH24:MI') changed_at FROM planner.product_dev_change_log WHERE item_ref=$1 ORDER BY changed_at DESC LIMIT 200`, [req.params.ref])).rows;
+    res.json({ change_log });
+  } catch (e) { res.json({ change_log: [] }); }
+});
 // The heavy part — sizes + component dimensions + files + samples (for the shipments column). Loaded after the core.
 app.get('/api/product/item/:ref/sizes', async (req, res) => {
   const ref = req.params.ref;
@@ -4085,6 +4092,10 @@ app.post('/api/product/item/:ref', async (req, res) => {
     if (!sets.length) return res.json({ ok: true });
     vals.push(ref);
     await pool.query(`UPDATE planner.product_dev_items SET ${sets.join(',')}, updated_at=now() WHERE ref=$${i}`, vals);
+    // Record of change (PRODUCT ▸ Timeline) — one entry per field the D&B user just changed.
+    { const _plbl = { colour_name: 'Colour way', description: 'Description', status: 'Status', season: 'Season', category: 'Category', dev_start_override: 'Development start', recipient_countries: 'Recipient country', approval_method: 'Approval method', supplier: 'Supplier' };
+      const _pby = authUser(req) || 'Dock & Bay';
+      for (const k of Object.keys(_plbl)) { if (k in b) { const v = String(b[k] == null ? '' : b[k]).trim(); await logProductChange(ref, _plbl[k] + (v ? (' → ' + (v.length > 80 ? v.slice(0, 80) + '…' : v)) : ' cleared'), null, _pby); } } }
     if (_recNote) { const label = _recNote.split(',').map(x => x.trim()).filter(Boolean).join(' and ') || 'UK';
       try { await pool.query(`INSERT INTO planner.supplier_notes (po, author_kind, author_email, body) VALUES ($1,'internal',$2,$3)`, [ref, authUser(req) || null, 'Recipient country updated to ' + label]); } catch (e) { /* note best-effort */ } }
     res.json({ ok: true });
@@ -4107,7 +4118,9 @@ app.post('/api/product/item/:ref/rename', async (req, res) => {
     await client.query(`UPDATE planner.supplier_notes      SET po=$1 WHERE po=$2`, [newRef, oldRef]);
     await client.query(`UPDATE planner.portal_attachments  SET po=$1 WHERE po=$2 AND category='product'`, [newRef, oldRef]);
     await client.query(`UPDATE planner.supplier_submissions SET po=$1 WHERE po=$2`, [newRef, oldRef]);
+    await client.query(`UPDATE planner.product_dev_change_log SET item_ref=$1 WHERE item_ref=$2`, [newRef, oldRef]).catch(() => {});
     await client.query('COMMIT');
+    await logProductChange(newRef, 'Reference renamed', 'from ' + oldRef, authUser(req) || 'Dock & Bay');
     res.json({ ok: true, ref: newRef });
   } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); }
   finally { client.release(); }
@@ -9407,6 +9420,11 @@ async function logPoChange(po, event, detail, by) {
 async function logSampleChange(sampleId, event, detail, by) {
   try { await pool.query(`INSERT INTO planner.sample_change_log (sample_id,event,detail,changed_by) VALUES ($1::bigint,$2,$3,$4)`, [sampleId, event, detail || null, by || null]); }
   catch (e) { /* table absent pre-migration 172 — non-fatal */ }
+}
+// Record of change for a PRODUCT development item (migration 181). Surfaced in PRODUCT ▸ Timeline (merged with notes).
+async function logProductChange(ref, event, detail, by) {
+  try { await pool.query(`INSERT INTO planner.product_dev_change_log (item_ref,event,detail,changed_by) VALUES ($1,$2,$3,$4)`, [ref, event, detail || null, by || null]); }
+  catch (e) { /* table absent pre-migration 181 — non-fatal */ }
 }
 const SAMPLE_TRACK = { production_status:'Production status', tracking_code:'Tracking code', carrier:'Carrier', supplier_expected_completion:'Expected completion', status:'Status' };
 // Diff the tracked sample fields (current DB row vs incoming body) and log each actual change. Call BEFORE the patch.

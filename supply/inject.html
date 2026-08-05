@@ -10117,7 +10117,7 @@
     var _delHtml='<div style="margin-top:16px;padding-top:12px;border-top:1px solid #eef2f7;max-width:660px"><button class="save-btn light" id="pm-del" style="color:#dc2626">Delete product</button></div>';
     body.innerHTML=(mode==='sizes')?_sizesHtml:(_masterHtml+_delHtml);
     body.querySelectorAll('.pm-fld').forEach(function(el){ el.onchange=function(){ var msg=body.querySelector('#pm-msg'); if(msg){msg.style.color='#64748b';msg.textContent='Saving…';}
-      var payload={}; payload[el.dataset.f]=el.value; shipPost('/api/product/item/'+encodeURIComponent(it.ref),payload,function(j){ if(msg){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;} else { msg.style.color='#16a34a'; msg.textContent='Saved ✓'; setTimeout(function(){ if(msg)msg.textContent=''; },1200); prodSyncGridCell(it.ref,el.dataset.f,el.value); } } _prodCfg=null; }); }; });
+      var payload={}; payload[el.dataset.f]=el.value; shipPost('/api/product/item/'+encodeURIComponent(it.ref),payload,function(j){ if(msg){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;} else { msg.style.color='#16a34a'; msg.textContent='Saved ✓'; setTimeout(function(){ if(msg)msg.textContent=''; },1200); prodSyncGridCell(it.ref,el.dataset.f,el.value); _prodJsonBust(it.ref); } } _prodCfg=null; }); }; });
     body.querySelectorAll('.pm-rec').forEach(function(cb){ cb.onchange=function(){ var vals=[]; body.querySelectorAll('.pm-rec:checked').forEach(function(x){ vals.push(x.value); });
       if(!vals.length){ cb.checked=true; vals=[cb.value]; }   // at least one recipient country
       var msg=body.querySelector('#pm-msg'); if(msg){msg.style.color='#64748b';msg.textContent='Saving…';}
@@ -10231,24 +10231,31 @@
     }).catch(function(e){ body.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
   // Mirrors the PO timeline (timelinePanel): newest-first cards, Escalate sits on YOUR latest message (not the compose box), compose posts at the bottom.
   function renderProdTimeline(body,ref){ body.innerHTML='<div style="color:#94a3b8">Loading…</div>';
-    _prodCachedJson('/api/product/notes/'+encodeURIComponent(ref)).then(function(notes){ notes=Array.isArray(notes)?notes:[];
+    Promise.all([_prodCachedJson('/api/product/notes/'+encodeURIComponent(ref)),_prodCachedJson('/api/product/item/'+encodeURIComponent(ref)+'/changes')]).then(function(_r){
+      var notes=Array.isArray(_r[0])?_r[0]:[], changes=(_r[1]&&_r[1].change_log)||[], _hid=rocIsHidden(ref);
       var unreadSup=notes.filter(function(n){return n.author_kind==='supplier'&&!n.read;}).length;
       var _ownNotes=notes.filter(function(n){return n.author_kind==='internal';});
-      var recentOwnId=_ownNotes.length?tlDesc(_ownNotes)[0].id:null;   // escalate only on the most-recent D&B message
-      var list=notes.length?tlDesc(notes).map(function(n){ var sup=(n.author_kind==='supplier'); var isNew=(sup&&!n.read);
+      var recentOwnId=_ownNotes.length?tlDesc(_ownNotes)[0].id:null;
+      function _fmt(iso){ iso=String(iso||''); return (iso.slice(0,10)?fd(iso.slice(0,10)):iso)+(iso.slice(11,16)?' '+iso.slice(11,16):''); }
+      function _noteRow(n){ var sup=(n.author_kind==='supplier'); var isNew=(sup&&!n.read);
         var who=sup?('supplier'+(n.author_email?' ('+esc(shortUser(n.author_email))+')':'')):(n.author_email&&n.author_email!=='Dock & Bay'?esc(shortUser(n.author_email)):'Dock &amp; Bay');
         var ctrl=(!sup && n.id===recentOwnId)?'<button class="save-btn light prod-esc" data-msg="'+esc(n.body||'')+'" title="Escalate this message to the supplier (emails their portal user)" style="color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'';
         var dl=n.attachment_id?'<div style="margin-top:4px"><a href="/api/supply/portal-attachment/'+encodeURIComponent(n.attachment_id)+'" target="_blank" rel="noopener" style="font-size:12px;color:#1d4ed8;text-decoration:none;font-weight:600">⬇ '+esc(n.attachment_name||'Download file')+'</a></div>':'';
         return '<div style="font-size:11px;margin:3px 0;max-width:640px;padding:5px 8px;background:'+(sup?(n.read?'#f1f5f9':'#fff7ed'):'#eef2ff')+';border:1px solid '+(isNew?'#fdba74':'#e5e7eb')+';border-radius:5px;display:flex;gap:10px;align-items:flex-start">'
           +(ctrl?'<div style="flex:0 0 auto;display:flex;flex-direction:column;gap:3px;align-items:flex-start;min-width:78px">'+ctrl+'</div>':'')
-          +'<div style="flex:1"><span class="mut tiny">'+esc(n.created_at||'')+' · '+who+'</span>'+(isNew?' <span class="ex-badge">new</span>':'')+'<br><span style="color:#1a1a1a;white-space:pre-wrap">'+esc(n.body||'')+'</span>'+dl+'</div>'
-          +'</div>'; }).join(''):'<div class="mut tiny" style="padding:6px 0">No timeline entries yet.</div>';
+          +'<div style="flex:1"><span class="mut tiny">'+esc(_fmt(n.created_at))+' · '+who+'</span>'+(isNew?' <span class="ex-badge">new</span>':'')+'<br><span style="color:#1a1a1a;white-space:pre-wrap">'+esc(n.body||'')+'</span>'+dl+'</div>'
+          +'</div>'; }
+      function _changeRow(c){ return '<div class="tl-change" style="font-size:11px;margin:3px 0;max-width:640px;padding:5px 8px;background:#f8fafc;border:1px solid #e5e7eb;border-left:3px solid #94a3b8;border-radius:5px'+(_hid?';display:none':'')+'"><span class="ex-badge" style="background:#e2e8f0;color:#475569;margin-right:6px">record of change</span><span class="mut tiny">'+esc(_fmt(c.changed_at))+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span><br><span style="color:#334155"><b>'+esc(c.event)+'</b>'+(c.detail?': '+esc(c.detail):'')+'</span></div>'; }
+      var _items=[]; notes.forEach(function(n){ _items.push({t:String(n.created_at||''),h:_noteRow(n)}); }); changes.forEach(function(c){ _items.push({t:String(c.changed_at||''),h:_changeRow(c)}); });
+      _items.sort(function(a,b){ return b.t.localeCompare(a.t); });
+      var list=_items.length?_items.map(function(x){return x.h;}).join(''):'<div class="mut tiny" style="padding:6px 0">No timeline entries yet.</div>';
       var compose='<div style="margin-top:6px;display:flex;gap:6px;align-items:flex-start;max-width:640px"><textarea class="fci" id="pt-in" rows="2" placeholder="Add a note…" style="flex:1;min-height:34px;text-align:left"></textarea><button class="save-btn" id="pt-post" style="flex:0 0 auto;background:#2563eb;color:#fff;border-color:#1d4ed8">Post</button></div>'
         +'<div class="mut tiny" style="margin:4px 2px 12px">To escalate to the supplier, post the message then use ⚑ Escalate on it.</div>';
-      body.innerHTML='<div class="sect-h">Timeline <span class="mut tiny">— message thread for this product</span></div>'+compose+list;
-      if(unreadSup>0){ shipPost('/api/product/notes-read-supplier',{ref:ref},function(){ if(typeof loadProductUnread==='function')loadProductUnread(); }); }   // D&B has now seen them → clear the unread badges
+      body.innerHTML='<div class="sect-h">Timeline <span class="mut tiny">— message thread for this product; record of change is admin-only</span> <label style="font-size:11px;font-weight:400;margin-left:8px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="prod-hide-chg"'+(_hid?' checked':'')+' style="vertical-align:middle;margin-right:3px">hide record of change</label></div>'+compose+list;
+      if(unreadSup>0){ shipPost('/api/product/notes-read-supplier',{ref:ref},function(){ if(typeof loadProductUnread==='function')loadProductUnread(); }); }
       body.querySelector('#pt-post').onclick=function(){ var t=body.querySelector('#pt-in').value.trim(); if(!t)return; shipPost('/api/product/note',{ref:ref,body:t,author_email:(window.ME&&ME.email)||''},function(){ _prodJsonBust(ref); renderProdTimeline(body,ref); }); };
       var eb=body.querySelector('.prod-esc'); if(eb)eb.onclick=function(){ var msg=eb.dataset.msg||''; if(!msg){alert('No message to escalate.');return;} if(!confirm('Escalate this message for '+ref+' to the supplier (emails their portal user)?'))return; eb.disabled=true; var t=eb.textContent; eb.textContent='Sending…'; shipPost('/api/product/escalate',{ref:ref,message:msg},function(j){ if(j&&j.error){alert(j.error);eb.disabled=false;eb.textContent=t;return;} alert(j&&j.sent?('Escalated — emailed '+j.emails.join(', ')):(j&&j.note)||'Escalated (no recipients configured).'); renderProdTimeline(body,ref); }); };
+      var _hc=body.querySelector('.prod-hide-chg'); if(_hc)_hc.onchange=function(){ rocSetHidden(ref,_hc.checked); body.querySelectorAll('.tl-change').forEach(function(el){ el.style.display=_hc.checked?'none':''; }); };
     }).catch(function(e){ body.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
   // hz-preboot masks the DEMAND plan filter rows. It must persist on EVERY non-demand view (not just lift at boot) — else
   // there's a frame where the rows fall back to their static display:flex before the runtime hide catches them. Only the
