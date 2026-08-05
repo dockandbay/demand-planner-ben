@@ -1,3 +1,6 @@
+## v26.588.0 — Zalando P1+P2: BUY & MOVE ▸ Zalando tab (stock upload + send analysis)
+- New ZALANDO sub-tab in BUY & MOVE (renderZalando, self-contained — does not touch the buy grid). Upload the Zalando stock file (csv/xls/xlsx, flexible header match); baked per-SKU forecast (ZAL_FC) vs stock-on-hand → suggested send = 3-month cover (this + next 2 months) − stock, NO minimum. FBA-style tick + per-SKU override. Download = EAN,Quantity (ZALANDO_UP format), EANs from products.product_ean. Verified: 44 fc SKUs / 22 months baked; tab wired. P3 (EU ZAL demand-grid channel) still to do after mockup.
+
 ## v26.587.0 — Zalando P1: baked forecast + stock table + endpoints (server foundation)
 - Baked the per-SKU monthly Zalando forecast (zalando_data.json, 44 SKUs × 22 months) into the app as ZAL_FC / ZAL_MONTHS globals (sandbox + live via deploy). Migration 182 planner.zalando_stock (sku/qty/updated_at). GET /api/supply/zalando/data (forecast + months + uploaded stock; /data suffix avoids the :section catch-all). POST /api/supply/zalando/stock-upload (csv/xls/xlsx; flexible header match on Sku + …sellable_stock; replaces the snapshot). Verified: endpoint returns 44 fc SKUs + 22 months. Client Zalando tab (upload UI + FBA-style transfer analysis, no MOQ, EAN/Qty download) is the next step; ZAL demand-grid channel (P3) after mockup.
 
