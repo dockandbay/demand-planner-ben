@@ -1,3 +1,7 @@
+## v26.596.0 — Barcode size circle: guard against XL/XS size_short PIM typos
+- The barcode "size circle" prints products.size_short verbatim. PICNIC-CAB-XL-AMALG (+ TOWLB-CAB-XL-AMALG-R) had size_short='L' in the PIM despite size_long='Extra Large', so the circle showed "L" for an XL product.
+- lblCircle now derives the size from the size NAME and, when the name clearly says XL/XS but size_short dropped the "extra" (L/S), trusts the name. Any other size_short value is still used verbatim; genuine L/S/M unaffected. 9/9 logic tests pass.
+- NOTE: the underlying data is still wrong (size_short='L' on the 2 Amalfi XL SKUs) and is used elsewhere too (e.g. the FBA download label = colour_long + size_short) — worth correcting in Airtable so it's right everywhere.
 ## v26.595.0 — Zalando tab: halve SKU column width (min-width 320px -> 160px; auto layout still expands for longer SKUs)
 
 ## v26.594.0 — Zalando tab polish: SKU column width fix + grey zero-suggested + ticked total

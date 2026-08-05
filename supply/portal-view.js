@@ -100,14 +100,20 @@
   function lblSizeName(r){ if(r.size_long) return r.size_long; var pn=r.product_name||''; if(pn.indexOf(' - ')>=0){ var p=pn.split(' - '); return p[p.length-1].trim(); } return r.size||''; }
   // size-circle code: the source size_short field verbatim (blank for "One Size"); falls back to a derivation
   // from the size name until size_short is populated from the PIM.
-  function lblCircle(r,sizeName){ var ss=(r.size_short||'').trim(); if(ss) return /^one\s*size$/i.test(ss)?'':ss;
-    var s=(sizeName||'').toLowerCase(); if(/one\s*size/.test(s))return '';
-    if(/extra large|x-?large|\bxl\b/.test(s))return 'XL';
-    if(/extra small|x-?small|\bxs\b/.test(s))return 'XS';
-    if(/\blarge\b|\bl\b/.test(s))return 'L';
-    if(/\bmedium\b|\bm\b/.test(s))return 'M';
-    if(/\bsmall\b|\bs\b/.test(s))return 'S';
-    return ''; }
+  function lblCircle(r,sizeName){ var ss=(r.size_short||'').trim(); if(/^one\s*size$/i.test(ss))return '';
+    var s=(sizeName||'').toLowerCase();
+    var der='';                                    // size derived from the size NAME (size_long / product name)
+    if(/one\s*size/.test(s))der='';
+    else if(/extra large|x-?large|\bxl\b/.test(s))der='XL';
+    else if(/extra small|x-?small|\bxs\b/.test(s))der='XS';
+    else if(/\blarge\b|\bl\b/.test(s))der='L';
+    else if(/\bmedium\b|\bm\b/.test(s))der='M';
+    else if(/\bsmall\b|\bs\b/.test(s))der='S';
+    // PIM-typo guard (Ben): the size NAME clearly says XL/XS but size_short dropped the "extra" (shows L/S) →
+    // trust the name (e.g. PICNIC-CAB-XL-AMALG had size_short='L' but size_long='Extra Large'). Any other
+    // size_short value is used verbatim, as before.
+    if(ss){ if((der==='XL'&&ss==='L')||(der==='XS'&&ss==='S'))return der; return ss; }
+    return der; }
   // EAN-13 bars with extended guard bars (start/centre/end run lower, classic look)
   function eanBars(code,x,y,m,nH,gExt){ var bits=ean13Pattern(code); if(!bits)return null; var guard={0:1,2:1,46:1,48:1,92:1,94:1},gH=nH+gExt,out='',i=0;
     while(i<bits.length){ if(bits[i]==='1'){ var run=1; while(bits[i+run]==='1')run++; var hh=(run===1&&guard[i])?gH:nH; out+='<rect x="'+(x+i*m).toFixed(2)+'" y="'+y+'" width="'+(run*m).toFixed(2)+'" height="'+hh+'" fill="#000"/>'; i+=run; } else i++; } return out; }
