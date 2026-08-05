@@ -5501,6 +5501,48 @@ async function _tplGenevaRows(buf, period) {
   }
   return Object.values(byOrder);
 }
+// US Geneva accounting map: fee-code → Xero account. '|' = SPLIT COGS - US - Wholesale / Faire by B2B unit count (Ben).
+// SHIPPING (freight) is NOT here — it's allocated per-order to the order's Cin7 CostCentre. Overhead (storage/admin/
+// packaging/returns/labour) → the two Geneva accounts. From the `…GENEVA.csv` mapping (cols A=account, B=fee code).
+const GENEVA_ACCT = { 'OUTBOUND-ORDER-D2C':'COGS - US - Shopify','OUTBOUND-UNIT-D2C':'COGS - US - Shopify','OUTBOUND-LINE-D2C':'COGS - US - Shopify','OUTBOUND-CASE-D2C':'COGS - US - Shopify','PERSONALIZATION':'COGS - US - Shopify','GIFT MESSAGE':'COGS - US - Shopify',
+  'OUTBOUND-ORDER-FBA':'COGS - US - Amazon','OUTBOUND-UNIT-FBA':'COGS - US - Amazon','OUTBOUND-CASE-FBA':'COGS - US - Amazon','OUTBOUND-LINE-FBA':'COGS - US - Amazon','FBA':'COGS - US - Amazon',
+  'OUTBOUND-ORDER-B2B':'COGS - US - Wholesale|COGS - US - Faire','OUTBOUND-UNIT-B2B':'COGS - US - Wholesale|COGS - US - Faire','OUTBOUND-LINE-B2B':'COGS - US - Wholesale|COGS - US - Faire','OUTBOUND-CASE-B2B':'COGS - US - Wholesale|COGS - US - Faire','LTL FREIGHT':'COGS - US - Wholesale|COGS - US - Faire',
+  'EMBROIDERING':'COGS - US - Co-Brand/Custom','EMBROIDERING-WHSL':'COGS - US - Wholesale','SSCC-LABEL-FEE':'COGS - US - Wholesale','B2B':'COGS - US - Wholesale',
+  'ADMIN-LABOR':'Geneva USA - Other fees','PACKAGING':'Geneva USA - Other fees','RETURN-ORDER':'Geneva USA - Other fees','RETURN-UNIT':'Geneva USA - Other fees','INBOUND-HOURLY':'Geneva USA - Other fees','INBOUND-CASE':'Geneva USA - Other fees','WAREHOUSE-LABOR':'Geneva USA - Other fees','CHARGEBACK':'Geneva USA - Other fees','CHARGEBACK RETAIL COMPLIANCE':'Geneva USA - Other fees','CHARGEBACK RETAIL COMPLIANCE CHARGEBACK':'Geneva USA - Other fees','INSERTS':'Geneva USA - Other fees','SHIPPING - RETURN LABELS':'Geneva USA - Other fees','SHIPPING-RETURN':'Geneva USA - Other fees',
+  'STORAGE-PALLET':'Geneva USA - Storage Fees - Other','STORAGE-MED-BIN':'Geneva USA - Storage Fees - Other','STORAGE-LG-BIN':'Geneva USA - Storage Fees - Other' };
+const GENEVA_CODES = Object.keys(GENEVA_ACCT).concat(['SHIPPING']).sort((a, b) => b.length - a.length);   // longest-first: 'SHIPPING - RETURN LABELS' before 'SHIPPING'
+// Parse the G10/Geneva invoice PDF → [{code, amount}] per fee line. (Verified: reconciles to the invoice total.)
+async function _tplGenevaPdfItems(buf) {
+  const { PDFParse } = await import('pdf-parse');
+  const t = (await new PDFParse({ data: new Uint8Array(buf) }).getText()).text || '';
+  const lines = t.split(/\n/).map(l => l.trim()).filter(Boolean);
+  const num = s => parseFloat(String(s).replace(/[,$\s]/g, '')) || 0;
+  const items = [];
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^(\d[\d,]*)\s+(.+)$/.exec(lines[i]); if (!m) continue;
+    const rest = m[2].toUpperCase(); const code = GENEVA_CODES.find(c => rest.startsWith(c.toUpperCase())); if (!code) continue;
+    let amt = null; for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) { const pm = [...lines[j].matchAll(/\$([\d,]+\.\d{2})/g)]; if (pm.length) { amt = num(pm[pm.length - 1][1]); break; } }
+    if (amt != null) items.push({ code, amount: amt });
+  }
+  return items;
+}
+// Per-order FREIGHT (Small Parcel) + B2B UNITS (Pick Detail) for the period → drives the SHIPPING per-CostCentre
+// split and the B2B Wholesale/Faire unit split.
+async function _tplGenevaPerOrder(buf, period) {
+  const ExcelJS = (await import('exceljs')).default;
+  const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf);
+  const MON = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
+  const mm = /^\d{4}-(\d{2})/.exec(String(period || '')); const pref = mm ? MON[Number(mm[1]) - 1] : null;
+  const gridOf = ws => { const g = []; ws.eachRow({ includeEmpty: false }, r => { const a = []; r.eachCell({ includeEmpty: true }, (c, col) => { a[col - 1] = _tplCellVal(c); }); g.push(a); }); return g; };
+  let pick = null, parcel = null;
+  wb.eachSheet(ws => { const n = String(ws.name || '').toUpperCase(); if (pref && n.indexOf(pref) < 0) return; if (n.indexOf('PICK') >= 0) pick = gridOf(ws); else if (n.indexOf('PARCEL') >= 0 || n.indexOf('SMALL') >= 0) parcel = gridOf(ws); });
+  const freight = {}, b2bUnits = {};
+  if (parcel && parcel.length) { const hdr = (parcel[0] || []).map(x => String(x == null ? '' : x).trim()); const oi = hdr.findIndex(h => /order\s*id/i.test(h)); const ci = hdr.findIndex(h => /carrier\s*amount\s*due/i.test(h));
+    if (oi >= 0 && ci >= 0) for (let r = 1; r < parcel.length; r++) { const row = parcel[r] || []; const ref = row[oi]; if (ref == null || !/^[A-Za-z0-9]/.test(String(ref).trim())) continue; const amt = _tplNum(row[ci]); if (amt == null) continue; const k = String(ref).trim(); freight[k] = (freight[k] || 0) + amt; } }
+  if (pick && pick.length) { const hdr = (pick[0] || []).map(x => String(x == null ? '' : x).trim()); const oi = hdr.findIndex(h => /order\s*id/i.test(h)); const ti = hdr.findIndex(h => /type\s*of\s*sale/i.test(h)); const qi = hdr.findIndex(h => /sumquantity/i.test(String(h).replace(/\s/g, '')));
+    if (oi >= 0) for (let r = 1; r < pick.length; r++) { const row = pick[r] || []; const ref = row[oi]; if (ref == null) continue; const k = String(ref).trim(); if (!k) continue; if (ti >= 0 && String(row[ti] || '').toUpperCase() === 'B2B') b2bUnits[k] = (b2bUnits[k] || 0) + (qi >= 0 ? (_tplNum(row[qi]) || 0) : 0); } }
+  return { freight, b2bUnits };
+}
 async function _tplOrderRows(buf, isCsv, tpl, period) {
   if (tpl === 'us_geneva' && !isCsv) { try { const g = await _tplGenevaRows(buf, period); if (g.length) return g; } catch (e) {} }
   let grids = [];
@@ -5555,11 +5597,41 @@ function _tplAggregateAccounts(orders, refCC) {
   const costCenters = Object.values(byCC).map(x => ({ ...x, total: x.freight + x.fulfilment })).sort((a, b) => b.total - a.total);
   return { costCenters, unmapped: { ...unmapped, total: unmapped.freight + unmapped.fulfilment }, totals: { orders: orders.length, matched: mCount, freight: mFreight, fulfilment: mFulfil } };
 }
+// US Geneva FULL allocation: PDF fee totals + xlsx per-order freight/units + Cin7 CostCentres → per-Xero-account
+// breakdown (freight per-order→CostCentre; fulfilment by fee-type; B2B split Wholesale/Faire by units; overhead→Geneva
+// accounts). Returns the same {costCenters, unmapped, totals} shape as _tplAggregateAccounts so the review + CSV reuse.
+async function _tplGenevaAllocate(period) {
+  const files = (await pool.query(`SELECT filename, content_type, content FROM planner.tpl_invoice_files WHERE tpl='us_geneva' AND period=$1 ORDER BY uploaded_at DESC`, [period])).rows;
+  const xlsx = files.find(f => /\.xlsx?$/i.test(f.filename || '') || /sheet|excel/i.test(f.content_type || ''));
+  const pdf = files.find(f => /\.pdf$/i.test(f.filename || '') || /pdf/i.test(f.content_type || ''));
+  if (!xlsx) return { ok: false, error: 'Upload the Geneva freight-expense .xlsx for this period first.' };
+  if (!pdf) return { ok: false, error: 'Upload the Geneva invoice PDF for this period too — it holds the storage / admin / packaging / returns fee totals.' };
+  const items = await _tplGenevaPdfItems(pdf.content);
+  if (!items.length) return { ok: false, error: 'Could not read any fee lines from the invoice PDF.' };
+  const { freight, b2bUnits } = await _tplGenevaPerOrder(xlsx.content, period);
+  const refs = [...new Set([...Object.keys(freight), ...Object.keys(b2bUnits)])];
+  const dbrows = refs.length ? (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [refs])).rows : [];
+  const byRef = {}, byCon = {}; dbrows.forEach(r => { const cc = String(r.cc || '').trim(); if (r.reference) byRef[r.reference] = cc; if (r.customer_order_no) byCon[r.customer_order_no] = cc; });
+  const ccOf = ref => { const ov = _tplRefOverride(ref, 'us_geneva'); if (ov) return ov; return (byRef[ref] != null) ? byRef[ref] : (byCon[ref] != null ? byCon[ref] : null); };
+  const acct = {}; const add = (a, f, u) => { if (!a) return; if (!acct[a]) acct[a] = { freight: 0, fulfilment: 0 }; acct[a].freight += (f || 0); acct[a].fulfilment += (u || 0); };
+  let unmappedFreight = 0; const unmappedRefs = [];
+  Object.keys(freight).forEach(ref => { const cc = ccOf(ref); if (cc) add(cc, freight[ref], 0); else { unmappedFreight += freight[ref]; if (unmappedRefs.length < 50) unmappedRefs.push(ref); } });
+  let faireU = 0, whslU = 0; Object.keys(b2bUnits).forEach(ref => { const cc = (ccOf(ref) || '').toUpperCase(); const u = b2bUnits[ref] || 0; if (cc.indexOf('FAIRE') >= 0) faireU += u; else whslU += u; });
+  const faireShare = (faireU + whslU) > 0 ? faireU / (faireU + whslU) : 0;
+  items.forEach(it => { const code = it.code.toUpperCase(); if (code === 'SHIPPING') return;   // freight handled per-order above
+    const map = GENEVA_ACCT[code]; if (!map) { add('Geneva USA - Other fees', 0, it.amount); return; }   // unknown fee → Other fees (surface later)
+    if (map.indexOf('|') >= 0) { const [w, f] = map.split('|'); add(f, 0, it.amount * faireShare); add(w, 0, it.amount * (1 - faireShare)); }
+    else add(map, 0, it.amount); });
+  const costCenters = Object.keys(acct).map(a => ({ costCenter: a, orders: 0, freight: Math.round(acct[a].freight * 100) / 100, fulfilment: Math.round(acct[a].fulfilment * 100) / 100, total: Math.round((acct[a].freight + acct[a].fulfilment) * 100) / 100 })).sort((a, b) => b.total - a.total);
+  const allocated = costCenters.reduce((s, c) => s + c.total, 0) + unmappedFreight;
+  return { ok: true, geneva: true, costCenters, unmapped: { orders: unmappedRefs.length, freight: Math.round(unmappedFreight * 100) / 100, fulfilment: 0, total: Math.round(unmappedFreight * 100) / 100, refs: unmappedRefs }, totals: { orders: refs.length, matched: refs.length - unmappedRefs.length, freight: 0, fulfilment: 0 }, invoiceTotal: Math.round(items.reduce((s, i) => s + i.amount, 0) * 100) / 100, allocated: Math.round(allocated * 100) / 100, faireSharePct: Math.round(faireShare * 1000) / 10 };
+}
 app.post('/api/supply/tpl/map/:id', async (req, res) => {
   try {
     const row = (await pool.query(`SELECT filename, content_type, content, tpl, period FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
     if (!row) return res.status(404).json({ error: 'not found' });
     const tpl0 = row.tpl || null;
+    if (tpl0 === 'us_geneva') { try { return res.json(await _tplGenevaAllocate(row.period)); } catch (e) { return res.json({ ok: false, error: 'Geneva allocation failed: ' + (e.message || e) }); } }
     const isCsv = /\.csv$/i.test(row.filename || '') || /csv/i.test(row.content_type || '');
     const orders = await _tplOrderRows(row.content, isCsv, tpl0, row.period);
     if (!orders.length) return res.json({ ok: false, error: 'No order rows with a Reference + Shipping Fee column were found to map.' });
