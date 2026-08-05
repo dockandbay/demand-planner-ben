@@ -1,3 +1,6 @@
+## v26.571.0 — PO Client/FBA: Custom-order product picker only when Custom ticked
+- The "Custom order product(s)" row on the PO Client/FBA tab now shows only when Direct-to-Client type = Custom is ticked (hidden otherwise). Toggling the Custom checkbox shows/hides it live without a re-render.
+
 ## v26.570.0 — PRODUCT detail crash FIXED (Cannot set properties of null onclick)
 - renderProdMaster wires #pm-del/#pm-swatch (master-mode only) and #pm-addsz (sizes-mode only) unconditionally, but body renders only one mode. Since Size & variants split into its own tab (v26.560), #pm-addsz is absent in master mode → body.querySelector(#pm-addsz).onclick threw on every product master tab ("Failed: Cannot set properties of null"). All three now null-guarded (if(el)).
 

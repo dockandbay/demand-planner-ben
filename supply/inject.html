@@ -3191,7 +3191,7 @@
       +'<div class="cli-form">'
       +cliRow('Client name','<input class="fci txt dtc-client" list="kalist" data-po="'+esc(r.po)+'" value="'+esc(r.client||'')+'" style="width:360px;text-align:left" placeholder="type, or pick a saved key account…" title="pick a saved key account to pull in its packing / requirements / address"><datalist id="kalist"></datalist> <button class="save-btn dtc-mkka" data-po="'+esc(r.po)+'" style="display:none" title="save this client as a key account in config, using this PO&rsquo;s current packing / requirements / address">＋ Create as key account</button>')
       +cliRow('Direct-to-Client type','<label style="margin-right:16px;cursor:pointer"><input type="checkbox" class="dtc-tag" data-po="'+esc(r.po)+'" data-field="dtc_key_account"'+(r.dtc_key_account?' checked':'')+'> Key account</label><label style="cursor:pointer"><input type="checkbox" class="dtc-tag" data-po="'+esc(r.po)+'" data-field="dtc_custom"'+(r.dtc_custom?' checked':'')+'> Custom</label>')
-      +cliRow('Custom order product(s) <span class="mut tiny">(product developments — shown to the supplier; pick one or more)</span>','<div class="cdev-pick" data-po="'+esc(r.po)+'" data-cur="'+esc(r.custom_dev_ref||'')+'"><span class="mut tiny">loading…</span></div>')
+      +'<div class="cdev-row" data-po="'+esc(r.po)+'"'+(r.dtc_custom?'':' style="display:none"')+'>'+cliRow('Custom order product(s) <span class="mut tiny">(product developments — shown to the supplier; pick one or more)</span>','<div class="cdev-pick" data-po="'+esc(r.po)+'" data-cur="'+esc(r.custom_dev_ref||'')+'"><span class="mut tiny">loading…</span></div>')+'</div>'
       +cliRow('Client requirements',txtIn(ep,'client_requirements',r.client_requirements,440,true))
       +cliRow('Sales Ref / Amazon Ref',txtIn(ep,'sales_order_ref',r.sales_order_ref,220))
       +cliRow('Client deadline date', dateField(r.client_deadline,{attrs:'data-ep="'+ep+'" data-field="client_deadline_date"', cls:'txtin', width:'130px'})+' <span class="mut tiny">(date the client needs it by)</span>')
@@ -3732,6 +3732,7 @@
       if(amt)amt.addEventListener('input',sync); if(due)due.addEventListener('input',sync); sync(); })();
     // Direct-to-Client tags (Key account / Custom checkboxes)
     document.querySelectorAll('#podet-'+i+' .dtc-tag').forEach(function(cb){ cb.onchange=function(){ var b={}; b[cb.dataset.field]=cb.checked;
+      if(cb.dataset.field==='dtc_custom'){ var _cr=document.querySelector('#podet-'+i+' .cdev-row'); if(_cr)_cr.style.display=cb.checked?'':'none'; }   // show the Custom-order product picker only when Custom is ticked
       shipPost('/api/supply/po/'+encodeURIComponent(po),b,function(){ if(poBy[po])poBy[po][cb.dataset.field]=cb.checked; }); }; });
     (function(){ var _cd=document.querySelector('#podet-'+i+' .cdev-pick'); if(_cd)wireCdevPicker(_cd); })();
     // Client name — save it; if it matches a saved key account offer to pull its defaults in; if it does NOT
