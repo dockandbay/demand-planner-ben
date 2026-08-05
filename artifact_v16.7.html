@@ -1960,6 +1960,8 @@ function render(){
   }
   var _dl=document.getElementById('fba-dl-btn');
   if(_dl)_dl.style.display=(BP_VIEW==='fba')?'':'none';
+  var _dlAwd=document.getElementById('fba-dl-awd-btn');   // AWD upload = US only (a distinct Amazon template)
+  if(_dlAwd)_dlAwd.style.display=(BP_VIEW==='fba'&&CUR==='US')?'':'none';
   var _cr=document.getElementById('fba-create-btn');
   if(_cr)_cr.style.display=(BP_VIEW==='fba')?'':'none';
   // Create PO / Refresh / multi-Download (#bp-buy-actions) are BUY-only. FBA Transfer Logic → FBA only.
@@ -2211,7 +2213,8 @@ try{ window.buildXlsx=buildXlsx; }catch(_e){}   // BUGFIX (same class as skuMatc
 // Amazon UK/EU has some SKUs registered under a slightly different merchant SKU (e.g. a trailing dot).
 // Map the D&B SKU → the Amazon UK/EU merchant SKU here; applied only for CUR UK/EU in the manifest.
 var FBA_SKU_ALIAS_EUUK={'BAGF-CAB-MD-NAVY':'BAGF-CAB-MD-NAVY.'};
-function downloadFbaTransfer(){
+function downloadFbaTransfer(dest){
+  var awd=(dest==='awd');   // US AWD upload = a DIFFERENT Amazon template (no lot code; adds Palletized?/Boxes Per Pallet/Number of pallets)
   var us=(CUR==='US'||CUR==='CA'), euuk=(CUR==='UK'||CUR==='EU');
   var DIMS=(typeof window!=='undefined'&&window.FBA_DIMS)||{};
   var n=function(x){return (x==null||x==='')?null:Number(x);};
@@ -2237,7 +2240,8 @@ function downloadFbaTransfer(){
     // Case-pack columns (units/box, #boxes, box dims) ONLY when qty is an exact multiple of the case pack —
     // Amazon requires Quantity == Units per box × Number of boxes. Otherwise send loose units (case cols blank).
     var caseOk=cp>0 && (qty % cp)===0;
-    rows.push([outSku, qty, '', '', caseOk?cp:'', caseOk?(qty/cp):'', caseOk?ri(L):'', caseOk?ri(W):'', caseOk?ri(H):'', caseOk?ri(Wt):'']);
+    if(awd) rows.push([outSku, qty, '', caseOk?cp:'', caseOk?(qty/cp):'', caseOk?ri(L):'', caseOk?ri(W):'', caseOk?ri(H):'', caseOk?ri(Wt):'', '', '', '']);   // AWD: no lot code; pallet cols left blank for the team to complete
+    else rows.push([outSku, qty, '', '', caseOk?cp:'', caseOk?(qty/cp):'', caseOk?ri(L):'', caseOk?ri(W):'', caseOk?ri(H):'', caseOk?ri(Wt):'']);
   });
   if(!rows.length){alert('No rows ticked for '+CUR+'. Tick the Ship box on the rows you want to transfer.');return;}
   // Amazon manifest layout (identical for all regions): title (row1), Default prep/labeling owner = Seller
@@ -2245,17 +2249,28 @@ function downloadFbaTransfer(){
   // units differ — US/CA imperial (in/lb), UK/EU/AU metric (cm/kg).
   var boxCols=us?['Box length (in)','Box width (in)','Box height (in)','Box weight (lb)']
                 :['Box length (cm)','Box width (cm)','Box height (cm)','Box weight (kg)'];
-  var hdr=[
-    ['Please review the Example tab before you complete this sheet'],
-    [],
-    ['Default prep owner','Seller'],
-    ['Default labeling owner','Seller'],
-    [],[],
-    ['','','Optional','','Optional: Use only for case-packed SKUs'],
-    ['Merchant SKU','Quantity','Expiration date (MM/DD/YYYY)','Manufacturing lot code','Units per box','Number of boxes'].concat(boxCols)
-  ];
+  var hdr, fname;
+  if(awd){   // Amazon AWD (US) template — no lot code; adds Palletized? / Boxes Per Pallet / Number of pallets
+    hdr=[
+      ['Please review the Example tab before you complete this sheet'],
+      [],[],
+      ['Mandatory','','Optional','Mandatory','','','','','','','Mandatory if palletized',''],
+      ['Merchant SKU','Quantity','Expiration date (MM/DD/YYYY)','Units per box','Number of boxes','Box length (in)','Box width (in)','Box height (in)','Box weight (lb)','Palletized?','Boxes Per Pallet','Number of pallets']
+    ];
+    fname='AWD_Transfer_US_'+new Date().toISOString().slice(0,10)+'.xlsx';
+  } else {
+    hdr=[
+      ['Please review the Example tab before you complete this sheet'],
+      [],
+      ['Default prep owner','Seller'],
+      ['Default labeling owner','Seller'],
+      [],[],
+      ['','','Optional','','Optional: Use only for case-packed SKUs'],
+      ['Merchant SKU','Quantity','Expiration date (MM/DD/YYYY)','Manufacturing lot code','Units per box','Number of boxes'].concat(boxCols)
+    ];
+    fname='FBA_Transfer_'+CUR+'_'+new Date().toISOString().slice(0,10)+'.xlsx';
+  }
   var grid=hdr.concat(rows);
-  var fname='FBA_Transfer_'+CUR+'_'+new Date().toISOString().slice(0,10)+'.xlsx';
   try{
     var bytes=buildXlsx('Create workflow – template', grid);
     var blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
@@ -3576,7 +3591,8 @@ var BUY_SCAFFOLD=`<div class="wrap">
         </div>
       </span>
     </span>
-    <button type="button" id="fba-dl-btn" onclick="BP.downloadFbaTransfer()" title="Download ticked rows as an Amazon FBA Transfer Upload workbook (.xlsx)" style="display:none;margin-left:6px;font-size:10px;padding:1px 8px;border:1px solid #16a34a;border-radius:3px;background:#dcfce7;color:#166534;cursor:pointer;font-weight:600">&#8681; FBA Transfer Upload</button>
+    <button type="button" id="fba-dl-btn" onclick="BP.downloadFbaTransfer('fba')" title="Download ticked rows as an Amazon FBA Transfer Upload workbook (.xlsx)" style="display:none;margin-left:6px;font-size:10px;padding:1px 8px;border:1px solid #16a34a;border-radius:3px;background:#dcfce7;color:#166534;cursor:pointer;font-weight:600">&#8681; FBA Transfer Upload</button>
+    <button type="button" id="fba-dl-awd-btn" onclick="BP.downloadFbaTransfer('awd')" title="US only — download ticked rows in the Amazon AWD upload format (.xlsx): no lot code, adds Palletized? / Boxes Per Pallet / Number of pallets" style="display:none;margin-left:6px;font-size:10px;padding:1px 8px;border:1px solid #7c3aed;border-radius:3px;background:#ede9fe;color:#5b21b6;cursor:pointer;font-weight:600">&#8681; AWD Transfer Upload (US)</button>
     <button type="button" id="fba-create-btn" onclick="alert('Feature to build - Direct created shipment in Amazon FBA')" title="Create the shipment directly in Amazon FBA (coming soon)" style="display:none;margin-left:6px;font-size:10px;padding:1px 8px;border:1px solid #d97706;border-radius:3px;background:#fef3c7;color:#92400e;cursor:pointer;font-weight:600">Create FBA Shipment</button>
     <span id="fba-sel-summary" style="display:none;align-items:center;gap:4px;font-size:11px;padding:3px 12px;background:#fef9c3;border:1px solid #fde047;border-radius:5px;color:#713f12"></span>
   </div>

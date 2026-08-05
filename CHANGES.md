@@ -1,3 +1,6 @@
+## v26.586.0 — FBA transfer: US AWD upload format + clear FBA/AWD choice
+- US AWD needs a different Amazon template. downloadFbaTransfer(dest) now branches: dest=fba → the send-to-Amazon manifest (unchanged); dest=awd → the AWD template (no Manufacturing lot code; adds Palletized? / Boxes Per Pallet / Number of pallets; simpler header block). On the FBA transfer tab a separate purple “AWD Transfer Upload (US)” button appears ONLY for US so the user clearly chooses FBA vs AWD; non-US shows just FBA.
+
 ## v26.585.0 — ILG tab: monthly-files guidance panel
 - The UK ILG invoices view now shows a guidance box: (1) DI invoice PDFs, (2) the month's invoice_00 shipping-detail file (.csv/.xlsx), (3) run Import Cin7 orders to split freight by channel; plus notes that .xls cannot be read (re-export .xlsx) and that missing pieces are flagged in the Map result. ILG tab only.
 
