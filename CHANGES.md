@@ -1,3 +1,6 @@
+## v26.599.0 — Xero Compare: keep the last upload for 1 week (was 24h)
+- PAYMENTS ▸ Xero Compare now persists the uploaded snapshot in localStorage for 7 days (was 24h) — re-analysed against current Horizon data on each visit. Banner "ago" label now shows days (e.g. "3 days ago") not a huge hour count. Still per-browser (localStorage), not shared server-side.
+
 ## v26.598.0 — Barcodes: individual row download → one file per supplier (unique code each)
 - Clicking a Product/Carton/Inner label button on a multi-supplier SKU now downloads ONE file PER supplier (separate files, not a zip) — each with THAT supplier's short code on the batch line AND appended to the filename (e.g. TOWLB-CAB-LG-AMALG-R-LX and …-XR). Single-supplier SKUs unchanged.
 - bcMakeSheet / bcMakeLabel take an optional supplier code (stamps the label + filename; skips the batch-confirm since the fan-out confirms once). The row click-handler resolves the SKU's supplier codes and fans out when there are ≥2.
