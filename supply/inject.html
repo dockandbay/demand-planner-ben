@@ -6188,6 +6188,7 @@
           function supPuRow(u){ return '<div class="sup-pu-row" data-id="'+esc(String(u.id))+'" style="display:flex;align-items:center;gap:8px;font-size:12px;margin:3px 0">'
               +'<label style="cursor:pointer;flex:0 0 auto" title="active"><input type="checkbox" class="sup-pu-active"'+(u.active?' checked':'')+'></label>'
               +'<span style="flex:1;min-width:0;word-break:break-word">'+esc(u.email)+(u.contact_name?' <span class="mut tiny">· '+esc(u.contact_name)+'</span>':'')+(u.active?'':' <span class="tool-badge bg-neutral" style="font-size:8px">inactive</span>')+'</span>'
+              +'<button class="lnk-btn sup-pu-magic" title="create & copy a 7-day portal login link for this user" style="color:#2563eb">🔗 link</button> '
               +'<button class="lnk-btn sup-pu-del" title="remove this portal user" style="color:#b91c1c">✕</button></div>'; }
           function supPuBlock(r){ var users=puFor(r);
             return '<div style="border-top:1px solid #eef2f7;margin:2px 0 14px"></div>'
@@ -6196,7 +6197,9 @@
               +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input id="sup-pu-email" type="email" placeholder="email@supplier.com" style="font-size:12px;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;width:200px"><input id="sup-pu-contact" placeholder="contact (optional)" style="font-size:12px;padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px;width:140px"><button class="save-btn light" id="sup-pu-add">+ Add portal user</button><span id="sup-pu-msg" class="mut tiny"></span></div>'; }
           function wireSupPuRow(row){ row.querySelector('.sup-pu-del').onclick=function(){ if(!confirm('Remove this portal user?'))return;
               fetch('/api/supply/portal-user/'+row.dataset.id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({_delete:true})}).then(function(r){return r.json();}).then(function(){ row.remove(); }).catch(function(e){ alert('Remove failed: '+(e.message||e)); }); };
-            row.querySelector('.sup-pu-active').onchange=function(){ var cb=this; fetch('/api/supply/portal-user/'+row.dataset.id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({active:cb.checked})}).then(function(r){return r.json();}).catch(function(){ cb.checked=!cb.checked; alert('Update failed'); }); }; }
+            row.querySelector('.sup-pu-active').onchange=function(){ var cb=this; fetch('/api/supply/portal-user/'+row.dataset.id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({active:cb.checked})}).then(function(r){return r.json();}).catch(function(){ cb.checked=!cb.checked; alert('Update failed'); }); };
+            var _mg=row.querySelector('.sup-pu-magic'); if(_mg)_mg.onclick=function(){ var mb=this; fetch('/api/supply/portal-magic/'+row.dataset.id,{method:'POST'}).then(function(x){return x.json();}).then(function(j){ if(j&&j.error)return alert(j.error);
+              if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(j.url).then(function(){ var o=mb.textContent; mb.textContent='✓ Copied'; setTimeout(function(){mb.textContent=o;},1500); }, function(){ prompt('Copy this 7-day login link:', j.url); }); } else { prompt('Copy this 7-day login link:', j.url); } }).catch(function(e){ alert('Failed: '+(e.message||e)); }); }; }
           function wireSupPu(scope){ scope.querySelectorAll('.sup-pu-row').forEach(wireSupPuRow);
             var addBtn=scope.querySelector('#sup-pu-add'); if(!addBtn)return; addBtn.onclick=function(){
               var emEl=scope.querySelector('#sup-pu-email'), ctEl=scope.querySelector('#sup-pu-contact'), msg=scope.querySelector('#sup-pu-msg'), list=scope.querySelector('#sup-pu-list');

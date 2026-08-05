@@ -1,3 +1,6 @@
+## v26.565.0 — CONFIG ▸ Suppliers: magic-link button in edit view
+- Each portal user in the supplier EDIT view (bottom of the record, Portal users section) now has a 🔗 link button that creates & copies a 7-day magic login link (same /api/supply/portal-magic/:id endpoint as the Portal Users table + PO drawer). Previously the edit view could add/remove users but not issue a link.
+
 ## v26.564 — Test-feedback fixes: DEMAND download error, 3PL align, in-flight popup
 - DEMAND plan download (#11): a subcategory whose calc() returned undefined threw and failed the whole export — now guarded (per-subcat try/catch) and the real error is surfaced instead of a bare 'Failed'.
 - 3PL Review (#5): parsed-data summary card top-margin removed so it aligns with the top of the Xero-preview column (box 4).
