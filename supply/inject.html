@@ -6204,24 +6204,39 @@
           fetch('/api/supply/transfer-lead-upsert',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({from_market:inp.dataset.from,to_market:inp.dataset.to,weeks:v})})
             .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw 0; inp.style.borderColor='#16a34a'; delete cache['config']; }).catch(function(){ inp.style.borderColor='#dc2626'; }); }); }
       };
-      SUBS['barcodegen']=function(){ var _bg=[];
-        b.innerHTML='<div class="annot"><b>CONFIG ▸ Supply chain ▸ Barcodes.</b> Upload a CSV (or paste) of EAN numbers — one <b>barcode-only</b> JPG is generated per EAN (no text). Download them all as a zip.</div>'
+      SUBS['barcodegen']=function(){ var _bg=[]; var SAMPLE='5061011622709';
+        var SIZES=[['452','452 px (source match)'],['678','678 px (default)'],['1000','1000 px'],['1500','1500 px'],['custom','Custom…']];
+        b.innerHTML='<div class="annot"><b>CONFIG ▸ Supply chain ▸ Barcodes.</b> Upload a CSV (or paste) of EAN numbers — one <b>barcode-only</b> image is generated per EAN (EAN-13 bars + digits, no other text). Download them all as a zip.</div>'
           +'<div class="bar" style="align-items:flex-start;gap:14px;flex-wrap:wrap"><div><div class="mut tiny">CSV / text file of EANs</div><input type="file" id="bg-file" accept=".csv,.txt"></div>'
           +'<div><div class="mut tiny">or paste (one per line)</div><textarea id="bg-paste" style="width:240px;height:70px;font:11px ui-monospace,monospace;border:1px solid #d0d0d0;border-radius:5px;padding:6px" placeholder="5060000000001&#10;5060000000002"></textarea></div>'
+          +'<div style="display:flex;flex-direction:column;gap:8px;padding-top:14px">'
+            +'<div><span class="mut tiny">Format</span><br><label style="font-size:12px;margin-right:8px"><input type="radio" name="bg-fmt" value="png" checked> PNG</label><label style="font-size:12px"><input type="radio" name="bg-fmt" value="jpg"> JPG</label></div>'
+            +'<div><span class="mut tiny">Size</span><br><select class="fci" id="bg-size" style="text-align:left">'+SIZES.map(function(s){return '<option value="'+s[0]+'"'+(s[0]==='678'?' selected':'')+'>'+s[1]+'</option>';}).join('')+'</select> <input class="fci" id="bg-cw" type="number" min="120" max="4000" value="678" title="custom width (px)" style="width:74px;display:none"></div>'
+          +'</div>'
           +'<div style="display:flex;flex-direction:column;gap:6px;padding-top:14px"><button class="save-btn" id="bg-gen">Generate</button><button class="save-btn" id="bg-dl" style="display:none;background:#dcfce7;color:#166534;border-color:#16a34a">&#11015; Download all (.zip)</button></div></div>'
+          +'<div id="bg-sample" style="margin:4px 0 10px"></div>'
           +'<div id="bg-msg" class="mut tiny" style="margin:2px 0 10px"></div><div id="bg-preview" style="display:flex;gap:14px;flex-wrap:wrap"></div>';
         var fileEl=document.getElementById('bg-file'); if(fileEl)fileEl.onchange=function(){ var f=this.files&&this.files[0]; if(!f)return; var rd=new FileReader(); rd.onload=function(){ var ta=document.getElementById('bg-paste'); if(ta)ta.value=String(rd.result||''); }; rd.readAsText(f); };
+        function fmt(){ var r=b.querySelector('input[name=bg-fmt]:checked'); return (r&&r.value==='jpg')?{mime:'image/jpeg',ext:'jpg'}:{mime:'image/png',ext:'png'}; }
+        function targetW(){ var s=(document.getElementById('bg-size')||{}).value; if(s==='custom'){ var v=parseInt((document.getElementById('bg-cw')||{}).value,10); return Math.max(120,Math.min(4000,v||678)); } return parseInt(s,10)||678; }
+        function showSample(){ var host=document.getElementById('bg-sample'); if(!host)return; var svg=eanBarcodeSVG(SAMPLE); var w=targetW(), f=fmt();
+          svgToImg(svg,w,f.mime,function(bl,cw,ch){ if(!bl){host.innerHTML='';return;} var url=URL.createObjectURL(bl);
+            host.innerHTML='<div class="mut tiny" style="margin-bottom:3px">Default preview — '+SAMPLE+'.'+f.ext+' · '+cw+'×'+ch+' px ('+f.ext.toUpperCase()+')</div><img src="'+url+'" style="max-width:452px;border:1px solid #e5e7eb;background:#fff">'; }); }
+        var szSel=document.getElementById('bg-size'); if(szSel)szSel.onchange=function(){ var cw=document.getElementById('bg-cw'); if(cw)cw.style.display=(this.value==='custom')?'':'none'; showSample(); };
+        var cwEl=document.getElementById('bg-cw'); if(cwEl)cwEl.onchange=showSample;
+        b.querySelectorAll('input[name=bg-fmt]').forEach(function(r){ r.onchange=showSample; });
+        showSample();
         function parseEans(txt){ var out=[],seen={}; (String(txt).match(/\d{12,13}/g)||[]).forEach(function(x){ if(!seen[x]){seen[x]=1;out.push(x);} }); return out; }
         document.getElementById('bg-gen').onclick=function(){ var msg=document.getElementById('bg-msg'), prev=document.getElementById('bg-preview'), dl=document.getElementById('bg-dl');
-          var eans=parseEans((document.getElementById('bg-paste')||{}).value||''); prev.innerHTML=''; _bg=[]; var bad=[];
+          var eans=parseEans((document.getElementById('bg-paste')||{}).value||''); prev.innerHTML=''; _bg=[]; var bad=[]; var f=fmt(), w=targetW();
           if(!eans.length){ msg.textContent='No 12–13 digit EANs found in the input.'; dl.style.display='none'; return; }
           msg.textContent='Generating '+eans.length+' barcode'+(eans.length===1?'':'s')+'…';
           var jobs=eans.map(function(code){ return new Promise(function(res){ var svg=eanBarcodeSVG(code); if(!svg){ bad.push(code); return res(); }
-            var img=document.createElement('img'); img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg); img.style.cssText='height:96px;border:1px solid #eee;display:block'; img.title=code;
-            var cell=document.createElement('div'); cell.style.cssText='text-align:center'; cell.appendChild(img); var cap=document.createElement('div'); cap.className='mut tiny'; cap.textContent=code+'.jpg'; cell.appendChild(cap); prev.appendChild(cell);
-            svgToJpgBlob(svg,2,function(bl){ if(bl&&bl.arrayBuffer){ bl.arrayBuffer().then(function(ab){ _bg.push({name:code+'.jpg',data:new Uint8Array(ab)}); res(); },function(){res();}); } else res(); });
+            var img=document.createElement('img'); img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg); img.style.cssText='height:88px;border:1px solid #eee;display:block'; img.title=code;
+            var cell=document.createElement('div'); cell.style.cssText='text-align:center'; cell.appendChild(img); var cap=document.createElement('div'); cap.className='mut tiny'; cap.textContent=code+'.'+f.ext; cell.appendChild(cap); prev.appendChild(cell);
+            svgToImg(svg,w,f.mime,function(bl){ if(bl&&bl.arrayBuffer){ bl.arrayBuffer().then(function(ab){ _bg.push({name:code+'.'+f.ext,data:new Uint8Array(ab)}); res(); },function(){res();}); } else res(); });
           }); });
-          Promise.all(jobs).then(function(){ msg.textContent='Generated '+_bg.length+' barcode'+(_bg.length===1?'':'s')+(bad.length?(' · '+bad.length+' invalid EAN'+(bad.length===1?'':'s')+' ('+bad.slice(0,5).join(', ')+(bad.length>5?'…':'')+')'):''); dl.style.display=_bg.length?'':'none'; });
+          Promise.all(jobs).then(function(){ msg.textContent='Generated '+_bg.length+' '+f.ext.toUpperCase()+' barcode'+(_bg.length===1?'':'s')+' at '+w+'px wide'+(bad.length?(' · '+bad.length+' invalid EAN'+(bad.length===1?'':'s')+' ('+bad.slice(0,5).join(', ')+(bad.length>5?'…':'')+')'):''); dl.style.display=_bg.length?'':'none'; });
         };
         document.getElementById('bg-dl').onclick=function(){ if(!_bg.length)return; var blob=makeZipStore(_bg); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='ean_barcodes.zip'; document.body.appendChild(a); a.click(); setTimeout(function(){ try{URL.revokeObjectURL(a.href);}catch(e){} a.remove(); },1200); };
       };
@@ -7784,10 +7799,11 @@
       +svgText(bx+24*m,dbl,c.slice(1,7),{size:ds,anchor:'middle',ls:2})
       +svgText(bx+71*m,dbl,c.slice(7,13),{size:ds,anchor:'middle',ls:2});
     return '<svg xmlns="http://www.w3.org/2000/svg" width="'+W+'" height="'+H+'" viewBox="0 0 '+W+' '+H+'"><rect width="'+W+'" height="'+H+'" fill="#fff"/>'+el+'</svg>'; }
-  function svgToJpgBlob(svg,scale,cb){ scale=scale||1; var img=new Image();
-    img.onload=function(){ var cv=document.createElement('canvas'); cv.width=Math.round(img.width*scale); cv.height=Math.round(img.height*scale);
+  function svgToImg(svg,targetW,mime,cb){ var img=new Image();   // rasterise an SVG to a blob at a target pixel width (aspect kept), PNG or JPEG
+    img.onload=function(){ var nw=img.width||678, nh=img.height||450, sc=(targetW&&nw)?(targetW/nw):1;
+      var cv=document.createElement('canvas'); cv.width=Math.max(1,Math.round(nw*sc)); cv.height=Math.max(1,Math.round(nh*sc));
       var ctx=cv.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height); ctx.drawImage(img,0,0,cv.width,cv.height);
-      try{ cv.toBlob(function(bl){ cb(bl); },'image/jpeg',0.95); }catch(e){ cb(null); } };
+      try{ cv.toBlob(function(bl){ cb(bl,cv.width,cv.height); },mime||'image/png',0.95); }catch(e){ cb(null); } };
     img.onerror=function(){ cb(null); };
     img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg); }
   function makeZipStore(files){ // files:[{name, data:Uint8Array}] → application/zip Blob (STORE method; JPEGs are already compressed)

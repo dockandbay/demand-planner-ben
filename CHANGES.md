@@ -1,3 +1,6 @@
+## v26.648.0 — Barcode generator: PNG (default) + size options + live preview
+- Format toggle PNG (default) / JPG; Size dropdown (452 "source match" / 678 default / 1000 / 1500 / Custom width px, aspect kept); a live default-size preview of a sample barcode showing the exact output dimensions, updating on format/size change. Zip filenames use the chosen extension. Rasteriser generalised (svgToImg: target width + mime).
+
 ## v26.647.0 — SUG-0018 P2: Klaviyo BIS enhanced-demand recommendation
 - Back-in-stock subscribers now drive a forecast-uplift RECOMMENDATION (advisory, never auto-applied). Suggested enhanced demand = subscribers × take-rate % (default 35, editable on DEMAND ▸ Inputs ▸ Klaviyo BIS → app_settings.bis_take_rate, injected BIS_CFG). Surfaced BOTH as a 🔔N ↑M hint + tooltip on the plan SKU rows, and as a "Back-in-stock demand" recommendation in DEMAND ▸ Actions (daBis detector, current market, ≥10 subs). Informational — planner decides.
 
