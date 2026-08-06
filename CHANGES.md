@@ -1,3 +1,7 @@
+## v26.655.0 — DEMAND auto-smooth: fire only when gap is UNDER the threshold
+- Reversed the auto-smooth rule: a flagged sub-category month is now rescaled only when its SKU-sum is WITHIN the gap % (default <20%) of the target; a bigger gap is left for manual review. Updated runAutoSmooth + the staleness badge + the "Gap <" label + wording.
+
+
 ## v26.654.0 — DEMAND Smoothing settings: simpler flat layout
 - Dropped the Category grouping. Now one row per sub-category: sub-category name first, then the two toggles (Disregard disc., Auto) as a clean 3-column table with header labels + tooltips.
 

@@ -829,10 +829,10 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
 <div id="smoothset-ov" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:flex-start;justify-content:center" onclick="if(event.target===this)closeSmoothSettings()">
   <div style="background:#fff;max-width:640px;width:94%;margin-top:40px;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.25);padding:18px 22px;max-height:86vh;overflow:auto;font-size:13px;color:#222">
     <div style="display:flex;align-items:center;margin-bottom:6px"><div style="font-weight:700;font-size:15px">&#9881; Smoothing settings</div><button onclick="closeSmoothSettings()" style="margin-left:auto;border:none;background:none;font-size:20px;cursor:pointer;color:#888">&times;</button></div>
-    <div style="color:#555;font-size:12px;margin-bottom:10px">Per country / channel / sub-category. <b>Disregard disc.</b>: smoothing leaves discontinued SKUs at their stock rundown and boosts only active SKUs. <b>Auto</b>: include in the one-click auto-smooth sweep.</div>
+    <div style="color:#555;font-size:12px;margin-bottom:10px">Per country / channel / sub-category. <b>Disregard disc.</b>: smoothing leaves discontinued SKUs at their stock rundown and boosts only active SKUs. <b>Auto</b>: include in the one-click auto-smooth sweep — it rescales only months whose SKU-sum is <b>within</b> the gap threshold (a bigger gap is left for manual review).</div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:#f5f8ff;border:1px solid #dbeafe;border-radius:8px;padding:8px 10px;margin-bottom:10px">
       <span style="font-weight:700;font-size:12px;color:#1e3a8a">Auto-smooth</span>
-      <label style="font-size:12px;color:#64748b">Gap &gt;</label><input type="number" id="ss-th" min="1" max="100" style="width:52px;font-size:12px;padding:3px 5px;border:1px solid #cbd5e1;border-radius:4px"><span style="font-size:12px;color:#64748b">%</span>
+      <label style="font-size:12px;color:#64748b" title="Only auto-smooth a month when the SKU-sum is within this % of the sub-category target — a bigger gap is left for manual review">Gap &lt;</label><input type="number" id="ss-th" min="1" max="100" style="width:52px;font-size:12px;padding:3px 5px;border:1px solid #cbd5e1;border-radius:4px"><span style="font-size:12px;color:#64748b">%</span>
       <label style="font-size:12px;color:#64748b;margin-left:6px">Mode</label><select id="ss-mode" style="font-size:12px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px"><option value="standard">Standard</option><option value="leader">Leader</option></select>
       <button id="ss-run" style="margin-left:auto;font-size:12px;font-weight:600;padding:4px 12px;border:1px solid #16a34a;border-radius:6px;background:#16a34a;color:#fff;cursor:pointer">&#8623; Run auto-smooth now</button>
     </div>
@@ -923,7 +923,8 @@ function renderSmoothSettings(){
   list.querySelectorAll('.ss-dis').forEach(function(cb){ cb.onchange=function(){ var k=_ssCo+'|'+_ssCh+'|'+cb.dataset.s; if(cb.checked)SMOOTH_DISREGARD_DISC[k]=true; else delete SMOOTH_DISREGARD_DISC[k]; saveSmoothDisregard(); renderSmoothSettings(); try{renderMain();}catch(e){} }; });
   list.querySelectorAll('.ss-auto').forEach(function(cb){ cb.onchange=function(){ var k=_ssCo+'|'+_ssCh+'|'+cb.dataset.s; SMOOTH_AUTO.flags=SMOOTH_AUTO.flags||{}; if(cb.checked)SMOOTH_AUTO.flags[k]=true; else delete SMOOTH_AUTO.flags[k]; saveSmoothAuto(); renderSmoothSettings(); }; });
 }
-// One-click sweep: smooth every flagged (co|ch|subcat) forecast month whose SKU-sum deviates from the subcat target by > threshold.
+// One-click sweep: smooth every flagged (co|ch|subcat) forecast month whose SKU-sum deviates from the subcat target
+// by LESS than the threshold (small gaps only — a big gap is left for manual review).
 function runAutoSmooth(){
   var th=(Number(SMOOTH_AUTO.threshold)||20)/100, leader=SMOOTH_AUTO.mode==='leader';
   var flags=SMOOTH_AUTO.flags||{}, keys=Object.keys(flags).filter(function(k){return flags[k];});
@@ -935,11 +936,12 @@ function runAutoSmooth(){
     FM.forEach(function(m){ if(isActualMonth(m)&&m!==CUR_MONTH)return;   // forecast months only
       var target=(m===CUR_MONTH)?curMonthForecast(s,co,ch):(((calc(s,co,ch)||{}).fu||{})[m]||0);
       if(target<=0)return; var sum=eff.totals[m]||0;
-      if(Math.abs(sum-target)/target>th){ var vals=computeSmoothAlloc(s,co,ch,m,{protectLeaders:leader}); if(vals){ applySmoothAlloc(co,ch,m,vals); applied++; } }
+      var gap=Math.abs(sum-target)/target;
+      if(gap>1e-9 && gap<th){ var vals=computeSmoothAlloc(s,co,ch,m,{protectLeaders:leader}); if(vals){ applySmoothAlloc(co,ch,m,vals); applied++; } }
     }); });
   if(_rc)_markSmoothRun();
   try{renderMain();}catch(e){} try{markDirty();}catch(e){}
-  alert('Auto-smoothed '+applied+' forecast month-cell'+(applied===1?'':'s')+' across '+keys.length+' sub-categor'+(keys.length===1?'y':'ies')+' with a >'+(SMOOTH_AUTO.threshold||20)+'% gap.\n\nReview the numbers, then Save Forecasts. (Undo reverts the whole sweep.)');
+  alert('Auto-smoothed '+applied+' forecast month-cell'+(applied===1?'':'s')+' across '+keys.length+' sub-categor'+(keys.length===1?'y':'ies')+' with a gap under '+(SMOOTH_AUTO.threshold||20)+'%.\n\nReview the numbers, then Save Forecasts. (Undo reverts the whole sweep.)');
 }
 function openSmoothSettings(ev){ if(ev)ev.stopPropagation(); var e=document.getElementById('smoothset-ov'); if(e)e.style.display='flex';
   var thI=document.getElementById('ss-th'); if(thI)thI.onchange=function(){ var v=Math.max(1,Math.min(100,parseInt(this.value,10)||20)); SMOOTH_AUTO.threshold=v; this.value=v; saveSmoothAuto(); };
@@ -3886,7 +3888,7 @@ function computeSmoothStale(){
   keys.forEach(function(k){ var p=k.split('|'), co=p[0],ch=p[1],s=p.slice(2).join('|'), eff; try{eff=subcatSkuEffTotals(s,co,ch);}catch(e){return;} if(!eff)return;
     var hit=false; FM.forEach(function(m){ if(hit)return; if(isActualMonth(m)&&m!==CUR_MONTH)return;
       var target=(m===CUR_MONTH)?curMonthForecast(s,co,ch):(((calc(s,co,ch)||{}).fu||{})[m]||0);
-      if(target>0 && Math.abs((eff.totals[m]||0)-target)/target>th) hit=true; });
+      if(target>0){ var g=Math.abs((eff.totals[m]||0)-target)/target; if(g>1e-9 && g<th) hit=true; } });
     if(hit)n++; });
   return {count:n};
 }
