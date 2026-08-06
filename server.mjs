@@ -4464,7 +4464,9 @@ app.get('/api/product/spec-suppliers', async (req, res) => {   // distinct suppl
 app.get('/api/product/specs', async (_req, res) => {
   try { const r = await pool.query(`SELECT id, spec_type, filename, mime, scope_type,
       coalesce(scope_category,'') scope_category, coalesce(scope_size,'') scope_size, coalesce(scope_skus,'') scope_skus,
-      effective_mode, coalesce(effective_prod_no,'') effective_prod_no, confirm_with_supplier, coalesce(confirm_suppliers,'') confirm_suppliers,
+      coalesce(effective_when, CASE WHEN effective_mode='production' THEN 'production' ELSE 'immediate' END) effective_when,
+      coalesce(effective_stock, CASE WHEN effective_mode='immediate_dispose' THEN 'dispose' ELSE 'useup' END) effective_stock,
+      coalesce(effective_prod_no,'') effective_prod_no, confirm_with_supplier, coalesce(confirm_suppliers,'') confirm_suppliers,
       coalesce(uploaded_by,'') uploaded_by, to_char(uploaded_at,'DD-Mon-YY HH24:MI') uploaded_at
       FROM planner.product_specs WHERE active ORDER BY uploaded_at DESC`); res.json(r.rows); }
   catch (e) { res.status(500).json({ error: e.message }); }
@@ -4476,12 +4478,14 @@ app.post('/api/product/specs', async (req, res) => {
   try {
     const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
     if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: 'file exceeds 10MB' });
+    const when = (b.effective_when || 'production').trim(), stock = (b.effective_stock || 'useup').trim();
+    const effMode = (when === 'production') ? 'production' : ('immediate_' + stock);   // legacy combined value
     const r = await pool.query(`INSERT INTO planner.product_specs
-      (spec_type, filename, mime, data, scope_type, scope_category, scope_size, scope_skus, effective_mode, effective_prod_no, confirm_with_supplier, confirm_suppliers, uploaded_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
+      (spec_type, filename, mime, data, scope_type, scope_category, scope_size, scope_skus, effective_mode, effective_when, effective_stock, effective_prod_no, confirm_with_supplier, confirm_suppliers, uploaded_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
       [st, b.filename || 'file', b.mime || 'application/octet-stream', buf,
        scope, (b.scope_category || '').trim() || null, (b.scope_size || '').trim() || null, (b.scope_skus || '').trim() || null,
-       (b.effective_mode || 'production').trim(), (b.effective_prod_no || '').trim() || null,
+       effMode, when, stock, (b.effective_prod_no || '').trim() || null,
        !!b.confirm_with_supplier, (b.confirm_with_supplier && b.confirm_suppliers) ? String(b.confirm_suppliers).trim() || null : null, internalAuthor(req, b.uploaded_by)]);
     res.json({ ok: true, id: r.rows[0].id });
   } catch (e) { res.status(500).json({ error: e.message }); }

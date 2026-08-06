@@ -9779,7 +9779,7 @@
       var types=Array.isArray(res[0])?res[0]:[], opts=res[1]||{}, specs=Array.isArray(res[2])?res[2]:[];
       var cats=opts.categories||[], catSizes=opts.catSizes||{}, prods=opts.productions||[];
       function scopeLabel(s){ if(s.scope_type==='category')return 'Category · '+esc(s.scope_category); if(s.scope_type==='size')return 'Size · '+esc(s.scope_category)+' / '+esc(s.scope_size); if(s.scope_type==='sku')return 'SKU · '+esc(s.scope_skus); return 'All products'; }
-      function effLabel(s){ if(s.effective_mode==='immediate_useup')return 'Immediately, use up old stock'; if(s.effective_mode==='immediate_dispose')return 'Immediately, dispose old stock'; return 'From next production P'+esc(s.effective_prod_no); }
+      function effLabel(s){ var w=(s.effective_when==='immediate')?'Immediately':('From next production P'+esc(s.effective_prod_no)); var st=(s.effective_stock==='dispose')?'dispose old stock':'use up old stock'; return w+' · '+st; }
       var defProd=String(opts.defaultProdNo||prods[0]||'');
       if(defProd && prods.indexOf(defProd)<0)prods=[defProd].concat(prods);   // ensure the next-production default is selectable
       var typeOpts=types.map(function(t){return '<option value="'+esc(t.name)+'">'+esc(t.name)+'</option>';}).join('');
@@ -9803,9 +9803,8 @@
           +'<div id="sp-scope-sku" style="display:none;margin-top:6px"><input class="fci" id="sp-skus" placeholder="Paste SKUs, comma or space separated" style="text-align:left;width:100%"></div>'
         +'</div></div>'
         +'<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:8px"><label style="font-size:12px;color:#64748b;width:90px;padding-top:4px">Use from</label><div style="flex:1">'
-          +'<div style="margin-bottom:4px"><label style="font-size:12px"><input type="radio" name="sp-eff" value="production" checked> Next production</label> <select class="fci" id="sp-prod" style="text-align:left;width:110px">'+prodOpts+'</select></div>'
-          +'<div style="margin-bottom:4px"><label style="font-size:12px"><input type="radio" name="sp-eff" value="immediate_useup"> Immediately, use up existing stock of past specifications</label></div>'
-          +'<div><label style="font-size:12px"><input type="radio" name="sp-eff" value="immediate_dispose"> Immediately, dispose of stock from past specifications</label></div>'
+          +'<div style="margin-bottom:6px"><label style="font-size:12px;margin-right:14px"><input type="radio" name="sp-when" value="production" checked> Next production</label><select class="fci" id="sp-prod" style="text-align:left;width:100px;margin-right:14px">'+prodOpts+'</select><label style="font-size:12px"><input type="radio" name="sp-when" value="immediate"> Immediately</label></div>'
+          +'<div><label style="font-size:12px;margin-right:14px"><input type="radio" name="sp-stock" value="useup" checked> Use up existing stock of past specifications</label><label style="font-size:12px"><input type="radio" name="sp-stock" value="dispose"> Dispose of old stock</label></div>'
         +'</div></div>'
         +'<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:12px"><label style="font-size:12px;color:#64748b;width:90px;padding-top:4px">Approval</label><div style="flex:1"><label style="font-size:12px"><input type="checkbox" id="sp-confirm"> Require Supplier Confirmation</label><div id="sp-suppliers" style="display:none;margin-top:6px"></div></div></div>'
         +'<div style="text-align:right"><button class="save-btn" id="sp-save">Save specification</button></div>'
@@ -9888,10 +9887,11 @@
       // save — one spec per staged file, sharing scope / use-from / confirmation
       var save=c.querySelector('#sp-save'); if(save)save.onclick=function(){
         if(!_spFiles.length){ alert('Add at least one file.'); return; }
-        var eff=(c.querySelector('input[name=sp-eff]:checked')||{}).value||'production';
+        var when=(c.querySelector('input[name=sp-when]:checked')||{}).value||'production';
+        var stock=(c.querySelector('input[name=sp-stock]:checked')||{}).value||'useup';
         var confirm=!!(c.querySelector('#sp-confirm')||{}).checked;
-        var shared=readScope(); shared.effective_mode=eff; shared.confirm_with_supplier=confirm;
-        if(eff==='production')shared.effective_prod_no=(c.querySelector('#sp-prod')||{}).value||'';
+        var shared=readScope(); shared.effective_when=when; shared.effective_stock=stock; shared.confirm_with_supplier=confirm;
+        if(when==='production')shared.effective_prod_no=(c.querySelector('#sp-prod')||{}).value||'';
         if(confirm){ var sel=Array.prototype.map.call(c.querySelectorAll('.sp-sup:checked'),function(x){return x.value;});
           if(!sel.length){ alert('Select at least one supplier for the confirmation, or untick Require Supplier Confirmation.'); return; }
           shared.confirm_suppliers=sel.join(','); }

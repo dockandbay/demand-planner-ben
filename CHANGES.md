@@ -1,3 +1,7 @@
+## v26.621.0 — Specifications "Use from" is now two layers
+- Split into (1) **when** — Next production [P##] or Immediately — and (2) **old stock** — Use up existing stock of past specifications or Dispose of old stock. The two are chosen independently (e.g. "Next production P68 · dispose old stock").
+- New columns `effective_when` + `effective_stock` (mig 191, backfilled from the old `effective_mode`); `effective_mode` still written as a legacy combined value. List label composes both layers.
+
 ## v26.620.0 — Specifications: pick which supplier(s) the confirmation goes to (derived from scope)
 - Ticking **Require Supplier Confirmation** now reveals a checklist of the **suppliers derived from the products in the chosen scope** (union of `supplier_multiple_all`, falling back to `main_supplier_final`). All pre-selected; a ⚠ flags a supplier not in the supplier list or with no email on file. The list re-derives when the scope changes.
 - Selected suppliers are saved on the spec (`confirm_suppliers`, mig 190) and shown in the current-specs list. Save blocks if confirmation is required but no supplier is selected. Sets up the P3 portal approval + email routing.
