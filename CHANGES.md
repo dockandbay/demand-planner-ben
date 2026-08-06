@@ -1,3 +1,6 @@
+## v26.644.0 — SUG-0020 DTC Mismatch (Phase 2: BI & Reports UI)
+- New BI & REPORTS ▸ DTC MISMATCH sub-tab: "Import sales orders" button (confirm-gated, read-only Cin7 pull), a live status line, Issues/Accepted/OK counters, and a table of open DTC sales orders vs their POs — each row shows the issue (no PO mapped / SKU-qty mismatch / OK), the mapped PO refs (click to open), the per-SKU SO-vs-PO diff, a note field, and an "accept" checkbox that clears it from the count. Completes the SUG-0020 flow (import → reconcile → note/accept). Remaining: roll the issue count onto the top-line BI & REPORTS menu badge.
+
 ## v26.643.0 — SUG-0020 DTC Mismatch (Phase 1: import + reconcile endpoints)
 - On-demand Cin7 sales-order import for the 3 DTC branches (Direct to Client 5051, UK B2B JLEW 27889, UK B2B NEXT 27890) with line items → planner.dtc_sales_orders + _lines (mig 196). Read-only Cin7. POST /api/supply/dtc/import (+ /status). Mismatch endpoint GET /api/supply/dtc/mismatch: OPEN SOs (not void, not dispatched) vs POs mapped by sales_order_ref — flags no-PO and SKU/qty diffs; per-order note + accept via POST /api/supply/dtc/review (accepted drops out of the count). Note: Cin7 SOs have no fullyReceivedDate field; open = not void AND dispatched_date null. Phase 2 = BI & Reports UI + Import button + counter.
 

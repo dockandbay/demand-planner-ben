@@ -726,9 +726,9 @@
     ['payments','PAYMENTS'],['samples','SAMPLES'],['quality-control','QUALITY CONTROL']];   // CONFIG is now a top-level view (see enterConfig); SHIPMENTS lives under the PURCHASE ORDERS sub-nav (poSub 'shipments'); PAYMENTS umbrella holds Deposits / Other Payments / Payments Due / Payments Report
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
   var REPORT_SECTIONS=[['metrics','METRICS'],['production-summary','PRODUCTION SUMMARY'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
-    ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['supplier-timing','SUPPLIER DELAYS'],['directclient','DIRECT TO CLIENT'],['customorders','CUSTOM ORDERS'],['flexport','FLEXPORT']];   // ERP COMPARE moved to ACTIONS ▸ ERP Compare sub-tab; CASH FLOW moved to PAYMENTS ▸ Cash Flow
-  var REPORT_KEYS=['metrics','production-summary','reallocate','urgent-buy','container-fill','consolidate','upcoming','pipeline','supplier-timing','directclient','customorders','flexport'];
-  var BI_TABS={'metrics':'/api/supply/bi','production-summary':'/api/supply/bi/production-summary','urgent-buy':'/api/supply/bi/projection','reallocate':'/api/supply/bi/reallocations','container-fill':'/api/supply/bi/container-fill','consolidate':'/api/supply/bi/consolidations','erp-compare':'/api/supply/bi/erp-compare','supplier-timing':'/api/supply/supplier-timing'};   // fluid: always re-fetch
+    ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['supplier-timing','SUPPLIER DELAYS'],['directclient','DIRECT TO CLIENT'],['dtc-mismatch','DTC MISMATCH'],['customorders','CUSTOM ORDERS'],['flexport','FLEXPORT']];   // ERP COMPARE moved to ACTIONS ▸ ERP Compare sub-tab; CASH FLOW moved to PAYMENTS ▸ Cash Flow
+  var REPORT_KEYS=['metrics','production-summary','reallocate','urgent-buy','container-fill','consolidate','upcoming','pipeline','supplier-timing','directclient','dtc-mismatch','customorders','flexport'];
+  var BI_TABS={'metrics':'/api/supply/bi','production-summary':'/api/supply/bi/production-summary','urgent-buy':'/api/supply/bi/projection','reallocate':'/api/supply/bi/reallocations','container-fill':'/api/supply/bi/container-fill','consolidate':'/api/supply/bi/consolidations','erp-compare':'/api/supply/bi/erp-compare','supplier-timing':'/api/supply/supplier-timing','dtc-mismatch':'/api/supply/dtc/mismatch'};   // fluid: always re-fetch
   var reportTab='metrics';   // BI & REPORTS opens on METRICS by default
   var ANNOT={
     actions:'<b>SUPPLY ▸ Actions.</b> Exceptions surfaced from the supply picture — date conflicts, unassigned shipments, missing supplier, unpaid deposits. Grouped by type.',
@@ -8408,6 +8408,7 @@
       if(rk==='supplier-timing')return renderSupplierTiming(d);
       if(rk==='cashflow')return renderCashflow(d);
       if(rk==='directclient')return renderDirectClient(d);
+      if(rk==='dtc-mismatch')return renderDtcMismatch(d);
       if(rk==='customorders')return renderCustomOrders(d);
       if(rk==='flexport')return renderFlexport(d); };
     if(!BI_TABS[rk] && cache[rk])return done(cache[rk]);
@@ -8416,6 +8417,38 @@
 
   // ============ SUPPLY ▸ BI & REPORTS — BI sub-tabs (render into #rep-body) ============
   function biBody(){ return document.getElementById('rep-body')||document.getElementById('supply-content'); }
+  // SUG-0020 DTC MISMATCH — open Direct-to-Client sales orders vs their POs (mapped by sales_order_ref)
+  function _dtcPill(lbl,n,color){ return '<span style="font-size:11px;color:#64748b">'+lbl+' <b style="color:'+color+'">'+n+'</b></span>'; }
+  function renderDtcMismatch(d){ var b=biBody(); d=d||{orders:[],counts:{}}; var counts=d.counts||{};
+    b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:#0f172a">DTC mismatch</div>'
+      +'<div class="mut tiny" style="margin-bottom:10px;max-width:840px">Open Direct-to-Client sales orders (not void, not dispatched) reconciled against their purchase orders (mapped by sales order ref). Flags orders with <b>no PO</b> or a <b>SKU / quantity mismatch</b>. Add a note or <b>accept</b> a discrepancy to clear it from the count.</div>'
+      +'<div class="bar" style="gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><button class="save-btn" id="dtc-import">&#8635; Import sales orders</button><span id="dtc-impmsg" class="mut tiny"></span>'
+        +'<span style="margin-left:auto;display:inline-flex;gap:12px">'+_dtcPill('Issues',counts.issues||0,'#dc2626')+_dtcPill('Accepted',counts.accepted||0,'#64748b')+_dtcPill('OK',counts.ok||0,'#166534')+'</span></div>'
+      +'<div id="dtc-list"></div>';
+    fetch('/api/supply/dtc/status').then(function(r){return r.json();}).then(function(s){ var m=document.getElementById('dtc-impmsg'); if(m)m.textContent=s.imported_at?('last import '+s.imported_at+' · '+s.orders+' orders ('+s.open+' open)'):'not imported yet — click Import'; }).catch(function(){});
+    var ib=document.getElementById('dtc-import'); if(ib)ib.onclick=function(){ if(!confirm('Import the latest Direct-to-Client sales orders from Cin7 now? (read-only pull)'))return; ib.disabled=true; ib.textContent='Importing…';
+      fetch('/api/supply/dtc/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({})}).then(function(r){return r.json();}).then(function(j){ ib.disabled=false; ib.textContent='↻ Import sales orders'; if(j&&j.error){ alert('Import failed: '+j.error); return; } selectReport('dtc-mismatch'); }).catch(function(){ ib.disabled=false; ib.textContent='↻ Import sales orders'; alert('Import failed.'); }); };
+    _drawDtcList((d.orders||[]).slice());
+  }
+  function _drawDtcList(orders){ var el=document.getElementById('dtc-list'); if(!el)return;
+    if(!orders.length){ el.innerHTML='<div class="mut tiny" style="padding:8px 0">No open DTC sales orders imported yet. Click <b>Import sales orders</b> to pull them from Cin7.</div>'; return; }
+    orders.sort(function(a,b){ var ra=(a.issue&&!a.accepted)?0:(a.accepted?2:1), rb=(b.issue&&!b.accepted)?0:(b.accepted?2:1); return ra-rb; });
+    var rows=orders.map(function(o){
+      var badge=o.accepted?'<span class="tool-badge bg-blue">accepted</span>':o.issue==='no_po'?'<span class="tool-badge bg-red">no PO mapped</span>':o.issue==='qty_mismatch'?'<span class="tool-badge bg-amber">SKU / qty mismatch</span>':'<span class="tool-badge bg-green">OK</span>';
+      var diffs=(o.diffs&&o.diffs.length)?'<div class="tiny" style="margin-top:4px;color:#7c2d12">'+o.diffs.map(function(x){return esc(x.sku)+': SO '+units(x.soQty)+' vs PO '+units(x.poQty);}).join('<br>')+'</div>':'';
+      var pos=(o.po_refs&&o.po_refs.length)?o.po_refs.map(function(p){return '<button class="lnk-btn dtc-po" data-po="'+esc(p)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer">'+esc(p)+'</button>';}).join(', '):'<span class="mut">—</span>';
+      return '<tr><td class="l" style="vertical-align:top"><b>'+esc(o.reference||'')+'</b><div class="mut tiny">'+esc(o.company||'')+' · '+esc(o.branch_name||'')+(o.created_date?' · '+esc(o.created_date):'')+'</div></td>'
+        +'<td class="l" style="vertical-align:top">'+badge+diffs+'</td>'
+        +'<td class="l" style="vertical-align:top">'+pos+'</td>'
+        +'<td class="l" style="vertical-align:top"><input class="fci txt dtc-note" data-id="'+o.cin7_id+'" value="'+esc(o.note||'')+'" placeholder="note…" style="width:150px"></td>'
+        +'<td class="l" style="vertical-align:top"><label style="font-size:11px;white-space:nowrap"><input type="checkbox" class="dtc-acc" data-id="'+o.cin7_id+'"'+(o.accepted?' checked':'')+'> accept</label></td></tr>';
+    }).join('');
+    el.innerHTML='<div class="tw"><table style="width:max-content;min-width:100%"><thead><tr><th class="l">Sales order</th><th class="l">Status</th><th class="l">PO(s)</th><th class="l">Note</th><th class="l">Accept</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+    el.querySelectorAll('.dtc-po').forEach(function(x){ x.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(x.dataset.po,'oplan'); else if(typeof gotoPO==='function')gotoPO(x.dataset.po,'oplan'); }; });
+    function save(id,accepted,note){ fetch('/api/supply/dtc/review',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({so_cin7_id:Number(id),accepted:accepted,note:note})}).then(function(r){return r.json();}).then(function(){ selectReport('dtc-mismatch'); }).catch(function(){}); }
+    el.querySelectorAll('.dtc-acc').forEach(function(cb){ cb.onclick=function(){ var id=cb.dataset.id, ne=el.querySelector('.dtc-note[data-id="'+id+'"]'); save(id,cb.checked,ne?ne.value:''); }; });
+    el.querySelectorAll('.dtc-note').forEach(function(inp){ inp.onchange=function(){ var id=inp.dataset.id, ce=el.querySelector('.dtc-acc[data-id="'+id+'"]'); save(id,ce?ce.checked:false,inp.value); }; });
+  }
   function biTile(label,val,sub,accent){ return '<div style="flex:1 1 160px;min-width:160px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px">'
     +'<div style="font-size:23px;font-weight:800;line-height:1.1;color:'+(accent||'#0f172a')+'">'+val+'</div>'
     +'<div style="font-size:10.5px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.04em;margin-top:4px">'+esc(label)+'</div>'
