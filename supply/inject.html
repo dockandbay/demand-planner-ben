@@ -9788,6 +9788,8 @@
       function typeOptsSel(sel){ return types.map(function(t){return '<option value="'+esc(t.name)+'"'+(t.name===sel?' selected':'')+'>'+esc(t.name)+'</option>';}).join(''); }
       var catOpts=cats.map(function(x){return '<option value="'+esc(x)+'">'+esc(x)+'</option>';}).join('');
       var prodOpts=prods.map(function(p){return '<option value="'+esc(p)+'"'+(String(p)===defProd?' selected':'')+'>P'+esc(p)+'</option>';}).join('');
+      var catDL='<datalist id="sp-cat-dl">'+cats.map(function(x){return '<option value="'+esc(x)+'">';}).join('')+'</datalist>';   // searchable category picker
+      var prodDL='<datalist id="sp-prod-dl">'+prods.map(function(p){return '<option value="'+esc(p)+'">P'+esc(p)+'</option>';}).join('')+'</datalist>';
       var _spFiles=[];   // File objects staged for upload; each carries _type
       var upload=types.length?(
         '<div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;margin:0 0 16px;max-width:720px">'
@@ -9800,12 +9802,12 @@
           +'<label style="font-size:12px;margin-right:12px"><input type="radio" name="sp-scope" value="category"> Category</label>'
           +'<label style="font-size:12px;margin-right:12px"><input type="radio" name="sp-scope" value="size"> Size group</label>'
           +'<label style="font-size:12px"><input type="radio" name="sp-scope" value="sku"> SKU</label>'
-          +'<div id="sp-scope-cat" style="display:none;margin-top:6px"><select class="fci" id="sp-cat" style="text-align:left;min-width:220px">'+catOpts+'</select></div>'
-          +'<div id="sp-scope-size" style="display:none;margin-top:6px"><select class="fci" id="sp-size-cat" style="text-align:left;min-width:220px;margin-right:6px">'+catOpts+'</select><select class="fci" id="sp-size" style="text-align:left;min-width:160px"></select></div>'
+          +'<div id="sp-scope-cat" style="display:none;margin-top:6px"><input class="fci txt" id="sp-cat" list="sp-cat-dl" autocomplete="off" placeholder="Search category…" value="'+esc(cats[0]||'')+'" style="text-align:left;min-width:220px">'+catDL+'</div>'
+          +'<div id="sp-scope-size" style="display:none;margin-top:6px"><input class="fci txt" id="sp-size-cat" list="sp-cat-dl" autocomplete="off" placeholder="Search category…" value="'+esc(cats[0]||'')+'" style="text-align:left;min-width:220px;margin-right:6px"><input class="fci txt" id="sp-size" list="sp-size-dl" autocomplete="off" placeholder="Search size…" style="text-align:left;min-width:160px"><datalist id="sp-size-dl"></datalist></div>'
           +'<div id="sp-scope-sku" style="display:none;margin-top:6px"><input class="fci" id="sp-skus" placeholder="Paste SKUs, comma or space separated" style="text-align:left;width:100%"></div>'
         +'</div></div>'
         +'<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:8px"><label style="font-size:12px;color:#64748b;width:90px;padding-top:4px">Use from</label><div style="flex:1">'
-          +'<div style="margin-bottom:6px"><label style="font-size:12px;margin-right:14px"><input type="radio" name="sp-when" value="production" checked> Next production</label><select class="fci" id="sp-prod" style="text-align:left;width:100px;margin-right:14px">'+prodOpts+'</select><label style="font-size:12px"><input type="radio" name="sp-when" value="immediate"> Immediately</label></div>'
+          +'<div style="margin-bottom:6px"><label style="font-size:12px;margin-right:14px"><input type="radio" name="sp-when" value="production" checked> Next production</label><input class="fci txt" id="sp-prod" list="sp-prod-dl" autocomplete="off" value="'+esc(defProd)+'" style="text-align:left;width:90px;margin-right:14px">'+prodDL+'<label style="font-size:12px"><input type="radio" name="sp-when" value="immediate"> Immediately</label></div>'
           +'<div><label style="font-size:12px;margin-right:14px"><input type="radio" name="sp-stock" value="useup" checked> Use up existing stock of past specifications</label><label style="font-size:12px"><input type="radio" name="sp-stock" value="dispose"> Dispose of old stock</label></div>'
         +'</div></div>'
         +'<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:12px"><label style="font-size:12px;color:#64748b;width:90px;padding-top:4px">Approval</label><div style="flex:1"><label style="font-size:12px"><input type="checkbox" id="sp-confirm"> Require Supplier Confirmation</label><div id="sp-suppliers" style="display:none;margin-top:6px"></div></div></div>'
@@ -9882,7 +9884,8 @@
       function syncScope(){ var v=(c.querySelector('input[name=sp-scope]:checked')||{}).value||'all';
         var m={category:'sp-scope-cat',size:'sp-scope-size',sku:'sp-scope-sku'};
         ['sp-scope-cat','sp-scope-size','sp-scope-sku'].forEach(function(id){ var el=c.querySelector('#'+id); if(el)el.style.display=(m[v]===id)?'block':'none'; }); reloadSup(); }
-      function syncSizes(){ var cat=(c.querySelector('#sp-size-cat')||{}).value||'', sz=c.querySelector('#sp-size'); if(!sz)return; var list=catSizes[cat]||[]; sz.innerHTML=list.map(function(x){return '<option value="'+esc(x)+'">'+esc(x)+'</option>';}).join('')||'<option value="">(no sizes)</option>'; }
+      function syncSizes(){ var cat=(c.querySelector('#sp-size-cat')||{}).value||'', dl=c.querySelector('#sp-size-dl'), sz=c.querySelector('#sp-size'); if(!dl)return; var list=catSizes[cat]||[];
+        dl.innerHTML=list.map(function(x){return '<option value="'+esc(x)+'">';}).join(''); if(sz)sz.value=list[0]||''; }
       c.querySelectorAll('input[name=sp-scope]').forEach(function(r){ r.onchange=syncScope; });
       var szCat=c.querySelector('#sp-size-cat'); if(szCat){ szCat.onchange=function(){ syncSizes(); reloadSup(); }; syncSizes(); }
       var catSel=c.querySelector('#sp-cat'); if(catSel)catSel.onchange=reloadSup;

@@ -1,3 +1,6 @@
+## v26.628.0 — Specifications: searchable Category / Size / Production pickers
+- The Category, Size-group and Production pickers in the spec upload form are now type-to-filter inputs (native datalist) instead of plain dropdowns — search a long category list rather than scrolling. Size options still react to the chosen category.
+
 ## v26.627.0 — Portal: Specifications tab always visible
 - The supplier-portal Specifications tab now always shows (like Deposits/Payments), with an empty state when there are none — was auto-hiding when a supplier had no relevant specs, so it could look missing.
 
