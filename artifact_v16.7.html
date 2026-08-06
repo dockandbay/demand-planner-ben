@@ -735,10 +735,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-          <span class="pill-lbl" style="width:80px">Release</span>
-          <select id="plan-rw-sel" onchange="setPlanRw(this.value)" style="font-size:11px;padding:2px 6px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer"><option value="ALL">All</option></select>
-          <span style="width:1px;height:14px;background:#e0e0e0;margin:0 4px"></span>
-          <span class="pill-lbl">Sort</span>
+          <span class="pill-lbl" style="width:80px">Sort</span>
           <select id="plan-sort-sel" onchange="setPlanSort(this.value)" title="Row order" style="font-size:11px;padding:2px 6px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer"><option value="alpha">A–Z</option><option value="vol">Vol (3mo)</option><option value="tier">Tier+Vol</option></select>
         </div>
         <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:14px">
@@ -752,8 +749,6 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
     <div style="flex:1"></div>
     <button id="fclogic-btn" onclick="openFcLogic(event)" title="How the forecast numbers are calculated" style="font-size:10px;padding:3px 10px;border:1px solid #c4b5fd;border-radius:5px;background:#f5f3ff;color:#5b21b6;cursor:pointer;flex-shrink:0;font-weight:600">&#9635; Forecast Logic</button>
     <button id="smoothset-btn" onclick="openSmoothSettings(event)" title="Smoothing settings — disregard discontinued + auto-smooth" style="font-size:10px;padding:3px 10px;border:1px solid #93c5fd;border-radius:5px;background:#eff6ff;color:#1e40af;cursor:pointer;flex-shrink:0;font-weight:600">&#9881; Smoothing</button>
-    <button id="undo-btn" onclick="undoApply()" disabled title="Undo the last forecast edit (up to 10) — also &#8984;/Ctrl+Z" style="font-size:10px;padding:3px 10px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#334155;cursor:default;opacity:.45;flex-shrink:0">&#8624; Undo</button>
-    <button id="plan-dl-btn" onclick="openPlanDownload(event)" title="Download the demand plan (SKU × month, units + revenue) for chosen fiscal year(s)" style="font-size:10px;padding:3px 10px;border:1px solid #16a34a;border-radius:5px;background:#dcfce7;color:#166534;cursor:pointer;flex-shrink:0">&#11015; Download</button>
   </div>
 </div>
 <div id="sa-drawer-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:5900" onclick="closeSADrawer()"></div>
@@ -8413,8 +8408,15 @@ function renderDemandTabs(){
   var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS';
   var PRIMARY=['plan','summary','kpis','actions'], INPUTS=['targets','keyaccounts','calendar','revenue','klaviyobis'];
   var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0;
-  bar.innerHTML=PRIMARY.map(function(k){return _dlbl[k]?'<button class="dnav'+(k===DEMAND_VIEW?' active':'')+'" data-d="'+k+'">'+_dlbl[k]+'</button>':'';}).join('')
-    +'<button class="dnav'+(_inpActive?' active':'')+'" id="dnav-inputs-btn" title="Sell-through targets, Key accounts, Calendar, Revenue">Inputs</button>';
+  var _isPlanV=(DEMAND_VIEW==='plan');
+  // Release Window sits right after the PLAN tab; Undo + Download sit far-right on this row (plan view only).
+  var _rwHtml=_isPlanV?('<span class="pill-lbl" style="margin-left:10px">Release</span><select id="plan-rw-sel" onchange="setPlanRw(this.value)" style="font-size:11px;padding:2px 6px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer;flex-shrink:0"><option value="ALL">All</option></select>'):'';
+  var _actHtml=_isPlanV?('<span style="margin-left:auto;display:inline-flex;gap:6px;align-items:center">'
+    +'<button id="undo-btn" onclick="undoApply()" disabled title="Undo the last forecast edit (up to 10) — also &#8984;/Ctrl+Z" style="font-size:10px;padding:3px 10px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#334155;cursor:default;opacity:.45">&#8624; Undo</button>'
+    +'<button id="plan-dl-btn" onclick="openPlanDownload(event)" title="Download the demand plan (SKU × month, units + revenue) for chosen fiscal year(s)" style="font-size:10px;padding:3px 10px;border:1px solid #16a34a;border-radius:5px;background:#dcfce7;color:#166534;cursor:pointer">&#11015; Download</button></span>'):'';
+  bar.innerHTML=PRIMARY.map(function(k){ if(!_dlbl[k])return ''; var btn='<button class="dnav'+(k===DEMAND_VIEW?' active':'')+'" data-d="'+k+'">'+_dlbl[k]+'</button>'; if(k==='plan')btn+=_rwHtml; return btn; }).join('')
+    +'<button class="dnav'+(_inpActive?' active':'')+'" id="dnav-inputs-btn" title="Sell-through targets, Key accounts, Calendar, Revenue">Inputs</button>'+_actHtml;
+  if(_isPlanV){ try{ fillPlanRwSel(); }catch(e){} try{ updateUndoBtn(); }catch(e){} }
   bar.querySelectorAll('.dnav[data-d]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); VIEW_MODE='planning'; DEMAND_VIEW=b.dataset.d; if(window.writeHash)window.writeHash(['demand',DEMAND_VIEW]); render(); }; });   // a demand sub-tab is a planning view — force planning mode
   // "Inputs" → enter the inputs group (keep the current input view, else default to the first)
   var _ib=document.getElementById('dnav-inputs-btn'); if(_ib)_ib.onclick=function(e){ e.stopPropagation(); VIEW_MODE='planning'; if(INPUTS.indexOf(DEMAND_VIEW)<0)DEMAND_VIEW=INPUTS[0]; if(window.writeHash)window.writeHash(['demand','inputs',DEMAND_VIEW]); render(); };

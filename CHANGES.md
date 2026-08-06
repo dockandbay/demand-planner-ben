@@ -1,3 +1,6 @@
+## v26.640.0 — DEMAND ▸ Plan: Release Window on the tab row; Undo + Download far-right
+- Release Window moved onto the PLAN tab row, right after the PLAN button (out of the More Filters panel). Undo + Download moved to the far right of that same row (out of the bottom filter row). Both shown only on the plan view; Row B now holds Show/search/More Filters/chips + Forecast Logic + Smoothing.
+
 ## v26.639.0 — DEMAND: >48h discontinued-smoothing staleness badge
 - On entering the plan, if it has been >48h since discontinued SKUs were last smoothed/recalculated AND a re-run would change numbers (a flagged sub-category is back over the auto-smooth threshold), a small red count badge appears on the ⚙ Smoothing button (tooltip: N sub-categories would change). Background check runs once per session (read-only); the badge clears after a smooth/recalc run. Last-run time persisted in app_settings.smooth_auto.lastRun.
 
