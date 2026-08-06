@@ -1,3 +1,8 @@
+## v26.622.0 — Zalando upload: show who uploaded + "Analysis complete" badge
+- Zalando stock-on-hand status now reads e.g. "136 SKUs · ben@ uploaded 05-Aug-26 22:26 · 0 days old" (uploader captured server-side via `authUser`, stored in `zalando_stock.uploaded_by`, mig 192; returned as `stock_updated_by`).
+- Added a green "✓ Analysis complete" badge in the Stock-on-hand box whenever a fresh (≤7-day) stock file is loaded and the send analysis is showing — the "Uploading…" message remains during the upload itself.
+- Backfilled the existing sandbox snapshot's uploader to ben@ so the new line shows immediately.
+
 ## v26.621.0 — Specifications "Use from" is now two layers
 - Split into (1) **when** — Next production [P##] or Immediately — and (2) **old stock** — Use up existing stock of past specifications or Dispose of old stock. The two are chosen independently (e.g. "Next production P68 · dispose old stock").
 - New columns `effective_when` + `effective_stock` (mig 191, backfilled from the old `effective_mode`); `effective_mode` still written as a legacy combined value. List label composes both layers.

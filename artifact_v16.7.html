@@ -8314,14 +8314,16 @@ function _zalRender(wrap,d){
   var hasStock=(Number(d.stock_skus)>0) && !stale;
   var upInfo;
   if(Number(d.stock_skus)>0){ var _ts=d.stock_updated_ts?new Date(d.stock_updated_ts):null;
+    var _who=d.stock_updated_by?esc(shortEml(d.stock_updated_by))+' ':'';
     if(_ts && !isNaN(_ts.getTime())){ var _days=Math.max(0,Math.floor((Date.now()-_ts.getTime())/86400000)); var _hh=String(_ts.getHours()).padStart(2,'0'), _mm=String(_ts.getMinutes()).padStart(2,'0');
-      upInfo=(d.stock_skus||0)+' SKUs &middot; uploaded <b>'+esc(fdmy(d.stock_updated_ts))+'</b> '+_hh+':'+_mm+' &middot; '+_days+' day'+(_days===1?'':'s')+' old'+(stale?' <span style="color:#b45309;font-weight:600">(expired — over 7 days)</span>':''); }
-    else { upInfo=(d.stock_skus||0)+' SKUs &middot; uploaded '+esc(fdmy(d.stock_updated||'')); } }
+      upInfo=(d.stock_skus||0)+' SKUs &middot; '+_who+'uploaded <b>'+esc(fdmy(d.stock_updated_ts))+'</b> '+_hh+':'+_mm+' &middot; '+_days+' day'+(_days===1?'':'s')+' old'+(stale?' <span style="color:#b45309;font-weight:600">(expired — over 7 days)</span>':''); }
+    else { upInfo=(d.stock_skus||0)+' SKUs &middot; '+_who+'uploaded '+esc(fdmy(d.stock_updated||'')); } }
   else { upInfo='<span style="color:#b45309;font-weight:600">none uploaded yet</span>'; }
+  var doneBadge=hasStock?'<span id="zal-done-badge" style="display:inline-block;font-size:11px;font-weight:700;padding:3px 12px;border-radius:12px;background:#dcfce7;color:#166534">✓ Analysis complete</span>':'';
   var upBox='<div style="border:1px solid #e2e8f0;border-radius:10px;padding:12px 14px;margin-bottom:12px;background:#fff;display:flex;gap:12px;align-items:center;flex-wrap:wrap">'
     +'<div><div style="font-weight:700;font-size:13px">Stock on hand</div><div style="font-size:11px;color:#94a3b8">'+upInfo+'</div></div>'
     +'<label class="save-btn light" style="cursor:pointer">&#8593; Upload stock file<input type="file" id="zal-stock-file" accept=".csv,.xls,.xlsx" style="display:none"></label>'
-    +'<span id="zal-up-msg" class="mut tiny"></span></div>';
+    +doneBadge+'<span id="zal-up-msg" class="mut tiny"></span></div>';
   function wireUpload(){ var fileEl=wrap.querySelector('#zal-stock-file');
     if(fileEl)fileEl.onchange=function(){ var f=this.files[0]; if(!f)return; var msg=wrap.querySelector('#zal-up-msg'); msg.style.color='#64748b'; msg.textContent='Uploading…';
       var rd=new FileReader(); rd.onload=function(){ var b64=String(rd.result).split(',')[1]||''; fetch('/api/supply/zalando/stock-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({filename:f.name,content_base64:b64})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;return;} msg.style.color='#16a34a'; msg.textContent='✓ '+(j.count||0)+' SKUs updated'; renderZalando(); }).catch(function(e){msg.style.color='#dc2626';msg.textContent='Failed: '+((e&&e.message)||e);}); }; rd.readAsDataURL(f); }; }

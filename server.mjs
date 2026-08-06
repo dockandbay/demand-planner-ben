@@ -6276,10 +6276,10 @@ app.post('/api/supply/fba-transfers/refresh', async (req, res) => {
 app.get('/api/supply/zalando/data', async (req, res) => {   // /data suffix: single-segment /api/supply/zalando is caught by the :section catch-all
   try {
     const stock = {}; (await pool.query(`SELECT sku, qty FROM planner.zalando_stock`)).rows.forEach(r => { stock[r.sku] = Number(r.qty) || 0; });
-    const up = (await pool.query(`SELECT to_char(max(updated_at),'YYYY-MM-DD') d, max(updated_at) ts, count(*)::int n FROM planner.zalando_stock`)).rows[0] || {};
+    const up = (await pool.query(`SELECT to_char(max(updated_at),'YYYY-MM-DD') d, max(updated_at) ts, count(*)::int n, max(uploaded_by) by FROM planner.zalando_stock`)).rows[0] || {};
     const skus = Object.keys(ZAL_DATA.forecast || {}); const eans = {};   // SKU → EAN (strip the leading apostrophe Sheets adds) for the ZALANDO_UP (EAN,Quantity) download
     if (skus.length) (await pool.query(`SELECT sku, replace(coalesce(product_ean,''), chr(39), '') ean FROM planner.products WHERE sku = ANY($1)`, [skus])).rows.forEach(r => { if (r.ean) eans[r.sku] = r.ean; });
-    res.set('Cache-Control', 'no-store').json({ ok: true, forecast: ZAL_DATA.forecast || {}, months: ZAL_DATA.months || [], stock, eans, stock_updated: up.d || null, stock_updated_ts: up.ts || null, stock_skus: up.n || 0 });
+    res.set('Cache-Control', 'no-store').json({ ok: true, forecast: ZAL_DATA.forecast || {}, months: ZAL_DATA.months || [], stock, eans, stock_updated: up.d || null, stock_updated_ts: up.ts || null, stock_skus: up.n || 0, stock_updated_by: up.by || null });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Upload the combined Zalando stock file (csv/xls/xlsx). Flexible: finds the header row with a "Sku" + "…sellable_stock" column.
@@ -6296,8 +6296,9 @@ app.post('/api/supply/zalando/stock-upload', async (req, res) => {
     if (hr < 0) return res.json({ ok: false, error: 'Could not find the "Sku" and "…sellable_stock" columns in the file.' });
     const rows = []; for (let r = hr + 1; r < grid.length; r++) { const sku = String((grid[r] || [])[si] == null ? '' : grid[r][si]).trim(); if (!sku) continue; const q = _tplNum((grid[r] || [])[qi]); rows.push([sku, q == null ? 0 : q]); }
     if (!rows.length) return res.json({ ok: false, error: 'no stock rows found under the headers' });
+    const by = authUser(req);
     await pool.query(`DELETE FROM planner.zalando_stock`);   // dedicated snapshot table — each upload replaces with the latest
-    for (const [sku, q] of rows) await pool.query(`INSERT INTO planner.zalando_stock (sku, qty, updated_at) VALUES ($1,$2,now()) ON CONFLICT (sku) DO UPDATE SET qty=excluded.qty, updated_at=now()`, [sku, q]);
+    for (const [sku, q] of rows) await pool.query(`INSERT INTO planner.zalando_stock (sku, qty, updated_at, uploaded_by) VALUES ($1,$2,now(),$3) ON CONFLICT (sku) DO UPDATE SET qty=excluded.qty, updated_at=now(), uploaded_by=excluded.uploaded_by`, [sku, q, by]);
     res.json({ ok: true, count: rows.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
