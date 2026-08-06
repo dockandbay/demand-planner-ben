@@ -1,3 +1,6 @@
+## v26.642.0 — Barcode generator: match D&B example styling (full EAN-13 + digits)
+- Reworked to match the supplied example art: standard EAN-13 with the human-readable digits underneath (first digit outside-left, then 6+6 under each half), start/middle/end guard bars extended down through the digit row, white background + quiet-zone margins, ~1.5:1 aspect. Reuses the app EAN-13 renderer (eanBars + svgText); each barcode is drawn as SVG and rasterised to a JPG for the zip.
+
 ## v26.641.0 — CONFIG ▸ Supply chain ▸ Barcodes: EAN → barcode-only JPGs
 - New "Barcodes" sub-tab under CONFIG ▸ Supply chain. Upload a CSV (or paste) of EAN numbers → generates one barcode-only JPG per EAN (EAN-13 bars, no text), previews them, and downloads all as a single zip (ean_barcodes.zip). Reuses the existing in-app EAN-13 renderer; zip built client-side (no new deps). Styling (module width / height / quiet zone) is placeholder pending Benx27s example.
 
