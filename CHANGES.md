@@ -1,3 +1,8 @@
+## v26.652.0 — DEMAND toolbar: Release into More Filters; Undo/Download to the right
+- Release Window filter moved OUT of the top tab menu and INTO the More Filters panel (with Category/Tier/Sort/etc).
+- Undo + Download buttons moved OFF the tab menu row onto the right side of the plan controls row (#filters-row2), plan-view only. Tab menu row is now just the tabs.
+
+
 ## v26.651.0 — Manufacturing tab: existing-stock entry + PO detail (inline expand AND drawer)
 - New "Existing stock" column per component row (manual entry, per production x component SKU; migration 197 planner.manufacturing_stock_cover) added to Total supply / Coverage; recomputes inline on edit; POST /api/supply/manufacturing-stock.
 - See the POs behind each number two ways (both shown so Ben can pick): (a) inline expand (arrow) with In production / Completed / Finished-demand PO lists; (b) "drawer" pop-out per BOM SKU x production with KPI tiles + PO tables. Both link each PO to its drawer.
