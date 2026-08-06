@@ -5753,8 +5753,8 @@
   function renderConfig(d){ var c=document.getElementById('supply-content'); var sizes=d.sizes||[];
     // CONFIG nav is two tiers: level-2 tabs (like every other page) + a "Supply chain" tab that,
     // when active, expands a level-3 row of its member config tabs.
-    var SC_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom','products'];
-    var SC_LABEL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'Manufacturing BOM',products:'Products'};
+    var SC_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom','products','barcodegen'];
+    var SC_LABEL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'Manufacturing BOM',products:'Products',barcodegen:'Barcodes'};
     var ADM_KEYS=['admin-general','permissions','email-log'];
     var ADM_LABEL={'admin-general':'General',permissions:'Permissions','email-log':'Email log'};
     // Supply chain sits second (next to General settings); it expands to the level-3 members below / nested.
@@ -6203,6 +6203,27 @@
           var v=inp.value.trim().replace(/[^0-9.]/g,''); inp.style.borderColor='#d0d0d0';
           fetch('/api/supply/transfer-lead-upsert',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({from_market:inp.dataset.from,to_market:inp.dataset.to,weeks:v})})
             .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw 0; inp.style.borderColor='#16a34a'; delete cache['config']; }).catch(function(){ inp.style.borderColor='#dc2626'; }); }); }
+      };
+      SUBS['barcodegen']=function(){ var _bg=[];
+        b.innerHTML='<div class="annot"><b>CONFIG ▸ Supply chain ▸ Barcodes.</b> Upload a CSV (or paste) of EAN numbers — one <b>barcode-only</b> JPG is generated per EAN (no text). Download them all as a zip.</div>'
+          +'<div class="bar" style="align-items:flex-start;gap:14px;flex-wrap:wrap"><div><div class="mut tiny">CSV / text file of EANs</div><input type="file" id="bg-file" accept=".csv,.txt"></div>'
+          +'<div><div class="mut tiny">or paste (one per line)</div><textarea id="bg-paste" style="width:240px;height:70px;font:11px ui-monospace,monospace;border:1px solid #d0d0d0;border-radius:5px;padding:6px" placeholder="5060000000001&#10;5060000000002"></textarea></div>'
+          +'<div style="display:flex;flex-direction:column;gap:6px;padding-top:14px"><button class="save-btn" id="bg-gen">Generate</button><button class="save-btn" id="bg-dl" style="display:none;background:#dcfce7;color:#166534;border-color:#16a34a">&#11015; Download all (.zip)</button></div></div>'
+          +'<div id="bg-msg" class="mut tiny" style="margin:2px 0 10px"></div><div id="bg-preview" style="display:flex;gap:14px;flex-wrap:wrap"></div>';
+        var fileEl=document.getElementById('bg-file'); if(fileEl)fileEl.onchange=function(){ var f=this.files&&this.files[0]; if(!f)return; var rd=new FileReader(); rd.onload=function(){ var ta=document.getElementById('bg-paste'); if(ta)ta.value=String(rd.result||''); }; rd.readAsText(f); };
+        function parseEans(txt){ var out=[],seen={}; (String(txt).match(/\d{12,13}/g)||[]).forEach(function(x){ if(!seen[x]){seen[x]=1;out.push(x);} }); return out; }
+        document.getElementById('bg-gen').onclick=function(){ var msg=document.getElementById('bg-msg'), prev=document.getElementById('bg-preview'), dl=document.getElementById('bg-dl');
+          var eans=parseEans((document.getElementById('bg-paste')||{}).value||''); prev.innerHTML=''; _bg=[]; var bad=[];
+          if(!eans.length){ msg.textContent='No 12–13 digit EANs found in the input.'; dl.style.display='none'; return; }
+          msg.textContent='Generating '+eans.length+' barcode'+(eans.length===1?'':'s')+'…';
+          var jobs=eans.map(function(code){ return new Promise(function(res){ var cv=eanBarcodeCanvas(code); if(!cv){ bad.push(code); return res(); }
+            var img=document.createElement('img'); try{ img.src=cv.toDataURL('image/jpeg',0.95); }catch(e){} img.style.cssText='height:88px;border:1px solid #eee;display:block'; img.title=code;
+            var cell=document.createElement('div'); cell.style.cssText='text-align:center'; cell.appendChild(img); var cap=document.createElement('div'); cap.className='mut tiny'; cap.textContent=code+'.jpg'; cell.appendChild(cap); prev.appendChild(cell);
+            try{ cv.toBlob(function(bl){ if(bl&&bl.arrayBuffer){ bl.arrayBuffer().then(function(ab){ _bg.push({name:code+'.jpg',data:new Uint8Array(ab)}); res(); },function(){res();}); } else res(); },'image/jpeg',0.95); }catch(e){ res(); }
+          }); });
+          Promise.all(jobs).then(function(){ msg.textContent='Generated '+_bg.length+' barcode'+(_bg.length===1?'':'s')+(bad.length?(' · '+bad.length+' invalid EAN'+(bad.length===1?'':'s')+' ('+bad.slice(0,5).join(', ')+(bad.length>5?'…':'')+')'):''); dl.style.display=_bg.length?'':'none'; });
+        };
+        document.getElementById('bg-dl').onclick=function(){ if(!_bg.length)return; var blob=makeZipStore(_bg); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='ean_barcodes.zip'; document.body.appendChild(a); a.click(); setTimeout(function(){ try{URL.revokeObjectURL(a.href);}catch(e){} a.remove(); },1200); };
       };
       SUBS['suppliers']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         Promise.all([fetch('/api/supply/suppliers').then(function(r){return r.json();}),fetch('/api/supply/portal-users').then(function(r){return r.json();}).catch(function(){return [];})]).then(function(_sr){ var rows=_sr[0], PUSERS=_sr[1]||[];
@@ -7747,6 +7768,27 @@
     bits+='01010';
     for(i=7;i<=12;i++) bits+=R[d[i]];
     return bits+'101'; }
+  // ── EAN → barcode-only JPG + a minimal STORE-zip (no external libs) — CONFIG ▸ Supply chain ▸ Barcodes ──
+  var _crc32Tab=(function(){var t=[];for(var n=0;n<256;n++){var c=n;for(var k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1);t[n]=c>>>0;}return t;})();
+  function crc32u8(u8){ var c=0xFFFFFFFF; for(var i=0;i<u8.length;i++)c=_crc32Tab[(c^u8[i])&0xFF]^(c>>>8); return (c^0xFFFFFFFF)>>>0; }
+  function eanBarcodeCanvas(code,opts){ var bits=ean13Pattern(code); if(!bits)return null; opts=opts||{};
+    var mod=opts.module||3, h=opts.height||120, quiet=opts.quiet||10, n=bits.length;   // styling defaults — refine to Ben's example
+    var cv=document.createElement('canvas'); cv.width=quiet*2+n*mod; cv.height=h+quiet*2;
+    var ctx=cv.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,cv.width,cv.height); ctx.fillStyle='#000';
+    for(var i=0;i<n;i++){ if(bits.charAt(i)==='1') ctx.fillRect(quiet+i*mod, quiet, mod, h); }   // bars only — no text
+    return cv; }
+  function makeZipStore(files){ // files:[{name, data:Uint8Array}] → application/zip Blob (STORE method; JPEGs are already compressed)
+    function u16(x){return [x&255,(x>>8)&255];} function u32(x){return [x&255,(x>>8)&255,(x>>16)&255,(x>>>24)&255];}
+    var parts=[], central=[], off=0;
+    files.forEach(function(f){ var nb=[]; for(var i=0;i<f.name.length;i++)nb.push(f.name.charCodeAt(i)&255);
+      var crc=crc32u8(f.data), sz=f.data.length;
+      var lh=[].concat(u32(0x04034b50),u16(20),u16(0),u16(0),u16(0),u16(0),u32(crc),u32(sz),u32(sz),u16(nb.length),u16(0),nb);
+      parts.push(new Uint8Array(lh)); parts.push(f.data);
+      central.push(new Uint8Array([].concat(u32(0x02014b50),u16(20),u16(20),u16(0),u16(0),u16(0),u16(0),u32(crc),u32(sz),u32(sz),u16(nb.length),u16(0),u16(0),u16(0),u16(0),u32(0),u32(off),nb)));
+      off+=lh.length+sz; });
+    var cdSz=central.reduce(function(a,x){return a+x.length;},0);
+    var eocd=new Uint8Array([].concat(u32(0x06054b50),u16(0),u16(0),u16(files.length),u16(files.length),u32(cdSz),u32(off),u16(0)));
+    return new Blob(parts.concat(central,[eocd]),{type:'application/zip'}); }
   // (Removed dead lblDims + lblRRP — leftover label-field builders. v25.652)
   function svgText(x,y,s,o){ o=o||{}; return '<text x="'+x+'" y="'+y+'" font-family="'+(o.mono?'monospace':"'Gotham',Arial,Helvetica,sans-serif")+'" font-size="'+(o.size||11)+'"'+(o.bold?' font-weight="700"':'')+' fill="'+(o.fill||'#111')+'"'+(o.anchor?' text-anchor="'+o.anchor+'"':'')+(o.ls?' letter-spacing="'+o.ls+'"':'')+'>'+esc(s)+'</text>'; }
   // @font-face block embedding the Gotham TTFs (data URIs) so the rasterised label/PNG/PDF uses the brand font

@@ -1,3 +1,6 @@
+## v26.641.0 — CONFIG ▸ Supply chain ▸ Barcodes: EAN → barcode-only JPGs
+- New "Barcodes" sub-tab under CONFIG ▸ Supply chain. Upload a CSV (or paste) of EAN numbers → generates one barcode-only JPG per EAN (EAN-13 bars, no text), previews them, and downloads all as a single zip (ean_barcodes.zip). Reuses the existing in-app EAN-13 renderer; zip built client-side (no new deps). Styling (module width / height / quiet zone) is placeholder pending Benx27s example.
+
 ## v26.640.0 — DEMAND ▸ Plan: Release Window on the tab row; Undo + Download far-right
 - Release Window moved onto the PLAN tab row, right after the PLAN button (out of the More Filters panel). Undo + Download moved to the far right of that same row (out of the bottom filter row). Both shown only on the plan view; Row B now holds Show/search/More Filters/chips + Forecast Logic + Smoothing.
 
