@@ -828,8 +828,9 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
 </div>
 <div id="smoothset-ov" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:flex-start;justify-content:center" onclick="if(event.target===this)closeSmoothSettings()">
   <div style="background:#fff;max-width:640px;width:94%;margin-top:40px;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.25);padding:18px 22px;max-height:86vh;overflow:auto;font-size:13px;color:#222">
-    <div style="display:flex;align-items:center;margin-bottom:6px"><div style="font-weight:700;font-size:15px">&#9881; Smoothing settings</div><button onclick="closeSmoothSettings()" style="margin-left:auto;border:none;background:none;font-size:20px;cursor:pointer;color:#888">&times;</button></div>
-    <div style="color:#555;font-size:12px;margin-bottom:10px">Per country / channel / sub-category. <b>Disregard disc.</b>: smoothing leaves discontinued SKUs at their stock rundown and boosts only active SKUs. <b>Auto</b>: include in the one-click auto-smooth sweep — it rescales only months whose SKU-sum is <b>within</b> the gap threshold (a bigger gap is left for manual review).</div>
+    <div style="display:flex;align-items:center;margin-bottom:6px"><div style="font-weight:700;font-size:15px">&#9881; Smoothing settings</div><span id="ss-saved" style="margin-left:12px;font-size:11px;color:#16a34a;font-weight:600;opacity:0;transition:opacity .25s">Saved &#10003; — persists per country/channel</span><button onclick="closeSmoothSettings()" style="margin-left:auto;border:none;background:none;font-size:20px;cursor:pointer;color:#888">&times;</button></div>
+    <div style="color:#555;font-size:12px;margin-bottom:10px">Per country / channel / sub-category — every choice is saved to the database and reloads next time. <b>Disregard disc.</b>: smoothing leaves discontinued SKUs at their stock rundown and boosts only active SKUs. <b>Auto</b>: include in the one-click auto-smooth sweep. The sweep first <b>re-caps discontinued SKUs to remaining stock</b> (on-hand + inbound spread across the run-out months, then 0 once exhausted), then rescales only months whose SKU-sum is <b>within</b> the gap threshold (a bigger gap is left for manual review).</div>
+    <div style="color:#555;font-size:12px;margin-bottom:10px;background:#f8fafc;border:1px solid #eef2f7;border-radius:6px;padding:7px 9px"><b>Mode</b> — how the rescale is shared out: <b>Standard</b> scales every SKU by the same factor so their sum hits the sub-category target. <b>Leader</b> protects historically-strong SKUs — it floors them at 80% of their historical share (× tier target) so top performers aren&rsquo;t diluted, and pushes the rest of the adjustment onto the smaller SKUs.</div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:#f5f8ff;border:1px solid #dbeafe;border-radius:8px;padding:8px 10px;margin-bottom:10px">
       <span style="font-weight:700;font-size:12px;color:#1e3a8a">Auto-smooth</span>
       <label style="font-size:12px;color:#64748b" title="Only auto-smooth a month when the SKU-sum is within this % of the sub-category target — a bigger gap is left for manual review">Gap &lt;</label><input type="number" id="ss-th" min="1" max="100" style="width:52px;font-size:12px;padding:3px 5px;border:1px solid #cbd5e1;border-radius:4px"><span style="font-size:12px;color:#64748b">%</span>
@@ -895,8 +896,10 @@ var _ssCo='UK', _ssCh='DTC';
 function ssSubcatsFor(co,ch){ var ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':'b', byCat={};
   Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||!p.s)return; var av=(p.av||{})[ctry]||''; if(av.indexOf(chKey)<0)return; var cat=p.c||p.s; (byCat[cat]=byCat[cat]||{})[p.s]=1; });
   return byCat; }
-function saveSmoothDisregard(){ fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'smooth_disregard_disc',value:JSON.stringify(SMOOTH_DISREGARD_DISC)})}).catch(function(){}); }
-function saveSmoothAuto(){ fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'smooth_auto',value:JSON.stringify(SMOOTH_AUTO)})}).catch(function(){}); }
+var _ssSavedT=null;
+function _ssFlashSaved(){ var el=document.getElementById('ss-saved'); if(!el)return; el.style.opacity='1'; clearTimeout(_ssSavedT); _ssSavedT=setTimeout(function(){ el.style.opacity='0'; },1800); }
+function saveSmoothDisregard(){ fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'smooth_disregard_disc',value:JSON.stringify(SMOOTH_DISREGARD_DISC)})}).then(function(){ _ssFlashSaved(); }).catch(function(){}); }
+function saveSmoothAuto(){ fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'smooth_auto',value:JSON.stringify(SMOOTH_AUTO)})}).then(function(){ _ssFlashSaved(); }).catch(function(){}); }
 function renderSmoothSettings(){
   var coSel=document.getElementById('ss-co'), chSel=document.getElementById('ss-ch'), list=document.getElementById('ss-list');
   if(!coSel||!chSel||!list)return;
@@ -916,7 +919,7 @@ function renderSmoothSettings(){
       +'<th style="padding:5px 6px;font-weight:600;text-align:center;width:120px" title="Disregard discontinued — when smoothing, leave discontinued SKUs at their stock rundown and push the sub-category target onto the ACTIVE SKUs only">Disregard&nbsp;disc.</th>'
       +'<th style="padding:5px 6px;font-weight:600;text-align:center;width:70px" title="Include this sub-category in the one-click Run auto-smooth sweep at the top">Auto</th></tr></thead><tbody>'
     +subsList.map(function(s){ var dis=smoothDisregards(_ssCo,_ssCh,s), au=smoothAuto(_ssCo,_ssCh,s);
-      return '<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:5px 6px;color:#334155">'+esc(s)+'</td>'
+      return '<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:5px 6px;color:#334155;text-align:left">'+esc(s)+'</td>'
         +'<td style="padding:5px 6px;text-align:center"><input type="checkbox" class="ss-dis" data-s="'+esc(s)+'"'+(dis?' checked':'')+'></td>'
         +'<td style="padding:5px 6px;text-align:center"><input type="checkbox" class="ss-auto" data-s="'+esc(s)+'"'+(au?' checked':'')+'></td></tr>'; }).join('')
     +'</tbody></table>';
@@ -931,7 +934,10 @@ function runAutoSmooth(){
   if(!keys.length){ alert('No sub-categories are ticked for Auto. Tick "auto" on some sub-categories first.'); return; }
   var applied=0, _rc=false;
   keys.forEach(function(k){ var p=k.split('|'); var co=p[0],ch=p[1],s=p.slice(2).join('|');
-    if(smoothDisregards(co,ch,s)){ try{ recalcDiscontinued(s,co,ch); _rc=true; }catch(e){} }   // auto-recalc discontinued rundown first
+    // Always re-cap discontinued SKUs to remaining stock first — spread on-hand+inbound across the post-discontinue
+    // months (velocity × seasonality) and ZERO every month once stock is exhausted. Runs for every Auto sub-category
+    // regardless of the "Disregard disc." tick: a discontinued SKU should never be forecast beyond what it can ship.
+    try{ recalcDiscontinued(s,co,ch); _rc=true; }catch(e){}
     var eff; try{ eff=subcatSkuEffTotals(s,co,ch); }catch(e){ return; } if(!eff)return;
     FM.forEach(function(m){ if(isActualMonth(m)&&m!==CUR_MONTH)return;   // forecast months only
       var target=(m===CUR_MONTH)?curMonthForecast(s,co,ch):(((calc(s,co,ch)||{}).fu||{})[m]||0);

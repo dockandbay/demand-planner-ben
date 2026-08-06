@@ -1,3 +1,10 @@
+## v26.656.0 — DEMAND Smoothing: left-align, saved indicator, mode help, always re-cap discontinued
+- Sub-category column explicitly left-aligned.
+- Added a "Saved" indicator in the modal header; settings already persist per country/channel to the DB (app_settings, injected on load) — now visibly confirmed on every change.
+- Added help text explaining Standard vs Leader mode (proportional rescale vs protecting historically-strong SKUs at an 80%-of-share floor).
+- Auto-smooth now ALWAYS re-caps discontinued SKUs to remaining stock first (spread on-hand+inbound over run-out months, 0 once exhausted) for every Auto sub-category, regardless of the "Disregard disc." tick — so an over-forecast discontinued SKU (e.g. 100 left, 50/50/50) gets its beyond-stock months zeroed.
+
+
 ## v26.655.0 — DEMAND auto-smooth: fire only when gap is UNDER the threshold
 - Reversed the auto-smooth rule: a flagged sub-category month is now rescaled only when its SKU-sum is WITHIN the gap % (default <20%) of the target; a bigger gap is left for manual review. Updated runAutoSmooth + the staleness badge + the "Gap <" label + wording.
 
