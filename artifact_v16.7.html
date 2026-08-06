@@ -833,9 +833,15 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
 </div>
 <div id="smoothset-ov" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:flex-start;justify-content:center" onclick="if(event.target===this)closeSmoothSettings()">
   <div style="background:#fff;max-width:640px;width:94%;margin-top:40px;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.25);padding:18px 22px;max-height:86vh;overflow:auto;font-size:13px;color:#222">
-    <div style="display:flex;align-items:center;margin-bottom:6px"><div style="font-weight:700;font-size:15px">&#9881; Smoothing &middot; disregard discontinued SKUs</div><button onclick="closeSmoothSettings()" style="margin-left:auto;border:none;background:none;font-size:20px;cursor:pointer;color:#888">&times;</button></div>
-    <div style="color:#555;font-size:12px;margin-bottom:12px">For a country / channel / sub-category, smoothing <b>zeroes discontinued SKUs</b> so the active SKUs absorb the full sub-category forecast (discontinued are also left out of the gap check).</div>
-    <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px"><label style="font-size:12px;color:#64748b">Country</label><select id="ss-co" style="font-size:12px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px"></select><label style="font-size:12px;color:#64748b;margin-left:6px">Channel</label><select id="ss-ch" style="font-size:12px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px"></select><label style="font-size:12px;margin-left:auto;font-weight:600;cursor:pointer"><input type="checkbox" id="ss-all"> Select all</label></div>
+    <div style="display:flex;align-items:center;margin-bottom:6px"><div style="font-weight:700;font-size:15px">&#9881; Smoothing settings</div><button onclick="closeSmoothSettings()" style="margin-left:auto;border:none;background:none;font-size:20px;cursor:pointer;color:#888">&times;</button></div>
+    <div style="color:#555;font-size:12px;margin-bottom:10px">Per country / channel / sub-category. <b>Disregard disc.</b>: smoothing leaves discontinued SKUs at their stock rundown and boosts only active SKUs. <b>Auto</b>: include in the one-click auto-smooth sweep.</div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:#f5f8ff;border:1px solid #dbeafe;border-radius:8px;padding:8px 10px;margin-bottom:10px">
+      <span style="font-weight:700;font-size:12px;color:#1e3a8a">Auto-smooth</span>
+      <label style="font-size:12px;color:#64748b">Gap &gt;</label><input type="number" id="ss-th" min="1" max="100" style="width:52px;font-size:12px;padding:3px 5px;border:1px solid #cbd5e1;border-radius:4px"><span style="font-size:12px;color:#64748b">%</span>
+      <label style="font-size:12px;color:#64748b;margin-left:6px">Mode</label><select id="ss-mode" style="font-size:12px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px"><option value="standard">Standard</option><option value="leader">Leader</option></select>
+      <button id="ss-run" style="margin-left:auto;font-size:12px;font-weight:600;padding:4px 12px;border:1px solid #16a34a;border-radius:6px;background:#16a34a;color:#fff;cursor:pointer">&#8623; Run auto-smooth now</button>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px"><label style="font-size:12px;color:#64748b">Country</label><select id="ss-co" style="font-size:12px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px"></select><label style="font-size:12px;color:#64748b;margin-left:6px">Channel</label><select id="ss-ch" style="font-size:12px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px"></select><span style="margin-left:auto;font-size:11px;color:#64748b">Select all: <label style="cursor:pointer"><input type="checkbox" id="ss-all-dis"> disc</label> <label style="cursor:pointer;margin-left:6px"><input type="checkbox" id="ss-all-auto"> auto</label></span></div>
     <div id="ss-list"></div>
   </div>
 </div>
@@ -895,25 +901,51 @@ function ssSubcatsFor(co,ch){ var ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch
   Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||!p.s)return; var av=(p.av||{})[ctry]||''; if(av.indexOf(chKey)<0)return; var cat=p.c||p.s; (byCat[cat]=byCat[cat]||{})[p.s]=1; });
   return byCat; }
 function saveSmoothDisregard(){ fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'smooth_disregard_disc',value:JSON.stringify(SMOOTH_DISREGARD_DISC)})}).catch(function(){}); }
+function saveSmoothAuto(){ fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'smooth_auto',value:JSON.stringify(SMOOTH_AUTO)})}).catch(function(){}); }
 function renderSmoothSettings(){
-  var coSel=document.getElementById('ss-co'), chSel=document.getElementById('ss-ch'), list=document.getElementById('ss-list'), allB=document.getElementById('ss-all');
+  var coSel=document.getElementById('ss-co'), chSel=document.getElementById('ss-ch'), list=document.getElementById('ss-list');
   if(!coSel||!chSel||!list)return;
   if(!coSel.options.length){ coSel.innerHTML=CTRS.map(function(c){return '<option>'+c+'</option>';}).join(''); coSel.value=_ssCo; coSel.onchange=function(){_ssCo=this.value;renderSmoothSettings();}; }
   if(!chSel.options.length){ chSel.innerHTML=['DTC','FBA','B2B'].map(function(c){return '<option>'+c+'</option>';}).join(''); chSel.value=_ssCh; chSel.onchange=function(){_ssCh=this.value;renderSmoothSettings();}; }
+  var thI=document.getElementById('ss-th'); if(thI&&document.activeElement!==thI)thI.value=(SMOOTH_AUTO.threshold!=null?SMOOTH_AUTO.threshold:20);
+  var mSel=document.getElementById('ss-mode'); if(mSel)mSel.value=SMOOTH_AUTO.mode||'standard';
   var byCat=ssSubcatsFor(_ssCo,_ssCh); var cats=Object.keys(byCat).sort();
   var allSubs=[]; cats.forEach(function(c){ Object.keys(byCat[c]).forEach(function(s){ allSubs.push(s); }); });
-  if(!allSubs.length){ list.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:8px 0">No sub-categories available for '+esc(_ssCo)+' / '+esc(_ssCh)+'.</div>'; if(allB)allB.checked=false; return; }
-  var onCount=allSubs.filter(function(s){return smoothDisregards(_ssCo,_ssCh,s);}).length;
-  if(allB)allB.checked=(onCount===allSubs.length);
+  if(!allSubs.length){ list.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:8px 0">No sub-categories available for '+esc(_ssCo)+' / '+esc(_ssCh)+'.</div>'; return; }
+  var adis=document.getElementById('ss-all-dis'); if(adis)adis.checked=allSubs.every(function(s){return smoothDisregards(_ssCo,_ssCh,s);});
+  var aau=document.getElementById('ss-all-auto'); if(aau)aau.checked=allSubs.every(function(s){return smoothAuto(_ssCo,_ssCh,s);});
   list.innerHTML=cats.map(function(c){ var subs=Object.keys(byCat[c]).sort();
-    return '<div style="margin:0 0 10px"><div style="font-weight:700;font-size:12px;color:#0f172a;border-bottom:1px solid #eef2f7;padding-bottom:2px;margin-bottom:4px">'+esc(c)+'</div>'
-      +subs.map(function(s){ var on=smoothDisregards(_ssCo,_ssCh,s); return '<label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;margin:0 14px 5px 0"><input type="checkbox" class="ss-cb" data-s="'+esc(s)+'"'+(on?' checked':'')+'> '+esc(s)+'</label>'; }).join('')+'</div>'; }).join('');
-  list.querySelectorAll('.ss-cb').forEach(function(cb){ cb.onchange=function(){ var k=_ssCo+'|'+_ssCh+'|'+cb.dataset.s; if(cb.checked)SMOOTH_DISREGARD_DISC[k]=true; else delete SMOOTH_DISREGARD_DISC[k]; saveSmoothDisregard(); renderSmoothSettings(); try{renderMain();}catch(e){} }; });
+    return '<div style="margin:0 0 10px"><div style="font-weight:700;font-size:12px;color:#0f172a;border-bottom:1px solid #eef2f7;padding-bottom:2px;margin-bottom:5px">'+esc(c)+'</div>'
+      +subs.map(function(s){ var dis=smoothDisregards(_ssCo,_ssCh,s), au=smoothAuto(_ssCo,_ssCh,s);
+        return '<div style="display:flex;align-items:center;gap:12px;font-size:12px;margin:0 0 3px">'
+          +'<label style="display:inline-flex;align-items:center;gap:4px" title="Disregard discontinued — boost active only"><input type="checkbox" class="ss-dis" data-s="'+esc(s)+'"'+(dis?' checked':'')+'> disc</label>'
+          +'<label style="display:inline-flex;align-items:center;gap:4px" title="Include in the auto-smooth sweep"><input type="checkbox" class="ss-auto" data-s="'+esc(s)+'"'+(au?' checked':'')+'> auto</label>'
+          +'<span style="color:#334155">'+esc(s)+'</span></div>'; }).join('')+'</div>'; }).join('');
+  list.querySelectorAll('.ss-dis').forEach(function(cb){ cb.onchange=function(){ var k=_ssCo+'|'+_ssCh+'|'+cb.dataset.s; if(cb.checked)SMOOTH_DISREGARD_DISC[k]=true; else delete SMOOTH_DISREGARD_DISC[k]; saveSmoothDisregard(); renderSmoothSettings(); try{renderMain();}catch(e){} }; });
+  list.querySelectorAll('.ss-auto').forEach(function(cb){ cb.onchange=function(){ var k=_ssCo+'|'+_ssCh+'|'+cb.dataset.s; SMOOTH_AUTO.flags=SMOOTH_AUTO.flags||{}; if(cb.checked)SMOOTH_AUTO.flags[k]=true; else delete SMOOTH_AUTO.flags[k]; saveSmoothAuto(); renderSmoothSettings(); }; });
+}
+// One-click sweep: smooth every flagged (co|ch|subcat) forecast month whose SKU-sum deviates from the subcat target by > threshold.
+function runAutoSmooth(){
+  var th=(Number(SMOOTH_AUTO.threshold)||20)/100, leader=SMOOTH_AUTO.mode==='leader';
+  var flags=SMOOTH_AUTO.flags||{}, keys=Object.keys(flags).filter(function(k){return flags[k];});
+  if(!keys.length){ alert('No sub-categories are ticked for Auto. Tick "auto" on some sub-categories first.'); return; }
+  var applied=0;
+  keys.forEach(function(k){ var p=k.split('|'); var co=p[0],ch=p[1],s=p.slice(2).join('|');
+    var eff; try{ eff=subcatSkuEffTotals(s,co,ch); }catch(e){ return; } if(!eff)return;
+    FM.forEach(function(m){ if(isActualMonth(m)&&m!==CUR_MONTH)return;   // forecast months only
+      var target=(m===CUR_MONTH)?curMonthForecast(s,co,ch):(((calc(s,co,ch)||{}).fu||{})[m]||0);
+      if(target<=0)return; var sum=eff.totals[m]||0;
+      if(Math.abs(sum-target)/target>th){ var vals=computeSmoothAlloc(s,co,ch,m,{protectLeaders:leader}); if(vals){ applySmoothAlloc(co,ch,m,vals); applied++; } }
+    }); });
+  try{renderMain();}catch(e){} try{markDirty();}catch(e){}
+  alert('Auto-smoothed '+applied+' forecast month-cell'+(applied===1?'':'s')+' across '+keys.length+' sub-categor'+(keys.length===1?'y':'ies')+' with a >'+(SMOOTH_AUTO.threshold||20)+'% gap.\n\nReview the numbers, then Save Forecasts. (Undo reverts the whole sweep.)');
 }
 function openSmoothSettings(ev){ if(ev)ev.stopPropagation(); var e=document.getElementById('smoothset-ov'); if(e)e.style.display='flex';
-  var allB=document.getElementById('ss-all'); if(allB)allB.onchange=function(){ var byCat=ssSubcatsFor(_ssCo,_ssCh); var on=this.checked;
-    Object.keys(byCat).forEach(function(c){ Object.keys(byCat[c]).forEach(function(s){ var k=_ssCo+'|'+_ssCh+'|'+s; if(on)SMOOTH_DISREGARD_DISC[k]=true; else delete SMOOTH_DISREGARD_DISC[k]; }); });
-    saveSmoothDisregard(); renderSmoothSettings(); try{renderMain();}catch(e){} };
+  var thI=document.getElementById('ss-th'); if(thI)thI.onchange=function(){ var v=Math.max(1,Math.min(100,parseInt(this.value,10)||20)); SMOOTH_AUTO.threshold=v; this.value=v; saveSmoothAuto(); };
+  var mSel=document.getElementById('ss-mode'); if(mSel)mSel.onchange=function(){ SMOOTH_AUTO.mode=(this.value==='leader')?'leader':'standard'; saveSmoothAuto(); };
+  var run=document.getElementById('ss-run'); if(run)run.onclick=function(){ runAutoSmooth(); };
+  var adis=document.getElementById('ss-all-dis'); if(adis)adis.onchange=function(){ var byCat=ssSubcatsFor(_ssCo,_ssCh), on=this.checked; Object.keys(byCat).forEach(function(c){ Object.keys(byCat[c]).forEach(function(s){ var k=_ssCo+'|'+_ssCh+'|'+s; if(on)SMOOTH_DISREGARD_DISC[k]=true; else delete SMOOTH_DISREGARD_DISC[k]; }); }); saveSmoothDisregard(); renderSmoothSettings(); try{renderMain();}catch(e){} };
+  var aau=document.getElementById('ss-all-auto'); if(aau)aau.onchange=function(){ var byCat=ssSubcatsFor(_ssCo,_ssCh), on=this.checked; SMOOTH_AUTO.flags=SMOOTH_AUTO.flags||{}; Object.keys(byCat).forEach(function(c){ Object.keys(byCat[c]).forEach(function(s){ var k=_ssCo+'|'+_ssCh+'|'+s; if(on)SMOOTH_AUTO.flags[k]=true; else delete SMOOTH_AUTO.flags[k]; }); }); saveSmoothAuto(); renderSmoothSettings(); };
   renderSmoothSettings(); }
 function closeSmoothSettings(){ var e=document.getElementById('smoothset-ov'); if(e)e.style.display='none'; }
 // Context help — one icon in the top nav; content matches the current tab / sub-tab.
@@ -3833,8 +3865,10 @@ var SHOW_CAT_TOT=(function(){try{return localStorage.getItem('hzShowCatTot')==='
 function setShowCatTot(on){SHOW_CAT_TOT=!!on;try{localStorage.setItem('hzShowCatTot',SHOW_CAT_TOT?'1':'0');}catch(e){}var b=document.getElementById('cat-tot-toggle');if(b){b.classList.toggle('active',SHOW_CAT_TOT);b.setAttribute('aria-pressed',SHOW_CAT_TOT?'true':'false');}renderMain();}
 var SMOOTH_PREVIEW=null; // {pk:'subcat|co|ch', fy:startY|null, months:{'YYYY_MM':{sku:units}}} — one pending smooth preview at a time (fy set = whole-FY smooth)
 var SMOOTH_LEADER=false;  // false = Standard (pure proportional), true = Leader (protect historically-strong SKUs). Set via the FY-total dropdown; applies to ALL smoothing.
-var SMOOTH_DISREGARD_DISC={};  // {'CO|CH|subcat':true} — when set, smoothing zeroes discontinued SKUs so active SKUs absorb the full subcat forecast (toolbar ⚙ Smoothing). Server-injected from app_settings.
+var SMOOTH_DISREGARD_DISC={};  // {'CO|CH|subcat':true} — when set, smoothing leaves discontinued SKUs untouched so active SKUs absorb the full subcat forecast (toolbar ⚙ Smoothing). Server-injected from app_settings.
 function smoothDisregards(co,ch,s){ return !!SMOOTH_DISREGARD_DISC[co+'|'+ch+'|'+s]; }
+var SMOOTH_AUTO={flags:{},threshold:20,mode:'standard'};  // one-click auto-smooth: flagged co|ch|subcat over `threshold`% gap are smoothed (standard|leader). Server-injected.
+function smoothAuto(co,ch,s){ return !!(SMOOTH_AUTO.flags&&SMOOTH_AUTO.flags[co+'|'+ch+'|'+s]); }
 // 120ms hover tooltip explaining Standard vs Leader smoothing (used on the FY-total dropdown).
 var _smTip=null;
 function smoothModeTip(el){

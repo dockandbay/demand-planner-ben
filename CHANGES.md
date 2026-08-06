@@ -1,3 +1,6 @@
+## v26.635.0 — DEMAND: Auto-smooth (one-click sweep, per country/channel/sub-category)
+- Added to the xe2x9ax99 Smoothing panel: a threshold (default 20%%) + mode (Standard default / Leader), an "auto" checkbox per sub-category (alongside "disc"), and a "Run auto-smooth now" button. The sweep smooths every flagged co/ch/sub-category forecast month whose SKU-sum deviates from the sub-category target by more than the threshold xe2x80x94 boosting active SKUs (respecting disregard-discontinued). One-click, one Undo step, persisted in app_settings.smooth_auto (injected SMOOTH_AUTO). Opt-in xe2x80x94 buy plan unchanged until run (verified b3 24,332).
+
 ## v26.634.0 — DEMAND xe2x96xb8 Plan filter redesign v2 (active-filter chips)
 - Reworked after review: active filters now show as removable CHIPS on the bar (e.g. "Tier B xc3x97", "All SKUs xc3x97", "From replacement xc3x97") so you always SEE what is applied xe2x80x94 click xc3x97 to clear one. The "Filters" button opens a tidy anchored panel (Show/Active-window, Tier, Release, Sort, From-replacement, Cat totals) with Reset all + Done. Sort moved into the panel (rarely used). Popovers now anchor to their buttons (reliable when the bar wraps). Tools icon changed xe2x9ax99xe2x86x92xe2x8bxaf to remove the icon collision with Smoothing. Find / refine / actions zones visually separated. UI-only.
 
