@@ -1,3 +1,7 @@
+## v26.664.0 — DEMAND plan: frozen columns 1&2 sit above cell icons when scrolling
+- Raised the sticky SKU / column-2 / SKU-label columns z-index (1 -> 6) so the month-cell C (calendar) / i (BI) / note badges scroll UNDER the frozen columns instead of over them. Still below the sticky header.
+
+
 ## v26.663.0 — Payments Due: bind Balance-2 likely pay date
 - The Payments Due "Balance" row now reads the likely pay date from balance 1 OR balance 2 (was balance 1 only), so a likely date set on the second balance milestone in the PO PAYMENTS tab now shows/binds; editable-overdue rows write back to the correct bal:/bal2: key.
 
