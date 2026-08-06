@@ -1,3 +1,6 @@
+## v26.630.0 — Specifications: pickers match the PO-grid "assign supplier" format
+- The Category / Size / Production search pickers now use the exact same native-datalist input format as the PO-grid "assign supplier" field (class "fci txt" + list, "pick / type…" placeholder). Removed autocomplete="off" (which suppressed the dropdown in some browsers) and the extra inline styling.
+
 ## v26.629.0 — DEMAND: active vs discontinued unit split on the sub-category subtotal
 - The sub-category subtotal now shows a per-month "active · discontinued" unit split (only for sub-categories that have discontinued SKUs), so it is clear how much of the forecast is active vs discontinued sell-through. With "disregard discontinued from smoothing" on, this reads e.g. 15,000 · 0; off, e.g. 11,800 · 3,200. subcatSkuEffTotals now returns activeTotals/discTotals/anyDisc.
 
