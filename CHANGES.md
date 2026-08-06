@@ -1,3 +1,7 @@
+## v26.650.0 — Supplier portal: white background
+- Portal body background changed from grey (#f1f5f9) to white (#fff).
+
+
 ## v26.649.0 — Quality Control: dd-mmm-yy dates + portal upload rework + 24h delete
 - QC dates now dd-mmm-yy (e.g. 06-Aug-26 14:20) in both the admin SUPPLY > Quality Control list and the supplier portal (server to_char DD-Mon-YY HH24:MI).
 - Supplier portal QC upload reworked into a clear 3-step flow: (1) attach file via drag-and-drop or click-to-browse; (2) specify file type (NO default -- placeholder "select file type") + assign to production/batch/PO as dropdown-only (batch can no longer be free-typed); (3) Upload button greyed out until a file is attached AND a file type chosen. On upload without a production/batch chosen, those fields flash red.
