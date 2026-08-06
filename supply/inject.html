@@ -9775,9 +9775,10 @@
     Promise.all([
       fetch('/api/product/spec-types').then(function(r){return r.json();}),
       fetch('/api/product/spec-scope-options').then(function(r){return r.json();}),
-      fetch('/api/product/specs').then(function(r){return r.json();})
+      fetch('/api/product/specs').then(function(r){return r.json();}),
+      fetch('/api/product/specs/past').then(function(r){return r.json();})
     ]).then(function(res){
-      var types=Array.isArray(res[0])?res[0]:[], opts=res[1]||{}, specs=Array.isArray(res[2])?res[2]:[];
+      var types=Array.isArray(res[0])?res[0]:[], opts=res[1]||{}, specs=Array.isArray(res[2])?res[2]:[], past=Array.isArray(res[3])?res[3]:[];
       var cats=opts.categories||[], catSizes=opts.catSizes||{}, prods=opts.productions||[];
       function scopeLabel(s){ if(s.scope_type==='category')return 'Category · '+esc(s.scope_category); if(s.scope_type==='size')return 'Size · '+esc(s.scope_category)+' / '+esc(s.scope_size); if(s.scope_type==='sku')return 'SKU · '+esc(s.scope_skus); return 'All products'; }
       function effLabel(s){ var w=(s.effective_when==='immediate')?'Immediately':('From next production P'+esc(s.effective_prod_no)); var st=(s.effective_stock==='dispose')?'dispose old stock':'use up old stock'; return w+' · '+st; }
@@ -9860,7 +9861,7 @@
           +'<button id="sp-view-matrix" style="font-size:11px;padding:3px 12px;border:1px solid #93c5fd;border-radius:5px;cursor:pointer">Matrix</button>'
         +'</div></div>'):'';
       var listTitle='<div style="font-weight:700;font-size:13px;color:#0f172a;margin:4px 0 8px">Current specifications ('+specs.length+')</div>';
-      c.innerHTML='<div style="padding:6px 2px"><div style="font-size:16px;font-weight:700;color:#0f172a;margin-bottom:2px">Specifications</div><div style="color:#94a3b8;font-size:12px;margin-bottom:14px">Manage source-of-truth packaging &amp; labelling documents. Assign each to all products, a category, a size group, or specific SKUs — with a use-from rule.</div>'+upload+listTitle+controls+'<div id="sp-listwrap"></div></div>';
+      c.innerHTML='<div style="padding:6px 2px"><div style="font-size:16px;font-weight:700;color:#0f172a;margin-bottom:2px">Specifications</div><div style="color:#94a3b8;font-size:12px;margin-bottom:14px">Manage source-of-truth packaging &amp; labelling documents. Assign each to all products, a category, a size group, or specific SKUs — with a use-from rule.</div>'+upload+listTitle+controls+'<div id="sp-listwrap"></div><div id="sp-past" style="margin-top:18px"></div></div>';
       // scope helpers + derived-supplier picker
       function readScope(){ var v=(c.querySelector('input[name=sp-scope]:checked')||{}).value||'all', o={scope_type:v};
         if(v==='category')o.scope_category=(c.querySelector('#sp-cat')||{}).value||'';
@@ -9952,6 +9953,15 @@
       var vl=c.querySelector('#sp-view-list'); if(vl)vl.onclick=function(){ _specView='list'; styleViewBtns(); drawSpecs(); };
       var vm=c.querySelector('#sp-view-matrix'); if(vm)vm.onclick=function(){ _specView='matrix'; styleViewBtns(); drawSpecs(); };
       styleViewBtns(); stylePills(); drawSpecs();
+      // Past specifications (superseded) — collapsible, read-only history
+      (function(){ var pw=c.querySelector('#sp-past'); if(!pw)return; if(!past.length){ pw.innerHTML=''; return; }
+        function pRow(s){ var eff=(s.effective_when==='immediate'?'Immediately':('P'+esc(s.effective_prod_no)))+' · '+(s.effective_stock==='dispose'?'dispose':'use up');
+          return '<tr style="border-top:1px solid #eef2f7;color:#64748b"><td style="padding:5px 10px 5px 0;font-weight:600">'+esc(s.spec_type)+'</td><td style="padding:5px 10px 5px 0">'+scopeLabel(s)+'</td><td style="padding:5px 10px 5px 0">'+eff+'</td><td style="padding:5px 10px 5px 0"><a href="/api/product/spec-file/'+s.id+'" target="_blank" style="color:#6b7fb0;text-decoration:none">'+esc(s.filename||'file')+'</a></td><td style="padding:5px 10px 5px 0;font-size:11px;white-space:nowrap">superseded '+esc(s.superseded_at||'')+'</td></tr>'; }
+        pw.innerHTML='<div id="sp-past-hd" style="cursor:pointer;font-weight:700;font-size:13px;color:#64748b;margin:4px 0 6px;user-select:none">▸ Past specifications ('+past.length+')</div>'
+          +'<div id="sp-past-body" style="display:none"><div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%"><thead><tr style="text-align:left;color:#94a3b8;font-size:11px"><th style="padding:0 10px 4px 0">Type</th><th style="padding:0 10px 4px 0">Applied to</th><th style="padding:0 10px 4px 0">Use from</th><th style="padding:0 10px 4px 0">File</th><th style="padding:0 10px 4px 0">Retired</th></tr></thead><tbody>'+past.map(pRow).join('')+'</tbody></table></div></div>';
+        var hd=c.querySelector('#sp-past-hd'), bd=c.querySelector('#sp-past-body');
+        hd.onclick=function(){ var open=bd.style.display!=='none'; bd.style.display=open?'none':'block'; hd.textContent=(open?'▸':'▾')+' Past specifications ('+past.length+')'; };
+      })();
       syncScope();
     }).catch(function(e){ c.innerHTML='<div style="color:#dc2626;padding:10px 2px">Failed: '+esc(e.message||e)+'</div>'; }); }
   // RANGE PLAN — a season's products laid out by category: swatch + colour way + a tiny status pill. Toggle all vs approved-only.

@@ -1,3 +1,8 @@
+## v26.624.0 — Specifications: superseding + "Past specifications" history
+- Uploading a spec with the **same type + identical scope** as an existing one now **supersedes** it: the old spec is retired (kept, not deleted) and the new one becomes current. A narrower/different scope (e.g. All vs a Category) is an override, not a supersede, so it won't wrongly retire the other.
+- New collapsible **"Past specifications"** list shows retired specs — type, what they applied to, use-from, file, and when they were superseded. (Manual deletes stay hidden as before.)
+- Schema: `superseded_at` + `superseded_by` (mig 194); new `GET /api/product/specs/past`.
+
 ## v26.623.0 — Specifications: search + type pills, pending/approved status, list & matrix views
 - Added a **search box** and **type filter pills** over the specifications.
 - **Approval column** is now a clickable **pending / approved** pill (green/amber) for specs requiring supplier confirmation (—for those that don't); toggling posts to a new `/api/product/specs/:id/approval` endpoint (`approval_status`, mig 193). P3's supplier flow will drive this automatically.

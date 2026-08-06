@@ -4486,15 +4486,31 @@ app.post('/api/product/specs', async (req, res) => {
     if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: 'file exceeds 10MB' });
     const when = (b.effective_when || 'production').trim(), stock = (b.effective_stock || 'useup').trim();
     const effMode = (when === 'production') ? 'production' : ('immediate_' + stock);   // legacy combined value
+    const scat = (b.scope_category || '').trim() || null, ssize = (b.scope_size || '').trim() || null, sskus = (b.scope_skus || '').trim() || null;
     const r = await pool.query(`INSERT INTO planner.product_specs
       (spec_type, filename, mime, data, scope_type, scope_category, scope_size, scope_skus, effective_mode, effective_when, effective_stock, effective_prod_no, confirm_with_supplier, confirm_suppliers, uploaded_by)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
       [st, b.filename || 'file', b.mime || 'application/octet-stream', buf,
-       scope, (b.scope_category || '').trim() || null, (b.scope_size || '').trim() || null, (b.scope_skus || '').trim() || null,
+       scope, scat, ssize, sskus,
        effMode, when, stock, (b.effective_prod_no || '').trim() || null,
        !!b.confirm_with_supplier, (b.confirm_with_supplier && b.confirm_suppliers) ? String(b.confirm_suppliers).trim() || null : null, internalAuthor(req, b.uploaded_by)]);
-    res.json({ ok: true, id: r.rows[0].id });
+    const newId = r.rows[0].id;
+    // supersede any prior active spec of the same type + identical scope — it becomes a "past specification"
+    const sup = await pool.query(`UPDATE planner.product_specs SET active=false, superseded_at=now(), superseded_by=$1
+      WHERE active AND id<>$1 AND spec_type=$2 AND scope_type=$3
+        AND coalesce(scope_category,'')=coalesce($4,'') AND coalesce(scope_size,'')=coalesce($5,'') AND coalesce(scope_skus,'')=coalesce($6,'')`,
+      [newId, st, scope, scat, ssize, sskus]);
+    res.json({ ok: true, id: newId, superseded: sup.rowCount });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/product/specs/past', async (_req, res) => {   // superseded specs (kept for history) — most recent first
+  try { const r = await pool.query(`SELECT id, spec_type, filename, scope_type,
+      coalesce(scope_category,'') scope_category, coalesce(scope_size,'') scope_size, coalesce(scope_skus,'') scope_skus,
+      coalesce(effective_when,'') effective_when, coalesce(effective_stock,'') effective_stock, coalesce(effective_prod_no,'') effective_prod_no,
+      confirm_with_supplier, coalesce(confirm_suppliers,'') confirm_suppliers, superseded_by,
+      coalesce(uploaded_by,'') uploaded_by, to_char(uploaded_at,'DD-Mon-YY') uploaded_at, to_char(superseded_at,'DD-Mon-YY HH24:MI') superseded_at
+      FROM planner.product_specs WHERE NOT active AND superseded_at IS NOT NULL ORDER BY superseded_at DESC`); res.json(r.rows); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/specs/:id/delete', async (req, res) => {
   try { await pool.query(`UPDATE planner.product_specs SET active=false WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
