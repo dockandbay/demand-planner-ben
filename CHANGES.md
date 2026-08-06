@@ -1,3 +1,8 @@
+## v26.615.0 — Klaviyo BIS: "last uploaded by … on dd-mmm-yy hh:mm:ss" + analysis summary + CSV download
+- Each market box now shows "last uploaded by <ben@> on <dd-mmm-yy hh:mm:ss>" (uploader local-part + precise time). Status endpoint returns the full timestamp + aggregated rows.
+- New Analysis summary on the page: per-market colour chips (SKUs · subs) + a SKU × market table (UK/US/EU/AU/Total, sorted desc by total).
+- Download CSV button (SKU,UK,US,EU,AU,Total).
+- Sandbox pre-loaded with all four markets from the combined workbook for review.
 ## v26.614.0 — Barcodes: group all three Download-all buttons top-right
 - "⤓ All (product + carton + inner)" now floats right with "All Products" / "All Cartons (+inners)" (was inline on the left) — all three grouped near each other above the grid.
 

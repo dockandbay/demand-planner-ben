@@ -9309,19 +9309,24 @@ function calSkuChips(arr){ return arr.map(function(s){ return '<span class="cal-
 // DEMAND ▸ Inputs ▸ Klaviyo BIS — per-market upload boxes (colour-coded via MKT_COLORS). Raw Klaviyo back-in-stock
 // export per market → server sums Queued Subscriptions per SKU (last 6mo). Shared/persistent. Surfaced as a 🔔 on the plan.
 function renderKlaviyoBisView(body){
-  var MK=['UK','US','EU','AU'];
+  var MK=['UK','US','EU','AU'], KMON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   function e2(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
-  body.innerHTML='<div style="max-width:920px">'
+  function shortEml(e){ e=String(e||''); return e.indexOf('@')>=0?e.split('@')[0]+'@':e; }
+  function fmtDT(iso){ if(!iso)return ''; var d=new Date(iso); if(isNaN(d.getTime()))return String(iso);
+    var p=function(n){return String(n).padStart(2,'0');}; return p(d.getDate())+'-'+KMON[d.getMonth()]+'-'+String(d.getFullYear()).slice(2)+' '+p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds()); }
+  function col(mk){ return (typeof MKT_COLORS!=='undefined'&&MKT_COLORS[mk])||'#e5e7eb'; }
+  body.innerHTML='<div style="max-width:1000px">'
     +'<div style="font-weight:700;font-size:15px;margin-bottom:2px">Klaviyo &mdash; Back-in-Stock subscriptions</div>'
-    +'<div style="font-size:12px;color:#666;margin-bottom:12px">Upload each Klaviyo account’s raw back-in-stock export (.xlsx or .csv). We sum <b>Queued Subscriptions</b> per SKU (subscribed in the last 6 months) and show a &#128276; count on the DEMAND plan for that market. The last file per market persists for everyone until replaced.</div>'
-    +'<div id="kb-boxes" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px"></div></div>';
-  var boxes=body.querySelector('#kb-boxes');
-  function draw(st){ st=st||{};
-    boxes.innerHTML=MK.map(function(mk){ var col=(typeof MKT_COLORS!=='undefined'&&MKT_COLORS[mk])||'#e5e7eb'; var s=st[mk];
-      return '<div style="border:2px solid '+col+';border-radius:10px;overflow:hidden;background:#fff">'
-        +'<div style="background:'+col+';color:#111;font-weight:700;padding:6px 11px;font-size:13px">'+mk+'</div>'
+    +'<div style="font-size:12px;color:#666;margin-bottom:12px">Upload each Klaviyo account’s raw back-in-stock export (.xlsx or .csv — the combined workbook works too). We sum <b>Queued Subscriptions</b> per SKU (subscribed in the last 6 months) and show a &#128276; count on the DEMAND plan for that market. The last file per market persists for everyone until replaced.</div>'
+    +'<div id="kb-boxes" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px"></div>'
+    +'<div id="kb-summary" style="margin-top:18px"></div></div>';
+  var boxes=body.querySelector('#kb-boxes'), summary=body.querySelector('#kb-summary'), DROWS=[];
+  function draw(d){ var st=d.markets||{}; DROWS=d.rows||[];
+    boxes.innerHTML=MK.map(function(mk){ var c=col(mk), s=st[mk];
+      return '<div style="border:2px solid '+c+';border-radius:10px;overflow:hidden;background:#fff">'
+        +'<div style="background:'+c+';color:#111;font-weight:700;padding:6px 11px;font-size:13px">'+mk+'</div>'
         +'<div style="padding:10px 11px">'
-          +'<div class="mut" style="font-size:11px;margin-bottom:8px;min-height:32px">'+(s?('Last: <b>'+e2(s.filename||'file')+'</b><br>'+e2(s.uploaded_at||'')+' &middot; '+(s.n_skus||0)+' SKUs &middot; '+(s.total_subs||0)+' subs'):'<span style="color:#b45309">none uploaded yet</span>')+'</div>'
+          +'<div class="mut" style="font-size:11px;margin-bottom:8px;min-height:44px">'+(s?('<b>'+e2(s.filename||'file')+'</b><br>'+(s.n_skus||0)+' SKUs &middot; '+(s.total_subs||0)+' subs<br><span style="color:#94a3b8">last uploaded by <b>'+e2(shortEml(s.uploaded_by))+'</b> on '+e2(fmtDT(s.uploaded_at))+'</span>'):'<span style="color:#b45309">none uploaded yet</span>')+'</div>'
           +'<label class="rbtn" style="cursor:pointer;display:inline-block;font-size:11px;padding:4px 10px">&#8593; Upload file<input type="file" class="kb-file" data-mk="'+mk+'" accept=".xlsx,.xls,.csv" style="display:none"></label>'
           +' <span class="kb-stat mut" data-mk="'+mk+'" style="font-size:11px"></span>'
         +'</div></div>'; }).join('');
@@ -9331,8 +9336,28 @@ function renderKlaviyoBisView(body){
           .then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ if(stat){stat.style.color='#dc2626';stat.textContent=j.error;} return; }
             if(stat){stat.style.color='#16a34a';stat.textContent='✓ '+(j.n_skus||0)+' SKUs, '+(j.total_subs||0)+' subs';} load(); })
           .catch(function(){ if(stat){stat.style.color='#dc2626';stat.textContent='Failed';} }); }; rd.readAsDataURL(f); }; });
+    // ---- analysis summary ----
+    if(!DROWS.length){ summary.innerHTML='<div class="mut tiny">No back-in-stock data yet — upload a file above.</div>'; return; }
+    var mtot={UK:0,US:0,EU:0,AU:0}, msku={UK:0,US:0,EU:0,AU:0}, gtot=0;
+    DROWS.forEach(function(r){ MK.forEach(function(m){ if(r[m]>0){mtot[m]+=r[m];msku[m]++;} }); gtot+=r.total; });
+    var chips=MK.map(function(m){ return '<span style="display:inline-block;background:'+col(m)+';color:#111;font-weight:700;border-radius:5px;padding:3px 9px;font-size:11px;margin-right:6px">'+m+': '+msku[m]+' SKUs · '+mtot[m].toLocaleString()+' subs</span>'; }).join('');
+    var head='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px"><div style="font-weight:700;font-size:14px">Analysis summary <span class="mut tiny">— active back-in-stock subscribers by SKU · '+DROWS.length+' SKUs · '+gtot.toLocaleString()+' total</span></div>'
+      +'<button id="kb-dl" class="save-btn" style="margin-left:auto;background:#dcfce7;border:1px solid #16a34a;color:#166534;font-weight:700">&#8595; Download CSV</button></div>'
+      +'<div style="margin-bottom:8px">'+chips+'</div>';
+    var TD='padding:4px 10px 4px 0;text-align:right;font-variant-numeric:tabular-nums';
+    var thd='<tr style="color:#64748b;text-transform:uppercase;font-size:10px;border-bottom:1px solid #e2e8f0"><th style="padding:2px 12px 4px 0;text-align:left;min-width:200px">SKU</th>'
+      +MK.map(function(m){return '<th style="'+TD+'"><span style="background:'+col(m)+';color:#111;border-radius:3px;padding:0 5px">'+m+'</span></th>';}).join('')
+      +'<th style="'+TD+';font-weight:700">Total</th></tr>';
+    var tb=DROWS.map(function(r){ return '<tr><td style="padding:3px 12px 3px 0;text-align:left;font-family:ui-monospace,Menlo,monospace;font-size:11px">'+e2(r.sku)+'</td>'
+      +MK.map(function(m){return '<td style="'+TD+';color:'+(r[m]>0?'#111':'#cbd5e1')+'">'+(r[m]>0?r[m].toLocaleString():'—')+'</td>';}).join('')
+      +'<td style="'+TD+';font-weight:700;color:#1d4ed8">'+r.total.toLocaleString()+'</td></tr>'; }).join('');
+    summary.innerHTML=head+'<div class="tw" style="max-width:760px"><table style="border-collapse:collapse;font-size:12px;width:100%"><thead>'+thd+'</thead><tbody>'+tb+'</tbody></table></div>';
+    var dl=summary.querySelector('#kb-dl'); if(dl)dl.onclick=function(){ var out=[['SKU','UK','US','EU','AU','Total']];
+      DROWS.forEach(function(r){ out.push([r.sku,r.UK||0,r.US||0,r.EU||0,r.AU||0,r.total||0]); });
+      var csv=out.map(function(row){return row.map(function(v){v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',');}).join('\r\n');
+      var blob=new Blob([csv],{type:'text/csv;charset=utf-8'}); var url=URL.createObjectURL(blob); var a=document.createElement('a'); a.href=url; a.download='Klaviyo_BIS_summary_'+new Date().toISOString().slice(0,10)+'.csv'; document.body.appendChild(a); a.click(); setTimeout(function(){URL.revokeObjectURL(url);a.remove();},150); };
   }
-  function load(){ fetch('/api/klaviyo-bis/status').then(function(r){return r.json();}).then(function(j){ draw((j&&j.markets)||{}); }).catch(function(){ draw({}); }); }
+  function load(){ fetch('/api/klaviyo-bis/status').then(function(r){return r.json();}).then(function(j){ draw(j||{}); }).catch(function(){ draw({}); }); }
   load();
 }
 function renderCalendarView(body){

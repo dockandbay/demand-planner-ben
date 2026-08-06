@@ -3555,10 +3555,16 @@ app.post('/api/klaviyo-bis/upload', async (req, res) => {
 });
 app.get('/api/klaviyo-bis/status', async (req, res) => {
   try {
-    const rows = (await pool.query(`SELECT upper(market) market, coalesce(filename,'') filename, coalesce(uploaded_by,'') uploaded_by,
-        to_char(uploaded_at AT TIME ZONE 'UTC','YYYY-MM-DD') uploaded_at, n_skus, total_subs FROM planner.klaviyo_bis_uploads`)).rows;
-    const by = {}; rows.forEach(r => { by[r.market] = r; });
-    res.set('Cache-Control', 'no-store').json({ ok: true, markets: by });
+    const meta = (await pool.query(`SELECT upper(market) market, coalesce(filename,'') filename, coalesce(uploaded_by,'') uploaded_by,
+        to_char(uploaded_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') uploaded_at, n_skus, total_subs FROM planner.klaviyo_bis_uploads`)).rows;
+    const by = {}; meta.forEach(r => { by[r.market] = r; });
+    const agg = {};   // aggregate per SKU across markets → analysis summary + CSV download
+    (await pool.query(`SELECT sku, upper(market) market, subs FROM planner.klaviyo_bis`)).rows.forEach(r => {
+      const a = agg[r.sku] || (agg[r.sku] = { sku: r.sku, UK: 0, US: 0, EU: 0, AU: 0, total: 0 });
+      if (a[r.market] !== undefined) a[r.market] = Number(r.subs) || 0; a.total += Number(r.subs) || 0;
+    });
+    const rows = Object.values(agg).sort((x, y) => y.total - x.total);
+    res.set('Cache-Control', 'no-store').json({ ok: true, markets: by, rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
