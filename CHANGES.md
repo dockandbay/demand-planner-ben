@@ -1,3 +1,6 @@
+## v26.632.0 — DEMAND: Undo (last 10 changes)
+- New "xe2x86xb6 Undo" button on the demand toolbar (and xe2x8cx98/Ctrl+Z) reverts forecast edits up to the last 10 changes. Each edit gesture is one step — a single SKU/subcat edit, or a whole smoothing apply (batched). Restores FC_OUTPUTS + subcat inputs (IV) + dirty flags and re-renders. Cmd/Ctrl+Z is ignored while typing in a field (native undo still works there).
+
 ## v26.631.0 — Fix: disregard-discontinued smoothing keeps discontinued (boosts active only)
 - BUGFIX: "disregard discontinued from smoothing" was writing a 0 override onto discontinued SKUs. It now leaves discontinued UNTOUCHED (frozen — keeps their stock rundown) and boosts only the ACTIVE SKUs to the sub-category target. The gap check compares active-only vs target. (Reverses the earlier "zero them out" behaviour per Ben.)
 

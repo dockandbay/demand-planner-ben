@@ -746,6 +746,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
     </span>
     <button id="fclogic-btn" onclick="openFcLogic(event)" title="How the forecast numbers are calculated" style="margin-left:12px;font-size:10px;padding:2px 9px;border:1px solid #c4b5fd;border-radius:3px;background:#f5f3ff;color:#5b21b6;cursor:pointer;flex-shrink:0">&#9635; Forecast Logic</button>
     <button id="smoothset-btn" onclick="openSmoothSettings(event)" title="Smoothing settings: disregard discontinued SKUs per country / channel / sub-category" style="margin-left:8px;font-size:10px;padding:2px 9px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1e40af;cursor:pointer;flex-shrink:0">&#9881; Smoothing</button>
+    <button id="undo-btn" onclick="undoApply()" disabled title="Undo the last forecast edit (up to 10) — also &#8984;/Ctrl+Z" style="margin-left:8px;font-size:10px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:3px;background:#f8fafc;color:#334155;cursor:default;opacity:.45;flex-shrink:0">&#8624; Undo</button>
     <button id="plan-dl-btn" onclick="openPlanDownload(event)" title="Download the demand plan (SKU × month, units + revenue) for chosen fiscal year(s)" style="margin-left:8px;font-size:10px;padding:2px 9px;border:1px solid #16a34a;border-radius:3px;background:#dcfce7;color:#166534;cursor:pointer;flex-shrink:0">&#11015; Download plan</button>
   </div>
   <div id="catrow1-wrap" style="display:flex;align-items:center;gap:6px;position:relative">
@@ -5192,6 +5193,7 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   inp.addEventListener('focus',function(e){e.target.value=IV[e.target.dataset.k]||'';var t=e.target;setTimeout(function(){try{t.select();}catch(_){}},0);});
   inp.addEventListener('blur',function(e){const r=IV[e.target.dataset.k];e.target.value=r?disp(r):'';});
   inp.addEventListener('change',function(e){
+    if(typeof undoMark==='function')undoMark();   // snapshot pre-edit state for undo
     markDirty();
     const v=parseInput(e.target.value);
     IV[e.target.dataset.k]=v==null?'':(typeof v==='string'?v:String(v));
@@ -5668,6 +5670,7 @@ function skuHasLY(salesMap){for(var mi=1;mi<=12;mi++){var mm=(mi<10?'0':'')+mi;i
 // (buildLiveDemand reads FC_OUTPUTS) and can be persisted to forecast_outputs on Save.
 function skuOvGet(sku,co,ch,m){var v=skuOutFC(sku,co,ch,m);return v!=null?String(v):null;}
 function skuOvSet(sku,co,ch,m,v){
+  if(typeof undoMark==='function')undoMark();   // snapshot pre-edit state for undo (batched per gesture)
   var k=sku+'|'+skuWh(co,ch)+'|'+ch;
   if(!FC_OUTPUTS[k])FC_OUTPUTS[k]={};
   if(v==null||v===''){delete FC_OUTPUTS[k][m];}
@@ -7661,6 +7664,7 @@ function remapExpanded(dim,newVal){
 }
 function renderMain(){
   CALC_MEMO={};   // fresh per-render forecast memo — covers direct renderMain() calls (filters/toggles) too
+  _undoReady=true; try{ updateUndoBtn(); }catch(e){}   // arm undo once the plan has rendered (edits after load are captured)
   // load per-cell forecast notes for the current country+channel before building the grid (so the N badges
   // render). fcNotesLoad always sets FC_NOTES_KEY (even on failure) so this can't loop.
   if(typeof FC_NOTES_KEY!=='undefined' && FC_NOTES_KEY!==CUR+'|'+CF){ fcNotesLoad(CUR,CF,function(){ renderMain(); }); return; }
@@ -10904,6 +10908,23 @@ var _autoSaveTimer=null, _saving=false, AUTOSAVE_MS=60000;
 function scheduleAutoSave(){ if(_autoSaveTimer)return;   // one save already scheduled — this edit batches into it
   _autoSaveTimer=setTimeout(function(){ _autoSaveTimer=null; if(_dirty){ if(_saving) scheduleAutoSave(); else saveForecasts(); } },AUTOSAVE_MS); }
 function markDirty(){ _dirty=true; scheduleAutoSave(); }   // SKU-level edits (FC_DIRTY) call this — sets _dirty + auto-saves
+// ── DEMAND undo — snapshot the forecast edit state (FC_OUTPUTS + IV + FC_DIRTY) before each edit gesture; undo up to the last 10 ──
+var _UNDO=[], _undoBusy=false, _undoReady=false;
+function undoMark(){ if(!_undoReady||_undoBusy)return; _undoBusy=true;   // called BEFORE a mutation; batches all edits in one synchronous gesture into a single entry
+  try{ _UNDO.push(JSON.stringify({fc:FC_OUTPUTS, iv:IV, fd:FC_DIRTY})); }catch(e){ _undoBusy=false; return; }
+  if(_UNDO.length>10)_UNDO.shift();
+  Promise.resolve().then(function(){ _undoBusy=false; });
+  try{ updateUndoBtn(); }catch(e){} }
+function undoApply(){ if(!_UNDO.length)return; var snap; try{ snap=JSON.parse(_UNDO.pop()); }catch(e){ return; }
+  function restore(target,src){ Object.keys(target).forEach(function(k){delete target[k];}); Object.keys(src||{}).forEach(function(k){target[k]=src[k];}); }
+  restore(FC_OUTPUTS, snap.fc); restore(IV, snap.iv); restore(FC_DIRTY, snap.fd);
+  _dirty=true; try{ scheduleAutoSave(); }catch(e){}
+  try{ renderMain(); }catch(e){} try{ updateUndoBtn(); }catch(e){} }
+function updateUndoBtn(){ var b=document.getElementById('undo-btn'); if(!b)return; var n=_UNDO.length;
+  b.disabled=!n; b.style.opacity=n?'1':'.45'; b.style.cursor=n?'pointer':'default'; b.textContent='↶ Undo'+(n?(' ('+n+')'):''); }
+try{ document.addEventListener('keydown',function(e){ if((e.metaKey||e.ctrlKey)&&(e.key==='z'||e.key==='Z')&&!e.shiftKey){
+  var ae=document.activeElement; if(ae&&/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName))return;   // let native undo work inside fields
+  var dp=document.getElementById('demand-plan-root'); e.preventDefault(); undoApply(); } }); }catch(e){}
 // Build the SKU-level (FC_OUTPUTS) change list — shared by saveSkuForecasts + the unload beacon flush.
 function buildSkuChanges(){ var changes=[]; Object.keys(FC_DIRTY).forEach(function(k){ var parts=k.split('|'); if(parts.length<3)return;
     var sku=parts[0],wh=parts[1],ch=parts[2], months=FC_DIRTY[k]||{}, mo=FC_OUTPUTS[k]||{};
