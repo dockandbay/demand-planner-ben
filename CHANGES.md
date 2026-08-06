@@ -1,3 +1,6 @@
+## v26.637.0 — DEMAND ▸ Plan toolbar tweaks (per Ben)
+- Show / Active|All / date-window moved OUT of the panel to sit BEFORE the SKU search. Category filter moved INTO the panel. Filters button renamed "More Filters". Forecast Logic + Smoothing pulled OUT of the ⋯ Tools menu into their own buttons (⋯ removed). Download moved to the far right of the row. Dropped the redundant "All SKUs" chip (the toggle is now visible).
+
 ## v26.636.0 — B2B scenario: layout, SKU dedupe, A4 PDF export
 - Recommendation moved to the 2nd column (right after SKU) and widened; SKU column fixed at 160px; the single-number middle columns compressed (table-layout:fixed + colgroup). Duplicate SKUs in the paste box are now analysed once (quantities summed). New "⤓ PDF" button downloads the allocation report as an A4 (landscape) print-to-PDF.
 

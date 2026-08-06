@@ -705,27 +705,25 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
     </div>
   </div>
   <div id="filters-row2" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-    <input type="text" id="plan-sku-qry" placeholder="&#128269; Search SKU / name…" autocomplete="off"
-      style="font-size:11px;padding:4px 9px;border:1px solid #86efac;background:#f0fdf4;border-radius:5px;width:230px"
-      oninput="setPlanSkuQry(this.value)">
+    <span class="pill-lbl" title="Active: today &rarr; today+180 days. All: everything not permanently inactive.">Show</span>
+    <span style="display:inline-flex;gap:3px"><button id="plan-active-btn" class="pill catpill active" onclick="setPlanActiveMode('active')">Active</button><button id="plan-all-btn" class="pill catpill" onclick="setPlanActiveMode('all')">All</button></span>
+    <input type="date" id="plan-start-date" title="Window start" style="font-size:10px;padding:2px 5px;border:1px solid #d0d0d0;border-radius:4px;color:#444" onchange="setPlanActiveStart(this.value)">
+    <span style="font-size:10px;color:#999">&rarr;</span>
+    <input type="date" id="plan-end-date" title="Window end" style="font-size:10px;padding:2px 5px;border:1px solid #d0d0d0;border-radius:4px;color:#444" onchange="setPlanActiveEnd(this.value)">
+    <button id="plan-date-reset" title="Reset to today &rarr; today+180 days" onclick="resetPlanActiveDates()" style="font-size:11px;padding:2px 7px;border:1px solid #d0d0d0;border-radius:4px;background:#f8f8f8;cursor:pointer;color:#666">&#8634;</button>
     <span style="width:1px;height:18px;background:#e0e0e0;flex-shrink:0"></span>
-    <span style="position:relative;display:inline-flex;align-items:center;gap:6px">
-      <span class="pill-lbl">Category</span>
-      <button id="cat-btn" class="pill" style="display:inline-flex;align-items:center;gap:8px" onclick="toggleCatPop(event)"><span id="cat-btn-lbl">All categories</span><span style="opacity:.55;font-size:9px">▾</span></button>
-      <div id="cat-chips" style="display:flex;gap:4px;flex-wrap:nowrap"></div>
-      <div id="cat-pop" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;z-index:300;background:#fff;border:1px solid #d0d0d0;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.18);width:440px;padding:8px"></div>
-    </span>
+    <input type="text" id="plan-sku-qry" placeholder="&#128269; Search SKU / name…" autocomplete="off"
+      style="font-size:11px;padding:4px 9px;border:1px solid #86efac;background:#f0fdf4;border-radius:5px;width:210px"
+      oninput="setPlanSkuQry(this.value)">
     <span style="position:relative;display:inline-flex;align-items:center">
-      <button id="plan-filters-btn" onclick="togglePlanFilters(event)" title="Refine — active window, tier, release window, from-replacement, sort, category totals" style="font-size:11px;padding:4px 11px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#334155;cursor:pointer;flex-shrink:0;font-weight:600">&#10697; Filters <span style="opacity:.55;font-size:9px">▾</span></button>
+      <button id="plan-filters-btn" onclick="togglePlanFilters(event)" title="More filters — category, tier, release window, from-replacement, sort, category totals" style="font-size:11px;padding:4px 11px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#334155;cursor:pointer;flex-shrink:0;font-weight:600">&#10697; More Filters <span style="opacity:.55;font-size:9px">▾</span></button>
       <div id="plan-filters-pop" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;z-index:300;background:#fff;border:1px solid #d0d0d0;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.2);width:520px;max-width:94vw;padding:14px 16px">
-        <div style="display:flex;align-items:center;margin-bottom:12px"><div style="font-weight:700;font-size:14px;color:#0f172a">Filters</div><button onclick="resetPlanFilters()" style="margin-left:auto;font-size:11px;padding:3px 10px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#475569;cursor:pointer">Reset all</button></div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-          <span class="pill-lbl" style="width:80px" title="Active: today &rarr; today+180 days. All: everything not permanently inactive.">Show</span>
-          <span style="display:inline-flex;gap:3px"><button id="plan-active-btn" class="pill catpill active" onclick="setPlanActiveMode('active')">Active</button><button id="plan-all-btn" class="pill catpill" onclick="setPlanActiveMode('all')">All</button></span>
-          <input type="date" id="plan-start-date" title="Window start" style="font-size:10px;padding:2px 5px;border:1px solid #d0d0d0;border-radius:4px;color:#444" onchange="setPlanActiveStart(this.value)">
-          <span style="font-size:10px;color:#999">&rarr;</span>
-          <input type="date" id="plan-end-date" title="Window end" style="font-size:10px;padding:2px 5px;border:1px solid #d0d0d0;border-radius:4px;color:#444" onchange="setPlanActiveEnd(this.value)">
-          <button id="plan-date-reset" title="Reset to today &rarr; today+180 days" onclick="resetPlanActiveDates()" style="font-size:11px;padding:2px 7px;border:1px solid #d0d0d0;border-radius:4px;background:#f8f8f8;cursor:pointer;color:#666">&#8634;</button>
+        <div style="display:flex;align-items:center;margin-bottom:12px"><div style="font-weight:700;font-size:14px;color:#0f172a">More filters</div><button onclick="resetPlanFilters()" style="margin-left:auto;font-size:11px;padding:3px 10px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#475569;cursor:pointer">Reset all</button></div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;position:relative">
+          <span class="pill-lbl" style="width:80px">Category</span>
+          <button id="cat-btn" class="pill" style="display:inline-flex;align-items:center;gap:8px" onclick="toggleCatPop(event)"><span id="cat-btn-lbl">All categories</span><span style="opacity:.55;font-size:9px">▾</span></button>
+          <div id="cat-chips" style="display:flex;gap:4px;flex-wrap:wrap"></div>
+          <div id="cat-pop" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;z-index:320;background:#fff;border:1px solid #d0d0d0;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.18);width:440px;padding:8px"></div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
           <span class="pill-lbl" style="width:80px">Tier</span>
@@ -752,15 +750,10 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
     </span>
     <div id="plan-chips" style="display:flex;gap:5px;flex-wrap:wrap;align-items:center"></div>
     <div style="flex:1"></div>
+    <button id="fclogic-btn" onclick="openFcLogic(event)" title="How the forecast numbers are calculated" style="font-size:10px;padding:3px 10px;border:1px solid #c4b5fd;border-radius:5px;background:#f5f3ff;color:#5b21b6;cursor:pointer;flex-shrink:0;font-weight:600">&#9635; Forecast Logic</button>
+    <button id="smoothset-btn" onclick="openSmoothSettings(event)" title="Smoothing settings — disregard discontinued + auto-smooth" style="font-size:10px;padding:3px 10px;border:1px solid #93c5fd;border-radius:5px;background:#eff6ff;color:#1e40af;cursor:pointer;flex-shrink:0;font-weight:600">&#9881; Smoothing</button>
     <button id="undo-btn" onclick="undoApply()" disabled title="Undo the last forecast edit (up to 10) — also &#8984;/Ctrl+Z" style="font-size:10px;padding:3px 10px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#334155;cursor:default;opacity:.45;flex-shrink:0">&#8624; Undo</button>
     <button id="plan-dl-btn" onclick="openPlanDownload(event)" title="Download the demand plan (SKU × month, units + revenue) for chosen fiscal year(s)" style="font-size:10px;padding:3px 10px;border:1px solid #16a34a;border-radius:5px;background:#dcfce7;color:#166534;cursor:pointer;flex-shrink:0">&#11015; Download</button>
-    <span style="position:relative;display:inline-block">
-      <button id="plan-tools-btn" onclick="togglePlanTools(event)" title="More — Forecast Logic, Smoothing settings" style="font-size:13px;padding:3px 11px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#334155;cursor:pointer;flex-shrink:0;font-weight:700;line-height:1">&#8943;</button>
-      <div id="plan-tools-menu" style="display:none;position:absolute;top:100%;right:0;margin-top:4px;z-index:300;background:#fff;border:1px solid #d0d0d0;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.18);padding:6px;min-width:200px">
-        <button onclick="openFcLogic(event)" style="display:block;width:100%;text-align:left;font-size:12px;padding:7px 10px;border:none;background:none;cursor:pointer;border-radius:5px;color:#5b21b6">&#9635; Forecast Logic</button>
-        <button onclick="openSmoothSettings(event)" style="display:block;width:100%;text-align:left;font-size:12px;padding:7px 10px;border:none;background:none;cursor:pointer;border-radius:5px;color:#1e40af">&#9881; Smoothing settings</button>
-      </div>
-    </span>
   </div>
 </div>
 <div id="sa-drawer-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:5900" onclick="closeSADrawer()"></div>
@@ -7814,7 +7807,6 @@ function _planClearFilter(k){ if(k==='all')setPlanActiveMode('active'); else if(
 // Active-filter CHIPS — always show WHICH filters are applied (each removable with ×). Replaces the opaque count badge.
 function renderPlanChips(){ var c=document.getElementById('plan-chips'); if(!c)return; var chips=[];
   function chip(label,key){ return '<span class="pill" style="display:inline-flex;align-items:center;gap:5px;background:#dbeafe;border-color:#93c5fd;color:#1e3a8a;font-size:10px;padding:2px 5px 2px 9px;cursor:default">'+esc(label)+'<span data-clr="'+key+'" style="cursor:pointer;font-weight:700;color:#1d4ed8;padding:0 3px;font-size:12px;line-height:1" title="Clear">&times;</span></span>'; }
-  var all=document.getElementById('plan-all-btn'); if(all&&all.classList.contains('active'))chips.push(chip('All SKUs','all'));
   var tier=document.querySelector('#plan-tier-pills .ptier.active'); if(tier&&tier.dataset.tier!=='ALL')chips.push(chip('Tier '+tier.dataset.tier,'tier'));
   var rw=document.getElementById('plan-rw-sel'); if(rw&&rw.value&&rw.value!=='ALL')chips.push(chip('Release: '+rw.value,'rw'));
   var fr=document.getElementById('plan-fromrep-btn'); if(fr&&fr.classList.contains('active'))chips.push(chip('From replacement','fromrep'));
