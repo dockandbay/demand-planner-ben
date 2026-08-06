@@ -1,3 +1,6 @@
+## v26.638.0 — DEMAND: recalculate discontinued forecasts (velocity × seasonality)
+- When disregard-discontinued smoothing runs on a sub-category (auto-smooth sweep OR a manual/FY smooth apply), discontinued SKUs are now automatically RECALCULATED: recent velocity (last 3 completed months) shaped by the sub-category seasonal pattern, capped by remaining on-hand+inbound, and hard-zeroed once that SKU's stock is exhausted. Replaces the naive cascade rundown. Writes overrides (one Undo step). Opt-in via the disregard flag xe2x80x94 buy plan unchanged until run (b3 24,332).
+
 ## v26.637.0 — DEMAND ▸ Plan toolbar tweaks (per Ben)
 - Show / Active|All / date-window moved OUT of the panel to sit BEFORE the SKU search. Category filter moved INTO the panel. Filters button renamed "More Filters". Forecast Logic + Smoothing pulled OUT of the ⋯ Tools menu into their own buttons (⋯ removed). Download moved to the far right of the row. Dropped the redundant "All SKUs" chip (the toggle is now visible).
 

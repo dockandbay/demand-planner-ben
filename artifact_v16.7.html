@@ -924,6 +924,7 @@ function runAutoSmooth(){
   if(!keys.length){ alert('No sub-categories are ticked for Auto. Tick "auto" on some sub-categories first.'); return; }
   var applied=0;
   keys.forEach(function(k){ var p=k.split('|'); var co=p[0],ch=p[1],s=p.slice(2).join('|');
+    if(smoothDisregards(co,ch,s)){ try{ recalcDiscontinued(s,co,ch); }catch(e){} }   // auto-recalc discontinued rundown first
     var eff; try{ eff=subcatSkuEffTotals(s,co,ch); }catch(e){ return; } if(!eff)return;
     FM.forEach(function(m){ if(isActualMonth(m)&&m!==CUR_MONTH)return;   // forecast months only
       var target=(m===CUR_MONTH)?curMonthForecast(s,co,ch):(((calc(s,co,ch)||{}).fu||{})[m]||0);
@@ -6648,6 +6649,33 @@ function applySmoothAlloc(co,ch,m,vals){
   Object.keys(vals||{}).forEach(function(sku){ skuOvSet(sku,co,ch,m,vals[sku]); });
 }
 
+// Recalculate discontinued SKUs' sell-through of remaining stock: recent velocity × sub-category seasonality,
+// capped by on-hand+inbound (decrementing), hard-zero once stock is exhausted. Writes overrides. Runs automatically
+// inside the smoothing flow when the subcat has "disregard discontinued" on. Returns # of SKUs recalculated.
+function recalcDiscontinued(s,co,ch){
+  var wh=skuWh(co,ch), ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':'b';
+  var FU=(calc(s,co,ch).fu)||{};
+  var fmF=FM.filter(function(m){ return !isActualMonth(m)||m===CUR_MONTH; });   // forecast months only
+  if(!fmF.length) return 0;
+  var fuVals=fmF.map(function(m){ return Math.max(0,FU[m]||0); }), fuSum=fuVals.reduce(function(a,b){return a+b;},0);
+  var seasMult={}; fmF.forEach(function(m,i){ seasMult[m]= fuSum>0 ? (fuVals[i]/fuSum*fmF.length) : 1; });   // seasonal multiplier ~1 mean
+  var cy=parseInt(CUR_MONTH.slice(0,4),10), cm=parseInt(CUR_MONTH.slice(5),10);
+  var all=Object.keys(SKUM).filter(function(sku){ var p=SKUM[sku]; if(!p||p.s!==s)return false; var av=(p.av||{})[ctry]||''; return av.indexOf(chKey)>=0; });
+  var n=0;
+  all.forEach(function(sku){ var p=SKUM[sku]; var disc=p.disc&&p.disc[ctry]?p.disc[ctry]:null; if(!disc)return;
+    var sales=skuSales(sku,co,ch)||{}, recent=0;
+    for(var k=1;k<=3;k++){ var mm=cm-k, yy=cy; while(mm<=0){mm+=12;yy--;} recent+=(sales[yy+'_'+String(mm).padStart(2,'0')]||0); }
+    var vMonthly=recent/3;   // avg monthly units over the last 3 completed months
+    var remaining=(p.inv&&p.inv[wh]||0)+(p.oo&&p.oo[wh]||0), touched=false;
+    fmF.forEach(function(m){ var ms=m.slice(0,4)+'-'+m.slice(5,7)+'-01'; if(!(ms>disc))return;   // only months after discontinue
+      touched=true;
+      if(remaining<=0){ skuOvSet(sku,co,ch,m,0); return; }
+      var expected=Math.round(vMonthly*(seasMult[m]||1)), give=Math.max(0,Math.min(expected,remaining));
+      skuOvSet(sku,co,ch,m,give); remaining-=give; });
+    if(touched)n++;
+  });
+  return n;
+}
 // Effective monthly forecast totals summed over ALL SKUs in a subcat (current co/ch),
 // applying the same clamps as the SKU rows and Smooth: pre-launch = 0, discontinued runs
 // down on-hand+inbound stock (0 once exhausted). Used by the subtotal/gap so the displayed
@@ -6777,6 +6805,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
   // Commit every month in the current preview (single-month or whole-FY) → SKU overrides. Review step first.
   function applySmoothPreview(){
     if(!SMOOTH_PREVIEW||!SMOOTH_PREVIEW.months)return;
+    if(smoothDisregards(co,ch,s)){ try{ recalcDiscontinued(s,co,ch); }catch(e){} }   // auto-recalc discontinued rundown (velocity × seasonality) whenever disregard-discontinued smoothing is applied
     Object.keys(SMOOTH_PREVIEW.months).forEach(function(mo){ applySmoothAlloc(co,ch,mo,SMOOTH_PREVIEW.months[mo]); });
     SMOOTH_PREVIEW=null; reExpand();
     try{ if(typeof saveForecasts==='function') saveForecasts(); }catch(e){}   // persist a smooth immediately — a bulk edit shouldn't wait on the 60s autosave (lost on refresh otherwise)
