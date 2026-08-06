@@ -6109,6 +6109,85 @@ app.post('/api/supply/tpl/cin7-import', async (req, res) => {
     res.json({ ok: true, period, from: start, to: end, kind, imported, cin7_calls: calls, summary });
   } catch (e) { await logImport(null, null, 'error', 0, 'error', e.message, 0); res.status(500).json({ error: e.message }); }
 });
+// ── SUG-0020 DTC Mismatch ── on-demand Cin7 sales-order import for the Direct-to-Client branches (read-only Cin7).
+const DTC_BRANCHES = { 5051: 'Direct to Client', 27889: 'UK B2B JLEW', 27890: 'UK B2B NEXT' };
+const _dOnly = (v) => v ? String(v).slice(0, 10) : null;
+app.post('/api/supply/dtc/import', async (req, res) => {
+  const auth = cin7Auth(); if (!auth) return res.json({ ok: false, error: 'Cin7 is not configured in this environment (no CIN7 credentials).' });
+  const days = Number((req.body && req.body.days) || req.query.days) || 365;
+  const since = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+  try {
+    let imported = 0, calls = 0; const byBranch = {};
+    for (const bid of Object.keys(DTC_BRANCHES)) {
+      byBranch[bid] = 0; let page = 1; const MAXP = 60;
+      while (page <= MAXP) {
+        const where = encodeURIComponent("BranchId=" + bid + " AND CreatedDate>='" + since + "T00:00:00Z'");
+        const r = await cin7Fetch('https://api.cin7.com/api/v1/SalesOrders?rows=100&page=' + page + '&where=' + where + '&order=createdDate%20DESC', { method: 'GET', headers: { Authorization: auth, 'content-type': 'application/json' } });
+        calls++;
+        if (r.status >= 400) { let eb = ''; try { eb = (await r.text()).slice(0, 200); } catch (e) {} return res.json({ ok: false, error: 'Cin7 fetch failed (HTTP ' + r.status + '). ' + eb, imported }); }
+        let arr = []; try { arr = await r.json(); } catch (e) { arr = []; }
+        if (!Array.isArray(arr) || !arr.length) break;
+        for (const o of arr) {
+          await pool.query(`INSERT INTO planner.dtc_sales_orders (cin7_id,reference,customer_order_no,branch_id,branch_name,company,stage,status,is_void,dispatched_date,invoice_date,created_date,modified_date,total,imported_at)
+            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now()) ON CONFLICT (cin7_id) DO UPDATE SET reference=excluded.reference,customer_order_no=excluded.customer_order_no,branch_name=excluded.branch_name,company=excluded.company,stage=excluded.stage,status=excluded.status,is_void=excluded.is_void,dispatched_date=excluded.dispatched_date,invoice_date=excluded.invoice_date,modified_date=excluded.modified_date,total=excluded.total,imported_at=now()`,
+            [o.id, o.reference || null, o.customerOrderNo || null, o.branchId || null, DTC_BRANCHES[bid], o.company || null, o.stage || null, o.status || null, !!o.isVoid, _dOnly(o.dispatchedDate), _dOnly(o.invoiceDate), o.createdDate || null, o.modifiedDate || null, o.total != null ? Number(o.total) : null]);
+          await pool.query(`DELETE FROM planner.dtc_sales_order_lines WHERE so_cin7_id=$1`, [o.id]);
+          for (const li of (o.lineItems || [])) { if (!li || !li.code) continue; await pool.query(`INSERT INTO planner.dtc_sales_order_lines (so_cin7_id,code,name,qty,barcode) VALUES ($1,$2,$3,$4,$5)`, [o.id, li.code, li.name || null, li.qty != null ? Number(li.qty) : 0, li.barcode || null]); }
+          imported++; byBranch[bid]++;
+        }
+        if (arr.length < 100) break; page++;
+      }
+    }
+    res.json({ ok: true, imported, byBranch, cin7_calls: calls });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/dtc/status', async (_req, res) => {
+  try { const o = (await pool.query(`SELECT count(*)::int n, count(*) FILTER (WHERE NOT is_void AND dispatched_date IS NULL)::int open, to_char(max(imported_at),'DD-Mon-YY HH24:MI') at FROM planner.dtc_sales_orders`)).rows[0] || {};
+    res.json({ orders: o.n || 0, open: o.open || 0, imported_at: o.at || null }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/dtc/review', async (req, res) => {   // per-order note / accept-discrepancy
+  const b = req.body || {}, id = b.so_cin7_id; if (!id) return res.status(400).json({ error: 'so_cin7_id required' });
+  try { await pool.query(`INSERT INTO planner.dtc_mismatch_review (so_cin7_id,note,accepted,accepted_by,updated_at) VALUES ($1,$2,$3,$4,now())
+      ON CONFLICT (so_cin7_id) DO UPDATE SET note=coalesce(excluded.note,planner.dtc_mismatch_review.note), accepted=excluded.accepted, accepted_by=excluded.accepted_by, updated_at=now()`,
+      [id, (b.note != null ? String(b.note) : null), !!b.accepted, !!b.accepted ? authUser(req) : null]);
+    res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// The mismatch report: OPEN DTC sales orders (not void, not dispatched) vs the POs mapped by sales_order_ref.
+// Issue 1 = no PO mapped; Issue 2 = SKU/qty on the SO ≠ summed across its POs. Accepted orders drop out of the count.
+app.get('/api/supply/dtc/mismatch', async (_req, res) => {
+  try {
+    const sos = (await pool.query(`SELECT s.cin7_id, s.reference, s.customer_order_no, s.branch_name, s.company, to_char(s.created_date,'DD-Mon-YY') created_date,
+        coalesce(r.note,'') note, coalesce(r.accepted,false) accepted, coalesce(r.accepted_by,'') accepted_by
+      FROM planner.dtc_sales_orders s LEFT JOIN planner.dtc_mismatch_review r ON r.so_cin7_id=s.cin7_id
+      WHERE NOT s.is_void AND s.dispatched_date IS NULL ORDER BY s.created_date DESC NULLS LAST`)).rows;
+    if (!sos.length) return res.json({ orders: [], counts: { issues: 0, accepted: 0, ok: 0 } });
+    const ids = sos.map(s => s.cin7_id), refs = sos.map(s => s.reference).filter(Boolean);
+    const soLineMap = {};
+    (await pool.query(`SELECT so_cin7_id, code, sum(qty) qty FROM planner.dtc_sales_order_lines WHERE so_cin7_id = ANY($1) GROUP BY so_cin7_id, code`, [ids])).rows
+      .forEach(l => { (soLineMap[l.so_cin7_id] = soLineMap[l.so_cin7_id] || {})[l.code] = Number(l.qty) || 0; });
+    const posByRef = {};
+    const pos = refs.length ? (await pool.query(`SELECT po, sales_order_ref FROM planner.purchase_orders WHERE sales_order_ref = ANY($1)`, [refs])).rows : [];
+    pos.forEach(p => { (posByRef[p.sales_order_ref] = posByRef[p.sales_order_ref] || []).push(p.po); });
+    const allPos = pos.map(p => p.po), poLineByPo = {};
+    if (allPos.length) (await pool.query(`SELECT po, sku, sum(qty) qty FROM planner.purchase_order_lines WHERE po = ANY($1) GROUP BY po, sku`, [allPos])).rows
+      .forEach(l => { (poLineByPo[l.po] = poLineByPo[l.po] || {})[l.sku] = (poLineByPo[l.po][l.sku] || 0) + (Number(l.qty) || 0); });
+    let issues = 0, accepted = 0, ok = 0;
+    const orders = sos.map(s => {
+      const poRefs = posByRef[s.reference] || [], soL = soLineMap[s.cin7_id] || {}, poAgg = {};
+      poRefs.forEach(po => { const m = poLineByPo[po] || {}; Object.keys(m).forEach(sku => { poAgg[sku] = (poAgg[sku] || 0) + m[sku]; }); });
+      let issue = null; const diffs = [];
+      if (!poRefs.length) issue = 'no_po';
+      else { const skus = {}; Object.keys(soL).forEach(k => skus[k] = 1); Object.keys(poAgg).forEach(k => skus[k] = 1);
+        Object.keys(skus).forEach(sku => { const sq = soL[sku] || 0, pq = poAgg[sku] || 0; if (sq !== pq) diffs.push({ sku, soQty: sq, poQty: pq }); });
+        if (diffs.length) issue = 'qty_mismatch'; }
+      const isIssue = !!issue && !s.accepted;
+      if (s.accepted) accepted++; else if (isIssue) issues++; else ok++;
+      return { cin7_id: s.cin7_id, reference: s.reference, branch_name: s.branch_name, company: s.company, created_date: s.created_date, po_refs: poRefs, issue, diffs: diffs.slice(0, 60), note: s.note, accepted: s.accepted };
+    });
+    res.json({ orders, counts: { issues, accepted, ok } });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // 3PL invoice — reference-based CLEAN-UP SWEEP for one invoice file. Fetches the invoice's references that
 // aren't yet cached, directly from Cin7 (Reference IN, then CustomerOrderNo IN) with NO branch/date filter,
 // so cross-month orders (e.g. despatched in Feb but on the May invoice) are caught. Upserts into the cache.
