@@ -6478,7 +6478,7 @@ function computeSmoothAlloc(s,co,ch,m,opts){
     var cur=Math.max(0,(_fo!=null)?_fo:Math.round(target*(shares[sku]||0)));
     var cap=Infinity, frozen=false;
     if(lch&&ms<lch){cap=0;frozen=true;}                 // pre-launch — leave on cascade 0
-    else if(disc&&ms>disc&&DISREGARD_DISC){ cap=0; cur=0; }   // disregard discontinued: zero it so active SKUs absorb the full subcat forecast (writes a 0 override)
+    else if(disc&&ms>disc&&DISREGARD_DISC){ frozen=true; cap=0; }   // disregard discontinued: leave it UNTOUCHED (no override, keeps its stock rundown) and exclude from the pool so only ACTIVE SKUs are boosted to the subcat target
     else if(disc&&ms>disc){                              // discontinued — cap by remaining stock (matches row display rundown)
       var rem=(p.inv&&p.inv[wh]||0)+(p.oo&&p.oo[wh]||0);
       for(var i=0;i<FM.length&&FM[i]<m;i++){
@@ -6640,9 +6640,9 @@ function subcatSkuEffTotals(s,co,ch){
       var raw=(_fo!=null)?_fo:Math.round((FU[m]||0)*(shares[sku]||0));
       var v, isDisc=(disc&&ms>disc);
       if(lch&&ms<lch){v=0;}
-      else if(isDisc){ if(DIS){v=0;} else if(rem<=0){v=0;} else {v=Math.max(0,Math.min(raw,rem));rem=Math.max(0,rem-v);} }
+      else if(isDisc){ if(rem<=0){v=0;} else {v=Math.max(0,Math.min(raw,rem));rem=Math.max(0,rem-v);} }   // discontinued always keep their stock rundown (not zeroed)
       else{v=raw;}
-      tot[m]=(tot[m]||0)+v;
+      if(!(isDisc&&DIS)) tot[m]=(tot[m]||0)+v;   // when disregarding, the gap basis is ACTIVE-only vs the subcat target (discontinued excluded)
       if(isDisc){ discTot[m]=(discTot[m]||0)+v; } else { actTot[m]=(actTot[m]||0)+v; }
     });
   });

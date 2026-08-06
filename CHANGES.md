@@ -1,3 +1,6 @@
+## v26.631.0 — Fix: disregard-discontinued smoothing keeps discontinued (boosts active only)
+- BUGFIX: "disregard discontinued from smoothing" was writing a 0 override onto discontinued SKUs. It now leaves discontinued UNTOUCHED (frozen — keeps their stock rundown) and boosts only the ACTIVE SKUs to the sub-category target. The gap check compares active-only vs target. (Reverses the earlier "zero them out" behaviour per Ben.)
+
 ## v26.630.0 — Specifications: pickers match the PO-grid "assign supplier" format
 - The Category / Size / Production search pickers now use the exact same native-datalist input format as the PO-grid "assign supplier" field (class "fci txt" + list, "pick / type…" placeholder). Removed autocomplete="off" (which suppressed the dropdown in some browsers) and the extra inline styling.
 
