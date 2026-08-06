@@ -177,7 +177,7 @@
 /* label-settings bar uses normal inline-block flow (not flex) — robust against this webview's flex-wrap height/gap quirks; the block container always grows to fit wrapped rows */
 #supply-root #bc-settings{display:flow-root}   /* flow-root contains the floated Download-all button so the box still grows */
 #supply-root #bc-settings>*{display:inline-block;vertical-align:middle}
-#supply-root #bc-dlall-prod,#supply-root #bc-dlall-cart{float:right;margin-left:8px}   /* sit top-right, above the grid's "labels" column */
+#supply-root .bc-dlall-btn{float:right;margin-left:8px}   /* all three Download-all buttons sit top-right, grouped together, above the grid's "labels" column */
 #supply-root .bc-dlall-btn:hover{background:#bfdbfe}
 #supply-root .pill{padding:3px 9px;font-size:10px;cursor:pointer;border:1px solid #d0d0d0;background:#fff;color:#666;border-radius:4px;white-space:nowrap;font-weight:600}
 #supply-root .pill:hover{background:#f5f5f5;color:#333}

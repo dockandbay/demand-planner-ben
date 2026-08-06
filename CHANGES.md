@@ -1,3 +1,6 @@
+## v26.614.0 — Barcodes: group all three Download-all buttons top-right
+- "⤓ All (product + carton + inner)" now floats right with "All Products" / "All Cartons (+inners)" (was inline on the left) — all three grouped near each other above the grid.
+
 ## v26.613.0 — Klaviyo BIS upload accepts the combined workbook (auto-picks the <MKT>_BIS tab)
 - The per-market upload now uses that market's raw tab (e.g. UK_BIS) when the workbook has per-market sheets, else the first sheet. So the same combined "Klaviyo BIS Subscriptions & Campaign Performance.xlsx" can be dropped into each market box (or a single-market export works too). All 4 markets loaded in sandbox for review.
 
