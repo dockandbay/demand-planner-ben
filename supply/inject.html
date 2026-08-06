@@ -974,6 +974,10 @@
     return 'production'; }
   // grid Ship-to display: the five majors show as-is; anything else (DIRECT / other) shows as "OT" (OTHER)
   function cgridLabel(c){ if(!c)return ''; c=String(c).toUpperCase(); return ['UK','US','AU','EU','CA'].indexOf(c)>=0?c:'OT'; }
+  // 2-letter ship-to badge with the market colour background (black text). MKT_COLORS is the server-injected palette.
+  function mktBadge(c){ var lbl=cgridLabel(c); if(!lbl)return ''; var cc=String(c).toUpperCase();
+    var col=(typeof MKT_COLORS!=='undefined'&&MKT_COLORS[cc])||'#e5e7eb';
+    return '<span style="display:inline-block;background:'+col+';color:#111;font-weight:700;font-size:10px;border-radius:4px;padding:1px 5px;letter-spacing:.02em;white-space:nowrap">'+esc(lbl)+'</span>'; }
   function countrySel(ep,val,pay,cls){ var opts='<option value=""'+(val?'':' selected')+'>— (use branch)</option>';
     var known=PO_COUNTRIES.some(function(o){return o[0]===val;});
     if(val&&!known)opts+='<option value="'+esc(val)+'" selected>'+esc(val)+'</option>';
@@ -1726,7 +1730,8 @@
   // Not a link to a table; just the dropdown/search to set the value. data-list: 'supplier' | 'branch'.
   var CELL_LBL={supplier:'supplier',branch:'branch',prod:'production',batch:'batch',country:'ship-to'};
   function cellPickBtn(po,ep,field,val,kind){
-    return '<button class="cell-pick" data-po="'+esc(po)+'" data-ep="'+esc(ep)+'" data-field="'+esc(field)+'" data-kind="'+kind+'" title="'+esc(val||'')+'">'+(val?esc(val):'<span class="mut">— <span style="background:#fee2e2;color:#991b1b;font-weight:700;border-radius:3px;padding:0 3px">assign</span></span>')+' ▾</button>'; }
+    var bg=''; if(kind==='country'&&val){ var cc=String(val).toUpperCase(); var col=(typeof MKT_COLORS!=='undefined'&&MKT_COLORS[cc]); if(col)bg='background:'+col+';color:#111;font-weight:700;border-radius:4px;'; }   // SHIP TO: colour the badge by market (black text)
+    return '<button class="cell-pick" data-po="'+esc(po)+'" data-ep="'+esc(ep)+'" data-field="'+esc(field)+'" data-kind="'+kind+'"'+(bg?' style="'+bg+'"':'')+' title="'+esc(val||'')+'">'+(val?esc(val):'<span class="mut">— <span style="background:#fee2e2;color:#991b1b;font-weight:700;border-radius:3px;padding:0 3px">assign</span></span>')+' ▾</button>'; }
   function bindCellPick(){ document.querySelectorAll('#supply-root .cell-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openCellPick(b); }; }); }
   function openCellPick(btn){ closeShPop();
     var kind=btn.dataset.kind, lbl=CELL_LBL[kind]||kind, isCtry=(kind==='country');
@@ -4558,7 +4563,7 @@
       +'<th class="l" style="'+fzc('sup','#f3f3f1',5)+';'+fzh+'" title="allowed suppliers for the SKU (supplier_multiple_all)">Suppliers</th>'
       +'<th class="l" style="'+fzc('dis','#f3f3f1',5)+';'+fzh+'">Discontinue</th>';
     pos.forEach(function(po){var m=meta[po],ps=pstat[po];
-      h+='<th style="min-width:'+POW+';width:'+POW+'"><button class="lnk-btn op-po-link" data-po="'+esc(po)+'" title="open '+esc(po)+' in a drawer"><b style="font-size:12px">'+esc(po)+'</b></button><br><span class="tiny mut" style="'+sp+'">'+esc(m?m.s:'')+'</span>'
+      h+='<th style="min-width:'+POW+';width:'+POW+'">'+(m&&m.co?mktBadge(m.co)+' ':'')+'<button class="lnk-btn op-po-link" data-po="'+esc(po)+'" title="open '+esc(po)+' in a drawer"><b style="font-size:10px">'+esc(po)+'</b></button><br><span class="tiny mut" style="'+sp+'">'+esc(m?m.s:'')+'</span>'
         +(m&&m.st?'<br><span class="tiny mut" style="'+sp+'">'+esc(m.st)+'</span>':'')
         +(m&&(m.cl||m.so)?'<br><span class="tiny mut" style="'+sp+'">'+esc([m.cl,m.so].filter(Boolean).join(' · '))+'</span>':'')
         +'<br><span class="tiny mut" style="'+sp+'">'+(m&&m.ps?fd(m.ps):'?')+'→'+(m&&m.pe?fd(m.pe):'?')+'</span>'
@@ -6523,6 +6528,12 @@
               +'<span class="gs-help" title="Speeds up the Purchase Orders grid and Order Plan by hiding old, finished POs from the default view.\n\n• Only COMPLETE POs are ever archived — Production / Shipping / Future POs always show, no matter their production number.\n• Nothing is deleted: archived POs stay in the database. A “Show archived” toggle on the grid brings them back instantly.\n• Does NOT affect the supplier portal or Cash Flow.\n• Blank or 0 = archiving off." style="cursor:help;color:#2563eb;font-weight:700;border:1px solid #93c5fd;border-radius:50%;font-size:10px;padding:0 5px;margin-left:4px">i</span></div>'
               +'<div class="mut tiny" style="margin:1px 0 6px">Hides <b>completed</b> POs with a production number below this value from the <b>Purchase Orders grid</b> and <b>Order Plan</b> (hover the <b>i</b> for details). Nothing is deleted — a <b>“Show archived”</b> toggle on the grid brings them back. Leave blank / 0 to turn off.</div>'
               +'<input class="fci gs-set" data-key="po_archive_before_prod" value="'+esc(s.po_archive_before_prod||'')+'" placeholder="e.g. 40  (blank = off)" inputmode="numeric" style="width:220px;box-sizing:border-box;text-align:left"></div></div>'
+            +'<div class="sect-h" style="margin-top:18px">Market colours <span class="mut tiny">— reused across the app (ship-to badges, Klaviyo BIS inputs, …). Text stays black.</span></div>'
+            +'<div style="max-width:760px;display:flex;gap:16px;flex-wrap:wrap;margin-bottom:4px">'
+              +[['uk','UK','#F88379'],['us','US','#B5C7EB'],['eu','EU','#D3D3FF'],['au','AU','#A8DCAB'],['ca','CA','#DB2D43']].map(function(mk){ var v=s['mkt_color_'+mk[0]]||mk[2];
+                return '<div style="display:flex;align-items:center;gap:7px"><span style="display:inline-block;background:'+esc(v)+';color:#111;font-weight:700;font-size:11px;border-radius:4px;padding:2px 7px">'+mk[1]+'</span>'
+                  +'<input type="color" class="gs-set" data-key="mkt_color_'+mk[0]+'" value="'+esc(v)+'" title="'+mk[1]+' market colour" style="width:38px;height:26px;padding:0;border:1px solid #cbd5e1;border-radius:5px;cursor:pointer;vertical-align:middle"></div>'; }).join('')
+            +'</div>'
             +'<div class="sect-h" style="margin-top:18px">ERP integration <span class="mut tiny">— which system purchase orders push to (dates + line items)</span></div>'
             +'<div style="max-width:760px">'
               +'<div style="margin:0 0 12px"><div style="font-weight:600;font-size:13px">Active ERP</div><div class="mut tiny" style="margin:1px 0 4px"><b>Cin7</b> is current; switch to <b>Fulfil</b> to target Fulfil instead. PO pushes (dates + line items) follow this setting.</div>'

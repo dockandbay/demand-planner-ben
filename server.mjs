@@ -76,6 +76,29 @@ const ZAL_DATA = (() => { try { return JSON.parse(readFileSync(new URL('./zaland
 // injected into both clients' CF_GBP/AF_GBP literals at serve time. Fallback 1.34 if unset/invalid.
 async function gbpRate() { try { const r = await pool.query(`SELECT value FROM planner.app_settings WHERE key='usd_gbp_rate'`);
   const v = parseFloat(r.rows[0] && r.rows[0].value); return (isFinite(v) && v > 0) ? v : 1.34; } catch { return 1.34; } }
+// Klaviyo back-in-stock (BIS) subscriber signal (SUG-0018) → {sku:{UK:n,US:n,…}, _at:'YYYY-MM-DD'} injected into the
+// DEMAND plan as an informational demand-pressure indicator. Fresh per load (uploads are infrequent, not cached).
+async function buildKlaviyoBis() {
+  try {
+    const rows = (await pool.query(`SELECT sku, upper(market) market, subs FROM planner.klaviyo_bis`)).rows;
+    const m = {}; rows.forEach(r => { (m[r.sku] || (m[r.sku] = {}))[r.market] = Number(r.subs) || 0; });
+    const at = (await pool.query(`SELECT to_char(max(updated_at) AT TIME ZONE 'UTC','YYYY-MM-DD') d FROM planner.klaviyo_bis`)).rows[0];
+    m._at = (at && at.d) || '';
+    return m;
+  } catch { return {}; }
+}
+// Reusable market colour palette (app_settings mkt_color_<mkt>, editable in CONFIG ▸ Admin ▸ General). Injected as MKT_COLORS.
+const MKT_COLOR_DEFAULTS = { UK: '#F88379', CA: '#DB2D43', US: '#B5C7EB', AU: '#A8DCAB', EU: '#D3D3FF' };
+async function buildMktColors() {
+  const m = Object.assign({}, MKT_COLOR_DEFAULTS);
+  try {
+    (await pool.query(`SELECT key, value FROM planner.app_settings WHERE key LIKE 'mkt_color_%'`)).rows.forEach(r => {
+      const mk = String(r.key).replace('mkt_color_', '').toUpperCase(); let v = String(r.value || '').trim();
+      if (m[mk] !== undefined && /^#?[0-9a-fA-F]{3,8}$/.test(v)) m[mk] = v[0] === '#' ? v : ('#' + v);
+    });
+  } catch {}
+  return m;
+}
 const SUPPLY_INJECT = loadInject();
 // Dev convenience: re-read the artefact + supply inject on each page load so edits show on a refresh WITHOUT
 // restarting the server (the boot-time consts above are kept for server-side global parsing + prod speed).
@@ -592,6 +615,8 @@ app.get('/', async (_req, res) => {
       buildCATS_META(), buildSUBS_META(), buildBI_RULES(), buildPROD_CONST(), freshness(), buildFBADIMS(), buildSAEXTRA(), gbpRate(), buildBRANCH_FREIGHT(), buildTRANSFER_LEADS(),
     ]); _dataCache = { at: Date.now(), vals: _vals }; }
     const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS, SA_EXTRA, GBP_RATE, BRANCH_FREIGHT, TRANSFER_LEADS] = _vals;
+    const KLAVIYO_BIS = await buildKlaviyoBis();   // fresh (uploads are infrequent, not in the data cache)
+    const MKT_COLORS = await buildMktColors();
     let html = DEV ? loadHTML() : HTML;
     html = replaceGlobal(html, 'DATA', JSON.stringify(DATA));
     html = replaceGlobal(html, 'FC_CURRENT', JSON.stringify(FC_CURRENT));
@@ -604,6 +629,8 @@ app.get('/', async (_req, res) => {
     html = replaceGlobal(html, 'PROD_CONST', JSON.stringify(PROD_CONST));
     html = replaceGlobal(html, 'ZAL_FC', JSON.stringify(ZAL_DATA.forecast || {}));
     html = replaceGlobal(html, 'ZAL_MONTHS', JSON.stringify(ZAL_DATA.months || []));
+    html = replaceGlobal(html, 'KLAVIYO_BIS', JSON.stringify(KLAVIYO_BIS));   // {sku:{UK:n,…}, _at:'YYYY-MM-DD'} — DEMAND BIS badge
+    html = replaceGlobal(html, 'MKT_COLORS', JSON.stringify(MKT_COLORS));     // reusable market colour palette
     html = replaceGlobal(html, 'BRANCH_FREIGHT', JSON.stringify(BRANCH_FREIGHT || {}));
     html = replaceGlobal(html, 'TRANSFER_LEADS', JSON.stringify(TRANSFER_LEADS || {}));
     // Definitive price changes (DEMAND ▸ Revenue) — injected fresh (not in the 5-min data cache) so an edit shows
@@ -3475,6 +3502,61 @@ app.post('/api/app-settings', async (req, res) => {
     await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ($1,$2,$3,now())
       ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [key, b.value || '', authUser(req) || null]);
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Klaviyo BIS per-market upload (SUG-0018). Raw Klaviyo back-in-stock export → sum "Queued Subscriptions" per SKU
+// (subscribed in the last 6 months) → replace that market's snapshot. Shared across users. .xlsx or .csv.
+app.post('/api/klaviyo-bis/upload', async (req, res) => {
+  try {
+    const b = req.body || {}; const market = String(b.market || '').trim().toUpperCase();
+    if (['UK', 'US', 'EU', 'AU'].indexOf(market) < 0) return res.status(400).json({ error: 'market must be UK / US / EU / AU' });
+    const b64 = String(b.content_base64 || '').replace(/^data:[^;]+;base64,/, ''); if (!b64) return res.status(400).json({ error: 'file required' });
+    const buf = Buffer.from(b64, 'base64'); const fname = String(b.filename || '');
+    // → array of {sku, queued, last}. Header-driven so column order doesn't matter.
+    let recs = [];
+    const norm = h => String(h == null ? '' : h).trim().toLowerCase();
+    const mapCols = hdr => { const c = {}; hdr.forEach((h, i) => { const n = norm(h); if (n === 'sku') c.sku = i; else if (/queued/.test(n)) c.q = i; else if (/last subscription/.test(n)) c.last = i; }); return c; };
+    const cellNum = v => { const n = parseFloat(String(v == null ? '' : v).replace(/[^0-9.\-]/g, '')); return isFinite(n) ? n : 0; };
+    if (/\.csv$/i.test(fname) || b.is_csv) {
+      const lines = buf.toString('utf8').split(/\r?\n/).map(l => l.split(',').map(x => x.replace(/^"|"$/g, '')));
+      let hi = lines.findIndex(r => r.some(x => norm(x) === 'sku') && r.some(x => /queued/.test(norm(x)))); if (hi < 0) hi = 0;
+      const col = mapCols(lines[hi]);
+      for (let r = hi + 1; r < lines.length; r++) { const row = lines[r]; if (col.sku == null) break; recs.push({ sku: (row[col.sku] || '').trim(), queued: cellNum(col.q != null ? row[col.q] : 0), last: col.last != null ? row[col.last] : '' }); }
+    } else {
+      const ExcelJS = (await import('exceljs')).default; const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf); const ws = wb.worksheets[0];
+      if (!ws) return res.status(400).json({ error: 'empty workbook' });
+      const txt = c => { const v = c && c.value; if (v == null) return ''; if (typeof v === 'object') { if (v.result != null) return v.result; if (v.text != null) return v.text; if (Array.isArray(v.richText)) return v.richText.map(t => t.text).join(''); return ''; } return v; };
+      const grid = []; for (let r = 1; r <= ws.rowCount; r++) { const row = []; for (let c = 1; c <= ws.columnCount; c++) row.push(txt(ws.getRow(r).getCell(c))); grid.push(row); }
+      let hi = grid.findIndex(r => r.some(x => norm(x) === 'sku') && r.some(x => /queued/.test(norm(x)))); if (hi < 0) hi = 0;
+      const col = mapCols(grid[hi]);
+      if (col.sku == null) return res.status(400).json({ error: 'Could not find a SKU / Queued Subscriptions header — is this a raw Klaviyo BIS export?' });
+      for (let r = hi + 1; r < grid.length; r++) { const row = grid[r]; recs.push({ sku: String(row[col.sku] || '').trim(), queued: cellNum(col.q != null ? row[col.q] : 0), last: col.last != null ? row[col.last] : '' }); }
+    }
+    // sum Queued per SKU, keeping only rows subscribed in the last 6 months (undatable rows kept)
+    const cut = new Date(); cut.setMonth(cut.getMonth() - 6);
+    const bySku = {};
+    recs.forEach(r => { if (!r.sku) return; const d = r.last ? new Date(String(r.last)) : null; if (d && !isNaN(d.getTime()) && d < cut) return; const q = Math.max(0, Math.round(r.queued || 0)); if (q <= 0) return; const k = r.sku.toUpperCase(); bySku[k] = (bySku[k] || 0) + q; });
+    const skus = Object.keys(bySku); const totalSubs = skus.reduce((a, s) => a + bySku[s], 0);
+    await pool.query('BEGIN');
+    try {
+      await pool.query(`DELETE FROM planner.klaviyo_bis WHERE market=$1`, [market]);
+      for (const s of skus) await pool.query(`INSERT INTO planner.klaviyo_bis (sku,market,subs,updated_at) VALUES ($1,$2,$3,now())`, [s, market, bySku[s]]);
+      await pool.query(`INSERT INTO planner.klaviyo_bis_uploads (market,filename,uploaded_by,uploaded_at,n_skus,total_subs)
+          VALUES ($1,$2,$3,now(),$4,$5)
+        ON CONFLICT (market) DO UPDATE SET filename=EXCLUDED.filename, uploaded_by=EXCLUDED.uploaded_by, uploaded_at=now(), n_skus=EXCLUDED.n_skus, total_subs=EXCLUDED.total_subs`,
+        [market, fname, authUser(req) || '', skus.length, totalSubs]);
+      await pool.query('COMMIT');
+    } catch (e) { await pool.query('ROLLBACK'); throw e; }
+    res.json({ ok: true, market, n_skus: skus.length, total_subs: totalSubs });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/klaviyo-bis/status', async (req, res) => {
+  try {
+    const rows = (await pool.query(`SELECT upper(market) market, coalesce(filename,'') filename, coalesce(uploaded_by,'') uploaded_by,
+        to_char(uploaded_at AT TIME ZONE 'UTC','YYYY-MM-DD') uploaded_at, n_skus, total_subs FROM planner.klaviyo_bis_uploads`)).rows;
+    const by = {}; rows.forEach(r => { by[r.market] = r; });
+    res.set('Cache-Control', 'no-store').json({ ok: true, markets: by });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

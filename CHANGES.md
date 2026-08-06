@@ -1,3 +1,8 @@
+## v26.611.0 — Reusable market colour palette + SHIP-TO badges; Klaviyo BIS server foundation (SUG-0018)
+- CONFIG ▸ Admin ▸ General: new "Market colours" pickers (UK #F88379 · US #B5C7EB · EU #D3D3FF · AU #A8DCAB · CA #DB2D43 — app_settings mkt_color_*). Injected as a reusable MKT_COLORS palette; badges keep BLACK text.
+- PO grid: the SHIP TO cell is now a coloured badge (market-colour background).
+- Order Plan (#/supply/order-plan): a 2-letter ship-to coloured badge before each PO column header; PO ref text reduced 12px→10px.
+- Klaviyo BIS (SUG-0018) SERVER foundation: migrations 186 (planner.klaviyo_bis) + 187 (planner.klaviyo_bis_uploads); per-market upload endpoint POST /api/klaviyo-bis/upload (parses a raw Klaviyo export, sums "Queued Subscriptions" per SKU over the last 6 months, shared snapshot) + GET /api/klaviyo-bis/status; KLAVIYO_BIS injected into the artifact. DEMAND ▸ Inputs upload UI + plan 🔔 badge = next.
 ## v26.610.0 — PO grid: Hide is now a multi-select dropdown
 - The three Hide toggles (snoozed / payment due / timeline unread) moved from inline checkboxes into a "Hide (N) ▾" dropdown — button shows the active count, opens a checkbox menu, closes on outside-click. Same effect on the ACTION ITEMS count / red badges / filter.
 
