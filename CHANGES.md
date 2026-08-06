@@ -1,3 +1,6 @@
+## v26.617.0 — Klaviyo BIS summary: all 4 country columns side-by-side, fully expanded
+- Forced 4-column grid (repeat(4,minmax(220px,1fr)), no auto-fit wrapping); removed the per-block max-height so every SKU row shows (no inner scroll). Page scrolls if needed.
+
 ## v26.616.0 — Klaviyo BIS summary: per-country SKU/QTY layout (mirrors the upload sheet)
 - Reworked the on-page Analysis summary to match BIS_REPORT_FILTERED: four side-by-side market blocks, each its own SKU + QTY list sorted by that market's subscribers, with a "N SKUs · total" header. SKU column fixed 200px + no-wrap. Per-market chips + CSV download retained.
 
