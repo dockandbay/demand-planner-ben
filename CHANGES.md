@@ -1,3 +1,9 @@
+## v26.651.0 — Manufacturing tab: existing-stock entry + PO detail (inline expand AND drawer)
+- New "Existing stock" column per component row (manual entry, per production x component SKU; migration 197 planner.manufacturing_stock_cover) added to Total supply / Coverage; recomputes inline on edit; POST /api/supply/manufacturing-stock.
+- See the POs behind each number two ways (both shown so Ben can pick): (a) inline expand (arrow) with In production / Completed / Finished-demand PO lists; (b) "drawer" pop-out per BOM SKU x production with KPI tiles + PO tables. Both link each PO to its drawer.
+- Server now surfaces per-production finished POs + per-component MFG PO split (in-production vs completed) and the manual stock figure.
+
+
 ## v26.650.0 — Supplier portal: white background
 - Portal body background changed from grey (#f1f5f9) to white (#fff).
 

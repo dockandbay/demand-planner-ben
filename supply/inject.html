@@ -4741,6 +4741,7 @@
   // MANUFACTURING sub-tab (mock): for each finished bundle, its demand (from finished-product POs) × BOM = the
   // component qty the MANUFACTURING-branch POs must carry. Shows required vs on-mfg-POs, the diff (shortage/overage),
   // and an "Accept" tick to sign off a mismatch. Part report, part management.
+  var _mfgDet={};   // per-row id → detail payload, shared by the inline expand + the pop-out drawer
   function renderManufacturing(d, b){ d=d||{}; if(!b)return;
     var bundles=d.bundles||[];
     var allComps=[]; bundles.forEach(function(bn){(bn.components||[]).forEach(function(c){allComps.push(c);});});
@@ -4791,39 +4792,120 @@
     // into IN PRODUCTION vs COMPLETED (both count toward coverage) so the numbers can be confirmed against demand.
     var prods=(d.productions||[]);
     if(!prods.length){ h+='<div class="count">No open finished-product demand (FUTURE / PRODUCTION / READY TO SHIP) for any bundle SKU.</div>'; }
+    var _rid=0; _mfgDet={};   // per-row id → detail payload for the pop-out drawer + inline stock recompute
     h+=prods.map(function(pr){
+      var prodKey=pr.prod_no||'';
+      var plabel=(pr.prod_no&&pr.prod_no!=='(no prod #)')?'Production P'+esc(pr.prod_no):esc(pr.prod_no);
       var body=(pr.bundles||[]).map(function(bn){
+        var finPos=(bn.finishedPos||[]).filter(function(x){return x.qty;});
         var compRows=(bn.components||[]).map(function(c){
+          var rid='mfgr'+(_rid++);
           var st=c.diff<0?'short':c.diff>0?'over':'ok';
           var diffTxt=st==='ok'?'<span class="tool-badge bg-green">match</span>':(st==='short'?'<span style="color:#b91c1c;font-weight:700">short '+units(-c.diff)+'</span>':'<span style="color:#92710a;font-weight:700">over '+units(c.diff)+'</span>');
-          var ipPos=(c.mfgPos||[]).filter(function(m){return m.bucket==='inProd'&&m.qty;});
-          var cpPos=(c.mfgPos||[]).filter(function(m){return m.bucket==='completed'&&m.qty;});
-          var tip=function(list,lbl){ return list.length?list.map(function(m){return m.po+(m.prod_no?' (P'+m.prod_no+')':'')+' ×'+m.qty;}).join('  ·  '):('no '+lbl+' MFG orders'); };
           var acc=(st!=='ok')?'<label class="mut tiny" style="cursor:pointer;white-space:nowrap"><input type="checkbox" class="mfg-acc" data-comp="'+esc(c.component_sku)+'"'+(c.accepted?' checked':'')+'> accept</label>':'';
-          return '<tr'+(st!=='ok'&&!c.accepted?' style="background:#fff7ed"':'')+'>'
-            +'<td class="l">'+esc(c.component_sku)+'</td>'
+          var stkIn='<input class="mfg-stock" data-rid="'+rid+'" data-prod="'+esc(prodKey)+'" data-comp="'+esc(c.component_sku)+'" data-req="'+c.required+'" data-fixed="'+(c.inProd+c.completed)+'" value="'+(c.stock||0)+'" title="Qty already covered by existing on-hand stock — added to total supply" style="width:64px;padding:2px 5px;font-size:11px;text-align:right;border:1px solid #cbd5e1;border-radius:4px">';
+          // stash the full detail so the drawer can render without a refetch
+          _mfgDet[rid]={ prodLabel:plabel, parent:bn.parent_sku, comp:c.component_sku, per:c.per, demand:bn.demand,
+            required:c.required, inProd:c.inProd, completed:c.completed, stock:c.stock||0, supplied:c.supplied, diff:c.diff,
+            finishedPos:finPos, ipPos:(c.mfgPos||[]).filter(function(m){return m.bucket==='inProd'&&m.qty;}),
+            cpPos:(c.mfgPos||[]).filter(function(m){return m.bucket==='completed'&&m.qty;}) };
+          var det=_mfgDet[rid];
+          var detRow='<tr class="mfg-inline-det" id="'+rid+'-det" style="display:none"><td colspan="8" style="background:#f8fafc;text-align:left;padding:8px 12px">'
+            +mfgInlineDetail(det)+'</td></tr>';
+          return '<tr id="'+rid+'"'+(st!=='ok'&&!c.accepted?' style="background:#fff7ed"':'')+'>'
+            +'<td class="l" style="white-space:nowrap"><button class="lnk-btn mfg-exp-btn" data-rid="'+rid+'" title="expand the detail inline" style="background:none;border:none;cursor:pointer;color:#64748b;padding:0 4px 0 0;font-size:11px">▸</button>'+esc(c.component_sku)+' <button class="lnk-btn mfg-det-btn" data-rid="'+rid+'" title="see the detail in a pop-out drawer" style="background:none;border:none;cursor:pointer;color:#1d4ed8;padding:0 0 0 4px;font-size:11px">drawer ↗</button></td>'
             +'<td>'+units(c.required)+'</td>'
-            +'<td title="'+esc(tip(ipPos,'in-production'))+'">'+units(c.inProd)+'</td>'
-            +'<td title="'+esc(tip(cpPos,'completed'))+'">'+units(c.completed)+'</td>'
-            +'<td style="font-weight:700">'+units(c.supplied)+'</td>'
-            +'<td>'+diffTxt+'</td>'
-            +'<td class="l">'+acc+'</td></tr>';
+            +'<td class="mfg-inprod">'+units(c.inProd)+'</td>'
+            +'<td class="mfg-compl">'+units(c.completed)+'</td>'
+            +'<td class="l">'+stkIn+'</td>'
+            +'<td class="mfg-total" style="font-weight:700">'+units(c.supplied)+'</td>'
+            +'<td class="mfg-cov">'+diffTxt+'</td>'
+            +'<td class="l mfg-acc-cell">'+acc+'</td></tr>'+detRow;
         }).join('');
-        return '<div style="margin:6px 0 12px"><div style="font-weight:700;font-size:12px;margin-bottom:3px">'+badgeFin+' '+esc(bn.parent_sku)+' <span class="mut tiny">— demand '+units(bn.demand)+'</span></div>'
-          +'<div class="tw" style="max-width:840px"><table style="width:max-content;min-width:100%"><thead><tr><th class="l">'+badgeMfg+' Component SKU</th><th>Required</th><th title="FUTURE / PRODUCTION / READY TO SHIP — still at the factory">In production</th><th title="COMPLETE / DELIVERED / SHIPPING — already made">Completed</th><th>Total supply</th><th>Coverage</th><th class="l">Sign-off</th></tr></thead><tbody>'+compRows+'</tbody></table></div></div>';
+        return '<div style="margin:6px 0 12px"><div style="font-weight:700;font-size:12px;margin-bottom:3px">'+badgeFin+' '+esc(bn.parent_sku)+' <span class="mut tiny">— demand '+units(bn.demand)+(finPos.length?(' · '+finPos.length+' finished PO'+(finPos.length===1?'':'s')):'')+'</span></div>'
+          +'<div class="tw" style="max-width:900px"><table style="width:max-content;min-width:100%"><thead><tr><th class="l">'+badgeMfg+' Component SKU</th><th>Required</th><th title="FUTURE / PRODUCTION / READY TO SHIP — still at the factory">In production</th><th title="COMPLETE / DELIVERED / SHIPPING — already made">Completed</th><th title="Manual entry — qty already covered by existing on-hand stock">Existing stock</th><th>Total supply</th><th>Coverage</th><th class="l">Sign-off</th></tr></thead><tbody>'+compRows+'</tbody></table></div></div>';
       }).join('');
-      var plabel=(pr.prod_no&&pr.prod_no!=='(no prod #)')?'Production P'+esc(pr.prod_no):esc(pr.prod_no);
       return '<div style="margin-bottom:16px;max-width:1000px;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px">'
         +'<div style="font-weight:800;font-size:14px;margin-bottom:6px">'+plabel+'</div>'+body+'</div>';
     }).join('');
     b.innerHTML=h; wireMfgNotes();
     b.querySelectorAll('.mfg-po-go').forEach(function(x){ x.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(x.dataset.po); else gotoPO(x.dataset.po); }; });
-    b.querySelectorAll('.mfg-acc').forEach(function(cb){ cb.onchange=function(){ var comp=cb.dataset.comp, on=cb.checked;
+    b.querySelectorAll('.mfg-det-btn').forEach(function(x){ x.onclick=function(){ openMfgSkuDrawer(_mfgDet[x.dataset.rid]); }; });
+    b.querySelectorAll('.mfg-exp-btn').forEach(function(x){ x.onclick=function(){ var dr=document.getElementById(x.dataset.rid+'-det'); if(!dr)return; var open=dr.style.display==='none'; dr.style.display=open?'':'none'; x.textContent=open?'▾':'▸';
+      if(open)dr.querySelectorAll('.mfg-inline-po').forEach(function(p){ p.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(p.dataset.po); else gotoPO(p.dataset.po); }; }); }; });
+    // Existing-stock manual entry: save on change/blur, then recompute Total supply + Coverage for the row inline.
+    b.querySelectorAll('.mfg-stock').forEach(function(inp){
+      var save=function(){ var q=Math.max(0,Math.round(Number(inp.value)||0)); inp.value=q;
+        var req=Number(inp.dataset.req)||0, fixed=Number(inp.dataset.fixed)||0, supplied=fixed+q, diff=supplied-req, rid=inp.dataset.rid;
+        var tr=document.getElementById(rid); if(tr){ var tot=tr.querySelector('.mfg-total'); if(tot)tot.textContent=units(supplied);
+          var cov=tr.querySelector('.mfg-cov'); if(cov)cov.innerHTML=(diff===0?'<span class="tool-badge bg-green">match</span>':(diff<0?'<span style="color:#b91c1c;font-weight:700">short '+units(-diff)+'</span>':'<span style="color:#92710a;font-weight:700">over '+units(diff)+'</span>'));
+          var accCell=tr.querySelector('.mfg-acc-cell'), comp=inp.dataset.comp;
+          if(accCell){ if(diff===0)accCell.innerHTML=''; else if(!accCell.querySelector('.mfg-acc'))accCell.innerHTML='<label class="mut tiny" style="cursor:pointer;white-space:nowrap"><input type="checkbox" class="mfg-acc" data-comp="'+esc(comp)+'"> accept</label>'; }
+          tr.style.background=(diff!==0 && !(accCell&&accCell.querySelector('.mfg-acc:checked')))?'#fff7ed':''; }
+        if(_mfgDet[rid]){ _mfgDet[rid].stock=q; _mfgDet[rid].supplied=supplied; _mfgDet[rid].diff=diff; }
+        fetch('/api/supply/manufacturing-stock',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({prod_no:inp.dataset.prod,component_sku:inp.dataset.comp,qty:q,updated_by:(window.ME&&ME.email)||null})})
+          .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); delete cache['manufacturing']; try{ _navCounts.manufacturing=undefined; prefetchNavCounts(); }catch(e){} inp.style.borderColor='#16a34a'; setTimeout(function(){ inp.style.borderColor='#cbd5e1'; },900); })
+          .catch(function(e){ inp.style.borderColor='#dc2626'; alert('Could not save stock: '+(e.message||e)); });
+        // re-bind any accept checkbox we just created
+        bindMfgAcc(); };
+      inp.onchange=save; inp.addEventListener('keydown',function(e){ if(e.key==='Enter'){ inp.blur(); } });
+    });
+    function bindMfgAcc(){ b.querySelectorAll('.mfg-acc').forEach(function(cb){ if(cb._wired)return; cb._wired=true; cb.onchange=function(){ var comp=cb.dataset.comp, on=cb.checked;
       fetch('/api/supply/manufacturing-accept',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({component_sku:comp,accepted:on,accepted_by:'PO PLAN'})})
         .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); delete cache['manufacturing'];
           var tr=cb.closest('tr'); if(tr)tr.style.background=on?'':'#fff7ed'; })
-        .catch(function(e){ cb.checked=!on; alert('Could not save: '+(e.message||e)); }); }; });
+        .catch(function(e){ cb.checked=!on; alert('Could not save: '+(e.message||e)); }); }; }); }
+    bindMfgAcc();
   }
+  // Pop-out drawer: the purchase-order detail behind one BOM component SKU in one production. Rendered from the
+  // stashed payload (_mfgDet) — no refetch. Reuses the shipment/PO drawer chrome.
+  function openMfgSkuDrawer(m){ if(!m)return;
+    if(typeof closePODrawer==='function')closePODrawer(true);
+    var root=document.getElementById('supply-root')||document.body;
+    var st=m.diff<0?'short':m.diff>0?'over':'ok';
+    var covTxt=st==='ok'?'<span class="tool-badge bg-green">match</span>':(st==='short'?'<span style="color:#b91c1c;font-weight:800">short '+units(-m.diff)+'</span>':'<span style="color:#92710a;font-weight:800">over '+units(m.diff)+'</span>');
+    function poList(list,label,empty){ if(!list||!list.length)return '<div style="margin:4px 0 12px"><div style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:#64748b;margin-bottom:3px">'+label+'</div><div class="mut tiny">'+empty+'</div></div>';
+      var tot=list.reduce(function(s,x){return s+Number(x.qty||0);},0);
+      return '<div style="margin:4px 0 12px"><div style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:#64748b;margin-bottom:4px">'+label+' <span class="mut">— '+units(tot)+'</span></div>'
+        +'<div class="tw" style="margin:0"><table style="width:100%;font-size:11px"><thead><tr><th class="l">PO</th><th class="l">Prod</th><th class="l">Status</th><th>Qty</th></tr></thead><tbody>'
+        +list.map(function(x){ return '<tr><td class="l"><button class="lnk-btn mfg-drw-po" data-po="'+esc(x.po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer;font:inherit">'+esc(x.po)+'</button></td><td class="l">'+(x.prod_no?'P'+esc(x.prod_no):'')+'</td><td class="l">'+esc(x.status||'')+(x.prod_end?' <span class="mut">· ends '+fd(x.prod_end)+'</span>':'')+'</td><td>'+units(x.qty)+'</td></tr>'; }).join('')
+        +'</tbody></table></div></div>'; }
+    var bg=document.createElement('div'); bg.id='podrawer-bg'; bg.style.zIndex=(typeof nextDrawerZ==='function'?nextDrawerZ():1000);
+    bg.innerHTML='<div id="podrawer"><div class="shipdrawer-head"><div class="shipdrawer-title">'+esc(m.comp)+' <span style="font-weight:400;opacity:.7">· '+esc(m.prodLabel)+'</span></div>'
+      +'<div><button class="shipdrawer-x" title="close">✕</button></div></div>'
+      +'<div class="shipdrawer-body">'
+      +'<div style="font-size:12px;margin-bottom:10px">Component of '+badgeFinInline()+' <b>'+esc(m.parent)+'</b> — <b>'+units(m.per)+'</b> per finished unit × demand <b>'+units(m.demand)+'</b> = required <b>'+units(m.required)+'</b>.</div>'
+      +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">'
+        +mfgKpi('Required',units(m.required),'#f1f5f9','#334155')
+        +mfgKpi('In production',units(m.inProd),'#fef3c7','#92400e')
+        +mfgKpi('Completed',units(m.completed),'#dcfce7','#166534')
+        +mfgKpi('Existing stock',units(m.stock),'#e0f2fe','#075985')
+        +mfgKpi('Total supply',units(m.supplied),'#f1f5f9','#334155')
+        +mfgKpi('Coverage',covTxt,st==='short'?'#fee2e2':st==='over'?'#fef9c3':'#dcfce7',st==='short'?'#b91c1c':st==='over'?'#92710a':'#166534')
+      +'</div>'
+      +poList(m.ipPos,'🏭 In-production MFG orders','No in-production manufacturing orders.')
+      +poList(m.cpPos,'✅ Completed MFG orders','No completed manufacturing orders.')
+      +poList(m.finishedPos,'📦 Finished-product orders driving demand','No open finished orders.')
+      +'<div class="mut tiny" style="margin-top:6px">Existing stock is entered on the summary row and added to total supply.</div>'
+      +'</div></div>';
+    root.appendChild(bg);
+    requestAnimationFrame(function(){ bg.classList.add('open'); });
+    bg.addEventListener('mousedown',function(e){ if(e.target===bg)bg.parentNode&&bg.parentNode.removeChild(bg); });
+    bg.querySelector('.shipdrawer-x').onclick=function(){ if(bg.parentNode)bg.parentNode.removeChild(bg); };
+    bg.querySelectorAll('.mfg-drw-po').forEach(function(x){ x.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(x.dataset.po); else gotoPO(x.dataset.po); }; });
+  }
+  // Inline expand: compact PO detail behind one component's numbers (in-production / completed / finished demand).
+  function mfgInlineDetail(m){ if(!m)return '';
+    function grp(list,label,empty){ if(!list||!list.length)return '<div class="mut tiny" style="margin:2px 0 5px"><b>'+label+':</b> '+empty+'</div>';
+      return '<div style="margin:2px 0 6px"><div class="mut tiny" style="font-weight:700;text-transform:uppercase;letter-spacing:.03em;margin-bottom:1px">'+label+'</div>'
+        +list.map(function(x){ return '<div style="font-size:11px;line-height:1.5"><button class="lnk-btn mfg-inline-po" data-po="'+esc(x.po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer;font:inherit">'+esc(x.po)+'</button>'
+          +(x.prod_no?' <span class="mut">P'+esc(x.prod_no)+'</span>':'')+' × '+units(x.qty)+(x.status?' <span class="mut">· '+esc(x.status)+'</span>':'')+(x.prod_end?' <span class="mut">· ends '+fd(x.prod_end)+'</span>':'')+'</div>'; }).join('')+'</div>'; }
+    return '<div style="display:flex;gap:26px;flex-wrap:wrap">'
+      +'<div style="min-width:180px">'+grp(m.ipPos,'🏭 In production','none')+'</div>'
+      +'<div style="min-width:180px">'+grp(m.cpPos,'✅ Completed','none')+'</div>'
+      +'<div style="min-width:180px">'+grp(m.finishedPos,'📦 Finished demand','none')+'</div></div>'; }
+  function mfgKpi(label,val,bg,fg){ return '<div style="flex:0 0 auto;min-width:84px;padding:7px 11px;border-radius:8px;background:'+bg+';color:'+fg+'"><div style="font-size:16px;font-weight:800;line-height:1.1">'+val+'</div><div style="font-size:9px;text-transform:uppercase;letter-spacing:.04em;opacity:.85;margin-top:2px">'+label+'</div></div>'; }
+  function badgeFinInline(){ return '<span style="display:inline-block;padding:1px 7px;border-radius:10px;background:#dbeafe;color:#1e40af;font-weight:700;font-size:10px">📦 FINISHED</span>'; }
   function renderProductions(rows){ var c=document.getElementById('supply-content');
     c.innerHTML=annot(subUmbrella(poSub)==='payments'?'payments':'productions')+poSubNav()
       +'<div id="prod-body"><div class="count">Loading…</div></div>';

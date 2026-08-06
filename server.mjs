@@ -561,7 +561,7 @@ const CONFIG_WRITE = [   // config reference-data writes — editable by anyone 
   /^\/api\/supply\/supplier-create$/, /^\/api\/supply\/key-account/, /^\/api\/supply\/batch\//,
   /^\/api\/supply\/batch-create$/, /^\/api\/supply\/production-create$/, /^\/api\/supply\/prod-number\//,
   /^\/api\/supply\/portal-user/, /^\/api\/supply\/manufacturing-bom-(save|delete)$/,
-  /^\/api\/supply\/manufacturing-accept$/, /^\/api\/supply\/settings$/,
+  /^\/api\/supply\/manufacturing-accept$/, /^\/api\/supply\/manufacturing-stock$/, /^\/api\/supply\/settings$/,
 ];
 function requiredCap(method, p) {
   if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return null;   // reads open to all
@@ -1053,34 +1053,49 @@ async function manufacturingData() {
     WHERE l.sku = ANY($1) AND coalesce(p.branch,'') ILIKE '%manufactur%'
       AND coalesce(p.status,'') NOT ILIKE '%cancel%'`, [comps])).rows : [];
   const accepted = {}; (await pool.query(`SELECT component_sku, accepted FROM planner.manufacturing_accept`)).rows.forEach(r => { accepted[r.component_sku] = !!r.accepted; });
+  // Manual "covered by existing stock" per (prod_no, component_sku). Added to a component's coverage. (mig 197)
+  const stockBy = {}, stockTotByComp = {};
+  (await pool.query(`SELECT prod_no, component_sku, qty::numeric qty FROM planner.manufacturing_stock_cover`).catch(() => ({ rows: [] }))).rows
+    .forEach(r => { (stockBy[r.prod_no || '(no prod #)'] = stockBy[r.prod_no || '(no prod #)'] || {})[r.component_sku] = Number(r.qty);
+      stockTotByComp[r.component_sku] = (stockTotByComp[r.component_sku] || 0) + Number(r.qty); });
   const mfgBucket = s => { const u = (s || '').toUpperCase(); if (u.includes('READY TO SHIP')) return 'inProd'; if (/COMPLETE|DELIVER|SHIP/.test(u)) return 'completed'; return 'inProd'; };
   // Component supply pooled by SKU, split into inProd / completed.
   const compSup = {};   // sku -> { inProd, completed, mfgPos:[] }
   supRows.forEach(r => { const e = compSup[r.sku] || (compSup[r.sku] = { inProd: 0, completed: 0, mfgPos: [] }); const b = mfgBucket(r.status); e[b] += Number(r.qty); e.mfgPos.push({ po: r.po, qty: Number(r.qty), status: r.status, prod_no: r.prod_no, bucket: b }); });
   // Demand pooled by parent (flat, for actions/KPIs) AND by (prod_no, parent) for the grouped view.
+  // demByProd[pk][sku] = { qty, pos:[] } so each production card can also show the finished POs that create the demand.
   const demandBy = {}, finishedPosBy = {}, demByProd = {};
   demRows.forEach(r => {
     demandBy[r.sku] = (demandBy[r.sku] || 0) + Number(r.qty);
     (finishedPosBy[r.sku] = finishedPosBy[r.sku] || []).push({ po: r.po, prod_no: r.prod_no, qty: Number(r.qty), branch: r.branch, status: r.status, prod_end: r.prod_end || '' });
     const pk = r.prod_no || '(no prod #)';
-    (demByProd[pk] = demByProd[pk] || {})[r.sku] = (demByProd[pk][r.sku] || 0) + Number(r.qty);
+    const pm = demByProd[pk] || (demByProd[pk] = {});
+    const e = pm[r.sku] || (pm[r.sku] = { qty: 0, pos: [] });
+    e.qty += Number(r.qty);
+    e.pos.push({ po: r.po, prod_no: r.prod_no, qty: Number(r.qty), status: r.status, prod_end: r.prod_end || '' });
   });
-  const compsOf = (parent, demand) => bom.filter(b => b.parent_sku === parent).map(b => {
+  // stockFn(component_sku) → manually-entered existing-stock cover for this scope; added to a component's supply.
+  const compsOf = (parent, demand, stockFn) => bom.filter(b => b.parent_sku === parent).map(b => {
     const sup = compSup[b.component_sku] || { inProd: 0, completed: 0, mfgPos: [] };
-    const required = demand * Number(b.qty), supplied = sup.inProd + sup.completed;
-    return { component_sku: b.component_sku, per: Number(b.qty), required, inProd: sup.inProd, completed: sup.completed, supplied, diff: supplied - required, mfgPos: sup.mfgPos, accepted: !!accepted[b.component_sku] };
+    const stock = (stockFn ? Number(stockFn(b.component_sku)) : 0) || 0;
+    const required = demand * Number(b.qty), supplied = sup.inProd + sup.completed + stock;
+    return { component_sku: b.component_sku, per: Number(b.qty), required, inProd: sup.inProd, completed: sup.completed, stock, supplied, diff: supplied - required, mfgPos: sup.mfgPos, accepted: !!accepted[b.component_sku] };
   });
-  // Flat bundles (per parent, pooled demand) — kept for manufacturingActions + KPIs.
+  // Flat bundles (per parent, pooled demand) — kept for manufacturingActions + KPIs. Uses the component's total
+  // manual stock (summed across productions) so the action/short count stays consistent with the grouped view.
   const bundles = parents.map(parent => {
     const demand = demandBy[parent] || 0;
-    return { parent_sku: parent, demand, finishedPos: finishedPosBy[parent] || [], components: compsOf(parent, demand) };
+    return { parent_sku: parent, demand, finishedPos: finishedPosBy[parent] || [], components: compsOf(parent, demand, c => stockTotByComp[c] || 0) };
   });
-  // Grouped by production (finished prod_no) — the view. NOTE: component supply is pooled by SKU and shown in full
-  // against each production that needs it; when one component feeds several open productions this can read as
-  // over-covered (allocation across productions is a later refinement).
+  // Grouped by production (finished prod_no) — the view. Manual existing-stock cover is scoped to (prod_no, component).
+  // Component MFG supply is still pooled by SKU and shown against each production; the tab now surfaces the actual
+  // MFG POs (in-production / completed) per component so the split can be judged by eye rather than allocated.
   const productions = Object.keys(demByProd).sort((a, b) => (a < b ? 1 : a > b ? -1 : 0)).map(prod => ({
     prod_no: prod,
-    bundles: Object.keys(demByProd[prod]).sort().map(parent => ({ parent_sku: parent, demand: demByProd[prod][parent], components: compsOf(parent, demByProd[prod][parent]) }))
+    bundles: Object.keys(demByProd[prod]).sort().map(parent => ({
+      parent_sku: parent, demand: demByProd[prod][parent].qty, finishedPos: demByProd[prod][parent].pos,
+      components: compsOf(parent, demByProd[prod][parent].qty, c => (stockBy[prod] || {})[c] || 0)
+    }))
   }));
   return { bom, bundles, productions };
 }
@@ -5477,6 +5492,21 @@ app.post('/api/supply/manufacturing-accept', async (req, res) => {
       VALUES ($1, true, $2, now()) ON CONFLICT (component_sku) DO UPDATE SET accepted=true, accepted_by=$2, accepted_at=now()`, [b.component_sku, b.accepted_by || 'PO PLAN']);
     else await pool.query(`DELETE FROM planner.manufacturing_accept WHERE component_sku=$1`, [b.component_sku]);
     res.json({ ok: true, component_sku: b.component_sku, accepted: on });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// SUPPLY ▸ Manufacturing — manual "covered by existing stock" per (prod_no, component_sku). (mig 197)
+app.post('/api/supply/manufacturing-stock', async (req, res) => {
+  const b = req.body || {};
+  const prod = String(b.prod_no || '').trim(), comp = String(b.component_sku || '').trim();
+  const qty = Number(b.qty);
+  if (!prod || !comp) return res.status(400).json({ error: 'prod_no and component_sku required' });
+  if (!isFinite(qty) || qty < 0) return res.status(400).json({ error: 'qty must be zero or a positive number' });
+  try {
+    if (qty > 0) await pool.query(`INSERT INTO planner.manufacturing_stock_cover (prod_no, component_sku, qty, updated_by, updated_at)
+      VALUES ($1,$2,$3,$4, now()) ON CONFLICT (prod_no, component_sku) DO UPDATE SET qty=$3, updated_by=$4, updated_at=now()`,
+      [prod, comp, qty, b.updated_by || null]);
+    else await pool.query(`DELETE FROM planner.manufacturing_stock_cover WHERE prod_no=$1 AND component_sku=$2`, [prod, comp]);
+    res.json({ ok: true, prod_no: prod, component_sku: comp, qty });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // CONFIG ▸ Manufacturing BOM — upsert a parent→component row (qty per finished unit). Add or edit.
