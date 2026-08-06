@@ -4867,7 +4867,7 @@
     function compBlock(c){ var st=c.diff<0?'short':c.diff>0?'over':'ok';
       var covTxt=st==='ok'?'<span class="tool-badge bg-green">match</span>':(st==='short'?'<span style="color:#b91c1c;font-weight:800">short '+units(-c.diff)+'</span>':'<span style="color:#92710a;font-weight:800">over '+units(c.diff)+'</span>');
       var pos=(c.mfgPos||[]);
-      var poTbl=pos.length?('<div class="tw" style="margin:6px 0 0"><table style="width:100%;font-size:11px"><thead><tr><th class="l">'+badgeMfg+' Manufacturing PO</th><th class="l">Prod</th><th class="l">Stage</th><th class="l">Status</th><th>Qty</th></tr></thead><tbody>'
+      var poTbl=pos.length?('<div class="tw" style="margin:6px 0 0"><table style="width:100%;font-size:11px"><thead><tr><th class="l">'+badgeMfgInline()+' Manufacturing PO</th><th class="l">Prod</th><th class="l">Stage</th><th class="l">Status</th><th>Qty</th></tr></thead><tbody>'
         +pos.map(function(x){ return '<tr><td class="l"><button class="lnk-btn mfg-drw-po" data-po="'+esc(x.po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer;font:inherit">'+esc(x.po)+'</button></td><td class="l">'+(x.prod_no?'P'+esc(x.prod_no):'')+'</td><td class="l">'+(x.bucket==='completed'?'✅ Completed':'🏭 In production')+'</td><td class="l">'+esc(x.status||'')+'</td><td>'+units(x.qty)+'</td></tr>'; }).join('')
         +'</tbody></table></div>'):'<div class="mut tiny" style="margin:4px 0 0">No Manufacturing-branch POs for this component.</div>';
       return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:10px">'
@@ -4897,6 +4897,7 @@
   }
   function mfgKpi(label,val,bg,fg){ return '<div style="flex:0 0 auto;min-width:84px;padding:7px 11px;border-radius:8px;background:'+bg+';color:'+fg+'"><div style="font-size:16px;font-weight:800;line-height:1.1">'+val+'</div><div style="font-size:9px;text-transform:uppercase;letter-spacing:.04em;opacity:.85;margin-top:2px">'+label+'</div></div>'; }
   function badgeFinInline(){ return '<span style="display:inline-block;padding:1px 7px;border-radius:10px;background:#dbeafe;color:#1e40af;font-weight:700;font-size:10px">📦 FINISHED</span>'; }
+  function badgeMfgInline(){ return '<span style="display:inline-block;padding:1px 7px;border-radius:10px;background:#fef3c7;color:#92400e;font-weight:700;font-size:10px">🏭 MFG</span>'; }
   function renderProductions(rows){ var c=document.getElementById('supply-content');
     c.innerHTML=annot(subUmbrella(poSub)==='payments'?'payments':'productions')+poSubNav()
       +'<div id="prod-body"><div class="count">Loading…</div></div>';

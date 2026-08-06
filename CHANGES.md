@@ -1,3 +1,7 @@
+## v26.659.0 — Fix: Manufacturing detail drawer not popping
+- openMfgBundleDrawer referenced badgeMfg (a var local to renderManufacturing) → ReferenceError on click, drawer never rendered. Added top-level badgeMfgInline() helper.
+
+
 ## v26.658.0 — Zalando: no edit permission needed to submit the file
 - Exempted /api/supply/zalando/* from the SUPPLY edit-rights guard (requiredCap) so anyone can upload the stock snapshot / generate the Zalando send-file without SUPPLY permissions. Benign snapshot action.
 
