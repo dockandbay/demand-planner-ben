@@ -1,3 +1,8 @@
+## v26.623.0 — Specifications: search + type pills, pending/approved status, list & matrix views
+- Added a **search box** and **type filter pills** over the specifications.
+- **Approval column** is now a clickable **pending / approved** pill (green/amber) for specs requiring supplier confirmation (—for those that don't); toggling posts to a new `/api/product/specs/:id/approval` endpoint (`approval_status`, mig 193). P3's supplier flow will drive this automatically.
+- **Two view modes** via a toggle: **List** — grouped by product category with "All products" at the top — and **Matrix** — spec types as column headers, product categories as row headers, each cell showing the applicable file(s) + status.
+
 ## v26.622.0 — Zalando upload: show who uploaded + "Analysis complete" badge
 - Zalando stock-on-hand status now reads e.g. "136 SKUs · ben@ uploaded 05-Aug-26 22:26 · 0 days old" (uploader captured server-side via `authUser`, stored in `zalando_stock.uploaded_by`, mig 192; returned as `stock_updated_by`).
 - Added a green "✓ Analysis complete" badge in the Stock-on-hand box whenever a fresh (≤7-day) stock file is loaded and the send analysis is showing — the "Uploading…" message remains during the upload itself.

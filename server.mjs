@@ -4467,8 +4467,14 @@ app.get('/api/product/specs', async (_req, res) => {
       coalesce(effective_when, CASE WHEN effective_mode='production' THEN 'production' ELSE 'immediate' END) effective_when,
       coalesce(effective_stock, CASE WHEN effective_mode='immediate_dispose' THEN 'dispose' ELSE 'useup' END) effective_stock,
       coalesce(effective_prod_no,'') effective_prod_no, confirm_with_supplier, coalesce(confirm_suppliers,'') confirm_suppliers,
+      coalesce(approval_status,'pending') approval_status,
       coalesce(uploaded_by,'') uploaded_by, to_char(uploaded_at,'DD-Mon-YY HH24:MI') uploaded_at
       FROM planner.product_specs WHERE active ORDER BY uploaded_at DESC`); res.json(r.rows); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/specs/:id/approval', async (req, res) => {   // toggle a confirm-spec's approval state (pending|approved)
+  const st = ((req.body || {}).status || '').trim() === 'approved' ? 'approved' : 'pending';
+  try { await pool.query(`UPDATE planner.product_specs SET approval_status=$2 WHERE id=$1`, [req.params.id, st]); res.json({ ok: true, status: st }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/specs', async (req, res) => {

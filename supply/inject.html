@@ -9769,6 +9769,7 @@
     if(k==='dashboard') return renderProductDashboard(c);
     renderProductPlan(c); }
   // SPECIFICATIONS (SUG-0019) — source-of-truth packaging/labelling docs. P1: managed types + upload with scope + effective-from.
+  var _specView='list', _specQ='', _specTypeFilter={};   // list = grouped by category; matrix = category × type. Persist across redraws.
   function renderProductSpecs(c){
     c.innerHTML='<div class="count" style="padding:10px 2px;color:#94a3b8">Loading specifications…</div>';
     Promise.all([
@@ -9810,20 +9811,56 @@
         +'<div style="text-align:right"><button class="save-btn" id="sp-save">Save specification</button></div>'
         +'</div>'
       ):'<div style="background:#fef3c7;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:10px 14px;margin:0 0 16px;max-width:720px;font-size:13px">No spec types yet. <b>Manage types</b> to add your first (e.g. Hang tag). <button class="save-btn" id="sp-mgt0" style="background:#fff;color:#92400e;border-color:#fde68a;margin-left:8px">Manage types</button></div>';
-      var rows=specs.length?specs.map(function(s){
-        return '<tr style="border-top:1px solid #eef2f7">'
-          +'<td style="padding:6px 10px 6px 0;font-weight:600;color:#0f172a">'+esc(s.spec_type)+'</td>'
-          +'<td style="padding:6px 10px 6px 0;color:#334155">'+scopeLabel(s)+'</td>'
-          +'<td style="padding:6px 10px 6px 0;color:#334155">'+effLabel(s)+'</td>'
-          +'<td style="padding:6px 10px 6px 0">'+(s.confirm_with_supplier?('<span style="display:inline-block;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px;background:#fef3c7;color:#92400e">confirm</span>'+(s.confirm_suppliers?' <span style="color:#64748b;font-size:11px">'+esc(s.confirm_suppliers)+'</span>':'')):'<span style="color:#cbd5e1">—</span>')+'</td>'
-          +'<td style="padding:6px 10px 6px 0"><a href="/api/product/spec-file/'+s.id+'" target="_blank" style="color:#2563eb;text-decoration:none">'+esc(s.filename||'file')+'</a></td>'
-          +'<td style="padding:6px 10px 6px 0;color:#94a3b8;font-size:11px;white-space:nowrap">'+esc(shortUser(s.uploaded_by||''))+(s.uploaded_at?' · '+esc(s.uploaded_at):'')+'</td>'
-          +'<td style="padding:6px 0"><button class="sp-del" data-id="'+s.id+'" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:14px" title="Delete">✕</button></td>'
-        +'</tr>';
-      }).join(''):'';
-      var list='<div style="font-weight:700;font-size:13px;color:#0f172a;margin:4px 0 8px">Current specifications ('+specs.length+')</div>'
-        +(specs.length?'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%"><thead><tr style="text-align:left;color:#64748b;font-size:11px"><th style="padding:0 10px 4px 0">Type</th><th style="padding:0 10px 4px 0">Applies to</th><th style="padding:0 10px 4px 0">Use from</th><th style="padding:0 10px 4px 0">Approval</th><th style="padding:0 10px 4px 0">File</th><th style="padding:0 10px 4px 0">Uploaded</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<div style="color:#94a3b8;font-size:13px;padding:6px 0">No specifications uploaded yet.</div>');
-      c.innerHTML='<div style="padding:6px 2px"><div style="font-size:16px;font-weight:700;color:#0f172a;margin-bottom:2px">Specifications</div><div style="color:#94a3b8;font-size:12px;margin-bottom:14px">Manage source-of-truth packaging &amp; labelling documents. Assign each to all products, a category, a size group, or specific SKUs — with a use-from rule.</div>'+upload+list+'</div>';
+      function apPill(s,compact){ if(!s.confirm_with_supplier)return '<span style="color:#cbd5e1">—</span>';
+        var ap=(s.approval_status==='approved');
+        var names=(!compact&&s.confirm_suppliers)?' <span style="color:#94a3b8;font-size:11px">'+esc(s.confirm_suppliers)+'</span>':'';
+        return '<span class="sp-ap" data-id="'+s.id+'" data-st="'+(ap?'approved':'pending')+'" title="Click to toggle pending / approved" style="cursor:pointer;display:inline-block;font-size:10px;font-weight:700;padding:1px 8px;border-radius:8px;'+(ap?'background:#dcfce7;color:#166534':'background:#fef3c7;color:#92400e')+'">'+(ap?'approved':'pending')+'</span>'+names; }
+      function rowHtml(s){ return '<tr style="border-top:1px solid #eef2f7">'
+        +'<td style="padding:6px 10px 6px 0;font-weight:600;color:#0f172a">'+esc(s.spec_type)+'</td>'
+        +'<td style="padding:6px 10px 6px 0;color:#334155">'+scopeLabel(s)+'</td>'
+        +'<td style="padding:6px 10px 6px 0;color:#334155">'+effLabel(s)+'</td>'
+        +'<td style="padding:6px 10px 6px 0">'+apPill(s)+'</td>'
+        +'<td style="padding:6px 10px 6px 0"><a href="/api/product/spec-file/'+s.id+'" target="_blank" style="color:#2563eb;text-decoration:none">'+esc(s.filename||'file')+'</a></td>'
+        +'<td style="padding:6px 10px 6px 0;color:#94a3b8;font-size:11px;white-space:nowrap">'+esc(shortUser(s.uploaded_by||''))+(s.uploaded_at?' · '+esc(s.uploaded_at):'')+'</td>'
+        +'<td style="padding:6px 0"><button class="sp-del" data-id="'+s.id+'" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:14px" title="Delete">✕</button></td></tr>'; }
+      function catKey(s){ return s.scope_type==='all'?'__all':s.scope_type==='sku'?'__sku':(s.scope_category||'(uncategorised)'); }
+      function catLbl(k){ return k==='__all'?'All products':k==='__sku'?'Specific SKUs':k; }
+      function catOrder(a,b){ var w=function(k){return k==='__all'?0:(k==='__sku'?2:1);}; return w(a)-w(b)||(a<b?-1:a>b?1:0); }
+      function matchQ(s){ if(!_specQ)return true; var q=_specQ.toLowerCase(); return [s.spec_type,scopeLabel(s),s.filename,s.confirm_suppliers,s.approval_status].some(function(x){return String(x||'').toLowerCase().indexOf(q)>=0;}); }
+      function activeTypes(){ return Object.keys(_specTypeFilter).filter(function(k){return _specTypeFilter[k];}); }
+      function matchType(s){ var a=activeTypes(); return !a.length||a.indexOf(s.spec_type)>=0; }
+      var THEAD='<thead><tr style="text-align:left;color:#64748b;font-size:11px"><th style="padding:0 10px 4px 0">Type</th><th style="padding:0 10px 4px 0">Applies to</th><th style="padding:0 10px 4px 0">Use from</th><th style="padding:0 10px 4px 0">Approval</th><th style="padding:0 10px 4px 0">File</th><th style="padding:0 10px 4px 0">Uploaded</th><th></th></tr></thead>';
+      function drawSpecs(){ var w=c.querySelector('#sp-listwrap'); if(!w)return;
+        if(!specs.length){ w.innerHTML='<div style="color:#94a3b8;font-size:13px;padding:6px 0">No specifications uploaded yet.</div>'; return; }
+        var shown=specs.filter(function(s){return matchQ(s)&&matchType(s);});
+        if(!shown.length){ w.innerHTML='<div style="color:#94a3b8;font-size:13px;padding:6px 0">No specifications match the filter.</div>'; return; }
+        if(_specView==='matrix'){
+          var colTypes=activeTypes().length?types.filter(function(t){return _specTypeFilter[t.name];}):types;
+          var keys=[]; shown.forEach(function(s){ var k=catKey(s); if(keys.indexOf(k)<0)keys.push(k); }); keys.sort(catOrder);
+          var head='<tr style="color:#64748b;font-size:11px"><th style="text-align:left;padding:4px 10px 6px 0;min-width:150px">Category</th>'+colTypes.map(function(t){return '<th style="text-align:left;padding:4px 10px 6px 0;min-width:120px">'+esc(t.name)+'</th>';}).join('')+'</tr>';
+          var body=keys.map(function(k){ return '<tr style="border-top:1px solid #eef2f7"><td style="padding:6px 10px 6px 0;font-weight:600;color:#0f172a;vertical-align:top">'+esc(catLbl(k))+'</td>'+colTypes.map(function(t){
+            var cell=shown.filter(function(s){return catKey(s)===k&&s.spec_type===t.name;});
+            if(!cell.length)return '<td style="padding:6px 10px 6px 0;color:#e2e8f0">—</td>';
+            return '<td style="padding:6px 10px 6px 0;vertical-align:top">'+cell.map(function(s){ return '<div style="margin-bottom:4px;white-space:nowrap"><a href="/api/product/spec-file/'+s.id+'" target="_blank" style="color:#2563eb;text-decoration:none" title="'+esc(s.filename||'')+'">'+esc((s.filename||'file').length>20?(s.filename.slice(0,19)+'…'):(s.filename||'file'))+'</a> '+apPill(s,true)+'</div>'; }).join('')+'</td>'; }).join('')+'</tr>'; }).join('');
+          w.innerHTML='<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px">'+head+'<tbody>'+body+'</tbody></table></div>';
+        } else {
+          var byCat={}; shown.forEach(function(s){ var k=catKey(s); (byCat[k]=byCat[k]||[]).push(s); });
+          var gkeys=Object.keys(byCat).sort(catOrder);
+          w.innerHTML=gkeys.map(function(k){ return '<div style="margin:0 0 14px"><div style="font-weight:700;font-size:13px;color:#0f172a;border-bottom:2px solid #eef2f7;padding-bottom:3px;margin-bottom:4px">'+esc(catLbl(k))+' <span style="font-weight:400;color:#94a3b8;font-size:11px">('+byCat[k].length+')</span></div><div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">'+THEAD+'<tbody>'+byCat[k].map(rowHtml).join('')+'</tbody></table></div></div>'; }).join('');
+        }
+        w.querySelectorAll('.sp-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete this specification?'))return; shipPost('/api/product/specs/'+b.dataset.id+'/delete',{},function(){ renderProductSpecs(c); }); }; });
+        w.querySelectorAll('.sp-ap').forEach(function(b){ b.onclick=function(){ var id=b.dataset.id, ns=(b.dataset.st==='approved')?'pending':'approved'; shipPost('/api/product/specs/'+id+'/approval',{status:ns},function(){ var sp=specs.filter(function(x){return String(x.id)===String(id);})[0]; if(sp)sp.approval_status=ns; drawSpecs(); }); }; });
+      }
+      var pillsHtml=types.map(function(t){ return '<span class="sp-pill" data-t="'+esc(t.name)+'" style="cursor:pointer;font-size:11px;font-weight:600;padding:2px 10px;border-radius:12px;background:#eef2ff;color:#3730a3">'+esc(t.name)+'</span>'; }).join('');
+      var controls=specs.length?('<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:4px 0 10px">'
+        +'<input id="sp-q" placeholder="Search specifications…" value="'+esc(_specQ)+'" style="border:1px solid #cbd5e1;border-radius:6px;padding:5px 10px;font-size:12px;width:240px">'
+        +'<div id="sp-pills" style="display:flex;gap:6px;flex-wrap:wrap">'+pillsHtml+'</div>'
+        +'<div style="margin-left:auto;display:flex;gap:2px;border:1px solid #dbeafe;border-radius:6px;padding:2px;background:#f0f6ff">'
+          +'<button id="sp-view-list" style="font-size:11px;padding:3px 12px;border:1px solid #93c5fd;border-radius:5px;cursor:pointer">List</button>'
+          +'<button id="sp-view-matrix" style="font-size:11px;padding:3px 12px;border:1px solid #93c5fd;border-radius:5px;cursor:pointer">Matrix</button>'
+        +'</div></div>'):'';
+      var listTitle='<div style="font-weight:700;font-size:13px;color:#0f172a;margin:4px 0 8px">Current specifications ('+specs.length+')</div>';
+      c.innerHTML='<div style="padding:6px 2px"><div style="font-size:16px;font-weight:700;color:#0f172a;margin-bottom:2px">Specifications</div><div style="color:#94a3b8;font-size:12px;margin-bottom:14px">Manage source-of-truth packaging &amp; labelling documents. Assign each to all products, a category, a size group, or specific SKUs — with a use-from rule.</div>'+upload+listTitle+controls+'<div id="sp-listwrap"></div></div>';
       // scope helpers + derived-supplier picker
       function readScope(){ var v=(c.querySelector('input[name=sp-scope]:checked')||{}).value||'all', o={scope_type:v};
         if(v==='category')o.scope_category=(c.querySelector('#sp-cat')||{}).value||'';
@@ -9905,7 +9942,16 @@
           fr.readAsDataURL(file);
         })(0);
       };
-      c.querySelectorAll('.sp-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete this specification?'))return; shipPost('/api/product/specs/'+b.dataset.id+'/delete',{},function(){ renderProductSpecs(c); }); }; });
+      // list controls: search, type pills, view toggle
+      function styleViewBtns(){ var l=c.querySelector('#sp-view-list'), m=c.querySelector('#sp-view-matrix'); if(!l||!m)return;
+        function on(b,a){ b.style.background=a?'#2563eb':'#fff'; b.style.color=a?'#fff':'#1e40af'; b.style.fontWeight=a?'700':'400'; }
+        on(l,_specView==='list'); on(m,_specView==='matrix'); }
+      function stylePills(){ c.querySelectorAll('#sp-pills .sp-pill').forEach(function(p){ var a=!!_specTypeFilter[p.dataset.t]; p.style.background=a?'#2563eb':'#eef2ff'; p.style.color=a?'#fff':'#3730a3'; }); }
+      var qEl=c.querySelector('#sp-q'); if(qEl)qEl.oninput=function(){ _specQ=this.value; drawSpecs(); };
+      c.querySelectorAll('#sp-pills .sp-pill').forEach(function(p){ p.onclick=function(){ var t=p.dataset.t; _specTypeFilter[t]=!_specTypeFilter[t]; stylePills(); drawSpecs(); }; });
+      var vl=c.querySelector('#sp-view-list'); if(vl)vl.onclick=function(){ _specView='list'; styleViewBtns(); drawSpecs(); };
+      var vm=c.querySelector('#sp-view-matrix'); if(vm)vm.onclick=function(){ _specView='matrix'; styleViewBtns(); drawSpecs(); };
+      styleViewBtns(); stylePills(); drawSpecs();
       syncScope();
     }).catch(function(e){ c.innerHTML='<div style="color:#dc2626;padding:10px 2px">Failed: '+esc(e.message||e)+'</div>'; }); }
   // RANGE PLAN — a season's products laid out by category: swatch + colour way + a tiny status pill. Toggle all vs approved-only.
