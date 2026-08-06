@@ -2787,9 +2787,12 @@
     var _firstTab=_acts.length?(PO_ACT_TAB[_acts[0]]||''):(_exc.pay.length?'pay':_exc.dates.length?'dates':_exc.timeline.length?'timeline':_exc.ship.length?'shipments':_exc.oplan.length?'oplan':_exc.client.length?'client':_exc.master.length?'masterdata':'');
     var _noteTxt=_notif+' notification'+(_notif>1?'s':'')+(_acts.length?' — '+_acts.map(function(k){return PO_ACT_LABEL[k]||k;}).join('; '):'')+' (click to open)';
     var actFlag=_notif?' <button class="po-act-badge ex-badge" style="cursor:pointer;border:none" data-po="'+esc(r.po)+'" data-tab="'+_firstTab+'" data-allacts="'+esc(poActionsAll(r).join(','))+'" data-note="'+esc(_noteTxt)+'">'+_notif+'</button>':'';
+    // "A" badge — PO is in production but a required field (Batch / Production # / Supplier / Branch) is unassigned.
+    var _miss=poMissingReq(r);
+    var reqFlag=_miss.length?' <button class="po-req-badge ex-badge" style="cursor:pointer;border:none;background:#dc2626" data-po="'+esc(r.po)+'" title="Required field'+(_miss.length>1?'s':'')+' missing while in production: '+esc(_miss.join(', '))+' — click to assign">A</button>':'';
     // the "double-click to copy" hint lives on the PO text only (not the whole cell), so hovering the action-item
     // badge beside it doesn't pop this native tooltip on top of the badge's own action-items tooltip.
-    var pocell=indent?'<td class="l po-child po-numcell" data-po="'+esc(r.po)+'"><span class="ind"></span><b title="double-click (or long-press on mobile) to copy PO reference">'+esc(r.po)+'</b>'+actFlag+'</td>':'<td class="l po-numcell" data-po="'+esc(r.po)+'"><b title="double-click (or long-press on mobile) to copy PO reference">'+esc(r.po)+'</b>'+actFlag+'</td>';
+    var pocell=indent?'<td class="l po-child po-numcell" data-po="'+esc(r.po)+'"><span class="ind"></span><b title="double-click (or long-press on mobile) to copy PO reference">'+esc(r.po)+'</b>'+actFlag+reqFlag+'</td>':'<td class="l po-numcell" data-po="'+esc(r.po)+'"><b title="double-click (or long-press on mobile) to copy PO reference">'+esc(r.po)+'</b>'+actFlag+reqFlag+'</td>';
     // ERP cell — compact badge-style buttons (same look as the "✓ in sync" badge) → keeps the column narrow.
     // Labels collapse to a single action: Update lines / Update date / Update both. All open the same ERP modal.
     var erpStyle='cursor:pointer;border:none';
@@ -3022,7 +3025,14 @@
   function bindPoActBadge(){ document.querySelectorAll('#supply-root .po-act-badge[data-po]').forEach(function(b){ if(b._b)return; b._b=1;
     b.addEventListener('mouseenter',function(){ b._t=setTimeout(function(){ noteTip(b); },120); });   // fast 120ms tooltip (native title is ~1s)
     b.addEventListener('mouseleave',function(){ clearTimeout(b._t); hideNoteTip(); });
-    b.onclick=function(e){ e.stopPropagation(); hideNoteTip(); poActPopover(b); }; }); }
+    b.onclick=function(e){ e.stopPropagation(); hideNoteTip(); poActPopover(b); }; });
+    // "A" required-field badge → open the PO drawer so the missing field can be assigned
+    document.querySelectorAll('#supply-root .po-req-badge[data-po]').forEach(function(b){ if(b._b)return; b._b=1;
+      b.onclick=function(e){ e.stopPropagation(); if(typeof openPODrawer==='function')openPODrawer(b.dataset.po); else gotoPO(b.dataset.po); }; }); }
+  // PO in PRODUCTION status with any of Batch / Production # / Supplier / Branch unassigned → the missing field names.
+  function poMissingReq(r){ if(!r)return []; if(String(r.status||'').toLowerCase().indexOf('production')<0)return [];
+    var m=[]; if(!String(r.batch_id||'').trim())m.push('Batch'); if(!String(r.prod_no||'').trim())m.push('Production #');
+    if(!String(r.supplier_name||'').trim())m.push('Supplier'); if(!String(r.branch||'').trim())m.push('Branch'); return m; }
   function loadPoDetail(po,i,wantTab){
     // Complete POs load as THIN grid rows (no expand-only fields). Before rendering the detail panels — which read
     // many fields straight off poBy[po] — hydrate the full row from /api/supply/po-row/:po (mirrors the drawer).

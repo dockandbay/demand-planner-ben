@@ -2996,6 +2996,18 @@ app.get('/api/supply/:section', async (req, res) => {
                   WHERE coalesce(po.status,'') NOT ILIKE '%complete%' AND coalesce(po.status,'') NOT ILIKE 'ship%'
                     AND coalesce(po.status,'') NOT ILIKE '%deliver%') z
             WHERE z.pal > 20 AND z.ctry <> 'DIRECT'
+          UNION ALL
+          -- PO is IN PRODUCTION but one of the required fields (Batch / Production # / Supplier / Branch) is blank.
+          SELECT 'amber','Required field missing', p.po,
+            'In production but missing required field(s): ' || concat_ws(', ',
+               CASE WHEN coalesce(p.batch_id,'')='' THEN 'Batch' END,
+               CASE WHEN coalesce(p.prod_no,'')='' THEN 'Production #' END,
+               CASE WHEN coalesce(p.supplier_name,'')='' THEN 'Supplier' END,
+               CASE WHEN coalesce(p.branch,'')='' THEN 'Branch' END)
+            || ' — assign in the PO', 'gotopo','po','', p.po
+            FROM planner.purchase_orders p
+            WHERE coalesce(p.status,'') ILIKE 'production%'
+              AND ( coalesce(p.batch_id,'')='' OR coalesce(p.prod_no,'')='' OR coalesce(p.supplier_name,'')='' OR coalesce(p.branch,'')='' )
           ) _a ${req.query.scope === 'priority' ? "WHERE _a.severity = 'high'" : ''} ORDER BY CASE severity WHEN 'high' THEN 0 WHEN 'amber' THEN 1 ELSE 2 END, type LIMIT 400`);
         // The recommendation / submission / ERP layers each run their own (heavier) queries — skip them for the
         // fast priority preview (scope=priority); the full fetch that follows includes them.

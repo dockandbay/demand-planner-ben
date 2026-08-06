@@ -1,3 +1,8 @@
+## v26.660.0 — Required-field actions for in-production POs
+- A PO in PRODUCTION status missing any of Batch / Production # / Supplier / Branch now raises a SUPPLY Action ("Required field missing", amber) listing the missing field(s) — so it is counted in the ACTIONS tab + nav counter and appears as a card (click → PO).
+- The PO grid shows a red "A" badge next to such POs (tooltip lists the missing required fields; click opens the PO drawer to assign them).
+
+
 ## v26.659.0 — Fix: Manufacturing detail drawer not popping
 - openMfgBundleDrawer referenced badgeMfg (a var local to renderManufacturing) → ReferenceError on click, drawer never rendered. Added top-level badgeMfgInline() helper.
 
