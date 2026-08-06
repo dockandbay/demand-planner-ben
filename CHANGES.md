@@ -1,3 +1,9 @@
+## v26.653.0 — Manufacturing tab: one drawer per BOM SKU (Manufacturing-branch POs only)
+- Detail is now a single pop-out drawer per BOM (parent) SKU, opened from the "detail" link on the bundle header (replaces the per-component drawer + inline expand, per Ben).
+- Drawer shows: the productionn orders carrying that SKU (PO, prod, status, production-end date, qty + total demand), then a block per component SKU (Required / In production / Completed / Existing stock / Total supply + coverage) listing ONLY branch=Manufacturing POs behind each component.
+- Summary table + inline Existing-stock entry unchanged.
+
+
 ## v26.652.0 — DEMAND toolbar: Release into More Filters; Undo/Download to the right
 - Release Window filter moved OUT of the top tab menu and INTO the More Filters panel (with Category/Tier/Sort/etc).
 - Undo + Download buttons moved OFF the tab menu row onto the right side of the plan controls row (#filters-row2), plan-view only. Tab menu row is now just the tabs.
