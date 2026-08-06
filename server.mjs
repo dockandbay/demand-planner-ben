@@ -4434,7 +4434,10 @@ app.get('/api/product/spec-scope-options', async (_req, res) => {   // categorie
     const cs = (await pool.query(`SELECT DISTINCT category, size FROM planner.products WHERE size IS NOT NULL AND size<>'' AND category IS NOT NULL AND category<>'' ORDER BY category, size`)).rows;
     const catSizes = {}; cs.forEach(r => { (catSizes[r.category] = catSizes[r.category] || []).push(r.size); });
     const productions = (await pool.query(`SELECT prod_no FROM planner.prod_numbers WHERE coalesce(status,'')<>'' AND prod_no ~ '^[0-9]+$' ORDER BY prod_no::int DESC`)).rows.map(r => r.prod_no);
-    res.json({ categories: cats, catSizes, productions });
+    // default "use from" production = next after the largest production number on POs in the grid
+    const mx = (await pool.query(`SELECT max(prod_no::int) m FROM planner.purchase_orders WHERE prod_no ~ '^[0-9]+$'`)).rows[0].m;
+    const defaultProdNo = (mx != null) ? String(mx + 1) : (productions[0] || '');
+    res.json({ categories: cats, catSizes, productions, defaultProdNo });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/product/specs', async (_req, res) => {

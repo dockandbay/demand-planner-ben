@@ -1,3 +1,8 @@
+## v26.619.0 — Specifications upload: multi-file + drag-and-drop, per-file type, smarter production default
+- Upload now takes **single or multiple files**, via a **drag-and-drop** zone or click-to-browse. Each staged file gets its own **type** selector (and a remove ✕); scope / use-from / confirmation are shared across the batch, and Save creates one spec per file.
+- "Use from → Next production" now defaults to the **next production number after the largest production on POs in the grid** (server `defaultProdNo` = max purchase_orders prod_no + 1; e.g. 67 → P68). The default is always selectable even if not yet in prod_numbers.
+- Renamed the approval checkbox to **"Require Supplier Confirmation"**.
+
 ## v26.618.0 — PRODUCT ▸ Specifications (SUG-0019 P1): admin upload + scope + use-from
 - New PRODUCT sub-tab **SPECIFICATIONS** — source-of-truth for packaging/labelling docs. Upload a file, pick a **type** (managed/editable list, seeded Hang tag / Wrap tag / Box / Polybag / Care tag), assign a **scope** (All products / Category / Size group [category + size] / SKU list), a **use-from** rule (next production P## / immediately, use up old stock / immediately, dispose of old stock), and a **confirm-with-supplier** flag. Current-specs list with file link, attribution and delete.
 - Storage: `planner.product_specs` (bytea, mig 189) + `planner.product_spec_types` (mig 188, seeded). Endpoints under `/api/product/spec-*`.

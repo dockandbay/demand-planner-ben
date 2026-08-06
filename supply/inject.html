@@ -9780,14 +9780,19 @@
       var cats=opts.categories||[], catSizes=opts.catSizes||{}, prods=opts.productions||[];
       function scopeLabel(s){ if(s.scope_type==='category')return 'Category · '+esc(s.scope_category); if(s.scope_type==='size')return 'Size · '+esc(s.scope_category)+' / '+esc(s.scope_size); if(s.scope_type==='sku')return 'SKU · '+esc(s.scope_skus); return 'All products'; }
       function effLabel(s){ if(s.effective_mode==='immediate_useup')return 'Immediately, use up old stock'; if(s.effective_mode==='immediate_dispose')return 'Immediately, dispose old stock'; return 'From next production P'+esc(s.effective_prod_no); }
+      var defProd=String(opts.defaultProdNo||prods[0]||'');
+      if(defProd && prods.indexOf(defProd)<0)prods=[defProd].concat(prods);   // ensure the next-production default is selectable
       var typeOpts=types.map(function(t){return '<option value="'+esc(t.name)+'">'+esc(t.name)+'</option>';}).join('');
+      function typeOptsSel(sel){ return types.map(function(t){return '<option value="'+esc(t.name)+'"'+(t.name===sel?' selected':'')+'>'+esc(t.name)+'</option>';}).join(''); }
       var catOpts=cats.map(function(x){return '<option value="'+esc(x)+'">'+esc(x)+'</option>';}).join('');
-      var prodOpts=prods.map(function(p){return '<option value="'+esc(p)+'">P'+esc(p)+'</option>';}).join('');
+      var prodOpts=prods.map(function(p){return '<option value="'+esc(p)+'"'+(String(p)===defProd?' selected':'')+'>P'+esc(p)+'</option>';}).join('');
+      var _spFiles=[];   // File objects staged for upload; each carries _type
       var upload=types.length?(
         '<div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;margin:0 0 16px;max-width:720px">'
         +'<div style="font-weight:700;font-size:13px;color:#0f172a;margin-bottom:10px">Upload specification</div>'
-        +'<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px"><label style="font-size:12px;color:#64748b;width:90px">Type</label><select class="fci" id="sp-type" style="text-align:left;flex:1">'+typeOpts+'</select><button class="save-btn" id="sp-mgt" style="background:#eef2ff;color:#3730a3;border-color:#c7d2fe;white-space:nowrap">Manage types</button></div>'
-        +'<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px"><label style="font-size:12px;color:#64748b;width:90px">File</label><input type="file" id="sp-file" style="flex:1;font-size:12px"></div>'
+        +'<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px"><label style="font-size:12px;color:#64748b;width:90px">Files</label><div style="flex:1"></div><button class="save-btn" id="sp-mgt" style="background:#eef2ff;color:#3730a3;border-color:#c7d2fe;white-space:nowrap">Manage types</button></div>'
+        +'<div id="sp-drop" style="border:2px dashed #cbd5e1;border-radius:8px;padding:16px;text-align:center;color:#94a3b8;font-size:13px;cursor:pointer;background:#fff;margin-bottom:8px">Drag &amp; drop file(s) here, or click to browse<input type="file" id="sp-file" multiple style="display:none"></div>'
+        +'<div id="sp-files" style="margin-bottom:8px"></div>'
         +'<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:8px"><label style="font-size:12px;color:#64748b;width:90px;padding-top:4px">Applies to</label><div style="flex:1">'
           +'<label style="font-size:12px;margin-right:12px"><input type="radio" name="sp-scope" value="all" checked> All products</label>'
           +'<label style="font-size:12px;margin-right:12px"><input type="radio" name="sp-scope" value="category"> Category</label>'
@@ -9802,7 +9807,7 @@
           +'<div style="margin-bottom:4px"><label style="font-size:12px"><input type="radio" name="sp-eff" value="immediate_useup"> Immediately, use up existing stock of past specifications</label></div>'
           +'<div><label style="font-size:12px"><input type="radio" name="sp-eff" value="immediate_dispose"> Immediately, dispose of stock from past specifications</label></div>'
         +'</div></div>'
-        +'<div style="display:flex;gap:10px;align-items:center;margin-bottom:12px"><label style="font-size:12px;color:#64748b;width:90px">Approval</label><label style="font-size:12px"><input type="checkbox" id="sp-confirm"> Confirm with supplier (requires portal approval)</label></div>'
+        +'<div style="display:flex;gap:10px;align-items:center;margin-bottom:12px"><label style="font-size:12px;color:#64748b;width:90px">Approval</label><label style="font-size:12px"><input type="checkbox" id="sp-confirm"> Require Supplier Confirmation</label></div>'
         +'<div style="text-align:right"><button class="save-btn" id="sp-save">Save specification</button></div>'
         +'</div>'
       ):'<div style="background:#fef3c7;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:10px 14px;margin:0 0 16px;max-width:720px;font-size:13px">No spec types yet. <b>Manage types</b> to add your first (e.g. Hang tag). <button class="save-btn" id="sp-mgt0" style="background:#fff;color:#92400e;border-color:#fde68a;margin-left:8px">Manage types</button></div>';
@@ -9844,22 +9849,41 @@
       }
       var mg=c.querySelector('#sp-mgt'); if(mg)mg.onclick=manageTypes;
       var mg0=c.querySelector('#sp-mgt0'); if(mg0)mg0.onclick=manageTypes;
-      // save
+      // files: drag-drop + multi picker; each staged file gets its own type selector
+      var defType=types.length?types[0].name:'';
+      var drop=c.querySelector('#sp-drop'), finput=c.querySelector('#sp-file'), flist=c.querySelector('#sp-files');
+      function renderFiles(){ if(!flist)return;
+        flist.innerHTML=_spFiles.map(function(f,i){ return '<div style="display:flex;gap:8px;align-items:center;margin:4px 0;font-size:12px">'
+          +'<span style="flex:1;color:#334155;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(f.name)+'">'+esc(f.name)+'</span>'
+          +'<select class="fci sp-ftype" data-i="'+i+'" style="text-align:left;width:150px">'+typeOptsSel(f._type)+'</select>'
+          +'<button class="sp-frm" data-i="'+i+'" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:14px" title="Remove">✕</button></div>'; }).join('');
+        flist.querySelectorAll('.sp-ftype').forEach(function(s){ s.onchange=function(){ _spFiles[+s.dataset.i]._type=s.value; }; });
+        flist.querySelectorAll('.sp-frm').forEach(function(b){ b.onclick=function(){ _spFiles.splice(+b.dataset.i,1); renderFiles(); }; }); }
+      function addFiles(fl){ for(var i=0;i<fl.length;i++){ var f=fl[i]; f._type=defType; _spFiles.push(f); } renderFiles(); }
+      if(drop&&finput){ drop.onclick=function(){ finput.click(); };
+        finput.onchange=function(){ addFiles(finput.files); finput.value=''; };
+        drop.ondragover=function(e){ e.preventDefault(); drop.style.borderColor='#60a5fa'; drop.style.background='#eff6ff'; };
+        drop.ondragleave=function(){ drop.style.borderColor='#cbd5e1'; drop.style.background='#fff'; };
+        drop.ondrop=function(e){ e.preventDefault(); drop.style.borderColor='#cbd5e1'; drop.style.background='#fff'; if(e.dataTransfer&&e.dataTransfer.files)addFiles(e.dataTransfer.files); }; }
+      // save — one spec per staged file, sharing scope / use-from / confirmation
       var save=c.querySelector('#sp-save'); if(save)save.onclick=function(){
-        var f=(c.querySelector('#sp-file')||{}).files; if(!f||!f[0]){ alert('Choose a file first.'); return; }
+        if(!_spFiles.length){ alert('Add at least one file.'); return; }
         var scope=(c.querySelector('input[name=sp-scope]:checked')||{}).value||'all';
         var eff=(c.querySelector('input[name=sp-eff]:checked')||{}).value||'production';
-        var body={ spec_type:(c.querySelector('#sp-type')||{}).value||'', scope_type:scope, effective_mode:eff,
-          confirm_with_supplier:!!(c.querySelector('#sp-confirm')||{}).checked };
-        if(scope==='category')body.scope_category=(c.querySelector('#sp-cat')||{}).value||'';
-        if(scope==='size'){ body.scope_category=(c.querySelector('#sp-size-cat')||{}).value||''; body.scope_size=(c.querySelector('#sp-size')||{}).value||''; }
-        if(scope==='sku')body.scope_skus=((c.querySelector('#sp-skus')||{}).value||'').split(/[,\s]+/).map(function(x){return x.trim();}).filter(Boolean).join(',');
-        if(eff==='production')body.effective_prod_no=(c.querySelector('#sp-prod')||{}).value||'';
-        var file=f[0]; body.filename=file.name; body.mime=file.type||'application/octet-stream';
-        var fr=new FileReader(); fr.onload=function(){ body.data_base64=String(fr.result).replace(/^data:[^;]+;base64,/,'');
-          save.disabled=true; save.textContent='Saving…';
-          shipPost('/api/product/specs',body,function(r){ if(r&&r.error){ alert('Save failed: '+r.error); save.disabled=false; save.textContent='Save specification'; return; } renderProductSpecs(c); }); };
-        fr.readAsDataURL(file);
+        var shared={ scope_type:scope, effective_mode:eff, confirm_with_supplier:!!(c.querySelector('#sp-confirm')||{}).checked };
+        if(scope==='category')shared.scope_category=(c.querySelector('#sp-cat')||{}).value||'';
+        if(scope==='size'){ shared.scope_category=(c.querySelector('#sp-size-cat')||{}).value||''; shared.scope_size=(c.querySelector('#sp-size')||{}).value||''; }
+        if(scope==='sku')shared.scope_skus=((c.querySelector('#sp-skus')||{}).value||'').split(/[,\s]+/).map(function(x){return x.trim();}).filter(Boolean).join(',');
+        if(eff==='production')shared.effective_prod_no=(c.querySelector('#sp-prod')||{}).value||'';
+        save.disabled=true;
+        (function up(i){ if(i>=_spFiles.length)return renderProductSpecs(c);
+          save.textContent='Saving '+(i+1)+'/'+_spFiles.length+'…';
+          var file=_spFiles[i], body={}; for(var k in shared)body[k]=shared[k];
+          body.spec_type=file._type||defType; body.filename=file.name; body.mime=file.type||'application/octet-stream';
+          var fr=new FileReader(); fr.onload=function(){ body.data_base64=String(fr.result).replace(/^data:[^;]+;base64,/,'');
+            shipPost('/api/product/specs',body,function(r){ if(r&&r.error){ alert('Save failed on '+file.name+': '+r.error); save.disabled=false; save.textContent='Save specification'; return; } up(i+1); }); };
+          fr.readAsDataURL(file);
+        })(0);
       };
       c.querySelectorAll('.sp-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete this specification?'))return; shipPost('/api/product/specs/'+b.dataset.id+'/delete',{},function(){ renderProductSpecs(c); }); }; });
       syncScope();
