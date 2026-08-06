@@ -1,3 +1,10 @@
+## v26.625.0 — Specifications P3: supplier portal display + approval + email + counter (SUG-0019)
+- New **Specifications** tab on the supplier portal (`/portal`). Suppliers see the specs relevant to them — those directed to them for confirmation, plus specs covering products they make (as reference) — grouped by type, with file links.
+- **Approval workflow:** "Require Supplier Confirmation" specs show a **Confirm** button; confirming records a **per-supplier** acknowledgement (`product_spec_approvals`, mig 195) so multi-supplier specs need every directed supplier to confirm. Admin Specifications view derives pending/approved from these (shows x/y), and the admin pill now approves-all / resets via the same table.
+- **Email on submission:** creating a confirm-spec emails each directed supplier a portal link (auto-login magic token). Sandbox logs it (email_log, `spec-approval`); live sends via Resend.
+- **Action counter:** unapproved count rolls up as a red badge on the portal's top-level Specifications tab.
+- Endpoints: `POST /api/portal/spec-approve`, `GET /api/portal/spec-file/:id` (both supplier-scoped); bootstrap now returns `specs`.
+
 ## v26.624.0 — Specifications: superseding + "Past specifications" history
 - Uploading a spec with the **same type + identical scope** as an existing one now **supersedes** it: the old spec is retired (kept, not deleted) and the new one becomes current. A narrower/different scope (e.g. All vs a Category) is an override, not a supersede, so it won't wrongly retire the other.
 - New collapsible **"Past specifications"** list shows retired specs — type, what they applied to, use-from, file, and when they were superseded. (Manual deletes stay hidden as before.)

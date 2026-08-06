@@ -607,7 +607,7 @@
     // ── Hash router: shareable deep links. #/<tab> for menus; #/<tab>/<ref> for a specific PO / product / sample /
     // shipment (e.g. #/pos/PO-123, #/product/SS27-TOWEL-BL-02, #/samples/SR-45). Applied on load + hashchange.
     var _ppRouting=false;
-    var PP_TABS=['pos','shipmentplan','deposits','payments','productions','samples','product'];
+    var PP_TABS=['pos','shipmentplan','deposits','payments','productions','samples','product','specs'];
     function ppSetHash(tab, ref){ _ppRouting=true; try{ location.hash='#/'+tab+(ref?('/'+encodeURIComponent(ref)):''); }catch(e){} setTimeout(function(){ _ppRouting=false; },30); }
     function ppApplyHash(){ var h=(location.hash||'').replace(/^#\/?/,''); if(!h)return false; var parts=h.split('/'); var tab=parts[0], ref=parts[1]?decodeURIComponent(parts[1]):'';
       if(PP_TABS.indexOf(tab)<0)return false;
@@ -634,7 +634,7 @@
     var rootEl=opts.root; if(!rootEl.closest('#supply-root')){rootEl.id='supply-root';} rootEl.style.display='block';
     if(PP_ANON){ try{ var _anonObs=new MutationObserver(function(){ if(_anonObs._busy)return; _anonObs._busy=1; _anonObs.disconnect(); try{anonSweep();}catch(e){} _anonObs.observe(rootEl,{childList:true,subtree:true}); _anonObs._busy=0; });
       _anonObs.observe(rootEl,{childList:true,subtree:true}); setTimeout(anonSweep,80); }catch(e){} }
-    rootEl.innerHTML='<div class="bar" style="align-items:center"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders <span id="pp-pos-badge"></span></span><span class="rtab" data-pt="shipmentplan">Shipment Plan <span id="pp-ship-badge"></span></span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="productions">Productions</span><span class="rtab" data-pt="samples">Sample shipments <span id="pp-samp-badge"></span></span><span class="rtab" data-pt="quality">Quality Control</span><span class="rtab" data-pt="product" id="pp-prod-tab" style="display:none">Product <span id="pp-prod-badge"></span></span></span>'
+    rootEl.innerHTML='<div class="bar" style="align-items:center"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders <span id="pp-pos-badge"></span></span><span class="rtab" data-pt="shipmentplan">Shipment Plan <span id="pp-ship-badge"></span></span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="productions">Productions</span><span class="rtab" data-pt="samples">Sample shipments <span id="pp-samp-badge"></span></span><span class="rtab" data-pt="quality">Quality Control</span><span class="rtab" data-pt="product" id="pp-prod-tab" style="display:none">Product <span id="pp-prod-badge"></span></span><span class="rtab" data-pt="specs" id="pp-spec-tab" style="display:none">Specifications <span id="pp-spec-badge"></span></span></span>'
       +'<span id="pp-notif" style="margin-left:auto;display:none;gap:6px;align-items:center;position:relative;white-space:nowrap">'
         +'<button id="pp-unread-btn" class="save-btn light" title="Unread messages from Dock &amp; Bay" style="position:relative">✉ <span class="pp-inbox-lbl">Inbox </span><span id="pp-unread-n">0</span></button>'
         +'<button id="pp-recent-btn" class="save-btn light" title="Recent changes">🕘 Recent</button>'
@@ -1984,9 +1984,27 @@
               var rd=new FileReader(); rd.onload=function(){ fetch('/api/portal/quality-doc',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({doc_type:document.getElementById('pq-type').value, filename:f.name, mime:f.type||'application/octet-stream', data_base64:String(rd.result), prod_no:prod||null, batch_id:batch||null, po:po||null})}).then(function(r){return r.json();}).then(function(j){ up.disabled=false; if(j&&j.error){ msg.textContent='Error: '+j.error; return; } msg.textContent='Uploaded ✓'; ['pq-prod','pq-batch','pq-po'].forEach(function(id){var e=document.getElementById(id); if(e)e.value='';}); var fe=document.getElementById('pq-file'); if(fe)fe.value=''; load(); }).catch(function(){ up.disabled=false; msg.textContent='Upload failed'; }); }; rd.readAsDataURL(f); };
             load();
           }
+          // SUG-0019 P3: PRODUCT ▸ Specifications — files grouped by type; "confirm" items need the supplier's acknowledgement.
+          function ppSpecs(){ var specs=(_ppData&&_ppData.specs)||[];
+            if(!specs.length)return '<div style="max-width:920px;text-align:left"><div class="sect-h">Specifications</div><div class="mut tiny">No specifications to show.</div></div>';
+            var byType={}; specs.forEach(function(s){ (byType[s.spec_type]=byType[s.spec_type]||[]).push(s); });
+            var groups=Object.keys(byType).sort().map(function(t){
+              var rows=byType[t].map(function(s){ var status;
+                if(!s.confirm_with_supplier) status='<span class="mut tiny">reference</span>';
+                else if(s.approved) status='<span style="color:#166534;font-weight:700">✓ Confirmed</span>';
+                else status='<button class="save-btn sp-confirm" data-id="'+s.id+'" style="background:#1a1a1a;color:#fff">Confirm</button>';
+                return '<tr><td class="l"><a href="'+EP.specFileBase+s.id+'" target="_blank" rel="noopener">'+esc(s.filename||'file')+'</a></td><td class="l">'+esc(s.scope)+'</td><td class="l">'+esc(s.effective)+'</td><td class="l">'+status+'</td></tr>'; }).join('');
+              return '<div class="sect-h" style="margin-top:14px">'+esc(t)+'</div><div class="tw"><table style="width:max-content;min-width:100%"><thead><tr><th class="l">File</th><th class="l">Applies to</th><th class="l">Use from</th><th class="l">Status</th></tr></thead><tbody>'+rows+'</tbody></table></div>'; }).join('');
+            return '<div style="max-width:920px;text-align:left"><div class="sect-h">Specifications</div><div class="mut tiny" style="margin-bottom:6px">Packaging &amp; labelling documents from Dock &amp; Bay. Items marked for confirmation need your acknowledgement.</div>'+groups+'</div>'; }
+          function wireSpecs(){ document.querySelectorAll('.sp-confirm').forEach(function(b){ b.onclick=function(){ var id=b.dataset.id; b.disabled=true; b.textContent='…';
+            fetch(EP.specApprove,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({spec_id:id})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ b.disabled=false; b.textContent='Confirm'; alert(j.error); return; }
+              var sp=((_ppData&&_ppData.specs)||[]).filter(function(x){return String(x.id)===String(id);})[0]; if(sp){ sp.approved=true; sp.needs_approval=false; } setSpecBadge(); renderPP(); }).catch(function(){ b.disabled=false; b.textContent='Confirm'; }); }; }); }
+          function setSpecBadge(){ var specs=(_ppData&&_ppData.specs)||[]; var t=document.getElementById('pp-spec-tab'); if(t)t.style.display=specs.length?'':'none';
+            var n=specs.filter(function(s){return s.needs_approval;}).length; var bg=document.getElementById('pp-spec-badge'); if(bg)bg.innerHTML=n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
           function renderPP(){ if(!_ppData)return; var body=document.getElementById('pp-body');
             tabsEl.querySelectorAll('.rtab').forEach(function(t){t.classList.toggle('active',t.dataset.pt===PORTAL_TAB);});
-            setSampBadge(); setPosBadge(); setShipBadge(); setProdBadge(); try{ renderPortalNotif(); }catch(e){}
+            setSampBadge(); setPosBadge(); setShipBadge(); setProdBadge(); setSpecBadge(); try{ renderPortalNotif(); }catch(e){}
+            if(PORTAL_TAB==='specs'){ body.innerHTML=ppSpecs(); wireSpecs(); return; }
             if(PORTAL_TAB==='quality'){ body.innerHTML=ppQuality(); wireQuality(); return; }
             if(PORTAL_TAB==='product'){ body.innerHTML=ppProducts(_ppData.products||[]); wireProducts(); return; }
             if(PORTAL_TAB==='samples'){ body.innerHTML=ppSamples(_ppData.samples||[]); wireSamples(); return; }

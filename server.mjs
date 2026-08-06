@@ -4448,6 +4448,13 @@ function specScopeWhere(q) {
   if (t === 'sku') { const sk = String(q.scope_skus || '').split(/[,\s]+/).map(s => s.trim()).filter(Boolean); ps.push(sk.length ? sk : ['']); return { sql: `sku = ANY($1)`, params: ps }; }
   return { sql: `TRUE`, params: [] };
 }
+async function specSupplierSet(spec) {   // set of supplier names that make products in this spec's scope
+  const w = specScopeWhere({ scope_type: spec.scope_type, scope_category: spec.scope_category, scope_size: spec.scope_size, scope_skus: spec.scope_skus });
+  const rows = (await pool.query(`SELECT coalesce(supplier_multiple_all,'') sma, coalesce(main_supplier_final,'') msf, coalesce(supplier,'') sup FROM planner.products WHERE ${w.sql}`, w.params)).rows;
+  const set = new Set();
+  rows.forEach(r => { const names = r.sma ? r.sma.split(',') : [r.msf || r.sup]; names.forEach(n => { const v = String(n || '').trim(); if (v) set.add(v); }); });
+  return set;
+}
 app.get('/api/product/spec-suppliers', async (req, res) => {   // distinct suppliers of the products in the chosen scope
   try {
     const w = specScopeWhere(req.query || {});
@@ -4467,15 +4474,28 @@ app.get('/api/product/specs', async (_req, res) => {
       coalesce(effective_when, CASE WHEN effective_mode='production' THEN 'production' ELSE 'immediate' END) effective_when,
       coalesce(effective_stock, CASE WHEN effective_mode='immediate_dispose' THEN 'dispose' ELSE 'useup' END) effective_stock,
       coalesce(effective_prod_no,'') effective_prod_no, confirm_with_supplier, coalesce(confirm_suppliers,'') confirm_suppliers,
-      coalesce(approval_status,'pending') approval_status,
       coalesce(uploaded_by,'') uploaded_by, to_char(uploaded_at,'DD-Mon-YY HH24:MI') uploaded_at
-      FROM planner.product_specs WHERE active ORDER BY uploaded_at DESC`); res.json(r.rows); }
+      FROM planner.product_specs WHERE active ORDER BY uploaded_at DESC`);
+    const appr = {}; (await pool.query(`SELECT spec_id, array_agg(supplier_name) sn FROM planner.product_spec_approvals GROUP BY spec_id`)).rows.forEach(x => { appr[x.spec_id] = x.sn || []; });
+    r.rows.forEach(s => {   // derive approval from per-supplier acknowledgements
+      const directed = s.confirm_suppliers ? s.confirm_suppliers.split(',').map(x => x.trim()).filter(Boolean) : [];
+      const done = (appr[s.id] || []).filter(n => directed.indexOf(n) >= 0);
+      s.directed_n = directed.length; s.approved_n = done.length;
+      s.approval_status = s.confirm_with_supplier ? (directed.length > 0 && done.length >= directed.length ? 'approved' : 'pending') : 'pending';
+    });
+    res.json(r.rows); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.post('/api/product/specs/:id/approval', async (req, res) => {   // toggle a confirm-spec's approval state (pending|approved)
-  const st = ((req.body || {}).status || '').trim() === 'approved' ? 'approved' : 'pending';
-  try { await pool.query(`UPDATE planner.product_specs SET approval_status=$2 WHERE id=$1`, [req.params.id, st]); res.json({ ok: true, status: st }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+app.post('/api/product/specs/:id/approval', async (req, res) => {   // admin override: approve-all directed suppliers, or reset to pending
+  const id = req.params.id, st = ((req.body || {}).status || '').trim() === 'approved' ? 'approved' : 'pending';
+  try {
+    const sp = (await pool.query(`SELECT coalesce(confirm_suppliers,'') cs FROM planner.product_specs WHERE id=$1`, [id])).rows[0];
+    const directed = sp ? sp.cs.split(',').map(x => x.trim()).filter(Boolean) : [];
+    if (st === 'approved') { const by = authUser(req); for (const n of directed) await pool.query(`INSERT INTO planner.product_spec_approvals (spec_id, supplier_name, approved_by) VALUES ($1,$2,$3) ON CONFLICT (spec_id, supplier_name) DO NOTHING`, [id, n, by]); }
+    else { await pool.query(`DELETE FROM planner.product_spec_approvals WHERE spec_id=$1`, [id]); }
+    await pool.query(`UPDATE planner.product_specs SET approval_status=$2 WHERE id=$1`, [id, st]);   // legacy column kept in sync
+    res.json({ ok: true, status: st });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/specs', async (req, res) => {
   const b = req.body || {}, st = String(b.spec_type || '').trim(), scope = (b.scope_type || 'all').trim();
@@ -4500,7 +4520,15 @@ app.post('/api/product/specs', async (req, res) => {
       WHERE active AND id<>$1 AND spec_type=$2 AND scope_type=$3
         AND coalesce(scope_category,'')=coalesce($4,'') AND coalesce(scope_size,'')=coalesce($5,'') AND coalesce(scope_skus,'')=coalesce($6,'')`,
       [newId, st, scope, scat, ssize, sskus]);
-    res.json({ ok: true, id: newId, superseded: sup.rowCount });
+    let emailed = 0;   // notify directed suppliers with a portal link (sandbox: logged only)
+    if (b.confirm_with_supplier && b.confirm_suppliers) {
+      try {
+        const names = String(b.confirm_suppliers).split(',').map(x => x.trim()).filter(Boolean);
+        const base = (req.headers['x-forwarded-proto'] ? req.headers['x-forwarded-proto'] + '://' : 'http://') + (req.headers['x-forwarded-host'] || req.headers.host);
+        emailed = await emailSpecToSuppliers(names, st, base);
+      } catch (e) { console.log('[spec-email] ' + e.message); }
+    }
+    res.json({ ok: true, id: newId, superseded: sup.rowCount, emailed });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/product/specs/past', async (_req, res) => {   // superseded specs (kept for history) — most recent first
@@ -9529,6 +9557,26 @@ async function sendMagicEmail(email, url) {
   await sendResendEmail({ kind: 'magic-link', ref: email, to: email, subject: 'Your Dock & Bay supplier portal link',
     html: `<p>Hi,</p><p>Here's your link to the Dock &amp; Bay supplier portal (valid 7 days):</p><p><a href="${url}">${url}</a></p><p>If you didn't request this, you can ignore this email.</p>` });
 }
+// SUG-0019 P3: notify each directed supplier of a new spec needing confirmation, with an auto-login portal link.
+async function emailSpecToSuppliers(names, specType, base) {
+  if (!names || !names.length) return 0;
+  let sent = 0; const done = new Set();
+  for (const name of names) {
+    const users = (await pool.query(`SELECT DISTINCT lower(email) email FROM planner.supplier_portal_users WHERE supplier_name=$1 AND active=true AND coalesce(email,'')<>''`, [name])).rows;
+    let recips = users.map(u => u.email);
+    if (!recips.length) { const s = (await pool.query(`SELECT lower(coalesce(email,'')) email FROM planner.suppliers WHERE name=$1`, [name])).rows[0]; if (s && s.email) recips = [s.email]; }
+    for (const email of recips) {
+      if (done.has(email)) continue; done.add(email);
+      let url = base + '/portal';
+      try { const tok = portalToken(); await pool.query(`INSERT INTO planner.portal_magic_tokens (token,email,expires_at) VALUES ($1,$2, now()+interval '7 days')`, [tok, email]); url = base + '/portal?token=' + tok; } catch (e) {}
+      await sendResendEmail({ kind: 'spec-approval', ref: name, to: email,
+        subject: 'New ' + specType + ' specification to confirm — Dock & Bay',
+        html: `<p>Hi,</p><p>Dock &amp; Bay has published a new <b>${specType}</b> specification that requires your confirmation.</p><p>Please review and confirm it under <b>Specifications</b> in your supplier portal:</p><p><a href="${url}">${url}</a></p>` });
+      sent++;
+    }
+  }
+  return sent;
+}
 // ── DEMAND ▸ KPIs ▸ In Stock rate ────────────────────────────────────────────────────────────────────────
 // For each market × channel: of the ACTIVE products available in that channel, how many have > threshold units
 // on hand (3PL stock for the 3PL channel, FBA stock for FBA). Threshold toggleable per channel-type (3PL/FBA).
@@ -10925,8 +10973,59 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
           WHERE po = ANY($1) AND coalesce(category,'') <> 'client' ORDER BY uploaded_at DESC`, [_pokeys]);
       drows.forEach(d => { (docsByPo[d.po] = docsByPo[d.po] || []).push(d); });
     }
+    // SUG-0019 P3: specifications relevant to this supplier — directed confirm-specs + specs whose scope covers a product they make.
+    const specs = [];
+    try {
+      const supSet = new Set(names);
+      const specRows = await q(`SELECT id, spec_type, filename, scope_type, coalesce(scope_category,'') scope_category, coalesce(scope_size,'') scope_size,
+        coalesce(scope_skus,'') scope_skus, coalesce(effective_when,'') effective_when, coalesce(effective_stock,'') effective_stock,
+        coalesce(effective_prod_no,'') effective_prod_no, confirm_with_supplier, coalesce(confirm_suppliers,'') confirm_suppliers, to_char(uploaded_at,'DD-Mon-YY') uploaded_at
+        FROM planner.product_specs WHERE active ORDER BY spec_type, uploaded_at DESC`);
+      const myAppr = {}; if (specRows.length) (await q(`SELECT spec_id FROM planner.product_spec_approvals WHERE supplier_name = ANY($1)`, [names])).forEach(a => { myAppr[a.spec_id] = true; });
+      for (const s of specRows) {
+        const directedList = s.confirm_suppliers ? s.confirm_suppliers.split(',').map(x => x.trim()).filter(Boolean) : [];
+        const directed = s.confirm_with_supplier && directedList.some(n => supSet.has(n));
+        let relevant = directed;
+        if (!relevant) { const ss = await specSupplierSet(s); relevant = names.some(n => ss.has(n)); }
+        if (!relevant) continue;
+        const scopeLabel = s.scope_type === 'category' ? ('Category · ' + s.scope_category) : s.scope_type === 'size' ? ('Size · ' + s.scope_category + ' / ' + s.scope_size) : s.scope_type === 'sku' ? ('SKU · ' + s.scope_skus) : 'All products';
+        const effLabel = (s.effective_when === 'immediate' ? 'Immediately' : ('From next production P' + s.effective_prod_no)) + ' · ' + (s.effective_stock === 'dispose' ? 'dispose old stock' : 'use up old stock');
+        const approved = !!myAppr[s.id];
+        specs.push({ id: s.id, spec_type: s.spec_type, filename: s.filename, scope: scopeLabel, effective: effLabel, uploaded_at: s.uploaded_at,
+          confirm_with_supplier: !!s.confirm_with_supplier, directed, approved, needs_approval: directed && !approved });
+      }
+    } catch (e) { console.log('[portal-specs] ' + e.message); }
     res.json({ pos, lb, sdep: deps, sid: ids[0] || null, supplierName: names.join(', '),
-      notesByPo, subsByPo, costsByPo, supSkus, xdByPo, addByPo, approvedByPo, docsByPo, samples, payments, shipmentPlan, productEnabled, products });
+      notesByPo, subsByPo, costsByPo, supSkus, xdByPo, addByPo, approvedByPo, docsByPo, samples, payments, shipmentPlan, productEnabled, products, specs });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// SUG-0019 P3: supplier confirms a spec — record a per-supplier acknowledgement for each of their directed names.
+app.post('/api/portal/spec-approve', portalAuth, async (req, res) => {
+  const specId = (req.body || {}).spec_id; if (!specId) return res.status(400).json({ error: 'spec_id required' });
+  try {
+    const sp = (await pool.query(`SELECT coalesce(confirm_suppliers,'') cs, confirm_with_supplier FROM planner.product_specs WHERE id=$1 AND active`, [specId])).rows[0];
+    if (!sp || !sp.confirm_with_supplier) return res.status(404).json({ error: 'spec not found' });
+    const directed = sp.cs.split(',').map(x => x.trim()).filter(Boolean);
+    const mine = req.portal.suppliers.filter(n => directed.indexOf(n) >= 0);
+    if (!mine.length) return res.status(403).json({ error: 'this spec is not directed to your account' });
+    for (const n of mine) await pool.query(`INSERT INTO planner.product_spec_approvals (spec_id, supplier_name, approved_by) VALUES ($1,$2,$3) ON CONFLICT (spec_id, supplier_name) DO NOTHING`, [specId, n, req.portal.email]);
+    // sync the legacy column: approved once every directed supplier has acknowledged
+    const doneN = (await pool.query(`SELECT count(*)::int n FROM planner.product_spec_approvals WHERE spec_id=$1 AND supplier_name = ANY($2)`, [specId, directed])).rows[0].n;
+    await pool.query(`UPDATE planner.product_specs SET approval_status=$2 WHERE id=$1`, [specId, doneN >= directed.length ? 'approved' : 'pending']);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Serve a spec file to a supplier — only if the spec is relevant to (directed at / covers a product of) their account.
+app.get('/api/portal/spec-file/:id', portalAuth, async (req, res) => {
+  try {
+    const s = (await pool.query(`SELECT filename, mime, data, scope_type, coalesce(scope_category,'') scope_category, coalesce(scope_size,'') scope_size, coalesce(scope_skus,'') scope_skus, confirm_with_supplier, coalesce(confirm_suppliers,'') confirm_suppliers FROM planner.product_specs WHERE id=$1 AND active`, [req.params.id])).rows[0];
+    if (!s) return res.status(404).send('not found');
+    const directed = s.confirm_with_supplier && s.confirm_suppliers.split(',').map(x => x.trim()).some(n => req.portal.suppliers.indexOf(n) >= 0);
+    let ok = directed;
+    if (!ok) { const ss = await specSupplierSet(s); ok = req.portal.suppliers.some(n => ss.has(n)); }
+    if (!ok) return res.status(403).send('forbidden');
+    res.setHeader('Content-Type', s.mime || 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'inline; filename="' + (s.filename || 'file').replace(/"/g, '') + '"'); res.send(s.data);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Portal "recent changes" drawer — key events for THIS supplier, newest first (new PO, payment received, sample).
