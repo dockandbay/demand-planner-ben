@@ -1,3 +1,6 @@
+## v26.616.0 — Klaviyo BIS summary: per-country SKU/QTY layout (mirrors the upload sheet)
+- Reworked the on-page Analysis summary to match BIS_REPORT_FILTERED: four side-by-side market blocks, each its own SKU + QTY list sorted by that market's subscribers, with a "N SKUs · total" header. SKU column fixed 200px + no-wrap. Per-market chips + CSV download retained.
+
 ## v26.615.0 — Klaviyo BIS: "last uploaded by … on dd-mmm-yy hh:mm:ss" + analysis summary + CSV download
 - Each market box now shows "last uploaded by <ben@> on <dd-mmm-yy hh:mm:ss>" (uploader local-part + precise time). Status endpoint returns the full timestamp + aggregated rows.
 - New Analysis summary on the page: per-market colour chips (SKUs · subs) + a SKU × market table (UK/US/EU/AU/Total, sorted desc by total).
