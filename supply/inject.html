@@ -2199,7 +2199,7 @@
     function shippedNoInvoice(r){ var st=String(r.status||'').toUpperCase(); if(st!=='SHIPPING'&&st!=='DELIVERED'&&st!=='COMPLETE')return false;
       if(r.final_invoice!=null&&String(r.final_invoice).trim()!=='')return false; var pn=parseFloat(r.prod_no); return !isNaN(pn)&&pn>=50; }
     function actNoPay(r){ return poActions(r).some(function(a){ return PO_ACT_TAB[a]!=='pay'; }); }   // has ≥1 open action that isn't a payment (pay-tab) action
-    function excMatch(k,r){ if(k==='has_crossdock')return hasCrossdock(r); if(k==='shipped_no_invoice')return shippedNoInvoice(r); if(k==='act_no_pay')return actNoPay(r); if(k==='timeline_unread')return Number(r.unread_notes)>0; var fn=PO_ACTCOND[k]; return fn?fn(r):true; }
+    function excMatch(k,r){ if(k==='has_crossdock')return hasCrossdock(r); if(k==='shipped_no_invoice')return shippedNoInvoice(r); if(k==='act_no_pay')return actNoPay(r); if(k==='timeline_unread')return Number(r.unread_notes)>0; if(k==='reqfields')return poMissingReq(r).length>0; var fn=PO_ACTCOND[k]; return fn?fn(r):true; }
     // unified "has any open action item" — same as the red badge next to each PO ref (poExceptions)
     function _hideCount(){ return (!_poShowSnoozed?1:0)+(_hidePayDue?1:0)+(_hideTimelineUnread?1:0); }   // active Hide toggles → dropdown badge
     function hasActions(r){ return poActions(r).length>0; }   // snooze-aware, mirrors the red PO-ref badge
@@ -2254,6 +2254,7 @@
         +'<option value="shipped_no_invoice"'+(state.act.shipped_no_invoice?' selected':'')+'>Shipped · no final invoice ('+rows.filter(shippedNoInvoice).length+')</option>'
         +'<option value="act_no_pay"'+(state.act.act_no_pay?' selected':'')+'>All actions except payment due ('+rows.filter(actNoPay).length+')</option>'
         +'<option value="timeline_unread"'+(state.act.timeline_unread?' selected':'')+'>Timeline unread ('+rows.filter(function(r){return Number(r.unread_notes)>0;}).length+')</option>'
+        +'<option value="reqfields"'+(state.act.reqfields?' selected':'')+'>Master data missing ('+rows.filter(function(r){return poMissingReq(r).length>0;}).length+')</option>'
       +'</select></span>'
       +'<span class="po-filt-item" style="position:relative;white-space:nowrap">'
         +'<button type="button" id="po-hide-btn" class="flt" style="cursor:pointer;text-align:left;width:auto" title="hide categories from the ACTION ITEMS count, red badges + filter">Hide'+(_hideCount()?' ('+_hideCount()+')':'')+' ▾</button>'

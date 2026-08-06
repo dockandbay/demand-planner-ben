@@ -1,3 +1,7 @@
+## v26.661.0 — PO grid exceptions dropdown: "Master data missing" option
+- Added a "Master data missing (N)" option to the PO-grid ⚠ exceptions filter — POs in production missing Batch / Production # / Supplier / Branch (the new red "A"). "PO not approved" stays as its own separate option.
+
+
 ## v26.660.0 — Required-field actions for in-production POs
 - A PO in PRODUCTION status missing any of Batch / Production # / Supplier / Branch now raises a SUPPLY Action ("Required field missing", amber) listing the missing field(s) — so it is counted in the ACTIONS tab + nav counter and appears as a card (click → PO).
 - The PO grid shows a red "A" badge next to such POs (tooltip lists the missing required fields; click opens the PO drawer to assign them).
