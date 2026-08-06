@@ -1,3 +1,6 @@
+## v26.612.0 — DEMAND ▸ Inputs ▸ Klaviyo BIS upload UI + plan 🔔 badge (SUG-0018 P1)
+- New DEMAND ▸ Inputs sub-tab "Klaviyo BIS": four colour-coded per-market upload boxes (UK/US/EU/AU — MKT_COLORS palette). Each shows the last file uploaded + as-of date + SKU/subs count; uploading a raw Klaviyo export replaces that market's shared snapshot (server sums Queued Subscriptions per SKU, last 6 months).
+- DEMAND plan SKU rows now show a 🔔<n> badge for the current market's back-in-stock subscriber count (tooltip: count + as-of date). Informational only (does not change forecast/buy numbers) — P2 (feed into buy logic) is a later decision.
 ## v26.611.0 — Reusable market colour palette + SHIP-TO badges; Klaviyo BIS server foundation (SUG-0018)
 - CONFIG ▸ Admin ▸ General: new "Market colours" pickers (UK #F88379 · US #B5C7EB · EU #D3D3FF · AU #A8DCAB · CA #DB2D43 — app_settings mkt_color_*). Injected as a reusable MKT_COLORS palette; badges keep BLACK text.
 - PO grid: the SHIP TO cell is now a coloured badge (market-colour background).

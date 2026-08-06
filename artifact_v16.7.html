@@ -6149,7 +6149,10 @@ function renderSkuView(){
     var launch=p.lch&&p.lch[ctry]?p.lch[ctry]:null;
     var tierCls='tier-'+(p.ti||'c').toLowerCase();
     lbl.innerHTML='<div class="sku-nm">'
-      +'<div class="sku-code" style="font-size:11px;font-weight:700;color:#1a1a1a;font-family:monospace">'+sku+'</div>'
+      +'<div class="sku-code" style="font-size:11px;font-weight:700;color:#1a1a1a;font-family:monospace">'+sku
+        +(function(){ try{ var n=(typeof KLAVIYO_BIS!=='undefined'&&KLAVIYO_BIS[sku]&&KLAVIYO_BIS[sku][CUR])||0; if(!(n>0))return '';
+          return ' <span title="'+n+' back-in-stock subscribers waiting ('+CUR+' · Klaviyo'+(KLAVIYO_BIS._at?' · as of '+KLAVIYO_BIS._at:'')+')" style="display:inline-block;background:#fef3c7;color:#92400e;font-weight:700;font-size:8px;border-radius:3px;padding:0 3px;vertical-align:middle;white-space:nowrap">&#128276;'+n+'</span>'; }catch(e){ return ''; } })()
+        +'</div>'
       +'<div class="sku-name" style="font-size:10px;color:#aaa;font-weight:400" title="'+p.n+'">'+p.n+'</div>'
       +'<div class="sku-meta">'
       +'<span class="sku-tier '+tierCls+'">'+( p.ti||'C')+'</span>'
@@ -7782,6 +7785,7 @@ function render(){
     else if(DEMAND_VIEW==='calendar') renderCalendarView(body);
     else if(DEMAND_VIEW==='kpis') renderKpisView(body);
     else if(DEMAND_VIEW==='revenue') renderRevenueView(body);
+    else if(DEMAND_VIEW==='klaviyobis') renderKlaviyoBisView(body);
     else renderDemandActionsView(body);
     return;
   }
@@ -8243,8 +8247,8 @@ function renderDemandTabs(){
     // sit directly below the main tabs but ABOVE the filters (same header column, right after the tab row)
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   // Primary tabs inline; the reference/input views (Sell-through targets, Key accounts, Calendar, Revenue) are grouped under an "Inputs ▾" dropdown.
-  var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];});
-  var PRIMARY=['plan','summary','kpis','actions'], INPUTS=['targets','keyaccounts','calendar','revenue'];
+  var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS';
+  var PRIMARY=['plan','summary','kpis','actions'], INPUTS=['targets','keyaccounts','calendar','revenue','klaviyobis'];
   var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0;
   bar.innerHTML=PRIMARY.map(function(k){return _dlbl[k]?'<button class="dnav'+(k===DEMAND_VIEW?' active':'')+'" data-d="'+k+'">'+_dlbl[k]+'</button>':'';}).join('')
     +'<button class="dnav'+(_inpActive?' active':'')+'" id="dnav-inputs-btn" title="Sell-through targets, Key accounts, Calendar, Revenue">Inputs</button>';
@@ -9302,6 +9306,35 @@ var _calSkuItems=null;
 function calSkuItems(){ if(_calSkuItems)return _calSkuItems;
   _calSkuItems=Object.keys(SKUM||{}).sort().map(function(s){ return {v:s,label:s,sub:(SKUM[s]&&SKUM[s].n)||''}; }); return _calSkuItems; }
 function calSkuChips(arr){ return arr.map(function(s){ return '<span class="cal-chip" data-sku="'+tHesc(s)+'">'+tHesc(s)+' <b data-rm="1" title="remove">✕</b></span>'; }).join('')+'<button class="cal-addsku">+ SKU</button>'; }
+// DEMAND ▸ Inputs ▸ Klaviyo BIS — per-market upload boxes (colour-coded via MKT_COLORS). Raw Klaviyo back-in-stock
+// export per market → server sums Queued Subscriptions per SKU (last 6mo). Shared/persistent. Surfaced as a 🔔 on the plan.
+function renderKlaviyoBisView(body){
+  var MK=['UK','US','EU','AU'];
+  function e2(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  body.innerHTML='<div style="max-width:920px">'
+    +'<div style="font-weight:700;font-size:15px;margin-bottom:2px">Klaviyo &mdash; Back-in-Stock subscriptions</div>'
+    +'<div style="font-size:12px;color:#666;margin-bottom:12px">Upload each Klaviyo account’s raw back-in-stock export (.xlsx or .csv). We sum <b>Queued Subscriptions</b> per SKU (subscribed in the last 6 months) and show a &#128276; count on the DEMAND plan for that market. The last file per market persists for everyone until replaced.</div>'
+    +'<div id="kb-boxes" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px"></div></div>';
+  var boxes=body.querySelector('#kb-boxes');
+  function draw(st){ st=st||{};
+    boxes.innerHTML=MK.map(function(mk){ var col=(typeof MKT_COLORS!=='undefined'&&MKT_COLORS[mk])||'#e5e7eb'; var s=st[mk];
+      return '<div style="border:2px solid '+col+';border-radius:10px;overflow:hidden;background:#fff">'
+        +'<div style="background:'+col+';color:#111;font-weight:700;padding:6px 11px;font-size:13px">'+mk+'</div>'
+        +'<div style="padding:10px 11px">'
+          +'<div class="mut" style="font-size:11px;margin-bottom:8px;min-height:32px">'+(s?('Last: <b>'+e2(s.filename||'file')+'</b><br>'+e2(s.uploaded_at||'')+' &middot; '+(s.n_skus||0)+' SKUs &middot; '+(s.total_subs||0)+' subs'):'<span style="color:#b45309">none uploaded yet</span>')+'</div>'
+          +'<label class="rbtn" style="cursor:pointer;display:inline-block;font-size:11px;padding:4px 10px">&#8593; Upload file<input type="file" class="kb-file" data-mk="'+mk+'" accept=".xlsx,.xls,.csv" style="display:none"></label>'
+          +' <span class="kb-stat mut" data-mk="'+mk+'" style="font-size:11px"></span>'
+        +'</div></div>'; }).join('');
+    boxes.querySelectorAll('.kb-file').forEach(function(inp){ inp.onchange=function(){ var f=this.files[0]; if(!f)return; var mk=this.dataset.mk; var stat=boxes.querySelector('.kb-stat[data-mk="'+mk+'"]'); if(stat){stat.style.color='#64748b';stat.textContent='Uploading…';}
+      var rd=new FileReader(); rd.onload=function(){ var b64=String(rd.result).split(',')[1]||''; var isCsv=/\.csv$/i.test(f.name);
+        fetch('/api/klaviyo-bis/upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({market:mk,filename:f.name,content_base64:b64,is_csv:isCsv})})
+          .then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ if(stat){stat.style.color='#dc2626';stat.textContent=j.error;} return; }
+            if(stat){stat.style.color='#16a34a';stat.textContent='✓ '+(j.n_skus||0)+' SKUs, '+(j.total_subs||0)+' subs';} load(); })
+          .catch(function(){ if(stat){stat.style.color='#dc2626';stat.textContent='Failed';} }); }; rd.readAsDataURL(f); }; });
+  }
+  function load(){ fetch('/api/klaviyo-bis/status').then(function(r){return r.json();}).then(function(j){ draw((j&&j.markets)||{}); }).catch(function(){ draw({}); }); }
+  load();
+}
 function renderCalendarView(body){
   var MK=['ALL','UK','US','EU','AU'];
   function load(){ body.innerHTML='<div style="padding:18px;color:#666;font-size:12px">Loading…</div>';
