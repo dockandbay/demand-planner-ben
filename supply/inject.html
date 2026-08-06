@@ -9436,11 +9436,13 @@
       +'<div class="bar" style="align-items:flex-start"><textarea id="b2b-lines" placeholder="one per line:  SKU, qty   (e.g.  TOWLB-CAB-LG-NAVY-R, 500)" style="width:340px;height:78px;font:11px ui-monospace,monospace;border:1px solid #d0d0d0;border-radius:5px;padding:6px"></textarea>'
         +'<div style="display:flex;flex-direction:column;gap:6px">'
           +'<div style="position:relative"><input class="fci txt" id="b2b-skq" placeholder="search SKU to add…" style="width:250px" autocomplete="off"><div id="b2b-skres" style="display:none;position:absolute;z-index:30;left:0;top:26px;width:340px;max-height:260px;overflow:auto;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 6px 22px rgba(0,0,0,.18)"></div></div>'
-          +'<div style="display:flex;gap:6px"><button class="pill active" id="b2b-run" style="background:#1a1a1a;color:#fff">Analyse order</button><button class="pill" id="b2b-save" style="display:none">💾 Save &amp; share</button></div>'
+          +'<div style="display:flex;gap:6px"><button class="pill active" id="b2b-run" style="background:#1a1a1a;color:#fff">Analyse order</button><button class="pill" id="b2b-save" style="display:none">💾 Save &amp; share</button><button class="pill" id="b2b-pdf" style="display:none">⤓ PDF</button></div>'
         +'</div></div>'
       +'<div id="b2b-recent" style="margin-bottom:10px"></div>'
       +'<div id="b2b-out"></div>';
-    function parseLines(){ return (document.getElementById('b2b-lines').value||'').split(/\n/).map(function(l){var m=l.trim().split(/[\s,]+/).filter(Boolean); if(!m.length)return null; return {sku:m[0].toUpperCase(), qty:parseInt(m[m.length-1],10)||0};}).filter(function(x){return x&&x.sku;}); }
+    function parseLines(){ var raw=(document.getElementById('b2b-lines').value||'').split(/\n/).map(function(l){var m=l.trim().split(/[\s,]+/).filter(Boolean); if(!m.length)return null; return {sku:m[0].toUpperCase(), qty:parseInt(m[m.length-1],10)||0};}).filter(function(x){return x&&x.sku;});
+      var map={}, order=[]; raw.forEach(function(x){ if(!Object.prototype.hasOwnProperty.call(map,x.sku)){ map[x.sku]={sku:x.sku,qty:0}; order.push(x.sku); } map[x.sku].qty+=x.qty; });   // dedupe: a SKU listed twice is analysed once (quantities summed)
+      return order.map(function(s){return map[s];}); }
     // re-fetch against the selected market — stock, recent sales and retail price are all market-specific,
     // so every country change re-analyses from scratch.
     function runB2B(alertEmpty){ var lines=parseLines(); if(!lines.length){ if(alertEmpty)alert('Enter at least one line:  SKU, qty'); return; }
@@ -9449,7 +9451,7 @@
       fetch('/api/scenario/b2b',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({market:st.co,date:dt,skus:lines.map(function(l){return l.sku;})})})
         .then(function(r){return r.json();}).then(function(d){ var by={}; (d.rows||[]).forEach(function(r){by[(r.sku||'').toUpperCase()]=r;});
           var data=lines.map(function(l){ return {qty:l.qty, d:by[l.sku]||{sku:l.sku,name:'(not found)',available:0,recent_units:0,weight:null,retail:null,cogs:null,avg_cost:null,inbound_by_date:0,inbound_total:0,next_inbound_date:null,next_inbound_qty:0,production:[]}}; });
-          _b2bLast={data:data,co:st.co,date:dt}; b2bRender(_b2bLast,st); var _sv=document.getElementById('b2b-save'); if(_sv)_sv.style.display=''; })
+          _b2bLast={data:data,co:st.co,date:dt}; b2bRender(_b2bLast,st); var _sv=document.getElementById('b2b-save'); if(_sv)_sv.style.display=''; var _pd=document.getElementById('b2b-pdf'); if(_pd){_pd.style.display=''; _pd.onclick=function(){ b2bPDF(st); };} })
         .catch(function(e){document.getElementById('b2b-out').innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>';}); }
     c.querySelectorAll('.bar .pill[data-co]').forEach(function(p){p.onclick=function(){c.querySelectorAll('.pill[data-co]').forEach(function(x){x.classList.remove('active');});p.classList.add('active');st.co=p.dataset.co; runB2B(false);};});
     // Air rush rate: USD input; show the £ equivalent (from the settings USD→GBP rate) in brackets.
@@ -9542,7 +9544,9 @@
       if(short>0) acts.push('🏭 Make more &amp; expedite '+units(short)+(air!=null?' <span class="mut">(or rush air '+sym+fmInt(air)+')</span>':''));
       var prodDetail = prodPOs.length ? '<div class="tiny mut" style="margin-top:3px">In production ('+units(prodQty)+'): '+prodPOs.slice(0,4).map(function(pp){ return '<button class="lnk-btn b2b-prod-po" data-po="'+esc(pp.po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer">'+esc(pp.po)+'</button>'+(pp.branch?' <span style="opacity:.7">'+esc(pp.branch)+'</span>':'')+' ×'+units(pp.qty)+(pp.date?' · '+fd(pp.date):''); }).join('<br>')+(prodPOs.length>4?'<br>+'+(prodPOs.length-4)+' more':'')+'</div>' : (st.src!=='onhand'?'<div class="tiny mut" style="margin-top:3px">No open production POs for this SKU.</div>':'');
       var availSub='now '+units(avail)+(expSold>0?' − '+units(expSold)+' sold':'')+(inbBy>0?' + '+units(inbBy)+' in':'');
-      return '<tr><td class="l" style="white-space:nowrap"><b>'+esc(d.sku)+'</b></td>'
+      return '<tr><td class="l" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><b>'+esc(d.sku)+'</b></td>'
+        +'<td class="l" style="white-space:normal;vertical-align:top"><span class="tool-badge '+cls+'" style="white-space:normal;display:inline-block;line-height:1.25">'+esc(rec)+'</span>'
+        +(acts.length?'<div class="tiny" style="margin-top:3px;line-height:1.35">'+acts.join('<br>')+'</div>':'')+prodDetail+'</td>'
         +'<td>'+units(qty)+'</td>'
         +'<td><b>'+units(projAtDate)+'</b><br><span class="tiny mut">'+availSub+'</span>'+(d.next_inbound_date?'<br><span class="tiny mut">next '+nextTxt+'</span>':'')+'</td>'
         +'<td><span class="mut">'+units(reserve)+'</span><br><span class="tiny mut">'+keepW+'wk cover</span></td>'
@@ -9553,9 +9557,7 @@
         +'<td>'+(air!=null?sym+fmInt(air):'—')+'</td>'
         +'<td>'+(ws!=null?csym+fmInt(ws):'<span class="mut tiny">no price</span>')+'</td>'
         +'<td>'+(rev!=null?csym+fmInt(rev):'—')+'</td>'
-        +'<td>'+(mar!=null?csym+fmInt(mar):'<span class="mut tiny">no cost</span>')+'</td>'
-        +'<td class="l" style="white-space:normal;min-width:170px;max-width:290px"><span class="tool-badge '+cls+'" style="white-space:normal;display:inline-block;line-height:1.25">'+esc(rec)+'</span>'
-        +(acts.length?'<div class="tiny" style="margin-top:3px;line-height:1.35">'+acts.join('<br>')+'</div>':'')+prodDetail+'</td></tr>';
+        +'<td>'+(mar!=null?csym+fmInt(mar):'<span class="mut tiny">no cost</span>')+'</td></tr>';
     }).join('');
     // ---- order-level verdict: take it? stock impact? worth it after air cost? ----
     var net=tMar-tAir;
@@ -9586,9 +9588,24 @@
       +'<div class="kpi"><div class="l">Gross margin</div><div class="v">'+csym+fmInt(tMar)+'</div></div>'
       +'<div class="kpi"><div class="l">Net after air</div><div class="v"'+(net<0?' style="color:#991b1b"':'')+'>'+csym+fmInt(net)+'</div></div></div>';
     document.getElementById('b2b-out').innerHTML=verdict+kpi
-      +'<div class="tw"><table><thead><tr><th class="l">SKU</th><th>Req</th><th>Avail @ '+(orderDate?fd(orderDate):'date')+'</th><th>Keep</th><th>Fulfil</th><th>Short</th><th>Cover after</th><th>Wt kg</th><th>Air cost</th><th>Wholesale</th><th>Revenue</th><th>Margin</th><th class="l">Recommendation</th></tr></thead><tbody>'+rowsH+'</tbody></table></div>'
+      +'<div class="tw"><table style="table-layout:fixed"><colgroup><col style="width:160px"><col style="width:240px"><col style="width:46px"><col style="width:132px"><col style="width:58px"><col style="width:52px"><col style="width:48px"><col style="width:46px"><col style="width:44px"><col style="width:56px"><col style="width:64px"><col style="width:58px"><col style="width:62px"></colgroup><thead><tr><th class="l">SKU</th><th class="l">Recommendation</th><th>Req</th><th>Avail @ '+(orderDate?fd(orderDate):'date')+'</th><th>Keep</th><th>Fulfil</th><th>Short</th><th>Cover</th><th>Wt kg</th><th>Air</th><th>Wholesale</th><th>Revenue</th><th>Margin</th></tr></thead><tbody>'+rowsH+'</tbody></table></div>'
       +'<div class="mut tiny" style="margin-top:4px"><b>Avail @ date</b> = on-hand today − own-channel sales between now and the required-by date + inbound landing by then (so a later date both sells down stock and lands more inbound). <b>Keep</b> = '+keepW+'wk of own-channel cover (velocity × '+keepW+'wk) held back before giving to B2B. <b>Fulfil</b> = min(requested, avail @date − keep); <b>Short</b> = the rest, rushed by air. Wholesale = 50% of ex-VAT retail (UK/EU ÷1.2). Air = short × unit weight × '+sym+rate+'/kg. Margin = (wholesale − market COGS, 3PL final; else avg PO cost) × qty; net after air in '+sym+'. <b>Fulfil from</b> switches whether stock, in-production POs (open Production status, Direct-to-Client excluded — expeditable, ≤4wk usually feasible), or both count toward Fulfil.</div>';
     document.querySelectorAll('#b2b-out .b2b-prod-po').forEach(function(x){ x.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(x.dataset.po,'oplan'); else gotoPO(x.dataset.po,'oplan'); }; }); }
+  // Download the B2B allocation report as an A4 (landscape) print-to-PDF.
+  function b2bPDF(st){ var out=document.getElementById('b2b-out'); if(!out||!out.innerHTML.trim()){ alert('Run an analysis first.'); return; }
+    var client=(document.getElementById('b2b-client')||{}).value||'', co=(st&&st.co)||'', dt=(_b2bLast&&_b2bLast.date)||'';
+    var w=window.open('','_blank'); if(!w){ alert('Allow popups to download the PDF.'); return; }
+    var css='@page{size:A4 landscape;margin:11mm} body{font-family:system-ui,Arial,sans-serif;color:#0f172a;margin:0;padding:12px;font-size:11px}'
+      +'h1{font-size:16px;margin:0 0 2px} .sub{color:#555;font-size:11px;margin:0 0 12px}'
+      +'table{border-collapse:collapse;width:100%;table-layout:auto!important} colgroup col{width:auto!important}'
+      +'th,td{border:1px solid #e2e8f0;padding:4px 6px;text-align:right;font-size:10px;vertical-align:top;word-wrap:break-word} th.l,td.l{text-align:left} thead th{background:#f1f5f9}'
+      +'.tool-badge{display:inline-block;padding:1px 6px;border-radius:6px;font-weight:600} .bg-red{background:#fee2e2;color:#991b1b}.bg-amber{background:#fef3c7;color:#92400e}.bg-green{background:#dcfce7;color:#166534}.bg-blue{background:#dbeafe;color:#1e40af}'
+      +'.kpibar{display:flex;gap:18px;margin:0 0 12px;flex-wrap:wrap} .kpi .l{color:#64748b;font-size:9px}.kpi .v{font-weight:700;font-size:14px} .tiny{font-size:9px}.mut{color:#94a3b8}';
+    w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>B2B allocation'+(client?' — '+esc(client):'')+'</title><style>'+css+'</style></head><body>'
+      +'<h1>B2B allocation scenario'+(client?' — '+esc(client):'')+'</h1><div class="sub">Market '+esc(co)+(dt?' &middot; required by '+esc(fd(dt)):'')+' &middot; generated '+esc(fd(new Date().toISOString().slice(0,10)))+'</div>'
+      +out.innerHTML
+      +'<scr'+'ipt>window.onload=function(){setTimeout(function(){try{window.print();}catch(e){}},400);};</scr'+'ipt></body></html>');
+    w.document.close(); }
   function ensureScenarioRoot(){ if(document.getElementById('scenario-root'))return;
     var app=document.getElementById('app')||document.body; if(!app)return;
     var el=document.createElement('div'); el.id='scenario-root';

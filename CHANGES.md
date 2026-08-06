@@ -1,3 +1,6 @@
+## v26.636.0 — B2B scenario: layout, SKU dedupe, A4 PDF export
+- Recommendation moved to the 2nd column (right after SKU) and widened; SKU column fixed at 160px; the single-number middle columns compressed (table-layout:fixed + colgroup). Duplicate SKUs in the paste box are now analysed once (quantities summed). New "⤓ PDF" button downloads the allocation report as an A4 (landscape) print-to-PDF.
+
 ## v26.635.0 — DEMAND: Auto-smooth (one-click sweep, per country/channel/sub-category)
 - Added to the xe2x9ax99 Smoothing panel: a threshold (default 20%%) + mode (Standard default / Leader), an "auto" checkbox per sub-category (alongside "disc"), and a "Run auto-smooth now" button. The sweep smooths every flagged co/ch/sub-category forecast month whose SKU-sum deviates from the sub-category target by more than the threshold xe2x80x94 boosting active SKUs (respecting disregard-discontinued). One-click, one Undo step, persisted in app_settings.smooth_auto (injected SMOOTH_AUTO). Opt-in xe2x80x94 buy plan unchanged until run (verified b3 24,332).
 
