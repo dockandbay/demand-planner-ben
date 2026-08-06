@@ -8387,6 +8387,7 @@
   function refreshErpcBadge(){ fetch('/api/supply/bi/erp-compare').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _erpcCount=j.count; paintErpcBadge(); } }).catch(function(){}); }
   function selectReport(rk){ if(rk==='cashflow')return showPoSub('cashflow');   // Cash Flow moved to PAYMENTS ▸ Cash Flow
     current='reports'; reportTab=rk; syncHash();
+    var _tk=++_navToken;   // invalidate any in-flight section load (e.g. the ACTIONS fetch) so it can't paint over this report
     document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k==='reports');});
     var _ns=document.getElementById('supply-nav-sel'); if(_ns)_ns.value='reports';
     var c=document.getElementById('supply-content');
@@ -8395,6 +8396,7 @@
     paintErpcBadge();   // repaint from last-known count; refresh in the background unless we're about to load the report itself (which sets it)
     if(rk!=='erp-compare') refreshErpcBadge();
     var done=function(d){
+      if(_tk!==_navToken)return;   // navigated away (or to another report) before this resolved → don't overwrite the newer view
       if(rk==='metrics')return renderBIMetrics(d);
       if(rk==='production-summary')return renderProductionSummary(d);
       if(rk==='urgent-buy')return renderUrgentBuy(d);
@@ -8413,7 +8415,7 @@
       if(rk==='flexport')return renderFlexport(d); };
     if(!BI_TABS[rk] && cache[rk])return done(cache[rk]);
     var url=BI_TABS[rk]||('/api/supply/'+((rk==='directclient'||rk==='customorders')?'purchase-orders':rk));
-    fetch(url).then(function(r){return r.json();}).then(done).catch(function(e){var b=document.getElementById('rep-body');if(b)b.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); }
+    fetch(url).then(function(r){return r.json();}).then(done).catch(function(e){ if(_tk!==_navToken)return; var b=document.getElementById('rep-body');if(b)b.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); }
 
   // ============ SUPPLY ▸ BI & REPORTS — BI sub-tabs (render into #rep-body) ============
   function biBody(){ return document.getElementById('rep-body')||document.getElementById('supply-content'); }
