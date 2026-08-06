@@ -1,3 +1,9 @@
+## v26.618.0 — PRODUCT ▸ Specifications (SUG-0019 P1): admin upload + scope + use-from
+- New PRODUCT sub-tab **SPECIFICATIONS** — source-of-truth for packaging/labelling docs. Upload a file, pick a **type** (managed/editable list, seeded Hang tag / Wrap tag / Box / Polybag / Care tag), assign a **scope** (All products / Category / Size group [category + size] / SKU list), a **use-from** rule (next production P## / immediately, use up old stock / immediately, dispose of old stock), and a **confirm-with-supplier** flag. Current-specs list with file link, attribution and delete.
+- Storage: `planner.product_specs` (bytea, mig 189) + `planner.product_spec_types` (mig 188, seeded). Endpoints under `/api/product/spec-*`.
+- Scope reference data from `planner.products` (category + size) and `planner.prod_numbers` (active P##). Size group = the products.size field within a category (Ben's decision).
+- P2 (SKU × spec-type inheritance matrix) and P3 (supplier-portal grouped display + approval workflow + email + action counter) to follow.
+
 ## v26.617.0 — Klaviyo BIS summary: all 4 country columns side-by-side, fully expanded
 - Forced 4-column grid (repeat(4,minmax(220px,1fr)), no auto-fit wrapping); removed the per-block max-height so every SKU row shows (no inner scroll). Page scrolls if needed.
 

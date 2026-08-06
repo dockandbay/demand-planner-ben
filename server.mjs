@@ -4412,6 +4412,66 @@ app.get('/api/product/doc/:id', async (req, res) => {
 app.post('/api/product/doc/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1 AND category='product'`, [req.params.id]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// ── PRODUCT ▸ SPECIFICATIONS (SUG-0019) — source-of-truth packaging/labelling docs. P1: admin upload + scope + effective-from. ──
+app.get('/api/product/spec-types', async (_req, res) => {
+  try { const r = await pool.query(`SELECT id, name, sort FROM planner.product_spec_types WHERE active ORDER BY sort, name`); res.json(r.rows); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/spec-types', async (req, res) => {
+  const b = req.body || {}, act = (b.action || '').trim(), id = b.id, name = String(b.name || '').trim();
+  try {
+    if (act === 'delete') { await pool.query(`UPDATE planner.product_spec_types SET active=false WHERE id=$1`, [id]); return res.json({ ok: true }); }
+    if (id) { if (!name) return res.status(400).json({ error: 'name required' }); await pool.query(`UPDATE planner.product_spec_types SET name=$2 WHERE id=$1`, [id, name]); return res.json({ ok: true }); }
+    if (!name) return res.status(400).json({ error: 'name required' });
+    const mx = (await pool.query(`SELECT coalesce(max(sort),0)+1 s FROM planner.product_spec_types`)).rows[0].s;
+    const r = await pool.query(`INSERT INTO planner.product_spec_types (name, sort) VALUES ($1,$2) ON CONFLICT (name) DO UPDATE SET active=true RETURNING id`, [name, mx]);
+    res.json({ ok: true, id: r.rows[0].id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/product/spec-scope-options', async (_req, res) => {   // categories, size-within-category, and production numbers for the assignment form
+  try {
+    const cats = (await pool.query(`SELECT DISTINCT category FROM planner.products WHERE category IS NOT NULL AND category<>'' ORDER BY category`)).rows.map(r => r.category);
+    const cs = (await pool.query(`SELECT DISTINCT category, size FROM planner.products WHERE size IS NOT NULL AND size<>'' AND category IS NOT NULL AND category<>'' ORDER BY category, size`)).rows;
+    const catSizes = {}; cs.forEach(r => { (catSizes[r.category] = catSizes[r.category] || []).push(r.size); });
+    const productions = (await pool.query(`SELECT prod_no FROM planner.prod_numbers WHERE coalesce(status,'')<>'' AND prod_no ~ '^[0-9]+$' ORDER BY prod_no::int DESC`)).rows.map(r => r.prod_no);
+    res.json({ categories: cats, catSizes, productions });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/product/specs', async (_req, res) => {
+  try { const r = await pool.query(`SELECT id, spec_type, filename, mime, scope_type,
+      coalesce(scope_category,'') scope_category, coalesce(scope_size,'') scope_size, coalesce(scope_skus,'') scope_skus,
+      effective_mode, coalesce(effective_prod_no,'') effective_prod_no, confirm_with_supplier,
+      coalesce(uploaded_by,'') uploaded_by, to_char(uploaded_at,'DD-Mon-YY HH24:MI') uploaded_at
+      FROM planner.product_specs WHERE active ORDER BY uploaded_at DESC`); res.json(r.rows); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/specs', async (req, res) => {
+  const b = req.body || {}, st = String(b.spec_type || '').trim(), scope = (b.scope_type || 'all').trim();
+  if (!st) return res.status(400).json({ error: 'spec_type required' });
+  if (!b.data_base64) return res.status(400).json({ error: 'file required' });
+  try {
+    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: 'file exceeds 10MB' });
+    const r = await pool.query(`INSERT INTO planner.product_specs
+      (spec_type, filename, mime, data, scope_type, scope_category, scope_size, scope_skus, effective_mode, effective_prod_no, confirm_with_supplier, uploaded_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+      [st, b.filename || 'file', b.mime || 'application/octet-stream', buf,
+       scope, (b.scope_category || '').trim() || null, (b.scope_size || '').trim() || null, (b.scope_skus || '').trim() || null,
+       (b.effective_mode || 'production').trim(), (b.effective_prod_no || '').trim() || null, !!b.confirm_with_supplier, internalAuthor(req, b.uploaded_by)]);
+    res.json({ ok: true, id: r.rows[0].id });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/specs/:id/delete', async (req, res) => {
+  try { await pool.query(`UPDATE planner.product_specs SET active=false WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/product/spec-file/:id', async (req, res) => {
+  try { const r = (await pool.query(`SELECT filename, mime, data FROM planner.product_specs WHERE id=$1`, [req.params.id])).rows[0];
+    if (!r) return res.status(404).send('not found');
+    res.setHeader('Content-Type', r.mime || 'application/octet-stream');
+    res.setHeader('Content-Disposition', 'inline; filename="' + (r.filename || 'file').replace(/"/g, '') + '"'); res.send(r.data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/api/product/notes/:ref', async (req, res) => {
   try { const r = await pool.query(`SELECT n.id, n.author_kind, coalesce(n.author_email,'') author_email, n.body,
     to_char(n.created_at,'DD-Mon-YY HH24:MI') created_at, n.read_at IS NOT NULL read,

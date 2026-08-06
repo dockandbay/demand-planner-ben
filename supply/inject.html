@@ -9746,7 +9746,7 @@
   function ensureProductRoot(){ if(document.getElementById('product-root'))return;
     var app=document.getElementById('app')||document.body; if(!app)return;
     var el=document.createElement('div'); el.id='product-root';
-    el.innerHTML='<div id="product-subnav"><button class="stab" data-k="plan">PLAN</button><button class="stab" data-k="dashboard">DASHBOARD</button><button class="stab" data-k="range">RANGE PLAN</button><button class="stab" data-k="reports">REPORTS</button><span class="ver">HORIZON __APP_VERSION__</span></div><div id="product-content"></div>';
+    el.innerHTML='<div id="product-subnav"><button class="stab" data-k="plan">PLAN</button><button class="stab" data-k="dashboard">DASHBOARD</button><button class="stab" data-k="range">RANGE PLAN</button><button class="stab" data-k="specs">SPECIFICATIONS</button><button class="stab" data-k="reports">REPORTS</button><span class="ver">HORIZON __APP_VERSION__</span></div><div id="product-content"></div>';
     app.appendChild(el);
     el.querySelectorAll('.stab').forEach(function(b){ b.onclick=function(){ selectProductSub(b.dataset.k); }; }); }
   function showProduct(){ ensureProductRoot(); if(typeof hideSupply==='function')hideSupply(); if(typeof hideScenario==='function')hideScenario();
@@ -9765,8 +9765,105 @@
     var c=document.getElementById('product-content'); if(!c)return;
     if(k==='reports') return renderProductReports(c);
     if(k==='range') return renderProductRange(c);
+    if(k==='specs') return renderProductSpecs(c);
     if(k==='dashboard') return renderProductDashboard(c);
     renderProductPlan(c); }
+  // SPECIFICATIONS (SUG-0019) — source-of-truth packaging/labelling docs. P1: managed types + upload with scope + effective-from.
+  function renderProductSpecs(c){
+    c.innerHTML='<div class="count" style="padding:10px 2px;color:#94a3b8">Loading specifications…</div>';
+    Promise.all([
+      fetch('/api/product/spec-types').then(function(r){return r.json();}),
+      fetch('/api/product/spec-scope-options').then(function(r){return r.json();}),
+      fetch('/api/product/specs').then(function(r){return r.json();})
+    ]).then(function(res){
+      var types=Array.isArray(res[0])?res[0]:[], opts=res[1]||{}, specs=Array.isArray(res[2])?res[2]:[];
+      var cats=opts.categories||[], catSizes=opts.catSizes||{}, prods=opts.productions||[];
+      function scopeLabel(s){ if(s.scope_type==='category')return 'Category · '+esc(s.scope_category); if(s.scope_type==='size')return 'Size · '+esc(s.scope_category)+' / '+esc(s.scope_size); if(s.scope_type==='sku')return 'SKU · '+esc(s.scope_skus); return 'All products'; }
+      function effLabel(s){ if(s.effective_mode==='immediate_useup')return 'Immediately, use up old stock'; if(s.effective_mode==='immediate_dispose')return 'Immediately, dispose old stock'; return 'From next production P'+esc(s.effective_prod_no); }
+      var typeOpts=types.map(function(t){return '<option value="'+esc(t.name)+'">'+esc(t.name)+'</option>';}).join('');
+      var catOpts=cats.map(function(x){return '<option value="'+esc(x)+'">'+esc(x)+'</option>';}).join('');
+      var prodOpts=prods.map(function(p){return '<option value="'+esc(p)+'">P'+esc(p)+'</option>';}).join('');
+      var upload=types.length?(
+        '<div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;margin:0 0 16px;max-width:720px">'
+        +'<div style="font-weight:700;font-size:13px;color:#0f172a;margin-bottom:10px">Upload specification</div>'
+        +'<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px"><label style="font-size:12px;color:#64748b;width:90px">Type</label><select class="fci" id="sp-type" style="text-align:left;flex:1">'+typeOpts+'</select><button class="save-btn" id="sp-mgt" style="background:#eef2ff;color:#3730a3;border-color:#c7d2fe;white-space:nowrap">Manage types</button></div>'
+        +'<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px"><label style="font-size:12px;color:#64748b;width:90px">File</label><input type="file" id="sp-file" style="flex:1;font-size:12px"></div>'
+        +'<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:8px"><label style="font-size:12px;color:#64748b;width:90px;padding-top:4px">Applies to</label><div style="flex:1">'
+          +'<label style="font-size:12px;margin-right:12px"><input type="radio" name="sp-scope" value="all" checked> All products</label>'
+          +'<label style="font-size:12px;margin-right:12px"><input type="radio" name="sp-scope" value="category"> Category</label>'
+          +'<label style="font-size:12px;margin-right:12px"><input type="radio" name="sp-scope" value="size"> Size group</label>'
+          +'<label style="font-size:12px"><input type="radio" name="sp-scope" value="sku"> SKU</label>'
+          +'<div id="sp-scope-cat" style="display:none;margin-top:6px"><select class="fci" id="sp-cat" style="text-align:left;min-width:220px">'+catOpts+'</select></div>'
+          +'<div id="sp-scope-size" style="display:none;margin-top:6px"><select class="fci" id="sp-size-cat" style="text-align:left;min-width:220px;margin-right:6px">'+catOpts+'</select><select class="fci" id="sp-size" style="text-align:left;min-width:160px"></select></div>'
+          +'<div id="sp-scope-sku" style="display:none;margin-top:6px"><input class="fci" id="sp-skus" placeholder="Paste SKUs, comma or space separated" style="text-align:left;width:100%"></div>'
+        +'</div></div>'
+        +'<div style="display:flex;gap:10px;align-items:flex-start;margin-bottom:8px"><label style="font-size:12px;color:#64748b;width:90px;padding-top:4px">Use from</label><div style="flex:1">'
+          +'<div style="margin-bottom:4px"><label style="font-size:12px"><input type="radio" name="sp-eff" value="production" checked> Next production</label> <select class="fci" id="sp-prod" style="text-align:left;width:110px">'+prodOpts+'</select></div>'
+          +'<div style="margin-bottom:4px"><label style="font-size:12px"><input type="radio" name="sp-eff" value="immediate_useup"> Immediately, use up existing stock of past specifications</label></div>'
+          +'<div><label style="font-size:12px"><input type="radio" name="sp-eff" value="immediate_dispose"> Immediately, dispose of stock from past specifications</label></div>'
+        +'</div></div>'
+        +'<div style="display:flex;gap:10px;align-items:center;margin-bottom:12px"><label style="font-size:12px;color:#64748b;width:90px">Approval</label><label style="font-size:12px"><input type="checkbox" id="sp-confirm"> Confirm with supplier (requires portal approval)</label></div>'
+        +'<div style="text-align:right"><button class="save-btn" id="sp-save">Save specification</button></div>'
+        +'</div>'
+      ):'<div style="background:#fef3c7;border:1px solid #fde68a;color:#92400e;border-radius:8px;padding:10px 14px;margin:0 0 16px;max-width:720px;font-size:13px">No spec types yet. <b>Manage types</b> to add your first (e.g. Hang tag). <button class="save-btn" id="sp-mgt0" style="background:#fff;color:#92400e;border-color:#fde68a;margin-left:8px">Manage types</button></div>';
+      var rows=specs.length?specs.map(function(s){
+        return '<tr style="border-top:1px solid #eef2f7">'
+          +'<td style="padding:6px 10px 6px 0;font-weight:600;color:#0f172a">'+esc(s.spec_type)+'</td>'
+          +'<td style="padding:6px 10px 6px 0;color:#334155">'+scopeLabel(s)+'</td>'
+          +'<td style="padding:6px 10px 6px 0;color:#334155">'+effLabel(s)+'</td>'
+          +'<td style="padding:6px 10px 6px 0">'+(s.confirm_with_supplier?'<span style="display:inline-block;font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px;background:#fef3c7;color:#92400e">confirm</span>':'<span style="color:#cbd5e1">—</span>')+'</td>'
+          +'<td style="padding:6px 10px 6px 0"><a href="/api/product/spec-file/'+s.id+'" target="_blank" style="color:#2563eb;text-decoration:none">'+esc(s.filename||'file')+'</a></td>'
+          +'<td style="padding:6px 10px 6px 0;color:#94a3b8;font-size:11px;white-space:nowrap">'+esc(shortUser(s.uploaded_by||''))+(s.uploaded_at?' · '+esc(s.uploaded_at):'')+'</td>'
+          +'<td style="padding:6px 0"><button class="sp-del" data-id="'+s.id+'" style="background:none;border:none;color:#dc2626;cursor:pointer;font-size:14px" title="Delete">✕</button></td>'
+        +'</tr>';
+      }).join(''):'';
+      var list='<div style="font-weight:700;font-size:13px;color:#0f172a;margin:4px 0 8px">Current specifications ('+specs.length+')</div>'
+        +(specs.length?'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%"><thead><tr style="text-align:left;color:#64748b;font-size:11px"><th style="padding:0 10px 4px 0">Type</th><th style="padding:0 10px 4px 0">Applies to</th><th style="padding:0 10px 4px 0">Use from</th><th style="padding:0 10px 4px 0">Approval</th><th style="padding:0 10px 4px 0">File</th><th style="padding:0 10px 4px 0">Uploaded</th><th></th></tr></thead><tbody>'+rows+'</tbody></table></div>':'<div style="color:#94a3b8;font-size:13px;padding:6px 0">No specifications uploaded yet.</div>');
+      c.innerHTML='<div style="padding:6px 2px"><div style="font-size:16px;font-weight:700;color:#0f172a;margin-bottom:2px">Specifications</div><div style="color:#94a3b8;font-size:12px;margin-bottom:14px">Manage source-of-truth packaging &amp; labelling documents. Assign each to all products, a category, a size group, or specific SKUs — with a use-from rule.</div>'+upload+list+'</div>';
+      // scope radios show/hide
+      function syncScope(){ var v=(c.querySelector('input[name=sp-scope]:checked')||{}).value||'all';
+        var m={category:'sp-scope-cat',size:'sp-scope-size',sku:'sp-scope-sku'};
+        ['sp-scope-cat','sp-scope-size','sp-scope-sku'].forEach(function(id){ var el=c.querySelector('#'+id); if(el)el.style.display=(m[v]===id)?'block':'none'; }); }
+      function syncSizes(){ var cat=(c.querySelector('#sp-size-cat')||{}).value||'', sz=c.querySelector('#sp-size'); if(!sz)return; var list=catSizes[cat]||[]; sz.innerHTML=list.map(function(x){return '<option value="'+esc(x)+'">'+esc(x)+'</option>';}).join('')||'<option value="">(no sizes)</option>'; }
+      c.querySelectorAll('input[name=sp-scope]').forEach(function(r){ r.onchange=syncScope; });
+      var szCat=c.querySelector('#sp-size-cat'); if(szCat){ szCat.onchange=syncSizes; syncSizes(); }
+      // manage types (prompt-based add/rename/delete)
+      function manageTypes(){
+        var names=types.map(function(t){return t.name;}).join('\n');
+        var msg='Spec types (one per line — rename by editing, remove a line to delete, add a new line to create):\n\n'+names;
+        var v=prompt(msg, names); if(v===null)return;
+        var want=v.split('\n').map(function(x){return x.trim();}).filter(Boolean);
+        var have=types.map(function(t){return t.name;});
+        var jobs=[];
+        // deletions: existing not in want
+        types.forEach(function(t){ if(want.indexOf(t.name)<0){ jobs.push(function(cb){ shipPost('/api/product/spec-types',{id:t.id,action:'delete'},cb); }); } });
+        // additions: want not in have
+        want.forEach(function(n){ if(have.indexOf(n)<0){ jobs.push(function(cb){ shipPost('/api/product/spec-types',{name:n},cb); }); } });
+        if(!jobs.length)return;
+        (function run(i){ if(i>=jobs.length)return renderProductSpecs(c); jobs[i](function(){ run(i+1); }); })(0);
+      }
+      var mg=c.querySelector('#sp-mgt'); if(mg)mg.onclick=manageTypes;
+      var mg0=c.querySelector('#sp-mgt0'); if(mg0)mg0.onclick=manageTypes;
+      // save
+      var save=c.querySelector('#sp-save'); if(save)save.onclick=function(){
+        var f=(c.querySelector('#sp-file')||{}).files; if(!f||!f[0]){ alert('Choose a file first.'); return; }
+        var scope=(c.querySelector('input[name=sp-scope]:checked')||{}).value||'all';
+        var eff=(c.querySelector('input[name=sp-eff]:checked')||{}).value||'production';
+        var body={ spec_type:(c.querySelector('#sp-type')||{}).value||'', scope_type:scope, effective_mode:eff,
+          confirm_with_supplier:!!(c.querySelector('#sp-confirm')||{}).checked };
+        if(scope==='category')body.scope_category=(c.querySelector('#sp-cat')||{}).value||'';
+        if(scope==='size'){ body.scope_category=(c.querySelector('#sp-size-cat')||{}).value||''; body.scope_size=(c.querySelector('#sp-size')||{}).value||''; }
+        if(scope==='sku')body.scope_skus=((c.querySelector('#sp-skus')||{}).value||'').split(/[,\s]+/).map(function(x){return x.trim();}).filter(Boolean).join(',');
+        if(eff==='production')body.effective_prod_no=(c.querySelector('#sp-prod')||{}).value||'';
+        var file=f[0]; body.filename=file.name; body.mime=file.type||'application/octet-stream';
+        var fr=new FileReader(); fr.onload=function(){ body.data_base64=String(fr.result).replace(/^data:[^;]+;base64,/,'');
+          save.disabled=true; save.textContent='Saving…';
+          shipPost('/api/product/specs',body,function(r){ if(r&&r.error){ alert('Save failed: '+r.error); save.disabled=false; save.textContent='Save specification'; return; } renderProductSpecs(c); }); };
+        fr.readAsDataURL(file);
+      };
+      c.querySelectorAll('.sp-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete this specification?'))return; shipPost('/api/product/specs/'+b.dataset.id+'/delete',{},function(){ renderProductSpecs(c); }); }; });
+      syncScope();
+    }).catch(function(e){ c.innerHTML='<div style="color:#dc2626;padding:10px 2px">Failed: '+esc(e.message||e)+'</div>'; }); }
   // RANGE PLAN — a season's products laid out by category: swatch + colour way + a tiny status pill. Toggle all vs approved-only.
   var _rangeSeason=null, _rangeApprovedOnly=false;
   function renderProductRange(c){
