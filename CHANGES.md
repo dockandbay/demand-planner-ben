@@ -1,3 +1,9 @@
+## v26.649.0 — Quality Control: dd-mmm-yy dates + portal upload rework + 24h delete
+- QC dates now dd-mmm-yy (e.g. 06-Aug-26 14:20) in both the admin SUPPLY > Quality Control list and the supplier portal (server to_char DD-Mon-YY HH24:MI).
+- Supplier portal QC upload reworked into a clear 3-step flow: (1) attach file via drag-and-drop or click-to-browse; (2) specify file type (NO default -- placeholder "select file type") + assign to production/batch/PO as dropdown-only (batch can no longer be free-typed); (3) Upload button greyed out until a file is attached AND a file type chosen. On upload without a production/batch chosen, those fields flash red.
+- Suppliers can delete their OWN QC upload within 24h (mistake window): DELETE /api/portal/quality-doc/:id (supplier-scoped, uploader_kind=supplier, 24h guard); Delete button shown per-row only when deletable.
+
+
 ## v26.648.0 — Barcode generator: PNG (default) + size options + live preview
 - Format toggle PNG (default) / JPG; Size dropdown (452 "source match" / 678 default / 1000 / 1500 / Custom width px, aspect kept); a live default-size preview of a sample barcode showing the exact output dimensions, updating on format/size change. Zip filenames use the chosen extension. Rasteriser generalised (svgToImg: target width + mime).
 

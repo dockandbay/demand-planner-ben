@@ -1955,34 +1955,75 @@
           // Portal ▸ Quality Control — supplier uploads test reports / GRS certs etc. (stored in-DB), assigned to prod/batch/PO.
           function ppQuality(){
             var TYPES=['Test report','GRS transaction certificate','GRS scope certificate','Inspection report','Compliance certificate','Material certificate','Packaging spec','Other'];
-            // Prod # / batch # / PO options come from THIS supplier's PO history (_ppData.pos). Searchable dropdowns
-            // (native datalist) only appear when there's history to match; prod + batch sort largest→smallest.
+            // Prod # / batch # / PO options come from THIS supplier's PO history (_ppData.pos). Dropdown-only
+            // (no free text — batch numbers especially must be chosen, not typed); prod + batch sort largest→smallest.
             var pos=(_ppData&&_ppData.pos)||[];
             function distinct(key){ var s={}; pos.forEach(function(p){ var v=(p[key]==null?'':String(p[key])).trim(); if(v)s[v]=1; }); return Object.keys(s); }
             function numDesc(a,b){ var na=parseFloat(a),nb=parseFloat(b); if(isFinite(na)&&isFinite(nb))return nb-na; return a<b?1:(a>b?-1:0); }
             var prods=distinct('prod_no').sort(numDesc), batches=distinct('batch_id').sort(numDesc), poList=distinct('po').sort().reverse();
-            function dl(id,arr){ return arr.length?('<datalist id="'+id+'">'+arr.map(function(o){return '<option value="'+esc(o)+'">';}).join('')+'</datalist>'):''; }
-            function fld(id,ph,arr,w){ return '<input class="fci txt" id="'+id+'" placeholder="'+ph+'"'+(arr.length?(' list="'+id+'-dl" autocomplete="off"'):'')+' style="width:'+w+'">'+dl(id+'-dl',arr); }
-            return '<div style="max-width:920px">'
+            function sel(id,ph,arr,w){ return '<select class="fci" id="'+id+'" style="width:'+w+';text-align:left"><option value="">'+ph+'</option>'+arr.map(function(o){return '<option value="'+esc(o)+'">'+esc(o)+'</option>';}).join('')+'</select>'; }
+            var stepCss='border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:12px;background:#fff;text-align:left';
+            var numCss='display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#1a1a1a;color:#fff;font-size:11px;font-weight:700;margin-right:8px;vertical-align:middle';
+            return '<div style="max-width:920px;text-align:left">'
               +'<div class="sect-h">Upload a document</div>'
-              +'<div class="mut tiny" style="margin-bottom:8px">Test reports, GRS certificates, inspection &amp; compliance docs. Assign to a production, batch, and/or PO'+(pos.length?' — search the dropdowns (from your POs)':'')+'. GRS transaction certificates usually map to a <b>batch</b> (they span POs).</div>'
-              +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px"><select class="fci" id="pq-type">'+TYPES.map(function(t){return '<option>'+t+'</option>';}).join('')+'</select>'
-              +fld('pq-prod','Production # (opt)',prods,'150px')+fld('pq-batch','Batch # (opt)',batches,'150px')+fld('pq-po','PO (opt)',poList,'170px')
-              +'<input type="file" id="pq-file"><button class="save-btn" id="pq-up" style="background:#1a1a1a;color:#fff">⬆ Upload</button><span class="mut tiny" id="pq-msg"></span></div>'
-              +'<div class="sect-h">Your uploaded documents</div><div id="pq-list"><div class="mut tiny">Loading…</div></div></div>';
+              +'<div class="mut tiny" style="margin-bottom:12px">Test reports, GRS certificates, inspection &amp; compliance docs. GRS transaction certificates usually map to a <b>batch</b> (they span POs).</div>'
+              // Step 1 — attach file (drag & drop / browse)
+              +'<div style="'+stepCss+'"><div style="font-weight:600;margin-bottom:8px"><span style="'+numCss+'">1</span>Attach file</div>'
+                +'<div id="pq-drop" style="border:2px dashed #cbd5e1;border-radius:8px;padding:22px 14px;text-align:center;cursor:pointer;color:#64748b;font-size:13px;transition:border-color .15s,background .15s">Drag &amp; drop a file here, or <span style="text-decoration:underline">click to browse</span></div>'
+                +'<input type="file" id="pq-file" style="display:none">'
+                +'<div id="pq-fname" class="tiny" style="margin-top:8px;color:#166534;font-weight:600;text-align:left"></div></div>'
+              // Step 2 — file type (NO default) + assignment (dropdown-only)
+              +'<div style="'+stepCss+'"><div style="font-weight:600;margin-bottom:8px"><span style="'+numCss+'">2</span>Specify the file type</div>'
+                +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px"><label class="tiny mut" style="min-width:62px">File type</label>'
+                  +'<select class="fci" id="pq-type" style="text-align:left"><option value="">— select file type —</option>'+TYPES.map(function(t){return '<option value="'+esc(t)+'">'+esc(t)+'</option>';}).join('')+'</select></div>'
+                +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><label class="tiny mut" style="min-width:62px">Assign to</label>'
+                  +sel('pq-prod','— production —',prods,'150px')+sel('pq-batch','— batch —',batches,'150px')+sel('pq-po','— PO (optional) —',poList,'190px')+'</div>'
+                +'<div class="tiny mut" style="margin-top:6px">Choose a <b>production</b> or <b>batch</b> (required). PO is optional.</div></div>'
+              // Step 3 — upload (greyed until steps 1 & 2 done)
+              +'<div style="'+stepCss+'"><div style="font-weight:600;margin-bottom:8px"><span style="'+numCss+'">3</span>Upload</div>'
+                +'<button class="save-btn" id="pq-up" disabled style="background:#cbd5e1;color:#fff;cursor:not-allowed">⬆ Upload</button>'
+                +'<span class="tiny mut" id="pq-msg" style="margin-left:10px"></span>'
+                +'<div class="tiny mut" id="pq-hint" style="margin-top:6px">Attach a file and choose a file type to enable upload.</div></div>'
+              +'<div class="sect-h" style="margin-top:16px">Your uploaded documents</div><div id="pq-list"><div class="mut tiny">Loading…</div></div></div>';
           }
           function wireQuality(){
+            var fileEl=document.getElementById('pq-file'), drop=document.getElementById('pq-drop'), fname=document.getElementById('pq-fname');
+            var typeEl=document.getElementById('pq-type'), prodEl=document.getElementById('pq-prod'), batchEl=document.getElementById('pq-batch'), poEl=document.getElementById('pq-po');
+            var up=document.getElementById('pq-up'), msg=document.getElementById('pq-msg'), hint=document.getElementById('pq-hint');
+            var _file=null;
+            function refreshBtn(){ var ok=!!_file && !!(typeEl&&typeEl.value); if(up){ up.disabled=!ok; up.style.background=ok?'#1a1a1a':'#cbd5e1'; up.style.cursor=ok?'pointer':'not-allowed'; } if(hint)hint.style.display=ok?'none':''; }
+            function setFile(f){ _file=f||null; if(fname)fname.textContent=_file?('✓ '+_file.name+' ('+Math.max(1,Math.round(_file.size/1024))+' KB)'):''; refreshBtn(); }
+            // Step 1 — drag & drop + click to browse
+            if(drop){
+              drop.onclick=function(){ if(fileEl)fileEl.click(); };
+              drop.ondragover=function(e){ e.preventDefault(); drop.style.borderColor='#1a1a1a'; drop.style.background='#f8fafc'; };
+              drop.ondragleave=function(){ drop.style.borderColor='#cbd5e1'; drop.style.background=''; };
+              drop.ondrop=function(e){ e.preventDefault(); drop.style.borderColor='#cbd5e1'; drop.style.background=''; var f=((e.dataTransfer&&e.dataTransfer.files)||[])[0]; if(f)setFile(f); };
+            }
+            if(fileEl)fileEl.onchange=function(){ setFile((fileEl.files||[])[0]||null); };
+            // Step 2 — type change enables the button; picking prod/batch clears the required-flash
+            if(typeEl)typeEl.onchange=refreshBtn;
+            function clearFlash(el){ if(el){ el.style.borderColor=''; el.style.boxShadow=''; } }
+            if(prodEl)prodEl.onchange=function(){ clearFlash(prodEl); clearFlash(batchEl); };
+            if(batchEl)batchEl.onchange=function(){ clearFlash(prodEl); clearFlash(batchEl); };
+            function flashReq(){ var els=[prodEl,batchEl].filter(Boolean), n=0; var iv=setInterval(function(){ n++; var on=(n%2===1); els.forEach(function(e){ e.style.borderColor=on?'#dc2626':'#cbd5e1'; e.style.boxShadow=on?'0 0 0 2px rgba(220,38,38,.25)':'none'; }); if(n>=5){ clearInterval(iv); els.forEach(function(e){ e.style.borderColor='#dc2626'; e.style.boxShadow='none'; }); } },150); }
             function load(){ fetch('/api/portal/quality-docs').then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
-              var body=rows.map(function(d){ return '<tr><td class="l">'+esc(d.doc_type||'')+'</td><td class="l"><a href="/api/portal/quality-doc/'+d.id+'" target="_blank" rel="noopener">'+esc(d.filename||'file')+'</a></td><td class="l">'+esc(d.po||'')+'</td><td class="l">'+(d.prod_no?'P'+esc(d.prod_no):'')+'</td><td class="l">'+esc(d.batch_id||'')+'</td><td class="l mut tiny">'+esc(d.created_at||'')+'</td></tr>'; }).join('');
-              var el=document.getElementById('pq-list'); if(el)el.innerHTML='<div class="tw"><table style="width:max-content;min-width:100%"><thead><tr><th class="l">Type</th><th class="l">File</th><th class="l">PO</th><th class="l">Prod</th><th class="l">Batch</th><th class="l">Uploaded</th></tr></thead><tbody>'+(body||'<tr><td colspan="6" class="mut tiny">No documents uploaded yet.</td></tr>')+'</tbody></table></div>';
+              var body=rows.map(function(d){
+                var del=d.deletable?('<button class="pq-del" data-id="'+d.id+'" style="border:1px solid #fecaca;background:#fff;color:#dc2626;border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer">Delete</button>'):'';
+                return '<tr><td class="l">'+esc(d.doc_type||'')+'</td><td class="l"><a href="/api/portal/quality-doc/'+d.id+'" target="_blank" rel="noopener">'+esc(d.filename||'file')+'</a></td><td class="l">'+esc(d.po||'')+'</td><td class="l">'+(d.prod_no?'P'+esc(d.prod_no):'')+'</td><td class="l">'+esc(d.batch_id||'')+'</td><td class="l mut tiny">'+esc(d.created_at||'')+'</td><td class="l">'+del+'</td></tr>'; }).join('');
+              var el=document.getElementById('pq-list'); if(!el)return;
+              el.innerHTML='<div class="tw"><table style="width:max-content;min-width:100%"><thead><tr><th class="l">Type</th><th class="l">File</th><th class="l">PO</th><th class="l">Prod</th><th class="l">Batch</th><th class="l">Uploaded</th><th class="l"></th></tr></thead><tbody>'+(body||'<tr><td colspan="7" class="mut tiny">No documents uploaded yet.</td></tr>')+'</tbody></table></div>';
+              Array.prototype.forEach.call(el.querySelectorAll('.pq-del'),function(b){ b.onclick=function(){ var id=b.getAttribute('data-id'); if(!window.confirm('Delete this document? Files can only be deleted within 24 hours of uploading.'))return; b.disabled=true; b.textContent='…'; fetch('/api/portal/quality-doc/'+id,{method:'DELETE'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ b.disabled=false; b.textContent='Delete'; window.alert(j.error); return; } load(); }).catch(function(){ b.disabled=false; b.textContent='Delete'; }); }; });
             }).catch(function(){ var el=document.getElementById('pq-list'); if(el)el.innerHTML='<div class="mut tiny">Could not load.</div>'; }); }
-            var up=document.getElementById('pq-up'); if(up)up.onclick=function(){ var msg=document.getElementById('pq-msg'), f=((document.getElementById('pq-file')||{}).files||[])[0];
-              if(!f){ msg.textContent='Choose a file.'; return; }
-              var prod=document.getElementById('pq-prod').value.trim(), batch=document.getElementById('pq-batch').value.trim(), po=document.getElementById('pq-po').value.trim();
-              if(!(prod||batch||po)){ msg.textContent='Assign at least one of Production / Batch / PO.'; return; }
-              up.disabled=true; msg.textContent='Uploading…';
-              var rd=new FileReader(); rd.onload=function(){ fetch('/api/portal/quality-doc',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({doc_type:document.getElementById('pq-type').value, filename:f.name, mime:f.type||'application/octet-stream', data_base64:String(rd.result), prod_no:prod||null, batch_id:batch||null, po:po||null})}).then(function(r){return r.json();}).then(function(j){ up.disabled=false; if(j&&j.error){ msg.textContent='Error: '+j.error; return; } msg.textContent='Uploaded ✓'; ['pq-prod','pq-batch','pq-po'].forEach(function(id){var e=document.getElementById(id); if(e)e.value='';}); var fe=document.getElementById('pq-file'); if(fe)fe.value=''; load(); }).catch(function(){ up.disabled=false; msg.textContent='Upload failed'; }); }; rd.readAsDataURL(f); };
-            load();
+            // Step 3 — upload (flash prod/batch red if none chosen)
+            if(up)up.onclick=function(){
+              if(!_file){ if(msg)msg.textContent='Attach a file first.'; return; }
+              if(!typeEl.value){ if(msg)msg.textContent='Choose a file type.'; return; }
+              var prod=prodEl?prodEl.value.trim():'', batch=batchEl?batchEl.value.trim():'', po=poEl?poEl.value.trim():'';
+              if(!(prod||batch)){ if(msg)msg.textContent='Choose a production or batch.'; flashReq(); return; }
+              up.disabled=true; up.style.background='#cbd5e1'; up.style.cursor='not-allowed'; if(msg)msg.textContent='Uploading…';
+              var f=_file, rd=new FileReader(); rd.onload=function(){ fetch('/api/portal/quality-doc',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({doc_type:typeEl.value, filename:f.name, mime:f.type||'application/octet-stream', data_base64:String(rd.result), prod_no:prod||null, batch_id:batch||null, po:po||null})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ if(msg)msg.textContent='Error: '+j.error; refreshBtn(); return; } if(msg)msg.textContent='Uploaded ✓'; setFile(null); if(typeEl)typeEl.value=''; if(prodEl)prodEl.value=''; if(batchEl)batchEl.value=''; if(poEl)poEl.value=''; refreshBtn(); load(); }).catch(function(){ if(msg)msg.textContent='Upload failed'; refreshBtn(); }); }; rd.readAsDataURL(f); };
+            load(); refreshBtn();
           }
           // SUG-0019 P3: PRODUCT ▸ Specifications — files grouped by type; "confirm" items need the supplier's acknowledgement.
           function ppSpecs(){ var specs=(_ppData&&_ppData.specs)||[];

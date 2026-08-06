@@ -2718,7 +2718,7 @@ app.get('/api/supply/:section', async (req, res) => {
         if (qs) { w.push(`(filename ILIKE '%'||$${i}||'%' OR coalesce(po,'') ILIKE '%'||$${i}||'%' OR coalesce(supplier_name,'') ILIKE '%'||$${i}||'%' OR coalesce(prod_no,'') ILIKE '%'||$${i}||'%' OR coalesce(batch_id,'') ILIKE '%'||$${i}||'%' OR doc_type ILIKE '%'||$${i}||'%')`); p.push(qs); i++; }
         const sql = `SELECT id, doc_type, filename, coalesce(mime,'') mime, coalesce(byte_size,0) byte_size,
             coalesce(prod_no,'') prod_no, coalesce(batch_id,'') batch_id, coalesce(po,'') po, coalesce(supplier_name,'') supplier_name,
-            coalesce(uploaded_by,'') uploaded_by, coalesce(uploader_kind,'') uploader_kind, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at
+            coalesce(uploaded_by,'') uploaded_by, coalesce(uploader_kind,'') uploader_kind, to_char(created_at,'DD-Mon-YY HH24:MI') created_at
           FROM planner.quality_docs ${w.length ? 'WHERE ' + w.join(' AND ') : ''} ORDER BY created_at DESC LIMIT 2000`;
         return res.json((await pool.query(sql, p).catch(() => ({ rows: [] }))).rows);
       }
@@ -10838,7 +10838,8 @@ app.get('/api/portal/quality-docs', portalAuth, async (req, res) => {
     const sups = (req.portal.suppliers || []).map(s => String(s).toLowerCase());
     if (!sups.length) return res.json([]);
     const r = await pool.query(`SELECT id, doc_type, filename, coalesce(byte_size,0) byte_size, coalesce(prod_no,'') prod_no,
-        coalesce(batch_id,'') batch_id, coalesce(po,'') po, coalesce(uploader_kind,'') uploader_kind, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at
+        coalesce(batch_id,'') batch_id, coalesce(po,'') po, coalesce(uploader_kind,'') uploader_kind, to_char(created_at,'DD-Mon-YY HH24:MI') created_at,
+        (coalesce(uploader_kind,'')='supplier' AND created_at > now() - interval '24 hours') deletable
       FROM planner.quality_docs WHERE lower(coalesce(supplier_name,'')) = ANY($1) ORDER BY created_at DESC LIMIT 500`, [sups]);
     res.json(r.rows);
   } catch (e) { res.json([]); }
@@ -10865,6 +10866,19 @@ app.get('/api/portal/quality-doc/:id', portalAuth, async (req, res) => {
     res.setHeader('Content-Type', r.mime || 'application/octet-stream');
     res.setHeader('Content-Disposition', 'attachment; filename="' + String(r.filename || 'document').replace(/"/g, '') + '"');
     res.send(r.data);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Supplier may delete their OWN QC upload within 24h of uploading it (mistake window). Scoped to their supplier + uploader_kind='supplier'.
+app.delete('/api/portal/quality-doc/:id', portalAuth, async (req, res) => {
+  try {
+    const sups = (req.portal.suppliers || []).map(s => String(s).toLowerCase());
+    const r = (await pool.query(`SELECT lower(coalesce(supplier_name,'')) sn, coalesce(uploader_kind,'') uk,
+        (created_at > now() - interval '24 hours') within24 FROM planner.quality_docs WHERE id=$1`, [req.params.id])).rows[0];
+    if (!r || (sups.length && r.sn && sups.indexOf(r.sn) < 0)) return res.status(404).json({ error: 'not found' });
+    if (r.uk !== 'supplier') return res.status(403).json({ error: 'can only delete your own uploads' });
+    if (!r.within24) return res.status(403).json({ error: 'delete window (24h) has passed' });
+    await pool.query(`DELETE FROM planner.quality_docs WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
