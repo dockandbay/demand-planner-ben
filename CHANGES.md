@@ -1,3 +1,6 @@
+## v26.629.0 — DEMAND: active vs discontinued unit split on the sub-category subtotal
+- The sub-category subtotal now shows a per-month "active · discontinued" unit split (only for sub-categories that have discontinued SKUs), so it is clear how much of the forecast is active vs discontinued sell-through. With "disregard discontinued from smoothing" on, this reads e.g. 15,000 · 0; off, e.g. 11,800 · 3,200. subcatSkuEffTotals now returns activeTotals/discTotals/anyDisc.
+
 ## v26.628.0 — Specifications: searchable Category / Size / Production pickers
 - The Category, Size-group and Production pickers in the spec upload form are now type-to-filter inputs (native datalist) instead of plain dropdowns — search a long category list rather than scrolling. Size options still react to the chosen category.
 

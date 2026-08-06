@@ -6626,10 +6626,11 @@ function subcatSkuEffTotals(s,co,ch){
   var all=Object.keys(SKUM).filter(function(sku){var p=SKUM[sku];if(!p||p.s!==s)return false;var av=(p.av||{})[ctry]||'';return av.indexOf(chKey)>=0;});
   var shares=buildSkuShares(all,co,ch,lyYM);
   var DIS=smoothDisregards(co,ch,s);   // disregard discontinued → they run to 0 (active SKUs carry the subcat)
-  var tot={}, actTot={}, discTot={}, discN=0;
+  var tot={}, actTot={}, discTot={}, discN=0, anyD=false;
   all.forEach(function(sku){
     var p=SKUM[sku];
     var disc=p.disc&&p.disc[ctry]?p.disc[ctry]:null;
+    if(disc)anyD=true;
     if(disc&&disc<TODAY)discN++;
     var lch=p.lch&&p.lch[ctry]?p.lch[ctry]:null;
     var rem=(p.inv&&p.inv[wh]||0)+(p.oo&&p.oo[wh]||0);
@@ -6645,7 +6646,7 @@ function subcatSkuEffTotals(s,co,ch){
       if(isDisc){ discTot[m]=(discTot[m]||0)+v; } else { actTot[m]=(actTot[m]||0)+v; }
     });
   });
-  return {totals:tot,activeTotals:actTot,discTotals:discTot,count:all.length,disc:discN,active:all.length-discN};
+  return {totals:tot,activeTotals:actTot,discTotals:discTot,count:all.length,disc:discN,active:all.length-discN,anyDisc:anyD};
 }
 
 function insertInlineSkuRows(s,co,ch,afterTr){
@@ -7295,6 +7296,11 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     var sumDiv=document.createElement('div');sumDiv.textContent=sum?fn(sum):'';if(prevActive)sumDiv.style.color='#b45309';std.appendChild(sumDiv);
     var gapDiv=document.createElement('div');gapDiv.style.cssText='font-size:7px;font-weight:700;color:'+c;
     gapDiv.textContent=g===0?'0':(g>0?'+':'\u2212')+fn(Math.abs(g));std.appendChild(gapDiv);
+    // Active vs discontinued unit split (only for subcats that have discontinued SKUs) \u2014 "act \u00b7 disc"
+    if(eff&&eff.anyDisc){ var _av=Math.round((eff.activeTotals&&eff.activeTotals[m])||0), _dv=Math.round((eff.discTotals&&eff.discTotals[m])||0);
+      if(_av||_dv){ var splitDiv=document.createElement('div'); splitDiv.style.cssText='font-size:7px;font-weight:600;line-height:1.1';
+        splitDiv.innerHTML='<span style="color:#475569" title="active SKUs">'+fn(_av)+'</span> <span style="color:#c4c4c2">\u00b7</span> <span style="color:#9ca3af;font-style:italic" title="discontinued SKUs">'+fn(_dv)+'</span>';
+        std.appendChild(splitDiv); } }
     if(prevActive && SMOOTH_PREVIEW.fy==null){
       var bar=document.createElement('div');bar.style.cssText='margin-top:1px;display:flex;gap:2px;justify-content:flex-end;align-items:center;flex-wrap:wrap';
       smoothReviewBar(bar);std.appendChild(bar);
@@ -7335,7 +7341,8 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       std.innerHTML='<div style="font-weight:700">↳ '+eff.count+' total</div>'
         +'<div style="font-size:7px;font-weight:700;color:#92400e">gap vs subcat</div>'
         +'<div style="font-size:8px;font-weight:500;color:#475569">'+eff.active+' active</div>'
-        +'<div style="font-size:8px;font-weight:400;font-style:italic;color:#9ca3af">'+eff.disc+' discontinued</div>';
+        +'<div style="font-size:8px;font-weight:400;font-style:italic;color:#9ca3af">'+eff.disc+' discontinued</div>'
+        +(eff.anyDisc?'<div style="font-size:7px;font-weight:600;color:#94a3b8;margin-top:1px">units/mth: <span style="color:#475569">active</span> · <span style="font-style:italic">disc</span></div>':'');
       std.title='Totals & gap cover ALL SKUs in this subcategory for the current country/channel (incl. discontinued, regardless of row filters). Second line per month = sum of SKU forecasts minus the subcategory forecast, in units. + = SKUs over the subcat; \u2212 = SKUs under.';
     } else if(ci3===1){
       // Sticky stock total (OH / inbound) for the subcategory
