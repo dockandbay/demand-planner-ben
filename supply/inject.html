@@ -8419,6 +8419,8 @@
   function biBody(){ return document.getElementById('rep-body')||document.getElementById('supply-content'); }
   // SUG-0020 DTC MISMATCH — open Direct-to-Client sales orders vs their POs (mapped by sales_order_ref)
   function _dtcPill(lbl,n,color){ return '<span style="font-size:11px;color:#64748b">'+lbl+' <b style="color:'+color+'">'+n+'</b></span>'; }
+  function refreshDtcBadge(){ var el=document.getElementById('nav-dtc-badge'); if(!el)return;
+    fetch('/api/supply/dtc/mismatch?count=1').then(function(r){return r.json();}).then(function(j){ var n=(j&&j.counts&&j.counts.issues)||0; el.textContent=n?String(n):''; el.style.display=n?'':'none'; }).catch(function(){}); }
   function renderDtcMismatch(d){ var b=biBody(); d=d||{orders:[],counts:{}}; var counts=d.counts||{};
     b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:#0f172a">DTC mismatch</div>'
       +'<div class="mut tiny" style="margin-bottom:10px;max-width:840px">Open Direct-to-Client sales orders (not void, not dispatched) reconciled against their purchase orders (mapped by sales order ref). Flags orders with <b>no PO</b> or a <b>SKU / quantity mismatch</b>. Add a note or <b>accept</b> a discrepancy to clear it from the count.</div>'
@@ -8429,6 +8431,7 @@
     var ib=document.getElementById('dtc-import'); if(ib)ib.onclick=function(){ if(!confirm('Import the latest Direct-to-Client sales orders from Cin7 now? (read-only pull)'))return; ib.disabled=true; ib.textContent='Importing…';
       fetch('/api/supply/dtc/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({})}).then(function(r){return r.json();}).then(function(j){ ib.disabled=false; ib.textContent='↻ Import sales orders'; if(j&&j.error){ alert('Import failed: '+j.error); return; } selectReport('dtc-mismatch'); }).catch(function(){ ib.disabled=false; ib.textContent='↻ Import sales orders'; alert('Import failed.'); }); };
     _drawDtcList((d.orders||[]).slice());
+    try{ refreshDtcBadge(); }catch(e){}
   }
   function _drawDtcList(orders){ var el=document.getElementById('dtc-list'); if(!el)return;
     if(!orders.length){ el.innerHTML='<div class="mut tiny" style="padding:8px 0">No open DTC sales orders imported yet. Click <b>Import sales orders</b> to pull them from Cin7.</div>'; return; }
@@ -9080,6 +9083,7 @@
   // without waiting for CONFIG's (sometimes slow) DOM render. Mirror L2 in renderConfig if that list changes.
   try{window.__configNav={items:[['general','General settings'],['supplychain','Supply chain'],['portalusers','Portal users'],['portal','Portal'],['keyaccounts','Key accounts'],['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']],select:function(k){CONFIG_SUB=k;enterConfig();},current:function(){return CONFIG_SUB;}};}catch(e){}
   function showSupply(noSelect){ ensureRoot(); if(typeof hideScenario==='function')hideScenario(); var app=document.getElementById('app'); if(app){app.classList.add('supply-active');app.classList.remove('config-mode');}
+    try{ refreshDtcBadge(); }catch(e){}   // DTC mismatch issue count on the BI & REPORTS top tab
     document.body.classList.add('supply-on');   // reveals the mobile top-bar search
     var r=document.getElementById('supply-root'); if(r)r.style.display='block';
     document.querySelectorAll('#view-tabs-row .view-toggle').forEach(function(b){b.classList.remove('active');});
@@ -9110,7 +9114,7 @@
   function ensureRoot(){ if(document.getElementById('supply-root'))return;
     var app=document.getElementById('app')||document.body; if(!app)return;
     var rootEl=document.createElement('div'); rootEl.id='supply-root';
-    rootEl.innerHTML='<div id="supply-subnav">'+SECTIONS.map(function(s){return '<a class="stab" data-k="'+s[0]+'" href="#/supply/'+s[0]+'">'+s[1]+'</a>';}).join('')
+    rootEl.innerHTML='<div id="supply-subnav">'+SECTIONS.map(function(s){return '<a class="stab" data-k="'+s[0]+'" href="#/supply/'+s[0]+'">'+s[1]+(s[0]==='reports'?'<span id="nav-dtc-badge" title="DTC mismatch issues" style="display:none;margin-left:5px;background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;vertical-align:middle"></span>':'')+'</a>';}).join('')
       +'<span class="ver">HORIZON __APP_VERSION__</span></div>'
       +'<select id="supply-nav-sel" aria-label="Section">'+SECTIONS.map(function(s){return '<option value="'+s[0]+'">'+s[1]+'</option>';}).join('')+'</select>'
       +'<div id="supply-content"></div>';

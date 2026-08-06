@@ -1,3 +1,6 @@
+## v26.645.0 — SUG-0020 DTC Mismatch (Phase 3: top-menu counter)
+- The open-issue count now rolls up as a red badge on the top-level BI & REPORTS tab (refreshed on entering SUPPLY and after import/accept). Cheap ?count=1 mode on the mismatch endpoint. Completes SUG-0020.
+
 ## v26.644.0 — SUG-0020 DTC Mismatch (Phase 2: BI & Reports UI)
 - New BI & REPORTS ▸ DTC MISMATCH sub-tab: "Import sales orders" button (confirm-gated, read-only Cin7 pull), a live status line, Issues/Accepted/OK counters, and a table of open DTC sales orders vs their POs — each row shows the issue (no PO mapped / SKU-qty mismatch / OK), the mapped PO refs (click to open), the per-SKU SO-vs-PO diff, a note field, and an "accept" checkbox that clears it from the count. Completes the SUG-0020 flow (import → reconcile → note/accept). Remaining: roll the issue count onto the top-line BI & REPORTS menu badge.
 

@@ -6155,7 +6155,8 @@ app.post('/api/supply/dtc/review', async (req, res) => {   // per-order note / a
 });
 // The mismatch report: OPEN DTC sales orders (not void, not dispatched) vs the POs mapped by sales_order_ref.
 // Issue 1 = no PO mapped; Issue 2 = SKU/qty on the SO ≠ summed across its POs. Accepted orders drop out of the count.
-app.get('/api/supply/dtc/mismatch', async (_req, res) => {
+app.get('/api/supply/dtc/mismatch', async (req, res) => {
+  const countOnly = !!(req.query && req.query.count);
   try {
     const sos = (await pool.query(`SELECT s.cin7_id, s.reference, s.customer_order_no, s.branch_name, s.company, to_char(s.created_date,'DD-Mon-YY') created_date,
         coalesce(r.note,'') note, coalesce(r.accepted,false) accepted, coalesce(r.accepted_by,'') accepted_by
@@ -6185,7 +6186,7 @@ app.get('/api/supply/dtc/mismatch', async (_req, res) => {
       if (s.accepted) accepted++; else if (isIssue) issues++; else ok++;
       return { cin7_id: s.cin7_id, reference: s.reference, branch_name: s.branch_name, company: s.company, created_date: s.created_date, po_refs: poRefs, issue, diffs: diffs.slice(0, 60), note: s.note, accepted: s.accepted };
     });
-    res.json({ orders, counts: { issues, accepted, ok } });
+    res.json({ orders: countOnly ? [] : orders, counts: { issues, accepted, ok } });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // 3PL invoice — reference-based CLEAN-UP SWEEP for one invoice file. Fetches the invoice's references that
