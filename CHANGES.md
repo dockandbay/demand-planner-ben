@@ -1,3 +1,7 @@
+## v26.657.0 — DEMAND Smoothing: clarify Disregard disc. help wording
+- Help text now reads "...boosts only active SKUs to sum to the category forecast" (Ben's wording).
+
+
 ## v26.656.0 — DEMAND Smoothing: left-align, saved indicator, mode help, always re-cap discontinued
 - Sub-category column explicitly left-aligned.
 - Added a "Saved" indicator in the modal header; settings already persist per country/channel to the DB (app_settings, injected on load) — now visibly confirmed on every change.
