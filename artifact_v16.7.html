@@ -909,13 +909,17 @@ function renderSmoothSettings(){
   if(!allSubs.length){ list.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:8px 0">No sub-categories available for '+esc(_ssCo)+' / '+esc(_ssCh)+'.</div>'; return; }
   var adis=document.getElementById('ss-all-dis'); if(adis)adis.checked=allSubs.every(function(s){return smoothDisregards(_ssCo,_ssCh,s);});
   var aau=document.getElementById('ss-all-auto'); if(aau)aau.checked=allSubs.every(function(s){return smoothAuto(_ssCo,_ssCh,s);});
-  list.innerHTML=cats.map(function(c){ var subs=Object.keys(byCat[c]).sort();
-    return '<div style="margin:0 0 10px"><div style="font-weight:700;font-size:12px;color:#0f172a;border-bottom:1px solid #eef2f7;padding-bottom:2px;margin-bottom:5px">'+esc(c)+'</div>'
-      +subs.map(function(s){ var dis=smoothDisregards(_ssCo,_ssCh,s), au=smoothAuto(_ssCo,_ssCh,s);
-        return '<div style="display:flex;align-items:center;gap:12px;font-size:12px;margin:0 0 3px">'
-          +'<label style="display:inline-flex;align-items:center;gap:4px" title="Disregard discontinued — boost active only"><input type="checkbox" class="ss-dis" data-s="'+esc(s)+'"'+(dis?' checked':'')+'> disc</label>'
-          +'<label style="display:inline-flex;align-items:center;gap:4px" title="Include in the auto-smooth sweep"><input type="checkbox" class="ss-auto" data-s="'+esc(s)+'"'+(au?' checked':'')+'> auto</label>'
-          +'<span style="color:#334155">'+esc(s)+'</span></div>'; }).join('')+'</div>'; }).join('');
+  // Flat list — one row per sub-category (no category grouping): sub-category name first, then the two toggles.
+  var uniq={}; allSubs.forEach(function(s){ uniq[s]=1; }); var subsList=Object.keys(uniq).sort();
+  list.innerHTML='<table style="width:100%;border-collapse:collapse;font-size:12px">'
+    +'<thead><tr style="border-bottom:1px solid #e5e7eb;color:#64748b"><th style="padding:5px 6px;font-weight:600;text-align:left">Sub-category</th>'
+      +'<th style="padding:5px 6px;font-weight:600;text-align:center;width:120px" title="Disregard discontinued — when smoothing, leave discontinued SKUs at their stock rundown and push the sub-category target onto the ACTIVE SKUs only">Disregard&nbsp;disc.</th>'
+      +'<th style="padding:5px 6px;font-weight:600;text-align:center;width:70px" title="Include this sub-category in the one-click Run auto-smooth sweep at the top">Auto</th></tr></thead><tbody>'
+    +subsList.map(function(s){ var dis=smoothDisregards(_ssCo,_ssCh,s), au=smoothAuto(_ssCo,_ssCh,s);
+      return '<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:5px 6px;color:#334155">'+esc(s)+'</td>'
+        +'<td style="padding:5px 6px;text-align:center"><input type="checkbox" class="ss-dis" data-s="'+esc(s)+'"'+(dis?' checked':'')+'></td>'
+        +'<td style="padding:5px 6px;text-align:center"><input type="checkbox" class="ss-auto" data-s="'+esc(s)+'"'+(au?' checked':'')+'></td></tr>'; }).join('')
+    +'</tbody></table>';
   list.querySelectorAll('.ss-dis').forEach(function(cb){ cb.onchange=function(){ var k=_ssCo+'|'+_ssCh+'|'+cb.dataset.s; if(cb.checked)SMOOTH_DISREGARD_DISC[k]=true; else delete SMOOTH_DISREGARD_DISC[k]; saveSmoothDisregard(); renderSmoothSettings(); try{renderMain();}catch(e){} }; });
   list.querySelectorAll('.ss-auto').forEach(function(cb){ cb.onchange=function(){ var k=_ssCo+'|'+_ssCh+'|'+cb.dataset.s; SMOOTH_AUTO.flags=SMOOTH_AUTO.flags||{}; if(cb.checked)SMOOTH_AUTO.flags[k]=true; else delete SMOOTH_AUTO.flags[k]; saveSmoothAuto(); renderSmoothSettings(); }; });
 }

@@ -1,6 +1,10 @@
+## v26.654.0 — DEMAND Smoothing settings: simpler flat layout
+- Dropped the Category grouping. Now one row per sub-category: sub-category name first, then the two toggles (Disregard disc., Auto) as a clean 3-column table with header labels + tooltips.
+
+
 ## v26.653.0 — Manufacturing tab: one drawer per BOM SKU (Manufacturing-branch POs only)
 - Detail is now a single pop-out drawer per BOM (parent) SKU, opened from the "detail" link on the bundle header (replaces the per-component drawer + inline expand, per Ben).
-- Drawer shows: the productionn orders carrying that SKU (PO, prod, status, production-end date, qty + total demand), then a block per component SKU (Required / In production / Completed / Existing stock / Total supply + coverage) listing ONLY branch=Manufacturing POs behind each component.
+- Drawer shows: the production orders carrying that SKU (PO, prod, status, production-end date, qty + total demand), then a block per component SKU (Required / In production / Completed / Existing stock / Total supply + coverage) listing ONLY branch=Manufacturing POs behind each component.
 - Summary table + inline Existing-stock entry unchanged.
 
 
