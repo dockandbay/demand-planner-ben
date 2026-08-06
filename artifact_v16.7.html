@@ -745,6 +745,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
       <button id="cat-tot-toggle" class="pill catpill" aria-pressed="false" title="Show / hide a total row under each category (e.g. &ldquo;Hair Wrap — total&rdquo;). Hidden by default." onclick="setShowCatTot(!SHOW_CAT_TOT)">Show</button>
     </span>
     <button id="fclogic-btn" onclick="openFcLogic(event)" title="How the forecast numbers are calculated" style="margin-left:12px;font-size:10px;padding:2px 9px;border:1px solid #c4b5fd;border-radius:3px;background:#f5f3ff;color:#5b21b6;cursor:pointer;flex-shrink:0">&#9635; Forecast Logic</button>
+    <button id="smoothset-btn" onclick="openSmoothSettings(event)" title="Smoothing settings: disregard discontinued SKUs per country / channel / sub-category" style="margin-left:8px;font-size:10px;padding:2px 9px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1e40af;cursor:pointer;flex-shrink:0">&#9881; Smoothing</button>
     <button id="plan-dl-btn" onclick="openPlanDownload(event)" title="Download the demand plan (SKU × month, units + revenue) for chosen fiscal year(s)" style="margin-left:8px;font-size:10px;padding:2px 9px;border:1px solid #16a34a;border-radius:3px;background:#dcfce7;color:#166534;cursor:pointer;flex-shrink:0">&#11015; Download plan</button>
   </div>
   <div id="catrow1-wrap" style="display:flex;align-items:center;gap:6px;position:relative">
@@ -825,6 +826,14 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
     <div style="margin-top:14px;color:#888;font-size:11px">Product, sales actuals &amp; inventory import daily via n8n &rarr; Supabase; everything else is live. Your forecast edits save with <b>Save Forecasts</b> (to <code style="background:#f3f4f6;padding:1px 4px;border-radius:3px">forecast_outputs</code>). No manual rebuilds.</div>
   </div>
 </div>
+<div id="smoothset-ov" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:flex-start;justify-content:center" onclick="if(event.target===this)closeSmoothSettings()">
+  <div style="background:#fff;max-width:640px;width:94%;margin-top:40px;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.25);padding:18px 22px;max-height:86vh;overflow:auto;font-size:13px;color:#222">
+    <div style="display:flex;align-items:center;margin-bottom:6px"><div style="font-weight:700;font-size:15px">&#9881; Smoothing &middot; disregard discontinued SKUs</div><button onclick="closeSmoothSettings()" style="margin-left:auto;border:none;background:none;font-size:20px;cursor:pointer;color:#888">&times;</button></div>
+    <div style="color:#555;font-size:12px;margin-bottom:12px">For a country / channel / sub-category, smoothing <b>zeroes discontinued SKUs</b> so the active SKUs absorb the full sub-category forecast (discontinued are also left out of the gap check).</div>
+    <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px"><label style="font-size:12px;color:#64748b">Country</label><select id="ss-co" style="font-size:12px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px"></select><label style="font-size:12px;color:#64748b;margin-left:6px">Channel</label><select id="ss-ch" style="font-size:12px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px"></select><label style="font-size:12px;margin-left:auto;font-weight:600;cursor:pointer"><input type="checkbox" id="ss-all"> Select all</label></div>
+    <div id="ss-list"></div>
+  </div>
+</div>
 <div id="fclogic-ov" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:flex-start;justify-content:center" onclick="if(event.target===this)closeFcLogic()">
   <div style="background:#fff;max-width:660px;width:94%;margin-top:40px;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.25);padding:18px 22px;max-height:86vh;overflow:auto;font-size:13px;line-height:1.55;color:#222">
     <div style="display:flex;align-items:center;margin-bottom:10px">
@@ -875,6 +884,33 @@ function openHelp(){var e=document.getElementById('help-ov');if(e)e.style.displa
 function closeHelp(){var e=document.getElementById('help-ov');if(e)e.style.display='none';}
 function openFcLogic(ev){ if(ev)ev.stopPropagation(); var e=document.getElementById('fclogic-ov'); if(e)e.style.display='flex'; }
 function closeFcLogic(){ var e=document.getElementById('fclogic-ov'); if(e)e.style.display='none'; }
+// ⚙ Smoothing settings — per country/channel/subcat "disregard discontinued" flags (persisted in app_settings).
+var _ssCo='UK', _ssCh='DTC';
+function ssSubcatsFor(co,ch){ var ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':'b', byCat={};
+  Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||!p.s)return; var av=(p.av||{})[ctry]||''; if(av.indexOf(chKey)<0)return; var cat=p.c||p.s; (byCat[cat]=byCat[cat]||{})[p.s]=1; });
+  return byCat; }
+function saveSmoothDisregard(){ fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'smooth_disregard_disc',value:JSON.stringify(SMOOTH_DISREGARD_DISC)})}).catch(function(){}); }
+function renderSmoothSettings(){
+  var coSel=document.getElementById('ss-co'), chSel=document.getElementById('ss-ch'), list=document.getElementById('ss-list'), allB=document.getElementById('ss-all');
+  if(!coSel||!chSel||!list)return;
+  if(!coSel.options.length){ coSel.innerHTML=CTRS.map(function(c){return '<option>'+c+'</option>';}).join(''); coSel.value=_ssCo; coSel.onchange=function(){_ssCo=this.value;renderSmoothSettings();}; }
+  if(!chSel.options.length){ chSel.innerHTML=['DTC','FBA','B2B'].map(function(c){return '<option>'+c+'</option>';}).join(''); chSel.value=_ssCh; chSel.onchange=function(){_ssCh=this.value;renderSmoothSettings();}; }
+  var byCat=ssSubcatsFor(_ssCo,_ssCh); var cats=Object.keys(byCat).sort();
+  var allSubs=[]; cats.forEach(function(c){ Object.keys(byCat[c]).forEach(function(s){ allSubs.push(s); }); });
+  if(!allSubs.length){ list.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:8px 0">No sub-categories available for '+esc(_ssCo)+' / '+esc(_ssCh)+'.</div>'; if(allB)allB.checked=false; return; }
+  var onCount=allSubs.filter(function(s){return smoothDisregards(_ssCo,_ssCh,s);}).length;
+  if(allB)allB.checked=(onCount===allSubs.length);
+  list.innerHTML=cats.map(function(c){ var subs=Object.keys(byCat[c]).sort();
+    return '<div style="margin:0 0 10px"><div style="font-weight:700;font-size:12px;color:#0f172a;border-bottom:1px solid #eef2f7;padding-bottom:2px;margin-bottom:4px">'+esc(c)+'</div>'
+      +subs.map(function(s){ var on=smoothDisregards(_ssCo,_ssCh,s); return '<label style="display:inline-flex;align-items:center;gap:5px;font-size:12px;margin:0 14px 5px 0"><input type="checkbox" class="ss-cb" data-s="'+esc(s)+'"'+(on?' checked':'')+'> '+esc(s)+'</label>'; }).join('')+'</div>'; }).join('');
+  list.querySelectorAll('.ss-cb').forEach(function(cb){ cb.onchange=function(){ var k=_ssCo+'|'+_ssCh+'|'+cb.dataset.s; if(cb.checked)SMOOTH_DISREGARD_DISC[k]=true; else delete SMOOTH_DISREGARD_DISC[k]; saveSmoothDisregard(); renderSmoothSettings(); try{renderMain();}catch(e){} }; });
+}
+function openSmoothSettings(ev){ if(ev)ev.stopPropagation(); var e=document.getElementById('smoothset-ov'); if(e)e.style.display='flex';
+  var allB=document.getElementById('ss-all'); if(allB)allB.onchange=function(){ var byCat=ssSubcatsFor(_ssCo,_ssCh); var on=this.checked;
+    Object.keys(byCat).forEach(function(c){ Object.keys(byCat[c]).forEach(function(s){ var k=_ssCo+'|'+_ssCh+'|'+s; if(on)SMOOTH_DISREGARD_DISC[k]=true; else delete SMOOTH_DISREGARD_DISC[k]; }); });
+    saveSmoothDisregard(); renderSmoothSettings(); try{renderMain();}catch(e){} };
+  renderSmoothSettings(); }
+function closeSmoothSettings(){ var e=document.getElementById('smoothset-ov'); if(e)e.style.display='none'; }
 // Context help — one icon in the top nav; content matches the current tab / sub-tab.
 var CTX_HELP={
   'planning|plan':{t:'DEMAND ▸ Plan',h:'The monthly demand plan, category → SKU × market. Edit a forecast input (growth % like 0.3, an absolute like &gt;=4, or a literal) and the cascade rebuilds the SKU-level forecast. In a month cell, <b>i</b> = a BI rule applies, <b>C</b> = a trading-calendar event for that category × market × month.'},
@@ -3792,6 +3828,8 @@ var SHOW_CAT_TOT=(function(){try{return localStorage.getItem('hzShowCatTot')==='
 function setShowCatTot(on){SHOW_CAT_TOT=!!on;try{localStorage.setItem('hzShowCatTot',SHOW_CAT_TOT?'1':'0');}catch(e){}var b=document.getElementById('cat-tot-toggle');if(b){b.classList.toggle('active',SHOW_CAT_TOT);b.setAttribute('aria-pressed',SHOW_CAT_TOT?'true':'false');}renderMain();}
 var SMOOTH_PREVIEW=null; // {pk:'subcat|co|ch', fy:startY|null, months:{'YYYY_MM':{sku:units}}} — one pending smooth preview at a time (fy set = whole-FY smooth)
 var SMOOTH_LEADER=false;  // false = Standard (pure proportional), true = Leader (protect historically-strong SKUs). Set via the FY-total dropdown; applies to ALL smoothing.
+var SMOOTH_DISREGARD_DISC={};  // {'CO|CH|subcat':true} — when set, smoothing zeroes discontinued SKUs so active SKUs absorb the full subcat forecast (toolbar ⚙ Smoothing). Server-injected from app_settings.
+function smoothDisregards(co,ch,s){ return !!SMOOTH_DISREGARD_DISC[co+'|'+ch+'|'+s]; }
 // 120ms hover tooltip explaining Standard vs Leader smoothing (used on the FY-total dropdown).
 var _smTip=null;
 function smoothModeTip(el){
@@ -6416,6 +6454,7 @@ function computeSmoothAlloc(s,co,ch,m,opts){
   // Without this option, the algorithm reduces to pure capped proportional smoothing.
   var protectLeaders=!!opts.protectLeaders;
   var floorFactor=(opts.floorFactor!=null)?opts.floorFactor:0.80;
+  var DISREGARD_DISC=smoothDisregards(co,ch,s);   // when set: zero discontinued SKUs, active SKUs carry the full subcat target
   var wh=skuWh(co,ch), ctry=co.toLowerCase();
   var chKey=ch==='DTC'?'d':ch==='FBA'?'f':'b';
   var FU=(calc(s,co,ch).fu)||{};
@@ -6439,6 +6478,7 @@ function computeSmoothAlloc(s,co,ch,m,opts){
     var cur=Math.max(0,(_fo!=null)?_fo:Math.round(target*(shares[sku]||0)));
     var cap=Infinity, frozen=false;
     if(lch&&ms<lch){cap=0;frozen=true;}                 // pre-launch — leave on cascade 0
+    else if(disc&&ms>disc&&DISREGARD_DISC){ cap=0; cur=0; }   // disregard discontinued: zero it so active SKUs absorb the full subcat forecast (writes a 0 override)
     else if(disc&&ms>disc){                              // discontinued — cap by remaining stock (matches row display rundown)
       var rem=(p.inv&&p.inv[wh]||0)+(p.oo&&p.oo[wh]||0);
       for(var i=0;i<FM.length&&FM[i]<m;i++){
@@ -6585,7 +6625,8 @@ function subcatSkuEffTotals(s,co,ch){
   var lyYM=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
   var all=Object.keys(SKUM).filter(function(sku){var p=SKUM[sku];if(!p||p.s!==s)return false;var av=(p.av||{})[ctry]||'';return av.indexOf(chKey)>=0;});
   var shares=buildSkuShares(all,co,ch,lyYM);
-  var tot={}, discN=0;
+  var DIS=smoothDisregards(co,ch,s);   // disregard discontinued → they run to 0 (active SKUs carry the subcat)
+  var tot={}, actTot={}, discTot={}, discN=0;
   all.forEach(function(sku){
     var p=SKUM[sku];
     var disc=p.disc&&p.disc[ctry]?p.disc[ctry]:null;
@@ -6596,14 +6637,15 @@ function subcatSkuEffTotals(s,co,ch){
       var ms=m.slice(0,4)+'-'+m.slice(5,7)+'-01';
       var _fo=skuOutFC(sku,co,ch,m);
       var raw=(_fo!=null)?_fo:Math.round((FU[m]||0)*(shares[sku]||0));
-      var v;
+      var v, isDisc=(disc&&ms>disc);
       if(lch&&ms<lch){v=0;}
-      else if(disc&&ms>disc){ if(rem<=0){v=0;} else {v=Math.max(0,Math.min(raw,rem));rem=Math.max(0,rem-v);} }
+      else if(isDisc){ if(DIS){v=0;} else if(rem<=0){v=0;} else {v=Math.max(0,Math.min(raw,rem));rem=Math.max(0,rem-v);} }
       else{v=raw;}
       tot[m]=(tot[m]||0)+v;
+      if(isDisc){ discTot[m]=(discTot[m]||0)+v; } else { actTot[m]=(actTot[m]||0)+v; }
     });
   });
-  return {totals:tot,count:all.length,disc:discN,active:all.length-discN};
+  return {totals:tot,activeTotals:actTot,discTotals:discTot,count:all.length,disc:discN,active:all.length-discN};
 }
 
 function insertInlineSkuRows(s,co,ch,afterTr){

@@ -1999,7 +1999,7 @@
           function wireSpecs(){ document.querySelectorAll('.sp-confirm').forEach(function(b){ b.onclick=function(){ var id=b.dataset.id; b.disabled=true; b.textContent='…';
             fetch(EP.specApprove,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({spec_id:id})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ b.disabled=false; b.textContent='Confirm'; alert(j.error); return; }
               var sp=((_ppData&&_ppData.specs)||[]).filter(function(x){return String(x.id)===String(id);})[0]; if(sp){ sp.approved=true; sp.needs_approval=false; } setSpecBadge(); renderPP(); }).catch(function(){ b.disabled=false; b.textContent='Confirm'; }); }; }); }
-          function setSpecBadge(){ var specs=(_ppData&&_ppData.specs)||[]; var t=document.getElementById('pp-spec-tab'); if(t)t.style.display=specs.length?'':'none';
+          function setSpecBadge(){ var specs=(_ppData&&_ppData.specs)||[]; var t=document.getElementById('pp-spec-tab'); if(t)t.style.display='';   // always visible (like Deposits/Payments) — shows an empty state when there are none
             var n=specs.filter(function(s){return s.needs_approval;}).length; var bg=document.getElementById('pp-spec-badge'); if(bg)bg.innerHTML=n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
           function renderPP(){ if(!_ppData)return; var body=document.getElementById('pp-body');
             tabsEl.querySelectorAll('.rtab').forEach(function(t){t.classList.toggle('active',t.dataset.pt===PORTAL_TAB);});

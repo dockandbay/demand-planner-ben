@@ -1,3 +1,10 @@
+## v26.627.0 — Portal: Specifications tab always visible
+- The supplier-portal Specifications tab now always shows (like Deposits/Payments), with an empty state when there are none — was auto-hiding when a supplier had no relevant specs, so it could look missing.
+
+## v26.626.0 — DEMAND: "disregard discontinued from smoothing" setting (per country/channel/sub-category)
+- New toolbar **⚙ Smoothing** panel: for a country / channel / sub-category (with per-country/channel "select all"), toggle **disregard discontinued SKUs**. When on, smoothing **zeroes** discontinued SKUs that month so active SKUs absorb the full sub-category forecast; the ±5% gap check also ignores discontinued for that sub-category. Persisted in `app_settings.smooth_disregard_disc`, injected as `SMOOTH_DISREGARD_DISC`.
+- Default off everywhere → buy plan unchanged (verified: Buy 3PL 24,332 before = after). Only affects on-demand smoothing + the subtotal/gap display, not the automatic forecast.
+
 ## v26.625.0 — Specifications P3: supplier portal display + approval + email + counter (SUG-0019)
 - New **Specifications** tab on the supplier portal (`/portal`). Suppliers see the specs relevant to them — those directed to them for confirmation, plus specs covering products they make (as reference) — grouped by type, with file links.
 - **Approval workflow:** "Require Supplier Confirmation" specs show a **Confirm** button; confirming records a **per-supplier** acknowledgement (`product_spec_approvals`, mig 195) so multi-supplier specs need every directed supplier to confirm. Admin Specifications view derives pending/approved from these (shows x/y), and the admin pill now approves-all / resets via the same table.
