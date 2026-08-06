@@ -7387,7 +7387,7 @@
     // Completed POs ARE included — an unpaid balance shouldn't hide behind a COMPLETE flag. Old payments are cut below.
     (Array.isArray(pos)?pos:[]).forEach(function(p){ if(!p.is_final)return; var ep='/api/supply/po/'+encodeURIComponent(p.po);
       if(Number(p.completion_calc)>0.009 && p.completion_due) rows.push({sup:p.supplier_name||'',type:'Completion',ref:p.po,due_amt:Number(p.completion_calc),due:p.completion_due,likely:p.likely_completion,ep:ep,amt_field:'pay_completion_assigned',amt_val:p.completion_assigned,dt_field:'pay_completion_date',dt_val:p.completion_date,po:true});
-      if(Number(p.balance_owing)>0.009 && p.balance_due) rows.push({sup:p.supplier_name||'',type:'Balance',ref:p.po,due_amt:Number(p.balance_owing),due:p.balance_due,likely:p.likely_balance_1,ep:ep,amt_field:'pay_balance_1_amount',amt_val:p.balance_1_amount,dt_field:'pay_balance_1_date',dt_val:p.balance_1_date,po:true}); });
+      if(Number(p.balance_owing)>0.009 && p.balance_due) rows.push({sup:p.supplier_name||'',type:'Balance',ref:p.po,due_amt:Number(p.balance_owing),due:p.balance_due,likely:(p.likely_balance_1||p.likely_balance_2),bal2:!p.likely_balance_1&&!!p.likely_balance_2,ep:ep,amt_field:'pay_balance_1_amount',amt_val:p.balance_1_amount,dt_field:'pay_balance_1_date',dt_val:p.balance_1_date,po:true}); });
     (deps||[]).forEach(function(d){ if(d.status==='closed')return;
       if(!(Number(d.amount)>0.009) && !d.date_paid && !d.date_due) return;   // skip empty stubs
       rows.push({sup:d.supplier_name||'',type:d.is_deposit?'Deposit':'Other',ref:d.reference||d.description||('#'+d.id),due_amt:Number(d.amount)||0,due:d.date_due||'',likely:d.date_likely_pay,ep:'/api/supply/deposit/'+encodeURIComponent(d.id),amt_field:'amount',amt_val:d.amount,dt_field:'date_paid',dt_val:d.date_paid,po:false}); });
@@ -7421,7 +7421,7 @@
           var dueCell=r.due?(r.overdue?'<span style="color:#dc2626;font-weight:700">'+esc(fd(r.due))+'</span>':esc(fd(r.due))):'<span class="mut">—</span>';
           // Likely pay date: editable ONLY for overdue payments. PO milestones write payment_likely_dates by
           // line_key (comp:/bal:), deposits/other write their own date_likely_pay. Non-overdue rows: read-only.
-          var _lk=r.po?((r.type==='Completion'?'comp:':'bal:')+r.ref):null;
+          var _lk=r.po?((r.type==='Completion'?'comp:':(r.bal2?'bal2:':'bal:'))+r.ref):null;
           var likelyC = r.overdue
             ? (r.po ? dateField(r.likely,{attrs:'data-key="'+esc(_lk)+'" title="likely payment date (drives cash flow)"',cls:'pdue-likely'})
                     : editCell(r.ep,'date_likely_pay',r.likely,'date'))

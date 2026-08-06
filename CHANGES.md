@@ -1,3 +1,7 @@
+## v26.663.0 — Payments Due: bind Balance-2 likely pay date
+- The Payments Due "Balance" row now reads the likely pay date from balance 1 OR balance 2 (was balance 1 only), so a likely date set on the second balance milestone in the PO PAYMENTS tab now shows/binds; editable-overdue rows write back to the correct bal:/bal2: key.
+
+
 ## v26.662.0 — Payments report Paid-USD hide + PLAN counter rolls up to PURCHASE ORDERS
 - Payments Report: the "Paid USD" button is hidden once a bank amount AND currency are both set for that run.
 - The PLAN action-item counter now also rolls up as a red badge on the top-level PURCHASE ORDERS menu (mirrors the PLAN sub-tab count; prefetched so it shows before opening the grid).
