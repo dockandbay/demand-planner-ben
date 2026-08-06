@@ -1,3 +1,8 @@
+## v26.662.0 — Payments report Paid-USD hide + PLAN counter rolls up to PURCHASE ORDERS
+- Payments Report: the "Paid USD" button is hidden once a bank amount AND currency are both set for that run.
+- The PLAN action-item counter now also rolls up as a red badge on the top-level PURCHASE ORDERS menu (mirrors the PLAN sub-tab count; prefetched so it shows before opening the grid).
+
+
 ## v26.661.0 — PO grid exceptions dropdown: "Master data missing" option
 - Added a "Master data missing (N)" option to the PO-grid ⚠ exceptions filter — POs in production missing Batch / Production # / Supplier / Branch (the new red "A"). "PO not approved" stays as its own separate option.
 
