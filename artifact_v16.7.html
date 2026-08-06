@@ -922,15 +922,16 @@ function runAutoSmooth(){
   var th=(Number(SMOOTH_AUTO.threshold)||20)/100, leader=SMOOTH_AUTO.mode==='leader';
   var flags=SMOOTH_AUTO.flags||{}, keys=Object.keys(flags).filter(function(k){return flags[k];});
   if(!keys.length){ alert('No sub-categories are ticked for Auto. Tick "auto" on some sub-categories first.'); return; }
-  var applied=0;
+  var applied=0, _rc=false;
   keys.forEach(function(k){ var p=k.split('|'); var co=p[0],ch=p[1],s=p.slice(2).join('|');
-    if(smoothDisregards(co,ch,s)){ try{ recalcDiscontinued(s,co,ch); }catch(e){} }   // auto-recalc discontinued rundown first
+    if(smoothDisregards(co,ch,s)){ try{ recalcDiscontinued(s,co,ch); _rc=true; }catch(e){} }   // auto-recalc discontinued rundown first
     var eff; try{ eff=subcatSkuEffTotals(s,co,ch); }catch(e){ return; } if(!eff)return;
     FM.forEach(function(m){ if(isActualMonth(m)&&m!==CUR_MONTH)return;   // forecast months only
       var target=(m===CUR_MONTH)?curMonthForecast(s,co,ch):(((calc(s,co,ch)||{}).fu||{})[m]||0);
       if(target<=0)return; var sum=eff.totals[m]||0;
       if(Math.abs(sum-target)/target>th){ var vals=computeSmoothAlloc(s,co,ch,m,{protectLeaders:leader}); if(vals){ applySmoothAlloc(co,ch,m,vals); applied++; } }
     }); });
+  if(_rc)_markSmoothRun();
   try{renderMain();}catch(e){} try{markDirty();}catch(e){}
   alert('Auto-smoothed '+applied+' forecast month-cell'+(applied===1?'':'s')+' across '+keys.length+' sub-categor'+(keys.length===1?'y':'ies')+' with a >'+(SMOOTH_AUTO.threshold||20)+'% gap.\n\nReview the numbers, then Save Forecasts. (Undo reverts the whole sweep.)');
 }
@@ -3861,8 +3862,30 @@ var SMOOTH_PREVIEW=null; // {pk:'subcat|co|ch', fy:startY|null, months:{'YYYY_MM
 var SMOOTH_LEADER=false;  // false = Standard (pure proportional), true = Leader (protect historically-strong SKUs). Set via the FY-total dropdown; applies to ALL smoothing.
 var SMOOTH_DISREGARD_DISC={};  // {'CO|CH|subcat':true} — when set, smoothing leaves discontinued SKUs untouched so active SKUs absorb the full subcat forecast (toolbar ⚙ Smoothing). Server-injected from app_settings.
 function smoothDisregards(co,ch,s){ return !!SMOOTH_DISREGARD_DISC[co+'|'+ch+'|'+s]; }
-var SMOOTH_AUTO={flags:{},threshold:20,mode:'standard'};  // one-click auto-smooth: flagged co|ch|subcat over `threshold`% gap are smoothed (standard|leader). Server-injected.
+var SMOOTH_AUTO={flags:{},threshold:20,mode:'standard',lastRun:null};  // one-click auto-smooth: flagged co|ch|subcat over `threshold`% gap are smoothed (standard|leader). lastRun = ISO of last discontinued smooth/recalc. Server-injected.
 function smoothAuto(co,ch,s){ return !!(SMOOTH_AUTO.flags&&SMOOTH_AUTO.flags[co+'|'+ch+'|'+s]); }
+// >48h staleness badge on the ⚙ Smoothing button: when the last discontinued smooth/recalc was >48h ago AND a
+// re-run would change numbers (a flagged subcat is back over the auto-smooth threshold), show a count.
+var _smoothStale=null;   // cached {count}; computed once per plan render, reset on a run
+function _markSmoothRun(){ try{ SMOOTH_AUTO.lastRun=new Date().toISOString(); saveSmoothAuto(); }catch(e){} _smoothStale={count:0}; try{ updateSmoothStaleBadge(); }catch(e){} }
+function computeSmoothStale(){
+  var last=(SMOOTH_AUTO&&SMOOTH_AUTO.lastRun)?Date.parse(SMOOTH_AUTO.lastRun):0;
+  if(last && (Date.now()-last)<=48*3600*1000) return {count:0};   // smoothed within 48h → fresh
+  var set={}; [SMOOTH_DISREGARD_DISC,(SMOOTH_AUTO&&SMOOTH_AUTO.flags)||{}].forEach(function(o){ Object.keys(o||{}).forEach(function(k){ if(o[k])set[k]=1; }); });
+  var keys=Object.keys(set); if(!keys.length) return {count:0};
+  var th=(Number(SMOOTH_AUTO.threshold)||20)/100, n=0;
+  keys.forEach(function(k){ var p=k.split('|'), co=p[0],ch=p[1],s=p.slice(2).join('|'), eff; try{eff=subcatSkuEffTotals(s,co,ch);}catch(e){return;} if(!eff)return;
+    var hit=false; FM.forEach(function(m){ if(hit)return; if(isActualMonth(m)&&m!==CUR_MONTH)return;
+      var target=(m===CUR_MONTH)?curMonthForecast(s,co,ch):(((calc(s,co,ch)||{}).fu||{})[m]||0);
+      if(target>0 && Math.abs((eff.totals[m]||0)-target)/target>th) hit=true; });
+    if(hit)n++; });
+  return {count:n};
+}
+function updateSmoothStaleBadge(){ var b=document.getElementById('smoothset-btn'); if(!b)return;
+  var old=b.querySelector('.sm-stale'); if(old)old.remove();
+  var c=(_smoothStale&&_smoothStale.count)||0; if(c>0){ var sp=document.createElement('span'); sp.className='sm-stale';
+    sp.title=c+' sub-categor'+(c===1?'y':'ies')+' would change if you re-run smoothing — last run >48h ago. Open ⚙ Smoothing ▸ Run.';
+    sp.textContent=c; sp.style.cssText='margin-left:5px;background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px'; b.appendChild(sp); } }
 // 120ms hover tooltip explaining Standard vs Leader smoothing (used on the FY-total dropdown).
 var _smTip=null;
 function smoothModeTip(el){
@@ -6805,7 +6828,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
   // Commit every month in the current preview (single-month or whole-FY) → SKU overrides. Review step first.
   function applySmoothPreview(){
     if(!SMOOTH_PREVIEW||!SMOOTH_PREVIEW.months)return;
-    if(smoothDisregards(co,ch,s)){ try{ recalcDiscontinued(s,co,ch); }catch(e){} }   // auto-recalc discontinued rundown (velocity × seasonality) whenever disregard-discontinued smoothing is applied
+    if(smoothDisregards(co,ch,s)){ try{ recalcDiscontinued(s,co,ch); _markSmoothRun(); }catch(e){} }   // auto-recalc discontinued rundown (velocity × seasonality) whenever disregard-discontinued smoothing is applied
     Object.keys(SMOOTH_PREVIEW.months).forEach(function(mo){ applySmoothAlloc(co,ch,mo,SMOOTH_PREVIEW.months[mo]); });
     SMOOTH_PREVIEW=null; reExpand();
     try{ if(typeof saveForecasts==='function') saveForecasts(); }catch(e){}   // persist a smooth immediately — a bulk edit shouldn't wait on the 60s autosave (lost on refresh otherwise)
@@ -7725,6 +7748,8 @@ function remapExpanded(dim,newVal){
 function renderMain(){
   CALC_MEMO={};   // fresh per-render forecast memo — covers direct renderMain() calls (filters/toggles) too
   _undoReady=true; try{ updateUndoBtn(); }catch(e){} try{ renderPlanChips(); }catch(e){}   // arm undo + refresh active-filter chips once the plan has rendered
+  if(_smoothStale===null){ try{ _smoothStale=computeSmoothStale(); }catch(e){ _smoothStale={count:0}; } }   // >48h discontinued-smoothing impact check — once per session
+  try{ updateSmoothStaleBadge(); }catch(e){}
   // load per-cell forecast notes for the current country+channel before building the grid (so the N badges
   // render). fcNotesLoad always sets FC_NOTES_KEY (even on failure) so this can't loop.
   if(typeof FC_NOTES_KEY!=='undefined' && FC_NOTES_KEY!==CUR+'|'+CF){ fcNotesLoad(CUR,CF,function(){ renderMain(); }); return; }

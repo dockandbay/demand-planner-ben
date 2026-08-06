@@ -1,3 +1,6 @@
+## v26.639.0 — DEMAND: >48h discontinued-smoothing staleness badge
+- On entering the plan, if it has been >48h since discontinued SKUs were last smoothed/recalculated AND a re-run would change numbers (a flagged sub-category is back over the auto-smooth threshold), a small red count badge appears on the ⚙ Smoothing button (tooltip: N sub-categories would change). Background check runs once per session (read-only); the badge clears after a smooth/recalc run. Last-run time persisted in app_settings.smooth_auto.lastRun.
+
 ## v26.638.0 — DEMAND: recalculate discontinued forecasts (velocity × seasonality)
 - When disregard-discontinued smoothing runs on a sub-category (auto-smooth sweep OR a manual/FY smooth apply), discontinued SKUs are now automatically RECALCULATED: recent velocity (last 3 completed months) shaped by the sub-category seasonal pattern, capped by remaining on-hand+inbound, and hard-zeroed once that SKU's stock is exhausted. Replaces the naive cascade rundown. Writes overrides (one Undo step). Opt-in via the disregard flag xe2x80x94 buy plan unchanged until run (b3 24,332).
 
