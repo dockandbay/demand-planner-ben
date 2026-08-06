@@ -1,3 +1,8 @@
+## v26.620.0 — Specifications: pick which supplier(s) the confirmation goes to (derived from scope)
+- Ticking **Require Supplier Confirmation** now reveals a checklist of the **suppliers derived from the products in the chosen scope** (union of `supplier_multiple_all`, falling back to `main_supplier_final`). All pre-selected; a ⚠ flags a supplier not in the supplier list or with no email on file. The list re-derives when the scope changes.
+- Selected suppliers are saved on the spec (`confirm_suppliers`, mig 190) and shown in the current-specs list. Save blocks if confirmation is required but no supplier is selected. Sets up the P3 portal approval + email routing.
+- New endpoint `GET /api/product/spec-suppliers?scope_type=…` returns the scope's distinct suppliers (name + email + known flag).
+
 ## v26.619.0 — Specifications upload: multi-file + drag-and-drop, per-file type, smarter production default
 - Upload now takes **single or multiple files**, via a **drag-and-drop** zone or click-to-browse. Each staged file gets its own **type** selector (and a remove ✕); scope / use-from / confirmation are shared across the batch, and Save creates one spec per file.
 - "Use from → Next production" now defaults to the **next production number after the largest production on POs in the grid** (server `defaultProdNo` = max purchase_orders prod_no + 1; e.g. 67 → P68). The default is always selectable even if not yet in prod_numbers.

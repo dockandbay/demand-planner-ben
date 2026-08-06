@@ -4440,10 +4440,31 @@ app.get('/api/product/spec-scope-options', async (_req, res) => {   // categorie
     res.json({ categories: cats, catSizes, productions, defaultProdNo });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// scope → WHERE clause on planner.products (shared by spec-suppliers)
+function specScopeWhere(q) {
+  const t = (q.scope_type || 'all').trim(), ps = [];
+  if (t === 'category') { ps.push(q.scope_category || ''); return { sql: `category=$1`, params: ps }; }
+  if (t === 'size') { ps.push(q.scope_category || '', q.scope_size || ''); return { sql: `category=$1 AND size=$2`, params: ps }; }
+  if (t === 'sku') { const sk = String(q.scope_skus || '').split(/[,\s]+/).map(s => s.trim()).filter(Boolean); ps.push(sk.length ? sk : ['']); return { sql: `sku = ANY($1)`, params: ps }; }
+  return { sql: `TRUE`, params: [] };
+}
+app.get('/api/product/spec-suppliers', async (req, res) => {   // distinct suppliers of the products in the chosen scope
+  try {
+    const w = specScopeWhere(req.query || {});
+    const rows = (await pool.query(`SELECT coalesce(supplier_multiple_all,'') sma, coalesce(main_supplier_final,'') msf, coalesce(supplier,'') sup FROM planner.products WHERE ${w.sql}`, w.params)).rows;
+    const set = new Set();
+    rows.forEach(r => { const names = (r.sma ? r.sma.split(',') : [r.msf || r.sup]); names.forEach(n => { const v = String(n || '').trim(); if (v) set.add(v); }); });
+    const names = Array.from(set).sort((a, b) => a.localeCompare(b));
+    let sup = [];
+    if (names.length) { sup = (await pool.query(`SELECT name, coalesce(email,'') email, coalesce(active,true) active FROM planner.suppliers WHERE name = ANY($1)`, [names])).rows; }
+    const byName = {}; sup.forEach(s => { byName[s.name] = s; });
+    res.json({ suppliers: names.map(n => ({ name: n, email: (byName[n] || {}).email || '', known: !!byName[n] })) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/api/product/specs', async (_req, res) => {
   try { const r = await pool.query(`SELECT id, spec_type, filename, mime, scope_type,
       coalesce(scope_category,'') scope_category, coalesce(scope_size,'') scope_size, coalesce(scope_skus,'') scope_skus,
-      effective_mode, coalesce(effective_prod_no,'') effective_prod_no, confirm_with_supplier,
+      effective_mode, coalesce(effective_prod_no,'') effective_prod_no, confirm_with_supplier, coalesce(confirm_suppliers,'') confirm_suppliers,
       coalesce(uploaded_by,'') uploaded_by, to_char(uploaded_at,'DD-Mon-YY HH24:MI') uploaded_at
       FROM planner.product_specs WHERE active ORDER BY uploaded_at DESC`); res.json(r.rows); }
   catch (e) { res.status(500).json({ error: e.message }); }
@@ -4456,11 +4477,12 @@ app.post('/api/product/specs', async (req, res) => {
     const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
     if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: 'file exceeds 10MB' });
     const r = await pool.query(`INSERT INTO planner.product_specs
-      (spec_type, filename, mime, data, scope_type, scope_category, scope_size, scope_skus, effective_mode, effective_prod_no, confirm_with_supplier, uploaded_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`,
+      (spec_type, filename, mime, data, scope_type, scope_category, scope_size, scope_skus, effective_mode, effective_prod_no, confirm_with_supplier, confirm_suppliers, uploaded_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`,
       [st, b.filename || 'file', b.mime || 'application/octet-stream', buf,
        scope, (b.scope_category || '').trim() || null, (b.scope_size || '').trim() || null, (b.scope_skus || '').trim() || null,
-       (b.effective_mode || 'production').trim(), (b.effective_prod_no || '').trim() || null, !!b.confirm_with_supplier, internalAuthor(req, b.uploaded_by)]);
+       (b.effective_mode || 'production').trim(), (b.effective_prod_no || '').trim() || null,
+       !!b.confirm_with_supplier, (b.confirm_with_supplier && b.confirm_suppliers) ? String(b.confirm_suppliers).trim() || null : null, internalAuthor(req, b.uploaded_by)]);
     res.json({ ok: true, id: r.rows[0].id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
