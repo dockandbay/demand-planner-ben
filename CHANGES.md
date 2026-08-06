@@ -1,3 +1,7 @@
+## v26.658.0 — Zalando: no edit permission needed to submit the file
+- Exempted /api/supply/zalando/* from the SUPPLY edit-rights guard (requiredCap) so anyone can upload the stock snapshot / generate the Zalando send-file without SUPPLY permissions. Benign snapshot action.
+
+
 ## v26.657.0 — DEMAND Smoothing: clarify Disregard disc. help wording
 - Help text now reads "...boosts only active SKUs to sum to the category forecast" (Ben's wording).
 
