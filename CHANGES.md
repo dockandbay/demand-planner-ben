@@ -1,3 +1,6 @@
+## v26.613.0 — Klaviyo BIS upload accepts the combined workbook (auto-picks the <MKT>_BIS tab)
+- The per-market upload now uses that market's raw tab (e.g. UK_BIS) when the workbook has per-market sheets, else the first sheet. So the same combined "Klaviyo BIS Subscriptions & Campaign Performance.xlsx" can be dropped into each market box (or a single-market export works too). All 4 markets loaded in sandbox for review.
+
 ## v26.612.0 — DEMAND ▸ Inputs ▸ Klaviyo BIS upload UI + plan 🔔 badge (SUG-0018 P1)
 - New DEMAND ▸ Inputs sub-tab "Klaviyo BIS": four colour-coded per-market upload boxes (UK/US/EU/AU — MKT_COLORS palette). Each shows the last file uploaded + as-of date + SKU/subs count; uploading a raw Klaviyo export replaces that market's shared snapshot (server sums Queued Subscriptions per SKU, last 6 months).
 - DEMAND plan SKU rows now show a 🔔<n> badge for the current market's back-in-stock subscriber count (tooltip: count + as-of date). Informational only (does not change forecast/buy numbers) — P2 (feed into buy logic) is a later decision.

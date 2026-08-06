@@ -3524,7 +3524,9 @@ app.post('/api/klaviyo-bis/upload', async (req, res) => {
       const col = mapCols(lines[hi]);
       for (let r = hi + 1; r < lines.length; r++) { const row = lines[r]; if (col.sku == null) break; recs.push({ sku: (row[col.sku] || '').trim(), queued: cellNum(col.q != null ? row[col.q] : 0), last: col.last != null ? row[col.last] : '' }); }
     } else {
-      const ExcelJS = (await import('exceljs')).default; const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf); const ws = wb.worksheets[0];
+      const ExcelJS = (await import('exceljs')).default; const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf);
+      // pick this market's raw tab if the workbook has per-market sheets (e.g. UK_BIS), else the first sheet (a single-market export)
+      const ws = wb.getWorksheet(market + '_BIS') || wb.worksheets.find(w => new RegExp('^' + market + '\\b.*bis', 'i').test(w.name)) || wb.worksheets[0];
       if (!ws) return res.status(400).json({ error: 'empty workbook' });
       const txt = c => { const v = c && c.value; if (v == null) return ''; if (typeof v === 'object') { if (v.result != null) return v.result; if (v.text != null) return v.text; if (Array.isArray(v.richText)) return v.richText.map(t => t.text).join(''); return ''; } return v; };
       const grid = []; for (let r = 1; r <= ws.rowCount; r++) { const row = []; for (let c = 1; c <= ws.columnCount; c++) row.push(txt(ws.getRow(r).getCell(c))); grid.push(row); }
