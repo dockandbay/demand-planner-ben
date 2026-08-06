@@ -1146,6 +1146,9 @@ var PROD_CONST={};
 var BRANCH_FREIGHT={};   // {uk:{air,sea days},…} — expedite freight leads for Buy 3PL Urgent Air/Sea (server-injected)
 var TRANSFER_LEADS={};   // {UK:{US:6,EU:2,AU:8},…} — inter-market 3PL→3PL transfer lead times (weeks); missing lane = we don't transfer that way. Server-injected (migration 171).
 var KLAVIYO_BIS={};      // Klaviyo back-in-stock: {sku:{UK:n,US:n,…}, _at:'YYYY-MM-DD'} — server-injected (SUG-0018). DEMAND plan 🔔 badge.
+var BIS_CFG={take_rate:35};   // SUG-0018 P2: % of waiting subscribers → suggested forecast uplift (real conversion ~30-40%; also signals strong sold-out interest). app_settings-injected.
+function bisCount(sku,mkt){ try{ return (KLAVIYO_BIS[sku]&&KLAVIYO_BIS[sku][mkt])||0; }catch(e){ return 0; } }
+function bisUplift(sku,mkt){ var n=bisCount(sku,mkt); return n>0?Math.round(n*(Number(BIS_CFG.take_rate)||35)/100):0; }   // enhanced-demand units
 var MKT_COLORS={};       // reusable market colour palette {UK:'#..',US:'#..',EU:'#..',AU:'#..',CA:'#..'} — server-injected from app_settings (CONFIG ▸ Admin ▸ General).
 var ZAL_FC={};           // Zalando per-SKU monthly forecast {sku:{YYYY_MM:units}} — hard-coded (server-injected from zalando_data.json). EU-only ZAL channel + BUY&MOVE Zalando transfer.
 var ZAL_MONTHS=[];       // ordered YYYY_MM list the Zalando forecast covers.
@@ -6241,8 +6244,9 @@ function renderSkuView(){
     var tierCls='tier-'+(p.ti||'c').toLowerCase();
     lbl.innerHTML='<div class="sku-nm">'
       +'<div class="sku-code" style="font-size:11px;font-weight:700;color:#1a1a1a;font-family:monospace">'+sku
-        +(function(){ try{ var n=(typeof KLAVIYO_BIS!=='undefined'&&KLAVIYO_BIS[sku]&&KLAVIYO_BIS[sku][CUR])||0; if(!(n>0))return '';
-          return ' <span title="'+n+' back-in-stock subscribers waiting ('+CUR+' · Klaviyo'+(KLAVIYO_BIS._at?' · as of '+KLAVIYO_BIS._at:'')+')" style="display:inline-block;background:#fef3c7;color:#92400e;font-weight:700;font-size:8px;border-radius:3px;padding:0 3px;vertical-align:middle;white-space:nowrap">&#128276;'+n+'</span>'; }catch(e){ return ''; } })()
+        +(function(){ try{ var n=bisCount(sku,CUR); if(!(n>0))return ''; var up=bisUplift(sku,CUR);
+          var tt=n+' back-in-stock subscribers waiting ('+CUR+' · Klaviyo'+(KLAVIYO_BIS._at?' · as of '+KLAVIYO_BIS._at:'')+')'+(up>0?(' — enhanced demand ≈ +'+up+' units ('+n+' × '+(Number(BIS_CFG.take_rate)||35)+'%); consider uplifting the forecast'):'');
+          return ' <span title="'+tt+'" style="display:inline-block;background:#fef3c7;color:#92400e;font-weight:700;font-size:8px;border-radius:3px;padding:0 3px;vertical-align:middle;white-space:nowrap">&#128276;'+n+(up>0?' ↑'+up:'')+'</span>'; }catch(e){ return ''; } })()
         +'</div>'
       +'<div class="sku-name" style="font-size:10px;color:#aaa;font-weight:400" title="'+p.n+'">'+p.n+'</div>'
       +'<div class="sku-meta">'
@@ -9221,9 +9225,18 @@ function daAlerts(){
       jump:{sub:a.subcat,co:a.country,ch:a.channel} };
   });
 }
-var DA_DETECTORS={fcTrend:true,anomalies:true,aplayer:true,alerts:true}; // feature flags for client-side detectors
+var DA_DETECTORS={fcTrend:true,anomalies:true,aplayer:true,alerts:true,bis:true}; // feature flags for client-side detectors
+// SUG-0018 P2: back-in-stock enhanced-demand recommendations for the current market (BI, not auto-applied).
+function daBis(){ var out=[], mkt=(typeof CUR!=='undefined'?CUR:'UK'), rate=Number(BIS_CFG.take_rate)||35;
+  Object.keys(KLAVIYO_BIS||{}).forEach(function(sku){ if(sku==='_at')return; var n=bisCount(sku,mkt); if(n<10)return; var up=bisUplift(sku,mkt); if(up<1)return;
+    var p=(typeof SKUM!=='undefined')?SKUM[sku]:null, sub=(p&&p.s)||'';
+    out.push({ key:'BIS|'+sku+'|'+mkt, type:'Back-in-stock demand', cat:sub, market:mkt, severity:'info',
+      detail:sku+' — '+n+' subscribers waiting to restock ('+mkt+', strong sold-out interest). Enhanced demand ≈ +'+up+' units ('+n+' × '+rate+'%). Consider uplifting the forecast.',
+      impact:up, status:'open', snooze_until:null, jump:{sub:sub,co:mkt,ch:(typeof CF!=='undefined'?CF:'DTC')} }); });
+  return out; }
 function daClientDetectors(stateMap){
   var items=[];
+  if(DA_DETECTORS.bis){ try{ items=items.concat(daBis()); }catch(e){ if(window.console)console.warn('bis detector failed',e); } }
   if(DA_DETECTORS.fcTrend){ try{ items=items.concat(daForecastTrend()); }catch(e){ if(window.console)console.warn('forecast-vs-trend detector failed',e); } }
   if(DA_DETECTORS.anomalies){ try{ items=items.concat(daAnomalies()); }catch(e){ if(window.console)console.warn('anomalies detector failed',e); } }
   if(DA_DETECTORS.aplayer){ try{ items=items.concat(daAplayer()); }catch(e){ if(window.console)console.warn('a-player detector failed',e); } }
@@ -9485,8 +9498,11 @@ function renderKlaviyoBisView(body){
   body.innerHTML='<div style="max-width:1000px">'
     +'<div style="font-weight:700;font-size:15px;margin-bottom:2px">Klaviyo &mdash; Back-in-Stock subscriptions</div>'
     +'<div style="font-size:12px;color:#666;margin-bottom:12px">Upload each Klaviyo account’s raw back-in-stock export (.xlsx or .csv — the combined workbook works too). We sum <b>Queued Subscriptions</b> per SKU (subscribed in the last 6 months) and show a &#128276; count on the DEMAND plan for that market. The last file per market persists for everyone until replaced.</div>'
+    +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#f5f8ff;border:1px solid #dbeafe;border-radius:8px;padding:8px 11px;margin-bottom:12px;max-width:640px"><span style="font-size:12px;color:#1e3a8a;font-weight:700">Forecast uplift</span><span style="font-size:12px;color:#64748b">enhanced demand = subscribers ×</span><input type="number" id="bis-take" min="1" max="100" value="'+(Number(BIS_CFG.take_rate)||35)+'" style="width:52px;font-size:12px;padding:3px 5px;border:1px solid #cbd5e1;border-radius:4px"><span style="font-size:12px;color:#64748b">% take-rate — surfaced as a &#128276;↑ hint on the plan and a DEMAND &#9656; Actions recommendation.</span></div>'
     +'<div id="kb-boxes" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px"></div>'
     +'<div id="kb-summary" style="margin-top:18px"></div></div>';
+  var _bt=body.querySelector('#bis-take'); if(_bt)_bt.onchange=function(){ var v=Math.max(1,Math.min(100,parseInt(this.value,10)||35)); this.value=v; BIS_CFG.take_rate=v;
+    fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'bis_take_rate',value:String(v)})}).catch(function(){}); };
   var boxes=body.querySelector('#kb-boxes'), summary=body.querySelector('#kb-summary'), DROWS=[];
   function draw(d){ var st=d.markets||{}; DROWS=d.rows||[];
     boxes.innerHTML=MK.map(function(mk){ var c=col(mk), s=st[mk];

@@ -643,6 +643,8 @@ app.get('/', async (_req, res) => {
     try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='smooth_disregard_disc'`)).rows[0]; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'SMOOTH_DISREGARD_DISC', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { /* leave the {} default */ }
     // DEMAND ▸ auto-smooth config (app_settings.smooth_auto = {flags:{'CO|CH|subcat':true}, threshold, mode}). One-click sweep smooths flagged subcats over the threshold.
     try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='smooth_auto'`)).rows[0]; const o = (r && r.value) ? JSON.parse(r.value) : {}; const cfg = { flags: (o && o.flags) || {}, threshold: (o && o.threshold != null) ? o.threshold : 20, mode: (o && o.mode === 'leader') ? 'leader' : 'standard', lastRun: (o && o.lastRun) || null }; html = replaceGlobal(html, 'SMOOTH_AUTO', JSON.stringify(cfg)); } catch (e) { /* leave the default */ }
+    // SUG-0018 P2: Klaviyo BIS take-rate (% of waiting subscribers → suggested forecast uplift; app_settings.bis_take_rate, default 35).
+    try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='bis_take_rate'`)).rows[0]; const tr = (r && r.value != null && r.value !== '') ? Number(r.value) : 35; html = replaceGlobal(html, 'BIS_CFG', JSON.stringify({ take_rate: (isFinite(tr) && tr > 0 ? tr : 35) })); } catch (e) { /* leave the default */ }
     // Neutralise the stale baked input overlay so live forecast_inputs is authoritative.
     // (FC_SEED already seeds IV from live FC_CURRENT.)
     html = replaceGlobal(html, 'SAVED_INPUTS', '{}');

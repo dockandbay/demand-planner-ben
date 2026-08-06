@@ -1,3 +1,6 @@
+## v26.647.0 — SUG-0018 P2: Klaviyo BIS enhanced-demand recommendation
+- Back-in-stock subscribers now drive a forecast-uplift RECOMMENDATION (advisory, never auto-applied). Suggested enhanced demand = subscribers × take-rate % (default 35, editable on DEMAND ▸ Inputs ▸ Klaviyo BIS → app_settings.bis_take_rate, injected BIS_CFG). Surfaced BOTH as a 🔔N ↑M hint + tooltip on the plan SKU rows, and as a "Back-in-stock demand" recommendation in DEMAND ▸ Actions (daBis detector, current market, ≥10 subs). Informational — planner decides.
+
 ## v26.645.0 — SUG-0020 DTC Mismatch (Phase 3: top-menu counter)
 - The open-issue count now rolls up as a red badge on the top-level BI & REPORTS tab (refreshed on entering SUPPLY and after import/accept). Cheap ?count=1 mode on the mismatch endpoint. Completes SUG-0020.
 
