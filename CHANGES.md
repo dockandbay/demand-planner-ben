@@ -1,3 +1,7 @@
+## v26.633.0 — DEMAND xe2x96xb8 Plan toolbar redesign (Option A)
+- Decluttered the Plan toolbar from ~28 controls across 4 crowded rows into two clean rows. Row A: Country + Channel (+ existing Revenue/Exec buttons). Row B: SKU search xc2xb7 Category xc2xb7 Sort (now a subtle 3-option dropdown) xc2xb7 "xe2x9axa9 Filters (N)" popover xc2xb7 right-aligned Undo / Download / "xe2x9ax99 Tools".
+- "Filters (N)" popover holds the set-and-leave filters (Active window + Active|All, Tier, Release Window, From replacement, Cat totals) with a live active-count badge + "Reset all". "xe2x9ax99 Tools" menu holds Forecast Logic + Smoothing. Nothing removed xe2x80x94 just grouped by how often it is used. All existing handlers/ids preserved (UI-only; forecast/buy calc untouched).
+
 ## v26.632.0 — DEMAND: Undo (last 10 changes)
 - New "xe2x86xb6 Undo" button on the demand toolbar (and xe2x8cx98/Ctrl+Z) reverts forecast edits up to the last 10 changes. Each edit gesture is one step — a single SKU/subcat edit, or a whole smoothing apply (batched). Restores FC_OUTPUTS + subcat inputs (IV) + dirty flags and re-renders. Cmd/Ctrl+Z is ignored while typing in a field (native undo still works there).
 
