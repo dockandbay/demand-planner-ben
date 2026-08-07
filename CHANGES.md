@@ -1,3 +1,7 @@
+## v26.710.0 — Summary targets tooltip: full left-align + live refresh on edit
+- ASP / Revenue / Growth rows now fully left-aligned (explicit text-align on every cell).
+- Tooltip now reflects edits immediately: typing a new target updates the hover div data-tgt live, so the breakdown no longer shows stale numbers until refresh.
+
 ## v26.709.0 — Summary targets tooltip: 300ms hover delay
 - The £ target hover tooltip on Summary with targets now waits 300ms before showing (was instant).
 

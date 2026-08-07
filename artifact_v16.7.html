@@ -8297,8 +8297,8 @@ function renderSummaryView(body){
       host.querySelectorAll('input.tgin').forEach(function(inp){
         inp.oninput=function(){ var lyv=Number(inp.dataset.ly)||0, net=Number(inp.dataset.net)||0, ih=inp.dataset.inh, p=_parseTgt(inp.value), sib=inp.parentNode.querySelector('.ttgt'); if(!sib)return;
           var u=function(gbp){ return (net>0&&gbp>0)?(' · '+Math.round(gbp/net).toLocaleString()+'u'):''; };
-          if(p.gbp!=null){ var imp=lyv>0?Math.round((p.gbp/lyv-1)*100):null; sib.innerHTML=(imp==null?'new':((imp>=0?'+':'')+imp+'%'))+u(p.gbp); }
-          else { var g=(p.pct!=null)?p.pct:((ih!==''&&ih!=null)?parseFloat(ih):0); if(isNaN(g))g=0; var tgt=lyv*(1+g/100); sib.innerHTML=(lyv>0?('£'+Math.round(tgt).toLocaleString()):'')+u(tgt); } };
+          if(p.gbp!=null){ var imp=lyv>0?Math.round((p.gbp/lyv-1)*100):null; sib.innerHTML=(imp==null?'new':((imp>=0?'+':'')+imp+'%'))+u(p.gbp); sib.dataset.tgt=Math.round(p.gbp); }
+          else { var g=(p.pct!=null)?p.pct:((ih!==''&&ih!=null)?parseFloat(ih):0); if(isNaN(g))g=0; var tgt=lyv*(1+g/100); sib.innerHTML=(lyv>0?('£'+Math.round(tgt).toLocaleString()):'')+u(tgt); sib.dataset.tgt=Math.round(tgt); } };   // keep data-tgt live so the hover tooltip reflects edits without a refresh
         inp.onchange=function(){ var sub=decodeURIComponent(inp.dataset.sub), lyv=Number(inp.dataset.ly)||0, p=_parseTgt(inp.value);
           // Instant in-place reformat (no full refresh needed): £ → light-blue "£1,000", % → light-green "+30%", blank → clear.
           if(p.gbp!=null){ inp.value='£'+Math.round(p.gbp).toLocaleString(); inp.style.background='#B3EBF2'; }
@@ -8324,12 +8324,13 @@ function renderSummaryView(body){
         var uCell=asp>0?(f(lyU)+' → '+f(tU)+' <span style="color:'+((tU-lyU)>=0?'#86efac':'#fca5a5')+'">('+((tU-lyU)>=0?'+':'')+f(tU-lyU)+')</span>'):'—';
         var rD=tgt-lyRev, rC=rD>=0?'#86efac':'#fca5a5';
         var gp=lyRev>0?Math.round((tgt/lyRev-1)*100):null;
-        return '<div style="font-weight:700;margin-bottom:4px">'+esc(sub||'Market total')+'</div>'
-          +'<table style="font-size:11px;border-collapse:collapse;color:#e5e7eb;text-align:left"><tr><td style="padding:1px 10px 1px 0;color:#94a3b8;text-align:left">Units</td><td style="text-align:left">'+uCell+'</td></tr>'
-          +'<tr><td style="padding:1px 10px 1px 0;color:#94a3b8">ASP</td><td>£'+(asp?asp.toFixed(2):'—')+'</td></tr>'
-          +'<tr><td style="padding:1px 10px 1px 0;color:#94a3b8">Revenue</td><td>£'+f(lyRev)+' → £'+f(tgt)+' <span style="color:'+rC+'">('+(rD>=0?'+':'')+'£'+f(rD)+')</span></td></tr>'
-          +(gp!=null?'<tr><td style="padding:1px 10px 1px 0;color:#94a3b8">Growth</td><td style="color:'+(gp>=0?'#86efac':'#fca5a5')+'">'+(gp>=0?'+':'')+gp+'%</td></tr>':'')+'</table>'
-          +'<div style="color:#94a3b8;margin-top:4px;font-size:9px">last-year actuals → target</div>'; }
+        var LT='padding:1px 10px 1px 0;color:#94a3b8;text-align:left', VT='text-align:left';
+        return '<div style="font-weight:700;margin-bottom:4px;text-align:left">'+esc(sub||'Market total')+'</div>'
+          +'<table style="font-size:11px;border-collapse:collapse;color:#e5e7eb;text-align:left"><tr><td style="'+LT+'">Units</td><td style="'+VT+'">'+uCell+'</td></tr>'
+          +'<tr><td style="'+LT+'">ASP</td><td style="'+VT+'">£'+(asp?asp.toFixed(2):'—')+'</td></tr>'
+          +'<tr><td style="'+LT+'">Revenue</td><td style="'+VT+'">£'+f(lyRev)+' → £'+f(tgt)+' <span style="color:'+rC+'">('+(rD>=0?'+':'')+'£'+f(rD)+')</span></td></tr>'
+          +(gp!=null?'<tr><td style="'+LT+'">Growth</td><td style="'+VT+';color:'+(gp>=0?'#86efac':'#fca5a5')+'">'+(gp>=0?'+':'')+gp+'%</td></tr>':'')+'</table>'
+          +'<div style="color:#94a3b8;margin-top:4px;font-size:9px;text-align:left">last-year actuals → target</div>'; }
       var _tgtHideT=null, _tgtShowT=null;
       function _tgtTipShow(el){ var t=document.getElementById('tgt-hov-tip'); if(!t){ t=document.createElement('div'); t.id='tgt-hov-tip'; t.style.cssText='position:fixed;z-index:100070;max-width:320px;background:#111827;color:#fff;padding:8px 11px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);text-align:left;user-select:text'; document.body.appendChild(t);
           t.addEventListener('mouseenter',function(){ if(_tgtHideT){clearTimeout(_tgtHideT);_tgtHideT=null;} }); t.addEventListener('mouseleave',_tgtTipHide); }
