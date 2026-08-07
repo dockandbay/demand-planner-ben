@@ -1,3 +1,6 @@
+## v26.704.0 — CRITICAL FIX: demand plan blank / note tooltip broken (dateDMY out of scope)
+- Note date formatting used dateDMY(), which is scoped to the buy-plan module and undefined in the notes scope. It threw a ReferenceError: in cellNoteTitle() (runs during render → renderMain aborted → the whole DEMAND plan showed no data, v26.703), and in fcNoteTipHtml() (threw on hover → note tooltip never appeared, since v26.696). Added a top-level _fcDMY() dd-mmm-yy formatter and used it in cellNoteTitle, fcNoteTipHtml, and the note popup.
+
 ## v26.703.0 — Note hover tooltip via the proven global 120ms system
 - The custom note tooltip was not appearing reliably. Notes now use the same global 120ms tooltip as the rest of the app: the note summary (note — submitter@ dd-mmm-yy, • separated) is set as the cell title, so hovering ANYWHERE on a note cell shows it. Updates live on add/edit/delete.
 
