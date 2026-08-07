@@ -7982,6 +7982,9 @@ function render(){
 // ── DEMAND ▸ SUMMARY — clean read-only rollup of the PLAN forecast, by country/channel, grouped by
 //    subcategory (expand → SKU), across financial years (past FYs minimised) or a custom month range.
 var SUMM_FROM='', SUMM_TO='', SUMM_OPEN={}, SUMM_FYOPEN={}, SUMM_METRIC=(function(){try{return localStorage.getItem('summ_metric')||'units';}catch(e){return 'units';}})(), SUMM_GROUP=(function(){try{return localStorage.getItem('summ_group')||'month';}catch(e){return 'month';}})(), SUMM_TGT_EDIT=false, SUMM_TGT={}, SUMM_TGT_KEY='';
+// Set-targets filter (persist in browser session): text query + selected category pills.
+var TGT_FILT_Q=(function(){try{return localStorage.getItem('tgt_filt_q')||'';}catch(e){return '';}})();
+var TGT_FILT_CATS=(function(){try{var s=localStorage.getItem('tgt_filt_cats');return s?new Set(JSON.parse(s)):null;}catch(e){return null;}})();
 function renderSummaryView(body){
   function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function fn2(n){ n=Math.round(Number(n)||0); return n?n.toLocaleString():''; }
@@ -8109,8 +8112,18 @@ function renderSummaryView(body){
       var _lyRev={}; subs.forEach(function(_s){ var _a=ga(co,ch,_s)||{}, _mm={}; DISP_MONTHS.forEach(function(m){ _mm[m]=_a[prevY(m)]?_a[prevY(m)][1]:0; }); _lyRev[_s]=_mm; });
       var _mmT={}; DISP_MONTHS.forEach(function(m){ var _t=0; subs.forEach(function(_s){ _t+=_lyRev[_s][m]||0; }); _mmT[m]=_t; }); _lyRev['']=_mmT;
       var eThead='<thead><tr>'+h1+'</tr><tr>'+h2+'</tr></thead>';
+      // #4 category filter (text + pills, session-persisted)
+      var _tcatsMap={}; subs.forEach(function(s){ _tcatsMap[_subcatParent(s)||'(uncategorised)']=1; }); var _tcatList=Object.keys(_tcatsMap).sort();
+      var _tq=(TGT_FILT_Q||'').trim().toLowerCase();
+      var _tsel=(TGT_FILT_CATS&&TGT_FILT_CATS.size)?TGT_FILT_CATS:null;
+      var _subsV=subs.filter(function(s){ if(_tq&&String(s).toLowerCase().indexOf(_tq)<0)return false; if(_tsel&&!_tsel.has(_subcatParent(s)||'(uncategorised)'))return false; return true; });
       var eRows='<tr class="gt"><td class="lbl">ALL SUBCATEGORIES <span style="font-weight:400;color:#94a3b8">(market total)</span></td>'+cols.map(function(c){return ecell('',c);}).join('')+'</tr>';
-      subs.forEach(function(s){ eRows+='<tr class="sub"><td class="lbl">'+e(s)+'</td>'+cols.map(function(c){return ecell(s,c);}).join('')+'</tr>'; });
+      _subsV.forEach(function(s){ eRows+='<tr class="sub"><td class="lbl">'+e(s)+'</td>'+cols.map(function(c){return ecell(s,c);}).join('')+'</tr>'; });
+      var _tgtFiltBar='<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 8px">'
+        +'<input id="tgt-fq" placeholder="&#128269; filter subcategory…" value="'+e(TGT_FILT_Q)+'" style="padding:4px 9px;border:1px solid #cbd5e1;border-radius:6px;font-size:11px;width:190px">'
+        +_tcatList.map(function(c){ var on=_tsel&&_tsel.has(c); return '<button class="tgt-fcat" data-c="'+encodeURIComponent(c)+'" style="border:1px solid '+(on?'#0f172a':'#cbd5e1')+';background:'+(on?'#0f172a':'#fff')+';color:'+(on?'#fff':'#334155')+';font-size:10px;padding:2px 8px;border-radius:11px;cursor:pointer;font-weight:600;font-family:inherit">'+e(c)+'</button>'; }).join('')
+        +((_tsel||_tq)?'<button id="tgt-fclr" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;font-size:10px;padding:2px 9px;border-radius:11px;cursor:pointer;font-weight:600">clear</button>':'')
+        +'<span style="font-size:10px;color:#94a3b8">'+_subsV.length+' / '+subs.length+' subcategories</span></div>';
       function _tgtCols(){ var out=[]; DISP_FY_STARTS.forEach(function(Y){ bucketize(fyMonths(Y),SUMM_GROUP).forEach(function(bk){ out.push({fy:Y,level:bk.single?'month':bk.level,idx:bk.idx,label:fyLabel(Y)+' '+bk.label}); }); }); return out; }
       function _csvCell(x){ x=String(x==null?'':x); return /[",\n]/.test(x)?('"'+x.replace(/"/g,'""')+'"'):x; }
       function _parseCsvLine(l){ var o=[],cur='',q=false; for(var i=0;i<l.length;i++){ var ch=l[i]; if(q){ if(ch==='"'){ if(l[i+1]==='"'){cur+='"';i++;} else q=false; } else cur+=ch; } else { if(ch==='"')q=true; else if(ch===','){o.push(cur);cur='';} else cur+=ch; } } o.push(cur); return o; }
@@ -8128,7 +8141,10 @@ function renderSummaryView(body){
       host.innerHTML=STY
         +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px"><button id="tgt-dl" style="border:1px solid #cbd5e1;background:#f8fafc;color:#334155;border-radius:6px;padding:4px 11px;font-size:11px;cursor:pointer;font-weight:700;font-family:inherit">⬇ Download template (all subcategories)</button><button id="tgt-imp" style="border:1px solid #cbd5e1;background:#f8fafc;color:#334155;border-radius:6px;padding:4px 11px;font-size:11px;cursor:pointer;font-weight:700;font-family:inherit">⬆ Import targets</button><span id="tgt-msg" style="font-size:11px;color:#94a3b8"></span></div>'
         +'<div id="tgt-imp-box" style="display:none;margin:0 0 8px"><textarea id="tgt-imp-text" placeholder="Paste the filled template CSV here (same Month/Quarter/Half level you downloaded)…" style="width:100%;max-width:820px;height:90px;font-size:11px;font-family:ui-monospace,Menlo,monospace;border:1px solid #cbd5e1;border-radius:6px;padding:6px;box-sizing:border-box"></textarea><div style="margin-top:4px"><button id="tgt-imp-save" style="border:1px solid #7c3aed;background:#7c3aed;color:#fff;border-radius:6px;padding:4px 12px;font-size:11px;cursor:pointer;font-weight:700;font-family:inherit">Save imported targets</button></div></div>'
-        +'<div style="font-size:11px;color:#666;margin:0 0 8px">Enter a revenue <b>growth %</b> (vs last year, + or -) per <b>'+SUMM_GROUP+'</b> for the market total and each subcategory. Set a coarser level (switch to Half/Quarter) and finer levels <b>inherit</b> it (shown as <span style="color:#94a3b8">↳</span>) until you type an override. Blank = clear.</div><table>'+eThead+'<tbody>'+eRows+'</tbody></table>';
+        +'<div style="font-size:11px;color:#666;margin:0 0 8px">Enter a revenue <b>growth %</b> (vs last year, + or -) per <b>'+SUMM_GROUP+'</b> for the market total and each subcategory. Set a coarser level (switch to Half/Quarter) and finer levels <b>inherit</b> it (shown as <span style="color:#94a3b8">↳</span>) until you type an override. Blank = clear.</div>'+_tgtFiltBar+'<table>'+eThead+'<tbody>'+eRows+'</tbody></table>';
+      var _fq=host.querySelector('#tgt-fq'); if(_fq)_fq.oninput=function(){ TGT_FILT_Q=this.value; try{localStorage.setItem('tgt_filt_q',TGT_FILT_Q);}catch(e){} draw(); var n=host.querySelector('#tgt-fq'); if(n){ n.focus(); var L=n.value.length; try{n.setSelectionRange(L,L);}catch(e){} } };
+      host.querySelectorAll('.tgt-fcat').forEach(function(b){ b.onclick=function(){ var c=decodeURIComponent(b.dataset.c); if(!TGT_FILT_CATS)TGT_FILT_CATS=new Set(); if(TGT_FILT_CATS.has(c))TGT_FILT_CATS['delete'](c); else TGT_FILT_CATS.add(c); try{localStorage.setItem('tgt_filt_cats',JSON.stringify(Array.from(TGT_FILT_CATS)));}catch(e){} draw(); }; });
+      var _fclr=host.querySelector('#tgt-fclr'); if(_fclr)_fclr.onclick=function(){ TGT_FILT_Q=''; TGT_FILT_CATS=null; try{localStorage.removeItem('tgt_filt_q');localStorage.removeItem('tgt_filt_cats');}catch(e){} draw(); };
       var _dl=host.querySelector('#tgt-dl'); if(_dl)_dl.onclick=tgtTemplate;
       var _im=host.querySelector('#tgt-imp'); if(_im)_im.onclick=function(){ var bx=host.querySelector('#tgt-imp-box'); if(bx)bx.style.display=(bx.style.display==='none'?'':'none'); };
       var _sv=host.querySelector('#tgt-imp-save'); if(_sv)_sv.onclick=function(){ tgtImport((host.querySelector('#tgt-imp-text')||{}).value, host.querySelector('#tgt-msg')); };

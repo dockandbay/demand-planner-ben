@@ -1,3 +1,7 @@
+## v26.666.0 — Set targets: category filter (text search + category pills, session-persisted)
+- The Set-targets grid now has a filter bar: a subcategory text search plus multi-select category pills (parent categories). Rows filter to the selection; a live "N / M subcategories" count + clear button. Both persist in the browser session (localStorage).
+
+
 ## v26.665.0 — Set targets: keep focus on the cell you click next
 - After entering a target and clicking another cell, the save no longer re-renders the grid (which yanked the cursor back). Re-render is skipped while another target cell is focused, so the click you make is respected.
 
