@@ -7988,10 +7988,15 @@ var SUMM_FROM='', SUMM_TO='', SUMM_OPEN={}, SUMM_FYOPEN={}, SUMM_METRIC=(functio
 var TGT_FILT_Q=(function(){try{return localStorage.getItem('tgt_filt_q')||'';}catch(e){return '';}})();
 var TGT_FILT_CATS=(function(){try{var s=localStorage.getItem('tgt_filt_cats');var a=s?JSON.parse(s):null;return (a&&a.length)?new Set(a):null;}catch(e){return null;}})();
 var TGT_CAT_OPEN=false, _tgtCatDocBound=false;   // Set-targets category multi-select dropdown open state
+var SUMM_CCY='GBP';   // Summary display currency: GBP or the market's local (USD/EUR/AUD) via FX_RATES per FY
+function mktCcy(co){ return ({US:'USD',EU:'EUR',AU:'AUD'})[co]||null; }
+var CCY_SYM={GBP:'£',USD:'$',EUR:'€',AUD:'A$'};
+function fxRate(ccy,fy){ if(!ccy||ccy==='GBP')return 1; var r=FX_RATES[fy]&&FX_RATES[fy][ccy]; if(r>0)return r; var ks=Object.keys(FX_RATES).filter(function(k){return FX_RATES[k]&&FX_RATES[k][ccy]>0;}).sort(); if(!ks.length)return null; return FX_RATES[ks[ks.length-1]][ccy]; }   // fall back to latest FY with a rate
 function renderSummaryView(body){
   function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function fn2(n){ n=Math.round(Number(n)||0); return n?n.toLocaleString():''; }
-  function mf(n){ var t=fn2(n); return t?(((SUMM_METRIC==='rev'||SUMM_METRIC==='revtgt')?'£':'')+t):''; }
+  var _curCcy='GBP', _symC='£';   // display currency (set once co is known); mf() uses the resolved symbol
+  function mf(n){ var t=fn2(n); return t?(((SUMM_METRIC==='rev'||SUMM_METRIC==='revtgt')?_symC:'')+t):''; }
   var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   function mlab(m){ return MON[(+m.slice(5,7))-1]+" '"+m.slice(2,4); }
   function bucketize(ms,g){ if(g==='quarter'){ var o=[]; for(var i=0;i<ms.length;i+=3)o.push({label:'Q'+(i/3+1),months:ms.slice(i,i+3),idx:i/3+1,level:'quarter'}); return o; }
@@ -8004,6 +8009,9 @@ function renderSummaryView(body){
   function fdate(v){ var m=String(v||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m?(m[3]+'-'+MON[(+m[2])-1]+'-'+m[1].slice(2)):''; }
   function prevY(m){ return (+m.slice(0,4)-1)+'_'+m.slice(5,7); }
   var co=CUR, ch=CF;
+  // Resolve display currency: SUMM_CCY is a mode (GBP|LOCAL); local = the market's currency if there's a rate.
+  var _localC=mktCcy(co); _curCcy=(SUMM_CCY==='LOCAL'&&_localC&&fxRate(_localC,0)!=null)?_localC:'GBP'; _symC=CCY_SYM[_curCcy]||'£';
+  function cvR(Y){ return fxRate(_curCcy,Y)||1; }   // GBP→display rate for a given FY start year (1 when GBP)
   var DATAr=(typeof DATA!=='undefined')?DATA:[];
   var subs=[]; DATAr.forEach(function(d){ if(d.co===co&&d.ch===ch&&d.s&&subs.indexOf(d.s)<0)subs.push(d.s); }); subs.sort();
   var LYYM=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
@@ -8041,6 +8049,7 @@ function renderSummaryView(body){
     +'<span style="display:flex;gap:3px">'+CH_PILLS.map(function(c){return '<button class="sm-ch'+(c===ch?' on':'')+'" data-c="'+c+'">'+c+'</button>';}).join('')+'</span>'
     +'<span style="display:flex;gap:3px;margin-left:8px">'+[['units','Units'],['rev','Revenue'],['revtgt','Rev + targets']].map(function(x){return '<button class="sm-metric'+(x[0]===SUMM_METRIC?' on':'')+'" data-m="'+x[0]+'">'+x[1]+'</button>';}).join('')+'</span>'
     +'<span style="display:flex;gap:3px">'+[['month','Month'],['quarter','Quarter'],['half','Half']].map(function(x){return '<button class="sm-group'+(x[0]===SUMM_GROUP?' on':'')+'" data-g="'+x[0]+'">'+x[1]+'</button>';}).join('')+'</span>'
+    +((_localC&&fxRate(_localC,0)!=null&&(SUMM_METRIC==='rev'||SUMM_METRIC==='revtgt'))?('<span style="display:flex;gap:3px;margin-left:4px" title="Show '+esc(co)+' in its local currency at the financial-year blended rate (CONFIG ▸ Admin ▸ Exchange rates)">'+[['GBP','GBP'],['LOCAL',_localC]].map(function(x){return '<button class="sm-ccy'+((x[0]===SUMM_CCY)?' on':'')+'" data-ccy="'+x[0]+'">'+x[1]+'</button>';}).join('')+'</span>'):'')
     +'<button class="sm-tgtedit'+(SUMM_TGT_EDIT?' on':'')+'" id="sm-tgtedit" style="margin-left:8px">'+(SUMM_TGT_EDIT?'✓ Editing targets':'✎ Add targets')+'</button>'
     +'<span style="margin-left:14px;font-size:12px;color:#475569;display:flex;align-items:center;gap:5px">Show from <select id="sm-from" style="padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px">'+moOpts(SUMM_FROM)+'</select> to <select id="sm-to" style="padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px">'+moOpts(SUMM_TO)+'</select>'+(rangeMode?' <button id="sm-clear" style="font-size:11px;padding:3px 9px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;cursor:pointer">✕ clear · FY view</button>':'')+'</span>'
     +'</div>'
@@ -8051,6 +8060,7 @@ function renderSummaryView(body){
   body.querySelectorAll('.sm-ch').forEach(function(b){ b.onclick=function(){ CF=b.dataset.c; renderSummaryView(body); }; });
   body.querySelectorAll('.sm-metric').forEach(function(b){ b.onclick=function(){ SUMM_METRIC=b.dataset.m; try{localStorage.setItem('summ_metric',SUMM_METRIC);}catch(e){} renderSummaryView(body); }; });
   body.querySelectorAll('.sm-group').forEach(function(b){ b.onclick=function(){ SUMM_GROUP=b.dataset.g; try{localStorage.setItem('summ_group',SUMM_GROUP);}catch(e){} renderSummaryView(body); }; });
+  body.querySelectorAll('.sm-ccy').forEach(function(b){ b.onclick=function(){ SUMM_CCY=b.dataset.ccy; renderSummaryView(body); }; });
   var _te=body.querySelector('#sm-tgtedit'); if(_te)_te.onclick=function(){ SUMM_TGT_EDIT=!SUMM_TGT_EDIT; if(SUMM_TGT_EDIT&&SUMM_METRIC==='units')SUMM_METRIC='revtgt'; renderSummaryView(body); };
   var fSel=body.querySelector('#sm-from'), tSel=body.querySelector('#sm-to');
   function applyRange(){ SUMM_FROM=fSel.value; SUMM_TO=tSel.value; renderSummaryView(body); }   // full silent re-render so the month range + header/clear update immediately
@@ -8068,7 +8078,7 @@ function renderSummaryView(body){
       +'#smc .c3ly{font-size:8px;color:#94a3b8;line-height:1.1}#smc .c3f{font-size:11px;font-weight:600;line-height:1.2;color:#0f172a}#smc .c3g{font-size:8px;font-weight:600;line-height:1.1}'
       +'#smc tr.sub td{border-top:1px solid #eef2f7}#smc tr.sub td.lbl{font-weight:700;color:#0f172a;cursor:pointer}#smc tr.gt td{border-top:2px solid #cbd5e1}#smc tr.gt td.lbl{background:#eef2ff;font-weight:700}#smc tr.gt .c3f{font-weight:700}'
       +'#smc tr.sku td.lbl{padding-left:22px;font-family:ui-monospace,Menlo,monospace;color:#475569}#smc .smx{color:#94a3b8;font-size:10px;display:inline-block;width:11px}'
-      +'.sm-co,.sm-ch,.sm-metric,.sm-group,.sm-tgtedit{border:1px solid #cbd5e1;background:#fff;color:#334155;font-size:11px;padding:3px 10px;border-radius:12px;cursor:pointer;font-weight:600;font-family:inherit}.sm-co.on,.sm-ch.on,.sm-metric.on,.sm-group.on{background:#0f172a;color:#fff;border-color:#0f172a}.sm-tgtedit.on{background:#b45309;color:#fff;border-color:#b45309}'
+      +'.sm-co,.sm-ch,.sm-metric,.sm-group,.sm-tgtedit,.sm-ccy{border:1px solid #cbd5e1;background:#fff;color:#334155;font-size:11px;padding:3px 10px;border-radius:12px;cursor:pointer;font-weight:600;font-family:inherit}.sm-co.on,.sm-ch.on,.sm-metric.on,.sm-group.on,.sm-ccy.on{background:#0f172a;color:#fff;border-color:#0f172a}.sm-tgtedit.on{background:#b45309;color:#fff;border-color:#b45309}'
       +'#smc input.tgin{width:54px;text-align:right;padding:2px 3px;border:1px solid #cbd5e1;border-radius:4px;font-size:11px;font-family:inherit}#smc td.tgcell,#smc td.ecell{vertical-align:top}#smc .c3t{font-size:9px;line-height:1.25;white-space:nowrap}</style>';
     // Inject the table styles ONCE into <head> so they persist across re-renders — rebuilding #smc no longer
     // re-parses a <style> block (which caused the brief unstyled "flash" on every pill change).
@@ -8101,12 +8111,12 @@ function renderSummaryView(body){
         +'<div class="c3t"><span style="'+L+'">&Delta;</span> <span style="color:'+vc+';font-weight:600">'+(vv>=0?'+':'')+mf(vv)+'</span></div></td>'; }
     function cells(val,ly,lch,disc,sub){ return cols.map(function(c){
         var months=(c.type==='m')?[c.m]:(c.type==='grp')?c.months:(c.type==='ptot'?rangeMonths:fyMonths(c.Y));
-        var vT=0,lT=0; months.forEach(function(m){ vT+=(val[m]||0); lT+=(ly[m]||0); });
+        var vT=0,lT=0,_fx=(SUMM_METRIC==='rev'||SUMM_METRIC==='revtgt'); months.forEach(function(m){ var rt=_fx?cvR(monFyIdx(m).Y):1; vT+=(val[m]||0)*rt; lT+=(ly[m]||0)*rt; });   // convert £→display currency per month by its FY rate (revenue metrics only)
         var shade;
         if(c.type==='tot'||c.type==='ptot')shade='tot';
         else if(c.type==='m')shade=shadeOf(c.m,lch,disc);
         else { var allAct=true; months.forEach(function(m){ if(!isActualMonth(m))allAct=false; }); shade=allAct?'act':''; if(disc){ var dm=disc.slice(0,7).replace('-','_'); if(months.every(function(m){return m>dm;}))shade='disc'; } else if(lch){ var lm=lch.slice(0,7).replace('-','_'); if(months.every(function(m){return m<lm;}))shade='pre'; } }
-        if(SUMM_METRIC==='revtgt'&&sub!=null&&!rangeMode){ var tgt=0; months.forEach(function(m){ var fi=monFyIdx(m); var g=resolveG(fi.Y,sub,fi.idx); if(g==null)g=0; tgt+=(ly[m]||0)*(1+g/100); }); return tcell(vT,lT,true,tgt,shade); }
+        if(SUMM_METRIC==='revtgt'&&sub!=null&&!rangeMode){ var tgt=0; months.forEach(function(m){ var fi=monFyIdx(m); var g=resolveG(fi.Y,sub,fi.idx); if(g==null)g=0; tgt+=(ly[m]||0)*(1+g/100)*cvR(fi.Y); }); return tcell(vT,lT,true,tgt,shade); }
         return c3(lT,vT,shade); }).join(''); }
     // Net £/unit for £→units: ex-tax retail (SUBCAT_RT) × channel factor (B2B ×0.5, else ×0.95). 0 if no price.
     function _tgtNet(sub){ var rt=(SUBCAT_RT[co]&&SUBCAT_RT[co][sub])||0; return rt>0?(rt*(ch==='B2B'?0.5:0.95)):0; }

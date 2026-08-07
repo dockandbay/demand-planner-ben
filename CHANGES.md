@@ -1,3 +1,7 @@
+## v26.677.0 — Multi-currency Phase 2: currency toggle in DEMAND Summary
+- On DEMAND ▸ Summary (Revenue / Rev+targets), when viewing US/EU/AU a GBP / local-currency (USD/EUR/AUD) toggle appears. Local converts each month by its financial-year blended rate (CONFIG ▸ Admin ▸ Exchange rates); £ figures + targets show in the local currency with the right symbol. Units are unaffected. Growth %/deltas unchanged (currency-invariant).
+
+
 ## v26.676.0 — Multi-currency Phase 1: CONFIG ▸ Admin ▸ Exchange rates
 - New admin-only CONFIG ▸ Admin ▸ Exchange rates editor: a per-financial-year grid of blended GBP→USD / GBP→EUR / GBP→AUD rates (stored in app_settings.fx_rates, no migration). Server injects FX_RATES into the DEMAND app for the upcoming currency toggle (Phase 2); will also feed supply cash flow (Phase 3).
 
