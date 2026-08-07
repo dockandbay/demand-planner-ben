@@ -1,3 +1,7 @@
+## v26.680.0 — Move Auto Forecast email from CONFIG General to Exports & uploads
+- The "Send Auto Forecast now" recipients + button moved out of CONFIG ▸ General into CONFIG ▸ Exports & uploads (under the Report exports section), alongside the other report emails.
+
+
 ## v26.679.0 — Multi-currency Phase 3: Cash Flow uses per-FY GBP↔USD; removed CONFIG General rate input
 - Cash Flow exports (transactions + arrivals) now convert USD→GBP by each line's financial-year blended rate from CONFIG ▸ Admin ▸ Exchange rates (falls back to the default if a FY has no rate).
 - Removed the "USD → GBP exchange rate" input from CONFIG ▸ General (replaced by CONFIG ▸ Admin ▸ Exchange rates). Server gbpRate() (CF_GBP/AF_GBP defaults) now falls back to the current-FY fx_rates USD rate when the legacy setting is unset.

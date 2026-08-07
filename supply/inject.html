@@ -6154,21 +6154,11 @@
               +'<div class="mut tiny" style="margin:1px 0 4px">Emailed when a supplier submits invoice information on a PO. Comma-separate multiple addresses.</div>'
               +'<input class="fci gs-set" data-key="invoice_submit_notify" value="'+esc(s.invoice_submit_notify||'zera@dockandbay.com, ben@dockandbay.com')+'" placeholder="email@dockandbay.com, other@dockandbay.com" style="width:100%;box-sizing:border-box;text-align:left"></div></div>'
             +'<div class="sect-h" style="margin-top:18px">Finance</div>'
-            +'<div class="mut tiny" style="max-width:720px;margin:0 0 12px">Exchange rates now live in <b>CONFIG ▸ Admin ▸ Exchange rates</b> (a blended GBP↔USD/EUR/AUD rate per financial year). They drive the local-currency toggle and the Cash Flow / Auto Forecast GBP columns.</div>'
-            +'<div class="sect-h" style="margin-top:18px">Auto Forecast email</div>'
-            +'<div style="max-width:720px"><div style="margin:0 0 8px"><div style="font-weight:600;font-size:13px">Recipients</div>'
-              +'<div class="mut tiny" style="margin:1px 0 4px">Who receives the <b>Auto Forecast</b> rolling buy plan (payments plan + transactions CSV, all markets, full window). Comma-separate multiple addresses.</div>'
-              +'<input class="fci gs-set" data-key="af_email_recipients" value="'+esc(s.af_email_recipients||'')+'" placeholder="email@dockandbay.com, other@dockandbay.com" style="width:100%;box-sizing:border-box;text-align:left"></div>'
-              +'<div style="margin:2px 0 12px"><button type="button" id="af-email-send" class="pill" style="font-weight:600">&#9993; Send Auto Forecast now</button> <span id="af-email-msg" class="mut tiny" style="margin-left:8px"></span></div></div>';
+            +'<div class="mut tiny" style="max-width:720px;margin:0 0 12px">Exchange rates now live in <b>CONFIG ▸ Admin ▸ Exchange rates</b> (a blended GBP↔USD/EUR/AUD rate per financial year). They drive the local-currency toggle and the Cash Flow / Auto Forecast GBP columns.</div>';
           b.querySelectorAll('.gs-set').forEach(function(inp){ inp.onchange=function(){ inp.style.borderColor='#d0d0d0';
             fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:inp.dataset.key,value:inp.value})})
               .then(function(r){return r.json();}).then(function(j){ inp.style.borderColor=(j&&j.error)?'#dc2626':'#16a34a'; setTimeout(function(){inp.style.borderColor='';},900); })
               .catch(function(){ inp.style.borderColor='#dc2626'; }); }; });
-          var afBtn=document.getElementById('af-email-send'); if(afBtn)afBtn.onclick=function(){ var msg=document.getElementById('af-email-msg'); afBtn.disabled=true; if(msg){msg.style.color='#888';msg.textContent='Sending…';}
-            fetch('/api/auto-forecast/email',{method:'POST'}).then(function(r){return r.json();}).then(function(j){ afBtn.disabled=false;
-              if(j&&j.error){ if(msg){msg.style.color='#dc2626';msg.textContent=j.error;} return; }
-              if(msg){ msg.style.color='#16a34a'; msg.textContent=j.sandbox?('Sandbox — would send to '+(j.recipients||[]).join(', ')):('Sent ✓ to '+(j.recipients||[]).join(', ')); } })
-            .catch(function(e){ afBtn.disabled=false; if(msg){msg.style.color='#dc2626';msg.textContent=String(e);} }); };
           fetch('/api/supply/erp-status').then(function(r){return r.json();}).then(function(st){ var el=document.getElementById('erp-status'); if(!el)return;
             function dot(ok){ return ok?'<span style="color:#16a34a">✓ configured</span>':'<span style="color:#b45309">⚠ keys missing</span>'; }
             el.innerHTML='Fulfil API keys in server env — Sandbox: '+dot(st&&st.fulfil&&st.fulfil.sandbox)+' &nbsp;·&nbsp; Live: '+dot(st&&st.fulfil&&st.fulfil.live); }).catch(function(){});
@@ -6838,8 +6828,13 @@
                 +'<td class="l"><input class="fci txt rx-email" data-ek="'+ek+'" value="'+em+'" placeholder="finance email…" style="width:250px"></td>'
                 +'<td class="l" style="white-space:nowrap"><button class="save-btn rx-csv" data-ek="'+ek+'">⬇ CSV</button> <button class="save-btn rx-email-btn" data-ek="'+ek+'">✉ Email</button></td></tr>'; }).join('')
             +'</tbody></table></div>';
-          b.innerHTML=head+bulk+tbl+rxHead+rxTbl+'<div class="mut tiny" id="fx-msg" style="margin-top:10px"></div>';
+          // Auto Forecast — full email (moved from CONFIG ▸ General): sends the rolling buy plan (payments plan + transactions CSV, all markets) to these recipients now.
+          var afHead='<div class="sect-h" style="margin-top:22px">Auto Forecast — full email <span class="mut tiny">— the complete rolling buy plan (payments plan + transactions CSV, all markets) to these recipients. Comma-separate addresses.</span></div>';
+          var afBox='<div class="tw" style="max-width:820px"><table><tbody><tr><td class="l" style="padding:8px 10px"><input class="fci txt" id="af-recips" value="'+esc(_appset.af_email_recipients||'')+'" placeholder="email@dockandbay.com, other@dockandbay.com" style="width:330px"></td><td class="l" style="white-space:nowrap"><button class="save-btn" id="af-email-send" style="background:#2563eb;color:#fff;border-color:#2563eb">✉ Send Auto Forecast now</button> <span id="af-email-msg" class="mut tiny" style="margin-left:6px"></span></td></tr></tbody></table></div>';
+          b.innerHTML=head+bulk+tbl+rxHead+rxTbl+afHead+afBox+'<div class="mut tiny" id="fx-msg" style="margin-top:10px"></div>';
           var msg=document.getElementById('fx-msg');
+          var afR=b.querySelector('#af-recips'); if(afR)afR.onchange=function(){ afR.style.borderColor='#f59e0b'; fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'af_email_recipients',value:afR.value.trim()})}).then(function(r){return r.json();}).then(function(){ afR.style.borderColor='#16a34a'; }).catch(function(){ afR.style.borderColor='#dc2626'; }); };
+          var afSend=b.querySelector('#af-email-send'); if(afSend)afSend.onclick=function(){ var m=document.getElementById('af-email-msg'); afSend.disabled=true; if(m){m.style.color='#888';m.textContent='Sending…';} fetch('/api/auto-forecast/email',{method:'POST'}).then(function(r){return r.json();}).then(function(j){ afSend.disabled=false; if(j&&j.error){ if(m){m.style.color='#dc2626';m.textContent=j.error;} return; } if(m){ m.style.color='#16a34a'; m.textContent=j.sandbox?('Sandbox — would send to '+(j.recipients||[]).join(', ')):('Sent ✓ to '+(j.recipients||[]).join(', ')); } }).catch(function(e){ afSend.disabled=false; if(m){m.style.color='#dc2626';m.textContent=String(e);} }); };
           b.querySelectorAll('.fx-email').forEach(function(inp){ inp.onchange=function(){ inp.style.borderColor='#f59e0b';
             fetch('/api/forecast/export-settings/'+inp.dataset.c,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:inp.value.trim()})})
               .then(function(r){return r.json();}).then(function(){ inp.style.borderColor='#16a34a'; }).catch(function(){ inp.style.borderColor='#dc2626'; }); }; });
