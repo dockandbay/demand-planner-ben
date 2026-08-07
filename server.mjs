@@ -644,6 +644,18 @@ app.get('/', async (_req, res) => {
     try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='smooth_disregard_disc'`)).rows[0]; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'SMOOTH_DISREGARD_DISC', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { /* leave the {} default */ }
     // DEMAND ▸ auto-smooth config (app_settings.smooth_auto = {flags:{'CO|CH|subcat':true}, threshold, mode}). One-click sweep smooths flagged subcats over the threshold.
     try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='smooth_auto'`)).rows[0]; const o = (r && r.value) ? JSON.parse(r.value) : {}; const cfg = { flags: (o && o.flags) || {}, threshold: (o && o.threshold != null) ? o.threshold : 20, mode: (o && o.mode === 'leader') ? 'leader' : 'standard', lastRun: (o && o.lastRun) || null }; html = replaceGlobal(html, 'SMOOTH_AUTO', JSON.stringify(cfg)); } catch (e) { /* leave the default */ }
+    // DEMAND Set-targets £→units: average EX-TAX retail price per market × subcategory from planner.products.
+    // Ben's formula: UK/EU ÷1.2 (VAT), AU ÷1.1 (GST), US/CA already ex-tax. Client applies the channel factor
+    // (B2B ×0.5, DTC/FBA ×0.95) to get net £/unit, then units = £target ÷ net price.
+    try {
+      const pr = (await pool.query(`SELECT subcategory, uk_rt, eu_rt, au_rt, us_rt, ca_rt FROM planner.products WHERE coalesce(subcategory,'')<>''`)).rows;
+      const DIV = { UK: 1.2, EU: 1.2, AU: 1.1, US: 1.0, CA: 1.0 }, COL = { UK: 'uk_rt', EU: 'eu_rt', AU: 'au_rt', US: 'us_rt', CA: 'ca_rt' };
+      const acc = { UK: {}, US: {}, EU: {}, AU: {}, CA: {} };
+      for (const p of pr) { const sc = p.subcategory; for (const mk of Object.keys(COL)) { const rt = Number(p[COL[mk]]); if (rt > 0) { const ex = rt / DIV[mk]; const a = acc[mk][sc] || (acc[mk][sc] = { s: 0, n: 0 }); a.s += ex; a.n++; } } }
+      const SUBCAT_RT = { UK: {}, US: {}, EU: {}, AU: {}, CA: {} };
+      for (const mk of Object.keys(acc)) for (const sc of Object.keys(acc[mk])) SUBCAT_RT[mk][sc] = Math.round(acc[mk][sc].s / acc[mk][sc].n * 100) / 100;
+      html = replaceGlobal(html, 'SUBCAT_RT', JSON.stringify(SUBCAT_RT));
+    } catch (e) { /* leave the {} default */ }
     // SUG-0018 P2: Klaviyo BIS take-rate (% of waiting subscribers → suggested forecast uplift; app_settings.bis_take_rate, default 35).
     try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='bis_take_rate'`)).rows[0]; const tr = (r && r.value != null && r.value !== '') ? Number(r.value) : 35; html = replaceGlobal(html, 'BIS_CFG', JSON.stringify({ take_rate: (isFinite(tr) && tr > 0 ? tr : 35) })); } catch (e) { /* leave the default */ }
     // Neutralise the stale baked input overlay so live forecast_inputs is authoritative.
@@ -9068,7 +9080,7 @@ app.post('/api/demand-revenue-targets', async (req, res) => {
 app.get('/api/demand-revenue-targets/periods', async (req, res) => {
   const country = String(req.query.country || ''), channel = String(req.query.channel || '');
   if (!country || !channel) return res.status(400).json({ error: 'country and channel required' });
-  try { res.json((await pool.query(`SELECT fy, subcategory, level, idx, growth_pct FROM planner.demand_revenue_target_periods WHERE country=$1 AND channel=$2`, [country, channel])).rows); }
+  try { res.json((await pool.query(`SELECT fy, subcategory, level, idx, growth_pct, target_gbp FROM planner.demand_revenue_target_periods WHERE country=$1 AND channel=$2`, [country, channel])).rows); }
   catch (e) { res.json([]); }   // table may not exist until migration 175 is applied
 });
 app.post('/api/demand-revenue-targets/periods', async (req, res) => {
@@ -9077,12 +9089,13 @@ app.post('/api/demand-revenue-targets/periods', async (req, res) => {
   if (!['half', 'quarter', 'month'].includes(b.level)) return res.status(400).json({ error: 'bad level' });
   const sub = (b.subcategory == null ? '' : String(b.subcategory));
   const g = (b.growth_pct !== '' && b.growth_pct != null && !isNaN(Number(b.growth_pct))) ? Number(b.growth_pct) : null;
+  const tg = (b.target_gbp !== '' && b.target_gbp != null && !isNaN(Number(b.target_gbp))) ? Number(b.target_gbp) : null;
   try {
-    if (g == null) { await pool.query(`DELETE FROM planner.demand_revenue_target_periods WHERE country=$1 AND channel=$2 AND fy=$3 AND subcategory=$4 AND level=$5 AND idx=$6`, [b.country, b.channel, b.fy, sub, b.level, b.idx]); return res.json({ cleared: true }); }
-    await pool.query(`INSERT INTO planner.demand_revenue_target_periods (country, channel, fy, subcategory, level, idx, growth_pct, updated_by, updated_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,now()) ON CONFLICT (country, channel, fy, subcategory, level, idx)
-      DO UPDATE SET growth_pct=excluded.growth_pct, updated_by=excluded.updated_by, updated_at=now()`,
-      [b.country, b.channel, b.fy, sub, b.level, b.idx, g, authUser(req) || null]);
+    if (g == null && tg == null) { await pool.query(`DELETE FROM planner.demand_revenue_target_periods WHERE country=$1 AND channel=$2 AND fy=$3 AND subcategory=$4 AND level=$5 AND idx=$6`, [b.country, b.channel, b.fy, sub, b.level, b.idx]); return res.json({ cleared: true }); }
+    await pool.query(`INSERT INTO planner.demand_revenue_target_periods (country, channel, fy, subcategory, level, idx, growth_pct, target_gbp, updated_by, updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,now()) ON CONFLICT (country, channel, fy, subcategory, level, idx)
+      DO UPDATE SET growth_pct=excluded.growth_pct, target_gbp=excluded.target_gbp, updated_by=excluded.updated_by, updated_at=now()`,
+      [b.country, b.channel, b.fy, sub, b.level, b.idx, g, tg, authUser(req) || null]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

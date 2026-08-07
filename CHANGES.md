@@ -1,3 +1,8 @@
+## v26.670.0 — Set targets: enter % growth OR a £ revenue target (auto-detect, colours, units)
+- A target cell now accepts a % growth (e.g. 40 → shows +40%, light-green cell) OR an absolute £ revenue target (£120000 or 120000 → shows £120,000, light-blue cell). Auto-detects by £ prefix or magnitude (>=1000 = £).
+- Under the cell: % mode shows the resulting £ target + units; £ mode shows the implied % growth (or "new" for a category with no history) + units. Units use the ex-tax retail price (planner.products) x channel factor (B2B x0.5, DTC/FBA x0.95). New migration 198 (target_gbp) + server SUBCAT_RT injection.
+
+
 ## v26.669.0 — Set targets: xc2xa3 baseline inherits forecast revenue for future halves
 - The target xc2xa3 baseline (last-year revenue under each cell) now falls back to the demand FORECAST revenue when the prior-year month is itself still a forecast (e.g. FY27/28 H2). Previously showed nothing because only actual LY revenue was used.
 

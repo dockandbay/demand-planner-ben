@@ -3879,6 +3879,7 @@ var SMOOTH_PREVIEW=null; // {pk:'subcat|co|ch', fy:startY|null, months:{'YYYY_MM
 var SMOOTH_LEADER=false;  // false = Standard (pure proportional), true = Leader (protect historically-strong SKUs). Set via the FY-total dropdown; applies to ALL smoothing.
 var SMOOTH_DISREGARD_DISC={};  // {'CO|CH|subcat':true} — when set, smoothing leaves discontinued SKUs untouched so active SKUs absorb the full subcat forecast (toolbar ⚙ Smoothing). Server-injected from app_settings.
 function smoothDisregards(co,ch,s){ return !!SMOOTH_DISREGARD_DISC[co+'|'+ch+'|'+s]; }
+var SUBCAT_RT={};   // avg EX-TAX retail £/unit per market × subcategory (server-injected from planner.products); Set-targets £→units
 var SMOOTH_AUTO={flags:{},threshold:20,mode:'standard',lastRun:null};  // one-click auto-smooth: flagged co|ch|subcat over `threshold`% gap are smoothed (standard|leader). lastRun = ISO of last discontinued smooth/recalc. Server-injected.
 function smoothAuto(co,ch,s){ return !!(SMOOTH_AUTO.flags&&SMOOTH_AUTO.flags[co+'|'+ch+'|'+s]); }
 // >48h staleness badge on the ⚙ Smoothing button: when the last discontinued smooth/recalc was >48h ago AND a
@@ -7981,7 +7982,7 @@ function render(){
 // to planner.key_account_forecasts (replaces the old n8n Airtable flow). SKU is a type-to-search dropdown from SKUM.
 // ── DEMAND ▸ SUMMARY — clean read-only rollup of the PLAN forecast, by country/channel, grouped by
 //    subcategory (expand → SKU), across financial years (past FYs minimised) or a custom month range.
-var SUMM_FROM='', SUMM_TO='', SUMM_OPEN={}, SUMM_FYOPEN={}, SUMM_METRIC=(function(){try{return localStorage.getItem('summ_metric')||'units';}catch(e){return 'units';}})(), SUMM_GROUP=(function(){try{return localStorage.getItem('summ_group')||'month';}catch(e){return 'month';}})(), SUMM_TGT_EDIT=false, SUMM_TGT={}, SUMM_TGT_KEY='';
+var SUMM_FROM='', SUMM_TO='', SUMM_OPEN={}, SUMM_FYOPEN={}, SUMM_METRIC=(function(){try{return localStorage.getItem('summ_metric')||'units';}catch(e){return 'units';}})(), SUMM_GROUP=(function(){try{return localStorage.getItem('summ_group')||'month';}catch(e){return 'month';}})(), SUMM_TGT_EDIT=false, SUMM_TGT={}, SUMM_TGT_GBP={}, SUMM_TGT_KEY='';
 // Set-targets filter (persist in browser session): text query + selected category pills.
 var TGT_FILT_Q=(function(){try{return localStorage.getItem('tgt_filt_q')||'';}catch(e){return '';}})();
 var TGT_FILT_CATS=(function(){try{var s=localStorage.getItem('tgt_filt_cats');return s?new Set(JSON.parse(s)):null;}catch(e){return null;}})();
@@ -8103,15 +8104,22 @@ function renderSummaryView(body){
         else { var allAct=true; months.forEach(function(m){ if(!isActualMonth(m))allAct=false; }); shade=allAct?'act':''; if(disc){ var dm=disc.slice(0,7).replace('-','_'); if(months.every(function(m){return m>dm;}))shade='disc'; } else if(lch){ var lm=lch.slice(0,7).replace('-','_'); if(months.every(function(m){return m<lm;}))shade='pre'; } }
         if(SUMM_METRIC==='revtgt'&&sub!=null&&!rangeMode){ var tgt=0; months.forEach(function(m){ var fi=monFyIdx(m); var g=resolveG(fi.Y,sub,fi.idx); if(g==null)g=0; tgt+=(ly[m]||0)*(1+g/100); }); return tcell(vT,lT,true,tgt,shade); }
         return c3(lT,vT,shade); }).join(''); }
+    // Net £/unit for £→units: ex-tax retail (SUBCAT_RT) × channel factor (B2B ×0.5, else ×0.95). 0 if no price.
+    function _tgtNet(sub){ var rt=(SUBCAT_RT[co]&&SUBCAT_RT[co][sub])||0; return rt>0?(rt*(ch==='B2B'?0.5:0.95)):0; }
+    function _uTxt(gbp,sub){ var net=_tgtNet(sub); if(!(net>0)||!(gbp>0))return ''; return ' · '+Math.round(gbp/net).toLocaleString()+'u'; }
     function ecell(sub,c){ if(c.type==='tot'||c.type==='ptot')return '<td class="tot" style="background:#f1f5f9"></td>';
       var Y=c.Y, lvl=c.level, idx=c.idx; if(Y==null||!lvl)return '<td></td>';
-      var stored=SUMM_TGT[tgKey(Y,sub,lvl,idx)], inh=inheritG(Y,sub,lvl,idx);
+      var key=tgKey(Y,sub,lvl,idx), gbpStored=SUMM_TGT_GBP[key], gStored=SUMM_TGT[key], inh=inheritG(Y,sub,lvl,idx);
       var mths=c.single?[c.single]:c.months, ly=0; mths.forEach(function(m){ ly+=((_lyRev[sub]&&_lyRev[sub][m])||0); });
-      var eff=(stored!=null)?Number(stored):(inh!=null?inh:0);
-      var v=(stored!=null)?((Number(stored)>=0?'+':'')+Number(stored)):'';
       var ph=(inh!=null)?('↳'+(inh>=0?'+':'')+inh):'0%';
-      var tgt=ly*(1+eff/100);
-      return '<td class="ecell" style="padding:2px 4px;border:1px solid #e5e7eb;text-align:right"><input class="tgin" data-sub="'+encodeURIComponent(sub)+'" data-fy="'+Y+'" data-lvl="'+lvl+'" data-idx="'+idx+'" data-ly="'+Math.round(ly)+'" data-inh="'+(inh!=null?inh:'')+'" value="'+v+'" placeholder="'+ph+'" title="revenue growth % vs last year (blank = inherit)"><div class="ttgt" style="font-size:9px;color:#64748b;text-align:right;font-variant-numeric:tabular-nums;margin-top:1px">'+(ly>0?('&pound;'+Math.round(tgt).toLocaleString()):'')+'</div></td>'; }
+      var isGbp=(gbpStored!=null), v='', bg='', ttxt='';
+      if(isGbp){ v='£'+Math.round(gbpStored).toLocaleString(); bg='background:#B3EBF2';   // £ absolute → light blue
+        var impPct=ly>0?Math.round((gbpStored/ly-1)*100):null;
+        ttxt=(impPct==null?'new':((impPct>=0?'+':'')+impPct+'%'))+_uTxt(gbpStored,sub); }
+      else if(gStored!=null){ v=(Number(gStored)>=0?'+':'')+Number(gStored)+'%'; bg='background:#F0FFF0';   // % growth → light green
+        var tgt=ly*(1+Number(gStored)/100); ttxt=(ly>0?('£'+Math.round(tgt).toLocaleString()):'')+_uTxt(tgt,sub); }
+      else { var eff=(inh!=null?inh:0), tgt2=ly*(1+eff/100); ttxt=(ly>0?('£'+Math.round(tgt2).toLocaleString()):'')+_uTxt(tgt2,sub); }
+      return '<td class="ecell" style="padding:2px 4px;border:1px solid #e5e7eb;text-align:right"><input class="tgin" data-sub="'+encodeURIComponent(sub)+'" data-fy="'+Y+'" data-lvl="'+lvl+'" data-idx="'+idx+'" data-ly="'+Math.round(ly)+'" data-inh="'+(inh!=null?inh:'')+'" data-net="'+_tgtNet(sub)+'" value="'+v+'" placeholder="'+ph+'" title="Type a % growth vs last year (e.g. 40) OR a £ revenue target (e.g. £120000 or 120000). Blank = inherit." style="'+bg+'"><div class="ttgt" style="font-size:9px;color:#64748b;text-align:right;font-variant-numeric:tabular-nums;margin-top:1px">'+ttxt+'</div></td>'; }
     if(SUMM_TGT_EDIT&&!rangeMode){
       // Target £ baseline = prior-year revenue per month. If the prior-year month is itself still a FORECAST
       // (e.g. FY27/28 H2 → FY26/27 H2 not complete), inherit the forecast revenue (subData.val, which is
@@ -8155,15 +8163,23 @@ function renderSummaryView(body){
       var _dl=host.querySelector('#tgt-dl'); if(_dl)_dl.onclick=tgtTemplate;
       var _im=host.querySelector('#tgt-imp'); if(_im)_im.onclick=function(){ var bx=host.querySelector('#tgt-imp-box'); if(bx)bx.style.display=(bx.style.display==='none'?'':'none'); };
       var _sv=host.querySelector('#tgt-imp-save'); if(_sv)_sv.onclick=function(){ tgtImport((host.querySelector('#tgt-imp-text')||{}).value, host.querySelector('#tgt-msg')); };
-      host.querySelectorAll('input.tgin').forEach(function(inp){ inp.oninput=function(){ var lyv=Number(inp.dataset.ly)||0, ih=inp.dataset.inh, rr=String(inp.value).replace(/[^0-9.\-]/g,''); var g=(rr===''?((ih!==''&&ih!=null)?parseFloat(ih):0):parseFloat(rr)); if(isNaN(g))g=0; var sib=inp.parentNode.querySelector('.ttgt'); if(sib)sib.innerHTML=lyv>0?('£'+Math.round(lyv*(1+g/100)).toLocaleString()):''; };
-        inp.onchange=function(){ var sub=decodeURIComponent(inp.dataset.sub); var raw=String(inp.value).replace(/[^0-9.\-]/g,'');
-        fetch('/api/demand-revenue-targets/periods',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({country:co,channel:ch,fy:+inp.dataset.fy,subcategory:sub,level:inp.dataset.lvl,idx:+inp.dataset.idx,growth_pct:raw})})
-          .then(function(r){return r.json();}).then(function(){ var k=tgKey(+inp.dataset.fy,sub,inp.dataset.lvl,+inp.dataset.idx); if(raw==='')delete SUMM_TGT[k]; else SUMM_TGT[k]=Number(raw);
-            // Don't re-render (which rebuilds the inputs and steals focus) if the user has already clicked into
-            // another target cell — respect that click. The save is persisted regardless; inheritance refreshes
-            // on the next natural render.
-            var ae=document.activeElement; if(!(ae&&ae.classList&&ae.classList.contains('tgin')))draw();
-          }).catch(function(){}); }; });
+      // Parse a target-cell entry → {gbp} (absolute £: has a £, OR magnitude ≥ 1000) or {pct} (% growth). Blank = clear.
+      function _parseTgt(val){ var s=String(val||'').trim(); if(s==='')return {}; var pound=/£/.test(s); var num=parseFloat(s.replace(/[^0-9.\-]/g,'')); if(isNaN(num))return {}; if(pound||Math.abs(num)>=1000)return {gbp:num}; return {pct:num}; }
+      host.querySelectorAll('input.tgin').forEach(function(inp){
+        inp.oninput=function(){ var lyv=Number(inp.dataset.ly)||0, net=Number(inp.dataset.net)||0, ih=inp.dataset.inh, p=_parseTgt(inp.value), sib=inp.parentNode.querySelector('.ttgt'); if(!sib)return;
+          var u=function(gbp){ return (net>0&&gbp>0)?(' · '+Math.round(gbp/net).toLocaleString()+'u'):''; };
+          if(p.gbp!=null){ var imp=lyv>0?Math.round((p.gbp/lyv-1)*100):null; sib.innerHTML=(imp==null?'new':((imp>=0?'+':'')+imp+'%'))+u(p.gbp); }
+          else { var g=(p.pct!=null)?p.pct:((ih!==''&&ih!=null)?parseFloat(ih):0); if(isNaN(g))g=0; var tgt=lyv*(1+g/100); sib.innerHTML=(lyv>0?('£'+Math.round(tgt).toLocaleString()):'')+u(tgt); } };
+        inp.onchange=function(){ var sub=decodeURIComponent(inp.dataset.sub), lyv=Number(inp.dataset.ly)||0, p=_parseTgt(inp.value);
+          var body={country:co,channel:ch,fy:+inp.dataset.fy,subcategory:sub,level:inp.dataset.lvl,idx:+inp.dataset.idx};
+          if(p.gbp!=null){ body.target_gbp=p.gbp; body.growth_pct=(lyv>0?Math.round((p.gbp/lyv-1)*1000)/10:''); }   // store £ + (for existing cats) the equivalent % so the summary math keeps working
+          else { body.growth_pct=(p.pct!=null?p.pct:''); body.target_gbp=''; }
+          fetch('/api/demand-revenue-targets/periods',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
+            .then(function(r){return r.json();}).then(function(){ var k=tgKey(+inp.dataset.fy,sub,inp.dataset.lvl,+inp.dataset.idx);
+              if(p.gbp!=null){ SUMM_TGT_GBP[k]=p.gbp; if(lyv>0)SUMM_TGT[k]=Math.round((p.gbp/lyv-1)*1000)/10; else delete SUMM_TGT[k]; }
+              else { delete SUMM_TGT_GBP[k]; if(p.pct!=null)SUMM_TGT[k]=p.pct; else delete SUMM_TGT[k]; }
+              var ae=document.activeElement; if(!(ae&&ae.classList&&ae.classList.contains('tgin')))draw();   // keep focus if user clicked another cell
+            }).catch(function(){}); }; });
       host.querySelectorAll('th.fyh[data-fy]').forEach(function(th){ th.onclick=function(){ var Y=+th.dataset.fy; SUMM_FYOPEN[Y]=!fyOpen(Y); draw(); }; });
       return;
     }
@@ -8184,7 +8200,7 @@ function renderSummaryView(body){
   }
   // Only (re)fetch targets when they're actually shown (Rev+targets metric or editing). Otherwise draw immediately —
   // no async gap, so switching country/channel pills doesn't blank-flash the table.
-  if((SUMM_METRIC==='revtgt'||SUMM_TGT_EDIT) && SUMM_TGT_KEY!==(co+'|'+ch)){ fetch('/api/demand-revenue-targets/periods?country='+encodeURIComponent(co)+'&channel='+encodeURIComponent(ch)).then(function(r){return r.json();}).then(function(rows){ SUMM_TGT={}; (rows||[]).forEach(function(t){ SUMM_TGT[t.fy+'|'+(t.subcategory||'')+'|'+t.level+'|'+t.idx]=t.growth_pct; }); SUMM_TGT_KEY=co+'|'+ch; draw(); }).catch(function(){ SUMM_TGT_KEY=co+'|'+ch; draw(); }); }
+  if((SUMM_METRIC==='revtgt'||SUMM_TGT_EDIT) && SUMM_TGT_KEY!==(co+'|'+ch)){ fetch('/api/demand-revenue-targets/periods?country='+encodeURIComponent(co)+'&channel='+encodeURIComponent(ch)).then(function(r){return r.json();}).then(function(rows){ SUMM_TGT={}; SUMM_TGT_GBP={}; (rows||[]).forEach(function(t){ var k=t.fy+'|'+(t.subcategory||'')+'|'+t.level+'|'+t.idx; if(t.growth_pct!=null)SUMM_TGT[k]=t.growth_pct; if(t.target_gbp!=null)SUMM_TGT_GBP[k]=Number(t.target_gbp); }); SUMM_TGT_KEY=co+'|'+ch; draw(); }).catch(function(){ SUMM_TGT_KEY=co+'|'+ch; draw(); }); }
   else draw();
 }
 var KAF_CTRY='uk_3pl', KAF_Q='', KAF_PAST=false;   // Key Accounts grid: selected country (3PL), filter text, show-past-12mo toggle
