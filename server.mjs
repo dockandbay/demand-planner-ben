@@ -588,6 +588,7 @@ function requiredCap(method, p) {
   if (p.startsWith('/api/supply/zalando/')) return null;      // Zalando stock upload / send-file — open to all (no edit rights needed)
   if (p.startsWith('/api/klaviyo-bis/')) return null;         // Klaviyo BIS upload — allowed with read-only permission (Ben)
   if (method === 'POST' && p === '/api/supply/quality-doc') return null;   // Quality Control file upload (+ its metafields) — allowed with read-only permission (Ben); delete stays gated
+  if (method === 'POST' && p === '/api/supply/actions/invalidate') return null;   // clears a server cache only — harmless, no data write
   if (p.startsWith('/api/supply/')) return 'supply';          // everything else under supply = SUPPLY feature
   return null;   // unknown non-supply write → fail-open (don't block routes we haven't classified)
 }
@@ -2085,6 +2086,301 @@ async function buildShipmentPlan() {
   return shipEntries.sort((a, b) => (a.departure || '9999').localeCompare(b.departure || '9999') || String(a.master_po).localeCompare(String(b.master_po)));
 }
 
+// SUPPLY ▸ Actions cache — the derived-exceptions set (big SQL UNION + expedite/submission/manufacturing/ERP
+// layers) is expensive to compute on every first visit. Cache the FULL computed row set for 10 min, boot-warm it,
+// and refresh in the background when stale (stale-while-revalidate) so a real request never blocks on a cold build.
+// The per-row snooze/dismiss/done lifecycle overlay is applied FRESH on each request (cheap, must reflect instantly).
+let _actionsCache = null, _actionsRefresh = null; const ACTIONS_TTL_MS = 10 * 60 * 1000;
+async function buildActionsRows() {
+  const q = (sql) => pool.query(sql).then(r => r.rows);
+        const arows = await q(`
+          SELECT * FROM (
+          SELECT 'high' severity,'Date conflict' type, po ref,
+            'Landing '||landing_date_overide::text||' is in the past (status '||coalesce(status,'?')||')' detail,
+            'date' fix, 'po' target, 'landing_date_overide' field, po target_key
+            FROM planner.purchase_orders
+            -- Only a genuine conflict when the PO hasn't reached shipping yet. A past landing while SHIPPING /
+            -- DELIVERED / COMPLETE is expected (goods arriving/arrived; marking delivered is optional) — not an action.
+            WHERE landing_date_overide < current_date
+              AND coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(status,'') NOT ILIKE '%shipping%'
+              AND coalesce(status,'') NOT ILIKE '%deliver%' AND coalesce(status,'') NOT ILIKE '%arriv%'
+          UNION ALL
+          SELECT 'low','Unassigned shipment', po, 'Past production with no shipment assigned',
+            'shipment','po','shipment_ref', po
+            FROM planner.purchase_orders
+            WHERE shipment_ref IS NULL AND coalesce(status,'') NOT ILIKE '%complete%'
+          UNION ALL
+          SELECT 'high','PO missing supplier', po, 'No supplier set on this PO', 'supplier','po','supplier_name', po
+            FROM planner.purchase_orders WHERE supplier_name IS NULL
+          UNION ALL
+          SELECT 'amber','Deposit not paid', coalesce(reference, description, 'deposit #'||id),
+            'Deposit '||coalesce(round(amount)::text,'?')||' '||coalesce(country,'')||' has no paid date',
+            'date','deposit','date_paid', id::text
+            FROM planner.deposits WHERE is_deposit AND date_paid IS NULL AND coalesce(amount,0) > 0
+          UNION ALL
+          -- paid deposit with no Xero FX rate captured → medium-priority review
+          SELECT 'amber','Deposit FX missing', coalesce(reference, description, 'deposit #'||id),
+            'Deposit '||coalesce(reference, description, '')||' is paid but has no Xero FX rate',
+            '','deposit','xero_fx', id::text
+            FROM planner.deposits WHERE is_deposit AND date_paid IS NOT NULL
+              AND (xero_fx IS NULL OR xero_fx::text='') AND coalesce(status,'')<>'closed'
+          UNION ALL
+          SELECT 'high','Deposit over-assigned', d.reference,
+            'Assigned start deposits '||round(dr.used)||' exceed pool '||round(d.pool)
+            ||' (remaining '||round(d.pool-dr.used)||')', '','','', d.reference
+            FROM (SELECT reference, sum(coalesce(amount,0)) pool FROM planner.deposits
+                  WHERE is_deposit AND reference IS NOT NULL AND coalesce(status,'')<>'closed' GROUP BY reference) d
+            JOIN (SELECT deposit_ref, sum(coalesce(pay_start_deposit_assigned,0)) used
+                  FROM planner.purchase_orders WHERE deposit_ref IS NOT NULL GROUP BY deposit_ref
+            ) dr ON dr.deposit_ref=d.reference WHERE dr.used > d.pool + 0.01
+          UNION ALL
+          -- deposit still has money left, but its open POs have no start deposit left to allocate → review
+          SELECT 'amber','Deposit remaining', x.reference,
+            'Deposit remaining '||round(x.rem,2)||', none left to be allocated', '','deposit','', x.reference
+            FROM (
+              SELECT dref.reference,
+                (SELECT sum(coalesce(amount,0)) FROM planner.deposits d2 WHERE d2.reference=dref.reference)
+                  - coalesce((SELECT sum(coalesce(po.pay_start_deposit_assigned,0)) FROM planner.purchase_orders po WHERE po.deposit_ref=dref.reference),0) rem,
+                coalesce((SELECT sum(round(coalesce(po.supplier_invoice_total,
+                           (SELECT sum(l.qty*l.cost_price) FROM planner.purchase_order_lines l WHERE l.po=po.po),
+                           po.order_value_estimation,0)*coalesce(po.start_deposit_pct_override,s.start_deposit_pct,0)/100,2))
+                   FROM planner.purchase_orders po LEFT JOIN planner.suppliers s ON s.id=po.supplier_id
+                   WHERE po.deposit_ref=dref.reference AND coalesce(po.status,'') NOT ILIKE '%complete%'
+                     AND po.pay_start_deposit_assigned IS NULL),0) est,
+                (SELECT count(*) FROM planner.purchase_orders po WHERE po.deposit_ref=dref.reference AND coalesce(po.status,'') NOT ILIKE '%complete%') open_po
+              FROM (SELECT DISTINCT reference FROM planner.deposits WHERE is_deposit AND coalesce(status,'')<>'closed' AND coalesce(reference,'')<>'') dref
+            ) x
+            WHERE x.rem > 0.01 AND x.est = 0 AND x.open_po > 0
+          UNION ALL
+          -- deposit still has money left, but NO open (non-complete) PO is drawing on it → stranded cash, reassign/close
+          SELECT 'amber','Deposit remaining, no open PO', x2.reference,
+            'Deposit remaining '||round(x2.rem,2)||', no open PO assigned', '','deposit','', x2.reference
+            FROM (
+              SELECT dref.reference,
+                (SELECT sum(coalesce(amount,0)) FROM planner.deposits d2 WHERE d2.reference=dref.reference)
+                  - coalesce((SELECT sum(coalesce(po.pay_start_deposit_assigned,0)) FROM planner.purchase_orders po WHERE po.deposit_ref=dref.reference),0) rem,
+                (SELECT count(*) FROM planner.purchase_orders po WHERE po.deposit_ref=dref.reference AND coalesce(po.status,'') NOT ILIKE '%complete%') open_po
+              FROM (SELECT DISTINCT reference FROM planner.deposits WHERE is_deposit AND coalesce(status,'')<>'closed' AND coalesce(reference,'')<>'') dref
+            ) x2
+            WHERE x2.rem > 0.01 AND x2.open_po = 0
+          UNION ALL
+          SELECT 'low','Partial cartons need approval', l.po,
+            count(*)||' line(s) not a full carton multiple and not yet approved', 'orderplan','','partials', l.po
+            FROM planner.v_purchase_order_lines l
+            JOIN planner.purchase_orders p ON p.po=l.po
+            WHERE l.full_carton_check LIKE '⚠%' AND coalesce(p.status,'') NOT ILIKE '%complete%'
+            GROUP BY l.po
+          UNION ALL
+          -- supplier hasn't confirmed the order (SKUs / qty / dates) yet — chase confirmation
+          SELECT 'low','Awaiting supplier confirmation', po,
+            'Supplier has not yet confirmed this order (SKUs / qty / dates)', 'remindconfirm','po','', po
+            FROM planner.purchase_orders
+            WHERE supplier_confirmed_at IS NULL AND coalesce(supplier_name,'')<>''
+              AND coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(status,'') NOT ILIKE '%future%'
+              AND coalesce(status,'') NOT ILIKE 'ship%' AND coalesce(status,'') NOT ILIKE '%deliver%'   -- once shipping/delivered, supplier confirmation is moot
+              AND coalesce((SELECT pn.require_supplier_confirmation FROM planner.prod_numbers pn WHERE pn.prod_no=purchase_orders.prod_no),false)
+              AND EXISTS (SELECT 1 FROM planner.purchase_order_lines l WHERE l.po=purchase_orders.po AND coalesce(l.qty,0)>0)
+          UNION ALL
+          -- supplier risk: line ordered against a supplier not in the SKU's allowed multi-supplier list (until approved)
+          SELECT 'amber','Supplier risk needs approval', l.po,
+            count(*)||' line(s) ordered against a supplier not in the SKU''s allowed list', 'orderplan','','suprisk', l.po
+            FROM planner.purchase_order_lines l
+            JOIN planner.purchase_orders p ON p.po=l.po
+            JOIN planner.products pr ON pr.sku=l.sku
+            WHERE coalesce(l.supplier_risk_approved,false)=false AND coalesce(l.qty,0)>0
+              AND coalesce(p.status,'') NOT ILIKE '%complete%'
+              AND coalesce(pr.supplier_multiple_all,'')<>'' AND coalesce(p.supplier_name,'')<>''
+              AND NOT (lower(trim(p.supplier_name)) = ANY(SELECT lower(trim(x)) FROM unnest(string_to_array(pr.supplier_multiple_all, ',')) x))
+            GROUP BY l.po
+          UNION ALL
+          -- discontinued: line forecast to arrive after the product's discontinue date, per-destination (until approved)
+          SELECT 'amber','Discontinued arrival needs approval', dd.po,
+            dd.cnt||' line(s) forecast to arrive after the product discontinue date', 'orderplan','','disc', dd.po
+            FROM (
+              SELECT l.po, count(*) cnt
+              FROM planner.purchase_order_lines l
+              JOIN planner.purchase_orders p ON p.po=l.po
+              LEFT JOIN planner.branches b ON b.name=p.branch
+              JOIN planner.products pr ON pr.sku=l.sku
+              LEFT JOIN LATERAL (SELECT f.landing_date FROM planner.flexport_shipments f
+                WHERE f.flex_id=p.flexport_reference OR f.shipment_name=p.po OR f.shipment_name=p.shipment_ref
+                ORDER BY (f.flex_id=p.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true
+              CROSS JOIN LATERAL (SELECT CASE upper(coalesce(nullif(p.country_code,''), b.country_code, ''))
+                  WHEN 'AU' THEN pr.discontinue_date_au_final WHEN 'CA' THEN pr.discontinue_date_ca
+                  ELSE pr.discontinue_date_final END disc) dsel
+              WHERE coalesce(l.discontinue_approved,false)=false AND coalesce(l.qty,0)>0
+                AND coalesce(p.status,'') NOT ILIKE '%complete%'
+                AND dsel.disc ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+                AND coalesce(to_char(p.delivery_date_overide,'YYYY-MM-DD'), to_char(p.landing_date_overide,'YYYY-MM-DD'), to_char(fx.landing_date,'YYYY-MM-DD')) > dsel.disc
+              GROUP BY l.po
+            ) dd
+          UNION ALL
+          -- client deadline at risk: forecast completion (arrival + warehouse leg) is after the PO's client deadline
+          SELECT 'high','Client deadline at risk', cd.po,
+            'Completion '||cd.completion||' is after the client deadline '||cd.cdl, '','po','', cd.po
+            FROM (
+              SELECT p.po, p.client_deadline_date::text cdl,
+                -- mirror the grid's completion: effective delivery (shipment dates ▸ flexport ▸ PO overrides) + warehouse leg
+                (coalesce(sh.delivery_date, sh.arrival_date, sh.landing_date, fx.landing_date, p.delivery_date_overide, p.landing_date_overide)
+                  + (CASE WHEN upper(coalesce(nullif(p.country_code,''), b.country_code, ''))='DIRECT'
+                            AND coalesce(nullif(p.shipment_ref,''), p.po)=p.po THEN 0 ELSE 7 END))::text completion
+              FROM planner.purchase_orders p
+              LEFT JOIN planner.branches b ON b.name=p.branch
+              LEFT JOIN planner.shipments sh ON sh.shipment_ref=p.shipment_ref
+              LEFT JOIN LATERAL (SELECT f.landing_date FROM planner.flexport_shipments f
+                WHERE f.flex_id=p.flexport_reference OR f.shipment_name=p.po OR f.shipment_name=p.shipment_ref
+                ORDER BY (f.flex_id=p.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true
+              WHERE p.client_deadline_date IS NOT NULL AND coalesce(p.status,'') NOT ILIKE '%complete%'
+            ) cd
+            WHERE cd.completion IS NOT NULL AND cd.completion > cd.cdl
+          UNION ALL
+          -- escalated shipment (set in the supplier portal / Shipments grid) → review while escalated AND still live
+          SELECT 'high','Shipment escalated', sh.shipment_ref,
+            'Shipment '||sh.shipment_ref||' has been escalated — review', '','shipment','', sh.shipment_ref
+            FROM planner.shipments sh WHERE sh.escalated=true
+              AND EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.shipment_ref=sh.shipment_ref AND coalesce(p.status,'') NOT ILIKE '%complete%')
+          UNION ALL
+          -- supplier created a new shipment from the portal (carrier/tracking on a PO with no shipment) → review while live
+          SELECT 'amber','Supplier created new shipment', sh.shipment_ref,
+            'A supplier created shipment '||sh.shipment_ref||' from the portal'||coalesce(' ('||sh.supplier_created_by||')','')||' — review the carrier / tracking & dates',
+            '','shipment','', sh.shipment_ref
+            FROM planner.shipments sh WHERE sh.supplier_created_at IS NOT NULL
+              AND EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.shipment_ref=sh.shipment_ref AND coalesce(p.status,'') NOT ILIKE '%complete%')
+          UNION ALL
+          SELECT 'amber','Order-plan change pending ERP push', l.po,
+            count(*)||' line(s) edited, not yet uploaded to the ERP', 'upload','po','', l.po
+            FROM planner.purchase_order_lines l LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
+            JOIN planner.purchase_orders p ON p.po=l.po AND coalesce(p.status,'') NOT ILIKE '%complete%'  -- ignore COMPLETE POs
+              AND coalesce(p.branch,'') NOT ILIKE '%manufactur%'  -- Manufacturing = FOB, not pushed to Cin7 → no ERP deviation exception
+            WHERE l.qty IS DISTINCT FROM el.qty  -- focus: SKU + QUANTITY (cost drift handled in the PO order-plan panel)
+            GROUP BY l.po HAVING count(*) FILTER (WHERE el.qty IS NOT NULL)>0  -- has ≥1 line in the ERP mirror (else "not in ERP" below)
+          UNION ALL
+          SELECT 'high','PO not in ERP', l.po,
+            count(*)||' line(s) exist but none are mirrored from the ERP (never pushed)', 'upload','po','', l.po
+            FROM planner.purchase_order_lines l
+            JOIN planner.purchase_orders p ON p.po=l.po
+            LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
+            WHERE coalesce(p.status,'') NOT ILIKE '%complete%'
+              AND coalesce(p.branch,'') NOT ILIKE '%manufactur%'  -- Manufacturing = FOB, not pushed to Cin7 → not an exception
+            GROUP BY l.po HAVING count(*) FILTER (WHERE el.qty IS NOT NULL)=0
+          -- (removed) "Production check-in" time-based nag — supplier production status is now a field on
+          -- PO ▸ PLAN ▸ DATES + the supplier portal, with a logic-based exception flagged there (not here).
+          UNION ALL
+          SELECT CASE WHEN y.shipd < current_date THEN 'high' ELSE 'amber' END,'Ship check-in', y.po,
+            CASE WHEN y.shipd < current_date
+              THEN 'Production complete; planned ship '||y.shipd||' passed ('||(current_date-y.shipd)||'d ago) — confirm it shipped'
+              ELSE 'Production complete; ships ~'||y.shipd||' (in '||(y.shipd-current_date)||'d) — confirm it''s on the water' END,
+            'prodstatus','po','production_status', y.po
+            FROM (SELECT po.po,
+                    coalesce(sh.departure_date,
+                      (coalesce(po.end_production_overide,
+                                po.start_production + (coalesce(s.production_days,0)||' days')::interval)::date + 7))::date shipd,
+                    coalesce(po.production_status,'') ps
+                  FROM planner.purchase_orders po
+                  LEFT JOIN planner.suppliers s ON s.id=po.supplier_id
+                  LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
+                  WHERE coalesce(po.status,'') NOT ILIKE '%complete%') y
+            WHERE y.shipd IS NOT NULL AND y.shipd <= current_date + 7 AND y.ps='ready_to_ship'
+          UNION ALL
+          -- Rider PO the supplier shipped to the master consolidator, but the master hasn't sailed → nudge to
+          -- set OUR status to SHIPPED TO MASTER (still upstream). When the master departs, set-shipping flips it.
+          SELECT 'amber','Shipped to master', p.po,
+            'Supplier marked this PO shipped to the master-shipment consolidator; master '||coalesce(nullif(sh.master_po,''), p.shipment_ref)||' has not departed yet — set it to SHIPPED TO MASTER',
+            'setstm','po','', p.po
+            FROM planner.purchase_orders p
+            JOIN planner.shipments sh ON sh.shipment_ref = p.shipment_ref
+            WHERE coalesce(p.shipment_ref,'') <> ''
+              AND p.po <> coalesce(nullif(sh.master_po,''), p.shipment_ref)          -- rider, not the master
+              AND coalesce(p.production_status,'') = 'shipped'                        -- supplier signalled shipped
+              AND coalesce(sh.status,'') NOT ILIKE '%shipping%' AND coalesce(sh.status,'') NOT ILIKE '%complete%' AND coalesce(sh.status,'') NOT ILIKE '%deliver%'   -- master not departed
+              AND upper(coalesce(p.status,'')) NOT IN ('SHIPPED TO MASTER','SHIPPING','DELIVERED') AND coalesce(p.status,'') NOT ILIKE '%complete%'
+          -- (removed) "Shipment missing dates" — a shipment lacking its own departure/ETA is normal: those dates
+          -- are inherited/calculated from the PO. Only *past/exceeded* dates matter, and those are already caught by
+          -- "Ship check-in" (calculated ship date passed) and "Shipment ETA passed" below.
+          UNION ALL
+          SELECT 'amber','Shipment ETA passed', s.shipment_ref,
+            'ETA '||coalesce(s.arrival_date,s.delivery_date,s.landing_date)::text||' has passed but not marked arrived',
+            'arrived','shipment','status', s.shipment_ref
+            FROM planner.shipments s
+            WHERE coalesce(s.arrival_date,s.delivery_date,s.landing_date) < current_date
+              AND coalesce(s.status,'') NOT ILIKE '%arriv%' AND coalesce(s.status,'') NOT ILIKE '%complete%'
+              AND coalesce(s.status,'') NOT ILIKE '%deliver%'
+              AND EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.shipment_ref=s.shipment_ref
+                          AND coalesce(p.status,'') NOT ILIKE '%complete%')
+          UNION ALL
+          -- PO sat in DELIVERED past its completion (arrival + 7) but not yet Received in Cin7/Fulfil → chase the receipt
+          SELECT 'amber','Awaiting ERP receipt', po.po,
+            'Delivered & completion ('||to_char((coalesce(s2.arrival_date, fx2.arrival_date, s2.landing_date, fx2.landing_date) + interval '7 days')::date,'YYYY-MM-DD')
+              ||') has passed — receive it in Cin7/Fulfil to complete the PO',
+            'gotopo','po','', po.po
+            FROM planner.purchase_orders po
+            JOIN planner.shipments s2 ON s2.shipment_ref=po.shipment_ref
+            LEFT JOIN LATERAL (SELECT f.arrival_date, f.landing_date FROM planner.flexport_shipments f
+              WHERE f.flex_id=s2.carrier_ref OR f.shipment_name=s2.shipment_ref LIMIT 1) fx2 ON true
+            WHERE coalesce(po.status,'') ILIKE '%deliver%' AND coalesce(po.status,'') NOT ILIKE '%complete%'
+              AND (coalesce(s2.arrival_date, fx2.arrival_date, s2.landing_date, fx2.landing_date) + interval '7 days')::date < current_date
+          UNION ALL
+          SELECT 'high','Payment invalid', po,
+            'A payment amount is set with no payment date — add the date in the PO''s PLAN', 'gotopo','po','', po
+            FROM planner.purchase_orders
+            -- Complete POs normally raise no actions, but payment issues still matter — surface them for
+            -- completed POs from Production 55 onwards (prod_no >= 55), not earlier productions.
+            WHERE (coalesce(status,'') NOT ILIKE '%complete%'
+                   OR (prod_no ~ '^[0-9]+$' AND prod_no::int >= 55)) AND (
+              (coalesce(pay_start_deposit_assigned,0)>0 AND pay_start_deposit_date IS NULL) OR
+              (coalesce(pay_completion_assigned,0)>0 AND pay_completion_date IS NULL) OR
+              (coalesce(pay_balance_1_amount,0)>0 AND pay_balance_1_date IS NULL) OR
+              (coalesce(pay_balance_2_amount,0)>0 AND pay_balance_2_date IS NULL) )
+              -- (removed the "final invoice entered but no Final payment due" branch: balance_due_date_overide is an OPTIONAL override — blank = calculated balance due date — so it false-positived on every invoiced PO)
+          UNION ALL
+          SELECT 'amber','Over 20 pallets', z.po,
+            'Estimated '||round(z.pal,1)||' pallets (>20 = over one container) — rebalance across this production''s POs',
+            'rebalance','po','', z.po
+            FROM (SELECT po.po, upper(coalesce(nullif(po.country_code,''), b.country_code, '')) ctry,
+                    (SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)) FROM planner.purchase_order_lines l
+                       LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=po.po) pal
+                  FROM planner.purchase_orders po LEFT JOIN planner.branches b ON b.name=po.branch
+                  -- only BEFORE it ships (FUTURE / PRODUCTION / READY TO SHIP) — once shipped it's too late to rebalance
+                  WHERE coalesce(po.status,'') NOT ILIKE '%complete%' AND coalesce(po.status,'') NOT ILIKE 'ship%'
+                    AND coalesce(po.status,'') NOT ILIKE '%deliver%') z
+            WHERE z.pal > 20 AND z.ctry <> 'DIRECT'
+          UNION ALL
+          -- PO is IN PRODUCTION but one of the required fields (Batch / Production # / Supplier / Branch) is blank.
+          SELECT 'amber','Required field missing', p.po,
+            'In production but missing required field(s): ' || concat_ws(', ',
+               CASE WHEN coalesce(p.batch_id,'')='' THEN 'Batch' END,
+               CASE WHEN coalesce(p.prod_no,'')='' THEN 'Production #' END,
+               CASE WHEN coalesce(p.supplier_name,'')='' THEN 'Supplier' END,
+               CASE WHEN coalesce(p.branch,'')='' THEN 'Branch' END)
+            || ' — assign in the PO', 'gotopo','po','', p.po
+            FROM planner.purchase_orders p
+            WHERE coalesce(p.status,'') ILIKE 'production%'
+              AND ( coalesce(p.batch_id,'')='' OR coalesce(p.prod_no,'')='' OR coalesce(p.supplier_name,'')='' OR coalesce(p.branch,'')='' )
+          ) _a ORDER BY CASE severity WHEN 'high' THEN 0 WHEN 'amber' THEN 1 ELSE 2 END, type LIMIT 400`);
+        // The recommendation / submission / ERP layers each run their own (heavier) queries — skip them for the
+        // fast priority preview (scope=priority); the full fetch that follows includes them.
+        try { (await expediteActions()).forEach(a => arows.push(a)); } catch (e) { /* recommendation layer is best-effort */ }
+        try { (await submissionActions()).forEach(a => arows.push(a)); } catch (e) { /* portal-submission layer is best-effort */ }
+        try { (await manufacturingActions()).forEach(a => arows.push(a)); } catch (e) { /* manufacturing-mismatch layer is best-effort */ }
+        // ERP COMPARE — a single medium-priority action when there are open ERP POs missing from the planner
+        try { const ec = await erpCompareActiveCount();
+          if (ec > 0) arows.push({ severity: 'amber', type: 'ERP POs not in planner',
+            ref: ec + ' PO' + (ec > 1 ? 's' : ''),
+            detail: 'There ' + (ec > 1 ? 'are ' : 'is ') + ec + ' PO' + (ec > 1 ? 's' : '') + ' open in the ERP but not in the planner — review the ERP Compare report',
+            fix: 'gotoreport', target: '', field: 'erp-compare', target_key: 'erp-compare' }); } catch (e) { /* best-effort */ }
+  return arows;
+}
+function refreshActionsCache() {   // single-flight — coalesces concurrent refreshes into one build
+  if (_actionsRefresh) return _actionsRefresh;
+  _actionsRefresh = buildActionsRows()
+    .then((rows) => { _actionsCache = { at: Date.now(), rows }; _actionsRefresh = null; return rows; })
+    .catch((e) => { _actionsRefresh = null; throw e; });
+  return _actionsRefresh;
+}
+refreshActionsCache().catch(() => {});           // warm on boot
+setInterval(() => { refreshActionsCache().catch(() => {}); }, ACTIONS_TTL_MS).unref?.();   // refresh every 10 min in the background
+
+
 app.get('/api/supply/:section', async (req, res) => {
   const q = (sql) => pool.query(sql).then(r => r.rows);
   try {
@@ -2802,283 +3098,11 @@ app.get('/api/supply/:section', async (req, res) => {
         // Priority preview = the SAME full rule set, filtered to high severity (so it can never drift out of sync with
         // the full set the way a hand-picked subset did). The heavier JS layers (expedite/submission/manufacturing/ERP)
         // are still skipped for the preview and arrive with the full fetch.
-        const arows = await q(`
-          SELECT * FROM (
-          SELECT 'high' severity,'Date conflict' type, po ref,
-            'Landing '||landing_date_overide::text||' is in the past (status '||coalesce(status,'?')||')' detail,
-            'date' fix, 'po' target, 'landing_date_overide' field, po target_key
-            FROM planner.purchase_orders
-            -- Only a genuine conflict when the PO hasn't reached shipping yet. A past landing while SHIPPING /
-            -- DELIVERED / COMPLETE is expected (goods arriving/arrived; marking delivered is optional) — not an action.
-            WHERE landing_date_overide < current_date
-              AND coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(status,'') NOT ILIKE '%shipping%'
-              AND coalesce(status,'') NOT ILIKE '%deliver%' AND coalesce(status,'') NOT ILIKE '%arriv%'
-          UNION ALL
-          SELECT 'low','Unassigned shipment', po, 'Past production with no shipment assigned',
-            'shipment','po','shipment_ref', po
-            FROM planner.purchase_orders
-            WHERE shipment_ref IS NULL AND coalesce(status,'') NOT ILIKE '%complete%'
-          UNION ALL
-          SELECT 'high','PO missing supplier', po, 'No supplier set on this PO', 'supplier','po','supplier_name', po
-            FROM planner.purchase_orders WHERE supplier_name IS NULL
-          UNION ALL
-          SELECT 'amber','Deposit not paid', coalesce(reference, description, 'deposit #'||id),
-            'Deposit '||coalesce(round(amount)::text,'?')||' '||coalesce(country,'')||' has no paid date',
-            'date','deposit','date_paid', id::text
-            FROM planner.deposits WHERE is_deposit AND date_paid IS NULL AND coalesce(amount,0) > 0
-          UNION ALL
-          -- paid deposit with no Xero FX rate captured → medium-priority review
-          SELECT 'amber','Deposit FX missing', coalesce(reference, description, 'deposit #'||id),
-            'Deposit '||coalesce(reference, description, '')||' is paid but has no Xero FX rate',
-            '','deposit','xero_fx', id::text
-            FROM planner.deposits WHERE is_deposit AND date_paid IS NOT NULL
-              AND (xero_fx IS NULL OR xero_fx::text='') AND coalesce(status,'')<>'closed'
-          UNION ALL
-          SELECT 'high','Deposit over-assigned', d.reference,
-            'Assigned start deposits '||round(dr.used)||' exceed pool '||round(d.pool)
-            ||' (remaining '||round(d.pool-dr.used)||')', '','','', d.reference
-            FROM (SELECT reference, sum(coalesce(amount,0)) pool FROM planner.deposits
-                  WHERE is_deposit AND reference IS NOT NULL AND coalesce(status,'')<>'closed' GROUP BY reference) d
-            JOIN (SELECT deposit_ref, sum(coalesce(pay_start_deposit_assigned,0)) used
-                  FROM planner.purchase_orders WHERE deposit_ref IS NOT NULL GROUP BY deposit_ref
-            ) dr ON dr.deposit_ref=d.reference WHERE dr.used > d.pool + 0.01
-          UNION ALL
-          -- deposit still has money left, but its open POs have no start deposit left to allocate → review
-          SELECT 'amber','Deposit remaining', x.reference,
-            'Deposit remaining '||round(x.rem,2)||', none left to be allocated', '','deposit','', x.reference
-            FROM (
-              SELECT dref.reference,
-                (SELECT sum(coalesce(amount,0)) FROM planner.deposits d2 WHERE d2.reference=dref.reference)
-                  - coalesce((SELECT sum(coalesce(po.pay_start_deposit_assigned,0)) FROM planner.purchase_orders po WHERE po.deposit_ref=dref.reference),0) rem,
-                coalesce((SELECT sum(round(coalesce(po.supplier_invoice_total,
-                           (SELECT sum(l.qty*l.cost_price) FROM planner.purchase_order_lines l WHERE l.po=po.po),
-                           po.order_value_estimation,0)*coalesce(po.start_deposit_pct_override,s.start_deposit_pct,0)/100,2))
-                   FROM planner.purchase_orders po LEFT JOIN planner.suppliers s ON s.id=po.supplier_id
-                   WHERE po.deposit_ref=dref.reference AND coalesce(po.status,'') NOT ILIKE '%complete%'
-                     AND po.pay_start_deposit_assigned IS NULL),0) est,
-                (SELECT count(*) FROM planner.purchase_orders po WHERE po.deposit_ref=dref.reference AND coalesce(po.status,'') NOT ILIKE '%complete%') open_po
-              FROM (SELECT DISTINCT reference FROM planner.deposits WHERE is_deposit AND coalesce(status,'')<>'closed' AND coalesce(reference,'')<>'') dref
-            ) x
-            WHERE x.rem > 0.01 AND x.est = 0 AND x.open_po > 0
-          UNION ALL
-          -- deposit still has money left, but NO open (non-complete) PO is drawing on it → stranded cash, reassign/close
-          SELECT 'amber','Deposit remaining, no open PO', x2.reference,
-            'Deposit remaining '||round(x2.rem,2)||', no open PO assigned', '','deposit','', x2.reference
-            FROM (
-              SELECT dref.reference,
-                (SELECT sum(coalesce(amount,0)) FROM planner.deposits d2 WHERE d2.reference=dref.reference)
-                  - coalesce((SELECT sum(coalesce(po.pay_start_deposit_assigned,0)) FROM planner.purchase_orders po WHERE po.deposit_ref=dref.reference),0) rem,
-                (SELECT count(*) FROM planner.purchase_orders po WHERE po.deposit_ref=dref.reference AND coalesce(po.status,'') NOT ILIKE '%complete%') open_po
-              FROM (SELECT DISTINCT reference FROM planner.deposits WHERE is_deposit AND coalesce(status,'')<>'closed' AND coalesce(reference,'')<>'') dref
-            ) x2
-            WHERE x2.rem > 0.01 AND x2.open_po = 0
-          UNION ALL
-          SELECT 'low','Partial cartons need approval', l.po,
-            count(*)||' line(s) not a full carton multiple and not yet approved', 'orderplan','','partials', l.po
-            FROM planner.v_purchase_order_lines l
-            JOIN planner.purchase_orders p ON p.po=l.po
-            WHERE l.full_carton_check LIKE '⚠%' AND coalesce(p.status,'') NOT ILIKE '%complete%'
-            GROUP BY l.po
-          UNION ALL
-          -- supplier hasn't confirmed the order (SKUs / qty / dates) yet — chase confirmation
-          SELECT 'low','Awaiting supplier confirmation', po,
-            'Supplier has not yet confirmed this order (SKUs / qty / dates)', 'remindconfirm','po','', po
-            FROM planner.purchase_orders
-            WHERE supplier_confirmed_at IS NULL AND coalesce(supplier_name,'')<>''
-              AND coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(status,'') NOT ILIKE '%future%'
-              AND coalesce(status,'') NOT ILIKE 'ship%' AND coalesce(status,'') NOT ILIKE '%deliver%'   -- once shipping/delivered, supplier confirmation is moot
-              AND coalesce((SELECT pn.require_supplier_confirmation FROM planner.prod_numbers pn WHERE pn.prod_no=purchase_orders.prod_no),false)
-              AND EXISTS (SELECT 1 FROM planner.purchase_order_lines l WHERE l.po=purchase_orders.po AND coalesce(l.qty,0)>0)
-          UNION ALL
-          -- supplier risk: line ordered against a supplier not in the SKU's allowed multi-supplier list (until approved)
-          SELECT 'amber','Supplier risk needs approval', l.po,
-            count(*)||' line(s) ordered against a supplier not in the SKU''s allowed list', 'orderplan','','suprisk', l.po
-            FROM planner.purchase_order_lines l
-            JOIN planner.purchase_orders p ON p.po=l.po
-            JOIN planner.products pr ON pr.sku=l.sku
-            WHERE coalesce(l.supplier_risk_approved,false)=false AND coalesce(l.qty,0)>0
-              AND coalesce(p.status,'') NOT ILIKE '%complete%'
-              AND coalesce(pr.supplier_multiple_all,'')<>'' AND coalesce(p.supplier_name,'')<>''
-              AND NOT (lower(trim(p.supplier_name)) = ANY(SELECT lower(trim(x)) FROM unnest(string_to_array(pr.supplier_multiple_all, ',')) x))
-            GROUP BY l.po
-          UNION ALL
-          -- discontinued: line forecast to arrive after the product's discontinue date, per-destination (until approved)
-          SELECT 'amber','Discontinued arrival needs approval', dd.po,
-            dd.cnt||' line(s) forecast to arrive after the product discontinue date', 'orderplan','','disc', dd.po
-            FROM (
-              SELECT l.po, count(*) cnt
-              FROM planner.purchase_order_lines l
-              JOIN planner.purchase_orders p ON p.po=l.po
-              LEFT JOIN planner.branches b ON b.name=p.branch
-              JOIN planner.products pr ON pr.sku=l.sku
-              LEFT JOIN LATERAL (SELECT f.landing_date FROM planner.flexport_shipments f
-                WHERE f.flex_id=p.flexport_reference OR f.shipment_name=p.po OR f.shipment_name=p.shipment_ref
-                ORDER BY (f.flex_id=p.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true
-              CROSS JOIN LATERAL (SELECT CASE upper(coalesce(nullif(p.country_code,''), b.country_code, ''))
-                  WHEN 'AU' THEN pr.discontinue_date_au_final WHEN 'CA' THEN pr.discontinue_date_ca
-                  ELSE pr.discontinue_date_final END disc) dsel
-              WHERE coalesce(l.discontinue_approved,false)=false AND coalesce(l.qty,0)>0
-                AND coalesce(p.status,'') NOT ILIKE '%complete%'
-                AND dsel.disc ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
-                AND coalesce(to_char(p.delivery_date_overide,'YYYY-MM-DD'), to_char(p.landing_date_overide,'YYYY-MM-DD'), to_char(fx.landing_date,'YYYY-MM-DD')) > dsel.disc
-              GROUP BY l.po
-            ) dd
-          UNION ALL
-          -- client deadline at risk: forecast completion (arrival + warehouse leg) is after the PO's client deadline
-          SELECT 'high','Client deadline at risk', cd.po,
-            'Completion '||cd.completion||' is after the client deadline '||cd.cdl, '','po','', cd.po
-            FROM (
-              SELECT p.po, p.client_deadline_date::text cdl,
-                -- mirror the grid's completion: effective delivery (shipment dates ▸ flexport ▸ PO overrides) + warehouse leg
-                (coalesce(sh.delivery_date, sh.arrival_date, sh.landing_date, fx.landing_date, p.delivery_date_overide, p.landing_date_overide)
-                  + (CASE WHEN upper(coalesce(nullif(p.country_code,''), b.country_code, ''))='DIRECT'
-                            AND coalesce(nullif(p.shipment_ref,''), p.po)=p.po THEN 0 ELSE 7 END))::text completion
-              FROM planner.purchase_orders p
-              LEFT JOIN planner.branches b ON b.name=p.branch
-              LEFT JOIN planner.shipments sh ON sh.shipment_ref=p.shipment_ref
-              LEFT JOIN LATERAL (SELECT f.landing_date FROM planner.flexport_shipments f
-                WHERE f.flex_id=p.flexport_reference OR f.shipment_name=p.po OR f.shipment_name=p.shipment_ref
-                ORDER BY (f.flex_id=p.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true
-              WHERE p.client_deadline_date IS NOT NULL AND coalesce(p.status,'') NOT ILIKE '%complete%'
-            ) cd
-            WHERE cd.completion IS NOT NULL AND cd.completion > cd.cdl
-          UNION ALL
-          -- escalated shipment (set in the supplier portal / Shipments grid) → review while escalated AND still live
-          SELECT 'high','Shipment escalated', sh.shipment_ref,
-            'Shipment '||sh.shipment_ref||' has been escalated — review', '','shipment','', sh.shipment_ref
-            FROM planner.shipments sh WHERE sh.escalated=true
-              AND EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.shipment_ref=sh.shipment_ref AND coalesce(p.status,'') NOT ILIKE '%complete%')
-          UNION ALL
-          -- supplier created a new shipment from the portal (carrier/tracking on a PO with no shipment) → review while live
-          SELECT 'amber','Supplier created new shipment', sh.shipment_ref,
-            'A supplier created shipment '||sh.shipment_ref||' from the portal'||coalesce(' ('||sh.supplier_created_by||')','')||' — review the carrier / tracking & dates',
-            '','shipment','', sh.shipment_ref
-            FROM planner.shipments sh WHERE sh.supplier_created_at IS NOT NULL
-              AND EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.shipment_ref=sh.shipment_ref AND coalesce(p.status,'') NOT ILIKE '%complete%')
-          UNION ALL
-          SELECT 'amber','Order-plan change pending ERP push', l.po,
-            count(*)||' line(s) edited, not yet uploaded to the ERP', 'upload','po','', l.po
-            FROM planner.purchase_order_lines l LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
-            JOIN planner.purchase_orders p ON p.po=l.po AND coalesce(p.status,'') NOT ILIKE '%complete%'  -- ignore COMPLETE POs
-              AND coalesce(p.branch,'') NOT ILIKE '%manufactur%'  -- Manufacturing = FOB, not pushed to Cin7 → no ERP deviation exception
-            WHERE l.qty IS DISTINCT FROM el.qty  -- focus: SKU + QUANTITY (cost drift handled in the PO order-plan panel)
-            GROUP BY l.po HAVING count(*) FILTER (WHERE el.qty IS NOT NULL)>0  -- has ≥1 line in the ERP mirror (else "not in ERP" below)
-          UNION ALL
-          SELECT 'high','PO not in ERP', l.po,
-            count(*)||' line(s) exist but none are mirrored from the ERP (never pushed)', 'upload','po','', l.po
-            FROM planner.purchase_order_lines l
-            JOIN planner.purchase_orders p ON p.po=l.po
-            LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
-            WHERE coalesce(p.status,'') NOT ILIKE '%complete%'
-              AND coalesce(p.branch,'') NOT ILIKE '%manufactur%'  -- Manufacturing = FOB, not pushed to Cin7 → not an exception
-            GROUP BY l.po HAVING count(*) FILTER (WHERE el.qty IS NOT NULL)=0
-          -- (removed) "Production check-in" time-based nag — supplier production status is now a field on
-          -- PO ▸ PLAN ▸ DATES + the supplier portal, with a logic-based exception flagged there (not here).
-          UNION ALL
-          SELECT CASE WHEN y.shipd < current_date THEN 'high' ELSE 'amber' END,'Ship check-in', y.po,
-            CASE WHEN y.shipd < current_date
-              THEN 'Production complete; planned ship '||y.shipd||' passed ('||(current_date-y.shipd)||'d ago) — confirm it shipped'
-              ELSE 'Production complete; ships ~'||y.shipd||' (in '||(y.shipd-current_date)||'d) — confirm it''s on the water' END,
-            'prodstatus','po','production_status', y.po
-            FROM (SELECT po.po,
-                    coalesce(sh.departure_date,
-                      (coalesce(po.end_production_overide,
-                                po.start_production + (coalesce(s.production_days,0)||' days')::interval)::date + 7))::date shipd,
-                    coalesce(po.production_status,'') ps
-                  FROM planner.purchase_orders po
-                  LEFT JOIN planner.suppliers s ON s.id=po.supplier_id
-                  LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
-                  WHERE coalesce(po.status,'') NOT ILIKE '%complete%') y
-            WHERE y.shipd IS NOT NULL AND y.shipd <= current_date + 7 AND y.ps='ready_to_ship'
-          UNION ALL
-          -- Rider PO the supplier shipped to the master consolidator, but the master hasn't sailed → nudge to
-          -- set OUR status to SHIPPED TO MASTER (still upstream). When the master departs, set-shipping flips it.
-          SELECT 'amber','Shipped to master', p.po,
-            'Supplier marked this PO shipped to the master-shipment consolidator; master '||coalesce(nullif(sh.master_po,''), p.shipment_ref)||' has not departed yet — set it to SHIPPED TO MASTER',
-            'setstm','po','', p.po
-            FROM planner.purchase_orders p
-            JOIN planner.shipments sh ON sh.shipment_ref = p.shipment_ref
-            WHERE coalesce(p.shipment_ref,'') <> ''
-              AND p.po <> coalesce(nullif(sh.master_po,''), p.shipment_ref)          -- rider, not the master
-              AND coalesce(p.production_status,'') = 'shipped'                        -- supplier signalled shipped
-              AND coalesce(sh.status,'') NOT ILIKE '%shipping%' AND coalesce(sh.status,'') NOT ILIKE '%complete%' AND coalesce(sh.status,'') NOT ILIKE '%deliver%'   -- master not departed
-              AND upper(coalesce(p.status,'')) NOT IN ('SHIPPED TO MASTER','SHIPPING','DELIVERED') AND coalesce(p.status,'') NOT ILIKE '%complete%'
-          -- (removed) "Shipment missing dates" — a shipment lacking its own departure/ETA is normal: those dates
-          -- are inherited/calculated from the PO. Only *past/exceeded* dates matter, and those are already caught by
-          -- "Ship check-in" (calculated ship date passed) and "Shipment ETA passed" below.
-          UNION ALL
-          SELECT 'amber','Shipment ETA passed', s.shipment_ref,
-            'ETA '||coalesce(s.arrival_date,s.delivery_date,s.landing_date)::text||' has passed but not marked arrived',
-            'arrived','shipment','status', s.shipment_ref
-            FROM planner.shipments s
-            WHERE coalesce(s.arrival_date,s.delivery_date,s.landing_date) < current_date
-              AND coalesce(s.status,'') NOT ILIKE '%arriv%' AND coalesce(s.status,'') NOT ILIKE '%complete%'
-              AND coalesce(s.status,'') NOT ILIKE '%deliver%'
-              AND EXISTS (SELECT 1 FROM planner.purchase_orders p WHERE p.shipment_ref=s.shipment_ref
-                          AND coalesce(p.status,'') NOT ILIKE '%complete%')
-          UNION ALL
-          -- PO sat in DELIVERED past its completion (arrival + 7) but not yet Received in Cin7/Fulfil → chase the receipt
-          SELECT 'amber','Awaiting ERP receipt', po.po,
-            'Delivered & completion ('||to_char((coalesce(s2.arrival_date, fx2.arrival_date, s2.landing_date, fx2.landing_date) + interval '7 days')::date,'YYYY-MM-DD')
-              ||') has passed — receive it in Cin7/Fulfil to complete the PO',
-            'gotopo','po','', po.po
-            FROM planner.purchase_orders po
-            JOIN planner.shipments s2 ON s2.shipment_ref=po.shipment_ref
-            LEFT JOIN LATERAL (SELECT f.arrival_date, f.landing_date FROM planner.flexport_shipments f
-              WHERE f.flex_id=s2.carrier_ref OR f.shipment_name=s2.shipment_ref LIMIT 1) fx2 ON true
-            WHERE coalesce(po.status,'') ILIKE '%deliver%' AND coalesce(po.status,'') NOT ILIKE '%complete%'
-              AND (coalesce(s2.arrival_date, fx2.arrival_date, s2.landing_date, fx2.landing_date) + interval '7 days')::date < current_date
-          UNION ALL
-          SELECT 'high','Payment invalid', po,
-            'A payment amount is set with no payment date — add the date in the PO''s PLAN', 'gotopo','po','', po
-            FROM planner.purchase_orders
-            -- Complete POs normally raise no actions, but payment issues still matter — surface them for
-            -- completed POs from Production 55 onwards (prod_no >= 55), not earlier productions.
-            WHERE (coalesce(status,'') NOT ILIKE '%complete%'
-                   OR (prod_no ~ '^[0-9]+$' AND prod_no::int >= 55)) AND (
-              (coalesce(pay_start_deposit_assigned,0)>0 AND pay_start_deposit_date IS NULL) OR
-              (coalesce(pay_completion_assigned,0)>0 AND pay_completion_date IS NULL) OR
-              (coalesce(pay_balance_1_amount,0)>0 AND pay_balance_1_date IS NULL) OR
-              (coalesce(pay_balance_2_amount,0)>0 AND pay_balance_2_date IS NULL) )
-              -- (removed the "final invoice entered but no Final payment due" branch: balance_due_date_overide is an OPTIONAL override — blank = calculated balance due date — so it false-positived on every invoiced PO)
-          UNION ALL
-          SELECT 'amber','Over 20 pallets', z.po,
-            'Estimated '||round(z.pal,1)||' pallets (>20 = over one container) — rebalance across this production''s POs',
-            'rebalance','po','', z.po
-            FROM (SELECT po.po, upper(coalesce(nullif(po.country_code,''), b.country_code, '')) ctry,
-                    (SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)) FROM planner.purchase_order_lines l
-                       LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=po.po) pal
-                  FROM planner.purchase_orders po LEFT JOIN planner.branches b ON b.name=po.branch
-                  -- only BEFORE it ships (FUTURE / PRODUCTION / READY TO SHIP) — once shipped it's too late to rebalance
-                  WHERE coalesce(po.status,'') NOT ILIKE '%complete%' AND coalesce(po.status,'') NOT ILIKE 'ship%'
-                    AND coalesce(po.status,'') NOT ILIKE '%deliver%') z
-            WHERE z.pal > 20 AND z.ctry <> 'DIRECT'
-          UNION ALL
-          -- PO is IN PRODUCTION but one of the required fields (Batch / Production # / Supplier / Branch) is blank.
-          SELECT 'amber','Required field missing', p.po,
-            'In production but missing required field(s): ' || concat_ws(', ',
-               CASE WHEN coalesce(p.batch_id,'')='' THEN 'Batch' END,
-               CASE WHEN coalesce(p.prod_no,'')='' THEN 'Production #' END,
-               CASE WHEN coalesce(p.supplier_name,'')='' THEN 'Supplier' END,
-               CASE WHEN coalesce(p.branch,'')='' THEN 'Branch' END)
-            || ' — assign in the PO', 'gotopo','po','', p.po
-            FROM planner.purchase_orders p
-            WHERE coalesce(p.status,'') ILIKE 'production%'
-              AND ( coalesce(p.batch_id,'')='' OR coalesce(p.prod_no,'')='' OR coalesce(p.supplier_name,'')='' OR coalesce(p.branch,'')='' )
-          ) _a ${req.query.scope === 'priority' ? "WHERE _a.severity = 'high'" : ''} ORDER BY CASE severity WHEN 'high' THEN 0 WHEN 'amber' THEN 1 ELSE 2 END, type LIMIT 400`);
-        // The recommendation / submission / ERP layers each run their own (heavier) queries — skip them for the
-        // fast priority preview (scope=priority); the full fetch that follows includes them.
-        if (req.query.scope !== 'priority') {
-        try { (await expediteActions()).forEach(a => arows.push(a)); } catch (e) { /* recommendation layer is best-effort */ }
-        try { (await submissionActions()).forEach(a => arows.push(a)); } catch (e) { /* portal-submission layer is best-effort */ }
-        try { (await manufacturingActions()).forEach(a => arows.push(a)); } catch (e) { /* manufacturing-mismatch layer is best-effort */ }
-        // ERP COMPARE — a single medium-priority action when there are open ERP POs missing from the planner
-        try { const ec = await erpCompareActiveCount();
-          if (ec > 0) arows.push({ severity: 'amber', type: 'ERP POs not in planner',
-            ref: ec + ' PO' + (ec > 1 ? 's' : ''),
-            detail: 'There ' + (ec > 1 ? 'are ' : 'is ') + ec + ' PO' + (ec > 1 ? 's' : '') + ' open in the ERP but not in the planner — review the ERP Compare report',
-            fix: 'gotoreport', target: '', field: 'erp-compare', target_key: 'erp-compare' }); } catch (e) { /* best-effort */ }
-        }
+        // Serve the cached full action set (stale-while-revalidate); apply the snooze/dismiss overlay fresh below.
+        let _full;
+        if (_actionsCache) { _full = _actionsCache.rows; if (Date.now() - _actionsCache.at >= ACTIONS_TTL_MS && !_actionsRefresh) refreshActionsCache().catch(() => {}); }
+        else { _full = await refreshActionsCache(); }
+        const arows = (req.query.scope === 'priority' ? _full.filter(r => r.severity === 'high') : _full).map(r => ({ ...r }));
         const dtoday = (await pool.query(`SELECT to_char(current_date,'YYYY-MM-DD') d`)).rows[0].d;
         let astate = {};
         try { (await pool.query(`SELECT action_key, status, to_char(snooze_until,'YYYY-MM-DD') snooze_until, snoozed_by, to_char(snoozed_at,'YYYY-MM-DD HH24:MI') snoozed_at FROM planner.supply_action_state`))
@@ -6589,6 +6613,10 @@ app.post('/api/supply/actions/state', async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Drop the cached Actions build so the next fetch reflects a just-made data edit (the client calls this from
+// invalidateDerived after any PO/shipment/payment change). Idle visits still ride the 10-min cache; editors get
+// freshness. Kicks a background rebuild so the cache re-warms without blocking the caller.
+app.post('/api/supply/actions/invalidate', (req, res) => { _actionsCache = null; refreshActionsCache().catch(() => {}); res.json({ ok: true }); });
 // Import-duty pivot (CONFIG ▸ Import duty): set duty % for a category × country. Upserts the duty_rates row.
 app.post('/api/supply/duty-upsert', async (req, res) => {
   const b = req.body || {}, cat = (b.category || '').trim(), country = (b.country || '').trim();

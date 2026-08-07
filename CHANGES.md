@@ -1,3 +1,9 @@
+## v26.726.0 SUPPLY Actions: 10-min server cache + background warm (much faster)
+- SUPPLY ▸ Actions was recomputing a heavy build (big SQL union + expedite/submission/manufacturing/ERP layers) on every first visit. The full computed action set is now cached server-side for 10 min, warmed on boot, and refreshed in the background when stale (stale-while-revalidate) — a real request no longer blocks on a cold build. Warm response ~0.7s vs a multi-second cold build.
+- Priority preview (high-severity) is now derived from the same cached set, so it can't drift from the full list and is equally instant.
+- The per-action snooze/dismiss/done overlay is still applied fresh on every request, so lifecycle changes reflect immediately.
+- After any data edit the client drops the server cache (debounced) and re-warms it, so a just-fixed action clears right away rather than lingering for up to 10 min. Client also keeps cache['actions'] warm every 10 min so opening ACTIONS renders instantly from cache.
+
 ## v26.725.0 Target recs: applied rows stay visible with ✓ applied + undo
 - Applying a target recommendation no longer hides the row. It now shows "✓ applied" (green row + "(applied)" tag) with an ↩ undo button.
 - Undo reverts that subcategory's cells back to exactly what they were before applying (IV snapshot captured at apply time), removing them from the applied count. Applied recs are excluded from the open count / "Apply all open".

@@ -773,7 +773,11 @@
   var _sampleReload=null;  // set by the Samples grid so detail-panel actions can refresh it
   // a write to a PO / shipment / deposit changes the derived views — drop their caches so they re-fetch fresh
   var _opExcTimer=null;   // debounce the exception-count refetch so rapid grid edits don't fire it per keystroke
-  function invalidateDerived(){ ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments','manufacturing'].forEach(function(k){delete cache[k];}); _lookupsAt=0; /* refetch lookups after any data change */ try{ if(typeof _navCounts!=='undefined'){_navCounts.manufacturing=undefined;_navCounts.paydue=undefined;} }catch(e){} clearTimeout(_opExcTimer); _opExcTimer=setTimeout(function(){ try{ refreshOpExc(); }catch(e){} },600); }   // 'manufacturing' + 'paydue' nav badges recompute after a PO/order-plan/payment edit → tabs update on next nav; no hard refresh
+  var _actInvTimer=null;  // debounce the server Actions-cache invalidation after edits
+  function invalidateDerived(){ ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments','manufacturing'].forEach(function(k){delete cache[k];}); _lookupsAt=0; /* refetch lookups after any data change */ try{ if(typeof _navCounts!=='undefined'){_navCounts.manufacturing=undefined;_navCounts.paydue=undefined;} }catch(e){} clearTimeout(_opExcTimer); _opExcTimer=setTimeout(function(){ try{ refreshOpExc(); }catch(e){} },600);
+    // The edit may have resolved (or raised) an action — drop the server's cached Actions build so it rebuilds fresh,
+    // then re-warm the client cache. Debounced so a burst of edits collapses into one rebuild.
+    clearTimeout(_actInvTimer); _actInvTimer=setTimeout(function(){ try{ fetch('/api/supply/actions/invalidate',{method:'POST'}).then(function(){ if(typeof prewarmActions==='function')prewarmActions(true); }).catch(function(){}); }catch(e){} },800); }   // 'manufacturing' + 'paydue' nav badges recompute after a PO/order-plan/payment edit → tabs update on next nav; no hard refresh
 
   function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function shortUser(s){return String(s==null?'':s).replace(/@dockandbay\.com\b/gi,'@');}  // ben@dockandbay.com → ben@ (display only)
@@ -1096,6 +1100,19 @@
     fetch('/api/supply/actions').then(function(r){return r.json();}).then(function(full){
       cache['actions']=full; if(tk!==_navToken)return; renderActions(full);
     }).catch(function(e){ if(tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>'; }); }
+  // Keep the (expensive) Actions set warm in the client cache so opening ACTIONS is instant — selectSection renders
+  // straight from cache['actions'] when present. The server caches the heavy build for 10 min and warms on boot;
+  // here we mirror that with a silent background fetch (no render unless already viewing Actions), refreshed every
+  // 10 min and re-warmed shortly after any data edit clears it.
+  var _actWarmStarted=false;
+  function prewarmActions(force){ if(!force && cache['actions'])return;
+    fetch('/api/supply/actions').then(function(r){return r.json();}).then(function(full){
+      if(!Array.isArray(full))return; cache['actions']=full;
+      try{ setActionsBadgeFrom(full); }catch(e){}
+      if(current==='actions')try{ renderActions(full); }catch(e){}   // refresh in place if the user is on Actions
+    }).catch(function(){}); }
+  function startActionsWarm(){ if(_actWarmStarted)return; _actWarmStarted=true;
+    setInterval(function(){ prewarmActions(true); }, 600000); }   // every 10 min, matching the server cache TTL
   var ACT_GROUP={ // PRIORITY — the highest-attention exceptions, surfaced first
     'PO not in ERP':'PRIORITY','Shipment escalated':'PRIORITY','Manufacturing mismatch':'PRIORITY','Client deadline at risk':'PRIORITY',
     'Deposit not paid':'PAYMENTS','Deposit over-assigned':'PAYMENTS','Payment invalid':'PAYMENTS','Payment overdue':'PAYMENTS','Supplier invoice':'PAYMENTS',
@@ -9266,7 +9283,8 @@
     var sb=document.getElementById('supply-btn'); if(sb)sb.classList.add('active');
     var fb=document.getElementById('supply-float'); if(fb)fb.style.display='none';
     try{updatePermBanner();}catch(e){}
-    if(noSelect!==true)selectSection(current||'actions'); hzSyncDemandPills(); }   // noSelect: caller (applyRoute) will select the routed section itself
+    if(noSelect!==true)selectSection(current||'actions'); hzSyncDemandPills();
+    try{ startActionsWarm(); }catch(e){} }   // begin the 10-min background Actions warm (once) so ACTIONS stays instant
   function hideSupply(){ var app=document.getElementById('app'); if(app){app.classList.remove('supply-active');app.classList.remove('config-mode');}
     document.body.classList.remove('supply-on');
     var r=document.getElementById('supply-root'); if(r)r.style.display='none';
