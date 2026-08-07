@@ -1,3 +1,7 @@
+## v26.692.0 — DEMAND cell indicators: vertical rail (visual demo at 2 cells)
+- New reusable cell indicator rail: subtle vertical letters (i / C / N / S̶) centred in the cell's left gutter, so it never widens the column. Only active flags render; each has a 120ms tooltip. S̶ = do-not-smooth (struck).
+- Seeded a visual demo at UK DTC · Picnic Blanket · Mar-28 (category row) and PICNIC-CAB-LG-AMALG · Apr-28 (SKU row) so the look can be approved before the real N/i/C data + do-not-smooth engine are wired.
+
 ## v26.691.0 — Global 120ms tooltips + Undo button shows what it will revert
 - Every native `title` in the app (DEMAND + SUPPLY) now shows as a fast custom tooltip after 120ms instead of the browser's ~700ms delay. One delegated handler converts them all (incl. re-rendered content); elements with an existing custom tip keep it (their slow native title is just stripped so it can't double up).
 - Undo button tooltip now describes the exact action, e.g. "Undo revert PICNIC-XL-BLUE Dec 26 from +60% back to +50% · Cmd/Ctrl+Z" (falls back to units when there's no % baseline; shows "(N edits)" for batched gestures like Smooth).

@@ -322,6 +322,14 @@ td{padding:0;border-bottom:1px solid #f0f0f0;vertical-align:middle;overflow:hidd
 #t thead th{border-right:1px solid #9a9a9a}
 /* Per-cell forecast notes: little "N" badge + add-note popup + hover tooltip. */
 .fc-note-n{position:absolute;top:0;right:1px;z-index:3;font-size:8px;font-weight:800;line-height:1;color:#fff;background:#2563eb;border-radius:2px;padding:1px 2px;cursor:pointer}
+/* Cell indicator rail: subtle vertical letters (i / C / N / S̶) centred in the left gutter — does not widen the cell. */
+td.has-rail{position:relative}
+.cell-rail{position:absolute;left:0;top:0;bottom:0;width:11px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:1px;pointer-events:none;z-index:4}
+.cell-rail .cf{font-size:9px;font-weight:800;line-height:1;pointer-events:auto;cursor:default;font-family:Helvetica,Arial,sans-serif}
+.cell-rail .cf-i{color:#2563eb}
+.cell-rail .cf-c{color:#7c3aed}
+.cell-rail .cf-n{color:#0e7490}
+.cell-rail .cf-s{color:#b45309;text-decoration:line-through}
 #fc-note-pop{position:absolute;z-index:100050;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 30px rgba(15,23,42,.18);padding:10px 12px;width:300px;font-size:12px;color:#0f172a;text-align:left}
 #fc-note-tip{position:fixed;z-index:100060;max-width:300px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none;display:none;text-align:left}
 td.stk{position:sticky;left:0;z-index:6;background:#fff;text-align:left;width:160px;min-width:160px;max-width:160px}
@@ -5266,6 +5274,7 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   // per-cell forecast note key + "N" badge (dbl-click the cell to add/view notes)
   var _nk=((typeof SKUM!=='undefined'&&SKUM[s])?'sku':'subcat')+'|'+s+'|'+co+'|'+ch+'|'+fym; td.dataset.nk=_nk;
   if(typeof FC_NOTES!=='undefined'&&FC_NOTES[_nk]&&FC_NOTES[_nk].length){ var _nb=document.createElement('span'); _nb.className='fc-note-n'; _nb.textContent='N'; _nb.dataset.nk=_nk; td.appendChild(_nb); }
+  var _rf=cellFlags(_nk); if(_rf){ td.classList.add('has-rail'); td.insertAdjacentHTML('afterbegin',cellRailHtml(_rf)); }
   const d=document.createElement('div');d.className='fcin';
   const lyD=document.createElement('div');lyD.className='fcly';
   // Forecast-on-forecast years: LY is the prior-year forecast (not an actual) — keep neutral colour
@@ -5745,6 +5754,23 @@ function inbDiv(inb, entries, color){
 // (Removed dead skuForecast — SKU forecasting now via skuOutFC/FC_OUTPUTS. v25.652)
 // SKU-level loaded forecast from forecast_outputs (in-memory working store).
 // Returns the unit value for a month, or null if this SKU/wh/channel has no loaded forecast.
+// ── Cell indicator rail (vertical, centred in the left gutter) ──────────────────────────────────
+// Unified home for the per-cell flags: i=BI rule, C=trading-calendar event, N=forecast note,
+// S̶=do-not-smooth lock. Renders only the ACTIVE letters so sparse cells stay calm. Each letter
+// carries a title → the global 120ms tooltip explains it. Keyed like the note key: level|item|co|ch|m.
+// DEMO_RAIL is a temporary visual seed so Ben can approve the look at two cells before the real
+// N/i/C data + do-not-smooth engine are wired in.
+var DEMO_RAIL={
+  'subcat|Picnic Blanket|UK|DTC|2028_03':{i:1,c:1,n:1,s:1},
+  'sku|PICNIC-CAB-LG-AMALG|UK|DTC|2028_04':{i:1,c:1,n:1,s:1}
+};
+function cellFlags(key){ var d=DEMO_RAIL[key]; return d?{i:!!d.i,c:!!d.c,n:!!d.n,s:!!d.s}:null; }
+function cellRailHtml(fl){ if(!fl)return ''; var o='';
+  if(fl.i)o+='<span class="cf cf-i" title="A BI rule applies to this cell">i</span>';
+  if(fl.c)o+='<span class="cf cf-c" title="Trading-calendar event (category · market · month)">C</span>';
+  if(fl.n)o+='<span class="cf cf-n" title="Forecast note — double-click the cell to view/add">N</span>';
+  if(fl.s)o+='<span class="cf cf-s" title="Do not smooth — forecast locked; only a manual override changes it">S</span>';
+  return o?('<div class="cell-rail">'+o+'</div>'):''; }
 function skuOutFC(sku,co,ch,m){var o=FC_OUTPUTS[sku+'|'+skuWh(co,ch)+'|'+ch];return(o&&o[m]!=null)?o[m]:null;}
 // "Continuing SKU" = has any actuals in the trailing 12 complete months. For a calendar month 'MM', the most
 // recent complete actual is THIS year if that month has finished (MM ≤ CUR_YTD_END's month), else last year.
@@ -7339,6 +7365,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       var fcv=isAct?act:fc;
       td.className=fyBg(Y)+(first?' sep2':'')+(isAct?' sku-act-cell':'');
       td.style.cssText='padding:1px 2px;border-bottom:1px solid #f0f0ee';
+      var _rf=cellFlags('sku|'+sku+'|'+co+'|'+ch+'|'+m); if(_rf){ td.classList.add('has-rail'); td.insertAdjacentHTML('afterbegin',cellRailHtml(_rf)); }
       if(isAct){
         var yoy=lyVal>0?Math.round((act-lyVal)/lyVal*100):null;
         var yc=yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp',ys=yoy!=null?((yoy>=0?'+':'')+yoy+'%'):'';
