@@ -1,3 +1,7 @@
+## v26.675.0 — Set targets: hover the £ target for a units/ASP/revenue breakdown
+- Hovering the £ figure under a target cell shows a tooltip: current forecast vs target for Units and Revenue (with from→to deltas) plus the ASP used. Works per Month/Quarter/Half cell; current part-way month uses the full-month forecast.
+
+
 ## v26.674.0 — Set targets: category filter is now a multi-select dropdown (like More Filters ▸ Category)
 - Replaced the inline category pills with a "All categories ▾" multi-select dropdown matching the DEMAND More Filters ▸ Category component (search box + tick-box list + Clear all). Subcategory text search kept alongside. Selection persists in the browser session.
 

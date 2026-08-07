@@ -8115,14 +8115,14 @@ function renderSummaryView(body){
       var key=tgKey(Y,sub,lvl,idx), gbpStored=SUMM_TGT_GBP[key], gStored=SUMM_TGT[key], inh=inheritG(Y,sub,lvl,idx);
       var mths=c.single?[c.single]:(c.m?[c.m]:(c.months||[])), ly=0; mths.forEach(function(m){ ly+=((_lyRev[sub]&&_lyRev[sub][m])||0); });   // month cols carry .m (not .months) → guard so MONTH group doesn't blank
       var ph=(inh!=null)?('↳'+(inh>=0?'+':'')+inh):'0%';
-      var isGbp=(gbpStored!=null), v='', bg='', ttxt='';
+      var isGbp=(gbpStored!=null), v='', bg='', ttxt='', cellTgt=0;
       if(isGbp){ v='£'+Math.round(gbpStored).toLocaleString(); bg='background:#B3EBF2';   // £ absolute → light blue
-        var impPct=ly>0?Math.round((gbpStored/ly-1)*100):null;
+        var impPct=ly>0?Math.round((gbpStored/ly-1)*100):null; cellTgt=gbpStored;
         ttxt=(impPct==null?'new':((impPct>=0?'+':'')+impPct+'%'))+_uTxt(gbpStored,sub); }
       else if(gStored!=null){ v=(Number(gStored)>=0?'+':'')+Number(gStored)+'%'; bg='background:#F0FFF0';   // % growth → light green
-        var tgt=ly*(1+Number(gStored)/100); ttxt=(ly>0?('£'+Math.round(tgt).toLocaleString()):'')+_uTxt(tgt,sub); }
-      else { var eff=(inh!=null?inh:0), tgt2=ly*(1+eff/100); ttxt=(ly>0?('£'+Math.round(tgt2).toLocaleString()):'')+_uTxt(tgt2,sub); }
-      return '<td class="ecell" style="padding:2px 4px;border:1px solid #e5e7eb;text-align:right"><input class="tgin" data-sub="'+encodeURIComponent(sub)+'" data-fy="'+Y+'" data-lvl="'+lvl+'" data-idx="'+idx+'" data-ly="'+Math.round(ly)+'" data-inh="'+(inh!=null?inh:'')+'" data-net="'+_tgtNet(sub)+'" value="'+v+'" placeholder="'+ph+'" title="Type a % growth vs last year (e.g. 40) OR a £ revenue target (e.g. £120000 or 120000). Blank = inherit." style="'+bg+'"><div class="ttgt" style="font-size:9px;color:#64748b;text-align:right;font-variant-numeric:tabular-nums;margin-top:1px">'+ttxt+'</div></td>'; }
+        var tgt=ly*(1+Number(gStored)/100); cellTgt=tgt; ttxt=(ly>0?('£'+Math.round(tgt).toLocaleString()):'')+_uTxt(tgt,sub); }
+      else { var eff=(inh!=null?inh:0), tgt2=ly*(1+eff/100); cellTgt=tgt2; ttxt=(ly>0?('£'+Math.round(tgt2).toLocaleString()):'')+_uTxt(tgt2,sub); }
+      return '<td class="ecell" style="padding:2px 4px;border:1px solid #e5e7eb;text-align:right"><input class="tgin" data-sub="'+encodeURIComponent(sub)+'" data-fy="'+Y+'" data-lvl="'+lvl+'" data-idx="'+idx+'" data-ly="'+Math.round(ly)+'" data-inh="'+(inh!=null?inh:'')+'" data-net="'+_tgtNet(sub)+'" value="'+v+'" placeholder="'+ph+'" title="Type a % growth vs last year (e.g. 40) OR a £ revenue target (e.g. £120000 or 120000). Blank = inherit." style="'+bg+'"><div class="ttgt tgt-hov" data-sub="'+encodeURIComponent(sub)+'" data-mths="'+mths.join(',')+'" data-tgt="'+Math.round(cellTgt)+'" style="font-size:9px;color:#64748b;text-align:right;font-variant-numeric:tabular-nums;margin-top:1px;cursor:help">'+ttxt+'</div></td>'; }
     if(SUMM_TGT_EDIT&&!rangeMode){
       // Target £ baseline = prior-year revenue per month. If the prior-year month is itself still a FORECAST
       // (e.g. FY27/28 H2 → FY26/27 H2 not complete), inherit the forecast revenue (subData.val, which is
@@ -8197,6 +8197,20 @@ function renderSummaryView(body){
               else { delete SUMM_TGT_GBP[k]; if(p.pct!=null)SUMM_TGT[k]=p.pct; else delete SUMM_TGT[k]; }
               var ae=document.activeElement; if(!(ae&&ae.classList&&ae.classList.contains('tgin')))draw();   // keep focus if user clicked another cell
             }).catch(function(){}); }; });
+      // Hover the £ target under a cell → breakdown: current forecast vs target (units / ASP / revenue), with from→to deltas.
+      function _tgtHovHtml(el){ var sub=decodeURIComponent(el.dataset.sub||''), mths=(el.dataset.mths||'').split(',').filter(Boolean), tgt=Number(el.dataset.tgt)||0;
+        var curU=0,curR=0; mths.forEach(function(m){ var fu=((typeof CUR_MONTH!=='undefined'&&m===CUR_MONTH&&typeof curMonthForecast==='function')?curMonthForecast(sub,co,ch):((calc(sub,co,ch).fu||{})[m]))||0; var p=pa(m), asp=getASP(co,ch,sub,p.y,p.mo)||0; curU+=fu; curR+=fu*asp; });
+        var asp=curU>0?(curR/curU):_tgtNet(sub); var tU=asp>0?Math.round(tgt/asp):0; var f=function(n){return Math.round(n).toLocaleString();};
+        var arw=function(a,b,mny){ var d=b-a, c=d>=0?'#86efac':'#fca5a5', pfx=mny?'£':''; return pfx+f(a)+' → '+pfx+f(b)+' <span style="color:'+c+'">('+(d>=0?'+':'')+pfx+f(d)+')</span>'; };
+        return '<div style="font-weight:700;margin-bottom:4px">'+esc(sub||'Market total')+'</div>'
+          +'<table style="font-size:11px;border-collapse:collapse;color:#e5e7eb"><tr><td style="padding:1px 10px 1px 0;color:#94a3b8">Units</td><td>'+arw(curU,tU,false)+'</td></tr>'
+          +'<tr><td style="padding:1px 10px 1px 0;color:#94a3b8">ASP</td><td>£'+(asp?asp.toFixed(2):'—')+'</td></tr>'
+          +'<tr><td style="padding:1px 10px 1px 0;color:#94a3b8">Revenue</td><td>'+arw(curR,tgt,true)+'</td></tr></table>'
+          +'<div style="color:#94a3b8;margin-top:4px;font-size:9px">forecast → target</div>'; }
+      function _tgtTipShow(el){ var t=document.getElementById('tgt-hov-tip'); if(!t){ t=document.createElement('div'); t.id='tgt-hov-tip'; t.style.cssText='position:fixed;z-index:100070;max-width:320px;background:#111827;color:#fff;padding:8px 11px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none;text-align:left'; document.body.appendChild(t); }
+        try{ t.innerHTML=_tgtHovHtml(el); }catch(e){ return; } t.style.display='block'; var r=el.getBoundingClientRect(); t.style.left=Math.max(6,Math.min(r.right-150,window.innerWidth-326))+'px'; t.style.top=(r.bottom+6)+'px'; }
+      function _tgtTipHide(){ var t=document.getElementById('tgt-hov-tip'); if(t)t.style.display='none'; }
+      host.querySelectorAll('.tgt-hov').forEach(function(el){ el.addEventListener('mouseenter',function(){ _tgtTipShow(el); }); el.addEventListener('mouseleave',_tgtTipHide); });
       host.querySelectorAll('th.fyh[data-fy]').forEach(function(th){ th.onclick=function(){ var Y=+th.dataset.fy; SUMM_FYOPEN[Y]=!fyOpen(Y); draw(); }; });
       return;
     }
