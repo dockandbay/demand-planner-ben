@@ -1,3 +1,7 @@
+## v26.731.0 Target recs: current month grows the FORECAST, not last year
+- The current (still-incomplete) calendar month was being targeted as "last-year × (1+growth)", which drags the forecast DOWN when a line grew YoY — e.g. Hair Wrap Seasonal · UK DTC at +50% recommended 268×1.5=402 against a 2,000 forecast (−80%). For the current month only, the recommendation now grows the FULL-MONTH FORECAST: 2,000×1.5 = 3,000, and both the ly and fc baselines show the forecast (2,000→3,000 +50%).
+- Future months are unchanged (still "X% over last year"). The current month is also now always included in the recs even when partial actuals have made it the latest "actual" month.
+
 ## v26.730.0 SUPPLY read caches: ORDER PLAN default view (load-time Phase 3, order-plan)
 - The default ORDER PLAN grid (no supplier, archived hidden) ran a heavy ~35-line query (v_purchase_order_lines + POs + ERP + flexport LATERAL + per-line availability) on every open (~4s uncached). Extracted the SELECT/joins into a shared ORDER_PLAN_SELECT const and cached the default view (boot-warm + single-flight + stale-while-revalidate, 10-min TTL; invalidates with the other SUPPLY caches on any edit). Warm ~4s → ~0.02s.
 - The rare paths stay LIVE/uncached: per-supplier portal preview (?supplier=) and the "show archived" toggle (?includeArchived=1).

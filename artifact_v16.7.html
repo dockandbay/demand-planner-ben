@@ -9067,18 +9067,27 @@ function trecCount(co,ch,fy){ try{ return computeTargetRecs(fy,co,ch).filter(fun
 var _trecRecCache={};   // memoise per (fy|co|ch) within a render pass (pill counters compute across all combos); cleared each renderTargetRecs
 function computeTargetRecs(fy,coA,chA){ var co=coA||CUR,ch=chA||CF; var _ck=fy+'|'+co+'|'+ch; if(_trecRecCache[_ck])return _trecRecCache[_ck];
   var subs=[]; (typeof DATA!=='undefined'?DATA:[]).forEach(function(d){ if(d.co===co&&d.ch===ch&&d.s&&subs.indexOf(d.s)<0)subs.push(d.s); }); subs.sort();
-  var months=fyMonths(fy).filter(function(m){ return !isActualMonth(m); });
+  // The current CALENDAR month is still in progress, so its last-year figure is a poor base (e.g. a product that
+  // grew YoY): growing last year drags the forecast DOWN. For that one month we grow the FULL-MONTH FORECAST instead,
+  // and show the forecast on BOTH the ly/fc baselines. Future months keep the "X% over last year" target. (Ben)
+  var _n=new Date(), THIS_MONTH=_n.getFullYear()+'_'+((_n.getMonth()+1)<10?'0':'')+(_n.getMonth()+1);
+  var months=fyMonths(fy).filter(function(m){ return !isActualMonth(m) || m===THIS_MONTH; });   // include the current (incomplete) month
   var out=[];
   subs.forEach(function(s){ var a=ga(co,ch,s)||{}, cr=null; var rows=[], fyCur=0, fyTgt=0;   // cr computed lazily — only for subs that actually have a target (keeps the pill-counter roll-up fast)
     months.forEach(function(m){ var fi=trecMonFyIdx(m); var g=trecResolve(fi.Y,s,fi.idx,co,ch); if(g==null)return;
-      var lyRev=a[trecPrevY(m)]?a[trecPrevY(m)][1]:0, lyU=a[trecPrevY(m)]?a[trecPrevY(m)][0]:0;
-      if(!(lyRev>0))return;
       var p=pa(m), asp=getASP(co,ch,s,p.y,p.mo); if(!(asp>0))return;
       if(!cr)cr=calc(s,co,ch);
+      if(m===THIS_MONTH){   // current incomplete month → grow the full-month forecast, not last year
+        var fcU=((typeof CUR_MONTH!=='undefined'&&m===CUR_MONTH&&typeof curMonthForecast==='function')?(curMonthForecast(s,co,ch)||0):(cr.fu[m]||0));
+        if(!(fcU>0))return;
+        var reqUc=Math.max(0,Math.round(fcU*(1+g/100))), fcRev=fcU*asp, tgtRevc=fcRev*(1+g/100);
+        rows.push({m:m, curU:fcU, lyU:fcU, curRev:fcRev, tgtRev:tgtRevc, reqU:reqUc, g:g, pctCur:(reqUc/fcU-1), pctLY:(reqUc/fcU-1)});
+        fyCur+=fcRev; fyTgt+=tgtRevc; return;
+      }
+      var lyRev=a[trecPrevY(m)]?a[trecPrevY(m)][1]:0, lyU=a[trecPrevY(m)]?a[trecPrevY(m)][0]:0;
+      if(!(lyRev>0))return;
       var tgtRev=lyRev*(1+g/100), reqU=Math.max(0,Math.round(tgtRev/asp));
-      // Current (part-way) month: use the FULL-MONTH forecast, not the actuals-to-date, as the baseline (Ben) —
-      // otherwise a partly-elapsed month reads as a huge drop (e.g. "Aug 20,453→454u -98%").
-      var curU=((typeof CUR_MONTH!=='undefined'&&m===CUR_MONTH&&typeof curMonthForecast==='function')?(curMonthForecast(s,co,ch)||0):(cr.fu[m]||0)), curRev=curU*asp;
+      var curU=(cr.fu[m]||0), curRev=curU*asp;
       rows.push({m:m, curU:curU, lyU:lyU, curRev:curRev, tgtRev:tgtRev, reqU:reqU, g:g, pctCur:(curU>0?(reqU/curU-1):null), pctLY:(lyU>0?(reqU/lyU-1):null)});
       fyCur+=curRev; fyTgt+=tgtRev; });
     if(rows.length)out.push({s:s, rows:rows, fyCur:fyCur, fyTgt:fyTgt}); });
