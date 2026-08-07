@@ -213,10 +213,14 @@ export async function buildDtcPackingList(pool, { pos, master }) {
   if (extra > 0) pk.duplicateRow(LAST_ROW, extra, true);
   const lastLineRow = LAST_ROW + extra, totalRow = lastLineRow + 1;
   const date = ymd(new Date().toISOString());
-  // Seller = Dock & Bay AU entity (CONFIG ▸ Consignees ▸ AU = Dock & Bay PTY LTD); fall back to UK, then cons.
-  const dnbRow = (await pool.query(`SELECT consignee FROM planner.invoice_consignees WHERE country='AU'`)).rows[0]
+  // Seller = the Dock & Bay entity chosen on the client's key account (key_accounts.seller_entity → a
+  // CONFIG ▸ Consignees country). Default UK. Falls back to UK then to the resolved cons block.
+  let ent = 'UK';
+  try { const ka = (await pool.query(`SELECT seller_entity FROM planner.key_accounts WHERE lower(name)=lower($1) LIMIT 1`, [masterRow.client || ''])).rows[0];
+    if (ka && ka.seller_entity) ent = String(ka.seller_entity).toUpperCase(); } catch (e) { /* default UK */ }
+  const dnbRow = (await pool.query(`SELECT consignee FROM planner.invoice_consignees WHERE upper(country)=$1`, [ent])).rows[0]
               || (await pool.query(`SELECT consignee FROM planner.invoice_consignees WHERE country='UK'`)).rows[0] || {};
-  const dnb = dnbRow.consignee || cons.consignee || 'Dock & Bay PTY LTD';
+  const dnb = dnbRow.consignee || cons.consignee || 'Dock & Bay LTD';
   const so = String(masterRow.sales_order_ref || '').trim(), cpo = String(masterRow.client_po_ref || '').trim();
   const docNo = ((so || cpo) ? (so + (cpo && cpo !== so ? ` (${cpo})` : '')) : masterRow.po);
   const clientBlock = [masterRow.client, masterRow.final_delivery_address].filter(Boolean).join('\n');

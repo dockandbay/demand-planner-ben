@@ -1,3 +1,6 @@
+## v26.716.0 — DTC packing list seller = per-key-account entity (default UK)
+- Which Dock & Bay entity is the seller on a client's Direct-to-Client packing list is now set per client in CONFIG ▸ Key accounts ("Supplier company (seller)": UK/AU/US/EU). Default UK. The list resolves the PO client's key account → entity → CONFIG ▸ Consignees record for the seller block. Replaces the hardcoded-AU from v26.715. Migration 200 adds key_accounts.seller_entity default UK.
+
 ## v26.715.0 — Direct to Client packing list seller = Dock & Bay AU
 - The DTC packing list seller/company block now uses the AU entity (CONFIG ▸ Consignees ▸ AU = Dock & Bay PTY LTD), not the UK one. Falls back to UK then generic if AU missing.
 

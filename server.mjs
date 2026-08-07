@@ -3397,7 +3397,7 @@ app.post('/api/supply/supplier-create', async (req, res) => {
 // Direct-to-Client details when selected. List / create / edit / delete, plus apply-to-PO.
 const KA_FIELDS = {
   name: 'text', client_requirements: 'text', address: 'text', pack_pallet_notes: 'text', pack_other_notes: 'text',
-  carton_label_format: 'text',
+  carton_label_format: 'text', seller_entity: 'text',
   forwarder_name: 'text', forwarder_email: 'text', forwarder_phone: 'text',
   pack_polybags: 'boolean', pack_polybags_notes: 'text', pack_dnb_barcodes: 'boolean', pack_dnb_barcodes_notes: 'text',
   pack_rfid_barcodes: 'boolean', pack_rfid_barcodes_notes: 'text', pack_dnb_carton: 'boolean', pack_dnb_carton_notes: 'text',
