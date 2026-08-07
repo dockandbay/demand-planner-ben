@@ -1,3 +1,7 @@
+## v26.685.0 — PO grid: quick-apply a supplier-submitted completion date under the END cell
+- When a supplier has submitted a completion (production-end) date, the PO grid now shows a purple "set to <dd-mmm-yy>" button under the END-date cell, with a 120ms hover note ("Supplier has submitted a completion date of … — click to update"). Clicking applies it to the PO's production-end override (via the submission-apply endpoint) and refreshes the row in place. Row carries sub_comp_date/sub_comp_id from PO_ROWS_SQL.
+
+
 ## v26.684.0 — PO drawer: respect the tab you click while detail is loading
 - Fixed the PO-drawer tab flash: when the background detail load finished it snapped back to the tab it started on (e.g. Dates) even if you had clicked another (Master data). Now the user's current tab wins over the load-start tab.
 

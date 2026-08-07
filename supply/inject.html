@@ -839,6 +839,9 @@
   function srctag(s){return s?'<span class="src '+(s==='FLEX'||s==='calc'?'fx':'m')+'">'+esc(s)+'</span>':'';}
   // END DATE cell: days until the (effective) production-end date — negative = overdue. Colour-coded:
   // <=0 red · <=7 dark orange · <=14 light orange · <=30 light blue · >30 light green.
+  // Supplier-submitted completion date → a "set to …" quick-apply button under the END-date cell (120ms hover note).
+  function subCompBtn(r){ if(!(r&&r.sub_comp_id&&r.sub_comp_date))return ''; var iso=String(r.sub_comp_date).slice(0,10); var lbl=fd(iso);
+    return '<button class="po-setcomp ex-badge" data-po="'+esc(r.po)+'" data-id="'+esc(r.sub_comp_id)+'" data-date="'+esc(iso)+'" data-note="Supplier has submitted a completion date of '+esc(lbl)+' — click to update this PO’s production-end date." style="display:block;margin-top:2px;width:auto;background:#f5f3ff;color:#6d28d9;border:1px solid #c4b5fd;border-radius:4px;font-size:9px;font-weight:700;padding:1px 6px;cursor:pointer;white-space:nowrap">set to '+esc(lbl)+'</button>'; }
   function endDaysBadge(iso,label){ if(!iso)return ''; var m=/^(\d{4}-\d{2}-\d{2})/.exec(String(iso)); if(!m)return '';
     var t=new Date(); t.setHours(0,0,0,0); var days=Math.round((new Date(m[1]+'T00:00:00')-t)/86400000);
     var bg,fg;
@@ -2817,7 +2820,7 @@
       +'<td class="l">'+shipcell+'</td>'
       +'<td class="l">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0 && !poFullyPaid(r))+'</td>'
       +gDate(r,'start_production',r.prod_start,'',(r.status==='FUTURE'&&datePast(r.prod_start))?DTD_LRED:'')
-      +gDate(r,'end_production_overide',r.prod_end,(r.status==='PRODUCTION'?endDaysBadge(r.prod_end):''),(r.status==='PRODUCTION'&&datePast(r.prod_end))?DTD_LRED:'')
+      +gDate(r,'end_production_overide',r.prod_end,(r.status==='PRODUCTION'?endDaysBadge(r.prod_end):'')+subCompBtn(r),(r.status==='PRODUCTION'&&datePast(r.prod_end))?DTD_LRED:'')
       +'<td class="l">'+dcell(r.ship)+srctagLink(r.ship_src,r)+'</td>'
       +'<td class="l">'+dcell(r.delivery)+srctagLink(r.delivery_src,r)+'</td>'
       +dTd(r.checkin,(['READY TO SHIP','SHIPPED TO MASTER','SHIPPING','DELIVERED'].indexOf(r.status)>=0?endDaysBadge(r.checkin,'completion'):''),((r.status==='PRODUCTION'||r.status==='SHIPPING')&&datePast(r.checkin))?DTD_RED:'')
@@ -3027,6 +3030,14 @@
     b.addEventListener('mouseenter',function(){ b._t=setTimeout(function(){ noteTip(b); },120); });   // fast 120ms tooltip (native title is ~1s)
     b.addEventListener('mouseleave',function(){ clearTimeout(b._t); hideNoteTip(); });
     b.onclick=function(e){ e.stopPropagation(); hideNoteTip(); poActPopover(b); }; });
+    // "set to <date>" — apply a supplier-submitted completion date to the PO's production-end (120ms hover note)
+    document.querySelectorAll('#supply-root .po-setcomp[data-id]').forEach(function(b){ if(b._b)return; b._b=1;
+      b.addEventListener('mouseenter',function(){ b._t=setTimeout(function(){ noteTip(b); },120); });
+      b.addEventListener('mouseleave',function(){ clearTimeout(b._t); hideNoteTip(); });
+      b.onclick=function(e){ e.stopPropagation(); hideNoteTip(); var iso=b.dataset.date; if(!confirm('Update PO '+b.dataset.po+' production-end date to '+fd(iso)+' (supplier-submitted)?'))return; var o=b.innerHTML; b.disabled=true; b.textContent='…';
+        fetch('/api/supply/submission/'+b.dataset.id+'/apply',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({by:(window.ME&&ME.email)||'PO GRID'})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived();
+          return fetch('/api/supply/po-row/'+encodeURIComponent(b.dataset.po)).then(function(r){return r.json();}).then(function(arr){ var rr=Array.isArray(arr)?arr[0]:null; if(rr&&window.__poRowApply)window.__poRowApply(rr); }); })
+          .catch(function(er){ b.disabled=false; b.innerHTML=o; alert('Failed: '+(er.message||er)); }); }; });
     // "A" required-field badge → open the PO drawer so the missing field can be assigned
     document.querySelectorAll('#supply-root .po-req-badge[data-po]').forEach(function(b){ if(b._b)return; b._b=1;
       b.onclick=function(e){ e.stopPropagation(); if(typeof openPODrawer==='function')openPODrawer(b.dataset.po); else gotoPO(b.dataset.po); }; }); }

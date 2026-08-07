@@ -10368,6 +10368,9 @@ const PO_ROWS_SQL = `
             coalesce(crossdock_skus,'') crossdock_skus,
             coalesce(dtc_custom,false) dtc_custom, coalesce(dtc_key_account,false) dtc_key_account,
             coalesce((SELECT pcd.custom_dev_ref FROM planner.purchase_orders pcd WHERE pcd.po=calc4.po),'') custom_dev_ref,   -- custom-order product developments (CSV of product_dev_items.ref); subquery since calc4 doesn't forward the column
+            -- Pending supplier-submitted completion (production-end) date → inline "set to …" quick-apply on the grid END cell
+            (SELECT ss.value FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='completion_date' AND ss.status='pending' ORDER BY ss.id DESC LIMIT 1) sub_comp_date,
+            (SELECT ss.id    FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='completion_date' AND ss.status='pending' ORDER BY ss.id DESC LIMIT 1) sub_comp_id,
             -- Forwarder contact details — read LIVE from the matching key account (by client name), not snapshotted
             (SELECT coalesce(ka.carton_label_format,'') FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) client_label_format,   -- key-account link to a client-specific carton-label format (e.g. 'paper_store')
             (SELECT coalesce(ka.forwarder_name,'')  FROM planner.key_accounts ka WHERE lower(trim(ka.name))=lower(trim(calc4.client)) LIMIT 1) forwarder_name,
