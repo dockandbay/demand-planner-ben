@@ -1,3 +1,6 @@
+## v26.699.0 — Fix: category override number spilling past the cell
+- The forecast override input on category rows was content-box at 50%, so padding/border spilled ~6px past the cell (and 50% clipped 5-digit literals like 10000). Now border-box at 60% width, right-aligned — stays inside the cell and still leaves a left gutter for double-click.
+
 ## v26.698.0 — Abbreviate very large growth % (+Nk%)
 - Growth % at/over 1000% now display as Nk% rounded to the nearest thousand, no decimals and no leading + (green colour already signals positive), e.g. +24282% → 24k%. Applied across plan cells, SKU rows, subcat + FY totals via a shared gPct() helper. Small values unchanged.
 

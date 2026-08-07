@@ -431,8 +431,10 @@ td.sku-fc.fc-nostock .sku-fc-v{color:#991b1b}
 .fcin{display:flex;flex-direction:column;padding:0}
 .fcly{font-size:10px;color:#94a3b8;text-align:right;padding-right:2px;font-variant-numeric:tabular-nums;line-height:1.15}
 .fci{width:100%;padding:0 2px;font-size:11px;text-align:right;border:1px solid transparent;border-radius:2px;background:transparent;color:#555;line-height:1.2}
-/* Forecast-cell override input = right 50% only, so the left half of the cell is free for double-click (notes / do-not-smooth). */
-.fcin>.fci{width:50%;margin-left:auto}
+/* Forecast-cell override input sits on the right, leaving the left of the cell free for double-click
+   (notes / do-not-smooth). border-box so padding/border don't spill past the cell edge; 60% fits a
+   5-digit literal without clipping while keeping a left gutter. */
+.fcin>.fci{width:60%;margin-left:auto;box-sizing:border-box}
 .fci:focus{outline:none;border-color:#60a5fa;background:#fff}
 .fci.pct{border-color:transparent;background:transparent;color:#1d4ed8}
 .fci.pct.neg{color:#dc2626}
