@@ -1,3 +1,8 @@
+## v26.679.0 — Multi-currency Phase 3: Cash Flow uses per-FY GBP↔USD; removed CONFIG General rate input
+- Cash Flow exports (transactions + arrivals) now convert USD→GBP by each line's financial-year blended rate from CONFIG ▸ Admin ▸ Exchange rates (falls back to the default if a FY has no rate).
+- Removed the "USD → GBP exchange rate" input from CONFIG ▸ General (replaced by CONFIG ▸ Admin ▸ Exchange rates). Server gbpRate() (CF_GBP/AF_GBP defaults) now falls back to the current-FY fx_rates USD rate when the legacy setting is unset.
+
+
 ## v26.678.0 — Multi-currency Phase 2b: DEMAND plan grid + revenue popup honour the currency toggle
 - The DEMAND plan now has a GBP / local (USD/EUR/AUD) currency toggle in the plan controls (US/EU/AU only). Per-cell revenue + ASP tooltip, category/FY/grand totals, and the Revenue-vs-target popup all convert by the financial-year blended rate. Shared with the Summary toggle (SUMM_CCY). Units + growth %/deltas unaffected.
 

@@ -72,10 +72,16 @@ function loadInject() { try { return readFileSync(new URL('./supply/inject.html'
 // Zalando: hard-coded per-SKU monthly forecast (cols S+ of Ben's ZALANDO_FC.csv) baked into the app (sandbox + live via deploy).
 // Stock-on-hand is uploaded periodically into planner.zalando_stock (mig 182); forecast stays static here.
 const ZAL_DATA = (() => { try { return JSON.parse(readFileSync(new URL('./zalando_data.json', import.meta.url), 'utf8')); } catch { return { forecast: {}, stock: {}, months: [] }; } })();
-// USD→GBP rate for the report GBP columns — configurable in CONFIG ▸ General settings (app_settings.usd_gbp_rate);
-// injected into both clients' CF_GBP/AF_GBP literals at serve time. Fallback 1.34 if unset/invalid.
-async function gbpRate() { try { const r = await pool.query(`SELECT value FROM planner.app_settings WHERE key='usd_gbp_rate'`);
-  const v = parseFloat(r.rows[0] && r.rows[0].value); return (isFinite(v) && v > 0) ? v : 1.34; } catch { return 1.34; } }
+// USD→GBP rate for the report GBP columns (CF_GBP/AF_GBP defaults). Legacy app_settings.usd_gbp_rate takes
+// precedence if still set; otherwise the current financial-year GBP→USD blended rate from CONFIG ▸ Admin ▸
+// Exchange rates (app_settings.fx_rates). Fallback 1.34. (The Cash Flow report itself converts per-line by FY.)
+async function gbpRate() { try {
+  const r = await pool.query(`SELECT value FROM planner.app_settings WHERE key='usd_gbp_rate'`);
+  const v = parseFloat(r.rows[0] && r.rows[0].value); if (isFinite(v) && v > 0) return v;
+  const fr = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='fx_rates'`)).rows[0];
+  if (fr && fr.value) { const o = JSON.parse(fr.value) || {}; const now = new Date(); const fy = (now.getMonth() + 1 >= 3 ? now.getFullYear() : now.getFullYear() - 1);
+    const u = o[fy] && o[fy].USD; if (u > 0) return u; }
+  return 1.34; } catch { return 1.34; } }
 // Klaviyo back-in-stock (BIS) subscriber signal (SUG-0018) → {sku:{UK:n,US:n,…}, _at:'YYYY-MM-DD'} injected into the
 // DEMAND plan as an informational demand-pressure indicator. Fresh per load (uploads are infrequent, not cached).
 async function buildKlaviyoBis() {

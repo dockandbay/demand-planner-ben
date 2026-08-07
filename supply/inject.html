@@ -6154,9 +6154,7 @@
               +'<div class="mut tiny" style="margin:1px 0 4px">Emailed when a supplier submits invoice information on a PO. Comma-separate multiple addresses.</div>'
               +'<input class="fci gs-set" data-key="invoice_submit_notify" value="'+esc(s.invoice_submit_notify||'zera@dockandbay.com, ben@dockandbay.com')+'" placeholder="email@dockandbay.com, other@dockandbay.com" style="width:100%;box-sizing:border-box;text-align:left"></div></div>'
             +'<div class="sect-h" style="margin-top:18px">Finance</div>'
-            +'<div style="max-width:720px"><div style="margin:0 0 12px"><div style="font-weight:600;font-size:13px">USD → GBP exchange rate</div>'
-              +'<div class="mut tiny" style="margin:1px 0 4px">Used for the GBP columns in the Cash Flow &amp; Auto Forecast reports (GBP = USD ÷ this rate). Takes effect on the next page reload.</div>'
-              +'<input class="fci gs-set" data-key="usd_gbp_rate" value="'+esc(s.usd_gbp_rate||'')+'" placeholder="1.34" inputmode="decimal" style="width:120px;box-sizing:border-box;text-align:left"></div></div>'
+            +'<div class="mut tiny" style="max-width:720px;margin:0 0 12px">Exchange rates now live in <b>CONFIG ▸ Admin ▸ Exchange rates</b> (a blended GBP↔USD/EUR/AUD rate per financial year). They drive the local-currency toggle and the Cash Flow / Auto Forecast GBP columns.</div>'
             +'<div class="sect-h" style="margin-top:18px">Auto Forecast email</div>'
             +'<div style="max-width:720px"><div style="margin:0 0 8px"><div style="font-weight:600;font-size:13px">Recipients</div>'
               +'<div class="mut tiny" style="margin:1px 0 4px">Who receives the <b>Auto Forecast</b> rolling buy plan (payments plan + transactions CSV, all markets, full window). Comma-separate multiple addresses.</div>'
@@ -7092,13 +7090,17 @@
   var CF_GBP=1.34;
   function cfMonthShort(m){ if(!m||m==='—')return 'Undated'; if(m==='aged')return 'Aged'; var p=String(m).split('-'); return (MON[+p[1]-1]||'?')+'-'+String(p[0]).slice(2); }
   function cfDtc(b){ return /direct to client|jlew|next/i.test(String(b||'')); }
+  // USD → GBP at the line's financial-year blended rate (CONFIG ▸ Admin ▸ Exchange rates); falls back to CF_GBP.
+  function cfUsdToGbp(usd,dm){ var s=String(dm||''), mt=s.match(/^(\d{4})[-_](\d{2})/), r=0;
+    if(mt){ var y=+mt[1],mo=+mt[2], fy=(mo>=3?y:y-1); if(typeof fxRate==='function'){ r=fxRate('USD',fy)||0; } }
+    if(!(r>0))r=CF_GBP||1; return usd/r; }
   function cfTxRows(d){ return ((d&&d.lines)||[]).map(function(x){ var usd=Number(x.amount||0); return {
     Reference:x.ref||'', Type:x.type, Amount_USD:usd.toFixed(2), Date:x.date||'', 'Paid Status':(x.paid?'TRUE':'FALSE'),
     Market:x.country||'', 'Production Deposit':x.deposit_ref||'', Class:(x.estimate?'estimate':'committed'), Supplier:x.supplier||'',
-    'Direct to Client?':(cfDtc(x.branch)?'TRUE':'FALSE'), Month:cfMonthShort(x.month), 'Amount GBP':(usd/CF_GBP).toFixed(2), 'UK Deposit Ref':x.uk_deposit_ref||'' }; }); }
+    'Direct to Client?':(cfDtc(x.branch)?'TRUE':'FALSE'), Month:cfMonthShort(x.month), 'Amount GBP':cfUsdToGbp(usd,x.date||x.month).toFixed(2), 'UK Deposit Ref':x.uk_deposit_ref||'' }; }); }
   function cfArrRows(d){ return ((d&&d.arrivals)||[]).map(function(a){ var usd=Number(a.amount_usd||0); return {
     'PO Number':a.po||'', 'Amount (USD)':usd.toFixed(2), 'Delivery Date':a.delivery||'',
-    'Direct to Client?':(cfDtc(a.branch)?'Direct':''), 'Amount (GBP)':(usd/CF_GBP).toFixed(2) }; }); }
+    'Direct to Client?':(cfDtc(a.branch)?'Direct':''), 'Amount (GBP)':cfUsdToGbp(usd,a.delivery).toFixed(2) }; }); }
   // rows (array of objects) → CSV string (headers = keys).
   function rowsToCsvStr(rows,labels){ if(!rows||!rows.length)return ''; var cols=Object.keys(rows[0]);
     var e1=function(v){v=v==null?'':String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;};
