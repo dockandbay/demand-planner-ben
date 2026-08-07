@@ -1,3 +1,7 @@
+## v26.674.0 — Set targets: category filter is now a multi-select dropdown (like More Filters ▸ Category)
+- Replaced the inline category pills with a "All categories ▾" multi-select dropdown matching the DEMAND More Filters ▸ Category component (search box + tick-box list + Clear all). Subcategory text search kept alongside. Selection persists in the browser session.
+
+
 ## v26.673.0 — Target recommendations drawer: counters, per-row apply, dismiss, month table, <2% hidden
 - Pills now show counters: FY pill = open recs for the current market/channel/FY; channel pill = that channel across all FYs; country pill = rolls up all channels x all FYs.
 - Recs with a gap under 2% are hidden (nothing to apply). Each row has an Apply button + a Dismiss (keeps it visible/greyed, removes from the open count + Apply-all, persisted). "Apply all" now applies OPEN recs only.
