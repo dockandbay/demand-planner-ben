@@ -777,7 +777,7 @@
   function invalidateDerived(){ ['pipeline','upcoming','actions','purchase-orders','productions','order-plan','shipments','manufacturing'].forEach(function(k){delete cache[k];}); _lookupsAt=0; /* refetch lookups after any data change */ try{ if(typeof _navCounts!=='undefined'){_navCounts.manufacturing=undefined;_navCounts.paydue=undefined;} }catch(e){} clearTimeout(_opExcTimer); _opExcTimer=setTimeout(function(){ try{ refreshOpExc(); }catch(e){} },600);
     // The edit may have resolved (or raised) an action — drop the server's cached Actions build so it rebuilds fresh,
     // then re-warm the client cache. Debounced so a burst of edits collapses into one rebuild.
-    clearTimeout(_actInvTimer); _actInvTimer=setTimeout(function(){ try{ fetch('/api/supply/actions/invalidate',{method:'POST'}).then(function(){ if(typeof prewarmActions==='function')prewarmActions(true); }).catch(function(){}); }catch(e){} },800); }   // 'manufacturing' + 'paydue' nav badges recompute after a PO/order-plan/payment edit → tabs update on next nav; no hard refresh
+    clearTimeout(_actInvTimer); _actInvTimer=setTimeout(function(){ try{ fetch('/api/supply/cache/invalidate',{method:'POST'}).then(function(){ if(typeof prewarmActions==='function')prewarmActions(true); }).catch(function(){}); }catch(e){} },800); }   // 'manufacturing' + 'paydue' nav badges recompute after a PO/order-plan/payment edit → tabs update on next nav; no hard refresh
 
   function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function shortUser(s){return String(s==null?'':s).replace(/@dockandbay\.com\b/gi,'@');}  // ben@dockandbay.com → ben@ (display only)

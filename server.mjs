@@ -588,7 +588,7 @@ function requiredCap(method, p) {
   if (p.startsWith('/api/supply/zalando/')) return null;      // Zalando stock upload / send-file — open to all (no edit rights needed)
   if (p.startsWith('/api/klaviyo-bis/')) return null;         // Klaviyo BIS upload — allowed with read-only permission (Ben)
   if (method === 'POST' && p === '/api/supply/quality-doc') return null;   // Quality Control file upload (+ its metafields) — allowed with read-only permission (Ben); delete stays gated
-  if (method === 'POST' && p === '/api/supply/actions/invalidate') return null;   // clears a server cache only — harmless, no data write
+  if (method === 'POST' && (p === '/api/supply/cache/invalidate' || p === '/api/supply/actions/invalidate')) return null;   // clears server caches only — harmless, no data write
   if (p.startsWith('/api/supply/')) return 'supply';          // everything else under supply = SUPPLY feature
   return null;   // unknown non-supply write → fail-open (don't block routes we haven't classified)
 }
@@ -2380,6 +2380,38 @@ function refreshActionsCache() {   // single-flight — coalesces concurrent ref
 refreshActionsCache().catch(() => {});           // warm on boot
 setInterval(() => { refreshActionsCache().catch(() => {}); }, ACTIONS_TTL_MS).unref?.();   // refresh every 10 min in the background
 
+// ---- Shared SUPPLY read-cache framework (Phase 1 of the load-time work) --------------------------------------
+// Same shape as _dataCache/_actionsCache: boot-warm + single-flight refresh + stale-while-revalidate. A real
+// request serves the cached value and triggers a background refresh once past TTL; it only ever blocks on the very
+// first call before the boot warm finishes. Every cache registers itself so invalidateSupplyCaches() (fired by the
+// client's invalidateDerived after any edit) drops them all at once for immediate freshness; the TTL is the backstop
+// for changes that bypass the app (n8n / ERP syncs). Caches are keyed to user-INDEPENDENT builds only.
+const SUPPLY_CACHE_TTL_MS = 10 * 60 * 1000;
+const _supplyCaches = [];
+function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS) {
+  let entry = null, inflight = null;
+  function refresh() {
+    if (inflight) return inflight;                 // single-flight: coalesce concurrent refreshes
+    inflight = Promise.resolve().then(builder)
+      .then((v) => { entry = { v, at: Date.now() }; inflight = null; return v; })
+      .catch((e) => { inflight = null; throw e; });
+    return inflight;
+  }
+  async function get() {
+    if (entry) { if (Date.now() - entry.at >= ttlMs && !inflight) refresh().catch(() => {}); return entry.v; }
+    return refresh();                              // cold: block once until the first build lands
+  }
+  const c = { name, get, refresh, invalidate() { entry = null; refresh().catch(() => {}); } };
+  _supplyCaches.push(c);
+  refresh().catch(() => {});                       // warm on boot
+  setInterval(() => { refresh().catch(() => {}); }, ttlMs).unref?.();
+  return c;
+}
+function invalidateSupplyCaches() {
+  _actionsCache = null; refreshActionsCache().catch(() => {});   // the hand-rolled Actions cache predates makeCache
+  _supplyCaches.forEach((c) => { try { c.invalidate(); } catch (e) { /* best-effort */ } });
+}
+
 
 app.get('/api/supply/:section', async (req, res) => {
   const q = (sql) => pool.query(sql).then(r => r.rows);
@@ -2548,52 +2580,27 @@ app.get('/api/supply/:section', async (req, res) => {
         if (req.params.section === 'purchase-orders' && req.query.supplier) {   // admin portal-preview: only this supplier's POs (full rows, unthinned)
           return res.json((await pool.query(PO_ROWS_SQL + ' WHERE calc4.supplier_name = $1 ORDER BY po', [req.query.supplier])).rows);
         }
-        // PO grid only (not cashflow, not the supplier/portal-preview path): hide archived POs unless ?includeArchived=1
-        const _archN = (req.params.section === 'purchase-orders' && !req.query.includeArchived) ? await poArchiveCutoff() : null;
-        const _archW = _archN ? ` WHERE NOT (${archivedSql('calc4', '$1')})` : '';
-        const _pos = (await pool.query(PO_ROWS_SQL + _archW + ' ORDER BY po', _archN ? [_archN] : [])).rows;
-        if (req.params.section === 'cashflow') return res.json(await cashflowResponse(_pos, q));
-        // PO grid: COMPLETE POs (≈85% of all POs, rarely opened) keep their list/filter/sort + PAYMENT-action
-        // fields but shed the heavy expand-only fields (big JSON snapshots, packing, forwarder, landed cost,
-        // delivery notes, ERP diff, likely dates) — a much smaller payload to transfer/parse/render. Expanding a
-        // marked (_thin) row refetches the full PO_ROWS_SQL via /api/supply/po-row/:po. Toggle with PO_GRID_SPLIT=0.
-        if (PO_GRID_SPLIT) {
-          for (const r of _pos) {
-            if (!String(r.status || '').toLowerCase().includes('complete')) continue;
-            for (const k of PO_COMPLETE_STRIP) delete r[k];
-            r._thin = true;
-          }
-        }
+        // Both non-supplier paths derive from ONE cached full PO_ROWS_SQL build (poRowsCache) — see the 10-min
+        // stale-while-revalidate cache. Cash Flow uses the full set as before (cashflowResponse doesn't mutate it).
+        const _all = await poRowsCache.get();
+        if (req.params.section === 'cashflow') return res.json(await cashflowResponse(_all, q));
+        // PO grid only: hide archived POs unless ?includeArchived=1 — filtered in JS (mirrors archivedSql).
+        const _cut = req.query.includeArchived ? null : await poArchiveCutoff();
+        const _kept = _cut ? _all.filter((r) => !_poRowArchived(r, _cut)) : _all;
+        // COMPLETE POs (≈85% of all POs, rarely opened) keep their list/filter/sort + PAYMENT-action fields but shed
+        // the heavy expand-only fields (big JSON snapshots, packing, forwarder, landed cost, delivery notes, ERP
+        // diff, likely dates) — a much smaller payload. Expanding a marked (_thin) row refetches the full row via
+        // /api/supply/po-row/:po. We SHALLOW-CLONE the complete rows before stripping so the shared cache is never
+        // mutated (the stripped keys are top-level). Non-complete rows pass through untouched (read-only). PO_GRID_SPLIT=0 reverts.
+        if (!PO_GRID_SPLIT) return res.json(_kept);
+        const _pos = _kept.map((r) => {
+          if (!String(r.status || '').toLowerCase().includes('complete')) return r;
+          const c = { ...r }; for (const k of PO_COMPLETE_STRIP) delete c[k]; c._thin = true; return c;
+        });
         return res.json(_pos);
       }
-      case 'lookups': {  // dropdown sources for PO editing: deposit refs, batches, prod#s, shipments
-        const [dep, bat, pr, sh, su, br, xd, po] = await Promise.all([
-          q(`SELECT reference FROM planner.deposits ORDER BY reference`),
-          q(`SELECT batch FROM planner.batches ORDER BY batch DESC`),
-          q(`SELECT prod_no FROM planner.prod_numbers WHERE prod_no IS NOT NULL AND status='ACTIVE' ORDER BY prod_no DESC`),   // PROD picker/filter: ACTIVE only, most-recent first
-          q(`SELECT shipment_ref FROM planner.shipments ORDER BY shipment_ref`),
-          q(`SELECT name, upper(coalesce(nullif(default_currency,''),'USD')) ccy FROM planner.suppliers WHERE name IS NOT NULL ORDER BY name`),
-          q(`SELECT name FROM planner.branches ORDER BY name`),
-          // eligible crossdock SKUs (code starts with CROSSDOCK or PREORDER), union of products + sku_labels
-          q(`SELECT sku FROM (
-               SELECT sku FROM planner.products WHERE sku ILIKE 'CROSSDOCK%' OR sku ILIKE 'PREORDER%'
-               UNION SELECT sku FROM planner.sku_labels WHERE sku ILIKE 'CROSSDOCK%' OR sku ILIKE 'PREORDER%'
-             ) z ORDER BY sku`),
-          // active (not-complete) POs — for assigning a PO onto a shipment from the shipment view
-          q(`SELECT po FROM planner.purchase_orders WHERE coalesce(status,'') NOT ILIKE '%complete%' ORDER BY po`),
-        ]).catch(() => [[], [], [], [], [], [], [], []]);
-        return res.json({
-          deposits: dep.map(x => x.reference),
-          batches: bat.map(x => x.batch),
-          prods: pr.map(x => x.prod_no),
-          shipments: sh.map(x => x.shipment_ref),
-          suppliers: su.map(x => x.name),
-          supplier_ccy: Object.fromEntries(su.map(x => [x.name, x.ccy])),   // name → default currency (for showing payment amounts in the supplier's currency)
-          branches: br.map(x => x.name),
-          crossdock: xd.map(x => x.sku),
-          pos: po.map(x => x.po),
-        });
-      }
+      case 'lookups':    // dropdown sources for PO editing (deposit refs, batches, prod#s, shipments…) — cached,
+        return res.json(await lookupsCache.get());   // hit by fetchLookups on nearly every SUPPLY render
       case 'skus':  // SKU master for Order Plan "all in category" scope + release-window filtering + sticky attribute columns
         return res.json(await q(`SELECT s.sku, coalesce(s.category,'') category, coalesce(s.release_window,'') release_window,
           coalesce(s.barcode_sku_name,'') name,
@@ -3226,12 +3233,8 @@ app.get('/api/supply/:section', async (req, res) => {
         const air = await q(`SELECT id, min_kg, max_kg, rate_per_kg FROM planner.air_freight_rates ORDER BY min_kg`).catch(() => []);
         return res.json({ tax, freight, duty, branches, transfer_leads, air, sizes: ['20ft','40ft','LCL'] });
       }
-      case 'order-plan-exceptions': {   // # POs with unapproved partial/supplier/discontinue/country exceptions → nav + sub-tab badges
-        const exr = (await pool.query(OP_EXC_SQL)).rows;
-        const byPo = {}, pos = new Set();
-        exr.forEach(x => { pos.add(x.po); (byPo[x.po] = byPo[x.po] || {})[x.typ] = true; });
-        return res.json({ count: pos.size, byPo });
-      }
+      case 'order-plan-exceptions':   // # POs with unapproved exceptions → nav + sub-tab badges (cached; runs on every mount)
+        return res.json(await opExcCache.get());
       case 'recent-activity':   // top-bar "recent changes" drawer — last 10 major SUPPLY events, newest first
         return res.json(await q(`
           SELECT to_char(ts,'YYYY-MM-DD HH24:MI') at, typ, label, ref FROM (
@@ -6616,7 +6619,9 @@ app.post('/api/supply/actions/state', async (req, res) => {
 // Drop the cached Actions build so the next fetch reflects a just-made data edit (the client calls this from
 // invalidateDerived after any PO/shipment/payment change). Idle visits still ride the 10-min cache; editors get
 // freshness. Kicks a background rebuild so the cache re-warms without blocking the caller.
-app.post('/api/supply/actions/invalidate', (req, res) => { _actionsCache = null; refreshActionsCache().catch(() => {}); res.json({ ok: true }); });
+// Drop ALL user-independent SUPPLY read caches (Actions + po-rows + lookups + order-plan-exceptions) so the next
+// fetch reflects a just-made edit; each rebuilds in the background. The client fires this from invalidateDerived.
+app.post(['/api/supply/cache/invalidate', '/api/supply/actions/invalidate'], (req, res) => { invalidateSupplyCaches(); res.json({ ok: true }); });
 // Import-duty pivot (CONFIG ▸ Import duty): set duty % for a category × country. Upserts the duty_rates row.
 app.post('/api/supply/duty-upsert', async (req, res) => {
   const b = req.body || {}, cat = (b.category || '').trim(), country = (b.country || '').trim();
@@ -10659,6 +10664,51 @@ const OP_EXC_SQL = `
         AND NOT EXISTS (SELECT 1 FROM planner.v_product_availability va
           WHERE va.sku=l.sku AND upper(va.country)=upper(coalesce(nullif(p.country_code,''), b.country_code,'')) AND va.is_available)
   ) z`;
+
+// ---- Phase 1 SUPPLY caches (defined here so PO_ROWS_SQL / OP_EXC_SQL exist at boot-warm time) ------------------
+// JS mirror of archivedSql(): a PO row is archived when it's complete AND its numeric prod_no is below the cutoff.
+// Non-numeric/blank prod_no never archives (matches the SQL's 999999 sentinel).
+function _poRowArchived(r, cutoff) {
+  if (!(cutoff > 0)) return false;
+  if (!/complete/i.test(String(r.status || ''))) return false;
+  const pn = String(r.prod_no == null ? '' : r.prod_no).trim();
+  const n = /^[0-9]+$/.test(pn) ? parseInt(pn, 10) : 999999;
+  return n < cutoff;
+}
+// Full, unfiltered PO grid rows (the expensive PO_ROWS_SQL, run once). Feeds the admin PO grid (archive-filtered in
+// JS per request) and Cash Flow (uses the full set as today). The per-supplier / portal-preview path stays live.
+const poRowsCache = makeCache('po-rows', async () => (await pool.query(PO_ROWS_SQL + ' ORDER BY po')).rows);
+// Dropdown sources for PO editing — hit by fetchLookups on nearly every SUPPLY render.
+const lookupsCache = makeCache('lookups', async () => {
+  const q = (sql) => pool.query(sql).then((r) => r.rows);
+  const [dep, bat, pr, sh, su, br, xd, po] = await Promise.all([
+    q(`SELECT reference FROM planner.deposits ORDER BY reference`),
+    q(`SELECT batch FROM planner.batches ORDER BY batch DESC`),
+    q(`SELECT prod_no FROM planner.prod_numbers WHERE prod_no IS NOT NULL AND status='ACTIVE' ORDER BY prod_no DESC`),
+    q(`SELECT shipment_ref FROM planner.shipments ORDER BY shipment_ref`),
+    q(`SELECT name, upper(coalesce(nullif(default_currency,''),'USD')) ccy FROM planner.suppliers WHERE name IS NOT NULL ORDER BY name`),
+    q(`SELECT name FROM planner.branches ORDER BY name`),
+    q(`SELECT sku FROM (
+         SELECT sku FROM planner.products WHERE sku ILIKE 'CROSSDOCK%' OR sku ILIKE 'PREORDER%'
+         UNION SELECT sku FROM planner.sku_labels WHERE sku ILIKE 'CROSSDOCK%' OR sku ILIKE 'PREORDER%'
+       ) z ORDER BY sku`),
+    q(`SELECT po FROM planner.purchase_orders WHERE coalesce(status,'') NOT ILIKE '%complete%' ORDER BY po`),
+  ]).catch(() => [[], [], [], [], [], [], [], []]);
+  return {
+    deposits: dep.map((x) => x.reference), batches: bat.map((x) => x.batch), prods: pr.map((x) => x.prod_no),
+    shipments: sh.map((x) => x.shipment_ref), suppliers: su.map((x) => x.name),
+    supplier_ccy: Object.fromEntries(su.map((x) => [x.name, x.ccy])),
+    branches: br.map((x) => x.name), crossdock: xd.map((x) => x.sku), pos: po.map((x) => x.po),
+  };
+});
+// Order-plan exception counts — runs on every SUPPLY mount as a nav/sub-tab badge (refreshOpExc in showSupply).
+const opExcCache = makeCache('order-plan-exceptions', async () => {
+  const exr = (await pool.query(OP_EXC_SQL)).rows;
+  const byPo = {}, pos = new Set();
+  exr.forEach((x) => { pos.add(x.po); (byPo[x.po] = byPo[x.po] || {})[x.typ] = true; });
+  return { count: pos.size, byPo };
+});
+
 // Apply a consolidation: re-point the merge shipment's POs onto the keep shipment, then mark applied.
 app.post('/api/supply/bi/apply-consolidate', async (req, res) => {
   const b = req.body || {};

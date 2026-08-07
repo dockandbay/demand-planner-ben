@@ -1,3 +1,10 @@
+## v26.727.0 SUPPLY read caches: PO rows + lookups + order-plan-exceptions (Phase 1)
+- Added a shared server-cache framework (boot-warm + single-flight + stale-while-revalidate, 10-min TTL) and applied it to the heaviest user-independent SUPPLY reads. All caches drop together on any edit via the client's invalidateDerived hook (now POSTs /api/supply/cache/invalidate); the TTL is the backstop for out-of-app (n8n/ERP) changes.
+- **PO rows** (one PO_ROWS_SQL build) now feeds both the PO grid and Cash Flow. PO grid warm ~2–4s → ~0.5s; Cash Flow 4.2s → 2.2s (residual is cashflowResponse's own queries). Archive filtering moved to JS over the cached set (byte-identical to the old SQL filter; verified). Per-supplier / portal-preview path stays live (uncached).
+- **lookups** (dropdown sources, hit by fetchLookups on nearly every render) 0.9s → ~0.003s.
+- **order-plan-exceptions** (nav/sub-tab badge, runs on every SUPPLY mount) 0.58s / 4.5s-cold → ~0.002s.
+- Verified transparent: purchase-orders / cashflow / lookups / order-plan-exceptions outputs are byte-identical before vs after; archive-cutoff filter re-tested (1148 excluded = 1148 expected) and restored to off.
+
 ## v26.726.0 SUPPLY Actions: 10-min server cache + background warm (much faster)
 - SUPPLY ▸ Actions was recomputing a heavy build (big SQL union + expedite/submission/manufacturing/ERP layers) on every first visit. The full computed action set is now cached server-side for 10 min, warmed on boot, and refreshed in the background when stale (stale-while-revalidate) — a real request no longer blocks on a cold build. Warm response ~0.7s vs a multi-second cold build.
 - Priority preview (high-severity) is now derived from the same cached set, so it can't drift from the full list and is equally instant.
