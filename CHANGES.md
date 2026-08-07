@@ -1,3 +1,7 @@
+## v26.724.0 Summary targets recs: Review button + ly/fc baselines
+- "Review target recommendations" button added to Summary with targets (opens the recs drawer).
+- Each month rec now shows TWO baselines to target: "ly <last-year units> to <target>" (the growth basis) and "fc <current forecast> to <target>", each with its own growth % (was only current-forecast to target).
+
 ## v26.723.0 — Summary targets: inherited quarter/month cells match the entered format
 - When a Half target (e.g. +4%) cascades down to Quarter/Month, those inherited cells now show "↳+4%" (with the %) on the light-green background, matching an entered % growth (the ↳ + greyed text still marks them as inherited). Was showing a bare "4" with no colour or %.
 

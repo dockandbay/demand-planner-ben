@@ -8226,6 +8226,7 @@ function renderSummaryView(body){
     +'<span style="display:flex;gap:3px">'+[['month','Month'],['quarter','Quarter'],['half','Half']].map(function(x){return '<button class="sm-group'+(x[0]===SUMM_GROUP?' on':'')+'" data-g="'+x[0]+'">'+x[1]+'</button>';}).join('')+'</span>'
     +''   /* currency toggle moved to the single global control in the DEMAND nav */
     +'<button class="sm-tgtedit'+(SUMM_TGT_EDIT?' on':'')+'" id="sm-tgtedit" style="margin-left:8px">'+(SUMM_TGT_EDIT?'✓ Editing targets':'✎ Add targets')+'</button>'
+    +'<button id="sm-trec" title="Review target recommendations — suggested targets vs last year and current forecast" style="margin-left:6px;border:1px solid #b45309;background:#fff;color:#b45309;border-radius:12px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit">🎯 Review target recommendations</button>'
     +'<span style="margin-left:14px;font-size:12px;color:#475569;display:flex;align-items:center;gap:5px">Show from <select id="sm-from" style="padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px">'+moOpts(SUMM_FROM)+'</select> to <select id="sm-to" style="padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px">'+moOpts(SUMM_TO)+'</select>'+(rangeMode?' <button id="sm-clear" style="font-size:11px;padding:3px 9px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;cursor:pointer">✕ clear · FY view</button>':'')+'</span>'
     +'</div>'
     +'<div style="font-size:12px;color:#666;margin:0 0 10px">'+e(co)+' · '+e(ch)+' — each cell stacks <b>LY actual</b> / <b>forecast</b> / <b>growth%</b>. Click a subcategory to see its SKUs. '+(rangeMode?('Showing '+mlab(SUMM_FROM)+' → '+mlab(SUMM_TO)+' with a period total.'):'FYs Mar–Feb; past years minimised (click a year to expand). ')+'<span style="background:#ecfdf5;padding:0 4px">actual</span> <span style="background:#f1f5f9;padding:0 4px">pre-launch</span> <span style="background:#fee2e2;padding:0 4px">discontinued</span></div>'
@@ -8236,6 +8237,7 @@ function renderSummaryView(body){
   body.querySelectorAll('.sm-metric').forEach(function(b){ b.onclick=function(){ SUMM_METRIC=b.dataset.m; try{localStorage.setItem('summ_metric',SUMM_METRIC);}catch(e){} renderSummaryView(body); }; });
   body.querySelectorAll('.sm-group').forEach(function(b){ b.onclick=function(){ SUMM_GROUP=b.dataset.g; try{localStorage.setItem('summ_group',SUMM_GROUP);}catch(e){} renderSummaryView(body); }; });
   var _te=body.querySelector('#sm-tgtedit'); if(_te)_te.onclick=function(){ summSetTgtEdit(!SUMM_TGT_EDIT); renderSummaryView(body); };
+  var _tr=body.querySelector('#sm-trec'); if(_tr)_tr.onclick=function(){ try{openTargetRecs();}catch(e){} };
   var fSel=body.querySelector('#sm-from'), tSel=body.querySelector('#sm-to');
   function applyRange(){ SUMM_FROM=fSel.value; SUMM_TO=tSel.value; renderSummaryView(body); }   // full silent re-render so the month range + header/clear update immediately
   fSel.onchange=applyRange; tSel.onchange=applyRange;
@@ -9071,7 +9073,7 @@ function computeTargetRecs(fy,coA,chA){ var co=coA||CUR,ch=chA||CF; var _ck=fy+'
       // Current (part-way) month: use the FULL-MONTH forecast, not the actuals-to-date, as the baseline (Ben) —
       // otherwise a partly-elapsed month reads as a huge drop (e.g. "Aug 20,453→454u -98%").
       var curU=((typeof CUR_MONTH!=='undefined'&&m===CUR_MONTH&&typeof curMonthForecast==='function')?(curMonthForecast(s,co,ch)||0):(cr.fu[m]||0)), curRev=curU*asp;
-      rows.push({m:m, curU:curU, curRev:curRev, tgtRev:tgtRev, reqU:reqU, g:g, pctCur:(curU>0?(reqU/curU-1):null), pctLY:(lyU>0?(reqU/lyU-1):null)});
+      rows.push({m:m, curU:curU, lyU:lyU, curRev:curRev, tgtRev:tgtRev, reqU:reqU, g:g, pctCur:(curU>0?(reqU/curU-1):null), pctLY:(lyU>0?(reqU/lyU-1):null)});
       fyCur+=curRev; fyTgt+=tgtRev; });
     if(rows.length)out.push({s:s, rows:rows, fyCur:fyCur, fyTgt:fyTgt}); });
   return out; }
@@ -9106,7 +9108,13 @@ function renderTargetRecs(body){ if(TREC_FY==null)TREC_FY=CUR_FY_START;
       var gap=rc.fyTgt-rc.fyCur, gp=trecGapPct(rc);
       var gapTxt=(gap>=0?'+':'')+money(gap)+(gp==null?' (new)':(' ('+(gp>=0?'+':'')+Math.round(gp)+'%)'));
       var mHdr=rc.rows.map(function(r){var p=pa(r.m);return '<th style="padding:1px 6px;text-align:center;font-weight:600;color:#64748b;font-size:9px;text-transform:uppercase">'+MON[p.mo]+'</th>';}).join('');
-      var mRow=rc.rows.map(function(r){ var pc=(r.pctCur==null?'':(r.pctCur>=0?'+':'')+Math.round(r.pctCur*100)+'%'); var col=(r.pctCur==null?'#94a3b8':(r.pctCur>0?'#166534':r.pctCur<0?'#b91c1c':'#94a3b8')); return '<td style="padding:1px 6px;text-align:center;white-space:nowrap;border-left:1px solid #f1f5f9"><div>'+fn(Math.round(r.curU))+'&rarr;'+fn(r.reqU)+'</div><div style="color:'+col+';font-size:9px">'+pc+'</div></td>';}).join('');
+      var mRow=rc.rows.map(function(r){
+        var pcL=(r.pctLY==null?'':(r.pctLY>=0?'+':'')+Math.round(r.pctLY*100)+'%'), colL=(r.pctLY==null?'#94a3b8':(r.pctLY>0?'#166534':r.pctLY<0?'#b91c1c':'#94a3b8'));
+        var pc=(r.pctCur==null?'':(r.pctCur>=0?'+':'')+Math.round(r.pctCur*100)+'%'), col=(r.pctCur==null?'#94a3b8':(r.pctCur>0?'#166534':r.pctCur<0?'#b91c1c':'#94a3b8'));
+        // Two baselines → target: LY actuals (the growth basis) and the current forecast.
+        return '<td style="padding:2px 6px;text-align:center;white-space:nowrap;border-left:1px solid #f1f5f9;font-size:9px;line-height:1.35">'
+          +'<div><span style="color:#94a3b8">ly</span> '+fn(Math.round(r.lyU))+'&rarr;'+fn(r.reqU)+' <span style="color:'+colL+'">'+pcL+'</span></div>'
+          +'<div><span style="color:#94a3b8">fc</span> '+fn(Math.round(r.curU))+'&rarr;'+fn(r.reqU)+' <span style="color:'+col+'">'+pc+'</span></div></td>';}).join('');
       var monTbl='<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:10px;margin:2px 0 0"><thead><tr>'+mHdr+'</tr></thead><tbody><tr>'+mRow+'</tr></tbody></table></div>';
       var actions=dism?'<button class="trec-restore" data-s="'+esc(rc.s)+'" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;font-weight:600">restore</button>'
         :'<button class="trec-apply1" data-s="'+esc(rc.s)+'" style="border:1px solid #b45309;background:#b45309;color:#fff;border-radius:5px;padding:2px 9px;font-size:10px;cursor:pointer;font-weight:700">Apply</button> <button class="trec-dismiss" data-s="'+esc(rc.s)+'" title="Keep as a recommendation but remove it from the open count / Apply all" style="border:1px solid #cbd5e1;background:#fff;color:#94a3b8;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer">dismiss</button>';
