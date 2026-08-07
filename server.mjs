@@ -2696,45 +2696,13 @@ app.get('/api/supply/:section', async (req, res) => {
           container_numbers, mbl_number, total_freight_cost, total_invoiced_amount, customs_duty_cost
           FROM planner.flexport_shipments ORDER BY arrival_date DESC NULLS LAST`));
       case 'order-plan': {  // enriched lines for the side-by-side grid (filter/group/pivot client-side)
-        const _opSup = req.query.supplier ? ` WHERE coalesce(p.supplier_name,'')=$1` : '';   // admin portal-preview: scope to one supplier's POs
-        // admin ORDER PLAN grid (no supplier): hide archived POs unless includeArchived. Mutually exclusive with the
-        // supplier/preview path (which is never archived), so only one WHERE is ever produced.
-        const _opArchN = (!req.query.supplier && !req.query.includeArchived) ? await poArchiveCutoff() : null;
-        const _opArch = _opArchN ? ` WHERE NOT (${archivedSql('p', '$1')})` : '';
-        return res.json((await pool.query(`SELECT l.po, l.sku, l.qty, el.qty erp_qty,
-          (coalesce(l.qty,0) IS DISTINCT FROM coalesce(el.qty,0)) pending, to_char(pol.proposed_at,'YYYY-MM-DD') proposed_at,   -- 0 plan == absent from ERP → not pending
-          l.cost_price, l.carton_qty, l.partial_carton_approved, l.full_carton_check,
-          pol.supplier_risk_approved, pol.discontinue_approved, pol.country_risk_approved,
-          coalesce(p.prod_no,'') prod_no, coalesce(p.status,'') status, coalesce(p.starred,false) starred,
-          coalesce(p.preship_not_required,false) preship_not_required,
-          (SELECT string_agg(DISTINCT category,',') FROM planner.portal_attachments a WHERE a.po=p.po) doc_cats,
-          coalesce(p.batch_id,'') batch_id,
-          coalesce(p.supplier_name,'') supplier_name, coalesce(p.shipment_ref,'') shipment_ref,
-          coalesce(nullif(p.country_code,''), b.country_code, '') country,
-          -- EXCEPTION: producing a SKU for a market where it isn't RELEASED. Availability (v_product_availability,
-          -- is_available) is authoritative — launch dates are always populated so they're ignored. Blank market → no flag.
-          (coalesce(p.branch,'') NOT ILIKE '%direct to client%'
-             AND upper(coalesce(nullif(p.country_code,''), b.country_code,'')) IN ('UK','US','EU','AU','CA') AND NOT EXISTS (
-             SELECT 1 FROM planner.v_product_availability va
-             WHERE va.sku=l.sku AND upper(va.country)=upper(coalesce(nullif(p.country_code,''), b.country_code,'')) AND va.is_available)) not_avail_market,
-          coalesce(p.client,'') client, coalesce(p.sales_order_ref,'') sales_order_ref, coalesce(p.branch,'') branch,
-          coalesce(sl.category,'') category, coalesce(sl.release_window,'') release_window, sl.pallet_qty,
-          to_char(p.start_production,'YYYY-MM-DD') prod_start,
-          to_char(p.end_production_overide,'YYYY-MM-DD') prod_end,
-          to_char(coalesce(fx.departure_date, p.supplier_ship_date),'YYYY-MM-DD') ship_date,
-          coalesce(to_char(p.delivery_date_overide,'YYYY-MM-DD'), to_char(p.landing_date_overide,'YYYY-MM-DD'),
-                   to_char(fx.landing_date,'YYYY-MM-DD')) delivery
-          FROM planner.v_purchase_order_lines l
-          JOIN planner.purchase_order_lines pol ON pol.po_sku=l.po_sku
-          LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
-          JOIN planner.purchase_orders p ON p.po=l.po
-          LEFT JOIN planner.branches b ON b.name=p.branch
-          LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku
-          LEFT JOIN LATERAL (SELECT f.departure_date, f.landing_date FROM planner.flexport_shipments f
-            WHERE f.flex_id=p.flexport_reference OR f.shipment_name=p.po OR f.shipment_name=p.shipment_ref
-            ORDER BY (f.flex_id=p.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true
-          ${_opSup}${_opArch}
-          ORDER BY l.po, l.sku`, req.query.supplier ? [req.query.supplier] : (_opArchN ? [_opArchN] : []))).rows);
+        // Per-supplier portal-preview and the "show archived" toggle run LIVE (rare paths). The DEFAULT admin grid
+        // (no supplier, archived hidden) is the common, expensive load → served from orderPlanCache (boot-warm + SWR).
+        if (req.query.supplier)
+          return res.json((await pool.query(ORDER_PLAN_SELECT + ` WHERE coalesce(p.supplier_name,'')=$1 ORDER BY l.po, l.sku`, [req.query.supplier])).rows);
+        if (req.query.includeArchived)
+          return res.json((await pool.query(ORDER_PLAN_SELECT + ' ORDER BY l.po, l.sku')).rows);
+        return res.json(await orderPlanCache.get());
       }
       case 'shipments': {
         // Editable shipment records (planner.shipments) joined to the POs aboard them. A shipment's
@@ -10470,6 +10438,40 @@ async function logPoFieldChanges(po, keys, oldRow, body, by) {
 // Shared PO grid-row query (WITH mastered ... FROM mastered calc4). Reused by the full grid endpoint
 // (+ ORDER BY po) and by /api/supply/po-row/:po (+ WHERE calc4.po=$1) so a single-cell edit refreshes ONE
 // row instead of re-pulling all ~1400 POs (multi-MB). Same SQL = zero drift.
+// SELECT + joins for the ORDER PLAN grid (callers append the WHERE + ORDER BY). Shared by the live supplier/
+// archived paths and orderPlanCache (the cached default admin view).
+const ORDER_PLAN_SELECT = `SELECT l.po, l.sku, l.qty, el.qty erp_qty,
+          (coalesce(l.qty,0) IS DISTINCT FROM coalesce(el.qty,0)) pending, to_char(pol.proposed_at,'YYYY-MM-DD') proposed_at,   -- 0 plan == absent from ERP → not pending
+          l.cost_price, l.carton_qty, l.partial_carton_approved, l.full_carton_check,
+          pol.supplier_risk_approved, pol.discontinue_approved, pol.country_risk_approved,
+          coalesce(p.prod_no,'') prod_no, coalesce(p.status,'') status, coalesce(p.starred,false) starred,
+          coalesce(p.preship_not_required,false) preship_not_required,
+          (SELECT string_agg(DISTINCT category,',') FROM planner.portal_attachments a WHERE a.po=p.po) doc_cats,
+          coalesce(p.batch_id,'') batch_id,
+          coalesce(p.supplier_name,'') supplier_name, coalesce(p.shipment_ref,'') shipment_ref,
+          coalesce(nullif(p.country_code,''), b.country_code, '') country,
+          -- EXCEPTION: producing a SKU for a market where it isn't RELEASED. Availability (v_product_availability,
+          -- is_available) is authoritative — launch dates are always populated so they're ignored. Blank market → no flag.
+          (coalesce(p.branch,'') NOT ILIKE '%direct to client%'
+             AND upper(coalesce(nullif(p.country_code,''), b.country_code,'')) IN ('UK','US','EU','AU','CA') AND NOT EXISTS (
+             SELECT 1 FROM planner.v_product_availability va
+             WHERE va.sku=l.sku AND upper(va.country)=upper(coalesce(nullif(p.country_code,''), b.country_code,'')) AND va.is_available)) not_avail_market,
+          coalesce(p.client,'') client, coalesce(p.sales_order_ref,'') sales_order_ref, coalesce(p.branch,'') branch,
+          coalesce(sl.category,'') category, coalesce(sl.release_window,'') release_window, sl.pallet_qty,
+          to_char(p.start_production,'YYYY-MM-DD') prod_start,
+          to_char(p.end_production_overide,'YYYY-MM-DD') prod_end,
+          to_char(coalesce(fx.departure_date, p.supplier_ship_date),'YYYY-MM-DD') ship_date,
+          coalesce(to_char(p.delivery_date_overide,'YYYY-MM-DD'), to_char(p.landing_date_overide,'YYYY-MM-DD'),
+                   to_char(fx.landing_date,'YYYY-MM-DD')) delivery
+          FROM planner.v_purchase_order_lines l
+          JOIN planner.purchase_order_lines pol ON pol.po_sku=l.po_sku
+          LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
+          JOIN planner.purchase_orders p ON p.po=l.po
+          LEFT JOIN planner.branches b ON b.name=p.branch
+          LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku
+          LEFT JOIN LATERAL (SELECT f.departure_date, f.landing_date FROM planner.flexport_shipments f
+            WHERE f.flex_id=p.flexport_reference OR f.shipment_name=p.po OR f.shipment_name=p.shipment_ref
+            ORDER BY (f.flex_id=p.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true`;
 const PO_ROWS_SQL = `
           -- Canonical per-PO payment/date core comes from the SHARED view planner.v_po_finance (migration 123),
           -- so admin + supplier portal compute identical figures (no drift). Admin layers shipment MASTERING on
@@ -10722,6 +10724,12 @@ function _poRowArchived(r, cutoff) {
 // Full, unfiltered PO grid rows (the expensive PO_ROWS_SQL, run once). Feeds the admin PO grid (archive-filtered in
 // JS per request) and Cash Flow (uses the full set as today). The per-supplier / portal-preview path stays live.
 const poRowsCache = makeCache('po-rows', async () => (await pool.query(PO_ROWS_SQL + ' ORDER BY po')).rows);
+// Default ORDER PLAN grid (no supplier, archived hidden per the cutoff) — the common heavy load. supplier/includeArchived variants run live in the route.
+const orderPlanCache = makeCache('order-plan', async () => {
+  const cut = await poArchiveCutoff();
+  const w = cut ? ` WHERE NOT (${archivedSql('p', '$1')})` : '';
+  return (await pool.query(ORDER_PLAN_SELECT + w + ' ORDER BY l.po, l.sku', cut ? [cut] : [])).rows;
+});
 // Dropdown sources for PO editing — hit by fetchLookups on nearly every SUPPLY render.
 const lookupsCache = makeCache('lookups', async () => {
   const q = (sql) => pool.query(sql).then((r) => r.rows);
