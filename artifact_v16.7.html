@@ -9052,6 +9052,12 @@ function trecLoad(cb){ if(TREC_KEY==='__all__'){cb();return;}   // load ALL comb
 // TREC dismissals — persisted per country|channel|fy|subcategory. A dismissed rec stays visible but is
 // removed from the "open" count + Apply-all (Ben). <2% gap recs have nothing to apply → hidden entirely.
 var TREC_DISM=(function(){try{return JSON.parse(localStorage.getItem('trec_dismissed'))||{};}catch(e){return {};}})();
+// Applied recs (session): keep them visible as "✓ applied" with an Undo, instead of vanishing once the gap
+// resolves. Stores the prior IV values per key so Undo restores exactly what was there. Keyed co|ch|fy|subcat.
+var TREC_APPLIED={};
+function trecUndo(co,ch,fy,s){ var dk=trecDKey(co,ch,fy,s), ap=TREC_APPLIED[dk]; if(!ap)return;
+  Object.keys(ap.prior||{}).forEach(function(ik){ var v=ap.prior[ik]; if(v===''||v==null)delete IV[ik]; else IV[ik]=v; });
+  delete TREC_APPLIED[dk]; if(typeof markDirty==='function')markDirty(); render(); }
 function trecDKey(co,ch,fy,s){ return co+'|'+ch+'|'+fy+'|'+s; }
 function trecSaveDism(){ try{localStorage.setItem('trec_dismissed',JSON.stringify(TREC_DISM));}catch(e){} }
 function trecGapPct(rc){ return rc.fyCur>0?((rc.fyTgt/rc.fyCur-1)*100):(rc.fyTgt>0?null:0); }   // null = new category (no LY base)
@@ -9077,10 +9083,12 @@ function computeTargetRecs(fy,coA,chA){ var co=coA||CUR,ch=chA||CF; var _ck=fy+'
       fyCur+=curRev; fyTgt+=tgtRev; });
     if(rows.length)out.push({s:s, rows:rows, fyCur:fyCur, fyTgt:fyTgt}); });
   return out; }
-function applyTargetRecs(recs){ var co=CUR,ch=CF; var _chg=[];
-  recs.forEach(function(rc){ var _fu=(calc(rc.s,co,ch).fu)||{}; rc.rows.forEach(function(r){ var ik=rc.s+'|'+co+'|'+ch+'|'+r.m; var u=Math.max(0,Math.round(r.reqU));
+function applyTargetRecs(recs){ var co=CUR,ch=CF; var _chg=[]; var _fyForDk=(typeof TREC_FY!=='undefined'&&TREC_FY!=null)?TREC_FY:CUR_FY_START;
+  recs.forEach(function(rc){ var _fu=(calc(rc.s,co,ch).fu)||{}; var _prior={}; rc.rows.forEach(function(r){ var ik=rc.s+'|'+co+'|'+ch+'|'+r.m; _prior[ik]=(IV[ik]!==undefined?IV[ik]:''); var u=Math.max(0,Math.round(r.reqU));
     var _old=Math.round(_fu[r.m]||0); if(_old!==u)_chg.push({level:'subcat',item:rc.s,country:co,channel:ch,month:r.m,action:'applied target recommendation',from:_old,to:u});
-    IV[ik]=(u>=4?String(u):("'"+u)); }); });
+    IV[ik]=(u>=4?String(u):("'"+u)); });
+    TREC_APPLIED[trecDKey(co,ch,_fyForDk,rc.s)]={prior:_prior};   // keep visible as applied + enable undo
+  });
   try{ logChangesBulk(_chg); }catch(e){}
   if(typeof markDirty==='function')markDirty();
   render(); }
@@ -9092,9 +9100,9 @@ function renderTargetRecs(body){ if(TREC_FY==null)TREC_FY=CUR_FY_START;
   body.innerHTML='<div style="padding:10px 2px;color:#888;font-size:12px">Loading targets…</div>';
   trecLoad(function(){
     _trecRecCache={};   // fresh compute each render (pill counters compute across all co×ch×fy)
-    var recs=computeTargetRecs(TREC_FY).filter(trecMeaningful);   // hide <2% gap — nothing meaningful to apply
+    var recs=computeTargetRecs(TREC_FY).filter(function(rc){ return trecMeaningful(rc) || TREC_APPLIED[trecDKey(co,ch,TREC_FY,rc.s)]; });   // hide <2% gap, but KEEP applied ones (shown as ✓ applied)
     var recByS={}; recs.forEach(function(rc){ recByS[rc.s]=rc; });
-    var openRecs=recs.filter(function(rc){ return trecOpen(rc,co,ch,TREC_FY); });
+    var openRecs=recs.filter(function(rc){ return trecOpen(rc,co,ch,TREC_FY) && !TREC_APPLIED[trecDKey(co,ch,TREC_FY,rc.s)]; });
     function cntB(n,on){ return n>0?(' <span style="background:'+(on?'rgba(255,255,255,.3)':'#b45309')+';color:#fff;border-radius:9px;font-size:9px;font-weight:800;padding:0 5px;margin-left:3px;vertical-align:1px">'+n+'</span>'):''; }
     var pills=fys.map(function(y){var on=(y===TREC_FY);return '<button class="trec-fy" data-fy="'+y+'" style="border:1px solid '+(on?'#b45309':'#cbd5e1')+';background:'+(on?'#b45309':'#fff')+';color:'+(on?'#fff':'#475569')+';border-radius:14px;padding:2px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;margin-right:4px">'+fyLbl(y)+cntB(trecCount(co,ch,y),on)+'</button>';}).join('');
     var _CO=(typeof CTRS!=='undefined'?CTRS:['UK','US','EU','AU','CA']), _CH=['DTC','FBA','B2B'];
@@ -9104,7 +9112,7 @@ function renderTargetRecs(body){ if(TREC_FY==null)TREC_FY=CUR_FY_START;
       body.querySelectorAll('.trec-co').forEach(function(b){ b.onclick=function(){ CUR=b.dataset.v; renderTargetRecs(body); }; });
       body.querySelectorAll('.trec-ch').forEach(function(b){ b.onclick=function(){ CF=b.dataset.v; renderTargetRecs(body); }; }); }
     if(!recs.length){ body.innerHTML='<div style="padding:4px 2px 4px">'+coPills+'</div><div style="padding:0 2px 8px">'+pills+'</div><div style="padding:12px 2px;color:#888;font-size:12px">No target gaps ≥2% for '+esc(co)+' · '+esc(ch)+' in '+fyLbl(TREC_FY)+'. Set/adjust targets in <b>Summary ▸ Add targets</b>.</div>'; wireFy(); return; }
-    var rowsH=recs.map(function(rc){ var dk=trecDKey(co,ch,TREC_FY,rc.s), dism=!!TREC_DISM[dk];
+    var rowsH=recs.map(function(rc){ var dk=trecDKey(co,ch,TREC_FY,rc.s), dism=!!TREC_DISM[dk], applied=!!TREC_APPLIED[dk];
       var gap=rc.fyTgt-rc.fyCur, gp=trecGapPct(rc);
       var gapTxt=(gap>=0?'+':'')+money(gap)+(gp==null?' (new)':(' ('+(gp>=0?'+':'')+Math.round(gp)+'%)'));
       var mHdr=rc.rows.map(function(r){var p=pa(r.m);return '<th style="padding:1px 6px;text-align:center;font-weight:600;color:#64748b;font-size:9px;text-transform:uppercase">'+MON[p.mo]+'</th>';}).join('');
@@ -9116,9 +9124,10 @@ function renderTargetRecs(body){ if(TREC_FY==null)TREC_FY=CUR_FY_START;
           +'<div><span style="color:#94a3b8">ly</span> '+fn(Math.round(r.lyU))+'&rarr;'+fn(r.reqU)+' <span style="color:'+colL+'">'+pcL+'</span></div>'
           +'<div><span style="color:#94a3b8">fc</span> '+fn(Math.round(r.curU))+'&rarr;'+fn(r.reqU)+' <span style="color:'+col+'">'+pc+'</span></div></td>';}).join('');
       var monTbl='<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:10px;margin:2px 0 0"><thead><tr>'+mHdr+'</tr></thead><tbody><tr>'+mRow+'</tr></tbody></table></div>';
-      var actions=dism?'<button class="trec-restore" data-s="'+esc(rc.s)+'" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;font-weight:600">restore</button>'
+      var actions=applied?'<span style="color:#166534;font-weight:700;font-size:10px;margin-right:5px">✓ applied</span><button class="trec-undo" data-s="'+esc(rc.s)+'" title="revert this applied recommendation to what it was before" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;font-weight:600">↩ undo</button>'
+        :dism?'<button class="trec-restore" data-s="'+esc(rc.s)+'" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer;font-weight:600">restore</button>'
         :'<button class="trec-apply1" data-s="'+esc(rc.s)+'" style="border:1px solid #b45309;background:#b45309;color:#fff;border-radius:5px;padding:2px 9px;font-size:10px;cursor:pointer;font-weight:700">Apply</button> <button class="trec-dismiss" data-s="'+esc(rc.s)+'" title="Keep as a recommendation but remove it from the open count / Apply all" style="border:1px solid #cbd5e1;background:#fff;color:#94a3b8;border-radius:5px;padding:2px 8px;font-size:10px;cursor:pointer">dismiss</button>';
-      return '<tr style="border-top:1px solid #eef2f7'+(dism?';opacity:.45':'')+'"><td style="padding:5px 10px;font-weight:600;text-align:left">'+esc(rc.s)+(dism?' <span style="font-size:9px;color:#94a3b8;font-weight:400">(dismissed)</span>':'')+'</td><td style="padding:5px 10px;text-align:right;font-variant-numeric:tabular-nums">'+money(rc.fyCur)+'</td><td style="padding:5px 10px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums">'+money(rc.fyTgt)+'</td><td style="padding:5px 10px;text-align:right;color:'+(gap>=0?'#166534':'#b91c1c')+';font-variant-numeric:tabular-nums">'+gapTxt+'</td><td style="padding:5px 10px;text-align:right;white-space:nowrap">'+actions+'</td></tr>'
+      return '<tr style="border-top:1px solid #eef2f7'+(dism?';opacity:.45':'')+(applied?';background:#f0fdf4':'')+'"><td style="padding:5px 10px;font-weight:600;text-align:left">'+esc(rc.s)+(dism?' <span style="font-size:9px;color:#94a3b8;font-weight:400">(dismissed)</span>':'')+(applied?' <span style="font-size:9px;color:#166534;font-weight:400">(applied)</span>':'')+'</td><td style="padding:5px 10px;text-align:right;font-variant-numeric:tabular-nums">'+money(rc.fyCur)+'</td><td style="padding:5px 10px;text-align:right;font-weight:600;font-variant-numeric:tabular-nums">'+money(rc.fyTgt)+'</td><td style="padding:5px 10px;text-align:right;color:'+(gap>=0?'#166534':'#b91c1c')+';font-variant-numeric:tabular-nums">'+gapTxt+'</td><td style="padding:5px 10px;text-align:right;white-space:nowrap">'+actions+'</td></tr>'
         +'<tr'+(dism?' style="opacity:.45"':'')+'><td colspan="5" style="padding:0 10px 8px 22px;text-align:left">'+monTbl+'</td></tr>'; }).join('');
     var tCur=openRecs.reduce(function(a,b){return a+b.fyCur;},0), tTgt=openRecs.reduce(function(a,b){return a+b.fyTgt;},0), tGap=tTgt-tCur;
     body.innerHTML='<div style="padding:4px 2px 4px">'+coPills+'</div><div style="padding:0 2px 8px">'+pills+'</div>'
@@ -9131,6 +9140,7 @@ function renderTargetRecs(body){ if(TREC_FY==null)TREC_FY=CUR_FY_START;
     body.querySelectorAll('.trec-apply1').forEach(function(b){ b.onclick=function(){ var rc=recByS[b.dataset.s]; if(!rc)return; applyTargetRecs([rc]); renderTargetRecs(body); }; });
     body.querySelectorAll('.trec-dismiss').forEach(function(b){ b.onclick=function(){ TREC_DISM[trecDKey(co,ch,TREC_FY,b.dataset.s)]=1; trecSaveDism(); renderTargetRecs(body); }; });
     body.querySelectorAll('.trec-restore').forEach(function(b){ b.onclick=function(){ delete TREC_DISM[trecDKey(co,ch,TREC_FY,b.dataset.s)]; trecSaveDism(); renderTargetRecs(body); }; });
+    body.querySelectorAll('.trec-undo').forEach(function(b){ b.onclick=function(){ trecUndo(co,ch,TREC_FY,b.dataset.s); renderTargetRecs(body); }; });
     var ab=document.getElementById('trec-apply'); if(ab&&openRecs.length)ab.onclick=function(){ if(!confirm('Apply '+openRecs.length+' open recommendation'+(openRecs.length>1?'s':'')+' in '+fyLbl(TREC_FY)+' · '+esc(co)+' · '+esc(ch)+'? Sets subcategory overrides — Save Forecasts to persist.'))return; applyTargetRecs(openRecs); renderTargetRecs(body); var m=document.getElementById('trec-msg'); if(m){ m.style.color='#166534'; m.textContent='Applied — now Save Forecasts to persist.'; } };
   }); }
 function trecEnsureDrawer(){ var d=document.getElementById('trec-drawer');

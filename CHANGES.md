@@ -1,3 +1,7 @@
+## v26.725.0 Target recs: applied rows stay visible with ✓ applied + undo
+- Applying a target recommendation no longer hides the row. It now shows "✓ applied" (green row + "(applied)" tag) with an ↩ undo button.
+- Undo reverts that subcategory's cells back to exactly what they were before applying (IV snapshot captured at apply time), removing them from the applied count. Applied recs are excluded from the open count / "Apply all open".
+
 ## v26.724.0 Summary targets recs: Review button + ly/fc baselines
 - "Review target recommendations" button added to Summary with targets (opens the recs drawer).
 - Each month rec now shows TWO baselines to target: "ly <last-year units> to <target>" (the growth basis) and "fc <current forecast> to <target>", each with its own growth % (was only current-forecast to target).
