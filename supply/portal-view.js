@@ -2243,6 +2243,7 @@
               +_fSel('pp-po-ctry',PORTAL_PO_CTRY,'All countries',_ctrys)
               +_fSel('pp-po-br',PORTAL_PO_BR,'All branches',_brs)
               +'<span class="pill'+(PORTAL_PO_EXC?' active':'')+'" data-poexc="1" style="'+(PORTAL_PO_EXC?'background:#dc2626;color:#fff;border-color:#dc2626':'color:#dc2626')+'" title="show every PO with an open action, across all statuses">⚠ Show all exceptions</span>'
+              +'<span class="pill pp-arch'+(window.__ppInclArch?' active':'')+'" data-pparch="1" title="Archived = completed POs before the production cutoff, hidden by default to keep the portal fast. Toggle to include them." style="'+(window.__ppInclArch?'background:#334155;color:#fff;border-color:#334155':'')+'">🗄 '+(window.__ppInclArch?'Hide archived':'Show archived')+'</span>'
               +(ordered.length?ordered.map(function(s){var dim=(pq||PORTAL_PO_EXC);return '<span class="pill'+(PORTAL_PO_ST[s]?' active':'')+(dim?' ':'')+'" data-st="'+esc(s)+'"'+(dim?' style="opacity:.4"':'')+'>'+esc(s)+'</span>';}).join(''):'<span class="mut tiny">no orders</span>')
               +(PORTAL_PO_EXC?'<span class="mut tiny">showing exceptions — all statuses</span>':'')+'</div>';
             // a PO/client search OVERRIDES the status pills; the dropdown filters (production / country / branch) always AND on top
@@ -2261,6 +2262,7 @@
             var ppsa=body.querySelector('.pp-showall'); if(ppsa)ppsa.onclick=function(){ _ppShowAllPO=true; renderPP(); };
             body.querySelectorAll('.pill[data-st]').forEach(function(p){ p.onclick=function(){ var s=p.dataset.st; PORTAL_PO_ST[s]=!PORTAL_PO_ST[s]; _ppShowAllPO=false; renderPP(); }; });
             var _exc=body.querySelector('.pill[data-poexc]'); if(_exc)_exc.onclick=function(){ PORTAL_PO_EXC=!PORTAL_PO_EXC; _ppShowAllPO=false; renderPP(); };
+            var _arch=body.querySelector('.pill[data-pparch]'); if(_arch)_arch.onclick=function(){ window.__ppInclArch=!window.__ppInclArch; _ppShowAllPO=false; loadPreview(); };   // re-fetch bootstrap incl/excl archived
             var _pr=body.querySelector('.pp-po-prod'); if(_pr)_pr.onchange=function(){ PORTAL_PO_PROD=this.value; _ppShowAllPO=false; renderPP(); };
             var _ct=body.querySelector('.pp-po-ctry'); if(_ct)_ct.onchange=function(){ PORTAL_PO_CTRY=this.value; _ppShowAllPO=false; renderPP(); };
             var _br=body.querySelector('.pp-po-br'); if(_br)_br.onchange=function(){ PORTAL_PO_BR=this.value; _ppShowAllPO=false; renderPP(); };

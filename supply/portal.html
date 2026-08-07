@@ -92,7 +92,7 @@
         root: document.getElementById('pv'),
         ep: EP, by: me.email, sid: null, supplierName: realSup,
         anon: ANON_NAME ? {name:ANON_NAME, realNames:(me.suppliers||[])} : null,
-        getData: function(){ return fetch('/api/portal/bootstrap').then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); return j; }); }
+        getData: function(){ return fetch('/api/portal/bootstrap'+(window.__ppInclArch?'?includeArchived=1':'')).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); return j; }); }
       });
     };
     s.onerror=function(){ document.getElementById('pv').innerHTML='<div class="pv-empty">Could not load the portal view.</div>'; };

@@ -11101,7 +11101,18 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
   const names = req.portal.suppliers, ids = req.portal.supplierIds;
   const q = (sql, p) => pool.query(sql, p).then(r => r.rows);
   try {
-    const pos = await q(POS_SQL_PORTAL, [names]);   // same calc as admin /api/supply/purchase-orders, filtered
+    // Hide archived (completed, pre-cutoff) POs by default — same cutoff as the admin grid — to keep the portal
+    // payload small; ?includeArchived=1 reveals them (portal "Show archived" toggle).
+    const _inclArch = String(req.query.includeArchived || '') === '1';
+    const _cutoff = await poArchiveCutoff();
+    let _posSql = POS_SQL_PORTAL, _posParams = [names];
+    if (_cutoff && !_inclArch) {
+      // NB function replacement — the injected SQL contains `$2` and `$'` (regex anchor), which a string
+      // replacement would misinterpret as replace-patterns. A function returns it verbatim.
+      const _cond = `AND NOT (${archivedSql('calc4', '$2')}) ORDER BY calc4.po`;
+      _posSql = POS_SQL_PORTAL.replace('ORDER BY calc4.po', () => _cond); _posParams = [names, _cutoff];
+    }
+    const pos = await q(_posSql, _posParams);   // same calc as admin /api/supply/purchase-orders, filtered
     const poList = pos.map(p => p.po);
     const grab = (sql) => poList.length ? q(sql, [poList]) : Promise.resolve([]);
     const [lines, deps, lc, xd, ac, notes, subs, supSkus] = await Promise.all([

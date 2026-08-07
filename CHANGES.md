@@ -1,3 +1,8 @@
+## v26.719.0 — Supplier portal: hide archived POs by default + "Show archived" toggle
+- The supplier portal now applies the SAME archive cutoff as the admin grid (CONFIG ▸ Admin ▸ General ▸ po_archive_before_prod): completed POs below the cutoff are hidden by default, cutting the portal payload dramatically for large suppliers (e.g. XR Textile 682 → 162 POs). A "🗄 Show archived" toggle on the portal PO grid reveals them (re-fetches bootstrap with ?includeArchived=1). Fixes the slow portal load for big suppliers (on top of the local-sandbox latency).
+- Bugfix: the archive filter is injected via a function replacement (a string replacement mis-handled the `$2` param + `$` regex anchor).
+- Archive help text updated: it now DOES apply to the portal (was excluded); still excludes Cash Flow.
+
 ## v26.718.0 — Record of change: log category manual edits + batch manual edits into the 60s autosave
 - Manual cell edits (SKU + category/subcat) are now recorded, and BATCHED — they accumulate in a buffer and flush with the existing 60-second forecast autosave (and on tab-hide / page-close), instead of one POST per edit. Smoothing / target-rec / lock stay immediate.
 
