@@ -1,3 +1,6 @@
+## v26.720.0 — Quality Control upload allowed with read-only permission
+- Read-only users can now upload files to SUPPLY ▸ Quality Control (including the metafields — doc type, production / batch / PO / supplier), like the Zalando / Klaviyo uploads. requiredCap exempts POST /api/supply/quality-doc. Deleting a QC doc still needs edit (supply) permission.
+
 ## v26.719.0 — Supplier portal: hide archived POs by default + "Show archived" toggle
 - The supplier portal now applies the SAME archive cutoff as the admin grid (CONFIG ▸ Admin ▸ General ▸ po_archive_before_prod): completed POs below the cutoff are hidden by default, cutting the portal payload dramatically for large suppliers (e.g. XR Textile 682 → 162 POs). A "🗄 Show archived" toggle on the portal PO grid reveals them (re-fetches bootstrap with ?includeArchived=1). Fixes the slow portal load for big suppliers (on top of the local-sandbox latency).
 - Bugfix: the archive filter is injected via a function replacement (a string replacement mis-handled the `$2` param + `$` regex anchor).
