@@ -1,3 +1,6 @@
+## v26.702.0 — Fix: note hover tooltip kept hiding on micro-moves within the cell
+- The note tooltip mouseout hid the tip on every move between child elements inside the same cell, so the 120ms hover rarely completed. Now it only hides when the cursor actually leaves the note cell — so hovering a note cell reliably shows the full note history.
+
 ## v26.701.0 — Fix: note tooltip now shows when hovering anywhere on a note cell
 - The rail N is only ~9px, so relying on hovering the letter made the note tooltip feel broken. Now hovering anywhere on a note-bearing forecast cell surfaces the full note history (text + submitter + dd-mmm-yy date), anchored to the N. Cells with no notes are unaffected.
 

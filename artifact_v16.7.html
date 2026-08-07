@@ -5238,7 +5238,10 @@ function openFcNotePopup(td){ var nk=td&&td.dataset.nk; if(!nk)return; _fcCloseP
     // note-bearing cell surfaces the full note history (the rail N is only ~9px, too small to rely on).
     var anchor=(n.querySelector&&n.querySelector('.cf-n'))||n;
     tt=setTimeout(function(){ var html=fcNoteTipHtml(nk); if(!html)return; if(!tip){tip=document.createElement('div');tip.id='fc-note-tip';document.body.appendChild(tip);} tip.innerHTML=html; tip.style.display='block'; var r=anchor.getBoundingClientRect(); var top=(r.bottom+5); if(top+ (tip.offsetHeight||120) > window.innerHeight-8) top=Math.max(6,r.top-(tip.offsetHeight||120)-5); tip.style.left=Math.max(6,Math.min(r.left,window.innerWidth-306))+'px'; tip.style.top=top+'px'; },120); });
-  document.addEventListener('mouseout',function(e){ var n=e.target.closest?e.target.closest('.fc-note-n,.cf-n,td[data-nk]'):null; if(n){ clearTimeout(tt); if(tip)tip.style.display='none'; } });
+  document.addEventListener('mouseout',function(e){ var n=e.target.closest?e.target.closest('.fc-note-n,.cf-n,td[data-nk]'):null; if(!n)return;
+    var cell=n.closest?n.closest('td[data-nk]'):n, to=e.relatedTarget;
+    if(cell&&to&&cell.contains&&cell.contains(to))return;   // moving WITHIN the same cell — keep the tip up (was hiding on every micro-move → felt broken)
+    clearTimeout(tt); if(tip)tip.style.display='none'; });
   document.addEventListener('scroll',function(){ if(tip)tip.style.display='none'; },true);
 })();
 function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
