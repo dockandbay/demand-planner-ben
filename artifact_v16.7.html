@@ -753,6 +753,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
     <div style="flex:1"></div>
     <button id="fclogic-btn" onclick="openFcLogic(event)" title="How the forecast numbers are calculated" style="font-size:10px;padding:3px 10px;border:1px solid #c4b5fd;border-radius:5px;background:#f5f3ff;color:#5b21b6;cursor:pointer;flex-shrink:0;font-weight:600">&#9635; Forecast Logic</button>
     <button id="smoothset-btn" onclick="openSmoothSettings(event)" title="Smoothing settings — disregard discontinued + auto-smooth" style="font-size:10px;padding:3px 10px;border:1px solid #93c5fd;border-radius:5px;background:#eff6ff;color:#1e40af;cursor:pointer;flex-shrink:0;font-weight:600">&#9881; Smoothing</button>
+    <span id="plan-ccy-wrap" style="display:none;flex-shrink:0;align-items:center"></span>
     <span style="width:1px;height:18px;background:#e0e0e0;flex-shrink:0;margin:0 2px"></span>
     <button id="undo-btn" onclick="undoApply()" disabled title="Undo the last forecast edit (up to 10) — also &#8984;/Ctrl+Z" style="font-size:10px;padding:3px 10px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#334155;cursor:default;opacity:.45;flex-shrink:0">&#8624; Undo</button>
     <button id="plan-dl-btn" onclick="openPlanDownload(event)" title="Download the demand plan (SKU × month, units + revenue) for chosen fiscal year(s)" style="font-size:10px;padding:3px 10px;border:1px solid #16a34a;border-radius:5px;background:#dcfce7;color:#166534;cursor:pointer;flex-shrink:0">&#11015; Download</button>
@@ -3958,22 +3959,23 @@ function getASP(co,ch,s,year,mo){
 }
 
 // Render a revenue line showing rev + YoY% with ASP in hover tooltip
-function renderRevLine(revVal,lyRev,asp){
+function renderRevLine(revVal,lyRev,asp,fy){
   if(!revVal&&!lyRev)return '';
-  var revYoY=lyRev>0?Math.round((revVal-lyRev)/lyRev*100):null;
+  var revYoY=lyRev>0?Math.round((revVal-lyRev)/lyRev*100):null;   // YoY ratio is currency-invariant
   var yoyHtml='';
   if(revYoY!=null){
     var clr=revYoY>=2?'#15803d':revYoY<=-2?'#A32D2D':'#666';
     yoyHtml=' <span style="color:'+clr+'">'+(revYoY>=0?'+':'')+revYoY+'%</span>';
   }
+  var rt=dispRate(fy), sym=dispSym();   // convert to the display currency (per-FY blended rate)
   var aspAttr='';
   if(asp>0){
-    var aspTipHtml='ASP £'+asp.toFixed(2);
+    var aspTipHtml='ASP '+sym+(asp*rt).toFixed(2);
     aspAttr=' data-asp-tip="'+aspTipHtml.replace(/"/g,'&quot;')+'" style-cursor="help"';
   }
   var cursorStyle=asp>0?'cursor:help;':'';
   return '<div style="font-size:8px;text-align:right;padding-right:3px;color:#475569;font-variant-numeric:tabular-nums;white-space:nowrap;line-height:1.3;'+cursorStyle+'"'+aspAttr+'>'
-    +fr(revVal)+yoyHtml+'</div>';
+    +frFY(revVal,fy)+yoyHtml+'</div>';
 }
 function sumU(a,y){let u=0;for(let m=1;m<=12;m++){const k=ym(y,m);if(a[k])u+=a[k][0];}return u}
 function sumR(a,y){let r=0;for(let m=1;m<=12;m++){const k=ym(y,m);if(a[k])r+=a[k][1];}return r}
@@ -4015,6 +4017,13 @@ function fyFC(fu,startY,s,co,ch){return fyMonths(startY).reduce(function(t,k){re
 // When s/co/ch supplied, the partial current month contributes its full-month projection.
 function fyTot(a,fu,startY,s,co,ch){return fyMonths(startY).reduce(function(t,k){if(isActualMonth(k)){if(s&&k===CUR_MONTH)return t+curMonthForecast(s,co,ch);return t+(a[k]?a[k][0]:0);}return t+(fu[k]||0);},0);}
 function fn(n){if(n==null)return'--';return Math.round(n).toLocaleString()}
+// Shared display-currency helpers (DEMAND plan + Summary). SUMM_CCY mode GBP|LOCAL; local = the current market's
+// currency (US=USD/EU=EUR/AU=AUD) converted by the FY blended rate. UK/CA stay GBP.
+function fyOfMonth(m){ var p=String(m).split('_'); var y=+p[0],mo=+p[1]; return mo>=3?y:y-1; }
+function dispCcy(){ return (SUMM_CCY==='LOCAL' && mktCcy(CUR) && fxRate(mktCcy(CUR),0)!=null)?mktCcy(CUR):'GBP'; }
+function dispSym(){ return CCY_SYM[dispCcy()]||'£'; }
+function dispRate(fy){ return fxRate(dispCcy(),fy)||1; }
+function frFY(n,fy){ var rt=dispRate(fy), sym=dispSym(), v=Math.round((n||0)*rt); if(!v)return '--'; if(v>=1000000)return sym+(v/1000000).toFixed(1)+'m'; if(v>=1000)return sym+(v/1000).toFixed(0)+'k'; return sym+v; }
 function fr(n){if(!n)return'--';const v=Math.round(n);if(v>=1000000)return'\u00a3'+(v/1000000).toFixed(1)+'m';if(v>=1000)return'\u00a3'+(v/1000).toFixed(0)+'k';return'\u00a3'+v}
 function fp(a,b){if(!b)return'';const p=Math.round((a-b)/b*100);return(p>0?'+':'')+p+'%'}
 function fpc(s){if(!s)return'fp';return s.startsWith('+')?'gp':s.startsWith('-')?'rp':'fp'}
@@ -5238,7 +5247,7 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
     var actualRev=a[fym]?(a[fym][1]||0):0;
     var lyRev=a[ym(y-1,mo)]?(a[ym(y-1,mo)][1]||0):0;
     var asp=actualUnits>0?actualRev/actualUnits:0;
-    var revHtml=renderRevLine(actualRev,lyRev,asp);
+    var revHtml=renderRevLine(actualRev,lyRev,asp,(mo>=3?y:y-1));
     if(revHtml){const revDiv=document.createElement('div');revDiv.innerHTML=revHtml;d.appendChild(revDiv.firstChild);}
     td.appendChild(d);return td;
   }
@@ -5353,7 +5362,7 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
     var fcASP=getASP(co,ch,s,y,mo);
     var fcRev=fcv*fcASP;
     var lyRevFc=a[ym(y-1,mo)]?(a[ym(y-1,mo)][1]||0):0;
-    var revHtmlFc=renderRevLine(fcRev,lyRevFc,fcASP);
+    var revHtmlFc=renderRevLine(fcRev,lyRevFc,fcASP,(mo>=3?y:y-1));
     if(revHtmlFc){const revDivFc=document.createElement('div');revDivFc.innerHTML=revHtmlFc;d.appendChild(revDivFc.firstChild);}
   }
   // SKU-vs-subcat variance indicator: when the sum of all SKU-level forecasts in
@@ -5497,7 +5506,7 @@ function buildDataRow(s,co,ch,x,fu_cache){
       var aspCur=getASP(co,ch,s,y,mo);
       var fcRevCur=fcv*aspCur;
       var lyRevCur=a[ym(y-1,mo)]?(a[ym(y-1,mo)][1]||0):0;
-      var revHtmlCur=renderRevLine(fcRevCur,lyRevCur,aspCur);
+      var revHtmlCur=renderRevLine(fcRevCur,lyRevCur,aspCur,(mo>=3?y:y-1));
       if(revHtmlCur){const rDiv=document.createElement('div');rDiv.innerHTML=revHtmlCur;d2.appendChild(rDiv.firstChild);}
       // SKU-vs-subcat variance indicator for the current-month special cell.
       // Restricted to the rolling 12-month window — the current month is always in it.
@@ -7597,7 +7606,7 @@ function buildBody(){
       var td=document.createElement('td');td.className=fyTotCls(Y)+' sep2';
       td.innerHTML='<div style="padding:2px 4px;text-align:right">'
         +'<div style="font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;color:#fff">'+fn(Math.round(u))+'</div>'
-        +'<div style="font-size:9px;color:#cbd5e1;font-variant-numeric:tabular-nums">'+fr(Math.round(rev))+'</div>'
+        +'<div style="font-size:9px;color:#cbd5e1;font-variant-numeric:tabular-nums">'+frFY(rev,Y)+'</div>'
         +'<div style="font-size:9px;font-variant-numeric:tabular-nums;color:#fff" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?(yoy>0?'+':'')+yoy+'%':'--')+'</div></div>';
       gtr.appendChild(td);
     }
@@ -7728,7 +7737,7 @@ function _makeCatTotRow(cat){
       var revYoY=lyR>0?Math.round((fcR-lyR)/lyR*100):null;
       var revYoyHtml='';
       if(revYoY!=null){var rClr=revYoY>=2?'#15803d':revYoY<=-2?'#A32D2D':'#666';revYoyHtml=' <span style="color:'+rClr+'">'+(revYoY>=0?'+':'')+revYoY+'%</span>';}
-      var revLineHtml=fcR>0?'<div style="font-size:8px;text-align:right;padding-right:3px;color:#475569;font-variant-numeric:tabular-nums;line-height:1.3">'+fr(fcR)+revYoyHtml+'</div>':'';
+      var revLineHtml=fcR>0?'<div style="font-size:8px;text-align:right;padding-right:3px;color:#475569;font-variant-numeric:tabular-nums;line-height:1.3">'+frFY(fcR,fyOfMonth(m))+revYoyHtml+'</div>':'';
       tadd('<div class="fcin"><div class="fcly" style="font-weight:600">'+fn(ly)+'</div>'
         +'<div style="font-size:10px;text-align:right;padding-right:3px;font-variant-numeric:tabular-nums" class="'+yoyCls.trim()+'">'+yoyStr+'</div>'
         +'<div class="fcr'+(isAct?' actual':'')+'">'+fn(fc)+'</div>'+revLineHtml+'</div>',bgCls);
@@ -7741,7 +7750,7 @@ function _makeCatTotRow(cat){
       var td=document.createElement('td');td.className=fyTotCls(Y)+' sep2';
       td.innerHTML='<div style="padding:2px 4px;text-align:right">'
         +'<div style="font-size:11px;font-weight:700;font-variant-numeric:tabular-nums">'+fn(Math.round(u))+'</div>'
-        +'<div style="font-size:9px;color:#475569;font-variant-numeric:tabular-nums">'+fr(Math.round(rev))+'</div>'
+        +'<div style="font-size:9px;color:#475569;font-variant-numeric:tabular-nums">'+frFY(rev,Y)+'</div>'
         +'<div style="font-size:9px;font-variant-numeric:tabular-nums" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?(yoy>0?'+':'')+yoy+'%':'--')+'</div></div>';
       totr.appendChild(td);
     }
@@ -7873,6 +7882,7 @@ function _planPopBind(){ if(window._planPopBound)return; window._planPopBound=tr
     if(pop&&pop.style.display==='block'&&!(b&&b.contains(ev.target))&&!pop.contains(ev.target))pop.style.display='none'; }); },true); }
 function togglePlanFilters(e){ if(e)e.stopPropagation(); var p=document.getElementById('plan-filters-pop'); if(!p)return; var open=p.style.display==='block'; _planPopClose(); if(!open)p.style.display='block'; _planPopBind(); }
 function togglePlanTools(e){ if(e)e.stopPropagation(); var m=document.getElementById('plan-tools-menu'); if(!m)return; var open=m.style.display==='block'; _planPopClose(); if(!open)m.style.display='block'; _planPopBind(); }
+function setPlanCcy(m){ SUMM_CCY=m; render(); }   // shared currency mode toggle (plan + summary)
 function resetPlanFilters(){ try{setPlanTier('ALL');}catch(e){} try{setPlanFromRep(false);}catch(e){} var rw=document.getElementById('plan-rw-sel'); if(rw){rw.value='ALL'; try{setPlanRw('ALL');}catch(e){}} try{setPlanSort('alpha');}catch(e){} var ct=document.getElementById('cat-tot-toggle'); if(ct&&ct.classList.contains('active')){try{setShowCatTot(false);}catch(e){}} try{resetPlanActiveDates();}catch(e){} try{renderPlanChips();}catch(e){} }
 function _planClearFilter(k){ if(k==='all')setPlanActiveMode('active'); else if(k==='tier')setPlanTier('ALL');
   else if(k==='rw'){var s=document.getElementById('plan-rw-sel'); if(s)s.value='ALL'; setPlanRw('ALL');}
@@ -7973,6 +7983,9 @@ function render(){
     return;
   }
   planFilters.forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='';});
+  (function(){ var w=document.getElementById('plan-ccy-wrap'); if(!w)return; var lc=mktCcy(CUR);   // currency toggle: only for US/EU/AU with a rate
+    if(lc&&fxRate(lc,0)!=null){ w.style.display='inline-flex'; w.innerHTML='<span class="pill-lbl" style="margin:0 2px 0 6px">Currency</span>'+[['GBP','GBP'],['LOCAL',lc]].map(function(x){var on=(x[0]===SUMM_CCY);return '<button onclick="setPlanCcy(\''+x[0]+'\')" title="Show revenue &amp; ASP in '+(x[0]==='GBP'?'GBP':(lc+' at the FY blended rate'))+'" style="font-size:10px;padding:3px 10px;border:1px solid '+(on?'#0f172a':'#cbd5e1')+';border-radius:5px;background:'+(on?'#0f172a':'#fff')+';color:'+(on?'#fff':'#334155')+';cursor:pointer;font-weight:600;font-family:inherit;margin-left:3px">'+x[1]+'</button>';}).join(''); }
+    else { w.style.display='none'; w.innerHTML=''; } })();
   var twp=document.getElementById('tw'); if(twp)twp.style.display='';
   var db=document.getElementById('demand-body'); if(db)db.remove();
   if(SKU_VIEW){renderSkuView();}else{renderMain();}
@@ -8979,17 +8992,17 @@ function planRevPopRender(){ var p=document.getElementById('plan-rev-pop'); if(!
   function grow(fc,ly){ return ly>0?Math.round((fc-ly)/ly*100):null; }
   function statusLine(fc,t,lbl){ if(t==null)return '<span style="color:#64748b">No '+fyLbl(fy)+' target set for '+esc(lbl)+' — add one in the Revenue tab.</span>';
     var gap=fc-t, gp=t>0?Math.round(gap/t*100):0;
-    return '<span style="color:'+ragC(fc,t)+';font-weight:700">'+(gap>=0?'On track · '+fr(gap)+' above target':'Short by '+fr(-gap)+' ('+gp+'%)')+'</span>'; }
+    return '<span style="color:'+ragC(fc,t)+';font-weight:700">'+(gap>=0?'On track · '+frFY(gap,fy)+' above target':'Short by '+frFY(-gap,fy)+' ('+gp+'%)')+'</span>'; }
   function bigRow(label,r,t){ var g=grow(r.fc,r.ly);
     return '<div style="padding:9px 13px;border-top:1px solid #eef2f7">'
       +'<div style="display:flex;justify-content:space-between;align-items:center"><b>'+esc(label)+'</b>'+(t!=null?'<span title="green ≥ target · amber within 5% · red below" style="display:inline-block;width:12px;height:12px;border-radius:50%;background:'+ragC(r.fc,t)+'"></span>':'')+'</div>'
-      +'<div style="display:flex;justify-content:space-between;margin-top:3px"><span style="color:#64748b">Forecast</span><b>'+fr(r.fc)+'</b></div>'
-      +'<div style="display:flex;justify-content:space-between"><span style="color:#64748b">Target</span><span>'+(t!=null?fr(t):'—')+'</span></div>'
-      +'<div style="display:flex;justify-content:space-between"><span style="color:#64748b">Last year</span><span>'+fr(r.ly)+(g!=null?' <span style="color:'+(g>=0?'#166534':'#b91c1c')+'">('+(g>=0?'+':'')+g+'%)</span>':'')+'</span></div>'
+      +'<div style="display:flex;justify-content:space-between;margin-top:3px"><span style="color:#64748b">Forecast</span><b>'+frFY(r.fc,fy)+'</b></div>'
+      +'<div style="display:flex;justify-content:space-between"><span style="color:#64748b">Target</span><span>'+(t!=null?frFY(t,fy):'—')+'</span></div>'
+      +'<div style="display:flex;justify-content:space-between"><span style="color:#64748b">Last year</span><span>'+frFY(r.ly,fy)+(g!=null?' <span style="color:'+(g>=0?'#166534':'#b91c1c')+'">('+(g>=0?'+':'')+g+'%)</span>':'')+'</span></div>'
       +'<div style="margin-top:4px">'+statusLine(r.fc,t,label)+'</div></div>'; }
   var pills=fys.map(function(y){return '<button class="prp-fy" data-fy="'+y+'" style="border:1px solid '+(y===fy?'#2563eb':'#cbd5e1')+';background:'+(y===fy?'#2563eb':'#fff')+';color:'+(y===fy?'#fff':'#475569')+';border-radius:14px;padding:2px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit">'+fyLbl(y)+'</button>';}).join(' ');
   var monRows=months.map(function(m){var p2=pa(m),act=isActualMonth(m),v=rCh.mon[m];
-    return '<div style="display:flex;justify-content:space-between;padding:2px 0;border-top:1px solid #f4f6f9"><span style="color:'+(act?'#16a34a':'#64748b')+'">'+MON[p2.mo]+" '"+String(p2.y).slice(2)+(act?' · actual':'')+'</span><span style="font-variant-numeric:tabular-nums'+(act?';color:#16a34a;font-weight:600':'')+'">'+(v?fr(v):'–')+'</span></div>';}).join('');
+    return '<div style="display:flex;justify-content:space-between;padding:2px 0;border-top:1px solid #f4f6f9"><span style="color:'+(act?'#16a34a':'#64748b')+'">'+MON[p2.mo]+" '"+String(p2.y).slice(2)+(act?' · actual':'')+'</span><span style="font-variant-numeric:tabular-nums'+(act?';color:#16a34a;font-weight:600':'')+'">'+(v?frFY(v,fy):'–')+'</span></div>';}).join('');
   p.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 13px;border-bottom:1px solid #eef2f7;position:sticky;top:0;background:#fff;border-radius:12px 12px 0 0">'
       +'<div><div style="font-weight:800;font-size:13px">Revenue vs target</div><div style="color:#64748b;font-size:11px">'+esc(co)+' · '+esc(ch)+' · '+fyLbl(fy)+' <span style="color:#94a3b8">(follows the plan)</span></div></div>'
       +'<button id="prp-x" style="border:none;background:#f1f5f9;border-radius:8px;width:26px;height:26px;cursor:pointer;font-size:15px;line-height:1">✕</button></div>'

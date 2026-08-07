@@ -1,3 +1,7 @@
+## v26.678.0 — Multi-currency Phase 2b: DEMAND plan grid + revenue popup honour the currency toggle
+- The DEMAND plan now has a GBP / local (USD/EUR/AUD) currency toggle in the plan controls (US/EU/AU only). Per-cell revenue + ASP tooltip, category/FY/grand totals, and the Revenue-vs-target popup all convert by the financial-year blended rate. Shared with the Summary toggle (SUMM_CCY). Units + growth %/deltas unaffected.
+
+
 ## v26.677.0 — Multi-currency Phase 2: currency toggle in DEMAND Summary
 - On DEMAND ▸ Summary (Revenue / Rev+targets), when viewing US/EU/AU a GBP / local-currency (USD/EUR/AUD) toggle appears. Local converts each month by its financial-year blended rate (CONFIG ▸ Admin ▸ Exchange rates); £ figures + targets show in the local currency with the right symbol. Units are unaffected. Growth %/deltas unchanged (currency-invariant).
 
