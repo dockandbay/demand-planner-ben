@@ -1,3 +1,7 @@
+## v26.668.0 — Target recommendations: "Edit forecasts" button → Summary with targets editing
+- The 🎯 Target recommendations drawer now has an "✎ Edit forecasts" button that closes the drawer and jumps to DEMAND ▸ Summary with Add-targets (edit) mode already on (Rev+targets metric).
+
+
 ## v26.667.0 — Summary/targets: sticky headers + no flash on pill change
 - Summary table is now a scroll container: the country/channel/metric/group pills AND the two-row table header (FY + months/H1/H2) stay sticky; only the subcategory rows scroll.
 - Killed the pill-change flash: the table <style> is injected once into <head> (no re-parse FOUC on re-render), and the targets fetch only runs when targets are shown (Rev+targets / editing) so switching pills no longer blank-flashes the table.
