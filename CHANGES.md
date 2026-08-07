@@ -1,3 +1,7 @@
+## v26.711.0 — DEMAND plan "R" record-of-change (audit log)
+- New R rail indicator + click-to-view history popup (descending, e.g. "07-Aug-26 22:05 ben@ smoothed from 45 to 65"). Records: manual cell edits, smoothing, target-recommendation apply, do-not-smooth lock/unlock. Actor = logged-in user (shortened).
+- Recording is always-on (cheap); the R indicator + histories only load when More Filters ▸ "Show record of change" is enabled (perf). Full list loads on click. New table planner.forecast_changes (migration 199) + endpoints /api/forecast/change(+/bulk, /changes, /changes/keys).
+
 ## v26.710.0 — Summary targets tooltip: full left-align + live refresh on edit
 - ASP / Revenue / Growth rows now fully left-aligned (explicit text-align on every cell).
 - Tooltip now reflects edits immediately: typing a new target updates the hover div data-tgt live, so the breakdown no longer shows stale numbers until refresh.

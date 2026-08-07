@@ -9431,6 +9431,62 @@ app.post('/api/forecast/note/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ── DEMAND plan "R" record-of-change (forecast_changes) ──────────────────────────────────────────
+// Lightweight keys: which cells have ≥1 change (so the R rail letter can show without loading histories).
+app.get('/api/forecast/changes/keys', async (req, res) => {
+  const country = (req.query.country || '').toUpperCase(), channel = (req.query.channel || '').toUpperCase();
+  try {
+    const rows = (await pool.query(`SELECT DISTINCT level, item, month FROM planner.forecast_changes
+      WHERE upper(country)=$1 AND upper(channel)=$2`, [country, channel])).rows;
+    res.json({ keys: rows.map(r => r.level + '|' + r.item + '|' + country + '|' + channel + '|' + r.month) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Full history for ONE cell (descending), loaded on click.
+app.get('/api/forecast/changes', async (req, res) => {
+  const country = (req.query.country || '').toUpperCase(), channel = (req.query.channel || '').toUpperCase();
+  const level = (req.query.level || '').trim(), item = (req.query.item || '').trim(), month = (req.query.month || '').trim();
+  try {
+    const rows = (await pool.query(`SELECT coalesce(actor,'') actor, action, from_val, to_val,
+        to_char(created_at,'YYYY-MM-DD HH24:MI') created_at
+      FROM planner.forecast_changes
+      WHERE upper(country)=$1 AND upper(channel)=$2 AND level=$3 AND item=$4 AND month=$5
+      ORDER BY created_at DESC, id DESC`, [country, channel, level, item, month])).rows;
+    res.json({ rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Record a change. Actor from the auth layer (falls back to body.actor for local/sandbox).
+app.post('/api/forecast/change', async (req, res) => {
+  const b = req.body || {}, level = (b.level || 'sku').trim(), item = (b.item || '').trim();
+  const country = (b.country || '').trim(), channel = (b.channel || '').trim(), month = (b.month || '').trim();
+  const action = (b.action || 'changed').trim();
+  if (!item || !country || !channel || !month || !action) return res.status(400).json({ error: 'item, country, channel, month, action required' });
+  const num = (v) => (v === '' || v == null || isNaN(+v)) ? null : +v;
+  try {
+    const who = authUser(req) || (b.actor || '').trim() || null;
+    await pool.query(`INSERT INTO planner.forecast_changes (level,item,country,channel,month,actor,action,from_val,to_val)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [level, item, country, channel, month, who, action, num(b.from), num(b.to)]);
+    res.json({ ok: true, actor: who || '' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Bulk-record changes (a smoothing sweep / target-rec apply touches many cells at once).
+app.post('/api/forecast/changes/bulk', async (req, res) => {
+  const b = req.body || {}, rows = Array.isArray(b.rows) ? b.rows : [];
+  if (!rows.length) return res.json({ ok: true, saved: 0 });
+  const num = (v) => (v === '' || v == null || isNaN(+v)) ? null : +v;
+  try {
+    const who = authUser(req) || (b.actor || '').trim() || null;
+    const vals = [], params = [];
+    rows.slice(0, 5000).forEach((r, i) => {
+      const o = i * 9;
+      vals.push(`($${o+1},$${o+2},$${o+3},$${o+4},$${o+5},$${o+6},$${o+7},$${o+8},$${o+9})`);
+      params.push((r.level||'sku').trim(), (r.item||'').trim(), (r.country||'').trim(), (r.channel||'').trim(),
+        (r.month||'').trim(), who, (r.action||'changed').trim(), num(r.from), num(r.to));
+    });
+    await pool.query(`INSERT INTO planner.forecast_changes (level,item,country,channel,month,actor,action,from_val,to_val) VALUES ${vals.join(',')}`, params);
+    res.json({ ok: true, saved: rows.length, actor: who || '' });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Trading calendar (DEMAND ▸ Calendar) — events by date × market; editable + CSV up/down.
 const CAL_FIELDS = { event_date: 'date', market: 'text', category: 'text', sku_list: 'text', event_type: 'text', title: 'text', uplift_pct: 'numeric', notes: 'text' };
 app.get('/api/trading-calendar', async (req, res) => {
