@@ -8003,8 +8003,8 @@ function setDispCcy(m){ SUMM_CCY=m; try{localStorage.setItem('disp_ccy',m);}catc
 function refreshDispCcy(){ var w=document.getElementById('demand-ccy'); if(!w)return; var lc=mktCcy(CUR);
   if(lc&&fxRate(lc,0)!=null){ w.innerHTML='<span class="pill-lbl" style="margin:0 3px">Currency</span>'+[['GBP','GBP'],['LOCAL',lc]].map(function(x){var on=(x[0]===SUMM_CCY);return '<button onclick="setDispCcy(\''+x[0]+'\')" title="Show revenue &amp; ASP in '+(x[0]==='GBP'?'GBP':(lc+' at the FY blended rate'))+' across DEMAND" style="font-size:10px;padding:3px 10px;border:1px solid '+(on?'#0f172a':'#cbd5e1')+';border-radius:12px;background:'+(on?'#0f172a':'#fff')+';color:'+(on?'#fff':'#334155')+';cursor:pointer;font-weight:600;font-family:inherit;margin-left:3px">'+x[1]+'</button>';}).join(''); }
   else w.innerHTML=''; }
-function mktCcy(co){ return ({US:'USD',EU:'EUR',AU:'AUD'})[co]||null; }
-var CCY_SYM={GBP:'£',USD:'$',EUR:'€',AUD:'A$'};
+function mktCcy(co){ return ({US:'USD',EU:'EUR',AU:'AUD',CA:'CAD'})[co]||null; }
+var CCY_SYM={GBP:'£',USD:'$',EUR:'€',AUD:'A$',CAD:'C$'};
 function fxRate(ccy,fy){ if(!ccy||ccy==='GBP')return 1; var r=FX_RATES[fy]&&FX_RATES[fy][ccy]; if(r>0)return r; var ks=Object.keys(FX_RATES).filter(function(k){return FX_RATES[k]&&FX_RATES[k][ccy]>0;}).sort(); if(!ks.length)return null; return FX_RATES[ks[ks.length-1]][ccy]; }   // fall back to latest FY with a rate
 function renderSummaryView(body){
   function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}

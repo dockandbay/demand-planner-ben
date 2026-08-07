@@ -1,3 +1,8 @@
+## v26.688.0 — Manufacturing drawer: full columns + editable stock/sign-off bound to the main table; CA→CAD currency
+- The per-BOM-SKU drawer now shows Required / In production / Completed / Existing stock / Total supply / Coverage / Sign-off per component. Existing stock is editable and Sign-off (accept) is a checkbox here too — both write through and patch the main table row (and _mfgBun), so the two views stay in sync.
+- Currency: added CA → CAD (mktCcy/CCY_SYM + a GBP→CAD column in CONFIG ▸ Admin ▸ Exchange rates).
+
+
 ## v26.687.0 — Currency toggle follows the market (USD/EUR/AUD updates per tab)
 - Fixed the DEMAND currency toggle showing a stale currency (e.g. USD on EU tabs). The local-currency label now refreshes with the selected market — USD on US, EUR on EU, AUD on AU — including when you switch country via the Summary pills (which previously did not rebuild the nav toggle). refreshDispCcy() rebuilds it on market change.
 
