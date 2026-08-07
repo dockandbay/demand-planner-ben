@@ -1,3 +1,6 @@
+## v26.700.0 — Summary targets: edit mode ignores the month-range filter
+- On "Summary with targets", "✎ Add / ✓ Editing targets" now ignores any active Show-from/to month range (targets are per-FY/half, so a range previously blanked the edit grid). Entering edit stashes + clears the range to show the full FY view; exiting restores the previous filter.
+
 ## v26.699.0 — Fix: category override number spilling past the cell
 - The forecast override input on category rows was content-box at 50%, so padding/border spilled ~6px past the cell (and 50% clipped 5-digit literals like 10000). Now border-box at 60% width, right-aligned — stays inside the cell and still leaves a left gutter for double-click.
 
