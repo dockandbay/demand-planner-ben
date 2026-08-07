@@ -1,3 +1,6 @@
+## v26.718.0 — Record of change: log category manual edits + batch manual edits into the 60s autosave
+- Manual cell edits (SKU + category/subcat) are now recorded, and BATCHED — they accumulate in a buffer and flush with the existing 60-second forecast autosave (and on tab-hide / page-close), instead of one POST per edit. Smoothing / target-rec / lock stay immediate.
+
 ## v26.717.0 — DTC packing list: notify party = consignee
 - On the Direct to Client packing list, the Notify Party now mirrors the Consignee (the client name + address).
 

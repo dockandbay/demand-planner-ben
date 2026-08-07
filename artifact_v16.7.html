@@ -5224,6 +5224,12 @@ function logChange(level,item,co,ch,m,action,fromV,toV){ if(!item||!m)return;
 function logChangesBulk(rows){ if(!rows||!rows.length)return;
   rows.forEach(function(r){ FC_CHANGE_KEYS.add((r.level||'sku')+'|'+r.item+'|'+r.country+'|'+r.channel+'|'+r.month); });
   try{ fetch('/api/forecast/changes/bulk',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({rows:rows,actor:_meEmail()})}); }catch(e){} }
+// Manual cell edits accumulate here and flush with the 60s forecast autosave (not one POST per edit).
+var _CHG_BUFFER=[];
+function bufferChange(level,item,co,ch,m,action,fromV,toV){ if(!item||!m)return; var nk=level+'|'+item+'|'+co+'|'+ch+'|'+m; FC_CHANGE_KEYS.add(nk);
+  _CHG_BUFFER.push({level:level,item:item,country:co,channel:ch,month:m,action:action,from:fromV,to:toV});
+  if(SHOW_CHANGES){ try{refreshCellRail(nk);}catch(e){} } }
+function flushChangeBuffer(){ if(_CHG_BUFFER.length){ logChangesBulk(_CHG_BUFFER.splice(0)); } }
 function setShowChanges(on){ SHOW_CHANGES=!!on; try{localStorage.setItem('show_changes',on?'1':'0');}catch(e){}
   if(on){ fcChangeKeysLoad(CUR,CF,function(){ try{renderMain();}catch(e){} }); } else { FC_CHANGE_KEYS=new Set(); try{renderMain();}catch(e){} } }
 function _fcNk(nk){ var p=(nk||'').split('|'); return {level:p[0],item:p[1],co:p[2],ch:p[3],month:p[4]}; }
@@ -5349,6 +5355,8 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   inp.addEventListener('change',function(e){
     if(typeof undoMark==='function')undoMark();   // snapshot pre-edit state for undo
     markDirty();
+    var _k=e.target.dataset.k,_s=e.target.dataset.s,_co=e.target.dataset.co,_ch=e.target.dataset.ch,_fym=(_k||'').split('|')[3];
+    var _oldU=0; try{_oldU=Math.round(((calc(_s,_co,_ch).fu)||{})[_fym]||0);}catch(_e){}   // subcat forecast before the edit
     const v=parseInput(e.target.value);
     IV[e.target.dataset.k]=v==null?'':(typeof v==='string'?v:String(v));
     const ps=parseStored(IV[e.target.dataset.k]);
@@ -5356,6 +5364,7 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
     e.target.className='fci'+(iO?' ovr':iP?' pct':'')+((iP&&ps.n<0)?' neg':'');
     e.target.value=v!=null?disp(IV[e.target.dataset.k]):'';
     refreshRow(e.target.dataset.s,e.target.dataset.co,e.target.dataset.ch);
+    try{ var _newU=Math.round(((calc(_s,_co,_ch).fu)||{})[_fym]||0); if(_newU!==_oldU&&typeof bufferChange==='function')bufferChange('subcat',_s,_co,_ch,_fym,'changed',_oldU,_newU); }catch(_e){}   // log category manual edit (batched)
   });
   d.appendChild(inp);
   const res=document.createElement('div');res.className='fcr'+(is27?' y27':'')+(isOvr?' ovc':!stored&&!gv?' flat':'');
@@ -5918,7 +5927,7 @@ function skuCommitOv(k, raw, ly){
   if(isNaN(n))return null;
   var abs=hasPct?Math.round((ly||0)*(1+n/100)):Math.round(n);
   skuOvSetK(k,abs);_undoLabelSku(k,ly,_old,abs,hasPct,n);
-  try{ if(abs!==_old){ var _p=k.split('|'); logChange('sku',_p[0],_p[1],_p[2],_p[3],'changed',(_old!=null?_old:(ly!=null?Math.round(ly):null)),abs); } }catch(e){}
+  try{ if(abs!==_old){ var _p=k.split('|'); bufferChange('sku',_p[0],_p[1],_p[2],_p[3],'changed',(_old!=null?_old:(ly!=null?Math.round(ly):null)),abs); } }catch(e){}
   return abs;
 }
 
@@ -11410,13 +11419,16 @@ function buildSkuChanges(){ var changes=[]; Object.keys(FC_DIRTY).forEach(functi
   return changes; }
 // Reliable flush when the tab is closing: sendBeacon survives unload (a normal fetch may be cancelled).
 // Same-origin cookie (pk) rides along so it passes the auth gate in production.
-function flushSaveBeacon(){ if(!_dirty||!navigator.sendBeacon)return;
+function flushSaveBeacon(){ if(!navigator.sendBeacon)return;
+  try{ if(_CHG_BUFFER&&_CHG_BUFFER.length){ navigator.sendBeacon('/api/forecast/changes/bulk',new Blob([JSON.stringify({rows:_CHG_BUFFER.splice(0),actor:_meEmail()})],{type:'application/json'})); } }catch(e){}
+  if(!_dirty)return;
   try{ var sc=buildInputChanges(); if(sc.length)navigator.sendBeacon('/api/save-forecasts',new Blob([JSON.stringify({changes:sc,who:'autosave-flush'})],{type:'application/json'}));
        var kc=buildSkuChanges(); if(kc.length)navigator.sendBeacon('/api/save-sku-forecasts',new Blob([JSON.stringify({changes:kc,who:'autosave-flush'})],{type:'application/json'})); }catch(e){} }
 document.addEventListener('visibilitychange',function(){ if(document.hidden && _dirty && !_saving) saveForecasts(); });   // tab hidden → save now (still open, fetch completes)
 window.addEventListener('pagehide',flushSaveBeacon);   // page closing → beacon (best-effort, survives unload)
 async function saveForecasts(){
   if(_saving)return;                 // a save is already running — the scheduler re-fires if still dirty
+  try{ flushChangeBuffer(); }catch(e){}   // flush buffered record-of-change rows on the same 60s cadence
   if(!_dirty){st('No changes to save');return;}
   _saving=true;
 
