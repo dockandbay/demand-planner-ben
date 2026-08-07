@@ -7998,6 +7998,11 @@ var TGT_FILT_CATS=(function(){try{var s=localStorage.getItem('tgt_filt_cats');va
 var TGT_CAT_OPEN=false, _tgtCatDocBound=false;   // Set-targets category multi-select dropdown open state
 var SUMM_CCY=(function(){try{return localStorage.getItem('disp_ccy')||'GBP';}catch(e){return 'GBP';}})();   // GLOBAL display currency mode: GBP | LOCAL (one toggle in the DEMAND nav; applies to plan + summary + reports)
 function setDispCcy(m){ SUMM_CCY=m; try{localStorage.setItem('disp_ccy',m);}catch(e){} if(typeof render==='function')render(); }
+// (Re)build the DEMAND-nav currency toggle for the CURRENT market — call whenever CUR changes so the local
+// currency label follows the tab (USD on US, EUR on EU, AUD on AU). Empty (spacer only) for GBP-only markets.
+function refreshDispCcy(){ var w=document.getElementById('demand-ccy'); if(!w)return; var lc=mktCcy(CUR);
+  if(lc&&fxRate(lc,0)!=null){ w.innerHTML='<span class="pill-lbl" style="margin:0 3px">Currency</span>'+[['GBP','GBP'],['LOCAL',lc]].map(function(x){var on=(x[0]===SUMM_CCY);return '<button onclick="setDispCcy(\''+x[0]+'\')" title="Show revenue &amp; ASP in '+(x[0]==='GBP'?'GBP':(lc+' at the FY blended rate'))+' across DEMAND" style="font-size:10px;padding:3px 10px;border:1px solid '+(on?'#0f172a':'#cbd5e1')+';border-radius:12px;background:'+(on?'#0f172a':'#fff')+';color:'+(on?'#fff':'#334155')+';cursor:pointer;font-weight:600;font-family:inherit;margin-left:3px">'+x[1]+'</button>';}).join(''); }
+  else w.innerHTML=''; }
 function mktCcy(co){ return ({US:'USD',EU:'EUR',AU:'AUD'})[co]||null; }
 var CCY_SYM={GBP:'£',USD:'$',EUR:'€',AUD:'A$'};
 function fxRate(ccy,fy){ if(!ccy||ccy==='GBP')return 1; var r=FX_RATES[fy]&&FX_RATES[fy][ccy]; if(r>0)return r; var ks=Object.keys(FX_RATES).filter(function(k){return FX_RATES[k]&&FX_RATES[k][ccy]>0;}).sort(); if(!ks.length)return null; return FX_RATES[ks[ks.length-1]][ccy]; }   // fall back to latest FY with a rate
@@ -8065,8 +8070,8 @@ function renderSummaryView(body){
     +'<div style="font-size:12px;color:#666;margin:0 0 10px">'+e(co)+' · '+e(ch)+' — each cell stacks <b>LY actual</b> / <b>forecast</b> / <b>growth%</b>. Click a subcategory to see its SKUs. '+(rangeMode?('Showing '+mlab(SUMM_FROM)+' → '+mlab(SUMM_TO)+' with a period total.'):'FYs Mar–Feb; past years minimised (click a year to expand). ')+'<span style="background:#ecfdf5;padding:0 4px">actual</span> <span style="background:#f1f5f9;padding:0 4px">pre-launch</span> <span style="background:#fee2e2;padding:0 4px">discontinued</span></div>'
     +'<div id="smc-tools" style="background:#fff"></div>'   /* edit-mode toolbar (buttons/desc/filter) — outside #smc so it stays fixed while rows scroll */
     +'<div id="smc" style="overflow:auto;max-height:calc(100vh - 250px)"></div></div>';
-  body.querySelectorAll('.sm-co').forEach(function(b){ b.onclick=function(){ CUR=b.dataset.c; renderSummaryView(body); }; });
-  body.querySelectorAll('.sm-ch').forEach(function(b){ b.onclick=function(){ CF=b.dataset.c; renderSummaryView(body); }; });
+  body.querySelectorAll('.sm-co').forEach(function(b){ b.onclick=function(){ CUR=b.dataset.c; renderSummaryView(body); try{refreshDispCcy();}catch(e){} }; });   // market change → update the nav currency toggle's local-currency label
+  body.querySelectorAll('.sm-ch').forEach(function(b){ b.onclick=function(){ CF=b.dataset.c; renderSummaryView(body); try{refreshDispCcy();}catch(e){} }; });
   body.querySelectorAll('.sm-metric').forEach(function(b){ b.onclick=function(){ SUMM_METRIC=b.dataset.m; try{localStorage.setItem('summ_metric',SUMM_METRIC);}catch(e){} renderSummaryView(body); }; });
   body.querySelectorAll('.sm-group').forEach(function(b){ b.onclick=function(){ SUMM_GROUP=b.dataset.g; try{localStorage.setItem('summ_group',SUMM_GROUP);}catch(e){} renderSummaryView(body); }; });
   var _te=body.querySelector('#sm-tgtedit'); if(_te)_te.onclick=function(){ SUMM_TGT_EDIT=!SUMM_TGT_EDIT; if(SUMM_TGT_EDIT&&SUMM_METRIC==='units')SUMM_METRIC='revtgt'; renderSummaryView(body); };
@@ -8547,10 +8552,9 @@ function renderDemandTabs(){
   } else if(_in3){ _in3.style.display='none'; _in3.innerHTML=''; }
   // relocate the demand-plan AI tool-bar into this secondary menu (moved back on teardown)
   var pt=document.getElementById('plan-tools'); if(pt)bar.appendChild(pt);
-  // ONE global currency toggle (GBP / local) for the whole DEMAND area — shown when the current market is US/EU/AU with a rate.
-  (function(){ var lc=mktCcy(CUR); if(!(lc&&fxRate(lc,0)!=null))return; var w=document.createElement('span'); w.style.cssText='margin-left:auto;display:inline-flex;align-items:center;flex:0 0 auto';
-    w.innerHTML='<span class="pill-lbl" style="margin:0 3px">Currency</span>'+[['GBP','GBP'],['LOCAL',lc]].map(function(x){var on=(x[0]===SUMM_CCY);return '<button onclick="setDispCcy(\''+x[0]+'\')" title="Show revenue &amp; ASP in '+(x[0]==='GBP'?'GBP':(lc+' at the FY blended rate'))+' across all DEMAND tabs" style="font-size:10px;padding:3px 10px;border:1px solid '+(on?'#0f172a':'#cbd5e1')+';border-radius:12px;background:'+(on?'#0f172a':'#fff')+';color:'+(on?'#fff':'#334155')+';cursor:pointer;font-weight:600;font-family:inherit;margin-left:3px">'+x[1]+'</button>';}).join('');
-    bar.appendChild(w); })();
+  // ONE global currency toggle (GBP / local) for the whole DEMAND area — a right-aligned spacer that also carries
+  // the toggle; refreshDispCcy() fills it for the current market (empty spacer for GBP-only markets).
+  (function(){ var w=document.createElement('span'); w.id='demand-ccy'; w.style.cssText='margin-left:auto;display:inline-flex;align-items:center;flex:0 0 auto'; bar.appendChild(w); refreshDispCcy(); })();
   // relocate the status note (#st) + last-updated/version (#ver) onto this nav row, right-aligned (all DEMAND pages)
   var _st=document.getElementById('st');
   if(_st){ _st.className=''; _st.style.cssText='font-size:11px;color:#888;margin-left:10px;flex:0 0 auto;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:40%'; bar.appendChild(_st); }

@@ -1,3 +1,7 @@
+## v26.687.0 — Currency toggle follows the market (USD/EUR/AUD updates per tab)
+- Fixed the DEMAND currency toggle showing a stale currency (e.g. USD on EU tabs). The local-currency label now refreshes with the selected market — USD on US, EUR on EU, AUD on AU — including when you switch country via the Summary pills (which previously did not rebuild the nav toggle). refreshDispCcy() rebuilds it on market change.
+
+
 ## v26.686.0 — Manufacturing tab: prominent demand chip + carry-back hint for short components
 - Bundle header: "demand N" is now a bold navy chip, same size as the SKU, so it stands out.
 - Drawer: when a production is short (or has no MFG PO) for a component, a hint points to the LAST production that manufactured it — e.g. "↩ Refer to P56 where 2,000 units were manufactured — 182 over its own demand (available to pull from)". Server computes carry = latest other production with a MFG qty for that SKU + surplus vs its own demand.
