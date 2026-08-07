@@ -1,3 +1,6 @@
+## v26.707.0 — SUG-0021: Packing List (in the Tax Invoice download) matches supplier format
+- The Packing List tab of the combined Tax Invoice + Packing List download now: shows real product size in SIZE(cm*cm) (from products.size_long parenthetical, e.g. 160x90cm); adds a dedicated Carton Dimensions column (LxWxH) with Order Quantity last; and shows Q'TY (CTN) to 1 decimal place for partial cartons (was rounded up). No separate button — it's the same combined Tax Invoice download (shipment/consolidation ref covers combined shipments).
+
 ## v26.706.0 — Summary targets: instant cell reformat on entry + LY row on Rev+targets
 - Entering a target now reformats the cell instantly (no page refresh): £ → light-blue "£1,000", % growth → light-green "+30%", blank → cleared.
 - Rev + targets cells now show a LY (last-year actuals) row on top, then fc / tgt / Δ.

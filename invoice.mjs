@@ -23,6 +23,9 @@ function cartonDims(p, country) {
            h: g('uk_carton_height', 'us_carton_height'), wt: g('uk_carton_weight', 'us_carton_weight') };
 }
 function hsFor(p, country) { return p['hscode_' + country.toLowerCase()] || p.hscode_us || ''; }
+// Product SIZE(cm*cm) for the packing list = the dims in parentheses from products.size_long
+// (e.g. "Large (160x90cm)" → "160x90cm"). Blank if none.
+function sizeCm(p) { const m = /\(([^)]+)\)/.exec(String(p.size_long || '')); return m ? m[1] : ''; }
 // Certification "GRS" + Recycled Content "100%" show ONLY when the product is fully GRS-approved
 // (products.grs_approved == "1 checked out of 1"); otherwise both columns are blank.
 function isGrsApproved(p) { return String(p.grs_approved || '').trim() === '1 checked out of 1'; }
@@ -45,7 +48,7 @@ async function gather(pool, pos, master) {
     [masterRow.supplier_id || null, supName])).rows[0] || { name: supName };
   const lines = (await pool.query(
     `SELECT l.po, l.sku, l.qty, l.cost_price,
-            p.sku_invoice_title, p.grs_approved, p.hscode_uk, p.hscode_us, p.hscode_eu, p.hscode_ca, p.hscode_au,
+            p.sku_invoice_title, p.grs_approved, p.size_long, p.hscode_uk, p.hscode_us, p.hscode_eu, p.hscode_ca, p.hscode_au,
             p.case_pack_size, p.carton_qty,
             p.uk_carton_length, p.uk_carton_width, p.uk_carton_height, p.uk_carton_weight,
             p.us_carton_length, p.us_carton_width, p.us_carton_height, p.us_carton_weight
@@ -148,27 +151,32 @@ export async function buildInvoice(pool, { type, pos, ref, dateISO, master }) {
   pk.getCell('F7').value = deliveryTerm;
   pk.getCell('B9').value = cons.notify_party || '';   // PL: NOTIFY PARTY
   pk.getCell('F9').value = 'Shanghai';
+  // Columns: A SKU | B SIZE(cm*cm) product dims | C Description | D Q'TY(CTN) | E Q'TY(PCS) | F GW(kg) |
+  // G Carton Dimensions (LxWxH) | H Order Quantity. Relabel the last two header cells (template had
+  // "Order Quantity" + "short shipment") to match the supplier packing-list layout.
+  ['11', '12'].forEach((hr) => { pk.getCell('G' + hr).value = 'Carton Dimensions'; pk.getCell('H' + hr).value = 'Order Quantity'; });
   let ctnTot = 0, pcsTot = 0, gwTot = 0, ordTot = 0;
   items.forEach((l, i) => {
     const r = FIRST_ROW + i;
     const qty = l.qty, cp = casePack(l), d = cartonDims(l, country);
-    const ctns = cp > 0 ? Math.ceil(qty / cp) : 0;
+    const ctns = cp > 0 ? Math.round((qty / cp) * 10) / 10 : 0;   // partial cartons → 1 decimal place
     const gw = +(ctns * (d.wt || 0)).toFixed(1);
     ctnTot += ctns; pcsTot += qty; gwTot += gw; ordTot += qty;
     pk.getCell('A' + r).value = l.sku;
-    pk.getCell('B' + r).value = (d.l && d.w && d.h) ? `${Math.round(d.l)}x${Math.round(d.w)}x${Math.round(d.h)}` : '';
+    pk.getCell('B' + r).value = sizeCm(l);                                                            // product size (cm)
     pk.getCell('C' + r).value = l.sku_invoice_title || '';
     pk.getCell('D' + r).value = ctns;
     pk.getCell('E' + r).value = qty;
     pk.getCell('F' + r).value = gw;
-    pk.getCell('G' + r).value = qty;
-    pk.getCell('H' + r).value = 0;
+    pk.getCell('G' + r).value = (d.l && d.w && d.h) ? `${Math.round(d.l)}x${Math.round(d.w)}x${Math.round(d.h)}` : '';   // carton dims
+    pk.getCell('H' + r).value = qty;                                                                 // order quantity
   });
   for (let r = FIRST_ROW + items.length; r <= lastLineRow; r++) clearRow(pk, r, ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']);
-  pk.getCell('D' + totalRow).value = ctnTot;
+  pk.getCell('D' + totalRow).value = +ctnTot.toFixed(1);
   pk.getCell('E' + totalRow).value = pcsTot;
   pk.getCell('F' + totalRow).value = +gwTot.toFixed(1);
-  pk.getCell('G' + totalRow).value = ordTot;
+  pk.getCell('G' + totalRow).value = '';
+  pk.getCell('H' + totalRow).value = ordTot;
   // Centre the quantity columns (CTN / PCS / GW / Order Qty / short shipment) — headers, data rows and totals.
   for (let r = 11; r <= totalRow; r++) ['D', 'E', 'F', 'G', 'H'].forEach((c) => {
     const cell = pk.getCell(c + r);
