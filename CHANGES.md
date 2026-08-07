@@ -1,3 +1,6 @@
+## v26.696.0 — Forecast note dates → dd-mmm-yy
+- Note submitter/date lines in the popup and the N hover tooltip now show the date as dd-mmm-yy (e.g. 07-Aug-26) via dateDMY(), per the house date format.
+
 ## v26.695.0 — Cell indicators fully unified into the vertical rail (category + SKU)
 - Category rows: i (BI rule) and C (calendar event) now render as plain rail letters alongside N — one neat home instead of scattered chips. Their rich BI/calendar hover tooltips are preserved (data-bi-tip / data-cal-tip). Retired the old top-right N box.
 - Fixes from testing: adding a SKU note now (1) closes the popup immediately and (2) shows the N in the rail at once (in-place rail refresh, no full re-render). Hovering N shows the full note history (text + submitter + date). Do-not-smooth toggle refreshes the S in place too.
