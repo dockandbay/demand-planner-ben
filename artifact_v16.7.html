@@ -8125,7 +8125,7 @@ function render(){
     var bw=document.getElementById('buy-wrap'); if(bw)bw.remove();
     var body=document.getElementById('demand-body');
     if(!body){ body=document.createElement('div'); body.id='demand-body'; document.querySelector('.wrap').appendChild(body); }
-    if(DEMAND_VIEW==='summary') renderSummaryView(body);
+    if(DEMAND_VIEW==='summary') renderSummaryReport(body);
     else if(DEMAND_VIEW==='keyaccounts') renderKeyAccountsView(body);
     else if(DEMAND_VIEW==='targets') renderTargetsView(body);
     else if(DEMAND_VIEW==='calendar') renderCalendarView(body);
@@ -8146,7 +8146,7 @@ function render(){
 // to planner.key_account_forecasts (replaces the old n8n Airtable flow). SKU is a type-to-search dropdown from SKUM.
 // ── DEMAND ▸ SUMMARY — clean read-only rollup of the PLAN forecast, by country/channel, grouped by
 //    subcategory (expand → SKU), across financial years (past FYs minimised) or a custom month range.
-var SUMM_FROM='', SUMM_TO='', SUMM_OPEN={}, SUMM_FYOPEN={}, SUMM_METRIC=(function(){try{return localStorage.getItem('summ_metric')||'units';}catch(e){return 'units';}})(), SUMM_GROUP=(function(){try{return localStorage.getItem('summ_group')||'month';}catch(e){return 'month';}})(), SUMM_TGT_EDIT=false, SUMM_TGT={}, SUMM_TGT_GBP={}, SUMM_TGT_KEY='', _SUMM_RANGE_STASH=null;
+var SUMM_FROM='', SUMM_TO='', SUMM_OPEN={}, SUMM_FYOPEN={}, SUMM_METRIC=(function(){try{return localStorage.getItem('summ_metric')||'units';}catch(e){return 'units';}})(), SUMM_GROUP=(function(){try{return localStorage.getItem('summ_group')||'month';}catch(e){return 'month';}})(), SUMM_TGT_EDIT=false, SUMM_TGT={}, SUMM_TGT_GBP={}, SUMM_TGT_KEY='', _SUMM_RANGE_STASH=null, SUMM_TAB='summary';
 // Target-edit mode ignores the month-range filter (targets are per-FY/half, not per arbitrary range).
 // Entering stashes + clears the range so the full FY view shows; exiting restores the previous filter.
 function summSetTgtEdit(on){
@@ -8167,6 +8167,21 @@ function refreshDispCcy(){ var w=document.getElementById('demand-ccy'); if(!w)re
 function mktCcy(co){ return ({US:'USD',EU:'EUR',AU:'AUD',CA:'CAD'})[co]||null; }
 var CCY_SYM={GBP:'£',USD:'$',EUR:'€',AUD:'A$',CAD:'C$'};
 function fxRate(ccy,fy){ if(!ccy||ccy==='GBP')return 1; var r=FX_RATES[fy]&&FX_RATES[fy][ccy]; if(r>0)return r; var ks=Object.keys(FX_RATES).filter(function(k){return FX_RATES[k]&&FX_RATES[k][ccy]>0;}).sort(); if(!ks.length)return null; return FX_RATES[ks[ks.length-1]][ccy]; }   // fall back to latest FY with a rate
+// "Summary with targets" report — three tabs: Summary (read), Edit targets (SUMM_TGT_EDIT), Target recommendations
+// (the embedded recs, formerly a standalone drawer). The tab bar sits outside the content div so each tab's own
+// re-renders (co/ch/metric changes inside renderSummaryView / renderTargetRecs) don't wipe the tabs.
+function renderSummaryReport(body){
+  if(SUMM_TAB!=='summary'&&SUMM_TAB!=='edit'&&SUMM_TAB!=='recs')SUMM_TAB='summary';
+  var TABS=[['summary','Summary'],['edit','Edit targets'],['recs','Target recommendations']];
+  body.innerHTML='<div id="summ-tabbar" style="display:flex;gap:4px;padding:6px 2px 0;position:sticky;top:0;background:#fff;z-index:3;border-bottom:1px solid #e5e7eb">'
+    +TABS.map(function(t){var on=(t[0]===SUMM_TAB);return '<button class="summ-tab" data-t="'+t[0]+'" style="border:1px solid '+(on?'#7c3aed':'#cbd5e1')+';border-bottom:'+(on?'1px solid #fff':'1px solid #cbd5e1')+';background:'+(on?'#7c3aed':'#f8fafc')+';color:'+(on?'#fff':'#475569')+';border-radius:8px 8px 0 0;padding:6px 14px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;margin-bottom:-1px">'+t[1]+'</button>';}).join('')
+    +'</div><div id="summ-tabc"></div>';
+  var c=body.querySelector('#summ-tabc');
+  body.querySelectorAll('.summ-tab').forEach(function(b){ b.onclick=function(){ SUMM_TAB=b.dataset.t; renderSummaryReport(body); }; });
+  if(SUMM_TAB==='recs'){ try{ renderTargetRecs(c); }catch(e){ c.innerHTML='<div style="padding:14px;color:#dc2626">Could not load recommendations: '+String(e&&e.message||e)+'</div>'; } return; }
+  try{ summSetTgtEdit(SUMM_TAB==='edit'); }catch(e){ SUMM_TGT_EDIT=(SUMM_TAB==='edit'); }
+  renderSummaryView(c);
+}
 function renderSummaryView(body){
   function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function fn2(n){ n=Math.round(Number(n)||0); return n?n.toLocaleString():''; }
@@ -8224,9 +8239,7 @@ function renderSummaryView(body){
     +'<span style="display:flex;gap:3px">'+CH_PILLS.map(function(c){return '<button class="sm-ch'+(c===ch?' on':'')+'" data-c="'+c+'">'+c+'</button>';}).join('')+'</span>'
     +'<span style="display:flex;gap:3px;margin-left:8px">'+[['units','Units'],['rev','Revenue'],['revtgt','Rev + targets']].map(function(x){return '<button class="sm-metric'+(x[0]===SUMM_METRIC?' on':'')+'" data-m="'+x[0]+'">'+x[1]+'</button>';}).join('')+'</span>'
     +'<span style="display:flex;gap:3px">'+[['month','Month'],['quarter','Quarter'],['half','Half']].map(function(x){return '<button class="sm-group'+(x[0]===SUMM_GROUP?' on':'')+'" data-g="'+x[0]+'">'+x[1]+'</button>';}).join('')+'</span>'
-    +''   /* currency toggle moved to the single global control in the DEMAND nav */
-    +'<button class="sm-tgtedit'+(SUMM_TGT_EDIT?' on':'')+'" id="sm-tgtedit" style="margin-left:8px">'+(SUMM_TGT_EDIT?'✓ Editing targets':'✎ Add targets')+'</button>'
-    +'<button id="sm-trec" title="Review target recommendations — suggested targets vs last year and current forecast" style="margin-left:6px;border:1px solid #b45309;background:#fff;color:#b45309;border-radius:12px;padding:3px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit">🎯 Review target recommendations</button>'
+    +''   /* currency toggle moved to the single global control in the DEMAND nav; targets edit + recommendations are now the report's own tabs */
     +'<span style="margin-left:14px;font-size:12px;color:#475569;display:flex;align-items:center;gap:5px">Show from <select id="sm-from" style="padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px">'+moOpts(SUMM_FROM)+'</select> to <select id="sm-to" style="padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px">'+moOpts(SUMM_TO)+'</select>'+(rangeMode?' <button id="sm-clear" style="font-size:11px;padding:3px 9px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;cursor:pointer">✕ clear · FY view</button>':'')+'</span>'
     +'</div>'
     +'<div style="font-size:12px;color:#666;margin:0 0 10px">'+e(co)+' · '+e(ch)+' — each cell stacks <b>LY actual</b> / <b>forecast</b> / <b>growth%</b>. Click a subcategory to see its SKUs. '+(rangeMode?('Showing '+mlab(SUMM_FROM)+' → '+mlab(SUMM_TO)+' with a period total.'):'FYs Mar–Feb; past years minimised (click a year to expand). ')+'<span style="background:#ecfdf5;padding:0 4px">actual</span> <span style="background:#f1f5f9;padding:0 4px">pre-launch</span> <span style="background:#fee2e2;padding:0 4px">discontinued</span></div>'
@@ -8236,8 +8249,6 @@ function renderSummaryView(body){
   body.querySelectorAll('.sm-ch').forEach(function(b){ b.onclick=function(){ CF=b.dataset.c; renderSummaryView(body); try{refreshDispCcy();}catch(e){} }; });
   body.querySelectorAll('.sm-metric').forEach(function(b){ b.onclick=function(){ SUMM_METRIC=b.dataset.m; try{localStorage.setItem('summ_metric',SUMM_METRIC);}catch(e){} renderSummaryView(body); }; });
   body.querySelectorAll('.sm-group').forEach(function(b){ b.onclick=function(){ SUMM_GROUP=b.dataset.g; try{localStorage.setItem('summ_group',SUMM_GROUP);}catch(e){} renderSummaryView(body); }; });
-  var _te=body.querySelector('#sm-tgtedit'); if(_te)_te.onclick=function(){ summSetTgtEdit(!SUMM_TGT_EDIT); renderSummaryView(body); };
-  var _tr=body.querySelector('#sm-trec'); if(_tr)_tr.onclick=function(){ try{openTargetRecs();}catch(e){} };
   var fSel=body.querySelector('#sm-from'), tSel=body.querySelector('#sm-to');
   function applyRange(){ SUMM_FROM=fSel.value; SUMM_TO=tSel.value; renderSummaryView(body); }   // full silent re-render so the month range + header/clear update immediately
   fSel.onchange=applyRange; tSel.onchange=applyRange;
@@ -8972,13 +8983,11 @@ function planRevBtnSync(){ var show=(typeof VIEW_MODE!=='undefined'&&VIEW_MODE==
       var btn='border:1px solid #cbd5e1;background:#fff;border-radius:6px;padding:3px 9px;font-size:11px;font-weight:600;font-family:inherit;cursor:pointer;white-space:nowrap;line-height:1.5';
       c.innerHTML='<button id="plan-rev-btn2" type="button" title="Revenue growth targets & tracking — full report" style="'+btn+';border-color:#2563eb;color:#2563eb">Revenue vs target</button>'
         +'<button id="plan-exec-btn" type="button" title="Executive summary — FY revenue &amp; units vs last year" style="'+btn+';border-color:#0f766e;color:#0f766e">Exec summary</button>'
-        +'<button id="plan-summ-btn" type="button" title="Summary report with revenue targets" style="'+btn+';border-color:#7c3aed;color:#7c3aed">Summary + targets</button>'
-        +'<button id="plan-trec-btn" type="button" title="Recommend forecast changes to meet your revenue targets" style="'+btn+';border-color:#b45309;color:#b45309">Target recs</button>';
+        +'<button id="plan-summ-btn" type="button" title="Summary report with revenue targets + recommendations" style="'+btn+';border-color:#7c3aed;color:#7c3aed">Summary + targets</button>';   // "Target recs" is now a tab inside this report
       row.appendChild(c);
       c.querySelector('#plan-rev-btn2').onclick=openPlanRevPopout;
       c.querySelector('#plan-exec-btn').onclick=openExecSummaryPopout;
-      c.querySelector('#plan-summ-btn').onclick=openSummaryPopout;
-      c.querySelector('#plan-trec-btn').onclick=openTargetRecs; }
+      c.querySelector('#plan-summ-btn').onclick=openSummaryPopout; }
   } else { if(c)c.remove(); if(typeof closeExecDrawer==='function')closeExecDrawer(); if(typeof closeRevDrawer==='function')closeRevDrawer(); if(typeof closeSummDrawer==='function')closeSummDrawer(); if(typeof closeTrecDrawer==='function')closeTrecDrawer(); } }
 // "Revenue vs target" opens the FULL revenue report (targets & tracking + price changes) in a 50% drawer —
 // the compact planRevPopRender card is deprecated.
@@ -9038,7 +9047,8 @@ function openSummaryPopout(){ var d=document.getElementById('summ-drawer');
   try{ if(localStorage.getItem('summ_metric')==null){ SUMM_METRIC='revtgt'; } }catch(e){ SUMM_METRIC='revtgt'; }   // first open shows targets
   d=summEnsureDrawer(); var bk=document.getElementById('summ-drawer-backdrop'); if(bk)bk.style.display='block'; d.style.display='flex';
   var body=document.getElementById('summ-drawer-body'); if(body)body.innerHTML='<div class="count" style="padding:14px;color:#888">Loading…</div>';
-  setTimeout(function(){ try{ renderSummaryView(document.getElementById('summ-drawer-body')); }
+  SUMM_TAB='summary';   // the "Summary + targets" entry always lands on the Summary tab
+  setTimeout(function(){ try{ renderSummaryReport(document.getElementById('summ-drawer-body')); }
     catch(e){ var b=document.getElementById('summ-drawer-body'); if(b)b.innerHTML='<div style="padding:14px;color:#dc2626">Could not load Summary: '+String(e&&e.message||e)+'</div>'; } }, 20); }
 // ── Plan ▸ "Target recommendations" — recommend subcategory forecast changes to meet revenue targets ──
 // Units are derived from target £ ÷ ASP (ASP includes price changes), so the unit change is revenue growth

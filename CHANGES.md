@@ -1,3 +1,7 @@
+## v26.732.0 Summary with targets: 3-tab report (Summary / Edit targets / Target recommendations)
+- Folded the standalone "Target recommendations" drawer into the Summary-with-targets report as a third tab. The report now has tabs: **Summary** (read), **Edit targets** (the former ✎/✓ toggle), **Target recommendations** (the recs, embedded).
+- Removed the in-report "🎯 Review target recommendations" button and the "✎ Add targets / ✓ Editing targets" toggle (both are now tabs), and removed the standalone "Target recs" quick-button on the plan (recs are reached via the report tab). "Summary + targets" still opens the report on the Summary tab.
+
 ## v26.731.0 Target recs: current month grows the FORECAST, not last year
 - The current (still-incomplete) calendar month was being targeted as "last-year × (1+growth)", which drags the forecast DOWN when a line grew YoY — e.g. Hair Wrap Seasonal · UK DTC at +50% recommended 268×1.5=402 against a 2,000 forecast (−80%). For the current month only, the recommendation now grows the FULL-MONTH FORECAST: 2,000×1.5 = 3,000, and both the ly and fc baselines show the forecast (2,000→3,000 +50%).
 - Future months are unchanged (still "X% over last year"). The current month is also now always included in the recs even when partial actuals have made it the latest "actual" month.
