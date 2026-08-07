@@ -1,3 +1,8 @@
+## v26.667.0 — Summary/targets: sticky headers + no flash on pill change
+- Summary table is now a scroll container: the country/channel/metric/group pills AND the two-row table header (FY + months/H1/H2) stay sticky; only the subcategory rows scroll.
+- Killed the pill-change flash: the table <style> is injected once into <head> (no re-parse FOUC on re-render), and the targets fetch only runs when targets are shown (Rev+targets / editing) so switching pills no longer blank-flashes the table.
+
+
 ## v26.666.0 — Set targets: category filter (text search + category pills, session-persisted)
 - The Set-targets grid now has a filter bar: a subcategory text search plus multi-select category pills (parent categories). Rows filter to the selection; a live "N / M subcategories" count + clear button. Both persist in the browser session (localStorage).
 

@@ -8042,7 +8042,7 @@ function renderSummaryView(body){
     +'<span style="margin-left:14px;font-size:12px;color:#475569;display:flex;align-items:center;gap:5px">Show from <select id="sm-from" style="padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px">'+moOpts(SUMM_FROM)+'</select> to <select id="sm-to" style="padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px">'+moOpts(SUMM_TO)+'</select>'+(rangeMode?' <button id="sm-clear" style="font-size:11px;padding:3px 9px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;cursor:pointer">✕ clear · FY view</button>':'')+'</span>'
     +'</div>'
     +'<div style="font-size:12px;color:#666;margin:0 0 10px">'+e(co)+' · '+e(ch)+' — each cell stacks <b>LY actual</b> / <b>forecast</b> / <b>growth%</b>. Click a subcategory to see its SKUs. '+(rangeMode?('Showing '+mlab(SUMM_FROM)+' → '+mlab(SUMM_TO)+' with a period total.'):'FYs Mar–Feb; past years minimised (click a year to expand). ')+'<span style="background:#ecfdf5;padding:0 4px">actual</span> <span style="background:#f1f5f9;padding:0 4px">pre-launch</span> <span style="background:#fee2e2;padding:0 4px">discontinued</span></div>'
-    +'<div id="smc" style="overflow-x:auto"></div></div>';
+    +'<div id="smc" style="overflow:auto;max-height:calc(100vh - 250px)"></div></div>';
   body.querySelectorAll('.sm-co').forEach(function(b){ b.onclick=function(){ CUR=b.dataset.c; renderSummaryView(body); }; });
   body.querySelectorAll('.sm-ch').forEach(function(b){ b.onclick=function(){ CF=b.dataset.c; renderSummaryView(body); }; });
   body.querySelectorAll('.sm-metric').forEach(function(b){ b.onclick=function(){ SUMM_METRIC=b.dataset.m; try{localStorage.setItem('summ_metric',SUMM_METRIC);}catch(e){} renderSummaryView(body); }; });
@@ -8056,8 +8056,9 @@ function renderSummaryView(body){
   function draw(){
     var STY='<style>#smc table{border-collapse:separate;border-spacing:0;font-size:12px}#smc th,#smc td{padding:2px 6px;white-space:nowrap;border-bottom:1px solid #f1f1f1;text-align:right}'
       +'#smc th{font-size:10px;text-transform:uppercase;letter-spacing:.02em;color:#666;background:#f8fafc;position:sticky;top:0;z-index:2}'
+      +'#smc thead tr:nth-child(2) th{top:19px}'   /* 2-row header: FY row sticks at 0, month/H1/H2 row just below it */
       +'#smc td.lbl,#smc th.lbl{position:sticky;left:0;background:#fff;text-align:left;z-index:1;min-width:230px;box-shadow:2px 0 3px -2px rgba(15,23,42,.15)}'
-      +'#smc th.lbl{z-index:3;background:#f8fafc}#smc td.act{background:#ecfdf5}#smc td.pre{background:#f1f5f9}#smc td.disc{background:#fee2e2}'
+      +'#smc th.lbl{z-index:6;background:#f8fafc}#smc td.act{background:#ecfdf5}#smc td.pre{background:#f1f5f9}#smc td.disc{background:#fee2e2}'
       +'#smc th.fyh{text-align:center;cursor:pointer;border-left:2px solid #cbd5e1;color:#334155}#smc th.tot{background:#1e3a8a;color:#fff;border-left:1px solid #1e3a8a}'
       +'#smc td.tot{background:#1e3a8a;border-left:1px solid #1e3a8a}#smc td.tot .c3f{color:#fff}#smc td.tot .c3ly{color:#c7d2fe}'
       +'#smc .c3ly{font-size:8px;color:#94a3b8;line-height:1.1}#smc .c3f{font-size:11px;font-weight:600;line-height:1.2;color:#0f172a}#smc .c3g{font-size:8px;font-weight:600;line-height:1.1}'
@@ -8065,7 +8066,10 @@ function renderSummaryView(body){
       +'#smc tr.sku td.lbl{padding-left:22px;font-family:ui-monospace,Menlo,monospace;color:#475569}#smc .smx{color:#94a3b8;font-size:10px;display:inline-block;width:11px}'
       +'.sm-co,.sm-ch,.sm-metric,.sm-group,.sm-tgtedit{border:1px solid #cbd5e1;background:#fff;color:#334155;font-size:11px;padding:3px 10px;border-radius:12px;cursor:pointer;font-weight:600;font-family:inherit}.sm-co.on,.sm-ch.on,.sm-metric.on,.sm-group.on{background:#0f172a;color:#fff;border-color:#0f172a}.sm-tgtedit.on{background:#b45309;color:#fff;border-color:#b45309}'
       +'#smc input.tgin{width:54px;text-align:right;padding:2px 3px;border:1px solid #cbd5e1;border-radius:4px;font-size:11px;font-family:inherit}#smc td.tgcell,#smc td.ecell{vertical-align:top}#smc .c3t{font-size:9px;line-height:1.25;white-space:nowrap}</style>';
-    if(!subs.length){ host.innerHTML=STY+'<div style="color:#888;font-size:12px;padding:12px 2px">No forecast data for '+e(co)+' · '+e(ch)+'.</div>'; return; }
+    // Inject the table styles ONCE into <head> so they persist across re-renders — rebuilding #smc no longer
+    // re-parses a <style> block (which caused the brief unstyled "flash" on every pill change).
+    if(!document.getElementById('smc-sty')){ var _st=document.createElement('style'); _st.id='smc-sty'; _st.innerHTML=STY.replace(/^<style>/,'').replace(/<\/style>$/,''); document.head.appendChild(_st); }
+    if(!subs.length){ host.innerHTML='<div style="color:#888;font-size:12px;padding:12px 2px">No forecast data for '+e(co)+' · '+e(ch)+'.</div>'; return; }
     var h1='', h2='', cols=[];   // cols: {type:'m',m} | {type:'tot',Y} | {type:'ptot'}
     if(rangeMode){
       h2='<th class="lbl">Subcategory / SKU</th>'+rangeMonths.map(function(m){return '<th class="'+(isActualMonth(m)?'act':'')+'">'+mlab(m)+'</th>';}).join('')+'<th class="tot">Total</th>';
@@ -8138,10 +8142,10 @@ function renderSummaryView(body){
           for(var i=1;i<cells.length;i++){ var m=hmap[i-1]; if(!m)continue; var raw=String(cells[i]||'').replace(/[^0-9.\-]/g,''); rws.push({country:co,channel:ch,fy:m.fy,subcategory:sub,level:m.level,idx:m.idx,growth_pct:raw}); } }
         if(msgEl){ msgEl.style.color='#64748b'; msgEl.textContent='Saving '+rws.length+' cells…'; }
         fetch('/api/demand-revenue-targets/periods/bulk',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({rows:rws})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); if(msgEl){msgEl.style.color='#166534';msgEl.textContent='Imported '+(j.saved||0)+' targets.';} SUMM_TGT_KEY=''; renderSummaryView(body); }).catch(function(er){ if(msgEl){msgEl.style.color='#dc2626';msgEl.textContent='Import failed: '+(er.message||er);} }); }
-      host.innerHTML=STY
+      host.innerHTML=''
         +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px"><button id="tgt-dl" style="border:1px solid #cbd5e1;background:#f8fafc;color:#334155;border-radius:6px;padding:4px 11px;font-size:11px;cursor:pointer;font-weight:700;font-family:inherit">⬇ Download template (all subcategories)</button><button id="tgt-imp" style="border:1px solid #cbd5e1;background:#f8fafc;color:#334155;border-radius:6px;padding:4px 11px;font-size:11px;cursor:pointer;font-weight:700;font-family:inherit">⬆ Import targets</button><span id="tgt-msg" style="font-size:11px;color:#94a3b8"></span></div>'
         +'<div id="tgt-imp-box" style="display:none;margin:0 0 8px"><textarea id="tgt-imp-text" placeholder="Paste the filled template CSV here (same Month/Quarter/Half level you downloaded)…" style="width:100%;max-width:820px;height:90px;font-size:11px;font-family:ui-monospace,Menlo,monospace;border:1px solid #cbd5e1;border-radius:6px;padding:6px;box-sizing:border-box"></textarea><div style="margin-top:4px"><button id="tgt-imp-save" style="border:1px solid #7c3aed;background:#7c3aed;color:#fff;border-radius:6px;padding:4px 12px;font-size:11px;cursor:pointer;font-weight:700;font-family:inherit">Save imported targets</button></div></div>'
-        +'<div style="font-size:11px;color:#666;margin:0 0 8px">Enter a revenue <b>growth %</b> (vs last year, + or -) per <b>'+SUMM_GROUP+'</b> for the market total and each subcategory. Set a coarser level (switch to Half/Quarter) and finer levels <b>inherit</b> it (shown as <span style="color:#94a3b8">↳</span>) until you type an override. Blank = clear.</div>'+_tgtFiltBar+'<table>'+eThead+'<tbody>'+eRows+'</tbody></table>';
+        +'<div style="font-size:11px;color:#666;margin:0 0 8px">Enter a revenue <b>growth %</b> (vs last year, + or -) per <b>'+SUMM_GROUP+'</b> for the market total and each subcategory. Set a coarser level (switch to Half/Quarter) and finer levels <b>inherit</b> it (shown as <span style="color:#94a3b8">↳</span>) until you type an override. Blank = clear.</div>'+_tgtFiltBar+'<table>'+eThead+'<tbody>'+eRows+'</tbody></table>';  /* STY now injected once into head */
       var _fq=host.querySelector('#tgt-fq'); if(_fq)_fq.oninput=function(){ TGT_FILT_Q=this.value; try{localStorage.setItem('tgt_filt_q',TGT_FILT_Q);}catch(e){} draw(); var n=host.querySelector('#tgt-fq'); if(n){ n.focus(); var L=n.value.length; try{n.setSelectionRange(L,L);}catch(e){} } };
       host.querySelectorAll('.tgt-fcat').forEach(function(b){ b.onclick=function(){ var c=decodeURIComponent(b.dataset.c); if(!TGT_FILT_CATS)TGT_FILT_CATS=new Set(); if(TGT_FILT_CATS.has(c))TGT_FILT_CATS['delete'](c); else TGT_FILT_CATS.add(c); try{localStorage.setItem('tgt_filt_cats',JSON.stringify(Array.from(TGT_FILT_CATS)));}catch(e){} draw(); }; });
       var _fclr=host.querySelector('#tgt-fclr'); if(_fclr)_fclr.onclick=function(){ TGT_FILT_Q=''; TGT_FILT_CATS=null; try{localStorage.removeItem('tgt_filt_q');localStorage.removeItem('tgt_filt_cats');}catch(e){} draw(); };
@@ -8171,11 +8175,13 @@ function renderSummaryView(body){
         bodyH+='<tr class="sku"><td class="lbl">'+e(r.sku)+tb+(dts?'<div style="font-size:9px;font-family:system-ui">'+dts+'</div>':'')+'</td>'+cells(r.val,r.ly,r.lch,r.disc,null)+'</tr>'; }); }
     });
     var thead=rangeMode?('<thead><tr>'+h2+'</tr></thead>'):('<thead><tr>'+h1+'</tr><tr>'+h2+'</tr></thead>');
-    host.innerHTML=STY+'<table>'+thead+'<tbody>'+bodyH+'</tbody></table>';
+    host.innerHTML='<table>'+thead+'<tbody>'+bodyH+'</tbody></table>';
     host.querySelectorAll('td.lbl[data-sub]').forEach(function(td){ td.onclick=function(){ var s=td.dataset.sub; SUMM_OPEN[s]=!SUMM_OPEN[s]; draw(); }; });
     host.querySelectorAll('th.fyh[data-fy]').forEach(function(th){ th.onclick=function(){ var Y=+th.dataset.fy; SUMM_FYOPEN[Y]=!fyOpen(Y); draw(); }; });
   }
-  if(SUMM_TGT_KEY!==(co+'|'+ch)){ fetch('/api/demand-revenue-targets/periods?country='+encodeURIComponent(co)+'&channel='+encodeURIComponent(ch)).then(function(r){return r.json();}).then(function(rows){ SUMM_TGT={}; (rows||[]).forEach(function(t){ SUMM_TGT[t.fy+'|'+(t.subcategory||'')+'|'+t.level+'|'+t.idx]=t.growth_pct; }); SUMM_TGT_KEY=co+'|'+ch; draw(); }).catch(function(){ SUMM_TGT_KEY=co+'|'+ch; draw(); }); }
+  // Only (re)fetch targets when they're actually shown (Rev+targets metric or editing). Otherwise draw immediately —
+  // no async gap, so switching country/channel pills doesn't blank-flash the table.
+  if((SUMM_METRIC==='revtgt'||SUMM_TGT_EDIT) && SUMM_TGT_KEY!==(co+'|'+ch)){ fetch('/api/demand-revenue-targets/periods?country='+encodeURIComponent(co)+'&channel='+encodeURIComponent(ch)).then(function(r){return r.json();}).then(function(rows){ SUMM_TGT={}; (rows||[]).forEach(function(t){ SUMM_TGT[t.fy+'|'+(t.subcategory||'')+'|'+t.level+'|'+t.idx]=t.growth_pct; }); SUMM_TGT_KEY=co+'|'+ch; draw(); }).catch(function(){ SUMM_TGT_KEY=co+'|'+ch; draw(); }); }
   else draw();
 }
 var KAF_CTRY='uk_3pl', KAF_Q='', KAF_PAST=false;   // Key Accounts grid: selected country (3PL), filter text, show-past-12mo toggle
