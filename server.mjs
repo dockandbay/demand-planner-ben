@@ -2407,14 +2407,34 @@ function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS) {
   setInterval(() => { refresh().catch(() => {}); }, ttlMs).unref?.();
   return c;
 }
+// Section response-cache (Phase 2). For a whitelist of EXPENSIVE, param-free, user-independent GET sections we cache
+// the exact JSON the handler returns (captured via a per-request res.json wrapper — so output is provably identical to
+// the uncached path, no code extraction). TTL cache with single-flight lazy refresh: a fresh entry is served straight
+// from cache; once stale, the FIRST request recomputes (others serve stale meanwhile) then repopulates. Correct on
+// both a long-lived server and Vercel serverless (no background/self-fetch needed). Dropped by invalidateSupplyCaches
+// on any edit. Only the zero-query-param variant is cached (any filter bypasses the cache and runs live).
+const SECTION_CACHE_TTL_MAP = { cashflow: SUPPLY_CACHE_TTL_MS, bi: SUPPLY_CACHE_TTL_MS, manufacturing: SUPPLY_CACHE_TTL_MS, 'payments-report': SUPPLY_CACHE_TTL_MS, shipments: SUPPLY_CACHE_TTL_MS };
+const _sectionResp = {};        // section -> { v, at }
+const _sectionInflight = {};    // section -> bool (a recompute is running; others serve stale)
 function invalidateSupplyCaches() {
   _actionsCache = null; refreshActionsCache().catch(() => {});   // the hand-rolled Actions cache predates makeCache
   _supplyCaches.forEach((c) => { try { c.invalidate(); } catch (e) { /* best-effort */ } });
+  for (const k of Object.keys(_sectionResp)) delete _sectionResp[k];   // drop cached section responses too
 }
 
 
 app.get('/api/supply/:section', async (req, res) => {
   const q = (sql) => pool.query(sql).then(r => r.rows);
+  // Phase-2 section response-cache: serve fresh (or serve stale while one request refreshes); otherwise fall through
+  // to the switch and capture whatever it returns. Only the param-free variant is eligible.
+  const _sec = req.params.section;
+  if (SECTION_CACHE_TTL_MAP[_sec] && Object.keys(req.query || {}).length === 0) {
+    const _c = _sectionResp[_sec];
+    if (_c && (Date.now() - _c.at < SECTION_CACHE_TTL_MAP[_sec] || _sectionInflight[_sec])) return res.json(_c.v);
+    _sectionInflight[_sec] = true;                                  // this request recomputes; concurrent ones serve stale above
+    const _origJson = res.json.bind(res);
+    res.json = (p) => { if (!(p && p.error)) _sectionResp[_sec] = { v: p, at: Date.now() }; _sectionInflight[_sec] = false; return _origJson(p); };
+  }
   try {
     switch (req.params.section) {
       case 'team':   // mentionable Dock & Bay teammates for the internal-note @-picker (handle = email local-part)

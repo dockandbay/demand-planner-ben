@@ -1,3 +1,8 @@
+## v26.728.0 SUPPLY read caches (Phase 2): cashflow, bi, manufacturing, payments-report, shipments
+- Added a section response-cache: for a whitelist of expensive, param-free, user-independent GET sections the exact JSON the handler returns is captured (per-request res.json wrapper) and cached (10-min TTL, single-flight lazy refresh — a stale entry is served while one request recomputes). Works on both a long-lived server and Vercel serverless (no background/self-fetch). Drops with the other SUPPLY caches on any edit; only the zero-param variant is cached (any filter runs live).
+- Warm response times: cashflow 2.2s→~0.01s, BI metrics 1.1s→~0.002s, Manufacturing 2.2s→~0.003s, Payments Report 1.8s→~0.007s, Shipments 0.84s→~0.01s.
+- Verified transparent: for every section a freshly-recomputed response is byte-identical to the cached one; cashflow also matches its pre-Phase-1 output exactly. Non-cached sections unaffected.
+
 ## v26.727.0 SUPPLY read caches: PO rows + lookups + order-plan-exceptions (Phase 1)
 - Added a shared server-cache framework (boot-warm + single-flight + stale-while-revalidate, 10-min TTL) and applied it to the heaviest user-independent SUPPLY reads. All caches drop together on any edit via the client's invalidateDerived hook (now POSTs /api/supply/cache/invalidate); the TTL is the backstop for out-of-app (n8n/ERP) changes.
 - **PO rows** (one PO_ROWS_SQL build) now feeds both the PO grid and Cash Flow. PO grid warm ~2–4s → ~0.5s; Cash Flow 4.2s → 2.2s (residual is cashflowResponse's own queries). Archive filtering moved to JS over the cached set (byte-identical to the old SQL filter; verified). Per-supplier / portal-preview path stays live (uncached).
