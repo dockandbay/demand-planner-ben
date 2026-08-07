@@ -431,6 +431,8 @@ td.sku-fc.fc-nostock .sku-fc-v{color:#991b1b}
 .fcin{display:flex;flex-direction:column;padding:0}
 .fcly{font-size:10px;color:#94a3b8;text-align:right;padding-right:2px;font-variant-numeric:tabular-nums;line-height:1.15}
 .fci{width:100%;padding:0 2px;font-size:11px;text-align:right;border:1px solid transparent;border-radius:2px;background:transparent;color:#555;line-height:1.2}
+/* Forecast-cell override input = right 50% only, so the left half of the cell is free for double-click (notes / do-not-smooth). */
+.fcin>.fci{width:50%;margin-left:auto}
 .fci:focus{outline:none;border-color:#60a5fa;background:#fff}
 .fci.pct{border-color:transparent;background:transparent;color:#1d4ed8}
 .fci.pct.neg{color:#dc2626}
@@ -7087,7 +7089,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         fcWrapCur.appendChild(lyDivCur);
         var inpCur=document.createElement('input');inpCur.type='text';
         inpCur.placeholder='+0%';inpCur.value=storedCur!=null?String(storedCur):'';
-        inpCur.style.cssText='width:100%;border:none;background:transparent;font-size:9px;text-align:right;color:'+(storedCur!=null?'#7c3aed':'#3b82f6')+';outline:none;font-variant-numeric:tabular-nums;padding:0';
+        inpCur.style.cssText='width:50%;margin-left:auto;border:none;background:transparent;font-size:9px;text-align:right;color:'+(storedCur!=null?'#7c3aed':'#3b82f6')+';outline:none;font-variant-numeric:tabular-nums;padding:0';
         inpCur.dataset.ovkey=ovKeyCur;
         inpCur.dataset.ly=fcCur; // % override is relative to the calculated forecast
         skuNav(inpCur,parentKey);
@@ -7150,7 +7152,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
           inp26.type='text';
           inp26.placeholder='+0%';
           inp26.value=stored26!=null?String(stored26):'';
-          inp26.style.cssText='width:100%;border:none;background:transparent;font-size:9px;text-align:right;color:'+(stored26!=null?'#7c3aed':'#3b82f6')+';outline:none;font-variant-numeric:tabular-nums;padding:0;font-weight:'+(stored26!=null?'700':'500');
+          inp26.style.cssText='width:50%;margin-left:auto;border:none;background:transparent;font-size:9px;text-align:right;color:'+(stored26!=null?'#7c3aed':'#3b82f6')+';outline:none;font-variant-numeric:tabular-nums;padding:0;font-weight:'+(stored26!=null?'700':'500');
           inp26.dataset.ovkey=ovKey26;
           inp26.dataset.ly=fc26; // % override is relative to the calculated forecast
           skuNav(inp26,parentKey);
@@ -7217,7 +7219,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         inp27.type='text';
         inp27.placeholder='+0%';
         inp27.value=stored27!=null?String(stored27):'';
-        inp27.style.cssText='width:100%;border:none;background:transparent;font-size:9px;text-align:right;color:'+(stored27!=null?'#7c3aed':'#6366f1')+';outline:none;font-variant-numeric:tabular-nums;padding:0;font-weight:'+(stored27!=null?'700':'500');
+        inp27.style.cssText='width:50%;margin-left:auto;border:none;background:transparent;font-size:9px;text-align:right;color:'+(stored27!=null?'#7c3aed':'#6366f1')+';outline:none;font-variant-numeric:tabular-nums;padding:0;font-weight:'+(stored27!=null?'700':'500');
         inp27.dataset.ovkey=ovKey27;
         inp27.dataset.ly=fc27; // % override is relative to the calculated forecast
         skuNav(inp27,parentKey);
@@ -7304,7 +7306,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         inp28.type='text';
         inp28.placeholder='+0%';
         inp28.value=stored28!=null?String(stored28):'';
-        inp28.style.cssText='width:100%;border:none;background:transparent;font-size:9px;text-align:right;color:'+(stored28!=null?'#7c3aed':'#0d9488')+';outline:none;font-variant-numeric:tabular-nums;padding:0;font-weight:'+(stored28!=null?'700':'500');
+        inp28.style.cssText='width:50%;margin-left:auto;border:none;background:transparent;font-size:9px;text-align:right;color:'+(stored28!=null?'#7c3aed':'#0d9488')+';outline:none;font-variant-numeric:tabular-nums;padding:0;font-weight:'+(stored28!=null?'700':'500');
         inp28.dataset.ovkey=ovKey28;
         inp28.dataset.ly=fc28; // % override is relative to the calculated forecast
         skuNav(inp28,parentKey);
@@ -7402,7 +7404,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       wrap.appendChild(lyD);
       var inp=document.createElement('input');inp.type='text';inp.placeholder='+0%';
       inp.value=stored!=null?String(stored):'';
-      inp.style.cssText='width:100%;border:none;background:transparent;font-size:9px;text-align:right;color:'+(stored!=null?'#7c3aed':'#3b82f6')+';outline:none;font-variant-numeric:tabular-nums;padding:0;font-weight:'+(stored!=null?'700':'500');
+      inp.style.cssText='width:50%;margin-left:auto;border:none;background:transparent;font-size:9px;text-align:right;color:'+(stored!=null?'#7c3aed':'#3b82f6')+';outline:none;font-variant-numeric:tabular-nums;padding:0;font-weight:'+(stored!=null?'700':'500');
       inp.dataset.ovkey=sku+'|'+co+'|'+ch+'|'+m;inp.dataset.ly=fc;
       skuNav(inp,parentKey);
       inp.addEventListener('change',function(){skuCommitOv(this.dataset.ovkey,this.value,parseFloat(this.dataset.ly));refreshRow(s,co,ch);});
@@ -7433,7 +7435,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       var ly=document.createElement('div');ly.style.cssText='font-size:8px;color:#94a3b8;text-align:right;font-variant-numeric:tabular-nums';if(preLaunchM(mCur)){ly.textContent='pre launch';ly.style.cssText='font-size:7px;color:#3b82f6;text-align:right;font-style:italic;white-space:nowrap';}else{ly.textContent=fn(lyCur);}
       w.appendChild(ly);
       var inp=document.createElement('input');inp.type='text';inp.placeholder='+0%';inp.value=storedCur!=null?String(storedCur):'';
-      inp.style.cssText='width:100%;border:none;background:transparent;font-size:9px;text-align:right;color:'+(storedCur!=null?'#7c3aed':'#3b82f6')+';outline:none;font-variant-numeric:tabular-nums;padding:0';
+      inp.style.cssText='width:50%;margin-left:auto;border:none;background:transparent;font-size:9px;text-align:right;color:'+(storedCur!=null?'#7c3aed':'#3b82f6')+';outline:none;font-variant-numeric:tabular-nums;padding:0';
       inp.dataset.ovkey=sku+'|'+co+'|'+ch+'|'+mCur;inp.dataset.ly=fcCur;skuNav(inp,parentKey);
       inp.addEventListener('change',function(){skuCommitOv(this.dataset.ovkey,this.value,parseFloat(this.dataset.ly));refreshRow(s,co,ch);});
       w.appendChild(inp);

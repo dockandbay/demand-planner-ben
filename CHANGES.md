@@ -1,3 +1,6 @@
+## v26.697.0 — Forecast override input = right 50% of the cell (left half free for double-click)
+- The editable %/override input now occupies only the right half of each forecast cell (still right-aligned). The left half is now clear for double-click → add notes / do-not-smooth, which the full-width input previously blocked.
+
 ## v26.696.0 — Forecast note dates → dd-mmm-yy
 - Note submitter/date lines in the popup and the N hover tooltip now show the date as dd-mmm-yy (e.g. 07-Aug-26) via dateDMY(), per the house date format.
 
