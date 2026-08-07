@@ -1,5 +1,7 @@
 ## v26.723.0 — Summary targets: inherited quarter/month cells match the entered format
-- When a Half target (e.g. +4%) cascades down to Quarter/Month, those inherited cells now show "↳+4%" (with the %) on the light-green background, matching an entered % growth (the ↳ + greyed text still marks them as inherited). Was showing a bare "4" with no colour/## v26.722.0 — Server: warm the page-data cache on boot + stale-while-revalidate (no more cold-build spikes)
+- When a Half target (e.g. +4%) cascades down to Quarter/Month, those inherited cells now show "↳+4%" (with the %) on the light-green background, matching an entered % growth (the ↳ + greyed text still marks them as inherited). Was showing a bare "4" with no colour or %.
+
+## v26.722.0 — Server: warm the page-data cache on boot + stale-while-revalidate (no more cold-build spikes)
 - The main app "/" data build (~12 Supabase queries, ~26s cold on the remote sandbox) is now warmed once at server startup and refreshed in the BACKGROUND when it passes the 5-min TTL — a real request never blocks on a cold build (it serves the cached build and revalidates behind the scenes). No idle polling (refresh only when a request arrives past TTL). Forecast-save invalidation unchanged (edits still show on the next load). Fixes the intermittent very-slow first load (esp. on the mobile tunnel).
 
 ## v26.721.0 — DEMAND plan: notes (N) + record-of-change (R) load lazily (non-blocking)
