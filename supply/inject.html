@@ -5846,13 +5846,13 @@
     // when active, expands a level-3 row of its member config tabs.
     var SC_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom','products','barcodegen'];
     var SC_LABEL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'Manufacturing BOM',products:'Products',barcodegen:'Barcodes'};
-    var ADM_KEYS=['admin-general','permissions','email-log'];
-    var ADM_LABEL={'admin-general':'General',permissions:'Permissions','email-log':'Email log'};
+    var ADM_KEYS=['admin-general','exchange-rates','permissions','email-log'];
+    var ADM_LABEL={'admin-general':'General','exchange-rates':'Exchange rates',permissions:'Permissions','email-log':'Email log'};
     // Supply chain sits second (next to General settings); it expands to the level-3 members below / nested.
     var L2=[['general','General settings'],['supplychain','Supply chain'],['portalusers','Portal users'],['portal','Portal'],['keyaccounts','Key accounts'],['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']];
     if(ME&&ME.is_admin){L2.push(['admin','Admin']);}   // Admin grouping → Permissions / Email log as level-3 tabs
     if(CONFIG_SUB==='forecast-export')CONFIG_SUB='export-uploads';   // legacy slug redirect
-    if((CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log'||CONFIG_SUB==='admin-general')&&!(ME&&ME.is_admin))CONFIG_SUB='general';   // guard: non-admins can't land on admin-only tabs
+    if((CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log'||CONFIG_SUB==='admin-general'||CONFIG_SUB==='exchange-rates')&&!(ME&&ME.is_admin))CONFIG_SUB='general';   // guard: non-admins can't land on admin-only tabs
     function reload(){ delete cache['config']; selectSection('config'); }   // refresh after a rate add (keeps sub-tab)
     // Generic Edit/Save row table: read-only cells + an Edit button per row; Edit swaps that row's cells to inputs
     // and shows Save/Cancel; Save POSTs all editable fields at once. cols: [{f,h,t:'text|num|select',ro,opts,w}].
@@ -6676,6 +6676,24 @@
           fetch('/api/supply/erp-status').then(function(r){return r.json();}).then(function(st){ var el=document.getElementById('erp-status'); if(!el)return;
             function dot(ok){ return ok?'<span style="color:#16a34a">✓ configured</span>':'<span style="color:#b45309">⚠ keys missing</span>'; }
             el.innerHTML='Fulfil API keys in server env — Sandbox: '+dot(st&&st.fulfil&&st.fulfil.sandbox)+' &nbsp;·&nbsp; Live: '+dot(st&&st.fulfil&&st.fulfil.live); }).catch(function(){});
+        }).catch(function(e){ b.innerHTML='<div class="count" style="color:#dc2626">'+esc(String(e))+'</div>'; }); };
+      SUBS['exchange-rates']=function(){ b.innerHTML='<div class="count">Loading…</div>';
+        fetch('/api/app-settings').then(function(r){return r.json();}).then(function(s){ s=s||{};
+          var fx=(function(){ try{ var o=(typeof s.fx_rates==='string')?JSON.parse(s.fx_rates):(s.fx_rates||{}); return (o&&typeof o==='object')?o:{}; }catch(e){ return {}; } })();
+          var now=new Date(), yy=now.getFullYear(), mm=now.getMonth()+1, curFY=(mm>=3?yy:yy-1);
+          var fys=[curFY-1,curFY,curFY+1,curFY+2];
+          var CCY=[['USD','GBP → USD (US)'],['EUR','GBP → EUR (EU)'],['AUD','GBP → AUD (AU)']];
+          var fyLbl=function(y){return 'FY'+String(y).slice(2)+'/'+String(y+1).slice(2);};
+          var rows=fys.map(function(y){ return '<tr><td class="l" style="padding:5px 10px;font-weight:600">'+fyLbl(y)+'</td>'
+            +CCY.map(function(c){ var v=(fx[y]&&fx[y][c[0]]!=null)?fx[y][c[0]]:''; return '<td style="padding:4px 10px;text-align:right"><input class="fci fx-in" data-fy="'+y+'" data-ccy="'+c[0]+'" value="'+esc(v)+'" placeholder="rate" inputmode="decimal" style="width:90px;text-align:right"></td>'; }).join('')+'</tr>'; }).join('');
+          b.innerHTML='<div class="annot"><b>CONFIG ▸ Admin ▸ Exchange rates.</b> A simple <b>blended / average rate per financial year</b> (Mar–Feb) used to display a market in its local currency. Sales &amp; forecasts are held in GBP; local = GBP × the FY rate. e.g. a GBP→USD rate of 1.27 shows £100 as $127.</div>'
+            +'<div class="sect-h">GBP → local currency, by financial year</div>'
+            +'<div class="tw" style="max-width:560px"><table style="width:max-content;min-width:100%"><thead><tr><th class="l" style="padding:5px 10px">Financial year</th>'+CCY.map(function(c){return '<th style="padding:5px 10px;text-align:right">'+c[1]+'</th>';}).join('')+'</tr></thead><tbody>'+rows+'</tbody></table></div>'
+            +'<div class="mut tiny" style="margin-top:8px">Blank = no conversion offered for that market/year (falls back to GBP). Also feeds the SUPPLY Cash Flow GBP↔USD columns (wired later).</div>';
+          b.querySelectorAll('.fx-in').forEach(function(inp){ inp.onchange=function(){ var y=inp.dataset.fy, ccy=inp.dataset.ccy, raw=String(inp.value).replace(/[^0-9.]/g,'').trim();
+            if(!fx[y])fx[y]={}; if(raw===''){ delete fx[y][ccy]; if(!Object.keys(fx[y]).length)delete fx[y]; } else fx[y][ccy]=Number(raw);
+            inp.value=raw; inp.style.borderColor='#d0d0d0';
+            fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'fx_rates',value:JSON.stringify(fx)})}).then(function(r){return r.json();}).then(function(j){ inp.style.borderColor=(j&&j.error)?'#dc2626':'#16a34a'; setTimeout(function(){inp.style.borderColor='';},900); }).catch(function(){ inp.style.borderColor='#dc2626'; }); }; });
         }).catch(function(e){ b.innerHTML='<div class="count" style="color:#dc2626">'+esc(String(e))+'</div>'; }); };
       SUBS['permissions']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/config/permissions').then(function(r){return r.json();}).then(function(rows){

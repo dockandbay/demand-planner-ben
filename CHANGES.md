@@ -1,3 +1,7 @@
+## v26.676.0 — Multi-currency Phase 1: CONFIG ▸ Admin ▸ Exchange rates
+- New admin-only CONFIG ▸ Admin ▸ Exchange rates editor: a per-financial-year grid of blended GBP→USD / GBP→EUR / GBP→AUD rates (stored in app_settings.fx_rates, no migration). Server injects FX_RATES into the DEMAND app for the upcoming currency toggle (Phase 2); will also feed supply cash flow (Phase 3).
+
+
 ## v26.675.0 — Set targets: hover the £ target for a units/ASP/revenue breakdown
 - Hovering the £ figure under a target cell shows a tooltip: current forecast vs target for Units and Revenue (with from→to deltas) plus the ASP used. Works per Month/Quarter/Half cell; current part-way month uses the full-month forecast.
 

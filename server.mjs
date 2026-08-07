@@ -656,6 +656,8 @@ app.get('/', async (_req, res) => {
       for (const mk of Object.keys(acc)) for (const sc of Object.keys(acc[mk])) SUBCAT_RT[mk][sc] = Math.round(acc[mk][sc].s / acc[mk][sc].n * 100) / 100;
       html = replaceGlobal(html, 'SUBCAT_RT', JSON.stringify(SUBCAT_RT));
     } catch (e) { /* leave the {} default */ }
+    // DEMAND multi-currency: blended GBP→local rates per FY (app_settings.fx_rates = {"<fyStart>":{USD,EUR,AUD}}). Local = GBP × rate.
+    try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='fx_rates'`)).rows[0]; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'FX_RATES', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { /* leave the {} default */ }
     // SUG-0018 P2: Klaviyo BIS take-rate (% of waiting subscribers → suggested forecast uplift; app_settings.bis_take_rate, default 35).
     try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='bis_take_rate'`)).rows[0]; const tr = (r && r.value != null && r.value !== '') ? Number(r.value) : 35; html = replaceGlobal(html, 'BIS_CFG', JSON.stringify({ take_rate: (isFinite(tr) && tr > 0 ? tr : 35) })); } catch (e) { /* leave the default */ }
     // Neutralise the stale baked input overlay so live forecast_inputs is authoritative.
