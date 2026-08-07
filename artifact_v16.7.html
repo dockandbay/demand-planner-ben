@@ -5274,7 +5274,7 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   // per-cell forecast note key + "N" badge (dbl-click the cell to add/view notes)
   var _nk=((typeof SKUM!=='undefined'&&SKUM[s])?'sku':'subcat')+'|'+s+'|'+co+'|'+ch+'|'+fym; td.dataset.nk=_nk;
   if(typeof FC_NOTES!=='undefined'&&FC_NOTES[_nk]&&FC_NOTES[_nk].length){ var _nb=document.createElement('span'); _nb.className='fc-note-n'; _nb.textContent='N'; _nb.dataset.nk=_nk; td.appendChild(_nb); }
-  var _rf=cellFlags(_nk); if(_rf){ td.classList.add('has-rail'); td.insertAdjacentHTML('afterbegin',cellRailHtml(_rf)); }
+  var _rf=cellFlags(_nk); if(_rf){ td.classList.add('has-rail'); td.style.position='relative'; td.insertAdjacentHTML('afterbegin',cellRailHtml(_rf)); }
   const d=document.createElement('div');d.className='fcin';
   const lyD=document.createElement('div');lyD.className='fcly';
   // Forecast-on-forecast years: LY is the prior-year forecast (not an actual) — keep neutral colour
@@ -7365,7 +7365,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       var fcv=isAct?act:fc;
       td.className=fyBg(Y)+(first?' sep2':'')+(isAct?' sku-act-cell':'');
       td.style.cssText='padding:1px 2px;border-bottom:1px solid #f0f0ee';
-      var _rf=cellFlags('sku|'+sku+'|'+co+'|'+ch+'|'+m); if(_rf){ td.classList.add('has-rail'); td.insertAdjacentHTML('afterbegin',cellRailHtml(_rf)); }
+      var _rf=cellFlags('sku|'+sku+'|'+co+'|'+ch+'|'+m); if(_rf){ td.classList.add('has-rail'); td.style.position='relative'; td.insertAdjacentHTML('afterbegin',cellRailHtml(_rf)); }
       if(isAct){
         var yoy=lyVal>0?Math.round((act-lyVal)/lyVal*100):null;
         var yc=yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp',ys=yoy!=null?((yoy>=0?'+':'')+yoy+'%'):'';

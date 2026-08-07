@@ -1,3 +1,6 @@
+## v26.693.0 — Fix: cell indicator rail escaped to outside the table on SKU rows
+- The vertical rail is absolute-positioned; SKU `<td>`s were not establishing a positioning context (category td.fctd already did), so the AMALG Apr-28 rail rendered in a phantom column outside the table. Now sets `position:relative` inline on any rail cell.
+
 ## v26.692.0 — DEMAND cell indicators: vertical rail (visual demo at 2 cells)
 - New reusable cell indicator rail: subtle vertical letters (i / C / N / S̶) centred in the cell's left gutter, so it never widens the column. Only active flags render; each has a 120ms tooltip. S̶ = do-not-smooth (struck).
 - Seeded a visual demo at UK DTC · Picnic Blanket · Mar-28 (category row) and PICNIC-CAB-LG-AMALG · Apr-28 (SKU row) so the look can be approved before the real N/i/C data + do-not-smooth engine are wired.
