@@ -4911,17 +4911,17 @@
       if((st==='short'||!pos.length) && c.carry && c.carry.made>0){ var cy=c.carry;
         carryHtml='<div style="margin:6px 0 0;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:6px 9px;font-size:11px;color:#1e40af">↩ Refer to <b>P'+esc(cy.prod)+'</b> where <b>'+units(cy.made)+'</b> units were manufactured'+(cy.surplus>0?(' — <b>'+units(cy.surplus)+' over</b> its own demand (available to pull from)'):(cy.required>0?(' (met its own demand of '+units(cy.required)+')'):''))+'.</div>'; }
       var stkTile='<div style="flex:0 0 auto;min-width:84px;padding:7px 11px;border-radius:8px;background:#e0f2fe;color:#075985"><input class="mfg-drw-stock" data-ci="'+ci+'" value="'+(c.stock||0)+'" inputmode="numeric" title="Existing on-hand stock covering this component — added to total supply (bound to the main table)" style="width:58px;font-size:15px;font-weight:800;line-height:1.1;border:1px solid #7dd3fc;border-radius:4px;padding:0 4px;background:#fff;color:#075985;text-align:right"><div style="font-size:9px;text-transform:uppercase;letter-spacing:.04em;opacity:.85;margin-top:2px">Existing stock</div></div>';
-      var acc=(st!=='ok')?('<label style="display:inline-flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;margin-top:8px;color:#334155"><input type="checkbox" class="mfg-drw-acc" data-ci="'+ci+'" data-comp="'+esc(c.comp)+'"'+(c.accepted?' checked':'')+'> Sign-off — accept this '+st+'</label>'):'';
+      var acc=(st!=='ok')?('<label style="display:inline-flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;color:#334155;white-space:nowrap" title="Accept this '+st+' component">'+'<input type="checkbox" class="mfg-drw-acc" data-ci="'+ci+'" data-comp="'+esc(c.comp)+'"'+(c.accepted?' checked':'')+'> Sign-off</label>'):'';
       return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:10px">'
-        +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px"><b style="font-size:12px">'+esc(c.comp)+'</b><span class="mut tiny">'+units(c.per)+'/unit</span><span style="margin-left:auto">'+covTxt+'</span></div>'
+        +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px"><b style="font-size:12px">'+esc(c.comp)+'</b><span class="mut tiny">'+units(c.per)+'/unit</span><span style="margin-left:auto">'+covTxt+'</span>'+(acc?'<span style="padding-left:10px;margin-left:10px;border-left:1px solid #e5e7eb">'+acc+'</span>':'')+'</div>'
         +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end">'
           +mfgKpi('Required',units(c.required),'#f1f5f9','#334155')
           +mfgKpi('In production',units(c.inProd),'#fef3c7','#92400e')
           +mfgKpi('Completed',units(c.completed),'#dcfce7','#166534')
           +stkTile
           +mfgKpi('Total supply',units(c.supplied),'#f1f5f9','#334155')
-          +mfgKpi('Coverage',(st==='ok'?'✓':(st==='short'?units(-c.diff):'+'+units(c.diff))),st==='short'?'#fee2e2':st==='over'?'#fef9c3':'#dcfce7',st==='short'?'#b91c1c':st==='over'?'#92710a':'#166534')
-        +'</div>'+acc+poTbl+carryHtml+'</div>'; }
+          +mfgKpi('Coverage',(st==='ok'?'✓ match':(st==='short'?units(-c.diff)+' SHORT':units(c.diff)+' OVER')),st==='short'?'#fee2e2':st==='over'?'#fef9c3':'#dcfce7',st==='short'?'#b91c1c':st==='over'?'#92710a':'#166534')
+        +'</div>'+poTbl+carryHtml+'</div>'; }
     var bg=document.createElement('div'); bg.id='podrawer-bg'; bg.style.zIndex=(typeof nextDrawerZ==='function'?nextDrawerZ():1000);
     bg.innerHTML='<div id="podrawer"><div class="shipdrawer-head"><div class="shipdrawer-title">'+badgeFinInline()+' '+esc(m.parent)+' <span style="font-weight:400;opacity:.7">· '+esc(m.prodLabel)+'</span></div>'
       +'<div><button class="shipdrawer-x" title="close">✕</button></div></div>'

@@ -1,3 +1,7 @@
+## v26.689.0 — Manufacturing drawer: clearer Coverage wording + inline Sign-off
+- Coverage KPI in the pop-out drawer now reads "30 SHORT" / "45 OVER" (was a bare "30"); ✓ match unchanged.
+- Component Sign-off checkbox moved inline onto the header row (next to Coverage), instead of a separate line underneath.
+
 ## v26.688.0 — Manufacturing drawer: full columns + editable stock/sign-off bound to the main table; CA→CAD currency
 - The per-BOM-SKU drawer now shows Required / In production / Completed / Existing stock / Total supply / Coverage / Sign-off per component. Existing stock is editable and Sign-off (accept) is a checkbox here too — both write through and patch the main table row (and _mfgBun), so the two views stay in sync.
 - Currency: added CA → CAD (mktCcy/CCY_SYM + a GBP→CAD column in CONFIG ▸ Admin ▸ Exchange rates).
