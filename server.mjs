@@ -41,6 +41,15 @@ const pool = new pg.Pool({
 // fatal and exits (the repeated EADDRNOTAVAIL crashes in dev). Log it and let the pool recycle the
 // client — the next query opens a fresh connection.
 pool.on('error', (err) => { console.error('[pg pool] idle client error (ignored):', err && err.message); });
+// Keep one pooled connection WARM. idleTimeoutMillis (8s) closes idle clients, so a request after any short idle gap
+// otherwise pays the remote Supabase pooler's ~8s cold-connect stall — which is what made SUPPLY (Actions etc.) feel
+// slow on the sandbox even with the response caches (every request still runs one small query). A 5s SELECT 1 keeps a
+// connection alive so requests reuse it. Long-lived server only; on Vercel the process is ephemeral (keepalive would
+// be pointless and would fight allowExitOnIdle). unref() so it never itself holds the process open.
+if (!process.env.VERCEL) {
+  const _ka = setInterval(() => { pool.query('SELECT 1').catch(() => {}); }, 5000);
+  _ka.unref?.();
+}
 // Last-resort process guards so a single malformed request or stray async rejection can't take the
 // whole server down (we saw an ERR_OUT_OF_RANGE kill it once). This harness holds no critical
 // in-memory state — it's a stateless proxy to Postgres — so logging and staying up beats crashing.
@@ -606,6 +615,14 @@ app.use(async (req, res, next) => {
     const label = cap === 'demand' ? 'DEMAND' : cap === 'config' ? 'CONFIG' : cap === 'product' ? 'PRODUCT' : 'SUPPLY';
     return res.status(403).json({ error: 'Read-only access — you don’t have ' + label + ' edit rights. Ask an admin (CONFIG ▸ Permissions).', code: 'readonly', cap });
   } catch (e) { return next(); }   // the guard must never break a request itself
+});
+// After any supplier-portal WRITE, drop the cached portal bootstraps so the supplier's next load reflects their edit
+// (tracking, notes, completion, invoice, cost submit…). Cheap — the map holds one entry per active supplier set.
+app.use((req, res, next) => {
+  if (req.method === 'POST' && req.path.startsWith('/api/portal/')) {
+    res.on('finish', () => { try { if (res.statusCode < 400) { _portalCache.clear(); _portalInflight.clear(); } } catch (e) { /* ignore */ } });
+  }
+  next();
 });
 
 // Short-TTL cache of the built data globals. The build (~12 Supabase queries) is ~85% of a page serve (~870ms);
@@ -2416,10 +2433,17 @@ function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS) {
 const SECTION_CACHE_TTL_MAP = { cashflow: SUPPLY_CACHE_TTL_MS, bi: SUPPLY_CACHE_TTL_MS, manufacturing: SUPPLY_CACHE_TTL_MS, 'payments-report': SUPPLY_CACHE_TTL_MS, shipments: SUPPLY_CACHE_TTL_MS };
 const _sectionResp = {};        // section -> { v, at }
 const _sectionInflight = {};    // section -> bool (a recompute is running; others serve stale)
+// Supplier-portal bootstrap cache — per supplier-set + includeArchived. The portal is the one heavy PO-calc path
+// with no cache (POS_SQL_PORTAL live + 8 follow-on queries every load → ~8s on the sandbox pooler). Keyed, 10-min
+// TTL, single-flight; cleared by invalidateSupplyCaches (admin edits) and after any portal POST (the supplier's own
+// write — so their next load reflects it).
+const _portalCache = new Map();      // key -> { v, at }
+const _portalInflight = new Map();   // key -> bool
 function invalidateSupplyCaches() {
   _actionsCache = null; refreshActionsCache().catch(() => {});   // the hand-rolled Actions cache predates makeCache
   _supplyCaches.forEach((c) => { try { c.invalidate(); } catch (e) { /* best-effort */ } });
   for (const k of Object.keys(_sectionResp)) delete _sectionResp[k];   // drop cached section responses too
+  _portalCache.clear(); _portalInflight.clear();                       // and cached portal bootstraps
 }
 
 
@@ -11219,6 +11243,14 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
     // Hide archived (completed, pre-cutoff) POs by default — same cutoff as the admin grid — to keep the portal
     // payload small; ?includeArchived=1 reveals them (portal "Show archived" toggle).
     const _inclArch = String(req.query.includeArchived || '') === '1';
+    // Per-supplier-set bootstrap cache: serve fresh (or serve stale while one request rebuilds); else capture the
+    // response below. Cleared on admin edits (invalidateSupplyCaches) and after the supplier's own portal POST.
+    const _pkey = names.slice().sort().join('|') + '|' + (_inclArch ? '1' : '0');
+    const _phit = _portalCache.get(_pkey);
+    if (_phit && (Date.now() - _phit.at < SUPPLY_CACHE_TTL_MS || _portalInflight.get(_pkey))) return res.json(_phit.v);
+    _portalInflight.set(_pkey, true);
+    const _pOrigJson = res.json.bind(res);
+    res.json = (p) => { if (!(p && p.error)) _portalCache.set(_pkey, { v: p, at: Date.now() }); _portalInflight.delete(_pkey); return _pOrigJson(p); };
     const _cutoff = await poArchiveCutoff();
     let _posSql = POS_SQL_PORTAL, _posParams = [names];
     if (_cutoff && !_inclArch) {
