@@ -1,3 +1,8 @@
+## v26.705.0 — Summary targets tooltip: flip-up, left-align, pinnable, LY-actuals baseline
+- Tooltip flips ABOVE when near the bottom of the screen (bottom rows were off-page).
+- Content left-aligned; tooltip is now selectable/copyable (pointer-events on + a short grace period so you can move into it).
+- FIX: the target tooltip now compares LAST-YEAR ACTUALS → target (LY already blended with LY forecast for incomplete months), not the current forecast — so a +4% target reads as +4% instead of a spurious decrease. Units now use the same net ASP as the under-cell figure, so the two agree (was 16k vs 14,692). Added a Growth row.
+
 ## v26.704.0 — CRITICAL FIX: demand plan blank / note tooltip broken (dateDMY out of scope)
 - Note date formatting used dateDMY(), which is scoped to the buy-plan module and undefined in the notes scope. It threw a ReferenceError: in cellNoteTitle() (runs during render → renderMain aborted → the whole DEMAND plan showed no data, v26.703), and in fcNoteTipHtml() (threw on hover → note tooltip never appeared, since v26.696). Added a top-level _fcDMY() dd-mmm-yy formatter and used it in cellNoteTitle, fcNoteTipHtml, and the note popup.
 
