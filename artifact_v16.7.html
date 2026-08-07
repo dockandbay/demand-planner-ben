@@ -3895,6 +3895,8 @@ function smoothDisregards(co,ch,s){ return !!SMOOTH_DISREGARD_DISC[co+'|'+ch+'|'
 var SUBCAT_RT={};   // avg EX-TAX retail £/unit per market × subcategory (server-injected from planner.products); Set-targets £→units
 var FX_RATES={};   // blended GBP→local rate per FY start year: {"2026":{USD:1.27,EUR:1.17,AUD:1.92}} (CONFIG▸Admin▸Exchange rates); local = GBP × rate
 var SMOOTH_AUTO={flags:{},threshold:20,mode:'standard',lastRun:null};  // one-click auto-smooth: flagged co|ch|subcat over `threshold`% gap are smoothed (standard|leader). lastRun = ISO of last discontinued smooth/recalc. Server-injected.
+var SMOOTH_LOCKS={};  // do-not-smooth locks keyed 'sku|CO|CH|YYYY_MM' → true. A locked SKU-cell is held FIXED by smoothing (excluded from the pool; its value subtracted from the subcat target so others fill the rest). SKU-level only. Server-injected from app_settings.smooth_locks.
+function saveSmoothLocks(){ fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'smooth_locks',value:JSON.stringify(SMOOTH_LOCKS)})}).catch(function(){}); }
 function smoothAuto(co,ch,s){ return !!(SMOOTH_AUTO.flags&&SMOOTH_AUTO.flags[co+'|'+ch+'|'+s]); }
 // >48h staleness badge on the ⚙ Smoothing button: when the last discontinued smooth/recalc was >48h ago AND a
 // re-run would change numbers (a flagged subcat is back over the auto-smooth threshold), show a count.
@@ -5198,6 +5200,7 @@ function openFcNotePopup(td){ var nk=td&&td.dataset.nk; if(!nk)return; _fcCloseP
   var pop=document.createElement('div'); pop.id='fc-note-pop'; document.body.appendChild(pop);
   function draw(){ var arr=FC_NOTES[nk]||[];
     pop.innerHTML='<div style="font-weight:700">Forecast notes</div><div '+_fcMut+' style="font-size:10px;color:#94a3b8;margin-bottom:6px">'+_fcEsc(m.item)+' · '+_fcEsc(m.co)+' · '+_fcEsc(m.ch)+' · '+_fcEsc(_fcMlbl(m.month))+'</div>'
+      +(m.level==='sku'?('<label style="display:flex;align-items:flex-start;gap:6px;font-size:12px;margin:0 0 8px;padding:6px 8px;background:#fff7ed;border:1px solid #fed7aa;border-radius:6px;cursor:pointer;color:#7c2d12"><input type="checkbox" class="fcn-lock" style="margin-top:2px"'+((typeof SMOOTH_LOCKS!=='undefined'&&SMOOTH_LOCKS[nk])?' checked':'')+'><span><b>Do not smooth</b> — lock this forecast. Smoothing leaves it fixed and other SKUs absorb the difference; only a manual override changes it.</span></label>'):'')
       +(arr.length?arr.map(function(n){return '<div style="border-top:1px solid #f1f5f9;padding:5px 0"><div style="white-space:pre-wrap">'+_fcEsc(n.note)+'</div><div style="font-size:10px;color:#94a3b8">'+_fcEsc((n.created_by||'—').replace(/@dockandbay\.com\b/gi,'@'))+' · '+_fcEsc(n.created_at||'')+(n.updated_at?' · edited':'')+' &nbsp;<a href="#" class="fcn-ed" data-id="'+n.id+'" style="color:#2563eb">edit</a> <a href="#" class="fcn-dl" data-id="'+n.id+'" style="color:#b91c1c">delete</a></div></div>';}).join(''):'<div style="font-size:10px;color:#94a3b8;padding:4px 0">No notes yet.</div>')
       +'<div style="border-top:1px solid #e2e8f0;margin-top:6px;padding-top:6px"><textarea class="fcn-new" rows="2" placeholder="Add a note…" style="width:100%;box-sizing:border-box;font-family:inherit;font-size:12px;border:1px solid #cbd5e1;border-radius:5px;padding:5px"></textarea>'
       +'<div style="text-align:right;margin-top:4px">'+(editId?_fcBtn('fcn-cancel','Cancel',false)+' ':'')+_fcBtn('fcn-save',editId?'Save':'Add note',true)+'</div></div>';
@@ -5205,6 +5208,7 @@ function openFcNotePopup(td){ var nk=td&&td.dataset.nk; if(!nk)return; _fcCloseP
     pop.querySelector('.fcn-save').onclick=function(){ var v=ta.value.trim(); if(!v)return; this.disabled=true;
       if(editId){ var _id=editId; fetch('/api/forecast/note/'+_id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({note:v})}).then(function(r){return r.json();}).then(function(){ var cur=(FC_NOTES[nk]||[]).filter(function(x){return String(x.id)===String(_id);})[0]; if(cur){cur.note=v;cur.updated_at='1';} editId=null; draw(); fcNoteBadge(nk); }).catch(function(){ draw(); }); }
       else { fetch('/api/forecast/notes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({level:m.level,item:m.item,country:m.co,channel:m.ch,month:m.month,note:v})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.id){ (FC_NOTES[nk]||(FC_NOTES[nk]=[])).push({id:j.id,note:v,created_by:j.created_by||'',created_at:j.created_at||''}); } draw(); fcNoteBadge(nk); }).catch(function(){ draw(); }); } };
+    var lk=pop.querySelector('.fcn-lock'); if(lk)lk.onchange=function(){ if(typeof SMOOTH_LOCKS==='undefined')window.SMOOTH_LOCKS={}; if(this.checked)SMOOTH_LOCKS[nk]=true; else delete SMOOTH_LOCKS[nk]; try{saveSmoothLocks();}catch(e){} try{renderMain();}catch(e){} };
     var cn=pop.querySelector('.fcn-cancel'); if(cn)cn.onclick=function(){ editId=null; draw(); };
     pop.querySelectorAll('.fcn-ed').forEach(function(a){ a.onclick=function(e){ e.preventDefault(); editId=a.dataset.id; draw(); }; });
     pop.querySelectorAll('.fcn-dl').forEach(function(a){ a.onclick=function(e){ e.preventDefault(); if(!confirm('Delete this note?'))return; var id=a.dataset.id;
@@ -5215,7 +5219,7 @@ function openFcNotePopup(td){ var nk=td&&td.dataset.nk; if(!nk)return; _fcCloseP
   setTimeout(function(){ document.addEventListener('mousedown',_fcPopOut,true); },0);
 }
 (function(){   // delegated: dbl-click a forecast cell to open notes; 120ms hover tooltip on the N badge
-  document.addEventListener('dblclick',function(e){ if(e.target&&e.target.tagName==='INPUT')return; var td=e.target.closest?e.target.closest('td.fctd[data-nk]'):null; if(td)openFcNotePopup(td); });
+  document.addEventListener('dblclick',function(e){ if(e.target&&e.target.tagName==='INPUT')return; var td=e.target.closest?e.target.closest('td[data-nk]'):null; if(td)openFcNotePopup(td); });
   var tip=null,tt=null;
   document.addEventListener('mouseover',function(e){ var n=e.target.closest?e.target.closest('.fc-note-n'):null; if(!n)return; clearTimeout(tt);
     tt=setTimeout(function(){ var html=fcNoteTipHtml(n.dataset.nk); if(!html)return; if(!tip){tip=document.createElement('div');tip.id='fc-note-tip';document.body.appendChild(tip);} tip.innerHTML=html; tip.style.display='block'; var r=n.getBoundingClientRect(); tip.style.left=Math.max(6,Math.min(r.left,window.innerWidth-306))+'px'; tip.style.top=(r.bottom+5)+'px'; },120); });
@@ -5274,7 +5278,6 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   // per-cell forecast note key + "N" badge (dbl-click the cell to add/view notes)
   var _nk=((typeof SKUM!=='undefined'&&SKUM[s])?'sku':'subcat')+'|'+s+'|'+co+'|'+ch+'|'+fym; td.dataset.nk=_nk;
   if(typeof FC_NOTES!=='undefined'&&FC_NOTES[_nk]&&FC_NOTES[_nk].length){ var _nb=document.createElement('span'); _nb.className='fc-note-n'; _nb.textContent='N'; _nb.dataset.nk=_nk; td.appendChild(_nb); }
-  var _rf=cellFlags(_nk); if(_rf){ td.classList.add('has-rail'); td.style.position='relative'; td.insertAdjacentHTML('afterbegin',cellRailHtml(_rf)); }
   const d=document.createElement('div');d.className='fcin';
   const lyD=document.createElement('div');lyD.className='fcly';
   // Forecast-on-forecast years: LY is the prior-year forecast (not an actual) — keep neutral colour
@@ -5755,21 +5758,17 @@ function inbDiv(inb, entries, color){
 // SKU-level loaded forecast from forecast_outputs (in-memory working store).
 // Returns the unit value for a month, or null if this SKU/wh/channel has no loaded forecast.
 // ── Cell indicator rail (vertical, centred in the left gutter) ──────────────────────────────────
-// Unified home for the per-cell flags: i=BI rule, C=trading-calendar event, N=forecast note,
-// S̶=do-not-smooth lock. Renders only the ACTIVE letters so sparse cells stay calm. Each letter
-// carries a title → the global 120ms tooltip explains it. Keyed like the note key: level|item|co|ch|m.
-// DEMO_RAIL is a temporary visual seed so Ben can approve the look at two cells before the real
-// N/i/C data + do-not-smooth engine are wired in.
-var DEMO_RAIL={
-  'subcat|Picnic Blanket|UK|DTC|2028_03':{i:1,c:1,n:1,s:1},
-  'sku|PICNIC-CAB-LG-AMALG|UK|DTC|2028_04':{i:1,c:1,n:1,s:1}
-};
-function cellFlags(key){ var d=DEMO_RAIL[key]; return d?{i:!!d.i,c:!!d.c,n:!!d.n,s:!!d.s}:null; }
+// The neat home for per-cell flags. Phase 1 (SKU rows): N=forecast note, S̶=do-not-smooth lock
+// (SKU-level only — never on category rows). Renders only ACTIVE letters so sparse cells stay calm;
+// each letter has a title → the global 120ms tooltip. Keyed like the note key: level|item|co|ch|m.
+// (Category-row i/C/N migration into the rail is the next step; today they keep their existing marks.)
+function cellFlags(key){ if(!key)return null; var isSku=key.indexOf('sku|')===0;
+  var n=(typeof FC_NOTES!=='undefined'&&FC_NOTES[key]&&FC_NOTES[key].length)?1:0;
+  var s=(isSku&&typeof SMOOTH_LOCKS!=='undefined'&&SMOOTH_LOCKS[key])?1:0;
+  return (n||s)?{n:n,s:s}:null; }
 function cellRailHtml(fl){ if(!fl)return ''; var o='';
-  if(fl.i)o+='<span class="cf cf-i" title="A BI rule applies to this cell">i</span>';
-  if(fl.c)o+='<span class="cf cf-c" title="Trading-calendar event (category · market · month)">C</span>';
   if(fl.n)o+='<span class="cf cf-n" title="Forecast note — double-click the cell to view/add">N</span>';
-  if(fl.s)o+='<span class="cf cf-s" title="Do not smooth — forecast locked; only a manual override changes it">S</span>';
+  if(fl.s)o+='<span class="cf cf-s" title="Do not smooth — this SKU forecast is locked; smoothing leaves it fixed, only a manual override changes it">S</span>';
   return o?('<div class="cell-rail">'+o+'</div>'):''; }
 function skuOutFC(sku,co,ch,m){var o=FC_OUTPUTS[sku+'|'+skuWh(co,ch)+'|'+ch];return(o&&o[m]!=null)?o[m]:null;}
 // "Continuing SKU" = has any actuals in the trailing 12 complete months. For a calendar month 'MM', the most
@@ -6633,6 +6632,14 @@ function computeSmoothAlloc(s,co,ch,m,opts){
     return {sku:sku,cur:cur,cap:cap,floor:0,frozen:frozen,alloc:null};
   });
 
+  // Do-not-smooth locks (SKU-level): hold a locked SKU-cell at its current value — freeze it (so it
+  // keeps its forecast and is excluded from `out`), exclude it from the pool (cap=0), and subtract its
+  // value from the target so the remaining SKUs smooth to fill the rest. No locks set → target and
+  // items are unchanged, so smoothing (and therefore the buy plan) behave exactly as before.
+  var _lockSum=0;
+  items.forEach(function(it){ if(typeof SMOOTH_LOCKS!=='undefined' && SMOOTH_LOCKS['sku|'+it.sku+'|'+co+'|'+ch+'|'+m] && !it.frozen){ it.frozen=true; it.locked=true; it.cap=0; _lockSum+=Math.max(0,it.cur); } });
+  if(_lockSum>0) target=Math.max(0, target-_lockSum);
+
   // === Rank-aware floors (only when protectLeaders=true) ===
   // Each SKU's "historical signal" is the sum of units sold in the LAST 3 COMPLETED
   // MONTHS (e.g. Mar/Apr/May when CUR_MONTH = Jun). This makes the floor responsive to
@@ -7365,7 +7372,8 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       var fcv=isAct?act:fc;
       td.className=fyBg(Y)+(first?' sep2':'')+(isAct?' sku-act-cell':'');
       td.style.cssText='padding:1px 2px;border-bottom:1px solid #f0f0ee';
-      var _rf=cellFlags('sku|'+sku+'|'+co+'|'+ch+'|'+m); if(_rf){ td.classList.add('has-rail'); td.style.position='relative'; td.insertAdjacentHTML('afterbegin',cellRailHtml(_rf)); }
+      var _rk='sku|'+sku+'|'+co+'|'+ch+'|'+m; td.dataset.nk=_rk;   // enables dbl-click notes + do-not-smooth popup on SKU cells
+      var _rf=cellFlags(_rk); if(_rf){ td.classList.add('has-rail'); td.style.position='relative'; td.insertAdjacentHTML('afterbegin',cellRailHtml(_rf)); }
       if(isAct){
         var yoy=lyVal>0?Math.round((act-lyVal)/lyVal*100):null;
         var yc=yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp',ys=yoy!=null?((yoy>=0?'+':'')+yoy+'%'):'';
@@ -7373,6 +7381,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
           +'<div style="font-size:8px;color:#94a3b8;text-align:right;font-variant-numeric:tabular-nums">'+fn(lyVal)+'</div>'
           +'<div style="font-size:9px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums">'+fn(act)+'</div>'
           +'<div style="font-size:7px;text-align:right" class="'+yc+'">'+ys+'</div></div>';
+        if(_rf)td.insertAdjacentHTML('afterbegin',cellRailHtml(_rf));   // innerHTML above wiped the rail — re-add for actual-month cells
         return td;
       }
       var af=(fc>0&&!skuRundown[m])?skuAF[m]:null;

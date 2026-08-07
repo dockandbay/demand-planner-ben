@@ -1,3 +1,9 @@
+## v26.694.0 — Do-not-smooth engine (SKU-only) + SKU-cell notes/rail
+- DEMAND plan SKU cells now support **double-click** → notes popup (same as category) with a **"Do not smooth"** checkbox. Locking holds that SKU-month forecast FIXED during smoothing: it is excluded from the redistribution pool and its value is subtracted from the sub-category target so the other SKUs fill the remainder (auto-smooth + manual smooth both respect it).
+- New vertical indicator rail is now live on SKU rows: **N** (note) + **S̶** (locked) in the left gutter. S̶ is SKU-only — never on category rows. Demo seed removed.
+- Locks persist in app_settings.smooth_locks (keyed sku|CO|CH|YYYY_MM), server-injected as SMOOTH_LOCKS. With no locks set, smoothing (and the buy plan) behave exactly as before.
+- Category-row indicator migration (i/C/N into the rail) is the remaining polish step; category cells keep their current marks for now.
+
 ## v26.693.0 — Fix: cell indicator rail escaped to outside the table on SKU rows
 - The vertical rail is absolute-positioned; SKU `<td>`s were not establishing a positioning context (category td.fctd already did), so the AMALG Apr-28 rail rendered in a phantom column outside the table. Now sets `position:relative` inline on any rail cell.
 
