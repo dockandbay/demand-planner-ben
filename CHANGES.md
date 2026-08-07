@@ -1,3 +1,6 @@
+## v26.698.0 — Abbreviate very large growth % (+Nk%)
+- Growth % at/over 1000% now display as Nk% rounded to the nearest thousand, no decimals and no leading + (green colour already signals positive), e.g. +24282% → 24k%. Applied across plan cells, SKU rows, subcat + FY totals via a shared gPct() helper. Small values unchanged.
+
 ## v26.697.0 — Forecast override input = right 50% of the cell (left half free for double-click)
 - The editable %/override input now occupies only the right half of each forecast cell (still right-aligned). The left half is now clear for double-click → add notes / do-not-smooth, which the full-width input previously blocked.
 

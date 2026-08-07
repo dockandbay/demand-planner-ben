@@ -4227,7 +4227,7 @@ function refreshRow(s,co,ch){
     e.innerHTML='<div style="padding:2px 4px;text-align:right">'
       +'<div style="font-size:11px;font-weight:700;font-variant-numeric:tabular-nums">'+fn(Math.round(cur))+'</div>'
       +'<div style="font-size:9px;font-variant-numeric:tabular-nums;color:#475569">'+fr(Math.round(cur*sp))+'</div>'
-      +'<div style="font-size:9px;font-variant-numeric:tabular-nums" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?(yoy>0?'+':'')+yoy+'%':'--')+'</div>'
+      +'<div style="font-size:9px;font-variant-numeric:tabular-nums" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?gPct(yoy):'--')+'</div>'
       +'</div>';
   });
   // If this subcategory's SKU rows are expanded, rebuild them so the SKU subtotal/gap
@@ -5248,7 +5248,7 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   if(isActual){
     const actualUnits=a[fym]?a[fym][0]:0;
     const yoyPct=ly_u>0?Math.round((actualUnits-ly_u)/ly_u*100):null;
-    const yoyStr=yoyPct!=null?((yoyPct>=0?'+':'')+yoyPct+'%'):'';
+    const yoyStr=yoyPct!=null?(gPct(yoyPct)):'';
     const isNeg=yoyPct!=null&&yoyPct<0;
     const isCurMo=fym===ACTUAL_MONTHS[ACTUAL_MONTHS.length-1]; // current month = last actual
     const td=document.createElement('td');td.className='fctd actual'+extraCls;
@@ -5492,7 +5492,7 @@ function buildDataRow(s,co,ch,x,fu_cache){
       const fcv=curMonthForecast(s,co,ch);
       const ly_u=a[ym(y-1,mo)]?a[ym(y-1,mo)][0]:0;
       const yoyPct=ly_u>0?Math.round((fcv-ly_u)/ly_u*100):null;
-      const yoyStr=yoyPct!=null?((yoyPct>=0?'+':'')+yoyPct+'%'):'';
+      const yoyStr=yoyPct!=null?(gPct(yoyPct)):'';
       const fcTd=document.createElement('td');fcTd.className='fctd bg26';
       const d2=document.createElement('div');d2.className='fcin';
       const lyD2=document.createElement('div');lyD2.className='fcly';lyD2.textContent=ly_u?fn(ly_u):'--';d2.appendChild(lyD2);
@@ -5544,7 +5544,7 @@ function buildDataRow(s,co,ch,x,fu_cache){
     td.innerHTML='<div style="padding:2px 4px;text-align:right">'
       +'<div style="font-size:11px;font-weight:700;font-variant-numeric:tabular-nums">'+fn(Math.round(cur))+'</div>'
       +'<div style="font-size:9px;font-variant-numeric:tabular-nums;color:#475569">'+fr(Math.round(cur*sp))+'</div>'
-      +'<div style="font-size:9px;font-variant-numeric:tabular-nums" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?(yoy>0?'+':'')+yoy+'%':'--')+'</div>'
+      +'<div style="font-size:9px;font-variant-numeric:tabular-nums" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?gPct(yoy):'--')+'</div>'
       +'</div>';
     return td;
   }
@@ -5828,7 +5828,10 @@ function skuNav(inp,parentKey){
 // override -> forecast falls back to LY (flat -> +0%), not the cascade.
 // (Removed dead skuFcv — unused. v25.652)
 function skuYoY(fc, ly){ if(ly>0)return Math.round((fc-ly)/ly*100); return fc>0?100:0; }
-function skuYoYStr(fc, ly){var y=skuYoY(fc,ly);return (y>=0?'+':'')+y+'%';}
+// Growth % display: abbreviate very large magnitudes (|n|>=1000%) to ±Nk% (rounded to nearest 1000, no
+// decimals) — accuracy is irrelevant at those sizes, e.g. +24282% → +24k%. Small values unchanged.
+function gPct(n){ if(n==null)return ''; var a=Math.abs(n); if(a>=1000)return (n<0?'-':'')+Math.round(a/1000)+'k%'; return (n>=0?'+':'')+n+'%'; }
+function skuYoYStr(fc, ly){return gPct(skuYoY(fc,ly));}
 function skuYoYCls(fc, ly){var y=skuYoY(fc,ly);return y>0?'gp':y<0?'rp':'fp';}
 // Build a "revert X from A back to B" description for the undo tooltip (% when a baseline exists, else units).
 function _undoLabelSku(k,ly,oldUnits,newUnits,hasPct,typedN){
@@ -6392,7 +6395,7 @@ function renderSkuView(){
       var ty=sales[m]||0;
       var ly=sales[lyMonth(m)]||0;
       var yoy=ly>0?Math.round((ty-ly)/ly*100):null;
-      var yoyStr=yoy!=null?((yoy>=0?'+':'')+yoy+'%'):'';
+      var yoyStr=yoy!=null?(gPct(yoy)):'';
       var yoyCls=yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp';
       td.innerHTML='<div class="sku-act-vals">'
         +'<div class="sku-ly">'+fn(ly)+'</div>'
@@ -6492,7 +6495,7 @@ function renderSkuView(){
     var tyTot=skus.reduce(function(a,sku){return a+(skuSales(sku,co,ch)[m]||0);},0);
     var lyTot=skus.reduce(function(a,sku){return a+(skuSales(sku,co,ch)[lyMonth(m)]||0);},0);
     var yoy=lyTot>0?Math.round((tyTot-lyTot)/lyTot*100):null;
-    var yoyStr=yoy!=null?((yoy>=0?'+':'')+yoy+'%'):'';
+    var yoyStr=yoy!=null?(gPct(yoy)):'';
     var yoyCls=yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp';
     td.innerHTML='<div class="sku-act-vals">'
       +'<div class="sku-ly" style="font-weight:600">'+fn(lyTot)+'</div>'
@@ -6532,7 +6535,7 @@ function renderSkuView(){
     },0);
     var lyTot2=skus.reduce(function(a,sku){return a+(skuSales(sku,co,ch)[lyMonth(m)]||0);},0);
     var yoy2=lyTot2>0?Math.round((fcTot-lyTot2)/lyTot2*100):null;
-    var yoyStr2=yoy2!=null?((yoy2>=0?'+':'')+yoy2+'%'):'';
+    var yoyStr2=yoy2!=null?(gPct(yoy2)):'';
     var yoyCls2=yoy2!=null?(yoy2>0?'gp':yoy2<0?'rp':'fp'):'fp';
     td.innerHTML='<div class="sku-fc-vals">'
       +'<div class="sku-fc-ly" style="font-weight:600">'+fn(lyTot2)+'</div>'
@@ -7079,7 +7082,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         var lyCur=sales[(parseInt(mCur.slice(0,4))-1)+'_'+mCur.slice(5)]||0;
         var fcvCur=skuFC[mCur]||0; // calculated cascade-or-override (matches buy plan + drill-down)
         var yoyCur=skuYoY(fcvCur,lyCur);
-        var yoyStrCur=(yoyCur>=0?'+':'')+yoyCur+'%';
+        var yoyStrCur=gPct(yoyCur);
         var yoyCls26Cur=yoyCur>0?'gp':yoyCur<0?'rp':'fp';
         td.className='bg26';
         td.style.cssText='padding:1px 2px;border-bottom:1px solid #f0f0ee;border-left:1px dashed #86efac';
@@ -7125,7 +7128,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         var lyVal=ly26;
         var mainVal=isAct26?act26:fcv26;
         var yoy26=lyVal>0?Math.round((mainVal-lyVal)/lyVal*100):null;
-        var yoyStr26=yoy26!=null?((yoy26>=0?'+':'')+yoy26+'%'):'';
+        var yoyStr26=yoy26!=null?(gPct(yoy26)):'';
         var yoyCls26=yoy26!=null?(yoy26>0?'gp':yoy26<0?'rp':'fp'):'fp';
         if(isAct26){
           td.innerHTML='<div style="display:flex;flex-direction:column;padding:1px 2px">'
@@ -7387,7 +7390,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       var _rh=cellRailForKey(_rk); if(_rh){ td.classList.add('has-rail'); td.style.position='relative'; td.insertAdjacentHTML('afterbegin',_rh); }
       if(isAct){
         var yoy=lyVal>0?Math.round((act-lyVal)/lyVal*100):null;
-        var yc=yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp',ys=yoy!=null?((yoy>=0?'+':'')+yoy+'%'):'';
+        var yc=yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp',ys=yoy!=null?(gPct(yoy)):'';
         td.innerHTML='<div style="display:flex;flex-direction:column;padding:1px 2px">'
           +'<div style="font-size:8px;color:#94a3b8;text-align:right;font-variant-numeric:tabular-nums">'+fn(lyVal)+'</div>'
           +'<div style="font-size:9px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums">'+fn(act)+'</div>'
@@ -7440,7 +7443,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       inp.addEventListener('change',function(){skuCommitOv(this.dataset.ovkey,this.value,parseFloat(this.dataset.ly));refreshRow(s,co,ch);});
       w.appendChild(inp);
       var fcD=document.createElement('div');fcD.style.cssText='font-size:9px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;color:#334155';fcD.textContent=fn(fcvCur);w.appendChild(fcD);
-      var yD=document.createElement('div');yD.style.cssText='font-size:7px;text-align:right';yD.className=yoyCur>0?'gp':yoyCur<0?'rp':'fp';yD.textContent=(yoyCur>=0?'+':'')+yoyCur+'%';w.appendChild(yD);
+      var yD=document.createElement('div');yD.style.cssText='font-size:7px;text-align:right';yD.className=yoyCur>0?'gp':yoyCur<0?'rp':'fp';yD.textContent=gPct(yoyCur);w.appendChild(yD);
       td.appendChild(w);applyDisc(inp,fcD,skuDiscOut[mCur],td);markDiscRundown(td,skuRundown[mCur]&&!skuDiscOut[mCur]);applyPreview(inp,fcD,mCur,sku);return td;
     }
     function skuFyTotCell(Y){
@@ -7658,7 +7661,7 @@ function buildBody(){
     function gtMonthCell(m,first,isFcCol){
       var ly=Math.round(gtMonthLY[m]||0),fc=Math.round(isFcCol?gtCurFC:(gtMonthFC[m]||0));
       var yoy=ly>0?Math.round((fc-ly)/ly*100):null;
-      var yoyStr=yoy!=null?((yoy>=0?'+':'')+yoy+'%'):'';
+      var yoyStr=yoy!=null?(gPct(yoy)):'';
       var yoyCls=yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp';
       gtadd('<div style="padding:1px 2px;display:flex;flex-direction:column">'
         +'<div style="font-size:8px;color:#cbd5e1;text-align:right;font-variant-numeric:tabular-nums">'+fn(ly)+'</div>'
@@ -7674,7 +7677,7 @@ function buildBody(){
       td.innerHTML='<div style="padding:2px 4px;text-align:right">'
         +'<div style="font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;color:#fff">'+fn(Math.round(u))+'</div>'
         +'<div style="font-size:9px;color:#cbd5e1;font-variant-numeric:tabular-nums">'+frFY(rev,Y)+'</div>'
-        +'<div style="font-size:9px;font-variant-numeric:tabular-nums;color:#fff" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?(yoy>0?'+':'')+yoy+'%':'--')+'</div></div>';
+        +'<div style="font-size:9px;font-variant-numeric:tabular-nums;color:#fff" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?gPct(yoy):'--')+'</div></div>';
       gtr.appendChild(td);
     }
     TIME_COLS.forEach(function(tc){
@@ -7798,7 +7801,7 @@ function _makeCatTotRow(cat){
       var bgCls=fyBg(Y)+' fctd'+(isAct?' actual':'')+(first?' sep2':'');
       var ly=Math.round(cMonthLY[m]||0),fc=Math.round(isFcCol?cCurFC:(cMonthFC[m]||0));
       var yoy=ly>0?Math.round((fc-ly)/ly*100):null;
-      var yoyStr=yoy!=null?((yoy>=0?'+':'')+yoy+'%'):'';
+      var yoyStr=yoy!=null?(gPct(yoy)):'';
       var yoyCls=yoy!=null?(yoy>0?' gp':yoy<0?' rp':' fp'):' fp';
       var lyR=cMonthLYRev[m]||0,fcR=isFcCol?cCurFCRev:(cMonthFCRev[m]||0);
       var revYoY=lyR>0?Math.round((fcR-lyR)/lyR*100):null;
@@ -7818,7 +7821,7 @@ function _makeCatTotRow(cat){
       td.innerHTML='<div style="padding:2px 4px;text-align:right">'
         +'<div style="font-size:11px;font-weight:700;font-variant-numeric:tabular-nums">'+fn(Math.round(u))+'</div>'
         +'<div style="font-size:9px;color:#475569;font-variant-numeric:tabular-nums">'+frFY(rev,Y)+'</div>'
-        +'<div style="font-size:9px;font-variant-numeric:tabular-nums" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?(yoy>0?'+':'')+yoy+'%':'--')+'</div></div>';
+        +'<div style="font-size:9px;font-variant-numeric:tabular-nums" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?gPct(yoy):'--')+'</div></div>';
       totr.appendChild(td);
     }
     TIME_COLS.forEach(function(tc){
