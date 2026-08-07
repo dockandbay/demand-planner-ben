@@ -1,3 +1,6 @@
+## v26.690.0 — DEMAND plan: fix faint FY-boundary border on SKU rows with a March dip
+- The FY-boundary separator (e.g. the right edge of the FY26/27 total column) is drawn by the next FY's first-month cell (border-collapse). When that month was a low-anomaly (dip) cell, its .anom-lo-cell rule lightened border-left to near-white, so the FY26/27 boundary looked "missing/patchy" for SKUs like PICNIC-CAB-LG-NAVY/AMALG. Added .sep2.anom-* override so FY boundaries always keep the dark #b0b0ae separator.
+
 ## v26.689.0 — Manufacturing drawer: clearer Coverage wording + inline Sign-off
 - Coverage KPI in the pop-out drawer now reads "30 SHORT" / "45 OVER" (was a bare "30"); ✓ match unchanged.
 - Component Sign-off checkbox moved inline onto the header row (next to Coverage), instead of a separate line underneath.

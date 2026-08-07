@@ -279,6 +279,11 @@ thead tr.sub th.stk2{background:#f3f3f1}
 .bgH2{background:#f4f3f0 !important}
 .bg28.anom-hi-cell{background:#fef9c3 !important;border-left-color:#f59e0b !important}
 .bg28.anom-lo-cell{background:#fff !important;border-left-color:#e5e5e5 !important}
+/* FY-boundary separator must always read as the dark structural divider, even when the boundary
+   cell (first month of a FY) is also an anomaly cell. The .bgNN.anom-* rules above lighten
+   border-left-color (#e5e5e5 for a low-anomaly dip), which with border-collapse becomes the
+   FY total's right edge → the FY26/27 boundary looked "missing" for SKUs with a March dip. */
+.sep2.anom-hi-cell,.sep2.anom-lo-cell{border-left-color:#b0b0ae !important}
 /* SKU rows (demand PLAN): plain white forecast cells (drop the 2026 blue / 2027 purple tint),
    keep actual (green) + anomaly signals, and make row dividers visible. */
 tr.sku-inline:not(.subtot-row) td.bg26:not(.sku-act-cell):not(.anom-hi-cell):not(.anom-lo-cell){background:#fff !important}
