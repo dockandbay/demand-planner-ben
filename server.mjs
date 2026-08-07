@@ -612,17 +612,33 @@ app.use(async (req, res, next) => {
 // values for a few seconds coalesces bursts (refresh, multiple tabs, the auto-update reload) → repeat loads skip
 // the build. We cache DATA only, NOT the HTML, so DEV live-editing still works (the file is re-read + re-injected
 // each request). Invalidated on forecast saves so an edit shows on the next load.
-let _dataCache = null;
-const DATA_TTL_MS = 300000;   // 5 min — each cold build pulls ~2-3MB from Supabase; a wider window sharply cuts DB egress. Invalidated on forecast saves so edits still show immediately.
+let _dataCache = null, _dataRefresh = null;
+const DATA_TTL_MS = 300000;   // 5 min — each cold build pulls ~2-3MB from Supabase; a wider window sharply cuts DB egress.
+// Build all live data globals (~12-14 Supabase queries) in parallel. Cold this is ~26s on the remote sandbox, so
+// we serve the cached build and refresh it in the BACKGROUND when it goes stale (stale-while-revalidate): after
+// the boot warm below, a real request never blocks on a cold build. A forecast save nulls _dataCache (lines
+// ~768/806) so the very next load rebuilds synchronously — edits show immediately.
+async function _buildDataVals() {
+  return Promise.all([
+    buildDATA(), buildFC_CURRENT(), buildFC_OUTPUTS(), buildSKURAW(),
+    buildCATS_META(), buildSUBS_META(), buildBI_RULES(), buildPROD_CONST(), freshness(), buildFBADIMS(), buildSAEXTRA(), gbpRate(), buildBRANCH_FREIGHT(), buildTRANSFER_LEADS(),
+  ]);
+}
+function refreshDataCache() {   // single-flight — coalesces concurrent refreshes into one build
+  if (_dataRefresh) return _dataRefresh;
+  _dataRefresh = _buildDataVals()
+    .then((vals) => { _dataCache = { at: Date.now(), vals }; _dataRefresh = null; return vals; })
+    .catch((e) => { _dataRefresh = null; throw e; });
+  return _dataRefresh;
+}
+refreshDataCache().catch(() => {});   // warm the cache on boot so the first real request isn't a cold 26s build
 app.get('/', async (_req, res) => {
   try {
-    // Fetch every live global in parallel, then splice sequentially (string ops on one buffer). Short-TTL cached.
+    // Serve the cached build; refresh in the background once past TTL (stale-while-revalidate). Only the very
+    // first load (or the load right after a save-invalidation) waits on a synchronous build.
     let _vals;
-    if (_dataCache && Date.now() - _dataCache.at < DATA_TTL_MS) _vals = _dataCache.vals;
-    else { _vals = await Promise.all([
-      buildDATA(), buildFC_CURRENT(), buildFC_OUTPUTS(), buildSKURAW(),
-      buildCATS_META(), buildSUBS_META(), buildBI_RULES(), buildPROD_CONST(), freshness(), buildFBADIMS(), buildSAEXTRA(), gbpRate(), buildBRANCH_FREIGHT(), buildTRANSFER_LEADS(),
-    ]); _dataCache = { at: Date.now(), vals: _vals }; }
+    if (_dataCache) { _vals = _dataCache.vals; if (Date.now() - _dataCache.at >= DATA_TTL_MS && !_dataRefresh) refreshDataCache().catch(() => {}); }
+    else { _vals = await refreshDataCache(); }
     const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS, SA_EXTRA, GBP_RATE, BRANCH_FREIGHT, TRANSFER_LEADS] = _vals;
     const KLAVIYO_BIS = await buildKlaviyoBis();   // fresh (uploads are infrequent, not in the data cache)
     const MKT_COLORS = await buildMktColors();

@@ -1,3 +1,6 @@
+## v26.722.0 — Server: warm the page-data cache on boot + stale-while-revalidate (no more cold-build spikes)
+- The main app "/" data build (~12 Supabase queries, ~26s cold on the remote sandbox) is now warmed once at server startup and refreshed in the BACKGROUND when it passes the 5-min TTL — a real request never blocks on a cold build (it serves the cached build and revalidates behind the scenes). No idle polling (refresh only when a request arrives past TTL). Forecast-save invalidation unchanged (edits still show on the next load). Fixes the intermittent very-slow first load (esp. on the mobile tunnel).
+
 ## v26.721.0 — DEMAND plan: notes (N) + record-of-change (R) load lazily (non-blocking)
 - The plan no longer waits on the notes + change-keys fetches before first paint — it renders immediately and the N / R rail indicators fill in when they arrive (SKU rows pick them up on expand; category cells via a one-pass rail refresh). Speeds up first paint, especially on mobile / the tunnel.
 
