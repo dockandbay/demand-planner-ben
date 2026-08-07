@@ -5794,14 +5794,30 @@ function skuNav(inp,parentKey){
 function skuYoY(fc, ly){ if(ly>0)return Math.round((fc-ly)/ly*100); return fc>0?100:0; }
 function skuYoYStr(fc, ly){var y=skuYoY(fc,ly);return (y>=0?'+':'')+y+'%';}
 function skuYoYCls(fc, ly){var y=skuYoY(fc,ly);return y>0?'gp':y<0?'rp':'fp';}
+// Build a "revert X from A back to B" description for the undo tooltip (% when a baseline exists, else units).
+function _undoLabelSku(k,ly,oldUnits,newUnits,hasPct,typedN){
+  try{ var p=k.split('|'), sku=p[0], m=p[3], lyN=Number(ly)||0;
+    function pctOf(u){ return lyN>0?Math.round((u/lyN-1)*100):null; }
+    function pctStr(x){ return (x>=0?'+':'')+x+'%'; }
+    var newStr, oldStr;
+    if(newUnits==null){ newStr='cleared'; }
+    else if(hasPct){ newStr=pctStr(Math.round(typedN)); }
+    else { var np=pctOf(newUnits); newStr=(np!=null)?pctStr(np):fn(newUnits); }
+    if(oldUnits==null){ oldStr='no override'; }
+    else { var op=pctOf(oldUnits); oldStr=(op!=null)?pctStr(op):fn(oldUnits); }
+    var ml=(typeof mlab==='function')?mlab(m):m;
+    undoLabel('revert '+sku+' '+ml+' from '+newStr+' back to '+oldStr);
+  }catch(e){}
+}
 function skuCommitOv(k, raw, ly){
   raw=(raw||'').trim();
-  if(!raw){skuOvSetK(k,null);return null;}
+  var _old=skuOvGetK(k); _old=(_old!=null)?parseInt(_old,10):null;   // pre-edit override, for the undo label
+  if(!raw){skuOvSetK(k,null);_undoLabelSku(k,ly,_old,null,false,0);return null;}
   var hasPct=raw.indexOf('%')>=0;
   var n=parseFloat(raw.replace(/[^0-9.\-]/g,''));
   if(isNaN(n))return null;
   var abs=hasPct?Math.round((ly||0)*(1+n/100)):Math.round(n);
-  skuOvSetK(k,abs);return abs;
+  skuOvSetK(k,abs);_undoLabelSku(k,ly,_old,abs,hasPct,n);return abs;
 }
 
 // Build SKU-level LY share within a subcat×co×ch
@@ -11189,22 +11205,56 @@ function scheduleAutoSave(){ if(_autoSaveTimer)return;   // one save already sch
   _autoSaveTimer=setTimeout(function(){ _autoSaveTimer=null; if(_dirty){ if(_saving) scheduleAutoSave(); else saveForecasts(); } },AUTOSAVE_MS); }
 function markDirty(){ _dirty=true; scheduleAutoSave(); }   // SKU-level edits (FC_DIRTY) call this — sets _dirty + auto-saves
 // ── DEMAND undo — snapshot the forecast edit state (FC_OUTPUTS + IV + FC_DIRTY) before each edit gesture; undo up to the last 10 ──
-var _UNDO=[], _undoBusy=false, _undoReady=false;
+var _UNDO=[], _UNDO_LABELS=[], _undoBusy=false, _undoReady=false;
 function undoMark(){ if(!_undoReady||_undoBusy)return; _undoBusy=true;   // called BEFORE a mutation; batches all edits in one synchronous gesture into a single entry
   try{ _UNDO.push(JSON.stringify({fc:FC_OUTPUTS, iv:IV, fd:FC_DIRTY})); }catch(e){ _undoBusy=false; return; }
-  if(_UNDO.length>10)_UNDO.shift();
+  _UNDO_LABELS.push([]);                                   // parallel bucket of human-readable edit descriptions for this gesture
+  if(_UNDO.length>10){_UNDO.shift();_UNDO_LABELS.shift();}
   Promise.resolve().then(function(){ _undoBusy=false; });
   try{ updateUndoBtn(); }catch(e){} }
-function undoApply(){ if(!_UNDO.length)return; var snap; try{ snap=JSON.parse(_UNDO.pop()); }catch(e){ return; }
+// Append a description of an edit to the current gesture's undo bucket (shown in the Undo button tooltip).
+function undoLabel(s){ try{ if(_UNDO_LABELS.length)_UNDO_LABELS[_UNDO_LABELS.length-1].push(s); }catch(e){} try{ updateUndoBtn(); }catch(e){} }
+function undoApply(){ if(!_UNDO.length)return; var snap; try{ snap=JSON.parse(_UNDO.pop()); }catch(e){ return; } _UNDO_LABELS.pop();
   function restore(target,src){ Object.keys(target).forEach(function(k){delete target[k];}); Object.keys(src||{}).forEach(function(k){target[k]=src[k];}); }
   restore(FC_OUTPUTS, snap.fc); restore(IV, snap.iv); restore(FC_DIRTY, snap.fd);
   _dirty=true; try{ scheduleAutoSave(); }catch(e){}
   try{ renderMain(); }catch(e){} try{ updateUndoBtn(); }catch(e){} }
 function updateUndoBtn(){ var b=document.getElementById('undo-btn'); if(!b)return; var n=_UNDO.length;
-  b.disabled=!n; b.style.opacity=n?'1':'.45'; b.style.cursor=n?'pointer':'default'; b.textContent='↶ Undo'+(n?(' ('+n+')'):''); }
+  b.disabled=!n; b.style.opacity=n?'1':'.45'; b.style.cursor=n?'pointer':'default'; b.textContent='↶ Undo'+(n?(' ('+n+')'):'');
+  // Tooltip describes exactly what the next undo will do (e.g. "revert PICNIC-XL-BLUE Dec 26 from +60% back to +50%").
+  var tip;
+  if(!n){ tip='Nothing to undo'; }
+  else { var lab=(_UNDO_LABELS[_UNDO_LABELS.length-1])||[]; var head=lab.length?lab[0]:'the last forecast edit';
+    tip='Undo '+(lab.length>1?('('+lab.length+' edits) — '+head):head)+' · ⌘/Ctrl+Z'; }
+  b.setAttribute('data-ttl',tip); b.removeAttribute('title'); }
 try{ document.addEventListener('keydown',function(e){ if((e.metaKey||e.ctrlKey)&&(e.key==='z'||e.key==='Z')&&!e.shiftKey){
   var ae=document.activeElement; if(ae&&/^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName))return;   // let native undo work inside fields
   var dp=document.getElementById('demand-plan-root'); e.preventDefault(); undoApply(); } }); }catch(e){}
+// ── Global 120ms tooltips ──────────────────────────────────────────────────────────────────────
+// Native `title` tooltips only appear after the browser's ~700ms delay and can't be retimed per-element.
+// This one delegated handler converts EVERY native `title` (DEMAND + SUPPLY, incl. re-rendered content)
+// into a fast custom tooltip that shows after 120ms — so we never have to retrofit tooltips one at a time.
+// Elements that already own a custom tip (data-tip / data-anom-tip / …) keep their own handler; we only
+// strip their slow native `title` so it can't double up. Init once (guarded).
+(function(){ if(window.__ttlTip)return; window.__ttlTip=true;
+  var SKIP=['data-tip','data-anom-tip','data-antip','data-bi-tip','data-asp-tip','data-cal-tip','data-note'];
+  function hasCustom(el){ for(var i=0;i<SKIP.length;i++){ if(el.hasAttribute(SKIP[i]))return true; } return false; }
+  var tip=null,timer=null;
+  function mk(){ if(tip)return tip; tip=document.createElement('div'); tip.id='app-ttl-tip'; tip.style.cssText='position:fixed;z-index:100080;background:#0f172a;color:#fff;font-size:11px;line-height:1.4;padding:5px 8px;border-radius:5px;max-width:300px;pointer-events:none;box-shadow:0 4px 14px rgba(0,0,0,.28);opacity:0;transition:opacity .08s;white-space:normal;text-align:left'; document.body.appendChild(tip); return tip; }
+  function hide(){ if(timer){clearTimeout(timer);timer=null;} if(tip)tip.style.opacity='0'; }
+  // Converter (capture phase → runs before bubble-phase show handlers on the same mouseover event).
+  document.addEventListener('mouseover',function(ev){ var el=ev.target&&ev.target.closest&&ev.target.closest('[title]'); if(!el)return;
+    var t=el.getAttribute('title'); if(t==null)return;
+    if(hasCustom(el)){ el.removeAttribute('title'); return; }        // custom tip owns it → just kill the slow native one
+    if(t===''){ el.removeAttribute('title'); return; }
+    el.setAttribute('data-ttl',t); el.removeAttribute('title'); },true);
+  // Show (bubble) — any element carrying a converted title.
+  document.addEventListener('mouseover',function(ev){ var el=ev.target&&ev.target.closest&&ev.target.closest('[data-ttl]'); if(!el)return; var txt=el.getAttribute('data-ttl'); if(!txt)return; if(timer)clearTimeout(timer);
+    timer=setTimeout(function(){ var t=mk(); t.textContent=txt; t.style.opacity='0'; t.style.left='-9999px'; t.style.top='0px'; var r=el.getBoundingClientRect(); var top=r.bottom+6; if(top+t.offsetHeight>window.innerHeight-8)top=r.top-t.offsetHeight-6; t.style.left=Math.max(8,Math.min(window.innerWidth-t.offsetWidth-8,r.left))+'px'; t.style.top=top+'px'; t.style.opacity='1'; },120); });
+  document.addEventListener('mouseout',function(ev){ var el=ev.target&&ev.target.closest&&ev.target.closest('[data-ttl]'); if(el)hide(); });
+  document.addEventListener('mousedown',hide,true);
+  window.addEventListener('scroll',hide,true);
+})();
 // Build the SKU-level (FC_OUTPUTS) change list — shared by saveSkuForecasts + the unload beacon flush.
 function buildSkuChanges(){ var changes=[]; Object.keys(FC_DIRTY).forEach(function(k){ var parts=k.split('|'); if(parts.length<3)return;
     var sku=parts[0],wh=parts[1],ch=parts[2], months=FC_DIRTY[k]||{}, mo=FC_OUTPUTS[k]||{};
