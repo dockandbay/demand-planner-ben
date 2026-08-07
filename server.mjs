@@ -586,6 +586,7 @@ function requiredCap(method, p) {
   if (CONFIG_WRITE.some((re) => re.test(p))) return 'config'; // config reference data → supply OR demand
   if (p.startsWith('/api/product/')) return 'product';        // PRODUCT module writes → 'product' capability
   if (p.startsWith('/api/supply/zalando/')) return null;      // Zalando stock upload / send-file — open to all (no edit rights needed)
+  if (p.startsWith('/api/klaviyo-bis/')) return null;         // Klaviyo BIS upload — allowed with read-only permission (Ben)
   if (p.startsWith('/api/supply/')) return 'supply';          // everything else under supply = SUPPLY feature
   return null;   // unknown non-supply write → fail-open (don't block routes we haven't classified)
 }

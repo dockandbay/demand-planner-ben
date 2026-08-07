@@ -753,7 +753,6 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
     <div style="flex:1"></div>
     <button id="fclogic-btn" onclick="openFcLogic(event)" title="How the forecast numbers are calculated" style="font-size:10px;padding:3px 10px;border:1px solid #c4b5fd;border-radius:5px;background:#f5f3ff;color:#5b21b6;cursor:pointer;flex-shrink:0;font-weight:600">&#9635; Forecast Logic</button>
     <button id="smoothset-btn" onclick="openSmoothSettings(event)" title="Smoothing settings — disregard discontinued + auto-smooth" style="font-size:10px;padding:3px 10px;border:1px solid #93c5fd;border-radius:5px;background:#eff6ff;color:#1e40af;cursor:pointer;flex-shrink:0;font-weight:600">&#9881; Smoothing</button>
-    <span id="plan-ccy-wrap" style="display:none;flex-shrink:0;align-items:center"></span>
     <span style="width:1px;height:18px;background:#e0e0e0;flex-shrink:0;margin:0 2px"></span>
     <button id="undo-btn" onclick="undoApply()" disabled title="Undo the last forecast edit (up to 10) — also &#8984;/Ctrl+Z" style="font-size:10px;padding:3px 10px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#334155;cursor:default;opacity:.45;flex-shrink:0">&#8624; Undo</button>
     <button id="plan-dl-btn" onclick="openPlanDownload(event)" title="Download the demand plan (SKU × month, units + revenue) for chosen fiscal year(s)" style="font-size:10px;padding:3px 10px;border:1px solid #16a34a;border-radius:5px;background:#dcfce7;color:#166534;cursor:pointer;flex-shrink:0">&#11015; Download</button>
@@ -7882,7 +7881,6 @@ function _planPopBind(){ if(window._planPopBound)return; window._planPopBound=tr
     if(pop&&pop.style.display==='block'&&!(b&&b.contains(ev.target))&&!pop.contains(ev.target))pop.style.display='none'; }); },true); }
 function togglePlanFilters(e){ if(e)e.stopPropagation(); var p=document.getElementById('plan-filters-pop'); if(!p)return; var open=p.style.display==='block'; _planPopClose(); if(!open)p.style.display='block'; _planPopBind(); }
 function togglePlanTools(e){ if(e)e.stopPropagation(); var m=document.getElementById('plan-tools-menu'); if(!m)return; var open=m.style.display==='block'; _planPopClose(); if(!open)m.style.display='block'; _planPopBind(); }
-function setPlanCcy(m){ SUMM_CCY=m; render(); }   // shared currency mode toggle (plan + summary)
 function resetPlanFilters(){ try{setPlanTier('ALL');}catch(e){} try{setPlanFromRep(false);}catch(e){} var rw=document.getElementById('plan-rw-sel'); if(rw){rw.value='ALL'; try{setPlanRw('ALL');}catch(e){}} try{setPlanSort('alpha');}catch(e){} var ct=document.getElementById('cat-tot-toggle'); if(ct&&ct.classList.contains('active')){try{setShowCatTot(false);}catch(e){}} try{resetPlanActiveDates();}catch(e){} try{renderPlanChips();}catch(e){} }
 function _planClearFilter(k){ if(k==='all')setPlanActiveMode('active'); else if(k==='tier')setPlanTier('ALL');
   else if(k==='rw'){var s=document.getElementById('plan-rw-sel'); if(s)s.value='ALL'; setPlanRw('ALL');}
@@ -7983,9 +7981,6 @@ function render(){
     return;
   }
   planFilters.forEach(function(id){var el=document.getElementById(id);if(el)el.style.display='';});
-  (function(){ var w=document.getElementById('plan-ccy-wrap'); if(!w)return; var lc=mktCcy(CUR);   // currency toggle: only for US/EU/AU with a rate
-    if(lc&&fxRate(lc,0)!=null){ w.style.display='inline-flex'; w.innerHTML='<span class="pill-lbl" style="margin:0 2px 0 6px">Currency</span>'+[['GBP','GBP'],['LOCAL',lc]].map(function(x){var on=(x[0]===SUMM_CCY);return '<button onclick="setPlanCcy(\''+x[0]+'\')" title="Show revenue &amp; ASP in '+(x[0]==='GBP'?'GBP':(lc+' at the FY blended rate'))+'" style="font-size:10px;padding:3px 10px;border:1px solid '+(on?'#0f172a':'#cbd5e1')+';border-radius:5px;background:'+(on?'#0f172a':'#fff')+';color:'+(on?'#fff':'#334155')+';cursor:pointer;font-weight:600;font-family:inherit;margin-left:3px">'+x[1]+'</button>';}).join(''); }
-    else { w.style.display='none'; w.innerHTML=''; } })();
   var twp=document.getElementById('tw'); if(twp)twp.style.display='';
   var db=document.getElementById('demand-body'); if(db)db.remove();
   if(SKU_VIEW){renderSkuView();}else{renderMain();}
@@ -8001,7 +7996,8 @@ var SUMM_FROM='', SUMM_TO='', SUMM_OPEN={}, SUMM_FYOPEN={}, SUMM_METRIC=(functio
 var TGT_FILT_Q=(function(){try{return localStorage.getItem('tgt_filt_q')||'';}catch(e){return '';}})();
 var TGT_FILT_CATS=(function(){try{var s=localStorage.getItem('tgt_filt_cats');var a=s?JSON.parse(s):null;return (a&&a.length)?new Set(a):null;}catch(e){return null;}})();
 var TGT_CAT_OPEN=false, _tgtCatDocBound=false;   // Set-targets category multi-select dropdown open state
-var SUMM_CCY='GBP';   // Summary display currency: GBP or the market's local (USD/EUR/AUD) via FX_RATES per FY
+var SUMM_CCY=(function(){try{return localStorage.getItem('disp_ccy')||'GBP';}catch(e){return 'GBP';}})();   // GLOBAL display currency mode: GBP | LOCAL (one toggle in the DEMAND nav; applies to plan + summary + reports)
+function setDispCcy(m){ SUMM_CCY=m; try{localStorage.setItem('disp_ccy',m);}catch(e){} if(typeof render==='function')render(); }
 function mktCcy(co){ return ({US:'USD',EU:'EUR',AU:'AUD'})[co]||null; }
 var CCY_SYM={GBP:'£',USD:'$',EUR:'€',AUD:'A$'};
 function fxRate(ccy,fy){ if(!ccy||ccy==='GBP')return 1; var r=FX_RATES[fy]&&FX_RATES[fy][ccy]; if(r>0)return r; var ks=Object.keys(FX_RATES).filter(function(k){return FX_RATES[k]&&FX_RATES[k][ccy]>0;}).sort(); if(!ks.length)return null; return FX_RATES[ks[ks.length-1]][ccy]; }   // fall back to latest FY with a rate
@@ -8062,7 +8058,7 @@ function renderSummaryView(body){
     +'<span style="display:flex;gap:3px">'+CH_PILLS.map(function(c){return '<button class="sm-ch'+(c===ch?' on':'')+'" data-c="'+c+'">'+c+'</button>';}).join('')+'</span>'
     +'<span style="display:flex;gap:3px;margin-left:8px">'+[['units','Units'],['rev','Revenue'],['revtgt','Rev + targets']].map(function(x){return '<button class="sm-metric'+(x[0]===SUMM_METRIC?' on':'')+'" data-m="'+x[0]+'">'+x[1]+'</button>';}).join('')+'</span>'
     +'<span style="display:flex;gap:3px">'+[['month','Month'],['quarter','Quarter'],['half','Half']].map(function(x){return '<button class="sm-group'+(x[0]===SUMM_GROUP?' on':'')+'" data-g="'+x[0]+'">'+x[1]+'</button>';}).join('')+'</span>'
-    +((_localC&&fxRate(_localC,0)!=null&&(SUMM_METRIC==='rev'||SUMM_METRIC==='revtgt'))?('<span style="display:flex;gap:3px;margin-left:4px" title="Show '+esc(co)+' in its local currency at the financial-year blended rate (CONFIG ▸ Admin ▸ Exchange rates)">'+[['GBP','GBP'],['LOCAL',_localC]].map(function(x){return '<button class="sm-ccy'+((x[0]===SUMM_CCY)?' on':'')+'" data-ccy="'+x[0]+'">'+x[1]+'</button>';}).join('')+'</span>'):'')
+    +''   /* currency toggle moved to the single global control in the DEMAND nav */
     +'<button class="sm-tgtedit'+(SUMM_TGT_EDIT?' on':'')+'" id="sm-tgtedit" style="margin-left:8px">'+(SUMM_TGT_EDIT?'✓ Editing targets':'✎ Add targets')+'</button>'
     +'<span style="margin-left:14px;font-size:12px;color:#475569;display:flex;align-items:center;gap:5px">Show from <select id="sm-from" style="padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px">'+moOpts(SUMM_FROM)+'</select> to <select id="sm-to" style="padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px">'+moOpts(SUMM_TO)+'</select>'+(rangeMode?' <button id="sm-clear" style="font-size:11px;padding:3px 9px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;cursor:pointer">✕ clear · FY view</button>':'')+'</span>'
     +'</div>'
@@ -8073,7 +8069,6 @@ function renderSummaryView(body){
   body.querySelectorAll('.sm-ch').forEach(function(b){ b.onclick=function(){ CF=b.dataset.c; renderSummaryView(body); }; });
   body.querySelectorAll('.sm-metric').forEach(function(b){ b.onclick=function(){ SUMM_METRIC=b.dataset.m; try{localStorage.setItem('summ_metric',SUMM_METRIC);}catch(e){} renderSummaryView(body); }; });
   body.querySelectorAll('.sm-group').forEach(function(b){ b.onclick=function(){ SUMM_GROUP=b.dataset.g; try{localStorage.setItem('summ_group',SUMM_GROUP);}catch(e){} renderSummaryView(body); }; });
-  body.querySelectorAll('.sm-ccy').forEach(function(b){ b.onclick=function(){ SUMM_CCY=b.dataset.ccy; renderSummaryView(body); }; });
   var _te=body.querySelector('#sm-tgtedit'); if(_te)_te.onclick=function(){ SUMM_TGT_EDIT=!SUMM_TGT_EDIT; if(SUMM_TGT_EDIT&&SUMM_METRIC==='units')SUMM_METRIC='revtgt'; renderSummaryView(body); };
   var fSel=body.querySelector('#sm-from'), tSel=body.querySelector('#sm-to');
   function applyRange(){ SUMM_FROM=fSel.value; SUMM_TO=tSel.value; renderSummaryView(body); }   // full silent re-render so the month range + header/clear update immediately
@@ -8552,9 +8547,13 @@ function renderDemandTabs(){
   } else if(_in3){ _in3.style.display='none'; _in3.innerHTML=''; }
   // relocate the demand-plan AI tool-bar into this secondary menu (moved back on teardown)
   var pt=document.getElementById('plan-tools'); if(pt)bar.appendChild(pt);
+  // ONE global currency toggle (GBP / local) for the whole DEMAND area — shown when the current market is US/EU/AU with a rate.
+  (function(){ var lc=mktCcy(CUR); if(!(lc&&fxRate(lc,0)!=null))return; var w=document.createElement('span'); w.style.cssText='margin-left:auto;display:inline-flex;align-items:center;flex:0 0 auto';
+    w.innerHTML='<span class="pill-lbl" style="margin:0 3px">Currency</span>'+[['GBP','GBP'],['LOCAL',lc]].map(function(x){var on=(x[0]===SUMM_CCY);return '<button onclick="setDispCcy(\''+x[0]+'\')" title="Show revenue &amp; ASP in '+(x[0]==='GBP'?'GBP':(lc+' at the FY blended rate'))+' across all DEMAND tabs" style="font-size:10px;padding:3px 10px;border:1px solid '+(on?'#0f172a':'#cbd5e1')+';border-radius:12px;background:'+(on?'#0f172a':'#fff')+';color:'+(on?'#fff':'#334155')+';cursor:pointer;font-weight:600;font-family:inherit;margin-left:3px">'+x[1]+'</button>';}).join('');
+    bar.appendChild(w); })();
   // relocate the status note (#st) + last-updated/version (#ver) onto this nav row, right-aligned (all DEMAND pages)
   var _st=document.getElementById('st');
-  if(_st){ _st.className=''; _st.style.cssText='font-size:11px;color:#888;margin-left:auto;flex:0 0 auto;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:46%'; bar.appendChild(_st); }
+  if(_st){ _st.className=''; _st.style.cssText='font-size:11px;color:#888;margin-left:10px;flex:0 0 auto;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;max-width:40%'; bar.appendChild(_st); }
   var _ver=document.getElementById('ver');
   if(_ver){ _ver.style.cssText='color:#0f172a;background:#fbbf24;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:800;line-height:1.2;letter-spacing:.02em;flex:0 0 auto;margin-left:10px;white-space:nowrap;position:relative'; bar.appendChild(_ver); }   // amber badge, matches SUPPLY
   if(_sb)_sb.style.display='none';   // its contents now live on nav-2

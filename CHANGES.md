@@ -1,3 +1,8 @@
+## v26.682.0 — Single global currency toggle + Klaviyo upload allowed read-only
+- Replaced the per-view GBP/local toggles (Summary pills + plan controls) with ONE global toggle in the DEMAND nav row — set once, applies across every DEMAND tab & report; persisted (localStorage). Shows for US/EU/AU when a rate exists.
+- Klaviyo BIS upload (/api/klaviyo-bis/*) is now explicitly allowed with read-only permission (no edit rights needed), like the Zalando upload.
+
+
 ## v26.681.0 — Exchange rates: inherit forward to FY2040, show only current + 2 years ahead
 - CONFIG ▸ Admin ▸ Exchange rates: future financial years now inherit the last rate you set (shown as ↳) unless overridden, and the values are materialised/persisted through FY2040 in the DB (fx_rates), while the editor only shows the current FY + 2 ahead. User overrides tracked separately (fx_rates_explicit) so inheritance re-flows when you change an earlier year.
 
