@@ -1,3 +1,6 @@
+## v26.721.0 — DEMAND plan: notes (N) + record-of-change (R) load lazily (non-blocking)
+- The plan no longer waits on the notes + change-keys fetches before first paint — it renders immediately and the N / R rail indicators fill in when they arrive (SKU rows pick them up on expand; category cells via a one-pass rail refresh). Speeds up first paint, especially on mobile / the tunnel.
+
 ## v26.720.0 — Quality Control upload allowed with read-only permission
 - Read-only users can now upload files to SUPPLY ▸ Quality Control (including the metafields — doc type, production / batch / PO / supplier), like the Zalando / Klaviyo uploads. requiredCap exempts POST /api/supply/quality-doc. Deleting a QC doc still needs edit (supply) permission.
 

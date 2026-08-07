@@ -5851,6 +5851,12 @@ function refreshCellRail(nk){ if(!nk)return; var sel=(window.CSS&&CSS.escape)?CS
     applyCellNote(td,nk);
   });
 }
+// One-pass refresh of EVERY rendered cell's rail — used after the lazy notes/change-keys load completes so the
+// N / R indicators fill in without a full plan re-render.
+function refreshAllCellRails(){ try{ document.querySelectorAll('td[data-nk]').forEach(function(td){ var nk=td.dataset.nk; if(!nk)return;
+  var ex=td.querySelector('.cell-rail'); if(ex)ex.remove(); var html=cellRailForKey(nk);
+  if(html){ td.classList.add('has-rail'); td.style.position='relative'; td.insertAdjacentHTML('afterbegin',html); } else { td.classList.remove('has-rail'); }
+  applyCellNote(td,nk); }); }catch(e){} }
 function skuOutFC(sku,co,ch,m){var o=FC_OUTPUTS[sku+'|'+skuWh(co,ch)+'|'+ch];return(o&&o[m]!=null)?o[m]:null;}
 // "Continuing SKU" = has any actuals in the trailing 12 complete months. For a calendar month 'MM', the most
 // recent complete actual is THIS year if that month has finished (MM ≤ CUR_YTD_END's month), else last year.
@@ -7925,9 +7931,11 @@ function renderMain(){
   _undoReady=true; try{ updateUndoBtn(); }catch(e){} try{ renderPlanChips(); }catch(e){}   // arm undo + refresh active-filter chips once the plan has rendered
   if(_smoothStale===null){ try{ _smoothStale=computeSmoothStale(); }catch(e){ _smoothStale={count:0}; } }   // >48h discontinued-smoothing impact check — once per session
   try{ updateSmoothStaleBadge(); }catch(e){}
-  // load per-cell forecast notes for the current country+channel before building the grid (so the N badges
-  // render). fcNotesLoad always sets FC_NOTES_KEY (even on failure) so this can't loop.
-  if(typeof FC_NOTES_KEY!=='undefined' && FC_NOTES_KEY!==CUR+'|'+CF){ fcNotesLoad(CUR,CF,function(){ fcChangeKeysLoad(CUR,CF,function(){ renderMain(); }); }); return; }
+  // Notes (N) + record-of-change keys (R) load in the BACKGROUND — the plan paints immediately and the N/R rail
+  // indicators fill in when they arrive (SKU rows pick them up on expand; category cells via refreshAllCellRails).
+  // Was blocking first paint on two fetches — noticeably slow on mobile / the tunnel.
+  if(typeof FC_NOTES_KEY!=='undefined' && FC_NOTES_KEY!==CUR+'|'+CF){ FC_NOTES_KEY=CUR+'|'+CF;   // mark now so we don't re-trigger during the async load
+    fcNotesLoad(CUR,CF,function(){ fcChangeKeysLoad(CUR,CF,function(){ try{refreshAllCellRails();}catch(e){} }); }); }
   SKU_VIEW=null;
   SMOOTH_PREVIEW=null; // drop any pending smooth preview when the grid is rebuilt
   // Always reset tw — SKU view replaces its contents so we can't rely on #t existing
