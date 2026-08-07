@@ -8110,7 +8110,7 @@ function renderSummaryView(body){
     function ecell(sub,c){ if(c.type==='tot'||c.type==='ptot')return '<td class="tot" style="background:#f1f5f9"></td>';
       var Y=c.Y, lvl=c.level, idx=c.idx; if(Y==null||!lvl)return '<td></td>';
       var key=tgKey(Y,sub,lvl,idx), gbpStored=SUMM_TGT_GBP[key], gStored=SUMM_TGT[key], inh=inheritG(Y,sub,lvl,idx);
-      var mths=c.single?[c.single]:c.months, ly=0; mths.forEach(function(m){ ly+=((_lyRev[sub]&&_lyRev[sub][m])||0); });
+      var mths=c.single?[c.single]:(c.m?[c.m]:(c.months||[])), ly=0; mths.forEach(function(m){ ly+=((_lyRev[sub]&&_lyRev[sub][m])||0); });   // month cols carry .m (not .months) → guard so MONTH group doesn't blank
       var ph=(inh!=null)?('↳'+(inh>=0?'+':'')+inh):'0%';
       var isGbp=(gbpStored!=null), v='', bg='', ttxt='';
       if(isGbp){ v='£'+Math.round(gbpStored).toLocaleString(); bg='background:#B3EBF2';   // £ absolute → light blue
@@ -8805,7 +8805,17 @@ function trecMonFyIdx(m){ var mo=+m.slice(5,7),y=+m.slice(0,4); return {Y:(mo>=3
 function trecResolve(Y,sub,mIdx){ var k; k=Y+'|'+sub+'|month|'+mIdx; if(TREC_MAP[k]!=null)return Number(TREC_MAP[k]); k=Y+'|'+sub+'|quarter|'+Math.ceil(mIdx/3); if(TREC_MAP[k]!=null)return Number(TREC_MAP[k]); k=Y+'|'+sub+'|half|'+Math.ceil(mIdx/6); if(TREC_MAP[k]!=null)return Number(TREC_MAP[k]); return null; }
 function trecLoad(cb){ var co=CUR,ch=CF; if(TREC_KEY===co+'|'+ch){cb();return;}
   fetch('/api/demand-revenue-targets/periods?country='+encodeURIComponent(co)+'&channel='+encodeURIComponent(ch)).then(function(r){return r.json();}).then(function(rows){ TREC_MAP={}; (rows||[]).forEach(function(t){ TREC_MAP[t.fy+'|'+(t.subcategory||'')+'|'+t.level+'|'+t.idx]=t.growth_pct; }); TREC_KEY=co+'|'+ch; cb(); }).catch(function(){ TREC_KEY=co+'|'+ch; cb(); }); }
-function computeTargetRecs(fy){ var co=CUR,ch=CF;
+// TREC dismissals — persisted per country|channel|fy|subcategory. A dismissed rec stays visible but is
+// removed from the "open" count + Apply-all (Ben). <2% gap recs have nothing to apply → hidden entirely.
+var TREC_DISM=(function(){try{return JSON.parse(localStorage.getItem('trec_dismissed'))||{};}catch(e){return {};}})();
+function trecDKey(co,ch,fy,s){ return co+'|'+ch+'|'+fy+'|'+s; }
+function trecSaveDism(){ try{localStorage.setItem('trec_dismissed',JSON.stringify(TREC_DISM));}catch(e){} }
+function trecGapPct(rc){ return rc.fyCur>0?((rc.fyTgt/rc.fyCur-1)*100):(rc.fyTgt>0?null:0); }   // null = new category (no LY base)
+function trecMeaningful(rc){ var gp=trecGapPct(rc); return gp==null?(rc.fyTgt>0):(Math.abs(gp)>=2); }   // <2% gap → nothing to apply
+function trecOpen(rc,co,ch,fy){ return trecMeaningful(rc) && !TREC_DISM[trecDKey(co,ch,fy,rc.s)]; }
+function trecCount(co,ch,fy){ try{ return computeTargetRecs(fy,co,ch).filter(function(rc){return trecOpen(rc,co,ch,fy);}).length; }catch(e){ return 0; } }
+var _trecRecCache={};   // memoise per (fy|co|ch) within a render pass (pill counters compute across all combos); cleared each renderTargetRecs
+function computeTargetRecs(fy,coA,chA){ var co=coA||CUR,ch=chA||CF; var _ck=fy+'|'+co+'|'+ch; if(_trecRecCache[_ck])return _trecRecCache[_ck];
   var subs=[]; (typeof DATA!=='undefined'?DATA:[]).forEach(function(d){ if(d.co===co&&d.ch===ch&&d.s&&subs.indexOf(d.s)<0)subs.push(d.s); }); subs.sort();
   var months=fyMonths(fy).filter(function(m){ return !isActualMonth(m); });
   var out=[];
@@ -8815,7 +8825,9 @@ function computeTargetRecs(fy){ var co=CUR,ch=CF;
       if(!(lyRev>0))return;
       var p=pa(m), asp=getASP(co,ch,s,p.y,p.mo); if(!(asp>0))return;
       var tgtRev=lyRev*(1+g/100), reqU=Math.max(0,Math.round(tgtRev/asp));
-      var curU=cr.fu[m]||0, curRev=curU*asp;
+      // Current (part-way) month: use the FULL-MONTH forecast, not the actuals-to-date, as the baseline (Ben) —
+      // otherwise a partly-elapsed month reads as a huge drop (e.g. "Aug 20,453→454u -98%").
+      var curU=((typeof CUR_MONTH!=='undefined'&&m===CUR_MONTH&&typeof curMonthForecast==='function')?(curMonthForecast(s,co,ch)||0):(cr.fu[m]||0)), curRev=curU*asp;
       rows.push({m:m, curU:curU, curRev:curRev, tgtRev:tgtRev, reqU:reqU, g:g, pctCur:(curU>0?(reqU/curU-1):null), pctLY:(lyU>0?(reqU/lyU-1):null)});
       fyCur+=curRev; fyTgt+=tgtRev; });
     if(rows.length)out.push({s:s, rows:rows, fyCur:fyCur, fyTgt:fyTgt}); });

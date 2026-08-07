@@ -1,3 +1,8 @@
+## v26.671.0 — Fix Summary edit-targets MONTH blank + target-recs current-month baseline
+- FIX (regression/pre-existing): Set-targets edit grid went blank on the MONTH pill xe2x80x94 month columns carry .m (not .months) and ecell read the wrong property, throwing. Now guarded.
+- Target recommendations: the current (part-way) month now uses the FULL-MONTH forecast as the baseline, not actuals-to-date (was showing e.g. "Aug 20,453xe2x86x92454u -98%"). Also parametrised computeTargetRecs + added dismiss/count helpers (used by the drawer rework).
+
+
 ## v26.670.0 — Set targets: enter % growth OR a £ revenue target (auto-detect, colours, units)
 - A target cell now accepts a % growth (e.g. 40 → shows +40%, light-green cell) OR an absolute £ revenue target (£120000 or 120000 → shows £120,000, light-blue cell). Auto-detects by £ prefix or magnitude (>=1000 = £).
 - Under the cell: % mode shows the resulting £ target + units; £ mode shows the implied % growth (or "new" for a category with no history) + units. Units use the ex-tax retail price (planner.products) x channel factor (B2B x0.5, DTC/FBA x0.95). New migration 198 (target_gbp) + server SUBCAT_RT injection.
