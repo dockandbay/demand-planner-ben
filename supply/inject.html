@@ -6666,22 +6666,31 @@
             el.innerHTML='Fulfil API keys in server env — Sandbox: '+dot(st&&st.fulfil&&st.fulfil.sandbox)+' &nbsp;·&nbsp; Live: '+dot(st&&st.fulfil&&st.fulfil.live); }).catch(function(){});
         }).catch(function(e){ b.innerHTML='<div class="count" style="color:#dc2626">'+esc(String(e))+'</div>'; }); };
       SUBS['exchange-rates']=function(){ b.innerHTML='<div class="count">Loading…</div>';
+        var CCY=[['USD','GBP → USD (US)'],['EUR','GBP → EUR (EU)'],['AUD','GBP → AUD (AU)']], FX_END=2040;
+        var fyLbl=function(y){return 'FY'+String(y).slice(2)+'/'+String(y+1).slice(2);};
+        // Materialise the sparse user-set rates forward to FY2040 (carry the last set rate forward per currency).
+        function matFx(exp){ var out={}, eyrs=Object.keys(exp).map(Number).filter(function(x){return !isNaN(x);}); if(!eyrs.length)return {}; var start=Math.min.apply(null,eyrs);
+          CCY.forEach(function(c){ var ccy=c[0], last=null; for(var fy=start; fy<=FX_END; fy++){ if(exp[fy]&&exp[fy][ccy]!=null&&exp[fy][ccy]!=='')last=Number(exp[fy][ccy]); if(last!=null)(out[fy]=out[fy]||{})[ccy]=last; } }); return out; }
         fetch('/api/app-settings').then(function(r){return r.json();}).then(function(s){ s=s||{};
-          var fx=(function(){ try{ var o=(typeof s.fx_rates==='string')?JSON.parse(s.fx_rates):(s.fx_rates||{}); return (o&&typeof o==='object')?o:{}; }catch(e){ return {}; } })();
+          var parse=function(v){ try{ var o=(typeof v==='string')?JSON.parse(v):(v||{}); return (o&&typeof o==='object')?o:{}; }catch(e){ return {}; } };
+          var exp=parse(s.fx_rates_explicit); if(!Object.keys(exp).length)exp=parse(s.fx_rates);   // migrate: seed explicit from the old materialised/sparse fx_rates
+          var mat=matFx(exp);
           var now=new Date(), yy=now.getFullYear(), mm=now.getMonth()+1, curFY=(mm>=3?yy:yy-1);
-          var fys=[curFY-1,curFY,curFY+1,curFY+2];
-          var CCY=[['USD','GBP → USD (US)'],['EUR','GBP → EUR (EU)'],['AUD','GBP → AUD (AU)']];
-          var fyLbl=function(y){return 'FY'+String(y).slice(2)+'/'+String(y+1).slice(2);};
+          var fys=[curFY,curFY+1,curFY+2];   // only current + 2 years ahead (later years persist in the DB via inheritance, just hidden here)
           var rows=fys.map(function(y){ return '<tr><td class="l" style="padding:5px 10px;font-weight:600">'+fyLbl(y)+'</td>'
-            +CCY.map(function(c){ var v=(fx[y]&&fx[y][c[0]]!=null)?fx[y][c[0]]:''; return '<td style="padding:4px 10px;text-align:right"><input class="fci fx-in" data-fy="'+y+'" data-ccy="'+c[0]+'" value="'+esc(v)+'" placeholder="rate" inputmode="decimal" style="width:90px;text-align:right"></td>'; }).join('')+'</tr>'; }).join('');
-          b.innerHTML='<div class="annot"><b>CONFIG ▸ Admin ▸ Exchange rates.</b> A simple <b>blended / average rate per financial year</b> (Mar–Feb) used to display a market in its local currency. Sales &amp; forecasts are held in GBP; local = GBP × the FY rate. e.g. a GBP→USD rate of 1.27 shows £100 as $127.</div>'
+            +CCY.map(function(c){ var ex=(exp[y]&&exp[y][c[0]]!=null&&exp[y][c[0]]!=='')?exp[y][c[0]]:''; var inh=(mat[y]&&mat[y][c[0]]!=null)?mat[y][c[0]]:''; var ph=(ex===''&&inh!=='')?('↳ '+inh):'rate';
+              return '<td style="padding:4px 10px;text-align:right"><input class="fci fx-in" data-fy="'+y+'" data-ccy="'+c[0]+'" value="'+esc(ex)+'" placeholder="'+esc(ph)+'" inputmode="decimal" style="width:90px;text-align:right'+(ex===''&&inh!==''?';color:#94a3b8':'')+'"></td>'; }).join('')+'</tr>'; }).join('');
+          b.innerHTML='<div class="annot"><b>CONFIG ▸ Admin ▸ Exchange rates.</b> A simple <b>blended / average rate per financial year</b> (Mar–Feb) used to display a market in its local currency. Sales &amp; forecasts are held in GBP; local = GBP × the FY rate (e.g. GBP→USD 1.27 shows £100 as $127). <b>Future years inherit the last rate you set</b> (shown as <span style="color:#94a3b8">↳</span>) unless you type an override — persisted through FY'+FX_END+'. Only the current year + 2 ahead are shown.</div>'
             +'<div class="sect-h">GBP → local currency, by financial year</div>'
             +'<div class="tw" style="max-width:560px"><table style="width:max-content;min-width:100%"><thead><tr><th class="l" style="padding:5px 10px">Financial year</th>'+CCY.map(function(c){return '<th style="padding:5px 10px;text-align:right">'+c[1]+'</th>';}).join('')+'</tr></thead><tbody>'+rows+'</tbody></table></div>'
-            +'<div class="mut tiny" style="margin-top:8px">Blank = no conversion offered for that market/year (falls back to GBP). Also feeds the SUPPLY Cash Flow GBP↔USD columns (wired later).</div>';
+            +'<div class="mut tiny" style="margin-top:8px">Blank = inherit the previous year (↳). Also feeds the SUPPLY Cash Flow GBP↔USD columns.</div>';
           b.querySelectorAll('.fx-in').forEach(function(inp){ inp.onchange=function(){ var y=inp.dataset.fy, ccy=inp.dataset.ccy, raw=String(inp.value).replace(/[^0-9.]/g,'').trim();
-            if(!fx[y])fx[y]={}; if(raw===''){ delete fx[y][ccy]; if(!Object.keys(fx[y]).length)delete fx[y]; } else fx[y][ccy]=Number(raw);
-            inp.value=raw; inp.style.borderColor='#d0d0d0';
-            fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'fx_rates',value:JSON.stringify(fx)})}).then(function(r){return r.json();}).then(function(j){ inp.style.borderColor=(j&&j.error)?'#dc2626':'#16a34a'; setTimeout(function(){inp.style.borderColor='';},900); }).catch(function(){ inp.style.borderColor='#dc2626'; }); }; });
+            if(!exp[y])exp[y]={}; if(raw===''){ delete exp[y][ccy]; if(!Object.keys(exp[y]).length)delete exp[y]; } else exp[y][ccy]=Number(raw);
+            inp.value=raw; inp.style.borderColor='#d0d0d0'; var newMat=matFx(exp);
+            Promise.all([
+              fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'fx_rates_explicit',value:JSON.stringify(exp)})}).then(function(r){return r.json();}),
+              fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'fx_rates',value:JSON.stringify(newMat)})}).then(function(r){return r.json();})
+            ]).then(function(){ inp.style.borderColor='#16a34a'; SUBS['exchange-rates'](); }).catch(function(){ inp.style.borderColor='#dc2626'; }); }; });
         }).catch(function(e){ b.innerHTML='<div class="count" style="color:#dc2626">'+esc(String(e))+'</div>'; }); };
       SUBS['permissions']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/config/permissions').then(function(r){return r.json();}).then(function(rows){

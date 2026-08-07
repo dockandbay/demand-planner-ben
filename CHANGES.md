@@ -1,3 +1,7 @@
+## v26.681.0 — Exchange rates: inherit forward to FY2040, show only current + 2 years ahead
+- CONFIG ▸ Admin ▸ Exchange rates: future financial years now inherit the last rate you set (shown as ↳) unless overridden, and the values are materialised/persisted through FY2040 in the DB (fx_rates), while the editor only shows the current FY + 2 ahead. User overrides tracked separately (fx_rates_explicit) so inheritance re-flows when you change an earlier year.
+
+
 ## v26.680.0 — Move Auto Forecast email from CONFIG General to Exports & uploads
 - The "Send Auto Forecast now" recipients + button moved out of CONFIG ▸ General into CONFIG ▸ Exports & uploads (under the Report exports section), alongside the other report emails.
 
