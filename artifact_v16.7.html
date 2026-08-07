@@ -8113,7 +8113,10 @@ function renderSummaryView(body){
       var tgt=ly*(1+eff/100);
       return '<td class="ecell" style="padding:2px 4px;border:1px solid #e5e7eb;text-align:right"><input class="tgin" data-sub="'+encodeURIComponent(sub)+'" data-fy="'+Y+'" data-lvl="'+lvl+'" data-idx="'+idx+'" data-ly="'+Math.round(ly)+'" data-inh="'+(inh!=null?inh:'')+'" value="'+v+'" placeholder="'+ph+'" title="revenue growth % vs last year (blank = inherit)"><div class="ttgt" style="font-size:9px;color:#64748b;text-align:right;font-variant-numeric:tabular-nums;margin-top:1px">'+(ly>0?('&pound;'+Math.round(tgt).toLocaleString()):'')+'</div></td>'; }
     if(SUMM_TGT_EDIT&&!rangeMode){
-      var _lyRev={}; subs.forEach(function(_s){ var _a=ga(co,ch,_s)||{}, _mm={}; DISP_MONTHS.forEach(function(m){ _mm[m]=_a[prevY(m)]?_a[prevY(m)][1]:0; }); _lyRev[_s]=_mm; });
+      // Target £ baseline = prior-year revenue per month. If the prior-year month is itself still a FORECAST
+      // (e.g. FY27/28 H2 → FY26/27 H2 not complete), inherit the forecast revenue (subData.val, which is
+      // actual-or-forecast for revtgt) instead of showing 0 → so the £ target appears for future halves too.
+      var _lyRev={}; subs.forEach(function(_s){ var _sd=subData(_s), _a=_sd.a||{}, _mm={}; DISP_MONTHS.forEach(function(m){ var py=prevY(m); _mm[m]=(py in _sd.val)?_sd.val[py]:((_a[py]&&_a[py][1])||0); }); _lyRev[_s]=_mm; });
       var _mmT={}; DISP_MONTHS.forEach(function(m){ var _t=0; subs.forEach(function(_s){ _t+=_lyRev[_s][m]||0; }); _mmT[m]=_t; }); _lyRev['']=_mmT;
       var eThead='<thead><tr>'+h1+'</tr><tr>'+h2+'</tr></thead>';
       // #4 category filter (text + pills, session-persisted)

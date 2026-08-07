@@ -1,3 +1,7 @@
+## v26.669.0 — Set targets: xc2xa3 baseline inherits forecast revenue for future halves
+- The target xc2xa3 baseline (last-year revenue under each cell) now falls back to the demand FORECAST revenue when the prior-year month is itself still a forecast (e.g. FY27/28 H2). Previously showed nothing because only actual LY revenue was used.
+
+
 ## v26.668.0 — Target recommendations: "Edit forecasts" button → Summary with targets editing
 - The 🎯 Target recommendations drawer now has an "✎ Edit forecasts" button that closes the drawer and jumps to DEMAND ▸ Summary with Add-targets (edit) mode already on (Rev+targets metric).
 
