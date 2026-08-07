@@ -8300,14 +8300,15 @@ function renderSummaryView(body){
       var Y=c.Y, lvl=c.level, idx=c.idx; if(Y==null||!lvl)return '<td></td>';
       var key=tgKey(Y,sub,lvl,idx), gbpStored=SUMM_TGT_GBP[key], gStored=SUMM_TGT[key], inh=inheritG(Y,sub,lvl,idx);
       var mths=c.single?[c.single]:(c.m?[c.m]:(c.months||[])), ly=0; mths.forEach(function(m){ ly+=((_lyRev[sub]&&_lyRev[sub][m])||0); });   // month cols carry .m (not .months) → guard so MONTH group doesn't blank
-      var ph=(inh!=null)?('↳'+(inh>=0?'+':'')+inh):'0%';
+      var ph=(inh!=null)?('↳'+(inh>=0?'+':'')+inh+'%'):'0%';
       var isGbp=(gbpStored!=null), v='', bg='', ttxt='', cellTgt=0;
       if(isGbp){ v='£'+Math.round(gbpStored).toLocaleString(); bg='background:#B3EBF2';   // £ absolute → light blue
         var impPct=ly>0?Math.round((gbpStored/ly-1)*100):null; cellTgt=gbpStored;
         ttxt=(impPct==null?'new':((impPct>=0?'+':'')+impPct+'%'))+_uTxt(gbpStored,sub); }
       else if(gStored!=null){ v=(Number(gStored)>=0?'+':'')+Number(gStored)+'%'; bg='background:#F0FFF0';   // % growth → light green
         var tgt=ly*(1+Number(gStored)/100); cellTgt=tgt; ttxt=(ly>0?('£'+Math.round(tgt).toLocaleString()):'')+_uTxt(tgt,sub); }
-      else { var eff=(inh!=null?inh:0), tgt2=ly*(1+eff/100); cellTgt=tgt2; ttxt=(ly>0?('£'+Math.round(tgt2).toLocaleString()):'')+_uTxt(tgt2,sub); }
+      else { var eff=(inh!=null?inh:0), tgt2=ly*(1+eff/100); cellTgt=tgt2; if(inh!=null)bg='background:#F0FFF0';   // inherited % growth → green, matching an entered %
+        ttxt=(ly>0?('£'+Math.round(tgt2).toLocaleString()):'')+_uTxt(tgt2,sub); }
       return '<td class="ecell" style="padding:2px 4px;border:1px solid #e5e7eb;text-align:right"><input class="tgin" data-sub="'+encodeURIComponent(sub)+'" data-fy="'+Y+'" data-lvl="'+lvl+'" data-idx="'+idx+'" data-ly="'+Math.round(ly)+'" data-inh="'+(inh!=null?inh:'')+'" data-net="'+_tgtNet(sub)+'" value="'+v+'" placeholder="'+ph+'" title="Type a % growth vs last year (e.g. 40) OR a £ revenue target (e.g. £120000 or 120000). Blank = inherit." style="'+bg+'"><div class="ttgt tgt-hov" data-sub="'+encodeURIComponent(sub)+'" data-mths="'+mths.join(',')+'" data-tgt="'+Math.round(cellTgt)+'" data-ly="'+Math.round(ly)+'" data-net="'+_tgtNet(sub)+'" style="font-size:9px;color:#64748b;text-align:right;font-variant-numeric:tabular-nums;margin-top:1px;cursor:help">'+ttxt+'</div></td>'; }
     if(SUMM_TGT_EDIT&&!rangeMode){
       // Target £ baseline = prior-year revenue per month. If the prior-year month is itself still a FORECAST
