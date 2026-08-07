@@ -8330,7 +8330,7 @@ function renderSummaryView(body){
           +'<tr><td style="padding:1px 10px 1px 0;color:#94a3b8">Revenue</td><td>£'+f(lyRev)+' → £'+f(tgt)+' <span style="color:'+rC+'">('+(rD>=0?'+':'')+'£'+f(rD)+')</span></td></tr>'
           +(gp!=null?'<tr><td style="padding:1px 10px 1px 0;color:#94a3b8">Growth</td><td style="color:'+(gp>=0?'#86efac':'#fca5a5')+'">'+(gp>=0?'+':'')+gp+'%</td></tr>':'')+'</table>'
           +'<div style="color:#94a3b8;margin-top:4px;font-size:9px">last-year actuals → target</div>'; }
-      var _tgtHideT=null;
+      var _tgtHideT=null, _tgtShowT=null;
       function _tgtTipShow(el){ var t=document.getElementById('tgt-hov-tip'); if(!t){ t=document.createElement('div'); t.id='tgt-hov-tip'; t.style.cssText='position:fixed;z-index:100070;max-width:320px;background:#111827;color:#fff;padding:8px 11px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);text-align:left;user-select:text'; document.body.appendChild(t);
           t.addEventListener('mouseenter',function(){ if(_tgtHideT){clearTimeout(_tgtHideT);_tgtHideT=null;} }); t.addEventListener('mouseleave',_tgtTipHide); }
         if(_tgtHideT){clearTimeout(_tgtHideT);_tgtHideT=null;}
@@ -8340,8 +8340,8 @@ function renderSummaryView(body){
         t.style.left=Math.max(6,Math.min(r.right-150,window.innerWidth-326))+'px'; t.style.top=top+'px'; }
       function _tgtTipHide(){ var t=document.getElementById('tgt-hov-tip'); if(t)t.style.display='none'; }
       host.querySelectorAll('.tgt-hov').forEach(function(el){
-        el.addEventListener('mouseenter',function(){ if(_tgtHideT){clearTimeout(_tgtHideT);_tgtHideT=null;} _tgtTipShow(el); });
-        el.addEventListener('mouseleave',function(){ if(_tgtHideT)clearTimeout(_tgtHideT); _tgtHideT=setTimeout(_tgtTipHide,220); });   // brief grace so you can move INTO the tip to select/copy
+        el.addEventListener('mouseenter',function(){ if(_tgtHideT){clearTimeout(_tgtHideT);_tgtHideT=null;} if(_tgtShowT)clearTimeout(_tgtShowT); _tgtShowT=setTimeout(function(){ _tgtTipShow(el); },300); });   // 300ms hover delay before showing
+        el.addEventListener('mouseleave',function(){ if(_tgtShowT){clearTimeout(_tgtShowT);_tgtShowT=null;} if(_tgtHideT)clearTimeout(_tgtHideT); _tgtHideT=setTimeout(_tgtTipHide,220); });   // brief grace so you can move INTO the tip to select/copy
       });
       host.querySelectorAll('th.fyh[data-fy]').forEach(function(th){ th.onclick=function(){ var Y=+th.dataset.fy; SUMM_FYOPEN[Y]=!fyOpen(Y); draw(); }; });
       return;

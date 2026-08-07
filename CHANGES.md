@@ -1,3 +1,6 @@
+## v26.709.0 — Summary targets tooltip: 300ms hover delay
+- The £ target hover tooltip on Summary with targets now waits 300ms before showing (was instant).
+
 ## v26.708.0 — Rename invoice buttons to reflect the packing list
 - "Commercial Invoice" → "Commercial Invoice & Packing List"; "Tax Invoice" → "Tax Invoice & Packing List" (the download already bundles both tabs).
 
