@@ -1081,9 +1081,13 @@ async function manufacturingData() {
     .forEach(r => { (stockBy[r.prod_no || '(no prod #)'] = stockBy[r.prod_no || '(no prod #)'] || {})[r.component_sku] = Number(r.qty);
       stockTotByComp[r.component_sku] = (stockTotByComp[r.component_sku] || 0) + Number(r.qty); });
   const mfgBucket = s => { const u = (s || '').toUpperCase(); if (u.includes('READY TO SHIP')) return 'inProd'; if (/COMPLETE|DELIVER|SHIP/.test(u)) return 'completed'; return 'inProd'; };
-  // Component supply pooled by SKU, split into inProd / completed.
-  const compSup = {};   // sku -> { inProd, completed, mfgPos:[] }
-  supRows.forEach(r => { const e = compSup[r.sku] || (compSup[r.sku] = { inProd: 0, completed: 0, mfgPos: [] }); const b = mfgBucket(r.status); e[b] += Number(r.qty); e.mfgPos.push({ po: r.po, qty: Number(r.qty), status: r.status, prod_no: r.prod_no, bucket: b }); });
+  // Component supply pooled by SKU, split into inProd / completed. ALSO kept per production number (the MFG PO's own
+  // prod_no) so the grouped view can attribute a Manufacturing PO to ITS production only (not every production that
+  // needs the component) — e.g. PO-56WK-MANU-1 (Production 56) shows against P56, not P57.
+  const compSup = {}, compSupByProd = {};   // sku -> { inProd, completed, mfgPos:[] } ; sku -> prodKey -> {…}
+  supRows.forEach(r => { const b = mfgBucket(r.status), line = { po: r.po, qty: Number(r.qty), status: r.status, prod_no: r.prod_no, bucket: b };
+    const e = compSup[r.sku] || (compSup[r.sku] = { inProd: 0, completed: 0, mfgPos: [] }); e[b] += Number(r.qty); e.mfgPos.push(line);
+    const pk = r.prod_no || '(no prod #)', m = compSupByProd[r.sku] || (compSupByProd[r.sku] = {}), pe = m[pk] || (m[pk] = { inProd: 0, completed: 0, mfgPos: [] }); pe[b] += Number(r.qty); pe.mfgPos.push(line); });
   // Demand pooled by parent (flat, for actions/KPIs) AND by (prod_no, parent) for the grouped view.
   // demByProd[pk][sku] = { qty, pos:[] } so each production card can also show the finished POs that create the demand.
   const demandBy = {}, finishedPosBy = {}, demByProd = {};
@@ -1097,8 +1101,9 @@ async function manufacturingData() {
     e.pos.push({ po: r.po, prod_no: r.prod_no, qty: Number(r.qty), status: r.status, prod_end: r.prod_end || '' });
   });
   // stockFn(component_sku) → manually-entered existing-stock cover for this scope; added to a component's supply.
-  const compsOf = (parent, demand, stockFn) => bom.filter(b => b.parent_sku === parent).map(b => {
-    const sup = compSup[b.component_sku] || { inProd: 0, completed: 0, mfgPos: [] };
+  // prodKey (grouped view) → use ONLY the MFG POs whose own prod_no matches this production; omit (flat bundles) → pooled.
+  const compsOf = (parent, demand, stockFn, prodKey) => bom.filter(b => b.parent_sku === parent).map(b => {
+    const sup = (prodKey ? ((compSupByProd[b.component_sku] || {})[prodKey]) : compSup[b.component_sku]) || { inProd: 0, completed: 0, mfgPos: [] };
     const stock = (stockFn ? Number(stockFn(b.component_sku)) : 0) || 0;
     const required = demand * Number(b.qty), supplied = sup.inProd + sup.completed + stock;
     return { component_sku: b.component_sku, per: Number(b.qty), required, inProd: sup.inProd, completed: sup.completed, stock, supplied, diff: supplied - required, mfgPos: sup.mfgPos, accepted: !!accepted[b.component_sku] };
@@ -1109,14 +1114,13 @@ async function manufacturingData() {
     const demand = demandBy[parent] || 0;
     return { parent_sku: parent, demand, finishedPos: finishedPosBy[parent] || [], components: compsOf(parent, demand, c => stockTotByComp[c] || 0) };
   });
-  // Grouped by production (finished prod_no) — the view. Manual existing-stock cover is scoped to (prod_no, component).
-  // Component MFG supply is still pooled by SKU and shown against each production; the tab now surfaces the actual
-  // MFG POs (in-production / completed) per component so the split can be judged by eye rather than allocated.
+  // Grouped by production (finished prod_no) — the view. Component MFG supply + existing-stock are BOTH scoped to
+  // this production number: a Manufacturing PO only counts against the production matching its own prod_no.
   const productions = Object.keys(demByProd).sort((a, b) => (a < b ? 1 : a > b ? -1 : 0)).map(prod => ({
     prod_no: prod,
     bundles: Object.keys(demByProd[prod]).sort().map(parent => ({
       parent_sku: parent, demand: demByProd[prod][parent].qty, finishedPos: demByProd[prod][parent].pos,
-      components: compsOf(parent, demByProd[prod][parent].qty, c => (stockBy[prod] || {})[c] || 0)
+      components: compsOf(parent, demByProd[prod][parent].qty, c => (stockBy[prod] || {})[c] || 0, prod)
     }))
   }));
   return { bom, bundles, productions };

@@ -1,3 +1,7 @@
+## v26.683.0 — Manufacturing tab: MFG PO limited to its own production number
+- A Manufacturing-branch component PO now only shows/counts against the production matching its own prod_no (master data), not every production that needs the component. e.g. PO-56WK-MANU-1 (Production 56) shows against P56 only, not P57. Per-production supply map (compSupByProd); flat KPI/actions still use the pooled total.
+
+
 ## v26.682.0 — Single global currency toggle + Klaviyo upload allowed read-only
 - Replaced the per-view GBP/local toggles (Summary pills + plan controls) with ONE global toggle in the DEMAND nav row — set once, applies across every DEMAND tab & report; persisted (localStorage). Shows for US/EU/AU when a rate exists.
 - Klaviyo BIS upload (/api/klaviyo-bis/*) is now explicitly allowed with read-only permission (no edit rights needed), like the Zalando upload.
