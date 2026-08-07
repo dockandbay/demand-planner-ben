@@ -230,7 +230,7 @@ export async function buildDtcPackingList(pool, { pos, master }) {
   pk.getCell('F4').value = date;
   pk.getCell('B5').value = clientBlock;                                 // CONSIGNEE = client + address
   pk.getCell('F5').value = 'TT';
-  pk.getCell('B9').value = '';
+  pk.getCell('B9').value = clientBlock;                                 // NOTIFY PARTY = same as consignee (the client)
   pk.getCell('F9').value = 'Shanghai';
   ['11', '12'].forEach((hr) => { pk.getCell('B' + hr).value = 'Carton Size'; pk.getCell('G' + hr).value = 'Order Quantity'; pk.getCell('H' + hr).value = ''; });
   let ctnTot = 0, pcsTot = 0, gwTot = 0, ordTot = 0;

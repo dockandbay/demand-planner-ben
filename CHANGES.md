@@ -1,3 +1,6 @@
+## v26.717.0 — DTC packing list: notify party = consignee
+- On the Direct to Client packing list, the Notify Party now mirrors the Consignee (the client name + address).
+
 ## v26.716.0 — DTC packing list seller = per-key-account entity (default UK)
 - Which Dock & Bay entity is the seller on a client's Direct-to-Client packing list is now set per client in CONFIG ▸ Key accounts ("Supplier company (seller)": UK/AU/US/EU). Default UK. The list resolves the PO client's key account → entity → CONFIG ▸ Consignees record for the seller block. Replaces the hardcoded-AU from v26.715. Migration 200 adds key_accounts.seller_entity default UK.
 
