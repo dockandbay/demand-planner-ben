@@ -8135,7 +8135,12 @@ function renderSummaryView(body){
       host.querySelectorAll('input.tgin').forEach(function(inp){ inp.oninput=function(){ var lyv=Number(inp.dataset.ly)||0, ih=inp.dataset.inh, rr=String(inp.value).replace(/[^0-9.\-]/g,''); var g=(rr===''?((ih!==''&&ih!=null)?parseFloat(ih):0):parseFloat(rr)); if(isNaN(g))g=0; var sib=inp.parentNode.querySelector('.ttgt'); if(sib)sib.innerHTML=lyv>0?('£'+Math.round(lyv*(1+g/100)).toLocaleString()):''; };
         inp.onchange=function(){ var sub=decodeURIComponent(inp.dataset.sub); var raw=String(inp.value).replace(/[^0-9.\-]/g,'');
         fetch('/api/demand-revenue-targets/periods',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({country:co,channel:ch,fy:+inp.dataset.fy,subcategory:sub,level:inp.dataset.lvl,idx:+inp.dataset.idx,growth_pct:raw})})
-          .then(function(r){return r.json();}).then(function(){ var k=tgKey(+inp.dataset.fy,sub,inp.dataset.lvl,+inp.dataset.idx); if(raw==='')delete SUMM_TGT[k]; else SUMM_TGT[k]=Number(raw); draw(); }).catch(function(){}); }; });
+          .then(function(r){return r.json();}).then(function(){ var k=tgKey(+inp.dataset.fy,sub,inp.dataset.lvl,+inp.dataset.idx); if(raw==='')delete SUMM_TGT[k]; else SUMM_TGT[k]=Number(raw);
+            // Don't re-render (which rebuilds the inputs and steals focus) if the user has already clicked into
+            // another target cell — respect that click. The save is persisted regardless; inheritance refreshes
+            // on the next natural render.
+            var ae=document.activeElement; if(!(ae&&ae.classList&&ae.classList.contains('tgin')))draw();
+          }).catch(function(){}); }; });
       host.querySelectorAll('th.fyh[data-fy]').forEach(function(th){ th.onclick=function(){ var Y=+th.dataset.fy; SUMM_FYOPEN[Y]=!fyOpen(Y); draw(); }; });
       return;
     }

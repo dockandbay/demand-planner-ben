@@ -1,3 +1,7 @@
+## v26.665.0 — Set targets: keep focus on the cell you click next
+- After entering a target and clicking another cell, the save no longer re-renders the grid (which yanked the cursor back). Re-render is skipped while another target cell is focused, so the click you make is respected.
+
+
 ## v26.664.0 — DEMAND plan: frozen columns 1&2 sit above cell icons when scrolling
 - Raised the sticky SKU / column-2 / SKU-label columns z-index (1 -> 6) so the month-cell C (calendar) / i (BI) / note badges scroll UNDER the frozen columns instead of over them. Still below the sticky header.
 
