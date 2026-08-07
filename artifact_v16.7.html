@@ -755,6 +755,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
           <span class="pill-lbl" style="width:80px" title="Show the R record-of-change indicator on cells with edit history (loads on demand)">Records</span>
           <label style="font-size:12px;color:#334155;cursor:pointer;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="filt-show-changes" onchange="setShowChanges(this.checked)"> Show record of change <b style="color:#be185d">(R)</b></label>
+          <label style="font-size:12px;color:#334155;cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Hide the R indicator on months before the current month"><input type="checkbox" id="filt-hide-past-changes" onchange="setHidePastChanges(this.checked)"> Hide for past months</label>
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
           <span class="pill-lbl" style="width:80px" title="Filter SKUs by release window (season)">Release</span>
@@ -5208,6 +5209,9 @@ function fcNotesLoad(co,ch,cb){
 // the R rail letter) when the More-Filters "Show record of change" toggle is on; the full list loads on click.
 var FC_CHANGE_KEYS=new Set();
 var SHOW_CHANGES=(function(){try{return localStorage.getItem('show_changes')==='1';}catch(e){return false;}})();
+// Hide the R record-of-change indicator on PAST months (< current month). Default TRUE.
+var HIDE_PAST_CHANGES=(function(){try{return localStorage.getItem('hide_past_changes')!=='0';}catch(e){return true;}})();
+function setHidePastChanges(on){ HIDE_PAST_CHANGES=!!on; try{localStorage.setItem('hide_past_changes',on?'1':'0');}catch(e){} try{renderMain();}catch(e){} }
 function _meEmail(){ return (typeof ME!=='undefined'&&ME&&ME.email)||null; }
 function fcChangeKeysLoad(co,ch,cb){ if(!SHOW_CHANGES){ FC_CHANGE_KEYS=new Set(); if(cb)cb(); return; }
   fetch('/api/forecast/changes/keys?country='+encodeURIComponent(co)+'&channel='+encodeURIComponent(ch))
@@ -5821,7 +5825,9 @@ function cellRailForKey(nk){ if(!nk)return ''; var p=nk.split('|'); var level=p[
   if(calTip)o+='<span class="cf cf-c" data-cal-tip="'+calTip.replace(/"/g,'&quot;')+'">C</span>';
   if(hasNote)o+='<span class="cf cf-n" data-nk="'+nk+'" title="'+cellNoteTitle(nk).replace(/"/g,'&quot;')+'">N</span>';
   if(locked)o+='<span class="cf cf-s" title="Do not smooth — this SKU forecast is locked; smoothing leaves it fixed, only a manual override changes it">S</span>';
-  if(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES&&typeof FC_CHANGE_KEYS!=='undefined'&&FC_CHANGE_KEYS.has(nk)) o+='<span class="cf cf-r" data-nk="'+nk+'" title="Record of change — click to view history">R</span>';
+  if(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES&&typeof FC_CHANGE_KEYS!=='undefined'&&FC_CHANGE_KEYS.has(nk)
+     && !(typeof HIDE_PAST_CHANGES!=='undefined'&&HIDE_PAST_CHANGES&&typeof CUR_MONTH!=='undefined'&&m<CUR_MONTH))   // hide R on past months when the setting is on
+     o+='<span class="cf cf-r" data-nk="'+nk+'" title="Record of change — click to view history">R</span>';
   return o?('<div class="cell-rail">'+o+'</div>'):''; }
 // Put the note summary on the whole cell (title → proven global 120ms tooltip) so hovering ANYWHERE on
 // a note cell shows it — the rail N is only ~9px. Cleared when the cell has no notes.
@@ -8011,7 +8017,7 @@ function _planPopBind(){ if(window._planPopBound)return; window._planPopBound=tr
   document.addEventListener('click',function(ev){ [['plan-filters-btn','plan-filters-pop'],['plan-tools-btn','plan-tools-menu']].forEach(function(p){
     var b=document.getElementById(p[0]), pop=document.getElementById(p[1]);
     if(pop&&pop.style.display==='block'&&!(b&&b.contains(ev.target))&&!pop.contains(ev.target))pop.style.display='none'; }); },true); }
-function togglePlanFilters(e){ if(e)e.stopPropagation(); var p=document.getElementById('plan-filters-pop'); if(!p)return; var open=p.style.display==='block'; _planPopClose(); if(!open)p.style.display='block'; var sc=document.getElementById('filt-show-changes'); if(sc)sc.checked=(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES); _planPopBind(); }
+function togglePlanFilters(e){ if(e)e.stopPropagation(); var p=document.getElementById('plan-filters-pop'); if(!p)return; var open=p.style.display==='block'; _planPopClose(); if(!open)p.style.display='block'; var sc=document.getElementById('filt-show-changes'); if(sc)sc.checked=(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES); var hp=document.getElementById('filt-hide-past-changes'); if(hp)hp.checked=(typeof HIDE_PAST_CHANGES==='undefined'||HIDE_PAST_CHANGES); _planPopBind(); }
 function togglePlanTools(e){ if(e)e.stopPropagation(); var m=document.getElementById('plan-tools-menu'); if(!m)return; var open=m.style.display==='block'; _planPopClose(); if(!open)m.style.display='block'; _planPopBind(); }
 function resetPlanFilters(){ try{setPlanTier('ALL');}catch(e){} try{setPlanFromRep(false);}catch(e){} var rw=document.getElementById('plan-rw-sel'); if(rw){rw.value='ALL'; try{setPlanRw('ALL');}catch(e){}} try{setPlanSort('alpha');}catch(e){} var ct=document.getElementById('cat-tot-toggle'); if(ct&&ct.classList.contains('active')){try{setShowCatTot(false);}catch(e){}} try{resetPlanActiveDates();}catch(e){} try{renderPlanChips();}catch(e){} }
 function _planClearFilter(k){ if(k==='all')setPlanActiveMode('active'); else if(k==='tier')setPlanTier('ALL');
