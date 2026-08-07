@@ -1,3 +1,6 @@
+## v26.715.0 — Direct to Client packing list seller = Dock & Bay AU
+- The DTC packing list seller/company block now uses the AU entity (CONFIG ▸ Consignees ▸ AU = Dock & Bay PTY LTD), not the UK one. Falls back to UK then generic if AU missing.
+
 ## v26.714.0 — Consolidated Direct to Client Packing List on shipments
 - On a shipment, when EVERY PO aboard is direct-to-client (carries a client / sales ref), a "Direct to Client Packing List" button appears next to "Tax Invoice & Packing List" — downloads one consolidated DTC packing list (all POs merged by SKU). Endpoint /api/invoice/dtc-packing/shipment/:ref.
 
