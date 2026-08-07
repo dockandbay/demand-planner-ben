@@ -1,3 +1,8 @@
+## v26.695.0 — Cell indicators fully unified into the vertical rail (category + SKU)
+- Category rows: i (BI rule) and C (calendar event) now render as plain rail letters alongside N — one neat home instead of scattered chips. Their rich BI/calendar hover tooltips are preserved (data-bi-tip / data-cal-tip). Retired the old top-right N box.
+- Fixes from testing: adding a SKU note now (1) closes the popup immediately and (2) shows the N in the rail at once (in-place rail refresh, no full re-render). Hovering N shows the full note history (text + submitter + date). Do-not-smooth toggle refreshes the S in place too.
+- Rail now appears on both forecast and actual month cells, at category and SKU level; S̶ stays SKU-only.
+
 ## v26.694.0 — Do-not-smooth engine (SKU-only) + SKU-cell notes/rail
 - DEMAND plan SKU cells now support **double-click** → notes popup (same as category) with a **"Do not smooth"** checkbox. Locking holds that SKU-month forecast FIXED during smoothing: it is excluded from the redistribution pool and its value is subtracted from the sub-category target so the other SKUs fill the remainder (auto-smooth + manual smooth both respect it).
 - New vertical indicator rail is now live on SKU rows: **N** (note) + **S̶** (locked) in the left gutter. S̶ is SKU-only — never on category rows. Demo seed removed.
