@@ -8,7 +8,7 @@ import 'dotenv/config';
 import express from 'express';
 import { readFileSync, appendFile } from 'fs';
 import pg from 'pg';
-import { buildInvoice } from './invoice.mjs';
+import { buildInvoice, buildDtcPackingList } from './invoice.mjs';
 import { buildAsnLabelsPdf } from './asnpdf.mjs';
 
 // On Vercel (serverless) use Supabase's TRANSACTION pooler (port 6543) — built for many
@@ -5021,6 +5021,12 @@ app.get('/api/invoice/shipment/:ref', async (req, res) => {
     if (!pos.length) return res.status(404).json({ error: 'No POs found for shipment ' + ref });
     sendXlsx(res, await buildInvoice(pool, { type: 'tax', pos, ref, master: ref }));
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Direct-to-Client packing list for one PO (seller = Dock & Bay, consignee = the client).
+app.get('/api/invoice/dtc-packing/:po', async (req, res) => {
+  const po = decodeURIComponent(req.params.po || '');
+  try { sendXlsx(res, await buildDtcPackingList(pool, { pos: [po], master: po })); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Portal-scoped invoice downloads — same generator, namespaced under /api/portal/* (so they route on the
 // portal host) and scoped to the caller's own suppliers. The supplier portal fetches these as a blob.

@@ -1,3 +1,6 @@
+## v26.713.0 — Direct to Client Packing List (PO drawer, DTC POs only)
+- New "Direct to Client Packing List" button on the PO drawer, shown only for Direct-to-Client POs (branch Direct to Client / JLEW / NEXT, or a client sales ref). Seller block = Dock & Bay (UK consignee record); invoice no = client sales-order ref (+ client PO in brackets if it differs); consignee = client name + final delivery address; column B = "Carton Size" (carton dims); cartons to 1dp; short-shipment column removed. Packing List sheet only. Endpoint /api/invoice/dtc-packing/:po. Freight forwarder: existing key-account forwarder used; no new field added.
+
 ## v26.712.0 — Record of change: "Hide for past months" setting (default on)
 - New More Filters toggle "Hide for past months" (default ON): the R indicator is suppressed on months before the current month. Turn off to see R on historical months too.
 

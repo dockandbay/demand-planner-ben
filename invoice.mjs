@@ -38,7 +38,9 @@ function ymd(d) { if (!d) return ''; const t = new Date(d); return isNaN(t) ? ''
 // Pull everything the doc needs for a set of POs (one for Commercial, many for Tax).
 async function gather(pool, pos, master) {
   const poRows = (await pool.query(
-    `SELECT po, supplier_name, supplier_id, branch, delivery_date_overide FROM planner.purchase_orders WHERE po = ANY($1)`, [pos])).rows;
+    `SELECT po, supplier_name, supplier_id, branch, delivery_date_overide,
+            client, sales_order_ref, client_po_ref, final_delivery_address
+       FROM planner.purchase_orders WHERE po = ANY($1)`, [pos])).rows;
   if (!poRows.length) throw new Error('PO(s) not found: ' + pos.join(', '));
   // Supplier + delivery country come from the MASTER PO (the one the shipment is named after); for a single-PO
   // Commercial Invoice that's just the PO itself.
@@ -188,4 +190,65 @@ export async function buildInvoice(pool, { type, pos, ref, dateISO, master }) {
   const filename = `${type === 'tax' ? 'Tax' : 'Commercial'} Invoice - ${safeRef}.xlsx`;
   const suppliers = [...new Set(poRows.map((p) => p.supplier_name).filter(Boolean))];
   return { buffer, filename, lineCount: items.length, country, supplier: sup.business_name || sup.name, poCount: poRows.length, suppliers };
+}
+
+// Direct-to-Client Packing List. Same template, but: SELLER block = Dock & Bay (the UK consignee record);
+// invoice no = client sales-order ref (+ client PO in brackets); CONSIGNEE = client name + final delivery
+// address; column B = Carton Size (carton dims); no short-shipment column. Packing List sheet only.
+export async function buildDtcPackingList(pool, { pos, master }) {
+  const { poRows, lines, country, cons } = await gather(pool, pos, master || pos[0]);
+  const masterRow = poRows.find((p) => p.po === (master || pos[0])) || poRows[0];
+  const bySku = new Map();
+  for (const l of lines) { const k = String(l.sku).toUpperCase(); const qty = parseInt(l.qty, 10) || 0;
+    if (!bySku.has(k)) bySku.set(k, { ...l, qty: 0 }); bySku.get(k).qty += qty; }
+  const items = [...bySku.values()];
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.readFile(TEMPLATE_URL);
+  wb.worksheets.slice().forEach((ws) => { if (ws.name !== 'Packing List') wb.removeWorksheet(ws.id); });
+  const pk = wb.getWorksheet('Packing List');
+  pk.eachRow({ includeEmpty: true }, (row) => row.eachCell({ includeEmpty: true }, (cell) => {
+    const v = cell.value; if (v && typeof v === 'object' && ('formula' in v || 'sharedFormula' in v)) cell.value = (v.result !== undefined ? v.result : null);
+  }));
+  const extra = Math.max(0, items.length - MAX_LINES);
+  if (extra > 0) pk.duplicateRow(LAST_ROW, extra, true);
+  const lastLineRow = LAST_ROW + extra, totalRow = lastLineRow + 1;
+  const date = ymd(new Date().toISOString());
+  const dnb = cons.consignee || 'Dock & Bay LTD';                       // UK consignee record = Dock & Bay
+  const so = String(masterRow.sales_order_ref || '').trim(), cpo = String(masterRow.client_po_ref || '').trim();
+  const docNo = ((so || cpo) ? (so + (cpo && cpo !== so ? ` (${cpo})` : '')) : masterRow.po);
+  const clientBlock = [masterRow.client, masterRow.final_delivery_address].filter(Boolean).join('\n');
+  pk.getCell('A1').value = dnb.split('\n')[0] || 'Dock & Bay LTD';       // seller = D&B
+  pk.getCell('A2').value = dnb;
+  pk.getCell('B4').value = docNo;                                       // invoice no = client SO (+ client PO)
+  pk.getCell('F4').value = date;
+  pk.getCell('B5').value = clientBlock;                                 // CONSIGNEE = client + address
+  pk.getCell('F5').value = 'TT';
+  pk.getCell('B9').value = '';
+  pk.getCell('F9').value = 'Shanghai';
+  ['11', '12'].forEach((hr) => { pk.getCell('B' + hr).value = 'Carton Size'; pk.getCell('G' + hr).value = 'Order Quantity'; pk.getCell('H' + hr).value = ''; });
+  let ctnTot = 0, pcsTot = 0, gwTot = 0, ordTot = 0;
+  items.forEach((l, i) => { const r = FIRST_ROW + i;
+    const qty = l.qty, cp = casePack(l), d = cartonDims(l, country);
+    const ctns = cp > 0 ? Math.round((qty / cp) * 10) / 10 : 0;
+    const gw = +(ctns * (d.wt || 0)).toFixed(1);
+    ctnTot += ctns; pcsTot += qty; gwTot += gw; ordTot += qty;
+    pk.getCell('A' + r).value = l.sku;
+    pk.getCell('B' + r).value = (d.l && d.w && d.h) ? `${Math.round(d.l)}x${Math.round(d.w)}x${Math.round(d.h)}` : '';   // Carton Size
+    pk.getCell('C' + r).value = l.sku_invoice_title || '';
+    pk.getCell('D' + r).value = ctns;
+    pk.getCell('E' + r).value = qty;
+    pk.getCell('F' + r).value = gw;
+    pk.getCell('G' + r).value = qty;                                    // Order Quantity
+    pk.getCell('H' + r).value = '';
+  });
+  for (let r = FIRST_ROW + items.length; r <= lastLineRow; r++) clearRow(pk, r, ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']);
+  pk.getCell('D' + totalRow).value = +ctnTot.toFixed(1);
+  pk.getCell('E' + totalRow).value = pcsTot;
+  pk.getCell('F' + totalRow).value = +gwTot.toFixed(1);
+  pk.getCell('G' + totalRow).value = ordTot;
+  pk.getCell('H' + totalRow).value = '';
+  for (let r = 11; r <= totalRow; r++) ['D', 'E', 'F', 'G'].forEach((c) => { const cell = pk.getCell(c + r); cell.alignment = { ...(cell.alignment || {}), horizontal: 'center', vertical: 'middle', wrapText: true }; });
+  const buffer = Buffer.from(await wb.xlsx.writeBuffer());
+  const safe = String(docNo).replace(/[^A-Za-z0-9._-]+/g, '_');
+  return { buffer, filename: `Direct to Client Packing List - ${safe}.xlsx`, lineCount: items.length };
 }
