@@ -3051,7 +3051,7 @@
       var _domTab=_pd.querySelector('.potab.active'), _domWant=_domTab?_domTab.dataset.pt:null;
       _pd.innerHTML=poDetailHTML(po,d,i); _pd._poDetail=d;   // stash detail so a silent snooze can recompute tab badges in place
       bindPay(po,i); bindPoScrollPin(); applyPoPin();   // pin left + position for any current horizontal scroll
-      var _useTab=wantTab||_domWant; if(_useTab){ var t=document.querySelector('#podet-'+i+' .potab[data-pt="'+_useTab+'"]'); if(t)t.onclick(); } })
+      var _useTab=_domWant||wantTab; if(_useTab){ var t=document.querySelector('#podet-'+i+' .potab[data-pt="'+_useTab+'"]'); if(t)t.onclick(); } })   // the user's CURRENT tab wins over the tab the load started on (don't snap back)
     .catch(function(e){ document.getElementById('podet-'+i).innerHTML='<span style="color:#dc2626">'+esc(e.message||e)+'</span>'; }); }
   // Editable PLAN payment panel. Terms come from the supplier; each milestone's amount, date and %
   // can be overridden inline (saves on blur). Saving re-pulls the PO so catch-up / owing ripple.

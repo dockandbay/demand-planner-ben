@@ -1,3 +1,7 @@
+## v26.684.0 — PO drawer: respect the tab you click while detail is loading
+- Fixed the PO-drawer tab flash: when the background detail load finished it snapped back to the tab it started on (e.g. Dates) even if you had clicked another (Master data). Now the user's current tab wins over the load-start tab.
+
+
 ## v26.683.0 — Manufacturing tab: MFG PO limited to its own production number
 - A Manufacturing-branch component PO now only shows/counts against the production matching its own prod_no (master data), not every production that needs the component. e.g. PO-56WK-MANU-1 (Production 56) shows against P56 only, not P57. Per-production supply map (compSupByProd); flat KPI/actions still use the pooled total.
 
