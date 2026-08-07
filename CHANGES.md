@@ -1,3 +1,6 @@
+## v26.708.0 — Rename invoice buttons to reflect the packing list
+- "Commercial Invoice" → "Commercial Invoice & Packing List"; "Tax Invoice" → "Tax Invoice & Packing List" (the download already bundles both tabs).
+
 ## v26.707.0 — SUG-0021: Packing List (in the Tax Invoice download) matches supplier format
 - The Packing List tab of the combined Tax Invoice + Packing List download now: shows real product size in SIZE(cm*cm) (from products.size_long parenthetical, e.g. 160x90cm); adds a dedicated Carton Dimensions column (LxWxH) with Order Quantity last; and shows Q'TY (CTN) to 1 decimal place for partial cartons (was rounded up). No separate button — it's the same combined Tax Invoice download (shipment/consolidation ref covers combined shipments).
 
