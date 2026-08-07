@@ -1,3 +1,10 @@
+## v26.673.0 — Target recommendations drawer: counters, per-row apply, dismiss, month table, <2% hidden
+- Pills now show counters: FY pill = open recs for the current market/channel/FY; channel pill = that channel across all FYs; country pill = rolls up all channels x all FYs.
+- Recs with a gap under 2% are hidden (nothing to apply). Each row has an Apply button + a Dismiss (keeps it visible/greyed, removes from the open count + Apply-all, persisted). "Apply all" now applies OPEN recs only.
+- Per-month detail is now a small table (months as headers) instead of a text line.
+- All-combo targets loaded once (/periods-all) so counters are correct across markets; calc() computed lazily (only subs with a target) for speed.
+
+
 ## v26.672.0 — Set targets: toolbar + filter pills stay fixed while rows scroll
 - Moved the Download/Import buttons, the instructions line, and the category-filter pills out of the scrolling table area into a fixed #smc-tools block above it xe2x80x94 so they stay put (like the country/channel pills) while only the subcategory rows scroll. Instructions updated to mention %/xc2xa3 + the green/blue colour key.
 

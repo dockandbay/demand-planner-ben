@@ -9083,6 +9083,11 @@ app.get('/api/demand-revenue-targets/periods', async (req, res) => {
   try { res.json((await pool.query(`SELECT fy, subcategory, level, idx, growth_pct, target_gbp FROM planner.demand_revenue_target_periods WHERE country=$1 AND channel=$2`, [country, channel])).rows); }
   catch (e) { res.json([]); }   // table may not exist until migration 175 is applied
 });
+// All periods across every country/channel — for the Target-recs pill counters (which roll up per market/channel/FY).
+app.get('/api/demand-revenue-targets/periods-all', async (_req, res) => {
+  try { res.json((await pool.query(`SELECT country, channel, fy, subcategory, level, idx, growth_pct, target_gbp FROM planner.demand_revenue_target_periods`)).rows); }
+  catch (e) { res.json([]); }
+});
 app.post('/api/demand-revenue-targets/periods', async (req, res) => {
   const b = req.body || {};
   if (!b.country || !b.channel || b.fy == null || !b.level || b.idx == null) return res.status(400).json({ error: 'country, channel, fy, level, idx required' });
