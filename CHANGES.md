@@ -1,3 +1,7 @@
+## v26.672.0 — Set targets: toolbar + filter pills stay fixed while rows scroll
+- Moved the Download/Import buttons, the instructions line, and the category-filter pills out of the scrolling table area into a fixed #smc-tools block above it xe2x80x94 so they stay put (like the country/channel pills) while only the subcategory rows scroll. Instructions updated to mention %/xc2xa3 + the green/blue colour key.
+
+
 ## v26.671.0 — Fix Summary edit-targets MONTH blank + target-recs current-month baseline
 - FIX (regression/pre-existing): Set-targets edit grid went blank on the MONTH pill xe2x80x94 month columns carry .m (not .months) and ecell read the wrong property, throwing. Now guarded.
 - Target recommendations: the current (part-way) month now uses the FULL-MONTH forecast as the baseline, not actuals-to-date (was showing e.g. "Aug 20,453xe2x86x92454u -98%"). Also parametrised computeTargetRecs + added dismiss/count helpers (used by the drawer rework).
