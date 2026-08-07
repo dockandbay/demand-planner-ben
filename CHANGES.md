@@ -1,3 +1,6 @@
+## v26.714.0 — Consolidated Direct to Client Packing List on shipments
+- On a shipment, when EVERY PO aboard is direct-to-client (carries a client / sales ref), a "Direct to Client Packing List" button appears next to "Tax Invoice & Packing List" — downloads one consolidated DTC packing list (all POs merged by SKU). Endpoint /api/invoice/dtc-packing/shipment/:ref.
+
 ## v26.713.0 — Direct to Client Packing List (PO drawer, DTC POs only)
 - New "Direct to Client Packing List" button on the PO drawer, shown only for Direct-to-Client POs (branch Direct to Client / JLEW / NEXT, or a client sales ref). Seller block = Dock & Bay (UK consignee record); invoice no = client sales-order ref (+ client PO in brackets if it differs); consignee = client name + final delivery address; column B = "Carton Size" (carton dims); cartons to 1dp; short-shipment column removed. Packing List sheet only. Endpoint /api/invoice/dtc-packing/:po. Freight forwarder: existing key-account forwarder used; no new field added.
 

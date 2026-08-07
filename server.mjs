@@ -5028,6 +5028,15 @@ app.get('/api/invoice/dtc-packing/:po', async (req, res) => {
   try { sendXlsx(res, await buildDtcPackingList(pool, { pos: [po], master: po })); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Consolidated Direct-to-Client packing list for a whole shipment (all POs aboard).
+app.get('/api/invoice/dtc-packing/shipment/:ref', async (req, res) => {
+  const ref = decodeURIComponent(req.params.ref || '');
+  try {
+    const pos = (await pool.query('SELECT po FROM planner.purchase_orders WHERE shipment_ref=$1 OR po=$1', [ref])).rows.map((r) => r.po);
+    if (!pos.length) return res.status(404).json({ error: 'No POs found for shipment ' + ref });
+    sendXlsx(res, await buildDtcPackingList(pool, { pos, master: ref }));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // Portal-scoped invoice downloads — same generator, namespaced under /api/portal/* (so they route on the
 // portal host) and scoped to the caller's own suppliers. The supplier portal fetches these as a blob.
 app.get('/api/portal/invoice/shipment/:ref', portalAuth, async (req, res) => {
