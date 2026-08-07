@@ -5230,19 +5230,9 @@ function openFcNotePopup(td){ var nk=td&&td.dataset.nk; if(!nk)return; _fcCloseP
   var rc=td.getBoundingClientRect(); pop.style.left=(window.scrollX+Math.max(6,Math.min(rc.left,window.innerWidth-320)))+'px'; pop.style.top=(window.scrollY+rc.bottom+4)+'px';
   setTimeout(function(){ document.addEventListener('mousedown',_fcPopOut,true); },0);
 }
-(function(){   // delegated: dbl-click a forecast cell to open notes; 120ms hover tooltip on the N badge
+(function(){   // delegated: dbl-click a forecast cell to open notes. The note HOVER tooltip is handled by
+  // the proven global 120ms tooltip: applyCellNote() puts the note summary on each note cell's title.
   document.addEventListener('dblclick',function(e){ if(e.target&&e.target.tagName==='INPUT')return; var td=e.target.closest?e.target.closest('td[data-nk]'):null; if(td)openFcNotePopup(td); });
-  var tip=null,tt=null;
-  document.addEventListener('mouseover',function(e){ var n=e.target.closest?e.target.closest('.fc-note-n,.cf-n,td[data-nk]'):null; if(!n)return; var nk=n.dataset.nk; if(!nk||!(FC_NOTES[nk]&&FC_NOTES[nk].length))return; clearTimeout(tt);
-    // Anchor the tip to the N letter if present in this cell, else to the cell — so hovering anywhere on a
-    // note-bearing cell surfaces the full note history (the rail N is only ~9px, too small to rely on).
-    var anchor=(n.querySelector&&n.querySelector('.cf-n'))||n;
-    tt=setTimeout(function(){ var html=fcNoteTipHtml(nk); if(!html)return; if(!tip){tip=document.createElement('div');tip.id='fc-note-tip';document.body.appendChild(tip);} tip.innerHTML=html; tip.style.display='block'; var r=anchor.getBoundingClientRect(); var top=(r.bottom+5); if(top+ (tip.offsetHeight||120) > window.innerHeight-8) top=Math.max(6,r.top-(tip.offsetHeight||120)-5); tip.style.left=Math.max(6,Math.min(r.left,window.innerWidth-306))+'px'; tip.style.top=top+'px'; },120); });
-  document.addEventListener('mouseout',function(e){ var n=e.target.closest?e.target.closest('.fc-note-n,.cf-n,td[data-nk]'):null; if(!n)return;
-    var cell=n.closest?n.closest('td[data-nk]'):n, to=e.relatedTarget;
-    if(cell&&to&&cell.contains&&cell.contains(to))return;   // moving WITHIN the same cell — keep the tip up (was hiding on every micro-move → felt broken)
-    clearTimeout(tt); if(tip)tip.style.display='none'; });
-  document.addEventListener('scroll',function(){ if(tip)tip.style.display='none'; },true);
 })();
 function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   const{y,mo}=pa(fym);
@@ -5263,6 +5253,7 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
     // BI icon (if any) — absolutely positioned top-left of cell
     var _nk0=((typeof SKUM!=='undefined'&&SKUM[s])?'sku':'subcat')+'|'+s+'|'+co+'|'+ch+'|'+fym; td.dataset.nk=_nk0;
     var _rh0=cellRailForKey(_nk0); if(_rh0){ td.classList.add('has-rail'); td.style.position='relative'; td.insertAdjacentHTML('afterbegin',_rh0); }
+    applyCellNote(td,_nk0);
     const d=document.createElement('div');d.className='fcin';
     const lyD=document.createElement('div');lyD.className='fcly';lyD.textContent=ly_u?fn(ly_u):'--';d.appendChild(lyD);
     const inp=document.createElement('input');inp.type='text';inp.readOnly=true;
@@ -5290,6 +5281,7 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   // per-cell forecast note key + "N" badge (dbl-click the cell to add/view notes)
   var _nk=((typeof SKUM!=='undefined'&&SKUM[s])?'sku':'subcat')+'|'+s+'|'+co+'|'+ch+'|'+fym; td.dataset.nk=_nk;
   var _rhF=cellRailForKey(_nk); if(_rhF){ td.classList.add('has-rail'); td.style.position='relative'; td.insertAdjacentHTML('afterbegin',_rhF); }
+  applyCellNote(td,_nk);
   const d=document.createElement('div');d.className='fcin';
   const lyD=document.createElement('div');lyD.className='fcly';
   // Forecast-on-forecast years: LY is the prior-year forecast (not an actual) — keep neutral colour
@@ -5769,6 +5761,9 @@ function inbDiv(inb, entries, color){
 // C = trading-calendar event (both keep their rich data-bi-tip / data-cal-tip tooltips), N = note
 // (rich preview on hover via the note handler), S̶ = do-not-smooth lock (SKU-level only). Only active
 // letters render. i/C apply at category level only (BI/calendar are per subcat × month).
+// Plain-text summary of a cell's notes (submitter + dd-mmm-yy date), for the tooltip.
+function cellNoteTitle(nk){ var arr=(typeof FC_NOTES!=='undefined'&&FC_NOTES[nk])||[]; if(!arr.length)return '';
+  return arr.map(function(n){ return (n.note||'')+' — '+String(n.created_by||'—').replace(/@dockandbay\.com\b/gi,'@')+' '+dateDMY(n.created_at); }).join('   •   '); }
 function cellRailForKey(nk){ if(!nk)return ''; var p=nk.split('|'); var level=p[0],item=p[1],co=p[2],ch=p[3],m=p[4]; var isSku=level==='sku';
   var biTip=isSku?'':biTipHtml(getBIForMonth(item,co,ch,m));
   var calTip=isSku?'':calTipHtml(item,co,m);
@@ -5777,9 +5772,12 @@ function cellRailForKey(nk){ if(!nk)return ''; var p=nk.split('|'); var level=p[
   var o='';
   if(biTip)o+='<span class="cf cf-i" data-bi-tip="'+biTip.replace(/"/g,'&quot;')+'">i</span>';
   if(calTip)o+='<span class="cf cf-c" data-cal-tip="'+calTip.replace(/"/g,'&quot;')+'">C</span>';
-  if(hasNote)o+='<span class="cf cf-n" data-nk="'+nk+'">N</span>';
+  if(hasNote)o+='<span class="cf cf-n" data-nk="'+nk+'" title="'+cellNoteTitle(nk).replace(/"/g,'&quot;')+'">N</span>';
   if(locked)o+='<span class="cf cf-s" title="Do not smooth — this SKU forecast is locked; smoothing leaves it fixed, only a manual override changes it">S</span>';
   return o?('<div class="cell-rail">'+o+'</div>'):''; }
+// Put the note summary on the whole cell (title → proven global 120ms tooltip) so hovering ANYWHERE on
+// a note cell shows it — the rail N is only ~9px. Cleared when the cell has no notes.
+function applyCellNote(td,nk){ if(!td)return; var t=cellNoteTitle(nk); if(t){td.title=t;} else {td.removeAttribute('title'); td.removeAttribute('data-ttl');} }
 // Rebuild a cell's rail in place (after a note/lock change) without a full re-render.
 function refreshCellRail(nk){ if(!nk)return; var sel=(window.CSS&&CSS.escape)?CSS.escape(nk):nk;
   document.querySelectorAll('td[data-nk="'+sel+'"]').forEach(function(td){
@@ -5787,6 +5785,7 @@ function refreshCellRail(nk){ if(!nk)return; var sel=(window.CSS&&CSS.escape)?CS
     var html=cellRailForKey(nk);
     if(html){ td.classList.add('has-rail'); td.style.position='relative'; td.insertAdjacentHTML('afterbegin',html); }
     else { td.classList.remove('has-rail'); }
+    applyCellNote(td,nk);
   });
 }
 function skuOutFC(sku,co,ch,m){var o=FC_OUTPUTS[sku+'|'+skuWh(co,ch)+'|'+ch];return(o&&o[m]!=null)?o[m]:null;}
@@ -7396,6 +7395,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       td.style.cssText='padding:1px 2px;border-bottom:1px solid #f0f0ee';
       var _rk='sku|'+sku+'|'+co+'|'+ch+'|'+m; td.dataset.nk=_rk;   // enables dbl-click notes + do-not-smooth popup on SKU cells
       var _rh=cellRailForKey(_rk); if(_rh){ td.classList.add('has-rail'); td.style.position='relative'; td.insertAdjacentHTML('afterbegin',_rh); }
+      applyCellNote(td,_rk);
       if(isAct){
         var yoy=lyVal>0?Math.round((act-lyVal)/lyVal*100):null;
         var yc=yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp',ys=yoy!=null?(gPct(yoy)):'';

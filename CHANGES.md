@@ -1,3 +1,6 @@
+## v26.703.0 — Note hover tooltip via the proven global 120ms system
+- The custom note tooltip was not appearing reliably. Notes now use the same global 120ms tooltip as the rest of the app: the note summary (note — submitter@ dd-mmm-yy, • separated) is set as the cell title, so hovering ANYWHERE on a note cell shows it. Updates live on add/edit/delete.
+
 ## v26.702.0 — Fix: note hover tooltip kept hiding on micro-moves within the cell
 - The note tooltip mouseout hid the tip on every move between child elements inside the same cell, so the 120ms hover rarely completed. Now it only hides when the cursor actually leaves the note cell — so hovering a note cell reliably shows the full note history.
 
