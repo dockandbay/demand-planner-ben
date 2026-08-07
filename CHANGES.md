@@ -1,3 +1,7 @@
+## v26.706.0 — Summary targets: instant cell reformat on entry + LY row on Rev+targets
+- Entering a target now reformats the cell instantly (no page refresh): £ → light-blue "£1,000", % growth → light-green "+30%", blank → cleared.
+- Rev + targets cells now show a LY (last-year actuals) row on top, then fc / tgt / Δ.
+
 ## v26.705.0 — Summary targets tooltip: flip-up, left-align, pinnable, LY-actuals baseline
 - Tooltip flips ABOVE when near the bottom of the screen (bottom rows were off-page).
 - Content left-aligned; tooltip is now selectable/copyable (pointer-events on + a short grace period so you can move into it).

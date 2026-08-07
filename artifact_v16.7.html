@@ -8206,7 +8206,8 @@ function renderSummaryView(body){
       var vtxt=tot?'#ffffff':'#0f172a', L='font-style:italic;font-size:8px;color:'+(tot?'#c7d2fe':'#94a3b8');
       var fg=ly>0?Math.round((fc/ly-1)*100):null, tg=(ly>0)?Math.round((tgt/ly-1)*100):null, vv=(fc-tgt);
       var vc=vv>=0?(tot?'#86efac':'#15803d'):(tot?'#fca5a5':'#b91c1c');
-      return '<td class="'+shade+' tgcell"><div class="c3t"><span style="'+L+'">fc</span> <b style="color:'+vtxt+'">'+mf(fc)+'</b> <span style="color:'+col(fg)+'">'+lab(fg)+'</span></div>'
+      return '<td class="'+shade+' tgcell"><div class="c3t"><span style="'+L+'">ly</span> <b style="color:'+(tot?'#e2e8f0':'#475569')+'">'+mf(ly)+'</b></div>'
+        +'<div class="c3t"><span style="'+L+'">fc</span> <b style="color:'+vtxt+'">'+mf(fc)+'</b> <span style="color:'+col(fg)+'">'+lab(fg)+'</span></div>'
         +'<div class="c3t"><span style="'+L+'">tgt</span> <b style="color:'+vtxt+'">'+mf(tgt)+'</b> <span style="color:'+col(tg)+'">'+lab(tg)+'</span></div>'
         +'<div class="c3t"><span style="'+L+'">&Delta;</span> <span style="color:'+vc+';font-weight:600">'+(vv>=0?'+':'')+mf(vv)+'</span></div></td>'; }
     function cells(val,ly,lch,disc,sub){ return cols.map(function(c){
@@ -8299,6 +8300,10 @@ function renderSummaryView(body){
           if(p.gbp!=null){ var imp=lyv>0?Math.round((p.gbp/lyv-1)*100):null; sib.innerHTML=(imp==null?'new':((imp>=0?'+':'')+imp+'%'))+u(p.gbp); }
           else { var g=(p.pct!=null)?p.pct:((ih!==''&&ih!=null)?parseFloat(ih):0); if(isNaN(g))g=0; var tgt=lyv*(1+g/100); sib.innerHTML=(lyv>0?('£'+Math.round(tgt).toLocaleString()):'')+u(tgt); } };
         inp.onchange=function(){ var sub=decodeURIComponent(inp.dataset.sub), lyv=Number(inp.dataset.ly)||0, p=_parseTgt(inp.value);
+          // Instant in-place reformat (no full refresh needed): £ → light-blue "£1,000", % → light-green "+30%", blank → clear.
+          if(p.gbp!=null){ inp.value='£'+Math.round(p.gbp).toLocaleString(); inp.style.background='#B3EBF2'; }
+          else if(p.pct!=null){ inp.value=(p.pct>=0?'+':'')+p.pct+'%'; inp.style.background='#F0FFF0'; }
+          else { inp.value=''; inp.style.background=''; }
           var body={country:co,channel:ch,fy:+inp.dataset.fy,subcategory:sub,level:inp.dataset.lvl,idx:+inp.dataset.idx};
           if(p.gbp!=null){ body.target_gbp=p.gbp; body.growth_pct=(lyv>0?Math.round((p.gbp/lyv-1)*1000)/10:''); }   // store £ + (for existing cats) the equivalent % so the summary math keeps working
           else { body.growth_pct=(p.pct!=null?p.pct:''); body.target_gbp=''; }
