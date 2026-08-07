@@ -1,3 +1,6 @@
+## v26.701.0 — Fix: note tooltip now shows when hovering anywhere on a note cell
+- The rail N is only ~9px, so relying on hovering the letter made the note tooltip feel broken. Now hovering anywhere on a note-bearing forecast cell surfaces the full note history (text + submitter + dd-mmm-yy date), anchored to the N. Cells with no notes are unaffected.
+
 ## v26.700.0 — Summary targets: edit mode ignores the month-range filter
 - On "Summary with targets", "✎ Add / ✓ Editing targets" now ignores any active Show-from/to month range (targets are per-FY/half, so a range previously blanked the edit grid). Entering edit stashes + clears the range to show the full FY view; exiting restores the previous filter.
 

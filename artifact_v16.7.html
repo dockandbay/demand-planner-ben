@@ -5233,9 +5233,12 @@ function openFcNotePopup(td){ var nk=td&&td.dataset.nk; if(!nk)return; _fcCloseP
 (function(){   // delegated: dbl-click a forecast cell to open notes; 120ms hover tooltip on the N badge
   document.addEventListener('dblclick',function(e){ if(e.target&&e.target.tagName==='INPUT')return; var td=e.target.closest?e.target.closest('td[data-nk]'):null; if(td)openFcNotePopup(td); });
   var tip=null,tt=null;
-  document.addEventListener('mouseover',function(e){ var n=e.target.closest?e.target.closest('.fc-note-n,.cf-n'):null; if(!n)return; clearTimeout(tt);
-    tt=setTimeout(function(){ var html=fcNoteTipHtml(n.dataset.nk); if(!html)return; if(!tip){tip=document.createElement('div');tip.id='fc-note-tip';document.body.appendChild(tip);} tip.innerHTML=html; tip.style.display='block'; var r=n.getBoundingClientRect(); var top=(r.bottom+5); if(top+ (tip.offsetHeight||120) > window.innerHeight-8) top=Math.max(6,r.top-(tip.offsetHeight||120)-5); tip.style.left=Math.max(6,Math.min(r.left,window.innerWidth-306))+'px'; tip.style.top=top+'px'; },120); });
-  document.addEventListener('mouseout',function(e){ var n=e.target.closest?e.target.closest('.fc-note-n,.cf-n'):null; if(n){ clearTimeout(tt); if(tip)tip.style.display='none'; } });
+  document.addEventListener('mouseover',function(e){ var n=e.target.closest?e.target.closest('.fc-note-n,.cf-n,td[data-nk]'):null; if(!n)return; var nk=n.dataset.nk; if(!nk||!(FC_NOTES[nk]&&FC_NOTES[nk].length))return; clearTimeout(tt);
+    // Anchor the tip to the N letter if present in this cell, else to the cell — so hovering anywhere on a
+    // note-bearing cell surfaces the full note history (the rail N is only ~9px, too small to rely on).
+    var anchor=(n.querySelector&&n.querySelector('.cf-n'))||n;
+    tt=setTimeout(function(){ var html=fcNoteTipHtml(nk); if(!html)return; if(!tip){tip=document.createElement('div');tip.id='fc-note-tip';document.body.appendChild(tip);} tip.innerHTML=html; tip.style.display='block'; var r=anchor.getBoundingClientRect(); var top=(r.bottom+5); if(top+ (tip.offsetHeight||120) > window.innerHeight-8) top=Math.max(6,r.top-(tip.offsetHeight||120)-5); tip.style.left=Math.max(6,Math.min(r.left,window.innerWidth-306))+'px'; tip.style.top=top+'px'; },120); });
+  document.addEventListener('mouseout',function(e){ var n=e.target.closest?e.target.closest('.fc-note-n,.cf-n,td[data-nk]'):null; if(n){ clearTimeout(tt); if(tip)tip.style.display='none'; } });
   document.addEventListener('scroll',function(){ if(tip)tip.style.display='none'; },true);
 })();
 function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
