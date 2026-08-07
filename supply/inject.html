@@ -4829,7 +4829,7 @@
         var finPos=(bn.finishedPos||[]).filter(function(x){return x.qty;});
         // stash the whole BOM SKU for the drawer: its production orders + every component (Manufacturing-branch POs only)
         _mfgBun[bid]={ prodLabel:plabel, parent:bn.parent_sku, demand:bn.demand, finishedPos:finPos,
-          components:(bn.components||[]).map(function(c){ return { comp:c.component_sku, per:c.per, required:c.required, inProd:c.inProd, completed:c.completed, stock:c.stock||0, supplied:c.supplied, diff:c.diff, mfgPos:(c.mfgPos||[]).filter(function(m){return m.qty;}) }; }) };
+          components:(bn.components||[]).map(function(c){ return { comp:c.component_sku, per:c.per, required:c.required, inProd:c.inProd, completed:c.completed, stock:c.stock||0, supplied:c.supplied, diff:c.diff, carry:c.carry||null, mfgPos:(c.mfgPos||[]).filter(function(m){return m.qty;}) }; }) };
         var compRows=(bn.components||[]).map(function(c,ci){
           var rowid=bid+'r'+ci;
           var st=c.diff<0?'short':c.diff>0?'over':'ok';
@@ -4846,7 +4846,7 @@
             +'<td class="mfg-cov">'+diffTxt+'</td>'
             +'<td class="l mfg-acc-cell">'+acc+'</td></tr>';
         }).join('');
-        return '<div style="margin:6px 0 12px"><div style="font-weight:700;font-size:12px;margin-bottom:3px">'+badgeFin+' '+esc(bn.parent_sku)+' <span class="mut tiny">— demand '+units(bn.demand)+(finPos.length?(' · '+finPos.length+' production order'+(finPos.length===1?'':'s')):'')+'</span> <button class="lnk-btn mfg-bun-btn" data-bid="'+bid+'" title="open the full detail for this BOM SKU — production orders + every component" style="background:none;border:none;cursor:pointer;color:#1d4ed8;padding:0 0 0 6px;font-size:11px;font-weight:600">detail ↗</button></div>'
+        return '<div style="margin:6px 0 12px"><div style="font-weight:700;font-size:12px;margin-bottom:3px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+badgeFin+' <span>'+esc(bn.parent_sku)+'</span> <span style="font-size:12px;font-weight:700;background:#1e3a8a;color:#fff;border-radius:5px;padding:1px 8px">demand '+units(bn.demand)+'</span>'+(finPos.length?('<span class="mut tiny">'+finPos.length+' production order'+(finPos.length===1?'':'s')+'</span>'):'')+' <button class="lnk-btn mfg-bun-btn" data-bid="'+bid+'" title="open the full detail for this BOM SKU — production orders + every component" style="background:none;border:none;cursor:pointer;color:#1d4ed8;padding:0;font-size:11px;font-weight:600">detail ↗</button></div>'
           +'<div class="tw" style="max-width:900px"><table style="width:max-content;min-width:100%"><thead><tr><th class="l">'+badgeMfg+' Component SKU</th><th>Required</th><th title="FUTURE / PRODUCTION / READY TO SHIP — still at the factory">In production</th><th title="COMPLETE / DELIVERED / SHIPPING — already made">Completed</th><th title="Manual entry — qty already covered by existing on-hand stock">Existing stock</th><th>Total supply</th><th>Coverage</th><th class="l">Sign-off</th></tr></thead><tbody>'+compRows+'</tbody></table></div></div>';
       }).join('');
       return '<div style="margin-bottom:16px;max-width:1000px;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px">'
@@ -4897,7 +4897,11 @@
       var pos=(c.mfgPos||[]);
       var poTbl=pos.length?('<div class="tw" style="margin:6px 0 0"><table style="width:100%;font-size:11px"><thead><tr><th class="l">'+badgeMfgInline()+' Manufacturing PO</th><th class="l">Prod</th><th class="l">Stage</th><th class="l">Status</th><th>Qty</th></tr></thead><tbody>'
         +pos.map(function(x){ return '<tr><td class="l"><button class="lnk-btn mfg-drw-po" data-po="'+esc(x.po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer;font:inherit">'+esc(x.po)+'</button></td><td class="l">'+(x.prod_no?'P'+esc(x.prod_no):'')+'</td><td class="l">'+(x.bucket==='completed'?'✅ Completed':'🏭 In production')+'</td><td class="l">'+esc(x.status||'')+'</td><td>'+units(x.qty)+'</td></tr>'; }).join('')
-        +'</tbody></table></div>'):'<div class="mut tiny" style="margin:4px 0 0">No Manufacturing-branch POs for this component.</div>';
+        +'</tbody></table></div>'):'<div class="mut tiny" style="margin:4px 0 0">No Manufacturing-branch POs for this component in this production.</div>';
+      // Carry-back hint: when this production is short/has no MFG supply, point to the last production that made it.
+      var carryHtml='';
+      if((st==='short'||!pos.length) && c.carry && c.carry.made>0){ var cy=c.carry;
+        carryHtml='<div style="margin:6px 0 0;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:6px 9px;font-size:11px;color:#1e40af">↩ Refer to <b>P'+esc(cy.prod)+'</b> where <b>'+units(cy.made)+'</b> units were manufactured'+(cy.surplus>0?(' — <b>'+units(cy.surplus)+' over</b> its own demand (available to pull from)'):(cy.required>0?(' (met its own demand of '+units(cy.required)+')'):''))+'.</div>'; }
       return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:10px">'
         +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px"><b style="font-size:12px">'+esc(c.comp)+'</b><span class="mut tiny">'+units(c.per)+'/unit · required '+units(c.required)+'</span><span style="margin-left:auto">'+covTxt+'</span></div>'
         +'<div style="display:flex;gap:6px;flex-wrap:wrap">'
@@ -4906,7 +4910,7 @@
           +mfgKpi('Completed',units(c.completed),'#dcfce7','#166534')
           +mfgKpi('Existing stock',units(c.stock),'#e0f2fe','#075985')
           +mfgKpi('Total supply',units(c.supplied),'#f1f5f9','#334155')
-        +'</div>'+poTbl+'</div>'; }
+        +'</div>'+poTbl+carryHtml+'</div>'; }
     var bg=document.createElement('div'); bg.id='podrawer-bg'; bg.style.zIndex=(typeof nextDrawerZ==='function'?nextDrawerZ():1000);
     bg.innerHTML='<div id="podrawer"><div class="shipdrawer-head"><div class="shipdrawer-title">'+badgeFinInline()+' '+esc(m.parent)+' <span style="font-weight:400;opacity:.7">· '+esc(m.prodLabel)+'</span></div>'
       +'<div><button class="shipdrawer-x" title="close">✕</button></div></div>'

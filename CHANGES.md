@@ -1,3 +1,8 @@
+## v26.686.0 — Manufacturing tab: prominent demand chip + carry-back hint for short components
+- Bundle header: "demand N" is now a bold navy chip, same size as the SKU, so it stands out.
+- Drawer: when a production is short (or has no MFG PO) for a component, a hint points to the LAST production that manufactured it — e.g. "↩ Refer to P56 where 2,000 units were manufactured — 182 over its own demand (available to pull from)". Server computes carry = latest other production with a MFG qty for that SKU + surplus vs its own demand.
+
+
 ## v26.685.0 — PO grid: quick-apply a supplier-submitted completion date under the END cell
 - When a supplier has submitted a completion (production-end) date, the PO grid now shows a purple "set to <dd-mmm-yy>" button under the END-date cell, with a 120ms hover note ("Supplier has submitted a completion date of … — click to update"). Clicking applies it to the PO's production-end override (via the submission-apply endpoint) and refreshes the row in place. Row carries sub_comp_date/sub_comp_id from PO_ROWS_SQL.
 

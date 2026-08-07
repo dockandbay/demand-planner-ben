@@ -1106,7 +1106,20 @@ async function manufacturingData() {
     const sup = (prodKey ? ((compSupByProd[b.component_sku] || {})[prodKey]) : compSup[b.component_sku]) || { inProd: 0, completed: 0, mfgPos: [] };
     const stock = (stockFn ? Number(stockFn(b.component_sku)) : 0) || 0;
     const required = demand * Number(b.qty), supplied = sup.inProd + sup.completed + stock;
-    return { component_sku: b.component_sku, per: Number(b.qty), required, inProd: sup.inProd, completed: sup.completed, stock, supplied, diff: supplied - required, mfgPos: sup.mfgPos, accepted: !!accepted[b.component_sku] };
+    // Carry-back hint (grouped view): the LATEST OTHER production number that actually manufactured this component,
+    // how many it made, and how many over ITS OWN demand (surplus you could pull from). Helps when this production
+    // has no/short MFG supply for the component.
+    let carry = null;
+    if (prodKey) {
+      const byP = compSupByProd[b.component_sku] || {};
+      const others = Object.keys(byP).filter(k => k !== prodKey && (byP[k].inProd + byP[k].completed) > 0)
+        .sort((a, z) => { const na = parseFloat(a), nz = parseFloat(z); if (isFinite(na) && isFinite(nz)) return nz - na; return a < z ? 1 : (a > z ? -1 : 0); });
+      if (others.length) { const op = others[0], made = byP[op].inProd + byP[op].completed;
+        const demThere = (demByProd[op] && demByProd[op][parent]) ? demByProd[op][parent].qty : 0;
+        const reqThere = demThere * Number(b.qty);
+        carry = { prod: op, made, required: reqThere, surplus: Math.round(made - reqThere) }; }
+    }
+    return { component_sku: b.component_sku, per: Number(b.qty), required, inProd: sup.inProd, completed: sup.completed, stock, supplied, diff: supplied - required, mfgPos: sup.mfgPos, carry, accepted: !!accepted[b.component_sku] };
   });
   // Flat bundles (per parent, pooled demand) — kept for manufacturingActions + KPIs. Uses the component's total
   // manual stock (summed across productions) so the action/short count stays consistent with the grouped view.
