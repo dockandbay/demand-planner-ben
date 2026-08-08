@@ -1,3 +1,9 @@
+## v26.746.0 Zalando (Z1) review — efficiency tidy-up (no behaviour change)
+- `buildLiveDemand` no longer scans all ~503 products to clear the Zalando overlay — it clears+rebuilds in a single pass over the ≤44 `ZAL_FC` SKUs (`dem.ZAL` only ever exists there). Runs on every init / forecast edit / market switch.
+- `nextZalCover` (the 2-month Zalando target term) now short-circuits to 0 off the Zalando path (`isZalEU?…:0`) instead of doing empty-object lookups for every SKU×market×month.
+- Fixed a stale comment (Zalando is extra EU 3PL demand, not an "FBA-style transfer branch").
+- Verified byte-identical: Zalando on/off still changes exactly the same 5 EU SKUs with the same deltas.
+
 ## v26.745.0 Zalando forecast → EU Buy 3PL (Z1)
 - Zalando is now a real driver of the **EU Buy 3PL**, not just the send-to-Zalando tab. The baked per-SKU Zalando forecast (`ZAL_FC`), **netted against the uploaded Zalando stock** (`planner.zalando_stock`, new server-injected `ZAL_STOCK` global), lands as **extra demand on the EU 3PL warehouse** — it drains 3PL like DTC/B2B, so the Buy 3PL grows vs the stock-on-hand estimate. Held to a **2-month cover** in the 3PL buy target (Ben's spec).
 - **Buy 3PL ONLY — never Buy FBA.** Zalando touches only the 3PL demand/target/gate; FBA logic untouched.

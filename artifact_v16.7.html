@@ -2978,7 +2978,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     const nextFbaNeed=Math.max(tgFbuy-cF,0);
     // Zalando top-up: 2-month forward Zalando cover added straight to the 3PL target (Ben) so the Buy 3PL funds it.
     // Buy 3PL ONLY — never FBA. With no Zalando demand this is 0 → identical to before.
-    const nextZalCover=nextZalNeed(i);
+    const nextZalCover=isZalEU?nextZalNeed(i):0;   // skip the work entirely off the Zalando path
     const t3eff=crMatched.length?crCoverWeeks(i,t3,crMatched):t3;   // Complex Rules override (raise-only, per-month window)
     const tg3=fwdDemand(t3eff,i,d3DemFn)+nextFbaNeed+nextZalCover;
 
@@ -11142,20 +11142,19 @@ function buildLiveDemand(){
   // 2c) Zalando (EU only): a per-SKU BAKED branch forecast (ZAL_FC) — NOT the subcat cascade, so no LY / share /
   //     smoothing / auto-forecast (Ben's spec). GATED on an uploaded Zalando stock file (ZAL_STOCK non-empty):
   //     with nothing to net against, Zalando must contribute nothing to the buy plan. Written as md.demand.ZAL on
-  //     EU only; the buy engine (project) reads it as an FBA-style transfer branch. It stays invisible to every
+  //     EU only; the buy engine (project) reads it as extra EU 3PL demand (Buy 3PL only). It stays invisible to every
   //     other path because the 3PL/total demand sums name DTC/B2B/FBA explicitly (never Object.keys(demand)).
   (function(){
-    // Always clear any prior ZAL overlay first, so a since-cleared upload doesn't leave stale Zalando demand.
-    Object.keys(BP_DATA.products).forEach(function(sku){
-      var m=BP_DATA.products[sku].mkts; if(m&&m.EU&&m.EU.demand&&m.EU.demand.ZAL)delete m.EU.demand.ZAL;
-    });
-    if(!(ZAL_STOCK&&Object.keys(ZAL_STOCK).length))return;   // no stock file uploaded → Zalando off
+    var on = ZAL_STOCK && Object.keys(ZAL_STOCK).length;   // stock file uploaded?
+    // dem.ZAL only ever lives on ZAL_FC SKUs (EU) — clear+rebuild just those, not all 503 products. Clearing a
+    // stale overlay (upload since removed) still happens because we always iterate the ZAL_FC key set.
     Object.keys(ZAL_FC||{}).forEach(function(sku){
       var prod=BP_DATA.products[sku]; if(!prod||!prod.mkts||!prod.mkts.EU)return;
-      var md=prod.mkts.EU; if(!md.demand)md.demand={};
+      var md=prod.mkts.EU; if(md.demand&&md.demand.ZAL)delete md.demand.ZAL;   // drop any prior overlay first
+      if(!on)return;
       var fcm=ZAL_FC[sku]||{}, zal={};
       LIVE_FC_MONTHS.forEach(function(fym){ var v=Math.round(fcm[fym]||0); if(v>0)zal[fym]=v; });
-      if(Object.keys(zal).length)md.demand.ZAL=zal;
+      if(Object.keys(zal).length){ if(!md.demand)md.demand={}; md.demand.ZAL=zal; }
     });
   })();
   // 3) Re-fold committed Preorder/KA demand into B2B (pka stays on each market)
