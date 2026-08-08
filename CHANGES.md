@@ -1,3 +1,8 @@
+## v26.760.0 AI rec calibration: "Mixed" is direction-only (Hair Wrap fix)
+- "Mixed" now fires **only when the trend DIRECTION is unclear** — too few months, or the YoY genuinely swings up AND down (≥15% both ways). A consistently-positive (or -negative) SKU is NOT Mixed just because its magnitude varies a lot: e.g. **Hair Wrap SEASONAL UK (+58%..+1409% YoY) now reads "High growth"** (was wrongly "Mixed"). Magnitude uncertainty shows in the confidence band instead.
+- Primary % = the **robust median YoY** (clamped ±, no more shrink-toward-flat), so the label reflects the real direction/size; band width scales with variance. (Genuinely up-and-down SKUs, e.g. US Hair Wrap −38%..+151%, still correctly Mixed.)
+- Fixes a ReferenceError (leftover `confidence` var) introduced mid-calibration.
+
 ## v26.759.0 Tidy: remove 15 confirmed-dead functions (~215 lines)
 - Dead-code sweep — removed functions with **zero references anywhere** (whole-word cross-file verified across artifact/inject/portal/server, incl. `onclick`/`window`/module-export checks):
   - **artifact:** `_oldMakeRecTd`, `_oldBuildRowConfidencePopup` (superseded by the v26.757 AI-rec redesign), `recCalc`, `fwdFcWindow` (orphaned by it), and pre-existing remnants of past reworks — `fcNoteBadge`, `fcNoteTipHtml`, `openPlanRevPopout`, `openTargetRecs`, `revTargetQ`, `saveRevTarget` (old Revenue-tab / target-recs, since replaced), `renderCalIcon`, `renderTransferView` (transfer-tab placeholder), `stockCellHTML`, `togglePlanTools`.

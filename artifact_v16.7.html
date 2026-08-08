@@ -4557,21 +4557,21 @@ function aiRec(s,co,ch){
   var mean=yoy.reduce(function(x,y){return x+y;},0)/yoy.length;
   var variance=yoy.length>1?yoy.reduce(function(s2,v){return s2+Math.pow(v-mean,2);},0)/(yoy.length-1):0;
   var stdev=Math.sqrt(variance);
-  var sampleFactor=yoy.length<3?yoy.length/3:1;
-  var confidence=sampleFactor/(1+stdev*2);                          // 0..1 — consistency × sample size
-  // "Mixed": don't recommend a trend unless it's clear — too few months, low confidence, or YoY swings up AND down.
-  var pos=yoy.filter(function(v){return v>0.15;}).length, neg=yoy.filter(function(v){return v<-0.15;}).length;   // only BIG swings count (flat-with-noise is a clear "Flat", not Mixed)
+  // "Mixed" = the DIRECTION is unclear, NOT just noisy magnitude. Fire only when too few months, OR the YoY
+  // genuinely swings up AND down by a meaningful amount. A consistently-positive (or -negative) SKU is a clear
+  // growth/decline even if the magnitude varies a lot — that uncertainty shows in the confidence band, not here.
+  var pos=yoy.filter(function(v){return v>0.15;}).length, neg=yoy.filter(function(v){return v<-0.15;}).length;
   var splitSigns=Math.min(pos,neg)>=2 && Math.min(pos,neg)/yoy.length>=0.33;
-  if(yoy.length<3 || confidence<0.30 || splitSigns){
+  if(yoy.length<3 || splitSigns){
     return {label:{t:'Mixed',c:'#6b7280',bg:'#eef0f2'}, pct:null, mixed:true, n:yoy.length, biLifted:biLifted,
             median:median, yoyMin:Math.min.apply(null,yoy), yoyMax:Math.max.apply(null,yoy)};
   }
   var r5=function(x){return Math.round(x*20)/20;};                  // round to 5%
-  var primary=r5(Math.max(-0.5,Math.min(1.5,median*confidence)));   // shrunk toward flat, clamped ±
-  var k=Math.max(0.15,Math.min(0.4,stdev*0.5));                     // spread — wider when the trend is noisy
+  var primary=r5(Math.max(-0.5,Math.min(1.5,median)));              // robust median (clamped ±); the label follows the real direction/size
+  var k=Math.max(0.15,Math.min(0.5,stdev*0.5));                     // band width — wider when the magnitude is uncertain
   return {label:trendLabel(primary),
           pct:{high:primary, med:r5(primary*(1-k)), low:r5(primary*(1+k))},   // med=hedged toward flat, low=stretch
-          n:yoy.length, biLifted:biLifted, confidence:confidence, median:median};
+          n:yoy.length, biLifted:biLifted, median:median};
 }
 function makeRecTd(s,co,ch){
   var rec=aiRec(s,co,ch);
