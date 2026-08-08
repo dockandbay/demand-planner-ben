@@ -6890,8 +6890,8 @@ app.post('/api/supply/buyplan-pos', async (req, res) => {
   // default branch by channel × destination (must match planner.branches.name)
   const FBA_BR = { UK: 'UK FBA', US: 'US FBA', CA: 'CA FBA', AU: 'AU FBA', EU: 'DE FBA' };   // EU FBA → DE FBA
   const TPL_BR = { UK: 'UK ILG', US: 'US Geneva', EU: 'EU iFulfillment', AU: 'AU Coghlans', CA: 'CA FBA' };   // CA always → CA FBA (no CA 3PL)
-  const branch = (mode === 'fba' ? FBA_BR : TPL_BR)[country] || null;
-  if (mode === 'fba' && country === 'EU') return res.status(400).json({ error: 'FBA-direct PO creation is not available for EU yet (no DE FBA branch).' });
+  const branch = (b.branch ? String(b.branch).trim() : (mode === 'fba' ? FBA_BR : TPL_BR)[country]) || null;   // explicit branch override (e.g. 'China Stock' holding-branch for the MOQ top-up PO)
+  if (mode === 'fba' && country === 'EU' && !b.branch) return res.status(400).json({ error: 'FBA-direct PO creation is not available for EU yet (no DE FBA branch).' });
   if (!prod || !country || !items.length) return res.status(400).json({ error: 'prod_no, country and items required' });
   const num = (prod.match(/\d+/) || [prod])[0];   // 'P54' -> '54'
   try {
