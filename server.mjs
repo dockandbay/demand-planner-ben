@@ -5134,7 +5134,11 @@ async function processReceivedPos() {
   return out;
 }
 // n8n calls this after it upserts the feed. Idempotent — safe to call any time.
+// Shared-secret gate: if N8N_WEBHOOK_SECRET is set (live), the caller must send a matching `x-webhook-secret`
+// header; when unset (sandbox/dev) the endpoint is open so it stays testable. (Same env-gated pattern as RESEND_API_KEY.)
 app.post('/api/supply/received-pos/process', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET;
+  if (secret && req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
   try { res.json({ ok: true, ...(await processReceivedPos()) }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });

@@ -1,3 +1,7 @@
+## v26.756.0 received-POs endpoint: shared-secret gate for the n8n trigger
+- `POST /api/supply/received-pos/process` now requires an `x-webhook-secret` header matching env **`N8N_WEBHOOK_SECRET`** when that var is set (live). Unset (sandbox/dev) → open, so testing is unaffected (same env-gated pattern as `RESEND_API_KEY`). Diviyaj sets `N8N_WEBHOOK_SECRET` on live and has n8n send the header.
+- Verified: secret set → 401 (no/wrong header) / 200 (correct); unset → 200.
+
 ## v26.755.0 Received-PO auto-complete surfaces in the ✉ bell + counts as a timeline action
 - The auto-complete timeline note (recently-received-POs feed) now appears in the top-bar **✉ Inbox bell** as a recent event — the bell query now includes **system-generated internal notes** (`author_kind='internal' AND author_email='system'`) alongside supplier notes. Clearable/snoozable via the existing id-based read mechanism.
 - **Unread timeline notes are an action:** the PO-grid `timeline_unread` action already counts unread internal notes (so the auto-complete note registers); relabelled *"Unread supplier note(s)"* → *"Unread timeline note(s)"*.
