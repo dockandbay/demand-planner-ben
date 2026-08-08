@@ -11172,10 +11172,10 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape')hideInbPop()
 function openProdBuilderPO(){
   if(!window.BP||typeof BP.getBuyQtys!=='function'){ alert('Open the BUY plan once, then retry.'); return; }
   if(!window.openBuyplanModalMulti){ alert('Supply module not ready — open the SUPPLY tab once, then retry.'); return; }
-  var byC={};
-  CTRS.forEach(function(m){ var arr=[]; Object.keys(SKUM).forEach(function(sku){ var q=BP.getBuyQtys(sku,m); var b=Math.round((q&&q.b3)||0); if(b>0)arr.push({sku:sku,qty:b}); }); if(arr.length)byC[m]=arr; });
-  if(!Object.keys(byC).length){ alert('No Buy 3PL quantities across any market.'); return; }
-  window.openBuyplanModalMulti(byC,'3pl');
+  var byMode={'3pl':{}, 'fba':{}};   // per-market Buy 3PL + Buy FBA quantities; the modal toggles between them
+  CTRS.forEach(function(m){ var a3=[],af=[]; Object.keys(SKUM).forEach(function(sku){ var q=BP.getBuyQtys(sku,m); var b3=Math.round((q&&q.b3)||0), bf=Math.round((q&&q.bf)||0); if(b3>0)a3.push({sku:sku,qty:b3}); if(bf>0)af.push({sku:sku,qty:bf}); }); if(a3.length)byMode['3pl'][m]=a3; if(af.length)byMode['fba'][m]=af; });
+  if(!Object.keys(byMode['3pl']).length && !Object.keys(byMode['fba']).length){ alert('No Buy quantities across any market.'); return; }
+  window.openBuyplanModalMulti(byMode,'3pl');
 }
 var _pbData=null, _pbSel={ ctrs:null, cat:'', q:'' }, _pbQT=null;
 function _pbCol(mk){ return (typeof MKT_COLORS!=='undefined'&&MKT_COLORS[mk])||'#94a3b8'; }
