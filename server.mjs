@@ -78,9 +78,8 @@ function loadHTML() {
 const HTML = loadHTML();
 // SUPPLY tab (Production Planner) UI — injected before </body>. Optional; empty if file absent.
 function loadInject() { try { return readFileSync(new URL('./supply/inject.html', import.meta.url), 'utf8'); } catch { return ''; } }
-// Zalando: hard-coded per-SKU monthly forecast (cols S+ of Ben's ZALANDO_FC.csv) baked into the app (sandbox + live via deploy).
-// Stock-on-hand is uploaded periodically into planner.zalando_stock (mig 182); forecast stays static here.
-const ZAL_DATA = (() => { try { return JSON.parse(readFileSync(new URL('./zalando_data.json', import.meta.url), 'utf8')); } catch { return { forecast: {}, stock: {}, months: [] }; } })();
+// Zalando forecast is no longer baked — it lives in Supabase (forecast_inputs/outputs, channel ZAL). `zalando_data.json`
+// remains only as the source for migration 203 (the one-time seed). The old baked `ZAL_DATA` reader was removed (v26.751).
 // USD→GBP rate for the report GBP columns (CF_GBP/AF_GBP defaults). Legacy app_settings.usd_gbp_rate takes
 // precedence if still set; otherwise the current financial-year GBP→USD blended rate from CONFIG ▸ Admin ▸
 // Exchange rates (app_settings.fx_rates). Fallback 1.34. (The Cash Flow report itself converts per-line by FY.)

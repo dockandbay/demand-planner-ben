@@ -1,3 +1,8 @@
+## v26.751.0 Zalando: ZAL in the Summary (EU) + remove dead baked ZAL_DATA
+- **DEMAND ▸ Summary:** ZAL is now offered in the Summary's channel selector **on EU only** (hidden on UK/US/AU/CA; selecting a non-EU market drops off ZAL). The Zalando category forecast + LY actuals are viewable/comparable in the Summary like the other channels — closes the "comparison to a total summary" gap from the reviews. `zalInit()` also called from `renderSummaryView` so the channel is wired even if the Summary is opened before the plan renders.
+- **Cleanup (Zalando de-bake Stage 4, partial):** removed the dead baked `ZAL_DATA` server reader (the Zalando forecast has been DB-sourced since v26.747). `zalando_data.json` stays only as the migration-203 seed source. (The `buildLiveDemand` 2c overlay removal stays paired with Stage 3b, the buy-feed-to-cascade switch.)
+- Verified (jsdom): Summary shows DTC/FBA/B2B/**ZAL** on EU, renders + selects ZAL with no error, ZAL absent on UK.
+
 ## v26.750.0 Modular channels — Phase 1: registry + CONFIG▸Admin▸Channels (inert)
 - New config registry (**migration 205**): `planner.channels` + `planner.countries` + `planner.channel_countries`, seeded to mirror today's 4 channels / 5 countries **exactly** — DTC/B2B/ZAL draw **3PL**, FBA draws **FBA**; B2B carries rt-factor 0.5 + no-urgent; ZAL = absolute forecast, cover 2, nets vs `zalando_stock`. AU-no-B2B and CA-FBA-only are simply which rows exist in `channel_countries`.
 - Server injects `CHANNELS` + `COUNTRIES` globals; new `GET /api/config/channels` (open) + admin-only `POST /api/config/channel` / `POST /api/config/country`.
