@@ -4557,7 +4557,82 @@ function fwdFcWindow(){
   for(var i=0;i<F26.length&&out.length<6;i++){ if(ACTUAL_MONTHS.indexOf(F26[i])<0)out.push(F26[i]); }
   return out;
 }
+// ── AI recommendation (redesigned 2026-08-08) ──────────────────────────────────────────────────
+// ONE clear growth % + a confidence interval, applied as a single row growth % (LY × (1+%) every future month).
+// Trend label (7 buckets) from the primary %. Three confidence-tagged options ("at least X% growth"):
+//   High = the primary read · Medium = hedged toward flat · Low = a stretch (model B, Ben 2026-08-08).
+// BI-lifts stockout-flagged history so the trend reflects true demand, not supply-capped sales.
+function trendLabel(p){
+  if(p==null)return {t:'No data',c:'#6b7280',bg:'#f3f4f6'};
+  if(p>0.30)return {t:'High growth',c:'#14532d',bg:'#bbf7d0'};
+  if(p>0.10)return {t:'Med growth',c:'#166534',bg:'#dcfce7'};
+  if(p>0.02)return {t:'Low growth',c:'#1e40af',bg:'#dbeafe'};
+  if(p>=-0.02)return {t:'Flat',c:'#525252',bg:'#e5e7eb'};
+  if(p>=-0.10)return {t:'Low decline',c:'#9a3412',bg:'#ffedd5'};
+  if(p>=-0.30)return {t:'Med decline',c:'#7f1d1d',bg:'#fee2e2'};
+  return {t:'High decline',c:'#450a0a',bg:'#fecaca'};
+}
+function aiRec(s,co,ch){
+  var a=ga(co,ch,s), yoy=[], biLifted=false;
+  ACTUAL_MONTHS.forEach(function(am){ if(am===CUR_MONTH)return;   // skip the partial current month
+    var y=parseInt(am.split('_')[0],10),m=parseInt(am.split('_')[1],10);
+    var tv=a[am]?a[am][0]:0, lk=ym(y-1,m), lv=a[lk]?a[lk][0]:0;
+    var lt=getMonthBILift(s,co,ch,am), ll=getMonthBILift(s,co,ch,lk);
+    if(lt>1){tv=tv*lt;biLifted=true;} if(ll>1){lv=lv*ll;}
+    if(lv>0&&tv>0)yoy.push((tv-lv)/lv);
+  });
+  if(!yoy.length)return {label:trendLabel(null),pct:null,n:0,biLifted:false,median:null};
+  var sorted=yoy.slice().sort(function(x,y){return x-y;});
+  var median=sorted.length%2?sorted[(sorted.length-1)/2]:(sorted[sorted.length/2-1]+sorted[sorted.length/2])/2;
+  var mean=yoy.reduce(function(x,y){return x+y;},0)/yoy.length;
+  var variance=yoy.length>1?yoy.reduce(function(s2,v){return s2+Math.pow(v-mean,2);},0)/(yoy.length-1):0;
+  var stdev=Math.sqrt(variance);
+  var sampleFactor=yoy.length<3?yoy.length/3:1;
+  var confidence=sampleFactor/(1+stdev*2);                          // 0..1 — consistency × sample size
+  // "Mixed": don't recommend a trend unless it's clear — too few months, low confidence, or YoY swings up AND down.
+  var pos=yoy.filter(function(v){return v>0.15;}).length, neg=yoy.filter(function(v){return v<-0.15;}).length;   // only BIG swings count (flat-with-noise is a clear "Flat", not Mixed)
+  var splitSigns=Math.min(pos,neg)>=2 && Math.min(pos,neg)/yoy.length>=0.33;
+  if(yoy.length<3 || confidence<0.30 || splitSigns){
+    return {label:{t:'Mixed',c:'#6b7280',bg:'#eef0f2'}, pct:null, mixed:true, n:yoy.length, biLifted:biLifted,
+            median:median, yoyMin:Math.min.apply(null,yoy), yoyMax:Math.max.apply(null,yoy)};
+  }
+  var r5=function(x){return Math.round(x*20)/20;};                  // round to 5%
+  var primary=r5(Math.max(-0.5,Math.min(1.5,median*confidence)));   // shrunk toward flat, clamped ±
+  var k=Math.max(0.15,Math.min(0.4,stdev*0.5));                     // spread — wider when the trend is noisy
+  return {label:trendLabel(primary),
+          pct:{high:primary, med:r5(primary*(1-k)), low:r5(primary*(1+k))},   // med=hedged toward flat, low=stretch
+          n:yoy.length, biLifted:biLifted, confidence:confidence, median:median};
+}
 function makeRecTd(s,co,ch){
+  var rec=aiRec(s,co,ch);
+  var td=document.createElement('td');td.className='rectd';
+  var d=document.createElement('div');d.className='ri';
+  if(rec.mixed){
+    var gm=rec.label;
+    d.innerHTML='<div style="font-size:10px;font-weight:600;padding:1px 4px;border-radius:3px;text-align:center;background:'+gm.bg+';color:'+gm.c+';line-height:1.3">Mixed</div>'
+      +'<div style="font-size:8px;color:#9ca3af;text-align:center;margin-top:1px">trend unclear</div>';
+    var mdrop=document.createElement('button');mdrop.className='rbtn';
+    mdrop.style.cssText='font-size:9px;padding:2px 5px;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;width:100%;margin-top:1px;background:'+gm.bg+';color:'+gm.c+';border:1px solid #cbd5e1;border-radius:3px;font-weight:600';
+    mdrop.textContent='Why? ▾';
+    (function(ss,cco,cch){ mdrop.onclick=function(e){ e.stopPropagation(); showConfidencePopup(mdrop,buildRowConfidencePopup(ss,cco,cch)); }; })(s,co,ch);
+    d.appendChild(mdrop);
+  } else if(rec.pct==null){
+    d.innerHTML='<span class="rpct rfl" style="font-size:10px">--</span><span class="rbas" style="white-space:normal;font-size:8px;color:#9ca3af">no YoY basis</span>';
+  } else {
+    var gl=rec.label, hiStr=(rec.pct.high>=0?'+':'')+Math.round(rec.pct.high*100)+'%';
+    var biBadge=rec.biLifted?' <span title="Trend lifted for stockout-flagged history (BI)" style="font-size:7px;background:#FFFFC5;color:#854d0e;border:1px solid #facc15;border-radius:2px;padding:0 2px;font-weight:700;cursor:help">BI↑</span>':'';
+    d.innerHTML='<div style="font-size:10px;font-weight:600;padding:1px 4px;border-radius:3px;text-align:center;background:'+gl.bg+';color:'+gl.c+';line-height:1.3">'+gl.t+'</div>'
+      +'<div style="font-size:8px;color:#6b7280;text-align:center;margin-top:1px">'+hiStr+biBadge+'</div>';
+    var drop=document.createElement('button');
+    drop.className='rbtn';
+    drop.style.cssText='font-size:9px;padding:2px 5px;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;width:100%;margin-top:1px;background:'+gl.bg+';color:'+gl.c+';border:1px solid '+gl.c+';border-radius:3px;font-weight:600';
+    drop.textContent='Apply ▾';
+    (function(ss,cco,cch){ drop.onclick=function(e){ e.stopPropagation(); showConfidencePopup(drop,buildRowConfidencePopup(ss,cco,cch)); }; })(s,co,ch);
+    d.appendChild(drop);
+  }
+  td.appendChild(d);return td;
+}
+function _oldMakeRecTd(s,co,ch){
   const res=recCalc(s,co,ch);const lowPct=res.pct,basis=res.basis;
   const td=document.createElement('td');td.className='rectd';
   const d=document.createElement('div');d.className='ri';
@@ -4614,7 +4689,49 @@ function makeRecTd(s,co,ch){
 
 // Build a row-level confidence popup: shows HIGH/MED/LOW totals for the whole forecast horizon
 // Clicking an option applies per-month confidence-matched values across all F26+F27 months
-function buildRowConfidencePopup(s,co,ch,rowPct){
+// Redesigned row AI-rec popup (2026-08-08): trend label + 3 confidence-tagged "at least X% growth" options,
+// applied as a single row growth % across every future month, with a live per-month LY→result preview.
+function buildRowConfidencePopup(s,co,ch){
+  var rec=aiRec(s,co,ch), a=ga(co,ch,s);
+  var pop=document.createElement('div');
+  pop.style.cssText='position:absolute;background:#fff;border:1px solid #d0d0d0;border-radius:6px;padding:12px;width:340px;z-index:1000;box-shadow:0 4px 14px rgba(0,0,0,0.12);font-family:inherit;text-align:left';
+  if(rec.mixed){
+    pop.innerHTML='<div style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;background:'+rec.label.bg+';color:'+rec.label.c+';display:inline-block;margin-bottom:6px">Mixed — trend unclear</div>'
+      +'<div style="font-size:10px;color:#475569;line-height:1.5">'+s+' · '+co+' '+ch+'<br>The year-on-year history swings up and down ('+rec.n+' month'+(rec.n===1?'':'s')+', from '+(rec.yoyMin>=0?'+':'')+Math.round(rec.yoyMin*100)+'% to '+(rec.yoyMax>=0?'+':'')+Math.round(rec.yoyMax*100)+'% YoY), so there’s no confident trend to recommend. Set a growth % manually in the row if you want one.</div>';
+    return pop;
+  }
+  if(rec.pct==null){ pop.innerHTML='<div style="font-size:11px;color:#6b7280">No year-on-year basis for <b>'+s+'</b> — not enough matching months to recommend a trend.</div>'; return pop; }
+  var fwd=[]; FM.forEach(function(fym){ if(ACTUAL_MONTHS.indexOf(fym)<0)fwd.push(fym); });
+  var _MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function previewHtml(pct){
+    return fwd.slice(0,8).map(function(fym){
+      var y=parseInt(fym.split('_')[0],10),m=parseInt(fym.split('_')[1],10), lyv=(a[ym(y-1,m)]?a[ym(y-1,m)][0]:0);
+      return '<span style="display:inline-block;margin:0 6px 2px 0;font-size:9px;color:#475569">'+_MN[m-1]+'-'+String(y).slice(2)+' '+(lyv>0?(fn(lyv)+'→'+fn(Math.round(lyv*(1+pct)))):'—')+'</span>';
+    }).join('');
+  }
+  var gl=rec.label;
+  function optRow(label,pct){ var pstr=(pct>=0?'+':'')+Math.round(pct*100)+'%';
+    return '<button class="conf-opt-row" data-pct="'+pct+'" style="display:flex;justify-content:space-between;align-items:center;padding:7px 9px;background:#f8fafc;border:1px solid #cbd5e1;border-radius:5px;cursor:pointer;text-align:left;width:100%">'
+      +'<div><div style="font-size:11px;font-weight:600;color:#0f172a">'+label+' confidence</div><div style="font-size:9px;color:#64748b">at least '+pstr+' growth</div></div>'
+      +'<div style="font-size:13px;font-weight:700;color:'+gl.c+';font-variant-numeric:tabular-nums">'+pstr+'</div></button>'; }
+  pop.innerHTML='<div style="font-size:10px;color:#666;margin-bottom:4px;font-weight:600">'+s+' · '+co+' '+ch+'</div>'
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;background:'+gl.bg+';color:'+gl.c+'">'+gl.t+'</span>'
+      +'<span style="font-size:9px;color:#94a3b8">'+rec.n+' completed month'+(rec.n===1?'':'s')+' of YoY history'+(rec.biLifted?' · BI-lifted':'')+'</span></div>'
+    +'<div style="font-size:9px;color:#64748b;margin-bottom:6px">Pick a growth % — applied to <b>every future month</b> on that month’s last-year actual:</div>'
+    +'<div style="display:flex;flex-direction:column;gap:4px">'+optRow('High',rec.pct.high)+optRow('Medium',rec.pct.med)+optRow('Low',rec.pct.low)+'</div>'
+    +'<div id="rec-preview" style="margin-top:8px;padding-top:6px;border-top:1px solid #eef2f7"><div style="color:#94a3b8;font-size:9px;margin-bottom:2px">Preview at '+((rec.pct.high>=0?'+':'')+Math.round(rec.pct.high*100))+'%:</div>'+previewHtml(rec.pct.high)+'</div>'
+    +'<div style="margin-top:6px;font-size:8px;color:#94a3b8;line-height:1.4">Applies a single row growth % across all future months (LY × (1+%)); clears manual per-month overrides. Median YoY of completed months, shrunk toward flat when inconsistent.</div>';
+  pop.querySelectorAll('.conf-opt-row').forEach(function(btn){ var p=parseFloat(btn.dataset.pct);
+    btn.onmouseenter=function(){ var pv=document.getElementById('rec-preview'); if(pv)pv.innerHTML='<div style="color:#94a3b8;font-size:9px;margin-bottom:2px">Preview at '+((p>=0?'+':'')+Math.round(p*100))+'%:</div>'+previewHtml(p); };
+    btn.onclick=function(e){ e.stopPropagation(); e.preventDefault();
+      FM.forEach(function(fym){ if(ACTUAL_MONTHS.indexOf(fym)<0)IV[s+'|'+co+'|'+ch+'|'+fym]=''; });   // clear forward per-month overrides so the row % applies everywhere
+      IV[gk(s,co,ch)]=p;                                                                              // single row growth % (calc applies LY×(1+p) to every future month)
+      markDirty(); pop.remove(); render();
+    };
+  });
+  return pop;
+}
+function _oldBuildRowConfidencePopup(s,co,ch,rowPct){
   // Compute per-month HIGH/MED/LOW values for every forecast month
   var cr=calc(s,co,ch);
   var curFu=cr.fu;

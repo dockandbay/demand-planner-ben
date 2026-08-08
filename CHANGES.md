@@ -1,3 +1,10 @@
+## v26.757.0 DEMAND AI recommendation — clearer redesign (single %, trend label, confidence band, "Mixed")
+- Rebuilt the per-row AI rec (`aiRec`/`makeRecTd`/`buildRowConfidencePopup`). The cell shows a **7-bucket trend label** (High/Med/Low growth · Flat · Low/Med/High decline) + the headline growth %.
+- **"Mixed" when the trend isn't clear** (too few months, low confidence, or YoY swings up *and* down by >15%): the badge reads **"Mixed — trend unclear"** and makes **no recommendation** (Ben). Fixes the nonsensical numbers on small-base/seasonal SKUs (e.g. YoY −13%..+3692% now shows Mixed, not a misleading %).
+- **Popup:** trend label + three **confidence-tagged options** — *High/Medium/Low confidence, "at least X% growth"* (High = primary read, Medium = hedged toward flat, Low = stretch) + a live **per-month LY→result preview** so it's clear what lands where.
+- **Apply = a single growth % to every future month** (sets the row growth; `LY × (1+%)`), clearing manual per-month overrides — replaces the old per-month band values. Fixes "unclear what % applies to each month."
+- Method: median YoY of completed months (BI-lifted for stockouts), shrunk toward flat when inconsistent, ±spread band; extreme small-base YoY is tamed or shown as Mixed. Verified in the render harness (labels/bands on clear SKUs, Mixed on messy ones, apply sets LY×(1+%)). Old row-rec fns kept dead as `_old*`; the per-cell month popup is unchanged (separate interaction).
+
 ## v26.756.0 received-POs endpoint: shared-secret gate for the n8n trigger
 - `POST /api/supply/received-pos/process` now requires an `x-webhook-secret` header matching env **`N8N_WEBHOOK_SECRET`** when that var is set (live). Unset (sandbox/dev) → open, so testing is unaffected (same env-gated pattern as `RESEND_API_KEY`). Diviyaj sets `N8N_WEBHOOK_SECRET` on live and has n8n send the header.
 - Verified: secret set → 401 (no/wrong header) / 200 (correct); unset → 200.
