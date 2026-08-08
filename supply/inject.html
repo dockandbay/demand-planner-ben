@@ -1015,7 +1015,10 @@
         // The save returns the recomputed row (j.row) → repaint with NO extra fetch. If it's a cosmetic field the
         // server returns no row (nothing to recompute in the grid) → the in-place recolour above is all that's needed.
         var _pm=/^\/api\/supply\/po\/([^\/]+)$/.exec(ep);
-        if(_pm && current==='purchase-orders'){ try{ if(j&&j.row&&window.__poRowApply){ window.__poRowApply(j.row); } }catch(e){} }
+        // j.row present = the server recomputed something (dates/qty/status). Repaint the collapsed row AND refresh
+        // any open PLAN panel so DERIVED dates rebind too — the completion/balance payment due dates, ship/arrival
+        // etc. are computed display text (not .fci inputs), so the duplicate-control sync above can't touch them.
+        if(_pm && current==='purchase-orders'){ try{ if(j&&j.row&&window.__poRowApply){ window.__poRowApply(j.row); if(window.__poPanelRefresh)window.__poPanelRefresh(j.row.po); } }catch(e){} }
         // shipment edit (e.g. a departure/landing/arrival override in the shipment drawer/popout): re-render the
         // drawer or grid row so the chained Ship/Arrival/Completion "final" dates recompute — they're display-only
         // text, not .fci inputs, so the duplicate-control sync above can't touch them.
@@ -2043,12 +2046,16 @@
     erp_date:function(r){ return r.erp_date_pending>0 && !poComplete(r) && !poErpNa(r); },
     // Order-plan lines differ from the ERP (never-pushed OR qty drift). ONE action ("push to align"),
     // not one-per-line — mapped to the ORDER PLAN tab where the deviations box + push button live.
-    erp_lines:function(r){ return r.progress!=='complete' && !poErpNa(r) && ((Number(r.erp_total)>0 && !(Number(r.erp_in)>0)) || Number(r.erp_pending)>0); }};
+    erp_lines:function(r){ return r.progress!=='complete' && !poErpNa(r) && ((Number(r.erp_total)>0 && !(Number(r.erp_in)>0)) || Number(r.erp_pending)>0); },
+    // Master data missing: PO in PRODUCTION with a required field (Batch / Production # / Supplier / Branch) unassigned.
+    // A first-class action so it counts on the PO-ref badge + Actions notification and lights the MASTER DATA sub-tab
+    // (via the poExceptions mirror) — replaces the old standalone red "A" badge beside the PO number (Ben).
+    master_missing:function(r){ return poMissingReq(r).length>0; }};
   // Manufacturing = FOB → the PO is never pushed to Cin7/Fulfil, so it has NO ERP state at all (no deviation, no "in sync").
   function poErpNa(r){ return /manufactur/i.test((r&&r.branch)||''); }
   // PO-row action badge: label + which PO detail sub-tab each condition deep-links to.
-  var PO_ACT_LABEL={payment_overdue:'Payment overdue',unpaid_payment:'Unpaid payment',late:'Late — should be completed',unassigned_shipment:'Unassigned shipment',production:'Late — should have shipped',dtc_not_approved:'Direct-to-Client not approved',po_not_approved:'Not confirmed by supplier',preship:'Pre-shipment documents overdue',erp_date:'ERP delivery date differs',erp_lines:'Order plan differs from ERP — push to align',shipped_to_master:'Shipped to master — set status',payment_invalid:'Payment invalid — amount set with no date',timeline_unread:'Unread timeline note(s)'};
-  var PO_ACT_TAB={payment_overdue:'pay',unpaid_payment:'pay',late:'dates',unassigned_shipment:'shipments',production:'dates',dtc_not_approved:'client',po_not_approved:'masterdata',preship:'shipments',erp_date:'dates',erp_lines:'oplan',payment_invalid:'pay',shipped_to_master:'dates',timeline_unread:'timeline'};
+  var PO_ACT_LABEL={payment_overdue:'Payment overdue',unpaid_payment:'Unpaid payment',late:'Late — should be completed',unassigned_shipment:'Unassigned shipment',production:'Late — should have shipped',dtc_not_approved:'Direct-to-Client not approved',po_not_approved:'Not confirmed by supplier',preship:'Pre-shipment documents overdue',erp_date:'ERP delivery date differs',erp_lines:'Order plan differs from ERP — push to align',shipped_to_master:'Shipped to master — set status',payment_invalid:'Payment invalid — amount set with no date',timeline_unread:'Unread timeline note(s)',master_missing:'Master data missing — assign required field(s) while in production'};
+  var PO_ACT_TAB={payment_overdue:'pay',unpaid_payment:'pay',late:'dates',unassigned_shipment:'shipments',production:'dates',dtc_not_approved:'client',po_not_approved:'masterdata',preship:'shipments',erp_date:'dates',erp_lines:'oplan',payment_invalid:'pay',shipped_to_master:'dates',timeline_unread:'timeline',master_missing:'masterdata'};
   // ── PO-grid action-item snooze ── keyed poact|<po>|<condition> in supply_action_state (shared store).
   var _poActState={}, _poActStateLoaded=false, _poShowSnoozed=false, _hidePayDue=false, _hideTimelineUnread=false;   // PO-grid ACTION ITEMS hide toggles
   function poActKey(po,cond){ return 'poact|'+po+'|'+cond; }
@@ -2807,12 +2814,11 @@
     var _firstTab=_acts.length?(PO_ACT_TAB[_acts[0]]||''):(_exc.pay.length?'pay':_exc.dates.length?'dates':_exc.timeline.length?'timeline':_exc.ship.length?'shipments':_exc.oplan.length?'oplan':_exc.client.length?'client':_exc.master.length?'masterdata':'');
     var _noteTxt=_notif+' notification'+(_notif>1?'s':'')+(_acts.length?' — '+_acts.map(function(k){return PO_ACT_LABEL[k]||k;}).join('; '):'')+' (click to open)';
     var actFlag=_notif?' <button class="po-act-badge ex-badge" style="cursor:pointer;border:none" data-po="'+esc(r.po)+'" data-tab="'+_firstTab+'" data-allacts="'+esc(poActionsAll(r).join(','))+'" data-note="'+esc(_noteTxt)+'">'+_notif+'</button>':'';
-    // "A" badge — PO is in production but a required field (Batch / Production # / Supplier / Branch) is unassigned.
-    var _miss=poMissingReq(r);
-    var reqFlag=_miss.length?' <button class="po-req-badge ex-badge" style="cursor:pointer;border:none;background:#dc2626" data-po="'+esc(r.po)+'" title="Required field'+(_miss.length>1?'s':'')+' missing while in production: '+esc(_miss.join(', '))+' — click to assign">A</button>':'';
+    // Master-data-missing is now folded into the action count + MASTER DATA sub-tab (see master_missing in PO_ACTCOND);
+    // the old standalone red "A" badge beside the PO number was removed (Ben) — it lived only here.
     // the "double-click to copy" hint lives on the PO text only (not the whole cell), so hovering the action-item
     // badge beside it doesn't pop this native tooltip on top of the badge's own action-items tooltip.
-    var pocell=indent?'<td class="l po-child po-numcell" data-po="'+esc(r.po)+'"><span class="ind"></span><b title="double-click (or long-press on mobile) to copy PO reference">'+esc(r.po)+'</b>'+actFlag+reqFlag+'</td>':'<td class="l po-numcell" data-po="'+esc(r.po)+'"><b title="double-click (or long-press on mobile) to copy PO reference">'+esc(r.po)+'</b>'+actFlag+reqFlag+'</td>';
+    var pocell=indent?'<td class="l po-child po-numcell" data-po="'+esc(r.po)+'"><span class="ind"></span><b title="double-click (or long-press on mobile) to copy PO reference">'+esc(r.po)+'</b>'+actFlag+'</td>':'<td class="l po-numcell" data-po="'+esc(r.po)+'"><b title="double-click (or long-press on mobile) to copy PO reference">'+esc(r.po)+'</b>'+actFlag+'</td>';
     // ERP cell — compact badge-style buttons (same look as the "✓ in sync" badge) → keeps the column narrow.
     // Labels collapse to a single action: Update lines / Update date / Update both. All open the same ERP modal.
     var erpStyle='cursor:pointer;border:none';
@@ -3054,9 +3060,7 @@
         fetch('/api/supply/submission/'+b.dataset.id+'/apply',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({by:(window.ME&&ME.email)||'PO GRID'})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived();
           return fetch('/api/supply/po-row/'+encodeURIComponent(b.dataset.po)).then(function(r){return r.json();}).then(function(arr){ var rr=Array.isArray(arr)?arr[0]:null; if(rr&&window.__poRowApply)window.__poRowApply(rr); }); })
           .catch(function(er){ b.disabled=false; b.innerHTML=o; alert('Failed: '+(er.message||er)); }); }; });
-    // "A" required-field badge → open the PO drawer so the missing field can be assigned
-    document.querySelectorAll('#supply-root .po-req-badge[data-po]').forEach(function(b){ if(b._b)return; b._b=1;
-      b.onclick=function(e){ e.stopPropagation(); if(typeof openPODrawer==='function')openPODrawer(b.dataset.po); else gotoPO(b.dataset.po); }; }); }
+  }
   // PO in PRODUCTION status with any of Batch / Production # / Supplier / Branch unassigned → the missing field names.
   function poMissingReq(r){ if(!r)return []; if(String(r.status||'').toLowerCase().indexOf('production')<0)return [];
     var m=[]; if(!String(r.batch_id||'').trim())m.push('Batch'); if(!String(r.prod_no||'').trim())m.push('Production #');

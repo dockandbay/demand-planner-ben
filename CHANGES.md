@@ -1,3 +1,7 @@
+## v26.767.0 PO grid: bind derived dates on edit + relocate master-data "A"
+- **Date calcs now rebind on a PO-grid edit.** Editing a PO date (e.g. production end) in the grid repainted the collapsed row but left the open PLAN panel's DERIVED dates stale (completion/balance payment due, ship/arrival) until a refresh — they're computed display text, not `.fci` inputs, so the duplicate-control sync couldn't touch them. Now a recompute-worthy PO edit also refreshes the open panel (`__poPanelRefresh`), like the shipment branch already does.
+- **Master-data-missing "A" relocated.** Removed the standalone red **"A"** badge beside the PO number. Master-data-missing (PO in production with Batch / Production # / Supplier / Branch unassigned) is now a first-class action (`master_missing`) → it **increments the PO action count / Actions notification by 1** and **lights the MASTER DATA sub-tab badge** (via the existing poExceptions mirror), instead of a separate grid indicator.
+
 ## v26.766.0 Trend Gaps — collapsible volume tiers
 - Each volume-tier header (High/Medium/Low) is now **click to expand/minimise** (▾/▸ chevron). State persists across horizon/country changes within the session. **Low collapsed by default** (it's the noise tier); High + Medium open.
 - Display-only.
