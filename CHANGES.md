@@ -1,3 +1,8 @@
+## v26.749.0 Zalando: show last-year actuals in the demand plan (category + SKU cells)
+- ZAL now displays **last-year actuals** in category + SKU cells: `calc` no longer forces the absolute forecast into every month — past months show actuals like DTC/FBA (forecast months stay absolute manual entry). Zalando actuals upload into `sales_actuals` (channel `ZAL`, country EU) and flow automatically into the grid via the `category_sales_summary` VIEW (category cells) + the unfiltered SKU-sales feed (SKU cells) — no server change needed.
+- **Migration 204**: widen the `sales_actuals` channel CHECK constraint to allow `'ZAL'` (was DTC/B2B/FBA — it blocked the upload). forecast_inputs/outputs need no change (channel is free text).
+- Verified with seeded sandbox test actuals: category `ga` = 180/270 and SKU `skuSales` = 60/100 for the ZAL LY months; test rows removed after.
+
 ## v26.748.0 Zalando de-bake — Stage 3a: EU ZAL channel in the DEMAND plan grid
 - New **EU-only `ZAL` channel** in the demand plan. The channel pill shows **only when EU is selected** (hidden on UK/US/AU/CA; selecting a non-EU market drops you off ZAL). Reads the Supabase Zalando forecast — **absolute entry, no last-year / growth / smoothing** (new `ch==='ZAL'` branch in `calc`, and the forecast shows in every month since Zalando has no actuals).
 - SKUs surface under ZAL via a `'z'` availability granted to `ZAL_SKUS` (stock upload ∪ ZAL-forecast SKUs); synthesized EU `DATA` rows per ZAL subcat (Zalando isn't in the actuals-based `DATA` feed). Threaded `'z'` through the `chKey` mappings. Wiring runs from `renderMain` via idempotent `zalInit()` (NOT `augmentSKUM`, which executes before `DATA`/`ZAL_SKUS` initialise).

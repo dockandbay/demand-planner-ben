@@ -4186,11 +4186,13 @@ function calc(s,co,ch){
   const graw=IV[gk(s,co,ch)];const gn=(graw!=null&&graw!=='')?parseFloat(graw):null;
   FM_CALC.forEach(function(fym){
     const{y,mo}=pa(fym),ik=kb+'|'+fym,stored=IV[ik];
-    if(ch==='ZAL'){   // Zalando: absolute entry only — no LY base, no growth, no flat carry; forecast shows in every month (no actuals)
+    // Actuals for ALL channels incl ZAL — Zalando LY actuals are now uploaded to sales_actuals (channel ZAL),
+    // so past months show real actuals in the category + SKU cells (same as DTC/FBA).
+    if(ACTUAL_MONTHS.indexOf(fym)>=0){fu[fym]=a[fym]?a[fym][0]:0;return;}
+    if(ch==='ZAL'){   // Zalando FORECAST months: absolute manual entry (no LY base / growth / smoothing). LY actuals still display via the actuals branch above.
       var _zv=(stored!=null&&stored!=='')?parseFloat(String(stored).replace(/^'/,'').replace('%','')):0;
       fu[fym]=Math.max(0,isFinite(_zv)?Math.round(_zv):0); reasons[fym]='Zalando forecast: '+fn(fu[fym])+' units'; return;
     }
-    if(ACTUAL_MONTHS.indexOf(fym)>=0){fu[fym]=a[fym]?a[fym][0]:0;return;}
     const prevAct=a[ym(y-1,mo)]?a[ym(y-1,mo)][0]:0;
     const prevAct26=a[ym(2026,mo)]?a[ym(2026,mo)][0]:0;
     // 2027 base lookup: when the matching 2026 month is the current/partial month,
