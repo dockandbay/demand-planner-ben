@@ -1,3 +1,6 @@
+## v26.735.0 Sandbox banner: keep drawers below the strip (no content hidden under it)
+- The orange "SANDBOX ONLY" banner is fixed at top; full-page/right drawers ([id$="-drawer"]) were sliding under it. Added a sandbox-only rule offsetting drawers to top:20px (max-height calc) so nothing hides under the banner. Sandbox-only (never injected on prod).
+
 ## v26.734.0 BUY: "Build production" full-page all-countries view (PO builder Phase 1a)
 - New "🏭 Build production" button on the BUY plan (next to Create-PO) opens a full-page drawer showing each SKU's Buy 3PL requirement across ALL markets in one matrix — market-coloured columns (MKT_COLORS), country pills (toggle columns + narrow the SKU list), category filter + SKU search, per-row combined total and column/grand totals. Read-only first cut; additive (the per-market Create-PO flow is unchanged). Buy calc untouched (reads BP.getBuyQtys). Next increments: MOQ combined flag, per-qty supplier pick + select-all, Save-as-POs incl. China-stock excess. Spec: Claude Analyses/SPEC_PO_PRODUCTION_BUILDER.md.
 

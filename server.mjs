@@ -19,7 +19,7 @@ if (process.env.VERCEL || process.env.USE_TXN_POOLER) CONN = CONN.replace(':5432
 // Environment marker: show a SANDBOX banner unless we're pointed at the PRODUCTION Supabase (ref oolwklahstnvocaugryg).
 // Keyed off the real prod DB ref so it's correct wherever it runs — live never shows it, any non-prod DB does.
 const IS_SANDBOX = !String(CONN).includes('oolwklahstnvocaugryg');
-const SANDBOX_BANNER = '<div id="sbx-banner" style="position:fixed;top:0;left:0;right:0;height:20px;line-height:20px;background:#f97316;color:#fff;font:700 11px/20px system-ui,-apple-system,sans-serif;text-align:center;letter-spacing:.14em;z-index:100001">SANDBOX ONLY — test data, not live</div><style>body{padding-top:20px}#hz-topbar{top:20px!important}</style>';
+const SANDBOX_BANNER = '<div id="sbx-banner" style="position:fixed;top:0;left:0;right:0;height:20px;line-height:20px;background:#f97316;color:#fff;font:700 11px/20px system-ui,-apple-system,sans-serif;text-align:center;letter-spacing:.14em;z-index:100001">SANDBOX ONLY — test data, not live</div><style>body{padding-top:20px}#hz-topbar{top:20px!important}[id$="-drawer"]{top:20px!important;max-height:calc(100% - 20px)!important}</style>';
 // Sandbox favicon: the normal app logo (favicon.png) wrapped in an orange border, so sandbox tabs are visually
 // distinct from live. Served at /favicon-sbx.svg and swapped into the page only when IS_SANDBOX.
 const FAVICON_SBX_SVG = (() => {
