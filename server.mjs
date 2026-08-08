@@ -583,6 +583,7 @@ function requiredCap(method, p) {
   if (p.startsWith('/api/portal/')) return null;             // supplier portal — separate magic-link auth
   if (p.startsWith('/api/scenario/')) return null;           // SCENARIO open to all
   if (p.startsWith('/api/config/permissions')) return null;  // permissions API self-checks admin
+  if (p.startsWith('/api/config/channel') || p.startsWith('/api/config/countr')) return null;  // channel registry — reads open; writes self-check admin
   if (p === '/api/me' || p === '/api/ai') return null;       // profile + AI helper (no gated DB write)
   if (p === '/api/save-forecasts' || p === '/api/save-sku-forecasts' || p === '/api/targets'
       || p === '/api/demand-actions/state' || p.startsWith('/api/trading-calendar')
@@ -690,6 +691,21 @@ async function buildZalSkus() {
     return r.rows.map(x => x.sku);
   } catch (e) { return []; }
 }
+// Modular channel registry (planner.channels + channel_countries) → array with a countries[] each. Phase 1: injected
+// but not yet read by the app logic (see Claude Analyses/MODULAR_CHANNELS_ANALYSIS.md). Powers CONFIG▸Admin▸Channels.
+async function buildChannels() {
+  try {
+    const ch = (await pool.query(`SELECT code,label,stock_source,forecast_mode,cover_months,ext_stock_source,sku_scope,rt_factor,no_urgent,sort,active FROM planner.channels ORDER BY sort,code`)).rows;
+    const cc = (await pool.query(`SELECT channel_code, country_code FROM planner.channel_countries`)).rows;
+    const byCh = {}; cc.forEach(r => (byCh[r.channel_code] || (byCh[r.channel_code] = [])).push(r.country_code));
+    ch.forEach(c => { c.countries = (byCh[c.code] || []).sort(); c.cover_months = c.cover_months != null ? Number(c.cover_months) : null; c.rt_factor = c.rt_factor != null ? Number(c.rt_factor) : null; });
+    return ch;
+  } catch (e) { return []; }
+}
+async function buildCountries() {
+  try { return (await pool.query(`SELECT code,label,sort,active FROM planner.countries ORDER BY sort,code`)).rows; }
+  catch (e) { return []; }
+}
 app.get('/', async (req, res) => {
   try {
     const _lazy = !!(req.query && (req.query.lazysku === '1' || req.query.lazysku === 'true'));   // SKU-data lazy-load opt-in
@@ -729,6 +745,8 @@ app.get('/', async (req, res) => {
     try { const CHINA_STOCK = await buildChinaStock(); html = replaceGlobal(html, 'CHINA_STOCK', JSON.stringify(CHINA_STOCK)); } catch (e) { /* leave the {} default */ }   // buy-plan "China stock to allocate" flag
     try { const ZAL_STOCK = await buildZalStock(); html = replaceGlobal(html, 'ZAL_STOCK', JSON.stringify(ZAL_STOCK)); } catch (e) { /* leave the {} default */ }   // EU Zalando buy-feed gate + forecast-vs-stock netting
     try { const ZAL_SKUS = await buildZalSkus(); html = replaceGlobal(html, 'ZAL_SKUS', JSON.stringify(ZAL_SKUS)); } catch (e) { /* leave the [] default */ }   // EU ZAL demand-channel scope
+    try { const CHANNELS = await buildChannels(); html = replaceGlobal(html, 'CHANNELS', JSON.stringify(CHANNELS)); } catch (e) { /* leave the [] default */ }   // modular channel registry (P1: inert)
+    try { const COUNTRIES = await buildCountries(); html = replaceGlobal(html, 'COUNTRIES', JSON.stringify(COUNTRIES)); } catch (e) { /* leave the [] default */ }   // country master list
     // BUY ▸ Complex Rules — cover-target override rules (replaces First Buy). Injected fresh (not cached) so an
     // add/edit shows on the next load. The buy engine reads these to override the 3PL cover target per SKU/window.
     try { const COMPLEX_RULES = await buildComplexRules(); html = replaceGlobal(html, 'COMPLEX_RULES', JSON.stringify(COMPLEX_RULES)); } catch (e) { /* leave the [] default */ }
@@ -5076,6 +5094,48 @@ app.get('/api/me', async (req, res) => { try { const me = await permsFor(req);
 app.get('/api/config/permissions', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   try { const r = await pool.query('SELECT email, supply_edit, demand_edit, product_edit, is_admin, coalesce(landing_page,\'\') landing_page, to_char(updated_at,\'YYYY-MM-DD HH24:MI\') updated_at, updated_by FROM planner.app_permissions ORDER BY email'); res.json(r.rows); }
   catch (e) { res.status(500).json({ error: e.message }); } });
+// ── Modular channel registry (CONFIG ▸ Admin ▸ Channels) — Phase 1. Reads open; writes admin-only. ──
+app.get('/api/config/channels', async (req, res) => {
+  try { res.set('Cache-Control', 'no-store').json({ ok: true, channels: await buildChannels(), countries: await buildCountries() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/config/channel', async (req, res) => {
+  const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
+  const b = req.body || {}; const code = String(b.code || '').trim().toUpperCase();
+  if (!/^[A-Z0-9]{2,8}$/.test(code)) return res.status(400).json({ error: 'code must be 2–8 chars A–Z/0–9' });
+  if (!String(b.label || '').trim()) return res.status(400).json({ error: 'label required' });
+  const ss = b.stock_source === 'FBA' ? 'FBA' : '3PL';
+  const fm = b.forecast_mode === 'absolute' ? 'absolute' : 'ly-growth';
+  const cover = (b.cover_months !== null && b.cover_months !== undefined && b.cover_months !== '') ? Number(b.cover_months) : null;
+  const ext = String(b.ext_stock_source || '').trim() || null;
+  const scope = String(b.sku_scope || 'country-avail').trim() || 'country-avail';
+  const rt = (b.rt_factor !== null && b.rt_factor !== undefined && b.rt_factor !== '') ? Number(b.rt_factor) : null;
+  const noU = !!b.no_urgent, sort = Number.isFinite(+b.sort) ? +b.sort : 0, active = b.active !== false;
+  const countries = Array.isArray(b.countries) ? b.countries.map(c => String(c).trim().toUpperCase()).filter(Boolean) : [];
+  try {
+    await pool.query(`INSERT INTO planner.channels (code,label,stock_source,forecast_mode,cover_months,ext_stock_source,sku_scope,rt_factor,no_urgent,sort,active,updated_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now())
+        ON CONFLICT (code) DO UPDATE SET label=excluded.label,stock_source=excluded.stock_source,forecast_mode=excluded.forecast_mode,
+          cover_months=excluded.cover_months,ext_stock_source=excluded.ext_stock_source,sku_scope=excluded.sku_scope,
+          rt_factor=excluded.rt_factor,no_urgent=excluded.no_urgent,sort=excluded.sort,active=excluded.active,updated_at=now()`,
+      [code, String(b.label).trim(), ss, fm, cover, ext, scope, rt, noU, sort, active]);
+    await pool.query(`DELETE FROM planner.channel_countries WHERE channel_code=$1`, [code]);
+    for (const cc of countries) await pool.query(`INSERT INTO planner.channel_countries (channel_code,country_code) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [code, cc]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/config/country', async (req, res) => {
+  const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
+  const b = req.body || {}; const code = String(b.code || '').trim().toUpperCase();
+  if (!/^[A-Z]{2}$/.test(code)) return res.status(400).json({ error: 'code must be 2 letters' });
+  if (!String(b.label || '').trim()) return res.status(400).json({ error: 'label required' });
+  try {
+    await pool.query(`INSERT INTO planner.countries (code,label,sort,active,updated_at) VALUES ($1,$2,$3,$4,now())
+        ON CONFLICT (code) DO UPDATE SET label=excluded.label,sort=excluded.sort,active=excluded.active,updated_at=now()`,
+      [code, String(b.label).trim(), Number.isFinite(+b.sort) ? +b.sort : 0, b.active !== false]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.post('/api/config/permissions', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   const b = req.body || {}; const email = String(b.email || '').trim().toLowerCase();
   if (!email || email.indexOf('@') < 0) return res.status(400).json({ error: 'valid email required' });

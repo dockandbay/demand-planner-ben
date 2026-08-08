@@ -5904,13 +5904,13 @@
     // when active, expands a level-3 row of its member config tabs.
     var SC_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom','products','barcodegen'];
     var SC_LABEL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'Manufacturing BOM',products:'Products',barcodegen:'Barcodes'};
-    var ADM_KEYS=['admin-general','exchange-rates','permissions','email-log'];
-    var ADM_LABEL={'admin-general':'General','exchange-rates':'Exchange rates',permissions:'Permissions','email-log':'Email log'};
+    var ADM_KEYS=['admin-general','exchange-rates','channels','permissions','email-log'];
+    var ADM_LABEL={'admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels',permissions:'Permissions','email-log':'Email log'};
     // Supply chain sits second (next to General settings); it expands to the level-3 members below / nested.
     var L2=[['general','General settings'],['supplychain','Supply chain'],['portalusers','Portal users'],['portal','Portal'],['keyaccounts','Key accounts'],['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']];
     if(ME&&ME.is_admin){L2.push(['admin','Admin']);}   // Admin grouping → Permissions / Email log as level-3 tabs
     if(CONFIG_SUB==='forecast-export')CONFIG_SUB='export-uploads';   // legacy slug redirect
-    if((CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log'||CONFIG_SUB==='admin-general'||CONFIG_SUB==='exchange-rates')&&!(ME&&ME.is_admin))CONFIG_SUB='general';   // guard: non-admins can't land on admin-only tabs
+    if((CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log'||CONFIG_SUB==='admin-general'||CONFIG_SUB==='exchange-rates'||CONFIG_SUB==='channels')&&!(ME&&ME.is_admin))CONFIG_SUB='general';   // guard: non-admins can't land on admin-only tabs
     function reload(){ delete cache['config']; selectSection('config'); }   // refresh after a rate add (keeps sub-tab)
     // Generic Edit/Save row table: read-only cells + an Edit button per row; Edit swaps that row's cells to inputs
     // and shows Save/Cancel; Save POSTs all editable fields at once. cols: [{f,h,t:'text|num|select',ro,opts,w}].
@@ -6751,6 +6751,57 @@
               fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'fx_rates',value:JSON.stringify(newMat)})}).then(function(r){return r.json();})
             ]).then(function(){ inp.style.borderColor='#16a34a'; SUBS['exchange-rates'](); }).catch(function(){ inp.style.borderColor='#dc2626'; }); }; });
         }).catch(function(e){ b.innerHTML='<div class="count" style="color:#dc2626">'+esc(String(e))+'</div>'; }); };
+      SUBS['channels']=function(){ b.innerHTML='<div class="count">Loading…</div>';
+        fetch('/api/config/channels').then(function(r){return r.json();}).then(function(d){
+          if(!d||d.error){ b.innerHTML='<div class="count" style="color:#dc2626">'+esc((d&&d.error)||'load failed')+'</div>'; return; }
+          var chans=d.channels||[], countries=d.countries||[];
+          var SS=[['3PL','3PL'],['FBA','FBA']], FM=[['ly-growth','LY + growth'],['absolute','Absolute (manual)']];
+          function opts(list,v){ return list.map(function(o){return '<option value="'+esc(o[0])+'"'+(o[0]===v?' selected':'')+'>'+esc(o[1])+'</option>';}).join(''); }
+          function ccChecks(sel){ sel=sel||[]; return countries.map(function(c){ return '<label style="font-size:12px;margin-right:10px;white-space:nowrap"><input type="checkbox" class="ch-cc" value="'+esc(c.code)+'"'+(sel.indexOf(c.code)>=0?' checked':'')+'> '+esc(c.code)+'</label>'; }).join(''); }
+          var rows=chans.map(function(c){ return '<tr>'
+            +'<td class="l"><b>'+esc(c.code)+'</b></td><td class="l">'+esc(c.label)+'</td>'
+            +'<td class="l">'+esc(c.stock_source)+'</td><td class="l">'+esc(c.forecast_mode)+'</td>'
+            +'<td class="l">'+(c.cover_months!=null?esc(String(c.cover_months))+' mo':'<span class="mut">default</span>')+'</td>'
+            +'<td class="l">'+(c.ext_stock_source?esc(c.ext_stock_source):'<span class="mut">—</span>')+'</td>'
+            +'<td class="l">'+esc((c.countries||[]).join(', '))+'</td>'
+            +'<td class="l"><button class="ch-edit" data-code="'+esc(c.code)+'" style="cursor:pointer;border:1px solid #cbd5e1;background:#fff;border-radius:4px;font-size:11px;padding:3px 9px">Edit</button></td></tr>'; }).join('');
+          b.innerHTML='<div class="annot"><b>CONFIG ▸ Admin ▸ Channels.</b> The sales-channel registry. Each channel draws stock from <b>3PL</b> or <b>FBA</b>, forecasts by <b>LY + growth</b> or <b>absolute</b> entry, and is assigned to one or more countries. <span class="mut">Phase 1: channels are managed here; wiring the demand plan + buy plan to read this registry is the next phase, so for now edits are stored but existing behaviour is unchanged.</span></div>'
+            +'<div class="sect-h">Channels</div>'
+            +'<div class="tw"><table style="width:auto;min-width:100%"><thead><tr><th class="l">Code</th><th class="l">Label</th><th class="l">Stock</th><th class="l">Forecast</th><th class="l">Cover</th><th class="l">Ext stock</th><th class="l">Countries</th><th class="l"></th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+            +'<div style="margin-top:10px"><button class="tool-badge bg-blue" id="ch-add" style="cursor:pointer;border:none">+ Add channel</button></div>'
+            +'<div id="ch-form" style="display:none;margin-top:14px;padding:12px;border:1px solid #e2e8f0;border-radius:8px;max-width:660px"></div>'
+            +'<div class="sect-h" style="margin-top:18px">Countries</div>'
+            +'<div class="bar" style="gap:8px"><input class="flt" id="cty-code" placeholder="Code (e.g. NZ)" style="width:120px;text-transform:uppercase"><input class="flt" id="cty-label" placeholder="Label" style="width:200px"><button class="tool-badge bg-blue" id="cty-add" style="cursor:pointer;border:none">+ Add country</button><span class="ch-err" style="color:#dc2626;font-size:12px"></span></div>'
+            +'<div class="mut tiny" style="margin-top:6px">'+countries.map(function(c){return esc(c.code);}).join(' · ')+'</div>';
+          function showForm(c){ c=c||{}; var f=document.getElementById('ch-form'); f.style.display='block';
+            f.innerHTML='<div style="display:grid;grid-template-columns:130px 1fr;gap:8px 10px;align-items:center;font-size:12px">'
+              +'<label>Code</label><input class="flt" id="cf-code" value="'+esc(c.code||'')+'" '+(c.code?'disabled':'')+' style="width:120px;text-transform:uppercase" placeholder="2–8 A–Z/0–9">'
+              +'<label>Label</label><input class="flt" id="cf-label" value="'+esc(c.label||'')+'" style="width:280px">'
+              +'<label>Stock source</label><select class="flt" id="cf-ss">'+opts(SS,c.stock_source||'3PL')+'</select>'
+              +'<label>Forecast mode</label><select class="flt" id="cf-fm">'+opts(FM,c.forecast_mode||'ly-growth')+'</select>'
+              +'<label>Cover (months)</label><input class="flt" id="cf-cover" value="'+(c.cover_months!=null?esc(String(c.cover_months)):'')+'" style="width:90px" placeholder="default">'
+              +'<label>Ext stock source</label><input class="flt" id="cf-ext" value="'+esc(c.ext_stock_source||'')+'" style="width:220px" placeholder="(optional) e.g. zalando_stock">'
+              +'<label>Countries</label><div>'+ccChecks(c.countries)+'</div>'
+              +'</div>'
+              +'<div style="margin-top:10px;display:flex;gap:8px;align-items:center"><button class="tool-badge bg-blue" id="cf-save" style="cursor:pointer;border:none">Save channel</button><button id="cf-cancel" style="cursor:pointer;border:1px solid #cbd5e1;background:#fff;border-radius:4px;font-size:12px;padding:4px 12px">Cancel</button><span class="ch-err" style="color:#dc2626;font-size:12px"></span></div>';
+            document.getElementById('cf-cancel').onclick=function(){ f.style.display='none'; };
+            document.getElementById('cf-save').onclick=function(){ var err=f.querySelector('.ch-err'); err.textContent='';
+              var payload={ code:(document.getElementById('cf-code').value||'').trim().toUpperCase(), label:(document.getElementById('cf-label').value||'').trim(),
+                stock_source:document.getElementById('cf-ss').value, forecast_mode:document.getElementById('cf-fm').value,
+                cover_months:(document.getElementById('cf-cover').value||'').trim(), ext_stock_source:(document.getElementById('cf-ext').value||'').trim(),
+                countries:[].slice.call(f.querySelectorAll('.ch-cc:checked')).map(function(x){return x.value;}) };
+              if(!/^[A-Z0-9]{2,8}$/.test(payload.code)){ err.textContent='Code must be 2–8 chars A–Z/0–9.'; return; }
+              if(!payload.label){ err.textContent='Label required.'; return; }
+              fetch('/api/config/channel',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ err.textContent=j.error; return; } showSub(); }).catch(function(e){ err.textContent=(e&&e.message)||'failed'; }); };
+          }
+          b.querySelectorAll('.ch-edit').forEach(function(btn){ btn.onclick=function(){ var c=chans.filter(function(x){return x.code===btn.dataset.code;})[0]; showForm(c); var f=document.getElementById('ch-form'); if(f)f.scrollIntoView({block:'nearest'}); }; });
+          document.getElementById('ch-add').onclick=function(){ showForm(null); };
+          document.getElementById('cty-add').onclick=function(){ var err=b.querySelector('.ch-err'); err.textContent='';
+            var code=(document.getElementById('cty-code').value||'').trim().toUpperCase(), label=(document.getElementById('cty-label').value||'').trim();
+            if(!/^[A-Z]{2}$/.test(code)){ err.textContent='Country code = 2 letters.'; return; }
+            if(!label){ err.textContent='Country label required.'; return; }
+            fetch('/api/config/country',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:code,label:label,sort:99})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ err.textContent=j.error; return; } showSub(); }).catch(function(e){ err.textContent=(e&&e.message)||'failed'; }); };
+        }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };
       SUBS['permissions']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/config/permissions').then(function(r){return r.json();}).then(function(rows){
           if(rows&&rows.error){ b.innerHTML='<div class="count" style="color:#dc2626">'+esc(rows.error)+'</div>'; return; }

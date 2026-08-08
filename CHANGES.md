@@ -1,3 +1,9 @@
+## v26.750.0 Modular channels — Phase 1: registry + CONFIG▸Admin▸Channels (inert)
+- New config registry (**migration 205**): `planner.channels` + `planner.countries` + `planner.channel_countries`, seeded to mirror today's 4 channels / 5 countries **exactly** — DTC/B2B/ZAL draw **3PL**, FBA draws **FBA**; B2B carries rt-factor 0.5 + no-urgent; ZAL = absolute forecast, cover 2, nets vs `zalando_stock`. AU-no-B2B and CA-FBA-only are simply which rows exist in `channel_countries`.
+- Server injects `CHANNELS` + `COUNTRIES` globals; new `GET /api/config/channels` (open) + admin-only `POST /api/config/channel` / `POST /api/config/country`.
+- New **CONFIG ▸ Admin ▸ Channels** panel: list / add / edit a channel (code, label, stock source 3PL|FBA, forecast mode LY-growth|absolute, cover months, external stock source, country assignment) + add a country.
+- **Phase 1 is INERT** — nothing in the demand/buy logic reads the registry yet (Phase 2 flips the ~40 hardcoded enumerations to read it). Zero behaviour change. Verified: injection + endpoint round-trip (created/removed a throwaway channel); server/artifact/inject all syntax-clean.
+
 ## v26.749.0 Zalando: show last-year actuals in the demand plan (category + SKU cells)
 - ZAL now displays **last-year actuals** in category + SKU cells: `calc` no longer forces the absolute forecast into every month — past months show actuals like DTC/FBA (forecast months stay absolute manual entry). Zalando actuals upload into `sales_actuals` (channel `ZAL`, country EU) and flow automatically into the grid via the `category_sales_summary` VIEW (category cells) + the unfiltered SKU-sales feed (SKU cells) — no server change needed.
 - **Migration 204**: widen the `sales_actuals` channel CHECK constraint to allow `'ZAL'` (was DTC/B2B/FBA — it blocked the upload). forecast_inputs/outputs need no change (channel is free text).

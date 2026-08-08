@@ -30,6 +30,10 @@ The good news: three foundations are already channel-agnostic — the **save end
 
 Replace literals with a **channel registry** that is the single source of truth, injected to the client and read server-side.
 
+### 2.0 Ben's refinements (2026-08-08)
+- **Countries and channels are each their own tables** (master lists — 5 countries UK/AU/US/EU/CA and 4 channels DTC/FBA/B2B/ZAL today, both extensible), plus a **channel↔country assignment**.
+- **The buy dimension is a single field: `stock_source` ∈ {`3PL`, `FBA`}** per channel — "where stock is drawn from." This *replaces* the 4-role model below: DTC→3PL, B2B→3PL, ZAL→3PL, FBA→FBA. The buy engine groups demand by `stock_source` (3PL-pool vs FBA-pool). ZAL's "net against uploaded ZFS stock" is an **extra optional attribute** (`ext_stock_source`) layered on a `stock_source=3PL` channel, not its own role.
+
 ### 2.1 Data model — `planner.channels`
 | column | meaning |
 |---|---|
@@ -115,13 +119,17 @@ Each phase retrofits the existing four channels first (dogfood), so "modular" is
 
 ---
 
-## 8. Decisions needed before building
+## 8. Decisions
 
-1. **Country assignment:** `countries[]` array on the channel (simpler) vs a `channel_countries` child table (allows per-country cover/behaviour overrides later)? *(Rec: array now.)*
-2. **`sales_actuals.channel`:** widen the CHECK per channel (quick) vs FK to `channels` (governed, recommended)?
-3. **Buy roles:** are the four roles (`direct-3pl`, `transfer-fba`, `external-net`, `none`) the complete set, or do you foresee others (e.g. marketplace-consignment variants, dropship)?
-4. **Scope of P1 now, or full P1–P5?** *(Rec: build P1+P2 first — registry, config UI, and client enumeration — which delivers "add a channel & assign countries, see it in the plan"; treat P4 buy-engine generalisation as a separate, snapshot-gated phase.)*
-5. **Retrofit ZAL:** fold the just-built Zalando special-casing into the registry as the first `external-net` channel (removes the bespoke code), or leave ZAL as-is and apply modular only to *future* channels? *(Rec: retrofit — it's the proof the model works and removes debt.)*
+**RESOLVED (Ben, 2026-08-08):**
+- **Own tables** — `planner.countries` + `planner.channels` + a `channel_countries` assignment (all first-class, extensible).
+- **Buy dimension = `stock_source` (3PL | FBA)** per channel — replaces the 4-role model. Demand grouped by stock pool. ZAL = 3PL + optional `ext_stock_source` netting.
+
+**Still open:**
+- **A. `sales_actuals.channel`** — widen the CHECK per channel (quick) vs FK to `channels` (governed) *(rec FK, in P5)*.
+- **B. Is `stock_source` fixed per channel, or can it differ by country?** *(rec fixed per channel — simplest; no evidence a channel draws 3PL in one market and FBA in another.)*
+- **C. Countries scope** — is `planner.countries` just the master list for channel assignment (deep country enumerations `MK`/`CTRS`/`CO_CCY`/market-colours stay as-is for now), or do you want **full country modularity** (add a country in config → flows everywhere)? *(rec: master-list + assignment now; full country-refactor as a separate later effort — it's a second cross-cutting sweep.)*
+- **D. Per-channel forecast quirks** to preserve as flags: B2B rt-factor 0.5, B2B no-urgent, AU-no-B2B, CA-FBA-only. Confirm these are the complete set.
 
 ---
 

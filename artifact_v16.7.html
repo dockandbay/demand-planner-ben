@@ -1215,6 +1215,8 @@ var CHINA_STOCK={};      // {sku: units} un-allocated holding stock on open "Chi
 var ZAL_MONTHS=[];       // ordered YYYY_MM list the Zalando forecast covers.
 var ZAL_STOCK={};        // {sku: units} Zalando (ZFS) stock-on-hand — server-injected from planner.zalando_stock (the uploaded inventory file). EU buy-plan Zalando feed is GATED on this being non-empty (nothing uploaded → Zalando contributes nothing).
 var ZAL_SKUS=[];         // EU Zalando channel scope — SKUs in the Zalando stock upload ∪ SKUs with a ZAL forecast (server-injected). Drives the EU-only ZAL demand channel's SKU set + 'z' availability.
+var CHANNELS=[];         // Modular channel registry (planner.channels + country assignment) — server-injected. Phase 1: INERT (nothing reads it yet); Phase 2 will drive the channel enumerations/pills/keys from this. Each: {code,label,stock_source,forecast_mode,cover_months,ext_stock_source,sku_scope,rt_factor,no_urgent,countries[],sort,active}.
+var COUNTRIES=[];        // Country master list (planner.countries) — server-injected {code,label,sort,active}.
 var COMPLEX_RULES=[];    // BUY ▸ Complex Rules: cover-target override rules (server-injected). Buy engine reads these to override the 3PL cover target per SKU/window. Replaces First Buy.
 // Categories + subcategories metadata — pulled via MCP each rebuild from
 // Airtable's categories/subcategories tables. CATS_META keyed by category
