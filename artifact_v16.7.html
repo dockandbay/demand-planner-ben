@@ -5235,6 +5235,7 @@ function setShowChanges(on){ SHOW_CHANGES=!!on; try{localStorage.setItem('show_c
   if(on){ fcChangeKeysLoad(CUR,CF,function(){ try{renderMain();}catch(e){} }); } else { FC_CHANGE_KEYS=new Set(); try{renderMain();}catch(e){} } }
 function _fcNk(nk){ var p=(nk||'').split('|'); return {level:p[0],item:p[1],co:p[2],ch:p[3],month:p[4]}; }
 function _fcMlbl(m){ var p=String(m||'').split(/[-_]/); if(p.length<2)return m||''; var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return (mn[(+p[1])-1]||'')+" '"+String(p[0]).slice(2); }
+function shortEml(e){ e=String(e||''); return e.indexOf('@')>=0?e.split('@')[0]+'@':e; }   // top-level so Zalando + Klaviyo + anywhere can shorten dockandbay emails to local-part@ (was nested in Klaviyo view → Zalando threw "shortEml is not defined")
 function _fcEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
 var _fcMut='style="font-size:10px;color:#94a3b8"';
 function fcNoteBadge(nk){ var sel=(window.CSS&&CSS.escape)?CSS.escape(nk):nk;

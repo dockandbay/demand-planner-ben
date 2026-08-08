@@ -1,3 +1,6 @@
+## v26.737.0 Fix: Zalando tab "shortEml is not defined"
+- The Zalando tab threw a ReferenceError ("shortEml is not defined") because the email-shortener helper was defined locally inside the Klaviyo BIS view but referenced in the Zalando render. Promoted shortEml() to a top-level helper so it's available everywhere.
+
 ## v26.736.0 Record of change popup: concise "SKU Mmm-YY" title
 - The record-of-change popup header now reads e.g. "PICNIC-CAB-LG-LTBLU Jul-27" (SKU + month) instead of "Record of change PICNIC-CAB-LG-LTBLU · Jul '27" — dropped the redundant label + the "·", month shown as Mmm-YY (Ben).
 
