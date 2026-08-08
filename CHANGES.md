@@ -1,3 +1,9 @@
+## v26.764.0 DEMAND ▸ Trend Gaps — surface top under-forecast trends
+- New **"Trend Gaps"** tab in DEMAND ▸ Actions (Actions · Insights · **Trend Gaps** · Anomalies · Weather). Finds where the category AI-rec sees a confident **minimum growth** over the **next 1–3 months** but the plan forecasts much less — "likely ≥30% but 0% forecasted".
+- Per **subcategory × country × channel**: recommended-min = `aiRec` confident floor (skips Mixed / no-basis / <10%); forecast growth = Σ plan forecast(window) ÷ Σ last-year actuals(same months) − 1; **gap = recommended − forecast**. Keeps positive gaps ≥15pts with ≥100 LY units.
+- **Horizon toggle** (1/2/3 mo, default 3), **country pills** (with counts), **sorted by largest gap**. Each row → **plan** (jumps to that cell) and **Apply ▾** (opens the existing row recommendation to set a growth %).
+- Read-only scan (`aiRec` + `calc`); **buy engine byte-identical** (138 triples), no errors in jsdom.
+
 ## v26.763.0 Per-cell AI confidence rework: always-Leader + previous-years + previous-months + category trend
 - Fixes the **0/0/0 bug**: the per-cell popup anchored everything on the SKU's *own* last-year value for that month, so a SKU with no sales that month last year showed high/med/low = 0 even though the cell had a real forecast (e.g. HAIRW-SUE-HOTTROP Jan-27).
 - New central "expected" = a **blend** of (a) the SKU's **Leader-protected share of the category's seasonal forecast** (carries the overall **category trend** + **previous-years** share + tier-aware leader floor) and (b) the SKU's **previous-months** run-rate (deseasonalised → re-seasonalised), weighted 60/40. Never collapses to 0.

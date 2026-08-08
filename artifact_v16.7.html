@@ -9489,6 +9489,34 @@ function daForecastTrend(){
   });
   return out;
 }
+// Trend Gaps (DEMAND ▸ Actions ▸ Trend Gaps): subcat × country × channel where the category AI-rec sees a
+// confident MINIMUM growth over the next 1–3 months but the PLAN forecasts much less — an under-forecast trend.
+//   recommended-min = aiRec confident floor (pct.med, the "at least X%" figure); skip Mixed / no-basis / <10%.
+//   forecast growth  = Σ plan fu(window) / Σ LY actual(window) − 1  (plan vs same months last year).
+//   gap = recommended-min − forecast growth; keep positive gaps ≥15pts with ≥100 LY units; sort largest-first.
+function _tgAddMonth(fym,n){ var p=fym.split('_'),y=parseInt(p[0],10),m=parseInt(p[1],10)-1+n; y+=Math.floor(m/12); m=((m%12)+12)%12; return y+'_'+(m+1<10?'0':'')+(m+1); }
+function daTrendGaps(horizon){
+  horizon=Math.max(1,Math.min(3,horizon||3));
+  var FLOOR=100, THRESH=0.15, MINREC=0.10;
+  var win=[]; for(var i=1;i<=horizon;i++)win.push(_tgAddMonth(CUR_MONTH,i));
+  var out=[];
+  DATA.forEach(function(row){
+    var sub=row.s,co=row.co,ch=row.ch; if(!sub||!co||!ch)return;
+    var rec; try{ rec=aiRec(sub,co,ch); }catch(e){ return; }
+    if(!rec||rec.mixed||!rec.pct)return;
+    var recMin=rec.pct.med; if(recMin==null||recMin<MINREC)return;   // only a confident growth signal
+    var fu; try{ fu=daRowFu(row); }catch(e){ return; }
+    var m=row.m||{}, fSum=0, lySum=0;
+    win.forEach(function(fym){ fSum+=(fu[fym]||0);
+      var p=fym.split('_'), lk=ym(parseInt(p[0],10)-1,parseInt(p[1],10)); lySum+=((m[lk]&&m[lk][0])||0); });
+    if(lySum<FLOOR)return;
+    var fcYoY=fSum/lySum-1;
+    var gap=recMin-fcYoY; if(gap<THRESH)return;
+    out.push({sub:sub,co:co,ch:ch,recMin:recMin,recMed:rec.median,label:rec.label,fcYoY:fcYoY,gap:gap,lySum:Math.round(lySum),fSum:Math.round(fSum),n:rec.n,biLifted:rec.biLifted});
+  });
+  out.sort(function(a,b){return b.gap-a.gap;});
+  return out;
+}
 // Anomalies to review (ACTIONS): surface RECENT one-off spikes/dips from the existing pattern
 // scanner (scanBIPatterns) — sub-category × country × channel. Dips (possible stockout / lost
 // sales) are amber; spikes (promo/one-off to sanity-check) are info. Resolve via Done + Open in Plan.
@@ -9631,7 +9659,7 @@ function renderDemandActionsView(body){
     }).catch(function(e){ body.innerHTML='<div style="padding:18px;color:#b91c1c">'+tHesc(String(e))+'</div>'; }); }
   // level-3 sub-nav: ACTIONS · INSIGHTS · WEATHER (same .dnav style as the DEMAND/SUPPLY/REPORTS menus)
   function secNav(){
-    var SEC=[['actions','Actions'],['insights','Insights'],['anomalies','Anomalies'],['weather','Weather']];
+    var SEC=[['actions','Actions'],['insights','Insights'],['trendgaps','Trend Gaps'],['anomalies','Anomalies'],['weather','Weather']];
     var anN=(typeof daAnomalyOpenCount==='function')?daAnomalyOpenCount():0;   // open items to review → badge
     return '<div class="d3nav" style="display:flex;align-items:center;flex-wrap:wrap">'+SEC.map(function(s){var bdg=(s[0]==='anomalies'&&anN>0)?' <span class="ex-badge" style="background:#7c3aed;color:#fff">'+anN+'</span>':'';return '<button class="d3tab'+(_da.sec===s[0]?' active':'')+'" data-sec="'+s[0]+'">'+s[1]+bdg+'</button>';}).join('')
       +'<button class="d3tab" id="da-ai-insights" title="Generate AI insights for the current market" style="margin-left:auto;color:#5b21b6;font-weight:600">💡 AI Insights</button></div>';
@@ -9737,6 +9765,39 @@ function renderDemandActionsView(body){
       var _acat=body.querySelector('.an-cat-sel'); if(_acat)_acat.onchange=function(){ _da.anCat=this.value; draw(all); };
       var _asku=body.querySelector('.an-sku'); if(_asku)_asku.onchange=function(){ _da.anSku=this.value.trim(); draw(all); };
       body.querySelectorAll('.an-jump').forEach(function(b){ b.onclick=function(e){ e.preventDefault(); daJumpToPlan(b.dataset.sku); }; });
+      return;
+    }
+    if(_da.sec==='trendgaps'){
+      var tgHoz=_da.tgHoz||3, tgCo=_da.tgCo||'ALL', COL=['UK','US','EU','AU','CA'];
+      var tgAll=daTrendGaps(tgHoz);
+      var scoped=tgAll.filter(function(it){return tgCo==='ALL'||it.co===tgCo;});
+      var pctS=function(v){return (v>=0?'+':'')+Math.round(v*100)+'%';};
+      var hozBar='<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><span style="font-size:11px;font-weight:700;color:#888">HORIZON</span>'
+        +[[1,'1 mo'],[2,'2 mo'],[3,'3 mo']].map(function(h){return '<button class="tg-hoz dsub'+(tgHoz===h[0]?' active':'')+'" data-h="'+h[0]+'">'+h[1]+'</button>';}).join('')
+        +'<span style="font-size:11px;font-weight:700;color:#888;margin-left:10px">COUNTRY</span>'
+        +[['ALL','All']].concat(COL.map(function(c){return [c,c];})).map(function(c){var n=(c[0]==='ALL'?tgAll.length:tgAll.filter(function(i){return i.co===c[0];}).length);return '<button class="tg-co pill catpill'+(tgCo===c[0]?' active':'')+'" data-co="'+c[0]+'">'+c[1]+(n?' ('+n+')':'')+'</button>';}).join('')+'</div>';
+      var rows=scoped.slice(0,50).map(function(it){
+        var col=(it.label&&it.label.c)||'#166534', bg=(it.label&&it.label.bg)||'#dcfce7';
+        return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;padding:7px 0;border-top:1px solid #f1f5f9">'
+          +'<span title="gap = recommended minimum − forecast growth" style="font-weight:800;font-variant-numeric:tabular-nums;color:#b91c1c;min-width:52px">'+Math.round(it.gap*100)+'pts</span>'
+          +'<span style="font-weight:700;padding:1px 6px;border-radius:3px;background:'+bg+';color:'+col+';white-space:nowrap" title="'+tHesc(it.label?it.label.t:'')+' — confident minimum">≥'+pctS(it.recMin)+' ▲</span>'
+          +'<span style="color:#64748b;white-space:nowrap">forecast <b style="color:#0f172a">'+pctS(it.fcYoY)+'</b></span>'
+          +'<span style="flex:1;min-width:180px">'+tHesc(it.sub)+' <span style="color:#94a3b8">· '+it.co+' '+it.ch+'</span></span>'
+          +'<span style="color:#94a3b8;font-size:10px;white-space:nowrap" title="last-year actual units over the window">LY '+fn(it.lySum)+'</span>'
+          +'<a href="#" class="tg-jump" data-sub="'+tHesc(it.sub)+'" data-co="'+it.co+'" data-ch="'+it.ch+'" style="color:#1d4ed8;text-decoration:none;font-weight:600;white-space:nowrap">→ plan</a>'
+          +'<button class="tg-apply pill catpill" data-sub="'+tHesc(it.sub)+'" data-co="'+it.co+'" data-ch="'+it.ch+'" style="font-size:10px;cursor:pointer;white-space:nowrap" title="open the row recommendation">Apply ▾</button>'
+          +'</div>';
+      }).join('');
+      var empty='<div style="padding:22px;text-align:center;color:#666">No under-forecast trends'+(tgCo!=='ALL'?' for '+tgCo:'')+' over the next '+tgHoz+' month'+(tgHoz>1?'s':'')+' — the plan is keeping up with the trend.</div>';
+      body.innerHTML=secNav()+hozBar
+        +'<div style="font-size:12px;margin-bottom:4px"><b>'+scoped.length+'</b> under-forecast trend'+(scoped.length===1?'':'s')+' · next '+tgHoz+' month'+(tgHoz>1?'s':'')+' · sorted by largest gap</div>'
+        +(rows||empty)
+        +'<div style="font-size:11px;color:#888;margin-top:10px;line-height:1.5">Each row is a subcategory · market · channel where the category AI-rec sees a confident <b>minimum</b> growth over the next '+tgHoz+' month'+(tgHoz>1?'s':'')+' but the plan forecasts less. <b>Gap</b> = recommended minimum − forecast growth (plan vs last-year actuals for the same months). Only positive gaps ≥15pts with ≥100 LY units shown. <b>→ plan</b> opens the cell; <b>Apply ▾</b> opens the row recommendation to set a growth %.</div>';
+      wireSecNav();
+      body.querySelectorAll('.tg-hoz').forEach(function(b){ b.onclick=function(){ _da.tgHoz=parseInt(b.dataset.h,10); draw(all); }; });
+      body.querySelectorAll('.tg-co').forEach(function(b){ b.onclick=function(){ _da.tgCo=b.dataset.co; draw(all); }; });
+      body.querySelectorAll('.tg-jump').forEach(function(b){ b.onclick=function(e){ e.preventDefault(); try{ daJumpToPlan({sub:b.dataset.sub,co:b.dataset.co,ch:b.dataset.ch}); }catch(_){} }; });
+      body.querySelectorAll('.tg-apply').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); try{ showConfidencePopup(b,buildRowConfidencePopup(b.dataset.sub,b.dataset.co,b.dataset.ch)); }catch(_){} }; });
       return;
     }
     var MK=[['all','All'],['UK','UK'],['US','US'],['EU','EU'],['AU','AU']];
