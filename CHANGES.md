@@ -1,3 +1,7 @@
+## v26.740.0 SKU-data lazy-load (opt-in ?lazysku=1) — ~46% smaller mobile page
+- Refactored the SKU-data init so it CAN be lazy-loaded: the augmentSKUM + buildLiveBpOverlay init IIFEs are now named functions gated on LAZY_SKU; default (LAZY_SKU=false) runs them immediately exactly as before — the normal page is byte-identical (full _SKU_RAW + FC_OUTPUTS injected).
+- With **?lazysku=1** the server ships _SKU_RAW + FC_OUTPUTS EMPTY (page 6.16MB→3.33MB raw / 1.22MB→842KB gzip) and the client fetches them from the new GET /api/demand/sku-data after first paint, mutates the maps in place, runs augmentSKUM + buildLiveBpOverlay for real, and re-renders. OPT-IN/experimental — verify at a desktop (SKU expand + buy plan intact, no blank grid) before making it default. Default path unchanged/verified; only the flagged path is new.
+
 ## v26.739.0 Build production modal: 3PL/FBA toggle, per-cell ticks, inline qty override, full-width
 - Reworked the multi-country Build-production modal: full-screen width; a **Buy 3PL / Buy FBA toggle** (switches the per-market quantities shown AND the PO create mode); a **tick box + inline editable quantity per country cell** (centred) — untick a market to exclude it, or type over the recommended qty to override; combined **Total** and the **MOQ flag** recompute live from the ticked/overridden quantities. Supplier pick, production/batch/start, country pills, tick-all + per-category tick, Preview and Create-PO-per-country all retained. State (ticks/overrides/supplier) persists across mode + column toggles.
 

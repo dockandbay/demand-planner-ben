@@ -650,8 +650,15 @@ function refreshDataCache() {   // single-flight — coalesces concurrent refres
   return _dataRefresh;
 }
 refreshDataCache().catch(() => {});   // warm the cache on boot so the first real request isn't a cold 26s build
-app.get('/', async (_req, res) => {
+// SKU-data lazy-load (opt-in ?lazysku=1): the heavy _SKU_RAW + FC_OUTPUTS are shipped EMPTY in the page and the
+// client fetches them here after first paint. Served from the warm data cache (vals[3]=SKU_RAW, vals[2]=FC_OUTPUTS).
+app.get('/api/demand/sku-data', async (req, res) => {
+  try { const v = _dataCache ? _dataCache.vals : await refreshDataCache(); res.json({ sku_raw: v[3] || {}, fc_outputs: v[2] || {} }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/', async (req, res) => {
   try {
+    const _lazy = !!(req.query && (req.query.lazysku === '1' || req.query.lazysku === 'true'));   // SKU-data lazy-load opt-in
     // Serve the cached build; refresh in the background once past TTL (stale-while-revalidate). Only the very
     // first load (or the load right after a save-invalidation) waits on a synchronous build.
     let _vals;
@@ -663,8 +670,9 @@ app.get('/', async (_req, res) => {
     let html = DEV ? loadHTML() : HTML;
     html = replaceGlobal(html, 'DATA', JSON.stringify(DATA));
     html = replaceGlobal(html, 'FC_CURRENT', JSON.stringify(FC_CURRENT));
-    html = replaceGlobal(html, 'FC_OUTPUTS', JSON.stringify(FC_OUTPUTS));
-    html = replaceGlobal(html, '_SKU_RAW', JSON.stringify(SKU_RAW));
+    html = replaceGlobal(html, 'FC_OUTPUTS', JSON.stringify(_lazy ? {} : FC_OUTPUTS));   // lazy: ship empty; client fetches /api/demand/sku-data after first paint
+    html = replaceGlobal(html, '_SKU_RAW', JSON.stringify(_lazy ? {} : SKU_RAW));
+    if (_lazy) html = html.replace('var LAZY_SKU=false', 'var LAZY_SKU=true');
     html = replaceGlobal(html, '_SA_EXTRA', JSON.stringify(SA_EXTRA));
     html = replaceGlobal(html, 'CATS_META', JSON.stringify(CATS));
     html = replaceGlobal(html, 'SUBS_META', JSON.stringify(SUBS));
@@ -728,7 +736,7 @@ app.get('/', async (_req, res) => {
     const FBADIMS_JS = '<script>window.FBA_DIMS=' + JSON.stringify(FBADIMS) + ';</script>';
     // Per-user landing slug + hide #app until the router lands, so a plain load goes straight to the user's page
     // (default SUPPLY ▸ Purchase Orders) with no DEMAND→SUPPLY flash. inject.html reveals #app once routed.
-    let _land = 'supply/purchase-orders'; try { _land = (await permsFor(_req)).landing_page || _land; } catch (_) {}
+    let _land = 'supply/purchase-orders'; try { _land = (await permsFor(req)).landing_page || _land; } catch (_) {}
     // 3s failsafe reveal (belt-and-suspenders — the harness removes hz-hide-app once routed). The actual flash
     // prevention is HEAD_NOFLASH below: it must run in <head>, BEFORE the browser paints the static DEMAND filter
     // bar. A script at the end of <body> runs too late (the pills have already painted → flash).
@@ -753,7 +761,7 @@ app.get('/', async (_req, res) => {
     // gzip the (large, live-data-injected) HTML over the wire — ~6.3MB → ~1MB. The JSON middleware only wraps
     // res.json, so the main page was going out uncompressed. Prod/Vercel may also compress at the edge; harmless.
     res.set('content-type', 'text/html').set('Cache-Control', 'no-store').set('Vary', 'Accept-Encoding');
-    if (/\bgzip\b/.test(_req.headers['accept-encoding'] || '')) {
+    if (/\bgzip\b/.test(req.headers['accept-encoding'] || '')) {
       zlib.gzip(html, (err, buf) => {
         if (err) return res.send(html);
         res.setHeader('Content-Encoding', 'gzip');
