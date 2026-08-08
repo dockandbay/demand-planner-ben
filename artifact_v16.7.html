@@ -5281,14 +5281,16 @@ function _chgLine(row){ var d=String(row.created_at||''); var dt=(d.length>=10?_
 function _chgClose(){ var p=document.getElementById('chg-pop'); if(p)p.remove(); document.removeEventListener('mousedown',_chgOut,true); }
 function _chgOut(e){ var p=document.getElementById('chg-pop'); if(p&&!p.contains(e.target)&&!(e.target.classList&&e.target.classList.contains('cf-r')))_chgClose(); }
 function openChangeRecord(el){ var nk=el.dataset.nk; if(!nk)return; var p=nk.split('|'),level=p[0],item=p[1],co=p[2],ch=p[3],m=p[4]; _chgClose();
+  var _mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],_mp=String(m||'').split(/[-_]/),_ml=(_mn[(+_mp[1])-1]||'')+'-'+String(_mp[0]).slice(2);   // month as "Jul-27" (Ben)
+  var _chgTitle='<div style="font-weight:700;margin-bottom:5px;color:#fff">'+esc(item)+' <span style="color:#94a3b8;font-weight:400">'+_ml+'</span></div>';
   var pop=document.createElement('div'); pop.id='chg-pop'; pop.style.cssText='position:fixed;z-index:100075;max-width:380px;min-width:230px;background:#0f172a;color:#e5e7eb;font-size:11px;line-height:1.5;padding:9px 11px;border-radius:8px;box-shadow:0 8px 26px rgba(0,0,0,.35);text-align:left;max-height:52vh;overflow:auto';
-  pop.innerHTML='<div style="font-weight:700;margin-bottom:5px;color:#fff">Record of change</div><div style="color:#94a3b8">Loading…</div>';
+  pop.innerHTML=_chgTitle+'<div style="color:#94a3b8">Loading…</div>';
   document.body.appendChild(pop);
   var r=el.getBoundingClientRect(); pop.style.left=Math.max(6,Math.min(r.left,window.innerWidth-386))+'px'; pop.style.top=(r.bottom+6)+'px';
   setTimeout(function(){ document.addEventListener('mousedown',_chgOut,true); },0);
   fetch('/api/forecast/changes?country='+encodeURIComponent(co)+'&channel='+encodeURIComponent(ch)+'&level='+encodeURIComponent(level)+'&item='+encodeURIComponent(item)+'&month='+encodeURIComponent(m))
    .then(function(x){return x.json();}).then(function(d){ var rows=(d&&d.rows)||[];
-     pop.innerHTML='<div style="font-weight:700;margin-bottom:5px;color:#fff">Record of change <span style="color:#94a3b8;font-weight:400">'+esc(item)+' · '+esc(_fcMlbl(m))+'</span></div>'
+     pop.innerHTML=_chgTitle
        +(rows.length?rows.map(function(row){return '<div style="padding:2px 0;border-top:1px solid #1f2937">'+esc(_chgLine(row))+'</div>';}).join(''):'<div style="color:#94a3b8">No records.</div>');
      var rr=el.getBoundingClientRect(),t2=rr.bottom+6; if(t2+pop.offsetHeight>window.innerHeight-8)t2=Math.max(6,rr.top-pop.offsetHeight-6); pop.style.top=t2+'px';
    }).catch(function(){ pop.innerHTML='<div style="color:#fca5a5">Could not load.</div>'; }); }

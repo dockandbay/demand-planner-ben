@@ -1,3 +1,6 @@
+## v26.736.0 Record of change popup: concise "SKU Mmm-YY" title
+- The record-of-change popup header now reads e.g. "PICNIC-CAB-LG-LTBLU Jul-27" (SKU + month) instead of "Record of change PICNIC-CAB-LG-LTBLU · Jul '27" — dropped the redundant label + the "·", month shown as Mmm-YY (Ben).
+
 ## v26.735.0 Sandbox banner: keep drawers below the strip (no content hidden under it)
 - The orange "SANDBOX ONLY" banner is fixed at top; full-page/right drawers ([id$="-drawer"]) were sliding under it. Added a sandbox-only rule offsetting drawers to top:20px (max-height calc) so nothing hides under the banner. Sandbox-only (never injected on prod).
 
