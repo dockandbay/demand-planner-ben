@@ -656,6 +656,17 @@ app.get('/api/demand/sku-data', async (req, res) => {
   try { const v = _dataCache ? _dataCache.vals : await refreshDataCache(); res.json({ sku_raw: v[3] || {}, fc_outputs: v[2] || {} }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Un-allocated "China Stock" holding stock per SKU = qty on open China Stock branch POs (the MOQ top-ups). The buy
+// plan flags this as available to allocate. Display-only (does NOT alter buy quantities — allocation is a later step).
+async function buildChinaStock() {
+  try {
+    const r = await pool.query(`SELECT upper(l.sku) sku, sum(l.qty)::int qty
+      FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po
+      WHERE p.branch ILIKE 'China Stock' AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(l.qty,0)>0
+      GROUP BY upper(l.sku)`);
+    const o = {}; r.rows.forEach(x => { o[x.sku] = Number(x.qty) || 0; }); return o;
+  } catch (e) { return {}; }
+}
 app.get('/', async (req, res) => {
   try {
     const _lazy = !!(req.query && (req.query.lazysku === '1' || req.query.lazysku === 'true'));   // SKU-data lazy-load opt-in
@@ -687,6 +698,7 @@ app.get('/', async (req, res) => {
     // Definitive price changes (DEMAND ▸ Revenue) — injected fresh (not in the 5-min data cache) so an edit shows
     // on the next load. getASP applies these to lift the revenue forecast.
     try { const PRICE_CHANGES = await buildPriceChanges(); html = replaceGlobal(html, 'PRICE_CHANGES', JSON.stringify(PRICE_CHANGES)); } catch (e) { /* leave the [] default */ }
+    try { const CHINA_STOCK = await buildChinaStock(); html = replaceGlobal(html, 'CHINA_STOCK', JSON.stringify(CHINA_STOCK)); } catch (e) { /* leave the {} default */ }   // buy-plan "China stock to allocate" flag
     // BUY ▸ Complex Rules — cover-target override rules (replaces First Buy). Injected fresh (not cached) so an
     // add/edit shows on the next load. The buy engine reads these to override the 3PL cover target per SKU/window.
     try { const COMPLEX_RULES = await buildComplexRules(); html = replaceGlobal(html, 'COMPLEX_RULES', JSON.stringify(COMPLEX_RULES)); } catch (e) { /* leave the [] default */ }
@@ -6941,6 +6953,12 @@ app.post('/api/supply/buyplan-pos', async (req, res) => {
       const insPo = await pool.query(`INSERT INTO planner.purchase_orders (po, supplier_name, supplier_id, prod_no, batch_id, country_code, branch, start_production, status)
         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'FUTURE') ON CONFLICT (po) DO NOTHING RETURNING po`, [p.po, p.supplier_name, supIdOf(p.supplier_code, p.supplier_name), prod, batchId, country, branch, startDate]);
       if (insPo.rowCount) await notePoCreated(pool, p.po, authUser(req));
+      // China Stock top-up PO → flag the move on the PO timeline (units held un-allocated to meet MOQ; allocated manually later).
+      if (insPo.rowCount && /china stock/i.test(String(branch || ''))) {
+        const _u = p.lines.reduce((a, l) => a + (Number(l.qty) || 0), 0);
+        try { await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body) VALUES ($1,$2,$3,'internal',$4)`,
+          [p.po, supIdOf(p.supplier_code, p.supplier_name), authUser(req) || null, '🏭 China Stock move — ' + _u.toLocaleString() + ' units held un-allocated to meet supplier MOQ; allocate to a market / order later']); } catch (e) { /* best-effort */ }
+      }
       for (const l of p.lines)
         await pool.query(`INSERT INTO planner.purchase_order_lines (po_sku, po, sku, qty, erp_qty, proposed_at, proposed_by)
           VALUES ($1,$2,$3,$4::int,0,now(),'buyplan') ON CONFLICT (po_sku) DO UPDATE SET qty=excluded.qty, proposed_at=now(), proposed_by='buyplan'`,

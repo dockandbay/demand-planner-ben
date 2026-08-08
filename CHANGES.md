@@ -1,3 +1,7 @@
+## v26.742.0 Buy plan: China-stock "available to allocate" flag + timeline move note
+- Buy plan now shows a 🏭 China-stock badge on any SKU that has un-allocated stock on open "China Stock" branch POs (server global CHINA_STOCK = qty per SKU; buy-row SKU cell badge with a tooltip). Surfaces China stock as available supply to allocate — display-only, does NOT change buy quantities (allocation to a market/order stays a manual step, per Ben). Buy calc untouched.
+- When a China Stock top-up PO is created (Build production), its PO timeline gets a "🏭 China Stock move — N units held un-allocated to meet supplier MOQ; allocate later" note.
+
 ## v26.741.0 Build production: China-stock MOQ top-up workflow
 - In the multi-country Build-production modal, a "China-stock top-up" toggle (live count) now creates the MOQ shortfall as a **China Stock holding PO**: for each ticked SKU whose combined-across-markets order is below its MOQ, the shortfall (moq − combined) is added to a China Stock PO (one per production per supplier), so the production meets the supplier minimum. China Stock is the existing real holding branch — stock can be allocated to a market/DTC order later. Preview lists it alongside the per-country POs (🏭); Create makes it in the same action. Server: /api/supply/buyplan-pos now accepts an explicit `branch` override (used for the China Stock PO).
 - NOT yet done (next, buy-engine): China stock counting as available supply in the buy plan + a buy-plan flag showing there's China stock to allocate — needs a before/after buy-plan snapshot.

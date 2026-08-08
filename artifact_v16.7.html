@@ -1195,6 +1195,7 @@ function bisCount(sku,mkt){ try{ return (KLAVIYO_BIS[sku]&&KLAVIYO_BIS[sku][mkt]
 function bisUplift(sku,mkt){ var n=bisCount(sku,mkt); return n>0?Math.round(n*(Number(BIS_CFG.take_rate)||35)/100):0; }   // enhanced-demand units
 var MKT_COLORS={};       // reusable market colour palette {UK:'#..',US:'#..',EU:'#..',AU:'#..',CA:'#..'} — server-injected from app_settings (CONFIG ▸ Admin ▸ General).
 var ZAL_FC={};           // Zalando per-SKU monthly forecast {sku:{YYYY_MM:units}} — hard-coded (server-injected from zalando_data.json). EU-only ZAL channel + BUY&MOVE Zalando transfer.
+var CHINA_STOCK={};      // {sku: units} un-allocated holding stock on open "China Stock" branch POs (MOQ top-ups) — server-injected; buy plan flags it as available to allocate.
 var ZAL_MONTHS=[];       // ordered YYYY_MM list the Zalando forecast covers.
 var COMPLEX_RULES=[];    // BUY ▸ Complex Rules: cover-target override rules (server-injected). Buy engine reads these to override the 3PL cover target per SKU/window. Replaces First Buy.
 // Categories + subcategories metadata — pulled via MCP each rebuild from
@@ -2218,7 +2219,7 @@ function render(){
         <td class="bq">${bf>0?`<span class="bq-fba">${fmt(bf)}</span>`:`<span class="bq-nil">—</span>`}</td>`;   // inter-market Trf columns removed from BUY (now the TRANSFER tab)
       }
       h+=`<tr class="sr">
-        <td class="stk"><div class="snm"><button class="ob" data-sku="${s.s}">Plan \u25b8</button><span class="${tc}">${s.ti}</span><span class="scode">${s.s}</span>${BP_VIEW==='transfer'?trfChips(s.s):''}</div></td>
+        <td class="stk"><div class="snm"><button class="ob" data-sku="${s.s}">Plan \u25b8</button><span class="${tc}">${s.ti}</span><span class="scode">${s.s}</span>${(typeof CHINA_STOCK!=='undefined'&&CHINA_STOCK[s.s]>0)?`<span class="cn-stk tip120" data-tip="China stock: ${CHINA_STOCK[s.s].toLocaleString()} units held (un-allocated MOQ top-up) \u2014 available to allocate to a market / DTC order" style="margin-left:5px;font-size:8px;font-weight:700;color:#92400e;background:#fef3c7;border:1px solid #f59e0b;border-radius:3px;padding:0 3px;white-space:nowrap">\u{1F3ED} ${CHINA_STOCK[s.s].toLocaleString()}</span>`:''}${BP_VIEW==='transfer'?trfChips(s.s):''}</div></td>
         ${_MERGE
           ? `<td style="padding:2px 6px;font-size:10px;line-height:1.3"><span class="${sc2}">${st}</span><br>${s.cs?`<span class="cs-${s.cs.toLowerCase().replace('-','')}" title="${s.cs}">${s.cs==='Seasonal'?'S':'C'}</span>`:'<span style="color:#bbb">—</span>'}</td>`
           : `<td style="padding:2px 8px"><span class="${sc2}">${st}</span></td>
