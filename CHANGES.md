@@ -1,3 +1,7 @@
+## v26.754.0 Zalando Stage 3b: buy feed reads the live cascade (not baked ZAL_FC)
+- `buildLiveDemand`'s Zalando overlay now builds `dem.ZAL` from the **live forecast** — `calc(subcat,EU,ZAL)` (absolute, reads live IV) × SKU share + `FC_OUTPUTS` per-SKU overrides — the same source the demand grid renders from, instead of the page-load `ZAL_FC` global. **A ZAL forecast edit in the plan now flows to the buy plan without a page reload** (closes the 3a/3b consistency gap from the audit). Still absolute (no LY-chain), gated on `ZAL_STOCK`, Buy 3PL only.
+- Verified: **byte-identical buy effect** (same 5 EU SKUs); the buy is now **independent of `ZAL_FC`** (clearing it leaves the buy unchanged); the `ZAL_STOCK` gate is intact. (`ZAL_FC`/`ZAL_MONTHS` globals stay for now — still fed to the send-to-Zalando tab; Stage 4 removes if fully unused.)
+
 ## v26.753.0 Recently-received POs → auto-complete + timeline + supply-planner email
 - New `planner.recently_received_pos` feed (**migration 206**), populated by n8n (`po` + `received_date`). Processor **`POST /api/supply/received-pos/process`** (n8n calls it after upserting; idempotent — each row processed once via `processed_at`): marks any **not-yet-`COMPLETE`** PO as `COMPLETE`, adds a timeline note (`supplier_notes`, internal), and emails the supply planner. **Already-`COMPLETE` or PO-not-found → no action** (row just marked processed with a reason).
 - New **CONFIG ▸ Admin ▸ General ▸ Supply planner** email field (`app_settings.supply_planner_email`).

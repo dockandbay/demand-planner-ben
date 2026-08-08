@@ -11193,22 +11193,27 @@ function buildLiveDemand(){
   });
   // (2b removed v26.461 — saved SKU overrides (forecast_outputs) are now applied INLINE in section 2's
   //  chronological pass, so the chained last-year rule can read a month's final value incl. its override.)
-  // 2c) Zalando (EU only): a per-SKU BAKED branch forecast (ZAL_FC) — NOT the subcat cascade, so no LY / share /
-  //     smoothing / auto-forecast (Ben's spec). GATED on an uploaded Zalando stock file (ZAL_STOCK non-empty):
-  //     with nothing to net against, Zalando must contribute nothing to the buy plan. Written as md.demand.ZAL on
-  //     EU only; the buy engine (project) reads it as extra EU 3PL demand (Buy 3PL only). It stays invisible to every
-  //     other path because the 3PL/total demand sums name DTC/B2B/FBA explicitly (never Object.keys(demand)).
+  // 2c) Zalando (EU only): extra EU-3PL demand from the LIVE forecast — Stage 3b (v26.754). Built the same way the
+  //     demand grid renders ZAL: per-SKU FC_OUTPUTS override wins, else the subcat forecast (calc, absolute — reads
+  //     live IV) × the SKU share. So a ZAL edit in the plan now flows straight to the buy (no page reload) — it no
+  //     longer reads the page-load ZAL_FC global. Absolute forecast (no LY-chain) per Ben. GATED on an uploaded
+  //     Zalando stock file (ZAL_STOCK non-empty). Byte-identical to the old baked path on seeded data (every seeded
+  //     SKU has an override that wins). Buy 3PL only; invisible elsewhere (3PL/total sums name DTC/B2B/FBA explicitly).
   (function(){
-    var on = ZAL_STOCK && Object.keys(ZAL_STOCK).length;   // stock file uploaded?
-    // dem.ZAL only ever lives on ZAL_FC SKUs (EU) — clear+rebuild just those, not all 503 products. Clearing a
-    // stale overlay (upload since removed) still happens because we always iterate the ZAL_FC key set.
-    Object.keys(ZAL_FC||{}).forEach(function(sku){
-      var prod=BP_DATA.products[sku]; if(!prod||!prod.mkts||!prod.mkts.EU)return;
-      var md=prod.mkts.EU; if(md.demand&&md.demand.ZAL)delete md.demand.ZAL;   // drop any prior overlay first
-      if(!on)return;
-      var fcm=ZAL_FC[sku]||{}, zal={};
-      LIVE_FC_MONTHS.forEach(function(fym){ var v=Math.round(fcm[fym]||0); if(v>0)zal[fym]=v; });
-      if(Object.keys(zal).length){ if(!md.demand)md.demand={}; md.demand.ZAL=zal; }
+    var scope = (typeof ZAL_SKUS!=='undefined'&&ZAL_SKUS.length)?ZAL_SKUS:Object.keys(ZAL_FC||{});
+    scope.forEach(function(sku){ var p=BP_DATA.products[sku]; if(p&&p.mkts&&p.mkts.EU&&p.mkts.EU.demand&&p.mkts.EU.demand.ZAL)delete p.mkts.EU.demand.ZAL; });   // clear any prior overlay first
+    if(!(ZAL_STOCK&&Object.keys(ZAL_STOCK).length))return;   // no stock file uploaded → Zalando off
+    var bySub={}; scope.forEach(function(sku){ var sp=SKUM[sku]; if(sp&&sp.s)(bySub[sp.s]||(bySub[sp.s]=[])).push(sku); });
+    Object.keys(bySub).forEach(function(subcat){
+      var skus=bySub[subcat], fu={}, shares={};
+      try{ fu=calc(subcat,'EU','ZAL').fu||{}; }catch(e){}
+      try{ shares=buildSkuShares(skus,'EU','ZAL',lyYearMonths)||{}; }catch(e){}
+      skus.forEach(function(sku){
+        var prod=BP_DATA.products[sku]; if(!prod||!prod.mkts||!prod.mkts.EU)return;
+        var md=prod.mkts.EU, ovMap=FC_OUTPUTS[sku+'|'+skuWh('EU','ZAL')+'|ZAL']||{}, sh=shares[sku]||0, zal={};
+        LIVE_FC_MONTHS.forEach(function(fym){ var raw=(ovMap[fym]!=null)?ovMap[fym]:((fu[fym]||0)*sh); var v=Math.round(raw); if(v>0)zal[fym]=v; });
+        if(Object.keys(zal).length){ if(!md.demand)md.demand={}; md.demand.ZAL=zal; }
+      });
     });
   })();
   // 3) Re-fold committed Preorder/KA demand into B2B (pka stays on each market)
