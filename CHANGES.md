@@ -1,3 +1,8 @@
+## v26.765.0 Trend Gaps — group by volume tier
+- Trend Gaps rows now grouped into **volume tiers** (Ben): **High >1,500/mo · Medium 401–1,500/mo · Low ≤400/mo**, by average last-year units/month over the window. Largest gap first within each tier; each row shows its **units/month**.
+- Surfaces big-volume opportunities separately from tiny-base noise (e.g. the raw top gap, Bag-Toiletry UK DTC 94pts, is Low-volume ~215/mo; the top High-volume gaps are Hair Wrap SEASONAL UK DTC and Towel-Beach SEASONAL UK DTC).
+- Display-only; buy engine byte-identical (138 triples).
+
 ## v26.764.0 DEMAND ▸ Trend Gaps — surface top under-forecast trends
 - New **"Trend Gaps"** tab in DEMAND ▸ Actions (Actions · Insights · **Trend Gaps** · Anomalies · Weather). Finds where the category AI-rec sees a confident **minimum growth** over the **next 1–3 months** but the plan forecasts much less — "likely ≥30% but 0% forecasted".
 - Per **subcategory × country × channel**: recommended-min = `aiRec` confident floor (skips Mixed / no-basis / <10%); forecast growth = Σ plan forecast(window) ÷ Σ last-year actuals(same months) − 1; **gap = recommended − forecast**. Keeps positive gaps ≥15pts with ≥100 LY units.
