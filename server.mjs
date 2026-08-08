@@ -422,21 +422,7 @@ async function buildBI_RULES() {
   }));
 }
 
-// Parse a baked top-level object/array global out of the HTML once (read-only, at boot).
-function extractBaked(name) {
-  const m = HTML.match(new RegExp('(?:const|let|var)\\s+' + name + '\\s*=\\s*([\\[{])'));
-  if (!m) return null;
-  const open = m[1], close = open === '[' ? ']' : '}';
-  let i = m.index + m[0].length - 1, depth = 0, inStr = false, esc = false, q = '', start = i;
-  for (; i < HTML.length; i++) {
-    const c = HTML[i];
-    if (inStr) { if (esc) esc = false; else if (c === '\\') esc = true; else if (c === q) inStr = false; }
-    else if (c === '"' || c === "'") { inStr = true; q = c; }
-    else if (c === open) depth++;
-    else if (c === close) { depth--; if (depth === 0) { i++; break; } }
-  }
-  try { return JSON.parse(HTML.slice(start, i)); } catch { return null; }
-}
+// (Removed dead fn extractBaked — v26.759; unused bootstrap remnant, no callers.)
 // (Removed BAKED_FM — `fm` now comes from products.fba_transfer_min_units_* in buildPROD_CONST, not a baked map.)
 
 // PROD_CONST: per-SKU buy constants for the BUY view. {sku:{cp,moq,supp,lt,t3,tf,fm,l3}}

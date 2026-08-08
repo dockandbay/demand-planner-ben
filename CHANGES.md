@@ -1,3 +1,10 @@
+## v26.759.0 Tidy: remove 15 confirmed-dead functions (~215 lines)
+- Dead-code sweep — removed functions with **zero references anywhere** (whole-word cross-file verified across artifact/inject/portal/server, incl. `onclick`/`window`/module-export checks):
+  - **artifact:** `_oldMakeRecTd`, `_oldBuildRowConfidencePopup` (superseded by the v26.757 AI-rec redesign), `recCalc`, `fwdFcWindow` (orphaned by it), and pre-existing remnants of past reworks — `fcNoteBadge`, `fcNoteTipHtml`, `openPlanRevPopout`, `openTargetRecs`, `revTargetQ`, `saveRevTarget` (old Revenue-tab / target-recs, since replaced), `renderCalIcon`, `renderTransferView` (transfer-tab placeholder), `stockCellHTML`, `togglePlanTools`.
+  - **server:** `extractBaked` (unused boot remnant).
+- Kept `confidenceOptions`/`buildConfidencePopup`/`buildSkuConfidencePopup`/`saveRevTargetQ` etc. — still called by live code (a `saveRevTarget` vs `saveRevTargetQ` substring collision was caught with whole-word matching).
+- Verified: both files syntax-clean; jsdom full audit green — grid renders (135 rows), buy feed unchanged (5 EU ZAL SKUs), ZAL grid + Actions transfer lines + DTC intact, no over-consumption (`buildColgroup` + all critical fns present), no errors.
+
 ## v26.758.0 Zalando de-bake — Stage 4: remove the baked ZAL_FC / ZAL_MONTHS globals
 - Removed the `ZAL_FC` + `ZAL_MONTHS` client globals and their server injection. The Zalando forecast is now **DB-sourced everywhere**: the buy feed builds `dem.ZAL` from the live cascade (Stage 3b), and the send-to-Zalando tab reads `/api/supply/zalando/data`. Updated the 2c scope fallback + the send-tab comment. `zalando_data.json` remains only as the migration-203 seed source.
 - Verified: page loads clean (no ReferenceError, `typeof ZAL_FC`=undefined), buy feed unchanged (12 EU ZAL SKUs), send-to-Zalando endpoint still serves 44 SKUs. **Completes the Zalando de-bake (Stages 1–4).**

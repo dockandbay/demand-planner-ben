@@ -4248,26 +4248,7 @@ function curMonthForecast(s,co,ch){
 // stay consistent regardless of what overrides are currently applied.
 // (Removed dead calcBaseline — leftover forecasting helper, no caller. v25.652)
 
-function recCalc(s,co,ch){
-  const a=ga(co,ch,s);
-  const y24=sumU(a,2024),y25=sumU(a,2025),yt25=sumUT(a,2025,5),yt26=sumUT(a,2026,5);
-  if(y25<5&&yt26<5)return{pct:null,basis:'--'};
-  const gy=y24>5?(y25-y24)/y24:null,gytd=yt25>5?(yt26-yt25)/yt25:null;
-  var r=null,basis='';
-  if(gy!=null&&gytd!=null){r=gytd*0.7+gy*0.3;
-    var c1=gytd>0?'#2E6F40':gytd<0?'#B31B1B':'#888';
-    var c2=gy>0?'#2E6F40':gy<0?'#B31B1B':'#888';
-    basis='<span style="color:'+c1+'">YTD'+(gytd>=0?'+':'')+Math.round(gytd*100)+'%</span><br><span style="color:'+c2+'">py'+(gy>=0?'+':'')+Math.round(gy*100)+'%</span>';}
-  else if(gytd!=null){r=gytd*0.8;
-    var c1=gytd>0?'#2E6F40':gytd<0?'#B31B1B':'#888';
-    basis='<span style="color:'+c1+'">YTD'+(gytd>=0?'+':'')+Math.round(gytd*100)+'%</span>';}
-  else if(gy!=null){r=gy*0.5;
-    var c2=gy>0?'#2E6F40':gy<0?'#B31B1B':'#888';
-    basis='<span style="color:'+c2+'">py'+(gy>=0?'+':'')+Math.round(gy*100)+'%</span>';}
-  if(r==null)return{pct:null,basis:'--'};
-  r=Math.max(-0.5,Math.min(1.5,r));r=Math.round(r*20)/20;
-  return{pct:r,basis:basis};
-}
+// (removed dead fn recCalc — v26.759)
 
 function filteredCats(){
   const ac=(SEL.has('ALL')||PLAN_SKU_QRY)?null:SEL;   // SKU search overrides the category pill (show matches across all categories)
@@ -4440,14 +4421,7 @@ function calTipHtml(s,co,fym){
       +'<div style="font-size:9px;color:#334155">'+tHesc(line2)+up+'</div>'+sk+nt+'</div>';
   }).join('');
 }
-function renderCalIcon(s,co,fym){
-  var content=calTipHtml(s,co,fym);
-  if(!content)return '';
-  return '<span class="cal-icon" data-cal-tip="'+content.replace(/"/g,'&quot;')+'" '
-    +'style="display:inline-flex;align-items:center;justify-content:center;width:11px;height:11px;'
-    +'border-radius:2px;background:#dbeafe;color:#1d4ed8;font-size:8px;font-weight:700;'
-    +'cursor:help;border:1px solid #93c5fd;line-height:1;flex-shrink:0;font-family:Georgia,serif">C</span>';
-}
+// (removed dead fn renderCalIcon — v26.759)
 
 // Heuristic interpretation of a BI rule — explains how to apply it to forecasting
 function getInterpretation(r){
@@ -4552,11 +4526,7 @@ function buildHdr(){
 
 // Forward forecast window: 2026 months not yet actual, capped at 6 (e.g. Jul–Dec once June is actual).
 // Used by BOTH the AI Rec button label and the confidence popup so their HIGH % always agree.
-function fwdFcWindow(){
-  var out=[];
-  for(var i=0;i<F26.length&&out.length<6;i++){ if(ACTUAL_MONTHS.indexOf(F26[i])<0)out.push(F26[i]); }
-  return out;
-}
+// (removed dead fn fwdFcWindow — v26.759)
 // ── AI recommendation (redesigned 2026-08-08) ──────────────────────────────────────────────────
 // ONE clear growth % + a confidence interval, applied as a single row growth % (LY × (1+%) every future month).
 // Trend label (7 buckets) from the primary %. Three confidence-tagged options ("at least X% growth"):
@@ -4632,60 +4602,7 @@ function makeRecTd(s,co,ch){
   }
   td.appendChild(d);return td;
 }
-function _oldMakeRecTd(s,co,ch){
-  const res=recCalc(s,co,ch);const lowPct=res.pct,basis=res.basis;
-  const td=document.createElement('td');td.className='rectd';
-  const d=document.createElement('div');d.className='ri';
-  // Compute HIGH-tier % over forward 6 months (Jun-Nov 2026) — drives BOTH the descriptive label AND the apply button %.
-  // This avoids inflating numbers with 2027 forecast months where 2026 LY base isn't yet available.
-  var forward6=fwdFcWindow();
-  var hi6Sum=0,ly6Sum=0;
-  var biLifted=false; // any historical month in the trend was BI-lifted for stockout
-  forward6.forEach(function(fym){
-    var opts=confidenceOptions(s,co,ch,fym,0);
-    hi6Sum+=opts.high.value;
-    ly6Sum+=opts.context.lyVal||0;
-    if(opts.context.biLiftedMonths&&opts.context.biLiftedMonths.length>0)biLifted=true;
-  });
-  var hiPct6=ly6Sum>0?(hi6Sum-ly6Sum)/ly6Sum:null;
-  // Round to 2 decimal places for clean display
-  var hiPct6Rounded=hiPct6!=null?Math.round(hiPct6*100)/100:null;
-  // Bucket into descriptive label
-  function growthLabel(p){
-    if(p==null)return {label:'No Data',color:'#9ca3af',bg:'#f3f4f6'};
-    if(p>0.30)return {label:'High Growth',color:'#14532d',bg:'#bbf7d0'};
-    if(p>0.10)return {label:'Med Growth',color:'#166534',bg:'#dcfce7'};
-    if(p>0.02)return {label:'Low Growth',color:'#1e40af',bg:'#dbeafe'};
-    if(p>=-0.01)return {label:'Steady',color:'#525252',bg:'#e5e5e5'};
-    if(p>=-0.10)return {label:'Low Decline',color:'#9a3412',bg:'#ffedd5'};
-    if(p>=-0.30)return {label:'Med Decline',color:'#7f1d1d',bg:'#fee2e2'};
-    return {label:'High Decline',color:'#450a0a',bg:'#fecaca'};
-  }
-  var gl=growthLabel(hiPct6);
-  if(hiPct6==null&&lowPct==null){
-    d.innerHTML='<span class="rpct rfl" style="font-size:10px">--</span><span class="rbas" style="white-space:normal">'+basis+'</span>';
-  } else {
-    var pctSubtext=hiPct6!=null?(hiPct6>=0?'+':'')+Math.round(hiPct6*100)+'% next 6mo':'';
-    var biBadge=biLifted?' <span title="Trend lifted +'+Math.round((BI_STOCKOUT_LIFT-1)*100)+'% for one or more historical months flagged as stockout in BI. Without the lift this rec would be lower." style="font-size:7px;background:#FFFFC5;color:#854d0e;border:1px solid #facc15;border-radius:2px;padding:0 2px;font-weight:700;cursor:help">BI&nbsp;\u2191</span>':'';
-    d.innerHTML='<div style="font-size:10px;font-weight:600;padding:1px 4px;border-radius:3px;text-align:center;background:'+gl.bg+';color:'+gl.color+';line-height:1.3">'+gl.label+'</div>'
-      +'<div style="font-size:8px;color:#6b7280;text-align:center;margin-top:1px">'+pctSubtext+biBadge+'</div>';
-    const drop=document.createElement('button');
-    drop.className='rbtn';
-    drop.style.cssText='font-size:9px;padding:2px 5px;cursor:pointer;text-decoration:underline;text-decoration-style:dotted;width:100%;margin-top:1px;background:'+gl.bg+';color:'+gl.color+';border:1px solid '+gl.color+';border-radius:3px;font-weight:600';
-    // Button text uses SAME 6mo HIGH % as the label — keeps things consistent.
-    var dropPct=hiPct6Rounded!=null?disp(String(hiPct6Rounded)):(lowPct!=null?disp(String(lowPct)):'rec');
-    drop.textContent='Apply '+dropPct+' ▾';
-    (function(ss,cco,cch){
-      drop.onclick=function(e){
-        e.stopPropagation();
-        var popup=buildRowConfidencePopup(ss,cco,cch,lowPct!=null?lowPct:0);
-        showConfidencePopup(drop,popup);
-      };
-    })(s,co,ch);
-    d.appendChild(drop);
-  }
-  td.appendChild(d);return td;
-}
+// (removed dead fn _oldMakeRecTd — v26.759)
 
 // Build a row-level confidence popup: shows HIGH/MED/LOW totals for the whole forecast horizon
 // Clicking an option applies per-month confidence-matched values across all F26+F27 months
@@ -4731,144 +4648,7 @@ function buildRowConfidencePopup(s,co,ch){
   });
   return pop;
 }
-function _oldBuildRowConfidencePopup(s,co,ch,rowPct){
-  // Compute per-month HIGH/MED/LOW values for every forecast month
-  var cr=calc(s,co,ch);
-  var curFu=cr.fu;
-  var monthOpts={}; // fym -> {high, medium, low}
-  var totals={high:0,medium:0,low:0};
-  var totals26={high:0,medium:0,low:0};
-  var totals27={high:0,medium:0,low:0};
-  // First: add Jan-May 2026 actuals to all three tiers (they're fixed)
-  ACTUAL_MONTHS.forEach(function(m){
-    var actVal=curFu[m]||0;
-    totals.high+=actVal;
-    totals.medium+=actVal;
-    totals.low+=actVal;
-    if(m.startsWith('2026')){
-      totals26.high+=actVal;
-      totals26.medium+=actVal;
-      totals26.low+=actVal;
-    }
-  });
-  // Then: add forecast month options
-  FM.forEach(function(fym){
-    if(ACTUAL_MONTHS.indexOf(fym)>=0)return; // skip actuals (already added above)
-    var curVal=curFu[fym]||0;
-    var opts=confidenceOptions(s,co,ch,fym,curVal);
-    monthOpts[fym]=opts;
-    totals.high+=opts.high.value;
-    totals.medium+=opts.medium.value;
-    totals.low+=opts.low.value;
-    if(fym.startsWith('2026')){totals26.high+=opts.high.value;totals26.medium+=opts.medium.value;totals26.low+=opts.low.value;}
-    else{totals27.high+=opts.high.value;totals27.medium+=opts.medium.value;totals27.low+=opts.low.value;}
-  });
-  // Get LY 2025 reference total for YoY comparison
-  var a=ga(co,ch,s);
-  var ly2025=sumU(a,2025);
-  // Sum LY values for FORECAST MONTHS ONLY (Jun-Dec 2025) — used as anchor for HIGH/MED/LOW % display
-  // Forward 6 months (Jun-Nov 26) — matches AI Rec column label and "Apply X%" button.
-  // Excludes Dec 2026 to keep all three numbers consistent (forecasting horizon: "next 6 months").
-  var forward6Months=fwdFcWindow();
-  var lyForecastMonths26=0;
-  forward6Months.forEach(function(fym){
-    var mo=parseInt(fym.split('_')[1]);
-    var lyKey=ym(2025,mo);
-    lyForecastMonths26+=(a[lyKey]?a[lyKey][0]:0);
-  });
-  // HIGH/MED/LOW totals for the 6-month window (used for matching label %)
-  var fcTotal26={high:0,medium:0,low:0};
-  forward6Months.forEach(function(fym){
-    if(monthOpts[fym]){
-      fcTotal26.high+=monthOpts[fym].high.value;
-      fcTotal26.medium+=monthOpts[fym].medium.value;
-      fcTotal26.low+=monthOpts[fym].low.value;
-    }
-  });
-
-  var pop=document.createElement('div');
-  pop.style.cssText='position:absolute;background:#fff;border:1px solid #d0d0d0;border-radius:6px;padding:10px;width:340px;z-index:1000;box-shadow:0 4px 14px rgba(0,0,0,0.12);font-family:inherit;text-align:left';
-
-  function yoyStr(v){var p=ly2025>0?Math.round((v-ly2025)/ly2025*100):null;return p!=null?(p>=0?'+':'')+p+'% YoY':'—';}
-
-  // Compute the row-level % change vs 2025 LY (stable baseline)
-  var curTotal26=F26.reduce(function(acc,m){return acc+(curFu[m]||0);},0);
-  var curTotal27=F27.reduce(function(acc,m){return acc+(curFu[m]||0);},0);
-  function pctChg(newVal,oldVal){if(oldVal<=0)return null;return Math.round((newVal-oldVal)/oldVal*100);}
-  function pctStr(p){if(p==null)return '';return (p>=0?'+':'')+p+'%';}
-  // % shown in HIGH/MED/LOW headers: growth vs LY for forecast months (matches per-cell labels)
-  var hi26pct=pctChg(fcTotal26.high,lyForecastMonths26);
-  var med26pct=pctChg(fcTotal26.medium,lyForecastMonths26);
-  var low26pct=pctChg(fcTotal26.low,lyForecastMonths26);
-  // Format helper — show abs value if change is too large
-  function pctOrAbs(newVal,oldVal,p){
-    if(p==null||p<-50||p>150){return fn(Math.round(newVal));}
-    return (p>=0?'+':'')+p+'%';
-  }
-
-  pop.innerHTML='<div style="font-size:10px;color:#666;margin-bottom:6px;font-weight:500">'+s+' · '+co+' '+ch+' — apply to all forecast months</div>'
-    +'<div style="background:#f5f5f3;border-radius:4px;padding:6px 8px;margin-bottom:8px;font-size:10px;line-height:1.5">'
-      +'<div style="display:flex;justify-content:space-between"><span style="color:#666">2025 LY total</span><span style="font-variant-numeric:tabular-nums;font-weight:500">'+fn(ly2025)+'</span></div>'
-      +'<div style="display:flex;justify-content:space-between"><span style="color:#666">Current FY26 forecast</span><span style="font-variant-numeric:tabular-nums;font-weight:500">'+fn(curTotal26)+'</span></div>'
-      +'<div style="display:flex;justify-content:space-between"><span style="color:#666">Row recommendation</span><span style="font-variant-numeric:tabular-nums;font-weight:500">'+disp(String(rowPct))+'</span></div>'
-    +'</div>'
-    +'<div style="display:flex;flex-direction:column;gap:3px">'
-      // HIGH
-      +'<button class="conf-opt-row" data-tier="high" style="display:flex;justify-content:space-between;align-items:flex-start;padding:6px 8px;background:#EAF3DE;border:1px solid #97C459;border-radius:4px;cursor:pointer;text-align:left;width:100%">'
-        +'<div><div style="font-size:10px;font-weight:600;color:#27500A">HIGH confidence '+pctOrAbs(fcTotal26.high,lyForecastMonths26,hi26pct)+'</div>'
-        +'<div style="font-size:9px;color:#3B6D11">Per-month: trend × LY, capped at month HWM × 1.25</div></div>'
-        +'<div style="text-align:right;font-variant-numeric:tabular-nums">'
-          +'<div style="font-size:10px;color:#27500A;font-weight:500">Next 6mo '+fn(fcTotal26.high)+'</div>'
-          +'<div style="font-size:9px;color:#3B6D11">'+pctStr(hi26pct)+' YoY</div>'
-        +'</div>'
-      +'</button>'
-      // MED
-      +'<button class="conf-opt-row" data-tier="medium" style="display:flex;justify-content:space-between;align-items:flex-start;padding:6px 8px;background:#FAEEDA;border:1px solid #EF9F27;border-radius:4px;cursor:pointer;text-align:left;width:100%">'
-        +'<div><div style="font-size:10px;font-weight:600;color:#633806">MED confidence '+pctOrAbs(fcTotal26.medium,lyForecastMonths26,med26pct)+'</div>'
-        +'<div style="font-size:9px;color:#854F0B">Per-month: midpoint, capped at HWM × 1.6</div></div>'
-        +'<div style="text-align:right;font-variant-numeric:tabular-nums">'
-          +'<div style="font-size:10px;color:#633806;font-weight:500">Next 6mo '+fn(fcTotal26.medium)+'</div>'
-          +'<div style="font-size:9px;color:#854F0B">'+pctStr(med26pct)+' YoY</div>'
-        +'</div>'
-      +'</button>'
-      // LOW
-      +'<button class="conf-opt-row" data-tier="low" style="display:flex;justify-content:space-between;align-items:flex-start;padding:6px 8px;background:#FCEBEB;border:1px solid #E24B4A;border-radius:4px;cursor:pointer;text-align:left;width:100%">'
-        +'<div><div style="font-size:10px;font-weight:600;color:#791F1F">LOW confidence '+pctOrAbs(fcTotal26.low,lyForecastMonths26,low26pct)+'</div>'
-        +'<div style="font-size:9px;color:#A32D2D">Per-month: central minus confidence band</div></div>'
-        +'<div style="text-align:right;font-variant-numeric:tabular-nums">'
-          +'<div style="font-size:10px;color:#791F1F;font-weight:500">Next 6mo '+fn(fcTotal26.low)+'</div>'
-          +'<div style="font-size:9px;color:#A32D2D">'+pctStr(low26pct)+' YoY</div>'
-        +'</div>'
-      +'</button>'
-    +'</div>'
-    +'<div style="margin-top:6px;padding-top:5px;border-top:1px solid #e5e7eb;font-size:8px;color:#888;line-height:1.4">'
-      +'<strong style="color:#444">Method:</strong> Trend-shrunk YoY forecast. Central trend = median of recent YoY rates, shrunk toward 0% when inconsistent. HIGH/MED/LOW are confidence bands. Replaces existing overrides.'
-    +'</div>';
-
-  pop.querySelectorAll('.conf-opt-row').forEach(function(btn){
-    btn.addEventListener('click',function(e){
-      e.stopPropagation();
-      e.preventDefault();
-      var target=e.target.closest('.conf-opt-row')||btn;
-      var tier=target.dataset.tier;
-      // Apply per-month value for this tier across all forecast months
-      FM.forEach(function(fym){
-        if(ACTUAL_MONTHS.indexOf(fym)>=0)return;
-        var ik=s+'|'+co+'|'+ch+'|'+fym;
-        var v=monthOpts[fym][tier].value;
-        var lyV=monthOpts[fym].context.lyVal||0;
-        var curV=curFu[fym]||0;
-        applyConfidenceValue(ik,curV,lyV,v);
-      });
-      IV[gk(s,co,ch)]=''; // clear row growth; per-month overrides take precedence for all tiers
-      markDirty();
-      pop.remove();
-      // Full re-render to refresh all input fields
-      render();
-    });
-  });
-  return pop;
-}
+// (removed dead fn _oldBuildRowConfidencePopup — v26.759)
 
 // ── Seasonal curves (2024+2025 actuals) ──────────────────────────────────
 const BIZ_SHARES={"1": 0.0548, "2": 0.063, "3": 0.0757, "4": 0.09, "5": 0.1139, "6": 0.1151, "7": 0.1285, "8": 0.1022, "9": 0.0522, "10": 0.0389, "11": 0.0868, "12": 0.0788};      // month(int) -> share of annual
@@ -5434,11 +5214,8 @@ function _fcMlbl(m){ var p=String(m||'').split(/[-_]/); if(p.length<2)return m||
 function shortEml(e){ e=String(e||''); return e.indexOf('@')>=0?e.split('@')[0]+'@':e; }   // top-level so Zalando + Klaviyo + anywhere can shorten dockandbay emails to local-part@ (was nested in Klaviyo view → Zalando threw "shortEml is not defined")
 function _fcEsc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
 var _fcMut='style="font-size:10px;color:#94a3b8"';
-function fcNoteBadge(nk){ var sel=(window.CSS&&CSS.escape)?CSS.escape(nk):nk;
-  document.querySelectorAll('td.fctd[data-nk="'+sel+'"]').forEach(function(td){ var ex=td.querySelector('.fc-note-n'), has=(FC_NOTES[nk]&&FC_NOTES[nk].length);
-    if(has&&!ex){ var b=document.createElement('span'); b.className='fc-note-n'; b.textContent='N'; b.dataset.nk=nk; td.appendChild(b); } else if(!has&&ex)ex.remove(); }); }
-function fcNoteTipHtml(nk){ var arr=FC_NOTES[nk]||[]; if(!arr.length)return '';
-  return arr.map(function(n){ return _fcEsc(n.note)+'<br><span style="opacity:.7;font-size:10px">'+_fcEsc((n.created_by||'—').replace(/@dockandbay\.com\b/gi,'@'))+' · '+_fcEsc(_fcDMY(n.created_at))+(n.updated_at?' · edited':'')+'</span>'; }).join('<hr style="border:0;border-top:1px solid #374151;margin:5px 0">'); }
+// (removed dead fn fcNoteBadge — v26.759)
+// (removed dead fn fcNoteTipHtml — v26.759)
 function _fcClosePop(){ var p=document.getElementById('fc-note-pop'); if(p)p.remove(); document.removeEventListener('mousedown',_fcPopOut,true); }
 function _fcPopOut(e){ var p=document.getElementById('fc-note-pop'); if(p && !p.contains(e.target) && !(e.target.classList&&e.target.classList.contains('fc-note-n')))_fcClosePop(); }
 function _fcBtn(cls,txt,primary){ return '<button class="'+cls+'" style="font-size:11px;font-family:inherit;cursor:pointer;border-radius:5px;padding:3px 10px;border:1px solid '+(primary?'#2563eb':'#cbd5e1')+';background:'+(primary?'#2563eb':'#fff')+';color:'+(primary?'#fff':'#475569')+'">'+txt+'</button>'; }
@@ -5885,11 +5662,7 @@ function stock2Line(oh3,ohF,color,bold){ var c=color||'#334155', fw=bold?'font-w
     +'<div style="white-space:nowrap"><span style="opacity:.6;font-weight:400">FBA:</span> '+fn(ohF)+'</div></div>';
 }
 // Two-line OH / +inbound cell HTML for the sticky stock column (+ next-inbound date & hover list).
-function stockCellHTML(oh,inb,entries){
-  return '<div style="padding:2px 5px;text-align:right;font-size:9px;line-height:1.25;font-variant-numeric:tabular-nums">'
-    +'<div style="color:#334155;font-weight:600">'+fn(oh)+'</div>'
-    +inbDiv(inb,entries,'#94a3b8')+'</div>';
-}
+// (removed dead fn stockCellHTML — v26.759)
 // --- Inbound detail for the STOCK column: next-arrival date under the >>inbound number + a 120ms hover
 // listing every inbound shipment. Data comes from SKUI ("SKU|warehouse" -> [{ref,qty,eta,type}]). ---
 function _skuSetForSubcat(s,co,ch){ var ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':'b', out=[];
@@ -8236,7 +8009,7 @@ function _planPopBind(){ if(window._planPopBound)return; window._planPopBound=tr
     var b=document.getElementById(p[0]), pop=document.getElementById(p[1]);
     if(pop&&pop.style.display==='block'&&!(b&&b.contains(ev.target))&&!pop.contains(ev.target))pop.style.display='none'; }); },true); }
 function togglePlanFilters(e){ if(e)e.stopPropagation(); var p=document.getElementById('plan-filters-pop'); if(!p)return; var open=p.style.display==='block'; _planPopClose(); if(!open)p.style.display='block'; var sc=document.getElementById('filt-show-changes'); if(sc)sc.checked=(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES); var hp=document.getElementById('filt-hide-past-changes'); if(hp)hp.checked=(typeof HIDE_PAST_CHANGES==='undefined'||HIDE_PAST_CHANGES); _planPopBind(); }
-function togglePlanTools(e){ if(e)e.stopPropagation(); var m=document.getElementById('plan-tools-menu'); if(!m)return; var open=m.style.display==='block'; _planPopClose(); if(!open)m.style.display='block'; _planPopBind(); }
+// (removed dead fn togglePlanTools — v26.759)
 function resetPlanFilters(){ try{setPlanTier('ALL');}catch(e){} try{setPlanFromRep(false);}catch(e){} var rw=document.getElementById('plan-rw-sel'); if(rw){rw.value='ALL'; try{setPlanRw('ALL');}catch(e){}} try{setPlanSort('alpha');}catch(e){} var ct=document.getElementById('cat-tot-toggle'); if(ct&&ct.classList.contains('active')){try{setShowCatTot(false);}catch(e){}} try{resetPlanActiveDates();}catch(e){} try{renderPlanChips();}catch(e){} }
 function _planClearFilter(k){ if(k==='all')setPlanActiveMode('active'); else if(k==='tier')setPlanTier('ALL');
   else if(k==='rw'){var s=document.getElementById('plan-rw-sel'); if(s)s.value='ALL'; setPlanRw('ALL');}
@@ -9147,18 +8920,7 @@ function renderBuyMoveTabs(){
   var _ver=document.getElementById('ver'); if(_ver){ _ver.style.cssText='color:#0f172a;background:#fbbf24;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:800;line-height:1.2;letter-spacing:.02em;flex:0 0 auto;margin-left:'+(_st?'10px':'auto')+';white-space:nowrap;position:relative'; bar.appendChild(_ver); }
   var _sb=document.getElementById('statusbar'); if(_sb)_sb.style.display='none';
 }
-function renderTransferView(){
-  var host=document.querySelector('.wrap');
-  var ex=document.getElementById('transfer-wrap'); if(ex)ex.remove();
-  var wrap=document.createElement('div'); wrap.id='transfer-wrap';
-  wrap.innerHTML='<div style="max-width:760px;margin:22px auto;padding:30px;border:1px dashed #cbd5e1;border-radius:14px;background:#f8fafc;text-align:center">'
-    +'<div style="font-size:36px">🔄</div>'
-    +'<div style="font-weight:800;font-size:19px;margin-top:6px;letter-spacing:.02em">TRANSFER</div>'
-    +'<div style="color:#334155;font-size:14px;margin-top:10px;font-weight:600">Function to be confirmed.</div>'
-    +'<div style="color:#94a3b8;font-size:12px;margin-top:12px;line-height:1.65;max-width:560px;margin-left:auto;margin-right:auto">Planned: a stock-transfer analysis from each warehouse to the others — which SKUs to move where to balance cover across 3PL / FBA / markets, similar to the buy-plan transfer columns.</div>'
-    +'</div>';
-  if(host)host.appendChild(wrap); else document.body.appendChild(wrap);
-}
+// (removed dead fn renderTransferView — v26.759)
 // ─── DEMAND ▸ TARGETS: sell-through % targets by category × market ─────────
 function tHesc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
 var _tgtMetric='st'; // Targets sub-metric: 'st' (sell-through %) | 'cover' (cover weeks)
@@ -9182,9 +8944,7 @@ function revMonthly(co,ch,fy){ var ck=co+'|'+(ch||'*')+'|'+fy; if(_revCache[ck])
   var out={mon:mon, fc:fc, ly:ly, lyPos:lyPos}; _revCache[ck]=out; return out; }
 // Quarter helpers (FY starts March): Q1 Mar-May, Q2 Jun-Aug, Q3 Sep-Nov, Q4 Dec-Feb. Growth % is vs LY same quarter.
 function revQtrLy(rev,q){ var lp=(rev&&rev.lyPos)||[]; return (lp[q*3]||0)+(lp[q*3+1]||0)+(lp[q*3+2]||0); }
-function revTargetQ(t,rev,q){ if(!t)return null; var ly=revQtrLy(rev,q);
-  if(t.type==='quarterly'){ var p=t['q'+(q+1)]; return (p==null||p==='')?null:ly*(1+Number(p)/100); }
-  if(t.type==='value')return null; return (t.pct!=null&&t.pct!=='')?ly*(1+Number(t.pct)/100):null; }
+// (removed dead fn revTargetQ — v26.759)
 function revTargetFY(t,rev){ if(!t)return null;
   if(t.type==='value')return Number(t.value||0);
   if(t.type==='quarterly'){ var s2=0; for(var q=0;q<4;q++){ var ly=revQtrLy(rev,q),p=t['q'+(q+1)]; s2+=(p==null||p==='')?ly:ly*(1+Number(p)/100); } return s2; }
@@ -9229,12 +8989,7 @@ function revEnsureDrawer(){ var d=document.getElementById('rev-drawer');
   else if(bk.parentNode!==document.body)document.body.appendChild(bk);
   return d; }
 function closeRevDrawer(){ var d=document.getElementById('rev-drawer'); if(d)d.style.display='none'; var bk=document.getElementById('rev-drawer-backdrop'); if(bk)bk.style.display='none'; }
-function openPlanRevPopout(){ var d=document.getElementById('rev-drawer');
-  if(d && d.style.display!=='none'){ closeRevDrawer(); return; }   // click again to close
-  d=revEnsureDrawer(); var bk=document.getElementById('rev-drawer-backdrop'); if(bk)bk.style.display='block'; d.style.display='flex';
-  var body=document.getElementById('rev-drawer-body'); if(body)body.innerHTML='<div class="count" style="padding:14px;color:#888">Loading…</div>';
-  setTimeout(function(){ try{ renderRevenueView(document.getElementById('rev-drawer-body')); }
-    catch(e){ var b=document.getElementById('rev-drawer-body'); if(b)b.innerHTML='<div style="padding:14px;color:#dc2626">Could not load Revenue report: '+String(e&&e.message||e)+'</div>'; } }, 20); }
+// (removed dead fn openPlanRevPopout — v26.759)
 function planRevPopRefresh(){ if(document.getElementById('plan-rev-pop'))planRevPopRender(); if(document.getElementById('exec-sum-pop'))execSumPopRender(); }
 
 // ── Plan ▸ "Executive summary" pop-out drawer ──────────────────────────────────────────────────
@@ -9401,11 +9156,7 @@ function trecEnsureDrawer(){ var d=document.getElementById('trec-drawer');
   else if(bk.parentNode!==document.body)document.body.appendChild(bk);
   return d; }
 function closeTrecDrawer(){ var d=document.getElementById('trec-drawer'); if(d)d.style.display='none'; var bk=document.getElementById('trec-drawer-backdrop'); if(bk)bk.style.display='none'; }
-function openTargetRecs(){ var d=document.getElementById('trec-drawer');
-  if(d && d.style.display!=='none'){ closeTrecDrawer(); return; }
-  d=trecEnsureDrawer(); var bk=document.getElementById('trec-drawer-backdrop'); if(bk)bk.style.display='block'; d.style.display='flex';
-  setTimeout(function(){ try{ renderTargetRecs(document.getElementById('trec-drawer-body')); }
-    catch(e){ var b=document.getElementById('trec-drawer-body'); if(b)b.innerHTML='<div style="padding:14px;color:#dc2626">Could not load Target recommendations: '+String(e&&e.message||e)+'</div>'; } }, 20); }
+// (removed dead fn openTargetRecs — v26.759)
 function execSumPopRender(){ var p=document.getElementById('exec-sum-pop'); if(!p)return;
   var d=buildExecData();
   var gbp=function(v){ if(Math.abs(v)>=1e6)return '£'+(v/1e6).toFixed(2)+'M'; if(Math.abs(v)>=1e3)return '£'+Math.round(v/1e3)+'k'; return '£'+Math.round(v); };
@@ -9493,11 +9244,7 @@ function renderRevenueView(body){ _revBody=body; if(REV_FY==null)REV_FY=CUR_FY_S
     try { if(REV_SUB==='prices')renderPriceChanges(rb); else renderRevTargets(rb); }
     catch(err){ rb.innerHTML='<div style="padding:12px;color:#b91c1c;font-size:12px">Could not render this view: '+esc(String(err&&err.message||err))+'</div>'; if(window.console)console.error('[revenue] render error',err); }
   }).catch(function(err){ var rb=document.getElementById('rev-body'); if(rb)rb.innerHTML='<div style="padding:12px;color:#b91c1c;font-size:12px">Could not load revenue data: '+esc(String(err&&err.message||err))+'</div>'; if(window.console)console.error('[revenue] load error',err); }); }
-function saveRevTarget(co,ch,fy,str){ var v=String(str||'').trim(), b={country:co,channel:ch,fy:fy};
-  if(!v){ b.target_type='pct'; b.target_pct=''; b.target_value=''; }
-  else if(v.indexOf('%')>=0){ b.target_type='pct'; b.target_pct=parseFloat(v.replace(/[^0-9.\-]/g,'')); }
-  else { var n=v.replace(/[£$,\s]/g,''), mult=1; if(/m$/i.test(n)){mult=1e6;n=n.replace(/m$/i,'');} else if(/k$/i.test(n)){mult=1e3;n=n.replace(/k$/i,'');} b.target_type='value'; b.target_value=parseFloat(n)*mult; }
-  fetch('/api/demand-revenue-targets',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b)}).then(function(r){return r.json();}).then(function(){ revReload(); }).catch(function(){ revReload(); }); }
+// (removed dead fn saveRevTarget — v26.759)
 function renderRevTargets(el){ _revCache={}; var combos=revCombos(), fys=[CUR_FY_START,CUR_FY_START+1,CUR_FY_START+2], fy=REV_FY;
   var fyLbl=function(y){return 'FY'+String(y).slice(2)+'/'+String(y+1).slice(2);};
   var months=fyMonths(fy), MON=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
