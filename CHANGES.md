@@ -1,3 +1,7 @@
+## v26.766.0 Trend Gaps — collapsible volume tiers
+- Each volume-tier header (High/Medium/Low) is now **click to expand/minimise** (▾/▸ chevron). State persists across horizon/country changes within the session. **Low collapsed by default** (it's the noise tier); High + Medium open.
+- Display-only.
+
 ## v26.765.0 Trend Gaps — group by volume tier
 - Trend Gaps rows now grouped into **volume tiers** (Ben): **High >1,500/mo · Medium 401–1,500/mo · Low ≤400/mo**, by average last-year units/month over the window. Largest gap first within each tier; each row shows its **units/month**.
 - Surfaces big-volume opportunities separately from tiny-base noise (e.g. the raw top gap, Bag-Toiletry UK DTC 94pts, is Low-volume ~215/mo; the top High-volume gaps are Hair Wrap SEASONAL UK DTC and Towel-Beach SEASONAL UK DTC).

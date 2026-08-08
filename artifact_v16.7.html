@@ -9791,10 +9791,12 @@ function renderDemandActionsView(body){
           +'</div>';
       };
       var TG_TIERS=[['HIGH','High volume','>1,500/mo','#166534'],['MED','Medium volume','401–1,500/mo','#a16207'],['LOW','Low volume','≤400/mo','#64748b']];
+      if(!_da.tgOpen)_da.tgOpen={HIGH:true,MED:true,LOW:false};   // collapsible tiers; Low collapsed by default (noise)
       var rows=TG_TIERS.map(function(t){
         var g=scoped.filter(function(r){return r.tier===t[0];}).sort(function(a,b){return b.gap-a.gap;});
         if(!g.length)return '';
-        return '<div style="display:flex;align-items:baseline;gap:8px;margin:14px 0 0;padding-bottom:3px;border-bottom:2px solid '+t[3]+'"><span style="font-size:12px;font-weight:800;color:'+t[3]+'">'+t[1]+'</span><span style="font-size:10px;color:#94a3b8">'+t[2]+' · '+g.length+' trend'+(g.length===1?'':'s')+'</span></div>'+g.map(rowHtml).join('');
+        var open=_da.tgOpen[t[0]]!==false;
+        return '<div class="tg-tier" data-tier="'+t[0]+'" style="display:flex;align-items:baseline;gap:8px;margin:14px 0 0;padding-bottom:3px;border-bottom:2px solid '+t[3]+';cursor:pointer;user-select:none" title="'+(open?'minimise':'expand')+'"><span style="font-size:12px;font-weight:800;color:'+t[3]+'">'+(open?'▾':'▸')+' '+t[1]+'</span><span style="font-size:10px;color:#94a3b8">'+t[2]+' · '+g.length+' trend'+(g.length===1?'':'s')+(open?'':' · click to expand')+'</span></div>'+(open?g.map(rowHtml).join(''):'');
       }).join('');
       var empty='<div style="padding:22px;text-align:center;color:#666">No under-forecast trends'+(tgCo!=='ALL'?' for '+tgCo:'')+' over the next '+tgHoz+' month'+(tgHoz>1?'s':'')+' — the plan is keeping up with the trend.</div>';
       body.innerHTML=secNav()+hozBar
@@ -9804,6 +9806,7 @@ function renderDemandActionsView(body){
       wireSecNav();
       body.querySelectorAll('.tg-hoz').forEach(function(b){ b.onclick=function(){ _da.tgHoz=parseInt(b.dataset.h,10); draw(all); }; });
       body.querySelectorAll('.tg-co').forEach(function(b){ b.onclick=function(){ _da.tgCo=b.dataset.co; draw(all); }; });
+      body.querySelectorAll('.tg-tier').forEach(function(b){ b.onclick=function(){ var k=b.dataset.tier; _da.tgOpen[k]=(_da.tgOpen[k]===false); draw(all); }; });
       body.querySelectorAll('.tg-jump').forEach(function(b){ b.onclick=function(e){ e.preventDefault(); try{ daJumpToPlan({sub:b.dataset.sub,co:b.dataset.co,ch:b.dataset.ch}); }catch(_){} }; });
       body.querySelectorAll('.tg-apply').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); try{ showConfidencePopup(b,buildRowConfidencePopup(b.dataset.sub,b.dataset.co,b.dataset.ch)); }catch(_){} }; });
       return;
