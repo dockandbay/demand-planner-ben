@@ -728,13 +728,8 @@ app.get('/', async (req, res) => {
     html = replaceGlobal(html, 'SUBS_META', JSON.stringify(SUBS));
     html = replaceGlobal(html, 'BI_RULES', JSON.stringify(BI));
     html = replaceGlobal(html, 'PROD_CONST', JSON.stringify(PROD_CONST));
-    // Zalando forecast now comes from the DB (forecast_outputs, channel ZAL), not the baked zalando_data.json —
-    // derive it from the already-loaded FC_OUTPUTS (keys "sku|warehouse|ZAL") to avoid an extra query on this hot path.
-    const ZAL_FC_DB = {}; const _zalM = new Set();
-    for (const k in FC_OUTPUTS) { if (k.endsWith('|ZAL')) { const sku = k.slice(0, k.indexOf('|')); const mm = FC_OUTPUTS[k];
-      const t = ZAL_FC_DB[sku] || (ZAL_FC_DB[sku] = {}); for (const ym in mm) { t[ym] = mm[ym]; _zalM.add(ym); } } }
-    html = replaceGlobal(html, 'ZAL_FC', JSON.stringify(ZAL_FC_DB));
-    html = replaceGlobal(html, 'ZAL_MONTHS', JSON.stringify([..._zalM].sort()));
+    // (ZAL_FC/ZAL_MONTHS injection removed v26.758 — the Zalando forecast is read from the DB everywhere now:
+    //  the buy feed builds dem.ZAL from the live cascade, and /api/supply/zalando/data serves the send-to-Zalando tab.)
     html = replaceGlobal(html, 'KLAVIYO_BIS', JSON.stringify(KLAVIYO_BIS));   // {sku:{UK:n,…}, _at:'YYYY-MM-DD'} — DEMAND BIS badge
     html = replaceGlobal(html, 'MKT_COLORS', JSON.stringify(MKT_COLORS));     // reusable market colour palette
     html = replaceGlobal(html, 'BRANCH_FREIGHT', JSON.stringify(BRANCH_FREIGHT || {}));

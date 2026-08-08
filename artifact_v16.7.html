@@ -1210,9 +1210,9 @@ var BIS_CFG={take_rate:35};   // SUG-0018 P2: % of waiting subscribers → sugge
 function bisCount(sku,mkt){ try{ return (KLAVIYO_BIS[sku]&&KLAVIYO_BIS[sku][mkt])||0; }catch(e){ return 0; } }
 function bisUplift(sku,mkt){ var n=bisCount(sku,mkt); return n>0?Math.round(n*(Number(BIS_CFG.take_rate)||35)/100):0; }   // enhanced-demand units
 var MKT_COLORS={};       // reusable market colour palette {UK:'#..',US:'#..',EU:'#..',AU:'#..',CA:'#..'} — server-injected from app_settings (CONFIG ▸ Admin ▸ General).
-var ZAL_FC={};           // Zalando per-SKU monthly forecast {sku:{YYYY_MM:units}} — hard-coded (server-injected from zalando_data.json). EU-only ZAL channel + BUY&MOVE Zalando transfer.
+// (ZAL_FC / ZAL_MONTHS globals removed v26.758 — the Zalando forecast is DB-sourced everywhere now: the buy feed
+//  reads the live cascade (forecast_inputs/outputs), and the send-to-Zalando tab reads /api/supply/zalando/data.)
 var CHINA_STOCK={};      // {sku: units} un-allocated holding stock on open "China Stock" branch POs (MOQ top-ups) — server-injected; buy plan flags it as available to allocate.
-var ZAL_MONTHS=[];       // ordered YYYY_MM list the Zalando forecast covers.
 var ZAL_STOCK={};        // {sku: units} Zalando (ZFS) stock-on-hand — server-injected from planner.zalando_stock (the uploaded inventory file). EU buy-plan Zalando feed is GATED on this being non-empty (nothing uploaded → Zalando contributes nothing).
 var ZAL_SKUS=[];         // EU Zalando channel scope — SKUs in the Zalando stock upload ∪ SKUs with a ZAL forecast (server-injected). Drives the EU-only ZAL demand channel's SKU set + 'z' availability.
 var CHANNELS=[];         // Modular channel registry (planner.channels + country assignment) — server-injected. Phase 1: INERT (nothing reads it yet); Phase 2 will drive the channel enumerations/pills/keys from this. Each: {code,label,stock_source,forecast_mode,cover_months,ext_stock_source,sku_scope,rt_factor,no_urgent,countries[],sort,active}.
@@ -8967,7 +8967,7 @@ function renderDemandTabs(){
 }
 // ── BUY & MOVE group: second-level sub-nav (BUY / FBA / TRANSFER) + the TRANSFER placeholder page ──
 var BUYMOVE_TABS=[['actions','ACTIONS'],['buy','BUY'],['fba','FBA'],['transfer','TRANSFER'],['zalando','ZALANDO']];
-// ── Zalando send-to-Zalando (P1/P2): baked per-SKU forecast (ZAL_FC) vs uploaded stock-on-hand → suggested send
+// ── Zalando send-to-Zalando (P1/P2): forecast (from /api/supply/zalando/data) vs uploaded stock-on-hand → suggested send
 // (3-month cover, NO minimum), FBA-style tick/override, download EAN,Quantity (ZALANDO_UP format). Self-contained panel.
 var ZAL_TICK={}, ZAL_OV={}, ZAL_COVER=2, ZAL_Q='';   // months of cover the suggested send targets (default 2; toggle 1-6); ZAL_Q = SKU search filter
 function _zalEff(sku,sugg){ var o=ZAL_OV[sku]; if(o!=null&&String(o).trim()!=='')return Math.max(0,Math.round(Number(o)||0)); return sugg; }
@@ -11317,7 +11317,7 @@ function buildLiveDemand(){
   //     Zalando stock file (ZAL_STOCK non-empty). Byte-identical to the old baked path on seeded data (every seeded
   //     SKU has an override that wins). Buy 3PL only; invisible elsewhere (3PL/total sums name DTC/B2B/FBA explicitly).
   (function(){
-    var scope = (typeof ZAL_SKUS!=='undefined'&&ZAL_SKUS.length)?ZAL_SKUS:Object.keys(ZAL_FC||{});
+    var scope = (typeof ZAL_SKUS!=='undefined'?ZAL_SKUS:[]);   // ZAL channel scope (server-injected: stock upload ∪ ZAL-forecast SKUs)
     scope.forEach(function(sku){ var p=BP_DATA.products[sku]; if(p&&p.mkts&&p.mkts.EU&&p.mkts.EU.demand&&p.mkts.EU.demand.ZAL)delete p.mkts.EU.demand.ZAL; });   // clear any prior overlay first
     if(!(ZAL_STOCK&&Object.keys(ZAL_STOCK).length))return;   // no stock file uploaded → Zalando off
     var bySub={}; scope.forEach(function(sku){ var sp=SKUM[sku]; if(sp&&sp.s)(bySub[sp.s]||(bySub[sp.s]=[])).push(sku); });

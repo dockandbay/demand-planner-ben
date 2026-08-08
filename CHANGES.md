@@ -1,3 +1,7 @@
+## v26.758.0 Zalando de-bake — Stage 4: remove the baked ZAL_FC / ZAL_MONTHS globals
+- Removed the `ZAL_FC` + `ZAL_MONTHS` client globals and their server injection. The Zalando forecast is now **DB-sourced everywhere**: the buy feed builds `dem.ZAL` from the live cascade (Stage 3b), and the send-to-Zalando tab reads `/api/supply/zalando/data`. Updated the 2c scope fallback + the send-tab comment. `zalando_data.json` remains only as the migration-203 seed source.
+- Verified: page loads clean (no ReferenceError, `typeof ZAL_FC`=undefined), buy feed unchanged (12 EU ZAL SKUs), send-to-Zalando endpoint still serves 44 SKUs. **Completes the Zalando de-bake (Stages 1–4).**
+
 ## v26.757.0 DEMAND AI recommendation — clearer redesign (single %, trend label, confidence band, "Mixed")
 - Rebuilt the per-row AI rec (`aiRec`/`makeRecTd`/`buildRowConfidencePopup`). The cell shows a **7-bucket trend label** (High/Med/Low growth · Flat · Low/Med/High decline) + the headline growth %.
 - **"Mixed" when the trend isn't clear** (too few months, low confidence, or YoY swings up *and* down by >15%): the badge reads **"Mixed — trend unclear"** and makes **no recommendation** (Ben). Fixes the nonsensical numbers on small-base/seasonal SKUs (e.g. YoY −13%..+3692% now shows Mixed, not a misleading %).
