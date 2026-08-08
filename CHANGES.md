@@ -1,3 +1,10 @@
+## v26.763.0 Per-cell AI confidence rework: always-Leader + previous-years + previous-months + category trend
+- Fixes the **0/0/0 bug**: the per-cell popup anchored everything on the SKU's *own* last-year value for that month, so a SKU with no sales that month last year showed high/med/low = 0 even though the cell had a real forecast (e.g. HAIRW-SUE-HOTTROP Jan-27).
+- New central "expected" = a **blend** of (a) the SKU's **Leader-protected share of the category's seasonal forecast** (carries the overall **category trend** + **previous-years** share + tier-aware leader floor) and (b) the SKU's **previous-months** run-rate (deseasonalised → re-seasonalised), weighted 60/40. Never collapses to 0.
+- Confidence **band** = the SKU's recent-YoY volatility, widened toward the recent run-rate and when the category trend is itself "Mixed"; **HIGH capped at the previous-years seasonal peak**. Applying still writes **this cell only** (per-month override), unchanged.
+- Popup now shows Category trend (label + %), Your leader share (units + % of category), and Recent run-rate.
+- **Buy engine untouched** — verified byte-identical over 138 buy-triples; repro of the broken case now returns MED>0, no errors.
+
 ## v26.762.0 Buy popup: Zalando demand now drains 3PL + counts in Total Demand
 - Moved the **"Zalando transfer demand"** line **up under "FBA Transfer"** in the 3PL Stock section (was a standalone block below the section).
 - The buy popup's **display pass** now subtracts Zalando net demand from **SOH 3PL (closing)** and includes it in **Total Demand** — matching what the buy engine already does (and mirroring how FBA Transfer drains 3PL). Display target (`tg3`) also gains the 2-month forward Zalando cover so the SOH-vs-target colour stays fair.

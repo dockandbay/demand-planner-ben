@@ -4934,101 +4934,116 @@ function getMonthBILift(s,co,ch,am){
 }
 
 // SKU-level confidence options — same trend-shrunk YoY algorithm as subcat level
+// Per-cell confidence (reworked 2026-08-08, Ben): the "expected" central value is a BLEND of
+//   (a) the SKU's LEADER-protected share of the category's seasonal forecast — which carries the
+//       overall CATEGORY TREND (subcatFU is the aiRec-driven category number) and PREVIOUS-YEARS
+//       sales (historical share + the tier-aware leader floor), and
+//   (b) the SKU's PREVIOUS-MONTHS momentum — its recent completed-month run-rate, deseasonalised to
+//       an annual level and re-seasonalised onto this month.
+// Replaces the old "SKU's own LY × shrunk-trend" anchor, which collapsed to 0 whenever the SKU had
+// no sales in the same month last year even though the cell showed a real forecast. The band comes
+// from the SKU's recent YoY volatility, widened toward the recent run-rate and when the category
+// trend is itself unclear.
 function skuConfidenceOptions(sku,co,ch,fym,wh,curForecast,sales,share,subcatFU){
   var mo=parseInt(fym.split('_')[1]);
   var year=parseInt(fym.split('_')[0]);
   var lyVal=sales[ym(year-1,mo)]||0;
+  var subcat=(SKUM[sku]&&SKUM[sku].s)||'';
 
-  // Step 1: Recent YoY rates for this SKU (completed months only; skip the partial current month)
-  // BI-aware: stockout-flagged historical months are lifted by getMonthBILift on the
-  // SKU's parent subcategory — supply constraints depress all SKUs in the subcat
-  // equally, so the SKU-level trend gets the same correction as the subcat level.
-  var biSubcat=(SKUM[sku]&&SKUM[sku].s)||'';
-  var yoyRates=[];
-  var biLiftedMonths=[];
+  // Previous-months YoY volatility (drives the band; BI-aware like aiRec)
+  var yoyRates=[], biLiftedMonths=[];
   ACTUAL_MONTHS.forEach(function(am){
-    if(am===CUR_MONTH)return; // partial current month: MTD vs LY full month is not a like-for-like YoY
-    var amY=parseInt(am.split('_')[0]);
-    var amM=parseInt(am.split('_')[1]);
-    var thisVal=sales[am]||0;
-    var lyKey=ym(amY-1,amM);
-    var lyVal2=sales[lyKey]||0;
-    var liftThis=biSubcat?getMonthBILift(biSubcat,co,ch,am):1.0;
-    var liftLy=biSubcat?getMonthBILift(biSubcat,co,ch,lyKey):1.0;
+    if(am===CUR_MONTH)return;
+    var amY=parseInt(am.split('_')[0]), amM=parseInt(am.split('_')[1]);
+    var thisVal=sales[am]||0, lyKey=ym(amY-1,amM), lyVal2=sales[lyKey]||0;
+    var liftThis=subcat?getMonthBILift(subcat,co,ch,am):1.0;
+    var liftLy=subcat?getMonthBILift(subcat,co,ch,lyKey):1.0;
     if(liftThis>1.0){thisVal=thisVal*liftThis;biLiftedMonths.push(am);}
     if(liftLy>1.0){lyVal2=lyVal2*liftLy;}
-    if(lyVal2>0&&thisVal>0){
-      yoyRates.push((thisVal-lyVal2)/lyVal2);
-    }
+    if(lyVal2>0&&thisVal>0)yoyRates.push((thisVal-lyVal2)/lyVal2);
   });
-
-  // Step 2: Median trend
-  var trend=0;
-  if(yoyRates.length>0){
-    var sorted=yoyRates.slice().sort(function(a,b){return a-b;});
-    trend=sorted.length%2?sorted[Math.floor(sorted.length/2)]:(sorted[sorted.length/2-1]+sorted[sorted.length/2])/2;
-  }
-
-  // Step 3: Confidence factor
   var mean=yoyRates.length>0?yoyRates.reduce(function(a,b){return a+b;},0)/yoyRates.length:0;
   var variance=yoyRates.length>1?yoyRates.reduce(function(s2,v){return s2+Math.pow(v-mean,2);},0)/(yoyRates.length-1):0;
   var stdev=Math.sqrt(variance);
   var sampleFactor=yoyRates.length<3?yoyRates.length/3:1;
   var confidence=sampleFactor/(1+stdev*2);
-
-  // Step 4: Shrunk trend
-  var shrunkTrend=trend*confidence;
-
-  // Step 5: Forecasts
-  var medValue=Math.round(lyVal*(1+shrunkTrend));
-  var bandWidth=Math.min(stdev*0.5,0.3);
-  if(yoyRates.length<3)bandWidth=Math.max(bandWidth,0.15);
-  var highValue=Math.round(medValue*(1+bandWidth));
-  var lowValue=Math.round(Math.max(0,medValue*(1-bandWidth)));
-
-  // HWM cap
-  var monthHist=[];
-  for(var y=2024;y<=2026;y++){
-    if(y===year)continue;
-    var k=ym(y,mo);
-    if(sales[k]&&sales[k]>0)monthHist.push(sales[k]);
-  }
-  var hwm=monthHist.length?Math.max.apply(null,monthHist):lyVal;
-  highValue=Math.min(highValue,Math.round(hwm*1.25));
-  if(medValue>highValue)medValue=highValue;
-  if(lowValue>medValue)lowValue=medValue;
-  if(lyVal<1){
-    var fb=monthHist.length?Math.round(monthHist[0]):0;
-    highValue=fb;medValue=fb;lowValue=fb;
-  }
-
-  var shrunkPct=Math.round(shrunkTrend*100);
-  var trendPct=Math.round(trend*100);
   var confLabel=confidence>0.7?'high':confidence>0.4?'medium':'low';
-  var bandPct=Math.round(bandWidth*100);
 
-  var highReason='central +'+(shrunkPct>=0?'':'-')+Math.abs(shrunkPct)+'%, plus '+bandPct+'% band';
-  if(biLiftedMonths.length>0){
-    var monthsTxt=biLiftedMonths.map(function(m){return monthName(parseInt(m.split('_')[1]))+' '+m.split('_')[0];}).join(', ');
-    highReason+=' \u2014 BI lift +'+Math.round((BI_STOCKOUT_LIFT-1)*100)+'% on '+monthsTxt+' (subcat stockout)';
+  // (a) LEADER share of the category's seasonal forecast for this month
+  var leaderAlloc=null;
+  try{ var _alloc=computeSmoothAlloc(subcat,co,ch,fym,{protectLeaders:true});
+    if(_alloc&&_alloc[sku]!=null)leaderAlloc=_alloc[sku]; }catch(e){}
+  var catFU=(subcatFU&&subcatFU[fym])||0;
+  if(leaderAlloc==null)leaderAlloc=Math.round(catFU*(share||0));
+  var leaderShare=catFU>0?(leaderAlloc/catFU):(share||0);
+
+  // (b) PREVIOUS-MONTHS momentum: recent completed months -> deseasonalised annual level -> this month
+  var seas=function(mm){ return BIZ_SHARES[String(mm)]||(1/12); };
+  var annLevels=[];
+  ACTUAL_MONTHS.filter(function(a){return a!==CUR_MONTH;}).slice(-6).forEach(function(am){
+    var amM=parseInt(am.split('_')[1]), v=sales[am]||0, sh=seas(amM);
+    if(v>0&&sh>0)annLevels.push(v/sh);
+  });
+  var momentumExpected=null;
+  if(annLevels.length){
+    var srt=annLevels.slice().sort(function(a,b){return a-b;});
+    var annMed=srt.length%2?srt[(srt.length-1)/2]:(srt[srt.length/2-1]+srt[srt.length/2])/2;
+    momentumExpected=annMed*seas(mo);
   }
-  var medReason=shrunkPct===0?'flat (insufficient/inconsistent signal)':(shrunkPct>0?'+':'')+shrunkPct+'% central trend × LY';
-  if(confidence<0.5&&trend!==0)medReason='+'+trendPct+'% trend shrunk to '+shrunkPct+'% (low confidence)';
-  var lowReason='central, minus '+bandPct+'% band';
+
+  // Central = blended expected (0.6 leader / 0.4 momentum when both available)
+  var central;
+  if(momentumExpected!=null&&leaderAlloc>0)central=Math.round(0.6*leaderAlloc+0.4*momentumExpected);
+  else if(leaderAlloc>0)central=Math.round(leaderAlloc);
+  else if(momentumExpected!=null)central=Math.round(momentumExpected);
+  else central=Math.round(catFU*(share||0));
+
+  // Band: SKU recent-YoY volatility, widened when momentum diverges and when category trend is unclear
+  var catRec=subcat?aiRec(subcat,co,ch):null;
+  var band=Math.min(0.45,Math.max(0.10,stdev*0.5));
+  if(yoyRates.length<3)band=Math.max(band,0.15);
+  if(catRec&&catRec.mixed)band=Math.max(band,0.25);
+  if(momentumExpected!=null&&leaderAlloc>0){
+    var div=Math.abs(momentumExpected-leaderAlloc)/leaderAlloc;
+    band=Math.min(0.50,Math.max(band,div*0.6));
+  }
+
+  var medValue=central;
+  var highValue=Math.round(central*(1+band));
+  var lowValue=Math.round(Math.max(0,central*(1-band)));
+
+  // Previous-years seasonal peak (HWM) caps HIGH, but never below the central
+  var monthHist=[];
+  for(var y=2023;y<=2026;y++){ if(y===year)continue; var k=ym(y,mo); if(sales[k]&&sales[k]>0)monthHist.push(sales[k]); }
+  var hwm=monthHist.length?Math.max.apply(null,monthHist):Math.max(lyVal,central);
+  var hwmCap=Math.round(hwm*1.25);
+  var highCapped=false;
+  if(hwm>0){ var _h=Math.max(central,Math.min(highValue,hwmCap)); highCapped=(_h<highValue); highValue=_h; }
+  if(lowValue>medValue)lowValue=medValue;
+
+  var bandPct=Math.round(band*100);
+  var catPct=(catRec&&catRec.pct)?Math.round(catRec.pct.high*100):(catRec&&catRec.median!=null?Math.round(catRec.median*100):null);
+  var catLbl=catRec?catRec.label.t:'—';
+  var momPct=(momentumExpected!=null&&leaderAlloc>0)?Math.round((momentumExpected/leaderAlloc-1)*100):null;
+
+  var highReason='+'+bandPct+'% band'+(highCapped?' (seasonal peak cap)':'');
+  if(biLiftedMonths.length>0)highReason+=' · BI-lifted history';
+  var medReason=Math.round(leaderShare*100)+'% leader share of category'+(catPct!=null?' ('+(catPct>=0?'+':'')+catPct+'% trend)':'')+(momPct!=null?', recent '+(momPct>=0?'+':'')+momPct+'%':'');
+  var lowReason='−'+bandPct+'% band';
 
   return {
     high:{value:highValue,reason:highReason,pctile:'+'+bandPct+'%'},
     medium:{value:medValue,reason:medReason,pctile:'central'},
     low:{value:lowValue,reason:lowReason,pctile:'-'+bandPct+'%'},
     context:{lyVal:Math.round(lyVal),hwm:Math.round(hwm),cv:stdev,cvLabel:confLabel,
-      ytdGrowth:trend,monthYoY:shrunkTrend,recent3YoY:confidence,blendedGrowth:shrunkTrend,
+      ytdGrowth:(catRec&&catRec.median!=null)?catRec.median:0,
       monthsAhead:0,curForecast:Math.round(curForecast),
       mo:monthName(mo),sampleSize:yoyRates.length,
-      trend:trend,shrunkTrend:shrunkTrend,confidence:confidence,stdev:stdev,bandWidth:bandWidth,
-      biLiftedMonths:biLiftedMonths,biLiftFactor:BI_STOCKOUT_LIFT-1}
+      catLabel:catLbl,catPct:catPct,leaderShare:leaderShare,leaderAlloc:Math.round(leaderAlloc),
+      momentum:momentumExpected!=null?Math.round(momentumExpected):null,momPct:momPct,
+      stdev:stdev,bandWidth:band,biLiftedMonths:biLiftedMonths,biLiftFactor:BI_STOCKOUT_LIFT-1}
   };
 }
-
 function buildSkuConfidencePopup(sku,co,ch,fym,opts,onApply){
   var ctx=opts.context;
   var pop=document.createElement('div');
@@ -5045,7 +5060,9 @@ function buildSkuConfidencePopup(sku,co,ch,fym,opts,onApply){
       +'<div style="display:flex;justify-content:space-between"><span style="color:#666">Current forecast</span><span style="font-variant-numeric:tabular-nums;font-weight:500">'+fn(ctx.curForecast)+'</span></div>'
       +'<div style="display:flex;justify-content:space-between"><span style="color:#666">All-time '+ctx.mo+' high</span><span style="font-variant-numeric:tabular-nums;font-weight:500">'+fn(ctx.hwm)+'</span></div>'
       +'<div style="display:flex;justify-content:space-between"><span style="color:#666">24mo volatility (CV)</span><span style="font-variant-numeric:tabular-nums;font-weight:500">'+ctx.cv.toFixed(2)+' <span style="color:'+cvColor+';font-weight:400">'+ctx.cvLabel+'</span></span></div>'
-      +'<div style="display:flex;justify-content:space-between"><span style="color:#666">YTD 2026 trend</span><span style="font-variant-numeric:tabular-nums;font-weight:500;color:'+ytdColor+'">'+ytdSign+Math.round(ctx.ytdGrowth*100)+'% vs LY</span></div>'
+      +'<div style="display:flex;justify-content:space-between"><span style="color:#666">Category trend</span><span style="font-weight:500;color:'+ytdColor+'">'+(ctx.catLabel||'—')+(ctx.catPct!=null?' <span style="font-variant-numeric:tabular-nums">'+(ctx.catPct>=0?'+':'')+ctx.catPct+'%</span>':'')+'</span></div>'
+      +'<div style="display:flex;justify-content:space-between"><span style="color:#666">Your leader share</span><span style="font-variant-numeric:tabular-nums;font-weight:500">'+Math.round((ctx.leaderShare||0)*100)+'% <span style="color:#999;font-weight:400">('+fn(ctx.leaderAlloc||0)+' of cat)</span></span></div>'
+      +(ctx.momentum!=null?'<div style="display:flex;justify-content:space-between"><span style="color:#666">Recent run-rate</span><span style="font-variant-numeric:tabular-nums;font-weight:500">'+fn(ctx.momentum)+(ctx.momPct!=null?' <span style="color:#999;font-weight:400">('+(ctx.momPct>=0?'+':'')+ctx.momPct+'% vs share)</span>':'')+'</span></div>':'')
     +'</div>'
     +'<div style="display:flex;flex-direction:column;gap:3px">'
       +'<button class="conf-opt" data-val="'+opts.high.value+'" style="display:flex;justify-content:space-between;align-items:center;padding:6px 8px;background:#EAF3DE;border:1px solid #97C459;border-radius:4px;cursor:pointer;text-align:left;width:100%">'
@@ -5065,8 +5082,8 @@ function buildSkuConfidencePopup(sku,co,ch,fym,opts,onApply){
       +'</button>'
     +'</div>'
     +'<div style="margin-top:6px;padding-top:5px;border-top:1px solid #e5e7eb;font-size:8px;color:#888;line-height:1.4">'
-      +'<strong style="color:#444">Method:</strong> SKU-level trend-shrunk YoY. MED = median YoY × confidence × LY. HIGH/LOW = MED ± stdev band. '
-      +(ctx.sampleSize>0?ctx.sampleSize+'+1 yrs of '+ctx.mo+' history':'limited '+ctx.mo+' history')
+      +'<strong style="color:#444">Method:</strong> MED = leader share of the category forecast (carries category trend + previous-years share) blended 60/40 with recent-months run-rate. HIGH/LOW = MED ± volatility band, HIGH capped at the seasonal peak. '
+      +(ctx.sampleSize>0?ctx.sampleSize+' month'+(ctx.sampleSize===1?'':'s')+' of YoY history':'limited YoY history')
     +'</div>';
 
   pop.querySelectorAll('.conf-opt').forEach(function(btn){
