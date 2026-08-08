@@ -6850,7 +6850,7 @@ async function buyplanSkuMeta(skus) {
     const f = n.split(/\s+/)[0]; if (!(f in byFirst)) byFirst[f] = s.code; });
   const codeOf = (name) => { if (!name) return null; const n = String(name).trim().toLowerCase(); return byName[n] || byFirst[n.split(/\s+/)[0]] || null; };
   const rows = (await pool.query(`SELECT upper(p.sku) sku, coalesce(p.main_supplier_final, p.supplier) main_name,
-      p.supplier_multiple_all multi, coalesce(p.category,'') category, sl.pallet_qty,
+      p.supplier_multiple_all multi, coalesce(p.category,'') category, sl.pallet_qty, p.moq,
       nullif(p.discontinue_date_final,'') disc, nullif(p.discontinue_date_au_final,'') disc_au, nullif(p.discontinue_date_ca,'') disc_ca
     FROM planner.products p LEFT JOIN planner.sku_labels sl ON upper(sl.sku)=upper(p.sku)
     WHERE upper(p.sku) = ANY($1)`, [skus])).rows;
@@ -6861,7 +6861,7 @@ async function buyplanSkuMeta(skus) {
     const seen = {}, options = [];
     names.forEach(nm => { const c = codeOf(nm); const k = c || nm.toLowerCase(); if (!seen[k]) { seen[k] = 1; options.push({ code: c, name: nm }); } });
     map[r.sku] = { pallet_qty: Number(r.pallet_qty) || 0, category: r.category || '', main_code: codeOf(r.main_name), main_name: r.main_name || '', options,
-      disc: r.disc || '', disc_au: r.disc_au || '', disc_ca: r.disc_ca || '' };
+      moq: (Number(r.moq) > 0 ? Number(r.moq) : null), disc: r.disc || '', disc_au: r.disc_au || '', disc_ca: r.disc_ca || '' };
   });
   return map;
 }
@@ -6953,7 +6953,7 @@ app.post('/api/supply/buyplan-skus', async (req, res) => {
     const discFor = m => ctry === 'AU' ? (m.disc_au || m.disc || '') : ctry === 'CA' ? (m.disc_ca || m.disc || '') : (m.disc || '');
     res.json({ skus: items.map(it => { const sku = String(it.sku).toUpperCase(), m = map[sku] || { options: [] };
       return { sku, qty: Math.round(Number(it.qty)), pallet_qty: m.pallet_qty || 0, category: m.category || '', main_code: m.main_code || null,
-        main_name: m.main_name || '', options: (m.options || []).map(o => ({ code: o.code, name: o.name })), discontinue: discFor(m) }; }) });
+        main_name: m.main_name || '', options: (m.options || []).map(o => ({ code: o.code, name: o.name })), moq: (m.moq || null), discontinue: discFor(m) }; }) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Approve an order-plan exception on a line. field selects which: partial (default) → partial_carton_approved,

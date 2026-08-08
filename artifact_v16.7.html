@@ -3694,7 +3694,7 @@ var BUY_SCAFFOLD=`<div class="wrap">
     <span id="bp-buy-actions" style="display:inline-flex;align-items:center;gap:6px;margin-left:6px;border-left:1px solid #e2e8f0;padding-left:8px">
       <button type="button" id="bp-make-po-3pl" onclick="(function(){var it=BP.buyplanItems('3pl');if(!it.length){alert('No Buy 3PL quantities in the current plan.');return;}if(window.openBuyplanModal){window.openBuyplanModal(BP.CUR,it,'3pl');}else{alert('Supply module not ready — open the SUPPLY tab once, then retry.');}})()" title="Create 3PL purchase orders from the Buy 3PL quantities, split into 20-pallet containers" style="font-size:10px;padding:2px 10px;border:1px solid #1d4ed8;border-radius:3px;background:#1d4ed8;color:#fff;cursor:pointer;font-weight:600">3PL - Create POs</button>
       <button type="button" id="bp-make-po-fba" onclick="(function(){if((BP.CUR||'').toUpperCase()==='EU'){alert('FBA-direct PO creation is not available for EU yet (no DE FBA branch).');return;}var it=BP.buyplanItems('fba');if(!it.length){alert('No Buy FBA quantities in the current plan.');return;}if(window.openBuyplanModal){window.openBuyplanModal(BP.CUR,it,'fba');}else{alert('Supply module not ready — open the SUPPLY tab once, then retry.');}})()" title="Create FBA-direct purchase orders from the Buy FBA quantities, split into 20-pallet containers" style="font-size:10px;padding:2px 10px;border:1px solid #16a34a;border-radius:3px;background:#16a34a;color:#fff;cursor:pointer;font-weight:600">FBA - Create POs</button>
-      <button type="button" id="bp-prodbuild" onclick="if(window.openProdBuilder)openProdBuilder();" title="Open the all-countries production builder — Buy 3PL requirements for every market in one full-page view" style="font-size:10px;padding:2px 10px;border:1px solid #7c3aed;border-radius:3px;background:#7c3aed;color:#fff;cursor:pointer;font-weight:600">&#127981; Build production</button>
+      <button type="button" id="bp-prodbuild" onclick="if(window.openProdBuilderPO)openProdBuilderPO();" title="Build a production across ALL countries — the 3PL Create-POs flow with a column per market + MOQ flag" style="font-size:10px;padding:2px 10px;border:1px solid #7c3aed;border-radius:3px;background:#7c3aed;color:#fff;cursor:pointer;font-weight:600">&#127981; Build production</button>
       <span style="position:relative;display:inline-block" id="dl-wrap">
         <button type="button" id="dl-btn-top" onclick="document.getElementById('dl-menu').classList.toggle('open');event.stopPropagation()" style="font-size:10px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:3px;background:#f1f5f9;color:#0f172a;cursor:pointer">&#11015; Download &#9662;</button>
         <div id="dl-menu" class="dl-menu-top" style="min-width:262px">
@@ -11167,6 +11167,16 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape')hideInbPop()
 // Additive to the per-market Create-PO flow (unchanged). Shows each SKU's Buy 3PL requirement per market in one
 // grid, market-coloured, with country pills + category/search filters. Computes the matrix once (SKUM × CTRS via
 // BP.getBuyQtys) then filters in JS. Does NOT touch the buy calc. Later phases add MOQ flag + supplier pick + Save.
+// BUY ▸ "Build production" → the multi-country Create-PO modal (SUPPLY buyplanModalMulti). Gathers Buy 3PL per
+// market (BP.getBuyQtys over SKUM × CTRS) and opens it. Supersedes the read-only matrix openProdBuilder below.
+function openProdBuilderPO(){
+  if(!window.BP||typeof BP.getBuyQtys!=='function'){ alert('Open the BUY plan once, then retry.'); return; }
+  if(!window.openBuyplanModalMulti){ alert('Supply module not ready — open the SUPPLY tab once, then retry.'); return; }
+  var byC={};
+  CTRS.forEach(function(m){ var arr=[]; Object.keys(SKUM).forEach(function(sku){ var q=BP.getBuyQtys(sku,m); var b=Math.round((q&&q.b3)||0); if(b>0)arr.push({sku:sku,qty:b}); }); if(arr.length)byC[m]=arr; });
+  if(!Object.keys(byC).length){ alert('No Buy 3PL quantities across any market.'); return; }
+  window.openBuyplanModalMulti(byC,'3pl');
+}
 var _pbData=null, _pbSel={ ctrs:null, cat:'', q:'' }, _pbQT=null;
 function _pbCol(mk){ return (typeof MKT_COLORS!=='undefined'&&MKT_COLORS[mk])||'#94a3b8'; }
 function openProdBuilder(){

@@ -1,3 +1,7 @@
+## v26.738.0 Build production → multi-country Create-PO modal (+ MOQ flag)
+- Reworked BUY ▸ "🏭 Build production" to be the exact "3PL – Create POs" popup extended to ALL countries (replaces the read-only matrix). New SUPPLY modal buyplanModalMulti: tick / per-SKU supplier pick / production+batch+start / preview / create — identical to the single-country flow, plus a market-coloured Buy-3PL column per country, a combined Total, and country pills to toggle markets. "Create POs" makes one PO per country (shared production number, ≤20-pallet split per country) in one action.
+- MOQ flag: shows on its own line under a SKU when the combined (across shown countries) order is below the SKU's products.moq — "⚑ MOQ 500 — production 450, short 50". (products.moq now surfaced via /api/supply/buyplan-skus.) Inert until MOQs are populated; BAGDRY SKUs set to 500 in sandbox for testing.
+
 ## v26.737.0 Fix: Zalando tab "shortEml is not defined"
 - The Zalando tab threw a ReferenceError ("shortEml is not defined") because the email-shortener helper was defined locally inside the Klaviyo BIS view but referenced in the Zalando render. Promoted shortEml() to a top-level helper so it's available everywhere.
 

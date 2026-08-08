@@ -10013,6 +10013,105 @@
         .catch(function(e){ btn.disabled=false; btn.textContent='Create POs'; alert('Create failed: '+(e.message||e)); }); };
   }
   window.openBuyplanModal=function(country,items,mode){ try{ buyplanModal(country,items,mode); }catch(e){ if(window.console)console.log('[SUPPLY] buyplanModal',e&&e.message); } };
+  // ---- MULTI-COUNTRY "Build production" modal: same as buyplanModal but per-country columns + combined total + MOQ
+  // flag under the SKU. Create POs = one PO per country (shared production number). itemsByCountry = {UK:[{sku,qty}],…}
+  function buyplanModalMulti(itemsByCountry, mode){
+    mode=(mode==='fba'?'fba':'3pl'); var modeLbl=(mode==='fba'?'FBA-direct':'3PL');
+    var CTRS_ALL=['UK','US','EU','AU','CA']; itemsByCountry=itemsByCountry||{};
+    var countries=CTRS_ALL.filter(function(c){ return (itemsByCountry[c]||[]).length; });
+    if(!countries.length){ alert('No Buy '+modeLbl+' quantities across any market.'); return; }
+    var bySku={}; countries.forEach(function(c){ (itemsByCountry[c]||[]).forEach(function(it){ var s=String(it.sku).toUpperCase(); (bySku[s]=bySku[s]||{})[c]=Math.round(Number(it.qty)||0); }); });
+    var unionItems=Object.keys(bySku).map(function(s){ var t=0; countries.forEach(function(c){ t+=(bySku[s][c]||0); }); return {sku:s,qty:t}; });
+    var shown=countries.slice(), META={}, colOf=function(c){ return (typeof MKT_COLORS!=='undefined'&&MKT_COLORS[c])||'#94a3b8'; };
+    var ov=document.createElement('div'); ov.id='bp-po-modal-multi';
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200000;display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow:auto';
+    ov.innerHTML='<div class="pomodal" style="width:1060px;max-width:97vw;max-height:90vh;display:flex;flex-direction:column;overflow:hidden">'
+      +'<div style="flex:0 0 auto">'
+      +'<div style="display:flex;align-items:center;margin-bottom:8px"><b style="font-size:15px">Create production POs — all countries</b><span style="margin-left:auto;cursor:pointer;font-size:18px" id="bpm-x">✕</span></div>'
+      +'<div style="font-size:12px;color:#555;margin-bottom:8px">Buy '+modeLbl+' across markets in one production. Tick SKUs; pick a supplier where a SKU has more than one. <b>Create POs</b> makes one PO per country (branch auto, ≤20-pallet split, status FUTURE). An MOQ flag shows under a SKU when the combined order is below its minimum.</div>'
+      +'<div class="bar"><span class="pill-lbl">Production</span><select id="bpm-prod" class="flt" style="width:auto"></select>'
+      +'<span class="pill-lbl">Batch</span><select id="bpm-batch" class="flt" style="width:auto"><option value="">— optional —</option></select>'
+      +'<span class="pill-lbl">Start date</span><input id="bpm-start" type="date" class="flt" style="width:auto">'
+      +'<span style="margin-left:10px" id="bpm-pills"></span>'
+      +'<button id="bpm-preview" class="tool-badge bg-blue" style="border:none;cursor:pointer;padding:6px 13px;margin-left:6px">Preview PO plan</button>'
+      +'<button id="bpm-create" class="tool-badge bg-green" style="border:none;cursor:pointer;padding:6px 13px;display:none">Create POs</button></div>'
+      +'<div id="bpm-result" style="max-height:24vh;overflow:auto;margin:8px 0"></div>'
+      +'</div>'
+      +'<div id="bpm-skus" style="flex:1 1 auto;overflow:hidden;display:flex;flex-direction:column;min-height:140px">Loading SKUs…</div>'
+      +'</div>';
+    document.body.appendChild(ov);
+    var close=function(){ ov.remove(); };
+    ov.addEventListener('click',function(e){ if(e.target===ov)close(); }); document.getElementById('bpm-x').onclick=close;
+    fetch('/api/supply/prod-numbers').then(function(r){return r.json();}).then(function(rows){ var prods=(rows||[]).map(function(p){return p.prod_no;}).filter(Boolean);
+      var sel=document.getElementById('bpm-prod'); if(sel)sel.innerHTML='<option value="">— choose production —</option>'+prods.map(function(p){return '<option>'+esc(p)+'</option>';}).join(''); }).catch(function(){});
+    fetch('/api/supply/lookups').then(function(r){return r.json();}).then(function(d){ var batches=((d&&d.batches)||[]).slice().sort(function(a,b){return String(b).localeCompare(String(a),undefined,{numeric:true});});
+      var bs=document.getElementById('bpm-batch'); if(bs)bs.innerHTML='<option value="">— optional —</option>'+batches.map(function(x){return '<option>'+esc(x)+'</option>';}).join(''); }).catch(function(){});
+    fetch('/api/supply/buyplan-skus',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({items:unionItems,country:countries[0]})}).then(function(r){return r.json();}).then(function(d){
+      if(d&&d.error){ document.getElementById('bpm-skus').innerHTML='<div style="color:#dc2626">'+esc(d.error)+'</div>'; return; }
+      (d&&d.skus||[]).forEach(function(s){ META[s.sku]=s; }); drawSkus();
+    }).catch(function(e){ document.getElementById('bpm-skus').innerHTML='<div style="color:#dc2626">'+esc(String(e))+'</div>'; });
+    function pillBar(){ return countries.map(function(c){ var on=shown.indexOf(c)>=0; return '<button class="bpm-ctr" data-c="'+c+'" style="border:1px solid '+colOf(c)+';background:'+(on?colOf(c):'#fff')+';color:'+(on?'#fff':'#334155')+';border-radius:12px;padding:2px 10px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;margin-right:3px">'+c+'</button>'; }).join(''); }
+    function refreshCount(){ var n=document.querySelectorAll('#bpm-skus .bpm-skutick:checked').length; var c=document.getElementById('bpm-skucount'); if(c)c.textContent=n+' SKU(s) ticked'; }
+    function drawSkus(){
+      var box=document.getElementById('bpm-skus'); if(!box)return;
+      var list=Object.keys(bySku).map(function(s){ var t=0; shown.forEach(function(c){ t+=(bySku[s][c]||0); }); var m=META[s]||{options:[]}; return {sku:s,byC:bySku[s],total:t,cat:m.category||'',options:m.options||[],main_code:m.main_code,moq:m.moq||null,pallet_qty:m.pallet_qty||0,discontinue:m.discontinue||''}; }).filter(function(r){return r.total>0;});
+      list.sort(function(a,b){ var ca=a.cat||'~~~',cb=b.cat||'~~~'; return ca<cb?-1:ca>cb?1:(a.sku<b.sku?-1:a.sku>b.sku?1:0); });
+      var tdB='padding:3px 8px;border-bottom:1px solid #f0f0f0;white-space:nowrap', ncol=shown.length, rows='', curCat=null;
+      list.forEach(function(s){ var cat=s.cat||'(uncategorised)';
+        if(cat!==curCat){ curCat=cat; rows+='<tr><td colspan="'+(ncol+4)+'" style="background:#e8e8e6;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#333;padding:3px 8px;text-align:left">'+esc(cat)+' <span style="margin-left:8px;font-weight:400;text-transform:none;letter-spacing:0"><a class="bpm-cat-sel" data-cat="'+esc(cat)+'" data-on="1" style="cursor:pointer;color:#1d4ed8;font-size:9px">select all</a> <span style="color:#cbd5e1">·</span> <a class="bpm-cat-sel" data-cat="'+esc(cat)+'" data-on="0" style="cursor:pointer;color:#64748b;font-size:9px">none</a></span></td></tr>'; }
+        var code='', supCell;
+        if(!s.options.length){ supCell='<span style="color:#b45309">⚠ no supplier</span>'; }
+        else if(s.options.length===1){ var o=s.options[0]; if(o.code){ code=o.code; supCell=esc(o.code)+' · '+esc(o.name); } else { supCell='<span style="color:#b45309">⚠ '+esc(o.name)+' (no code)</span>'; } }
+        else { supCell='<select class="bpm-skusup" style="width:auto;font-size:11px;padding:1px 4px;border:1px solid #f59e0b;border-radius:4px;background:#fef3c7;color:#92400e;font-weight:600">'+s.options.map(function(o){return '<option value="'+esc(o.code||'')+'"'+(o.code===s.main_code?' selected':'')+(o.code?'':' disabled')+'>'+esc(o.code||'?')+' · '+esc(o.name)+'</option>';}).join('')+'</select>'; }
+        var hasCode=(s.options.length===1?!!code:s.options.some(function(o){return o.code;}));
+        var pal=s.pallet_qty>0?(Math.round(s.total/s.pallet_qty*10)/10):('<span style="color:#b45309" title="no pallet_qty">n/a</span>');
+        var qtyCells=shown.map(function(c){ var v=s.byC[c]||0; return '<td style="'+tdB+';text-align:right;font-variant-numeric:tabular-nums'+(v?';background:'+colOf(c)+'22':'')+'">'+(v?v.toLocaleString():'<span style="color:#cbd5e1">—</span>')+'</td>'; }).join('');
+        var moqLine=(s.moq && s.total<s.moq)?('<div style="font-size:9.5px;color:#b45309;font-weight:700;margin-top:2px">⚑ MOQ '+s.moq.toLocaleString()+' — production '+s.total.toLocaleString()+', short '+(s.moq-s.total).toLocaleString()+'</div>'):'';
+        rows+='<tr data-sku="'+esc(s.sku)+'" data-code="'+esc(code)+'" data-cat="'+esc(cat)+'">'
+          +'<td style="'+tdB+';text-align:center"><input type="checkbox" class="bpm-skutick"'+(hasCode?' checked':'')+'></td>'
+          +'<td style="'+tdB.replace('white-space:nowrap','')+';text-align:left;min-width:190px"><div style="display:flex;align-items:center;gap:6px"><button class="bpm-plan" data-sku="'+esc(s.sku)+'" style="font-size:8px;font-weight:700;padding:0 4px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer">PLAN</button><span>'+esc(s.sku)+'</span></div>'+(s.discontinue?'<div style="font-size:9px;color:#9ca3af;margin-top:1px">discontinue '+esc(fd(s.discontinue))+'</div>':'')+moqLine+'</td>'
+          +qtyCells
+          +'<td style="'+tdB+';text-align:right;font-weight:700;font-variant-numeric:tabular-nums">'+s.total.toLocaleString()+'</td>'
+          +'<td style="'+tdB+';text-align:center">'+pal+'</td>'
+          +'<td style="'+tdB+';text-align:left;min-width:150px">'+supCell+'</td></tr>';
+      });
+      var thB='position:sticky;top:0;background:#f3f3f1;z-index:1;padding:5px 8px;border-bottom:1px solid #d5d5d5;font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#444;white-space:nowrap';
+      var ctryTh=shown.map(function(c){return '<th style="'+thB+';text-align:right;border-bottom:3px solid '+colOf(c)+';color:'+colOf(c)+';min-width:56px">'+c+'</th>';}).join('');
+      box.innerHTML='<div style="flex:0 0 auto;display:flex;align-items:center;gap:10px;margin-bottom:4px"><label style="font-size:11px;cursor:pointer"><input type="checkbox" id="bpm-tickall" checked> tick all</label><span class="count" id="bpm-skucount" style="margin-left:auto"></span></div>'
+        +'<div style="flex:1 1 auto;overflow:auto;border:1px solid #e0e0e0;border-radius:6px"><table style="border-collapse:separate;border-spacing:0;font-size:11px;width:100%">'
+        +'<thead><tr><th style="'+thB+';text-align:center;width:30px"></th><th style="'+thB+';text-align:left;min-width:170px">SKU</th>'+ctryTh
+        +'<th style="'+thB+';text-align:right;min-width:70px">Total</th><th style="'+thB+';text-align:center;min-width:54px">Pallets</th>'
+        +'<th style="'+thB+';text-align:left;min-width:150px">Supplier</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+      var pb=document.getElementById('bpm-pills'); if(pb)pb.innerHTML=pillBar();
+      document.querySelectorAll('#bpm-pills .bpm-ctr').forEach(function(b){ b.onclick=function(){ var c=b.dataset.c,i=shown.indexOf(c); if(i>=0){ if(shown.length>1)shown.splice(i,1); } else shown=countries.filter(function(x){return x===c||shown.indexOf(x)>=0;}); drawSkus(); }; });
+      var ta=document.getElementById('bpm-tickall'); if(ta)ta.onchange=function(){ box.querySelectorAll('.bpm-skutick:not([disabled])').forEach(function(t){t.checked=ta.checked;}); refreshCount(); };
+      box.querySelectorAll('.bpm-skutick').forEach(function(t){ t.onchange=refreshCount; });
+      box.querySelectorAll('.bpm-cat-sel').forEach(function(a){ a.onclick=function(){ var cat=a.dataset.cat,on=a.dataset.on==='1'; box.querySelectorAll('.bpm-skutick').forEach(function(t){ var tr=t.closest('tr'); if(tr&&tr.getAttribute('data-cat')===cat&&!t.disabled)t.checked=on; }); refreshCount(); }; });
+      box.querySelectorAll('.bpm-plan').forEach(function(b){ b.onclick=function(){ var sku=b.dataset.sku; if(!window.open_){alert('Buy plan unavailable — reload.');return;} if(window.ensureBuyPlanScaffold)window.ensureBuyPlanScaffold(); var app=document.getElementById('app'); if(app)app.classList.add('plan-ov-open'); try{ window.open_(sku); }catch(e){ if(app)app.classList.remove('plan-ov-open'); return; } var o2=document.getElementById('ov'); if(o2){ o2.style.zIndex='300000'; var mo=new MutationObserver(function(){ if(!o2.classList.contains('open')){ if(app)app.classList.remove('plan-ov-open'); mo.disconnect(); } }); mo.observe(o2,{attributes:true,attributeFilter:['class']}); } }; });
+      refreshCount();
+    }
+    function gatherFor(ctry){ var out=[]; document.querySelectorAll('#bpm-skus tbody tr[data-sku]').forEach(function(tr){ var t=tr.querySelector('.bpm-skutick'); if(!t||!t.checked)return;
+      var sku=tr.dataset.sku, q=(bySku[sku]&&bySku[sku][ctry])||0; if(q<=0)return;
+      var code=tr.dataset.code, sel=tr.querySelector('.bpm-skusup'); if(sel)code=sel.value;
+      out.push({sku:sku,qty:q,supplier_code:code||''}); }); return out; }
+    function prodVal(){ return document.getElementById('bpm-prod').value; }
+    function payloadFor(ctry,commit){ var bb=document.getElementById('bpm-batch'); return {prod_no:prodVal(),batch_id:(bb&&bb.value)||null,country:ctry,mode:mode,start_date:document.getElementById('bpm-start').value||null,items:gatherFor(ctry),commit:!!commit}; }
+    document.getElementById('bpm-preview').onclick=function(){ if(!prodVal()){alert('Choose or enter a production number');return;}
+      var cs=shown.filter(function(c){ return gatherFor(c).length; }); if(!cs.length){alert('Tick at least one SKU with a quantity in a shown country');return;}
+      var res=document.getElementById('bpm-result'); res.innerHTML='<div class="count">Working…</div>'; document.getElementById('bpm-create').style.display='none';
+      Promise.all(cs.map(function(c){ return fetch('/api/supply/buyplan-pos',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payloadFor(c,false))}).then(function(r){return r.json();}).then(function(d){return {c:c,d:d};}).catch(function(e){return {c:c,d:{error:String(e)}};}); })).then(function(all){
+        var h='',totPos=0;
+        all.forEach(function(x){ var d=x.d||{}; if(d.error){ h+='<div style="font-size:11px;color:#dc2626;margin:6px 0"><b>'+esc(x.c)+':</b> '+esc(d.error)+'</div>'; return; } var pos=d.pos||[]; totPos+=pos.length;
+          h+='<div style="font-size:12px;margin:6px 0 2px;font-weight:700;color:'+colOf(x.c)+'">'+esc(x.c)+' — '+pos.length+' PO(s) · branch '+esc(d.branch||'(none)')+(d.warnings&&d.warnings.length?(' · <span style="color:#b45309">'+d.warnings.length+' not placed</span>'):'')+'</div>';
+          h+=pos.map(function(p){ var u=p.lines.reduce(function(a,b){return a+b.qty;},0); return '<div style="font-size:11px;padding:1px 0 1px 10px">'+esc(p.po)+' · '+esc(p.supplier_code)+' · '+p.pallets+' pal · '+p.lines.length+' SKU · '+u.toLocaleString()+'u</div>'; }).join('');
+        });
+        res.innerHTML=h||'<div style="color:#64748b">Nothing to place.</div>'; var cb=document.getElementById('bpm-create'); cb.style.display=totPos?'':'none'; cb.dataset.cs=cs.join(','); }); };
+    document.getElementById('bpm-create').onclick=function(){ var btn=this; if(!prodVal())return; var cs=(btn.dataset.cs||'').split(',').filter(Boolean); if(!cs.length)return; btn.disabled=true; btn.textContent='Creating…';
+      Promise.all(cs.map(function(c){ return fetch('/api/supply/buyplan-pos',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payloadFor(c,true))}).then(function(r){return r.json();}).then(function(d){ if(d&&d.error)throw new Error(c+': '+d.error); return (d&&d.created)||0; }); })).then(function(counts){
+        var tot=counts.reduce(function(a,b){return a+b;},0); invalidateDerived(); close(); if(window.gotoSupplySection)window.gotoSupplySection('order-plan'); setTimeout(function(){ alert('Created '+tot+' PO(s) across '+cs.length+' countr'+(cs.length>1?'ies':'y')+' for '+prodVal()+'. Review in Order Plan.'); },250); })
+        .catch(function(e){ btn.disabled=false; btn.textContent='Create POs'; alert('Create failed: '+(e.message||e)); }); };
+  }
+  window.openBuyplanModalMulti=function(itemsByCountry,mode){ try{ buyplanModalMulti(itemsByCountry,mode); }catch(e){ if(window.console)console.log('[SUPPLY] buyplanModalMulti',e&&e.message); } };
   window.gotoSupplySection=function(k){ try{ showSupply(true); selectSection(k); }catch(e){ if(window.console)console.log('[SUPPLY] goto',e&&e.message); } };
   // Context help for the current SUPPLY section (reuses the ANNOT descriptions). Returns {t,h}.
   window.supplyHelpText=function(){ var sec=current||'actions'; if(sec==='reports')sec=reportTab||'upcoming'; var raw=ANNOT[sec]||'';
