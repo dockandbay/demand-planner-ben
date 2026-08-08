@@ -2970,7 +2970,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
       // Buy-3PL; leave it for the Buy 3PL Urgent column (rush/air). Only place a 3PL buy with full lead time.
       if(pi>=1){
         const r=Math.ceil(gap/cp)*cp;
-        bQ=Math.max(r,moq);
+        bQ=r;   // MOQ is NO LONGER floored per country — it's a per-production minimum, handled by Build-production's combined-across-markets check + the China-stock top-up (was Math.max(r,moq), which over-ordered each market). moq unset (=1) → identical.
         buyDisplay[pi]=(buyDisplay[pi]||0)+bQ;
         buyFromLbl[i]=(buyFromLbl[i]?buyFromLbl[i]+', ':'')+`${PROJ[pi].lbl} order`;
         // carried forward in s3 (c3final=c3+bQ) so consecutive months don't re-buy the same gap
@@ -3071,7 +3071,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
       // capped at the total; SEA bulk = the remainder. This CONSERVES the urgent total (no double-MOQ inflation) and
       // correctly collapses to all-air when one air carton already over-covers a small need (sea=0), or splits a large
       // urgent into air-bridge + sea-bulk (e.g. 180 → 30 air + 150 sea).
-      var _totR=Math.max(Math.ceil(urgentQtyNeeded/cp)*cp,moq);
+      var _totR=Math.ceil(urgentQtyNeeded/cp)*cp;   // per-country MOQ floor removed (MOQ handled at production level, not per market)
       var _airR=_airQ>0?Math.min(Math.ceil(_airQ/cp)*cp,_totR):0;   // bridge = whole cartons, capped at the total
       var _seaR=_totR-_airR;                                        // bulk = the remainder
       buyUrgentAir[1]=_airR; buyUrgentSea[1]=_seaR;

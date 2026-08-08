@@ -1,3 +1,7 @@
+## v26.744.0 Buy engine: remove per-country MOQ round-up
+- Buy 3PL and Buy 3PL Urgent no longer floor a market's buy up to the SKU's MOQ (was Math.max(qty, moq) per country, which over-ordered every market when a real MOQ was set). MOQ is now handled where it belongs — a per-production minimum, via Build-production's combined-across-markets MOQ flag + the China-stock top-up PO.
+- Byte-identical wherever moq is unset (=1) — i.e. all of live, since a default MOQ of 1 never exceeds a carton-rounded buy. The only change: SKUs with a real MOQ that exceeds the market buy (sandbox BAGDRY=500) now size to actual demand instead of force-rounding to the MOQ in each market.
+
 ## v26.743.0 PO grid: selecting an exception clears the status pills (all POs show)
 - On PURCHASE ORDERS, choosing anything in the "⚠ All exceptions…" dropdown now resets the Production/Future/Shipping/Complete status pills to none-selected (= all POs show), so the exception filter isn't narrowed by a status filter and can surface COMPLETE/SHIPPED POs the default pills would hide. Clearing the exception leaves the pills as they are. (Replaces the old shipped_no_invoice-only special case.)
 
