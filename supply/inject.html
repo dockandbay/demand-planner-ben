@@ -2436,10 +2436,9 @@
     // <select> directly here (black = a value is applied; cleared = back to default).
     function selHi(el,on){ if(!el)return; if(on){ el.style.background='#0f172a'; el.style.color='#fff'; el.style.borderColor='#0f172a'; el.style.fontWeight='700'; } else { el.style.background=''; el.style.color=''; el.style.borderColor=''; el.style.fontWeight=''; } }
     var _exc=c.querySelector('#po-exc'); if(_exc)_exc.onchange=function(){ state.act={}; if(this.value)state.act[this.value]=true;
-      // "Shipped · no final invoice" matches SHIPPING/DELIVERED/COMPLETE POs, which the default status pills hide →
-      // auto-select the Shipping + Complete pills so the matches actually show (and reflect it visually).
-      if(this.value==='shipped_no_invoice'){ state.f={shipping:1,complete:1};
-        c.querySelectorAll('#po-prog .pill').forEach(function(p){ p.classList.toggle('active', !!state.f[p.dataset.f]); }); }
+      // Picking ANY exception clears the status pills → none selected = ALL POs show, so the exception filter isn't
+      // narrowed by a status filter (it can surface COMPLETE/SHIPPED POs the default pills would otherwise hide). (Ben)
+      if(this.value){ state.f={}; c.querySelectorAll('#po-prog .pill').forEach(function(p){ p.classList.remove('active'); }); }
       if(this.value){ selHi(this,true); } else { this.style.background='#fef2f2'; this.style.color='#991b1b'; this.style.borderColor='#fca5a5'; this.style.fontWeight='700'; } view(); };
     var pgrp=document.getElementById('po-grp'); if(pgrp)pgrp.onchange=function(){state.grp=this.value;view();};
     var hBtn=document.getElementById('po-hide-btn'), hMenu=document.getElementById('po-hide-menu');

@@ -1,3 +1,6 @@
+## v26.743.0 PO grid: selecting an exception clears the status pills (all POs show)
+- On PURCHASE ORDERS, choosing anything in the "⚠ All exceptions…" dropdown now resets the Production/Future/Shipping/Complete status pills to none-selected (= all POs show), so the exception filter isn't narrowed by a status filter and can surface COMPLETE/SHIPPED POs the default pills would hide. Clearing the exception leaves the pills as they are. (Replaces the old shipped_no_invoice-only special case.)
+
 ## v26.742.0 Buy plan: China-stock "available to allocate" flag + timeline move note
 - Buy plan now shows a 🏭 China-stock badge on any SKU that has un-allocated stock on open "China Stock" branch POs (server global CHINA_STOCK = qty per SKU; buy-row SKU cell badge with a tooltip). Surfaces China stock as available supply to allocate — display-only, does NOT change buy quantities (allocation to a market/order stays a manual step, per Ben). Buy calc untouched.
 - When a China Stock top-up PO is created (Build production), its PO timeline gets a "🏭 China Stock move — N units held un-allocated to meet supplier MOQ; allocate later" note.
