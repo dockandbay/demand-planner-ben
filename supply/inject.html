@@ -6708,6 +6708,9 @@
                 return '<div style="display:flex;align-items:center;gap:7px"><span style="display:inline-block;background:'+esc(v)+';color:#111;font-weight:700;font-size:11px;border-radius:4px;padding:2px 7px">'+mk[1]+'</span>'
                   +'<input type="color" class="gs-set" data-key="mkt_color_'+mk[0]+'" value="'+esc(v)+'" title="'+mk[1]+' market colour" style="width:38px;height:26px;padding:0;border:1px solid #cbd5e1;border-radius:5px;cursor:pointer;vertical-align:middle"></div>'; }).join('')
             +'</div>'
+            +'<div class="sect-h" style="margin-top:18px">Supply planner <span class="mut tiny">— notified when a PO is auto-completed from the received-POs feed</span></div>'
+            +'<div style="max-width:760px"><div class="mut tiny" style="margin:1px 0 6px">Email that receives a note when a received PO is automatically marked <b>COMPLETE</b> (the n8n “recently received POs” feed). Blank = no email.</div>'
+              +'<input class="fci gs-set" data-key="supply_planner_email" value="'+esc(s.supply_planner_email||'')+'" placeholder="planner@dockandbay.com" type="email" style="width:280px;box-sizing:border-box;text-align:left"></div>'
             +'<div class="sect-h" style="margin-top:18px">ERP integration <span class="mut tiny">— which system purchase orders push to (dates + line items)</span></div>'
             +'<div style="max-width:760px">'
               +'<div style="margin:0 0 12px"><div style="font-weight:600;font-size:13px">Active ERP</div><div class="mut tiny" style="margin:1px 0 4px"><b>Cin7</b> is current; switch to <b>Fulfil</b> to target Fulfil instead. PO pushes (dates + line items) follow this setting.</div>'

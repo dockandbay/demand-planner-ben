@@ -1,3 +1,9 @@
+## v26.753.0 Recently-received POs → auto-complete + timeline + supply-planner email
+- New `planner.recently_received_pos` feed (**migration 206**), populated by n8n (`po` + `received_date`). Processor **`POST /api/supply/received-pos/process`** (n8n calls it after upserting; idempotent — each row processed once via `processed_at`): marks any **not-yet-`COMPLETE`** PO as `COMPLETE`, adds a timeline note (`supplier_notes`, internal), and emails the supply planner. **Already-`COMPLETE` or PO-not-found → no action** (row just marked processed with a reason).
+- New **CONFIG ▸ Admin ▸ General ▸ Supply planner** email field (`app_settings.supply_planner_email`).
+- Endpoint is open (n8n system trigger; acts only on rows n8n wrote). Sandbox-safe: no `RESEND_API_KEY` → the email logs (email_log) but doesn't send.
+- Verified end-to-end in sandbox (then fully reverted): non-complete PO→COMPLETE + timeline + email; already-complete & not-found → no action; `{completed:1, skipped:2, emailed:1}`.
+
 ## v26.752.0 BUY & MOVE ▸ Actions: 3PL→3PL transfer lines
 - The **Actions-by-country** summary now includes **"3PL Transfer In"** (stock this market receives from other markets) and **"3PL Transfer Out"** (stock it sends), alongside Buy 3PL · Urgent Sea/Air · Buy FBA · FBA Transfer. Same format — total units + expand, each lane showing the counterpart market (← / →) and its **Urgent / Rebalance** class. Left-aligned per house style.
 - Uses the existing inter-market transfer engine (`trfLane`, now exposed on `BP`). **Display/report only — buy quantities are unchanged** (inter-market transfers never feed `getBuyQtys`).

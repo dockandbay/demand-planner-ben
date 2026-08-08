@@ -595,6 +595,7 @@ function requiredCap(method, p) {
   if (CONFIG_WRITE.some((re) => re.test(p))) return 'config'; // config reference data → supply OR demand
   if (p.startsWith('/api/product/')) return 'product';        // PRODUCT module writes → 'product' capability
   if (p.startsWith('/api/supply/zalando/')) return null;      // Zalando stock upload / send-file — open to all (no edit rights needed)
+  if (p.startsWith('/api/supply/received-pos/')) return null; // n8n system trigger — processes the received-POs feed (acts only on rows n8n wrote)
   if (p.startsWith('/api/klaviyo-bis/')) return null;         // Klaviyo BIS upload — allowed with read-only permission (Ben)
   if (method === 'POST' && p === '/api/supply/quality-doc') return null;   // Quality Control file upload (+ its metafields) — allowed with read-only permission (Ben); delete stays gated
   if (method === 'POST' && (p === '/api/supply/cache/invalidate' || p === '/api/supply/actions/invalidate')) return null;   // clears server caches only — harmless, no data write
@@ -5093,6 +5094,50 @@ app.get('/api/me', async (req, res) => { try { const me = await permsFor(req);
 app.get('/api/config/permissions', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   try { const r = await pool.query('SELECT email, supply_edit, demand_edit, product_edit, is_admin, coalesce(landing_page,\'\') landing_page, to_char(updated_at,\'YYYY-MM-DD HH24:MI\') updated_at, updated_by FROM planner.app_permissions ORDER BY email'); res.json(r.rows); }
   catch (e) { res.status(500).json({ error: e.message }); } });
+// ── Recently-received POs feed (populated by n8n) → auto-complete + timeline + supply-planner email. ──
+// Idempotent: each row processed once. Action ONLY when a not-yet-COMPLETE PO is received (Ben): already-COMPLETE
+// or PO-not-found → no action, just mark processed. Sandbox has no RESEND_API_KEY → the email logs, doesn't send.
+async function processReceivedPos() {
+  const out = { pending: 0, completed: 0, skipped: 0, emailed: 0 };
+  const rows = (await pool.query(
+    `SELECT id, po, to_char(received_date,'DD-Mon-YY') rd FROM planner.recently_received_pos WHERE processed_at IS NULL ORDER BY id`)).rows;
+  out.pending = rows.length;
+  if (!rows.length) return out;
+  let plannerEmail = null;
+  try { plannerEmail = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='supply_planner_email'`)).rows[0]?.value || null; } catch { /* no config */ }
+  for (const r of rows) {
+    let note;
+    try {
+      const po = (await pool.query(`SELECT po, status FROM planner.purchase_orders WHERE po=$1`, [r.po])).rows[0];
+      if (!po) { note = 'PO not found — no action'; out.skipped++; }
+      else if (String(po.status || '').toUpperCase() === 'COMPLETE') { note = 'already COMPLETE — no action'; out.skipped++; }
+      else {
+        await pool.query(`UPDATE planner.purchase_orders SET status='COMPLETE' WHERE po=$1`, [r.po]);
+        out.completed++;
+        const when = r.rd ? ' on ' + r.rd : '';
+        await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,'system','internal',$2)`,
+          [r.po, '📦 Received' + when + ' — automatically marked COMPLETE (recently-received-POs feed).']);
+        if (plannerEmail && /@/.test(plannerEmail)) {
+          try {
+            await sendResendEmail({ to: plannerEmail, subject: 'PO ' + r.po + ' received — marked complete',
+              html: '<p>Purchase order <b>' + r.po + '</b> was marked received' + (r.rd ? ' on <b>' + r.rd + '</b>' : '') +
+                    ' and has been automatically set to <b>COMPLETE</b> in HORIZON.</p>',
+              kind: 'po-received', ref: r.po, by: 'system' });
+            out.emailed++; note = 'marked COMPLETE + emailed ' + plannerEmail;
+          } catch (e) { note = 'marked COMPLETE (email failed: ' + e.message + ')'; }
+        } else { note = 'marked COMPLETE (no supply_planner_email set)'; }
+      }
+    } catch (e) { note = 'error: ' + e.message; }
+    await pool.query(`UPDATE planner.recently_received_pos SET processed_at=now(), note=$2 WHERE id=$1`, [r.id, note]);
+  }
+  return out;
+}
+// n8n calls this after it upserts the feed. Idempotent — safe to call any time.
+app.post('/api/supply/received-pos/process', async (req, res) => {
+  try { res.json({ ok: true, ...(await processReceivedPos()) }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ── Modular channel registry (CONFIG ▸ Admin ▸ Channels) — Phase 1. Reads open; writes admin-only. ──
 app.get('/api/config/channels', async (req, res) => {
   try { res.set('Cache-Control', 'no-store').json({ ok: true, channels: await buildChannels(), countries: await buildCountries() }); }
