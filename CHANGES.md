@@ -1,3 +1,11 @@
+## v26.745.0 Zalando forecast → EU Buy 3PL (Z1)
+- Zalando is now a real driver of the **EU Buy 3PL**, not just the send-to-Zalando tab. The baked per-SKU Zalando forecast (`ZAL_FC`), **netted against the uploaded Zalando stock** (`planner.zalando_stock`, new server-injected `ZAL_STOCK` global), lands as **extra demand on the EU 3PL warehouse** — it drains 3PL like DTC/B2B, so the Buy 3PL grows vs the stock-on-hand estimate. Held to a **2-month cover** in the 3PL buy target (Ben's spec).
+- **Buy 3PL ONLY — never Buy FBA.** Zalando touches only the 3PL demand/target/gate; FBA logic untouched.
+- **Gated on an uploaded Zalando stock file.** With nothing uploaded (`ZAL_STOCK` empty) `buildLiveDemand` writes no `dem.ZAL`, `isZalEU` is false, and the buy math is byte-identical to before.
+- New **"Zalando transfer demand"** row in the SKU detail (plan) popup, shown on the **EU** view only — per-month Zalando net demand feeding the 3PL buy (rendered only when the SKU carries Zalando demand).
+- **Verified offline (buy-engine harness):** Zalando ON vs OFF changes only EU Zalando SKUs (net demand > stock, not discontinued); non-EU, non-Zalando, discontinued and stock-covered SKUs are byte-identical. Buy quantity rises by ~the netted Zalando demand (carton-rounded); the now-buy `b3` responds to Zalando demand at/after lead time, near-term demand schedules as future buys.
+- Scope note: this is **Z1 (buy feed)**. Z2 (a read-only Zalando channel in the DEMAND plan grid + Summary) is not yet built.
+
 ## v26.744.0 Buy engine: remove per-country MOQ round-up
 - Buy 3PL and Buy 3PL Urgent no longer floor a market's buy up to the SKU's MOQ (was Math.max(qty, moq) per country, which over-ordered every market when a real MOQ was set). MOQ is now handled where it belongs — a per-production minimum, via Build-production's combined-across-markets MOQ flag + the China-stock top-up PO.
 - Byte-identical wherever moq is unset (=1) — i.e. all of live, since a default MOQ of 1 never exceeds a carton-rounded buy. The only change: SKUs with a real MOQ that exceeds the market buy (sandbox BAGDRY=500) now size to actual demand instead of force-rounding to the MOQ in each market.

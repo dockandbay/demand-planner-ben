@@ -667,6 +667,14 @@ async function buildChinaStock() {
     const o = {}; r.rows.forEach(x => { o[x.sku] = Number(x.qty) || 0; }); return o;
   } catch (e) { return {}; }
 }
+// Zalando (ZFS) stock-on-hand from the uploaded inventory file → {sku: qty}. Keyed by the raw SKU (same source as
+// ZAL_FC), so ZAL_STOCK[sku] lines up with the Zalando forecast keys. Empty ⇒ Zalando buy-feed stays OFF.
+async function buildZalStock() {
+  try {
+    const r = await pool.query(`SELECT sku, sum(qty)::int qty FROM planner.zalando_stock WHERE coalesce(qty,0)>0 GROUP BY sku`);
+    const o = {}; r.rows.forEach(x => { o[x.sku] = Number(x.qty) || 0; }); return o;
+  } catch (e) { return {}; }
+}
 app.get('/', async (req, res) => {
   try {
     const _lazy = !!(req.query && (req.query.lazysku === '1' || req.query.lazysku === 'true'));   // SKU-data lazy-load opt-in
@@ -699,6 +707,7 @@ app.get('/', async (req, res) => {
     // on the next load. getASP applies these to lift the revenue forecast.
     try { const PRICE_CHANGES = await buildPriceChanges(); html = replaceGlobal(html, 'PRICE_CHANGES', JSON.stringify(PRICE_CHANGES)); } catch (e) { /* leave the [] default */ }
     try { const CHINA_STOCK = await buildChinaStock(); html = replaceGlobal(html, 'CHINA_STOCK', JSON.stringify(CHINA_STOCK)); } catch (e) { /* leave the {} default */ }   // buy-plan "China stock to allocate" flag
+    try { const ZAL_STOCK = await buildZalStock(); html = replaceGlobal(html, 'ZAL_STOCK', JSON.stringify(ZAL_STOCK)); } catch (e) { /* leave the {} default */ }   // EU Zalando buy-feed gate + forecast-vs-stock netting
     // BUY ▸ Complex Rules — cover-target override rules (replaces First Buy). Injected fresh (not cached) so an
     // add/edit shows on the next load. The buy engine reads these to override the 3PL cover target per SKU/window.
     try { const COMPLEX_RULES = await buildComplexRules(); html = replaceGlobal(html, 'COMPLEX_RULES', JSON.stringify(COMPLEX_RULES)); } catch (e) { /* leave the [] default */ }

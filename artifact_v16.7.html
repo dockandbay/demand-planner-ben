@@ -1197,6 +1197,7 @@ var MKT_COLORS={};       // reusable market colour palette {UK:'#..',US:'#..',EU
 var ZAL_FC={};           // Zalando per-SKU monthly forecast {sku:{YYYY_MM:units}} — hard-coded (server-injected from zalando_data.json). EU-only ZAL channel + BUY&MOVE Zalando transfer.
 var CHINA_STOCK={};      // {sku: units} un-allocated holding stock on open "China Stock" branch POs (MOQ top-ups) — server-injected; buy plan flags it as available to allocate.
 var ZAL_MONTHS=[];       // ordered YYYY_MM list the Zalando forecast covers.
+var ZAL_STOCK={};        // {sku: units} Zalando (ZFS) stock-on-hand — server-injected from planner.zalando_stock (the uploaded inventory file). EU buy-plan Zalando feed is GATED on this being non-empty (nothing uploaded → Zalando contributes nothing).
 var COMPLEX_RULES=[];    // BUY ▸ Complex Rules: cover-target override rules (server-injected). Buy engine reads these to override the 3PL cover target per SKU/window. Replaces First Buy.
 // Categories + subcategories metadata — pulled via MCP each rebuild from
 // Airtable's categories/subcategories tables. CATS_META keyed by category
@@ -1597,7 +1598,8 @@ function getBuyQtys(sku,mkt){
   const _cpF=(pd.cp)||1;
   if(bf>0){ const _ctF=Math.ceil(bf/_cpF); bf=_ctF>1?_ctF*_cpF:0; }
   const tx=(proj[START_IDX]&&proj[START_IDX].tx)||0; // recommended 3PL->FBA transfer NOW (M+0)
-  return BUY_CACHE[cacheKey]={b3,b3u,b3uSea,b3uAir,bf,tx,futQty,futN,buyTip,urgTip};
+  const zx=(proj[START_IDX]&&proj[START_IDX].zx)||0; // recommended 3PL->Zalando transfer NOW (M+0, EU only)
+  return BUY_CACHE[cacheKey]={b3,b3u,b3uSea,b3uAir,bf,tx,zx,futQty,futN,buyTip,urgTip};
 }
 
 // Split FBA-bound inbound into arriving within 14 days vs 15+ days out (by ETA).
@@ -2841,6 +2843,26 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
 
   let s3=md.i3||0,sF=md['if_']||0;
 
+  // ── Zalando (EU only): extra demand on the EU 3PL warehouse — Buy 3PL ONLY, never FBA (Ben). Zalando forecast
+  //    net of its own uploaded stock (ZAL_STOCK) lands as additional 3PL consumption, draining the 3PL pool, so the
+  //    Buy 3PL grows vs the stock-on-hand estimate. Held to a 2-month cover in the 3PL buy target (like DTC/B2B use
+  //    the 3PL cover, and mirroring FBA's forward top-up term). zalOut[i] = the month's Zalando net demand — shown
+  //    as the "Zalando demand" popup line. GATED: EU + a known SKU + dem.ZAL present (buildLiveDemand only writes
+  //    dem.ZAL when a Zalando stock file is uploaded) → with nothing uploaded isZalEU is false, byte-identical buy.
+  const zalOut={};
+  const isZalEU = mkt==='EU' && !!skuKey && !!(dem.ZAL && Object.keys(dem.ZAL).length);
+  const ZAL_COVER_MONTHS=2;   // Ben: Zalando cover = same as FBA, 2 months
+  // Per-month Zalando NET demand: forecast reduced by drawing its own stock (ZAL_STOCK) down over the earliest
+  // months ("compared to forecast"). Post-discontinue months are excluded — no buying past disc.
+  const zalNet={};
+  if(isZalEU){ let zRem=ZAL_STOCK[skuKey]||0;
+    PROJ.forEach(function(p){ if(p.isActual)return; if(discCutoff&&p.key>=discCutoff)return;
+      var raw=(dem.ZAL&&dem.ZAL[p.key])||0; if(raw<=0)return;
+      var net=Math.max(raw-zRem,0); zRem=Math.max(zRem-raw,0); if(net>0)zalNet[p.key]=net; });
+  }
+  const zalNetAt=fi=>{ if(fi<0||fi>=PROJ.length)return 0; return zalNet[PROJ[fi].key]||0; };
+  const nextZalNeed=i=>{ let t=0; for(let m=1;m<=ZAL_COVER_MONTHS;m++)t+=zalNetAt(i+m); return t; };  // 2-month forward Zalando cover (added to the 3PL buy target)
+
   PROJ.forEach(({key,isActual,isForecast},i)=>{
     if(isActual)return;
     if(isForecast){
@@ -2856,7 +2878,10 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
       const _rfba=Math.round((elapsed>0?(_mtd.FBA||0)/elapsed:_fF/total)*remaining);
       const _ri3=(ib3[key]||[]).filter(s=>s.eta&&s.eta.slice(8,10)>String(TODAY.getDate()).padStart(2,'0')).reduce((s,x)=>s+(x.qty||0),0);
       const _riF=(ibF[key]||[]).filter(s=>s.eta&&s.eta.slice(8,10)>String(TODAY.getDate()).padStart(2,'0')).reduce((s,x)=>s+(x.qty||0),0);
-      s3=Math.max(s3+_ri3-(_rdtc+_rb2b),0);
+      // Zalando (EU): this month's remaining net demand also draws the 3PL pool (forecast-only → prorate by days left).
+      const _rzal=isZalEU?Math.round((zalNetAt(i)/total)*remaining):0;
+      if(isZalEU)zalOut[i]=Math.round(zalNetAt(i));   // popup "Zalando demand" line (full-month net)
+      s3=Math.max(s3+_ri3-(_rdtc+_rb2b+_rzal),0);
       sF=Math.max(sF+_riF-_rfba,0);
       // "Transfer now" (M+0): the current actionable month (PROJ[1]="Remaining") is where getBuyQtys reads tx and
       // the buy view displays the now-figures. Unify it with the Transfer FBA tab — same fbaTransferRec (demand-
@@ -2871,13 +2896,15 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     const dtc=afterDisc?0:(dem.DTC&&dem.DTC[key])||0;
     const b2b=afterDisc?0:(dem.B2B&&dem.B2B[key])||0;
     const fba=afterDisc?0:(dem.FBA&&dem.FBA[key])||0;
+    const zaln=afterDisc?0:(zalNet[key]||0);   // Zalando net demand on the 3PL pool this month (EU only)
+    if(isZalEU)zalOut[i]=zaln;                  // popup "Zalando demand" line
     const nextTot=demAt(i+1),nextFba=fbaAt(i+1);
     const w3next=(nextTot-nextFba)/4.33,wFnext=nextFba/4.33;
 
     const a3=(ib3[key]||[]).reduce((s,x)=>s+(x.qty||0),0)+(assumedArr[i]||0);
     const aF=(ibF[key]||[]).reduce((s,x)=>s+(x.qty||0),0)+(tA1[i]||0)+(assumedArrF[i]||0);
     const fAI=sF+aF,fSh=Math.max(fba-fAI,0),fAD=Math.max(fAI-fba,0);
-    const pAD=(s3+a3)-(dtc+b2b)-fSh;
+    const pAD=(s3+a3)-(dtc+b2b+zaln)-fSh;   // Zalando drains the 3PL pool alongside DTC/B2B
 
     // Forward-looking target calc: sum actual demand over the target weeks
     const fbaDemFn=fi=>{
@@ -2949,8 +2976,11 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     // 3PL target: forward-looking sum of DTC+B2B demand over t3 weeks + FBA top-up need (buy-target, no
     // buying past disc). nextFbaNeed stays IN tg3 — Buy FBA is shown as a slice of it, not stripped out.
     const nextFbaNeed=Math.max(tgFbuy-cF,0);
+    // Zalando top-up: 2-month forward Zalando cover added straight to the 3PL target (Ben) so the Buy 3PL funds it.
+    // Buy 3PL ONLY — never FBA. With no Zalando demand this is 0 → identical to before.
+    const nextZalCover=nextZalNeed(i);
     const t3eff=crMatched.length?crCoverWeeks(i,t3,crMatched):t3;   // Complex Rules override (raise-only, per-month window)
-    const tg3=fwdDemand(t3eff,i,d3DemFn)+nextFbaNeed;
+    const tg3=fwdDemand(t3eff,i,d3DemFn)+nextFbaNeed+nextZalCover;
 
     let bQ=0,bPi=-1;
     const gap=tg3-c3;
@@ -2958,7 +2988,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     const meaningfulGap=gap>=cp||c3<=0;
     // No Buy-3PL that would LAND in/after the effective discontinue month — a standard-lead order can't be
     // sold once the product is discontinued (a true near-term gap still surfaces in Buy 3PL Urgent).
-    if(c3<tg3&&w3next>0&&meaningfulGap&&!afterDisc){
+    if(c3<tg3&&(w3next>0||nextZalCover>0)&&meaningfulGap&&!afterDisc){   // ||nextZalCover: a pure-Zalando SKU (no DTC/B2B fwd demand) still needs a Buy 3PL
       // Ideal placement = arrival month i minus lead months. Allow placement as early as
       // the current actionable month (index 1 = current-month "Remaining" / "ship today").
       // If the ideal placement is in the past (pi<1) the order is already late: clamp it to
@@ -3141,7 +3171,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
         a3:0,aF:0,confQty3:0,confQtyF:0,assumedQty3:0,assumedLabel:'',trfIn:0,
         fTx:0,fSh:0,tot3pl:0,c3:s3,cF:sF,tg3:0,tgF:0,cv3:999,cvF:999,isDisc:false,
         bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,bQuSea:buyUrgentSea[i]||0,bQuAir:buyUrgentAir[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],urgentProd:buyUrgentProd[i],urgentFreight:buyUrgentFreight[i],urgentMode:buyUrgentMode[i],bPM:_buyPlaceTip(i),
-        fdQ:fbaBuyDisp[i]||0,tx:transferOut[i]||0,overdue:buyOverdue[i]||false,inbLines3:[],inbLinesF:[]};
+        fdQ:fbaBuyDisp[i]||0,tx:transferOut[i]||0,zx:zalOut[i]||0,overdue:buyOverdue[i]||false,inbLines3:[],inbLinesF:[]};
     }
     if(isForecast){
       const mtd=md['mtd_'+_CUR_MON_LC]||{};
@@ -3164,7 +3194,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
         assumedQty3:0,assumedLabel:'',trfIn:0,fTx:0,fSh:0,tot3pl:dtc+b2b,c3:rc3,cF:rcF,
         tg3:t3*wA2,tgF:tf*wF2,cv3:wA2>0?rc3/wA2:999,cvF:wF2>0?rcF/wF2:999,isDisc:false,
         bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,bQuSea:buyUrgentSea[i]||0,bQuAir:buyUrgentAir[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],urgentProd:buyUrgentProd[i],urgentFreight:buyUrgentFreight[i],urgentMode:buyUrgentMode[i],bPM:_buyPlaceTip(i),
-        fdQ:fbaBuyDisp[i]||0,tx:transferOut[i]||0,overdue:buyOverdue[i]||false,
+        fdQ:fbaBuyDisp[i]||0,tx:transferOut[i]||0,zx:zalOut[i]||0,overdue:buyOverdue[i]||false,
         inbLines3:remInb3.map(inbLineHtml),
         inbLinesF:remInbF.map(inbLineHtml)};
     }
@@ -3283,7 +3313,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
       cv3:isFinite(cv3)?cv3:999,cvF:isFinite(cvF)?cvF:999,
       isDisc:!!(discCutoff&&key>=discCutoff),
       bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,bQuSea:buyUrgentSea[i]||0,bQuAir:buyUrgentAir[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],urgentProd:buyUrgentProd[i],urgentFreight:buyUrgentFreight[i],urgentMode:buyUrgentMode[i],bPM,
-      fdQ:fbaBuyDisp[i]||0,tx:transferOut[i]||0,overdue:buyOverdue[i]||false,
+      fdQ:fbaBuyDisp[i]||0,tx:transferOut[i]||0,zx:zalOut[i]||0,overdue:buyOverdue[i]||false,
       inbLines3,inbLinesF};
     // Advance s3 including assumed inbound so future months see the benefit (matches pass 1)
     // c3 already includes assumed inbound (via a3 → pAD → c3), so just roll forward
@@ -3402,6 +3432,15 @@ function buildTable(proj,md,pd,is3,hasFBA){
     rows.push(dr('3PL Target Units',proj,p=>{
       if(p.crRule)return '<td class="tgt crc-tip" data-tip="'+crRuleTip(p.crRule)+'" style="background:#FFFFC5;cursor:help">'+fmt(Math.round(p.tg3))+'</td>';
       return c(fmt(Math.round(p.tg3)),'tgt');
+    }));
+  }
+
+  // Zalando demand (EU only): per-month Zalando net demand (forecast − Zalando stock) landing on the EU 3PL
+  // warehouse — it drains 3PL like DTC/B2B and lifts Buy 3PL (2-month cover). Only shown when this SKU carries it.
+  if(proj.some(p=>(p.zx||0)>0)){
+    rows.push(dr('Zalando transfer demand',proj,p=>{
+      if(p.isActual||!p.zx)return c('—','cv0');
+      return `<td class="tip120" style="background:#f5f3ff;color:#5b21b6;font-weight:600" data-tip="Zalando (ZFS) net demand on the EU 3PL pool — Zalando forecast minus its stock-on-hand; drains 3PL and lifts Buy 3PL (held to 2-month cover)">${fmt(p.zx)}</td>`;
     }));
   }
 
@@ -11100,6 +11139,25 @@ function buildLiveDemand(){
   });
   // (2b removed v26.461 — saved SKU overrides (forecast_outputs) are now applied INLINE in section 2's
   //  chronological pass, so the chained last-year rule can read a month's final value incl. its override.)
+  // 2c) Zalando (EU only): a per-SKU BAKED branch forecast (ZAL_FC) — NOT the subcat cascade, so no LY / share /
+  //     smoothing / auto-forecast (Ben's spec). GATED on an uploaded Zalando stock file (ZAL_STOCK non-empty):
+  //     with nothing to net against, Zalando must contribute nothing to the buy plan. Written as md.demand.ZAL on
+  //     EU only; the buy engine (project) reads it as an FBA-style transfer branch. It stays invisible to every
+  //     other path because the 3PL/total demand sums name DTC/B2B/FBA explicitly (never Object.keys(demand)).
+  (function(){
+    // Always clear any prior ZAL overlay first, so a since-cleared upload doesn't leave stale Zalando demand.
+    Object.keys(BP_DATA.products).forEach(function(sku){
+      var m=BP_DATA.products[sku].mkts; if(m&&m.EU&&m.EU.demand&&m.EU.demand.ZAL)delete m.EU.demand.ZAL;
+    });
+    if(!(ZAL_STOCK&&Object.keys(ZAL_STOCK).length))return;   // no stock file uploaded → Zalando off
+    Object.keys(ZAL_FC||{}).forEach(function(sku){
+      var prod=BP_DATA.products[sku]; if(!prod||!prod.mkts||!prod.mkts.EU)return;
+      var md=prod.mkts.EU; if(!md.demand)md.demand={};
+      var fcm=ZAL_FC[sku]||{}, zal={};
+      LIVE_FC_MONTHS.forEach(function(fym){ var v=Math.round(fcm[fym]||0); if(v>0)zal[fym]=v; });
+      if(Object.keys(zal).length)md.demand.ZAL=zal;
+    });
+  })();
   // 3) Re-fold committed Preorder/KA demand into B2B (pka stays on each market)
   Object.keys(BP_DATA.products).forEach(function(sku){
     var mk=BP_DATA.products[sku].mkts;if(!mk)return;
