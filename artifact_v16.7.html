@@ -3694,6 +3694,7 @@ var BUY_SCAFFOLD=`<div class="wrap">
     <span id="bp-buy-actions" style="display:inline-flex;align-items:center;gap:6px;margin-left:6px;border-left:1px solid #e2e8f0;padding-left:8px">
       <button type="button" id="bp-make-po-3pl" onclick="(function(){var it=BP.buyplanItems('3pl');if(!it.length){alert('No Buy 3PL quantities in the current plan.');return;}if(window.openBuyplanModal){window.openBuyplanModal(BP.CUR,it,'3pl');}else{alert('Supply module not ready — open the SUPPLY tab once, then retry.');}})()" title="Create 3PL purchase orders from the Buy 3PL quantities, split into 20-pallet containers" style="font-size:10px;padding:2px 10px;border:1px solid #1d4ed8;border-radius:3px;background:#1d4ed8;color:#fff;cursor:pointer;font-weight:600">3PL - Create POs</button>
       <button type="button" id="bp-make-po-fba" onclick="(function(){if((BP.CUR||'').toUpperCase()==='EU'){alert('FBA-direct PO creation is not available for EU yet (no DE FBA branch).');return;}var it=BP.buyplanItems('fba');if(!it.length){alert('No Buy FBA quantities in the current plan.');return;}if(window.openBuyplanModal){window.openBuyplanModal(BP.CUR,it,'fba');}else{alert('Supply module not ready — open the SUPPLY tab once, then retry.');}})()" title="Create FBA-direct purchase orders from the Buy FBA quantities, split into 20-pallet containers" style="font-size:10px;padding:2px 10px;border:1px solid #16a34a;border-radius:3px;background:#16a34a;color:#fff;cursor:pointer;font-weight:600">FBA - Create POs</button>
+      <button type="button" id="bp-prodbuild" onclick="if(window.openProdBuilder)openProdBuilder();" title="Open the all-countries production builder — Buy 3PL requirements for every market in one full-page view" style="font-size:10px;padding:2px 10px;border:1px solid #7c3aed;border-radius:3px;background:#7c3aed;color:#fff;cursor:pointer;font-weight:600">&#127981; Build production</button>
       <span style="position:relative;display:inline-block" id="dl-wrap">
         <button type="button" id="dl-btn-top" onclick="document.getElementById('dl-menu').classList.toggle('open');event.stopPropagation()" style="font-size:10px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:3px;background:#f1f5f9;color:#0f172a;cursor:pointer">&#11015; Download &#9662;</button>
         <div id="dl-menu" class="dl-menu-top" style="min-width:262px">
@@ -11159,6 +11160,66 @@ document.addEventListener('click',function(e){
 },true); // capture phase: fires before the panel's .pn stopPropagation
 document.addEventListener('keydown',function(e){if(e.key==='Escape')hideInbPop();});
 
+// ── BUY ▸ "Build production" — full-page all-countries buy matrix (Phase 1: read-only view) ──────────────────
+// Additive to the per-market Create-PO flow (unchanged). Shows each SKU's Buy 3PL requirement per market in one
+// grid, market-coloured, with country pills + category/search filters. Computes the matrix once (SKUM × CTRS via
+// BP.getBuyQtys) then filters in JS. Does NOT touch the buy calc. Later phases add MOQ flag + supplier pick + Save.
+var _pbData=null, _pbSel={ ctrs:null, cat:'', q:'' }, _pbQT=null;
+function _pbCol(mk){ return (typeof MKT_COLORS!=='undefined'&&MKT_COLORS[mk])||'#94a3b8'; }
+function openProdBuilder(){
+  if(!window.BP||typeof BP.getBuyQtys!=='function'){ alert('Open the BUY plan once, then retry.'); return; }
+  var d=document.getElementById('prodbuild-drawer');
+  if(d && d.style.display!=='none'){ d.style.display='none'; return; }   // toggle closed
+  if(!d){ d=document.createElement('div'); d.id='prodbuild-drawer'; d.style.cssText='position:fixed;inset:0;background:#fff;z-index:7000;display:flex;flex-direction:column;overflow:hidden'; document.body.appendChild(d); }
+  d.style.display='flex'; d.innerHTML='<div style="padding:16px 20px;color:#64748b;font-size:13px">Building all-country plan…</div>';
+  if(_pbSel.ctrs==null)_pbSel.ctrs=CTRS.slice();
+  setTimeout(function(){ try{
+    _pbData=[];
+    Object.keys(SKUM).forEach(function(sku){ var byC={}, any=0;
+      CTRS.forEach(function(m){ var q=BP.getBuyQtys(sku,m); var b=Math.round((q&&q.b3)||0); if(b>0){ byC[m]=b; any+=b; } });
+      if(any>0){ var p=SKUM[sku]||{}; _pbData.push({sku:sku, cat:p.c||'', name:p.n||'', byC:byC}); }
+    });
+    _pbRender(d);
+  }catch(e){ d.innerHTML='<div style="padding:20px;color:#dc2626">Could not build: '+String(e&&e.message||e)+'</div>'; if(window.console)console.error('[prodbuild]',e); } },20);
+}
+function _pbRender(d){
+  var esc=function(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});};
+  var fmt=function(n){ n=Math.round(Number(n)||0); return n?n.toLocaleString():''; };
+  var shown=(_pbSel.ctrs&&_pbSel.ctrs.length)?_pbSel.ctrs:CTRS.slice();
+  var rows=(_pbData||[]).map(function(r){ var t=0; shown.forEach(function(m){ t+=(r.byC[m]||0); }); return {r:r, tot:t}; }).filter(function(x){ return x.tot>0; });
+  var cats=Array.from(new Set((_pbData||[]).map(function(r){return r.cat;}).filter(Boolean))).sort();
+  var q=(_pbSel.q||'').toLowerCase();
+  var frows=rows.filter(function(x){ if(_pbSel.cat&&x.r.cat!==_pbSel.cat)return false; if(q&&(x.r.sku+' '+x.r.name).toLowerCase().indexOf(q)<0)return false; return true; }).sort(function(a,b){return a.r.sku<b.r.sku?-1:1;});
+  var pills=CTRS.map(function(m){var on=shown.indexOf(m)>=0;return '<button class="pb-ctr" data-m="'+m+'" style="border:1px solid '+_pbCol(m)+';background:'+(on?_pbCol(m):'#fff')+';color:'+(on?'#fff':'#334155')+';border-radius:12px;padding:3px 12px;font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;margin-right:4px">'+m+'</button>';}).join('');
+  var catOpts='<option value="">All categories</option>'+cats.map(function(c){return '<option'+(_pbSel.cat===c?' selected':'')+'>'+esc(c)+'</option>';}).join('');
+  var th='<th style="position:sticky;left:0;background:#f8fafc;text-align:left;padding:6px 10px;border-bottom:2px solid #e5e7eb;min-width:230px;z-index:1">SKU</th>'
+    +shown.map(function(m){return '<th style="text-align:right;padding:6px 10px;border-bottom:3px solid '+_pbCol(m)+';color:'+_pbCol(m)+';min-width:72px">'+m+'</th>';}).join('')
+    +'<th style="text-align:right;padding:6px 10px;border-bottom:2px solid #111;min-width:82px">Total</th>';
+  var body=frows.map(function(x){ var r=x.r;
+    return '<tr style="border-bottom:1px solid #f1f5f9">'
+      +'<td style="position:sticky;left:0;background:#fff;padding:4px 10px;font-weight:600">'+esc(r.sku)+(r.cat?'<span style="color:#94a3b8;font-weight:400;font-size:10px"> · '+esc(r.cat)+'</span>':'')+'</td>'
+      +shown.map(function(m){var v=r.byC[m]; return '<td style="text-align:right;padding:4px 10px;font-variant-numeric:tabular-nums'+(v?';background:'+_pbCol(m)+'22':'')+'">'+(v?fmt(v):'<span style="color:#cbd5e1">—</span>')+'</td>';}).join('')
+      +'<td style="text-align:right;padding:4px 10px;font-weight:700;font-variant-numeric:tabular-nums">'+fmt(x.tot)+'</td></tr>';
+  }).join('');
+  var colTot=shown.map(function(m){ return frows.reduce(function(a,x){return a+(x.r.byC[m]||0);},0); });
+  var grand=frows.reduce(function(a,x){return a+x.tot;},0);
+  var foot='<tr style="border-top:2px solid #cbd5e1;font-weight:700;background:#f8fafc"><td style="position:sticky;left:0;background:#f8fafc;padding:6px 10px">'+frows.length+' SKUs</td>'
+    +colTot.map(function(t){return '<td style="text-align:right;padding:6px 10px;font-variant-numeric:tabular-nums">'+fmt(t)+'</td>';}).join('')
+    +'<td style="text-align:right;padding:6px 10px;font-variant-numeric:tabular-nums">'+fmt(grand)+'</td></tr>';
+  d.innerHTML='<div style="display:flex;align-items:center;gap:10px;padding:12px 18px;border-bottom:1px solid #e5e7eb;flex:0 0 auto;flex-wrap:wrap">'
+      +'<b style="font-size:15px">Build production — all countries</b>'
+      +'<span style="display:inline-flex;align-items:center;margin-left:6px">'+pills+'</span>'
+      +'<select id="pb-cat" style="font-size:12px;padding:3px 8px;border:1px solid #cbd5e1;border-radius:6px">'+catOpts+'</select>'
+      +'<input id="pb-q" placeholder="Search SKU…" value="'+esc(_pbSel.q||'')+'" style="font-size:12px;padding:3px 8px;border:1px solid #cbd5e1;border-radius:6px;width:160px">'
+      +'<span style="margin-left:auto;color:#64748b;font-size:11px">Buy 3PL requirement by market · read-only (Phase 1)</span>'
+      +'<button id="pb-x" title="Close" style="width:30px;height:30px;border-radius:6px;border:1px solid #cbd5e1;background:#f8fafc;cursor:pointer;font-size:17px;line-height:1">&times;</button>'
+    +'</div>'
+    +'<div style="flex:1 1 auto;overflow:auto;padding:0 6px 16px"><table style="border-collapse:collapse;font-size:12px;width:100%"><thead><tr>'+th+'</tr></thead><tbody>'+body+foot+'</tbody></table></div>';
+  d.querySelector('#pb-x').onclick=function(){ d.style.display='none'; };
+  d.querySelectorAll('.pb-ctr').forEach(function(b){ b.onclick=function(){ var m=b.dataset.m, i=_pbSel.ctrs.indexOf(m); if(i>=0){ if(_pbSel.ctrs.length>1)_pbSel.ctrs.splice(i,1); } else { _pbSel.ctrs=CTRS.filter(function(c){ return c===m||_pbSel.ctrs.indexOf(c)>=0; }); } _pbRender(d); }; });
+  d.querySelector('#pb-cat').onchange=function(){ _pbSel.cat=this.value; _pbRender(d); };
+  var qi=d.querySelector('#pb-q'); qi.oninput=function(){ _pbSel.q=this.value; clearTimeout(_pbQT); _pbQT=setTimeout(function(){ _pbRender(d); var e2=document.getElementById('pb-q'); if(e2){e2.focus();e2.setSelectionRange(e2.value.length,e2.value.length);} },250); };
+}
 function renderBuyView(mode,scaffoldOnly){
   // scaffoldOnly: build the buy grid ONLY to host the SKU popup (#ov), invisibly — used when opening the
   // buy-plan popup from the DEMAND plan / SUPPLY, so the buy grid never flashes over the current view.
