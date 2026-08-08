@@ -1,3 +1,10 @@
+## v26.747.0 Zalando de-bake — Stage 2: forecast sourced from Supabase (not baked)
+- The injected `ZAL_FC` global is now derived from the DB (`forecast_outputs` channel `ZAL`, via the loaded `FC_OUTPUTS`) instead of `zalando_data.json`. Both consumers — the EU buy feed *and* the send-to-Zalando tab (`/api/supply/zalando/data`) — now read the Supabase forecast. `ZAL_MONTHS` derived from it.
+- New `ZAL_SKUS` global = the EU Zalando channel scope (SKUs in the stock upload ∪ SKUs with a ZAL forecast) — feeds the upcoming EU-only ZAL demand channel.
+- `zalando_data.json` is no longer the runtime source (its server reader `ZAL_DATA` is now dead — removed in Stage 4).
+- Verified: buy feed byte-identical (same 5 EU SKUs / deltas on Zalando on/off); `/api/supply/zalando/data` returns 44 forecast SKUs from the DB. Stage 1 seed (migration 203) is the data behind this.
+- Still to come: Stage 3 = enter/edit the Zalando forecast in the DEMAND grid (EU-only `ZAL` channel, absolute entry); Stage 4 = remove the baked file + old overlay path.
+
 ## v26.746.0 Zalando (Z1) review — efficiency tidy-up (no behaviour change)
 - `buildLiveDemand` no longer scans all ~503 products to clear the Zalando overlay — it clears+rebuilds in a single pass over the ≤44 `ZAL_FC` SKUs (`dem.ZAL` only ever exists there). Runs on every init / forecast edit / market switch.
 - `nextZalCover` (the 2-month Zalando target term) now short-circuits to 0 off the Zalando path (`isZalEU?…:0`) instead of doing empty-object lookups for every SKU×market×month.

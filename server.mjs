@@ -675,6 +675,21 @@ async function buildZalStock() {
     const o = {}; r.rows.forEach(x => { o[x.sku] = Number(x.qty) || 0; }); return o;
   } catch (e) { return {}; }
 }
+// Zalando forecast from the DB (forecast_outputs, channel ZAL) → {sku:{YYYY_MM:units}}. Replaces the baked
+// zalando_data.json map — the Zalando forecast is now stored in Supabase like DTC/FBA (Ben, 2026-08-08).
+async function buildZalFc() {
+  try {
+    const r = await pool.query(`SELECT sku, to_char(month,'YYYY_MM') ym, units::int u FROM planner.forecast_outputs WHERE channel='ZAL' AND units IS NOT NULL`);
+    const fc = {}; r.rows.forEach(x => { (fc[x.sku] || (fc[x.sku] = {}))[x.ym] = x.u; }); return fc;
+  } catch (e) { return {}; }
+}
+// EU Zalando channel scope: SKUs we track Zalando stock for (the upload) ∪ SKUs with a ZAL forecast.
+async function buildZalSkus() {
+  try {
+    const r = await pool.query(`SELECT DISTINCT sku FROM planner.zalando_stock UNION SELECT DISTINCT sku FROM planner.forecast_outputs WHERE channel='ZAL'`);
+    return r.rows.map(x => x.sku);
+  } catch (e) { return []; }
+}
 app.get('/', async (req, res) => {
   try {
     const _lazy = !!(req.query && (req.query.lazysku === '1' || req.query.lazysku === 'true'));   // SKU-data lazy-load opt-in
@@ -697,8 +712,13 @@ app.get('/', async (req, res) => {
     html = replaceGlobal(html, 'SUBS_META', JSON.stringify(SUBS));
     html = replaceGlobal(html, 'BI_RULES', JSON.stringify(BI));
     html = replaceGlobal(html, 'PROD_CONST', JSON.stringify(PROD_CONST));
-    html = replaceGlobal(html, 'ZAL_FC', JSON.stringify(ZAL_DATA.forecast || {}));
-    html = replaceGlobal(html, 'ZAL_MONTHS', JSON.stringify(ZAL_DATA.months || []));
+    // Zalando forecast now comes from the DB (forecast_outputs, channel ZAL), not the baked zalando_data.json —
+    // derive it from the already-loaded FC_OUTPUTS (keys "sku|warehouse|ZAL") to avoid an extra query on this hot path.
+    const ZAL_FC_DB = {}; const _zalM = new Set();
+    for (const k in FC_OUTPUTS) { if (k.endsWith('|ZAL')) { const sku = k.slice(0, k.indexOf('|')); const mm = FC_OUTPUTS[k];
+      const t = ZAL_FC_DB[sku] || (ZAL_FC_DB[sku] = {}); for (const ym in mm) { t[ym] = mm[ym]; _zalM.add(ym); } } }
+    html = replaceGlobal(html, 'ZAL_FC', JSON.stringify(ZAL_FC_DB));
+    html = replaceGlobal(html, 'ZAL_MONTHS', JSON.stringify([..._zalM].sort()));
     html = replaceGlobal(html, 'KLAVIYO_BIS', JSON.stringify(KLAVIYO_BIS));   // {sku:{UK:n,…}, _at:'YYYY-MM-DD'} — DEMAND BIS badge
     html = replaceGlobal(html, 'MKT_COLORS', JSON.stringify(MKT_COLORS));     // reusable market colour palette
     html = replaceGlobal(html, 'BRANCH_FREIGHT', JSON.stringify(BRANCH_FREIGHT || {}));
@@ -708,6 +728,7 @@ app.get('/', async (req, res) => {
     try { const PRICE_CHANGES = await buildPriceChanges(); html = replaceGlobal(html, 'PRICE_CHANGES', JSON.stringify(PRICE_CHANGES)); } catch (e) { /* leave the [] default */ }
     try { const CHINA_STOCK = await buildChinaStock(); html = replaceGlobal(html, 'CHINA_STOCK', JSON.stringify(CHINA_STOCK)); } catch (e) { /* leave the {} default */ }   // buy-plan "China stock to allocate" flag
     try { const ZAL_STOCK = await buildZalStock(); html = replaceGlobal(html, 'ZAL_STOCK', JSON.stringify(ZAL_STOCK)); } catch (e) { /* leave the {} default */ }   // EU Zalando buy-feed gate + forecast-vs-stock netting
+    try { const ZAL_SKUS = await buildZalSkus(); html = replaceGlobal(html, 'ZAL_SKUS', JSON.stringify(ZAL_SKUS)); } catch (e) { /* leave the [] default */ }   // EU ZAL demand-channel scope
     // BUY ▸ Complex Rules — cover-target override rules (replaces First Buy). Injected fresh (not cached) so an
     // add/edit shows on the next load. The buy engine reads these to override the 3PL cover target per SKU/window.
     try { const COMPLEX_RULES = await buildComplexRules(); html = replaceGlobal(html, 'COMPLEX_RULES', JSON.stringify(COMPLEX_RULES)); } catch (e) { /* leave the [] default */ }
@@ -6596,9 +6617,11 @@ app.get('/api/supply/zalando/data', async (req, res) => {   // /data suffix: sin
   try {
     const stock = {}; (await pool.query(`SELECT sku, qty FROM planner.zalando_stock`)).rows.forEach(r => { stock[r.sku] = Number(r.qty) || 0; });
     const up = (await pool.query(`SELECT to_char(max(updated_at),'YYYY-MM-DD') d, max(updated_at) ts, count(*)::int n, max(uploaded_by) by FROM planner.zalando_stock`)).rows[0] || {};
-    const skus = Object.keys(ZAL_DATA.forecast || {}); const eans = {};   // SKU → EAN (strip the leading apostrophe Sheets adds) for the ZALANDO_UP (EAN,Quantity) download
+    const forecast = await buildZalFc();   // Zalando forecast from the DB (forecast_outputs channel ZAL), not the baked file
+    const months = [...new Set(Object.values(forecast).flatMap(m => Object.keys(m)))].sort();
+    const skus = Object.keys(forecast); const eans = {};   // SKU → EAN (strip the leading apostrophe Sheets adds) for the ZALANDO_UP (EAN,Quantity) download
     if (skus.length) (await pool.query(`SELECT sku, replace(coalesce(product_ean,''), chr(39), '') ean FROM planner.products WHERE sku = ANY($1)`, [skus])).rows.forEach(r => { if (r.ean) eans[r.sku] = r.ean; });
-    res.set('Cache-Control', 'no-store').json({ ok: true, forecast: ZAL_DATA.forecast || {}, months: ZAL_DATA.months || [], stock, eans, stock_updated: up.d || null, stock_updated_ts: up.ts || null, stock_skus: up.n || 0, stock_updated_by: up.by || null });
+    res.set('Cache-Control', 'no-store').json({ ok: true, forecast, months, stock, eans, stock_updated: up.d || null, stock_updated_ts: up.ts || null, stock_skus: up.n || 0, stock_updated_by: up.by || null });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Upload the combined Zalando stock file (csv/xls/xlsx). Flexible: finds the header row with a "Sku" + "…sellable_stock" column.
