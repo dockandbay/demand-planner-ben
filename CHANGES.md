@@ -1,3 +1,10 @@
+## v26.748.0 Zalando de-bake — Stage 3a: EU ZAL channel in the DEMAND plan grid
+- New **EU-only `ZAL` channel** in the demand plan. The channel pill shows **only when EU is selected** (hidden on UK/US/AU/CA; selecting a non-EU market drops you off ZAL). Reads the Supabase Zalando forecast — **absolute entry, no last-year / growth / smoothing** (new `ch==='ZAL'` branch in `calc`, and the forecast shows in every month since Zalando has no actuals).
+- SKUs surface under ZAL via a `'z'` availability granted to `ZAL_SKUS` (stock upload ∪ ZAL-forecast SKUs); synthesized EU `DATA` rows per ZAL subcat (Zalando isn't in the actuals-based `DATA` feed). Threaded `'z'` through the `chKey` mappings. Wiring runs from `renderMain` via idempotent `zalInit()` (NOT `augmentSKUM`, which executes before `DATA`/`ZAL_SKUS` initialise).
+- Editing/saving ZAL in the grid flows to `forecast_inputs`/`forecast_outputs` (channel ZAL) through the existing CF-keyed save paths.
+- **Buy feed unchanged this stage** (still via the current path). Verified in the jsdom render harness: ZAL renders on EU with the seeded forecast, DTC/FBA byte-unaffected, no errors.
+- Still to come: Stage 3b = point the buy feed at the cascade (retire the baked overlay); Stage 4 = remove `zalando_data.json` injection + dead `ZAL_DATA`.
+
 ## v26.747.0 Zalando de-bake — Stage 2: forecast sourced from Supabase (not baked)
 - The injected `ZAL_FC` global is now derived from the DB (`forecast_outputs` channel `ZAL`, via the loaded `FC_OUTPUTS`) instead of `zalando_data.json`. Both consumers — the EU buy feed *and* the send-to-Zalando tab (`/api/supply/zalando/data`) — now read the Supabase forecast. `ZAL_MONTHS` derived from it.
 - New `ZAL_SKUS` global = the EU Zalando channel scope (SKUs in the stock upload ∪ SKUs with a ZAL forecast) — feeds the upcoming EU-only ZAL demand channel.
