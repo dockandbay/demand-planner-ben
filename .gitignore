@@ -38,4 +38,6 @@ files/
 *.mov
 *.dmg
 mockups/
-temp files/
+# All scratch/throwaway files live in temp/ (harness probes, logs, one-off scripts). Keep the folder, ignore its contents.
+temp/*
+!temp/.gitkeep
