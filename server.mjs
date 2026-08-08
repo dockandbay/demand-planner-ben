@@ -2454,18 +2454,42 @@ setInterval(() => { refreshActionsCache().catch(() => {}); }, ACTIONS_TTL_MS).un
 // for changes that bypass the app (n8n / ERP syncs). Caches are keyed to user-INDEPENDENT builds only.
 const SUPPLY_CACHE_TTL_MS = 10 * 60 * 1000;
 const _supplyCaches = [];
+// Cross-instance cache coherence: a shared "epoch" counter lives in planner.app_settings and is bumped on every
+// supply write (via patch() + invalidateSupplyCaches). Each cached build records the epoch it was built at; a cached
+// value is only served while the current epoch still matches. So on Vercel/multi-instance, an edit on ANY instance
+// forces every OTHER instance to rebuild (within the ~5s local epoch-poll window) rather than serving its own stale
+// in-memory cache until the 10-min TTL. Degrades gracefully to epoch 0 if the read fails (caching still works).
+const EPOCH_POLL_MS = 5000;
+let _epochVal = 0, _epochAt = 0, _epochInflight = null;
+async function currentSupplyEpoch() {
+  const now = Date.now();
+  if (_epochAt && now - _epochAt < EPOCH_POLL_MS) return _epochVal;
+  if (_epochInflight) return _epochInflight;
+  _epochInflight = pool.query(`SELECT coalesce(value::bigint,0) v FROM planner.app_settings WHERE key='supply_cache_epoch'`)
+    .then(r => { _epochVal = r.rows[0] ? Number(r.rows[0].v) : 0; _epochAt = Date.now(); _epochInflight = null; return _epochVal; })
+    .catch(() => { _epochAt = Date.now(); _epochInflight = null; return _epochVal; });   // keep last known on error
+  return _epochInflight;
+}
+async function bumpSupplyEpoch() {
+  try {
+    await pool.query(`INSERT INTO planner.app_settings(key,value) VALUES('supply_cache_epoch','1')
+      ON CONFLICT (key) DO UPDATE SET value=((coalesce(planner.app_settings.value,'0')::bigint)+1)::text, updated_at=now()`);
+    _epochAt = 0;   // force this instance to re-read on the next check so it sees its own bump immediately
+  } catch (e) { /* non-fatal */ }
+}
 function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS) {
   let entry = null, inflight = null;
-  function refresh() {
+  function refresh(ep) {
     if (inflight) return inflight;                 // single-flight: coalesce concurrent refreshes
     inflight = Promise.resolve().then(builder)
-      .then((v) => { entry = { v, at: Date.now() }; inflight = null; return v; })
+      .then((v) => { entry = { v, at: Date.now(), epoch: (ep != null ? ep : _epochVal) }; inflight = null; return v; })
       .catch((e) => { inflight = null; throw e; });
     return inflight;
   }
   async function get() {
-    if (entry) { if (Date.now() - entry.at >= ttlMs && !inflight) refresh().catch(() => {}); return entry.v; }
-    return refresh();                              // cold: block once until the first build lands
+    const ep = await currentSupplyEpoch();
+    if (entry && entry.epoch === ep) { if (Date.now() - entry.at >= ttlMs && !inflight) refresh(ep).catch(() => {}); return entry.v; }
+    return refresh(ep);                            // cold OR epoch changed → rebuild (block once)
   }
   const c = { name, get, refresh, invalidate() { entry = null; refresh().catch(() => {}); } };
   _supplyCaches.push(c);
@@ -2489,6 +2513,7 @@ const _sectionInflight = {};    // section -> bool (a recompute is running; othe
 const _portalCache = new Map();      // key -> { v, at }
 const _portalInflight = new Map();   // key -> bool
 function invalidateSupplyCaches() {
+  bumpSupplyEpoch();                                             // shared epoch → every OTHER instance rebuilds too (cross-instance)
   _actionsCache = null; refreshActionsCache().catch(() => {});   // the hand-rolled Actions cache predates makeCache
   _supplyCaches.forEach((c) => { try { c.invalidate(); } catch (e) { /* best-effort */ } });
   for (const k of Object.keys(_sectionResp)) delete _sectionResp[k];   // drop cached section responses too
@@ -2502,11 +2527,12 @@ app.get('/api/supply/:section', async (req, res) => {
   // to the switch and capture whatever it returns. Only the param-free variant is eligible.
   const _sec = req.params.section;
   if (SECTION_CACHE_TTL_MAP[_sec] && Object.keys(req.query || {}).length === 0) {
+    const _ep = await currentSupplyEpoch();                        // epoch-gated: a cached response is only valid while the epoch is unchanged
     const _c = _sectionResp[_sec];
-    if (_c && (Date.now() - _c.at < SECTION_CACHE_TTL_MAP[_sec] || _sectionInflight[_sec])) return res.json(_c.v);
+    if (_c && _c.epoch === _ep && (Date.now() - _c.at < SECTION_CACHE_TTL_MAP[_sec] || _sectionInflight[_sec])) return res.json(_c.v);
     _sectionInflight[_sec] = true;                                  // this request recomputes; concurrent ones serve stale above
     const _origJson = res.json.bind(res);
-    res.json = (p) => { if (!(p && p.error)) _sectionResp[_sec] = { v: p, at: Date.now() }; _sectionInflight[_sec] = false; return _origJson(p); };
+    res.json = (p) => { if (!(p && p.error)) _sectionResp[_sec] = { v: p, at: Date.now(), epoch: _ep }; _sectionInflight[_sec] = false; return _origJson(p); };
   }
   try {
     switch (req.params.section) {
@@ -3346,6 +3372,7 @@ async function patch(res, table, keyCol, keyVal, allowed, body, keyType, extraFn
   vals.push(keyVal);
   try {
     const r = await pool.query(`UPDATE ${table} SET ${sets.join(',')} WHERE ${keyCol}=$${i}${keyType ? '::' + keyType : ''}`, vals);
+    bumpSupplyEpoch();   // any supply edit bumps the shared epoch → cached sections (cash flow, PO rows…) rebuild cross-instance, not just after the 10-min TTL
     let extra = {};
     if (extraFn) { try { extra = (await extraFn(r.rowCount)) || {}; } catch (e) { /* non-fatal — still report the save */ } }
     res.json({ updated: r.rowCount, ...extra });
