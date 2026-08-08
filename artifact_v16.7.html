@@ -3512,7 +3512,7 @@ function buyplanItems(mode){ var out=[], fba=(mode==='fba'); try{ for(var sku in
 return {project:project, getBuyQtys:getBuyQtys, buyplanItems:buyplanItems, render:render, initUI:initUI, setFilters:setFilters, restoreFilters:bpRestoreFilters, donorSpare:donorSpare,
   open_:open_, close_:close_, renderPanel:renderPanel, swM:swM, rpc:rpc,
   downloadReport:downloadReport, downloadReportCSV:downloadReportCSV, downloadViewCSV:downloadViewCSV, updateDlMenuLabels:updateDlMenuLabels,
-  updateTrfHeaders:updateTrfHeaders, getFilteredVis:getFilteredVis,
+  updateTrfHeaders:updateTrfHeaders, getFilteredVis:getFilteredVis, trfLane:trfLane,
   seasons:function(){ var out={}; SL.forEach(function(s){ if(!s.rw)return; var ok=false; for(var m in (s.ms||{})){ if(s.ms[m]&&(s.ms[m].st==='ACTIVE'||s.ms[m].st==='FUTURE')){ok=true;break;} } if(ok)out[s.rw]=1; }); return Object.keys(out).sort(); },
   skuOptions:function(){ return SL.map(function(s){ return {s:s.s, sc:s.sc||s.c||''}; }).sort(function(a,b){ return a.s<b.s?-1:a.s>b.s?1:0; }); },   // for the Complex Rules SKU picker: {sku, subcat/cat}
 
@@ -8964,14 +8964,20 @@ function renderBuyMoveActions(){
     try{ BP.CUR=m; }catch(e){} for(var k in BP.BUY_CACHE)delete BP.BUY_CACHE[k];
     var vis=[]; try{ vis=BP.getFilteredVis()||[]; }catch(e){}
     var acts={b3:[],sea:[],air:[],bf:[],tx:[]};
+    var trfIn=[], trfOut=[];   // inter-market 3PL→3PL transfers where m is recipient (In) / donor (Out)
     vis.forEach(function(s){ var q; try{ q=BP.getBuyQtys(s.s,m); }catch(e){} if(!q)return;
       if(q.b3>0)acts.b3.push({sku:s.s,qty:Math.round(q.b3)});
       if(q.b3uSea>0)acts.sea.push({sku:s.s,qty:Math.round(q.b3uSea)});
       if(q.b3uAir>0)acts.air.push({sku:s.s,qty:Math.round(q.b3uAir)});
       if(q.bf>0)acts.bf.push({sku:s.s,qty:Math.round(q.bf)});
       if(q.tx>0)acts.tx.push({sku:s.s,qty:Math.round(q.tx)});
+      // 3PL→3PL transfers: recommend moving existing stock between markets before buying (Rebalance/Urgent classes).
+      MK.forEach(function(om){ if(om===m||!BP.trfLane)return;
+        try{ var ti=BP.trfLane(s.s,om,m); if(ti&&ti.qty>0)trfIn.push({sku:s.s,qty:Math.round(ti.qty),om:om,cls:ti.cls}); }catch(e){}
+        try{ var to=BP.trfLane(s.s,m,om); if(to&&to.qty>0)trfOut.push({sku:s.s,qty:Math.round(to.qty),om:om,cls:to.cls}); }catch(e){}
+      });
     });
-    var any=ACTS.some(function(a){return acts[a[0]].length;});
+    var any=ACTS.some(function(a){return acts[a[0]].length;})||trfIn.length||trfOut.length;
     html+='<div style="border:1px solid #e2e8f0;border-radius:10px;margin-bottom:12px;overflow:hidden">'
       +'<div style="background:#f8fafc;padding:8px 12px;font-weight:800;font-size:13px;border-bottom:1px solid #eef2f7">'+m+'</div>'
       +'<table style="width:100%;border-collapse:collapse;font-size:12px"><tbody>';
@@ -8986,6 +8992,23 @@ function renderBuyMoveActions(){
         +'<td style="padding:6px 12px;text-align:left;color:#94a3b8;width:22px"><span class="bma-chev">&#9656;</span></td></tr>'
         +'<tr id="'+rid+'" style="display:none"><td colspan="4" style="padding:0 12px 8px 24px;background:#fbfdff"><div style="max-height:230px;overflow:auto">'
         +list.map(function(x){return '<div style="display:flex;gap:14px;padding:1px 0;font-size:11px;border-bottom:1px solid #f4f6f9;text-align:left"><span style="min-width:200px">'+esc(x.sku)+'</span><span style="font-variant-numeric:tabular-nums">'+fn(x.qty)+'</span></div>';}).join('')
+        +'</div></td></tr>';
+    });
+    // 3PL→3PL transfer lines (In = m receives; Out = m sends). Expand shows each lane's counterpart market + class.
+    [['trfin','3PL Transfer In','#0f766e','←',trfIn],['trfout','3PL Transfer Out','#b45309','→',trfOut]].forEach(function(t){
+      var list=t[4]; if(!list.length)return;
+      var tot=list.reduce(function(a,x){return a+x.qty;},0); list.sort(function(x,y){return y.qty-x.qty;});
+      var rid='bma-'+m+'-'+t[0];
+      function chip(cls){ return cls==='urgent'
+        ?'<span title="Urgent — stockout protection" style="font-size:8px;font-weight:700;color:#dc2626;background:#fee2e2;border-radius:3px;padding:0 4px;margin-left:6px">URGENT</span>'
+        :'<span title="Rebalance — move overstock before buying" style="font-size:8px;font-weight:700;color:#1d4ed8;background:#dbeafe;border-radius:3px;padding:0 4px;margin-left:6px">REBAL</span>'; }
+      html+='<tr class="bma-row" data-t="'+rid+'" style="cursor:pointer;border-top:1px solid #f1f5f9">'
+        +'<td style="padding:6px 12px;text-align:left;font-weight:700;color:'+t[2]+'">'+t[1]+'</td>'
+        +'<td style="padding:6px 12px;text-align:left;font-variant-numeric:tabular-nums;font-weight:700">'+fn(tot)+' <span style="color:#94a3b8;font-weight:400">units</span></td>'
+        +'<td style="padding:6px 12px;text-align:left;color:#64748b">'+list.length+' lane'+(list.length>1?'s':'')+'</td>'
+        +'<td style="padding:6px 12px;text-align:left;color:#94a3b8;width:22px"><span class="bma-chev">&#9656;</span></td></tr>'
+        +'<tr id="'+rid+'" style="display:none"><td colspan="4" style="padding:0 12px 8px 24px;background:#fbfdff"><div style="max-height:230px;overflow:auto">'
+        +list.map(function(x){return '<div style="display:flex;gap:14px;padding:1px 0;font-size:11px;border-bottom:1px solid #f4f6f9;text-align:left;align-items:center"><span style="min-width:200px">'+esc(x.sku)+'</span><span style="min-width:64px;color:#64748b">'+t[3]+' '+esc(x.om)+'</span><span style="font-variant-numeric:tabular-nums;min-width:48px">'+fn(x.qty)+'</span>'+chip(x.cls)+'</div>';}).join('')
         +'</div></td></tr>';
     });
     html+='</tbody></table></div>';

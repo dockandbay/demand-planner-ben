@@ -1,3 +1,8 @@
+## v26.752.0 BUY & MOVE ▸ Actions: 3PL→3PL transfer lines
+- The **Actions-by-country** summary now includes **"3PL Transfer In"** (stock this market receives from other markets) and **"3PL Transfer Out"** (stock it sends), alongside Buy 3PL · Urgent Sea/Air · Buy FBA · FBA Transfer. Same format — total units + expand, each lane showing the counterpart market (← / →) and its **Urgent / Rebalance** class. Left-aligned per house style.
+- Uses the existing inter-market transfer engine (`trfLane`, now exposed on `BP`). **Display/report only — buy quantities are unchanged** (inter-market transfers never feed `getBuyQtys`).
+- Verified (jsdom): both lines render against the sandbox's live transfer lanes (e.g. US/EU→UK urgent/rebalance), no errors.
+
 ## v26.751.0 Zalando: ZAL in the Summary (EU) + remove dead baked ZAL_DATA
 - **DEMAND ▸ Summary:** ZAL is now offered in the Summary's channel selector **on EU only** (hidden on UK/US/AU/CA; selecting a non-EU market drops off ZAL). The Zalando category forecast + LY actuals are viewable/comparable in the Summary like the other channels — closes the "comparison to a total summary" gap from the reviews. `zalInit()` also called from `renderSummaryView` so the channel is wired even if the Summary is opened before the plan renders.
 - **Cleanup (Zalando de-bake Stage 4, partial):** removed the dead baked `ZAL_DATA` server reader (the Zalando forecast has been DB-sourced since v26.747). `zalando_data.json` stays only as the migration-203 seed source. (The `buildLiveDemand` 2c overlay removal stays paired with Stage 3b, the buy-feed-to-cascade switch.)
