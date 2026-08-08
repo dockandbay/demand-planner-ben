@@ -10088,10 +10088,10 @@
     ov.innerHTML='<div class="pomodal" style="width:100%;max-width:none;flex:1 1 auto;display:flex;flex-direction:column;overflow:hidden">'
       +'<div style="flex:0 0 auto">'
       +'<div style="display:flex;align-items:center;margin-bottom:8px"><b style="font-size:15px">Create production POs — all countries</b>'
-        +'<span style="margin-left:12px;display:inline-flex;gap:3px" id="bpm-mode"></span>'
         +'<span style="margin-left:auto;cursor:pointer;font-size:18px" id="bpm-x">✕</span></div>'
       +'<div style="font-size:12px;color:#555;margin-bottom:8px">One production across markets. Tick a market per SKU and edit the qty inline to override the recommendation; pick a supplier where a SKU has more than one. <b>Create POs</b> makes one PO per country (branch auto, ≤20-pallet split, status FUTURE). An MOQ flag shows under a SKU when the combined ticked order is below its minimum.</div>'
-      +'<div class="bar"><span class="pill-lbl">Production</span><select id="bpm-prod" class="flt" style="width:auto"></select>'
+      +'<div class="bar"><span id="bpm-mode" style="display:inline-flex;gap:3px;margin-right:14px"></span>'
+      +'<span class="pill-lbl">Production</span><select id="bpm-prod" class="flt" style="width:auto"></select>'
       +'<span class="pill-lbl">Batch</span><select id="bpm-batch" class="flt" style="width:auto"><option value="">— optional —</option></select>'
       +'<span class="pill-lbl">Start date</span><input id="bpm-start" type="date" class="flt" style="width:auto">'
       +'<span style="margin-left:10px" id="bpm-pills"></span>'
@@ -10105,10 +10105,23 @@
     document.body.appendChild(ov);
     var close=function(){ ov.remove(); };
     document.getElementById('bpm-x').onclick=close;
+    try{ var _sd=document.getElementById('bpm-start'); if(_sd)_sd.value=new Date().toISOString().slice(0,10); }catch(e){}   // start date defaults to today
     fetch('/api/supply/prod-numbers').then(function(r){return r.json();}).then(function(rows){ var prods=(rows||[]).map(function(p){return p.prod_no;}).filter(Boolean);
       var sel=document.getElementById('bpm-prod'); if(sel)sel.innerHTML='<option value="">— choose production —</option>'+prods.map(function(p){return '<option>'+esc(p)+'</option>';}).join(''); }).catch(function(){});
+    // Batch dropdown + inline "add batch number" (writes to CONFIG ▸ Batches via /api/supply/batch-create).
+    var _bpmBatchPrev='';
+    function bpmFillBatch(batches, sel){ var bs=document.getElementById('bpm-batch'); if(!bs)return;
+      bs.innerHTML='<option value="">— optional —</option>'+batches.map(function(x){return '<option'+(x===sel?' selected':'')+'>'+esc(x)+'</option>';}).join('')+'<option value="__addbatch__">➕ Add batch number…</option>';
+      _bpmBatchPrev=sel||''; }
     fetch('/api/supply/lookups').then(function(r){return r.json();}).then(function(d){ var batches=((d&&d.batches)||[]).slice().sort(function(a,b){return String(b).localeCompare(String(a),undefined,{numeric:true});});
-      var bs=document.getElementById('bpm-batch'); if(bs)bs.innerHTML='<option value="">— optional —</option>'+batches.map(function(x){return '<option>'+esc(x)+'</option>';}).join(''); }).catch(function(){});
+      bpmFillBatch(batches,''); var bs=document.getElementById('bpm-batch');
+      if(bs)bs.onchange=function(){ if(bs.value!=='__addbatch__'){ _bpmBatchPrev=bs.value; return; }
+        var nm=(window.prompt('New batch number (added to Config ▸ Batches):')||'').trim(); if(!nm){ bs.value=_bpmBatchPrev; return; }
+        fetch('/api/supply/batch-create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({batch:nm})}).then(function(r){return r.json();}).then(function(j){
+          if(j&&j.error){ alert(j.error); bs.value=_bpmBatchPrev; return; }
+          batches.push(nm); batches.sort(function(a,b){return String(b).localeCompare(String(a),undefined,{numeric:true});}); bpmFillBatch(batches,nm);
+        }).catch(function(e){ alert((e&&e.message)||'failed'); bs.value=_bpmBatchPrev; }); };
+    }).catch(function(){});
     // enrichment for the union of ALL skus across both modes
     var unionSkus={}; ['3pl','fba'].forEach(function(md){ Object.keys(REC[md]).forEach(function(s){ var t=0; CTRS_ALL.forEach(function(c){ t+=(REC[md][s][c]||0); }); if(!unionSkus[s]||t>unionSkus[s])unionSkus[s]=t; }); });
     var unionItems=Object.keys(unionSkus).map(function(s){ return {sku:s,qty:unionSkus[s]||1}; });
@@ -10136,29 +10149,27 @@
       list.sort(function(a,b){ var ca=a.cat||'~~~',cb=b.cat||'~~~'; return ca<cb?-1:ca>cb?1:(a.sku<b.sku?-1:a.sku>b.sku?1:0); });
       var tdB='padding:3px 8px;border-bottom:1px solid #f0f0f0;white-space:nowrap', ncol=shown.length, rows='', curCat=null;
       list.forEach(function(s){ var cat=s.cat||'(uncategorised)'; var hc=hasCode(s.sku);
-        if(cat!==curCat){ curCat=cat; rows+='<tr><td colspan="'+(ncol+4)+'" style="background:#e8e8e6;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#333;padding:3px 8px;text-align:left">'+esc(cat)+' <span style="margin-left:8px;font-weight:400;text-transform:none;letter-spacing:0"><a class="bpm-cat-sel" data-cat="'+esc(cat)+'" data-on="1" style="cursor:pointer;color:#1d4ed8;font-size:9px">tick all</a> <span style="color:#cbd5e1">·</span> <a class="bpm-cat-sel" data-cat="'+esc(cat)+'" data-on="0" style="cursor:pointer;color:#64748b;font-size:9px">none</a></span></td></tr>'; }
+        if(cat!==curCat){ curCat=cat; rows+='<tr><td colspan="'+(ncol+3)+'" style="background:#e8e8e6;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#333;padding:3px 8px;text-align:left">'+esc(cat)+' <span style="margin-left:8px;font-weight:400;text-transform:none;letter-spacing:0"><a class="bpm-cat-sel" data-cat="'+esc(cat)+'" data-on="1" style="cursor:pointer;color:#1d4ed8;font-size:9px">tick all</a> <span style="color:#cbd5e1">·</span> <a class="bpm-cat-sel" data-cat="'+esc(cat)+'" data-on="0" style="cursor:pointer;color:#64748b;font-size:9px">none</a></span></td></tr>'; }
         var supCell; var o=optsOf(s.sku);
         if(!o.length){ supCell='<span style="color:#b45309">⚠ no supplier</span>'; }
         else if(o.length===1){ supCell=o[0].code?(esc(o[0].code)+' · '+esc(o[0].name)):('<span style="color:#b45309">⚠ '+esc(o[0].name)+' (no code)</span>'); }
         else { supCell='<select class="bpm-skusup" style="width:auto;font-size:11px;padding:1px 4px;border:1px solid #f59e0b;border-radius:4px;background:#fef3c7;color:#92400e;font-weight:600">'+o.map(function(x){return '<option value="'+esc(x.code||'')+'"'+(x.code===supOf(s.sku)?' selected':'')+(x.code?'':' disabled')+'>'+esc(x.code||'?')+' · '+esc(x.name)+'</option>';}).join('')+'</select>'; }
         var rt=rowTotal(s.sku);
-        var pal=s.pallet_qty>0?(Math.round(rt/s.pallet_qty*10)/10):('<span style="color:#b45309" title="no pallet_qty">n/a</span>');
         var qtyCells=shown.map(function(c){ var v=qtyVal(s.sku,c), tk=isTicked(s.sku,c), dis=hc?'':' disabled';
-          return '<td style="'+tdB+';text-align:center'+(v?';background:'+colOf(c)+'18':'')+'"><span style="display:inline-flex;align-items:center;gap:4px;justify-content:center"><input type="checkbox" class="bpm-tick" data-s="'+esc(s.sku)+'" data-c="'+c+'"'+(tk?' checked':'')+dis+'><input type="number" min="0" class="bpm-q" data-s="'+esc(s.sku)+'" data-c="'+c+'" value="'+v+'"'+dis+' style="width:58px;text-align:center;font-size:11px;padding:1px 3px;border:1px solid #d1d5db;border-radius:4px"></span></td>'; }).join('');
+          return '<td style="'+tdB+';text-align:center'+(v?';background:'+colOf(c)+'18':'')+'"><span style="display:inline-flex;align-items:center;gap:4px;justify-content:center"><input type="checkbox" class="bpm-tick" data-s="'+esc(s.sku)+'" data-c="'+c+'"'+(tk?' checked':'')+dis+'><input type="number" min="0" class="bpm-q" data-s="'+esc(s.sku)+'" data-c="'+c+'" value="'+v+'"'+dis+' style="width:58px;text-align:center;font-size:11px;padding:1px 3px;border:none;background:transparent"></span></td>'; }).join('');
         var moqShort=(s.moq&&rt>0&&rt<s.moq);
         rows+='<tr data-sku="'+esc(s.sku)+'" data-cat="'+esc(cat)+'" data-moq="'+(s.moq||0)+'">'
           +'<td style="'+tdB.replace('white-space:nowrap','')+';text-align:left;min-width:200px"><div style="display:flex;align-items:center;gap:6px"><button class="bpm-plan" data-sku="'+esc(s.sku)+'" style="font-size:8px;font-weight:700;padding:0 4px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer">PLAN</button><span>'+esc(s.sku)+'</span></div>'+(s.discontinue?'<div style="font-size:9px;color:#9ca3af;margin-top:1px">discontinue '+esc(fd(s.discontinue))+'</div>':'')+'<div class="bpm-moq" style="font-size:9.5px;color:#b45309;font-weight:700;margin-top:2px;display:'+(moqShort?'':'none')+'">'+(moqShort?('⚑ MOQ '+s.moq.toLocaleString()+' — production '+rt.toLocaleString()+', short '+(s.moq-rt).toLocaleString()):'')+'</div></td>'
           +qtyCells
           +'<td style="'+tdB+';text-align:center;font-weight:700;font-variant-numeric:tabular-nums"><span class="bpm-rowtot">'+(rt?rt.toLocaleString():'0')+'</span></td>'
-          +'<td style="'+tdB+';text-align:center">'+pal+'</td>'
           +'<td style="'+tdB+';text-align:left;min-width:150px">'+supCell+'</td></tr>';
       });
       var thB='position:sticky;top:0;background:#f3f3f1;z-index:1;padding:5px 8px;border-bottom:1px solid #d5d5d5;font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#444;white-space:nowrap';
-      var ctryTh=shown.map(function(c){return '<th style="'+thB+';text-align:center;border-bottom:3px solid '+colOf(c)+';color:'+colOf(c)+';min-width:104px">'+c+'</th>';}).join('');
+      var ctryTh=shown.map(function(c){return '<th style="'+thB+';text-align:center;border-bottom:3px solid '+colOf(c)+';color:#111;min-width:104px">'+c+'</th>';}).join('');
       box.innerHTML='<div style="flex:0 0 auto;display:flex;align-items:center;gap:10px;margin-bottom:4px"><label style="font-size:11px;cursor:pointer"><input type="checkbox" id="bpm-tickall" checked> tick all shown</label><span class="count" id="bpm-skucount" style="margin-left:auto"></span></div>'
         +'<div style="flex:1 1 auto;overflow:auto;border:1px solid #e0e0e0;border-radius:6px"><table style="border-collapse:separate;border-spacing:0;font-size:11px;width:100%">'
         +'<thead><tr><th style="'+thB+';text-align:left;min-width:200px">SKU</th>'+ctryTh
-        +'<th style="'+thB+';text-align:center;min-width:70px">Total</th><th style="'+thB+';text-align:center;min-width:54px">Pallets</th>'
+        +'<th style="'+thB+';text-align:center;min-width:70px">Total</th>'
         +'<th style="'+thB+';text-align:left;min-width:150px">Supplier</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
       var pb=document.getElementById('bpm-pills'); if(pb)pb.innerHTML=pillBar();
       document.querySelectorAll('#bpm-pills .bpm-ctr').forEach(function(b){ b.onclick=function(){ var c=b.dataset.c,i=shown.indexOf(c); if(i>=0){ if(shown.length>1)shown.splice(i,1); } else shown=modeCountries().filter(function(x){return x===c||shown.indexOf(x)>=0;}); drawSkus(); }; });

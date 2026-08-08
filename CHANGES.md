@@ -1,3 +1,7 @@
+## v26.761.0 Create-production-POs modal: 6 UX tweaks
+- (1) Removed the per-SKU **Pallets** column from the SKU grid. (2) Country column headers now **black text** (the coloured underline stays). (3) Removed the **border** on the qty input cells. (4) Moved the **Buy 3PL / Buy FBA** toggle out of the title bar, down into the toolbar **before "Production"**. (5) Batch dropdown now has an **"➕ Add batch number…"** option that creates the batch in Config inline (`/api/supply/batch-create`) and selects it. (6) **Start date defaults to today.**
+- UX-only (no buy-logic change). inject syntax-clean; Ben verifies the modal visually.
+
 ## v26.760.0 AI rec calibration: "Mixed" is direction-only (Hair Wrap fix)
 - "Mixed" now fires **only when the trend DIRECTION is unclear** — too few months, or the YoY genuinely swings up AND down (≥15% both ways). A consistently-positive (or -negative) SKU is NOT Mixed just because its magnitude varies a lot: e.g. **Hair Wrap SEASONAL UK (+58%..+1409% YoY) now reads "High growth"** (was wrongly "Mixed"). Magnitude uncertainty shows in the confidence band instead.
 - Primary % = the **robust median YoY** (clamped ±, no more shrink-toward-flat), so the label reflects the real direction/size; band width scales with variance. (Genuinely up-and-down SKUs, e.g. US Hair Wrap −38%..+151%, still correctly Mixed.)
