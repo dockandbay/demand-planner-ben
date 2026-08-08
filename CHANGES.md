@@ -1,3 +1,8 @@
+## v26.755.0 Received-PO auto-complete surfaces in the ✉ bell + counts as a timeline action
+- The auto-complete timeline note (recently-received-POs feed) now appears in the top-bar **✉ Inbox bell** as a recent event — the bell query now includes **system-generated internal notes** (`author_kind='internal' AND author_email='system'`) alongside supplier notes. Clearable/snoozable via the existing id-based read mechanism.
+- **Unread timeline notes are an action:** the PO-grid `timeline_unread` action already counts unread internal notes (so the auto-complete note registers); relabelled *"Unread supplier note(s)"* → *"Unread timeline note(s)"*.
+- Verified: seed a received PO → process → the note shows in the bell **and** counts as a PO action; reverted.
+
 ## v26.754.0 Zalando Stage 3b: buy feed reads the live cascade (not baked ZAL_FC)
 - `buildLiveDemand`'s Zalando overlay now builds `dem.ZAL` from the **live forecast** — `calc(subcat,EU,ZAL)` (absolute, reads live IV) × SKU share + `FC_OUTPUTS` per-SKU overrides — the same source the demand grid renders from, instead of the page-load `ZAL_FC` global. **A ZAL forecast edit in the plan now flows to the buy plan without a page reload** (closes the 3a/3b consistency gap from the audit). Still absolute (no LY-chain), gated on `ZAL_STOCK`, Buy 3PL only.
 - Verified: **byte-identical buy effect** (same 5 EU SKUs); the buy is now **independent of `ZAL_FC`** (clearing it leaves the buy unchanged); the `ZAL_STOCK` gate is intact. (`ZAL_FC`/`ZAL_MONTHS` globals stay for now — still fed to the send-to-Zalando tab; Stage 4 removes if fully unused.)

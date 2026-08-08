@@ -2576,7 +2576,7 @@ app.get('/api/supply/:section', async (req, res) => {
           ORDER BY slip_days DESC NULLS LAST, po.supplier_name, po.po`);
         return res.json({ pos: rows });
       }
-      case 'timeline-notifications':   // top-bar ✉ bell: unread SUPPLIER PO-timeline notes (newest first), minus snoozed (supply_action_state key 'tlnote|<id>')
+      case 'timeline-notifications':   // top-bar ✉ bell: unread SUPPLIER PO-timeline notes + system events (e.g. auto-complete on receipt), newest first, minus snoozed (supply_action_state key 'tlnote|<id>')
         return res.json(await q(`
           SELECT sn.id, sn.po, coalesce(po.supplier_name,'') supplier_name, sn.body,
                  to_char(sn.created_at,'YYYY-MM-DD HH24:MI') created_at
@@ -2584,7 +2584,8 @@ app.get('/api/supply/:section', async (req, res) => {
           LEFT JOIN planner.purchase_orders po ON po.po = sn.po
           LEFT JOIN planner.supply_action_state s ON s.action_key = 'tlnote|'||sn.id
                  AND s.status='snoozed' AND (s.snooze_until IS NULL OR s.snooze_until >= current_date)
-          WHERE sn.author_kind='supplier' AND sn.read_at IS NULL AND s.action_key IS NULL
+          WHERE (sn.author_kind='supplier' OR (sn.author_kind='internal' AND sn.author_email='system'))
+                AND sn.read_at IS NULL AND s.action_key IS NULL
           ORDER BY sn.created_at DESC`));
       case 'samples':   // SUPPLY ▸ Samples grid — all sample requests + open/overdue/charge flags
         return res.json(await q(`SELECT s.id, s.ref, coalesce(s.supplier_name,'') supplier_name,
