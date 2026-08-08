@@ -8130,7 +8130,7 @@ function render(){
     else if(DEMAND_VIEW==='targets') renderTargetsView(body);
     else if(DEMAND_VIEW==='calendar') renderCalendarView(body);
     else if(DEMAND_VIEW==='kpis') renderKpisView(body);
-    else if(DEMAND_VIEW==='revenue') renderRevenueView(body);
+    else if(DEMAND_VIEW==='pricechanges'||DEMAND_VIEW==='revenue') renderPriceChangesView(body);   // Revenue & growth report removed (superseded by Summary + targets); this Inputs tab now hosts Price changes. 'revenue' kept as an alias for old hashes/bookmarks.
     else if(DEMAND_VIEW==='klaviyobis') renderKlaviyoBisView(body);
     else renderDemandActionsView(body);
     return;
@@ -8710,7 +8710,7 @@ function renderAccuracyView(kb,body){
   }).catch(function(){ kb.innerHTML='<div style="color:#dc2626;font-size:12px">Failed to load.</div>'; });
 }
 // ─── DEMAND sub-tabs (PLAN / KPIs / TARGETS / ACTIONS / CALENDAR) ───────────────────────────
-var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accts'],['kpis','KPIs'],['targets','Sell-through targets'],['revenue','Revenue'],['actions','Actions'],['calendar','Calendar']];
+var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accts'],['kpis','KPIs'],['targets','Sell-through targets'],['pricechanges','Price changes'],['actions','Actions'],['calendar','Calendar']];
 function renderDemandTabs(){
   var bar=document.getElementById('demand-tabs');
   var _sb=document.getElementById('statusbar');
@@ -8727,13 +8727,13 @@ function renderDemandTabs(){
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   // Primary tabs inline; the reference/input views (Sell-through targets, Key accounts, Calendar, Revenue) are grouped under an "Inputs ▾" dropdown.
   var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS';
-  var PRIMARY=['plan','summary','kpis','actions'], INPUTS=['targets','keyaccounts','calendar','revenue','klaviyobis'];
+  var PRIMARY=['plan','summary','kpis','actions'], INPUTS=['targets','keyaccounts','calendar','pricechanges','klaviyobis'];
   var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0;
   var _isPlanV=(DEMAND_VIEW==='plan');
   // Release Window now lives in the More Filters panel; Undo + Download now sit on the right of the plan controls
   // row (#filters-row2), not on this tab menu row. (Ben: keep the tab menu clean.)
   bar.innerHTML=PRIMARY.map(function(k){ if(!_dlbl[k])return ''; return '<button class="dnav'+(k===DEMAND_VIEW?' active':'')+'" data-d="'+k+'">'+_dlbl[k]+'</button>'; }).join('')
-    +'<button class="dnav'+(_inpActive?' active':'')+'" id="dnav-inputs-btn" title="Sell-through targets, Key accounts, Calendar, Revenue">Inputs</button>';
+    +'<button class="dnav'+(_inpActive?' active':'')+'" id="dnav-inputs-btn" title="Sell-through targets, Key accounts, Calendar, Price changes">Inputs</button>';
   if(_isPlanV){ try{ fillPlanRwSel(); }catch(e){} try{ updateUndoBtn(); }catch(e){} }
   bar.querySelectorAll('.dnav[data-d]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); VIEW_MODE='planning'; DEMAND_VIEW=b.dataset.d; if(window.writeHash)window.writeHash(['demand',DEMAND_VIEW]); render(); }; });   // a demand sub-tab is a planning view — force planning mode
   // "Inputs" → enter the inputs group (keep the current input view, else default to the first)
@@ -8938,7 +8938,7 @@ var _tgtStatus='all'; // scorecard status filter
 function applyTarget(cat,mkt,pct){ return fetch('/api/targets',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({category:cat,market:mkt,metric:'st',value:pct})}).then(function(r){return r.json();}); }
 // ── DEMAND ▸ Revenue: revenue-growth targets + tracking, and definitive price changes ──────────────────────
 var REV_SUB='targets', REV_FY=null, REV_TARGETS={}, _revBody=null, REV_ROWS=[];
-function revReload(){ if(_revBody)renderRevenueView(_revBody); }
+function revReload(){ if(_revBody)renderPriceChangesView(_revBody); }   // price-changes add/delete refresh (Revenue report retired)
 function revCombos(){ var seen={}, out=[]; (DATA||[]).forEach(function(r){ if(!r.co||!r.ch)return; var k=r.co+'|'+r.ch; if(!seen[k]){ seen[k]=1; out.push({co:r.co,ch:r.ch}); } });
   out.sort(function(a,b){ var ia=CTRS.indexOf(a.co),ib=CTRS.indexOf(b.co); ia=ia<0?99:ia; ib=ib<0?99:ib; return ia!==ib?ia-ib:String(a.ch).localeCompare(String(b.ch)); }); return out; }
 function revSubcats(){ var seen={}, out=[]; (DATA||[]).forEach(function(r){ if(r.s&&!seen[r.s]){ seen[r.s]=1; out.push(r.s); } }); return out.sort(); }
@@ -8981,11 +8981,9 @@ function planRevBtnSync(){ var show=(typeof VIEW_MODE!=='undefined'&&VIEW_MODE==
   if(show&&row&&!isMobile){
     if(!c){ c=document.createElement('div'); c.id='plan-report-btns'; c.style.cssText='margin-left:auto;display:flex;gap:4px;align-items:center;flex-wrap:wrap';
       var btn='border:1px solid #cbd5e1;background:#fff;border-radius:6px;padding:3px 9px;font-size:11px;font-weight:600;font-family:inherit;cursor:pointer;white-space:nowrap;line-height:1.5';
-      c.innerHTML='<button id="plan-rev-btn2" type="button" title="Revenue growth targets & tracking — full report" style="'+btn+';border-color:#2563eb;color:#2563eb">Revenue vs target</button>'
-        +'<button id="plan-exec-btn" type="button" title="Executive summary — FY revenue &amp; units vs last year" style="'+btn+';border-color:#0f766e;color:#0f766e">Exec summary</button>'
+      c.innerHTML='<button id="plan-exec-btn" type="button" title="Executive summary — FY revenue &amp; units vs last year" style="'+btn+';border-color:#0f766e;color:#0f766e">Exec summary</button>'
         +'<button id="plan-summ-btn" type="button" title="Summary report with revenue targets + recommendations" style="'+btn+';border-color:#7c3aed;color:#7c3aed">Summary + targets</button>';   // "Target recs" is now a tab inside this report
       row.appendChild(c);
-      c.querySelector('#plan-rev-btn2').onclick=openPlanRevPopout;
       c.querySelector('#plan-exec-btn').onclick=openExecSummaryPopout;
       c.querySelector('#plan-summ-btn').onclick=openSummaryPopout; }
   } else { if(c)c.remove(); if(typeof closeExecDrawer==='function')closeExecDrawer(); if(typeof closeRevDrawer==='function')closeRevDrawer(); if(typeof closeSummDrawer==='function')closeSummDrawer(); if(typeof closeTrecDrawer==='function')closeTrecDrawer(); } }
@@ -9243,6 +9241,16 @@ function planRevPopRender(){ var p=document.getElementById('plan-rev-pop'); if(!
   p.querySelectorAll('.prp-fy').forEach(function(b){ b.onclick=function(){ PLAN_REV_FY=+b.dataset.fy; planRevPopRender(); }; });
   p.querySelector('#prp-goto').onclick=function(){ p.remove(); REV_SUB='targets'; REV_FY=fy; DEMAND_VIEW='revenue'; if(window.writeHash)window.writeHash(['demand','revenue']); render(); }; }
 
+// DEMAND ▸ Inputs ▸ Price changes — the price-changes editor, standalone (the old Revenue & growth report/targets
+// were removed, superseded by Summary + targets). Reuses renderPriceChanges (add/delete → revReload refreshes here).
+function renderPriceChangesView(body){ _revBody=body;
+  body.innerHTML='<style>.rev-tbl{border-collapse:collapse;font-size:12px;margin-top:6px}.rev-tbl th,.rev-tbl td{padding:4px 11px;border-bottom:1px solid #eef2f7;text-align:left;white-space:nowrap}.rev-tbl .r{text-align:right;font-variant-numeric:tabular-nums}.rev-tbl .c{text-align:center}.rev-tbl .mut{color:#9aa5b1}.rev-tbl .tiny{font-size:10px;font-weight:400}.rev-tbl input,.rev-tbl select{font-size:12px}</style>'
+    +'<div style="font-weight:700;font-size:15px;margin:2px 0 8px">Price changes</div>'
+    +'<div id="rev-body"><div class="count">Loading…</div></div>';
+  fetch('/api/price-changes').then(function(r){return r.json();}).catch(function(){return [];}).then(function(pc){
+    PRICE_CHANGES=pc||[]; var rb=document.getElementById('rev-body'); if(!rb)return;
+    try{ renderPriceChanges(rb); }catch(err){ rb.innerHTML='<div style="padding:12px;color:#b91c1c;font-size:12px">Could not render price changes: '+esc(String(err&&err.message||err))+'</div>'; if(window.console)console.error('[pricechanges] render error',err); }
+  }); }
 function renderRevenueView(body){ _revBody=body; if(REV_FY==null)REV_FY=CUR_FY_START;
   var subs=[['targets','Targets &amp; tracking'],['prices','Price changes']];
   body.innerHTML='<style>.rev-tbl{border-collapse:collapse;font-size:12px;margin-top:6px}.rev-tbl th,.rev-tbl td{padding:4px 11px;border-bottom:1px solid #eef2f7;text-align:left;white-space:nowrap}.rev-tbl .r{text-align:right;font-variant-numeric:tabular-nums}.rev-tbl .c{text-align:center}.rev-tbl tr.tot td{border-top:2px solid #999;font-weight:700}.rev-tbl tr.rev-cotot td{background:#f1f5f9;border-top:2px solid #cbd5e1;font-weight:600}.rev-tbl .mut{color:#9aa5b1}.rev-tbl .tiny{font-size:10px;font-weight:400}.rev-tbl input,.rev-tbl select{font-size:12px}</style>'

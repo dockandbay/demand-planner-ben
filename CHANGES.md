@@ -1,3 +1,7 @@
+## v26.733.0 Remove Revenue tab → Price changes (Inputs level-3)
+- Removed the superseded DEMAND ▸ Inputs ▸ Revenue (revenue & growth report + old FY-level targets editor) — superseded by Summary + targets. The level-3 Inputs tab is now "Price changes", hosting the price-changes editor standalone (renderPriceChangesView; add/delete reload preserved).
+- PRICE_CHANGES + getASP (ASP/forecast/buy-plan-critical) are UNCHANGED — only the surrounding revenue report was removed. Also removed the plan's "Revenue vs target" quick-button (report retired; Summary + targets covers it). Old #/demand/revenue hash aliases to the new Price changes view. Orphaned renderRevenueView/rev-drawer left as dead code for a later cleanup.
+
 ## v26.732.0 Summary with targets: 3-tab report (Summary / Edit targets / Target recommendations)
 - Folded the standalone "Target recommendations" drawer into the Summary-with-targets report as a third tab. The report now has tabs: **Summary** (read), **Edit targets** (the former ✎/✓ toggle), **Target recommendations** (the recs, embedded).
 - Removed the in-report "🎯 Review target recommendations" button and the "✎ Add targets / ✓ Editing targets" toggle (both are now tabs), and removed the standalone "Target recs" quick-button on the plan (recs are reached via the report tab). "Summary + targets" still opens the report on the Summary tab.
