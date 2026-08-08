@@ -1,3 +1,8 @@
+## v26.762.0 Buy popup: Zalando demand now drains 3PL + counts in Total Demand
+- Moved the **"Zalando transfer demand"** line **up under "FBA Transfer"** in the 3PL Stock section (was a standalone block below the section).
+- The buy popup's **display pass** now subtracts Zalando net demand from **SOH 3PL (closing)** and includes it in **Total Demand** — matching what the buy engine already does (and mirroring how FBA Transfer drains 3PL). Display target (`tg3`) also gains the 2-month forward Zalando cover so the SOH-vs-target colour stays fair.
+- **Buy engine untouched** — verified byte-identical over 138 SKU buy-triples (Z-EU / Z-UK / Z-US / control-EU), before vs after. Display-only change.
+
 ## v26.761.0 Create-production-POs modal: 6 UX tweaks
 - (1) Removed the per-SKU **Pallets** column from the SKU grid. (2) Country column headers now **black text** (the coloured underline stays). (3) Removed the **border** on the qty input cells. (4) Moved the **Buy 3PL / Buy FBA** toggle out of the title bar, down into the toolbar **before "Production"**. (5) Batch dropdown now has an **"➕ Add batch number…"** option that creates the batch in Config inline (`/api/supply/batch-create`) and selects it. (6) **Start date defaults to today.**
 - UX-only (no buy-logic change). inject syntax-clean; Ben verifies the modal visually.

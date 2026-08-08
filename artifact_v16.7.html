@@ -3225,6 +3225,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     const dtc=(dem.DTC&&dem.DTC[key])||0;
     const b2b=(dem.B2B&&dem.B2B[key])||0;
     const fba=(dem.FBA&&dem.FBA[key])||0;
+    const zaln=(zalNet[key]||0);   // Zalando net demand on the EU 3PL pool this month (display; mirrors buy pass)
     const tot=dtc+b2b+fba;
     const nextTot=demAt(i+1),nextFba=fbaAt(i+1);
     const nextDtcB2b=nextTot-nextFba,w3next=nextDtcB2b/4.33,wFnext=nextFba/4.33;
@@ -3237,7 +3238,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     const aF=confQtyF+(tA2[i]||0)+(assumedArrF[i]||0);
 
     const fAI=sF+aF,fSh=Math.max(fba-fAI,0),fAD=Math.max(fAI-fba,0);
-    const pO=s3+a3,pAD=pO-(dtc+b2b)-fSh;
+    const pO=s3+a3,pAD=pO-(dtc+b2b+zaln)-fSh;   // Zalando drains the 3PL pool alongside DTC/B2B (display; matches buy pass)
 
     // Forward-looking target calc: sum actual demand over target weeks
     const fbaDemFn=fi=>{
@@ -3299,7 +3300,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     const c3=Math.max(pAD-fTx,0),cF=fAD+trfIn;
     const nextFbaNeed=Math.max(tgFbuy-cF,0);
     const t3eff=crMatched.length?crCoverWeeks(i,t3,crMatched):t3;   // Complex Rules override (raise-only, per-month window)
-    const tg3=fwdDemand(t3eff,i,d3DemFn)+nextFbaNeed;
+    const tg3=fwdDemand(t3eff,i,d3DemFn)+nextFbaNeed+(isZalEU?nextZalNeed(i):0);   // include forward Zalando cover so SOH-vs-target colour stays fair (mirrors buy pass)
     // Cover: forward-looking — count how many weeks of future demand SOH covers
     // cover-weeks (display): count REAL future demand including post-discontinue, so cover runs down
     // realistically rather than looking infinite once the disc cutoff zeroes demand. (Buy decisions keep
@@ -3328,7 +3329,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     const row={key,lbl,lbl2,now,isActual:false,isForecast:!!isForecast,crRule,
       dtc,b2b,fba,tot,pka:(md.pka&&md.pka[key])||0,a3,aF,confQty3,confQtyF,assumedQty3,
       assumedLabel:buyFromLbl[i]||lbl,
-      fTx,trfIn,fSh,c3,cF,tg3,tgF,tot3pl:dtc+b2b+fTx,
+      fTx,trfIn,fSh,c3,cF,tg3,tgF,tot3pl:dtc+b2b+zaln+fTx,
       cv3:isFinite(cv3)?cv3:999,cvF:isFinite(cvF)?cvF:999,
       isDisc:!!(discCutoff&&key>=discCutoff),
       bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,bQuSea:buyUrgentSea[i]||0,bQuAir:buyUrgentAir[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],urgentProd:buyUrgentProd[i],urgentFreight:buyUrgentFreight[i],urgentMode:buyUrgentMode[i],bPM,
@@ -3411,7 +3412,15 @@ function buildTable(proj,md,pd,is3,hasFBA){
     rows.push(dr('FBA Transfer',proj,p=>
       p.fTx>0?`<td style="color:#a78bfa;font-weight:500">${fmt(p.fTx)}</td>`:c('\u2014','cv0')
     ,true));
-    // Total Demand = DTC + B2B + FBA Transfer
+    // Zalando transfer demand (EU only): per-month Zalando net demand (forecast \u2212 Zalando stock) landing on the EU
+    // 3PL warehouse \u2014 drains 3PL like FBA Transfer and lifts Buy 3PL (2-month cover). Only shown when carried.
+    if(proj.some(p=>(p.zx||0)>0)){
+      rows.push(dr('Zalando transfer demand',proj,p=>{
+        if(p.isActual||!p.zx)return c('\u2014','cv0');
+        return `<td class="tip120" style="background:#f5f3ff;color:#5b21b6;font-weight:600" data-tip="Zalando (ZFS) net demand on the EU 3PL pool \u2014 Zalando forecast minus its stock-on-hand; drains 3PL and lifts Buy 3PL (held to 2-month cover)">${fmt(p.zx)}</td>`;
+      }));
+    }
+    // Total Demand = DTC + B2B + FBA Transfer + Zalando
     rows.push(dr('Total Demand',proj,p=>p.isActual?c('','cv0'):c(p.tot3pl?fmt(p.tot3pl):'\u2014',p.tot3pl?'cv':'cv0')));
     // Inbound
     rows.push(dr('Inbound',proj,p=>{
@@ -3451,15 +3460,6 @@ function buildTable(proj,md,pd,is3,hasFBA){
     rows.push(dr('3PL Target Units',proj,p=>{
       if(p.crRule)return '<td class="tgt crc-tip" data-tip="'+crRuleTip(p.crRule)+'" style="background:#FFFFC5;cursor:help">'+fmt(Math.round(p.tg3))+'</td>';
       return c(fmt(Math.round(p.tg3)),'tgt');
-    }));
-  }
-
-  // Zalando demand (EU only): per-month Zalando net demand (forecast − Zalando stock) landing on the EU 3PL
-  // warehouse — it drains 3PL like DTC/B2B and lifts Buy 3PL (2-month cover). Only shown when this SKU carries it.
-  if(proj.some(p=>(p.zx||0)>0)){
-    rows.push(dr('Zalando transfer demand',proj,p=>{
-      if(p.isActual||!p.zx)return c('—','cv0');
-      return `<td class="tip120" style="background:#f5f3ff;color:#5b21b6;font-weight:600" data-tip="Zalando (ZFS) net demand on the EU 3PL pool — Zalando forecast minus its stock-on-hand; drains 3PL and lifts Buy 3PL (held to 2-month cover)">${fmt(p.zx)}</td>`;
     }));
   }
 
