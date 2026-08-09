@@ -9873,14 +9873,16 @@ function renderDemandActionsView(body){
         body.querySelectorAll('.si-act').forEach(function(b){ b.onclick=function(){ b.disabled=true; setState(b.dataset.k,b.dataset.s).then(function(j){ if(j&&j.error){alert(j.error);b.disabled=false;return;} load(); }); }; });
         return;
       }
-      var tgHoz=_da.tgHoz||3;
+      var tgHoz=_da.tgHoz||3, tgCh=_da.tgCh||'ALL';
       var tgAll=daTrendGaps(tgHoz);
-      var scoped=tgAll.filter(function(it){return tgCo==='ALL'||it.co===tgCo;});
+      var scoped=tgAll.filter(function(it){return (tgCo==='ALL'||it.co===tgCo)&&(tgCh==='ALL'||it.ch===tgCh);});
       var pctS=function(v){return (v>=0?'+':'')+Math.round(v*100)+'%';};
       var hozBar='<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><span style="font-size:11px;font-weight:700;color:#888">HORIZON</span>'
         +[[1,'1 mo'],[2,'2 mo'],[3,'3 mo']].map(function(h){return '<button class="tg-hoz dsub'+(tgHoz===h[0]?' active':'')+'" data-h="'+h[0]+'">'+h[1]+'</button>';}).join('')
         +'<span style="font-size:11px;font-weight:700;color:#888;margin-left:10px">COUNTRY</span>'
-        +[['ALL','All']].concat(COL.map(function(c){return [c,c];})).map(function(c){var n=(c[0]==='ALL'?tgAll.length:tgAll.filter(function(i){return i.co===c[0];}).length);return '<button class="tg-co pill catpill'+(tgCo===c[0]?' active':'')+'" data-co="'+c[0]+'">'+c[1]+(n?' ('+n+')':'')+'</button>';}).join('')+'</div>';
+        +[['ALL','All']].concat(COL.map(function(c){return [c,c];})).map(function(c){var n=(c[0]==='ALL'?tgAll.length:tgAll.filter(function(i){return i.co===c[0];}).length);return '<button class="tg-co pill catpill'+(tgCo===c[0]?' active':'')+'" data-co="'+c[0]+'">'+c[1]+(n?' ('+n+')':'')+'</button>';}).join('')
+        +'<span style="font-size:11px;font-weight:700;color:#888;margin-left:8px">CHANNEL</span>'
+        +[['ALL','All'],['DTC','DTC'],['FBA','FBA'],['B2B','B2B']].map(function(c){return '<button class="tg-ch pill catpill'+(tgCh===c[0]?' active':'')+'" data-c="'+c[0]+'">'+c[1]+'</button>';}).join('')+'</div>';
       var rowHtml=function(it){
         var col=(it.label&&it.label.c)||'#166534', bg=(it.label&&it.label.bg)||'#dcfce7';
         return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;padding:7px 0;border-top:1px solid #f1f5f9">'
@@ -9912,6 +9914,7 @@ function renderDemandActionsView(body){
       body.querySelectorAll('.tg-view').forEach(function(b){ b.onclick=function(){ _da.tgView=b.dataset.v; draw(all); }; });
       body.querySelectorAll('.tg-hoz').forEach(function(b){ b.onclick=function(){ _da.tgHoz=parseInt(b.dataset.h,10); draw(all); }; });
       body.querySelectorAll('.tg-co').forEach(function(b){ b.onclick=function(){ _da.tgCo=b.dataset.co; draw(all); }; });
+      body.querySelectorAll('.tg-ch').forEach(function(b){ b.onclick=function(){ _da.tgCh=b.dataset.c; draw(all); }; });
       body.querySelectorAll('.tg-tier').forEach(function(b){ b.onclick=function(){ var k=b.dataset.tier; _da.tgOpen[k]=(_da.tgOpen[k]===false); draw(all); }; });
       body.querySelectorAll('.tg-jump').forEach(function(b){ b.onclick=function(e){ e.preventDefault(); try{ daJumpToPlan({sub:b.dataset.sub,co:b.dataset.co,ch:b.dataset.ch}); }catch(_){} }; });
       body.querySelectorAll('.tg-apply').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); try{ showConfidencePopup(b,buildRowConfidencePopup(b.dataset.sub,b.dataset.co,b.dataset.ch)); }catch(_){} }; });
