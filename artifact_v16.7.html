@@ -8988,11 +8988,13 @@ function planRevBtnSync(){ var show=(typeof VIEW_MODE!=='undefined'&&VIEW_MODE==
     if(!c){ c=document.createElement('div'); c.id='plan-report-btns'; c.style.cssText='margin-left:auto;display:flex;gap:4px;align-items:center;flex-wrap:wrap';
       var btn='border:1px solid #cbd5e1;background:#fff;border-radius:6px;padding:3px 9px;font-size:11px;font-weight:600;font-family:inherit;cursor:pointer;white-space:nowrap;line-height:1.5';
       c.innerHTML='<button id="plan-exec-btn" type="button" title="Executive summary — FY revenue &amp; units vs last year" style="'+btn+';border-color:#0f766e;color:#0f766e">Exec summary</button>'
-        +'<button id="plan-summ-btn" type="button" title="Summary report with revenue targets + recommendations" style="'+btn+';border-color:#7c3aed;color:#7c3aed">Summary + targets</button>';   // "Target recs" is now a tab inside this report
+        +'<button id="plan-summ-btn" type="button" title="Summary report with revenue targets + recommendations" style="'+btn+';border-color:#7c3aed;color:#7c3aed">Summary + targets</button>'
+        +'<button id="plan-tg-btn" type="button" title="Trend Gaps — under-forecast trends (Category + SKU)" style="'+btn+';border-color:#b45309;color:#b45309">Trend Gaps</button>';
       row.appendChild(c);
       c.querySelector('#plan-exec-btn').onclick=openExecSummaryPopout;
-      c.querySelector('#plan-summ-btn').onclick=openSummaryPopout; }
-  } else { if(c)c.remove(); if(typeof closeExecDrawer==='function')closeExecDrawer(); if(typeof closeRevDrawer==='function')closeRevDrawer(); if(typeof closeSummDrawer==='function')closeSummDrawer(); if(typeof closeTrecDrawer==='function')closeTrecDrawer(); } }
+      c.querySelector('#plan-summ-btn').onclick=openSummaryPopout;
+      c.querySelector('#plan-tg-btn').onclick=openTrendGapsPopout; }
+  } else { if(c)c.remove(); if(typeof closeExecDrawer==='function')closeExecDrawer(); if(typeof closeRevDrawer==='function')closeRevDrawer(); if(typeof closeSummDrawer==='function')closeSummDrawer(); if(typeof closeTrecDrawer==='function')closeTrecDrawer(); if(typeof closeTgDrawer==='function')closeTgDrawer(); } }
 // "Revenue vs target" opens the FULL revenue report (targets & tracking + price changes) in a 50% drawer —
 // the compact planRevPopRender card is deprecated.
 function revEnsureDrawer(){ var d=document.getElementById('rev-drawer');
@@ -9049,6 +9051,25 @@ function openSummaryPopout(){ var d=document.getElementById('summ-drawer');
   SUMM_TAB='summary';   // the "Summary + targets" entry always lands on the Summary tab
   setTimeout(function(){ try{ renderSummaryReport(document.getElementById('summ-drawer-body')); }
     catch(e){ var b=document.getElementById('summ-drawer-body'); if(b)b.innerHTML='<div style="padding:14px;color:#dc2626">Could not load Summary: '+String(e&&e.message||e)+'</div>'; } }, 20); }
+// Trend Gaps popout — same drawer pattern as Summary; renders the DEMAND ▸ Actions view in "drawer" mode (level-3
+// nav hidden, forced to the Trend Gaps report) so the plan gets a one-click pop-out of the report.
+function tgEnsureDrawer(){ var d=document.getElementById('tg-drawer');
+  if(!d){ d=document.createElement('div'); d.id='tg-drawer';
+    d.style.cssText='position:fixed;top:0;right:0;height:100%;width:clamp(400px,66vw,1300px);background:#fff;box-shadow:-8px 0 28px rgba(0,0,0,.22);z-index:6000;flex-direction:column;display:none';
+    d.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 16px;border-bottom:1px solid #e5e5e5;flex:0 0 auto"><b style="font-size:15px">Trend Gaps</b><button id="tg-drawer-x" title="Close" style="width:28px;height:28px;border-radius:6px;border:1px solid #cbd5e1;background:#f8fafc;cursor:pointer;font-size:16px;line-height:1">&times;</button></div><div id="tg-drawer-body" style="flex:1 1 auto;overflow:auto;padding:10px 16px 12px">Loading…</div>';
+    document.body.appendChild(d); var x=d.querySelector('#tg-drawer-x'); if(x)x.onclick=closeTgDrawer; }
+  else if(d.parentNode!==document.body)document.body.appendChild(d);
+  var bk=document.getElementById('tg-drawer-backdrop');
+  if(!bk){ bk=document.createElement('div'); bk.id='tg-drawer-backdrop'; bk.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:5900;display:none'; bk.onclick=closeTgDrawer; document.body.appendChild(bk); }
+  return d; }
+function closeTgDrawer(){ var d=document.getElementById('tg-drawer'); if(d)d.style.display='none'; var bk=document.getElementById('tg-drawer-backdrop'); if(bk)bk.style.display='none'; }
+function openTrendGapsPopout(){ var d=document.getElementById('tg-drawer');
+  if(d && d.style.display!=='none'){ closeTgDrawer(); return; }   // click again to close
+  d=tgEnsureDrawer(); var bk=document.getElementById('tg-drawer-backdrop'); if(bk)bk.style.display='block'; d.style.display='flex';
+  var body=document.getElementById('tg-drawer-body'); if(body)body.innerHTML='<div class="count" style="padding:14px;color:#888">Loading…</div>';
+  _da.sec='trendgaps';
+  setTimeout(function(){ try{ renderDemandActionsView(document.getElementById('tg-drawer-body'), {drawer:true}); }
+    catch(e){ var b=document.getElementById('tg-drawer-body'); if(b)b.innerHTML='<div style="padding:14px;color:#dc2626">Could not load Trend Gaps: '+String(e&&e.message||e)+'</div>'; } }, 20); }
 // ── Plan ▸ "Target recommendations" — recommend subcategory forecast changes to meet revenue targets ──
 // Units are derived from target £ ÷ ASP (ASP includes price changes), so the unit change is revenue growth
 // net of price. Review-then-apply: Apply writes subcategory overrides into IV (cascade to SKUs); Save persists.
@@ -9729,7 +9750,8 @@ function daClientDetectors(stateMap){
   items.forEach(function(x){ var s=stateMap&&stateMap[x.key]; if(s){ x.status=s.status; x.snooze_until=s.snooze_until||null; } else { x.status='open'; x.snooze_until=null; } });
   return items;
 }
-function renderDemandActionsView(body){
+function renderDemandActionsView(body,opts){
+  var _daDrawer=!!(opts&&opts.drawer);   // drawer mode (plan ▸ Trend Gaps popout): hide the level-3 nav, show just the report
   var SC={high:'#b91c1c',amber:'#d97706',info:'#0369a1'};
   function setState(key,status,days){ var ind=(parseInt(days,10)<0); return fetch('/api/demand-actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key,status:status,snooze_days:(ind?7:days),indefinite:ind})}).then(function(r){return r.json();}); }
   function load(){ body.innerHTML='<div style="padding:18px;color:#666;font-size:12px">Loading…</div>';
@@ -9744,6 +9766,7 @@ function renderDemandActionsView(body){
     }).catch(function(e){ body.innerHTML='<div style="padding:18px;color:#b91c1c">'+tHesc(String(e))+'</div>'; }); }
   // level-3 sub-nav: ACTIONS · INSIGHTS · WEATHER (same .dnav style as the DEMAND/SUPPLY/REPORTS menus)
   function secNav(){
+    if(_daDrawer)return '';   // drawer mode: no level-3 nav (the plan ▸ Trend Gaps popout shows only the report)
     var SEC=[['actions','Actions'],['insights','Insights'],['trendgaps','Trend Gaps'],['weather','Weather']];   // Anomalies folded into Trend Gaps ▸ SKU view (v26.770)
     var anN=(typeof daAnomalyOpenCount==='function')?daAnomalyOpenCount():0;   // open items to review → badge
     return '<div class="d3nav" style="display:flex;align-items:center;flex-wrap:wrap">'+SEC.map(function(s){var bdg=(s[0]==='anomalies'&&anN>0)?' <span class="ex-badge" style="background:#7c3aed;color:#fff">'+anN+'</span>':'';return '<button class="d3tab'+(_da.sec===s[0]?' active':'')+'" data-sec="'+s[0]+'">'+s[1]+bdg+'</button>';}).join('')
