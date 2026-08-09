@@ -10597,10 +10597,13 @@ function render3plInvoice(body){
     function doUpload(f){ if(!f){ msg.style.color='#dc2626'; msg.textContent='Choose a file first.'; return; }
       up.disabled=true; msg.style.color='#64748b'; msg.textContent='Uploading '+f.name+'…'; var rd=new FileReader();
       rd.onload=function(){ fetch('/api/supply/tpl/upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({tpl:TPL3_STATE.tpl,period:TPL3_STATE.period,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:(window.ME&&ME.email)||''})})
-        .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); load(); }).catch(function(err){ msg.style.color='#dc2626'; msg.textContent='Failed: '+(err.message||err); up.disabled=false; }); };
+        // a too-large upload comes back as a non-JSON "Request Entity Too Large" (413) — the live host (Vercel) caps
+        // request bodies at ~4.5MB. Detect it and show a clear message instead of a raw JSON-parse error.
+        .then(function(r){ if(!r.ok){ return r.text().then(function(t){ var big=(r.status===413)||/too large|request entity/i.test(t||''); throw new Error(big?('This file is '+(f.size/1048576).toFixed(1)+'MB — too large for the live server (uploads are capped at ~4.5MB). Ask Diviyaj to enable the direct-to-storage uploader, or upload a smaller / zipped file.'):('Upload failed ('+r.status+')')); }); } return r.json(); })
+        .then(function(j){ if(j&&j.error)throw new Error(j.error); load(); }).catch(function(err){ msg.style.color='#dc2626'; msg.textContent='Failed: '+(err.message||err); up.disabled=false; }); };
       rd.readAsDataURL(f); }
     up.onclick=function(){ doUpload(fi&&fi.files&&fi.files[0]); };
-    if(fi)fi.onchange=function(){ if(fi.files&&fi.files[0]){ msg.style.color='#64748b'; msg.textContent=fi.files[0].name+' ready — click Upload'; } };
+    if(fi)fi.onchange=function(){ if(fi.files&&fi.files[0]){ var _f=fi.files[0], _mb=_f.size/1048576; msg.style.color=(_mb>3.3?'#b45309':'#64748b'); msg.textContent=_f.name+' ('+_mb.toFixed(1)+'MB) ready — click Upload'+(_mb>3.3?' · ⚠ over ~3.3MB may exceed the live upload limit':''); } };
     if(drop){ var hi=function(on){ drop.style.background=on?'#eff6ff':'#f8fafc'; drop.style.borderColor=on?'#2563eb':'#cbd5e1'; };
       ['dragenter','dragover'].forEach(function(ev){ drop.addEventListener(ev,function(e){ e.preventDefault(); e.stopPropagation(); hi(true); }); });
       ['dragleave','dragend'].forEach(function(ev){ drop.addEventListener(ev,function(e){ e.preventDefault(); e.stopPropagation(); if(ev==='dragleave'&&drop.contains(e.relatedTarget))return; hi(false); }); });
