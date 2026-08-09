@@ -1,3 +1,10 @@
+## v26.778.0 Cin7 imports (3PL + DTC-mismatch) — resumable + logged (fixes timeouts & false failures)
+- Both Cin7 sales-order imports (SUPPLY ▸ 3PL Invoice ▸ "Import Cin7 orders"; DTC Mismatch ▸ "Import sales orders") are now **resumable**: each server call processes a time-bounded (~8s) batch and returns a **resume cursor** the client re-POSTs until done — so a large import never exceeds the live serverless timeout. Previously it timed out → the client showed a false "Import Failed" / "An error occurred" even though the orders had actually imported.
+- **Log-at-start**: each run writes a `'running'` row to `planner.tpl_cin7_imports` up front (DTC rows use `tpl='dtc'`), updated to `ok`/`error` as it progresses — so every attempt is captured on live even if a chunk dies (fixes the empty log / "0 runs"). Answers "are we keeping logs on live" → yes, now.
+- Client shows live progress ("Importing… N orders so far") and only reports done when complete; buttons grey while running.
+- Verified against real Cin7 (read-only) + sandbox: cursor advances + accumulates (250→750 / multi-branch), log rows written (`running`→`ok`). **No migration** (reuses `tpl_cin7_imports`).
+- **Diviyaj:** no schema change. Please verify a full-month import on live completes across multiple chunks + the log rows appear — this removes the need to raise the serverless function timeout for these endpoints.
+
 ## v26.776.0 3PL invoicing — import error handling, greyed buttons, editable account map
 - **Cin7 import**: a server error / serverless **timeout** now shows a clear message ("took too long / some orders may have imported — re-run to continue; ask Diviyaj to raise the timeout") instead of a raw "Unexpected token 'A'" JSON-parse error. Import + Sweep buttons are **greyed (opacity + wait cursor)** while running, so a double-click can't fire a second import.
 - **CONFIG ▸ 3PL accounts ▸ Account map** (region × channel): now **editable** — COGS / Sales / Fulfilment / Cost-of-Sales are inputs, saved on change via new `POST /api/supply/tpl/account-map` (field-whitelisted, keyed by label). All headers + cells **left-aligned**.

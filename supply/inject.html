@@ -8682,13 +8682,15 @@
     var ib=document.getElementById('dtc-import'); if(ib)ib.onclick=function(){ if(!confirm('Import the latest Direct-to-Client sales orders from Cin7 now? (read-only pull)'))return;
       var m=document.getElementById('dtc-impmsg'); ib.disabled=true; ib.style.opacity='.5'; ib.style.cursor='wait'; ib.textContent='Importing…'; if(m){m.style.color='#64748b';m.textContent='Importing from Cin7… (this can take a while)';}
       var _done=function(){ ib.disabled=false; ib.style.opacity=''; ib.style.cursor='pointer'; ib.textContent='↻ Import sales orders'; };
-      // The Cin7 pull can exceed the live server's function timeout — that returns a non-JSON error even though the
-      // orders usually imported. So on a timeout/parse failure, show a soft note and RELOAD the report (the imported
-      // rows will show) rather than a false "Import Failed".
-      fetch('/api/supply/dtc/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({})})
-        .then(function(r){ if(!r.ok)return r.text().then(function(t){ throw new Error((r.status===504||r.status===502||/timed out|timeout|took too long|FUNCTION_INVOCATION_TIMEOUT/i.test(t||''))?'__TIMEOUT__':('HTTP '+r.status)); }); return r.json(); })
-        .then(function(j){ _done(); if(j&&j.error){ if(m){m.style.color='#b45309';m.textContent='Import error: '+j.error;} return; } if(m){m.style.color='#166534';m.textContent='Imported '+(j.imported||0)+' orders.';} selectReport('dtc-mismatch'); })
-        .catch(function(err){ _done(); var to=String(err&&err.message)==='__TIMEOUT__'; if(m){ m.style.color='#b45309'; m.textContent=to?'The import ran long and the server timed out — it usually still completes. Reloading to show what imported…':'Import error: '+(err&&err.message||err); } selectReport('dtc-mismatch'); }); };
+      // Resumable: the server processes a time-bounded chunk and returns done=false + a resume cursor; loop until done.
+      function step(body){
+        fetch('/api/supply/dtc/import',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
+          .then(function(r){ if(!r.ok)return r.text().then(function(t){ throw new Error((r.status===504||r.status===502||/timed out|timeout|took too long|FUNCTION_INVOCATION_TIMEOUT/i.test(t||''))?'__TIMEOUT__':('HTTP '+r.status)); }); return r.json(); })
+          .then(function(j){ if(!j||j.ok===false){ _done(); if(m){m.style.color='#b45309';m.textContent='Import error: '+((j&&j.error)||'failed');} return; }
+            if(!j.done){ if(m){m.style.color='#64748b';m.textContent='Importing… '+(j.imported||0)+' orders so far';} step({resume:j.resume}); return; }
+            _done(); if(m){m.style.color='#166534';m.textContent='Imported '+(j.imported||0)+' orders.';} selectReport('dtc-mismatch'); })
+          .catch(function(err){ _done(); var to=String(err&&err.message)==='__TIMEOUT__'; if(m){ m.style.color='#b45309'; m.textContent=to?'The server timed out mid-import — click Import again to continue.':'Import error: '+(err&&err.message||err); } selectReport('dtc-mismatch'); }); }
+      step({}); };
     _drawDtcList((d.orders||[]).slice());
     try{ refreshDtcBadge(); }catch(e){}
   }
