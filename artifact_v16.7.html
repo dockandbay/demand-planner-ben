@@ -9858,11 +9858,11 @@ function renderDemandActionsView(body){
           var whyBits=[];
           r.anoms.forEach(function(a){ whyBits.push((a.type==='hi'?'▲ ':'▼ ')+mlbl(a.fym)+' '+(a.type==='hi'?'spike':'dip')+' — fcst '+fn(a.cur)+' vs seasonal '+fn(a.expected)); });
           if(r.rec){ var d=r.rec.delta; whyBits.push((d>0?'▲ under-forecast — ':'▼ over-forecast — ')+r.rec.catLabel+' ≥'+(r.rec.recPct>=0?'+':'')+r.rec.recPct+'%: rec '+fn(r.rec.recTotal)+' vs plan '+fn(r.rec.curTotal)+' ('+(d>0?'+':'')+fn(d)+'u over 4mo)'); }
-          var why='<td style="padding:3px 8px;font-size:10px;color:#475569;line-height:1.45">'+whyBits.join('<br>')+'</td>';
+          var why='<td style="padding:3px 8px;font-size:10px;color:#475569;line-height:1.45;text-align:left">'+whyBits.join('<br>')+'</td>';
           var act=r.status!=='open'
             ? '<td style="padding:3px 6px"><button class="si-act" data-k="'+tHesc(r.key)+'" data-s="open" title="restore" style="border:1px solid #1d4ed8;color:#1d4ed8;background:#fff;border-radius:5px;padding:2px 7px;cursor:pointer;font-size:10px">↺</button></td>'
             : '<td style="padding:3px 6px"><button class="si-act" data-k="'+tHesc(r.key)+'" data-s="dismissed" style="border:1px solid #cbd5e1;background:#fff;border-radius:5px;padding:2px 7px;cursor:pointer;font-size:10px">Dismiss</button></td>';
-          return '<tr style="border-top:1px solid #f1f5f9'+(r.status!=='open'?';opacity:.55':'')+'"><td style="padding:3px 8px;position:sticky;left:0;background:#fff;z-index:1"><span style="font-family:monospace;font-weight:700;font-size:11px">'+tHesc(r.sku)+'</span><br><span style="font-size:9px;color:#94a3b8">'+r.co+' '+r.ch+' · '+tHesc(r.subcat)+'</span></td>'+pastTds+fwdTds+why+act+'</tr>';
+          return '<tr style="border-top:1px solid #f1f5f9'+(r.status!=='open'?';opacity:.55':'')+'"><td style="padding:3px 8px;position:sticky;left:0;background:#fff;z-index:1;text-align:left"><span style="font-family:monospace;font-weight:700;font-size:11px">'+tHesc(r.sku)+'</span><br><span style="font-size:9px;color:#94a3b8">'+r.co+' '+r.ch+' · '+tHesc(r.subcat)+'</span></td>'+pastTds+fwdTds+why+act+'</tr>';
         }).join('');
         body.innerHTML=secNav()+filtBar
           +'<div style="font-size:12px;margin-bottom:6px"><b>'+shown.length+'</b> SKU'+(shown.length===1?'':'s')+' flagged ('+tgSt+')'+(shown.length>80?' — showing 80':'')+' · last 12 months actuals + next 4 forecast <span style="color:#7c3aed">(editable → binds to the plan)</span></div>'
@@ -9903,9 +9903,11 @@ function renderDemandActionsView(body){
       }).join('');
       var empty='<div style="padding:22px;text-align:center;color:#666">No under-forecast trends'+(tgCo!=='ALL'?' for '+tgCo:'')+' over the next '+tgHoz+' month'+(tgHoz>1?'s':'')+' — the plan is keeping up with the trend.</div>';
       body.innerHTML=secNav()+viewBar+hozBar
+        +'<div style="max-width:860px">'
         +'<div style="font-size:12px;margin-bottom:4px"><b>'+scoped.length+'</b> under-forecast trend'+(scoped.length===1?'':'s')+' · next '+tgHoz+' month'+(tgHoz>1?'s':'')+' · sorted by largest gap</div>'
         +(rows||empty)
-        +'<div style="font-size:11px;color:#888;margin-top:10px;line-height:1.5">Each row is a subcategory · market · channel where the category AI-rec sees a confident <b>minimum</b> growth over the next '+tgHoz+' month'+(tgHoz>1?'s':'')+' but the plan forecasts less. <b>Gap</b> = recommended minimum − forecast growth (plan vs last-year actuals for the same months). Only positive gaps ≥15pts with ≥100 LY units shown. Grouped into <b>volume tiers</b> by average last-year units/month over the window (High &gt;1,500 · Medium 401–1,500 · Low ≤400), largest gap first within each. <b>→ plan</b> opens the cell; <b>Apply ▾</b> opens the row recommendation to set a growth %.</div>';
+        +'<div style="font-size:11px;color:#888;margin-top:10px;line-height:1.5">Each row is a subcategory · market · channel where the category AI-rec sees a confident <b>minimum</b> growth over the next '+tgHoz+' month'+(tgHoz>1?'s':'')+' but the plan forecasts less. <b>Gap</b> = recommended minimum − forecast growth (plan vs last-year actuals for the same months). Only positive gaps ≥15pts with ≥100 LY units shown. Grouped into <b>volume tiers</b> by average last-year units/month over the window (High &gt;1,500 · Medium 401–1,500 · Low ≤400), largest gap first within each. <b>→ plan</b> opens the cell; <b>Apply ▾</b> opens the row recommendation to set a growth %.</div>'
+        +'</div>';
       wireSecNav();
       body.querySelectorAll('.tg-view').forEach(function(b){ b.onclick=function(){ _da.tgView=b.dataset.v; draw(all); }; });
       body.querySelectorAll('.tg-hoz').forEach(function(b){ b.onclick=function(){ _da.tgHoz=parseInt(b.dataset.h,10); draw(all); }; });

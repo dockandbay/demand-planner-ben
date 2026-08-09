@@ -1,3 +1,8 @@
+## v26.772.0 Trend Gaps — layout tweaks
+- **Category** view now sits in a **max-width (860px) container** so it isn't stretched full-width on wide screens (easier to scan).
+- **SKU** view — the **SKU · market · channel** column and the **Why / recommended** column are explicitly **left-aligned**.
+- Display-only.
+
 ## v26.771.0 Cash Flow: starting-deposits export = every PO drawdown (not the aggregated pool)
 - The **Starting deposits** export (SUPPLY ▸ PAYMENTS ▸ Cash Flow) now lists **one line per PO's start deposit**, including each PO's **drawdown from a referenced deposit pool** — with amount + date + the pool it drew from. Previously it filtered the on-screen cashflow, which shows referenced pools as a single aggregated line, so per-PO drawdowns weren't itemised (sandbox: **873 per-PO lines** — 759 drawdowns + 114 direct — vs 141 aggregated pool lines).
 - **Columns are identical to the "All transactions" export** (same `cfTxRows` mapper, fed a new server `startDeposits` array). amount = assigned/drawn ▸ calculated term; date = paid ▸ due.
