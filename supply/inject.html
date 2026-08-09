@@ -4669,7 +4669,7 @@
   // PURCHASE ORDERS is now the umbrella: PLAN (the PO grid) + the former PRODUCTIONS sub-tabs.
   var poSub='plan';
   var PO_SUBS=[['plan','PLAN'],['shipments','Shipments'],['crossdock','Crossdock & Labels'],['manufacturing','Manufacturing'],['list','Productions'],['barcodes','Barcodes']];
-  var PAY_SUBS=[['deposits','Deposits'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['bysupplier','By Supplier'],['cashflow','Cash Flow'],['xerocompare','Xero Compare']];   // the PAYMENTS umbrella (moved out of PURCHASE ORDERS); Cash Flow moved here from BI & REPORTS
+  var PAY_SUBS=[['deposits','Deposits'],['drawdown','Deposits Drawdown'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['bysupplier','By Supplier'],['cashflow','Cash Flow'],['xerocompare','Xero Compare']];   // the PAYMENTS umbrella (moved out of PURCHASE ORDERS); Cash Flow moved here from BI & REPORTS
   var PO_SUB_KEYS=PO_SUBS.map(function(t){return t[0];});
   var PAY_SUB_KEYS=PAY_SUBS.map(function(t){return t[0];});
   var ALL_SUB_KEYS=PO_SUB_KEYS.concat(PAY_SUB_KEYS);
@@ -4984,6 +4984,7 @@
       Promise.all([fetch('/api/supply/deposits').then(function(r){return r.json();}), fetch('/api/supply/productions').then(function(r){return r.json();})])
         .then(function(res){ renderDepRegister(b, (res[0]||[]).filter(function(d){return d.is_deposit;}), res[1]||[]); })
         .catch(function(e){b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>';}); return; }
+    if(prodTab==='drawdown'){ b.innerHTML='<div class="count">Loading…</div>'; fetch('/api/supply/deposit-drawdown').then(function(r){return r.json();}).then(function(d){ renderDepositDrawdown(b,d); }).catch(function(e){ b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>'; }); return; }
     if(prodTab==='other'){ renderOtherPayments(b); return; }
     if(prodTab==='paydue'){ renderPaymentsDue(b); return; }
     if(prodTab==='payreport'){ renderPaymentsReport(b); return; }
@@ -7959,6 +7960,36 @@
     ov.querySelector('#epv-x').onclick=close; ov.querySelector('#epv-ok').onclick=close; }
   // (Removed dead payRegister + bindRunRecalc — old payment-runs register, superseded by renderPaymentsReport. v25.652)
 
+  // Deposits Drawdown — per-deposit burn-down matrix (months = rows, deposits = columns, running balance) + exports.
+  function renderDepositDrawdown(b,d){
+    var months=d.months||[], cols=d.columns||[], bal=d.balances||{}, tx=d.transactions||[];
+    var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    var ml=function(m){ var p=String(m).split('-'); return (MN[+p[1]-1]||p[1])+'-'+p[0].slice(2); };
+    var m0=function(v){ return (v==null||v==='')?'':Math.round(Number(v)).toLocaleString(); };
+    var auN=cols.filter(function(c){return c.isAu;}).length;
+    var sepAt=function(i){ return (auN>0&&i===auN)?';border-left:3px solid #0f172a':''; };
+    var head='<tr><th style="position:sticky;left:0;top:0;background:#e9eef5;z-index:4;text-align:left;padding:4px 8px;font-size:10px;color:#475569">Month</th>'
+      +cols.map(function(c,i){ return '<th style="position:sticky;top:0;z-index:3;padding:4px 6px;text-align:right;font-size:9px;white-space:nowrap;background:'+(c.isAu?'#eef2ff':'#f8fafc')+sepAt(i)+'" title="'+esc(c.ref)+(c.country?' · '+c.country:'')+' — paid '+m0(c.paid)+' / drawn '+m0(c.drawn)+' / remaining '+m0(c.remaining)+'"><div style="font-weight:800;color:#0f172a">'+esc(c.prod)+'</div><div style="color:#94a3b8;font-weight:400;font-size:8px">'+esc(c.ref)+'</div></th>'; }).join('')+'</tr>';
+    var rowsH=months.map(function(mo){ return '<tr><td style="position:sticky;left:0;background:#fff;z-index:1;text-align:left;padding:3px 8px;font-weight:600;font-size:11px;white-space:nowrap">'+ml(mo)+'</td>'
+      +cols.map(function(c,i){ var v=bal[c.ref]?bal[c.ref][mo]:null; var col=(v<0?'#b91c1c':(v>0?'#166534':'#cbd5e1')); return '<td style="padding:3px 6px;text-align:right;font-variant-numeric:tabular-nums;font-size:11px;color:'+col+sepAt(i)+'">'+(v?m0(v):'·')+'</td>'; }).join('')+'</tr>'; }).join('');
+    var foot='<tr style="border-top:2px solid #cbd5e1"><td style="position:sticky;left:0;background:#f8fafc;z-index:1;text-align:left;padding:3px 8px;font-weight:700;font-size:10px">Remaining</td>'
+      +cols.map(function(c,i){ var col=(c.remaining<0?'#b91c1c':'#166534'); return '<td style="padding:3px 6px;text-align:right;font-variant-numeric:tabular-nums;font-size:11px;font-weight:700;color:'+col+sepAt(i)+'">'+m0(c.remaining)+'</td>'; }).join('')+'</tr>';
+    function summaryRows(){ return months.map(function(mo){ var o={Month:mo}; cols.forEach(function(c){ o[c.prod+' · '+c.ref]=(bal[c.ref]&&bal[c.ref][mo]!=null)?bal[c.ref][mo]:''; }); return o; }); }
+    function txRows(){ return tx.map(function(t){ return {'Deposit Prod':t.prod,'Deposit Ref':t.ref,'Amount':t.amount,'Date':t.date,'PO':t.po}; }); }
+    b.innerHTML='<div style="font-size:13px;font-weight:700;margin-bottom:2px">Deposits Drawdown</div>'
+      +'<div style="font-size:11px;color:#94a3b8;margin-bottom:8px">Per-deposit burn-down — a deposit is <b>paid in</b> (＋) then each PO’s starting deposit <b>draws it down</b> (－); each cell is the running balance that month. Deposits from production #48 onward; <b>AU deposits grouped first</b>. '+cols.length+' deposits · '+months.length+' months.</div>'
+      +'<div class="bar" style="gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'
+        +'<span class="tiny mut">Summary table:</span><button class="save-btn" id="dd-sum-copy" title="Copy the burn-down matrix">⧉</button><button class="save-btn" id="dd-sum-csv" style="background:#dcfce7;color:#166534;border-color:#16a34a" title="Download the matrix CSV">⬇ CSV</button>'
+        +'<span class="tiny mut" style="margin-left:8px">All transactions:</span><button class="save-btn" id="dd-tx-copy" title="Copy every paid-in + drawdown">⧉</button><button class="save-btn" id="dd-tx-csv" style="background:#dcfce7;color:#166534;border-color:#16a34a" title="Download the transactions CSV">⬇ CSV</button>'
+      +'</div>'
+      +'<div style="overflow:auto;max-height:70vh;border:1px solid #e5e7eb;border-radius:6px"><table style="border-collapse:collapse;font-size:11px"><thead>'+head+'</thead><tbody>'+rowsH+foot+'</tbody></table></div>'
+      +'<div style="font-size:10px;color:#94a3b8;margin-top:6px">Red = negative balance (drawdowns exceed the paid-in recorded for that deposit — worth a check). Hover a column header for paid / drawn / remaining. Transactions export = prod · ref · amount (− for a drawdown) · date · PO (drawdowns only).</div>';
+    var q=function(id){ return b.querySelector('#'+id); };
+    q('dd-sum-copy').onclick=function(){ copyRows(summaryRows(),'Deposits drawdown — summary'); };
+    q('dd-sum-csv').onclick=function(){ csv(summaryRows(),'deposits_drawdown_summary.csv'); };
+    q('dd-tx-copy').onclick=function(){ copyRows(txRows(),'Deposits drawdown — transactions'); };
+    q('dd-tx-csv').onclick=function(){ csv(txRows(),'deposits_drawdown_transactions.csv'); };
+  }
   function renderDeposits(rows){ var c=document.getElementById('supply-content');
     fetchLookups(function(){ depInner(rows,c); }); }
   function depCreate(isDep){ shipPost('/api/supply/deposit-create',{is_deposit:isDep},function(){ delete cache['deposits']; selectSection('deposits'); }); }

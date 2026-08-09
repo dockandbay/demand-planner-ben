@@ -2534,6 +2534,41 @@ function invalidateSupplyCaches() {
 }
 
 
+// Deposits Drawdown report (SUPPLY ▸ Payments): per-deposit burn-down — a deposit is PAID in (increases the pool),
+// then each PO's starting deposit DRAWS it down. Columns = deposits (from prod #48 onward, plus all AU deposits as a
+// top group), labelled by production number ('AU' for AU deposits); rows = months; cell = running balance. Also
+// returns the flat transactions list for the export: prod · ref · amount(− for drawdown) · date · PO(if a drawdown).
+app.get('/api/supply/deposit-drawdown', async (_req, res) => {
+  try {
+    const deps = (await pool.query(`
+      SELECT reference, coalesce(prod_no,'') prod_no, upper(coalesce(country,'')) country, round(coalesce(amount,0),2) amount,
+             to_char(date_paid,'YYYY-MM') paid_month, to_char(date_paid,'YYYY-MM-DD') paid_date
+      FROM planner.deposits
+      WHERE coalesce(is_deposit,false)=true
+        AND (upper(coalesce(country,''))='AU'
+             OR (regexp_replace(coalesce(prod_no,''),'[^0-9]','','g') ~ '^[0-9]+$'
+                 AND regexp_replace(prod_no,'[^0-9]','','g')::int >= 48))`)).rows;
+    const draws = (await pool.query(`
+      SELECT deposit_ref ref, po, round(coalesce(pay_start_deposit_assigned,0),2) amt,
+             to_char(pay_start_deposit_date,'YYYY-MM') mth, to_char(pay_start_deposit_date,'YYYY-MM-DD') dt
+      FROM planner.purchase_orders
+      WHERE coalesce(deposit_ref,'')<>'' AND pay_start_deposit_assigned IS NOT NULL AND pay_start_deposit_assigned<>0`)).rows;
+    const byRef = {};
+    deps.forEach(d => { const isAu = d.country === 'AU'; byRef[d.reference] = { ref: d.reference, prod: isAu ? 'AU' : (d.prod_no || '—'), prodNum: /^[0-9]+$/.test(String(d.prod_no||'').replace(/[^0-9]/g,'')) ? parseInt(String(d.prod_no).replace(/[^0-9]/g,''),10) : 999999, country: d.country, isAu, paid: Number(d.amount||0), paid_month: d.paid_month || null, paid_date: d.paid_date || null, mov: {} }; });
+    const tx = [];
+    deps.forEach(d => { const r = byRef[d.reference]; if (r.paid_month) r.mov[r.paid_month] = (r.mov[r.paid_month] || 0) + r.paid;
+      if (Number(d.amount) > 0) tx.push({ prod: r.prod, ref: d.reference, amount: r.paid, date: d.paid_date || '', po: '', kind: 'deposit paid' }); });
+    draws.forEach(x => { const r = byRef[x.ref]; if (!r) return; if (x.mth) r.mov[x.mth] = (r.mov[x.mth] || 0) - Number(x.amt || 0);
+      tx.push({ prod: r.prod, ref: x.ref, amount: -Number(x.amt || 0), date: x.dt || '', po: x.po || '', kind: 'drawdown' }); });
+    const mset = new Set(); Object.values(byRef).forEach(r => Object.keys(r.mov).forEach(m => mset.add(m)));
+    const months = [...mset].filter(Boolean).sort();
+    const columns = Object.values(byRef).sort((a, b) => (b.isAu - a.isAu) || (a.prodNum - b.prodNum) || (a.ref < b.ref ? -1 : 1));
+    const balances = {};
+    columns.forEach(r => { let run = 0; balances[r.ref] = {}; months.forEach(m => { run += (r.mov[m] || 0); balances[r.ref][m] = Math.round(run * 100) / 100; }); r.remaining = Math.round(run * 100) / 100; r.drawn = Math.round((r.paid - run) * 100) / 100; });
+    tx.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.ref < b.ref ? -1 : 1)));
+    res.json({ months, columns: columns.map(({ mov, prodNum, ...c }) => c), balances, transactions: tx });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/api/supply/:section', async (req, res) => {
   const q = (sql) => pool.query(sql).then(r => r.rows);
   // Phase-2 section response-cache: serve fresh (or serve stale while one request refreshes); otherwise fall through
