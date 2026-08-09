@@ -7360,8 +7360,9 @@
     function cfExportDD(expId,menuId,optClass,rowsFn,fn,emailKey){ var exp=c.querySelector('#'+expId), menu=c.querySelector('#'+menuId); if(!exp||!menu)return;
       exp.onclick=function(e){ e.stopPropagation(); menu.style.display=(menu.style.display==='none'?'':'none'); };
       c.querySelectorAll('.'+optClass).forEach(function(a){ a.onclick=function(){ menu.style.display='none'; if(a.dataset.a==='csv')csv(rowsFn(),fn); else cfEmail(exp,emailKey,rowsFn,fn); }; }); }
-    // Starting Deposits — the "All transactions" format filtered to type = Deposit.
-    function cfStartDepRows(){ return cfAllRows().filter(function(r){return r.Type==='Deposit';}); }
+    // Starting Deposits — EVERY PO's start deposit (incl. each PO's drawdown from a referenced pool), amount + date,
+    // in the EXACT "All transactions" column format (same cfTxRows mapper, fed the server's per-PO startDeposits array).
+    function cfStartDepRows(){ return cfTxRows({lines:(d&&d.startDeposits)||[]}); }
     c.querySelector('#cf-copy-sd').onclick=function(){ copyRows(cfStartDepRows(),'Starting deposits'); };
     cfExportDD('cf-all-exp','cf-all-menu','cf-all-opt',cfAllRows,'cash_flow_all_transactions.csv','cf_transactions');
     cfExportDD('cf-arr-exp','cf-arr-menu','cf-arr-opt',cfArrivalsRows,'stock_arrivals.csv','cf_arrivals');

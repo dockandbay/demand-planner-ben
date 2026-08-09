@@ -982,8 +982,8 @@ async function cashflowResponse(pos, q) {
   shipRows.forEach(s => { shipFreight[s.shipment_ref] = shipFreightSrv(s); });
 
   const lines = [];
-  const add = (o) => {
-    if (!(num(o.amount) > 0.009)) return;                       // never emit a $0 (or negative) line
+  // Build a cash-flow line object from a spec (shared by the main lines and the per-PO starting-deposits export).
+  const mkLine = (o) => {
     const due = o.due || null;
     // "likely" date: the line's own likely date (e.g. a deposit's date_likely_pay) ▸ a manual per-line override
     const lk = o.likely || likely[o.key] || null;
@@ -992,7 +992,7 @@ async function cashflowResponse(pos, q) {
     // cash flow is timed on the DUE date, unless a likely date is applied → then the likely date (whenever set, not just overdue)
     if (!o.paid_date && lk) { date = lk; kind = 'likely'; }
     const _dref = (poMeta[o.ref] ? (poMeta[o.ref].deposit_ref || '') : ((o.basis || 'po') === 'register' ? (o.ref || '') : ''));
-    lines.push({
+    return {
       key: o.key, type: o.type, ref: o.ref, supplier: o.supplier || '', country: o.country || '',
       amount: Math.round(num(o.amount) * 100) / 100, paid: !!o.paid_date, estimate: !!o.estimate, basis: o.basis || 'po',
       src: o.src || '', due, paid_date: o.paid_date || null, date, date_kind: kind,
@@ -1002,8 +1002,9 @@ async function cashflowResponse(pos, q) {
       deposit_ref: _dref,
       uk_deposit_ref: depProdByRef[_dref] || '',
       branch: (poMeta[o.ref] ? (poMeta[o.ref].branch || '') : ''),
-    });
+    };
   };
+  const add = (o) => { if (!(num(o.amount) > 0.009)) return; lines.push(mkLine(o)); };   // never emit a $0 (or negative) line
 
   const complete = (p) => (p.progress === 'complete');
   // group shipment-assigned POs for freight/duty/tax sizing
@@ -1096,7 +1097,19 @@ async function cashflowResponse(pos, q) {
     const duty = isFobPO(p) ? 0 : num(p.est_duty);
     return { po: p.po, amount_usd: Math.round((num(p.value_used) + duty) * 100) / 100, delivery: p.checkin, branch: p.branch || '' };
   }).sort((a, b) => (a.delivery || '9999').localeCompare(b.delivery || '9999'));
-  return { today, lines, arrivals };
+  // Starting-deposits export: ONE line per PO that carries a start deposit — including each PO's DRAWDOWN from a
+  // referenced deposit pool (the main cash flow shows those pools as one aggregated line; here they're itemised
+  // per PO). amount = assigned/drawn (▸ calculated term if not yet drawn), date = paid ▸ due. Same line shape as
+  // the main lines, so the client renders it through the identical "all transactions" column mapper.
+  const startDeposits = [];
+  for (const p of pos) {
+    const amt = (p.start_assigned != null ? p.start_assigned : p.start_calc);
+    if (!(num(amt) > 0.009)) continue;
+    startDeposits.push(mkLine({ key: 'startdep:' + p.po, type: 'Deposit', ref: p.po, supplier: p.supplier_name,
+      country: p.country, amount: amt, due: p.start_due, paid_date: p.start_date, basis: (p.deposit_ref ? 'drawdown' : 'po') }));
+  }
+  startDeposits.sort((a, b) => (a.date || '9999').localeCompare(b.date || '9999') || (a.ref || '').localeCompare(b.ref || ''));
+  return { today, lines, arrivals, startDeposits };
 }
 
 // Expedite recommendations for SUPPLY ▸ Actions: when a SKU on an open, not-yet-shipped PO will stock out
