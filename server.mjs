@@ -5991,6 +5991,17 @@ app.post('/api/supply/tpl/cost-account', async (req, res) => {
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Edit a single account-map cell (region×channel → COGS/Sales/Fulfilment/Cost of Sales), keyed by label.
+app.post('/api/supply/tpl/account-map', async (req, res) => {
+  const b = req.body || {};
+  const FIELDS = { cogs_account: 1, sales_account: 1, fulfilment_account: 1, cost_of_sales_account: 1 };   // whitelist → safe to interpolate
+  if (!b.label || !FIELDS[b.field]) return res.status(400).json({ error: 'label + valid field required' });
+  try {
+    const r = await pool.query(`UPDATE planner.tpl_account_map SET ${b.field}=$2 WHERE label=$1`, [b.label, (String(b.value == null ? '' : b.value).trim()) || null]);
+    if (!r.rowCount) return res.status(404).json({ error: 'label not found' });
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // 3PL invoice — Phase 1: parse an uploaded file and return the sum of every numeric field per sheet.
 // Generic (works for any 3PL export): finds each sheet's header row, then sums numeric columns. Named
 // highlights (Shipping Fee = freight, Total Excl Shipping = fulfilment, Total Cost) are surfaced for the

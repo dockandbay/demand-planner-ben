@@ -1,3 +1,8 @@
+## v26.776.0 3PL invoicing — import error handling, greyed buttons, editable account map
+- **Cin7 import**: a server error / serverless **timeout** now shows a clear message ("took too long / some orders may have imported — re-run to continue; ask Diviyaj to raise the timeout") instead of a raw "Unexpected token 'A'" JSON-parse error. Import + Sweep buttons are **greyed (opacity + wait cursor)** while running, so a double-click can't fire a second import.
+- **CONFIG ▸ 3PL accounts ▸ Account map** (region × channel): now **editable** — COGS / Sales / Fulfilment / Cost-of-Sales are inputs, saved on change via new `POST /api/supply/tpl/account-map` (field-whitelisted, keyed by label). All headers + cells **left-aligned**.
+- Also the earlier v26.775 upload fix. **Both the upload 413 and the import timeout are live/Vercel limits — the real fixes (direct-to-storage upload; higher function timeout) are Diviyaj/infra.**
+
 ## v26.772.0 Trend Gaps — layout tweaks
 - **Category** view now sits in a **max-width (860px) container** so it isn't stretched full-width on wide screens (easier to scan).
 - **SKU** view — the **SKU · market · channel** column and the **Why / recommended** column are explicitly **left-aligned**.
