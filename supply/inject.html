@@ -1520,15 +1520,17 @@
   // PLAN-panel MASTER DATA tab (#2): edit this PO's key fields (PO Number rename / Branch / Supplier / Production
   // / Batch / Shipment) + delete the PO. Rendered inside a single PO's PLAN panel.
   function poMasterPanel(po){ var r=poBy[po]||{}; var ep='/api/supply/po/'+encodeURIComponent(po);
+    var _mm=poMissingReq(r);   // required fields still unassigned while in PRODUCTION → show an "A" next to each
+    function _amk(field){ return _mm.indexOf(field)>=0?(' '+actMark(po,'master_missing')):''; }
     function row(lbl,f){ return '<div class="cli-row"><div class="cli-lbl">'+lbl+'</div><div class="cli-val">'+f+'</div></div>'; }
     return '<div class="sect-h">Master Data <span class="mut tiny">— edit this PO\'s key fields; Delete removes the PO and its lines</span></div>'
       +lookupDatalists()+'<div class="cli-form" style="max-width:560px">'
       +row('PO Number','<input class="fci pom-po" data-po="'+esc(po)+'" value="'+esc(po)+'" style="width:200px;text-align:left">')
-      +row('Branch',cellPickBtn(po,ep,'branch',r.branch,'branch'))
+      +row('Branch',cellPickBtn(po,ep,'branch',r.branch,'branch')+_amk('Branch'))
       +row('Ship to <span class="mut tiny">(blank = use branch country)</span>',countrySel(ep,r.country_override,true)+' <span class="mut tiny">'+(r.country_src==='M'?'override':(r.country?esc(String(r.country).toUpperCase())+' (inherited from branch)':'inherited from branch'))+'</span>')
-      +row('Supplier',cellPickBtn(po,'/api/supply/po/'+encodeURIComponent(po)+'/supplier','supplier_name',r.supplier_name,'supplier')+(r.supplier_name?' <button class="lnk-btn pom-mng-sup" data-sup="'+esc(r.supplier_name)+'" title="edit this supplier in a popout" style="margin-left:8px;color:#2563eb">⚙ manage supplier</button>':''))
-      +row('Production',cellPickBtn(po,ep,'prod_no',r.prod_no,'prod'))
-      +row('Batch ID',cellPickBtn(po,ep,'batch_id',r.batch_id,'batch'))
+      +row('Supplier',cellPickBtn(po,'/api/supply/po/'+encodeURIComponent(po)+'/supplier','supplier_name',r.supplier_name,'supplier')+_amk('Supplier')+(r.supplier_name?' <button class="lnk-btn pom-mng-sup" data-sup="'+esc(r.supplier_name)+'" title="edit this supplier in a popout" style="margin-left:8px;color:#2563eb">⚙ manage supplier</button>':''))
+      +row('Production',cellPickBtn(po,ep,'prod_no',r.prod_no,'prod')+_amk('Production #'))
+      +row('Batch ID',cellPickBtn(po,ep,'batch_id',r.batch_id,'batch')+_amk('Batch'))
       +row('Supplier confirmation',(r.supplier_confirmed?'<span class="tool-badge bg-green">✓ confirmed '+esc(r.supplier_confirmed)+(r.supplier_confirmed_by?' · '+esc(r.supplier_confirmed_by):'')+'</span> <button class="save-btn light pom-unconfirm" data-po="'+esc(po)+'" title="reset so the supplier must re-confirm">reset</button>':'<span class="tool-badge bg-amber">⏳ awaiting supplier confirmation</span>'+(PO_ACTCOND.po_not_approved(r)?actMark(po,'po_not_approved')+' <button class="save-btn po-remind-confirm" data-po="'+esc(po)+'" style="background:#7c3aed;color:#fff;border-color:#6d28d9" title="Post &ldquo;Reminder to review and confirm this PO&rdquo; to the supplier&rsquo;s portal timeline">✉ Send timeline message to supplier</button>':'')))
       +row('<span class="po-note-badge" style="cursor:default">N</span> Notes <span class="mut tiny">(internal — shows as a purple N on the PO row; separate from the Timeline)</span>',txtIn(ep,'notes',r.notes,540,true))
       +'</div><div style="margin-top:14px"><button class="save-btn light pom-del" data-po="'+esc(po)+'" title="delete this PO + its lines" style="color:#dc2626;border-color:#fca5a5">🗑 Delete this PO</button></div>'; }

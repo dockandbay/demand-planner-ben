@@ -1,3 +1,6 @@
+## v26.821.0 Master-data panel shows an "A" next to each missing required field
+- On the PO ▸ MASTER DATA panel, each required field still unassigned while the PO is in PRODUCTION (Branch / Supplier / Production / Batch ID) now shows the red **"A"** action marker next to it (same marker + tooltip/snooze as elsewhere). Previously the missing-field action only lit the sub-tab badge with no per-field indicator. (Detection unchanged — `poMissingReq`; e.g. PO-1672805 flags Production # + Batch.)
+
 ## v26.820.0 Trend Gaps SKU apply reflects live + BUY "Refresh cache" button
 - **Trend Gaps ▸ SKU view:** applying a change (override box or → suggested) now calls `refreshRow(subcat,co,ch)` after the write — clears the subcategory calc memo, repaints the plan cell, and flags the buy stale — so the new forecast number shows **without a page refresh** (previously the change logged to the "R" rail but the number only appeared after reload).
 - **BUY ▸ "↻ Refresh cache" button:** re-pulls only the buy-impacting tables (products/params, current stock, inbound, on-order, forecast outputs) from the database, rebuilds the demand/buy overlays and clears the buy cache, then re-renders — no full page reload. Guards against discarding unsaved forecast edits. For the case where buy data changed outside the open tab.
