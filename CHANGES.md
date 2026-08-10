@@ -1,3 +1,8 @@
+## v26.802.0 Edit targets / Summary — implied colour, wider input, FY-column priority, flash fix
+- Summary ▸ SUMMARY: the FY (full-year) columns keep their **dark-blue** background on the ALL SUBCATEGORIES row (the light total-row shade no longer overrides them).
+- Summary-with-targets **loads without the styling flash** — the styled grid paints immediately, then target numbers fill when the fetch returns (was blank until the fetch).
+- Edit targets: **implied** (market-balanced) cells are now **pale yellow #FDFBD4**, distinct from entered green (% growth) and blue (£ target). The input box is ~20% wider (54→65px) so £1,000,000 fits; column width unchanged.
+
 ## v26.801.0 Build production modal — MOQ shortfall on the Total cell + bigger step numbers
 - MOQ shortfall now shows on the **Total cell**: red **#FA5053** background + white number + a ⚑ hover icon (hover = "MOQ 500 — production 150, short 350"). Removed the easy-to-miss line under the SKU.
 - Step headers now use a **large numbered badge** (1 / 2 / 3): "STEP 1 · Set up", "STEP 2 · Choose & preview", "STEP 3 · Create" — the numbers are clearly visible now.
