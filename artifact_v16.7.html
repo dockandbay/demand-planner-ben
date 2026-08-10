@@ -9633,7 +9633,10 @@ function buildTgApply(sub,co,ch){
       // Write a SUBCATEGORY per-month OVERRIDE (absolute units) for the next 3 months — same store the plan's subcat
       // row edits use (IV[sub|co|ch|month]), so it changes the visible subcat forecast + cascades to SKUs/buy, and is
       // reversible (clear the cell → back to base). Uses the plan's absolute encoding (<4 → apostrophe sentinel).
-      var n=0; rows.forEach(function(r){ var u=Math.max(0,Math.round(r.tgt)); IV[sub+'|'+co+'|'+ch+'|'+r.m]=(u>=4?String(u):("'"+u)); n++; });
+      var _chg=[]; rows.forEach(function(r){ var u=Math.max(0,Math.round(r.tgt));
+        var _old=Math.round(r.base||0); if(_old!==u)_chg.push({level:'subcat',item:sub,country:co,channel:ch,month:r.m,action:'applied trend-gap recommendation',from:_old,to:u});
+        IV[sub+'|'+co+'|'+ch+'|'+r.m]=(u>=4?String(u):("'"+u)); });
+      try{ logChangesBulk(_chg); }catch(_e){}                                    // record the change on the plan's "R" audit rail (who/what/when)
       if(typeof markDirty==='function')markDirty(); pop.remove();
       if(typeof render==='function')render();
     }catch(err){ alert('Apply failed: '+(err&&err.message||err)); }

@@ -1,3 +1,6 @@
+## v26.809.0 Trend Gaps — Apply now writes a change-record entry (the "R" audit rail)
+- Applying a trend-gap recommendation changed the forecast but left **no record on the plan's "R" change rail** (who/what/when). It now logs each affected month via `logChangesBulk` (`level:'subcat'`, action `"applied trend-gap recommendation"`, from = prior forecast → to = applied units) — matching how the DEMAND ▸ Set-targets recommendations already log. The change now shows in UK DTC's change record.
+
 ## v26.808.0 Trend Gaps — "Forecast now" showed the current month's partial actual, not its forecast
 - In the category Apply popup, the "Forecast now" column read `calc().fu[month]`, which for the **current (partial) month** returns the month-to-date **actual** (e.g. 268 units so far in Aug), not the full-month forecast. The plan shows the current-month **forecast** via `curMonthForecast()` (e.g. 2000). The popup now uses `curMonthForecast()` for the current month so "Forecast now" matches the plan; future months are unchanged. (Also refreshed the stale per-SKU wording in the popup footer — it now correctly says it writes a subcategory override.)
 
