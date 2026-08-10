@@ -1,3 +1,7 @@
+## v26.817.0 Price changes inputs left-aligned + Quality Control column widths
+- Price changes form: **Subcategory** and **From month** inputs forced **left-aligned** (were inheriting a right-align).
+- SUPPLY ▸ Quality Control results table: **Uploaded** column given a min-width (230px) so the date/user no longer truncates; the **delete** column shrunk to its content (was absorbing the table's slack).
+
 ## v26.816.0 Trend Gaps SKU-view logs changes + Price changes tab polish
 - **Trend Gaps ▸ SKU view:** applying a change (editing the override box or clicking the → suggested value) now writes a **change-record entry** to the plan's "R" rail (level `sku`, from → to), so SKU-view applies are audited like everything else.
 - **DEMAND ▸ Inputs ▸ Price changes:** the Uplift header/value and the Uplift input are now **left-aligned** (whole table + form left-aligned); the **From month** field is a proper **month picker** (`type="month"`, still stores YYYY-MM); the table's From column shows **mmm-yy** (e.g. Aug-26) per the house date style.
