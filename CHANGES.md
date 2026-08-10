@@ -1,3 +1,6 @@
+## v26.826.0 New product — go to PLAN and open the new item after create
+- Creating a single product now navigates to PRODUCT ▸ PLAN and opens the new item's detail (mirrors the grid/dashboard open pattern). Previously it called `renderProductDetail` without first entering the PLAN sub-tab, so it rendered into the stale new-product-form box and appeared stuck on "Created 1 of 1…".
+
 ## v26.825.0 Trend Gaps SKU apply — persist the override immediately (survives refresh)
 - The SKU-view apply wrote the override to the runtime + dirty buffer and waited on the **60s autosave**, but the change **record** ("R") posts immediately — so a quick refresh lost the forecast (showed the base, e.g. 2) while the note still said "changed 2 → 19". The apply now calls `saveForecasts()` immediately (same as the smooth-apply), so the override persists to the server and survives a refresh, matching the record.
 

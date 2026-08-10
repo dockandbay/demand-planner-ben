@@ -11009,7 +11009,7 @@
       var created=[], i=0;
       // sequential (not parallel) so the per-(season,category) counter increments cleanly without a race
       (function next(){
-        if(i>=colours.length){ if(created.length===1){ _prodDetailTab='master'; renderProductDetail(created[0]); } else { selectProductSub('plan'); } return; }
+        if(i>=colours.length){ if(created.length===1){ _prodDetailTab='master'; selectProductSub('plan'); var _newRef=created[0]; setTimeout(function(){ renderProductDetail(_newRef); },0); } else { selectProductSub('plan'); } return; }   // go to PLAN then open the new item's detail (mirrors the grid/dashboard open pattern; also avoids rendering into the stale new-product form box)
         shipPost('/api/product/item',{type:type,season:season,category:cat,supplier:supplier,colour_name:colours[i],description:desc,sizes:sizes,approval_method:approval,created_by:(window.ME&&ME.email)||''},function(j){
           if(j&&j.error){ msg.style.color='#dc2626'; msg.textContent='Failed on “'+(colours[i]||'(no colour)')+'”: '+j.error; btn.disabled=false; return; }
           if(j&&j.ref)created.push(j.ref); i++; msg.textContent='Created '+created.length+' of '+colours.length+'…'; next(); });
