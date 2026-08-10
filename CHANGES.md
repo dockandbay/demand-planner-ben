@@ -1,3 +1,6 @@
+## v26.803.0 Edit targets — group subcategories (Priority / Beach / Bags / Home)
+- Edit-targets subcategory rows are now **grouped under headers** by their grouping (Priority → Beach → Bags → Home → other), matching the DEMAND plan's category picker, instead of one flat alphabetical list.
+
 ## v26.802.0 Edit targets / Summary — implied colour, wider input, FY-column priority, flash fix
 - Summary ▸ SUMMARY: the FY (full-year) columns keep their **dark-blue** background on the ALL SUBCATEGORIES row (the light total-row shade no longer overrides them).
 - Summary-with-targets **loads without the styling flash** — the styled grid paints immediately, then target numbers fill when the fetch returns (was blank until the fetch).

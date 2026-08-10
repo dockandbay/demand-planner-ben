@@ -8285,7 +8285,7 @@ function renderSummaryView(body){
       +'#smc th.fyh{text-align:center;cursor:pointer;border-left:2px solid #cbd5e1;color:#334155}#smc th.tot{background:#1e3a8a;color:#fff;border-left:1px solid #1e3a8a}'
       +'#smc td.tot{background:#1e3a8a;border-left:1px solid #1e3a8a}#smc td.tot .c3f{color:#fff}#smc td.tot .c3ly{color:#c7d2fe}'
       +'#smc .c3ly{font-size:8px;color:#94a3b8;line-height:1.1}#smc .c3f{font-size:11px;font-weight:600;line-height:1.2;color:#0f172a}#smc .c3g{font-size:8px;font-weight:600;line-height:1.1}'
-      +'#smc tr.sub td{border-top:1px solid #eef2f7}#smc tr.sub td.lbl{font-weight:700;color:#0f172a;cursor:pointer}#smc tr.gt td{border-top:2px solid #cbd5e1;background:#eef2ff}#smc tr.gt td.lbl{background:#eef2ff;font-weight:700}#smc tr.gt td.tot{background:#1e3a8a}#smc tr.gt .c3f{font-weight:700}'
+      +'#smc tr.sub td{border-top:1px solid #eef2f7}#smc tr.sub td.lbl{font-weight:700;color:#0f172a;cursor:pointer}#smc tr.gt td{border-top:2px solid #cbd5e1;background:#eef2ff}#smc tr.gt td.lbl{background:#eef2ff;font-weight:700}#smc tr.gt td.tot{background:#1e3a8a}#smc tr.gt .c3f{font-weight:700}#smc tr.grp td.grp-lbl{position:static;background:#e8eaf0;box-shadow:none;min-width:0;font-weight:800;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#334155;padding:4px 8px;text-align:left;border-top:2px solid #cbd5e1}'
       +'#smc tr.sku td.lbl{padding-left:22px;font-family:ui-monospace,Menlo,monospace;color:#475569}#smc .smx{color:#94a3b8;font-size:10px;display:inline-block;width:11px}'
       +'.sm-co,.sm-ch,.sm-metric,.sm-group,.sm-tgtedit,.sm-ccy{border:1px solid #cbd5e1;background:#fff;color:#334155;font-size:11px;padding:3px 10px;border-radius:12px;cursor:pointer;font-weight:600;font-family:inherit}.sm-co.on,.sm-ch.on,.sm-metric.on,.sm-group.on,.sm-ccy.on{background:#0f172a;color:#fff;border-color:#0f172a}.sm-tgtedit.on{background:#b45309;color:#fff;border-color:#b45309}'
       +'#smc input.tgin{width:65px;text-align:right;padding:2px 3px;border:1px solid #cbd5e1;border-radius:4px;font-size:11px;font-family:inherit}#smc td.tgcell,#smc td.ecell{vertical-align:top}#smc .c3t{font-size:9px;line-height:1.25;white-space:nowrap}</style>';
@@ -8360,7 +8360,14 @@ function renderSummaryView(body){
       var _tsel=(TGT_FILT_CATS&&TGT_FILT_CATS.size)?TGT_FILT_CATS:null;
       var _subsV=subs.filter(function(s){ if(_tq&&String(s).toLowerCase().indexOf(_tq)<0)return false; if(_tsel&&!_tsel.has(_subcatParent(s)||'(uncategorised)'))return false; return true; });
       var eRows='<tr class="gt"><td class="lbl">ALL SUBCATEGORIES <span style="font-weight:400;color:#94a3b8">(market total)</span></td>'+cols.map(function(c){return ecell('',c);}).join('')+'</tr>';
-      _subsV.forEach(function(s){ eRows+='<tr class="sub"><td class="lbl">'+e(s)+'</td>'+cols.map(function(c){return ecell(s,c);}).join('')+'</tr>'; });
+      // Group the subcategory rows by their grouping (Priority → Beach → Bags → Home → other), matching the DEMAND plan's category picker.
+      var _gOrder=(CAT_GROUPING&&Object.keys(CAT_GROUPING).length)?catGroups().map(function(g){return g[0];}):['Priority','Beach','Bags','Home'];
+      var _byG={}; _subsV.forEach(function(s){ var gp=(CAT_GROUPING&&CAT_GROUPING[_subcatParent(s)])||'Other'; (_byG[gp]=_byG[gp]||[]).push(s); });
+      var _gList=_gOrder.filter(function(g){return _byG[g];}); Object.keys(_byG).sort().forEach(function(g){ if(_gList.indexOf(g)<0)_gList.push(g); });
+      _gList.forEach(function(gp){
+        eRows+='<tr class="grp"><td class="lbl grp-lbl" colspan="'+(cols.length+1)+'">'+e(gp)+'</td></tr>';
+        _byG[gp].forEach(function(s){ eRows+='<tr class="sub"><td class="lbl">'+e(s)+'</td>'+cols.map(function(c){return ecell(s,c);}).join('')+'</tr>'; });
+      });
       var _selN=_tsel?_tsel.size:0, _catBtnLbl=(_selN?(_selN+' categor'+(_selN>1?'ies':'y')):'All categories');
       function _tgtOpt(cat,label,on){ return '<div class="tgt-cat-opt" data-c="'+encodeURIComponent(cat)+'" style="display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:4px;cursor:pointer;font-size:12px'+(cat==='__ALL__'?';font-weight:600':'')+'"><span style="width:14px;height:14px;border-radius:3px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;font-size:10px;color:#fff;border:1px solid '+(on?'#1a1a1a':'#ccc')+';background:'+(on?'#1a1a1a':'#fff')+'">'+(on?'✓':'')+'</span><span>'+e(label)+'</span></div>'; }
       var _tgtFiltBar='<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 8px">'
