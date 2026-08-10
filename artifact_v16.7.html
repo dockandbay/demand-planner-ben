@@ -8215,22 +8215,26 @@ function renderSummaryView(body){
   // ── Target balancing: a market-total (sub='') growth is a FIXED revenue budget; a subcat you type into LOCKS;
   //    untyped subcats share the remaining budget at a UNIFORM implied growth (∝ their LY) so subcats always sum
   //    back to the market total. impliedG returns that uniform % for a period (null if no market total set).
-  var _impCache={};
+  var _impCache={}, _impConflict={}, _lastImpCk=null;
   function _periodMonths(Y,level,idx){ var fm=fyMonths(Y); if(level==='month')return [fm[idx-1]]; if(level==='quarter')return fm.slice((idx-1)*3,idx*3); if(level==='half')return fm.slice((idx-1)*6,idx*6); return fm.slice(); }
   function _lyPer(sub,mths){ var t=0; function one(s){ var sd=subData(s); mths.forEach(function(m){ var py=prevY(m); t+=((py in sd.val)?sd.val[py]:((sd.a[py]&&sd.a[py][1])||0)); }); } if(sub===''){ subs.forEach(one); } else one(sub); return t; }
   function impliedG(Y,level,idx){ var ck=Y+'|'+level+'|'+idx; if(ck in _impCache)return _impCache[ck];
     var mk=tgKey(Y,'',level,idx), mg=SUMM_TGT[mk], mgbp=SUMM_TGT_GBP[mk];
-    if(mg==null&&mgbp==null)return (_impCache[ck]=null);
+    if(mg==null&&mgbp==null){ _impConflict[ck]=false; return (_impCache[ck]=null); }
     var mths=_periodMonths(Y,level,idx), lyTot=_lyPer('',mths);
     var mtRev=(mgbp!=null)?Number(mgbp):(lyTot*(1+Number(mg)/100));
+    var marketG=(mgbp!=null)?(lyTot>0?(mtRev/lyTot-1)*100:0):Number(mg);   // the top-line growth % this budget implies
     var lockedRev=0, unlockedLY=0;
     subs.forEach(function(s){ var sk=tgKey(Y,s,level,idx), sg=SUMM_TGT[sk], sgbp=SUMM_TGT_GBP[sk], lys=_lyPer(s,mths);
       if(sgbp!=null)lockedRev+=Number(sgbp); else if(sg!=null)lockedRev+=lys*(1+Number(sg)/100); else unlockedLY+=lys; });
-    var g=(unlockedLY>0)?Math.round(((mtRev-lockedRev)/unlockedLY-1)*1000)/10:null;
+    if(!(unlockedLY>0)){ _impConflict[ck]=false; return (_impCache[ck]=null); }
+    var raw=((mtRev-lockedRev)/unlockedLY-1)*100;
+    _impConflict[ck]=(raw<-100.0001)||(raw<-0.05&&marketG>=-0.05);   // impossible (< −100%), OR negative implied despite a non-negative market total
+    var g=Math.round(Math.max(-100,raw)*10)/10;   // floor at −100% — can't imply negative revenue
     return (_impCache[ck]=g); }
-  function impliedFor(Y,lvl,idx){ var im=impliedG(Y,lvl,idx); if(im!=null)return im;
-    if(lvl==='month'){ im=impliedG(Y,'quarter',Math.ceil(idx/3)); if(im!=null)return im; return impliedG(Y,'half',Math.ceil(idx/6)); }
-    if(lvl==='quarter'){ return impliedG(Y,'half',Math.ceil(idx/2)); } return null; }
+  function impliedFor(Y,lvl,idx){ var g=impliedG(Y,lvl,idx); if(g!=null){ _lastImpCk=Y+'|'+lvl+'|'+idx; return g; }
+    if(lvl==='month'){ g=impliedG(Y,'quarter',Math.ceil(idx/3)); if(g!=null){ _lastImpCk=Y+'|quarter|'+Math.ceil(idx/3); return g; } g=impliedG(Y,'half',Math.ceil(idx/6)); if(g!=null){ _lastImpCk=Y+'|half|'+Math.ceil(idx/6); return g; } return null; }
+    if(lvl==='quarter'){ g=impliedG(Y,'half',Math.ceil(idx/2)); if(g!=null){ _lastImpCk=Y+'|half|'+Math.ceil(idx/2); return g; } return null; } return null; }
   function skuRows(s){ var wh=skuWh(co,ch), ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':'b'; var sd=subData(s), a=sd.a, fu=sd.fu;
     var all=Object.keys(SKUM).filter(function(sku){var p=SKUM[sku];if(!p||p.s!==s)return false;var av=(p.av||{})[ctry]||'';return av.indexOf(chKey)>=0;});
     var shares=buildSkuShares(all,co,ch,LYYM);
@@ -8276,7 +8280,7 @@ function renderSummaryView(body){
   var clr=body.querySelector('#sm-clear'); if(clr)clr.onclick=function(){ SUMM_FROM=''; SUMM_TO=''; renderSummaryView(body); };
   var host=body.querySelector('#smc'), tools=body.querySelector('#smc-tools');
   function draw(){
-    _impCache={};   // recompute the market-total→subcat implied balancing fresh each render (targets may have changed)
+    _impCache={}; _impConflict={};   // recompute the market-total→subcat implied balancing fresh each render (targets may have changed)
     var STY='<style>#smc table{border-collapse:separate;border-spacing:0;font-size:12px}#smc th,#smc td{padding:2px 6px;white-space:nowrap;border-bottom:1px solid #f1f1f1;text-align:right}'
       +'#smc th{font-size:10px;text-transform:uppercase;letter-spacing:.02em;color:#666;background:#f8fafc;position:sticky;top:0;z-index:2}'
       +'#smc thead tr:nth-child(2) th{top:19px}'   /* 2-row header: FY row sticks at 0, month/H1/H2 row just below it */
@@ -8288,7 +8292,7 @@ function renderSummaryView(body){
       +'#smc tr.sub td{border-top:1px solid #eef2f7}#smc tr.sub td.lbl{font-weight:700;color:#0f172a;cursor:pointer}#smc tr.gt td{border-top:2px solid #cbd5e1;background:#eef2ff}#smc tr.gt td.lbl{background:#eef2ff;font-weight:700}#smc tr.gt td.tot{background:#1e3a8a}#smc tr.gt .c3f{font-weight:700}#smc tr.grp td.grp-lbl{position:static;background:#e8eaf0;box-shadow:none;min-width:0;font-weight:800;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#334155;padding:4px 8px;text-align:left;border-top:2px solid #cbd5e1}'
       +'#smc tr.sku td.lbl{padding-left:22px;font-family:ui-monospace,Menlo,monospace;color:#475569}#smc .smx{color:#94a3b8;font-size:10px;display:inline-block;width:11px}'
       +'.sm-co,.sm-ch,.sm-metric,.sm-group,.sm-tgtedit,.sm-ccy{border:1px solid #cbd5e1;background:#fff;color:#334155;font-size:11px;padding:3px 10px;border-radius:12px;cursor:pointer;font-weight:600;font-family:inherit}.sm-co.on,.sm-ch.on,.sm-metric.on,.sm-group.on,.sm-ccy.on{background:#0f172a;color:#fff;border-color:#0f172a}.sm-tgtedit.on{background:#b45309;color:#fff;border-color:#b45309}'
-      +'#smc input.tgin{width:65px;text-align:right;padding:2px 3px;border:1px solid #cbd5e1;border-radius:4px;font-size:11px;font-family:inherit}#smc td.tgcell,#smc td.ecell{vertical-align:top}#smc .c3t{font-size:9px;line-height:1.25;white-space:nowrap}</style>';
+      +'#smc input.tgin{width:72px;text-align:right;padding:2px 3px;border:1px solid #cbd5e1;border-radius:4px;font-size:11px;font-family:inherit}#smc td.tgcell,#smc td.ecell{vertical-align:top}#smc .c3t{font-size:9px;line-height:1.25;white-space:nowrap}</style>';
     // Inject the table styles ONCE into <head> so they persist across re-renders — rebuilding #smc no longer
     // re-parses a <style> block (which caused the brief unstyled "flash" on every pill change).
     if(!document.getElementById('smc-sty')){ var _st=document.createElement('style'); _st.id='smc-sty'; _st.innerHTML=STY.replace(/^<style>/,'').replace(/<\/style>$/,''); document.head.appendChild(_st); }
@@ -8335,6 +8339,7 @@ function renderSummaryView(body){
       var Y=c.Y, lvl=c.level, idx=c.idx; if(Y==null||!lvl)return '<td></td>';
       var key=tgKey(Y,sub,lvl,idx), gbpStored=SUMM_TGT_GBP[key], gStored=SUMM_TGT[key], inh=inheritG(Y,sub,lvl,idx);
       var imp=(sub!==''&&gStored==null&&gbpStored==null)?impliedFor(Y,lvl,idx):null;   // untyped subcat → implied growth balancing to the market total
+      var impC=(imp!=null)&&_impConflict[_lastImpCk];   // conflict: locked category targets exceed the budget → implied floored at −100% / forced negative
       if(imp!=null)inh=imp;   // treat the implied growth as this cell's effective inherited value (display + live edit baseline)
       var mths=c.single?[c.single]:(c.m?[c.m]:(c.months||[])), ly=0; mths.forEach(function(m){ ly+=((_lyRev[sub]&&_lyRev[sub][m])||0); });   // month cols carry .m (not .months) → guard so MONTH group doesn't blank
       var ph=(inh!=null)?('↳'+(inh>=0?'+':'')+inh+'%'):'0%';
@@ -8346,7 +8351,8 @@ function renderSummaryView(body){
         var tgt=ly*(1+Number(gStored)/100); cellTgt=tgt; ttxt=(ly>0?('£'+Math.round(tgt).toLocaleString()):'')+_uTxt(tgt,sub); }
       else { var eff=(inh!=null?inh:0), tgt2=ly*(1+eff/100); cellTgt=tgt2; if(imp!=null)bg='background:#FDFBD4'; else if(inh!=null)bg='background:#F0FFF0';   // implied (balances to market total) → pale yellow; level-inherited → green
         ttxt=(ly>0?('£'+Math.round(tgt2).toLocaleString()):'')+_uTxt(tgt2,sub); }
-      return '<td class="ecell" style="padding:2px 4px;border:1px solid #e5e7eb;text-align:right"><input class="tgin" data-sub="'+encodeURIComponent(sub)+'" data-fy="'+Y+'" data-lvl="'+lvl+'" data-idx="'+idx+'" data-ly="'+Math.round(ly)+'" data-inh="'+(inh!=null?inh:'')+'" data-net="'+_tgtNet(sub)+'" value="'+v+'" placeholder="'+ph+'" title="Type a % growth vs last year (e.g. 40) OR a £ revenue target (e.g. £120000 or 120000). Blank = inherit." style="'+bg+'"><div class="ttgt tgt-hov" data-sub="'+encodeURIComponent(sub)+'" data-mths="'+mths.join(',')+'" data-tgt="'+Math.round(cellTgt)+'" data-ly="'+Math.round(ly)+'" data-net="'+_tgtNet(sub)+'" style="font-size:9px;color:#64748b;text-align:right;font-variant-numeric:tabular-nums;margin-top:1px;cursor:help">'+ttxt+'</div></td>'; }
+      if(impC)ttxt='<span title="Target conflict: the locked category growth targets for this period exceed what the market-total budget allows, so the implied growth for the remaining (untyped) categories is floored at −100% (or forced negative even though the market total is a positive/flat growth). Lower a locked category’s growth, or raise the market total." style="color:#b91c1c;cursor:help;font-weight:800">⚠</span> '+ttxt;
+      return '<td class="ecell" style="padding:2px 4px;border:1px solid #e5e7eb;text-align:right'+(impC?';background:#fff1f1':'')+'"><input class="tgin" data-sub="'+encodeURIComponent(sub)+'" data-fy="'+Y+'" data-lvl="'+lvl+'" data-idx="'+idx+'" data-ly="'+Math.round(ly)+'" data-inh="'+(inh!=null?inh:'')+'" data-net="'+_tgtNet(sub)+'" value="'+v+'" placeholder="'+ph+'" title="Type a % growth vs last year (e.g. 40) OR a £ revenue target (e.g. £120000 or 120000). Blank = inherit." style="'+bg+'"><div class="ttgt tgt-hov" data-sub="'+encodeURIComponent(sub)+'" data-mths="'+mths.join(',')+'" data-tgt="'+Math.round(cellTgt)+'" data-ly="'+Math.round(ly)+'" data-net="'+_tgtNet(sub)+'" style="font-size:9px;color:#64748b;text-align:right;font-variant-numeric:tabular-nums;margin-top:1px;cursor:help">'+ttxt+'</div></td>'; }
     if(SUMM_TGT_EDIT&&!rangeMode){
       // Target £ baseline = prior-year revenue per month. If the prior-year month is itself still a FORECAST
       // (e.g. FY27/28 H2 → FY26/27 H2 not complete), inherit the forecast revenue (subData.val, which is

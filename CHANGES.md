@@ -1,3 +1,8 @@
+## v26.804.0 Edit targets — implied floored at −100% + conflict warning; wider input
+- Implied growth is now **floored at −100%** (can't imply negative revenue) — fixes the "−198.5%" case.
+- **Conflict warning ⚠**: when the locked category targets exceed the market-total budget (implied would fall below −100%, or is forced negative despite a positive/flat market total), the implied cells show a red **⚠** with a hover explaining the conflict and how to resolve it (lower a locked category, or raise the market total); the cell is tinted light red.
+- Input box widened again (65→72px) so £1,000,000-scale targets fit.
+
 ## v26.803.0 Edit targets — group subcategories (Priority / Beach / Bags / Home)
 - Edit-targets subcategory rows are now **grouped under headers** by their grouping (Priority → Beach → Bags → Home → other), matching the DEMAND plan's category picker, instead of one flat alphabetical list.
 
