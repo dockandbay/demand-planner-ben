@@ -8193,7 +8193,9 @@ function renderSummaryView(body){
     return ms.map(function(m,i){return {label:MON[(+m.slice(5,7))-1],months:[m],single:m,idx:i+1,level:'month'};}); }
   function monFyIdx(m){ var y=+m.slice(0,4),mo=+m.slice(5,7); return {Y:(mo>=3?y:y-1), idx:(mo>=3?mo-2:mo+10)}; }
   function tgKey(Y,sub,lvl,idx){ return Y+'|'+(sub||'')+'|'+lvl+'|'+idx; }
-  function resolveG(Y,sub,mIdx){ var k; k=tgKey(Y,sub,'month',mIdx); if(SUMM_TGT[k]!=null)return Number(SUMM_TGT[k]); k=tgKey(Y,sub,'quarter',Math.ceil(mIdx/3)); if(SUMM_TGT[k]!=null)return Number(SUMM_TGT[k]); k=tgKey(Y,sub,'half',Math.ceil(mIdx/6)); if(SUMM_TGT[k]!=null)return Number(SUMM_TGT[k]); return null; }
+  function resolveG(Y,sub,mIdx){ var k; k=tgKey(Y,sub,'month',mIdx); if(SUMM_TGT[k]!=null)return Number(SUMM_TGT[k]); k=tgKey(Y,sub,'quarter',Math.ceil(mIdx/3)); if(SUMM_TGT[k]!=null)return Number(SUMM_TGT[k]); k=tgKey(Y,sub,'half',Math.ceil(mIdx/6)); if(SUMM_TGT[k]!=null)return Number(SUMM_TGT[k]);
+    if(sub!==''){ var im=impliedG(Y,'month',mIdx); if(im==null)im=impliedG(Y,'quarter',Math.ceil(mIdx/3)); if(im==null)im=impliedG(Y,'half',Math.ceil(mIdx/6)); if(im!=null)return im; }   // untyped subcat → market-total balanced implied growth
+    return null; }
   function inheritG(Y,sub,lvl,idx){ var k; if(lvl==='month'){ k=tgKey(Y,sub,'quarter',Math.ceil(idx/3)); if(SUMM_TGT[k]!=null)return Number(SUMM_TGT[k]); k=tgKey(Y,sub,'half',Math.ceil(idx/6)); if(SUMM_TGT[k]!=null)return Number(SUMM_TGT[k]); return null; } if(lvl==='quarter'){ k=tgKey(Y,sub,'half',Math.ceil(idx/2)); if(SUMM_TGT[k]!=null)return Number(SUMM_TGT[k]); return null; } return null; }
   function fdate(v){ var m=String(v||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m?(m[3]+'-'+MON[(+m[2])-1]+'-'+m[1].slice(2)):''; }
   function prevY(m){ return (+m.slice(0,4)-1)+'_'+m.slice(5,7); }
@@ -8210,6 +8212,25 @@ function renderSummaryView(body){
         if(SUMM_METRIC==='rev'||SUMM_METRIC==='revtgt'){ val[m]=isActualMonth(m)?((a[m]&&a[m][1])||0):(u*getASP(co,ch,s,pa(m).y,pa(m).mo)); ly[m]=(a[prevY(m)]&&a[prevY(m)][1])||0; }
         else { val[m]=u; ly[m]=lu; } });
       sdCache[s]={a:a,fu:fu,val:val,ly:ly}; } return sdCache[s]; }
+  // ── Target balancing: a market-total (sub='') growth is a FIXED revenue budget; a subcat you type into LOCKS;
+  //    untyped subcats share the remaining budget at a UNIFORM implied growth (∝ their LY) so subcats always sum
+  //    back to the market total. impliedG returns that uniform % for a period (null if no market total set).
+  var _impCache={};
+  function _periodMonths(Y,level,idx){ var fm=fyMonths(Y); if(level==='month')return [fm[idx-1]]; if(level==='quarter')return fm.slice((idx-1)*3,idx*3); if(level==='half')return fm.slice((idx-1)*6,idx*6); return fm.slice(); }
+  function _lyPer(sub,mths){ var t=0; function one(s){ var sd=subData(s); mths.forEach(function(m){ var py=prevY(m); t+=((py in sd.val)?sd.val[py]:((sd.a[py]&&sd.a[py][1])||0)); }); } if(sub===''){ subs.forEach(one); } else one(sub); return t; }
+  function impliedG(Y,level,idx){ var ck=Y+'|'+level+'|'+idx; if(ck in _impCache)return _impCache[ck];
+    var mk=tgKey(Y,'',level,idx), mg=SUMM_TGT[mk], mgbp=SUMM_TGT_GBP[mk];
+    if(mg==null&&mgbp==null)return (_impCache[ck]=null);
+    var mths=_periodMonths(Y,level,idx), lyTot=_lyPer('',mths);
+    var mtRev=(mgbp!=null)?Number(mgbp):(lyTot*(1+Number(mg)/100));
+    var lockedRev=0, unlockedLY=0;
+    subs.forEach(function(s){ var sk=tgKey(Y,s,level,idx), sg=SUMM_TGT[sk], sgbp=SUMM_TGT_GBP[sk], lys=_lyPer(s,mths);
+      if(sgbp!=null)lockedRev+=Number(sgbp); else if(sg!=null)lockedRev+=lys*(1+Number(sg)/100); else unlockedLY+=lys; });
+    var g=(unlockedLY>0)?Math.round(((mtRev-lockedRev)/unlockedLY-1)*1000)/10:null;
+    return (_impCache[ck]=g); }
+  function impliedFor(Y,lvl,idx){ var im=impliedG(Y,lvl,idx); if(im!=null)return im;
+    if(lvl==='month'){ im=impliedG(Y,'quarter',Math.ceil(idx/3)); if(im!=null)return im; return impliedG(Y,'half',Math.ceil(idx/6)); }
+    if(lvl==='quarter'){ return impliedG(Y,'half',Math.ceil(idx/2)); } return null; }
   function skuRows(s){ var wh=skuWh(co,ch), ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':'b'; var sd=subData(s), a=sd.a, fu=sd.fu;
     var all=Object.keys(SKUM).filter(function(sku){var p=SKUM[sku];if(!p||p.s!==s)return false;var av=(p.av||{})[ctry]||'';return av.indexOf(chKey)>=0;});
     var shares=buildSkuShares(all,co,ch,LYYM);
@@ -8255,6 +8276,7 @@ function renderSummaryView(body){
   var clr=body.querySelector('#sm-clear'); if(clr)clr.onclick=function(){ SUMM_FROM=''; SUMM_TO=''; renderSummaryView(body); };
   var host=body.querySelector('#smc'), tools=body.querySelector('#smc-tools');
   function draw(){
+    _impCache={};   // recompute the market-total→subcat implied balancing fresh each render (targets may have changed)
     var STY='<style>#smc table{border-collapse:separate;border-spacing:0;font-size:12px}#smc th,#smc td{padding:2px 6px;white-space:nowrap;border-bottom:1px solid #f1f1f1;text-align:right}'
       +'#smc th{font-size:10px;text-transform:uppercase;letter-spacing:.02em;color:#666;background:#f8fafc;position:sticky;top:0;z-index:2}'
       +'#smc thead tr:nth-child(2) th{top:19px}'   /* 2-row header: FY row sticks at 0, month/H1/H2 row just below it */
@@ -8312,6 +8334,8 @@ function renderSummaryView(body){
     function ecell(sub,c){ if(c.type==='tot'||c.type==='ptot')return '<td class="tot" style="background:#f1f5f9"></td>';
       var Y=c.Y, lvl=c.level, idx=c.idx; if(Y==null||!lvl)return '<td></td>';
       var key=tgKey(Y,sub,lvl,idx), gbpStored=SUMM_TGT_GBP[key], gStored=SUMM_TGT[key], inh=inheritG(Y,sub,lvl,idx);
+      var imp=(sub!==''&&gStored==null&&gbpStored==null)?impliedFor(Y,lvl,idx):null;   // untyped subcat → implied growth balancing to the market total
+      if(imp!=null)inh=imp;   // treat the implied growth as this cell's effective inherited value (display + live edit baseline)
       var mths=c.single?[c.single]:(c.m?[c.m]:(c.months||[])), ly=0; mths.forEach(function(m){ ly+=((_lyRev[sub]&&_lyRev[sub][m])||0); });   // month cols carry .m (not .months) → guard so MONTH group doesn't blank
       var ph=(inh!=null)?('↳'+(inh>=0?'+':'')+inh+'%'):'0%';
       var isGbp=(gbpStored!=null), v='', bg='', ttxt='', cellTgt=0;
@@ -8395,16 +8419,11 @@ function renderSummaryView(body){
           var body={country:co,channel:ch,fy:+inp.dataset.fy,subcategory:sub,level:inp.dataset.lvl,idx:+inp.dataset.idx};
           if(p.gbp!=null){ body.target_gbp=p.gbp; body.growth_pct=(lyv>0?Math.round((p.gbp/lyv-1)*1000)/10:''); }   // store £ + (for existing cats) the equivalent % so the summary math keeps working
           else { body.growth_pct=(p.pct!=null?p.pct:''); body.target_gbp=''; }
-          if(sub===''){   // MARKET TOTAL → propagate the same growth down to every subcategory for this period (optimistic + bulk save). £ entry → its implied % vs the market LY.
-            var _g=(p.pct!=null)?p.pct:(p.gbp!=null&&lyv>0?Math.round((p.gbp/lyv-1)*1000)/10:null), _fy=+inp.dataset.fy,_lvl=inp.dataset.lvl,_idx=+inp.dataset.idx;
-            subs.forEach(function(s){ var k=tgKey(_fy,s,_lvl,_idx); delete SUMM_TGT_GBP[k]; if(_g==null)delete SUMM_TGT[k]; else SUMM_TGT[k]=_g; });
-            fetch('/api/demand-revenue-targets/periods/bulk',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({rows:subs.map(function(s){return {country:co,channel:ch,fy:_fy,subcategory:s,level:_lvl,idx:_idx,growth_pct:(_g==null?'':_g),target_gbp:''};})})}).catch(function(){});
-          }
           fetch('/api/demand-revenue-targets/periods',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
             .then(function(r){return r.json();}).then(function(){ var k=tgKey(+inp.dataset.fy,sub,inp.dataset.lvl,+inp.dataset.idx);
               if(p.gbp!=null){ SUMM_TGT_GBP[k]=p.gbp; if(lyv>0)SUMM_TGT[k]=Math.round((p.gbp/lyv-1)*1000)/10; else delete SUMM_TGT[k]; }
               else { delete SUMM_TGT_GBP[k]; if(p.pct!=null)SUMM_TGT[k]=p.pct; else delete SUMM_TGT[k]; }
-              var ae=document.activeElement; if(!(ae&&ae.classList&&ae.classList.contains('tgin')))draw();   // keep focus if user clicked another cell
+              var ae=document.activeElement; if(sub===''||!(ae&&ae.classList&&ae.classList.contains('tgin')))draw();   // market total re-balances every subcat → always redraw; otherwise keep focus for rapid entry
             }).catch(function(){}); }; });
       // Hover the £ target under a cell → breakdown: current forecast vs target (units / ASP / revenue), with from→to deltas.
       function _tgtHovHtml(el){ var sub=decodeURIComponent(el.dataset.sub||''), tgt=Number(el.dataset.tgt)||0;

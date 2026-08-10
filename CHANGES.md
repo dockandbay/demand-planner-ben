@@ -1,3 +1,6 @@
+## v26.799.0 Edit targets — market total is a fixed budget; subcategories imply & rebalance
+- Replaced the v26.798 hardcode-everywhere with a **balancing model**. The ALL SUBCATEGORIES (market total) growth is a **fixed revenue budget**; any subcategory you type into **locks**; untyped subcategories share the remaining budget at a **uniform implied growth** (∝ last-year size) so categories always sum back to the market total. Override some (+100 / 0 / −100%) and the rest re-imply; implied cells show ↳%, typing locks, clearing re-implies. Implied values feed the Summary + target math via `resolveG`, so numbers match everywhere.
+
 ## v26.798.0 Edit targets — market-total row propagates to subcategories + total-row shading
 - **ALL SUBCATEGORIES (market total)** row (Summary ▸ Edit targets): entering a growth % (or a £ target → its implied %) now **propagates that growth down to every subcategory** for that period (bulk-saved + optimistic). Previously it only saved the market-total level. Blank clears them.
 - The market-total row now carries the **same #eef2ff background across the whole row** (matching its label cell) so it reads as the total row.
