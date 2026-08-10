@@ -1,3 +1,6 @@
+## v26.812.0 Build-production modal — MOQ ⚑ now explains itself on hover
+- The MOQ shortfall flag showed no hover text: its native `title` tooltip rendered behind the modal (modal `z-index:200000` > app tooltip `100080`). Added a dedicated tooltip that draws **above** the modal (`z-index:200020`) and clearer wording — e.g. "Minimum order quantity (MOQ) for this product is 500 units. This production totals 150 units across all shown markets — 350 short of the MOQ. Tick 'China-stock top-up' to add the shortfall to a China holding PO."
+
 ## v26.811.0 Trend Gaps — recommendation now uses the SAME engine as the plan cell "est +X% ▾"
 - Trend Gaps previously recommended `aiRec.pct.med` — a **pooled all-month median YoY** with no noise-shrink and no seasonal cap. For seasonal lines that overstates growth (off-season, tiny-base months post wild % swings that inflate the median), so it showed e.g. **≥+75%** while the plan cell for the same subcat/month showed **est +25%**.
 - Now both the gap calculation and the Apply target use `confidenceOptions(...).high` **per month** — the identical engine the plan cell displays as "est +X% ▾" (trend-shrunk YoY, capped at 1.25× the month's high-water-mark). So the list, the Apply popup, and the plan cell all agree.

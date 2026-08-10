@@ -10245,11 +10245,18 @@
     // (moq − combined) goes to a "China Stock" holding PO (one per production per supplier). supplier = the SKU's chosen supplier.
     function chinaShortfalls(){ var out=[]; Object.keys(REC[MODE]).forEach(function(s){ var m=META[s]; if(!m||!m.moq||!hasCode(s))return; var rt=rowTotal(s); if(rt>0&&rt<m.moq)out.push({sku:s,qty:(m.moq-rt),supplier_code:supOf(s)||''}); }); return out; }
     function refreshChina(){ var lbl=document.getElementById('bpm-china-lbl'); if(!lbl)return; var sf=chinaShortfalls(); var u=sf.reduce(function(a,b){return a+b.qty;},0); lbl.textContent=sf.length?('China-stock top-up ('+sf.length+' SKU · '+u.toLocaleString()+'u)'):'China-stock top-up (none)'; }
-    function moqMsg(moq,t){ return 'MOQ '+moq.toLocaleString()+' — production '+t.toLocaleString()+', short '+(moq-t).toLocaleString(); }
+    function moqMsg(moq,t){ return 'Minimum order quantity (MOQ) for this product is '+moq.toLocaleString()+' units. This production totals '+t.toLocaleString()+' units across all shown markets — '+(moq-t).toLocaleString()+' short of the MOQ. Tick “China-stock top-up” to add the shortfall to a China holding PO.'; }
+    // The app's native-title tooltip renders below this modal (modal z-index 200000), so the MOQ hint would be hidden.
+    // Give the ⚑ its own tooltip that draws ABOVE the modal. Bound once, delegated (survives drawSkus re-renders).
+    if(!window._bpmMoqTipBound){ window._bpmMoqTipBound=true;
+      var _mt=document.createElement('div'); _mt.style.cssText='position:fixed;z-index:200020;max-width:300px;background:#0f172a;color:#fff;font-size:11px;line-height:1.5;padding:8px 11px;border-radius:6px;box-shadow:0 6px 20px rgba(0,0,0,.35);pointer-events:none;display:none;text-align:left'; document.body.appendChild(_mt);
+      document.addEventListener('mouseover',function(e){ var ic=e.target&&e.target.closest&&e.target.closest('.bpm-moqicon'); if(!ic||ic.style.display==='none')return; var msg=ic.getAttribute('data-moqtip'); if(!msg)return; _mt.textContent=msg; _mt.style.display='block'; var r=ic.getBoundingClientRect(); _mt.style.left=Math.max(6,Math.min(r.left,window.innerWidth-306))+'px'; _mt.style.top=(r.bottom+6)+'px'; });
+      document.addEventListener('mouseout',function(e){ if(e.target&&e.target.closest&&e.target.closest('.bpm-moqicon'))_mt.style.display='none'; });
+    }
     function updateRow(tr){ if(!tr)return; var s=tr.dataset.sku, moq=Number(tr.dataset.moq)||0; var t=rowTotal(s); var short=!!(moq&&t>0&&t<moq);
       var tc=tr.querySelector('.bpm-rowtot'); if(tc){ tc.textContent=t?t.toLocaleString():'0'; tc.style.color=short?'#fff':''; }
       var td=tr.querySelector('.bpm-totcell'); if(td)td.style.background=short?'#FA5053':'';
-      var ic=tr.querySelector('.bpm-moqicon'); if(ic){ ic.style.display=short?'':'none'; ic.title=short?moqMsg(moq,t):''; ic.style.color=short?'#fff':'#b91c1c'; } }
+      var ic=tr.querySelector('.bpm-moqicon'); if(ic){ ic.style.display=short?'':'none'; ic.setAttribute('data-moqtip',short?moqMsg(moq,t):''); ic.style.color=short?'#fff':'#b91c1c'; } }
     function drawSkus(){
       var box=document.getElementById('bpm-skus'); if(!box)return;
       var skus=Object.keys(REC[MODE]).filter(function(s){ return shown.some(function(c){ return rec(s,c)>0; }); });
@@ -10269,7 +10276,7 @@
         rows+='<tr data-sku="'+esc(s.sku)+'" data-cat="'+esc(cat)+'" data-moq="'+(s.moq||0)+'">'
           +'<td style="'+tdB.replace('white-space:nowrap','')+';text-align:left;min-width:200px"><div style="display:flex;align-items:center;gap:6px"><button class="bpm-plan" data-sku="'+esc(s.sku)+'" style="font-size:8px;font-weight:700;padding:0 4px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer">PLAN</button><span>'+esc(s.sku)+'</span></div>'+(s.discontinue?'<div style="font-size:9px;color:#9ca3af;margin-top:1px">discontinue '+esc(fd(s.discontinue))+'</div>':'')+'</td>'
           +qtyCells
-          +'<td class="bpm-totcell" style="'+tdB+';text-align:center;font-weight:700;font-variant-numeric:tabular-nums'+(moqShort?';background:#FA5053':'')+'"><span class="bpm-moqicon" title="'+(moqShort?('MOQ '+s.moq.toLocaleString()+' — production '+rt.toLocaleString()+', short '+(s.moq-rt).toLocaleString()):'')+'" style="cursor:help;margin-right:3px;color:'+(moqShort?'#fff':'#b91c1c')+';display:'+(moqShort?'':'none')+'">⚑</span><span class="bpm-rowtot" style="'+(moqShort?'color:#fff':'')+'">'+(rt?rt.toLocaleString():'0')+'</span></td>'
+          +'<td class="bpm-totcell" style="'+tdB+';text-align:center;font-weight:700;font-variant-numeric:tabular-nums'+(moqShort?';background:#FA5053':'')+'"><span class="bpm-moqicon" data-moqtip="'+(moqShort?esc(moqMsg(s.moq,rt)):'')+'" style="cursor:help;margin-right:3px;color:'+(moqShort?'#fff':'#b91c1c')+';display:'+(moqShort?'':'none')+'">⚑</span><span class="bpm-rowtot" style="'+(moqShort?'color:#fff':'')+'">'+(rt?rt.toLocaleString():'0')+'</span></td>'
           +'<td style="'+tdB+';text-align:left;min-width:150px">'+supCell+'</td></tr>';
       });
       var thB='position:sticky;top:0;background:#f3f3f1;z-index:1;padding:5px 8px;border-bottom:1px solid #d5d5d5;font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#444;white-space:nowrap';
