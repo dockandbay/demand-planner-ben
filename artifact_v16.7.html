@@ -8263,7 +8263,7 @@ function renderSummaryView(body){
       +'#smc th.fyh{text-align:center;cursor:pointer;border-left:2px solid #cbd5e1;color:#334155}#smc th.tot{background:#1e3a8a;color:#fff;border-left:1px solid #1e3a8a}'
       +'#smc td.tot{background:#1e3a8a;border-left:1px solid #1e3a8a}#smc td.tot .c3f{color:#fff}#smc td.tot .c3ly{color:#c7d2fe}'
       +'#smc .c3ly{font-size:8px;color:#94a3b8;line-height:1.1}#smc .c3f{font-size:11px;font-weight:600;line-height:1.2;color:#0f172a}#smc .c3g{font-size:8px;font-weight:600;line-height:1.1}'
-      +'#smc tr.sub td{border-top:1px solid #eef2f7}#smc tr.sub td.lbl{font-weight:700;color:#0f172a;cursor:pointer}#smc tr.gt td{border-top:2px solid #cbd5e1}#smc tr.gt td.lbl{background:#eef2ff;font-weight:700}#smc tr.gt .c3f{font-weight:700}'
+      +'#smc tr.sub td{border-top:1px solid #eef2f7}#smc tr.sub td.lbl{font-weight:700;color:#0f172a;cursor:pointer}#smc tr.gt td{border-top:2px solid #cbd5e1;background:#eef2ff}#smc tr.gt td.lbl{background:#eef2ff;font-weight:700}#smc tr.gt .c3f{font-weight:700}'
       +'#smc tr.sku td.lbl{padding-left:22px;font-family:ui-monospace,Menlo,monospace;color:#475569}#smc .smx{color:#94a3b8;font-size:10px;display:inline-block;width:11px}'
       +'.sm-co,.sm-ch,.sm-metric,.sm-group,.sm-tgtedit,.sm-ccy{border:1px solid #cbd5e1;background:#fff;color:#334155;font-size:11px;padding:3px 10px;border-radius:12px;cursor:pointer;font-weight:600;font-family:inherit}.sm-co.on,.sm-ch.on,.sm-metric.on,.sm-group.on,.sm-ccy.on{background:#0f172a;color:#fff;border-color:#0f172a}.sm-tgtedit.on{background:#b45309;color:#fff;border-color:#b45309}'
       +'#smc input.tgin{width:54px;text-align:right;padding:2px 3px;border:1px solid #cbd5e1;border-radius:4px;font-size:11px;font-family:inherit}#smc td.tgcell,#smc td.ecell{vertical-align:top}#smc .c3t{font-size:9px;line-height:1.25;white-space:nowrap}</style>';
@@ -8395,6 +8395,11 @@ function renderSummaryView(body){
           var body={country:co,channel:ch,fy:+inp.dataset.fy,subcategory:sub,level:inp.dataset.lvl,idx:+inp.dataset.idx};
           if(p.gbp!=null){ body.target_gbp=p.gbp; body.growth_pct=(lyv>0?Math.round((p.gbp/lyv-1)*1000)/10:''); }   // store £ + (for existing cats) the equivalent % so the summary math keeps working
           else { body.growth_pct=(p.pct!=null?p.pct:''); body.target_gbp=''; }
+          if(sub===''){   // MARKET TOTAL → propagate the same growth down to every subcategory for this period (optimistic + bulk save). £ entry → its implied % vs the market LY.
+            var _g=(p.pct!=null)?p.pct:(p.gbp!=null&&lyv>0?Math.round((p.gbp/lyv-1)*1000)/10:null), _fy=+inp.dataset.fy,_lvl=inp.dataset.lvl,_idx=+inp.dataset.idx;
+            subs.forEach(function(s){ var k=tgKey(_fy,s,_lvl,_idx); delete SUMM_TGT_GBP[k]; if(_g==null)delete SUMM_TGT[k]; else SUMM_TGT[k]=_g; });
+            fetch('/api/demand-revenue-targets/periods/bulk',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({rows:subs.map(function(s){return {country:co,channel:ch,fy:_fy,subcategory:s,level:_lvl,idx:_idx,growth_pct:(_g==null?'':_g),target_gbp:''};})})}).catch(function(){});
+          }
           fetch('/api/demand-revenue-targets/periods',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
             .then(function(r){return r.json();}).then(function(){ var k=tgKey(+inp.dataset.fy,sub,inp.dataset.lvl,+inp.dataset.idx);
               if(p.gbp!=null){ SUMM_TGT_GBP[k]=p.gbp; if(lyv>0)SUMM_TGT[k]=Math.round((p.gbp/lyv-1)*1000)/10; else delete SUMM_TGT[k]; }

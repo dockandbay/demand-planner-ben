@@ -1,3 +1,7 @@
+## v26.798.0 Edit targets — market-total row propagates to subcategories + total-row shading
+- **ALL SUBCATEGORIES (market total)** row (Summary ▸ Edit targets): entering a growth % (or a £ target → its implied %) now **propagates that growth down to every subcategory** for that period (bulk-saved + optimistic). Previously it only saved the market-total level. Blank clears them.
+- The market-total row now carries the **same #eef2ff background across the whole row** (matching its label cell) so it reads as the total row.
+
 ## v26.797.0 Build production modal — 3-step wizard + per-country tick + zero styling
 - BUY plan: **hid** the standalone **3PL - Create POs** / **FBA - Create POs** buttons (the all-countries "Build production" modal replaces them).
 - "Create production POs — all countries" restructured into a **3-column step wizard**: ① Set up (Buy 3PL/FBA · Production · Batch · Start date) · ② Choose & preview (Markets · China-stock · Preview) · ③ Create (Create POs + the preview output lives here).
