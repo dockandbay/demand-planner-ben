@@ -3659,6 +3659,17 @@
   function poRefetchPanel(po,i){ var at=document.querySelector('#podet-'+i+' .potab.active'); var wantTab=at?at.dataset.pt:null;   // keep the open sub-tab after a save re-render
     // Refresh ONLY this PO's row (single-row endpoint) instead of pulling the whole ~1400-row grid — much faster.
     fetch('/api/supply/po-row/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(arr){ var rr=Array.isArray(arr)?arr[0]:null; if(rr)poBy[po]=rr; loadPoDetail(po,i,wantTab); }).catch(function(){ loadPoDetail(po,i,wantTab); }); }
+  // FAST refresh for PAYMENT edits (start-deposit %/amount, completion, balance, dates): a payment edit only changes
+  // row-level figures — the lines/costs (po-detail) are unchanged — so re-pull ONLY the recomputed row and re-render
+  // the panel from the CACHED detail. One clean render with the fresh value: no slow po-detail fetch (~5s) and no
+  // flash of the pre-save value. Falls back to the full refetch if the detail isn't cached yet.
+  function poRefreshRowFast(po,i){ var box=document.getElementById('podet-'+i); var d=box&&box._poDetail;
+    if(!d){ poRefetchPanel(po,i); return; }
+    var at=box.querySelector('.potab.active'), wantTab=at?at.dataset.pt:null;
+    fetch('/api/supply/po-row/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(arr){ var rr=Array.isArray(arr)?arr[0]:null; if(rr)poBy[po]=rr;
+      box.innerHTML=poDetailHTML(po,d,i); box._poDetail=d; bindPay(po,i); try{bindPoScrollPin();applyPoPin();}catch(e){}
+      if(wantTab){ var t=box.querySelector('.potab[data-pt="'+wantTab+'"]'); if(t&&t.onclick)t.onclick(); }
+    }).catch(function(){ poRefetchPanel(po,i); }); }
   // Re-render ONLY the order-plan panel from the in-memory detail (box._poDetail) — no fetch → instant. Used by
   // Edit / Cancel (pure UI toggle) and empty Save. Falls back to the full refetch if the detail isn't cached.
   function rerenderOrderPlan(po,i){ var box=document.getElementById('podet-'+i); var d=box&&box._poDetail;
@@ -3718,7 +3729,7 @@
       var _d=document.querySelector('#podet-'+i+' .payin[data-field="pay_start_deposit_date"]');
       if(_a>0 && _d && !_d.value){ body['pay_start_deposit_date']=new Date().toISOString().slice(0,10); } }
     fetch(inp.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
-      .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); })
+      .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefreshRowFast(po,i); })   // fast row-only re-render (payment edit → lines unchanged): instant, no flash-back to the pre-save value
       .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; });
     document.querySelectorAll('#podet-'+i+' .po-likely').forEach(function(inp){ inp.onchange=function(){
       var raw=(inp.value||'').trim(), iso=raw?parseDateLoose(raw):''; if(raw&&!iso){ inp.classList.add('err'); return; } inp.classList.remove('err'); inp.value=iso; inp.classList.add('saved');
@@ -3731,7 +3742,7 @@
     document.querySelectorAll('#podet-'+i+' .pay-fill').forEach(function(b){ b.onclick=function(){ var orig=b.innerHTML; b.disabled=true; b.textContent='…';
       var today=localToday(); var body={}; body[b.dataset.af]=b.dataset.calc; body[b.dataset.df]=today;
       fetch('/api/supply/po/'+encodeURIComponent(po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
-        .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); })
+        .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefreshRowFast(po,i); })   // fast row-only re-render (payment fill → lines unchanged)
         .catch(function(e){ b.disabled=false; b.innerHTML=orig; alert('Failed: '+(e.message||e)); }); }; });
     document.querySelectorAll('#podet-'+i+' .dep-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openDepPick(b.dataset.po,b,function(){ poRefetchPanel(po,i); }); }; });
     // Additional costs (supplier-submitted, PAYMENTS tab) — edit / approve / un-approve / remove / add. Same
