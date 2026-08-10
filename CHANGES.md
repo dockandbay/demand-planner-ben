@@ -1,3 +1,8 @@
+## v26.810.0 Trend Gaps — list & Apply popup now cover the SAME months (+ "open the current month before the 15th" rule)
+- **Root cause of "Will apply = Forecast now, nothing changes":** the gap **list** measured `CUR_MONTH+1..+3` (Sep/Oct/Nov) while the Apply **popup** showed the calendar next-3 (Aug/Sep/Oct). So the popup landed on months already forecast high while the real under-forecast sat in months it wasn't showing.
+- Both now share one window helper, `_tgWindow()`: **before the 15th of the current month** the window *includes* the current (partial) month (so we can still lift it) → e.g. 10-Aug ⇒ Aug/Sep/Oct; **from the 15th** it starts next month ⇒ Sep/Oct/Nov. The list and the popup are always in sync.
+- When the current month is in-window, both sides use the **full-month forecast** (`curMonthForecast`), not the month-to-date actual, so the YoY comparison and "Forecast now" are honest. Result: "Will apply →" is now genuinely higher than "Forecast now" and applying moves the forecast.
+
 ## v26.809.0 Trend Gaps — Apply now writes a change-record entry (the "R" audit rail)
 - Applying a trend-gap recommendation changed the forecast but left **no record on the plan's "R" change rail** (who/what/when). It now logs each affected month via `logChangesBulk` (`level:'subcat'`, action `"applied trend-gap recommendation"`, from = prior forecast → to = applied units) — matching how the DEMAND ▸ Set-targets recommendations already log. The change now shows in UK DTC's change record.
 

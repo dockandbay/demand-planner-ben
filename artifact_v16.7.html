@@ -9575,10 +9575,18 @@ function daForecastTrend(){
 //   forecast growth  = Σ plan fu(window) / Σ LY actual(window) − 1  (plan vs same months last year).
 //   gap = recommended-min − forecast growth; keep positive gaps ≥15pts with ≥100 LY units; sort largest-first.
 function _tgAddMonth(fym,n){ var p=fym.split('_'),y=parseInt(p[0],10),m=parseInt(p[1],10)-1+n; y+=Math.floor(m/12); m=((m%12)+12)%12; return y+'_'+(m+1<10?'0':'')+(m+1); }
+// Shared Trend-Gaps analysis window (used by BOTH the list and the Apply popup so they always cover the SAME months).
+// Before the 15th of the current month we stay open to updating the current (partial) month, so the window STARTS at
+// CUR_MONTH; from the 15th on it starts at the next month. e.g. on 10-Aug → [Aug,Sep,Oct]; on 20-Aug → [Sep,Oct,Nov].
+function _tgWindow(horizon){ horizon=Math.max(1,Math.min(3,horizon||3));
+  var start=(new Date().getDate()<15)?0:1; var w=[]; for(var i=0;i<horizon;i++)w.push(_tgAddMonth(CUR_MONTH,start+i)); return w; }
+// Forecast for a window month: for the current (partial) month calc().fu holds the month-to-date ACTUAL, so use the
+// full-month forecast (curMonthForecast) instead — matching what the plan shows and keeping the YoY comparison honest.
+function _tgFcMonth(s,co,ch,fu,fym){ if(fym===CUR_MONTH){ try{ return curMonthForecast(s,co,ch); }catch(e){} } return fu[fym]||0; }
 function daTrendGaps(horizon){
   horizon=Math.max(1,Math.min(3,horizon||3));
   var FLOOR=100, THRESH=0.15, MINREC=0.10;
-  var win=[]; for(var i=1;i<=horizon;i++)win.push(_tgAddMonth(CUR_MONTH,i));
+  var win=_tgWindow(horizon);
   var out=[];
   DATA.forEach(function(row){
     var sub=row.s,co=row.co,ch=row.ch; if(!sub||!co||!ch)return;
@@ -9587,7 +9595,7 @@ function daTrendGaps(horizon){
     var recMin=rec.pct.med; if(recMin==null||recMin<MINREC)return;   // only a confident growth signal
     var fu; try{ fu=daRowFu(row); }catch(e){ return; }
     var m=row.m||{}, fSum=0, lySum=0;
-    win.forEach(function(fym){ fSum+=(fu[fym]||0);
+    win.forEach(function(fym){ fSum+=_tgFcMonth(sub,co,ch,fu,fym);
       var p=fym.split('_'), lk=ym(parseInt(p[0],10)-1,parseInt(p[1],10)); lySum+=((m[lk]&&m[lk][0])||0); });
     if(lySum<FLOOR)return;
     var fcYoY=fSum/lySum-1;
@@ -9609,7 +9617,7 @@ function buildTgApply(sub,co,ch){
   var rec; try{ rec=aiRec(sub,co,ch); }catch(e){ rec=null; }
   if(!rec||rec.mixed||!rec.pct){ pop.innerHTML='<div style="font-size:11px;color:#6b7280">No confident recommendation for '+tHesc(sub)+' · '+co+' '+ch+'.</div>'; return pop; }
   var recMin=rec.pct.med, gl=rec.label;
-  var win=(typeof SKU_FC_MONTHS!=='undefined'?SKU_FC_MONTHS:[]).slice(0,3);
+  var win=_tgWindow(3);                                    // SAME window the Trend-Gaps list measures the gap over
   var fu=(calc(sub,co,ch).fu)||{}, a=ga(co,ch,sub)||{};
   var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var ml=function(m){var p=m.split('_');return MN[+p[1]-1]+'-'+p[0].slice(2);};
