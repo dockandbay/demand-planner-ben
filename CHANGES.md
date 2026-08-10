@@ -1,3 +1,7 @@
+## v26.805.0 Edit targets — conflict ⚠ on the locked cells + auto-rebalance on edit
+- The conflict **⚠ now shows on the locked category cells** that (together) exceed the budget — not on the implied cells.
+- Editing any locked cell (% or £) now **auto-updates the implied cells** immediately (redraw, with focus restored to the edited cell), so the balance recomputes as you go.
+
 ## v26.804.0 Edit targets — implied floored at −100% + conflict warning; wider input
 - Implied growth is now **floored at −100%** (can't imply negative revenue) — fixes the "−198.5%" case.
 - **Conflict warning ⚠**: when the locked category targets exceed the market-total budget (implied would fall below −100%, or is forced negative despite a positive/flat market total), the implied cells show a red **⚠** with a hover explaining the conflict and how to resolve it (lower a locked category, or raise the market total); the cell is tinted light red.

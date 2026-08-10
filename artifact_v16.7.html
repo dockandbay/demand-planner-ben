@@ -8338,8 +8338,11 @@ function renderSummaryView(body){
     function ecell(sub,c){ if(c.type==='tot'||c.type==='ptot')return '<td class="tot" style="background:#f1f5f9"></td>';
       var Y=c.Y, lvl=c.level, idx=c.idx; if(Y==null||!lvl)return '<td></td>';
       var key=tgKey(Y,sub,lvl,idx), gbpStored=SUMM_TGT_GBP[key], gStored=SUMM_TGT[key], inh=inheritG(Y,sub,lvl,idx);
-      var imp=(sub!==''&&gStored==null&&gbpStored==null)?impliedFor(Y,lvl,idx):null;   // untyped subcat → implied growth balancing to the market total
-      var impC=(imp!=null)&&_impConflict[_lastImpCk];   // conflict: locked category targets exceed the budget → implied floored at −100% / forced negative
+      var stored=(gStored!=null||gbpStored!=null);
+      var _pImp=(sub!=='')?impliedFor(Y,lvl,idx):null;   // compute the period balancing (populates the conflict flag) for locked OR implied cells
+      var periodConflict=(sub!=='')&&(_lastImpCk!=null)&&!!_impConflict[_lastImpCk];
+      var imp=(sub!==''&&!stored)?_pImp:null;   // implied growth shown only on untyped subcats
+      var lockConflict=stored&&periodConflict;   // ⚠ goes on the LOCKED entries that together exceed the budget — not the implied cells
       if(imp!=null)inh=imp;   // treat the implied growth as this cell's effective inherited value (display + live edit baseline)
       var mths=c.single?[c.single]:(c.m?[c.m]:(c.months||[])), ly=0; mths.forEach(function(m){ ly+=((_lyRev[sub]&&_lyRev[sub][m])||0); });   // month cols carry .m (not .months) → guard so MONTH group doesn't blank
       var ph=(inh!=null)?('↳'+(inh>=0?'+':'')+inh+'%'):'0%';
@@ -8351,8 +8354,8 @@ function renderSummaryView(body){
         var tgt=ly*(1+Number(gStored)/100); cellTgt=tgt; ttxt=(ly>0?('£'+Math.round(tgt).toLocaleString()):'')+_uTxt(tgt,sub); }
       else { var eff=(inh!=null?inh:0), tgt2=ly*(1+eff/100); cellTgt=tgt2; if(imp!=null)bg='background:#FDFBD4'; else if(inh!=null)bg='background:#F0FFF0';   // implied (balances to market total) → pale yellow; level-inherited → green
         ttxt=(ly>0?('£'+Math.round(tgt2).toLocaleString()):'')+_uTxt(tgt2,sub); }
-      if(impC)ttxt='<span title="Target conflict: the locked category growth targets for this period exceed what the market-total budget allows, so the implied growth for the remaining (untyped) categories is floored at −100% (or forced negative even though the market total is a positive/flat growth). Lower a locked category’s growth, or raise the market total." style="color:#b91c1c;cursor:help;font-weight:800">⚠</span> '+ttxt;
-      return '<td class="ecell" style="padding:2px 4px;border:1px solid #e5e7eb;text-align:right'+(impC?';background:#fff1f1':'')+'"><input class="tgin" data-sub="'+encodeURIComponent(sub)+'" data-fy="'+Y+'" data-lvl="'+lvl+'" data-idx="'+idx+'" data-ly="'+Math.round(ly)+'" data-inh="'+(inh!=null?inh:'')+'" data-net="'+_tgtNet(sub)+'" value="'+v+'" placeholder="'+ph+'" title="Type a % growth vs last year (e.g. 40) OR a £ revenue target (e.g. £120000 or 120000). Blank = inherit." style="'+bg+'"><div class="ttgt tgt-hov" data-sub="'+encodeURIComponent(sub)+'" data-mths="'+mths.join(',')+'" data-tgt="'+Math.round(cellTgt)+'" data-ly="'+Math.round(ly)+'" data-net="'+_tgtNet(sub)+'" style="font-size:9px;color:#64748b;text-align:right;font-variant-numeric:tabular-nums;margin-top:1px;cursor:help">'+ttxt+'</div></td>'; }
+      if(lockConflict)ttxt='<span title="Target conflict: the locked category targets for this period together exceed what the market-total budget allows — the remaining (untyped) categories get floored at −100% / forced negative even though the market total is a positive or flat growth. Lower a locked category’s growth (this one or another), or raise the market total." style="color:#b91c1c;cursor:help;font-weight:800">⚠</span> '+ttxt;
+      return '<td class="ecell" style="padding:2px 4px;border:1px solid #e5e7eb;text-align:right'+(lockConflict?';background:#fff1f1':'')+'"><input class="tgin" data-sub="'+encodeURIComponent(sub)+'" data-fy="'+Y+'" data-lvl="'+lvl+'" data-idx="'+idx+'" data-ly="'+Math.round(ly)+'" data-inh="'+(inh!=null?inh:'')+'" data-net="'+_tgtNet(sub)+'" value="'+v+'" placeholder="'+ph+'" title="Type a % growth vs last year (e.g. 40) OR a £ revenue target (e.g. £120000 or 120000). Blank = inherit." style="'+bg+'"><div class="ttgt tgt-hov" data-sub="'+encodeURIComponent(sub)+'" data-mths="'+mths.join(',')+'" data-tgt="'+Math.round(cellTgt)+'" data-ly="'+Math.round(ly)+'" data-net="'+_tgtNet(sub)+'" style="font-size:9px;color:#64748b;text-align:right;font-variant-numeric:tabular-nums;margin-top:1px;cursor:help">'+ttxt+'</div></td>'; }
     if(SUMM_TGT_EDIT&&!rangeMode){
       // Target £ baseline = prior-year revenue per month. If the prior-year month is itself still a FORECAST
       // (e.g. FY27/28 H2 → FY26/27 H2 not complete), inherit the forecast revenue (subData.val, which is
@@ -8436,7 +8439,8 @@ function renderSummaryView(body){
             .then(function(r){return r.json();}).then(function(){ var k=tgKey(+inp.dataset.fy,sub,inp.dataset.lvl,+inp.dataset.idx);
               if(p.gbp!=null){ SUMM_TGT_GBP[k]=p.gbp; if(lyv>0)SUMM_TGT[k]=Math.round((p.gbp/lyv-1)*1000)/10; else delete SUMM_TGT[k]; }
               else { delete SUMM_TGT_GBP[k]; if(p.pct!=null)SUMM_TGT[k]=p.pct; else delete SUMM_TGT[k]; }
-              var ae=document.activeElement; if(sub===''||!(ae&&ae.classList&&ae.classList.contains('tgin')))draw();   // market total re-balances every subcat → always redraw; otherwise keep focus for rapid entry
+              draw();   // any target change re-balances the implied cells → redraw, then restore focus to the edited cell
+              try{ var _rf=host.querySelector('input.tgin[data-sub="'+encodeURIComponent(sub)+'"][data-fy="'+inp.dataset.fy+'"][data-lvl="'+inp.dataset.lvl+'"][data-idx="'+inp.dataset.idx+'"]'); if(_rf){ _rf.focus(); try{_rf.setSelectionRange(_rf.value.length,_rf.value.length);}catch(_){} } }catch(e){}
             }).catch(function(){}); }; });
       // Hover the £ target under a cell → breakdown: current forecast vs target (units / ASP / revenue), with from→to deltas.
       function _tgtHovHtml(el){ var sub=decodeURIComponent(el.dataset.sub||''), tgt=Number(el.dataset.tgt)||0;
