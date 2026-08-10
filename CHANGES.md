@@ -1,3 +1,9 @@
+## v26.794.0 Deposits Drawdown — wider, readable columns on mobile
+- Removed the mobile shrink; every column now has a **100px min-width** (~10+ characters), so values stay readable on a phone and the matrix scrolls horizontally instead of cramming onto one screen.
+
+## v26.793.0 DEMAND ▸ Inputs — fix view flashing back to the previous tab during load
+- Clicking a DEMAND sub-tab (e.g. Inputs ▸ Key Accounts) no longer occasionally flashes back to the previously-loading view (e.g. Sell-through targets). Each navigation now gets a **fresh content container**, so a slow previous view's async render writes to a detached node instead of over the just-clicked view.
+
 ## v26.792.0 Deposits Drawdown — per-ref rebase-to-0 (settled/closed) · AU Sep-2024 reset removed · mobile scroll
 - **Removed** the AU Sep-2024 hard re-base.
 - **Settled deposit refs rebase to 0 outstanding**: any deposit ref that is CLOSED, or whose paid − drawn nets within 0.03, gets a synthetic "rebase to 0 (settled/closed)" line at its last-activity month so it stops carrying a balance (rounding tails + closed pools cleared). Shows as a transaction line in the popover/export.

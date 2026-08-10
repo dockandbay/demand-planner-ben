@@ -8121,7 +8121,8 @@ function render(){
     var tw0=document.getElementById('tw'); if(tw0)tw0.style.display='none';
     var bw=document.getElementById('buy-wrap'); if(bw)bw.remove();
     var body=document.getElementById('demand-body');
-    if(!body){ body=document.createElement('div'); body.id='demand-body'; document.querySelector('.wrap').appendChild(body); }
+    if(body)body.remove();   // fresh container per navigation: a slow PREVIOUS view's async render then writes to this detached node, never over the just-clicked view
+    body=document.createElement('div'); body.id='demand-body'; document.querySelector('.wrap').appendChild(body);
     if(DEMAND_VIEW==='summary') renderSummaryReport(body);
     else if(DEMAND_VIEW==='keyaccounts') renderKeyAccountsView(body);
     else if(DEMAND_VIEW==='targets') renderTargetsView(body);
