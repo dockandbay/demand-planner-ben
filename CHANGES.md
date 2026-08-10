@@ -1,3 +1,6 @@
+## v26.819.0 Quality Control table — fixed layout so the delete link is on-page
+- The QC results table still overflowed (long raw ISO date + non-wrapping cells) so the delete link sat off the right edge. Now `table-layout:fixed` at width:100% (can't overflow), the **Uploaded** date shows **dd-mmm-yy** (was full ISO), and long filenames/suppliers wrap — the **delete** link is always visible.
+
 ## v26.818.0 SUPPLY nav flash fix + QC full-width + "Refresh cache" button
 - **SUPPLY nav flash-back:** navigating straight to a section (e.g. Quality Control) could flash back to Actions — the early-return sections didn't bump the nav token, so an in-flight Actions render from boot overwrote the chosen section. `selectSection` now bumps `_navToken` at the top for **every** nav, so the section you clicked is always respected.
 - **Quality Control table** is now **full page width** (removed the 1200px cap; table width:100%) so the delete column is always visible; Uploaded keeps its min-width, delete column shrinks to content.
