@@ -1,3 +1,7 @@
+## v26.824.0 PRODUCT Type — Custom Order hides Season + "CUST-" reference prefix
+- **Custom Order** products have **no season**: the Season field is hidden in both the new-product form and the master-data panel (toggles live when you switch Type), and season isn't required.
+- A Custom Order's auto-generated reference uses the **`CUST-`** prefix instead of a season code (e.g. `CUST-TOWEL-01`); Product Development is unchanged (e.g. `SS27-TOWLB-01`).
+
 ## v26.823.0 PRODUCT ▸ PLAN — "Type" master-data field + grid filter
 - New **Type** field on product dev items: "Product Development" (default) or "Custom Order". Shown in the master-data panel **above Season**; saves on change and logs to the product timeline.
 - New **Type** filter dropdown in the PRODUCT grid, **before Season**, defaulting to **Product Development** (options: Product Development / Custom Order / All).

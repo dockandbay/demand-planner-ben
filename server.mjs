@@ -4502,8 +4502,12 @@ app.get('/api/product/swatch/:ref', async (req, res) => {
   } catch (e) { res.status(500).end(); }
 });
 app.post('/api/product/item', async (req, res) => {
-  const b = req.body || {}, season = (b.season || '').trim(), category = (b.category || '').trim();
-  if (!season || !category) return res.status(400).json({ error: 'season and category required' });
+  const b = req.body || {};
+  const type = ((b.type || '').trim() === 'Custom Order') ? 'Custom Order' : 'Product Development';
+  const isCustom = type === 'Custom Order';
+  const season = isCustom ? '' : (b.season || '').trim();   // custom orders have no season → ref prefix is CUST
+  const category = (b.category || '').trim();
+  if (!category || (!isCustom && !season)) return res.status(400).json({ error: isCustom ? 'category required' : 'season and category required' });
   const supplier = (b.supplier || '').trim();
   const client = await pool.connect();
   try {
@@ -4513,10 +4517,10 @@ app.post('/api/product/item', async (req, res) => {
     if (supplier) { const sr = (await client.query(`SELECT code FROM planner.suppliers WHERE name=$1`, [supplier])).rows[0];
       supCode = (sr && sr.code && sr.code.trim()) ? sr.code.trim().toUpperCase() : supplier.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3); }
     await client.query('BEGIN');
-    const seq = (await client.query(`SELECT coalesce(max(seq_in_group),0)+1 n FROM planner.product_dev_items WHERE season=$1 AND category_code=$2`, [season, code])).rows[0].n;
-    const ref = season + '-' + code + (supCode ? '-' + supCode : '') + '-' + String(seq).padStart(2, '0');
-    const ins = await client.query(`INSERT INTO planner.product_dev_items (ref, season, category, category_code, seq_in_group, colour_name, description, supplier, supplier_code, created_by, approval_method)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`, [ref, season, category, code, seq, (b.colour_name || '').trim() || null, (b.description || '').trim() || null, supplier || null, supCode, (b.created_by || '').trim() || null, (b.approval_method || '').trim() || null]);
+    const seq = (await client.query(`SELECT coalesce(max(seq_in_group),0)+1 n FROM planner.product_dev_items WHERE coalesce(season,'')=$1 AND category_code=$2`, [season, code])).rows[0].n;
+    const ref = (isCustom ? 'CUST' : season) + '-' + code + (supCode ? '-' + supCode : '') + '-' + String(seq).padStart(2, '0');
+    const ins = await client.query(`INSERT INTO planner.product_dev_items (ref, type, season, category, category_code, seq_in_group, colour_name, description, supplier, supplier_code, created_by, approval_method)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`, [ref, type, season || null, category, code, seq, (b.colour_name || '').trim() || null, (b.description || '').trim() || null, supplier || null, supCode, (b.created_by || '').trim() || null, (b.approval_method || '').trim() || null]);
     const id = ins.rows[0].id, sizes = Array.isArray(b.sizes) ? b.sizes : [];
     for (let k = 0; k < sizes.length; k++) { const sl = String(sizes[k] || '').trim(); if (sl) await client.query(`INSERT INTO planner.product_dev_sizes (item_id, size_label, sort) VALUES ($1,$2,$3)`, [id, sl, k]); }
     // Auto timeline note (author_kind='internal' = from D&B → shows as an UNREAD action for the supplier in the
