@@ -1,3 +1,6 @@
+## v26.829.0 DEMAND plan — optional variant-image thumbnail in the SKU label
+- New **"Show variant image"** toggle in **More Filters** (renamed **"More Filters & Settings"**), **default off**. When on, each SKU row shows a 40px variant-image thumbnail (from `products.variant_image_url_final`) to the left of the SKU code; **hover → 400×400 popup**. Images only load when the toggle is on. Server adds `img` to the SKU data (557/723 SKUs have one). Chose the in-label thumbnail over a true inserted column (Ben's call) to avoid colspan/sticky-offset surgery on the grid.
+
 ## v26.828.0 DEMAND currency pill now shows + converts the plan; redundant "Category totals" chip removed
 - **Currency pill:** the GBP/local pill (`refreshDispCcy`) was only refreshed on the Summary's market change, so on the **plan** it stayed as built for the initial market (UK = GBP-only = empty) and never appeared when you switched to US/EU/AU. Now refreshed on the plan's market change **and** on every plan render. (FX rates were already injected from `app_settings.fx_rates`.)
 - **Plan revenue now converts:** `fr()` (the plan's revenue formatter) was hard-coded to £. It's now display-currency aware (`dispCcy`/`dispRate`) — GBP default is unchanged (rate 1, £); toggling to local on US/EU/AU converts at the FY blended rate with the right symbol ($/€/A$). Summary already converted.

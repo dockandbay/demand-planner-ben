@@ -735,7 +735,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
       style="font-size:11px;padding:4px 9px;border:1px solid #86efac;background:#f0fdf4;border-radius:5px;width:210px"
       oninput="setPlanSkuQry(this.value)">
     <span style="position:relative;display:inline-flex;align-items:center">
-      <button id="plan-filters-btn" onclick="togglePlanFilters(event)" title="More filters — category, tier, release window, from-replacement, sort, category totals" style="font-size:11px;padding:4px 11px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#334155;cursor:pointer;flex-shrink:0;font-weight:600">&#10697; More Filters <span style="opacity:.55;font-size:9px">▾</span></button>
+      <button id="plan-filters-btn" onclick="togglePlanFilters(event)" title="More filters &amp; settings — category, tier, release window, from-replacement, sort, category totals, variant image" style="font-size:11px;padding:4px 11px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#334155;cursor:pointer;flex-shrink:0;font-weight:600">&#10697; More Filters &amp; Settings <span style="opacity:.55;font-size:9px">▾</span></button>
       <div id="plan-filters-pop" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;z-index:300;background:#fff;border:1px solid #d0d0d0;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.2);width:520px;max-width:94vw;padding:14px 16px">
         <div style="display:flex;align-items:center;margin-bottom:12px"><div style="font-weight:700;font-size:14px;color:#0f172a">More filters</div><button onclick="resetPlanFilters()" style="margin-left:auto;font-size:11px;padding:3px 10px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#475569;cursor:pointer">Reset all</button></div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;position:relative">
@@ -769,6 +769,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
         <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:14px">
           <button id="plan-fromrep-btn" class="pill catpill" title="Only SKUs that inherit a predecessor's history (products.replacement_sku)" onclick="setPlanFromRep(!PLAN_FROM_REP)">&#8617; From replacement</button>
           <span style="display:inline-flex;align-items:center;gap:6px"><span class="pill-lbl" title="Show a &lsquo;— total&rsquo; row at the foot of each category">Cat&nbsp;totals</span><button id="cat-tot-toggle" class="pill catpill" aria-pressed="false" onclick="setShowCatTot(!SHOW_CAT_TOT)">Show</button></span>
+          <span style="display:inline-flex;align-items:center;gap:6px"><span class="pill-lbl" title="Show the variant image next to each SKU (hover to enlarge)">Variant&nbsp;image</span><button id="var-img-toggle" class="pill catpill" aria-pressed="false" onclick="setShowVariantImg(!SHOW_VARIANT_IMG)">Show</button></span>
         </div>
         <div style="text-align:right"><button onclick="_planPopClose()" style="font-size:12px;font-weight:600;padding:5px 18px;border:1px solid #2563eb;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer">Done</button></div>
       </div>
@@ -3973,6 +3974,16 @@ var PLAN_FROM_REP=false;   // "From replacement SKU" filter — show only SKUs t
 function setPlanFromRep(v){ PLAN_FROM_REP=!!v; var b=document.getElementById('plan-fromrep-btn'); if(b)b.classList.toggle('active',PLAN_FROM_REP); render(); }
 var SHOW_CAT_TOT=(function(){try{return localStorage.getItem('hzShowCatTot')==='1';}catch(e){return false;}})(); // category-total rows hidden by default; toggle in the plan toolbar
 function setShowCatTot(on){SHOW_CAT_TOT=!!on;try{localStorage.setItem('hzShowCatTot',SHOW_CAT_TOT?'1':'0');}catch(e){}var b=document.getElementById('cat-tot-toggle');if(b){b.classList.toggle('active',SHOW_CAT_TOT);b.setAttribute('aria-pressed',SHOW_CAT_TOT?'true':'false');}renderMain();}
+var SHOW_VARIANT_IMG=(function(){try{return localStorage.getItem('hzShowVarImg')==='1';}catch(e){return false;}})(); // variant-image thumbnail in the SKU label — hidden by default; toggle in More Filters & Settings
+function setShowVariantImg(on){SHOW_VARIANT_IMG=!!on;try{localStorage.setItem('hzShowVarImg',SHOW_VARIANT_IMG?'1':'0');}catch(e){}var b=document.getElementById('var-img-toggle');if(b){b.classList.toggle('active',SHOW_VARIANT_IMG);b.setAttribute('aria-pressed',SHOW_VARIANT_IMG?'true':'false');}renderMain();}
+// Variant-image hover: enlarge any .sku-varimg thumbnail to a 400×400 popup (lazy-created, delegated, bound once).
+(function(){ var pop,im;
+  function ensure(){ if(pop)return; pop=document.createElement('div'); pop.style.cssText='position:fixed;z-index:100090;display:none;background:#fff;border:1px solid #d0d0d0;border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,.28);padding:6px;pointer-events:none';
+    im=document.createElement('img'); im.style.cssText='width:400px;height:400px;object-fit:contain;display:block;border-radius:4px;background:#f8fafc'; pop.appendChild(im); document.body.appendChild(pop); }
+  document.addEventListener('mouseover',function(e){ var t=e.target&&e.target.closest&&e.target.closest('.sku-varimg'); if(!t)return; var src=t.getAttribute('data-full')||t.src; if(!src)return; ensure(); im.src=src; pop.style.display='block';
+    var r=t.getBoundingClientRect(); pop.style.left=Math.min(r.right+8, window.innerWidth-412)+'px'; pop.style.top=Math.min(Math.max(6,r.top-180), window.innerHeight-412)+'px'; });
+  document.addEventListener('mouseout',function(e){ if(pop&&e.target&&e.target.closest&&e.target.closest('.sku-varimg'))pop.style.display='none'; });
+})();
 var SMOOTH_PREVIEW=null; // {pk:'subcat|co|ch', fy:startY|null, months:{'YYYY_MM':{sku:units}}} — one pending smooth preview at a time (fy set = whole-FY smooth)
 var SMOOTH_LEADER=false;  // false = Standard (pure proportional), true = Leader (protect historically-strong SKUs). Set via the FY-total dropdown; applies to ALL smoothing.
 var SMOOTH_DISREGARD_DISC={};  // {'CO|CH|subcat':true} — when set, smoothing leaves discontinued SKUs untouched so active SKUs absorb the full subcat forecast (toolbar ⚙ Smoothing). Server-injected from app_settings.
@@ -6421,6 +6432,16 @@ function renderSkuView(){
         +'</span>':'')
       +'</div>'
       +'</div>';
+    // Optional variant-image thumbnail (More Filters & Settings ▸ "Show variant image"); hover → 400×400 modal.
+    if(typeof SHOW_VARIANT_IMG!=='undefined' && SHOW_VARIANT_IMG && p.img){
+      var _vw=document.createElement('div'); _vw.style.cssText='display:flex;align-items:flex-start;gap:6px';
+      var _vi=document.createElement('img'); _vi.className='sku-varimg'; _vi.src=p.img; _vi.loading='lazy'; _vi.setAttribute('data-full',p.img); _vi.alt='';
+      _vi.style.cssText='width:40px;height:40px;object-fit:cover;border-radius:4px;border:1px solid #e5e7eb;flex:0 0 auto;cursor:zoom-in;background:#f8fafc';
+      var _vt=document.createElement('div'); _vt.style.cssText='flex:1 1 auto;min-width:0';
+      _vw.appendChild(_vi); _vw.appendChild(_vt);
+      while(lbl.firstChild) _vt.appendChild(lbl.firstChild);
+      lbl.appendChild(_vw);
+    }
     tr.appendChild(lbl);
 
     // Stock on hand
@@ -7924,6 +7945,7 @@ function renderMain(){
   try{ zalInit(); }catch(e){}   // wire the EU Zalando channel (av 'z' + synth DATA rows) — idempotent, runs once data is ready
   CALC_MEMO={};   // fresh per-render forecast memo — covers direct renderMain() calls (filters/toggles) too
   _undoReady=true; try{ updateUndoBtn(); }catch(e){} try{ renderPlanChips(); }catch(e){} try{ refreshDispCcy(); }catch(e){}   // arm undo + refresh active-filter chips + the GBP/local currency pill once the plan has rendered
+  try{ var _vb=document.getElementById('var-img-toggle'); if(_vb)_vb.classList.toggle('active',SHOW_VARIANT_IMG); var _cb=document.getElementById('cat-tot-toggle'); if(_cb)_cb.classList.toggle('active',SHOW_CAT_TOT); }catch(e){}   // sync the More-Filters toggle highlights with persisted state
   if(_smoothStale===null){ try{ _smoothStale=computeSmoothStale(); }catch(e){ _smoothStale={count:0}; } }   // >48h discontinued-smoothing impact check — once per session
   try{ updateSmoothStaleBadge(); }catch(e){}
   // Notes (N) + record-of-change keys (R) load in the BACKGROUND — the plan paints immediately and the N/R rail
