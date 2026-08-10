@@ -1,3 +1,8 @@
+## v26.823.0 PRODUCT ▸ PLAN — "Type" master-data field + grid filter
+- New **Type** field on product dev items: "Product Development" (default) or "Custom Order". Shown in the master-data panel **above Season**; saves on change and logs to the product timeline.
+- New **Type** filter dropdown in the PRODUCT grid, **before Season**, defaulting to **Product Development** (options: Product Development / Custom Order / All).
+- **Migration 207** (`207_product_dev_type.sql`): adds `type` to `planner.product_dev_items` (default 'Product Development', existing rows backfilled). Applied to sandbox; **Diviyaj to run on live.**
+
 ## v26.822.0 Master-data-missing now counts on the ACTIONS badge
 - The server flags "Required field missing" (PO in production, blank Batch/Production/Supplier/Branch) as **amber**, but the top ACTIONS nav badge counted only **high** — so it was excluded. The badge now also counts open "Required field missing" actions (per item 13), so a PO like PO-1672805 (missing Production # + Batch) contributes to the count.
 

@@ -4339,7 +4339,7 @@ app.get('/api/product/unread', async (_req, res) => {   // total unread supplier
 });
 app.get('/api/product/items', async (_req, res) => {
   try {
-    const r = await pool.query(`SELECT i.id, i.ref, coalesce(i.season,'') season, coalesce(i.category,'') category,
+    const r = await pool.query(`SELECT i.id, i.ref, coalesce(i.type,'Product Development') type, coalesce(i.season,'') season, coalesce(i.category,'') category,
       coalesce(i.colour_name,'') colour_name, coalesce(i.supplier,'') supplier, coalesce(i.description,'') description, i.status, (i.swatch IS NOT NULL) has_swatch,
       to_char(i.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id)::int sizes,
@@ -4393,7 +4393,7 @@ app.get('/api/product/item/:ref', async (req, res) => {
   try {
     // Round 1 — item + sizes + docs + samples + unread all in parallel (sizes uses a subquery so it needn't wait on item)
     const [itemR, sizesR, docsR, samplesR, unreadR] = await Promise.all([
-      pool.query(`SELECT id, ref, coalesce(season,'') season, coalesce(category,'') category,
+      pool.query(`SELECT id, ref, coalesce(type,'Product Development') type, coalesce(season,'') season, coalesce(category,'') category,
         coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(description,'') description, coalesce(recipient_countries,'UK') recipient_countries,
         coalesce(supplier,'') supplier, coalesce(supplier_code,'') supplier_code,
         status, (swatch IS NOT NULL) has_swatch, coalesce(created_by,'') created_by,
@@ -4437,7 +4437,7 @@ app.get('/api/product/item/:ref/core', async (req, res) => {
   const ref = req.params.ref;
   try {
     const [itemR, unreadR] = await Promise.all([
-      pool.query(`SELECT id, ref, coalesce(season,'') season, coalesce(category,'') category,
+      pool.query(`SELECT id, ref, coalesce(type,'Product Development') type, coalesce(season,'') season, coalesce(category,'') category,
         coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(description,'') description, coalesce(recipient_countries,'UK') recipient_countries,
         coalesce(supplier,'') supplier, coalesce(supplier_code,'') supplier_code,
         status, (swatch IS NOT NULL) has_swatch, coalesce(created_by,'') created_by,
@@ -4531,7 +4531,7 @@ app.post('/api/product/item', async (req, res) => {
 });
 app.post('/api/product/item/:ref', async (req, res) => {
   const b = req.body || {}, ref = req.params.ref, sets = [], vals = []; let i = 1;
-  const allow = { colour_name: 'text', description: 'text', status: 'text', season: 'text', category: 'text', dev_start_override: 'date', recipient_countries: 'text', approval_method: 'text' };
+  const allow = { type: 'text', colour_name: 'text', description: 'text', status: 'text', season: 'text', category: 'text', dev_start_override: 'date', recipient_countries: 'text', approval_method: 'text' };
   for (const k of Object.keys(allow)) { if (k in b) { sets.push(`${k}=$${i}${allow[k] === 'date' ? '::date' : ''}`); vals.push(b[k] === '' ? null : b[k]); i++; } }
   // stamp / clear the approval time when status changes (drives Reports' time-to-approve)
   if ('status' in b) sets.push(b.status === 'approved' ? 'approved_at=coalesce(approved_at, now())' : 'approved_at=NULL');
@@ -4551,7 +4551,7 @@ app.post('/api/product/item/:ref', async (req, res) => {
     vals.push(ref);
     await pool.query(`UPDATE planner.product_dev_items SET ${sets.join(',')}, updated_at=now() WHERE ref=$${i}`, vals);
     // Record of change (PRODUCT ▸ Timeline) — one entry per field the D&B user just changed.
-    { const _plbl = { colour_name: 'Colour way', description: 'Description', status: 'Status', season: 'Season', category: 'Category', dev_start_override: 'Development start', recipient_countries: 'Recipient country', approval_method: 'Approval method', supplier: 'Supplier' };
+    { const _plbl = { type: 'Type', colour_name: 'Colour way', description: 'Description', status: 'Status', season: 'Season', category: 'Category', dev_start_override: 'Development start', recipient_countries: 'Recipient country', approval_method: 'Approval method', supplier: 'Supplier' };
       const _pby = authUser(req) || 'Dock & Bay';
       for (const k of Object.keys(_plbl)) { if (k in b) { const v = String(b[k] == null ? '' : b[k]).trim(); await logProductChange(ref, _plbl[k] + (v ? (' → ' + (v.length > 80 ? v.slice(0, 80) + '…' : v)) : ' cleared'), null, _pby); } } }
     if (_recNote) { const label = _recNote.split(',').map(x => x.trim()).filter(Boolean).join(' and ') || 'UK';

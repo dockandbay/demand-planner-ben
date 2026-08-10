@@ -10864,7 +10864,7 @@
         +'<div class="mut tiny" style="margin-top:6px">“Avg samples/days to approve” are measured over <b>approved</b> products only. Time-to-approve runs from the product’s development-start date (the <i>Development started</i> override on Master data, else its creation date) to approval.</div>'
         +tbl('By season','Season',d.bySeason)+tbl('By category','Category',d.byCategory)+tbl('By supplier','Supplier',d.bySupplier);
     }).catch(function(e){ c.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
-  var _prodFilt={season:'',status:'dev_actions',q:'',category:''};
+  var _prodFilt={type:'Product Development',season:'',status:'dev_actions',q:'',category:''};   // Type defaults to Product Development
   var _pgSeasonCollapsed={}, _pgCatCollapsed={};   // PRODUCT grid group collapse state — persists across redraws
   function renderProductPlan(c){
     c.innerHTML='<div id="pg-filters" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px"></div><div id="pg-grid"><div style="color:#94a3b8">Loading…</div></div>';
@@ -10877,6 +10877,7 @@
       var selDark=function(v){ return 'text-align:left'+(v?';background:#0f172a;color:#fff;font-weight:600':''); };   // dark chip when a filter is set
       var fb=document.getElementById('pg-filters');
       fb.innerHTML='<button class="save-btn" id="pg-new" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd">+ New product</button>'
+        +'<span style="display:flex;align-items:center;gap:5px"><span style="color:#64748b;font-size:11px">Type</span><select class="fci" id="pg-type" style="'+selDark(_prodFilt.type)+'"><option value="Product Development"'+(_prodFilt.type==='Product Development'?' selected':'')+'>Product Development</option><option value="Custom Order"'+(_prodFilt.type==='Custom Order'?' selected':'')+'>Custom Order</option><option value=""'+(_prodFilt.type===''?' selected':'')+'>All</option></select></span>'
         +'<span style="display:flex;align-items:center;gap:5px"><span style="color:#64748b;font-size:11px">Season</span><select class="fci" id="pg-season" style="'+selDark(_prodFilt.season)+'"><option value="">All</option>'+seasons.map(function(s){return '<option value="'+esc(s)+'"'+(s===_prodFilt.season?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>'
         +'<span style="display:flex;align-items:center;gap:5px"><span style="color:#64748b;font-size:11px">Category</span><select class="fci" id="pg-cat" style="'+selDark(_prodFilt.category)+'"><option value="">All</option>'+cats.map(function(cc){return '<option value="'+esc(cc)+'"'+(cc===_prodFilt.category?' selected':'')+'>'+esc(cc)+'</option>';}).join('')+'</select></span>'
         +'<span style="display:flex;align-items:center;gap:5px"><span style="color:#64748b;font-size:11px">Status</span><select class="fci" id="pg-status" style="'+selDark(_prodFilt.status)+'">'+STAT.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===_prodFilt.status?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></span>'
@@ -10888,6 +10889,7 @@
         var q=_prodFilt.q.trim().toLowerCase();
         var expandAll=!!(_prodFilt.category || q);   // a category filter / search forces groups open so results are visible (doesn't wipe manual collapse state)
         var f=rows.filter(function(r){
+          if(_prodFilt.type && (r.type||'Product Development')!==_prodFilt.type)return false;
           if(_prodFilt.season && r.season!==_prodFilt.season)return false;
           if(_prodFilt.category && r.category!==_prodFilt.category)return false;
           if(_prodFilt.status==='dev_actions'){ if(!(r.status==='in_development' || prodOpenActs(r).n>0))return false; }
@@ -10972,6 +10974,7 @@
       }
       _prodDraw=draw;
       var _pgDark=function(el){ el.setAttribute('style','text-align:left'+(el.value?';background:#0f172a;color:#fff;font-weight:600':'')); };
+      document.getElementById('pg-type').onchange=function(){ _prodFilt.type=this.value; _pgDark(this); draw(); };
       document.getElementById('pg-season').onchange=function(){ _prodFilt.season=this.value; _pgDark(this); draw(); };
       document.getElementById('pg-cat').onchange=function(){ _prodFilt.category=this.value; _pgDark(this); draw(); };
       document.getElementById('pg-status').onchange=function(){ _prodFilt.status=this.value; _pgDark(this); draw(); };
@@ -11130,7 +11133,9 @@
     var swatchVal='<input type="file" id="pm-swatch" accept="image/png,image/jpeg" style="font-size:12px"> <span id="pm-sw-msg" style="font-size:11px"></span>'
       +(it.has_swatch?' <img class="pm-swatch-zoom" data-src="'+swUrl+'" src="'+swUrl+'" style="width:36px;height:36px;object-fit:cover;border-radius:5px;border:1px solid #e5e7eb;cursor:zoom-in;vertical-align:middle" title="click to enlarge"> <a href="'+swUrl+'" download title="download swatch" style="color:#1d4ed8;text-decoration:none;font-size:15px;vertical-align:middle">⬇</a>':'')
       +'<div id="pm-swatch-paste" tabindex="0" style="margin-top:6px;border:1px dashed #cbd5e1;border-radius:6px;padding:8px 11px;font-size:11px;color:#94a3b8;max-width:340px;cursor:text">…or click here and paste an image (⌘/Ctrl+V)</div>';
+    var _typeVal=(it.type==='Custom Order')?'Custom Order':'Product Development';
     var _masterHtml=prodSupList()+'<div style="max-width:660px">'
+      +pRow('Type','<select class="fci pm-field pm-fld" data-f="type" id="pm-type"><option value="Product Development"'+(_typeVal==='Product Development'?' selected':'')+'>Product Development</option><option value="Custom Order"'+(_typeVal==='Custom Order'?' selected':'')+'>Custom Order</option></select>')
       +pRow('Season','<select class="fci pm-field pm-fld" data-f="season" id="pm-season">'+seasonOpts+'</select>')
       +pRow('Category','<select class="fci pm-field pm-fld" data-f="category" id="pm-cat">'+catOpts+'</select>')
       +pRow('Supplier','<span class="pm-sup-pick" style="display:inline-block;min-width:200px;border:1px solid #cbd5e1;border-radius:5px;padding:4px 8px">'+prodPickBtn(it.ref,'supplier',it.supplier,'supplier')+'</span> <span style="color:#94a3b8;font-size:11px;margin-left:6px">ref keeps its original code'+(it.supplier_code?' ('+esc(it.supplier_code)+')':'')+'</span>')
