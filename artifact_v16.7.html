@@ -9583,6 +9583,11 @@ function _tgWindow(horizon){ horizon=Math.max(1,Math.min(3,horizon||3));
 // Forecast for a window month: for the current (partial) month calc().fu holds the month-to-date ACTUAL, so use the
 // full-month forecast (curMonthForecast) instead — matching what the plan shows and keeping the YoY comparison honest.
 function _tgFcMonth(s,co,ch,fu,fym){ if(fym===CUR_MONTH){ try{ return curMonthForecast(s,co,ch); }catch(e){} } return fu[fym]||0; }
+// Per-month recommended forecast — the SAME per-cell confidence engine (HIGH option) the plan cell shows as
+// "est +X% ▾": trend-shrunk YoY, seasonally capped at the month's high-water-mark. Aligned 2026-08-10 (Ben) so the
+// gap Trend Gaps flags and the value it applies match the plan cell (was aiRec's pooled all-month median, which
+// overstated seasonal lines because off-season tiny-base months inflate the median).
+function _tgRecMonth(s,co,ch,fym,fc){ try{ return confidenceOptions(s,co,ch,fym,fc).high.value||0; }catch(e){ return fc||0; } }
 function daTrendGaps(horizon){
   horizon=Math.max(1,Math.min(3,horizon||3));
   var FLOOR=100, THRESH=0.15, MINREC=0.10;
@@ -9591,32 +9596,31 @@ function daTrendGaps(horizon){
   DATA.forEach(function(row){
     var sub=row.s,co=row.co,ch=row.ch; if(!sub||!co||!ch)return;
     var rec; try{ rec=aiRec(sub,co,ch); }catch(e){ return; }
-    if(!rec||rec.mixed||!rec.pct)return;
-    var recMin=rec.pct.med; if(recMin==null||recMin<MINREC)return;   // only a confident growth signal
+    if(!rec||rec.mixed||!rec.pct)return;                             // direction gate: skip Mixed / no year-on-year basis
     var fu; try{ fu=daRowFu(row); }catch(e){ return; }
-    var m=row.m||{}, fSum=0, lySum=0;
-    win.forEach(function(fym){ fSum+=_tgFcMonth(sub,co,ch,fu,fym);
+    var m=row.m||{}, fSum=0, lySum=0, recSum=0;
+    win.forEach(function(fym){ var fc=_tgFcMonth(sub,co,ch,fu,fym); fSum+=fc; recSum+=_tgRecMonth(sub,co,ch,fym,fc);
       var p=fym.split('_'), lk=ym(parseInt(p[0],10)-1,parseInt(p[1],10)); lySum+=((m[lk]&&m[lk][0])||0); });
     if(lySum<FLOOR)return;
-    var fcYoY=fSum/lySum-1;
-    var gap=recMin-fcYoY; if(gap<THRESH)return;
+    var fcYoY=fSum/lySum-1, recYoY=recSum/lySum-1;
+    if(recYoY<MINREC)return;                                         // only flag a meaningful upside recommendation
+    var gap=recYoY-fcYoY; if(gap<THRESH)return;                      // plan is ≥15pts below the confidence-high estimate
     var vpm=Math.round(lySum/horizon);                              // avg last-year units/month over the window
     var tier=vpm>1500?'HIGH':vpm>400?'MED':'LOW';                   // Ben's volume tiers: High >1500/mo · Med >400 · Low ≤400
-    out.push({sub:sub,co:co,ch:ch,recMin:recMin,recMed:rec.median,label:rec.label,fcYoY:fcYoY,gap:gap,lySum:Math.round(lySum),fSum:Math.round(fSum),vpm:vpm,tier:tier,n:rec.n,biLifted:rec.biLifted});
+    out.push({sub:sub,co:co,ch:ch,recMin:recYoY,recMed:rec.median,label:trendLabel(recYoY),fcYoY:fcYoY,gap:gap,lySum:Math.round(lySum),fSum:Math.round(fSum),recSum:Math.round(recSum),vpm:vpm,tier:tier,n:rec.n,biLifted:rec.biLifted});
   });
   out.sort(function(a,b){return b.gap-a.gap;});
   return out;
 }
-// Trend Gaps ▸ Category ▸ Apply popup. Shows the next 3 months (LY actual · forecast now · recommended override)
-// then, on Apply, writes a SUBCATEGORY per-month OVERRIDE (IV[sub|co|ch|month] = last-year × (1+recMin)) for those
-// months — the same store the plan's subcat-row edits use, so it moves the visible subcat forecast, cascades to
-// SKUs/buy, and is reversible (clear the cell → back to base). Replaces the old row-growth apply that rewrote the base.
+// Trend Gaps ▸ Category ▸ Apply popup. Shows the window months (LY actual · forecast now · recommended estimate)
+// then, on Apply, writes a SUBCATEGORY per-month OVERRIDE (IV[sub|co|ch|month]) = the per-month confidence-HIGH
+// estimate (the SAME engine the plan cell shows as "est +X% ▾" — trend-shrunk YoY, seasonally capped). Same store
+// the plan's subcat-row edits use, so it moves the visible forecast, cascades to SKUs/buy, and is reversible.
 function buildTgApply(sub,co,ch){
   var pop=document.createElement('div');
   pop.style.cssText='position:absolute;background:#fff;border:1px solid #d0d0d0;border-radius:6px;padding:12px;width:390px;z-index:100085;box-shadow:0 4px 14px rgba(0,0,0,0.12);font-family:inherit;text-align:left';
   var rec; try{ rec=aiRec(sub,co,ch); }catch(e){ rec=null; }
   if(!rec||rec.mixed||!rec.pct){ pop.innerHTML='<div style="font-size:11px;color:#6b7280">No confident recommendation for '+tHesc(sub)+' · '+co+' '+ch+'.</div>'; return pop; }
-  var recMin=rec.pct.med, gl=rec.label;
   var win=_tgWindow(3);                                    // SAME window the Trend-Gaps list measures the gap over
   var fu=(calc(sub,co,ch).fu)||{}, a=ga(co,ch,sub)||{};
   var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
@@ -9626,16 +9630,19 @@ function buildTgApply(sub,co,ch){
   // For the current (partial) month, calc().fu returns the month-to-date ACTUAL (small), not the forecast.
   // The plan shows the full-month FORECAST via curMonthForecast() — use that so "Forecast now" matches the plan.
   var fuNow=function(m){ return (m===CM)?Math.round(curMonthForecast(sub,co,ch)):Math.round(fu[m]||0); };
+  // "Will apply" = the per-month confidence-HIGH estimate (same engine as the plan cell "est +X% ▾"), NOT a flat row %.
   var rows=win.map(function(m){var p=m.split('_'),lk=(+p[0]-1)+'_'+p[1];
-    var ly=Math.round((a[lk]&&a[lk][0])||0), base=fuNow(m), tgt=Math.round(ly*(1+recMin));
+    var ly=Math.round((a[lk]&&a[lk][0])||0), base=fuNow(m), tgt=Math.round(_tgRecMonth(sub,co,ch,m,base));
     return {m:m,ly:ly,base:base,tgt:tgt};});
+  var _lySum=rows.reduce(function(x,r){return x+r.ly;},0), _recSum=rows.reduce(function(x,r){return x+r.tgt;},0);
+  var recPct=(_lySum>0)?(_recSum/_lySum-1):0; var gl=trendLabel(recPct);
   pop.innerHTML='<div style="font-size:10px;color:#666;margin-bottom:4px;font-weight:600">'+tHesc(sub)+' · '+co+' '+ch+'</div>'
-    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;background:'+gl.bg+';color:'+gl.c+'">'+gl.t+'</span><span style="font-size:10px;color:#64748b">recommend ≥'+pctS(recMin)+' vs last year</span></div>'
+    +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;background:'+gl.bg+';color:'+gl.c+'">'+gl.t+'</span><span style="font-size:10px;color:#64748b">est '+pctS(recPct)+' vs last year (confidence high)</span></div>'
     +'<table style="border-collapse:collapse;font-size:11px;width:100%;margin-bottom:8px"><thead><tr style="color:#64748b;font-size:10px"><th style="text-align:left;padding:2px 4px">Month</th><th style="text-align:right;padding:2px 4px">LY actual</th><th style="text-align:right;padding:2px 4px">Forecast now</th><th style="text-align:right;padding:2px 4px;color:#7c3aed">Will apply →</th></tr></thead><tbody>'
     +rows.map(function(r){return '<tr style="border-top:1px solid #f1f5f9"><td style="text-align:left;padding:2px 4px;font-weight:600">'+ml(r.m)+'</td><td style="text-align:right;padding:2px 4px;color:#475569;font-variant-numeric:tabular-nums">'+fn(r.ly)+'</td><td style="text-align:right;padding:2px 4px;color:#475569;font-variant-numeric:tabular-nums">'+fn(r.base)+'</td><td style="text-align:right;padding:2px 4px;color:#7c3aed;font-weight:700;font-variant-numeric:tabular-nums">'+fn(r.tgt)+'</td></tr>';}).join('')
     +'</tbody></table>'
     +'<button class="tgapply-go" style="width:100%;padding:7px;background:#7c3aed;color:#fff;border:none;border-radius:5px;cursor:pointer;font-weight:600;font-size:12px">Apply override → next '+rows.length+' month'+(rows.length===1?'':'s')+'</button>'
-    +'<div style="margin-top:6px;font-size:8px;color:#94a3b8;line-height:1.4">Writes a subcategory <b>override</b> for each month (last-year × (1'+pctS(recMin)+')). The base forecast is preserved — clear the override in the plan to revert. The plan cell + buy plan use the override.</div>';
+    +'<div style="margin-top:6px;font-size:8px;color:#94a3b8;line-height:1.4">Writes a subcategory <b>override</b> for each month = the per-month confidence-high estimate (same as the plan cell “est”, seasonally capped). The base forecast is preserved — clear the override in the plan to revert. The plan cell + buy plan use the override.</div>';
   pop.querySelector('.tgapply-go').onclick=function(e){ e.stopPropagation();
     try{
       // Write a SUBCATEGORY per-month OVERRIDE (absolute units) for the next 3 months — same store the plan's subcat
@@ -10032,8 +10039,8 @@ function renderDemandActionsView(body,opts){
       var rowHtml=function(it){
         var col=(it.label&&it.label.c)||'#166534', bg=(it.label&&it.label.bg)||'#dcfce7';
         return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;padding:7px 0;border-top:1px solid #f1f5f9">'
-          +'<span title="gap = recommended minimum − forecast growth" style="font-weight:800;font-variant-numeric:tabular-nums;color:#b91c1c;min-width:52px">'+Math.round(it.gap*100)+'pts</span>'
-          +'<span style="font-weight:700;padding:1px 6px;border-radius:3px;background:'+bg+';color:'+col+';white-space:nowrap" title="'+tHesc(it.label?it.label.t:'')+' — confident minimum">≥'+pctS(it.recMin)+' ▲</span>'
+          +'<span title="gap = recommended estimate − forecast growth" style="font-weight:800;font-variant-numeric:tabular-nums;color:#b91c1c;min-width:52px">'+Math.round(it.gap*100)+'pts</span>'
+          +'<span style="font-weight:700;padding:1px 6px;border-radius:3px;background:'+bg+';color:'+col+';white-space:nowrap" title="'+tHesc(it.label?it.label.t:'')+' — confidence-high estimate (same engine as the plan cell ‘est’)">est '+pctS(it.recMin)+' ▲</span>'
           +'<span style="color:#64748b;white-space:nowrap">forecast <b style="color:#0f172a">'+pctS(it.fcYoY)+'</b></span>'
           +'<span style="flex:1;min-width:170px">'+tHesc(it.sub)+' <span style="color:#94a3b8">· '+it.co+' '+it.ch+'</span></span>'
           +'<span style="color:#94a3b8;font-size:10px;white-space:nowrap;font-variant-numeric:tabular-nums" title="avg last-year units per month over the window (volume-tier basis)">avg volume '+fn(it.vpm)+'/mo</span>'
@@ -10054,7 +10061,7 @@ function renderDemandActionsView(body,opts){
         +'<div style="max-width:860px">'
         +'<div style="font-size:12px;margin-bottom:4px"><b>'+scoped.length+'</b> under-forecast trend'+(scoped.length===1?'':'s')+' · next '+tgHoz+' month'+(tgHoz>1?'s':'')+' · sorted by largest gap</div>'
         +(rows||empty)
-        +'<div style="font-size:11px;color:#888;margin-top:10px;line-height:1.5">Each row is a subcategory · market · channel where the category AI-rec sees a confident <b>minimum</b> growth over the next '+tgHoz+' month'+(tgHoz>1?'s':'')+' but the plan forecasts less. <b>Gap</b> = recommended minimum − forecast growth (plan vs last-year actuals for the same months). Only positive gaps ≥15pts with ≥100 LY units shown. Grouped into <b>volume tiers</b> by average last-year units/month over the window (High &gt;1,500 · Medium 401–1,500 · Low ≤400), largest gap first within each. <b>→ plan</b> opens the cell; <b>Apply ▾</b> opens the row recommendation to set a growth %.</div>'
+        +'<div style="font-size:11px;color:#888;margin-top:10px;line-height:1.5">Each row is a subcategory · market · channel where the plan forecasts less than the <b>confidence-high estimate</b> — the same per-month engine the plan cell shows as “est +X% ▾” (trend-shrunk YoY, seasonally capped at each month’s high-water-mark). <b>Gap</b> = recommended estimate − forecast growth (both vs last-year actuals for the same months). Only positive gaps ≥15pts with ≥100 LY units shown. Grouped into <b>volume tiers</b> by average last-year units/month over the window (High &gt;1,500 · Medium 401–1,500 · Low ≤400), largest gap first within each. <b>→ plan</b> opens the cell; <b>Apply ▾</b> applies the estimate as the forecast for those months.</div>'
         +'</div>';
       wireSecNav();
       body.querySelectorAll('.tg-view').forEach(function(b){ b.onclick=function(){ _da.tgView=b.dataset.v; draw(all); }; });
