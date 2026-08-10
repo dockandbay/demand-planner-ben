@@ -1,3 +1,6 @@
+## v26.808.0 Trend Gaps — "Forecast now" showed the current month's partial actual, not its forecast
+- In the category Apply popup, the "Forecast now" column read `calc().fu[month]`, which for the **current (partial) month** returns the month-to-date **actual** (e.g. 268 units so far in Aug), not the full-month forecast. The plan shows the current-month **forecast** via `curMonthForecast()` (e.g. 2000). The popup now uses `curMonthForecast()` for the current month so "Forecast now" matches the plan; future months are unchanged. (Also refreshed the stale per-SKU wording in the popup footer — it now correctly says it writes a subcategory override.)
+
 ## v26.807.0 Trend Gaps — fix "Apply override → next 3 months" (no change to forecast)
 - The category Apply button wrote **per-SKU** overrides (`FC_OUTPUTS` via `skuOvSet`), which change SKU cells but do **not** move the subcategory forecast (`calc(sub).fu` is driven by the subcategory-level input, not re-summed from SKU overrides) — so applying appeared to do nothing at the level Trend Gaps compares. It now writes a **subcategory per-month override** (`IV[sub|co|ch|month]`) for the next 3 months — the same store the plan's subcat-row edits use — so the visible subcat forecast changes, it cascades to SKUs/buy, and it's reversible (clear the cell → back to base). Uses the plan's absolute-units encoding.
 

@@ -9600,9 +9600,9 @@ function daTrendGaps(horizon){
   return out;
 }
 // Trend Gaps ▸ Category ▸ Apply popup. Shows the next 3 months (LY actual · forecast now · recommended override)
-// then, on Apply, writes a real per-SKU OVERRIDE (skuOvSet → FC_OUTPUTS: last-year × (1+recMin), split across the
-// subcat's SKUs by share) for those months — the base forecast is preserved (cleared → it falls back), and the
-// override is what the plan cell + buy plan use. This replaces the old row-growth apply that rewrote the base.
+// then, on Apply, writes a SUBCATEGORY per-month OVERRIDE (IV[sub|co|ch|month] = last-year × (1+recMin)) for those
+// months — the same store the plan's subcat-row edits use, so it moves the visible subcat forecast, cascades to
+// SKUs/buy, and is reversible (clear the cell → back to base). Replaces the old row-growth apply that rewrote the base.
 function buildTgApply(sub,co,ch){
   var pop=document.createElement('div');
   pop.style.cssText='position:absolute;background:#fff;border:1px solid #d0d0d0;border-radius:6px;padding:12px;width:390px;z-index:100085;box-shadow:0 4px 14px rgba(0,0,0,0.12);font-family:inherit;text-align:left';
@@ -9614,8 +9614,12 @@ function buildTgApply(sub,co,ch){
   var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var ml=function(m){var p=m.split('_');return MN[+p[1]-1]+'-'+p[0].slice(2);};
   var pctS=function(v){return (v>=0?'+':'')+Math.round(v*100)+'%';};
+  var CM=(typeof CUR_MONTH!=='undefined')?CUR_MONTH:null;
+  // For the current (partial) month, calc().fu returns the month-to-date ACTUAL (small), not the forecast.
+  // The plan shows the full-month FORECAST via curMonthForecast() — use that so "Forecast now" matches the plan.
+  var fuNow=function(m){ return (m===CM)?Math.round(curMonthForecast(sub,co,ch)):Math.round(fu[m]||0); };
   var rows=win.map(function(m){var p=m.split('_'),lk=(+p[0]-1)+'_'+p[1];
-    var ly=Math.round((a[lk]&&a[lk][0])||0), base=Math.round(fu[m]||0), tgt=Math.round(ly*(1+recMin));
+    var ly=Math.round((a[lk]&&a[lk][0])||0), base=fuNow(m), tgt=Math.round(ly*(1+recMin));
     return {m:m,ly:ly,base:base,tgt:tgt};});
   pop.innerHTML='<div style="font-size:10px;color:#666;margin-bottom:4px;font-weight:600">'+tHesc(sub)+' · '+co+' '+ch+'</div>'
     +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;background:'+gl.bg+';color:'+gl.c+'">'+gl.t+'</span><span style="font-size:10px;color:#64748b">recommend ≥'+pctS(recMin)+' vs last year</span></div>'
@@ -9623,7 +9627,7 @@ function buildTgApply(sub,co,ch){
     +rows.map(function(r){return '<tr style="border-top:1px solid #f1f5f9"><td style="text-align:left;padding:2px 4px;font-weight:600">'+ml(r.m)+'</td><td style="text-align:right;padding:2px 4px;color:#475569;font-variant-numeric:tabular-nums">'+fn(r.ly)+'</td><td style="text-align:right;padding:2px 4px;color:#475569;font-variant-numeric:tabular-nums">'+fn(r.base)+'</td><td style="text-align:right;padding:2px 4px;color:#7c3aed;font-weight:700;font-variant-numeric:tabular-nums">'+fn(r.tgt)+'</td></tr>';}).join('')
     +'</tbody></table>'
     +'<button class="tgapply-go" style="width:100%;padding:7px;background:#7c3aed;color:#fff;border:none;border-radius:5px;cursor:pointer;font-weight:600;font-size:12px">Apply override → next '+rows.length+' month'+(rows.length===1?'':'s')+'</button>'
-    +'<div style="margin-top:6px;font-size:8px;color:#94a3b8;line-height:1.4">Writes a per-SKU <b>override</b> for each month (last-year × (1'+pctS(recMin)+'), split across the subcategory’s SKUs by last-year share). The base forecast is preserved — clear the override in the plan to revert. The plan cell + buy plan use the override.</div>';
+    +'<div style="margin-top:6px;font-size:8px;color:#94a3b8;line-height:1.4">Writes a subcategory <b>override</b> for each month (last-year × (1'+pctS(recMin)+')). The base forecast is preserved — clear the override in the plan to revert. The plan cell + buy plan use the override.</div>';
   pop.querySelector('.tgapply-go').onclick=function(e){ e.stopPropagation();
     try{
       // Write a SUBCATEGORY per-month OVERRIDE (absolute units) for the next 3 months — same store the plan's subcat
