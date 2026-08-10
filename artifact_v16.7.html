@@ -9915,18 +9915,27 @@ function renderDemandActionsView(body,opts){
         var fuOf=function(sub,co,ch){ var k=sub+'|'+co+'|'+ch; if(!(k in _fuC)){ try{ _fuC[k]=(calc(sub,co,ch).fu)||{}; }catch(e){ _fuC[k]={}; } } return _fuC[k]; };
         var shOf=function(sub,co,ch){ var k=sub+'|'+co+'|'+ch; if(!(k in _shC)){ try{ _shC[k]=buildSkuShares(filteredSkus(sub,co,ch)||[],co,ch,_lyYM)||{}; }catch(e){ _shC[k]={}; } } return _shC[k]; };
         var shown=si.rows.filter(function(r){ return tgSt==='all'?true:r.status===tgSt; });
-        var thM='padding:3px 4px;font-size:9px;color:#94a3b8;text-align:right;white-space:nowrap';
+        var thA='padding:3px 2px;font-size:9px;color:#94a3b8;text-align:center;width:34px;white-space:nowrap;border-left:1px solid #eee';
+        var thF='padding:3px 4px;font-size:9px;color:#7c3aed;font-weight:700;text-align:center;white-space:nowrap';
         var head='<tr><th style="text-align:left;padding:4px 8px;font-size:10px;color:#64748b;position:sticky;left:0;background:#f8fafc;z-index:2">SKU · market · ch</th>'
-          +past.map(function(m){return '<th style="'+thM+'">'+mlbl(m).split('-')[0]+'</th>';}).join('')
-          +fwd.map(function(m){return '<th style="'+thM+';color:#7c3aed;font-weight:700">'+mlbl(m)+'</th>';}).join('')
-          +'<th style="text-align:left;padding:4px 8px;font-size:10px;color:#64748b;min-width:230px">Why / recommended</th><th></th></tr>';
+          +past.map(function(m){return '<th style="'+thA+'">'+mlbl(m).split('-')[0]+'</th>';}).join('')
+          +fwd.map(function(m,i){return '<th style="'+thF+';border-left:'+(i===0?'2px solid #ddd':'1px solid #eee')+'">'+mlbl(m)+'</th>';}).join('')
+          +'<th style="text-align:left;padding:4px 8px;font-size:10px;color:#64748b;min-width:230px;border-left:2px solid #ddd">Why / recommended</th><th></th></tr>';
         var rowsHtml=shown.slice(0,80).map(function(r){
           var sales=skuSales(r.sku,r.co,r.ch)||{};
           var cur={}; try{ cur=skuMonthlyMap(r.sku,r.co,r.ch,fwd,fuOf(r.subcat,r.co,r.ch),shOf(r.subcat,r.co,r.ch)[r.sku]||0)||{}; }catch(e){ cur={}; }
           var anomM={}; r.anoms.forEach(function(a){ anomM[a.fym]=a; });
-          var pastTds=past.map(function(m){ var v=Math.round(sales[m]||0); return '<td style="padding:2px 4px;text-align:right;font-variant-numeric:tabular-nums;color:#475569">'+(v?fn(v):'·')+'</td>'; }).join('');
-          var fwdTds=fwd.map(function(m){ var ov=skuOvGet(r.sku,r.co,r.ch,m); var cv=Math.round(cur[m]||0); var an=anomM[m]; var bg=an?(an.type==='hi'?'#fff7ed':'#eff6ff'):'#faf5ff';
-            return '<td style="padding:2px 3px;background:'+bg+'"><input class="si-ov" data-sku="'+tHesc(r.sku)+'" data-co="'+r.co+'" data-ch="'+r.ch+'" data-m="'+m+'" value="'+(ov!=null?tHesc(ov):'')+'" placeholder="'+cv+'" title="'+mlbl(m)+' — current plan '+fn(cv)+(an?' · '+(an.type==='hi'?'spike':'dip')+' vs seasonal '+fn(an.expected):'')+'. Type to override (binds to the plan)." style="width:52px;text-align:right;font-size:11px;border:1px solid #e5e7eb;border-radius:4px;padding:1px 3px" inputmode="numeric"></td>'; }).join('');
+          var pastTds=past.map(function(m){ var v=Math.round(sales[m]||0); return '<td style="padding:2px 2px;text-align:center;font-size:9px;font-variant-numeric:tabular-nums;color:#64748b;width:34px;border-left:1px solid #eee">'+(v?fn(v):'·')+'</td>'; }).join('');
+          var fwdTds=fwd.map(function(m,i){ var ov=skuOvGet(r.sku,r.co,r.ch,m); var cv=Math.round(cur[m]||0); var an=anomM[m];
+            var ly=Math.round(sales[_tgAddMonth(m,-12)]||0);
+            var finalV=(ov!=null&&ov!=='')?Math.round(Number(String(ov).replace(/[^0-9.\-]/g,''))||0):cv;
+            var sugg=an?Math.round(an.expected||0):(r.rec?Math.round(cv*(1+(r.rec.recPct||0)/100)):null);
+            return '<td style="padding:2px 3px;text-align:center;vertical-align:top;border-left:'+(i===0?'2px solid #ddd':'1px solid #eee')+'">'
+              +'<div style="font-size:8px;color:#94a3b8" title="last-year actual">LY '+(ly?fn(ly):'·')+'</div>'
+              +'<input class="si-ov" data-sku="'+tHesc(r.sku)+'" data-co="'+r.co+'" data-ch="'+r.ch+'" data-m="'+m+'" value="'+(ov!=null?tHesc(String(ov)):'')+'" placeholder="'+cv+'" title="'+mlbl(m)+' — base plan '+fn(cv)+'. Type to override (binds to the plan)." style="width:50px;text-align:center;font-size:11px;border:1px solid #e5e7eb;border-radius:4px;padding:1px 3px" inputmode="numeric">'
+              +'<div class="si-fin" style="font-size:8px;color:#475569" title="final forecast — override if set, else base">fc '+fn(finalV)+'</div>'
+              +((sugg!=null&&sugg!==finalV)?'<div class="si-sugg" data-sku="'+tHesc(r.sku)+'" data-co="'+r.co+'" data-ch="'+r.ch+'" data-m="'+m+'" data-v="'+sugg+'" title="suggested value — click to apply as the override" style="font-size:9px;color:#7c3aed;font-weight:700;cursor:pointer;text-decoration:underline;margin-top:1px">→ '+fn(sugg)+'</div>':'')
+              +'</td>'; }).join('');
           var whyBits=[];
           r.anoms.forEach(function(a){ whyBits.push((a.type==='hi'?'▲ ':'▼ ')+mlbl(a.fym)+' '+(a.type==='hi'?'spike':'dip')+' — fcst '+fn(a.cur)+' vs seasonal '+fn(a.expected)); });
           if(r.rec){ var d=r.rec.delta; whyBits.push((d>0?'▲ under-forecast — ':'▼ over-forecast — ')+r.rec.catLabel+' ≥'+(r.rec.recPct>=0?'+':'')+r.rec.recPct+'%: rec '+fn(r.rec.recTotal)+' vs plan '+fn(r.rec.curTotal)+' ('+(d>0?'+':'')+fn(d)+'u over 4mo)'); }
@@ -9939,9 +9948,12 @@ function renderDemandActionsView(body,opts){
         body.innerHTML=secNav()+filtBar
           +'<div style="font-size:12px;margin-bottom:6px"><b>'+shown.length+'</b> SKU'+(shown.length===1?'':'s')+' flagged ('+tgSt+')'+(shown.length>80?' — showing 80':'')+' · last 12 months actuals + next 4 forecast <span style="color:#7c3aed">(editable → binds to the plan)</span></div>'
           +(shown.length?'<div style="overflow-x:auto;border:1px solid #eef2f7;border-radius:6px"><table style="border-collapse:collapse;font-size:11px;min-width:100%">'+head+rowsHtml+'</table></div>':'<div style="padding:22px;text-align:center;color:#666">No flagged SKUs for this filter.</div>')
-          +'<div style="font-size:11px;color:#888;margin-top:8px;line-height:1.5">Flags combine forward <b>anomalies</b> (spike ▲ / dip ▼ vs the SKU’s seasonal flow) and <b>recommendation gaps</b> (leader allocation vs the current forecast, inside off-plan categories). Forecast cells show the current plan value (placeholder) — type to override; it saves to your plan and the buy plan. Dismiss to clear a SKU. Same data as the demand plan.</div>';
+          +'<div style="font-size:11px;color:#888;margin-top:8px;line-height:1.5">Flags combine forward <b>anomalies</b> (spike ▲ / dip ▼ vs the SKU’s seasonal flow) and <b>recommendation gaps</b> (leader allocation vs the current forecast, inside off-plan categories). Each forecast cell shows <b>LY</b> (last-year actual), an editable <b>override</b> box, and <b>fc</b> (final forecast — the override if set, else the base plan). When the flag has a recommendation a suggested <b>→ value</b> shows underneath — click it to apply it as the override (binds to your plan + the buy plan). Dismiss to clear a SKU.</div>';
         wireCommon();
-        body.querySelectorAll('.si-ov').forEach(function(inp){ inp.onchange=function(){ var v=inp.value.trim(); skuOvSet(inp.dataset.sku,inp.dataset.co,inp.dataset.ch,inp.dataset.m,(v===''?null:v)); inp.style.borderColor='#16a34a'; inp.style.background='#f0fdf4'; }; });
+        body.querySelectorAll('.si-ov').forEach(function(inp){ inp.onchange=function(){ var v=inp.value.trim(); skuOvSet(inp.dataset.sku,inp.dataset.co,inp.dataset.ch,inp.dataset.m,(v===''?null:v)); inp.style.borderColor='#16a34a'; inp.style.background='#f0fdf4';
+          var td=inp.closest('td'), fin=td&&td.querySelector('.si-fin'); if(fin){ var nv=(v===''?Number(inp.placeholder||0):Number(v.replace(/[^0-9.\-]/g,''))||0); fin.textContent='fc '+Math.round(nv).toLocaleString(); } }; });
+        body.querySelectorAll('.si-sugg').forEach(function(el){ el.onclick=function(){ var v=el.dataset.v, td=el.closest('td'), inp=td&&td.querySelector('.si-ov'); if(inp){ inp.value=v; inp.style.borderColor='#16a34a'; inp.style.background='#f0fdf4'; }
+          skuOvSet(el.dataset.sku,el.dataset.co,el.dataset.ch,el.dataset.m,v); var fin=td&&td.querySelector('.si-fin'); if(fin)fin.textContent='fc '+Number(v).toLocaleString(); }; });
         body.querySelectorAll('.si-act').forEach(function(b){ b.onclick=function(){ b.disabled=true; setState(b.dataset.k,b.dataset.s).then(function(j){ if(j&&j.error){alert(j.error);b.disabled=false;return;} load(); }); }; });
         return;
       }

@@ -1,3 +1,7 @@
+## v26.796.0 Trend Gaps SKU view — richer forecast cells + tidier actuals
+- **Forecast cells** (next 4 months) redesigned: colour fills removed; each cell now stacks **LY** (last-year actual), the editable **override** box, and **fc** (final forecast = override if set, else base). When the flag has a recommendation a clickable **→ suggested value** shows underneath — clicking applies it as the override.
+- **Actuals** (trailing 12 months) are now evenly-spaced, centred, smaller text with grey column separators (matching the headers).
+
 ## v26.795.0 Fixes — Trend Gaps Apply popup (drawer z-index) + Deposits Drawdown mobile scroll
 - **Trend Gaps Apply ▾ now opens** — the recommendation popup was z-index 1000, behind the Trend Gaps drawer (z-index 6000); raised it above so it shows in both the drawer and the Actions tab.
 - **Deposits Drawdown mobile**: the table now has an explicit computed min-width ((cols+1)×100px), so it genuinely overflows and **scrolls horizontally** on phones instead of squishing to one screen.
