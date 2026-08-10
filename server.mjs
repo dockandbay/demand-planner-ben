@@ -170,18 +170,32 @@ async function freshnessCached() {
   return _freshCache.val;
 }
 
+// The plan's subcategory rows are driven by AVAILABILITY (v_product_availability), not just sales history — so an
+// available-but-never-sold subcategory (e.g. a Non-Core line only sold in one market) still shows in every market
+// it's available. Sales history (category_sales_summary) fills the month cells where it exists. SKUs/subcats with no
+// category/subcategory (or the view's 'Unknown') roll up under a synthetic "Undefined sub category" (the client
+// sorts it to the top). (Ben, v26.833.)
+const UNDEF_SUBCAT = 'Undefined sub category';
+function _normCat(v) { const t = (v == null ? '' : String(v).trim()); return (t === '' || t === 'Unknown') ? UNDEF_SUBCAT : t; }
 async function buildDATA() {
-  const { rows } = await pool.query(`
-    SELECT category c, subcategory s, country co, channel ch,
-           is_excluded_category x, to_char(month,'YYYY_MM') ym,
-           units::int u, revenue::float r
-    FROM planner.category_sales_summary
-    WHERE subcategory IS NOT NULL`);
+  const [salesR, availR] = await Promise.all([
+    pool.query(`SELECT category c, subcategory s, country co, channel ch,
+                       is_excluded_category x, to_char(month,'YYYY_MM') ym, units::int u, revenue::float r
+                FROM planner.category_sales_summary WHERE subcategory IS NOT NULL`),
+    // one row per (category, subcategory, country, channel) that has ≥1 AVAILABLE SKU in planning scope
+    pool.query(`SELECT DISTINCT p.category c, p.subcategory s, upper(a.country) co, a.channel ch
+                FROM planner.v_product_availability a JOIN planner.products p ON p.sku = a.sku
+                WHERE a.is_available AND p.in_planning_scope`),
+  ]);
   const byKey = {};
-  for (const row of rows) {
-    const k = row.c + '|' + row.s + '|' + row.co + '|' + row.ch;
-    if (!byKey[k]) byKey[k] = { c: row.c, s: row.s, co: row.co, ch: row.ch, x: row.x, m: {} };
+  for (const row of salesR.rows) {
+    const c = _normCat(row.c), s = _normCat(row.s), k = c + '|' + s + '|' + row.co + '|' + row.ch;
+    if (!byKey[k]) byKey[k] = { c, s, co: row.co, ch: row.ch, x: row.x, m: {} };
     byKey[k].m[row.ym] = [row.u, row.r];
+  }
+  for (const row of availR.rows) {   // available but unsold → add the row with an empty history so it still shows
+    const c = _normCat(row.c), s = _normCat(row.s), k = c + '|' + s + '|' + row.co + '|' + row.ch;
+    if (!byKey[k]) byKey[k] = { c, s, co: row.co, ch: row.ch, x: false, m: {} };
   }
   return Object.values(byKey);
 }
@@ -239,7 +253,10 @@ async function buildFC_OUTPUTS() {
 // oo (on-order) derived from outstanding inbound — both fill gaps the baked snapshot lacked.
 async function buildSKURAW() {
   const [prods, pcs, inv, avail, oo, sales, inbound, openpo] = await Promise.all([
-    pool.query(`SELECT p.sku, p.product_name n, p.subcategory s, p.category c, p.market_tier ti, p.core_seasonal cs, coalesce(sl.release_window,'') rw,
+    pool.query(`SELECT p.sku, p.product_name n,
+                       coalesce(nullif(btrim(p.subcategory),''),'Undefined sub category') s,
+                       coalesce(nullif(btrim(p.category),''),'Undefined sub category') c,
+                       p.market_tier ti, p.core_seasonal cs, coalesce(sl.release_window,'') rw,
                        nullif(trim(p.replacement_sku),'') rep, nullif(trim(p.variant_image_url_final),'') img
                 FROM planner.products p LEFT JOIN planner.sku_labels sl ON sl.sku=p.sku WHERE p.in_planning_scope`),
     // Launch + discontinue dates per country, from planner.products (Ben's single source of truth).

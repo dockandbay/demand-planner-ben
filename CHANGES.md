@@ -1,3 +1,8 @@
+## v26.833.0 Demand plan — subcategory rows now driven by AVAILABILITY, not just sales history
+- **`buildDATA`** now unions **availability** (`v_product_availability`, in-scope) into the plan's subcategory×market×channel rows — so an **available-but-never-sold** subcategory (e.g. Non Core on EU DTC / SHIPBAG-LAR) still shows, with an empty history. Sales history (`category_sales_summary`) fills the month cells where it exists. Previously a subcat only appeared where it had sales, so available SKUs with no sales in a market were invisible.
+- **SKUs/subcats with no category/subcategory** (or the view's 'Unknown') roll up under a synthetic **"Undefined sub category"**, which the plan sorts to the **top** of the category list (`buildSKURAW` coalesces; client `filteredCats` forces it first). Only ~12 SKU·market·channel combos in the sandbox.
+- Buy plan unchanged — verified control SKU (TOWLB-CAB-LG-LTBGE-R EU) stays b3=1040; the added rows are empty (no forecast → zero demand). Interim: a units=0 `sales_actuals` seed was added on LIVE to force Non Core EU DTC visible until this deploys — remove it after.
+
 ## v26.832.0 Record-of-change — a just-made edit now shows its R before the autosave flush
 - Plan cell edits are **buffered** and only POST to `forecast_changes` on the 60s autosave. Ticking "show record of change" called `fcChangeKeysLoad`, which **replaced** the client key-set with the server's — so a just-made (still-buffered) edit lost its R until the flush + a re-tick/reload. Now the load **merges** the current-market unsaved buffer keys into the display set, so recent edits show their R immediately. (Recording itself was always happening — this was a display-timing gap on unflushed edits.)
 

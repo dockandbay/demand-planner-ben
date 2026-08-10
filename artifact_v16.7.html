@@ -4277,7 +4277,7 @@ function filteredCats(){
   } else {
     allOrder=[].concat(OTHER_ORDER,BAG_CATS);
   }
-  const ks=Object.keys(m).sort(function(a,b){const ai=allOrder.indexOf(a),bi=allOrder.indexOf(b);if(ai<0&&bi<0)return a.localeCompare(b);if(ai<0)return 1;if(bi<0)return-1;return ai-bi;});
+  const ks=Object.keys(m).sort(function(a,b){if(a==='Undefined sub category'&&b!=='Undefined sub category')return -1;if(b==='Undefined sub category'&&a!=='Undefined sub category')return 1;var ai=allOrder.indexOf(a),bi=allOrder.indexOf(b);if(ai<0&&bi<0)return a.localeCompare(b);if(ai<0)return 1;if(bi<0)return-1;return ai-bi;});
   const out={};ks.forEach(function(k){out[k]=m[k];});return out;
 }
 
