@@ -10197,7 +10197,7 @@
           +'<div style="display:flex;flex-direction:column;gap:7px;font-size:11px">'
             +'<span id="bpm-mode" style="display:inline-flex;gap:3px"></span>'
             +'<div><span class="pill-lbl">Production</span> <select id="bpm-prod" class="flt" style="width:auto"></select></div>'
-            +'<div><span class="pill-lbl">Batch</span> <select id="bpm-batch" class="flt" style="width:auto"><option value="">— optional —</option></select></div>'
+            +'<div><span class="pill-lbl">Batch</span> <select id="bpm-batch" class="flt" style="width:auto"><option value="">— choose batch (required) —</option></select></div>'
             +'<div><span class="pill-lbl">Start date</span> <input id="bpm-start" type="date" class="flt" style="width:auto"></div>'
           +'</div></div>'
         +'<div style="flex:1 1 230px;min-width:220px;border:1px solid #dbe3ee;border-radius:8px;padding:8px 10px;background:#f8fbff">'
@@ -10228,7 +10228,7 @@
     // Batch dropdown + inline "add batch number" (writes to CONFIG ▸ Batches via /api/supply/batch-create).
     var _bpmBatchPrev='';
     function bpmFillBatch(batches, sel){ var bs=document.getElementById('bpm-batch'); if(!bs)return;
-      bs.innerHTML='<option value="">— optional —</option>'+batches.map(function(x){return '<option'+(x===sel?' selected':'')+'>'+esc(x)+'</option>';}).join('')+'<option value="__addbatch__">➕ Add batch number…</option>';
+      bs.innerHTML='<option value="">— choose batch (required) —</option>'+batches.map(function(x){return '<option'+(x===sel?' selected':'')+'>'+esc(x)+'</option>';}).join('')+'<option value="__addbatch__">➕ Add batch number…</option>';
       _bpmBatchPrev=sel||''; }
     fetch('/api/supply/lookups').then(function(r){return r.json();}).then(function(d){ var batches=((d&&d.batches)||[]).slice().sort(function(a,b){return String(b).localeCompare(String(a),undefined,{numeric:true});});
       bpmFillBatch(batches,''); var bs=document.getElementById('bpm-batch');
@@ -10267,7 +10267,8 @@
     function updateRow(tr){ if(!tr)return; var s=tr.dataset.sku, moq=Number(tr.dataset.moq)||0; var t=rowTotal(s); var short=!!(moq&&t>0&&t<moq);
       var tc=tr.querySelector('.bpm-rowtot'); if(tc){ tc.textContent=t?t.toLocaleString():'0'; tc.style.color=short?'#fff':''; }
       var td=tr.querySelector('.bpm-totcell'); if(td)td.style.background=short?'#FA5053':'';
-      var ic=tr.querySelector('.bpm-moqicon'); if(ic){ ic.style.display=short?'':'none'; ic.setAttribute('data-moqtip',short?moqMsg(moq,t):''); ic.style.color=short?'#fff':'#b91c1c'; } }
+      var ic=tr.querySelector('.bpm-moqicon'); if(ic){ ic.style.display=short?'':'none'; ic.setAttribute('data-moqtip',short?moqMsg(moq,t):''); ic.style.color=short?'#fff':'#b91c1c'; }
+      var mv=tr.querySelector('.bpm-moqval'); if(mv)mv.style.color=short?'#fff':'#94a3b8'; }
     function drawSkus(){
       var box=document.getElementById('bpm-skus'); if(!box)return;
       var skus=Object.keys(REC[MODE]).filter(function(s){ return shown.some(function(c){ return rec(s,c)>0; }); });
@@ -10287,7 +10288,7 @@
         rows+='<tr data-sku="'+esc(s.sku)+'" data-cat="'+esc(cat)+'" data-moq="'+(s.moq||0)+'">'
           +'<td style="'+tdB.replace('white-space:nowrap','')+';text-align:left;min-width:200px"><div style="display:flex;align-items:center;gap:6px"><button class="bpm-plan" data-sku="'+esc(s.sku)+'" style="font-size:8px;font-weight:700;padding:0 4px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer">PLAN</button><span>'+esc(s.sku)+'</span></div>'+(s.discontinue?'<div style="font-size:9px;color:#9ca3af;margin-top:1px">discontinue '+esc(fd(s.discontinue))+'</div>':'')+'</td>'
           +qtyCells
-          +'<td class="bpm-totcell" style="'+tdB+';text-align:center;font-weight:700;font-variant-numeric:tabular-nums'+(moqShort?';background:#FA5053':'')+'"><span class="bpm-moqicon" data-moqtip="'+(moqShort?esc(moqMsg(s.moq,rt)):'')+'" style="cursor:help;margin-right:3px;color:'+(moqShort?'#fff':'#b91c1c')+';display:'+(moqShort?'':'none')+'">⚑</span><span class="bpm-rowtot" style="'+(moqShort?'color:#fff':'')+'">'+(rt?rt.toLocaleString():'0')+'</span></td>'
+          +'<td class="bpm-totcell" style="'+tdB+';text-align:center;font-weight:700;font-variant-numeric:tabular-nums'+(moqShort?';background:#FA5053':'')+'"><span class="bpm-moqicon" data-moqtip="'+(moqShort?esc(moqMsg(s.moq,rt)):'')+'" style="cursor:help;margin-right:3px;color:'+(moqShort?'#fff':'#b91c1c')+';display:'+(moqShort?'':'none')+'">⚑</span><span class="bpm-rowtot" style="'+(moqShort?'color:#fff':'')+'">'+(rt?rt.toLocaleString():'0')+'</span>'+(s.moq?'<div class="bpm-moqval" style="font-size:8px;font-weight:400;margin-top:1px;color:'+(moqShort?'#fff':'#94a3b8')+'">MOQ '+s.moq.toLocaleString()+'</div>':'')+'</td>'
           +'<td style="'+tdB+';text-align:left;min-width:150px">'+supCell+'</td></tr>';
       });
       var thB='position:sticky;top:0;background:#f3f3f1;z-index:1;padding:5px 8px;border-bottom:1px solid #d5d5d5;font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#444;white-space:nowrap';
@@ -10330,7 +10331,7 @@
         });
         res.style.color='#0f172a';
         res.innerHTML=h?('<div style="column-width:260px;column-gap:18px">'+h+'</div>'):'<div style="color:#64748b">Nothing to place.</div>'; var cb=document.getElementById('bpm-create'); cb.style.display=totPos?'':'none'; }); };
-    document.getElementById('bpm-create').onclick=function(){ var btn=this; if(!prodVal())return; var _prod=prodVal(), _bb=document.getElementById('bpm-batch'), _batch=(_bb&&_bb.value)||''; var js=jobs(true); if(!js.length)return; btn.disabled=true; btn.textContent='Creating…';
+    document.getElementById('bpm-create').onclick=function(){ var btn=this; if(!prodVal())return; var _prod=prodVal(), _bb=document.getElementById('bpm-batch'), _batch=(_bb&&_bb.value)||''; if(!_batch||_batch==='__addbatch__'){ alert('Choose a batch — it is required. Pick one from the Batch dropdown in Step 1 (or add a new batch number).'); if(_bb)_bb.focus(); return; } var js=jobs(true); if(!js.length)return; btn.disabled=true; btn.textContent='Creating…';
       Promise.all(js.map(function(j){ return fetch('/api/supply/buyplan-pos',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(j.payload)}).then(function(r){return r.json();}).then(function(d){ if(d&&d.error)throw new Error(j.label+': '+d.error); return (d&&d.created)||0; }); })).then(function(counts){
         var tot=counts.reduce(function(a,b){return a+b;},0); invalidateDerived(); close();
         _pendingOP={status:'future'}; if(_prod)_pendingOP.prod=_prod; if(_batch)_pendingOP.batch=_batch;   // Order Plan opens filtered to Future + this production + batch
