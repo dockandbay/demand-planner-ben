@@ -1,3 +1,7 @@
+## v26.801.0 Build production modal — MOQ shortfall on the Total cell + bigger step numbers
+- MOQ shortfall now shows on the **Total cell**: red **#FA5053** background + white number + a ⚑ hover icon (hover = "MOQ 500 — production 150, short 350"). Removed the easy-to-miss line under the SKU.
+- Step headers now use a **large numbered badge** (1 / 2 / 3): "STEP 1 · Set up", "STEP 2 · Choose & preview", "STEP 3 · Create" — the numbers are clearly visible now.
+
 ## v26.800.0 Build production modal — polish (fade-in · 2-col preview · invalidate · tick-skip-0)
 - Modal **fades in once styles apply** — no unstyled flash on open.
 - Preview POs flow into **2 columns** when the Create box is wide (country groups kept intact); PO lines are now **black** (were light grey).

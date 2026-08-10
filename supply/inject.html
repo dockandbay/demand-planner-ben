@@ -10182,7 +10182,7 @@
         +'<span style="margin-left:auto;cursor:pointer;font-size:18px" id="bpm-x">✕</span></div>'
       +'<div style="display:flex;gap:10px;align-items:stretch;margin-bottom:8px;flex-wrap:wrap">'
         +'<div style="flex:1 1 230px;min-width:220px;border:1px solid #dbe3ee;border-radius:8px;padding:8px 10px;background:#f8fbff">'
-          +'<div style="font-size:11px;font-weight:800;color:#1e3a8a;margin-bottom:8px;letter-spacing:.03em">① SET UP</div>'
+          +'<div style="font-weight:800;color:#1e3a8a;margin-bottom:8px;display:flex;align-items:center;gap:7px"><span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1e3a8a;color:#fff;font-size:15px;font-weight:800;flex-shrink:0">1</span><span style="font-size:12px;letter-spacing:.03em">STEP 1 · Set up</span></div>'
           +'<div style="display:flex;flex-direction:column;gap:7px;font-size:11px">'
             +'<span id="bpm-mode" style="display:inline-flex;gap:3px"></span>'
             +'<div><span class="pill-lbl">Production</span> <select id="bpm-prod" class="flt" style="width:auto"></select></div>'
@@ -10190,14 +10190,14 @@
             +'<div><span class="pill-lbl">Start date</span> <input id="bpm-start" type="date" class="flt" style="width:auto"></div>'
           +'</div></div>'
         +'<div style="flex:1 1 230px;min-width:220px;border:1px solid #dbe3ee;border-radius:8px;padding:8px 10px;background:#f8fbff">'
-          +'<div style="font-size:11px;font-weight:800;color:#1e3a8a;margin-bottom:8px;letter-spacing:.03em">② CHOOSE &amp; PREVIEW</div>'
+          +'<div style="font-weight:800;color:#1e3a8a;margin-bottom:8px;display:flex;align-items:center;gap:7px"><span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#1e3a8a;color:#fff;font-size:15px;font-weight:800;flex-shrink:0">2</span><span style="font-size:12px;letter-spacing:.03em">STEP 2 · Choose &amp; preview</span></div>'
           +'<div style="display:flex;flex-direction:column;gap:9px;font-size:11px">'
             +'<div><span class="pill-lbl">Markets</span> <span id="bpm-pills"></span></div>'
             +'<label style="cursor:pointer;color:#b45309" title="Top up SKUs below their MOQ by adding the shortfall to a China Stock holding PO (one per production per supplier). Allocate to a market later."><input type="checkbox" id="bpm-china" checked> <span id="bpm-china-lbl">China-stock top-up</span></label>'
             +'<div><button id="bpm-preview" class="tool-badge bg-blue" style="border:none;cursor:pointer;padding:7px 15px;font-size:13px;font-weight:700">Preview PO plan ▶</button></div>'
           +'</div></div>'
         +'<div style="flex:2 1 320px;min-width:280px;border:1px solid #cfe8d6;border-radius:8px;padding:8px 10px;background:#f6fdf8;display:flex;flex-direction:column">'
-          +'<div style="font-size:11px;font-weight:800;color:#166534;margin-bottom:8px;letter-spacing:.03em">③ CREATE</div>'
+          +'<div style="font-weight:800;color:#166534;margin-bottom:8px;display:flex;align-items:center;gap:7px"><span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#166534;color:#fff;font-size:15px;font-weight:800;flex-shrink:0">3</span><span style="font-size:12px;letter-spacing:.03em">STEP 3 · Create</span></div>'
           +'<div style="flex:0 0 auto"><button id="bpm-create" class="tool-badge bg-green" style="border:none;cursor:pointer;padding:7px 15px;font-size:13px;font-weight:700;display:none">Create POs</button>'
             +'<span style="font-size:10px;color:#64748b;margin-left:6px">POs create as <b>FUTURE</b>, then Order Plan opens filtered to this production + batch.</span></div>'
           +'<div id="bpm-result" style="flex:1 1 auto;max-height:24vh;overflow:auto;margin-top:7px;font-size:11px;color:#94a3b8">Preview to see the PO plan here.</div>'
@@ -10245,9 +10245,11 @@
     // (moq − combined) goes to a "China Stock" holding PO (one per production per supplier). supplier = the SKU's chosen supplier.
     function chinaShortfalls(){ var out=[]; Object.keys(REC[MODE]).forEach(function(s){ var m=META[s]; if(!m||!m.moq||!hasCode(s))return; var rt=rowTotal(s); if(rt>0&&rt<m.moq)out.push({sku:s,qty:(m.moq-rt),supplier_code:supOf(s)||''}); }); return out; }
     function refreshChina(){ var lbl=document.getElementById('bpm-china-lbl'); if(!lbl)return; var sf=chinaShortfalls(); var u=sf.reduce(function(a,b){return a+b.qty;},0); lbl.textContent=sf.length?('China-stock top-up ('+sf.length+' SKU · '+u.toLocaleString()+'u)'):'China-stock top-up (none)'; }
-    function updateRow(tr){ if(!tr)return; var s=tr.dataset.sku, moq=Number(tr.dataset.moq)||0; var t=rowTotal(s);
-      var tc=tr.querySelector('.bpm-rowtot'); if(tc)tc.textContent=t?t.toLocaleString():'0';
-      var mf=tr.querySelector('.bpm-moq'); if(mf){ if(moq&&t>0&&t<moq){ mf.style.display=''; mf.textContent='⚑ MOQ '+moq.toLocaleString()+' — production '+t.toLocaleString()+', short '+(moq-t).toLocaleString(); } else mf.style.display='none'; } }
+    function moqMsg(moq,t){ return 'MOQ '+moq.toLocaleString()+' — production '+t.toLocaleString()+', short '+(moq-t).toLocaleString(); }
+    function updateRow(tr){ if(!tr)return; var s=tr.dataset.sku, moq=Number(tr.dataset.moq)||0; var t=rowTotal(s); var short=!!(moq&&t>0&&t<moq);
+      var tc=tr.querySelector('.bpm-rowtot'); if(tc){ tc.textContent=t?t.toLocaleString():'0'; tc.style.color=short?'#fff':''; }
+      var td=tr.querySelector('.bpm-totcell'); if(td)td.style.background=short?'#FA5053':'';
+      var ic=tr.querySelector('.bpm-moqicon'); if(ic){ ic.style.display=short?'':'none'; ic.title=short?moqMsg(moq,t):''; ic.style.color=short?'#fff':'#b91c1c'; } }
     function drawSkus(){
       var box=document.getElementById('bpm-skus'); if(!box)return;
       var skus=Object.keys(REC[MODE]).filter(function(s){ return shown.some(function(c){ return rec(s,c)>0; }); });
@@ -10265,9 +10267,9 @@
           return '<td style="'+tdB+';text-align:center'+(v?';background:'+colOf(c)+'18':'')+'"><span style="display:inline-flex;align-items:center;gap:4px;justify-content:center"><input type="checkbox" class="bpm-tick"'+(zero?' style="accent-color:#cbd5e1"':'')+' data-s="'+esc(s.sku)+'" data-c="'+c+'"'+(tk?' checked':'')+dis+'><input type="number" min="0" class="bpm-q" data-s="'+esc(s.sku)+'" data-c="'+c+'" value="'+v+'"'+dis+' style="width:58px;text-align:center;font-size:11px;padding:1px 3px;border:1px solid '+(zero?'#e5e7eb':'transparent')+';border-radius:4px;background:transparent;color:'+(zero?'#cbd5e1':'inherit')+'"></span></td>'; }).join('');
         var moqShort=(s.moq&&rt>0&&rt<s.moq);
         rows+='<tr data-sku="'+esc(s.sku)+'" data-cat="'+esc(cat)+'" data-moq="'+(s.moq||0)+'">'
-          +'<td style="'+tdB.replace('white-space:nowrap','')+';text-align:left;min-width:200px"><div style="display:flex;align-items:center;gap:6px"><button class="bpm-plan" data-sku="'+esc(s.sku)+'" style="font-size:8px;font-weight:700;padding:0 4px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer">PLAN</button><span>'+esc(s.sku)+'</span></div>'+(s.discontinue?'<div style="font-size:9px;color:#9ca3af;margin-top:1px">discontinue '+esc(fd(s.discontinue))+'</div>':'')+'<div class="bpm-moq" style="font-size:9.5px;color:#b45309;font-weight:700;margin-top:2px;display:'+(moqShort?'':'none')+'">'+(moqShort?('⚑ MOQ '+s.moq.toLocaleString()+' — production '+rt.toLocaleString()+', short '+(s.moq-rt).toLocaleString()):'')+'</div></td>'
+          +'<td style="'+tdB.replace('white-space:nowrap','')+';text-align:left;min-width:200px"><div style="display:flex;align-items:center;gap:6px"><button class="bpm-plan" data-sku="'+esc(s.sku)+'" style="font-size:8px;font-weight:700;padding:0 4px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer">PLAN</button><span>'+esc(s.sku)+'</span></div>'+(s.discontinue?'<div style="font-size:9px;color:#9ca3af;margin-top:1px">discontinue '+esc(fd(s.discontinue))+'</div>':'')+'</td>'
           +qtyCells
-          +'<td style="'+tdB+';text-align:center;font-weight:700;font-variant-numeric:tabular-nums"><span class="bpm-rowtot">'+(rt?rt.toLocaleString():'0')+'</span></td>'
+          +'<td class="bpm-totcell" style="'+tdB+';text-align:center;font-weight:700;font-variant-numeric:tabular-nums'+(moqShort?';background:#FA5053':'')+'"><span class="bpm-moqicon" title="'+(moqShort?('MOQ '+s.moq.toLocaleString()+' — production '+rt.toLocaleString()+', short '+(s.moq-rt).toLocaleString()):'')+'" style="cursor:help;margin-right:3px;color:'+(moqShort?'#fff':'#b91c1c')+';display:'+(moqShort?'':'none')+'">⚑</span><span class="bpm-rowtot" style="'+(moqShort?'color:#fff':'')+'">'+(rt?rt.toLocaleString():'0')+'</span></td>'
           +'<td style="'+tdB+';text-align:left;min-width:150px">'+supCell+'</td></tr>';
       });
       var thB='position:sticky;top:0;background:#f3f3f1;z-index:1;padding:5px 8px;border-bottom:1px solid #d5d5d5;font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#444;white-space:nowrap';
