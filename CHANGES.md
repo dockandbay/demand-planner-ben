@@ -1,3 +1,8 @@
+## v26.828.0 DEMAND currency pill now shows + converts the plan; redundant "Category totals" chip removed
+- **Currency pill:** the GBP/local pill (`refreshDispCcy`) was only refreshed on the Summary's market change, so on the **plan** it stayed as built for the initial market (UK = GBP-only = empty) and never appeared when you switched to US/EU/AU. Now refreshed on the plan's market change **and** on every plan render. (FX rates were already injected from `app_settings.fx_rates`.)
+- **Plan revenue now converts:** `fr()` (the plan's revenue formatter) was hard-coded to £. It's now display-currency aware (`dispCcy`/`dispRate`) — GBP default is unchanged (rate 1, £); toggling to local on US/EU/AU converts at the FY blended rate with the right symbol ($/€/A$). Summary already converted.
+- **Removed** the redundant external **"Category totals"** active-filter chip — the More-Filters Show toggle is the single control.
+
 ## v26.827.0 CONFIG loads fast — cache the config response + parallelise its queries
 - `/api/supply/config` (rate cards, freight, duty, branches, transfer/air leads) took ~3.3s on the sandbox (each query is a ~310ms round-trip to the remote pooler; ~6 of them, one sequential). It now (a) runs all 6 queries in one `Promise.all` (was 5 + 1 sequential) and (b) is added to the section response-cache, so repeat loads are **~3ms** (dropped on any supply edit; 10-min TTL). First cold load is still bounded by the sandbox pooler latency (much lower on live).
 

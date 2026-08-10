@@ -4123,7 +4123,7 @@ function dispCcy(){ return (SUMM_CCY==='LOCAL' && mktCcy(CUR) && fxRate(mktCcy(C
 function dispSym(){ return CCY_SYM[dispCcy()]||'£'; }
 function dispRate(fy){ return fxRate(dispCcy(),fy)||1; }
 function frFY(n,fy){ var rt=dispRate(fy), sym=dispSym(), v=Math.round((n||0)*rt); if(!v)return '--'; if(v>=1000000)return sym+(v/1000000).toFixed(1)+'m'; if(v>=1000)return sym+(v/1000).toFixed(0)+'k'; return sym+v; }
-function fr(n){if(!n)return'--';const v=Math.round(n);if(v>=1000000)return'\u00a3'+(v/1000000).toFixed(1)+'m';if(v>=1000)return'\u00a3'+(v/1000).toFixed(0)+'k';return'\u00a3'+v}
+function fr(n){if(!n)return'--';var sym=CCY_SYM[dispCcy()]||'\u00a3',v=Math.round(n*dispRate(0));if(v>=1000000)return sym+(v/1000000).toFixed(1)+'m';if(v>=1000)return sym+(v/1000).toFixed(0)+'k';return sym+v}   // display-currency aware: GBP default (rate 1, \u00a3) \u2192 unchanged; local (US/EU/AU) converts at the FY blended rate
 function fp(a,b){if(!b)return'';const p=Math.round((a-b)/b*100);return(p>0?'+':'')+p+'%'}
 function fpc(s){if(!s)return'fp';return s.startsWith('+')?'gp':s.startsWith('-')?'rp':'fp'}
 function dateShort(d){if(!d||typeof d!=='string')return'';var s=d.slice(0,10);var p=s.split('-');if(p.length<2)return s;var mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];var yr=p[0].length===4?p[0].slice(2):p[0];var mon=parseInt(p[1])-1;return(mo[mon]||p[1])+'-'+yr;}
@@ -7923,7 +7923,7 @@ function remapExpanded(dim,newVal){
 function renderMain(){
   try{ zalInit(); }catch(e){}   // wire the EU Zalando channel (av 'z' + synth DATA rows) — idempotent, runs once data is ready
   CALC_MEMO={};   // fresh per-render forecast memo — covers direct renderMain() calls (filters/toggles) too
-  _undoReady=true; try{ updateUndoBtn(); }catch(e){} try{ renderPlanChips(); }catch(e){}   // arm undo + refresh active-filter chips once the plan has rendered
+  _undoReady=true; try{ updateUndoBtn(); }catch(e){} try{ renderPlanChips(); }catch(e){} try{ refreshDispCcy(); }catch(e){}   // arm undo + refresh active-filter chips + the GBP/local currency pill once the plan has rendered
   if(_smoothStale===null){ try{ _smoothStale=computeSmoothStale(); }catch(e){ _smoothStale={count:0}; } }   // >48h discontinued-smoothing impact check — once per session
   try{ updateSmoothStaleBadge(); }catch(e){}
   // Notes (N) + record-of-change keys (R) load in the BACKGROUND — the plan paints immediately and the N/R rail
@@ -8042,7 +8042,7 @@ function renderPlanChips(){ var c=document.getElementById('plan-chips'); if(!c)r
   var tier=document.querySelector('#plan-tier-pills .ptier.active'); if(tier&&tier.dataset.tier!=='ALL')chips.push(chip('Tier '+tier.dataset.tier,'tier'));
   var rw=document.getElementById('plan-rw-sel'); if(rw&&rw.value&&rw.value!=='ALL')chips.push(chip('Release: '+rw.value,'rw'));
   var fr=document.getElementById('plan-fromrep-btn'); if(fr&&fr.classList.contains('active'))chips.push(chip('From replacement','fromrep'));
-  var ct=document.getElementById('cat-tot-toggle'); if(ct&&ct.classList.contains('active'))chips.push(chip('Category totals','cattot'));
+  // (no "Category totals" chip — the More-Filters Show toggle is the single control; the external chip was redundant per Ben)
   var ss=document.getElementById('plan-sort-sel'); if(ss&&ss.value&&ss.value!=='alpha')chips.push(chip('Sort: '+((ss.options[ss.selectedIndex]||{}).text||ss.value),'sort'));
   c.innerHTML=chips.join('');
   c.querySelectorAll('[data-clr]').forEach(function(x){ x.onclick=function(e){ e.stopPropagation(); _planClearFilter(x.getAttribute('data-clr')); }; });
@@ -11692,7 +11692,7 @@ var FLAGS={'UK':'🇬🇧','US':'🇺🇸','EU':'🇪🇺','AU':'🇦🇺','CA':
 CTRS.forEach(function(co){
   const b=document.createElement('button');b.className='pill'+(co===CUR?' active':'');b.dataset.co=co;
   b.innerHTML=(FLAGS[co]||'')+' '+co;
-  b.onclick=function(){remapExpanded('co',co);CUR=co;render();if(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES){fcChangeKeysLoad(CUR,CF,function(){try{refreshAllCellRails();}catch(e){}});}};
+  b.onclick=function(){remapExpanded('co',co);CUR=co;render();try{refreshDispCcy();}catch(e){}if(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES){fcChangeKeysLoad(CUR,CF,function(){try{refreshAllCellRails();}catch(e){}});}};
   document.getElementById('ctabs').appendChild(b);
 });
 
