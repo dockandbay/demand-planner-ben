@@ -11754,7 +11754,10 @@ function catGroups(){
   var seen=new Set(ORDER);
   var extras=Object.keys(byGroup).filter(function(g){return !seen.has(g);}).sort();
   var groups=ORDER.filter(function(g){return byGroup[g];}).concat(extras);
-  return groups.map(function(g){return [g,byGroup[g].slice().sort()];});
+  // within-group order follows the curated OTHER_ORDER (Towel - Beach first, then Hair Wrap, …); anything not listed
+  // falls to the end alphabetically. (Was a plain alphabetical sort, which pushed Towel - Beach below Hair Wrap.)
+  var _catOrd=function(c){ var i=OTHER_ORDER.indexOf(c); return i<0?1000:i; };
+  return groups.map(function(g){return [g,byGroup[g].slice().sort(function(a,b){ var d=_catOrd(a)-_catOrd(b); return d||String(a).localeCompare(String(b)); })];});
 }
 function setCat(cat){
   if(cat==='ALL'){SEL=new Set(['ALL']);SKU_VIEW=null;}

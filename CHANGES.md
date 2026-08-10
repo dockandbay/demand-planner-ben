@@ -1,3 +1,6 @@
+## v26.831.0 Demand plan category order — within-group order follows the curated list (Towel - Beach can lead Priority)
+- `catGroups()` sorted categories **alphabetically** within each group, so "Towel - Beach" fell below "Hair Wrap". It now orders within a group by the curated `OTHER_ORDER` (Towel - Beach first, then Hair Wrap, Picnic Blanket, Tea Towel…), unlisted categories alphabetical at the end. Combined with setting **Towel - Beach → grouping "Priority"** (in `planner.categories`, sandbox done; **live/Airtable still to set**), it now leads the Priority group above Hair Wraps.
+
 ## v26.830.0 Variant-image thumbnail — fix: add it to the PLAN's SKU rows (not just SKU view)
 - v26.829 put the thumbnail in `renderSkuView` (the standalone SKU view), but the demand **plan's expanded SKU rows** are built by `insertInlineSkuRows` — so nothing showed when toggling on the plan. Added the thumbnail to the plan's SKU label cell (ci=0) too, keeping the 160px sticky width so column offsets don't shift.
 
