@@ -1,3 +1,7 @@
+## v26.820.0 Trend Gaps SKU apply reflects live + BUY "Refresh cache" button
+- **Trend Gaps ▸ SKU view:** applying a change (override box or → suggested) now calls `refreshRow(subcat,co,ch)` after the write — clears the subcategory calc memo, repaints the plan cell, and flags the buy stale — so the new forecast number shows **without a page refresh** (previously the change logged to the "R" rail but the number only appeared after reload).
+- **BUY ▸ "↻ Refresh cache" button:** re-pulls only the buy-impacting tables (products/params, current stock, inbound, on-order, forecast outputs) from the database, rebuilds the demand/buy overlays and clears the buy cache, then re-renders — no full page reload. Guards against discarding unsaved forecast edits. For the case where buy data changed outside the open tab.
+
 ## v26.819.0 Quality Control table — fixed layout so the delete link is on-page
 - The QC results table still overflowed (long raw ISO date + non-wrapping cells) so the delete link sat off the right edge. Now `table-layout:fixed` at width:100% (can't overflow), the **Uploaded** date shows **dd-mmm-yy** (was full ISO), and long filenames/suppliers wrap — the **delete** link is always visible.
 

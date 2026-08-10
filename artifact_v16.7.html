@@ -3764,6 +3764,7 @@ var BUY_SCAFFOLD=`<div class="wrap">
     <button type="button" id="bp-fba-help-btn" onclick="document.getElementById('fba-help').style.display=(document.getElementById('fba-help').style.display==='none'?'block':'none')" title="How Transfer FBA is calculated" style="font-size:10px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer">&#9432; FBA Transfer Logic</button>
     <button type="button" id="bp-buy-help-btn" onclick="document.getElementById('buy-help').style.display=(document.getElementById('buy-help').style.display==='none'?'block':'none')" title="How the buy plan, targets and cell colours work" style="font-size:10px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer">&#9432; Buy Plan Logic</button>
     <button type="button" id="bp-trf-help-btn" onclick="document.getElementById('trf-help').style.display=(document.getElementById('trf-help').style.display==='none'?'block':'none')" title="How 3PL-to-3PL transfers are calculated" style="font-size:10px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer">&#9432; Transfer Logic</button>
+    <button type="button" id="bp-refresh-cache" onclick="if(window.refreshBuyCache)refreshBuyCache(this)" title="Re-pull the buy-impacting tables (forecasts, stock, inbound, on-order, product params) from the database and rebuild the buy plan — no full page reload" style="font-size:10px;padding:2px 10px;border:1px solid #2563eb;border-radius:3px;background:#fff;color:#2563eb;cursor:pointer;font-weight:600">&#8635; Refresh cache</button>
     <span id="bp-buy-actions" style="display:inline-flex;align-items:center;gap:6px;margin-left:6px;border-left:1px solid #e2e8f0;padding-left:8px">
       <button type="button" id="bp-make-po-3pl" onclick="(function(){var it=BP.buyplanItems('3pl');if(!it.length){alert('No Buy 3PL quantities in the current plan.');return;}if(window.openBuyplanModal){window.openBuyplanModal(BP.CUR,it,'3pl');}else{alert('Supply module not ready — open the SUPPLY tab once, then retry.');}})()" title="Create 3PL purchase orders from the Buy 3PL quantities, split into 20-pallet containers" style="font-size:10px;padding:2px 10px;border:1px solid #1d4ed8;border-radius:3px;background:#1d4ed8;color:#fff;cursor:pointer;font-weight:600;display:none">3PL - Create POs</button>
       <button type="button" id="bp-make-po-fba" onclick="(function(){if((BP.CUR||'').toUpperCase()==='EU'){alert('FBA-direct PO creation is not available for EU yet (no DE FBA branch).');return;}var it=BP.buyplanItems('fba');if(!it.length){alert('No Buy FBA quantities in the current plan.');return;}if(window.openBuyplanModal){window.openBuyplanModal(BP.CUR,it,'fba');}else{alert('Supply module not ready — open the SUPPLY tab once, then retry.');}})()" title="Create FBA-direct purchase orders from the Buy FBA quantities, split into 20-pallet containers" style="font-size:10px;padding:2px 10px;border:1px solid #16a34a;border-radius:3px;background:#16a34a;color:#fff;cursor:pointer;font-weight:600;display:none">FBA - Create POs</button>
@@ -10025,12 +10026,14 @@ function renderDemandActionsView(body,opts){
           var _old=fin?(Number(String(fin.textContent).replace(/[^0-9.\-]/g,''))||0):(Number(inp.placeholder||0)||0);   // fc before the edit → change-record "from"
           skuOvSet(inp.dataset.sku,inp.dataset.co,inp.dataset.ch,inp.dataset.m,(v===''?null:v)); inp.style.borderColor='#16a34a'; inp.style.background='#f0fdf4';
           var nv=(v===''?Number(inp.placeholder||0):Number(v.replace(/[^0-9.\-]/g,''))||0); if(fin)fin.textContent='fc '+Math.round(nv).toLocaleString();
-          try{ if(typeof logChange==='function'&&Math.round(_old)!==Math.round(nv))logChange('sku',inp.dataset.sku,inp.dataset.co,inp.dataset.ch,inp.dataset.m,'edited forecast (trend gaps)',Math.round(_old),Math.round(nv)); }catch(e){} }; });
+          try{ if(typeof logChange==='function'&&Math.round(_old)!==Math.round(nv))logChange('sku',inp.dataset.sku,inp.dataset.co,inp.dataset.ch,inp.dataset.m,'edited forecast (trend gaps)',Math.round(_old),Math.round(nv)); }catch(e){}
+          try{ var _sub=(typeof SKUM!=='undefined'&&SKUM[inp.dataset.sku]&&SKUM[inp.dataset.sku].s)||null; if(_sub&&typeof refreshRow==='function')refreshRow(_sub,inp.dataset.co,inp.dataset.ch); }catch(e){} }; });   // clear the subcat calc memo + repaint the plan cell + flag the buy stale, so the change shows without a page refresh
         body.querySelectorAll('.si-sugg').forEach(function(el){ el.onclick=function(){ var v=el.dataset.v, td=el.closest('td'), inp=td&&td.querySelector('.si-ov'), fin=td&&td.querySelector('.si-fin');
           var _old=fin?(Number(String(fin.textContent).replace(/[^0-9.\-]/g,''))||0):(inp?(Number(inp.placeholder||0)||0):0);   // fc before applying the suggestion
           if(inp){ inp.value=v; inp.style.borderColor='#16a34a'; inp.style.background='#f0fdf4'; }
           skuOvSet(el.dataset.sku,el.dataset.co,el.dataset.ch,el.dataset.m,v); var _new=Number(v)||0; if(fin)fin.textContent='fc '+_new.toLocaleString();
-          try{ if(typeof logChange==='function'&&Math.round(_old)!==Math.round(_new))logChange('sku',el.dataset.sku,el.dataset.co,el.dataset.ch,el.dataset.m,'applied suggested (trend gaps)',Math.round(_old),_new); }catch(e){} }; });
+          try{ if(typeof logChange==='function'&&Math.round(_old)!==Math.round(_new))logChange('sku',el.dataset.sku,el.dataset.co,el.dataset.ch,el.dataset.m,'applied suggested (trend gaps)',Math.round(_old),_new); }catch(e){}
+          try{ var _sub=(typeof SKUM!=='undefined'&&SKUM[el.dataset.sku]&&SKUM[el.dataset.sku].s)||null; if(_sub&&typeof refreshRow==='function')refreshRow(_sub,el.dataset.co,el.dataset.ch); }catch(e){} }; });   // clear the subcat calc memo + repaint the plan + flag the buy stale, so the change shows without a page refresh
         body.querySelectorAll('.si-act').forEach(function(b){ b.onclick=function(){ b.disabled=true; setState(b.dataset.k,b.dataset.s).then(function(j){ if(j&&j.error){alert(j.error);b.disabled=false;return;} load(); }); }; });
         return;
       }
@@ -11494,6 +11497,34 @@ async function refreshBuyData(){
   }catch(e){s('Refresh failed: '+(e&&e.message||e));console.error('refreshBuyData',e);}
   finally{var b2=document.getElementById('bp-refresh');if(b2)b2.disabled=false;}
 }
+
+// BUY ▸ "↻ Refresh cache" — re-pull ONLY the tables that drive the buy plan (products/params, current stock, inbound,
+// on-order, forecast outputs) from the database and rebuild the buy overlays. No full page reload. Use when the data
+// changed outside this open tab (import / n8n / another session) and the buy is showing a stale number.
+window.refreshBuyCache = async function(btn){
+  var st=document.getElementById('bpst'); function s(m){ if(st)st.textContent=m; }
+  try{
+    if(typeof FC_DIRTY!=='undefined' && FC_DIRTY && Object.keys(FC_DIRTY).length){
+      if(!confirm('You have unsaved forecast edits. Refreshing pulls the saved data from the database and will discard those unsaved changes. Continue?'))return;
+    }
+    if(btn)btn.disabled=true; s('Refreshing buy data from the database…');
+    try{ await fetch('/api/supply/cache/invalidate',{method:'POST'}); }catch(e){}   // reset the server read-cache so PO/on-order-derived numbers are fresh
+    var d=await (await fetch('/api/demand/sku-data')).json();
+    if(d){ var raw=d.sku_raw||{};
+      if(raw.p)Object.assign(SKUM,raw.p); if(raw.s)Object.assign(SKUS,raw.s);
+      if(raw.i||raw.inbound)Object.assign(SKUI,raw.i||raw.inbound||{}); if(raw.oi)Object.assign(SKUOI,raw.oi);
+      if(d.fc_outputs){ for(var k in FC_OUTPUTS)delete FC_OUTPUTS[k]; Object.assign(FC_OUTPUTS,d.fc_outputs); }   // replace wholesale so removed/zeroed forecasts drop out too
+    }
+    try{augmentSKUM();}catch(e){}
+    try{buildLiveBpOverlay();}catch(e){}
+    try{buildLiveDemand();}catch(e){}
+    try{ for(var c in BUY_CACHE)delete BUY_CACHE[c]; }catch(e){}
+    try{ BUY_FC_STALE=false; }catch(e){}
+    try{ if(typeof renderBuyView==='function')renderBuyView(); else if(typeof renderMain==='function')renderMain(); }catch(e){}
+    s('Buy data refreshed · '+new Date().toLocaleTimeString());
+  }catch(e){ s('Refresh failed: '+(e&&e.message||e)); if(window.console)console.error('refreshBuyCache',e); }
+  finally{ if(btn)btn.disabled=false; }
+};
 
 // ── Inbound detail popover (copyable, never clipped) ──────────────────────
 var _INB_POP=null;
