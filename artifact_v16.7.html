@@ -9626,10 +9626,12 @@ function buildTgApply(sub,co,ch){
     +'<div style="margin-top:6px;font-size:8px;color:#94a3b8;line-height:1.4">Writes a per-SKU <b>override</b> for each month (last-year × (1'+pctS(recMin)+'), split across the subcategory’s SKUs by last-year share). The base forecast is preserved — clear the override in the plan to revert. The plan cell + buy plan use the override.</div>';
   pop.querySelector('.tgapply-go').onclick=function(e){ e.stopPropagation();
     try{
-      var skus=filteredSkus(sub,co,ch)||[];
-      var shares=buildSkuShares(skus,co,ch,['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'])||{};
-      rows.forEach(function(r){ skus.forEach(function(sku){ var sh=shares[sku]||0; if(sh<=0)return; skuOvSet(sku,co,ch,r.m,String(Math.round(r.tgt*sh))); }); });
-      if(typeof markDirty==='function')markDirty(); pop.remove(); if(typeof render==='function')render();
+      // Write a SUBCATEGORY per-month OVERRIDE (absolute units) for the next 3 months — same store the plan's subcat
+      // row edits use (IV[sub|co|ch|month]), so it changes the visible subcat forecast + cascades to SKUs/buy, and is
+      // reversible (clear the cell → back to base). Uses the plan's absolute encoding (<4 → apostrophe sentinel).
+      var n=0; rows.forEach(function(r){ var u=Math.max(0,Math.round(r.tgt)); IV[sub+'|'+co+'|'+ch+'|'+r.m]=(u>=4?String(u):("'"+u)); n++; });
+      if(typeof markDirty==='function')markDirty(); pop.remove();
+      if(typeof render==='function')render();
     }catch(err){ alert('Apply failed: '+(err&&err.message||err)); }
   };
   return pop;

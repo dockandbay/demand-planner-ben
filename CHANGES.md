@@ -1,3 +1,6 @@
+## v26.807.0 Trend Gaps — fix "Apply override → next 3 months" (no change to forecast)
+- The category Apply button wrote **per-SKU** overrides (`FC_OUTPUTS` via `skuOvSet`), which change SKU cells but do **not** move the subcategory forecast (`calc(sub).fu` is driven by the subcategory-level input, not re-summed from SKU overrides) — so applying appeared to do nothing at the level Trend Gaps compares. It now writes a **subcategory per-month override** (`IV[sub|co|ch|month]`) for the next 3 months — the same store the plan's subcat-row edits use — so the visible subcat forecast changes, it cascades to SKUs/buy, and it's reversible (clear the cell → back to base). Uses the plan's absolute-units encoding.
+
 ## v26.806.0 Summary / Edit targets — pin the header, only table rows scroll
 - Everything above the table (pills, description, download/import/legend/filter toolbar) now stays put; only the table body scrolls. The table height is sized **dynamically** to fill from its top to the viewport bottom (replacing the fixed `100vh−250px` offset that broke when the edit toolbar was tall), and re-fits on window resize.
 
