@@ -1,3 +1,8 @@
+## v26.792.0 Deposits Drawdown — per-ref rebase-to-0 (settled/closed) · AU Sep-2024 reset removed · mobile scroll
+- **Removed** the AU Sep-2024 hard re-base.
+- **Settled deposit refs rebase to 0 outstanding**: any deposit ref that is CLOSED, or whose paid − drawn nets within 0.03, gets a synthetic "rebase to 0 (settled/closed)" line at its last-activity month so it stops carrying a balance (rounding tails + closed pools cleared). Shows as a transaction line in the popover/export.
+- **Mobile**: the matrix scrolls horizontally with touch momentum (Month column stays sticky); tighter cells under 700px.
+
 ## v26.791.0 Deposits Drawdown — 2dp · AU re-based at Sep-2024 · hide pre-Dec-2024 toggle
 - Matrix, totals and hover show **2 decimal places** in both currencies.
 - **AU column re-based to 0 at Sep-2024**: the AU running balance starts from zero at Sep-2024 and tracks the **net change since** (pre-Sep-2024 paid-in excluded from the AU total; all transactions retained, so pre-Sep months read relative to that baseline). Non-AU columns unchanged.

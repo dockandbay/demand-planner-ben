@@ -2542,7 +2542,7 @@ app.get('/api/supply/deposit-drawdown', async (_req, res) => {
   try {
     const deps = (await pool.query(`
       SELECT d.reference, coalesce(d.prod_no,'') prod_no, upper(coalesce(d.country,'')) country, round(coalesce(d.amount,0),2) amount,
-             upper(coalesce(s.default_currency,'USD')) ccy,
+             upper(coalesce(s.default_currency,'USD')) ccy, lower(coalesce(d.status,'')) status,
              to_char(d.date_paid,'YYYY-MM') paid_month, to_char(d.date_paid,'YYYY-MM-DD') paid_date
       FROM planner.deposits d LEFT JOIN planner.suppliers s ON s.id=d.supplier_id
       WHERE coalesce(d.is_deposit,false)=true
@@ -2560,29 +2560,36 @@ app.get('/api/supply/deposit-drawdown', async (_req, res) => {
     let fxLocal = {}; try { const fr = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='fx_rates'`)).rows[0]; const o = fr && fr.value ? JSON.parse(fr.value) : {}; const fys = Object.keys(o).sort(); fxLocal = o[fys[fys.length - 1]] || {}; } catch (e) { /* leave default */ }
     const gbpTo = (c) => c === 'GBP' ? 1 : c === 'USD' ? rUSD : (Number(fxLocal[c]) || rUSD);   // GBP→ccy (unknown → treat as USD)
     const toUsd = (amt, c) => c === 'USD' ? amt : amt * rUSD / gbpTo(c);
-    const AU_RESET = '2024-09';   // AU pool is "zeroed out" at Sep-2024 — its balance re-bases to 0 there and tracks the net change since
     // Group columns by PRODUCTION ref — all AU deposits collapse into a single "AU" column; every other
     // deposit is keyed by its production number (multiple deposits sharing a prod # merge into one column).
-    const cols = {}, refToCol = {}, refToCcy = {};
+    const cols = {}, refToCol = {}, refToCcy = {}, refInfo = {};
     const colKeyFor = (d) => d.country === 'AU' ? 'AU' : (d.prod_no || '—');
     deps.forEach(d => { const isAu = d.country === 'AU'; const key = colKeyFor(d); const ccy = d.ccy || 'USD'; refToCol[d.reference] = key; refToCcy[d.reference] = ccy;
       let c = cols[key];
       if (!c) c = cols[key] = { key, prod: key, isAu, prodNum: isAu ? -1 : (/^[0-9]+$/.test(String(d.prod_no||'').replace(/[^0-9]/g,'')) ? parseInt(String(d.prod_no).replace(/[^0-9]/g,''),10) : 999999), country: isAu ? 'AU' : (d.country || ''), paid: 0, nDeps: 0, mov: {} };
       c.nDeps++; const usd = toUsd(Number(d.amount || 0), ccy); const pm = d.paid_month || '';
-      if (!(isAu && pm && pm < AU_RESET)) c.paid += usd;              // AU pre-Sep-2024 paid-in excluded from the post-reset "paid" total
-      if (pm) c.mov[pm] = (c.mov[pm] || 0) + usd; });                 // keep ALL movements — the AU offset below uses the pre-reset sum
+      c.paid += usd;
+      if (pm) c.mov[pm] = (c.mov[pm] || 0) + usd;
+      const ri = refInfo[d.reference] || (refInfo[d.reference] = { ref: d.reference, col: key, ccy, closed: false, paidUsd: 0, drawnUsd: 0, lastMonth: '', lastDate: '' });
+      if (d.status === 'closed') ri.closed = true; ri.paidUsd += usd;
+      if (pm && pm > ri.lastMonth) ri.lastMonth = pm; if (d.paid_date && d.paid_date > ri.lastDate) ri.lastDate = d.paid_date; });
     const tx = [];
     deps.forEach(d => { if (Number(d.amount) > 0) { const ccy = d.ccy || 'USD'; const usd = toUsd(Number(d.amount), ccy); tx.push({ prod: refToCol[d.reference], ref: d.reference, ccy, amount: Math.round(Number(d.amount) * 100) / 100, usd: Math.round(usd * 100) / 100, date: d.paid_date || '', po: '', kind: 'deposit paid' }); } });
     draws.forEach(x => { const key = refToCol[x.ref]; if (!key) return; const ccy = refToCcy[x.ref] || 'USD'; const usd = toUsd(Number(x.amt || 0), ccy); const c = cols[key]; if (x.mth) c.mov[x.mth] = (c.mov[x.mth] || 0) - usd;
-      tx.push({ prod: key, ref: x.ref, ccy, amount: -(Math.round(Number(x.amt || 0) * 100) / 100), usd: -(Math.round(usd * 100) / 100), date: x.dt || '', po: x.po || '', kind: 'drawdown' }); });
+      tx.push({ prod: key, ref: x.ref, ccy, amount: -(Math.round(Number(x.amt || 0) * 100) / 100), usd: -(Math.round(usd * 100) / 100), date: x.dt || '', po: x.po || '', kind: 'drawdown' });
+      const ri = refInfo[x.ref]; if (ri) { ri.drawnUsd += usd; if (x.mth && x.mth > ri.lastMonth) ri.lastMonth = x.mth; if (x.dt && x.dt > ri.lastDate) ri.lastDate = x.dt; } });
+    // Rebase settled deposit refs to 0 outstanding: a ref that is CLOSED, or whose paid − drawn rounds within 0.03,
+    // gets a synthetic −residual "rebase to 0" movement at its last-activity month so it stops carrying a balance.
+    Object.values(refInfo).forEach(ri => { const outstanding = ri.paidUsd - ri.drawnUsd; const settled = ri.closed || Math.abs(outstanding) < 0.03;
+      if (settled && Math.abs(outstanding) >= 0.005) { const c = cols[ri.col], m = ri.lastMonth;
+        if (c && m) c.mov[m] = (c.mov[m] || 0) - outstanding;
+        tx.push({ prod: ri.col, ref: ri.ref, ccy: ri.ccy, amount: -(Math.round(outstanding * 100) / 100), usd: -(Math.round(outstanding * 100) / 100), date: ri.lastDate || '', po: '', kind: ri.closed ? 'rebase to 0 (closed)' : 'rebase to 0 (settled)' }); } });
     const mset = new Set(); Object.values(cols).forEach(c => Object.keys(c.mov).forEach(m => mset.add(m)));
     const months = [...mset].filter(Boolean).sort();
     const columns = Object.values(cols).sort((a, b) => (b.isAu - a.isAu) || (a.prodNum - b.prodNum) || (a.key < b.key ? -1 : 1));
     const balances = {};
-    columns.forEach(c => { let run = 0, offset = 0;
-      if (c.isAu) months.forEach(m => { if (m < AU_RESET) offset += (c.mov[m] || 0); });   // AU: re-base to 0 at Sep-2024
-      balances[c.key] = {}; months.forEach(m => { run += (c.mov[m] || 0); balances[c.key][m] = Math.round((run - offset) * 100) / 100; });
-      c.remaining = Math.round((run - offset) * 100) / 100; c.drawn = Math.round((c.paid - c.remaining) * 100) / 100; c.paid = Math.round(c.paid * 100) / 100; });
+    columns.forEach(c => { let run = 0; balances[c.key] = {}; months.forEach(m => { run += (c.mov[m] || 0); balances[c.key][m] = Math.round(run * 100) / 100; });
+      c.remaining = Math.round(run * 100) / 100; c.drawn = Math.round((c.paid - c.remaining) * 100) / 100; c.paid = Math.round(c.paid * 100) / 100; });
     tx.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.ref < b.ref ? -1 : 1)));
     res.json({ months, columns: columns.map(({ mov, prodNum, ...c }) => c), balances, transactions: tx, gbpRate: rUSD });
   } catch (e) { res.status(500).json({ error: e.message }); }
