@@ -4707,7 +4707,7 @@
   // ACTIONS tab badge = number of OPEN, HIGH-severity actions (the red items you should tackle first)
   function actionsNavBadge(n){ n=Number(n)||0; var btn=document.querySelector('#supply-subnav .stab[data-k="actions"]'); if(btn)btn.innerHTML='ACTIONS'+(n>0?' <span class="ex-badge" style="background:#dc2626;color:#fff" title="'+n+' high-priority action'+(n>1?'s':'')+'">'+n+'</span>':'');
     var opt=document.querySelector('#supply-nav-sel option[value="actions"]'); if(opt)opt.textContent='ACTIONS'+(n>0?' ('+n+')':''); }
-  function setActionsBadgeFrom(rows){ try{ actionsNavBadge((rows||[]).filter(function(r){return r.severity==='high' && (!r.status||r.status==='open');}).length); }catch(e){} }
+  function setActionsBadgeFrom(rows){ try{ actionsNavBadge((rows||[]).filter(function(r){return (r.severity==='high' || r.type==='Required field missing') && (!r.status||r.status==='open');}).length); }catch(e){} }   // master-data-missing (amber) also counts on the ACTIONS badge (Ben, item 13)
   function poSubNav(){ return '<div id="prod-subtabs">'+subListFor(poSub).map(function(t){ var bd=(_NAVLBL[t[0]]!==undefined)?navBadge(_navCounts[t[0]],_NAVNOUN[t[0]]):''; return '<span class="rtab'+(poSub===t[0]?' active':'')+'" data-posub="'+t[0]+'">'+t[1]+bd+'</span>'; }).join('')+'</div>'; }
   // count of OVERDUE payments — mirrors buildPaymentsDue's r.overdue (unpaid, has a due date, 2026-01-01 ≤ due < today).
   var PDUE_MIN_DUE='2026-01-01';   // Payments Due cutoff: hide payments whose due date is before this (old/legacy)

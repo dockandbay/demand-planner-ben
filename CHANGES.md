@@ -1,3 +1,6 @@
+## v26.822.0 Master-data-missing now counts on the ACTIONS badge
+- The server flags "Required field missing" (PO in production, blank Batch/Production/Supplier/Branch) as **amber**, but the top ACTIONS nav badge counted only **high** — so it was excluded. The badge now also counts open "Required field missing" actions (per item 13), so a PO like PO-1672805 (missing Production # + Batch) contributes to the count.
+
 ## v26.821.0 Master-data panel shows an "A" next to each missing required field
 - On the PO ▸ MASTER DATA panel, each required field still unassigned while the PO is in PRODUCTION (Branch / Supplier / Production / Batch ID) now shows the red **"A"** action marker next to it (same marker + tooltip/snooze as elsewhere). Previously the missing-field action only lit the sub-tab badge with no per-field indicator. (Detection unchanged — `poMissingReq`; e.g. PO-1672805 flags Production # + Batch.)
 
