@@ -1,3 +1,7 @@
+## v26.815.0 Payments final-invoice debounce + "Create Purchase Orders" button
+- **Final invoice amount** field: the live "no final-payment-due" red flag now waits ~1s after you stop typing instead of firing on every keystroke, so the field no longer flashes/reacts while you're still typing the amount. (The save/recompute already happens on blur.)
+- BUY buy-plan button renamed **"🏭 Build production" → "🏭 Create Purchase Orders"** and recoloured to dark blue (#1e3a8a).
+
 ## v26.814.0 Build-production modal — batch now mandatory + MOQ value shown in the flag column
 - **Batch is now required** in "Create production POs — all countries": the Batch dropdown reads "— choose batch (required) —" and Create is blocked (with a prompt) until a batch is chosen.
 - The MOQ **value** now shows in the Total (flag) column: a small "MOQ 500" line under each SKU's total, so the minimum is visible at a glance (turns white on the red shortfall background), in addition to the ⚑ hover explanation.

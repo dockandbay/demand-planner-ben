@@ -3815,7 +3815,9 @@
       var due=scope.querySelector('[data-field="balance_due_date_overide"]');
       var warn=scope.querySelector('.fpd-warn');
       function sync(){ if(!amt||!due)return; var bad=String(amt.value||'').trim()!=='' && String(due.value||'').trim()===''; due.classList.toggle('err',bad); if(warn)warn.style.display=bad?'':'none'; }
-      if(amt)amt.addEventListener('input',sync); if(due)due.addEventListener('input',sync); sync(); })();
+      // Debounce the live check ~1s so it doesn't flash the red flag on every keystroke while the amount is still being typed (Ben).
+      var syncD=(typeof debounce==='function')?debounce(sync,1000):sync;
+      if(amt)amt.addEventListener('input',syncD); if(due)due.addEventListener('input',syncD); sync(); })();
     // Direct-to-Client tags (Key account / Custom checkboxes)
     document.querySelectorAll('#podet-'+i+' .dtc-tag').forEach(function(cb){ cb.onchange=function(){ var b={}; b[cb.dataset.field]=cb.checked;
       if(cb.dataset.field==='dtc_custom'){ var _cr=document.querySelector('#podet-'+i+' .cdev-row'); if(_cr)_cr.style.display=cb.checked?'':'none'; }   // show the Custom-order product picker only when Custom is ticked
