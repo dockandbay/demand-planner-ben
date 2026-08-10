@@ -1,3 +1,6 @@
+## v26.825.0 Trend Gaps SKU apply — persist the override immediately (survives refresh)
+- The SKU-view apply wrote the override to the runtime + dirty buffer and waited on the **60s autosave**, but the change **record** ("R") posts immediately — so a quick refresh lost the forecast (showed the base, e.g. 2) while the note still said "changed 2 → 19". The apply now calls `saveForecasts()` immediately (same as the smooth-apply), so the override persists to the server and survives a refresh, matching the record.
+
 ## v26.824.0 PRODUCT Type — Custom Order hides Season + "CUST-" reference prefix
 - **Custom Order** products have **no season**: the Season field is hidden in both the new-product form and the master-data panel (toggles live when you switch Type), and season isn't required.
 - A Custom Order's auto-generated reference uses the **`CUST-`** prefix instead of a season code (e.g. `CUST-TOWEL-01`); Product Development is unchanged (e.g. `SS27-TOWLB-01`).
