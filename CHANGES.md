@@ -1,3 +1,6 @@
+## v26.832.0 Record-of-change — a just-made edit now shows its R before the autosave flush
+- Plan cell edits are **buffered** and only POST to `forecast_changes` on the 60s autosave. Ticking "show record of change" called `fcChangeKeysLoad`, which **replaced** the client key-set with the server's — so a just-made (still-buffered) edit lost its R until the flush + a re-tick/reload. Now the load **merges** the current-market unsaved buffer keys into the display set, so recent edits show their R immediately. (Recording itself was always happening — this was a display-timing gap on unflushed edits.)
+
 ## v26.831.0 Demand plan category order — within-group order follows the curated list (Towel - Beach can lead Priority)
 - `catGroups()` sorted categories **alphabetically** within each group, so "Towel - Beach" fell below "Hair Wrap". It now orders within a group by the curated `OTHER_ORDER` (Towel - Beach first, then Hair Wrap, Picnic Blanket, Tea Towel…), unlisted categories alphabetical at the end. Combined with setting **Towel - Beach → grouping "Priority"** (in `planner.categories`, sandbox done; **live/Airtable still to set**), it now leads the Priority group above Hair Wraps.
 

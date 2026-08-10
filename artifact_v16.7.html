@@ -5221,7 +5221,11 @@ function setHidePastChanges(on){ HIDE_PAST_CHANGES=!!on; try{localStorage.setIte
 function _meEmail(){ return (typeof ME!=='undefined'&&ME&&ME.email)||null; }
 function fcChangeKeysLoad(co,ch,cb){ if(!SHOW_CHANGES){ FC_CHANGE_KEYS=new Set(); if(cb)cb(); return; }
   fetch('/api/forecast/changes/keys?country='+encodeURIComponent(co)+'&channel='+encodeURIComponent(ch))
-    .then(function(r){return r.json();}).then(function(d){ FC_CHANGE_KEYS=new Set((d&&d.keys)||[]); if(cb)cb(); })
+    .then(function(r){return r.json();}).then(function(d){ var s=new Set((d&&d.keys)||[]);
+      // merge in edits still sitting in the unsaved buffer (posted only on the 60s autosave) so a JUST-made change
+      // still shows its R when you tick "show record of change" — was wiped by replacing the set with the server's.
+      try{ _CHG_BUFFER.forEach(function(r){ if(r.country===co&&r.channel===ch)s.add((r.level||'sku')+'|'+r.item+'|'+r.country+'|'+r.channel+'|'+r.month); }); }catch(e){}
+      FC_CHANGE_KEYS=s; if(cb)cb(); })
     .catch(function(){ if(cb)cb(); }); }
 function logChange(level,item,co,ch,m,action,fromV,toV){ if(!item||!m)return;
   var nk=level+'|'+item+'|'+co+'|'+ch+'|'+m; FC_CHANGE_KEYS.add(nk);
