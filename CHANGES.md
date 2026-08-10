@@ -1,3 +1,6 @@
+## v26.830.0 Variant-image thumbnail — fix: add it to the PLAN's SKU rows (not just SKU view)
+- v26.829 put the thumbnail in `renderSkuView` (the standalone SKU view), but the demand **plan's expanded SKU rows** are built by `insertInlineSkuRows` — so nothing showed when toggling on the plan. Added the thumbnail to the plan's SKU label cell (ci=0) too, keeping the 160px sticky width so column offsets don't shift.
+
 ## v26.829.0 DEMAND plan — optional variant-image thumbnail in the SKU label
 - New **"Show variant image"** toggle in **More Filters** (renamed **"More Filters & Settings"**), **default off**. When on, each SKU row shows a 40px variant-image thumbnail (from `products.variant_image_url_final`) to the left of the SKU code; **hover → 400×400 popup**. Images only load when the toggle is on. Server adds `img` to the SKU data (557/723 SKUs have one). Chose the in-label thumbnail over a true inserted column (Ben's call) to avoid colspan/sticky-offset surgery on the grid.
 
