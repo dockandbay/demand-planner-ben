@@ -1,3 +1,28 @@
+## v26.785.0 Deposits Drawdown — AU show/hide pill + per-cell transactions popover
+- **Hide / Show AU** pill toggles the pooled AU column in/out (client-side, no refetch).
+- **Per-cell transactions popover:** hovering a matrix cell for **300ms** shows the paid-in + drawdown transactions that moved that production/AU column **in that month** — each on its own line (amount · PO · ref · date). The popover **persists** (doesn't vanish on mouse-out) and its text is **selectable/copyable**; click outside to dismiss. Cells highlight on hover.
+
+## v26.784.0 Deposits Drawdown — group columns by production ref + horizontal scroll
+- **Columns now group by production ref** (was one column per deposit ref): deposits sharing a production number merge into one column, and **all AU deposits collapse into a single "AU" column**. Header shows the production ref (or "AU") + a "(N deposits)" sub-label; hover = deposits count · paid / drawn / remaining. Server aggregates paid-in + drawdowns per production group (AU pooled).
+- **Matrix scrolls horizontally** with only the **Month column sticky** (left); every data column has a min-width so they're no longer squashed. Header row stays sticky on vertical scroll.
+- Server `/api/supply/deposit-drawdown` reworked to key by production group (`refToCol` maps each deposit reference → prod/AU); balances + transactions keyed accordingly. Transactions export unchanged (still per-deposit: prod · ref · amount · date · PO). No migration.
+
+## v26.783.0 Key Accounts polish + Trend Gaps labels + R record-of-change channel fix
+- **DEMAND ▸ Inputs** tab renamed **"Key Accts" → "Key Accounts Forecast"**.
+- **Key Accounts grid:** the SKU (Client/SKU column) is now **left-aligned** (a global `td{text-align:right}` was overriding it — added `text-align:left` to `#kafc td.lbl`); the **⬆ Import / paste** button moved to its own **left-aligned line directly above** the "Forecast qty per month…" note (was top-right).
+- **Trend Gaps:** the tier figure now reads **"avg volume N/mo"** (was "N/mo") — clarifies it's an average over the window, not a flat per-month forecast. The Category **Apply ▾** per-month column relabelled **"Will apply →"** (each month = last-year × recommended growth, so months differ — e.g. Oct/Nov/Dec each distinct).
+- **R record-of-change fix:** the R rail kept **stale change-keys when switching country/channel**, so it could show on a cell whose only change was on another channel (e.g. showed on UK **DTC** when the change was UK **B2B**) → clicking gave "No records". Now the change-keys **reload on every country/channel switch** (via `fcChangeKeysLoad`+`refreshAllCellRails`), and clicking an R with no history **clears the stale indicator** (unless an edit is still buffered for that cell). No server/migration change.
+
+## v26.782.0 DEMAND ▸ Inputs ▸ Key Accounts — Import/paste templates
+- Two new download buttons in the ⬆ Import / paste panel: **⬇ Blank template** (all SKUs, empty Qty) and **⬇ With current data** (all SKUs with a saved qty for the client + month selected in the panel, pre-filled). Both are `SKU,Qty` CSVs that drop straight back into the same importer.
+- Importer now **skips a `SKU` header row** so a downloaded template re-imports cleanly (was flagging the header as an unresolved SKU).
+- No server/migration change.
+
+## v26.781.0 DEMAND ▸ Inputs ▸ Key Accounts — grid tidy-up
+- **Client / SKU header left-aligned** (was centred over left-aligned data).
+- **Product name hidden** in the grid rows — just the SKU code shows now; the sticky Client/SKU column tightened (min-width 210→150px). SKU name is still searchable via the filter and still shown in the add-SKU dropdown.
+- No behaviour/data change; no migration. (The top-of-grid "filter SKU or client…" box already covers client+SKU search; the ⬆ Import / paste panel is the KA-forecast bulk loader — unchanged.)
+
 ## v26.779.0 SUPPLY ▸ Payments ▸ Deposits Drawdown report (new)
 - New sub-tab under **SUPPLY ▸ Payments ▸ Deposits Drawdown**. Per-deposit **burn-down**: a deposit is **paid in** (＋) then each PO's **starting deposit draws it down** (－); each cell = the running balance that month. **Months = rows, deposits = columns** labelled by **production number** ('AU' for AU deposits); deposits from **production #48 onward**, with **AU deposits grouped first** (thick separator). Red cells = negative balance (drawdowns exceed the recorded paid-in). Column hover shows paid / drawn / remaining; a "Remaining" footer row.
 - **Exports** (copy + CSV each): **Summary** (the burn-down matrix) and **All transactions** (`Deposit Prod · Deposit Ref · Amount [− for drawdown] · Date · PO [drawdowns only]`).

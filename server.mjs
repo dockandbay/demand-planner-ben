@@ -2553,18 +2553,24 @@ app.get('/api/supply/deposit-drawdown', async (_req, res) => {
              to_char(pay_start_deposit_date,'YYYY-MM') mth, to_char(pay_start_deposit_date,'YYYY-MM-DD') dt
       FROM planner.purchase_orders
       WHERE coalesce(deposit_ref,'')<>'' AND pay_start_deposit_assigned IS NOT NULL AND pay_start_deposit_assigned<>0`)).rows;
-    const byRef = {};
-    deps.forEach(d => { const isAu = d.country === 'AU'; byRef[d.reference] = { ref: d.reference, prod: isAu ? 'AU' : (d.prod_no || '—'), prodNum: /^[0-9]+$/.test(String(d.prod_no||'').replace(/[^0-9]/g,'')) ? parseInt(String(d.prod_no).replace(/[^0-9]/g,''),10) : 999999, country: d.country, isAu, paid: Number(d.amount||0), paid_month: d.paid_month || null, paid_date: d.paid_date || null, mov: {} }; });
+    // Group columns by PRODUCTION ref — all AU deposits collapse into a single "AU" column; every other
+    // deposit is keyed by its production number (multiple deposits sharing a prod # merge into one column).
+    const cols = {}, refToCol = {};
+    const colKeyFor = (d) => d.country === 'AU' ? 'AU' : (d.prod_no || '—');
+    deps.forEach(d => { const isAu = d.country === 'AU'; const key = colKeyFor(d); refToCol[d.reference] = key;
+      let c = cols[key];
+      if (!c) c = cols[key] = { key, prod: key, isAu, prodNum: isAu ? -1 : (/^[0-9]+$/.test(String(d.prod_no||'').replace(/[^0-9]/g,'')) ? parseInt(String(d.prod_no).replace(/[^0-9]/g,''),10) : 999999), country: isAu ? 'AU' : (d.country || ''), paid: 0, nDeps: 0, mov: {} };
+      c.nDeps++; c.paid += Number(d.amount || 0);
+      if (d.paid_month) c.mov[d.paid_month] = (c.mov[d.paid_month] || 0) + Number(d.amount || 0); });
     const tx = [];
-    deps.forEach(d => { const r = byRef[d.reference]; if (r.paid_month) r.mov[r.paid_month] = (r.mov[r.paid_month] || 0) + r.paid;
-      if (Number(d.amount) > 0) tx.push({ prod: r.prod, ref: d.reference, amount: r.paid, date: d.paid_date || '', po: '', kind: 'deposit paid' }); });
-    draws.forEach(x => { const r = byRef[x.ref]; if (!r) return; if (x.mth) r.mov[x.mth] = (r.mov[x.mth] || 0) - Number(x.amt || 0);
-      tx.push({ prod: r.prod, ref: x.ref, amount: -Number(x.amt || 0), date: x.dt || '', po: x.po || '', kind: 'drawdown' }); });
-    const mset = new Set(); Object.values(byRef).forEach(r => Object.keys(r.mov).forEach(m => mset.add(m)));
+    deps.forEach(d => { if (Number(d.amount) > 0) tx.push({ prod: refToCol[d.reference], ref: d.reference, amount: Number(d.amount), date: d.paid_date || '', po: '', kind: 'deposit paid' }); });
+    draws.forEach(x => { const key = refToCol[x.ref]; if (!key) return; const c = cols[key]; if (x.mth) c.mov[x.mth] = (c.mov[x.mth] || 0) - Number(x.amt || 0);
+      tx.push({ prod: key, ref: x.ref, amount: -Number(x.amt || 0), date: x.dt || '', po: x.po || '', kind: 'drawdown' }); });
+    const mset = new Set(); Object.values(cols).forEach(c => Object.keys(c.mov).forEach(m => mset.add(m)));
     const months = [...mset].filter(Boolean).sort();
-    const columns = Object.values(byRef).sort((a, b) => (b.isAu - a.isAu) || (a.prodNum - b.prodNum) || (a.ref < b.ref ? -1 : 1));
+    const columns = Object.values(cols).sort((a, b) => (b.isAu - a.isAu) || (a.prodNum - b.prodNum) || (a.key < b.key ? -1 : 1));
     const balances = {};
-    columns.forEach(r => { let run = 0; balances[r.ref] = {}; months.forEach(m => { run += (r.mov[m] || 0); balances[r.ref][m] = Math.round(run * 100) / 100; }); r.remaining = Math.round(run * 100) / 100; r.drawn = Math.round((r.paid - run) * 100) / 100; });
+    columns.forEach(c => { let run = 0; balances[c.key] = {}; months.forEach(m => { run += (c.mov[m] || 0); balances[c.key][m] = Math.round(run * 100) / 100; }); c.remaining = Math.round(run * 100) / 100; c.drawn = Math.round((c.paid - run) * 100) / 100; c.paid = Math.round(c.paid * 100) / 100; });
     tx.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.ref < b.ref ? -1 : 1)));
     res.json({ months, columns: columns.map(({ mov, prodNum, ...c }) => c), balances, transactions: tx });
   } catch (e) { res.status(500).json({ error: e.message }); }

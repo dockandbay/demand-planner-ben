@@ -5281,8 +5281,11 @@ function openChangeRecord(el){ var nk=el.dataset.nk; if(!nk)return; var p=nk.spl
   setTimeout(function(){ document.addEventListener('mousedown',_chgOut,true); },0);
   fetch('/api/forecast/changes?country='+encodeURIComponent(co)+'&channel='+encodeURIComponent(ch)+'&level='+encodeURIComponent(level)+'&item='+encodeURIComponent(item)+'&month='+encodeURIComponent(m))
    .then(function(x){return x.json();}).then(function(d){ var rows=(d&&d.rows)||[];
+     if(!rows.length){   // stale R (e.g. a key left over from another channel) — clear it, unless an edit is still buffered for this cell
+       var _pend=(typeof _CHG_BUFFER!=='undefined')&&_CHG_BUFFER.some(function(r){return (r.level+'|'+r.item+'|'+r.country+'|'+r.channel+'|'+r.month)===nk;});
+       if(!_pend){ try{ if(typeof FC_CHANGE_KEYS!=='undefined')FC_CHANGE_KEYS.delete(nk); refreshCellRail(nk); }catch(_){} } }
      pop.innerHTML=_chgTitle
-       +(rows.length?rows.map(function(row){return '<div style="padding:2px 0;border-top:1px solid #1f2937">'+esc(_chgLine(row))+'</div>';}).join(''):'<div style="color:#94a3b8">No records.</div>');
+       +(rows.length?rows.map(function(row){return '<div style="padding:2px 0;border-top:1px solid #1f2937">'+esc(_chgLine(row))+'</div>';}).join(''):'<div style="color:#94a3b8">No change history for this cell.</div>');
      var rr=el.getBoundingClientRect(),t2=rr.bottom+6; if(t2+pop.offsetHeight>window.innerHeight-8)t2=Math.max(6,rr.top-pop.offsetHeight-6); pop.style.top=t2+'px';
    }).catch(function(){ pop.innerHTML='<div style="color:#fca5a5">Could not load.</div>'; }); }
 function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
@@ -8465,12 +8468,14 @@ function renderKeyAccountsView(body){
   function skuName(s){ return (s&&SKUM[s])?(SKUM[s].n||''):''; }
   function resolveSku(raw){ var s=String(raw||'').trim(); if(!s)return null; if(SKUM[s])return s;
     var up=s.toUpperCase(); if(SKUM[up])return up; var hit=SKUS.filter(function(x){return x.toUpperCase()===up;})[0]; return hit||null; }
+  function dlCsv(name,rows){ var c=rows.map(function(r){return r.map(function(x){x=(x==null?'':String(x)); return /[",\n]/.test(x)?'"'+x.replace(/"/g,'""')+'"':x;}).join(',');}).join('\n')+'\n';
+    var bl=new Blob([c],{type:'text/csv'}),u=URL.createObjectURL(bl),a=document.createElement('a');a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u);},1000); }
   body.innerHTML='<div style="padding:6px 2px 12px">'
     +'<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:8px"><div style="font-weight:700;font-size:15px">Key Accounts Forecast</div>'
     +'<span id="kaf-pills" style="display:flex;gap:4px">'+CTRY.map(function(c){return '<button class="kaf-pill'+(c[0]===KAF_CTRY?' on':'')+'" data-w="'+c[0]+'">'+c[1]+'</button>';}).join('')+'</span>'
     +'<input id="kaf-q" placeholder="filter SKU or client…" value="'+e(KAF_Q)+'" style="padding:5px 9px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px;width:210px">'
-    +'<label style="font-size:12px;color:#475569;cursor:pointer;display:flex;align-items:center;gap:4px"><input type="checkbox" id="kaf-past"'+(KAF_PAST?' checked':'')+'> show 12 months back</label>'
-    +'<button id="kaf-import" style="margin-left:auto;border:1px solid #93c5fd;background:#eff6ff;color:#1e40af;padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600">⬆ Import / paste</button></div>'
+    +'<label style="font-size:12px;color:#475569;cursor:pointer;display:flex;align-items:center;gap:4px"><input type="checkbox" id="kaf-past"'+(KAF_PAST?' checked':'')+'> show 12 months back</label></div>'
+    +'<div style="margin:0 0 6px"><button id="kaf-import" style="border:1px solid #93c5fd;background:#eff6ff;color:#1e40af;padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600">⬆ Import / paste</button></div>'
     +'<div style="font-size:12px;color:#666;margin:0 0 10px">Forecast qty per month — edit inline (saves straight to the database). Current month → 18 months forward; past hidden by default.</div>'
     +'<div id="kaf-imp"></div>'
     +'<div id="kafc" style="overflow-x:auto"><div style="color:#888;font-size:12px">Loading…</div></div></div>';
@@ -8495,8 +8500,8 @@ function renderKeyAccountsView(body){
   function draw(){ var m=monthList(), d=build(), q=KAF_Q.trim().toLowerCase();
     var STY='<style>#kafc table{border-collapse:separate;border-spacing:0;font-size:12px}'
       +'#kafc th{padding:5px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#666;border-bottom:1px solid #ddd;white-space:nowrap;background:#f8fafc;position:sticky;top:0;z-index:2}'
-      +'#kafc th.mcur{color:#1e40af}#kafc th.mpast{color:#b45309;background:#fff7ed}'
-      +'#kafc td{padding:2px 5px;border-bottom:1px solid #f1f1f1;white-space:nowrap}#kafc td.lbl{position:sticky;left:0;background:#fff;z-index:1;min-width:210px;box-shadow:2px 0 3px -2px rgba(15,23,42,.15)}'
+      +'#kafc th.lbl{text-align:left}#kafc th.mcur{color:#1e40af}#kafc th.mpast{color:#b45309;background:#fff7ed}'
+      +'#kafc td{padding:2px 5px;border-bottom:1px solid #f1f1f1;white-space:nowrap}#kafc td.lbl{position:sticky;left:0;background:#fff;z-index:1;min-width:150px;text-align:left;box-shadow:2px 0 3px -2px rgba(15,23,42,.15)}'
       +'#kafc tr.clihdr td{background:#eef2f7;font-weight:700;color:#334155;border-top:1px solid #cbd5e1}#kafc tr.clihdr td.lbl{background:#eef2f7}'
       +'#kafc .kaf-cell{width:58px;text-align:right;padding:3px 5px;border:1px solid transparent;border-radius:4px;font-size:12px;font-family:inherit;background:transparent}#kafc .kaf-cell:focus{border-color:#93c5fd;background:#fff;outline:none}#kafc td.past .kaf-cell{color:#b45309}'
       +'#kafc .kaf-skunm{font-size:10px;color:#999;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#kafc .kaf-del{border:none;background:transparent;color:#b91c1c;cursor:pointer;font-size:12px}'
@@ -8511,7 +8516,7 @@ function renderKeyAccountsView(body){
       if(q && !cliMatch && !sks.length) return;   // filtering + nothing in this client matches → skip the group
       bodyH+='<tr class="clihdr"><td class="lbl">'+e(cl)+'</td><td colspan="'+(m.length+1)+'"></td></tr>';
       sks.forEach(function(sk){
-        bodyH+='<tr data-cl="'+e(cl)+'" data-sku="'+e(sk)+'"><td class="lbl"><div style="font-family:ui-monospace,Menlo,monospace;font-weight:600">'+e(sk)+'</div><div class="kaf-skunm">'+e(skuName(sk))+'</div></td>'
+        bodyH+='<tr data-cl="'+e(cl)+'" data-sku="'+e(sk)+'"><td class="lbl"><div style="font-family:ui-monospace,Menlo,monospace;font-weight:600">'+e(sk)+'</div></td>'
           +m.map(function(x){ var v=(d.C[cl]&&d.C[cl][sk]&&d.C[cl][sk][x.key]!=null)?d.C[cl][sk][x.key]:''; return '<td class="'+(x.past?'past':'')+'"><input class="kaf-cell" data-cl="'+e(cl)+'" data-sku="'+e(sk)+'" data-m="'+x.key+'" inputmode="numeric" value="'+e(v)+'"></td>'; }).join('')
           +'<td><button class="kaf-del" data-cl="'+e(cl)+'" data-sku="'+e(sk)+'" title="clear this SKU across all shown months">✕</button></td></tr>';
       });
@@ -8544,6 +8549,10 @@ function renderKeyAccountsView(body){
       +'<label style="font-size:12px">Client<br><input id="kaf-icli" placeholder="client / account" style="padding:5px 8px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px;width:200px"></label>'
       +'<label style="font-size:12px">Month<br><select id="kaf-imo" style="padding:5px 8px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px">'+moOpts+'</select></label>'
       +'<label style="font-size:12px">CSV file<br><input type="file" id="kaf-ifile" accept=".csv,text/csv,text/plain" style="font-size:11px"></label></div>'
+      +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><span style="font-size:12px;color:#475569">Template:</span>'
+      +'<button id="kaf-tblank" style="border:1px solid #cbd5e1;background:#fff;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer">&#8595; Blank template</button>'
+      +'<button id="kaf-tcur" style="border:1px solid #cbd5e1;background:#fff;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer">&#8595; With current data</button>'
+      +'<span style="font-size:11px;color:#94a3b8">SKU,Qty — fill in &amp; re-import. &ldquo;With current data&rdquo; uses the client + month above.</span></div>'
       +'<div style="font-size:12px;margin-bottom:3px">Paste from Excel / Google Sheets — <b>SKU</b> and <b>qty</b> per line (tab or comma separated):</div>'
       +'<textarea id="kaf-ipaste" rows="6" placeholder="ACTIVE-XLG-GREY\t500&#10;TOWEL-BL-02, 250" style="width:100%;box-sizing:border-box;font-family:ui-monospace,Menlo,monospace;font-size:12px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px"></textarea>'
       +'<div style="margin-top:8px"><button id="kaf-ido" style="border:1px solid #15803d;background:#16a34a;color:#fff;padding:6px 14px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600">Import</button> <button id="kaf-icancel" style="border:1px solid #cbd5e1;background:#fff;padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer">Cancel</button> <span id="kaf-ires" style="font-size:12px;margin-left:6px"></span></div>'
@@ -8551,12 +8560,16 @@ function renderKeyAccountsView(body){
     box.querySelector('#kaf-icancel').onclick=function(){ box.innerHTML=''; };
     box.querySelector('#kaf-ifile').onchange=function(){ var f=this.files&&this.files[0]; if(!f)return; var rd=new FileReader(); rd.onload=function(){ box.querySelector('#kaf-ipaste').value=String(rd.result); }; rd.readAsText(f); };
     box.querySelector('#kaf-ido').onclick=function(){ doImport(box); };
+    box.querySelector('#kaf-tblank').onclick=function(){ dlCsv('ka_template_blank.csv',[['SKU','Qty']].concat(SKUS.map(function(s){return [s,''];}))); };
+    box.querySelector('#kaf-tcur').onclick=function(){ var cl=(box.querySelector('#kaf-icli').value||'').trim(); var month=box.querySelector('#kaf-imo').value; var d=build(); var cm=d.C[cl||'(no client)']||{};
+      var out=[['SKU','Qty']]; Object.keys(cm).sort().forEach(function(sk){ var q=cm[sk]&&cm[sk][month]; if(q!=null&&q!=='') out.push([sk,q]); });
+      var mk=({uk_3pl:'UK',us_3pl:'US',eu_3pl:'EU'})[KAF_CTRY]; dlCsv('ka_current_'+mk+'_'+((cl||'all').replace(/[^a-z0-9]+/gi,'_'))+'_'+month+'.csv',out); };
   }
   function doImport(box){ var client=(box.querySelector('#kaf-icli').value||'').trim(), month=box.querySelector('#kaf-imo').value, txt=box.querySelector('#kaf-ipaste').value||'';
     var lines=txt.split(/\r?\n/).map(function(l){return l.trim();}).filter(Boolean);
     var agg={}, unresolved=[];
     lines.forEach(function(l){ var parts=l.split(/[\t,;]+/).map(function(p){return p.trim();}).filter(function(p){return p!=='';});
-      if(!parts.length)return; var rawSku=parts[0]; var qty=null;
+      if(!parts.length)return; var rawSku=parts[0]; if(rawSku.toLowerCase()==='sku')return; var qty=null;
       for(var i=parts.length-1;i>=1;i--){ var n=parseInt(parts[i].replace(/[^0-9-]/g,''),10); if(!isNaN(n)){ qty=n; break; } }
       var sku=resolveSku(rawSku); if(!sku){ unresolved.push(rawSku); return; } if(qty==null)return; agg[sku]=(agg[sku]||0)+qty; });
     var skus=Object.keys(agg); var res=box.querySelector('#kaf-ires'), warn=box.querySelector('#kaf-iwarn');
@@ -8706,7 +8719,7 @@ function renderAccuracyView(kb,body){
   }).catch(function(){ kb.innerHTML='<div style="color:#dc2626;font-size:12px">Failed to load.</div>'; });
 }
 // ─── DEMAND sub-tabs (PLAN / KPIs / TARGETS / ACTIONS / CALENDAR) ───────────────────────────
-var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accts'],['kpis','KPIs'],['targets','Sell-through targets'],['pricechanges','Price changes'],['actions','Actions'],['calendar','Calendar']];
+var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['targets','Sell-through targets'],['pricechanges','Price changes'],['actions','Actions'],['calendar','Calendar']];
 function renderDemandTabs(){
   var bar=document.getElementById('demand-tabs');
   var _sb=document.getElementById('statusbar');
@@ -9560,7 +9573,7 @@ function buildTgApply(sub,co,ch){
     return {m:m,ly:ly,base:base,tgt:tgt};});
   pop.innerHTML='<div style="font-size:10px;color:#666;margin-bottom:4px;font-weight:600">'+tHesc(sub)+' · '+co+' '+ch+'</div>'
     +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;background:'+gl.bg+';color:'+gl.c+'">'+gl.t+'</span><span style="font-size:10px;color:#64748b">recommend ≥'+pctS(recMin)+' vs last year</span></div>'
-    +'<table style="border-collapse:collapse;font-size:11px;width:100%;margin-bottom:8px"><thead><tr style="color:#64748b;font-size:10px"><th style="text-align:left;padding:2px 4px">Month</th><th style="text-align:right;padding:2px 4px">LY actual</th><th style="text-align:right;padding:2px 4px">Forecast now</th><th style="text-align:right;padding:2px 4px;color:#7c3aed">Override →</th></tr></thead><tbody>'
+    +'<table style="border-collapse:collapse;font-size:11px;width:100%;margin-bottom:8px"><thead><tr style="color:#64748b;font-size:10px"><th style="text-align:left;padding:2px 4px">Month</th><th style="text-align:right;padding:2px 4px">LY actual</th><th style="text-align:right;padding:2px 4px">Forecast now</th><th style="text-align:right;padding:2px 4px;color:#7c3aed">Will apply →</th></tr></thead><tbody>'
     +rows.map(function(r){return '<tr style="border-top:1px solid #f1f5f9"><td style="text-align:left;padding:2px 4px;font-weight:600">'+ml(r.m)+'</td><td style="text-align:right;padding:2px 4px;color:#475569;font-variant-numeric:tabular-nums">'+fn(r.ly)+'</td><td style="text-align:right;padding:2px 4px;color:#475569;font-variant-numeric:tabular-nums">'+fn(r.base)+'</td><td style="text-align:right;padding:2px 4px;color:#7c3aed;font-weight:700;font-variant-numeric:tabular-nums">'+fn(r.tgt)+'</td></tr>';}).join('')
     +'</tbody></table>'
     +'<button class="tgapply-go" style="width:100%;padding:7px;background:#7c3aed;color:#fff;border:none;border-radius:5px;cursor:pointer;font-weight:600;font-size:12px">Apply override → next '+rows.length+' month'+(rows.length===1?'':'s')+'</button>'
@@ -9948,7 +9961,7 @@ function renderDemandActionsView(body,opts){
           +'<span style="font-weight:700;padding:1px 6px;border-radius:3px;background:'+bg+';color:'+col+';white-space:nowrap" title="'+tHesc(it.label?it.label.t:'')+' — confident minimum">≥'+pctS(it.recMin)+' ▲</span>'
           +'<span style="color:#64748b;white-space:nowrap">forecast <b style="color:#0f172a">'+pctS(it.fcYoY)+'</b></span>'
           +'<span style="flex:1;min-width:170px">'+tHesc(it.sub)+' <span style="color:#94a3b8">· '+it.co+' '+it.ch+'</span></span>'
-          +'<span style="color:#94a3b8;font-size:10px;white-space:nowrap;font-variant-numeric:tabular-nums" title="avg last-year units per month over the window (volume-tier basis)">'+fn(it.vpm)+'/mo</span>'
+          +'<span style="color:#94a3b8;font-size:10px;white-space:nowrap;font-variant-numeric:tabular-nums" title="avg last-year units per month over the window (volume-tier basis)">avg volume '+fn(it.vpm)+'/mo</span>'
           +'<a href="#" class="tg-jump" data-sub="'+tHesc(it.sub)+'" data-co="'+it.co+'" data-ch="'+it.ch+'" style="color:#1d4ed8;text-decoration:none;font-weight:600;white-space:nowrap">→ plan</a>'
           +'<button class="tg-apply pill catpill" data-sub="'+tHesc(it.sub)+'" data-co="'+it.co+'" data-ch="'+it.ch+'" style="font-size:10px;cursor:pointer;white-space:nowrap" title="open the row recommendation">Apply ▾</button>'
           +'</div>';
@@ -11556,13 +11569,13 @@ var FLAGS={'UK':'🇬🇧','US':'🇺🇸','EU':'🇪🇺','AU':'🇦🇺','CA':
 CTRS.forEach(function(co){
   const b=document.createElement('button');b.className='pill'+(co===CUR?' active':'');b.dataset.co=co;
   b.innerHTML=(FLAGS[co]||'')+' '+co;
-  b.onclick=function(){remapExpanded('co',co);CUR=co;render();};
+  b.onclick=function(){remapExpanded('co',co);CUR=co;render();if(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES){fcChangeKeysLoad(CUR,CF,function(){try{refreshAllCellRails();}catch(e){}});}};
   document.getElementById('ctabs').appendChild(b);
 });
 
 // Channel tabs
 document.querySelectorAll('#chtabs .pill').forEach(function(b){
-  b.onclick=function(){remapExpanded('ch',b.dataset.ch);CF=b.dataset.ch;render();};
+  b.onclick=function(){remapExpanded('ch',b.dataset.ch);CF=b.dataset.ch;render();if(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES){fcChangeKeysLoad(CUR,CF,function(){try{refreshAllCellRails();}catch(e){}});}};
 });
 
 // ── Category multiselect (Option A: compact dropdown + chips; "All" pinned top) ──
