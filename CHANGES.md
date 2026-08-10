@@ -1,3 +1,6 @@
+## v26.827.0 CONFIG loads fast — cache the config response + parallelise its queries
+- `/api/supply/config` (rate cards, freight, duty, branches, transfer/air leads) took ~3.3s on the sandbox (each query is a ~310ms round-trip to the remote pooler; ~6 of them, one sequential). It now (a) runs all 6 queries in one `Promise.all` (was 5 + 1 sequential) and (b) is added to the section response-cache, so repeat loads are **~3ms** (dropped on any supply edit; 10-min TTL). First cold load is still bounded by the sandbox pooler latency (much lower on live).
+
 ## v26.826.0 New product — go to PLAN and open the new item after create
 - Creating a single product now navigates to PRODUCT ▸ PLAN and opens the new item's detail (mirrors the grid/dashboard open pattern). Previously it called `renderProductDetail` without first entering the PLAN sub-tab, so it rendered into the stale new-product-form box and appeared stuck on "Created 1 of 1…".
 

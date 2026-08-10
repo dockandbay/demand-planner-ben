@@ -2516,7 +2516,7 @@ function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS) {
 // from cache; once stale, the FIRST request recomputes (others serve stale meanwhile) then repopulates. Correct on
 // both a long-lived server and Vercel serverless (no background/self-fetch needed). Dropped by invalidateSupplyCaches
 // on any edit. Only the zero-query-param variant is cached (any filter bypasses the cache and runs live).
-const SECTION_CACHE_TTL_MAP = { cashflow: SUPPLY_CACHE_TTL_MS, bi: SUPPLY_CACHE_TTL_MS, manufacturing: SUPPLY_CACHE_TTL_MS, 'payments-report': SUPPLY_CACHE_TTL_MS, shipments: SUPPLY_CACHE_TTL_MS };
+const SECTION_CACHE_TTL_MAP = { cashflow: SUPPLY_CACHE_TTL_MS, bi: SUPPLY_CACHE_TTL_MS, manufacturing: SUPPLY_CACHE_TTL_MS, 'payments-report': SUPPLY_CACHE_TTL_MS, shipments: SUPPLY_CACHE_TTL_MS, config: SUPPLY_CACHE_TTL_MS };   // config = rate cards / branches (rarely change); param-free → cache the response so CONFIG opens instantly (esp. off the slow sandbox pooler)
 const _sectionResp = {};        // section -> { v, at }
 const _sectionInflight = {};    // section -> bool (a recompute is running; others serve stale)
 // Supplier-portal bootstrap cache — per supplier-set + includeArchived. The portal is the one heavy PO-calc path
@@ -3380,7 +3380,7 @@ app.get('/api/supply/:section', async (req, res) => {
       }
       case 'config':      // CONFIG view (rate-card sub-tabs); suppliers/batches fetched separately
       case 'settings': {  // editable cards: import tax, freight, duty, branches (lead times)
-        const [tax, freight, duty, branches, transfer_leads] = await Promise.all([
+        const [tax, freight, duty, branches, transfer_leads, air] = await Promise.all([
           q(`SELECT country, tax_pct, coalesce(base,'landed') base, coalesce(notes,'') notes
              FROM planner.import_tax_rates ORDER BY country`),
           q(`SELECT id, coalesce(destination,'') destination, coalesce(container_size,'') container_size,
@@ -3392,8 +3392,8 @@ app.get('/api/supply/:section', async (req, res) => {
              coalesce(shipping_notes,'') shipping_notes, coalesce(delivery_notes,'') delivery_notes, coalesce(fulfil_id,'') fulfil_id FROM planner.branches ORDER BY name`),
           q(`SELECT upper(from_market) from_market, upper(to_market) to_market, weeks
              FROM planner.transfer_lead_times ORDER BY from_market, to_market`).catch(() => []),
+          q(`SELECT id, min_kg, max_kg, rate_per_kg FROM planner.air_freight_rates ORDER BY min_kg`).catch(() => []),   // folded into the parallel batch (was a 6th sequential round-trip)
         ]);
-        const air = await q(`SELECT id, min_kg, max_kg, rate_per_kg FROM planner.air_freight_rates ORDER BY min_kg`).catch(() => []);
         return res.json({ tax, freight, duty, branches, transfer_leads, air, sizes: ['20ft','40ft','LCL'] });
       }
       case 'order-plan-exceptions':   // # POs with unapproved exceptions → nav + sub-tab badges (cached; runs on every mount)
