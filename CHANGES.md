@@ -1,3 +1,6 @@
+## v26.806.0 Summary / Edit targets — pin the header, only table rows scroll
+- Everything above the table (pills, description, download/import/legend/filter toolbar) now stays put; only the table body scrolls. The table height is sized **dynamically** to fill from its top to the viewport bottom (replacing the fixed `100vh−250px` offset that broke when the edit toolbar was tall), and re-fits on window resize.
+
 ## v26.805.0 Edit targets — conflict ⚠ on the locked cells + auto-rebalance on edit
 - The conflict **⚠ now shows on the locked category cells** that (together) exceed the budget — not on the implied cells.
 - Editing any locked cell (% or £) now **auto-updates the implied cells** immediately (redraw, with focus restored to the edited cell), so the balance recomputes as you go.

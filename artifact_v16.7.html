@@ -8279,6 +8279,8 @@ function renderSummaryView(body){
   fSel.onchange=applyRange; tSel.onchange=applyRange;
   var clr=body.querySelector('#sm-clear'); if(clr)clr.onclick=function(){ SUMM_FROM=''; SUMM_TO=''; renderSummaryView(body); };
   var host=body.querySelector('#smc'), tools=body.querySelector('#smc-tools');
+  function fitHost(){ try{ var r=host.getBoundingClientRect(); host.style.maxHeight=Math.max(180,(window.innerHeight-r.top-14))+'px'; }catch(e){} }   // size the table so ONLY its rows scroll — everything above (pills, description, toolbar) stays put, whatever the toolbar height
+  if(!window.__smcFit){ window.__smcFit=1; window.addEventListener('resize',function(){ var h=document.getElementById('smc'); if(h){ try{ h.style.maxHeight=Math.max(180,(window.innerHeight-h.getBoundingClientRect().top-14))+'px'; }catch(e){} } }); }
   function draw(){
     _impCache={}; _impConflict={};   // recompute the market-total→subcat implied balancing fresh each render (targets may have changed)
     var STY='<style>#smc table{border-collapse:separate;border-spacing:0;font-size:12px}#smc th,#smc td{padding:2px 6px;white-space:nowrap;border-bottom:1px solid #f1f1f1;text-align:right}'
@@ -8407,6 +8409,7 @@ function renderSummaryView(body){
         +'<div id="tgt-imp-box" style="display:none;margin:0 0 8px"><textarea id="tgt-imp-text" placeholder="Paste the filled template CSV here (same Month/Quarter/Half level you downloaded)…" style="width:100%;max-width:820px;height:90px;font-size:11px;font-family:ui-monospace,Menlo,monospace;border:1px solid #cbd5e1;border-radius:6px;padding:6px;box-sizing:border-box"></textarea><div style="margin-top:4px"><button id="tgt-imp-save" style="border:1px solid #7c3aed;background:#7c3aed;color:#fff;border-radius:6px;padding:4px 12px;font-size:11px;cursor:pointer;font-weight:700;font-family:inherit">Save imported targets</button></div></div>'
         +'<div style="font-size:11px;color:#666;margin:0 0 8px">Type a revenue <b>growth %</b> (e.g. 40) OR a <b>£ revenue target</b> (e.g. £120000) per <b>'+SUMM_GROUP+'</b> for the market total and each subcategory. Coarser levels (Half/Quarter) <b>inherit</b> down (shown as <span style="color:#94a3b8">↳</span>) until you override. <span style="background:#F0FFF0;padding:0 4px">green = % growth</span> <span style="background:#B3EBF2;padding:0 4px">blue = £ target</span> <span style="background:#FDFBD4;padding:0 4px">yellow = implied (balances to the market total)</span>. Blank = clear / re-imply.</div>'+_tgtFiltBar;
       host.innerHTML='<table>'+eThead+'<tbody>'+eRows+'</tbody></table>';  /* STY injected once into head; toolbar lives in #smc-tools (fixed) */
+      fitHost();
       var _tq2=tools||host;
       var _fq=_tq2.querySelector('#tgt-fq'); if(_fq)_fq.oninput=function(){ TGT_FILT_Q=this.value; try{localStorage.setItem('tgt_filt_q',TGT_FILT_Q);}catch(e){} draw(); var n=(tools||host).querySelector('#tgt-fq'); if(n){ n.focus(); var L=n.value.length; try{n.setSelectionRange(L,L);}catch(e){} } };
       function _tgtSaveCats(){ try{ localStorage.setItem('tgt_filt_cats', TGT_FILT_CATS?JSON.stringify(Array.from(TGT_FILT_CATS)):''); }catch(e){} }
@@ -8487,7 +8490,7 @@ function renderSummaryView(body){
         bodyH+='<tr class="sku"><td class="lbl">'+e(r.sku)+tb+(dts?'<div style="font-size:9px;font-family:system-ui">'+dts+'</div>':'')+'</td>'+cells(r.val,r.ly,r.lch,r.disc,null)+'</tr>'; }); }
     });
     var thead=rangeMode?('<thead><tr>'+h2+'</tr></thead>'):('<thead><tr>'+h1+'</tr><tr>'+h2+'</tr></thead>');
-    host.innerHTML='<table>'+thead+'<tbody>'+bodyH+'</tbody></table>';
+    host.innerHTML='<table>'+thead+'<tbody>'+bodyH+'</tbody></table>'; fitHost();
     host.querySelectorAll('td.lbl[data-sub]').forEach(function(td){ td.onclick=function(){ var s=td.dataset.sub; SUMM_OPEN[s]=!SUMM_OPEN[s]; draw(); }; });
     host.querySelectorAll('th.fyh[data-fy]').forEach(function(th){ th.onclick=function(){ var Y=+th.dataset.fy; SUMM_FYOPEN[Y]=!fyOpen(Y); draw(); }; });
   }
