@@ -9077,7 +9077,7 @@
           +'<td class="l">'+esc(d.supplier_name||'')+'</td><td class="l">'+(d.prod_no?'P'+esc(d.prod_no):'')+'</td><td class="l">'+esc(d.batch_id||'')+'</td>'
           +'<td class="l" style="white-space:nowrap"><span class="mut tiny">'+esc(d.created_at||'')+' · '+esc(shortUser(d.uploaded_by||'')||'')+(d.uploader_kind==='supplier'?' (supplier)':'')+'</span></td>'
           +'<td class="l" style="width:1%;white-space:nowrap"><button class="lnk-btn qc-del" data-id="'+d.id+'" style="color:#b91c1c;background:none;border:none;cursor:pointer;font-size:11px;text-decoration:underline">delete</button></td></tr>'; }).join('');
-        document.getElementById('qc-results').innerHTML='<div class="tw" style="max-width:1200px"><table><thead><tr><th class="l">Type</th><th class="l">File</th><th class="l">PO</th><th class="l">Supplier</th><th class="l">PROD#</th><th class="l">Batch</th><th class="l" style="min-width:230px">Uploaded</th><th class="l" style="width:1%;white-space:nowrap"></th></tr></thead><tbody>'+(body||'<tr><td colspan="8" class="l mut">No documents.</td></tr>')+'</tbody></table></div>';
+        document.getElementById('qc-results').innerHTML='<div class="tw"><table style="width:100%"><thead><tr><th class="l">Type</th><th class="l">File</th><th class="l">PO</th><th class="l">Supplier</th><th class="l">PROD#</th><th class="l">Batch</th><th class="l" style="min-width:230px">Uploaded</th><th class="l" style="width:1%;white-space:nowrap">&nbsp;</th></tr></thead><tbody>'+(body||'<tr><td colspan="8" class="l mut">No documents.</td></tr>')+'</tbody></table></div>';
         document.querySelectorAll('#qc-results .qc-po').forEach(function(b){ b.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(b.dataset.po,'documents'); else gotoPO(b.dataset.po,'documents'); }; });
         document.querySelectorAll('#qc-results .qc-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete this document? This cannot be undone.'))return; fetch('/api/supply/quality-doc/'+b.dataset.id+'/delete',{method:'POST'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)return alert(j.error); draw(); }).catch(function(e){ alert('Delete failed'); }); }; });
       }).catch(function(e){ document.getElementById('qc-results').innerHTML='<div class="count" style="color:#dc2626">'+esc(String(e))+'</div>'; }); }
@@ -9396,6 +9396,7 @@
     }).catch(function(){}); }
 
   function selectSection(key){
+    var _tk=++_navToken;   // bump on EVERY nav (even the early-return sections below) so an in-flight async render from a PRIOR section (e.g. Actions on boot) can't overwrite the section we just chose
     if(key==='barcodes')return showPoSub('barcodes');                                   // now a PURCHASE ORDERS sub-tab
     if(key==='productions')return showPoSub(PO_SUB_KEYS.indexOf(prodTab)>=0&&prodTab!=='plan'?prodTab:'list');   // PRODUCTIONS folded under PURCHASE ORDERS
     if(key==='purchase-orders')return showPoSub(PO_SUB_KEYS.indexOf(poSub)>=0?poSub:'plan');
@@ -9404,7 +9405,6 @@
     if(REPORT_KEYS.indexOf(key)>=0)return selectReport(key);
     if(key==='quality-control'){ current=key; syncHash(); document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k===key);}); var _qns=document.getElementById('supply-nav-sel'); if(_qns&&_qns.value!==key)_qns.value=key; return renderQualityControl(); }
     current=key; syncHash();
-    var _tk=++_navToken;   // this navigation — a later click bumps _navToken and invalidates our async render below
     document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k===key);});
     var _ns=document.getElementById('supply-nav-sel'); if(_ns&&_ns.value!==key)_ns.value=key;   // keep the phone section dropdown in sync
     var c=document.getElementById('supply-content');   // keep the current view visible while loading (the badge spinner signals activity) → no "Loading…" row flash on section switch
@@ -9466,12 +9466,16 @@
     var app=document.getElementById('app')||document.body; if(!app)return;
     var rootEl=document.createElement('div'); rootEl.id='supply-root';
     rootEl.innerHTML='<div id="supply-subnav">'+SECTIONS.map(function(s){return '<a class="stab" data-k="'+s[0]+'" href="#/supply/'+s[0]+'">'+s[1]+(s[0]==='reports'?'<span id="nav-dtc-badge" title="DTC mismatch issues" style="display:none;margin-left:5px;background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;vertical-align:middle"></span>':'')+'</a>';}).join('')
+      +'<button id="supply-refresh-cache" title="Reload every report from the database fresh and reset all caches (client + server)" style="margin-left:auto;background:#fff;border:1px solid #cbd5e1;border-radius:5px;color:#2563eb;font-weight:600;font-size:11px;padding:2px 10px;cursor:pointer">↻ Refresh cache</button>'
       +'<span class="ver">HORIZON __APP_VERSION__</span></div>'
       +'<select id="supply-nav-sel" aria-label="Section">'+SECTIONS.map(function(s){return '<option value="'+s[0]+'">'+s[1]+'</option>';}).join('')+'</select>'
       +'<div id="supply-content"></div>';
     app.appendChild(rootEl);
     rootEl.querySelectorAll('.stab').forEach(function(b){b.onclick=function(e){ if(e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return; e.preventDefault(); selectSection(b.dataset.k); };});   // Cmd/Ctrl/Shift/Alt-click (or middle-click) opens the section in a new tab via its deep-link href
     var _navSel=rootEl.querySelector('#supply-nav-sel'); if(_navSel)_navSel.onchange=function(){selectSection(this.value);};
+    var _rc=rootEl.querySelector('#supply-refresh-cache'); if(_rc)_rc.onclick=function(){ var b=this; b.disabled=true; b.textContent='Refreshing…';
+      try{ for(var k in cache)delete cache[k]; }catch(e){}   // drop the client section cache
+      fetch('/api/supply/cache/invalidate',{method:'POST'}).catch(function(){}).then(function(){ location.reload(); }); };   // reset the server read-cache, then a full reload re-fetches all data + rebuilds the demand/buy overlays
     fetch('/api/supply/samples').then(function(r){return r.json();}).then(function(d){ if(Array.isArray(d)){ cache['samples']=d; samplesNavBadge(d); } }).catch(function(){});
     refreshOpExc(); try{ prefetchNavCounts(); }catch(e){}   // compute the Payments Due count on mount so the PAYMENTS tab badge shows immediately
     // high-priority ACTIONS count for the ACTIONS tab badge (warms the actions cache too, so opening it is instant)

@@ -1,3 +1,8 @@
+## v26.818.0 SUPPLY nav flash fix + QC full-width + "Refresh cache" button
+- **SUPPLY nav flash-back:** navigating straight to a section (e.g. Quality Control) could flash back to Actions — the early-return sections didn't bump the nav token, so an in-flight Actions render from boot overwrote the chosen section. `selectSection` now bumps `_navToken` at the top for **every** nav, so the section you clicked is always respected.
+- **Quality Control table** is now **full page width** (removed the 1200px cap; table width:100%) so the delete column is always visible; Uploaded keeps its min-width, delete column shrinks to content.
+- **"↻ Refresh cache" button** in the SUPPLY nav bar: clears the client section cache, POSTs the server cache invalidate, then reloads — a one-click way to pull everything fresh from the database and rebuild the demand/buy overlays (for cases where data changed outside your open tab).
+
 ## v26.817.0 Price changes inputs left-aligned + Quality Control column widths
 - Price changes form: **Subcategory** and **From month** inputs forced **left-aligned** (were inheriting a right-align).
 - SUPPLY ▸ Quality Control results table: **Uploaded** column given a min-width (230px) so the date/user no longer truncates; the **delete** column shrunk to its content (was absorbing the table's slack).
