@@ -1,3 +1,10 @@
+## v26.800.0 Build production modal — polish (fade-in · 2-col preview · invalidate · tick-skip-0)
+- Modal **fades in once styles apply** — no unstyled flash on open.
+- Preview POs flow into **2 columns** when the Create box is wide (country groups kept intact); PO lines are now **black** (were light grey).
+- **Any change** (market pill, qty, tick, supplier) **invalidates the preview** — it clears to "Preview to see the PO plan here." + hides Create, so you re-preview before creating.
+- **Preview PO plan / Create POs** buttons have larger text.
+- **Tick-all / per-country / per-category** selects never tick a **0-qty** cell.
+
 ## v26.799.0 Edit targets — market total is a fixed budget; subcategories imply & rebalance
 - Replaced the v26.798 hardcode-everywhere with a **balancing model**. The ALL SUBCATEGORIES (market total) growth is a **fixed revenue budget**; any subcategory you type into **locks**; untyped subcategories share the remaining budget at a **uniform implied growth** (∝ last-year size) so categories always sum back to the market total. Override some (+100 / 0 / −100%) and the rest re-imply; implied cells show ↳%, typing locks, clearing re-implies. Implied values feed the Summary + target math via `resolveG`, so numbers match everywhere.
 

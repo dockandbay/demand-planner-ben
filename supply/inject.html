@@ -10176,7 +10176,7 @@
     function isTicked(s,c){ var k=keyC(s,c); return (k in TICK)?TICK[k]:(rec(s,c)>0&&hasCode(s)); }
     var ov=document.createElement('div'); ov.id='bp-po-modal-multi';
     ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200000;display:flex;flex-direction:column;padding:16px 8px;overflow:hidden';
-    ov.innerHTML='<div class="pomodal" style="width:100%;max-width:none;flex:1 1 auto;display:flex;flex-direction:column;overflow:hidden">'
+    ov.innerHTML='<div class="pomodal" style="width:100%;max-width:none;flex:1 1 auto;display:flex;flex-direction:column;overflow:hidden;opacity:0;transition:opacity .12s ease">'
       +'<div style="flex:0 0 auto">'
       +'<div style="display:flex;align-items:center;margin-bottom:8px"><b style="font-size:15px">Create production POs — all countries</b>'
         +'<span style="margin-left:auto;cursor:pointer;font-size:18px" id="bpm-x">✕</span></div>'
@@ -10194,11 +10194,11 @@
           +'<div style="display:flex;flex-direction:column;gap:9px;font-size:11px">'
             +'<div><span class="pill-lbl">Markets</span> <span id="bpm-pills"></span></div>'
             +'<label style="cursor:pointer;color:#b45309" title="Top up SKUs below their MOQ by adding the shortfall to a China Stock holding PO (one per production per supplier). Allocate to a market later."><input type="checkbox" id="bpm-china" checked> <span id="bpm-china-lbl">China-stock top-up</span></label>'
-            +'<div><button id="bpm-preview" class="tool-badge bg-blue" style="border:none;cursor:pointer;padding:6px 13px">Preview PO plan ▶</button></div>'
+            +'<div><button id="bpm-preview" class="tool-badge bg-blue" style="border:none;cursor:pointer;padding:7px 15px;font-size:13px;font-weight:700">Preview PO plan ▶</button></div>'
           +'</div></div>'
         +'<div style="flex:2 1 320px;min-width:280px;border:1px solid #cfe8d6;border-radius:8px;padding:8px 10px;background:#f6fdf8;display:flex;flex-direction:column">'
           +'<div style="font-size:11px;font-weight:800;color:#166534;margin-bottom:8px;letter-spacing:.03em">③ CREATE</div>'
-          +'<div style="flex:0 0 auto"><button id="bpm-create" class="tool-badge bg-green" style="border:none;cursor:pointer;padding:6px 13px;display:none">Create POs</button>'
+          +'<div style="flex:0 0 auto"><button id="bpm-create" class="tool-badge bg-green" style="border:none;cursor:pointer;padding:7px 15px;font-size:13px;font-weight:700;display:none">Create POs</button>'
             +'<span style="font-size:10px;color:#64748b;margin-left:6px">POs create as <b>FUTURE</b>, then Order Plan opens filtered to this production + batch.</span></div>'
           +'<div id="bpm-result" style="flex:1 1 auto;max-height:24vh;overflow:auto;margin-top:7px;font-size:11px;color:#94a3b8">Preview to see the PO plan here.</div>'
         +'</div>'
@@ -10207,8 +10207,10 @@
       +'<div id="bpm-skus" style="flex:1 1 auto;overflow:hidden;display:flex;flex-direction:column;min-height:140px">Loading SKUs…</div>'
       +'</div>';
     document.body.appendChild(ov);
+    requestAnimationFrame(function(){ var _pm=ov.querySelector('.pomodal'); if(_pm)_pm.style.opacity='1'; });   // reveal once styles have applied (no unstyled flash)
     var close=function(){ ov.remove(); };
     document.getElementById('bpm-x').onclick=close;
+    function invalidatePreview(){ var r=document.getElementById('bpm-result'); if(r){ r.style.color='#94a3b8'; r.innerHTML='Preview to see the PO plan here.'; } var cb=document.getElementById('bpm-create'); if(cb)cb.style.display='none'; }
     try{ var _sd=document.getElementById('bpm-start'); if(_sd)_sd.value=new Date().toISOString().slice(0,10); }catch(e){}   // start date defaults to today
     fetch('/api/supply/prod-numbers').then(function(r){return r.json();}).then(function(rows){ var prods=(rows||[]).map(function(p){return p.prod_no;}).filter(Boolean);
       var sel=document.getElementById('bpm-prod'); if(sel)sel.innerHTML='<option value="">— choose production —</option>'+prods.map(function(p){return '<option>'+esc(p)+'</option>';}).join(''); }).catch(function(){});
@@ -10276,13 +10278,14 @@
         +'<th style="'+thB+';text-align:center;min-width:70px">Total</th>'
         +'<th style="'+thB+';text-align:left;min-width:150px">Supplier</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
       var pb=document.getElementById('bpm-pills'); if(pb)pb.innerHTML=pillBar();
-      document.querySelectorAll('#bpm-pills .bpm-ctr').forEach(function(b){ b.onclick=function(){ var c=b.dataset.c,i=shown.indexOf(c); if(i>=0){ if(shown.length>1)shown.splice(i,1); } else shown=modeCountries().filter(function(x){return x===c||shown.indexOf(x)>=0;}); drawSkus(); }; });
-      box.querySelectorAll('.bpm-tick').forEach(function(t){ t.onchange=function(){ TICK[keyC(t.dataset.s,t.dataset.c)]=t.checked; updateRow(t.closest('tr')); refreshCount(); }; });
-      box.querySelectorAll('.bpm-q').forEach(function(inp){ inp.onchange=function(){ var v=Math.max(0,Math.round(Number(inp.value)||0)); inp.value=v; OVR[keyC(inp.dataset.s,inp.dataset.c)]=v; var z=!(v>0); inp.style.color=z?'#cbd5e1':'inherit'; inp.style.border='1px solid '+(z?'#e5e7eb':'transparent'); updateRow(inp.closest('tr')); }; });
-      box.querySelectorAll('.bpm-skusup').forEach(function(sel){ var tr=sel.closest('tr'); sel.onchange=function(){ SUP[tr.dataset.sku]=sel.value; }; });
-      var ta=document.getElementById('bpm-tickall'); if(ta)ta.onchange=function(){ box.querySelectorAll('.bpm-tick:not([disabled])').forEach(function(t){ t.checked=ta.checked; TICK[keyC(t.dataset.s,t.dataset.c)]=ta.checked; }); box.querySelectorAll('tr[data-sku]').forEach(updateRow); refreshCount(); };
-      box.querySelectorAll('.bpm-cat-sel').forEach(function(a){ a.onclick=function(){ var cat=a.dataset.cat,on=a.dataset.on==='1'; box.querySelectorAll('tr[data-cat="'+cat.replace(/"/g,'')+'"][data-sku] .bpm-tick:not([disabled])').forEach(function(t){ t.checked=on; TICK[keyC(t.dataset.s,t.dataset.c)]=on; }); box.querySelectorAll('tr[data-sku]').forEach(updateRow); refreshCount(); }; });
-      box.querySelectorAll('.bpm-col-sel').forEach(function(a){ a.onclick=function(){ var c=a.dataset.c,on=a.dataset.on==='1'; box.querySelectorAll('.bpm-tick[data-c="'+c+'"]:not([disabled])').forEach(function(t){ t.checked=on; TICK[keyC(t.dataset.s,t.dataset.c)]=on; }); box.querySelectorAll('tr[data-sku]').forEach(updateRow); refreshCount(); }; });
+      var _tickQ=function(t){ var q=t.parentNode&&t.parentNode.querySelector('.bpm-q'); return q?(Number(q.value)||0):0; };   // ticking never selects a 0-qty cell
+      document.querySelectorAll('#bpm-pills .bpm-ctr').forEach(function(b){ b.onclick=function(){ var c=b.dataset.c,i=shown.indexOf(c); if(i>=0){ if(shown.length>1)shown.splice(i,1); } else shown=modeCountries().filter(function(x){return x===c||shown.indexOf(x)>=0;}); invalidatePreview(); drawSkus(); }; });
+      box.querySelectorAll('.bpm-tick').forEach(function(t){ t.onchange=function(){ TICK[keyC(t.dataset.s,t.dataset.c)]=t.checked; updateRow(t.closest('tr')); refreshCount(); invalidatePreview(); }; });
+      box.querySelectorAll('.bpm-q').forEach(function(inp){ inp.onchange=function(){ var v=Math.max(0,Math.round(Number(inp.value)||0)); inp.value=v; OVR[keyC(inp.dataset.s,inp.dataset.c)]=v; var z=!(v>0); inp.style.color=z?'#cbd5e1':'inherit'; inp.style.border='1px solid '+(z?'#e5e7eb':'transparent'); updateRow(inp.closest('tr')); invalidatePreview(); }; });
+      box.querySelectorAll('.bpm-skusup').forEach(function(sel){ var tr=sel.closest('tr'); sel.onchange=function(){ SUP[tr.dataset.sku]=sel.value; invalidatePreview(); }; });
+      var ta=document.getElementById('bpm-tickall'); if(ta)ta.onchange=function(){ box.querySelectorAll('.bpm-tick:not([disabled])').forEach(function(t){ t.checked=ta.checked&&_tickQ(t)>0; TICK[keyC(t.dataset.s,t.dataset.c)]=t.checked; }); box.querySelectorAll('tr[data-sku]').forEach(updateRow); refreshCount(); invalidatePreview(); };
+      box.querySelectorAll('.bpm-cat-sel').forEach(function(a){ a.onclick=function(){ var cat=a.dataset.cat,on=a.dataset.on==='1'; box.querySelectorAll('tr[data-cat="'+cat.replace(/"/g,'')+'"][data-sku] .bpm-tick:not([disabled])').forEach(function(t){ t.checked=on&&_tickQ(t)>0; TICK[keyC(t.dataset.s,t.dataset.c)]=t.checked; }); box.querySelectorAll('tr[data-sku]').forEach(updateRow); refreshCount(); invalidatePreview(); }; });
+      box.querySelectorAll('.bpm-col-sel').forEach(function(a){ a.onclick=function(){ var c=a.dataset.c,on=a.dataset.on==='1'; box.querySelectorAll('.bpm-tick[data-c="'+c+'"]:not([disabled])').forEach(function(t){ t.checked=on&&_tickQ(t)>0; TICK[keyC(t.dataset.s,t.dataset.c)]=t.checked; }); box.querySelectorAll('tr[data-sku]').forEach(updateRow); refreshCount(); invalidatePreview(); }; });
       box.querySelectorAll('.bpm-plan').forEach(function(b){ b.onclick=function(){ var sku=b.dataset.sku; if(!window.open_){alert('Buy plan unavailable — reload.');return;} if(window.ensureBuyPlanScaffold)window.ensureBuyPlanScaffold(); var app=document.getElementById('app'); if(app)app.classList.add('plan-ov-open'); try{ window.open_(sku); }catch(e){ if(app)app.classList.remove('plan-ov-open'); return; } var o2=document.getElementById('ov'); if(o2){ o2.style.zIndex='300000'; var mo=new MutationObserver(function(){ if(!o2.classList.contains('open')){ if(app)app.classList.remove('plan-ov-open'); mo.disconnect(); } }); mo.observe(o2,{attributes:true,attributeFilter:['class']}); } }; });
       refreshCount();
     }
@@ -10300,11 +10303,13 @@
       var res=document.getElementById('bpm-result'); res.innerHTML='<div class="count">Working…</div>'; document.getElementById('bpm-create').style.display='none';
       Promise.all(js.map(function(j){ return fetch('/api/supply/buyplan-pos',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(j.payload)}).then(function(r){return r.json();}).then(function(d){return {j:j,d:d};}).catch(function(e){return {j:j,d:{error:String(e)}};}); })).then(function(all){
         var h='',totPos=0;
-        all.forEach(function(x){ var d=x.d||{}, lab=x.j.label, col=x.j.china?'#b45309':colOf(lab); if(d.error){ h+='<div style="font-size:11px;color:#dc2626;margin:6px 0"><b>'+esc(lab)+':</b> '+esc(d.error)+'</div>'; return; } var pos=d.pos||[]; totPos+=pos.length;
-          h+='<div style="font-size:12px;margin:6px 0 2px;font-weight:700;color:'+col+'">'+(x.j.china?'🏭 ':'')+esc(lab)+' — '+pos.length+' PO(s) · branch '+esc(d.branch||'(none)')+(d.warnings&&d.warnings.length?(' · <span style="color:#b45309">'+d.warnings.length+' not placed</span>'):'')+'</div>';
-          h+=pos.map(function(p){ var u=p.lines.reduce(function(a,b){return a+b.qty;},0); return '<div style="font-size:11px;padding:1px 0 1px 10px">'+esc(p.po)+' · '+esc(p.supplier_code)+' · '+p.pallets+' pal · '+p.lines.length+' SKU · '+u.toLocaleString()+'u</div>'; }).join('');
+        all.forEach(function(x){ var d=x.d||{}, lab=x.j.label, col=x.j.china?'#b45309':colOf(lab); if(d.error){ h+='<div style="break-inside:avoid;font-size:11px;color:#dc2626;margin:0 0 8px"><b>'+esc(lab)+':</b> '+esc(d.error)+'</div>'; return; } var pos=d.pos||[]; totPos+=pos.length;
+          var gh='<div style="font-size:12px;margin:0 0 2px;font-weight:700;color:'+col+'">'+(x.j.china?'🏭 ':'')+esc(lab)+' — '+pos.length+' PO(s) · branch '+esc(d.branch||'(none)')+(d.warnings&&d.warnings.length?(' · <span style="color:#b45309">'+d.warnings.length+' not placed</span>'):'')+'</div>';
+          var pl=pos.map(function(p){ var u=p.lines.reduce(function(a,b){return a+b.qty;},0); return '<div style="font-size:11px;padding:1px 0 1px 10px;color:#0f172a">'+esc(p.po)+' · '+esc(p.supplier_code)+' · '+p.pallets+' pal · '+p.lines.length+' SKU · '+u.toLocaleString()+'u</div>'; }).join('');
+          h+='<div style="break-inside:avoid;margin:0 0 8px">'+gh+pl+'</div>';   // keep a country group intact within a column
         });
-        res.innerHTML=h||'<div style="color:#64748b">Nothing to place.</div>'; var cb=document.getElementById('bpm-create'); cb.style.display=totPos?'':'none'; }); };
+        res.style.color='#0f172a';
+        res.innerHTML=h?('<div style="column-width:260px;column-gap:18px">'+h+'</div>'):'<div style="color:#64748b">Nothing to place.</div>'; var cb=document.getElementById('bpm-create'); cb.style.display=totPos?'':'none'; }); };
     document.getElementById('bpm-create').onclick=function(){ var btn=this; if(!prodVal())return; var _prod=prodVal(), _bb=document.getElementById('bpm-batch'), _batch=(_bb&&_bb.value)||''; var js=jobs(true); if(!js.length)return; btn.disabled=true; btn.textContent='Creating…';
       Promise.all(js.map(function(j){ return fetch('/api/supply/buyplan-pos',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(j.payload)}).then(function(r){return r.json();}).then(function(d){ if(d&&d.error)throw new Error(j.label+': '+d.error); return (d&&d.created)||0; }); })).then(function(counts){
         var tot=counts.reduce(function(a,b){return a+b;},0); invalidateDerived(); close();
