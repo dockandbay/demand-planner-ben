@@ -1,3 +1,10 @@
+## v26.797.0 Build production modal — 3-step wizard + per-country tick + zero styling
+- BUY plan: **hid** the standalone **3PL - Create POs** / **FBA - Create POs** buttons (the all-countries "Build production" modal replaces them).
+- "Create production POs — all countries" restructured into a **3-column step wizard**: ① Set up (Buy 3PL/FBA · Production · Batch · Start date) · ② Choose & preview (Markets · China-stock · Preview) · ③ Create (Create POs + the preview output lives here).
+- Each **country header** now has **tick all / none** links (per-column select).
+- **Zero-qty cells** de-emphasised — light-grey number + light-grey box outline.
+- **Create → Order Plan**: after creating (FUTURE POs), Order Plan opens pre-filtered to status=Future, production=<prod#>, batch=<batch>.
+
 ## v26.796.0 Trend Gaps SKU view — richer forecast cells + tidier actuals
 - **Forecast cells** (next 4 months) redesigned: colour fills removed; each cell now stacks **LY** (last-year actual), the editable **override** box, and **fc** (final forecast = override if set, else base). When the flag has a recommendation a clickable **→ suggested value** shows underneath — clicking applies it as the override.
 - **Actuals** (trailing 12 months) are now evenly-spaced, centred, smaller text with grey column separators (matching the headers).

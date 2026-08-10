@@ -4273,7 +4273,10 @@
     var _opStay={partial:new Set(),supplier:new Set(),discontinue:new Set(),country:new Set()};
     function opKey(l){ return l.po+'|'+l.sku; }
     if(_pendingOP){ st.partials=!!_pendingOP.partials; st.suprisk=!!_pendingOP.suprisk; st.disc=!!_pendingOP.disc; if(_pendingOP.po)st.poq=String(_pendingOP.po).toLowerCase();
-      st.statuses=new Set(OP_ST_KEYS);   // show all (non-complete) status groups so the flagged lines aren't hidden by the status filter
+      if(_pendingOP.status && OP_ST_KEYS.indexOf(_pendingOP.status)>=0) st.statuses=new Set([_pendingOP.status]);   // specific status group (e.g. Create POs → 'future')
+      else st.statuses=new Set(OP_ST_KEYS);   // else show all (non-complete) so flagged lines aren't hidden
+      if(_pendingOP.prod)st.prod=String(_pendingOP.prod);
+      if(_pendingOP.batch)st.batch=String(_pendingOP.batch);
       _pendingOP=null; }
     function pillsHTML(opts,setv,noAll){ return opts.map(function(o){return '<span class="pill'+(setv.has(o)?' active':'')+'" data-v="'+esc(o)+'">'+esc(o)+'</span>';}).join('')+(noAll?'':'<span class="pill" data-all="1">All</span>'); }
     function sel(id,label,opts,val){return '<span class="pill-lbl">'+label+'</span><select class="flt'+(val&&val!=='All'?' sel-on':'')+'" id="'+id+'" style="width:auto;padding:3px 6px"><option>All</option>'+opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>';}
@@ -10177,16 +10180,29 @@
       +'<div style="flex:0 0 auto">'
       +'<div style="display:flex;align-items:center;margin-bottom:8px"><b style="font-size:15px">Create production POs — all countries</b>'
         +'<span style="margin-left:auto;cursor:pointer;font-size:18px" id="bpm-x">✕</span></div>'
-      +'<div style="font-size:12px;color:#555;margin-bottom:8px">One production across markets. Tick a market per SKU and edit the qty inline to override the recommendation; pick a supplier where a SKU has more than one. <b>Create POs</b> makes one PO per country (branch auto, ≤20-pallet split, status FUTURE). An MOQ flag shows under a SKU when the combined ticked order is below its minimum.</div>'
-      +'<div class="bar"><span id="bpm-mode" style="display:inline-flex;gap:3px;margin-right:14px"></span>'
-      +'<span class="pill-lbl">Production</span><select id="bpm-prod" class="flt" style="width:auto"></select>'
-      +'<span class="pill-lbl">Batch</span><select id="bpm-batch" class="flt" style="width:auto"><option value="">— optional —</option></select>'
-      +'<span class="pill-lbl">Start date</span><input id="bpm-start" type="date" class="flt" style="width:auto">'
-      +'<span style="margin-left:10px" id="bpm-pills"></span>'
-      +'<button id="bpm-preview" class="tool-badge bg-blue" style="border:none;cursor:pointer;padding:6px 13px;margin-left:6px">Preview PO plan</button>'
-      +'<button id="bpm-create" class="tool-badge bg-green" style="border:none;cursor:pointer;padding:6px 13px;display:none">Create POs</button>'
-      +'<label style="margin-left:10px;font-size:11px;cursor:pointer;color:#b45309" title="Top up SKUs below their MOQ by adding the shortfall to a China Stock holding PO (one per production per supplier). Allocate to a market later."><input type="checkbox" id="bpm-china" checked> <span id="bpm-china-lbl">China-stock top-up</span></label></div>'
-      +'<div id="bpm-result" style="max-height:22vh;overflow:auto;margin:8px 0"></div>'
+      +'<div style="display:flex;gap:10px;align-items:stretch;margin-bottom:8px;flex-wrap:wrap">'
+        +'<div style="flex:1 1 230px;min-width:220px;border:1px solid #dbe3ee;border-radius:8px;padding:8px 10px;background:#f8fbff">'
+          +'<div style="font-size:11px;font-weight:800;color:#1e3a8a;margin-bottom:8px;letter-spacing:.03em">① SET UP</div>'
+          +'<div style="display:flex;flex-direction:column;gap:7px;font-size:11px">'
+            +'<span id="bpm-mode" style="display:inline-flex;gap:3px"></span>'
+            +'<div><span class="pill-lbl">Production</span> <select id="bpm-prod" class="flt" style="width:auto"></select></div>'
+            +'<div><span class="pill-lbl">Batch</span> <select id="bpm-batch" class="flt" style="width:auto"><option value="">— optional —</option></select></div>'
+            +'<div><span class="pill-lbl">Start date</span> <input id="bpm-start" type="date" class="flt" style="width:auto"></div>'
+          +'</div></div>'
+        +'<div style="flex:1 1 230px;min-width:220px;border:1px solid #dbe3ee;border-radius:8px;padding:8px 10px;background:#f8fbff">'
+          +'<div style="font-size:11px;font-weight:800;color:#1e3a8a;margin-bottom:8px;letter-spacing:.03em">② CHOOSE &amp; PREVIEW</div>'
+          +'<div style="display:flex;flex-direction:column;gap:9px;font-size:11px">'
+            +'<div><span class="pill-lbl">Markets</span> <span id="bpm-pills"></span></div>'
+            +'<label style="cursor:pointer;color:#b45309" title="Top up SKUs below their MOQ by adding the shortfall to a China Stock holding PO (one per production per supplier). Allocate to a market later."><input type="checkbox" id="bpm-china" checked> <span id="bpm-china-lbl">China-stock top-up</span></label>'
+            +'<div><button id="bpm-preview" class="tool-badge bg-blue" style="border:none;cursor:pointer;padding:6px 13px">Preview PO plan ▶</button></div>'
+          +'</div></div>'
+        +'<div style="flex:2 1 320px;min-width:280px;border:1px solid #cfe8d6;border-radius:8px;padding:8px 10px;background:#f6fdf8;display:flex;flex-direction:column">'
+          +'<div style="font-size:11px;font-weight:800;color:#166534;margin-bottom:8px;letter-spacing:.03em">③ CREATE</div>'
+          +'<div style="flex:0 0 auto"><button id="bpm-create" class="tool-badge bg-green" style="border:none;cursor:pointer;padding:6px 13px;display:none">Create POs</button>'
+            +'<span style="font-size:10px;color:#64748b;margin-left:6px">POs create as <b>FUTURE</b>, then Order Plan opens filtered to this production + batch.</span></div>'
+          +'<div id="bpm-result" style="flex:1 1 auto;max-height:24vh;overflow:auto;margin-top:7px;font-size:11px;color:#94a3b8">Preview to see the PO plan here.</div>'
+        +'</div>'
+      +'</div>'
       +'</div>'
       +'<div id="bpm-skus" style="flex:1 1 auto;overflow:hidden;display:flex;flex-direction:column;min-height:140px">Loading SKUs…</div>'
       +'</div>';
@@ -10243,8 +10259,8 @@
         else if(o.length===1){ supCell=o[0].code?(esc(o[0].code)+' · '+esc(o[0].name)):('<span style="color:#b45309">⚠ '+esc(o[0].name)+' (no code)</span>'); }
         else { supCell='<select class="bpm-skusup" style="width:auto;font-size:11px;padding:1px 4px;border:1px solid #f59e0b;border-radius:4px;background:#fef3c7;color:#92400e;font-weight:600">'+o.map(function(x){return '<option value="'+esc(x.code||'')+'"'+(x.code===supOf(s.sku)?' selected':'')+(x.code?'':' disabled')+'>'+esc(x.code||'?')+' · '+esc(x.name)+'</option>';}).join('')+'</select>'; }
         var rt=rowTotal(s.sku);
-        var qtyCells=shown.map(function(c){ var v=qtyVal(s.sku,c), tk=isTicked(s.sku,c), dis=hc?'':' disabled';
-          return '<td style="'+tdB+';text-align:center'+(v?';background:'+colOf(c)+'18':'')+'"><span style="display:inline-flex;align-items:center;gap:4px;justify-content:center"><input type="checkbox" class="bpm-tick" data-s="'+esc(s.sku)+'" data-c="'+c+'"'+(tk?' checked':'')+dis+'><input type="number" min="0" class="bpm-q" data-s="'+esc(s.sku)+'" data-c="'+c+'" value="'+v+'"'+dis+' style="width:58px;text-align:center;font-size:11px;padding:1px 3px;border:none;background:transparent"></span></td>'; }).join('');
+        var qtyCells=shown.map(function(c){ var v=qtyVal(s.sku,c), tk=isTicked(s.sku,c), dis=hc?'':' disabled'; var zero=!(v>0);
+          return '<td style="'+tdB+';text-align:center'+(v?';background:'+colOf(c)+'18':'')+'"><span style="display:inline-flex;align-items:center;gap:4px;justify-content:center"><input type="checkbox" class="bpm-tick"'+(zero?' style="accent-color:#cbd5e1"':'')+' data-s="'+esc(s.sku)+'" data-c="'+c+'"'+(tk?' checked':'')+dis+'><input type="number" min="0" class="bpm-q" data-s="'+esc(s.sku)+'" data-c="'+c+'" value="'+v+'"'+dis+' style="width:58px;text-align:center;font-size:11px;padding:1px 3px;border:1px solid '+(zero?'#e5e7eb':'transparent')+';border-radius:4px;background:transparent;color:'+(zero?'#cbd5e1':'inherit')+'"></span></td>'; }).join('');
         var moqShort=(s.moq&&rt>0&&rt<s.moq);
         rows+='<tr data-sku="'+esc(s.sku)+'" data-cat="'+esc(cat)+'" data-moq="'+(s.moq||0)+'">'
           +'<td style="'+tdB.replace('white-space:nowrap','')+';text-align:left;min-width:200px"><div style="display:flex;align-items:center;gap:6px"><button class="bpm-plan" data-sku="'+esc(s.sku)+'" style="font-size:8px;font-weight:700;padding:0 4px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer">PLAN</button><span>'+esc(s.sku)+'</span></div>'+(s.discontinue?'<div style="font-size:9px;color:#9ca3af;margin-top:1px">discontinue '+esc(fd(s.discontinue))+'</div>':'')+'<div class="bpm-moq" style="font-size:9.5px;color:#b45309;font-weight:700;margin-top:2px;display:'+(moqShort?'':'none')+'">'+(moqShort?('⚑ MOQ '+s.moq.toLocaleString()+' — production '+rt.toLocaleString()+', short '+(s.moq-rt).toLocaleString()):'')+'</div></td>'
@@ -10253,7 +10269,7 @@
           +'<td style="'+tdB+';text-align:left;min-width:150px">'+supCell+'</td></tr>';
       });
       var thB='position:sticky;top:0;background:#f3f3f1;z-index:1;padding:5px 8px;border-bottom:1px solid #d5d5d5;font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#444;white-space:nowrap';
-      var ctryTh=shown.map(function(c){return '<th style="'+thB+';text-align:center;border-bottom:3px solid '+colOf(c)+';color:#111;min-width:104px">'+c+'</th>';}).join('');
+      var ctryTh=shown.map(function(c){return '<th style="'+thB+';text-align:center;border-bottom:3px solid '+colOf(c)+';color:#111;min-width:104px">'+c+'<div style="font-weight:400;text-transform:none;letter-spacing:0;margin-top:2px"><a class="bpm-col-sel" data-c="'+c+'" data-on="1" style="cursor:pointer;color:#1d4ed8;font-size:9px">tick all</a> <span style="color:#cbd5e1">·</span> <a class="bpm-col-sel" data-c="'+c+'" data-on="0" style="cursor:pointer;color:#64748b;font-size:9px">none</a></div></th>';}).join('');
       box.innerHTML='<div style="flex:0 0 auto;display:flex;align-items:center;gap:10px;margin-bottom:4px"><label style="font-size:11px;cursor:pointer"><input type="checkbox" id="bpm-tickall" checked> tick all shown</label><span class="count" id="bpm-skucount" style="margin-left:auto"></span></div>'
         +'<div style="flex:1 1 auto;overflow:auto;border:1px solid #e0e0e0;border-radius:6px"><table style="border-collapse:separate;border-spacing:0;font-size:11px;width:100%">'
         +'<thead><tr><th style="'+thB+';text-align:left;min-width:200px">SKU</th>'+ctryTh
@@ -10262,10 +10278,11 @@
       var pb=document.getElementById('bpm-pills'); if(pb)pb.innerHTML=pillBar();
       document.querySelectorAll('#bpm-pills .bpm-ctr').forEach(function(b){ b.onclick=function(){ var c=b.dataset.c,i=shown.indexOf(c); if(i>=0){ if(shown.length>1)shown.splice(i,1); } else shown=modeCountries().filter(function(x){return x===c||shown.indexOf(x)>=0;}); drawSkus(); }; });
       box.querySelectorAll('.bpm-tick').forEach(function(t){ t.onchange=function(){ TICK[keyC(t.dataset.s,t.dataset.c)]=t.checked; updateRow(t.closest('tr')); refreshCount(); }; });
-      box.querySelectorAll('.bpm-q').forEach(function(inp){ inp.onchange=function(){ var v=Math.max(0,Math.round(Number(inp.value)||0)); inp.value=v; OVR[keyC(inp.dataset.s,inp.dataset.c)]=v; updateRow(inp.closest('tr')); }; });
+      box.querySelectorAll('.bpm-q').forEach(function(inp){ inp.onchange=function(){ var v=Math.max(0,Math.round(Number(inp.value)||0)); inp.value=v; OVR[keyC(inp.dataset.s,inp.dataset.c)]=v; var z=!(v>0); inp.style.color=z?'#cbd5e1':'inherit'; inp.style.border='1px solid '+(z?'#e5e7eb':'transparent'); updateRow(inp.closest('tr')); }; });
       box.querySelectorAll('.bpm-skusup').forEach(function(sel){ var tr=sel.closest('tr'); sel.onchange=function(){ SUP[tr.dataset.sku]=sel.value; }; });
       var ta=document.getElementById('bpm-tickall'); if(ta)ta.onchange=function(){ box.querySelectorAll('.bpm-tick:not([disabled])').forEach(function(t){ t.checked=ta.checked; TICK[keyC(t.dataset.s,t.dataset.c)]=ta.checked; }); box.querySelectorAll('tr[data-sku]').forEach(updateRow); refreshCount(); };
       box.querySelectorAll('.bpm-cat-sel').forEach(function(a){ a.onclick=function(){ var cat=a.dataset.cat,on=a.dataset.on==='1'; box.querySelectorAll('tr[data-cat="'+cat.replace(/"/g,'')+'"][data-sku] .bpm-tick:not([disabled])').forEach(function(t){ t.checked=on; TICK[keyC(t.dataset.s,t.dataset.c)]=on; }); box.querySelectorAll('tr[data-sku]').forEach(updateRow); refreshCount(); }; });
+      box.querySelectorAll('.bpm-col-sel').forEach(function(a){ a.onclick=function(){ var c=a.dataset.c,on=a.dataset.on==='1'; box.querySelectorAll('.bpm-tick[data-c="'+c+'"]:not([disabled])').forEach(function(t){ t.checked=on; TICK[keyC(t.dataset.s,t.dataset.c)]=on; }); box.querySelectorAll('tr[data-sku]').forEach(updateRow); refreshCount(); }; });
       box.querySelectorAll('.bpm-plan').forEach(function(b){ b.onclick=function(){ var sku=b.dataset.sku; if(!window.open_){alert('Buy plan unavailable — reload.');return;} if(window.ensureBuyPlanScaffold)window.ensureBuyPlanScaffold(); var app=document.getElementById('app'); if(app)app.classList.add('plan-ov-open'); try{ window.open_(sku); }catch(e){ if(app)app.classList.remove('plan-ov-open'); return; } var o2=document.getElementById('ov'); if(o2){ o2.style.zIndex='300000'; var mo=new MutationObserver(function(){ if(!o2.classList.contains('open')){ if(app)app.classList.remove('plan-ov-open'); mo.disconnect(); } }); mo.observe(o2,{attributes:true,attributeFilter:['class']}); } }; });
       refreshCount();
     }
@@ -10288,9 +10305,11 @@
           h+=pos.map(function(p){ var u=p.lines.reduce(function(a,b){return a+b.qty;},0); return '<div style="font-size:11px;padding:1px 0 1px 10px">'+esc(p.po)+' · '+esc(p.supplier_code)+' · '+p.pallets+' pal · '+p.lines.length+' SKU · '+u.toLocaleString()+'u</div>'; }).join('');
         });
         res.innerHTML=h||'<div style="color:#64748b">Nothing to place.</div>'; var cb=document.getElementById('bpm-create'); cb.style.display=totPos?'':'none'; }); };
-    document.getElementById('bpm-create').onclick=function(){ var btn=this; if(!prodVal())return; var js=jobs(true); if(!js.length)return; btn.disabled=true; btn.textContent='Creating…';
+    document.getElementById('bpm-create').onclick=function(){ var btn=this; if(!prodVal())return; var _prod=prodVal(), _bb=document.getElementById('bpm-batch'), _batch=(_bb&&_bb.value)||''; var js=jobs(true); if(!js.length)return; btn.disabled=true; btn.textContent='Creating…';
       Promise.all(js.map(function(j){ return fetch('/api/supply/buyplan-pos',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(j.payload)}).then(function(r){return r.json();}).then(function(d){ if(d&&d.error)throw new Error(j.label+': '+d.error); return (d&&d.created)||0; }); })).then(function(counts){
-        var tot=counts.reduce(function(a,b){return a+b;},0); invalidateDerived(); close(); if(window.gotoSupplySection)window.gotoSupplySection('order-plan'); setTimeout(function(){ alert('Created '+tot+' PO(s) for '+prodVal()+' (incl. any China-stock top-up). Review in Order Plan.'); },250); })
+        var tot=counts.reduce(function(a,b){return a+b;},0); invalidateDerived(); close();
+        _pendingOP={status:'future'}; if(_prod)_pendingOP.prod=_prod; if(_batch)_pendingOP.batch=_batch;   // Order Plan opens filtered to Future + this production + batch
+        if(window.gotoSupplySection)window.gotoSupplySection('order-plan'); setTimeout(function(){ alert('Created '+tot+' PO(s) for '+_prod+' (incl. any China-stock top-up). Showing them in Order Plan — Future · '+_prod+(_batch?' · '+_batch:'')+'.'); },250); })
         .catch(function(e){ btn.disabled=false; btn.textContent='Create POs'; alert('Create failed: '+(e.message||e)); }); };
   }
   window.openBuyplanModalMulti=function(itemsByMode,mode){ try{ buyplanModalMulti(itemsByMode,mode); }catch(e){ if(window.console)console.log('[SUPPLY] buyplanModalMulti',e&&e.message); } };
