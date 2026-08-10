@@ -7999,7 +7999,7 @@
         +'<button class="save-btn" id="dd-au-toggle" title="Hide or show the pooled AU column">'+(DD_HIDE_AU?'Show AU':'Hide AU')+'</button>'
       +'</div>'
       +'<style>.dd-scroll{-webkit-overflow-scrolling:touch}.dd-scroll td.ddcell{cursor:help}.dd-scroll td.ddcell:hover{background:#fef9c3}</style>'
-      +'<div class="dd-scroll" style="overflow:auto;-webkit-overflow-scrolling:touch;max-width:100%;max-height:72vh;border:1px solid #e5e7eb;border-radius:6px"><table style="border-collapse:collapse;font-size:11px"><thead>'+head+'</thead><tbody>'+rowsH+foot+'</tbody></table></div>'
+      +'<div class="dd-scroll" style="overflow:auto;-webkit-overflow-scrolling:touch;max-width:100%;max-height:72vh;border:1px solid #e5e7eb;border-radius:6px"><table style="border-collapse:collapse;font-size:11px;min-width:'+((cols.length+1)*100)+'px"><thead>'+head+'</thead><tbody>'+rowsH+foot+'</tbody></table></div>'
       +'<div style="font-size:10px;color:#94a3b8;margin-top:6px">Red = negative balance (drawdowns exceed the paid-in recorded for that production/AU column — worth a check). Hover a column header for paid / drawn / remaining. Transactions export = prod · ref · amount (− for a drawdown) · date · PO (drawdowns only).</div>';
     var q=function(id){ return b.querySelector('#'+id); };
     q('dd-sum-copy').onclick=function(){ copyRows(summaryRows(),'Deposits drawdown — summary'); };

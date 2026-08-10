@@ -1,3 +1,7 @@
+## v26.795.0 Fixes — Trend Gaps Apply popup (drawer z-index) + Deposits Drawdown mobile scroll
+- **Trend Gaps Apply ▾ now opens** — the recommendation popup was z-index 1000, behind the Trend Gaps drawer (z-index 6000); raised it above so it shows in both the drawer and the Actions tab.
+- **Deposits Drawdown mobile**: the table now has an explicit computed min-width ((cols+1)×100px), so it genuinely overflows and **scrolls horizontally** on phones instead of squishing to one screen.
+
 ## v26.794.0 Deposits Drawdown — wider, readable columns on mobile
 - Removed the mobile shrink; every column now has a **100px min-width** (~10+ characters), so values stay readable on a phone and the matrix scrolls horizontally instead of cramming onto one screen.
 
