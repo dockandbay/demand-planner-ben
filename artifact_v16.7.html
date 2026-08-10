@@ -9415,20 +9415,21 @@ function saveRevTargetQ(rowid){ var rw=null; (REV_ROWS||[]).forEach(function(x){
   for(var q=0;q<4;q++){ var inp=document.getElementById('rq_'+rowid+'_'+q); var raw=inp?String(inp.value).replace(/[^0-9.\-]/g,''):''; b['target_q'+(q+1)+'_pct']=raw; }
   fetch('/api/demand-revenue-targets',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b)}).then(function(r){return r.json();}).then(function(){ if(typeof ensureRevTargets==='function')ensureRevTargets(); }).catch(function(){}); }
 function renderPriceChanges(el){
-  var rows=(PRICE_CHANGES||[]).map(function(p){ return '<tr><td><b>'+esc(p.country)+'</b></td><td>'+(p.channel?esc(p.channel):'<span class="mut">all</span>')+'</td><td>'+(p.subcategory?esc(p.subcategory):'<span class="mut">all</span>')+'</td><td>'+esc(p.effective_month)+'</td><td class="r" style="font-weight:600;color:'+(Number(p.uplift_pct)>=0?'#166534':'#b91c1c')+'">'+(Number(p.uplift_pct)>=0?'+':'')+Number(p.uplift_pct)+'%</td><td>'+esc(p.note||'')+'</td><td class="c"><button class="pc-del" data-id="'+p.id+'" title="delete" style="color:#dc2626;cursor:pointer;border:none;background:none;font-size:13px">✕</button></td></tr>'; }).join('')||'<tr><td colspan="7" class="mut" style="padding:10px">No price changes yet.</td></tr>';
+  var _fm=function(ym){var s=String(ym||'');var p=s.split('-');if(p.length<2||!p[1])return esc(s);var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];return (MN[+p[1]-1]||p[1])+'-'+p[0].slice(2);};   // YYYY-MM → mmm-yy (house date style)
+  var rows=(PRICE_CHANGES||[]).map(function(p){ return '<tr><td><b>'+esc(p.country)+'</b></td><td>'+(p.channel?esc(p.channel):'<span class="mut">all</span>')+'</td><td>'+(p.subcategory?esc(p.subcategory):'<span class="mut">all</span>')+'</td><td>'+_fm(p.effective_month)+'</td><td style="text-align:left;font-weight:600;color:'+(Number(p.uplift_pct)>=0?'#166534':'#b91c1c')+'">'+(Number(p.uplift_pct)>=0?'+':'')+Number(p.uplift_pct)+'%</td><td>'+esc(p.note||'')+'</td><td><button class="pc-del" data-id="'+p.id+'" title="delete" style="color:#dc2626;cursor:pointer;border:none;background:none;font-size:13px">✕</button></td></tr>'; }).join('')||'<tr><td colspan="7" class="mut" style="padding:10px">No price changes yet.</td></tr>';
   el.innerHTML='<div style="font-size:11px;color:#888;margin-bottom:8px">Definitive price changes lift the revenue forecast (ASP) from the effective month forward — units are unchanged. Country is required; leave channel / subcategory blank for "all". Multiple changes <b>compound</b>.</div>'
     +'<div class="bar" style="gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;padding:8px 10px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px">'
       +'<div><div class="mut tiny">Country</div><select id="pc-co" class="fci">'+CTRS.map(function(c){return '<option>'+c+'</option>';}).join('')+'</select></div>'
       +'<div><div class="mut tiny">Channel</div><select id="pc-ch" class="fci"><option value="">all</option>'+['DTC','FBA','B2B'].map(function(c){return '<option>'+c+'</option>';}).join('')+'</select></div>'
       +'<div><div class="mut tiny">Subcategory</div><input id="pc-sub" class="fci" list="pc-subs" placeholder="all" style="width:170px"></div>'
-      +'<div><div class="mut tiny">From month</div><input id="pc-mon" class="fci" placeholder="YYYY-MM" style="width:90px"></div>'
-      +'<div><div class="mut tiny">Uplift %</div><input id="pc-pct" class="fci" placeholder="+10" style="width:64px;text-align:right"></div>'
+      +'<div><div class="mut tiny">From month</div><input id="pc-mon" type="month" class="fci" style="width:140px"></div>'
+      +'<div><div class="mut tiny">Uplift %</div><input id="pc-pct" class="fci" placeholder="+10" style="width:64px;text-align:left"></div>'
       +'<div style="flex:1;min-width:120px"><div class="mut tiny">Note</div><input id="pc-note" class="fci" placeholder="optional" style="width:100%"></div>'
       +'<button class="pill" id="pc-add" style="background:#dcfce7;color:#166534;border:1px solid #16a34a;font-weight:600">+ Add price change</button>'
       +'<span id="pc-msg" class="mut tiny"></span>'
       +'<datalist id="pc-subs">'+revSubcats().map(function(s){return '<option value="'+esc(s)+'"></option>';}).join('')+'</datalist>'
     +'</div>'
-    +'<table class="rev-tbl"><thead><tr><th>Country</th><th>Channel</th><th>Subcategory</th><th>From</th><th class="r">Uplift</th><th>Note</th><th class="c"></th></tr></thead><tbody>'+rows+'</tbody></table>';
+    +'<table class="rev-tbl"><thead><tr><th>Country</th><th>Channel</th><th>Subcategory</th><th>From</th><th>Uplift</th><th>Note</th><th></th></tr></thead><tbody>'+rows+'</tbody></table>';
   document.getElementById('pc-add').onclick=function(){ var msg=document.getElementById('pc-msg');
     var body={country:document.getElementById('pc-co').value, channel:document.getElementById('pc-ch').value||null, subcategory:(document.getElementById('pc-sub').value||'').trim()||null, effective_month:(document.getElementById('pc-mon').value||'').trim(), uplift_pct:document.getElementById('pc-pct').value.replace(/[^0-9.\-]/g,''), note:(document.getElementById('pc-note').value||'').trim()||null };
     if(!/^\d{4}-\d{2}$/.test(body.effective_month)){ msg.style.color='#dc2626'; msg.textContent='From month must be YYYY-MM.'; return; }
@@ -10019,10 +10020,17 @@ function renderDemandActionsView(body,opts){
           +(shown.length?'<div style="overflow-x:auto;border:1px solid #eef2f7;border-radius:6px"><table style="border-collapse:collapse;font-size:11px;min-width:100%">'+head+rowsHtml+'</table></div>':'<div style="padding:22px;text-align:center;color:#666">No flagged SKUs for this filter.</div>')
           +'<div style="font-size:11px;color:#888;margin-top:8px;line-height:1.5">Flags combine forward <b>anomalies</b> (spike ▲ / dip ▼ vs the SKU’s seasonal flow) and <b>recommendation gaps</b> (leader allocation vs the current forecast, inside off-plan categories). Each forecast cell shows <b>LY</b> (last-year actual), an editable <b>override</b> box, and <b>fc</b> (final forecast — the override if set, else the base plan). When the flag has a recommendation a suggested <b>→ value</b> shows underneath — click it to apply it as the override (binds to your plan + the buy plan). Dismiss to clear a SKU.</div>';
         wireCommon();
-        body.querySelectorAll('.si-ov').forEach(function(inp){ inp.onchange=function(){ var v=inp.value.trim(); skuOvSet(inp.dataset.sku,inp.dataset.co,inp.dataset.ch,inp.dataset.m,(v===''?null:v)); inp.style.borderColor='#16a34a'; inp.style.background='#f0fdf4';
-          var td=inp.closest('td'), fin=td&&td.querySelector('.si-fin'); if(fin){ var nv=(v===''?Number(inp.placeholder||0):Number(v.replace(/[^0-9.\-]/g,''))||0); fin.textContent='fc '+Math.round(nv).toLocaleString(); } }; });
-        body.querySelectorAll('.si-sugg').forEach(function(el){ el.onclick=function(){ var v=el.dataset.v, td=el.closest('td'), inp=td&&td.querySelector('.si-ov'); if(inp){ inp.value=v; inp.style.borderColor='#16a34a'; inp.style.background='#f0fdf4'; }
-          skuOvSet(el.dataset.sku,el.dataset.co,el.dataset.ch,el.dataset.m,v); var fin=td&&td.querySelector('.si-fin'); if(fin)fin.textContent='fc '+Number(v).toLocaleString(); }; });
+        body.querySelectorAll('.si-ov').forEach(function(inp){ inp.onchange=function(){ var v=inp.value.trim();
+          var td=inp.closest('td'), fin=td&&td.querySelector('.si-fin');
+          var _old=fin?(Number(String(fin.textContent).replace(/[^0-9.\-]/g,''))||0):(Number(inp.placeholder||0)||0);   // fc before the edit → change-record "from"
+          skuOvSet(inp.dataset.sku,inp.dataset.co,inp.dataset.ch,inp.dataset.m,(v===''?null:v)); inp.style.borderColor='#16a34a'; inp.style.background='#f0fdf4';
+          var nv=(v===''?Number(inp.placeholder||0):Number(v.replace(/[^0-9.\-]/g,''))||0); if(fin)fin.textContent='fc '+Math.round(nv).toLocaleString();
+          try{ if(typeof logChange==='function'&&Math.round(_old)!==Math.round(nv))logChange('sku',inp.dataset.sku,inp.dataset.co,inp.dataset.ch,inp.dataset.m,'edited forecast (trend gaps)',Math.round(_old),Math.round(nv)); }catch(e){} }; });
+        body.querySelectorAll('.si-sugg').forEach(function(el){ el.onclick=function(){ var v=el.dataset.v, td=el.closest('td'), inp=td&&td.querySelector('.si-ov'), fin=td&&td.querySelector('.si-fin');
+          var _old=fin?(Number(String(fin.textContent).replace(/[^0-9.\-]/g,''))||0):(inp?(Number(inp.placeholder||0)||0):0);   // fc before applying the suggestion
+          if(inp){ inp.value=v; inp.style.borderColor='#16a34a'; inp.style.background='#f0fdf4'; }
+          skuOvSet(el.dataset.sku,el.dataset.co,el.dataset.ch,el.dataset.m,v); var _new=Number(v)||0; if(fin)fin.textContent='fc '+_new.toLocaleString();
+          try{ if(typeof logChange==='function'&&Math.round(_old)!==Math.round(_new))logChange('sku',el.dataset.sku,el.dataset.co,el.dataset.ch,el.dataset.m,'applied suggested (trend gaps)',Math.round(_old),_new); }catch(e){} }; });
         body.querySelectorAll('.si-act').forEach(function(b){ b.onclick=function(){ b.disabled=true; setState(b.dataset.k,b.dataset.s).then(function(j){ if(j&&j.error){alert(j.error);b.disabled=false;return;} load(); }); }; });
         return;
       }

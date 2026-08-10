@@ -1,3 +1,7 @@
+## v26.816.0 Trend Gaps SKU-view logs changes + Price changes tab polish
+- **Trend Gaps ▸ SKU view:** applying a change (editing the override box or clicking the → suggested value) now writes a **change-record entry** to the plan's "R" rail (level `sku`, from → to), so SKU-view applies are audited like everything else.
+- **DEMAND ▸ Inputs ▸ Price changes:** the Uplift header/value and the Uplift input are now **left-aligned** (whole table + form left-aligned); the **From month** field is a proper **month picker** (`type="month"`, still stores YYYY-MM); the table's From column shows **mmm-yy** (e.g. Aug-26) per the house date style.
+
 ## v26.815.0 Payments final-invoice debounce + "Create Purchase Orders" button
 - **Final invoice amount** field: the live "no final-payment-due" red flag now waits ~1s after you stop typing instead of firing on every keystroke, so the field no longer flashes/reacts while you're still typing the amount. (The save/recompute already happens on blur.)
 - BUY buy-plan button renamed **"🏭 Build production" → "🏭 Create Purchase Orders"** and recoloured to dark blue (#1e3a8a).
