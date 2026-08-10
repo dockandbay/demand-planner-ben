@@ -1,3 +1,26 @@
+## v26.791.0 Deposits Drawdown — 2dp · AU re-based at Sep-2024 · hide pre-Dec-2024 toggle
+- Matrix, totals and hover show **2 decimal places** in both currencies.
+- **AU column re-based to 0 at Sep-2024**: the AU running balance starts from zero at Sep-2024 and tracks the **net change since** (pre-Sep-2024 paid-in excluded from the AU total; all transactions retained, so pre-Sep months read relative to that baseline). Non-AU columns unchanged.
+- **Months before Dec-2024 hidden by default**, with a **Show / Hide pre-Dec 2024** toggle.
+
+## v26.790.0 CONFIG ▸ Batches — delete a batch (only when no POs linked)
+- Each batch row in CONFIG ▸ Batches now has a **✕ Delete** button, shown **only when no POs are linked** to that batch; linked batches show a 🔒 "N PO(s) linked" lock instead. Server `POST /api/supply/batch-delete/:batch` double-checks and returns 409 if any PO references it. The batches list now returns `po_count`.
+
+## v26.789.0 Deposits Drawdown — currency (USD default + GBP toggle, source in export)
+- Amounts are now **currency-aware**: each deposit/drawdown is in its **supplier's currency** (mostly USD); non-USD is **normalised to USD** using the CONFIG blended FX rates (GBP→ccy per FY + GBP→USD). Server returns USD-normalised balances + each transaction's source currency/amount + USD, and the blended `gbpRate`.
+- **USD / GBP toggle** (default USD) — GBP = USD ÷ blended rate. Header/cells/footer + hover totals convert; a "Values in USD/GBP" note shows the active currency.
+- **Transactions export** now carries **Currency · Amount (source) · Amount USD · Amount GBP** (per-column ⬇ and the full export); summary export is in the selected currency. Popover shows each transaction in its **source currency** (symbol + 2dp) with dd-mmm-yy dates.
+
+## v26.788.0 Deposits Drawdown — per-column transactions download
+- Each production/AU column header now has a small **⬇** button that downloads a CSV of **only that column's transactions** (same format as the full All-transactions export: Deposit Prod · Ref · Amount · Date · PO).
+
+## v26.787.0 Deposits Drawdown — popup dates dd-mmm-yy
+- Transaction dates in the per-cell popover now render **dd-mmm-yy** (via `fd()`), per the house date format.
+
+## v26.786.0 Deposits Drawdown — hide-AU trims empty months + popup 2dp
+- With **Hide AU** on, months that no longer have any balance across the remaining (non-AU) columns are **dropped** from the matrix (no empty rows).
+- Per-cell transactions popover amounts now show **2 decimal places**.
+
 ## v26.785.0 Deposits Drawdown — AU show/hide pill + per-cell transactions popover
 - **Hide / Show AU** pill toggles the pooled AU column in/out (client-side, no refetch).
 - **Per-cell transactions popover:** hovering a matrix cell for **300ms** shows the paid-in + drawdown transactions that moved that production/AU column **in that month** — each on its own line (amount · PO · ref · date). The popover **persists** (doesn't vanish on mouse-out) and its text is **selectable/copyable**; click outside to dismiss. Cells highlight on hover.

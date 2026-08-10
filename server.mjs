@@ -2541,38 +2541,50 @@ function invalidateSupplyCaches() {
 app.get('/api/supply/deposit-drawdown', async (_req, res) => {
   try {
     const deps = (await pool.query(`
-      SELECT reference, coalesce(prod_no,'') prod_no, upper(coalesce(country,'')) country, round(coalesce(amount,0),2) amount,
-             to_char(date_paid,'YYYY-MM') paid_month, to_char(date_paid,'YYYY-MM-DD') paid_date
-      FROM planner.deposits
-      WHERE coalesce(is_deposit,false)=true
-        AND (upper(coalesce(country,''))='AU'
-             OR (regexp_replace(coalesce(prod_no,''),'[^0-9]','','g') ~ '^[0-9]+$'
-                 AND regexp_replace(prod_no,'[^0-9]','','g')::int >= 48))`)).rows;
+      SELECT d.reference, coalesce(d.prod_no,'') prod_no, upper(coalesce(d.country,'')) country, round(coalesce(d.amount,0),2) amount,
+             upper(coalesce(s.default_currency,'USD')) ccy,
+             to_char(d.date_paid,'YYYY-MM') paid_month, to_char(d.date_paid,'YYYY-MM-DD') paid_date
+      FROM planner.deposits d LEFT JOIN planner.suppliers s ON s.id=d.supplier_id
+      WHERE coalesce(d.is_deposit,false)=true
+        AND (upper(coalesce(d.country,''))='AU'
+             OR (regexp_replace(coalesce(d.prod_no,''),'[^0-9]','','g') ~ '^[0-9]+$'
+                 AND regexp_replace(d.prod_no,'[^0-9]','','g')::int >= 48))`)).rows;
     const draws = (await pool.query(`
       SELECT deposit_ref ref, po, round(coalesce(pay_start_deposit_assigned,0),2) amt,
              to_char(pay_start_deposit_date,'YYYY-MM') mth, to_char(pay_start_deposit_date,'YYYY-MM-DD') dt
       FROM planner.purchase_orders
       WHERE coalesce(deposit_ref,'')<>'' AND pay_start_deposit_assigned IS NOT NULL AND pay_start_deposit_assigned<>0`)).rows;
+    // Currency: each deposit is in its supplier's currency (mostly USD). Normalise everything to USD using the
+    // CONFIG blended rates (fx_rates, GBP→ccy per FY) + the GBP→USD blended rate. The client toggles USD↔GBP.
+    const rUSD = await gbpRate();                       // USD per GBP (~1.34)
+    let fxLocal = {}; try { const fr = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='fx_rates'`)).rows[0]; const o = fr && fr.value ? JSON.parse(fr.value) : {}; const fys = Object.keys(o).sort(); fxLocal = o[fys[fys.length - 1]] || {}; } catch (e) { /* leave default */ }
+    const gbpTo = (c) => c === 'GBP' ? 1 : c === 'USD' ? rUSD : (Number(fxLocal[c]) || rUSD);   // GBP→ccy (unknown → treat as USD)
+    const toUsd = (amt, c) => c === 'USD' ? amt : amt * rUSD / gbpTo(c);
+    const AU_RESET = '2024-09';   // AU pool is "zeroed out" at Sep-2024 — its balance re-bases to 0 there and tracks the net change since
     // Group columns by PRODUCTION ref — all AU deposits collapse into a single "AU" column; every other
     // deposit is keyed by its production number (multiple deposits sharing a prod # merge into one column).
-    const cols = {}, refToCol = {};
+    const cols = {}, refToCol = {}, refToCcy = {};
     const colKeyFor = (d) => d.country === 'AU' ? 'AU' : (d.prod_no || '—');
-    deps.forEach(d => { const isAu = d.country === 'AU'; const key = colKeyFor(d); refToCol[d.reference] = key;
+    deps.forEach(d => { const isAu = d.country === 'AU'; const key = colKeyFor(d); const ccy = d.ccy || 'USD'; refToCol[d.reference] = key; refToCcy[d.reference] = ccy;
       let c = cols[key];
       if (!c) c = cols[key] = { key, prod: key, isAu, prodNum: isAu ? -1 : (/^[0-9]+$/.test(String(d.prod_no||'').replace(/[^0-9]/g,'')) ? parseInt(String(d.prod_no).replace(/[^0-9]/g,''),10) : 999999), country: isAu ? 'AU' : (d.country || ''), paid: 0, nDeps: 0, mov: {} };
-      c.nDeps++; c.paid += Number(d.amount || 0);
-      if (d.paid_month) c.mov[d.paid_month] = (c.mov[d.paid_month] || 0) + Number(d.amount || 0); });
+      c.nDeps++; const usd = toUsd(Number(d.amount || 0), ccy); const pm = d.paid_month || '';
+      if (!(isAu && pm && pm < AU_RESET)) c.paid += usd;              // AU pre-Sep-2024 paid-in excluded from the post-reset "paid" total
+      if (pm) c.mov[pm] = (c.mov[pm] || 0) + usd; });                 // keep ALL movements — the AU offset below uses the pre-reset sum
     const tx = [];
-    deps.forEach(d => { if (Number(d.amount) > 0) tx.push({ prod: refToCol[d.reference], ref: d.reference, amount: Number(d.amount), date: d.paid_date || '', po: '', kind: 'deposit paid' }); });
-    draws.forEach(x => { const key = refToCol[x.ref]; if (!key) return; const c = cols[key]; if (x.mth) c.mov[x.mth] = (c.mov[x.mth] || 0) - Number(x.amt || 0);
-      tx.push({ prod: key, ref: x.ref, amount: -Number(x.amt || 0), date: x.dt || '', po: x.po || '', kind: 'drawdown' }); });
+    deps.forEach(d => { if (Number(d.amount) > 0) { const ccy = d.ccy || 'USD'; const usd = toUsd(Number(d.amount), ccy); tx.push({ prod: refToCol[d.reference], ref: d.reference, ccy, amount: Math.round(Number(d.amount) * 100) / 100, usd: Math.round(usd * 100) / 100, date: d.paid_date || '', po: '', kind: 'deposit paid' }); } });
+    draws.forEach(x => { const key = refToCol[x.ref]; if (!key) return; const ccy = refToCcy[x.ref] || 'USD'; const usd = toUsd(Number(x.amt || 0), ccy); const c = cols[key]; if (x.mth) c.mov[x.mth] = (c.mov[x.mth] || 0) - usd;
+      tx.push({ prod: key, ref: x.ref, ccy, amount: -(Math.round(Number(x.amt || 0) * 100) / 100), usd: -(Math.round(usd * 100) / 100), date: x.dt || '', po: x.po || '', kind: 'drawdown' }); });
     const mset = new Set(); Object.values(cols).forEach(c => Object.keys(c.mov).forEach(m => mset.add(m)));
     const months = [...mset].filter(Boolean).sort();
     const columns = Object.values(cols).sort((a, b) => (b.isAu - a.isAu) || (a.prodNum - b.prodNum) || (a.key < b.key ? -1 : 1));
     const balances = {};
-    columns.forEach(c => { let run = 0; balances[c.key] = {}; months.forEach(m => { run += (c.mov[m] || 0); balances[c.key][m] = Math.round(run * 100) / 100; }); c.remaining = Math.round(run * 100) / 100; c.drawn = Math.round((c.paid - run) * 100) / 100; c.paid = Math.round(c.paid * 100) / 100; });
+    columns.forEach(c => { let run = 0, offset = 0;
+      if (c.isAu) months.forEach(m => { if (m < AU_RESET) offset += (c.mov[m] || 0); });   // AU: re-base to 0 at Sep-2024
+      balances[c.key] = {}; months.forEach(m => { run += (c.mov[m] || 0); balances[c.key][m] = Math.round((run - offset) * 100) / 100; });
+      c.remaining = Math.round((run - offset) * 100) / 100; c.drawn = Math.round((c.paid - c.remaining) * 100) / 100; c.paid = Math.round(c.paid * 100) / 100; });
     tx.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.ref < b.ref ? -1 : 1)));
-    res.json({ months, columns: columns.map(({ mov, prodNum, ...c }) => c), balances, transactions: tx });
+    res.json({ months, columns: columns.map(({ mov, prodNum, ...c }) => c), balances, transactions: tx, gbpRate: rUSD });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/:section', async (req, res) => {
@@ -3046,8 +3058,10 @@ app.get('/api/supply/:section', async (req, res) => {
           deposits: p.prod_deposits || p.po_deposits || '' })));
       }
       case 'batches':
-        return res.json(await q(`SELECT batch,to_char(batch_date,'YYYY-MM-DD') batch_date,
-          first_release_window,notes FROM planner.batches ORDER BY batch_date DESC NULLS LAST`));
+        return res.json(await q(`SELECT b.batch,to_char(b.batch_date,'YYYY-MM-DD') batch_date,
+          b.first_release_window,b.notes,
+          (SELECT count(*) FROM planner.purchase_orders po WHERE po.batch_id=b.batch)::int po_count
+          FROM planner.batches b ORDER BY b.batch_date DESC NULLS LAST`));
       case 'prod-numbers':   // CONFIG ▸ Productions: raw prod_numbers master + PO/supplier counts (editable via /prod-number/:id)
         return res.json(await q(`
           SELECT pn.id, pn.prod_no, coalesce(pn.status,'') status, coalesce(pn.xero_account_code,'') xero_account_code,
@@ -3660,6 +3674,16 @@ app.post('/api/supply/batch-create', async (req, res) => {
     if (dup.rowCount) return res.status(409).json({ error: 'batch ' + batch + ' already exists' });
     await pool.query(`INSERT INTO planner.batches (batch, batch_date) VALUES ($1,$2)`, [batch, b.batch_date || null]);
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Delete a batch — ONLY if no PO is linked to it (guarded server-side; the UI also hides the button when POs exist).
+app.post('/api/supply/batch-delete/:batch', async (req, res) => {
+  const batch = req.params.batch;
+  try {
+    const n = (await pool.query(`SELECT count(*)::int n FROM planner.purchase_orders WHERE batch_id=$1`, [batch])).rows[0].n;
+    if (n > 0) return res.status(409).json({ error: 'Cannot delete — ' + n + ' PO' + (n === 1 ? '' : 's') + ' linked to batch ' + batch });
+    const r = await pool.query(`DELETE FROM planner.batches WHERE batch=$1`, [batch]);
+    res.json({ ok: true, deleted: r.rowCount });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Create a production number (registers it in prod_numbers so it's pickable; a PO joins a production by

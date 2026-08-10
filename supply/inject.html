@@ -691,7 +691,7 @@
   #supply-root #op-filters .bar{gap:2px 3px;margin-bottom:5px}
   #supply-root #op-filters .pill-lbl{margin:0 3px 0 0!important;font-size:11px}
   #supply-root #op-filters .pill{padding:3px 7px;margin:2px 3px 2px 0;font-size:11px}
-  #supply-root #op-filters select.flt{width:calc(50% - 48px)!important;min-width:88px;padding:3px 4px!important}
+  #supply-root #op-filters select.flt{width:calc(50% - 48px)!important;min-width:74px;padding:3px 4px!important}
   #supply-root #op-filters #op-prod,#supply-root #op-filters #op-batch{width:92px!important;min-width:92px}   /* PROD# / Batch hold short codes — narrower */
   #supply-root #op-filters .op-hint{display:none}   /* drop the "completed POs: search…" hint on mobile to save a line */
   #supply-root #op-count{font-size:11px;text-align:right}   /* count + Load-more/Show-all, right-aligned above the table; kept on mobile so Load-more is reachable */
@@ -6164,11 +6164,14 @@
             else { sb.textContent='✓ Sent'; alert('Reminder sent to: '+((j.emails||[]).join(', ')||'(none)')); } })
           .catch(function(e){ alert('Send failed: '+(e.message||e)); sb.disabled=false; sb.textContent='✉ Send reminder email'; }); };
     }
-    function batchTbl(rows){ var body=rows.map(function(r){ var ep='/api/supply/batch/'+encodeURIComponent(r.batch);
+    function batchTbl(rows){ var body=rows.map(function(r){ var ep='/api/supply/batch/'+encodeURIComponent(r.batch); var pc=Number(r.po_count)||0;
       return '<tr><td class="l"><b>'+esc(r.batch)+'</b></td><td class="l">'+editCell(ep,'batch_date',r.batch_date,'date')+'</td>'
-        +'<td class="l">'+editCell(ep,'first_release_window',r.first_release_window,'txt')+'</td><td class="l">'+editCell(ep,'notes',r.notes,'txt')+'</td></tr>';}).join('');
+        +'<td class="l">'+editCell(ep,'first_release_window',r.first_release_window,'txt')+'</td><td class="l">'+editCell(ep,'notes',r.notes,'txt')+'</td>'
+        +'<td class="l">'+(pc>0
+            ? '<span class="mut" title="'+pc+' PO'+(pc===1?'':'s')+' linked — cannot delete">🔒 '+pc+' PO'+(pc===1?'':'s')+'</span>'
+            : '<button class="tool-badge bg-red del-batch" data-batch="'+esc(r.batch)+'" style="cursor:pointer;border:none" title="Delete this batch (no POs linked)">✕ Delete</button>')+'</td></tr>';}).join('');
       return '<div class="sect-h">Batches — buying batches <button class="tool-badge bg-blue" id="batch-new" style="cursor:pointer;border:none;margin-left:8px">+ Batch</button></div>'
-        +'<div class="tw" style="max-width:760px"><table><thead><tr><th class="l">Batch</th><th class="l">Date</th><th class="l">First release window</th><th class="l">Notes</th></tr></thead><tbody>'+body+'</tbody></table></div>'; }
+        +'<div class="tw" style="max-width:820px"><table><thead><tr><th class="l">Batch</th><th class="l">Date</th><th class="l">First release window</th><th class="l">Notes</th><th class="l"></th></tr></thead><tbody>'+body+'</tbody></table></div>'; }
     // Products master — read-only. First column (SKU) is sticky (stays visible while scrolling right); header row
     // is sticky on top; columns are widened so headers + values are readable.
     // Read-only products table (sticky SKU column + header). cols/rows passed in so the view can filter.
@@ -6617,7 +6620,9 @@
       SUBS['batches']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/batches').then(function(r){return r.json();}).then(function(rows){ b.innerHTML=batchTbl(rows); bindEdits();
           document.getElementById('batch-new').onclick=function(){ var nm=prompt('New batch name:'); if(!nm||!nm.trim())return;
-            shipPost('/api/supply/batch-create',{batch:nm.trim()},showSub); }; }); };
+            shipPost('/api/supply/batch-create',{batch:nm.trim()},showSub); };
+          b.querySelectorAll('.del-batch').forEach(function(btn){ btn.onclick=function(){ var bn=btn.getAttribute('data-batch'); if(!confirm('Delete batch '+bn+'? This cannot be undone.'))return;
+            fetch('/api/supply/batch-delete/'+encodeURIComponent(bn),{method:'POST'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} try{_lookupsAt=0;}catch(e){} showSub(); }).catch(function(e){ alert('Delete failed: '+e); }); }; }); }); };
       SUBS['productions']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/prod-numbers').then(function(r){return r.json();}).then(function(rows){ b.innerHTML=prodNumTbl(rows);
           wireEditTbl('productions', function(k){return '/api/supply/prod-number/'+k;}, showSub);
@@ -7961,9 +7966,15 @@
   // (Removed dead payRegister + bindRunRecalc — old payment-runs register, superseded by renderPaymentsReport. v25.652)
 
   // Deposits Drawdown — per-deposit burn-down matrix (months = rows, deposits = columns, running balance) + exports.
-  var DD_HIDE_AU=false;
+  var DD_HIDE_AU=false, DD_CCY='USD', DD_SHOW_ALL=false;
   function renderDepositDrawdown(b,d){
     var months=d.months||[], allCols=d.columns||[], cols=DD_HIDE_AU?allCols.filter(function(c){return !c.isAu;}):allCols, bal=d.balances||{}, tx=d.transactions||[];
+    if(!DD_SHOW_ALL){ months=months.filter(function(mo){ return mo>='2024-12'; }); }   // default: hide months before Dec-2024 (toggle to reveal)
+    if(DD_HIDE_AU){ months=months.filter(function(mo){ return cols.some(function(c){ return bal[c.key]&&Math.round(bal[c.key][mo]||0)!==0; }); }); }   // drop months with no balance across the remaining (non-AU) columns
+    var rUSD=Number(d.gbpRate)||1.34;                                  // USD per GBP (CONFIG blended)
+    var CSYM={USD:'$',GBP:'£',EUR:'€',AUD:'A$'};                        // source-currency symbols for the popover/export
+    var cvt=function(usd){ return DD_CCY==='GBP'?(Number(usd||0)/rUSD):Number(usd||0); };   // server sends USD; GBP = USD ÷ blended rate
+    var fmtV=function(usd){ return (usd==null||usd==='')?'':cvt(usd).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); };
     var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     var ml=function(m){ var p=String(m).split('-'); return (MN[+p[1]-1]||p[1])+'-'+p[0].slice(2); };
     var m0=function(v){ return (v==null||v==='')?'':Math.round(Number(v)).toLocaleString(); };
@@ -7971,35 +7982,42 @@
     var auN=cols.filter(function(c){return c.isAu;}).length;
     var sepAt=function(i){ return (auN>0&&i===auN)?';border-left:3px solid #0f172a':''; };
     var head='<tr><th style="position:sticky;left:0;top:0;background:#e9eef5;z-index:4;text-align:left;padding:4px 8px;font-size:10px;color:#475569">Month</th>'
-      +cols.map(function(c,i){ return '<th style="position:sticky;top:0;z-index:3;padding:4px 6px;text-align:right;font-size:9px;white-space:nowrap;min-width:74px;background:'+(c.isAu?'#eef2ff':'#f8fafc')+sepAt(i)+'" title="'+esc(c.prod)+(c.country?' · '+c.country:'')+' — '+c.nDeps+' deposit'+(c.nDeps===1?'':'s')+' · paid '+m0(c.paid)+' / drawn '+m0(c.drawn)+' / remaining '+m0(c.remaining)+'"><div style="font-weight:800;color:#0f172a">'+esc(c.prod)+'</div><div style="color:#94a3b8;font-weight:400;font-size:8px">'+c.nDeps+' dep'+(c.nDeps===1?'':'s')+'</div></th>'; }).join('')+'</tr>';
+      +cols.map(function(c,i){ return '<th style="position:sticky;top:0;z-index:3;padding:4px 6px;text-align:right;font-size:9px;white-space:nowrap;min-width:88px;background:'+(c.isAu?'#eef2ff':'#f8fafc')+sepAt(i)+'" title="'+esc(c.prod)+(c.country?' · '+c.country:'')+' — '+c.nDeps+' deposit'+(c.nDeps===1?'':'s')+' · paid '+CSYM[DD_CCY]+fmtV(c.paid)+' / drawn '+CSYM[DD_CCY]+fmtV(c.drawn)+' / remaining '+CSYM[DD_CCY]+fmtV(c.remaining)+'"><div style="font-weight:800;color:#0f172a">'+esc(c.prod)+'</div><div style="color:#94a3b8;font-weight:400;font-size:8px">'+c.nDeps+' dep'+(c.nDeps===1?'':'s')+'</div><button class="dd-col-dl" data-ddcol="'+esc(c.key)+'" title="Download transactions for '+esc(c.prod)+'" style="margin-top:3px;font-size:9px;line-height:1;padding:1px 5px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer">⬇</button></th>'; }).join('')+'</tr>';
     var rowsH=months.map(function(mo){ return '<tr><td style="position:sticky;left:0;background:#fff;z-index:1;text-align:left;padding:3px 8px;font-weight:600;font-size:11px;white-space:nowrap">'+ml(mo)+'</td>'
-      +cols.map(function(c,i){ var v=bal[c.key]?bal[c.key][mo]:null; var col=(v<0?'#b91c1c':(v>0?'#166534':'#cbd5e1')); return '<td class="ddcell" data-ddk="'+esc(c.key)+'|'+mo+'" style="padding:3px 6px;text-align:right;font-variant-numeric:tabular-nums;font-size:11px;min-width:74px;color:'+col+sepAt(i)+'">'+(v?m0(v):'·')+'</td>'; }).join('')+'</tr>'; }).join('');
+      +cols.map(function(c,i){ var v=bal[c.key]?bal[c.key][mo]:null; var col=(v<0?'#b91c1c':(v>0?'#166534':'#cbd5e1')); return '<td class="ddcell" data-ddk="'+esc(c.key)+'|'+mo+'" style="padding:3px 6px;text-align:right;font-variant-numeric:tabular-nums;font-size:11px;min-width:88px;color:'+col+sepAt(i)+'">'+(v?fmtV(v):'·')+'</td>'; }).join('')+'</tr>'; }).join('');
     var foot='<tr style="border-top:2px solid #cbd5e1"><td style="position:sticky;left:0;background:#f8fafc;z-index:1;text-align:left;padding:3px 8px;font-weight:700;font-size:10px">Remaining</td>'
-      +cols.map(function(c,i){ var col=(c.remaining<0?'#b91c1c':'#166534'); return '<td style="padding:3px 6px;text-align:right;font-variant-numeric:tabular-nums;font-size:11px;font-weight:700;min-width:74px;color:'+col+sepAt(i)+'">'+m0(c.remaining)+'</td>'; }).join('')+'</tr>';
-    function summaryRows(){ return months.map(function(mo){ var o={Month:mo}; cols.forEach(function(c){ o[c.prod]=(bal[c.key]&&bal[c.key][mo]!=null)?bal[c.key][mo]:''; }); return o; }); }
-    function txRows(){ return tx.map(function(t){ return {'Deposit Prod':t.prod,'Deposit Ref':t.ref,'Amount':t.amount,'Date':t.date,'PO':t.po}; }); }
+      +cols.map(function(c,i){ var col=(c.remaining<0?'#b91c1c':'#166534'); return '<td style="padding:3px 6px;text-align:right;font-variant-numeric:tabular-nums;font-size:11px;font-weight:700;min-width:88px;color:'+col+sepAt(i)+'">'+fmtV(c.remaining)+'</td>'; }).join('')+'</tr>';
+    function summaryRows(){ return months.map(function(mo){ var o={Month:mo}; cols.forEach(function(c){ o[c.prod+' ('+DD_CCY+')']=(bal[c.key]&&bal[c.key][mo]!=null)?Math.round(cvt(bal[c.key][mo])*100)/100:''; }); return o; }); }
+    function txRows(){ return tx.map(function(t){ return {'Deposit Prod':t.prod,'Deposit Ref':t.ref,'Currency':t.ccy,'Amount (source)':t.amount,'Amount USD':t.usd,'Amount GBP':(t.usd==null?'':Math.round((t.usd/rUSD)*100)/100),'Date':fd(t.date),'PO':t.po}; }); }
     b.innerHTML='<div style="font-size:13px;font-weight:700;margin-bottom:2px">Deposits Drawdown</div>'
-      +'<div style="font-size:11px;color:#94a3b8;margin-bottom:8px">Burn-down grouped by <b>production ref</b> (all AU deposits under one <b>AU</b> column) — paid in (＋), then each PO’s starting deposit <b>draws it down</b> (－); each cell is the running balance that month. Production #48 onward, AU first. '+cols.length+' columns · '+months.length+' months — scroll → for more.</div>'
+      +'<div style="font-size:11px;color:#94a3b8;margin-bottom:8px">Burn-down grouped by <b>production ref</b> (all AU deposits under one <b>AU</b> column) — paid in (＋), then each PO’s starting deposit <b>draws it down</b> (－); each cell is the running balance that month. Production #48 onward, AU first. '+cols.length+' columns · '+months.length+' months — scroll → for more. Values in <b>'+DD_CCY+'</b> (non-USD normalised at the blended rate).</div>'
       +'<div class="bar" style="gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'
         +'<span class="tiny mut">Summary table:</span><button class="save-btn" id="dd-sum-copy" title="Copy the burn-down matrix">⧉</button><button class="save-btn" id="dd-sum-csv" style="background:#dcfce7;color:#166534;border-color:#16a34a" title="Download the matrix CSV">⬇ CSV</button>'
         +'<span class="tiny mut" style="margin-left:8px">All transactions:</span><button class="save-btn" id="dd-tx-copy" title="Copy every paid-in + drawdown">⧉</button><button class="save-btn" id="dd-tx-csv" style="background:#dcfce7;color:#166534;border-color:#16a34a" title="Download the transactions CSV">⬇ CSV</button>'
-        +'<button class="save-btn" id="dd-au-toggle" style="margin-left:auto" title="Hide or show the pooled AU column">'+(DD_HIDE_AU?'Show AU':'Hide AU')+'</button>'
+        +'<span class="tiny mut" style="margin-left:8px">Values:</span><button class="save-btn" id="dd-ccy-usd" title="Show values in USD" style="'+(DD_CCY==='USD'?'background:#0f172a;color:#fff;border-color:#0f172a':'')+'">USD $</button><button class="save-btn" id="dd-ccy-gbp" title="Show values in GBP (blended rate)" style="'+(DD_CCY==='GBP'?'background:#0f172a;color:#fff;border-color:#0f172a':'')+'">GBP £</button>'
+        +'<button class="save-btn" id="dd-showall" style="margin-left:auto" title="Show or hide months before Dec-2024">'+(DD_SHOW_ALL?'Hide pre-Dec 2024':'Show pre-Dec 2024')+'</button>'
+        +'<button class="save-btn" id="dd-au-toggle" title="Hide or show the pooled AU column">'+(DD_HIDE_AU?'Show AU':'Hide AU')+'</button>'
       +'</div>'
       +'<style>.dd-scroll td.ddcell{cursor:help}.dd-scroll td.ddcell:hover{background:#fef9c3}</style>'
       +'<div class="dd-scroll" style="overflow:auto;max-height:70vh;border:1px solid #e5e7eb;border-radius:6px"><table style="border-collapse:collapse;font-size:11px"><thead>'+head+'</thead><tbody>'+rowsH+foot+'</tbody></table></div>'
       +'<div style="font-size:10px;color:#94a3b8;margin-top:6px">Red = negative balance (drawdowns exceed the paid-in recorded for that production/AU column — worth a check). Hover a column header for paid / drawn / remaining. Transactions export = prod · ref · amount (− for a drawdown) · date · PO (drawdowns only).</div>';
     var q=function(id){ return b.querySelector('#'+id); };
     q('dd-sum-copy').onclick=function(){ copyRows(summaryRows(),'Deposits drawdown — summary'); };
-    q('dd-sum-csv').onclick=function(){ csv(summaryRows(),'deposits_drawdown_summary.csv'); };
+    q('dd-sum-csv').onclick=function(){ csv(summaryRows(),'deposits_drawdown_summary_'+DD_CCY+'.csv'); };
     q('dd-tx-copy').onclick=function(){ copyRows(txRows(),'Deposits drawdown — transactions'); };
     q('dd-tx-csv').onclick=function(){ csv(txRows(),'deposits_drawdown_transactions.csv'); };
     var _au=q('dd-au-toggle'); if(_au)_au.onclick=function(){ DD_HIDE_AU=!DD_HIDE_AU; renderDepositDrawdown(b,d); };
+    var _sa=q('dd-showall'); if(_sa)_sa.onclick=function(){ DD_SHOW_ALL=!DD_SHOW_ALL; renderDepositDrawdown(b,d); };
+    var _cu=q('dd-ccy-usd'), _cg=q('dd-ccy-gbp'); if(_cu)_cu.onclick=function(){ DD_CCY='USD'; renderDepositDrawdown(b,d); }; if(_cg)_cg.onclick=function(){ DD_CCY='GBP'; renderDepositDrawdown(b,d); };
+    b.querySelectorAll('.dd-col-dl').forEach(function(btn){ btn.onclick=function(e){ e.stopPropagation(); var key=btn.getAttribute('data-ddcol');
+      var rows=tx.filter(function(t){ return t.prod===key; }).map(function(t){ return {'Deposit Prod':t.prod,'Deposit Ref':t.ref,'Currency':t.ccy,'Amount (source)':t.amount,'Amount USD':t.usd,'Amount GBP':(t.usd==null?'':Math.round((t.usd/rUSD)*100)/100),'Date':fd(t.date),'PO':t.po}; });
+      csv(rows,'deposits_drawdown_'+String(key).replace(/[^a-z0-9]+/gi,'_')+'.csv'); }; });
     // Per-cell transactions popover: 300ms hover, persists (doesn't hide on mouse-out) so it can be selected/copied.
     (function(){ var host=b.querySelector('.dd-scroll'); if(!host)return; var tmr=null, cur=null;
       function closePop(){ var p=document.getElementById('dd-txpop'); if(p)p.remove(); cur=null; }
       function showPop(td){ var k=td.getAttribute('data-ddk'), arr=txByCell[k]||[], parts=k.split('|'); closePop();
-        var lines=arr.length?arr.map(function(t){ var s=(t.amount<0?'−':'＋'), amt=Math.abs(Math.round(t.amount)).toLocaleString();
-            return t.amount<0?('drawdown  '+s+amt+(t.po?('  '+t.po):'')+'  · ref '+t.ref+'  · '+t.date):('deposit paid  '+s+amt+'  · ref '+t.ref+'  · '+t.date); }).join('\n')
+        var lines=arr.length?arr.map(function(t){ var s=(t.amount<0?'−':'＋'), amt=(CSYM[t.ccy]||'')+Math.abs(Number(t.amount)).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+            return t.amount<0?('drawdown  '+s+amt+(t.po?('  '+t.po):'')+'  · ref '+t.ref+'  · '+fd(t.date)):('deposit paid  '+s+amt+'  · ref '+t.ref+'  · '+fd(t.date)); }).join('\n')
           :'no transactions this month (balance carried forward)';
         var pop=document.createElement('div'); pop.id='dd-txpop';
         pop.style.cssText='position:fixed;z-index:100080;max-width:400px;background:#0f172a;color:#e5e7eb;font-size:11px;line-height:1.55;padding:8px 10px;border-radius:8px;box-shadow:0 8px 26px rgba(0,0,0,.35);-webkit-user-select:text;user-select:text;white-space:pre-wrap;max-height:52vh;overflow:auto';
