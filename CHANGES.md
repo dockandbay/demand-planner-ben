@@ -1,3 +1,7 @@
+## v26.836.0 BUY plan — inbound PO links in the plan popup now open the PO drawer
+- In the BUY plan SKU popup, clicking an **Inbound** cell opens the copyable inbound popover whose lines carry the **PO reference as a blue link**. Clicking that ref did **nothing** — the demand/buy artifact called `window.openPODrawer`, which only existed inside the SUPPLY IIFE (never exposed). Now `openPODrawer`/`closePODrawer` are exposed on `window`, and when opened from DEMAND/BUY (SUPPLY hidden) the drawer opens in a new **overlay mode**: `#supply-root` is revealed *only* to host the fixed drawer (all other supply content hidden), so the PO drawer floats **above the plan popup** (z100002 > 9000) and closing it returns you to the plan. Same fix covers the FBA-inbound cell's `.fba-inb-po` links.
+- Inbound lines with **no PO** stay plain text (no blue link) — already the case (`inbLineHtml` only renders the `<a class="inb-po">` when a shipment ref exists; the "Buy Plan Assumed" line has none).
+
 ## v26.835.0 Key Accounts input — "add SKU" is now an ACTIVE-only, multi-add search
 - On **DEMAND ▸ Inputs ▸ Key Accounts**, the per-client "+ add SKU…" box now (a) only lists **active products** (`products.status='ACTIVE'`, new `st` field on the SKU data), and (b) is **multi-add**: after clicking a SKU it stays on the same search text and re-opens the dropdown (the just-added SKU drops out), so several SKUs can be added in a row without re-clicking the box. Already-queued SKUs are filtered out of results.
 

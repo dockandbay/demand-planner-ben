@@ -5713,7 +5713,7 @@ function _etaShort(d){ if(!d)return 'TBC'; var p=String(d).split('-'); if(p.leng
   var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return (+p[2])+' '+(mn[(+p[1])-1]||'')+" '"+p[0].slice(2); }
 // Inbound-line PO ref (in the SKU popup inbound tooltip) → open that PO. Delegated so it works on lines rendered
 // inside hover tooltips. Opens the PO drawer if available, else navigates to the SUPPLY PO grid.
-document.addEventListener('click',function(e){ var a=e.target&&e.target.closest?e.target.closest('.inb-po[data-po]'):null; if(!a)return; e.preventDefault(); e.stopPropagation(); var po=a.getAttribute('data-po'); if(!po)return; if(window.openPODrawer){ try{ window.openPODrawer(po); return; }catch(_){} } location.hash='#/supply/purchase-orders/'+encodeURIComponent(po); });
+document.addEventListener('click',function(e){ var a=e.target&&e.target.closest?e.target.closest('.inb-po[data-po]'):null; if(!a)return; e.preventDefault(); e.stopPropagation(); var po=a.getAttribute('data-po'); if(!po)return; try{if(window.hideInbPop)hideInbPop();}catch(_){} if(window.openPODrawer){ try{ window.openPODrawer(po); return; }catch(_){} } location.hash='#/supply/purchase-orders/'+encodeURIComponent(po); });
 // The ">>inbound" div, with a next-arrival sub-line + hover tooltip (data-tip) listing all shipments.
 function inbDiv(inb, entries, color){
   var base='color:'+(color||'#94a3b8');

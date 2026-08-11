@@ -267,6 +267,12 @@
 #supply-root #shipdrawer,#supply-root #podrawer{position:absolute;top:0;right:0;height:100%;width:clamp(min(920px,94vw), 65vw, 94vw);background:#fff;box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1)}
 #supply-root #shipdrawer-bg.open #shipdrawer,#supply-root #podrawer-bg.open #podrawer{transform:translateX(0)}
 #supply-root #podrawer-bg{z-index:100002}   /* above the consolidation modal (z100001) so a PO opened from it is visible */
+/* Drawer-overlay mode: PO drawer opened from DEMAND/BUY (supply hidden). supply-root is shown ONLY to host the
+   fixed drawer overlay — every other supply child is hidden, so the drawer floats over the current view (e.g. the
+   BUY plan popup) and closing it returns you there. No positioning on supply-root itself → the drawer's fixed
+   z-index (100002) still beats the plan popup (z9000). */
+#supply-root.hz-drawer-overlay{display:block!important;padding:0!important}
+#supply-root.hz-drawer-overlay > *:not(#podrawer-bg):not(#shipdrawer-bg):not(#mob-sheet-ov){display:none!important}
 #supply-root .shipdrawer-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 18px;border-bottom:1px solid #e6ebf2;background:#f8fafc;flex:0 0 auto}
 #supply-root .shipdrawer-title{font-size:15px;font-weight:700;color:#0f172a}
 #supply-root .shipdrawer-x{background:transparent;border:none;font-size:18px;line-height:1;cursor:pointer;color:#64748b;padding:4px 8px;font-family:inherit}
@@ -5832,6 +5838,10 @@
     if(isPhone()){ buildPOMobSheet(po,tab); }
     else {
     var root=document.getElementById('supply-root')||document.body;
+    // Opened from DEMAND/BUY/etc (supply hidden): reveal supply-root in overlay-only mode so the drawer floats over
+    // the current view (e.g. the BUY plan popup) instead of being invisible inside the hidden supply-root.
+    var _overlay = root.id==='supply-root' && root.style.display==='none';
+    if(_overlay){ root.classList.add('hz-drawer-overlay'); root.style.display='block'; }
     var bg=document.createElement('div'); bg.id='podrawer-bg'; bg.style.zIndex=nextDrawerZ();   // stack above whatever's already open (e.g. a shipment drawer)
     bg.innerHTML='<div id="podrawer"><div class="shipdrawer-head"><div class="shipdrawer-title">'+esc(po)+'</div>'
       +'<div><button class="lnk-btn shipdrawer-full" title="open the full PO page for this PO">Full page ↗</button>'
@@ -5875,7 +5885,12 @@
     var ov=document.getElementById('mob-sheet-ov');   // phone variant: the PO drawer rendered into the full-screen mobile sheet
     if(ov && ov.dataset.podrawer){ ov.style.display='none'; ov.innerHTML=''; ov.dataset.podrawer=''; ov.style.zIndex=''; document.body.style.overflow=''; }
     maybeResetDrawerZ();
+    // Leave drawer-overlay mode (opened from DEMAND/BUY) once no drawer remains → re-hide supply-root so the
+    // underlying view (e.g. the BUY plan popup) is all that's left.
+    var sr=document.getElementById('supply-root');
+    if(sr && sr.classList.contains('hz-drawer-overlay') && !document.getElementById('podrawer-bg') && !document.getElementById('shipdrawer-bg')){ sr.classList.remove('hz-drawer-overlay'); sr.style.display='none'; }
     if(!silent){ _poPatchRow=_poDrawerPrevPatch; _poRefresh=_poDrawerPrevRefresh; _poDrawerPrevPatch=null; _poDrawerPrevRefresh=null; } }
+  try{ window.openPODrawer=openPODrawer; window.closePODrawer=closePODrawer; }catch(e){}   // let the DEMAND/BUY artifact (inbound PO links in the plan popup) open the PO drawer
   // (Removed dead unassignedTable + bindAssign — superseded by the shipments-assign flow. v25.652)
 
   // ---- SETTINGS (landed-cost rate cards: import tax by country, freight by lane × size) ----
