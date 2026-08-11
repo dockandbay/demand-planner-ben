@@ -5830,8 +5830,10 @@ function inbDiv(inb, entries, color){
     b.style.display='inline-flex'; var x=b.querySelector('.ps-x'); if(x)x.onclick=clearSel; }
   function clearSel(){ Array.prototype.forEach.call(sel(),function(el){el.classList.remove('plansel');}); update(); }
   function add(el){ if(el && !el.classList.contains('plansel')){ el.classList.add('plansel'); update(); } }
-  document.addEventListener('mousedown',function(e){ if(!isMod(e))return; var el=valEl(e); if(!el)return; e.preventDefault();
-    if(el.classList.contains('plansel')){ el.classList.remove('plansel'); update(); } else add(el); });   // click toggles a single cell
+  document.addEventListener('mousedown',function(e){
+    if(!isMod(e)){ if(sel().length && !(e.target&&e.target.closest&&e.target.closest('#plan-sum-inline'))) clearSel(); return; }   // a plain click (no ⌘/Ctrl) clears the selection
+    var el=valEl(e); if(!el)return; e.preventDefault();
+    if(el.classList.contains('plansel')){ el.classList.remove('plansel'); update(); } else add(el); });   // ⌘/Ctrl-click toggles a single cell
   document.addEventListener('mouseover',function(e){ if(!isMod(e))return; add(valEl(e)); });                // ⌘/Ctrl held + hover → auto-select (paint)
   document.addEventListener('keydown',function(e){ if(e.key==='Escape' && sel().length)clearSel(); });
 })();

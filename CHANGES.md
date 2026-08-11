@@ -1,3 +1,6 @@
+## v26.859.0 DEMAND plan SUM — a plain click clears the selection
+- Clicking anywhere **without** ⌘/Ctrl now clears the sum selection (previously only Esc / ✕). ⌘/Ctrl-hover/click still builds it. (SKU-level confirmed working on the served page: hovering 3 SKU cells → "Sum 377" from the bold forecast values, not LY — if it still looks broken, hard-reload the tab; the 6 MB artifact caches across in-app navigation.)
+
 ## v26.858.0 DEMAND plan SUM — moved to the toolbar row (far right) + SKU-level actually works
 - Moved the **Sum** chip to the toolbar row with **Forecast Logic / Smoothing / Undo / Download**, at the **far right** (static `#plan-sum-inline`), instead of the report-button row.
 - **Fixed SKU-level**: a SKU cell stacks LY / input / forecast / YoY, and the extractor was grabbing the first number (**LY**). It now targets the **bold forecast div** (`font-weight ≥ 600`, no "%") — verified: hovering two SKU cells sums 277 + 59 = 336 (the forecasts), not the LY.
