@@ -1,3 +1,6 @@
+## v26.856.0 DEMAND Key Accounts — fix "+ add SKU" dropdown (was clipped, invisible)
+- The add-SKU box's dropdown DID render, but `#kafc` has `overflow-x:auto` (→ overflow-y:auto), which **clipped the `position:absolute` `.kaf-drop`** so it was never visible — it looked like a plain free-text box. Switched `.kaf-drop` to `position:fixed` and position it at the input's viewport coords on show, so it escapes the scroll container. (v854's SKUM change was a mis-diagnosis — the view has a local `SKUS=Object.keys(SKUM)` array that already worked; the real bug was the clip.)
+
 ## v26.855.0 DEMAND plan — select cells → running SUM badge (quick reference)
 - **Cmd/Ctrl-click** (or Cmd/Ctrl-**drag**) forecast cells to select them → a floating badge shows **Σ sum · n · avg** of the selection. Works on **both category/subcat rows and SKU rows** (SKU forecast divs tagged `.fcr` to match). Modifier-gated so plain clicks still edit; **Esc** or the badge **✕** clears. Scoped to the main plan table (`#t`). Verified: selecting 4,859 + 6,553 → Σ 11,412 · avg 5,706.
 
