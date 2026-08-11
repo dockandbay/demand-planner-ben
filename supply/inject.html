@@ -19,7 +19,7 @@
 #product-root{display:none;font-size:12px;color:#1a1a1a;padding-top:4px}
 /* Left-align everything in the Product module (Ben's standing default). */
 #product-root,#product-root th,#product-root td,#product-root input,#product-root select,#product-root textarea,#product-root .prow,#product-root .pg-card{text-align:left}
-#app.product-active > *:not(#dab-navwrap):not(#product-root){display:none!important}
+#app.product-active > *:not(#dab-navwrap):not(#product-root):not(.hz-drawer-overlay){display:none!important}   /* spare a drawer-overlay supply-root so a sample drawer can float over the PRODUCT view */
 #app.product-active #dab-navwrap > *:not(#view-tabs-row){display:none!important}
 #app.product-active #view-tabs-row .tool-bar{display:none!important}
 /* product top sub-nav (Plan / Reports) — matches the PO-detail subnav (.po-subnav / .rtab) */
@@ -262,17 +262,17 @@
 #supply-root .rtab:hover{color:#2563eb}
 #supply-root .rtab.active{color:#2563eb;border-bottom-color:#3b82f6;font-weight:600}
 /* Shipment / PO drawer — right-side slide-in popout (open a shipment or PO without leaving the current page) */
-#supply-root #shipdrawer-bg,#supply-root #podrawer-bg{position:fixed;inset:0;z-index:6100;background:rgba(15,23,42,0);transition:background .18s ease}   /* above the mobile PO sheet (#mob-sheet-ov, z6000) so the drawer opens on top of it */
-#supply-root #shipdrawer-bg.open,#supply-root #podrawer-bg.open{background:rgba(15,23,42,.32)}
-#supply-root #shipdrawer,#supply-root #podrawer{position:absolute;top:0;right:0;height:100%;width:clamp(min(920px,94vw), 65vw, 94vw);background:#fff;box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1)}
-#supply-root #shipdrawer-bg.open #shipdrawer,#supply-root #podrawer-bg.open #podrawer{transform:translateX(0)}
-#supply-root #podrawer-bg{z-index:100002}   /* above the consolidation modal (z100001) so a PO opened from it is visible */
+#supply-root #shipdrawer-bg,#supply-root #podrawer-bg,#supply-root #sampdrawer-bg{position:fixed;inset:0;z-index:6100;background:rgba(15,23,42,0);transition:background .18s ease}   /* above the mobile PO sheet (#mob-sheet-ov, z6000) so the drawer opens on top of it */
+#supply-root #shipdrawer-bg.open,#supply-root #podrawer-bg.open,#supply-root #sampdrawer-bg.open{background:rgba(15,23,42,.32)}
+#supply-root #shipdrawer,#supply-root #podrawer,#supply-root #sampdrawer{position:absolute;top:0;right:0;height:100%;width:clamp(min(920px,94vw), 65vw, 94vw);background:#fff;box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1)}
+#supply-root #shipdrawer-bg.open #shipdrawer,#supply-root #podrawer-bg.open #podrawer,#supply-root #sampdrawer-bg.open #sampdrawer{transform:translateX(0)}
+#supply-root #podrawer-bg,#supply-root #sampdrawer-bg{z-index:100002}   /* above the consolidation modal (z100001) so a PO/sample opened from it is visible */
 /* Drawer-overlay mode: PO drawer opened from DEMAND/BUY (supply hidden). supply-root is shown ONLY to host the
    fixed drawer overlay — every other supply child is hidden, so the drawer floats over the current view (e.g. the
    BUY plan popup) and closing it returns you there. No positioning on supply-root itself → the drawer's fixed
    z-index (100002) still beats the plan popup (z9000). */
 #supply-root.hz-drawer-overlay{display:block!important;padding:0!important}
-#supply-root.hz-drawer-overlay > *:not(#podrawer-bg):not(#shipdrawer-bg):not(#mob-sheet-ov){display:none!important}
+#supply-root.hz-drawer-overlay > *:not(#podrawer-bg):not(#shipdrawer-bg):not(#sampdrawer-bg):not(#mob-sheet-ov){display:none!important}
 #supply-root .shipdrawer-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 18px;border-bottom:1px solid #e6ebf2;background:#f8fafc;flex:0 0 auto}
 #supply-root .shipdrawer-title{font-size:15px;font-weight:700;color:#0f172a}
 #supply-root .shipdrawer-x{background:transparent;border:none;font-size:18px;line-height:1;cursor:pointer;color:#64748b;padding:4px 8px;font-family:inherit}
@@ -284,9 +284,9 @@
 @media (max-width:700px){
   #supply-root #sup-count{display:none}            /* PO count line — hide on mobile */
   #supply-root .po-erp-match{display:none}         /* ERP-match summary — hide on mobile */
-  #supply-root #shipdrawer-bg,#supply-root #podrawer-bg{background:transparent!important}
-  #supply-root #shipdrawer,#supply-root #podrawer{top:0;right:0;left:0;width:100vw;height:100vh;height:100dvh;box-shadow:none;transform:translateY(100%);transition:transform .24s cubic-bezier(.4,0,.2,1)}
-  #supply-root #shipdrawer-bg.open #shipdrawer,#supply-root #podrawer-bg.open #podrawer{transform:translateY(0)}
+  #supply-root #shipdrawer-bg,#supply-root #podrawer-bg,#supply-root #sampdrawer-bg{background:transparent!important}
+  #supply-root #shipdrawer,#supply-root #podrawer,#supply-root #sampdrawer{top:0;right:0;left:0;width:100vw;height:100vh;height:100dvh;box-shadow:none;transform:translateY(100%);transition:transform .24s cubic-bezier(.4,0,.2,1)}
+  #supply-root #shipdrawer-bg.open #shipdrawer,#supply-root #podrawer-bg.open #podrawer,#supply-root #sampdrawer-bg.open #sampdrawer{transform:translateY(0)}
   #supply-root .shipdrawer-head{padding:13px 14px;background:#0f172a;border-bottom:none;position:sticky;top:0;z-index:3}
   #supply-root .shipdrawer-title{color:#fff;font-size:15px}
   #supply-root .shipdrawer-x{color:#fff;font-size:22px;padding:6px 10px}
@@ -5734,8 +5734,39 @@
   // resets once everything is closed so it never grows unbounded.
   var _drawerZTop=6100;
   function nextDrawerZ(){ _drawerZTop+=10; return _drawerZTop; }
-  function maybeResetDrawerZ(){ if(document.getElementById('shipdrawer-bg')||document.getElementById('podrawer-bg'))return;
+  function maybeResetDrawerZ(){ if(document.getElementById('shipdrawer-bg')||document.getElementById('podrawer-bg')||document.getElementById('sampdrawer-bg'))return;
     var ov=document.getElementById('mob-sheet-ov'); if(ov&&ov.dataset.podrawer&&ov.style.display!=='none')return; _drawerZTop=6100; }
+  // ── Sample DRAWER: open an editable sample shipment (SR) in a right-side slide-in popout — used from the PRODUCT
+  // module (grid "Sample shipment" column + the item's Samples sub-tab) so the user isn't navigated to SUPPLY ▸ Samples.
+  // Reuses loadSampleDetail(id,'DRAWER') into #sampdet-DRAWER inside #supply-root (so the supply-scoped sample CSS +
+  // edit wiring apply); revealed via the hz-drawer-overlay mode when opened from a non-SUPPLY view (e.g. PRODUCT).
+  function openSampleDrawer(ref){ if(!ref)return;
+    function go(id){ if(id==null)return gotoSample(ref);   // fallback: couldn't resolve → old behaviour
+      closeSampleDrawer(true);
+      var sr=document.getElementById('supply-root')||(typeof ensureRoot==='function'&&(ensureRoot(),document.getElementById('supply-root')))||document.body;
+      var overlay = sr.id==='supply-root' && sr.style.display==='none';   // opened from PRODUCT/DEMAND (supply hidden) → reveal as an overlay
+      if(overlay){ sr.classList.add('hz-drawer-overlay'); sr.style.display='block'; }
+      var root=sr;
+      var bg=document.createElement('div'); bg.id='sampdrawer-bg'; if(overlay)bg.dataset.overlay='1'; bg.style.zIndex=nextDrawerZ();
+      bg.innerHTML='<div id="sampdrawer"><div class="shipdrawer-head"><div class="shipdrawer-title">Sample '+esc(ref)+'</div>'
+        +'<div><button class="lnk-btn sampdrawer-full" title="open the full Samples page for this sample">Full page ↗</button>'
+        +'<button class="sampdrawer-x" title="close">✕</button></div></div>'
+        +'<div class="shipdrawer-body"><div id="sampdet-DRAWER" class="count">Loading…</div></div></div>';
+      root.appendChild(bg);
+      requestAnimationFrame(function(){ bg.classList.add('open'); });
+      bg.addEventListener('mousedown',function(e){ if(e.target===bg)closeSampleDrawer(); });
+      bg.querySelector('.sampdrawer-x').onclick=function(){ closeSampleDrawer(); };
+      bg.querySelector('.sampdrawer-full').onclick=function(){ closeSampleDrawer(); gotoSample(ref); };
+      loadSampleDetail(id,'DRAWER'); }
+    // resolve ref → id from the cached samples list, else fetch it
+    var cached=((cache&&cache['samples'])||[]).filter(function(x){return x.ref===ref;})[0];
+    if(cached)return go(cached.id);
+    fetch('/api/supply/samples').then(function(r){return r.json();}).then(function(d){ cache['samples']=Array.isArray(d)?d:[]; var s=cache['samples'].filter(function(x){return x.ref===ref;})[0]; go(s?s.id:null); }).catch(function(){ gotoSample(ref); });
+  }
+  function closeSampleDrawer(silent){ var bg=document.getElementById('sampdrawer-bg'); if(bg&&bg.parentNode)bg.parentNode.removeChild(bg);
+    maybeResetDrawerZ();
+    var sr=document.getElementById('supply-root'); if(sr&&sr.classList.contains('hz-drawer-overlay')&&!document.getElementById('podrawer-bg')&&!document.getElementById('shipdrawer-bg')&&!document.getElementById('sampdrawer-bg')){ sr.classList.remove('hz-drawer-overlay'); sr.style.display='none'; } }
+  try{ window.openSampleDrawer=openSampleDrawer; }catch(e){}
   // ── Shipment DRAWER: right-side slide-in popout so a shipment can be opened/edited without leaving PURCHASE ORDERS.
   // Reuses shipExpand(ref,'DRAWER') into #shipdet-DRAWER; the drawer lives inside #supply-root so bindEdits (scoped to
   // '#supply-root .fci[data-ep]') wires every edit field, and the same shtab tabs / assign / delete flows work unchanged.
@@ -9386,7 +9417,7 @@
               return '<div class="sect-h" style="font-size:13px">Timeline <span class="mut tiny" style="font-weight:400">— shared with the supplier; record of change is admin-only</span>'
                 +' <label style="font-size:11px;font-weight:400;margin-left:8px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="samp-hide-chg"'+(_h?' checked':'')+' style="vertical-align:middle;margin-right:3px">hide record of change</label></div>'
                 +'<div class="sp-timeline" data-ref="'+esc(s.ref)+'"></div>'; })());
-        box.querySelectorAll('.samp-tab').forEach(function(t){ t.onclick=function(){ curTab=t.dataset.st; box._sampTab=curTab; try{ writeHash(curTab==='details'?['supply','samples',s.ref]:['supply','samples',s.ref,curTab]); }catch(e){}
+        box.querySelectorAll('.samp-tab').forEach(function(t){ t.onclick=function(){ curTab=t.dataset.st; box._sampTab=curTab; try{ if(i!=='DRAWER')writeHash(curTab==='details'?['supply','samples',s.ref]:['supply','samples',s.ref,curTab]); }catch(e){}   // in a drawer (e.g. from PRODUCT) don't hijack the URL to #/supply/samples
           box.querySelectorAll('.samp-tab').forEach(function(x){x.classList.toggle('active',x===t);});
           box.querySelectorAll('.samp-panel').forEach(function(p){p.style.display=(p.dataset.st===curTab)?'':'none';}); }; });
         try{ bindActMark(box); }catch(e){}   // wire the inline Ⓐ tooltip + SNOOZE ▾ (same as the PO drawer)
@@ -9397,7 +9428,7 @@
         var af=box.querySelector('.samp-att-file'), au=box.querySelector('.samp-att-up');
         if(au)au.onclick=function(){ var f=af&&af.files&&af.files[0]; if(!f){alert('Choose a file to upload.');return;} au.disabled=true; var rd=new FileReader(); rd.onload=function(){ shipPost('/api/supply/portal-upload',{po:s.ref,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),category:'sample',uploaded_by:'PO PLAN'},function(j){ if(j&&j.error){alert(j.error);au.disabled=false;return;} loadSampleDetail(id,i); }); }; rd.readAsDataURL(f); };
         box.querySelectorAll('.samp-att-rm').forEach(function(b){ b.onclick=function(){ if(!confirm('Remove this attachment?'))return; shipPost('/api/supply/portal-attachment-remove',{id:b.dataset.aid},function(){ loadSampleDetail(id,i); }); }; });
-        box.querySelectorAll('.samp-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete this sample request?'))return; shipPost('/api/supply/sample/'+b.dataset.id+'/delete',{},function(){ if(_sampleReload)_sampleReload(); }); }; });
+        box.querySelectorAll('.samp-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete this sample request?'))return; shipPost('/api/supply/sample/'+b.dataset.id+'/delete',{},function(){ if(i==='DRAWER'){ if(typeof closeSampleDrawer==='function')closeSampleDrawer(); } if(_sampleReload)_sampleReload(); }); }; });
         var _ss=box.querySelector('.samp-setship'); if(_ss)_ss.onclick=function(){ _ss.disabled=true; shipPost('/api/supply/sample/'+id,{status:'SHIPPED'},function(j){ if(j&&j.error){alert(j.error);_ss.disabled=false;return;} loadSampleDetail(id,i); }); };   // re-render THIS card in place (Our status → SHIPPED, button clears) — not _sampleReload, which would collapse the open card
         box.querySelectorAll('.samp-charge-acc').forEach(function(b){ b.onclick=function(){ b.disabled=true; shipPost('/api/supply/charge/'+b.dataset.id+'/accept',{},function(j){ if(j&&j.error){alert(j.error);b.disabled=false;return;} alert('Charge accepted — posted to Other Payments.'); loadSampleDetail(id,i); }); }; });
         box.querySelectorAll('.samp-charge-rej').forEach(function(b){ b.onclick=function(){ if(!confirm('Reject this charge?'))return; shipPost('/api/supply/charge/'+b.dataset.id+'/reject',{},function(){ loadSampleDetail(id,i); }); }; });
@@ -11011,7 +11042,7 @@
           if(open){ row.style.display='none'; row.querySelector('.pg-det').innerHTML=''; datarow.classList.remove('pg-openrow'); _prodDetailBox=null; try{writeHash(['product','plan']);}catch(_){} return; }
           row.style.display=''; datarow.classList.add('pg-openrow'); _prodDetailTab='master'; renderProductDetail(ref, row.querySelector('.pg-det'), rows.filter(function(x){return x.ref===ref;})[0]); }; });
         g.querySelectorAll('.prod-cell-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openProdCellPick(b); }; });
-        g.querySelectorAll('.samp-open').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); gotoSample(a.dataset.ref); }; });   // sample-shipment ref → SUPPLY ▸ Samples
+        g.querySelectorAll('.samp-open').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); (typeof openSampleDrawer==="function"?openSampleDrawer(a.dataset.ref):gotoSample(a.dataset.ref)); }; });   // sample-shipment ref -> editable drawer (was: navigate to SUPPLY Samples)
         // Single count badge (like the PO grid): fast 120ms tooltip explains the actions; click opens the product (snooze lives inside).
         g.querySelectorAll('.pg-actbadge').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var pb=g.querySelector('.pg-open[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(b.dataset.ref):b.dataset.ref)+'"]'); if(pb)pb.click(); }; });
         bindFastTips(g); bindProdActMark(g, function(){ draw(); });   // status-misalignment A marker + SNOOZE on the grid
@@ -11128,7 +11159,7 @@
       body.querySelectorAll('.ps-adm-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this sample version?'))return; shipPost('/api/product/sample/'+a.dataset.id+'/delete',{},function(){ _prodJsonBust(ref); renderProdSamplesTab(body,ref); }); }; });
       body.querySelectorAll('.ps-adm-fb').forEach(function(t){ t.onchange=function(){ var msg=body.querySelector('.ps-adm-fb-msg[data-id="'+t.dataset.id+'"]'); if(msg){msg.style.color='#94a3b8';msg.textContent='saving…';} shipPost('/api/product/sample/'+t.dataset.id+'/feedback',{admin_feedback:t.value},function(j){ if(msg){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;} else {msg.style.color='#16a34a';msg.textContent='✓ saved';setTimeout(function(){msg.textContent='';},1800);} } }); }; });
       body.querySelectorAll('.psamp-img').forEach(function(im){ im.onclick=function(){ openImgZoom(im.dataset.src); }; });
-      body.querySelectorAll('.samp-open').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); gotoSample(a.dataset.ref); }; });   // sample-shipment ref → SUPPLY ▸ Samples
+      body.querySelectorAll('.samp-open').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); (typeof openSampleDrawer==="function"?openSampleDrawer(a.dataset.ref):gotoSample(a.dataset.ref)); }; });   // sample-shipment ref -> editable drawer (was: navigate to SUPPLY Samples)
     }).catch(function(e){ body.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
   function renderProdMaster(body,d,mode){ mode=mode||'master'; var it=d.item; ensureSuppliers(function(){ loadProdCfg(function(cfg){
     var seasons=(cfg.seasons||[]), cats=(cfg.categories||[]);
@@ -11259,7 +11290,7 @@
       scope.querySelectorAll('.pm-comp-fdel').forEach(function(a){ if(a._b)return; a._b=1; a.onclick=function(){ if(!confirm('Remove this file?'))return; shipPost('/api/product/component-file/'+a.dataset.fid+'/delete',{},function(){ reloadSizes(); }); }; });
       scope.querySelectorAll('.pm-dimimg').forEach(function(im){ if(im._b)return; im._b=1; im.onclick=function(){ openImgZoom(im.dataset.src); }; });
       scope.querySelectorAll('.pm-samp-open').forEach(function(a){ if(a._b)return; a._b=1; a.onclick=function(e){ e.stopPropagation(); var tb=document.querySelector('.pd-tab[data-t="samples"]'); if(tb)tb.click(); }; });   // sample version → the product's Samples tab
-      scope.querySelectorAll('.samp-open').forEach(function(a){ if(a._b)return; a._b=1; a.onclick=function(e){ e.stopPropagation(); gotoSample(a.dataset.ref); }; });   // sample shipment (SR) → SUPPLY ▸ Samples
+      scope.querySelectorAll('.samp-open').forEach(function(a){ if(a._b)return; a._b=1; a.onclick=function(e){ e.stopPropagation(); (typeof openSampleDrawer==="function"?openSampleDrawer(a.dataset.ref):gotoSample(a.dataset.ref)); }; });   // sample-shipment ref -> editable drawer (was: navigate to SUPPLY Samples)
       bindProdActMark(scope, function(){ renderProductDetail(it.ref); });   // PO-style A marker: 120ms tooltip + SNOOZE ▾ / wake
     }
     bindSz(body);

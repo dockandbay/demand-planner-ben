@@ -1,3 +1,7 @@
+## v26.851.0 PRODUCT — sample-shipment refs open an editable drawer (not a page jump)
+- Clicking a sample-shipment **SR ref** in the PRODUCT module (grid "Sample shipment" column, item detail, and the item's Samples sub-tab) now opens the sample in an **editable right-side drawer** (`openSampleDrawer`) instead of navigating to `#/supply/samples`. Reuses the full sample-detail editor (`loadSampleDetail(id,'DRAWER')`) in a drawer inside `#supply-root`, revealed over the PRODUCT view via the existing `hz-drawer-overlay` mode (same pattern as the PO drawer over DEMAND/BUY).
+- Made the sample-detail renderer **drawer-safe**: in a drawer it no longer rewrites the URL hash to `#/supply/samples` on tab clicks, and Delete closes the drawer. Falls back to the old navigation if the drawer fn is unavailable. Added `#sampdrawer-bg` to the drawer CSS (desktop + mobile) and spared a drawer-overlay `#supply-root` from the `product-active` hide rule.
+
 ## v26.850.0 SUPPLY Samples — "Set shipping" rebinds the card + supplier SRs show at once
 - **"🚢 Set shipping — supplier marked shipped"** now re-renders the sample card in place (via `loadSampleDetail`) so **"Our status" flips to SHIPPED** and the button clears — previously it called `_sampleReload` (grid reload) which didn't update the open card, so it kept showing PLANNED.
 - **A supplier-created sample (SR) now shows on the admin Samples grid immediately** — the section served a stale client cache; `samples` now always refetches fresh on open (cheap, uncached endpoint; current view stays visible while it loads).
