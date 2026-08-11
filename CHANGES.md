@@ -1,3 +1,6 @@
+## v26.855.0 DEMAND plan — select cells → running SUM badge (quick reference)
+- **Cmd/Ctrl-click** (or Cmd/Ctrl-**drag**) forecast cells to select them → a floating badge shows **Σ sum · n · avg** of the selection. Works on **both category/subcat rows and SKU rows** (SKU forecast divs tagged `.fcr` to match). Modifier-gated so plain clicks still edit; **Esc** or the badge **✕** clears. Scoped to the main plan table (`#t`). Verified: selecting 4,859 + 6,553 → Σ 11,412 · avg 5,706.
+
 ## v26.854.0 DEMAND Key Accounts — fix the "+ add SKU" search/dropdown (was dead)
 - The add-SKU box's `show()` iterated **`SKUS`**, but `SKUS` is the piped `"SKU|CO|CH"` **sales-map object** (no `.filter`, keys aren't plain SKUs) — so it **threw on focus/type and no dropdown ever appeared** (the v835 active/multi-add work inherited the broken source). Now it sources from **`SKUM`** (keyed by plain SKU, carries `products.status`), filtered to `st==='ACTIVE'`, searchable + multi-add as intended. Verified in a jsdom harness (focus → 40 active options; typing filters).
 

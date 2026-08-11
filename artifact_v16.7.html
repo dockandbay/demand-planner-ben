@@ -449,6 +449,11 @@ td.sku-fc.fc-nostock .sku-fc-v{color:#991b1b}
 .fcr.ovc{color:#111827}
 .fcr.actual{color:#166534;font-weight:700}
 .fcr.actual.neg{color:#991b1b}
+/* Cmd/Ctrl-click (or drag) forecast cells → running sum badge (quick reference on category + SKU rows) */
+.fcr.cellsel{background:#dbeafe !important;box-shadow:inset 0 0 0 1px #60a5fa;border-radius:2px;cursor:cell}
+#plan-sumbadge{position:fixed;right:16px;bottom:16px;z-index:100050;display:none;align-items:center;gap:10px;background:#0f172a;color:#fff;font-size:13px;font-weight:700;padding:8px 12px;border-radius:9px;box-shadow:0 8px 24px rgba(0,0,0,.32);font-family:inherit}
+#plan-sumbadge .pb-x{cursor:pointer;color:#94a3b8;font-weight:800;font-size:14px;line-height:1;padding:0 2px}
+#plan-sumbadge .pb-x:hover{color:#fff}
 td.totu{padding:2px 5px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums;font-size:12px;white-space:nowrap}
 td.totu.y26{background:#e7e5e0;border-left:2px solid #a8a29e;color:#44403c}
 td.totu.y27{background:#e7e5e0;border-left:2px solid #a8a29e;color:#44403c}
@@ -5797,6 +5802,30 @@ function inbDiv(inb, entries, color){
   document.addEventListener('mouseover',function(e){ if(!dragging||!anchor)return; var cell=td(e); if(cell)selectRect(anchor,cell); });
   document.addEventListener('mouseup',function(){ dragging=false; });
 })();
+// ── DEMAND plan: Cmd/Ctrl-click (or Cmd/Ctrl-drag) forecast cells → running SUM badge (quick reference). ──────
+// Works on BOTH category/subcat rows (.fcr) and SKU rows (.fcr tagged on the SKU forecast div). Modifier-gated so
+// plain clicks still edit. Scoped to the main plan table (#t). Esc or the badge ✕ clears.
+(function(){
+  var SEL='#t .fcr', dragging=false, dragAdd=true;
+  function isMod(e){ return e.metaKey||e.ctrlKey; }
+  function cellOf(e){ return (e.target&&e.target.closest)?e.target.closest(SEL):null; }
+  function numOf(el){ if(!el)return null; var m=(el.textContent||'').replace(/,/g,'').match(/-?\d+(?:\.\d+)?/); return m?parseFloat(m[0]):null; }
+  function badge(){ var b=document.getElementById('plan-sumbadge'); if(!b){ b=document.createElement('div'); b.id='plan-sumbadge';
+      b.innerHTML='<span class="pb-txt"></span><span class="pb-x" title="clear (Esc)">✕</span>'; document.body.appendChild(b);
+      b.querySelector('.pb-x').onclick=clearSel; } return b; }
+  function update(){ var sel=document.querySelectorAll('#t .fcr.cellsel'), sum=0,n=0;
+    sel.forEach(function(el){ var v=numOf(el); if(v!==null){sum+=v;n++;} });
+    var b=badge(); if(n<2){ b.style.display='none'; return; }
+    var f=function(x){return x.toLocaleString(undefined,{maximumFractionDigits:2});};
+    b.querySelector('.pb-txt').innerHTML='Σ '+f(sum)+' <span style="opacity:.7;font-weight:500">· n='+n+' · avg '+f(sum/n)+'</span>';
+    b.style.display='inline-flex'; }
+  function clearSel(){ document.querySelectorAll('#t .fcr.cellsel').forEach(function(el){el.classList.remove('cellsel');}); update(); }
+  document.addEventListener('mousedown',function(e){ if(!isMod(e))return; var el=cellOf(e); if(!el)return; e.preventDefault();
+    dragging=true; dragAdd=!el.classList.contains('cellsel'); el.classList.toggle('cellsel',dragAdd); update(); });
+  document.addEventListener('mouseover',function(e){ if(!dragging)return; var el=cellOf(e); if(el){ el.classList.toggle('cellsel',dragAdd); update(); } });
+  document.addEventListener('mouseup',function(){ dragging=false; });
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape' && document.querySelector('#t .fcr.cellsel'))clearSel(); });
+})();
 // Persistent, click-to-copy tooltip for FBA-inbound cells (.fba-inb[data-copy]) — 120ms hover to show;
 // stays while hovering the cell OR the tooltip; click copies the detail (qty · date · ref) to the clipboard.
 (function(){ var el=null,t=null,cur=null,hideT=null;
@@ -7222,7 +7251,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         fcWrapCur.appendChild(inpCur);
         var fcDivCur=document.createElement('div');
         fcDivCur.style.cssText='font-size:9px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;color:#334155';
-        fcDivCur.textContent=fn(fcvCur);
+        fcDivCur.textContent=fn(fcvCur); fcDivCur.className='fcr';
         fcWrapCur.appendChild(fcDivCur);
         var yoyDivCur=document.createElement('div');yoyDivCur.style.cssText='font-size:7px;text-align:right';yoyDivCur.className=yoyCls26Cur;yoyDivCur.textContent=yoyStrCur;
         fcWrapCur.appendChild(yoyDivCur);
@@ -7285,7 +7314,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
           fcWrap26.appendChild(inp26);
           var fcDiv26=document.createElement('div');
           fcDiv26.style.cssText='font-size:9px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;color:#334155';
-          fcDiv26.textContent=fn(fcv26);
+          fcDiv26.textContent=fn(fcv26); fcDiv26.className='fcr';
           fcWrap26.appendChild(fcDiv26);
           var yoyDiv26=document.createElement('div');
           yoyDiv26.style.cssText='font-size:7px;text-align:right';
@@ -7358,7 +7387,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         fcWrap27.appendChild(inp27);
         var fcDiv27=document.createElement('div');
         fcDiv27.style.cssText='font-size:9px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;color:#4c1d95';
-        fcDiv27.textContent=fn(fcv27);
+        fcDiv27.textContent=fn(fcv27); fcDiv27.className='fcr';
         fcWrap27.appendChild(fcDiv27);
         // disc styling + preview applied after the cell is attached (below)
         var yoyDiv27=document.createElement('div');
@@ -7444,7 +7473,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         fcWrap28.appendChild(inp28);
         var fcDiv28=document.createElement('div');
         fcDiv28.style.cssText='font-size:9px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;color:#0f766e';
-        fcDiv28.textContent=fn(fcv28);
+        fcDiv28.textContent=fn(fcv28); fcDiv28.className='fcr';
         fcWrap28.appendChild(fcDiv28);
         // disc styling + preview applied after the cell is attached (below)
         var yoyDiv28=document.createElement('div');
