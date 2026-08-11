@@ -450,7 +450,7 @@ td.sku-fc.fc-nostock .sku-fc-v{color:#991b1b}
 .fcr.actual{color:#166534;font-weight:700}
 .fcr.actual.neg{color:#991b1b}
 /* Cmd/Ctrl-click (or drag) forecast cells → running sum badge (quick reference on category + SKU rows) */
-.fcr.cellsel{background:#dbeafe !important;box-shadow:inset 0 0 0 1px #60a5fa;border-radius:2px;cursor:cell}
+#t .plansel{background:#dbeafe !important;box-shadow:inset 0 0 0 1px #60a5fa;border-radius:2px;cursor:cell}
 #plan-sumbadge{position:fixed;right:16px;bottom:16px;z-index:100050;display:none;align-items:center;gap:10px;background:#0f172a;color:#fff;font-size:13px;font-weight:700;padding:8px 12px;border-radius:9px;box-shadow:0 8px 24px rgba(0,0,0,.32);font-family:inherit}
 #plan-sumbadge .pb-x{cursor:pointer;color:#94a3b8;font-weight:800;font-size:14px;line-height:1;padding:0 2px}
 #plan-sumbadge .pb-x:hover{color:#fff}
@@ -5802,29 +5802,32 @@ function inbDiv(inb, entries, color){
   document.addEventListener('mouseover',function(e){ if(!dragging||!anchor)return; var cell=td(e); if(cell)selectRect(anchor,cell); });
   document.addEventListener('mouseup',function(){ dragging=false; });
 })();
-// ── DEMAND plan: Cmd/Ctrl-click (or Cmd/Ctrl-drag) forecast cells → running SUM badge (quick reference). ──────
-// Works on BOTH category/subcat rows (.fcr) and SKU rows (.fcr tagged on the SKU forecast div). Modifier-gated so
-// plain clicks still edit. Scoped to the main plan table (#t). Esc or the badge ✕ clears.
+// ── DEMAND plan: hold ⌘/Ctrl and hover (or click) forecast cells → running SUM in the report-button bar. ──────
+// Targets the CELL (td) and sums its .fcr forecast value — so it works on BOTH category/subcat rows AND SKU rows,
+// clicking/hovering anywhere in the cell (not just the small number). Modifier-gated so plain clicks still edit.
+// Scoped to the main plan table (#t). Esc or the ✕ clears.
 (function(){
-  var SEL='#t .fcr', dragging=false, dragAdd=true;
   function isMod(e){ return e.metaKey||e.ctrlKey; }
-  function cellOf(e){ return (e.target&&e.target.closest)?e.target.closest(SEL):null; }
-  function numOf(el){ if(!el)return null; var m=(el.textContent||'').replace(/,/g,'').match(/-?\d+(?:\.\d+)?/); return m?parseFloat(m[0]):null; }
-  function badge(){ var b=document.getElementById('plan-sumbadge'); if(!b){ b=document.createElement('div'); b.id='plan-sumbadge';
-      b.innerHTML='<span class="pb-txt"></span><span class="pb-x" title="clear (Esc)">✕</span>'; document.body.appendChild(b);
-      b.querySelector('.pb-x').onclick=clearSel; } return b; }
-  function update(){ var sel=document.querySelectorAll('#t .fcr.cellsel'), sum=0,n=0;
-    sel.forEach(function(el){ var v=numOf(el); if(v!==null){sum+=v;n++;} });
-    var b=badge(); if(n<2){ b.style.display='none'; return; }
+  function numTxt(t){ var m=(t||'').replace(/,/g,'').match(/-?\d+(?:\.\d+)?/); return m?parseFloat(m[0]):null; }
+  // The forecast value element in a plan cell: subcat rows have a `.fcr`; SKU/subtotal rows render it as the first
+  // numeric leaf <div>. Return that element so hovering/clicking ANYWHERE in the cell sums the forecast (both row types).
+  function valEl(e){ var td=(e.target&&e.target.closest)?e.target.closest('#t td'):null; if(!td)return null;
+    var f=td.querySelector('.fcr'); if(f)return f;
+    var divs=td.querySelectorAll('div'); for(var i=0;i<divs.length;i++){ if(divs[i].children.length===0 && numTxt(divs[i].textContent)!==null) return divs[i]; }
+    return null; }
+  function sel(){ return document.querySelectorAll('#t .plansel'); }
+  function update(){ var s=sel(),sum=0,n=0; Array.prototype.forEach.call(s,function(el){ var v=numTxt(el.textContent); if(v!==null){sum+=v;n++;} });
+    var b=document.getElementById('plan-sum-inline'); if(!b)return;
+    if(n<1){ b.style.display='none'; b.innerHTML=''; return; }
     var f=function(x){return x.toLocaleString(undefined,{maximumFractionDigits:2});};
-    b.querySelector('.pb-txt').innerHTML='Σ '+f(sum)+' <span style="opacity:.7;font-weight:500">· n='+n+' · avg '+f(sum/n)+'</span>';
-    b.style.display='inline-flex'; }
-  function clearSel(){ document.querySelectorAll('#t .fcr.cellsel').forEach(function(el){el.classList.remove('cellsel');}); update(); }
-  document.addEventListener('mousedown',function(e){ if(!isMod(e))return; var el=cellOf(e); if(!el)return; e.preventDefault();
-    dragging=true; dragAdd=!el.classList.contains('cellsel'); el.classList.toggle('cellsel',dragAdd); update(); });
-  document.addEventListener('mouseover',function(e){ if(!dragging)return; var el=cellOf(e); if(el){ el.classList.toggle('cellsel',dragAdd); update(); } });
-  document.addEventListener('mouseup',function(){ dragging=false; });
-  document.addEventListener('keydown',function(e){ if(e.key==='Escape' && document.querySelector('#t .fcr.cellsel'))clearSel(); });
+    b.innerHTML='Sum '+f(sum)+' <span style="opacity:.7;font-weight:500">· n='+n+' · avg '+f(sum/n)+'</span> <span class="ps-x" title="clear (Esc)" style="cursor:pointer;color:#6366f1;font-weight:800;margin-left:3px">✕</span>';
+    b.style.display='inline-flex'; var x=b.querySelector('.ps-x'); if(x)x.onclick=clearSel; }
+  function clearSel(){ Array.prototype.forEach.call(sel(),function(el){el.classList.remove('plansel');}); update(); }
+  function add(el){ if(el && !el.classList.contains('plansel')){ el.classList.add('plansel'); update(); } }
+  document.addEventListener('mousedown',function(e){ if(!isMod(e))return; var el=valEl(e); if(!el)return; e.preventDefault();
+    if(el.classList.contains('plansel')){ el.classList.remove('plansel'); update(); } else add(el); });   // click toggles a single cell
+  document.addEventListener('mouseover',function(e){ if(!isMod(e))return; add(valEl(e)); });                // ⌘/Ctrl held + hover → auto-select (paint)
+  document.addEventListener('keydown',function(e){ if(e.key==='Escape' && sel().length)clearSel(); });
 })();
 // Persistent, click-to-copy tooltip for FBA-inbound cells (.fba-inb[data-copy]) — 120ms hover to show;
 // stays while hovering the cell OR the tooltip; click copies the detail (qty · date · ref) to the clipboard.
@@ -9128,7 +9131,8 @@ function planRevBtnSync(){ var show=(typeof VIEW_MODE!=='undefined'&&VIEW_MODE==
       var btn='border:1px solid #cbd5e1;background:#fff;border-radius:6px;padding:3px 9px;font-size:11px;font-weight:600;font-family:inherit;cursor:pointer;white-space:nowrap;line-height:1.5';
       c.innerHTML='<button id="plan-exec-btn" type="button" title="Executive summary — FY revenue &amp; units vs last year" style="'+btn+';border-color:#0f766e;color:#0f766e">Exec summary</button>'
         +'<button id="plan-summ-btn" type="button" title="Summary report with revenue targets + recommendations" style="'+btn+';border-color:#7c3aed;color:#7c3aed">Summary + targets</button>'
-        +'<button id="plan-tg-btn" type="button" title="Trend Gaps — under-forecast trends (Category + SKU)" style="'+btn+';border-color:#b45309;color:#b45309">Trend Gaps</button>';
+        +'<button id="plan-tg-btn" type="button" title="Trend Gaps — under-forecast trends (Category + SKU)" style="'+btn+';border-color:#b45309;color:#b45309">Trend Gaps</button>'
+        +'<span id="plan-sum-inline" title="Hold ⌘/Ctrl and hover forecast cells to sum them" style="display:none;align-items:center;gap:8px;margin-left:6px;font-size:12px;font-weight:700;color:#0f172a;background:#eef2ff;border:1px solid #c7d2fe;border-radius:6px;padding:3px 9px;white-space:nowrap"></span>';
       row.appendChild(c);
       c.querySelector('#plan-exec-btn').onclick=openExecSummaryPopout;
       c.querySelector('#plan-summ-btn').onclick=openSummaryPopout;

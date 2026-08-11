@@ -1,3 +1,8 @@
+## v26.857.0 DEMAND plan SUM — in the button bar, SKU-level, "Sum", ⌘-hover to select
+- Moved the running total into the **report-button bar** (next to Exec summary / Summary + targets / Trend Gaps) as a "Sum X · n · avg" chip with a ✕, instead of a floating badge.
+- Now works on **SKU rows** too — selection targets the whole cell and reads the forecast value (`.fcr` on category rows, or the cell's numeric value div on SKU/subtotal rows), so hovering/clicking anywhere in the cell counts.
+- **⌘/Ctrl + hover** now **auto-selects** (paint) as you move over cells; ⌘/Ctrl-click toggles a single cell; Esc / ✕ clears. Label changed **Σ → "Sum"**.
+
 ## v26.856.0 DEMAND Key Accounts — fix "+ add SKU" dropdown (was clipped, invisible)
 - The add-SKU box's dropdown DID render, but `#kafc` has `overflow-x:auto` (→ overflow-y:auto), which **clipped the `position:absolute` `.kaf-drop`** so it was never visible — it looked like a plain free-text box. Switched `.kaf-drop` to `position:fixed` and position it at the input's viewport coords on show, so it escapes the scroll container. (v854's SKUM change was a mis-diagnosis — the view has a local `SKUS=Object.keys(SKUM)` array that already worked; the real bug was the clip.)
 
