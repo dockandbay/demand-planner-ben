@@ -1,3 +1,6 @@
+## v26.848.0 PRODUCT — "Recipient country" now offers US + Direct to Client
+- The product master-data **Recipient country** picker (who receives the samples) only had **UK** and **AU**. Added **US** and **Direct to Client** (value `DIRECT`, matching the PO ship-to convention). Free-text `recipient_countries` field — no server/migration change.
+
 ## v26.847.0 Xero Compare — Horizon Due = final invoice − payments on/before the report date
 - Reworked the comparison basis (Ben's spec). For a PO with a **final invoice** (`supplier_invoice_total`, supplier currency), **Horizon Due = final invoice − payments dated ON/BEFORE the report period end** (parsed from the file, e.g. 31-Jul). Payments *after* the report date are ignored — the invoice was still outstanding at report time, which is what Xero shows. Goods payments only (deposit/completion/balance incl. deposit-pool drawdowns).
 - Previously it summed the *entered* payment milestones, which under-counted when milestones weren't fully itemised — e.g. **PO-1683100** showed a false 233% variance (compared Xero's ~$1,288 against only the $387.83 deposit). Now: 1,292.76 − 0 (the 387.83 deposit is 04-Aug, after 31-Jul) = 1,292.76 ≈ Xero → **OK**.
