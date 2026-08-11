@@ -257,7 +257,8 @@ async function buildSKURAW() {
                        coalesce(nullif(btrim(p.subcategory),''),'Undefined sub category') s,
                        coalesce(nullif(btrim(p.category),''),'Undefined sub category') c,
                        p.market_tier ti, p.core_seasonal cs, coalesce(sl.release_window,'') rw,
-                       nullif(trim(p.replacement_sku),'') rep, nullif(trim(p.variant_image_url_final),'') img,
+                       nullif(trim(p.replacement_sku),'') rep,
+                       coalesce(nullif(trim(p.variant_image_url_final),''), nullif(trim(p.colour_swatch_url),'')) img,   -- variant image, falling back to the colour swatch when blank
                        upper(coalesce(nullif(btrim(p.status),''),'')) st
                 FROM planner.products p LEFT JOIN planner.sku_labels sl ON sl.sku=p.sku WHERE p.in_planning_scope`),
     // Launch + discontinue dates per country, from planner.products (Ben's single source of truth).
