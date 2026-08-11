@@ -7518,11 +7518,11 @@
       compareNow(); }).catch(function(){});
     function analyse(){
       // Period-aware Horizon due. The Xero report is a point-in-time snapshot (period end = _period). A Horizon payment
-      // that was PAID AFTER the period end was still OUTSTANDING at report time, so we count it as due for the comparison.
+      // paid ON OR AFTER the period end was still OUTSTANDING at report time (Xero still shows it owed), so we count it as due.
       var pend=_period||'', due={}, known={};
       ((_cf&&_cf.lines)||[]).forEach(function(l){ if((l.basis||'po')!=='po'||!l.ref)return; var _t=String(l.type||'').toLowerCase(); if(!(_t.indexOf('deposit')>=0||_t==='completion'||_t==='balance'))return;
         known[l.ref]=true;   // PO is present in Horizon's payment plan (paid or not) — lets us distinguish "not found" from "nothing open"
-        var openAtReport = !l.paid || (pend && l.paid_date && String(l.paid_date).slice(0,10) > pend);
+        var openAtReport = !l.paid || (pend && l.paid_date && String(l.paid_date).slice(0,10) >= pend);
         if(openAtReport) due[l.ref]=(due[l.ref]||0)+(Number(l.amount)||0); });   // type is title-case: Deposit/Start deposit/Completion/Balance
       // A PO whose start deposit draws from a REFERENCED deposit pool shows in the main cash flow as ONE aggregated
       // pool line (basis 'register', keyed by the deposit ref) — so its deposit is never attributed to the PO above,
@@ -7530,10 +7530,17 @@
       // per-PO so a deposit-ref PO with a legit (incl. after-period) payment isn't wrongly flagged. (v26.841)
       ((_cf&&_cf.startDeposits)||[]).forEach(function(l){ if(l.basis!=='drawdown'||!l.ref)return;
         known[l.ref]=true;
-        var openAtReport = !l.paid || (pend && l.paid_date && String(l.paid_date).slice(0,10) > pend);
+        var openAtReport = !l.paid || (pend && l.paid_date && String(l.paid_date).slice(0,10) >= pend);
+        if(openAtReport) due[l.ref]=(due[l.ref]||0)+(Number(l.amount)||0); });
+      // Some POs are paid via an "Other Payments" (sundry register) row rather than the PO payment plan — match
+      // those too, by the Other line's reference (basis 'other'). Ben: PO-1836737 lives in Other Payments. (v26.842)
+      ((_cf&&_cf.lines)||[]).forEach(function(l){ if((l.basis||'')!=='other'||!l.ref)return;
+        known[l.ref]=true;
+        var openAtReport = !l.paid || (pend && l.paid_date && String(l.paid_date).slice(0,10) >= pend);
         if(openAtReport) due[l.ref]=(due[l.ref]||0)+(Number(l.amount)||0); });
       var showAll=b.querySelector('#xc-allrows').checked;
-      var approved=(_rows||[]).filter(function(r){ return /approv/i.test(r.status||''); });
+      // Ignore Xero batch "SUPPLIER-PAYMENT-*" rows entirely — they're aggregate supplier payments, not per-PO invoices. (v26.842)
+      var approved=(_rows||[]).filter(function(r){ return /approv/i.test(r.status||'') && !/SUPPLIER-PAYMENT/i.test(r.reference||''); });
       var out=approved.map(function(r){
         var isGbp=!(Number(r.rate)>0), ccy=isGbp?'GBP':'USD';
         var xero=(Number(r.balance_gbp)||0)*(isGbp?1:(Number(r.rate)||0));   // Xero outstanding → USD at the report rate

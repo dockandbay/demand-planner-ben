@@ -1,3 +1,8 @@
+## v26.842.0 PAYMENTS ▸ Xero Compare — ignore SUPPLIER-PAYMENT batches + match Other Payments + same-day period edge
+- **Ignore batch rows**: Xero `SUPPLIER-PAYMENT-*` references (aggregate supplier payments, not per-PO invoices) are now filtered out of the comparison entirely.
+- **Match Other Payments**: a PO can be paid via an "Other Payments" (sundry register) row rather than the PO payment plan — the comparison now also matches cash-flow `basis:'other'` lines by their reference, so e.g. **PO-1836737** (an Other Payment of £7,269.60 / ref `PO-1836737`) is found instead of showing "PO not found in Horizon".
+- **Same-day period edge**: a Horizon payment paid **on** the report's period-end date (not just strictly after) now counts as still-outstanding at report time (`>=` instead of `>`), matching how Xero still shows it owed as of that date.
+
 ## v26.841.0 PAYMENTS ▸ Xero Compare — deposit-ref POs no longer wrongly show "PO not found"
 - A PO whose start deposit draws from a **referenced deposit pool** appears in the cash flow as ONE aggregated pool line (`basis:'register'`, keyed by the deposit ref) — so its deposit was never attributed to the PO in the Xero comparison, and the PO showed **"PO not found in Horizon"** even though a legit (incl. after-period) payment exists (e.g. PO-1683100 = 387.83). The comparison now also folds in the per-PO drawdown lines from cash flow's `startDeposits` (`basis:'drawdown'`) so those deposits count toward the PO's Horizon-due. Non-ref POs are unaffected (their deposit is already a `basis:'po'` line; the `drawdown` filter avoids double-counting).
 
