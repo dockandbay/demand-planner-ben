@@ -1,3 +1,7 @@
+## v26.858.0 DEMAND plan SUM — moved to the toolbar row (far right) + SKU-level actually works
+- Moved the **Sum** chip to the toolbar row with **Forecast Logic / Smoothing / Undo / Download**, at the **far right** (static `#plan-sum-inline`), instead of the report-button row.
+- **Fixed SKU-level**: a SKU cell stacks LY / input / forecast / YoY, and the extractor was grabbing the first number (**LY**). It now targets the **bold forecast div** (`font-weight ≥ 600`, no "%") — verified: hovering two SKU cells sums 277 + 59 = 336 (the forecasts), not the LY.
+
 ## v26.857.0 DEMAND plan SUM — in the button bar, SKU-level, "Sum", ⌘-hover to select
 - Moved the running total into the **report-button bar** (next to Exec summary / Summary + targets / Trend Gaps) as a "Sum X · n · avg" chip with a ✕, instead of a floating badge.
 - Now works on **SKU rows** too — selection targets the whole cell and reads the forecast value (`.fcr` on category rows, or the cell's numeric value div on SKU/subtotal rows), so hovering/clicking anywhere in the cell counts.

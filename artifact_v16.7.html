@@ -787,6 +787,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
     <span style="width:1px;height:18px;background:#e0e0e0;flex-shrink:0;margin:0 2px"></span>
     <button id="undo-btn" onclick="undoApply()" disabled title="Undo the last forecast edit (up to 10) — also &#8984;/Ctrl+Z" style="font-size:10px;padding:3px 10px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#334155;cursor:default;opacity:.45;flex-shrink:0">&#8624; Undo</button>
     <button id="plan-dl-btn" onclick="openPlanDownload(event)" title="Download the demand plan (SKU × month, units + revenue) for chosen fiscal year(s)" style="font-size:10px;padding:3px 10px;border:1px solid #16a34a;border-radius:5px;background:#dcfce7;color:#166534;cursor:pointer;flex-shrink:0">&#11015; Download</button>
+    <span id="plan-sum-inline" title="Hold &#8984;/Ctrl and hover forecast cells to sum them" style="display:none;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#0f172a;background:#eef2ff;border:1px solid #c7d2fe;border-radius:6px;padding:3px 9px;white-space:nowrap;flex-shrink:0"></span>
   </div>
 </div>
 <div id="sa-drawer-backdrop" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:5900" onclick="closeSADrawer()"></div>
@@ -5812,9 +5813,14 @@ function inbDiv(inb, entries, color){
   // The forecast value element in a plan cell: subcat rows have a `.fcr`; SKU/subtotal rows render it as the first
   // numeric leaf <div>. Return that element so hovering/clicking ANYWHERE in the cell sums the forecast (both row types).
   function valEl(e){ var td=(e.target&&e.target.closest)?e.target.closest('#t td'):null; if(!td)return null;
-    var f=td.querySelector('.fcr'); if(f)return f;
-    var divs=td.querySelectorAll('div'); for(var i=0;i<divs.length;i++){ if(divs[i].children.length===0 && numTxt(divs[i].textContent)!==null) return divs[i]; }
-    return null; }
+    var f=td.querySelector('.fcr'); if(f)return f;   // category rows (and any tagged) — the forecast is .fcr
+    // SKU rows stack [LY (grey), input, forecast (bold), YoY (%)]. Pick the BOLD numeric leaf div with no '%' = the
+    // forecast (not the first div, which is LY). Fall back to the first plain number (e.g. subtotal rows).
+    var divs=td.querySelectorAll('div'), first=null, bold=null;
+    for(var i=0;i<divs.length;i++){ var el=divs[i]; if(el.children.length)continue; var t=el.textContent||'';
+      if(t.indexOf('%')>=0||numTxt(t)===null)continue; if(!first)first=el;
+      if(parseInt(el.style.fontWeight||'0',10)>=600){ bold=el; break; } }
+    return bold||first; }
   function sel(){ return document.querySelectorAll('#t .plansel'); }
   function update(){ var s=sel(),sum=0,n=0; Array.prototype.forEach.call(s,function(el){ var v=numTxt(el.textContent); if(v!==null){sum+=v;n++;} });
     var b=document.getElementById('plan-sum-inline'); if(!b)return;
@@ -9131,8 +9137,7 @@ function planRevBtnSync(){ var show=(typeof VIEW_MODE!=='undefined'&&VIEW_MODE==
       var btn='border:1px solid #cbd5e1;background:#fff;border-radius:6px;padding:3px 9px;font-size:11px;font-weight:600;font-family:inherit;cursor:pointer;white-space:nowrap;line-height:1.5';
       c.innerHTML='<button id="plan-exec-btn" type="button" title="Executive summary — FY revenue &amp; units vs last year" style="'+btn+';border-color:#0f766e;color:#0f766e">Exec summary</button>'
         +'<button id="plan-summ-btn" type="button" title="Summary report with revenue targets + recommendations" style="'+btn+';border-color:#7c3aed;color:#7c3aed">Summary + targets</button>'
-        +'<button id="plan-tg-btn" type="button" title="Trend Gaps — under-forecast trends (Category + SKU)" style="'+btn+';border-color:#b45309;color:#b45309">Trend Gaps</button>'
-        +'<span id="plan-sum-inline" title="Hold ⌘/Ctrl and hover forecast cells to sum them" style="display:none;align-items:center;gap:8px;margin-left:6px;font-size:12px;font-weight:700;color:#0f172a;background:#eef2ff;border:1px solid #c7d2fe;border-radius:6px;padding:3px 9px;white-space:nowrap"></span>';
+        +'<button id="plan-tg-btn" type="button" title="Trend Gaps — under-forecast trends (Category + SKU)" style="'+btn+';border-color:#b45309;color:#b45309">Trend Gaps</button>';
       row.appendChild(c);
       c.querySelector('#plan-exec-btn').onclick=openExecSummaryPopout;
       c.querySelector('#plan-summ-btn').onclick=openSummaryPopout;
