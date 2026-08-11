@@ -1,3 +1,8 @@
+## v26.847.0 Xero Compare — Horizon Due = final invoice − payments on/before the report date
+- Reworked the comparison basis (Ben's spec). For a PO with a **final invoice** (`supplier_invoice_total`, supplier currency), **Horizon Due = final invoice − payments dated ON/BEFORE the report period end** (parsed from the file, e.g. 31-Jul). Payments *after* the report date are ignored — the invoice was still outstanding at report time, which is what Xero shows. Goods payments only (deposit/completion/balance incl. deposit-pool drawdowns).
+- Previously it summed the *entered* payment milestones, which under-counted when milestones weren't fully itemised — e.g. **PO-1683100** showed a false 233% variance (compared Xero's ~$1,288 against only the $387.83 deposit). Now: 1,292.76 − 0 (the 387.83 deposit is 04-Aug, after 31-Jul) = 1,292.76 ≈ Xero → **OK**.
+- POs with no final invoice fall back to the previous open-payment sum, so Other Payments (e.g. PO-1836737) still reconcile. Client fetches `/api/supply/payments-by-supplier` for the per-PO invoice total; no server change.
+
 ## v26.846.0 PAYMENTS — likely pay date now appears in the payment lists immediately
 - Setting a **likely pay date** (`/api/supply/likely-date` → `payment_likely_dates`) didn't invalidate the supply caches, so it showed in the PO's **Payments tab** (fresh single-PO fetch) but **not** in the cached Payments Due / Cash Flow / By-Supplier lists (e.g. PO-1621143's 11-Aug balance likely date). The endpoint now calls `invalidateSupplyCaches()` on save *and* clear, so the cached PO/cash-flow builds rebuild and the likely date appears across all payment views at once.
 

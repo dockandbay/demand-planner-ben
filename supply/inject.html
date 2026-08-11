@@ -7489,11 +7489,14 @@
         +'</ol></div>'
       +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px"><input type="file" id="xc-file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="font-size:12px"><button class="save-btn" id="xc-go" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;font-weight:600">Analyse</button><label style="font-size:12px;color:#475569;cursor:pointer"><input type="checkbox" id="xc-allrows"> show all Approved rows (not just issues)</label><span id="xc-msg" style="font-size:12px"></span></div>'
       +'<div id="xc-result"></div>';
-    var _rows=null, _cf=null, _period='';   // last upload is stored SERVER-SIDE (shared across the team, kept 1 week) — /api/supply/xero-compare/*
+    var _rows=null, _cf=null, _period='', _pbs=[];   // last upload is stored SERVER-SIDE (shared across the team, kept 1 week) — /api/supply/xero-compare/*  ·  _pbs = payments-by-supplier (per-PO final invoice total)
     var go=b.querySelector('#xc-go'), fileI=b.querySelector('#xc-file'), msg=b.querySelector('#xc-msg');
     function setMsg(t,bad){ msg.style.color=bad?'#dc2626':'#64748b'; msg.textContent=t; }
     function agoLabel(at){ var m=Math.round((Date.now()-at)/60000); if(m<1)return 'just now'; if(m<60)return m+'m ago'; var h=Math.round(m/60); if(h<24)return h+'h ago'; var d=Math.round(h/24); return d+' day'+(d===1?'':'s')+' ago'; }
-    function compareNow(){ setMsg('Comparing against current Horizon data…'); return fetch('/api/supply/cashflow').then(function(r){return r.json();}).then(function(cf){ _cf=cf; analyse(); }).catch(function(e){ setMsg('Failed: '+(e.message||e),1); }); }
+    function compareNow(){ setMsg('Comparing against current Horizon data…'); return Promise.all([
+        fetch('/api/supply/cashflow').then(function(r){return r.json();}),
+        fetch('/api/supply/payments-by-supplier').then(function(r){return r.json();}).catch(function(){return [];})   // per-PO final invoice total (supplier_invoice_total)
+      ]).then(function(res){ _cf=res[0]; _pbs=Array.isArray(res[1])?res[1]:[]; analyse(); }).catch(function(e){ setMsg('Failed: '+(e.message||e),1); }); }
     go.onclick=function(){ var f=fileI.files&&fileI.files[0]; if(!f){ setMsg('Choose the XLSX export first.',1); return; }
       setMsg('Reading…'); go.disabled=true; var fname=f.name; var rd=new FileReader();
       rd.onload=function(){ var b64=String(rd.result).replace(/^data:[^;]+;base64,/,'');
@@ -7538,6 +7541,16 @@
         known[l.ref]=true;
         var openAtReport = !l.paid || (pend && l.paid_date && String(l.paid_date).slice(0,10) >= pend);
         if(openAtReport) due[l.ref]=(due[l.ref]||0)+(Number(l.amount)||0); });
+      // PRIMARY basis (Ben, v26.847): a PO with a FINAL INVOICE (supplier_invoice_total, in supplier currency) →
+      //   Horizon due = final invoice − payments dated ON/BEFORE the report period end.
+      // Payments AFTER the report date are ignored (the invoice was fully/partly outstanding at report time, which is
+      // what Xero shows). Goods payments only (deposit/completion/balance incl. deposit-pool drawdowns) — Other-payment
+      // and pool lines aren't part of the goods invoice. POs with no final invoice fall back to the open-payment sum above.
+      var invTot={}; (_pbs||[]).forEach(function(r){ if(r&&r.po&&Number(r.invoice_total)>0) invTot[r.po]=Number(r.invoice_total); });
+      var paidBefore={};
+      function _addPaidBefore(l){ if(!l.ref||!l.paid||!l.paid_date)return; if(String(l.paid_date).slice(0,10)>pend)return; paidBefore[l.ref]=(paidBefore[l.ref]||0)+(Number(l.amount)||0); }
+      ((_cf&&_cf.lines)||[]).forEach(function(l){ if((l.basis||'po')!=='po')return; var _t=String(l.type||'').toLowerCase(); if(!(_t.indexOf('deposit')>=0||_t==='completion'||_t==='balance'))return; _addPaidBefore(l); });
+      ((_cf&&_cf.startDeposits)||[]).forEach(function(l){ if(l.basis!=='drawdown')return; _addPaidBefore(l); });
       var showAll=b.querySelector('#xc-allrows').checked;
       // Ignore Xero batch "SUPPLIER-PAYMENT-*" rows entirely — they're aggregate supplier payments, not per-PO invoices. (v26.842)
       var approved=(_rows||[]).filter(function(r){ return /approv/i.test(r.status||'') && !/SUPPLIER-PAYMENT/i.test(r.reference||''); });
@@ -7546,7 +7559,12 @@
         var xero=(Number(r.balance_gbp)||0)*(isGbp?1:(Number(r.rate)||0));   // Xero outstanding → USD at the report rate
         var fx=isGbp?0:(Number(r.unrealised_gain)||0);   // unrealised FX gain = revaluation of the outstanding balance vs Horizon's booked USD
         var xadj=xero-fx;   // FX-neutralised → comparable to Horizon (booked rate)
-        var hd=(r.po&&due[r.po]!==undefined)?due[r.po]:(r.po&&known[r.po]?0:undefined), issue='', flag=false, pct=null;
+        var hd;   // Horizon due at report date
+        if(r.po && invTot[r.po]!=null) hd=Math.round((invTot[r.po]-(paidBefore[r.po]||0))*100)/100;   // final invoice − on/before-report payments
+        else if(r.po && due[r.po]!==undefined) hd=due[r.po];                                          // fallback: open-payment sum (Other Payments etc.)
+        else if(r.po && known[r.po]) hd=0;
+        else hd=undefined;                                                                            // PO not found in Horizon
+        var issue='', flag=false, pct=null;
         var asOf=pend?(' as of '+pend):'';
         if(!r.po){ issue='No PO in the Xero reference ('+(r.reference||'')+')'; flag=true; }
         else if(hd===undefined){ issue='PO not found in Horizon'; flag=true; }
