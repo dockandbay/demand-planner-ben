@@ -1,3 +1,6 @@
+## v26.835.0 Key Accounts input — "add SKU" is now an ACTIVE-only, multi-add search
+- On **DEMAND ▸ Inputs ▸ Key Accounts**, the per-client "+ add SKU…" box now (a) only lists **active products** (`products.status='ACTIVE'`, new `st` field on the SKU data), and (b) is **multi-add**: after clicking a SKU it stays on the same search text and re-opens the dropdown (the just-added SKU drops out), so several SKUs can be added in a row without re-clicking the box. Already-queued SKUs are filtered out of results.
+
 ## v26.834.0 DEMAND plan — "⬆ Import forecast" (SKU-level manual overrides)
 - New **Import forecast** button on the plan toolbar (next to More Filters & Settings). Opens an importer for the **current market + channel**: pick a From/To month → **Download template** (CSV: SKU + month columns, mmm-yy headers) → **paste from a spreadsheet or upload a CSV** (header row of SKU + months, then rows). Each cell is an absolute unit **override** (same as typing a SKU cell) — written via `skuOvSet`, logged to the "R" rail, and saved immediately. Unknown SKUs / unrecognised month headers are skipped with a preview count.
 

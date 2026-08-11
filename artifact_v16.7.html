@@ -8615,11 +8615,15 @@ function renderKeyAccountsView(body){
       saveCell(inp.dataset.cl==='(no client)'?'':inp.dataset.cl, inp.dataset.sku, inp.dataset.m, v===''?'':qty); }; });
     host.querySelectorAll('.kaf-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Clear '+b.dataset.sku+' across all shown months for this client?'))return;
       var cl=b.dataset.cl==='(no client)'?'':b.dataset.cl; monthList().forEach(function(x){ saveCell(cl,b.dataset.sku,x.key,''); }); setTimeout(reload,300); }; });
-    host.querySelectorAll('.kaf-skuin').forEach(function(inp){ var td=inp.closest('td'), drop=td.querySelector('.kaf-drop');
-      function show(){ var qq=inp.value.trim().toLowerCase(); var ms=SKUS.filter(function(s){ return !qq||s.toLowerCase().indexOf(qq)>=0||skuName(s).toLowerCase().indexOf(qq)>=0; }).slice(0,40);
-        drop.innerHTML=ms.length?ms.map(function(s){return '<div class="kaf-opt" data-sku="'+e(s)+'"><b>'+e(s)+'</b> <span style="color:#999">'+e(skuName(s))+'</span></div>';}).join(''):'<div class="kaf-opt" style="color:#999;cursor:default">no matches</div>';
-        drop.classList.add('open'); drop.querySelectorAll('.kaf-opt[data-sku]').forEach(function(o){ o.onmousedown=function(ev){ ev.preventDefault(); var cl=inp.dataset.cl; (pendSkus[cl]=pendSkus[cl]||[]).push(o.dataset.sku); drop.classList.remove('open'); draw(); }; }); }
-      inp.oninput=show; inp.onfocus=show; inp.onblur=function(){ setTimeout(function(){drop.classList.remove('open');},160); }; });
+    host.querySelectorAll('.kaf-skuin').forEach(function(inp){ var td=inp.closest('td'), drop=td.querySelector('.kaf-drop'); var cl=inp.dataset.cl;
+      function show(){ var qq=inp.value.trim().toLowerCase(); var pend=(pendSkus[cl]||[]);
+        var ms=SKUS.filter(function(s){ var p=SKUM[s]; if(p&&p.st&&p.st!=='ACTIVE')return false;   // ACTIVE products only
+          if(pend.indexOf(s)>=0)return false;                                                       // already queued for this client
+          return !qq||s.toLowerCase().indexOf(qq)>=0||skuName(s).toLowerCase().indexOf(qq)>=0; }).slice(0,40);
+        drop.innerHTML=ms.length?ms.map(function(s){return '<div class="kaf-opt" data-sku="'+e(s)+'"><b>'+e(s)+'</b> <span style="color:#999">'+e(skuName(s))+'</span></div>';}).join(''):'<div class="kaf-opt" style="color:#999;cursor:default">no active matches</div>';
+        drop.classList.add('open'); drop.querySelectorAll('.kaf-opt[data-sku]').forEach(function(o){ o.onmousedown=function(ev){ ev.preventDefault(); var q=inp.value; (pendSkus[cl]=pendSkus[cl]||[]).push(o.dataset.sku); draw();
+          setTimeout(function(){ var sel='.kaf-skuin[data-cl="'+(window.CSS&&CSS.escape?CSS.escape(cl):String(cl).replace(/"/g,'\\"'))+'"]'; var ni=host.querySelector(sel); if(ni){ ni.value=q; ni.focus(); if(ni.oninput)ni.oninput(); } },0); }; }); }   // multi-add: keep searching + adding without re-clicking the box
+      inp.oninput=show; inp.onfocus=show; inp.onblur=function(){ setTimeout(function(){drop.classList.remove('open');},200); }; });
     var addCli=host.querySelector('#kaf-addcli'); if(addCli)addCli.onclick=function(){ var i=host.querySelector('#kaf-newcli'); var v=(i.value||'').trim(); if(!v)return; if(pendClients.indexOf(v)<0)pendClients.push(v); i.value=''; draw(); };
   }
   function reload(){ fetch('/api/supply/ka-forecasts').then(function(r){return r.json();}).then(function(d){ rows=Array.isArray(d)?d:[]; draw(); }); }

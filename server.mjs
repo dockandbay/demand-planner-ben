@@ -257,7 +257,8 @@ async function buildSKURAW() {
                        coalesce(nullif(btrim(p.subcategory),''),'Undefined sub category') s,
                        coalesce(nullif(btrim(p.category),''),'Undefined sub category') c,
                        p.market_tier ti, p.core_seasonal cs, coalesce(sl.release_window,'') rw,
-                       nullif(trim(p.replacement_sku),'') rep, nullif(trim(p.variant_image_url_final),'') img
+                       nullif(trim(p.replacement_sku),'') rep, nullif(trim(p.variant_image_url_final),'') img,
+                       upper(coalesce(nullif(btrim(p.status),''),'')) st
                 FROM planner.products p LEFT JOIN planner.sku_labels sl ON sl.sku=p.sku WHERE p.in_planning_scope`),
     // Launch + discontinue dates per country, from planner.products (Ben's single source of truth).
     // Values are already ISO text on products, so pass through; the artifact compares them as strings.
@@ -345,6 +346,7 @@ async function buildSKURAW() {
                  rw: r.rw || '',  // release window (season) — shown on the BUY/FBA/Transfer grid after Type
                  rep: r.rep || '',  // replacement_sku (predecessor) — new SKU inherits its sales history as the forecast basis
                  img: r.img || '',  // variant_image_url_final — DEMAND plan optional variant-image thumbnail
+                 st: r.st || '',    // products.status (ACTIVE/…) — for the Key-Accounts "active only" SKU picker
                  av: {}, disc: {}, lch: {}, inv: {}, oo: {} };
   for (const r of avail.rows) if (p[r.sku] && r.av) p[r.sku].av[r.co] = r.av;
   for (const r of pcs.rows) if (p[r.sku]) { if (r.lch) p[r.sku].lch[r.co] = r.lch; if (r.disc) p[r.sku].disc[r.co] = r.disc; }
