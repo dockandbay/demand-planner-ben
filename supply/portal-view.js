@@ -1473,24 +1473,27 @@
             var b=document.getElementById('pp-ship-badge'); if(b)b.innerHTML=ppBadgeHtml(n); }
           function ppSampleRow(s,i){
             var units=(s.lines||[]).reduce(function(a,l){return a+(Number(l.qty)||0);},0), nsku=(s.lines||[]).length;
+            var _ps=s.production_status||'', _pso=PROD_STATUS.filter(function(x){return x[0]===_ps;})[0], _psc=PROD_STATUS_COL[_ps]||PROD_STATUS_COL[''];
+            var yourStatus='<span style="display:inline-block;font-size:10px;font-weight:700;padding:1px 8px;border-radius:8px;background:'+_psc[0]+';color:'+_psc[1]+'">'+esc(_pso?_pso[1]:'—')+'</span>';
             return '<tr><td class="l"><button class="planbtn ps-manage" data-id="'+s.id+'" data-i="'+i+'">PLAN</button><span class="ps-rowbadge" data-id="'+s.id+'">'+sampRowBadgeHtml(s)+'</span></td>'
-              +'<td class="l"><b>'+esc(s.ref)+'</b></td>'
+              +'<td class="l"><a class="ps-reflink" data-i="'+i+'" title="open this sample shipment" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;font-weight:700">'+esc(s.ref)+'</a></td>'
               +'<td class="l">'+sampChip(s.status_calc)+'</td>'
+              +'<td class="l">'+yourStatus+'</td>'
               +'<td class="l">'+esc(s.recipient_company||'')+(s.recipient_name?' <span class="mut tiny">'+esc(s.recipient_name)+'</span>':'')+'</td>'
               +'<td class="l">'+(s.completion_required?fd(s.completion_required):'<span class="mut">—</span>')+'</td>'
               +'<td class="l"><b>'+units+'</b> <span class="mut tiny">· '+nsku+' SKU'+(nsku===1?'':'s')+'</span></td>'
               +'<td class="l">'+(s.tracking_code?carrierTrackLink(s.carrier,s.tracking_code):'<span class="mut">—</span>')+'</td></tr>'
-              +'<tr class="ps-exp" id="ps-exp-'+i+'" style="display:none"><td colspan="7"><div class="ps-det" data-id="'+s.id+'"></div></td></tr>'; }
+              +'<tr class="ps-exp" id="ps-exp-'+i+'" style="display:none"><td colspan="8"><div class="ps-det" data-id="'+s.id+'"></div></td></tr>'; }
           function ppSamples(samples){
             var F=[['open','Open'],['closed','Closed'],['all','All']];
             var q=(PORTAL_SAMP_Q||'').toLowerCase();
             var rows=samples.filter(function(s){ if(!sampInFilt(s,PORTAL_SAMP_F))return false; if(q){ var hay=((s.ref||'')+' '+(s.recipient_company||'')+' '+(s.recipient_name||'')+' '+(s.lines||[]).map(function(l){return l.sku;}).join(' ')+' '+Object.keys(s.cur_lines||{}).join(' ')).toLowerCase(); if(hay.indexOf(q)<0)return false; } return true; });   // cur_lines: SKUs are searchable even before the row is expanded
+            var newTop='<div style="margin-bottom:8px"><button class="save-btn" id="samp-new-btn" style="background:#16a34a;color:#fff;border-color:#15803d">+ New Sample Shipment</button></div>';   // moved to the very top (Ben)
             var bar='<div class="bar" style="margin-bottom:8px;flex-wrap:wrap;gap:6px;align-items:center">'
               +F.map(function(f){return '<span class="rtab ps-filt'+(PORTAL_SAMP_F===f[0]?' active':'')+'" data-f="'+f[0]+'" style="cursor:pointer">'+f[1]+' ('+samples.filter(function(s){return sampInFilt(s,f[0]);}).length+')</span>';}).join('')
-              +'<input class="fci txt ps-q" placeholder="search ref / recipient / SKU…" value="'+esc(PORTAL_SAMP_Q||'')+'" style="width:220px">'
-              +'<button class="save-btn" id="samp-new-btn" style="margin-left:auto;background:#16a34a;color:#fff;border-color:#15803d">+ New Sample Shipment</button></div>';
-            var tbl=samples.length?(rows.length?'<div class="tw"><table style="width:max-content;min-width:100%"><thead><tr><th class="l"></th><th class="l">Ref</th><th class="l">Status</th><th class="l">Recipient</th><th class="l">Requested completion</th><th class="l">Units</th><th class="l">Tracking</th></tr></thead><tbody>'+rows.map(ppSampleRow).join('')+'</tbody></table></div>':'<div class="count">No samples match this filter.</div>'):'<div class="count">No sample requests yet.</div>';
-            return bar+'<div id="samp-newform"></div>'+tbl; }
+              +'<input class="fci txt ps-q" placeholder="search ref / recipient / SKU…" value="'+esc(PORTAL_SAMP_Q||'')+'" style="width:220px"></div>';
+            var tbl=samples.length?(rows.length?'<div class="tw"><table style="width:max-content;min-width:100%"><thead><tr><th class="l"></th><th class="l">Ref</th><th class="l">Dock &amp; Bay Status</th><th class="l">Your status</th><th class="l">Recipient</th><th class="l">Requested completion</th><th class="l">Units</th><th class="l">Tracking</th></tr></thead><tbody>'+rows.map(ppSampleRow).join('')+'</tbody></table></div>':'<div class="count">No samples match this filter.</div>'):'<div class="count">No sample requests yet.</div>';
+            return newTop+bar+'<div id="samp-newform"></div>'+tbl; }
           function wireSampleCard(scope,id){
             // Contents (bulk SKUs + product-development samples) — replace-all writes, then a light contents-only
             // refresh (no full bootstrap reload) so the card updates silently.
@@ -1578,7 +1581,10 @@
               ex.style.display=open?'none':''; b.classList.toggle('open',!open);
               if(!open && !ex.dataset.loaded){ ex.dataset.loaded='1'; var det=ex.querySelector('.ps-det'); var s=(_ppData.samples||[]).filter(function(x){return String(x.id)===String(b.dataset.id);})[0]; if(s){ det.innerHTML=ppSampleCard(s); wireSampleCard(det, s.id);
                 // refresh contents from the DB — the cached _ppData.samples can be stale if dev samples were linked from PRODUCT ▸ samples after the portal loaded
-                getJSON(EP.sampleContentsBase+s.id+'/contents').then(function(c){ if(c&&!c.error){ s.lines=c.lines||[]; s.dev_samples=c.dev_samples||[]; det.innerHTML=ppSampleCard(s); wireSampleCard(det, s.id); } }).catch(function(){}); } } }; }); }
+                getJSON(EP.sampleContentsBase+s.id+'/contents').then(function(c){ if(c&&!c.error){ s.lines=c.lines||[]; s.dev_samples=c.dev_samples||[]; det.innerHTML=ppSampleCard(s); wireSampleCard(det, s.id); } }).catch(function(){}); } } }; });
+            // the SR reference is a link → open (expand) the sample's editable detail + scroll to it
+            body.querySelectorAll('.ps-reflink').forEach(function(a){ a.onclick=function(){ var i=a.dataset.i, ex=document.getElementById('ps-exp-'+i), mb=body.querySelector('.ps-manage[data-i="'+i+'"]');
+              if(ex && ex.style.display==='none' && mb){ mb.click(); } if(ex){ try{ ex.scrollIntoView({behavior:'smooth',block:'center'}); }catch(e){} } }; }); }
           function prodStatusLabel(s){ return {in_development:'In development',approved:'Approved',dropped:'Dropped'}[s]||s; }
           function ppProducts(items){ items=items||[];
             if(!items.length) return '<div class="count" style="padding:16px 2px;text-align:left">No product development items assigned to you yet.</div>';

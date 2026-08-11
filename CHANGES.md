@@ -1,3 +1,7 @@
+## v26.849.0 Supplier portal — sample-shipments grid + new product cache
+- **New product now shows in the portal at once**: creating a product on the admin side (`/api/product/item`) now clears the cached portal bootstrap (`_portalCache`) — previously it lagged a whole cache TTL.
+- **Sample shipments grid**: renamed **Status → "Dock & Bay Status"** and added a **"Your status"** column (the supplier's own production status, colour-chipped). The **SR reference is now a link** that opens the sample's editable detail (expands + scrolls to it). The **"+ New Sample Shipment"** button moved to the **top** (its own line above the filters).
+
 ## v26.848.0 PRODUCT — "Recipient country" now offers US + Direct to Client
 - The product master-data **Recipient country** picker (who receives the samples) only had **UK** and **AU**. Added **US** and **Direct to Client** (value `DIRECT`, matching the PO ship-to convention). Free-text `recipient_countries` field — no server/migration change.
 

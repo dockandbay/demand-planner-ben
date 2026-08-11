@@ -4579,6 +4579,7 @@ app.post('/api/product/item', async (req, res) => {
     await client.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`,
       [ref, (b.created_by || '').trim() || null, who + ' created a new product development item']);
     await client.query('COMMIT');
+    try { _portalCache.clear(); _portalInflight.clear(); } catch (e) {}   // a new product must appear in the supplier portal at once — drop the cached portal bootstrap (else it lags a whole TTL)
     res.json({ ok: true, ref, id });
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
