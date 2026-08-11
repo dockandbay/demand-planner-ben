@@ -1,3 +1,6 @@
+## v26.861.0 Key Accounts — add-SKU dropdown flips up at page bottom
+- The `+ add SKU…` suggestion dropdown now opens **upward** when there isn't enough room below (bottom-of-page rows), instead of being clipped off-screen. Measures the dropdown's real height and available space, flips only when needed.
+
 ## v26.860.0 DEMAND plan SUM — box pinned to far right of the toolbar
 - The Sum box now uses `margin-left:auto` so it sits hard against the right edge, separated from the Forecast Logic / Download button cluster.
 
