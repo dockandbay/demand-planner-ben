@@ -1,3 +1,6 @@
+## v26.844.0 Supplier portal — de-dup the "submitted invoice info" email
+- A supplier clicking **Submit** repeatedly re-staged the same invoice value and fired **one email per click** (Ben got 3× for PO-57EULX4). The invoice-notify email now only sends when the value is **new** — i.e. it differs from the immediately-previous invoice submission for that PO (`invoiceSubmitIsRepeat`). Same amount resubmitted → no email; a genuinely changed amount → email as before. Applied at both submit endpoints. On any error it errs toward sending (never silently drops a real notification).
+
 ## v26.843.0 PAYMENTS ▸ Xero Compare — clearer column headers
 - Renamed **"Xero balance (GBP)" → "Xero Due (GBP)"** and **"Xero amount" → "Xero Due (USD)"** — both are the outstanding/due amount (GBP as reported by Xero, and its USD conversion at the rate).
 

@@ -3992,6 +3992,20 @@ async function emailInvoiceSubmit(po, value, by) {
     + '<p><a href="' + link + '">Open ' + po + ' in HORIZON</a></p>';
   return sendResendEmail({ to: emails, subject: supName + ' submitted invoice info — ' + po, html, kind: 'invoice-notify', ref: po, replyTo: by });   // reply-to = the supplier who submitted
 }
+// Dedup the "supplier submitted invoice info" email. A supplier clicking Submit repeatedly re-stages the SAME
+// invoice value, which previously fired one email per click (Ben saw 3× for PO-57EULX4). Only email when the
+// value is NEW — i.e. it differs from the immediately-previous invoice submission for this PO. (The just-submitted
+// row is already committed, so rows[0] = current, rows[1] = previous.)
+async function invoiceSubmitIsRepeat(po, _newVal) {
+  try {
+    const rows = (await pool.query(`SELECT value FROM planner.supplier_submissions
+      WHERE po=$1 AND kind='invoice_value' ORDER BY id DESC LIMIT 2`, [po])).rows;
+    if (rows.length < 2) return false;   // first-ever invoice submission for this PO → send
+    const n = s => { const x = Number(String(s == null ? '' : s).replace(/[^0-9.\-]/g, '')); return isFinite(x) ? x : null; };
+    const cur = n(rows[0].value), prev = n(rows[1].value);
+    return cur != null && prev != null && Math.abs(cur - prev) < 0.005;   // same amount as last time → repeat click → skip the email
+  } catch (e) { return false; }   // on any error, don't suppress — better a duplicate email than a missed one
+}
 // supplier display name for a PO (falls back to "Supplier" when unknown) — used in supplier-submission emails
 async function poSupplierName(po) {
   try { const r = (await pool.query(`SELECT coalesce(nullif(trim(supplier_name),''),'Supplier') n FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0];
@@ -5764,7 +5778,7 @@ app.post('/api/supply/portal-submit', async (req, res) => {
       else { await client.query(`UPDATE planner.purchase_orders SET supplier_confirmed_at=NULL, supplier_confirmed_by=NULL WHERE po=$1`, [b.po]); out.applied.push('PO confirmation cleared'); }
     }
     await client.query('COMMIT');
-    if (_invoiceSubmit != null) await emailInvoiceSubmit(b.po, _invoiceSubmit, by).catch(() => {});
+    if (_invoiceSubmit != null && !(await invoiceSubmitIsRepeat(b.po, _invoiceSubmit))) await emailInvoiceSubmit(b.po, _invoiceSubmit, by).catch(() => {});   // skip duplicate emails from repeated Submit clicks with the same amount
     res.json(out);
   } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
@@ -12357,7 +12371,7 @@ app.post('/api/portal/submit', portalAuth, async (req, res) => {
       // master PO marked shipped → its shipment advances to Shipping (master POs only)
       if (st === 'shipped') { const shref = await shipmentShippingFromMasterPO(pool, b.po); if (shref) out.applied.push('shipment ' + shref + ' → Shipping'); }
     }
-    if (_invoiceSubmit != null) await emailInvoiceSubmit(b.po, _invoiceSubmit, by).catch(() => {});
+    if (_invoiceSubmit != null && !(await invoiceSubmitIsRepeat(b.po, _invoiceSubmit))) await emailInvoiceSubmit(b.po, _invoiceSubmit, by).catch(() => {});   // skip duplicate emails from repeated Submit clicks with the same amount
     res.json(out);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
