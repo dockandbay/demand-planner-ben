@@ -1,3 +1,8 @@
+## v26.852.0 SUPPLY Samples — "created" timeline entry, always-editable details, tighter layout
+- **Creation is logged on the sample timeline** with who created it: admin-created → `sample_notes` `internal` (shows as an **unread** note for the supplier in the portal); supplier-created (portal) → `supplier` (shows **unread** for Dock & Bay on the admin side). Drives the existing unread badges + keeps the sample surfaced.
+- **Admin sample details are now always-editable** — removed the Edit/Done toggle; every cell is an input that **auto-saves on change** (SKU lines now auto-save too, debounced, previously only persisted by the removed "✓ Done").
+- **Layout**: moved the **"Other details"** card up next to **"Recipient & address"** (was stranded far below).
+
 ## v26.851.0 PRODUCT — sample-shipment refs open an editable drawer (not a page jump)
 - Clicking a sample-shipment **SR ref** in the PRODUCT module (grid "Sample shipment" column, item detail, and the item's Samples sub-tab) now opens the sample in an **editable right-side drawer** (`openSampleDrawer`) instead of navigating to `#/supply/samples`. Reuses the full sample-detail editor (`loadSampleDetail(id,'DRAWER')`) in a drawer inside `#supply-root`, revealed over the PRODUCT view via the existing `hz-drawer-overlay` mode (same pattern as the PO drawer over DEMAND/BUY).
 - Made the sample-detail renderer **drawer-safe**: in a drawer it no longer rewrites the URL hash to `#/supply/samples` on tab clicks, and Delete closes the drawer. Falls back to the old navigation if the drawer fn is unavailable. Added `#sampdrawer-bg` to the drawer CSS (desktop + mobile) and spared a drawer-overlay `#supply-root` from the `product-active` hide rule.

@@ -9323,14 +9323,16 @@
     }).catch(function(){}); }
   function loadSampleDetail(id,i){ var box=document.getElementById('sampdet-'+i);
     fetch('/api/supply/sample-detail/'+id).then(function(r){return r.json();}).then(function(d){ if(!d||d.error){box.innerHTML='<div style="color:#dc2626">'+esc((d&&d.error)||'load failed')+'</div>';return;}
-      var s=d.sample, ep='/api/supply/sample/'+id, editing=false, curTab=(box._sampTab||_pendingSampleTab||'details'); box._sampTab=curTab;
+      var s=d.sample, ep='/api/supply/sample/'+id, editing=true, curTab=(box._sampTab||_pendingSampleTab||'details'); box._sampTab=curTab;   // always-editable (Ben): no Edit/Done toggle — cells edit + auto-save in place
       var slines=(d.lines||[]).map(function(l){return {sku:l.sku,qty:l.qty};});
+      // auto-save the SKU lines (debounced) — was previously only persisted by the removed "✓ Done" button
+      var _slT=null; function saveSlines(){ clearTimeout(_slT); _slT=setTimeout(function(){ shipPost('/api/supply/sample/'+id+'/lines',{lines:slines.filter(function(l){return l.sku&&String(l.sku).trim();}).map(function(l){return {sku:String(l.sku).trim(),qty:Number(l.qty)||0};})},function(){}); },400); }
       var PURP=['sales','product','photography','marketing','operations'];
       function fld(f,val,w,ph){ return '<span style="display:inline-block;margin:0 6px 5px 0;vertical-align:top"><span style="display:block;font-size:9px;text-transform:uppercase;letter-spacing:.03em;color:#94a3b8;margin-bottom:1px">'+esc(ph||f)+'</span><input class="fci txt samp-fld" data-field="'+f+'" value="'+esc(val||'')+'" style="width:'+(w||150)+'px"></span>'; }
       function renderSlines(){ var w=box.querySelector('.samp-lines'); if(!w)return; w.innerHTML=(slines.length?slines:[]).map(function(l,k){return '<div style="margin-bottom:3px"><input class="fci txt sl-sku" data-k="'+k+'" value="'+esc(l.sku)+'" placeholder="SKU" style="width:170px"> <input class="fci sl-qty" data-k="'+k+'" value="'+esc(l.qty)+'" style="width:55px;text-align:right"> <a class="sl-rm" data-k="'+k+'" style="color:#dc2626;cursor:pointer">×</a></div>';}).join('')||'<div class="mut tiny">no SKUs — add a line</div>';
-        w.querySelectorAll('.sl-sku').forEach(function(x){x.onchange=function(){slines[x.dataset.k].sku=x.value;};});
-        w.querySelectorAll('.sl-qty').forEach(function(x){x.onchange=function(){slines[x.dataset.k].qty=x.value;};});
-        w.querySelectorAll('.sl-rm').forEach(function(x){x.onclick=function(){slines.splice(x.dataset.k,1);renderSlines();};}); }
+        w.querySelectorAll('.sl-sku').forEach(function(x){x.onchange=function(){slines[x.dataset.k].sku=x.value;saveSlines();};});
+        w.querySelectorAll('.sl-qty').forEach(function(x){x.onchange=function(){slines[x.dataset.k].qty=x.value;saveSlines();};});
+        w.querySelectorAll('.sl-rm').forEach(function(x){x.onclick=function(){slines.splice(x.dataset.k,1);renderSlines();saveSlines();};}); }
       function paint(){
         var charges=(d.charges||[]).map(function(ch){ var tot=(Number(ch.freight_cost)||0)+(Number(ch.product_cost)||0);
           return '<tr><td class="l">'+sampleChargeChip(ch.status)+'</td><td class="l">'+money(ch.freight_cost)+'</td><td class="l">'+money(ch.product_cost)+'</td><td class="l"><b>'+money(tot)+'</b></td><td class="l">'+esc(ch.description||'')+'</td><td class="l">'+(ch.status==='pending'?'<button class="save-btn samp-charge-acc" data-id="'+ch.id+'" style="background:#bbf7d0;border:1px solid #16a34a;color:#166534;font-weight:700">Accept → Other Payments</button> <button class="save-btn light samp-charge-rej" data-id="'+ch.id+'">Reject</button>':'')+'</td></tr>'; }).join('')||'<tr><td colspan="6" class="mut">no charges</td></tr>';
@@ -9372,8 +9374,7 @@
         // supplier signalled shipped (marked shipped OR entered tracking) but we haven't set SHIPPED → offer "Set shipping" (mirrors the PO grid)
         var _supShipped=(s.production_status==='shipped' || String(s.tracking_code||'').trim());
         var setShip=(_supShipped && _us!=='SHIPPED' && _us!=='CANCELLED')?'<button class="save-btn samp-setship" data-id="'+id+'" style="background:#50C878;color:#0f3d22;border:1px solid #3ca35f;font-weight:700;margin-top:6px">🚢 Set shipping — supplier '+(s.production_status==='shipped'?'marked shipped':'entered tracking')+'</button>':'';
-        var actBtn = editing ? '<button class="save-btn samp-done" style="background:#2563eb;color:#fff;border-color:#1d4ed8">✓ Done</button>'
-                             : '<button class="save-btn samp-edit">Edit</button>';
+        var actBtn = '';   // always-editable — no Edit/Done button (cells auto-save in place)
         // tabbed detail — mirrors the PO detail (.po-subnav / .rtab + panels), with per-tab counts
         function bdge(n){ return n>0?' <span class="ex-badge">'+n+'</span>':''; }
         var pend=(d.charges||[]).filter(function(c){return c.status==='pending';}).length, _unread=(d.notes||[]).filter(function(n){return n.author_kind==='supplier'&&!n.read;}).length;
@@ -9384,6 +9385,7 @@
         var _scard='border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;background:#fff';
         var detailsPanel='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;align-items:start">'
           +'<div style="'+_scard+'"><div class="sect-h">Recipient &amp; address</div>'+recip+'</div>'
+          +'<div style="'+_scard+'"><div class="sect-h">Other details</div>'+L('Purpose')+purpose+L('Notes')+notes+'</div>'   // sits right after Recipient so the two are together (Ben)
           +((s.recipient_company_2||s.tracking_code_2||s.address_line1_2)?'<div style="'+_scard+'"><div class="sect-h">Second recipient &amp; tracking <span class="mut tiny" style="font-weight:400">(supplier-added)</span></div>'
             +'<div class="tiny" style="line-height:1.65"><b>'+esc(s.recipient_company_2||'—')+'</b>'+(((s.first_name_2||'')+' '+(s.last_name_2||'')).trim()?'<br>'+esc(((s.first_name_2||'')+' '+(s.last_name_2||'')).trim()):'')+([s.address_line1_2,s.address_line2_2,s.city_2,s.region_2,s.postcode_2,s.country_2].filter(Boolean).length?'<br>'+esc([s.address_line1_2,s.address_line2_2,s.city_2,s.region_2,s.postcode_2,s.country_2].filter(Boolean).join(', ')):'')+(s.phone_2?'<br>☏ '+esc(s.phone_2):'')+'</div>'
             +'<div class="cli-row" style="margin-top:6px"><div class="cli-lbl">2nd tracking</div><div class="cli-val"><span class="tiny">'+(s.tracking_code_2?((carrierTrackUrl(s.carrier_2,s.tracking_code_2)?'<a href="'+carrierTrackUrl(s.carrier_2,s.tracking_code_2)+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;font-weight:700">'+esc(s.tracking_code_2)+' ↗</a>':esc(s.tracking_code_2))+(s.carrier_2?' <span class="mut tiny">'+esc(s.carrier_2)+'</span>':'')):'<span class="mut">—</span>')+'</span></div></div></div>':'')
@@ -9404,7 +9406,6 @@
             +(dateExc?'<div style="color:#dc2626;font-weight:700;font-size:11px;margin-top:4px">⚠ Overdue — completion / supplier-expected date has passed'+_sMk('date_overdue')+'</div>':'')
             +'<div style="margin-top:10px">'+actBtn+' <button class="save-btn light samp-del" data-id="'+id+'" style="color:#dc2626">Delete</button></div></div>'
           +'<div style="'+_scard+'"><div class="sect-h">SKUs &amp; quantities</div>'+skus+'</div>'
-          +'<div style="'+_scard+'"><div class="sect-h">Other details</div>'+L('Purpose')+purpose+L('Notes')+notes+'</div>'
           +'</div>';
         var attachPanel='<div class="tiny" style="margin-bottom:6px">'+((d.attachments||[]).map(function(a){return '<span style="display:inline-block;margin:0 12px 4px 0"><a href="/api/supply/portal-attachment/'+a.id+'" target="_blank" rel="noopener">'+esc(a.filename||'file')+'</a> <a class="samp-att-rm" data-aid="'+a.id+'" title="remove" style="color:#dc2626;cursor:pointer">×</a></span>';}).join('')||'<span class="mut">no attachments yet</span>')+'</div>'
           +'<div><input type="file" class="samp-att-file" style="font-size:11px"> <button class="save-btn samp-att-up">Upload attachment</button></div>';
@@ -9446,8 +9447,8 @@
               var have={}; slines.forEach(function(l){ if(l.sku)have[String(l.sku).trim()]=1; }); rows=rows.filter(function(k){return !have[k.sku];});
               rb.innerHTML=(rows.length?'<div style="border:1px solid #cbd5e1;border-radius:6px;max-height:200px;overflow:auto;background:#fff">'+rows.map(function(k){return '<div style="display:flex;gap:7px;align-items:center;padding:3px 8px;border-bottom:1px solid #f1f5f9;font-size:12px"><input type="checkbox" class="samp-skcb" value="'+esc(k.sku)+'"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(k.sku)+'</b>'+(k.dev?' <span class="tool-badge bg-blue" style="font-size:9px">dev</span>':'')+'<span class="mut tiny" style="flex:1;min-width:0">'+esc(k.description||'')+(k.release_window&&!k.dev?' · '+esc(k.release_window):'')+'</span><input class="fci samp-skqty" data-sku="'+esc(k.sku)+'" placeholder="qty" style="width:52px;text-align:left"></div>';}).join('')+'</div><button class="save-btn light samp-skadd" style="margin-top:4px">+ Add selected</button>':'<div class="mut tiny">No matches.</div>')
                 +'<div style="display:flex;gap:6px;align-items:center;margin-top:6px;padding-top:6px;border-top:1px dashed #e5e7eb"><span class="mut tiny">Not listed?</span><input class="fci txt samp-ftsku" value="'+esc(q)+'" placeholder="type SKU" style="width:160px"><input class="fci samp-ftqty" placeholder="qty" style="width:52px;text-align:left"><button class="save-btn light samp-ftadd">+ Add free text</button></div>';
-              var sk=rb.querySelector('.samp-skadd'); if(sk)sk.onclick=function(){ var any=false; rb.querySelectorAll('.samp-skcb:checked').forEach(function(c){ var qi=rb.querySelector('.samp-skqty[data-sku="'+(window.CSS&&CSS.escape?CSS.escape(c.value):c.value)+'"]'); slines.push({sku:c.value,qty:(qi&&Number(qi.value))||1}); any=true; }); if(any){ rb.innerHTML=''; sss.value=''; renderSlines(); } };
-              var ft=rb.querySelector('.samp-ftadd'); if(ft)ft.onclick=function(){ var sv=rb.querySelector('.samp-ftsku').value.trim(); if(!sv)return; var qv=rb.querySelector('.samp-ftqty').value; slines.push({sku:sv,qty:Number(qv)||1}); rb.innerHTML=''; sss.value=''; renderSlines(); };
+              var sk=rb.querySelector('.samp-skadd'); if(sk)sk.onclick=function(){ var any=false; rb.querySelectorAll('.samp-skcb:checked').forEach(function(c){ var qi=rb.querySelector('.samp-skqty[data-sku="'+(window.CSS&&CSS.escape?CSS.escape(c.value):c.value)+'"]'); slines.push({sku:c.value,qty:(qi&&Number(qi.value))||1}); any=true; }); if(any){ rb.innerHTML=''; sss.value=''; renderSlines(); saveSlines(); } };
+              var ft=rb.querySelector('.samp-ftadd'); if(ft)ft.onclick=function(){ var sv=rb.querySelector('.samp-ftsku').value.trim(); if(!sv)return; var qv=rb.querySelector('.samp-ftqty').value; slines.push({sku:sv,qty:Number(qv)||1}); rb.innerHTML=''; sss.value=''; renderSlines(); saveSlines(); };
             }).catch(function(){ rb.innerHTML='<div class="mut tiny" style="color:#dc2626">search failed</div>'; }); },300);
         }
         loadSampleTimeline(s.ref, id, 'internal', s.supplier_name);

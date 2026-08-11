@@ -9997,6 +9997,9 @@ app.post('/api/supply/sample-create', async (req, res) => {
     for (const l of (Array.isArray(b.lines)?b.lines:[])) { if (!l || !l.sku) continue;
       await client.query(`INSERT INTO planner.sample_request_lines (sample_id, sku, qty) VALUES ($1,$2,$3)`,
         [id, String(l.sku).trim(), Math.round(Number(l.qty)||0)]); }
+    // timeline entry: created by Dock & Bay → author_kind 'internal' = shows as an UNREAD note for the supplier in the portal
+    await client.query(`INSERT INTO planner.sample_notes (sample_id, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`,
+      [id, (b.created_by||'').trim()||null, (shortUser((b.created_by||'').trim())||'Dock & Bay')+' created this sample request']);
     await client.query('COMMIT');
     res.json({ ok:true, id, ref });
   } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); }
@@ -12053,6 +12056,9 @@ app.post('/api/portal/sample-create', portalAuth, async (req, res) => {   // sup
     const id = ins.rows[0].id, ref = 'SR-'+id; await client.query(`UPDATE planner.sample_requests SET ref=$1 WHERE id=$2`, [ref, id]);
     for (const l of (Array.isArray(b.lines)?b.lines:[])) { if(!l||!l.sku) continue; await client.query(`INSERT INTO planner.sample_request_lines (sample_id, sku, qty) VALUES ($1,$2,$3)`, [id, String(l.sku).trim(), qtyOrOne(l.qty)]); }
     for (const d of (Array.isArray(b.dev_samples)?b.dev_samples:[])) { const did=(d&&typeof d==='object')?d.id:d; if(!did) continue; await client.query(`INSERT INTO planner.sample_request_dev_samples (sample_request_id, dev_sample_id, qty, created_by) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING`, [id, did, qtyOrOne(d&&typeof d==='object'?d.qty:1), req.portal.email||null]); }
+    // timeline entry: created by the supplier → author_kind 'supplier' = shows as an UNREAD note for Dock & Bay on the admin side
+    await client.query(`INSERT INTO planner.sample_notes (sample_id, author_email, author_kind, body) VALUES ($1,$2,'supplier',$3)`,
+      [id, req.portal.email||null, (shortUser(req.portal.email||'')||supName||'Supplier')+' created this sample request']);
     await client.query('COMMIT'); res.json({ ok: true, id, ref });
   } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); } finally { client.release(); } });
 
