@@ -1,3 +1,7 @@
+## v26.840.0 PAYMENTS ▸ Xero Compare — the uploaded XLSX is now re-downloadable
+- On upload, the original XLSX is now stored (base64) alongside the parsed rows (migration **208** adds `xero_compare_snapshot.file_b64`). The "Using the last uploaded file …" banner makes the **filename a clickable download** (`↓`) served by new `GET /api/supply/xero-compare/file` (correct XLSX mime + original filename). Older snapshots (uploaded before this) have no stored file, so the name stays plain text until the next upload.
+- New env/migration: run migration `208_xero_compare_file.sql` on live.
+
 ## v26.839.0 PAYMENTS ▸ Xero Compare — narrower middle columns so "Issue" isn't clipped
 - The 7 middle columns (Status, Xero balance (GBP), Rate, Xero amount, FX gain, Horizon due, Variance) auto-sized wide (driven by their long headers), pushing the table past the container and clipping the "Issue" column. They now have a fixed ~64px width with wrapping headers and tighter padding (`.xc-n` class), roughly halving their footprint so Supplier/PO/Issue get the room. Numbers stay right-aligned/nowrap.
 

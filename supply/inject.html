@@ -7499,7 +7499,7 @@
       rd.onload=function(){ var b64=String(rd.result).replace(/^data:[^;]+;base64,/,'');
         fetch('/api/supply/xero-parse',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({data_base64:b64})}).then(function(r){return r.json();})
           .then(function(j){ if(j&&j.error)throw new Error(j.error); _rows=j.rows||[]; _period=j.period_end||'';
-            try{ fetch('/api/supply/xero-compare/save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({rows:_rows,filename:fname,period:_period})}); }catch(e){}   // store the snapshot server-side (shared, kept 1 week)
+            try{ fetch('/api/supply/xero-compare/save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({rows:_rows,filename:fname,period:_period,file_b64:b64})}); }catch(e){}   // store the snapshot + the ORIGINAL xlsx (base64) server-side (shared, kept 1 week) so it can be re-downloaded
             var bn=b.querySelector('#xc-banner'); if(bn)bn.remove(); return compareNow(); })
           .then(function(){ go.disabled=false; })
           .catch(function(e){ go.disabled=false; setMsg('Failed: '+(e.message||e),1); }); };
@@ -7511,7 +7511,8 @@
       var by=s.uploaded_by?(' by '+esc(typeof shortUser==='function'?shortUser(s.uploaded_by):s.uploaded_by)):'';
       var when=s.uploaded_at?(', '+esc(agoLabel(Date.parse(s.uploaded_at)))):'';
       var bn=document.createElement('div'); bn.id='xc-banner'; bn.style.cssText='font-size:12px;color:#475569;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:7px 10px;margin-bottom:10px';
-      bn.innerHTML='Using the last uploaded file'+(s.filename?' <b>'+esc(s.filename)+'</b>':'')+' ('+when.replace(/^, /,'')+by+', shared with the team · kept for 1 week) — re-analysed against current Horizon data. Upload a new file to replace it. <button id="xc-clear" style="border:none;background:none;color:#b91c1c;text-decoration:underline;cursor:pointer;font-size:12px;padding:0">clear</button>';
+      var fileLbl = s.filename ? (s.has_file ? ' <a href="/api/supply/xero-compare/file" download title="download the original uploaded XLSX" style="color:#1d4ed8;text-decoration:underline;font-weight:600">'+esc(s.filename)+' ↓</a>' : ' <b>'+esc(s.filename)+'</b>') : '';
+      bn.innerHTML='Using the last uploaded file'+fileLbl+' ('+when.replace(/^, /,'')+by+', shared with the team · kept for 1 week) — re-analysed against current Horizon data. Upload a new file to replace it. <button id="xc-clear" style="border:none;background:none;color:#b91c1c;text-decoration:underline;cursor:pointer;font-size:12px;padding:0">clear</button>';
       var rr=b.querySelector('#xc-result'); if(!rr)return; rr.parentNode.insertBefore(bn, rr);
       var cl=bn.querySelector('#xc-clear'); if(cl)cl.onclick=function(){ try{ fetch('/api/supply/xero-compare/clear',{method:'POST'}); }catch(e){} bn.remove(); rr.innerHTML=''; _rows=null; setMsg(''); };
       compareNow(); }).catch(function(){});

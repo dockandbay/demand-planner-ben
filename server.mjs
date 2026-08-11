@@ -1943,24 +1943,38 @@ app.post('/api/supply/xero-parse', async (req, res) => {
 app.get('/api/supply/xero-compare/latest', async (req, res) => {
   try {
     const r = (await pool.query(`SELECT rows, coalesce(filename,'') filename, coalesce(period,'') period,
-        coalesce(uploaded_by,'') uploaded_by, to_char(uploaded_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') uploaded_at
+        coalesce(uploaded_by,'') uploaded_by, to_char(uploaded_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') uploaded_at,
+        (nullif(file_b64,'') IS NOT NULL) has_file
       FROM planner.xero_compare_snapshot WHERE id=1 AND uploaded_at > now() - interval '7 days'`)).rows[0];
-    res.set('Cache-Control', 'no-store').json(r ? { ok: true, rows: r.rows, filename: r.filename, period: r.period, uploaded_by: r.uploaded_by, uploaded_at: r.uploaded_at } : { ok: true, rows: null });
+    res.set('Cache-Control', 'no-store').json(r ? { ok: true, rows: r.rows, filename: r.filename, period: r.period, uploaded_by: r.uploaded_by, uploaded_at: r.uploaded_at, has_file: !!r.has_file } : { ok: true, rows: null });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/xero-compare/save', async (req, res) => {
   try {
     const b = req.body || {}; if (!Array.isArray(b.rows)) return res.status(400).json({ error: 'rows required' });
-    await pool.query(`INSERT INTO planner.xero_compare_snapshot (id, rows, filename, period, uploaded_by, uploaded_at)
-        VALUES (1, $1::jsonb, $2, $3, $4, now())
-      ON CONFLICT (id) DO UPDATE SET rows=EXCLUDED.rows, filename=EXCLUDED.filename, period=EXCLUDED.period, uploaded_by=EXCLUDED.uploaded_by, uploaded_at=now()`,
-      [JSON.stringify(b.rows), String(b.filename || ''), String(b.period || ''), authUser(req) || '']);
+    await pool.query(`INSERT INTO planner.xero_compare_snapshot (id, rows, filename, period, uploaded_by, uploaded_at, file_b64)
+        VALUES (1, $1::jsonb, $2, $3, $4, now(), $5)
+      ON CONFLICT (id) DO UPDATE SET rows=EXCLUDED.rows, filename=EXCLUDED.filename, period=EXCLUDED.period, uploaded_by=EXCLUDED.uploaded_by, uploaded_at=now(), file_b64=EXCLUDED.file_b64`,
+      [JSON.stringify(b.rows), String(b.filename || ''), String(b.period || ''), authUser(req) || '', (b.file_b64 ? String(b.file_b64) : null)]);
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/xero-compare/clear', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.xero_compare_snapshot WHERE id=1`); res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Download the ORIGINAL uploaded XLSX for the current Xero Compare snapshot (stored as base64 on upload).
+app.get('/api/supply/xero-compare/file', async (req, res) => {
+  try {
+    const r = (await pool.query(`SELECT coalesce(filename,'xero-compare.xlsx') filename, file_b64
+      FROM planner.xero_compare_snapshot WHERE id=1 AND uploaded_at > now() - interval '7 days'`)).rows[0];
+    if (!r || !r.file_b64) return res.status(404).send('No uploaded file stored for the current snapshot.');
+    const buf = Buffer.from(r.file_b64, 'base64');
+    const name = String(r.filename || 'xero-compare.xlsx').replace(/[\r\n"]/g, '');
+    res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+       .set('Content-Disposition', 'attachment; filename="' + name + '"')
+       .set('Cache-Control', 'no-store').send(buf);
+  } catch (e) { res.status(500).send('file error: ' + e.message); }
 });
 
 // Paper Store carton labels — client-specific carton labels for a PO's order-plan lines. One carton record per
