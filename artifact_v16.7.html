@@ -5946,6 +5946,15 @@ function skuCommitOv(k, raw, ly){
   try{ if(abs!==_old){ var _p=k.split('|'); bufferChange('sku',_p[0],_p[1],_p[2],_p[3],'changed',(_old!=null?_old:(ly!=null?Math.round(ly):null)),abs); } }catch(e){}
   return abs;
 }
+// Apply a confidence-popup ("est ▾") recommendation to a SKU cell: write the absolute override, record the
+// change for the "R" rail (same as typing a value), and repaint the row so the applied number shows at once.
+function skuApplyRec(sku,co,ch,mm,applyVal,s){
+  var k=sku+'|'+co+'|'+ch+'|'+mm;
+  var _old=skuOvGetK(k); _old=(_old!=null)?parseInt(_old,10):null;
+  skuOvSetK(k,applyVal);
+  try{ if(applyVal!==_old){ bufferChange('sku',sku,co,ch,mm,'changed',_old,applyVal); } }catch(e){}
+  try{ refreshRow(s,co,ch); }catch(e){}
+}
 
 // Build SKU-level LY share within a subcat×co×ch
 function buildSkuShares(skus,co,ch,lyMonths){
@@ -7285,11 +7294,12 @@ function insertInlineSkuRows(s,co,ch,afterTr){
           if(af26){
             var estDiv26=document.createElement('div');
             estDiv26.style.cssText='font-size:7px;text-align:right;cursor:pointer;color:'+(af26.type==='hi'?'#f59e0b':'#38bdf8')+';text-decoration:underline;text-decoration-style:dotted';
-            estDiv26.setAttribute('data-anom-tip','<div style="font-weight:600;color:#fff">'+(af26.type==='hi'?'⚠ Spike':'↓ Dip')+'</div><div>Forecast: '+fn(af26.cur)+'</div><div>Expected: '+fn(af26.expected)+'</div><div>Suggested: '+fn(af26.suggest)+'</div><div style="margin-top:3px;color:#fbbf24">Click for options</div>');
-            // Compute HIGH option for label — show as % growth vs LY
+            // Confidence options FIRST so the hover tooltip's Expected/Suggested match the click-through popup
+            // (same engine) — Ben: "suggested" in the tooltip must equal the popup's HIGH confidence value.
             var _o26=skuConfidenceOptions(sku,co,ch,m26,wh,fc26,sales,share,subcatFU);
             var _hi26=_o26.high.value;
             var _ly26=_o26.context.lyVal;
+            estDiv26.setAttribute('data-anom-tip','<div style="font-weight:600;color:#fff">'+(af26.type==='hi'?'⚠ Spike':'↓ Dip')+'</div><div>Forecast: '+fn(af26.cur)+'</div><div>Expected: '+fn(_o26.medium.value)+'</div><div>Suggested: '+fn(_hi26)+'</div><div style="margin-top:3px;color:#fbbf24">Click for options</div>');
             estDiv26.textContent='est '+formatEstLabel(_ly26,_hi26)+' ▾';
             (function(mm,cur){
               estDiv26.addEventListener('click',function(e){
@@ -7299,8 +7309,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
                 // Better: compute SKU-specific options
                 var opts=skuConfidenceOptions(sku,co,ch,mm,wh,cur,sales,share,subcatFU);
                 var popup=buildSkuConfidencePopup(sku,co,ch,mm,opts,function(applyVal){
-                  skuOvSetK(sku+'|'+co+'|'+ch+'|'+mm,applyVal);
-                  refreshRow(s,co,ch);
+                  skuApplyRec(sku,co,ch,mm,applyVal,s);
                 });
                 showConfidencePopup(anchor,popup);
               });
@@ -7359,10 +7368,10 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         if(af27){
           var estDiv27=document.createElement('div');
           estDiv27.style.cssText='font-size:7px;text-align:right;cursor:pointer;color:'+(af27.type==='hi'?'#f59e0b':'#38bdf8')+';text-decoration:underline;text-decoration-style:dotted';
-          estDiv27.setAttribute('data-anom-tip','<div style="font-weight:600;color:#fff">'+(af27.type==='hi'?'⚠ Spike':'↓ Dip')+'</div><div>Forecast: '+fn(af27.cur)+'</div><div>Expected: '+fn(af27.expected)+'</div><div>Suggested: '+fn(af27.suggest)+'</div><div style="margin-top:3px;color:#fbbf24">Click for options</div>');
           var _o27=skuConfidenceOptions(sku,co,ch,m27,wh,fc27,sales,share,subcatFU);
           var _hi27=_o27.high.value;
           var _ly27=_o27.context.lyVal;
+          estDiv27.setAttribute('data-anom-tip','<div style="font-weight:600;color:#fff">'+(af27.type==='hi'?'⚠ Spike':'↓ Dip')+'</div><div>Forecast: '+fn(af27.cur)+'</div><div>Expected: '+fn(_o27.medium.value)+'</div><div>Suggested: '+fn(_hi27)+'</div><div style="margin-top:3px;color:#fbbf24">Click for options</div>');
           estDiv27.textContent='est '+formatEstLabel(_ly27,_hi27)+' ▾';
           (function(mm,cur){
             estDiv27.addEventListener('click',function(e){
@@ -7370,8 +7379,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
               var anchor=e.currentTarget;
               var opts=skuConfidenceOptions(sku,co,ch,mm,wh,cur,sales,share,subcatFU);
               var popup=buildSkuConfidencePopup(sku,co,ch,mm,opts,function(applyVal){
-                skuOvSetK(sku+'|'+co+'|'+ch+'|'+mm,applyVal);
-                refreshRow(s,co,ch);
+                skuApplyRec(sku,co,ch,mm,applyVal,s);
               });
               showConfidencePopup(anchor,popup);
             });
@@ -7446,10 +7454,10 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         if(af28){
           var estDiv28=document.createElement('div');
           estDiv28.style.cssText='font-size:7px;text-align:right;cursor:pointer;color:'+(af28.type==='hi'?'#f59e0b':'#38bdf8')+';text-decoration:underline;text-decoration-style:dotted';
-          estDiv28.setAttribute('data-anom-tip','<div style="font-weight:600;color:#fff">'+(af28.type==='hi'?'⚠ Spike':'↓ Dip')+'</div><div>Forecast: '+fn(af28.cur)+'</div><div>Expected: '+fn(af28.expected)+'</div><div>Suggested: '+fn(af28.suggest)+'</div><div style="margin-top:3px;color:#fbbf24">Click for options</div>');
           var _o28=skuConfidenceOptions(sku,co,ch,m28,wh,fc28,sales,share,subcatFU);
           var _hi28=_o28.high.value;
           var _ly28=_o28.context.lyVal;
+          estDiv28.setAttribute('data-anom-tip','<div style="font-weight:600;color:#fff">'+(af28.type==='hi'?'⚠ Spike':'↓ Dip')+'</div><div>Forecast: '+fn(af28.cur)+'</div><div>Expected: '+fn(_o28.medium.value)+'</div><div>Suggested: '+fn(_hi28)+'</div><div style="margin-top:3px;color:#fbbf24">Click for options</div>');
           estDiv28.textContent='est '+formatEstLabel(_ly28,_hi28)+' ▾';
           (function(mm,cur){
             estDiv28.addEventListener('click',function(e){
@@ -7457,8 +7465,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
               var anchor=e.currentTarget;
               var opts=skuConfidenceOptions(sku,co,ch,mm,wh,cur,sales,share,subcatFU);
               var popup=buildSkuConfidencePopup(sku,co,ch,mm,opts,function(applyVal){
-                skuOvSetK(sku+'|'+co+'|'+ch+'|'+mm,applyVal);
-                refreshRow(s,co,ch);
+                skuApplyRec(sku,co,ch,mm,applyVal,s);
               });
               showConfidencePopup(anchor,popup);
             });
@@ -7528,10 +7535,10 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       if(af){
         var estD=document.createElement('div');
         estD.style.cssText='font-size:7px;text-align:right;cursor:pointer;color:'+(af.type==='hi'?'#f59e0b':'#38bdf8')+';text-decoration:underline;text-decoration-style:dotted';
-        estD.setAttribute('data-anom-tip','<div style="font-weight:600;color:#fff">'+(af.type==='hi'?'⚠ Spike':'↓ Dip')+'</div><div>Forecast: '+fn(af.cur)+'</div><div>Expected: '+fn(af.expected)+'</div><div>Suggested: '+fn(af.suggest)+'</div><div style="margin-top:3px;color:#fbbf24">Click for options</div>');
         var _o=skuConfidenceOptions(sku,co,ch,m,wh,fc,sales,share,subcatFU);
+        estD.setAttribute('data-anom-tip','<div style="font-weight:600;color:#fff">'+(af.type==='hi'?'⚠ Spike':'↓ Dip')+'</div><div>Forecast: '+fn(af.cur)+'</div><div>Expected: '+fn(_o.medium.value)+'</div><div>Suggested: '+fn(_o.high.value)+'</div><div style="margin-top:3px;color:#fbbf24">Click for options</div>');
         estD.textContent='est '+formatEstLabel(_o.context.lyVal,_o.high.value)+' ▾';
-        (function(mm,cur){estD.addEventListener('click',function(e){e.stopPropagation();var anchor=e.currentTarget;var opts=skuConfidenceOptions(sku,co,ch,mm,wh,cur,sales,share,subcatFU);var popup=buildSkuConfidencePopup(sku,co,ch,mm,opts,function(applyVal){skuOvSetK(sku+'|'+co+'|'+ch+'|'+mm,applyVal);refreshRow(s,co,ch);});showConfidencePopup(anchor,popup);});})(m,af.cur);
+        (function(mm,cur){estD.addEventListener('click',function(e){e.stopPropagation();var anchor=e.currentTarget;var opts=skuConfidenceOptions(sku,co,ch,mm,wh,cur,sales,share,subcatFU);var popup=buildSkuConfidencePopup(sku,co,ch,mm,opts,function(applyVal){skuApplyRec(sku,co,ch,mm,applyVal,s);});showConfidencePopup(anchor,popup);});})(m,af.cur);
         wrap.appendChild(estD);
       }
       td.appendChild(wrap);
