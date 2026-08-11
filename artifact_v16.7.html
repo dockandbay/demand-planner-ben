@@ -736,6 +736,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
       oninput="setPlanSkuQry(this.value)">
     <span style="position:relative;display:inline-flex;align-items:center">
       <button id="plan-filters-btn" onclick="togglePlanFilters(event)" title="More filters &amp; settings — category, tier, release window, from-replacement, sort, category totals, variant image" style="font-size:11px;padding:4px 11px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#334155;cursor:pointer;flex-shrink:0;font-weight:600">&#10697; More Filters &amp; Settings <span style="opacity:.55;font-size:9px">▾</span></button>
+      <button id="fc-import-btn" onclick="if(window.openForecastImport)openForecastImport()" title="Import / paste SKU-level forecast overrides for the current market + channel" style="font-size:11px;padding:4px 11px;border:1px solid #2563eb;border-radius:5px;background:#fff;color:#2563eb;cursor:pointer;flex-shrink:0;font-weight:600;margin-left:6px">&#11014; Import forecast</button>
       <div id="plan-filters-pop" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;z-index:300;background:#fff;border:1px solid #d0d0d0;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.2);width:520px;max-width:94vw;padding:14px 16px">
         <div style="display:flex;align-items:center;margin-bottom:12px"><div style="font-weight:700;font-size:14px;color:#0f172a">More filters</div><button onclick="resetPlanFilters()" style="margin-left:auto;font-size:11px;padding:3px 10px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#475569;cursor:pointer">Reset all</button></div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;position:relative">
@@ -11743,6 +11744,71 @@ function catLbl(c){return c;}
 // layout if Airtable data isn't available. Groups are ordered: Priority, Beach,
 // Bags, Home, then any other groups alphabetically. Within a group, categories
 // are sorted alphabetically.
+// DEMAND plan ▸ "⬆ Import forecast" — paste/upload SKU-level manual overrides for the CURRENT market+channel.
+// Columns are months; each cell is an absolute unit override (same as typing a SKU cell). Writes via skuOvSet,
+// logs to the R rail (bufferChange), persists immediately (saveForecasts). Template = SKU + month columns for a
+// from/to range picked here.
+function openForecastImport(){
+  var co=CUR, ch=CF;
+  if(!ch){ alert('Pick a channel (DTC / FBA / B2B) on the plan first.'); return; }
+  var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function fym2lbl(fym){var p=fym.split('_');return MN[+p[1]-1]+'-'+p[0].slice(2);}
+  function lbl2fym(lbl){ lbl=String(lbl||'').trim(); var m;
+    if((m=/^(\d{4})[-_](\d{1,2})$/.exec(lbl)))return m[1]+'_'+('0'+m[2]).slice(-2);
+    if((m=/^([A-Za-z]{3,})[-\s\/]*(\d{2,4})$/.exec(lbl))){ var mi=MN.map(function(x){return x.toLowerCase();}).indexOf(m[1].slice(0,3).toLowerCase()); if(mi<0)return null; var y=m[2].length===2?('20'+m[2]):m[2]; return y+'_'+('0'+(mi+1)).slice(-2); }
+    return null; }
+  function monthsBetween(from,to){ var out=[]; if(!from||!to)return out; var a=from.split('-'),b=to.split('-'); var y=+a[0],mo=+a[1],ey=+b[0],em=+b[1]; var g=0; while((y<ey||(y===ey&&mo<=em))&&g++<180){ out.push(y+'_'+('0'+mo).slice(-2)); mo++; if(mo>12){mo=1;y++;} } return out; }
+  var ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200000;display:flex;align-items:flex-start;justify-content:center;padding:5vh 12px;overflow:auto';
+  var box=document.createElement('div'); box.style.cssText='background:#fff;border-radius:12px;max-width:820px;width:100%;padding:18px 20px;box-shadow:0 20px 60px rgba(0,0,0,.3);font-family:inherit;text-align:left';
+  ov.appendChild(box); document.body.appendChild(ov);
+  function close(){ if(ov.parentNode)ov.parentNode.removeChild(ov); }
+  ov.onclick=function(e){ if(e.target===ov)close(); };
+  var defFrom=(typeof SKU_FC_MONTHS!=='undefined'&&SKU_FC_MONTHS[0])?SKU_FC_MONTHS[0].replace('_','-'):'';
+  var defTo=(typeof SKU_FC_MONTHS!=='undefined'&&SKU_FC_MONTHS.length)?SKU_FC_MONTHS[SKU_FC_MONTHS.length-1].replace('_','-'):'';
+  box.innerHTML=
+    '<div style="display:flex;align-items:center;margin-bottom:6px"><b style="font-size:16px">Import forecast overrides</b><button id="fci-x" style="margin-left:auto;border:none;background:none;font-size:20px;cursor:pointer;color:#64748b">×</button></div>'
+    +'<div style="font-size:12px;color:#475569;margin-bottom:12px">SKU-level manual overrides for <b>'+esc(co)+' · '+esc(ch)+'</b> (the plan’s current market + channel). Columns are months; each cell is an absolute unit override (same as typing into a SKU cell). Blank = leave as-is.</div>'
+    +'<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:12px">'
+      +'<div><div style="font-size:10px;color:#64748b;margin-bottom:2px">From month</div><input type="month" id="fci-from" value="'+esc(defFrom)+'" style="font-size:12px;padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px"></div>'
+      +'<div><div style="font-size:10px;color:#64748b;margin-bottom:2px">To month</div><input type="month" id="fci-to" value="'+esc(defTo)+'" style="font-size:12px;padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px"></div>'
+      +'<button id="fci-tmpl" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;font-weight:600;font-size:11px;padding:6px 12px;border-radius:6px;cursor:pointer">&#11015; Download template</button>'
+      +'<span style="font-size:10px;color:#94a3b8">SKU + month columns for the range</span></div>'
+    +'<div style="font-size:11px;font-weight:600;color:#334155;margin-bottom:4px">Paste from a spreadsheet (a header row of SKU + month columns, then rows) or upload a CSV:</div>'
+    +'<textarea id="fci-paste" placeholder="SKU&#9;Aug-26&#9;Sep-26&#10;TOWLB-...-NVY&#9;120&#9;140" style="width:100%;box-sizing:border-box;height:130px;font-family:ui-monospace,Menlo,monospace;font-size:11px;padding:8px;border:1px solid #cbd5e1;border-radius:6px;resize:vertical"></textarea>'
+    +'<div style="display:flex;gap:10px;align-items:center;margin:8px 0 4px"><input type="file" id="fci-file" accept=".csv,.tsv,.txt" style="font-size:11px"><span style="font-size:10px;color:#94a3b8">or choose a file</span></div>'
+    +'<div id="fci-preview" style="font-size:11px;color:#64748b;margin:8px 0;min-height:16px"></div>'
+    +'<div style="display:flex;gap:8px;align-items:center;margin-top:8px"><button id="fci-apply" style="background:#16a34a;color:#fff;border:none;border-radius:6px;font-weight:700;font-size:13px;padding:8px 18px;cursor:pointer">Apply overrides</button><span id="fci-msg" style="font-size:11px"></span></div>';
+  box.querySelector('#fci-x').onclick=close;
+  box.querySelector('#fci-tmpl').onclick=function(){ var ms=monthsBetween(box.querySelector('#fci-from').value, box.querySelector('#fci-to').value); if(!ms.length){ alert('Pick a valid From / To month range.'); return; }
+    var csv=['SKU'].concat(ms.map(fym2lbl)).join(',')+'\n';
+    var blob=new Blob([csv],{type:'text/csv;charset=utf-8'}), url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download='forecast-override-'+co+'-'+ch+'-template.csv'; document.body.appendChild(a); a.click(); setTimeout(function(){URL.revokeObjectURL(url);a.remove();},150); };
+  box.querySelector('#fci-file').onchange=function(){ var f=this.files&&this.files[0]; if(!f)return; var rd=new FileReader(); rd.onload=function(){ box.querySelector('#fci-paste').value=String(rd.result||''); doPreview(); }; rd.readAsText(f); };
+  box.querySelector('#fci-paste').oninput=doPreview;
+  var _parsed=null;
+  function parse(){ var txt=box.querySelector('#fci-paste').value||''; var lines=txt.split(/\r?\n/).filter(function(l){return l.trim()!=='';}); if(lines.length<2)return null;
+    var sep=lines[0].indexOf('\t')>=0?'\t':','; var head=lines[0].split(sep).map(function(x){return x.trim();});
+    var monCols=[]; for(var i=1;i<head.length;i++)monCols.push(lbl2fym(head[i]));
+    var rows=[], bad=[]; for(var r=1;r<lines.length;r++){ var c=lines[r].split(sep); var sku=(c[0]||'').trim(); if(!sku)continue;
+      if(!(typeof SKUM!=='undefined'&&SKUM[sku])){ bad.push(sku); continue; }
+      var cells={}; for(var j=1;j<c.length&&j<head.length;j++){ var fym=monCols[j-1]; if(!fym)continue; var v=String(c[j]||'').replace(/[^0-9.\-]/g,''); if(v==='')continue; var n=Math.round(Number(v)); if(!isFinite(n))continue; cells[fym]=n; }
+      rows.push({sku:sku,cells:cells}); }
+    return {monCols:monCols,rows:rows,bad:bad,head:head}; }
+  function doPreview(){ _parsed=parse(); var el=box.querySelector('#fci-preview'); if(!_parsed){ el.innerHTML=''; return; }
+    var nCells=_parsed.rows.reduce(function(a,r){return a+Object.keys(r.cells).length;},0);
+    var unkMon=_parsed.head.slice(1).filter(function(h,i){return !_parsed.monCols[i];});
+    el.innerHTML='<b>'+_parsed.rows.length+'</b> SKU(s) · <b>'+nCells+'</b> override cell(s) → '+esc(co)+' · '+esc(ch)+'.'
+      +(_parsed.bad.length?'<div style="color:#b45309;margin-top:3px">'+_parsed.bad.length+' unknown SKU(s) skipped: '+esc(_parsed.bad.slice(0,6).join(', '))+(_parsed.bad.length>6?'…':'')+'</div>':'')
+      +(unkMon.length?'<div style="color:#b45309;margin-top:3px">Unrecognised month header(s) ignored: '+esc(unkMon.join(', '))+'</div>':''); }
+  box.querySelector('#fci-apply').onclick=function(){ doPreview(); var msg=box.querySelector('#fci-msg'); if(!_parsed||!_parsed.rows.length){ msg.style.color='#b45309'; msg.textContent='Nothing to import — paste SKU + month data first.'; return; }
+    var n=0; _parsed.rows.forEach(function(r){ Object.keys(r.cells).forEach(function(fym){ var q=r.cells[fym];
+      var _old=0; try{ var o=skuOvGet(r.sku,co,ch,fym); _old=Math.round(o!=null?Number(o):0); }catch(e){}
+      try{ skuOvSet(r.sku,co,ch,fym,String(q)); n++; }catch(e){}
+      try{ if(typeof bufferChange==='function'&&_old!==q)bufferChange('sku',r.sku,co,ch,fym,'imported override',_old,q); }catch(e){} }); });
+    try{ if(typeof saveForecasts==='function')saveForecasts(); }catch(e){}
+    try{ if(typeof renderMain==='function')renderMain(); }catch(e){}
+    close(); alert('Applied '+n+' forecast override(s) to '+co+' · '+ch+'. Saved.'); };
+}
+window.openForecastImport=openForecastImport;
 function catGroups(){
   if(!CAT_GROUPING||Object.keys(CAT_GROUPING).length===0){
     // Legacy fallback (pre-Airtable-grouping)
