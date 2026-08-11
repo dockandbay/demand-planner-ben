@@ -1,3 +1,6 @@
+## v26.843.0 PAYMENTS ▸ Xero Compare — clearer column headers
+- Renamed **"Xero balance (GBP)" → "Xero Due (GBP)"** and **"Xero amount" → "Xero Due (USD)"** — both are the outstanding/due amount (GBP as reported by Xero, and its USD conversion at the rate).
+
 ## v26.842.0 PAYMENTS ▸ Xero Compare — ignore SUPPLIER-PAYMENT batches + match Other Payments + same-day period edge
 - **Ignore batch rows**: Xero `SUPPLIER-PAYMENT-*` references (aggregate supplier payments, not per-PO invoices) are now filtered out of the comparison entirely.
 - **Match Other Payments**: a PO can be paid via an "Other Payments" (sundry register) row rather than the PO payment plan — the comparison now also matches cash-flow `basis:'other'` lines by their reference, so e.g. **PO-1836737** (an Other Payment of £7,269.60 / ref `PO-1836737`) is found instead of showing "PO not found in Horizon".
