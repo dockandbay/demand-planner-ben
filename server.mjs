@@ -2551,7 +2551,7 @@ function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS) {
 // from cache; once stale, the FIRST request recomputes (others serve stale meanwhile) then repopulates. Correct on
 // both a long-lived server and Vercel serverless (no background/self-fetch needed). Dropped by invalidateSupplyCaches
 // on any edit. Only the zero-query-param variant is cached (any filter bypasses the cache and runs live).
-const SECTION_CACHE_TTL_MAP = { cashflow: SUPPLY_CACHE_TTL_MS, bi: SUPPLY_CACHE_TTL_MS, manufacturing: SUPPLY_CACHE_TTL_MS, 'payments-report': SUPPLY_CACHE_TTL_MS, shipments: SUPPLY_CACHE_TTL_MS, config: SUPPLY_CACHE_TTL_MS };   // config = rate cards / branches (rarely change); param-free → cache the response so CONFIG opens instantly (esp. off the slow sandbox pooler)
+const SECTION_CACHE_TTL_MAP = { cashflow: SUPPLY_CACHE_TTL_MS, bi: SUPPLY_CACHE_TTL_MS, manufacturing: SUPPLY_CACHE_TTL_MS, 'payments-report': SUPPLY_CACHE_TTL_MS, shipments: SUPPLY_CACHE_TTL_MS, config: SUPPLY_CACHE_TTL_MS, deposits: SUPPLY_CACHE_TTL_MS };   // config = rate cards / branches (rarely change); deposits = every Payments tab (Other Payments / Payments Due / By Supplier / Deposits) fetches it — cache + serve-stale-while-revalidate so it opens instantly instead of re-querying (and paying a cold-DB stall) each time. Epoch-gated: any deposit/PO edit (patch → bumpSupplyEpoch) busts it.
 const _sectionResp = {};        // section -> { v, at }
 const _sectionInflight = {};    // section -> bool (a recompute is running; others serve stale)
 // Supplier-portal bootstrap cache — per supplier-set + includeArchived. The portal is the one heavy PO-calc path

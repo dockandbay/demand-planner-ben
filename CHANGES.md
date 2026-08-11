@@ -1,3 +1,8 @@
+## v26.845.0 PAYMENTS performance — instant PAY button + cache the deposits fetch
+- **PAY button (Payments Due)** now updates the amount/date cells and flips to ✓ **immediately** (optimistic), running the write in the background instead of blocking ~5s on the PO POST (which recomputes a grid row and can hit a cold-DB stall on live). On failure it reverts the cells + button and alerts, so nothing is lost silently.
+- **Other Payments / Payments Due / By Supplier / Deposits** all fetch `/api/supply/deposits`, which was **uncached** — every open re-queried (and could pay a cold-connection stall, ~10s once). Added `deposits` to the section response-cache (serve-fresh / serve-stale-while-revalidate, epoch-gated so any deposit/PO edit busts it) so repeat opens are instant.
+- Note: the remaining first-hit latency is live infra (Vercel serverless cold starts + Supabase pooler ~8s cold connects) — a keep-warm / transaction-pooler tweak on the deploy side is the lever for that (Diviyaj).
+
 ## v26.844.0 Supplier portal — de-dup the "submitted invoice info" email
 - A supplier clicking **Submit** repeatedly re-staged the same invoice value and fired **one email per click** (Ben got 3× for PO-57EULX4). The invoice-notify email now only sends when the value is **new** — i.e. it differs from the immediately-previous invoice submission for that PO (`invoiceSubmitIsRepeat`). Same amount resubmitted → no email; a genuinely changed amount → email as before. Applied at both submit endpoints. On any error it errs toward sending (never silently drops a real notification).
 
