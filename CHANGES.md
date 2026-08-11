@@ -1,3 +1,6 @@
+## v26.841.0 PAYMENTS ▸ Xero Compare — deposit-ref POs no longer wrongly show "PO not found"
+- A PO whose start deposit draws from a **referenced deposit pool** appears in the cash flow as ONE aggregated pool line (`basis:'register'`, keyed by the deposit ref) — so its deposit was never attributed to the PO in the Xero comparison, and the PO showed **"PO not found in Horizon"** even though a legit (incl. after-period) payment exists (e.g. PO-1683100 = 387.83). The comparison now also folds in the per-PO drawdown lines from cash flow's `startDeposits` (`basis:'drawdown'`) so those deposits count toward the PO's Horizon-due. Non-ref POs are unaffected (their deposit is already a `basis:'po'` line; the `drawdown` filter avoids double-counting).
+
 ## v26.840.0 PAYMENTS ▸ Xero Compare — the uploaded XLSX is now re-downloadable
 - On upload, the original XLSX is now stored (base64) alongside the parsed rows (migration **208** adds `xero_compare_snapshot.file_b64`). The "Using the last uploaded file …" banner makes the **filename a clickable download** (`↓`) served by new `GET /api/supply/xero-compare/file` (correct XLSX mime + original filename). Older snapshots (uploaded before this) have no stored file, so the name stays plain text until the next upload.
 - New env/migration: run migration `208_xero_compare_file.sql` on live.

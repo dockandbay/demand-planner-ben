@@ -7524,6 +7524,14 @@
         known[l.ref]=true;   // PO is present in Horizon's payment plan (paid or not) — lets us distinguish "not found" from "nothing open"
         var openAtReport = !l.paid || (pend && l.paid_date && String(l.paid_date).slice(0,10) > pend);
         if(openAtReport) due[l.ref]=(due[l.ref]||0)+(Number(l.amount)||0); });   // type is title-case: Deposit/Start deposit/Completion/Balance
+      // A PO whose start deposit draws from a REFERENCED deposit pool shows in the main cash flow as ONE aggregated
+      // pool line (basis 'register', keyed by the deposit ref) — so its deposit is never attributed to the PO above,
+      // making it look "not found". `startDeposits` itemises each PO's drawdown (basis 'drawdown'); fold those in
+      // per-PO so a deposit-ref PO with a legit (incl. after-period) payment isn't wrongly flagged. (v26.841)
+      ((_cf&&_cf.startDeposits)||[]).forEach(function(l){ if(l.basis!=='drawdown'||!l.ref)return;
+        known[l.ref]=true;
+        var openAtReport = !l.paid || (pend && l.paid_date && String(l.paid_date).slice(0,10) > pend);
+        if(openAtReport) due[l.ref]=(due[l.ref]||0)+(Number(l.amount)||0); });
       var showAll=b.querySelector('#xc-allrows').checked;
       var approved=(_rows||[]).filter(function(r){ return /approv/i.test(r.status||''); });
       var out=approved.map(function(r){
