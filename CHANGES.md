@@ -1,3 +1,6 @@
+## v26.860.0 DEMAND plan SUM — box pinned to far right of the toolbar
+- The Sum box now uses `margin-left:auto` so it sits hard against the right edge, separated from the Forecast Logic / Download button cluster.
+
 ## v26.859.0 DEMAND plan SUM — a plain click clears the selection
 - Clicking anywhere **without** ⌘/Ctrl now clears the sum selection (previously only Esc / ✕). ⌘/Ctrl-hover/click still builds it. (SKU-level confirmed working on the served page: hovering 3 SKU cells → "Sum 377" from the bold forecast values, not LY — if it still looks broken, hard-reload the tab; the 6 MB artifact caches across in-app navigation.)
 
