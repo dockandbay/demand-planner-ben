@@ -1,3 +1,6 @@
+## v26.853.0 SUPPLY Samples — white input boxes (not the supply blue)
+- The sample detail/form inputs inherited the supply blue editable-cell styling (`#supply-root .fci`). Added a scoped override so the samples UI (`.samp-fld`, `.samp-panel .fci`, `#samp-form .fci`) uses **plain white** inputs with a grey border, matching the PRODUCT module. PO/payments cells keep their blue.
+
 ## v26.852.0 SUPPLY Samples — "created" timeline entry, always-editable details, tighter layout
 - **Creation is logged on the sample timeline** with who created it: admin-created → `sample_notes` `internal` (shows as an **unread** note for the supplier in the portal); supplier-created (portal) → `supplier` (shows **unread** for Dock & Bay on the admin side). Drives the existing unread badges + keeps the sample surfaced.
 - **Admin sample details are now always-editable** — removed the Edit/Done toggle; every cell is an input that **auto-saves on change** (SKU lines now auto-save too, debounced, previously only persisted by the removed "✓ Done").
