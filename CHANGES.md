@@ -1,3 +1,6 @@
+## v26.839.0 PAYMENTS ▸ Xero Compare — narrower middle columns so "Issue" isn't clipped
+- The 7 middle columns (Status, Xero balance (GBP), Rate, Xero amount, FX gain, Horizon due, Variance) auto-sized wide (driven by their long headers), pushing the table past the container and clipping the "Issue" column. They now have a fixed ~64px width with wrapping headers and tighter padding (`.xc-n` class), roughly halving their footprint so Supplier/PO/Issue get the room. Numbers stay right-aligned/nowrap.
+
 ## v26.838.0 DEMAND plan variant image — fall back to the colour swatch when blank
 - The "Show variant image" thumbnail sourced only `products.variant_image_url_final`, so SKUs without one showed nothing. Server `buildSKURAW` now `coalesce`s to `products.colour_swatch_url` when the variant image is blank. Coverage in the sandbox rose ~557 → ~598 SKUs. No client change — the plan/hover already reads the `img` field.
 

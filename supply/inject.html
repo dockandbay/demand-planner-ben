@@ -7478,7 +7478,8 @@
   // amount doesn't match the PO's amount due in Horizon (Xero GBP × rate = USD; Horizon due = unpaid goods payments).
   function renderXeroCompare(b){
     var XERO_URL='https://reporting.xero.com/!BHF-X/v1/Run/4450044?isCustom=True';
-    b.innerHTML='<div class="sect-h">Xero Compare <span class="mut tiny">— reconcile Xero &ldquo;Approved&rdquo; (unpaid) payable invoices against Horizon</span></div>'
+    b.innerHTML='<style>.xc-tbl th.xc-n,.xc-tbl td.xc-n{width:64px;min-width:64px;max-width:64px;padding-left:4px;padding-right:4px;overflow:hidden;text-overflow:ellipsis}.xc-tbl th.xc-n{white-space:normal;line-height:1.15;font-size:10px}.xc-tbl td.xc-n{font-size:11px;white-space:nowrap}</style>'
+      +'<div class="sect-h">Xero Compare <span class="mut tiny">— reconcile Xero &ldquo;Approved&rdquo; (unpaid) payable invoices against Horizon</span></div>'
       +'<div style="max-width:840px;font-size:12px;line-height:1.65;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px;margin-bottom:12px"><b>How to use</b>'
         +'<ol style="margin:5px 0 0;padding-left:20px">'
         +'<li>Open the Xero report: <a href="'+XERO_URL+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;font-weight:600">Payable Invoice Summary ↗</a></li>'
@@ -7542,14 +7543,14 @@
       setMsg(approved.length+' Approved invoice'+(approved.length===1?'':'s')+' · '+nIssue+' flagged'+(pend?' · report as of '+pend+' (later Horizon payments counted as still-due)':''));
       var res=b.querySelector('#xc-result');
       if(!view.length){ res.innerHTML='<div class="count" style="padding:10px 2px">'+(out.length?'✓ No mismatches — every Approved invoice matches Horizon.':'No Approved (unpaid) invoices in this upload.')+'</div>'; return; }
-      res.innerHTML='<div class="tw"><table class="pay-tbl"><thead><tr><th class="l">Supplier</th><th class="l">PO</th><th class="l">Status</th><th style="text-align:right">Xero balance (GBP)</th><th style="text-align:right">Rate</th><th style="text-align:right">Xero amount</th><th style="text-align:right">FX gain</th><th style="text-align:right">Horizon due</th><th style="text-align:right">Variance</th><th class="l">Issue</th></tr></thead><tbody>'
+      res.innerHTML='<div class="tw"><table class="pay-tbl xc-tbl"><thead><tr><th class="l">Supplier</th><th class="l">PO</th><th class="l xc-n">Status</th><th class="xc-n" style="text-align:right">Xero balance (GBP)</th><th class="xc-n" style="text-align:right">Rate</th><th class="xc-n" style="text-align:right">Xero amount</th><th class="xc-n" style="text-align:right">FX gain</th><th class="xc-n" style="text-align:right">Horizon due</th><th class="xc-n" style="text-align:right">Variance</th><th class="l">Issue</th></tr></thead><tbody>'
         +view.map(function(x){ return '<tr'+(x.flag?' style="background:#fff7ed"':'')+'><td class="l">'+esc(x.supplier||'')+'</td>'
           +'<td class="l">'+(x.po?'<button class="lnk-btn xc-po" data-po="'+esc(x.po)+'" style="color:#1d4ed8;text-decoration:underline;cursor:pointer">'+esc(x.po)+'</button>':'<span class="mut">'+esc(x.reference||'—')+'</span>')+'</td>'
-          +'<td class="l">'+esc(x.status)+'</td><td style="text-align:right">£'+money(x.gbp)+'</td><td style="text-align:right">'+(x.rate?x.rate.toFixed(4):'—')+'</td>'
-          +'<td style="text-align:right">'+(x.ccy==='GBP'?'£':'$')+money(x.xero)+'</td>'
-          +'<td style="text-align:right;color:#64748b">'+(x.fx?'−$'+money(x.fx):'<span class="mut">—</span>')+'</td>'
-          +'<td style="text-align:right">'+(x.hd===undefined?'<span class="mut">—</span>':'$'+money(x.hd))+'</td>'
-          +'<td style="text-align:right;'+(x.pct==null?'':(Math.abs(x.pct)>=5?'color:#b45309;font-weight:600':'color:#166534'))+'">'+(x.pct==null?'<span class="mut">—</span>':((x.pct>0?'+':'')+x.pct.toFixed(1)+'%'))+'</td>'
+          +'<td class="l xc-n">'+esc(x.status)+'</td><td class="xc-n" style="text-align:right">£'+money(x.gbp)+'</td><td class="xc-n" style="text-align:right">'+(x.rate?x.rate.toFixed(4):'—')+'</td>'
+          +'<td class="xc-n" style="text-align:right">'+(x.ccy==='GBP'?'£':'$')+money(x.xero)+'</td>'
+          +'<td class="xc-n" style="text-align:right;color:#64748b">'+(x.fx?'−$'+money(x.fx):'<span class="mut">—</span>')+'</td>'
+          +'<td class="xc-n" style="text-align:right">'+(x.hd===undefined?'<span class="mut">—</span>':'$'+money(x.hd))+'</td>'
+          +'<td class="xc-n" style="text-align:right;'+(x.pct==null?'':(Math.abs(x.pct)>=5?'color:#b45309;font-weight:600':'color:#166534'))+'">'+(x.pct==null?'<span class="mut">—</span>':((x.pct>0?'+':'')+x.pct.toFixed(1)+'%'))+'</td>'
           +'<td class="l" style="'+(x.flag?'color:#b45309;font-weight:600':'color:#166534')+'">'+esc(x.issue)+'</td></tr>'; }).join('')
         +'</tbody></table></div>';
       res.querySelectorAll('.xc-po').forEach(function(bt){ bt.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(bt.dataset.po,'pay'); else gotoPO(bt.dataset.po,'pay'); }; });
