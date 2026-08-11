@@ -1,3 +1,7 @@
+## v26.850.0 SUPPLY Samples — "Set shipping" rebinds the card + supplier SRs show at once
+- **"🚢 Set shipping — supplier marked shipped"** now re-renders the sample card in place (via `loadSampleDetail`) so **"Our status" flips to SHIPPED** and the button clears — previously it called `_sampleReload` (grid reload) which didn't update the open card, so it kept showing PLANNED.
+- **A supplier-created sample (SR) now shows on the admin Samples grid immediately** — the section served a stale client cache; `samples` now always refetches fresh on open (cheap, uncached endpoint; current view stays visible while it loads).
+
 ## v26.849.0 Supplier portal — sample-shipments grid + new product cache
 - **New product now shows in the portal at once**: creating a product on the admin side (`/api/product/item`) now clears the cached portal bootstrap (`_portalCache`) — previously it lagged a whole cache TTL.
 - **Sample shipments grid**: renamed **Status → "Dock & Bay Status"** and added a **"Your status"** column (the supplier's own production status, colour-chipped). The **SR reference is now a link** that opens the sample's editable detail (expands + scrolls to it). The **"+ New Sample Shipment"** button moved to the **top** (its own line above the filters).
