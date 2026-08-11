@@ -1,3 +1,6 @@
+## v26.846.0 PAYMENTS — likely pay date now appears in the payment lists immediately
+- Setting a **likely pay date** (`/api/supply/likely-date` → `payment_likely_dates`) didn't invalidate the supply caches, so it showed in the PO's **Payments tab** (fresh single-PO fetch) but **not** in the cached Payments Due / Cash Flow / By-Supplier lists (e.g. PO-1621143's 11-Aug balance likely date). The endpoint now calls `invalidateSupplyCaches()` on save *and* clear, so the cached PO/cash-flow builds rebuild and the likely date appears across all payment views at once.
+
 ## v26.845.0 PAYMENTS performance — instant PAY button + cache the deposits fetch
 - **PAY button (Payments Due)** now updates the amount/date cells and flips to ✓ **immediately** (optimistic), running the write in the background instead of blocking ~5s on the PO POST (which recomputes a grid row and can hit a cold-DB stall on live). On failure it reverts the cells + button and alerts, so nothing is lost silently.
 - **Other Payments / Payments Due / By Supplier / Deposits** all fetch `/api/supply/deposits`, which was **uncached** — every open re-queried (and could pay a cold-connection stall, ~10s once). Added `deposits` to the section response-cache (serve-fresh / serve-stale-while-revalidate, epoch-gated so any deposit/PO edit busts it) so repeat opens are instant.

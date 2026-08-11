@@ -3542,9 +3542,10 @@ app.post('/api/supply/likely-date', async (req, res) => {
   const { line_key, likely_date } = req.body || {};
   if (!line_key) return res.status(400).json({ error: 'line_key required' });
   try {
-    if (!likely_date) { await pool.query(`DELETE FROM planner.payment_likely_dates WHERE line_key=$1`, [line_key]); return res.json({ cleared: true }); }
+    if (!likely_date) { await pool.query(`DELETE FROM planner.payment_likely_dates WHERE line_key=$1`, [line_key]); invalidateSupplyCaches(); return res.json({ cleared: true }); }
     await pool.query(`INSERT INTO planner.payment_likely_dates (line_key, likely_date, updated_at) VALUES ($1,$2::date,now())
       ON CONFLICT (line_key) DO UPDATE SET likely_date=excluded.likely_date, updated_at=now()`, [line_key, likely_date]);
+    invalidateSupplyCaches();   // bump the epoch so the CACHED purchase-orders / cash flow / payments-due builds rebuild — otherwise a new likely date shows in the PO drawer (fresh fetch) but not in the payment LISTS until the TTL
     res.json({ saved: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
