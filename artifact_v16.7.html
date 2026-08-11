@@ -8624,9 +8624,11 @@ function renderKeyAccountsView(body){
       var cl=b.dataset.cl==='(no client)'?'':b.dataset.cl; monthList().forEach(function(x){ saveCell(cl,b.dataset.sku,x.key,''); }); setTimeout(reload,300); }; });
     host.querySelectorAll('.kaf-skuin').forEach(function(inp){ var td=inp.closest('td'), drop=td.querySelector('.kaf-drop'); var cl=inp.dataset.cl;
       function show(){ var qq=inp.value.trim().toLowerCase(); var pend=(pendSkus[cl]||[]);
-        var ms=SKUS.filter(function(s){ var p=SKUM[s]; if(p&&p.st&&p.st!=='ACTIVE')return false;   // ACTIVE products only
+        // Source from SKUM (keyed by plain SKU, carries products.status as .st). NB: SKUS is the piped "SKU|CO|CH"
+        // sales map (an object) — it has no .filter and its keys aren't plain SKUs, so it can't be used here.
+        var ms=Object.keys(SKUM).filter(function(s){ var p=SKUM[s]; if(!p||p.st!=='ACTIVE')return false;   // ACTIVE products only
           if(pend.indexOf(s)>=0)return false;                                                       // already queued for this client
-          return !qq||s.toLowerCase().indexOf(qq)>=0||skuName(s).toLowerCase().indexOf(qq)>=0; }).slice(0,40);
+          return !qq||s.toLowerCase().indexOf(qq)>=0||skuName(s).toLowerCase().indexOf(qq)>=0; }).sort().slice(0,40);
         drop.innerHTML=ms.length?ms.map(function(s){return '<div class="kaf-opt" data-sku="'+e(s)+'"><b>'+e(s)+'</b> <span style="color:#999">'+e(skuName(s))+'</span></div>';}).join(''):'<div class="kaf-opt" style="color:#999;cursor:default">no active matches</div>';
         drop.classList.add('open'); drop.querySelectorAll('.kaf-opt[data-sku]').forEach(function(o){ o.onmousedown=function(ev){ ev.preventDefault(); var q=inp.value; (pendSkus[cl]=pendSkus[cl]||[]).push(o.dataset.sku); draw();
           setTimeout(function(){ var sel='.kaf-skuin[data-cl="'+(window.CSS&&CSS.escape?CSS.escape(cl):String(cl).replace(/"/g,'\\"'))+'"]'; var ni=host.querySelector(sel); if(ni){ ni.value=q; ni.focus(); if(ni.oninput)ni.oninput(); } },0); }; }); }   // multi-add: keep searching + adding without re-clicking the box

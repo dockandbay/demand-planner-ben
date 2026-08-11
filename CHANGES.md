@@ -1,3 +1,6 @@
+## v26.854.0 DEMAND Key Accounts — fix the "+ add SKU" search/dropdown (was dead)
+- The add-SKU box's `show()` iterated **`SKUS`**, but `SKUS` is the piped `"SKU|CO|CH"` **sales-map object** (no `.filter`, keys aren't plain SKUs) — so it **threw on focus/type and no dropdown ever appeared** (the v835 active/multi-add work inherited the broken source). Now it sources from **`SKUM`** (keyed by plain SKU, carries `products.status`), filtered to `st==='ACTIVE'`, searchable + multi-add as intended. Verified in a jsdom harness (focus → 40 active options; typing filters).
+
 ## v26.853.0 SUPPLY Samples — white input boxes (not the supply blue)
 - The sample detail/form inputs inherited the supply blue editable-cell styling (`#supply-root .fci`). Added a scoped override so the samples UI (`.samp-fld`, `.samp-panel .fci`, `#samp-form .fci`) uses **plain white** inputs with a grey border, matching the PRODUCT module. PO/payments cells keep their blue.
 
