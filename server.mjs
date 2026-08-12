@@ -2818,7 +2818,11 @@ app.get('/api/supply/:section', async (req, res) => {
         if (req.params.section === 'cashflow') return res.json(await cashflowResponse(_all, q));
         // PO grid only: hide archived POs unless ?includeArchived=1 — filtered in JS (mirrors archivedSql).
         const _cut = req.query.includeArchived ? null : await poArchiveCutoff();
-        const _kept = _cut ? _all.filter((r) => !_poRowArchived(r, _cut)) : _all;
+        let _kept = _cut ? _all.filter((r) => !_poRowArchived(r, _cut)) : _all;
+        // Child POs are kept OUT of poRowsCache (so Cash Flow above doesn't double-count the master) but SHOULD appear in
+        // the grid — append them here only. The client suppresses their actions + shows a 'child' badge.
+        const _kids = (await pool.query(PO_ROWS_SQL + ` WHERE (SELECT po3.master_po FROM planner.purchase_orders po3 WHERE po3.po=calc4.po) IS NOT NULL ORDER BY po`)).rows;
+        if (_kids.length) _kept = _kept.concat(_kids);
         // COMPLETE POs (≈85% of all POs, rarely opened) keep their list/filter/sort + PAYMENT-action fields but shed
         // the heavy expand-only fields (big JSON snapshots, packing, forwarder, landed cost, delivery notes, ERP
         // diff, likely dates) — a much smaller payload. Expanding a marked (_thin) row refetches the full row via

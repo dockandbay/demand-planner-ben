@@ -1,3 +1,8 @@
+## v26.871.0 Child POs show in the grid; Child PO sub-tab removed
+- **Child POs now appear in the main PO grid** with a medium-blue **child** badge (click it to open the master). They stay operationally inert — no ERP, no actions, and excluded from **cash flow, payments due and buy-plan on-order** so the master (which carries the consolidated lines/invoice) is never double-counted.
+- Removed the standalone **Child PO** sub-tab (children live in the grid now); the old `.../child-po` URL falls back to PLAN.
+- Master detail keeps its **CHILD PO** tab (after Timeline) but **without the count badge**.
+
 ## v26.870.0 INVENTORY ▸ Manage 3PL — import 3PL stock reports + compare to HORIZON
 - Each market pill (US/UK/AU) has an **⟳ Import 3PL report** button that server-side fetches the drivehq CSV (cache-busted), parses it per-market (US ItemID/OnHand/Available · UK Product_Code/PhysicalStock/AvailableStock · AU STOCK_CODE/CLOSE_ON_HAND/STOCK_AVAILABLE) and compares each SKU to `planner.products.inventory_<mkt>_3pl`.
 - Shows a summary (report SKUs, matched, not-in-HORIZON, HORIZON-3PL>0 missing from report) + a table sorted by biggest mismatch (report − HORIZON). Read-only comparison; EU has no source yet. Verified live: US 450/468 matched, UK 824/848, AU 911/994.
