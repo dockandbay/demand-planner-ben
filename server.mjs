@@ -6657,7 +6657,7 @@ app.get('/api/supply/dtc/status', async (_req, res) => {
 // ERP order. Its number = biggest child's po + '-MASTER'. CHILDREN carry master_po and are excluded from
 // all live calcs (grid, buy plan, cash flow, payments, ERP) — the master represents them.
 const MPO_CHILD_SQL = `SELECT p.po, f.supplier_name, coalesce(p.branch,'') branch, coalesce(p.client,'') client,
-    coalesce(f.value_est,0)::numeric value_est
+    coalesce(f.value_est,0)::numeric value_est, coalesce(p.status,'') status
   FROM planner.purchase_orders p JOIN planner.v_po_finance f ON f.po=p.po`;
 // Transactional/identity columns NOT inherited from the biggest child — the master starts a fresh order.
 const MPO_RESET_NULL = new Set(['erp_po','deposit_ref','shipment_ref','crossdock_skus','asn_numbers',

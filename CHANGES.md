@@ -1,3 +1,8 @@
+## v26.866.0 Create master PO popup — grouped by status, search, actions on top
+- Eligible POs are now **grouped by status** with **PRODUCTION and SHIPPING first** (then the rest), each group headed and counted.
+- Added a **🔍 search box** (filters by PO / client / branch; checked rows stay selected).
+- Moved the **selected-Σ / Invoice total / Cancel / Create master** action bar to the **top**, above the selection table.
+
 ## v26.865.0 Payments Report — fix: "Paid USD" amount wiped by "Mark paid & notify"
 - `payRefreshState()` only re-fetched remittances + emails and redrew from the **stale** rows captured at load, so after "Paid USD" (which saves the bank amount) clicking "Mark paid & notify" redrew with `other_amount` still null → the bank-amount box showed empty. The amount was always safe in the DB; this was a display wipe. Fix: `payRefreshState()` now also re-fetches `/api/supply/payments-report` and updates the shared rows before redrawing.
 
