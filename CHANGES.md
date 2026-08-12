@@ -1,3 +1,9 @@
+## v26.909.0 Target recommendations — new categories: smooth GBP revenue targets to monthly units on a grouping curve
+- New categories with no sales history (e.g. **Lanyard**) now get target recommendations. When a subcategory has no last-year base but an absolute **GBP revenue target** (Edit Targets, month/quarter/half), the rec spreads it across those months on the **seasonality curve of the other categories in the same `grouping`** (Lanyard→Beach), then divides by the **category GBP ASP** to get monthly unit targets.
+- **Category ASP (GBP):** new server global `CAT_ASP_GBP` = avg of the category's SKU retail prices `<co>_rt` per market, converted to GBP via `fx_rates`. A market with no priced SKU → no unit target there (e.g. Lanyard CA, no `ca_rt`).
+- New helpers: `groupingCurve()`, `trecResolveGBP()`; `trecLoad` now also carries `target_gbp`. Verified end-to-end on Lanyard (Beach curve, ~£16 ASP): £30k Q1 → summer-ramped monthly units; month>quarter>half precedence intact.
+- Follow-up polish (not done): an explicit "no ASP — set a price" flag for markets that produce no units.
+
 ## v26.908.0 Demand plan — selection Sum box: FC / LY / REV FC (+ avgs) in a yellow box
 - The multi-cell Sum box now shows three figures with per-cell averages: **Sum FC** (forecast units), **Sum LY** (last-year actual units), **Sum REV FC** (forecast revenue = units × ASP × display FX). Rendered in a **yellow box** for visibility.
 - Per selected cell it derives `s|co|ch|month` from the cell (`.fcr[data-rk]` for subcats, `input.fci[data-k]` for SKUs); LY from `ga` (subcat) or `skuSales` (SKU), revenue via `getASP` (SKU uses its parent-subcat ASP from `data-parentkey`).

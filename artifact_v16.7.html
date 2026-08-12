@@ -4034,6 +4034,7 @@ var SMOOTH_DISREGARD_DISC={};  // {'CO|CH|subcat':true} — when set, smoothing 
 function smoothDisregards(co,ch,s){ return !!SMOOTH_DISREGARD_DISC[co+'|'+ch+'|'+s]; }
 var SUBCAT_RT={};   // avg EX-TAX retail £/unit per market × subcategory (server-injected from planner.products); Set-targets £→units
 var FX_RATES={};   // blended GBP→local rate per FY start year: {"2026":{USD:1.27,EUR:1.17,AUD:1.92}} (CONFIG▸Admin▸Exchange rates); local = GBP × rate
+var CAT_ASP_GBP={};   // GBP avg selling price per subcategory × market {subcat:{UK,US,EU,AU,CA}} — from SKU retail prices ÷ fx; feeds new-category target smoothing (revenue÷ASP→units)
 var SMOOTH_AUTO={flags:{},threshold:20,mode:'standard',lastRun:null};  // one-click auto-smooth: flagged co|ch|subcat over `threshold`% gap are smoothed (standard|leader). lastRun = ISO of last discontinued smooth/recalc. Server-injected.
 var SMOOTH_LOCKS={};  // do-not-smooth locks keyed 'sku|CO|CH|YYYY_MM' → true. A locked SKU-cell is held FIXED by smoothing (excluded from the pool; its value subtracted from the subcat target so others fill the rest). SKU-level only. Server-injected from app_settings.smooth_locks.
 function saveSmoothLocks(){ fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'smooth_locks',value:JSON.stringify(SMOOTH_LOCKS)})}).catch(function(){}); }
@@ -9718,12 +9719,35 @@ function openTrendGapsPopout(){ var d=document.getElementById('tg-drawer');
 // ── Plan ▸ "Target recommendations" — recommend subcategory forecast changes to meet revenue targets ──
 // Units are derived from target £ ÷ ASP (ASP includes price changes), so the unit change is revenue growth
 // net of price. Review-then-apply: Apply writes subcategory overrides into IV (cascade to SKUs); Save persists.
-var TREC_FY=null, TREC_ALL={}, TREC_KEY='';   // TREC_ALL[co|ch][fy|sub|level|idx] = growth_pct — all combos (for the pill counters)
+var TREC_FY=null, TREC_ALL={}, TREC_GBP={}, TREC_KEY='';   // TREC_ALL[co|ch][fy|sub|level|idx] = growth_pct; TREC_GBP = same key → absolute target_gbp (new categories with no LY base)
 function trecPrevY(m){ return (+m.slice(0,4)-1)+'_'+m.slice(5,7); }
 function trecMonFyIdx(m){ var mo=+m.slice(5,7),y=+m.slice(0,4); return {Y:(mo>=3?y:y-1), idx:(mo>=3?mo-2:mo+10)}; }
 function trecResolve(Y,sub,mIdx,co,ch){ var M=TREC_ALL[(co||CUR)+'|'+(ch||CF)]; if(!M)return null; var k; k=Y+'|'+sub+'|month|'+mIdx; if(M[k]!=null)return Number(M[k]); k=Y+'|'+sub+'|quarter|'+Math.ceil(mIdx/3); if(M[k]!=null)return Number(M[k]); k=Y+'|'+sub+'|half|'+Math.ceil(mIdx/6); if(M[k]!=null)return Number(M[k]); return null; }
+// Absolute GBP period target (for new categories with no growth% base). Returns {gbp, lo, hi} where lo..hi is the
+// fiscal-month-index span the target covers (month=1, quarter=3, half=6), so it can be spread across those months.
+function trecResolveGBP(Y,sub,mIdx,co,ch){ var M=TREC_GBP[(co||CUR)+'|'+(ch||CF)]; if(!M)return null; var k;
+  k=Y+'|'+sub+'|month|'+mIdx; if(M[k]!=null)return {gbp:Number(M[k]),lo:mIdx,hi:mIdx};
+  var q=Math.ceil(mIdx/3); k=Y+'|'+sub+'|quarter|'+q; if(M[k]!=null)return {gbp:Number(M[k]),lo:(q-1)*3+1,hi:q*3};
+  var h=Math.ceil(mIdx/6); k=Y+'|'+sub+'|half|'+h; if(M[k]!=null)return {gbp:Number(M[k]),lo:(h-1)*6+1,hi:h*6};
+  return null; }
+function trecFiCal(i){ return ((i+1)%12)+1; }   // fiscal idx (1=Mar…12=Feb) → calendar month (1..12)
+// Monthly seasonality curve (calendar month → fraction of annual) borrowed from the OTHER (sub)categories in the same
+// `grouping` — for a new category with no history. Falls back co×ch → co → all → flat. Excludes the target subcat.
+var _grpCurveCache={};
+function groupingCurve(sub,co,ch){ var key=sub+'|'+co+'|'+ch; if(_grpCurveCache[key])return _grpCurveCache[key];
+  var cat=(typeof SUBS_META!=='undefined'&&SUBS_META[sub]&&SUBS_META[sub].c)||sub;
+  var grp=(typeof CATS_META!=='undefined'&&CATS_META[cat]&&CATS_META[cat].g)||null;
+  function build(coF,chF){ var b={},any=false;
+    (typeof DATA!=='undefined'?DATA:[]).forEach(function(r){ if(!r||r.s===sub)return; if(coF&&r.co!==coF)return; if(chF&&r.ch!==chF)return;
+      var rcat=(SUBS_META[r.s]&&SUBS_META[r.s].c)||r.c, rgrp=(CATS_META[rcat]&&CATS_META[rcat].g)||null;
+      if(grp){ if(rgrp!==grp)return; } else if(rcat!==cat)return;   // no grouping set → same-category siblings
+      var mm=r.m||{}; for(var ym in mm){ var u=(mm[ym]&&mm[ym][0])||0; if(u>0){ var cm=+ym.slice(5,7); b[cm]=(b[cm]||0)+u; any=true; } } });
+    return any?b:null; }
+  var raw=build(co,ch)||build(co,null)||build(null,null), tot=0; if(raw){ for(var kk in raw)tot+=raw[kk]; }
+  var cv={}; for(var mo=1;mo<=12;mo++)cv[mo]=(raw&&tot>0)?((raw[mo]||0)/tot):(1/12);
+  _grpCurveCache[key]=cv; return cv; }
 function trecLoad(cb){ if(TREC_KEY==='__all__'){cb();return;}   // load ALL combos once (pill counters roll up per market/channel)
-  fetch('/api/demand-revenue-targets/periods-all').then(function(r){return r.json();}).then(function(rows){ TREC_ALL={}; (rows||[]).forEach(function(t){ var ck=t.country+'|'+t.channel; (TREC_ALL[ck]=TREC_ALL[ck]||{})[t.fy+'|'+(t.subcategory||'')+'|'+t.level+'|'+t.idx]=t.growth_pct; }); TREC_KEY='__all__'; cb(); }).catch(function(){ TREC_KEY='__all__'; cb(); }); }
+  fetch('/api/demand-revenue-targets/periods-all').then(function(r){return r.json();}).then(function(rows){ TREC_ALL={}; TREC_GBP={}; (rows||[]).forEach(function(t){ var ck=t.country+'|'+t.channel, k=t.fy+'|'+(t.subcategory||'')+'|'+t.level+'|'+t.idx; (TREC_ALL[ck]=TREC_ALL[ck]||{})[k]=t.growth_pct; if(t.target_gbp!=null&&t.target_gbp!=='')(TREC_GBP[ck]=TREC_GBP[ck]||{})[k]=Number(t.target_gbp); }); TREC_KEY='__all__'; cb(); }).catch(function(){ TREC_KEY='__all__'; cb(); }); }
 // TREC dismissals — persisted per country|channel|fy|subcategory. A dismissed rec stays visible but is
 // removed from the "open" count + Apply-all (Ben). <2% gap recs have nothing to apply → hidden entirely.
 var TREC_DISM=(function(){try{return JSON.parse(localStorage.getItem('trec_dismissed'))||{};}catch(e){return {};}})();
@@ -9749,9 +9773,20 @@ function computeTargetRecs(fy,coA,chA){ var co=coA||CUR,ch=chA||CF; var _ck=fy+'
   var months=fyMonths(fy).filter(function(m){ return !isActualMonth(m) || m===THIS_MONTH; });   // include the current (incomplete) month
   var out=[];
   subs.forEach(function(s){ var a=ga(co,ch,s)||{}, cr=null; var rows=[], fyCur=0, fyTgt=0;   // cr computed lazily — only for subs that actually have a target (keeps the pill-counter roll-up fast)
-    months.forEach(function(m){ var fi=trecMonFyIdx(m); var g=trecResolve(fi.Y,s,fi.idx,co,ch); if(g==null)return;
-      var p=pa(m), asp=getASP(co,ch,s,p.y,p.mo); if(!(asp>0))return;
+    months.forEach(function(m){ var fi=trecMonFyIdx(m); var g=trecResolve(fi.Y,s,fi.idx,co,ch);
+      var gb=(g==null)?trecResolveGBP(fi.Y,s,fi.idx,co,ch):null;   // no growth% → maybe an absolute GBP target (new category)
+      if(g==null&&!gb)return;
+      var p=pa(m);
       if(!cr)cr=calc(s,co,ch);
+      if(gb){   // ── NEW CATEGORY: no last-year base → spread the GBP target on the grouping seasonality curve, ÷ category GBP ASP → units
+        var aspG=(typeof CAT_ASP_GBP!=='undefined'&&CAT_ASP_GBP[s]&&CAT_ASP_GBP[s][co])||0; if(!(aspG>0))return;   // no derivable ASP for this market → can't compute units
+        var cv=groupingCurve(s,co,ch), wSum=0; for(var ii=gb.lo;ii<=gb.hi;ii++)wSum+=(cv[trecFiCal(ii)]||0); if(!(wSum>0))return;
+        var monthRev=gb.gbp*((cv[trecFiCal(fi.idx)]||0)/wSum); if(!(monthRev>0))return;
+        var curUg=(cr.fu[m]||0), reqUg=Math.max(0,Math.round(monthRev/aspG));
+        rows.push({m:m, curU:curUg, lyU:0, curRev:curUg*aspG, tgtRev:monthRev, reqU:reqUg, g:null, pctCur:(curUg>0?(reqUg/curUg-1):null), pctLY:null, newcat:true});
+        fyCur+=curUg*aspG; fyTgt+=monthRev; return;
+      }
+      var asp=getASP(co,ch,s,p.y,p.mo); if(!(asp>0))return;
       if(m===THIS_MONTH){   // current incomplete month → grow the full-month forecast, not last year
         var fcU=((typeof CUR_MONTH!=='undefined'&&m===CUR_MONTH&&typeof curMonthForecast==='function')?(curMonthForecast(s,co,ch)||0):(cr.fu[m]||0));
         if(!(fcU>0))return;

@@ -673,10 +673,27 @@ async function kvReadBlob() {   // reassemble the blob from KV; null on miss/cor
 // we serve the cached build and refresh it in the BACKGROUND when it goes stale (stale-while-revalidate): after
 // the boot warm below, a real request never blocks on a cold build. A forecast save nulls _dataCache (lines
 // ~768/806) so the very next load rebuilds synchronously — edits show immediately.
+// GBP average selling price per subcategory × market, from SKU retail prices (<co>_rt, held in local currency)
+// converted to GBP via fx_rates (local-per-GBP). Feeds new-category target smoothing (revenue ÷ ASP → units) where
+// there's no sales history to derive an ASP from. A market with no priced SKU is omitted (→ no units for that market).
+async function buildCatAspGBP() {
+  let fx = {}; try { const fr = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='fx_rates'`)).rows[0];
+    const o = fr && fr.value ? JSON.parse(fr.value) : {}; const ys = Object.keys(o).sort(); fx = o[ys[ys.length - 1]] || {}; } catch (e) {}
+  const rate = { UK: 1, US: fx.USD || 1.34, EU: fx.EUR || 1.15, AU: fx.AUD || 1.9, CA: fx.CAD || 1.85 };   // local per GBP
+  const col = { UK: 'uk_rt', US: 'us_rt', EU: 'eu_rt', AU: 'au_rt', CA: 'ca_rt' };
+  const rows = (await pool.query(`SELECT subcategory s, uk_rt, us_rt, eu_rt, au_rt, ca_rt
+    FROM planner.products WHERE in_planning_scope AND subcategory IS NOT NULL`)).rows;
+  const acc = {};   // subcat -> {mkt:[sumLocal,n]}
+  for (const r of rows) { const s = r.s; if (!acc[s]) acc[s] = { UK: [0, 0], US: [0, 0], EU: [0, 0], AU: [0, 0], CA: [0, 0] };
+    for (const m in col) { const v = parseFloat(r[col[m]]); if (v > 0) { acc[s][m][0] += v; acc[s][m][1]++; } } }
+  const out = {};
+  for (const s in acc) { out[s] = {}; for (const m in col) { const a = acc[s][m]; if (a[1] > 0) out[s][m] = Math.round((a[0] / a[1]) / (rate[m] || 1) * 100) / 100; } }
+  return out;
+}
 async function _buildDataVals() {
   return Promise.all([
     buildDATA(), buildFC_CURRENT(), buildFC_OUTPUTS(), buildSKURAW(),
-    buildCATS_META(), buildSUBS_META(), buildBI_RULES(), buildPROD_CONST(), freshness(), buildFBADIMS(), buildSAEXTRA(), gbpRate(), buildBRANCH_FREIGHT(), buildTRANSFER_LEADS(),
+    buildCATS_META(), buildSUBS_META(), buildBI_RULES(), buildPROD_CONST(), freshness(), buildFBADIMS(), buildSAEXTRA(), gbpRate(), buildBRANCH_FREIGHT(), buildTRANSFER_LEADS(), buildCatAspGBP(),
   ]);
 }
 function refreshDataCache() {   // AUTHORITATIVE rebuild from Supabase (single-flight) + push to KV so other instances pick it up
@@ -767,7 +784,7 @@ app.get('/', async (req, res) => {
     // Serve the cached build; refresh in the background once past TTL (stale-while-revalidate). Only the very
     // first load (or the load right after a save-invalidation) waits on a synchronous build.
     const _vals = await getDataVals();   // in-process → KV (cold start, off-Supabase) → Supabase build; SWR handled inside
-    const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS, SA_EXTRA, GBP_RATE, BRANCH_FREIGHT, TRANSFER_LEADS] = _vals;
+    const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS, SA_EXTRA, GBP_RATE, BRANCH_FREIGHT, TRANSFER_LEADS, CAT_ASP_GBP] = _vals;
     const KLAVIYO_BIS = await buildKlaviyoBis();   // fresh (uploads are infrequent, not in the data cache)
     const MKT_COLORS = await buildMktColors();
     let html = DEV ? loadHTML() : HTML;
@@ -786,6 +803,7 @@ app.get('/', async (req, res) => {
     html = replaceGlobal(html, 'KLAVIYO_BIS', JSON.stringify(KLAVIYO_BIS));   // {sku:{UK:n,…}, _at:'YYYY-MM-DD'} — DEMAND BIS badge
     html = replaceGlobal(html, 'MKT_COLORS', JSON.stringify(MKT_COLORS));     // reusable market colour palette
     html = replaceGlobal(html, 'BRANCH_FREIGHT', JSON.stringify(BRANCH_FREIGHT || {}));
+    html = replaceGlobal(html, 'CAT_ASP_GBP', JSON.stringify(CAT_ASP_GBP || {}));
     html = replaceGlobal(html, 'TRANSFER_LEADS', JSON.stringify(TRANSFER_LEADS || {}));
     // Definitive price changes (DEMAND ▸ Revenue) — injected fresh (not in the 5-min data cache) so an edit shows
     // on the next load. getASP applies these to lift the revenue forecast.
