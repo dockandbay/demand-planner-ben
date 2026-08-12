@@ -6746,13 +6746,18 @@ const INVFBA_COLS = { sku:'sku', asin:'asin', av:'available', fc:'fc-transfer',
   a1:'inv-age-91-to-180-days', a2:'inv-age-181-to-270-days', a3:'inv-age-271-to-365-days', a4:'inv-age-366-to-455-days', a5:'inv-age-456-plus-days' };
 function invFbaParse(text) {
   const lines = text.split(/\r?\n/).filter(x => x.trim().length); if (!lines.length) return null;
-  const hdr = parseCsvLine(lines[0]).map(h => h.replace(/^"|"$/g, '').trim());
+  // Amazon exports the same report as CSV (comma, quoted) or TXT (tab-separated, unquoted) — detect + parse either.
+  const isTsv = lines[0].indexOf('\t') >= 0;
+  const split = isTsv ? (line => line.split('\t').map(s => String(s).replace(/^"|"$/g, '').trim()))
+                      : (line => parseCsvLine(line).map(s => String(s).replace(/^"|"$/g, '').trim()));
+  const hdr = split(lines[0]);
   const ci = {}; for (const k in INVFBA_COLS) ci[k] = hdr.indexOf(INVFBA_COLS[k]);
   if (ci.sku < 0) return { error: 'FBA report "sku" column not found', headers: hdr.slice(0, 12) };
   const rep = {};
-  for (let i = 1; i < lines.length; i++) { const f = parseCsvLine(lines[i]); const sku = String(f[ci.sku] || '').replace(/^"|"$/g, '').trim(); if (!sku) continue;
+  for (let i = 1; i < lines.length; i++) { const f = split(lines[i]); const sku = String(f[ci.sku] || '').trim(); if (!sku) continue;
+    if (/^amzn\.gr\./i.test(sku)) continue;   // ignore Amazon "amzn.gr." listings entirely — not inventory we count
     const r = rep[sku] || (rep[sku] = { av: 0, fc: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, asin: '' });
-    if (!r.asin && ci.asin >= 0) r.asin = String(f[ci.asin] || '').replace(/^"|"$/g, '').trim();
+    if (!r.asin && ci.asin >= 0) r.asin = String(f[ci.asin] || '').trim();
     ['av', 'fc', 'a1', 'a2', 'a3', 'a4', 'a5'].forEach(k => { if (ci[k] >= 0) r[k] += csvNum(f[ci[k]]); }); }
   return { rep };
 }

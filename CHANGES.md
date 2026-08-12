@@ -1,3 +1,8 @@
+## v26.885.0 Manage FBA — accept .txt (tab-delimited) + ignore amzn.gr. listings
+- FBA upload now accepts the Amazon report as **.csv (comma/quoted) or .txt (tab-delimited)** — the parser auto-detects the delimiter (same columns either way). Verified UK .txt and .csv give identical results (210 SKUs, 209 matched).
+- Rows whose SKU starts with **`amzn.gr.`** are now **ignored entirely** (not real inventory) — dropped before compare/aged, every market.
+- (No change needed for ASIN across markets — `products.asin` is global, so SKU-or-ASIN matching already works for US/UK/AU/EU/CA.)
+
 ## v26.884.0 Manage FBA — match by SKU or ASIN (all markets)
 - FBA upload comparison now matches each report row to `products` **by SKU first, then by ASIN** (`products.asin`) — Amazon SKUs are often prefixed/suffixed and do not match ours, but the ASIN does. US test: matched 485→586 (101 via ASIN), unmatched 119→18. Added an **ASIN column** + a "→ <sku> (via ASIN)" note on ASIN-matched rows. Applies to every market (US/UK/AU/EU/CA — the feature was already per-market; UK/AU/EU take the same file and compare to inventory_<mkt>_fba).
 
