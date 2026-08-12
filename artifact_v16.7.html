@@ -9018,7 +9018,7 @@ var INV_SUB='status', INV_3PL='US', INV_FBA='US';
 function renderInventory(){
   var host=document.querySelector('.wrap'); if(!host)return;
   var ex=document.getElementById('inventory-wrap'); if(ex)ex.remove();
-  var wrap=document.createElement('div'); wrap.id='inventory-wrap'; wrap.style.cssText='max-width:1080px;margin:6px 0 20px';
+  var wrap=document.createElement('div'); wrap.id='inventory-wrap'; wrap.style.cssText='margin:6px 0 20px';   // full-width (match the SUPPLY pages)
   var SUBS=[['status','Status Report'],['manage3pl','Manage 3PL'],['managefba','Manage FBA']];
   function pillbar(list,cur,cls){ return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px">'+list.map(function(c){ var on=(c===cur);
       return '<button class="'+cls+'" data-c="'+c+'" style="padding:4px 15px;border-radius:16px;border:1px solid '+(on?'#1e40af':'#cbd5e1')+';background:'+(on?'#1e40af':'#fff')+';color:'+(on?'#fff':'#334155')+';font-weight:600;font-size:12px;cursor:pointer">'+c+'</button>'; }).join('')+'</div>'; }

@@ -1,3 +1,6 @@
+## v26.874.0 INVENTORY — full-width layout
+- The INVENTORY view (incl. its level-3 nav) is now full-width, matching the SUPPLY pages (was capped at 1080px).
+
 ## v26.873.0 Xero Compare — fixed column widths
 - Table is now `table-layout:fixed` with a colgroup: **Issue 40%**, **PO 10%**, and the other 8 columns (Supplier, Status, Xero Due GBP/USD, Rate, FX gain, Horizon due, Variance) split the remaining 50% evenly (6.25% each). Removed the old fixed 64px on the number columns.
 
