@@ -6526,7 +6526,8 @@ function renderSkuView(){
     // Optional variant-image thumbnail (More Filters & Settings ▸ "Show variant image"); hover → 400×400 modal.
     if(typeof SHOW_VARIANT_IMG!=='undefined' && SHOW_VARIANT_IMG && p.img){
       var _vw=document.createElement('div'); _vw.style.cssText='display:flex;align-items:flex-start;gap:6px';
-      var _vi=document.createElement('img'); _vi.className='sku-varimg'; _vi.src=p.img; _vi.loading='lazy'; _vi.setAttribute('data-full',p.img); _vi.alt='';
+      var _iu=String(p.img).replace(/^http:\/\//i,'https://');   // upgrade http→https (mixed-content blocks http images on the https site)
+      var _vi=document.createElement('img'); _vi.className='sku-varimg'; _vi.src=_iu; _vi.loading='lazy'; _vi.setAttribute('data-full',_iu); _vi.alt=''; _vi.onerror=function(){ _vw.style.display='none'; };
       _vi.style.cssText='width:40px;height:40px;object-fit:cover;border-radius:4px;border:1px solid #e5e7eb;flex:0 0 auto;cursor:zoom-in;background:#f8fafc';
       var _vt=document.createElement('div'); _vt.style.cssText='flex:1 1 auto;min-width:0';
       _vw.appendChild(_vi); _vw.appendChild(_vt);
@@ -7214,7 +7215,8 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         // Optional variant-image thumbnail (More Filters & Settings ▸ "Show variant image"); hover → 400×400 modal.
         if(typeof SHOW_VARIANT_IMG!=='undefined' && SHOW_VARIANT_IMG && p.img){
           var _vw=document.createElement('div'); _vw.style.cssText='display:flex;align-items:flex-start;gap:4px;padding:2px 4px';
-          var _vi=document.createElement('img'); _vi.className='sku-varimg'; _vi.src=p.img; _vi.loading='lazy'; _vi.setAttribute('data-full',p.img); _vi.alt='';
+          var _iu=String(p.img).replace(/^http:\/\//i,'https://');   // upgrade http→https (mixed-content blocks http images on the https site)
+          var _vi=document.createElement('img'); _vi.className='sku-varimg'; _vi.src=_iu; _vi.loading='lazy'; _vi.setAttribute('data-full',_iu); _vi.alt=''; _vi.onerror=function(){ _vw.style.display='none'; };
           _vi.style.cssText='width:30px;height:30px;object-fit:cover;border-radius:4px;border:1px solid #e5e7eb;flex:0 0 auto;cursor:zoom-in;background:#f8fafc';
           var _vt=document.createElement('div'); _vt.style.cssText='flex:1 1 auto;min-width:0';
           while(td.firstChild) _vt.appendChild(td.firstChild);

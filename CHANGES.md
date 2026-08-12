@@ -1,3 +1,7 @@
+## v26.906.0 Demand plan variant image — fix broken (http→https) thumbnails
+- Variant-image thumbnails rendered the URL raw, so ~20 SKUs with `http://` Cloudinary URLs were **blocked as mixed content** on the https site (broken-image icon). The render now **upgrades http→https** and adds an `onerror` that hides the thumbnail if it still fails (no ugly broken-image icon). Applied to both render paths.
+- Also cleaned the source data: `UPDATE planner.products` set the http:// image URLs → https:// (applied to **live** + sandbox). NOTE: n8n could re-introduce http URLs on the next products sync — the client-side upgrade is the durable guard; to fix permanently, correct the URLs at the Airtable/n8n source.
+
 ## v26.905.0 Out of Stock rework — 3 lists, lost-sales £, inbound PO drawer; removed standalone inbound list
 - **Out of stock (§1) split into 3 lists:** 3PL (web/wholesale), FBA (Amazon), and both. Each left-aligned with SKU · Release · Tier · On order · **Lost fcst (units)** · **Est £ lost** · **Inbound (PO · ETA)**, sorted biggest £-at-risk first, with a per-list £-at-risk subtotal.
 - **Lost sales** = forecast over the OOS-remaining period (now → the next relevant inbound ETA): DTC+B2B for the 3PL list, FBA for the Amazon list, each valued at that channel's **average selling price** (`aspF`). Out of stock with **no inbound scheduled** is flagged red ("no restock").
