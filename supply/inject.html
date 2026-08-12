@@ -7899,13 +7899,13 @@
       fetch('/api/supply/payments-report').then(function(r){return r.json();}),
       fetch('/api/supply/remittances').then(function(r){return r.json();}).catch(function(){return [];}),
       fetch('/api/supply/payment-emails').then(function(r){return r.json();}).catch(function(){return [];})
-    ]).then(function(_res){ payBuildMaps(_res[1],_res[2]); var rows=Array.isArray(_res[0])?_res[0]:((_res[0]&&(_res[0].rows||_res[0].payments))||[]);   // tolerate a non-array response (error/shape) instead of crashing the page
+    ]).then(function(_res){ payBuildMaps(_res[1],_res[2]); _payRows=Array.isArray(_res[0])?_res[0]:((_res[0]&&(_res[0].rows||_res[0].payments))||[]); var rows=_payRows;   // tolerate a non-array response (error/shape) instead of crashing the page; keep rows in a shared ref so payRefreshState can update it
       // date filter: type a date (or partial, e.g. 2026-06) into From / To — no date picker
       b.innerHTML='<div class="bar"><span class="pill-lbl">Date</span><span class="tiny mut">from</span> <input class="flt" id="pay-from" placeholder="YYYY-MM-DD" value="'+esc(PAY_FROM)+'" style="width:118px"> <span class="tiny mut">to</span> <input class="flt" id="pay-to" placeholder="YYYY-MM-DD" value="'+esc(PAY_TO)+'" style="width:118px"> <button class="save-btn light" id="pay-clear">Clear</button>'
         +'<span class="pill-lbl" style="margin-left:14px">Search</span><input class="flt" id="pay-q" placeholder="supplier / amount…" value="'+esc(PAY_Q)+'" style="width:180px;background:#eff6ff;border-color:#93c5fd" title="search by supplier name or amount — overrides the date filter (spans all history)"> <span class="tiny mut">supplier or amount (spans all dates)</span></div><div id="pay-rep"></div>';
       bindFastTips(b);   // fast (120ms) tooltips on all payments-report icons — delegated, covers re-rendered rows
       function draw(){ var q=(PAY_Q||'').trim().toLowerCase();
-        var f=rows.filter(function(r){
+        var f=_payRows.filter(function(r){
           if(q){ var sup=String(r.supplier||'').toLowerCase(); if(sup.indexOf(q)>=0) return true;   // search overrides the date filter → all history
             var qn=q.replace(/[^0-9.]/g,''); if(qn==='') return false;                              // amount: comma-agnostic, matches the 2dp base amount
             var qNum=Number(qn);
@@ -7928,15 +7928,16 @@
   var PAY_CCY=['','GBP','EUR','AUD','USD'];
   var PTYPE_BG={Deposit:'bg-blue',Completion:'bg-amber',Balance:'bg-green',Other:'bg-neutral'};
   // Remittance upload + delayed paid-notification state, keyed by run_key = '<date>|<supplier>'.
-  var PAY_REMIT={}, PAY_EMAILS={}, _payDraw=null;
+  var PAY_REMIT={}, PAY_EMAILS={}, _payDraw=null, _payRows=[];
   function payRunKey(r){ return (r.dt||'')+'|'+(r.supplier||''); }
   function payBuildMaps(rem,em){ PAY_REMIT={}; PAY_EMAILS={};
     (rem||[]).forEach(function(x){ (PAY_REMIT[x.run_key]||(PAY_REMIT[x.run_key]=[])).push(x); });
     (em||[]).forEach(function(x){ if(!PAY_EMAILS[x.run_key])PAY_EMAILS[x.run_key]=x; }); }   // list is id DESC → first seen = latest
   function payRefreshState(){ return Promise.all([
       fetch('/api/supply/remittances').then(function(r){return r.json();}).catch(function(){return [];}),
-      fetch('/api/supply/payment-emails').then(function(r){return r.json();}).catch(function(){return [];})
-    ]).then(function(a){ payBuildMaps(a[0],a[1]); if(_payDraw)_payDraw(); }); }
+      fetch('/api/supply/payment-emails').then(function(r){return r.json();}).catch(function(){return [];}),
+      fetch('/api/supply/payments-report').then(function(r){return r.json();}).catch(function(){return null;})   // ALSO re-fetch the report so a just-saved bank amount (Paid USD) isn't wiped by a redraw from stale rows
+    ]).then(function(a){ payBuildMaps(a[0],a[1]); if(a[2]!=null)_payRows=Array.isArray(a[2])?a[2]:((a[2]&&(a[2].rows||a[2].payments))||[]); if(_payDraw)_payDraw(); }); }
   // ---- Xero bill export (Payments Report) ----
   function xbDmy(iso){ var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(iso||''); return m?(m[3]+'/'+m[2]+'/'+m[1]):(iso||''); }   // YYYY-MM-DD → DD/MM/YYYY
   function xbCell(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }

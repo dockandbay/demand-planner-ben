@@ -1,3 +1,6 @@
+## v26.865.0 Payments Report — fix: "Paid USD" amount wiped by "Mark paid & notify"
+- `payRefreshState()` only re-fetched remittances + emails and redrew from the **stale** rows captured at load, so after "Paid USD" (which saves the bank amount) clicking "Mark paid & notify" redrew with `other_amount` still null → the bank-amount box showed empty. The amount was always safe in the DB; this was a display wipe. Fix: `payRefreshState()` now also re-fetches `/api/supply/payments-report` and updates the shared rows before redrawing.
+
 ## v26.864.0 Master PO — remove a child + guarded master delete
 - **Child PO tab:** each child now has a **✕ remove** — it detaches from the master and converts back to a **normal PO** (returns to the grid); the master **re-sums its consolidated lines** (verified 3395→1195 after removing one). Replaces the old bulk Dissolve.
 - **Master delete is guarded:** the PO's "🗑 Delete this PO" is **greyed out with a tooltip** ("Cannot delete a master PO when child POs are assigned — remove them on the Child PO tab") until every child is removed; then it's clickable. Enforced server-side too (409, never orphans children). `master_child_count` added to PO rows.
