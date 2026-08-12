@@ -6668,33 +6668,61 @@ function parseCsvLine(line) { const out = []; let cur = '', q = false;
     else { if (ch === '"') q = true; else if (ch === ',') { out.push(cur); cur = ''; } else cur += ch; } }
   out.push(cur); return out.map(s => s.trim()); }
 function csvNum(v) { const n = parseFloat(String(v == null ? '' : v).replace(/[^0-9.\-]/g, '')); return isNaN(n) ? 0 : n; }
-app.get('/api/supply/inventory-3pl/import', async (req, res) => {
+// Compare a parsed report (sku -> {oh,av}) against live products: ERP on-hand (inventory_<mkt>_3pl_onhand) + ERP available (inventory_<mkt>_3pl).
+async function inv3plCompare(mkt, rep) {
+  const ohCol = 'inventory_' + mkt.toLowerCase() + '_3pl_onhand';   // mkt is whitelisted → safe to interpolate
+  const avCol = 'inventory_' + mkt.toLowerCase() + '_3pl';
+  const erp = {};
+  (await pool.query(`SELECT sku, coalesce(${ohCol},0)::numeric oh, coalesce(${avCol},0)::numeric av FROM planner.products WHERE sku IS NOT NULL`)).rows
+    .forEach(x => { erp[x.sku] = { oh: Number(x.oh) || 0, av: Number(x.av) || 0 }; });
+  const skus = Object.keys(rep);
+  const rows = skus.map(sku => { const matched = (sku in erp), e = matched ? erp[sku] : null;
+    return { sku, report_onhand: rep[sku].oh, report_avail: rep[sku].av, erp_onhand: e ? e.oh : null, erp_avail: e ? e.av : null,
+      matched, diff_onhand: e ? rep[sku].oh - e.oh : null, diff_avail: e ? rep[sku].av - e.av : null }; })
+    .sort((a, b) => (Math.abs(b.diff_avail || 0) + Math.abs(b.diff_onhand || 0)) - (Math.abs(a.diff_avail || 0) + Math.abs(a.diff_onhand || 0)));   // biggest combined mismatch first
+  return { rows, report_skus: skus.length, matched: rows.filter(r => r.matched).length, unmatched: rows.filter(r => !r.matched).length,
+    erp_not_in_report: Object.keys(erp).filter(s => (erp[s].oh > 0 || erp[s].av > 0) && !(s in rep)).length };
+}
+function inv3plParse(cfg, text) {   // CSV text -> { sku: {oh,av} } (sum duplicate rows)
+  const lines = text.split(/\r?\n/).filter(x => x.trim().length); if (!lines.length) return null;
+  const hdr = parseCsvLine(lines[0]).map(h => h.replace(/^"|"$/g, ''));
+  const ci = { sku: hdr.indexOf(cfg.sku), oh: hdr.indexOf(cfg.onhand), av: hdr.indexOf(cfg.avail) };
+  if (ci.sku < 0) return { error: 'SKU column "' + cfg.sku + '" not found', headers: hdr };
+  const rep = {};
+  for (let i = 1; i < lines.length; i++) { const f = parseCsvLine(lines[i]); const sku = String(f[ci.sku] || '').replace(/^"|"$/g, '').trim(); if (!sku) continue;
+    if (!rep[sku]) rep[sku] = { oh: 0, av: 0 };
+    rep[sku].oh += ci.oh >= 0 ? csvNum(f[ci.oh]) : 0;
+    rep[sku].av += ci.av >= 0 ? csvNum(f[ci.av]) : 0; }
+  return { rep };
+}
+// GET: the last stored import for a market (meta + comparison recomputed vs live products). No external fetch.
+app.get('/api/supply/inventory-3pl/status', async (req, res) => {
   const mkt = String((req.query && req.query.market) || '').toUpperCase();
+  if (!INV3PL_SRC[mkt]) return res.json({ market: mkt, configured: false, error: mkt === 'EU' ? 'No EU 3PL report source configured yet.' : 'Unknown market' });
+  try {
+    const m = (await pool.query(`SELECT imported_by, to_char(imported_at,'YYYY-MM-DD"T"HH24:MI:SS') imported_at, report FROM planner.inventory_3pl_imports WHERE market=$1`, [mkt])).rows[0];
+    if (!m || !m.report) return res.json({ market: mkt, configured: true, imported: false });
+    const rep = {}; Object.keys(m.report).forEach(sku => { const a = m.report[sku]; rep[sku] = { oh: Number(a[0]) || 0, av: Number(a[1]) || 0 }; });
+    res.json({ market: mkt, configured: true, imported: true, imported_by: m.imported_by, imported_at: m.imported_at, ...(await inv3plCompare(mkt, rep)) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// POST: fetch the market's report fresh, parse, persist (who/when + report), and return the comparison.
+app.post('/api/supply/inventory-3pl/import', async (req, res) => {
+  const mkt = String((req.query && req.query.market) || (req.body && req.body.market) || '').toUpperCase();
   const cfg = INV3PL_SRC[mkt];
   if (!cfg) return res.json({ market: mkt, configured: false, error: mkt === 'EU' ? 'No EU 3PL report source configured yet.' : 'Unknown market' });
   try {
     const rsp = await fetch(cfg.url + '?' + Date.now(), { redirect: 'follow' });
     if (!rsp.ok) return res.status(502).json({ error: 'Report fetch failed (HTTP ' + rsp.status + ')' });
-    const lines = (await rsp.text()).split(/\r?\n/).filter(x => x.trim().length);
-    if (!lines.length) return res.json({ market: mkt, error: 'Empty report' });
-    const hdr = parseCsvLine(lines[0]).map(h => h.replace(/^"|"$/g, ''));
-    const ci = { sku: hdr.indexOf(cfg.sku), oh: hdr.indexOf(cfg.onhand), av: hdr.indexOf(cfg.avail) };
-    if (ci.sku < 0) return res.json({ market: mkt, headers: hdr, error: 'SKU column "' + cfg.sku + '" not found in report' });
-    const rep = {};
-    for (let i = 1; i < lines.length; i++) { const f = parseCsvLine(lines[i]); const sku = String(f[ci.sku] || '').replace(/^"|"$/g, '').trim(); if (!sku) continue;
-      if (!rep[sku]) rep[sku] = { oh: 0, av: 0 };
-      rep[sku].oh += ci.oh >= 0 ? csvNum(f[ci.oh]) : 0;
-      rep[sku].av += ci.av >= 0 ? csvNum(f[ci.av]) : 0; }   // sum duplicate rows (multi-warehouse/version)
-    const col = 'inventory_' + mkt.toLowerCase() + '_3pl';   // mkt is from a fixed whitelist above → safe to interpolate
-    const hz = {};
-    (await pool.query(`SELECT sku, coalesce(${col},0)::numeric v FROM planner.products WHERE sku IS NOT NULL`)).rows.forEach(x => { hz[x.sku] = Number(x.v) || 0; });
-    const skus = Object.keys(rep);
-    const rows = skus.map(sku => { const matched = (sku in hz), h = matched ? hz[sku] : null;
-      return { sku, on_hand: rep[sku].oh, available: rep[sku].av, horizon_3pl: h, matched, diff: (h == null ? null : rep[sku].av - h) }; })
-      .sort((a, b) => (b.diff == null ? -1 : Math.abs(b.diff)) - (a.diff == null ? -1 : Math.abs(a.diff)));   // biggest mismatch first, unmatched last
-    res.json({ market: mkt, configured: true, url: cfg.url, columns: cfg, fetched_at: new Date().toISOString(),
-      report_skus: skus.length, matched: rows.filter(r => r.matched).length, unmatched: rows.filter(r => !r.matched).length,
-      hz_not_in_report: Object.keys(hz).filter(s => hz[s] > 0 && !(s in rep)).length, rows });
+    const parsed = inv3plParse(cfg, await rsp.text());
+    if (!parsed) return res.json({ market: mkt, error: 'Empty report' });
+    if (parsed.error) return res.json({ market: mkt, headers: parsed.headers, error: parsed.error });
+    const store = {}; Object.keys(parsed.rep).forEach(sku => { store[sku] = [parsed.rep[sku].oh, parsed.rep[sku].av]; });
+    const by = authUser(req) || 'admin';
+    await pool.query(`INSERT INTO planner.inventory_3pl_imports (market, imported_by, imported_at, report) VALUES ($1,$2,now(),$3::jsonb)
+      ON CONFLICT (market) DO UPDATE SET imported_by=excluded.imported_by, imported_at=now(), report=excluded.report`, [mkt, by, JSON.stringify(store)]);
+    const m = (await pool.query(`SELECT to_char(imported_at,'YYYY-MM-DD"T"HH24:MI:SS') imported_at FROM planner.inventory_3pl_imports WHERE market=$1`, [mkt])).rows[0];
+    res.json({ market: mkt, configured: true, imported: true, imported_by: by, imported_at: m.imported_at, url: cfg.url, ...(await inv3plCompare(mkt, parsed.rep)) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // ── Master PO (consolidated supplier invoice) ─────────────────────────────────────────────────

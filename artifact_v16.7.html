@@ -9025,11 +9025,7 @@ function renderInventory(){
   function placeholder(title){ return '<div style="padding:26px;color:#64748b;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;text-align:center"><b style="color:#334155">'+title+'</b><div style="margin-top:6px;font-size:13px">To complete in future.</div></div>'; }
   var subnav='<div class="d3nav">'+SUBS.map(function(t){return '<button class="d3tab inv-sub'+(t[0]===INV_SUB?' active':'')+'" data-sub="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div>';
   var body;
-  if(INV_SUB==='manage3pl'){ var noSrc=(INV_3PL==='EU');
-    body=pillbar(['US','UK','AU','EU'],INV_3PL,'inv-3pl-pill')
-      +(noSrc?'<div class="mut" style="font-size:12px;margin-bottom:10px">No EU 3PL report source configured yet.</div>'
-             :'<div style="margin:0 0 10px"><button id="inv3pl-import" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:6px;padding:6px 15px;font-weight:600;cursor:pointer;font-size:12px">⟳ Import '+INV_3PL+' 3PL report</button> <span id="inv3pl-msg" class="mut" style="font-size:12px"></span></div>')
-      +'<div id="inv3pl-result"></div>'; }
+  if(INV_SUB==='manage3pl') body=pillbar(['US','UK','AU','EU'],INV_3PL,'inv-3pl-pill')+'<div id="inv3pl-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
   else if(INV_SUB==='managefba') body=pillbar(['US','UK','AU','EU','CA'],INV_FBA,'inv-fba-pill')+placeholder('Manage FBA — '+INV_FBA);
   else body=placeholder('Status Report');
   wrap.innerHTML=subnav+'<div id="inv-body">'+body+'</div>';
@@ -9037,27 +9033,48 @@ function renderInventory(){
   wrap.querySelectorAll('.inv-sub').forEach(function(b){ b.onclick=function(){ INV_SUB=b.dataset.sub; renderInventory(); }; });
   wrap.querySelectorAll('.inv-3pl-pill').forEach(function(b){ b.onclick=function(){ INV_3PL=b.dataset.c; renderInventory(); }; });
   wrap.querySelectorAll('.inv-fba-pill').forEach(function(b){ b.onclick=function(){ INV_FBA=b.dataset.c; renderInventory(); }; });
-  var _ib=wrap.querySelector('#inv3pl-import'); if(_ib)_ib.onclick=inv3plImport;
+  if(INV_SUB==='manage3pl')inv3plLoad();
 }
-// Manage 3PL ▸ import a market's 3PL stock report and compare on-hand/available vs HORIZON inventory_<mkt>_3pl.
-function inv3plImport(){ var mkt=INV_3PL, btn=document.getElementById('inv3pl-import'), msg=document.getElementById('inv3pl-msg'), out=document.getElementById('inv3pl-result');
+function inv3plUser(e){ e=String(e||''); var i=e.indexOf('@'); return i>0?e.slice(0,i+1):(e||'—'); }   // ben@dockandbay.com → ben@
+function inv3plAge(iso){ var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var d=new Date(String(iso||'').replace(' ','T')); if(isNaN(d.getTime()))return {age:'',stamp:String(iso||'')};
+  var days=Math.floor((Date.now()-d.getTime())/86400000), p=function(n){return (n<10?'0':'')+n;};
+  return {age:(days<=0?'today':(days===1?'1 day old':days+' days old')),
+    stamp:p(d.getDate())+'-'+MN[d.getMonth()]+'-'+String(d.getFullYear()).slice(2)+' '+p(d.getHours())+':'+p(d.getMinutes())}; }
+// Load the LAST stored import for the selected market (meta + comparison) — no external fetch.
+function inv3plLoad(){ var mkt=INV_3PL, panel=document.getElementById('inv3pl-panel'); if(!panel)return;
+  if(mkt==='EU'){ panel.innerHTML='<div class="mut" style="font-size:12px">No EU 3PL report source configured yet.</div>'; return; }
+  panel.innerHTML='<div class="mut" style="font-size:12px">Loading…</div>';
+  fetch('/api/supply/inventory-3pl/status?market='+mkt).then(function(r){return r.json();}).then(inv3plRender)
+    .catch(function(e){ panel.innerHTML='<div style="color:#dc2626">'+tHesc((e&&e.message)||e)+'</div>'; }); }
+// Re-import: fetch the report fresh, persist, re-render.
+function inv3plImport(){ var mkt=INV_3PL, btn=document.getElementById('inv3pl-import'), msg=document.getElementById('inv3pl-msg');
   if(btn)btn.disabled=true; if(msg)msg.textContent='Fetching '+mkt+' report…';
-  fetch('/api/supply/inventory-3pl/import?market='+mkt).then(function(r){return r.json();}).then(function(j){ if(btn)btn.disabled=false; if(msg)msg.textContent='';
-    if(j.error){ out.innerHTML='<div style="color:#dc2626">'+tHesc(j.error)+(j.headers?'<div class="mut" style="font-size:11px;margin-top:4px">Report headers: '+tHesc(j.headers.join(', '))+'</div>':'')+'</div>'; return; }
-    var rows=j.rows||[];
-    var summary='<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px;font-size:12px">'
-      +'<span><b>'+j.report_skus+'</b> report SKUs</span><span style="color:#16a34a"><b>'+j.matched+'</b> matched</span>'
-      +'<span style="color:#b45309"><b>'+j.unmatched+'</b> not in HORIZON</span><span style="color:#b91c1c"><b>'+j.hz_not_in_report+'</b> HORIZON 3PL&gt;0 missing from report</span>'
-      +'<span class="mut">fetched '+tHesc((j.fetched_at||"").slice(0,19).replace("T"," "))+'</span></div>';
-    var head=['SKU','On hand','Available (report)','HORIZON 3PL','Diff (rep−hz)'].map(function(h,ix){return '<th style="text-align:'+(ix===0?'left':'right')+';padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc">'+h+'</th>';}).join('');
-    var trs=rows.slice(0,800).map(function(r){ var d=r.diff, dc=(d==null?'#94a3b8':(d===0?'#16a34a':(d>0?'#b45309':'#b91c1c')));
-      return '<tr'+(!r.matched?' style="background:#fff7ed"':'')+'><td style="padding:4px 10px">'+tHesc(r.sku)+(!r.matched?' <span class="mut" style="font-size:10px">(not in HORIZON)</span>':'')+'</td>'
-        +'<td style="padding:4px 10px;text-align:right">'+r.on_hand+'</td><td style="padding:4px 10px;text-align:right">'+r.available+'</td>'
-        +'<td style="padding:4px 10px;text-align:right">'+(r.horizon_3pl==null?'—':r.horizon_3pl)+'</td>'
-        +'<td style="padding:4px 10px;text-align:right;color:'+dc+';font-weight:600">'+(d==null?'—':(d>0?'+':'')+d)+'</td></tr>'; }).join('');
-    out.innerHTML=summary+'<div style="max-height:520px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'+head+'</tr></thead><tbody>'+trs+'</tbody></table></div>'
-      +(rows.length>800?'<div class="mut" style="font-size:11px;margin-top:4px">Showing first 800 of '+rows.length+' (sorted by biggest mismatch)</div>':'');
-  }).catch(function(e){ if(btn)btn.disabled=false; if(msg)msg.textContent=''; out.innerHTML='<div style="color:#dc2626">Failed: '+tHesc((e&&e.message)||e)+'</div>'; }); }
+  fetch('/api/supply/inventory-3pl/import?market='+mkt,{method:'POST'}).then(function(r){return r.json();}).then(inv3plRender)
+    .catch(function(e){ if(btn)btn.disabled=false; if(msg)msg.textContent=''; var p=document.getElementById('inv3pl-panel'); if(p)p.innerHTML='<div style="color:#dc2626">Failed: '+tHesc((e&&e.message)||e)+'</div>'; }); }
+function inv3plRender(j){ var panel=document.getElementById('inv3pl-panel'); if(!panel)return;
+  if(j&&j.error){ panel.innerHTML='<div style="color:#dc2626">'+tHesc(j.error)+(j.headers?'<div class="mut" style="font-size:11px;margin-top:4px">Report headers: '+tHesc(j.headers.join(', '))+'</div>':'')+'</div>'; return; }
+  var meta=j.imported?(function(){ var a=inv3plAge(j.imported_at); return '<span class="mut" style="font-size:12px">'+tHesc(a.age)+' · last imported <b>'+tHesc(inv3plUser(j.imported_by))+'</b> on '+tHesc(a.stamp)+'</span>'; })()
+    :'<span class="mut" style="font-size:12px">Not imported yet.</span>';
+  var head='<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 10px"><button id="inv3pl-import" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:6px;padding:6px 15px;font-weight:600;cursor:pointer;font-size:12px">⟳ Import '+tHesc(j.market||INV_3PL)+' 3PL report</button>'+meta+' <span id="inv3pl-msg" class="mut" style="font-size:12px"></span></div>';
+  var content='';
+  if(j.imported){ var rows=j.rows||[];
+    var summary='<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px;font-size:12px"><span><b>'+j.report_skus+'</b> report SKUs</span>'
+      +'<span style="color:#16a34a"><b>'+j.matched+'</b> matched</span><span style="color:#b45309"><b>'+j.unmatched+'</b> not in ERP</span>'
+      +'<span style="color:#b91c1c"><b>'+j.erp_not_in_report+'</b> ERP stock missing from report</span></div>';
+    var HED=['SKU','3PL Report - On Hand','3PL Report - Available','ERP On Hand','ERP Available','Diff On Hand','Diff Available'];
+    var head2=HED.map(function(h){return '<th style="text-align:left;padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+h+'</th>';}).join('');
+    var num=function(v){return v==null?'—':v;};
+    var dcell=function(d){ var c=(d==null?'#94a3b8':(d===0?'#16a34a':(d>0?'#b45309':'#b91c1c'))); return '<td style="padding:4px 10px;text-align:left;color:'+c+';font-weight:600">'+(d==null?'—':(d>0?'+':'')+d)+'</td>'; };
+    var trs=rows.slice(0,800).map(function(r){ return '<tr'+(!r.matched?' style="background:#fff7ed"':'')+'>'
+      +'<td style="padding:4px 10px;text-align:left">'+tHesc(r.sku)+(!r.matched?' <span class="mut" style="font-size:10px">(not in ERP)</span>':'')+'</td>'
+      +'<td style="padding:4px 10px;text-align:left">'+num(r.report_onhand)+'</td><td style="padding:4px 10px;text-align:left">'+num(r.report_avail)+'</td>'
+      +'<td style="padding:4px 10px;text-align:left">'+num(r.erp_onhand)+'</td><td style="padding:4px 10px;text-align:left">'+num(r.erp_avail)+'</td>'
+      +dcell(r.diff_onhand)+dcell(r.diff_avail)+'</tr>'; }).join('');
+    content=summary+'<div style="max-height:520px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'+head2+'</tr></thead><tbody>'+trs+'</tbody></table></div>'
+      +(rows.length>800?'<div class="mut" style="font-size:11px;margin-top:4px">Showing first 800 of '+rows.length+' (sorted by biggest mismatch)</div>':''); }
+  panel.innerHTML=head+content;
+  var ib=document.getElementById('inv3pl-import'); if(ib)ib.onclick=inv3plImport; }
 function renderBuyMoveActions(){
   try{ buildLiveDemand(); }catch(e){}
   var host=document.querySelector('.wrap');
