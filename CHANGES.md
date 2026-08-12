@@ -1,3 +1,6 @@
+## v26.873.0 Xero Compare — fixed column widths
+- Table is now `table-layout:fixed` with a colgroup: **Issue 40%**, **PO 10%**, and the other 8 columns (Supplier, Status, Xero Due GBP/USD, Rate, FX gain, Horizon due, Variance) split the remaining 50% evenly (6.25% each). Removed the old fixed 64px on the number columns.
+
 ## v26.872.0 PO grid — NEEDS ERP pill clears the status pills
 - Clicking **⬆ NEEDS ERP** now unselects all status pills (Production/Shipping/Future/Complete) so it shows every PO needing ERP across all statuses (it already filtered that way; now the pills reflect it).
 
