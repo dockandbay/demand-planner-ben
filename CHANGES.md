@@ -1,3 +1,7 @@
+## v26.908.0 Demand plan — selection Sum box: FC / LY / REV FC (+ avgs) in a yellow box
+- The multi-cell Sum box now shows three figures with per-cell averages: **Sum FC** (forecast units), **Sum LY** (last-year actual units), **Sum REV FC** (forecast revenue = units × ASP × display FX). Rendered in a **yellow box** for visibility.
+- Per selected cell it derives `s|co|ch|month` from the cell (`.fcr[data-rk]` for subcats, `input.fci[data-k]` for SKUs); LY from `ga` (subcat) or `skuSales` (SKU), revenue via `getASP` (SKU uses its parent-subcat ASP from `data-parentkey`).
+
 ## v26.907.0 Demand plan — YoY base uses forecast (not partial actuals) for the current month
 - **Target recommendations & Summary/Targets revenue** growth for the month one year ahead of the current month (e.g. Aug-2027) used the **current incomplete month's partial actuals** (Aug-2026 MTD) as the last-year base → inflated growth/targets. Now, when the prior-year base month IS the current incomplete month, the base uses that month's **full-month forecast** (MTD actuals + remaining forecast), matching how the forecast side already treats the current month.
 - `computeTargetRecs`: future-month LY base = `curMonthForecast × ASP` when `trecPrevY(m)===CUR_MONTH`. `revMonthly`: the LY (fmL) loop uses the full-month forecast for `CUR_MONTH` instead of `a[m]` actuals. Only affects FY-ahead views whose LY spans the current month.

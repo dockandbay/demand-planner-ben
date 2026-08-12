@@ -5859,12 +5859,32 @@ function inbDiv(inb, entries, color){
       if(parseInt(el.style.fontWeight||'0',10)>=600){ bold=el; break; } }
     return bold||first; }
   function sel(){ return document.querySelectorAll('#t .plansel'); }
-  function update(){ var s=sel(),sum=0,n=0; Array.prototype.forEach.call(s,function(el){ var v=numTxt(el.textContent); if(v!==null){sum+=v;n++;} });
+  function update(){ var s=sel(),sumFC=0,sumLY=0,sumRev=0,n=0;
+    Array.prototype.forEach.call(s,function(el){ var fcU=numTxt(el.textContent); if(fcU===null)return; sumFC+=fcU; n++;
+      try{   // derive s|co|ch|month from the cell (subcat: .fcr[data-rk]; SKU: input.fci[data-k]) → LY actuals + revenue
+        var tdc=el.closest&&el.closest('td'); if(!tdc)return;
+        var idEl=tdc.querySelector('[data-rk]')||tdc.querySelector('[data-k]'); if(!idEl)return;
+        var rk=idEl.dataset.rk||idEl.dataset.k; var p=(rk||'').split('|'); if(p.length<4)return;
+        var name=p[0],co=p[1],ch=p[2],fym=p[3], pm=pa(fym), lyKey=(pm.y-1)+'_'+fym.slice(5,7);
+        var a=ga(co,ch,name), isSub=a&&Object.keys(a).length>0, sub=name;
+        if(isSub){ sumLY+=(a[lyKey]?(a[lyKey][0]||0):0); }
+        else { var ss=skuSales(name,co,ch)||{}; sumLY+=(ss[lyKey]||0);   // SKU cell → SKU-level actuals + parent-subcat ASP
+          var tr=el.closest&&el.closest('tr'), pk=tr&&(tr.getAttribute('data-parentkey')||''); if(pk)sub=pk.split('|')[0]; }
+        var asp=getASP(co,ch,sub,pm.y,pm.mo)||0, fyS=(pm.mo>=3?pm.y:pm.y-1), rt=(typeof dispRate==='function'?(dispRate(fyS)||1):1);
+        sumRev+=fcU*asp*rt;
+      }catch(e){}
+    });
     var b=document.getElementById('plan-sum-inline'); if(!b)return;
     if(n<1){ b.style.display='none'; b.innerHTML=''; return; }
-    var f=function(x){return x.toLocaleString(undefined,{maximumFractionDigits:2});};
-    b.innerHTML='Sum '+f(sum)+' <span style="opacity:.7;font-weight:500">· n='+n+' · avg '+f(sum/n)+'</span> <span class="ps-x" title="clear (Esc)" style="cursor:pointer;color:#6366f1;font-weight:800;margin-left:3px">✕</span>';
-    b.style.display='inline-flex'; var x=b.querySelector('.ps-x'); if(x)x.onclick=clearSel; }
+    var f=function(x){return Math.round(x).toLocaleString();};
+    var sym=(typeof dispSym==='function'?dispSym():'£'), m=function(x){return sym+Math.round(x).toLocaleString();};
+    b.innerHTML='<b>Sum FC</b> '+f(sumFC)+' <span style="opacity:.6">(avg '+f(sumFC/n)+')</span>'
+      +' &nbsp;·&nbsp; <b>Sum LY</b> '+f(sumLY)+' <span style="opacity:.6">(avg '+f(sumLY/n)+')</span>'
+      +' &nbsp;·&nbsp; <b>Sum REV FC</b> '+m(sumRev)+' <span style="opacity:.6">(avg '+m(sumRev/n)+')</span>'
+      +' <span style="opacity:.5;font-weight:500">· n='+n+'</span>'
+      +' <span class="ps-x" title="clear (Esc)" style="cursor:pointer;color:#b45309;font-weight:800;margin-left:4px">✕</span>';
+    b.style.display='inline-flex'; b.style.alignItems='center'; b.style.background='#fef9c3'; b.style.border='1px solid #fde047'; b.style.borderRadius='6px'; b.style.padding='3px 10px'; b.style.color='#334155';
+    var x=b.querySelector('.ps-x'); if(x)x.onclick=clearSel; }
   function clearSel(){ Array.prototype.forEach.call(sel(),function(el){el.classList.remove('plansel');}); update(); }
   function add(el){ if(el && !el.classList.contains('plansel')){ el.classList.add('plansel'); update(); } }
   document.addEventListener('mousedown',function(e){
