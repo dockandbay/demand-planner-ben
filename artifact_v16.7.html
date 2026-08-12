@@ -9014,7 +9014,7 @@ function _zalRender(wrap,d){
 // ACTIONS: per-country summary of the buy/move actions (Buy 3PL, Urgent Sea/Air, Buy FBA, FBA Transfer) —
 // total units per action with expand-to-SKU. Uses BP.getBuyQtys across each market's visible SKUs.
 // ── BUY & MOVE ▸ INVENTORY (scaffold) — Status Report | Manage 3PL (US/UK/AU/EU) | Manage FBA (US/UK/AU/EU/CA) ──
-var INV_SUB='status', INV_3PL='US', INV_FBA='US', INV_FBA_GAP='all', _invFbaLast=null, INV_3PL_GAP='all', _inv3plLast=null;
+var INV_SUB='status', INV_3PL='US', INV_FBA='US', INV_FBA_GAP='all', _invFbaLast=null, INV_3PL_GAP='all', _inv3plLast=null, INV_STATUS_MKT='US';
 function renderInventory(){
   var host=document.querySelector('.wrap'); if(!host)return;
   var ex=document.getElementById('inventory-wrap'); if(ex)ex.remove();
@@ -9030,15 +9030,46 @@ function renderInventory(){
   if(INV_SUB==='manage3pl') body=pillbar(['US','UK','AU','EU'],INV_3PL,'inv-3pl-pill')+'<div id="inv3pl-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
   else if(INV_SUB==='managefba') body=pillbar(['US','UK','AU','EU','CA'],INV_FBA,'inv-fba-pill')+'<div id="invfba-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
   else if(INV_SUB==='fba-aged') body=pillbar(['US','UK','AU','EU','CA'],INV_FBA,'inv-fba-pill')+'<div id="fbaaged-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
-  else body=placeholder('Status Report');
+  else body=pillbar(['US','UK','EU','AU','CA'],INV_STATUS_MKT,'inv-status-pill')+'<div id="invstatus-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';   // Status Report (SUG-0024)
   wrap.innerHTML=subnav+'<div id="inv-body">'+body+'</div>';
   host.appendChild(wrap);
   wrap.querySelectorAll('.inv-sub').forEach(function(b){ b.onclick=function(){ INV_SUB=b.dataset.sub; renderInventory(); }; });
   wrap.querySelectorAll('.inv-3pl-pill').forEach(function(b){ b.onclick=function(){ INV_3PL=b.dataset.c; renderInventory(); }; });
   wrap.querySelectorAll('.inv-fba-pill').forEach(function(b){ b.onclick=function(){ INV_FBA=b.dataset.c; renderInventory(); }; });
+  wrap.querySelectorAll('.inv-status-pill').forEach(function(b){ b.onclick=function(){ INV_STATUS_MKT=b.dataset.c; renderInventory(); }; });
   if(INV_SUB==='manage3pl')inv3plLoad();
   else if(INV_SUB==='managefba')invFbaLoad('manage');
   else if(INV_SUB==='fba-aged')invFbaLoad('aged');
+  else if(INV_SUB==='status')renderInvStatus();
+}
+// SUG-0024 Inventory Status Report — section 1 (Out of stock by A/B/C tier, per market, 3PL + FBA). Uses the buy-plan
+// public data (BP.getFilteredVis → .ms[mkt].{i3=3PL SOH, if_=FBA SOH, oo=on-order, st, launch, disc} + .ti tier).
+// More sections (backorders, weeks-cover, delivery, inbound, PO delays, in-production) to follow.
+function renderInvStatus(){
+  var panel=document.getElementById('invstatus-panel'); if(!panel)return;
+  var mkt=INV_STATUS_MKT;
+  if(typeof BP==='undefined'||!BP.getFilteredVis){ panel.innerHTML='<div class="mut" style="font-size:12px">Open BUY & MOVE once to load stock data, then reopen this tab.</div>'; return; }
+  try{ if(typeof buildLiveDemand==='function')buildLiveDemand(); }catch(e){}
+  var vis=[]; var saved=BP.CUR; try{ BP.CUR=mkt; vis=BP.getFilteredVis()||[]; }catch(e){} try{ BP.CUR=saved; }catch(e){}
+  var oos={A:[],B:[],C:[]};
+  vis.forEach(function(s){ var m=s.ms&&s.ms[mkt]; if(!m||m.st!=='ACTIVE')return;
+    var i3=Number(m.i3)||0, iff=Number(m.if_)||0; if(i3>0&&iff>0)return;   // out of stock in at least one warehouse
+    (oos[s.ti]||oos.C).push({sku:s.s, i3:i3, iff:iff, oo:Number(m.oo)||0, out3:i3<=0, outf:iff<=0}); });
+  var tot=oos.A.length+oos.B.length+oos.C.length;
+  var TL={A:'Tier A',B:'Tier B',C:'Tier C'}, TC={A:'#b91c1c',B:'#b45309',C:'#64748b'};
+  var html='<div style="font-weight:800;font-size:15px;margin:2px 0 2px">Inventory status — '+esc(mkt)+'</div>'
+    +'<div class="mut" style="font-size:11px;margin-bottom:12px">Section 1 of the report: <b>out of stock</b> (0 on hand in 3PL and/or FBA) among ACTIVE products, by marketing tier. More sections (backorders, weeks-cover, delivery, inbound, PO delays) coming.</div>';
+  if(!tot){ panel.innerHTML=html+'<div style="padding:20px;color:#16a34a;font-size:13px">No out-of-stock active products in '+esc(mkt)+' 🎉</div>'; return; }
+  ['A','B','C'].forEach(function(t){ var L=oos[t]; if(!L.length)return;
+    L.sort(function(a,b){ return (a.out3&&a.outf?0:1)-(b.out3&&b.outf?0:1) || a.sku.localeCompare(b.sku); });   // both-OOS first
+    html+='<div style="margin-bottom:14px"><div style="font-weight:700;font-size:12px;color:'+TC[t]+';margin-bottom:4px">'+TL[t]+' <span class="mut" style="font-weight:400">('+L.length+' out of stock)</span></div>'
+      +'<div style="max-height:300px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'
+      +['SKU','3PL SOH','FBA SOH','On order'].map(function(h,i){return '<th style="text-align:'+(i===0?'left':'right')+';padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+      +L.map(function(r){ var oosCell=function(v,out){ return '<td style="padding:4px 10px;text-align:right'+(out?';color:#b91c1c;font-weight:700':'')+'">'+v+'</td>'; };
+        return '<tr><td style="padding:4px 10px;text-align:left">'+esc(r.sku)+'</td>'+oosCell(r.i3,r.out3)+oosCell(r.iff,r.outf)+'<td style="padding:4px 10px;text-align:right">'+(r.oo||0)+'</td></tr>'; }).join('')
+      +'</tbody></table></div></div>';
+  });
+  panel.innerHTML=html;
 }
 // Manage FBA + FBA Aged: manually-uploaded Amazon FBA report per market (persisted). Manage FBA compares
 // (available + fc-transfer) vs inventory_<mkt>_fba; FBA Aged shows the aged buckets oldest-first.
