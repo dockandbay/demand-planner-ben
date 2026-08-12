@@ -260,7 +260,7 @@ async function buildSKURAW() {
                        nullif(trim(p.replacement_sku),'') rep,
                        coalesce(nullif(trim(p.variant_image_url_final),''), nullif(trim(p.colour_swatch_url),'')) img,   -- variant image, falling back to the colour swatch when blank
                        upper(coalesce(nullif(btrim(p.status),''),'')) st
-                FROM planner.products p LEFT JOIN planner.sku_labels sl ON sl.sku=p.sku WHERE p.in_planning_scope`),
+                FROM planner.products p LEFT JOIN planner.v_sku_attrs sl ON sl.sku=p.sku WHERE p.in_planning_scope`),
     // Launch + discontinue dates per country, from planner.products (Ben's single source of truth).
     // Values are already ISO text on products, so pass through; the artifact compares them as strings.
     pool.query(`SELECT sku, co, lch, disc FROM (
@@ -981,7 +981,7 @@ async function cashflowResponse(pos, q) {
     WITH agg AS (
       SELECT po.shipment_ref,
         round(sum(coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0))
-           FROM planner.purchase_order_lines l LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=po.po),0))::numeric,1) pallets,
+           FROM planner.purchase_order_lines l LEFT JOIN planner.v_sku_attrs sl ON sl.sku=l.sku WHERE l.po=po.po),0))::numeric,1) pallets,
         round(sum(coalesce((SELECT sum(l.qty*p.prod_weight_uk)
            FROM planner.purchase_order_lines l JOIN planner.products p ON p.sku=l.sku WHERE l.po=po.po),0))::numeric) weight_kg,
         max(upper(coalesce(nullif(po.country_code,''), pb.country_code, ''))) market
@@ -1431,7 +1431,7 @@ app.get('/api/supply/label-data', async (req, res) => {
         sl.product_barcode, sl.carton_barcode, sl.inner_barcode, sl.grs_material, coalesce(p.colour_swatch_url, sl.swatch_url) swatch_url, coalesce(p.size_long,'') size_long, coalesce((SELECT s.code FROM planner.suppliers s WHERE lower(s.name)=lower(p.main_supplier_final) LIMIT 1),'') supplier_code,
         sl.uk_carton_l, sl.uk_carton_w, sl.uk_carton_h, sl.uk_carton_wt,
         coalesce(p.supplier_multiple_all,'') supplier_multiple, p.uk_rt, p.us_rt, p.eu_rt, coalesce(p.product_name,'') product_name
-      FROM planner.sku_labels sl LEFT JOIN planner.products p ON p.sku=sl.sku
+      FROM planner.v_sku_attrs sl LEFT JOIN planner.products p ON p.sku=sl.sku
       WHERE ${where}
         AND coalesce(sl.variant_type,'') NOT ILIKE 'set'
         AND coalesce(sl.product_barcode, sl.carton_barcode, sl.inner_barcode) IS NOT NULL
@@ -1734,7 +1734,7 @@ app.get('/api/supply/shipment-crossdock/:ref', async (req, res) => {
 // containers by assigning several POs onto one shipment — either an existing master shipment or a new
 // master-less consolidation reference (e.g. P57-UK-CONSOL-1, where 57 is the anchor's production number).
 const PROD_END_SQL = `coalesce(p.end_production_overide, p.start_production + (coalesce(s.production_days,0)||' days')::interval)::date`;
-const PO_PALLETS_SQL = `coalesce((SELECT round(sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)),1) FROM planner.purchase_order_lines l LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=p.po),0)`;
+const PO_PALLETS_SQL = `coalesce((SELECT round(sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)),1) FROM planner.purchase_order_lines l LEFT JOIN planner.v_sku_attrs sl ON sl.sku=l.sku WHERE l.po=p.po),0)`;
 app.get('/api/supply/consolidation', async (req, res) => {
   const po = String(req.query.po || '').trim();
   if (!po) return res.status(400).json({ error: 'po required' });
@@ -2124,7 +2124,7 @@ async function buildShipmentPlan() {
       to_char(p.client_deadline_date,'YYYY-MM-DD') client_deadline,
       (p.po = coalesce(sh.master_po, p.shipment_ref)) is_master, coalesce(sh.escalated,false) escalated,
       round(coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0))
-        FROM planner.purchase_order_lines l LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=p.po),0)::numeric,1) pallets,
+        FROM planner.purchase_order_lines l LEFT JOIN planner.v_sku_attrs sl ON sl.sku=l.sku WHERE l.po=p.po),0)::numeric,1) pallets,
       coalesce(sh.delivery_notes,'') sh_delivery_notes,   -- shipment-level override
       coalesce(nullif(p.branch_delivery_notes,''), b.delivery_notes, '') po_delivery_notes   -- this PO's branch delivery notes (used from the master row)
     FROM planner.purchase_orders p
@@ -2161,7 +2161,7 @@ async function buildShipmentPlan() {
     const masters = (await pool.query(`SELECT p.po, coalesce(p.supplier_name,'') supplier_name, coalesce(p.client,'') client,
         to_char(p.client_deadline_date,'YYYY-MM-DD') client_deadline,
         round(coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)) FROM planner.purchase_order_lines l
-          LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=p.po),0)::numeric,1) pallets
+          LEFT JOIN planner.v_sku_attrs sl ON sl.sku=l.sku WHERE l.po=p.po),0)::numeric,1) pallets
       FROM planner.purchase_orders p WHERE p.po = ANY($1)`, [masterPos])).rows;
     const mById = {}; masters.forEach(m => mById[m.po] = m);
     Object.keys(byRef).forEach(k => { const s = byRef[k]; const m = mById[s.master_po]; if (!m) return;
@@ -2182,7 +2182,7 @@ async function buildShipmentPlan() {
       to_char(p.client_deadline_date,'YYYY-MM-DD') client_deadline,
       to_char(coalesce(p.end_production_overide, p.start_production + (coalesce(s.production_days,0)||' days')::interval)::date,'YYYY-MM-DD') prod_end,
       round(coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)) FROM planner.purchase_order_lines l
-        LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=p.po),0)::numeric,1) pallets
+        LEFT JOIN planner.v_sku_attrs sl ON sl.sku=l.sku WHERE l.po=p.po),0)::numeric,1) pallets
     FROM planner.purchase_orders p
     LEFT JOIN planner.suppliers s ON s.id=p.supplier_id
     LEFT JOIN planner.branches  b ON b.name=p.branch
@@ -2453,7 +2453,7 @@ async function buildActionsRows() {
             'rebalance','po','', z.po
             FROM (SELECT po.po, upper(coalesce(nullif(po.country_code,''), b.country_code, '')) ctry,
                     (SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)) FROM planner.purchase_order_lines l
-                       LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=po.po) pal
+                       LEFT JOIN planner.v_sku_attrs sl ON sl.sku=l.sku WHERE l.po=po.po) pal
                   FROM planner.purchase_orders po LEFT JOIN planner.branches b ON b.name=po.branch
                   -- only BEFORE it ships (FUTURE / PRODUCTION / READY TO SHIP) — once shipped it's too late to rebalance
                   WHERE coalesce(po.status,'') NOT ILIKE '%complete%' AND coalesce(po.status,'') NOT ILIKE 'ship%'
@@ -2761,7 +2761,7 @@ app.get('/api/supply/:section', async (req, res) => {
       case 'bi': {   // SUPPLY ▸ BI — Metrics Summary (Phase 0a). Live operational counts; no engine yet.
         const UNITS = `coalesce((SELECT sum(l.qty) FROM planner.purchase_order_lines l WHERE l.po=p.po),0)`;
         const VAL   = `coalesce((SELECT sum(l.qty*coalesce(l.cost_price,0)) FROM planner.purchase_order_lines l WHERE l.po=p.po),0)`;
-        const PAL   = `coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)) FROM planner.purchase_order_lines l LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=p.po),0)`;
+        const PAL   = `coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)) FROM planner.purchase_order_lines l LEFT JOIN planner.v_sku_attrs sl ON sl.sku=l.sku WHERE l.po=p.po),0)`;
         const poAgg = (await q(`SELECT
             count(*) FILTER (WHERE status NOT ILIKE '%complete%')::int open_total,
             count(*) FILTER (WHERE status ILIKE 'future%')::int future,
@@ -2780,7 +2780,7 @@ app.get('/api/supply/:section', async (req, res) => {
             round(coalesce(sum(pal),0)/20.0,1) containers_shipping
           FROM (SELECT coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0))
                   FROM planner.purchase_orders po JOIN planner.purchase_order_lines l ON l.po=po.po
-                  LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE po.shipment_ref=s.shipment_ref),0) pal
+                  LEFT JOIN planner.v_sku_attrs sl ON sl.sku=l.sku WHERE po.shipment_ref=s.shipment_ref),0) pal
                 FROM planner.shipments s WHERE coalesce(s.status,'') NOT ILIKE '%complete%') z`))[0];
         // "outstanding" = deposit capital tied to deposits still drawn on by at least one OPEN (non-complete) PO.
         // (Avoids summing all-time historical deposits; the exact drawn-down balance arrives with the BI engine.)
@@ -2847,7 +2847,7 @@ app.get('/api/supply/:section', async (req, res) => {
           p.main_supplier_final supplier, p.supplier_multiple_all,
           nullif(p.carton_qty,'') carton_qty,
           nullif(p.discontinue_date_final,'') discontinue, nullif(p.discontinue_date_au_final,'') discontinue_au, nullif(p.discontinue_date_ca,'') discontinue_ca
-          FROM planner.sku_labels s LEFT JOIN planner.products p ON p.sku = s.sku
+          FROM planner.v_sku_attrs s LEFT JOIN planner.products p ON p.sku = s.sku
           WHERE coalesce(s.status,'') NOT ILIKE '%discontinued%' ORDER BY s.category, s.sku`));
       case 'manufacturing-bom':   // CONFIG ▸ Manufacturing BOM — parent (finished) → component × qty
         return res.json(await q(`SELECT parent_sku, component_sku, qty::numeric qty FROM planner.manufacturing_bom ORDER BY parent_sku, component_sku`));
@@ -2911,7 +2911,7 @@ app.get('/api/supply/:section', async (req, res) => {
               bool_and(coalesce(po.status,'') ILIKE '%complete%') all_complete,
               sum(coalesce((SELECT sum(l.qty) FROM planner.purchase_order_lines l WHERE l.po=po.po),0))::int units,
               round(sum(coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0))
-                 FROM planner.purchase_order_lines l LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=po.po),0))::numeric,1) pallets,
+                 FROM planner.purchase_order_lines l LEFT JOIN planner.v_sku_attrs sl ON sl.sku=l.sku WHERE l.po=po.po),0))::numeric,1) pallets,
               round(sum(coalesce((SELECT sum(l.qty*p.prod_weight_uk)
                  FROM planner.purchase_order_lines l JOIN planner.products p ON p.sku=l.sku WHERE l.po=po.po),0))::numeric) weight_kg,
               max(upper(coalesce(nullif(po.country_code,''), pb.country_code, ''))) market,   -- fall back to the branch country (PO country_code is often blank)
@@ -3131,7 +3131,7 @@ app.get('/api/supply/:section', async (req, res) => {
           ORDER BY coalesce(u.supplier_name, s.name, ''), u.email`));
       case 'products-all': { // CONFIG ▸ Products: full products master + release window, read-only (columns dynamic)
         const pr = await pool.query(`SELECT p.*, sl.release_window FROM planner.products p
-          LEFT JOIN planner.sku_labels sl ON sl.sku=p.sku ORDER BY p.sku`);
+          LEFT JOIN planner.v_sku_attrs sl ON sl.sku=p.sku ORDER BY p.sku`);
         return res.json({ columns: pr.fields.map(f => f.name).filter(c => c !== 'loaded_at'), rows: pr.rows });
       }
       case 'barcodes': {
@@ -3151,7 +3151,7 @@ app.get('/api/supply/:section', async (req, res) => {
             coalesce(sp.prod_nos,'') prod_nos, coalesce(sp.suppliers,'') suppliers,
             coalesce(p.supplier_multiple_all,'') supplier_multiple,
             p.uk_rt, p.us_rt, p.eu_rt, coalesce(p.product_name,'') product_name
-          FROM planner.sku_labels sl
+          FROM planner.v_sku_attrs sl
           LEFT JOIN sku_po sp ON sp.sku=sl.sku
           LEFT JOIN planner.products p ON p.sku=sl.sku
           WHERE coalesce(sl.product_barcode,sl.carton_barcode,sl.inner_barcode) IS NOT NULL
@@ -7379,7 +7379,7 @@ async function rebalancePlan(rootPo) {
   const pos = group.map(g => g.po);
   const lines = (await pool.query(`
     SELECT l.po, l.sku, coalesce(l.qty,0) qty, coalesce(sl.pallet_qty,0) pallet_qty
-    FROM planner.purchase_order_lines l LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku
+    FROM planner.purchase_order_lines l LEFT JOIN planner.v_sku_attrs sl ON sl.sku=l.sku
     WHERE l.po = ANY($1)`, [pos])).rows;
   const cur = {}; pos.forEach(p => cur[p] = {});
   const palq = {};
@@ -7439,7 +7439,7 @@ async function buyplanSkuMeta(skus) {
   const rows = (await pool.query(`SELECT upper(p.sku) sku, coalesce(p.main_supplier_final, p.supplier) main_name,
       p.supplier_multiple_all multi, coalesce(p.category,'') category, sl.pallet_qty, p.moq,
       nullif(p.discontinue_date_final,'') disc, nullif(p.discontinue_date_au_final,'') disc_au, nullif(p.discontinue_date_ca,'') disc_ca
-    FROM planner.products p LEFT JOIN planner.sku_labels sl ON upper(sl.sku)=upper(p.sku)
+    FROM planner.products p LEFT JOIN planner.v_sku_attrs sl ON upper(sl.sku)=upper(p.sku)
     WHERE upper(p.sku) = ANY($1)`, [skus])).rows;
   const map = {};
   rows.forEach(r => {
@@ -7707,7 +7707,7 @@ app.post('/api/supply/po-lines-paste', async (req, res) => {
       if (isNaN(qty)) { badQty.push(raw); continue; }
       const m = await client.query(
         `SELECT sku FROM planner.products WHERE upper(sku)=upper($1)
-         UNION SELECT sku FROM planner.sku_labels WHERE upper(sku)=upper($1) LIMIT 1`, [raw]);
+         UNION SELECT sku FROM planner.v_sku_attrs WHERE upper(sku)=upper($1) LIMIT 1`, [raw]);
       if (!m.rowCount) { skipped.push(raw); continue; }
       const sku = m.rows[0].sku, key = po + '|' + sku;
       const exists = (await client.query('SELECT 1 FROM planner.purchase_order_lines WHERE po_sku=$1', [key])).rowCount;
@@ -8581,7 +8581,7 @@ app.get('/api/supply/production-detail/:prod', async (req, res) => {
         FROM planner.purchase_order_lines l
         JOIN planner.purchase_orders po ON po.po=l.po
         LEFT JOIN planner.products pr ON pr.sku=l.sku
-        LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku
+        LEFT JOIN planner.v_sku_attrs sl ON sl.sku=l.sku
         WHERE po.prod_no=$1 AND ${supMatch} GROUP BY l.sku, pr.product_name, pr.category, sl.product_barcode
         HAVING sum(l.qty) <> 0 ORDER BY category, l.sku`, [prod, supplier]),
       pool.query(`SELECT po.po, coalesce(po.supplier_name,'') supplier_name, coalesce(po.status,'') status,
@@ -9246,7 +9246,7 @@ async function computeAutoForecast(markets) {
       pool.query(`SELECT p.subcategory s, sum(fo.units/nullif(sl.pallet_qty,0)) pall,
           sum(CASE WHEN coalesce(sl.pallet_qty,0)>0 THEN fo.units ELSE 0 END) u
         FROM planner.forecast_outputs fo JOIN planner.products p ON p.sku=fo.sku
-        LEFT JOIN planner.sku_labels sl ON sl.sku=fo.sku
+        LEFT JOIN planner.v_sku_attrs sl ON sl.sku=fo.sku
         WHERE p.subcategory IS NOT NULL AND fo.units>0 GROUP BY 1`),
       // dominant category per subcat (for the duty lookup).
       pool.query(`SELECT s, category FROM (SELECT subcategory s, category,
@@ -10584,7 +10584,7 @@ async function _biProjectionCompute() {
     .forEach(r => { (skuOvr[r.sku] = skuOvr[r.sku] || {})[r.warehouse] = r.w; });
   const skuCq = {};
   (await pool.query(`SELECT p.sku, coalesce(p.category,'') category, coalesce(sl.carton_qty,0) cq
-     FROM planner.products p LEFT JOIN planner.sku_labels sl ON sl.sku=p.sku`)).rows
+     FROM planner.products p LEFT JOIN planner.v_sku_attrs sl ON sl.sku=p.sku`)).rows
     .forEach(r => { skuCat[r.sku] = r.category; skuCq[r.sku] = Number(r.cq) || 0; });
   const twFor = (sku, wh) => { const o = skuOvr[sku] && skuOvr[sku][wh]; if (o != null) return o;
     const c = catCover[skuCat[sku]] && catCover[skuCat[sku]][wh]; return c != null ? c : null; };
@@ -10751,7 +10751,7 @@ async function biContainerFill() {
   const proj = await biProjection();
   const skuMeta = {};
   (await pool.query(`SELECT p.sku, coalesce(p.supplier,'') supplier, coalesce(sl.pallet_qty::numeric,0) pallet_qty
-     FROM planner.products p LEFT JOIN planner.sku_labels sl ON sl.sku=p.sku`)).rows
+     FROM planner.products p LEFT JOIN planner.v_sku_attrs sl ON sl.sku=p.sku`)).rows
     .forEach(r => { skuMeta[r.sku] = { supplier: r.supplier, pq: Number(r.pallet_qty) || 0 }; });
   const supDays = {};
   (await pool.query(`SELECT name, coalesce(production_days,0) d FROM planner.suppliers`)).rows
@@ -10766,7 +10766,7 @@ async function biContainerFill() {
       upper(coalesce(nullif(mp.country_code,''), b.country_code, '')) country,
       coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty::numeric,0))
         FROM planner.purchase_orders po JOIN planner.purchase_order_lines l ON l.po=po.po
-        LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE po.shipment_ref=s.shipment_ref),0) pallets
+        LEFT JOIN planner.v_sku_attrs sl ON sl.sku=l.sku WHERE po.shipment_ref=s.shipment_ref),0) pallets
     FROM planner.shipments s
     LEFT JOIN planner.purchase_orders mp ON mp.po=coalesce(s.master_po,s.shipment_ref)
     LEFT JOIN planner.branches b ON b.name=mp.branch
@@ -10846,7 +10846,7 @@ async function biConsolidations() {
       upper(coalesce(nullif(mp.country_code,''), b.country_code, '')) country,
       round(coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty::numeric,0))
         FROM planner.purchase_orders po JOIN planner.purchase_order_lines l ON l.po=po.po
-        LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE po.shipment_ref=s.shipment_ref),0)::numeric,1) pallets
+        LEFT JOIN planner.v_sku_attrs sl ON sl.sku=l.sku WHERE po.shipment_ref=s.shipment_ref),0)::numeric,1) pallets
     FROM planner.shipments s
     LEFT JOIN planner.purchase_orders mp ON mp.po=coalesce(s.master_po,s.shipment_ref)
     LEFT JOIN planner.branches b ON b.name=mp.branch
@@ -11072,7 +11072,7 @@ const ORDER_PLAN_SELECT = `SELECT l.po, l.sku, l.qty, el.qty erp_qty,
           LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku
           JOIN planner.purchase_orders p ON p.po=l.po
           LEFT JOIN planner.branches b ON b.name=p.branch
-          LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku
+          LEFT JOIN planner.v_sku_attrs sl ON sl.sku=l.sku
           LEFT JOIN LATERAL (SELECT f.departure_date, f.landing_date FROM planner.flexport_shipments f
             WHERE f.flex_id=p.flexport_reference OR f.shipment_name=p.po OR f.shipment_name=p.shipment_ref
             ORDER BY (f.flex_id=p.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true`;
@@ -11235,7 +11235,7 @@ const PO_ROWS_SQL = `
             (coalesce(status,'') ILIKE '%production%') is_production,
             -- pallet estimate (Σ line qty ÷ sku pallet_qty); 20 pallets = one container
             (SELECT round(sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)),1) FROM planner.purchase_order_lines l
-               LEFT JOIN planner.sku_labels sl ON sl.sku=l.sku WHERE l.po=calc4.po) pallets,
+               LEFT JOIN planner.v_sku_attrs sl ON sl.sku=l.sku WHERE l.po=calc4.po) pallets,
             -- manual "likely payment date" per milestone (cash flow report) — keyed dep|comp|bal|bal2:PO
             (SELECT to_char(likely_date,'YYYY-MM-DD') FROM planner.payment_likely_dates WHERE line_key='dep:'||calc4.po) likely_start,
             (SELECT to_char(likely_date,'YYYY-MM-DD') FROM planner.payment_likely_dates WHERE line_key='comp:'||calc4.po) likely_completion,
@@ -11359,7 +11359,7 @@ const lookupsCache = makeCache('lookups', async () => {
     q(`SELECT name FROM planner.branches ORDER BY name`),
     q(`SELECT sku FROM (
          SELECT sku FROM planner.products WHERE sku ILIKE 'CROSSDOCK%' OR sku ILIKE 'PREORDER%'
-         UNION SELECT sku FROM planner.sku_labels WHERE sku ILIKE 'CROSSDOCK%' OR sku ILIKE 'PREORDER%'
+         UNION SELECT sku FROM planner.v_sku_attrs WHERE sku ILIKE 'CROSSDOCK%' OR sku ILIKE 'PREORDER%'
        ) z ORDER BY sku`),
     q(`SELECT po FROM planner.purchase_orders WHERE coalesce(status,'') NOT ILIKE '%complete%' AND master_po IS NULL ORDER BY po`),
   ]).catch(() => [[], [], [], [], [], [], [], []]);
@@ -12465,7 +12465,7 @@ app.get('/api/portal/label-data', portalAuth, async (req, res) => {
         sl.product_barcode, sl.carton_barcode, sl.inner_barcode, sl.grs_material, coalesce(p.colour_swatch_url, sl.swatch_url) swatch_url, coalesce(p.size_long,'') size_long, coalesce((SELECT s.code FROM planner.suppliers s WHERE lower(s.name)=lower(p.main_supplier_final) LIMIT 1),'') supplier_code,
         sl.uk_carton_l, sl.uk_carton_w, sl.uk_carton_h, sl.uk_carton_wt,
         coalesce(p.supplier_multiple_all,'') supplier_multiple, p.uk_rt, p.us_rt, p.eu_rt, coalesce(p.product_name,'') product_name
-      FROM planner.sku_labels sl LEFT JOIN planner.products p ON p.sku=sl.sku
+      FROM planner.v_sku_attrs sl LEFT JOIN planner.products p ON p.sku=sl.sku
       WHERE sl.sku = ANY($1) AND coalesce(sl.variant_type,'') NOT ILIKE 'set'
         AND coalesce(sl.product_barcode, sl.carton_barcode, sl.inner_barcode) IS NOT NULL
       ORDER BY sl.sku`, [finalSkus])).rows;

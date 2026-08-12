@@ -1,3 +1,6 @@
+## v26.882.0 sku_labels → products (phase 1): carton_qty + pallet_qty now products-first
+- New view `planner.v_sku_attrs` exposes every sku_labels column but makes **carton_qty and pallet_qty products-first** (source of truth), with sku_labels fallback. All 27 `planner.sku_labels` reads in server.mjs repointed to it — so pallet counts (PO grid / shipments / order plan / 20-pallet PO split) and carton checks stop drifting from `products`. Migration 215; applied to sandbox + live (view pre-staged; live code unaffected until deploy). Barcodes / carton dims / grs / main_supplier still pass through from sku_labels (they only live there) — migrating those into products + n8n is the step before the table can be dropped.
+
 ## v26.881.0 Supplier Timing — exclude "our issue" POs + manual delay
 - SUPPLY ▸ Reports ▸ Supplier Timing: each PO with completion-date movements gets an **"our issue (exclude)"** checkbox. Ticking it removes that PO from the supplier’s slip stats (By-supplier table) and reveals a **manual delay (days)** input to record the true, self-inflicted delay. Persists per PO (migration 214, `supplier_timing_review`).
 
