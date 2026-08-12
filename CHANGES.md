@@ -1,3 +1,6 @@
+## v26.876.0 Nav spacing — tighter gap between level-2 and level-3 menus
+- Reduced the bottom margin of the level-2 nav bars (DEMAND tabs, BUY & MOVE tabs, SUPPLY sub-nav) from 10px to 4px, and dropped the INVENTORY wrapper top margin — so the level-3 menu (Status Report / Manage 3PL / … , report sub-tabs) sits close under the level-2 menu on all pages.
+
 ## v26.875.0 Manage 3PL — persisted imports + ERP on-hand/available comparison
 - The import now **persists** per market (migration 212, `inventory_3pl_imports`): the panel loads the last import and shows **"X days old · last imported ben@ on dd-mmm-yy hh:mm"**; the button re-imports.
 - Table is **left-aligned** and split into **3PL Report - On Hand · 3PL Report - Available · ERP On Hand · ERP Available · Diff On Hand · Diff Available** (ERP On Hand = inventory_<mkt>_3pl_onhand, ERP Available = inventory_<mkt>_3pl; a diff on both).
