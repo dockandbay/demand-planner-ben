@@ -1,3 +1,6 @@
+## v26.900.0 FBA Aged — resolve to our SKU via ASIN + warn on no match
+- The FBA Aged table now shows an **Our SKU** column: each Amazon SKU is matched to our planner SKU by SKU first, else by **ASIN** (badged "via ASIN"). If neither the SKU nor its ASIN matches any product, the row is flagged **⚠ No SKU/ASIN match** (amber row) and counted in the header. Reuses the same match resolution as Manage FBA.
+
 ## v26.899.0 BLADE EU 3PL — live token fix; import verified end-to-end
 - BLADE login returns the token at `data.session_token` (not access_token/token) — extractor updated. With `BLADE_PASSWORD` set, a **live EU import** now works: 749 SKUs pulled, **737 matched** to planner.products (12 unmatched, 80 ERP-only), persisted to `inventory_3pl_imports` and compared vs `inventory_eu_3pl[_onhand]` like the other markets. EU 3PL is fully operational.
 

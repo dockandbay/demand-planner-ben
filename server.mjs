@@ -6849,8 +6849,11 @@ async function invFbaCompare(mkt, rep) {
   const matchedSkus = new Set(rows.filter(r => r.erp_sku).map(r => r.erp_sku));
   const erp_missing = Object.keys(erp).filter(s => erp[s] > 0 && !matchedSkus.has(s)).map(s => ({ sku: s, erp_fba: erp[s] })).sort((a, b) => b.erp_fba - a.erp_fba);
   const not_in_erp = rows.filter(r => !r.matched).map(r => ({ sku: r.sku, asin: r.asin, report_fba: r.report_fba }));
+  const bySku = {}; rows.forEach(r => { bySku[r.sku] = r; });   // reuse the SKU-then-ASIN match resolved above
   const aged = skus.map(sku => { const r = rep[sku], tot = (r.a1 || 0) + (r.a2 || 0) + (r.a3 || 0) + (r.a4 || 0) + (r.a5 || 0);
-    return { sku, a1: r.a1 || 0, a2: r.a2 || 0, a3: r.a3 || 0, a4: r.a4 || 0, a5: r.a5 || 0, total: tot }; })
+    const m = bySku[sku] || {};
+    return { sku, asin: r.asin || '', erp_sku: m.erp_sku || null, matched: !!m.matched, matched_via: m.matched_via || null,
+      a1: r.a1 || 0, a2: r.a2 || 0, a3: r.a3 || 0, a4: r.a4 || 0, a5: r.a5 || 0, total: tot }; })
     .filter(x => x.total > 0)
     .sort((a, b) => (b.a5 - a.a5) || (b.a4 - a.a4) || (b.a3 - a.a3) || (b.a2 - a.a2) || (b.a1 - a.a1));   // oldest inventory first
   return { rows, aged, report_skus: skus.length, matched: rows.filter(r => r.matched).length, unmatched: not_in_erp.length,
