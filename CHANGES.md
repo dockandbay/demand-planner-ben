@@ -1,3 +1,6 @@
+## v26.888.0 Manage FBA/3PL — fix gap-filter dropdown styling
+- The gap-filter select was using the inline grid-editor class (`.fci` = width:100%, transparent) so it rendered full-width and unstyled. Replaced with a compact bordered dropdown (max 200px), consistent with other selects.
+
 ## v26.887.0 Manage 3PL/FBA — gap filters, Cin7 Stocktake export, grouped 3PL columns
 - **Gap filter** on both Manage tabs: **All gaps** (default) / **Gap more than 20%** / **Gap more than 10 items**. 3PL tests the gap on **both on-hand and available** (row passes if either exceeds).
 - **Cin7 Stocktake** button (both tabs) → **Download CSV** or **Copy to clipboard** (tab-separated for Sheets/Cin7 paste). Two columns: **Code** (planner.products SKU) + **Count** — FBA uses available+fc-transfer, 3PL uses 3PL-Report On-Hand. Exports the currently-filtered matched rows.

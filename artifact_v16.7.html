@@ -9096,7 +9096,7 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
       +(j.dup_asins?'<span class="mut" title="products SKUs that share an ASIN — skipped for ASIN matching to avoid mis-mapping">'+j.dup_asins+' duplicate ASIN'+(j.dup_asins>1?'s':'')+' (skipped)</span>':'')
       +'</div><div id="fba-detail" style="margin-bottom:10px"></div>';
     var ctl='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 10px">'
-      +'<label class="mut" style="font-size:12px">Show</label><select id="fba-gap" class="fci" style="text-align:left">'
+      +'<label class="mut" style="font-size:12px">Show</label><select id="fba-gap" style="width:auto;max-width:200px;padding:4px 8px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#334155;font-size:12px;cursor:pointer">'
       +[['all','All gaps'],['pct20','Gap more than 20%'],['items10','Gap more than 10 items']].map(function(o){return '<option value="'+o[0]+'"'+(o[0]===INV_FBA_GAP?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'
       +'<span class="mut" style="font-size:11px">'+fr.length+' shown</span>'
       +'<span style="margin-left:auto;position:relative"><button id="fba-stk" class="save-btn" style="background:#dcfce7;color:#166534;border:1px solid #16a34a;font-weight:600">⤓ Cin7 Stocktake ▾</button>'
@@ -9184,7 +9184,7 @@ function inv3plRender(j){ var panel=document.getElementById('inv3pl-panel'); if(
       +'<span style="color:#16a34a"><b>'+j.matched+'</b> matched</span><span style="color:#b45309"><b>'+j.unmatched+'</b> not in ERP</span>'
       +'<span style="color:#b91c1c"><b>'+j.erp_not_in_report+'</b> ERP stock missing from report</span></div>';
     var ctl='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 10px">'
-      +'<label class="mut" style="font-size:12px">Show</label><select id="inv3pl-gap" class="fci" style="text-align:left">'
+      +'<label class="mut" style="font-size:12px">Show</label><select id="inv3pl-gap" style="width:auto;max-width:200px;padding:4px 8px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#334155;font-size:12px;cursor:pointer">'
       +[['all','All gaps'],['pct20','Gap more than 20%'],['items10','Gap more than 10 items']].map(function(o){return '<option value="'+o[0]+'"'+(o[0]===INV_3PL_GAP?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'
       +'<span class="mut" style="font-size:11px">'+fr.length+' shown · gap tested on on-hand &amp; available</span>'
       +'<span style="margin-left:auto;position:relative"><button id="inv3pl-stk" class="save-btn" style="background:#dcfce7;color:#166534;border:1px solid #16a34a;font-weight:600">⤓ Cin7 Stocktake ▾</button>'
