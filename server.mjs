@@ -2633,7 +2633,8 @@ app.get('/api/supply/deposit-drawdown', async (_req, res) => {
     res.json({ months, columns: columns.map(({ mov, prodNum, ...c }) => c), balances, transactions: tx, gbpRate: rUSD });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.get('/api/supply/:section', async (req, res) => {
+app.get('/api/supply/:section', async (req, res, next) => {
+  if (req.params.section === 'po-delays') return next();   // handled by its own route below (has bespoke logic)
   const q = (sql) => pool.query(sql).then(r => r.rows);
   // Phase-2 section response-cache: serve fresh (or serve stale while one request refreshes); otherwise fall through
   // to the switch and capture whatever it returns. Only the param-free variant is eligible.
@@ -6878,6 +6879,80 @@ app.post('/api/supply/inventory-fba/import', async (req, res) => {
     const m = (await pool.query(`SELECT to_char(imported_at,'YYYY-MM-DD"T"HH24:MI:SS') imported_at FROM planner.inventory_fba_imports WHERE market=$1`, [mkt])).rows[0];
     res.json({ market: mkt, imported: true, imported_by: by, imported_at: m.imported_at, ...(await invFbaCompare(mkt, parsed.rep)) });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// ── PO inbound delays + impacted products (SUG-0024 Inventory Status Report §6) ───────────────
+// Landing (into-stock) date per open PO = coalesce(shipment arrival/delivery/landing, PO override, prod_end+7+sea lead).
+// We snapshot it into planner.po_delivery_history on every call (PK dedupes → a distinct date stored once). A PO whose
+// latest recorded date is later than its first-recorded date has SLIPPED. For slipped POs we assess impact per market:
+// which lines are out of stock now, or will run out (on hand ÷ fwd weekly demand) BEFORE the (delayed) landing date.
+const PO_LANDING_EXPR = `coalesce(sh.arrival_date, sh.delivery_date, sh.landing_date, po.landing_date_overide,
+  (coalesce(po.end_production_overide, po.start_production + (coalesce(sup.production_days,0)||' days')::interval)::date
+    + interval '7 days' + (coalesce(b.sea_lead_time_days,0)||' days')::interval)::date)`;
+const PO_OPEN_FROM = `FROM planner.purchase_orders po
+  LEFT JOIN planner.suppliers sup ON sup.id=po.supplier_id
+  LEFT JOIN planner.branches  b   ON b.name=po.branch
+  LEFT JOIN planner.shipments sh  ON sh.shipment_ref=po.shipment_ref
+  WHERE coalesce(po.status,'') NOT ILIKE '%complete%' AND po.master_po IS NULL`;   // exclude children (master carries the lines)
+async function poDeliveryDelays(market) {
+  // 1) Snapshot current landing dates (append only when a PO shows a date we haven't recorded before).
+  await pool.query(`INSERT INTO planner.po_delivery_history (po, delivery_date)
+     SELECT po, d FROM (SELECT po.po po, ${PO_LANDING_EXPR} d ${PO_OPEN_FROM}) x
+     WHERE d IS NOT NULL ON CONFLICT (po, delivery_date) DO NOTHING`);
+  // 2) Baseline (first-seen date) vs current (latest-seen date); slipped = current later than baseline.
+  const slips = (await pool.query(`
+    WITH h AS (SELECT po, delivery_date, recorded_at,
+        first_value(delivery_date) OVER (PARTITION BY po ORDER BY recorded_at ASC,  delivery_date ASC)  base,
+        first_value(delivery_date) OVER (PARTITION BY po ORDER BY recorded_at DESC, delivery_date DESC) cur
+      FROM planner.po_delivery_history)
+    SELECT DISTINCT po, to_char(base,'YYYY-MM-DD') baseline, to_char(cur,'YYYY-MM-DD') current_date, (cur-base) slip_days
+    FROM h WHERE cur > base`)).rows;
+  if (!slips.length) return { market, delayed: [], other_delays: 0 };
+  const slipBy = {}; slips.forEach(s => { slipBy[s.po] = s; });
+  const pos = slips.map(s => s.po);
+  // 3) Impact per line for the slipped POs in this market (on hand + fwd weekly demand → stock-out date).
+  const rows = (await pool.query(`
+    WITH pod AS (SELECT po.po, coalesce(po.supplier_name,'') supplier,
+        upper(coalesce(nullif(po.country_code,''), b.country_code, '')) market, ${PO_LANDING_EXPR} landing
+      ${PO_OPEN_FROM} AND po.po = ANY($1))
+    SELECT pod.po, pod.supplier, pod.market, to_char(pod.landing,'YYYY-MM-DD') landing, l.sku, l.qty::int qty,
+      coalesce(oh.oh,0)::numeric on_hand, coalesce(fc.fwk,0)::numeric fc_wk, coalesce(c.c,0)::numeric cost
+    FROM pod
+    JOIN planner.purchase_order_lines l ON l.po=pod.po AND l.qty>0
+    LEFT JOIN (SELECT sku, upper(split_part(warehouse,'_',1)) mk, sum(available)::numeric oh
+               FROM planner.v_product_inventory GROUP BY 1,2) oh ON oh.sku=l.sku AND oh.mk=pod.market
+    LEFT JOIN (SELECT sku, upper(split_part(warehouse,'_',1)) mk, sum(units)::numeric/13.0 fwk
+               FROM planner.forecast_outputs WHERE month>=date_trunc('month',CURRENT_DATE)
+                 AND month<date_trunc('month',CURRENT_DATE)+interval '3 months' GROUP BY 1,2) fc ON fc.sku=l.sku AND fc.mk=pod.market
+    LEFT JOIN (SELECT sku, avg(cost_price) c FROM planner.purchase_order_lines WHERE cost_price>0 GROUP BY 1) c ON c.sku=l.sku
+    WHERE pod.market=$2`, [pos, market])).rows;
+  const T = new Date((await pool.query(`SELECT current_date d`)).rows[0].d).getTime(), DAY = 86400000;
+  const byPo = {};
+  for (const r of rows) {
+    const oh = Number(r.on_hand), wk = Number(r.fc_wk);
+    const stockoutT = wk > 0.01 ? T + (oh / wk) * 7 * DAY : null;
+    const landT = r.landing ? new Date(r.landing).getTime() : null;
+    const oos = oh <= 0;
+    const runsOut = stockoutT != null && landT != null && stockoutT < landT;
+    if (!oos && !runsOut) continue;                                   // only surface genuinely impacted lines
+    const g = byPo[r.po] || (byPo[r.po] = { po: r.po, supplier: r.supplier, market: r.market,
+      ...slipBy[r.po], lines: [], units_at_risk: 0, value_at_risk: 0 });
+    g.lines.push({ sku: r.sku, qty: r.qty, on_hand: Math.round(oh), wk: Math.round(wk * 10) / 10,
+      stockout: stockoutT != null ? new Date(stockoutT).toISOString().slice(0, 10) : null, oos, runs_out: runsOut });
+    g.units_at_risk += r.qty; g.value_at_risk += Math.round(r.qty * (Number(r.cost) || 0));
+  }
+  const delayed = Object.values(byPo).sort((a, b) => (b.slip_days - a.slip_days) || (b.value_at_risk - a.value_at_risk));
+  delayed.forEach(g => g.lines.sort((a, b) => (a.oos === b.oos ? 0 : a.oos ? -1 : 1) || a.sku.localeCompare(b.sku)));
+  // slipped POs in this market with NO impacted line (delay exists but stock is fine) — reported as a count only.
+  const impactedPos = new Set(delayed.map(g => g.po));
+  const otherDelays = (await pool.query(`
+    SELECT count(DISTINCT pod.po)::int n FROM (SELECT po.po, upper(coalesce(nullif(po.country_code,''), b.country_code,'')) market
+      ${PO_OPEN_FROM} AND po.po = ANY($1)) pod WHERE pod.market=$2`, [pos.filter(p => !impactedPos.has(p)), market])).rows[0].n;
+  return { market, delayed, other_delays: otherDelays };
+}
+app.get('/api/supply/po-delays', async (req, res) => {
+  const mkt = String((req.query && req.query.market) || '').toUpperCase();
+  try { res.json(await poDeliveryDelays(mkt)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
 });
 // ── Master PO (consolidated supplier invoice) ─────────────────────────────────────────────────
 // A MASTER is a REAL purchase_orders row (is_master=true) that consolidates N child POs (one supplier).

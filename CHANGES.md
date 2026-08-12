@@ -1,3 +1,10 @@
+## v26.897.0 SUG-0024 Inventory Status Report — Section 6 (PO inbound delays + impacted products) · COMPLETE
+- **New plumbing (mig 219 `planner.po_delivery_history`):** snapshots each PO's delivery (into-stock landing) date — coalesce(shipment arrival/delivery/landing, PO override, prod_end+7+sea lead) — every time §6 is viewed. PK dedupes, so a distinct date is stored once with the timestamp first seen. Baseline = earliest recorded; current = latest ⇒ a PO whose current date is later than baseline has **slipped**.
+- **New endpoint `GET /api/supply/po-delays?market=`:** records current dates, finds slipped POs, and for the market assesses impact — lines **out of stock now**, or that **run out (on hand ÷ fwd weekly demand) before the delayed landing date**. Returns slip days, baseline→current, units/value at risk, and impacted lines. POs that slipped but whose stock is covered are reported as a count only.
+- **§6 in the report** lists each impacting slipped PO (deep-link to SUPPLY), the slip, and the impacted-product table (out of stock vs runs-out-before-landing). Loads async after the sync sections.
+- Detection **starts from first view** — slips before today aren't known (no prior snapshot). *Enhancement to consider: also snapshot on PO-grid load or a daily cron so changes are caught even when the report isn't open.*
+- **SUG-0024 is now complete: all 7 sections** (out of stock · backorders · low stock · delivery vs forecast · inbound vs PO · PO delays+impact · in-production launches).
+
 ## v26.896.0 SUG-0024 Inventory Status Report — Section 7 (in-production new-season launches)
 - **7 · In-production — new-season launches:** all not-yet-launched (FUTURE) products, grouped by **season (release window)**, soonest launch first — with units on order / inbound to land the launch and the first-6-month forecast. Rows launching **within 4 months with nothing in production** are flagged red (actionable); far-future launches aren't false-flagged.
 - `BP.statusMetrics` now also returns `rw` (release window).

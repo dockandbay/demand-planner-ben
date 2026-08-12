@@ -9169,6 +9169,10 @@ function renderInvStatus(){
       return '<tr><td style="padding:4px 10px">'+esc(x.sku)+'</td><td style="padding:4px 10px">'+poCell+'</td><td style="padding:4px 10px;text-align:right">'+invNum(x.qty)+'</td><td style="padding:4px 10px;white-space:nowrap">'+invFmtEta(x.eta)+'</td><td style="padding:4px 10px">'+esc(typeLbl[x.type]||x.type||'')+'</td><td style="padding:4px 10px">'+esc(x.supplier||'')+'</td></tr>'; }).join('')
     +'</tbody></table></div>'; }
 
+  // Section 6 · PO inbound delays + impacted products (loaded async from the server after the sync sections paint).
+  html+=sectHdr(6,'6 · PO inbound delays — impacted products','Purchase orders whose delivery (landing) date has <b>slipped later</b> since first recorded, that impact stock in '+esc(mkt)+' — lines already <b>out of stock</b>, or that <b>run out before the delayed PO lands</b>. Tracking builds over time from first view.');
+  html+='<div id="invstatus-s6"><div class="mut" style="font-size:12px">Checking PO delivery dates for slips…</div></div>';
+
   // Section 7 · In-production new-season launches. FUTURE SKUs (launch date ahead), grouped by season (release window),
   // soonest launch first. Shows what's on order/inbound to land the launch; red = nothing in production yet.
   var _now=Date.now(), SOON=120*864e5;   // "imminent" launch window (within ~4 months) — where production should already be under way
@@ -9194,8 +9198,35 @@ function renderInvStatus(){
           +'<td style="padding:4px 10px;text-align:right">'+invNum(r.dl.dem)+'</td></tr>'; }).join('')
       +'</tbody></table></div></div>'; });
 
-  html+='<div class="mut" style="font-size:11px;margin-top:20px;border-top:1px solid #e5e7eb;padding-top:10px">One section remaining: PO inbound delays &amp; impacted products (needs a SUPPLY/PO delay endpoint).</div>';
   panel.innerHTML=html;
+  loadInvS6(mkt);   // fill section 6 async (server delay-detection + impact)
+}
+// Section 6 loader: fetch slipped POs impacting this market and render impacted-product tables. Re-guards on market.
+function loadInvS6(mkt){
+  fetch('/api/supply/po-delays?market='+encodeURIComponent(mkt)).then(function(r){return r.json();}).then(function(j){
+    if(INV_SUB!=='status'||INV_STATUS_MKT!==mkt)return;   // pill changed while loading
+    var el=document.getElementById('invstatus-s6'); if(!el)return;
+    if(j&&j.error){ el.innerHTML='<div style="color:#dc2626;font-size:12px">'+esc(j.error)+'</div>'; return; }
+    var D=(j&&j.delayed)||[];
+    if(!D.length){ el.innerHTML='<div style="padding:12px 4px;color:#16a34a;font-size:12px">No delayed POs impacting '+esc(mkt)+' stock 🎉'
+      +(j&&j.other_delays?' <span class="mut">('+j.other_delays+' PO'+(j.other_delays>1?'s have':' has')+' slipped but stock is covered.)</span>':'')+'</div>'; return; }
+    var html=D.map(function(g){
+      var poLink='<a href="#/supply/purchase-orders/'+encodeURIComponent(g.po)+'" style="color:#1d4ed8;text-decoration:none;font-weight:700">'+esc(g.po)+'</a>';
+      var head='<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;margin-bottom:4px">'+poLink
+        +(g.supplier?'<span class="mut" style="font-size:11px">'+esc(g.supplier)+'</span>':'')
+        +'<span style="font-size:12px;color:#b45309;font-weight:700">slipped '+g.slip_days+'d</span>'
+        +'<span class="mut" style="font-size:11px">'+invFmtEta(g.baseline)+' → '+invFmtEta(g.current_date)+'</span>'
+        +'<span class="mut" style="font-size:11px">'+invNum(g.units_at_risk)+'u'+(g.value_at_risk?' · £'+invNum(g.value_at_risk):'')+' at risk</span></div>';
+      var body='<div style="max-height:220px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'
+        +['SKU','On PO','On hand','Stock-out','Impact'].map(function(h,i){return '<th style="text-align:'+(i===0?'left':(i===4?'left':'right'))+';padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+        +g.lines.map(function(l){ var tag=l.oos?'<span style="color:#b91c1c;font-weight:700">Out of stock</span>':'<span style="color:#b45309;font-weight:700">Runs out before landing</span>';
+          return '<tr'+(l.oos?' style="background:#fef2f2"':'')+'><td style="padding:4px 10px">'+esc(l.sku)+'</td><td style="padding:4px 10px;text-align:right">'+invNum(l.qty)+'</td><td style="padding:4px 10px;text-align:right">'+invNum(l.on_hand)+'</td><td style="padding:4px 10px;text-align:right;white-space:nowrap">'+(l.stockout?invFmtEta(l.stockout):'—')+'</td><td style="padding:4px 10px">'+tag+'</td></tr>'; }).join('')
+        +'</tbody></table></div>';
+      return '<div style="margin-bottom:14px">'+head+body+'</div>';
+    }).join('');
+    if(j.other_delays)html+='<div class="mut" style="font-size:11px">+ '+j.other_delays+' other slipped PO'+(j.other_delays>1?'s':'')+' with stock covered (not shown).</div>';
+    el.innerHTML=html;
+  }).catch(function(e){ var el=document.getElementById('invstatus-s6'); if(el)el.innerHTML='<div style="color:#dc2626;font-size:12px">'+esc((e&&e.message)||e)+'</div>'; });
 }
 // Manage FBA + FBA Aged: manually-uploaded Amazon FBA report per market (persisted). Manage FBA compares
 // (available + fc-transfer) vs inventory_<mkt>_fba; FBA Aged shows the aged buckets oldest-first.
