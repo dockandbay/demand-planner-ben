@@ -1,3 +1,8 @@
+## v26.895.0 SUG-0024 Inventory Status Report — Sections 4 & 5
+- **4 · Delivery — on hand + inbound vs forecast:** a 6-month runway projection per ACTIVE SKU (current SOH + inbound bucketed by ETA, minus monthly forecast across all channels). Flags products projected to **go out of stock within 6 months** despite inbound, soonest-first, by tier; hover the stock-out month for the month-by-month runway.
+- **5 · Inbound shipments vs PO:** flat list of every inbound line for the market (soonest ETA first) — SKU, **PO (deep-links into SUPPLY ▸ Purchase Orders)**, qty, ETA, in-transit/on-order, supplier.
+- `BP.statusMetrics` extended with the projection (`dl`) + inbound list (`inbList`); still a pure read. Remaining SUG-0024 sections: PO inbound delays + impacted products, in-production new-season launches.
+
 ## v26.894.0 BLADE EU 3PL — build the PUT /stocks body dynamically (only BLADE_PASSWORD needed)
 - The PUT `/stocks` payload is now built server-side from the fetched variation IDs: `{"product_variation_id":[all ids],"warehouse_code":"BOC"}` — mirroring Ben's sheet formula, so it tracks the variation count automatically. **No more `BLADE_STOCK_BODY` to paste** (still honoured as an optional manual override; warehouse defaults to `BOC`, overridable via `BLADE_WAREHOUSE_CODE`).
 - The **only** env secret required now is **`BLADE_PASSWORD`**. Until set, EU Import shows "BLADE_PASSWORD not set in server env".

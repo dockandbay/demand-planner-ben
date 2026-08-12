@@ -1767,6 +1767,8 @@ function webFwdDemand(md,n){
 // on-order, avg weekly demand + weeks-cover per warehouse, cover targets, inbound units + next ETA, tier/status/dates.
 // Pure read — does NOT touch buy logic. Assumes buildLiveDemand() already ran so md.demand is populated.
 function statusMetrics(mkt){
+  // Forward horizon = next 6 full forecast months (skip current-month actuals + remaining, matching fwdDemand semantics).
+  var HK=[]; for(var _i=0;_i<PROJ.length&&HK.length<6;_i++){ if(PROJ[_i].isActual||PROJ[_i].isForecast)continue; HK.push({key:PROJ[_i].key,lbl:PROJ[_i].lbl}); }
   var out=[]; (SL||[]).forEach(function(s){
     if(!s.ms||!s.ms[mkt])return;
     var md=PD[s.s]&&PD[s.s].mkts&&PD[s.s].mkts[mkt]; if(!md)return;
@@ -1775,11 +1777,23 @@ function statusMetrics(mkt){
     var wk3=webFwdDemand(md,3)/13, wkf=fbaFwdDemand(md,3)/13;   // avg weekly demand over next 90 days
     var cov3=wk3>0?(i3+oo3)/wk3:((i3+oo3)>0?Infinity:0);
     var covf=wkf>0?(iff+oof)/wkf:((iff+oof)>0?Infinity:0);
-    var inbUnits=0, nextEta=null;
-    (md.inb||[]).forEach(function(x){ inbUnits+=(x.qty||0); var e=x.eta||x.poEta; if(e&&(!nextEta||e<nextEta))nextEta=e; });
+    // Inbound: build a flat list (for the Inbound section) + bucket units into forecast months by ETA (for the projection).
+    var dem=md.demand||{}, D=dem.DTC||{}, B=dem.B2B||{}, F=dem.FBA||{}, Z=dem.ZAL||{};
+    var inbList=[], inbUnits=0, nextEta=null, inbByKey={};
+    var firstKey=HK.length?HK[0].key:null, lastKey=HK.length?HK[HK.length-1].key:null;
+    (md.inb||[]).forEach(function(x){ var q=x.qty||0; var e=x.eta||x.poEta||null;
+      inbUnits+=q; if(e&&(!nextEta||e<nextEta))nextEta=e;
+      inbList.push({ref:x.ref||'', qty:q, eta:e, type:x.type||'', supplier:x.supplier||'', wh:x.wh||''});
+      if(HK.length){ var mk=e?String(e).slice(0,7).replace('-','_'):firstKey; if(mk<firstKey)mk=firstKey;   // past/undated → arrives now
+        if(mk<=lastKey)inbByKey[mk]=(inbByKey[mk]||0)+q; } });   // beyond horizon → ignored in the projection
+    // 6-month runway projection: on-hand + timed inbound vs monthly forecast; flag the month it goes negative.
+    var bal=i3+iff, projOut=null, projDem=0, projInb=0, months=[];
+    HK.forEach(function(p){ var d=(D[p.key]||0)+(B[p.key]||0)+(F[p.key]||0)+(Z[p.key]||0), ib=inbByKey[p.key]||0;
+      bal+=ib; bal-=d; projDem+=d; projInb+=ib; if(bal<0&&!projOut)projOut=p.lbl; months.push({lbl:p.lbl,dem:d,inb:ib,close:bal}); });
     out.push({sku:s.s, ti:s.ti||'C', cat:s.c||'', st:s.ms[mkt].st||'ACTIVE', has3:has3, hasf:hasf,
       i3:i3, iff:iff, oo3:oo3, oof:oof, oo:oo3+oof, wk3:wk3, wkf:wkf, cov3:cov3, covf:covf,
       t3:md.t3||12, tf:md.tf||(mkt==='CA'?4:8), inbUnits:inbUnits, nextEta:nextEta,
+      inbList:inbList, dl:{soh:i3+iff, inb:projInb, dem:projDem, out:projOut, months:months},
       launch:md.launch||null, disc:md.disc||null}); });
   return out;
 }
@@ -9090,11 +9104,11 @@ function renderInvStatus(){
   function sectHdr(n,title,sub){ return '<div style="font-weight:800;font-size:14px;margin:'+(n===1?'2px':'22px')+' 0 2px">'+title+'</div>'
     +'<div class="mut" style="font-size:11px;margin-bottom:10px">'+sub+'</div>'; }
   // Shared table renderer. `cols` = [{h,align,f}] where f(r)->cell html.
-  function tierTables(buckets, cols, emptyMsg){
+  function tierTables(buckets, cols, emptyMsg, sortFn){
     var any=buckets.A.length+buckets.B.length+buckets.C.length;
     if(!any)return '<div style="padding:12px 4px;color:#16a34a;font-size:12px">'+emptyMsg+'</div>';
     return ['A','B','C'].map(function(t){ var L=buckets[t]; if(!L.length)return '';
-      L.sort(function(a,b){ return a.sku.localeCompare(b.sku); });
+      L.sort(sortFn||function(a,b){ return a.sku.localeCompare(b.sku); });
       return '<div style="margin-bottom:12px"><div style="font-weight:700;font-size:12px;color:'+TC[t]+';margin-bottom:4px">'+TL[t]+' <span class="mut" style="font-weight:400">('+L.length+')</span></div>'
         +'<div style="max-height:300px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'
         +cols.map(function(c){return '<th style="text-align:'+(c.align||'right')+';padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+c.h+'</th>';}).join('')+'</tr></thead><tbody>'
@@ -9128,7 +9142,34 @@ function renderInvStatus(){
   html+=tierTables(bo,boCols,'No 3PL backorders in '+esc(mkt)+' 🎉');
   html+=sectHdr(3,'3 · Low stock — below cover target ('+nLow+')','ACTIVE products in stock but with weeks-cover (on hand + on order ÷ avg weekly demand) below the market cover target, by tier. Amber = the warehouse below target.');
   html+=tierTables(low,lowCols,'No low-stock active products in '+esc(mkt)+' 🎉');
-  html+='<div class="mut" style="font-size:11px;margin-top:20px;border-top:1px solid #e5e7eb;padding-top:10px">More sections to come: delivery SOH+inbound vs forecast, PO inbound delays &amp; impacted products, in-production new-season launches.</div>';
+
+  // Section 4 · Delivery — SOH + inbound vs forecast. Flag ACTIVE SKUs projected to go out of stock within 6 months.
+  var risk={A:[],B:[],C:[]};
+  rows.forEach(function(r){ if(r.st!=='ACTIVE')return; if(r.dl&&r.dl.out){ r._outIdx=r.dl.months.findIndex(function(m){return m.close<0;}); (risk[r.ti]||risk.C).push(r); } });
+  var nRisk=risk.A.length+risk.B.length+risk.C.length;
+  var mtip=function(r){ return r.dl.months.map(function(m){ return m.lbl+': −'+invNum(m.dem)+(m.inb?' +'+invNum(m.inb):'')+' → '+invNum(Math.round(m.close)); }).join('  |  '); };
+  var dlCols=[{h:'SKU',align:'left',f:function(r){return esc(r.sku);}},
+    {h:'SOH now',f:function(r){return invNum(r.dl.soh);}},
+    {h:'+ Inbound (6mo)',f:function(r){return r.dl.inb>0?invNum(r.dl.inb):'<span class="mut">0</span>';}},
+    {h:'− Forecast (6mo)',f:function(r){return invNum(r.dl.dem);}},
+    {h:'Projected stock-out',f:function(r){return '<span style="color:#b91c1c;font-weight:700" title="'+esc(mtip(r))+'">'+esc(r.dl.out)+'</span>';}}];
+  html+=sectHdr(4,'4 · Delivery — on hand + inbound vs forecast ('+nRisk+')','ACTIVE products projected to run <b>out of stock within 6 months</b> — current on hand plus timed inbound is below forecast demand. Sorted soonest-first; hover the stock-out month for the month-by-month runway.');
+  html+=tierTables(risk,dlCols,'All active products are covered through the next 6 months in '+esc(mkt)+' 🎉',
+    function(a,b){ return (a._outIdx-b._outIdx)||a.sku.localeCompare(b.sku); });
+
+  // Section 5 · Inbound + PO drawer link. Flat list of every inbound line, soonest ETA first, PO ref deep-links to SUPPLY.
+  var allInb=[]; rows.forEach(function(r){ if(r.st==='DISCONTINUED')return; (r.inbList||[]).forEach(function(x){ if((x.qty||0)<=0)return; allInb.push({sku:r.sku,ti:r.ti,ref:x.ref,qty:x.qty,eta:x.eta,type:x.type,supplier:x.supplier,wh:x.wh}); }); });
+  allInb.sort(function(a,b){ var ea=a.eta||'9999', eb=b.eta||'9999'; return ea<eb?-1:ea>eb?1:a.sku.localeCompare(b.sku); });
+  var typeLbl={supplier_china:'In transit',open_po:'On order'};
+  html+=sectHdr(5,'5 · Inbound shipments vs PO ('+allInb.length+')','Every inbound line for the market, soonest ETA first. Click the PO to open it in SUPPLY.');
+  if(!allInb.length){ html+='<div style="padding:12px 4px;color:#64748b;font-size:12px">No inbound for '+esc(mkt)+'.</div>'; }
+  else { html+='<div style="max-height:360px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'
+    +['SKU','PO','Qty','ETA','Type','Supplier'].map(function(h,i){return '<th style="text-align:'+(i===2?'right':'left')+';padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+    +allInb.map(function(x){ var poCell=x.ref?'<a href="#/supply/purchase-orders/'+encodeURIComponent(x.ref)+'" style="color:#1d4ed8;text-decoration:none;font-weight:600">'+esc(x.ref)+'</a>':'<span class="mut">—</span>';
+      return '<tr><td style="padding:4px 10px">'+esc(x.sku)+'</td><td style="padding:4px 10px">'+poCell+'</td><td style="padding:4px 10px;text-align:right">'+invNum(x.qty)+'</td><td style="padding:4px 10px;white-space:nowrap">'+invFmtEta(x.eta)+'</td><td style="padding:4px 10px">'+esc(typeLbl[x.type]||x.type||'')+'</td><td style="padding:4px 10px">'+esc(x.supplier||'')+'</td></tr>'; }).join('')
+    +'</tbody></table></div>'; }
+
+  html+='<div class="mut" style="font-size:11px;margin-top:20px;border-top:1px solid #e5e7eb;padding-top:10px">More sections to come: PO inbound delays &amp; impacted products, in-production new-season launches.</div>';
   panel.innerHTML=html;
 }
 // Manage FBA + FBA Aged: manually-uploaded Amazon FBA report per market (persisted). Manage FBA compares
