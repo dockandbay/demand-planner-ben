@@ -1,3 +1,6 @@
+## v26.884.0 Manage FBA — match by SKU or ASIN (all markets)
+- FBA upload comparison now matches each report row to `products` **by SKU first, then by ASIN** (`products.asin`) — Amazon SKUs are often prefixed/suffixed and do not match ours, but the ASIN does. US test: matched 485→586 (101 via ASIN), unmatched 119→18. Added an **ASIN column** + a "→ <sku> (via ASIN)" note on ASIN-matched rows. Applies to every market (US/UK/AU/EU/CA — the feature was already per-market; UK/AU/EU take the same file and compare to inventory_<mkt>_fba).
+
 ## v26.883.0 INVENTORY — Manage FBA upload/compare, FBA Aged tab, level-3 slugs
 - **Manage FBA** (per market US/UK/AU/EU/CA): manual **drag-and-drop / choose-file** upload of the Amazon FBA inventory report; persists per market (migration 216) with "last uploaded by/when"; compares **(available + fc-transfer)** vs `products.inventory_<mkt>_fba`, biggest mismatch first. Verified US: 604 report SKUs, 485 matched.
 - **FBA Aged** (new sub-tab): from the same uploaded report, shows the aged buckets **456+ / 366-455 / 271-365 / 181-270 / 91-180** (oldest-first, oldest column first), SKUs with the most aged stock at top.

@@ -9081,12 +9081,14 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
     var summary='<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px;font-size:12px"><span><b>'+j.report_skus+'</b> report SKUs</span>'
       +'<span style="color:#16a34a"><b>'+j.matched+'</b> matched</span><span style="color:#b45309"><b>'+j.unmatched+'</b> not in ERP</span>'
       +'<span style="color:#b91c1c"><b>'+j.erp_not_in_report+'</b> ERP FBA stock missing from report</span></div>';
-    var H=['SKU','Available','FC-transfer','FBA report (avail+fc)','ERP ('+tHesc(INV_FBA)+' FBA)','Diff'];
+    var H=['SKU','ASIN','Available','FC-transfer','FBA report (avail+fc)','ERP ('+tHesc(INV_FBA)+' FBA)','Diff'];
     var head=H.map(function(h){return '<th style="text-align:left;padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+h+'</th>';}).join('');
     var num=function(v){return v==null?'—':v;};
     var dc=function(d){ var c=(d==null?'#94a3b8':(d===0?'#16a34a':(d>0?'#b45309':'#b91c1c'))); return '<td style="padding:4px 10px;text-align:left;color:'+c+';font-weight:600">'+(d==null?'—':(d>0?'+':'')+d)+'</td>'; };
-    var trs=rows.slice(0,800).map(function(r){ return '<tr'+(!r.matched?' style="background:#fff7ed"':'')+'>'
-      +'<td style="padding:4px 10px;text-align:left">'+tHesc(r.sku)+(!r.matched?' <span class="mut" style="font-size:10px">(not in ERP)</span>':'')+'</td>'
+    var trs=rows.slice(0,800).map(function(r){ var note=(r.matched_via==='asin')?' <span class="mut" style="font-size:10px;color:#1d4ed8">→ '+tHesc(r.erp_sku)+' (via ASIN)</span>':(!r.matched?' <span class="mut" style="font-size:10px">(not in ERP)</span>':'');
+      return '<tr'+(!r.matched?' style="background:#fff7ed"':'')+'>'
+      +'<td style="padding:4px 10px;text-align:left">'+tHesc(r.sku)+note+'</td>'
+      +'<td style="padding:4px 10px;text-align:left;font-family:ui-monospace,Menlo,monospace;font-size:11px">'+tHesc(r.asin||'—')+'</td>'
       +'<td style="padding:4px 10px;text-align:left">'+r.available+'</td><td style="padding:4px 10px;text-align:left">'+r.fc_transfer+'</td>'
       +'<td style="padding:4px 10px;text-align:left;font-weight:600">'+r.report_fba+'</td><td style="padding:4px 10px;text-align:left">'+num(r.erp_fba)+'</td>'+dc(r.diff)+'</tr>'; }).join('');
     content=summary+'<div style="max-height:520px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'+head+'</tr></thead><tbody>'+trs+'</tbody></table></div>'
