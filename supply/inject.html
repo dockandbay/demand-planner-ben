@@ -8863,7 +8863,7 @@
     else if(v==='exec')writeHash(['reports',(typeof REPORT_VIEW!=='undefined'&&REPORT_VIEW)||'ex']);
     else if(v==='actions'||v==='buy'||v==='fba'||v==='transfer'){   // BUY & MOVE group: #/buy-move/<actions|buy|fba|transfer>
       var _sub=v;   // entering via the top BUY & MOVE button (data-view='actions') → restore the last sub-tab the user was on
-      if(v==='actions'){try{var _last=localStorage.getItem('hzBuyMoveLast');if(_last&&['actions','buy','fba','transfer'].indexOf(_last)>=0)_sub=_last;}catch(e){}}
+      if(v==='actions'){try{var _last=localStorage.getItem('hzBuyMoveLast');if(_last&&['actions','buy','fba','transfer','inventory','zalando'].indexOf(_last)>=0)_sub=_last;}catch(e){}}
       writeHash(['buy-move',_sub]);
     }
     else writeHash([v]);
@@ -8898,7 +8898,7 @@
     else if(seg[0]==='buy-move'||seg[0]==='buy'||seg[0]==='fba'){
       // BUY & MOVE group. New URLs: #/buy-move/<buy|fba|transfer>. Legacy #/buy/<ctry>, #/fba/<ctry> still work.
       var sub, ctry=null;
-      if(seg[0]==='buy-move'){ sub=(['actions','buy','fba','transfer'].indexOf(seg[1])>=0)?seg[1]:'actions'; }
+      if(seg[0]==='buy-move'){ sub=(['actions','buy','fba','transfer','inventory','zalando'].indexOf(seg[1])>=0)?seg[1]:'actions'; }
       else { sub=seg[0]; ctry=seg[1]; }
       if(ctry&&window.BP&&window.BP.setFilters&&['uk','us','eu','au','ca'].indexOf(String(ctry).toLowerCase())>=0){ try{ window.BP.setFilters(ctry.toUpperCase()); }catch(e){} }
       var top=document.querySelector('#view-tabs-row .view-toggle[data-group="buymove"]'); if(top)top.click();   // enter the group (builds the sub-nav)

@@ -8157,14 +8157,14 @@ function render(){
   if(CAL_EVENTS===null){ CAL_EVENTS=[]; fetch('/api/trading-calendar').then(function(r){return r.json();}).then(function(d){ CAL_EVENTS=(d&&d.events)||[]; if(VIEW_MODE==='planning')render(); }).catch(function(){}); }
   // Toggle filter rows visibility based on view mode.
   // PLAN shows filters; BUY and REPORT hide the PLAN filter rows (BUY gets its own in a later part).
-  var filtersHide=(VIEW_MODE==='exec'||VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='zalando');
+  var filtersHide=(VIEW_MODE==='exec'||VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='zalando'||VIEW_MODE==='inventory');
   ['ctabs-row','filters-row2','catrow1-wrap'].forEach(function(id){
     var el=document.getElementById(id);
     if(el)el.style.display=filtersHide?'none':'';
   });
   // Update view toggle button states
   document.querySelectorAll('.view-toggle').forEach(function(b){
-    b.classList.toggle('active',b.dataset.view===VIEW_MODE||(b.dataset.group==='buymove'&&(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='zalando')));
+    b.classList.toggle('active',b.dataset.view===VIEW_MODE||(b.dataset.group==='buymove'&&(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='zalando'||VIEW_MODE==='inventory')));
   });
   // Show the top-right AI tool-bar (Insights) on the PLAN/DEMAND view only; REPORTS/BUY/FBA get none.
   var _pt=document.getElementById('plan-tools');
@@ -8181,17 +8181,18 @@ function render(){
     ['demand-tabs','demand-inputs-nav','demand-body'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
   }
   // Leaving the BUY & MOVE group → tear down its sub-nav + the ACTIONS/TRANSFER pages.
-  var _inBM=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='zalando');
-  if(!_inBM){ ['buymove-tabs','transfer-wrap','bm-actions-wrap','zalando-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();}); }
+  var _inBM=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='zalando'||VIEW_MODE==='inventory');
+  if(!_inBM){ ['buymove-tabs','transfer-wrap','bm-actions-wrap','zalando-wrap','inventory-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();}); }
   if(VIEW_MODE==='exec'){renderReportView();return;}
   // leaving the REPORTS area — tear down its sub-tab bar + any report body
   ['report-tabs','report-body','exec-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
   if(_inBM){
-    if(window.BP)BP.BP_VIEW=((VIEW_MODE==='actions'||VIEW_MODE==='zalando')?'buy':VIEW_MODE); // hint; renderBuyView sets the engine flag
-    ['transfer-wrap','bm-actions-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
+    if(window.BP)BP.BP_VIEW=((VIEW_MODE==='actions'||VIEW_MODE==='zalando'||VIEW_MODE==='inventory')?'buy':VIEW_MODE); // hint; renderBuyView sets the engine flag
+    ['transfer-wrap','bm-actions-wrap','inventory-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
     if(VIEW_MODE!=='zalando'){ var _zw=document.getElementById('zalando-wrap'); if(_zw)_zw.remove(); }
     if(VIEW_MODE==='actions'){ var _tw=document.getElementById('tw'); if(_tw)_tw.style.display='none'; var _bw=document.getElementById('buy-wrap'); if(_bw)_bw.remove(); renderBuyMoveActions(); }
     else if(VIEW_MODE==='zalando'){ var _twz=document.getElementById('tw'); if(_twz)_twz.style.display='none'; var _bwz=document.getElementById('buy-wrap'); if(_bwz)_bwz.remove(); renderZalando(); }
+    else if(VIEW_MODE==='inventory'){ var _twi=document.getElementById('tw'); if(_twi)_twi.style.display='none'; var _bwi=document.getElementById('buy-wrap'); if(_bwi)_bwi.remove(); renderInventory(); }
     else renderBuyView(VIEW_MODE);   // 'buy' | 'fba' | 'transfer'
     renderBuyMoveTabs();
     return;
@@ -8909,7 +8910,7 @@ function renderDemandTabs(){
   if(_sb)_sb.style.display='none';   // its contents now live on nav-2
 }
 // ── BUY & MOVE group: second-level sub-nav (BUY / FBA / TRANSFER) + the TRANSFER placeholder page ──
-var BUYMOVE_TABS=[['actions','ACTIONS'],['buy','BUY'],['fba','FBA'],['transfer','TRANSFER'],['zalando','ZALANDO']];
+var BUYMOVE_TABS=[['actions','ACTIONS'],['buy','BUY'],['fba','FBA'],['transfer','TRANSFER'],['inventory','INVENTORY'],['zalando','ZALANDO']];
 // ── Zalando send-to-Zalando (P1/P2): forecast (from /api/supply/zalando/data) vs uploaded stock-on-hand → suggested send
 // (3-month cover, NO minimum), FBA-style tick/override, download EAN,Quantity (ZALANDO_UP format). Self-contained panel.
 var ZAL_TICK={}, ZAL_OV={}, ZAL_COVER=2, ZAL_Q='';   // months of cover the suggested send targets (default 2; toggle 1-6); ZAL_Q = SKU search filter
@@ -9012,6 +9013,28 @@ function _zalRender(wrap,d){
 }
 // ACTIONS: per-country summary of the buy/move actions (Buy 3PL, Urgent Sea/Air, Buy FBA, FBA Transfer) —
 // total units per action with expand-to-SKU. Uses BP.getBuyQtys across each market's visible SKUs.
+// ── BUY & MOVE ▸ INVENTORY (scaffold) — Status Report | Manage 3PL (US/UK/AU/EU) | Manage FBA (US/UK/AU/EU/CA) ──
+var INV_SUB='status', INV_3PL='US', INV_FBA='US';
+function renderInventory(){
+  var host=document.querySelector('.wrap'); if(!host)return;
+  var ex=document.getElementById('inventory-wrap'); if(ex)ex.remove();
+  var wrap=document.createElement('div'); wrap.id='inventory-wrap'; wrap.style.cssText='max-width:1080px;margin:6px 0 20px';
+  var SUBS=[['status','Status Report'],['manage3pl','Manage 3PL'],['managefba','Manage FBA']];
+  function pillbar(list,cur,cls){ return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px">'+list.map(function(c){ var on=(c===cur);
+      return '<button class="'+cls+'" data-c="'+c+'" style="padding:4px 15px;border-radius:16px;border:1px solid '+(on?'#1e40af':'#cbd5e1')+';background:'+(on?'#1e40af':'#fff')+';color:'+(on?'#fff':'#334155')+';font-weight:600;font-size:12px;cursor:pointer">'+c+'</button>'; }).join('')+'</div>'; }
+  function placeholder(title){ return '<div style="padding:26px;color:#64748b;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;text-align:center"><b style="color:#334155">'+title+'</b><div style="margin-top:6px;font-size:13px">To complete in future.</div></div>'; }
+  var subnav='<div style="display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid #e0e0e0;margin-bottom:14px">'
+    +SUBS.map(function(t){return '<button class="dnav inv-sub'+(t[0]===INV_SUB?' active':'')+'" data-sub="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div>';
+  var body;
+  if(INV_SUB==='manage3pl') body=pillbar(['US','UK','AU','EU'],INV_3PL,'inv-3pl-pill')+placeholder('Manage 3PL — '+INV_3PL);
+  else if(INV_SUB==='managefba') body=pillbar(['US','UK','AU','EU','CA'],INV_FBA,'inv-fba-pill')+placeholder('Manage FBA — '+INV_FBA);
+  else body=placeholder('Status Report');
+  wrap.innerHTML='<div style="font-weight:800;font-size:16px;margin:4px 0 12px">Inventory</div>'+subnav+'<div id="inv-body">'+body+'</div>';
+  host.appendChild(wrap);
+  wrap.querySelectorAll('.inv-sub').forEach(function(b){ b.onclick=function(){ INV_SUB=b.dataset.sub; renderInventory(); }; });
+  wrap.querySelectorAll('.inv-3pl-pill').forEach(function(b){ b.onclick=function(){ INV_3PL=b.dataset.c; renderInventory(); }; });
+  wrap.querySelectorAll('.inv-fba-pill').forEach(function(b){ b.onclick=function(){ INV_FBA=b.dataset.c; renderInventory(); }; });
+}
 function renderBuyMoveActions(){
   try{ buildLiveDemand(); }catch(e){}
   var host=document.querySelector('.wrap');
