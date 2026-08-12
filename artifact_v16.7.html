@@ -9582,7 +9582,7 @@ function revMonthly(co,ch,fy){ var ck=co+'|'+(ch||'*')+'|'+fy; if(_revCache[ck])
   var fmC=fyMonths(fy), fmL=fyMonths(fy-1), mon={}, fc=0, ly=0, lyPos=[0,0,0,0,0,0,0,0,0,0,0,0]; fmC.forEach(function(m){mon[m]=0;});
   (DATA||[]).forEach(function(r){ if(r.co!==co)return; if(ch&&r.ch!==ch)return; var s=r.s, a=ga(co,r.ch,s), fu=(calc(s,co,r.ch)||{}).fu||{};
     fmC.forEach(function(m){ var v=(isActualMonth(m)&&m!==CUR_MONTH)?(a[m]?a[m][1]:0):((m===CUR_MONTH?curMonthForecast(s,co,r.ch):(fu[m]||0))*getASP(co,r.ch,s,pa(m).y,pa(m).mo)); mon[m]+=v; fc+=v; });   // current partial month → full-month forecast (matches plan + exec)
-    fmL.forEach(function(m,ix){ var add=(a[m]?a[m][1]:0); ly+=add; lyPos[ix]+=add; }); });
+    fmL.forEach(function(m,ix){ var add=(m===CUR_MONTH)?((curMonthForecast(s,co,r.ch)||0)*getASP(co,r.ch,s,pa(m).y,pa(m).mo)):(a[m]?a[m][1]:0); ly+=add; lyPos[ix]+=add; }); });   // LY base: current incomplete month → its full-month FORECAST, not partial MTD actuals (mirrors the fc side)
   var out={mon:mon, fc:fc, ly:ly, lyPos:lyPos}; _revCache[ck]=out; return out; }
 // Quarter helpers (FY starts March): Q1 Mar-May, Q2 Jun-Aug, Q3 Sep-Nov, Q4 Dec-Feb. Growth % is vs LY same quarter.
 function revQtrLy(rev,q){ var lp=(rev&&rev.lyPos)||[]; return (lp[q*3]||0)+(lp[q*3+1]||0)+(lp[q*3+2]||0); }
@@ -9739,7 +9739,10 @@ function computeTargetRecs(fy,coA,chA){ var co=coA||CUR,ch=chA||CF; var _ck=fy+'
         rows.push({m:m, curU:fcU, lyU:fcU, curRev:fcRev, tgtRev:tgtRevc, reqU:reqUc, g:g, pctCur:(reqUc/fcU-1), pctLY:(reqUc/fcU-1)});
         fyCur+=fcRev; fyTgt+=tgtRevc; return;
       }
-      var lyRev=a[trecPrevY(m)]?a[trecPrevY(m)][1]:0, lyU=a[trecPrevY(m)]?a[trecPrevY(m)][0]:0;
+      var _pk=trecPrevY(m), lyRev, lyU;
+      if(_pk===CUR_MONTH){   // LY base IS the current incomplete month (e.g. Aug-27's base = Aug-26) → use its full-month forecast, not partial actuals
+        lyU=curMonthForecast(s,co,ch)||0; var _pp=pa(_pk); lyRev=lyU*getASP(co,ch,s,_pp.y,_pp.mo);
+      } else { lyRev=a[_pk]?a[_pk][1]:0; lyU=a[_pk]?a[_pk][0]:0; }
       if(!(lyRev>0))return;
       var tgtRev=lyRev*(1+g/100), reqU=Math.max(0,Math.round(tgtRev/asp));
       var curU=(cr.fu[m]||0), curRev=curU*asp;

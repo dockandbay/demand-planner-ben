@@ -1,3 +1,7 @@
+## v26.907.0 Demand plan — YoY base uses forecast (not partial actuals) for the current month
+- **Target recommendations & Summary/Targets revenue** growth for the month one year ahead of the current month (e.g. Aug-2027) used the **current incomplete month's partial actuals** (Aug-2026 MTD) as the last-year base → inflated growth/targets. Now, when the prior-year base month IS the current incomplete month, the base uses that month's **full-month forecast** (MTD actuals + remaining forecast), matching how the forecast side already treats the current month.
+- `computeTargetRecs`: future-month LY base = `curMonthForecast × ASP` when `trecPrevY(m)===CUR_MONTH`. `revMonthly`: the LY (fmL) loop uses the full-month forecast for `CUR_MONTH` instead of `a[m]` actuals. Only affects FY-ahead views whose LY spans the current month.
+
 ## v26.906.0 Demand plan variant image — fix broken (http→https) thumbnails
 - Variant-image thumbnails rendered the URL raw, so ~20 SKUs with `http://` Cloudinary URLs were **blocked as mixed content** on the https site (broken-image icon). The render now **upgrades http→https** and adds an `onerror` that hides the thumbnail if it still fails (no ugly broken-image icon). Applied to both render paths.
 - Also cleaned the source data: `UPDATE planner.products` set the http:// image URLs → https:// (applied to **live** + sandbox). NOTE: n8n could re-introduce http URLs on the next products sync — the client-side upgrade is the durable guard; to fix permanently, correct the URLs at the Airtable/n8n source.
