@@ -1,3 +1,6 @@
+## v26.913.0 Silent data/version refresh — no banner, no interrupting full reload
+- The auto-update check (new code or new ETL data) no longer shows the yellow **"🔄 Refresh now" banner** or force a full page reload while you're actively using the app. It now only ever reloads **silently** when the tab is backgrounded or idle (unsaved forecast edits are still flushed first). Applies to all pages. A stale tab just waits for the next idle/hidden moment to update quietly. The manual **↻ Refresh cache** button is unchanged.
+
 ## v26.911.0 Smooth — "Disregard disc." now leaves discontinued SKUs untouched (manual smooth)
 - With "Disregard disc." ON, clicking **Smooth** on a subcategory now rescales only the ACTIVE SKUs to hit the target and leaves discontinued SKUs **exactly as they are** — it no longer runs the discontinued stock-rundown recalc, which could *raise* a discontinued cell (the "it increases discontinued items" bug, e.g. Cooling UK DTC May-27). The ⚙ Auto-smooth sweep keeps its own recalc (unchanged).
 

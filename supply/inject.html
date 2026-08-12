@@ -11583,8 +11583,9 @@
     document.body.appendChild(d); document.getElementById('hz-update-go').onclick=function(){ safeReload(); }; }
   function apply(){ if(!pending)return;
     if(document.hidden){ safeReload(); return; }              // backgrounded → reload silently (saves first)
-    if(Date.now()-lastAct>IDLE_MS){ safeReload(); return; }   // visible but idle → reload (saves first)
-    nag(); }                                                        // actively in use → nudge; retried below
+    if(Date.now()-lastAct>IDLE_MS){ safeReload(); return; }   // visible but idle → reload silently (saves first)
+    /* actively in use → do NOT interrupt: no banner, no forced full reload (Ben). Stays `pending`; the 30s retry
+       loop + focus/visibility handlers reload SILENTLY at the next idle/backgrounded moment. */ }
   function check(){ fetch('/api/version',{cache:'no-store',credentials:'same-origin'}).then(function(r){return r.ok?r.json():null;}).then(function(j){
     if(!j)return;
     var newCode=(j.version&&j.version!==BOOT);
