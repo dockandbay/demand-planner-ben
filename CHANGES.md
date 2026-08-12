@@ -1,3 +1,10 @@
+## v26.905.0 Out of Stock rework — 3 lists, lost-sales £, inbound PO drawer; removed standalone inbound list
+- **Out of stock (§1) split into 3 lists:** 3PL (web/wholesale), FBA (Amazon), and both. Each left-aligned with SKU · Release · Tier · On order · **Lost fcst (units)** · **Est £ lost** · **Inbound (PO · ETA)**, sorted biggest £-at-risk first, with a per-list £-at-risk subtotal.
+- **Lost sales** = forecast over the OOS-remaining period (now → the next relevant inbound ETA): DTC+B2B for the 3PL list, FBA for the Amazon list, each valued at that channel's **average selling price** (`aspF`). Out of stock with **no inbound scheduled** is flagged red ("no restock").
+- **Inbound shows its PO** with a link that **opens the PO drawer** (`openPODrawer`, hash fallback). "Both" list shows the 3PL and FBA inbound separately.
+- **Removed** the standalone "Inbound shipments vs PO" list (was §5) — inbound + PO now live inside Out of Stock. Renumbered: §5 = PO inbound delays, §6 = In-production launches.
+- Accessor `BP.statusMetrics` gains `subcat`, per-channel weekly demand (`dtcWk`/`b2bWk`/`fbaWk`), and per-warehouse next inbound (`nx3`/`nxf`).
+
 ## v26.904.0 Inventory Status Report — scope/na, release-window column, left-align, PO drawer links
 - **Out of stock (+ backorders/low stock) scope:** now explicitly requires the SKU to be **in scope for the market** — launched (launch date passed), **not** discontinued (disc date not in the past), and sold via at least one channel. Per warehouse, if the SKU isn't sold via **shp (3PL)** or **amz (FBA)** in that market, that column shows a light-grey **n/a** instead of a number.
 - **Release window** added as the second column (after SKU) in the Out-of-stock, Backorders and Low-stock tables.
