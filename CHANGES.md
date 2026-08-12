@@ -1,3 +1,7 @@
+## v26.896.0 SUG-0024 Inventory Status Report — Section 7 (in-production new-season launches)
+- **7 · In-production — new-season launches:** all not-yet-launched (FUTURE) products, grouped by **season (release window)**, soonest launch first — with units on order / inbound to land the launch and the first-6-month forecast. Rows launching **within 4 months with nothing in production** are flagged red (actionable); far-future launches aren't false-flagged.
+- `BP.statusMetrics` now also returns `rw` (release window).
+
 ## v26.895.0 SUG-0024 Inventory Status Report — Sections 4 & 5
 - **4 · Delivery — on hand + inbound vs forecast:** a 6-month runway projection per ACTIVE SKU (current SOH + inbound bucketed by ETA, minus monthly forecast across all channels). Flags products projected to **go out of stock within 6 months** despite inbound, soonest-first, by tier; hover the stock-out month for the month-by-month runway.
 - **5 · Inbound shipments vs PO:** flat list of every inbound line for the market (soonest ETA first) — SKU, **PO (deep-links into SUPPLY ▸ Purchase Orders)**, qty, ETA, in-transit/on-order, supplier.

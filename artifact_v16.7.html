@@ -1790,7 +1790,7 @@ function statusMetrics(mkt){
     var bal=i3+iff, projOut=null, projDem=0, projInb=0, months=[];
     HK.forEach(function(p){ var d=(D[p.key]||0)+(B[p.key]||0)+(F[p.key]||0)+(Z[p.key]||0), ib=inbByKey[p.key]||0;
       bal+=ib; bal-=d; projDem+=d; projInb+=ib; if(bal<0&&!projOut)projOut=p.lbl; months.push({lbl:p.lbl,dem:d,inb:ib,close:bal}); });
-    out.push({sku:s.s, ti:s.ti||'C', cat:s.c||'', st:s.ms[mkt].st||'ACTIVE', has3:has3, hasf:hasf,
+    out.push({sku:s.s, ti:s.ti||'C', cat:s.c||'', rw:s.rw||'', st:s.ms[mkt].st||'ACTIVE', has3:has3, hasf:hasf,
       i3:i3, iff:iff, oo3:oo3, oof:oof, oo:oo3+oof, wk3:wk3, wkf:wkf, cov3:cov3, covf:covf,
       t3:md.t3||12, tf:md.tf||(mkt==='CA'?4:8), inbUnits:inbUnits, nextEta:nextEta,
       inbList:inbList, dl:{soh:i3+iff, inb:projInb, dem:projDem, out:projOut, months:months},
@@ -9169,7 +9169,32 @@ function renderInvStatus(){
       return '<tr><td style="padding:4px 10px">'+esc(x.sku)+'</td><td style="padding:4px 10px">'+poCell+'</td><td style="padding:4px 10px;text-align:right">'+invNum(x.qty)+'</td><td style="padding:4px 10px;white-space:nowrap">'+invFmtEta(x.eta)+'</td><td style="padding:4px 10px">'+esc(typeLbl[x.type]||x.type||'')+'</td><td style="padding:4px 10px">'+esc(x.supplier||'')+'</td></tr>'; }).join('')
     +'</tbody></table></div>'; }
 
-  html+='<div class="mut" style="font-size:11px;margin-top:20px;border-top:1px solid #e5e7eb;padding-top:10px">More sections to come: PO inbound delays &amp; impacted products, in-production new-season launches.</div>';
+  // Section 7 · In-production new-season launches. FUTURE SKUs (launch date ahead), grouped by season (release window),
+  // soonest launch first. Shows what's on order/inbound to land the launch; red = nothing in production yet.
+  var _now=Date.now(), SOON=120*864e5;   // "imminent" launch window (within ~4 months) — where production should already be under way
+  var fut=rows.filter(function(r){ return r.st==='FUTURE'; });
+  fut.forEach(function(r){ r._soon=r.launch&&(Date.parse(r.launch)-_now)<SOON; r._none=r._soon&&(r.oo+r.inbUnits)<=0; });
+  var seasons={}; fut.forEach(function(r){ var k=r.rw||'(no season)'; (seasons[k]||(seasons[k]=[])).push(r); });
+  var seasonKeys=Object.keys(seasons).sort(function(a,b){   // sort seasons by their earliest launch date
+    var la=Math.min.apply(null,seasons[a].map(function(r){return r.launch?Date.parse(r.launch):8e15;}));
+    var lb=Math.min.apply(null,seasons[b].map(function(r){return r.launch?Date.parse(r.launch):8e15;})); return la-lb; });
+  var noProd=fut.filter(function(r){ return r._none; }).length;
+  html+=sectHdr(7,'7 · In-production — new-season launches ('+fut.length+')','Products not yet launched (launch date ahead), grouped by season, soonest first. Shows units on order / inbound to land the launch and forecast for the first 6 months. '+(noProd?'<b style="color:#b91c1c">'+noProd+' launching within 4 months have nothing in production yet.</b>':'Every imminent launch (within 4 months) has production in progress.'));
+  if(!fut.length){ html+='<div style="padding:12px 4px;color:#64748b;font-size:12px">No upcoming launches for '+esc(mkt)+'.</div>'; }
+  else seasonKeys.forEach(function(sk){ var L=seasons[sk]; L.sort(function(a,b){ var la=a.launch||'9999',lb=b.launch||'9999'; return la<lb?-1:la>lb?1:a.sku.localeCompare(b.sku); });
+    html+='<div style="margin-bottom:12px"><div style="font-weight:700;font-size:12px;color:#334155;margin-bottom:4px">'+esc(sk)+' <span class="mut" style="font-weight:400">('+L.length+')</span></div>'
+      +'<div style="max-height:300px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'
+      +['SKU','Tier','Launch','On order','Inbound (next ETA)','Forecast (6mo)'].map(function(h,i){return '<th style="text-align:'+(i>=3?'right':'left')+';padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+      +L.map(function(r){ var none=r._none;
+        var inb=r.inbUnits>0?(invNum(r.inbUnits)+' <span class="mut" style="font-size:10px">'+invFmtEta(r.nextEta)+'</span>'):'—';
+        return '<tr'+(none?' style="background:#fef2f2"':'')+'><td style="padding:4px 10px">'+esc(r.sku)+'</td><td style="padding:4px 10px">'+esc(r.ti)+'</td>'
+          +'<td style="padding:4px 10px;white-space:nowrap">'+invFmtEta(r.launch)+'</td>'
+          +'<td style="padding:4px 10px;text-align:right'+(none?';color:#b91c1c;font-weight:700':'')+'">'+invNum(r.oo)+'</td>'
+          +'<td style="padding:4px 10px;text-align:right">'+inb+'</td>'
+          +'<td style="padding:4px 10px;text-align:right">'+invNum(r.dl.dem)+'</td></tr>'; }).join('')
+      +'</tbody></table></div></div>'; });
+
+  html+='<div class="mut" style="font-size:11px;margin-top:20px;border-top:1px solid #e5e7eb;padding-top:10px">One section remaining: PO inbound delays &amp; impacted products (needs a SUPPLY/PO delay endpoint).</div>';
   panel.innerHTML=html;
 }
 // Manage FBA + FBA Aged: manually-uploaded Amazon FBA report per market (persisted). Manage FBA compares
