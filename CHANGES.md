@@ -1,3 +1,8 @@
+## v26.920.0 Fix: "Take forecast snapshot" (old accuracy feature) crashed on duplicate PK
+- **Bug (live):** DEMAND ▸ KPIs ▸ Forecast accuracy ▸ "📸 Take forecast snapshot now" failed with `duplicate key value violates unique constraint "forecasts_pkey"`. Cause: the snapshot insert normalised any non-FBA/B2B channel to `DTC`, so once Zalando forecasts existed in `forecast_outputs`, `DTC` + `ZAL` rows for the same SKU/warehouse/month collapsed to one primary key (278 keys on live). The first two snapshots (pre-Zalando) worked; this one didn't.
+- **Fix:** `/api/forecast/snapshot` now (a) maps `ZAL` to its own channel (matches `sales_actuals` + the app's ZAL channel) and (b) `GROUP BY`s the full PK + `sum(units)`, so any future channel that still collapses is summed into one row instead of crashing. Verified against live: 0 offending keys after the fix.
+- Server-only; no schema/migration/env/deps. Live-affecting bug on v26.861 — rides the next deploy.
+
 ## v26.919.0 Security hardening — low-risk quick wins from Diviyaj's 2026-08-12 review (H2/M4/M7)
 - **H2 (inline-script injection):** `replaceGlobal()` now unicode-escapes `<` `>` and U+2028/U+2029 in every injected global. A baked DB string containing `</script>` can no longer break out of the inline `<script>` and inject HTML into staff pages. Verified: no break-out, injected value round-trips byte-identical.
 - **M4 (`/api/ai` proxy):** sanitises the client body before forwarding on the company key — drops `mcp_servers` (SSRF-by-proxy; nothing legitimate uses it), allowlists `model` (falls back to a current default rather than rejecting, so the app never breaks), and caps `max_tokens` at 8192. `system`/`messages`/etc. pass through unchanged.

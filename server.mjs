@@ -11907,12 +11907,20 @@ app.post('/api/forecast/snapshot', async (req, res) => {
     const run = (await client.query(`INSERT INTO planner.forecast_runs (engine_version, horizon_start, horizon_end, notes)
       VALUES ('sku-snapshot', $1, $2, $3) RETURNING id, to_char(run_at,'YYYY-MM-DD HH24:MI') run_at`,
       [hz.s, hz.e, (req.body && req.body.note) || 'Manual SKU forecast snapshot'])).rows[0];
+    // ZAL (Zalando) is its own channel — map it explicitly (matches sales_actuals + the app's ZAL channel). Without
+    // this it fell through to DTC, so DTC and ZAL rows for the same sku/wh/month collapsed to one PK and the insert
+    // threw "duplicate key … forecasts_pkey" (278 keys on live). GROUP BY the full PK + sum(units) is belt-and-braces:
+    // any future channel that still collapses is summed into one row rather than crashing the snapshot.
     const ins = await client.query(`INSERT INTO planner.forecasts (run_id, level, subcategory, country, channel, sku, warehouse, month, units, method, reason)
-      SELECT $1, 'sku', coalesce(NULLIF(p.subcategory,''),'Uncategorised'),
+      SELECT $1, 'sku', coalesce(NULLIF(p.subcategory,''),'Uncategorised') subcategory,
+        upper(split_part(fo.warehouse,'_',1)) country,
+        CASE WHEN upper(fo.channel)='FBA' THEN 'FBA' WHEN upper(fo.channel)='B2B' THEN 'B2B' WHEN upper(fo.channel)='ZAL' THEN 'ZAL' ELSE 'DTC' END channel,
+        fo.sku, fo.warehouse, fo.month, sum(fo.units) units, 'snapshot', 'manual snapshot'
+      FROM planner.forecast_outputs fo LEFT JOIN planner.products p ON p.sku=fo.sku
+      GROUP BY coalesce(NULLIF(p.subcategory,''),'Uncategorised'),
         upper(split_part(fo.warehouse,'_',1)),
-        CASE WHEN upper(fo.channel)='FBA' THEN 'FBA' WHEN upper(fo.channel)='B2B' THEN 'B2B' ELSE 'DTC' END,
-        fo.sku, fo.warehouse, fo.month, fo.units, 'snapshot', 'manual snapshot'
-      FROM planner.forecast_outputs fo LEFT JOIN planner.products p ON p.sku=fo.sku`, [run.id]);
+        CASE WHEN upper(fo.channel)='FBA' THEN 'FBA' WHEN upper(fo.channel)='B2B' THEN 'B2B' WHEN upper(fo.channel)='ZAL' THEN 'ZAL' ELSE 'DTC' END,
+        fo.sku, fo.warehouse, fo.month`, [run.id]);
     await client.query('COMMIT');
     res.json({ ok: true, run_id: run.id, run_at: run.run_at, rows: ins.rowCount });
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
