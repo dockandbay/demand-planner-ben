@@ -2806,6 +2806,7 @@ app.get('/api/supply/:section', async (req, res, next) => {
       }
       case 'purchase-orders':
       case 'cashflow': {
+        maybeRecordPoDeliveries();   // §6 delay detection: snapshot current PO landing dates on every grid load (non-blocking)
         // value est = Σ(qty×cost) from order-plan lines (fallback to stored estimate).
         // Catch-up: completion = (start%+completion%)×value − actual start-deposit assigned, so
         // completion tops up to the cumulative target when the assigned deposit differed from start%.
@@ -6893,11 +6894,24 @@ const PO_OPEN_FROM = `FROM planner.purchase_orders po
   LEFT JOIN planner.branches  b   ON b.name=po.branch
   LEFT JOIN planner.shipments sh  ON sh.shipment_ref=po.shipment_ref
   WHERE coalesce(po.status,'') NOT ILIKE '%complete%' AND po.master_po IS NULL`;   // exclude children (master carries the lines)
-async function poDeliveryDelays(market) {
-  // 1) Snapshot current landing dates (append only when a PO shows a date we haven't recorded before).
+// Snapshot each open PO's current landing date; PK dedupes so only genuinely-new dates append (= a slip is recorded).
+async function recordPoDeliveries() {
   await pool.query(`INSERT INTO planner.po_delivery_history (po, delivery_date)
      SELECT po, d FROM (SELECT po.po po, ${PO_LANDING_EXPR} d ${PO_OPEN_FROM}) x
      WHERE d IS NOT NULL ON CONFLICT (po, delivery_date) DO NOTHING`);
+}
+// Fire-and-forget snapshot for hot paths (PO grid load). No-overlap guard so concurrent grid loads don't pile up;
+// idempotent (ON CONFLICT DO NOTHING) so running it often is cheap and safe. This is what makes §6 delay-detection
+// robust — dates are captured on every grid view, not only when the Status Report is open.
+let _poRecInFlight = false;
+function maybeRecordPoDeliveries() {
+  if (_poRecInFlight) return;
+  _poRecInFlight = true;
+  recordPoDeliveries().catch(e => console.error('[po-dates] snapshot failed:', e.message)).finally(() => { _poRecInFlight = false; });
+}
+async function poDeliveryDelays(market) {
+  // 1) Snapshot current landing dates (append only when a PO shows a date we haven't recorded before).
+  await recordPoDeliveries();
   // 2) Baseline (first-seen date) vs current (latest-seen date); slipped = current later than baseline.
   const slips = (await pool.query(`
     WITH h AS (SELECT po, delivery_date, recorded_at,
