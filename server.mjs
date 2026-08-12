@@ -6751,6 +6751,32 @@ app.post('/api/supply/master-po/create', async (req, res) => {
   } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
+app.post('/api/supply/master-po/:id/remove-child', async (req, res) => {   // detach ONE child → it becomes a normal PO again; re-sum the master's lines
+  const id = req.params.id, po = String((req.body && req.body.po) || '').trim();
+  if (!po) return res.status(400).json({ error: 'po required' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const m = (await client.query(`SELECT po, coalesce(status,'') status FROM planner.purchase_orders WHERE po=$1 AND coalesce(is_master,false)=true FOR UPDATE`, [id])).rows[0];
+    if (!m) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'master not found' }); }
+    const ch = (await client.query(`SELECT 1 FROM planner.purchase_orders WHERE po=$1 AND master_po=$2`, [po, id])).rows[0];
+    if (!ch) { await client.query('ROLLBACK'); return res.status(400).json({ error: po + ' is not a child of ' + id }); }
+    await client.query(`UPDATE planner.purchase_orders SET master_po=NULL, updated_at=now() WHERE po=$1`, [po]);   // back to a normal PO
+    // Re-sum the master's consolidated lines from the remaining children (empty if none left).
+    await client.query(`DELETE FROM planner.purchase_order_lines WHERE po=$1`, [id]);
+    await client.query(`INSERT INTO planner.purchase_order_lines (po, sku, po_sku, qty, cost_price, carton_qty, po_status)
+      SELECT $1, sku, $1||'-'||sku, sum(qty),
+             CASE WHEN sum(qty)>0 THEN round(sum(qty*coalesce(cost_price,0))/sum(qty),4) ELSE max(cost_price) END,
+             nullif(sum(coalesce(carton_qty,0)),0), $2
+      FROM planner.purchase_order_lines WHERE po IN (SELECT po FROM planner.purchase_orders WHERE master_po=$1) GROUP BY sku`, [id, m.status]);
+    await client.query(`UPDATE planner.purchase_orders SET order_value_estimation=(SELECT coalesce(sum(f.value_est),0) FROM planner.purchase_orders p JOIN planner.v_po_finance f ON f.po=p.po WHERE p.master_po=$1), updated_at=now() WHERE po=$1`, [id]);
+    const remaining = (await client.query(`SELECT count(*)::int n FROM planner.purchase_orders WHERE master_po=$1`, [id])).rows[0].n;
+    await client.query('COMMIT');
+    invalidateSupplyCaches();
+    res.json({ ok: true, remaining });
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
 app.post('/api/supply/master-po/:id/dissolve', async (req, res) => {   // undo: remove the master row + lines, free the children
   const id = req.params.id;
   const client = await pool.connect();
@@ -7460,6 +7486,9 @@ app.post('/api/supply/po/:po/delete', async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
+    // Never orphan children: a master PO can only be deleted once all its child POs are removed (Child PO tab).
+    const kids = (await client.query(`SELECT count(*)::int n FROM planner.purchase_orders WHERE master_po=$1`, [po])).rows[0].n;
+    if (kids > 0) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'Cannot delete a master PO while ' + kids + ' child PO' + (kids > 1 ? 's are' : ' is') + ' assigned — remove them on the Child PO tab first' }); }
     await client.query('DELETE FROM planner.purchase_order_lines WHERE po=$1', [po]);
     await client.query('DELETE FROM planner.erp_purchase_order_lines WHERE po=$1', [po]);
     await client.query('DELETE FROM planner.erp_purchase_orders WHERE po=$1', [po]);
@@ -11039,6 +11068,7 @@ const PO_ROWS_SQL = `
             coalesce((SELECT pcd.custom_dev_ref FROM planner.purchase_orders pcd WHERE pcd.po=calc4.po),'') custom_dev_ref,   -- custom-order product developments (CSV of product_dev_items.ref); subquery since calc4 doesn't forward the column
             (SELECT po3.master_po FROM planner.purchase_orders po3 WHERE po3.po=calc4.po) master_po,                        -- master-PO grouping: a CHILD carries its master's po (filtered out of the grid in poRowsCache)
             (SELECT coalesce(po3.is_master,false) FROM planner.purchase_orders po3 WHERE po3.po=calc4.po) is_master,        -- true on the consolidated MASTER row (shows the 'master' badge)
+            (SELECT count(*) FROM planner.purchase_orders pc WHERE pc.master_po=calc4.po)::int master_child_count,           -- how many children a master still has (delete is blocked until 0)
             -- Pending supplier-submitted completion (production-end) date → inline "set to …" quick-apply on the grid END cell
             (SELECT ss.value FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='completion_date' AND ss.status='pending' ORDER BY ss.id DESC LIMIT 1) sub_comp_date,
             (SELECT ss.id    FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='completion_date' AND ss.status='pending' ORDER BY ss.id DESC LIMIT 1) sub_comp_id,

@@ -1542,7 +1542,7 @@
       +row('Batch ID',cellPickBtn(po,ep,'batch_id',r.batch_id,'batch')+_amk('Batch'))
       +row('Supplier confirmation',(r.supplier_confirmed?'<span class="tool-badge bg-green">✓ confirmed '+esc(r.supplier_confirmed)+(r.supplier_confirmed_by?' · '+esc(r.supplier_confirmed_by):'')+'</span> <button class="save-btn light pom-unconfirm" data-po="'+esc(po)+'" title="reset so the supplier must re-confirm">reset</button>':'<span class="tool-badge bg-amber">⏳ awaiting supplier confirmation</span>'+(PO_ACTCOND.po_not_approved(r)?actMark(po,'po_not_approved')+' <button class="save-btn po-remind-confirm" data-po="'+esc(po)+'" style="background:#7c3aed;color:#fff;border-color:#6d28d9" title="Post &ldquo;Reminder to review and confirm this PO&rdquo; to the supplier&rsquo;s portal timeline">✉ Send timeline message to supplier</button>':'')))
       +row('<span class="po-note-badge" style="cursor:default">N</span> Notes <span class="mut tiny">(internal — shows as a purple N on the PO row; separate from the Timeline)</span>',txtIn(ep,'notes',r.notes,540,true))
-      +'</div><div style="margin-top:14px"><button class="save-btn light pom-del" data-po="'+esc(po)+'" title="delete this PO + its lines" style="color:#dc2626;border-color:#fca5a5">🗑 Delete this PO</button></div>'; }
+      +'</div><div style="margin-top:14px"><button class="save-btn light pom-del" data-po="'+esc(po)+'"'+((r.is_master&&Number(r.master_child_count)>0)?' disabled title="Cannot delete a master PO when child POs are assigned — remove them on the Child PO tab" style="color:#9ca3af;border-color:#e5e7eb;cursor:not-allowed;opacity:.6"':' title="delete this PO + its lines" style="color:#dc2626;border-color:#fca5a5"')+'>🗑 Delete this PO</button>'+((r.is_master&&Number(r.master_child_count)>0)?' <span class="mut tiny">'+Number(r.master_child_count)+' child PO'+(Number(r.master_child_count)>1?'s':'')+' still assigned</span>':'')+'</div>'; }
   // PLAN-panel SHIPMENTS tab (#10): assign a shipment / FOB, ASN numbers, iFulfillment pallet labels — this PO.
   function poShipPanel(po,d){ var r=poBy[po]||{}; var ep='/api/supply/po/'+encodeURIComponent(po);
     var today=new Date().toISOString().slice(0,10);   // used by the pre-shipment-doc overdue checks below
@@ -4825,17 +4825,18 @@
         html+='<div style="margin-bottom:14px"><div class="bar" style="gap:10px;align-items:center;margin-bottom:4px">'
           +'<span class="mut tiny">Master</span><button class="lnk-btn cp-master" data-po="'+esc(mp)+'" style="color:#1d4ed8;cursor:pointer;font-weight:700">'+esc(mp)+'</button>'
           +'<span style="'+MP_BADGE+'">master</span>'+(st?' <span class="tool-badge" style="background:#e0e7ff;color:#3730a3">'+esc(st)+'</span>':'')
-          +'<span style="margin-left:auto"></span><button class="save-btn light cp-dissolve" data-po="'+esc(mp)+'" style="color:#dc2626;border-color:#fca5a5" title="undo: remove the master + free the children back to the grid">Dissolve</button></div>'
-          +'<div class="tw"><table class="pay-tbl"><thead><tr><th class="l">Child PO</th><th></th><th class="l">Branch</th><th class="l">Client</th><th>Value</th><th class="l">Status</th></tr></thead><tbody>'
+          +'<span class="mut tiny" style="margin-left:auto">'+kids.length+' child PO'+(kids.length>1?'s':'')+' · remove all to delete the master from its PO page</span></div>'
+          +'<div class="tw"><table class="pay-tbl"><thead><tr><th class="l">Child PO</th><th></th><th class="l">Branch</th><th class="l">Client</th><th>Value</th><th class="l">Status</th><th></th></tr></thead><tbody>'
           +kids.map(function(c){ return '<tr><td class="l"><button class="lnk-btn cp-child" data-po="'+esc(c.po)+'" style="color:#1d4ed8;cursor:pointer">'+esc(c.po)+'</button></td>'
             +'<td><span style="'+MP_BADGE+'">child</span></td><td class="l">'+esc(c.branch||'')+'</td><td class="l">'+esc(c.client||'')+'</td><td>'+mpMoney(c.value_est)+'</td>'
-            +'<td class="l"><span class="mut tiny">inherits master</span></td></tr>'; }).join('')
+            +'<td class="l"><span class="mut tiny">inherits master</span></td>'
+            +'<td class="l"><button class="cp-remove" data-mp="'+esc(mp)+'" data-po="'+esc(c.po)+'" title="remove from master — converts back to a normal PO" style="border:none;background:none;color:#dc2626;font-weight:800;cursor:pointer;font-size:13px">✕</button></td></tr>'; }).join('')
           +'</tbody></table></div></div>';
       });
       body.innerHTML=html;
       body.querySelectorAll('.cp-master, .cp-child').forEach(function(b){ b.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(b.dataset.po,'dates'); else if(typeof gotoPO==='function')gotoPO(b.dataset.po,'dates'); }; });
-      body.querySelectorAll('.cp-dissolve').forEach(function(b){ b.onclick=function(){ if(!confirm('Dissolve '+b.dataset.po+'? The master PO + its consolidated lines are removed and the children return to the grid.'))return;
-        fetch('/api/supply/master-po/'+encodeURIComponent(b.dataset.po)+'/dissolve',{method:'POST'}).then(function(r){return r.json();}).then(function(res){ if(res.error){ alert(res.error); return; } cache['purchase-orders']=null; renderChildPo(body); }); }; });
+      body.querySelectorAll('.cp-remove').forEach(function(b){ b.onclick=function(){ if(!confirm('Remove '+b.dataset.po+' from '+b.dataset.mp+'? It converts back to a normal PO and returns to the grid; the master re-sums its lines.'))return;
+        b.disabled=true; fetch('/api/supply/master-po/'+encodeURIComponent(b.dataset.mp)+'/remove-child',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({po:b.dataset.po})}).then(function(r){return r.json();}).then(function(res){ if(res.error){ alert(res.error); b.disabled=false; return; } cache['purchase-orders']=null; renderChildPo(body); }); }; });
     }).catch(function(e){ body.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>'; }); }
   // CROSSDOCK sub-tab: on-hand + inbound for every CROSSDOCK/PREORDER SKU in the four 3PL warehouses, the app's
   // best-guess attribution of what each stock is, a manual note for anything unknown (auto-wiped on ship-out),

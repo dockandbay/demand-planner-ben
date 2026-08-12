@@ -1,3 +1,7 @@
+## v26.864.0 Master PO — remove a child + guarded master delete
+- **Child PO tab:** each child now has a **✕ remove** — it detaches from the master and converts back to a **normal PO** (returns to the grid); the master **re-sums its consolidated lines** (verified 3395→1195 after removing one). Replaces the old bulk Dissolve.
+- **Master delete is guarded:** the PO's "🗑 Delete this PO" is **greyed out with a tooltip** ("Cannot delete a master PO when child POs are assigned — remove them on the Child PO tab") until every child is removed; then it's clickable. Enforced server-side too (409, never orphans children). `master_child_count` added to PO rows.
+
 ## v26.863.0 Master PO — reworked: the master is now a REAL purchase order
 - Per Ben's feedback, a master is no longer a separate object — it's a **real `purchase_orders` row** (`is_master`) that behaves like any PO (grid, shipments, branch, ERP, rename). Number = **biggest child's PO + `-MASTER`** (ties → first); it **inherits the biggest child's header** and carries the **summed child lines** + the supplier invoice.
 - **Create moved to Import/Export ▸ ⛃ Create master PO** (modal: pick supplier → tick 2+ consolidatable POs → optional invoice → create). Warns if the selection spans multiple branches (the master forces one branch → market shift).
