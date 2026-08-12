@@ -1,3 +1,6 @@
+## v26.881.0 Supplier Timing — exclude "our issue" POs + manual delay
+- SUPPLY ▸ Reports ▸ Supplier Timing: each PO with completion-date movements gets an **"our issue (exclude)"** checkbox. Ticking it removes that PO from the supplier’s slip stats (By-supplier table) and reveals a **manual delay (days)** input to record the true, self-inflicted delay. Persists per PO (migration 214, `supplier_timing_review`).
+
 ## v26.880.0 Shipments — active filter selects go dark
 - The Shipments **ship-to country**, **branch** and **mode** dropdowns now render dark (black, SEL_ON) when a non-default value is chosen, and revert when set back to "All" — a clear active-filter cue (matches the PO grid selects).
 

@@ -2687,9 +2687,11 @@ app.get('/api/supply/:section', async (req, res) => {
             to_char(po.end_production_overide,'YYYY-MM-DD') applied_completion,
             s.first_date, s.latest_date, coalesce(s.changes,0) changes, s.first_at, s.last_at, coalesce(s.trail,'[]'::json) trail,
             CASE WHEN s.first_date IS NOT NULL AND s.latest_date IS NOT NULL THEN (s.latest_date::date - s.first_date::date) END slip_days,
-            CASE WHEN po.start_production IS NOT NULL THEN (coalesce(s.latest_date::date, po.end_production_overide) - po.start_production) END lead_days
+            CASE WHEN po.start_production IS NOT NULL THEN (coalesce(s.latest_date::date, po.end_production_overide) - po.start_production) END lead_days,
+            coalesce(r.our_issue,false) our_issue, r.manual_delay_days, coalesce(r.note,'') st_note
           FROM planner.purchase_orders po
           LEFT JOIN sub s ON s.po=po.po
+          LEFT JOIN planner.supplier_timing_review r ON r.po=po.po
           WHERE s.po IS NOT NULL
              OR (po.start_production IS NOT NULL AND coalesce(po.status,'') !~* 'complete|arrived|received|cancel|closed|deliver')
           ORDER BY slip_days DESC NULLS LAST, po.supplier_name, po.po`);
@@ -6654,6 +6656,18 @@ app.get('/api/supply/dtc/status', async (_req, res) => {
   try { const o = (await pool.query(`SELECT count(*)::int n, count(*) FILTER (WHERE NOT is_void AND dispatched_date IS NULL)::int open, to_char(max(imported_at),'DD-Mon-YY HH24:MI') at FROM planner.dtc_sales_orders`)).rows[0] || {};
     res.json({ orders: o.n || 0, open: o.open || 0, imported_at: o.at || null }); }
   catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Supplier Timing: mark a PO's delay as OUR issue (excluded from supplier slip stats) + optional manual delay days/note.
+app.post('/api/supply/supplier-timing/review', async (req, res) => {
+  const b = req.body || {}, po = String(b.po || '').trim(); if (!po) return res.status(400).json({ error: 'po required' });
+  try {
+    const md = (b.manual_delay_days === '' || b.manual_delay_days == null) ? null : parseInt(b.manual_delay_days, 10);
+    await pool.query(`INSERT INTO planner.supplier_timing_review (po, our_issue, manual_delay_days, note, updated_by, updated_at)
+      VALUES ($1,$2,$3,$4,$5,now())
+      ON CONFLICT (po) DO UPDATE SET our_issue=excluded.our_issue, manual_delay_days=excluded.manual_delay_days, note=excluded.note, updated_by=excluded.updated_by, updated_at=now()`,
+      [po, !!b.our_issue, (md != null && !isNaN(md)) ? md : null, b.note ? String(b.note) : null, authUser(req)]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // ── Manage 3PL: import a market's 3PL stock report (drivehq CSV) and compare on-hand vs planner.products.inventory_<mkt>_3pl ──
 // EU has no source yet. URLs are cache-busted with a timestamp. Read-only (no writes) — it's a comparison view.
