@@ -729,6 +729,35 @@ app.get('/api/demand/sku-data', async (req, res) => {
   try { const v = await getDataVals(); res.json({ sku_raw: v[3] || {}, fc_outputs: v[2] || {} }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// ── Forecast Snapshots (DEMAND ▸ Snapshots) — lock a copy of forecast_outputs; compare later + past-month locked-vs-actual ──
+app.get('/api/demand/snapshots', async (_req, res) => {
+  try { res.json((await pool.query(`SELECT id, name, to_char(taken_at,'YYYY-MM-DD"T"HH24:MI:SS') taken_at, taken_by, row_count
+    FROM planner.forecast_snapshots ORDER BY taken_at DESC`)).rows); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/demand/snapshots', async (req, res) => {
+  const name = String((req.body && req.body.name) || '').trim() || ('Snapshot ' + new Date().toISOString().slice(0, 16).replace('T', ' '));
+  const by = authUser(req) || 'admin';
+  try {
+    const id = (await pool.query(`INSERT INTO planner.forecast_snapshots(name, taken_by) VALUES($1,$2) RETURNING id`, [name, by])).rows[0].id;
+    const r = await pool.query(`INSERT INTO planner.forecast_snapshot_rows(snapshot_id, sku, warehouse, channel, month, units)
+      SELECT $1, sku, warehouse, channel, month, units FROM planner.forecast_outputs WHERE units IS NOT NULL`, [id]);
+    await pool.query(`UPDATE planner.forecast_snapshots SET row_count=$2 WHERE id=$1`, [id, r.rowCount]);
+    res.json({ ok: true, id: id, name: name, rows: r.rowCount });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/demand/snapshots/:id/delete', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.forecast_snapshots WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Snapshot data as an FC_OUTPUTS-shaped map { "sku|wh|ch": { "YYYY_MM": units } } — client diffs vs live (or another snapshot).
+app.get('/api/demand/snapshots/:id/data', async (req, res) => {
+  try { const rows = (await pool.query(`SELECT sku, warehouse wh, channel ch, to_char(month,'YYYY_MM') ym, units
+      FROM planner.forecast_snapshot_rows WHERE snapshot_id=$1`, [req.params.id])).rows;
+    const out = {}; rows.forEach(r => { const k = r.sku + '|' + r.wh + '|' + r.ch; (out[k] || (out[k] = {}))[r.ym] = r.units; });
+    res.json({ id: Number(req.params.id), fc: out });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // Un-allocated "China Stock" holding stock per SKU = qty on open China Stock branch POs (the MOQ top-ups). The buy
 // plan flags this as available to allocate. Display-only (does NOT alter buy quantities — allocation is a later step).
 async function buildChinaStock() {

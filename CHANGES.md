@@ -1,3 +1,6 @@
+## v26.916.0 Forecast Snapshots — backend (#3 stage 1)
+- New table (mig 220) `planner.forecast_snapshots` + `forecast_snapshot_rows` (a copy of `forecast_outputs` unit values at a point in time). Endpoints: `POST /api/demand/snapshots` (take, names + copies), `GET /api/demand/snapshots` (list), `POST /api/demand/snapshots/:id/delete`, `GET /api/demand/snapshots/:id/data` (FC_OUTPUTS-shaped map for compare / past-month locked-vs-actual). Stores raw unit values so a past month's forecast is preserved (no recompute). Category level = sum of SKU rows. UI (Snapshots tab + compare + #4 cell display) next.
+
 ## v26.913.0 Silent data/version refresh — no banner, no interrupting full reload
 - The auto-update check (new code or new ETL data) no longer shows the yellow **"🔄 Refresh now" banner** or force a full page reload while you're actively using the app. It now only ever reloads **silently** when the tab is backgrounded or idle (unsaved forecast edits are still flushed first). Applies to all pages. A stale tab just waits for the next idle/hidden moment to update quietly. The manual **↻ Refresh cache** button is unchanged.
 
