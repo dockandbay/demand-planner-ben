@@ -1,3 +1,8 @@
+## v26.891.0 SUG-0024 Inventory Status Report — Sections 1–3 + BP.statusMetrics accessor
+- New read-only **`BP.statusMetrics(mkt)`** accessor: per SKU it returns SOH split (3PL/FBA), on-order, avg weekly demand + **weeks-cover** per warehouse, cover targets, inbound units + next ETA, tier/status/dates. Pure read — does not touch buy logic.
+- **INVENTORY ▸ Status Report** now shows three tiered (A/B/C) sections per market pill: **1 · Out of stock** (0 on hand in a used warehouse), **2 · Backorders** (negative 3PL available, owed orders) with inbound + next ETA to clear, **3 · Low stock** (weeks-cover below the market cover target). Mutually exclusive in urgency order (backorder → out → low).
+- Remaining sections (delivery vs forecast, PO inbound delays + impacted products, in-production new-season launches) still to come — they cross into SUPPLY/PO data.
+
 ## v26.890.0 Manage 3PL — EU via BLADE API + auto-load when >2 days old
 - **EU 3PL source is now the BLADE (bladepro.io) API** (previously "no source configured"). On **Import**, the server logs into BLADE, calls `PUT /products/variations/stocks` (a read), and maps each row to a SKU with **total_saleable = on hand** and **available = available**, summed across warehouses. Variations (`stock_availability`) are fetched as a SKU fallback for any stock row missing one. Then compared vs `products.inventory_eu_3pl[_onhand]` like the other markets.
 - **Needs env (secrets, not committed):** `BLADE_PASSWORD` and `BLADE_STOCK_BODY` (the `PUT /stocks` payload from your BLADE_AUTH!A2 cell). `BLADE_USERNAME` defaults to the app account. Until set, EU Import shows a clear "not set in env" message.

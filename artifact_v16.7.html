@@ -1763,6 +1763,26 @@ function webFwdDemand(md,n){
   }
   return sum;
 }
+// Read-only status accessor for the INVENTORY ▸ Status Report (SUG-0024). Per SKU in `mkt`: SOH split (3PL/FBA),
+// on-order, avg weekly demand + weeks-cover per warehouse, cover targets, inbound units + next ETA, tier/status/dates.
+// Pure read — does NOT touch buy logic. Assumes buildLiveDemand() already ran so md.demand is populated.
+function statusMetrics(mkt){
+  var out=[]; (SL||[]).forEach(function(s){
+    if(!s.ms||!s.ms[mkt])return;
+    var md=PD[s.s]&&PD[s.s].mkts&&PD[s.s].mkts[mkt]; if(!md)return;
+    var ch=md.ch||[]; var has3=ch.indexOf('DTC')>=0||ch.indexOf('B2B')>=0, hasf=ch.indexOf('FBA')>=0;
+    var i3=md.i3||0, iff=md['if_']||0, oo3=md.oo3||0, oof=md.oof||0;
+    var wk3=webFwdDemand(md,3)/13, wkf=fbaFwdDemand(md,3)/13;   // avg weekly demand over next 90 days
+    var cov3=wk3>0?(i3+oo3)/wk3:((i3+oo3)>0?Infinity:0);
+    var covf=wkf>0?(iff+oof)/wkf:((iff+oof)>0?Infinity:0);
+    var inbUnits=0, nextEta=null;
+    (md.inb||[]).forEach(function(x){ inbUnits+=(x.qty||0); var e=x.eta||x.poEta; if(e&&(!nextEta||e<nextEta))nextEta=e; });
+    out.push({sku:s.s, ti:s.ti||'C', cat:s.c||'', st:s.ms[mkt].st||'ACTIVE', has3:has3, hasf:hasf,
+      i3:i3, iff:iff, oo3:oo3, oof:oof, oo:oo3+oof, wk3:wk3, wkf:wkf, cov3:cov3, covf:covf,
+      t3:md.t3||12, tf:md.tf||(mkt==='CA'?4:8), inbUnits:inbUnits, nextEta:nextEta,
+      launch:md.launch||null, disc:md.disc||null}); });
+  return out;
+}
 const TRF_MIN_3PL_WKS=4;   // hybrid guard: never transfer so much that 3PL drops below this many weeks of website cover
 
 // Recommended units to transfer 3PL -> FBA now, per the agreed rules:
@@ -3520,7 +3540,7 @@ function buyplanItems(mode){ var out=[], fba=(mode==='fba'); try{ for(var sku in
 return {project:project, getBuyQtys:getBuyQtys, buyplanItems:buyplanItems, render:render, initUI:initUI, setFilters:setFilters, restoreFilters:bpRestoreFilters, donorSpare:donorSpare,
   open_:open_, close_:close_, renderPanel:renderPanel, swM:swM, rpc:rpc,
   downloadReport:downloadReport, downloadReportCSV:downloadReportCSV, downloadViewCSV:downloadViewCSV, updateDlMenuLabels:updateDlMenuLabels,
-  updateTrfHeaders:updateTrfHeaders, getFilteredVis:getFilteredVis, trfLane:trfLane,
+  updateTrfHeaders:updateTrfHeaders, getFilteredVis:getFilteredVis, statusMetrics:statusMetrics, trfLane:trfLane,
   seasons:function(){ var out={}; SL.forEach(function(s){ if(!s.rw)return; var ok=false; for(var m in (s.ms||{})){ if(s.ms[m]&&(s.ms[m].st==='ACTIVE'||s.ms[m].st==='FUTURE')){ok=true;break;} } if(ok)out[s.rw]=1; }); return Object.keys(out).sort(); },
   skuOptions:function(){ return SL.map(function(s){ return {s:s.s, sc:s.sc||s.c||''}; }).sort(function(a,b){ return a.s<b.s?-1:a.s>b.s?1:0; }); },   // for the Complex Rules SKU picker: {sku, subcat/cat}
 
@@ -9042,33 +9062,73 @@ function renderInventory(){
   else if(INV_SUB==='fba-aged')invFbaLoad('aged');
   else if(INV_SUB==='status')renderInvStatus();
 }
-// SUG-0024 Inventory Status Report — section 1 (Out of stock by A/B/C tier, per market, 3PL + FBA). Uses the buy-plan
-// public data (BP.getFilteredVis → .ms[mkt].{i3=3PL SOH, if_=FBA SOH, oo=on-order, st, launch, disc} + .ti tier).
-// More sections (backorders, weeks-cover, delivery, inbound, PO delays, in-production) to follow.
+// SUG-0024 Inventory Status Report. Reads BP.statusMetrics(mkt) (SOH split, on-order, weeks-cover per warehouse,
+// cover targets, inbound units + next ETA). Section 1 = OUT OF STOCK; Section 2 = LOW STOCK (below cover target).
+// Sections still TODO (data-dependent): backorders vs inbound (no backorder feed), delivery vs forecast, PO delays.
+function invFmtEta(iso){ if(!iso)return '—'; var d=new Date(iso); if(isNaN(d.getTime()))return esc(String(iso).slice(0,10));
+  var mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return ('0'+d.getDate()).slice(-2)+'-'+mo[d.getMonth()]+'-'+String(d.getFullYear()).slice(-2); }
+function invNum(v){ return (Number(v)||0).toLocaleString(); }
+function invWks(v){ return v===Infinity?'∞':(Number(v)||0).toFixed(1); }
 function renderInvStatus(){
   var panel=document.getElementById('invstatus-panel'); if(!panel)return;
   var mkt=INV_STATUS_MKT;
-  if(typeof BP==='undefined'||!BP.getFilteredVis){ panel.innerHTML='<div class="mut" style="font-size:12px">Open BUY & MOVE once to load stock data, then reopen this tab.</div>'; return; }
+  if(typeof BP==='undefined'||!BP.statusMetrics){ panel.innerHTML='<div class="mut" style="font-size:12px">Open BUY & MOVE once to load stock data, then reopen this tab.</div>'; return; }
   try{ if(typeof buildLiveDemand==='function')buildLiveDemand(); }catch(e){}
-  var vis=[]; var saved=BP.CUR; try{ BP.CUR=mkt; vis=BP.getFilteredVis()||[]; }catch(e){} try{ BP.CUR=saved; }catch(e){}
-  var oos={A:[],B:[],C:[]};
-  vis.forEach(function(s){ var m=s.ms&&s.ms[mkt]; if(!m||m.st!=='ACTIVE')return;
-    var i3=Number(m.i3)||0, iff=Number(m.if_)||0; if(i3>0&&iff>0)return;   // out of stock in at least one warehouse
-    (oos[s.ti]||oos.C).push({sku:s.s, i3:i3, iff:iff, oo:Number(m.oo)||0, out3:i3<=0, outf:iff<=0}); });
-  var tot=oos.A.length+oos.B.length+oos.C.length;
+  var rows=[]; try{ rows=BP.statusMetrics(mkt)||[]; }catch(e){ panel.innerHTML='<div style="color:#dc2626">'+esc((e&&e.message)||e)+'</div>'; return; }
   var TL={A:'Tier A',B:'Tier B',C:'Tier C'}, TC={A:'#b91c1c',B:'#b45309',C:'#64748b'};
-  var html='<div style="font-weight:800;font-size:15px;margin:2px 0 2px">Inventory status — '+esc(mkt)+'</div>'
-    +'<div class="mut" style="font-size:11px;margin-bottom:12px">Section 1 of the report: <b>out of stock</b> (0 on hand in 3PL and/or FBA) among ACTIVE products, by marketing tier. More sections (backorders, weeks-cover, delivery, inbound, PO delays) coming.</div>';
-  if(!tot){ panel.innerHTML=html+'<div style="padding:20px;color:#16a34a;font-size:13px">No out-of-stock active products in '+esc(mkt)+' 🎉</div>'; return; }
-  ['A','B','C'].forEach(function(t){ var L=oos[t]; if(!L.length)return;
-    L.sort(function(a,b){ return (a.out3&&a.outf?0:1)-(b.out3&&b.outf?0:1) || a.sku.localeCompare(b.sku); });   // both-OOS first
-    html+='<div style="margin-bottom:14px"><div style="font-weight:700;font-size:12px;color:'+TC[t]+';margin-bottom:4px">'+TL[t]+' <span class="mut" style="font-weight:400">('+L.length+' out of stock)</span></div>'
-      +'<div style="max-height:300px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'
-      +['SKU','3PL SOH','FBA SOH','On order'].map(function(h,i){return '<th style="text-align:'+(i===0?'left':'right')+';padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
-      +L.map(function(r){ var oosCell=function(v,out){ return '<td style="padding:4px 10px;text-align:right'+(out?';color:#b91c1c;font-weight:700':'')+'">'+v+'</td>'; };
-        return '<tr><td style="padding:4px 10px;text-align:left">'+esc(r.sku)+'</td>'+oosCell(r.i3,r.out3)+oosCell(r.iff,r.outf)+'<td style="padding:4px 10px;text-align:right">'+(r.oo||0)+'</td></tr>'; }).join('')
-      +'</tbody></table></div></div>';
-  });
+  // Classify each ACTIVE row per warehouse it uses, in urgency priority: backorder (neg 3PL) > out of stock (zero) > low.
+  var bo={A:[],B:[],C:[]}, oos={A:[],B:[],C:[]}, low={A:[],B:[],C:[]};
+  rows.forEach(function(r){ if(r.st!=='ACTIVE')return;
+    var out3=r.has3&&r.i3===0, outf=r.hasf&&r.iff<=0;
+    var low3=r.has3&&r.i3>0&&r.cov3<r.t3, lowf=r.hasf&&r.iff>0&&r.covf<r.tf;
+    r.out3=out3; r.outf=outf; r.low3=low3; r.lowf=lowf;
+    if(r.has3&&r.i3<0){ (bo[r.ti]||bo.C).push(r); }          // backorder: negative 3PL available
+    else if(out3||outf){ (oos[r.ti]||oos.C).push(r); }        // out of stock: zero on hand in a used warehouse
+    else if(low3||lowf){ (low[r.ti]||low.C).push(r); } });    // low stock: below cover target
+  var nBo=bo.A.length+bo.B.length+bo.C.length, nOos=oos.A.length+oos.B.length+oos.C.length, nLow=low.A.length+low.B.length+low.C.length;
+  function sectHdr(n,title,sub){ return '<div style="font-weight:800;font-size:14px;margin:'+(n===1?'2px':'22px')+' 0 2px">'+title+'</div>'
+    +'<div class="mut" style="font-size:11px;margin-bottom:10px">'+sub+'</div>'; }
+  // Shared table renderer. `cols` = [{h,align,f}] where f(r)->cell html.
+  function tierTables(buckets, cols, emptyMsg){
+    var any=buckets.A.length+buckets.B.length+buckets.C.length;
+    if(!any)return '<div style="padding:12px 4px;color:#16a34a;font-size:12px">'+emptyMsg+'</div>';
+    return ['A','B','C'].map(function(t){ var L=buckets[t]; if(!L.length)return '';
+      L.sort(function(a,b){ return a.sku.localeCompare(b.sku); });
+      return '<div style="margin-bottom:12px"><div style="font-weight:700;font-size:12px;color:'+TC[t]+';margin-bottom:4px">'+TL[t]+' <span class="mut" style="font-weight:400">('+L.length+')</span></div>'
+        +'<div style="max-height:300px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'
+        +cols.map(function(c){return '<th style="text-align:'+(c.align||'right')+';padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+c.h+'</th>';}).join('')+'</tr></thead><tbody>'
+        +L.map(function(r){ return '<tr>'+cols.map(function(c){return '<td style="padding:4px 10px;text-align:'+(c.align||'right')+';white-space:nowrap">'+c.f(r)+'</td>';}).join('')+'</tr>'; }).join('')
+        +'</tbody></table></div></div>'; }).join('');
+  }
+  var sohCell=function(v,bad){ return '<span style="'+(bad?'color:#b91c1c;font-weight:700':'')+'">'+invNum(v)+'</span>'; };
+  var wkCell=function(v,target,bad){ return '<span style="'+(bad?'color:#b45309;font-weight:700':'')+'">'+invWks(v)+'</span> <span class="mut" style="font-size:10px">/ '+target+'w</span>'; };
+  var inbCell=function(r){ return r.inbUnits>0?(invNum(r.inbUnits)+' <span class="mut" style="font-size:10px">'+invFmtEta(r.nextEta)+'</span>'):'—'; };
+  var boCols=[{h:'SKU',align:'left',f:function(r){return esc(r.sku);}},
+    {h:'3PL available',f:function(r){return '<span style="color:#b91c1c;font-weight:700">'+invNum(r.i3)+'</span>';}},
+    {h:'FBA SOH',f:function(r){return r.hasf?sohCell(r.iff,r.outf):'<span class="mut">—</span>';}},
+    {h:'On order',f:function(r){return invNum(r.oo);}},
+    {h:'Inbound (next ETA)',f:inbCell}];
+  var oosCols=[{h:'SKU',align:'left',f:function(r){return esc(r.sku);}},
+    {h:'3PL SOH',f:function(r){return r.has3?sohCell(r.i3,r.out3):'<span class="mut">—</span>';}},
+    {h:'FBA SOH',f:function(r){return r.hasf?sohCell(r.iff,r.outf):'<span class="mut">—</span>';}},
+    {h:'On order',f:function(r){return invNum(r.oo);}},
+    {h:'Inbound (next ETA)',f:inbCell}];
+  var lowCols=[{h:'SKU',align:'left',f:function(r){return esc(r.sku);}},
+    {h:'3PL SOH',f:function(r){return r.has3?invNum(r.i3):'<span class="mut">—</span>';}},
+    {h:'3PL cover',f:function(r){return r.has3?wkCell(r.cov3,r.t3,r.low3):'<span class="mut">—</span>';}},
+    {h:'FBA SOH',f:function(r){return r.hasf?invNum(r.iff):'<span class="mut">—</span>';}},
+    {h:'FBA cover',f:function(r){return r.hasf?wkCell(r.covf,r.tf,r.lowf):'<span class="mut">—</span>';}},
+    {h:'On order',f:function(r){return invNum(r.oo);}},
+    {h:'Inbound (next ETA)',f:inbCell}];
+  var html='<div style="font-weight:800;font-size:15px;margin:2px 0 10px">Inventory status — '+esc(mkt)+'</div>';
+  html+=sectHdr(1,'1 · Out of stock ('+nOos+')','ACTIVE products with 0 on hand in a warehouse they sell from (3PL and/or FBA), by marketing tier. Red = the out-of-stock warehouse.');
+  html+=tierTables(oos,oosCols,'No out-of-stock active products in '+esc(mkt)+' 🎉');
+  html+=sectHdr(2,'2 · Backorders — negative 3PL available, vs inbound ('+nBo+')','ACTIVE products with negative available stock in 3PL (orders owed). Inbound column shows units + next ETA to clear the backorder.');
+  html+=tierTables(bo,boCols,'No 3PL backorders in '+esc(mkt)+' 🎉');
+  html+=sectHdr(3,'3 · Low stock — below cover target ('+nLow+')','ACTIVE products in stock but with weeks-cover (on hand + on order ÷ avg weekly demand) below the market cover target, by tier. Amber = the warehouse below target.');
+  html+=tierTables(low,lowCols,'No low-stock active products in '+esc(mkt)+' 🎉');
+  html+='<div class="mut" style="font-size:11px;margin-top:20px;border-top:1px solid #e5e7eb;padding-top:10px">More sections to come: delivery SOH+inbound vs forecast, PO inbound delays &amp; impacted products, in-production new-season launches.</div>';
   panel.innerHTML=html;
 }
 // Manage FBA + FBA Aged: manually-uploaded Amazon FBA report per market (persisted). Manage FBA compares
