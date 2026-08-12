@@ -1,3 +1,8 @@
+## v26.887.0 Manage 3PL/FBA — gap filters, Cin7 Stocktake export, grouped 3PL columns
+- **Gap filter** on both Manage tabs: **All gaps** (default) / **Gap more than 20%** / **Gap more than 10 items**. 3PL tests the gap on **both on-hand and available** (row passes if either exceeds).
+- **Cin7 Stocktake** button (both tabs) → **Download CSV** or **Copy to clipboard** (tab-separated for Sheets/Cin7 paste). Two columns: **Code** (planner.products SKU) + **Count** — FBA uses available+fc-transfer, 3PL uses 3PL-Report On-Hand. Exports the currently-filtered matched rows.
+- **3PL table grouped**: On Hand (3PL Report · ERP · Diff) | separator | Available (3PL Report · ERP · Diff), with an ON HAND / AVAILABLE header band.
+
 ## v26.886.0 Manage FBA — small upload box, clickable count lists, duplicate-ASIN safety
 - Upload box shrunk to **max 200px** with the "last uploaded" note beside it.
 - **"N not in ERP"** and **"N ERP FBA stock missing from report"** are now **clickable** — they expand the actual SKU lists (not-in-ERP shows SKU/ASIN/report qty; ERP-missing shows SKU + ERP FBA qty).

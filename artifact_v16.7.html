@@ -9014,7 +9014,7 @@ function _zalRender(wrap,d){
 // ACTIONS: per-country summary of the buy/move actions (Buy 3PL, Urgent Sea/Air, Buy FBA, FBA Transfer) —
 // total units per action with expand-to-SKU. Uses BP.getBuyQtys across each market's visible SKUs.
 // ── BUY & MOVE ▸ INVENTORY (scaffold) — Status Report | Manage 3PL (US/UK/AU/EU) | Manage FBA (US/UK/AU/EU/CA) ──
-var INV_SUB='status', INV_3PL='US', INV_FBA='US';
+var INV_SUB='status', INV_3PL='US', INV_FBA='US', INV_FBA_GAP='all', _invFbaLast=null, INV_3PL_GAP='all', _inv3plLast=null;
 function renderInventory(){
   var host=document.querySelector('.wrap'); if(!host)return;
   var ex=document.getElementById('inventory-wrap'); if(ex)ex.remove();
@@ -9078,26 +9078,43 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
     +'<div class="mut" style="margin-top:2px">.csv/.txt · or <span style="color:#1d4ed8;text-decoration:underline">choose file</span></div>'
     +'<input type="file" id="invfba-file" accept=".csv,.txt,text/csv,text/plain,text/tab-separated-values" style="display:none"></div>'
     +'<span>'+invFbaMeta(j)+' <span id="invfba-msg" class="mut" style="font-size:11px"></span></span></div>';
+  _invFbaLast=j;   // keep last data so the gap filter can re-render without re-fetching
   var content='';
   if(j.imported){ var rows=j.rows||[];
+    // gap filter: default all; else only matched rows exceeding the threshold
+    function passGap(r){ if(INV_FBA_GAP==='all')return true; if(!r.matched)return false;
+      if(INV_FBA_GAP==='items10')return Math.abs(r.diff)>10;
+      if(INV_FBA_GAP==='pct20')return (r.erp_fba>0)?(Math.abs(r.diff)/r.erp_fba>0.20):(r.report_fba>0); return true; }
+    var fr=rows.filter(passGap);
+    // Cin7 Stocktake export = matched rows in the current filter: Code = products SKU, Count = Amazon FBA (available+fc-transfer)
+    var stkRows=fr.filter(function(r){return r.matched;}).map(function(r){ return [r.erp_sku, r.report_fba]; });
+    window._invFbaStk=stkRows;
     var summary='<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:6px;font-size:12px;align-items:center"><span><b>'+j.report_skus+'</b> report SKUs</span>'
       +'<span style="color:#16a34a"><b>'+j.matched+'</b> matched</span>'
       +'<button class="fba-toggle" data-t="notinerp" style="background:none;border:none;cursor:pointer;color:#b45309;font-size:12px;padding:0;font-family:inherit"><b>'+j.unmatched+'</b> not in ERP ▾</button>'
       +'<button class="fba-toggle" data-t="erpmissing" style="background:none;border:none;cursor:pointer;color:#b91c1c;font-size:12px;padding:0;font-family:inherit"><b>'+j.erp_not_in_report+'</b> ERP FBA stock missing from report ▾</button>'
       +(j.dup_asins?'<span class="mut" title="products SKUs that share an ASIN — skipped for ASIN matching to avoid mis-mapping">'+j.dup_asins+' duplicate ASIN'+(j.dup_asins>1?'s':'')+' (skipped)</span>':'')
       +'</div><div id="fba-detail" style="margin-bottom:10px"></div>';
+    var ctl='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 10px">'
+      +'<label class="mut" style="font-size:12px">Show</label><select id="fba-gap" class="fci" style="text-align:left">'
+      +[['all','All gaps'],['pct20','Gap more than 20%'],['items10','Gap more than 10 items']].map(function(o){return '<option value="'+o[0]+'"'+(o[0]===INV_FBA_GAP?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'
+      +'<span class="mut" style="font-size:11px">'+fr.length+' shown</span>'
+      +'<span style="margin-left:auto;position:relative"><button id="fba-stk" class="save-btn" style="background:#dcfce7;color:#166534;border:1px solid #16a34a;font-weight:600">⤓ Cin7 Stocktake ▾</button>'
+        +'<div id="fba-stk-menu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);z-index:50;min-width:190px">'
+        +'<div class="fba-stk-opt" data-a="csv" style="padding:8px 12px;cursor:pointer;font-size:12px">⬇ Download CSV</div>'
+        +'<div class="fba-stk-opt" data-a="clip" style="padding:8px 12px;cursor:pointer;font-size:12px;border-top:1px solid #eef2f7">📋 Copy to clipboard</div></div></span></div>';
     var H=['SKU','ASIN','Available','FC-transfer','FBA report (avail+fc)','ERP ('+tHesc(INV_FBA)+' FBA)','Diff'];
     var head=H.map(function(h){return '<th style="text-align:left;padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+h+'</th>';}).join('');
     var num=function(v){return v==null?'—':v;};
     var dc=function(d){ var c=(d==null?'#94a3b8':(d===0?'#16a34a':(d>0?'#b45309':'#b91c1c'))); return '<td style="padding:4px 10px;text-align:left;color:'+c+';font-weight:600">'+(d==null?'—':(d>0?'+':'')+d)+'</td>'; };
-    var trs=rows.slice(0,800).map(function(r){ var note=(r.matched_via==='asin')?' <span class="mut" style="font-size:10px;color:#1d4ed8">→ '+tHesc(r.erp_sku)+' (via ASIN)</span>':(!r.matched?' <span class="mut" style="font-size:10px">(not in ERP)</span>':'');
+    var trs=fr.slice(0,800).map(function(r){ var note=(r.matched_via==='asin')?' <span class="mut" style="font-size:10px;color:#1d4ed8">→ '+tHesc(r.erp_sku)+' (via ASIN)</span>':(!r.matched?' <span class="mut" style="font-size:10px">(not in ERP)</span>':'');
       return '<tr'+(!r.matched?' style="background:#fff7ed"':'')+'>'
       +'<td style="padding:4px 10px;text-align:left">'+tHesc(r.sku)+note+'</td>'
       +'<td style="padding:4px 10px;text-align:left;font-family:ui-monospace,Menlo,monospace;font-size:11px">'+tHesc(r.asin||'—')+'</td>'
       +'<td style="padding:4px 10px;text-align:left">'+r.available+'</td><td style="padding:4px 10px;text-align:left">'+r.fc_transfer+'</td>'
       +'<td style="padding:4px 10px;text-align:left;font-weight:600">'+r.report_fba+'</td><td style="padding:4px 10px;text-align:left">'+num(r.erp_fba)+'</td>'+dc(r.diff)+'</tr>'; }).join('');
-    content=summary+'<div style="max-height:520px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'+head+'</tr></thead><tbody>'+trs+'</tbody></table></div>'
-      +(rows.length>800?'<div class="mut" style="font-size:11px;margin-top:4px">Showing first 800 of '+rows.length+'</div>':''); }
+    content=summary+ctl+'<div style="max-height:520px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'+head+'</tr></thead><tbody>'+trs+'</tbody></table></div>'
+      +(fr.length>800?'<div class="mut" style="font-size:11px;margin-top:4px">Showing first 800 of '+fr.length+'</div>':''); }
   panel.innerHTML=drop+content;
   var dz=document.getElementById('invfba-drop'), fi=document.getElementById('invfba-file');
   if(dz&&fi){ dz.onclick=function(){ fi.click(); };
@@ -9111,7 +9128,21 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
     if(t==='notinerp'){ var L=j.not_in_erp||[]; det.innerHTML=fbaListTbl(['SKU','ASIN','FBA report'], L.map(function(x){return [x.sku, x.asin||'—', x.report_fba];}), 'Report SKUs (amzn.gr. already ignored) that match no product by SKU or ASIN'); }
     else { var M=j.erp_missing||[]; det.innerHTML=fbaListTbl(['SKU','ERP '+INV_FBA+' FBA'], M.map(function(x){return [x.sku, x.erp_fba];}), 'Products with ERP FBA stock > 0 that are absent from the uploaded report'); }
   }; });
+  var gp=document.getElementById('fba-gap'); if(gp)gp.onchange=function(){ INV_FBA_GAP=this.value; invFbaRender('manage',_invFbaLast); };
+  invStkBind('fba-stk','fba-stk-menu','FBA-'+INV_FBA,function(){ return window._invFbaStk||[]; });
 }
+// Cin7 Stocktake export (shared by Manage FBA + Manage 3PL): Code = products SKU, Count = the report count.
+function invStkBind(btnId, menuId, name, getRows){ var btn=document.getElementById(btnId), menu=document.getElementById(menuId); if(!(btn&&menu))return;
+  btn.onclick=function(e){ e.stopPropagation(); menu.style.display=(menu.style.display==='none'?'block':'none'); };
+  menu.querySelectorAll('.fba-stk-opt').forEach(function(o){ o.onclick=function(){ menu.style.display='none'; invStkExport(o.dataset.a, name, getRows()); }; }); }
+function invStkExport(kind, name, rows){ if(!rows||!rows.length){ alert('Nothing to export for this filter/market.'); return; }
+  if(kind==='clip'){ var t='Code\tCount\n'+rows.map(function(r){return r[0]+'\t'+r[1];}).join('\n');
+    if(navigator.clipboard&&navigator.clipboard.writeText) navigator.clipboard.writeText(t).then(function(){invStkToast(rows.length+' rows copied — paste into Cin7/Sheets');},function(){invStkFallbackCopy(t,rows.length);});
+    else invStkFallbackCopy(t,rows.length);
+  } else { var csv='Code,Count\n'+rows.map(function(r){return '"'+String(r[0]).replace(/"/g,'""')+'",'+r[1];}).join('\n');
+    var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'})); a.download='cin7-stocktake-'+name+'.csv'; document.body.appendChild(a); a.click(); setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},100); } }
+function invStkFallbackCopy(t,n){ var ta=document.createElement('textarea'); ta.value=t; ta.style.cssText='position:fixed;left:-9999px'; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');invStkToast(n+' rows copied');}catch(e){alert('Copy failed');} ta.remove(); }
+function invStkToast(msg){ var t=document.createElement('div'); t.textContent='✓ '+msg; t.style.cssText='position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#0f172a;color:#fff;padding:8px 16px;border-radius:8px;font-size:13px;z-index:200005;box-shadow:0 6px 20px rgba(0,0,0,.3)'; document.body.appendChild(t); setTimeout(function(){t.remove();},1800); }
 function fbaListTbl(head, rows, cap){ if(!rows.length)return '<div class="mut" style="font-size:12px">none</div>';
   return '<div class="mut" style="font-size:11px;margin:2px 0 4px">'+tHesc(cap)+' ('+rows.length+')</div>'
     +'<div style="max-height:280px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px;max-width:520px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'
@@ -9140,24 +9171,44 @@ function inv3plRender(j){ var panel=document.getElementById('inv3pl-panel'); if(
   var meta=j.imported?(function(){ var a=inv3plAge(j.imported_at); return '<span class="mut" style="font-size:12px">'+tHesc(a.age)+' · last imported <b>'+tHesc(inv3plUser(j.imported_by))+'</b> on '+tHesc(a.stamp)+'</span>'; })()
     :'<span class="mut" style="font-size:12px">Not imported yet.</span>';
   var head='<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 10px"><button id="inv3pl-import" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:6px;padding:6px 15px;font-weight:600;cursor:pointer;font-size:12px">⟳ Import '+tHesc(j.market||INV_3PL)+' 3PL report</button>'+meta+' <span id="inv3pl-msg" class="mut" style="font-size:12px"></span></div>';
+  _inv3plLast=j;
   var content='';
   if(j.imported){ var rows=j.rows||[];
-    var summary='<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px;font-size:12px"><span><b>'+j.report_skus+'</b> report SKUs</span>'
+    // gap filter — passes if EITHER the on-hand OR the available gap exceeds the threshold
+    function passGap3(r){ if(INV_3PL_GAP==='all')return true; if(!r.matched)return false;
+      var ck=function(d,e){ if(d==null)return false; if(INV_3PL_GAP==='items10')return Math.abs(d)>10; if(INV_3PL_GAP==='pct20')return (e>0)?(Math.abs(d)/e>0.20):(Math.abs(d)>0); return false; };
+      return ck(r.diff_onhand,r.erp_onhand)||ck(r.diff_avail,r.erp_avail); }
+    var fr=rows.filter(passGap3);
+    var stk=fr.filter(function(r){return r.matched;}).map(function(r){ return [r.sku, r.report_onhand]; }); window._inv3plStk=stk;   // Cin7 Stocktake: Code=SKU, Count=3PL Report - On Hand
+    var summary='<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:6px;font-size:12px;align-items:center"><span><b>'+j.report_skus+'</b> report SKUs</span>'
       +'<span style="color:#16a34a"><b>'+j.matched+'</b> matched</span><span style="color:#b45309"><b>'+j.unmatched+'</b> not in ERP</span>'
       +'<span style="color:#b91c1c"><b>'+j.erp_not_in_report+'</b> ERP stock missing from report</span></div>';
-    var HED=['SKU','3PL Report - On Hand','3PL Report - Available','ERP On Hand','ERP Available','Diff On Hand','Diff Available'];
-    var head2=HED.map(function(h){return '<th style="text-align:left;padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+h+'</th>';}).join('');
+    var ctl='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 10px">'
+      +'<label class="mut" style="font-size:12px">Show</label><select id="inv3pl-gap" class="fci" style="text-align:left">'
+      +[['all','All gaps'],['pct20','Gap more than 20%'],['items10','Gap more than 10 items']].map(function(o){return '<option value="'+o[0]+'"'+(o[0]===INV_3PL_GAP?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'
+      +'<span class="mut" style="font-size:11px">'+fr.length+' shown · gap tested on on-hand &amp; available</span>'
+      +'<span style="margin-left:auto;position:relative"><button id="inv3pl-stk" class="save-btn" style="background:#dcfce7;color:#166534;border:1px solid #16a34a;font-weight:600">⤓ Cin7 Stocktake ▾</button>'
+        +'<div id="inv3pl-stk-menu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);z-index:50;min-width:190px">'
+        +'<div class="fba-stk-opt" data-a="csv" style="padding:8px 12px;cursor:pointer;font-size:12px">⬇ Download CSV</div>'
+        +'<div class="fba-stk-opt" data-a="clip" style="padding:8px 12px;cursor:pointer;font-size:12px;border-top:1px solid #eef2f7">📋 Copy to clipboard</div></div></span></div>';
     var num=function(v){return v==null?'—':v;};
     var dcell=function(d){ var c=(d==null?'#94a3b8':(d===0?'#16a34a':(d>0?'#b45309':'#b91c1c'))); return '<td style="padding:4px 10px;text-align:left;color:'+c+';font-weight:600">'+(d==null?'—':(d>0?'+':'')+d)+'</td>'; };
-    var trs=rows.slice(0,800).map(function(r){ return '<tr'+(!r.matched?' style="background:#fff7ed"':'')+'>'
+    var th=function(t){return '<th style="text-align:left;padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+t+'</th>';};
+    var sepTh='<th style="width:10px;background:#eef2f7;border-bottom:1px solid #e5e7eb;padding:0"></th>', sepTd='<td style="width:10px;background:#f4f6fa;padding:0"></td>';
+    // grouped: [ON HAND] 3PL Report · ERP · Diff | separator | [AVAILABLE] 3PL Report · ERP · Diff
+    var grp='<tr><th style="border-bottom:1px solid #e5e7eb;background:#f8fafc"></th><th colspan="3" style="text-align:center;padding:4px 10px;border-bottom:1px solid #e5e7eb;background:#eef6ff;color:#1e40af;font-size:10px;letter-spacing:.4px;position:sticky;top:0">ON HAND</th><th style="background:#eef2f7;border-bottom:1px solid #e5e7eb"></th><th colspan="3" style="text-align:center;padding:4px 10px;border-bottom:1px solid #e5e7eb;background:#eef6ff;color:#1e40af;font-size:10px;letter-spacing:.4px;position:sticky;top:0">AVAILABLE</th></tr>';
+    var head2=grp+'<tr>'+th('SKU')+th('3PL Report')+th('ERP')+th('Diff')+sepTh+th('3PL Report')+th('ERP')+th('Diff')+'</tr>';
+    var trs=fr.slice(0,800).map(function(r){ return '<tr'+(!r.matched?' style="background:#fff7ed"':'')+'>'
       +'<td style="padding:4px 10px;text-align:left">'+tHesc(r.sku)+(!r.matched?' <span class="mut" style="font-size:10px">(not in ERP)</span>':'')+'</td>'
-      +'<td style="padding:4px 10px;text-align:left">'+num(r.report_onhand)+'</td><td style="padding:4px 10px;text-align:left">'+num(r.report_avail)+'</td>'
-      +'<td style="padding:4px 10px;text-align:left">'+num(r.erp_onhand)+'</td><td style="padding:4px 10px;text-align:left">'+num(r.erp_avail)+'</td>'
-      +dcell(r.diff_onhand)+dcell(r.diff_avail)+'</tr>'; }).join('');
-    content=summary+'<div style="max-height:520px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'+head2+'</tr></thead><tbody>'+trs+'</tbody></table></div>'
-      +(rows.length>800?'<div class="mut" style="font-size:11px;margin-top:4px">Showing first 800 of '+rows.length+' (sorted by biggest mismatch)</div>':''); }
+      +'<td style="padding:4px 10px;text-align:left">'+num(r.report_onhand)+'</td><td style="padding:4px 10px;text-align:left">'+num(r.erp_onhand)+'</td>'+dcell(r.diff_onhand)
+      +sepTd
+      +'<td style="padding:4px 10px;text-align:left">'+num(r.report_avail)+'</td><td style="padding:4px 10px;text-align:left">'+num(r.erp_avail)+'</td>'+dcell(r.diff_avail)+'</tr>'; }).join('');
+    content=summary+ctl+'<div style="max-height:520px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead>'+head2+'</thead><tbody>'+trs+'</tbody></table></div>'
+      +(fr.length>800?'<div class="mut" style="font-size:11px;margin-top:4px">Showing first 800 of '+fr.length+'</div>':''); }
   panel.innerHTML=head+content;
-  var ib=document.getElementById('inv3pl-import'); if(ib)ib.onclick=inv3plImport; }
+  var ib=document.getElementById('inv3pl-import'); if(ib)ib.onclick=inv3plImport;
+  var g3=document.getElementById('inv3pl-gap'); if(g3)g3.onchange=function(){ INV_3PL_GAP=this.value; inv3plRender(_inv3plLast); };
+  invStkBind('inv3pl-stk','inv3pl-stk-menu','3PL-'+INV_3PL,function(){ return window._inv3plStk||[]; }); }
 function renderBuyMoveActions(){
   try{ buildLiveDemand(); }catch(e){}
   var host=document.querySelector('.wrap');
