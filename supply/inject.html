@@ -4695,7 +4695,7 @@
   var prodTab='list', _prodList=[];
   // PURCHASE ORDERS is now the umbrella: PLAN (the PO grid) + the former PRODUCTIONS sub-tabs.
   var poSub='plan';
-  var PO_SUBS=[['plan','PLAN'],['shipments','Shipments'],['crossdock','Crossdock & Labels'],['manufacturing','Manufacturing'],['list','Productions'],['barcodes','Barcodes']];
+  var PO_SUBS=[['plan','PLAN'],['shipments','Shipments'],['crossdock','Crossdock & Labels'],['manufacturing','Manufacturing'],['list','Productions'],['barcodes','Barcodes'],['master-pos','Master POs']];
   var PAY_SUBS=[['deposits','Deposits'],['drawdown','Deposits Drawdown'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['bysupplier','By Supplier'],['cashflow','Cash Flow'],['xerocompare','Xero Compare']];   // the PAYMENTS umbrella (moved out of PURCHASE ORDERS); Cash Flow moved here from BI & REPORTS
   var PO_SUB_KEYS=PO_SUBS.map(function(t){return t[0];});
   var PAY_SUB_KEYS=PAY_SUBS.map(function(t){return t[0];});
@@ -4761,9 +4761,109 @@
     if(poSub==='crossdock'){ c.innerHTML=poSubNav()+'<div id="prod-body"><div class="count">Loading…</div></div>'; bindPoSubNav();
       fetch('/api/supply/crossdock-report').then(function(r){return r.json();}).then(function(d){ if(_tk!==_navToken)return; renderCrossdock(d, document.getElementById('prod-body')); })
         .catch(function(e){ if(_tk!==_navToken)return; var pb=document.getElementById('prod-body'); if(pb)pb.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>'; }); return; }
+    if(poSub==='master-pos'){ c.innerHTML=poSubNav()+'<div id="prod-body"><div class="count">Loading…</div></div>'; bindPoSubNav(); mpList(document.getElementById('prod-body')); return; }
     prodTab=poSub;
     if(cache['productions'])return renderProductions(cache['productions']); c.innerHTML='<div class="count">Loading…</div>';
     fetch('/api/supply/productions').then(function(r){return r.json();}).then(function(d){cache['productions']=d; if(_tk!==_navToken)return; renderProductions(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); }
+  // ── MASTER POs sub-tab: group child POs (one supplier + currency) under one supplier invoice and reconcile ──
+  var MP_TOL=0.05;   // reconciliation tolerance (±5%) — same band Ben uses on Xero Compare
+  function mpMoney(x){ return Number(x||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  function mpRecon(children_value, invoice_total){   // {html} verdict badge comparing Σ children vs invoice
+    var cv=Number(children_value)||0; if(invoice_total==null||invoice_total==='') return '<span class="mut tiny">no invoice yet</span>';
+    var inv=Number(invoice_total)||0, v=inv-cv, pct=cv?v/cv:(inv?1:0), ok=Math.abs(pct)<=MP_TOL;
+    var sign=v>=0?'+':'−', col=ok?'#166534':'#b91c1c', bg=ok?'#dcfce7':'#fee2e2';
+    return '<span class="tool-badge" style="background:'+bg+';color:'+col+'" title="invoice − Σ children">'+(ok?'✓ ':'✗ ')+sign+mpMoney(Math.abs(v))+' ('+(v>=0?'+':'−')+(Math.abs(pct)*100).toFixed(1)+'%)</span>'; }
+  function mpList(body){ if(!body)return; body.innerHTML='<div class="count">Loading…</div>';
+    fetch('/api/supply/master-po/list').then(function(r){return r.json();}).then(function(d){ var rows=(d&&d.masters)||[];
+      var html='<div class="bar" style="gap:10px;align-items:center;margin-bottom:12px">'
+        +'<button class="save-btn" id="mp-new" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd">＋ New master PO</button>'
+        +'<span class="mut tiny">Consolidate child POs (one supplier + currency) under a single supplier invoice. The master is the ERP order; children stay for planning.</span></div>';
+      if(!rows.length) html+='<div class="count">No master POs yet.</div>';
+      else { html+='<div class="tw"><table class="pay-tbl"><thead><tr><th class="l">Master PO</th><th class="l">Supplier</th><th class="l">Cur</th><th>Children</th><th>Σ children</th><th>Invoice</th><th class="l">Reconciliation</th><th class="l">Status</th><th class="l">Created</th></tr></thead><tbody>'
+        +rows.map(function(m){ return '<tr><td class="l"><button class="lnk-btn mp-open" data-id="'+esc(m.master_po)+'" style="color:#1d4ed8;cursor:pointer;font-weight:600">'+esc(m.master_po)+'</button></td>'
+          +'<td class="l">'+esc(m.supplier_name||'')+'</td><td class="l">'+esc(m.currency||'')+'</td>'
+          +'<td>'+esc(m.child_count)+'</td><td>'+mpMoney(m.children_value)+'</td><td>'+(m.invoice_total!=null?mpMoney(m.invoice_total):'<span class="mut tiny">—</span>')+'</td>'
+          +'<td class="l">'+mpRecon(m.children_value,m.invoice_total)+'</td>'
+          +'<td class="l"><span class="tool-badge" style="background:#e0e7ff;color:#3730a3">'+esc(m.status||'draft')+'</span></td>'
+          +'<td class="l">'+esc(m.created_at||'')+'</td></tr>'; }).join('')+'</tbody></table></div>'; }
+      body.innerHTML=html;
+      var nb=document.getElementById('mp-new'); if(nb)nb.onclick=function(){ mpCreate(body); };
+      body.querySelectorAll('.mp-open').forEach(function(b){ b.onclick=function(){ mpDetail(body,b.dataset.id); }; });
+    }).catch(function(e){ body.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>'; }); }
+  function mpCreate(body){ if(!body)return; body.innerHTML='<div class="count">Loading…</div>';
+    fetch('/api/supply/master-po/new-data').then(function(r){return r.json();}).then(function(d){ var sups=(d&&d.suppliers)||[];
+      body.innerHTML='<div class="bar" style="margin-bottom:10px"><button class="lnk-btn mp-back" style="color:#1d4ed8;cursor:pointer">← Master POs</button></div>'
+        +'<div class="sect-h">New master PO</div>'
+        +'<div class="bar" style="gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0">'
+        +'<label class="mut tiny">Supplier</label><select id="mp-sup" class="flt"><option value="">— choose supplier —</option>'
+        +sups.map(function(s){return '<option value="'+esc(s.supplier_name)+'" data-cur="'+esc(s.currency||'USD')+'">'+esc(s.supplier_name)+' ('+esc(s.currency||'USD')+')</option>';}).join('')+'</select>'
+        +'<span id="mp-cur" class="mut tiny"></span></div>'
+        +'<div id="mp-elig"><div class="mut tiny">Choose a supplier to list its ungrouped POs.</div></div>'
+        +'<div class="bar" style="gap:12px;align-items:center;flex-wrap:wrap;margin-top:12px;border-top:1px solid #e5e7eb;padding-top:10px">'
+        +'<span id="mp-seltot" class="mut tiny">0 selected · Σ 0.00</span>'
+        +'<label class="mut tiny">Invoice total</label><input id="mp-inv" class="flt" style="width:120px" placeholder="optional">'
+        +'<button class="save-btn" id="mp-save" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd">Create master</button>'
+        +'<span id="mp-msg" style="color:#b91c1c"></span></div>';
+      body.querySelector('.mp-back').onclick=function(){ mpList(body); };
+      var sup=document.getElementById('mp-sup'), curEl=document.getElementById('mp-cur'), elig=document.getElementById('mp-elig');
+      function recalc(){ var chk=elig.querySelectorAll('input.mp-ck:checked'), sum=0; chk.forEach(function(c){ sum+=Number(c.dataset.val)||0; });
+        document.getElementById('mp-seltot').textContent=chk.length+' selected · Σ '+mpMoney(sum); }
+      sup.onchange=function(){ var cur=sup.options[sup.selectedIndex]?sup.options[sup.selectedIndex].dataset.cur:''; curEl.textContent=cur?('Currency: '+cur):'';
+        if(!sup.value){ elig.innerHTML='<div class="mut tiny">Choose a supplier to list its ungrouped POs.</div>'; recalc(); return; }
+        elig.innerHTML='<div class="count">Loading…</div>';
+        fetch('/api/supply/master-po/eligible?supplier='+encodeURIComponent(sup.value)).then(function(r){return r.json();}).then(function(d){ var pos=(d&&d.pos)||[];
+          if(!pos.length){ elig.innerHTML='<div class="mut tiny">No ungrouped POs for this supplier.</div>'; recalc(); return; }
+          elig.innerHTML='<div class="tw"><table class="pay-tbl"><thead><tr><th></th><th class="l">PO</th><th class="l">Branch</th><th class="l">Client</th><th>Value</th></tr></thead><tbody>'
+            +pos.map(function(p){ return '<tr><td><input type="checkbox" class="mp-ck" value="'+esc(p.po)+'" data-val="'+esc(p.value_est)+'"></td><td class="l">'+esc(p.po)+'</td><td class="l">'+esc(p.branch||'')+'</td><td class="l">'+esc(p.client||'')+'</td><td>'+mpMoney(p.value_est)+'</td></tr>'; }).join('')
+            +'</tbody></table></div>'; elig.querySelectorAll('input.mp-ck').forEach(function(c){ c.onchange=recalc; }); recalc();
+        }).catch(function(e){ elig.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); };
+      document.getElementById('mp-save').onclick=function(){ var msg=document.getElementById('mp-msg'); msg.textContent='';
+        var cur=sup.options[sup.selectedIndex]?sup.options[sup.selectedIndex].dataset.cur:'USD';
+        var chk=[].map.call(elig.querySelectorAll('input.mp-ck:checked'),function(c){return c.value;});
+        if(!sup.value||!chk.length){ msg.textContent='Pick a supplier and at least one PO.'; return; }
+        var btn=this; btn.disabled=true;
+        fetch('/api/supply/master-po/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supplier_name:sup.value,currency:cur,child_pos:chk,invoice_total:document.getElementById('mp-inv').value})})
+          .then(function(r){return r.json();}).then(function(res){ btn.disabled=false; if(res.error){ msg.textContent=res.error; return; } mpDetail(body,res.master_po); })
+          .catch(function(e){ btn.disabled=false; msg.textContent=e.message||e; }); };
+    }).catch(function(e){ body.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>'; }); }
+  function mpDetail(body,id){ if(!body)return; body.innerHTML='<div class="count">Loading…</div>';
+    fetch('/api/supply/master-po/'+encodeURIComponent(id)).then(function(r){return r.json();}).then(function(d){ if(d.error){ body.innerHTML='<div style="color:#dc2626">'+esc(d.error)+'</div>'; return; }
+      var m=d.master, ch=d.children||[], lines=d.lines||[], cv=ch.reduce(function(a,c){return a+(Number(c.value_est)||0);},0);
+      var html='<div class="bar" style="margin-bottom:10px"><button class="lnk-btn mp-back" style="color:#1d4ed8;cursor:pointer">← Master POs</button></div>'
+        +'<div class="bar" style="gap:14px;align-items:baseline;flex-wrap:wrap"><div class="sect-h" style="margin:0">'+esc(m.master_po)+'</div>'
+        +'<span class="mut tiny">'+esc(m.supplier_name||'')+' · '+esc(m.currency||'')+' · '+esc(ch.length)+' children · created '+esc(m.created_at||'')+(m.created_by?(' by '+esc(String(m.created_by).split('@')[0]+'@')):'')+'</span></div>'
+        +'<div class="bar" style="gap:14px;align-items:center;flex-wrap:wrap;margin:10px 0;padding:8px 10px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px">'
+        +'<span>Σ children (HORIZON): <b>'+esc(m.currency||'')+' '+mpMoney(cv)+'</b></span>'
+        +'<label class="mut tiny">Invoice total</label><input id="mp-d-inv" class="flt" style="width:120px" value="'+(m.invoice_total!=null?esc(m.invoice_total):'')+'">'
+        +'<button class="lnk-btn mp-d-save" style="color:#1d4ed8;cursor:pointer">save</button>'
+        +'<span id="mp-d-recon">'+mpRecon(cv,m.invoice_total)+'</span>'
+        +'<span id="mp-d-msg" style="color:#b91c1c"></span></div>'
+        +'<div class="sect-h" style="font-size:12px">Child POs</div>'
+        +'<div class="tw"><table class="pay-tbl"><thead><tr><th class="l">PO</th><th class="l">Branch</th><th class="l">Client</th><th>Value</th><th></th></tr></thead><tbody>'
+        +(ch.length?ch.map(function(c){ return '<tr><td class="l"><button class="lnk-btn mp-cpo" data-po="'+esc(c.po)+'" style="color:#1d4ed8;cursor:pointer">'+esc(c.po)+'</button></td><td class="l">'+esc(c.branch||'')+'</td><td class="l">'+esc(c.client||'')+'</td><td>'+mpMoney(c.value_est)+'</td><td><button class="lnk-btn mp-rm" data-po="'+esc(c.po)+'" style="color:#b91c1c;cursor:pointer" title="remove from master">remove</button></td></tr>'; }).join(''):'<tr><td colspan="5" class="mut tiny">No children.</td></tr>')
+        +'</tbody></table></div>'
+        +'<div class="bar" style="margin:8px 0"><button class="lnk-btn mp-add" style="color:#1d4ed8;cursor:pointer">＋ add more POs</button></div>'
+        +'<div id="mp-addbox"></div>'
+        +'<div class="sect-h" style="font-size:12px;margin-top:12px">Consolidated lines (ERP push, step 2)</div>'
+        +'<div class="tw"><table class="pay-tbl"><thead><tr><th class="l">SKU</th><th>Qty</th></tr></thead><tbody>'
+        +(lines.length?lines.map(function(l){return '<tr><td class="l">'+esc(l.sku)+'</td><td>'+esc(Number(l.qty).toLocaleString())+'</td></tr>';}).join(''):'<tr><td colspan="2" class="mut tiny">No lines.</td></tr>')
+        +'</tbody></table></div>'
+        +'<div class="bar" style="margin-top:14px;border-top:1px solid #e5e7eb;padding-top:10px"><button class="save-btn mp-del" style="color:#dc2626;border-color:#fca5a5">Delete master (ungroups children)</button></div>';
+      body.innerHTML=html;
+      body.querySelector('.mp-back').onclick=function(){ mpList(body); };
+      body.querySelectorAll('.mp-cpo').forEach(function(b){ b.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(b.dataset.po,'dates'); else if(typeof gotoPO==='function')gotoPO(b.dataset.po,'dates'); }; });
+      function edit(payload,after){ fetch('/api/supply/master-po/'+encodeURIComponent(id)+'/edit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(res){ if(res.error){ document.getElementById('mp-d-msg').textContent=res.error; return; } (after||function(){mpDetail(body,id);})(); }).catch(function(e){ document.getElementById('mp-d-msg').textContent=e.message||e; }); }
+      body.querySelector('.mp-d-save').onclick=function(){ document.getElementById('mp-d-msg').textContent=''; edit({invoice_total:document.getElementById('mp-d-inv').value}); };
+      body.querySelectorAll('.mp-rm').forEach(function(b){ b.onclick=function(){ edit({remove:[b.dataset.po]}); }; });
+      body.querySelector('.mp-del').onclick=function(){ if(!confirm('Delete '+id+'? Its child POs are ungrouped (not deleted).'))return; fetch('/api/supply/master-po/'+encodeURIComponent(id)+'/delete',{method:'POST'}).then(function(r){return r.json();}).then(function(){ mpList(body); }); };
+      body.querySelector('.mp-add').onclick=function(){ var box=document.getElementById('mp-addbox'); if(box.innerHTML){ box.innerHTML=''; return; } box.innerHTML='<div class="count">Loading…</div>';
+        fetch('/api/supply/master-po/eligible?supplier='+encodeURIComponent(m.supplier_name)).then(function(r){return r.json();}).then(function(dd){ var pos=(dd&&dd.pos)||[];
+          if(!pos.length){ box.innerHTML='<div class="mut tiny">No other ungrouped POs for '+esc(m.supplier_name)+'.</div>'; return; }
+          box.innerHTML='<div class="tw"><table class="pay-tbl"><thead><tr><th></th><th class="l">PO</th><th class="l">Branch</th><th class="l">Client</th><th>Value</th></tr></thead><tbody>'
+            +pos.map(function(p){return '<tr><td><input type="checkbox" class="mp-addck" value="'+esc(p.po)+'"></td><td class="l">'+esc(p.po)+'</td><td class="l">'+esc(p.branch||'')+'</td><td class="l">'+esc(p.client||'')+'</td><td>'+mpMoney(p.value_est)+'</td></tr>';}).join('')
+            +'</tbody></table></div><div class="bar" style="margin-top:6px"><button class="lnk-btn mp-addgo" style="color:#1d4ed8;cursor:pointer">add selected</button></div>';
+          box.querySelector('.mp-addgo').onclick=function(){ var add=[].map.call(box.querySelectorAll('input.mp-addck:checked'),function(c){return c.value;}); if(!add.length)return; edit({add:add}); }; }); };
+    }).catch(function(e){ body.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>'; }); }
   // CROSSDOCK sub-tab: on-hand + inbound for every CROSSDOCK/PREORDER SKU in the four 3PL warehouses, the app's
   // best-guess attribution of what each stock is, a manual note for anything unknown (auto-wiped on ship-out),
   // and the crossdock assigned to open POs that isn't showing inbound yet.

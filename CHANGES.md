@@ -1,3 +1,9 @@
+## v26.862.0 Master PO (consolidated supplier invoice) — step 1: group + reconcile
+- New **PURCHASE ORDERS ▸ Master POs** sub-tab. Group child POs (one supplier + one currency) under a single supplier invoice; the master is the future ERP order, children stay for planning.
+- Create flow: pick supplier → tick its ungrouped POs (running Σ) → optional invoice total → creates `MPO-nnnn`.
+- Detail/reconciliation: Σ children (HORIZON `value_est`) vs invoice total, ±5% variance badge (Xero-Compare style); add/remove children, edit invoice, delete (ungroups, never deletes child POs). Consolidated line view (SKU×qty) shown ready for the step-2 ERP push.
+- Guards: same-supplier only; a PO can't be in two masters (409). Migration **209** (`planner.master_pos` + `purchase_orders.master_po`, additive). No buy-plan/forecast path touched.
+
 ## v26.861.0 Key Accounts — add-SKU dropdown flips up at page bottom
 - The `+ add SKU…` suggestion dropdown now opens **upward** when there isn't enough room below (bottom-of-page rows), instead of being clipped off-screen. Measures the dropdown's real height and available space, flips only when needed.
 

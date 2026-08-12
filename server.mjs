@@ -6647,6 +6647,111 @@ app.get('/api/supply/dtc/status', async (_req, res) => {
     res.json({ orders: o.n || 0, open: o.open || 0, imported_at: o.at || null }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// ── Master PO (consolidated supplier invoice) ─────────────────────────────────────────────────
+// A master groups N child POs (one supplier + one currency) under a single supplier invoice. Step 1:
+// grouping + reconciliation only. Child PO order value = v_po_finance.value_est (line value else estimate);
+// we reconcile Σ(children value_est) vs the master invoice_total.
+const MPO_CHILD_SQL = `SELECT p.po, f.supplier_name, coalesce(p.branch,'') branch, coalesce(p.client,'') client,
+    coalesce(f.value_est,0)::numeric value_est
+  FROM planner.purchase_orders p JOIN planner.v_po_finance f ON f.po=p.po`;
+app.get('/api/supply/master-po/list', async (req, res) => {   // list masters + rollups (two-segment path avoids the /api/supply/:section router)
+  try {
+    const rows = (await pool.query(`SELECT m.master_po, m.supplier_name, m.currency, m.invoice_total, m.status,
+        coalesce(m.notes,'') notes, m.invoice_attachment_id, m.created_by, to_char(m.created_at,'DD-Mon-YY') created_at,
+        (SELECT count(*) FROM planner.purchase_orders p WHERE p.master_po=m.master_po)::int child_count,
+        (SELECT coalesce(sum(coalesce(f.value_est,0)),0) FROM planner.purchase_orders p JOIN planner.v_po_finance f ON f.po=p.po WHERE p.master_po=m.master_po)::numeric children_value
+      FROM planner.master_pos m ORDER BY m.created_at DESC`)).rows;
+    res.json({ masters: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/master-po/new-data', async (req, res) => {   // suppliers that have ungrouped POs (for the create picker)
+  try {
+    const rows = (await pool.query(`SELECT DISTINCT f.supplier_name, coalesce(s.default_currency,'USD') currency
+      FROM planner.purchase_orders p JOIN planner.v_po_finance f ON f.po=p.po
+      LEFT JOIN planner.suppliers s ON lower(trim(s.name))=lower(trim(f.supplier_name))
+      WHERE p.master_po IS NULL AND coalesce(f.supplier_name,'')<>'' ORDER BY 1`)).rows;
+    res.json({ suppliers: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/master-po/eligible', async (req, res) => {   // ungrouped POs for a supplier
+  const sup = String((req.query && req.query.supplier) || '').trim(); if (!sup) return res.json({ pos: [] });
+  try {
+    const rows = (await pool.query(MPO_CHILD_SQL + ` WHERE p.master_po IS NULL AND lower(trim(f.supplier_name))=lower(trim($1))
+      AND coalesce(p.status,'') NOT ILIKE '%cancel%' ORDER BY p.po`, [sup])).rows;
+    res.json({ pos: rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/master-po/:id', async (req, res) => {   // detail: master + children + consolidated lines
+  const id = req.params.id;
+  try {
+    const m = (await pool.query(`SELECT master_po, supplier_name, currency, invoice_total, status, coalesce(notes,'') notes,
+        invoice_attachment_id, created_by, to_char(created_at,'DD-Mon-YY') created_at FROM planner.master_pos WHERE master_po=$1`, [id])).rows[0];
+    if (!m) return res.status(404).json({ error: 'master not found' });
+    const children = (await pool.query(MPO_CHILD_SQL + ` WHERE p.master_po=$1 ORDER BY p.po`, [id])).rows;
+    const pos = children.map(c => c.po);
+    const lines = pos.length ? (await pool.query(`SELECT sku, sum(qty)::numeric qty FROM planner.purchase_order_lines WHERE po = ANY($1) GROUP BY sku ORDER BY sku`, [pos])).rows : [];
+    res.json({ master: m, children, lines });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/master-po/create', async (req, res) => {
+  const b = req.body || {}, childPos = Array.isArray(b.child_pos) ? b.child_pos.filter(Boolean) : [];
+  const supplier = String(b.supplier_name || '').trim(), currency = String(b.currency || '').trim() || 'USD';
+  if (!supplier || !childPos.length) return res.status(400).json({ error: 'supplier_name and child_pos required' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // Guard: every child must exist, be the same supplier, and not already be mastered.
+    const chk = (await client.query(`SELECT p.po, f.supplier_name, p.master_po FROM planner.purchase_orders p JOIN planner.v_po_finance f ON f.po=p.po WHERE p.po = ANY($1)`, [childPos])).rows;
+    if (chk.length !== childPos.length) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'one or more POs not found' }); }
+    const bad = chk.find(r => r.master_po); if (bad) { await client.query('ROLLBACK'); return res.status(409).json({ error: bad.po + ' is already in ' + bad.master_po }); }
+    const wrongSup = chk.find(r => String(r.supplier_name || '').trim().toLowerCase() !== supplier.toLowerCase());
+    if (wrongSup) { await client.query('ROLLBACK'); return res.status(400).json({ error: wrongSup.po + ' is a different supplier' }); }
+    const n = (await client.query(`SELECT coalesce(max((regexp_replace(master_po,'\\D','','g'))::int),1000) mx FROM planner.master_pos WHERE master_po ~ '^MPO-[0-9]+$'`)).rows[0].mx;
+    const mpo = 'MPO-' + (Number(n) + 1);
+    await client.query(`INSERT INTO planner.master_pos (master_po,supplier_name,currency,invoice_total,invoice_attachment_id,notes,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+      [mpo, supplier, currency, (b.invoice_total != null && b.invoice_total !== '' ? Number(b.invoice_total) : null), (b.invoice_attachment_id || null), (b.notes ? String(b.notes) : null), authUser(req)]);
+    await client.query(`UPDATE planner.purchase_orders SET master_po=$1 WHERE po = ANY($2)`, [mpo, childPos]);
+    await client.query('COMMIT');
+    invalidateSupplyCaches();
+    res.json({ ok: true, master_po: mpo });
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
+app.post('/api/supply/master-po/:id/edit', async (req, res) => {   // invoice_total / notes / status + add/remove children
+  const id = req.params.id, b = req.body || {};
+  const add = Array.isArray(b.add) ? b.add.filter(Boolean) : [], remove = Array.isArray(b.remove) ? b.remove.filter(Boolean) : [];
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const m = (await client.query(`SELECT master_po, supplier_name FROM planner.master_pos WHERE master_po=$1 FOR UPDATE`, [id])).rows[0];
+    if (!m) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'master not found' }); }
+    if (b.invoice_total !== undefined) await client.query(`UPDATE planner.master_pos SET invoice_total=$2 WHERE master_po=$1`, [id, (b.invoice_total != null && b.invoice_total !== '' ? Number(b.invoice_total) : null)]);
+    if (b.notes !== undefined) await client.query(`UPDATE planner.master_pos SET notes=$2 WHERE master_po=$1`, [id, (b.notes ? String(b.notes) : null)]);
+    if (b.status !== undefined) await client.query(`UPDATE planner.master_pos SET status=$2 WHERE master_po=$1`, [id, String(b.status)]);
+    if (remove.length) await client.query(`UPDATE planner.purchase_orders SET master_po=NULL WHERE master_po=$1 AND po = ANY($2)`, [id, remove]);
+    if (add.length) {
+      const chk = (await client.query(`SELECT p.po, f.supplier_name, p.master_po FROM planner.purchase_orders p JOIN planner.v_po_finance f ON f.po=p.po WHERE p.po = ANY($1)`, [add])).rows;
+      const bad = chk.find(r => r.master_po && r.master_po !== id); if (bad) { await client.query('ROLLBACK'); return res.status(409).json({ error: bad.po + ' is already in ' + bad.master_po }); }
+      const wrongSup = chk.find(r => String(r.supplier_name || '').trim().toLowerCase() !== String(m.supplier_name || '').trim().toLowerCase());
+      if (wrongSup) { await client.query('ROLLBACK'); return res.status(400).json({ error: wrongSup.po + ' is a different supplier' }); }
+      await client.query(`UPDATE planner.purchase_orders SET master_po=$1 WHERE po = ANY($2)`, [id, add]);
+    }
+    await client.query('COMMIT');
+    invalidateSupplyCaches();
+    res.json({ ok: true });
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
+app.post('/api/supply/master-po/:id/delete', async (req, res) => {   // ungroup all children + remove the master
+  const id = req.params.id;
+  try {
+    await pool.query(`UPDATE planner.purchase_orders SET master_po=NULL WHERE master_po=$1`, [id]);
+    await pool.query(`DELETE FROM planner.master_pos WHERE master_po=$1`, [id]);
+    invalidateSupplyCaches();
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.post('/api/supply/dtc/review', async (req, res) => {   // per-order note / accept-discrepancy
   const b = req.body || {}, id = b.so_cin7_id; if (!id) return res.status(400).json({ error: 'so_cin7_id required' });
   try { await pool.query(`INSERT INTO planner.dtc_mismatch_review (so_cin7_id,note,accepted,accepted_by,updated_at) VALUES ($1,$2,$3,$4,now())
