@@ -607,6 +607,7 @@ function requiredCap(method, p) {
   if (p.startsWith('/api/klaviyo-bis/')) return null;         // Klaviyo BIS upload — allowed with read-only permission (Ben)
   if (method === 'POST' && p === '/api/supply/quality-doc') return null;   // Quality Control file upload (+ its metafields) — allowed with read-only permission (Ben); delete stays gated
   if (method === 'POST' && (p === '/api/supply/cache/invalidate' || p === '/api/supply/actions/invalidate')) return null;   // clears server caches only — harmless, no data write
+  if (method === 'POST' && p === '/api/data-cache/invalidate') return null;   // n8n post-ETL data-cache rebuild trigger (webhook-secret gated in the handler)
   if (p.startsWith('/api/supply/')) return 'supply';          // everything else under supply = SUPPLY feature
   return null;   // unknown non-supply write → fail-open (don't block routes we haven't classified)
 }
@@ -639,8 +640,35 @@ app.use((req, res, next) => {
 // values for a few seconds coalesces bursts (refresh, multiple tabs, the auto-update reload) → repeat loads skip
 // the build. We cache DATA only, NOT the HTML, so DEV live-editing still works (the file is re-read + re-injected
 // each request). Invalidated on forecast saves so an edit shows on the next load.
-let _dataCache = null, _dataRefresh = null;
-const DATA_TTL_MS = 300000;   // 5 min — each cold build pulls ~2-3MB from Supabase; a wider window sharply cuts DB egress.
+let _dataCache = null, _dataRefresh = null, _bgRefreshing = false;
+const DATA_TTL_MS = 600000;   // 10 min — with KV + n8n-triggered invalidation this is just a staleness heartbeat, not the primary refresh.
+// ── Shared cross-instance data cache (Vercel KV / Upstash REST) ───────────────────────────────────────────────
+// FEATURE-FLAGGED: active only when KV_REST_API_URL + KV_REST_API_TOKEN are set (Vercel prod). When absent (sandbox/
+// local) every path falls back to the in-process cache — behaviour identical to before. On Vercel the ~12MB build
+// pulled from Supabase is the biggest egress+CPU source and re-runs on every serverless cold start; storing the built
+// blob in KV lets cold starts read it from KV (not Supabase), so the Supabase build runs only when data actually
+// changes (n8n upload via POST /api/data-cache/invalidate, or a forecast edit). Blob is gzip+base64 + chunked to dodge value limits.
+const KV_URL = (process.env.KV_REST_API_URL || '').replace(/\/$/, ''), KV_TOKEN = process.env.KV_REST_API_TOKEN || '';
+const KV_ON = !!(KV_URL && KV_TOKEN);
+const KV_KEY = 'horizon:data', KV_CHUNK = 900000;   // ~900KB base64 chunks (safely under the ~1MB REST value limit)
+async function kvCmd(cmd) {   // Upstash REST: POST base URL with a JSON command array → { result }
+  const r = await fetch(KV_URL, { method: 'POST', headers: { Authorization: 'Bearer ' + KV_TOKEN, 'Content-Type': 'application/json' }, body: JSON.stringify(cmd) });
+  if (!r.ok) throw new Error('KV ' + r.status);
+  return (await r.json()).result;
+}
+async function kvWriteBlob(vals) {   // store the built 14-tuple as gzip+base64 chunks + a meta record
+  const b64 = zlib.gzipSync(Buffer.from(JSON.stringify(vals))).toString('base64');
+  const n = Math.ceil(b64.length / KV_CHUNK);
+  for (let i = 0; i < n; i++) await kvCmd(['SET', KV_KEY + ':' + i, b64.slice(i * KV_CHUNK, (i + 1) * KV_CHUNK)]);
+  await kvCmd(['SET', KV_KEY + ':meta', JSON.stringify({ n, at: Date.now(), len: b64.length })]);
+}
+async function kvReadBlob() {   // reassemble the blob from KV; null on miss/corruption (caller falls back to Supabase)
+  const meta = await kvCmd(['GET', KV_KEY + ':meta']); if (!meta) return null;
+  const m = JSON.parse(meta); let b64 = '';
+  for (let i = 0; i < m.n; i++) { const c = await kvCmd(['GET', KV_KEY + ':' + i]); if (c == null) return null; b64 += c; }
+  let vals; try { vals = JSON.parse(zlib.gunzipSync(Buffer.from(b64, 'base64')).toString()); } catch (e) { return null; }
+  return (Array.isArray(vals) && vals.length >= 14) ? vals : null;   // sanity-check shape before trusting it
+}
 // Build all live data globals (~12-14 Supabase queries) in parallel. Cold this is ~26s on the remote sandbox, so
 // we serve the cached build and refresh it in the BACKGROUND when it goes stale (stale-while-revalidate): after
 // the boot warm below, a real request never blocks on a cold build. A forecast save nulls _dataCache (lines
@@ -651,18 +679,37 @@ async function _buildDataVals() {
     buildCATS_META(), buildSUBS_META(), buildBI_RULES(), buildPROD_CONST(), freshness(), buildFBADIMS(), buildSAEXTRA(), gbpRate(), buildBRANCH_FREIGHT(), buildTRANSFER_LEADS(),
   ]);
 }
-function refreshDataCache() {   // single-flight — coalesces concurrent refreshes into one build
+function refreshDataCache() {   // AUTHORITATIVE rebuild from Supabase (single-flight) + push to KV so other instances pick it up
   if (_dataRefresh) return _dataRefresh;
   _dataRefresh = _buildDataVals()
-    .then((vals) => { _dataCache = { at: Date.now(), vals }; _dataRefresh = null; return vals; })
+    .then(async (vals) => { _dataCache = { at: Date.now(), vals }; _dataRefresh = null;
+      if (KV_ON) { try { await kvWriteBlob(vals); } catch (e) { console.error('[kv] write failed:', e.message); } } return vals; })
     .catch((e) => { _dataRefresh = null; throw e; });
   return _dataRefresh;
 }
-refreshDataCache().catch(() => {});   // warm the cache on boot so the first real request isn't a cold 26s build
+// Background staleness refresh (fire-and-forget). With KV: re-read the blob from KV (cheap, off-Supabase) to pick up a
+// blob another instance rebuilt on invalidate. Without KV: rebuild from Supabase (identical to the old behaviour).
+function bgRefresh() {
+  if (_bgRefreshing || _dataRefresh) return;
+  if (!KV_ON) { refreshDataCache().catch(() => {}); return; }
+  _bgRefreshing = true;
+  kvReadBlob().then((v) => { if (v) _dataCache = { at: Date.now(), vals: v }; }).catch(() => {}).finally(() => { _bgRefreshing = false; });
+}
+// The accessor every serve path uses. In-process first; on a cold start, prefer KV (no Supabase); else build once.
+async function getDataVals() {
+  if (_dataCache) { if (Date.now() - _dataCache.at >= DATA_TTL_MS) bgRefresh(); return _dataCache.vals; }
+  if (KV_ON) { try { const v = await kvReadBlob(); if (v) { _dataCache = { at: Date.now(), vals: v }; return v; } } catch (e) { console.error('[kv] read failed:', e.message); } }
+  return await refreshDataCache();   // KV miss / not configured → authoritative Supabase build (also writes KV)
+}
+// Called on data change (n8n upload endpoint + forecast edits): drop the local copy and rebuild+repush to KV in the
+// background so every instance converges. Fire-and-forget so a forecast save isn't blocked on the ~12MB rebuild.
+function invalidateDataCache() { _dataCache = null; refreshDataCache().catch((e) => console.error('[cache] rebuild failed:', e.message)); }
+// Boot warm: on Vercel read the pre-built blob from KV (no Supabase); only build from Supabase if KV is empty/off.
+(async () => { try { if (KV_ON) { const v = await kvReadBlob(); if (v) { _dataCache = { at: Date.now(), vals: v }; return; } } await refreshDataCache(); } catch (e) { /* first real request will retry */ } })();
 // SKU-data lazy-load (opt-in ?lazysku=1): the heavy _SKU_RAW + FC_OUTPUTS are shipped EMPTY in the page and the
 // client fetches them here after first paint. Served from the warm data cache (vals[3]=SKU_RAW, vals[2]=FC_OUTPUTS).
 app.get('/api/demand/sku-data', async (req, res) => {
-  try { const v = _dataCache ? _dataCache.vals : await refreshDataCache(); res.json({ sku_raw: v[3] || {}, fc_outputs: v[2] || {} }); }
+  try { const v = await getDataVals(); res.json({ sku_raw: v[3] || {}, fc_outputs: v[2] || {} }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Un-allocated "China Stock" holding stock per SKU = qty on open China Stock branch POs (the MOQ top-ups). The buy
@@ -719,9 +766,7 @@ app.get('/', async (req, res) => {
     const _lazy = !!(req.query && (req.query.lazysku === '1' || req.query.lazysku === 'true'));   // SKU-data lazy-load opt-in
     // Serve the cached build; refresh in the background once past TTL (stale-while-revalidate). Only the very
     // first load (or the load right after a save-invalidation) waits on a synchronous build.
-    let _vals;
-    if (_dataCache) { _vals = _dataCache.vals; if (Date.now() - _dataCache.at >= DATA_TTL_MS && !_dataRefresh) refreshDataCache().catch(() => {}); }
-    else { _vals = await refreshDataCache(); }
+    const _vals = await getDataVals();   // in-process → KV (cold start, off-Supabase) → Supabase build; SWR handled inside
     const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS, SA_EXTRA, GBP_RATE, BRANCH_FREIGHT, TRANSFER_LEADS] = _vals;
     const KLAVIYO_BIS = await buildKlaviyoBis();   // fresh (uploads are infrequent, not in the data cache)
     const MKT_COLORS = await buildMktColors();
@@ -870,7 +915,7 @@ app.post('/api/save-forecasts', async (req, res) => {
        VALUES ('ui_save_forecasts','success',$1,$2)`,
       [upserts + deletes, `${upserts} upsert / ${deletes} clear by ${who || 'unknown'}`]);
     await client.query('COMMIT');
-    _dataCache = null;   // a forecast edit changes FC_CURRENT — force a fresh build on the next page load
+    invalidateDataCache();   // a forecast edit changes FC_CURRENT — rebuild + repush to KV so every instance converges
     invalidateBiCache();   // forecast_outputs changed → BI/KPI projections must recompute
     res.json({ saved: upserts + deletes, upserts, deletes });
   } catch (e) {
@@ -908,7 +953,7 @@ app.post('/api/save-sku-forecasts', async (req, res) => {
        VALUES ('ui_save_sku_forecasts','success',$1,$2)`,
       [n, `${n} SKU cells by ${who || 'unknown'}`]);
     await client.query('COMMIT');
-    _dataCache = null;   // SKU-forecast edit changes FC_OUTPUTS — invalidate the page-data cache
+    invalidateDataCache();   // SKU-forecast edit changes FC_OUTPUTS — rebuild + repush to KV so every instance converges
     invalidateBiCache();   // FC_OUTPUTS drives biProjection()/kpiBase() → recompute
     res.json({ saved: n });
   } catch (e) {
@@ -7526,6 +7571,16 @@ app.post('/api/supply/actions/state', async (req, res) => {
 // Drop ALL user-independent SUPPLY read caches (Actions + po-rows + lookups + order-plan-exceptions) so the next
 // fetch reflects a just-made edit; each rebuilds in the background. The client fires this from invalidateDerived.
 app.post(['/api/supply/cache/invalidate', '/api/supply/actions/invalidate'], (req, res) => { invalidateSupplyCaches(); res.json({ ok: true }); });
+// n8n post-ETL trigger: after a sales/inventory upload, rebuild the demand-data cache from Supabase ONCE and push it to
+// KV so every serverless instance converges — instead of each Vercel cold start re-pulling ~12MB from Supabase. Awaits
+// the rebuild so n8n gets a success confirmation (and KV is written) before responding. Webhook-secret gated (if set).
+app.post('/api/data-cache/invalidate', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET;
+  if (secret && req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
+  try { _dataCache = null; const vals = await refreshDataCache(); invalidateBiCache();
+    res.json({ ok: true, rebuilt: Array.isArray(vals) ? vals.length : 0, kv: KV_ON, at: new Date().toISOString() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 // Import-duty pivot (CONFIG ▸ Import duty): set duty % for a category × country. Upserts the duty_rates row.
 app.post('/api/supply/duty-upsert', async (req, res) => {
   const b = req.body || {}, cat = (b.category || '').trim(), country = (b.country || '').trim();

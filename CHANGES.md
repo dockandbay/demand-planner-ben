@@ -1,3 +1,9 @@
+## v26.902.0 Supabase egress/CPU — KV shared data-cache (feature-flagged) + n8n invalidate
+- The ~12MB page data-build (sales_actuals 7.8MB + forecast_outputs 3.3MB + …) is the biggest Supabase egress+CPU source and re-ran on every Vercel cold start. Now the built blob is cached in **Vercel KV (Upstash)** — cold starts read it from KV (off-Supabase), so the Supabase build runs ~once per data change instead of per cold start.
+- **Feature-flagged:** active only when `KV_REST_API_URL`+`KV_REST_API_TOKEN` are set; otherwise byte-identical to before (in-process cache). Blob is gzip+base64, chunked at 900KB. No npm deps, no migrations.
+- New `POST /api/data-cache/invalidate` (gated by existing `N8N_WEBHOOK_SECRET`) → rebuild from Supabase once + push to KV; n8n calls it after each sales upload. Forecast edits already self-invalidate (now rebuild+repush to KV). `DATA_TTL_MS` 5→10 min (heartbeat only).
+- See `deploy notes/KV_DATA_CACHE_2026-08-12.md` (Diviyaj: provision Vercel KV + add the n8n call) and `Claude Analyses/SUPABASE_EGRESS_CPU_ANALYSIS.md`.
+
 ## v26.901.0 FBA Aged — monthly storage-cost estimate + editable rates
 - FBA Aged now estimates the **monthly storage cost** of aged inventory. Big headline sum at top (≈ $X/mo = base + aged surcharge), per-bracket cost chips (91-180 … 456+), and a per-SKU **Est. /mo** column.
 - Cost basis (per Ben): **per cubic foot/metre** — each SKU's per-unit volume = carton dims ÷ carton qty (from products) × the age-tier rate, greater-of per-unit floor at the top tiers, plus base monthly storage (Q4 peak auto-applied Oct–Dec). SKUs missing dims use the market average volume (counted + flagged with `~`).
