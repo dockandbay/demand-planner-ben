@@ -4035,6 +4035,7 @@ function smoothDisregards(co,ch,s){ return !!SMOOTH_DISREGARD_DISC[co+'|'+ch+'|'
 var SUBCAT_RT={};   // avg EX-TAX retail £/unit per market × subcategory (server-injected from planner.products); Set-targets £→units
 var FX_RATES={};   // blended GBP→local rate per FY start year: {"2026":{USD:1.27,EUR:1.17,AUD:1.92}} (CONFIG▸Admin▸Exchange rates); local = GBP × rate
 var CAT_ASP_GBP={};   // GBP avg selling price per subcategory × market {subcat:{UK,US,EU,AU,CA}} — from SKU retail prices ÷ fx; feeds new-category target smoothing (revenue÷ASP→units)
+var LOCKED_FC={sub:{},sku:{}};   // #4 locked-forecast-vs-actual: most-recent snapshot BEFORE each COMPLETED month {sub:{'SUBCAT|CO|CH|YYYY_MM':units}, sku:{'SKU|CO|CH|YYYY_MM':units}} — shown small in the actuals cell
 var SMOOTH_AUTO={flags:{},threshold:20,mode:'standard',lastRun:null};  // one-click auto-smooth: flagged co|ch|subcat over `threshold`% gap are smoothed (standard|leader). lastRun = ISO of last discontinued smooth/recalc. Server-injected.
 var SMOOTH_LOCKS={};  // do-not-smooth locks keyed 'sku|CO|CH|YYYY_MM' → true. A locked SKU-cell is held FIXED by smoothing (excluded from the pool; its value subtracted from the subcat target so others fill the rest). SKU-level only. Server-injected from app_settings.smooth_locks.
 function saveSmoothLocks(){ fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'smooth_locks',value:JSON.stringify(SMOOTH_LOCKS)})}).catch(function(){}); }
@@ -5383,6 +5384,11 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
     var asp=actualUnits>0?actualRev/actualUnits:0;
     var revHtml=renderRevLine(actualRev,lyRev,asp,(mo>=3?y:y-1));
     if(revHtml){const revDiv=document.createElement('div');revDiv.innerHTML=revHtml;d.appendChild(revDiv.firstChild);}
+    // #4 locked-forecast-vs-actual — completed months only (not the current partial month). Show the units from the
+    // most-recent snapshot taken BEFORE this month, small + indigo, so the locked forecast can be eyeballed vs actual.
+    if(!isCurMo){ var _lf=LOCKED_FC.sub[ik]; if(_lf!=null){ var _dl=actualUnits>0?Math.round((_lf-actualUnits)/actualUnits*100):null;
+      var lfDiv=document.createElement('div'); lfDiv.style.cssText='font-size:8px;color:#6366f1;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap';
+      lfDiv.title='Locked forecast — most recent snapshot taken before this month'+(_dl!=null?' ('+gPct(_dl)+' vs actual)':''); lfDiv.textContent='fc '+fn(_lf); d.appendChild(lfDiv); } }
     td.appendChild(d);return td;
   }
 
@@ -7612,10 +7618,15 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       if(isAct){
         var yoy=lyVal>0?Math.round((act-lyVal)/lyVal*100):null;
         var yc=yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp',ys=yoy!=null?(gPct(yoy)):'';
+        // #4 locked-forecast-vs-actual — completed months only (not current partial month): the units from the most
+        // recent snapshot taken before this month, small + indigo, to compare the locked forecast against the actual.
+        var _lfS=(m!==CUR_MONTH)?LOCKED_FC.sku[sku+'|'+co+'|'+ch+'|'+m]:null;
+        var _lfDl=(_lfS!=null&&act>0)?Math.round((_lfS-act)/act*100):null;
+        var _lfHtml=(_lfS!=null)?('<div style="font-size:7px;color:#6366f1;text-align:right;font-variant-numeric:tabular-nums" title="Locked forecast (most recent snapshot before this month)'+(_lfDl!=null?' '+gPct(_lfDl)+' vs actual':'')+'">fc '+fn(_lfS)+'</div>'):'';
         td.innerHTML='<div style="display:flex;flex-direction:column;padding:1px 2px">'
           +'<div style="font-size:8px;color:#94a3b8;text-align:right;font-variant-numeric:tabular-nums">'+fn(lyVal)+'</div>'
           +'<div style="font-size:9px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums">'+fn(act)+'</div>'
-          +'<div style="font-size:7px;text-align:right" class="'+yc+'">'+ys+'</div></div>';
+          +'<div style="font-size:7px;text-align:right" class="'+yc+'">'+ys+'</div>'+_lfHtml+'</div>';
         if(_rh)td.insertAdjacentHTML('afterbegin',_rh);   // innerHTML above wiped the rail — re-add for actual-month cells
         return td;
       }

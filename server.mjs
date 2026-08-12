@@ -695,10 +695,42 @@ async function buildCatAspGBP() {
   for (const s in acc) { out[s] = {}; for (const m in col) { const a = acc[s][m]; if (a[1] > 0) out[s][m] = Math.round((a[0] / a[1]) / (rate[m] || 1) * 100) / 100; } }
   return out;
 }
+// #4 locked-forecast-vs-actual — for each COMPLETED past month, the SKU-level forecast from the most recent snapshot
+// (planner.forecast_runs + forecasts, level='sku') taken BEFORE that month started. Shown small in the actuals cell
+// (subcategory + SKU) so a completed month's actual can be compared to what we had locked heading into it. Empty until
+// monthly snapshots accrue (the KPIs "Take forecast snapshot" button / the n8n 14th-of-month job). Keyed to match the
+// client plan cells: sub → "SUBCAT|CO|CH|YYYY_MM", sku → "SKU|CO|CH|YYYY_MM".
+async function buildLockedFc() {
+  const out = { sub: {}, sku: {} };
+  try {
+    const rows = (await pool.query(`
+      WITH completed AS (
+        SELECT DISTINCT month FROM planner.forecasts
+        WHERE level='sku' AND month < date_trunc('month', current_date)),
+      pick AS (   -- for each completed month, the most recent run taken strictly before that month started
+        SELECT c.month, (
+          SELECT r.id FROM planner.forecast_runs r
+          WHERE r.run_at < date_trunc('month', c.month)
+            AND EXISTS (SELECT 1 FROM planner.forecasts f2 WHERE f2.run_id=r.id AND f2.level='sku' AND f2.month=c.month)
+          ORDER BY r.run_at DESC LIMIT 1) run_id
+        FROM completed c)
+      SELECT to_char(f.month,'YYYY_MM') ym, upper(f.country) co, f.channel ch, f.subcategory sub, f.sku,
+             sum(f.units)::int units
+      FROM planner.forecasts f JOIN pick p ON p.run_id=f.run_id AND f.month=p.month
+      WHERE f.level='sku' AND p.run_id IS NOT NULL
+      GROUP BY 1,2,3,4,5`)).rows;
+    for (const r of rows) {
+      const suff = '|' + r.co + '|' + r.ch + '|' + r.ym;
+      out.sku[r.sku + suff] = r.units;
+      const sk = r.sub + suff; out.sub[sk] = (out.sub[sk] || 0) + r.units;
+    }
+  } catch (e) { /* forecast_runs/forecasts may be absent in some envs → leave empty */ }
+  return out;
+}
 async function _buildDataVals() {
   return Promise.all([
     buildDATA(), buildFC_CURRENT(), buildFC_OUTPUTS(), buildSKURAW(),
-    buildCATS_META(), buildSUBS_META(), buildBI_RULES(), buildPROD_CONST(), freshness(), buildFBADIMS(), buildSAEXTRA(), gbpRate(), buildBRANCH_FREIGHT(), buildTRANSFER_LEADS(), buildCatAspGBP(),
+    buildCATS_META(), buildSUBS_META(), buildBI_RULES(), buildPROD_CONST(), freshness(), buildFBADIMS(), buildSAEXTRA(), gbpRate(), buildBRANCH_FREIGHT(), buildTRANSFER_LEADS(), buildCatAspGBP(), buildLockedFc(),
   ]);
 }
 function refreshDataCache() {   // AUTHORITATIVE rebuild from Supabase (single-flight) + push to KV so other instances pick it up
@@ -820,7 +852,7 @@ app.get('/', async (req, res) => {
     // Serve the cached build; refresh in the background once past TTL (stale-while-revalidate). Only the very
     // first load (or the load right after a save-invalidation) waits on a synchronous build.
     const _vals = await getDataVals();   // in-process → KV (cold start, off-Supabase) → Supabase build; SWR handled inside
-    const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS, SA_EXTRA, GBP_RATE, BRANCH_FREIGHT, TRANSFER_LEADS, CAT_ASP_GBP] = _vals;
+    const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS, SA_EXTRA, GBP_RATE, BRANCH_FREIGHT, TRANSFER_LEADS, CAT_ASP_GBP, LOCKED_FC] = _vals;
     const KLAVIYO_BIS = await buildKlaviyoBis();   // fresh (uploads are infrequent, not in the data cache)
     const MKT_COLORS = await buildMktColors();
     let html = DEV ? loadHTML() : HTML;
@@ -840,6 +872,7 @@ app.get('/', async (req, res) => {
     html = replaceGlobal(html, 'MKT_COLORS', JSON.stringify(MKT_COLORS));     // reusable market colour palette
     html = replaceGlobal(html, 'BRANCH_FREIGHT', JSON.stringify(BRANCH_FREIGHT || {}));
     html = replaceGlobal(html, 'CAT_ASP_GBP', JSON.stringify(CAT_ASP_GBP || {}));
+    html = replaceGlobal(html, 'LOCKED_FC', JSON.stringify(LOCKED_FC || { sub: {}, sku: {} }));   // #4 locked-forecast-vs-actual (completed months only)
     html = replaceGlobal(html, 'TRANSFER_LEADS', JSON.stringify(TRANSFER_LEADS || {}));
     // Definitive price changes (DEMAND ▸ Revenue) — injected fresh (not in the 5-min data cache) so an edit shows
     // on the next load. getASP applies these to lift the revenue forecast.
