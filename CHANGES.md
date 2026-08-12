@@ -1,3 +1,9 @@
+## v26.922.0 Demand plan #5 — quarter & half-year total columns (toggle in More Filters)
+- Two new toggles in **More Filters & Settings**: **Quarter totals** and **Half-year totals** (independent, off by default, persisted). When on, sum-total columns appear **inside each expanded FY** showing **units / revenue / growth-vs-LY** at both subcategory and SKU level (plus the market + company grand-total rows). Interleaved: each period total sits right after its own months.
+- Fiscal periods off the March FY start: **Q1 Mar-May, Q2 Jun-Aug, Q3 Sep-Nov, Q4 Dec-Feb; H1 Mar-Aug, H2 Sep-Feb**. Only in expanded FYs (collapsed FYs keep just the FY total).
+- Modelled on the existing FY-total column (same compute basis: actuals for complete months, forecast otherwise; current partial month uses the full-month forecast). Subcat period totals recompute in place on edit (`refreshRow`); SKU period totals rebuild with the row.
+- Client-only, no schema/migration/env/deps. **Default-off = the plan is byte-identical until toggled.** Verified: `buildTimeCols` inserts Q1-Q4/H1-H2 at the correct fiscal boundaries with the right month sets; artifact syntax clean.
+
 ## v26.921.0 Demand plan #4 — locked forecast vs actual in the actuals cell (completed months only)
 - In the demand plan, a completed past month's **actuals cell** now shows, in small indigo text (`fc N`), the units from the **most recent forecast snapshot taken before that month started** — so the locked forecast can be compared to what actually happened. At both **subcategory** and **SKU** level. Hover shows the % vs actual.
 - Shown ONLY for **fully-completed** months: not forecast months, not the current (partial) month (`isActualMonth(m) && m!==CUR_MONTH`).

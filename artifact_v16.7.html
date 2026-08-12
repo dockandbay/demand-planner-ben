@@ -449,6 +449,8 @@ td.sku-fc.fc-nostock .sku-fc-v{color:#991b1b}
 .fcr.ovc{color:#111827}
 .fcr.actual{color:#166534;font-weight:700}
 .fcr.actual.neg{color:#991b1b}
+/* #5 quarter/half total columns — subtle shade, lighter than the FY total, so they read as aggregate columns */
+td.ptot{background:#eef1f5}
 /* Cmd/Ctrl-click (or drag) forecast cells → running sum badge (quick reference on category + SKU rows) */
 #t .plansel{background:#dbeafe !important;box-shadow:inset 0 0 0 1px #60a5fa;border-radius:2px;cursor:cell}
 #plan-sumbadge{position:fixed;right:16px;bottom:16px;z-index:100050;display:none;align-items:center;gap:10px;background:#0f172a;color:#fff;font-size:13px;font-weight:700;padding:8px 12px;border-radius:9px;box-shadow:0 8px 24px rgba(0,0,0,.32);font-family:inherit}
@@ -776,6 +778,10 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
           <button id="plan-fromrep-btn" class="pill catpill" title="Only SKUs that inherit a predecessor's history (products.replacement_sku)" onclick="setPlanFromRep(!PLAN_FROM_REP)">&#8617; From replacement</button>
           <span style="display:inline-flex;align-items:center;gap:6px"><span class="pill-lbl" title="Show a &lsquo;— total&rsquo; row at the foot of each category">Cat&nbsp;totals</span><button id="cat-tot-toggle" class="pill catpill" aria-pressed="false" onclick="setShowCatTot(!SHOW_CAT_TOT)">Show</button></span>
           <span style="display:inline-flex;align-items:center;gap:6px"><span class="pill-lbl" title="Show the variant image next to each SKU (hover to enlarge)">Variant&nbsp;image</span><button id="var-img-toggle" class="pill catpill" aria-pressed="false" onclick="setShowVariantImg(!SHOW_VARIANT_IMG)">Show</button></span>
+        </div>
+        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:14px">
+          <span style="display:inline-flex;align-items:center;gap:6px"><span class="pill-lbl" title="Show quarter (3-month) sum-total columns (units / revenue / growth) inside each expanded financial year">Quarter&nbsp;totals</span><button id="qtr-tot-toggle" class="pill catpill" aria-pressed="false" onclick="setShowQtr(!SHOW_Q)">Show</button></span>
+          <span style="display:inline-flex;align-items:center;gap:6px"><span class="pill-lbl" title="Show half-year (6-month) sum-total columns (units / revenue / growth) inside each expanded financial year">Half-year&nbsp;totals</span><button id="half-tot-toggle" class="pill catpill" aria-pressed="false" onclick="setShowHalf(!SHOW_H)">Show</button></span>
         </div>
         <div style="text-align:right"><button onclick="_planPopClose()" style="font-size:12px;font-weight:600;padding:5px 18px;border:1px solid #2563eb;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer">Done</button></div>
       </div>
@@ -4018,6 +4024,12 @@ var PLAN_FROM_REP=false;   // "From replacement SKU" filter — show only SKUs t
 function setPlanFromRep(v){ PLAN_FROM_REP=!!v; var b=document.getElementById('plan-fromrep-btn'); if(b)b.classList.toggle('active',PLAN_FROM_REP); render(); }
 var SHOW_CAT_TOT=(function(){try{return localStorage.getItem('hzShowCatTot')==='1';}catch(e){return false;}})(); // category-total rows hidden by default; toggle in the plan toolbar
 function setShowCatTot(on){SHOW_CAT_TOT=!!on;try{localStorage.setItem('hzShowCatTot',SHOW_CAT_TOT?'1':'0');}catch(e){}var b=document.getElementById('cat-tot-toggle');if(b){b.classList.toggle('active',SHOW_CAT_TOT);b.setAttribute('aria-pressed',SHOW_CAT_TOT?'true':'false');}renderMain();}
+// #5 — quarter (3-mo) / half-year (6-mo) sum-total columns, toggled in More Filters. Off by default. Shown ONLY inside
+// expanded FYs; each is rendered like the FY-total column (units / revenue / growth) but over its own month set.
+var SHOW_Q=(function(){try{return localStorage.getItem('hzShowQtr')==='1';}catch(e){return false;}})();
+var SHOW_H=(function(){try{return localStorage.getItem('hzShowHalf')==='1';}catch(e){return false;}})();
+function setShowQtr(on){SHOW_Q=!!on;try{localStorage.setItem('hzShowQtr',SHOW_Q?'1':'0');}catch(e){}TIME_COLS=buildTimeCols();var b=document.getElementById('qtr-tot-toggle');if(b){b.classList.toggle('active',SHOW_Q);b.setAttribute('aria-pressed',SHOW_Q?'true':'false');}render();}
+function setShowHalf(on){SHOW_H=!!on;try{localStorage.setItem('hzShowHalf',SHOW_H?'1':'0');}catch(e){}TIME_COLS=buildTimeCols();var b=document.getElementById('half-tot-toggle');if(b){b.classList.toggle('active',SHOW_H);b.setAttribute('aria-pressed',SHOW_H?'true':'false');}render();}
 var SHOW_VARIANT_IMG=(function(){try{return localStorage.getItem('hzShowVarImg')==='1';}catch(e){return false;}})(); // variant-image thumbnail in the SKU label — hidden by default; toggle in More Filters & Settings
 function setShowVariantImg(on){SHOW_VARIANT_IMG=!!on;try{localStorage.setItem('hzShowVarImg',SHOW_VARIANT_IMG?'1':'0');}catch(e){}var b=document.getElementById('var-img-toggle');if(b){b.classList.toggle('active',SHOW_VARIANT_IMG);b.setAttribute('aria-pressed',SHOW_VARIANT_IMG?'true':'false');}renderMain();}
 // Variant-image hover: enlarge any .sku-varimg thumbnail to a 400×400 popup (lazy-created, delegated, bound once).
@@ -4151,8 +4163,12 @@ function isActualMonth(m){return m<=CUR_MONTH;}
 var DISP_MONTHS=[]; DISP_FY_STARTS.forEach(function(Y){fyMonths(Y).forEach(function(m){DISP_MONTHS.push(m);});});
 // Flat ordered column spec for the time region (TIME_COLS declared near the F-arrays). Built once
 // CUR_MONTH is known (see init IIFE). Entries: {t:'m',m} | {t:'fc',m} current-month extra | {t:'tot',startY,label}
+function tcFY(tc){return (tc.t==='m'||tc.t==='fc')?fyStartOf(tc.m):tc.startY;}   // FY a time-column belongs to (q/h/tot carry startY; m/fc carry a month)
 function buildTimeCols(){var out=[];DISP_FY_STARTS.forEach(function(Y){
-  if(!FY_COLLAPSED.has(Y)){ fyMonths(Y).forEach(function(m){out.push({t:'m',m:m});if(m===CUR_MONTH)out.push({t:'fc',m:m});}); }
+  if(!FY_COLLAPSED.has(Y)){ var fm=fyMonths(Y); fm.forEach(function(m,idx){ out.push({t:'m',m:m}); if(m===CUR_MONTH)out.push({t:'fc',m:m});
+    if(SHOW_Q&&(idx+1)%3===0){var qn=(idx+1)/3;out.push({t:'q',startY:Y,months:fm.slice(idx-2,idx+1),label:'Q'+qn});}   // quarter total after each 3rd fiscal month (Q1 Mar-May …)
+    if(SHOW_H&&(idx+1)%6===0){var hn=(idx+1)/6;out.push({t:'h',startY:Y,months:fm.slice(idx-5,idx+1),label:'H'+hn});}   // half total after month 6 (H1 Mar-Aug) and 12 (H2 Sep-Feb)
+  }); }
   out.push({t:'tot',startY:Y,label:fyLabel(Y)});
 });return out;}
 // Fiscal-block background class for a month/total (by fiscal start year) — colours the strip per FY.
@@ -4172,6 +4188,9 @@ function fyFC(fu,startY,s,co,ch){return fyMonths(startY).reduce(function(t,k){re
 // Unified fiscal-year total across the whole strip: actual months from `a`, forecast months from `fu`.
 // When s/co/ch supplied, the partial current month contributes its full-month projection.
 function fyTot(a,fu,startY,s,co,ch){return fyMonths(startY).reduce(function(t,k){if(isActualMonth(k)){if(s&&k===CUR_MONTH)return t+curMonthForecast(s,co,ch);return t+(a[k]?a[k][0]:0);}return t+(fu[k]||0);},0);}
+// #5 period (quarter/half) helpers — sum units over an arbitrary month list, same actual-vs-forecast basis as fyTot.
+function prevYearMonths(months){return months.map(function(m){var p=pa(m);return ym(p.y-1,p.mo);});}
+function periodTot(a,fu,months,s,co,ch){return months.reduce(function(t,k){if(isActualMonth(k)){if(s&&k===CUR_MONTH)return t+curMonthForecast(s,co,ch);return t+(a[k]?a[k][0]:0);}return t+(fu[k]||0);},0);}
 function fn(n){if(n==null)return'--';return Math.round(n).toLocaleString()}
 // Shared display-currency helpers (DEMAND plan + Summary). SUMM_CCY mode GBP|LOCAL; local = the current market's
 // currency (US=USD/EU=EUR/AU=AUD) converted by the FY blended rate. UK/CA stay GBP.
@@ -4357,6 +4376,17 @@ function refreshRow(s,co,ch){
       +'<div style="font-size:9px;font-variant-numeric:tabular-nums" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?gPct(yoy):'--')+'</div>'
       +'</div>';
   });
+  // Quarter/half total cells (#5) — recompute in place on edit, same as the FY total above
+  document.querySelectorAll('[data-ptot="'+esc(rk)+'"]').forEach(function(e){
+    var months=(e.dataset.pmonths||'').split(',').filter(Boolean);
+    var cur=periodTot(_a,fu,months,s,co,ch),prev=periodTot(_a,fu,prevYearMonths(months),s,co,ch);
+    var yoy=prev>0?Math.round((cur-prev)/prev*100):null;
+    e.innerHTML='<div style="padding:2px 4px;text-align:right">'
+      +'<div style="font-size:11px;font-weight:700;font-variant-numeric:tabular-nums">'+fn(Math.round(cur))+'</div>'
+      +'<div style="font-size:9px;font-variant-numeric:tabular-nums;color:#475569">'+fr(Math.round(cur*sp))+'</div>'
+      +'<div style="font-size:9px;font-variant-numeric:tabular-nums" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?gPct(yoy):'--')+'</div>'
+      +'</div>';
+  });
   // If this subcategory's SKU rows are expanded, rebuild them so the SKU subtotal/gap
   // recomputes against the updated subcategory forecast (otherwise the gap goes stale).
   try{
@@ -4522,7 +4552,7 @@ function buildColgroup(){
   col(W.su);col(W.sr);col(W.yoy);
   col(W.trd);col(W.trd);
   col(W.lbl);col(W.rec);
-  TIME_COLS.forEach(function(tc){col(tc.t==='tot'?72:W.fc);});
+  TIME_COLS.forEach(function(tc){col((tc.t==='tot'||tc.t==='q'||tc.t==='h')?72:W.fc);});
   return cg;
 }
 
@@ -4542,14 +4572,14 @@ function buildHdr(){
   // FY's month columns with a − (minimise); collapsed → a + (expand) sits on the lone total column. Reuses the
   // .fy-toggle click handler (toggles FY_COLLAPSED). The FY's total column carries an empty group cell.
   (function(){var i=0;while(i<TIME_COLS.length){var tc=TIME_COLS[i];
-    var Y=(tc.t==='tot')?tc.startY:fyStartOf(tc.m);
+    var Y=tcFY(tc);
     if(FY_COLLAPSED.has(Y)){   // collapsed FY = just the total column → EXPAND (+)
       var ce=document.createElement('th');ce.className='grpbar grpbar-col';
       ce.innerHTML='<button class="fy-toggle grp-tog" data-fy="'+Y+'" title="Expand '+fyLabel(Y)+' months"><span class="grp-pm">+</span> '+fyLabel(Y)+'</button>';
       r1.appendChild(ce); i++; continue;
     }
     // expanded FY = n month columns (+ a trailing total column) → bar spans the months with − (minimise)
-    var n=0; while(i<TIME_COLS.length&&TIME_COLS[i].t!=='tot'&&fyStartOf(TIME_COLS[i].m)===Y){n++;i++;}
+    var n=0; while(i<TIME_COLS.length&&TIME_COLS[i].t!=='tot'&&tcFY(TIME_COLS[i])===Y){n++;i++;}   // span months + interleaved q/h totals; stop at the FY total
     var ee=document.createElement('th');ee.className='grpbar grpbar-exp';ee.colSpan=n;
     ee.innerHTML='<button class="fy-toggle grp-tog" data-fy="'+Y+'" title="Minimise '+fyLabel(Y)+' months"><span class="grp-pm">−</span> '+fyLabel(Y)+'</button>';
     r1.appendChild(ee);
@@ -5672,12 +5702,25 @@ function buildDataRow(s,co,ch,x,fu_cache){
       +'</div>';
     return td;
   }
+  function periodTotCell(months){   // #5 quarter/half total for a subcategory — same stack as the FY total, over its own months
+    var cur=periodTot(a,fu,months,s,co,ch),prev=periodTot(a,fu,prevYearMonths(months),s,co,ch);
+    var yoy=prev>0?Math.round((cur-prev)/prev*100):null;
+    var td=document.createElement('td');td.className='sep2 ptot';td.dataset.ptot=rk;td.dataset.pmonths=months.join(',');   // data-* → refreshRow recomputes in place on edit
+    td.innerHTML='<div style="padding:2px 4px;text-align:right">'
+      +'<div style="font-size:11px;font-weight:700;font-variant-numeric:tabular-nums">'+fn(Math.round(cur))+'</div>'
+      +'<div style="font-size:9px;font-variant-numeric:tabular-nums;color:#475569">'+fr(Math.round(cur*sp))+'</div>'
+      +'<div style="font-size:9px;font-variant-numeric:tabular-nums" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?gPct(yoy):'--')+'</div>'
+      +'</div>';
+    return td;
+  }
   TIME_COLS.forEach(function(tc){
     if(tc.t==='m'){
       var first=(tc.m===fyMonths(fyStartOf(tc.m))[0]);
       tr.appendChild(makeFCTd(s,co,ch,tc.m,fu,a,first?' fs26':'',aflags,reasons,_skuEff,_VAR_WIN));
     } else if(tc.t==='fc'){
       tr.appendChild(curFcCell(tc.m));
+    } else if(tc.t==='q'||tc.t==='h'){
+      tr.appendChild(periodTotCell(tc.months));
     } else {
       tr.appendChild(fyTotCell(tc.startY));
     }
@@ -7690,9 +7733,20 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         +(yoy!=null?'<div style="font-size:7px" class="'+(yoy>0?'gp':yoy<0?'rp':'fp')+'">'+(yoy>0?'+':'')+yoy+'%</div>':'')+'</div>';
       return td;
     }
+    function skuPeriodCell(months){   // #5 quarter/half total for a SKU — same stack as the SKU FY total, over its own months
+      var cur=months.reduce(function(t,m){return t+(isActualMonth(m)?(sales[m]||0):(skuFC[m]||0));},0);
+      var prev=prevYearMonths(months).reduce(function(t,m){return t+(isActualMonth(m)?(sales[m]||0):(skuFC[m]||0));},0);
+      var yoy=prev>0?Math.round((cur-prev)/prev*100):null;
+      var td=document.createElement('td');td.className='sep2 ptot';td.style.cssText='padding:2px 4px;border-bottom:1px solid #f0f0ee';
+      td.innerHTML='<div style="text-align:right"><div style="font-size:9px;font-weight:700;font-variant-numeric:tabular-nums">'+fn(cur)+'</div>'
+        +'<div style="font-size:8px;font-variant-numeric:tabular-nums;color:#475569">'+fr(Math.round(cur*_skuSp))+'</div>'
+        +(yoy!=null?'<div style="font-size:7px" class="'+(yoy>0?'gp':yoy<0?'rp':'fp')+'">'+(yoy>0?'+':'')+yoy+'%</div>':'')+'</div>';
+      return td;
+    }
     TIME_COLS.forEach(function(tc){
       if(tc.t==='fc')tr.appendChild(skuCurFcCell());
       else if(tc.t==='tot')tr.appendChild(skuFyTotCell(tc.startY));
+      else if(tc.t==='q'||tc.t==='h')tr.appendChild(skuPeriodCell(tc.months));
       else tr.appendChild(skuMonthCell(tc.m));
     });
     tbody.insertBefore(tr,insertRef);
@@ -7802,6 +7856,8 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         }
         std.appendChild(wrap);
       }
+    } else if(tc.t==='q'||tc.t==='h'){
+      std.style.cssText='background:#ebebea;border-bottom:2px solid #b0b0ae';   // #5 period total column: no per-month gap in the subtotal row
     } else {
       var m=tc.m,Y=fyStartOf(m),first=(tc.t==='m'&&m===fyMonths(Y)[0]);
       std.className=fyBg(Y)+(first?' sep2':'');
@@ -7913,9 +7969,22 @@ function buildBody(){
         +'<div style="font-size:9px;font-variant-numeric:tabular-nums;color:#fff" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?gPct(yoy):'--')+'</div></div>';
       gtr.appendChild(td);
     }
+    var gtPeriodCell=function(months){   // #5 quarter/half total for the market grand-total row
+      var u=months.reduce(function(t,m){return t+(gtMonthFC[m]||0);},0);
+      var prev=prevYearMonths(months).reduce(function(t,m){return t+(gtMonthFC[m]||0);},0);
+      var rev=months.reduce(function(t,m){return t+(gtMonthFCRev[m]||0);},0);
+      var yoy=prev>0?Math.round((u-prev)/prev*100):null;
+      var td=document.createElement('td');td.className='sep2 ptot';
+      td.innerHTML='<div style="padding:2px 4px;text-align:right">'
+        +'<div style="font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;color:#fff">'+fn(Math.round(u))+'</div>'
+        +'<div style="font-size:9px;color:#cbd5e1;font-variant-numeric:tabular-nums">'+frFY(rev,fyStartOf(months[0]))+'</div>'
+        +'<div style="font-size:9px;font-variant-numeric:tabular-nums;color:#fff" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?gPct(yoy):'--')+'</div></div>';
+      gtr.appendChild(td);
+    };
     TIME_COLS.forEach(function(tc){
       if(tc.t==='fc'){ gtMonthCell(tc.m,false,true); }
       else if(tc.t==='tot'){ gtFyCell(tc.startY); }
+      else if(tc.t==='q'||tc.t==='h'){ gtPeriodCell(tc.months); }
       else { gtMonthCell(tc.m, tc.m===fyMonths(fyStartOf(tc.m))[0]); }
     });
     return gtr;
@@ -8057,9 +8126,22 @@ function _makeCatTotRow(cat){
         +'<div style="font-size:9px;font-variant-numeric:tabular-nums" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?gPct(yoy):'--')+'</div></div>';
       totr.appendChild(td);
     }
+    function cPeriodCell(months){   // #5 quarter/half total for the company total row
+      var u=months.reduce(function(t,m){return t+(cMonthFC[m]||0);},0);
+      var prev=prevYearMonths(months).reduce(function(t,m){return t+(cMonthFC[m]||0);},0);
+      var rev=months.reduce(function(t,m){return t+(cMonthFCRev[m]||0);},0);
+      var yoy=prev>0?Math.round((u-prev)/prev*100):null;
+      var td=document.createElement('td');td.className='sep2 ptot';
+      td.innerHTML='<div style="padding:2px 4px;text-align:right">'
+        +'<div style="font-size:11px;font-weight:700;font-variant-numeric:tabular-nums">'+fn(Math.round(u))+'</div>'
+        +'<div style="font-size:9px;color:#475569;font-variant-numeric:tabular-nums">'+frFY(rev,fyStartOf(months[0]))+'</div>'
+        +'<div style="font-size:9px;font-variant-numeric:tabular-nums" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?gPct(yoy):'--')+'</div></div>';
+      totr.appendChild(td);
+    }
     TIME_COLS.forEach(function(tc){
       if(tc.t==='fc'){ cMonthCell(tc.m,false,true); }
       else if(tc.t==='tot'){ cFyCell(tc.startY); }
+      else if(tc.t==='q'||tc.t==='h'){ cPeriodCell(tc.months); }
       else { cMonthCell(tc.m, tc.m===fyMonths(fyStartOf(tc.m))[0]); }
     });
     // Only show totals row if there are multiple subcategories (otherwise it duplicates the single row)
@@ -8081,7 +8163,7 @@ function renderMain(){
   try{ zalInit(); }catch(e){}   // wire the EU Zalando channel (av 'z' + synth DATA rows) — idempotent, runs once data is ready
   CALC_MEMO={};   // fresh per-render forecast memo — covers direct renderMain() calls (filters/toggles) too
   _undoReady=true; try{ updateUndoBtn(); }catch(e){} try{ renderPlanChips(); }catch(e){} try{ refreshDispCcy(); }catch(e){}   // arm undo + refresh active-filter chips + the GBP/local currency pill once the plan has rendered
-  try{ var _vb=document.getElementById('var-img-toggle'); if(_vb)_vb.classList.toggle('active',SHOW_VARIANT_IMG); var _cb=document.getElementById('cat-tot-toggle'); if(_cb)_cb.classList.toggle('active',SHOW_CAT_TOT); }catch(e){}   // sync the More-Filters toggle highlights with persisted state
+  try{ var _vb=document.getElementById('var-img-toggle'); if(_vb)_vb.classList.toggle('active',SHOW_VARIANT_IMG); var _cb=document.getElementById('cat-tot-toggle'); if(_cb)_cb.classList.toggle('active',SHOW_CAT_TOT); var _qb=document.getElementById('qtr-tot-toggle'); if(_qb){_qb.classList.toggle('active',SHOW_Q);_qb.setAttribute('aria-pressed',SHOW_Q?'true':'false');} var _hb=document.getElementById('half-tot-toggle'); if(_hb){_hb.classList.toggle('active',SHOW_H);_hb.setAttribute('aria-pressed',SHOW_H?'true':'false');} }catch(e){}   // sync the More-Filters toggle highlights with persisted state
   if(_smoothStale===null){ try{ _smoothStale=computeSmoothStale(); }catch(e){ _smoothStale={count:0}; } }   // >48h discontinued-smoothing impact check — once per session
   try{ updateSmoothStaleBadge(); }catch(e){}
   // Notes (N) + record-of-change keys (R) load in the BACKGROUND — the plan paints immediately and the N/R rail
