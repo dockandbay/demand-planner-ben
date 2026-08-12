@@ -1,3 +1,7 @@
+## v26.870.0 INVENTORY ▸ Manage 3PL — import 3PL stock reports + compare to HORIZON
+- Each market pill (US/UK/AU) has an **⟳ Import 3PL report** button that server-side fetches the drivehq CSV (cache-busted), parses it per-market (US ItemID/OnHand/Available · UK Product_Code/PhysicalStock/AvailableStock · AU STOCK_CODE/CLOSE_ON_HAND/STOCK_AVAILABLE) and compares each SKU to `planner.products.inventory_<mkt>_3pl`.
+- Shows a summary (report SKUs, matched, not-in-HORIZON, HORIZON-3PL>0 missing from report) + a table sorted by biggest mismatch (report − HORIZON). Read-only comparison; EU has no source yet. Verified live: US 450/468 matched, UK 824/848, AU 911/994.
+
 ## v26.869.0 Master PO polish + PO grid height + INVENTORY restyle
 - **Create master PO**: added an optional **PO reference** field — shows the default (biggest child + -MASTER) as grey placeholder, editable to override (server validates uniqueness).
 - **PO ▸ CHILD PO tab**: a master PO now has a final **CHILD PO** tab (after Timeline) listing its children with a link + ✕ remove (detaches back to a normal PO, re-sums the master).

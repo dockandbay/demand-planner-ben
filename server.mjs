@@ -6651,6 +6651,48 @@ app.get('/api/supply/dtc/status', async (_req, res) => {
     res.json({ orders: o.n || 0, open: o.open || 0, imported_at: o.at || null }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// ── Manage 3PL: import a market's 3PL stock report (drivehq CSV) and compare on-hand vs planner.products.inventory_<mkt>_3pl ──
+// EU has no source yet. URLs are cache-busted with a timestamp. Read-only (no writes) — it's a comparison view.
+const INV3PL_SRC = {
+  US: { url: 'https://www.drivehq.com/file/df.aspx/publish/dockandbay/UPLOADED/DockAndBayDailyInventoryReport.csv', sku: 'ItemID',       onhand: 'OnHand',        avail: 'Available' },
+  UK: { url: 'https://www.drivehq.com/file/df.aspx/publish/dockandbay/UPLOADED/UK%20-%20Stock%20Report.csv',        sku: 'Product_Code', onhand: 'PhysicalStock', avail: 'AvailableStock' },
+  AU: { url: 'https://www.drivehq.com/file/df.aspx/publish/dockandbay/UPLOADED/DOK_DSA_Report.csv',                 sku: 'STOCK_CODE',   onhand: 'CLOSE_ON_HAND', avail: 'STOCK_AVAILABLE' },
+};
+function parseCsvLine(line) { const out = []; let cur = '', q = false;
+  for (let i = 0; i < line.length; i++) { const ch = line[i];
+    if (q) { if (ch === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += ch; }
+    else { if (ch === '"') q = true; else if (ch === ',') { out.push(cur); cur = ''; } else cur += ch; } }
+  out.push(cur); return out.map(s => s.trim()); }
+function csvNum(v) { const n = parseFloat(String(v == null ? '' : v).replace(/[^0-9.\-]/g, '')); return isNaN(n) ? 0 : n; }
+app.get('/api/supply/inventory-3pl/import', async (req, res) => {
+  const mkt = String((req.query && req.query.market) || '').toUpperCase();
+  const cfg = INV3PL_SRC[mkt];
+  if (!cfg) return res.json({ market: mkt, configured: false, error: mkt === 'EU' ? 'No EU 3PL report source configured yet.' : 'Unknown market' });
+  try {
+    const rsp = await fetch(cfg.url + '?' + Date.now(), { redirect: 'follow' });
+    if (!rsp.ok) return res.status(502).json({ error: 'Report fetch failed (HTTP ' + rsp.status + ')' });
+    const lines = (await rsp.text()).split(/\r?\n/).filter(x => x.trim().length);
+    if (!lines.length) return res.json({ market: mkt, error: 'Empty report' });
+    const hdr = parseCsvLine(lines[0]).map(h => h.replace(/^"|"$/g, ''));
+    const ci = { sku: hdr.indexOf(cfg.sku), oh: hdr.indexOf(cfg.onhand), av: hdr.indexOf(cfg.avail) };
+    if (ci.sku < 0) return res.json({ market: mkt, headers: hdr, error: 'SKU column "' + cfg.sku + '" not found in report' });
+    const rep = {};
+    for (let i = 1; i < lines.length; i++) { const f = parseCsvLine(lines[i]); const sku = String(f[ci.sku] || '').replace(/^"|"$/g, '').trim(); if (!sku) continue;
+      if (!rep[sku]) rep[sku] = { oh: 0, av: 0 };
+      rep[sku].oh += ci.oh >= 0 ? csvNum(f[ci.oh]) : 0;
+      rep[sku].av += ci.av >= 0 ? csvNum(f[ci.av]) : 0; }   // sum duplicate rows (multi-warehouse/version)
+    const col = 'inventory_' + mkt.toLowerCase() + '_3pl';   // mkt is from a fixed whitelist above → safe to interpolate
+    const hz = {};
+    (await pool.query(`SELECT sku, coalesce(${col},0)::numeric v FROM planner.products WHERE sku IS NOT NULL`)).rows.forEach(x => { hz[x.sku] = Number(x.v) || 0; });
+    const skus = Object.keys(rep);
+    const rows = skus.map(sku => { const matched = (sku in hz), h = matched ? hz[sku] : null;
+      return { sku, on_hand: rep[sku].oh, available: rep[sku].av, horizon_3pl: h, matched, diff: (h == null ? null : rep[sku].av - h) }; })
+      .sort((a, b) => (b.diff == null ? -1 : Math.abs(b.diff)) - (a.diff == null ? -1 : Math.abs(a.diff)));   // biggest mismatch first, unmatched last
+    res.json({ market: mkt, configured: true, url: cfg.url, columns: cfg, fetched_at: new Date().toISOString(),
+      report_skus: skus.length, matched: rows.filter(r => r.matched).length, unmatched: rows.filter(r => !r.matched).length,
+      hz_not_in_report: Object.keys(hz).filter(s => hz[s] > 0 && !(s in rep)).length, rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // ── Master PO (consolidated supplier invoice) ─────────────────────────────────────────────────
 // A MASTER is a REAL purchase_orders row (is_master=true) that consolidates N child POs (one supplier).
 // It inherits its header from the BIGGEST child (by value), carries the summed lines, and is the single

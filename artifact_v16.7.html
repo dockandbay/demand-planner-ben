@@ -9025,7 +9025,11 @@ function renderInventory(){
   function placeholder(title){ return '<div style="padding:26px;color:#64748b;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;text-align:center"><b style="color:#334155">'+title+'</b><div style="margin-top:6px;font-size:13px">To complete in future.</div></div>'; }
   var subnav='<div class="d3nav">'+SUBS.map(function(t){return '<button class="d3tab inv-sub'+(t[0]===INV_SUB?' active':'')+'" data-sub="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div>';
   var body;
-  if(INV_SUB==='manage3pl') body=pillbar(['US','UK','AU','EU'],INV_3PL,'inv-3pl-pill')+placeholder('Manage 3PL — '+INV_3PL);
+  if(INV_SUB==='manage3pl'){ var noSrc=(INV_3PL==='EU');
+    body=pillbar(['US','UK','AU','EU'],INV_3PL,'inv-3pl-pill')
+      +(noSrc?'<div class="mut" style="font-size:12px;margin-bottom:10px">No EU 3PL report source configured yet.</div>'
+             :'<div style="margin:0 0 10px"><button id="inv3pl-import" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:6px;padding:6px 15px;font-weight:600;cursor:pointer;font-size:12px">⟳ Import '+INV_3PL+' 3PL report</button> <span id="inv3pl-msg" class="mut" style="font-size:12px"></span></div>')
+      +'<div id="inv3pl-result"></div>'; }
   else if(INV_SUB==='managefba') body=pillbar(['US','UK','AU','EU','CA'],INV_FBA,'inv-fba-pill')+placeholder('Manage FBA — '+INV_FBA);
   else body=placeholder('Status Report');
   wrap.innerHTML=subnav+'<div id="inv-body">'+body+'</div>';
@@ -9033,7 +9037,27 @@ function renderInventory(){
   wrap.querySelectorAll('.inv-sub').forEach(function(b){ b.onclick=function(){ INV_SUB=b.dataset.sub; renderInventory(); }; });
   wrap.querySelectorAll('.inv-3pl-pill').forEach(function(b){ b.onclick=function(){ INV_3PL=b.dataset.c; renderInventory(); }; });
   wrap.querySelectorAll('.inv-fba-pill').forEach(function(b){ b.onclick=function(){ INV_FBA=b.dataset.c; renderInventory(); }; });
+  var _ib=wrap.querySelector('#inv3pl-import'); if(_ib)_ib.onclick=inv3plImport;
 }
+// Manage 3PL ▸ import a market's 3PL stock report and compare on-hand/available vs HORIZON inventory_<mkt>_3pl.
+function inv3plImport(){ var mkt=INV_3PL, btn=document.getElementById('inv3pl-import'), msg=document.getElementById('inv3pl-msg'), out=document.getElementById('inv3pl-result');
+  if(btn)btn.disabled=true; if(msg)msg.textContent='Fetching '+mkt+' report…';
+  fetch('/api/supply/inventory-3pl/import?market='+mkt).then(function(r){return r.json();}).then(function(j){ if(btn)btn.disabled=false; if(msg)msg.textContent='';
+    if(j.error){ out.innerHTML='<div style="color:#dc2626">'+tHesc(j.error)+(j.headers?'<div class="mut" style="font-size:11px;margin-top:4px">Report headers: '+tHesc(j.headers.join(', '))+'</div>':'')+'</div>'; return; }
+    var rows=j.rows||[];
+    var summary='<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px;font-size:12px">'
+      +'<span><b>'+j.report_skus+'</b> report SKUs</span><span style="color:#16a34a"><b>'+j.matched+'</b> matched</span>'
+      +'<span style="color:#b45309"><b>'+j.unmatched+'</b> not in HORIZON</span><span style="color:#b91c1c"><b>'+j.hz_not_in_report+'</b> HORIZON 3PL&gt;0 missing from report</span>'
+      +'<span class="mut">fetched '+tHesc((j.fetched_at||"").slice(0,19).replace("T"," "))+'</span></div>';
+    var head=['SKU','On hand','Available (report)','HORIZON 3PL','Diff (rep−hz)'].map(function(h,ix){return '<th style="text-align:'+(ix===0?'left':'right')+';padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc">'+h+'</th>';}).join('');
+    var trs=rows.slice(0,800).map(function(r){ var d=r.diff, dc=(d==null?'#94a3b8':(d===0?'#16a34a':(d>0?'#b45309':'#b91c1c')));
+      return '<tr'+(!r.matched?' style="background:#fff7ed"':'')+'><td style="padding:4px 10px">'+tHesc(r.sku)+(!r.matched?' <span class="mut" style="font-size:10px">(not in HORIZON)</span>':'')+'</td>'
+        +'<td style="padding:4px 10px;text-align:right">'+r.on_hand+'</td><td style="padding:4px 10px;text-align:right">'+r.available+'</td>'
+        +'<td style="padding:4px 10px;text-align:right">'+(r.horizon_3pl==null?'—':r.horizon_3pl)+'</td>'
+        +'<td style="padding:4px 10px;text-align:right;color:'+dc+';font-weight:600">'+(d==null?'—':(d>0?'+':'')+d)+'</td></tr>'; }).join('');
+    out.innerHTML=summary+'<div style="max-height:520px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'+head+'</tr></thead><tbody>'+trs+'</tbody></table></div>'
+      +(rows.length>800?'<div class="mut" style="font-size:11px;margin-top:4px">Showing first 800 of '+rows.length+' (sorted by biggest mismatch)</div>':'');
+  }).catch(function(e){ if(btn)btn.disabled=false; if(msg)msg.textContent=''; out.innerHTML='<div style="color:#dc2626">Failed: '+tHesc((e&&e.message)||e)+'</div>'; }); }
 function renderBuyMoveActions(){
   try{ buildLiveDemand(); }catch(e){}
   var host=document.querySelector('.wrap');
