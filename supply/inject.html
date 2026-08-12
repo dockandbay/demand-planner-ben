@@ -9734,7 +9734,7 @@
     var sa=document.getElementById('sa-drawer-btn'); if(sa)row.insertBefore(bell,sa); else { var sp=row.querySelector('div[style*="flex:1"]'); if(sp&&sp.nextSibling)row.insertBefore(bell,sp.nextSibling); else row.appendChild(bell); }
     bell.onclick=function(e){ e.stopPropagation(); toggleTlDropdown(); };
     if(!document.getElementById('tl-drop')){ var d=document.createElement('div'); d.id='tl-drop'; document.body.appendChild(d); }
-    loadTlNotifs(); if(!window.__tlPoll)window.__tlPoll=setInterval(function(){ loadTlNotifs(); }, 60000); }
+    loadTlNotifs(); if(!window.__tlPoll)window.__tlPoll=setInterval(function(){ loadTlNotifs(); }, 240000); }   // 4-min poll (was 60s) — cuts Supabase egress/CPU
   // ── Recent changes drawer (top bar 🕘) — last 10 major SUPPLY events, newest first ──────────────────────
   var ACT_ICON={po_created:'🧾',po_confirmed:'✅',shipment_created:'🚢',deposit_added:'💰',sample_created:'🎁',supplier_submission:'📩',erp_push:'⬆️'};
   function actWhen(at){ if(!at)return ''; var d=at.slice(0,10), t=at.slice(11); return fd(d)+(t?' '+t:''); }   // YYYY-MM-DD HH:MI → dd-mmm-yy HH:MI
@@ -10948,7 +10948,7 @@
     if(cfg)row.insertBefore(btn,cfg); else if(spacer)row.insertBefore(btn,spacer); else row.appendChild(btn);
     btn.onclick=function(){ showProduct(); selectProductSub(PRODUCT_SUB||'plan'); };
     row.querySelectorAll('.view-toggle:not(.product-toggle)').forEach(function(b){ b.addEventListener('click',function(){ hideProduct(); }); });
-    loadProductUnread(); if(!window.__prodUnreadPoll)window.__prodUnreadPoll=setInterval(loadProductUnread,60000); }
+    loadProductUnread(); if(!window.__prodUnreadPoll)window.__prodUnreadPoll=setInterval(loadProductUnread,240000); }   // 4-min poll (was 60s) — cuts Supabase egress/CPU
   function loadProductUnread(){ if(!prodCan())return; fetch('/api/product/unread').then(function(r){return r.json();}).then(function(j){ var b=document.getElementById('product-unread'); if(!b)return; var n=(j&&j.count)||0; b.textContent=n>0?(n>99?'99+':String(n)):''; b.style.display=n>0?'inline-block':'none'; }).catch(function(){}); }
   function prodStatusChip(s){ var m={in_development:['In development','#b45309','#fffbeb'],approved:['Approved','#16a34a','#f0fdf4'],dropped:['Rejected','#b91c1c','#fef2f2']}; var x=m[s]||m.in_development; return hzChip(x[2],x[1],x[0]); }
   // Item status: In development (orange) / Approved (green) / Rejected (red, value 'dropped'). Colour-coded editable dropdown.

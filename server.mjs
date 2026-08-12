@@ -7024,10 +7024,11 @@ async function recordPoDeliveries() {
 // Fire-and-forget snapshot for hot paths (PO grid load). No-overlap guard so concurrent grid loads don't pile up;
 // idempotent (ON CONFLICT DO NOTHING) so running it often is cheap and safe. This is what makes §6 delay-detection
 // robust — dates are captured on every grid view, not only when the Status Report is open.
-let _poRecInFlight = false;
+let _poRecInFlight = false, _poRecAt = 0;
+const PO_REC_THROTTLE_MS = 600000;   // snapshot at most once / 10 min per instance (idempotent; a slip is caught within 10 min of any grid view)
 function maybeRecordPoDeliveries() {
-  if (_poRecInFlight) return;
-  _poRecInFlight = true;
+  if (_poRecInFlight || Date.now() - _poRecAt < PO_REC_THROTTLE_MS) return;
+  _poRecInFlight = true; _poRecAt = Date.now();
   recordPoDeliveries().catch(e => console.error('[po-dates] snapshot failed:', e.message)).finally(() => { _poRecInFlight = false; });
 }
 async function poDeliveryDelays(market) {

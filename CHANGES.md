@@ -1,3 +1,7 @@
+## v26.903.0 Supabase load — widen 60s polls to 4min + throttle PO-delivery snapshot
+- The two per-tab background polls (timeline notifications, product unread) go **60s → 4min** — ~4× fewer DB hits per open tab, no meaningful UX change.
+- The PO-delivery-date snapshot (SUG-0024 §6) fired on **every** PO-grid load; now throttled to **at most once / 10 min per instance** (idempotent). Opening the Status Report §6 still snapshots fresh (that path is un-throttled), so a slip is still caught within 10 min of any grid view.
+
 ## v26.902.0 Supabase egress/CPU — KV shared data-cache (feature-flagged) + n8n invalidate
 - The ~12MB page data-build (sales_actuals 7.8MB + forecast_outputs 3.3MB + …) is the biggest Supabase egress+CPU source and re-ran on every Vercel cold start. Now the built blob is cached in **Vercel KV (Upstash)** — cold starts read it from KV (off-Supabase), so the Supabase build runs ~once per data change instead of per cold start.
 - **Feature-flagged:** active only when `KV_REST_API_URL`+`KV_REST_API_TOKEN` are set; otherwise byte-identical to before (in-process cache). Blob is gzip+base64, chunked at 900KB. No npm deps, no migrations.
