@@ -5502,8 +5502,8 @@
     if(!_poActStateLoaded){ loadPoActState(function(){ recomputeShipNavCount(); try{ view(); }catch(e){} }); }
     recomputeShipNavCount();
     var FILTERS=[['planned','Planned'],['shipping','Shipping'],['completed','Completed'],['exceptions','Exceptions'],['escalated','Escalated'],['all','All']];
-    var state={f:_pendingShip?'all':'planned',q:'',ctry:'',br:'',fob:'',recent:true,focus:false};   // default Planned; show all when navigating to a specific shipment
-    if(!_pendingShip){ var _shsv=hzFilterLoad('ships'); if(_shsv&&typeof _shsv==='object'){ try{ ['f','ctry','br','fob','focus','recent'].forEach(function(k){ if(_shsv[k]!=null)state[k]=_shsv[k]; }); }catch(e){} } }   // restore persisted filters (sliding 1h TTL); not the search
+    var state={f:_pendingShip?'all':'planned',q:'',ctry:'',br:'',mode:'',recent:true,focus:false};   // default Planned; show all when navigating to a specific shipment
+    if(!_pendingShip){ var _shsv=hzFilterLoad('ships'); if(_shsv&&typeof _shsv==='object'){ try{ ['f','ctry','br','mode','focus','recent'].forEach(function(k){ if(_shsv[k]!=null)state[k]=_shsv[k]; }); }catch(e){} } }   // restore persisted filters (sliding 1h TTL); not the search
     var SHIP_CAP=250, _shipShowAll=false;   // cap rendered rows; "show all" reveals the rest
     var RECENT_CUT=(function(){var x=new Date();x.setMonth(x.getMonth()-12);return x.toISOString().slice(0,10);})();
     function shipRecentDate(s){ return s.arrival||s.landing||s.departure||''; }   // most-recent milestone for the 12m cut
@@ -5517,7 +5517,7 @@
       +'<span class="sh-filt-row">'
       +'<select class="flt" id="ship-ctry" style="width:auto"><option value="">All countries</option>'+ctrys.map(function(c){return '<option>'+esc(c)+'</option>';}).join('')+'</select>'
       +'<select class="flt" id="ship-br" style="width:auto"><option value="">All branches</option>'+brList.map(function(b){return '<option>'+esc(b)+'</option>';}).join('')+'</select>'
-      +'<select class="flt" id="ship-fob" style="width:auto"><option value="">FOB &amp; non-FOB</option><option value="nonfob">Non-FOB only</option><option value="fob">FOB only</option></select>'
+      +'<select class="flt" id="ship-mode" style="width:auto"><option value="">All modes</option><option value="sea">Sea</option><option value="air">Air</option><option value="fob">FOB</option></select>'
       +'</span>'
       +'<input class="flt" id="sup-search" placeholder="Filter shipment / PO…">'
       +'<button class="tool-badge bg-blue" id="ship-new" style="cursor:pointer;border:none">+ New shipment</button>'
@@ -5525,8 +5525,7 @@
     function cur(){ var q=effQ(state.q), searching=!!q; return ships.filter(function(s){
       if(state.ctry && (s.market||'')!==state.ctry)return false;
       if(state.br && (s.branch||'').indexOf(state.br)<0)return false;
-      if(state.fob==='fob' && s.mode_eff!=='fob')return false;       // FOB only
-      if(state.fob==='nonfob' && s.mode_eff==='fob')return false;    // non-FOB only
+      if(state.mode && (s.mode_eff||'')!==state.mode)return false;   // mode filter: sea / air / fob (blank = all)
       if(!searching && s.no_pos)return false;   // empty shipments (no POs — e.g. an orphaned self-shipment) are hidden from the grid; still findable via search
       if(searching)return true;   // a shipment / PO search overrides the status filter (find it whatever its status)
       var complete=(s.status==='Complete'||s.status==='Completed');
@@ -5535,7 +5534,7 @@
       if(state.f==='all')return true; if(state.f==='escalated')return !!s.escalated; if(state.f==='exceptions')return shipIsExc(s); if(state.f==='completed')return complete;
       if(state.f==='shipping')return !complete && s.status==='Shipping';   // shipping = in transit
       return !complete && s.status!=='Shipping'; }); }   // planned (default) = active, not yet shipping
-    function view(){ try{hzFilterSave('ships',{f:state.f,ctry:state.ctry,br:state.br,fob:state.fob,focus:state.focus,recent:state.recent});}catch(e){}   // persist filters (not the search)
+    function view(){ try{hzFilterSave('ships',{f:state.f,ctry:state.ctry,br:state.br,mode:state.mode,focus:state.focus,recent:state.recent});}catch(e){}   // persist filters (not the search)
       var q=effQ(state.q); var f=filt(cur(),q);
       var shown=(_shipShowAll||f.length<=SHIP_CAP)?f:f.slice(0,SHIP_CAP);
       document.getElementById('sup-count').textContent=(shown.length<f.length?shown.length+' of ':'')+f.length+' / '+ships.length+' shipments';
@@ -5573,7 +5572,7 @@
     document.getElementById('sup-search').oninput=debounce(function(){state.q=this.value;_shipShowAll=false;view();},350);
     document.getElementById('ship-ctry').onchange=function(){state.ctry=this.value;_shipShowAll=false;view();};
     document.getElementById('ship-br').onchange=function(){state.br=this.value;_shipShowAll=false;view();};
-    document.getElementById('ship-fob').onchange=function(){state.fob=this.value;_shipShowAll=false;view();};
+    document.getElementById('ship-mode').onchange=function(){state.mode=this.value;_shipShowAll=false;view();};
     document.getElementById('ship-new').onclick=function(){ var ref=prompt('New shipment reference (usually the master PO number):'); if(ref&&ref.trim())shipPost('/api/supply/shipment-create',{shipment_ref:ref.trim()},shipReload); };
     view(); }   // Unassigned-POs moved to the PURCHASE ORDERS "Unassigned shipment" exception filter
   function shipComplete(s){ return s.status==='Complete'||s.status==='Completed'; }

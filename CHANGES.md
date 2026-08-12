@@ -1,3 +1,6 @@
+## v26.879.0 Shipments — ship-to-country + mode (all/sea/air/fob) filters
+- SUPPLY ▸ Shipments: the **ship-to country** dropdown (default "All countries") is in place, and the mode dropdown is now **All modes / Sea / Air / FOB** (was FOB / non-FOB) — filters on the shipment’s effective mode. Both persist with the other shipment filters.
+
 ## v26.878.0 SUG-0023 — order-plan false "partial carton" fix
 - `v_purchase_order_lines` computed the full/partial-carton check from `sku_labels.carton_qty` (stale — e.g. 40 for TOWLB-CAB-XL-AMALG-R) instead of the source-of-truth `products.carton_qty` (30). A 510 qty (17×30) was wrongly flagged "partial". View now uses `products.carton_qty` (safe text→int) with sku_labels fallback. Migration 213 — applied to sandbox + LIVE; verified live now shows "✅ Full Cartons".
 
