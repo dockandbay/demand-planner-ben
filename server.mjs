@@ -6683,7 +6683,8 @@ const BLADE = {
   base: 'https://public-api.bladepro.io/v1',
   username: (process.env.BLADE_USERNAME || 'app_6777fa0f3cfdd1.01954814').trim(),
   password: (process.env.BLADE_PASSWORD || '').trim(),
-  stockBody: (process.env.BLADE_STOCK_BODY || '').trim(),   // = BLADE_AUTH!A2 payload for the PUT /stocks call
+  warehouse: (process.env.BLADE_WAREHOUSE_CODE || 'BOC').trim(),   // PUT /stocks body scopes to this warehouse
+  stockBody: (process.env.BLADE_STOCK_BODY || '').trim(),          // optional manual override of the whole PUT body
 };
 async function bladeLogin() {
   if (!BLADE.password) throw new Error('BLADE_PASSWORD not set in server env');
@@ -6695,32 +6696,35 @@ async function bladeLogin() {
   if (!tok) throw new Error('Blade login: no access token in response');
   return tok;
 }
-async function bladeVariations(token) {   // paginate stock_availability → { "<id>": sku } fallback map
-  const map = {}; let page = 1;
+async function bladeVariations(token) {   // paginate stock_availability → { map:{ "<id>":sku }, ids:[<id>…] }
+  const map = {}; const ids = []; let page = 1;
   while (page <= 100) {
     const r = await fetch(BLADE.base + '/products/variations/stock_availability?expand=*&page=' + page,
       { headers: { 'Access-Token': token, 'Content-Type': 'application/json' } });
     if (!r.ok) break;
     const j = await r.json().catch(() => null); const data = (j && j.data) || [];
     if (!data.length) break;
-    data.forEach(v => { if (v && v.id != null) map[String(v.id)] = String(v.sku || '').trim(); });
+    data.forEach(v => { if (v && v.id != null) { map[String(v.id)] = String(v.sku || '').trim(); ids.push(Number(v.id)); } });
     page++;
   }
-  return map;
+  return { map, ids };
 }
-async function bladeStocks(token) {   // PUT /stocks (a read) with the saved request body
+async function bladeStocks(token, body) {   // PUT /stocks (a read); body built from all variation ids + warehouse
   const r = await fetch(BLADE.base + '/products/variations/stocks', { method: 'PUT',
-    headers: { 'Access-Token': token, 'Content-Type': 'application/json' }, body: BLADE.stockBody || '{}' });
+    headers: { 'Access-Token': token, 'Content-Type': 'application/json' }, body: body });
   if (!r.ok) throw new Error('Blade stock fetch failed (HTTP ' + r.status + ')');
   const j = await r.json().catch(() => null);
   return (j && j.data) || [];
 }
-// EU 3PL via BLADE → { rep: { sku: {oh,av} } } (oh=total_saleable, av=available; summed across warehouses)
+// EU 3PL via BLADE → { rep: { sku: {oh,av} } } (oh=total_saleable, av=available; summed across warehouses).
+// Mirrors Ben's sheet formula: PUT body = {"product_variation_id":[all variation ids],"warehouse_code":"BOC"} —
+// built dynamically from the variations feed so it tracks the current variation count automatically.
 async function bladeFetchStock() {
-  if (!BLADE.stockBody) throw new Error('BLADE_STOCK_BODY not set in server env (the PUT /stocks payload from BLADE_AUTH!A2)');
   const token = await bladeLogin();
-  const idMap = await bladeVariations(token).catch(() => ({}));
-  const stocks = await bladeStocks(token);
+  const { map: idMap, ids } = await bladeVariations(token);
+  if (!ids.length) throw new Error('Blade: no product variations returned (cannot build stock request)');
+  const body = BLADE.stockBody || JSON.stringify({ product_variation_id: ids, warehouse_code: BLADE.warehouse });
+  const stocks = await bladeStocks(token, body);
   const rep = {};
   stocks.forEach(s => {
     let sku = String((s.SKU != null ? s.SKU : s.sku) || '').trim();

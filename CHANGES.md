@@ -1,3 +1,7 @@
+## v26.894.0 BLADE EU 3PL — build the PUT /stocks body dynamically (only BLADE_PASSWORD needed)
+- The PUT `/stocks` payload is now built server-side from the fetched variation IDs: `{"product_variation_id":[all ids],"warehouse_code":"BOC"}` — mirroring Ben's sheet formula, so it tracks the variation count automatically. **No more `BLADE_STOCK_BODY` to paste** (still honoured as an optional manual override; warehouse defaults to `BOC`, overridable via `BLADE_WAREHOUSE_CODE`).
+- The **only** env secret required now is **`BLADE_PASSWORD`**. Until set, EU Import shows "BLADE_PASSWORD not set in server env".
+
 ## v26.893.0 sku_labels DECOMMISSIONED from the view (mig 218): v_sku_attrs now reads products only
 - `v_sku_attrs` is rebuilt **`FROM planner.products` with zero reference to sku_labels** (supersedes mig 217's fallback). Every one of the 29 columns keeps its name/type, so the 27 server reads are transparent. sku_labels is no longer relied on anywhere — app code (mig 215) *and* the view are both off it.
 - Sourced the remaining fields from products, all verified in sandbox (~100% agreement, equal-or-better populated): `carton_barcode`/`inner_barcode`/`barcode_carton_name`/`barcode_inner_name` (same-named products cols), `swatch_url←colour_swatch_url`, `size`/`category`/`subcategory`/`status`/`size_short`/`variant_type`/`release_window`. `created_at`/`updated_at` → NULL (no products equivalent; nothing reads them).
