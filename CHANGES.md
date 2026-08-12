@@ -1,3 +1,11 @@
+## v26.890.0 Manage 3PL — EU via BLADE API + auto-load when >2 days old
+- **EU 3PL source is now the BLADE (bladepro.io) API** (previously "no source configured"). On **Import**, the server logs into BLADE, calls `PUT /products/variations/stocks` (a read), and maps each row to a SKU with **total_saleable = on hand** and **available = available**, summed across warehouses. Variations (`stock_availability`) are fetched as a SKU fallback for any stock row missing one. Then compared vs `products.inventory_eu_3pl[_onhand]` like the other markets.
+- **Needs env (secrets, not committed):** `BLADE_PASSWORD` and `BLADE_STOCK_BODY` (the `PUT /stocks` payload from your BLADE_AUTH!A2 cell). `BLADE_USERNAME` defaults to the app account. Until set, EU Import shows a clear "not set in env" message.
+- **Auto-load:** visiting any Manage 3PL market now auto-refreshes if it was never imported or the last import is **more than 2 days old**.
+
+## v26.889.0 SUG-0024 Inventory Status Report — Section 1
+- New **INVENTORY ▸ Status Report** first section: **out of stock** (0 on hand in 3PL and/or FBA) among ACTIVE products, grouped by **A/B/C marketing tier**, per market pill (US/UK/EU/AU/CA). Shows 3PL SOH, FBA SOH, on-order per SKU. Further sections (backorders, weeks-cover, delivery, inbound, PO delays) to follow.
+
 ## v26.888.0 Manage FBA/3PL — fix gap-filter dropdown styling
 - The gap-filter select was using the inline grid-editor class (`.fci` = width:100%, transparent) so it rendered full-width and unstyled. Replaced with a compact bordered dropdown (max 200px), consistent with other selects.
 

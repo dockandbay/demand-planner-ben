@@ -9188,10 +9188,15 @@ function inv3plAge(iso){ var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug'
     stamp:p(d.getDate())+'-'+MN[d.getMonth()]+'-'+String(d.getFullYear()).slice(2)+' '+p(d.getHours())+':'+p(d.getMinutes())}; }
 // Load the LAST stored import for the selected market (meta + comparison) — no external fetch.
 function inv3plLoad(){ var mkt=INV_3PL, panel=document.getElementById('inv3pl-panel'); if(!panel)return;
-  if(mkt==='EU'){ panel.innerHTML='<div class="mut" style="font-size:12px">No EU 3PL report source configured yet.</div>'; return; }
   panel.innerHTML='<div class="mut" style="font-size:12px">Loading…</div>';
-  fetch('/api/supply/inventory-3pl/status?market='+mkt).then(function(r){return r.json();}).then(inv3plRender)
-    .catch(function(e){ panel.innerHTML='<div style="color:#dc2626">'+tHesc((e&&e.message)||e)+'</div>'; }); }
+  fetch('/api/supply/inventory-3pl/status?market='+mkt).then(function(r){return r.json();}).then(function(j){
+    inv3plRender(j);
+    // Auto-refresh on visit if never imported or the last import is >2 days old.
+    if(INV_3PL!==mkt)return;   // pill changed while loading
+    var stale=!j||!j.imported;
+    if(j&&j.imported&&j.imported_at){ var t=Date.parse(j.imported_at.replace(' ','T')); if(!isNaN(t)&&(Date.now()-t)>2*864e5)stale=true; }
+    if(stale)inv3plImport();
+  }).catch(function(e){ panel.innerHTML='<div style="color:#dc2626">'+tHesc((e&&e.message)||e)+'</div>'; }); }
 // Re-import: fetch the report fresh, persist, re-render.
 function inv3plImport(){ var mkt=INV_3PL, btn=document.getElementById('inv3pl-import'), msg=document.getElementById('inv3pl-msg');
   if(btn)btn.disabled=true; if(msg)msg.textContent='Fetching '+mkt+' report…';

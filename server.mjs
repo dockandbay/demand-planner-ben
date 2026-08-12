@@ -6675,7 +6675,63 @@ const INV3PL_SRC = {
   US: { url: 'https://www.drivehq.com/file/df.aspx/publish/dockandbay/UPLOADED/DockAndBayDailyInventoryReport.csv', sku: 'ItemID',       onhand: 'OnHand',        avail: 'Available' },
   UK: { url: 'https://www.drivehq.com/file/df.aspx/publish/dockandbay/UPLOADED/UK%20-%20Stock%20Report.csv',        sku: 'Product_Code', onhand: 'PhysicalStock', avail: 'AvailableStock' },
   AU: { url: 'https://www.drivehq.com/file/df.aspx/publish/dockandbay/UPLOADED/DOK_DSA_Report.csv',                 sku: 'STOCK_CODE',   onhand: 'CLOSE_ON_HAND', avail: 'STOCK_AVAILABLE' },
+  EU: { type: 'blade', onhand: 'total_saleable', avail: 'available' },   // BLADE (bladepro.io) API — total_saleable=on hand, available=available
 };
+// ── BLADE (bladepro.io) EU 3PL API. Mirrors Ben's Apps Script: login → token, then PUT /stocks (a read) with a saved
+// request body. Variations (id→sku) are fetched as a fallback for any stock row missing a SKU. Creds live in env only.
+const BLADE = {
+  base: 'https://public-api.bladepro.io/v1',
+  username: (process.env.BLADE_USERNAME || 'app_6777fa0f3cfdd1.01954814').trim(),
+  password: (process.env.BLADE_PASSWORD || '').trim(),
+  stockBody: (process.env.BLADE_STOCK_BODY || '').trim(),   // = BLADE_AUTH!A2 payload for the PUT /stocks call
+};
+async function bladeLogin() {
+  if (!BLADE.password) throw new Error('BLADE_PASSWORD not set in server env');
+  const r = await fetch(BLADE.base + '/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username: BLADE.username, password: BLADE.password }) });
+  const j = await r.json().catch(() => null);
+  if (!r.ok) throw new Error('Blade login failed (HTTP ' + r.status + ')');
+  const tok = j && (j.access_token || j.token || j.accessToken || (j.data && (j.data.access_token || j.data.token || j.data.accessToken)));
+  if (!tok) throw new Error('Blade login: no access token in response');
+  return tok;
+}
+async function bladeVariations(token) {   // paginate stock_availability → { "<id>": sku } fallback map
+  const map = {}; let page = 1;
+  while (page <= 100) {
+    const r = await fetch(BLADE.base + '/products/variations/stock_availability?expand=*&page=' + page,
+      { headers: { 'Access-Token': token, 'Content-Type': 'application/json' } });
+    if (!r.ok) break;
+    const j = await r.json().catch(() => null); const data = (j && j.data) || [];
+    if (!data.length) break;
+    data.forEach(v => { if (v && v.id != null) map[String(v.id)] = String(v.sku || '').trim(); });
+    page++;
+  }
+  return map;
+}
+async function bladeStocks(token) {   // PUT /stocks (a read) with the saved request body
+  const r = await fetch(BLADE.base + '/products/variations/stocks', { method: 'PUT',
+    headers: { 'Access-Token': token, 'Content-Type': 'application/json' }, body: BLADE.stockBody || '{}' });
+  if (!r.ok) throw new Error('Blade stock fetch failed (HTTP ' + r.status + ')');
+  const j = await r.json().catch(() => null);
+  return (j && j.data) || [];
+}
+// EU 3PL via BLADE → { rep: { sku: {oh,av} } } (oh=total_saleable, av=available; summed across warehouses)
+async function bladeFetchStock() {
+  if (!BLADE.stockBody) throw new Error('BLADE_STOCK_BODY not set in server env (the PUT /stocks payload from BLADE_AUTH!A2)');
+  const token = await bladeLogin();
+  const idMap = await bladeVariations(token).catch(() => ({}));
+  const stocks = await bladeStocks(token);
+  const rep = {};
+  stocks.forEach(s => {
+    let sku = String((s.SKU != null ? s.SKU : s.sku) || '').trim();
+    if (!sku && s.product_variation_id != null) sku = idMap[String(s.product_variation_id)] || '';
+    sku = sku.trim(); if (!sku) return;
+    if (!rep[sku]) rep[sku] = { oh: 0, av: 0 };
+    rep[sku].oh += csvNum(s.total_saleable);
+    rep[sku].av += csvNum(s.available);
+  });
+  return { rep, count: stocks.length };
+}
 function parseCsvLine(line) { const out = []; let cur = '', q = false;
   for (let i = 0; i < line.length; i++) { const ch = line[i];
     if (q) { if (ch === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += ch; }
@@ -6726,9 +6782,15 @@ app.post('/api/supply/inventory-3pl/import', async (req, res) => {
   const cfg = INV3PL_SRC[mkt];
   if (!cfg) return res.json({ market: mkt, configured: false, error: mkt === 'EU' ? 'No EU 3PL report source configured yet.' : 'Unknown market' });
   try {
-    const rsp = await fetch(cfg.url + '?' + Date.now(), { redirect: 'follow' });
-    if (!rsp.ok) return res.status(502).json({ error: 'Report fetch failed (HTTP ' + rsp.status + ')' });
-    const parsed = inv3plParse(cfg, await rsp.text());
+    let parsed;
+    if (cfg.type === 'blade') {
+      try { parsed = await bladeFetchStock(); }
+      catch (e) { return res.json({ market: mkt, error: e.message }); }
+    } else {
+      const rsp = await fetch(cfg.url + '?' + Date.now(), { redirect: 'follow' });
+      if (!rsp.ok) return res.status(502).json({ error: 'Report fetch failed (HTTP ' + rsp.status + ')' });
+      parsed = inv3plParse(cfg, await rsp.text());
+    }
     if (!parsed) return res.json({ market: mkt, error: 'Empty report' });
     if (parsed.error) return res.json({ market: mkt, headers: parsed.headers, error: parsed.error });
     const store = {}; Object.keys(parsed.rep).forEach(sku => { store[sku] = [parsed.rep[sku].oh, parsed.rep[sku].av]; });
@@ -6736,7 +6798,7 @@ app.post('/api/supply/inventory-3pl/import', async (req, res) => {
     await pool.query(`INSERT INTO planner.inventory_3pl_imports (market, imported_by, imported_at, report) VALUES ($1,$2,now(),$3::jsonb)
       ON CONFLICT (market) DO UPDATE SET imported_by=excluded.imported_by, imported_at=now(), report=excluded.report`, [mkt, by, JSON.stringify(store)]);
     const m = (await pool.query(`SELECT to_char(imported_at,'YYYY-MM-DD"T"HH24:MI:SS') imported_at FROM planner.inventory_3pl_imports WHERE market=$1`, [mkt])).rows[0];
-    res.json({ market: mkt, configured: true, imported: true, imported_by: by, imported_at: m.imported_at, url: cfg.url, ...(await inv3plCompare(mkt, parsed.rep)) });
+    res.json({ market: mkt, configured: true, imported: true, imported_by: by, imported_at: m.imported_at, url: cfg.url || 'BLADE API', ...(await inv3plCompare(mkt, parsed.rep)) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // ── Manage FBA / FBA Aged: manually-uploaded Amazon FBA inventory report per market. Compare (available + fc-transfer)
