@@ -1,21 +1,10 @@
 -- 209: Master PO — consolidate multiple child POs under ONE supplier invoice.
--- One supplier invoice can cover many POs. The MASTER owns finance + ERP; child POs keep
--- planning/production (demand, shipments, buy plan). All children of a master share ONE
--- supplier + ONE currency. Step 1 = grouping + reconciliation only (no ERP push, no cash-flow
--- rerouting yet — those are later steps). Additive + idempotent.
+-- A MASTER is a REAL purchase_orders row (is_master=true) that behaves like any PO — it appears in the
+-- grid, takes shipments/branch/ERP, and carries the consolidated child lines + the single supplier invoice.
+-- Its number is the biggest child's PO + '-MASTER'. CHILDREN carry master_po (→ the master's po) and are
+-- EXCLUDED from live calcs (buy plan, cash flow, payments, ERP) — the master represents them. Children keep a
+-- 'child' badge, no ERP sync, and inherit the master's status. Additive + idempotent.
 
-CREATE TABLE IF NOT EXISTS planner.master_pos (
-  master_po             text PRIMARY KEY,                 -- MPO-NNNN
-  supplier_name         text,
-  currency              text,
-  invoice_total         numeric(14,2),                    -- the single supplier invoice covering all children
-  invoice_attachment_id bigint,                           -- optional → planner.portal_attachments(id)
-  status                text DEFAULT 'draft',             -- draft | confirmed (ERP states come in step 2)
-  notes                 text,
-  created_by            text,
-  created_at            timestamptz DEFAULT now()
-);
-
--- Child link: which master (if any) a PO belongs to. NULL = standalone (unchanged behaviour).
-ALTER TABLE planner.purchase_orders ADD COLUMN IF NOT EXISTS master_po text;
+ALTER TABLE planner.purchase_orders ADD COLUMN IF NOT EXISTS master_po  text;      -- on a CHILD: the master's po (NULL = normal PO)
+ALTER TABLE planner.purchase_orders ADD COLUMN IF NOT EXISTS is_master  boolean DEFAULT false;   -- true on the consolidated master row
 CREATE INDEX IF NOT EXISTS idx_purchase_orders_master_po ON planner.purchase_orders(master_po);

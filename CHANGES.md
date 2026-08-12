@@ -1,3 +1,10 @@
+## v26.863.0 Master PO — reworked: the master is now a REAL purchase order
+- Per Ben's feedback, a master is no longer a separate object — it's a **real `purchase_orders` row** (`is_master`) that behaves like any PO (grid, shipments, branch, ERP, rename). Number = **biggest child's PO + `-MASTER`** (ties → first); it **inherits the biggest child's header** and carries the **summed child lines** + the supplier invoice.
+- **Create moved to Import/Export ▸ ⛃ Create master PO** (modal: pick supplier → tick 2+ consolidatable POs → optional invoice → create). Warns if the selection spans multiple branches (the master forces one branch → market shift).
+- **`master` badge** (medium blue) under the PO number in the grid.
+- **New Child PO sub-tab** (replaces the old Master POs tab): children grouped by master, each with a `child` badge, a link to the master, and the master's (inherited) status; **Dissolve** unwinds a master.
+- **Children fully excluded** from the grid, buy plan (on-order inbound), cash flow, payments, ERP and Actions — the master represents them. Consolidation restricted to **not-yet-shipped, not-complete** POs so no in-transit stock is dropped or double-counted (verified units conserved). Migration **209** now adds `is_master` (+ `master_po`); the interim `master_pos` table was dropped. No forecast-logic path changed; exclusion filters are no-ops when no master exists.
+
 ## v26.862.0 Master PO (consolidated supplier invoice) — step 1: group + reconcile
 - New **PURCHASE ORDERS ▸ Master POs** sub-tab. Group child POs (one supplier + one currency) under a single supplier invoice; the master is the future ERP order, children stay for planning.
 - Create flow: pick supplier → tick its ungrouped POs (running Σ) → optional invoice total → creates `MPO-nnnn`.

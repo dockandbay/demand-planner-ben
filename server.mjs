@@ -296,6 +296,7 @@ async function buildSKURAW() {
                     LEFT JOIN planner.branches b ON b.name = po.branch
                     WHERE coalesce(l.qty,0) > 0
                       AND coalesce(po.status,'') NOT ILIKE '%complete%'
+                      AND po.master_po IS NULL   -- child POs are consolidated into a master; the master (real on-order PO) carries the summed lines, so count it not them
                       AND coalesce(nullif(po.country_code,''), b.country_code) IN ('UK','US','EU','AU','CA')
                       AND NOT EXISTS (SELECT 1 FROM planner.inbound_shipments i WHERE i.reference = po.po)
                 ) z WHERE wh IS NOT NULL GROUP BY sku, wh`),
@@ -2482,6 +2483,9 @@ async function buildActionsRows() {
             ref: ec + ' PO' + (ec > 1 ? 's' : ''),
             detail: 'There ' + (ec > 1 ? 'are ' : 'is ') + ec + ' PO' + (ec > 1 ? 's' : '') + ' open in the ERP but not in the planner — review the ERP Compare report',
             fix: 'gotoreport', target: '', field: 'erp-compare', target_key: 'erp-compare' }); } catch (e) { /* best-effort */ }
+  // CHILD POs are consolidated into a master and raise NO actions of their own (no ERP sync, no field/shipment prompts) — the master owns them.
+  try { const _child = new Set((await pool.query(`SELECT po FROM planner.purchase_orders WHERE master_po IS NOT NULL`)).rows.map(r => r.po));
+    if (_child.size) return arows.filter(r => !(r && r.ref && _child.has(r.ref)) && !(r && r.target && _child.has(r.target)) && !(r && r.po && _child.has(r.po))); } catch (e) { /* best-effort */ }
   return arows;
 }
 function refreshActionsCache() {   // single-flight — coalesces concurrent refreshes into one build
@@ -2806,7 +2810,7 @@ app.get('/api/supply/:section', async (req, res) => {
         // Landing imports from linked Flexport (FLEX) unless manually overridden (M).
         // 'cashflow' reuses this exact PO calc, then re-shapes the rows into dated payment line items.
         if (req.params.section === 'purchase-orders' && req.query.supplier) {   // admin portal-preview: only this supplier's POs (full rows, unthinned)
-          return res.json((await pool.query(PO_ROWS_SQL + ' WHERE calc4.supplier_name = $1 ORDER BY po', [req.query.supplier])).rows);
+          return res.json((await pool.query(PO_ROWS_SQL + ' WHERE calc4.supplier_name = $1 ORDER BY po', [req.query.supplier])).rows.filter(r => !r.master_po));
         }
         // Both non-supplier paths derive from ONE cached full PO_ROWS_SQL build (poRowsCache) — see the 10-min
         // stale-while-revalidate cache. Cash Flow uses the full set as before (cashflowResponse doesn't mutate it).
@@ -6648,108 +6652,120 @@ app.get('/api/supply/dtc/status', async (_req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 // ── Master PO (consolidated supplier invoice) ─────────────────────────────────────────────────
-// A master groups N child POs (one supplier + one currency) under a single supplier invoice. Step 1:
-// grouping + reconciliation only. Child PO order value = v_po_finance.value_est (line value else estimate);
-// we reconcile Σ(children value_est) vs the master invoice_total.
+// A MASTER is a REAL purchase_orders row (is_master=true) that consolidates N child POs (one supplier).
+// It inherits its header from the BIGGEST child (by value), carries the summed lines, and is the single
+// ERP order. Its number = biggest child's po + '-MASTER'. CHILDREN carry master_po and are excluded from
+// all live calcs (grid, buy plan, cash flow, payments, ERP) — the master represents them.
 const MPO_CHILD_SQL = `SELECT p.po, f.supplier_name, coalesce(p.branch,'') branch, coalesce(p.client,'') client,
     coalesce(f.value_est,0)::numeric value_est
   FROM planner.purchase_orders p JOIN planner.v_po_finance f ON f.po=p.po`;
-app.get('/api/supply/master-po/list', async (req, res) => {   // list masters + rollups (two-segment path avoids the /api/supply/:section router)
-  try {
-    const rows = (await pool.query(`SELECT m.master_po, m.supplier_name, m.currency, m.invoice_total, m.status,
-        coalesce(m.notes,'') notes, m.invoice_attachment_id, m.created_by, to_char(m.created_at,'DD-Mon-YY') created_at,
-        (SELECT count(*) FROM planner.purchase_orders p WHERE p.master_po=m.master_po)::int child_count,
-        (SELECT coalesce(sum(coalesce(f.value_est,0)),0) FROM planner.purchase_orders p JOIN planner.v_po_finance f ON f.po=p.po WHERE p.master_po=m.master_po)::numeric children_value
-      FROM planner.master_pos m ORDER BY m.created_at DESC`)).rows;
-    res.json({ masters: rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-app.get('/api/supply/master-po/new-data', async (req, res) => {   // suppliers that have ungrouped POs (for the create picker)
+// Transactional/identity columns NOT inherited from the biggest child — the master starts a fresh order.
+const MPO_RESET_NULL = new Set(['erp_po','deposit_ref','shipment_ref','crossdock_skus','asn_numbers',
+  'pay_start_deposit_assigned','pay_start_deposit_date','pay_completion_assigned','pay_completion_date',
+  'pay_balance_1_amount','pay_balance_1_date','pay_balance_2_amount','pay_balance_2_date','credit_fee_assigned',
+  'dtc_accepted_at','dtc_accepted_by','dtc_approved_snapshot','supplier_confirmed_at','supplier_confirmed_by',
+  'invoice_processed_date','approved_lines','production_confirmed_at']);
+let _poColsCache = null;
+async function poColumns() { if (_poColsCache) return _poColsCache;
+  _poColsCache = (await pool.query(`SELECT column_name FROM information_schema.columns WHERE table_schema='planner' AND table_name='purchase_orders' ORDER BY ordinal_position`)).rows.map(r => r.column_name);
+  return _poColsCache; }
+app.get('/api/supply/master-po/new-data', async (req, res) => {   // suppliers with ungrouped POs (for the create picker)
   try {
     const rows = (await pool.query(`SELECT DISTINCT f.supplier_name, coalesce(s.default_currency,'USD') currency
       FROM planner.purchase_orders p JOIN planner.v_po_finance f ON f.po=p.po
       LEFT JOIN planner.suppliers s ON lower(trim(s.name))=lower(trim(f.supplier_name))
-      WHERE p.master_po IS NULL AND coalesce(f.supplier_name,'')<>'' ORDER BY 1`)).rows;
+      WHERE p.master_po IS NULL AND NOT coalesce(p.is_master,false) AND coalesce(f.supplier_name,'')<>'' ORDER BY 1`)).rows;
     res.json({ suppliers: rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.get('/api/supply/master-po/eligible', async (req, res) => {   // ungrouped POs for a supplier
+app.get('/api/supply/master-po/eligible', async (req, res) => {   // POs eligible to become children of a master
   const sup = String((req.query && req.query.supplier) || '').trim(); if (!sup) return res.json({ pos: [] });
   try {
-    const rows = (await pool.query(MPO_CHILD_SQL + ` WHERE p.master_po IS NULL AND lower(trim(f.supplier_name))=lower(trim($1))
-      AND coalesce(p.status,'') NOT ILIKE '%cancel%' ORDER BY p.po`, [sup])).rows;
+    const rows = (await pool.query(MPO_CHILD_SQL + ` WHERE p.master_po IS NULL AND NOT coalesce(p.is_master,false)
+      AND lower(trim(f.supplier_name))=lower(trim($1)) AND coalesce(p.status,'') NOT ILIKE '%cancel%' AND coalesce(p.status,'') NOT ILIKE '%complete%'
+      AND NOT EXISTS (SELECT 1 FROM planner.inbound_shipments i WHERE i.reference=p.po) ORDER BY p.po`, [sup])).rows;
     res.json({ pos: rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-app.get('/api/supply/master-po/:id', async (req, res) => {   // detail: master + children + consolidated lines
-  const id = req.params.id;
+app.get('/api/supply/master-po/children', async (req, res) => {   // Child PO tab: all children grouped by master + master link/status
   try {
-    const m = (await pool.query(`SELECT master_po, supplier_name, currency, invoice_total, status, coalesce(notes,'') notes,
-        invoice_attachment_id, created_by, to_char(created_at,'DD-Mon-YY') created_at FROM planner.master_pos WHERE master_po=$1`, [id])).rows[0];
-    if (!m) return res.status(404).json({ error: 'master not found' });
-    const children = (await pool.query(MPO_CHILD_SQL + ` WHERE p.master_po=$1 ORDER BY p.po`, [id])).rows;
-    const pos = children.map(c => c.po);
-    const lines = pos.length ? (await pool.query(`SELECT sku, sum(qty)::numeric qty FROM planner.purchase_order_lines WHERE po = ANY($1) GROUP BY sku ORDER BY sku`, [pos])).rows : [];
-    res.json({ master: m, children, lines });
+    const rows = (await pool.query(`SELECT p.po, p.master_po, f.supplier_name, coalesce(p.branch,'') branch, coalesce(p.client,'') client,
+        coalesce(f.value_est,0)::numeric value_est, coalesce(mp.status,'') master_status
+      FROM planner.purchase_orders p JOIN planner.v_po_finance f ON f.po=p.po
+      LEFT JOIN planner.purchase_orders mp ON mp.po=p.master_po
+      WHERE p.master_po IS NOT NULL ORDER BY p.master_po, p.po`)).rows;
+    res.json({ children: rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/master-po/create', async (req, res) => {
   const b = req.body || {}, childPos = Array.isArray(b.child_pos) ? b.child_pos.filter(Boolean) : [];
-  const supplier = String(b.supplier_name || '').trim(), currency = String(b.currency || '').trim() || 'USD';
-  if (!supplier || !childPos.length) return res.status(400).json({ error: 'supplier_name and child_pos required' });
+  const supplier = String(b.supplier_name || '').trim();
+  if (!supplier || childPos.length < 2) return res.status(400).json({ error: 'supplier_name and at least two child_pos required' });
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    // Guard: every child must exist, be the same supplier, and not already be mastered.
-    const chk = (await client.query(`SELECT p.po, f.supplier_name, p.master_po FROM planner.purchase_orders p JOIN planner.v_po_finance f ON f.po=p.po WHERE p.po = ANY($1)`, [childPos])).rows;
+    // Every child must exist, be the same supplier, and not already be a child or a master.
+    const chk = (await client.query(`SELECT p.po, f.supplier_name, p.master_po, coalesce(p.is_master,false) is_master, coalesce(p.status,'') status, coalesce(f.value_est,0)::numeric value_est,
+        EXISTS (SELECT 1 FROM planner.inbound_shipments i WHERE i.reference=p.po) has_inbound
+      FROM planner.purchase_orders p JOIN planner.v_po_finance f ON f.po=p.po WHERE p.po = ANY($1)`, [childPos])).rows;
     if (chk.length !== childPos.length) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'one or more POs not found' }); }
-    const bad = chk.find(r => r.master_po); if (bad) { await client.query('ROLLBACK'); return res.status(409).json({ error: bad.po + ' is already in ' + bad.master_po }); }
+    const bad = chk.find(r => r.master_po || r.is_master); if (bad) { await client.query('ROLLBACK'); return res.status(409).json({ error: bad.po + (bad.is_master ? ' is already a master' : ' is already in ' + bad.master_po) }); }
     const wrongSup = chk.find(r => String(r.supplier_name || '').trim().toLowerCase() !== supplier.toLowerCase());
     if (wrongSup) { await client.query('ROLLBACK'); return res.status(400).json({ error: wrongSup.po + ' is a different supplier' }); }
-    const n = (await client.query(`SELECT coalesce(max((regexp_replace(master_po,'\\D','','g'))::int),1000) mx FROM planner.master_pos WHERE master_po ~ '^MPO-[0-9]+$'`)).rows[0].mx;
-    const mpo = 'MPO-' + (Number(n) + 1);
-    await client.query(`INSERT INTO planner.master_pos (master_po,supplier_name,currency,invoice_total,invoice_attachment_id,notes,created_by) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [mpo, supplier, currency, (b.invoice_total != null && b.invoice_total !== '' ? Number(b.invoice_total) : null), (b.invoice_attachment_id || null), (b.notes ? String(b.notes) : null), authUser(req)]);
-    await client.query(`UPDATE planner.purchase_orders SET master_po=$1 WHERE po = ANY($2)`, [mpo, childPos]);
+    const shipped = chk.find(r => r.has_inbound || /complete/i.test(r.status));   // consolidating a shipped/received PO would drop real in-transit stock or double-count
+    if (shipped) { await client.query('ROLLBACK'); return res.status(400).json({ error: shipped.po + (shipped.has_inbound ? ' already has inbound stock — consolidate before shipping' : ' is complete') }); }
+    // Biggest child by value_est, ties broken by the order they were passed in.
+    const byPo = {}; chk.forEach(r => { byPo[r.po] = r; });
+    let big = childPos[0]; childPos.forEach(po => { if (Number(byPo[po].value_est) > Number(byPo[big].value_est)) big = po; });
+    const bigStatus = byPo[big].status, childValSum = chk.reduce((a, r) => a + Number(r.value_est || 0), 0);
+    // Master number = biggest child's po + '-MASTER' (dedupe if it somehow exists).
+    let mpo = big + '-MASTER', sfx = 1;
+    while ((await client.query(`SELECT 1 FROM planner.purchase_orders WHERE po=$1`, [mpo])).rowCount) { sfx++; mpo = big + '-MASTER-' + sfx; }
+    // Build the master row by copying the biggest child's header, resetting identity/transactional columns.
+    const cols = await poColumns();
+    const inv = (b.invoice_total != null && b.invoice_total !== '') ? Number(b.invoice_total) : null;
+    // params: $1=big(src) $2=mpo $3=inv $4=childValSum
+    const selectList = cols.map(c => {
+      if (c === 'po') return '$2';
+      if (c === 'is_master') return 'true';
+      if (c === 'master_po') return 'NULL';
+      if (c === 'supplier_invoice_total') return '$3';
+      if (c === 'order_value_estimation') return '$4';
+      if (c === 'created_at' || c === 'updated_at') return 'now()';
+      if (c === 'starred') return 'false';
+      if (MPO_RESET_NULL.has(c)) return 'NULL';
+      return 'src.' + c;
+    });
+    await client.query(`INSERT INTO planner.purchase_orders (${cols.join(',')}) SELECT ${selectList.join(',')} FROM planner.purchase_orders src WHERE src.po=$1`, [big, mpo, inv, childValSum]);
+    // Consolidated lines (qty summed, cost = qty-weighted avg). po_sku kept unique per master.
+    await client.query(`INSERT INTO planner.purchase_order_lines (po, sku, po_sku, qty, cost_price, carton_qty, po_status)
+      SELECT $1, sku, $1||'-'||sku, sum(qty),
+             CASE WHEN sum(qty)>0 THEN round(sum(qty*coalesce(cost_price,0))/sum(qty),4) ELSE max(cost_price) END,
+             nullif(sum(coalesce(carton_qty,0)),0), $2
+      FROM planner.purchase_order_lines WHERE po = ANY($3) GROUP BY sku`, [mpo, bigStatus, childPos]);
+    // Link children (they keep their own status; the Child PO tab shows the master's status live).
+    await client.query(`UPDATE planner.purchase_orders SET master_po=$1, updated_at=now() WHERE po = ANY($2)`, [mpo, childPos]);
     await client.query('COMMIT');
     invalidateSupplyCaches();
-    res.json({ ok: true, master_po: mpo });
+    res.json({ ok: true, master_po: mpo, biggest_child: big });
   } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
-app.post('/api/supply/master-po/:id/edit', async (req, res) => {   // invoice_total / notes / status + add/remove children
-  const id = req.params.id, b = req.body || {};
-  const add = Array.isArray(b.add) ? b.add.filter(Boolean) : [], remove = Array.isArray(b.remove) ? b.remove.filter(Boolean) : [];
+app.post('/api/supply/master-po/:id/dissolve', async (req, res) => {   // undo: remove the master row + lines, free the children
+  const id = req.params.id;
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const m = (await client.query(`SELECT master_po, supplier_name FROM planner.master_pos WHERE master_po=$1 FOR UPDATE`, [id])).rows[0];
+    const m = (await client.query(`SELECT po FROM planner.purchase_orders WHERE po=$1 AND coalesce(is_master,false)=true`, [id])).rows[0];
     if (!m) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'master not found' }); }
-    if (b.invoice_total !== undefined) await client.query(`UPDATE planner.master_pos SET invoice_total=$2 WHERE master_po=$1`, [id, (b.invoice_total != null && b.invoice_total !== '' ? Number(b.invoice_total) : null)]);
-    if (b.notes !== undefined) await client.query(`UPDATE planner.master_pos SET notes=$2 WHERE master_po=$1`, [id, (b.notes ? String(b.notes) : null)]);
-    if (b.status !== undefined) await client.query(`UPDATE planner.master_pos SET status=$2 WHERE master_po=$1`, [id, String(b.status)]);
-    if (remove.length) await client.query(`UPDATE planner.purchase_orders SET master_po=NULL WHERE master_po=$1 AND po = ANY($2)`, [id, remove]);
-    if (add.length) {
-      const chk = (await client.query(`SELECT p.po, f.supplier_name, p.master_po FROM planner.purchase_orders p JOIN planner.v_po_finance f ON f.po=p.po WHERE p.po = ANY($1)`, [add])).rows;
-      const bad = chk.find(r => r.master_po && r.master_po !== id); if (bad) { await client.query('ROLLBACK'); return res.status(409).json({ error: bad.po + ' is already in ' + bad.master_po }); }
-      const wrongSup = chk.find(r => String(r.supplier_name || '').trim().toLowerCase() !== String(m.supplier_name || '').trim().toLowerCase());
-      if (wrongSup) { await client.query('ROLLBACK'); return res.status(400).json({ error: wrongSup.po + ' is a different supplier' }); }
-      await client.query(`UPDATE planner.purchase_orders SET master_po=$1 WHERE po = ANY($2)`, [id, add]);
-    }
+    await client.query(`UPDATE planner.purchase_orders SET master_po=NULL, updated_at=now() WHERE master_po=$1`, [id]);
+    await client.query(`DELETE FROM planner.purchase_order_lines WHERE po=$1`, [id]);
+    await client.query(`DELETE FROM planner.purchase_orders WHERE po=$1 AND coalesce(is_master,false)=true`, [id]);
     await client.query('COMMIT');
     invalidateSupplyCaches();
     res.json({ ok: true });
   } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); }
   finally { client.release(); }
-});
-app.post('/api/supply/master-po/:id/delete', async (req, res) => {   // ungroup all children + remove the master
-  const id = req.params.id;
-  try {
-    await pool.query(`UPDATE planner.purchase_orders SET master_po=NULL WHERE master_po=$1`, [id]);
-    await pool.query(`DELETE FROM planner.master_pos WHERE master_po=$1`, [id]);
-    invalidateSupplyCaches();
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/supply/dtc/review', async (req, res) => {   // per-order note / accept-discrepancy
@@ -11021,6 +11037,8 @@ const PO_ROWS_SQL = `
             coalesce(crossdock_skus,'') crossdock_skus,
             coalesce(dtc_custom,false) dtc_custom, coalesce(dtc_key_account,false) dtc_key_account,
             coalesce((SELECT pcd.custom_dev_ref FROM planner.purchase_orders pcd WHERE pcd.po=calc4.po),'') custom_dev_ref,   -- custom-order product developments (CSV of product_dev_items.ref); subquery since calc4 doesn't forward the column
+            (SELECT po3.master_po FROM planner.purchase_orders po3 WHERE po3.po=calc4.po) master_po,                        -- master-PO grouping: a CHILD carries its master's po (filtered out of the grid in poRowsCache)
+            (SELECT coalesce(po3.is_master,false) FROM planner.purchase_orders po3 WHERE po3.po=calc4.po) is_master,        -- true on the consolidated MASTER row (shows the 'master' badge)
             -- Pending supplier-submitted completion (production-end) date → inline "set to …" quick-apply on the grid END cell
             (SELECT ss.value FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='completion_date' AND ss.status='pending' ORDER BY ss.id DESC LIMIT 1) sub_comp_date,
             (SELECT ss.id    FROM planner.supplier_submissions ss WHERE ss.po=calc4.po AND ss.kind='completion_date' AND ss.status='pending' ORDER BY ss.id DESC LIMIT 1) sub_comp_id,
@@ -11194,7 +11212,7 @@ function _poRowArchived(r, cutoff) {
 }
 // Full, unfiltered PO grid rows (the expensive PO_ROWS_SQL, run once). Feeds the admin PO grid (archive-filtered in
 // JS per request) and Cash Flow (uses the full set as today). The per-supplier / portal-preview path stays live.
-const poRowsCache = makeCache('po-rows', async () => (await pool.query(PO_ROWS_SQL + ' ORDER BY po')).rows);
+const poRowsCache = makeCache('po-rows', async () => (await pool.query(PO_ROWS_SQL + ' ORDER BY po')).rows.filter(r => !r.master_po));   // CHILD POs are consolidated into their master and hidden from the grid + cash flow (the master, is_master, stays)
 // Default ORDER PLAN grid (no supplier, archived hidden per the cutoff) — the common heavy load. supplier/includeArchived variants run live in the route.
 const orderPlanCache = makeCache('order-plan', async () => {
   const cut = await poArchiveCutoff();
@@ -11215,7 +11233,7 @@ const lookupsCache = makeCache('lookups', async () => {
          SELECT sku FROM planner.products WHERE sku ILIKE 'CROSSDOCK%' OR sku ILIKE 'PREORDER%'
          UNION SELECT sku FROM planner.sku_labels WHERE sku ILIKE 'CROSSDOCK%' OR sku ILIKE 'PREORDER%'
        ) z ORDER BY sku`),
-    q(`SELECT po FROM planner.purchase_orders WHERE coalesce(status,'') NOT ILIKE '%complete%' ORDER BY po`),
+    q(`SELECT po FROM planner.purchase_orders WHERE coalesce(status,'') NOT ILIKE '%complete%' AND master_po IS NULL ORDER BY po`),
   ]).catch(() => [[], [], [], [], [], [], [], []]);
   return {
     deposits: dep.map((x) => x.reference), batches: bat.map((x) => x.batch), prods: pr.map((x) => x.prod_no),
