@@ -7133,7 +7133,9 @@ function insertInlineSkuRows(s,co,ch,afterTr){
   // Commit every month in the current preview (single-month or whole-FY) → SKU overrides. Review step first.
   function applySmoothPreview(){
     if(!SMOOTH_PREVIEW||!SMOOTH_PREVIEW.months)return;
-    if(smoothDisregards(co,ch,s)){ try{ recalcDiscontinued(s,co,ch); _markSmoothRun(); }catch(e){} }   // auto-recalc discontinued rundown (velocity × seasonality) whenever disregard-discontinued smoothing is applied
+    // "Disregard disc." on a MANUAL smooth = leave discontinued SKUs completely untouched (Ben, v26.911): the active-SKU
+    // rescale already excludes them (computeSmoothAlloc), so we no longer recalc their stock-rundown here — that would
+    // re-forecast (and sometimes RAISE) discontinued cells, which isn't "disregard". The ⚙ Auto-smooth keeps its own recalc.
     Object.keys(SMOOTH_PREVIEW.months).forEach(function(mo){ applySmoothAlloc(co,ch,mo,SMOOTH_PREVIEW.months[mo]); });
     SMOOTH_PREVIEW=null; reExpand();
     try{ if(typeof saveForecasts==='function') saveForecasts(); }catch(e){}   // persist a smooth immediately — a bulk edit shouldn't wait on the 60s autosave (lost on refresh otherwise)

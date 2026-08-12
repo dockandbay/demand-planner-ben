@@ -1,3 +1,6 @@
+## v26.911.0 Smooth — "Disregard disc." now leaves discontinued SKUs untouched (manual smooth)
+- With "Disregard disc." ON, clicking **Smooth** on a subcategory now rescales only the ACTIVE SKUs to hit the target and leaves discontinued SKUs **exactly as they are** — it no longer runs the discontinued stock-rundown recalc, which could *raise* a discontinued cell (the "it increases discontinued items" bug, e.g. Cooling UK DTC May-27). The ⚙ Auto-smooth sweep keeps its own recalc (unchanged).
+
 ## v26.910.0 Target recs — "No ASP — set a price" flag for new-category targets with no price
 - When a new-category revenue target is set for a market that has **no derivable ASP** (e.g. Lanyard CA — no `ca_rt`), the recommendation now shows an amber **"⚠ No ASP — set a price"** row explaining units can't be computed, instead of silently producing nothing. Kept visible in the list but excluded from the open/Apply-all count.
 
