@@ -9367,12 +9367,16 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
     return;
   }
   // Manage FBA (compare): small upload box + meta + comparison table
-  var drop='<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 12px">'
+  // Where to get the report per market (Amazon Seller Central → FBA Inventory ▸ Reports ▸ Inventory Report → CSV/TXT).
+  var _fbaHost={UK:'amazon.co.uk',US:'amazon.com',EU:'amazon.de',AU:'amazon.com.au',CA:'amazon.ca'}[INV_FBA]||'amazon.com';
+  var _fbaUrl='https://sellercentral.'+_fbaHost+'/inventoryplanning/manageinventoryhealth';
+  var drop='<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 6px">'
     +'<div id="invfba-drop" style="border:2px dashed #93c5fd;border-radius:8px;background:#f8fbff;padding:8px 10px;text-align:center;cursor:pointer;max-width:200px;box-sizing:border-box;font-size:11px">'
     +'<div style="color:#1e40af;font-weight:600">⬆ Drop '+tHesc(INV_FBA)+' FBA report</div>'
     +'<div class="mut" style="margin-top:2px">.csv/.txt · or <span style="color:#1d4ed8;text-decoration:underline">choose file</span></div>'
     +'<input type="file" id="invfba-file" accept=".csv,.txt,text/csv,text/plain,text/tab-separated-values" style="display:none"></div>'
-    +'<span>'+invFbaMeta(j)+' <span id="invfba-msg" class="mut" style="font-size:11px"></span></span></div>';
+    +'<span>'+invFbaMeta(j)+' <span id="invfba-msg" class="mut" style="font-size:11px"></span></span></div>'
+    +'<div class="mut" style="font-size:11px;margin:0 0 12px;max-width:600px;line-height:1.5">📄 Get it from <a href="'+_fbaUrl+'" target="_blank" rel="noopener" style="color:#1d4ed8;font-weight:600">Amazon Seller Central ('+tHesc(INV_FBA)+') ↗</a> ▸ <b>FBA Inventory</b> ▸ <b>Reports</b> ▸ <b>Inventory Report</b> → download <b>CSV</b> or <b>TXT</b>, then drop it here.</div>';
   _invFbaLast=j;   // keep last data so the gap filter can re-render without re-fetching
   var content='';
   if(j.imported){ var rows=j.rows||[];
