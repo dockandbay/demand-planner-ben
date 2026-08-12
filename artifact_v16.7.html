@@ -7042,6 +7042,7 @@ function subcatSkuEffTotals(s,co,ch){
 function insertInlineSkuRows(s,co,ch,afterTr){
   var wh=skuWh(co,ch);
   var ctry=co.toLowerCase();
+  var _skuSp=aspF(s,co,ch);   // subcat avg selling price — used to show revenue on SKU FY/period totals (SKU units × subcat ASP)
   var skus=filteredSkus(s,co,ch); // rows respect the SKU filters; subtotal/gap (eff) covers ALL subcat SKUs
   // Share basis = the WHOLE subcat (activity + channel available), NOT the filtered rows — otherwise a search or
   // pill that narrows to one SKU gives it share 1.0, so its cell shows the entire subcat forecast (was a bug).
@@ -7674,6 +7675,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       td.className=fyTotCls(Y)+' sep2';
       td.style.cssText='padding:2px 4px;border-bottom:1px solid #f0f0ee';
       td.innerHTML='<div style="text-align:right"><div style="font-size:9px;font-weight:700;font-variant-numeric:tabular-nums">'+fn(cur)+'</div>'
+        +'<div style="font-size:8px;font-variant-numeric:tabular-nums;color:#475569">'+fr(Math.round(cur*_skuSp))+'</div>'   // revenue (SKU units × subcat ASP) — matches the subcat FY total's rev line
         +(yoy!=null?'<div style="font-size:7px" class="'+(yoy>0?'gp':yoy<0?'rp':'fp')+'">'+(yoy>0?'+':'')+yoy+'%</div>':'')+'</div>';
       return td;
     }
