@@ -741,7 +741,9 @@ app.post('/api/demand/snapshots', async (req, res) => {
   try {
     const id = (await pool.query(`INSERT INTO planner.forecast_snapshots(name, taken_by) VALUES($1,$2) RETURNING id`, [name, by])).rows[0].id;
     const r = await pool.query(`INSERT INTO planner.forecast_snapshot_rows(snapshot_id, sku, warehouse, channel, month, units)
-      SELECT $1, sku, warehouse, channel, month, units FROM planner.forecast_outputs WHERE units IS NOT NULL`, [id]);
+      SELECT $1, sku, warehouse, channel, month, units FROM planner.forecast_outputs
+      WHERE units IS NOT NULL AND month >= date_trunc('month', current_date)
+        AND month < date_trunc('month', current_date) + interval '18 months'`, [id]);   // forward 18 months only (Ben) — keeps snapshots lean; still captures near-forward months that later become past (for #4)
     await pool.query(`UPDATE planner.forecast_snapshots SET row_count=$2 WHERE id=$1`, [id, r.rowCount]);
     res.json({ ok: true, id: id, name: name, rows: r.rowCount });
   } catch (e) { res.status(500).json({ error: e.message }); }
