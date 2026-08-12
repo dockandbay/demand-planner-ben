@@ -1,3 +1,6 @@
+## v26.880.0 Shipments — active filter selects go dark
+- The Shipments **ship-to country**, **branch** and **mode** dropdowns now render dark (black, SEL_ON) when a non-default value is chosen, and revert when set back to "All" — a clear active-filter cue (matches the PO grid selects).
+
 ## v26.879.0 Shipments — ship-to-country + mode (all/sea/air/fob) filters
 - SUPPLY ▸ Shipments: the **ship-to country** dropdown (default "All countries") is in place, and the mode dropdown is now **All modes / Sea / Air / FOB** (was FOB / non-FOB) — filters on the shipment’s effective mode. Both persist with the other shipment filters.
 
