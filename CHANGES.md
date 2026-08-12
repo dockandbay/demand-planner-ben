@@ -1,3 +1,8 @@
+## v26.867.0 PO grid — status-first lazy load, PROD# descending, load-more inside the grid
+- **Lazy load now prioritises by status**: the first 50 (and each "load more") surface **Production ▸ Shipping ▸ Shipped-to-master ▸ Ready-to-ship ▸ Future** first, with **Complete last** — so a search like "DILLARDS" shows all its in-progress POs at once instead of 3-then-load-more. Sort applied to the filtered set *before* paging.
+- **PROD# descending** (57 ▸ 56 ▸ 55) within a status and for the production group headers (was ascending).
+- **"Load more / Show all" moved into the grid table footer row** (sticky-left), inside the same scroll box as the rows — fixes the double-scroll (grid had its own `max-height` scrollbar separate from the page).
+
 ## v26.866.0 Create master PO popup — grouped by status, search, actions on top
 - Eligible POs are now **grouped by status** with **PRODUCTION and SHIPPING first** (then the rest), each group headed and counted.
 - Added a **🔍 search box** (filters by PO / client / branch; checked rows stay selected).

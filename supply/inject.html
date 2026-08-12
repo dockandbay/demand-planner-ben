@@ -988,6 +988,14 @@
     if(s.indexOf('FUTURE')>=0)return 'future';
     if(/SHIPPING|DELIVER/.test(s))return 'shipping';
     return 'production'; }
+  // PO status priority for the grid: production ▸ shipping ▸ ready-to-ship ▸ future FIRST, complete LAST (Ben).
+  var PO_STATUS_SEQ=['PRODUCTION','SHIPPING','SHIPPED TO MASTER','READY TO SHIP','FUTURE','DELIVERED','COMPLETE'];
+  function poStPri(r){ var s=String(r&&r.status||'').toUpperCase(); var i=PO_STATUS_SEQ.indexOf(s);
+    if(i>=0)return i; if(s.indexOf('COMPLETE')>=0)return PO_STATUS_SEQ.length; return PO_STATUS_SEQ.length-1.5; }   // unknown → just before Complete
+  function poProdNo(r){ var n=parseFloat(r&&r.prod_no); return isNaN(n)?-1:n; }   // for descending 57 ▸ 56 ▸ 55 sort
+  function poGridSort(list){ return list.slice().sort(function(a,b){ var pa=poStPri(a),pb=poStPri(b); if(pa!==pb)return pa-pb;   // status priority
+      var na=poProdNo(a),nb=poProdNo(b); if(na!==nb)return nb-na;                                                                // PROD# descending
+      return a.po<b.po?-1:a.po>b.po?1:0; }); }
   // grid Ship-to display: the five majors show as-is; anything else (DIRECT / other) shows as "OT" (OTHER)
   function cgridLabel(c){ if(!c)return ''; c=String(c).toUpperCase(); return ['UK','US','AU','EU','CA'].indexOf(c)>=0?c:'OT'; }
   // 2-letter ship-to badge with the market colour background (black text). MKT_COLORS is the server-injected palette.
@@ -2329,6 +2337,7 @@
       var q=effQ(state.q); var f=q ? filt(rows,q) : cur(); var fuzzy=false;
       if(q && !f.length){ var ff=fuzzyFilt(rows,state.q); if(ff.length){ f=ff; fuzzy=true; } }   // nothing on the exact search → fuzzy fallback on the best token
       if(state.sku && String(state.sku).trim()){ f=f.filter(function(r){ return _poSkuSet && _poSkuSet.has(r.po); }); }   // SUG-0012: intersect with the SKU filter (POs whose order plan has any of the SKUs)
+      f=poGridSort(f);   // status-priority + PROD#-desc BEFORE paging, so the lazy-loaded first 50 surface production/shipping/ready-to-ship/future and push complete to the end
       _poShowClient=!!(state.ctry&&state.ctry['OTHER']);   // OTHER pill (incl. Direct-to-Client) → reveal Client name + sales ref columns
       // page the render: reset to the first 50 whenever the filtered/searched set changes; keep the current
       // page across in-place edits + "load more" (same set → same signature, so the limit isn't reset)
@@ -2336,8 +2345,10 @@
       if(_sig!==_poFiltSig){ _poFiltSig=_sig; _poLimit=PO_PAGE; }
       var shown=(_poShowAll||f.length<=_poLimit)?f:f.slice(0,_poLimit);
       var _sc=document.getElementById('sup-count'); if(_sc)_sc.textContent='';   // PO count line removed (Ben) — guard kept in case the element returns
-      document.getElementById('sup-grid').innerHTML=poTable(shown,q?'status':state.grp)   // a search spans all statuses → always group the results under status sub-labels (Production ▸ Ready to ship ▸ Future ▸ Shipping ▸ Complete)
-        +(shown.length<f.length?'<div style="margin:8px 0;text-align:center;display:flex;gap:8px;justify-content:center;align-items:center;flex-wrap:wrap"><span class="mut" style="font-size:12px">Showing '+shown.length+' of '+f.length+'</span><button class="save-btn light" id="po-loadmore">Load '+Math.min(PO_PAGE,f.length-shown.length)+' more &darr;</button><button class="save-btn light" id="po-showall">Show all '+f.length+'</button></div>':'');
+      // Load-more lives INSIDE the grid table (footer row) so it's in the same scroll box as the rows — no second
+      // scroll to reach it. Sticky-left keeps the buttons visible when the wide grid is scrolled sideways.
+      var _footRow=(shown.length<f.length)?'<tr class="po-loadmore-row"><td colspan="19" style="text-align:center;padding:10px;background:#f8fafc;border-top:1px solid #e5e7eb;position:sticky;left:0"><span class="mut" style="font-size:12px">Showing '+shown.length+' of '+f.length+'</span> <button class="save-btn light" id="po-loadmore" style="margin-left:8px">Load '+Math.min(PO_PAGE,f.length-shown.length)+' more &darr;</button> <button class="save-btn light" id="po-showall" style="margin-left:6px">Show all '+f.length+'</button></td></tr>':'';
+      document.getElementById('sup-grid').innerHTML=poTable(shown,q?'status':state.grp,_footRow);   // a search spans all statuses → group under status sub-labels (Production ▸ Shipping ▸ Ready to ship ▸ Future ▸ Complete)
       var lm=document.getElementById('po-loadmore'); if(lm)lm.onclick=function(){ _poLimit+=PO_PAGE; view(); };
       var sa=document.getElementById('po-showall'); if(sa)sa.onclick=function(){ _poShowAll=true; view(); };
       bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindPoNotes(); bindPoActBadge(); bindPoCopy(); bindPoScrollPin(); bindPoGrpToggle();
@@ -2866,7 +2877,7 @@
       +'<td class="l">'+cellPickBtn(r.po,ep,'batch_id',r.batch_id,'batch')+'</td>'
       +'</tr>'
       +'<tr class="exp-row"'+ga+' id="poexp-'+i+'" style="display:none"><td colspan="19"><div id="podet-'+i+'" class="count">Loading…</div></td></tr>'; }
-  function poTable(rows,groupBy){ if(!rows.length)return '<div class="count">No POs in this filter.</div>';
+  function poTable(rows,groupBy,footerHtml){ if(!rows.length)return '<div class="count">No POs in this filter.</div>';
     var _visPo={}; rows.forEach(function(r){ _visPo[String(r.po)]=1; });
     var _isMasterRow=function(r){ return !r.shipment || r.is_master || r.po===r.shipment; };
     var indentFor=function(r){ return !_isMasterRow(r) && !!_visPo[String(r.shipment||'')]; };   // indent a shipment member ONLY when its master PO is also visible in the current (filtered) grid — otherwise the └ dangles
@@ -2875,12 +2886,12 @@
     if(!groupBy||groupBy==='none'){ rows.forEach(function(r,i){ body+=poRowHtml(r,i,false,null); }); }
     else if(groupBy==='status'){
       // group under status sub-labels (used during a search, which spans all statuses)
-      var SORDER=['PRODUCTION','READY TO SHIP','SHIPPED TO MASTER','FUTURE','SHIPPING','DELIVERED','COMPLETE'];   // Ben's order: Production ▸ Ready to ship ▸ Shipped to master ▸ Future ▸ Shipping ▸ (Delivered) ▸ Complete
+      var SORDER=PO_STATUS_SEQ;   // Ben's order: Production ▸ Shipping ▸ Shipped to master ▸ Ready to ship ▸ Future ▸ (Delivered) ▸ Complete
       var smap={}, sextra=[];
       rows.forEach(function(r){ var s=(r.status||'').toUpperCase()||'—'; if(!smap[s]){smap[s]=[]; if(SORDER.indexOf(s)<0)sextra.push(s);} smap[s].push(r); });
       var sseq=SORDER.filter(function(s){return smap[s];}).concat(sextra.sort());
       var si=0;
-      sseq.forEach(function(s){ var list=smap[s]; list.sort(function(a,b){return a.po<b.po?-1:a.po>b.po?1:0;});
+      sseq.forEach(function(s){ var list=smap[s]; list.sort(function(a,b){ var na=poProdNo(a),nb=poProdNo(b); return (na!==nb?nb-na:(a.po<b.po?-1:a.po>b.po?1:0)); });   // within a status: PROD# descending
         body+='<tr class="grp-row cat-hdr"><td colspan="19">'+esc(s)+' <span style="opacity:.55;font-weight:600">('+list.length+')</span></td></tr>';
         list.forEach(function(r){ body+=poRowHtml(r,si++,false,null); });
       });
@@ -2909,7 +2920,7 @@
       var isMasterRow=function(r){ return !r.shipment || r.is_master || r.po===r.shipment; };
       var groups={},order=[];
       rows.forEach(function(r){ var k=grpKeyOf(r); if(!groups[k]){groups[k]=[];order.push(k);} groups[k].push(r); });
-      order.sort(function(a,b){ if(!a)return 1; if(!b)return -1; return a<b?-1:a>b?1:0; });   // named groups first, blank last
+      order.sort(function(a,b){ if(!a)return 1; if(!b)return -1; var na=parseFloat(a),nb=parseFloat(b); if(!isNaN(na)&&!isNaN(nb))return nb-na; return a<b?1:a>b?-1:0; });   // PROD# DESCENDING (57 ▸ 56 ▸ 55), named groups first, blank last
       var i=0;
       order.forEach(function(k){ var list=groups[k];
         list.sort(function(a,b){ var ka=shipKey(a), kb=shipKey(b); if(ka!==kb)return ka<kb?-1:1; var ra=isMasterRow(a)?0:1, rb=isMasterRow(b)?0:1; return ra-rb || (a.po<b.po?-1:a.po>b.po?1:0); });   // cluster by shipment, master first, then alphabetical
@@ -2918,7 +2929,7 @@
         list.forEach(function(r){ body+=poRowHtml(r,i++,indentFor(r),gkey); });   // consolidated members indented under their master PO (only when the master is also in view)
       });
     }
-    return head+body+'</tbody></table></div><div class="grid-tailspace"></div>'; }
+    return head+body+(footerHtml||'')+'</tbody></table></div><div class="grid-tailspace"></div>'; }
   // on phones an opened expand-row becomes a full-screen sheet with a Back bar (desktop unchanged)
   function isPhone(){ return window.matchMedia && window.matchMedia('(max-width:640px)').matches; }
   // On phone the PO card sub-nav (many tabs) collapses to PAYMENTS · DATES · CLIENT/FBA + a "More ▾"
