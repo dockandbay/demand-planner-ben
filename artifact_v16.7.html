@@ -9091,9 +9091,15 @@ function renderInvStatus(){
   try{ if(typeof buildLiveDemand==='function')buildLiveDemand(); }catch(e){}
   var rows=[]; try{ rows=BP.statusMetrics(mkt)||[]; }catch(e){ panel.innerHTML='<div style="color:#dc2626">'+esc((e&&e.message)||e)+'</div>'; return; }
   var TL={A:'Tier A',B:'Tier B',C:'Tier C'}, TC={A:'#b91c1c',B:'#b45309',C:'#64748b'};
-  // Classify each ACTIVE row per warehouse it uses, in urgency priority: backorder (neg 3PL) > out of stock (zero) > low.
+  // Classify each sellable row per warehouse it uses, in urgency priority: backorder (neg 3PL) > out of stock (zero) > low.
+  // In scope for the market = launched (launch date passed) AND not discontinued (disc date not in the past) AND sold via
+  // at least one channel (3PL/shp and/or FBA/amz). Per warehouse: only flag/consider a warehouse the SKU actually uses.
+  var _today=new Date().toISOString().slice(0,10);
   var bo={A:[],B:[],C:[]}, oos={A:[],B:[],C:[]}, low={A:[],B:[],C:[]};
-  rows.forEach(function(r){ if(r.st!=='ACTIVE')return;
+  rows.forEach(function(r){
+    if(r.launch && r.launch>_today) return;      // launch date not yet passed → not sellable yet
+    if(r.disc && r.disc<_today) return;          // discontinue date in the past → discontinued
+    if(!r.has3 && !r.hasf) return;               // not in scope for this market on any channel
     var out3=r.has3&&r.i3===0, outf=r.hasf&&r.iff<=0;
     var low3=r.has3&&r.i3>0&&r.cov3<r.t3, lowf=r.hasf&&r.iff>0&&r.covf<r.tf;
     r.out3=out3; r.outf=outf; r.low3=low3; r.lowf=lowf;
@@ -9118,21 +9124,24 @@ function renderInvStatus(){
   var sohCell=function(v,bad){ return '<span style="'+(bad?'color:#b91c1c;font-weight:700':'')+'">'+invNum(v)+'</span>'; };
   var wkCell=function(v,target,bad){ return '<span style="'+(bad?'color:#b45309;font-weight:700':'')+'">'+invWks(v)+'</span> <span class="mut" style="font-size:10px">/ '+target+'w</span>'; };
   var inbCell=function(r){ return r.inbUnits>0?(invNum(r.inbUnits)+' <span class="mut" style="font-size:10px">'+invFmtEta(r.nextEta)+'</span>'):'—'; };
-  var boCols=[{h:'SKU',align:'left',f:function(r){return esc(r.sku);}},
+  var naCell='<span style="color:#cbd5e1">n/a</span>';   // light grey — this warehouse (shp/3PL or amz/FBA) isn't in scope for the SKU in this market
+  var skuCol={h:'SKU',align:'left',f:function(r){return esc(r.sku);}};
+  var relCol={h:'Release',align:'left',f:function(r){return r.rw?esc(r.rw):'<span class="mut">—</span>';}};   // release window (season)
+  var boCols=[skuCol,relCol,
     {h:'3PL available',f:function(r){return '<span style="color:#b91c1c;font-weight:700">'+invNum(r.i3)+'</span>';}},
-    {h:'FBA SOH',f:function(r){return r.hasf?sohCell(r.iff,r.outf):'<span class="mut">—</span>';}},
+    {h:'FBA SOH',f:function(r){return r.hasf?sohCell(r.iff,r.outf):naCell;}},
     {h:'On order',f:function(r){return invNum(r.oo);}},
     {h:'Inbound (next ETA)',f:inbCell}];
-  var oosCols=[{h:'SKU',align:'left',f:function(r){return esc(r.sku);}},
-    {h:'3PL SOH',f:function(r){return r.has3?sohCell(r.i3,r.out3):'<span class="mut">—</span>';}},
-    {h:'FBA SOH',f:function(r){return r.hasf?sohCell(r.iff,r.outf):'<span class="mut">—</span>';}},
+  var oosCols=[skuCol,relCol,
+    {h:'3PL SOH',f:function(r){return r.has3?sohCell(r.i3,r.out3):naCell;}},
+    {h:'FBA SOH',f:function(r){return r.hasf?sohCell(r.iff,r.outf):naCell;}},
     {h:'On order',f:function(r){return invNum(r.oo);}},
     {h:'Inbound (next ETA)',f:inbCell}];
-  var lowCols=[{h:'SKU',align:'left',f:function(r){return esc(r.sku);}},
-    {h:'3PL SOH',f:function(r){return r.has3?invNum(r.i3):'<span class="mut">—</span>';}},
-    {h:'3PL cover',f:function(r){return r.has3?wkCell(r.cov3,r.t3,r.low3):'<span class="mut">—</span>';}},
-    {h:'FBA SOH',f:function(r){return r.hasf?invNum(r.iff):'<span class="mut">—</span>';}},
-    {h:'FBA cover',f:function(r){return r.hasf?wkCell(r.covf,r.tf,r.lowf):'<span class="mut">—</span>';}},
+  var lowCols=[skuCol,relCol,
+    {h:'3PL SOH',f:function(r){return r.has3?invNum(r.i3):naCell;}},
+    {h:'3PL cover',f:function(r){return r.has3?wkCell(r.cov3,r.t3,r.low3):naCell;}},
+    {h:'FBA SOH',f:function(r){return r.hasf?invNum(r.iff):naCell;}},
+    {h:'FBA cover',f:function(r){return r.hasf?wkCell(r.covf,r.tf,r.lowf):naCell;}},
     {h:'On order',f:function(r){return invNum(r.oo);}},
     {h:'Inbound (next ETA)',f:inbCell}];
   var html='<div style="font-weight:800;font-size:15px;margin:2px 0 10px">Inventory status — '+esc(mkt)+'</div>';
@@ -9161,12 +9170,12 @@ function renderInvStatus(){
   var allInb=[]; rows.forEach(function(r){ if(r.st==='DISCONTINUED')return; (r.inbList||[]).forEach(function(x){ if((x.qty||0)<=0)return; allInb.push({sku:r.sku,ti:r.ti,ref:x.ref,qty:x.qty,eta:x.eta,type:x.type,supplier:x.supplier,wh:x.wh}); }); });
   allInb.sort(function(a,b){ var ea=a.eta||'9999', eb=b.eta||'9999'; return ea<eb?-1:ea>eb?1:a.sku.localeCompare(b.sku); });
   var typeLbl={supplier_china:'In transit',open_po:'On order'};
-  html+=sectHdr(5,'5 · Inbound shipments vs PO ('+allInb.length+')','Every inbound line for the market, soonest ETA first. Click the PO to open it in SUPPLY.');
+  html+=sectHdr(5,'5 · Inbound shipments vs PO ('+allInb.length+')','Every inbound line for the market, soonest ETA first. Click a PO to open it in a drawer.');
   if(!allInb.length){ html+='<div style="padding:12px 4px;color:#64748b;font-size:12px">No inbound for '+esc(mkt)+'.</div>'; }
-  else { html+='<div style="max-height:360px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'
-    +['SKU','PO','Qty','ETA','Type','Supplier'].map(function(h,i){return '<th style="text-align:'+(i===2?'right':'left')+';padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
-    +allInb.map(function(x){ var poCell=x.ref?'<a href="#/supply/purchase-orders/'+encodeURIComponent(x.ref)+'" style="color:#1d4ed8;text-decoration:none;font-weight:600">'+esc(x.ref)+'</a>':'<span class="mut">—</span>';
-      return '<tr><td style="padding:4px 10px">'+esc(x.sku)+'</td><td style="padding:4px 10px">'+poCell+'</td><td style="padding:4px 10px;text-align:right">'+invNum(x.qty)+'</td><td style="padding:4px 10px;white-space:nowrap">'+invFmtEta(x.eta)+'</td><td style="padding:4px 10px">'+esc(typeLbl[x.type]||x.type||'')+'</td><td style="padding:4px 10px">'+esc(x.supplier||'')+'</td></tr>'; }).join('')
+  else { html+='<div style="max-height:360px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'
+    +['SKU','PO','Qty','ETA','Type','Supplier'].map(function(h){return '<th style="text-align:left;padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+    +allInb.map(function(x){ var poCell=x.ref?'<a class="inb-po" data-po="'+esc(x.ref)+'" href="#/supply/purchase-orders/'+encodeURIComponent(x.ref)+'" style="color:#1d4ed8;text-decoration:none;font-weight:600;cursor:pointer">'+esc(x.ref)+'</a>':'<span class="mut">—</span>';
+      return '<tr><td style="padding:4px 10px;text-align:left">'+esc(x.sku)+'</td><td style="padding:4px 10px;text-align:left">'+poCell+'</td><td style="padding:4px 10px;text-align:left">'+invNum(x.qty)+'</td><td style="padding:4px 10px;text-align:left;white-space:nowrap">'+invFmtEta(x.eta)+'</td><td style="padding:4px 10px;text-align:left">'+esc(typeLbl[x.type]||x.type||'')+'</td><td style="padding:4px 10px;text-align:left">'+esc(x.supplier||'')+'</td></tr>'; }).join('')
     +'</tbody></table></div>'; }
 
   // Section 6 · PO inbound delays + impacted products (loaded async from the server after the sync sections paint).
@@ -9187,15 +9196,15 @@ function renderInvStatus(){
   if(!fut.length){ html+='<div style="padding:12px 4px;color:#64748b;font-size:12px">No upcoming launches for '+esc(mkt)+'.</div>'; }
   else seasonKeys.forEach(function(sk){ var L=seasons[sk]; L.sort(function(a,b){ var la=a.launch||'9999',lb=b.launch||'9999'; return la<lb?-1:la>lb?1:a.sku.localeCompare(b.sku); });
     html+='<div style="margin-bottom:12px"><div style="font-weight:700;font-size:12px;color:#334155;margin-bottom:4px">'+esc(sk)+' <span class="mut" style="font-weight:400">('+L.length+')</span></div>'
-      +'<div style="max-height:300px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'
-      +['SKU','Tier','Launch','On order','Inbound (next ETA)','Forecast (6mo)'].map(function(h,i){return '<th style="text-align:'+(i>=3?'right':'left')+';padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+      +'<div style="max-height:300px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'
+      +['SKU','Tier','Launch','On order','Inbound (next ETA)','Forecast (6mo)'].map(function(h){return '<th style="text-align:left;padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
       +L.map(function(r){ var none=r._none;
         var inb=r.inbUnits>0?(invNum(r.inbUnits)+' <span class="mut" style="font-size:10px">'+invFmtEta(r.nextEta)+'</span>'):'—';
-        return '<tr'+(none?' style="background:#fef2f2"':'')+'><td style="padding:4px 10px">'+esc(r.sku)+'</td><td style="padding:4px 10px">'+esc(r.ti)+'</td>'
-          +'<td style="padding:4px 10px;white-space:nowrap">'+invFmtEta(r.launch)+'</td>'
-          +'<td style="padding:4px 10px;text-align:right'+(none?';color:#b91c1c;font-weight:700':'')+'">'+invNum(r.oo)+'</td>'
-          +'<td style="padding:4px 10px;text-align:right">'+inb+'</td>'
-          +'<td style="padding:4px 10px;text-align:right">'+invNum(r.dl.dem)+'</td></tr>'; }).join('')
+        return '<tr'+(none?' style="background:#fef2f2"':'')+'><td style="padding:4px 10px;text-align:left">'+esc(r.sku)+'</td><td style="padding:4px 10px;text-align:left">'+esc(r.ti)+'</td>'
+          +'<td style="padding:4px 10px;text-align:left;white-space:nowrap">'+invFmtEta(r.launch)+'</td>'
+          +'<td style="padding:4px 10px;text-align:left'+(none?';color:#b91c1c;font-weight:700':'')+'">'+invNum(r.oo)+'</td>'
+          +'<td style="padding:4px 10px;text-align:left">'+inb+'</td>'
+          +'<td style="padding:4px 10px;text-align:left">'+invNum(r.dl.dem)+'</td></tr>'; }).join('')
       +'</tbody></table></div></div>'; });
 
   panel.innerHTML=html;
@@ -9211,7 +9220,7 @@ function loadInvS6(mkt){
     if(!D.length){ el.innerHTML='<div style="padding:12px 4px;color:#16a34a;font-size:12px">No delayed POs impacting '+esc(mkt)+' stock 🎉'
       +(j&&j.other_delays?' <span class="mut">('+j.other_delays+' PO'+(j.other_delays>1?'s have':' has')+' slipped but stock is covered.)</span>':'')+'</div>'; return; }
     var html=D.map(function(g){
-      var poLink='<a href="#/supply/purchase-orders/'+encodeURIComponent(g.po)+'" style="color:#1d4ed8;text-decoration:none;font-weight:700">'+esc(g.po)+'</a>';
+      var poLink='<a class="inb-po" data-po="'+esc(g.po)+'" href="#/supply/purchase-orders/'+encodeURIComponent(g.po)+'" style="color:#1d4ed8;text-decoration:none;font-weight:700;cursor:pointer">'+esc(g.po)+'</a>';
       var head='<div style="display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;margin-bottom:4px">'+poLink
         +(g.supplier?'<span class="mut" style="font-size:11px">'+esc(g.supplier)+'</span>':'')
         +'<span style="font-size:12px;color:#b45309;font-weight:700">slipped '+g.slip_days+'d</span>'

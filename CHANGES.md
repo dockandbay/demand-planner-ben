@@ -1,3 +1,9 @@
+## v26.904.0 Inventory Status Report — scope/na, release-window column, left-align, PO drawer links
+- **Out of stock (+ backorders/low stock) scope:** now explicitly requires the SKU to be **in scope for the market** — launched (launch date passed), **not** discontinued (disc date not in the past), and sold via at least one channel. Per warehouse, if the SKU isn't sold via **shp (3PL)** or **amz (FBA)** in that market, that column shows a light-grey **n/a** instead of a number.
+- **Release window** added as the second column (after SKU) in the Out-of-stock, Backorders and Low-stock tables.
+- **§5 Inbound vs PO** and **§7 In-production** tables are now fully **left-aligned** (headers + data).
+- **PO links open in a drawer:** §5 and §6 PO references now open the SUPPLY PO **drawer** (via `openPODrawer`, hash fallback) instead of navigating to the full grid.
+
 ## v26.903.0 Supabase load — widen 60s polls to 4min + throttle PO-delivery snapshot
 - The two per-tab background polls (timeline notifications, product unread) go **60s → 4min** — ~4× fewer DB hits per open tab, no meaningful UX change.
 - The PO-delivery-date snapshot (SUG-0024 §6) fired on **every** PO-grid load; now throttled to **at most once / 10 min per instance** (idempotent). Opening the Status Report §6 still snapshots fresh (that path is un-throttled), so a slip is still caught within 10 min of any grid view.
