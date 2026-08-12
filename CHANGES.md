@@ -1,3 +1,6 @@
+## v26.918.0 Forecast Snapshots — Snapshots tab + compare (#3 stage 2)
+- New **DEMAND ▸ Snapshots** tab. **📸 Take snapshot** (names + locks the current SKU forecast, 18 months forward), a list of saved snapshots (name / taken / by / rows) with **Delete**, and a **Compare** panel: pick any two versions — a snapshot or **Live (current plan)** — and see **Δ units = B − A** per category × month, expand a category to per-SKU rows (hover a cell for A → B). Category level = sum of its SKU rows. Runs entirely off the mig-220 endpoints; Live side reads the in-memory forecast. Next: #4 (past-month locked-forecast-vs-actual on the plan).
+
 ## v26.916.0 Forecast Snapshots — backend (#3 stage 1)
 - New table (mig 220) `planner.forecast_snapshots` + `forecast_snapshot_rows` (a copy of `forecast_outputs` unit values at a point in time). Endpoints: `POST /api/demand/snapshots` (take, names + copies), `GET /api/demand/snapshots` (list), `POST /api/demand/snapshots/:id/delete`, `GET /api/demand/snapshots/:id/data` (FC_OUTPUTS-shaped map for compare / past-month locked-vs-actual). Stores raw unit values so a past month's forecast is preserved (no recompute). Category level = sum of SKU rows. UI (Snapshots tab + compare + #4 cell display) next.
 

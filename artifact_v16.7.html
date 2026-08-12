@@ -8273,6 +8273,7 @@ function render(){
     if(body)body.remove();   // fresh container per navigation: a slow PREVIOUS view's async render then writes to this detached node, never over the just-clicked view
     body=document.createElement('div'); body.id='demand-body'; document.querySelector('.wrap').appendChild(body);
     if(DEMAND_VIEW==='summary') renderSummaryReport(body);
+    else if(DEMAND_VIEW==='snapshots') renderSnapshotsView(body);
     else if(DEMAND_VIEW==='keyaccounts') renderKeyAccountsView(body);
     else if(DEMAND_VIEW==='targets') renderTargetsView(body);
     else if(DEMAND_VIEW==='calendar') renderCalendarView(body);
@@ -8314,6 +8315,105 @@ function refreshDispCcy(){ var w=document.getElementById('demand-ccy'); if(!w)re
 function mktCcy(co){ return ({US:'USD',EU:'EUR',AU:'AUD',CA:'CAD'})[co]||null; }
 var CCY_SYM={GBP:'£',USD:'$',EUR:'€',AUD:'A$',CAD:'C$'};
 function fxRate(ccy,fy){ if(!ccy||ccy==='GBP')return 1; var r=FX_RATES[fy]&&FX_RATES[fy][ccy]; if(r>0)return r; var ks=Object.keys(FX_RATES).filter(function(k){return FX_RATES[k]&&FX_RATES[k][ccy]>0;}).sort(); if(!ks.length)return null; return FX_RATES[ks[ks.length-1]][ccy]; }   // fall back to latest FY with a rate
+// ── DEMAND ▸ SNAPSHOTS (#3) — lock a named version of the SKU-level forecast, then compare any two (or vs live).
+// A snapshot = a copy of forecast_outputs (SKU×wh×ch×month → units), 18 months forward, taken server-side (migration 220).
+// Category level = SUM of its SKU rows. "Live" = the in-memory FC_OUTPUTS (what's on the plan right now, incl. unsaved edits).
+// Compare shows Δ units = B − A per subcategory × month (expand → per-SKU), so we can see how a plan moved since a lock.
+var SNAP_LIST=null, SNAP_CACHE={}, SNAP_A='live', SNAP_B=null, SNAP_EXP={}, SNAP_SHOW=false, SNAP_BUSY=false, SNAP_MSG='';
+function _snapUnits(n){ n=Math.round(Number(n)||0); return n.toLocaleString(); }
+function _snapDmy(iso){ if(!iso)return''; var m=/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{2}):(\d{2}))?/.exec(String(iso)); if(!m)return String(iso);
+  var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; var s=m[3]+'-'+MON[+m[2]-1]+'-'+m[1].slice(2); if(m[4])s+=' '+m[4]+':'+m[5]; return s; }
+function _snapMonLbl(ym){ var p=String(ym).split('_'); var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return (MON[(+p[1]||1)-1]||'?')+'-'+String(p[0]).slice(2); }
+function _snapSideData(sel,cb){                                   // resolve a side ('live' or a snapshot id) → {key:{ym:units}}
+  if(sel==='live'){ cb(FC_OUTPUTS); return; }
+  if(SNAP_CACHE[sel]){ cb(SNAP_CACHE[sel]); return; }
+  fetch('/api/demand/snapshots/'+sel+'/data').then(function(r){return r.json();}).then(function(j){ SNAP_CACHE[sel]=(j&&j.fc)||{}; cb(SNAP_CACHE[sel]); }).catch(function(){ cb({}); });
+}
+function _snapRollup(A,B){                                        // subcat → {tot:{ym:{a,b}}, skus:{sku:{ym:{a,b}}}}
+  var subs={};
+  function add(map,side){ Object.keys(map||{}).forEach(function(key){ var sku=key.split('|')[0]; var meta=SKUM[sku]||{}; var sub=meta.s||'(unmapped)';
+    var s=subs[sub]||(subs[sub]={tot:{},skus:{},name:sub}); var sk=s.skus[sku]||(s.skus[sku]={}); var mm=map[key]||{};
+    Object.keys(mm).forEach(function(ym){ var u=Number(mm[ym])||0; if(!u)return; (s.tot[ym]||(s.tot[ym]={a:0,b:0}))[side]+=u; (sk[ym]||(sk[ym]={a:0,b:0}))[side]+=u; }); }); }
+  add(A,'a'); add(B,'b'); return subs;
+}
+function renderSnapshotsView(body){
+  body.innerHTML='<div style="padding:8px 10px;max-width:100%"><div id="snap-root">Loading snapshots…</div></div>';
+  var root=body.querySelector('#snap-root');
+  if(SNAP_LIST===null){ fetch('/api/demand/snapshots').then(function(r){return r.json();}).then(function(rows){ SNAP_LIST=Array.isArray(rows)?rows:[]; if(SNAP_B===null&&SNAP_LIST.length)SNAP_B=String(SNAP_LIST[0].id); drawSnap(); }).catch(function(e){ SNAP_LIST=[]; SNAP_MSG='Load failed: '+(e.message||e); drawSnap(); }); return; }
+  drawSnap();
+  function drawSnap(){
+    root=document.getElementById('snap-root'); if(!root)return;
+    var h='';
+    // ── take + list ────────────────────────────────────────────────────────────
+    h+='<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><h3 style="margin:0;font-size:15px">Forecast snapshots</h3>'
+      +'<button id="snap-take" class="btn" style="background:#2563eb;color:#fff;border:none;padding:5px 12px;border-radius:5px;cursor:pointer;font-size:13px">📸 Take snapshot</button>'
+      +'<span style="color:#64748b;font-size:12px">A locked copy of the SKU forecast (18 months forward) to compare against later.</span></div>';
+    if(SNAP_MSG)h+='<div style="margin:4px 0;font-size:12px;color:'+(/fail|error/i.test(SNAP_MSG)?'#dc2626':'#166534')+'">'+SNAP_MSG+'</div>';
+    if(!SNAP_LIST.length){ h+='<div style="color:#94a3b8;font-size:13px;margin:6px 0 14px">No snapshots yet — take one to lock the current forecast.</div>'; }
+    else{
+      h+='<table style="border-collapse:collapse;font-size:12.5px;margin:2px 0 16px"><thead><tr style="text-align:left;color:#475569">'
+        +'<th style="padding:3px 10px 3px 0">Name</th><th style="padding:3px 14px">Taken</th><th style="padding:3px 14px">By</th><th style="padding:3px 14px;text-align:right">Rows</th><th></th></tr></thead><tbody>';
+      SNAP_LIST.forEach(function(s){ h+='<tr style="border-top:1px solid #eef2f7">'
+        +'<td style="padding:3px 10px 3px 0;font-weight:600">'+(s.name||'')+'</td>'
+        +'<td style="padding:3px 14px;color:#475569">'+_snapDmy(s.taken_at)+'</td>'
+        +'<td style="padding:3px 14px;color:#475569">'+shortEml(s.taken_by||'')+'</td>'
+        +'<td style="padding:3px 14px;text-align:right;color:#475569">'+_snapUnits(s.row_count)+'</td>'
+        +'<td style="padding:3px 6px"><button class="snap-del" data-id="'+s.id+'" data-name="'+encodeURIComponent(s.name||'')+'" title="Delete snapshot" style="border:1px solid #fecaca;background:#fff;color:#dc2626;border-radius:4px;cursor:pointer;padding:2px 8px;font-size:11px">Delete</button></td></tr>'; });
+      h+='</tbody></table>';
+    }
+    // ── compare ────────────────────────────────────────────────────────────────
+    h+='<div style="border-top:1px solid #e5e7eb;padding-top:10px"><h3 style="margin:0 0 6px;font-size:15px">Compare</h3>';
+    function optsFor(selVal){ var o='<option value="live"'+(selVal==='live'?' selected':'')+'>— Live (current plan) —</option>'; SNAP_LIST.forEach(function(s){ o+='<option value="'+s.id+'"'+(String(selVal)===String(s.id)?' selected':'')+'>'+(s.name||('#'+s.id))+' · '+_snapDmy(s.taken_at)+'</option>'; }); return o; }
+    h+='<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:13px">'
+      +'<span style="color:#475569">A (baseline)</span><select id="snap-a" style="padding:4px 6px;font-size:12.5px">'+optsFor(SNAP_A)+'</select>'
+      +'<span style="color:#475569">B (compare)</span><select id="snap-b" style="padding:4px 6px;font-size:12.5px">'+optsFor(SNAP_B)+'</select>'
+      +'<button id="snap-cmp" class="btn" style="background:#0f172a;color:#fff;border:none;padding:5px 14px;border-radius:5px;cursor:pointer">Compare</button>'
+      +'<span style="color:#94a3b8;font-size:12px">Δ = B − A (units). '+(SNAP_BUSY?'Loading…':'')+'</span></div>';
+    h+='<div id="snap-cmp-out"></div></div>';
+    root.innerHTML=h;
+    // wire
+    var tb=document.getElementById('snap-take'); if(tb)tb.onclick=function(){ var name=prompt('Name this snapshot:',''); if(name==null)return; name=String(name).trim(); if(!name)return; SNAP_MSG='Saving…'; drawSnap();
+      fetch('/api/demand/snapshots',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({name:name})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); SNAP_MSG='Saved “'+name+'” — '+_snapUnits(j.rows)+' rows.'; SNAP_LIST=null; renderSnapshotsView(body); }).catch(function(e){ SNAP_MSG='Save failed: '+(e.message||e); drawSnap(); }); };
+    root.querySelectorAll('.snap-del').forEach(function(b){ b.onclick=function(){ var nm=decodeURIComponent(b.dataset.name||''); if(!confirm('Delete snapshot “'+nm+'”? This cannot be undone.'))return; fetch('/api/demand/snapshots/'+b.dataset.id+'/delete',{method:'POST'}).then(function(r){return r.json();}).then(function(){ delete SNAP_CACHE[b.dataset.id]; if(String(SNAP_B)===String(b.dataset.id))SNAP_B=null; if(String(SNAP_A)===String(b.dataset.id))SNAP_A='live'; SNAP_MSG='Deleted “'+nm+'”.'; SNAP_LIST=null; renderSnapshotsView(body); }).catch(function(e){ SNAP_MSG='Delete failed: '+(e.message||e); drawSnap(); }); }; });
+    var sa=document.getElementById('snap-a'); if(sa)sa.onchange=function(){ SNAP_A=sa.value; SNAP_SHOW=false; drawSnap(); };
+    var sbx=document.getElementById('snap-b'); if(sbx)sbx.onchange=function(){ SNAP_B=sbx.value; SNAP_SHOW=false; drawSnap(); };
+    var cb2=document.getElementById('snap-cmp'); if(cb2)cb2.onclick=function(){ if(SNAP_A===SNAP_B){ SNAP_MSG='Pick two different versions to compare.'; drawSnap(); return; } SNAP_MSG=''; SNAP_BUSY=true; drawSnap();
+      _snapSideData(SNAP_A,function(A){ _snapSideData(SNAP_B,function(B){ SNAP_BUSY=false; SNAP_SHOW=true; window._SNAP_CMP={A:A,B:B}; drawSnap(); }); }); };
+    if(SNAP_SHOW&&window._SNAP_CMP)drawCmp();
+  }
+  function drawCmp(){
+    var out=document.getElementById('snap-cmp-out'); if(!out)return;
+    var subs=_snapRollup(window._SNAP_CMP.A,window._SNAP_CMP.B);
+    var subNames=Object.keys(subs).sort();
+    var monSet={}; subNames.forEach(function(sn){ Object.keys(subs[sn].tot).forEach(function(ym){monSet[ym]=1;}); });
+    var mons=Object.keys(monSet).sort();
+    if(!mons.length){ out.innerHTML='<div style="color:#94a3b8;font-size:13px">No forecast rows in either version.</div>'; return; }
+    function dcell(o){ o=o||{a:0,b:0}; var d=Math.round((o.b||0)-(o.a||0)); if(!d)return '<td style="text-align:right;padding:2px 8px;color:#cbd5e1">·</td>'; var col=d>0?'#166534':'#dc2626'; return '<td style="text-align:right;padding:2px 8px;color:'+col+'" title="'+_snapUnits(o.a)+' → '+_snapUnits(o.b)+'">'+(d>0?'+':'')+_snapUnits(d)+'</td>'; }
+    function rowTot(map){ var a=0,b=0; mons.forEach(function(ym){ var o=map[ym]; if(o){a+=o.a||0;b+=o.b||0;} }); return {a:a,b:b}; }
+    var lblA=(SNAP_A==='live')?'Live':((SNAP_LIST.filter(function(s){return String(s.id)===String(SNAP_A);})[0]||{}).name||('#'+SNAP_A));
+    var lblB=(SNAP_B==='live')?'Live':((SNAP_LIST.filter(function(s){return String(s.id)===String(SNAP_B);})[0]||{}).name||('#'+SNAP_B));
+    var h='<div style="font-size:12px;color:#475569;margin:2px 0 6px">A = <b>'+lblA+'</b> → B = <b>'+lblB+'</b>. Cells show <b>Δ units</b> (hover for A → B).</div>';
+    h+='<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px">'
+      +'<thead><tr style="background:#f1f5f9"><th style="text-align:left;padding:4px 10px;position:sticky;left:0;background:#f1f5f9">Category</th>';
+    mons.forEach(function(ym){ h+='<th style="text-align:right;padding:4px 8px;white-space:nowrap">'+_snapMonLbl(ym)+'</th>'; });
+    h+='<th style="text-align:right;padding:4px 10px;border-left:1px solid #cbd5e1">Total Δ</th></tr></thead><tbody>';
+    // grand total
+    var gt={}; mons.forEach(function(ym){ var a=0,b=0; subNames.forEach(function(sn){ var o=subs[sn].tot[ym]; if(o){a+=o.a||0;b+=o.b||0;} }); gt[ym]={a:a,b:b}; });
+    var gtot=rowTot(gt);
+    h+='<tr style="font-weight:700;background:#fafcff;border-top:2px solid #cbd5e1"><td style="padding:4px 10px;position:sticky;left:0;background:#fafcff">All categories</td>';
+    mons.forEach(function(ym){ h+=dcell(gt[ym]); }); h+=dcell(gtot).replace('padding:2px 8px','padding:2px 10px;border-left:1px solid #cbd5e1')+'</tr>';
+    subNames.forEach(function(sn){ var s=subs[sn]; var open=!!SNAP_EXP[sn];
+      h+='<tr class="snap-subrow" data-sub="'+encodeURIComponent(sn)+'" style="border-top:1px solid #eef2f7;cursor:pointer"><td style="padding:3px 10px;position:sticky;left:0;background:#fff">'+(open?'▾ ':'▸ ')+sn+'</td>';
+      mons.forEach(function(ym){ h+=dcell(s.tot[ym]); }); h+=dcell(rowTot(s.tot)).replace('padding:2px 8px','padding:2px 10px;border-left:1px solid #eef2f7')+'</tr>';
+      if(open){ var skus=Object.keys(s.skus).sort(); skus.forEach(function(sku){ var mp=s.skus[sku]; var nm=(SKUM[sku]&&SKUM[sku].n)?(' · '+SKUM[sku].n):'';
+        h+='<tr style="background:#fbfdff"><td style="padding:2px 10px 2px 26px;color:#475569;position:sticky;left:0;background:#fbfdff;white-space:nowrap">'+sku+nm+'</td>';
+        mons.forEach(function(ym){ h+=dcell(mp[ym]); }); h+=dcell(rowTot(mp)).replace('padding:2px 8px','padding:2px 10px;border-left:1px solid #eef2f7')+'</tr>'; }); }
+    });
+    h+='</tbody></table></div>';
+    out.innerHTML=h;
+    out.querySelectorAll('.snap-subrow').forEach(function(r){ r.onclick=function(){ var sn=decodeURIComponent(r.dataset.sub); if(SNAP_EXP[sn])delete SNAP_EXP[sn]; else SNAP_EXP[sn]=1; drawCmp(); }; });
+  }
+}
 // "Summary with targets" report — three tabs: Summary (read), Edit targets (SUMM_TGT_EDIT), Target recommendations
 // (the embedded recs, formerly a standalone drawer). The tab bar sits outside the content div so each tab's own
 // re-renders (co/ch/metric changes inside renderSummaryView / renderTargetRecs) don't wipe the tabs.
@@ -8940,8 +9040,8 @@ function renderDemandTabs(){
     // sit directly below the main tabs but ABOVE the filters (same header column, right after the tab row)
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   // Primary tabs inline; the reference/input views (Sell-through targets, Key accounts, Calendar, Revenue) are grouped under an "Inputs ▾" dropdown.
-  var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS';
-  var PRIMARY=['plan','summary','kpis','actions'], INPUTS=['targets','keyaccounts','calendar','pricechanges','klaviyobis'];
+  var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['snapshots']='Snapshots';
+  var PRIMARY=['plan','summary','snapshots','kpis','actions'], INPUTS=['targets','keyaccounts','calendar','pricechanges','klaviyobis'];
   var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0;
   var _isPlanV=(DEMAND_VIEW==='plan');
   // Release Window now lives in the More Filters panel; Undo + Download now sit on the right of the plan controls
