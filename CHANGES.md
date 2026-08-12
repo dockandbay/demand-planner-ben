@@ -1,3 +1,6 @@
+## v26.899.0 BLADE EU 3PL — live token fix; import verified end-to-end
+- BLADE login returns the token at `data.session_token` (not access_token/token) — extractor updated. With `BLADE_PASSWORD` set, a **live EU import** now works: 749 SKUs pulled, **737 matched** to planner.products (12 unmatched, 80 ERP-only), persisted to `inventory_3pl_imports` and compared vs `inventory_eu_3pl[_onhand]` like the other markets. EU 3PL is fully operational.
+
 ## v26.898.0 SUG-0024 §6 robustness — snapshot PO delivery dates on every grid load
 - PO delivery-date snapshotting (`recordPoDeliveries`) now also fires **on every PURCHASE ORDERS / cashflow grid load** (non-blocking, with a no-overlap guard; idempotent via ON CONFLICT). Previously it only ran when the Status Report §6 was opened — so a slip that happened and reverted between report views could be missed. Now dates are captured whenever the grid is viewed (the most-used SUPPLY page), catching **indirect** date moves too (shipment-date edits, production-day/branch-lead changes), not just direct PO edits. Vercel-safe (per-request hook, not a long-running cron). Verified: clearing history then one grid load re-snapshots all 208 open POs.
 

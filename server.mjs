@@ -6694,7 +6694,8 @@ async function bladeLogin() {
     body: JSON.stringify({ username: BLADE.username, password: BLADE.password }) });
   const j = await r.json().catch(() => null);
   if (!r.ok) throw new Error('Blade login failed (HTTP ' + r.status + ')');
-  const tok = j && (j.access_token || j.token || j.accessToken || (j.data && (j.data.access_token || j.data.token || j.data.accessToken)));
+  const tok = j && (j.access_token || j.token || j.accessToken || j.session_token
+    || (j.data && (j.data.access_token || j.data.token || j.data.accessToken || j.data.session_token)));
   if (!tok) throw new Error('Blade login: no access token in response');
   return tok;
 }
