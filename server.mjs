@@ -6763,23 +6763,29 @@ function invFbaParse(text) {
 }
 async function invFbaCompare(mkt, rep) {
   const col = 'inventory_' + mkt.toLowerCase() + '_fba';   // mkt whitelisted → safe to interpolate
-  const erp = {}, asin2sku = {};
+  const erp = {}, asinSkus = {};
   (await pool.query(`SELECT sku, upper(coalesce(asin,'')) asin, coalesce(${col},0)::numeric v FROM planner.products WHERE sku IS NOT NULL`)).rows
-    .forEach(x => { erp[x.sku] = Number(x.v) || 0; if (x.asin && !(x.asin in asin2sku)) asin2sku[x.asin] = x.sku; });
+    .forEach(x => { erp[x.sku] = Number(x.v) || 0; if (x.asin) (asinSkus[x.asin] = asinSkus[x.asin] || []).push(x.sku); });
+  // Only match by ASIN when it's UNAMBIGUOUS (maps to exactly one product) — duplicate ASINs would mis-map.
+  const asin2sku = {}, dupAsins = [];
+  for (const a in asinSkus) { if (asinSkus[a].length === 1) asin2sku[a] = asinSkus[a][0]; else dupAsins.push(a); }
   const skus = Object.keys(rep);
   const rows = skus.map(sku => { const r = rep[sku], fba = (r.av || 0) + (r.fc || 0);
-    // match by SKU first, else by ASIN (Amazon SKU sometimes differs from ours but the ASIN maps)
+    // match by SKU first, else by unambiguous ASIN (Amazon SKU sometimes differs from ours but the ASIN maps)
     let mSku = (sku in erp) ? sku : null, via = mSku ? 'sku' : null;
     if (!mSku && r.asin && asin2sku[r.asin.toUpperCase()]) { mSku = asin2sku[r.asin.toUpperCase()]; via = 'asin'; }
     const e = mSku ? erp[mSku] : null;
     return { sku, asin: r.asin || '', available: r.av || 0, fc_transfer: r.fc || 0, report_fba: fba, erp_sku: mSku, matched_via: via, erp_fba: e, matched: !!mSku, diff: (e == null ? null : fba - e) }; })
     .sort((a, b) => Math.abs(b.diff || 0) - Math.abs(a.diff || 0));
+  const matchedSkus = new Set(rows.filter(r => r.erp_sku).map(r => r.erp_sku));
+  const erp_missing = Object.keys(erp).filter(s => erp[s] > 0 && !matchedSkus.has(s)).map(s => ({ sku: s, erp_fba: erp[s] })).sort((a, b) => b.erp_fba - a.erp_fba);
+  const not_in_erp = rows.filter(r => !r.matched).map(r => ({ sku: r.sku, asin: r.asin, report_fba: r.report_fba }));
   const aged = skus.map(sku => { const r = rep[sku], tot = (r.a1 || 0) + (r.a2 || 0) + (r.a3 || 0) + (r.a4 || 0) + (r.a5 || 0);
     return { sku, a1: r.a1 || 0, a2: r.a2 || 0, a3: r.a3 || 0, a4: r.a4 || 0, a5: r.a5 || 0, total: tot }; })
     .filter(x => x.total > 0)
     .sort((a, b) => (b.a5 - a.a5) || (b.a4 - a.a4) || (b.a3 - a.a3) || (b.a2 - a.a2) || (b.a1 - a.a1));   // oldest inventory first
-  return { rows, aged, report_skus: skus.length, matched: rows.filter(r => r.matched).length, unmatched: rows.filter(r => !r.matched).length,
-    erp_not_in_report: Object.keys(erp).filter(s => erp[s] > 0 && !(s in rep)).length };
+  return { rows, aged, report_skus: skus.length, matched: rows.filter(r => r.matched).length, unmatched: not_in_erp.length,
+    not_in_erp, erp_missing, erp_not_in_report: erp_missing.length, dup_asins: dupAsins.length };
 }
 app.get('/api/supply/inventory-fba/status', async (req, res) => {
   const mkt = String((req.query && req.query.market) || '').toUpperCase();

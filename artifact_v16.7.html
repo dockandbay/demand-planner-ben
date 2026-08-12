@@ -9071,16 +9071,21 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
     panel.innerHTML=meta+'<div style="max-height:560px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'+head+'</tr></thead><tbody>'+trs+'</tbody></table></div>'+(aged.length>800?'<div class="mut" style="font-size:11px;margin-top:4px">Showing first 800 of '+aged.length+'</div>':'');
     return;
   }
-  // Manage FBA (compare): upload zone + meta + comparison table
-  var drop='<div id="invfba-drop" style="border:2px dashed #93c5fd;border-radius:10px;background:#f8fbff;padding:16px;text-align:center;cursor:pointer;margin:0 0 10px">'
-    +'<div style="font-size:13px;color:#1e40af;font-weight:600">⬆ Drag &amp; drop the '+tHesc(INV_FBA)+' FBA inventory report (.csv or .txt) here</div>'
-    +'<div class="mut" style="font-size:11px;margin-top:4px">or <span style="color:#1d4ed8;text-decoration:underline">choose a file</span> · '+invFbaMeta(j)+' <span id="invfba-msg" class="mut" style="font-size:11px"></span></div>'
-    +'<input type="file" id="invfba-file" accept=".csv,.txt,text/csv,text/plain,text/tab-separated-values" style="display:none"></div>';
+  // Manage FBA (compare): small upload box + meta + comparison table
+  var drop='<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 12px">'
+    +'<div id="invfba-drop" style="border:2px dashed #93c5fd;border-radius:8px;background:#f8fbff;padding:8px 10px;text-align:center;cursor:pointer;max-width:200px;box-sizing:border-box;font-size:11px">'
+    +'<div style="color:#1e40af;font-weight:600">⬆ Drop '+tHesc(INV_FBA)+' FBA report</div>'
+    +'<div class="mut" style="margin-top:2px">.csv/.txt · or <span style="color:#1d4ed8;text-decoration:underline">choose file</span></div>'
+    +'<input type="file" id="invfba-file" accept=".csv,.txt,text/csv,text/plain,text/tab-separated-values" style="display:none"></div>'
+    +'<span>'+invFbaMeta(j)+' <span id="invfba-msg" class="mut" style="font-size:11px"></span></span></div>';
   var content='';
   if(j.imported){ var rows=j.rows||[];
-    var summary='<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px;font-size:12px"><span><b>'+j.report_skus+'</b> report SKUs</span>'
-      +'<span style="color:#16a34a"><b>'+j.matched+'</b> matched</span><span style="color:#b45309"><b>'+j.unmatched+'</b> not in ERP</span>'
-      +'<span style="color:#b91c1c"><b>'+j.erp_not_in_report+'</b> ERP FBA stock missing from report</span></div>';
+    var summary='<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:6px;font-size:12px;align-items:center"><span><b>'+j.report_skus+'</b> report SKUs</span>'
+      +'<span style="color:#16a34a"><b>'+j.matched+'</b> matched</span>'
+      +'<button class="fba-toggle" data-t="notinerp" style="background:none;border:none;cursor:pointer;color:#b45309;font-size:12px;padding:0;font-family:inherit"><b>'+j.unmatched+'</b> not in ERP ▾</button>'
+      +'<button class="fba-toggle" data-t="erpmissing" style="background:none;border:none;cursor:pointer;color:#b91c1c;font-size:12px;padding:0;font-family:inherit"><b>'+j.erp_not_in_report+'</b> ERP FBA stock missing from report ▾</button>'
+      +(j.dup_asins?'<span class="mut" title="products SKUs that share an ASIN — skipped for ASIN matching to avoid mis-mapping">'+j.dup_asins+' duplicate ASIN'+(j.dup_asins>1?'s':'')+' (skipped)</span>':'')
+      +'</div><div id="fba-detail" style="margin-bottom:10px"></div>';
     var H=['SKU','ASIN','Available','FC-transfer','FBA report (avail+fc)','ERP ('+tHesc(INV_FBA)+' FBA)','Diff'];
     var head=H.map(function(h){return '<th style="text-align:left;padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+h+'</th>';}).join('');
     var num=function(v){return v==null?'—':v;};
@@ -9100,7 +9105,19 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
     dz.addEventListener('dragover',function(e){ e.preventDefault(); dz.style.background='#e0f2fe'; });
     dz.addEventListener('dragleave',function(){ dz.style.background='#f8fbff'; });
     dz.addEventListener('drop',function(e){ e.preventDefault(); dz.style.background='#f8fbff'; var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]; if(f)invFbaUpload('manage',f); }); }
+  var det=document.getElementById('fba-detail'); var _fbaOpen=null;
+  (panel.querySelectorAll('.fba-toggle')||[]).forEach(function(btn){ btn.onclick=function(){ var t=btn.dataset.t; if(!det)return;
+    if(_fbaOpen===t){ det.innerHTML=''; _fbaOpen=null; return; } _fbaOpen=t;
+    if(t==='notinerp'){ var L=j.not_in_erp||[]; det.innerHTML=fbaListTbl(['SKU','ASIN','FBA report'], L.map(function(x){return [x.sku, x.asin||'—', x.report_fba];}), 'Report SKUs (amzn.gr. already ignored) that match no product by SKU or ASIN'); }
+    else { var M=j.erp_missing||[]; det.innerHTML=fbaListTbl(['SKU','ERP '+INV_FBA+' FBA'], M.map(function(x){return [x.sku, x.erp_fba];}), 'Products with ERP FBA stock > 0 that are absent from the uploaded report'); }
+  }; });
 }
+function fbaListTbl(head, rows, cap){ if(!rows.length)return '<div class="mut" style="font-size:12px">none</div>';
+  return '<div class="mut" style="font-size:11px;margin:2px 0 4px">'+tHesc(cap)+' ('+rows.length+')</div>'
+    +'<div style="max-height:280px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px;max-width:520px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'
+    +head.map(function(h,i){return '<th style="text-align:'+(i===0?'left':'right')+';padding:4px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc">'+tHesc(h)+'</th>';}).join('')+'</tr></thead><tbody>'
+    +rows.slice(0,500).map(function(r){ return '<tr>'+r.map(function(v,i){return '<td style="padding:3px 10px;text-align:'+(i===0?'left':'right')+(i===0?';font-family:ui-monospace,Menlo,monospace;font-size:11px':'')+'">'+tHesc(v)+'</td>';}).join('')+'</tr>'; }).join('')
+    +'</tbody></table></div>'+(rows.length>500?'<div class="mut" style="font-size:11px;margin-top:3px">Showing first 500 of '+rows.length+'</div>':''); }
 function inv3plUser(e){ e=String(e||''); var i=e.indexOf('@'); return i>0?e.slice(0,i+1):(e||'—'); }   // ben@dockandbay.com → ben@
 function inv3plAge(iso){ var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var d=new Date(String(iso||'').replace(' ','T')); if(isNaN(d.getTime()))return {age:'',stamp:String(iso||'')};

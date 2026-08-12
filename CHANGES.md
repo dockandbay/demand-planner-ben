@@ -1,3 +1,8 @@
+## v26.886.0 Manage FBA — small upload box, clickable count lists, duplicate-ASIN safety
+- Upload box shrunk to **max 200px** with the "last uploaded" note beside it.
+- **"N not in ERP"** and **"N ERP FBA stock missing from report"** are now **clickable** — they expand the actual SKU lists (not-in-ERP shows SKU/ASIN/report qty; ERP-missing shows SKU + ERP FBA qty).
+- **Duplicate ASINs**: any ASIN shared by >1 product is now **skipped** for ASIN matching (so it can never mis-map); the count is shown. `amzn.gr.` rows remain fully ignored.
+
 ## v26.885.0 Manage FBA — accept .txt (tab-delimited) + ignore amzn.gr. listings
 - FBA upload now accepts the Amazon report as **.csv (comma/quoted) or .txt (tab-delimited)** — the parser auto-detects the delimiter (same columns either way). Verified UK .txt and .csv give identical results (210 SKUs, 209 matched).
 - Rows whose SKU starts with **`amzn.gr.`** are now **ignored entirely** (not real inventory) — dropped before compare/aged, every market.
