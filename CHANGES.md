@@ -1,3 +1,6 @@
+## v26.878.0 SUG-0023 — order-plan false "partial carton" fix
+- `v_purchase_order_lines` computed the full/partial-carton check from `sku_labels.carton_qty` (stale — e.g. 40 for TOWLB-CAB-XL-AMALG-R) instead of the source-of-truth `products.carton_qty` (30). A 510 qty (17×30) was wrongly flagged "partial". View now uses `products.carton_qty` (safe text→int) with sku_labels fallback. Migration 213 — applied to sandbox + LIVE; verified live now shows "✅ Full Cartons".
+
 ## v26.877.0 PO actions — DATES count fix + Unassigned-shipment 21-day gate
 - **DATES tab counter** now matches the panel: production-start and production-end exceptions are counted **separately** (the panel shows a ⚠ on each row; the old combined `prodStatusException` undercounted when both fired). Also the ERP-date banner now respects the same `!poErpNa` guard as the count.
 - **"Unassigned shipment"** action now only fires **within 21 days (3 weeks) of production end** (or once past) — no premature nag when production is far off.
