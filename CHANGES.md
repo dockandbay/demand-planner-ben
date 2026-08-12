@@ -1,3 +1,6 @@
+## v26.872.0 PO grid — NEEDS ERP pill clears the status pills
+- Clicking **⬆ NEEDS ERP** now unselects all status pills (Production/Shipping/Future/Complete) so it shows every PO needing ERP across all statuses (it already filtered that way; now the pills reflect it).
+
 ## v26.871.0 Child POs show in the grid; Child PO sub-tab removed
 - **Child POs now appear in the main PO grid** with a medium-blue **child** badge (click it to open the master). They stay operationally inert — no ERP, no actions, and excluded from **cash flow, payments due and buy-plan on-order** so the master (which carries the consolidated lines/invoice) is never double-counted.
 - Removed the standalone **Child PO** sub-tab (children live in the grid now); the old `.../child-po` URL falls back to PLAN.

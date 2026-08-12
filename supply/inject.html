@@ -2466,7 +2466,7 @@
       pillToggle(_erpPill,!!state.erp,anyOn,'#b45309','#7c2d12','⬆ NEEDS ERP ('+erpCount()+')'); }
     syncActErp();
     c.querySelectorAll('#po-act .po-actall').forEach(function(p){p.onclick=function(){state.hasact=!state.hasact;if(state.hasact)state.erp=false;syncActErp();view();};});
-    c.querySelectorAll('#po-act .po-erp').forEach(function(p){p.onclick=function(){state.erp=!state.erp;if(state.erp)state.hasact=false;syncActErp();view();};});
+    c.querySelectorAll('#po-act .po-erp').forEach(function(p){p.onclick=function(){state.erp=!state.erp;if(state.erp){state.hasact=false;state.f={};c.querySelectorAll('#po-prog .pill').forEach(function(sp){sp.classList.remove('active');});}syncActErp();view();};});   // NEEDS ERP spans all statuses → clear the status pills so it's clear you're seeing every PO needing ERP
     // view() only re-renders the grid body, not the filter bar — so toggle the active-filter highlight on the
     // <select> directly here (black = a value is applied; cleared = back to default).
     function selHi(el,on){ if(!el)return; if(on){ el.style.background='#0f172a'; el.style.color='#fff'; el.style.borderColor='#0f172a'; el.style.fontWeight='700'; } else { el.style.background=''; el.style.color=''; el.style.borderColor=''; el.style.fontWeight=''; } }
