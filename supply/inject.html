@@ -8931,6 +8931,7 @@
       if(seg[0]==='buy-move'){ sub=(['actions','buy','fba','transfer','inventory','zalando'].indexOf(seg[1])>=0)?seg[1]:'actions'; }
       else { sub=seg[0]; ctry=seg[1]; }
       if(ctry&&window.BP&&window.BP.setFilters&&['uk','us','eu','au','ca'].indexOf(String(ctry).toLowerCase())>=0){ try{ window.BP.setFilters(ctry.toUpperCase()); }catch(e){} }
+      if(sub==='inventory'){ try{ var _is=seg[2]; if(['status','manage3pl','managefba','fba-aged'].indexOf(_is)>=0){ window.INV_SUB=_is; var _mk=String(seg[3]||'').toUpperCase(); if(_mk){ if(_is==='manage3pl')window.INV_3PL=_mk; else window.INV_FBA=_mk; } } }catch(e){} }   // deep-link the level-3 inventory page + market
       var top=document.querySelector('#view-tabs-row .view-toggle[data-group="buymove"]'); if(top)top.click();   // enter the group (builds the sub-nav)
       var pick=function(){ var sb=document.querySelector('#buymove-tabs .dnav[data-bm="'+sub+'"]'); if(sb){ sb.click(); return true; } return false; };
       if(!pick())setTimeout(pick,40); }

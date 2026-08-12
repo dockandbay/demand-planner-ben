@@ -9019,14 +9019,17 @@ function renderInventory(){
   var host=document.querySelector('.wrap'); if(!host)return;
   var ex=document.getElementById('inventory-wrap'); if(ex)ex.remove();
   var wrap=document.createElement('div'); wrap.id='inventory-wrap'; wrap.style.cssText='margin:0 0 20px';   // full-width (match the SUPPLY pages)
-  var SUBS=[['status','Status Report'],['manage3pl','Manage 3PL'],['managefba','Manage FBA']];
+  var SUBS=[['status','Status Report'],['manage3pl','Manage 3PL'],['managefba','Manage FBA'],['fba-aged','FBA Aged']];
   function pillbar(list,cur,cls){ return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px">'+list.map(function(c){ var on=(c===cur);
       return '<button class="'+cls+'" data-c="'+c+'" style="padding:4px 15px;border-radius:16px;border:1px solid '+(on?'#1e40af':'#cbd5e1')+';background:'+(on?'#1e40af':'#fff')+';color:'+(on?'#fff':'#334155')+';font-weight:600;font-size:12px;cursor:pointer">'+c+'</button>'; }).join('')+'</div>'; }
   function placeholder(title){ return '<div style="padding:26px;color:#64748b;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;text-align:center"><b style="color:#334155">'+title+'</b><div style="margin-top:6px;font-size:13px">To complete in future.</div></div>'; }
+  // Slug the level-3 page (+ market) into the URL so it's linkable: #/buy-move/inventory/<sub>/<market>
+  try{ if(window.writeHash){ var _mk=(INV_SUB==='manage3pl'?INV_3PL:((INV_SUB==='managefba'||INV_SUB==='fba-aged')?INV_FBA:'')); writeHash(['buy-move','inventory',INV_SUB].concat(_mk?[_mk]:[])); } }catch(e){}
   var subnav='<div class="d3nav">'+SUBS.map(function(t){return '<button class="d3tab inv-sub'+(t[0]===INV_SUB?' active':'')+'" data-sub="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div>';
   var body;
   if(INV_SUB==='manage3pl') body=pillbar(['US','UK','AU','EU'],INV_3PL,'inv-3pl-pill')+'<div id="inv3pl-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
-  else if(INV_SUB==='managefba') body=pillbar(['US','UK','AU','EU','CA'],INV_FBA,'inv-fba-pill')+placeholder('Manage FBA — '+INV_FBA);
+  else if(INV_SUB==='managefba') body=pillbar(['US','UK','AU','EU','CA'],INV_FBA,'inv-fba-pill')+'<div id="invfba-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
+  else if(INV_SUB==='fba-aged') body=pillbar(['US','UK','AU','EU','CA'],INV_FBA,'inv-fba-pill')+'<div id="fbaaged-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
   else body=placeholder('Status Report');
   wrap.innerHTML=subnav+'<div id="inv-body">'+body+'</div>';
   host.appendChild(wrap);
@@ -9034,6 +9037,67 @@ function renderInventory(){
   wrap.querySelectorAll('.inv-3pl-pill').forEach(function(b){ b.onclick=function(){ INV_3PL=b.dataset.c; renderInventory(); }; });
   wrap.querySelectorAll('.inv-fba-pill').forEach(function(b){ b.onclick=function(){ INV_FBA=b.dataset.c; renderInventory(); }; });
   if(INV_SUB==='manage3pl')inv3plLoad();
+  else if(INV_SUB==='managefba')invFbaLoad('manage');
+  else if(INV_SUB==='fba-aged')invFbaLoad('aged');
+}
+// Manage FBA + FBA Aged: manually-uploaded Amazon FBA report per market (persisted). Manage FBA compares
+// (available + fc-transfer) vs inventory_<mkt>_fba; FBA Aged shows the aged buckets oldest-first.
+function invFbaLoad(mode){ var mkt=INV_FBA, panel=document.getElementById(mode==='aged'?'fbaaged-panel':'invfba-panel'); if(!panel)return;
+  panel.innerHTML='<div class="mut" style="font-size:12px">Loading…</div>';
+  fetch('/api/supply/inventory-fba/status?market='+mkt).then(function(r){return r.json();}).then(function(j){ invFbaRender(mode,j); })
+    .catch(function(e){ panel.innerHTML='<div style="color:#dc2626">'+tHesc((e&&e.message)||e)+'</div>'; }); }
+function invFbaUpload(mode,file){ if(!file)return; var mkt=INV_FBA, msg=document.getElementById('invfba-msg');
+  if(msg)msg.textContent='Reading '+file.name+'…';
+  var rd=new FileReader(); rd.onload=function(){ if(msg)msg.textContent='Uploading…';
+    fetch('/api/supply/inventory-fba/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({market:mkt,csv:String(rd.result)})})
+      .then(function(r){return r.json();}).then(function(j){ invFbaRender(mode,j); })
+      .catch(function(e){ if(msg)msg.textContent=''; var p=document.getElementById('invfba-panel'); if(p)p.innerHTML='<div style="color:#dc2626">Failed: '+tHesc((e&&e.message)||e)+'</div>'; }); };
+  rd.readAsText(file); }
+function invFbaMeta(j){ if(!j.imported)return '<span class="mut" style="font-size:12px">Not uploaded yet.</span>';
+  var a=inv3plAge(j.imported_at); return '<span class="mut" style="font-size:12px">'+tHesc(a.age)+' · last uploaded <b>'+tHesc(inv3plUser(j.imported_by))+'</b> on '+tHesc(a.stamp)+'</span>'; }
+function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'fbaaged-panel':'invfba-panel'); if(!panel)return;
+  if(j&&j.error){ panel.innerHTML='<div style="color:#dc2626">'+tHesc(j.error)+(j.headers?'<div class="mut" style="font-size:11px;margin-top:4px">Detected headers: '+tHesc(j.headers.join(', '))+'</div>':'')+'</div>'; return; }
+  if(mode==='aged'){
+    if(!j.imported){ panel.innerHTML='<div class="mut" style="font-size:12px">No FBA report uploaded for '+tHesc(j.market||INV_FBA)+' yet — upload it under <b>Manage FBA</b>.</div>'; return; }
+    var aged=j.aged||[];
+    var meta='<div style="margin:0 0 10px">'+invFbaMeta(j)+' <span class="mut" style="font-size:12px">· '+aged.length+' SKUs with inventory older than 90 days (oldest first)</span></div>';
+    if(!aged.length){ panel.innerHTML=meta+'<div class="mut" style="font-size:12px">No inventory older than 90 days 🎉</div>'; return; }
+    var H=['SKU','456+ days','366-455','271-365','181-270','91-180','Total aged'];
+    var head=H.map(function(h,i){return '<th style="text-align:'+(i===0?'left':'right')+';padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+h+'</th>';}).join('');
+    var cell=function(v){ return '<td style="padding:4px 10px;text-align:right">'+(v||0)+'</td>'; };
+    var trs=aged.slice(0,800).map(function(r){ return '<tr><td style="padding:4px 10px;text-align:left">'+tHesc(r.sku)+'</td>'
+      +'<td style="padding:4px 10px;text-align:right;font-weight:700;color:'+(r.a5>0?'#b91c1c':'#334155')+'">'+(r.a5||0)+'</td>'+cell(r.a4)+cell(r.a3)+cell(r.a2)+cell(r.a1)
+      +'<td style="padding:4px 10px;text-align:right;font-weight:700">'+r.total+'</td></tr>'; }).join('');
+    panel.innerHTML=meta+'<div style="max-height:560px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'+head+'</tr></thead><tbody>'+trs+'</tbody></table></div>'+(aged.length>800?'<div class="mut" style="font-size:11px;margin-top:4px">Showing first 800 of '+aged.length+'</div>':'');
+    return;
+  }
+  // Manage FBA (compare): upload zone + meta + comparison table
+  var drop='<div id="invfba-drop" style="border:2px dashed #93c5fd;border-radius:10px;background:#f8fbff;padding:16px;text-align:center;cursor:pointer;margin:0 0 10px">'
+    +'<div style="font-size:13px;color:#1e40af;font-weight:600">⬆ Drag &amp; drop the '+tHesc(INV_FBA)+' FBA inventory report (.csv) here</div>'
+    +'<div class="mut" style="font-size:11px;margin-top:4px">or <span style="color:#1d4ed8;text-decoration:underline">choose a file</span> · '+invFbaMeta(j)+' <span id="invfba-msg" class="mut" style="font-size:11px"></span></div>'
+    +'<input type="file" id="invfba-file" accept=".csv,text/csv" style="display:none"></div>';
+  var content='';
+  if(j.imported){ var rows=j.rows||[];
+    var summary='<div style="display:flex;gap:18px;flex-wrap:wrap;margin-bottom:10px;font-size:12px"><span><b>'+j.report_skus+'</b> report SKUs</span>'
+      +'<span style="color:#16a34a"><b>'+j.matched+'</b> matched</span><span style="color:#b45309"><b>'+j.unmatched+'</b> not in ERP</span>'
+      +'<span style="color:#b91c1c"><b>'+j.erp_not_in_report+'</b> ERP FBA stock missing from report</span></div>';
+    var H=['SKU','Available','FC-transfer','FBA report (avail+fc)','ERP ('+tHesc(INV_FBA)+' FBA)','Diff'];
+    var head=H.map(function(h){return '<th style="text-align:left;padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+h+'</th>';}).join('');
+    var num=function(v){return v==null?'—':v;};
+    var dc=function(d){ var c=(d==null?'#94a3b8':(d===0?'#16a34a':(d>0?'#b45309':'#b91c1c'))); return '<td style="padding:4px 10px;text-align:left;color:'+c+';font-weight:600">'+(d==null?'—':(d>0?'+':'')+d)+'</td>'; };
+    var trs=rows.slice(0,800).map(function(r){ return '<tr'+(!r.matched?' style="background:#fff7ed"':'')+'>'
+      +'<td style="padding:4px 10px;text-align:left">'+tHesc(r.sku)+(!r.matched?' <span class="mut" style="font-size:10px">(not in ERP)</span>':'')+'</td>'
+      +'<td style="padding:4px 10px;text-align:left">'+r.available+'</td><td style="padding:4px 10px;text-align:left">'+r.fc_transfer+'</td>'
+      +'<td style="padding:4px 10px;text-align:left;font-weight:600">'+r.report_fba+'</td><td style="padding:4px 10px;text-align:left">'+num(r.erp_fba)+'</td>'+dc(r.diff)+'</tr>'; }).join('');
+    content=summary+'<div style="max-height:520px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'+head+'</tr></thead><tbody>'+trs+'</tbody></table></div>'
+      +(rows.length>800?'<div class="mut" style="font-size:11px;margin-top:4px">Showing first 800 of '+rows.length+'</div>':''); }
+  panel.innerHTML=drop+content;
+  var dz=document.getElementById('invfba-drop'), fi=document.getElementById('invfba-file');
+  if(dz&&fi){ dz.onclick=function(){ fi.click(); };
+    fi.onchange=function(){ if(fi.files&&fi.files[0])invFbaUpload('manage',fi.files[0]); };
+    dz.addEventListener('dragover',function(e){ e.preventDefault(); dz.style.background='#e0f2fe'; });
+    dz.addEventListener('dragleave',function(){ dz.style.background='#f8fbff'; });
+    dz.addEventListener('drop',function(e){ e.preventDefault(); dz.style.background='#f8fbff'; var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]; if(f)invFbaUpload('manage',f); }); }
 }
 function inv3plUser(e){ e=String(e||''); var i=e.indexOf('@'); return i>0?e.slice(0,i+1):(e||'—'); }   // ben@dockandbay.com → ben@
 function inv3plAge(iso){ var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];

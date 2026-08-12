@@ -6739,6 +6739,63 @@ app.post('/api/supply/inventory-3pl/import', async (req, res) => {
     res.json({ market: mkt, configured: true, imported: true, imported_by: by, imported_at: m.imported_at, url: cfg.url, ...(await inv3plCompare(mkt, parsed.rep)) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// ── Manage FBA / FBA Aged: manually-uploaded Amazon FBA inventory report per market. Compare (available + fc-transfer)
+// vs planner.products.inventory_<mkt>_fba; the aged buckets (91-180 … 456+) feed the FBA Aged tab. Persisted per market.
+const INVFBA_MKTS = ['US','UK','AU','EU','CA'];
+const INVFBA_COLS = { sku:'sku', av:'available', fc:'fc-transfer',
+  a1:'inv-age-91-to-180-days', a2:'inv-age-181-to-270-days', a3:'inv-age-271-to-365-days', a4:'inv-age-366-to-455-days', a5:'inv-age-456-plus-days' };
+function invFbaParse(text) {
+  const lines = text.split(/\r?\n/).filter(x => x.trim().length); if (!lines.length) return null;
+  const hdr = parseCsvLine(lines[0]).map(h => h.replace(/^"|"$/g, '').trim());
+  const ci = {}; for (const k in INVFBA_COLS) ci[k] = hdr.indexOf(INVFBA_COLS[k]);
+  if (ci.sku < 0) return { error: 'FBA report "sku" column not found', headers: hdr.slice(0, 12) };
+  const rep = {};
+  for (let i = 1; i < lines.length; i++) { const f = parseCsvLine(lines[i]); const sku = String(f[ci.sku] || '').replace(/^"|"$/g, '').trim(); if (!sku) continue;
+    const r = rep[sku] || (rep[sku] = { av: 0, fc: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0 });
+    ['av', 'fc', 'a1', 'a2', 'a3', 'a4', 'a5'].forEach(k => { if (ci[k] >= 0) r[k] += csvNum(f[ci[k]]); }); }
+  return { rep };
+}
+async function invFbaCompare(mkt, rep) {
+  const col = 'inventory_' + mkt.toLowerCase() + '_fba';   // mkt whitelisted → safe to interpolate
+  const erp = {};
+  (await pool.query(`SELECT sku, coalesce(${col},0)::numeric v FROM planner.products WHERE sku IS NOT NULL`)).rows.forEach(x => { erp[x.sku] = Number(x.v) || 0; });
+  const skus = Object.keys(rep);
+  const rows = skus.map(sku => { const matched = (sku in erp), e = matched ? erp[sku] : null, fba = (rep[sku].av || 0) + (rep[sku].fc || 0);
+    return { sku, available: rep[sku].av || 0, fc_transfer: rep[sku].fc || 0, report_fba: fba, erp_fba: e, matched, diff: (e == null ? null : fba - e) }; })
+    .sort((a, b) => Math.abs(b.diff || 0) - Math.abs(a.diff || 0));
+  const aged = skus.map(sku => { const r = rep[sku], tot = (r.a1 || 0) + (r.a2 || 0) + (r.a3 || 0) + (r.a4 || 0) + (r.a5 || 0);
+    return { sku, a1: r.a1 || 0, a2: r.a2 || 0, a3: r.a3 || 0, a4: r.a4 || 0, a5: r.a5 || 0, total: tot }; })
+    .filter(x => x.total > 0)
+    .sort((a, b) => (b.a5 - a.a5) || (b.a4 - a.a4) || (b.a3 - a.a3) || (b.a2 - a.a2) || (b.a1 - a.a1));   // oldest inventory first
+  return { rows, aged, report_skus: skus.length, matched: rows.filter(r => r.matched).length, unmatched: rows.filter(r => !r.matched).length,
+    erp_not_in_report: Object.keys(erp).filter(s => erp[s] > 0 && !(s in rep)).length };
+}
+app.get('/api/supply/inventory-fba/status', async (req, res) => {
+  const mkt = String((req.query && req.query.market) || '').toUpperCase();
+  if (INVFBA_MKTS.indexOf(mkt) < 0) return res.json({ market: mkt, error: 'Unknown market' });
+  try {
+    const m = (await pool.query(`SELECT imported_by, to_char(imported_at,'YYYY-MM-DD"T"HH24:MI:SS') imported_at, report FROM planner.inventory_fba_imports WHERE market=$1`, [mkt])).rows[0];
+    if (!m || !m.report) return res.json({ market: mkt, imported: false });
+    res.json({ market: mkt, imported: true, imported_by: m.imported_by, imported_at: m.imported_at, ...(await invFbaCompare(mkt, m.report)) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/inventory-fba/import', async (req, res) => {
+  const b = req.body || {}, mkt = String(b.market || '').toUpperCase();
+  if (INVFBA_MKTS.indexOf(mkt) < 0) return res.json({ market: mkt, error: 'Unknown market' });
+  let text = String(b.csv || '');
+  if (b.csv_base64) { try { text = Buffer.from(String(b.csv_base64).split(',').pop(), 'base64').toString('utf8'); } catch (e) {} }
+  if (!text.trim()) return res.json({ market: mkt, error: 'Empty file' });
+  try {
+    const parsed = invFbaParse(text);
+    if (!parsed) return res.json({ market: mkt, error: 'Empty report' });
+    if (parsed.error) return res.json({ market: mkt, headers: parsed.headers, error: parsed.error });
+    const by = authUser(req) || 'admin';
+    await pool.query(`INSERT INTO planner.inventory_fba_imports (market, imported_by, imported_at, report) VALUES ($1,$2,now(),$3::jsonb)
+      ON CONFLICT (market) DO UPDATE SET imported_by=excluded.imported_by, imported_at=now(), report=excluded.report`, [mkt, by, JSON.stringify(parsed.rep)]);
+    const m = (await pool.query(`SELECT to_char(imported_at,'YYYY-MM-DD"T"HH24:MI:SS') imported_at FROM planner.inventory_fba_imports WHERE market=$1`, [mkt])).rows[0];
+    res.json({ market: mkt, imported: true, imported_by: by, imported_at: m.imported_at, ...(await invFbaCompare(mkt, parsed.rep)) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // ── Master PO (consolidated supplier invoice) ─────────────────────────────────────────────────
 // A MASTER is a REAL purchase_orders row (is_master=true) that consolidates N child POs (one supplier).
 // It inherits its header from the BIGGEST child (by value), carries the summed lines, and is the single

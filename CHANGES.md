@@ -1,3 +1,8 @@
+## v26.883.0 INVENTORY — Manage FBA upload/compare, FBA Aged tab, level-3 slugs
+- **Manage FBA** (per market US/UK/AU/EU/CA): manual **drag-and-drop / choose-file** upload of the Amazon FBA inventory report; persists per market (migration 216) with "last uploaded by/when"; compares **(available + fc-transfer)** vs `products.inventory_<mkt>_fba`, biggest mismatch first. Verified US: 604 report SKUs, 485 matched.
+- **FBA Aged** (new sub-tab): from the same uploaded report, shows the aged buckets **456+ / 366-455 / 271-365 / 181-270 / 91-180** (oldest-first, oldest column first), SKUs with the most aged stock at top.
+- **Level-3 slugs**: INVENTORY now writes/restores `#/buy-move/inventory/<sub>/<market>` so each page + market is linkable/bookmarkable.
+
 ## v26.882.0 sku_labels → products (phase 1): carton_qty + pallet_qty now products-first
 - New view `planner.v_sku_attrs` exposes every sku_labels column but makes **carton_qty and pallet_qty products-first** (source of truth), with sku_labels fallback. All 27 `planner.sku_labels` reads in server.mjs repointed to it — so pallet counts (PO grid / shipments / order plan / 20-pallet PO split) and carton checks stop drifting from `products`. Migration 215; applied to sandbox + live (view pre-staged; live code unaffected until deploy). Barcodes / carton dims / grs / main_supplier still pass through from sku_labels (they only live there) — migrating those into products + n8n is the step before the table can be dropped.
 
