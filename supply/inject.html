@@ -11593,6 +11593,7 @@
     if(newCode||newData){ nagMsg=newCode?'A new version of HORIZON is ready.':'Newer data is available.'; pending=true; apply(); } }).catch(function(){}); }
   document.addEventListener('visibilitychange',function(){ if(document.hidden){ apply(); } else { lastAct=Date.now(); check(); } });
   window.addEventListener('focus',function(){ lastAct=Date.now(); check(); });
+  window.addEventListener('hashchange',function(){ if(pending)safeReload(); });   // Ben: apply a pending update silently on the NEXT page navigation (a natural, non-disruptive moment)
   setInterval(check,5*60*1000);                        // poll for new version / data every 5 minutes
   setInterval(function(){ if(pending)apply(); },30*1000);   // once stale/updated, reload at the next safe moment
   setTimeout(check,15000);                             // and shortly after load
