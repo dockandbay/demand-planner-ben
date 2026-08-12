@@ -1,3 +1,7 @@
+## v26.877.0 PO actions — DATES count fix + Unassigned-shipment 21-day gate
+- **DATES tab counter** now matches the panel: production-start and production-end exceptions are counted **separately** (the panel shows a ⚠ on each row; the old combined `prodStatusException` undercounted when both fired). Also the ERP-date banner now respects the same `!poErpNa` guard as the count.
+- **"Unassigned shipment"** action now only fires **within 21 days (3 weeks) of production end** (or once past) — no premature nag when production is far off.
+
 ## v26.876.0 Nav spacing — tighter gap between level-2 and level-3 menus
 - Reduced the bottom margin of the level-2 nav bars (DEMAND tabs, BUY & MOVE tabs, SUPPLY sub-nav) from 10px to 4px, and dropped the INVENTORY wrapper top margin — so the level-3 menu (Status Report / Manage 3PL / … , report sub-tabs) sits close under the level-2 menu on all pages.
 

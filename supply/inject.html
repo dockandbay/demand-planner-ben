@@ -2043,7 +2043,8 @@
     // "Late - should be Completed": the COMPLETION date (checkin = delivery + 7, the Fulfil/Cin7 completion) has
     // passed but the PO isn't marked complete yet. (Was wrongly keyed on the production-end date.)
     late:function(r){ var t=new Date().toISOString().slice(0,10); return r.progress!=='complete' && r.checkin && r.checkin<t; },
-    unassigned_shipment:function(r){return r.unassigned_shipment;},
+    unassigned_shipment:function(r){ if(!r.unassigned_shipment)return false; if(!r.prod_end)return false;   // only chase a shipment within 3 weeks (21d) of production end (or once past) — no premature nag
+      var _thr=new Date(Date.now()+21*86400000).toISOString().slice(0,10); return r.prod_end<=_thr; },
     // Rider PO the supplier shipped to the master consolidator, master not yet departed → set SHIPPED TO MASTER.
     shipped_to_master:function(r){ return r.progress!=='complete' && r.shipment && !r.is_master && r.production_status==='shipped' && r.ship_status!=='Shipping' && r.ship_status!=='Delivered' && ['SHIPPED TO MASTER','SHIPPING','DELIVERED','COMPLETE'].indexOf(r.status)<0; },
     // "Late - should have Shipped": still in PRODUCTION and the ship date has passed.
@@ -3201,7 +3202,11 @@
     // ERP delivery-date drift (materiality-thresholded server-side) → DATES sub-tab count comes from the
     // snooze-aware mirror loop below (erp_date is now a PO_ACTCOND action mapped to the dates tab).
     // only flag a missing/late production status when this production actually requires supplier confirmation
-    var _pse=r.require_confirmation?prodStatusException(r.status, r.prod_start, r.prod_end, today):''; if(_pse) dates.push('Production status: '+_pse);
+    // Count the production-start and production-end exceptions SEPARATELY — the DATES panel shows a ⚠ on each row,
+    // so collapsing them (old prodStatusException = start||end) undercounted the tab when both fired.
+    if(r.require_confirmation){ var _pss=prodStatusStart(r.status, r.prod_start, today), _pse=prodStatusEnd(r.status, r.prod_end, today);
+      if(_pss) dates.push('Production start: '+_pss);
+      if(_pse) dates.push('Production end: '+_pse); }
     var timeline=[]; if(Number(r.unread_notes)>0) timeline.push(r.unread_notes+' unread supplier note'+(r.unread_notes>1?'s':''));
     var oplan=[]; if(Number(r.orderplan_unconfirmed)>0) oplan.push(r.orderplan_unconfirmed+' unconfirmed order-plan change'+(r.orderplan_unconfirmed>1?'s':''));
     // unapproved order-plan exceptions for this PO (from /api/supply/order-plan-exceptions) → ORDER PLAN sub-tab badge
@@ -3466,7 +3471,7 @@
     var _alert=function(m){ return m?' <span style="color:#b91c1c;font-weight:600">⚠ '+esc(m)+'</span>':''; };
     // ERP delivery-date drift banner (same look as the ORDER PLAN ERP-deviations box): our completed-at-warehouse
     // date differs from the ERP's final delivery date → offer to push it. Hidden on COMPLETE POs.
-    var _erpDateBanner=(r.erp_date_pending>0 && !poComplete(r)) ?
+    var _erpDateBanner=(r.erp_date_pending>0 && !poComplete(r) && !poErpNa(r)) ?
       '<div style="margin:4px 0 10px;padding:9px 12px;background:#fefce8;border:1px solid #eab308;border-radius:6px;max-width:820px">'
       +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="font-weight:700;color:#854d0e">⚠ ERP delivery date needs updating</span>'
       +'<span class="mut tiny">ERP final delivery <b>'+(r.erp_final_delivery?fd(r.erp_final_delivery):'—')+'</b> → completed-at-warehouse <b>'+(r.checkin?fd(r.checkin):'—')+'</b></span>'
