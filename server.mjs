@@ -6718,9 +6718,14 @@ app.post('/api/supply/master-po/create', async (req, res) => {
     const byPo = {}; chk.forEach(r => { byPo[r.po] = r; });
     let big = childPos[0]; childPos.forEach(po => { if (Number(byPo[po].value_est) > Number(byPo[big].value_est)) big = po; });
     const bigStatus = byPo[big].status, childValSum = chk.reduce((a, r) => a + Number(r.value_est || 0), 0);
-    // Master number = biggest child's po + '-MASTER' (dedupe if it somehow exists).
-    let mpo = big + '-MASTER', sfx = 1;
-    while ((await client.query(`SELECT 1 FROM planner.purchase_orders WHERE po=$1`, [mpo])).rowCount) { sfx++; mpo = big + '-MASTER-' + sfx; }
+    // Master number: user override if given, else biggest child's po + '-MASTER' (dedupe if it somehow exists).
+    const override = String(b.master_po || '').trim();
+    let mpo;
+    if (override) {
+      if (override.length > 60) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'PO reference too long' }); }
+      if ((await client.query(`SELECT 1 FROM planner.purchase_orders WHERE po=$1`, [override])).rowCount) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'PO ' + override + ' already exists — choose another reference' }); }
+      mpo = override;
+    } else { mpo = big + '-MASTER'; let sfx = 1; while ((await client.query(`SELECT 1 FROM planner.purchase_orders WHERE po=$1`, [mpo])).rowCount) { sfx++; mpo = big + '-MASTER-' + sfx; } }
     // Build the master row by copying the biggest child's header, resetting identity/transactional columns.
     const cols = await poColumns();
     const inv = (b.invoice_total != null && b.invoice_total !== '') ? Number(b.invoice_total) : null;
@@ -8440,7 +8445,12 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
              OR (coalesce(qd.batch_id,'')<>'' AND qd.batch_id=coalesce(o.batch_id,'')))
         AND (coalesce(qd.supplier_name,'')='' OR lower(qd.supplier_name)=lower(coalesce(o.supplier_name,'')))
       ORDER BY qd.created_at DESC LIMIT 200`, [po]).catch(() => ({ rows: [] }));
+    // Child POs, if this PO is a consolidated master (drives the PO ▸ CHILD PO tab).
+    const children = await pool.query(`SELECT p.po, coalesce(p.branch,'') branch, coalesce(p.client,'') client, coalesce(p.status,'') status,
+        coalesce(f.value_est,0)::numeric value_est FROM planner.purchase_orders p JOIN planner.v_po_finance f ON f.po=p.po
+      WHERE p.master_po=$1 ORDER BY p.po`, [po]).catch(() => ({ rows: [] }));
     res.json({ ship, lines: lines.rows, deposit: deposit.rows, payments: payments.rows, flexport: flexport.rows, dtc,
+      children: children.rows,
       changes: changes.rows, quality_docs: qdocs.rows,
       crossdock_lines: xdMaster.rows,
       sup_invoice: supInv.rows[0] || null,

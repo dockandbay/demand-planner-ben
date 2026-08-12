@@ -1,3 +1,9 @@
+## v26.869.0 Master PO polish + PO grid height + INVENTORY restyle
+- **Create master PO**: added an optional **PO reference** field — shows the default (biggest child + -MASTER) as grey placeholder, editable to override (server validates uniqueness).
+- **PO ▸ CHILD PO tab**: a master PO now has a final **CHILD PO** tab (after Timeline) listing its children with a link + ✕ remove (detaches back to a normal PO, re-sums the master).
+- **PO grid height**: the grid scroll box is now sized to the actual space below it (not a fixed 100vh-210px), so the load-more footer row stays inside the viewport even when the window is short / not full-screen.
+- **BUY & MOVE ▸ INVENTORY**: dropped the "Inventory" heading; sub-tabs now use the light-blue level-3 nav style (.d3nav/.d3tab).
+
 ## v26.868.0 BUY & MOVE — new INVENTORY tab (scaffold)
 - Added an **INVENTORY** tab to the BUY & MOVE sub-nav with 3 sub-tabs: **Status Report** (placeholder — "to complete in future"), **Manage 3PL** (pills US/UK/AU/EU) and **Manage FBA** (pills US/UK/AU/EU/CA). Structure only; panels are placeholders for the future build.
 

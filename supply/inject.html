@@ -2214,6 +2214,9 @@
   function hzFilterSave(key,obj){ try{ localStorage.setItem('hzf.'+key, JSON.stringify({at:Date.now(), v:obj})); }catch(e){} }
   function hzFilterLoad(key){ try{ var s=JSON.parse(localStorage.getItem('hzf.'+key)||'null'); if(s&&s.at&&(Date.now()-s.at)<3600000) return s.v; }catch(e){} return null; }
   var _poState=null;   // PURCHASE ORDERS filter state — persisted across edit-triggered reloads so the filter survives
+  // Size the PO grid's scroll box to the ACTUAL space below it (not a fixed 100vh-210px guess) so its bottom —
+  // incl. the load-more footer row — is always inside the viewport, even when the window is short / not full-screen.
+  function fitPoGrid(){ var tw=document.querySelector('#sup-grid .tw'); if(!tw)return; var top=tw.getBoundingClientRect().top; if(!top)return; tw.style.maxHeight=Math.max(240,window.innerHeight-top-16)+'px'; }
   function poInner(rows,c){
     if(!_poActStateLoaded){ loadPoActState(function(){ try{view();}catch(e){} }); }   // snooze map → re-render once loaded
     // Status pills — MULTI-SELECT (state.f is a set of selected groups). No pill selected = All. Same 4 options
@@ -2353,6 +2356,7 @@
       var sa=document.getElementById('po-showall'); if(sa)sa.onclick=function(){ _poShowAll=true; view(); };
       bindExpand(); bindEdits(); bindShipPick(); bindShipOpen(); bindCellPick(); bindPoNotes(); bindPoActBadge(); bindPoCopy(); bindPoScrollPin(); bindPoGrpToggle();
       bindDepPick(patchPoRow); bindPoStars(); bindSetShipping(); bindSetStm();
+      fitPoGrid(); if(!window._poGridFitBound){ window._poGridFitBound=1; window.addEventListener('resize',fitPoGrid); }   // keep the grid's bottom (load-more) inside the viewport on any window size
       _navCounts.plan=actItemsCount(); updateNavBadges();   // PLAN sub-menu action counter (POs with open actions)
       if(_pendingPO){ var want=_pendingPO; _pendingPO=null; setTimeout(function(){
         // if the target PO is past the render cap it isn't in the DOM yet — reveal all rows and retry so the
@@ -4146,6 +4150,22 @@
           return '<tr><td class="l">'+esc(x.doc_type||'')+'</td><td class="l"><a href="/api/supply/quality-doc/'+x.id+'" target="_blank" rel="noopener">'+esc(x.filename||'file')+'</a></td><td class="l mut tiny">'+esc(map)+'</td><td class="l mut tiny" style="white-space:nowrap">'+esc(x.created_at||'')+(x.uploader_kind==='supplier'?' · supplier':'')+'</td></tr>'; }).join(''):'<tr><td colspan="4" class="mut tiny">No quality-control documents for this PO / production / batch yet.</td></tr>';
         return '<div class="sect-h" style="margin-top:20px">Quality Control documents <span class="mut tiny">— test reports / GRS certificates for this supplier, shared across this PO&rsquo;s production or batch (upload &amp; manage in SUPPLY ▸ Quality Control)</span></div>'
           +'<div class="tw" style="max-width:820px"><table><thead><tr><th class="l">Type</th><th class="l">File</th><th class="l">Applies to</th><th class="l">Uploaded</th></tr></thead><tbody>'+qcRows+'</tbody></table></div>'; })(); }
+  // PO ▸ CHILD PO tab (masters only): the consolidated children, each linking out + a ✕ to detach back to a normal PO.
+  function childPoPanel(po,d){ var kids=(d&&d.children)||[];
+    if(!kids.length) return '<div class="count">No child POs assigned.</div>';
+    return '<div class="sect-h">Child POs <span class="mut tiny">— consolidated under this master; hidden from the grid, buy plan, cash flow &amp; ERP</span></div>'
+      +'<div class="tw"><table class="pay-tbl"><thead><tr><th class="l">Child PO</th><th></th><th class="l">Branch</th><th class="l">Client</th><th>Value</th><th class="l">Status</th><th></th></tr></thead><tbody>'
+      +kids.map(function(c){ return '<tr><td class="l"><button class="lnk-btn cpp-open" data-po="'+esc(c.po)+'" style="color:#1d4ed8;cursor:pointer">'+esc(c.po)+'</button></td>'
+        +'<td><span style="'+MP_BADGE+'">child</span></td><td class="l">'+esc(c.branch||'')+'</td><td class="l">'+esc(c.client||'')+'</td><td>'+mpMoney(c.value_est)+'</td>'
+        +'<td class="l"><span class="mut tiny">inherits master</span></td>'
+        +'<td class="l"><button class="cpp-remove" data-mp="'+esc(po)+'" data-po="'+esc(c.po)+'" title="remove from master — converts back to a normal PO" style="border:none;background:none;color:#dc2626;font-weight:800;cursor:pointer;font-size:13px">✕</button></td></tr>'; }).join('')
+      +'</tbody></table></div>'; }
+  if(!window._cppBound){ window._cppBound=1; document.addEventListener('click',function(e){
+    var o=e.target&&e.target.closest&&e.target.closest('.cpp-open'); if(o){ if(typeof openPODrawer==='function')openPODrawer(o.dataset.po,'dates'); else if(typeof gotoPO==='function')gotoPO(o.dataset.po,'dates'); return; }
+    var r=e.target&&e.target.closest&&e.target.closest('.cpp-remove'); if(!r)return;
+    if(!confirm('Remove '+r.dataset.po+' from '+r.dataset.mp+'? It converts back to a normal PO and returns to the grid; the master re-sums its lines.'))return;
+    fetch('/api/supply/master-po/'+encodeURIComponent(r.dataset.mp)+'/remove-child',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({po:r.dataset.po})}).then(function(x){return x.json();}).then(function(res){ if(res.error){alert(res.error);return;}
+      cache['purchase-orders']=null; try{ if(window.__poPanelRefresh)window.__poPanelRefresh(r.dataset.mp); }catch(_){} }); }); }
   function poDetailHTML(po,d,i){
     var p=payPanel(poBy[po],d);
     if(!p||typeof p==='string') return '<div class="count">No PO data.</div>';
@@ -4161,6 +4181,7 @@
     var masterH2=masterH+_sep+docsH;               // MASTER DATA + documents
     var _docsAwaiting=((d&&d.all_docs)||[]).filter(function(x){return (x.approval_status||'')==='submitted';}).length;   // supplier docs awaiting approval → flag the tab
     var tabs=[['pay','PAYMENTS',payH2,(p.ex.pay||0)+(p.ex.landed||0)],['dates','DATES',p.dates,p.ex.dates],['client','CLIENT/FBA',p.client,p.ex.client],['oplan','ORDER PLAN',oplanH,(p.ex.oplan||0)],['shipments','SHIPMENTS',shipH,(p.ex.ship||0)],['masterdata','MASTER DATA & DOCS',masterH2,(p.ex.master||0)+_docsAwaiting],['timeline','TIMELINE',timelineH,p.ex.timeline]];
+    if(poBy[po]&&poBy[po].is_master){ tabs.push(['childpo','CHILD PO',childPoPanel(po,d),(d&&d.children||[]).length]); }   // masters only — final tab after Timeline
     function badge(n){ return n>0?' <span class="ex-badge" title="'+n+' exception'+(n>1?'s':'')+' / action'+(n>1?'s':'')+'">'+n+'</span>':''; }
     var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab potab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'" data-po="'+esc(po)+'">'+t[1]+badge(t[3])+'</button>';}).join('')
       +((d&&d.__fast)?'<span class="mut tiny po-fastnote" style="margin-left:auto;align-self:center;white-space:nowrap;color:#94a3b8;padding:0 4px">⏳ loading full detail…</span>':'')+'</div>';
@@ -4793,7 +4814,8 @@
       +'<input id="mpc-search" class="flt" placeholder="🔍 filter PO / client / branch…" style="width:220px;background:#eff6ff;border-color:#93c5fd" disabled></div>'
       +'<div class="bar" style="gap:12px;align-items:center;flex-wrap:wrap;padding:8px 10px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:8px">'   // action bar at the TOP, above the table
       +'<span id="mpc-seltot" class="mut tiny">0 selected · Σ 0.00</span>'
-      +'<label class="mut tiny">Invoice total</label><input id="mpc-inv" class="flt" style="width:120px" placeholder="optional">'
+      +'<label class="mut tiny">PO reference</label><input id="mpc-po" class="flt" style="width:200px" placeholder="(auto)" title="Master PO number — defaults to the biggest child + -MASTER; edit to override">'
+      +'<label class="mut tiny">Invoice total</label><input id="mpc-inv" class="flt" style="width:110px" placeholder="optional">'
       +'<span style="margin-left:auto"></span><button class="save-btn light mpc-x">Cancel</button>'
       +'<button class="save-btn" id="mpc-go" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;margin-left:6px">Create master</button>'
       +'<span id="mpc-msg" style="color:#b91c1c;flex-basis:100%;text-align:right"></span></div>'
@@ -4806,8 +4828,9 @@
     var sup=bg.querySelector('#mpc-sup'), elig=bg.querySelector('#mpc-elig'), warn=bg.querySelector('#mpc-warn');
     fetch('/api/supply/master-po/new-data').then(function(r){return r.json();}).then(function(d){ (d&&d.suppliers||[]).forEach(function(s){ var o=document.createElement('option'); o.value=s.supplier_name; o.textContent=s.supplier_name; sup.appendChild(o); }); });
     var srch=bg.querySelector('#mpc-search');
-    function recalc(){ var chk=elig.querySelectorAll('input.mpc-ck:checked'), sum=0, brs={}; chk.forEach(function(c){ sum+=Number(c.dataset.val)||0; if(c.dataset.branch)brs[c.dataset.branch]=1; });
+    function recalc(){ var chk=elig.querySelectorAll('input.mpc-ck:checked'), sum=0, brs={}, big=null, bigv=-1; chk.forEach(function(c){ var v=Number(c.dataset.val)||0; sum+=v; if(c.dataset.branch)brs[c.dataset.branch]=1; if(v>bigv){bigv=v;big=c.value;} });
       bg.querySelector('#mpc-seltot').textContent=chk.length+' selected · Σ '+mpMoney(sum);
+      var poEl=bg.querySelector('#mpc-po'); if(poEl)poEl.placeholder=big?(big+'-MASTER'):'(auto)';   // show the default master ref as grey placeholder (editable to override)
       var nb=Object.keys(brs); if(nb.length>1){ warn.style.display='block'; warn.innerHTML='⚠ Selected POs span '+nb.length+' branches ('+nb.join(', ')+'). The master takes the biggest child’s branch, so the others’ stock moves to that market in the buy plan.'; } else warn.style.display='none'; }
     function applySearch(){ var q=(srch.value||'').trim().toLowerCase(), vis={};   // filter rows by PO/client/branch; hide groups with nothing visible (checked rows stay selected)
       elig.querySelectorAll('tr.mpc-row').forEach(function(tr){ var show=(!q||(tr.dataset.txt||'').indexOf(q)>=0); tr.style.display=show?'':'none'; if(show)vis[tr.dataset.g]=1; });
@@ -4834,7 +4857,7 @@
       var chk=[].map.call(elig.querySelectorAll('input.mpc-ck:checked'),function(c){return c.value;});
       if(!sup.value||chk.length<2){ msg.textContent='Pick a supplier and at least two POs.'; return; }
       var btn=this; btn.disabled=true;
-      fetch('/api/supply/master-po/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supplier_name:sup.value,child_pos:chk,invoice_total:bg.querySelector('#mpc-inv').value})})
+      fetch('/api/supply/master-po/create',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({supplier_name:sup.value,child_pos:chk,invoice_total:bg.querySelector('#mpc-inv').value,master_po:bg.querySelector('#mpc-po').value})})
         .then(function(r){return r.json();}).then(function(res){ btn.disabled=false; if(res.error){ msg.textContent=res.error; return; }
           close(); cache['purchase-orders']=null;                    // master now in grid; children gone → refresh
           if(typeof openPODrawer==='function')openPODrawer(res.master_po,'dates'); else showPoSub('plan');
