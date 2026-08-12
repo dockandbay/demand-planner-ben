@@ -1,3 +1,9 @@
+## v26.901.0 FBA Aged — monthly storage-cost estimate + editable rates
+- FBA Aged now estimates the **monthly storage cost** of aged inventory. Big headline sum at top (≈ $X/mo = base + aged surcharge), per-bracket cost chips (91-180 … 456+), and a per-SKU **Est. /mo** column.
+- Cost basis (per Ben): **per cubic foot/metre** — each SKU's per-unit volume = carton dims ÷ carton qty (from products) × the age-tier rate, greater-of per-unit floor at the top tiers, plus base monthly storage (Q4 peak auto-applied Oct–Dec). SKUs missing dims use the market average volume (counted + flagged with `~`).
+- **Rates** live in `app_settings.fba_aged_rates`, editable via a "Rates & assumptions" pop-down (per-tier + base + Q4 peak, Save). Seeded with **verified 2026 US** figures; UK/CA are flagged placeholders; EU/AU (cubic-metre markets) start unset and show a "rates not set — enter from Seller Central" banner until filled. New endpoint `POST /api/supply/inventory-fba/aged-rates`.
+- FBA Aged rows also resolve to our SKU via ASIN (from v26.900) so cost is computed against the matched product's dims.
+
 ## v26.900.0 FBA Aged — resolve to our SKU via ASIN + warn on no match
 - The FBA Aged table now shows an **Our SKU** column: each Amazon SKU is matched to our planner SKU by SKU first, else by **ASIN** (badged "via ASIN"). If neither the SKU nor its ASIN matches any product, the row is flagged **⚠ No SKU/ASIN match** (amber row) and counted in the header. Reuses the same match resolution as Manage FBA.
 

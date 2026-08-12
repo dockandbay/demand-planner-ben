@@ -6830,11 +6830,43 @@ function invFbaParse(text) {
     ['av', 'fc', 'a1', 'a2', 'a3', 'a4', 'a5'].forEach(k => { if (ci[k] >= 0) r[k] += csvNum(f[ci[k]]); }); }
   return { rep };
 }
+// FBA aged-inventory storage-cost rates. Amazon bills MONTHLY per volume (greater of per-cu-ft/cu-m or per-unit at the top
+// tiers), on top of base monthly storage, escalating by age. Our report buckets (a1 91-180 … a5 456+) mapped to Amazon's
+// 2026 US tiers (a2/a3 blended across sub-tiers). b[bucket]=[per-volume rate, per-unit floor]. US is real (verified 2026);
+// UK/EU/AU/CA are PLACEHOLDERS to correct from Seller Central (EU/AU use cu-m, seeded 0). Editable via CONFIG (app_settings).
+const FBA_AGED_RATE_DEFAULT = {
+  US: { cur: '$',  vol: 'cuft', base: 0.78, peak: 2.40, placeholder: false, b: { a1: [0, 0], a2: [1.00, 0], a3: [5.68, 0], a4: [6.90, 0.30], a5: [7.90, 0.35] } },
+  UK: { cur: '£',  vol: 'cuft', base: 0.75, peak: 2.10, placeholder: true,  b: { a1: [0, 0], a2: [1.00, 0], a3: [5.68, 0], a4: [6.90, 0.30], a5: [7.90, 0.35] } },
+  CA: { cur: 'C$', vol: 'cuft', base: 0.78, peak: 2.40, placeholder: true,  b: { a1: [0, 0], a2: [1.00, 0], a3: [5.68, 0], a4: [6.90, 0.30], a5: [7.90, 0.35] } },
+  EU: { cur: '€',  vol: 'cum',  base: 0,    peak: 0,    placeholder: true,  b: { a1: [0, 0], a2: [0, 0], a3: [0, 0], a4: [0, 0], a5: [0, 0] } },
+  AU: { cur: 'A$', vol: 'cum',  base: 0,    peak: 0,    placeholder: true,  b: { a1: [0, 0], a2: [0, 0], a3: [0, 0], a4: [0, 0], a5: [0, 0] } },
+};
+async function getFbaAgedRates() {
+  const out = JSON.parse(JSON.stringify(FBA_AGED_RATE_DEFAULT));
+  try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='fba_aged_rates'`)).rows[0];
+    if (r && r.value) { const saved = JSON.parse(r.value); for (const m in saved) out[m] = Object.assign(out[m] || {}, saved[m]); } } catch (e) {}
+  return out;
+}
+const FBA_DIMSET = { US: 'us', CA: 'us', UK: 'uk', EU: 'uk', AU: 'uk' };   // which carton dim-set feeds each market's volume
+function fbaUnitVolume(mkt, d, cq) {   // per-unit volume in the market's billing unit (cu ft or cu m); null if no dims
+  if (!d || !cq) return null;
+  const use = FBA_DIMSET[mkt] === 'us' ? [d.us_l, d.us_w, d.us_h] : [d.uk_l, d.uk_w, d.uk_h];
+  const L = Number(use[0]) || 0, W = Number(use[1]) || 0, H = Number(use[2]) || 0; if (L <= 0 || W <= 0 || H <= 0) return null;
+  const cartonUS = L * W * H / 1728;          // inches³ → cu ft
+  const cartonUKcuft = L * W * H / 28316.85;  // cm³ → cu ft
+  const cartonCUM = L * W * H / 1e6;          // cm³ → cu m
+  const wantCuM = FBA_AGED_RATE_DEFAULT[mkt] && FBA_AGED_RATE_DEFAULT[mkt].vol === 'cum';
+  const carton = FBA_DIMSET[mkt] === 'us' ? cartonUS : (wantCuM ? cartonCUM : cartonUKcuft);
+  return carton / cq;
+}
 async function invFbaCompare(mkt, rep) {
   const col = 'inventory_' + mkt.toLowerCase() + '_fba';   // mkt whitelisted → safe to interpolate
-  const erp = {}, asinSkus = {};
-  (await pool.query(`SELECT sku, upper(coalesce(asin,'')) asin, coalesce(${col},0)::numeric v FROM planner.products WHERE sku IS NOT NULL`)).rows
-    .forEach(x => { erp[x.sku] = Number(x.v) || 0; if (x.asin) (asinSkus[x.asin] = asinSkus[x.asin] || []).push(x.sku); });
+  const erp = {}, asinSkus = {}, dimsBySku = {};
+  (await pool.query(`SELECT sku, upper(coalesce(asin,'')) asin, coalesce(${col},0)::numeric v,
+      nullif(carton_qty,'') carton_qty, us_carton_length us_l, us_carton_width us_w, us_carton_height us_h,
+      uk_carton_length uk_l, uk_carton_width uk_w, uk_carton_height uk_h FROM planner.products WHERE sku IS NOT NULL`)).rows
+    .forEach(x => { erp[x.sku] = Number(x.v) || 0; if (x.asin) (asinSkus[x.asin] = asinSkus[x.asin] || []).push(x.sku);
+      dimsBySku[x.sku] = { cq: parseFloat(x.carton_qty) || 0, us_l: x.us_l, us_w: x.us_w, us_h: x.us_h, uk_l: x.uk_l, uk_w: x.uk_w, uk_h: x.uk_h }; });
   // Only match by ASIN when it's UNAMBIGUOUS (maps to exactly one product) — duplicate ASINs would mis-map.
   const asin2sku = {}, dupAsins = [];
   for (const a in asinSkus) { if (asinSkus[a].length === 1) asin2sku[a] = asinSkus[a][0]; else dupAsins.push(a); }
@@ -6856,9 +6888,49 @@ async function invFbaCompare(mkt, rep) {
       a1: r.a1 || 0, a2: r.a2 || 0, a3: r.a3 || 0, a4: r.a4 || 0, a5: r.a5 || 0, total: tot }; })
     .filter(x => x.total > 0)
     .sort((a, b) => (b.a5 - a.a5) || (b.a4 - a.a4) || (b.a3 - a.a3) || (b.a2 - a.a2) || (b.a1 - a.a1));   // oldest inventory first
-  return { rows, aged, report_skus: skus.length, matched: rows.filter(r => r.matched).length, unmatched: not_in_erp.length,
+  // Aged storage-cost estimate: per-unit volume (from carton dims) × rate, greater-of per-unit floor, + base monthly storage.
+  const rates = await getFbaAgedRates(), rate = rates[mkt] || FBA_AGED_RATE_DEFAULT[mkt] || null;
+  const aged_cost = await fbaAgedCost(mkt, aged, rate, dimsBySku);
+  return { rows, aged, aged_cost, report_skus: skus.length, matched: rows.filter(r => r.matched).length, unmatched: not_in_erp.length,
     not_in_erp, erp_missing, erp_not_in_report: erp_missing.length, dup_asins: dupAsins.length };
 }
+// Estimate monthly aged-storage cost. Uses each SKU's per-unit volume × the market rate (base + age-tier surcharge; greater
+// of per-volume or per-unit at the top tiers). SKUs missing dims use the market's average unit volume (counted + flagged).
+async function fbaAgedCost(mkt, aged, rate, dimsBySku) {
+  const BUCKETS = ['a1', 'a2', 'a3', 'a4', 'a5'];
+  if (!rate) return { unavailable: true };
+  const mo = new Date((await pool.query(`SELECT current_date d`)).rows[0].d).getMonth() + 1;   // 1..12
+  const baseRate = (mo >= 10 && mo <= 12) ? (rate.peak || rate.base || 0) : (rate.base || 0);   // Q4 peak storage
+  // per-unit volume per aged SKU (by its matched erp_sku, else the amazon sku) + market average for fallback
+  const volOf = r => fbaUnitVolume(mkt, dimsBySku[r.erp_sku] || dimsBySku[r.sku], (dimsBySku[r.erp_sku] || dimsBySku[r.sku] || {}).cq);
+  const known = aged.map(volOf).filter(v => v != null && v > 0);
+  const avgVol = known.length ? known.reduce((s, v) => s + v, 0) / known.length : 0;
+  const buckets = {}; BUCKETS.forEach(k => buckets[k] = { units: 0, base: 0, surcharge: 0, total: 0 });
+  let missingDims = 0, placeholder = !!rate.placeholder, anyRate = BUCKETS.some(k => (rate.b[k] || [0])[0] > 0 || (rate.b[k] || [0, 0])[1] > 0) || baseRate > 0;
+  aged.forEach(r => { let v = volOf(r), est = false; if (v == null || v <= 0) { v = avgVol; est = true; missingDims += (r.total > 0 ? 1 : 0); }
+    let rowCost = 0;
+    BUCKETS.forEach(k => { const units = r[k] || 0; if (!units) return;
+      const perVol = (rate.b[k] || [0, 0])[0], perUnitFloor = (rate.b[k] || [0, 0])[1];
+      const surchargePerUnit = Math.max(v * perVol, perUnitFloor), basePerUnit = v * baseRate;
+      buckets[k].units += units; buckets[k].base += units * basePerUnit; buckets[k].surcharge += units * surchargePerUnit;
+      buckets[k].total += units * (basePerUnit + surchargePerUnit); rowCost += units * (basePerUnit + surchargePerUnit); });
+    r.est_cost = Math.round(rowCost * 100) / 100; r.vol_est = est; });
+  BUCKETS.forEach(k => { buckets[k].base = Math.round(buckets[k].base * 100) / 100; buckets[k].surcharge = Math.round(buckets[k].surcharge * 100) / 100; buckets[k].total = Math.round(buckets[k].total * 100) / 100; });
+  const base_total = BUCKETS.reduce((s, k) => s + buckets[k].base, 0), surcharge_total = BUCKETS.reduce((s, k) => s + buckets[k].surcharge, 0);
+  return { currency: rate.cur, vol_unit: rate.vol, peak: (mo >= 10 && mo <= 12), placeholder, rates_set: anyRate,
+    buckets, base_total: Math.round(base_total * 100) / 100, surcharge_total: Math.round(surcharge_total * 100) / 100,
+    grand_total: Math.round((base_total + surcharge_total) * 100) / 100, missing_dims: missingDims, avg_vol: Math.round(avgVol * 1000) / 1000, rate };
+}
+// Save edited aged-storage rates (CONFIG). Body: { market, rate:{cur,vol,base,peak,b:{a1..a5:[v,u]}} } — merged over current.
+app.post('/api/supply/inventory-fba/aged-rates', async (req, res) => {
+  const b = req.body || {}, mkt = String(b.market || '').toUpperCase();
+  if (INVFBA_MKTS.indexOf(mkt) < 0 || !b.rate) return res.json({ error: 'market + rate required' });
+  try { const cur = await getFbaAgedRates(); cur[mkt] = Object.assign(cur[mkt] || {}, b.rate); cur[mkt].placeholder = false;
+    await pool.query(`INSERT INTO planner.app_settings(key,value) VALUES('fba_aged_rates',$1)
+      ON CONFLICT (key) DO UPDATE SET value=excluded.value`, [JSON.stringify(cur)]);
+    res.json({ ok: true, market: mkt, rates: cur[mkt] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/api/supply/inventory-fba/status', async (req, res) => {
   const mkt = String((req.query && req.query.market) || '').toUpperCase();
   if (INVFBA_MKTS.indexOf(mkt) < 0) return res.json({ market: mkt, error: 'Unknown market' });

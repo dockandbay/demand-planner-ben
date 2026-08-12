@@ -9243,19 +9243,55 @@ function invFbaUpload(mode,file){ if(!file)return; var mkt=INV_FBA, msg=document
   rd.readAsText(file); }
 function invFbaMeta(j){ if(!j.imported)return '<span class="mut" style="font-size:12px">Not uploaded yet.</span>';
   var a=inv3plAge(j.imported_at); return '<span class="mut" style="font-size:12px">'+tHesc(a.age)+' · last uploaded <b>'+tHesc(inv3plUser(j.imported_by))+'</b> on '+tHesc(a.stamp)+'</span>'; }
+// Save edited FBA aged-storage rates for a market, then reload the tab so costs recompute.
+function invFbaSaveRates(mkt,rt){ var msg=document.getElementById('fba-rates-msg');
+  function num(id){ var e=document.getElementById(id); return e?(parseFloat(e.value)||0):0; }
+  var b={}; ['a1','a2','a3','a4','a5'].forEach(function(k){ b[k]=[num('far-'+k+'-v'),num('far-'+k+'-u')]; });
+  var rate={ cur:(rt&&rt.cur)||'', vol:(rt&&rt.vol)||'cuft', base:num('far-base'), peak:num('far-peak'), b:b };
+  if(msg)msg.textContent='Saving…';
+  fetch('/api/supply/inventory-fba/aged-rates',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({market:mkt,rate:rate})})
+    .then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ if(msg)msg.textContent='Error: '+tHesc(j.error); return; } invFbaLoad('aged'); })
+    .catch(function(e){ if(msg)msg.textContent='Failed: '+tHesc((e&&e.message)||e); }); }
 function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'fbaaged-panel':'invfba-panel'); if(!panel)return;
   if(j&&j.error){ panel.innerHTML='<div style="color:#dc2626">'+tHesc(j.error)+(j.headers?'<div class="mut" style="font-size:11px;margin-top:4px">Detected headers: '+tHesc(j.headers.join(', '))+'</div>':'')+'</div>'; return; }
   if(mode==='aged'){
     if(!j.imported){ panel.innerHTML='<div class="mut" style="font-size:12px">No FBA report uploaded for '+tHesc(j.market||INV_FBA)+' yet — upload it under <b>Manage FBA</b>.</div>'; return; }
-    var aged=j.aged||[];
+    var mkt=j.market||INV_FBA, aged=j.aged||[], ac=j.aged_cost||{};
     var nUn=aged.filter(function(r){return !r.matched;}).length;
     var meta='<div style="margin:0 0 10px">'+invFbaMeta(j)+' <span class="mut" style="font-size:12px">· '+aged.length+' SKUs with inventory older than 90 days (oldest first)</span>'
       +(nUn?' <span style="font-size:12px;color:#b45309;font-weight:600">· ⚠ '+nUn+' with no SKU/ASIN match</span>':'')+'</div>';
     if(!aged.length){ panel.innerHTML=meta+'<div class="mut" style="font-size:12px">No inventory older than 90 days 🎉</div>'; return; }
+    var cur=ac.currency||'', BL={a1:'91-180',a2:'181-270',a3:'271-365',a4:'366-455',a5:'456+'};
+    var fmtC=function(n){ return cur+(Math.round(Number(n)||0)).toLocaleString(); };
+    var haveRates=!ac.unavailable && ac.rates_set;
+    // Headline sum + per-bracket cost chips.
+    var costHead='';
+    if(!haveRates){
+      costHead='<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 12px;margin-bottom:10px;font-size:13px;color:#92400e">Storage rates not set for <b>'+tHesc(mkt)+'</b> — enter your Amazon Seller Central rates to see the monthly cost estimate. <button id="fba-rates-btn" style="margin-left:6px;background:#f59e0b;color:#fff;border:0;border-radius:6px;padding:4px 12px;font-weight:600;cursor:pointer">Set rates</button></div>';
+    } else {
+      var warn=ac.placeholder?' <span style="font-size:11px;color:#b45309;font-weight:600">(placeholder rates — verify)</span>':'';
+      costHead='<div style="display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;margin:2px 0 6px">'
+        +'<div style="font-size:28px;font-weight:800;color:#0f172a">≈ '+fmtC(ac.grand_total)+'<span style="font-size:15px;font-weight:600;color:#64748b"> /mo</span></div>'
+        +'<div class="mut" style="font-size:12px;line-height:1.4">estimated aged-inventory storage'+warn+'<br>base '+fmtC(ac.base_total)+' + surcharge '+fmtC(ac.surcharge_total)+(ac.peak?' · <b>Q4 peak</b>':'')+'</div>'
+        +'<button id="fba-rates-btn" style="margin-left:auto;background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;border-radius:6px;padding:5px 12px;font-weight:600;cursor:pointer;font-size:12px">Rates &amp; assumptions ▾</button></div>';
+      costHead+='<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">'+['a5','a4','a3','a2','a1'].map(function(k){ var bb=(ac.buckets&&ac.buckets[k])||{}; return '<span style="font-size:11px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:2px 8px">'+BL[k]+': <b>'+fmtC(bb.total)+'</b> <span class="mut">('+(bb.units||0)+'u)</span></span>'; }).join('')+'</div>';
+    }
+    // Editable rates pop-down (hidden until toggled).
+    var rt=ac.rate||{}, volLbl=(rt.vol==='cum'?'m³':'ft³');
+    var ratesPanel='<div id="fba-rates-panel" style="display:none;border:1px solid #e5e7eb;border-radius:8px;padding:12px;margin-bottom:10px;background:#f8fafc">'
+      +'<div style="font-weight:700;font-size:13px;margin-bottom:6px">'+tHesc(mkt)+' storage rates ('+tHesc(cur)+' per '+volLbl+' / month)'+(rt.placeholder?' <span style="color:#b45309;font-weight:600">— placeholder, verify in Seller Central</span>':'')+'</div>'
+      +'<table style="font-size:12px;border-collapse:collapse"><thead><tr><th style="text-align:left;padding:3px 10px">Age (days)</th><th style="padding:3px 10px">Per '+volLbl+'</th><th style="padding:3px 10px">Per-unit floor</th></tr></thead><tbody>'
+      +['a1','a2','a3','a4','a5'].map(function(k){ var b=(rt.b&&rt.b[k])||[0,0]; return '<tr><td style="padding:2px 10px">'+BL[k]+(k==='a1'?' <span class="mut">(no surcharge)</span>':'')+'</td><td style="padding:2px 10px"><input id="far-'+k+'-v" type="number" step="0.01" value="'+(b[0]||0)+'" style="width:74px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px"></td><td style="padding:2px 10px"><input id="far-'+k+'-u" type="number" step="0.01" value="'+(b[1]||0)+'" style="width:74px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px"></td></tr>'; }).join('')
+      +'<tr><td style="padding:2px 10px">Base storage (Jan–Sep)</td><td style="padding:2px 10px"><input id="far-base" type="number" step="0.01" value="'+(rt.base||0)+'" style="width:74px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px"></td><td></td></tr>'
+      +'<tr><td style="padding:2px 10px">Base storage — Q4 peak (Oct–Dec)</td><td style="padding:2px 10px"><input id="far-peak" type="number" step="0.01" value="'+(rt.peak||0)+'" style="width:74px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px"></td><td></td></tr>'
+      +'</tbody></table>'
+      +'<div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button id="fba-rates-save" style="background:#2563eb;color:#fff;border:0;border-radius:6px;padding:6px 16px;font-weight:600;cursor:pointer;font-size:12px">Save rates</button><span id="fba-rates-msg" class="mut" style="font-size:11px"></span></div>'
+      +'<div class="mut" style="font-size:11px;margin-top:8px;line-height:1.5"><b>Assumptions:</b> per-unit volume = carton dimensions ÷ carton qty (from products); Amazon bills the greater of per-'+volLbl+' or per-unit; the aged surcharge starts at 181 days (91–180 pays base storage only)'+(ac.missing_dims?'; <b>'+ac.missing_dims+'</b> SKU(s) had no carton dims and used the market average volume ('+(ac.avg_vol||0)+' '+volLbl+')':'')+'. Figures are estimates — reconcile against your Amazon storage-fee invoice.</div>'
+      +'</div>';
     var H=['Amazon SKU','Our SKU','456+ days','366-455','271-365','181-270','91-180','Total aged'];
+    if(haveRates)H.push('Est. /mo');
     var head=H.map(function(h,i){return '<th style="text-align:'+(i<=1?'left':'right')+';padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+h+'</th>';}).join('');
     var cell=function(v){ return '<td style="padding:4px 10px;text-align:right">'+(v||0)+'</td>'; };
-    // Resolve each Amazon SKU to our planner SKU: matched by SKU, or by ASIN (badge); no match at all → warning.
     var ourCell=function(r){
       if(r.matched){ var badge=r.matched_via==='asin'?' <span title="Matched to our product by ASIN (the Amazon SKU differs)" style="font-size:9px;background:#dbeafe;color:#1e40af;padding:0 4px;border-radius:3px;font-weight:600">via ASIN</span>':'';
         return '<td style="padding:4px 10px;text-align:left">'+tHesc(r.erp_sku||'')+badge+'</td>'; }
@@ -9263,8 +9299,11 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
     };
     var trs=aged.slice(0,800).map(function(r){ return '<tr'+(!r.matched?' style="background:#fffbeb"':'')+'><td style="padding:4px 10px;text-align:left">'+tHesc(r.sku)+'</td>'+ourCell(r)
       +'<td style="padding:4px 10px;text-align:right;font-weight:700;color:'+(r.a5>0?'#b91c1c':'#334155')+'">'+(r.a5||0)+'</td>'+cell(r.a4)+cell(r.a3)+cell(r.a2)+cell(r.a1)
-      +'<td style="padding:4px 10px;text-align:right;font-weight:700">'+r.total+'</td></tr>'; }).join('');
-    panel.innerHTML=meta+'<div style="max-height:560px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'+head+'</tr></thead><tbody>'+trs+'</tbody></table></div>'+(aged.length>800?'<div class="mut" style="font-size:11px;margin-top:4px">Showing first 800 of '+aged.length+'</div>':'');
+      +'<td style="padding:4px 10px;text-align:right;font-weight:700">'+r.total+'</td>'
+      +(haveRates?'<td style="padding:4px 10px;text-align:right" title="'+(r.vol_est?'volume estimated (no carton dims)':'')+'">'+fmtC(r.est_cost)+(r.vol_est?' ~':'')+'</td>':'')+'</tr>'; }).join('');
+    panel.innerHTML=meta+costHead+ratesPanel+'<div style="max-height:560px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'+head+'</tr></thead><tbody>'+trs+'</tbody></table></div>'+(aged.length>800?'<div class="mut" style="font-size:11px;margin-top:4px">Showing first 800 of '+aged.length+'</div>':'');
+    var rb=document.getElementById('fba-rates-btn'); if(rb)rb.onclick=function(){ var p=document.getElementById('fba-rates-panel'); if(p)p.style.display=(p.style.display==='none'?'block':'none'); };
+    var sv=document.getElementById('fba-rates-save'); if(sv)sv.onclick=function(){ invFbaSaveRates(mkt,rt); };
     return;
   }
   // Manage FBA (compare): small upload box + meta + comparison table
