@@ -141,7 +141,12 @@ function replaceGlobal(html, name, jsonText) {
     else if (ch === open) depth++;
     else if (ch === close) { depth--; if (depth === 0) { i++; break; } }
   }
-  return html.slice(0, start) + jsonText + html.slice(i);
+  // Harden inline-script injection (H2): a baked DB string containing "</script>" (or a raw U+2028/U+2029 line
+  // separator) would otherwise break out of the inline <script> and inject HTML into every staff page load. The
+  // injected value is JSON, which only emits these characters INSIDE string values, so unicode-escaping them keeps
+  // the decoded value byte-identical while making break-out impossible.
+  const safe = String(jsonText).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/\u2028/g, '\\u2028').replace(/\u2029/g, '\\u2029');
+  return html.slice(0, start) + safe + html.slice(i);
 }
 
 // Latest change across the ETL-fed SOURCE data that gets BAKED into the page (and is otherwise frozen for an
@@ -10777,17 +10782,29 @@ app.post('/api/supply/charge/:id/accept', async (req, res) => {   // accept → 
 // AI proxy — the artefact's Claude calls hit api.anthropic.com keyless (only works inside
 // Claude). We rewrite those calls to /api/ai (see GET /), and this endpoint forwards them to
 // Anthropic with the API key attached server-side. Key never reaches the browser.
+// M4: sanitise what the browser can push through the AI proxy (which runs on the company key). The client only
+// ever sends model/system/messages/max_tokens, so we (a) drop mcp_servers entirely — it lets a caller make
+// Anthropic connect to arbitrary MCP endpoints (SSRF-by-proxy) and nothing legitimate uses it; (b) allowlist the
+// model, falling back to a current default rather than rejecting so the app never breaks; (c) cap max_tokens so a
+// crafted request can't burn the key. Everything else (system/messages/temperature/…) passes through unchanged.
+const AI_ALLOWED_MODELS = new Set(['claude-sonnet-4-20250514', 'claude-sonnet-4-6', 'claude-opus-4-8', 'claude-haiku-4-5-20251001', 'claude-fable-5']);
+const AI_DEFAULT_MODEL = 'claude-sonnet-4-6';
+const AI_MAX_TOKENS_CAP = 8192;
 app.post('/api/ai', async (req, res) => {
   if (!process.env.ANTHROPIC_API_KEY) return res.status(503).json({ error: { message: 'AI not configured (no API key set)' } });
   try {
+    const body = (req.body && typeof req.body === 'object' && !Array.isArray(req.body)) ? { ...req.body } : {};
+    delete body.mcp_servers;
+    body.model = AI_ALLOWED_MODELS.has(body.model) ? body.model : AI_DEFAULT_MODEL;
+    const reqTok = Number(body.max_tokens);
+    body.max_tokens = (Number.isFinite(reqTok) && reqTok > 0) ? Math.min(reqTok, AI_MAX_TOKENS_CAP) : 1024;
     const headers = {
       'content-type': 'application/json',
       'x-api-key': process.env.ANTHROPIC_API_KEY,
       'anthropic-version': '2023-06-01',
     };
-    if (req.body && req.body.mcp_servers) headers['anthropic-beta'] = 'mcp-client-2025-04-04';
     const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST', headers, body: JSON.stringify(req.body),
+      method: 'POST', headers, body: JSON.stringify(body),
     });
     const text = await r.text();
     res.status(r.status).set('content-type', 'application/json').send(text);
@@ -12659,6 +12676,7 @@ app.post('/api/portal/sample-attachment', portalAuth, async (req, res) => {   //
   const b = req.body || {};
   try { const s = await portalOwnsSample(req, b.id); if(!s) return res.status(403).json({ error: 'not your sample' }); if(!b.data_base64) return res.status(400).json({ error: 'data_base64 required' });
     const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: 'file exceeds 10MB' });   // M7: cap like the other upload routes
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, supplier_id, filename, mime, byte_size, data, uploaded_by, category)
       VALUES ($1,$2,$3,$4,$5,$6,$7,'sample') RETURNING id`, [s.ref, (req.portal.supplierIds||[])[0]||null, b.filename||'attachment', b.mime||'application/octet-stream', buf.length, buf, req.portal.email||'supplier']);
     res.json({ ok:true, id: r.rows[0].id }); }
@@ -12988,6 +13006,7 @@ app.post('/api/portal/upload', portalAuth, async (req, res) => {
   if (!await portalOwnsPO(req, b.po)) return portalDeny(res);
   try {
     const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: 'file exceeds 10MB' });   // M7: cap like the other upload routes
     const sid = req.portal.supplierIds[0] || null;
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po,supplier_id,filename,mime,byte_size,data,uploaded_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
       [b.po, sid, b.filename || 'invoice', b.mime || 'application/octet-stream', buf.length, buf, req.portal.email]);

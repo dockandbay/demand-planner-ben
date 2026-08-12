@@ -1,3 +1,9 @@
+## v26.919.0 Security hardening — low-risk quick wins from Diviyaj's 2026-08-12 review (H2/M4/M7)
+- **H2 (inline-script injection):** `replaceGlobal()` now unicode-escapes `<` `>` and U+2028/U+2029 in every injected global. A baked DB string containing `</script>` can no longer break out of the inline `<script>` and inject HTML into staff pages. Verified: no break-out, injected value round-trips byte-identical.
+- **M4 (`/api/ai` proxy):** sanitises the client body before forwarding on the company key — drops `mcp_servers` (SSRF-by-proxy; nothing legitimate uses it), allowlists `model` (falls back to a current default rather than rejecting, so the app never breaks), and caps `max_tokens` at 8192. `system`/`messages`/etc. pass through unchanged.
+- **M7 (upload size caps):** added the existing 10MB check to the two routes that lacked it (`/api/portal/upload`, `/api/portal/sample-attachment`); the other five upload routes already had it.
+- Server-side only; no schema/migration/env/deps. Authored on-branch for Diviyaj to reconcile into prod (do not double-implement). C1/H1/H3/M1-3/M5-6 remain Diviyaj's (auth redesign + infra/portal hardening).
+
 ## v26.918.0 Forecast Snapshots — Snapshots tab + compare (#3 stage 2)
 - New **DEMAND ▸ Snapshots** tab. **📸 Take snapshot** (names + locks the current SKU forecast, 18 months forward), a list of saved snapshots (name / taken / by / rows) with **Delete**, and a **Compare** panel: pick any two versions — a snapshot or **Live (current plan)** — and see **Δ units = B − A** per category × month, expand a category to per-SKU rows (hover a cell for A → B). Category level = sum of its SKU rows. Runs entirely off the mig-220 endpoints; Live side reads the in-memory forecast. Next: #4 (past-month locked-forecast-vs-actual on the plan).
 
