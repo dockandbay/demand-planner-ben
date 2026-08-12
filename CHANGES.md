@@ -1,3 +1,6 @@
+## v26.910.0 Target recs — "No ASP — set a price" flag for new-category targets with no price
+- When a new-category revenue target is set for a market that has **no derivable ASP** (e.g. Lanyard CA — no `ca_rt`), the recommendation now shows an amber **"⚠ No ASP — set a price"** row explaining units can't be computed, instead of silently producing nothing. Kept visible in the list but excluded from the open/Apply-all count.
+
 ## v26.909.0 Target recommendations — new categories: smooth GBP revenue targets to monthly units on a grouping curve
 - New categories with no sales history (e.g. **Lanyard**) now get target recommendations. When a subcategory has no last-year base but an absolute **GBP revenue target** (Edit Targets, month/quarter/half), the rec spreads it across those months on the **seasonality curve of the other categories in the same `grouping`** (Lanyard→Beach), then divides by the **category GBP ASP** to get monthly unit targets.
 - **Category ASP (GBP):** new server global `CAT_ASP_GBP` = avg of the category's SKU retail prices `<co>_rt` per market, converted to GBP via `fx_rates`. A market with no priced SKU → no unit target there (e.g. Lanyard CA, no `ca_rt`).

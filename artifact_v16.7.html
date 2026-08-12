@@ -9760,8 +9760,8 @@ function trecUndo(co,ch,fy,s){ var dk=trecDKey(co,ch,fy,s), ap=TREC_APPLIED[dk];
 function trecDKey(co,ch,fy,s){ return co+'|'+ch+'|'+fy+'|'+s; }
 function trecSaveDism(){ try{localStorage.setItem('trec_dismissed',JSON.stringify(TREC_DISM));}catch(e){} }
 function trecGapPct(rc){ return rc.fyCur>0?((rc.fyTgt/rc.fyCur-1)*100):(rc.fyTgt>0?null:0); }   // null = new category (no LY base)
-function trecMeaningful(rc){ var gp=trecGapPct(rc); return gp==null?(rc.fyTgt>0):(Math.abs(gp)>=2); }   // <2% gap → nothing to apply
-function trecOpen(rc,co,ch,fy){ return trecMeaningful(rc) && !TREC_DISM[trecDKey(co,ch,fy,rc.s)]; }
+function trecMeaningful(rc){ if(rc.noAsp)return true; var gp=trecGapPct(rc); return gp==null?(rc.fyTgt>0):(Math.abs(gp)>=2); }   // <2% gap → nothing to apply; no-ASP flags stay visible
+function trecOpen(rc,co,ch,fy){ return !rc.noAsp && trecMeaningful(rc) && !TREC_DISM[trecDKey(co,ch,fy,rc.s)]; }   // no-ASP recs aren't applyable → excluded from the open count / Apply-all
 function trecCount(co,ch,fy){ try{ return computeTargetRecs(fy,co,ch).filter(function(rc){return trecOpen(rc,co,ch,fy);}).length; }catch(e){ return 0; } }
 var _trecRecCache={};   // memoise per (fy|co|ch) within a render pass (pill counters compute across all combos); cleared each renderTargetRecs
 function computeTargetRecs(fy,coA,chA){ var co=coA||CUR,ch=chA||CF; var _ck=fy+'|'+co+'|'+ch; if(_trecRecCache[_ck])return _trecRecCache[_ck];
@@ -9772,14 +9772,14 @@ function computeTargetRecs(fy,coA,chA){ var co=coA||CUR,ch=chA||CF; var _ck=fy+'
   var _n=new Date(), THIS_MONTH=_n.getFullYear()+'_'+((_n.getMonth()+1)<10?'0':'')+(_n.getMonth()+1);
   var months=fyMonths(fy).filter(function(m){ return !isActualMonth(m) || m===THIS_MONTH; });   // include the current (incomplete) month
   var out=[];
-  subs.forEach(function(s){ var a=ga(co,ch,s)||{}, cr=null; var rows=[], fyCur=0, fyTgt=0;   // cr computed lazily — only for subs that actually have a target (keeps the pill-counter roll-up fast)
+  subs.forEach(function(s){ var a=ga(co,ch,s)||{}, cr=null; var rows=[], fyCur=0, fyTgt=0, noAsp=false;   // cr computed lazily — only for subs that actually have a target (keeps the pill-counter roll-up fast); noAsp = GBP target set but no derivable ASP
     months.forEach(function(m){ var fi=trecMonFyIdx(m); var g=trecResolve(fi.Y,s,fi.idx,co,ch);
       var gb=(g==null)?trecResolveGBP(fi.Y,s,fi.idx,co,ch):null;   // no growth% → maybe an absolute GBP target (new category)
       if(g==null&&!gb)return;
       var p=pa(m);
       if(!cr)cr=calc(s,co,ch);
       if(gb){   // ── NEW CATEGORY: no last-year base → spread the GBP target on the grouping seasonality curve, ÷ category GBP ASP → units
-        var aspG=(typeof CAT_ASP_GBP!=='undefined'&&CAT_ASP_GBP[s]&&CAT_ASP_GBP[s][co])||0; if(!(aspG>0))return;   // no derivable ASP for this market → can't compute units
+        var aspG=(typeof CAT_ASP_GBP!=='undefined'&&CAT_ASP_GBP[s]&&CAT_ASP_GBP[s][co])||0; if(!(aspG>0)){ noAsp=true; return; }   // no derivable ASP for this market → flag "set a price", can't compute units
         var cv=groupingCurve(s,co,ch), wSum=0; for(var ii=gb.lo;ii<=gb.hi;ii++)wSum+=(cv[trecFiCal(ii)]||0); if(!(wSum>0))return;
         var monthRev=gb.gbp*((cv[trecFiCal(fi.idx)]||0)/wSum); if(!(monthRev>0))return;
         var curUg=(cr.fu[m]||0), reqUg=Math.max(0,Math.round(monthRev/aspG));
@@ -9803,7 +9803,8 @@ function computeTargetRecs(fy,coA,chA){ var co=coA||CUR,ch=chA||CF; var _ck=fy+'
       var curU=(cr.fu[m]||0), curRev=curU*asp;
       rows.push({m:m, curU:curU, lyU:lyU, curRev:curRev, tgtRev:tgtRev, reqU:reqU, g:g, pctCur:(curU>0?(reqU/curU-1):null), pctLY:(lyU>0?(reqU/lyU-1):null)});
       fyCur+=curRev; fyTgt+=tgtRev; });
-    if(rows.length)out.push({s:s, rows:rows, fyCur:fyCur, fyTgt:fyTgt}); });
+    if(rows.length)out.push({s:s, rows:rows, fyCur:fyCur, fyTgt:fyTgt});
+    else if(noAsp)out.push({s:s, rows:[], fyCur:0, fyTgt:0, noAsp:true}); });   // GBP target set but no ASP → surface a "set a price" flag
   return out; }
 function applyTargetRecs(recs){ var co=CUR,ch=CF; var _chg=[]; var _fyForDk=(typeof TREC_FY!=='undefined'&&TREC_FY!=null)?TREC_FY:CUR_FY_START;
   recs.forEach(function(rc){ var _fu=(calc(rc.s,co,ch).fu)||{}; var _prior={}; rc.rows.forEach(function(r){ var ik=rc.s+'|'+co+'|'+ch+'|'+r.m; _prior[ik]=(IV[ik]!==undefined?IV[ik]:''); var u=Math.max(0,Math.round(r.reqU));
@@ -9835,6 +9836,8 @@ function renderTargetRecs(body){ if(TREC_FY==null)TREC_FY=CUR_FY_START;
       body.querySelectorAll('.trec-ch').forEach(function(b){ b.onclick=function(){ CF=b.dataset.v; renderTargetRecs(body); }; }); }
     if(!recs.length){ body.innerHTML='<div style="padding:4px 2px 4px">'+coPills+'</div><div style="padding:0 2px 8px">'+pills+'</div><div style="padding:12px 2px;color:#888;font-size:12px">No target gaps ≥2% for '+esc(co)+' · '+esc(ch)+' in '+fyLbl(TREC_FY)+'. Set/adjust targets in <b>Summary ▸ Add targets</b>.</div>'; wireFy(); return; }
     var rowsH=recs.map(function(rc){ var dk=trecDKey(co,ch,TREC_FY,rc.s), dism=!!TREC_DISM[dk], applied=!!TREC_APPLIED[dk];
+      if(rc.noAsp){ return '<tr style="border-top:1px solid #eef2f7;background:#fffbeb"><td style="padding:5px 10px;font-weight:600;text-align:left">'+esc(rc.s)+'</td>'
+        +'<td colspan="4" style="padding:5px 10px;text-align:left;color:#b45309;font-size:11px">⚠ <b>No ASP — set a price.</b> A revenue target is set for '+esc(co)+' but this category has no retail price for that market, so units can\'t be calculated. Add a price to the category\'s SKUs.</td></tr>'; }
       var gap=rc.fyTgt-rc.fyCur, gp=trecGapPct(rc);
       var gapTxt=(gap>=0?'+':'')+money(gap)+(gp==null?' (new)':(' ('+(gp>=0?'+':'')+Math.round(gp)+'%)'));
       var mHdr=rc.rows.map(function(r){var p=pa(r.m);return '<th style="padding:1px 6px;text-align:center;font-weight:600;color:#64748b;font-size:9px;text-transform:uppercase">'+MON[p.mo]+'</th>';}).join('');
