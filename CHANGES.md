@@ -1,3 +1,7 @@
+## v26.945.0 Plan Shipments — clickable rec POs + remember market on reopen
+- PO references inside a Recommendation are now clickable (open the PO drawer).
+- Reopening the drawer keeps the **last-selected market** and **reloads** it (instead of showing the country pill selected but an empty prompt).
+
 ## v26.944.0 Plan Shipments — confirmed lock, merge recs, dismiss
 - Each container has a **"Confirmed - do not change"** checkbox: when ticked the shipment goes **light orange**, its POs become non-draggable, and it is **excluded from recommendations**. Persisted (migration 223 planner.ship_plan_locks; POST /api/supply/ship-plan/lock).
 - **Recommendations now also consider POs already on (unconfirmed) shipments**, so it can suggest **merges** (groupings that already match an existing shipment are skipped, so no status-quo noise).
