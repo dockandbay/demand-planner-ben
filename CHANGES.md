@@ -1,3 +1,7 @@
+## v26.967.0 vercel.json maxDuration 60→300 + Diviyaj deploy package (2026-08-13)
+- Raised `vercel.json` api function `maxDuration` 60→**300** to match the prod outage fix (a fresh deploy from repo would otherwise revert it to 60 and re-open the cold-start retry loop).
+- Packaged everything since the live baseline (v26.861) for Diviyaj: **deploy notes/DEPLOY_2026-08-13.md** — supersedes the rolled-back 2026-08-12 package, folds in migrations 209/212/214/215/216/218/219 + new 220/221/222/223, KV + 300s + matview prerequisites, and the v26.911→967 feature list.
+
 ## v26.966.0 Buy-plan PLAN popup: TikTok demand row highlighted yellow
 - The **TikTok demand** line in the SKU buy-plan (PLAN) popup now gets the same light-yellow demand-source highlight as DTC / B2B / FBA demand. Still shown only when the SKU has TIK forecast (hidden otherwise), sitting under DTC demand.
 

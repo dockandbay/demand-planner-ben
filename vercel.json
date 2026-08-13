@@ -5,7 +5,7 @@
   "outputDirectory": ".",
   "installCommand": "npm install",
   "functions": {
-    "api/index.mjs": { "includeFiles": "artifact_v16.7.html", "maxDuration": 60, "memory": 1024 }
+    "api/index.mjs": { "includeFiles": "artifact_v16.7.html", "maxDuration": 300, "memory": 1024 }
   },
   "rewrites": [{ "source": "/(.*)", "destination": "/api/index" }]
 }
