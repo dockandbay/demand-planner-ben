@@ -451,10 +451,10 @@ td.sku-fc.fc-nostock .sku-fc-v{color:#991b1b}
 .fcr.actual.neg{color:#991b1b}
 /* #5 quarter/half total columns — subtle shade, lighter than the FY total, so they read as aggregate columns */
 td.ptot{background:#eef1f5}
-td.ptot-q,th.ptot-q{background:#898989}   /* quarter total columns (Ben) */
-td.ptot-h,th.ptot-h{background:#898989}   /* half-year total columns (Ben) */
-td.totu{background:#898989!important}     /* full-year total columns (Ben) */
-th.bgt26u,th.bgt27u,th.bgt28u,th.bgtH1u,th.bgtH2u{background:#898989!important}   /* FY total column headers */
+td.ptot-q,th.ptot-q{background:#c4c4c4}   /* quarter total columns (Ben) */
+td.ptot-h,th.ptot-h{background:#c4c4c4}   /* half-year total columns (Ben) */
+td.totu{background:#c4c4c4!important}     /* full-year total columns (Ben) */
+th.bgt26u,th.bgt27u,th.bgt28u,th.bgtH1u,th.bgtH2u{background:#c4c4c4!important}   /* FY total column headers */
 /* Cmd/Ctrl-click (or drag) forecast cells → running sum badge (quick reference on category + SKU rows) */
 #t .plansel{background:#dbeafe !important;box-shadow:inset 0 0 0 1px #60a5fa;border-radius:2px;cursor:cell}
 #plan-sumbadge{position:fixed;right:16px;bottom:16px;z-index:100050;display:none;align-items:center;gap:10px;background:#0f172a;color:#fff;font-size:13px;font-weight:700;padding:8px 12px;border-radius:9px;box-shadow:0 8px 24px rgba(0,0,0,.32);font-family:inherit}
@@ -7970,9 +7970,9 @@ function buildBody(){
       var yoy=prev>0?Math.round((u-prev)/prev*100):null;
       var td=document.createElement('td');td.className=fyTotCls(Y)+' sep2';
       td.innerHTML='<div style="padding:2px 4px;text-align:right">'
-        +'<div style="font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;color:#fff">'+fn(Math.round(u))+'</div>'
-        +'<div style="font-size:9px;color:#cbd5e1;font-variant-numeric:tabular-nums">'+frFY(rev,Y)+'</div>'
-        +'<div style="font-size:9px;font-variant-numeric:tabular-nums;color:#fff" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?gPct(yoy):'--')+'</div></div>';
+        +'<div style="font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;color:#0f172a">'+fn(Math.round(u))+'</div>'
+        +'<div style="font-size:9px;color:#334155;font-variant-numeric:tabular-nums">'+frFY(rev,Y)+'</div>'
+        +'<div style="font-size:9px;font-variant-numeric:tabular-nums;color:#0f172a" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?gPct(yoy):'--')+'</div></div>';
       gtr.appendChild(td);
     }
     var gtPeriodCell=function(months,ptype){   // #5 quarter/half total for the market grand-total row (light bg → dark text)

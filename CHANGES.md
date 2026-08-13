@@ -1,3 +1,6 @@
+## v26.936.0 Demand plan — quarter/half/FY column colour → #C4C4C4
+- Quarter / half / full-year total columns recoloured to **#C4C4C4** (from #898989). Market grand-total FY cell text switched to dark so the number stays readable on the lighter fill.
+
 ## v26.935.0 🚢 Plan Shipments drawer (shipment allocation)
 - New **Plan Shipments** button on PURCHASE ORDERS ▸ PLAN opens a drag-and-drop drawer to allocate **READY-TO-SHIP** POs (sea only, FOB/air excluded, ship-to country pill) onto containers. Each container shows a **pallets / 20** fill bar (effective pallets = override or estimate). Drag a PO onto a container (or "+ new container") to **set its shipment_ref live** (timeline-logged); drag to Unassigned to remove.
 - **⚡ Recommend consolidation** greedily fills 20-pallet (40ft) containers per country and applies with one click (first PO = master). New endpoint `GET /api/supply/ship-plan`.
