@@ -3848,7 +3848,7 @@
       var body={}; body[inp.dataset.field]=inp.value; inp.classList.add('saved');
       fetch(inp.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error); if(poBy[po])poBy[po][inp.dataset.field]=inp.value;
-          if(inp.dataset.field==='balance_due_date_overide'||inp.dataset.field==='pallets_override'){ invalidateDerived(); poRefetchPanel(po,i); } })   // recompute balance due / freight / cash flow
+          if(inp.dataset.field==='balance_due_date_overide'||inp.dataset.field==='pallets_override'){ invalidateDerived(); poRefetchPanel(po,i); if(inp.dataset.field==='pallets_override'&&typeof _spOnPalletsSaved==='function'){ try{_spOnPalletsSaved(po);}catch(e){} } } })   // recompute balance due / freight / cash flow; also refresh the open Plan-Shipments plan
         .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; });
     // #A SHIPMENTS tab — load the cartons/pallets estimate + current override
     (function(){ var scope=document.getElementById('podet-'+i); if(!scope)return; var est=scope.querySelector('#po-pallets-est'); var ov=scope.querySelector('.txtin[data-field="pallets_override"]'); if(!est&&!ov)return;
@@ -4857,13 +4857,18 @@
       +'</div>';
     body.querySelectorAll('.sp-poref').forEach(function(bb){ bb.onclick=function(e){ e.stopPropagation(); if(typeof openPODrawer==='function')openPODrawer(bb.dataset.po,'oplan'); }; });
     body.querySelectorAll('.sp-shipref').forEach(function(bb){ bb.onclick=function(e){ e.stopPropagation(); if(typeof gotoShipment==='function')gotoShipment(bb.dataset.ref); else if(typeof openShipDrawer==='function')openShipDrawer(bb.dataset.ref); }; });
-    body.querySelectorAll('.sp-apply-bin').forEach(function(bb){ bb.onclick=function(){ var arr=(bb.dataset.pos||'').split(',').filter(Boolean); if(arr.length<2)return; var master=arr[0]; Promise.all(arr.map(function(po){ return fetch('/api/supply/po/'+encodeURIComponent(po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({shipment_ref:master})}).then(function(r){return r.json();}); })).then(function(){ _spLoad(); }).catch(function(){ _spLoad(); }); }; });
+    body.querySelectorAll('.sp-apply-bin').forEach(function(bb){ bb.onclick=function(){ var arr=(bb.dataset.pos||'').split(',').filter(Boolean); if(arr.length<2)return; var master=arr[0];
+      arr.forEach(function(po){ var p=_spData.find(function(x){return x.po===po;}); if(p){ p.shipment_ref=master; p.container=master; } }); _spDraw();   // optimistic
+      Promise.all(arr.map(function(po){ return fetch('/api/supply/po/'+encodeURIComponent(po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({shipment_ref:master})}).then(function(r){return r.json();}); })).then(function(rs){ if(rs.some(function(j){return j&&j.error;}))_spLoad(); }).catch(function(){ _spLoad(); }); }; });
     body.querySelectorAll('.sp-po').forEach(function(card){ card.addEventListener('dragstart',function(e){ e.dataTransfer.setData('text/plain',card.dataset.po); e.dataTransfer.effectAllowed='move'; card.style.opacity='.5'; }); card.addEventListener('dragend',function(){ card.style.opacity=''; }); });
     body.querySelectorAll('.sp-drop').forEach(function(dz){ dz.addEventListener('dragover',function(e){ e.preventDefault(); dz.style.borderColor='#0ea5e9'; }); dz.addEventListener('dragleave',function(){ dz.style.borderColor=''; });
       dz.addEventListener('drop',function(e){ e.preventDefault(); dz.style.borderColor=''; var po=e.dataTransfer.getData('text/plain'); if(!po)return; var ref=dz.dataset.ref; if(ref==='__new__')ref=po; _spAssign(po, ref); }); });
   }
-  function _spAssign(po,ref){ var p=_spData.find(function(x){return x.po===po;}); if(p){ p.shipment_ref=ref; p.container=ref||null; } _spDraw();
-    fetch('/api/supply/po/'+encodeURIComponent(po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({shipment_ref:ref})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ alert('Assign failed: '+j.error); _spLoad(); } else { _spLoad(); } }).catch(function(){ _spLoad(); }); }
+  function _spAssign(po,ref){ var p=_spData.find(function(x){return x.po===po;}); if(p){ p.shipment_ref=ref; p.container=ref||null; } _spDraw();   // optimistic — no reload on success (smooth, no flash); reconcile only on error
+    fetch('/api/supply/po/'+encodeURIComponent(po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({shipment_ref:ref})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ alert('Assign failed: '+j.error); _spLoad(); } }).catch(function(){ _spLoad(); }); }
+  // silent refresh of one PO's effective pallets in the open plan (called after the PO drawer saves a pallet override)
+  function _spOnPalletsSaved(po){ if(!document.getElementById('shipplan-ov')||!_spData)return; var p=_spData.find(function(x){return x.po===po;}); if(!p)return;
+    fetch('/api/supply/po/'+encodeURIComponent(po)+'/pallets').then(function(r){return r.json();}).then(function(d){ if(!d||d.error)return; p.pallets=Math.round((d.pallets_override!=null?d.pallets_override:d.est_pallets||0)*10)/10; _spDraw(); }).catch(function(){}); }
   function _spRecommend(){ if(!_spData){ alert('Choose a country first.'); return; } var vis=_spData.filter(function(p){ return p.ready && !p.container; });
     var byC={}; vis.forEach(function(p){ (byC[p.country]=byC[p.country]||[]).push(p); });
     var bins=[]; Object.keys(byC).forEach(function(cty){ byC[cty].slice().sort(function(a,b){return b.pallets-a.pallets;}).forEach(function(p){ var placed=false; for(var i=0;i<bins.length;i++){ if(bins[i].cty===cty && bins[i].pal+p.pallets<=SP_CAP){ bins[i].pos.push(p); bins[i].pal+=p.pallets; placed=true; break; } } if(!placed)bins.push({cty:cty,pos:[p],pal:p.pallets}); }); });

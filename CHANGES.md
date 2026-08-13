@@ -1,3 +1,7 @@
+## v26.941.0 Plan Shipments — smoother assign/apply + live pallet sync
+- Drag-assign, drag-unassign and Recommendation **Apply** are now **optimistic** (update the view instantly, persist in the background) — no more delay/flash re-fetching the whole plan. It only re-loads if the save actually fails.
+- Editing a POs **pallet override** in the PO drawer now **silently updates** its pallets in the open Plan Shipments plan.
+
 ## v26.940.0 Plan Shipments — shipment drawer now opens above the popup
 - Fixed the popup z-index (6105, just below the drawer base) so the shipment drawer opens ABOVE it, matching the PO drawer. (The drawer counter can reset while the popup is open, which was landing the shipment drawer at the same z and behind.)
 
