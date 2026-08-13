@@ -1,3 +1,9 @@
+## v26.986.0 Open-actions scoreboard — engine (mig 226) + Thursday cron
+- New weekly open-actions metrics engine: `computeOpenActions()` returns 10 counts (supplier_pos, supplier_dtc, po_actions, order_plan, shipments, manufacturing, samples, payments_overdue, dtc_mismatch, and total_our = sum of our-actions). Server-side SQL tracks the live badges; supplier-waiting kept separate from the headline.
+- Migration **226** `action_metrics_snapshot` (one row per Thursday week_ending, upsert). Endpoints: GET `/api/supply/action-metrics/data` (live counts + 52-week history), POST `/api/supply/action-metrics/snapshot`, GET `/api/cron/action-metrics`.
+- **vercel.json cron** `59 23 * * 4` (Thursday 23:59 GMT) hits the cron endpoint to write the weekly row. (Diviyaj: confirm the Vercel cron; needs Pro plan for weekly.)
+- First-pass definitions flagged for tuning vs live badges: **po_actions** (PO housekeeping) and **payments_overdue** (balance-paid lives in the ledger). The trend VIEW is next.
+
 ## v26.985.0 Klaviyo BIS — always 4 market boxes side by side
 - The market boxes now use a fixed 4-column grid (repeat(4,minmax(0,1fr))) so UK/US/EU/AU always sit side by side; SKUs truncate to fit.
 

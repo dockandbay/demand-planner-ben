@@ -7738,6 +7738,78 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // Cin7 import audit log — every import run (range, kind, orders, status, error, calls).
+// ── Open-actions scoreboard (SUPPLY ▸ Reports ▸ Metrics) — weekly snapshot of open actions (mig 226) ──────────
+// Each count is a server-side definition that tracks the live badges. total_our = sum of the OUR-actions counts only;
+// supplier-waiting (supplier_pos / supplier_dtc) is kept separate. Snapshotted every Thursday 23:59 GMT by the cron.
+async function computeOpenActions() {
+  const q = s => pool.query(s).then(r => r.rows);
+  const one = async s => Number(((await q(s))[0] || {}).n || 0);
+  const DTC = `(lower(coalesce(p.branch,'')) LIKE '%direct to client%' OR lower(coalesce(p.branch,'')) LIKE '%jlew%' OR lower(coalesce(p.branch,'')) LIKE '%next%' OR coalesce(p.sales_order_ref,'')<>'')`;
+  const nd = `coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%cancel%'`;
+  const hasLines = `EXISTS (SELECT 1 FROM planner.purchase_order_lines l WHERE l.po=p.po AND coalesce(l.qty,0)>0)`;
+  const supplier_pos = await one(`SELECT count(*) n FROM planner.purchase_orders p LEFT JOIN planner.prod_numbers pn ON pn.prod_no=p.prod_no
+    WHERE p.supplier_confirmed_at IS NULL AND coalesce(pn.require_supplier_confirmation,false) AND ${nd}
+      AND coalesce(p.status,'') NOT ILIKE 'ship%' AND coalesce(p.status,'') NOT ILIKE '%deliver%' AND p.master_po IS NULL AND ${hasLines} AND NOT ${DTC}`);
+  const supplier_dtc = await one(`SELECT count(*) n FROM planner.purchase_orders p LEFT JOIN planner.prod_numbers pn ON pn.prod_no=p.prod_no
+    WHERE ${DTC} AND p.dtc_accepted_at IS NULL AND coalesce(pn.require_supplier_confirmation,false) AND ${nd} AND p.master_po IS NULL AND ${hasLines}`);
+  // PO action items (first pass — PO housekeeping): missing supplier, or a past landing date while not yet shipping. TUNE vs the live badge.
+  const po_actions = await one(`SELECT count(DISTINCT p.po) n FROM planner.purchase_orders p WHERE ${nd} AND p.master_po IS NULL AND ${hasLines}
+      AND (coalesce(p.supplier_name,'')='' OR (p.landing_date_overide < current_date AND coalesce(p.status,'') NOT ILIKE 'ship%' AND coalesce(p.status,'') NOT ILIKE '%deliver%'))`);
+  const order_plan = await one(`SELECT count(DISTINCT l.po) n FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po
+    LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku WHERE ${nd} AND coalesce(el.qty,0) IS DISTINCT FROM coalesce(l.qty,0)`);
+  const shipments = await one(`SELECT count(*) n FROM planner.purchase_orders p WHERE p.shipment_ref IS NULL AND ${nd} AND p.master_po IS NULL
+      AND (p.status ILIKE '%production%' OR p.status ILIKE '%ready to ship%') AND coalesce(p.end_production_overide, current_date) <= current_date + interval '21 days' AND ${hasLines}`);
+  let manufacturing = 0; try { manufacturing = (await manufacturingActions()).length; } catch (e) {}
+  const samples = await one(`SELECT count(*) n FROM planner.sample_requests s WHERE upper(coalesce(s.status,'')) NOT IN ('SHIPPED','CANCELLED','COMPLETE')
+      AND ((s.production_status='shipped' OR coalesce(s.tracking_code,'')<>'') OR (s.completion_date_required IS NOT NULL AND current_date > s.completion_date_required)
+        OR EXISTS (SELECT 1 FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending')
+        OR EXISTS (SELECT 1 FROM planner.sample_notes n WHERE n.sample_id=s.id AND n.author_kind='supplier' AND n.read_at IS NULL))`);
+  // payments overdue — FIRST PASS (completion payment date past + not marked assigned; deposits past due + unpaid). Balance-paid
+  // lives in the ledger so this may under-count balances — confirm the exact definition against the live Payments Due badge.
+  const payments_overdue = await one(`SELECT ((SELECT count(*) FROM planner.purchase_orders p WHERE ${nd} AND p.master_po IS NULL AND p.pay_completion_date < current_date AND p.pay_completion_assigned IS NULL)
+      + (SELECT count(*) FROM planner.deposits d WHERE coalesce(d.is_deposit,false) AND lower(coalesce(d.status,''))<>'closed' AND d.date_paid IS NULL AND d.date_due < current_date)) n`);
+  const dtc_issues = await one(`WITH oso AS (SELECT s.cin7_id, s.reference FROM planner.dtc_sales_orders s LEFT JOIN planner.dtc_mismatch_review r ON r.so_cin7_id=s.cin7_id WHERE NOT s.is_void AND s.dispatched_date IS NULL AND NOT coalesce(r.accepted,false)),
+    sol AS (SELECT l.so_cin7_id, l.code, sum(l.qty) q FROM planner.dtc_sales_order_lines l WHERE l.so_cin7_id IN (SELECT cin7_id FROM oso) GROUP BY 1,2),
+    mp AS (SELECT o.cin7_id, po.po FROM oso o JOIN planner.purchase_orders po ON po.sales_order_ref=o.reference),
+    pol AS (SELECT m.cin7_id, l.sku, sum(l.qty) q FROM mp m JOIN planner.purchase_order_lines l ON l.po=m.po GROUP BY 1,2)
+    SELECT count(*) n FROM oso o WHERE NOT EXISTS (SELECT 1 FROM mp WHERE mp.cin7_id=o.cin7_id)
+      OR EXISTS (SELECT 1 FROM (SELECT coalesce(s2.q,0) sq, coalesce(p2.q,0) pq FROM (SELECT code, q FROM sol WHERE so_cin7_id=o.cin7_id) s2 FULL OUTER JOIN (SELECT sku, q FROM pol WHERE cin7_id=o.cin7_id) p2 ON p2.sku=s2.code) x WHERE x.sq <> x.pq)`);
+  const dtc_unmapped = await one(`SELECT count(*) n FROM planner.purchase_orders p LEFT JOIN planner.dtc_po_review r ON r.po=p.po
+    WHERE (lower(coalesce(p.branch,'')) LIKE '%direct to client%' OR lower(coalesce(p.branch,'')) LIKE '%jlew%' OR lower(coalesce(p.branch,'')) LIKE '%next%')
+      AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%cancel%' AND coalesce(p.status,'') NOT ILIKE '%void%' AND coalesce(p.sales_order_ref,'')='' AND NOT coalesce(r.accepted,false)`);
+  const dtc_mismatch = dtc_issues + dtc_unmapped;
+  const total_our = po_actions + order_plan + shipments + manufacturing + samples + payments_overdue + dtc_mismatch;
+  return { supplier_pos, supplier_dtc, po_actions, order_plan, shipments, manufacturing, samples, payments_overdue, dtc_mismatch, total_our };
+}
+function _thisThursdayGMT() {   // most recent Thursday in GMT (today if it's Thursday)
+  const now = new Date(); const back = (now.getUTCDay() - 4 + 7) % 7;
+  return new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - back)).toISOString().slice(0, 10);
+}
+async function snapshotOpenActions() {
+  const m = await computeOpenActions(); const wk = _thisThursdayGMT();
+  await pool.query(`INSERT INTO planner.action_metrics_snapshot (week_ending, captured_at, supplier_pos, supplier_dtc, po_actions, order_plan, shipments, manufacturing, samples, payments_overdue, dtc_mismatch, total_our)
+      VALUES ($1, now(), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      ON CONFLICT (week_ending) DO UPDATE SET captured_at=now(), supplier_pos=excluded.supplier_pos, supplier_dtc=excluded.supplier_dtc, po_actions=excluded.po_actions,
+        order_plan=excluded.order_plan, shipments=excluded.shipments, manufacturing=excluded.manufacturing, samples=excluded.samples,
+        payments_overdue=excluded.payments_overdue, dtc_mismatch=excluded.dtc_mismatch, total_our=excluded.total_our`,
+    [wk, m.supplier_pos, m.supplier_dtc, m.po_actions, m.order_plan, m.shipments, m.manufacturing, m.samples, m.payments_overdue, m.dtc_mismatch, m.total_our]);
+  return { week_ending: wk, ...m };
+}
+app.get('/api/supply/action-metrics/data', async (_req, res) => {   // 2-segment path so the generic /api/supply/:section dispatcher doesn't swallow it
+  try {
+    const history = (await pool.query(`SELECT to_char(week_ending,'YYYY-MM-DD') week_ending, to_char(captured_at,'YYYY-MM-DD HH24:MI') captured_at,
+        supplier_pos, supplier_dtc, po_actions, order_plan, shipments, manufacturing, samples, payments_overdue, dtc_mismatch, total_our
+      FROM planner.action_metrics_snapshot ORDER BY week_ending DESC LIMIT 52`)).rows;
+    res.json({ ok: true, current: await computeOpenActions(), history });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/action-metrics/snapshot', async (_req, res) => {
+  try { res.json({ ok: true, snapshot: await snapshotOpenActions() }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Vercel cron target — vercel.json schedules `59 23 * * 4` (Thursday 23:59 GMT) to hit this; computes + upserts this week's row.
+app.get('/api/cron/action-metrics', async (_req, res) => {
+  try { res.json({ ok: true, snapshot: await snapshotOpenActions() }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/api/supply/tpl/cin7-log', async (req, res) => {
   try {
     const lim = Math.min(500, Math.max(1, parseInt(req.query.limit) || 200));
