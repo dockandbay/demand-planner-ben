@@ -769,12 +769,8 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
           <span class="pill-lbl" style="width:80px" title="Filter SKUs by release window (season)">Release</span>
           <select id="plan-rw-sel" onchange="setPlanRw(this.value)" style="font-size:11px;padding:2px 6px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer"><option value="ALL">All</option></select>
         </div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-          <span class="pill-lbl" style="width:80px">Sort</span>
-          <select id="plan-sort-sel" onchange="setPlanSort(this.value)" title="Row order" style="font-size:11px;padding:2px 6px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer"><option value="alpha">A–Z</option><option value="vol">Vol (3mo)</option><option value="tier">Tier+Vol</option></select>
-        </div>
         <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:14px">
-          <button id="plan-fromrep-btn" class="pill catpill" title="Only SKUs that inherit a predecessor's history (products.replacement_sku)" onclick="setPlanFromRep(!PLAN_FROM_REP)">&#8617; From replacement</button>
+          <label style="font-size:12px;color:#334155;cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Only SKUs that inherit a predecessor's history (products.replacement_sku)"><input type="checkbox" id="plan-fromrep-chk" onchange="setPlanFromRep(this.checked)"> From replacement</label>
         </div>
         <div style="text-align:right"><button onclick="_planPopClose()" style="font-size:12px;font-weight:600;padding:5px 18px;border:1px solid #2563eb;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer">Done</button></div>
       </div>
@@ -806,6 +802,10 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
             <label style="font-size:12px;color:#334155;cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Show quarter (3-month) sum-total columns inside each expanded financial year"><input type="checkbox" id="disp-qtr" onchange="setShowQtr(this.checked)"> Quarter totals</label>
             <label style="font-size:12px;color:#334155;cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Show half-year (6-month) sum-total columns inside each expanded financial year"><input type="checkbox" id="disp-half" onchange="setShowHalf(this.checked)"> Half-year totals</label>
           </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <span class="pill-lbl" style="width:80px">Sort</span>
+          <select id="plan-sort-sel" onchange="setPlanSort(this.value)" title="Row order" style="font-size:11px;padding:2px 6px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer"><option value="alpha">A–Z</option><option value="vol">Vol (3mo)</option><option value="tier">Tier+Vol</option></select>
         </div>
         <div style="text-align:right"><button onclick="_displayPopClose()" style="font-size:12px;font-weight:600;padding:5px 18px;border:1px solid #2563eb;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer">Done</button></div>
       </div>
@@ -4059,7 +4059,7 @@ function saveLayout(){ try{ localStorage.setItem('db_layout_expanded_v1',JSON.st
 var PLAN_SKU_QRY=''; // planner SKU filter text (matches sku code or product name)
 var PLAN_RW='ALL';   // planner Release Window filter (dd next to Category); 'ALL' = no filter
 var PLAN_FROM_REP=false;   // "From replacement SKU" filter — show only SKUs that inherit a predecessor (products.replacement_sku)
-function setPlanFromRep(v){ PLAN_FROM_REP=!!v; var b=document.getElementById('plan-fromrep-btn'); if(b)b.classList.toggle('active',PLAN_FROM_REP); render(); }
+function setPlanFromRep(v){ PLAN_FROM_REP=!!v; var b=document.getElementById('plan-fromrep-btn'); if(b)b.classList.toggle('active',PLAN_FROM_REP); var c=document.getElementById('plan-fromrep-chk'); if(c)c.checked=PLAN_FROM_REP; render(); }
 var SHOW_CAT_TOT=(function(){try{return localStorage.getItem('hzShowCatTot')==='1';}catch(e){return false;}})(); // category-total rows hidden by default; toggle in the plan toolbar
 function setShowCatTot(on){SHOW_CAT_TOT=!!on;try{localStorage.setItem('hzShowCatTot',SHOW_CAT_TOT?'1':'0');}catch(e){}var b=document.getElementById('cat-tot-toggle');if(b){b.classList.toggle('active',SHOW_CAT_TOT);b.setAttribute('aria-pressed',SHOW_CAT_TOT?'true':'false');}renderMain();}
 // #5 — quarter (3-mo) / half-year (6-mo) sum-total columns, toggled in More Filters. Off by default. Shown ONLY inside
@@ -6419,7 +6419,7 @@ function filteredSkus(s,co,ch,all){
     // Channel availability (always required)
     var av=p.av||{};
     var ctry=co.toLowerCase();
-    var chKey=ch.toLowerCase()==='dtc'?'d':ch.toLowerCase()==='fba'?'f':ch.toLowerCase()==='zal'?'z':'b';
+    var chKey=ch.toLowerCase()==='dtc'?'d':ch.toLowerCase()==='fba'?'f':ch.toLowerCase()==='zal'?'z':ch.toLowerCase()==='tik'?'t':'b';
     var ctryAvail=av[ctry]||'';
     if(!ctryAvail.includes(chKey))return false;
     // SKU text filter — when active it OVERRIDES all pills (RW / tier / core-seasonal / status): match by code or name only.
@@ -7136,7 +7136,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
   var skus=filteredSkus(s,co,ch); // rows respect the SKU filters; subtotal/gap (eff) covers ALL subcat SKUs
   // Share basis = the WHOLE subcat (activity + channel available), NOT the filtered rows — otherwise a search or
   // pill that narrows to one SKU gives it share 1.0, so its cell shows the entire subcat forecast (was a bug).
-  var _chKey=ch.toLowerCase()==='dtc'?'d':ch.toLowerCase()==='fba'?'f':ch.toLowerCase()==='zal'?'z':'b';
+  var _chKey=ch.toLowerCase()==='dtc'?'d':ch.toLowerCase()==='fba'?'f':ch.toLowerCase()==='zal'?'z':ch.toLowerCase()==='tik'?'t':'b';
   var shareSkus=Object.keys(SKUM).filter(function(sk){var pp=SKUM[sk];if(!pp||pp.s!==s)return false;
     if(typeof skuHasAnyActivity==='function'&&!skuHasAnyActivity(sk,co))return false;
     return ((pp.av||{})[ctry]||'').includes(_chKey);});
@@ -8312,7 +8312,7 @@ function _planPopBind(){ if(window._planPopBound)return; window._planPopBound=tr
   document.addEventListener('click',function(ev){ [['plan-filters-btn','plan-filters-pop'],['plan-tools-btn','plan-tools-menu']].forEach(function(p){
     var b=document.getElementById(p[0]), pop=document.getElementById(p[1]);
     if(pop&&pop.style.display==='block'&&!(b&&b.contains(ev.target))&&!pop.contains(ev.target))pop.style.display='none'; }); },true); }
-function togglePlanFilters(e){ if(e)e.stopPropagation(); var p=document.getElementById('plan-filters-pop'); if(!p)return; var open=p.style.display==='block'; _planPopClose(); if(!open)p.style.display='block'; _planPopBind(); }
+function togglePlanFilters(e){ if(e)e.stopPropagation(); var p=document.getElementById('plan-filters-pop'); if(!p)return; var open=p.style.display==='block'; _planPopClose(); if(!open)p.style.display='block'; var _fr=document.getElementById('plan-fromrep-chk'); if(_fr)_fr.checked=(typeof PLAN_FROM_REP!=='undefined'&&PLAN_FROM_REP); _planPopBind(); }
 function _displayPopClose(){ var x=document.getElementById('plan-display-pop'); if(x)x.style.display='none'; }
 function _displayPopBind(){ if(window._displayPopBound)return; window._displayPopBound=true; document.addEventListener('click',function(ev){ var b=document.getElementById('plan-display-btn'), pop=document.getElementById('plan-display-pop'); if(pop&&pop.style.display==='block'&&!(b&&b.contains(ev.target))&&!pop.contains(ev.target))pop.style.display='none'; },true); }
 function toggleDisplaySettings(e){ if(e)e.stopPropagation(); var p=document.getElementById('plan-display-pop'); if(!p)return; var open=p.style.display==='block'; _planPopClose(); if(!open)p.style.display='block'; var sc=document.getElementById('filt-show-changes'); if(sc)sc.checked=(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES); var hp=document.getElementById('filt-hide-past-changes'); if(hp)hp.checked=(typeof HIDE_PAST_CHANGES==='undefined'||HIDE_PAST_CHANGES); var fa=document.getElementById('filt-fc-act'); if(fa)fa.checked=(typeof SHOW_FC_ACT==='undefined'||SHOW_FC_ACT); var _cc=document.getElementById('disp-cattot'); if(_cc)_cc.checked=(typeof SHOW_CAT_TOT!=='undefined'&&SHOW_CAT_TOT); var _vi=document.getElementById('disp-varimg'); if(_vi)_vi.checked=(typeof SHOW_VARIANT_IMG!=='undefined'&&SHOW_VARIANT_IMG); var _qq=document.getElementById('disp-qtr'); if(_qq)_qq.checked=(typeof SHOW_Q!=='undefined'&&SHOW_Q); var _hh=document.getElementById('disp-half'); if(_hh)_hh.checked=(typeof SHOW_H!=='undefined'&&SHOW_H); _displayPopBind(); }

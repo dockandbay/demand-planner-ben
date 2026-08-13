@@ -1,3 +1,8 @@
+## v26.958.0 DEMAND plan: TIK filtering fix + Sort/From-replacement moved
+- **Fix (TIK regression):** two lowercase channel-key ternaries (in filteredSkus + insertInlineSkuRows share basis) mapped the TIK channel to the B2B key, so the TIK column showed the wrong SKU set / SKUs failed to render. Now map TIK→"t" so TIK renders its own availability-scoped SKUs.
+- Moved **Sort** from More Filters into **Display Settings**.
+- Changed **From replacement** from a pill button to a **checkbox** (stays in More Filters).
+
 ## v26.957.0 Manage FBA: US AWD (Amazon Warehousing & Distribution) upload + reconciliation
 - Added a **US AWD** panel under BUY & MOVE ▸ Inventory ▸ **Manage FBA** (US market only): upload Amazon's **AWD Inventory Ledger** report (CSV/TSV). The ledger is in cartons; on-hand **units = Ending Warehouse Balance (cartons) × Package Quantity**, aggregated per MSKU.
 - Matches each MSKU to our SKU and reconciles against the current `inventory_us_awd` (per-SKU **Δ**), with totals (units on hand, cartons, matched units, current AWD) and an unmatched count.
