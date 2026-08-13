@@ -1,3 +1,6 @@
+## v26.960.0 FIX: Variant image 404 blanked the SKU label column
+- When **Variant image** was on, the SKU label cell content (code, dates, tier badge, Plan button) is relocated into a wrapper next to the thumbnail. The image **onerror** handler hid that whole wrapper — so any SKU whose image failed to load (404) showed a **blank column 1** (row + forecast/actual data intact). Now onerror hides only the broken <img>, leaving the label/dates visible. (Turning Variant image off always worked — that was the tell.)
+
 ## v26.959.0 US AWD moved to its own inventory sub-tab
 - Moved the **US AWD** panel out of Manage FBA and into its own **US AWD** sub-tab under BUY & MOVE ▸ Inventory (`#/buy-move/inventory/awd`). Same upload + reconciliation vs `inventory_us_awd`; US-only, no market pill.
 
