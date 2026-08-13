@@ -1,3 +1,7 @@
+## v26.943.0 Plan Shipments — Apply on single-PO bins + Refresh button
+- A lone PO in the recommendations now has an **"Own container"** apply button (creates a shipment for it), not just multi-PO consolidations. (e.g. PO-57UKLX2 at 23.6 pal, flagged over-filled, can now be committed / then split.)
+- Added a **↻ Refresh** button to the Plan Shipments header.
+
 ## v26.942.0 Plan Shipments — wording + recommendation fixes
 - Past-production POs now read "ready (end date past)" instead of "ready N days ago".
 - Recommendation cards now show the correct container capacity: a 20ft is X/10 (not X/20). Bins over 20 pallets are red with "over filled - consider split" instead of "good fill".
