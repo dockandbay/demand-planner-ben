@@ -4323,11 +4323,12 @@
     var defS=OP_ST_KEYS.indexOf('production')>=0?['production']:OP_ST_KEYS.slice(0,1);   // default to Production (same as the PO grid)
     // default PROD# = the latest production number that still has POs IN PRODUCTION (a small, relevant, fast first load)
     var _prodDef='All'; (function(){ var bestN=-1; lines.forEach(function(l){ if(stGroup(l.status)!=='production'||!l.prod_no)return; var n=parseInt(String(l.prod_no).replace(/[^0-9]/g,''),10); if(!isNaN(n)&&n>bestN){bestN=n;_prodDef=String(l.prod_no);} }); })();
-    var st={statuses:new Set(defS),countries:new Set(),prod:_prodDef,cat:'All',batch:'All',supplier:'All',q:'',poq:'',scope:'ordered',rw:'All',partials:false,erpdiff:false,suprisk:false,disc:false,notmkt:false,focus:false};   // countries: empty = all (like PURCHASE ORDERS)
+    var st={statuses:new Set(defS),countries:new Set(),prod:_prodDef,cat:'All',batch:'All',supplier:'All',q:'',poq:'',scope:'ordered',rw:'All',disp:'units',partials:false,erpdiff:false,suprisk:false,disc:false,notmkt:false,focus:false};   // countries: empty = all (like PURCHASE ORDERS). disp: units|cartons (SUG-0022 view-only)
+    function _cartonsOf(q,cq){ cq=Number(cq)||0; return (cq>0&&q)?(Math.round(q/cq*10)/10):null; }   // SUG-0022 units → cartons (view only)
     if(!_pendingOP){ var _opsv=hzFilterLoad('oplan'); if(_opsv){ try{   // restore persisted filters (sliding 1h TTL) unless deep-linking a PO/exception; search boxes are not restored
       if(Array.isArray(_opsv.statuses)) st.statuses=new Set(_opsv.statuses.filter(function(k){return OP_ST_KEYS.indexOf(k)>=0;}));
       if(Array.isArray(_opsv.countries)) st.countries=new Set(_opsv.countries);
-      ['prod','cat','batch','supplier','scope','rw'].forEach(function(k){ if(_opsv[k]!=null)st[k]=_opsv[k]; });
+      ['prod','cat','batch','supplier','scope','rw','disp'].forEach(function(k){ if(_opsv[k]!=null)st[k]=_opsv[k]; });
       ['partials','erpdiff','suprisk','disc','notmkt','focus'].forEach(function(k){ if(typeof _opsv[k]==='boolean')st[k]=_opsv[k]; });
     }catch(e){} } }
     // action sets (exclude complete POs): unapproved partial cartons, and lines whose planned qty differs from the ERP
@@ -4364,6 +4365,7 @@
       +'<div class="bar"><span class="pill-lbl">Country</span><span id="op-country">'+pillsHTML(countries,st.countries,true)+'</span>'
         +'<span style="margin-left:12px"></span>'+sel('op-prod','PROD#',prods,st.prod)+sel('op-batch','Batch',batches,st.batch)+sel('op-supplier','Supplier',suppliers,st.supplier)+'</div>'
       +'<div class="bar"><span class="pill-lbl">SKUs</span><span class="pill active" data-sc="ordered">Ordered</span><span class="pill" data-sc="allskus">All SKUs</span><span class="pill" data-sc="all">All in category</span>'
+        +'<span class="pill-lbl" style="margin-left:14px" title="View quantities as units or whole cartons (qty ÷ carton qty). Cartons view is read-only — switch to Units to edit.">View</span><span class="pill'+(st.disp!=='cartons'?' active':'')+'" data-disp="units">Units</span><span class="pill'+(st.disp==='cartons'?' active':'')+'" data-disp="cartons">Cartons</span>'
         +sel('op-cat','Category',cats,st.cat)+sel('op-rw','Release',rws,st.rw)
         +'<input class="flt" id="op-q" placeholder="filter SKU / colour…" style="width:140px;background:#f0fdf4;border-color:#86efac">'
         +'<button class="save-btn" id="op-dl" style="margin-left:auto;background:#2563eb;color:#fff;border-color:#2563eb" title="Download XLSX — SKUs (rows) × purchase orders (columns) × quantities, for the current view">⤓ Download report</button></div>'
@@ -4442,7 +4444,7 @@
       return m; }
     var _opShowAllPos=false, _opLimit=OP_POCAP;
     function viewReset(){ _opShowAllPos=false; _opLimit=OP_POCAP; view(); }   // any filter/search change re-caps the PO columns to the first page
-    function view(){ try{hzFilterSave('oplan',{statuses:Array.from(st.statuses),countries:Array.from(st.countries),prod:st.prod,cat:st.cat,batch:st.batch,supplier:st.supplier,scope:st.scope,rw:st.rw,partials:st.partials,erpdiff:st.erpdiff,suprisk:st.suprisk,disc:st.disc,notmkt:st.notmkt,focus:st.focus});}catch(e){}   // persist filters (not the search boxes)
+    function view(){ try{hzFilterSave('oplan',{statuses:Array.from(st.statuses),countries:Array.from(st.countries),prod:st.prod,cat:st.cat,batch:st.batch,supplier:st.supplier,scope:st.scope,rw:st.rw,disp:st.disp,partials:st.partials,erpdiff:st.erpdiff,suprisk:st.suprisk,disc:st.disc,notmkt:st.notmkt,focus:st.focus});}catch(e){}   // persist filters (not the search boxes)
       var cl=curLines(); var poCl=curLines(true); var _poExc=buildPoExcMap(); document.getElementById('op-grid').innerHTML=pivot(poCl,rowsFor(cl),skuCat,plcMap,skuAttr,skuRW,_opShowAllPos,_opLimit,_poExc); bindQty(); bindUploads(); bindApprove(); bindConfirm(); bindPoLinks(); bindOpTips(); updateActionCounts();
       document.querySelectorAll('#op-grid .op-plan').forEach(function(b){ b.onclick=function(){ var sku=b.dataset.sku;
         if(!window.open_){ alert('Buy plan unavailable — reload the page.'); return; }
@@ -4533,6 +4535,7 @@
     function togglebar(id,opts,setv){ document.getElementById(id).onclick=function(e){var t=e.target; if(t.dataset.all)setv=new Set(opts); else if(t.dataset.v!=null){if(setv.has(t.dataset.v))setv.delete(t.dataset.v);else setv.add(t.dataset.v);} else return; if(id==='op-status'){st.statuses=setv; document.getElementById(id).innerHTML=opStatusPills(setv);} else {st.countries=setv; document.getElementById(id).innerHTML=pillsHTML(opts,setv,true);} viewReset(); }; }
     togglebar('op-status',OP_ST_KEYS,st.statuses); togglebar('op-country',countries,st.countries);
     c.querySelectorAll('[data-sc]').forEach(function(p){p.onclick=function(){st.scope=p.dataset.sc; c.querySelectorAll('[data-sc]').forEach(function(x){x.classList.toggle('active',x===p);}); viewReset();};});
+    c.querySelectorAll('[data-disp]').forEach(function(p){p.onclick=function(){st.disp=p.dataset.disp; c.querySelectorAll('[data-disp]').forEach(function(x){x.classList.toggle('active',x===p);}); viewKeep();};});   // SUG-0022 units/cartons view toggle (display only — cartons view is read-only)
     // Action-item pills are SINGLE-select: clicking one clears the others (click again to turn it off).
     var OP_EXCL={partials:'op-partials',suprisk:'op-suprisk',disc:'op-disc',notmkt:'op-notmkt'};
     // Defer the (heavy) grid rebuild to the next frame so the clicked pill highlights + the grid dims IMMEDIATELY,
@@ -4653,6 +4656,7 @@
     +'<span class="tool-badge bg-green" title="'+title+' approved">'+kind+'✓</span>'
     +'<button class="'+undoCls+'" data-ap="'+esc(psku)+'" data-ps="'+esc(psku)+'" data-field="'+field+'" title="undo '+title+' approval" style="position:absolute;inset:0;align-items:center;justify-content:center;background:rgba(185,28,28,.94);color:#fff;border:none;border-radius:3px;font-size:9px;font-weight:700;line-height:1;cursor:pointer">✕</button></span>'; }
   function pivot(rows, skuList, skuCat, plcMap, skuAttr, skuRW, showAllPos, opLimit, poExc){ plcMap=plcMap||{}; skuAttr=skuAttr||{}; skuRW=skuRW||{}; poExc=poExc||{}; var cn=document.getElementById('op-count');
+    var cartons=(st.disp==='cartons'); function _fC(x){ return Math.round((Number(x)||0)*10)/10; }   // SUG-0022 cartons view (read-only)
     if(!skuList.length){ if(cn)cn.textContent='0 SKUs'; return '<div class="count">No SKUs for this filter (pick a Category for \"All in category\").</div>'; }
     var pos=[],psn={},cell={},meta={};
     rows.forEach(function(l){ if(!psn[l.po]){psn[l.po]=1;pos.push(l.po);meta[l.po]={s:l.supplier_name,co:l.country,ps:l.prod_start,pe:l.prod_end,sd:l.ship_date,dl:l.delivery,st:l.status,cl:l.client,so:l.sales_order_ref};}
@@ -4664,7 +4668,7 @@
     if(cn){ var _more=Math.min(OP_POCAP,poTotal-pos.length);
       cn.innerHTML=(poCapped?pos.length+' of ':'')+poTotal+' POs'
         +(poCapped?' &nbsp;<button class="save-btn op-loadmore" style="padding:1px 9px;font-size:11px;background:#2563eb;color:#fff;border-color:#2563eb">Load '+_more+' more &darr;</button> <button class="save-btn light op-showall-pos" style="padding:1px 9px;font-size:11px">Show all '+poTotal+'</button>':(poTotal>25?' · narrow with filters':'')); }
-    var pstat={}; pos.forEach(function(po){var u=0,pl=0; skuList.forEach(function(sku){var cc=cell[po+'|'+sku]; if(cc){u+=cc.q; if(cc.pq>0)pl+=cc.q/cc.pq;}}); pstat[po]={u:u,pl:pl};});
+    var pstat={}; pos.forEach(function(po){var u=0,pl=0,ct=0; skuList.forEach(function(sku){var cc=cell[po+'|'+sku]; if(cc){u+=cc.q; if(cc.pq>0)pl+=cc.q/cc.pq; var _cq=Number((skuAttr[sku]||{}).cq)||0; if(_cq>0)ct+=cc.q/_cq;}}); pstat[po]={u:u,pl:pl,ct:ct};});
     var POW='112px';
     // frozen label columns after SKU (cumulative left offsets): SKU · Release · Carton · Supplier · Discontinue
     var FW={sku:200,cq:34,rw:40,sup:86,dis:70}, FL={sku:0,cq:200,rw:234,sup:274,dis:360}, FROZEN=430;   // Carton is column 2 (sticky), right after SKU; Release follows
@@ -4730,15 +4734,18 @@
         // COUNTRY RISK: SKU not released in the PO's market → approve (c ⚠) / approved (c✓ + undo)
         if(cc && cc.nm && q>0){ if(cc.cra) badge+=apprBadge('c','Country risk','country',po+'|'+sku,'opundo');
           else { if(!tdc)tdc=' class="pcell"'; badge+=' <button class="oprisk-badge opapprove-ctry" data-ap="'+esc(po+'|'+sku)+'" data-tip="Country risk: '+esc((meta[po].co||'').toUpperCase())+' has no availability for this SKU (launch date ignored) — you\'re producing it for a market where it isn\'t released. Click to review &amp; approve.">c</button>'; } }
-        tds+='<td'+tdc+' style="min-width:'+POW+';width:'+POW+';text-align:center'+(discPast&&!tdc?';background:'+rowBg:'')+'"><input class="qtycell'+(q?'':' z')+'" data-po="'+esc(po)+'" data-sku="'+esc(sku)+'" data-erp="'+eq+'" value="'+(q||'')+'">'+badge+'</td>';});
+        var _cellInner=cartons
+          ? (function(){ var cv=_cartonsOf(q,a.cq); return '<span class="tiny" title="'+(q?units(q)+' units':'')+'">'+(cv!=null?cv:(q?('<span class="mut">'+units(q)+'u</span>'):''))+'</span>'; })()
+          : '<input class="qtycell'+(q?'':' z')+'" data-po="'+esc(po)+'" data-sku="'+esc(sku)+'" data-erp="'+eq+'" value="'+(q||'')+'">';
+        tds+='<td'+tdc+' style="min-width:'+POW+';width:'+POW+';text-align:center'+(discPast&&!tdc?';background:'+rowBg:'')+'">'+_cellInner+badge+'</td>';});
       h+='<tr><td class="l" style="'+fzc('sku',rowBg,2)+'"><button class="op-plan" data-sku="'+esc(sku)+'" title="show the buy plan for this SKU (pick country in the popup)" style="font-size:8px;font-weight:700;padding:0 4px;margin-right:5px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer;vertical-align:middle">PLAN</button>'+esc(sku)+'</td>'
         +'<td style="'+fzc('cq',rowBg,2)+';text-align:right"><span class="tiny">'+(a.cq?esc(a.cq):'')+'</span></td>'
         +'<td class="l" style="'+fzc('rw',rowBg,2)+'"><span class="tiny">'+esc(skuRW[sku]||'')+'</span></td>'
         +'<td class="l" style="'+fzc('sup',rowBg,2)+';overflow:hidden;text-overflow:ellipsis" title="allowed suppliers (supplier_multiple_all): '+esc(a.sm||'—')+(a.sup?' · main: '+esc(a.sup):'')+'"><span class="tiny">'+esc(a.sm||a.sup||'')+'</span></td>'
         +'<td class="l" style="'+fzc('dis',discPast?'#fecaca':rowBg,2)+(discPast?';color:#991b1b;font-weight:700':'')+'" title="'+(discPast?'discontinue date is in the past':'')+'"><span class="tiny'+(discPast?'':' mut')+'">'+(a.dis?fd(a.dis):'')+'</span></td>'
-        +tds+'<td style="text-align:center'+(discPast?';background:'+rowBg:'')+'"><b>'+units(tot)+'</b></td></tr>'; });
-    var gu=0,gv=0,gpl=0,ptd=''; pos.forEach(function(po){var u=pstat[po].u,pl=pstat[po].pl,v=0; skuList.forEach(function(sku){var cc=cell[po+'|'+sku]; if(cc)v+=cc.q*cc.c;}); gu+=u;gv+=v;gpl+=pl; ptd+='<td style="text-align:center"><b>'+units(u)+'</b><br><span class="tiny mut">$'+money(v)+' · '+plt(pl)+'</span></td>';});
-    h+='<tr class="batchrow"><td class="l" colspan="5" style="position:sticky;left:0;background:#eef2ff;z-index:2;min-width:'+FROZEN+'px;white-space:nowrap">PO TOTALS · units / value / pallets'+(poCapped?' (first '+OP_POCAP+' POs)':'')+'</td>'+ptd+'<td style="text-align:center"><b>'+units(gu)+'</b><br><span class="tiny mut">$'+money(gv)+' · '+plt(gpl)+'</span></td></tr>';
+        +tds+'<td style="text-align:center'+(discPast?';background:'+rowBg:'')+'"><b>'+(cartons?(function(){var cv=_cartonsOf(tot,a.cq);return cv!=null?cv:units(tot)+'u';})():units(tot))+'</b></td></tr>'; });
+    var gu=0,gv=0,gpl=0,gct=0,ptd=''; pos.forEach(function(po){var u=pstat[po].u,pl=pstat[po].pl,ct=pstat[po].ct,v=0; skuList.forEach(function(sku){var cc=cell[po+'|'+sku]; if(cc)v+=cc.q*cc.c;}); gu+=u;gv+=v;gpl+=pl;gct+=ct; ptd+='<td style="text-align:center"><b>'+(cartons?_fC(ct):units(u))+'</b><br><span class="tiny mut">$'+money(v)+' · '+plt(pl)+'</span></td>';});
+    h+='<tr class="batchrow"><td class="l" colspan="5" style="position:sticky;left:0;background:#eef2ff;z-index:2;min-width:'+FROZEN+'px;white-space:nowrap">PO TOTALS · '+(cartons?'cartons':'units')+' / value / pallets'+(poCapped?' (first '+OP_POCAP+' POs)':'')+'</td>'+ptd+'<td style="text-align:center"><b>'+(cartons?_fC(gct):units(gu))+'</b><br><span class="tiny mut">$'+money(gv)+' · '+plt(gpl)+'</span></td></tr>';
     return h+'</tbody></table></div>'
       ; }   // (Load more / Show all live in the top toolbar count line, always visible — not down here off-screen)
 

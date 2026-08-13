@@ -1,3 +1,6 @@
+## v26.928.0 SUG-0022 Order Plan — Units / Cartons view toggle
+- New **View: Units | Cartons** toggle in the Order Plan filter bar (persisted with the other filters). **Cartons** shows every quantity as **whole cartons** (`qty ÷ carton_qty`, 1 dp) — cells, SKU-row totals, and PO totals — and is **read-only** (switch back to Units to edit; the underlying order is always units). SKUs with no carton qty fall back to showing `Nu` (units) so nothing is hidden. View-only per Ben (no carton-editing/rounding semantics).
+
 ## v26.927.0 SUG-0026 Klaviyo BIS upload — drag & drop
 - Each market box on DEMAND ▸ Inputs ▸ Klaviyo BIS is now a **drop zone**: drag a .xlsx/.csv straight onto it (highlights on hover) in addition to the file-select button. Same upload path. Also marked SUG-0020 (DTC Mismatch) + SUG-0024 (Inventory Status Report) complete on live (both already shipped).
 
