@@ -1,3 +1,6 @@
+## v26.929.0 Pallet override — supplier-portal PO-card input (feature A complete)
+- The supplier can now enter the **pallet count** on the portal PO card (under Production status / Completion date): a **Pallets** field showing the current value + `est. N pallets · M cartons`. Saves to the **same** `purchase_orders.pallets_override` used by the admin SHIPMENTS tab (so it feeds freight/cash flow) via `POST /api/portal/po-pallets`, portalOwnsPO-guarded, **timeline-logged**. Completes feature A (admin + calc + portal).
+
 ## v26.928.0 SUG-0022 Order Plan — Units / Cartons view toggle
 - New **View: Units | Cartons** toggle in the Order Plan filter bar (persisted with the other filters). **Cartons** shows every quantity as **whole cartons** (`qty ÷ carton_qty`, 1 dp) — cells, SKU-row totals, and PO totals — and is **read-only** (switch back to Units to edit; the underlying order is always units). SKUs with no carton qty fall back to showing `Nu` (units) so nothing is hidden. View-only per Ben (no carton-editing/rounding semantics).
 

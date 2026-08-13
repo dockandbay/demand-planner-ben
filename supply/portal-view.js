@@ -850,6 +850,7 @@
         +'<b>Production status</b> &nbsp; '+prodStatusSel(p.po, p.production_status||'')
         +'<div style="margin-top:8px"><b>Completion date</b> &nbsp; <input type="date" class="pp-cd-grid" data-po="'+esc(p.po)+'" value="'+esc(cdVal)+'" title="your production completion date — submitted for Dock &amp; Bay approval; kept in sync with the purchase order grid" style="width:150px;cursor:pointer;text-align:left;font:inherit;font-size:12px;padding:4px 6px;border:1px solid '+(cdMiss?'#dc2626':'#93c5fd')+';border-radius:4px;background:'+(cdMiss?'#fef2f2':'#eff6ff')+';color:#1d4ed8">'
         +(cdMiss?' <span style="background:#dc2626;color:#fff;border-radius:4px;font-size:10px;font-weight:700;padding:2px 7px">⚠ Must enter completion date</span>':'')+'</div>'
+        +'<div style="margin-top:8px"><b>Pallets</b> &nbsp; <input class="pp-pallets" data-po="'+esc(p.po)+'" placeholder="(estimate)" inputmode="decimal" title="number of pallets for this PO — used in Dock &amp; Bay shipment planning" style="width:90px;text-align:right;font:inherit;font-size:12px;padding:4px 6px;border:1px solid #93c5fd;border-radius:4px;background:#eff6ff;color:#1d4ed8"> <span class="pp-pal-est mut tiny" data-po="'+esc(p.po)+'" style="text-align:left">…</span></div>'
         +(prodExc?'<div class="tiny" style="color:#b45309;margin-top:4px">⚠ '+esc(prodExc)+'</div>':'')+'</div>';
       // escalate is only offered on the supplier's OWN latest message (it emails Dock & Bay) — never on a D&B note
       var _supNotes=(notes||[]).filter(function(n){return n.author_kind!=='internal';});
@@ -2377,6 +2378,14 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                     var ex=body.querySelector('tr[id^="pp-"][data-po="'+pe+'"]'); if(ex && ex.dataset.built && ex.style.display!=='none') rerenderRow(ex,po);
                     setManageBadge(po); setPosBadge(); setShipBadge();
                   }); },900); }; });
+              // #A supplier pallet count — same purchase_orders.pallets_override field the admin uses; timeline-logged server-side
+              scope.querySelectorAll('.pp-pallets').forEach(function(inp){ var po=inp.dataset.po, t;
+                var pe2=(window.CSS&&CSS.escape)?CSS.escape(po):po; var estEl=scope.querySelector('.pp-pal-est[data-po="'+pe2+'"]');
+                fetch('/api/portal/po-pallets/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(d){ if(!d||d.error)return;
+                  if(document.activeElement!==inp)inp.value=(d.pallets_override==null?'':d.pallets_override);
+                  if(estEl)estEl.textContent='est. '+(d.est_pallets||0)+' pallets · '+(d.est_cartons||0)+' cartons'; }).catch(function(){});
+                inp.onchange=function(){ clearTimeout(t); inp.style.borderColor='#f59e0b'; var v=inp.value;
+                  t=setTimeout(function(){ postJSON('/api/portal/po-pallets',{po:po,pallets_override:v},function(j){ if(j&&j.error){ inp.style.borderColor='#dc2626'; return; } inp.style.borderColor='#16a34a'; }); },700); }; });
               // order-plan amended qty + cost prices: live-recompute line + grand totals, save on change (no reload)
               scope.querySelectorAll('.pp-cost,.pp-qty').forEach(function(inp){
                 function recalc(box){ if(!box)return; var tot=0,tq=0;
