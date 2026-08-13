@@ -1,3 +1,6 @@
+## v26.992.0 Open-actions: merge PO list into the "Total our open actions" metric
+- Removed the standalone "POs with open actions" expander; the list now lives inside the Total-our-open-actions metric's expanded panel (below its trend), since those POs are exactly what that total counts. Still lazy-loads from `/api/supply/action-metrics/pos` the first time that metric is expanded.
+
 ## v26.991.0 Open-actions PO list — FIX PO label (was showing sub-ids like "27")
 - The POs-with-open-actions list keyed on target_key, which for apply-actions (e.g. supplier completion-date / invoice submissions) is the submission id, not the PO. Now keys on `ref` (always the PO number), so every row shows a real PO and links to the right drawer.
 
