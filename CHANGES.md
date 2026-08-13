@@ -1,3 +1,8 @@
+## v26.952.0 DEMAND ▸ KPIs ▸ Forecast accuracy — now matches the per-cell locked-forecast compare
+- Re-based the accuracy table on the **same locked-forecast basis** as the plan-cell `fc … +%` figure: the most recent snapshot taken strictly BEFORE each completed month (identical SQL selection to buildLockedFc). Previously it used a lag selector (1/3/6-mo-ahead), so its numbers didn't line up with the cells.
+- Removed the Lag control (no longer meaningful under the locked basis); added a note explaining the basis. Kept the Country×Channel / Category / SKU drill.
+- Columns renamed for clarity: **Locked FC**, **Actual**, **FC vs actual** (= the per-cell %), plus **WMAPE** / **Attainment** kept as extra accuracy measures. `FC vs actual` = (locked FC − actual) ÷ actual, exactly the cell %.
+
 ## v26.951.0 DEMAND plan toolbar — Display Settings popup + Import/Export consolidation
 - Renamed **More Filters & Settings → More Filters**.
 - New **⚙ Display Settings** popup button (next to More Filters) holding: **Records** (Show record of change (R) + Hide for past months — moved out of More Filters) and a new **Forecast to Actuals Compare** on/off toggle (controls the small `fc … +%` locked-forecast figure in completed-month cells; on by default, persisted).

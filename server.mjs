@@ -12077,15 +12077,15 @@ app.get('/api/kpi/forecast-accuracy', async (req, res) => {
         SELECT upper(country) country, channel, sku, month, sum(units) au FROM planner.sales_actuals
         WHERE month >= date_trunc('month',current_date) - ($1||' months')::interval AND month < date_trunc('month',current_date)
         GROUP BY 1,2,3,4),
-      fc AS (   -- the SKU forecast for each COMPLETED window month, taken from the snapshot made >= lag months before it
+      fc AS (   -- LOCKED basis: the SKU forecast from the most recent snapshot taken strictly BEFORE each completed month started — identical selection to buildLockedFc(), so this matches the plan-cell "fc … +%" compare
         SELECT f.sku, f.country, f.channel, f.month, sum(f.units) fu, min(f.subcategory) subcategory
         FROM planner.forecasts f JOIN planner.forecast_runs r ON r.id=f.run_id
         WHERE f.level='sku'
           AND f.month >= date_trunc('month',current_date) - ($1||' months')::interval AND f.month < date_trunc('month',current_date)
-          AND r.run_at < (f.month - ($2||' months')::interval)
+          AND r.run_at < date_trunc('month', f.month)
           AND NOT EXISTS (SELECT 1 FROM planner.forecasts f2 JOIN planner.forecast_runs r2 ON r2.id=f2.run_id
              WHERE f2.level='sku' AND f2.sku=f.sku AND f2.country=f.country AND f2.channel=f.channel AND f2.month=f.month
-               AND r2.run_at < (f.month - ($2||' months')::interval) AND r2.run_at > r.run_at)
+               AND r2.run_at < date_trunc('month', f.month) AND r2.run_at > r.run_at)
         GROUP BY 1,2,3,4),
       mfc AS (SELECT DISTINCT month FROM fc),   -- only evaluate months we actually forecast before they happened
       m AS (
@@ -12096,7 +12096,7 @@ app.get('/api/kpi/forecast-accuracy', async (req, res) => {
         LEFT JOIN planner.products pr ON pr.sku=coalesce(a.sku,fc.sku))
       SELECT ${sel}, round(sum(fu)) fc_units, round(sum(au)) act_units, round(sum(abs(fu-au))) abs_err, count(*) n
       FROM m GROUP BY ${grp} ORDER BY act_units DESC NULLS LAST`;
-    const accRows = (await pool.query(accSql, [win, lag])).rows.map(r => {
+    const accRows = (await pool.query(accSql, [win])).rows.map(r => {   // $2 (lag) no longer referenced — locked basis
       const fc = Number(r.fc_units) || 0, act = Number(r.act_units) || 0, ae = Number(r.abs_err) || 0;
       return { ...r, fc_units: fc, act_units: act,
         bias_pct: act > 0 ? Math.round((fc - act) / act * 100) : null,
