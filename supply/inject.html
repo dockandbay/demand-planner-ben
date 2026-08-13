@@ -1620,6 +1620,9 @@
     return '<div class="sect-h">Shipments <span class="mut tiny">— assign a shipment or mark FOB, ASN numbers, Ships With Supplier pallet labels</span></div>'
       +lookupDatalists()+'<div class="cli-form" style="max-width:620px">'
       +shipBlock
+      +row('Cartons / pallets <span class="mut tiny">(estimate = qty ÷ carton/pallet qty; a pallet override feeds freight &amp; cash flow)</span>',
+        '<div id="po-pallets-est" data-po="'+esc(po)+'" class="mut tiny" style="margin-bottom:4px">loading estimate…</div>'
+        +'<label style="font-size:12px">Pallet override <input class="fci txtin" data-ep="'+ep+'" data-field="pallets_override" placeholder="(use estimate)" style="width:90px;text-align:right"></label> <span class="mut tiny">leave blank to use the estimate</span>')
       +row('Branch delivery notes <span class="mut tiny">'+(r.shipment?'(from the assigned shipment — edit on the shipment)':'(defaults from the branch when the branch is set · shown to the supplier)')+'</span>', r.shipment
           ? '<textarea rows="3" readonly style="width:440px;max-width:100%;box-sizing:border-box;text-align:left;font-family:inherit;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:6px;padding:6px 8px">'+esc(r.shipment_delivery_notes||r.branch_delivery_notes||'')+'</textarea>'
           : txtIn(ep,'branch_delivery_notes',r.branch_delivery_notes,440,true))
@@ -3843,8 +3846,14 @@
       var body={}; body[inp.dataset.field]=inp.value; inp.classList.add('saved');
       fetch(inp.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
         .then(function(j){ if(j&&j.error)throw new Error(j.error); if(poBy[po])poBy[po][inp.dataset.field]=inp.value;
-          if(inp.dataset.field==='balance_due_date_overide'){ invalidateDerived(); poRefetchPanel(po,i); } })   // recompute balance due + cash flow
+          if(inp.dataset.field==='balance_due_date_overide'||inp.dataset.field==='pallets_override'){ invalidateDerived(); poRefetchPanel(po,i); } })   // recompute balance due / freight / cash flow
         .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; });
+    // #A SHIPMENTS tab — load the cartons/pallets estimate + current override
+    (function(){ var scope=document.getElementById('podet-'+i); if(!scope)return; var est=scope.querySelector('#po-pallets-est'); var ov=scope.querySelector('.txtin[data-field="pallets_override"]'); if(!est&&!ov)return;
+      fetch('/api/supply/po/'+encodeURIComponent(po)+'/pallets').then(function(r){return r.json();}).then(function(d){ if(!d||d.error)return;
+        var usingOv=(d.pallets_override!=null), eff=usingOv?d.pallets_override:d.est_pallets;
+        if(est)est.innerHTML='Est. cartons <b>'+units(d.est_cartons)+'</b> · Est. pallets <b>'+units(d.est_pallets)+'</b>'+(usingOv?' · <span style="color:#7c3aed">override <b>'+units(d.pallets_override)+'</b></span>':'')+' · <span class="mut">shipment calcs use <b>'+units(eff)+'</b> pallets</span>';
+        if(ov&&document.activeElement!==ov)ov.value=(d.pallets_override==null?'':d.pallets_override); }).catch(function(){}); })();
     // Final invoice amount entered but no Final payment due → flag the due-date field red, live as you type.
     (function(){ var scope=document.getElementById('podet-'+i); if(!scope)return;
       var amt=scope.querySelector('.payin[data-field="supplier_invoice_total"]');

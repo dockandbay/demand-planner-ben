@@ -1112,8 +1112,8 @@ async function cashflowResponse(pos, q) {
   const shipRows = await q(`
     WITH agg AS (
       SELECT po.shipment_ref,
-        round(sum(coalesce((SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0))
-           FROM planner.purchase_order_lines l LEFT JOIN planner.v_sku_attrs sl ON sl.sku=l.sku WHERE l.po=po.po),0))::numeric,1) pallets,
+        round(sum(coalesce(po.pallets_override, (SELECT sum(l.qty::numeric/NULLIF(sl.pallet_qty,0))
+           FROM planner.purchase_order_lines l LEFT JOIN planner.v_sku_attrs sl ON sl.sku=l.sku WHERE l.po=po.po), 0))::numeric,1) pallets,   -- #A per-PO pallet override wins over the estimate, then summed across the shipment
         round(sum(coalesce((SELECT sum(l.qty*p.prod_weight_uk)
            FROM planner.purchase_order_lines l JOIN planner.products p ON p.sku=l.sku WHERE l.po=po.po),0))::numeric) weight_kg,
         max(upper(coalesce(nullif(po.country_code,''), pb.country_code, ''))) market
@@ -1867,6 +1867,18 @@ app.get('/api/supply/shipment-crossdock/:ref', async (req, res) => {
 // master-less consolidation reference (e.g. P57-UK-CONSOL-1, where 57 is the anchor's production number).
 const PROD_END_SQL = `coalesce(p.end_production_overide, p.start_production + (coalesce(s.production_days,0)||' days')::interval)::date`;
 const PO_PALLETS_SQL = `coalesce((SELECT round(sum(l.qty::numeric/NULLIF(sl.pallet_qty,0)),1) FROM planner.purchase_order_lines l LEFT JOIN planner.v_sku_attrs sl ON sl.sku=l.sku WHERE l.po=p.po),0)`;
+const PO_PALLETS_EFF_SQL = `coalesce(p.pallets_override, ${PO_PALLETS_SQL})`;   // #A: a per-PO override wins over the estimate in all shipment/container calcs (null → estimate, identical to before)
+const PO_CARTONS_SQL = `coalesce((SELECT round(sum(l.qty::numeric/NULLIF(sl.carton_qty::numeric,0)),1) FROM planner.purchase_order_lines l LEFT JOIN planner.v_sku_attrs sl ON sl.sku=l.sku WHERE l.po=p.po),0)`;   // #A estimated cartons (display)
+// #A SHIPMENTS tab — estimated cartons/pallets + the current per-PO pallet override (admin + portal both read this).
+app.get('/api/supply/po/:po/pallets', async (req, res) => {
+  try {
+    const r = (await pool.query(`SELECT ${PO_CARTONS_SQL} est_cartons, ${PO_PALLETS_SQL} est_pallets, p.pallets_override
+      FROM planner.purchase_orders p WHERE p.po=$1`, [req.params.po])).rows[0];
+    if (!r) return res.status(404).json({ error: 'PO not found' });
+    res.json({ po: req.params.po, est_cartons: Number(r.est_cartons) || 0, est_pallets: Number(r.est_pallets) || 0,
+      pallets_override: r.pallets_override == null ? null : Number(r.pallets_override) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/api/supply/consolidation', async (req, res) => {
   const po = String(req.query.po || '').trim();
   if (!po) return res.status(400).json({ error: 'po required' });
@@ -1875,7 +1887,7 @@ app.get('/api/supply/consolidation', async (req, res) => {
       SELECT p.po, coalesce(p.prod_no,'') prod_no, coalesce(p.supplier_name,'') supplier, coalesce(p.client,'') client,
              upper(coalesce(nullif(p.country_code,''), b.country_code, '')) country,
              coalesce(p.shipment_ref,'') shipment_ref, coalesce(p.branch,'') branch,
-             to_char(${PROD_END_SQL},'YYYY-MM-DD') completion, ${PO_PALLETS_SQL} pallets
+             to_char(${PROD_END_SQL},'YYYY-MM-DD') completion, ${PO_PALLETS_EFF_SQL} pallets
       FROM planner.purchase_orders p
       LEFT JOIN planner.branches b ON b.name=p.branch
       LEFT JOIN planner.suppliers s ON s.id=p.supplier_id
@@ -1894,7 +1906,7 @@ app.get('/api/supply/consolidation', async (req, res) => {
              coalesce(p.shipment_ref,'') shipment_ref, coalesce(sh.master_po,'') master_po,
              (p.po = coalesce(sh.master_po, nullif(p.shipment_ref,''))) is_master,
              to_char(${PROD_END_SQL},'YYYY-MM-DD') completion,
-             (${PROD_END_SQL} - anchor.comp) delta_days, ${PO_PALLETS_SQL} pallets
+             (${PROD_END_SQL} - anchor.comp) delta_days, ${PO_PALLETS_EFF_SQL} pallets
       FROM planner.purchase_orders p
       LEFT JOIN planner.branches b ON b.name=p.branch
       LEFT JOIN planner.suppliers s ON s.id=p.supplier_id
@@ -8646,6 +8658,7 @@ app.post('/api/supply/po/:po', async (req, res) => {
     pay_balance_1_amount: 'numeric', pay_balance_1_date: 'date',
     pay_balance_2_amount: 'numeric', pay_balance_2_date: 'date',
     credit_amount: 'numeric',
+    pallets_override: 'numeric',   // #A per-PO pallet override (SHIPMENTS tab) — feeds freight/cash-flow; timeline-logged via PO_TRACK
   }, body,
   undefined,
   // Step 1+2: hand back the recomputed grid row so the client repaints WITHOUT a second fetch — but only when the
@@ -11457,7 +11470,8 @@ const PO_TRACK = { status: 'Status', end_production_overide: 'Production end dat
   pay_start_deposit_assigned: 'Start deposit paid', pay_start_deposit_date: 'Start deposit date',
   pay_completion_assigned: 'Completion paid', pay_completion_date: 'Completion date',
   pay_balance_1_amount: 'Balance 1 paid', pay_balance_1_date: 'Balance 1 date',
-  pay_balance_2_amount: 'Balance 2 paid', pay_balance_2_date: 'Balance 2 date' };
+  pay_balance_2_amount: 'Balance 2 paid', pay_balance_2_date: 'Balance 2 date',
+  pallets_override: 'Pallet count' };   // #A pallet override → timeline "Pallet count: M → N"
 async function logPoChange(po, event, detail, by) {
   try { await pool.query(`INSERT INTO planner.po_change_log (po,event,detail,changed_by) VALUES ($1,$2,$3,$4)`, [po, event, detail || null, by || null]); }
   catch (e) { /* table absent pre-migration 158 — non-fatal, never breaks the underlying save */ }

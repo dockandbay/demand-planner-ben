@@ -1,3 +1,8 @@
+## v26.925.0 SHIPMENTS — carton/pallet estimate + per-PO pallet override (admin + calc)
+- PO ▸ SHIPMENTS tab now shows **Est. cartons** and **Est. pallets** (`Σ qty ÷ carton/pallet_qty` from `v_sku_attrs`) plus an editable **pallet override**. When set, the override is used **instead of the estimate in all shipment calcs** — freight cost, container-fill/consolidation, and cash flow — per PO, summed across a multi-PO shipment.
+- **Null override = byte-identical to today** (`coalesce(pallets_override, estimate)`). Change is timeline-logged automatically (PO_TRACK → "Pallet count: M → N").
+- Migration **221** (`purchase_orders.pallets_override numeric`, additive — applied to sandbox, for Diviyaj on live). New endpoint `GET /api/supply/po/:po/pallets`. Server: effective-pallets applied at both calc sites; patch allowlist + tracking. **Next: supplier-portal input of the same field (also timeline-logged).**
+
 ## v26.924.0 DTC Mismatch — reverse unmapped POs, tidier detail, sub-tab counter
 - **Reverse view (#1):** a new "**Open purchase orders, not mapped to a sales order**" section lists open, not-received POs in the DTC branches (Direct to Client / JLEW / NEXT) that have no sales-order reference — PO (supplier) · branch · country · status. Read-only from `planner.purchase_orders`; new `unmapped_pos` in the endpoint + an "Unmapped POs" count pill.
 - **Clearer detail (#2):** the per-order SKU/qty mismatch now renders as a small **table** (SKU · SO · PO, PO qty red when it differs) instead of text lines; and each mapped PO now shows its **supplier in brackets** — `PO-xxxx (Supplier)`.
