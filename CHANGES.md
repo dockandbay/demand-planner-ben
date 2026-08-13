@@ -1,3 +1,6 @@
+## v26.991.0 Open-actions PO list — FIX PO label (was showing sub-ids like "27")
+- The POs-with-open-actions list keyed on target_key, which for apply-actions (e.g. supplier completion-date / invoice submissions) is the submission id, not the PO. Now keys on `ref` (always the PO number), so every row shows a real PO and links to the right drawer.
+
 ## v26.990.0 Open-actions scoreboard — desktop width, dd-mmm dates, PO list
 - Board now constrained to max-width 820px so it reads well on a full-width desktop.
 - Snapshot date columns in each metric's expanded trend now show dd-mmm (e.g. 14-Aug) instead of raw MM-DD.

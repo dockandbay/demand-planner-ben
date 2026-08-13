@@ -7811,7 +7811,9 @@ app.post('/api/supply/action-metrics/snapshot', async (_req, res) => {
 app.get('/api/supply/action-metrics/pos', async (_req, res) => {
   try {
     const rows = await buildActionsRows();
-    const pos = rows.filter(r => r.target === 'po' && r.target_key).map(r => ({ po: r.target_key, type: r.type, detail: r.detail, severity: r.severity }));
+    // The PO number is always in `ref`; target_key can be a sub-id (e.g. a supplier-submission id) for apply actions.
+    const pos = rows.filter(r => r.target === 'po' && (r.ref || r.target_key))
+      .map(r => ({ po: r.ref || r.target_key, type: r.type, detail: r.detail, severity: r.severity }));
     res.json({ ok: true, pos });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
