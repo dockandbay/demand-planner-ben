@@ -1,3 +1,6 @@
+## v26.934.0 Supplier portal — Pallets field on ALL POs
+- The **Pallets** field now shows on the SHIPMENT tab ▸ Shipment details for **every** PO (not just Direct-to-Client). For DTC POs the carton/CBM/weight/dimension fields still follow. Same estimate + `pallets_override` save.
+
 ## v26.933.0 DTC badge on the sub-tab + portal pallets moved to Shipment details
 - **DTC Mismatch counter** now shows on **both** the BI&Reports level-2 tab **and** the DTC Mismatch level-3 sub-tab. (The two badges had the same element id, so only the first ever populated — the sub-tab one now has its own id and both refresh.)
 - **Supplier portal:** the **Pallets** field moved from the Production block to the **SHIPMENT tab ▸ Shipment details**, as the **first field before Carton count** (shows the estimate; saves to the same `pallets_override`). Note: that section is Direct-to-Client-only — say if you want pallets on the shipment tab for all POs.

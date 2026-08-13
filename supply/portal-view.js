@@ -959,17 +959,20 @@
       shipment = shipLabelBtn + shipment;
       // Direct-to-Client shipment details (carton count / CBM / gross weight / dimensions). Supplier-entered;
       // saving posts a PO timeline note (→ D&B ✉ bell). Overdue badge once production has ended with data missing.
-      if(ppIsDtc(p)){ var _dtcToday=new Date().toISOString().slice(0,10), _dtcOverdue=(p.prod_end&&p.prod_end<_dtcToday&&!p.dtc_entered_at);
+      // Shipment details — PALLETS shows for ALL POs; carton count / CBM / weight / dimensions are Direct-to-Client only.
+      { var _isDtcSd=ppIsDtc(p), _dtcToday=new Date().toISOString().slice(0,10), _dtcOverdue=(_isDtcSd&&p.prod_end&&p.prod_end<_dtcToday&&!p.dtc_entered_at);
         shipment += '<div class="sect-h" style="margin-top:16px">Shipment details'+(_dtcOverdue?' <span class="ex-badge" title="production has ended — please enter your shipment details">!</span>':'')+'</div>'
-          +'<div class="tiny'+(_dtcOverdue?'':' mut')+'" style="margin-bottom:6px'+(_dtcOverdue?';color:#92400e':'')+'">'+(_dtcOverdue?'⚠ Production has ended — please enter the shipment details for this direct-to-client order.':'Enter the carton count, cargo volume, gross weight and dimensions for this direct-to-client shipment.')+'</div>'
+          +'<div class="tiny'+(_dtcOverdue?'':' mut')+'" style="margin-bottom:6px'+(_dtcOverdue?';color:#92400e':'')+'">'+(_dtcOverdue?'⚠ Production has ended — please enter the shipment details for this direct-to-client order.':(_isDtcSd?'Enter the pallet count, cartons, cargo volume, gross weight and dimensions for this shipment.':'Enter the number of pallets for this shipment.'))+'</div>'
           +'<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end">'
           +'<label class="tiny">Pallets <span class="pp-pal-est" data-po="'+po+'" style="color:#64748b"></span><br><input class="fci pp-pallets" data-po="'+po+'" placeholder="(estimate)" inputmode="decimal" style="width:100px;text-align:left"></label>'
-          +'<label class="tiny">Carton count<br><input class="fci pp-dtc" data-po="'+po+'" data-f="cartons" value="'+esc(p.dtc_cartons!=null?p.dtc_cartons:'')+'" inputmode="numeric" style="width:100px;text-align:left"></label>'
-          +'<label class="tiny">Cargo volume (CBM)<br><input class="fci pp-dtc" data-po="'+po+'" data-f="cbm" value="'+esc(p.dtc_cbm!=null?p.dtc_cbm:'')+'" inputmode="decimal" style="width:120px;text-align:left"></label>'
-          +'<label class="tiny">Gross weight (kg)<br><input class="fci pp-dtc" data-po="'+po+'" data-f="gross_weight_kg" value="'+esc(p.dtc_weight!=null?p.dtc_weight:'')+'" inputmode="decimal" style="width:120px;text-align:left"></label>'
-          +'<label class="tiny">Total shipment dimensions<br><input class="fci pp-dtc" data-po="'+po+'" data-f="dimensions" value="'+esc(p.dtc_dimensions||'')+'" placeholder="e.g. 120x100x80cm total" style="width:230px;text-align:left"></label>'
-          +'<button class="save-btn pp-dtc-go" data-po="'+po+'">Save shipment details</button></div>'
-          +(p.dtc_entered_at?'<div class="tiny mut" style="margin-top:4px">Last updated '+esc(p.dtc_entered_at)+'</div>':''); }
+          +(_isDtcSd?(
+            '<label class="tiny">Carton count<br><input class="fci pp-dtc" data-po="'+po+'" data-f="cartons" value="'+esc(p.dtc_cartons!=null?p.dtc_cartons:'')+'" inputmode="numeric" style="width:100px;text-align:left"></label>'
+            +'<label class="tiny">Cargo volume (CBM)<br><input class="fci pp-dtc" data-po="'+po+'" data-f="cbm" value="'+esc(p.dtc_cbm!=null?p.dtc_cbm:'')+'" inputmode="decimal" style="width:120px;text-align:left"></label>'
+            +'<label class="tiny">Gross weight (kg)<br><input class="fci pp-dtc" data-po="'+po+'" data-f="gross_weight_kg" value="'+esc(p.dtc_weight!=null?p.dtc_weight:'')+'" inputmode="decimal" style="width:120px;text-align:left"></label>'
+            +'<label class="tiny">Total shipment dimensions<br><input class="fci pp-dtc" data-po="'+po+'" data-f="dimensions" value="'+esc(p.dtc_dimensions||'')+'" placeholder="e.g. 120x100x80cm total" style="width:230px;text-align:left"></label>'
+            +'<button class="save-btn pp-dtc-go" data-po="'+po+'">Save shipment details</button>'):'')
+          +'</div>'
+          +(_isDtcSd&&p.dtc_entered_at?'<div class="tiny mut" style="margin-top:4px">Last updated '+esc(p.dtc_entered_at)+'</div>':''); }
       if(cdSkus.length){ var xrows=cdSkus.map(function(s){ var q=xd[s];
           return '<tr><td class="l">'+esc(s)+'</td><td style="text-align:right"><input class="fci pp-xqty" data-po="'+po+'" data-sku="'+esc(s)+'" value="'+(q!=null&&q!==''?esc(q):'')+'" placeholder="qty shipped" style="width:96px;text-align:right" inputmode="numeric"></td></tr>'; }).join('');
         shipment += '<div class="sect-h" style="margin-top:14px">Crossdock SKUs on this shipment'+(xdAction?' <span class="ex-badge" title="enter the quantity shipped for each crossdock SKU">'+xdMissing+'</span>':'')+'</div>'
