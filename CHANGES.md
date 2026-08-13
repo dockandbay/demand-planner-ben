@@ -1,3 +1,9 @@
+## v26.993.0 REALLOCATE: Buy-plan button, snooze dropdown, tab count, metrics snapshot
+- Each reallocation card gets a "📊 Buy plan" button opening that SKU's buy-plan overlay (reuses the ORDER PLAN PLAN behaviour).
+- Replaced the two "Snooze 1wk / 1mo" buttons with a single "Snooze ▾" dropdown (1/3/7 days), consistent with the PO/shipment/sample snooze menus.
+- REALLOCATE sub-nav tab now shows an amber count of open reallocation options (refreshed on report visits; the tab itself sets it live).
+- New `reallocations` metric on the open-actions scoreboard + snapshot (migration 227 adds the column). Shown under an "Opportunities" heading — tracked separately, NOT counted in Total-our-open-actions (they're optional zero-cost moves, not required actions).
+
 ## v26.992.0 Open-actions: merge PO list into the "Total our open actions" metric
 - Removed the standalone "POs with open actions" expander; the list now lives inside the Total-our-open-actions metric's expanded panel (below its trend), since those POs are exactly what that total counts. Still lazy-loads from `/api/supply/action-metrics/pos` the first time that metric is expanded.
 

@@ -9048,16 +9048,23 @@
     if(_erpcCount==null||_erpcCount===0){ el.textContent=''; el.style.display='none'; }
     else { el.textContent=_erpcCount; el.style.display=''; el.title=_erpcCount+' open ERP PO(s) to review (not ignored)'; } }
   function refreshErpcBadge(){ fetch('/api/supply/bi/erp-compare').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _erpcCount=j.count; paintErpcBadge(); } }).catch(function(){}); }
+  // Open reallocation-options counter next to the REALLOCATE sub-nav tab (amber — these are opportunities, not overdue actions).
+  var _reallocCount=null;
+  function paintReallocBadge(){ var el=document.getElementById('rep-realloc-badge'); if(!el)return;
+    if(_reallocCount==null||_reallocCount===0){ el.textContent=''; el.style.display='none'; }
+    else { el.textContent=_reallocCount; el.style.display=''; el.title=_reallocCount+' open reallocation option'+(_reallocCount===1?'':'s'); } }
+  function refreshReallocBadge(){ fetch('/api/supply/bi/reallocations').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _reallocCount=j.count; paintReallocBadge(); } }).catch(function(){}); }
   function selectReport(rk){ if(rk==='cashflow')return showPoSub('cashflow');   // Cash Flow moved to PAYMENTS ▸ Cash Flow
     current='reports'; reportTab=rk; syncHash();
     var _tk=++_navToken;   // invalidate any in-flight section load (e.g. the ACTIONS fetch) so it can't paint over this report
     document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k==='reports');});
     var _ns=document.getElementById('supply-nav-sel'); if(_ns)_ns.value='reports';
     var c=document.getElementById('supply-content');
-    c.innerHTML='<div id="rep-subnav">'+REPORT_SECTIONS.map(function(s){return '<span class="rtab'+(s[0]===rk?' active':'')+'" data-rk="'+s[0]+'">'+s[1]+(s[0]==='erp-compare'?'<span id="rep-erpc-badge" class="rtab-count" style="display:none"></span>':s[0]==='dtc-mismatch'?'<span id="nav-dtc-badge-l3" class="rtab-count" style="display:none"></span>':'')+'</span>';}).join('')+'</div><div id="rep-body"><div class="count">Loading…</div></div>';
+    c.innerHTML='<div id="rep-subnav">'+REPORT_SECTIONS.map(function(s){return '<span class="rtab'+(s[0]===rk?' active':'')+'" data-rk="'+s[0]+'">'+s[1]+(s[0]==='erp-compare'?'<span id="rep-erpc-badge" class="rtab-count" style="display:none"></span>':s[0]==='dtc-mismatch'?'<span id="nav-dtc-badge-l3" class="rtab-count" style="display:none"></span>':s[0]==='reallocate'?'<span id="rep-realloc-badge" class="rtab-count" style="display:none;background:#d97706"></span>':'')+'</span>';}).join('')+'</div><div id="rep-body"><div class="count">Loading…</div></div>';
     c.querySelectorAll('#rep-subnav .rtab').forEach(function(p){p.onclick=function(){selectReport(p.dataset.rk);};});
     paintErpcBadge();   // repaint from last-known count; refresh in the background unless we're about to load the report itself (which sets it)
     if(rk!=='erp-compare') refreshErpcBadge();
+    paintReallocBadge(); if(rk!=='reallocate') refreshReallocBadge();   // REALLOCATE opens set the count itself; other tabs refresh it in the background
     try{ refreshDtcBadge(); }catch(e){}   // DTC mismatch issue-count badge on its sub-tab
     var done=function(d){
       if(_tk!==_navToken)return;   // navigated away (or to another report) before this resolved → don't overwrite the newer view
@@ -9331,7 +9338,9 @@
       +'<div class="mut tiny" style="margin:12px 0 4px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#475569">Our actions</div>'
       +METS.map(function(m){return metricRow(m[0],m[1]);}).join('')
       +'<div class="mut tiny" style="margin:12px 0 4px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#475569">Waiting on supplier</div>'
-      +SUP.map(function(m){return metricRow(m[0],m[1],'#b45309');}).join('');
+      +SUP.map(function(m){return metricRow(m[0],m[1],'#b45309');}).join('')
+      +'<div class="mut tiny" style="margin:12px 0 4px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:#475569">Opportunities <span style="font-weight:400;text-transform:none;letter-spacing:0">(tracked separately — not counted in the total)</span></div>'
+      +metricRow('reallocations','Reallocation options','#d97706');
     if(!hist.length)h+='<div class="mut tiny" style="margin-top:6px">No weekly snapshots yet — the first is captured next Thursday, or click Snapshot now.</div>';
     el.innerHTML='<div style="max-width:820px">'+h+'</div>';
     el.querySelectorAll('.oa-hd').forEach(function(hd){ hd.onclick=function(){ var t=document.getElementById(hd.dataset.exp); if(!t)return; var open=t.style.display!=='none'; t.style.display=open?'none':'block'; var cc=hd.querySelector('.oa-caret'); if(cc)cc.textContent=open?'▸':'▾';
@@ -9445,7 +9454,25 @@
       cd.querySelectorAll('.cs-snooze').forEach(function(sb){ sb.onclick=function(){ this.disabled=true; lifecycle(key,'snoozed',sb.dataset.days).then(function(){removeCard(cd);}); }; });
       cd.querySelector('.cs-dismiss').onclick=function(){ this.disabled=true; lifecycle(key,'dismissed').then(function(){removeCard(cd);}); }; }); }
   // REALLOCATE — zero-sum order-plan moves (surplus market → short market, same production). Apply / Snooze / Dismiss.
+  // open a SKU's buy plan overlay from a SUPPLY card (mirrors the ORDER PLAN "PLAN" button behaviour)
+  function _openSkuBuyPlan(sku){ if(!sku)return; if(!window.open_){ alert('Buy plan unavailable — reload the page.'); return; }
+    if(window.ensureBuyPlanScaffold)window.ensureBuyPlanScaffold();
+    var app=document.getElementById('app'); if(app)app.classList.add('plan-ov-open');
+    try{ window.open_(sku); }catch(e){ if(app)app.classList.remove('plan-ov-open'); return; }
+    var o2=document.getElementById('ov'); if(o2){ o2.style.zIndex='300000'; var mo=new MutationObserver(function(){ if(!o2.classList.contains('open')){ if(app)app.classList.remove('plan-ov-open'); mo.disconnect(); } }); mo.observe(o2,{attributes:true,attributeFilter:['class']}); } }
+  // Snooze dropdown (1/3/7 days) popped from a single "Snooze ▾" button — consistent with the PO / shipment / sample snooze menus.
+  function openReallocSnz(btn,key,after){ var ex=document.getElementById('snz-menu'); if(ex)ex.remove();
+    var m=document.createElement('div'); m.id='snz-menu'; m.style.cssText='position:absolute;z-index:200002;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 6px 20px rgba(15,23,42,.18);padding:4px;font-size:12px;min-width:96px';
+    m.innerHTML='<div style="font-weight:700;color:#64748b;font-size:10px;padding:2px 10px 4px">Snooze</div>'+[[1,'1 day'],[3,'3 days'],[7,'7 days']].map(function(o){return '<div class="snz-opt" data-d="'+o[0]+'" style="padding:5px 12px;cursor:pointer;border-radius:4px">'+o[1]+'</div>';}).join('');
+    document.body.appendChild(m);
+    var rc=btn.getBoundingClientRect(); m.style.left=(window.scrollX+Math.min(rc.left,window.innerWidth-140))+'px'; m.style.top=(window.scrollY+rc.bottom+3)+'px';
+    function close(){ m.remove(); document.removeEventListener('mousedown',out,true); }
+    function out(e){ if(!m.contains(e.target)&&e.target!==btn)close(); }
+    setTimeout(function(){ document.addEventListener('mousedown',out,true); },0);
+    m.querySelectorAll('.snz-opt').forEach(function(o){ o.onmouseenter=function(){o.style.background='#eff6ff';}; o.onmouseleave=function(){o.style.background='';};
+      o.onclick=function(){ close(); fetch('/api/supply/actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key,status:'snoozed',snooze_days:parseInt(o.dataset.d,10)||7})}).then(function(){ if(after)after(); }); }; }); }
   function renderReallocate(d){ var b=biBody(); d=d||{}; var recs=d.recs||[];
+    _reallocCount=recs.length; paintReallocBadge();
     if(!recs.length){ b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 6px">Reallocate — order-plan adjustments</div><div class="count">No reallocation opportunities right now — every editable production’s split matches demand. 🎉</div>'; return; }
     var tgt=d.target_months||3;
     function card(r){ var crit=r.to_urgency==='critical';
@@ -9453,7 +9480,7 @@
         +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span class="tool-badge" style="background:'+(crit?'#fee2e2':'#fef3c7')+';color:'+(crit?'#991b1b':'#92400e')+'">'+esc(r.to_urgency)+'</span><b style="font-size:13px">'+esc(r.sku)+'</b><span class="mut tiny">prod '+esc(r.prod_no)+' · '+esc(r.supplier)+'</span></div>'
         +'<div style="margin:7px 0;font-size:13px">Move <b>'+units(r.qty)+'</b> units &nbsp;<button class="lnk-btn rl-po" data-po="'+esc(r.from_po)+'" title="open '+esc(r.from_po)+' in a drawer" style="color:#1e40af;font-weight:600;background:none;border:none;padding:0;cursor:pointer">'+esc(r.from_po)+' ('+esc(r.from_country)+')</button> &rarr; <button class="lnk-btn rl-po" data-po="'+esc(r.to_po)+'" title="open '+esc(r.to_po)+' in a drawer" style="color:#166534;font-weight:600;background:none;border:none;padding:0;cursor:pointer">'+esc(r.to_po)+' ('+esc(r.to_country)+')</button></div>'
         +'<div class="mut tiny" style="margin-bottom:9px">'+esc(r.from_country)+' cover '+r.from_cover+'→'+r.from_cover_after+' mo (stays covered) · '+esc(r.to_country)+' cover <b style="color:#dc2626">'+r.to_cover+'</b>→<b style="color:#166534">'+r.to_cover_after+'</b> mo'+(r.to_cover_after>=tgt?' (clears stock-out)':'')+' · supplier total unchanged</div>'
-        +'<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="save-btn rl-apply" style="background:#16a34a;color:#fff;border-color:#16a34a">✓ Apply</button><button class="save-btn light rl-snooze" data-days="7">Snooze 1wk</button><button class="save-btn light rl-snooze" data-days="30">Snooze 1mo</button><button class="save-btn light rl-dismiss">Dismiss</button></div></div>'; }
+        +'<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="save-btn rl-apply" style="background:#16a34a;color:#fff;border-color:#16a34a">✓ Apply</button><button class="save-btn light rl-buyplan" data-sku="'+esc(r.sku)+'" title="open the buy plan for '+esc(r.sku)+'">📊 Buy plan</button><button class="save-btn light rl-snz-btn" title="snooze this reallocation">Snooze ▾</button><button class="save-btn light rl-dismiss">Dismiss</button></div></div>'; }
     b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px">Reallocate — order-plan adjustments</div>'
       +'<div class="mut tiny" style="margin-bottom:10px">Zero-cost moves within an editable production (Future / Production): shift qty from a surplus market to one at stock-out risk. Supplier total unchanged. '+recs.length+' opportunit'+(recs.length===1?'y':'ies')+'.</div>'
       +'<div id="rl-list">'+recs.map(card).join('')+'</div>';
@@ -9468,7 +9495,8 @@
         fetch('/api/supply/bi/apply-reallocation',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key,from_po:r.from_po,to_po:r.to_po,sku:r.sku,qty:r.qty})})
           .then(function(x){return x.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); try{invalidateDerived();}catch(e){} delete cache['purchase-orders']; delete cache['order-plan']; removeCard(cd); })
           .catch(function(e){ btn.disabled=false; btn.textContent='✓ Apply'; alert('Apply failed: '+(e.message||e)); }); };
-      cd.querySelectorAll('.rl-snooze').forEach(function(sb){ sb.onclick=function(){ this.disabled=true; lifecycle(key,'snoozed',sb.dataset.days).then(function(){removeCard(cd);}); }; });
+      var szb=cd.querySelector('.rl-snz-btn'); if(szb)szb.onclick=function(e){ e.stopPropagation(); openReallocSnz(szb,key,function(){ removeCard(cd); }); };
+      var bpb=cd.querySelector('.rl-buyplan'); if(bpb)bpb.onclick=function(){ _openSkuBuyPlan(bpb.dataset.sku); };
       cd.querySelector('.rl-dismiss').onclick=function(){ this.disabled=true; lifecycle(key,'dismissed').then(function(){removeCard(cd);}); }; }); }
 
   // ── SUPPLY ▸ SAMPLES ────────────────────────────────────────────────────────────

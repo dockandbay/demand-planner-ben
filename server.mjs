@@ -7778,8 +7778,19 @@ async function computeOpenActions() {
     WHERE (lower(coalesce(p.branch,'')) LIKE '%direct to client%' OR lower(coalesce(p.branch,'')) LIKE '%jlew%' OR lower(coalesce(p.branch,'')) LIKE '%next%')
       AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%cancel%' AND coalesce(p.status,'') NOT ILIKE '%void%' AND coalesce(p.sales_order_ref,'')='' AND NOT coalesce(r.accepted,false)`);
   const dtc_mismatch = dtc_issues + dtc_unmapped;
+  // Reallocation options (zero-cost order-plan moves) — tracked separately, NOT part of total_our (they're optional
+  // opportunities, not required actions, so they don't belong in the mandatory-action total the PO list reflects).
+  let reallocations = 0;
+  try {
+    const recs = await biReallocations();
+    const st = {}; (await q(`SELECT action_key, status, to_char(snooze_until,'YYYY-MM-DD') snooze_until FROM planner.supply_action_state`)).forEach(s => { st[s.action_key] = s; });
+    const today = new Date().toISOString().slice(0, 10);
+    reallocations = recs.filter(rc => { const s = st[rc.key]; if (!s) return true;
+      if (s.status === 'dismissed' || s.status === 'applied') return false;
+      if (s.status === 'snoozed' && s.snooze_until && s.snooze_until >= today) return false; return true; }).length;
+  } catch (e) {}
   const total_our = po_actions + order_plan + shipments + manufacturing + samples + payments_overdue + dtc_mismatch;
-  return { supplier_pos, supplier_dtc, po_actions, order_plan, shipments, manufacturing, samples, payments_overdue, dtc_mismatch, total_our };
+  return { supplier_pos, supplier_dtc, po_actions, order_plan, shipments, manufacturing, samples, payments_overdue, dtc_mismatch, reallocations, total_our };
 }
 function _thisThursdayGMT() {   // most recent Thursday in GMT (today if it's Thursday)
   const now = new Date(); const back = (now.getUTCDay() - 4 + 7) % 7;
@@ -7787,18 +7798,18 @@ function _thisThursdayGMT() {   // most recent Thursday in GMT (today if it's Th
 }
 async function snapshotOpenActions() {
   const m = await computeOpenActions(); const wk = _thisThursdayGMT();
-  await pool.query(`INSERT INTO planner.action_metrics_snapshot (week_ending, captured_at, supplier_pos, supplier_dtc, po_actions, order_plan, shipments, manufacturing, samples, payments_overdue, dtc_mismatch, total_our)
-      VALUES ($1, now(), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+  await pool.query(`INSERT INTO planner.action_metrics_snapshot (week_ending, captured_at, supplier_pos, supplier_dtc, po_actions, order_plan, shipments, manufacturing, samples, payments_overdue, dtc_mismatch, reallocations, total_our)
+      VALUES ($1, now(), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
       ON CONFLICT (week_ending) DO UPDATE SET captured_at=now(), supplier_pos=excluded.supplier_pos, supplier_dtc=excluded.supplier_dtc, po_actions=excluded.po_actions,
         order_plan=excluded.order_plan, shipments=excluded.shipments, manufacturing=excluded.manufacturing, samples=excluded.samples,
-        payments_overdue=excluded.payments_overdue, dtc_mismatch=excluded.dtc_mismatch, total_our=excluded.total_our`,
-    [wk, m.supplier_pos, m.supplier_dtc, m.po_actions, m.order_plan, m.shipments, m.manufacturing, m.samples, m.payments_overdue, m.dtc_mismatch, m.total_our]);
+        payments_overdue=excluded.payments_overdue, dtc_mismatch=excluded.dtc_mismatch, reallocations=excluded.reallocations, total_our=excluded.total_our`,
+    [wk, m.supplier_pos, m.supplier_dtc, m.po_actions, m.order_plan, m.shipments, m.manufacturing, m.samples, m.payments_overdue, m.dtc_mismatch, m.reallocations, m.total_our]);
   return { week_ending: wk, ...m };
 }
 app.get('/api/supply/action-metrics/data', async (_req, res) => {   // 2-segment path so the generic /api/supply/:section dispatcher doesn't swallow it
   try {
     const history = (await pool.query(`SELECT to_char(week_ending,'YYYY-MM-DD') week_ending, to_char(captured_at,'YYYY-MM-DD HH24:MI') captured_at,
-        supplier_pos, supplier_dtc, po_actions, order_plan, shipments, manufacturing, samples, payments_overdue, dtc_mismatch, total_our
+        supplier_pos, supplier_dtc, po_actions, order_plan, shipments, manufacturing, samples, payments_overdue, dtc_mismatch, coalesce(reallocations,0) reallocations, total_our
       FROM planner.action_metrics_snapshot ORDER BY week_ending DESC LIMIT 52`)).rows;
     res.json({ ok: true, current: await computeOpenActions(), history });
   } catch (e) { res.status(500).json({ error: e.message }); }
