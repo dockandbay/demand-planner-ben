@@ -2281,6 +2281,7 @@
       +'<div id="po-sku-pop" style="display:none;position:absolute;top:100%;left:0;z-index:70;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 10px 26px rgba(0,0,0,.16);padding:10px;width:340px"><div class="tiny mut" style="margin-bottom:4px">SKUs — comma / space / newline separated (OR search, partial match)</div><textarea id="po-sku-ta" rows="6" style="width:100%;box-sizing:border-box;font-size:12px;text-align:left" placeholder="TOWLB-…, PONCHK-…"></textarea><div style="margin-top:6px;display:flex;justify-content:flex-end;gap:6px"><button class="save-btn light" id="po-sku-clear2">Clear</button><button class="save-btn" id="po-sku-apply" style="background:#dcfce7;color:#166534;border-color:#16a34a">Apply</button></div></div></span>'
       +'<button class="save-btn po-filt-toggle" id="po-filt-toggle">⚙ Filters</button>'
       +'<button class="save-btn" id="po-impexp-toggle" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd">⇅ Import/Export</button>'
+      +'<button class="save-btn" id="po-shipplan-btn" style="background:#e0f2fe;color:#075985;border:1px solid #7dd3fc" title="Plan shipments — drag ready-to-ship POs onto containers">🚢 Plan Shipments</button>'
       +'<span class="pill po-arch'+(_poInclArch?' active':'')+'" id="po-arch-toggle" title="Archived = completed POs before the production cutoff, hidden by default for speed. Toggle to include them. Set the cutoff in CONFIG ▸ Admin ▸ General.">🗄 '+(_poInclArch?'Hide archived':'Show archived')+'</span></div>'
       +(function(){ var lb='background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;';   // light-blue PO action buttons
         return '<div class="bar" id="po-impexp-bar" style="display:none;gap:8px;flex-wrap:wrap">'
@@ -2497,6 +2498,7 @@
     var pbatch=document.getElementById('po-batch'); if(pbatch)pbatch.onchange=function(){state.batch=this.value;selHi(this,!!this.value);view();};
     document.getElementById('sup-search').oninput=debounce(function(){state.q=this.value;_poShowAll=false;view();},350);
     (function(){ var _pat=document.getElementById('po-arch-toggle'); if(_pat)_pat.onclick=function(){ _poInclArch=!_poInclArch; delete cache['purchase-orders']; showPoSub('plan'); }; })();
+    (function(){ var _psp=document.getElementById('po-shipplan-btn'); if(_psp)_psp.onclick=function(){ openShipPlan(); }; })();
     // SUG-0012 — SKU filter box (+ expand popover). Fetches the matching PO set, then view() intersects it.
     function runSku(){ var v=String(state.sku||'').trim();
       if(!v){ _poSkuSet=null; view(); return; }
@@ -4801,6 +4803,52 @@
       .then(function(rows){ rows=Array.isArray(rows)?rows:[]; var go=function(){ _navCounts.plan=rows.reduce(function(a,r){return a+poActions(r).length;},0); updateNavBadges(); }; if(!_poActStateLoaded)loadPoActState(go); else go(); }).catch(function(){}); }
   }
   function bindPoSubNav(){ document.querySelectorAll('#supply-content .rtab[data-posub]').forEach(function(p){ p.onclick=function(){ showPoSub(p.dataset.posub); }; }); }
+  // ── 🚢 Plan Shipments drawer — allocate READY-TO-SHIP POs (sea, excl. FOB/air) onto containers by drag & drop.
+  //    Drop sets shipment_ref LIVE (same as the assign flow, timeline-logged). "Recommend" greedily fills 20-pallet
+  //    (40ft) containers per ship-to country; Apply assigns each group under its first PO as the master. ──
+  var _spData=null, _spCtry='', SP_CAP=20;
+  function openShipPlan(){ var ov=document.getElementById('shipplan-ov'); if(ov)ov.remove();
+    ov=document.createElement('div'); ov.id='shipplan-ov'; ov.style.cssText='position:fixed;inset:0;z-index:9000;background:rgba(15,23,42,.45);display:flex;padding:24px';
+    ov.innerHTML='<div style="background:#fff;border-radius:12px;width:min(1100px,96vw);margin:auto;display:flex;flex-direction:column;max-height:92vh;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.4)">'
+      +'<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #e5e7eb">'
+        +'<div style="font-weight:700;font-size:16px;color:#0f172a">🚢 Plan Shipments</div><span class="mut tiny">ready-to-ship, sea, excl. FOB — drag a PO onto a container</span>'
+        +'<span id="sp-ctry" style="display:inline-flex;gap:4px;margin-left:8px"></span>'
+        +'<button id="sp-recommend" class="save-btn" style="margin-left:auto;background:#0f172a;color:#fff;border:none">⚡ Recommend consolidation</button>'
+        +'<button id="sp-close" class="save-btn light">✕ Close</button></div>'
+      +'<div id="sp-body" style="flex:1;overflow:auto;padding:14px 16px"><div class="count">Loading…</div></div></div>';
+    document.body.appendChild(ov); ov.onclick=function(e){ if(e.target===ov)ov.remove(); };
+    ov.querySelector('#sp-close').onclick=function(){ ov.remove(); };
+    ov.querySelector('#sp-recommend').onclick=function(){ _spRecommend(); };
+    _spLoad(); }
+  function _spLoad(){ fetch('/api/supply/ship-plan').then(function(r){return r.json();}).then(function(j){ _spData=(j&&j.pos)||[]; _spDraw(); }).catch(function(){ var b=document.getElementById('sp-body'); if(b)b.innerHTML='<div style="color:#dc2626">Failed to load.</div>'; }); }
+  function _spDraw(){ var body=document.getElementById('sp-body'); if(!body||!_spData)return;
+    var ctys=Array.from(new Set(_spData.map(function(p){return p.country;}))).sort();
+    var cp=document.getElementById('sp-ctry'); if(cp){ cp.innerHTML=['ALL'].concat(ctys).map(function(c){ var v=(c==='ALL'?'':c); return '<span class="pill'+((_spCtry===v)?' active':'')+'" data-spc="'+v+'">'+c+'</span>'; }).join('');
+      cp.querySelectorAll('[data-spc]').forEach(function(x){ x.onclick=function(){ _spCtry=x.dataset.spc; _spDraw(); }; }); }
+    var vis=_spData.filter(function(p){ return !_spCtry || p.country===_spCtry; });
+    var unassigned=vis.filter(function(p){ return !p.container; }), contMap={};
+    vis.forEach(function(p){ if(p.container){ (contMap[p.container]=contMap[p.container]||[]).push(p); } });
+    function poCard(p){ return '<div class="sp-po" draggable="true" data-po="'+esc(p.po)+'" style="border:1px solid #cbd5e1;border-radius:7px;padding:6px 9px;margin:0 0 6px;background:#fff;cursor:grab;font-size:12px"><div style="font-weight:700;color:#0f172a">'+esc(p.po)+'</div><div class="mut tiny">'+esc(p.supplier||'')+' · '+esc(p.country)+' · <b>'+p.pallets+'</b> pal</div></div>'; }
+    function fillBar(pal){ var pct=Math.min(100,Math.round(pal/SP_CAP*100)),col=pal>SP_CAP?'#dc2626':pal>=SP_CAP*0.9?'#16a34a':'#3b82f6'; return '<div style="height:7px;background:#eef2f7;border-radius:4px;overflow:hidden;margin-top:4px"><div style="height:100%;width:'+pct+'%;background:'+col+'"></div></div>'; }
+    function contBox(ref,ps){ var tot=ps.reduce(function(a,p){return a+p.pallets;},0); return '<div class="sp-drop" data-ref="'+esc(ref)+'" style="border:2px dashed #cbd5e1;border-radius:9px;padding:8px 10px;margin:0 0 10px;background:#f8fafc"><div style="display:flex;justify-content:space-between;font-size:12px;font-weight:700;color:#0f172a"><span>'+esc(ref)+'</span><span>'+(Math.round(tot*10)/10)+' / '+SP_CAP+' pal</span></div>'+fillBar(tot)+'<div style="margin-top:8px">'+ps.map(poCard).join('')+'</div></div>'; }
+    body.innerHTML='<div style="display:flex;gap:16px;align-items:flex-start">'
+      +'<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px;margin-bottom:6px">Unassigned <span class="mut">('+unassigned.length+')</span></div><div class="sp-drop" data-ref="" style="min-height:60px;border:2px dashed #e5e7eb;border-radius:9px;padding:8px">'+(unassigned.length?unassigned.map(poCard).join(''):'<div class="mut tiny">none</div>')+'</div></div>'
+      +'<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px;margin-bottom:6px">Containers</div>'+Object.keys(contMap).map(function(ref){ return contBox(ref,contMap[ref]); }).join('')+'<div class="sp-drop" data-ref="__new__" style="border:2px dashed #7dd3fc;border-radius:9px;padding:14px;text-align:center;color:#0369a1;background:#f0f9ff;font-size:12px">+ drop a PO here to start a new container</div></div>'
+      +'</div>';
+    body.querySelectorAll('.sp-po').forEach(function(card){ card.addEventListener('dragstart',function(e){ e.dataTransfer.setData('text/plain',card.dataset.po); e.dataTransfer.effectAllowed='move'; card.style.opacity='.5'; }); card.addEventListener('dragend',function(){ card.style.opacity=''; }); });
+    body.querySelectorAll('.sp-drop').forEach(function(dz){ dz.addEventListener('dragover',function(e){ e.preventDefault(); dz.style.borderColor='#0ea5e9'; }); dz.addEventListener('dragleave',function(){ dz.style.borderColor=''; });
+      dz.addEventListener('drop',function(e){ e.preventDefault(); dz.style.borderColor=''; var po=e.dataTransfer.getData('text/plain'); if(!po)return; var ref=dz.dataset.ref; if(ref==='__new__')ref=po; _spAssign(po, ref); }); });
+  }
+  function _spAssign(po,ref){ var p=_spData.find(function(x){return x.po===po;}); if(p){ p.shipment_ref=ref; p.container=ref||null; } _spDraw();
+    fetch('/api/supply/po/'+encodeURIComponent(po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({shipment_ref:ref})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ alert('Assign failed: '+j.error); _spLoad(); } }).catch(function(){ _spLoad(); }); }
+  function _spRecommend(){ if(!_spData)return; var vis=_spData.filter(function(p){ return (!_spCtry||p.country===_spCtry) && !p.container; });
+    var byC={}; vis.forEach(function(p){ (byC[p.country]=byC[p.country]||[]).push(p); });
+    var bins=[]; Object.keys(byC).forEach(function(cty){ byC[cty].slice().sort(function(a,b){return b.pallets-a.pallets;}).forEach(function(p){ var placed=false; for(var i=0;i<bins.length;i++){ if(bins[i].cty===cty && bins[i].pal+p.pallets<=SP_CAP){ bins[i].pos.push(p); bins[i].pal+=p.pallets; placed=true; break; } } if(!placed)bins.push({cty:cty,pos:[p],pal:p.pallets}); }); });
+    var multi=bins.filter(function(b){return b.pos.length>1;});
+    if(!multi.length){ alert('No consolidations found — each ready-to-ship PO already fits its own container (or none are unassigned).'); return; }
+    if(!confirm('Suggested consolidations:\n\n'+multi.map(function(b){ return b.cty+': '+b.pos.map(function(p){return p.po;}).join(' + ')+'  ('+(Math.round(b.pal*10)/10)+'/'+SP_CAP+' pal)'; }).join('\n')+'\n\nApply all? (each group ships together; the first PO is the master)'))return;
+    var jobs=[]; multi.forEach(function(b){ var master=b.pos[0].po; b.pos.forEach(function(p){ jobs.push({po:p.po,ref:master}); }); });
+    Promise.all(jobs.map(function(j){ return fetch('/api/supply/po/'+encodeURIComponent(j.po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({shipment_ref:j.ref})}).then(function(r){return r.json();}); })).then(function(){ _spLoad(); }).catch(function(){ _spLoad(); }); }
   // render the PURCHASE ORDERS section on the given sub-tab (plan = PO grid; others = former productions views)
   function showPoSub(tab){ poSub=(ALL_SUB_KEYS.indexOf(tab)>=0?tab:'plan'); var _umb=subUmbrella(poSub); current=_umb; syncHash();
     var _tk=++_navToken;   // this navigation — invalidates any slower async render from a view we've since left

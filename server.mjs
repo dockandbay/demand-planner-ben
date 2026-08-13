@@ -1879,6 +1879,30 @@ app.get('/api/supply/po/:po/pallets', async (req, res) => {
       pallets_override: r.pallets_override == null ? null : Number(r.pallets_override) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Plan Shipments drawer — READY-TO-SHIP POs (sea only, not FOB/manufacturing, standard destinations) with their
+// effective pallets (override or estimate) and current shipment/container assignment. Client groups: unassigned
+// (shipment_ref empty) on the left, containers (grouped by master/ref) on the right; drag-drop sets shipment_ref live.
+app.get('/api/supply/ship-plan', async (_req, res) => {
+  try {
+    const rows = (await pool.query(`
+      SELECT p.po, coalesce(p.supplier_name,'') supplier,
+        upper(coalesce(nullif(p.country_code,''), b.country_code, '')) country,
+        coalesce(p.shipment_ref,'') shipment_ref,
+        coalesce(nullif(sh.master_po,''), nullif(p.shipment_ref,'')) container,
+        ${PO_PALLETS_EFF_SQL} pallets,
+        to_char(${PROD_END_SQL},'YYYY-MM-DD') prod_end
+      FROM planner.purchase_orders p
+      LEFT JOIN planner.branches b ON b.name=p.branch
+      LEFT JOIN planner.suppliers s ON s.id=p.supplier_id
+      LEFT JOIN planner.shipments sh ON sh.shipment_ref=p.shipment_ref
+      WHERE p.status ILIKE 'ready to ship'
+        AND coalesce(lower(sh.mode),'') NOT LIKE 'air%'
+        AND coalesce(p.branch,'') NOT ILIKE '%manufactur%'
+        AND upper(coalesce(nullif(p.country_code,''), b.country_code, '')) IN ('UK','US','EU','AU','CA')
+      ORDER BY country, p.po`)).rows;
+    res.json({ ok: true, pos: rows.map(r => ({ po: r.po, supplier: r.supplier, country: r.country, shipment_ref: r.shipment_ref, container: r.container || null, pallets: Math.round((Number(r.pallets) || 0) * 10) / 10, prod_end: r.prod_end })) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.get('/api/supply/consolidation', async (req, res) => {
   const po = String(req.query.po || '').trim();
   if (!po) return res.status(400).json({ error: 'po required' });

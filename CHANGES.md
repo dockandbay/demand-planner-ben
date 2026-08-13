@@ -1,3 +1,8 @@
+## v26.935.0 🚢 Plan Shipments drawer (shipment allocation)
+- New **Plan Shipments** button on PURCHASE ORDERS ▸ PLAN opens a drag-and-drop drawer to allocate **READY-TO-SHIP** POs (sea only, FOB/air excluded, ship-to country pill) onto containers. Each container shows a **pallets / 20** fill bar (effective pallets = override or estimate). Drag a PO onto a container (or "+ new container") to **set its shipment_ref live** (timeline-logged); drag to Unassigned to remove.
+- **⚡ Recommend consolidation** greedily fills 20-pallet (40ft) containers per country and applies with one click (first PO = master). New endpoint `GET /api/supply/ship-plan`.
+- Sandbox note: seeded 6 UK POs (PO-1672805, -1683068, -1693118, -55UKWK-AW26-1/-3, -55UKWK1-AIR) to READY TO SHIP for testing (sandbox had none); revert anytime.
+
 ## v26.934.0 Supplier portal — Pallets field on ALL POs
 - The **Pallets** field now shows on the SHIPMENT tab ▸ Shipment details for **every** PO (not just Direct-to-Client). For DTC POs the carton/CBM/weight/dimension fields still follow. Same estimate + `pallets_override` save.
 
