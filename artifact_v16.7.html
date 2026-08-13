@@ -11537,6 +11537,7 @@ function renderReportView(){
 var TPL3=[['uk_ilg','UK ILG'],['us_geneva','US Geneva'],['eu_ifulfilment','EU iFulfilment'],['au_coghlans','AU Coghlans']];
 var TPL3_STATE={tpl:'eu_ifulfilment',period:'',mode:'invoices'};
 function render3plInvoice(body){
+  try{ var _h3=(location.hash||'').replace(/^#\/?/,'').split('/'); if(_h3[0]==='reports'&&_h3[1]==='3pl-invoicing'&&_h3[2]&&TPL3.some(function(t){return t[0]===_h3[2];}))TPL3_STATE.tpl=_h3[2]; }catch(e){}   // deep-link: #/reports/3pl-invoicing/<tpl>
   function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function su(x){ x=String(x||''); return /@dockandbay\.com$/i.test(x)?x.split('@')[0]+'@':x; }   // ben@dockandbay.com → ben@
   function lastMonth(){ var d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return d.toISOString().slice(0,7); }
@@ -11649,7 +11650,7 @@ function render3plInvoice(body){
         +'<span style="width:1px;height:16px;background:#e0e0e0;margin:0 4px"></span>'
         +'<label style="font-size:12px;color:#475569">Month <input type="month" id="tpl-period" value="'+e(TPL3_STATE.period)+'" style="font-size:12px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;margin-left:4px"></label>'
       +'</div><div id="tpl-body"><div style="color:#94a3b8;font-size:12px">Loading…</div></div></div>';
-    host.querySelectorAll('.rtab[data-tpl]').forEach(function(b){ b.onclick=function(){ TPL3_STATE.tpl=b.dataset.tpl; shell(); load(); }; });
+    host.querySelectorAll('.rtab[data-tpl]').forEach(function(b){ b.onclick=function(){ TPL3_STATE.tpl=b.dataset.tpl; if(window.writeHash)window.writeHash(['reports','3pl-invoicing',TPL3_STATE.tpl]); shell(); load(); }; });
     host.querySelectorAll('.catpill[data-mode]').forEach(function(b){ b.onclick=function(){ TPL3_STATE.mode=b.dataset.mode; shell(); load(); }; });
     var pe=host.querySelector('#tpl-period'); if(pe)pe.onchange=function(){ TPL3_STATE.period=pe.value; load(); };
   }

@@ -11,6 +11,35 @@ import pg from 'pg';
 import { buildInvoice, buildDtcPackingList } from './invoice.mjs';
 import { buildAsnLabelsPdf } from './asnpdf.mjs';
 
+// pdf.js (bundled by pdf-parse) constructs DOMMatrix while extracting text from some invoice PDFs (e.g. US Geneva —
+// fonts / transforms). It's a browser API absent in the Node/serverless runtime → "DOMMatrix is not defined". Provide
+// a functional 2D polyfill (guarded — only if the runtime lacks it) so Geneva allocation parses server-side.
+if (typeof globalThis.DOMMatrix === 'undefined') {
+  class DOMMatrixPolyfill {
+    constructor(init) { this.a = 1; this.b = 0; this.c = 0; this.d = 1; this.e = 0; this.f = 0;
+      if (typeof init === 'string') { const n = init.replace(/matrix\(|\)/g, '').split(',').map(Number); if (n.length === 6)[this.a, this.b, this.c, this.d, this.e, this.f] = n; }
+      else if (Array.isArray(init)) { if (init.length === 6)[this.a, this.b, this.c, this.d, this.e, this.f] = init; else if (init.length === 16) { this.a = init[0]; this.b = init[1]; this.c = init[4]; this.d = init[5]; this.e = init[12]; this.f = init[13]; } } }
+    get m11() { return this.a } get m12() { return this.b } get m21() { return this.c } get m22() { return this.d } get m41() { return this.e } get m42() { return this.f }
+    get is2D() { return true } get isIdentity() { return this.a === 1 && this.b === 0 && this.c === 0 && this.d === 1 && this.e === 0 && this.f === 0 }
+    multiply(o) { o = o || new DOMMatrixPolyfill(); const r = new DOMMatrixPolyfill();
+      r.a = this.a * o.a + this.c * o.b; r.b = this.b * o.a + this.d * o.b; r.c = this.a * o.c + this.c * o.d; r.d = this.b * o.c + this.d * o.d;
+      r.e = this.a * o.e + this.c * o.f + this.e; r.f = this.b * o.e + this.d * o.f + this.f; return r; }
+    multiplySelf(o) { const r = this.multiply(o); Object.assign(this, { a: r.a, b: r.b, c: r.c, d: r.d, e: r.e, f: r.f }); return this; }
+    preMultiplySelf(o) { const r = (o || new DOMMatrixPolyfill()).multiply(this); Object.assign(this, { a: r.a, b: r.b, c: r.c, d: r.d, e: r.e, f: r.f }); return this; }
+    translate(tx, ty) { return this.multiply(Object.assign(new DOMMatrixPolyfill(), { e: tx || 0, f: ty || 0 })); }
+    translateSelf(tx, ty) { return this.multiplySelf(Object.assign(new DOMMatrixPolyfill(), { e: tx || 0, f: ty || 0 })); }
+    scale(sx, sy) { sy = (sy == null ? sx : sy); return this.multiply(Object.assign(new DOMMatrixPolyfill(), { a: sx, d: sy })); }
+    scaleSelf(sx, sy) { sy = (sy == null ? sx : sy); return this.multiplySelf(Object.assign(new DOMMatrixPolyfill(), { a: sx, d: sy })); }
+    rotate(deg) { const r = (deg || 0) * Math.PI / 180, c = Math.cos(r), s = Math.sin(r); return this.multiply(Object.assign(new DOMMatrixPolyfill(), { a: c, b: s, c: -s, d: c })); }
+    inverse() { const det = this.a * this.d - this.b * this.c; const r = new DOMMatrixPolyfill(); if (!det) return r; r.a = this.d / det; r.b = -this.b / det; r.c = -this.c / det; r.d = this.a / det; r.e = (this.c * this.f - this.d * this.e) / det; r.f = (this.b * this.e - this.a * this.f) / det; return r; }
+    transformPoint(p) { p = p || { x: 0, y: 0 }; return { x: this.a * p.x + this.c * p.y + this.e, y: this.b * p.x + this.d * p.y + this.f }; }
+    toString() { return 'matrix(' + [this.a, this.b, this.c, this.d, this.e, this.f].join(', ') + ')'; }
+  }
+  DOMMatrixPolyfill.fromMatrix = m => new DOMMatrixPolyfill([m.a, m.b, m.c, m.d, m.e, m.f]);
+  globalThis.DOMMatrix = DOMMatrixPolyfill;
+  if (typeof globalThis.DOMPoint === 'undefined') globalThis.DOMPoint = class { constructor(x, y, z, w) { this.x = x || 0; this.y = y || 0; this.z = z || 0; this.w = (w == null ? 1 : w); } };
+}
+
 // On Vercel (serverless) use Supabase's TRANSACTION pooler (port 6543) — built for many
 // short-lived serverless connections — with a tiny per-instance pool. Session pooler (5432)
 // caps at 15 clients and serverless instances exhaust it. Locally, keep 5432 + a larger pool.

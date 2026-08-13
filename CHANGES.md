@@ -1,3 +1,7 @@
+## v26.974.0 3PL Invoicing — DOMMatrix fix (Geneva) + deep-linkable sub-tabs
+- **FIX (live US Geneva error “DOMMatrix is not defined”):** pdf.js (via pdf-parse) constructs DOMMatrix while extracting text from the Geneva invoice PDF; it is absent in the Node/serverless runtime. Added a guarded, functional 2D **DOMMatrix polyfill** (+ minimal DOMPoint) in server.mjs so Geneva allocation parses server-side. Verified: correct matrix maths + no regression to text extraction.
+- **Deep links:** the 3PL sub-tabs are now URL-addressable — selecting one writes `#/reports/3pl-invoicing/<tpl>` (uk_ilg · us_geneva · eu_ifulfilment · au_coghlans) and loading that URL opens straight to it.
+
 ## v26.973.0 DTC Mismatch — cap the SKU/qty diffs sub-table at 300px
 - The per-order SKU/SO/PO diffs table is now wrapped in a max-width:300px scroll container so it no longer runs off the screen.
 
