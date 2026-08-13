@@ -1,3 +1,9 @@
+## v26.948.0 Forecast snapshots — Compare rework (filters, SKU/Category toggle, tighter diffs)
+- **Compare now scopes to the snapshot's month window.** Comparing a snapshot vs Live no longer floods the grid with differences for live months that fall outside the snapshot's 18-month window — only months present in the snapshot are compared, so a fresh snapshot with 3 edits shows ~3 diffs, not many.
+- **Filters:** Country (UK/US/EU/AU/CA), Channel (DTC/FBA/B2B/ZAL), Category dropdown, and a SKU search box. Keys are parsed as sku|warehouse|channel so the compare can be sliced by market/channel/category/SKU.
+- **Show toggle: Categories | SKUs** — one view at a time (no more expand-both-in-one). Categories view = one row per category; SKUs view = one flat row per SKU (honours all filters).
+- Label column left-aligned and renamed **Category / SKU**; SKU rows no longer show the product name (SKU code only).
+
 ## v26.947.0 Plan Shipments — tidier container layout (masonry)
 - Container boxes now flow in a **multi-column masonry** layout instead of a flex-wrap row, so a tall shipment (many POs) no longer stretches the row or leaves big gaps next to the small boxes. They pack together neatly.
 
