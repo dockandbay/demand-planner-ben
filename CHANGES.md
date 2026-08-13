@@ -1,3 +1,6 @@
+## v26.985.0 Klaviyo BIS — always 4 market boxes side by side
+- The market boxes now use a fixed 4-column grid (repeat(4,minmax(0,1fr))) so UK/US/EU/AU always sit side by side; SKUs truncate to fit.
+
 ## v26.984.0 Klaviyo BIS — quantity column now visible in each market box
 - Each per-market box pinned the SKU column at 200px, squeezing the QTY out of view. SKUs now truncate with a hover-title, QTY has a min-width, and the boxes are wider (min 260px, auto-fill) so the quantity is always readable.
 

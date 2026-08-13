@@ -11229,7 +11229,7 @@ function renderKlaviyoBisView(body){
       return '<div style="border:1px solid '+col(m)+';border-radius:8px;overflow:hidden;background:#fff">'
         +'<div style="background:'+col(m)+';color:#111;font-weight:700;padding:5px 10px;font-size:12px;display:flex;justify-content:space-between;gap:8px"><span>'+m+'</span><span style="font-weight:600">'+list.length+' SKUs &middot; '+sub.toLocaleString()+'</span></div>'
         +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;table-layout:auto;width:100%"><thead><tr style="color:#64748b;text-transform:uppercase;font-size:9px;border-bottom:1px solid #e2e8f0"><th style="text-align:left;padding:3px 8px 3px 0">SKU</th><th style="text-align:right;padding:3px 0;min-width:56px">QTY</th></tr></thead><tbody>'+(rowsH||'<tr><td colspan="2" class="mut tiny" style="padding:8px">none</td></tr>')+'</tbody></table></div></div>'; }).join('');
-    summary.innerHTML=head+'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;align-items:start">'+blocks+'</div>';
+    summary.innerHTML=head+'<div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;align-items:start">'+blocks+'</div>';
     var dl=summary.querySelector('#kb-dl'); if(dl)dl.onclick=function(){ var out=[['SKU','UK','US','EU','AU','Total']];
       DROWS.forEach(function(r){ out.push([r.sku,r.UK||0,r.US||0,r.EU||0,r.AU||0,r.total||0]); });
       var csv=out.map(function(row){return row.map(function(v){v=String(v==null?'':v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;}).join(',');}).join('\r\n');
