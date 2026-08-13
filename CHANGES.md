@@ -1,3 +1,6 @@
+## v26.987.0 Open-actions scoreboard — trend view on the Metrics report
+- Added the Open-actions scoreboard to SUPPLY ▸ Reports ▸ Metrics: the headline Total (our actions) + Waiting-on-supplier, tiles for each of the 10 metrics, a week-over-week trend table, and a 📸 Snapshot now button. Reads /api/supply/action-metrics/data.
+
 ## v26.986.0 Open-actions scoreboard — engine (mig 226) + Thursday cron
 - New weekly open-actions metrics engine: `computeOpenActions()` returns 10 counts (supplier_pos, supplier_dtc, po_actions, order_plan, shipments, manufacturing, samples, payments_overdue, dtc_mismatch, and total_our = sum of our-actions). Server-side SQL tracks the live badges; supplier-waiting kept separate from the headline.
 - Migration **226** `action_metrics_snapshot` (one row per Thursday week_ending, upsert). Endpoints: GET `/api/supply/action-metrics/data` (live counts + 52-week history), POST `/api/supply/action-metrics/snapshot`, GET `/api/cron/action-metrics`.

@@ -9266,7 +9266,32 @@
         +biTile('Value in transit', '$'+units(d.value_in_transit||0))
         +biTile('POs awaiting confirmation', d.awaiting_confirmation||0, '', (Number(d.awaiting_confirmation)>0?'#b45309':null))
         +biTile('Deposits outstanding', '$'+units(d.deposits_outstanding||0), (d.deposit_pools||0)+' active pool'+(Number(d.deposit_pools)===1?'':'s'))
-      +'</div>'; }
+      +'</div>'
+      +'<div id="oa-board" style="margin-top:22px;border-top:1px solid #e5e7eb;padding-top:14px"><div class="mut tiny">Loading open actions…</div></div>';
+    (function(){ var el=b.querySelector('#oa-board'); if(!el)return;
+      fetch('/api/supply/action-metrics/data').then(function(r){return r.json();}).then(function(j){ _renderOpenActionsBoard(el,j); }).catch(function(){ el.innerHTML='<div style="color:#dc2626;font-size:12px">Open actions failed to load</div>'; }); })();
+  }
+  // Open-actions scoreboard on the Metrics report — current counts (our actions + waiting-on-supplier) + weekly trend + manual snapshot.
+  function _renderOpenActionsBoard(el,j){
+    var cur=(j&&j.current)||{}, hist=(j&&j.history)||[];
+    var METS=[['po_actions','PO action items'],['order_plan','Order plan pending'],['shipments','Shipments'],['manufacturing','Manufacturing'],['samples','Samples'],['payments_overdue','Payments overdue'],['dtc_mismatch','DTC mismatch']];
+    var SUP=[['supplier_pos','POs awaiting supplier'],['supplier_dtc','DtC awaiting supplier']];
+    function tile(lbl,val,accent){ return '<div style="flex:0 0 auto;min-width:126px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:9px 12px"><div style="font-size:21px;font-weight:800;color:'+(accent||'#0f172a')+'">'+(val||0)+'</div><div style="font-size:10px;color:#64748b;font-weight:700;text-transform:uppercase;letter-spacing:.03em;margin-top:3px">'+lbl+'</div></div>'; }
+    var supTot=(cur.supplier_pos||0)+(cur.supplier_dtc||0);
+    var h='<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:10px"><div style="font-weight:700;font-size:15px;color:#0f172a">Open actions scoreboard</div>'
+      +'<span class="mut tiny">weekly snapshot — Thursday 23:59 GMT</span>'
+      +'<button id="oa-snap" class="save-btn" style="margin-left:auto;background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8">📸 Snapshot now</button></div>'
+      +'<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px">'
+        +'<div style="background:#0f172a;color:#fff;border-radius:8px;padding:12px 18px"><div style="font-size:30px;font-weight:800">'+(cur.total_our||0)+'</div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#cbd5e1;margin-top:3px">Total our open actions</div></div>'
+        +'<div style="background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:12px 18px"><div style="font-size:30px;font-weight:800;color:#b45309">'+supTot+'</div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#9a6a3a;margin-top:3px">Waiting on supplier</div></div></div>'
+      +'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:6px">'+METS.map(function(m){return tile(m[1],cur[m[0]]);}).join('')+'</div>'
+      +'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">'+SUP.map(function(m){return tile(m[1],cur[m[0]],'#b45309');}).join('')+'</div>';
+    if(hist.length){ var cols=[['total_our','Total']].concat(METS).concat(SUP);
+      h+='<div style="font-weight:700;font-size:13px;margin:6px 0 4px">Weekly trend</div><div style="overflow-x:auto;max-width:100%;border:1px solid #e5e7eb;border-radius:6px"><table style="border-collapse:collapse;font-size:11px;text-align:left"><thead><tr style="background:#e9eef5;text-transform:uppercase;font-size:9px;color:#475569"><th style="text-align:left;padding:4px 8px;position:sticky;left:0;background:#e9eef5">Week</th>'+cols.map(function(c){return '<th style="text-align:right;padding:4px 8px;white-space:nowrap">'+c[1]+'</th>';}).join('')+'</tr></thead><tbody>'
+        +hist.map(function(r){ return '<tr style="border-top:1px solid #eef2f7"><td style="text-align:left;padding:3px 8px;font-weight:600;position:sticky;left:0;background:#fff;white-space:nowrap">'+esc(r.week_ending)+'</td>'+cols.map(function(c){ var v=r[c[0]]; return '<td style="text-align:right;padding:3px 8px;font-variant-numeric:tabular-nums'+(c[0]==='total_our'?';font-weight:700':'')+'">'+(v==null?'':v)+'</td>'; }).join('')+'</tr>'; }).join('')+'</tbody></table></div>'; }
+    else h+='<div class="mut tiny">No weekly snapshots yet — the first is captured next Thursday, or click Snapshot now.</div>';
+    el.innerHTML=h;
+    var sb=el.querySelector('#oa-snap'); if(sb)sb.onclick=function(){ sb.disabled=true; sb.textContent='Snapshotting…'; fetch('/api/supply/action-metrics/snapshot',{method:'POST'}).then(function(r){return r.json();}).then(function(){ fetch('/api/supply/action-metrics/data').then(function(r){return r.json();}).then(function(j2){ _renderOpenActionsBoard(el,j2); }); }).catch(function(){ sb.disabled=false; sb.textContent='📸 Snapshot now'; }); };
   // ERP COMPARE — open/draft ERP POs missing from the planner (supplier must be a planner product supplier)
   function renderErpCompare(d,_cont,_re){ var b=_cont||biBody(); d=d||{}; var all=d.rows||[];
     var active=all.filter(function(r){return !r.ignored;}), ignored=all.filter(function(r){return r.ignored;});
