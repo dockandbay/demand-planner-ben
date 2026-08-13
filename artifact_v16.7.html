@@ -11654,7 +11654,7 @@ function render3plInvoice(body){
     host.querySelectorAll('.catpill[data-mode]').forEach(function(b){ b.onclick=function(){ TPL3_STATE.mode=b.dataset.mode; shell(); load(); }; });
     var pe=host.querySelector('#tpl-period'); if(pe)pe.onchange=function(){ TPL3_STATE.period=pe.value; load(); };
   }
-  function load(){ var b=host.querySelector('#tpl-body'); if(!b)return; b.innerHTML='<div style="color:#94a3b8;font-size:12px">Loading…</div>';
+  function load(silent){ var b=host.querySelector('#tpl-body'); if(!b)return; if(!silent)b.innerHTML='<div style="color:#94a3b8;font-size:12px">Loading…</div>';
     if(TPL3_STATE.mode==='log'){ drawImportLog(b); return; }
     fetch('/api/supply/tpl/data?tpl='+encodeURIComponent(TPL3_STATE.tpl)+'&period='+encodeURIComponent(TPL3_STATE.mode==='invoices'?TPL3_STATE.period:''))
       .then(function(r){return r.json();}).then(function(d){ if(!d||!d.ok)throw new Error((d&&d.error)||'load failed');
@@ -11708,7 +11708,7 @@ function render3plInvoice(body){
         // a too-large upload comes back as a non-JSON "Request Entity Too Large" (413) — the live host (Vercel) caps
         // request bodies at ~4.5MB. Detect it and show a clear message instead of a raw JSON-parse error.
         .then(function(r){ if(!r.ok){ return r.text().then(function(t){ var big=(r.status===413)||/too large|request entity/i.test(t||''); throw new Error(big?('This file is '+(f.size/1048576).toFixed(1)+'MB — too large for the live server (uploads are capped at ~4.5MB). Ask Diviyaj to enable the direct-to-storage uploader, or upload a smaller / zipped file.'):('Upload failed ('+r.status+')')); }); } return r.json(); })
-        .then(function(j){ if(j&&j.error)throw new Error(j.error); load(); }).catch(function(err){ msg.style.color='#dc2626'; msg.textContent='Failed: '+(err.message||err); up.disabled=false; }); };
+        .then(function(j){ if(j&&j.error)throw new Error(j.error); load(true); }).catch(function(err){ msg.style.color='#dc2626'; msg.textContent='Failed: '+(err.message||err); up.disabled=false; }); };   // silent reload (no Loading… flash) — updates the file list in place
       rd.readAsDataURL(f); }
     up.onclick=function(){ doUpload(fi&&fi.files&&fi.files[0]); };
     if(fi)fi.onchange=function(){ if(fi.files&&fi.files[0])doUpload(fi.files[0]); };   // auto-upload on select OR drop-onto-input (silent — no Upload click)

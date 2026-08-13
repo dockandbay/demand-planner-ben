@@ -1,3 +1,6 @@
+## v26.977.0 3PL Invoicing — upload updates in place (no Loading flash)
+- After a drag/drop or selected upload, the invoice panel now refreshes silently in place (load(true)) instead of blanking to "Loading…" and rebuilding — no page-refresh feel.
+
 ## v26.976.0 3PL Invoicing — silent drag-upload, dash slugs, import-log left-align
 - **Drag/drop or select a file → uploads silently** (the file input now auto-uploads on change; no separate Upload click).
 - **Deep-link slugs use dashes:** `#/reports/3pl-invoicing/us-geneva` (uk-ilg · us-geneva · eu-ifulfilment · au-coghlans); read back to the underscore tpl keys.
