@@ -1,3 +1,7 @@
+## v26.970.0 Samples — 2-column SKU/qty paste import + colour-coded Our status
+- **Paste import:** in a sample's SKUs, an **⧉ Import SKU, Qty (paste)** button expands a box — paste two columns (SKU + qty) from Excel/Sheets (tab or comma separated); header rows / non-numeric qty are skipped, existing SKUs update, new ones add. Auto-saves.
+- **Our status dropdown is now colour-coded:** PLANNED grey · SHIPPED green · CANCELLED red, recolouring live on change.
+
 ## v26.969.0 FIX: Samples “Our status” not sticking + no save feedback
 - **Our status now reflects the saved value.** The sample detail drawer was reading the sample-detail endpoint’s `status_calc` (a supplier-progress value: “In production”/“Shipped”…) as “Our status”, which never matches PLANNED/SHIPPED/CANCELLED — so “🚢 Set shipping” and manual status changes appeared not to take. Now normalised from `s.status` (mirrors the grid).
 - **Silent grid update.** Changing status (Set shipping or the dropdown) now updates the grid row’s status chip in place — no full refresh needed, and the open card stays open.

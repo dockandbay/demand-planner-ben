@@ -9589,6 +9589,8 @@
       function _sampNorm(st){ st=String(st||'').toLowerCase(); return /cancel/.test(st)?'CANCELLED':((/ship|complete/.test(st))?'SHIPPED':'PLANNED'); }   // our-status normalise (mirrors the grid's status_calc)
       function _sampFlash(el){ if(!el)return; try{ el.style.transition='background .2s'; el.style.background='#bbf7d0'; setTimeout(function(){ el.style.background=''; el.style.transition=''; },900); }catch(e){} }   // green "saved" flash
       function _sampGridSync(newStatus){ if(i==='DRAWER')return; try{ var exp=document.getElementById('sampexp-'+i), gtr=exp&&exp.previousElementSibling; if(!gtr)return; var tds=gtr.querySelectorAll('td'), td=tds&&tds[2]; if(!td)return; td.innerHTML=sampleStatusChip(_sampNorm(newStatus))+(s.production_status?'<div class="mut tiny" style="margin-top:2px">supplier: '+esc(prodStatusLabel(s.production_status))+'</div>':''); _sampFlash(td); }catch(e){} }   // update the grid row's status chip in place (no full reload → keeps the card open)
+      var _SAMP_SBG={PLANNED:['#e5e7eb','#334155'],SHIPPED:['#bbf7d0','#166534'],CANCELLED:['#fecaca','#991b1b']};   // colour-coded Our-status dropdown
+      function _sampColorSel(sel){ if(!sel)return; var c=_SAMP_SBG[_sampNorm(sel.value)]||_SAMP_SBG.PLANNED; sel.style.background=c[0];sel.style.color=c[1];sel.style.borderColor=c[0];sel.style.fontWeight='700'; }
       var slines=(d.lines||[]).map(function(l){return {sku:l.sku,qty:l.qty};});
       // auto-save the SKU lines (debounced) — was previously only persisted by the removed "✓ Done" button
       var _slT=null; function saveSlines(){ clearTimeout(_slT); _slT=setTimeout(function(){ shipPost('/api/supply/sample/'+id+'/lines',{lines:slines.filter(function(l){return l.sku&&String(l.sku).trim();}).map(function(l){return {sku:String(l.sku).trim(),qty:Number(l.qty)||0};})},function(){}); },400); }
@@ -9622,7 +9624,9 @@
           ? '<div class="samp-lines"></div>'
             +'<input class="fci samp-skusearch" placeholder="search a SKU / product to add…" style="width:240px;text-align:left;margin-top:5px">'
             +'<div class="samp-skuresults" style="margin-top:4px"></div>'
-            +'<div class="mut tiny" style="margin-top:3px">Search &amp; tick SKUs to add (with qty), then ✓ Done to save.</div>'
+            +'<div class="mut tiny" style="margin-top:3px">Search &amp; tick SKUs to add (with qty), or import a 2-column paste below.</div>'
+            +'<div style="margin-top:6px"><button type="button" class="save-btn samp-paste-btn" style="background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8" title="paste a 2-column SKU + qty block copied from Excel / Google Sheets">⧉ Import SKU, Qty (paste)</button></div>'
+            +'<div class="samp-paste-wrap" style="display:none;margin-top:6px"><textarea class="fci samp-paste-txt" placeholder="TOWLB-CAB-XL-GREY&#9;120&#10;EYEMASK-DES-FLIGHTS&#9;60" style="width:260px;height:120px;box-sizing:border-box;font-family:ui-monospace,Menlo,monospace;font-size:12px;text-align:left;white-space:pre"></textarea><div style="margin-top:4px;display:flex;gap:6px"><button type="button" class="save-btn dark samp-paste-go">Add lines</button><button type="button" class="save-btn light samp-paste-cancel">Cancel</button></div><div class="samp-paste-msg mut tiny" style="margin-top:3px"></div></div>'
           : '<div class="tiny" style="line-height:1.7">'+((d.lines||[]).map(function(l){return '<div><b>'+units(l.qty)+'</b> × '+esc(l.sku)+'</div>';}).join('')||'<span class="mut">no SKUs</span>')+'</div>';
         var completion = editing
           ? dateField(s.completion_required,{cls:'samp-fld', attrs:'data-field="completion_date_required"', width:'120px'})
@@ -9633,8 +9637,9 @@
         var _us=_sampNorm(s.status);   // our status normalised from s.status (NOT the detail endpoint's supplier-progress status_calc, which never matches PLANNED/SHIPPED/CANCELLED)
         var _sActsAll=sampActionsAll(s);   // all matched exceptions (incl. snoozed) → inline Ⓐ markers next to the item that carries each one
         function _sMk(code){ return _sActsAll.indexOf(code)>=0?sampActMark(s.ref,code):''; }
+        var _scc=_SAMP_SBG[_us]||_SAMP_SBG.PLANNED;
         var statusCtl = editing
-          ? '<select class="fci samp-fld" data-field="status">'+['PLANNED','SHIPPED','CANCELLED'].map(function(o){return '<option value="'+o+'"'+(o===_us?' selected':'')+'>'+o+'</option>';}).join('')+'</select>'
+          ? '<select class="fci samp-fld samp-status-sel" data-field="status" style="background:'+_scc[0]+';color:'+_scc[1]+';border-color:'+_scc[0]+';font-weight:700">'+['PLANNED','SHIPPED','CANCELLED'].map(function(o){return '<option value="'+o+'"'+(o===_us?' selected':'')+'>'+o+'</option>';}).join('')+'</select>'
           : sampleStatusChip(_us);
         // supplier signalled shipped (marked shipped OR entered tracking) but we haven't set SHIPPED → offer "Set shipping" (mirrors the PO grid)
         var _supShipped=(s.production_status==='shipped' || String(s.tracking_code||'').trim());
@@ -9699,7 +9704,7 @@
         box.querySelectorAll('.samp-charge-acc').forEach(function(b){ b.onclick=function(){ b.disabled=true; shipPost('/api/supply/charge/'+b.dataset.id+'/accept',{},function(j){ if(j&&j.error){alert(j.error);b.disabled=false;return;} alert('Charge accepted — posted to Other Payments.'); loadSampleDetail(id,i); }); }; });
         box.querySelectorAll('.samp-charge-rej').forEach(function(b){ b.onclick=function(){ if(!confirm('Reject this charge?'))return; shipPost('/api/supply/charge/'+b.dataset.id+'/reject',{},function(){ loadSampleDetail(id,i); }); }; });
         if(editing){
-          box.querySelectorAll('.samp-fld').forEach(function(inp){ inp.onchange=function(){
+          box.querySelectorAll('.samp-fld').forEach(function(inp){ inp.onchange=function(){ if(inp.classList.contains('samp-status-sel'))_sampColorSel(inp);
             if(inp.classList.contains('dateinp')){ var _r=(inp.value||'').trim(),_i=_r?parseDateLoose(_r):''; if(_r&&!_i){inp.classList.add('err');return;} inp.classList.remove('err'); inp.value=_i; }
             var b={}; b[inp.dataset.field]=inp.value; shipPost(ep,b,function(j){ if(j&&j.error){ inp.classList.add('err'); return; } s[inp.dataset.field==='completion_date_required'?'completion_required':inp.dataset.field]=inp.value; _sampFlash(inp); if(inp.dataset.field==='status'){ s.status=inp.value; _sampGridSync(inp.value); } }); }; });
           bindDatePickers();
@@ -9715,6 +9720,15 @@
               var sk=rb.querySelector('.samp-skadd'); if(sk)sk.onclick=function(){ var any=false; rb.querySelectorAll('.samp-skcb:checked').forEach(function(c){ var qi=rb.querySelector('.samp-skqty[data-sku="'+(window.CSS&&CSS.escape?CSS.escape(c.value):c.value)+'"]'); slines.push({sku:c.value,qty:(qi&&Number(qi.value))||1}); any=true; }); if(any){ rb.innerHTML=''; sss.value=''; renderSlines(); saveSlines(); } };
               var ft=rb.querySelector('.samp-ftadd'); if(ft)ft.onclick=function(){ var sv=rb.querySelector('.samp-ftsku').value.trim(); if(!sv)return; var qv=rb.querySelector('.samp-ftqty').value; slines.push({sku:sv,qty:Number(qv)||1}); rb.innerHTML=''; sss.value=''; renderSlines(); saveSlines(); };
             }).catch(function(){ rb.innerHTML='<div class="mut tiny" style="color:#dc2626">search failed</div>'; }); },300);
+          // 2-column paste import (SKU <tab/comma> qty). Rows whose 2nd column isn't a positive number (e.g. a header) are skipped.
+          var _pb=box.querySelector('.samp-paste-btn'), _pw=box.querySelector('.samp-paste-wrap');
+          if(_pb)_pb.onclick=function(){ if(!_pw)return; var open=_pw.style.display!=='none'; _pw.style.display=open?'none':'block'; if(!open){ var t=box.querySelector('.samp-paste-txt'); if(t)t.focus(); } };
+          var _pc=box.querySelector('.samp-paste-cancel'); if(_pc)_pc.onclick=function(){ if(_pw)_pw.style.display='none'; };
+          var _pg=box.querySelector('.samp-paste-go'); if(_pg)_pg.onclick=function(){ var t=box.querySelector('.samp-paste-txt'), msg=box.querySelector('.samp-paste-msg'); var txt=(t&&t.value||'').trim(); if(msg)msg.textContent='';
+            if(!txt){ if(msg)msg.textContent='Paste some rows first.'; return; }
+            var n=0; txt.split(/\r?\n/).forEach(function(ln){ var c=ln.split(/\t|,/); var sku=(c[0]||'').trim(); var q=parseInt(String(c[1]||'').replace(/[^0-9-]/g,''),10); if(!sku||!(q>0))return; var ex=slines.filter(function(l){return String(l.sku).trim().toLowerCase()===sku.toLowerCase();})[0]; if(ex){ ex.qty=q; } else { slines.push({sku:sku,qty:q}); } n++; });
+            if(!n){ if(msg)msg.textContent='No valid rows — need 2 columns: SKU then a whole number qty.'; return; }
+            if(t)t.value=''; if(_pw)_pw.style.display='none'; renderSlines(); saveSlines(); };
         }
         loadSampleTimeline(s.ref, id, 'internal', s.supplier_name);
       }
