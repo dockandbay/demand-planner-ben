@@ -1,3 +1,6 @@
+## v26.978.0 3PL Invoicing — delete file also updates in place
+- Deleting an invoice file now refreshes the list silently in place (load(true)), matching the upload — no Loading… flash / page-refresh feel.
+
 ## v26.977.0 3PL Invoicing — upload updates in place (no Loading flash)
 - After a drag/drop or selected upload, the invoice panel now refreshes silently in place (load(true)) instead of blanking to "Loading…" and rebuilding — no page-refresh feel.
 
