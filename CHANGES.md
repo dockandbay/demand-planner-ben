@@ -1,3 +1,7 @@
+## v26.950.0 DEMAND ▸ KPIs — level-3 nav now standard light-blue + deep links
+- The KPIs sub-tab bar (In Stock / Slow moving / Inventory cover / Stockout risk / Discontinued / Forecast accuracy) now uses the **standard light-blue level-3 nav** (`.d3nav`/`.d3tab`, matching DEMAND ▸ Inputs and SUPPLY ▸ Reports) instead of the plain dark tab style.
+- Each sub-tab is now **deep-linkable**: selecting one writes `#/demand/kpis/<sub>` to the URL, and loading that URL opens straight to that sub-tab. e.g. `#/demand/kpis/accuracy`.
+
 ## v26.949.0 Locked forecast vs actual — show % difference in the cell
 - The small indigo **fc 1,456** locked-forecast figure in completed-month actuals cells (both category subtotal rows and SKU rows) now also shows the **% difference vs actual** inline, e.g. **fc 1,456  +12%**. Positive = forecast came in above actual, negative = below. The value was already computed for the tooltip; it is now visible without hovering.
 

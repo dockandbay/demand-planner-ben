@@ -9001,10 +9001,12 @@ function renderKeyAccountsView(body){
 }
 function renderKpisView(body){
   var subTabs=[['instock','In Stock'],['slowmoving','Slow moving'],['inventory','Inventory cover'],['stockout','Stockout risk'],['discontinued','Discontinued'],['accuracy','Forecast accuracy']];
-  var nav='<div style="display:flex;gap:2px;margin:2px 0 12px;border-bottom:1px solid #e0e0e0;flex-wrap:wrap">'
-    +subTabs.map(function(t){return '<button class="dnav'+(t[0]===KPI_SUB?' active':'')+'" data-k="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div>';
+  // sync the sub-tab from a deep-link hash (#/demand/kpis/<sub>) when present & valid
+  try{ var _hs=(location.hash||'').replace(/^#\/?/,'').split('/'); if(_hs[0]==='demand'&&_hs[1]==='kpis'&&_hs[2]&&subTabs.some(function(t){return t[0]===_hs[2];}))KPI_SUB=_hs[2]; }catch(e){}
+  var nav='<div class="d3nav">'
+    +subTabs.map(function(t){return '<button class="d3tab'+(t[0]===KPI_SUB?' active':'')+'" data-k="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div>';
   body.innerHTML=nav+'<div id="kpi-body"></div>';
-  body.querySelectorAll('.dnav[data-k]').forEach(function(b){ b.onclick=function(){ KPI_SUB=b.dataset.k; renderKpisView(body); }; });
+  body.querySelectorAll('.d3tab[data-k]').forEach(function(b){ b.onclick=function(){ KPI_SUB=b.dataset.k; if(window.writeHash)window.writeHash(['demand','kpis',KPI_SUB]); renderKpisView(body); }; });
   var kb=body.querySelector('#kpi-body');
   function numIn(id,v){ return '<input type="number" id="'+id+'" value="'+v+'" min="0" style="width:56px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px">'; }
   function grpPills(){ var grps=[['','All'],['Core','Core'],['Seasonal','Seasonal'],['Non-Core','Non-Core']];
