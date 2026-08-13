@@ -1,3 +1,6 @@
+## v26.966.0 Buy-plan PLAN popup: TikTok demand row highlighted yellow
+- The **TikTok demand** line in the SKU buy-plan (PLAN) popup now gets the same light-yellow demand-source highlight as DTC / B2B / FBA demand. Still shown only when the SKU has TIK forecast (hidden otherwise), sitting under DTC demand.
+
 ## v26.965.0 US AWD stocktake CSV: only "Code" and "Count" columns
 - The Cin7 stocktake download now has exactly two headers, **Code** and **Count** (SKU + counted units); removed the Branch column.
 

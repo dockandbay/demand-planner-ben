@@ -3592,7 +3592,7 @@ function buildTable(proj,md,pd,is3,hasFBA){
   return `<div class="pw"><table class="pt"><thead>${hdr}</thead><tbody>${rows.join('')}</tbody></table></div>`;
 }
 function sec(l,n){return`<tr><td class="rl sec">${l}</td>${Array(n).fill('<td class="sx"></td>').join('')}</tr>`;}
-function dr(l,proj,fn,ind){var hl=(l==='DTC demand'||l==='B2B demand'||l==='FBA demand');return`<tr${hl?' class="dmd-hl"':''}><td class="rl${ind?' ind':''}">${l}</td>${proj.map(p=>fn(p)).join('')}</tr>`;}
+function dr(l,proj,fn,ind){var hl=(l==='DTC demand'||l==='B2B demand'||l==='FBA demand'||l==='TikTok demand');return`<tr${hl?' class="dmd-hl"':''}><td class="rl${ind?' ind':''}">${l}</td>${proj.map(p=>fn(p)).join('')}</tr>`;}
 function c(v,cls){return`<td class="${cls}">${v}</td>`;}
 function card(l,v,s,w){return`<div class="sc2 ${w}"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;}
 function fmt(n){if(n===null||n===undefined)return'\u2014';const r=Math.round(n);return Math.abs(r)>=1000?r.toLocaleString():String(r);}
