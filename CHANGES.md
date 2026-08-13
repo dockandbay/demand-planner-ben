@@ -1,3 +1,6 @@
+## v26.980.0 Deposits Drawdown — PO link opens the drawer on the Payments tab
+- The drawdown popover PO link now opens the PO drawer straight to its **Payments** tab (openPODrawer(po,'pay')).
+
 ## v26.979.0 Deposits Drawdown — PO number in the hover popover opens the PO drawer
 - In the drawdown cell hover popover, each drawdown transaction's PO number is now a clickable link (light blue, ↗) that opens the PO drawer. Deposit-paid lines are unchanged (no PO).
 
