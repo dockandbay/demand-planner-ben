@@ -1,3 +1,7 @@
+## v26.954.0 DEMAND plan — quarter/half columns on-load fix + Display Settings moved
+- **Fix:** Quarter/Half-year total columns now appear on load when their toggle is persisted-on. TIME_COLS was built in the init IIFE before SHOW_Q/SHOW_H had read their saved values, so the columns were missing despite the checkbox showing ticked. TIME_COLS is now rebuilt once those vars are assigned.
+- Moved the **⚙ Display Settings** button onto the right-hand tool row, **after Smoothing, before Undo** (matched to that row's smaller button size; popup now right-anchored so it stays on-screen).
+
 ## v26.953.0 DEMAND ▸ Display Settings — moved Cat totals / Variant image / Quarter / Half-year in as tickboxes
 - Moved **Category totals**, **Variant image**, **Quarter totals** and **Half-year totals** out of More Filters and into the **Display Settings** popup as checkboxes (a new "Layout" group). More Filters keeps "From replacement".
 - Checkboxes reflect and persist the same state as before; the plan re-renders on change.

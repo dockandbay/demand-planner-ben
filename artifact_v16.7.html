@@ -778,9 +778,13 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
         <div style="text-align:right"><button onclick="_planPopClose()" style="font-size:12px;font-weight:600;padding:5px 18px;border:1px solid #2563eb;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer">Done</button></div>
       </div>
     </span>
+    <div id="plan-chips" style="display:flex;gap:5px;flex-wrap:wrap;align-items:center"></div>
+    <div style="flex:1"></div>
+    <button id="fclogic-btn" onclick="openFcLogic(event)" title="How the forecast numbers are calculated" style="font-size:10px;padding:3px 10px;border:1px solid #c4b5fd;border-radius:5px;background:#f5f3ff;color:#5b21b6;cursor:pointer;flex-shrink:0;font-weight:600">&#9635; Forecast Logic</button>
+    <button id="smoothset-btn" onclick="openSmoothSettings(event)" title="Smoothing settings — disregard discontinued + auto-smooth" style="font-size:10px;padding:3px 10px;border:1px solid #93c5fd;border-radius:5px;background:#eff6ff;color:#1e40af;cursor:pointer;flex-shrink:0;font-weight:600">&#9881; Smoothing</button>
     <span style="position:relative;display:inline-flex;align-items:center">
-      <button id="plan-display-btn" onclick="toggleDisplaySettings(event)" title="Display settings — record of change, forecast-to-actuals compare" style="font-size:11px;padding:4px 11px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#334155;cursor:pointer;flex-shrink:0;font-weight:600;margin-left:6px">&#9881; Display Settings <span style="opacity:.55;font-size:9px">▾</span></button>
-      <div id="plan-display-pop" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;z-index:300;background:#fff;border:1px solid #d0d0d0;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.2);width:360px;max-width:94vw;padding:14px 16px">
+      <button id="plan-display-btn" onclick="toggleDisplaySettings(event)" title="Display settings — record of change, forecast-to-actuals compare" style="font-size:10px;padding:3px 10px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#334155;cursor:pointer;flex-shrink:0;font-weight:600">&#9881; Display Settings <span style="opacity:.55;font-size:9px">▾</span></button>
+      <div id="plan-display-pop" style="display:none;position:absolute;top:100%;right:0;margin-top:4px;z-index:300;background:#fff;border:1px solid #d0d0d0;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.2);width:360px;max-width:94vw;padding:14px 16px">
         <div style="display:flex;align-items:center;margin-bottom:12px"><div style="font-weight:700;font-size:14px;color:#0f172a">Display settings</div></div>
         <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:12px">
           <span class="pill-lbl" style="width:80px" title="Show the R record-of-change indicator on cells with edit history (loads on demand)">Records</span>
@@ -805,10 +809,6 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
         <div style="text-align:right"><button onclick="_displayPopClose()" style="font-size:12px;font-weight:600;padding:5px 18px;border:1px solid #2563eb;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer">Done</button></div>
       </div>
     </span>
-    <div id="plan-chips" style="display:flex;gap:5px;flex-wrap:wrap;align-items:center"></div>
-    <div style="flex:1"></div>
-    <button id="fclogic-btn" onclick="openFcLogic(event)" title="How the forecast numbers are calculated" style="font-size:10px;padding:3px 10px;border:1px solid #c4b5fd;border-radius:5px;background:#f5f3ff;color:#5b21b6;cursor:pointer;flex-shrink:0;font-weight:600">&#9635; Forecast Logic</button>
-    <button id="smoothset-btn" onclick="openSmoothSettings(event)" title="Smoothing settings — disregard discontinued + auto-smooth" style="font-size:10px;padding:3px 10px;border:1px solid #93c5fd;border-radius:5px;background:#eff6ff;color:#1e40af;cursor:pointer;flex-shrink:0;font-weight:600">&#9881; Smoothing</button>
     <span style="width:1px;height:18px;background:#e0e0e0;flex-shrink:0;margin:0 2px"></span>
     <button id="undo-btn" onclick="undoApply()" disabled title="Undo the last forecast edit (up to 10) — also &#8984;/Ctrl+Z" style="font-size:10px;padding:3px 10px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#334155;cursor:default;opacity:.45;flex-shrink:0">&#8624; Undo</button>
     <span id="plan-sum-inline" title="Hold &#8984;/Ctrl and hover forecast cells to sum them" style="display:none;margin-left:auto;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#0f172a;background:#eef2ff;border:1px solid #c7d2fe;border-radius:6px;padding:3px 9px;white-space:nowrap;flex-shrink:0"></span>
@@ -4046,6 +4046,7 @@ function setShowCatTot(on){SHOW_CAT_TOT=!!on;try{localStorage.setItem('hzShowCat
 // expanded FYs; each is rendered like the FY-total column (units / revenue / growth) but over its own month set.
 var SHOW_Q=(function(){try{return localStorage.getItem('hzShowQtr')==='1';}catch(e){return false;}})();
 var SHOW_H=(function(){try{return localStorage.getItem('hzShowHalf')==='1';}catch(e){return false;}})();
+try{TIME_COLS=buildTimeCols();}catch(e){}   // rebuild now that SHOW_Q/SHOW_H hold their persisted values — the early init build ran before these vars were assigned, so persisted-on quarter/half columns were missing on load
 function setShowQtr(on){SHOW_Q=!!on;try{localStorage.setItem('hzShowQtr',SHOW_Q?'1':'0');}catch(e){}TIME_COLS=buildTimeCols();var b=document.getElementById('qtr-tot-toggle');if(b){b.classList.toggle('active',SHOW_Q);b.setAttribute('aria-pressed',SHOW_Q?'true':'false');}render();}
 function setShowHalf(on){SHOW_H=!!on;try{localStorage.setItem('hzShowHalf',SHOW_H?'1':'0');}catch(e){}TIME_COLS=buildTimeCols();var b=document.getElementById('half-tot-toggle');if(b){b.classList.toggle('active',SHOW_H);b.setAttribute('aria-pressed',SHOW_H?'true':'false');}render();}
 var SHOW_VARIANT_IMG=(function(){try{return localStorage.getItem('hzShowVarImg')==='1';}catch(e){return false;}})(); // variant-image thumbnail in the SKU label — hidden by default; toggle in More Filters & Settings
