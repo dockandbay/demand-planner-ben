@@ -1,3 +1,9 @@
+## v26.923.0 Manage 3PL — US & UK "Non GRS" reconciliation tabs
+- BUY & MOVE ▸ INVENTORY ▸ **Manage 3PL** gains two tabs: **US Non GRS** and **UK Non GRS** — same read-only report-vs-ERP reconciliation as the existing tabs, compared against the ERP non-GRS pool columns (`inventory_us_nongrs` / `inventory_uk_nongrs`). No writes; buy plan unaffected.
+- **US split by `VersionID`:** the existing **US 3PL** tab now imports **`VersionID = STD` only** (was: all rows — it previously also counted the `FBA` rows). The new **US Non GRS** tab imports **`VersionID = FBA`** from the same file. Verified live: US → 473 STD, US Non GRS → 9 FBA.
+- **UK Non GRS** reads a separate DriveHQ file (`…/UPLOADED/Stock Report.csv`, columns `Code`/`Quantity`/`Quantity2`). Verified live: 137 SKUs parsed + matched.
+- Server: `INV3PL_SRC` extended (per-source `versionFilter` + ERP compare columns); `inv3plParse` filters by `VersionID`; `inv3plCompare` uses per-source columns. Client: two new pills (friendly labels via `pillbar` `[value,label]` support). No new external service (same DriveHQ), no migration/env/deps.
+
 ## v26.922.0 Demand plan #5 — quarter & half-year total columns (toggle in More Filters)
 - Two new toggles in **More Filters & Settings**: **Quarter totals** and **Half-year totals** (independent, off by default, persisted). When on, sum-total columns appear **inside each expanded FY** showing **units / revenue / growth-vs-LY** at both subcategory and SKU level (plus the market + company grand-total rows). Interleaved: each period total sits right after its own months.
 - Fiscal periods off the March FY start: **Q1 Mar-May, Q2 Jun-Aug, Q3 Sep-Nov, Q4 Dec-Feb; H1 Mar-Aug, H2 Sep-Feb**. Only in expanded FYs (collapsed FYs keep just the FY total).

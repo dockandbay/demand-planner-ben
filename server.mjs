@@ -6806,10 +6806,13 @@ app.post('/api/supply/supplier-timing/review', async (req, res) => {
 // ── Manage 3PL: import a market's 3PL stock report (drivehq CSV) and compare on-hand vs planner.products.inventory_<mkt>_3pl ──
 // EU has no source yet. URLs are cache-busted with a timestamp. Read-only (no writes) — it's a comparison view.
 const INV3PL_SRC = {
-  US: { url: 'https://www.drivehq.com/file/df.aspx/publish/dockandbay/UPLOADED/DockAndBayDailyInventoryReport.csv', sku: 'ItemID',       onhand: 'OnHand',        avail: 'Available' },
-  UK: { url: 'https://www.drivehq.com/file/df.aspx/publish/dockandbay/UPLOADED/UK%20-%20Stock%20Report.csv',        sku: 'Product_Code', onhand: 'PhysicalStock', avail: 'AvailableStock' },
-  AU: { url: 'https://www.drivehq.com/file/df.aspx/publish/dockandbay/UPLOADED/DOK_DSA_Report.csv',                 sku: 'STOCK_CODE',   onhand: 'CLOSE_ON_HAND', avail: 'STOCK_AVAILABLE' },
-  EU: { type: 'blade', onhand: 'total_saleable', avail: 'available' },   // BLADE (bladepro.io) API — total_saleable=on hand, available=available
+  US: { url: 'https://www.drivehq.com/file/df.aspx/publish/dockandbay/UPLOADED/DockAndBayDailyInventoryReport.csv', sku: 'ItemID',       onhand: 'OnHand',        avail: 'Available', versionCol: 'VersionID', versionFilter: 'STD', label: 'US 3PL' },   // GRS = VersionID STD only (FBA rows go to US_NG)
+  UK: { url: 'https://www.drivehq.com/file/df.aspx/publish/dockandbay/UPLOADED/UK%20-%20Stock%20Report.csv',        sku: 'Product_Code', onhand: 'PhysicalStock', avail: 'AvailableStock', label: 'UK 3PL' },
+  AU: { url: 'https://www.drivehq.com/file/df.aspx/publish/dockandbay/UPLOADED/DOK_DSA_Report.csv',                 sku: 'STOCK_CODE',   onhand: 'CLOSE_ON_HAND', avail: 'STOCK_AVAILABLE', label: 'AU 3PL' },
+  EU: { type: 'blade', onhand: 'total_saleable', avail: 'available', label: 'EU 3PL' },   // BLADE (bladepro.io) API — total_saleable=on hand, available=available
+  // ── Non-GRS reconciliation tabs (read-only, same process; compared vs the ERP non-GRS pool column) ──
+  US_NG: { url: 'https://www.drivehq.com/file/df.aspx/publish/dockandbay/UPLOADED/DockAndBayDailyInventoryReport.csv', sku: 'ItemID', onhand: 'OnHand', avail: 'Available', versionCol: 'VersionID', versionFilter: 'FBA', label: 'US 3PL Non GRS', ohCol: 'inventory_us_nongrs', avCol: 'inventory_us_nongrs', nongrs: true },   // same US file, FBA rows only
+  UK_NG: { url: 'https://www.drivehq.com/file/df.aspx/publish/dockandbay/UPLOADED/Stock%20Report.csv', sku: 'Code', onhand: 'Quantity', avail: 'Quantity2', label: 'UK 3PL Non GRS', ohCol: 'inventory_uk_nongrs', avCol: 'inventory_uk_nongrs', nongrs: true },   // separate non-GRS stock file
 };
 // ── BLADE (bladepro.io) EU 3PL API. Mirrors Ben's Apps Script: login → token, then PUT /stocks (a read) with a saved
 // request body. Variations (id→sku) are fetched as a fallback for any stock row missing a SKU. Creds live in env only.
@@ -6879,8 +6882,9 @@ function parseCsvLine(line) { const out = []; let cur = '', q = false;
 function csvNum(v) { const n = parseFloat(String(v == null ? '' : v).replace(/[^0-9.\-]/g, '')); return isNaN(n) ? 0 : n; }
 // Compare a parsed report (sku -> {oh,av}) against live products: ERP on-hand (inventory_<mkt>_3pl_onhand) + ERP available (inventory_<mkt>_3pl).
 async function inv3plCompare(mkt, rep) {
-  const ohCol = 'inventory_' + mkt.toLowerCase() + '_3pl_onhand';   // mkt is whitelisted → safe to interpolate
-  const avCol = 'inventory_' + mkt.toLowerCase() + '_3pl';
+  const cfg = INV3PL_SRC[mkt] || {};   // non-GRS tabs override the ERP compare columns (inventory_<mkt>_nongrs); GRS tabs derive them
+  const ohCol = cfg.ohCol || ('inventory_' + mkt.toLowerCase() + '_3pl_onhand');   // mkt/cols are whitelisted → safe to interpolate
+  const avCol = cfg.avCol || ('inventory_' + mkt.toLowerCase() + '_3pl');
   const erp = {};
   (await pool.query(`SELECT sku, coalesce(${ohCol},0)::numeric oh, coalesce(${avCol},0)::numeric av FROM planner.products WHERE sku IS NOT NULL`)).rows
     .forEach(x => { erp[x.sku] = { oh: Number(x.oh) || 0, av: Number(x.av) || 0 }; });
@@ -6897,8 +6901,11 @@ function inv3plParse(cfg, text) {   // CSV text -> { sku: {oh,av} } (sum duplica
   const hdr = parseCsvLine(lines[0]).map(h => h.replace(/^"|"$/g, ''));
   const ci = { sku: hdr.indexOf(cfg.sku), oh: hdr.indexOf(cfg.onhand), av: hdr.indexOf(cfg.avail) };
   if (ci.sku < 0) return { error: 'SKU column "' + cfg.sku + '" not found', headers: hdr };
+  const vi = cfg.versionFilter ? hdr.indexOf(cfg.versionCol || 'VersionID') : -1;   // when set, keep only rows whose VersionID matches (US: STD vs FBA)
   const rep = {};
-  for (let i = 1; i < lines.length; i++) { const f = parseCsvLine(lines[i]); const sku = String(f[ci.sku] || '').replace(/^"|"$/g, '').trim(); if (!sku) continue;
+  for (let i = 1; i < lines.length; i++) { const f = parseCsvLine(lines[i]);
+    if (vi >= 0) { const ver = String(f[vi] || '').replace(/^"|"$/g, '').trim().toUpperCase(); if (ver !== String(cfg.versionFilter).toUpperCase()) continue; }
+    const sku = String(f[ci.sku] || '').replace(/^"|"$/g, '').trim(); if (!sku) continue;
     if (!rep[sku]) rep[sku] = { oh: 0, av: 0 };
     rep[sku].oh += ci.oh >= 0 ? csvNum(f[ci.oh]) : 0;
     rep[sku].av += ci.av >= 0 ? csvNum(f[ci.av]) : 0; }
@@ -6910,9 +6917,9 @@ app.get('/api/supply/inventory-3pl/status', async (req, res) => {
   if (!INV3PL_SRC[mkt]) return res.json({ market: mkt, configured: false, error: mkt === 'EU' ? 'No EU 3PL report source configured yet.' : 'Unknown market' });
   try {
     const m = (await pool.query(`SELECT imported_by, to_char(imported_at,'YYYY-MM-DD"T"HH24:MI:SS') imported_at, report FROM planner.inventory_3pl_imports WHERE market=$1`, [mkt])).rows[0];
-    if (!m || !m.report) return res.json({ market: mkt, configured: true, imported: false });
+    if (!m || !m.report) return res.json({ market: mkt, label: INV3PL_SRC[mkt].label || mkt, configured: true, imported: false });
     const rep = {}; Object.keys(m.report).forEach(sku => { const a = m.report[sku]; rep[sku] = { oh: Number(a[0]) || 0, av: Number(a[1]) || 0 }; });
-    res.json({ market: mkt, configured: true, imported: true, imported_by: m.imported_by, imported_at: m.imported_at, ...(await inv3plCompare(mkt, rep)) });
+    res.json({ market: mkt, label: INV3PL_SRC[mkt].label || mkt, configured: true, imported: true, imported_by: m.imported_by, imported_at: m.imported_at, ...(await inv3plCompare(mkt, rep)) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // POST: fetch the market's report fresh, parse, persist (who/when + report), and return the comparison.
@@ -6937,7 +6944,7 @@ app.post('/api/supply/inventory-3pl/import', async (req, res) => {
     await pool.query(`INSERT INTO planner.inventory_3pl_imports (market, imported_by, imported_at, report) VALUES ($1,$2,now(),$3::jsonb)
       ON CONFLICT (market) DO UPDATE SET imported_by=excluded.imported_by, imported_at=now(), report=excluded.report`, [mkt, by, JSON.stringify(store)]);
     const m = (await pool.query(`SELECT to_char(imported_at,'YYYY-MM-DD"T"HH24:MI:SS') imported_at FROM planner.inventory_3pl_imports WHERE market=$1`, [mkt])).rows[0];
-    res.json({ market: mkt, configured: true, imported: true, imported_by: by, imported_at: m.imported_at, url: cfg.url || 'BLADE API', ...(await inv3plCompare(mkt, parsed.rep)) });
+    res.json({ market: mkt, label: cfg.label || mkt, configured: true, imported: true, imported_by: by, imported_at: m.imported_at, url: cfg.url || 'BLADE API', ...(await inv3plCompare(mkt, parsed.rep)) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // ── Manage FBA / FBA Aged: manually-uploaded Amazon FBA inventory report per market. Compare (available + fc-transfer)

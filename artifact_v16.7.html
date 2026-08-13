@@ -9277,14 +9277,14 @@ function renderInventory(){
   var ex=document.getElementById('inventory-wrap'); if(ex)ex.remove();
   var wrap=document.createElement('div'); wrap.id='inventory-wrap'; wrap.style.cssText='margin:0 0 20px';   // full-width (match the SUPPLY pages)
   var SUBS=[['status','Status Report'],['manage3pl','Manage 3PL'],['managefba','Manage FBA'],['fba-aged','FBA Aged']];
-  function pillbar(list,cur,cls){ return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px">'+list.map(function(c){ var on=(c===cur);
-      return '<button class="'+cls+'" data-c="'+c+'" style="padding:4px 15px;border-radius:16px;border:1px solid '+(on?'#1e40af':'#cbd5e1')+';background:'+(on?'#1e40af':'#fff')+';color:'+(on?'#fff':'#334155')+';font-weight:600;font-size:12px;cursor:pointer">'+c+'</button>'; }).join('')+'</div>'; }
+  function pillbar(list,cur,cls){ return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px">'+list.map(function(it){ var c=Array.isArray(it)?it[0]:it,lbl=Array.isArray(it)?it[1]:it; var on=(c===cur);
+      return '<button class="'+cls+'" data-c="'+c+'" style="padding:4px 15px;border-radius:16px;border:1px solid '+(on?'#1e40af':'#cbd5e1')+';background:'+(on?'#1e40af':'#fff')+';color:'+(on?'#fff':'#334155')+';font-weight:600;font-size:12px;cursor:pointer">'+lbl+'</button>'; }).join('')+'</div>'; }
   function placeholder(title){ return '<div style="padding:26px;color:#64748b;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;text-align:center"><b style="color:#334155">'+title+'</b><div style="margin-top:6px;font-size:13px">To complete in future.</div></div>'; }
   // Slug the level-3 page (+ market) into the URL so it's linkable: #/buy-move/inventory/<sub>/<market>
   try{ if(window.writeHash){ var _mk=(INV_SUB==='manage3pl'?INV_3PL:((INV_SUB==='managefba'||INV_SUB==='fba-aged')?INV_FBA:'')); writeHash(['buy-move','inventory',INV_SUB].concat(_mk?[_mk]:[])); } }catch(e){}
   var subnav='<div class="d3nav">'+SUBS.map(function(t){return '<button class="d3tab inv-sub'+(t[0]===INV_SUB?' active':'')+'" data-sub="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div>';
   var body;
-  if(INV_SUB==='manage3pl') body=pillbar(['US','UK','AU','EU'],INV_3PL,'inv-3pl-pill')+'<div id="inv3pl-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
+  if(INV_SUB==='manage3pl') body=pillbar(['US','UK','AU','EU',['US_NG','US Non GRS'],['UK_NG','UK Non GRS']],INV_3PL,'inv-3pl-pill')+'<div id="inv3pl-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
   else if(INV_SUB==='managefba') body=pillbar(['US','UK','AU','EU','CA'],INV_FBA,'inv-fba-pill')+'<div id="invfba-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
   else if(INV_SUB==='fba-aged') body=pillbar(['US','UK','AU','EU','CA'],INV_FBA,'inv-fba-pill')+'<div id="fbaaged-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
   else body=pillbar(['US','UK','EU','AU','CA'],INV_STATUS_MKT,'inv-status-pill')+'<div id="invstatus-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';   // Status Report (SUG-0024)
@@ -9667,7 +9667,7 @@ function inv3plRender(j){ var panel=document.getElementById('inv3pl-panel'); if(
   if(j&&j.error){ panel.innerHTML='<div style="color:#dc2626">'+tHesc(j.error)+(j.headers?'<div class="mut" style="font-size:11px;margin-top:4px">Report headers: '+tHesc(j.headers.join(', '))+'</div>':'')+'</div>'; return; }
   var meta=j.imported?(function(){ var a=inv3plAge(j.imported_at); return '<span class="mut" style="font-size:12px">'+tHesc(a.age)+' · last imported <b>'+tHesc(inv3plUser(j.imported_by))+'</b> on '+tHesc(a.stamp)+'</span>'; })()
     :'<span class="mut" style="font-size:12px">Not imported yet.</span>';
-  var head='<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 10px"><button id="inv3pl-import" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:6px;padding:6px 15px;font-weight:600;cursor:pointer;font-size:12px">⟳ Import '+tHesc(j.market||INV_3PL)+' 3PL report</button>'+meta+' <span id="inv3pl-msg" class="mut" style="font-size:12px"></span></div>';
+  var head='<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 10px"><button id="inv3pl-import" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:6px;padding:6px 15px;font-weight:600;cursor:pointer;font-size:12px">⟳ Import '+tHesc(j.label||j.market||INV_3PL)+' report</button>'+meta+' <span id="inv3pl-msg" class="mut" style="font-size:12px"></span></div>';
   _inv3plLast=j;
   var content='';
   if(j.imported){ var rows=j.rows||[];
