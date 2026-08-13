@@ -1,3 +1,8 @@
+## v26.932.0 Tweaks — column colour, pre-launch grey fix, pallet-estimate text size
+- Quarter / half / full-year total columns now all **#898989** (per Ben).
+- **Pre-launch greying now actually shows**: it was losing to the `.bg26/.sku-act-cell !important` backgrounds — now applied with inline `!important`, so pre-launch months (incl. actuals) shade **#D9D9D9**.
+- SHIPMENTS tab **pallet-estimate line** ("Est. cartons … · Est. pallets … · shipment calcs use …") enlarged to 12px to match the "Pallet override" label.
+
 ## v26.931.0 DTC Mismatch — accept unmapped POs + total-issue counter
 - The **"Open POs not mapped to a sales order"** section now has the **accept + note** feature (like the sales-order rows): accepting a PO clears it from the count and badges it. New table `dtc_po_review` (migration 222) + `POST /api/supply/dtc/po-review`.
 - The **DTC MISMATCH menu badge** now shows **total open issues = sales-order issues + unmapped POs** (minus accepted) — e.g. 16 in sandbox (6 + 10). The section header shows the non-accepted count.

@@ -1621,7 +1621,7 @@
       +lookupDatalists()+'<div class="cli-form" style="max-width:620px">'
       +shipBlock
       +row('Cartons / pallets <span class="mut tiny">(estimate = qty ÷ carton/pallet qty; a pallet override feeds freight &amp; cash flow)</span>',
-        '<div id="po-pallets-est" data-po="'+esc(po)+'" class="mut tiny" style="margin-bottom:4px">loading estimate…</div>'
+        '<div id="po-pallets-est" data-po="'+esc(po)+'" style="font-size:12px;color:#334155;font-weight:600;margin-bottom:5px">loading estimate…</div>'
         +'<label style="font-size:12px">Pallet override <input class="fci txtin" data-ep="'+ep+'" data-field="pallets_override" placeholder="(use estimate)" style="width:90px;text-align:right"></label> <span class="mut tiny">leave blank to use the estimate</span>')
       +row('Branch delivery notes <span class="mut tiny">'+(r.shipment?'(from the assigned shipment — edit on the shipment)':'(defaults from the branch when the branch is set · shown to the supplier)')+'</span>', r.shipment
           ? '<textarea rows="3" readonly style="width:440px;max-width:100%;box-sizing:border-box;text-align:left;font-family:inherit;background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0;border-radius:6px;padding:6px 8px">'+esc(r.shipment_delivery_notes||r.branch_delivery_notes||'')+'</textarea>'
