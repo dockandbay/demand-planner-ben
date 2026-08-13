@@ -201,7 +201,7 @@
 #supply-root #po-prog>*,#supply-root #po-act>*,#supply-root #po-ctry>*{margin:2px 3px 2px 0}
 #supply-root #po-prog .pill,#supply-root #po-act .pill,#supply-root #po-ctry .pill{padding:2px 7px}
 /* level-3 sub-navs (REPORTS, CONFIG): underline tabs like the level-1/2 menus, in light blue */
-#supply-root #rep-subnav,#supply-root #prod-subtabs,#supply-root .po-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 12px}
+#supply-root #rep-subnav,#supply-root #prod-subtabs,#supply-root .po-subnav{display:flex;gap:2px;align-items:center;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 12px}
 #supply-root #config-subs{display:flex;gap:2px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #e0e0e0;margin:2px 0 10px}   /* CONFIG level-2 = underline tabs, match other views (level-3 #config-subs-l3 stays a pill) */
 #supply-root #config-subs .rtab{color:#888;padding:6px 13px;font-weight:500}   /* match SUPPLY .stab colours (was blue .rtab) */
 #supply-root #config-subs .rtab:hover{color:#1a1a1a}
@@ -215,7 +215,7 @@
 #supply-root .skusel-opt:hover{background:#eff6ff}
 #supply-root .skusel-opt .mut{color:#94a3b8}
 /* keep each tab's label + its action-count badge on one line (never wrap the badge below the header) */
-#supply-root #prod-subtabs .rtab,#supply-root .po-subnav .rtab{white-space:nowrap}
+#supply-root #rep-subnav .rtab,#supply-root #prod-subtabs .rtab,#supply-root .po-subnav .rtab{white-space:nowrap;flex:0 0 auto}
 #supply-root #prod-subtabs .rtab .ex-badge,#supply-root .po-subnav .rtab .ex-badge{display:inline-block;vertical-align:middle}
 #supply-root .rtab-count{display:inline-block;margin-left:5px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;line-height:1;padding:2px 5px;border-radius:8px;vertical-align:middle}
 /* Opened PO detail lives inside the wide, horizontally-scrolling PO grid — pin its sub-tab strip to the left

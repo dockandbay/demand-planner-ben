@@ -1,3 +1,6 @@
+## v26.989.0 Mobile: level-3 nav scrolls horizontally instead of wrapping
+- The SUPPLY level-3 sub-navs (#rep-subnav reports · #prod-subtabs · .po-subnav) now scroll horizontally in one row (flex-wrap:nowrap + overflow-x:auto; tabs flex:0 0 auto) instead of wrapping to multiple lines on mobile.
+
 ## v26.988.0 Open-actions scoreboard — FIX syntax + per-metric sparklines/expand
 - FIX: v26.987 board function was missing its closing brace (broke the SUPPLY reports script). Corrected.
 - Redesign: each metric row shows caret, current value, a last-4-weeks sparkline + the 4 values, and expands to the full snapshot history + trend sparkline. Headline Total + Waiting-on-supplier tiles and Snapshot-now retained.
