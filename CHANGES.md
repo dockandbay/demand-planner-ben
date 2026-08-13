@@ -1,3 +1,7 @@
+## v26.930.0 Demand plan — column colours + pre-launch greying
+- Total-column colours (Ben): **quarter** columns `#C4D8E2`, **half-year** columns `#B5C7EB`, **full-year** total columns `#909EAE` (cells + headers). Grand-total quarter/half cells use dark text so they stay readable on the lighter fills.
+- **Pre-launch months** on a SKU row (every month before the SKU's launch date, **including actuals columns**) are now shaded **`#D9D9D9`** — e.g. HAIRW-SUE-BLUSHBY (pre-launch to Aug-2027).
+
 ## v26.929.0 Pallet override — supplier-portal PO-card input (feature A complete)
 - The supplier can now enter the **pallet count** on the portal PO card (under Production status / Completion date): a **Pallets** field showing the current value + `est. N pallets · M cartons`. Saves to the **same** `purchase_orders.pallets_override` used by the admin SHIPMENTS tab (so it feeds freight/cash flow) via `POST /api/portal/po-pallets`, portalOwnsPO-guarded, **timeline-logged**. Completes feature A (admin + calc + portal).
 
