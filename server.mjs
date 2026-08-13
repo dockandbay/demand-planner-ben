@@ -13084,6 +13084,34 @@ app.post('/api/portal/upload', portalAuth, async (req, res) => {
     res.json({ id: r.rows[0].id, byte_size: buf.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// #A supplier enters the pallet count on the portal PO card — same purchase_orders.pallets_override field the admin
+// SHIPMENTS tab uses (so it feeds freight/cash flow), and every change is logged to the PO timeline. Blank clears it.
+app.post('/api/portal/po-pallets', portalAuth, async (req, res) => {
+  const b = req.body || {}; const po = String(b.po || '').trim();
+  if (!po) return res.status(400).json({ error: 'po required' });
+  if (!await portalOwnsPO(req, po)) return res.status(403).json({ error: 'not your PO' });
+  let val = null;
+  if (b.pallets_override != null && String(b.pallets_override).trim() !== '') {
+    val = Number(String(b.pallets_override).replace(/[^0-9.\-]/g, ''));
+    if (!isFinite(val) || val < 0) return res.status(400).json({ error: 'Pallets must be a number.' });
+  }
+  try {
+    const by = (req.portal && req.portal.email) || 'supplier';
+    const old = (await pool.query(`SELECT pallets_override::text FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0] || {};
+    await pool.query(`UPDATE planner.purchase_orders SET pallets_override=$2, updated_at=now() WHERE po=$1`, [po, val]);
+    try { await logPoFieldChanges(po, ['pallets_override'], old, { pallets_override: val }, by); } catch (e) {}
+    res.json({ ok: true, po, pallets_override: val });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.get('/api/portal/po-pallets/:po', portalAuth, async (req, res) => {   // #A portal-scoped estimate + override for the PO card
+  const po = req.params.po;
+  if (!await portalOwnsPO(req, po)) return res.status(403).json({ error: 'not your PO' });
+  try {
+    const r = (await pool.query(`SELECT ${PO_CARTONS_SQL} est_cartons, ${PO_PALLETS_SQL} est_pallets, p.pallets_override FROM planner.purchase_orders p WHERE p.po=$1`, [po])).rows[0];
+    if (!r) return res.status(404).json({ error: 'not found' });
+    res.json({ po, est_cartons: Number(r.est_cartons) || 0, est_pallets: Number(r.est_pallets) || 0, pallets_override: r.pallets_override == null ? null : Number(r.pallets_override) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.post('/api/portal/submit', portalAuth, async (req, res) => {
   const b = req.body || {}; if (!b.po) return res.status(400).json({ error: 'po required' });
   if (!await portalOwnsPO(req, b.po)) return portalDeny(res);

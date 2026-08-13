@@ -1,3 +1,6 @@
+## v26.926.0 Pallet override — supplier-portal endpoints (server)
+- Portal endpoints for the supplier to read/set the **same** `pallets_override` field on the PO card: `GET /api/portal/po-pallets/:po` (estimate + current override) and `POST /api/portal/po-pallets` (portalOwnsPO-guarded; blank clears; **timeline-logged** via `logPoFieldChanges` → "Pallet count: M → N"). Verified gated (401 without a supplier session). **Portal PO-card UI input is the last step** (needs the portal render + a portal test tunnel).
+
 ## v26.925.0 SHIPMENTS — carton/pallet estimate + per-PO pallet override (admin + calc)
 - PO ▸ SHIPMENTS tab now shows **Est. cartons** and **Est. pallets** (`Σ qty ÷ carton/pallet_qty` from `v_sku_attrs`) plus an editable **pallet override**. When set, the override is used **instead of the estimate in all shipment calcs** — freight cost, container-fill/consolidation, and cash flow — per PO, summed across a multi-PO shipment.
 - **Null override = byte-identical to today** (`coalesce(pallets_override, estimate)`). Change is timeline-logged automatically (PO_TRACK → "Pallet count: M → N").
