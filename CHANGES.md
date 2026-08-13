@@ -1,3 +1,8 @@
+## v26.976.0 3PL Invoicing — silent drag-upload, dash slugs, import-log left-align
+- **Drag/drop or select a file → uploads silently** (the file input now auto-uploads on change; no separate Upload click).
+- **Deep-link slugs use dashes:** `#/reports/3pl-invoicing/us-geneva` (uk-ilg · us-geneva · eu-ifulfilment · au-coghlans); read back to the underscore tpl keys.
+- **Cin7 import-log table fully left-aligned** — every column now has explicit left alignment (the SUPPLY table default is right-align, so cells relying only on the `.l` class were right-aligned).
+
 ## v26.975.0 3PL Cin7 import log — left-aligned + stale-running fix
 - The Cin7 import log is now wrapped in an explicit left-aligned container (was inheriting centred alignment from the report shell).
 - A run left in **running** for over 30 minutes (a timed-out import the client never resumed) is now reported as **stalled** (amber) instead of a perpetual "running"; running rows show blue, not red.

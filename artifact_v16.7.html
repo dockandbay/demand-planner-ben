@@ -11537,7 +11537,7 @@ function renderReportView(){
 var TPL3=[['uk_ilg','UK ILG'],['us_geneva','US Geneva'],['eu_ifulfilment','EU iFulfilment'],['au_coghlans','AU Coghlans']];
 var TPL3_STATE={tpl:'eu_ifulfilment',period:'',mode:'invoices'};
 function render3plInvoice(body){
-  try{ var _h3=(location.hash||'').replace(/^#\/?/,'').split('/'); if(_h3[0]==='reports'&&_h3[1]==='3pl-invoicing'&&_h3[2]&&TPL3.some(function(t){return t[0]===_h3[2];}))TPL3_STATE.tpl=_h3[2]; }catch(e){}   // deep-link: #/reports/3pl-invoicing/<tpl>
+  try{ var _h3=(location.hash||'').replace(/^#\/?/,'').split('/'); if(_h3[0]==='reports'&&_h3[1]==='3pl-invoicing'&&_h3[2]){ var _sub=_h3[2].replace(/-/g,'_'); if(TPL3.some(function(t){return t[0]===_sub;}))TPL3_STATE.tpl=_sub; } }catch(e){}   // deep-link: #/reports/3pl-invoicing/<tpl>
   function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function su(x){ x=String(x||''); return /@dockandbay\.com$/i.test(x)?x.split('@')[0]+'@':x; }   // ben@dockandbay.com → ben@
   function lastMonth(){ var d=new Date(); d.setDate(1); d.setMonth(d.getMonth()-1); return d.toISOString().slice(0,7); }
@@ -11650,7 +11650,7 @@ function render3plInvoice(body){
         +'<span style="width:1px;height:16px;background:#e0e0e0;margin:0 4px"></span>'
         +'<label style="font-size:12px;color:#475569">Month <input type="month" id="tpl-period" value="'+e(TPL3_STATE.period)+'" style="font-size:12px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;margin-left:4px"></label>'
       +'</div><div id="tpl-body"><div style="color:#94a3b8;font-size:12px">Loading…</div></div></div>';
-    host.querySelectorAll('.rtab[data-tpl]').forEach(function(b){ b.onclick=function(){ TPL3_STATE.tpl=b.dataset.tpl; if(window.writeHash)window.writeHash(['reports','3pl-invoicing',TPL3_STATE.tpl]); shell(); load(); }; });
+    host.querySelectorAll('.rtab[data-tpl]').forEach(function(b){ b.onclick=function(){ TPL3_STATE.tpl=b.dataset.tpl; if(window.writeHash)window.writeHash(['reports','3pl-invoicing',TPL3_STATE.tpl.replace(/_/g,'-')]); shell(); load(); }; });
     host.querySelectorAll('.catpill[data-mode]').forEach(function(b){ b.onclick=function(){ TPL3_STATE.mode=b.dataset.mode; shell(); load(); }; });
     var pe=host.querySelector('#tpl-period'); if(pe)pe.onchange=function(){ TPL3_STATE.period=pe.value; load(); };
   }
@@ -11711,7 +11711,7 @@ function render3plInvoice(body){
         .then(function(j){ if(j&&j.error)throw new Error(j.error); load(); }).catch(function(err){ msg.style.color='#dc2626'; msg.textContent='Failed: '+(err.message||err); up.disabled=false; }); };
       rd.readAsDataURL(f); }
     up.onclick=function(){ doUpload(fi&&fi.files&&fi.files[0]); };
-    if(fi)fi.onchange=function(){ if(fi.files&&fi.files[0]){ var _f=fi.files[0], _mb=_f.size/1048576; msg.style.color=(_mb>3.3?'#b45309':'#64748b'); msg.textContent=_f.name+' ('+_mb.toFixed(1)+'MB) ready — click Upload'+(_mb>3.3?' · ⚠ over ~3.3MB may exceed the live upload limit':''); } };
+    if(fi)fi.onchange=function(){ if(fi.files&&fi.files[0])doUpload(fi.files[0]); };   // auto-upload on select OR drop-onto-input (silent — no Upload click)
     if(drop){ var hi=function(on){ drop.style.background=on?'#eff6ff':'#f8fafc'; drop.style.borderColor=on?'#2563eb':'#cbd5e1'; };
       ['dragenter','dragover'].forEach(function(ev){ drop.addEventListener(ev,function(e){ e.preventDefault(); e.stopPropagation(); hi(true); }); });
       ['dragleave','dragend'].forEach(function(ev){ drop.addEventListener(ev,function(e){ e.preventDefault(); e.stopPropagation(); if(ev==='dragleave'&&drop.contains(e.relatedTarget))return; hi(false); }); });
@@ -11770,15 +11770,15 @@ function render3plInvoice(body){
       var runs=(d&&d.runs)||[];
       var badge=function(st){ var c=st==='ok'?['#dcfce7','#166534']:st==='skipped'?['#f1f5f9','#64748b']:st==='running'?['#dbeafe','#1e40af']:st==='stalled'?['#fef3c7','#92400e']:['#fee2e2','#b91c1c']; return '<span style="background:'+c[0]+';color:'+c[1]+';font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px">'+e(st||'?')+'</span>'; };
       var rows=runs.length?runs.map(function(r){ return '<tr>'
-        +'<td class="l" style="padding:4px 10px;white-space:nowrap">'+e(r.ran_at||'')+'</td>'
-        +'<td class="l" style="padding:4px 10px">'+e(r.tpl||'')+'</td>'
-        +'<td class="l" style="padding:4px 10px">'+e(r.period||'')+'</td>'
-        +'<td class="l" style="padding:4px 10px;white-space:nowrap">'+e(r.from_date||'')+(r.to_date?(' → '+e(r.to_date)):'')+'</td>'
-        +'<td class="l" style="padding:4px 10px">'+e(r.kind||'')+'</td>'
+        +'<td class="l" style="padding:4px 10px;white-space:nowrap;text-align:left">'+e(r.ran_at||'')+'</td>'
+        +'<td class="l" style="padding:4px 10px;text-align:left">'+e(r.tpl||'')+'</td>'
+        +'<td class="l" style="padding:4px 10px;text-align:left">'+e(r.period||'')+'</td>'
+        +'<td class="l" style="padding:4px 10px;white-space:nowrap;text-align:left">'+e(r.from_date||'')+(r.to_date?(' → '+e(r.to_date)):'')+'</td>'
+        +'<td class="l" style="padding:4px 10px;text-align:left">'+e(r.kind||'')+'</td>'
         +'<td class="l" style="padding:4px 10px;text-align:left">'+(r.orders!=null?Number(r.orders).toLocaleString():'')+'</td>'
         +'<td class="l" style="padding:4px 10px;text-align:left">'+badge(r.status)+'</td>'
         +'<td class="l" style="padding:4px 10px;text-align:left">'+(r.cin7_calls!=null?r.cin7_calls:'')+'</td>'
-        +'<td class="l" style="padding:4px 10px;color:#b91c1c;max-width:340px">'+e(r.error||'')+'</td></tr>'; }).join('')
+        +'<td class="l" style="padding:4px 10px;color:#b91c1c;max-width:340px;text-align:left">'+e(r.error||'')+'</td></tr>'; }).join('')
         :'<tr><td colspan="9" style="padding:14px 10px;color:#94a3b8;text-align:center">No Cin7 imports logged yet.</td></tr>';
       b.innerHTML='<div style="text-align:left"><div style="font-size:13px;font-weight:700;margin-bottom:4px">Cin7 import log</div>'
         +'<div style="font-size:11px;color:#94a3b8;margin-bottom:8px">Every Cin7 sales-order import — date range, kind, orders imported, status and any error. A run left <b>running</b> for over 30 min is shown as <b>stalled</b> (timed out — re-run it).</div>'
