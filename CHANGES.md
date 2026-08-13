@@ -1,3 +1,7 @@
+## v26.968.0 sales_actuals TIK channel (mig 224) + vercel.json includeFiles fix
+- **Migration 224** — widen `planner.sales_actuals` channel CHECK to allow **TIK** (DTC/B2B/FBA/ZAL/TIK), so TikTok actuals can land alongside the others (forecasts already worked — no CHECK there). Applied to sandbox; Diviyaj to run on live before TikTok actuals arrive. Mirrors mig 204 (ZAL).
+- **vercel.json `includeFiles`** broadened from just the artifact to `{artifact_v16.7.html,favicon.png,package.json,supply/**}` so a repo deploy bundles the supplier portal (portal.html/portal-view.js), inject.html and supply/assets (logos/fonts for invoices) — previously they would 404. (Diviyaj had patched the deployed copy; this aligns the repo.)
+
 ## v26.967.0 vercel.json maxDuration 60→300 + Diviyaj deploy package (2026-08-13)
 - Raised `vercel.json` api function `maxDuration` 60→**300** to match the prod outage fix (a fresh deploy from repo would otherwise revert it to 60 and re-open the cold-start retry loop).
 - Packaged everything since the live baseline (v26.861) for Diviyaj: **deploy notes/DEPLOY_2026-08-13.md** — supersedes the rolled-back 2026-08-12 package, folds in migrations 209/212/214/215/216/218/219 + new 220/221/222/223, KV + 300s + matview prerequisites, and the v26.911→967 feature list.
