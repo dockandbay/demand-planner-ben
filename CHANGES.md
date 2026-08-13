@@ -1,3 +1,6 @@
+## v26.938.0 Manage 3PL / FBA — fix gap filter + add "All" + SKU search
+- The **"All gaps"** option now correctly shows **only rows with an ON HAND difference** (was showing everything). Added a separate **"All (incl. matches)"** option to show all rows, and a **SKU search box**. Applies to **both Manage 3PL and Manage FBA**. Default view is now on-hand gaps.
+
 ## v26.937.0 Plan Shipments drawer — rework (country-first, all POs, existing containers)
 - **Step 1 = choose a ship-to country** — fixed pills **UK / US / EU / AU / CA** (not data-derived); nothing loads until one is picked.
 - Left panel now lists **all** that market's shipping POs (ready-to-ship + those already on an active shipment), each with a **ready/status badge** and a **clickable PO ref** that opens the PO drawer **above** the popup.
