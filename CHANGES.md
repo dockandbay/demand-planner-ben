@@ -1,3 +1,6 @@
+## v26.961.0 US AWD as a Manage FBA market pill (not a separate sub-tab)
+- Reverted the standalone US AWD sub-tab; US AWD is now the 6th **pill** in the Manage FBA market bar (US · UK · EU · AU · CA · US AWD). Selecting it swaps the FBA compare panel for the AWD ledger upload/reconciliation. Guarded so the AWD pseudo-market never leaks to the FBA Aged tab.
+
 ## v26.960.0 FIX: Variant image 404 blanked the SKU label column
 - When **Variant image** was on, the SKU label cell content (code, dates, tier badge, Plan button) is relocated into a wrapper next to the thumbnail. The image **onerror** handler hid that whole wrapper — so any SKU whose image failed to load (404) showed a **blank column 1** (row + forecast/actual data intact). Now onerror hides only the broken <img>, leaving the label/dates visible. (Turning Variant image off always worked — that was the tell.)
 

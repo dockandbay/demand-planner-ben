@@ -9338,7 +9338,8 @@ function renderInventory(){
   var host=document.querySelector('.wrap'); if(!host)return;
   var ex=document.getElementById('inventory-wrap'); if(ex)ex.remove();
   var wrap=document.createElement('div'); wrap.id='inventory-wrap'; wrap.style.cssText='margin:0 0 20px';   // full-width (match the SUPPLY pages)
-  var SUBS=[['status','Status Report'],['manage3pl','Manage 3PL'],['managefba','Manage FBA'],['fba-aged','FBA Aged'],['awd','US AWD']];
+  var SUBS=[['status','Status Report'],['manage3pl','Manage 3PL'],['managefba','Manage FBA'],['fba-aged','FBA Aged']];
+  if(INV_FBA==='AWD'&&INV_SUB!=='managefba')INV_FBA='US';   // 'AWD' is a Manage-FBA-only pseudo-market pill; don't leak it to FBA Aged / other tabs
   function pillbar(list,cur,cls){ return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px">'+list.map(function(it){ var c=Array.isArray(it)?it[0]:it,lbl=Array.isArray(it)?it[1]:it; var on=(c===cur);
       return '<button class="'+cls+'" data-c="'+c+'" style="padding:4px 15px;border-radius:16px;border:1px solid '+(on?'#1e40af':'#cbd5e1')+';background:'+(on?'#1e40af':'#fff')+';color:'+(on?'#fff':'#334155')+';font-weight:600;font-size:12px;cursor:pointer">'+lbl+'</button>'; }).join('')+'</div>'; }
   function placeholder(title){ return '<div style="padding:26px;color:#64748b;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;text-align:center"><b style="color:#334155">'+title+'</b><div style="margin-top:6px;font-size:13px">To complete in future.</div></div>'; }
@@ -9347,9 +9348,8 @@ function renderInventory(){
   var subnav='<div class="d3nav">'+SUBS.map(function(t){return '<button class="d3tab inv-sub'+(t[0]===INV_SUB?' active':'')+'" data-sub="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div>';
   var body;
   if(INV_SUB==='manage3pl') body=pillbar(['US','UK','AU','EU',['US_NG','US Non GRS'],['UK_NG','UK Non GRS']],INV_3PL,'inv-3pl-pill')+'<div id="inv3pl-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
-  else if(INV_SUB==='managefba') body=pillbar(['US','UK','AU','EU','CA'],INV_FBA,'inv-fba-pill')+'<div id="invfba-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
+  else if(INV_SUB==='managefba') body=pillbar(['US','UK','AU','EU','CA',['AWD','US AWD']],INV_FBA,'inv-fba-pill')+(INV_FBA==='AWD'?'<div id="invawd-panel"><div class="mut" style="font-size:12px">Loading…</div></div>':'<div id="invfba-panel"><div class="mut" style="font-size:12px">Loading…</div></div>');
   else if(INV_SUB==='fba-aged') body=pillbar(['US','UK','AU','EU','CA'],INV_FBA,'inv-fba-pill')+'<div id="fbaaged-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
-  else if(INV_SUB==='awd') body='<div id="invawd-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
   else body=pillbar(['US','UK','EU','AU','CA'],INV_STATUS_MKT,'inv-status-pill')+'<div id="invstatus-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';   // Status Report (SUG-0024)
   wrap.innerHTML=subnav+'<div id="inv-body">'+body+'</div>';
   host.appendChild(wrap);
@@ -9358,9 +9358,8 @@ function renderInventory(){
   wrap.querySelectorAll('.inv-fba-pill').forEach(function(b){ b.onclick=function(){ INV_FBA=b.dataset.c; renderInventory(); }; });
   wrap.querySelectorAll('.inv-status-pill').forEach(function(b){ b.onclick=function(){ INV_STATUS_MKT=b.dataset.c; renderInventory(); }; });
   if(INV_SUB==='manage3pl')inv3plLoad();
-  else if(INV_SUB==='managefba')invFbaLoad('manage');
+  else if(INV_SUB==='managefba'){ if(INV_FBA==='AWD')invAwdLoad(); else invFbaLoad('manage'); }
   else if(INV_SUB==='fba-aged')invFbaLoad('aged');
-  else if(INV_SUB==='awd')invAwdLoad();
   else if(INV_SUB==='status')renderInvStatus();
 }
 // SUG-0024 Inventory Status Report. Reads BP.statusMetrics(mkt) (SOH split, on-order, weeks-cover per warehouse,
