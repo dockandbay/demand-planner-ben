@@ -1,3 +1,7 @@
+## v26.972.0 DTC Mismatch — table no longer runs off-screen
+- Both DTC Mismatch tables (open sales orders + unmapped POs) are now wrapped in a horizontally-scrolling container (`overflow-x:auto;max-width:100%`) instead of the demand-plan `.tw` wrapper, so the wide table scrolls within the report body instead of pushing off the right of the screen.
+- (Sandbox: seeded 4 test DTC sales orders so the report can be exercised — test data, not a deploy action.)
+
 ## v26.971.0 Samples — “email stakeholders when shipped” (mig 225)
 - New field **📧 email when shipped** on a sample (under Recipient & address) — comma-separated stakeholder emails.
 - When our status transitions to **SHIPPED** (via “🚢 Set shipping” or the status dropdown), those stakeholders get an email with the **tracking code, carrier and a direct link** to the sample in HORIZON. Fires once on the transition into shipped; logged to the email log (kind=sample-shipped). Sandbox has no RESEND_API_KEY → logs “would email …”, safe to test.
