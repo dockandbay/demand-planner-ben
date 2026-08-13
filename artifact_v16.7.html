@@ -1294,7 +1294,7 @@ function tierMix(s,co,ch){
 var ACTIVE_CATS=(function(){var s=new Set();for(var k in CATS_META){if(CATS_META[k]&&CATS_META[k].a)s.add(k);}return s;})();
 var ACTIVE_SUBS=(function(){var s=new Set();for(var k in SUBS_META){if(SUBS_META[k]&&SUBS_META[k].a)s.add(k);}return s;})();
 // Category grouping map for the filter UI layout (Beach / Bags / Home / Priority etc.)
-var CAT_GROUPING=(function(){var g={};for(var k in CATS_META){if(CATS_META[k]&&CATS_META[k].a){g[k]=CATS_META[k].g||'';}}return g;})();
+var CAT_GROUPING=(function(){var g={};for(var k in CATS_META){if(CATS_META[k]&&CATS_META[k].a){g[k]=CATS_META[k].g||'';}}g['Towel - Beach']='Priority';return g;})();   // pin Towel - Beach into the Priority group (top) regardless of Airtable grouping
 // Helper: resolve a subcat's parent category. Falls back to the subcat name
 // itself when no link is set in Airtable AND a category of that name exists
 // (handles the Lanyard case where the subcat exists but its parent link is empty).
@@ -1979,7 +1979,7 @@ function setFilters(cur,selArr){
 let _bpCatDocBound=false;
 function bpCatGroups(){
   var PRIO=['Towel - Beach','Hair Wrap','Picnic Blanket','Tea Towel'];
-  var pri=CAT_SORTED.filter(function(c){return PRIO.indexOf(c)>=0;});
+  var pri=PRIO.filter(function(c){return CAT_SORTED.indexOf(c)>=0;});   // PRIO order (Towel - Beach first), not CAT_SORTED alphabetical
   var bags=CAT_SORTED.filter(function(c){return c.indexOf('Bag')===0;});
   var ranges=CAT_SORTED.filter(function(c){return PRIO.indexOf(c)<0&&c.indexOf('Bag')!==0;});
   var g=[];if(pri.length)g.push(['Priority',pri]);if(ranges.length)g.push(['Ranges',ranges]);if(bags.length)g.push(['Bags',bags]);return g;
@@ -9333,7 +9333,7 @@ function _zalRender(wrap,d){
 // ACTIONS: per-country summary of the buy/move actions (Buy 3PL, Urgent Sea/Air, Buy FBA, FBA Transfer) —
 // total units per action with expand-to-SKU. Uses BP.getBuyQtys across each market's visible SKUs.
 // ── BUY & MOVE ▸ INVENTORY (scaffold) — Status Report | Manage 3PL (US/UK/AU/EU) | Manage FBA (US/UK/AU/EU/CA) ──
-var INV_SUB='status', INV_3PL='US', INV_FBA='US', INV_FBA_GAP='gaps', INV_FBA_Q='', _invFbaLast=null, INV_3PL_GAP='gaps', INV_3PL_Q='', _inv3plLast=null, INV_STATUS_MKT='US';
+var INV_SUB='status', INV_3PL='US', INV_FBA='US', INV_FBA_GAP='gaps', INV_FBA_Q='', _invFbaLast=null, INV_3PL_GAP='gaps', INV_3PL_Q='', _inv3plLast=null, INV_STATUS_MKT='US', FBA_AGED_F=null;
 function renderInventory(){
   var host=document.querySelector('.wrap'); if(!host)return;
   var ex=document.getElementById('inventory-wrap'); if(ex)ex.remove();
@@ -9572,8 +9572,13 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
   if(mode==='aged'){
     if(!j.imported){ panel.innerHTML='<div class="mut" style="font-size:12px">No FBA report uploaded for '+tHesc(j.market||INV_FBA)+' yet — upload it under <b>Manage FBA</b>.</div>'; return; }
     var mkt=j.market||INV_FBA, aged=j.aged||[], ac=j.aged_cost||{};
+    var _AGEDBL={a1:'91-180',a2:'181-270',a3:'271-365',a4:'366-455',a5:'456+'};
+    var agedF=FBA_AGED_F?aged.filter(function(r){return (r[FBA_AGED_F]||0)>0;}):aged;
+    var _bktU={a1:0,a2:0,a3:0,a4:0,a5:0}; aged.forEach(function(r){['a1','a2','a3','a4','a5'].forEach(function(k){_bktU[k]+=(r[k]||0);});});
+    var _fpill=function(k,lbl,u){ var on=FBA_AGED_F===k; return '<span class="fba-aged-f" data-bkt="'+(k||'')+'" style="cursor:pointer;font-size:11px;border-radius:6px;padding:3px 10px;border:1px solid '+(on?'#2563eb':'#cbd5e1')+';background:'+(on?'#2563eb':'#fff')+';color:'+(on?'#fff':'#334155')+'">'+lbl+(u!=null?' <span style="opacity:.65">('+u+'u)</span>':'')+'</span>'; };
+    var _filterBar='<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 10px"><span class="mut" style="font-size:11px">Filter by age:</span>'+_fpill(null,'All',null)+['a5','a4','a3','a2','a1'].map(function(k){return _fpill(k,_AGEDBL[k],_bktU[k]);}).join('')+'</div>';
     var nUn=aged.filter(function(r){return !r.matched;}).length;
-    var meta='<div style="margin:0 0 10px">'+invFbaMeta(j)+' <span class="mut" style="font-size:12px">· '+aged.length+' SKUs with inventory older than 90 days (oldest first)</span>'
+    var meta='<div style="margin:0 0 10px">'+invFbaMeta(j)+' <span class="mut" style="font-size:12px">· '+(FBA_AGED_F?agedF.length+' of '+aged.length:aged.length)+' SKUs with inventory older than 90 days (oldest first)</span>'
       +(nUn?' <span style="font-size:12px;color:#b45309;font-weight:600">· ⚠ '+nUn+' with no SKU/ASIN match</span>':'')+'</div>';
     if(!aged.length){ panel.innerHTML=meta+'<div class="mut" style="font-size:12px">No inventory older than 90 days 🎉</div>'; return; }
     var cur=ac.currency||'', BL={a1:'91-180',a2:'181-270',a3:'271-365',a4:'366-455',a5:'456+'};
@@ -9612,11 +9617,12 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
         return '<td style="padding:4px 10px;text-align:left">'+tHesc(r.erp_sku||'')+badge+'</td>'; }
       return '<td style="padding:4px 10px;text-align:left;color:#b45309;font-weight:600" title="This Amazon SKU has no matching planner SKU'+(r.asin?' and its ASIN ('+tHesc(r.asin)+') matched no product':' and no ASIN to match on')+'">⚠ No SKU/ASIN match</td>';
     };
-    var trs=aged.slice(0,800).map(function(r){ return '<tr'+(!r.matched?' style="background:#fffbeb"':'')+'><td style="padding:4px 10px;text-align:left">'+tHesc(r.sku)+'</td>'+ourCell(r)
+    var trs=agedF.slice(0,800).map(function(r){ return '<tr'+(!r.matched?' style="background:#fffbeb"':'')+'><td style="padding:4px 10px;text-align:left">'+tHesc(r.sku)+'</td>'+ourCell(r)
       +'<td style="padding:4px 10px;text-align:right;font-weight:700;color:'+(r.a5>0?'#b91c1c':'#334155')+'">'+(r.a5||0)+'</td>'+cell(r.a4)+cell(r.a3)+cell(r.a2)+cell(r.a1)
       +'<td style="padding:4px 10px;text-align:right;font-weight:700">'+r.total+'</td>'
       +(haveRates?'<td style="padding:4px 10px;text-align:right" title="'+(r.vol_est?'volume estimated (no carton dims)':'')+'">'+fmtC(r.est_cost)+(r.vol_est?' ~':'')+'</td>':'')+'</tr>'; }).join('');
-    panel.innerHTML=meta+costHead+ratesPanel+'<div style="max-height:560px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'+head+'</tr></thead><tbody>'+trs+'</tbody></table></div>'+(aged.length>800?'<div class="mut" style="font-size:11px;margin-top:4px">Showing first 800 of '+aged.length+'</div>':'');
+    panel.innerHTML=meta+costHead+_filterBar+ratesPanel+'<div style="max-height:560px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'+head+'</tr></thead><tbody>'+trs+'</tbody></table></div>'+(agedF.length>800?'<div class="mut" style="font-size:11px;margin-top:4px">Showing first 800 of '+agedF.length+'</div>':'');
+    panel.querySelectorAll('.fba-aged-f').forEach(function(el){ el.onclick=function(){ var b=el.dataset.bkt||null; FBA_AGED_F=(b===FBA_AGED_F)?null:b; invFbaRender('aged',j); }; });
     var rb=document.getElementById('fba-rates-btn'); if(rb)rb.onclick=function(){ var p=document.getElementById('fba-rates-panel'); if(p)p.style.display=(p.style.display==='none'?'block':'none'); };
     var sv=document.getElementById('fba-rates-save'); if(sv)sv.onclick=function(){ invFbaSaveRates(mkt,rt); };
     return;

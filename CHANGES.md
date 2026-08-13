@@ -1,3 +1,7 @@
+## v26.956.0 DEMAND: Towel - Beach pinned top + FBA Aged age filters
+- **Towel - Beach top category:** pinned into the **Priority** group in code (`CAT_GROUPING`) so it sits at the top of the category order in the demand plan, targets list and the priority grouping regardless of the Airtable grouping value; also fixed `bpCatGroups` to order the Priority group by the curated PRIO list (Towel - Beach first) instead of alphabetical.
+- **FBA Aged filters:** the aged-day buckets (456+, 366-455, 271-365, 181-270, 91-180) are now clickable **filter pills** (with per-bucket unit counts) that filter the table to SKUs holding stock in that age band; an "All" pill resets. Independent of whether storage rates are set.
+
 ## v26.955.0 New channel: TikTok (TIK) — targeted DTC clone
 - Added **TikTok / TIK** as a sell-through channel that behaves like DTC: own forecast input line, draws from the **3PL** pool, availability mirrors DTC, and its demand is **additive to total 3PL demand** in the buy plan.
 - **Country-gated** via a single `TIK_COUNTRIES=['UK','US']` list (edit to enable more markets). Drives the plan channel pill (UK/US only), COMBOS scaffold, availability synth (`tikInit`, grants 't' where DTC 'd' is available + synthesizes editable TIK plan rows), and Summary/Targets pills.
