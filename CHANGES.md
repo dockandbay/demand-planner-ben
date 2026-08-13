@@ -1,3 +1,9 @@
+## v26.951.0 DEMAND plan toolbar — Display Settings popup + Import/Export consolidation
+- Renamed **More Filters & Settings → More Filters**.
+- New **⚙ Display Settings** popup button (next to More Filters) holding: **Records** (Show record of change (R) + Hide for past months — moved out of More Filters) and a new **Forecast to Actuals Compare** on/off toggle (controls the small `fc … +%` locked-forecast figure in completed-month cells; on by default, persisted).
+- Renamed **Import forecast → Import/Export** and moved it up next to **Exec summary / Summary + targets / Trend Gaps** (same button style, plan view).
+- Moved the **Download** (plan export) button into the Import/Export popup (as **⬇ Download plan**); removed the two standalone toolbar buttons.
+
 ## v26.950.0 DEMAND ▸ KPIs — level-3 nav now standard light-blue + deep links
 - The KPIs sub-tab bar (In Stock / Slow moving / Inventory cover / Stockout risk / Discontinued / Forecast accuracy) now uses the **standard light-blue level-3 nav** (`.d3nav`/`.d3tab`, matching DEMAND ▸ Inputs and SUPPLY ▸ Reports) instead of the plain dark tab style.
 - Each sub-tab is now **deep-linkable**: selecting one writes `#/demand/kpis/<sub>` to the URL, and loading that URL opens straight to that sub-tab. e.g. `#/demand/kpis/accuracy`.

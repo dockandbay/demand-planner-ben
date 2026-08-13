@@ -746,8 +746,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
       style="font-size:11px;padding:4px 9px;border:1px solid #86efac;background:#f0fdf4;border-radius:5px;width:210px"
       oninput="setPlanSkuQry(this.value)">
     <span style="position:relative;display:inline-flex;align-items:center">
-      <button id="plan-filters-btn" onclick="togglePlanFilters(event)" title="More filters &amp; settings — category, tier, release window, from-replacement, sort, category totals, variant image" style="font-size:11px;padding:4px 11px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#334155;cursor:pointer;flex-shrink:0;font-weight:600">&#10697; More Filters &amp; Settings <span style="opacity:.55;font-size:9px">▾</span></button>
-      <button id="fc-import-btn" onclick="if(window.openForecastImport)openForecastImport()" title="Import / paste SKU-level forecast overrides for the current market + channel" style="font-size:11px;padding:4px 11px;border:1px solid #2563eb;border-radius:5px;background:#fff;color:#2563eb;cursor:pointer;flex-shrink:0;font-weight:600;margin-left:6px">&#11014; Import forecast</button>
+      <button id="plan-filters-btn" onclick="togglePlanFilters(event)" title="More filters &amp; settings — category, tier, release window, from-replacement, sort, category totals, variant image" style="font-size:11px;padding:4px 11px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#334155;cursor:pointer;flex-shrink:0;font-weight:600">&#10697; More Filters <span style="opacity:.55;font-size:9px">▾</span></button>
       <div id="plan-filters-pop" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;z-index:300;background:#fff;border:1px solid #d0d0d0;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.2);width:520px;max-width:94vw;padding:14px 16px">
         <div style="display:flex;align-items:center;margin-bottom:12px"><div style="font-weight:700;font-size:14px;color:#0f172a">More filters</div><button onclick="resetPlanFilters()" style="margin-left:auto;font-size:11px;padding:3px 10px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#475569;cursor:pointer">Reset all</button></div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;position:relative">
@@ -764,11 +763,6 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
             <button class="pill catpill ptier" data-tier="B" onclick="setPlanTier('B')">B</button>
             <button class="pill catpill ptier" data-tier="C" onclick="setPlanTier('C')">C</button>
           </div>
-        </div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
-          <span class="pill-lbl" style="width:80px" title="Show the R record-of-change indicator on cells with edit history (loads on demand)">Records</span>
-          <label style="font-size:12px;color:#334155;cursor:pointer;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="filt-show-changes" onchange="setShowChanges(this.checked)"> Show record of change <b style="color:#be185d">(R)</b></label>
-          <label style="font-size:12px;color:#334155;cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Hide the R indicator on months before the current month"><input type="checkbox" id="filt-hide-past-changes" onchange="setHidePastChanges(this.checked)"> Hide for past months</label>
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
           <span class="pill-lbl" style="width:80px" title="Filter SKUs by release window (season)">Release</span>
@@ -790,13 +784,30 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
         <div style="text-align:right"><button onclick="_planPopClose()" style="font-size:12px;font-weight:600;padding:5px 18px;border:1px solid #2563eb;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer">Done</button></div>
       </div>
     </span>
+    <span style="position:relative;display:inline-flex;align-items:center">
+      <button id="plan-display-btn" onclick="toggleDisplaySettings(event)" title="Display settings — record of change, forecast-to-actuals compare" style="font-size:11px;padding:4px 11px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#334155;cursor:pointer;flex-shrink:0;font-weight:600;margin-left:6px">&#9881; Display Settings <span style="opacity:.55;font-size:9px">▾</span></button>
+      <div id="plan-display-pop" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;z-index:300;background:#fff;border:1px solid #d0d0d0;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.2);width:360px;max-width:94vw;padding:14px 16px">
+        <div style="display:flex;align-items:center;margin-bottom:12px"><div style="font-weight:700;font-size:14px;color:#0f172a">Display settings</div></div>
+        <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <span class="pill-lbl" style="width:80px" title="Show the R record-of-change indicator on cells with edit history (loads on demand)">Records</span>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <label style="font-size:12px;color:#334155;cursor:pointer;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="filt-show-changes" onchange="setShowChanges(this.checked)"> Show record of change <b style="color:#be185d">(R)</b></label>
+            <label style="font-size:12px;color:#334155;cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Hide the R indicator on months before the current month"><input type="checkbox" id="filt-hide-past-changes" onchange="setHidePastChanges(this.checked)"> Hide for past months</label>
+          </div>
+        </div>
+        <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <span class="pill-lbl" style="width:80px" title="Show the locked-forecast-vs-actual figure (fc … +%) in completed-month actual cells">Compare</span>
+          <label style="font-size:12px;color:#334155;cursor:pointer;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="filt-fc-act" onchange="setShowFcAct(this.checked)"> Forecast to Actuals Compare</label>
+        </div>
+        <div style="text-align:right"><button onclick="_displayPopClose()" style="font-size:12px;font-weight:600;padding:5px 18px;border:1px solid #2563eb;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer">Done</button></div>
+      </div>
+    </span>
     <div id="plan-chips" style="display:flex;gap:5px;flex-wrap:wrap;align-items:center"></div>
     <div style="flex:1"></div>
     <button id="fclogic-btn" onclick="openFcLogic(event)" title="How the forecast numbers are calculated" style="font-size:10px;padding:3px 10px;border:1px solid #c4b5fd;border-radius:5px;background:#f5f3ff;color:#5b21b6;cursor:pointer;flex-shrink:0;font-weight:600">&#9635; Forecast Logic</button>
     <button id="smoothset-btn" onclick="openSmoothSettings(event)" title="Smoothing settings — disregard discontinued + auto-smooth" style="font-size:10px;padding:3px 10px;border:1px solid #93c5fd;border-radius:5px;background:#eff6ff;color:#1e40af;cursor:pointer;flex-shrink:0;font-weight:600">&#9881; Smoothing</button>
     <span style="width:1px;height:18px;background:#e0e0e0;flex-shrink:0;margin:0 2px"></span>
     <button id="undo-btn" onclick="undoApply()" disabled title="Undo the last forecast edit (up to 10) — also &#8984;/Ctrl+Z" style="font-size:10px;padding:3px 10px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#334155;cursor:default;opacity:.45;flex-shrink:0">&#8624; Undo</button>
-    <button id="plan-dl-btn" onclick="openPlanDownload(event)" title="Download the demand plan (SKU × month, units + revenue) for chosen fiscal year(s)" style="font-size:10px;padding:3px 10px;border:1px solid #16a34a;border-radius:5px;background:#dcfce7;color:#166534;cursor:pointer;flex-shrink:0">&#11015; Download</button>
     <span id="plan-sum-inline" title="Hold &#8984;/Ctrl and hover forecast cells to sum them" style="display:none;margin-left:auto;align-items:center;gap:8px;font-size:12px;font-weight:700;color:#0f172a;background:#eef2ff;border:1px solid #c7d2fe;border-radius:6px;padding:3px 9px;white-space:nowrap;flex-shrink:0"></span>
   </div>
 </div>
@@ -4035,7 +4046,9 @@ var SHOW_H=(function(){try{return localStorage.getItem('hzShowHalf')==='1';}catc
 function setShowQtr(on){SHOW_Q=!!on;try{localStorage.setItem('hzShowQtr',SHOW_Q?'1':'0');}catch(e){}TIME_COLS=buildTimeCols();var b=document.getElementById('qtr-tot-toggle');if(b){b.classList.toggle('active',SHOW_Q);b.setAttribute('aria-pressed',SHOW_Q?'true':'false');}render();}
 function setShowHalf(on){SHOW_H=!!on;try{localStorage.setItem('hzShowHalf',SHOW_H?'1':'0');}catch(e){}TIME_COLS=buildTimeCols();var b=document.getElementById('half-tot-toggle');if(b){b.classList.toggle('active',SHOW_H);b.setAttribute('aria-pressed',SHOW_H?'true':'false');}render();}
 var SHOW_VARIANT_IMG=(function(){try{return localStorage.getItem('hzShowVarImg')==='1';}catch(e){return false;}})(); // variant-image thumbnail in the SKU label — hidden by default; toggle in More Filters & Settings
+var SHOW_FC_ACT=(function(){try{return localStorage.getItem('hzShowFcAct')!=='0';}catch(e){return true;}})(); // locked-forecast-vs-actual "fc … +%" in completed-month cells; on by default; toggle in Display Settings
 function setShowVariantImg(on){SHOW_VARIANT_IMG=!!on;try{localStorage.setItem('hzShowVarImg',SHOW_VARIANT_IMG?'1':'0');}catch(e){}var b=document.getElementById('var-img-toggle');if(b){b.classList.toggle('active',SHOW_VARIANT_IMG);b.setAttribute('aria-pressed',SHOW_VARIANT_IMG?'true':'false');}renderMain();}
+function setShowFcAct(on){SHOW_FC_ACT=!!on;try{localStorage.setItem('hzShowFcAct',SHOW_FC_ACT?'1':'0');}catch(e){}try{renderMain();}catch(e){}}
 // Variant-image hover: enlarge any .sku-varimg thumbnail to a 400×400 popup (lazy-created, delegated, bound once).
 (function(){ var pop,im;
   function ensure(){ if(pop)return; pop=document.createElement('div'); pop.style.cssText='position:fixed;z-index:100090;display:none;background:#fff;border:1px solid #d0d0d0;border-radius:8px;box-shadow:0 8px 30px rgba(0,0,0,.28);padding:6px;pointer-events:none';
@@ -5420,7 +5433,7 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
     if(revHtml){const revDiv=document.createElement('div');revDiv.innerHTML=revHtml;d.appendChild(revDiv.firstChild);}
     // #4 locked-forecast-vs-actual — completed months only (not the current partial month). Show the units from the
     // most-recent snapshot taken BEFORE this month, small + indigo, so the locked forecast can be eyeballed vs actual.
-    if(!isCurMo){ var _lf=LOCKED_FC.sub[ik]; if(_lf!=null){ var _dl=actualUnits>0?Math.round((_lf-actualUnits)/actualUnits*100):null;
+    if(!isCurMo&&SHOW_FC_ACT){ var _lf=LOCKED_FC.sub[ik]; if(_lf!=null){ var _dl=actualUnits>0?Math.round((_lf-actualUnits)/actualUnits*100):null;
       var lfDiv=document.createElement('div'); lfDiv.style.cssText='font-size:8px;color:#6366f1;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap';
       lfDiv.title='Locked forecast — most recent snapshot taken before this month'+(_dl!=null?' ('+gPct(_dl)+' vs actual)':''); lfDiv.textContent='fc '+fn(_lf)+(_dl!=null?'  '+gPct(_dl):''); d.appendChild(lfDiv); } }
     td.appendChild(d);return td;
@@ -6213,7 +6226,7 @@ function buildPlanDownload(fyStarts){
 }
 function openPlanDownload(ev){ if(ev)ev.stopPropagation(); var p=document.getElementById('plan-dl-pop');
   if(p&&p.style.display==='block'){ p.style.display='none'; return; }
-  if(!p){ p=document.createElement('div'); p.id='plan-dl-pop'; p.style.cssText='position:fixed;z-index:9000;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.18);padding:12px 14px;font-size:12px;width:300px;text-align:left'; document.body.appendChild(p); }
+  if(!p){ p=document.createElement('div'); p.id='plan-dl-pop'; p.style.cssText='position:fixed;z-index:200001;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.18);padding:12px 14px;font-size:12px;width:300px;text-align:left'; document.body.appendChild(p); }
   var fys=DISP_FY_STARTS.filter(function(Y){ return Y<=CUR_FY_START+1; });
   var boxes=fys.map(function(Y){ var def=(Y===CUR_FY_START||Y===CUR_FY_START-1); return '<label style="display:block;padding:2px 0;cursor:pointer"><input type="checkbox" class="pdl-fy" value="'+Y+'"'+(def?' checked':'')+'> '+fyLabel(Y)+'</label>'; }).join('');
   p.innerHTML='<div style="font-weight:700;margin-bottom:5px">Download demand plan</div>'
@@ -7668,7 +7681,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         var yc=yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp',ys=yoy!=null?(gPct(yoy)):'';
         // #4 locked-forecast-vs-actual — completed months only (not current partial month): the units from the most
         // recent snapshot taken before this month, small + indigo, to compare the locked forecast against the actual.
-        var _lfS=(m!==CUR_MONTH)?LOCKED_FC.sku[sku+'|'+co+'|'+ch+'|'+m]:null;
+        var _lfS=(SHOW_FC_ACT&&m!==CUR_MONTH)?LOCKED_FC.sku[sku+'|'+co+'|'+ch+'|'+m]:null;
         var _lfDl=(_lfS!=null&&act>0)?Math.round((_lfS-act)/act*100):null;
         var _lfHtml=(_lfS!=null)?('<div style="font-size:7px;color:#6366f1;text-align:right;font-variant-numeric:tabular-nums" title="Locked forecast (most recent snapshot before this month)'+(_lfDl!=null?' '+gPct(_lfDl)+' vs actual':'')+'">fc '+fn(_lfS)+(_lfDl!=null?'  '+gPct(_lfDl):'')+'</div>'):'';
         td.innerHTML='<div style="display:flex;flex-direction:column;padding:1px 2px">'
@@ -8270,12 +8283,15 @@ function setPlanTier(t){
   renderMain();
 }
 // ── DEMAND ▸ Plan toolbar (redesign): Filters popover + Tools menu + active-filter badge ──
-function _planPopClose(){ ['plan-filters-pop','plan-tools-menu','cat-pop'].forEach(function(id){var x=document.getElementById(id);if(x)x.style.display='none';}); }
+function _planPopClose(){ ['plan-filters-pop','plan-tools-menu','cat-pop','plan-display-pop'].forEach(function(id){var x=document.getElementById(id);if(x)x.style.display='none';}); }
 function _planPopBind(){ if(window._planPopBound)return; window._planPopBound=true;
   document.addEventListener('click',function(ev){ [['plan-filters-btn','plan-filters-pop'],['plan-tools-btn','plan-tools-menu']].forEach(function(p){
     var b=document.getElementById(p[0]), pop=document.getElementById(p[1]);
     if(pop&&pop.style.display==='block'&&!(b&&b.contains(ev.target))&&!pop.contains(ev.target))pop.style.display='none'; }); },true); }
-function togglePlanFilters(e){ if(e)e.stopPropagation(); var p=document.getElementById('plan-filters-pop'); if(!p)return; var open=p.style.display==='block'; _planPopClose(); if(!open)p.style.display='block'; var sc=document.getElementById('filt-show-changes'); if(sc)sc.checked=(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES); var hp=document.getElementById('filt-hide-past-changes'); if(hp)hp.checked=(typeof HIDE_PAST_CHANGES==='undefined'||HIDE_PAST_CHANGES); _planPopBind(); }
+function togglePlanFilters(e){ if(e)e.stopPropagation(); var p=document.getElementById('plan-filters-pop'); if(!p)return; var open=p.style.display==='block'; _planPopClose(); if(!open)p.style.display='block'; _planPopBind(); }
+function _displayPopClose(){ var x=document.getElementById('plan-display-pop'); if(x)x.style.display='none'; }
+function _displayPopBind(){ if(window._displayPopBound)return; window._displayPopBound=true; document.addEventListener('click',function(ev){ var b=document.getElementById('plan-display-btn'), pop=document.getElementById('plan-display-pop'); if(pop&&pop.style.display==='block'&&!(b&&b.contains(ev.target))&&!pop.contains(ev.target))pop.style.display='none'; },true); }
+function toggleDisplaySettings(e){ if(e)e.stopPropagation(); var p=document.getElementById('plan-display-pop'); if(!p)return; var open=p.style.display==='block'; _planPopClose(); if(!open)p.style.display='block'; var sc=document.getElementById('filt-show-changes'); if(sc)sc.checked=(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES); var hp=document.getElementById('filt-hide-past-changes'); if(hp)hp.checked=(typeof HIDE_PAST_CHANGES==='undefined'||HIDE_PAST_CHANGES); var fa=document.getElementById('filt-fc-act'); if(fa)fa.checked=(typeof SHOW_FC_ACT==='undefined'||SHOW_FC_ACT); _displayPopBind(); }
 // (removed dead fn togglePlanTools — v26.759)
 function resetPlanFilters(){ try{setPlanTier('ALL');}catch(e){} try{setPlanFromRep(false);}catch(e){} var rw=document.getElementById('plan-rw-sel'); if(rw){rw.value='ALL'; try{setPlanRw('ALL');}catch(e){}} try{setPlanSort('alpha');}catch(e){} var ct=document.getElementById('cat-tot-toggle'); if(ct&&ct.classList.contains('active')){try{setShowCatTot(false);}catch(e){}} try{resetPlanActiveDates();}catch(e){} try{renderPlanChips();}catch(e){} }
 function _planClearFilter(k){ if(k==='all')setPlanActiveMode('active'); else if(k==='tier')setPlanTier('ALL');
@@ -9868,11 +9884,13 @@ function planRevBtnSync(){ var show=(typeof VIEW_MODE!=='undefined'&&VIEW_MODE==
       var btn='border:1px solid #cbd5e1;background:#fff;border-radius:6px;padding:3px 9px;font-size:11px;font-weight:600;font-family:inherit;cursor:pointer;white-space:nowrap;line-height:1.5';
       c.innerHTML='<button id="plan-exec-btn" type="button" title="Executive summary — FY revenue &amp; units vs last year" style="'+btn+';border-color:#0f766e;color:#0f766e">Exec summary</button>'
         +'<button id="plan-summ-btn" type="button" title="Summary report with revenue targets + recommendations" style="'+btn+';border-color:#7c3aed;color:#7c3aed">Summary + targets</button>'
-        +'<button id="plan-tg-btn" type="button" title="Trend Gaps — under-forecast trends (Category + SKU)" style="'+btn+';border-color:#b45309;color:#b45309">Trend Gaps</button>';
+        +'<button id="plan-tg-btn" type="button" title="Trend Gaps — under-forecast trends (Category + SKU)" style="'+btn+';border-color:#b45309;color:#b45309">Trend Gaps</button>'
+        +'<button id="plan-io-btn" type="button" title="Import forecast overrides / export (download) the demand plan" style="'+btn+';border-color:#2563eb;color:#2563eb">Import/Export</button>';
       row.appendChild(c);
       c.querySelector('#plan-exec-btn').onclick=openExecSummaryPopout;
       c.querySelector('#plan-summ-btn').onclick=openSummaryPopout;
-      c.querySelector('#plan-tg-btn').onclick=openTrendGapsPopout; }
+      c.querySelector('#plan-tg-btn').onclick=openTrendGapsPopout;
+      var _iob=c.querySelector('#plan-io-btn'); if(_iob)_iob.onclick=function(){ if(window.openForecastImport)openForecastImport(); }; }
   } else { if(c)c.remove(); if(typeof closeExecDrawer==='function')closeExecDrawer(); if(typeof closeRevDrawer==='function')closeRevDrawer(); if(typeof closeSummDrawer==='function')closeSummDrawer(); if(typeof closeTrecDrawer==='function')closeTrecDrawer(); if(typeof closeTgDrawer==='function')closeTgDrawer(); } }
 // "Revenue vs target" opens the FULL revenue report (targets & tracking + price changes) in a 50% drawer —
 // the compact planRevPopRender card is deprecated.
@@ -12595,7 +12613,7 @@ function openForecastImport(){
   var defFrom=(typeof SKU_FC_MONTHS!=='undefined'&&SKU_FC_MONTHS[0])?SKU_FC_MONTHS[0].replace('_','-'):'';
   var defTo=(typeof SKU_FC_MONTHS!=='undefined'&&SKU_FC_MONTHS.length)?SKU_FC_MONTHS[SKU_FC_MONTHS.length-1].replace('_','-'):'';
   box.innerHTML=
-    '<div style="display:flex;align-items:center;margin-bottom:6px"><b style="font-size:16px">Import forecast overrides</b><button id="fci-x" style="margin-left:auto;border:none;background:none;font-size:20px;cursor:pointer;color:#64748b">×</button></div>'
+    '<div style="display:flex;align-items:center;margin-bottom:6px"><b style="font-size:16px">Import / Export</b><button id="fci-dl" style="margin-left:14px;font-size:11px;padding:4px 12px;border:1px solid #16a34a;border-radius:6px;background:#dcfce7;color:#166534;font-weight:600;cursor:pointer">&#11015; Download plan</button><button id="fci-x" style="margin-left:auto;border:none;background:none;font-size:20px;cursor:pointer;color:#64748b">×</button></div>'
     +'<div style="font-size:12px;color:#475569;margin-bottom:12px">SKU-level manual overrides for <b>'+esc(co)+' · '+esc(ch)+'</b> (the plan’s current market + channel). Columns are months; each cell is an absolute unit override (same as typing into a SKU cell). Blank = leave as-is.</div>'
     +'<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:12px">'
       +'<div><div style="font-size:10px;color:#64748b;margin-bottom:2px">From month</div><input type="month" id="fci-from" value="'+esc(defFrom)+'" style="font-size:12px;padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px"></div>'
@@ -12608,6 +12626,7 @@ function openForecastImport(){
     +'<div id="fci-preview" style="font-size:11px;color:#64748b;margin:8px 0;min-height:16px"></div>'
     +'<div style="display:flex;gap:8px;align-items:center;margin-top:8px"><button id="fci-apply" style="background:#16a34a;color:#fff;border:none;border-radius:6px;font-weight:700;font-size:13px;padding:8px 18px;cursor:pointer">Apply overrides</button><span id="fci-msg" style="font-size:11px"></span></div>';
   box.querySelector('#fci-x').onclick=close;
+  var _fcidl=box.querySelector('#fci-dl'); if(_fcidl)_fcidl.onclick=function(ev){ if(window.openPlanDownload)openPlanDownload(ev); };
   box.querySelector('#fci-tmpl').onclick=function(){ var ms=monthsBetween(box.querySelector('#fci-from').value, box.querySelector('#fci-to').value); if(!ms.length){ alert('Pick a valid From / To month range.'); return; }
     var csv=['SKU'].concat(ms.map(fym2lbl)).join(',')+'\n';
     var blob=new Blob([csv],{type:'text/csv;charset=utf-8'}), url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download='forecast-override-'+co+'-'+ch+'-template.csv'; document.body.appendChild(a); a.click(); setTimeout(function(){URL.revokeObjectURL(url);a.remove();},150); };
