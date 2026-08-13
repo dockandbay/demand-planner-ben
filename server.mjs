@@ -4539,7 +4539,10 @@ app.post('/api/supply/ka-forecast-cell', async (req, res) => {
 async function suggestionStakeholders() {
   let v = '';
   try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='suggestion_stakeholders'`)).rows[0]; v = (r && r.value || '').trim(); } catch (e) {}
-  const list = (v || 'ben@dockandbay.com,sarah@dockandbay.com').split(/[,;\s]+/).map(s => s.trim().toLowerCase()).filter(e => /@/.test(e));
+  let list = (v || '').split(/[,;\s]+/).map(s => s.trim().toLowerCase()).filter(e => /@/.test(e));
+  // fall back to the default when the setting is blank OR holds no valid email (a non-empty invalid value would otherwise
+  // silently disable the new-suggestion + stakeholder-status emails — the "only emails on complete" symptom).
+  if (!list.length) list = ['ben@dockandbay.com', 'sarah@dockandbay.com'];
   return Array.from(new Set(list));
 }
 function parseEmails(v) { return Array.from(new Set(String(v || '').split(/[,;\s]+/).map(s => s.trim().toLowerCase()).filter(e => /@/.test(e)))); }

@@ -1,3 +1,6 @@
+## v26.981.0 Suggestion box — new-suggestion email robustness
+- suggestionStakeholders() now falls back to the ben@ + sarah@ default whenever the configured list parses to **no valid emails** (not only when blank). A non-empty invalid value in CONFIG ▸ Suggestions was silently disabling the new-suggestion + stakeholder-status emails — so emails appeared to fire only on "complete" (the going-live mail goes to the submitter directly, independent of the stakeholder list).
+
 ## v26.980.0 Deposits Drawdown — PO link opens the drawer on the Payments tab
 - The drawdown popover PO link now opens the PO drawer straight to its **Payments** tab (openPODrawer(po,'pay')).
 
