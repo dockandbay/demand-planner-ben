@@ -264,6 +264,7 @@ async function buildSKURAW() {
                        p.market_tier ti, p.core_seasonal cs, coalesce(sl.release_window,'') rw,
                        nullif(trim(p.replacement_sku),'') rep,
                        coalesce(nullif(trim(p.variant_image_url_final),''), nullif(trim(p.colour_swatch_url),'')) img,   -- variant image, falling back to the colour swatch when blank
+                       nullif(trim(p.colour_swatch_url),'') sw,   -- colour swatch URL — client-side fallback when the variant image URL 404s
                        upper(coalesce(nullif(btrim(p.status),''),'')) st
                 FROM planner.products p LEFT JOIN planner.v_sku_attrs sl ON sl.sku=p.sku WHERE p.in_planning_scope`),
     // Launch + discontinue dates per country, from planner.products (Ben's single source of truth).
@@ -353,6 +354,7 @@ async function buildSKURAW() {
                  rw: r.rw || '',  // release window (season) — shown on the BUY/FBA/Transfer grid after Type
                  rep: r.rep || '',  // replacement_sku (predecessor) — new SKU inherits its sales history as the forecast basis
                  img: r.img || '',  // variant_image_url_final — DEMAND plan optional variant-image thumbnail
+                 sw: r.sw || '',    // colour swatch URL — client falls back to this if the variant image 404s
                  st: r.st || '',    // products.status (ACTIVE/…) — for the Key-Accounts "active only" SKU picker
                  av: {}, disc: {}, lch: {}, inv: {}, oo: {} };
   for (const r of avail.rows) if (p[r.sku] && r.av) p[r.sku].av[r.co] = r.av;

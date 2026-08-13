@@ -1,3 +1,6 @@
+## v26.964.0 Variant image: fall back to colour swatch on a broken (404) link
+- The DEMAND plan variant thumbnail now falls back to the **colour swatch URL** when the variant image URL fails to load — not just when it is blank (the old DB-level coalesce). Server injects the swatch separately (SKUM.sw); client onerror swaps to it, and hides only if the swatch also fails. Example: TOWLB-CAB-LG-RED-R's variant URL 404s but its Cloudinary swatch loads, so it now shows.
+
 ## v26.963.0 FBA Aged: highlight the selected bucket column
 - When an aged-bucket filter pill is active (e.g. 456+), that bucket's column is now highlighted (header + cells, light blue) so the filtered age band stands out in the table.
 
