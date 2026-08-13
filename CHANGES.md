@@ -1,3 +1,8 @@
+## v26.937.0 Plan Shipments drawer — rework (country-first, all POs, existing containers)
+- **Step 1 = choose a ship-to country** — fixed pills **UK / US / EU / AU / CA** (not data-derived); nothing loads until one is picked.
+- Left panel now lists **all** that market's shipping POs (ready-to-ship + those already on an active shipment), each with a **ready/status badge** and a **clickable PO ref** that opens the PO drawer **above** the popup.
+- **Containers** panel shows the market's **existing active shipments** (multi-column), each a drop target with its POs + pallet fill; completed/delivered shipments excluded. "+ new container" still available. Endpoint takes `?country=`.
+
 ## v26.936.0 Demand plan — quarter/half/FY column colour → #C4C4C4
 - Quarter / half / full-year total columns recoloured to **#C4C4C4** (from #898989). Market grand-total FY cell text switched to dark so the number stays readable on the lighter fill.
 
