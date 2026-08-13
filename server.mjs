@@ -7806,6 +7806,15 @@ app.get('/api/supply/action-metrics/data', async (_req, res) => {   // 2-segment
 app.post('/api/supply/action-metrics/snapshot', async (_req, res) => {
   try { res.json({ ok: true, snapshot: await snapshotOpenActions() }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// The individual PO-level open actions (from the same exceptions engine as the ACTIONS tab) — PO + type + explainer,
+// so the Metrics scoreboard can list every PO with an open action and link each to its drawer.
+app.get('/api/supply/action-metrics/pos', async (_req, res) => {
+  try {
+    const rows = await buildActionsRows();
+    const pos = rows.filter(r => r.target === 'po' && r.target_key).map(r => ({ po: r.target_key, type: r.type, detail: r.detail, severity: r.severity }));
+    res.json({ ok: true, pos });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // Vercel cron target — vercel.json schedules `59 23 * * 4` (Thursday 23:59 GMT) to hit this; computes + upserts this week's row.
 app.get('/api/cron/action-metrics', async (_req, res) => {
   try { res.json({ ok: true, snapshot: await snapshotOpenActions() }); } catch (e) { res.status(500).json({ error: e.message }); }

@@ -1,3 +1,8 @@
+## v26.990.0 Open-actions scoreboard — desktop width, dd-mmm dates, PO list
+- Board now constrained to max-width 820px so it reads well on a full-width desktop.
+- Snapshot date columns in each metric's expanded trend now show dd-mmm (e.g. 14-Aug) instead of raw MM-DD.
+- New "POs with open actions" expander at the bottom of the board: lazy-loads from `/api/supply/action-metrics/pos` (server reuses buildActionsRows, PO-targeted rows), lists each PO with its action type + detail (severity-coloured), each PO links to its drawer via openPODrawer.
+
 ## v26.989.0 Mobile: level-3 nav scrolls horizontally instead of wrapping
 - The SUPPLY level-3 sub-navs (#rep-subnav reports · #prod-subtabs · .po-subnav) now scroll horizontally in one row (flex-wrap:nowrap + overflow-x:auto; tabs flex:0 0 auto) instead of wrapping to multiple lines on mobile.
 
