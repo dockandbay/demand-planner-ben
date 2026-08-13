@@ -8999,7 +8999,7 @@
   // SUG-0020 DTC MISMATCH — open Direct-to-Client sales orders vs their POs (mapped by sales_order_ref)
   function _dtcPill(lbl,n,color){ return '<span style="font-size:11px;color:#64748b">'+lbl+' <b style="color:'+color+'">'+n+'</b></span>'; }
   function refreshDtcBadge(){ var el=document.getElementById('nav-dtc-badge'); if(!el)return;
-    fetch('/api/supply/dtc/mismatch?count=1').then(function(r){return r.json();}).then(function(j){ var n=(j&&j.counts&&j.counts.issues)||0; el.textContent=n?String(n):''; el.style.display=n?'':'none'; }).catch(function(){}); }
+    fetch('/api/supply/dtc/mismatch?count=1').then(function(r){return r.json();}).then(function(j){ var c=(j&&j.counts)||{}; var n=(c.issues||0)+(c.unmapped_pos||0); el.textContent=n?String(n):''; el.style.display=n?'':'none'; }).catch(function(){}); }
   function renderDtcMismatch(d){ var b=biBody(); d=d||{orders:[],counts:{}}; var counts=d.counts||{};
     b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:#0f172a">DTC mismatch</div>'
       +'<div class="mut tiny" style="margin-bottom:10px;max-width:840px">Open Direct-to-Client sales orders (not void, not dispatched) reconciled against their purchase orders (mapped by sales order ref). Flags orders with <b>no PO</b> or a <b>SKU / quantity mismatch</b>. Add a note or <b>accept</b> a discrepancy to clear it from the count.</div>'
@@ -9026,11 +9026,19 @@
   // #1 reverse view — open, not-received DTC-branch POs with no sales-order mapping
   function _drawDtcUnmapped(list){ var el=document.getElementById('dtc-unmapped'); if(!el)return;
     if(!list.length){ el.innerHTML=''; return; }
-    var rows=list.map(function(p){ return '<tr><td class="l"><button class="lnk-btn dtc-po" data-po="'+esc(p.po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer">'+esc(p.po)+'</button>'+(p.supplier?' <span class="mut">('+esc(p.supplier)+')</span>':'')+'</td><td class="l">'+esc(p.branch||'')+'</td><td class="l">'+esc(p.country_code||'')+'</td><td class="l">'+esc(p.status||'')+'</td></tr>'; }).join('');
-    el.innerHTML='<div style="font-weight:700;font-size:13px;margin:18px 0 3px;color:#0f172a">Open purchase orders, not mapped to a sales order <span class="mut">('+list.length+')</span></div>'
-      +'<div class="mut tiny" style="margin-bottom:6px;max-width:840px">Open (not received) POs in the Direct-to-Client branches with no sales-order reference.</div>'
-      +'<div class="tw"><table style="width:max-content;min-width:100%"><thead><tr><th class="l">PO (supplier)</th><th class="l">Branch</th><th class="l">Country</th><th class="l">Status</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+    var openN=list.filter(function(p){return !p.accepted;}).length;
+    var rows=list.map(function(p){ var acc=!!p.accepted;
+      return '<tr'+(acc?' style="opacity:.6"':'')+'><td class="l">'+(acc?'<span class="tool-badge bg-blue">accepted</span> ':'')+'<button class="lnk-btn dtc-po" data-po="'+esc(p.po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer">'+esc(p.po)+'</button>'+(p.supplier?' <span class="mut">('+esc(p.supplier)+')</span>':'')+'</td>'
+        +'<td class="l">'+esc(p.branch||'')+'</td><td class="l">'+esc(p.country_code||'')+'</td><td class="l">'+esc(p.status||'')+'</td>'
+        +'<td class="l"><input class="fci txt dtcpo-note" data-po="'+esc(p.po)+'" value="'+esc(p.note||'')+'" placeholder="note…" style="width:150px"></td>'
+        +'<td class="l"><label style="font-size:11px;white-space:nowrap"><input type="checkbox" class="dtcpo-acc" data-po="'+esc(p.po)+'"'+(acc?' checked':'')+'> accept</label></td></tr>'; }).join('');
+    el.innerHTML='<div style="font-weight:700;font-size:13px;margin:18px 0 3px;color:#0f172a">Open purchase orders, not mapped to a sales order <span class="mut">('+openN+')</span></div>'
+      +'<div class="mut tiny" style="margin-bottom:6px;max-width:840px">Open (not received) POs in the Direct-to-Client branches with no sales-order reference. Accept a row to clear it from the count.</div>'
+      +'<div class="tw"><table style="width:max-content;min-width:100%"><thead><tr><th class="l">PO (supplier)</th><th class="l">Branch</th><th class="l">Country</th><th class="l">Status</th><th class="l">Note</th><th class="l">Accept</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
     el.querySelectorAll('.dtc-po').forEach(function(x){ x.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(x.dataset.po,'oplan'); else if(typeof gotoPO==='function')gotoPO(x.dataset.po,'oplan'); }; });
+    function savePo(po,accepted,note){ fetch('/api/supply/dtc/po-review',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,accepted:accepted,note:note})}).then(function(r){return r.json();}).then(function(){ selectReport('dtc-mismatch'); }).catch(function(){}); }
+    el.querySelectorAll('.dtcpo-acc').forEach(function(cb){ cb.onclick=function(){ var po=cb.dataset.po, ne=el.querySelector('.dtcpo-note[data-po="'+(window.CSS&&CSS.escape?CSS.escape(po):po)+'"]'); savePo(po,cb.checked,ne?ne.value:''); }; });
+    el.querySelectorAll('.dtcpo-note').forEach(function(inp){ inp.onchange=function(){ var po=inp.dataset.po, ce=el.querySelector('.dtcpo-acc[data-po="'+(window.CSS&&CSS.escape?CSS.escape(po):po)+'"]'); savePo(po,ce?ce.checked:false,inp.value); }; });
   }
   function _drawDtcList(orders){ var el=document.getElementById('dtc-list'); if(!el)return;
     if(!orders.length){ el.innerHTML='<div class="mut tiny" style="padding:8px 0">No open DTC sales orders imported yet. Click <b>Import sales orders</b> to pull them from Cin7.</div>'; return; }

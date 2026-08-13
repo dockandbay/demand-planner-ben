@@ -7384,16 +7384,31 @@ app.get('/api/supply/dtc/mismatch', async (req, res) => {
       if (s.accepted) accepted++; else if (isIssue) issues++; else ok++;
       return { cin7_id: s.cin7_id, reference: s.reference, branch_name: s.branch_name, company: s.company, created_date: s.created_date, po_refs: poRefs, issue, diffs: diffs.slice(0, 60), note: s.note, accepted: s.accepted };
     });
-    if (countOnly) return res.json({ orders: [], counts: { issues, accepted, ok } });
     // #1 reverse view — open, not-received POs in the DTC branches (Direct to Client / JLEW / NEXT) with NO sales-order
-    // mapping → surfaced as "open purchase order, not mapped to a sales order". Read-only from planner.purchase_orders.
+    // mapping → "open purchase order, not mapped to a sales order". Accept/note via dtc_po_review (mig 222) clears it
+    // from the open count. Read-only from planner.purchase_orders.
     const DTC_BRANCH_NAMES = Object.values(DTC_BRANCHES);
-    const unmapped = (await pool.query(`SELECT po, coalesce(supplier_name,'') supplier, coalesce(branch,'') branch, coalesce(country_code,'') country_code, coalesce(status,'') status
-      FROM planner.purchase_orders
-      WHERE branch = ANY($1)
-        AND coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(status,'') NOT ILIKE '%cancel%' AND coalesce(status,'') NOT ILIKE '%void%'
-        AND coalesce(sales_order_ref,'') = '' ORDER BY po`, [DTC_BRANCH_NAMES])).rows;
-    res.json({ orders, unmapped_pos: unmapped, counts: { issues, accepted, ok, unmapped_pos: unmapped.length } });
+    const unmapped = (await pool.query(`SELECT p.po, coalesce(p.supplier_name,'') supplier, coalesce(p.branch,'') branch, coalesce(p.country_code,'') country_code, coalesce(p.status,'') status,
+        coalesce(r.accepted,false) accepted, coalesce(r.note,'') note, coalesce(r.accepted_by,'') accepted_by
+      FROM planner.purchase_orders p LEFT JOIN planner.dtc_po_review r ON r.po=p.po
+      WHERE p.branch = ANY($1)
+        AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%cancel%' AND coalesce(p.status,'') NOT ILIKE '%void%'
+        AND coalesce(p.sales_order_ref,'') = '' ORDER BY coalesce(r.accepted,false), p.po`, [DTC_BRANCH_NAMES])).rows;
+    const unmappedOpen = unmapped.filter(u => !u.accepted).length;   // badge/count = non-accepted only
+    if (countOnly) return res.json({ orders: [], counts: { issues, accepted, ok, unmapped_pos: unmappedOpen } });
+    res.json({ orders, unmapped_pos: unmapped, counts: { issues, accepted, ok, unmapped_pos: unmappedOpen } });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Accept / note an unmapped-PO row (the reverse DTC view) — mig 222
+app.post('/api/supply/dtc/po-review', async (req, res) => {
+  const b = req.body || {}; const po = String(b.po || '').trim();
+  if (!po) return res.status(400).json({ error: 'po required' });
+  try {
+    const by = authUser(req) || 'admin';
+    await pool.query(`INSERT INTO planner.dtc_po_review (po, accepted, accepted_by, note, updated_at) VALUES ($1,$2,$3,$4,now())
+      ON CONFLICT (po) DO UPDATE SET accepted=excluded.accepted, accepted_by=excluded.accepted_by, note=coalesce(excluded.note, planner.dtc_po_review.note), updated_at=now()`,
+      [po, !!b.accepted, by, b.note != null ? String(b.note) : null]);
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // 3PL invoice — reference-based CLEAN-UP SWEEP for one invoice file. Fetches the invoice's references that

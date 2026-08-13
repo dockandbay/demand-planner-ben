@@ -1,3 +1,7 @@
+## v26.931.0 DTC Mismatch — accept unmapped POs + total-issue counter
+- The **"Open POs not mapped to a sales order"** section now has the **accept + note** feature (like the sales-order rows): accepting a PO clears it from the count and badges it. New table `dtc_po_review` (migration 222) + `POST /api/supply/dtc/po-review`.
+- The **DTC MISMATCH menu badge** now shows **total open issues = sales-order issues + unmapped POs** (minus accepted) — e.g. 16 in sandbox (6 + 10). The section header shows the non-accepted count.
+
 ## v26.930.0 Demand plan — column colours + pre-launch greying
 - Total-column colours (Ben): **quarter** columns `#C4D8E2`, **half-year** columns `#B5C7EB`, **full-year** total columns `#909EAE` (cells + headers). Grand-total quarter/half cells use dark text so they stay readable on the lighter fills.
 - **Pre-launch months** on a SKU row (every month before the SKU's launch date, **including actuals columns**) are now shaded **`#D9D9D9`** — e.g. HAIRW-SUE-BLUSHBY (pre-launch to Aug-2027).
