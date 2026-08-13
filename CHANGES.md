@@ -1,3 +1,6 @@
+## v26.949.0 Locked forecast vs actual — show % difference in the cell
+- The small indigo **fc 1,456** locked-forecast figure in completed-month actuals cells (both category subtotal rows and SKU rows) now also shows the **% difference vs actual** inline, e.g. **fc 1,456  +12%**. Positive = forecast came in above actual, negative = below. The value was already computed for the tooltip; it is now visible without hovering.
+
 ## v26.948.0 Forecast snapshots — Compare rework (filters, SKU/Category toggle, tighter diffs)
 - **Compare now scopes to the snapshot's month window.** Comparing a snapshot vs Live no longer floods the grid with differences for live months that fall outside the snapshot's 18-month window — only months present in the snapshot are compared, so a fresh snapshot with 3 edits shows ~3 diffs, not many.
 - **Filters:** Country (UK/US/EU/AU/CA), Channel (DTC/FBA/B2B/ZAL), Category dropdown, and a SKU search box. Keys are parsed as sku|warehouse|channel so the compare can be sliced by market/channel/category/SKU.

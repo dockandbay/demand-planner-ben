@@ -5422,7 +5422,7 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
     // most-recent snapshot taken BEFORE this month, small + indigo, so the locked forecast can be eyeballed vs actual.
     if(!isCurMo){ var _lf=LOCKED_FC.sub[ik]; if(_lf!=null){ var _dl=actualUnits>0?Math.round((_lf-actualUnits)/actualUnits*100):null;
       var lfDiv=document.createElement('div'); lfDiv.style.cssText='font-size:8px;color:#6366f1;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap';
-      lfDiv.title='Locked forecast — most recent snapshot taken before this month'+(_dl!=null?' ('+gPct(_dl)+' vs actual)':''); lfDiv.textContent='fc '+fn(_lf); d.appendChild(lfDiv); } }
+      lfDiv.title='Locked forecast — most recent snapshot taken before this month'+(_dl!=null?' ('+gPct(_dl)+' vs actual)':''); lfDiv.textContent='fc '+fn(_lf)+(_dl!=null?'  '+gPct(_dl):''); d.appendChild(lfDiv); } }
     td.appendChild(d);return td;
   }
 
@@ -7670,7 +7670,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         // recent snapshot taken before this month, small + indigo, to compare the locked forecast against the actual.
         var _lfS=(m!==CUR_MONTH)?LOCKED_FC.sku[sku+'|'+co+'|'+ch+'|'+m]:null;
         var _lfDl=(_lfS!=null&&act>0)?Math.round((_lfS-act)/act*100):null;
-        var _lfHtml=(_lfS!=null)?('<div style="font-size:7px;color:#6366f1;text-align:right;font-variant-numeric:tabular-nums" title="Locked forecast (most recent snapshot before this month)'+(_lfDl!=null?' '+gPct(_lfDl)+' vs actual':'')+'">fc '+fn(_lfS)+'</div>'):'';
+        var _lfHtml=(_lfS!=null)?('<div style="font-size:7px;color:#6366f1;text-align:right;font-variant-numeric:tabular-nums" title="Locked forecast (most recent snapshot before this month)'+(_lfDl!=null?' '+gPct(_lfDl)+' vs actual':'')+'">fc '+fn(_lfS)+(_lfDl!=null?'  '+gPct(_lfDl):'')+'</div>'):'';
         td.innerHTML='<div style="display:flex;flex-direction:column;padding:1px 2px">'
           +'<div style="font-size:8px;color:#94a3b8;text-align:right;font-variant-numeric:tabular-nums">'+fn(lyVal)+'</div>'
           +'<div style="font-size:9px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums">'+fn(act)+'</div>'
