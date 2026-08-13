@@ -4806,7 +4806,7 @@
   // ── 🚢 Plan Shipments drawer — allocate READY-TO-SHIP POs (sea, excl. FOB/air) onto containers by drag & drop.
   //    Drop sets shipment_ref LIVE (same as the assign flow, timeline-logged). "Recommend" greedily fills 20-pallet
   //    (40ft) containers per ship-to country; Apply assigns each group under its first PO as the master. ──
-  var _spData=null, _spCtry='', SP_CAP=20, SP_MKTS=['UK','US','EU','AU','CA'], _spDays=21, _spDismissed={};
+  var _spData=null, _spCtry='', SP_CAP=20, SP_MKTS=['UK','US','EU','AU','CA'], _spDays=21, _spDismissed={}, _spUndo=[];
   function openShipPlan(){ var ov=document.getElementById('shipplan-ov'); if(ov)ov.remove();
     ov=document.createElement('div'); ov.id='shipplan-ov'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;padding:8px';
     ov.style.zIndex=6105;   // #1 just below the drawer base+10 (6110) so EVERY PO/shipment drawer (nextDrawerZ ≥ 6110, even after a reset) opens ABOVE this popup; still above supply content
@@ -4815,12 +4815,13 @@
         +'<div style="font-weight:700;font-size:16px;color:#0f172a">🚢 Plan Shipments</div>'
         +'<div style="display:flex;align-items:center;gap:8px"><span style="font-size:12px;font-weight:700;color:#334155">Ship to:</span><span id="sp-ctry" style="display:inline-flex;gap:5px"></span></div>'
         +'<label style="font-size:12px;color:#334155;display:inline-flex;align-items:center;gap:5px">Days to go &lt; <input id="sp-days" type="number" min="0" value="'+_spDays+'" style="width:56px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px"></label>'
-        +'<button id="sp-refresh" class="save-btn light" style="margin-left:auto" title="reload the plan from the server">↻ Refresh</button>'
+        +'<button id="sp-undo" class="save-btn light" style="margin-left:auto" title="undo the last change">↶ Undo</button>'+'<button id="sp-refresh" class="save-btn light" title="reload the plan from the server">↻ Refresh</button>'
         +'<button id="sp-close" class="save-btn light">✕ Close</button></div>'
       +'<div id="sp-body" style="flex:1;overflow:auto;padding:14px 16px"></div></div>';
     document.body.appendChild(ov); ov.onclick=function(e){ if(e.target===ov)ov.remove(); };
     ov.querySelector('#sp-close').onclick=function(){ ov.remove(); };
     var _rf=ov.querySelector('#sp-refresh'); if(_rf)_rf.onclick=function(){ if(_spCtry)_spLoad(); else _spDrawPrompt(); };
+    var _uu=ov.querySelector('#sp-undo'); if(_uu)_uu.onclick=function(){ _spDoUndo(); };
     var _dz=ov.querySelector('#sp-days'); if(_dz)_dz.onchange=function(){ _spDays=Math.max(0,parseInt(this.value,10)); if(isNaN(_spDays))_spDays=21; if(_spCtry)_spDraw(); };
     _spPills(); if(_spCtry)_spLoad(); else _spDrawPrompt(); }   // reopen: keep the last-selected market and refresh it; else prompt
   function _spDaysToGo(pe){ if(!pe)return null; var t=new Date(pe+'T00:00:00'), n=new Date(); n.setHours(0,0,0,0); return Math.round((t-n)/86400000); }
@@ -4832,7 +4833,7 @@
     cp.innerHTML=SP_MKTS.map(function(c){ return '<span class="pill'+((_spCtry===c)?' active':'')+'" data-spc="'+c+'" style="font-weight:700;padding:4px 13px;font-size:12px">'+c+'</span>'; }).join('');
     cp.querySelectorAll('[data-spc]').forEach(function(x){ x.onclick=function(){ _spCtry=x.dataset.spc; _spPills(); _spLoad(); }; }); }
   function _spDrawPrompt(){ var b=document.getElementById('sp-body'); if(b)b.innerHTML='<div style="text-align:center;color:#64748b;padding:52px 0;font-size:14px">Choose a ship-to country above to plan its shipments.</div>'; }
-  function _spLoad(){ _spDismissed={}; var b=document.getElementById('sp-body'); if(b)b.innerHTML='<div class="count">Loading '+esc(_spCtry)+'…</div>';
+  function _spLoad(){ _spDismissed={}; _spUndo=[]; var b=document.getElementById('sp-body'); if(b)b.innerHTML='<div class="count">Loading '+esc(_spCtry)+'…</div>';
     fetch('/api/supply/ship-plan?country='+encodeURIComponent(_spCtry)).then(function(r){return r.json();}).then(function(j){ _spData=(j&&j.pos)||[]; _spDraw(); }).catch(function(){ if(b)b.innerHTML='<div style="color:#dc2626">Failed to load.</div>'; }); }
   function _spDraw(){ var body=document.getElementById('sp-body'); if(!body||!_spData)return;
     var vis=_spData.filter(function(p){ var d=_spDaysToGo(p.prod_end); return d==null || d<=_spDays; });
@@ -4859,17 +4860,21 @@
       +'</div>';
     body.querySelectorAll('.sp-poref').forEach(function(bb){ bb.onclick=function(e){ e.stopPropagation(); if(typeof openPODrawer==='function')openPODrawer(bb.dataset.po,'oplan'); }; });
     body.querySelectorAll('.sp-shipref').forEach(function(bb){ bb.onclick=function(e){ e.stopPropagation(); if(typeof gotoShipment==='function')gotoShipment(bb.dataset.ref); else if(typeof openShipDrawer==='function')openShipDrawer(bb.dataset.ref); }; });
-    body.querySelectorAll('.sp-conf').forEach(function(cb){ cb.onchange=function(){ var ref=cb.dataset.ref, on=cb.checked; _spData.forEach(function(p){ if(p.container===ref)p.confirmed=on; }); _spDraw(); fetch('/api/supply/ship-plan/lock',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ref:ref,confirmed:on})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)_spLoad(); }).catch(function(){ _spLoad(); }); }; });
+    body.querySelectorAll('.sp-conf').forEach(function(cb){ cb.onchange=function(){ var ref=cb.dataset.ref, on=cb.checked; var _pv=false; _spData.forEach(function(p){ if(p.container===ref&&p.confirmed)_pv=true; }); _spUndo.push({lock:{ref:ref,confirmed:_pv}}); _spData.forEach(function(p){ if(p.container===ref)p.confirmed=on; }); _spDraw(); fetch('/api/supply/ship-plan/lock',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ref:ref,confirmed:on})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)_spLoad(); }).catch(function(){ _spLoad(); }); }; });
     body.querySelectorAll('.sp-dismiss').forEach(function(bb){ bb.onclick=function(){ _spDismissed[bb.dataset.sig]=1; _spDraw(); }; });
     body.querySelectorAll('.sp-apply-bin').forEach(function(bb){ bb.onclick=function(){ var arr=(bb.dataset.pos||'').split(',').filter(Boolean); if(!arr.length)return; var master=arr[0];
-      arr.forEach(function(po){ var p=_spData.find(function(x){return x.po===po;}); if(p){ p.shipment_ref=master; p.container=master; } }); _spDraw();   // optimistic
+      _spUndo.push({pos:arr.map(function(po){ var p=_spData.find(function(x){return x.po===po;}); return p?{po:po,ref:p.shipment_ref,container:p.container}:{po:po,ref:'',container:null}; })}); arr.forEach(function(po){ var p=_spData.find(function(x){return x.po===po;}); if(p){ p.shipment_ref=master; p.container=master; } }); _spDraw();   // optimistic
       Promise.all(arr.map(function(po){ return fetch('/api/supply/po/'+encodeURIComponent(po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({shipment_ref:master})}).then(function(r){return r.json();}); })).then(function(rs){ if(rs.some(function(j){return j&&j.error;}))_spLoad(); }).catch(function(){ _spLoad(); }); }; });
     body.querySelectorAll('.sp-po').forEach(function(card){ card.addEventListener('dragstart',function(e){ e.dataTransfer.setData('text/plain',card.dataset.po); e.dataTransfer.effectAllowed='move'; card.style.opacity='.5'; }); card.addEventListener('dragend',function(){ card.style.opacity=''; }); });
     body.querySelectorAll('.sp-drop').forEach(function(dz){ dz.addEventListener('dragover',function(e){ e.preventDefault(); dz.style.borderColor='#0ea5e9'; }); dz.addEventListener('dragleave',function(){ dz.style.borderColor=''; });
       dz.addEventListener('drop',function(e){ e.preventDefault(); dz.style.borderColor=''; var po=e.dataTransfer.getData('text/plain'); if(!po)return; var ref=dz.dataset.ref; if(ref==='__new__')ref=po; _spAssign(po, ref); }); });
   }
-  function _spAssign(po,ref){ var p=_spData.find(function(x){return x.po===po;}); if(p){ p.shipment_ref=ref; p.container=ref||null; } _spDraw();   // optimistic — no reload on success (smooth, no flash); reconcile only on error
+  function _spAssign(po,ref){ var p=_spData.find(function(x){return x.po===po;}); if(p){ _spUndo.push({pos:[{po:po,ref:p.shipment_ref,container:p.container}]}); p.shipment_ref=ref; p.container=ref||null; } _spDraw();   // optimistic — no reload on success (smooth, no flash); reconcile only on error
     fetch('/api/supply/po/'+encodeURIComponent(po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({shipment_ref:ref})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ alert('Assign failed: '+j.error); _spLoad(); } }).catch(function(){ _spLoad(); }); }
+  function _spDoUndo(){ var u=_spUndo.pop(); if(!u)return;
+    if(u.lock){ var ref=u.lock.ref, on=u.lock.confirmed; _spData.forEach(function(p){ if(p.container===ref)p.confirmed=on; }); _spDraw(); fetch('/api/supply/ship-plan/lock',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({ref:ref,confirmed:on})}).then(function(r){return r.json();}).catch(function(){}); return; }
+    if(u.pos){ u.pos.forEach(function(x){ var p=_spData.find(function(y){return y.po===x.po;}); if(p){ p.shipment_ref=x.ref; p.container=x.container||null; } }); _spDraw();
+      Promise.all(u.pos.map(function(x){ return fetch('/api/supply/po/'+encodeURIComponent(x.po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({shipment_ref:x.ref})}).then(function(r){return r.json();}); })).then(function(rs){ if(rs.some(function(j){return j&&j.error;}))_spLoad(); }).catch(function(){ _spLoad(); }); } }
   // silent refresh of one PO's effective pallets in the open plan (called after the PO drawer saves a pallet override)
   function _spOnPalletsSaved(po){ if(!document.getElementById('shipplan-ov')||!_spData)return; var p=_spData.find(function(x){return x.po===po;}); if(!p)return;
     fetch('/api/supply/po/'+encodeURIComponent(po)+'/pallets').then(function(r){return r.json();}).then(function(d){ if(!d||d.error)return; p.pallets=Math.round((d.pallets_override!=null?d.pallets_override:d.est_pallets||0)*10)/10; _spDraw(); }).catch(function(){}); }

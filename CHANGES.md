@@ -1,3 +1,6 @@
+## v26.946.0 Plan Shipments — Undo button
+- Added an **↶ Undo** button that reverts the last change (drag-assign / unassign, Recommendation Apply, or a Confirmed toggle). Multiple undos step back through the history; cleared on Refresh.
+
 ## v26.945.0 Plan Shipments — clickable rec POs + remember market on reopen
 - PO references inside a Recommendation are now clickable (open the PO drawer).
 - Reopening the drawer keeps the **last-selected market** and **reloads** it (instead of showing the country pill selected but an empty prompt).
