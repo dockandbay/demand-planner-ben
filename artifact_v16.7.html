@@ -11052,19 +11052,25 @@ function renderKlaviyoBisView(body){
   var boxes=body.querySelector('#kb-boxes'), summary=body.querySelector('#kb-summary'), DROWS=[];
   function draw(d){ var st=d.markets||{}; DROWS=d.rows||[];
     boxes.innerHTML=MK.map(function(mk){ var c=col(mk), s=st[mk];
-      return '<div style="border:2px solid '+c+';border-radius:10px;overflow:hidden;background:#fff">'
+      return '<div class="kb-drop" data-mk="'+mk+'" style="border:2px solid '+c+';border-radius:10px;overflow:hidden;background:#fff">'
         +'<div style="background:'+c+';color:#111;font-weight:700;padding:6px 11px;font-size:13px">'+mk+'</div>'
         +'<div style="padding:10px 11px">'
           +'<div class="mut" style="font-size:11px;margin-bottom:8px;min-height:44px">'+(s?('<b>'+e2(s.filename||'file')+'</b><br>'+(s.n_skus||0)+' SKUs &middot; '+(s.total_subs||0)+' subs<br><span style="color:#94a3b8">last uploaded by <b>'+e2(shortEml(s.uploaded_by))+'</b> on '+e2(fmtDT(s.uploaded_at))+'</span>'):'<span style="color:#b45309">none uploaded yet</span>')+'</div>'
           +'<label class="rbtn" style="cursor:pointer;display:inline-block;font-size:11px;padding:4px 10px">&#8593; Upload file<input type="file" class="kb-file" data-mk="'+mk+'" accept=".xlsx,.xls,.csv" style="display:none"></label>'
           +' <span class="kb-stat mut" data-mk="'+mk+'" style="font-size:11px"></span>'
+          +'<div class="mut" style="font-size:10px;color:#94a3b8;margin-top:6px">or drag &amp; drop a file onto this box</div>'
         +'</div></div>'; }).join('');
-    boxes.querySelectorAll('.kb-file').forEach(function(inp){ inp.onchange=function(){ var f=this.files[0]; if(!f)return; var mk=this.dataset.mk; var stat=boxes.querySelector('.kb-stat[data-mk="'+mk+'"]'); if(stat){stat.style.color='#64748b';stat.textContent='Uploading…';}
+    function doKbUp(f,mk){ if(!f||!mk)return; var stat=boxes.querySelector('.kb-stat[data-mk="'+mk+'"]'); if(stat){stat.style.color='#64748b';stat.textContent='Uploading…';}
       var rd=new FileReader(); rd.onload=function(){ var b64=String(rd.result).split(',')[1]||''; var isCsv=/\.csv$/i.test(f.name);
         fetch('/api/klaviyo-bis/upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({market:mk,filename:f.name,content_base64:b64,is_csv:isCsv})})
           .then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ if(stat){stat.style.color='#dc2626';stat.textContent=j.error;} return; }
             if(stat){stat.style.color='#16a34a';stat.textContent='✓ '+(j.n_skus||0)+' SKUs, '+(j.total_subs||0)+' subs';} load(); })
-          .catch(function(){ if(stat){stat.style.color='#dc2626';stat.textContent='Failed';} }); }; rd.readAsDataURL(f); }; });
+          .catch(function(){ if(stat){stat.style.color='#dc2626';stat.textContent='Failed';} }); }; rd.readAsDataURL(f); }
+    boxes.querySelectorAll('.kb-file').forEach(function(inp){ inp.onchange=function(){ doKbUp(this.files[0], this.dataset.mk); }; });
+    boxes.querySelectorAll('.kb-drop').forEach(function(dz){ var mk=dz.dataset.mk;   // SUG-0026: drag-and-drop as well as file-select
+      dz.addEventListener('dragover',function(e){ e.preventDefault(); dz.style.outline='2px dashed '+col(mk); dz.style.outlineOffset='-2px'; });
+      dz.addEventListener('dragleave',function(e){ if(e.target===dz){ dz.style.outline=''; } });
+      dz.addEventListener('drop',function(e){ e.preventDefault(); dz.style.outline=''; var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]; if(f)doKbUp(f, mk); }); });
     // ---- analysis summary ----
     if(!DROWS.length){ summary.innerHTML='<div class="mut tiny">No back-in-stock data yet — upload a file above.</div>'; return; }
     var mtot={UK:0,US:0,EU:0,AU:0}, msku={UK:0,US:0,EU:0,AU:0}, gtot=0;

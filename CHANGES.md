@@ -1,3 +1,6 @@
+## v26.927.0 SUG-0026 Klaviyo BIS upload — drag & drop
+- Each market box on DEMAND ▸ Inputs ▸ Klaviyo BIS is now a **drop zone**: drag a .xlsx/.csv straight onto it (highlights on hover) in addition to the file-select button. Same upload path. Also marked SUG-0020 (DTC Mismatch) + SUG-0024 (Inventory Status Report) complete on live (both already shipped).
+
 ## v26.926.0 Pallet override — supplier-portal endpoints (server)
 - Portal endpoints for the supplier to read/set the **same** `pallets_override` field on the PO card: `GET /api/portal/po-pallets/:po` (estimate + current override) and `POST /api/portal/po-pallets` (portalOwnsPO-guarded; blank clears; **timeline-logged** via `logPoFieldChanges` → "Pallet count: M → N"). Verified gated (401 without a supplier session). **Portal PO-card UI input is the last step** (needs the portal render + a portal test tunnel).
 
