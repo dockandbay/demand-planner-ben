@@ -7125,6 +7125,62 @@ async function fbaAgedCost(mkt, aged, rate, dimsBySku) {
     grand_total: Math.round((base_total + surcharge_total) * 100) / 100, missing_dims: missingDims, avg_vol: Math.round(avgVol * 1000) / 1000, rate };
 }
 // Save edited aged-storage rates (CONFIG). Body: { market, rate:{cur,vol,base,peak,b:{a1..a5:[v,u]}} } — merged over current.
+// ── US AWD (Amazon Warehousing & Distribution) — upload of the "AWD Inventory Ledger" report. The ledger is in CARTONS;
+//    on-hand units = Ending Warehouse Balance (cartons) × Package Quantity, aggregated per MSKU. Stored in
+//    planner.inventory_fba_imports under the market key 'US_AWD' (no schema change). DISPLAY / reconciliation only —
+//    it does NOT write planner.products.inventory_us_awd, so the buy plan is untouched (wiring is a later decision).
+function awdLedgerParse(text) {
+  const lines = String(text).split(/\r?\n/).filter(x => x.trim().length); if (!lines.length) return null;
+  const isTsv = lines[0].indexOf('\t') >= 0;
+  const split = isTsv ? (l => l.split('\t').map(s => String(s).replace(/^"|"$/g, '').trim()))
+                      : (l => parseCsvLine(l).map(s => String(s).replace(/^"|"$/g, '').trim()));
+  const hdr = split(lines[0]).map(h => h.toLowerCase());
+  const iM = hdr.indexOf('msku'), iPkg = hdr.indexOf('package quantity'),
+        iEnd = hdr.findIndex(h => h.indexOf('ending warehouse balance') >= 0),
+        iFac = hdr.indexOf('facility id'), iAsin = hdr.indexOf('asin');
+  if (iM < 0 || iEnd < 0) return { error: 'Not an AWD Inventory Ledger (needs "MSKU" + "Ending Warehouse Balance (cartons)" columns)', headers: hdr.slice(0, 18) };
+  const agg = {};
+  for (let i = 1; i < lines.length; i++) { const f = split(lines[i]); const msku = String(f[iM] || '').trim(); if (!msku) continue;
+    const pkg = csvNum(f[iPkg]), cartons = csvNum(f[iEnd]);
+    const r = agg[msku] || (agg[msku] = { msku, cartons: 0, units: 0, pkg: 0, asin: '', facility: '' });
+    r.cartons += cartons; r.units += cartons * pkg; if (pkg) r.pkg = pkg;
+    if (!r.asin && iAsin >= 0) r.asin = String(f[iAsin] || '').trim();
+    if (!r.facility && iFac >= 0) r.facility = String(f[iFac] || '').trim(); }
+  const rows = Object.keys(agg).map(k => agg[k]).filter(r => r.cartons !== 0 || r.units !== 0);
+  return { rep: { rows, total_units: rows.reduce((s, r) => s + r.units, 0), total_cartons: rows.reduce((s, r) => s + r.cartons, 0), skus: rows.length } };
+}
+async function awdCompare(rep) {
+  const rows = (rep && rep.rows) || [];
+  const prod = (await pool.query(`SELECT sku, coalesce(inventory_us_awd,0) awd FROM planner.products`)).rows;
+  const bySku = {}; prod.forEach(p => { bySku[String(p.sku).toUpperCase()] = Number(p.awd) || 0; });
+  const out = rows.map(r => { const key = String(r.msku).toUpperCase(), matched = Object.prototype.hasOwnProperty.call(bySku, key);
+      return { ...r, matched, erp_sku: matched ? r.msku : '', current_awd: matched ? bySku[key] : null }; })
+    .sort((a, b) => b.units - a.units);
+  return { awd: out, total_units: rep.total_units || 0, total_cartons: rep.total_cartons || 0,
+    matched_units: out.filter(r => r.matched).reduce((s, r) => s + r.units, 0),
+    current_total: out.filter(r => r.matched).reduce((s, r) => s + (r.current_awd || 0), 0),
+    unmatched: out.filter(r => !r.matched).length };
+}
+app.get('/api/supply/inventory-awd/status', async (_req, res) => {
+  try { const m = (await pool.query(`SELECT imported_by, to_char(imported_at,'YYYY-MM-DD"T"HH24:MI:SS') imported_at, report FROM planner.inventory_fba_imports WHERE market='US_AWD'`)).rows[0];
+    if (!m || !m.report) return res.json({ market: 'US_AWD', imported: false });
+    res.json({ market: 'US_AWD', imported: true, imported_by: m.imported_by, imported_at: m.imported_at, ...(await awdCompare(m.report)) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/inventory-awd/import', async (req, res) => {
+  const b = req.body || {}; let text = String(b.csv || '');
+  if (b.csv_base64) { try { text = Buffer.from(String(b.csv_base64).split(',').pop(), 'base64').toString('utf8'); } catch (e) {} }
+  if (!text.trim()) return res.json({ error: 'Empty file' });
+  try { const parsed = awdLedgerParse(text);
+    if (!parsed) return res.json({ error: 'Empty report' });
+    if (parsed.error) return res.json({ headers: parsed.headers, error: parsed.error });
+    const by = authUser(req) || 'admin';
+    await pool.query(`INSERT INTO planner.inventory_fba_imports (market, imported_by, imported_at, report) VALUES ('US_AWD',$1,now(),$2::jsonb)
+      ON CONFLICT (market) DO UPDATE SET imported_by=excluded.imported_by, imported_at=now(), report=excluded.report`, [by, JSON.stringify(parsed.rep)]);
+    const m = (await pool.query(`SELECT to_char(imported_at,'YYYY-MM-DD"T"HH24:MI:SS') imported_at FROM planner.inventory_fba_imports WHERE market='US_AWD'`)).rows[0];
+    res.json({ market: 'US_AWD', imported: true, imported_by: by, imported_at: m.imported_at, ...(await awdCompare(parsed.rep)) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.post('/api/supply/inventory-fba/aged-rates', async (req, res) => {
   const b = req.body || {}, mkt = String(b.market || '').toUpperCase();
   if (INVFBA_MKTS.indexOf(mkt) < 0 || !b.rate) return res.json({ error: 'market + rate required' });

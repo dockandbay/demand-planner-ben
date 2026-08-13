@@ -9347,7 +9347,7 @@ function renderInventory(){
   var subnav='<div class="d3nav">'+SUBS.map(function(t){return '<button class="d3tab inv-sub'+(t[0]===INV_SUB?' active':'')+'" data-sub="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div>';
   var body;
   if(INV_SUB==='manage3pl') body=pillbar(['US','UK','AU','EU',['US_NG','US Non GRS'],['UK_NG','UK Non GRS']],INV_3PL,'inv-3pl-pill')+'<div id="inv3pl-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
-  else if(INV_SUB==='managefba') body=pillbar(['US','UK','AU','EU','CA'],INV_FBA,'inv-fba-pill')+'<div id="invfba-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
+  else if(INV_SUB==='managefba') body=pillbar(['US','UK','AU','EU','CA'],INV_FBA,'inv-fba-pill')+'<div id="invfba-panel"><div class="mut" style="font-size:12px">Loading…</div></div><div id="invawd-panel"></div>';
   else if(INV_SUB==='fba-aged') body=pillbar(['US','UK','AU','EU','CA'],INV_FBA,'inv-fba-pill')+'<div id="fbaaged-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
   else body=pillbar(['US','UK','EU','AU','CA'],INV_STATUS_MKT,'inv-status-pill')+'<div id="invstatus-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';   // Status Report (SUG-0024)
   wrap.innerHTML=subnav+'<div id="inv-body">'+body+'</div>';
@@ -9357,7 +9357,7 @@ function renderInventory(){
   wrap.querySelectorAll('.inv-fba-pill').forEach(function(b){ b.onclick=function(){ INV_FBA=b.dataset.c; renderInventory(); }; });
   wrap.querySelectorAll('.inv-status-pill').forEach(function(b){ b.onclick=function(){ INV_STATUS_MKT=b.dataset.c; renderInventory(); }; });
   if(INV_SUB==='manage3pl')inv3plLoad();
-  else if(INV_SUB==='managefba')invFbaLoad('manage');
+  else if(INV_SUB==='managefba'){invFbaLoad('manage'); invAwdLoad();}
   else if(INV_SUB==='fba-aged')invFbaLoad('aged');
   else if(INV_SUB==='status')renderInvStatus();
 }
@@ -9556,6 +9556,53 @@ function invFbaUpload(mode,file){ if(!file)return; var mkt=INV_FBA, msg=document
       .then(function(r){return r.json();}).then(function(j){ invFbaRender(mode,j); })
       .catch(function(e){ if(msg)msg.textContent=''; var p=document.getElementById('invfba-panel'); if(p)p.innerHTML='<div style="color:#dc2626">Failed: '+tHesc((e&&e.message)||e)+'</div>'; }); };
   rd.readAsText(file); }
+// US AWD (Amazon Warehousing & Distribution) upload + reconciliation — shown under Manage FBA, US market only. Display
+// only: reconciles the uploaded AWD Inventory Ledger against planner.products.inventory_us_awd (does not write it).
+function invAwdLoad(){ var panel=document.getElementById('invawd-panel'); if(!panel)return;
+  if(INV_FBA!=='US'){ panel.innerHTML=''; return; }
+  panel.innerHTML='<div class="mut" style="font-size:12px;margin-top:16px">Loading AWD…</div>';
+  fetch('/api/supply/inventory-awd/status').then(function(r){return r.json();}).then(function(j){ invAwdRender(j); })
+    .catch(function(e){ panel.innerHTML='<div style="color:#dc2626">'+tHesc((e&&e.message)||e)+'</div>'; }); }
+function invAwdUpload(file){ if(!file)return; var msg=document.getElementById('invawd-msg');
+  if(msg)msg.textContent='Reading '+file.name+'…';
+  var rd=new FileReader(); rd.onload=function(){ if(msg)msg.textContent='Uploading…';
+    fetch('/api/supply/inventory-awd/import',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csv:String(rd.result)})})
+      .then(function(r){return r.json();}).then(function(j){ invAwdRender(j); })
+      .catch(function(e){ if(msg)msg.textContent=''; var p=document.getElementById('invawd-panel'); if(p)p.innerHTML='<div style="color:#dc2626">Failed: '+tHesc((e&&e.message)||e)+'</div>'; }); };
+  rd.readAsText(file); }
+function invAwdWire(){ var drop=document.getElementById('invawd-drop'), file=document.getElementById('invawd-file'); if(!drop||!file)return;
+  drop.onclick=function(){ file.click(); };
+  file.onchange=function(){ if(file.files&&file.files[0])invAwdUpload(file.files[0]); };
+  drop.ondragover=function(e){ e.preventDefault(); drop.style.background='#e0f2fe'; };
+  drop.ondragleave=function(){ drop.style.background='#f8fbff'; };
+  drop.ondrop=function(e){ e.preventDefault(); drop.style.background='#f8fbff'; if(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0])invAwdUpload(e.dataTransfer.files[0]); };
+}
+function invAwdRender(j){ var panel=document.getElementById('invawd-panel'); if(!panel)return;
+  var host='<div style="margin-top:18px;border-top:1px solid #e5e7eb;padding-top:12px"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px"><b style="font-size:14px">US AWD — Amazon Warehousing &amp; Distribution</b>'
+    +'<span class="mut" style="font-size:11px">upload the <b>AWD Inventory Ledger</b> report (Seller Central). On-hand units = Ending cartons × Package Qty.</span></div>';
+  var drop='<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 8px">'
+    +'<div id="invawd-drop" style="border:2px dashed #93c5fd;border-radius:8px;background:#f8fbff;padding:8px 10px;text-align:center;cursor:pointer;max-width:220px;box-sizing:border-box;font-size:11px">Drop AWD Inventory Ledger CSV<br>or click to choose</div>'
+    +'<input id="invawd-file" type="file" accept=".csv,.tsv,.txt" style="display:none">'
+    +'<span id="invawd-msg" class="mut" style="font-size:11px"></span></div>';
+  if(j&&j.error){ panel.innerHTML=host+drop+'<div style="color:#dc2626;font-size:12px">'+tHesc(j.error)+(j.headers?'<div class="mut" style="font-size:11px;margin-top:4px">Detected headers: '+tHesc(j.headers.join(', '))+'</div>':'')+'</div></div>'; invAwdWire(); return; }
+  if(!j||!j.imported){ panel.innerHTML=host+drop+'<div class="mut" style="font-size:12px">No AWD ledger uploaded yet.</div></div>'; invAwdWire(); return; }
+  var awd=j.awd||[], nUn=j.unmatched||0;
+  var meta='<span class="mut" style="font-size:12px">'+invFbaMeta(j)+' · '+awd.length+' SKUs'+(nUn?' <span style="color:#b45309;font-weight:600">· ⚠ '+nUn+' unmatched</span>':'')+'</span>';
+  var head=['Amazon MSKU','Our SKU','Cartons','Pkg qty','AWD units','Current AWD','Δ'].map(function(h,i){return '<th style="text-align:'+(i<=1?'left':'right')+';padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+h+'</th>';}).join('');
+  var trs=awd.slice(0,800).map(function(r){ var d=r.matched?(r.units-(r.current_awd||0)):null;
+    return '<tr'+(!r.matched?' style="background:#fffbeb"':'')+'><td style="padding:4px 10px;text-align:left">'+tHesc(r.msku)+'</td>'
+      +'<td style="padding:4px 10px;text-align:left'+(r.matched?'':';color:#b45309;font-weight:600')+'">'+(r.matched?tHesc(r.erp_sku):'⚠ no match')+'</td>'
+      +'<td style="padding:4px 10px;text-align:right">'+(r.cartons||0).toLocaleString()+'</td>'
+      +'<td style="padding:4px 10px;text-align:right">'+(r.pkg||0)+'</td>'
+      +'<td style="padding:4px 10px;text-align:right;font-weight:700">'+(r.units||0).toLocaleString()+'</td>'
+      +'<td style="padding:4px 10px;text-align:right;color:#64748b">'+(r.matched?(r.current_awd||0).toLocaleString():'—')+'</td>'
+      +'<td style="padding:4px 10px;text-align:right;font-weight:600;color:'+(d==null?'#cbd5e1':(d===0?'#64748b':(d>0?'#166534':'#b91c1c')))+'">'+(d==null?'—':(d>0?'+':'')+d.toLocaleString())+'</td></tr>'; }).join('');
+  var totals='<div style="display:flex;gap:16px;flex-wrap:wrap;margin:8px 0;font-size:13px"><div><b>'+(j.total_units||0).toLocaleString()+'</b> <span class="mut">units on hand ('+(j.total_cartons||0).toLocaleString()+' cartons)</span></div>'
+    +'<div><b>'+(j.matched_units||0).toLocaleString()+'</b> <span class="mut">matched units</span></div>'
+    +'<div><b>'+(j.current_total||0).toLocaleString()+'</b> <span class="mut">current inventory_us_awd (matched)</span></div></div>';
+  panel.innerHTML=host+drop+'<div style="margin:2px 0 6px">'+meta+'</div>'+totals+'<div style="max-height:460px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'+head+'</tr></thead><tbody>'+trs+'</tbody></table></div>'+(awd.length>800?'<div class="mut" style="font-size:11px;margin-top:4px">Showing first 800 of '+awd.length+'</div>':'')+'</div>';
+  invAwdWire();
+}
 function invFbaMeta(j){ if(!j.imported)return '<span class="mut" style="font-size:12px">Not uploaded yet.</span>';
   var a=inv3plAge(j.imported_at); return '<span class="mut" style="font-size:12px">'+tHesc(a.age)+' · last uploaded <b>'+tHesc(inv3plUser(j.imported_by))+'</b> on '+tHesc(a.stamp)+'</span>'; }
 // Save edited FBA aged-storage rates for a market, then reload the tab so costs recompute.

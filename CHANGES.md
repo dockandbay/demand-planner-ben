@@ -1,3 +1,9 @@
+## v26.957.0 Manage FBA: US AWD (Amazon Warehousing & Distribution) upload + reconciliation
+- Added a **US AWD** panel under BUY & MOVE ▸ Inventory ▸ **Manage FBA** (US market only): upload Amazon's **AWD Inventory Ledger** report (CSV/TSV). The ledger is in cartons; on-hand **units = Ending Warehouse Balance (cartons) × Package Quantity**, aggregated per MSKU.
+- Matches each MSKU to our SKU and reconciles against the current `inventory_us_awd` (per-SKU **Δ**), with totals (units on hand, cartons, matched units, current AWD) and an unmatched count.
+- **Buy-plan-safe:** display/reconciliation only — it stores the upload (in `inventory_fba_imports` under key `US_AWD`, no schema change) and does **not** write `products.inventory_us_awd`. Wiring AWD into buy-plan cover is a later decision.
+- Endpoints: `GET/POST /api/supply/inventory-awd/{status,import}`. Verified against a live ledger: 90 SKUs, 100% matched, 380,604 units.
+
 ## v26.956.0 DEMAND: Towel - Beach pinned top + FBA Aged age filters
 - **Towel - Beach top category:** pinned into the **Priority** group in code (`CAT_GROUPING`) so it sits at the top of the category order in the demand plan, targets list and the priority grouping regardless of the Airtable grouping value; also fixed `bpCatGroups` to order the Priority group by the curated PRIO list (Towel - Beach first) instead of alphabetical.
 - **FBA Aged filters:** the aged-day buckets (456+, 366-455, 271-365, 181-270, 91-180) are now clickable **filter pills** (with per-bucket unit counts) that filter the table to SKUs holding stock in that age band; an "All" pill resets. Independent of whether storage rates are set.
