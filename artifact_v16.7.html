@@ -9568,7 +9568,7 @@ var _AWD_LAST=null;
 function _awdStocktakeDownload(){ var j=_AWD_LAST; if(!j||!j.awd)return; var rows=j.awd.filter(function(r){return r.matched;});
   if(!rows.length){ alert('No matched SKUs to include in the stocktake.'); return; }
   var esc=function(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
-  var m=[['SKU','Branch','Counted Quantity']].concat(rows.map(function(r){ return [r.erp_sku,'US AWD',r.units]; }));
+  var m=[['Code','Count']].concat(rows.map(function(r){ return [r.erp_sku,r.units]; }));
   var csv=m.map(function(r){return r.map(esc).join(',');}).join('\n')+'\n';
   var bl=new Blob([csv],{type:'text/csv;charset=utf-8'}),u=URL.createObjectURL(bl),a=document.createElement('a'); a.href=u; a.download='cin7-awd-stocktake.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},800);
 }
@@ -9614,7 +9614,7 @@ function invAwdRender(j){ var panel=document.getElementById('invawd-panel'); if(
   var totals='<div style="display:flex;gap:16px;flex-wrap:wrap;margin:8px 0;font-size:13px"><div><b>'+(j.total_units||0).toLocaleString()+'</b> <span class="mut">units on hand ('+(j.total_cartons||0).toLocaleString()+' cartons)</span></div>'
     +'<div><b>'+(j.matched_units||0).toLocaleString()+'</b> <span class="mut">matched units</span></div>'
     +'<div><b>'+(j.current_total||0).toLocaleString()+'</b> <span class="mut">current inventory_us_awd (matched)</span></div>'
-    +((j.matched_units>0)?'<button id="awd-stocktake-btn" title="Download a Cin7 stocktake CSV (SKU · Branch · Counted Qty) for the matched SKUs — import it into Cin7 yourself (no live write)" style="margin-left:auto;background:#dcfce7;color:#166534;border:1px solid #16a34a;border-radius:6px;padding:5px 12px;font-weight:600;cursor:pointer;font-size:12px">&#11015; Cin7 stocktake</button>':'')+'</div>';
+    +((j.matched_units>0)?'<button id="awd-stocktake-btn" title="Download a Cin7 stocktake CSV (Code · Count) for the matched SKUs — import it into Cin7 yourself (no live write)" style="margin-left:auto;background:#dcfce7;color:#166534;border:1px solid #16a34a;border-radius:6px;padding:5px 12px;font-weight:600;cursor:pointer;font-size:12px">&#11015; Cin7 stocktake</button>':'')+'</div>';
   panel.innerHTML=host+drop+'<div style="margin:2px 0 6px">'+meta+'</div>'+totals+'<div style="max-height:460px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'+head+'</tr></thead><tbody>'+trs+'</tbody></table></div>'+(awd.length>800?'<div class="mut" style="font-size:11px;margin-top:4px">Showing first 800 of '+awd.length+'</div>':'')+'</div>';
   invAwdWire();
 }

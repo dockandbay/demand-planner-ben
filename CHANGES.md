@@ -1,3 +1,6 @@
+## v26.965.0 US AWD stocktake CSV: only "Code" and "Count" columns
+- The Cin7 stocktake download now has exactly two headers, **Code** and **Count** (SKU + counted units); removed the Branch column.
+
 ## v26.964.0 Variant image: fall back to colour swatch on a broken (404) link
 - The DEMAND plan variant thumbnail now falls back to the **colour swatch URL** when the variant image URL fails to load — not just when it is blank (the old DB-level coalesce). Server injects the swatch separately (SKUM.sw); client onerror swaps to it, and hides only if the swatch also fails. Example: TOWLB-CAB-LG-RED-R's variant URL 404s but its Cloudinary swatch loads, so it now shows.
 
