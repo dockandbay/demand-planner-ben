@@ -4595,7 +4595,8 @@ app.post('/api/supply/suggestion/:id/status', async (req, res) => {
     }
     // notify the suggestion-box stakeholders on ANY status change — the GLOBAL list plus THIS suggestion's own stakeholders (mig 162)
     try {
-      if (prev && prev.status !== status) {
+      // skip the stakeholder "→ complete" mail when the dedicated "going live" mail already went out — one email on complete, not two.
+      if (prev && prev.status !== status && !(status === 'complete' && emailed)) {
         const stake = Array.from(new Set([...(await suggestionStakeholders()), ...(await suggestionOwnStakeholders(req.params.id))]));
         if (stake.length) {
           const html = `<p>Suggestion <b>${_sugEsc(prev.ref)}</b> status changed to <b>${_sugEsc(status)}</b>${by ? (' by ' + _sugEsc(by)) : ''}.</p>`

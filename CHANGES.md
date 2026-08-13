@@ -1,3 +1,6 @@
+## v26.982.0 Suggestion box — one email on complete, not two
+- Marking a suggestion complete previously sent both the "going live 🎉" mail (to the submitter) and the stakeholder "→ complete" mail. The stakeholder mail is now suppressed on complete when the going-live mail sent — so complete = one email. Other status changes (future/deferred) still send the stakeholder notification as before, and complete still notifies if the submitter has no email on file.
+
 ## v26.981.0 Suggestion box — new-suggestion email robustness
 - suggestionStakeholders() now falls back to the ben@ + sarah@ default whenever the configured list parses to **no valid emails** (not only when blank). A non-empty invalid value in CONFIG ▸ Suggestions was silently disabling the new-suggestion + stakeholder-status emails — so emails appeared to fire only on "complete" (the going-live mail goes to the submitter directly, independent of the stakeholder list).
 
