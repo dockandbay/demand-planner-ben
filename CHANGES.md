@@ -1,3 +1,7 @@
+## v26.953.0 DEMAND ▸ Display Settings — moved Cat totals / Variant image / Quarter / Half-year in as tickboxes
+- Moved **Category totals**, **Variant image**, **Quarter totals** and **Half-year totals** out of More Filters and into the **Display Settings** popup as checkboxes (a new "Layout" group). More Filters keeps "From replacement".
+- Checkboxes reflect and persist the same state as before; the plan re-renders on change.
+
 ## v26.952.0 DEMAND ▸ KPIs ▸ Forecast accuracy — now matches the per-cell locked-forecast compare
 - Re-based the accuracy table on the **same locked-forecast basis** as the plan-cell `fc … +%` figure: the most recent snapshot taken strictly BEFORE each completed month (identical SQL selection to buildLockedFc). Previously it used a lag selector (1/3/6-mo-ahead), so its numbers didn't line up with the cells.
 - Removed the Lag control (no longer meaningful under the locked basis); added a note explaining the basis. Kept the Country×Channel / Category / SKU drill.
