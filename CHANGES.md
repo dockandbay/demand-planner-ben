@@ -1,3 +1,6 @@
+## v26.940.0 Plan Shipments — shipment drawer now opens above the popup
+- Fixed the popup z-index (6105, just below the drawer base) so the shipment drawer opens ABOVE it, matching the PO drawer. (The drawer counter can reset while the popup is open, which was landing the shipment drawer at the same z and behind.)
+
 ## v26.939.0 Plan Shipments drawer — big rework (Ben's batch)
 - Only **PRODUCTION + READY-TO-SHIP** POs (no shipping/complete); containers are only **planned** shipments (master must be production/ready-to-ship) and only for the **same market** — so completed/cross-country shipments (e.g. PO-55UKXR2, PO-57AUBL1) no longer show.
 - **PO refs open the PO drawer ABOVE the popup** (z-index now joins the drawer scheme); **shipment refs open the shipment drawer**.

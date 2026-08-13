@@ -4809,7 +4809,7 @@
   var _spData=null, _spCtry='', SP_CAP=20, SP_MKTS=['UK','US','EU','AU','CA'], _spDays=21;
   function openShipPlan(){ var ov=document.getElementById('shipplan-ov'); if(ov)ov.remove();
     ov=document.createElement('div'); ov.id='shipplan-ov'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;padding:8px';
-    ov.style.zIndex=(typeof nextDrawerZ==='function'?nextDrawerZ():9000);   // #1 participate in the drawer z-scheme → PO/shipment drawers (opened after) sit ABOVE this popup
+    ov.style.zIndex=6105;   // #1 just below the drawer base+10 (6110) so EVERY PO/shipment drawer (nextDrawerZ ≥ 6110, even after a reset) opens ABOVE this popup; still above supply content
     ov.innerHTML='<div style="background:#fff;border-radius:10px;width:99vw;margin:auto;display:flex;flex-direction:column;max-height:98vh;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.4)">'
       +'<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #e5e7eb;flex-wrap:wrap">'
         +'<div style="font-weight:700;font-size:16px;color:#0f172a">🚢 Plan Shipments</div>'
