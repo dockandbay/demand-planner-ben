@@ -8355,12 +8355,14 @@
       function closePop(){ var p=document.getElementById('dd-txpop'); if(p)p.remove(); cur=null; }
       function showPop(td){ var k=td.getAttribute('data-ddk'), arr=txByCell[k]||[], parts=k.split('|'); closePop();
         var lines=arr.length?arr.map(function(t){ var s=(t.amount<0?'−':'＋'), amt=(CSYM[t.ccy]||'')+Math.abs(Number(t.amount)).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-            return t.amount<0?('drawdown  '+s+amt+(t.po?('  '+t.po):'')+'  · ref '+t.ref+'  · '+fd(t.date)):('deposit paid  '+s+amt+'  · ref '+t.ref+'  · '+fd(t.date)); }).join('\n')
+            var poLink=t.po?('  <a class="dd-po" data-po="'+esc(t.po)+'" style="color:#7dd3fc;text-decoration:underline;cursor:pointer" title="open the PO drawer">'+esc(t.po)+' ↗</a>'):'';
+            return t.amount<0?('drawdown  '+s+amt+poLink+'  · ref '+esc(t.ref)+'  · '+esc(fd(t.date))):('deposit paid  '+s+amt+'  · ref '+esc(t.ref)+'  · '+esc(fd(t.date))); }).join('<br>')
           :'no transactions this month (balance carried forward)';
         var pop=document.createElement('div'); pop.id='dd-txpop';
         pop.style.cssText='position:fixed;z-index:100080;max-width:400px;background:#0f172a;color:#e5e7eb;font-size:11px;line-height:1.55;padding:8px 10px;border-radius:8px;box-shadow:0 8px 26px rgba(0,0,0,.35);-webkit-user-select:text;user-select:text;white-space:pre-wrap;max-height:52vh;overflow:auto';
-        pop.innerHTML='<div style="font-weight:700;color:#fff;margin-bottom:4px">'+esc(parts[0])+' · '+ml(parts[1])+'  <span style="color:#94a3b8;font-weight:400">('+arr.length+' txn'+(arr.length===1?'':'s')+')</span></div><div>'+esc(lines)+'</div>';
+        pop.innerHTML='<div style="font-weight:700;color:#fff;margin-bottom:4px">'+esc(parts[0])+' · '+ml(parts[1])+'  <span style="color:#94a3b8;font-weight:400">('+arr.length+' txn'+(arr.length===1?'':'s')+')</span></div><div>'+lines+'</div>';
         document.body.appendChild(pop);
+        pop.querySelectorAll('.dd-po').forEach(function(a){ a.onclick=function(ev){ ev.preventDefault(); ev.stopPropagation(); var po=a.dataset.po; closePop(); if(typeof openPODrawer==='function')openPODrawer(po); else if(typeof gotoPO==='function')gotoPO(po); }; });
         var r=td.getBoundingClientRect(), tp=r.bottom+6; pop.style.left=Math.max(6,Math.min(r.left,window.innerWidth-406))+'px';
         if(tp+pop.offsetHeight>window.innerHeight-8)tp=Math.max(6,r.top-pop.offsetHeight-6); pop.style.top=tp+'px'; cur=td; }
       host.addEventListener('mouseover',function(e){ var td=e.target.closest?e.target.closest('td.ddcell'):null; if(!td||td===cur)return; clearTimeout(tmr); tmr=setTimeout(function(){ showPop(td); },300); });

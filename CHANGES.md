@@ -1,3 +1,6 @@
+## v26.979.0 Deposits Drawdown — PO number in the hover popover opens the PO drawer
+- In the drawdown cell hover popover, each drawdown transaction's PO number is now a clickable link (light blue, ↗) that opens the PO drawer. Deposit-paid lines are unchanged (no PO).
+
 ## v26.978.0 3PL Invoicing — delete file also updates in place
 - Deleting an invoice file now refreshes the list silently in place (load(true)), matching the upload — no Loading… flash / page-refresh feel.
 
