@@ -1,3 +1,6 @@
+## v26.984.0 Klaviyo BIS — quantity column now visible in each market box
+- Each per-market box pinned the SKU column at 200px, squeezing the QTY out of view. SKUs now truncate with a hover-title, QTY has a min-width, and the boxes are wider (min 260px, auto-fill) so the quantity is always readable.
+
 ## v26.983.0 Suggestion box — the single complete email now includes everyone
 - On complete, the one "going live 🎉" email now goes to the **submitter** (To) plus **ben, sarah, diviyaj and the suggestion stakeholders** (global + per-suggestion) on CC — a single mail to all of them, not two.
 
