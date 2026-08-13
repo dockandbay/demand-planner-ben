@@ -1,3 +1,8 @@
+## v26.971.0 Samples — “email stakeholders when shipped” (mig 225)
+- New field **📧 email when shipped** on a sample (under Recipient & address) — comma-separated stakeholder emails.
+- When our status transitions to **SHIPPED** (via “🚢 Set shipping” or the status dropdown), those stakeholders get an email with the **tracking code, carrier and a direct link** to the sample in HORIZON. Fires once on the transition into shipped; logged to the email log (kind=sample-shipped). Sandbox has no RESEND_API_KEY → logs “would email …”, safe to test.
+- Migration **225** adds `sample_requests.notify_emails`.
+
 ## v26.970.0 Samples — 2-column SKU/qty paste import + colour-coded Our status
 - **Paste import:** in a sample's SKUs, an **⧉ Import SKU, Qty (paste)** button expands a box — paste two columns (SKU + qty) from Excel/Sheets (tab or comma separated); header rows / non-numeric qty are skipped, existing SKUs update, new ones add. Auto-saves.
 - **Our status dropdown is now colour-coded:** PLANNED grey · SHIPPED green · CANCELLED red, recolouring live on change.

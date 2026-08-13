@@ -9613,7 +9613,8 @@
             +'<div style="margin-bottom:3px">'+fld('city',s.city,120,'city')+' '+fld('region',s.region,90,'region')+'</div>'
             +'<div style="margin-bottom:3px">'+fld('postcode',s.postcode,90,'postcode')+' '+fld('country',s.country,70,'country')+'</div>'
             +'<div style="margin-bottom:3px">'+fld('phone',s.phone,150,'phone')+'</div>'
-          : '<div class="tiny" style="line-height:1.65"><b>'+esc(s.recipient_company||'—')+'</b>'+(((s.first_name||'')+' '+(s.last_name||'')).trim()?'<br>'+esc(((s.first_name||'')+' '+(s.last_name||'')).trim()):'')+(addr?'<br>'+esc(addr):'')+(s.phone?'<br>☏ '+esc(s.phone):'')+'</div>';
+            +'<div style="margin-bottom:3px">'+fld('notify_emails',s.notify_emails,240,'📧 email when shipped (comma-separated)')+'</div>'
+          : '<div class="tiny" style="line-height:1.65"><b>'+esc(s.recipient_company||'—')+'</b>'+(((s.first_name||'')+' '+(s.last_name||'')).trim()?'<br>'+esc(((s.first_name||'')+' '+(s.last_name||'')).trim()):'')+(addr?'<br>'+esc(addr):'')+(s.phone?'<br>☏ '+esc(s.phone):'')+(s.notify_emails?'<br><span class="mut">📧 shipped-notify: '+esc(s.notify_emails)+'</span>':'')+'</div>';
         var purpose = editing
           ? '<div style="margin-top:2px">'+PURP.map(function(p){return '<label style="margin-right:10px;font-size:11px;white-space:nowrap"><input type="checkbox" class="samp-purpose" value="'+p+'"'+(((s.purpose||[]).indexOf(p)>=0)?' checked':'')+'> '+p+'</label>';}).join('')+'</div>'
           : '<div class="tiny">'+esc((s.purpose||[]).join(', ')||'—')+'</div>';

@@ -2226,6 +2226,7 @@ app.get('/api/supply/sample-detail/:id', async (req, res) => {
       coalesce(recipient_company,'') recipient_company, coalesce(first_name,'') first_name, coalesce(last_name,'') last_name,
       coalesce(address_line1,'') address_line1, coalesce(address_line2,'') address_line2, coalesce(city,'') city,
       coalesce(region,'') region, coalesce(postcode,'') postcode, coalesce(country,'') country, coalesce(phone,'') phone,
+      coalesce(notify_emails,'') notify_emails,
       to_char(completion_date_required,'YYYY-MM-DD') completion_required, coalesce(purpose,'{}') purpose, coalesce(notes,'') notes,
       status, to_char(accepted_at,'YYYY-MM-DD') accepted_at, to_char(supplier_expected_completion,'YYYY-MM-DD') supplier_expected,
       coalesce(change_requested,false) change_requested, coalesce(production_status,'') production_status,
@@ -10822,7 +10823,7 @@ app.post('/api/trading-calendar/:id', (req, res) =>
 // ── SAMPLES — writes ─────────────────────────────────────────────────────────────
 const SAMPLE_FIELDS = { supplier_id:'bigint', supplier_name:'text', recipient_company:'text', first_name:'text',
   last_name:'text', address_line1:'text', address_line2:'text', city:'text', region:'text', postcode:'text',
-  country:'text', phone:'text', completion_date_required:'date', purpose:'text[]', notes:'text', status:'text',
+  country:'text', phone:'text', notify_emails:'text', completion_date_required:'date', purpose:'text[]', notes:'text', status:'text',
   supplier_expected_completion:'date', tracking_code:'text', carrier:'text', production_status:'text',
   // Second recipient + second tracking (migration 167) — a sample can ship to two destinations.
   recipient_company_2:'text', first_name_2:'text', last_name_2:'text', address_line1_2:'text', address_line2_2:'text',
@@ -10894,9 +10895,44 @@ app.post('/api/supply/sample/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.sample_requests WHERE id=$1::bigint`, [req.params.id]); res.json({ ok:true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Email the "notify when shipped" stakeholders: tracking code, carrier + a direct link to the sample in HORIZON.
+async function sendSampleShippedEmail(ref, emails, tracking, carrier, recipient, by) {
+  if (!emails || !emails.length) return;
+  const base = String(process.env.PLANNER_URL || 'https://horizon.dockandbay.com').replace(/\/+$/, '');
+  const link = base + '/#/supply/samples/' + encodeURIComponent(ref);
+  const subject = 'Sample shipped — ' + ref + (recipient ? (' → ' + recipient) : '');
+  const e = v => String(v == null ? '' : v).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+  const html = '<div style="font-family:Arial,sans-serif;font-size:14px;color:#111;line-height:1.5">'
+    + '<p>Sample <b>' + e(ref) + '</b> has been marked <b>shipped</b>' + (recipient ? (' to <b>' + e(recipient) + '</b>') : '') + '.</p>'
+    + '<p><b>Tracking:</b> ' + (tracking ? e(tracking) : '—') + '<br><b>Carrier:</b> ' + (carrier ? e(carrier) : '—') + '</p>'
+    + '<p><a href="' + link + '" style="color:#1d4ed8;font-weight:600">Open the sample in HORIZON →</a></p></div>';
+  if (!process.env.RESEND_API_KEY) { console.log('[sample ship email] no RESEND_API_KEY — would email ' + emails.join(', ')); return; }
+  try {
+    const r = await fetch('https://api.resend.com/emails', { method: 'POST',
+      headers: { Authorization: 'Bearer ' + process.env.RESEND_API_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: process.env.PORTAL_FROM || 'Dock & Bay <portal@dockandbay.com>', to: emails, subject, html }) });
+    const j = await r.json().catch(() => ({}));
+    logEmail({ recipients: emails.join(', '), subject, kind: 'sample-shipped', ref, by, status: r.ok ? 'sent' : 'error', error: r.ok ? null : ('resend ' + r.status), resend_id: j && j.id });
+  } catch (ex) { logEmail({ recipients: emails.join(', '), subject, kind: 'sample-shipped', ref, by, status: 'error', error: ex.message }); }
+}
 app.post('/api/supply/sample/:id', async (req, res) => {   // patch fields (admin edits + supplier expected/tracking/carrier)
-  await logSampleFieldChanges(req.params.id, req.body || {}, authUser(req) || 'Dock & Bay');   // record of change (D&B side)
-  patch(res, 'planner.sample_requests', 'id', req.params.id, SAMPLE_FIELDS, req.body, 'bigint'); });
+  const b = req.body || {}, id = req.params.id;
+  await logSampleFieldChanges(id, b, authUser(req) || 'Dock & Bay');   // record of change (D&B side)
+  // Detect a transition INTO shipped so we can email the notify-stakeholders (read prior state before the update).
+  let _pre = null;
+  if (b.status && /ship|complete/i.test(String(b.status))) {
+    try { _pre = (await pool.query(`SELECT coalesce(status,'') status, ref, coalesce(notify_emails,'') notify_emails, coalesce(tracking_code,'') tracking_code, coalesce(carrier,'') carrier, coalesce(recipient_company,'') recipient_company FROM planner.sample_requests WHERE id=$1::bigint`, [id])).rows[0]; } catch (e) {}
+  }
+  patch(res, 'planner.sample_requests', 'id', id, SAMPLE_FIELDS, b, 'bigint', async () => {
+    if (_pre && !/ship|complete/i.test(_pre.status)) {   // newly shipped this save
+      const raw = (b.notify_emails != null ? b.notify_emails : _pre.notify_emails) || '';
+      const em = String(raw).split(/[,;\s]+/).map(x => x.trim()).filter(x => /.+@.+\..+/.test(x));
+      if (em.length) await sendSampleShippedEmail(_pre.ref, em,
+        (b.tracking_code != null ? b.tracking_code : _pre.tracking_code),
+        (b.carrier != null ? b.carrier : _pre.carrier), _pre.recipient_company, authUser(req));
+    }
+    return {};
+  }); });
 app.post('/api/supply/sample-note', async (req, res) => {
   const b = req.body || {}; const sid = b.sample_id || b.id;   // accept either key (admin grid vs portal preview)
   if (!sid || !b.body) return res.status(400).json({ error: 'sample_id and body required' });
