@@ -7354,15 +7354,15 @@ app.get('/api/supply/dtc/mismatch', async (req, res) => {
     (await pool.query(`SELECT so_cin7_id, code, sum(qty) qty FROM planner.dtc_sales_order_lines WHERE so_cin7_id = ANY($1) GROUP BY so_cin7_id, code`, [ids])).rows
       .forEach(l => { (soLineMap[l.so_cin7_id] = soLineMap[l.so_cin7_id] || {})[l.code] = Number(l.qty) || 0; });
     const posByRef = {};
-    const pos = refs.length ? (await pool.query(`SELECT po, sales_order_ref FROM planner.purchase_orders WHERE sales_order_ref = ANY($1)`, [refs])).rows : [];
-    pos.forEach(p => { (posByRef[p.sales_order_ref] = posByRef[p.sales_order_ref] || []).push(p.po); });
+    const pos = refs.length ? (await pool.query(`SELECT po, sales_order_ref, coalesce(supplier_name,'') supplier FROM planner.purchase_orders WHERE sales_order_ref = ANY($1)`, [refs])).rows : [];
+    pos.forEach(p => { (posByRef[p.sales_order_ref] = posByRef[p.sales_order_ref] || []).push({ po: p.po, supplier: p.supplier }); });
     const allPos = pos.map(p => p.po), poLineByPo = {};
     if (allPos.length) (await pool.query(`SELECT po, sku, sum(qty) qty FROM planner.purchase_order_lines WHERE po = ANY($1) GROUP BY po, sku`, [allPos])).rows
       .forEach(l => { (poLineByPo[l.po] = poLineByPo[l.po] || {})[l.sku] = (poLineByPo[l.po][l.sku] || 0) + (Number(l.qty) || 0); });
     let issues = 0, accepted = 0, ok = 0;
     const orders = sos.map(s => {
       const poRefs = posByRef[s.reference] || [], soL = soLineMap[s.cin7_id] || {}, poAgg = {};
-      poRefs.forEach(po => { const m = poLineByPo[po] || {}; Object.keys(m).forEach(sku => { poAgg[sku] = (poAgg[sku] || 0) + m[sku]; }); });
+      poRefs.forEach(pr => { const m = poLineByPo[pr.po] || {}; Object.keys(m).forEach(sku => { poAgg[sku] = (poAgg[sku] || 0) + m[sku]; }); });
       let issue = null; const diffs = [];
       if (!poRefs.length) issue = 'no_po';
       else { const skus = {}; Object.keys(soL).forEach(k => skus[k] = 1); Object.keys(poAgg).forEach(k => skus[k] = 1);
@@ -7372,7 +7372,16 @@ app.get('/api/supply/dtc/mismatch', async (req, res) => {
       if (s.accepted) accepted++; else if (isIssue) issues++; else ok++;
       return { cin7_id: s.cin7_id, reference: s.reference, branch_name: s.branch_name, company: s.company, created_date: s.created_date, po_refs: poRefs, issue, diffs: diffs.slice(0, 60), note: s.note, accepted: s.accepted };
     });
-    res.json({ orders: countOnly ? [] : orders, counts: { issues, accepted, ok } });
+    if (countOnly) return res.json({ orders: [], counts: { issues, accepted, ok } });
+    // #1 reverse view — open, not-received POs in the DTC branches (Direct to Client / JLEW / NEXT) with NO sales-order
+    // mapping → surfaced as "open purchase order, not mapped to a sales order". Read-only from planner.purchase_orders.
+    const DTC_BRANCH_NAMES = Object.values(DTC_BRANCHES);
+    const unmapped = (await pool.query(`SELECT po, coalesce(supplier_name,'') supplier, coalesce(branch,'') branch, coalesce(country_code,'') country_code, coalesce(status,'') status
+      FROM planner.purchase_orders
+      WHERE branch = ANY($1)
+        AND coalesce(status,'') NOT ILIKE '%complete%' AND coalesce(status,'') NOT ILIKE '%cancel%' AND coalesce(status,'') NOT ILIKE '%void%'
+        AND coalesce(sales_order_ref,'') = '' ORDER BY po`, [DTC_BRANCH_NAMES])).rows;
+    res.json({ orders, unmapped_pos: unmapped, counts: { issues, accepted, ok, unmapped_pos: unmapped.length } });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // 3PL invoice — reference-based CLEAN-UP SWEEP for one invoice file. Fetches the invoice's references that

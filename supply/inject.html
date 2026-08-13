@@ -8951,10 +8951,11 @@
     document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k==='reports');});
     var _ns=document.getElementById('supply-nav-sel'); if(_ns)_ns.value='reports';
     var c=document.getElementById('supply-content');
-    c.innerHTML='<div id="rep-subnav">'+REPORT_SECTIONS.map(function(s){return '<span class="rtab'+(s[0]===rk?' active':'')+'" data-rk="'+s[0]+'">'+s[1]+(s[0]==='erp-compare'?'<span id="rep-erpc-badge" class="rtab-count" style="display:none"></span>':'')+'</span>';}).join('')+'</div><div id="rep-body"><div class="count">Loading…</div></div>';
+    c.innerHTML='<div id="rep-subnav">'+REPORT_SECTIONS.map(function(s){return '<span class="rtab'+(s[0]===rk?' active':'')+'" data-rk="'+s[0]+'">'+s[1]+(s[0]==='erp-compare'?'<span id="rep-erpc-badge" class="rtab-count" style="display:none"></span>':s[0]==='dtc-mismatch'?'<span id="nav-dtc-badge" class="rtab-count" style="display:none"></span>':'')+'</span>';}).join('')+'</div><div id="rep-body"><div class="count">Loading…</div></div>';
     c.querySelectorAll('#rep-subnav .rtab').forEach(function(p){p.onclick=function(){selectReport(p.dataset.rk);};});
     paintErpcBadge();   // repaint from last-known count; refresh in the background unless we're about to load the report itself (which sets it)
     if(rk!=='erp-compare') refreshErpcBadge();
+    try{ refreshDtcBadge(); }catch(e){}   // DTC mismatch issue-count badge on its sub-tab
     var done=function(d){
       if(_tk!==_navToken)return;   // navigated away (or to another report) before this resolved → don't overwrite the newer view
       if(rk==='metrics')return renderBIMetrics(d);
@@ -8987,8 +8988,8 @@
     b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:#0f172a">DTC mismatch</div>'
       +'<div class="mut tiny" style="margin-bottom:10px;max-width:840px">Open Direct-to-Client sales orders (not void, not dispatched) reconciled against their purchase orders (mapped by sales order ref). Flags orders with <b>no PO</b> or a <b>SKU / quantity mismatch</b>. Add a note or <b>accept</b> a discrepancy to clear it from the count.</div>'
       +'<div class="bar" style="gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><button class="save-btn" id="dtc-import">&#8635; Import sales orders</button><span id="dtc-impmsg" class="mut tiny"></span>'
-        +'<span style="margin-left:auto;display:inline-flex;gap:12px">'+_dtcPill('Issues',counts.issues||0,'#dc2626')+_dtcPill('Accepted',counts.accepted||0,'#64748b')+_dtcPill('OK',counts.ok||0,'#166534')+'</span></div>'
-      +'<div id="dtc-list"></div>';
+        +'<span style="margin-left:auto;display:inline-flex;gap:12px">'+_dtcPill('Issues',counts.issues||0,'#dc2626')+_dtcPill('Accepted',counts.accepted||0,'#64748b')+_dtcPill('OK',counts.ok||0,'#166534')+_dtcPill('Unmapped POs',counts.unmapped_pos||0,'#b45309')+'</span></div>'
+      +'<div id="dtc-list"></div><div id="dtc-unmapped"></div>';
     fetch('/api/supply/dtc/status').then(function(r){return r.json();}).then(function(s){ var m=document.getElementById('dtc-impmsg'); if(m)m.textContent=s.imported_at?('last import '+s.imported_at+' · '+s.orders+' orders ('+s.open+' open)'):'not imported yet — click Import'; }).catch(function(){});
     var ib=document.getElementById('dtc-import'); if(ib)ib.onclick=function(){ if(!confirm('Import the latest Direct-to-Client sales orders from Cin7 now? (read-only pull)'))return;
       var m=document.getElementById('dtc-impmsg'); ib.disabled=true; ib.style.opacity='.5'; ib.style.cursor='wait'; ib.textContent='Importing…'; if(m){m.style.color='#64748b';m.textContent='Importing from Cin7… (this can take a while)';}
@@ -9003,15 +9004,25 @@
           .catch(function(err){ _done(); var to=String(err&&err.message)==='__TIMEOUT__'; if(m){ m.style.color='#b45309'; m.textContent=to?'The server timed out mid-import — click Import again to continue.':'Import error: '+(err&&err.message||err); } selectReport('dtc-mismatch'); }); }
       step({}); };
     _drawDtcList((d.orders||[]).slice());
+    _drawDtcUnmapped(d.unmapped_pos||[]);
     try{ refreshDtcBadge(); }catch(e){}
+  }
+  // #1 reverse view — open, not-received DTC-branch POs with no sales-order mapping
+  function _drawDtcUnmapped(list){ var el=document.getElementById('dtc-unmapped'); if(!el)return;
+    if(!list.length){ el.innerHTML=''; return; }
+    var rows=list.map(function(p){ return '<tr><td class="l"><button class="lnk-btn dtc-po" data-po="'+esc(p.po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer">'+esc(p.po)+'</button>'+(p.supplier?' <span class="mut">('+esc(p.supplier)+')</span>':'')+'</td><td class="l">'+esc(p.branch||'')+'</td><td class="l">'+esc(p.country_code||'')+'</td><td class="l">'+esc(p.status||'')+'</td></tr>'; }).join('');
+    el.innerHTML='<div style="font-weight:700;font-size:13px;margin:18px 0 3px;color:#0f172a">Open purchase orders, not mapped to a sales order <span class="mut">('+list.length+')</span></div>'
+      +'<div class="mut tiny" style="margin-bottom:6px;max-width:840px">Open (not received) POs in the Direct-to-Client branches with no sales-order reference.</div>'
+      +'<div class="tw"><table style="width:max-content;min-width:100%"><thead><tr><th class="l">PO (supplier)</th><th class="l">Branch</th><th class="l">Country</th><th class="l">Status</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+    el.querySelectorAll('.dtc-po').forEach(function(x){ x.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(x.dataset.po,'oplan'); else if(typeof gotoPO==='function')gotoPO(x.dataset.po,'oplan'); }; });
   }
   function _drawDtcList(orders){ var el=document.getElementById('dtc-list'); if(!el)return;
     if(!orders.length){ el.innerHTML='<div class="mut tiny" style="padding:8px 0">No open DTC sales orders imported yet. Click <b>Import sales orders</b> to pull them from Cin7.</div>'; return; }
     orders.sort(function(a,b){ var ra=(a.issue&&!a.accepted)?0:(a.accepted?2:1), rb=(b.issue&&!b.accepted)?0:(b.accepted?2:1); return ra-rb; });
     var rows=orders.map(function(o){
       var badge=o.accepted?'<span class="tool-badge bg-blue">accepted</span>':o.issue==='no_po'?'<span class="tool-badge bg-red">no PO mapped</span>':o.issue==='qty_mismatch'?'<span class="tool-badge bg-amber">SKU / qty mismatch</span>':'<span class="tool-badge bg-green">OK</span>';
-      var diffs=(o.diffs&&o.diffs.length)?'<div class="tiny" style="margin-top:4px;color:#7c2d12">'+o.diffs.map(function(x){return esc(x.sku)+': SO '+units(x.soQty)+' vs PO '+units(x.poQty);}).join('<br>')+'</div>':'';
-      var pos=(o.po_refs&&o.po_refs.length)?o.po_refs.map(function(p){return '<button class="lnk-btn dtc-po" data-po="'+esc(p)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer">'+esc(p)+'</button>';}).join(', '):'<span class="mut">—</span>';
+      var diffs=(o.diffs&&o.diffs.length)?'<table class="tiny" style="margin-top:4px;border-collapse:collapse"><thead><tr style="color:#94a3b8"><th style="text-align:left;padding:1px 10px 1px 0">SKU</th><th style="text-align:right;padding:1px 8px">SO</th><th style="text-align:right;padding:1px 8px">PO</th></tr></thead><tbody>'+o.diffs.map(function(x){var c=((x.poQty||0)===(x.soQty||0))?'#64748b':'#b91c1c';return '<tr><td style="padding:1px 10px 1px 0">'+esc(x.sku)+'</td><td style="text-align:right;padding:1px 8px">'+units(x.soQty)+'</td><td style="text-align:right;padding:1px 8px;color:'+c+'">'+units(x.poQty)+'</td></tr>';}).join('')+'</tbody></table>':'';
+      var pos=(o.po_refs&&o.po_refs.length)?o.po_refs.map(function(p){var po=(p&&p.po!=null)?p.po:p,sup=(p&&p.supplier)?(' <span class="mut">('+esc(p.supplier)+')</span>'):'';return '<button class="lnk-btn dtc-po" data-po="'+esc(po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer">'+esc(po)+'</button>'+sup;}).join('<br>'):'<span class="mut">—</span>';
       return '<tr><td class="l" style="vertical-align:top"><b>'+esc(o.reference||'')+'</b><div class="mut tiny">'+esc(o.company||'')+' · '+esc(o.branch_name||'')+(o.created_date?' · '+esc(o.created_date):'')+'</div></td>'
         +'<td class="l" style="vertical-align:top">'+badge+diffs+'</td>'
         +'<td class="l" style="vertical-align:top">'+pos+'</td>'

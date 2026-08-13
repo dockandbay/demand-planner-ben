@@ -1,3 +1,9 @@
+## v26.924.0 DTC Mismatch — reverse unmapped POs, tidier detail, sub-tab counter
+- **Reverse view (#1):** a new "**Open purchase orders, not mapped to a sales order**" section lists open, not-received POs in the DTC branches (Direct to Client / JLEW / NEXT) that have no sales-order reference — PO (supplier) · branch · country · status. Read-only from `planner.purchase_orders`; new `unmapped_pos` in the endpoint + an "Unmapped POs" count pill.
+- **Clearer detail (#2):** the per-order SKU/qty mismatch now renders as a small **table** (SKU · SO · PO, PO qty red when it differs) instead of text lines; and each mapped PO now shows its **supplier in brackets** — `PO-xxxx (Supplier)`.
+- **Counter (#3):** the issue count (issues minus accepted) now shows as a badge **next to the "DTC MISMATCH" sub-tab** (mirrors the ERP-Compare badge), refreshed whenever the reports menu renders.
+- Server: `/api/supply/dtc/mismatch` returns `po_refs` as `{po,supplier}` + `unmapped_pos`. Client: `_drawDtcUnmapped`, diff table, sub-tab badge. Read-only; no migration/env/deps.
+
 ## v26.923.0 Manage 3PL — US & UK "Non GRS" reconciliation tabs
 - BUY & MOVE ▸ INVENTORY ▸ **Manage 3PL** gains two tabs: **US Non GRS** and **UK Non GRS** — same read-only report-vs-ERP reconciliation as the existing tabs, compared against the ERP non-GRS pool columns (`inventory_us_nongrs` / `inventory_uk_nongrs`). No writes; buy plan unaffected.
 - **US split by `VersionID`:** the existing **US 3PL** tab now imports **`VersionID = STD` only** (was: all rows — it previously also counted the `FBA` rows). The new **US Non GRS** tab imports **`VersionID = FBA`** from the same file. Verified live: US → 473 STD, US Non GRS → 9 FBA.
