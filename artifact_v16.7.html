@@ -3106,16 +3106,31 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
       // already in the past (pi<1), the need is sooner than a standard order could ever arrive → it is NOT a
       // Buy-3PL; leave it for the Buy 3PL Urgent column (rush/air). Only place a 3PL buy with full lead time.
       if(pi>=1){
-        const r=Math.ceil(gap/cp)*cp;
-        bQ=r;   // MOQ is NO LONGER floored per country — it's a per-production minimum, handled by Build-production's combined-across-markets check + the China-stock top-up (was Math.max(r,moq), which over-ordered each market). moq unset (=1) → identical.
-        buyDisplay[pi]=(buyDisplay[pi]||0)+bQ;
-        buyFromLbl[i]=(buyFromLbl[i]?buyFromLbl[i]+', ':'')+`${PROJ[pi].lbl} order`;
-        // carried forward in s3 (c3final=c3+bQ) so consecutive months don't re-buy the same gap
-        assumedArr[i]=(assumedArr[i]||0)+bQ;
-        // Buy FBA visibility: the FBA top-up slice of this 3PL buy (transferred to FBA later). Surfaced for
-        // visibility only — it is NOT a separate buy and is NOT subtracted from Buy 3PL.
-        if(nextFbaNeed>0)fbaBuyDisp[pi]=(fbaBuyDisp[pi]||0)+Math.min(nextFbaNeed,bQ);
-        bPi=pi;
+        let r=Math.ceil(gap/cp)*cp;   // MOQ is NO LONGER floored per country — it's a per-production minimum, handled by Build-production's combined-across-markets check + the China-stock top-up (was Math.max(r,moq), which over-ordered each market). moq unset (=1) → identical.
+        // DEMAND CAP: never buy stock the SKU can't sell before its demand ends. Only for SKUs that genuinely
+        // DISCONTINUE within the horizon (discCutoff set) — a real end-of-life. Perpetual SKUs have demand running
+        // past the finite projection edge, so capping them against finite remaining demand would wrongly trim their
+        // far-horizon cover; the discCutoff gate excludes them entirely (their buys are unchanged).
+        // sellRoom = remaining sellable 3PL-served demand AFTER month i (month i is served by opening stock) minus
+        // what's already on hand at close (c3). d3DemFn/fbaDemFn are post-disc-zeroed, so post-discontinue demand
+        // doesn't count. A limited edition with its whole season already inbound → sellRoom 0 → no phantom buy.
+        if(discCutoff){
+          const remSell=fwdDemand(999999,i+1,d3DemFn)+(hasFBA?fwdDemand(999999,i+1,fbaDemFn):0)
+            +(isZalEU?(function(){let t=0;for(let m=i+1;m<PROJ.length;m++)t+=zalNetAt(m);return t;})():0);
+          const sellRoom=Math.max(0,remSell-c3);
+          if(r>sellRoom)r=Math.floor(sellRoom/cp)*cp;   // trim to whole cartons that still have somewhere to sell
+        }
+        if(r>0){
+          bQ=r;
+          buyDisplay[pi]=(buyDisplay[pi]||0)+bQ;
+          buyFromLbl[i]=(buyFromLbl[i]?buyFromLbl[i]+', ':'')+`${PROJ[pi].lbl} order`;
+          // carried forward in s3 (c3final=c3+bQ) so consecutive months don't re-buy the same gap
+          assumedArr[i]=(assumedArr[i]||0)+bQ;
+          // Buy FBA visibility: the FBA top-up slice of this 3PL buy (transferred to FBA later). Surfaced for
+          // visibility only — it is NOT a separate buy and is NOT subtracted from Buy 3PL.
+          if(nextFbaNeed>0)fbaBuyDisp[pi]=(fbaBuyDisp[pi]||0)+Math.min(nextFbaNeed,bQ);
+          bPi=pi;
+        }
       }
       // else: bQ stays 0 → no phantom stock carried forward → the Urgent pass sees the gap and sizes the rush.
     }
@@ -3936,6 +3951,7 @@ var BUY_SCAFFOLD=`<div class="wrap">
   <div>&bull; <b>Buy 3PL Urgent</b> &mdash; a shortfall inside the lead time that a scheduled buy can't fix in time (excludes a SKU's own discontinue-month clearance).</div>
   <div>&bull; <b>Buy FBA</b> &mdash; buys placed direct to Amazon FBA where run separately from 3PL.</div>
   <div>&bull; <b>On-order = shipped:</b> confirmed and unconfirmed open POs are treated as inbound (they land on their calculated ETA), so the plan doesn't double-buy what's already ordered.</div>
+  <div>&bull; <b>End-of-life demand cap:</b> for a SKU that <b>discontinues</b> within the plan horizon, no buy is placed for stock it couldn't sell before that date &mdash; the buy is capped at the remaining sellable demand (to discontinue) minus stock already on hand or inbound. This stops over-buying a limited-edition or seasonal tail whose supply is already covered (e.g. a 2-month line with its whole season already ordered buys nothing more). Perpetual SKUs (no discontinue in the horizon) are unaffected.</div>
 </div>
 <div id="trf-help" style="display:none;margin:4px 0 8px;padding:10px 14px;background:#f8fafc;border:1px solid #e2e8f0;border-left:3px solid #1d4ed8;border-radius:4px;font-size:11px;line-height:1.55;color:#334155;max-width:900px">
   <div style="font-weight:700;color:#0f172a;margin-bottom:4px">How 3PL-to-3PL transfers work</div>

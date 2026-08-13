@@ -1,3 +1,9 @@
+## v26.994.0 Buy plan: end-of-life demand cap (stop over-buying discontinuing SKUs)
+- Buy 3PL for a SKU that DISCONTINUES within the plan horizon is now capped at its remaining sellable demand (to the discontinue date) minus stock already on hand/inbound. Stops ordering stock that could never sell before end-of-life — e.g. a 2-month limited edition with its whole season already inbound now buys 0 instead of a phantom top-up.
+- Root cause it fixes: the cover target sums forward demand INCLUDING the current month, then compares to post-sale closing stock, so a fully pre-positioned spiky SKU showed a phantom shortfall. Rather than change that comparison globally (a blanket fix cut Buy-3PL ~29% and pushed legit buys into Urgent), the cap targets only genuine end-of-life SKUs.
+- Impact (sandbox, all sku x market): Buy-3PL total −10.6%, confined to discontinuing/seasonal SKUs; perpetual SKUs unchanged. Validated e.g. COOL-DES-GLDGRN/UK 7,100 → 3,600 (= its ~3,577 real remaining demand) and PICNIC-DES-LG-BIGDILL/UK 464 → 16.
+- Documented in BUY ▸ "Buy Plan Logic" (ⓘ) under Buy passes.
+
 ## v26.993.0 REALLOCATE: Buy-plan button, snooze dropdown, tab count, metrics snapshot
 - Each reallocation card gets a "📊 Buy plan" button opening that SKU's buy-plan overlay (reuses the ORDER PLAN PLAN behaviour).
 - Replaced the two "Snooze 1wk / 1mo" buttons with a single "Snooze ▾" dropdown (1/3/7 days), consistent with the PO/shipment/sample snooze menus.
