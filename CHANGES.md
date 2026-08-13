@@ -1,3 +1,6 @@
+## v26.959.0 US AWD moved to its own inventory sub-tab
+- Moved the **US AWD** panel out of Manage FBA and into its own **US AWD** sub-tab under BUY & MOVE ▸ Inventory (`#/buy-move/inventory/awd`). Same upload + reconciliation vs `inventory_us_awd`; US-only, no market pill.
+
 ## v26.958.0 DEMAND plan: TIK filtering fix + Sort/From-replacement moved
 - **Fix (TIK regression):** two lowercase channel-key ternaries (in filteredSkus + insertInlineSkuRows share basis) mapped the TIK channel to the B2B key, so the TIK column showed the wrong SKU set / SKUs failed to render. Now map TIK→"t" so TIK renders its own availability-scoped SKUs.
 - Moved **Sort** from More Filters into **Display Settings**.

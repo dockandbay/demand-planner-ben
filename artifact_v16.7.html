@@ -9338,7 +9338,7 @@ function renderInventory(){
   var host=document.querySelector('.wrap'); if(!host)return;
   var ex=document.getElementById('inventory-wrap'); if(ex)ex.remove();
   var wrap=document.createElement('div'); wrap.id='inventory-wrap'; wrap.style.cssText='margin:0 0 20px';   // full-width (match the SUPPLY pages)
-  var SUBS=[['status','Status Report'],['manage3pl','Manage 3PL'],['managefba','Manage FBA'],['fba-aged','FBA Aged']];
+  var SUBS=[['status','Status Report'],['manage3pl','Manage 3PL'],['managefba','Manage FBA'],['fba-aged','FBA Aged'],['awd','US AWD']];
   function pillbar(list,cur,cls){ return '<div style="display:flex;gap:6px;flex-wrap:wrap;margin:0 0 14px">'+list.map(function(it){ var c=Array.isArray(it)?it[0]:it,lbl=Array.isArray(it)?it[1]:it; var on=(c===cur);
       return '<button class="'+cls+'" data-c="'+c+'" style="padding:4px 15px;border-radius:16px;border:1px solid '+(on?'#1e40af':'#cbd5e1')+';background:'+(on?'#1e40af':'#fff')+';color:'+(on?'#fff':'#334155')+';font-weight:600;font-size:12px;cursor:pointer">'+lbl+'</button>'; }).join('')+'</div>'; }
   function placeholder(title){ return '<div style="padding:26px;color:#64748b;background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;text-align:center"><b style="color:#334155">'+title+'</b><div style="margin-top:6px;font-size:13px">To complete in future.</div></div>'; }
@@ -9347,8 +9347,9 @@ function renderInventory(){
   var subnav='<div class="d3nav">'+SUBS.map(function(t){return '<button class="d3tab inv-sub'+(t[0]===INV_SUB?' active':'')+'" data-sub="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div>';
   var body;
   if(INV_SUB==='manage3pl') body=pillbar(['US','UK','AU','EU',['US_NG','US Non GRS'],['UK_NG','UK Non GRS']],INV_3PL,'inv-3pl-pill')+'<div id="inv3pl-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
-  else if(INV_SUB==='managefba') body=pillbar(['US','UK','AU','EU','CA'],INV_FBA,'inv-fba-pill')+'<div id="invfba-panel"><div class="mut" style="font-size:12px">Loading…</div></div><div id="invawd-panel"></div>';
+  else if(INV_SUB==='managefba') body=pillbar(['US','UK','AU','EU','CA'],INV_FBA,'inv-fba-pill')+'<div id="invfba-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
   else if(INV_SUB==='fba-aged') body=pillbar(['US','UK','AU','EU','CA'],INV_FBA,'inv-fba-pill')+'<div id="fbaaged-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
+  else if(INV_SUB==='awd') body='<div id="invawd-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';
   else body=pillbar(['US','UK','EU','AU','CA'],INV_STATUS_MKT,'inv-status-pill')+'<div id="invstatus-panel"><div class="mut" style="font-size:12px">Loading…</div></div>';   // Status Report (SUG-0024)
   wrap.innerHTML=subnav+'<div id="inv-body">'+body+'</div>';
   host.appendChild(wrap);
@@ -9357,8 +9358,9 @@ function renderInventory(){
   wrap.querySelectorAll('.inv-fba-pill').forEach(function(b){ b.onclick=function(){ INV_FBA=b.dataset.c; renderInventory(); }; });
   wrap.querySelectorAll('.inv-status-pill').forEach(function(b){ b.onclick=function(){ INV_STATUS_MKT=b.dataset.c; renderInventory(); }; });
   if(INV_SUB==='manage3pl')inv3plLoad();
-  else if(INV_SUB==='managefba'){invFbaLoad('manage'); invAwdLoad();}
+  else if(INV_SUB==='managefba')invFbaLoad('manage');
   else if(INV_SUB==='fba-aged')invFbaLoad('aged');
+  else if(INV_SUB==='awd')invAwdLoad();
   else if(INV_SUB==='status')renderInvStatus();
 }
 // SUG-0024 Inventory Status Report. Reads BP.statusMetrics(mkt) (SOH split, on-order, weeks-cover per warehouse,
@@ -9556,11 +9558,10 @@ function invFbaUpload(mode,file){ if(!file)return; var mkt=INV_FBA, msg=document
       .then(function(r){return r.json();}).then(function(j){ invFbaRender(mode,j); })
       .catch(function(e){ if(msg)msg.textContent=''; var p=document.getElementById('invfba-panel'); if(p)p.innerHTML='<div style="color:#dc2626">Failed: '+tHesc((e&&e.message)||e)+'</div>'; }); };
   rd.readAsText(file); }
-// US AWD (Amazon Warehousing & Distribution) upload + reconciliation — shown under Manage FBA, US market only. Display
+// US AWD (Amazon Warehousing & Distribution) upload + reconciliation — its own inventory sub-tab (US-only). Display
 // only: reconciles the uploaded AWD Inventory Ledger against planner.products.inventory_us_awd (does not write it).
 function invAwdLoad(){ var panel=document.getElementById('invawd-panel'); if(!panel)return;
-  if(INV_FBA!=='US'){ panel.innerHTML=''; return; }
-  panel.innerHTML='<div class="mut" style="font-size:12px;margin-top:16px">Loading AWD…</div>';
+  panel.innerHTML='<div class="mut" style="font-size:12px">Loading AWD…</div>';
   fetch('/api/supply/inventory-awd/status').then(function(r){return r.json();}).then(function(j){ invAwdRender(j); })
     .catch(function(e){ panel.innerHTML='<div style="color:#dc2626">'+tHesc((e&&e.message)||e)+'</div>'; }); }
 function invAwdUpload(file){ if(!file)return; var msg=document.getElementById('invawd-msg');
@@ -9578,7 +9579,7 @@ function invAwdWire(){ var drop=document.getElementById('invawd-drop'), file=doc
   drop.ondrop=function(e){ e.preventDefault(); drop.style.background='#f8fbff'; if(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0])invAwdUpload(e.dataTransfer.files[0]); };
 }
 function invAwdRender(j){ var panel=document.getElementById('invawd-panel'); if(!panel)return;
-  var host='<div style="margin-top:18px;border-top:1px solid #e5e7eb;padding-top:12px"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px"><b style="font-size:14px">US AWD — Amazon Warehousing &amp; Distribution</b>'
+  var host='<div style="padding-top:4px"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px"><b style="font-size:15px">US AWD — Amazon Warehousing &amp; Distribution</b>'
     +'<span class="mut" style="font-size:11px">upload the <b>AWD Inventory Ledger</b> report (Seller Central). On-hand units = Ending cartons × Package Qty.</span></div>';
   var drop='<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 8px">'
     +'<div id="invawd-drop" style="border:2px dashed #93c5fd;border-radius:8px;background:#f8fbff;padding:8px 10px;text-align:center;cursor:pointer;max-width:220px;box-sizing:border-box;font-size:11px">Drop AWD Inventory Ledger CSV<br>or click to choose</div>'
