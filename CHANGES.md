@@ -1,3 +1,9 @@
+## v26.969.0 FIX: Samples “Our status” not sticking + no save feedback
+- **Our status now reflects the saved value.** The sample detail drawer was reading the sample-detail endpoint’s `status_calc` (a supplier-progress value: “In production”/“Shipped”…) as “Our status”, which never matches PLANNED/SHIPPED/CANCELLED — so “🚢 Set shipping” and manual status changes appeared not to take. Now normalised from `s.status` (mirrors the grid).
+- **Silent grid update.** Changing status (Set shipping or the dropdown) now updates the grid row’s status chip in place — no full refresh needed, and the open card stays open.
+- **Green save confirmation.** Edited fields flash green on successful save (incl. the status change).
+(All client-side; the server already persisted status correctly.)
+
 ## v26.968.0 sales_actuals TIK channel (mig 224) + vercel.json includeFiles fix
 - **Migration 224** — widen `planner.sales_actuals` channel CHECK to allow **TIK** (DTC/B2B/FBA/ZAL/TIK), so TikTok actuals can land alongside the others (forecasts already worked — no CHECK there). Applied to sandbox; Diviyaj to run on live before TikTok actuals arrive. Mirrors mig 204 (ZAL).
 - **vercel.json `includeFiles`** broadened from just the artifact to `{artifact_v16.7.html,favicon.png,package.json,supply/**}` so a repo deploy bundles the supplier portal (portal.html/portal-view.js), inject.html and supply/assets (logos/fonts for invoices) — previously they would 404. (Diviyaj had patched the deployed copy; this aligns the repo.)
