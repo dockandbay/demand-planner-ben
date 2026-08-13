@@ -1,3 +1,6 @@
+## v26.973.0 DTC Mismatch — cap the SKU/qty diffs sub-table at 300px
+- The per-order SKU/SO/PO diffs table is now wrapped in a max-width:300px scroll container so it no longer runs off the screen.
+
 ## v26.972.0 DTC Mismatch — table no longer runs off-screen
 - Both DTC Mismatch tables (open sales orders + unmapped POs) are now wrapped in a horizontally-scrolling container (`overflow-x:auto;max-width:100%`) instead of the demand-plan `.tw` wrapper, so the wide table scrolls within the report body instead of pushing off the right of the screen.
 - (Sandbox: seeded 4 test DTC sales orders so the report can be exercised — test data, not a deploy action.)
