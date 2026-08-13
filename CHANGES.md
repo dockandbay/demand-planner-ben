@@ -1,3 +1,6 @@
+## v26.947.0 Plan Shipments — tidier container layout (masonry)
+- Container boxes now flow in a **multi-column masonry** layout instead of a flex-wrap row, so a tall shipment (many POs) no longer stretches the row or leaves big gaps next to the small boxes. They pack together neatly.
+
 ## v26.946.0 Plan Shipments — Undo button
 - Added an **↶ Undo** button that reverts the last change (drag-assign / unassign, Recommendation Apply, or a Confirmed toggle). Multiple undos step back through the history; cleared on Refresh.
 
