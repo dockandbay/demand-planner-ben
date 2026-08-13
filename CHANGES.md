@@ -1,3 +1,7 @@
+## v26.942.0 Plan Shipments — wording + recommendation fixes
+- Past-production POs now read "ready (end date past)" instead of "ready N days ago".
+- Recommendation cards now show the correct container capacity: a 20ft is X/10 (not X/20). Bins over 20 pallets are red with "over filled - consider split" instead of "good fill".
+
 ## v26.941.0 Plan Shipments — smoother assign/apply + live pallet sync
 - Drag-assign, drag-unassign and Recommendation **Apply** are now **optimistic** (update the view instantly, persist in the background) — no more delay/flash re-fetching the whole plan. It only re-loads if the save actually fails.
 - Editing a POs **pallet override** in the PO drawer now **silently updates** its pallets in the open Plan Shipments plan.
