@@ -1,3 +1,8 @@
+## v26.944.0 Plan Shipments — confirmed lock, merge recs, dismiss
+- Each container has a **"Confirmed - do not change"** checkbox: when ticked the shipment goes **light orange**, its POs become non-draggable, and it is **excluded from recommendations**. Persisted (migration 223 planner.ship_plan_locks; POST /api/supply/ship-plan/lock).
+- **Recommendations now also consider POs already on (unconfirmed) shipments**, so it can suggest **merges** (groupings that already match an existing shipment are skipped, so no status-quo noise).
+- Each recommendation now has a **dismiss** link (hidden until the next Refresh).
+
 ## v26.943.0 Plan Shipments — Apply on single-PO bins + Refresh button
 - A lone PO in the recommendations now has an **"Own container"** apply button (creates a shipment for it), not just multi-PO consolidations. (e.g. PO-57UKLX2 at 23.6 pal, flagged over-filled, can now be committed / then split.)
 - Added a **↻ Refresh** button to the Plan Shipments header.

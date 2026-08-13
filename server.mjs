@@ -1903,6 +1903,7 @@ app.get('/api/supply/ship-plan', async (req, res) => {
              THEN coalesce(nullif(sh.master_po,''), nullif(p.shipment_ref,'')) ELSE NULL END container,
         coalesce(p.status,'') status,
         (p.status ILIKE 'ready to ship') ready,
+        coalesce((SELECT lk.confirmed FROM planner.ship_plan_locks lk WHERE lk.ref = coalesce(nullif(sh.master_po,''), nullif(p.shipment_ref,''))), false) confirmed,
         ${PO_PALLETS_EFF_SQL} pallets,
         to_char(${PROD_END_SQL},'YYYY-MM-DD') prod_end
       FROM planner.purchase_orders p
@@ -1916,7 +1917,18 @@ app.get('/api/supply/ship-plan', async (req, res) => {
         AND (p.status ILIKE 'production' OR p.status ILIKE 'ready to ship')
         ${cfilter}
       ORDER BY container NULLS FIRST, prod_end NULLS LAST, p.po`, params)).rows;
-    res.json({ ok: true, country: country || null, pos: rows.map(r => ({ po: r.po, supplier: r.supplier, country: r.country, shipment_ref: r.shipment_ref, container: r.container || null, status: r.status, ready: !!r.ready, pallets: Math.round((Number(r.pallets) || 0) * 10) / 10, prod_end: r.prod_end })) });
+    res.json({ ok: true, country: country || null, pos: rows.map(r => ({ po: r.po, supplier: r.supplier, country: r.country, shipment_ref: r.shipment_ref, container: r.container || null, status: r.status, ready: !!r.ready, confirmed: !!r.confirmed, pallets: Math.round((Number(r.pallets) || 0) * 10) / 10, prod_end: r.prod_end })) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// Plan Shipments "Confirmed — do not change" lock toggle (mig 223), keyed by container/master ref.
+app.post('/api/supply/ship-plan/lock', async (req, res) => {
+  const b = req.body || {}; const ref = String(b.ref || '').trim();
+  if (!ref) return res.status(400).json({ error: 'ref required' });
+  try {
+    if (b.confirmed) await pool.query(`INSERT INTO planner.ship_plan_locks (ref, confirmed, updated_by, updated_at) VALUES ($1, true, $2, now())
+      ON CONFLICT (ref) DO UPDATE SET confirmed=true, updated_by=$2, updated_at=now()`, [ref, authUser(req) || 'admin']);
+    else await pool.query(`DELETE FROM planner.ship_plan_locks WHERE ref=$1`, [ref]);
+    res.json({ ok: true, ref, confirmed: !!b.confirmed });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/consolidation', async (req, res) => {
