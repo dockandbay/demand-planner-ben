@@ -1,3 +1,7 @@
+## v26.988.0 Open-actions scoreboard — FIX syntax + per-metric sparklines/expand
+- FIX: v26.987 board function was missing its closing brace (broke the SUPPLY reports script). Corrected.
+- Redesign: each metric row shows caret, current value, a last-4-weeks sparkline + the 4 values, and expands to the full snapshot history + trend sparkline. Headline Total + Waiting-on-supplier tiles and Snapshot-now retained.
+
 ## v26.987.0 Open-actions scoreboard — trend view on the Metrics report
 - Added the Open-actions scoreboard to SUPPLY ▸ Reports ▸ Metrics: the headline Total (our actions) + Waiting-on-supplier, tiles for each of the 10 metrics, a week-over-week trend table, and a 📸 Snapshot now button. Reads /api/supply/action-metrics/data.
 
