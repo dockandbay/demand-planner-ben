@@ -1891,11 +1891,16 @@ app.get('/api/supply/ship-plan', async (req, res) => {
     // Every sea PO for the market that is either READY TO SHIP (assignable) or already on a (non-air) shipment (so the
     // existing containers + their POs show). FOB/manufacturing excluded. Client: left = all these POs; right = grouped
     // by container (= existing shipments) as drop targets.
+    // Only PRODUCTION + READY-TO-SHIP POs (no shipping/complete). A PO's container = its shipment master ONLY if that
+    // master is itself production/ready-to-ship (a "planned" shipment) — so completed/shipping shipments never show as
+    // drop targets. mp = the master PO row (self-master when shipment_ref = the PO's own number).
     const rows = (await pool.query(`
       SELECT p.po, coalesce(p.supplier_name,'') supplier,
         upper(coalesce(nullif(p.country_code,''), b.country_code, '')) country,
         coalesce(p.shipment_ref,'') shipment_ref,
-        coalesce(nullif(sh.master_po,''), nullif(p.shipment_ref,'')) container,
+        CASE WHEN (mp.status ILIKE 'production' OR mp.status ILIKE 'ready to ship')
+              AND upper(coalesce(nullif(mp.country_code,''), mb.country_code, '')) = upper(coalesce(nullif(p.country_code,''), b.country_code, ''))
+             THEN coalesce(nullif(sh.master_po,''), nullif(p.shipment_ref,'')) ELSE NULL END container,
         coalesce(p.status,'') status,
         (p.status ILIKE 'ready to ship') ready,
         ${PO_PALLETS_EFF_SQL} pallets,
@@ -1904,12 +1909,13 @@ app.get('/api/supply/ship-plan', async (req, res) => {
       LEFT JOIN planner.branches b ON b.name=p.branch
       LEFT JOIN planner.suppliers s ON s.id=p.supplier_id
       LEFT JOIN planner.shipments sh ON sh.shipment_ref=p.shipment_ref
+      LEFT JOIN planner.purchase_orders mp ON mp.po = coalesce(nullif(sh.master_po,''), nullif(p.shipment_ref,''))
+      LEFT JOIN planner.branches mb ON mb.name = mp.branch
       WHERE coalesce(p.branch,'') NOT ILIKE '%manufactur%'
         AND coalesce(lower(sh.mode),'') NOT LIKE 'air%'
-        AND (p.status ILIKE 'ready to ship'
-             OR (coalesce(p.shipment_ref,'') <> '' AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%deliver%'))
+        AND (p.status ILIKE 'production' OR p.status ILIKE 'ready to ship')
         ${cfilter}
-      ORDER BY container NULLS FIRST, p.po`, params)).rows;
+      ORDER BY container NULLS FIRST, prod_end NULLS LAST, p.po`, params)).rows;
     res.json({ ok: true, country: country || null, pos: rows.map(r => ({ po: r.po, supplier: r.supplier, country: r.country, shipment_ref: r.shipment_ref, container: r.container || null, status: r.status, ready: !!r.ready, pallets: Math.round((Number(r.pallets) || 0) * 10) / 10, prod_end: r.prod_end })) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

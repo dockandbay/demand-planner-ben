@@ -1,3 +1,12 @@
+## v26.939.0 Plan Shipments drawer — big rework (Ben's batch)
+- Only **PRODUCTION + READY-TO-SHIP** POs (no shipping/complete); containers are only **planned** shipments (master must be production/ready-to-ship) and only for the **same market** — so completed/cross-country shipments (e.g. PO-55UKXR2, PO-57AUBL1) no longer show.
+- **PO refs open the PO drawer ABOVE the popup** (z-index now joins the drawer scheme); **shipment refs open the shipment drawer**.
+- Each PO shows **prod-end date + "N days to go"** (ready / overdue / due today); a **"Days to go &lt; 21"** filter (editable). POs already on a shipment get a **light-green** card.
+- **Status badges** match the PO grid: PRODUCTION = orange, READY TO SHIP = blue.
+- Container fill number is **large + clear** (`X/20`) with a **10-pallet marker** on the bar and a "10 or 20 pallets both ship" note.
+- New **⚡ Recommendations column**: bin-packs unassigned POs to **maximise 20-pallet containers** (20 priority; 15+ = good fill; a 20ft at 15 beats a 10ft + LCL), each with 1-click Apply.
+- Smaller text + near-full-screen popup.
+
 ## v26.938.0 Manage 3PL / FBA — fix gap filter + add "All" + SKU search
 - The **"All gaps"** option now correctly shows **only rows with an ON HAND difference** (was showing everything). Added a separate **"All (incl. matches)"** option to show all rows, and a **SKU search box**. Applies to **both Manage 3PL and Manage FBA**. Default view is now on-hand gaps.
 
