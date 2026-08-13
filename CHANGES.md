@@ -1,3 +1,6 @@
+## v26.963.0 FBA Aged: highlight the selected bucket column
+- When an aged-bucket filter pill is active (e.g. 456+), that bucket's column is now highlighted (header + cells, light blue) so the filtered age band stands out in the table.
+
 ## v26.962.0 US AWD: fix carton dedup + Cin7 stocktake download
 - **Fix (numbers were ~9× too high):** the AWD Inventory Ledger repeats rows per date, so summing every row double-counted. Now dedupe to the **latest Ending Warehouse Balance per unique (MSKU, Facility ID, Purchase Order ID)**, then sum per MSKU → cartons; units = cartons × Package Qty. Example: TOWLB-CAB-LG-NAVY-R now 2,640u (vs Cin7 2,680) instead of 23,760u; total 42,286u / 1,050 cartons.
 - **Cin7 stocktake button:** downloads a stocktake CSV (SKU · Branch · Counted Qty = ledger units) for the matched SKUs, to import into Cin7 yourself. No live write to Cin7. Column headers / branch label may need tweaking to match the Cin7 importer.

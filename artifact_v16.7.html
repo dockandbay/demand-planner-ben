@@ -9670,15 +9670,16 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
       +'</div>';
     var H=['Amazon SKU','Our SKU','456+ days','366-455','271-365','181-270','91-180','Total aged'];
     if(haveRates)H.push('Est. /mo');
-    var head=H.map(function(h,i){return '<th style="text-align:'+(i<=1?'left':'right')+';padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+h+'</th>';}).join('');
-    var cell=function(v){ return '<td style="padding:4px 10px;text-align:right">'+(v||0)+'</td>'; };
+    var _colBkt={2:'a5',3:'a4',4:'a3',5:'a2',6:'a1'};   // aged-bucket columns (456+ … 91-180) — highlighted when their pill is active
+    var head=H.map(function(h,i){var _hl=(FBA_AGED_F&&_colBkt[i]===FBA_AGED_F);return '<th style="text-align:'+(i<=1?'left':'right')+';padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:'+(_hl?'#dbeafe':'#f8fafc')+';white-space:nowrap">'+h+'</th>';}).join('');
+    var cell=function(v,bkt){ return '<td style="padding:4px 10px;text-align:right'+((FBA_AGED_F&&FBA_AGED_F===bkt)?';background:#eff6ff':'')+'">'+(v||0)+'</td>'; };
     var ourCell=function(r){
       if(r.matched){ var badge=r.matched_via==='asin'?' <span title="Matched to our product by ASIN (the Amazon SKU differs)" style="font-size:9px;background:#dbeafe;color:#1e40af;padding:0 4px;border-radius:3px;font-weight:600">via ASIN</span>':'';
         return '<td style="padding:4px 10px;text-align:left">'+tHesc(r.erp_sku||'')+badge+'</td>'; }
       return '<td style="padding:4px 10px;text-align:left;color:#b45309;font-weight:600" title="This Amazon SKU has no matching planner SKU'+(r.asin?' and its ASIN ('+tHesc(r.asin)+') matched no product':' and no ASIN to match on')+'">⚠ No SKU/ASIN match</td>';
     };
     var trs=agedF.slice(0,800).map(function(r){ return '<tr'+(!r.matched?' style="background:#fffbeb"':'')+'><td style="padding:4px 10px;text-align:left">'+tHesc(r.sku)+'</td>'+ourCell(r)
-      +'<td style="padding:4px 10px;text-align:right;font-weight:700;color:'+(r.a5>0?'#b91c1c':'#334155')+'">'+(r.a5||0)+'</td>'+cell(r.a4)+cell(r.a3)+cell(r.a2)+cell(r.a1)
+      +'<td style="padding:4px 10px;text-align:right;font-weight:700;color:'+(r.a5>0?'#b91c1c':'#334155')+((FBA_AGED_F==='a5')?';background:#eff6ff':'')+'">'+(r.a5||0)+'</td>'+cell(r.a4,'a4')+cell(r.a3,'a3')+cell(r.a2,'a2')+cell(r.a1,'a1')
       +'<td style="padding:4px 10px;text-align:right;font-weight:700">'+r.total+'</td>'
       +(haveRates?'<td style="padding:4px 10px;text-align:right" title="'+(r.vol_est?'volume estimated (no carton dims)':'')+'">'+fmtC(r.est_cost)+(r.vol_est?' ~':'')+'</td>':'')+'</tr>'; }).join('');
     panel.innerHTML=meta+costHead+_filterBar+ratesPanel+'<div style="max-height:560px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'+head+'</tr></thead><tbody>'+trs+'</tbody></table></div>'+(agedF.length>800?'<div class="mut" style="font-size:11px;margin-top:4px">Showing first 800 of '+agedF.length+'</div>':'');
