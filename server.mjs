@@ -4585,12 +4585,14 @@ app.post('/api/supply/suggestion/:id/status', async (req, res) => {
     await pool.query(`UPDATE planner.suggestions SET status=$2, status_by=$3, status_at=now() WHERE id=$1`, [req.params.id, status, by]);
     let emailed = false;
     if (prev && status === 'complete' && prev.status !== 'complete' && /@/.test(prev.created_by)) {
-      const CC = ['sarah@dockandbay.com', 'ben@dockandbay.com', 'diviyaj@dockandbay.com'].filter(e => e.toLowerCase() !== prev.created_by.toLowerCase());
+      // one email on complete → submitter (to) + ben/sarah/diviyaj + the suggestion's stakeholders (global + own), on CC.
+      const _stake = Array.from(new Set([...(await suggestionStakeholders()), ...(await suggestionOwnStakeholders(req.params.id))]));
+      const CC = Array.from(new Set(['sarah@dockandbay.com', 'ben@dockandbay.com', 'diviyaj@dockandbay.com', ..._stake])).filter(e => e.toLowerCase() !== prev.created_by.toLowerCase());
       const html = `<p>Good news — a suggestion you submitted is going live.</p>`
         + `<p><b>This feature is going live.</b></p>`
         + `<p style="color:#475569"><b>${prev.ref}</b>: ${String(prev.body).replace(/[<>&]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]))}</p>`
         + `<p style="color:#94a3b8;font-size:12px">Thanks for the idea — HORIZON Suggestion Box.</p>`;
-      const r = await sendResendEmail({ to: prev.created_by, cc: CC, subject: `Your suggestion ${prev.ref} is going live 🎉`, html });
+      const r = await sendResendEmail({ to: prev.created_by, cc: CC, subject: `Your suggestion ${prev.ref} is going live 🎉`, html, kind: 'suggestion-complete', ref: prev.ref, by });
       emailed = !!(r && (r.sent || r.sandbox));
     }
     // notify the suggestion-box stakeholders on ANY status change — the GLOBAL list plus THIS suggestion's own stakeholders (mig 162)

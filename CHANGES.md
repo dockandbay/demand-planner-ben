@@ -1,3 +1,6 @@
+## v26.983.0 Suggestion box — the single complete email now includes everyone
+- On complete, the one "going live 🎉" email now goes to the **submitter** (To) plus **ben, sarah, diviyaj and the suggestion stakeholders** (global + per-suggestion) on CC — a single mail to all of them, not two.
+
 ## v26.982.0 Suggestion box — one email on complete, not two
 - Marking a suggestion complete previously sent both the "going live 🎉" mail (to the submitter) and the stakeholder "→ complete" mail. The stakeholder mail is now suppressed on complete when the going-live mail sent — so complete = one email. Other status changes (future/deferred) still send the stakeholder notification as before, and complete still notifies if the submitter has no email on file.
 
