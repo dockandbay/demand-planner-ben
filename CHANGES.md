@@ -1,3 +1,10 @@
+## v26.955.0 New channel: TikTok (TIK) — targeted DTC clone
+- Added **TikTok / TIK** as a sell-through channel that behaves like DTC: own forecast input line, draws from the **3PL** pool, availability mirrors DTC, and its demand is **additive to total 3PL demand** in the buy plan.
+- **Country-gated** via a single `TIK_COUNTRIES=['UK','US']` list (edit to enable more markets). Drives the plan channel pill (UK/US only), COMBOS scaffold, availability synth (`tikInit`, grants 't' where DTC 'd' is available + synthesizes editable TIK plan rows), and Summary/Targets pills.
+- **Buy engine:** `buildLiveDemand` builds `dem.TIK` (gated) then **folds it into `dem.DTC`**, so every downstream 3PL/total demand sum counts TIK additively with no per-site edits. The buy SKU popup shows a separate **TikTok demand** line (DTC line shows pure DTC); math via `tot3pl`/`d3DemFn` all include TIK.
+- **Safety:** with no TIK forecast data, `dem.TIK` is never built and the fold is a no-op → the buy plan is byte-identical to before. TIK only changes numbers once you enter a TIK forecast.
+- **Excluded from Key Accounts** (type-8 targets stay DTC+FBA), per spec. Availability av-code = 't' (server + client). No DB schema change (forecast_inputs/outputs/targets accept channel='TIK').
+
 ## v26.954.0 DEMAND plan — quarter/half columns on-load fix + Display Settings moved
 - **Fix:** Quarter/Half-year total columns now appear on load when their toggle is persisted-on. TIME_COLS was built in the init IIFE before SHOW_Q/SHOW_H had read their saved values, so the columns were missing despite the checkbox showing ticked. TIME_COLS is now rebuilt once those vars are assigned.
 - Moved the **⚙ Display Settings** button onto the right-hand tool row, **after Smoothing, before Undo** (matched to that row's smaller button size; popup now right-anchored so it stays on-screen).

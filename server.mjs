@@ -281,7 +281,7 @@ async function buildSKURAW() {
                 ) x WHERE lch IS NOT NULL OR disc IS NOT NULL`),
     pool.query(`SELECT sku, warehouse wh, available::int qty FROM planner.v_product_inventory`),
     pool.query(`SELECT sku, lower(country) co,
-                       string_agg(CASE channel WHEN 'DTC' THEN 'd' WHEN 'FBA' THEN 'f' WHEN 'B2B' THEN 'b' END,
+                       string_agg(CASE channel WHEN 'DTC' THEN 'd' WHEN 'FBA' THEN 'f' WHEN 'B2B' THEN 'b' WHEN 'TIK' THEN 't' END,
                                   '' ORDER BY CASE channel WHEN 'DTC' THEN 1 WHEN 'FBA' THEN 2 ELSE 3 END)
                          FILTER (WHERE is_available) av
                 FROM planner.v_product_availability GROUP BY sku, country`),
@@ -9440,7 +9440,7 @@ app.post('/api/scenario/sales-planning', async (req, res) => {
   const co = country.toLowerCase(), monthStart = month + '-01', isUS = country === 'US';
   const wh3 = co + '_3pl', whF = co + '_fba';
   const pools = channel === 'fba' ? [whF] : [wh3];            // projection pool: FBA (+AWD) for fba, 3PL for 3pl. 3PL is shown as a separate transferable column on the FBA report, not in the cover math.
-  const fchs = channel === 'fba' ? ['FBA'] : ['DTC', 'B2B'];  // sales channels the warehouse fulfils
+  const fchs = channel === 'fba' ? ['FBA'] : ['DTC', 'B2B', 'TIK'];  // sales channels the warehouse fulfils (TIK folds into the 3PL pool like DTC)
   const discCol = country === 'AU' ? 'discontinue_date_au_final' : country === 'CA' ? 'discontinue_date_ca' : 'discontinue_date_final';
   try {
     const run = (await pool.query(`SELECT max(run_id) mx FROM planner.forecasts WHERE level='sku'`)).rows[0].mx;

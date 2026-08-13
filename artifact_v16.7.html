@@ -731,6 +731,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
       <button class="pill active" data-ch="DTC">DTC</button>
       <button class="pill" data-ch="FBA">FBA</button>
       <button class="pill" data-ch="B2B">B2B</button>
+      <button class="pill" data-ch="TIK" style="display:none">TIK</button>
       <button class="pill" data-ch="ZAL" style="display:none">ZAL</button>
     </div>
   </div>
@@ -949,7 +950,7 @@ function openFcLogic(ev){ if(ev)ev.stopPropagation(); var e=document.getElementB
 function closeFcLogic(){ var e=document.getElementById('fclogic-ov'); if(e)e.style.display='none'; }
 // ⚙ Smoothing settings — per country/channel/subcat "disregard discontinued" flags (persisted in app_settings).
 var _ssCo='UK', _ssCh='DTC';
-function ssSubcatsFor(co,ch){ var ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':'b', byCat={};
+function ssSubcatsFor(co,ch){ var ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':ch==='TIK'?'t':'b', byCat={};
   Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||!p.s)return; var av=(p.av||{})[ctry]||''; if(av.indexOf(chKey)<0)return; var cat=p.c||p.s; (byCat[cat]=byCat[cat]||{})[p.s]=1; });
   return byCat; }
 var _ssSavedT=null;
@@ -960,7 +961,7 @@ function renderSmoothSettings(){
   var coSel=document.getElementById('ss-co'), chSel=document.getElementById('ss-ch'), list=document.getElementById('ss-list');
   if(!coSel||!chSel||!list)return;
   if(!coSel.options.length){ coSel.innerHTML=CTRS.map(function(c){return '<option>'+c+'</option>';}).join(''); coSel.value=_ssCo; coSel.onchange=function(){_ssCo=this.value;renderSmoothSettings();}; }
-  if(!chSel.options.length){ chSel.innerHTML=['DTC','FBA','B2B'].map(function(c){return '<option>'+c+'</option>';}).join(''); chSel.value=_ssCh; chSel.onchange=function(){_ssCh=this.value;renderSmoothSettings();}; }
+  if(!chSel.options.length){ chSel.innerHTML=['DTC','FBA','B2B','TIK'].map(function(c){return '<option>'+c+'</option>';}).join(''); chSel.value=_ssCh; chSel.onchange=function(){_ssCh=this.value;renderSmoothSettings();}; }
   var thI=document.getElementById('ss-th'); if(thI&&document.activeElement!==thI)thI.value=(SMOOTH_AUTO.threshold!=null?SMOOTH_AUTO.threshold:20);
   var mSel=document.getElementById('ss-mode'); if(mSel)mSel.value=SMOOTH_AUTO.mode||'standard';
   var byCat=ssSubcatsFor(_ssCo,_ssCh); var cats=Object.keys(byCat).sort();
@@ -1183,6 +1184,22 @@ function zalInit(){
     DATA.push({c:ref?ref.c:sc, s:sc, co:'EU', ch:'ZAL', x:ref?ref.x:false, m:{}});
   });
 }
+// TikTok (TIK) channel wiring — clones the Zalando pattern, gated to TIK_COUNTRIES (UK+US now). Runs LATE from renderMain,
+// idempotent: (a) grant 't' availability wherever DTC ('d') is available in a TIK country so filteredSkus surfaces TIK;
+// (b) synthesize TIK DATA rows (one per subcat, cloned from a DTC row) so the plan shows an editable TikTok line even before
+// any forecast is entered. TIK forecast is its own input (forecast_inputs channel='TIK'); stock/availability mirror DTC (3PL).
+function tikInit(){
+  if(typeof DATA==='undefined'||!Array.isArray(DATA)||typeof TIK_COUNTRIES==='undefined')return;
+  TIK_COUNTRIES.forEach(function(CO){ var ctry=CO.toLowerCase();
+    Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p)return; if(!p.av)p.av={}; var a=p.av[ctry]||''; if(a.indexOf('d')<0)return; if(a.indexOf('t')<0)p.av[ctry]=a+'t'; });
+    var subs={}; Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(p&&p.s&&((p.av&&p.av[ctry])||'').indexOf('t')>=0)subs[p.s]=1; });
+    Object.keys(subs).forEach(function(sc){
+      if(DATA.some(function(r){return r.co===CO&&r.ch==='TIK'&&r.s===sc;}))return;
+      var ref=DATA.find(function(r){return r.co===CO&&r.ch==='DTC'&&r.s===sc;})||DATA.find(function(r){return r.co===CO&&r.s===sc;});
+      DATA.push({c:ref?ref.c:sc, s:sc, co:CO, ch:'TIK', x:ref?ref.x:false, m:{}});
+    });
+  });
+}
 if(!LAZY_SKU)augmentSKUM();
 const SKUS=_SKU_RAW.s||{}; // SKU sales: {"SKU|wh": {"YYYY_MM": units}}
 const SKUI=_SKU_RAW.i||_SKU_RAW.inbound||{}; // SKU inbound: {"SKU|wh": {qty, eta} | array}
@@ -1246,6 +1263,7 @@ var MKT_COLORS={};       // reusable market colour palette {UK:'#..',US:'#..',EU
 //  reads the live cascade (forecast_inputs/outputs), and the send-to-Zalando tab reads /api/supply/zalando/data.)
 var CHINA_STOCK={};      // {sku: units} un-allocated holding stock on open "China Stock" branch POs (MOQ top-ups) — server-injected; buy plan flags it as available to allocate.
 var ZAL_STOCK={};        // {sku: units} Zalando (ZFS) stock-on-hand — server-injected from planner.zalando_stock (the uploaded inventory file). EU buy-plan Zalando feed is GATED on this being non-empty (nothing uploaded → Zalando contributes nothing).
+var TIK_COUNTRIES=['UK','US'];   // TikTok (TIK) channel enabled markets — edit to enable more; drives pill visibility, COMBOS gating, availability synth (tikInit) and buildLiveDemand TIK build.
 var ZAL_SKUS=[];         // EU Zalando channel scope — SKUs in the Zalando stock upload ∪ SKUs with a ZAL forecast (server-injected). Drives the EU-only ZAL demand channel's SKU set + 'z' availability.
 var CHANNELS=[];         // Modular channel registry (planner.channels + country assignment) — server-injected. Phase 1: INERT (nothing reads it yet); Phase 2 will drive the channel enumerations/pills/keys from this. Each: {code,label,stock_source,forecast_mode,cover_months,ext_stock_source,sku_scope,rt_factor,no_urgent,countries[],sort,active}.
 var COUNTRIES=[];        // Country master list (planner.countries) — server-injected {code,label,sort,active}.
@@ -1310,7 +1328,7 @@ DATA=(DATA||[]).filter(function(r){
   var present=new Set();
   DATA.forEach(function(r){if(r&&r.s)present.add(r.s);});
   // Standard country/channel combos (AU has no B2B; CA is FBA only).
-  var COMBOS=[['UK','DTC'],['UK','FBA'],['UK','B2B'],['US','DTC'],['US','FBA'],['US','B2B'],
+  var COMBOS=[['UK','DTC'],['UK','FBA'],['UK','B2B'],['US','DTC'],['US','FBA'],['US','B2B'],['UK','TIK'],['US','TIK'],
               ['EU','DTC'],['EU','FBA'],['EU','B2B'],['AU','DTC'],['AU','FBA'],['CA','FBA']];
   ACTIVE_SUBS.forEach(function(sub){
     if(present.has(sub))return;
@@ -1358,6 +1376,7 @@ function buildLiveBpOverlay(){
       if(av.indexOf('d')>=0)ch.push('DTC');
       if(av.indexOf('b')>=0)ch.push('B2B');
       if(av.indexOf('f')>=0)ch.push('FBA');
+      if(av.indexOf('t')>=0)ch.push('TIK');
       if(ch.length===0){delete pd.mkts[mkt];return;}  // no channels avail → drop market (fixes avail bug)
       var md=pd.mkts[mkt];
       if(!md){md=pd.mkts[mkt]={};}
@@ -1797,7 +1816,7 @@ function statusMetrics(mkt){
   var out=[]; (SL||[]).forEach(function(s){
     if(!s.ms||!s.ms[mkt])return;
     var md=PD[s.s]&&PD[s.s].mkts&&PD[s.s].mkts[mkt]; if(!md)return;
-    var ch=md.ch||[]; var has3=ch.indexOf('DTC')>=0||ch.indexOf('B2B')>=0, hasf=ch.indexOf('FBA')>=0;
+    var ch=md.ch||[]; var has3=ch.indexOf('DTC')>=0||ch.indexOf('B2B')>=0||ch.indexOf('TIK')>=0, hasf=ch.indexOf('FBA')>=0;
     var i3=md.i3||0, iff=md['if_']||0, oo3=md.oo3||0, oof=md.oof||0;
     var wk3=webFwdDemand(md,3)/13, wkf=fbaFwdDemand(md,3)/13;   // avg weekly demand over next 90 days
     var cov3=wk3>0?(i3+oo3)/wk3:((i3+oo3)>0?Infinity:0);
@@ -3428,7 +3447,7 @@ function crRuleTip(r){
   return out.replace(/"/g,'&quot;');
 }
 function buildTable(proj,md,pd,is3,hasFBA){
-  const ch=md.ch||[],hasDTC=ch.includes('DTC'),hasB2B=ch.includes('B2B');
+  const ch=md.ch||[],hasDTC=ch.includes('DTC'),hasB2B=ch.includes('B2B'),hasTIK=!!(md.demand_tik&&Object.keys(md.demand_tik).length);
   const tfOv=parseInt(document.getElementById('fbw')?.value)||null;
   const t3=md.t3||12,tf=(tfOv!==null?tfOv:(md.tf||4));
   const hdr='<tr><th class="rl">Row</th>'+proj.map(p=>{
@@ -3472,7 +3491,8 @@ function buildTable(proj,md,pd,is3,hasFBA){
   if(is3){
     rows.push(sec('3PL Stock',proj.length));
     // DTC
-    if(hasDTC)rows.push(dr('DTC demand',proj,p=>p.isActual?`<td style="color:#6b7280;font-style:italic">${p.dtc?fmt(p.dtc):'\u2014'}</td>`:p.isForecast?`<td style="color:#9ca3af">${p.dtc?fmt(p.dtc):'\u2014'}</td>`:c(p.dtc?fmt(p.dtc):'\u2014',p.dtc?'cv':'cv0')));
+    if(hasDTC)rows.push(dr('DTC demand',proj,p=>{var _t=(md.demand_tik&&md.demand_tik[p.key])||0,_pd=(p.dtc||0)-_t;return p.isActual?`<td style="color:#6b7280;font-style:italic">${_pd?fmt(_pd):'\u2014'}</td>`:p.isForecast?`<td style="color:#9ca3af">${_pd?fmt(_pd):'\u2014'}</td>`:c(_pd?fmt(_pd):'\u2014',_pd?'cv':'cv0');}));
+    if(hasTIK)rows.push(dr('TikTok demand',proj,p=>{var t=(md.demand_tik&&md.demand_tik[p.key])||0;return p.isActual?`<td style="color:#6b7280;font-style:italic">${t?fmt(t):'\u2014'}</td>`:p.isForecast?`<td style="color:#9ca3af">${t?fmt(t):'\u2014'}</td>`:c(t?fmt(t):'\u2014',t?'cv':'cv0');}));
     // B2B
     if(hasB2B)rows.push(dr('B2B demand',proj,p=>p.isActual?`<td style="color:#6b7280;font-style:italic">${p.b2b?fmt(p.b2b):'\u2014'}</td>`:p.isForecast?`<td style="color:#9ca3af">${p.b2b?fmt(p.b2b):'\u2014'}</td>`:c(p.b2b?fmt(p.b2b):'\u2014',p.b2b?'cv':'cv0')));
     // Preorder & KA (committed B2B demand from Preorder + Key account FC tables; included in B2B demand above)
@@ -5795,7 +5815,7 @@ function skuSales(sku,co,ch){
 // Stock for a subcategory at the channel's warehouse (DTC/B2B -> 3PL, FBA -> FBA).
 // Sums on-hand (inv) and inbound (on_order) over all SKUs available in this country+channel.
 function stockFor(s,co,ch){
-  var wh=skuWh(co,ch), ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':'b';
+  var wh=skuWh(co,ch), ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':ch==='TIK'?'t':'b';
   var wh3=skuWh(co,'DTC'), whF=skuWh(co,'FBA');   // 3PL + FBA warehouse codes for this country
   var oh=0,inb=0,oh3=0,ohF=0;
   Object.keys(SKUM).forEach(function(sku){
@@ -5816,7 +5836,7 @@ function stock2Line(oh3,ohF,color,bold){ var c=color||'#334155', fw=bold?'font-w
 // (removed dead fn stockCellHTML — v26.759)
 // --- Inbound detail for the STOCK column: next-arrival date under the >>inbound number + a 120ms hover
 // listing every inbound shipment. Data comes from SKUI ("SKU|warehouse" -> [{ref,qty,eta,type}]). ---
-function _skuSetForSubcat(s,co,ch){ var ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':'b', out=[];
+function _skuSetForSubcat(s,co,ch){ var ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':ch==='TIK'?'t':'b', out=[];
   Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||p.s!==s)return; var av=(p.av||{})[ctry]||''; if(av.indexOf(chKey)>=0)out.push(sku); }); return out; }
 function inbEntries(skuList,co,ch){ var wh=skuWh(co,ch), out=[];
   (skuList||[]).forEach(function(sku){ var v=SKUI[sku+'|'+wh]; if(!v)return; (Array.isArray(v)?v:[v]).forEach(function(x){ if((x.qty||0)>0) out.push({eta:x.eta||null, qty:x.qty||0, sku:sku}); }); });
@@ -6307,7 +6327,7 @@ function compute3plMonthlyDemand(sku,subcat,co){
   // For each of DTC and B2B (both ship from 3PL), build shares and apply to forecast
   ['DTC','B2B'].forEach(function(ch){
     var ctry=co.toLowerCase();
-    var chKey=ch==='DTC'?'d':'b';
+    var chKey=ch==='DTC'?'d':ch==='TIK'?'t':'b';
     var skus=Object.keys(SKUM).filter(function(s2){
       var p=SKUM[s2];
       if(!p||p.s!==subcat)return false;
@@ -6372,7 +6392,7 @@ function skuHasAnyActivity(sku,co){
   // (3) Inbound shipments to either warehouse
   if(SKUI[sku+'|'+wh3]||SKUI[sku+'|'+whF])return true;
   // (4) Any nonzero forecast in FC_OUTPUTS for any channel in this country
-  var CHS=['DTC','FBA','B2B'];
+  var CHS=['DTC','FBA','B2B'].concat((typeof TIK_COUNTRIES!=='undefined'&&TIK_COUNTRIES.indexOf(CUR)>=0)?['TIK']:[]);
   for(var i=0;i<CHS.length;i++){
     for(var j=0;j<2;j++){
       var w=(j===0)?wh3:whF;if(!w)continue;
@@ -6878,7 +6898,7 @@ function computeSmoothAlloc(s,co,ch,m,opts){
   var floorFactor=(opts.floorFactor!=null)?opts.floorFactor:0.80;
   var DISREGARD_DISC=smoothDisregards(co,ch,s);   // when set: zero discontinued SKUs, active SKUs carry the full subcat target
   var wh=skuWh(co,ch), ctry=co.toLowerCase();
-  var chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':'b';
+  var chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':ch==='TIK'?'t':'b';
   var FU=(calc(s,co,ch).fu)||{};
   var target=Math.round((m===CUR_MONTH)?curMonthForecast(s,co,ch):(FU[m]||0));
   if(target<=0) return {};
@@ -7051,7 +7071,7 @@ function applySmoothAlloc(co,ch,m,vals){
 // capped by on-hand+inbound (decrementing), hard-zero once stock is exhausted. Writes overrides. Runs automatically
 // inside the smoothing flow when the subcat has "disregard discontinued" on. Returns # of SKUs recalculated.
 function recalcDiscontinued(s,co,ch){
-  var wh=skuWh(co,ch), ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':'b';
+  var wh=skuWh(co,ch), ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':ch==='TIK'?'t':'b';
   var FU=(calc(s,co,ch).fu)||{};
   var fmF=FM.filter(function(m){ return !isActualMonth(m)||m===CUR_MONTH; });   // forecast months only
   if(!fmF.length) return 0;
@@ -7080,7 +7100,7 @@ function recalcDiscontinued(s,co,ch){
 // gap matches what Smooth reconciles (full subcat, incl. discontinued — not just visible rows).
 function subcatSkuEffTotals(s,co,ch){
   var wh=skuWh(co,ch), ctry=co.toLowerCase();
-  var chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':'b';
+  var chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':ch==='TIK'?'t':'b';
   var FU=(calc(s,co,ch).fu)||{};
   var lyYM=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
   var all=Object.keys(SKUM).filter(function(sku){var p=SKUM[sku];if(!p||p.s!==s)return false;var av=(p.av||{})[ctry]||'';return av.indexOf(chKey)>=0;});
@@ -8183,7 +8203,7 @@ function remapExpanded(dim,newVal){
   EXPANDED=ne;
 }
 function renderMain(){
-  try{ zalInit(); }catch(e){}   // wire the EU Zalando channel (av 'z' + synth DATA rows) — idempotent, runs once data is ready
+  try{ zalInit(); }catch(e){} try{ tikInit(); }catch(e){}   // wire the EU Zalando channel (av 'z' + synth DATA rows) — idempotent, runs once data is ready
   CALC_MEMO={};   // fresh per-render forecast memo — covers direct renderMain() calls (filters/toggles) too
   _undoReady=true; try{ updateUndoBtn(); }catch(e){} try{ renderPlanChips(); }catch(e){} try{ refreshDispCcy(); }catch(e){}   // arm undo + refresh active-filter chips + the GBP/local currency pill once the plan has rendered
   try{ var _vb=document.getElementById('var-img-toggle'); if(_vb)_vb.classList.toggle('active',SHOW_VARIANT_IMG); var _cb=document.getElementById('cat-tot-toggle'); if(_cb)_cb.classList.toggle('active',SHOW_CAT_TOT); var _qb=document.getElementById('qtr-tot-toggle'); if(_qb){_qb.classList.toggle('active',SHOW_Q);_qb.setAttribute('aria-pressed',SHOW_Q?'true':'false');} var _hb=document.getElementById('half-tot-toggle'); if(_hb){_hb.classList.toggle('active',SHOW_H);_hb.setAttribute('aria-pressed',SHOW_H?'true':'false');} }catch(e){}   // sync the More-Filters toggle highlights with persisted state
@@ -8326,6 +8346,7 @@ function syncTabs(){
   // Zalando is an EU-only channel: show the ZAL pill only on EU, and never leave CF stuck on ZAL off-EU.
   if(CF==='ZAL'&&CUR!=='EU')CF='DTC';
   var _zp=document.querySelector('#chtabs .pill[data-ch="ZAL"]'); if(_zp)_zp.style.display=(CUR==='EU')?'':'none';
+  var _tp=document.querySelector('#chtabs .pill[data-ch="TIK"]'); if(_tp)_tp.style.display=(typeof TIK_COUNTRIES!=='undefined'&&TIK_COUNTRIES.indexOf(CUR)>=0)?'':'none';
   document.querySelectorAll('#ctabs .pill').forEach(function(b){b.className='pill'+(b.dataset.co===CUR?' active':'');});
   document.querySelectorAll('#chtabs .pill').forEach(function(b){b.className='pill'+(b.dataset.ch===CF?' active':'');});
   renderCatControl();
@@ -8519,7 +8540,7 @@ function renderSnapshotsView(body){
     var _allCats=Object.keys(SKUM).reduce(function(o,k){var c=SKUM[k]&&SKUM[k].s; if(c)o[c]=1; return o;},{}); _allCats=Object.keys(_allCats).sort();
     function _pill(fk,fv,on){ return '<span class="snapf" data-fk="'+fk+'" data-fv="'+esc(fv)+'" style="cursor:pointer;padding:2px 8px;border-radius:10px;font-size:11px;border:1px solid '+(on?'#2563eb':'#cbd5e1')+';background:'+(on?'#2563eb':'#fff')+';color:'+(on?'#fff':'#334155')+'">'+(fv||'All')+'</span>'; }
     function _vpill(v,lbl){ var on=SNAP_VIEW===v; return '<span class="snapv" data-v="'+v+'" style="cursor:pointer;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:600;border:1px solid '+(on?'#0f172a':'#cbd5e1')+';background:'+(on?'#0f172a':'#fff')+';color:'+(on?'#fff':'#334155')+'">'+lbl+'</span>'; }
-    h+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:2px 0 8px;font-size:12px"><span style="color:#475569">Show</span>'+_vpill('cat','Categories')+_vpill('sku','SKUs')+'<span style="width:1px;height:16px;background:#e2e8f0;margin:0 2px"></span><span style="color:#475569">Country</span>'+['','UK','US','EU','AU','CA'].map(function(c){return _pill('co',c,SNAP_F_CO===c);}).join('')+'<span style="color:#475569;margin-left:4px">Channel</span>'+['','DTC','FBA','B2B','ZAL'].map(function(c){return _pill('ch',c,SNAP_F_CH===c);}).join('')+'<select id="snapf-cat" style="padding:3px 6px;font-size:12px;margin-left:4px"><option value="">All categories</option>'+_allCats.map(function(c){return '<option value="'+esc(c)+'"'+(SNAP_F_CAT===c?' selected':'')+'>'+esc(c)+'</option>';}).join('')+'</select><input id="snapf-q" placeholder="search SKU…" value="'+esc(SNAP_F_Q||'')+'" style="padding:3px 6px;font-size:12px;width:130px"></div>';
+    h+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:2px 0 8px;font-size:12px"><span style="color:#475569">Show</span>'+_vpill('cat','Categories')+_vpill('sku','SKUs')+'<span style="width:1px;height:16px;background:#e2e8f0;margin:0 2px"></span><span style="color:#475569">Country</span>'+['','UK','US','EU','AU','CA'].map(function(c){return _pill('co',c,SNAP_F_CO===c);}).join('')+'<span style="color:#475569;margin-left:4px">Channel</span>'+['','DTC','FBA','B2B','ZAL','TIK'].map(function(c){return _pill('ch',c,SNAP_F_CH===c);}).join('')+'<select id="snapf-cat" style="padding:3px 6px;font-size:12px;margin-left:4px"><option value="">All categories</option>'+_allCats.map(function(c){return '<option value="'+esc(c)+'"'+(SNAP_F_CAT===c?' selected':'')+'>'+esc(c)+'</option>';}).join('')+'</select><input id="snapf-q" placeholder="search SKU…" value="'+esc(SNAP_F_Q||'')+'" style="padding:3px 6px;font-size:12px;width:130px"></div>';
     h+='<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px">'
       +'<thead><tr style="background:#f1f5f9"><th style="text-align:left;padding:4px 10px;position:sticky;left:0;background:#f1f5f9">'+(SNAP_VIEW==='sku'?'SKU':'Category')+'</th>';
     mons.forEach(function(ym){ h+='<th style="text-align:right;padding:4px 8px;white-space:nowrap">'+_snapMonLbl(ym)+'</th>'; });
@@ -8563,7 +8584,7 @@ function renderSummaryReport(body){
   renderSummaryView(c);
 }
 function renderSummaryView(body){
-  try{ zalInit(); }catch(e){}   // ensure the EU ZAL channel (av 'z' + synth DATA rows) is wired if the Summary is opened before the plan renders
+  try{ zalInit(); }catch(e){} try{ tikInit(); }catch(e){}   // ensure the EU ZAL channel (av 'z' + synth DATA rows) is wired if the Summary is opened before the plan renders
   function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function fn2(n){ n=Math.round(Number(n)||0); return n?n.toLocaleString():''; }
   var _curCcy='GBP', _symC='£';   // display currency (set once co is known); mf() uses the resolved symbol
@@ -8617,7 +8638,7 @@ function renderSummaryView(body){
   function impliedFor(Y,lvl,idx){ var g=impliedG(Y,lvl,idx); if(g!=null){ _lastImpCk=Y+'|'+lvl+'|'+idx; return g; }
     if(lvl==='month'){ g=impliedG(Y,'quarter',Math.ceil(idx/3)); if(g!=null){ _lastImpCk=Y+'|quarter|'+Math.ceil(idx/3); return g; } g=impliedG(Y,'half',Math.ceil(idx/6)); if(g!=null){ _lastImpCk=Y+'|half|'+Math.ceil(idx/6); return g; } return null; }
     if(lvl==='quarter'){ g=impliedG(Y,'half',Math.ceil(idx/2)); if(g!=null){ _lastImpCk=Y+'|half|'+Math.ceil(idx/2); return g; } return null; } return null; }
-  function skuRows(s){ var wh=skuWh(co,ch), ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':'b'; var sd=subData(s), a=sd.a, fu=sd.fu;
+  function skuRows(s){ var wh=skuWh(co,ch), ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':ch==='TIK'?'t':'b'; var sd=subData(s), a=sd.a, fu=sd.fu;
     var all=Object.keys(SKUM).filter(function(sku){var p=SKUM[sku];if(!p||p.s!==s)return false;var av=(p.av||{})[ctry]||'';return av.indexOf(chKey)>=0;});
     var shares=buildSkuShares(all,co,ch,LYYM);
     return all.map(function(sku){ var p=SKUM[sku]; var disc=(p.disc&&p.disc[ctry])||null, lch=(p.lch&&p.lch[ctry])||null, sh=shares[sku]||0;
@@ -8637,7 +8658,7 @@ function renderSummaryView(body){
   var fyOpen=function(Y){ return (Y in SUMM_FYOPEN)?SUMM_FYOPEN[Y]:(Y>=CUR_FY_START); };   // past FYs minimised by default
   function shadeOf(m,lch,disc){ if(disc){var dm=disc.slice(0,7).replace('-','_'); if(m>dm)return 'disc';} if(lch){var lm=lch.slice(0,7).replace('-','_'); if(m<lm)return 'pre';} return isActualMonth(m)?'act':''; }
   var CO_PILLS=(typeof CTRS!=='undefined'?CTRS:['UK','US','EU','AU','CA']);
-  var CH_PILLS=(CUR==='EU')?['DTC','FBA','B2B','ZAL']:['DTC','FBA','B2B'];   // Zalando is an EU-only channel — offer it in the Summary channel selector on EU
+  var CH_PILLS=((CUR==='EU')?['DTC','FBA','B2B','ZAL']:['DTC','FBA','B2B']).concat((typeof TIK_COUNTRIES!=='undefined'&&TIK_COUNTRIES.indexOf(CUR)>=0)?['TIK']:[]);   // Zalando is an EU-only channel — offer it in the Summary channel selector on EU
   if(CF==='ZAL'&&CUR!=='EU')ch=CF='DTC';   // don't leave the Summary stuck on ZAL off-EU
   var moOpts=function(sel){ return '<option value="">—</option>'+DISP_MONTHS.map(function(m){return '<option value="'+m+'"'+(m===sel?' selected':'')+'>'+mlab(m)+'</option>';}).join(''); };
   body.innerHTML='<div style="padding:6px 2px 12px">'
@@ -10082,7 +10103,7 @@ function renderTargetRecs(body){ if(TREC_FY==null)TREC_FY=CUR_FY_START;
     var openRecs=recs.filter(function(rc){ return trecOpen(rc,co,ch,TREC_FY) && !TREC_APPLIED[trecDKey(co,ch,TREC_FY,rc.s)]; });
     function cntB(n,on){ return n>0?(' <span style="background:'+(on?'rgba(255,255,255,.3)':'#b45309')+';color:#fff;border-radius:9px;font-size:9px;font-weight:800;padding:0 5px;margin-left:3px;vertical-align:1px">'+n+'</span>'):''; }
     var pills=fys.map(function(y){var on=(y===TREC_FY);return '<button class="trec-fy" data-fy="'+y+'" style="border:1px solid '+(on?'#b45309':'#cbd5e1')+';background:'+(on?'#b45309':'#fff')+';color:'+(on?'#fff':'#475569')+';border-radius:14px;padding:2px 10px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;margin-right:4px">'+fyLbl(y)+cntB(trecCount(co,ch,y),on)+'</button>';}).join('');
-    var _CO=(typeof CTRS!=='undefined'?CTRS:['UK','US','EU','AU','CA']), _CH=['DTC','FBA','B2B'];
+    var _CO=(typeof CTRS!=='undefined'?CTRS:['UK','US','EU','AU','CA']), _CH=['DTC','FBA','B2B','TIK'];
     var _pb=function(v,on,cls,n){return '<button class="'+cls+'" data-v="'+v+'" style="border:1px solid '+(on?'#0f172a':'#cbd5e1')+';background:'+(on?'#0f172a':'#fff')+';color:'+(on?'#fff':'#475569')+';border-radius:12px;padding:2px 9px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit;margin-right:3px">'+esc(v)+cntB(n,on)+'</button>';};
     var coPills=_CO.map(function(x){var n=0;_CH.forEach(function(cc){fys.forEach(function(y){n+=trecCount(x,cc,y);});});return _pb(x,x===co,'trec-co',n);}).join('')+'<span style="display:inline-block;width:12px"></span>'+_CH.map(function(x){var n=0;fys.forEach(function(y){n+=trecCount(co,x,y);});return _pb(x,x===ch,'trec-ch',n);}).join('');
     function wireFy(){ body.querySelectorAll('.trec-fy').forEach(function(b){ b.onclick=function(){ TREC_FY=+b.dataset.fy; renderTargetRecs(body); }; });
@@ -10151,7 +10172,7 @@ function execSumPopRender(){ var p=document.getElementById('exec-sum-pop'); if(!
     +'<div style="flex:1;background:#f0fdfa;border:1px solid #ccfbf1;border-radius:9px;padding:8px"><div style="color:#0f766e;font-size:10px;font-weight:700">FY28 · partial</div><div style="font-weight:800;font-size:14px">'+gbp(t28.r)+'</div><div style="color:#64748b;font-size:10px">'+fn(Math.round(t28.u))+' u</div></div>'
     +'</div>';
   // Per-channel FY27 breakdown
-  var chOrder=['DTC','FBA','B2B'], rows=chOrder.map(function(cn){ var s=psum(d.ch[cn],FY27);
+  var chOrder=['DTC','FBA','B2B','TIK'], rows=chOrder.map(function(cn){ var s=psum(d.ch[cn],FY27);
     return '<tr><td style="padding:4px 13px;font-weight:700">'+cn+'</td>'
       +'<td style="padding:4px 13px;text-align:right;font-variant-numeric:tabular-nums">'+gbp(s.r)+'</td>'
       +'<td style="padding:4px 13px;text-align:right;font-variant-numeric:tabular-nums">'+fn(Math.round(s.u))+'</td>'
@@ -10301,7 +10322,7 @@ function renderPriceChanges(el){
   el.innerHTML='<div style="font-size:11px;color:#888;margin-bottom:8px">Definitive price changes lift the revenue forecast (ASP) from the effective month forward — units are unchanged. Country is required; leave channel / subcategory blank for "all". Multiple changes <b>compound</b>.</div>'
     +'<div class="bar" style="gap:8px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;padding:8px 10px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px">'
       +'<div><div class="mut tiny">Country</div><select id="pc-co" class="fci">'+CTRS.map(function(c){return '<option>'+c+'</option>';}).join('')+'</select></div>'
-      +'<div><div class="mut tiny">Channel</div><select id="pc-ch" class="fci"><option value="">all</option>'+['DTC','FBA','B2B'].map(function(c){return '<option>'+c+'</option>';}).join('')+'</select></div>'
+      +'<div><div class="mut tiny">Channel</div><select id="pc-ch" class="fci"><option value="">all</option>'+['DTC','FBA','B2B','TIK'].map(function(c){return '<option>'+c+'</option>';}).join('')+'</select></div>'
       +'<div><div class="mut tiny">Subcategory</div><input id="pc-sub" class="fci" list="pc-subs" placeholder="all" style="width:170px;text-align:left"></div>'
       +'<div><div class="mut tiny">From month</div><input id="pc-mon" type="month" class="fci" style="width:140px;text-align:left"></div>'
       +'<div><div class="mut tiny">Uplift %</div><input id="pc-pct" class="fci" placeholder="+10" style="width:64px;text-align:left"></div>'
@@ -10851,7 +10872,7 @@ function renderDemandActionsView(body,opts){
         var filtBar=viewBar
           +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px">'
           +'<span style="font-size:11px;font-weight:700;color:#888">COUNTRY</span>'+[['ALL','All']].concat(COL.map(function(c){return [c,c];})).map(function(c){return '<button class="tg-co pill catpill'+(tgCo===c[0]?' active':'')+'" data-co="'+c[0]+'">'+c[1]+'</button>';}).join('')
-          +'<span style="font-size:11px;font-weight:700;color:#888;margin-left:6px">CHANNEL</span>'+[['ALL','All'],['DTC','DTC'],['FBA','FBA'],['B2B','B2B']].map(function(c){return '<button class="tg-ch pill catpill'+(tgCh===c[0]?' active':'')+'" data-c="'+c[0]+'">'+c[1]+'</button>';}).join('')
+          +'<span style="font-size:11px;font-weight:700;color:#888;margin-left:6px">CHANNEL</span>'+[['ALL','All'],['DTC','DTC'],['FBA','FBA'],['B2B','B2B'],['TIK','TIK']].map(function(c){return '<button class="tg-ch pill catpill'+(tgCh===c[0]?' active':'')+'" data-c="'+c[0]+'">'+c[1]+'</button>';}).join('')
           +'<span style="font-size:11px;font-weight:700;color:#888;margin-left:6px">STATUS</span>'+[['open','Open'],['dismissed','Dismissed'],['all','All']].map(function(s){return '<button class="tg-st dsub'+(tgSt===s[0]?' active':'')+'" data-s="'+s[0]+'">'+s[1]+'</button>';}).join('')
           +'</div>';
         var wireCommon=function(){ wireSecNav();
@@ -10928,7 +10949,7 @@ function renderDemandActionsView(body,opts){
         +'<span style="font-size:11px;font-weight:700;color:#888;margin-left:10px">COUNTRY</span>'
         +[['ALL','All']].concat(COL.map(function(c){return [c,c];})).map(function(c){var n=(c[0]==='ALL'?tgAll.length:tgAll.filter(function(i){return i.co===c[0];}).length);return '<button class="tg-co pill catpill'+(tgCo===c[0]?' active':'')+'" data-co="'+c[0]+'">'+c[1]+(n?' ('+n+')':'')+'</button>';}).join('')
         +'<span style="font-size:11px;font-weight:700;color:#888;margin-left:8px">CHANNEL</span>'
-        +[['ALL','All'],['DTC','DTC'],['FBA','FBA'],['B2B','B2B']].map(function(c){return '<button class="tg-ch pill catpill'+(tgCh===c[0]?' active':'')+'" data-c="'+c[0]+'">'+c[1]+'</button>';}).join('')+'</div>';
+        +[['ALL','All'],['DTC','DTC'],['FBA','FBA'],['B2B','B2B'],['TIK','TIK']].map(function(c){return '<button class="tg-ch pill catpill'+(tgCh===c[0]?' active':'')+'" data-c="'+c[0]+'">'+c[1]+'</button>';}).join('')+'</div>';
       var rowHtml=function(it){
         var col=(it.label&&it.label.c)||'#166534', bg=(it.label&&it.label.bg)||'#dcfce7';
         return '<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;font-size:12px;padding:7px 0;border-top:1px solid #f1f5f9">'
@@ -11215,7 +11236,7 @@ function buildExecData(){
   var ch={DTC:{},FBA:{},B2B:{}},coc={DTC:{},FBA:{},B2B:{}},cocs={DTC:{},FBA:{},B2B:{}},tot={};
   function ensure(o,m){if(!o[m])o[m]={u:0,r:0,lyU:0,lyR:0};}
   DATA.forEach(function(row){
-    if(['DTC','FBA','B2B'].indexOf(row.ch)<0)return;
+    if(['DTC','FBA','B2B','TIK'].indexOf(row.ch)<0)return;
     // Reports mirror the DEMAND plan (Ben's call): use the RAW forecast (no BI_CACHE / AI overlay), and for the
     // current partial month use the FULL-month forecast (curMonthForecast) — matching the plan's fyTot — rather
     // than month-to-date actual (which understated the in-flight month).
@@ -12223,7 +12244,7 @@ function renderExecView(host){
       });
     }
   }
-  ['DTC','FBA','B2B'].forEach(renderChannelRow);
+  ['DTC','FBA','B2B','TIK'].forEach(renderChannelRow);
 
   // TOTAL row
   var trT=document.createElement('tr');trT.className='total-row';
@@ -12266,7 +12287,7 @@ function buildLiveDemand(){
   if(typeof BP_DATA==='undefined'||!BP_DATA.products)return;
   var lyYearMonths=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
   var MK=['UK','US','EU','AU','CA'];
-  var CHS=[['DTC','d'],['B2B','b'],['FBA','f']];
+  var CHS=[['DTC','d'],['B2B','b'],['FBA','f'],['TIK','t']];
   var subcats={};Object.keys(SKUM).forEach(function(s){var p=SKUM[s];if(p&&p.s)subcats[p.s]=1;});
   var subList=Object.keys(subcats);
   // 1) Clear forecast-month demand everywhere (drops the baked x1.10 fallback)
@@ -12274,7 +12295,7 @@ function buildLiveDemand(){
     var mk=BP_DATA.products[sku].mkts;if(!mk)return;
     Object.keys(mk).forEach(function(co){
       var d=mk[co].demand;if(!d)return;
-      ['DTC','B2B','FBA'].forEach(function(ch){if(d[ch])LIVE_FC_MONTHS.forEach(function(fym){delete d[ch][fym];});});
+      ['DTC','B2B','FBA','TIK'].forEach(function(ch){if(d[ch])LIVE_FC_MONTHS.forEach(function(fym){delete d[ch][fym];});});
     });
   });
   // 2) Live cascade: subcat monthly forecast (calc, reads IV) x SKU share
@@ -12282,6 +12303,7 @@ function buildLiveDemand(){
     var ctry=co.toLowerCase();
     CHS.forEach(function(chp){
       var ch=chp[0],chKey=chp[1];
+      if(ch==='TIK'&&TIK_COUNTRIES.indexOf(co)<0)return;   // TIK only in enabled markets
       subList.forEach(function(subcat){
         var skus=Object.keys(SKUM).filter(function(s2){var p=SKUM[s2];if(!p||p.s!==subcat)return false;return ((p.av||{})[ctry]||'').includes(chKey);});
         if(!skus.length)return;
@@ -12349,6 +12371,20 @@ function buildLiveDemand(){
       var md=mk[co];if(!md.pka)return;
       if(!md.demand)md.demand={};if(!md.demand.B2B)md.demand.B2B={};
       Object.keys(md.pka).forEach(function(fym){md.demand.B2B[fym]=(md.demand.B2B[fym]||0)+(md.pka[fym]||0);});
+    });
+  });
+  // TIK fold: TikTok behaves like DTC on the 3PL pool. Built above as its own channel (gated to TIK_COUNTRIES); here we
+  // FOLD it into DTC so every downstream 3PL/total demand sum counts it additively with no per-site edits, and stash a
+  // display-only copy (md.demand_tik) so the buy popup can show a separate 'TikTok demand' line. No TIK data => no-op.
+  Object.keys(BP_DATA.products).forEach(function(sku){
+    var mk=BP_DATA.products[sku].mkts; if(!mk)return;
+    Object.keys(mk).forEach(function(co){
+      var md=mk[co]; delete md.demand_tik;
+      if(!md.demand||!md.demand.TIK)return;
+      md.demand_tik=Object.assign({},md.demand.TIK);
+      if(!md.demand.DTC)md.demand.DTC={};
+      Object.keys(md.demand.TIK).forEach(function(fym){ md.demand.DTC[fym]=(md.demand.DTC[fym]||0)+md.demand.TIK[fym]; });
+      delete md.demand.TIK;
     });
   });
   BP_DATA.demand_source='Live: forecast_outputs (SKU) + PLAN cascade';
