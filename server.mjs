@@ -7137,16 +7137,26 @@ function awdLedgerParse(text) {
   const hdr = split(lines[0]).map(h => h.toLowerCase());
   const iM = hdr.indexOf('msku'), iPkg = hdr.indexOf('package quantity'),
         iEnd = hdr.findIndex(h => h.indexOf('ending warehouse balance') >= 0),
-        iFac = hdr.indexOf('facility id'), iAsin = hdr.indexOf('asin');
+        iFac = hdr.indexOf('facility id'), iAsin = hdr.indexOf('asin'),
+        iDate = hdr.indexOf('date'), iPO = hdr.findIndex(h => h.indexOf('purchase order id') >= 0);
   if (iM < 0 || iEnd < 0) return { error: 'Not an AWD Inventory Ledger (needs "MSKU" + "Ending Warehouse Balance (cartons)" columns)', headers: hdr.slice(0, 18) };
-  const agg = {};
+  // The ledger repeats rows per date; the current on-hand is the LATEST Ending Warehouse Balance for each
+  // UNIQUE (MSKU, Facility ID, Purchase Order ID). Dedupe to that, then sum per MSKU → cartons; units = cartons × pkg.
+  const uniq = {};
   for (let i = 1; i < lines.length; i++) { const f = split(lines[i]); const msku = String(f[iM] || '').trim(); if (!msku) continue;
     const pkg = csvNum(f[iPkg]), cartons = csvNum(f[iEnd]);
-    const r = agg[msku] || (agg[msku] = { msku, cartons: 0, units: 0, pkg: 0, asin: '', facility: '' });
-    r.cartons += cartons; r.units += cartons * pkg; if (pkg) r.pkg = pkg;
-    if (!r.asin && iAsin >= 0) r.asin = String(f[iAsin] || '').trim();
-    if (!r.facility && iFac >= 0) r.facility = String(f[iFac] || '').trim(); }
-  const rows = Object.keys(agg).map(k => agg[k]).filter(r => r.cartons !== 0 || r.units !== 0);
+    const fac = iFac >= 0 ? String(f[iFac] || '').trim() : '';
+    const po = iPO >= 0 ? String(f[iPO] || '').trim() : '';
+    const date = iDate >= 0 ? String(f[iDate] || '').trim() : '';
+    const asin = iAsin >= 0 ? String(f[iAsin] || '').trim() : '';
+    const key = msku + '|' + fac + '|' + po;
+    const prev = uniq[key];
+    if (!prev || date >= prev.date) uniq[key] = { msku, fac, po, date, cartons, pkg, asin }; }
+  const agg = {};
+  Object.keys(uniq).forEach(k => { const u = uniq[k];
+    const r = agg[u.msku] || (agg[u.msku] = { msku: u.msku, cartons: 0, units: 0, pkg: 0, asin: '', facility: '' });
+    r.cartons += u.cartons; if (u.pkg) r.pkg = u.pkg; if (!r.asin) r.asin = u.asin; if (!r.facility) r.facility = u.fac; });
+  const rows = Object.keys(agg).map(k => { const r = agg[k]; r.units = r.cartons * r.pkg; return r; }).filter(r => r.cartons !== 0 || r.units !== 0);
   return { rep: { rows, total_units: rows.reduce((s, r) => s + r.units, 0), total_cartons: rows.reduce((s, r) => s + r.cartons, 0), skus: rows.length } };
 }
 async function awdCompare(rep) {
