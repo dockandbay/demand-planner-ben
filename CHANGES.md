@@ -1,3 +1,7 @@
+## v26.975.0 3PL Cin7 import log — left-aligned + stale-running fix
+- The Cin7 import log is now wrapped in an explicit left-aligned container (was inheriting centred alignment from the report shell).
+- A run left in **running** for over 30 minutes (a timed-out import the client never resumed) is now reported as **stalled** (amber) instead of a perpetual "running"; running rows show blue, not red.
+
 ## v26.974.0 3PL Invoicing — DOMMatrix fix (Geneva) + deep-linkable sub-tabs
 - **FIX (live US Geneva error “DOMMatrix is not defined”):** pdf.js (via pdf-parse) constructs DOMMatrix while extracting text from the Geneva invoice PDF; it is absent in the Node/serverless runtime. Added a guarded, functional 2D **DOMMatrix polyfill** (+ minimal DOMPoint) in server.mjs so Geneva allocation parses server-side. Verified: correct matrix maths + no regression to text extraction.
 - **Deep links:** the 3PL sub-tabs are now URL-addressable — selecting one writes `#/reports/3pl-invoicing/<tpl>` (uk_ilg · us_geneva · eu_ifulfilment · au_coghlans) and loading that URL opens straight to it.

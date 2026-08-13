@@ -7735,7 +7735,11 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
 app.get('/api/supply/tpl/cin7-log', async (req, res) => {
   try {
     const lim = Math.min(500, Math.max(1, parseInt(req.query.limit) || 200));
-    const rows = (await pool.query(`SELECT id, coalesce(tpl,'') tpl, period, to_char(from_date,'YYYY-MM-DD') from_date, to_char(to_date,'YYYY-MM-DD') to_date, orders, coalesce(kind,'') kind, coalesce(status,'') status, coalesce(error,'') error, cin7_calls, to_char(ran_at,'YYYY-MM-DD HH24:MI') ran_at FROM planner.tpl_cin7_imports ORDER BY ran_at DESC, id DESC LIMIT $1`, [lim])).rows;
+    // a 'running' row older than 30 min is a timed-out/abandoned import (Vercel killed the function before it finished
+    // and the client never resumed) — report it as 'stalled' rather than a perpetual 'running'.
+    const rows = (await pool.query(`SELECT id, coalesce(tpl,'') tpl, period, to_char(from_date,'YYYY-MM-DD') from_date, to_char(to_date,'YYYY-MM-DD') to_date, orders, coalesce(kind,'') kind,
+        CASE WHEN coalesce(status,'')='running' AND ran_at < now() - interval '30 minutes' THEN 'stalled' ELSE coalesce(status,'') END status,
+        coalesce(error,'') error, cin7_calls, to_char(ran_at,'YYYY-MM-DD HH24:MI') ran_at FROM planner.tpl_cin7_imports ORDER BY ran_at DESC, id DESC LIMIT $1`, [lim])).rows;
     res.json({ ok: true, runs: rows });
   } catch (e) { res.json({ ok: false, error: e.message, runs: [] }); }
 });

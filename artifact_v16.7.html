@@ -11768,7 +11768,7 @@ function render3plInvoice(body){
   function drawImportLog(b){ b.innerHTML='<div style="color:#94a3b8;font-size:12px">Loading…</div>';
     fetch('/api/supply/tpl/cin7-log?limit=200').then(function(r){return r.json();}).then(function(d){
       var runs=(d&&d.runs)||[];
-      var badge=function(st){ var c=st==='ok'?['#dcfce7','#166534']:st==='skipped'?['#f1f5f9','#64748b']:['#fee2e2','#b91c1c']; return '<span style="background:'+c[0]+';color:'+c[1]+';font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px">'+e(st||'?')+'</span>'; };
+      var badge=function(st){ var c=st==='ok'?['#dcfce7','#166534']:st==='skipped'?['#f1f5f9','#64748b']:st==='running'?['#dbeafe','#1e40af']:st==='stalled'?['#fef3c7','#92400e']:['#fee2e2','#b91c1c']; return '<span style="background:'+c[0]+';color:'+c[1]+';font-size:10px;font-weight:700;padding:1px 7px;border-radius:8px">'+e(st||'?')+'</span>'; };
       var rows=runs.length?runs.map(function(r){ return '<tr>'
         +'<td class="l" style="padding:4px 10px;white-space:nowrap">'+e(r.ran_at||'')+'</td>'
         +'<td class="l" style="padding:4px 10px">'+e(r.tpl||'')+'</td>'
@@ -11780,10 +11780,10 @@ function render3plInvoice(body){
         +'<td class="l" style="padding:4px 10px;text-align:left">'+(r.cin7_calls!=null?r.cin7_calls:'')+'</td>'
         +'<td class="l" style="padding:4px 10px;color:#b91c1c;max-width:340px">'+e(r.error||'')+'</td></tr>'; }).join('')
         :'<tr><td colspan="9" style="padding:14px 10px;color:#94a3b8;text-align:center">No Cin7 imports logged yet.</td></tr>';
-      b.innerHTML='<div style="font-size:13px;font-weight:700;margin-bottom:4px">Cin7 import log</div>'
-        +'<div style="font-size:11px;color:#94a3b8;margin-bottom:8px">Every Cin7 sales-order import — date range, kind, orders imported, status and any error.</div>'
+      b.innerHTML='<div style="text-align:left"><div style="font-size:13px;font-weight:700;margin-bottom:4px">Cin7 import log</div>'
+        +'<div style="font-size:11px;color:#94a3b8;margin-bottom:8px">Every Cin7 sales-order import — date range, kind, orders imported, status and any error. A run left <b>running</b> for over 30 min is shown as <b>stalled</b> (timed out — re-run it).</div>'
         +'<div class="tw" style="overflow:auto;max-height:70vh"><table style="border-collapse:collapse;font-size:12px;width:100%;text-align:left"><thead><tr style="background:#e9eef5;font-size:10px;text-transform:uppercase;color:#475569">'
-        +['Ran at','3PL','Period','Invoice-date range','Kind','Orders','Status','Cin7 calls','Error'].map(function(h){return '<th class="l" style="padding:5px 10px;text-align:left;position:sticky;top:0;background:#e9eef5">'+h+'</th>';}).join('')+'</tr></thead><tbody>'+rows+'</tbody></table></div>';
+        +['Ran at','3PL','Period','Invoice-date range','Kind','Orders','Status','Cin7 calls','Error'].map(function(h){return '<th class="l" style="padding:5px 10px;text-align:left;position:sticky;top:0;background:#e9eef5">'+h+'</th>';}).join('')+'</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
     }).catch(function(err){ b.innerHTML='<div style="color:#dc2626;font-size:12px">Failed: '+e(err.message||err)+'</div>'; }); }
   shell(); load();
 }
