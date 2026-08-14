@@ -1,3 +1,6 @@
+## v27.6.14 Samples: new admin sample request appears in the portal immediately
+- The admin sample-create now invalidates supply caches on commit. Previously a newly created sample only showed in the supplier portal after the per-supplier bootstrap cache TTL expired (SR-15 "took a lot of time" to appear). Now it flows through straight away.
+
 ## v27.6.13 Plan Shipments: "Keep Lixin & XR Textile apart" toggle
 - New header toggle (default on, persisted). When on, the recommendations engine never combines Lixin and XR Textile POs in the same container — both the new-container packer and the top-up-existing packer skip any placement that would mix the two suppliers. Other suppliers are unaffected. Toggle off to allow mixing.
 

@@ -11095,6 +11095,7 @@ app.post('/api/supply/sample-create', async (req, res) => {
     await client.query(`INSERT INTO planner.sample_notes (sample_id, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`,
       [id, (b.created_by||'').trim()||null, (shortUser((b.created_by||'').trim())||'Dock & Bay')+' created this sample request']);
     await client.query('COMMIT');
+    invalidateSupplyCaches();   // new sample → drop the per-supplier portal bootstrap cache + admin samples cache so it appears immediately (not after the TTL)
     res.json({ ok:true, id, ref });
   } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
