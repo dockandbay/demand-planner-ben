@@ -1,3 +1,6 @@
+## v27.6.23 Build on Fly Sets: list view (1 row per set)
+- The Build on Fly Sets tab now shows a table — one row per set (Set · Components with ×qty · component count · Delete) instead of the card grid. (The earlier upload "timeouts" were leaked local pg/jsdom processes saturating the sandbox pooler, since cleared — the endpoint itself round-trips in ~1s.)
+
 ## v27.6.22 SETS Phase 0a (client): CONFIG ▸ BOM menu with Manufacturing + Build on Fly Sets
 - The CONFIG "Manufacturing BOM" tab is now "BOM" with two inner sub-tabs: Manufacturing (unchanged) and Build on Fly Sets. Build on Fly Sets lists each SET → its component SKUs × qty (cards), with an add-a-component row (SKU datalist) and an ⬆ Upload (paste output_sku,input_sku,input_quantity; optional replace-all). Wired to the set-bom endpoints.
 
