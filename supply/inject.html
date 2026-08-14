@@ -11269,6 +11269,8 @@
     ov.innerHTML='<img src="'+esc(src)+'" style="max-width:92vw;max-height:92vh;border-radius:10px;box-shadow:0 12px 46px rgba(0,0,0,.55)">';
     ov.onclick=function(){ ov.remove(); }; document.body.appendChild(ov); }
   // Inline cell picker for the product grid (same popup UX as the PO grid's supplier/branch picker) — edits are
+  // Brief light-green "committed" flash on a product cell/field after a successful save (root-independent inline style).
+  function _pmFlash(el){ if(!el)return; try{ var ob=el.style.background, obd=el.style.borderColor; el.style.transition='background .2s,border-color .2s'; el.style.background='#dcfce7'; el.style.borderColor='#16a34a'; setTimeout(function(){ el.style.background=ob||''; el.style.borderColor=obd||''; },900); }catch(e){} }
   // bound straight to the master-data fields via /api/product/item/<ref>. kind = supplier | season | category.
   function prodPickBtn(ref,field,val,kind){ return '<button class="cell-pick prod-cell-pick" data-ref="'+esc(ref)+'" data-field="'+field+'" data-kind="'+kind+'" title="'+esc(val||'')+'">'+(val?esc(val):'<span class="mut">— <span style="background:#fee2e2;color:#991b1b;font-weight:700;border-radius:3px;padding:0 3px">set</span></span>')+' ▾</button>'; }
   function openProdCellPick(btn,onSaved,onPick){ closeShPop(); loadProdCfg(function(cfg){ ensureSuppliers(function(){
@@ -11282,7 +11284,7 @@
     function set(val){ if(typeof onPick==='function'){ closeShPop(); onPick(val); return; }   // select-only mode (e.g. the New-product form, no ref yet)
       var body={}; body[btn.dataset.field]=val; shipPost('/api/product/item/'+encodeURIComponent(ref),body,function(j){ if(j&&j.error){alert('Failed: '+j.error);return;} closeShPop(); _prodCfg=null; if(typeof onSaved==='function'){ onSaved(); return; }
         // In-place: update the clicked cell + any open detail form for the same product (no disruptive full redraw).
-        btn.title=val||''; btn.innerHTML=(val?esc(val):'<span class="mut">— <span style="background:#fee2e2;color:#991b1b;font-weight:700;border-radius:3px;padding:0 3px">set</span></span>')+' ▾';
+        btn.title=val||''; btn.innerHTML=(val?esc(val):'<span class="mut">— <span style="background:#fee2e2;color:#991b1b;font-weight:700;border-radius:3px;padding:0 3px">set</span></span>')+' ▾'; _pmFlash(btn);
         if(_prodRows){ var ro=_prodRows.filter(function(x){return x.ref===ref;})[0]; if(ro)ro[btn.dataset.field]=val; }
         prodSyncDetailField(ref,btn.dataset.field,val); }); }
     function render(q){ q=(q||'').trim().toLowerCase(); var html='<div class="shpop-opt unassign" data-clear="1">— Clear</div>';
@@ -11702,7 +11704,7 @@
     (function(){ var _pmType=body.querySelector('#pm-type'), _pmSeasonRow=body.querySelector('#pm-season-row');   // Custom Order → hide the Season field (in addition to the generic .pm-fld save below)
       if(_pmType&&_pmSeasonRow)_pmType.addEventListener('change',function(){ _pmSeasonRow.style.display=(this.value==='Custom Order')?'none':''; }); })();
     body.querySelectorAll('.pm-fld').forEach(function(el){ el.onchange=function(){ var msg=body.querySelector('#pm-msg'); if(msg){msg.style.color='#64748b';msg.textContent='Saving…';}
-      var payload={}; payload[el.dataset.f]=el.value; shipPost('/api/product/item/'+encodeURIComponent(it.ref),payload,function(j){ if(msg){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;} else { msg.style.color='#16a34a'; msg.textContent='Saved ✓'; setTimeout(function(){ if(msg)msg.textContent=''; },1200); prodSyncGridCell(it.ref,el.dataset.f,el.value); _prodJsonBust(it.ref); } } _prodCfg=null; }); }; });
+      var payload={}; payload[el.dataset.f]=el.value; shipPost('/api/product/item/'+encodeURIComponent(it.ref),payload,function(j){ if(msg){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;} else { msg.style.color='#16a34a'; msg.textContent='Saved ✓'; setTimeout(function(){ if(msg)msg.textContent=''; },1200); _pmFlash(el); prodSyncGridCell(it.ref,el.dataset.f,el.value); _prodJsonBust(it.ref); } } _prodCfg=null; }); }; });
     body.querySelectorAll('.pm-rec').forEach(function(cb){ cb.onchange=function(){ var vals=[]; body.querySelectorAll('.pm-rec:checked').forEach(function(x){ vals.push(x.value); });
       if(!vals.length){ cb.checked=true; vals=[cb.value]; }   // at least one recipient country
       var msg=body.querySelector('#pm-msg'); if(msg){msg.style.color='#64748b';msg.textContent='Saving…';}
@@ -11724,11 +11726,11 @@
     function bindSz(scope){
       scope.querySelectorAll('.pm-sz').forEach(function(el){ if(el._b)return; el._b=1; el.onchange=function(){ var id=el.dataset.id, f=el.dataset.f, so=szObj(id), b={}; b[f]=el.value;
         if(so)so[f]=el.value;
-        shipPost('/api/product/size/'+id,b,function(j){ if(j&&j.error){alert('Failed: '+j.error);return;} if(f==='approval_status')reRender(); }); }; });
+        shipPost('/api/product/size/'+id,b,function(j){ if(j&&j.error){alert('Failed: '+j.error);return;} _pmFlash(el); if(f==='approval_status')reRender(); }); }; });
       scope.querySelectorAll('.pm-sz-del').forEach(function(a){ if(a._b)return; a._b=1; a.onclick=function(){ if(!confirm('Remove this size?'))return; shipPost('/api/product/size/'+a.dataset.id+'/delete',{},function(){ renderProductDetail(it.ref); }); }; });
       scope.querySelectorAll('.pm-sku-pick').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(e){ e.stopPropagation(); openSkuPick(b,function(val){ var id=b.dataset.id, so=szObj(id); if(so)so.mapped_sku=(val||''); reRender(); }); }; });
       // Component controls: description, required (+ packaging type), approval status, versioned files
-      scope.querySelectorAll('.pm-comp-desc').forEach(function(el){ if(el._b)return; el._b=1; el.onchange=function(){ var sd=sizeDimObj(el.dataset.id,el.dataset.dim); if(sd)sd.description=el.value; shipPost('/api/product/size/'+el.dataset.id+'/dimension',{dimension:el.dataset.dim,description:el.value},function(){}); }; });
+      scope.querySelectorAll('.pm-comp-desc').forEach(function(el){ if(el._b)return; el._b=1; el.onchange=function(){ var sd=sizeDimObj(el.dataset.id,el.dataset.dim); if(sd)sd.description=el.value; var _e=el; shipPost('/api/product/size/'+el.dataset.id+'/dimension',{dimension:el.dataset.dim,description:el.value},function(){ _pmFlash(_e); }); }; });
       scope.querySelectorAll('.pm-comp-req').forEach(function(el){ if(el._b)return; el._b=1; el.onchange=function(){ var sd=sizeDimObj(el.dataset.id,el.dataset.dim); if(sd)sd.required=el.checked;
         shipPost('/api/product/size/'+el.dataset.id+'/dimension',{dimension:el.dataset.dim,required:el.checked},function(j){ if(j&&j.error){alert('Failed: '+j.error);return;} reRender(); }); }; });
       scope.querySelectorAll('.pm-comp-type').forEach(function(el){ if(el._b)return; el._b=1; el.onchange=function(){ var sd=sizeDimObj(el.dataset.id,el.dataset.dim); if(sd)sd.packaging_type=el.value; shipPost('/api/product/size/'+el.dataset.id+'/dimension',{dimension:el.dataset.dim,packaging_type:el.value},function(){}); }; });

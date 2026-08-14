@@ -1,3 +1,6 @@
+## v27.6.17 PRODUCT: light-green commit flash on cell edits
+- Editing a cell on the PRODUCT detail (master-data fields, size rows, component descriptions) and the product-grid picker cells now flashes light green on a successful save, matching the "saved" flash used elsewhere.
+
 ## v27.6.16 New-sample form: qty beside tick, coloured Add, open+toast on create, dev→product link
 - SKU search results: qty box now sits right after the checkbox; "+ Add selected" is green to stand out.
 - After creating a sample: the grid opens that sample's row and a green "✓ SR-NN created" toast shows.
