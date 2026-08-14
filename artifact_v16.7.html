@@ -6739,19 +6739,21 @@ function renderSkuView(){
     }
     tr.appendChild(lbl);
 
-    // Stock on hand
-    var invOH=p.inv&&p.inv[wh]||0;
-    var invOO=p.oo&&p.oo[wh]||0;
+    // Stock on hand — SETS show 3PL inventory only (a set's FBA stock is drawn from 3PL, not held separately)
+    var _isSet=(p.vt==='SET'), _iwh=_isSet?(co.toLowerCase()+'_3pl'):wh;
+    var invOH=p.inv&&p.inv[_iwh]||0;
+    var invOO=p.oo&&p.oo[_iwh]||0;
     var invTd=document.createElement('td');invTd.className='sku-inv sep2';invTd.style.cssText='position:sticky;left:220px;z-index:1;background:#fff;border-right:1px solid #e0e0e0';
-    var nextIB=SKUI[sku+'|'+wh];
+    var nextIB=SKUI[sku+'|'+_iwh];
     var ibHtml='';
     if(nextIB&&nextIB.qty){
       ibHtml='<div class="inv-oo" style="color:#3b82f6" title="Next inbound: '+fn(nextIB.qty)+' units">+'
         +fn(nextIB.qty)+(nextIB.eta?' <span style="color:#94a3b8">'+dateShort(nextIB.eta)+'</span>':'')+'</div>';
     } else if(invOO){
-      ibHtml='<div class="inv-oo" title="On order for '+wh+'">+'+fn(invOO)+'</div>';
+      ibHtml='<div class="inv-oo" title="On order for '+_iwh+'">+'+fn(invOO)+'</div>';
     }
-    invTd.innerHTML='<div class="inv-oh'+(invOH<0?' inv-neg':'')+'">'+fn(invOH)+'</div>'+ibHtml;
+    var _setBadge=_isSet?'<div style="font-size:8px;font-weight:700;color:#7c3aed;background:#f3e8ff;border-radius:3px;padding:0 4px;display:inline-block;margin-bottom:1px" title="Build-on-fly SET — 3PL inventory only">SET</div>':'';
+    invTd.innerHTML=_setBadge+'<div class="inv-oh'+(invOH<0?' inv-neg':'')+'">'+fn(invOH)+'</div>'+ibHtml;
     tr.appendChild(invTd);
 
     // Weeks remaining @ 3PL (cover)

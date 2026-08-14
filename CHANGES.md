@@ -1,3 +1,6 @@
+## v27.6.29 DEMAND plan: SET badge + 3PL-only inventory in the SKU stock cell (P1b)
+- In the SKU-level view, SET SKUs show a purple "SET" badge and their stock-on-hand/on-order/next-inbound reads from the 3PL warehouse only (a set's FBA stock is drawn from 3PL). Non-set SKUs are unchanged (byte-identical).
+
 ## v27.6.28 DEMAND plan: Sets show/hide/only display filter (Display Settings)
 - New "Sets" control in Display Settings (Show / Hide / Only) filters build-on-fly SET SKUs in the SKU-level (drill-down) view. Display-only + persisted — does not touch shares, forecast or the buy plan.
 
