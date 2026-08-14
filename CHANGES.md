@@ -1,3 +1,7 @@
+## v27.0.3 Status Report ▸ Out of stock: exclude zero-forecast SKUs
+- A 0-stock SKU with NO forecast for that country/warehouse is no longer flagged out of stock (nothing to sell isn't a stockout). Added a demand gate (wk3 for 3PL, wkf for FBA). US OOS drops from 63 to 26 in the sandbox (39 zero-forecast SKUs removed).
+- Discontinue dates (market-specific, incl. AU's own date) and per-market availability were already respected — verified 0 violations in the US list.
+
 ## v27.0.2 Samples new-sample form: SKU search now filters + searchable supplier picker
 - FIX: the SKU search did nothing (typing e.g. "COOL" didn't filter). Two `/api/product/skus` routes existed; the first (returns ALL products, ignores params) shadowed the supplier+query search. Gave the search its own path `/api/product/sku-search` and pointed the sample form at it.
 - Supplier field is now a searchable dropdown ("assign supplier — type to search", click to select) instead of a bare datalist.

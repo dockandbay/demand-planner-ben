@@ -9402,9 +9402,11 @@ function renderInvStatus(){
   var bo={A:[],B:[],C:[]}, low={A:[],B:[],C:[]}, oos3=[], oosF=[], oosBoth=[];   // out of stock split into 3 lists: 3PL-only, FBA-only, both
   rows.forEach(function(r){
     if(r.launch && r.launch>_today) return;      // launch date not yet passed → not sellable yet
-    if(r.disc && r.disc<_today) return;          // discontinue date in the past → discontinued
-    if(!r.has3 && !r.hasf) return;               // not in scope for this market on any channel
-    var out3=r.has3&&r.i3===0, outf=r.hasf&&r.iff<=0;
+    if(r.disc && r.disc<_today) return;          // discontinue date in the past (market-specific: AU uses its own) → discontinued, not a stockout
+    if(!r.has3 && !r.hasf) return;               // not available in this market on any channel (per availability_<mkt>_<chan>)
+    // Out of stock only counts when there's demand to lose: a 0-stock SKU with NO forecast for this country/warehouse
+    // isn't a stockout (nothing to sell). wk3 = 3PL (DTC+B2B) demand, wkf = FBA demand, both over the next 90 days.
+    var out3=r.has3&&r.i3===0&&r.wk3>0, outf=r.hasf&&r.iff<=0&&r.wkf>0;
     var low3=r.has3&&r.i3>0&&r.cov3<r.t3, lowf=r.hasf&&r.iff>0&&r.covf<r.tf;
     r.out3=out3; r.outf=outf; r.low3=low3; r.lowf=lowf;
     if(r.has3&&r.i3<0){ (bo[r.ti]||bo.C).push(r); }          // backorder: negative 3PL available
