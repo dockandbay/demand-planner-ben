@@ -1,3 +1,6 @@
+## v27.6.4 Shipments: Orphans filter + "Clean up orphans" button
+- New "⚠ Orphans" pill filters the shipments grid to dangling self-shipments (PO shipment_ref with no shipments row; server flags is_orphan). "🧹 Clean up orphans" clears the shipment_ref on all of them (un-assigns), with a confirm.
+
 ## v27.6.3 Fix: admins wrongly got "Read-only" on demand/supply/config writes (e.g. auto-smooth)
 - The edit-permission guard only granted admins an implicit bypass for PRODUCT; for demand/supply/config it required the explicit *_edit flag. An admin without that flag hit a false "Read-only access" error (auto-smooth, etc.). Admins now always pass all caps.
 

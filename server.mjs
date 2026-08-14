@@ -2011,6 +2011,16 @@ app.get('/api/supply/consolidation', async (req, res) => {
     res.json({ anchor: { ...a, pallets: Number(a.pallets) || 0 }, candidates, suggested_ref: pfx + (n + 1), truncated, window_days: 21 });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Clean up orphan self-shipments: clear the shipment_ref on every PO whose shipment_ref has no planner.shipments row
+// (dangling refs — the shipment record was never created or was deleted). The POs become unassigned again.
+app.post('/api/supply/shipments/cleanup-orphans', async (req, res) => {
+  try {
+    const r = await pool.query(`UPDATE planner.purchase_orders SET shipment_ref=NULL, updated_at=now()
+      WHERE coalesce(shipment_ref,'')<>'' AND NOT EXISTS (SELECT 1 FROM planner.shipments s WHERE s.shipment_ref=purchase_orders.shipment_ref)`);
+    invalidateSupplyCaches();
+    res.json({ ok: true, cleared: r.rowCount });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // Perform a consolidation: assign `pos` onto one shipment. create=true makes a NEW master-less shipment
 // (shipment_ref=ref, master_po NULL); otherwise `ref` is an existing shipment and the POs are moved onto it.
 app.post('/api/supply/consolidate', async (req, res) => {
@@ -3162,6 +3172,7 @@ app.get('/api/supply/:section', async (req, res, next) => {
             SELECT DISTINCT shipment_ref FROM planner.purchase_orders WHERE coalesce(shipment_ref,'')<>''
           )
           SELECT r.shipment_ref, coalesce(sh.master_po, r.shipment_ref) master_po,
+            (sh.shipment_ref IS NULL) is_orphan,   -- PO carries this shipment_ref but there's no planner.shipments row (dangling)
             CASE WHEN a.all_complete THEN 'Completed'   -- all linked POs complete → shipment is complete (calculated, overrides any stored status)
                  ELSE coalesce(
                    -- normalise any legacy stored value (Active→Shipping, Complete→Completed)

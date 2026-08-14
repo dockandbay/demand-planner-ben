@@ -5616,6 +5616,8 @@
       +'<div class="bar" style="flex-wrap:wrap;gap:6px">'+FILTERS.map(function(f){return '<span class="pill'+(f[0]===state.f?' active':'')+'" data-f="'+f[0]+'">'+f[1]+'</span>';}).join('')
       +'<span class="pill ship-recent'+(state.recent?' active':'')+'" data-recent title="when on, Completed shows only shipments that arrived in the last 12 months (faster)">📅 Last 12m</span>'
       +'<span class="pill ship-focus'+(state.focus?' active':'')+'" data-focus title="show only starred or escalated shipments (active only — completed are hidden)">★ Focus</span>'
+      +'<span class="pill ship-orphans'+(state.orphans?' active':'')+'" data-orphans title="POs carrying a shipment ref with no shipment record (dangling self-shipments)">⚠ Orphans</span>'
+      +'<button class="save-btn ship-orphan-clean" style="background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;font-size:11px;padding:2px 9px" title="clear the shipment ref on every orphan PO (un-assigns them)">🧹 Clean up orphans</button>'
       +'<span class="sh-filt-row">'
       +'<select class="flt" id="ship-ctry" style="width:auto'+(state.ctry?SEL_ON:'')+'"><option value="">All countries</option>'+ctrys.map(function(c){return '<option>'+esc(c)+'</option>';}).join('')+'</select>'
       +'<select class="flt" id="ship-br" style="width:auto'+(state.br?SEL_ON:'')+'"><option value="">All branches</option>'+brList.map(function(b){return '<option>'+esc(b)+'</option>';}).join('')+'</select>'
@@ -5629,6 +5631,7 @@
       if(state.br && (s.branch||'').indexOf(state.br)<0)return false;
       if(state.mode && (s.mode_eff||'')!==state.mode)return false;   // mode filter: sea / air / fob (blank = all)
       if(!searching && s.no_pos)return false;   // empty shipments (no POs — e.g. an orphaned self-shipment) are hidden from the grid; still findable via search
+      if(state.orphans)return !!s.is_orphan;   // Orphans filter: dangling self-shipments only (overrides status)
       if(searching)return true;   // a shipment / PO search overrides the status filter (find it whatever its status)
       var complete=(s.status==='Complete'||s.status==='Completed');
       if(state.focus)return (s.starred || s.escalated) && !complete;   // Focus = starred OR escalated, active only (overrides status)
@@ -5665,6 +5668,8 @@
     c.querySelectorAll('.bar .pill[data-f]').forEach(function(p){p.onclick=function(){c.querySelectorAll('.bar .pill[data-f]').forEach(function(x){x.classList.remove('active');});p.classList.add('active');state.f=p.dataset.f;_shipShowAll=false;view();};});
     var _srp=c.querySelector('.bar .ship-recent'); if(_srp)_srp.onclick=function(){ state.recent=!state.recent; _srp.classList.toggle('active',state.recent); _shipShowAll=false; view(); };
     var _sfp=c.querySelector('.bar .ship-focus'); if(_sfp)_sfp.onclick=function(){ state.focus=!state.focus; _sfp.classList.toggle('active',state.focus); _shipShowAll=false; view(); };
+    var _sop=c.querySelector('.bar .ship-orphans'); if(_sop)_sop.onclick=function(){ state.orphans=!state.orphans; _sop.classList.toggle('active',state.orphans); _shipShowAll=false; view(); };
+    var _soc=c.querySelector('.bar .ship-orphan-clean'); if(_soc)_soc.onclick=function(){ var n=ships.filter(function(s){return s.is_orphan;}).length; if(!n){ alert('No orphan shipments to clean up.'); return; } if(!confirm('Clear the shipment ref on '+n+' orphan PO'+(n>1?'s':'')+'? They become unassigned (no shipment record exists for them).'))return; _soc.disabled=true; shipPost('/api/supply/shipments/cleanup-orphans',{},function(j){ _soc.disabled=false; if(j&&j.error){alert(j.error);return;} alert('Cleared '+(j.cleared||0)+' orphan reference'+((j.cleared||0)===1?'':'s')+'.'); shipReload(); }); };
     // ⭐ star toggle next to PLAN — persists to the shipment and updates the row in place (re-renders if Focus is on)
     function bindShipStars(){ document.querySelectorAll('#sup-grid .fav-star[data-star-ref]').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(e){ e.stopPropagation();
       var ref=b.dataset.starRef, s=shipBy[ref], nv=!(s&&s.starred); if(s)s.starred=nv;
