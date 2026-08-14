@@ -6230,11 +6230,12 @@
     if(!ro){ if(el)el.style.display='none'; return; }
     if(!el){ el=document.createElement('div'); el.id='perm-banner'; el.style.cssText='background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:7px 12px;border-radius:6px;margin:0 0 10px;font-size:12px;font-weight:700'; var content=document.getElementById('supply-content'); root.insertBefore(el, content||root.firstChild); }
     el.style.display='block'; el.textContent='👁 Read-only access — you don’t have '+(inConfig?'CONFIG':'SUPPLY')+' edit rights here. Edits are rejected; ask an admin (CONFIG ▸ Permissions).'; }
+  var _cfgBomInner='mfg';   // CONFIG ▸ BOM inner sub-tab: 'mfg' (Manufacturing) | 'set' (Build on Fly Sets)
   function renderConfig(d){ var c=document.getElementById('supply-content'); var sizes=d.sizes||[];
     // CONFIG nav is two tiers: level-2 tabs (like every other page) + a "Supply chain" tab that,
     // when active, expands a level-3 row of its member config tabs.
     var SC_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom','products','barcodegen'];
-    var SC_LABEL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'Manufacturing BOM',products:'Products',barcodegen:'Barcodes'};
+    var SC_LABEL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'BOM',products:'Products',barcodegen:'Barcodes'};
     var ADM_KEYS=['admin-general','exchange-rates','channels','permissions','email-log'];
     var ADM_LABEL={'admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels',permissions:'Permissions','email-log':'Email log'};
     // Supply chain sits second (next to General settings); it expands to the level-3 members below / nested.
@@ -7326,7 +7327,7 @@
             buildRxCsv(ek,function(csvStr,fn,err){ if(err||csvStr==null){ msg.innerHTML='<span style="color:#b91c1c">Could not build CSV: '+esc(err&&err.message||err||'error')+'</span>'; return; }
               postEmailCsv(btn,ek,csvStr,fn,msg); }); }; });
         }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };
-      SUBS['mfgbom']=function(){ b.innerHTML='<div class="count">Loading…</div>';
+      function renderMfgBomInner(b){ b.innerHTML='<div class="count">Loading…</div>';
         Promise.all([fetch('/api/supply/manufacturing-bom').then(function(r){return r.json();}),
                      fetch('/api/supply/skus').then(function(r){return r.json();}).catch(function(){return [];})])
           .then(function(R){ var rows=Array.isArray(R[0])?R[0]:[]; var skus=(Array.isArray(R[1])?R[1]:[]).filter(function(s){return s&&s.sku;});
@@ -7418,7 +7419,44 @@
               b.querySelectorAll('.bom-delb').forEach(function(btn){ btn.onclick=function(){ var p=btn.dataset.p; if(!confirm('Delete the ENTIRE bundle "'+p+'" and all its components? This cannot be undone.'))return;
                 btn.disabled=true; bomDel(p,'').then(function(){ delete byP[p]; api.draw(); }).catch(function(e){ btn.disabled=false; alert('Delete failed: '+(e.message||e)); }); }; });
             } });
-        }).catch(function(e){ b.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>'; }); };
+        }).catch(function(e){ b.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>'; }); }
+      // CONFIG ▸ BOM — one menu, two inner sub-tabs: Manufacturing (finished-goods) + Build on Fly Sets (set explosion).
+      SUBS['mfgbom']=function(){ var tab=_cfgBomInner==='set'?'set':'mfg';
+        b.innerHTML='<div style="display:flex;gap:2px;border-bottom:1px solid #e5e7eb;margin-bottom:2px">'
+          +[['mfg','Manufacturing'],['set','Build on Fly Sets']].map(function(t){ var on=t[0]===tab; return '<button class="cfg-bom-tab" data-t="'+t[0]+'" style="cursor:pointer;border:none;background:none;padding:7px 15px;font-size:12px;font-weight:'+(on?'700':'500')+';color:'+(on?'#0f172a':'#64748b')+';border-bottom:2px solid '+(on?'#2563eb':'transparent')+'">'+t[1]+'</button>'; }).join('')
+          +'</div><div id="bom-inner"></div>';
+        b.querySelectorAll('.cfg-bom-tab').forEach(function(x){ x.onclick=function(){ _cfgBomInner=x.dataset.t; SUBS['mfgbom'](); }; });
+        var inner=document.getElementById('bom-inner');
+        if(tab==='set')renderSetBomInner(inner); else renderMfgBomInner(inner); };
+      // Build on Fly Sets — a SET output SKU explodes into component input SKUs × qty (feeds set demand into the component buy plan).
+      function renderSetBomInner(host){ host.innerHTML='<div class="count">Loading…</div>';
+        Promise.all([fetch('/api/supply/set-bom').then(function(r){return r.json();}), fetch('/api/supply/skus').then(function(r){return r.json();}).catch(function(){return [];})]).then(function(R){
+          var rows=Array.isArray(R[0])?R[0]:[]; var skus=(Array.isArray(R[1])?R[1]:[]).filter(function(s){return s&&s.sku;});
+          var nameOf={}; skus.forEach(function(s){ nameOf[String(s.sku).trim().toUpperCase()]=s.name||s.product_name||''; });
+          function nm(v){ return nameOf[String(v||'').trim().toUpperCase()]||''; }
+          function reload(){ fetch('/api/supply/set-bom').then(function(r){return r.json();}).then(function(rw){ rows=Array.isArray(rw)?rw:[]; draw(); }); }
+          function draw(){ var byO={}; rows.forEach(function(x){(byO[x.output_sku]=byO[x.output_sku]||[]).push(x);}); var outs=Object.keys(byO).sort();
+            var h='<div class="sect-h">Build on Fly Sets <span class="mut tiny">(a SET SKU explodes into component SKUs × qty at fulfilment; feeds set demand into the component buy plan)</span> <button class="tool-badge bg-blue" id="setbom-upload" style="cursor:pointer;border:none;margin-left:8px">⬆ Upload</button></div>';
+            h+=outs.length?('<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:12px;margin-top:12px">'+outs.map(function(o){ var cs=byO[o]; return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;background:#fff"><div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:6px"><div style="flex:1;min-width:0;font-weight:700;word-break:break-word">'+esc(o)+(nm(o)?'<div class="mut tiny">'+esc(nm(o))+'</div>':'')+'</div><button class="setbom-del" data-o="'+esc(o)+'" style="cursor:pointer;border:1px solid #fecaca;background:#fef2f2;color:#b91c1c;padding:3px 10px;border-radius:5px;font-size:11px;white-space:nowrap">Delete</button></div><div class="mut tiny" style="text-transform:uppercase;letter-spacing:.3px;font-weight:700;margin-bottom:3px">'+cs.length+' component'+(cs.length===1?'':'s')+'</div>'+cs.map(function(x){ return '<div style="font-size:12px;display:flex;justify-content:space-between;gap:8px"><span style="min-width:0;word-break:break-word">'+esc(x.input_sku)+(nm(x.input_sku)?' <span class="mut tiny">'+esc(nm(x.input_sku))+'</span>':'')+'</span><span style="font-weight:700;white-space:nowrap">×'+esc(String(x.input_quantity))+'</span></div>'; }).join('')+'</div>'; }).join('')+'</div>'):'<div class="count" style="padding:10px 2px">No sets configured yet — Upload, or add a component below.</div>';
+            h+='<div style="margin-top:14px;padding-top:10px;border-top:1px solid #eef2f7"><div style="font-weight:700;font-size:12px;margin-bottom:5px">Add / update a component</div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input class="fci" id="sb-out" list="sb-skus" placeholder="set SKU (output)" style="width:220px"><span class="mut">→</span><input class="fci" id="sb-in" list="sb-skus" placeholder="component SKU (input)" style="width:220px"><input type="number" min="0" step="1" class="fci" id="sb-qty" placeholder="qty" style="width:70px;text-align:right"><button class="save-btn" id="sb-add" style="background:#16a34a;color:#fff;border-color:#15803d;font-weight:700">Add</button><span id="sb-msg" class="mut tiny"></span></div><datalist id="sb-skus">'+skus.slice(0,4000).map(function(s){return '<option value="'+esc(s.sku)+'">';}).join('')+'</datalist></div>';
+            host.innerHTML=h;
+            host.querySelector('#sb-add').onclick=function(){ var o=host.querySelector('#sb-out').value.trim(), inp=host.querySelector('#sb-in').value.trim(), qty=Number(host.querySelector('#sb-qty').value), msg=host.querySelector('#sb-msg'); if(!o||!inp){msg.style.color='#dc2626';msg.textContent='set + component required';return;} if(!(qty>0)){msg.style.color='#dc2626';msg.textContent='qty must be > 0';return;} msg.style.color='#64748b';msg.textContent='Saving…'; fetch('/api/supply/set-bom-save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({output_sku:o,input_sku:inp,input_quantity:qty})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;return;} reload(); }); };
+            host.querySelectorAll('.setbom-del').forEach(function(bd){ bd.onclick=function(){ var o=bd.dataset.o; if(!confirm('Delete the entire set "'+o+'" and its components?'))return; fetch('/api/supply/set-bom-delete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({output_sku:o})}).then(function(r){return r.json();}).then(function(){ reload(); }); }; });
+            var ub=host.querySelector('#setbom-upload'); if(ub)ub.onclick=function(){ _setBomUpload(reload); };
+          }
+          draw();
+        }).catch(function(e){ host.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(String(e))+'</div>'; }); }
+      // Paste popup: output_sku, input_sku, input_quantity (comma/tab per line) → bulk upsert.
+      function _setBomUpload(onDone){ var ex=document.getElementById('setbom-paste'); if(ex)ex.remove();
+        var ov=document.createElement('div'); ov.id='setbom-paste'; ov.style.cssText='position:fixed;inset:0;z-index:200000;background:rgba(15,23,42,.35);display:flex;align-items:center;justify-content:center';
+        ov.innerHTML='<div style="background:#fff;border-radius:10px;padding:16px 18px;width:460px;max-width:92vw;box-shadow:0 12px 40px rgba(15,23,42,.25)"><div style="font-weight:700;margin-bottom:5px">Upload Build-on-Fly sets</div><div class="mut tiny" style="margin-bottom:6px">One per line: <b>output_sku, input_sku, input_quantity</b> (comma or tab). A header row is ignored. Existing rows for the same set+component are updated.</div><textarea id="sbp-ta" rows="9" style="width:100%;box-sizing:border-box;font:12px ui-monospace,Menlo,monospace;border:1px solid #d0d0d0;border-radius:6px;padding:8px" placeholder="PICNIC-2SET-XX, PICNIC-DES-LG-ALF, 1"></textarea><label style="display:block;font-size:11px;margin-top:6px"><input type="checkbox" id="sbp-replace"> Replace ALL existing sets first</label><div style="text-align:right;margin-top:10px"><button class="save-btn light" id="sbp-cancel">Cancel</button> <button class="save-btn" id="sbp-go" style="background:#16a34a;color:#fff;border-color:#15803d">Upload</button></div></div>';
+        document.body.appendChild(ov); function close(){ ov.remove(); }
+        ov.addEventListener('mousedown',function(e){ if(e.target===ov)close(); });
+        document.getElementById('sbp-cancel').onclick=close; document.getElementById('sbp-ta').focus();
+        document.getElementById('sbp-go').onclick=function(){ var t=document.getElementById('sbp-ta').value, out=[];
+          t.split(/\n/).forEach(function(ln){ var p=ln.split(/[,\t]/); var o=(p[0]||'').trim(), i=(p[1]||'').trim(), q=(p[2]||'').trim(); if(!o||!i)return; if(/output/i.test(o)&&/input/i.test(i))return; out.push({output_sku:o,input_sku:i,input_quantity:Number(q)||1}); });
+          if(!out.length){ alert('No rows detected'); return; }
+          fetch('/api/supply/set-bom-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({rows:out,replace:document.getElementById('sbp-replace').checked})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} close(); alert('Uploaded '+(j.saved||0)+' row(s)'+(j.errors&&j.errors.length?'; '+j.errors.length+' skipped: '+j.errors.slice(0,3).join(' · '):'')+'.'); onDone&&onDone(); }).catch(function(e){ alert('Upload failed: '+(e.message||e)); }); }; }
       SUBS['products']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/products-all').then(function(r){return r.json();}).then(function(d){ if(d&&d.error){b.innerHTML='<div class="count">'+esc(d.error)+'</div>';return;}
           var cols=d.columns||[], all=d.rows||[];

@@ -1,3 +1,6 @@
+## v27.6.22 SETS Phase 0a (client): CONFIG ▸ BOM menu with Manufacturing + Build on Fly Sets
+- The CONFIG "Manufacturing BOM" tab is now "BOM" with two inner sub-tabs: Manufacturing (unchanged) and Build on Fly Sets. Build on Fly Sets lists each SET → its component SKUs × qty (cards), with an add-a-component row (SKU datalist) and an ⬆ Upload (paste output_sku,input_sku,input_quantity; optional replace-all). Wired to the set-bom endpoints.
+
 ## v27.6.21 SETS Phase 0a (backend): "Build on Fly Sets" BOM table + endpoints
 - New table planner.set_bom (output_sku, input_sku, input_quantity) via migration 229 — a SET SKU's component explosion, distinct from manufacturing_bom. Server: read section 'set-bom' + set-bom-save / set-bom-delete / set-bom-upload endpoints (supply-edit gated). Backend for the CONFIG ▸ BOM ▸ "Build on Fly Sets" UI. NEW MIGRATION: 229_set_bom.sql.
 
