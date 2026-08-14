@@ -1,3 +1,6 @@
+## v27.6.12 DEMAND More Filters — wider popup so all categories fit/click
+- Bumped the More Filters popup width 520→590px and the category checklist max-height 300→345px (~13%) so every category is visible and clickable.
+
 ## v27.6.11 Plan Shipments: merge top-up recs per container + single Apply; remove "Apply all"
 - Top-up recommendations now show ONE card per container listing every loose PO that fits it (largest-first best-fit packing into spare capacity), with a single "✓ Apply" button that adds them all at once (single undo). Previously each loose PO made its own "Top up TRF-…" card, so the same container appeared many times.
 - Removed the "Apply all" button (superseded by the merged per-container cards).
