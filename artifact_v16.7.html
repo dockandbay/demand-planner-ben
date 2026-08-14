@@ -6249,6 +6249,11 @@ function buildSkuShares(skus,co,ch,lyMonths){
     annualisedTotals[sku]=lyTotals[sku]>0?lyTotals[sku]:(recentSum*4);
   });
 
+  // SETS 0c (Ben): a SET takes 0 share of the subcategory contribution model — it is NOT auto-forecast off the
+  // seasonal curve. Zeroed BEFORE tier averages / grand total so masters split the subcat exactly as they did
+  // before sets entered scope (byte-identical), and sets never dilute masters.
+  skus.forEach(function(sku){ if(SKUM[sku]&&SKUM[sku].vt==='SET')annualisedTotals[sku]=0; });
+
   // For SKUs with neither LY nor recent history: use tier-weighted placeholder
   // proportional to average annualised value of other SKUs in same tier
   var tierAvg={};
@@ -6259,6 +6264,7 @@ function buildSkuShares(skus,co,ch,lyMonths){
   var globalAvg=skus.reduce(function(a,sku){return a+annualisedTotals[sku];},0)/Math.max(skus.length,1);
 
   skus.forEach(function(sku){
+    if(SKUM[sku]&&SKUM[sku].vt==='SET')return;   // SETS 0c: no placeholder — sets stay at 0 contribution
     if(annualisedTotals[sku]===0){
       var t=SKUM[sku]&&SKUM[sku].ti||'C';
       annualisedTotals[sku]=(tierAvg[t]||globalAvg||1)*(tierW[t]||1)/2;

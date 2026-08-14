@@ -1,3 +1,6 @@
+## v27.6.27 SETS: 0% contribution — sets no longer auto-forecast off the subcategory curve
+- In buildSkuShares, SET SKUs are zeroed BEFORE the tier averages / grand total, so they take 0 share of the subcategory contribution model (0c rule). Masters split the subcategory exactly as they did before sets entered scope (byte-identical — sets never dilute masters), and sets get 0 contribution-model forecast (e.g. TOWLB-CAB-LG-4SET-ORANGE). Sets still show in the plan; their real demand comes later. (Master/set grouping deferred to last per Ben.)
+
 ## v27.6.26 DEMAND plan: taller More Filters + Display Settings popup clamped to viewport
 - More Filters category checklist +50px height (345→395).
 - Display Settings popup no longer runs half off-screen on wide/full-screen windows — it now positions relative to its button and clamps inside the viewport.
