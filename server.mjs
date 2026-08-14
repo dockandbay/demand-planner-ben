@@ -12043,14 +12043,11 @@ async function getSampleLines(sampleId) {
 // Human diff of two sample line sets (summed per SKU) → "Added A ×2, B ×1; Removed C; Qty D 3→5" (or '' if unchanged).
 function sampleLinesDiffText(oldLines, newLines) {
   const norm = arr => { const m = {}; (arr || []).forEach(l => { if (!l || !l.sku) return; const k = String(l.sku).trim(); if (!k) return; m[k] = (m[k] || 0) + (Number(l.qty) || 0); }); return m; };
-  const o = norm(oldLines), n = norm(newLines), added = [], removed = [], changed = [];
-  Object.keys(n).forEach(k => { if (!(k in o)) added.push(k + ' ×' + n[k]); else if (o[k] !== n[k]) changed.push(k + ' ' + o[k] + '→' + n[k]); });
-  Object.keys(o).forEach(k => { if (!(k in n)) removed.push(k); });
-  const parts = [];
-  if (added.length) parts.push('Added ' + added.join(', '));
-  if (removed.length) parts.push('Removed ' + removed.join(', '));
-  if (changed.length) parts.push('Qty ' + changed.join(', '));
-  return parts.join('; ');
+  const o = norm(oldLines), n = norm(newLines), parts = [];
+  Object.keys(o).forEach(k => { if (!(k in n)) parts.push('deleted ' + k + ' x' + o[k]); });          // deleted SKU x<qty>
+  Object.keys(n).forEach(k => { if (!(k in o)) parts.push('added ' + k + ' x' + n[k]);                 // added SKU x<qty>
+    else if (o[k] !== n[k]) parts.push('changed ' + k + ' x' + o[k] + '→' + n[k]); });                 // changed SKU x<old>→<new>
+  return parts.join(', ');
 }
 // Record + notify a SKU/qty change: detailed record-of-change (admin audit) + a shared timeline note (notification).
 async function logSampleLinesChanged(sampleId, oldLines, newLines, by, kind) {

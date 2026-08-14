@@ -1,3 +1,6 @@
+## v27.6.34 Samples record-of-change: clearer SKU diff wording (incl. deleted qty)
+- The SKU/qty change detail now reads "deleted SKU x1, added SKU x2, changed SKU x3→5" (deleted items now show their quantity; consistent "deleted/added/changed … x<qty>" wording). Applies to admin + portal line edits and the shared timeline note. (The pre-v27.6.15 entries have no detail — that's historical, not a bug.)
+
 ## v27.6.33 Samples: grid status matches "our status" + dev product link navigates reliably
 - Samples grid status chip now reflects the D&B "our status" (FUTURE/PRODUCTION/COMPLETED) — same as the detail — instead of the old-vocabulary status_calc (which showed PLANNED for FUTURE/PRODUCTION).
 - The "↗ product" link on a dev-sample line now opens the product-development item directly (via selectProductSub + _pendingProdRef), instead of relying on a hash change that didn't re-route from inside SUPPLY.
