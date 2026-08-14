@@ -1,3 +1,6 @@
+## v27.6.30 SETS P2 foundation: inject set_bom map into the client
+- Server injects SET_BOM = {output_set_sku:[{sku,qty}]} (from planner.set_bom) into the artifact (buildSetBom + replaceGlobal), and the artifact declares the default. No logic reads it yet — this is the data foundation for the P2 buy-plan component explosion, so that step is a self-contained follow-up. Provably safe / no behaviour change.
+
 ## v27.6.29 DEMAND plan: SET badge + 3PL-only inventory in the SKU stock cell (P1b)
 - In the SKU-level view, SET SKUs show a purple "SET" badge and their stock-on-hand/on-order/next-inbound reads from the 3PL warehouse only (a set's FBA stock is drawn from 3PL). Non-set SKUs are unchanged (byte-identical).
 

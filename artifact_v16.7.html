@@ -1304,6 +1304,7 @@ var PROD_CONST={};
 var BRANCH_FREIGHT={};   // {uk:{air,sea days},…} — expedite freight leads for Buy 3PL Urgent Air/Sea (server-injected)
 var TRANSFER_LEADS={};   // {UK:{US:6,EU:2,AU:8},…} — inter-market 3PL→3PL transfer lead times (weeks); missing lane = we don't transfer that way. Server-injected (migration 171).
 var KLAVIYO_BIS={};      // Klaviyo back-in-stock: {sku:{UK:n,US:n,…}, _at:'YYYY-MM-DD'} — server-injected (SUG-0018). DEMAND plan 🔔 badge.
+var SET_BOM={};          // Build-on-fly SETS BOM: {output_set_sku:[{sku:input_sku,qty:input_quantity}]} — server-injected from planner.set_bom. Buy plan explodes set demand into these components (SETS feature P2).
 var BIS_CFG={take_rate:35};   // SUG-0018 P2: % of waiting subscribers → suggested forecast uplift (real conversion ~30-40%; also signals strong sold-out interest). app_settings-injected.
 function bisCount(sku,mkt){ try{ return (KLAVIYO_BIS[sku]&&KLAVIYO_BIS[sku][mkt])||0; }catch(e){ return 0; } }
 function bisUplift(sku,mkt){ var n=bisCount(sku,mkt); return n>0?Math.round(n*(Number(BIS_CFG.take_rate)||35)/100):0; }   // enhanced-demand units

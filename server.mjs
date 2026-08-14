@@ -142,6 +142,16 @@ async function buildMktColors() {
   } catch {}
   return m;
 }
+// Build-on-fly SETS BOM → {output_set_sku:[{sku:input_sku, qty:input_quantity}]} for the buy-plan component explosion.
+async function buildSetBom() {
+  const out = {};
+  try {
+    (await pool.query(`SELECT output_sku, input_sku, input_quantity::numeric qty FROM planner.set_bom ORDER BY output_sku, input_sku`)).rows.forEach(r => {
+      (out[r.output_sku] = out[r.output_sku] || []).push({ sku: r.input_sku, qty: Number(r.qty) || 0 });
+    });
+  } catch { /* table absent pre-migration 229 → empty map (no explosion) */ }
+  return out;
+}
 const SUPPLY_INJECT = loadInject();
 // Dev convenience: re-read the artefact + supply inject on each page load so edits show on a refresh WITHOUT
 // restarting the server (the boot-time consts above are kept for server-side global parsing + prod speed).
@@ -888,6 +898,7 @@ app.get('/', async (req, res) => {
     const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS, SA_EXTRA, GBP_RATE, BRANCH_FREIGHT, TRANSFER_LEADS, CAT_ASP_GBP, LOCKED_FC] = _vals;
     const KLAVIYO_BIS = await buildKlaviyoBis();   // fresh (uploads are infrequent, not in the data cache)
     const MKT_COLORS = await buildMktColors();
+    const SET_BOM = await buildSetBom();           // {output_set_sku:[{sku,qty}]} — SETS component explosion (SETS feature)
     let html = DEV ? loadHTML() : HTML;
     html = replaceGlobal(html, 'DATA', JSON.stringify(DATA));
     html = replaceGlobal(html, 'FC_CURRENT', JSON.stringify(FC_CURRENT));
@@ -902,6 +913,7 @@ app.get('/', async (req, res) => {
     // (ZAL_FC/ZAL_MONTHS injection removed v26.758 — the Zalando forecast is read from the DB everywhere now:
     //  the buy feed builds dem.ZAL from the live cascade, and /api/supply/zalando/data serves the send-to-Zalando tab.)
     html = replaceGlobal(html, 'KLAVIYO_BIS', JSON.stringify(KLAVIYO_BIS));   // {sku:{UK:n,…}, _at:'YYYY-MM-DD'} — DEMAND BIS badge
+    html = replaceGlobal(html, 'SET_BOM', JSON.stringify(SET_BOM || {}));     // {output_set_sku:[{sku,qty}]} — SETS build-on-fly explosion map
     html = replaceGlobal(html, 'MKT_COLORS', JSON.stringify(MKT_COLORS));     // reusable market colour palette
     html = replaceGlobal(html, 'BRANCH_FREIGHT', JSON.stringify(BRANCH_FREIGHT || {}));
     html = replaceGlobal(html, 'CAT_ASP_GBP', JSON.stringify(CAT_ASP_GBP || {}));
