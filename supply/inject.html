@@ -9833,7 +9833,7 @@
                   : '<span class="tool-badge bg-amber">Awaiting supplier approval</span>';
                 return '<div class="cli-row"><div class="cli-lbl">Supplier approval</div><div class="cli-val">'+b+'</div></div>'; })()
             +'<div class="cli-row"><div class="cli-lbl">Supplier expected</div><div class="cli-val">'+(s.supplier_expected?fd(s.supplier_expected):'<span class="mut">—</span>')+'</div></div>'
-            +'<div class="cli-row"><div class="cli-lbl">Supplier status</div><div class="cli-val"><span class="tiny">'+(s.production_status?esc(prodStatusLabel(s.production_status)):'<span class="mut">—</span>')+'</span></div></div>'
+            +'<div class="cli-row"><div class="cli-lbl">Supplier status</div><div class="cli-val">'+(function(){ var _ps=s.production_status?prodStatusLabel(s.production_status):''; if(!_ps)return '<span class="mut">—</span>'; var _c=/ship/i.test(_ps)?['#dcfce7','#166534']:/plan|produc/i.test(_ps)?['#ffedd5','#9a3412']:['#f1f5f9','#64748b']; return '<span style="font-size:13px;font-weight:700;padding:3px 13px;border-radius:12px;background:'+_c[0]+';color:'+_c[1]+'">'+esc(_ps)+'</span>'; })()+'</div></div>'
             +'<div class="cli-row"><div class="cli-lbl">Our status</div><div class="cli-val">'+statusCtl+_sMk('supplier_shipped')+'</div></div>'
             +(setShip?'<div>'+setShip+'</div>':'')
             +(dateExc?'<div style="color:#dc2626;font-weight:700;font-size:11px;margin-top:4px">⚠ Overdue — completion / supplier-expected date has passed'+_sMk('date_overdue')+'</div>':'')

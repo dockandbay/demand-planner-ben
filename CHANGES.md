@@ -1,3 +1,6 @@
+## v27.6.19 Samples: supplier status bigger + colour-coded on the expanded row
+- The "Supplier status" on an expanded sample now shows as a larger colour-coded chip: green = Shipped, orange = planning/production, grey otherwise (was tiny grey text). (Part 1 of the samples status rework; the FUTURE→PRODUCTION lifecycle + OPEN/COMPLETED/ALL pills + portal-hide-FUTURE is a coupled follow-up.)
+
 ## v27.6.18 PRODUCT ▸ Samples: linked sample requests + "Add to new sample request"
 - The PRODUCT Samples tab now lists the admin-created sample REQUESTS (SR-nn) linked to this product (via a line SKU = the product ref / a mapped SKU, or a dev-sample link) — ref, status, recipient, units, tracking; click to open in SUPPLY ▸ Samples. New endpoint GET /api/product/:ref/sample-requests.
 - New green "+ Add to new sample request" button on the Samples sub-tab AND on MASTER DATA (next to "Delete product"): creates a sample request for the product's supplier, pre-linked to the product's SKU, and opens it.
