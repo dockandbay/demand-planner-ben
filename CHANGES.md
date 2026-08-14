@@ -1,3 +1,6 @@
+## v27.6.21 SETS Phase 0a (backend): "Build on Fly Sets" BOM table + endpoints
+- New table planner.set_bom (output_sku, input_sku, input_quantity) via migration 229 — a SET SKU's component explosion, distinct from manufacturing_bom. Server: read section 'set-bom' + set-bom-save / set-bom-delete / set-bom-upload endpoints (supply-edit gated). Backend for the CONFIG ▸ BOM ▸ "Build on Fly Sets" UI. NEW MIGRATION: 229_set_bom.sql.
+
 ## v27.6.20 Samples: PO-like status lifecycle (FUTURE→PRODUCTION→COMPLETED) + OPEN/COMPLETED/ALL pills
 - D&B "Our status" is now FUTURE / PRODUCTION / COMPLETED / CANCELLED (was PLANNED/SHIPPED/CANCELLED), colour-coded (FUTURE grey, PRODUCTION orange, COMPLETED green, CANCELLED red).
 - New sample requests start FUTURE and are D&B-only — the supplier portal hides FUTURE and only shows a sample once it moves to PRODUCTION (verified: FUTURE hidden, PRODUCTION/SHIPPED visible).

@@ -618,7 +618,7 @@ const CONFIG_WRITE = [   // config reference-data writes — editable by anyone 
   /^\/api\/supply\/duty-upsert$/, /^\/api\/supply\/branch\//, /^\/api\/supply\/supplier\//,
   /^\/api\/supply\/supplier-create$/, /^\/api\/supply\/key-account/, /^\/api\/supply\/batch\//,
   /^\/api\/supply\/batch-create$/, /^\/api\/supply\/production-create$/, /^\/api\/supply\/prod-number\//,
-  /^\/api\/supply\/portal-user/, /^\/api\/supply\/manufacturing-bom-(save|delete)$/,
+  /^\/api\/supply\/portal-user/, /^\/api\/supply\/manufacturing-bom-(save|delete)$/, /^\/api\/supply\/set-bom-(save|delete|upload)$/,
   /^\/api\/supply\/manufacturing-accept$/, /^\/api\/supply\/manufacturing-stock$/, /^\/api\/supply\/settings$/,
 ];
 function requiredCap(method, p) {
@@ -3109,6 +3109,8 @@ app.get('/api/supply/:section', async (req, res, next) => {
           WHERE coalesce(s.status,'') NOT ILIKE '%discontinued%' ORDER BY s.category, s.sku`));
       case 'manufacturing-bom':   // CONFIG ▸ Manufacturing BOM — parent (finished) → component × qty
         return res.json(await q(`SELECT parent_sku, component_sku, qty::numeric qty FROM planner.manufacturing_bom ORDER BY parent_sku, component_sku`));
+      case 'set-bom':             // CONFIG ▸ BOM ▸ Build on Fly Sets — SET output SKU → component input SKU × qty
+        return res.json(await q(`SELECT output_sku, input_sku, input_quantity::numeric input_quantity FROM planner.set_bom ORDER BY output_sku, input_sku`));
       case 'manufacturing': {     // SUPPLY ▸ PURCHASE ORDERS ▸ Manufacturing — finished-bundle demand vs manufacturing-PO component supply
         const data = await manufacturingData();
         // Recently CLOSED manufacturing orders (branch = Manufacturing, status complete, closed in the last 30 days),
@@ -6298,6 +6300,51 @@ app.post('/api/supply/manufacturing-bom-delete', async (req, res) => {
       res.json({ ok: true, parent_sku: parent, deleted: r.rowCount });
     }
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// CONFIG ▸ BOM ▸ Build on Fly Sets — upsert a set output→input row (component qty per set). Add or edit.
+app.post('/api/supply/set-bom-save', async (req, res) => {
+  const b = req.body || {};
+  const out = String(b.output_sku || '').trim(), inp = String(b.input_sku || '').trim();
+  const qty = Number(b.input_quantity);
+  if (!out || !inp) return res.status(400).json({ error: 'output_sku and input_sku required' });
+  if (!isFinite(qty) || qty <= 0) return res.status(400).json({ error: 'input_quantity must be a positive number' });
+  try {
+    await pool.query(`INSERT INTO planner.set_bom (output_sku, input_sku, input_quantity, updated_at)
+      VALUES ($1,$2,$3, now()) ON CONFLICT (output_sku, input_sku) DO UPDATE SET input_quantity=$3, updated_at=now()`, [out, inp, qty]);
+    res.json({ ok: true, output_sku: out, input_sku: inp, input_quantity: qty });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// CONFIG ▸ BOM ▸ Build on Fly Sets — delete one component row, or the WHOLE set when no input given.
+app.post('/api/supply/set-bom-delete', async (req, res) => {
+  const b = req.body || {};
+  const out = String(b.output_sku || '').trim(), inp = String(b.input_sku || '').trim();
+  if (!out) return res.status(400).json({ error: 'output_sku required' });
+  try {
+    if (inp) { await pool.query(`DELETE FROM planner.set_bom WHERE output_sku=$1 AND input_sku=$2`, [out, inp]); res.json({ ok: true, output_sku: out, input_sku: inp }); }
+    else { const r = await pool.query(`DELETE FROM planner.set_bom WHERE output_sku=$1`, [out]); res.json({ ok: true, output_sku: out, deleted: r.rowCount }); }
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// CONFIG ▸ BOM ▸ Build on Fly Sets — bulk upload rows [{output_sku,input_sku,input_quantity}] (replace=true wipes first).
+app.post('/api/supply/set-bom-upload', async (req, res) => {
+  const b = req.body || {};
+  const rows = Array.isArray(b.rows) ? b.rows : [];
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    if (b.replace) await client.query(`DELETE FROM planner.set_bom`);
+    let n = 0; const errors = [];
+    for (const r of rows) {
+      const out = String((r && r.output_sku) || '').trim(), inp = String((r && r.input_sku) || '').trim(), qty = Number(r && r.input_quantity);
+      if (!out || !inp) { errors.push('missing output/input on a row'); continue; }
+      if (!isFinite(qty) || qty <= 0) { errors.push(out + '→' + inp + ': bad qty'); continue; }
+      await client.query(`INSERT INTO planner.set_bom (output_sku, input_sku, input_quantity, updated_at)
+        VALUES ($1,$2,$3, now()) ON CONFLICT (output_sku, input_sku) DO UPDATE SET input_quantity=$3, updated_at=now()`, [out, inp, qty]);
+      n++;
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true, saved: n, errors: errors.slice(0, 10) });
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
 });
 // Toggle a shipment's ESCALATED status (supplier portal or admin grid). Upserts the shipment row if needed.
 app.post('/api/supply/shipment/:ref/escalate', async (req, res) => {
