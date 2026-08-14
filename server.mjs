@@ -11181,6 +11181,7 @@ app.post('/api/supply/charge/:id/accept', async (req, res) => {   // accept → 
       VALUES (false, $1, $2, $3, $4, current_date) RETURNING id`, [c.supplier_name||null, amount, desc, c.source_ref]);
     await client.query(`UPDATE planner.supplier_charges SET status='accepted', accepted_at=now(), other_payment_id=$1 WHERE id=$2::bigint`, [op.rows[0].id, req.params.id]);
     await client.query('COMMIT');
+    invalidateSupplyCaches();   // the new Other Payment must flow through to the cached deposits / cash flow / payments-due builds immediately (was only appearing after the TTL)
     res.json({ ok:true, other_payment_id: op.rows[0].id, amount });
   } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); }
   finally { client.release(); }

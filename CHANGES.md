@@ -1,3 +1,6 @@
+## v27.1.1 Fix: accepted sample/shipment charge now flows to payment views immediately
+- Accepting a supplier charge (samples / shipments) creates an Other Payment but never invalidated the supply caches, so the new payment didn't appear in the cached Cash Flow / Payments Due builds until the TTL. Added invalidateSupplyCaches() on accept (server) + invalidateDerived() on the client accept callbacks. SR-14's charge was correctly posted (Other Payment $500) — it just wasn't flowing through to the cached views promptly.
+
 ## v27.1.0 Supplier portal: shipment plan + PO grid improvements (7)
 - Shipment plan "POs on board": added heading "Purchase Orders on Board this shipment"; POs belonging to ANOTHER supplier are no longer hyperlinked; new "Est. completion" column per on-board PO, shown RED when production ends on/after the shipment departure date (server now sends each member's prod_end).
 - PO grid: defaults to showing only PRODUCTION + READY TO SHIP (was PRODUCTION + SHIPPING).
