@@ -11271,6 +11271,11 @@
   // Inline cell picker for the product grid (same popup UX as the PO grid's supplier/branch picker) — edits are
   // Brief light-green "committed" flash on a product cell/field after a successful save (root-independent inline style).
   function _pmFlash(el){ if(!el)return; try{ var ob=el.style.background, obd=el.style.borderColor; el.style.transition='background .2s,border-color .2s'; el.style.background='#dcfce7'; el.style.borderColor='#16a34a'; setTimeout(function(){ el.style.background=ob||''; el.style.borderColor=obd||''; },900); }catch(e){} }
+  // A product's first mapped SKU (so a new sample request links back via the line SKU), else the product ref.
+  function _prodSeedSku(d,ref){ try{ var sz=(d&&d.sizes)||[]; for(var i=0;i<sz.length;i++){ if(sz[i]&&sz[i].mapped_sku&&String(sz[i].mapped_sku).trim())return String(sz[i].mapped_sku).trim(); } }catch(e){} return ref; }
+  // "Add to new sample request" — create a sample request pre-linked to this product, then open it in SUPPLY ▸ Samples.
+  function _newSampleForProduct(sup, sku){ if(!sup){ alert('This product has no supplier set — add one on Master data first.'); return; }
+    shipPost('/api/supply/sample-create',{supplier_name:sup, created_by:(window.ME&&ME.email)||'planner', lines: sku?[{sku:sku, qty:1}]:[]},function(j){ if(j&&j.error){ alert('Failed: '+j.error); return; } if(j&&j.ref&&typeof gotoSample==='function')gotoSample(j.ref); }); }
   // bound straight to the master-data fields via /api/product/item/<ref>. kind = supplier | season | category.
   function prodPickBtn(ref,field,val,kind){ return '<button class="cell-pick prod-cell-pick" data-ref="'+esc(ref)+'" data-field="'+field+'" data-kind="'+kind+'" title="'+esc(val||'')+'">'+(val?esc(val):'<span class="mut">— <span style="background:#fee2e2;color:#991b1b;font-weight:700;border-radius:3px;padding:0 3px">set</span></span>')+' ▾</button>'; }
   function openProdCellPick(btn,onSaved,onPick){ closeShPop(); loadProdCfg(function(cfg){ ensureSuppliers(function(){
@@ -11591,7 +11596,9 @@
   function renderProdSamplesTab(body,ref){ body.innerHTML='<div style="color:#94a3b8">Loading…</div>';
     _prodCachedJson('/api/product/samples/'+encodeURIComponent(ref)).then(function(list){ list=Array.isArray(list)?list:[];
       list.sort(function(a,b){ var d=String(b.sample_date||'').localeCompare(String(a.sample_date||'')); return d||((b.version||0)-(a.version||0)); });   // newest first
-      body.innerHTML='<div style="font-size:12px;color:#94a3b8;margin-bottom:10px">Sample versions submitted by the supplier in the portal — each colour + quality verified before submission.</div>'
+      body.innerHTML='<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><button class="prod-newsamp save-btn" style="background:#16a34a;color:#fff;border-color:#15803d;font-weight:700">+ Add to new sample request</button><span class="mut tiny">creates a sample request pre-linked to this product</span></div>'
+        +'<div id="prod-sr-list" style="margin-bottom:16px"></div>'
+        +'<div style="font-size:12px;color:#94a3b8;margin-bottom:10px">Sample versions submitted by the supplier in the portal — each colour + quality verified before submission.</div>'
         +(list.length?list.map(function(s){ var ph=(s.photos||[]).map(function(p){ var url='/api/supply/portal-attachment/'+p.id;
             return /^image\//i.test(String(p.mime||''))
               ? '<img class="psamp-img" data-src="'+url+'" src="'+url+'" style="width:60px;height:60px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;margin:2px;cursor:zoom-in" title="'+esc(p.filename||'')+(p.uploader_kind==='supplier'?' (supplier)':'')+' — click to enlarge">'
@@ -11614,6 +11621,20 @@
       body.querySelectorAll('.ps-adm-fb').forEach(function(t){ t.onchange=function(){ var msg=body.querySelector('.ps-adm-fb-msg[data-id="'+t.dataset.id+'"]'); if(msg){msg.style.color='#94a3b8';msg.textContent='saving…';} shipPost('/api/product/sample/'+t.dataset.id+'/feedback',{admin_feedback:t.value},function(j){ if(msg){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;} else {msg.style.color='#16a34a';msg.textContent='✓ saved';setTimeout(function(){msg.textContent='';},1800);} } }); }; });
       body.querySelectorAll('.psamp-img').forEach(function(im){ im.onclick=function(){ openImgZoom(im.dataset.src); }; });
       body.querySelectorAll('.samp-open').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); (typeof openSampleDrawer==="function"?openSampleDrawer(a.dataset.ref):gotoSample(a.dataset.ref)); }; });   // sample-shipment ref -> editable drawer (was: navigate to SUPPLY Samples)
+      var _pns=body.querySelector('.prod-newsamp'); if(_pns)_pns.onclick=function(){ var _d=_prodDetail; _newSampleForProduct((_d&&_d.item&&_d.item.supplier)||'', _prodSeedSku(_d, ref)); };
+      // Sample REQUESTS (SR-nn) linked to this product — admin-created, may include this product's SKUs / dev samples.
+      var _srBox=body.querySelector('#prod-sr-list'); if(_srBox){ fetch('/api/product/'+encodeURIComponent(ref)+'/sample-requests').then(function(r){return r.json();}).then(function(sr){ sr=Array.isArray(sr)?sr:[];
+        if(!sr.length){ _srBox.innerHTML='<div class="mut tiny" style="padding:2px 0">No sample requests linked to this product yet.</div>'; return; }
+        _srBox.innerHTML='<div style="font-weight:700;font-size:13px;margin:0 0 6px">Sample requests <span class="mut" style="font-weight:400;font-size:11px">— admin-created, including this product</span></div>'
+          +'<table style="border-collapse:collapse;font-size:12px;max-width:640px;width:100%"><thead><tr>'+['Ref','Status','Recipient','Units','Tracking'].map(function(h){return '<th style="text-align:left;padding:2px 8px 4px 0;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+          +sr.map(function(x){ var stC=/ship/i.test(x.status)?['#dbeafe','#1e40af']:(x.accepted?['#fef3c7','#92400e']:['#eef2f7','#475569']);
+            return '<tr><td style="padding:3px 8px 3px 0"><a class="prod-sr-open" data-ref="'+esc(x.ref)+'" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;font-weight:600;font-family:ui-monospace,Menlo,monospace">'+esc(x.ref)+'</a></td>'
+              +'<td style="padding:3px 8px 3px 0"><span style="font-size:11px;padding:1px 8px;border-radius:10px;background:'+stC[0]+';color:'+stC[1]+';font-weight:700">'+esc(x.status||'—')+'</span></td>'
+              +'<td style="padding:3px 8px 3px 0">'+esc(x.recipient||x.company||'—')+'</td>'
+              +'<td style="padding:3px 8px 3px 0"><b>'+(x.units||0)+'</b> <span class="mut tiny">· '+(x.line_count||0)+' SKU'+((x.line_count||0)===1?'':'s')+'</span></td>'
+              +'<td style="padding:3px 8px 3px 0">'+(x.tracking?esc(x.tracking):'<span class="mut">—</span>')+'</td></tr>'; }).join('')+'</tbody></table>';
+        _srBox.querySelectorAll('.prod-sr-open').forEach(function(a){ a.onclick=function(){ if(typeof gotoSample==='function')gotoSample(a.dataset.ref); }; });
+      }).catch(function(){ _srBox.innerHTML='<div class="mut tiny" style="color:#dc2626">Could not load linked sample requests.</div>'; }); }
     }).catch(function(e){ body.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
   function renderProdMaster(body,d,mode){ mode=mode||'master'; var it=d.item; ensureSuppliers(function(){ loadProdCfg(function(cfg){
     var seasons=(cfg.seasons||[]), cats=(cfg.categories||[]);
@@ -11699,7 +11720,7 @@
     var _sizesHtml='<div style="font-weight:700;font-size:13px;margin:0 0 6px">Size variants &amp; components <span style="color:#94a3b8;font-weight:400;font-size:11px">(approval = internal D&amp;B sign-off)</span></div>'
       +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;min-width:1460px;table-layout:fixed"><colgroup><col style="width:230px"><col style="width:22%"><col style="width:48px"><col style="width:180px"><col style="width:110px"><col><col style="width:16%"></colgroup><thead><tr>'+[['Component',''],['Description',''],['Req',''],['Status',''],['Actions',''],['Files',''],['Samples','']].map(function(h){return '<th style="text-align:left;padding:2px 8px 4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7;white-space:nowrap;'+h[1]+'">'+h[0]+'</th>';}).join('')+'</tr></thead><tbody id="pm-sztbody">'+(sizeRows||(_szLoading?'<tr><td colspan="7" style="color:#94a3b8;padding:8px 4px">Loading size variants &amp; components…</td></tr>':'<tr><td colspan="7" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>'))+'</tbody></table></div>'
       +'<div style="margin-top:8px"><input class="fci" id="pm-newsz" placeholder="add size…" style="width:130px"> <button class="save-btn" id="pm-addsz">+ Add size</button></div>';
-    var _delHtml='<div style="margin-top:16px;padding-top:12px;border-top:1px solid #eef2f7;max-width:660px"><button class="save-btn light" id="pm-del" style="color:#dc2626">Delete product</button></div>';
+    var _delHtml='<div style="margin-top:16px;padding-top:12px;border-top:1px solid #eef2f7;max-width:660px"><button class="save-btn" id="pm-newsamp" style="background:#16a34a;color:#fff;border-color:#15803d;font-weight:700;margin-right:8px">+ Add to new sample request</button><button class="save-btn light" id="pm-del" style="color:#dc2626">Delete product</button></div>';
     body.innerHTML=(mode==='sizes')?_sizesHtml:(_masterHtml+_delHtml);
     (function(){ var _pmType=body.querySelector('#pm-type'), _pmSeasonRow=body.querySelector('#pm-season-row');   // Custom Order → hide the Season field (in addition to the generic .pm-fld save below)
       if(_pmType&&_pmSeasonRow)_pmType.addEventListener('change',function(){ _pmSeasonRow.style.display=(this.value==='Custom Order')?'none':''; }); })();
@@ -11717,6 +11738,7 @@
           if(typeof renderProductPlan==='function'&&document.getElementById('pg-grid')){ renderProductPlan(document.getElementById('product-content')); _pendingProdRef=nv; }
           else { renderProductDetail(nv); } }); }; })();
     var _pmDel=body.querySelector('#pm-del'); if(_pmDel)_pmDel.onclick=function(){ if(!confirm('Delete '+it.ref+'? This removes its sizes, documents and timeline.'))return; shipPost('/api/product/item/'+encodeURIComponent(it.ref)+'/delete',{},function(){ selectProductSub('plan'); }); };   // #pm-del only in master mode — guard so sizes mode doesn't throw
+    var _pmNs=body.querySelector('#pm-newsamp'); if(_pmNs)_pmNs.onclick=function(){ _newSampleForProduct(it.supplier||'', _prodSeedSku(d, it.ref)); };   // create a sample request pre-linked to this product
     var _pmAddSz=body.querySelector('#pm-addsz'); if(_pmAddSz)_pmAddSz.onclick=function(){ var v=body.querySelector('#pm-newsz').value.trim(); if(!v)return; shipPost('/api/product/size',{ref:it.ref,size_label:v},function(){ renderProductDetail(it.ref); }); };   // #pm-addsz only in sizes mode — guard so master mode doesn't throw (was the "Cannot set properties of null" bug)
     // Silent per-row updates — an approval / mapped-SKU / approved-sample change re-renders JUST that row (no tab flash).
     function szObj(id){ return (d.sizes||[]).filter(function(x){return String(x.id)===String(id);})[0]; }

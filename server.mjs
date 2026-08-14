@@ -5403,6 +5403,33 @@ async function insertProductSamplePhoto(sampleId, b, by, kind) {
 app.get('/api/product/samples/:ref', async (req, res) => {
   try { res.json(await productSampleList(decodeURIComponent(req.params.ref))); } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Sample REQUESTS (SR-nn) linked to this product — either a line SKU maps to one of the product's sizes,
+// or a dev-sample on the request belongs to this product (product_dev_samples.item_ref = ref).
+app.get('/api/product/:ref/sample-requests', async (req, res) => {
+  const ref = decodeURIComponent(req.params.ref);
+  try {
+    const rows = (await pool.query(`
+      SELECT s.id, s.ref, coalesce(s.status,'') status, s.accepted_at IS NOT NULL accepted,
+        coalesce(s.tracking_code,'') tracking, coalesce(s.recipient_company,'') company,
+        trim(coalesce(s.first_name,'')||' '||coalesce(s.last_name,'')) recipient,
+        coalesce(s.supplier_name,'') supplier_name, to_char(s.created_at,'YYYY-MM-DD') created_at,
+        (SELECT count(*) FROM planner.sample_request_lines l WHERE l.sample_id=s.id)::int line_count,
+        (SELECT coalesce(sum(l.qty),0) FROM planner.sample_request_lines l WHERE l.sample_id=s.id)::int units
+      FROM planner.sample_requests s
+      WHERE EXISTS (
+              SELECT 1 FROM planner.sample_request_lines l
+              WHERE l.sample_id=s.id AND (
+                l.sku = $1                                    -- the product ref used directly as a line SKU (dev-item picker)
+                OR l.sku IN (
+                  SELECT sz.mapped_sku FROM planner.product_dev_sizes sz JOIN planner.product_dev_items i ON i.id=sz.item_id
+                  WHERE i.ref=$1 AND coalesce(sz.mapped_sku,'')<>'')))
+         OR EXISTS (
+              SELECT 1 FROM planner.sample_request_dev_samples ls JOIN planner.product_dev_samples ds ON ds.id=ls.dev_sample_id
+              WHERE ls.sample_request_id=s.id AND ds.item_ref=$1)
+      ORDER BY s.created_at DESC`, [ref])).rows;
+    res.json(rows);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.post('/api/product/sample', async (req, res) => {
   try { res.json({ ok: true, ...(await createProductSample(req.body || {}, ((req.body || {}).created_by || '').trim() || shortUser(authUser(req)) || null)) }); }
   catch (e) { res.status(400).json({ error: e.message }); }

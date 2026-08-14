@@ -1,3 +1,7 @@
+## v27.6.18 PRODUCT ▸ Samples: linked sample requests + "Add to new sample request"
+- The PRODUCT Samples tab now lists the admin-created sample REQUESTS (SR-nn) linked to this product (via a line SKU = the product ref / a mapped SKU, or a dev-sample link) — ref, status, recipient, units, tracking; click to open in SUPPLY ▸ Samples. New endpoint GET /api/product/:ref/sample-requests.
+- New green "+ Add to new sample request" button on the Samples sub-tab AND on MASTER DATA (next to "Delete product"): creates a sample request for the product's supplier, pre-linked to the product's SKU, and opens it.
+
 ## v27.6.17 PRODUCT: light-green commit flash on cell edits
 - Editing a cell on the PRODUCT detail (master-data fields, size rows, component descriptions) and the product-grid picker cells now flashes light green on a successful save, matching the "saved" flash used elsewhere.
 
