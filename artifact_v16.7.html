@@ -9562,6 +9562,14 @@ function loadInvS6(mkt){
     el.innerHTML=html;
   }).catch(function(e){ var el=document.getElementById('invstatus-s6'); if(el)el.innerHTML='<div style="color:#dc2626;font-size:12px">'+esc((e&&e.message)||e)+'</div>'; });
 }
+// A positive DIFF (report > ERP) can mean stock physically received but not yet registered in the ERP. This surfaces
+// open POs completing within ±1 week of today (server-provided as r.recent_pos) as the likely candidates, clickable
+// through to the PO drawer. Shown only on positive-diff rows.
+function _recentPoNote(pos){ if(!pos||!pos.length)return '';
+  return '<div style="font-size:10px;color:#166534;margin-top:2px">📦 completing ~now (maybe received, not yet in ERP): '
+    +pos.map(function(p){return '<a class="recent-po" data-po="'+tHesc(p.po)+'" title="'+tHesc(p.po)+' completes '+fd(p.completion)+' · '+p.qty+' units" style="color:#166534;font-weight:600;text-decoration:underline;cursor:pointer">'+tHesc(p.po)+'</a> ('+fd(p.completion)+', '+p.qty+')';}).join(' · ')
+    +'</div>'; }
+function _bindRecentPo(panel){ if(!panel)return; panel.querySelectorAll('.recent-po').forEach(function(a){ a.onclick=function(){ if(window.openPODrawer)window.openPODrawer(a.dataset.po); }; }); }
 // Manage FBA + FBA Aged: manually-uploaded Amazon FBA report per market (persisted). Manage FBA compares
 // (available + fc-transfer) vs inventory_<mkt>_fba; FBA Aged shows the aged buckets oldest-first.
 function invFbaLoad(mode){ var mkt=INV_FBA, panel=document.getElementById(mode==='aged'?'fbaaged-panel':'invfba-panel'); if(!panel)return;
@@ -9749,16 +9757,17 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
     var H=['SKU','ASIN','Available','FC-transfer','FBA report (avail+fc)','ERP ('+tHesc(INV_FBA)+' FBA)','Diff'];
     var head=H.map(function(h){return '<th style="text-align:left;padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+h+'</th>';}).join('');
     var num=function(v){return v==null?'—':v;};
-    var dc=function(d){ var c=(d==null?'#94a3b8':(d===0?'#16a34a':(d>0?'#b45309':'#b91c1c'))); return '<td style="padding:4px 10px;text-align:left;color:'+c+';font-weight:600">'+(d==null?'—':(d>0?'+':'')+d)+'</td>'; };
+    var dc=function(d){ var c=(d==null?'#94a3b8':(d>0?'#166534':(d===0?'#16a34a':'#b91c1c'))); return '<td style="padding:4px 10px;text-align:left;color:'+c+';font-weight:600">'+(d==null?'—':(d>0?'+':'')+d)+'</td>'; };   // positive diff (report > ERP) shown green — likely stock received but not yet registered in ERP
     var trs=fr.slice(0,800).map(function(r){ var note=(r.matched_via==='asin')?' <span class="mut" style="font-size:10px;color:#1d4ed8">→ '+tHesc(r.erp_sku)+' (via ASIN)</span>':(!r.matched?' <span class="mut" style="font-size:10px">(not in ERP)</span>':'');
       return '<tr'+(!r.matched?' style="background:#fff7ed"':'')+'>'
-      +'<td style="padding:4px 10px;text-align:left">'+tHesc(r.sku)+note+'</td>'
+      +'<td style="padding:4px 10px;text-align:left">'+tHesc(r.sku)+note+((r.diff>0)?_recentPoNote(r.recent_pos):'')+'</td>'
       +'<td style="padding:4px 10px;text-align:left;font-family:ui-monospace,Menlo,monospace;font-size:11px">'+tHesc(r.asin||'—')+'</td>'
       +'<td style="padding:4px 10px;text-align:left">'+r.available+'</td><td style="padding:4px 10px;text-align:left">'+r.fc_transfer+'</td>'
       +'<td style="padding:4px 10px;text-align:left;font-weight:600">'+r.report_fba+'</td><td style="padding:4px 10px;text-align:left">'+num(r.erp_fba)+'</td>'+dc(r.diff)+'</tr>'; }).join('');
     content=summary+ctl+'<div style="max-height:520px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'+head+'</tr></thead><tbody>'+trs+'</tbody></table></div>'
       +(fr.length>800?'<div class="mut" style="font-size:11px;margin-top:4px">Showing first 800 of '+fr.length+'</div>':''); }
   panel.innerHTML=drop+content;
+  _bindRecentPo(panel);
   var dz=document.getElementById('invfba-drop'), fi=document.getElementById('invfba-file');
   if(dz&&fi){ dz.onclick=function(){ fi.click(); };
     fi.onchange=function(){ if(fi.files&&fi.files[0])invFbaUpload('manage',fi.files[0]); };
@@ -9845,20 +9854,21 @@ function inv3plRender(j){ var panel=document.getElementById('inv3pl-panel'); if(
         +'<div class="fba-stk-opt" data-a="csv" style="padding:8px 12px;cursor:pointer;font-size:12px">⬇ Download CSV</div>'
         +'<div class="fba-stk-opt" data-a="clip" style="padding:8px 12px;cursor:pointer;font-size:12px;border-top:1px solid #eef2f7">📋 Copy to clipboard</div></div></span></div>';
     var num=function(v){return v==null?'—':v;};
-    var dcell=function(d){ var c=(d==null?'#94a3b8':(d===0?'#16a34a':(d>0?'#b45309':'#b91c1c'))); return '<td style="padding:4px 10px;text-align:left;color:'+c+';font-weight:600">'+(d==null?'—':(d>0?'+':'')+d)+'</td>'; };
+    var dcell=function(d){ var c=(d==null?'#94a3b8':(d>0?'#166534':(d===0?'#16a34a':'#b91c1c'))); return '<td style="padding:4px 10px;text-align:left;color:'+c+';font-weight:600">'+(d==null?'—':(d>0?'+':'')+d)+'</td>'; };   // positive diff (report > ERP) shown green — likely stock received but not yet registered in ERP
     var th=function(t){return '<th style="text-align:left;padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+t+'</th>';};
     var sepTh='<th style="width:10px;background:#eef2f7;border-bottom:1px solid #e5e7eb;padding:0"></th>', sepTd='<td style="width:10px;background:#f4f6fa;padding:0"></td>';
     // grouped: [ON HAND] 3PL Report · ERP · Diff | separator | [AVAILABLE] 3PL Report · ERP · Diff
     var grp='<tr><th style="border-bottom:1px solid #e5e7eb;background:#f8fafc"></th><th colspan="3" style="text-align:center;padding:4px 10px;border-bottom:1px solid #e5e7eb;background:#eef6ff;color:#1e40af;font-size:10px;letter-spacing:.4px;position:sticky;top:0">ON HAND</th><th style="background:#eef2f7;border-bottom:1px solid #e5e7eb"></th><th colspan="3" style="text-align:center;padding:4px 10px;border-bottom:1px solid #e5e7eb;background:#eef6ff;color:#1e40af;font-size:10px;letter-spacing:.4px;position:sticky;top:0">AVAILABLE</th></tr>';
     var head2=grp+'<tr>'+th('SKU')+th('3PL Report')+th('ERP')+th('Diff')+sepTh+th('3PL Report')+th('ERP')+th('Diff')+'</tr>';
     var trs=fr.slice(0,800).map(function(r){ return '<tr'+(!r.matched?' style="background:#fff7ed"':'')+'>'
-      +'<td style="padding:4px 10px;text-align:left">'+tHesc(r.sku)+(!r.matched?' <span class="mut" style="font-size:10px">(not in ERP)</span>':'')+'</td>'
+      +'<td style="padding:4px 10px;text-align:left">'+tHesc(r.sku)+(!r.matched?' <span class="mut" style="font-size:10px">(not in ERP)</span>':'')+(((r.diff_onhand>0)||(r.diff_avail>0))?_recentPoNote(r.recent_pos):'')+'</td>'
       +'<td style="padding:4px 10px;text-align:left">'+num(r.report_onhand)+'</td><td style="padding:4px 10px;text-align:left">'+num(r.erp_onhand)+'</td>'+dcell(r.diff_onhand)
       +sepTd
       +'<td style="padding:4px 10px;text-align:left">'+num(r.report_avail)+'</td><td style="padding:4px 10px;text-align:left">'+num(r.erp_avail)+'</td>'+dcell(r.diff_avail)+'</tr>'; }).join('');
     content=summary+ctl+'<div style="max-height:520px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead>'+head2+'</thead><tbody>'+trs+'</tbody></table></div>'
       +(fr.length>800?'<div class="mut" style="font-size:11px;margin-top:4px">Showing first 800 of '+fr.length+'</div>':''); }
   panel.innerHTML=head+content;
+  _bindRecentPo(panel);
   var ib=document.getElementById('inv3pl-import'); if(ib)ib.onclick=inv3plImport;
   var g3=document.getElementById('inv3pl-gap'); if(g3)g3.onchange=function(){ INV_3PL_GAP=this.value; inv3plRender(_inv3plLast); };
   var q3=document.getElementById('inv3pl-q'); if(q3)q3.oninput=function(){ var cp=this.selectionStart; INV_3PL_Q=this.value; inv3plRender(_inv3plLast); var n=document.getElementById('inv3pl-q'); if(n){n.focus(); try{n.setSelectionRange(cp,cp);}catch(e){}} };

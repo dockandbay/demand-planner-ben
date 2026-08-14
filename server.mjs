@@ -6983,6 +6983,31 @@ function parseCsvLine(line) { const out = []; let cur = '', q = false;
   out.push(cur); return out.map(s => s.trim()); }
 function csvNum(v) { const n = parseFloat(String(v == null ? '' : v).replace(/[^0-9.\-]/g, '')); return isNaN(n) ? 0 : n; }
 // Compare a parsed report (sku -> {oh,av}) against live products: ERP on-hand (inventory_<mkt>_3pl_onhand) + ERP available (inventory_<mkt>_3pl).
+// Open POs for a market completing within ±1 week of today — candidates for stock received in the warehouse but not
+// yet registered in the ERP (surfaced against positive DIFF rows on Manage 3PL / Manage FBA). isFba picks the branch
+// class (FBA branches vs 3PL). Returns { sku: [{po, completion, qty}] }.
+async function recentCompletionPOs(mkt, isFba) {
+  const rows = (await pool.query(`
+    SELECT l.sku, x.po, to_char(x.compl,'YYYY-MM-DD') completion, sum(l.qty)::int qty
+    FROM (
+      SELECT p.po, coalesce(p.end_production_overide,
+               CASE WHEN p.start_production IS NOT NULL AND s.production_days IS NOT NULL
+                    THEN (p.start_production + (s.production_days||' days')::interval)::date END) compl
+      FROM planner.purchase_orders p
+      LEFT JOIN planner.suppliers s ON s.id=p.supplier_id
+      LEFT JOIN planner.branches b ON b.name=p.branch
+      WHERE p.master_po IS NULL AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%cancel%'
+        AND upper(coalesce(nullif(p.country_code,''), b.country_code, '')) = $1
+        AND (coalesce(p.branch,'') ILIKE '%fba%') = $2
+    ) x
+    JOIN planner.purchase_order_lines l ON l.po=x.po AND coalesce(l.qty,0)>0
+    WHERE x.compl IS NOT NULL AND x.compl BETWEEN current_date - 7 AND current_date + 7
+    GROUP BY l.sku, x.po, x.compl
+    ORDER BY x.compl`, [mkt, !!isFba])).rows;
+  const map = {};
+  rows.forEach(r => { (map[r.sku] = map[r.sku] || []).push({ po: r.po, completion: r.completion, qty: r.qty }); });
+  return map;
+}
 async function inv3plCompare(mkt, rep) {
   const cfg = INV3PL_SRC[mkt] || {};   // non-GRS tabs override the ERP compare columns (inventory_<mkt>_nongrs); GRS tabs derive them
   const ohCol = cfg.ohCol || ('inventory_' + mkt.toLowerCase() + '_3pl_onhand');   // mkt/cols are whitelisted → safe to interpolate
@@ -6995,6 +7020,7 @@ async function inv3plCompare(mkt, rep) {
     return { sku, report_onhand: rep[sku].oh, report_avail: rep[sku].av, erp_onhand: e ? e.oh : null, erp_avail: e ? e.av : null,
       matched, diff_onhand: e ? rep[sku].oh - e.oh : null, diff_avail: e ? rep[sku].av - e.av : null }; })
     .sort((a, b) => (Math.abs(b.diff_avail || 0) + Math.abs(b.diff_onhand || 0)) - (Math.abs(a.diff_avail || 0) + Math.abs(a.diff_onhand || 0)));   // biggest combined mismatch first
+  try { const poMap = await recentCompletionPOs(mkt, false); rows.forEach(r => { if (poMap[r.sku]) r.recent_pos = poMap[r.sku]; }); } catch (e) {}
   return { rows, report_skus: skus.length, matched: rows.filter(r => r.matched).length, unmatched: rows.filter(r => !r.matched).length,
     erp_not_in_report: Object.keys(erp).filter(s => (erp[s].oh > 0 || erp[s].av > 0) && !(s in rep)).length };
 }
@@ -7132,6 +7158,7 @@ async function invFbaCompare(mkt, rep) {
   // Aged storage-cost estimate: per-unit volume (from carton dims) × rate, greater-of per-unit floor, + base monthly storage.
   const rates = await getFbaAgedRates(), rate = rates[mkt] || FBA_AGED_RATE_DEFAULT[mkt] || null;
   const aged_cost = await fbaAgedCost(mkt, aged, rate, dimsBySku);
+  try { const poMap = await recentCompletionPOs(mkt, true); rows.forEach(r => { const k = r.erp_sku || r.sku; if (poMap[k]) r.recent_pos = poMap[k]; }); } catch (e) {}
   return { rows, aged, aged_cost, report_skus: skus.length, matched: rows.filter(r => r.matched).length, unmatched: not_in_erp.length,
     not_in_erp, erp_missing, erp_not_in_report: erp_missing.length, dup_asins: dupAsins.length };
 }

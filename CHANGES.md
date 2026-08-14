@@ -1,3 +1,7 @@
+## v26.995.0 Manage 3PL / Manage FBA: green positive DIFF + candidate "unregistered receipt" POs
+- DIFF column: positive numbers (report > ERP) now render GREEN (were amber). Negative stays red, zero neutral.
+- On any positive-DIFF row, surface open POs completing within ±1 week of today under the SKU (server: recentCompletionPOs, matched by market + 3PL/FBA branch class). These are the likely cause — stock physically received in the warehouse but not yet registered in the ERP. Each PO shows completion date + qty and links to its drawer (openPODrawer).
+
 ## v26.994.0 Buy plan: end-of-life demand cap (stop over-buying discontinuing SKUs)
 - Buy 3PL for a SKU that DISCONTINUES within the plan horizon is now capped at its remaining sellable demand (to the discontinue date) minus stock already on hand/inbound. Stops ordering stock that could never sell before end-of-life — e.g. a 2-month limited edition with its whole season already inbound now buys 0 instead of a phantom top-up.
 - Root cause it fixes: the cover target sums forward demand INCLUDING the current month, then compares to post-sale closing stock, so a fully pre-positioned spiky SKU showed a phantom shortfall. Rather than change that comparison globally (a blanket fix cut Buy-3PL ~29% and pushed legit buys into Urgent), the cap targets only genuine end-of-life SKUs.
