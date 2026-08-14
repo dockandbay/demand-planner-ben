@@ -1,3 +1,6 @@
+## v27.4.2 DEMAND plan: smoothing shows a tooltip when clicked in SEARCH mode
+- Smoothing rebalances the whole subcategory, so it needs every SKU visible — it's disabled while a SKU search is active. The smooth cell now shows a hover title + a transient click tooltip ("clear the SKU search to smooth") instead of silently doing nothing.
+
 ## v27.4.1 Supplier portal: ships-with drawer is now fully editable
 - The ships-with popout drawer renders the real Shipment Plan card (force-expanded) and wires the editable fields directly — carrier / tracking / ship date / status auto-save, add freight charge, PO links, tax invoice, timeline — instead of the read-only summary.
 

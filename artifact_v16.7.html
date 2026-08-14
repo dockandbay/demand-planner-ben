@@ -4098,6 +4098,11 @@ function setShowFcAct(on){SHOW_FC_ACT=!!on;try{localStorage.setItem('hzShowFcAct
   document.addEventListener('mouseout',function(e){ if(pop&&e.target&&e.target.closest&&e.target.closest('.sku-varimg'))pop.style.display='none'; });
 })();
 var SMOOTH_PREVIEW=null; // {pk:'subcat|co|ch', fy:startY|null, months:{'YYYY_MM':{sku:units}}} — one pending smooth preview at a time (fy set = whole-FY smooth)
+// Transient tooltip shown when a user clicks a smooth cell while a SKU search is active (smoothing needs all SKUs visible).
+function _smoothSearchTip(x,y){ var t=document.getElementById('_smooth-tip'); if(!t){ t=document.createElement('div'); t.id='_smooth-tip'; t.style.cssText='position:fixed;z-index:300020;max-width:280px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:8px 10px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none'; document.body.appendChild(t); }
+  t.textContent='Smoothing is disabled while searching — it rebalances the whole subcategory, so clear the SKU search box to smooth.';
+  t.style.left=Math.min((x||40)+8,window.innerWidth-290)+'px'; t.style.top=((y||40)+12)+'px'; t.style.display='block';
+  clearTimeout(t._h); t._h=setTimeout(function(){ t.style.display='none'; },3200); }
 var SMOOTH_LEADER=false;  // false = Standard (pure proportional), true = Leader (protect historically-strong SKUs). Set via the FY-total dropdown; applies to ALL smoothing.
 var SMOOTH_DISREGARD_DISC={};  // {'CO|CH|subcat':true} — when set, smoothing leaves discontinued SKUs untouched so active SKUs absorb the full subcat forecast (toolbar ⚙ Smoothing). Server-injected from app_settings.
 function smoothDisregards(co,ch,s){ return !!SMOOTH_DISREGARD_DISC[co+'|'+ch+'|'+s]; }
@@ -7859,11 +7864,20 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     } else if(!prevActive&&isFc&&target>0&&Math.abs(g)/target>0.05){
       var isF27=(std.className||'').indexOf('bg27')>=0;
       std.classList.add('smoothable');
-      std.title='Click to preview a proportional rescale of all SKUs in '+s+' ('+co+'/'+ch+') for '+m.replace('_','-')+' to within \u00b15% of the subcategory forecast ('+fn(Math.round(target))+'). Use the \u2606 leaders toggle in the preview to apply tier-aware historical floors.';
-      var lnk=document.createElement('div');lnk.textContent='smooth';
-      lnk.style.cssText='margin-top:1px;font-size:7px;line-height:1.2;font-weight:500;font-style:italic;color:#9ca3af';
-      std.appendChild(lnk);
-      std.onclick=function(e){e.stopPropagation();var o={};o[m]=computeSmoothAlloc(s,co,ch,m,{protectLeaders:SMOOTH_LEADER});SMOOTH_PREVIEW={pk:parentKey,fy:null,months:o};reExpand();};
+      if((PLAN_SKU_QRY||'').trim()){   // SEARCH mode: smoothing rebalances the WHOLE subcategory, so it needs every SKU visible \u2014 disabled while a SKU search is active
+        std.title='Smoothing is disabled while a SKU search is active \u2014 it rebalances the whole subcategory, so it needs every SKU visible. Clear the search box to smooth.';
+        std.style.cursor='help';
+        var lnkS=document.createElement('div');lnkS.textContent='smooth (n/a in search)';
+        lnkS.style.cssText='margin-top:1px;font-size:7px;line-height:1.2;font-weight:500;font-style:italic;color:#cbd5e1';
+        std.appendChild(lnkS);
+        std.onclick=function(e){e.stopPropagation();_smoothSearchTip(e.clientX,e.clientY);};
+      } else {
+        std.title='Click to preview a proportional rescale of all SKUs in '+s+' ('+co+'/'+ch+') for '+m.replace('_','-')+' to within \u00b15% of the subcategory forecast ('+fn(Math.round(target))+'). Use the \u2606 leaders toggle in the preview to apply tier-aware historical floors.';
+        var lnk=document.createElement('div');lnk.textContent='smooth';
+        lnk.style.cssText='margin-top:1px;font-size:7px;line-height:1.2;font-weight:500;font-style:italic;color:#9ca3af';
+        std.appendChild(lnk);
+        std.onclick=function(e){e.stopPropagation();var o={};o[m]=computeSmoothAlloc(s,co,ch,m,{protectLeaders:SMOOTH_LEADER});SMOOTH_PREVIEW={pk:parentKey,fy:null,months:o};reExpand();};
+      }
     }
   }
   var eff=subcatSkuEffTotals(s,co,ch); // all-subcat effective totals (incl. discontinued) for gap/subtotal
