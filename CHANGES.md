@@ -1,3 +1,6 @@
+## v26.998.0 Manage 3PL/FBA: move "unregistered receipt" PO note into the DIFF cell
+- The 📦 candidate-PO note now sits under the DIFF number (Manage FBA: the Diff cell; Manage 3PL: under the AVAILABLE Diff), instead of under the SKU. Same content, same drawer links.
+
 ## v26.997.0 Fix: DEMAND-plan flash when deep-linking buy-move / exec / reports URLs
 - On load, the artifact pre-painted `render()` for any of planning/demand/buy-move/buy/fba/exec/reports hashes — but VIEW_MODE is still 'planning' at that point, so every non-demand hash flashed the DEMAND plan before the harness's applyRoute() switched to the real view (e.g. #/buy-move/inventory/manage3pl/US flashed DEMAND then loaded 3PL).
 - Narrowed the up-front render to only planning/demand hashes (where the default view already matches). All other artifact views are routed by applyRoute() on load via nav clicks, so they now paint once, no flash.
