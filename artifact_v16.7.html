@@ -9565,9 +9565,10 @@ function loadInvS6(mkt){
 // A positive DIFF (report > ERP) can mean stock physically received but not yet registered in the ERP. This surfaces
 // open POs completing within ±1 week of today (server-provided as r.recent_pos) as the likely candidates, clickable
 // through to the PO drawer. Shown only on positive-diff rows.
+function _recentPoDate(iso){ var m=String(iso==null?'':iso).match(/^(\d{4})-(\d{2})-(\d{2})/); if(!m)return String(iso||''); var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return m[3]+'-'+(MON[(+m[2])-1]||'?')+'-'+m[1].slice(2); }   // YYYY-MM-DD -> dd-mmm-yy (house format)
 function _recentPoNote(pos){ if(!pos||!pos.length)return '';
   return '<div style="font-size:10px;color:#166534;margin-top:2px">📦 completing ~now (maybe received, not yet in ERP): '
-    +pos.map(function(p){return '<a class="recent-po" data-po="'+tHesc(p.po)+'" title="'+tHesc(p.po)+' completes '+fd(p.completion)+' · '+p.qty+' units" style="color:#166534;font-weight:600;text-decoration:underline;cursor:pointer">'+tHesc(p.po)+'</a> ('+fd(p.completion)+', '+p.qty+')';}).join(' · ')
+    +pos.map(function(p){return '<a class="recent-po" data-po="'+tHesc(p.po)+'" title="'+tHesc(p.po)+' completes '+_recentPoDate(p.completion)+' · '+p.qty+' units" style="color:#166534;font-weight:600;text-decoration:underline;cursor:pointer">'+tHesc(p.po)+'</a> ('+_recentPoDate(p.completion)+', '+p.qty+')';}).join(' · ')
     +'</div>'; }
 function _bindRecentPo(panel){ if(!panel)return; panel.querySelectorAll('.recent-po').forEach(function(a){ a.onclick=function(){ if(window.openPODrawer)window.openPODrawer(a.dataset.po); }; }); }
 // Manage FBA + FBA Aged: manually-uploaded Amazon FBA report per market (persisted). Manage FBA compares

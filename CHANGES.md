@@ -1,3 +1,6 @@
+## v26.996.0 Fix: "fd is not defined" on Manage 3PL/FBA unregistered-receipt note
+- The v26.995 PO note called `fd()` (a SUPPLY-module fn) from the artifact, which doesn't have it → "fd is not defined". Replaced with a self-contained dd-mmm-yy formatter (`_recentPoDate`).
+
 ## v26.995.0 Manage 3PL / Manage FBA: green positive DIFF + candidate "unregistered receipt" POs
 - DIFF column: positive numbers (report > ERP) now render GREEN (were amber). Negative stays red, zero neutral.
 - On any positive-DIFF row, surface open POs completing within ±1 week of today under the SKU (server: recentCompletionPOs, matched by market + 3PL/FBA branch class). These are the likely cause — stock physically received in the warehouse but not yet registered in the ERP. Each PO shows completion date + qty and links to its drawer (openPODrawer).
