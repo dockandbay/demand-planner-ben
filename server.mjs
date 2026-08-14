@@ -3462,6 +3462,18 @@ app.get('/api/supply/:section', async (req, res, next) => {
           SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(supplier_name,'(none)'),
             coalesce(nullif(reference,''), description, ''), round(amount,2), 'Other', '', 'other', NULL, ${SUPC('supplier_name')}, coalesce(prod_no,'')
           FROM planner.deposits WHERE is_deposit=false AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND ${KIND('supplier_name')}`)).rows;
+        // Sample-derived Other Payments: attach a per-account split (the sample's type/purpose × its Xero account code)
+        // so the Payments Report Xero download can split the single total line across accounts. Register still shows the total.
+        const _sampRefs = [...new Set(lines.filter(l => l.source === 'other' && /^SR-/i.test(l.reference || '')).map(l => l.reference))];
+        const _sampPurp = {};
+        if (_sampRefs.length) (await pool.query(`SELECT ref, purpose FROM planner.sample_requests WHERE ref = ANY($1)`, [_sampRefs])).rows
+          .forEach(r => { _sampPurp[r.ref] = Array.isArray(r.purpose) ? r.purpose.filter(Boolean) : []; });
+        const _acct = {}; (await pool.query(`SELECT purpose, account_code FROM planner.sample_purpose_accounts`)).rows.forEach(r => _acct[r.purpose] = r.account_code);
+        const _sampleSplit = (ref, amt) => { const ps = _sampPurp[ref]; if (!ps || !ps.length) return null;
+          const n = ps.length, base = Math.floor((Number(amt) / n) * 100) / 100;
+          const arr = ps.map(p => ({ account_code: _acct[p] || '', purpose: p, amount: base }));
+          const resid = Math.round((Number(amt) - base * n) * 100) / 100; if (resid) arr[0].amount = Math.round((arr[0].amount + resid) * 100) / 100;
+          return arr; };
         const fx = (await pool.query(`SELECT to_char(run_date,'YYYY-MM-DD') dt, supplier, paid_amount, coalesce(paid_currency,'') ccy FROM planner.payment_fx`)).rows;
         const normSup = s => { const p = (s || '').split(',').map(x => x.trim()).filter(Boolean); return Array.from(new Set(p)).join(', ') || '(none)'; };
         const fxMap = {}; fx.forEach(f => fxMap[f.dt + '|' + normSup(f.supplier)] = f);
@@ -3470,7 +3482,8 @@ app.get('/api/supply/:section', async (req, res, next) => {
           const g = groups[k] || (groups[k] = { dt: l.dt, supplier: sup, total: 0, lines: [] });
           g.total += Number(l.amount);
           if (l.supplier_code && !g.supplier_code) g.supplier_code = l.supplier_code;
-          g.lines.push({ reference: l.reference, amount: Number(l.amount), type: l.type, deposit_ref: l.deposit_ref, source: l.source, account_code: l.account_code || '', prod_no: l.prod_no || '' }); }
+          g.lines.push({ reference: l.reference, amount: Number(l.amount), type: l.type, deposit_ref: l.deposit_ref, source: l.source, account_code: l.account_code || '', prod_no: l.prod_no || '',
+            sample_split: (l.source === 'other') ? _sampleSplit(l.reference, l.amount) : null }); }
         const TYPE_ORD = { Deposit: 0, Completion: 1, Balance: 2, Other: 3 };
         // base currency = the supplier's default currency (CONFIG), not a hardcoded USD
         const ccyRows = (await pool.query(`SELECT name, upper(coalesce(nullif(default_currency,''),'USD')) ccy FROM planner.suppliers`)).rows;
@@ -11170,18 +11183,25 @@ app.post('/api/supply/charge/:id/accept', async (req, res) => {   // accept → 
     const c = (await client.query(`SELECT * FROM planner.supplier_charges WHERE id=$1::bigint FOR UPDATE`, [req.params.id])).rows[0];
     if (!c) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'charge not found' }); }
     if (c.status === 'accepted') { await client.query('ROLLBACK'); return res.json({ ok:true, already:true, other_payment_id:c.other_payment_id }); }
-    const fr = Math.round(Number(c.freight_cost)||0), pr = Math.round(Number(c.product_cost)||0), amount = (Number(c.freight_cost)||0)+(Number(c.product_cost)||0);
-    let label;
-    if (c.source_type === 'shipment') {   // put the shipment's linked POs in the Other Payment description
+    const fr = Math.round(Number(c.freight_cost)||0), pr = Math.round(Number(c.product_cost)||0), amount = Math.round(((Number(c.freight_cost)||0)+(Number(c.product_cost)||0))*100)/100;
+    // ONE Other Payment showing the TOTAL. The per-account split (by the sample's type/purpose) is applied only in the
+    // Payments Report Xero download, not here — the register keeps a single total line per charge (Ben).
+    let label, typeStr = '';
+    if (c.source_type === 'shipment') {
       const pos = (await client.query(`SELECT string_agg(po,', ' ORDER BY po) pos FROM planner.purchase_orders WHERE shipment_ref=$1`, [c.source_ref])).rows[0].pos || '';
       label = `Shipment ${c.source_ref}${pos?` (POs: ${pos})`:''}`;
-    } else label = `Sample ${c.source_ref}`;
-    const desc = `${label} — freight $${fr} + product $${pr}${c.description?` · ${c.description}`:''}`;
+    } else {
+      label = `Sample ${c.source_ref}`;
+      const samp = (await client.query(`SELECT purpose FROM planner.sample_requests WHERE ref=$1`, [c.source_ref])).rows[0];
+      const purposes = (samp && Array.isArray(samp.purpose)) ? samp.purpose.filter(Boolean) : [];
+      if (purposes.length) typeStr = ` · type: ${purposes.join(', ')}`;   // the type(s) that drive the Xero account split at download
+    }
+    const desc = `${label} — freight $${fr} + product $${pr}${typeStr}${c.description ? ` · ${c.description}` : ''}`;
     const op = await client.query(`INSERT INTO planner.deposits (is_deposit, supplier_name, amount, description, reference, date_due)
-      VALUES (false, $1, $2, $3, $4, current_date) RETURNING id`, [c.supplier_name||null, amount, desc, c.source_ref]);
+      VALUES (false, $1, $2, $3, $4, current_date) RETURNING id`, [c.supplier_name || null, amount, desc, c.source_ref]);
     await client.query(`UPDATE planner.supplier_charges SET status='accepted', accepted_at=now(), other_payment_id=$1 WHERE id=$2::bigint`, [op.rows[0].id, req.params.id]);
     await client.query('COMMIT');
-    invalidateSupplyCaches();   // the new Other Payment must flow through to the cached deposits / cash flow / payments-due builds immediately (was only appearing after the TTL)
+    invalidateSupplyCaches();   // the new Other Payment must flow through to the cached deposits / cash flow / payments-due builds immediately
     res.json({ ok:true, other_payment_id: op.rows[0].id, amount });
   } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); }
   finally { client.release(); }

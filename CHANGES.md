@@ -1,3 +1,8 @@
+## v27.2.0 Samples: type → Xero account split in the Payments Report + Other Payments polish
+- New config table planner.sample_purpose_accounts (migration 228) maps sample type/purpose → Xero account code (Product 1000.52, Marketing 1000.44, Sales 1000.47, Photography 1000.61).
+- Accepting a sample charge posts ONE Other Payment for the TOTAL (type shown in the description). The per-account split (amount ÷ number of the sample's types, each to its account code) is applied only in the Payments Report Xero download — sample "other" lines are now INCLUDED and split (were dropped).
+- Other Payments: rows are editable inline with WHITE boxes (were blue), auto-save with a green flash, save button removed; the reference links to the Samples tab for SR- rows.
+
 ## v27.1.1 Fix: accepted sample/shipment charge now flows to payment views immediately
 - Accepting a supplier charge (samples / shipments) creates an Other Payment but never invalidated the supply caches, so the new payment didn't appear in the cached Cash Flow / Payments Due builds until the TTL. Added invalidateSupplyCaches() on accept (server) + invalidateDerived() on the client accept callbacks. SR-14's charge was correctly posted (Other Payment $500) — it just wasn't flowing through to the cached views promptly.
 
