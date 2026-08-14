@@ -2949,6 +2949,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
   const assumedArrF={},fbaBuyDisp={};
 
   let s3=md.i3||0,sF=md['if_']||0;
+  let ng3=nonGrsOf(skuKey,mkt);   // non-GRS 3PL pool (UK/US only). FBA transfers draw this down FIRST, sparing GRS SOH 3PL. 0 elsewhere → no change.
 
   // ── Zalando (EU only): extra demand on the EU 3PL warehouse — Buy 3PL ONLY, never FBA (Ben). Zalando forecast
   //    net of its own uploaded stock (ZAL_STOCK) lands as additional 3PL consumption, draining the 3PL pool, so the
@@ -3072,14 +3073,15 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
         // If even zero transfer can't satisfy 3PL cover, transfer ZERO
         // (don't make 3PL worse by sending stock to FBA)
         if(safeTransfer<0)safeTransfer=0;
-        fTx=Math.min(Math.round(r),safeTransfer);
+        fTx=Math.min(Math.round(r),safeTransfer+ng3);   // non-GRS is freely transferable to FBA (doesn't threaten GRS 3PL) + the GRS spare
         if(fTx<fm)fTx=0;
       }
     }
     if(fTx>0&&i+lt<PROJ.length)tA1[i+lt]=(tA1[i+lt]||0)+fTx;
     transferOut[i]=fTx||0; // units transferred 3PL->FBA initiated at month i
 
-    const c3=Math.max(pAD-fTx,0),cF=fAD+(tA1[i]||0);
+    const _ngUsed=Math.min(fTx,ng3); ng3=Math.max(ng3-_ngUsed,0); const _grsTx=fTx-_ngUsed;   // FBA transfer runs down non-GRS FIRST; only the excess reduces GRS SOH 3PL
+    const c3=Math.max(pAD-_grsTx,0),cF=fAD+(tA1[i]||0);
     // 3PL target: forward-looking sum of DTC+B2B demand over t3 weeks + FBA top-up need (buy-target, no
     // buying past disc). nextFbaNeed stays IN tg3 — Buy FBA is shown as a slice of it, not stripped out.
     const nextFbaNeed=Math.max(tgFbuy-cF,0);
@@ -3237,6 +3239,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
 
   // ── PASS 2: Build row objects using pass-1 SOH simulation ────────────────
   s3=md.i3||0;sF=md['if_']||0;
+  ng3=nonGrsOf(skuKey,mkt);   // display pass: reset the non-GRS pool for the SOH 3PL non-GRS (closing) row + FBA-transfer sourcing
   // Use separate tA for pass 2 to avoid double-counting FBA transfers
   const tA2={};
 
@@ -3393,14 +3396,15 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
           if(ok){safeTransfer=attempt;break;}
         }
         if(safeTransfer<0)safeTransfer=0;
-        fTx=Math.min(Math.round(r),safeTransfer);
+        fTx=Math.min(Math.round(r),safeTransfer+ng3);   // non-GRS is freely transferable to FBA + the GRS spare (mirrors the buy pass)
         if(fTx<fm)fTx=0;
       }
     }
     if(fTx>0&&i+lt<PROJ.length)tA2[i+lt]=(tA2[i+lt]||0)+fTx;
 
     const trfIn=tA2[i]||0;
-    const c3=Math.max(pAD-fTx,0),cF=fAD+trfIn;
+    const _ngUsed=Math.min(fTx,ng3); const _ng3close=Math.max(ng3-_ngUsed,0); const _grsTx=fTx-_ngUsed; ng3=_ng3close;   // FBA transfer runs down non-GRS first
+    const c3=Math.max(pAD-_grsTx,0),cF=fAD+trfIn;
     const nextFbaNeed=Math.max(tgFbuy-cF,0);
     const t3eff=crMatched.length?crCoverWeeks(i,t3,crMatched):t3;   // Complex Rules override (raise-only, per-month window)
     const tg3=fwdDemand(t3eff,i,d3DemFn)+nextFbaNeed+(isZalEU?nextZalNeed(i):0);   // include forward Zalando cover so SOH-vs-target colour stays fair (mirrors buy pass)
@@ -3432,7 +3436,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     const row={key,lbl,lbl2,now,isActual:false,isForecast:!!isForecast,crRule,
       dtc,b2b,fba,tot,pka:(md.pka&&md.pka[key])||0,a3,aF,confQty3,confQtyF,assumedQty3,
       assumedLabel:buyFromLbl[i]||lbl,
-      fTx,trfIn,fSh,c3,cF,tg3,tgF,tot3pl:dtc+b2b+zaln+fTx,
+      fTx,trfIn,fSh,c3,cF,tg3,tgF,tot3pl:dtc+b2b+zaln+fTx,ng3close:_ng3close,ng3open:nonGrsOf(skuKey,mkt),
       cv3:isFinite(cv3)?cv3:999,cvF:isFinite(cvF)?cvF:999,
       isDisc:!!(discCutoff&&key>=discCutoff),
       bQ:buyDisplay[i]||0,bQu:buyUrgent[i]||0,bQuSea:buyUrgentSea[i]||0,bQuAir:buyUrgentAir[i]||0,urgentLead:buyUrgentLead[i],urgentMonth:buyUrgentMonth[i],urgentArr:buyUrgentArr[i],urgentProd:buyUrgentProd[i],urgentFreight:buyUrgentFreight[i],urgentMode:buyUrgentMode[i],bPM,
@@ -3553,6 +3557,14 @@ function buildTable(proj,md,pd,is3,hasFBA){
       const cls={ok:'grn',amb:'amb',lo:'red',hi:'red-dk'}[covDevTier(p.c3,p.tg3)];
       return c(fmt(p.c3),cls);
     }));
+    // SOH 3PL non-GRS closing — only when the SKU holds non-GRS stock (UK/US). Reduces only on FBA transfers (drawn first).
+    var _ngOpen=(proj.find(p=>p.ng3open>0)||{}).ng3open||0;
+    if(_ngOpen>0){
+      rows.push(dr('SOH 3PL non-GRS (closing)',proj,p=>{
+        var v=(p.ng3close!=null)?p.ng3close:_ngOpen;   // actual months: show the opening (not yet drawn down)
+        return `<td style="color:#7c3aed;font-weight:600">${fmt(v)}</td>`;
+      }));
+    }
     // Cover weeks
     rows.push(dr('Cover (weeks)',proj,p=>{
       const w=p.cv3;if(w>=999)return c('\u221e','cok');

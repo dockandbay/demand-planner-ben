@@ -1,3 +1,7 @@
+## v27.5.0 Buy plan: non-GRS 3PL runs down for FBA transfers (spares GRS SOH 3PL)
+- For a SKU with non-GRS 3PL stock (UK/US), FBA transfers now draw the non-GRS pool down FIRST — the GRS SOH 3PL line no longer reduces from FBA transfers while non-GRS stock remains. New "SOH 3PL non-GRS (closing)" row in the SKU plan popup (shown only when non-GRS stock exists), reducing only on FBA transfers.
+- Effect: less 3PL buying for non-GRS SKUs (the non-GRS pool feeds FBA instead). Validated before/after: e.g. TOWLB-SUM-LG-UNICN-R/UK buy 160→0 (non-GRS 3178→2455), TOWLB-CAB-XL-NAVY-R/UK 9660→7620; FBA transfer quantities unchanged; SKUs without non-GRS completely unchanged.
+
 ## v27.4.3 Samples grid: red badge for rejected charges
 - The Charges column now shows a red "N rejected" badge (alongside pending/accepted) when a sample has rejected charges (server adds rejected_charges count).
 
