@@ -1,3 +1,6 @@
+## v27.6.6 Auto-smooth: popup lists the month-cells left un-smoothed (+ copy / CSV)
+- The one-click auto-smooth sweep now shows a proper result popup instead of a bare alert. It lists every forecast month-cell it LEFT un-smoothed because the gap exceeded the threshold (country · channel, sub-category, month, SKU sum, target, gap %), so you can see exactly what needs manual review. Two buttons: Copy to clipboard and Download CSV (autosmooth_unsmoothed.csv).
+
 ## v27.6.5 Create POs → Order Plan visible immediately (no hard refresh)
 - The buy-plan PO creation (`buyplan-pos` commit) and the manual `po-create` / `po-bulk` write paths now call invalidateSupplyCaches() after writing. Previously the server's cached PO-rows / order-plan build kept serving the pre-create snapshot until its TTL, so new POs only appeared after a hard refresh. Now they show as soon as the user lands on Order Plan.
 

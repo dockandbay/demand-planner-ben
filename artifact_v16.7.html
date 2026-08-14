@@ -989,7 +989,7 @@ function runAutoSmooth(){
   var th=(Number(SMOOTH_AUTO.threshold)||20)/100, leader=SMOOTH_AUTO.mode==='leader';
   var flags=SMOOTH_AUTO.flags||{}, keys=Object.keys(flags).filter(function(k){return flags[k];});
   if(!keys.length){ alert('No sub-categories are ticked for Auto. Tick "auto" on some sub-categories first.'); return; }
-  var applied=0, _rc=false;
+  var applied=0, _rc=false, skipped=[];   // skipped = forecast month-cells left un-smoothed because the gap is >= the threshold (too big — flagged for manual review)
   keys.forEach(function(k){ var p=k.split('|'); var co=p[0],ch=p[1],s=p.slice(2).join('|');
     // Always re-cap discontinued SKUs to remaining stock first — spread on-hand+inbound across the post-discontinue
     // months (velocity × seasonality) and ZERO every month once stock is exhausted. Runs for every Auto sub-category
@@ -1000,11 +1000,58 @@ function runAutoSmooth(){
       var target=(m===CUR_MONTH)?curMonthForecast(s,co,ch):(((calc(s,co,ch)||{}).fu||{})[m]||0);
       if(target<=0)return; var sum=eff.totals[m]||0;
       var gap=Math.abs(sum-target)/target;
-      if(gap>1e-9 && gap<th){ var vals=computeSmoothAlloc(s,co,ch,m,{protectLeaders:leader}); if(vals){ applySmoothAlloc(co,ch,m,vals); applied++; } }
+      if(gap<=1e-9)return;   // already within tolerance — nothing to do
+      if(gap<th){ var vals=computeSmoothAlloc(s,co,ch,m,{protectLeaders:leader}); if(vals){ applySmoothAlloc(co,ch,m,vals); applied++; } }
+      else { skipped.push({co:co,ch:ch,subcat:s,month:m,sum:Math.round(sum),target:Math.round(target),gapPct:Math.round(gap*100)}); }   // over the limit → left for manual review
     }); });
   if(_rc)_markSmoothRun();
   try{renderMain();}catch(e){} try{markDirty();}catch(e){}
-  alert('Auto-smoothed '+applied+' forecast month-cell'+(applied===1?'':'s')+' across '+keys.length+' sub-categor'+(keys.length===1?'y':'ies')+' with a gap under '+(SMOOTH_AUTO.threshold||20)+'%.\n\nReview the numbers, then Save Forecasts. (Undo reverts the whole sweep.)');
+  _showAutoSmoothResult(applied,keys.length,skipped);
+}
+// Result popup for the one-click auto-smooth sweep: what was smoothed, plus a table of the month-cells LEFT
+// un-smoothed because their gap exceeded the threshold (for manual review) with copy-to-clipboard + CSV download.
+function _showAutoSmoothResult(applied,keyCount,skipped){
+  var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function mlab(m){ m=String(m||''); return (MON[(+m.slice(5,7))-1]||'?')+'-'+m.slice(2,4); }   // 2026_04 → Apr-26
+  function he(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  var th=(SMOOTH_AUTO.threshold||20);
+  var old=document.getElementById('as-result-ov'); if(old)old.parentNode.removeChild(old);
+  var ov=document.createElement('div'); ov.id='as-result-ov';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:100000;display:flex;align-items:center;justify-content:center;padding:16px';
+  var rows=skipped.map(function(x){ return '<tr>'
+      +'<td style="padding:4px 8px;border-bottom:1px solid #f1f5f9">'+x.co+' · '+x.ch+'</td>'
+      +'<td style="padding:4px 8px;border-bottom:1px solid #f1f5f9">'+he(x.subcat)+'</td>'
+      +'<td style="padding:4px 8px;border-bottom:1px solid #f1f5f9">'+mlab(x.month)+'</td>'
+      +'<td style="padding:4px 8px;border-bottom:1px solid #f1f5f9;text-align:right">'+x.sum.toLocaleString()+'</td>'
+      +'<td style="padding:4px 8px;border-bottom:1px solid #f1f5f9;text-align:right">'+x.target.toLocaleString()+'</td>'
+      +'<td style="padding:4px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-weight:600;color:#b45309">'+x.gapPct+'%</td>'
+    +'</tr>'; }).join('');
+  var tbl=skipped.length
+    ? '<div style="font-size:12px;color:#334155;margin:10px 0 4px"><b>'+skipped.length+'</b> month-cell'+(skipped.length===1?'':'s')+' left un-smoothed (gap ≥ '+th+'% — review manually):</div>'
+      +'<div style="max-height:300px;overflow:auto;border:1px solid #e2e8f0;border-radius:6px">'
+      +'<table style="border-collapse:collapse;width:100%;font-size:11px"><thead><tr style="position:sticky;top:0;background:#f8fafc">'
+      +'<th style="padding:5px 8px;text-align:left;border-bottom:1px solid #e2e8f0">Country · Channel</th>'
+      +'<th style="padding:5px 8px;text-align:left;border-bottom:1px solid #e2e8f0">Sub-category</th>'
+      +'<th style="padding:5px 8px;text-align:left;border-bottom:1px solid #e2e8f0">Month</th>'
+      +'<th style="padding:5px 8px;text-align:right;border-bottom:1px solid #e2e8f0">SKU sum</th>'
+      +'<th style="padding:5px 8px;text-align:right;border-bottom:1px solid #e2e8f0">Target</th>'
+      +'<th style="padding:5px 8px;text-align:right;border-bottom:1px solid #e2e8f0">Gap</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+      +'<div style="display:flex;gap:8px;margin-top:10px"><button id="as-copy" style="font-size:12px;padding:5px 12px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;cursor:pointer">Copy to clipboard</button>'
+      +'<button id="as-csv" style="font-size:12px;padding:5px 12px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;cursor:pointer">Download CSV</button></div>'
+    : '<div style="font-size:12px;color:#16a34a;margin:10px 0 4px">✓ No sub-categories were left over the '+th+'% limit — everything auto-smoothable was smoothed.</div>';
+  ov.innerHTML='<div style="background:#fff;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.25);max-width:640px;width:100%;padding:18px 20px">'
+    +'<div style="font-weight:700;font-size:15px;color:#0f172a">Auto-smooth complete</div>'
+    +'<div style="font-size:12px;color:#475569;margin-top:4px">Smoothed <b>'+applied+'</b> forecast month-cell'+(applied===1?'':'s')+' across '+keyCount+' sub-categor'+(keyCount===1?'y':'ies')+' (gap under '+th+'%). Review the numbers, then Save Forecasts. Undo reverts the whole sweep.</div>'
+    +tbl
+    +'<div style="text-align:right;margin-top:14px"><button id="as-close" style="font-size:12px;padding:6px 16px;border:1px solid #1d4ed8;border-radius:6px;background:#1d4ed8;color:#fff;cursor:pointer;font-weight:600">Done</button></div></div>';
+  document.body.appendChild(ov);
+  function close(){ if(ov.parentNode)ov.parentNode.removeChild(ov); }
+  ov.onclick=function(e){ if(e.target===ov)close(); };
+  document.getElementById('as-close').onclick=close;
+  var csvHead='Country,Channel,Sub-category,Month,SKU sum,Subcat target,Gap %';
+  function csvBody(){ return skipped.map(function(x){ function q(v){v=String(v);return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v;} return [x.co,x.ch,q(x.subcat),mlab(x.month),x.sum,x.target,x.gapPct].join(','); }).join('\n'); }
+  var cbtn=document.getElementById('as-copy'); if(cbtn)cbtn.onclick=function(){ var txt=csvHead+'\n'+csvBody(); try{ navigator.clipboard.writeText(txt).then(function(){ cbtn.textContent='Copied ✓'; setTimeout(function(){cbtn.textContent='Copy to clipboard';},1500); }); }catch(e){ alert('Copy failed — use Download CSV instead.'); } };
+  var dbtn=document.getElementById('as-csv'); if(dbtn)dbtn.onclick=function(){ var bl=new Blob([csvHead+'\n'+csvBody()],{type:'text/csv'}), u=URL.createObjectURL(bl), a=document.createElement('a'); a.href=u; a.download='autosmooth_unsmoothed.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); };
 }
 function openSmoothSettings(ev){ if(ev)ev.stopPropagation(); var e=document.getElementById('smoothset-ov'); if(e)e.style.display='flex';
   var thI=document.getElementById('ss-th'); if(thI)thI.onchange=function(){ var v=Math.max(1,Math.min(100,parseInt(this.value,10)||20)); SMOOTH_AUTO.threshold=v; this.value=v; saveSmoothAuto(); };
