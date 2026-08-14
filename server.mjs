@@ -11218,6 +11218,11 @@ app.post('/api/supply/charge/:id/reject', async (req, res) => {
     if (c) await chargeTimelineNote(pool, c.source_type, c.source_ref, `🚫 Charge rejected — ${chargeLbl(c.freight_cost, c.product_cost, c.description)}`, shortUser(authUser(req)) || null);
     res.json({ ok:true }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
+app.post('/api/supply/charge/:id/unreject', async (req, res) => {   // put a rejected charge back to pending so it can be accepted
+  try { const c = (await pool.query(`UPDATE planner.supplier_charges SET status='pending' WHERE id=$1::bigint AND status='rejected' RETURNING source_type, source_ref, freight_cost, product_cost, description`, [req.params.id])).rows[0];
+    if (c) await chargeTimelineNote(pool, c.source_type, c.source_ref, `↺ Charge un-rejected (back to pending) — ${chargeLbl(c.freight_cost, c.product_cost, c.description)}`, shortUser(authUser(req)) || null);
+    res.json({ ok:true }); } catch (e) { res.status(500).json({ error: e.message }); }
+});
 app.post('/api/supply/charge/:id/accept', async (req, res) => {   // accept → Other Payment (deposits, is_deposit=false)
   const client = await pool.connect();
   try { await client.query('BEGIN');

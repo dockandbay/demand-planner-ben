@@ -1,3 +1,6 @@
+## v27.6.1 Sample charges: un-reject a rejected charge
+- A rejected sample/shipment charge now shows a small "↺ un-reject" link that puts it back to pending (so it can be accepted). Posts a timeline note.
+
 ## v27.6.0 Samples: Xero sample-charge description, single portal badge, editable reference
 - Payments Report Xero download: sample-charge lines now read "SR-14 - COUNTRY - Samples for First Last (Company). Shipped with CARRIER TRACKING" (the "Shipped with…" part only when a carrier or tracking code is set) instead of "Other (product)".
 - Supplier portal samples: removed the orange (unread) badge next to the reference — the single red badge already includes unread notes.
