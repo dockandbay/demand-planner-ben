@@ -7438,11 +7438,11 @@
           function draw(){ var byO={}; rows.forEach(function(x){(byO[x.output_sku]=byO[x.output_sku]||[]).push(x);}); var outs=Object.keys(byO).sort();
             var h='<div class="sect-h">Build on Fly Sets <span class="mut tiny">(a SET SKU explodes into component SKUs × qty at fulfilment; feeds set demand into the component buy plan)</span> <button class="tool-badge bg-blue" id="setbom-upload" style="cursor:pointer;border:none;margin-left:8px">⬆ Upload</button></div>';
             h+='<div class="count" style="margin-top:8px">'+outs.length+' set'+(outs.length===1?'':'s')+'</div>';
-            h+=outs.length?('<div style="overflow-x:auto;margin-top:4px"><table style="border-collapse:collapse;font-size:12px;width:100%;max-width:960px"><thead><tr>'
+            h+=outs.length?('<div style="margin-top:4px"><table style="border-collapse:collapse;font-size:12px;width:100%;table-layout:fixed"><colgroup><col style="width:220px"><col><col style="width:70px"><col style="width:80px"></colgroup><thead><tr>'
               +['Set','Components','',''].map(function(hd,i){return '<th style="text-align:'+(i===3?'right':'left')+';padding:4px 10px 6px 0;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #e5e7eb;white-space:nowrap">'+hd+'</th>';}).join('')+'</tr></thead><tbody>'
               +outs.map(function(o){ var cs=byO[o]; return '<tr style="border-bottom:1px solid #f1f5f9">'
-                +'<td style="padding:6px 10px 6px 0;font-weight:700;white-space:nowrap;vertical-align:top">'+esc(o)+(nm(o)?'<div class="mut tiny" style="font-weight:400">'+esc(nm(o))+'</div>':'')+'</td>'
-                +'<td style="padding:6px 10px 6px 0;vertical-align:top">'+cs.map(function(x){ return esc(x.input_sku)+' <b>×'+esc(String(x.input_quantity))+'</b>'+(nm(x.input_sku)?' <span class="mut tiny">'+esc(nm(x.input_sku))+'</span>':''); }).join(', ')+'</td>'
+                +'<td style="padding:6px 10px 6px 0;font-weight:700;vertical-align:top;word-break:break-word">'+esc(o)+'</td>'
+                +'<td style="padding:6px 10px 6px 0;vertical-align:top;white-space:normal;word-break:break-word;line-height:1.5">'+cs.map(function(x){ return esc(x.input_sku)+' <b>×'+esc(String(x.input_quantity))+'</b>'; }).join(', ')+'</td>'
                 +'<td style="padding:6px 10px 6px 0;color:#94a3b8;white-space:nowrap;vertical-align:top">'+cs.length+' comp'+(cs.length===1?'':'s')+'</td>'
                 +'<td style="padding:6px 0;text-align:right;vertical-align:top"><button class="setbom-del" data-o="'+esc(o)+'" style="cursor:pointer;border:1px solid #fecaca;background:#fef2f2;color:#b91c1c;padding:2px 9px;border-radius:5px;font-size:11px">Delete</button></td></tr>'; }).join('')
               +'</tbody></table></div>'):'<div class="count" style="padding:10px 2px">No sets configured yet — Upload, or add a component below.</div>';
