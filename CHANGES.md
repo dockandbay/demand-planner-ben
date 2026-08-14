@@ -1,3 +1,10 @@
+## v27.3.0 Samples: admin stakeholder emails + charges; portal sample UX
+- Admin new-sample form: added "Email when shipped (stakeholders)" field with email validation; saved to sample_requests.notify_emails.
+- Admin sample detail (…/charges): can now create charges directly (freight/product/note → + Add charge), not only from the supplier portal.
+- Supplier portal sample: "Completion required" is now a prominent coloured badge (amber, red+overdue if past) with larger text.
+- Supplier portal: creating a sample charge now updates in place (no full page reload).
+- Supplier portal "Add contents": the three boxes (dev-sample filter / SKU search / free text) are merged into ONE search input — searches the supplier's assigned SKUs and product-development samples, with a free-text add for anything not listed.
+
 ## v27.2.0 Samples: type → Xero account split in the Payments Report + Other Payments polish
 - New config table planner.sample_purpose_accounts (migration 228) maps sample type/purpose → Xero account code (Product 1000.52, Marketing 1000.44, Sales 1000.47, Photography 1000.61).
 - Accepting a sample charge posts ONE Other Payment for the TOTAL (type shown in the description). The per-account split (amount ÷ number of the sample's types, each to its account code) is applied only in the Payments Report Xero download — sample "other" lines are now INCLUDED and split (were dropped).

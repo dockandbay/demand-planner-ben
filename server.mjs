@@ -11035,11 +11035,11 @@ app.post('/api/supply/sample-create', async (req, res) => {
     if (b.supplier_name && b.supplier_name.trim()) await client.query(   // keep the supplier picker a real dropdown
       `INSERT INTO planner.suppliers(name,kind) SELECT $1,'supplier' WHERE NOT EXISTS (SELECT 1 FROM planner.suppliers WHERE lower(trim(name))=lower(trim($1)))`, [b.supplier_name.trim()]);
     const ins = await client.query(`INSERT INTO planner.sample_requests
-      (supplier_id, supplier_name, recipient_company, first_name, last_name, address_line1, address_line2, city, region, postcode, country, phone, completion_date_required, purpose, notes, created_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
+      (supplier_id, supplier_name, recipient_company, first_name, last_name, address_line1, address_line2, city, region, postcode, country, phone, completion_date_required, purpose, notes, created_by, notify_emails)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING id`,
       [b.supplier_id||null, b.supplier_name||null, b.recipient_company||null, b.first_name||null, b.last_name||null,
        b.address_line1||null, b.address_line2||null, b.city||null, b.region||null, b.postcode||null, b.country||null, b.phone||null,
-       b.completion_date_required||null, Array.isArray(b.purpose)?b.purpose:null, b.notes||null, b.created_by||'planner']);
+       b.completion_date_required||null, Array.isArray(b.purpose)?b.purpose:null, b.notes||null, b.created_by||'planner', b.notify_emails||null]);
     const id = ins.rows[0].id, ref = 'SR-' + id;
     await client.query(`UPDATE planner.sample_requests SET ref=$1 WHERE id=$2`, [ref, id]);
     for (const l of (Array.isArray(b.lines)?b.lines:[])) { if (!l || !l.sku) continue;

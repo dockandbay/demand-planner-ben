@@ -9607,6 +9607,7 @@
         +R('Completion required', dateField('',{cls:'sf-completion', width:'130px'}))
         +R('Purpose',purp)
         +R('Notes','<textarea class="fci sf-notes" rows="2" style="width:320px;text-align:left"></textarea>')
+        +R('Email when shipped <span class="mut tiny">(stakeholders)</span>','<input class="fci txt sf-notify_emails" placeholder="email, email… (comma-separated)" style="width:320px"><div class="sf-notify-err mut tiny" style="color:#dc2626;margin-top:2px"></div>')
         +'<div style="margin-top:12px;border-top:1px solid #eef2f7;padding-top:10px"><button class="save-btn sf-save" style="background:#16a34a;border-color:#15803d;color:#fff;font-weight:700">Create sample request</button> <button class="save-btn light sf-cancel">Cancel</button></div></div>';
       var lines=[];
       function renderLines(){ var w=box.querySelector('.sf-lines'); if(!lines.length){ w.innerHTML='<div class="mut tiny" style="padding:2px 0">No SKUs added yet — search above, or paste from a spreadsheet.</div>'; return; }
@@ -9659,7 +9660,12 @@
         if(!sup){ alert('Pick a supplier for the sample request.'); return; }
         var purpose=Array.prototype.map.call(box.querySelectorAll('.sf-purpose:checked'),function(x){return x.value;});
         function V(k){ var f=box.querySelector('.sf-'+k); return f?f.value.trim():''; }
-        var body={supplier_name:sup, created_by:'planner', purpose:purpose,
+        // Stakeholder emails: validate each comma/semicolon-separated address before saving.
+        var _notifyRaw=V('notify_emails'), _errEl=box.querySelector('.sf-notify-err'); if(_errEl)_errEl.textContent='';
+        var _emails=_notifyRaw.split(/[,;]/).map(function(x){return x.trim();}).filter(Boolean);
+        var _bad=_emails.filter(function(e){return !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);});
+        if(_bad.length){ if(_errEl)_errEl.textContent='Invalid email'+(_bad.length>1?'s':'')+': '+_bad.join(', '); else alert('Invalid email(s): '+_bad.join(', ')); return; }
+        var body={supplier_name:sup, created_by:'planner', purpose:purpose, notify_emails:_emails.join(', ')||null,
           recipient_company:V('recipient_company')||null, first_name:V('first_name')||null, last_name:V('last_name')||null,
           address_line1:V('address_line1')||null, address_line2:V('address_line2')||null, city:V('city')||null, region:V('region')||null,
           postcode:V('postcode')||null, country:(V('country')||'').toUpperCase()||null, phone:V('phone')||null,
@@ -9804,7 +9810,8 @@
           +'</div>';
         var attachPanel='<div class="tiny" style="margin-bottom:6px">'+((d.attachments||[]).map(function(a){return '<span style="display:inline-block;margin:0 12px 4px 0"><a href="/api/supply/portal-attachment/'+a.id+'" target="_blank" rel="noopener">'+esc(a.filename||'file')+'</a> <a class="samp-att-rm" data-aid="'+a.id+'" title="remove" style="color:#dc2626;cursor:pointer">×</a></span>';}).join('')||'<span class="mut">no attachments yet</span>')+'</div>'
           +'<div><input type="file" class="samp-att-file" style="font-size:11px"> <button class="save-btn samp-att-up">Upload attachment</button></div>';
-        var chargesPanel='<div class="tw"><table><thead><tr><th class="l">Status</th><th class="l">Freight</th><th class="l">Product</th><th class="l">Total</th><th class="l">Description</th><th class="l"></th></tr></thead><tbody>'+charges+'</tbody></table></div>';
+        var chargesPanel='<div class="tw"><table><thead><tr><th class="l">Status</th><th class="l">Freight</th><th class="l">Product</th><th class="l">Total</th><th class="l">Description</th><th class="l"></th></tr></thead><tbody>'+charges+'</tbody></table></div>'
+          +'<div style="display:flex;gap:8px;align-items:flex-end;margin-top:6px;flex-wrap:wrap"><div><div class="mut tiny">Freight</div><input class="fci samp-cf" style="width:80px" placeholder="0.00"></div><div><div class="mut tiny">Product</div><input class="fci samp-cp" style="width:80px" placeholder="0.00"></div><div><div class="mut tiny">Note</div><input class="fci txt samp-cd" style="width:220px" placeholder="optional"></div><button class="save-btn samp-charge-add" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd">+ Add charge</button></div>';
         box.innerHTML='<div class="po-subnav samp-subnav" style="margin-bottom:12px">'
             // badges only flag ACTIONS/exceptions (date overdue, pending charges, unread notes) — not plain counts
             +tb('details','Details'+bdge(dateExc))+tb('charges','Charges'+bdge(pend))+tb('attachments','Attachments')+tb('timeline','Timeline'+bdge(_unread))+'</div>'
@@ -9826,6 +9833,9 @@
         box.querySelectorAll('.samp-att-rm').forEach(function(b){ b.onclick=function(){ if(!confirm('Remove this attachment?'))return; shipPost('/api/supply/portal-attachment-remove',{id:b.dataset.aid},function(){ loadSampleDetail(id,i); }); }; });
         box.querySelectorAll('.samp-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete this sample request?'))return; shipPost('/api/supply/sample/'+b.dataset.id+'/delete',{},function(){ if(i==='DRAWER'){ if(typeof closeSampleDrawer==='function')closeSampleDrawer(); } if(_sampleReload)_sampleReload(); }); }; });
         var _ss=box.querySelector('.samp-setship'); if(_ss)_ss.onclick=function(){ _ss.disabled=true; shipPost('/api/supply/sample/'+id,{status:'SHIPPED'},function(j){ if(j&&j.error){alert(j.error);_ss.disabled=false;return;} s.status='SHIPPED'; _sampGridSync('SHIPPED'); loadSampleDetail(id,i); }); };   // re-render THIS card in place (Our status → SHIPPED, button clears) — not _sampleReload, which would collapse the open card
+        var _chAdd=box.querySelector('.samp-charge-add'); if(_chAdd)_chAdd.onclick=function(){ var f=box.querySelector('.samp-cf').value, p=box.querySelector('.samp-cp').value, cd=box.querySelector('.samp-cd').value;
+          if(!f&&!p){ alert('Enter a freight and/or product cost.'); return; } _chAdd.disabled=true;
+          shipPost('/api/supply/charge-create',{source_type:'sample',source_ref:s.ref,supplier_name:s.supplier_name||null,freight_cost:Number(f)||0,product_cost:Number(p)||0,description:cd||null,created_by:(window.ME&&ME.email)||'admin'},function(j){ if(j&&j.error){alert(j.error);_chAdd.disabled=false;return;} loadSampleDetail(id,i); }); };
         box.querySelectorAll('.samp-charge-acc').forEach(function(b){ b.onclick=function(){ b.disabled=true; shipPost('/api/supply/charge/'+b.dataset.id+'/accept',{},function(j){ if(j&&j.error){alert(j.error);b.disabled=false;return;} try{invalidateDerived();}catch(e){} alert('Charge accepted — posted to Other Payments.'); loadSampleDetail(id,i); }); }; });
         box.querySelectorAll('.samp-charge-rej').forEach(function(b){ b.onclick=function(){ if(!confirm('Reject this charge?'))return; shipPost('/api/supply/charge/'+b.dataset.id+'/reject',{},function(){ loadSampleDetail(id,i); }); }; });
         if(editing){
