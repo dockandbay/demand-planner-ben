@@ -1,3 +1,6 @@
+## v27.0.1 Fix: inbound (and other) tooltips hidden in a SUPPLY-opened buy plan
+- Opening the buy plan from SUPPLY (e.g. REALLOCATE ▸ Buy plan) bumps the overlay to z-index 300000, which buried the artifact's tooltips (inbound popup z10000, hover tooltips z~100001). Raised the inbound click-popup (#inb-pop) and the .tip120 / .stk-inb hover tooltips to z300010 so they sit above the overlay in both contexts.
+
 ## v27.0.0 REALLOCATE nav badge red (matches all other action badges)
 - The REALLOCATE sub-nav count badge was amber; now uses the standard red .rtab-count like every other action badge.
 

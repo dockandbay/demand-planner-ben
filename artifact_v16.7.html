@@ -5880,7 +5880,7 @@ function inbDiv(inb, entries, color){
 (function(){ var el=null,t=null;
   function hide(){ if(el)el.style.display='none'; }
   document.addEventListener('mouseover',function(e){ var n=e.target&&e.target.closest?e.target.closest('.stk-inb[data-tip]'):null; if(!n)return;
-    clearTimeout(t); t=setTimeout(function(){ if(!el){el=document.createElement('div'); el.style.cssText='position:fixed;z-index:100001;max-width:260px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none'; document.body.appendChild(el);} el.innerHTML=n.getAttribute('data-tip'); el.style.display='block'; var r=n.getBoundingClientRect(); el.style.left=Math.max(6,Math.min(r.left,window.innerWidth-266))+'px'; el.style.top=(r.bottom+5)+'px'; },120); });
+    clearTimeout(t); t=setTimeout(function(){ if(!el){el=document.createElement('div'); el.style.cssText='position:fixed;z-index:300010;max-width:260px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none'; document.body.appendChild(el);} el.innerHTML=n.getAttribute('data-tip'); el.style.display='block'; var r=n.getBoundingClientRect(); el.style.left=Math.max(6,Math.min(r.left,window.innerWidth-266))+'px'; el.style.top=(r.bottom+5)+'px'; },120); });
   document.addEventListener('mouseout',function(e){ var n=e.target&&e.target.closest?e.target.closest('.stk-inb[data-tip]'):null; if(n){clearTimeout(t); hide();} });
   document.addEventListener('scroll',hide,true);
 })();
@@ -5891,7 +5891,7 @@ function inbDiv(inb, entries, color){
   function show(n){ var tip=n.getAttribute('data-tip');
     if(tip==null&&n.hasAttribute('data-antip')&&window._anTipHtml){ var pp=n.getAttribute('data-antip').split('|'); tip=window._anTipHtml(pp[0],pp[1],pp[2],pp[3]); n.setAttribute('data-tip',tip); }   // lazy: build the anomaly strip on first hover, then cache
     if(tip==null)return;
-    if(!el){el=document.createElement('div'); el.style.cssText='position:fixed;z-index:100006;max-width:300px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none'; document.body.appendChild(el);}
+    if(!el){el=document.createElement('div'); el.style.cssText='position:fixed;z-index:300010;max-width:300px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none'; document.body.appendChild(el);}
     el.innerHTML=tip; el.style.display='block'; var r=n.getBoundingClientRect(); el.style.left=Math.max(6,Math.min(r.left,window.innerWidth-306))+'px'; el.style.top=(r.bottom+5)+'px'; }
   document.addEventListener('mouseover',function(e){ var n=e.target&&e.target.closest?e.target.closest(SEL):null; if(!n)return; clearTimeout(t); t=setTimeout(function(){show(n);},120); });
   document.addEventListener('mouseout',function(e){ var n=e.target&&e.target.closest?e.target.closest(SEL):null; if(n){clearTimeout(t); hide();} });
@@ -12552,7 +12552,9 @@ var _INB_POP=null;
 function _getInbPop(){
   if(_INB_POP&&document.body.contains(_INB_POP))return _INB_POP;
   var p=document.createElement('div');p.id='inb-pop';
-  p.style.cssText='display:none;position:fixed;z-index:10000;background:#0a0a0a;color:#f0f0f0;font-size:11px;line-height:1.7;border-radius:6px;border:1px solid #3b82f6;box-shadow:0 6px 24px rgba(0,0,0,.4);max-width:380px;user-select:text;-webkit-user-select:text';
+  // z-index sits above the SKU buy-plan overlay in BOTH contexts: the artifact's own #ov (9000) and the one opened
+  // from SUPPLY (e.g. REALLOCATE ▸ Buy plan), which bumps #ov to 300000. A tooltip must always be topmost.
+  p.style.cssText='display:none;position:fixed;z-index:300010;background:#0a0a0a;color:#f0f0f0;font-size:11px;line-height:1.7;border-radius:6px;border:1px solid #3b82f6;box-shadow:0 6px 24px rgba(0,0,0,.4);max-width:380px;user-select:text;-webkit-user-select:text';
   document.body.appendChild(p);_INB_POP=p;return p;
 }
 function hideInbPop(){if(_INB_POP)_INB_POP.style.display='none';}
