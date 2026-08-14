@@ -802,6 +802,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
             <label style="font-size:12px;color:#334155;cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Show the variant image next to each SKU (hover to enlarge)"><input type="checkbox" id="disp-varimg" onchange="setShowVariantImg(this.checked)"> Variant image</label>
             <label style="font-size:12px;color:#334155;cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Show quarter (3-month) sum-total columns inside each expanded financial year"><input type="checkbox" id="disp-qtr" onchange="setShowQtr(this.checked)"> Quarter totals</label>
             <label style="font-size:12px;color:#334155;cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Show half-year (6-month) sum-total columns inside each expanded financial year"><input type="checkbox" id="disp-half" onchange="setShowHalf(this.checked)"> Half-year totals</label>
+            <label style="font-size:12px;color:#334155;display:inline-flex;align-items:center;gap:6px" title="Show/hide build-on-fly SET SKUs in the SKU-level view (display only)">Sets <select id="disp-sets" onchange="setSetsView(this.value)" style="font-size:11px;padding:2px 6px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer"><option value="show">Show</option><option value="hide">Hide</option><option value="only">Only</option></select></label>
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
@@ -6560,12 +6561,15 @@ function filteredSkus(s,co,ch,all){
   });
 }
 
+var SETS_VIEW=(function(){try{return localStorage.getItem('hzSetsView')||'show';}catch(e){return 'show';}})();   // DEMAND SKU view: show | hide | only — how build-on-fly SET SKUs display (display-only; does not touch shares/buy)
+function setSetsView(v){ SETS_VIEW=(v==='hide'||v==='only')?v:'show'; try{localStorage.setItem('hzSetsView',SETS_VIEW);}catch(e){} if(SKU_VIEW&&typeof renderSkuView==='function')renderSkuView(); }
 function renderSkuView(){
   if(!SKU_VIEW)return;
   var s=SKU_VIEW.s,co=SKU_VIEW.co,ch=SKU_VIEW.ch;
   var wh=skuWh(co,ch);
   reset3plCache();
   var skus=filteredSkus(s,co,ch);
+  if(SETS_VIEW!=='show'){ skus=skus.filter(function(sk){ var isS=SKUM[sk]&&SKUM[sk].vt==='SET'; return SETS_VIEW==='only'?isS:!isS; }); }   // sets show/hide/only display filter
 
   // Get subcat forecast for each forecast month
   var subcatCalc=calc(s,co,ch);
@@ -8416,7 +8420,7 @@ function _displayPopClose(){ var x=document.getElementById('plan-display-pop'); 
 function _displayPopBind(){ if(window._displayPopBound)return; window._displayPopBound=true; document.addEventListener('click',function(ev){ var b=document.getElementById('plan-display-btn'), pop=document.getElementById('plan-display-pop'); if(pop&&pop.style.display==='block'&&!(b&&b.contains(ev.target))&&!pop.contains(ev.target))pop.style.display='none'; },true); }
 function toggleDisplaySettings(e){ if(e)e.stopPropagation(); var p=document.getElementById('plan-display-pop'); if(!p)return; var open=p.style.display==='block'; _planPopClose(); if(!open){p.style.display='block';
     try{ var b=document.getElementById('plan-display-btn'); if(b){ var br=b.getBoundingClientRect(), w=p.offsetWidth||360; p.style.position='fixed'; p.style.top=(br.bottom+4)+'px'; p.style.right='auto'; p.style.left=Math.max(6,Math.min(br.right-w, window.innerWidth-w-6))+'px'; } }catch(e){} }   // clamp within the viewport (was right:0 → half off-screen on wide windows)
-    var sc=document.getElementById('filt-show-changes'); if(sc)sc.checked=(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES); var hp=document.getElementById('filt-hide-past-changes'); if(hp)hp.checked=(typeof HIDE_PAST_CHANGES==='undefined'||HIDE_PAST_CHANGES); var fa=document.getElementById('filt-fc-act'); if(fa)fa.checked=(typeof SHOW_FC_ACT==='undefined'||SHOW_FC_ACT); var _cc=document.getElementById('disp-cattot'); if(_cc)_cc.checked=(typeof SHOW_CAT_TOT!=='undefined'&&SHOW_CAT_TOT); var _vi=document.getElementById('disp-varimg'); if(_vi)_vi.checked=(typeof SHOW_VARIANT_IMG!=='undefined'&&SHOW_VARIANT_IMG); var _qq=document.getElementById('disp-qtr'); if(_qq)_qq.checked=(typeof SHOW_Q!=='undefined'&&SHOW_Q); var _hh=document.getElementById('disp-half'); if(_hh)_hh.checked=(typeof SHOW_H!=='undefined'&&SHOW_H); _displayPopBind(); }
+    var sc=document.getElementById('filt-show-changes'); if(sc)sc.checked=(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES); var hp=document.getElementById('filt-hide-past-changes'); if(hp)hp.checked=(typeof HIDE_PAST_CHANGES==='undefined'||HIDE_PAST_CHANGES); var fa=document.getElementById('filt-fc-act'); if(fa)fa.checked=(typeof SHOW_FC_ACT==='undefined'||SHOW_FC_ACT); var _cc=document.getElementById('disp-cattot'); if(_cc)_cc.checked=(typeof SHOW_CAT_TOT!=='undefined'&&SHOW_CAT_TOT); var _vi=document.getElementById('disp-varimg'); if(_vi)_vi.checked=(typeof SHOW_VARIANT_IMG!=='undefined'&&SHOW_VARIANT_IMG); var _qq=document.getElementById('disp-qtr'); if(_qq)_qq.checked=(typeof SHOW_Q!=='undefined'&&SHOW_Q); var _hh=document.getElementById('disp-half'); if(_hh)_hh.checked=(typeof SHOW_H!=='undefined'&&SHOW_H); var _sv=document.getElementById('disp-sets'); if(_sv)_sv.value=(typeof SETS_VIEW!=='undefined'?SETS_VIEW:'show'); _displayPopBind(); }
 // (removed dead fn togglePlanTools — v26.759)
 function resetPlanFilters(){ try{setPlanTier('ALL');}catch(e){} try{setCat('ALL');}catch(e){} try{setPlanFromRep(false);}catch(e){} var rw=document.getElementById('plan-rw-sel'); if(rw){rw.value='ALL'; try{setPlanRw('ALL');}catch(e){}} try{setPlanSort('alpha');}catch(e){} var ct=document.getElementById('cat-tot-toggle'); if(ct&&ct.classList.contains('active')){try{setShowCatTot(false);}catch(e){}} try{resetPlanActiveDates();}catch(e){} try{renderPlanChips();}catch(e){} }
 function _planClearFilter(k){ if(k==='all')setPlanActiveMode('active'); else if(k==='tier')setPlanTier('ALL');

@@ -1,3 +1,6 @@
+## v27.6.28 DEMAND plan: Sets show/hide/only display filter (Display Settings)
+- New "Sets" control in Display Settings (Show / Hide / Only) filters build-on-fly SET SKUs in the SKU-level (drill-down) view. Display-only + persisted — does not touch shares, forecast or the buy plan.
+
 ## v27.6.27 SETS: 0% contribution — sets no longer auto-forecast off the subcategory curve
 - In buildSkuShares, SET SKUs are zeroed BEFORE the tier averages / grand total, so they take 0 share of the subcategory contribution model (0c rule). Masters split the subcategory exactly as they did before sets entered scope (byte-identical — sets never dilute masters), and sets get 0 contribution-model forecast (e.g. TOWLB-CAB-LG-4SET-ORANGE). Sets still show in the plan; their real demand comes later. (Master/set grouping deferred to last per Ben.)
 
