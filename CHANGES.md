@@ -1,3 +1,7 @@
+## v27.6.31 Samples: unique "Find past address" results + FUTURE status light-purple
+- "Find past address" now dedupes by recipient identity (company + name + address line 1 + postcode, case/space-insensitive), keeping the most recent — no more duplicate matches.
+- FUTURE sample status is now light purple (#D3D3FF) matching the PO grid, in both the status chip and the Our-status dropdown.
+
 ## v27.6.30 SETS P2 foundation: inject set_bom map into the client
 - Server injects SET_BOM = {output_set_sku:[{sku,qty}]} (from planner.set_bom) into the artifact (buildSetBom + replaceGlobal), and the artifact declares the default. No logic reads it yet — this is the data foundation for the P2 buy-plan component explosion, so that step is a self-contained follow-up. Provably safe / no behaviour change.
 

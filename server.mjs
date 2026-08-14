@@ -2323,14 +2323,18 @@ app.get('/api/supply/sample-detail/:id', async (req, res) => {
 });
 app.get('/api/supply/sample-addresses', async (req, res) => {
   const ql = '%' + String(req.query.q || '').toLowerCase() + '%';
-  try { res.json((await pool.query(`SELECT DISTINCT coalesce(recipient_company,'') recipient_company,
-      coalesce(first_name,'') first_name, coalesce(last_name,'') last_name, coalesce(address_line1,'') address_line1,
-      coalesce(address_line2,'') address_line2, coalesce(city,'') city, coalesce(region,'') region,
-      coalesce(postcode,'') postcode, coalesce(country,'') country, coalesce(phone,'') phone
+  // Dedupe by the recipient's core identity (company + name + address line 1 + postcode, case/space-insensitive),
+  // keeping the most recent version — so blank-phone / casing / line-2 variants don't show as duplicate matches.
+  try { res.json((await pool.query(`SELECT recipient_company, first_name, last_name, address_line1, address_line2, city, region, postcode, country, phone FROM (
+      SELECT DISTINCT ON (lower(btrim(coalesce(recipient_company,''))), lower(btrim(coalesce(first_name,''))), lower(btrim(coalesce(last_name,''))), lower(btrim(coalesce(address_line1,''))), lower(btrim(coalesce(postcode,''))))
+        coalesce(recipient_company,'') recipient_company, coalesce(first_name,'') first_name, coalesce(last_name,'') last_name,
+        coalesce(address_line1,'') address_line1, coalesce(address_line2,'') address_line2, coalesce(city,'') city, coalesce(region,'') region,
+        coalesce(postcode,'') postcode, coalesce(country,'') country, coalesce(phone,'') phone, created_at
       FROM planner.sample_requests
       WHERE coalesce(recipient_company,'')<>'' AND (lower(coalesce(recipient_company,'')) LIKE $1
         OR lower(coalesce(first_name,'')||' '||coalesce(last_name,'')) LIKE $1)
-      ORDER BY recipient_company LIMIT 20`, [ql])).rows); }
+      ORDER BY lower(btrim(coalesce(recipient_company,''))), lower(btrim(coalesce(first_name,''))), lower(btrim(coalesce(last_name,''))), lower(btrim(coalesce(address_line1,''))), lower(btrim(coalesce(postcode,''))), created_at DESC
+    ) d ORDER BY recipient_company LIMIT 20`, [ql])).rows); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/sample-notes', async (req, res) => {
