@@ -1,3 +1,8 @@
+## v27.6.24 SETS P1 (step 1): sets enter planning scope + excluded from the buy plan
+- Migration 230 extends the mig-109 derived-scope trigger to variant_type IN ('MASTER','SET') — the 190 SET SKUs (all have availability) now enter planning scope and show in the DEMAND plan. MASTER/null scope is unchanged (only sets added). NEW MIGRATION: 230_planning_scope_include_sets.sql (Diviyaj runs on live).
+- SKU feed now carries `vt` (MASTER|SET). The buy overlay build skips vt==='SET' (deletes sets from BP_DATA.products) so a SET never becomes a buy line — buy comes only from the P2 component explosion. By construction the buy universe = non-sets (unchanged) so non-set buys are byte-identical; sets = zero buy lines.
+- NEXT (P1 remainder): SET badge + 3PL-only in DEMAND col 2, show/hide/only-sets display filter, "DTC demand (sets)" line; then P2 explosion. Formal buy-plan before/after snapshot recommended before live deploy.
+
 ## v27.6.23 Build on Fly Sets: list view (1 row per set)
 - The Build on Fly Sets tab now shows a table — one row per set (Set · Components with ×qty · component count · Delete) instead of the card grid. (The earlier upload "timeouts" were leaked local pg/jsdom processes saturating the sandbox pooler, since cleared — the endpoint itself round-trips in ~1s.)
 
