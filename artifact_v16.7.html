@@ -3517,7 +3517,7 @@ function crRuleTip(r){
   return out.replace(/"/g,'&quot;');
 }
 function buildTable(proj,md,pd,is3,hasFBA){
-  const ch=md.ch||[],hasDTC=ch.includes('DTC'),hasB2B=ch.includes('B2B'),hasTIK=!!(md.demand_tik&&Object.keys(md.demand_tik).length);
+  const ch=md.ch||[],hasDTC=ch.includes('DTC'),hasB2B=ch.includes('B2B'),hasTIK=!!(md.demand_tik&&Object.keys(md.demand_tik).length),hasSETS=!!(md.demand_sets&&Object.keys(md.demand_sets).length);
   const tfOv=parseInt(document.getElementById('fbw')?.value)||null;
   const t3=md.t3||12,tf=(tfOv!==null?tfOv:(md.tf||4));
   const hdr='<tr><th class="rl">Row</th>'+proj.map(p=>{
@@ -3561,7 +3561,15 @@ function buildTable(proj,md,pd,is3,hasFBA){
   if(is3){
     rows.push(sec('3PL Stock',proj.length));
     // DTC
-    if(hasDTC)rows.push(dr('DTC demand',proj,p=>{var _t=(md.demand_tik&&md.demand_tik[p.key])||0,_pd=(p.dtc||0)-_t;return p.isActual?`<td style="color:#6b7280;font-style:italic">${_pd?fmt(_pd):'\u2014'}</td>`:p.isForecast?`<td style="color:#9ca3af">${_pd?fmt(_pd):'\u2014'}</td>`:c(_pd?fmt(_pd):'\u2014',_pd?'cv':'cv0');}));
+    if(hasDTC)rows.push(dr('DTC demand',proj,p=>{var _t=(md.demand_tik&&md.demand_tik[p.key])||0,_s=(md.demand_sets&&md.demand_sets[p.key])||0,_pd=(p.dtc||0)-_t-_s;return p.isActual?`<td style="color:#6b7280;font-style:italic">${_pd?fmt(_pd):'\u2014'}</td>`:p.isForecast?`<td style="color:#9ca3af">${_pd?fmt(_pd):'\u2014'}</td>`:c(_pd?fmt(_pd):'\u2014',_pd?'cv':'cv0');}));
+    // DTC demand (sets): 3PL component demand exploded from build-on-fly set forecasts (SETS feature P2/P1d). Included
+    // in the DTC total above (subtracted out there so the two lines don't double-count); tooltip lists the source sets.
+    if(hasSETS)rows.push(dr('DTC demand (sets)',proj,p=>{
+      var s=(md.demand_sets&&md.demand_sets[p.key])||0; if(!s)return c('\u2014','cv0');
+      var src=(md.demand_sets_src&&md.demand_sets_src[p.key])||[];
+      var lines=['<b>Set demand \u2192 component</b>'].concat(src.length?src.map(function(x){return x.set+': '+fmt(x.units)+(x.q>1?(' ('+fmt(x.units/x.q)+'\u00d7'+x.q+')'):'');}):['From build-on-fly set forecasts']);
+      return tipCell(fmt(s),'',lines,'color:#7c3aed;font-weight:500'+(p.isActual?';font-style:italic':(p.isForecast?';opacity:.65':'')));
+    }));
     if(hasTIK)rows.push(dr('TikTok demand',proj,p=>{var t=(md.demand_tik&&md.demand_tik[p.key])||0;return p.isActual?`<td style="color:#6b7280;font-style:italic">${t?fmt(t):'\u2014'}</td>`:p.isForecast?`<td style="color:#9ca3af">${t?fmt(t):'\u2014'}</td>`:c(t?fmt(t):'\u2014',t?'cv':'cv0');}));
     // B2B
     if(hasB2B)rows.push(dr('B2B demand',proj,p=>p.isActual?`<td style="color:#6b7280;font-style:italic">${p.b2b?fmt(p.b2b):'\u2014'}</td>`:p.isForecast?`<td style="color:#9ca3af">${p.b2b?fmt(p.b2b):'\u2014'}</td>`:c(p.b2b?fmt(p.b2b):'\u2014',p.b2b?'cv':'cv0')));
@@ -12576,6 +12584,53 @@ function buildLiveDemand(){
       delete md.demand.TIK;
     });
   });
+  // 4) SETS explosion (SETS feature P2): build-on-fly sets never buy directly (they're dropped from
+  //    BP_DATA.products by buildLiveBpOverlay); instead their demand-plan forecast (DTC + FBA channels, per Ben)
+  //    explodes into COMPONENT 3PL demand. Forecast source = skuMonthlyMap, the SAME number the DEMAND grid shows
+  //    for the set (share≈0 via 0c → in practice the saved forecast_outputs value). For each set × market, add
+  //    set_forecast × component_qty onto every component's md.demand.DTC (the 3PL pool that builds sets — FBA sets
+  //    draw components from 3PL too) so it flows into d3DemFn → the buy target. Stash a display-only copy in
+  //    md.demand_sets (+ md.demand_sets_src for the buy-popup source tooltip). No set gets a buy line; only components move.
+  (function(){
+    if(typeof SET_BOM!=='object'||!SET_BOM)return;
+    var setSkus=Object.keys(SET_BOM); if(!setSkus.length)return;
+    var skips={};
+    // Clear any prior explosion overlay first (idempotent across rebuilds; section 1 already cleared md.demand.DTC forecast months).
+    Object.keys(BP_DATA.products).forEach(function(sku){ var mk=BP_DATA.products[sku].mkts; if(!mk)return;
+      Object.keys(mk).forEach(function(co){ delete mk[co].demand_sets; delete mk[co].demand_sets_src; }); });
+    setSkus.forEach(function(setSku){
+      var comps=SET_BOM[setSku]; if(!Array.isArray(comps)||!comps.length)return;
+      var sp=SKUM[setSku]; if(!sp||sp.vt!=='SET')return;   // only true sets explode
+      MK.forEach(function(co){
+        var ctry=co.toLowerCase(), av=(sp.av||{})[ctry]||'';
+        var chans=[]; if(av.indexOf('d')>=0)chans.push('DTC'); if(av.indexOf('f')>=0)chans.push('FBA');   // DTC + FBA (decision 3)
+        if(!chans.length)return;
+        var setFC={};   // set forecast per future month = sum over its available DTC/FBA channels
+        chans.forEach(function(ch){
+          // Cascade OFF for sets (Ben's 0c rule): a set is NEVER auto-forecast off the subcategory seasonal curve —
+          // its only demand is the manually-planned forecast saved in forecast_outputs (skuOutFC, which skuMonthlyMap
+          // returns when share=0). Passing share=0 / empty subcatFU also sidesteps the buildSkuShares 1/n fallback
+          // that leaks a spurious share to an all-sets subcategory (e.g. CA), which must NOT drive a component buy.
+          var mm=skuMonthlyMap(setSku,co,ch,LIVE_FC_MONTHS,{},0,(sp.inv&&sp.inv[skuWh(co,ch)])||0);
+          LIVE_FC_MONTHS.forEach(function(fym){ var v=mm[fym]||0; if(v)setFC[fym]=(setFC[fym]||0)+v; });
+        });
+        if(!Object.keys(setFC).length)return;
+        comps.forEach(function(cc){
+          var cs=cc&&cc.sku, q=Number(cc&&cc.qty)||0; if(!cs||q<=0)return;
+          var cprod=BP_DATA.products[cs];
+          if(!cprod||!cprod.mkts||!cprod.mkts[co]){ skips[cs+'|'+co]=(skips[cs+'|'+co]||0)+1; return; }   // component not planned in this market — can't stock it here; report
+          var cmd=cprod.mkts[co];
+          if(!cmd.demand)cmd.demand={}; if(!cmd.demand.DTC)cmd.demand.DTC={};
+          if(!cmd.demand_sets)cmd.demand_sets={}; if(!cmd.demand_sets_src)cmd.demand_sets_src={};
+          Object.keys(setFC).forEach(function(fym){ var add=setFC[fym]*q; if(!add)return;
+            cmd.demand.DTC[fym]=(cmd.demand.DTC[fym]||0)+add;
+            cmd.demand_sets[fym]=(cmd.demand_sets[fym]||0)+add;
+            (cmd.demand_sets_src[fym]||(cmd.demand_sets_src[fym]=[])).push({set:setSku,units:add,q:q}); });
+        });
+      });
+    });
+    BP_DATA.set_explosion_skips=skips;
+  })();
   BP_DATA.demand_source='Live: forecast_outputs (SKU) + PLAN cascade';
 }
 

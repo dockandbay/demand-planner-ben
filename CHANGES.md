@@ -1,3 +1,10 @@
+## v27.003 SETS P2 — build-on-fly set demand explodes into component buys
+- **Buy plan now explodes set demand into components.** When a build-on-fly set has a saved demand-plan forecast, that forecast (DTC + FBA channels — FBA sets are built at the 3PL) is added onto each SET_BOM component's 3PL DTC demand, so the components buy for the sets they'll be built into. Sets themselves still never generate a buy line (they're kept out of `BP_DATA.products`).
+- **Forecast source = the set's saved planned forecast only (cascade-off).** Per the 0c rule, a set takes 0% of the subcategory seasonal cascade, so its only demand is what's manually planned/saved in the demand grid. This also sidesteps a `buildSkuShares` `1/n` fallback that was leaking a spurious share to all-sets subcategories (e.g. CA) — that phantom set forecast no longer reaches the buy plan.
+- **Discontinued/pre-launch sets don't explode** (respect the set's launch/discontinue dates, same as any SKU).
+- **Buy popup:** new "DTC demand (sets)" row under the 3PL section (subtracted from the plain "DTC demand" line so they don't double-count), with a per-cell tooltip listing which sets contribute. New display field `md.demand_sets` (+ `md.demand_sets_src`); components missing in a market are recorded in `BP_DATA.set_explosion_skips`.
+- **Verified (jsdom buy-plan snapshots):** on current sandbox data the buy plan is byte-identical (no set has a saved forecast yet — deploy-safe). Injecting a synthetic set forecast lands exactly `forecast × qty` on each component's demand and buy, leaves every non-component SKU unchanged, and creates no set buy line.
+
 ## v27.002 Samples detail: dev badge + product link on lines, and "Find past address"
 - The sample DETAIL SKU lines now show the "dev" badge (after qty) + a "↗ product" link (opens the product-dev item) on dev-item lines — matching the new-sample form. Sample-detail endpoint now flags each line's `dev` (SKU matches a product_dev_items ref).
 - Added the deduped "Find past address" recipient search to the sample DETAIL recipient section (populates + saves all recipient fields).
