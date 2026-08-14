@@ -1,3 +1,11 @@
+## v27.004 SETS P3a — Contribution model panel (CONFIG ▸ Demand), inert
+- New CONFIG group **Demand** with a **Contribution model** panel. Editable **A/B/C tier mix** per sub-category (the `tierMix`/`CONTRIB_TARGETS` model that Leader-mode auto-smoothing uses) plus a new **Sets vs SKUs %** split.
+- **Cascade:** a **Default** (All·All) cascades to every country×channel; narrow the Country/Channel scope to override — most-specific wins (cell → channel → country → default). Inherited cells shown greyed with the source; `×` clears an override. A/B/C normalises to 100 at compute; SKUs % = 100 − Sets %.
+- Defaults: today's `CONTRIB_TARGETS` is uniformly **50/25/25**, so that's the methodology default shown everywhere; only edits are saved.
+- **Storage:** `app_settings.contrib_model` (JSON keyed `CO|CH|subcat` with `*` for a cascade wildcard), saved via `/api/app-settings`. Panel shares page scope with the demand artifact (reads `ACTIVE_SUBS`).
+- **Inert:** stored only — no forecast/buy impact yet. The auto-forecast/smoothing + Sets-split wiring is the next phase (P3b).
+- **Forecast Logic** panel (demand toolbar) updated with a new §4b explaining the tier contribution + Sets split and how Leader-mode smoothing uses it (and how it differs from the new-SKU 3/2/1 tier weights).
+
 ## v27.003 SETS P2 — build-on-fly set demand explodes into component buys
 - **Buy plan now explodes set demand into components.** When a build-on-fly set has a saved demand-plan forecast, that forecast (DTC + FBA channels — FBA sets are built at the 3PL) is added onto each SET_BOM component's 3PL DTC demand, so the components buy for the sets they'll be built into. Sets themselves still never generate a buy line (they're kept out of `BP_DATA.products`).
 - **Forecast source = the set's saved planned forecast only (cascade-off).** Per the 0c rule, a set takes 0% of the subcategory seasonal cascade, so its only demand is what's manually planned/saved in the demand grid. This also sidesteps a `buildSkuShares` `1/n` fallback that was leaking a spurious share to all-sets subcategories (e.g. CA) — that phantom set forecast no longer reaches the buy plan.
