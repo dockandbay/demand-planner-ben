@@ -1,3 +1,9 @@
+## v27.6.20 Samples: PO-like status lifecycle (FUTURE→PRODUCTION→COMPLETED) + OPEN/COMPLETED/ALL pills
+- D&B "Our status" is now FUTURE / PRODUCTION / COMPLETED / CANCELLED (was PLANNED/SHIPPED/CANCELLED), colour-coded (FUTURE grey, PRODUCTION orange, COMPLETED green, CANCELLED red).
+- New sample requests start FUTURE and are D&B-only — the supplier portal hides FUTURE and only shows a sample once it moves to PRODUCTION (verified: FUTURE hidden, PRODUCTION/SHIPPED visible).
+- Grid pills are now OPEN / COMPLETED / ALL: OPEN = FUTURE + PRODUCTION (or anything with an outstanding action, via is_open); COMPLETED = completed/shipped; ALL = everything (CANCELLED shows under ALL).
+- Sandbox existing planned/open samples migrated to PRODUCTION.
+
 ## v27.6.19 Samples: supplier status bigger + colour-coded on the expanded row
 - The "Supplier status" on an expanded sample now shows as a larger colour-coded chip: green = Shipped, orange = planning/production, grey otherwise (was tiny grey text). (Part 1 of the samples status rework; the FUTURE→PRODUCTION lifecycle + OPEN/COMPLETED/ALL pills + portal-hide-FUTURE is a coupled follow-up.)
 
