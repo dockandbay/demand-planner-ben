@@ -1,3 +1,7 @@
+## v27.6.26 DEMAND plan: taller More Filters + Display Settings popup clamped to viewport
+- More Filters category checklist +50px height (345→395).
+- Display Settings popup no longer runs half off-screen on wide/full-screen windows — it now positions relative to its button and clamps inside the viewport.
+
 ## v27.6.25 Build on Fly Sets: drop product names, wrap components, full width
 - Removed the product-name subtext from the Set and Component cells; the Components column now wraps fully (fixed table layout, flexible components column, full-width table) so every component shows.
 
