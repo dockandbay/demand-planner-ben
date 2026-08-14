@@ -5232,7 +5232,9 @@ async function setSampleLines(sampleId, lines) {   // replace-all the bulk-SKU l
 // Candidate lists (admin/preview — supplier passed as ?supplier=)
 app.get('/api/product/open-samples', async (req, res) => { const sup = (req.query.supplier || '').trim();
   try { res.json(await openSampleCandidates(sup ? [sup] : null)); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.get('/api/product/skus', async (req, res) => { const sup = (req.query.supplier || '').trim();
+// Supplier-scoped SKU + dev-item SEARCH (supplier / q / dev). Its own path because the plain /api/product/skus above
+// returns the full {sku,label} list (used elsewhere) and, being registered first, would otherwise shadow this.
+app.get('/api/product/sku-search', async (req, res) => { const sup = (req.query.supplier || '').trim();
   try { res.json(await supplierSkuCandidates(sup ? [sup] : null, (req.query.q || '').trim(), !!req.query.dev)); } catch (e) { res.status(500).json({ error: e.message }); } });
 // Sample-shipment contents (admin/preview) — dev samples attach to a sample_request
 app.post('/api/supply/sample/:id/dev-samples', async (req, res) => { const b = req.body || {};

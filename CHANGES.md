@@ -1,3 +1,7 @@
+## v27.0.2 Samples new-sample form: SKU search now filters + searchable supplier picker
+- FIX: the SKU search did nothing (typing e.g. "COOL" didn't filter). Two `/api/product/skus` routes existed; the first (returns ALL products, ignores params) shadowed the supplier+query search. Gave the search its own path `/api/product/sku-search` and pointed the sample form at it.
+- Supplier field is now a searchable dropdown ("assign supplier — type to search", click to select) instead of a bare datalist.
+
 ## v27.0.1 Fix: inbound (and other) tooltips hidden in a SUPPLY-opened buy plan
 - Opening the buy plan from SUPPLY (e.g. REALLOCATE ▸ Buy plan) bumps the overlay to z-index 300000, which buried the artifact's tooltips (inbound popup z10000, hover tooltips z~100001). Raised the inbound click-popup (#inb-pop) and the .tip120 / .stk-inb hover tooltips to z300010 so they sit above the overlay in both contexts.
 

@@ -9595,7 +9595,7 @@
       function H(t){ return '<div class="mut tiny" style="text-transform:uppercase;letter-spacing:.04em;font-weight:700;color:#94a3b8;margin:12px 0 4px;border-bottom:1px solid #eef2f7;padding-bottom:3px">'+t+'</div>'; }
       box.innerHTML='<div class="sect-h">New sample request</div><div class="cli-form" style="max-width:740px;border:1px solid #e5e7eb;border-radius:10px;padding:14px 16px;background:#fff">'
         +H('Supplier &amp; recipient')
-        +R('Supplier','<input class="fci txt sf-supplier" list="supplierlist" placeholder="supplier…" style="width:240px">')
+        +R('Supplier','<span style="position:relative;display:inline-block"><input class="fci txt sf-supplier" autocomplete="off" placeholder="assign supplier — type to search…" style="width:240px"><div class="sf-supresults"></div></span>')
         +R('Find past address','<input class="fci txt sf-addrsearch" placeholder="search recipient / company…" style="width:240px"><div class="sf-addrmatches"></div>')
         +R('Recipient company','<input class="fci txt sf-recipient_company" style="width:240px">')
         +R('Name','<input class="fci txt sf-first_name" placeholder="first" style="width:115px"> <input class="fci txt sf-last_name" placeholder="last" style="width:115px">')
@@ -9620,11 +9620,24 @@
         w.querySelectorAll('.sf-lqty').forEach(function(x){x.onchange=function(){lines[x.dataset.i].qty=x.value;};});
         w.querySelectorAll('.sf-lrm').forEach(function(x){x.onclick=function(){lines.splice(x.dataset.i,1);renderLines();};}); }
       renderLines();
+      // Supplier picker — searchable dropdown (type to filter the supplier list; click to assign). Fills .sf-supplier,
+      // which also scopes the SKU search below.
+      (function(){ var si=box.querySelector('.sf-supplier'), sr=box.querySelector('.sf-supresults'); if(!si||!sr)return;
+        var SUPS=[]; fetch('/api/supply/suppliers').then(function(r){return r.json();}).then(function(rows){ SUPS=(Array.isArray(rows)?rows:[]).map(function(x){return (x&&(x.name||x.supplier_name))||x;}).filter(Boolean); SUPS=Array.from(new Set(SUPS)).sort(); }).catch(function(){});
+        function close(){ sr.innerHTML=''; }
+        function open(q){ q=String(q||'').toLowerCase(); var m=SUPS.filter(function(n){return !q||String(n).toLowerCase().indexOf(q)>=0;}).slice(0,80);
+          if(!m.length){ close(); return; }
+          sr.innerHTML='<div style="position:absolute;z-index:30;left:0;top:2px;min-width:240px;border:1px solid #cbd5e1;border-radius:6px;max-height:230px;overflow:auto;background:#fff;box-shadow:0 8px 22px rgba(15,23,42,.15)">'+m.map(function(n){return '<div class="sf-supopt" data-n="'+esc(n)+'" style="padding:4px 9px;cursor:pointer;font-size:12px;border-bottom:1px solid #f1f5f9">'+esc(n)+'</div>';}).join('')+'</div>';
+          sr.querySelectorAll('.sf-supopt').forEach(function(o){ o.onmousedown=function(e){ e.preventDefault(); si.value=o.dataset.n; close(); }; }); }
+        si.oninput=function(){ open(si.value); };
+        si.onfocus=function(){ open(si.value); };
+        si.onblur=function(){ setTimeout(close,160); };
+      })();
       // SKU search (default) — searches this supplier's catalogue SKUs AND product-development items; anything not
       // listed can be added as free text with a qty (no separate "+ line" button).
       var ssr=box.querySelector('.sf-skusearch'); if(ssr)ssr.oninput=debounce(function(){ var q=ssr.value.trim(), sup=box.querySelector('.sf-supplier').value.trim(), rb=box.querySelector('.sf-skuresults');
         if(q.length<2){ rb.innerHTML=''; return; }
-        fetch('/api/product/skus?dev=1&supplier='+encodeURIComponent(sup)+'&q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
+        fetch('/api/product/sku-search?dev=1&supplier='+encodeURIComponent(sup)+'&q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
           var list=(rows.length?'<div style="border:1px solid #cbd5e1;border-radius:6px;max-height:200px;overflow:auto;background:#fff">'+rows.map(function(k){return '<div style="display:flex;gap:7px;align-items:center;padding:3px 8px;border-bottom:1px solid #f1f5f9;font-size:12px"><input type="checkbox" class="sf-skcb" value="'+esc(k.sku)+'" data-dev="'+(k.dev?1:'')+'"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(k.sku)+'</b>'+(k.dev?' <span class="tool-badge bg-blue" style="font-size:9px">dev</span>':'')+'<span class="mut tiny" style="flex:1;min-width:0">'+esc(k.description||'')+(k.release_window&&!k.dev?' · '+esc(k.release_window):'')+'</span><input class="fci sf-skqty" data-sku="'+esc(k.sku)+'" placeholder="qty" style="width:52px;text-align:left"></div>';}).join('')+'</div><button class="save-btn light sf-skadd" style="margin-top:4px">+ Add selected</button>':'<div class="mut tiny">No matches.</div>')
             +'<div style="display:flex;gap:6px;align-items:center;margin-top:6px;padding-top:6px;border-top:1px dashed #e5e7eb"><span class="mut tiny">Not listed?</span><input class="fci txt sf-ftsku" value="'+esc(q)+'" placeholder="type SKU" style="width:180px"><input class="fci sf-ftqty" placeholder="qty" style="width:52px;text-align:left"><button class="save-btn light sf-ftadd">+ Add as free text</button></div>';
           rb.innerHTML=list;
@@ -9830,7 +9843,7 @@
           // add SKUs via the SAME multi-select search picker as "add new sample" (search → tick + qty → + Add selected)
           var _samSup=(s.supplier||s.supplier_name||''); var sss=box.querySelector('.samp-skusearch');
           if(sss)sss.oninput=debounce(function(){ var q=sss.value.trim(), rb=box.querySelector('.samp-skuresults'); if(!rb)return; if(q.length<2){rb.innerHTML='';return;}
-            fetch('/api/product/skus?dev=1&supplier='+encodeURIComponent(_samSup)+'&q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
+            fetch('/api/product/sku-search?dev=1&supplier='+encodeURIComponent(_samSup)+'&q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
               var have={}; slines.forEach(function(l){ if(l.sku)have[String(l.sku).trim()]=1; }); rows=rows.filter(function(k){return !have[k.sku];});
               rb.innerHTML=(rows.length?'<div style="border:1px solid #cbd5e1;border-radius:6px;max-height:200px;overflow:auto;background:#fff">'+rows.map(function(k){return '<div style="display:flex;gap:7px;align-items:center;padding:3px 8px;border-bottom:1px solid #f1f5f9;font-size:12px"><input type="checkbox" class="samp-skcb" value="'+esc(k.sku)+'"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(k.sku)+'</b>'+(k.dev?' <span class="tool-badge bg-blue" style="font-size:9px">dev</span>':'')+'<span class="mut tiny" style="flex:1;min-width:0">'+esc(k.description||'')+(k.release_window&&!k.dev?' · '+esc(k.release_window):'')+'</span><input class="fci samp-skqty" data-sku="'+esc(k.sku)+'" placeholder="qty" style="width:52px;text-align:left"></div>';}).join('')+'</div><button class="save-btn light samp-skadd" style="margin-top:4px">+ Add selected</button>':'<div class="mut tiny">No matches.</div>')
                 +'<div style="display:flex;gap:6px;align-items:center;margin-top:6px;padding-top:6px;border-top:1px dashed #e5e7eb"><span class="mut tiny">Not listed?</span><input class="fci txt samp-ftsku" value="'+esc(q)+'" placeholder="type SKU" style="width:160px"><input class="fci samp-ftqty" placeholder="qty" style="width:52px;text-align:left"><button class="save-btn light samp-ftadd">+ Add free text</button></div>';
