@@ -1084,42 +1084,45 @@
       var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
       var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end, sb):'';
       return (invoiceDue(p,sb)?1:0)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcActionDue(p)?1:0)+(poCdMissing(p,sb)?1:0); }
-    // Read-only popup drawer for a shipment (opened from a ships-with link in the PO grid). Shows the shipment's
-    // dates + the "Purchase Orders on Board this shipment" table. Only shipments in the supplier's own plan get here.
+    // Fully-editable popout drawer for a shipment (opened from a ships-with link in the PO grid). Renders the REAL
+    // shipment-plan card and wires the editable fields (carrier / tracking / ship date / status auto-save + add charge
+    // + PO links + timeline) directly, so it behaves like the Shipment Plan tab. Only shipments in the plan reach here.
     function ppShipDrawer(masterPo){
       var s=null; ((_ppData&&_ppData.shipmentPlan)||[]).forEach(function(x){ if(x.master_po===masterPo)s=x; });
       if(!s)return;
-      var posByPo={}; ((_ppData&&_ppData.pos)||[]).forEach(function(p){ posByPo[p.po]=p; });
-      var _dep=s.departure||'';
-      var membersRows=(s.members||[]).map(function(m){
-        var poCell=(posByPo[m.po])?('<b>'+esc(m.po)+'</b>'):esc(m.po);   // only their own POs bolded; others plain (can't open another supplier's PO)
-        var pe=m.prod_end||''; var late=pe&&_dep&&pe>=_dep;
-        return '<tr><td class="l">'+poCell+(m.is_master?' <span class="tool-badge bg-green" style="font-size:9px">★ master</span>':'')+'</td><td class="l">'+esc(m.supplier||'')+'</td>'
-          +'<td class="l"'+(late?' style="color:#b91c1c;font-weight:700" title="production ends on or after departure">':'>')+(pe?esc(fd(pe)):'<span class="mut">—</span>')+'</td>'
-          +'<td style="text-align:right">'+esc(m.pallets)+'</td><td class="l">'+(m.client?esc(m.client):'<span class="mut">—</span>')+'</td></tr>';
-      }).join('');
-      function _c(l,v){ return '<div style="min-width:88px"><div class="mut" style="font-size:10px;text-transform:uppercase;letter-spacing:.04em">'+l+'</div><div style="font-weight:700;font-size:14px;margin-top:1px">'+(v||'<span class="mut" style="font-weight:400">—</span>')+'</div></div>'; }
-      var html='<div class="pp-drawer-ov" style="position:fixed;inset:0;background:rgba(15,23,42,.4);z-index:100000;display:flex;align-items:flex-start;justify-content:center;padding:36px 16px;overflow:auto">'
-        +'<div style="background:#fff;border-radius:10px;max-width:760px;width:100%;box-shadow:0 20px 60px rgba(15,23,42,.4);padding:16px 18px;text-align:left">'
-        +'<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px"><div style="font-weight:700;font-size:16px">Shipment '+esc(s.master_po||'')+'</div>'
-          +(/^fob$/i.test(s.mode||'')?'<span style="background:#ede9fe;color:#6d28d9;border-radius:10px;font-size:10px;font-weight:700;padding:2px 8px">📦 FOB</span>':'')
-          +'<button class="pp-drawer-x" title="close" style="margin-left:auto;background:none;border:none;font-size:22px;line-height:1;cursor:pointer;color:#64748b">×</button></div>'
-        +'<div style="display:flex;flex-wrap:wrap;gap:18px;padding:9px 12px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:7px">'
-          +_c('Mode / Carrier',esc((s.mode||'—')+(s.carrier?' · '+s.carrier:'')))+_c('Departure',s.departure?esc(fd(s.departure)):'')+_c('Landing',s.landing?esc(fd(s.landing)):'')+_c('Arrival',s.arrival?esc(fd(s.arrival)):'')
-          +(s.master_client?_c('Client',esc(s.master_client)):'')+'</div>'
-        +'<div style="font-weight:700;font-size:12px;color:#334155;margin:12px 0 3px">Purchase Orders on Board this shipment</div>'
-        +'<table style="font-size:11px;width:100%"><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th class="l">Est. completion</th><th>Est. pallets</th><th class="l">Client</th></tr></thead><tbody>'+membersRows
-        +'<tr style="font-weight:700;border-top:1px solid #ccc"><td class="l">Total</td><td></td><td></td><td style="text-align:right">'+esc(s.total_pallets)+'</td><td></td></tr></tbody></table>'
-        +'<div style="text-align:right;margin-top:12px"><button class="save-btn pp-drawer-tab" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd">Open in Shipment Plan →</button></div>'
-        +'</div></div>';
-      var wrap=document.createElement('div'); wrap.innerHTML=html; var ov=wrap.firstChild; document.body.appendChild(ov);
-      function close(){ if(ov&&ov.parentNode)ov.parentNode.removeChild(ov); document.removeEventListener('keydown',esckey,true); }
+      var ov=document.createElement('div'); ov.className='pp-drawer-ov'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.4);z-index:100000;display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto';
+      var panel=document.createElement('div'); panel.style.cssText='background:#fff;border-radius:10px;max-width:860px;width:100%;box-shadow:0 20px 60px rgba(15,23,42,.4);padding:12px 16px;text-align:left';
+      panel.innerHTML='<div style="display:flex;align-items:center;margin-bottom:4px"><div style="font-weight:700;font-size:15px">Shipment '+esc(masterPo)+'</div><button class="pp-drawer-x" title="close" style="margin-left:auto;background:none;border:none;font-size:22px;line-height:1;cursor:pointer;color:#64748b">×</button></div><div class="pp-drawer-body">'+ppShipmentPlan([s])+'</div>';
+      ov.appendChild(panel); document.body.appendChild(ov);
+      var scope=panel.querySelector('.pp-drawer-body');
+      function close(){ if(ov.parentNode)ov.parentNode.removeChild(ov); document.removeEventListener('keydown',esckey,true); }
       function esckey(e){ if(e.key==='Escape')close(); }
       document.addEventListener('keydown',esckey,true);
       ov.addEventListener('click',function(e){ if(e.target===ov)close(); });
-      ov.querySelector('.pp-drawer-x').onclick=close;
-      var ot=ov.querySelector('.pp-drawer-tab'); if(ot)ot.onclick=function(){ close(); PORTAL_TAB='shipmentplan'; PORTAL_SP_PO=masterPo; renderPP(); };
+      panel.querySelector('.pp-drawer-x').onclick=close;
+      // force the card open (no collapse in the drawer) and hide its own toggle caret
+      var bd=scope.querySelector('.sp-card .sp-body'); if(bd)bd.style.display=''; var tg=scope.querySelector('.sp-toggle'); if(tg)tg.style.display='none';
+      var esq=function(r){ return window.CSS&&CSS.escape?CSS.escape(r):r; };
+      function saveShipD(ref){ var g=function(cls){ var el=scope.querySelector('.'+cls+'[data-ref="'+esq(ref)+'"]'); return el?el.value:''; };
+        var stEl=scope.querySelector('.sp-e-status[data-ref="'+esq(ref)+'"]');
+        var payload={ carrier:g('sp-e-carrier'), carrier_ref:g('sp-e-trk'), departure_date:g('sp-e-date') }; if(stEl)payload.status=stEl.value;
+        var msg=scope.querySelector('.sp-ship-msg[data-ref="'+esq(ref)+'"]'); if(msg){ msg.style.color='#94a3b8'; msg.textContent='saving…'; }
+        postJSON(EP.shipmentUpdate+encodeURIComponent(ref),payload,function(j){ if(j&&j.error){ if(msg){ msg.style.color='#dc2626'; msg.textContent=j.error; } return; }
+          if(msg){ msg.style.color='#16a34a'; msg.textContent='✓ saved'; setTimeout(function(){ if(msg)msg.textContent=''; },1500); }
+          var ent=(_ppData.shipmentPlan||[]).filter(function(x){return x.shipment_ref===ref;})[0]; if(ent){ ent.carrier=payload.carrier; ent.carrier_ref=payload.carrier_ref; ent.departure=payload.departure_date; if(stEl)ent.status=payload.status; }
+          if(j&&j.date_note&&typeof ppShipTimeline==='function')ppShipTimeline(ref); }); }
+      scope.querySelectorAll('.sp-e-carrier, .sp-e-trk, .sp-e-date').forEach(function(inp){ inp.onchange=function(){ saveShipD(inp.dataset.ref); }; });
+      scope.querySelectorAll('.sp-e-status').forEach(function(sel){ sel.onchange=function(){ var sh=sel.value==='Shipping'; sel.style.background=sh?'#dcfce7':'#ffedd5'; sel.style.color=sh?'#15803d':'#9a3412'; sel.style.borderColor=sh?'#86efac':'#fdba74'; saveShipD(sel.dataset.ref); }; });
+      scope.querySelectorAll('.sp-chg-go').forEach(function(btn){ btn.onclick=function(){ var ref=btn.dataset.ref, cEl=scope.querySelector('.sp-chg-cost[data-ref="'+esq(ref)+'"]'), dEl=scope.querySelector('.sp-chg-desc[data-ref="'+esq(ref)+'"]'); var fc=Number(cEl&&cEl.value)||0; if(fc<=0){ alert('Enter a freight cost greater than 0.'); return; }
+        btn.disabled=true; postJSON(EP.shipmentCharge,{shipment_ref:ref,freight_cost:fc,description:(dEl&&dEl.value)||null},function(j){ btn.disabled=false; if(j&&j.error){ alert('Failed: '+j.error); return; } if(cEl)cEl.value=''; if(dEl)dEl.value='';
+          var list=scope.querySelector('.sp-chg-list[data-ref="'+esq(ref)+'"]'); if(list){ fetch(EP.shipmentChargesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(cs){ list.innerHTML=(Array.isArray(cs)&&cs.length)?cs.map(function(c){var t=(Number(c.freight_cost)||0)+(Number(c.product_cost)||0);return '<div class="tiny" style="margin:2px 0">'+money(t)+(c.description?' · '+esc(c.description):'')+'</div>';}).join(''):'<span class="mut tiny">No charges yet.</span>'; }); } }); }; });
+      scope.querySelectorAll('.pp-go-po').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); close(); PORTAL_TAB='pos'; PORTAL_PO_Q=b.dataset.po; _ppOpenPO=b.dataset.po; ppSetHash('pos',b.dataset.po); renderPP(); }; });
+      scope.querySelectorAll('.sp-shiplabel').forEach(function(btn){ btn.onclick=function(){ dlShipsWith(btn.dataset.po, btn, EP.shipsWith); }; });
+      scope.querySelectorAll('.pp-ship-inv').forEach(function(btn){ btn.onclick=function(){ window.open(EP.shipmentInvoice+encodeURIComponent(btn.dataset.ref),'_blank'); }; });
+      var cl=scope.querySelector('.sp-chg-list'); if(cl){ fetch(EP.shipmentChargesBase+encodeURIComponent(cl.dataset.ref)).then(function(r){return r.json();}).then(function(cs){ cl.innerHTML=(Array.isArray(cs)&&cs.length)?cs.map(function(c){var t=(Number(c.freight_cost)||0)+(Number(c.product_cost)||0);return '<div class="tiny" style="margin:2px 0">'+money(t)+(c.description?' · '+esc(c.description):'')+'</div>';}).join(''):'<span class="mut tiny">No charges yet.</span>'; }).catch(function(){}); }
+      var tl=scope.querySelector('.sp-timeline'); if(tl&&typeof ppShipTimeline==='function')ppShipTimeline(tl.dataset.ref);
     }
+
     function ppPOs(pos, data){ var lb=data.lb||{}, notesByPo=data.notesByPo||{}, subsByPo=data.subsByPo||{}, costsByPo=data.costsByPo||{}, supSkus=data.supSkus||[], xdByPo=data.xdByPo||{}, addByPo=data.addByPo||{};
       if(!pos.length)return '<div class="count">No purchase orders for this supplier.</div>';
       var today=new Date().toISOString().slice(0,10);

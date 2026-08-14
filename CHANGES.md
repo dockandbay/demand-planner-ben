@@ -1,3 +1,6 @@
+## v27.4.1 Supplier portal: ships-with drawer is now fully editable
+- The ships-with popout drawer renders the real Shipment Plan card (force-expanded) and wires the editable fields directly — carrier / tracking / ship date / status auto-save, add freight charge, PO links, tax invoice, timeline — instead of the read-only summary.
+
 ## v27.4.0 Sample charges: show pending+accepted amounts in grid; timeline notes on add/accept/reject
 - Samples grid Charges column now shows the pending amount ("$X pending") alongside the accepted amount ("$Y accepted"), stacked (server adds pending_charge_amount).
 - Adding, accepting or rejecting a charge (admin or supplier portal) now posts a note to the sample/shipment timeline (💰 added / ✅ accepted → Other Payment / 🚫 rejected).
