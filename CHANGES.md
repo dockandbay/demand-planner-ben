@@ -1,3 +1,8 @@
+## v27.6.16 New-sample form: qty beside tick, coloured Add, open+toast on create, dev→product link
+- SKU search results: qty box now sits right after the checkbox; "+ Add selected" is green to stand out.
+- After creating a sample: the grid opens that sample's row and a green "✓ SR-NN created" toast shows.
+- Added dev-sample lines get a "↗ product" link to open that product's tab.
+
 ## v27.6.15 Samples timeline: detailed SKU/qty changes + confirm as notifications
 - "SKUs / quantities updated" record-of-change now spells out exactly what changed — "Added A ×2, B ×1; Removed C; Qty D 3→5" — instead of a bare label, and no-op re-saves no longer log. Applies to both the admin and supplier-portal line edits.
 - SKU/qty changes and supplier "Confirmed the sample request" now also post a shared timeline NOTE (visible to both sides + drives the unread bell), so key events surface on the timeline for supplier and D&B.
