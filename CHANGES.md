@@ -1,3 +1,6 @@
+## v27.010 MASTER/SET group headers left-aligned
+- The MASTERS/SETS group-header labels are now left-aligned (the sticky inline-block label was inheriting the plan's right-alignment).
+
 ## v27.009 SETS MASTER/SET grouping + contribution & forecast-logic touches
 - **MASTER/SET grouping (demand plan):** when a sub-category contains sets, its SKU expansion now groups **MASTERS** first then **SETS**, each under a **collapsible** header (▾/▸) with a count. Stays flat when there are no sets.
 - **SET badge** now sits on the same line as the 3PL quantity in the stock cell (was a line above).

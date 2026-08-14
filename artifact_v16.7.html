@@ -7403,7 +7403,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
   function _insGrpHdr(grp,label,count){
     var gkey=grp+'|'+parentKey, htr=document.createElement('tr'); htr.className='sku-inline'; htr.dataset.parentkey=parentKey;
     var htd=document.createElement('td'); htd.colSpan=999;
-    htd.style.cssText='background:#eef2f7;border-top:1px solid #d1d9e2;border-bottom:1px solid #d1d9e2;padding:0;cursor:pointer;position:relative;z-index:2';
+    htd.style.cssText='background:#eef2f7;border-top:1px solid #d1d9e2;border-bottom:1px solid #d1d9e2;padding:0;cursor:pointer;position:relative;z-index:2;text-align:left';
     // Inner label is sticky-left so MASTERS/SETS stay visible as you scroll the plan horizontally.
     htd.innerHTML='<span style="position:sticky;left:0;display:inline-block;padding:3px 8px;font-size:9px;font-weight:700;color:#475569;letter-spacing:.04em;text-align:left;background:#eef2f7"><span class="grp-caret" style="display:inline-block;width:11px">▾</span> '+label+' <span style="opacity:.6;font-weight:600">· '+count+'</span></span>';
     htd.onclick=function(){ var car=htd.querySelector('.grp-caret'), hide=car.textContent!=='▸'; car.textContent=hide?'▸':'▾';
