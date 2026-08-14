@@ -1,3 +1,6 @@
+## v27.6.13 Plan Shipments: "Keep Lixin & XR Textile apart" toggle
+- New header toggle (default on, persisted). When on, the recommendations engine never combines Lixin and XR Textile POs in the same container — both the new-container packer and the top-up-existing packer skip any placement that would mix the two suppliers. Other suppliers are unaffected. Toggle off to allow mixing.
+
 ## v27.6.12 DEMAND More Filters — wider popup so all categories fit/click
 - Bumped the More Filters popup width 520→590px and the category checklist max-height 300→345px (~13%) so every category is visible and clickable.
 

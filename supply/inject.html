@@ -4807,6 +4807,10 @@
   //    Drop sets shipment_ref LIVE (same as the assign flow, timeline-logged). "Recommend" greedily fills 20-pallet
   //    (40ft) containers per ship-to country; Apply assigns each group under its first PO as the master. ──
   var _spData=null, _spCtry='', SP_CAP=20, SP_MKTS=['UK','US','EU','AU','CA'], _spDays=21, _spDismissed={}, _spUndo=[];
+  var _spKeepApart=(function(){try{return localStorage.getItem('hzSpKeepApart')!=='0';}catch(e){return true;}})();   // recommendations avoid mixing Lixin + XR Textile in one container (default on — standing preference)
+  // supplier group for the keep-apart rule: 'L'=Lixin, 'X'=XR Textile, ''=neither. _spMixBlocked = would adding p to existingList mix L and X (only when the toggle is on).
+  function _spSupGrp(p){ var s=String((p&&p.supplier)||'').toLowerCase(); if(s.indexOf('lixin')>=0)return 'L'; if(s.indexOf('xr textile')>=0)return 'X'; return ''; }
+  function _spMixBlocked(existingList,p){ if(!_spKeepApart)return false; var g=_spSupGrp(p); if(!g)return false; var has={}; (existingList||[]).forEach(function(x){var xg=_spSupGrp(x);if(xg)has[xg]=1;}); return (g==='L'&&has['X'])||(g==='X'&&has['L']); }
   function openShipPlan(){ var ov=document.getElementById('shipplan-ov'); if(ov)ov.remove();
     ov=document.createElement('div'); ov.id='shipplan-ov'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;padding:8px';
     ov.style.zIndex=6105;   // #1 just below the drawer base+10 (6110) so EVERY PO/shipment drawer (nextDrawerZ ≥ 6110, even after a reset) opens ABOVE this popup; still above supply content
@@ -4815,6 +4819,7 @@
         +'<div style="font-weight:700;font-size:16px;color:#0f172a">🚢 Plan Shipments</div>'
         +'<div style="display:flex;align-items:center;gap:8px"><span style="font-size:12px;font-weight:700;color:#334155">Ship to:</span><span id="sp-ctry" style="display:inline-flex;gap:5px"></span></div>'
         +'<label style="font-size:12px;color:#334155;display:inline-flex;align-items:center;gap:5px">Days to go &lt; <input id="sp-days" type="number" min="0" value="'+_spDays+'" style="width:56px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px"></label>'
+        +'<label style="font-size:12px;color:#334155;display:inline-flex;align-items:center;gap:5px" title="Recommendations won\x27t combine Lixin and XR Textile POs in the same container"><input type="checkbox" id="sp-keepapart"'+(_spKeepApart?' checked':'')+'> Keep Lixin &amp; XR Textile apart</label>'
         +'<button id="sp-undo" class="save-btn light" style="margin-left:auto" title="undo the last change">↶ Undo</button>'+'<button id="sp-refresh" class="save-btn light" title="reload the plan from the server">↻ Refresh</button>'
         +'<button id="sp-close" class="save-btn light">✕ Close</button></div>'
       +'<div id="sp-body" style="flex:1;overflow:auto;padding:14px 16px"></div></div>';
@@ -4823,11 +4828,12 @@
     var _rf=ov.querySelector('#sp-refresh'); if(_rf)_rf.onclick=function(){ if(_spCtry)_spLoad(); else _spDrawPrompt(); };
     var _uu=ov.querySelector('#sp-undo'); if(_uu)_uu.onclick=function(){ _spDoUndo(); };
     var _dz=ov.querySelector('#sp-days'); if(_dz)_dz.onchange=function(){ _spDays=Math.max(0,parseInt(this.value,10)); if(isNaN(_spDays))_spDays=21; if(_spCtry)_spDraw(); };
+    var _ka=ov.querySelector('#sp-keepapart'); if(_ka)_ka.onchange=function(){ _spKeepApart=this.checked; try{localStorage.setItem('hzSpKeepApart',_spKeepApart?'1':'0');}catch(e){} if(_spCtry)_spDraw(); };
     _spPills(); if(_spCtry)_spLoad(); else _spDrawPrompt(); }   // reopen: keep the last-selected market and refresh it; else prompt
   function _spDaysToGo(pe){ if(!pe)return null; var t=new Date(pe+'T00:00:00'), n=new Date(); n.setHours(0,0,0,0); return Math.round((t-n)/86400000); }
   function _spDaysLabel(d){ if(d==null)return '<span class="mut" style="font-size:10px">no prod date</span>'; if(d<0)return '<span style="color:#166534;font-weight:700;font-size:10px">ready (end date past)</span>'; if(d===0)return '<span style="color:#b45309;font-weight:700;font-size:10px">due today</span>'; return '<span style="font-size:10px;color:'+(d<=7?'#b45309':'#475569')+';font-weight:'+(d<=7?'700':'600')+'">'+d+' days to go</span>'; }
   function _spPack(items){ var arr=items.slice().sort(function(a,b){return b.pallets-a.pallets;}), bins=[];   // FFD favouring the fullest ≤20-pallet bin (20 priority; 15+ good; beats 10ft+LCL)
-    arr.forEach(function(p){ if(!(p.pallets>0))return; var best=-1; for(var i=0;i<bins.length;i++){ if(bins[i].pal+p.pallets<=20 && (best<0||bins[i].pal>bins[best].pal))best=i; } if(best>=0){ bins[best].pos.push(p); bins[best].pal+=p.pallets; } else bins.push({pos:[p],pal:p.pallets}); });
+    arr.forEach(function(p){ if(!(p.pallets>0))return; var best=-1; for(var i=0;i<bins.length;i++){ if(bins[i].pal+p.pallets<=20 && !_spMixBlocked(bins[i].pos,p) && (best<0||bins[i].pal>bins[best].pal))best=i; } if(best>=0){ bins[best].pos.push(p); bins[best].pal+=p.pallets; } else bins.push({pos:[p],pal:p.pallets}); });   // keep-apart: never place a Lixin PO into an XR bin (or vice-versa) when the toggle is on
     return bins; }
   function _spPills(){ var cp=document.getElementById('sp-ctry'); if(!cp)return;
     cp.innerHTML=SP_MKTS.map(function(c){ return '<span class="pill'+((_spCtry===c)?' active':'')+'" data-spc="'+c+'" style="font-weight:700;padding:4px 13px;font-size:12px">'+c+'</span>'; }).join('');
@@ -4853,7 +4859,7 @@
     var addGroups=(function(){ var byRef={};
       Object.keys(contMap).forEach(function(rf){ var cps=contMap[rf]; if(!cps.length||cps[0].confirmed)return; byRef[rf]={ref:rf, cur:Math.round(cps.reduce(function(a,x){return a+x.pallets;},0)*10)/10, pos:[]}; });
       unassigned.slice().sort(function(a,b){return b.pallets-a.pallets;}).forEach(function(p){ var best=null,bestTot=-1;
-        Object.keys(byRef).forEach(function(rf){ var g=byRef[rf]; var tot=g.cur+g.pos.reduce(function(a,x){return a+x.pallets;},0); if(tot+p.pallets<=20 && tot>bestTot){ best=rf; bestTot=tot; } });
+        Object.keys(byRef).forEach(function(rf){ var g=byRef[rf]; var tot=g.cur+g.pos.reduce(function(a,x){return a+x.pallets;},0); if(tot+p.pallets<=20 && !_spMixBlocked(contMap[rf].concat(g.pos),p) && tot>bestTot){ best=rf; bestTot=tot; } });   // keep-apart: don't top up a container that would then mix Lixin + XR Textile
         if(best!=null)byRef[best].pos.push(p); });
       return Object.keys(byRef).map(function(k){return byRef[k];}).filter(function(g){return g.pos.length;})
         .map(function(g){ g.after=Math.round((g.cur+g.pos.reduce(function(a,x){return a+x.pallets;},0))*10)/10; return g; }); })();
