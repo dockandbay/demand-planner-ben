@@ -906,7 +906,8 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
       <div style="font-size:15px;font-weight:700">&#9635; Forecast logic — how every number is calculated</div>
       <button onclick="closeFcLogic()" style="margin-left:auto;border:none;background:#f0f0f0;border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:18px;line-height:1">&times;</button>
     </div>
-    <div style="color:#555;margin-bottom:12px">Every SKU × market × channel × month cell is either a real actual or a calculated forecast. The demand plan and the buy plan use the <b>same</b> forecast, so they always agree.</div>
+    <div style="color:#555;margin-bottom:10px">Every SKU × market × channel × month cell is either a real actual or a calculated forecast. The demand plan and the buy plan use the <b>same</b> forecast, so they always agree.</div>
+    <div style="margin:0 0 12px"><a href="#/config/contribmodel" onclick="try{closeFcLogic()}catch(e){}" style="display:inline-block;font-size:12px;font-weight:600;color:#5b21b6;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:6px 11px;text-decoration:none">&#9635; Edit the Contribution model &mdash; CONFIG &#9656; Demand &#9656;</a></div>
     <div style="display:flex;flex-direction:column;gap:13px">
       <div>
         <div style="font-weight:700;color:#0a0a0a">1 &middot; Actuals vs forecast</div>
@@ -1335,9 +1336,22 @@ var SUBS_META={};
 // underlying Airtable contribution_targets table is tier-mixed at the parent
 // category level, not per CORE/SEASONAL variant. Used by the rank-aware smooth.
 var CONTRIB_TARGETS={"Eye Mask|UK|FBA|B":25,"Tea Towel|US|B2B|B":25,"Poncho - Adults|US|B2B|A":50,"Beach Pillow|US|FBA|B":25,"Towel - Home|AU|FBA|A":50,"Bag - Toiletry|US|FBA|A":50,"Towel - Beach|UK|B2B|C":25,"Towel - Home|AU|DTC|B":25,"Cooling|UK|DTC|C":25,"Towel - Home|US|FBA|B":25,"Bag - Cooling|US|DTC|C":25,"Hair Wrap|UK|FBA|C":25,"Cooling|CA|FBA|A":50,"Bag - Cooling|UK|FBA|A":50,"Bag - Dry XS|AU|FBA|B":25,"Poncho - Adults|UK|FBA|B":25,"Getaway Glow|US|B2B|B":25,"Gift Box|AU|FBA|B":25,"Getaway Glow|CA|FBA|C":25,"Towel - Home|UK|DTC|C":25,"Eye Mask|EU|FBA|C":25,"Getaway Glow|UK|B2B|B":25,"Poncho - Kids|EU|FBA|B":25,"Tea Towel|US|FBA|C":25,"Towel - Beach|EU|B2B|B":25,"Picnic Blanket|AU|DTC|C":25,"Beach Pillow|UK|FBA|A":50,"Bag - Dry XS|US|B2B|C":25,"Towel - Home|AU|DTC|C":25,"Cooling|AU|DTC|C":25,"Poncho - Kids|EU|DTC|C":25,"Poncho - Adults|EU|DTC|C":25,"Bag - Toiletry|CA|FBA|B":25,"Bag - Dry XS|AU|FBA|C":25,"Hair Wrap|UK|FBA|B":25,"Bag - Foldable|US|B2B|C":25,"Cooling|UK|DTC|B":25,"Bag - Toiletry|UK|FBA|C":25,"Poncho - Adults|US|DTC|A":50,"Bag - Beach|US|DTC|C":25,"Bag - Dry MD|AU|FBA|B":25,"Gift Box|CA|FBA|A":50,"Poncho - Adults|UK|B2B|A":50,"Poncho - Kids|UK|DTC|A":50,"Bag - Beach|UK|DTC|A":50,"Poncho - Adults|EU|FBA|B":25,"Hair Wrap|EU|DTC|B":25,"Bag - Foldable|US|DTC|C":25,"Cooling|UK|B2B|B":25,"Towel - Beach|EU|FBA|A":50,"Beach Pillow|US|B2B|C":25,"Bag - Dry XS|EU|DTC|B":25,"Poncho - Kids|EU|B2B|B":25,"Bag - Cooling|AU|FBA|B":25,"Bag - Dry XS|US|DTC|C":25,"Bag - Cooling|US|FBA|A":50,"Cooling|US|DTC|A":50,"Bag - Beach|EU|B2B|B":25,"Bag - Dry MD|US|B2B|A":50,"Bag - Cooling|UK|B2B|A":50,"Cooling|CA|FBA|B":25,"Towel - Beach|CA|FBA|B":25,"Poncho - Adults|AU|DTC|A":50,"Poncho - Kids|UK|FBA|C":25,"Cooling|AU|DTC|B":25,"Bag - Toiletry|UK|DTC|C":25,"Poncho - Adults|AU|DTC|C":25,"Poncho - Adults|AU|FBA|A":50,"Hair Wrap|UK|B2B|C":25,"Towel - Home|US|B2B|C":25,"Poncho - Kids|EU|B2B|A":50,"Picnic Blanket|UK|DTC|A":50,"Getaway Glow|US|DTC|B":25,"Beach Pillow|AU|DTC|C":25,"Beach Pillow|EU|B2B|A":50,"Towel - Home|UK|B2B|B":25,"Bag - Dry XS|EU|FBA|A":50,"Towel - Home|US|DTC|B":25,"Gift Box|EU|FBA|C":25,"Bag - Toiletry|UK|B2B|C":25,"Cooling|US|DTC|C":25,"Bag - Beach|US|FBA|B":25,"Towel - Beach|EU|DTC|A":50,"Poncho - Adults|EU|DTC|A":50,"Eye Mask|US|FBA|C":25,"Bag - Dry MD|AU|DTC|B":25,"Bag - Toiletry|EU|B2B|C":25,"Poncho - Kids|AU|DTC|A":50,"Gift Box|EU|B2B|A":50,"Getaway Glow|UK|DTC|C":25,"Bag - Toiletry|AU|FBA|C":25,"Getaway Glow|UK|B2B|A":50,"Eye Mask|US|DTC|A":50,"Bag - Toiletry|AU|DTC|C":25,"Cooling|UK|FBA|A":50,"Towel - Home|EU|FBA|C":25,"Bag - Dry XS|UK|B2B|B":25,"Bag - Dry XS|US|FBA|A":50,"Bag - Toiletry|EU|FBA|A":50,"Bag - Dry XS|CA|FBA|B":25,"Gift Box|EU|DTC|B":25,"Bag - Dry MD|US|DTC|A":50,"Beach Pillow|UK|FBA|C":25,"Bag - Dry XS|EU|B2B|B":25,"Tea Towel|AU|FBA|C":25,"Picnic Blanket|US|B2B|C":25,"Eye Mask|EU|FBA|B":25,"Bag - Dry MD|AU|DTC|A":50,"Picnic Blanket|EU|B2B|A":50,"Towel - Home|UK|DTC|A":50,"Beach Pillow|US|FBA|C":25,"Poncho - Kids|US|DTC|A":50,"Poncho - Kids|UK|B2B|C":25,"Bag - Cooling|CA|FBA|A":50,"Hair Wrap|US|DTC|A":50,"Bag - Dry MD|EU|FBA|A":50,"Cooling|AU|FBA|B":25,"Hair Wrap|EU|DTC|A":50,"Towel - Home|EU|FBA|A":50,"Bag - Toiletry|UK|FBA|B":25,"Gift Box|UK|FBA|C":25,"Bag - Beach|AU|FBA|A":50,"Gift Box|AU|FBA|C":25,"Bag - Cooling|UK|B2B|C":25,"Gift Box|US|B2B|B":25,"Bag - Cooling|AU|DTC|C":25,"Tea Towel|AU|FBA|B":25,"Bag - Toiletry|US|FBA|C":25,"Bag - Beach|AU|DTC|B":25,"Bag - Cooling|AU|FBA|A":50,"Getaway Glow|EU|DTC|A":50,"Gift Box|UK|FBA|B":25,"Bag - Foldable|AU|FBA|B":25,"Bag - Dry MD|UK|DTC|B":25,"Bag - Cooling|UK|DTC|A":50,"Towel - Beach|UK|DTC|C":25,"Bag - Cooling|UK|DTC|B":25,"Hair Wrap|UK|DTC|C":25,"Poncho - Kids|CA|FBA|A":50,"Poncho - Adults|CA|FBA|C":25,"Bag - Dry XS|CA|FBA|A":50,"Gift Box|EU|FBA|A":50,"Picnic Blanket|EU|FBA|C":25,"Tea Towel|EU|B2B|C":25,"Bag - Dry XS|EU|FBA|B":25,"Bag - Toiletry|CA|FBA|C":25,"Eye Mask|AU|FBA|C":25,"Towel - Home|EU|DTC|B":25,"Bag - Foldable|AU|DTC|B":25,"Bag - Cooling|EU|FBA|A":50,"Gift Box|EU|FBA|B":25,"Towel - Beach|UK|DTC|B":25,"Bag - Toiletry|EU|B2B|A":50,"Poncho - Kids|UK|FBA|B":25,"Cooling|EU|B2B|C":25,"Poncho - Kids|AU|FBA|B":25,"Poncho - Adults|AU|FBA|B":25,"Cooling|EU|B2B|A":50,"Tea Towel|CA|FBA|A":50,"Bag - Dry MD|CA|FBA|B":25,"Cooling|EU|DTC|B":25,"Bag - Beach|EU|B2B|C":25,"Bag - Foldable|UK|B2B|B":25,"Eye Mask|US|FBA|A":50,"Bag - Dry XS|EU|DTC|A":50,"Bag - Cooling|EU|DTC|C":25,"Getaway Glow|US|B2B|C":25,"Gift Box|AU|DTC|B":25,"Picnic Blanket|EU|DTC|B":25,"Gift Box|AU|DTC|A":50,"Cooling|EU|FBA|B":25,"Bag - Cooling|EU|FBA|B":25,"Bag - Toiletry|AU|DTC|B":25,"Hair Wrap|UK|B2B|B":25,"Beach Pillow|EU|FBA|C":25,"Towel - Home|CA|FBA|A":50,"Beach Pillow|UK|B2B|C":25,"Hair Wrap|AU|DTC|B":25,"Bag - Dry MD|AU|DTC|C":25,"Poncho - Kids|AU|FBA|A":50,"Picnic Blanket|UK|B2B|B":25,"Cooling|UK|FBA|B":25,"Bag - Toiletry|CA|FBA|A":50,"Bag - Dry XS|US|FBA|C":25,"Gift Box|EU|B2B|C":25,"Bag - Beach|UK|FBA|C":25,"Bag - Beach|US|FBA|A":50,"Towel - Home|AU|DTC|A":50,"Hair Wrap|US|B2B|C":25,"Picnic Blanket|US|DTC|C":25,"Towel - Beach|US|B2B|C":25,"Getaway Glow|US|FBA|C":25,"Bag - Beach|US|DTC|B":25,"Bag - Dry XS|CA|FBA|C":25,"Towel - Beach|UK|B2B|A":50,"Poncho - Adults|EU|DTC|B":25,"Bag - Beach|CA|FBA|A":50,"Bag - Beach|UK|FBA|A":50,"Picnic Blanket|EU|FBA|A":50,"Eye Mask|AU|DTC|B":25,"Poncho - Adults|US|FBA|B":25,"Poncho - Adults|UK|B2B|B":25,"Bag - Foldable|EU|DTC|A":50,"Bag - Foldable|AU|DTC|A":50,"Bag - Foldable|US|B2B|A":50,"Bag - Cooling|US|B2B|C":25,"Bag - Dry MD|UK|DTC|C":25,"Eye Mask|EU|B2B|C":25,"Hair Wrap|US|FBA|B":25,"Towel - Beach|UK|DTC|A":50,"Cooling|AU|FBA|A":50,"Bag - Foldable|US|DTC|B":25,"Hair Wrap|EU|FBA|C":25,"Tea Towel|EU|B2B|B":25,"Towel - Beach|EU|DTC|C":25,"Picnic Blanket|AU|FBA|B":25,"Towel - Beach|AU|FBA|A":50,"Bag - Dry MD|AU|FBA|C":25,"Getaway Glow|AU|FBA|A":50,"Bag - Toiletry|US|B2B|A":50,"Bag - Cooling|EU|B2B|C":25,"Cooling|UK|FBA|C":25,"Beach Pillow|US|DTC|C":25,"Gift Box|US|DTC|C":25,"Bag - Foldable|EU|B2B|A":50,"Bag - Dry MD|CA|FBA|C":25,"Towel - Beach|US|FBA|B":25,"Poncho - Adults|EU|FBA|A":50,"Bag - Toiletry|EU|FBA|C":25,"Bag - Beach|US|B2B|C":25,"Poncho - Kids|US|B2B|C":25,"Getaway Glow|UK|DTC|B":25,"Tea Towel|UK|B2B|B":25,"Eye Mask|AU|FBA|B":25,"Cooling|US|FBA|C":25,"Bag - Dry MD|CA|FBA|A":50,"Tea Towel|US|FBA|B":25,"Eye Mask|US|FBA|B":25,"Gift Box|US|FBA|B":25,"Poncho - Kids|EU|FBA|A":50,"Getaway Glow|EU|FBA|C":25,"Picnic Blanket|CA|FBA|C":25,"Poncho - Adults|AU|FBA|C":25,"Poncho - Kids|CA|FBA|C":25,"Bag - Dry MD|US|DTC|C":25,"Tea Towel|UK|FBA|A":50,"Bag - Foldable|UK|FBA|B":25,"Poncho - Adults|US|B2B|C":25,"Picnic Blanket|CA|FBA|A":50,"Bag - Dry MD|EU|B2B|C":25,"Eye Mask|AU|DTC|C":25,"Tea Towel|UK|FBA|B":25,"Towel - Beach|US|DTC|C":25,"Bag - Foldable|EU|DTC|B":25,"Getaway Glow|UK|FBA|A":50,"Bag - Cooling|EU|DTC|A":50,"Getaway Glow|UK|FBA|C":25,"Hair Wrap|US|DTC|C":25,"Gift Box|EU|DTC|C":25,"Bag - Foldable|US|FBA|A":50,"Bag - Dry MD|EU|FBA|C":25,"Bag - Beach|UK|B2B|C":25,"Beach Pillow|EU|FBA|A":50,"Hair Wrap|UK|FBA|A":50,"Bag - Dry XS|UK|DTC|A":50,"Getaway Glow|UK|DTC|A":50,"Eye Mask|US|B2B|A":50,"Getaway Glow|US|FBA|A":50,"Bag - Beach|US|DTC|A":50,"Eye Mask|AU|FBA|A":50,"Gift Box|US|DTC|A":50,"Cooling|US|FBA|B":25,"Bag - Beach|CA|FBA|B":25,"Bag - Foldable|UK|FBA|C":25,"Bag - Cooling|CA|FBA|B":25,"Poncho - Kids|UK|B2B|A":50,"Picnic Blanket|UK|FBA|C":25,"Picnic Blanket|UK|B2B|C":25,"Bag - Cooling|UK|DTC|C":25,"Gift Box|US|DTC|B":25,"Getaway Glow|UK|FBA|B":25,"Bag - Cooling|AU|DTC|A":50,"Bag - Beach|UK|FBA|B":25,"Getaway Glow|AU|DTC|A":50,"Picnic Blanket|EU|DTC|C":25,"Getaway Glow|AU|DTC|C":25,"Eye Mask|CA|FBA|C":25,"Hair Wrap|EU|B2B|B":25,"Bag - Dry MD|EU|B2B|B":25,"Bag - Toiletry|EU|DTC|C":25,"Bag - Toiletry|US|DTC|B":25,"Bag - Beach|US|B2B|A":50,"Poncho - Kids|AU|DTC|C":25,"Bag - Toiletry|EU|DTC|B":25,"Beach Pillow|UK|DTC|B":25,"Gift Box|EU|B2B|B":25,"Beach Pillow|AU|DTC|B":25,"Towel - Home|UK|B2B|A":50,"Tea Towel|UK|FBA|C":25,"Towel - Home|EU|FBA|B":25,"Hair Wrap|US|FBA|A":50,"Gift Box|UK|DTC|A":50,"Bag - Dry MD|UK|FBA|C":25,"Poncho - Adults|US|DTC|C":25,"Poncho - Kids|US|DTC|B":25,"Cooling|AU|DTC|A":50,"Bag - Dry XS|US|DTC|A":50,"Tea Towel|EU|FBA|A":50,"Beach Pillow|EU|B2B|B":25,"Bag - Dry MD|EU|B2B|A":50,"Bag - Foldable|UK|B2B|C":25,"Getaway Glow|EU|FBA|A":50,"Bag - Dry XS|AU|DTC|C":25,"Getaway Glow|AU|FBA|B":25,"Cooling|US|B2B|C":25,"Bag - Toiletry|UK|FBA|A":50,"Bag - Beach|UK|DTC|B":25,"Towel - Beach|US|FBA|C":25,"Bag - Foldable|EU|B2B|B":25,"Tea Towel|AU|DTC|A":50,"Picnic Blanket|US|DTC|B":25,"Hair Wrap|EU|B2B|C":25,"Bag - Foldable|US|DTC|A":50,"Cooling|US|B2B|B":25,"Picnic Blanket|UK|FBA|A":50,"Beach Pillow|EU|B2B|C":25,"Towel - Home|US|B2B|A":50,"Bag - Cooling|US|DTC|B":25,"Eye Mask|UK|B2B|C":25,"Hair Wrap|AU|FBA|A":50,"Picnic Blanket|AU|DTC|A":50,"Eye Mask|US|DTC|C":25,"Getaway Glow|US|B2B|A":50,"Tea Towel|UK|DTC|B":25,"Poncho - Kids|EU|B2B|C":25,"Bag - Dry XS|UK|FBA|A":50,"Poncho - Adults|AU|DTC|B":25,"Bag - Foldable|AU|DTC|C":25,"Hair Wrap|AU|DTC|A":50,"Bag - Beach|EU|FBA|A":50,"Bag - Foldable|EU|FBA|A":50,"Bag - Dry MD|UK|DTC|A":50,"Towel - Beach|AU|DTC|A":50,"Getaway Glow|US|DTC|C":25,"Bag - Dry XS|US|FBA|B":25,"Picnic Blanket|US|FBA|B":25,"Getaway Glow|UK|B2B|C":25,"Towel - Home|US|FBA|C":25,"Hair Wrap|AU|FBA|B":25,"Bag - Dry MD|AU|FBA|A":50,"Towel - Beach|EU|DTC|B":25,"Picnic Blanket|EU|B2B|B":25,"Beach Pillow|CA|FBA|A":50,"Picnic Blanket|AU|FBA|C":25,"Bag - Foldable|CA|FBA|A":50,"Picnic Blanket|UK|B2B|A":50,"Bag - Foldable|US|FBA|B":25,"Eye Mask|EU|FBA|A":50,"Tea Towel|US|DTC|B":25,"Beach Pillow|UK|B2B|B":25,"Poncho - Adults|CA|FBA|A":50,"Tea Towel|UK|B2B|C":25,"Hair Wrap|UK|B2B|A":50,"Hair Wrap|US|FBA|C":25,"Eye Mask|EU|B2B|B":25,"Towel - Home|US|FBA|A":50,"Poncho - Kids|US|B2B|A":50,"Tea Towel|US|B2B|C":25,"Cooling|EU|FBA|C":25,"Bag - Dry XS|UK|B2B|A":50,"Eye Mask|CA|FBA|A":50,"Bag - Cooling|UK|B2B|B":25,"Towel - Home|UK|B2B|C":25,"Bag - Dry MD|US|FBA|C":25,"Gift Box|AU|FBA|A":50,"Gift Box|EU|DTC|A":50,"Bag - Beach|EU|FBA|C":25,"Gift Box|UK|B2B|A":50,"Picnic Blanket|UK|FBA|B":25,"Poncho - Adults|UK|DTC|C":25,"Bag - Toiletry|AU|FBA|A":50,"Beach Pillow|UK|B2B|A":50,"Gift Box|UK|FBA|A":50,"Beach Pillow|AU|FBA|C":25,"Poncho - Adults|EU|FBA|C":25,"Hair Wrap|EU|FBA|B":25,"Hair Wrap|EU|FBA|A":50,"Bag - Toiletry|US|DTC|A":50,"Getaway Glow|US|FBA|B":25,"Hair Wrap|CA|FBA|B":25,"Poncho - Adults|EU|B2B|B":25,"Poncho - Kids|UK|DTC|B":25,"Towel - Home|UK|FBA|C":25,"Beach Pillow|EU|FBA|B":25,"Beach Pillow|EU|DTC|A":50,"Beach Pillow|UK|FBA|B":25,"Bag - Cooling|US|FBA|C":25,"Towel - Beach|US|DTC|B":25,"Bag - Beach|AU|DTC|C":25,"Picnic Blanket|EU|B2B|C":25,"Bag - Dry MD|US|FBA|A":50,"Bag - Foldable|UK|DTC|A":50,"Poncho - Adults|UK|DTC|A":50,"Cooling|UK|B2B|A":50,"Poncho - Kids|US|FBA|C":25,"Poncho - Adults|UK|B2B|C":25,"Getaway Glow|EU|DTC|B":25,"Cooling|US|DTC|B":25,"Towel - Beach|UK|FBA|C":25,"Towel - Home|CA|FBA|B":25,"Cooling|US|B2B|A":50,"Tea Towel|AU|FBA|A":50,"Tea Towel|UK|DTC|A":50,"Bag - Dry MD|EU|DTC|B":25,"Beach Pillow|UK|DTC|A":50,"Towel - Beach|AU|FBA|B":25,"Gift Box|UK|B2B|B":25,"Bag - Toiletry|US|DTC|C":25,"Bag - Toiletry|EU|FBA|B":25,"Beach Pillow|US|FBA|A":50,"Tea Towel|AU|DTC|C":25,"Bag - Beach|AU|FBA|C":25,"Picnic Blanket|EU|FBA|B":25,"Gift Box|CA|FBA|B":25,"Beach Pillow|CA|FBA|C":25,"Picnic Blanket|UK|DTC|B":25,"Bag - Beach|EU|DTC|C":25,"Tea Towel|EU|FBA|B":25,"Eye Mask|US|B2B|C":25,"Eye Mask|US|DTC|B":25,"Gift Box|UK|DTC|B":25,"Tea Towel|AU|DTC|B":25,"Picnic Blanket|US|B2B|A":50,"Bag - Dry XS|AU|DTC|B":25,"Bag - Beach|UK|DTC|C":25,"Poncho - Kids|US|B2B|B":25,"Poncho - Kids|US|FBA|B":25,"Bag - Beach|UK|B2B|A":50,"Eye Mask|UK|DTC|B":25,"Beach Pillow|US|DTC|A":50,"Bag - Toiletry|AU|DTC|A":50,"Getaway Glow|CA|FBA|A":50,"Gift Box|AU|DTC|C":25,"Bag - Foldable|AU|FBA|C":25,"Towel - Beach|US|DTC|A":50,"Poncho - Kids|US|FBA|A":50,"Bag - Dry MD|EU|FBA|B":25,"Bag - Cooling|EU|DTC|B":25,"Bag - Dry MD|UK|FBA|B":25,"Bag - Toiletry|UK|DTC|B":25,"Bag - Dry XS|US|B2B|B":25,"Towel - Beach|AU|DTC|C":25,"Getaway Glow|AU|FBA|C":25,"Bag - Foldable|CA|FBA|B":25,"Eye Mask|EU|B2B|A":50,"Bag - Dry XS|EU|FBA|C":25,"Bag - Foldable|EU|DTC|C":25,"Towel - Home|US|DTC|C":25,"Bag - Foldable|UK|DTC|B":25,"Bag - Cooling|EU|B2B|B":25,"Bag - Dry MD|US|B2B|C":25,"Beach Pillow|EU|DTC|C":25,"Bag - Toiletry|EU|B2B|B":25,"Towel - Beach|UK|B2B|B":25,"Towel - Beach|EU|B2B|C":25,"Eye Mask|UK|FBA|C":25,"Bag - Dry XS|AU|FBA|A":50,"Eye Mask|EU|DTC|B":25,"Bag - Beach|US|B2B|B":25,"Hair Wrap|EU|B2B|A":50,"Towel - Home|US|DTC|A":50,"Bag - Foldable|EU|B2B|C":25,"Hair Wrap|EU|DTC|C":25,"Towel - Home|EU|B2B|B":25,"Getaway Glow|EU|B2B|A":50,"Poncho - Adults|US|FBA|A":50,"Bag - Toiletry|US|B2B|C":25,"Bag - Dry MD|US|DTC|B":25,"Hair Wrap|CA|FBA|A":50,"Poncho - Kids|AU|DTC|B":25,"Bag - Beach|AU|FBA|B":25,"Cooling|EU|B2B|B":25,"Bag - Beach|EU|DTC|B":25,"Cooling|UK|DTC|A":50,"Towel - Home|EU|B2B|A":50,"Beach Pillow|CA|FBA|B":25,"Poncho - Kids|UK|B2B|B":25,"Bag - Cooling|EU|B2B|A":50,"Bag - Foldable|EU|FBA|C":25,"Bag - Dry XS|UK|B2B|C":25,"Bag - Dry MD|UK|B2B|B":25,"Bag - Dry XS|US|B2B|A":50,"Eye Mask|US|B2B|B":25,"Towel - Home|EU|DTC|C":25,"Beach Pillow|US|B2B|A":50,"Bag - Dry MD|EU|DTC|A":50,"Hair Wrap|UK|DTC|B":25,"Bag - Beach|US|FBA|C":25,"Eye Mask|UK|DTC|C":25,"Bag - Dry XS|US|DTC|B":25,"Towel - Beach|EU|FBA|C":25,"Bag - Foldable|UK|B2B|A":50,"Picnic Blanket|AU|FBA|A":50,"Poncho - Adults|CA|FBA|B":25,"Towel - Beach|CA|FBA|A":50,"Tea Towel|EU|DTC|B":25,"Eye Mask|UK|B2B|A":50,"Eye Mask|EU|DTC|A":50,"Poncho - Adults|UK|FBA|A":50,"Towel - Beach|US|B2B|A":50,"Picnic Blanket|US|DTC|A":50,"Bag - Dry MD|US|B2B|B":25,"Bag - Cooling|UK|FBA|B":25,"Hair Wrap|AU|DTC|C":25,"Eye Mask|UK|B2B|B":25,"Towel - Beach|AU|DTC|B":25,"Bag - Foldable|EU|FBA|B":25,"Bag - Dry XS|UK|DTC|C":25,"Cooling|EU|DTC|A":50,"Beach Pillow|EU|DTC|B":25,"Picnic Blanket|US|B2B|B":25,"Bag - Toiletry|US|FBA|B":25,"Eye Mask|CA|FBA|B":25,"Bag - Beach|EU|DTC|A":50,"Tea Towel|CA|FBA|C":25,"Getaway Glow|EU|FBA|B":25,"Hair Wrap|AU|FBA|C":25,"Cooling|EU|DTC|C":25,"Bag - Cooling|AU|DTC|B":25,"Getaway Glow|US|DTC|A":50,"Tea Towel|US|FBA|A":50,"Towel - Home|CA|FBA|C":25,"Getaway Glow|EU|DTC|C":25,"Bag - Foldable|CA|FBA|C":25,"Poncho - Kids|CA|FBA|B":25,"Towel - Home|EU|DTC|A":50,"Hair Wrap|US|B2B|A":50,"Hair Wrap|UK|DTC|A":50,"Bag - Dry XS|EU|DTC|C":25,"Tea Towel|UK|B2B|A":50,"Tea Towel|US|B2B|A":50,"Getaway Glow|EU|B2B|B":25,"Cooling|UK|B2B|C":25,"Gift Box|US|B2B|A":50,"Picnic Blanket|US|FBA|C":25,"Bag - Dry XS|AU|DTC|A":50,"Cooling|AU|FBA|C":25,"Beach Pillow|AU|FBA|B":25,"Towel - Home|AU|FBA|C":25,"Bag - Dry XS|EU|B2B|C":25,"Beach Pillow|AU|FBA|A":50,"Bag - Toiletry|UK|DTC|A":50,"Bag - Toiletry|UK|B2B|B":25,"Hair Wrap|US|B2B|B":25,"Getaway Glow|EU|B2B|C":25,"Bag - Cooling|US|B2B|B":25,"Bag - Foldable|UK|FBA|A":50,"Gift Box|UK|DTC|C":25,"Bag - Dry MD|US|FBA|B":25,"Beach Pillow|US|B2B|B":25,"Eye Mask|UK|DTC|A":50,"Towel - Beach|AU|FBA|C":25,"Picnic Blanket|US|FBA|A":50,"Picnic Blanket|CA|FBA|B":25,"Poncho - Kids|UK|DTC|C":25,"Poncho - Adults|US|FBA|C":25,"Poncho - Adults|EU|B2B|A":50,"Gift Box|UK|B2B|C":25,"Towel - Beach|UK|FBA|A":50,"Bag - Dry XS|UK|FBA|B":25,"Towel - Beach|UK|FBA|B":25,"Towel - Beach|US|FBA|A":50,"Bag - Cooling|US|FBA|B":25,"Bag - Dry XS|UK|FBA|C":25,"Gift Box|US|B2B|C":25,"Bag - Cooling|EU|FBA|C":25,"Bag - Cooling|US|B2B|A":50,"Bag - Foldable|US|FBA|C":25,"Bag - Cooling|UK|FBA|C":25,"Poncho - Kids|EU|DTC|A":50,"Cooling|US|FBA|A":50,"Tea Towel|CA|FBA|B":25,"Eye Mask|AU|DTC|A":50,"Poncho - Adults|EU|B2B|C":25,"Eye Mask|EU|DTC|C":25,"Cooling|EU|FBA|A":50,"Hair Wrap|US|DTC|B":25,"Towel - Home|UK|FBA|A":50,"Bag - Beach|EU|B2B|A":50,"Bag - Dry XS|EU|B2B|A":50,"Poncho - Adults|UK|FBA|C":25,"Bag - Foldable|UK|DTC|C":25,"Getaway Glow|CA|FBA|B":25,"Towel - Beach|EU|FBA|B":25,"Eye Mask|UK|FBA|A":50,"Gift Box|CA|FBA|C":25,"Bag - Dry MD|UK|B2B|A":50,"Poncho - Kids|US|DTC|C":25,"Bag - Toiletry|US|B2B|B":25,"Poncho - Adults|US|B2B|B":25,"Getaway Glow|AU|DTC|B":25,"Towel - Home|UK|FBA|B":25,"Towel - Home|US|B2B|B":25,"Poncho - Kids|EU|FBA|C":25,"Poncho - Kids|EU|DTC|B":25,"Tea Towel|EU|FBA|C":25,"Bag - Toiletry|UK|B2B|A":50,"Tea Towel|UK|DTC|C":25,"Bag - Toiletry|EU|DTC|A":50,"Bag - Toiletry|AU|FBA|B":25,"Picnic Blanket|UK|DTC|C":25,"Tea Towel|US|DTC|A":50,"Towel - Beach|US|B2B|B":25,"Bag - Dry XS|UK|DTC|B":25,"Hair Wrap|CA|FBA|C":25,"Beach Pillow|AU|DTC|A":50,"Bag - Dry MD|UK|FBA|A":50,"Tea Towel|US|DTC|C":25,"Towel - Beach|EU|B2B|A":50,"Gift Box|US|FBA|A":50,"Bag - Beach|UK|B2B|B":25,"Gift Box|US|FBA|C":25,"Towel - Home|EU|B2B|C":25,"Tea Towel|EU|B2B|A":50,"Poncho - Adults|UK|DTC|B":25,"Picnic Blanket|EU|DTC|A":50,"Bag - Dry MD|EU|DTC|C":25,"Poncho - Kids|AU|FBA|C":25,"Towel - Beach|CA|FBA|C":25,"Bag - Beach|AU|DTC|A":50,"Towel - Home|AU|FBA|B":25,"Bag - Beach|EU|FBA|B":25,"Beach Pillow|US|DTC|B":25,"Bag - Foldable|US|B2B|B":25,"Tea Towel|EU|DTC|A":50,"Bag - Cooling|AU|FBA|C":25,"Tea Towel|EU|DTC|C":25,"Beach Pillow|UK|DTC|C":25,"Picnic Blanket|AU|DTC|B":25,"Bag - Cooling|US|DTC|A":50,"Bag - Foldable|AU|FBA|A":50,"Poncho - Adults|US|DTC|B":25,"Towel - Home|UK|DTC|B":25,"Bag - Beach|CA|FBA|C":25,"Poncho - Kids|UK|FBA|A":50,"Cooling|CA|FBA|C":25,"Bag - Cooling|CA|FBA|C":25,"Bag - Dry MD|UK|B2B|C":25};
-// Look up the {A,B,C} tier mix for a given subcat × country × channel.
-// Falls back to the methodology default 50/25/25 when no entry exists.
+// Editable Contribution model (CONFIG ▸ Demand ▸ Contribution model) — server-injected from
+// app_settings.contrib_model. Keyed "<co>|<ch>|<subcat>" with '*' wildcards; cascade cell→channel→
+// country→default. Value = {A,B,C,sets}. Drives the Leader-mode smoothing tier split (SETS feature P3b).
+var CONTRIB_MODEL={};
+// Resolve the saved contribution row for a subcat × country × channel via the cascade (most-specific wins).
+function contribResolve(s,co,ch){
+  if(typeof CONTRIB_MODEL!=='object'||!CONTRIB_MODEL)return null;
+  var ks=[co+'|'+ch,'*|'+ch,co+'|*','*|*'];   // cell → channel → country → default
+  for(var i=0;i<ks.length;i++){ var v=CONTRIB_MODEL[ks[i]+'|'+s]; if(v&&(v.A!=null||v.B!=null||v.C!=null||v.sets!=null))return v; }
+  return null;
+}
+// Look up the {A,B,C} tier mix for a given subcat × country × channel. The editable Contribution model wins;
+// else the legacy baked CONTRIB_TARGETS (by base subcat); else the methodology default 50/25/25.
 function tierMix(s,co,ch){
+  var cm=contribResolve(s,co,ch);
+  if(cm&&(cm.A!=null||cm.B!=null||cm.C!=null)) return {A:Number(cm.A)||0,B:Number(cm.B)||0,C:Number(cm.C)||0};
   var base=String(s||'').replace(/ (CORE|SEASONAL SUM|SEASONAL)$/,'');
   var pre=base+'|'+co+'|'+ch+'|';
   var a=CONTRIB_TARGETS[pre+'A'], b=CONTRIB_TARGETS[pre+'B'], c=CONTRIB_TARGETS[pre+'C'];
@@ -6263,23 +6277,29 @@ function buildSkuShares(skus,co,ch,lyMonths){
     annualisedTotals[sku]=lyTotals[sku]>0?lyTotals[sku]:(recentSum*4);
   });
 
-  // SETS 0c (Ben): a SET takes 0 share of the subcategory contribution model — it is NOT auto-forecast off the
-  // seasonal curve. Zeroed BEFORE tier averages / grand total so masters split the subcat exactly as they did
-  // before sets entered scope (byte-identical), and sets never dilute masters.
-  skus.forEach(function(sku){ if(SKUM[sku]&&SKUM[sku].vt==='SET')annualisedTotals[sku]=0; });
+  // SETS (Ben, P3b): sets are NORMAL SKUs in the sub-category pool. A set with last-year sales inherits it (kept
+  // above), an overridden set uses your number, and a brand-new set (no history) gets a placeholder sized by the
+  // Sets % (CONFIG ▸ Demand ▸ Contribution model). Removing the old 0c zeroing lets sets take their share so masters
+  // conserve the sub-category total. Sets % resolved per sub-category via the cascade; 0 (default) ⇒ new sets = 0.
+  var _setsPct=0; try{ var _sub=(skus.length&&SKUM[skus[0]])?SKUM[skus[0]].s:''; var _cm=(typeof contribResolve==='function')?contribResolve(_sub,co,ch):null; if(_cm&&_cm.sets!=null)_setsPct=Math.max(0,Math.min(100,Number(_cm.sets)||0)); }catch(e){}
 
   // For SKUs with neither LY nor recent history: use tier-weighted placeholder
-  // proportional to average annualised value of other SKUs in same tier
+  // proportional to average annualised value of other SKUs in same tier (masters only — sets use the Sets% placeholder)
   var tierAvg={};
   ['A','B','C'].forEach(function(t){
-    var tierSkus=skus.filter(function(sku){return (SKUM[sku]&&SKUM[sku].ti||'C')===t&&annualisedTotals[sku]>0;});
+    var tierSkus=skus.filter(function(sku){return !(SKUM[sku]&&SKUM[sku].vt==='SET')&&(SKUM[sku]&&SKUM[sku].ti||'C')===t&&annualisedTotals[sku]>0;});
     tierAvg[t]=tierSkus.length>0?tierSkus.reduce(function(a,sku){return a+annualisedTotals[sku];},0)/tierSkus.length:0;
   });
-  var globalAvg=skus.reduce(function(a,sku){return a+annualisedTotals[sku];},0)/Math.max(skus.length,1);
+  var globalAvg=skus.reduce(function(a,sku){return a+((SKUM[sku]&&SKUM[sku].vt==='SET')?0:(annualisedTotals[sku]||0));},0)/Math.max(skus.length,1);
+  var _mastersBase=skus.reduce(function(a,sku){return a+((SKUM[sku]&&SKUM[sku].vt==='SET')?0:(annualisedTotals[sku]||0));},0);
+  var _newSets=skus.filter(function(sku){return SKUM[sku]&&SKUM[sku].vt==='SET'&&annualisedTotals[sku]===0;}).length;
 
   skus.forEach(function(sku){
-    if(SKUM[sku]&&SKUM[sku].vt==='SET')return;   // SETS 0c: no placeholder — sets stay at 0 contribution
-    if(annualisedTotals[sku]===0){
+    if(annualisedTotals[sku]!==0)return;
+    if(SKUM[sku]&&SKUM[sku].vt==='SET'){
+      // brand-new set (no LY/recent): sized so all new sets ≈ Sets% of the sub-category's master base. Sets%=0 ⇒ 0.
+      annualisedTotals[sku]=(_setsPct>0&&_mastersBase>0&&_setsPct<100)?((_setsPct/100)/(1-_setsPct/100)*_mastersBase/Math.max(_newSets,1)):0;
+    } else {
       var t=SKUM[sku]&&SKUM[sku].ti||'C';
       annualisedTotals[sku]=(tierAvg[t]||globalAvg||1)*(tierW[t]||1)/2;
     }
@@ -6575,7 +6595,10 @@ function filteredSkus(s,co,ch,all){
 }
 
 var SETS_VIEW=(function(){try{return localStorage.getItem('hzSetsView')||'show';}catch(e){return 'show';}})();   // DEMAND SKU view: show | hide | only — how build-on-fly SET SKUs display (display-only; does not touch shares/buy)
-function setSetsView(v){ SETS_VIEW=(v==='hide'||v==='only')?v:'show'; try{localStorage.setItem('hzSetsView',SETS_VIEW);}catch(e){} if(SKU_VIEW&&typeof renderSkuView==='function')renderSkuView(); }
+function setSetsView(v){ SETS_VIEW=(v==='hide'||v==='only')?v:'show'; try{localStorage.setItem('hzSetsView',SETS_VIEW);}catch(e){}
+  if(SKU_VIEW&&typeof renderSkuView==='function'){ renderSkuView(); }
+  else if(typeof renderMain==='function'){ renderMain(); }   // main plan: re-render so inline SKU expansions re-apply the filter
+}
 function renderSkuView(){
   if(!SKU_VIEW)return;
   var s=SKU_VIEW.s,co=SKU_VIEW.co,ch=SKU_VIEW.ch;
@@ -6721,8 +6744,10 @@ function renderSkuView(){
     var disc=p.disc&&p.disc[ctry]?p.disc[ctry]:null;
     var launch=p.lch&&p.lch[ctry]?p.lch[ctry]:null;
     var tierCls='tier-'+(p.ti||'c').toLowerCase();
+    // SETS: hovering the SKU code lists the build-on-fly components it explodes into (SETS feature).
+    var _setCodeTip=''; if(p.vt==='SET'){ var _sc=(typeof SET_BOM!=='undefined'&&SET_BOM[sku])||[]; if(_sc.length){ _setCodeTip=' title="Build-on-fly SET — explodes into: '+_sc.map(function(c){return c.sku+' ×'+c.qty;}).join(', ').replace(/"/g,'&quot;')+'"'; } }
     lbl.innerHTML='<div class="sku-nm">'
-      +'<div class="sku-code" style="font-size:11px;font-weight:700;color:#1a1a1a;font-family:monospace">'+sku
+      +'<div class="sku-code"'+_setCodeTip+' style="font-size:11px;font-weight:700;color:#1a1a1a;font-family:monospace'+(_setCodeTip?';cursor:help':'')+'">'+sku
         +(function(){ try{ var n=bisCount(sku,CUR); if(!(n>0))return ''; var up=bisUplift(sku,CUR);
           var tt=n+' back-in-stock subscribers waiting ('+CUR+' · Klaviyo'+(KLAVIYO_BIS._at?' · as of '+KLAVIYO_BIS._at:'')+')'+(up>0?(' — enhanced demand ≈ +'+up+' units ('+n+' × '+(Number(BIS_CFG.take_rate)||35)+'%); consider uplifting the forecast'):'');
           return ' <span title="'+tt+'" style="display:inline-block;background:#fef3c7;color:#92400e;font-weight:700;font-size:8px;border-radius:3px;padding:0 3px;vertical-align:middle;white-space:nowrap">&#128276;'+n+(up>0?' ↑'+up:'')+'</span>'; }catch(e){ return ''; } })()
@@ -7241,6 +7266,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
   var ctry=co.toLowerCase();
   var _skuSp=aspF(s,co,ch);   // subcat avg selling price — used to show revenue on SKU FY/period totals (SKU units × subcat ASP)
   var skus=filteredSkus(s,co,ch); // rows respect the SKU filters; subtotal/gap (eff) covers ALL subcat SKUs
+  if(typeof SETS_VIEW!=='undefined'&&SETS_VIEW!=='show'){ skus=skus.filter(function(sk){ var isS=SKUM[sk]&&SKUM[sk].vt==='SET'; return SETS_VIEW==='only'?isS:!isS; }); }   // Display settings ▸ Sets show/hide/only (also applied here, not just renderSkuView)
   // Share basis = the WHOLE subcat (activity + channel available), NOT the filtered rows — otherwise a search or
   // pill that narrows to one SKU gives it share 1.0, so its cell shows the entire subcat forecast (was a bug).
   var _chKey=ch.toLowerCase()==='dtc'?'d':ch.toLowerCase()==='fba'?'f':ch.toLowerCase()==='zal'?'z':ch.toLowerCase()==='tik'?'t':'b';
@@ -7370,7 +7396,21 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     container.appendChild(ok);container.appendChild(no);
   }
 
-  skus.forEach(function(sku){
+  // MASTER / SET grouping (Ben): when the sub-category contains any sets, order masters first then sets and drop a
+  // collapsible group header before each group. Stays flat (unchanged) when there are no sets.
+  var _grpMs=[],_grpSs=[]; skus.forEach(function(sk){ (SKUM[sk]&&SKUM[sk].vt==='SET'?_grpSs:_grpMs).push(sk); });
+  var _grpOn=_grpSs.length>0; if(_grpOn){ skus=_grpMs.concat(_grpSs); }
+  function _insGrpHdr(grp,label,count){
+    var gkey=grp+'|'+parentKey, htr=document.createElement('tr'); htr.className='sku-inline'; htr.dataset.parentkey=parentKey;
+    var htd=document.createElement('td'); htd.colSpan=999;
+    htd.style.cssText='background:#eef2f7;border-top:1px solid #d1d9e2;border-bottom:1px solid #d1d9e2;padding:0;cursor:pointer;position:relative;z-index:2';
+    // Inner label is sticky-left so MASTERS/SETS stay visible as you scroll the plan horizontally.
+    htd.innerHTML='<span style="position:sticky;left:0;display:inline-block;padding:3px 8px;font-size:9px;font-weight:700;color:#475569;letter-spacing:.04em;text-align:left;background:#eef2f7"><span class="grp-caret" style="display:inline-block;width:11px">▾</span> '+label+' <span style="opacity:.6;font-weight:600">· '+count+'</span></span>';
+    htd.onclick=function(){ var car=htd.querySelector('.grp-caret'), hide=car.textContent!=='▸'; car.textContent=hide?'▸':'▾';
+      Array.prototype.forEach.call(tbody.querySelectorAll('tr.sku-inline'),function(r){ if(r.dataset.skugroup===gkey)r.style.display=hide?'none':''; }); };
+    htr.appendChild(htd); tbody.insertBefore(htr,insertRef);
+  }
+  skus.forEach(function(sku,_gidx){
     var p=SKUM[sku];if(!p)return;
     var sales=skuSales(sku,co,ch);
     var share=shares[sku]||0;
@@ -7434,12 +7474,13 @@ function insertInlineSkuRows(s,co,ch,afterTr){
           +'<button onclick="openDemandPlanPopup(\''+sku+'\')" title="Open the buy-plan view for this SKU" style="margin-top:3px;font-size:7px;padding:1px 7px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer;font-weight:600;line-height:1.4">Plan ▸</button>'
           +'</div>';
         // Optional variant-image thumbnail (More Filters & Settings ▸ "Show variant image"); hover → 400×400 modal.
-        if(typeof SHOW_VARIANT_IMG!=='undefined' && SHOW_VARIANT_IMG && p.img){
+        if(typeof SHOW_VARIANT_IMG!=='undefined' && SHOW_VARIANT_IMG && (p.sw||p.img)){
           var _vw=document.createElement('div'); _vw.style.cssText='display:flex;align-items:flex-start;gap:4px;padding:2px 4px';
-          var _iu=String(p.img).replace(/^http:\/\//i,'https://');   // upgrade http→https (mixed-content blocks http images on the https site)
-          var _sw=(p.sw?String(p.sw).replace(/^http:\/\//i,'https://'):'');   // colour swatch fallback
-          var _vi=document.createElement('img'); _vi.className='sku-varimg'; _vi.src=_iu; _vi.loading='lazy'; _vi.setAttribute('data-full',_iu); _vi.alt='';
-          _vi.onerror=function(){ if(_sw && _sw!==_iu && _vi.getAttribute('data-triedsw')!=='1'){ _vi.setAttribute('data-triedsw','1'); _vi.setAttribute('data-full',_sw); _vi.src=_sw; } else { _vi.style.display='none'; } };   // 404 → fall back to the colour swatch; hide only if that also fails (never hide the wrapper, which holds the SKU label)
+          var _iu=(p.img?String(p.img).replace(/^http:\/\//i,'https://'):'');   // variant image (fallback). upgrade http→https (mixed-content blocks http images)
+          var _sw=(p.sw?String(p.sw).replace(/^http:\/\//i,'https://'):'');   // colour swatch (PREFERRED — Ben)
+          var _primary=_sw||_iu, _fallback=(_sw&&_iu&&_iu!==_sw)?_iu:'';   // prioritise the colour swatch, fall back to the variant image
+          var _vi=document.createElement('img'); _vi.className='sku-varimg'; _vi.src=_primary; _vi.loading='lazy'; _vi.setAttribute('data-full',_primary); _vi.alt='';
+          _vi.onerror=function(){ if(_fallback && _vi.getAttribute('data-triedfb')!=='1'){ _vi.setAttribute('data-triedfb','1'); _vi.setAttribute('data-full',_fallback); _vi.src=_fallback; } else { _vi.style.display='none'; } };   // swatch 404 → fall back to variant image; hide only if that also fails
           _vi.style.cssText='width:30px;height:30px;object-fit:cover;border-radius:4px;border:1px solid #e5e7eb;flex:0 0 auto;cursor:zoom-in;background:#f8fafc';
           var _vt=document.createElement('div'); _vt.style.cssText='flex:1 1 auto;min-width:0';
           while(td.firstChild) _vt.appendChild(td.firstChild);
@@ -7451,9 +7492,14 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         var wh3=ctry+'_3pl', whF=ctry+'_fba';
         var oh3=(p.inv&&p.inv[wh3])||0, ohF=(p.inv&&p.inv[whF])||0, sOo=p.oo&&p.oo[wh]||0;
         td.style.cssText='position:sticky;left:160px;background:#fafafa;border-bottom:1px solid #f0f0ee;border-right:2px solid #b0b0ae;padding:2px 5px;text-align:right;font-size:9px;line-height:1.25;font-variant-numeric:tabular-nums;z-index:1';
+        if(p.vt==='SET'){
+          // SETS: 3PL inventory ONLY (a set's FBA stock is built from 3PL; sets aren't held at FBA and aren't inbound) + a SET badge on the 3PL line.
+          td.innerHTML='<div style="white-space:nowrap;color:'+(oh3<0?'#dc2626':'#334155')+';font-weight:600"><span style="font-size:7px;font-weight:700;color:#7c3aed;background:#f3e8ff;border-radius:3px;padding:0 4px;margin-right:4px;vertical-align:middle" title="Build-on-fly SET — 3PL inventory only (built from components)">SET</span><span style="opacity:.55;font-weight:400">3PL:</span> '+fn(oh3)+'</div>';
+        } else {
         td.innerHTML='<div style="white-space:nowrap;color:'+(oh3<0?'#dc2626':'#334155')+';font-weight:600"><span style="opacity:.55;font-weight:400">3PL:</span> '+fn(oh3)+'</div>'
           +'<div style="white-space:nowrap;color:'+(ohF<0?'#dc2626':'#334155')+';font-weight:600"><span style="opacity:.55;font-weight:400">FBA:</span> '+fn(ohF)+'</div>'
           +inbDiv(sOo, inbEntries([sku],co,ch), '#94a3b8');
+        }
 
       } else if(ci===2){
         // Fiscal FY (two back), units only — no revenue at SKU level
@@ -7901,6 +7947,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       else if(tc.t==='q'||tc.t==='h')tr.appendChild(skuPeriodCell(tc.months,tc.t));
       else tr.appendChild(skuMonthCell(tc.m));
     });
+    if(_grpOn){ if(_gidx===0)_insGrpHdr('m','MASTERS',_grpMs.length); if(_gidx===_grpMs.length)_insGrpHdr('s','SETS',_grpSs.length); tr.dataset.skugroup=(SKUM[sku]&&SKUM[sku].vt==='SET'?'s':'m')+'|'+parentKey; }   // MASTER/SET group headers + row tag
     tbody.insertBefore(tr,insertRef);
   });
 
@@ -8364,8 +8411,26 @@ function setPlanSkuQry(v){PLAN_SKU_QRY=(v||'').trim();clearTimeout(_skuQryTimer)
 function setPlanRw(v){PLAN_RW=v||'ALL';renderMain();}
 // DEMAND plan "Plan ▸" button (under a SKU) → open the buy-plan detail popup for that SKU. Builds the buy scaffold
 // on demand (without switching the visible view) and syncs the buy market to the demand plan's country.
+// Build-on-fly SETS have no buy plan of their own (they explode into components). Offer to open a component's plan.
+function openSetPlanChooser(setSku){
+  var comps=(typeof SET_BOM!=='undefined'&&SET_BOM[setSku])||[];
+  var old=document.getElementById('set-plan-chooser'); if(old)old.remove();
+  var ov=document.createElement('div'); ov.id='set-plan-chooser';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200002;display:flex;align-items:flex-start;justify-content:center';
+  ov.onclick=function(e){ if(e.target===ov)ov.remove(); };
+  var body='<div style="display:flex;align-items:center;margin-bottom:4px"><div style="font-weight:700;font-size:14px">Build-on-fly SET — '+esc(setSku)+'</div><button id="spc-x" style="margin-left:auto;border:none;background:#f0f0f0;border-radius:6px;width:24px;height:24px;cursor:pointer;font-size:16px;line-height:1">×</button></div>'
+    +'<div style="font-size:12px;color:#555;margin-bottom:10px">A set has no buy plan of its own — it explodes into its components. Open a component’s plan:</div>';
+  if(!comps.length){ body+='<div style="color:#b45309;font-size:12px">No components mapped yet (CONFIG ▸ BOM ▸ Build on Fly Sets).</div>'; }
+  else{ body+=comps.map(function(c){ var inScope=!!(typeof BP_DATA!=='undefined'&&BP_DATA.products&&BP_DATA.products[c.sku]);
+    return '<button class="spc-btn" data-sku="'+esc(c.sku)+'"'+(inScope?'':' disabled')+' style="display:block;width:100%;text-align:left;margin:3px 0;padding:7px 10px;border:1px solid '+(inScope?'#93c5fd':'#e2e8f0')+';border-radius:6px;background:'+(inScope?'#eff6ff':'#f8fafc')+';color:'+(inScope?'#1d4ed8':'#94a3b8')+';cursor:'+(inScope?'pointer':'not-allowed')+';font-weight:600;font-size:12px">'+esc(c.sku)+' <span style="font-weight:400;color:#64748b">×'+c.qty+'</span>'+(inScope?' <span style="float:right">Plan ▸</span>':' <span style="float:right;font-size:10px">not buyable</span>')+'</button>'; }).join(''); }
+  var box=document.createElement('div'); box.style.cssText='background:#fff;margin-top:60px;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.25);padding:16px 20px;width:380px;max-height:70vh;overflow:auto';
+  box.innerHTML=body; ov.appendChild(box); document.body.appendChild(ov);
+  box.querySelector('#spc-x').onclick=function(){ ov.remove(); };
+  box.querySelectorAll('.spc-btn').forEach(function(btn){ if(btn.disabled)return; btn.onclick=function(){ var cs=btn.dataset.sku; ov.remove(); openDemandPlanPopup(cs); }; });
+}
 function openDemandPlanPopup(sku){
   try{
+    if(typeof SKUM!=='undefined'&&SKUM[sku]&&SKUM[sku].vt==='SET'){ openSetPlanChooser(sku); return; }   // sets → component chooser (no buy plan of their own)
     // When opened from the DEMAND plan, pop the buy-plan detail as a modal only — don't leave the user on the
     // buy grid the scaffold builds behind it. Register a one-shot restore that re-renders the plan on close.
     if(VIEW_MODE==='planning'){ window._onPlanPopupClose=function(){ try{ if(VIEW_MODE==='planning')render(); }catch(e){} }; }
@@ -8965,8 +9030,17 @@ function renderSummaryView(body){
             .then(function(r){return r.json();}).then(function(){ var k=tgKey(+inp.dataset.fy,sub,inp.dataset.lvl,+inp.dataset.idx);
               if(p.gbp!=null){ SUMM_TGT_GBP[k]=p.gbp; if(lyv>0)SUMM_TGT[k]=Math.round((p.gbp/lyv-1)*1000)/10; else delete SUMM_TGT[k]; }
               else { delete SUMM_TGT_GBP[k]; if(p.pct!=null)SUMM_TGT[k]=p.pct; else delete SUMM_TGT[k]; }
-              draw();   // any target change re-balances the implied cells → redraw, then restore focus to the edited cell
-              try{ var _rf=host.querySelector('input.tgin[data-sub="'+encodeURIComponent(sub)+'"][data-fy="'+inp.dataset.fy+'"][data-lvl="'+inp.dataset.lvl+'"][data-idx="'+inp.dataset.idx+'"]'); if(_rf){ _rf.focus(); try{_rf.setSelectionRange(_rf.value.length,_rf.value.length);}catch(_){} } }catch(e){}
+              // Capture where the user CURRENTLY is BEFORE the redraw — the async save may resolve after they've
+              // tabbed to another target cell. Restore focus there (preserving in-progress text + caret); never yank
+              // the cursor back to the just-edited cell. If focus has left the grid entirely, leave it alone.
+              var _ae=document.activeElement, _k=null;
+              if(_ae&&_ae.classList&&_ae.classList.contains('tgin')){
+                var _wasEdited=(_ae.dataset.sub===encodeURIComponent(sub)&&_ae.dataset.fy===inp.dataset.fy&&_ae.dataset.lvl===inp.dataset.lvl&&_ae.dataset.idx===inp.dataset.idx);
+                _k={s:_ae.dataset.sub,fy:_ae.dataset.fy,lvl:_ae.dataset.lvl,idx:_ae.dataset.idx,v:(_wasEdited?null:_ae.value),pos:(function(){try{return _ae.selectionStart;}catch(_){return null;}})()};
+              }
+              draw();   // any target change re-balances the implied cells → redraw
+              if(_k){ try{ var _rf=host.querySelector('input.tgin[data-sub="'+_k.s+'"][data-fy="'+_k.fy+'"][data-lvl="'+_k.lvl+'"][data-idx="'+_k.idx+'"]');
+                if(_rf){ if(_k.v!=null)_rf.value=_k.v; _rf.focus(); var _p=(_k.pos!=null?_k.pos:_rf.value.length); try{_rf.setSelectionRange(_p,_p);}catch(_){} } }catch(e){} }
             }).catch(function(){}); }; });
       // Hover the £ target under a cell → breakdown: current forecast vs target (units / ASP / revenue), with from→to deltas.
       function _tgtHovHtml(el){ var sub=decodeURIComponent(el.dataset.sub||''), tgt=Number(el.dataset.tgt)||0;
@@ -12609,14 +12683,26 @@ function buildLiveDemand(){
         var ctry=co.toLowerCase(), av=(sp.av||{})[ctry]||'';
         var chans=[]; if(av.indexOf('d')>=0)chans.push('DTC'); if(av.indexOf('f')>=0)chans.push('FBA');   // DTC + FBA (decision 3)
         if(!chans.length)return;
-        var setFC={};   // set forecast per future month = sum over its available DTC/FBA channels
-        chans.forEach(function(ch){
-          // Cascade OFF for sets (Ben's 0c rule): a set is NEVER auto-forecast off the subcategory seasonal curve —
-          // its only demand is the manually-planned forecast saved in forecast_outputs (skuOutFC, which skuMonthlyMap
-          // returns when share=0). Passing share=0 / empty subcatFU also sidesteps the buildSkuShares 1/n fallback
-          // that leaks a spurious share to an all-sets subcategory (e.g. CA), which must NOT drive a component buy.
-          var mm=skuMonthlyMap(setSku,co,ch,LIVE_FC_MONTHS,{},0,(sp.inv&&sp.inv[skuWh(co,ch)])||0);
-          LIVE_FC_MONTHS.forEach(function(fym){ var v=mm[fym]||0; if(v)setFC[fym]=(setFC[fym]||0)+v; });
+        var setFC={};   // set forecast per future month = sum over its DTC/FBA channels. Sets forecast like NORMAL SKUs
+        chans.forEach(function(ch){                                    // (Ben P3b): override → last-year chain → subcat×share (same cascade as buildLiveDemand §2).
+          var subcat=sp.s||'', subcatFU={}, share=0, chKey=(ch==='DTC'?'d':(ch==='FBA'?'f':'b'));
+          try{ subcatFU=(calc(subcat,co,ch)||{}).fu||{}; }catch(e){}
+          try{ var subSkus=Object.keys(SKUM).filter(function(s2){var q=SKUM[s2];return q&&q.s===subcat&&(((q.av||{})[ctry]||'').indexOf(chKey)>=0);});
+               share=(buildSkuShares(subSkus,co,ch,lyYearMonths)||{})[setSku]||0; }catch(e){}   // set's own share of the subcat (now non-zero — 0c removed)
+          var launchDate=sp.lch&&sp.lch[ctry]?sp.lch[ctry]:null, discDate=sp.disc&&sp.disc[ctry]?sp.disc[ctry]:null;
+          var rem=(sp.inv&&sp.inv[skuWh(co,ch)])||0, s2sales=skuSales(setSku,co,ch), s2HasLY=skuHasLY(s2sales);
+          var ovMap=FC_OUTPUTS[setSku+'|'+skuWh(co,ch)+'|'+ch]||{}, chFC={};
+          LIVE_FC_MONTHS.forEach(function(fym){
+            var ms=fym.slice(0,4)+'-'+fym.slice(5,7)+'-01', raw;
+            if(ovMap[fym]!=null){ raw=ovMap[fym]; }                                          // saved override wins
+            else if(s2HasLY){ var lyM=(parseInt(fym.slice(0,4),10)-1)+'_'+fym.slice(5,7); raw=(lyM<=CUR_YTD_END)?(s2sales[lyM]||0):(chFC[lyM]||0); }   // continuing set → last-year chain
+            else { raw=(subcatFU[fym]||0)*share; }                                           // new set → subcat cascade × share (Sets%-sized)
+            var fc;
+            if(launchDate&&ms<launchDate)fc=0;
+            else if(discDate&&ms>discDate){fc=Math.max(0,Math.min(Math.round(raw),rem));rem=Math.max(0,rem-fc);}
+            else fc=Math.round(raw);
+            if(fc>0){ chFC[fym]=fc; setFC[fym]=(setFC[fym]||0)+fc; }
+          });
         });
         if(!Object.keys(setFC).length)return;
         comps.forEach(function(cc){

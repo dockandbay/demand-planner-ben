@@ -7511,6 +7511,22 @@
         function inherited(co,ch,sub){ var ps=parents(co,ch); for(var i=0;i<ps.length;i++){ var v=_cmModel[ps[i][0]+'|'+ps[i][1]+'|'+sub]; if(v)return {val:v,from:ps[i]}; } return {val:DEF,from:null}; }
         function scopeLabel(co,ch){ return (co==='ALL'?'All countries':co)+' · '+(ch==='ALL'?'All channels':ch); }
         function fromLabel(f){ if(!f)return 'default'; return (f[0]==='*'?'All':f[0])+'·'+(f[1]==='*'?'All':f[1]); }
+        // Auto-save: every edit persists to app_settings (debounced) with a light-green flash on the cell to confirm the commit.
+        var _cmSaveT=null;
+        function flashGreen(el){ if(!el)return; el.style.transition='background-color .12s'; var _revert=el.style.backgroundColor; el.style.backgroundColor='#bbf7d0';
+          setTimeout(function(){ el.style.backgroundColor=_revert||''; setTimeout(function(){ try{el.style.transition='';}catch(e){} },200); },480); }
+        function cmSave(flashEl){
+          var msg=document.getElementById('cm-msg'); if(msg){ msg.textContent='Saving…'; msg.style.color='#64748b'; }
+          clearTimeout(_cmSaveT);
+          _cmSaveT=setTimeout(function(){
+            fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'contrib_model',value:JSON.stringify(_cmModel)})})
+              .then(function(r){return r.json();}).then(function(j){ var m=document.getElementById('cm-msg');
+                if(j&&j.error){ if(m){m.textContent='Save failed: '+j.error;m.style.color='#dc2626';} return; }
+                if(m){ m.textContent='Saved ✓'; m.style.color='#16a34a'; setTimeout(function(){ if(m&&m.textContent==='Saved ✓')m.textContent=''; },1400); }
+                if(flashEl)flashGreen(flashEl);
+              }).catch(function(e){ var m=document.getElementById('cm-msg'); if(m){m.textContent='Save failed';m.style.color='#dc2626';} });
+          },300);
+        }
         function draw(){
           var curCo=_cmCo,curCh=_cmCh;
           var info='<div class="annot"><b>CONFIG ▸ Demand ▸ Contribution model.</b> The <b>A/B/C tier mix</b> per sub-category (how a sub-category’s forecast is split across its A/B/C-tier SKUs) plus the new <b>Sets vs SKUs</b> split.'
@@ -7523,16 +7539,16 @@
             +'<label style="font-size:12px;color:#64748b">Country '+sel('cm-co',COS,curCo)+'</label>'
             +'<label style="font-size:12px;color:#64748b">Channel '+sel('cm-ch',CHS,curCh)+'</label>'
             +'<span class="mut tiny" style="font-style:italic">'+(curCo==='ALL'&&curCh==='ALL'?'editing the DEFAULT — cascades everywhere':'editing '+scopeLabel(curCo,curCh)+' — blank inherits from above')+'</span>'
-            +'<button id="cm-save" style="margin-left:auto;background:#16a34a;color:#fff;border:1px solid #15803d;border-radius:5px;padding:5px 14px;font-weight:700;cursor:pointer">Save</button>'
-            +'<span id="cm-msg" class="mut tiny"></span></div>';
+            +'<span class="mut tiny" style="margin-left:auto;font-style:italic">Changes auto-save</span>'
+            +'<span id="cm-msg" class="mut tiny" style="min-width:70px"></span></div>';
           var head='<tr><th style="text-align:left;padding:4px 8px">Sub-category</th><th style="padding:4px 6px">A %</th><th style="padding:4px 6px">B %</th><th style="padding:4px 6px">C %</th><th style="padding:4px 6px;border-left:1px dashed #cbd5e1;color:#7c3aed">Sets %</th><th style="padding:4px 6px">SKUs %</th><th style="text-align:left;padding:4px 8px">Status</th></tr>';
           function statHtml(sub,isOv,abc,fromF){ return isOv ? '<span style="color:#1d4ed8">● override <a class="cm-clr" data-sub="'+esc(sub)+'" title="Clear this override" style="cursor:pointer;color:#dc2626;font-weight:700">×</a></span>'
                           : (abc===100?'<span style="color:#94a3b8">↑ '+fromLabel(fromF)+'</span>':'<span style="color:#b45309">⚠ '+abc+'% → normalises</span>'); }
           var body=SUBLIST.map(function(sub){
             var own=_cmModel[keyOf(curCo,curCh,sub)]||null, inh=inherited(curCo,curCh,sub), eff=own||inh.val, isOv=!!own;
-            var abc=(Number(eff.A)||0)+(Number(eff.B)||0)+(Number(eff.C)||0), over=abc>100;
-            function inp(fld){ var val=eff[fld]!=null?eff[fld]:0, grey=!isOv, red=(fld!=='sets')&&over;   // A/B/C get a light-red background when the row sums >100%
-              return '<input class="cm-inp'+(grey?' cm-inh':'')+'" data-sub="'+esc(sub)+'" data-f="'+fld+'" value="'+val+'" onfocus="this.select()" style="width:60px;text-align:center;font-size:12px;padding:3px;border:1px solid '+(grey?'#e2e8f0':'#94a3b8')+';border-radius:4px;color:'+(grey?'#94a3b8':'#0f172a')+';background:'+(red?'#fee2e2':'#fff')+'">'; }
+            var abc=(Number(eff.A)||0)+(Number(eff.B)||0)+(Number(eff.C)||0), over=abc>100, under=abc<100;
+            function inp(fld){ var val=eff[fld]!=null?eff[fld]:0, grey=!isOv, abg=(fld!=='sets')?(over?'#fee2e2':(under?'#ffedd5':'#fff')):'#fff';   // A/B/C cells: light-red >100%, light-orange <100%
+              return '<input class="cm-inp'+(grey?' cm-inh':'')+'" data-sub="'+esc(sub)+'" data-f="'+fld+'" value="'+val+'" onfocus="this.select()" style="width:60px;text-align:center;font-size:12px;padding:3px;border:1px solid '+(grey?'#e2e8f0':'#94a3b8')+';border-radius:4px;color:'+(grey?'#94a3b8':'#0f172a')+';background:'+abg+'">'; }
             var skus=100-(Number(eff.sets)||0);
             return '<tr data-sub="'+esc(sub)+'" style="border-top:1px solid #f1f5f9"><td style="text-align:left;padding:3px 8px">'+esc(sub)+'</td><td style="padding:3px 6px">'+inp('A')+'</td><td style="padding:3px 6px">'+inp('B')+'</td><td style="padding:3px 6px">'+inp('C')+'</td>'
               +'<td style="padding:3px 6px;border-left:1px dashed #cbd5e1">'+inp('sets')+'</td><td class="cm-skus" data-sub="'+esc(sub)+'" style="padding:3px 6px;color:#64748b;text-align:center">'+skus+'</td><td class="cm-stat" data-sub="'+esc(sub)+'" style="text-align:left;padding:3px 8px;font-size:11px">'+statHtml(sub,isOv,abc,inh.from)+'</td></tr>';
@@ -7543,14 +7559,14 @@
           document.getElementById('cm-co').onchange=function(){ _cmCo=this.value; draw(); };
           document.getElementById('cm-ch').onchange=function(){ _cmCh=this.value; draw(); };
           function rowEls(sub,cls){ return Array.prototype.filter.call(b.querySelectorAll('.'+cls),function(el){return el.dataset.sub===sub;}); }
-          function wireClr(a){ a.onclick=function(){ delete _cmModel[keyOf(_cmCo,_cmCh,a.dataset.sub)]; draw(); }; }
+          function wireClr(a){ a.onclick=function(){ delete _cmModel[keyOf(_cmCo,_cmCh,a.dataset.sub)]; draw(); cmSave(); }; }
           // Patch a single row IN PLACE after an edit — no full re-render, so focus + Tab survive.
           function patchRow(sub){
             var own=_cmModel[keyOf(_cmCo,_cmCh,sub)]||null, isOv=!!own, inh2=inherited(_cmCo,_cmCh,sub), eff=own||inh2.val;
-            var abc=(Number(eff.A)||0)+(Number(eff.B)||0)+(Number(eff.C)||0), over=abc>100;
+            var abc=(Number(eff.A)||0)+(Number(eff.B)||0)+(Number(eff.C)||0), over=abc>100, under=abc<100;
             rowEls(sub,'cm-inp').forEach(function(el){ var isAbc=el.dataset.f!=='sets';
               el.style.border='1px solid '+(isOv?'#94a3b8':'#e2e8f0'); el.style.color=isOv?'#0f172a':'#94a3b8';
-              el.style.background=(isAbc&&over)?'#fee2e2':'#fff';
+              el.style.background=isAbc?(over?'#fee2e2':(under?'#ffedd5':'#fff')):'#fff';
               if(document.activeElement!==el){ el.value=(eff[el.dataset.f]!=null?eff[el.dataset.f]:0); } });
             var sk=rowEls(sub,'cm-skus')[0]; if(sk)sk.textContent=100-(Number(eff.sets)||0);
             var stc=rowEls(sub,'cm-stat')[0]; if(stc){ stc.innerHTML=statHtml(sub,isOv,abc,inh2.from); var c=stc.querySelector('.cm-clr'); if(c)wireClr(c); }
@@ -7558,12 +7574,8 @@
           b.querySelectorAll('.cm-inp').forEach(function(el){ el.onchange=function(){
             var sub=el.dataset.sub, f=el.dataset.f, v=Math.max(0,Math.min(100,parseInt(el.value)||0)), k=keyOf(_cmCo,_cmCh,sub);
             el.value=v; if(!_cmModel[k]){ var base=inherited(_cmCo,_cmCh,sub).val; _cmModel[k]={A:base.A,B:base.B,C:base.C,sets:base.sets}; }
-            _cmModel[k][f]=v; patchRow(sub); }; });
+            _cmModel[k][f]=v; patchRow(sub); cmSave(el); }; });   // auto-save + green flash on commit
           b.querySelectorAll('.cm-clr').forEach(wireClr);
-          document.getElementById('cm-save').onclick=function(){ var msg=document.getElementById('cm-msg'); msg.textContent='Saving…';
-            fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'contrib_model',value:JSON.stringify(_cmModel)})})
-              .then(function(r){return r.json();}).then(function(j){ msg.textContent=(j&&j.error)?('Failed: '+j.error):'Saved ✓'; setTimeout(function(){msg.textContent='';},1500); })
-              .catch(function(e){ msg.textContent='Failed: '+(e&&e.message||e); }); };
         }
         fetch('/api/app-settings').then(function(r){return r.json();}).then(function(s){ s=s||{};
           try{ _cmModel=s.contrib_model?JSON.parse(s.contrib_model):{}; }catch(e){ _cmModel={}; }

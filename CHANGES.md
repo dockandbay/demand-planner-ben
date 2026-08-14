@@ -1,3 +1,32 @@
+## v27.009 SETS MASTER/SET grouping + contribution & forecast-logic touches
+- **MASTER/SET grouping (demand plan):** when a sub-category contains sets, its SKU expansion now groups **MASTERS** first then **SETS**, each under a **collapsible** header (▾/▸) with a count. Stays flat when there are no sets.
+- **SET badge** now sits on the same line as the 3PL quantity in the stock cell (was a line above).
+- **Contribution model cells:** A/B/C now shade **light-orange when the row sums under 100%** (light-red stays for over 100%).
+- **Forecast Logic** panel gains a link at the top → **CONFIG ▸ Demand ▸ Contribution model** (`#/config/contribmodel`).
+
+## v27.008 Contribution model auto-save + demand-plan display fixes
+- **Contribution model auto-saves:** every A/B/C/Sets edit (and clearing an override) now persists immediately (debounced) with a **light-green flash** on the cell to confirm the commit; the Save button is replaced by a "Changes auto-save" hint + a "Saved ✓" status.
+- **Sets show/hide/only now works on the main plan:** the `SETS_VIEW` filter was only applied in the standalone SKU view; it's now applied in the **inline SKU expansions** too, and changing the Display-settings ▸ Sets dropdown re-renders the plan so the filter takes effect.
+- **Summary ▸ Edit targets cursor-jump fixed:** entering a target then tabbing to another cell no longer yanks the cursor back to the just-edited cell when the async save resolves — focus is restored to wherever you currently are (in-progress text + caret preserved).
+- **Sets stock cell (demand plan col 2):** a SET now shows **3PL inventory only** (no FBA line, no inbound — a set is built from its components at the 3PL) with a purple **SET** badge, in the inline SKU expansion too (was only in the standalone SKU view).
+- **Variant image priority:** the demand-plan SKU thumbnail now prefers the **colour-swatch URL** and falls back to the variant image URL (was the other way round).
+
+## v27.007 SETS — two demand-plan UI touches (display only)
+- **Set-SKU hover:** hovering a SET's SKU code in the DEMAND plan (column 1) now shows a tooltip listing the build-on-fly components it explodes into (`SKU ×qty`).
+- **Set "Plan ▸":** clicking Plan ▸ on a SET (which has no buy plan of its own) now opens a small chooser listing its components — click one to open that component's buy plan. Components not in the buy universe are shown disabled.
+- Display/navigation only; buy engine unchanged (verified 430 pairs, 0 errors).
+
+## v27.006 SETS P3b-2 — sets forecast like normal SKUs (0c removed); Sets % split
+- **Removed the 0c rule** (`buildSkuShares` no longer zeroes sets). Sets are now normal SKUs in the sub-category pool: a set with last-year sales **inherits it**, an overridden set uses your number, and a **brand-new** set gets a placeholder **sized by Sets %** (CONFIG ▸ Demand ▸ Contribution model). Masters conserve the sub-category total (they give up share to the sets).
+- **Set forecast → components:** the P2 explosion now computes each set's forecast via the **same cascade as the demand plan** (override → last-year chain → subcat × share) instead of override-only, then explodes it onto the set's components. Sets still **never buy directly**.
+- **Before/after (jsdom A/B, identical data):** sets = **0 buy lines**; components **+8,660 Buy 3PL** (70 pairs up — the components needed to build the sets, previously unbought under 0c); masters **−810** (28 pairs down — share ceded to sets); all confined to sub-categories that contain sets. Buy engine clean (0 errors). Overrides still win (no double-count).
+- Buy-CHANGING by design — this is the core SETS fix (0c suppressed the component buys needed to build sets).
+
+## v27.005 SETS P3b-1 — wire the tier mix (A/B/C) to the Contribution model
+- `tierMix` now resolves the **A/B/C** split from the saved **Contribution model** (`CONTRIB_MODEL`, server-injected from `app_settings.contrib_model`) via the Default→Country→Channel→cell cascade, falling back to the legacy `CONTRIB_TARGETS` / 50-25-25 when nothing is saved.
+- This is the input to **Leader-mode auto-smoothing** only. `tierMix` is **not** in the buy path (project/getBuyQtys/buildLiveDemand don't call it), so the buy plan is unaffected; verified buy engine runs clean (438 pairs, 0 errors).
+- Sets-% wiring into auto-forecast (buy-changing, reconciles with the P2 explosion) is the next step (P3b-2) — pending a modelling decision.
+
 ## v27.004 SETS P3a — Contribution model panel (CONFIG ▸ Demand), inert
 - New CONFIG group **Demand** with a **Contribution model** panel. Editable **A/B/C tier mix** per sub-category (the `tierMix`/`CONTRIB_TARGETS` model that Leader-mode auto-smoothing uses) plus a new **Sets vs SKUs %** split.
 - **Cascade:** a **Default** (All·All) cascades to every country×channel; narrow the Country/Channel scope to override — most-specific wins (cell → channel → country → default). Inherited cells shown greyed with the source; `×` clears an override. A/B/C normalises to 100 at compute; SKUs % = 100 − Sets %.

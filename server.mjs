@@ -936,6 +936,9 @@ app.get('/', async (req, res) => {
     try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='smooth_auto'`)).rows[0]; const o = (r && r.value) ? JSON.parse(r.value) : {}; const cfg = { flags: (o && o.flags) || {}, threshold: (o && o.threshold != null) ? o.threshold : 20, mode: (o && o.mode === 'leader') ? 'leader' : 'standard', lastRun: (o && o.lastRun) || null }; html = replaceGlobal(html, 'SMOOTH_AUTO', JSON.stringify(cfg)); } catch (e) { /* leave the default */ }
     // DEMAND ▸ do-not-smooth locks (app_settings.smooth_locks = {'sku|CO|CH|YYYY_MM':true}). SKU-cell forecasts smoothing must leave fixed. Fresh so a toggle shows next load.
     try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='smooth_locks'`)).rows[0]; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'SMOOTH_LOCKS', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { /* leave the {} default */ }
+    // CONFIG ▸ Demand ▸ Contribution model (app_settings.contrib_model, JSON keyed "CO|CH|subcat" with '*' wildcards).
+    // Drives the Leader-mode smoothing tier mix (SETS feature P3b). Empty {} => tierMix falls back to CONTRIB_TARGETS/default.
+    try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='contrib_model'`)).rows[0]; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'CONTRIB_MODEL', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { /* leave the {} default */ }
     // DEMAND Set-targets £→units: average EX-TAX retail price per market × subcategory from planner.products.
     // Ben's formula: UK/EU ÷1.2 (VAT), AU ÷1.1 (GST), US/CA already ex-tax. Client applies the channel factor
     // (B2B ×0.5, DTC/FBA ×0.95) to get net £/unit, then units = £target ÷ net price.
