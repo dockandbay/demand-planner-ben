@@ -1,3 +1,6 @@
+## v27.6.2 Shipments grid: show orphan self-shipments (PO shipment_ref without a shipments row)
+- The shipments query drove off the shipments table only, so a PO with a shipment_ref but no planner.shipments row (e.g. PO-55UKWK2-AIR from Plan Shipments, 22 such in sandbox) was invisible. Added a refs CTE (shipments rows UNION PO shipment_refs); orphan self-shipments now appear (status/dates/branch derived from the PO).
+
 ## v27.6.1 Sample charges: un-reject a rejected charge
 - A rejected sample/shipment charge now shows a small "↺ un-reject" link that puts it back to pending (so it can be accepted). Posts a timeline note.
 

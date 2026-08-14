@@ -1161,7 +1161,7 @@ async function cashflowResponse(pos, q) {
     FROM planner.shipments sh
     LEFT JOIN agg a ON a.shipment_ref=sh.shipment_ref
     LEFT JOIN LATERAL (SELECT f.* FROM planner.flexport_shipments f
-      WHERE f.flex_id=sh.carrier_ref OR f.shipment_name=sh.shipment_ref
+      WHERE f.flex_id=sh.carrier_ref OR f.shipment_name=r.shipment_ref
       ORDER BY (f.flex_id=sh.carrier_ref) DESC NULLS LAST LIMIT 1) fx ON true`);
   const shipFreight = {};
   shipRows.forEach(s => { shipFreight[s.shipment_ref] = shipFreightSrv(s); });
@@ -3155,8 +3155,13 @@ app.get('/api/supply/:section', async (req, res, next) => {
               LEFT JOIN planner.suppliers sup ON sup.id=po.supplier_id
             WHERE po.shipment_ref IS NOT NULL
             GROUP BY po.shipment_ref
+          ),
+          refs AS (   -- drive off BOTH shipments rows AND any PO shipment_ref lacking a shipments row → orphan self-shipments still show
+            SELECT shipment_ref FROM planner.shipments
+            UNION
+            SELECT DISTINCT shipment_ref FROM planner.purchase_orders WHERE coalesce(shipment_ref,'')<>''
           )
-          SELECT sh.shipment_ref, coalesce(sh.master_po, sh.shipment_ref) master_po,
+          SELECT r.shipment_ref, coalesce(sh.master_po, r.shipment_ref) master_po,
             CASE WHEN a.all_complete THEN 'Completed'   -- all linked POs complete → shipment is complete (calculated, overrides any stored status)
                  ELSE coalesce(
                    -- normalise any legacy stored value (Active→Shipping, Complete→Completed)
@@ -3225,10 +3230,10 @@ app.get('/api/supply/:section', async (req, res, next) => {
             (coalesce(a.pallets,0) > 20) over_pallets,   -- est. cargo over one 20-pallet container → exception
             coalesce(sh.escalated,false) escalated,
             coalesce(sh.starred,false) starred,   -- ⭐ Focus / favourite toggle (migration 082)
-            (SELECT count(*) FROM planner.shipment_notes sn WHERE sn.shipment_ref=sh.shipment_ref AND sn.author_kind='supplier' AND sn.read_at IS NULL)::int unread_notes,
-            (SELECT count(*) FROM planner.supplier_charges sc WHERE sc.source_type='shipment' AND sc.source_ref=sh.shipment_ref AND sc.status='pending')::int pending_charges
-          FROM planner.shipments sh
-          LEFT JOIN agg a ON a.shipment_ref=sh.shipment_ref
+            (SELECT count(*) FROM planner.shipment_notes sn WHERE sn.shipment_ref=r.shipment_ref AND sn.author_kind='supplier' AND sn.read_at IS NULL)::int unread_notes,
+            (SELECT count(*) FROM planner.supplier_charges sc WHERE sc.source_type='shipment' AND sc.source_ref=r.shipment_ref AND sc.status='pending')::int pending_charges
+          FROM refs r LEFT JOIN planner.shipments sh ON sh.shipment_ref=r.shipment_ref
+          LEFT JOIN agg a ON a.shipment_ref=r.shipment_ref
           LEFT JOIN LATERAL (SELECT f.* FROM planner.flexport_shipments f
             WHERE f.flex_id=sh.carrier_ref OR f.shipment_name=sh.shipment_ref
             ORDER BY (f.flex_id=sh.carrier_ref) DESC NULLS LAST LIMIT 1) fx ON true
@@ -3249,7 +3254,7 @@ app.get('/api/supply/:section', async (req, res, next) => {
             LEFT JOIN planner.branches mb ON mb.name=m.branch
             CROSS JOIN LATERAL (SELECT coalesce(m.end_production_overide,
                 (m.start_production + (coalesce(ms.production_days,0)||' days')::interval)::date) pe) pec
-            WHERE m.po = coalesce(NULLIF(sh.master_po,''), sh.shipment_ref)
+            WHERE m.po = coalesce(NULLIF(sh.master_po,''), r.shipment_ref)
             LIMIT 1) mp ON true
           ORDER BY landing DESC NULLS LAST`);
         const unassigned = await q(`SELECT po, supplier_name, coalesce(status,'') status, coalesce(prod_no,'') prod_no
