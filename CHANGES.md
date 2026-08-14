@@ -1,3 +1,7 @@
+## v27.6.10 DEMAND More Filters — reworked layout + inline category checklist
+- Reordered the More Filters popup to: Tier → Release → From replacement → Category.
+- Category is now an inline checklist of ALL categories (grouped, 2-col) with real checkboxes — no more "All categories" button / pop-out / chips. Selected categories get a light-green background so the selection is obvious. "Select all" resets to all; count shown. Uses the same SEL state + setCat() so filtering behaviour is unchanged.
+
 ## v27.6.9 Plan Shipments: combined "Apply all" recommendations (one batch, single undo)
 - New "✓ Apply all (N)" button in the Recommendations header applies every visible recommendation at once — all top-ups plus all multi-PO new-container groups — deduped by PO, persisted together, and recorded as a SINGLE undo entry so one Undo reverts the whole set. Answers "can a recommendation change 2+ containers and both apply": yes, as an atomic batch.
 

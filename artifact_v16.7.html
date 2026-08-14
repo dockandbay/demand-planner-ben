@@ -750,12 +750,6 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
       <button id="plan-filters-btn" onclick="togglePlanFilters(event)" title="More filters &amp; settings — category, tier, release window, from-replacement, sort, category totals, variant image" style="font-size:11px;padding:4px 11px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#334155;cursor:pointer;flex-shrink:0;font-weight:600">&#10697; More Filters <span style="opacity:.55;font-size:9px">▾</span></button>
       <div id="plan-filters-pop" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;z-index:300;background:#fff;border:1px solid #d0d0d0;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.2);width:520px;max-width:94vw;padding:14px 16px">
         <div style="display:flex;align-items:center;margin-bottom:12px"><div style="font-weight:700;font-size:14px;color:#0f172a">More filters</div><button onclick="resetPlanFilters()" style="margin-left:auto;font-size:11px;padding:3px 10px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#475569;cursor:pointer">Reset all</button></div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px;position:relative">
-          <span class="pill-lbl" style="width:80px">Category</span>
-          <button id="cat-btn" class="pill" style="display:inline-flex;align-items:center;gap:8px" onclick="toggleCatPop(event)"><span id="cat-btn-lbl">All categories</span><span style="opacity:.55;font-size:9px">▾</span></button>
-          <div id="cat-chips" style="display:flex;gap:4px;flex-wrap:wrap"></div>
-          <div id="cat-pop" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;z-index:320;background:#fff;border:1px solid #d0d0d0;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.18);width:440px;padding:8px"></div>
-        </div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px">
           <span class="pill-lbl" style="width:80px">Tier</span>
           <div style="display:flex;gap:3px" id="plan-tier-pills">
@@ -769,9 +763,16 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
           <span class="pill-lbl" style="width:80px" title="Filter SKUs by release window (season)">Release</span>
           <select id="plan-rw-sel" onchange="setPlanRw(this.value)" style="font-size:11px;padding:2px 6px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer"><option value="ALL">All</option></select>
         </div>
-        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:12px">
+          <span class="pill-lbl" style="width:80px">Replacement</span>
           <label style="font-size:12px;color:#334155;cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Only SKUs that inherit a predecessor's history (products.replacement_sku)"><input type="checkbox" id="plan-fromrep-chk" onchange="setPlanFromRep(this.checked)"> From replacement</label>
         </div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+          <span class="pill-lbl" style="width:80px">Category</span>
+          <span id="cat-sel-count" style="font-size:10px;color:#94a3b8"></span>
+          <button onclick="setCat('ALL')" style="margin-left:auto;font-size:10px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#475569;cursor:pointer">Select all</button>
+        </div>
+        <div id="cat-checklist" style="max-height:300px;overflow:auto;border:1px solid #eef2f7;border-radius:8px;padding:6px 8px"></div>
         <div style="text-align:right"><button onclick="_planPopClose()" style="font-size:12px;font-weight:600;padding:5px 18px;border:1px solid #2563eb;border-radius:6px;background:#2563eb;color:#fff;cursor:pointer">Done</button></div>
       </div>
     </span>
@@ -8403,12 +8404,12 @@ function _planPopBind(){ if(window._planPopBound)return; window._planPopBound=tr
   document.addEventListener('click',function(ev){ [['plan-filters-btn','plan-filters-pop'],['plan-tools-btn','plan-tools-menu']].forEach(function(p){
     var b=document.getElementById(p[0]), pop=document.getElementById(p[1]);
     if(pop&&pop.style.display==='block'&&!(b&&b.contains(ev.target))&&!pop.contains(ev.target))pop.style.display='none'; }); },true); }
-function togglePlanFilters(e){ if(e)e.stopPropagation(); var p=document.getElementById('plan-filters-pop'); if(!p)return; var open=p.style.display==='block'; _planPopClose(); if(!open)p.style.display='block'; var _fr=document.getElementById('plan-fromrep-chk'); if(_fr)_fr.checked=(typeof PLAN_FROM_REP!=='undefined'&&PLAN_FROM_REP); _planPopBind(); }
+function togglePlanFilters(e){ if(e)e.stopPropagation(); var p=document.getElementById('plan-filters-pop'); if(!p)return; var open=p.style.display==='block'; _planPopClose(); if(!open){p.style.display='block'; try{buildCatChecklist();}catch(_){}} var _fr=document.getElementById('plan-fromrep-chk'); if(_fr)_fr.checked=(typeof PLAN_FROM_REP!=='undefined'&&PLAN_FROM_REP); _planPopBind(); }
 function _displayPopClose(){ var x=document.getElementById('plan-display-pop'); if(x)x.style.display='none'; }
 function _displayPopBind(){ if(window._displayPopBound)return; window._displayPopBound=true; document.addEventListener('click',function(ev){ var b=document.getElementById('plan-display-btn'), pop=document.getElementById('plan-display-pop'); if(pop&&pop.style.display==='block'&&!(b&&b.contains(ev.target))&&!pop.contains(ev.target))pop.style.display='none'; },true); }
 function toggleDisplaySettings(e){ if(e)e.stopPropagation(); var p=document.getElementById('plan-display-pop'); if(!p)return; var open=p.style.display==='block'; _planPopClose(); if(!open)p.style.display='block'; var sc=document.getElementById('filt-show-changes'); if(sc)sc.checked=(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES); var hp=document.getElementById('filt-hide-past-changes'); if(hp)hp.checked=(typeof HIDE_PAST_CHANGES==='undefined'||HIDE_PAST_CHANGES); var fa=document.getElementById('filt-fc-act'); if(fa)fa.checked=(typeof SHOW_FC_ACT==='undefined'||SHOW_FC_ACT); var _cc=document.getElementById('disp-cattot'); if(_cc)_cc.checked=(typeof SHOW_CAT_TOT!=='undefined'&&SHOW_CAT_TOT); var _vi=document.getElementById('disp-varimg'); if(_vi)_vi.checked=(typeof SHOW_VARIANT_IMG!=='undefined'&&SHOW_VARIANT_IMG); var _qq=document.getElementById('disp-qtr'); if(_qq)_qq.checked=(typeof SHOW_Q!=='undefined'&&SHOW_Q); var _hh=document.getElementById('disp-half'); if(_hh)_hh.checked=(typeof SHOW_H!=='undefined'&&SHOW_H); _displayPopBind(); }
 // (removed dead fn togglePlanTools — v26.759)
-function resetPlanFilters(){ try{setPlanTier('ALL');}catch(e){} try{setPlanFromRep(false);}catch(e){} var rw=document.getElementById('plan-rw-sel'); if(rw){rw.value='ALL'; try{setPlanRw('ALL');}catch(e){}} try{setPlanSort('alpha');}catch(e){} var ct=document.getElementById('cat-tot-toggle'); if(ct&&ct.classList.contains('active')){try{setShowCatTot(false);}catch(e){}} try{resetPlanActiveDates();}catch(e){} try{renderPlanChips();}catch(e){} }
+function resetPlanFilters(){ try{setPlanTier('ALL');}catch(e){} try{setCat('ALL');}catch(e){} try{setPlanFromRep(false);}catch(e){} var rw=document.getElementById('plan-rw-sel'); if(rw){rw.value='ALL'; try{setPlanRw('ALL');}catch(e){}} try{setPlanSort('alpha');}catch(e){} var ct=document.getElementById('cat-tot-toggle'); if(ct&&ct.classList.contains('active')){try{setShowCatTot(false);}catch(e){}} try{resetPlanActiveDates();}catch(e){} try{renderPlanChips();}catch(e){} }
 function _planClearFilter(k){ if(k==='all')setPlanActiveMode('active'); else if(k==='tier')setPlanTier('ALL');
   else if(k==='rw'){var s=document.getElementById('plan-rw-sel'); if(s)s.value='ALL'; setPlanRw('ALL');}
   else if(k==='fromrep')setPlanFromRep(false); else if(k==='cattot')setShowCatTot(false); else if(k==='sort')setPlanSort('alpha');
@@ -12899,6 +12900,7 @@ function setCat(cat){
   }
   var p=document.getElementById('cat-pop');
   if(p&&p.style.display==='block')buildCatPop();
+  buildCatChecklist();   // inline category checklist in More Filters
   renderCatControl();render();
 }
 function catOptRow(cat,label,on,bold,span){
@@ -12947,6 +12949,27 @@ function toggleCatPop(e){
   },true);}
 }
 function closeCatPop(){var p=document.getElementById('cat-pop');if(p)p.style.display='none';}
+// Inline category checklist for the More Filters panel — every category as a checkbox row; selected rows get a
+// light-green background. Replaces the old cat button + pop-out + chips. Toggles via the same setCat()/SEL state.
+function catChkRow(cat,label,on,bold){
+  return '<label class="cat-copt" data-cat="'+cat+'" style="display:flex;align-items:center;gap:7px;padding:4px 7px;border-radius:5px;cursor:pointer;font-size:12px;'+(bold?'font-weight:600;':'')+(on?'background:#dcfce7;':'')+'">'
+    +'<input type="checkbox"'+(on?' checked':'')+' tabindex="-1" style="pointer-events:none;margin:0">'
+    +'<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+label+'</span></label>';
+}
+function buildCatChecklist(){
+  var p=document.getElementById('cat-checklist');if(!p)return;
+  var allOn; try{ allOn=SEL.has('ALL'); }catch(e){ return; }   // bail gracefully if called before SEL is ready
+  var h=catChkRow('ALL','All categories',allOn,true);
+  catGroups().forEach(function(g){ var cats=g[1]; if(!cats||!cats.length)return;
+    h+='<div style="font-size:9px;color:#999;text-transform:uppercase;letter-spacing:.04em;margin:8px 2px 2px">'+g[0]+'</div>';
+    h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:1px 10px">';
+    cats.forEach(function(c){ h+=catChkRow(c,catLbl(c),!allOn&&SEL.has(c),false); });
+    h+='</div>';
+  });
+  p.innerHTML=h;
+  var cnt=document.getElementById('cat-sel-count');
+  if(cnt){ if(allOn)cnt.textContent='All categories'; else { var n=0;SEL.forEach(function(){n++;}); cnt.textContent=n+' selected'; } }
+}
 function renderCatControl(){
   var lbl=document.getElementById('cat-btn-lbl'),chips=document.getElementById('cat-chips');
   if(!lbl||!chips)return;
@@ -12963,8 +12986,10 @@ renderCatControl();
   if(popEl)popEl.addEventListener('click',function(e){e.stopPropagation();var r=e.target.closest('[data-cat]');if(r&&popEl.contains(r))setCat(r.getAttribute('data-cat'));});
   var chipsEl=document.getElementById('cat-chips');
   if(chipsEl)chipsEl.addEventListener('click',function(e){e.stopPropagation();var x=e.target.closest('[data-cat]');if(x)setCat(x.getAttribute('data-cat'));});
+  var clEl=document.getElementById('cat-checklist');   // inline checklist in More Filters
+  if(clEl)clEl.addEventListener('click',function(e){e.preventDefault();e.stopPropagation();var r=e.target.closest('[data-cat]');if(r&&clEl.contains(r))setCat(r.getAttribute('data-cat'));});
   document.addEventListener('click',function(e){var w=document.getElementById('catrow1-wrap'),p=document.getElementById('cat-pop');if(p&&p.style.display==='block'&&w&&!w.contains(e.target))closeCatPop();});
-})();
+})();   // checklist builds lazily on panel open (togglePlanFilters) + on setCat — no init-time build needed
 
 // ── Save forecasts via Apps Script web app → Airtable ────────────────
 
