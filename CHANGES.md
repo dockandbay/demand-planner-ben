@@ -1,3 +1,7 @@
+## v27.011 3PL invoicing — two live fixes (need Diviyaj redeploy)
+- **US Geneva PDF parse failed on live** ("Cannot find module …pdfjs-dist/legacy/build/pdf.worker.mjs"): the pdfjs worker isn't traced into the Vercel bundle (dynamic import). Added it to `vercel.json` `includeFiles`. ⚠️ **Diviyaj: needs a redeploy** for the bundle to pick it up.
+- **3PL import summary showed another 3PL's orders:** `tplCin7Summary` counted orders/imports by **period only**, so AU Coghlans showed US Geneva's "Imported 2,437 orders". Now scoped to the current 3PL — orders by the 3PL's Cin7 branch, imports by `tpl`. (The Analyse step was already tpl-scoped, hence it correctly reported no Coghlans orders.)
+
 ## v27.010 MASTER/SET group headers left-aligned
 - The MASTERS/SETS group-header labels are now left-aligned (the sticky inline-block label was inheriting the plan's right-alignment).
 

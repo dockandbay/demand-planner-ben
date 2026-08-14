@@ -6482,7 +6482,7 @@ app.get('/api/supply/tpl/data', async (req, res) => {
       coalesce(cogs_account,'') cogs_account, coalesce(sales_account,'') sales_account,
       coalesce(fulfilment_account,'') fulfilment_account, coalesce(cost_of_sales_account,'') cost_of_sales_account
       FROM planner.tpl_account_map ORDER BY region NULLS LAST, channel NULLS LAST, label`)).rows;
-    const cin7_summary = /^\d{4}-\d{2}$/.test(period) ? await tplCin7Summary(period) : null;
+    const cin7_summary = /^\d{4}-\d{2}$/.test(period) ? await tplCin7Summary(period, tpl) : null;
     res.json({ ok: true, files, cost_accounts: cost, account_map: map, cin7_summary });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -6926,9 +6926,13 @@ app.post('/api/supply/tpl/map/:id', async (req, res) => {
 // 3PL invoice — MANUAL Cin7 sales-order import for the previous month (by InvoiceDate). Populates
 // planner.tpl_cin7_orders so the Map step can resolve Reference -> CostCenter offline. Paginated, throttled,
 // read-only from Cin7. Aborts cleanly on auth failure (sandbox has dummy creds).
-async function tplCin7Summary(period) {
-  const o = (await pool.query(`SELECT count(*)::int n, to_char(min(invoice_date),'YYYY-MM-DD') mn, to_char(max(invoice_date),'YYYY-MM-DD') mx FROM planner.tpl_cin7_orders WHERE period=$1`, [period])).rows[0] || {};
-  const r = (await pool.query(`SELECT count(*)::int runs, to_char(min(from_date),'YYYY-MM-DD') cf, to_char(max(to_date),'YYYY-MM-DD') ct FROM planner.tpl_cin7_imports WHERE period=$1`, [period])).rows[0] || {};
+// 3PL → Cin7 branch. Module scope so the summary can scope its order count to the current 3PL's branch —
+// otherwise every 3PL shows the same period-wide count (e.g. AU Coghlans showed US Geneva's 2,437 orders).
+const TPL_CIN7_BRANCH = { eu_ifulfilment: 25073, us_geneva: 5055, uk_ilg: 5053, au_coghlans: 16288 };
+async function tplCin7Summary(period, tpl) {
+  const bid = TPL_CIN7_BRANCH[tpl] || null;   // scope orders to this 3PL's branch (the import filters by BranchId too)
+  const o = (await pool.query(`SELECT count(*)::int n, to_char(min(invoice_date),'YYYY-MM-DD') mn, to_char(max(invoice_date),'YYYY-MM-DD') mx FROM planner.tpl_cin7_orders WHERE period=$1` + (bid ? ` AND branch_id=$2` : ``), bid ? [period, bid] : [period])).rows[0] || {};
+  const r = (await pool.query(`SELECT count(*)::int runs, to_char(min(from_date),'YYYY-MM-DD') cf, to_char(max(to_date),'YYYY-MM-DD') ct FROM planner.tpl_cin7_imports WHERE period=$1` + (tpl ? ` AND tpl=$2` : ``), tpl ? [period, tpl] : [period])).rows[0] || {};
   return { orders: o.n || 0, min_date: o.mn || null, max_date: o.mx || null, runs: r.runs || 0, covered_from: r.cf || null, covered_to: r.ct || null };
 }
 // RESUMABLE + logged. Each call processes Cin7 pages until an ~8s time-budget (safe under the serverless timeout),
@@ -6937,8 +6941,7 @@ async function tplCin7Summary(period) {
 // captured on live even if a chunk dies. Fetch/insert logic is unchanged from before — only the loop is bounded.
 app.post('/api/supply/tpl/cin7-import', async (req, res) => {
   const tpl0 = String((req.body && req.body.tpl) || req.query.tpl || '') || null;
-  const TPL_CIN7_BRANCH = { eu_ifulfilment: 25073, us_geneva: 5055, uk_ilg: 5053, au_coghlans: 16288 };
-  const branchId = Number((req.body && req.body.branch_id) || req.query.branch_id) || TPL_CIN7_BRANCH[tpl0] || null;
+  const branchId = Number((req.body && req.body.branch_id) || req.query.branch_id) || TPL_CIN7_BRANCH[tpl0] || null;   // TPL_CIN7_BRANCH now module-scope (shared with tplCin7Summary)
   const rs = (req.body && req.body.resume) || null;   // resume cursor from a prior chunk
   const newLog = (period, from, to, kind) => pool.query(
     `INSERT INTO planner.tpl_cin7_imports (tpl, period, from_date, to_date, orders, kind, status, cin7_calls) VALUES ($1,$2,$3,$4,0,$5,'running',0) RETURNING id`,
@@ -6969,7 +6972,7 @@ app.post('/api/supply/tpl/cin7-import', async (req, res) => {
           const cov = (await pool.query(`SELECT to_char(max(to_date),'YYYY-MM-DD') ct FROM planner.tpl_cin7_imports WHERE period=$1 AND status<>'error'`, [period])).rows[0];
           if (cov && cov.ct) { const d = new Date(cov.ct + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); start = d.toISOString().slice(0, 10); } else start = monStart;
           end = monEnd; kind = 'incremental';
-          if (start > end) { const summary = await tplCin7Summary(period); return res.json({ ok: true, done: true, imported: 0, period, kind, note: 'Already imported through ' + cov.ct + ' — nothing new. Use Sweep up to re-scan the month.', summary }); }
+          if (start > end) { const summary = await tplCin7Summary(period, tpl0); return res.json({ ok: true, done: true, imported: 0, period, kind, note: 'Already imported through ' + cov.ct + ' — nothing new. Use Sweep up to re-scan the month.', summary }); }
         }
       }
       page = 1; imported = 0;
@@ -6994,7 +6997,7 @@ app.post('/api/supply/tpl/cin7-import', async (req, res) => {
     }
     if (page > MAXP) done = true;   // safety cap
     await setLog(runId, imported, calls, done ? 'ok' : 'running', null);
-    if (done) { const summary = await tplCin7Summary(period); return res.json({ ok: true, done: true, period, from: start, to: end, kind, imported, cin7_calls: calls, run_id: runId, summary }); }
+    if (done) { const summary = await tplCin7Summary(period, tpl0); return res.json({ ok: true, done: true, period, from: start, to: end, kind, imported, cin7_calls: calls, run_id: runId, summary }); }
     return res.json({ ok: true, done: false, imported, cin7_calls: calls, run_id: runId, resume: { run_id: runId, start, end, period, kind, page, imported } });
   } catch (e) { await setLog(runId, 0, 0, 'error', e.message); res.status(500).json({ error: e.message }); }
 });
