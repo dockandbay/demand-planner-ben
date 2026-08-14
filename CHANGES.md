@@ -1,3 +1,7 @@
+## v27.001 — REBASELINE (2026-08-14)
+- v27.6.34 confirmed LIVE on horizon.dockandbay.com (full planner backup taken; migrations 224–230 applied). SETS shipped: scope check passed — masters stayed exactly 716 in-scope, buy plan byte-identical, all 190 sets visible in the demand view (sets show, don't buy, as designed).
+- Version scheme reset to v27.00N (next change = v27.002).
+
 ## v27.6.34 Samples record-of-change: clearer SKU diff wording (incl. deleted qty)
 - The SKU/qty change detail now reads "deleted SKU x1, added SKU x2, changed SKU x3→5" (deleted items now show their quantity; consistent "deleted/added/changed … x<qty>" wording). Applies to admin + portal line edits and the shared timeline note. (The pre-v27.6.15 entries have no detail — that's historical, not a bug.)
 
