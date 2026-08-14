@@ -9649,7 +9649,7 @@
       var reqDate=r.completion_required?('<span'+(r.overdue?' style="color:#dc2626;font-weight:700"':'')+'>'+fd(r.completion_required)+'</span>'):'<span class="mut">—</span>';
       return '<tr><td class="l"><button class="planbtn samp-exp" data-id="'+r.id+'" data-ref="'+esc(r.ref||'')+'" data-i="'+i+'">PLAN</button>'+actFlag+'</td>'
         +'<td class="l"><b>'+esc(r.ref||'')+'</b></td>'
-        +'<td class="l">'+sampleStatusChip(r.status_calc)+(r.production_status?'<div class="mut tiny" style="margin-top:2px">supplier: '+esc(prodStatusLabel(r.production_status))+'</div>':'')+'</td>'
+        +'<td class="l">'+sampleStatusChip(_sampNormStatus(r.status))+(r.production_status?'<div class="mut tiny" style="margin-top:2px">supplier: '+esc(prodStatusLabel(r.production_status))+'</div>':'')+'</td>'
         +'<td class="l">'+esc(r.supplier_name||'—')+'</td>'
         +'<td class="l">'+esc(r.recipient_company||'')+(r.recipient_name?' <span class="mut tiny">'+esc(r.recipient_name)+'</span>':'')+'</td>'
         +'<td class="l">'+esc([r.city,r.country].filter(Boolean).join(', ')||'—')+'</td>'
@@ -9693,7 +9693,9 @@
         w.querySelectorAll('.sf-lsku').forEach(function(x){x.onchange=function(){lines[x.dataset.i].sku=x.value;};});
         w.querySelectorAll('.sf-lqty').forEach(function(x){x.onchange=function(){lines[x.dataset.i].qty=x.value;};});
         w.querySelectorAll('.sf-lrm').forEach(function(x){x.onclick=function(){lines.splice(x.dataset.i,1);renderLines();};});
-        w.querySelectorAll('.sf-lgo').forEach(function(x){x.onclick=function(){ var r=x.dataset.ref; if(r)location.hash='#/product/'+encodeURIComponent(r); };}); }
+        w.querySelectorAll('.sf-lgo').forEach(function(x){x.onclick=function(){ var r=x.dataset.ref; if(!r)return;
+          try{ _pendingProdRef=r; try{_pendingProdTab=null;}catch(_e){} selectProductSub('plan'); }   // open the product-development item directly (mirrors the #/product/<ref> router)
+          catch(e){ location.hash='#/product/'+encodeURIComponent(r); } };}); }
       renderLines();
       // Supplier picker — searchable dropdown (type to filter the supplier list; click to assign). Fills .sf-supplier,
       // which also scopes the SKU search below.

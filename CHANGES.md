@@ -1,3 +1,7 @@
+## v27.6.33 Samples: grid status matches "our status" + dev product link navigates reliably
+- Samples grid status chip now reflects the D&B "our status" (FUTURE/PRODUCTION/COMPLETED) — same as the detail — instead of the old-vocabulary status_calc (which showed PLANNED for FUTURE/PRODUCTION).
+- The "↗ product" link on a dev-sample line now opens the product-development item directly (via selectProductSub + _pendingProdRef), instead of relying on a hash change that didn't re-route from inside SUPPLY.
+
 ## v27.6.32 New-sample form: dev badge after the quantity
 - In the added-SKU lines, the "dev" badge now sits after the qty input (was between SKU and qty).
 
