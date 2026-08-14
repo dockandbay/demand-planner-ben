@@ -1,3 +1,10 @@
+## v27.1.0 Supplier portal: shipment plan + PO grid improvements (7)
+- Shipment plan "POs on board": added heading "Purchase Orders on Board this shipment"; POs belonging to ANOTHER supplier are no longer hyperlinked; new "Est. completion" column per on-board PO, shown RED when production ends on/after the shipment departure date (server now sends each member's prod_end).
+- PO grid: defaults to showing only PRODUCTION + READY TO SHIP (was PRODUCTION + SHIPPING).
+- PO grid: the completion-date box goes light-red (red border) when the completion date is in the past while the PO is still in production (was always blue).
+- PO grid: the "Ships With" reference is now a link that opens that shipment in a popup drawer — but only if the shipment is in this supplier's own plan.
+- PO grid: a PO that ships under another (master) PO is indented beneath it; rows sorted with the master shipment taking alphabetical priority (within each production group).
+
 ## v27.0.3 Status Report ▸ Out of stock: exclude zero-forecast SKUs
 - A 0-stock SKU with NO forecast for that country/warehouse is no longer flagged out of stock (nothing to sell isn't a stockout). Added a demand gate (wk3 for 3PL, wkf for FBA). US OOS drops from 63 to 26 in the sandbox (39 zero-forecast SKUs removed).
 - Discontinue dates (market-specific, incl. AU's own date) and per-market availability were already respected — verified 0 violations in the US list.

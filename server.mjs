@@ -2373,7 +2373,7 @@ async function buildShipmentPlan() {
     if (r.country && (r.is_master || !s.country)) s.country = r.country;
     if (r.branch && (r.is_master || !s.branch)) s.branch = r.branch;   // destination branch (from the master PO) → shown in the portal delivery-notes heading
     if (r.is_master) { s.master_client = r.client; s.master_deadline = r.client_deadline; s.master_supplier = r.supplier_name; if (!s.delivery_notes) s.delivery_notes = r.po_delivery_notes || ''; }   // shipment inherits the master PO's branch delivery notes (unless overridden on the shipment)
-    s.members.push({ po: r.po, supplier: r.supplier_name, pallets: Number(r.pallets) || 0, client: r.client, is_master: !!r.is_master });
+    s.members.push({ po: r.po, supplier: r.supplier_name, pallets: Number(r.pallets) || 0, client: r.client, is_master: !!r.is_master, prod_end: r.prod_end || '' });
   });
   // Fill missing shipment dates by inheriting/calculating from the master PO: ship = prod-end + 7 days,
   // landing/arrival = ship + branch transit lead (air vs sea). Flagged *_est so the UI can mark them estimated.

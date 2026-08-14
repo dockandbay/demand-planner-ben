@@ -1084,11 +1084,53 @@
       var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
       var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end, sb):'';
       return (invoiceDue(p,sb)?1:0)+unreadInt+((xdReq&&xdMiss>0)?1:0)+((p.require_confirmation&&!p.supplier_confirmed)?1:0)+(prodExc?1:0)+(dtcActionDue(p)?1:0)+(poCdMissing(p,sb)?1:0); }
+    // Read-only popup drawer for a shipment (opened from a ships-with link in the PO grid). Shows the shipment's
+    // dates + the "Purchase Orders on Board this shipment" table. Only shipments in the supplier's own plan get here.
+    function ppShipDrawer(masterPo){
+      var s=null; ((_ppData&&_ppData.shipmentPlan)||[]).forEach(function(x){ if(x.master_po===masterPo)s=x; });
+      if(!s)return;
+      var posByPo={}; ((_ppData&&_ppData.pos)||[]).forEach(function(p){ posByPo[p.po]=p; });
+      var _dep=s.departure||'';
+      var membersRows=(s.members||[]).map(function(m){
+        var poCell=(posByPo[m.po])?('<b>'+esc(m.po)+'</b>'):esc(m.po);   // only their own POs bolded; others plain (can't open another supplier's PO)
+        var pe=m.prod_end||''; var late=pe&&_dep&&pe>=_dep;
+        return '<tr><td class="l">'+poCell+(m.is_master?' <span class="tool-badge bg-green" style="font-size:9px">★ master</span>':'')+'</td><td class="l">'+esc(m.supplier||'')+'</td>'
+          +'<td class="l"'+(late?' style="color:#b91c1c;font-weight:700" title="production ends on or after departure">':'>')+(pe?esc(fd(pe)):'<span class="mut">—</span>')+'</td>'
+          +'<td style="text-align:right">'+esc(m.pallets)+'</td><td class="l">'+(m.client?esc(m.client):'<span class="mut">—</span>')+'</td></tr>';
+      }).join('');
+      function _c(l,v){ return '<div style="min-width:88px"><div class="mut" style="font-size:10px;text-transform:uppercase;letter-spacing:.04em">'+l+'</div><div style="font-weight:700;font-size:14px;margin-top:1px">'+(v||'<span class="mut" style="font-weight:400">—</span>')+'</div></div>'; }
+      var html='<div class="pp-drawer-ov" style="position:fixed;inset:0;background:rgba(15,23,42,.4);z-index:100000;display:flex;align-items:flex-start;justify-content:center;padding:36px 16px;overflow:auto">'
+        +'<div style="background:#fff;border-radius:10px;max-width:760px;width:100%;box-shadow:0 20px 60px rgba(15,23,42,.4);padding:16px 18px;text-align:left">'
+        +'<div style="display:flex;align-items:center;gap:12px;margin-bottom:8px"><div style="font-weight:700;font-size:16px">Shipment '+esc(s.master_po||'')+'</div>'
+          +(/^fob$/i.test(s.mode||'')?'<span style="background:#ede9fe;color:#6d28d9;border-radius:10px;font-size:10px;font-weight:700;padding:2px 8px">📦 FOB</span>':'')
+          +'<button class="pp-drawer-x" title="close" style="margin-left:auto;background:none;border:none;font-size:22px;line-height:1;cursor:pointer;color:#64748b">×</button></div>'
+        +'<div style="display:flex;flex-wrap:wrap;gap:18px;padding:9px 12px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:7px">'
+          +_c('Mode / Carrier',esc((s.mode||'—')+(s.carrier?' · '+s.carrier:'')))+_c('Departure',s.departure?esc(fd(s.departure)):'')+_c('Landing',s.landing?esc(fd(s.landing)):'')+_c('Arrival',s.arrival?esc(fd(s.arrival)):'')
+          +(s.master_client?_c('Client',esc(s.master_client)):'')+'</div>'
+        +'<div style="font-weight:700;font-size:12px;color:#334155;margin:12px 0 3px">Purchase Orders on Board this shipment</div>'
+        +'<table style="font-size:11px;width:100%"><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th class="l">Est. completion</th><th>Est. pallets</th><th class="l">Client</th></tr></thead><tbody>'+membersRows
+        +'<tr style="font-weight:700;border-top:1px solid #ccc"><td class="l">Total</td><td></td><td></td><td style="text-align:right">'+esc(s.total_pallets)+'</td><td></td></tr></tbody></table>'
+        +'<div style="text-align:right;margin-top:12px"><button class="save-btn pp-drawer-tab" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd">Open in Shipment Plan →</button></div>'
+        +'</div></div>';
+      var wrap=document.createElement('div'); wrap.innerHTML=html; var ov=wrap.firstChild; document.body.appendChild(ov);
+      function close(){ if(ov&&ov.parentNode)ov.parentNode.removeChild(ov); document.removeEventListener('keydown',esckey,true); }
+      function esckey(e){ if(e.key==='Escape')close(); }
+      document.addEventListener('keydown',esckey,true);
+      ov.addEventListener('click',function(e){ if(e.target===ov)close(); });
+      ov.querySelector('.pp-drawer-x').onclick=close;
+      var ot=ov.querySelector('.pp-drawer-tab'); if(ot)ot.onclick=function(){ close(); PORTAL_TAB='shipmentplan'; PORTAL_SP_PO=masterPo; renderPP(); };
+    }
     function ppPOs(pos, data){ var lb=data.lb||{}, notesByPo=data.notesByPo||{}, subsByPo=data.subsByPo||{}, costsByPo=data.costsByPo||{}, supSkus=data.supSkus||[], xdByPo=data.xdByPo||{}, addByPo=data.addByPo||{};
       if(!pos.length)return '<div class="count">No purchase orders for this supplier.</div>';
       var today=new Date().toISOString().slice(0,10);
+      var _spMasters={}; ((_ppData&&_ppData.shipmentPlan)||[]).forEach(function(s){ if(s.master_po)_spMasters[s.master_po]=1; });   // shipments in THIS supplier's plan → ships-with can open them
       return '<div class="tw"><table class="pp-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l" style="width:38px;min-width:38px" title="Production number">P#</th><th class="l">Status</th><th class="l" title="Ship to country">CTRY</th><th class="l">Ship to branch</th><th class="l">Direct</th><th class="l">Production status</th><th class="l">Start</th><th class="l">Est. completion</th><th class="l">Completion date</th><th class="l">Ship</th><th class="l">Flexport</th><th class="l">Ships With</th><th style="text-align:right">Start deposit</th><th style="text-align:right">Completion</th><th style="text-align:right">Balance</th><th style="text-align:right">Amount due</th><th class="l">Due</th><th class="l">Deposit ref</th></tr></thead><tbody>'
-        +pos.slice().sort(function(a,b){ var pa=((a.prod_no==null?'':String(a.prod_no)).trim())||'~~~', pb=((b.prod_no==null?'':String(b.prod_no)).trim())||'~~~'; return pa<pb?-1:pa>pb?1:(String(a.po||'')<String(b.po||'')?-1:1); }).map(function(p,i,arr){
+        +pos.slice().sort(function(a,b){ var pa=((a.prod_no==null?'':String(a.prod_no)).trim())||'~~~', pb=((b.prod_no==null?'':String(b.prod_no)).trim())||'~~~';
+            if(pa!==pb)return pa<pb?-1:1;
+            // Keep a shipment's POs together: order by the master PO (alphabetical), master first, then its ships-with children.
+            var ma=String(a.ships_with_master_po||a.po||''), mb=String(b.ships_with_master_po||b.po||''); if(ma!==mb)return ma<mb?-1:1;
+            var ca=(a.ships_with_master_po&&a.ships_with_master_po!==a.po)?1:0, cb=(b.ships_with_master_po&&b.ships_with_master_po!==b.po)?1:0; if(ca!==cb)return ca-cb;
+            return String(a.po||'')<String(b.po||'')?-1:1; }).map(function(p,i,arr){
           // group the grid by production number — emit a sub-heading row at the first PO of each prod_no group
           function _pk(x){ return (x.prod_no==null?'':String(x.prod_no)).trim(); }
           var _gk=_pk(p), _gkey=_gk||'none', _gcnt=arr.filter(function(x){return _pk(x)===_gk;}).length;
@@ -1103,6 +1145,10 @@
           var prodExc=p.require_confirmation?prodAttention(p.production_status, p.prod_start, p.prod_end, sb):'';
           var act=poActionCount(p);   // shared count (excludes productions ≤54; no "no shipment yet" term)
           var cdVal=poCdVal(p, sb);
+          // Completion overdue: the PO is still in PRODUCTION but the completion date (entered, else est. completion) is past.
+          var _effEnd=cdVal||p.prod_end||'';
+          var _cdOverdue=/production/i.test(p.status||'')&&_effEnd&&_effEnd<today;
+          var _cdSty=_cdOverdue?'border:1px solid #ef4444;background:#fef2f2;color:#b91c1c':'border:1px solid #93c5fd;background:#eff6ff;color:#1d4ed8';
           var cdGrid=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
           // Amount due (outstanding) = order value − amounts actually PAID (milestone with a recorded paid date),
           // so paid + due = the full order value. A scheduled-but-unpaid deposit/completion stays owed (mirrors the
@@ -1110,8 +1156,9 @@
           var _gSa=(p.start_assigned!=null?p.start_assigned:p.start_dep), _gCa=(p.completion_assigned!=null?p.completion_assigned:p.completion);
           var _gPaid=(p.start_date?Number(_gSa)||0:0)+(p.completion_date?Number(_gCa)||0:0)+(p.balance_1_date?Number(p.balance_1_amount)||0:0);
           var _gDue=(p.value_used!=null?Number(p.value_used)-_gPaid:null);
+          var _isChild=!!(p.ships_with_master_po&&p.ships_with_master_po!==p.po);   // this PO ships under another (master) PO → indent it
           return _grpHdr+'<tr class="pp-row" data-grp="'+esc(_gkey)+'"><td class="l"><button class="save-btn pp-exp" data-i="'+i+'" data-po="'+esc(p.po)+'"><span class="mng-txt">MANAGE</span>'+(act>0?' <span class="ex-badge" title="'+act+' action'+(act>1?'s':'')+' needed">'+act+'</span>':'')+'</button></td>'
-            +'<td class="l"><b>'+esc(p.po)+'</b></td>'
+            +'<td class="l"'+(_isChild?' style="padding-left:22px"':'')+'>'+(_isChild?'<span class="mut" title="ships with '+esc(p.ships_with_master_po)+'">└ </span>':'')+'<b>'+esc(p.po)+'</b></td>'
             +'<td class="l" style="width:38px;min-width:38px;white-space:nowrap">'+(p.prod_no?esc(p.prod_no):'<span class="mut">—</span>')+'</td>'
             +'<td class="l"><span class="tool-badge '+statusBg(p.status)+'">'+esc(p.status||'')+'</span>'+(ppIsFOB(p)?' <span style="background:#ede9fe;color:#6d28d9;border-radius:10px;font-size:9px;font-weight:700;padding:1px 6px;white-space:nowrap" title="FOB — collected at your factory, no import shipment">📦 FOB</span>':'')+'</td>'
             +'<td class="l">'+(p.country?esc(p.country):'<span class="mut">—</span>')+'</td>'
@@ -1119,10 +1166,10 @@
             +'<td class="l" style="font-size:10px;line-height:1.05;max-width:130px;white-space:normal">'+(p.client?esc(p.client):'<span class="mut">—</span>')+'<br>'+(p.sales_order_ref?'<span class="mut">'+esc(p.sales_order_ref)+'</span>':'<span class="mut">—</span>')+'</td>'
             +'<td class="l" style="min-width:150px">'+prodStatusSel(p.po, p.production_status||'')+(prodExc?'<div class="tiny" style="color:#b91c1c;font-weight:600;margin-top:2px" title="'+esc(prodExc)+'">⚠ check status</div>':'')+'</td>'
             +'<td class="l">'+dcell(p.prod_start)+'</td><td class="l">'+dcell(p.prod_end)+'</td>'
-            +'<td class="l" style="min-width:140px"><input type="date" class="pp-cd-grid" data-po="'+esc(p.po)+'" value="'+esc(cdVal)+'" title="click to pick your completion date — it saves automatically" style="width:128px;cursor:pointer;text-align:left;font:inherit;font-size:12px;padding:4px 6px;border:1px solid #93c5fd;border-radius:4px;background:#eff6ff;color:#1d4ed8;box-sizing:content-box"></td>'
+            +'<td class="l" style="min-width:140px"><input type="date" class="pp-cd-grid" data-po="'+esc(p.po)+'" value="'+esc(cdVal)+'" title="'+(_cdOverdue?'completion date is in the past but the PO is still in production — update your production status or completion date':'click to pick your completion date — it saves automatically')+'" style="width:128px;cursor:pointer;text-align:left;font:inherit;font-size:12px;padding:4px 6px;'+_cdSty+';border-radius:4px;box-sizing:content-box"></td>'
             +'<td class="l">'+dcell(p.ship)+'</td>'
             +'<td class="l">'+((p.flexport_reference||p.flex_id)?esc(p.flexport_reference||p.flex_id):'<span class="mut">—</span>')+'</td>'
-            +'<td class="l">'+(p.ships_with?esc(p.ships_with)+(p.ships_with_supplier?' <span class="mut">('+esc(p.ships_with_supplier)+')</span>':''):'<span class="mut">—</span>')+'</td>'
+            +'<td class="l">'+(p.ships_with?((p.ships_with_master_po&&_spMasters[p.ships_with_master_po])?'<button class="lnk-btn pp-sw-drawer" data-master="'+esc(p.ships_with_master_po)+'" title="open this shipment" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;background:none;border:none;padding:0;font:inherit">'+esc(p.ships_with)+' ↗</button>':esc(p.ships_with))+(p.ships_with_supplier?' <span class="mut">('+esc(p.ships_with_supplier)+')</span>':''):'<span class="mut">—</span>')+'</td>'
             +'<td style="text-align:right">'+ppPay(p.start_assigned!=null?p.start_assigned:p.start_dep, p.start_date)+'</td>'
             +'<td style="text-align:right">'+ppPay(p.completion_assigned!=null?p.completion_assigned:p.completion, p.completion_date)+'</td>'
             +'<td style="text-align:right">'+ppPay(p.balance_1_amount, p.balance_1_date)+'</td>'
@@ -1253,9 +1300,17 @@
             function _bucketOf(s){ var pe=s.prod_end; if(!pe)return 4; var d=new Date(pe+'T00:00:00'); if(isNaN(d.getTime()))return 4; var days=Math.round((d-_tdy)/86400000); if(days<7)return 0; if(days<21)return 1; if(days<42)return 2; return 3; }
             var _BKT=[{t:'DUE NOW',d:'Production End Date &lt; 1 week',bg:'#fee2e2',bd:'#fca5a5',c:'#991b1b'},{t:'DUE SOON',d:'Production End Date 1–3 weeks',bg:'#ffedd5',bd:'#fdba74',c:'#9a3412'},{t:'UPCOMING',d:'Production End Date 3–6 weeks',bg:'#fef9c3',bd:'#facc15',c:'#854d0e'},{t:'',d:'Production End Date 6+ weeks',bg:'#e5e7eb',bd:'#cbd5e1',c:'#374151'},{t:'',d:'No production end date yet',bg:'#e5e7eb',bd:'#cbd5e1',c:'#374151'}];
             function cardHtml(s){
-              var members=s.members.length?'<table style="font-size:11px;width:auto;margin-top:4px"><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th>Est. pallets</th><th class="l">Client</th></tr></thead><tbody>'
-                +s.members.map(function(m){return '<tr><td class="l">'+poLink(m.po)+(m.is_master?' <span class="tool-badge bg-green" style="font-size:9px">★ master</span>':'')+'</td><td class="l">'+esc(m.supplier||'')+'</td><td style="text-align:right">'+esc(m.pallets)+'</td><td class="l">'+(m.client?esc(m.client):'<span class="mut">—</span>')+'</td></tr>';}).join('')
-                +'<tr style="font-weight:700;border-top:1px solid #ccc"><td class="l">Total</td><td></td><td style="text-align:right">'+esc(s.total_pallets)+'</td><td></td></tr></tbody></table>':'<span class="mut tiny">no POs on this shipment</span>';
+              var _dep=s.departure||'';   // shipment departure/ETD — an on-board PO whose production ends on/after this is a risk
+              var members=s.members.length?'<div style="font-weight:700;font-size:12px;color:#334155;margin-top:8px;margin-bottom:3px">Purchase Orders on Board this shipment</div>'
+                +'<table style="font-size:11px;width:auto;margin-top:2px"><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th class="l">Est. completion</th><th>Est. pallets</th><th class="l">Client</th></tr></thead><tbody>'
+                +s.members.map(function(m){
+                    var mine=!!posByPo[m.po];   // only THIS supplier's POs are hyperlinked (they can't open another supplier's PO)
+                    var poCell=mine?poLink(m.po):esc(m.po);
+                    var pe=m.prod_end||''; var late=pe&&_dep&&pe>=_dep;   // red if production ends on/after departure
+                    return '<tr><td class="l">'+poCell+(m.is_master?' <span class="tool-badge bg-green" style="font-size:9px">★ master</span>':'')+'</td><td class="l">'+esc(m.supplier||'')+'</td>'
+                      +'<td class="l"'+(late?' style="color:#b91c1c;font-weight:700" title="production ends on or after the shipment departure date"':'')+'>'+(pe?esc(fd(pe)):'<span class="mut">—</span>')+'</td>'
+                      +'<td style="text-align:right">'+esc(m.pallets)+'</td><td class="l">'+(m.client?esc(m.client):'<span class="mut">—</span>')+'</td></tr>';}).join('')
+                +'<tr style="font-weight:700;border-top:1px solid #ccc"><td class="l">Total</td><td></td><td></td><td style="text-align:right">'+esc(s.total_pallets)+'</td><td></td></tr></tbody></table>':'<span class="mut tiny">no POs on this shipment</span>';
               // FOB orders — no shipment to us (collected at factory / delivered to a forwarder). Editable:
               // production end date (submitted for D&B approval, like elsewhere) + a timeline of PO notes.
               if(s.is_fob){
@@ -2241,7 +2296,7 @@
             var seen={}, present=[]; _ppData.pos.forEach(function(p){ var s=(p.status||'').toUpperCase(); if(s==='FUTURE')return; if(s&&!seen[s]){seen[s]=1;present.push(s);} });   // FUTURE POs are hidden from the portal (no pill, not listed)
             var ordered=PO_STATUSES.filter(function(s){return seen[s];}).concat(present.filter(function(s){return PO_STATUSES.indexOf(s)<0;}));
             if(PORTAL_PO_ST===null)PORTAL_PO_ST={};
-            ordered.forEach(function(s){ if(PORTAL_PO_ST[s]===undefined)PORTAL_PO_ST[s]=(s==='PRODUCTION'||s==='SHIPPING'); });
+            ordered.forEach(function(s){ if(PORTAL_PO_ST[s]===undefined)PORTAL_PO_ST[s]=(s==='PRODUCTION'||s==='READY TO SHIP'); });
             var pq=effQ(PORTAL_PO_Q);
             // distinct dropdown values across this supplier's POs (blank-safe, sorted)
             function _distinct(key){ var s={}; _ppData.pos.forEach(function(p){ var v=(p[key]==null?'':String(p[key])).trim(); if(v)s[v]=1; }); return Object.keys(s).sort(); }
@@ -2272,6 +2327,7 @@
             var ppsa=body.querySelector('.pp-showall'); if(ppsa)ppsa.onclick=function(){ _ppShowAllPO=true; renderPP(); };
             body.querySelectorAll('.pill[data-st]').forEach(function(p){ p.onclick=function(){ var s=p.dataset.st; PORTAL_PO_ST[s]=!PORTAL_PO_ST[s]; _ppShowAllPO=false; renderPP(); }; });
             var _exc=body.querySelector('.pill[data-poexc]'); if(_exc)_exc.onclick=function(){ PORTAL_PO_EXC=!PORTAL_PO_EXC; _ppShowAllPO=false; renderPP(); };
+            body.querySelectorAll('.pp-sw-drawer').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); ppShipDrawer(b.dataset.master); }; });   // ships-with → open the shipment in a popup drawer
             var _arch=body.querySelector('.pill[data-pparch]'); if(_arch)_arch.onclick=function(){ window.__ppInclArch=!window.__ppInclArch; _ppShowAllPO=false; loadPreview(); };   // re-fetch bootstrap incl/excl archived
             var _pr=body.querySelector('.pp-po-prod'); if(_pr)_pr.onchange=function(){ PORTAL_PO_PROD=this.value; _ppShowAllPO=false; renderPP(); };
             var _ct=body.querySelector('.pp-po-ctry'); if(_ct)_ct.onchange=function(){ PORTAL_PO_CTRY=this.value; _ppShowAllPO=false; renderPP(); };
