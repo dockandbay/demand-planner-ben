@@ -1,3 +1,7 @@
+## v27.002 Samples detail: dev badge + product link on lines, and "Find past address"
+- The sample DETAIL SKU lines now show the "dev" badge (after qty) + a "↗ product" link (opens the product-dev item) on dev-item lines — matching the new-sample form. Sample-detail endpoint now flags each line's `dev` (SKU matches a product_dev_items ref).
+- Added the deduped "Find past address" recipient search to the sample DETAIL recipient section (populates + saves all recipient fields).
+
 ## v27.001 — REBASELINE (2026-08-14)
 - v27.6.34 confirmed LIVE on horizon.dockandbay.com (full planner backup taken; migrations 224–230 applied). SETS shipped: scope check passed — masters stayed exactly 716 in-scope, buy plan byte-identical, all 190 sets visible in the demand view (sets show, don't buy, as designed).
 - Version scheme reset to v27.00N (next change = v27.002).

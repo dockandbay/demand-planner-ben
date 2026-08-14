@@ -2307,7 +2307,9 @@ app.get('/api/supply/sample-detail/:id', async (req, res) => {
       to_char(created_at,'YYYY-MM-DD') created_at
       FROM planner.sample_requests WHERE id=$1::bigint`, [id])).rows[0];
     if (!s) return res.status(404).json({ error: 'sample not found' });
-    const lines = (await pool.query(`SELECT id, sku, qty FROM planner.sample_request_lines WHERE sample_id=$1::bigint ORDER BY id`, [id])).rows;
+    const lines = (await pool.query(`SELECT l.id, l.sku, l.qty,
+      EXISTS (SELECT 1 FROM planner.product_dev_items i WHERE i.ref = l.sku) dev
+      FROM planner.sample_request_lines l WHERE l.sample_id=$1::bigint ORDER BY l.id`, [id])).rows;
     const notes = (await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
       to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read FROM planner.sample_notes WHERE sample_id=$1::bigint ORDER BY created_at`, [id])).rows;
     const charges = (await pool.query(`SELECT id, coalesce(supplier_name,'') supplier_name, freight_cost, product_cost,
