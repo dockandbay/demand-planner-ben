@@ -1,3 +1,6 @@
+## v27.6.8 Plan Shipments: "Top up existing container" recommendations
+- The Recommendations panel now suggests adding a loose (unassigned) PO to an existing, non-confirmed container that has spare capacity — best-fit into the fullest container it still fits (≤20 pal). Applying keeps that container's existing master ref (no reshuffle), unlike the from-scratch bins. Shown under a new "Top up existing containers" heading above "New containers".
+
 ## v27.6.7 Shipments Orphans: redefine as empty shipment records + delete on clean-up
 - Corrected the Orphans filter: an orphan is now a shipment RECORD with no POs aboard (by shipment_ref or master_po) that is NOT completed — i.e. an empty/dangling container. (Previously it flagged POs pointing at a missing shipment, which wrongly caught live active self-shipments like PO-55UKWK2-AIR.)
 - "🧹 Clean up orphans" now DELETES those empty shipment rows (plus their notes / change-log), in a transaction. POs are never touched. Completed shipments are excluded so history is preserved.
