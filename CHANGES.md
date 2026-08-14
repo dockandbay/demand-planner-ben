@@ -1,3 +1,6 @@
+## v27.6.32 New-sample form: dev badge after the quantity
+- In the added-SKU lines, the "dev" badge now sits after the qty input (was between SKU and qty).
+
 ## v27.6.31 Samples: unique "Find past address" results + FUTURE status light-purple
 - "Find past address" now dedupes by recipient identity (company + name + address line 1 + postcode, case/space-insensitive), keeping the most recent — no more duplicate matches.
 - FUTURE sample status is now light purple (#D3D3FF) matching the PO grid, in both the status chip and the Our-status dropdown.
