@@ -9060,7 +9060,7 @@
     document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k==='reports');});
     var _ns=document.getElementById('supply-nav-sel'); if(_ns)_ns.value='reports';
     var c=document.getElementById('supply-content');
-    c.innerHTML='<div id="rep-subnav">'+REPORT_SECTIONS.map(function(s){return '<span class="rtab'+(s[0]===rk?' active':'')+'" data-rk="'+s[0]+'">'+s[1]+(s[0]==='erp-compare'?'<span id="rep-erpc-badge" class="rtab-count" style="display:none"></span>':s[0]==='dtc-mismatch'?'<span id="nav-dtc-badge-l3" class="rtab-count" style="display:none"></span>':s[0]==='reallocate'?'<span id="rep-realloc-badge" class="rtab-count" style="display:none;background:#d97706"></span>':'')+'</span>';}).join('')+'</div><div id="rep-body"><div class="count">Loading…</div></div>';
+    c.innerHTML='<div id="rep-subnav">'+REPORT_SECTIONS.map(function(s){return '<span class="rtab'+(s[0]===rk?' active':'')+'" data-rk="'+s[0]+'">'+s[1]+(s[0]==='erp-compare'?'<span id="rep-erpc-badge" class="rtab-count" style="display:none"></span>':s[0]==='dtc-mismatch'?'<span id="nav-dtc-badge-l3" class="rtab-count" style="display:none"></span>':s[0]==='reallocate'?'<span id="rep-realloc-badge" class="rtab-count" style="display:none"></span>':'')+'</span>';}).join('')+'</div><div id="rep-body"><div class="count">Loading…</div></div>';
     c.querySelectorAll('#rep-subnav .rtab').forEach(function(p){p.onclick=function(){selectReport(p.dataset.rk);};});
     paintErpcBadge();   // repaint from last-known count; refresh in the background unless we're about to load the report itself (which sets it)
     if(rk!=='erp-compare') refreshErpcBadge();

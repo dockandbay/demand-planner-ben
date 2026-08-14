@@ -1,3 +1,6 @@
+## v27.0.0 REALLOCATE nav badge red (matches all other action badges)
+- The REALLOCATE sub-nav count badge was amber; now uses the standard red .rtab-count like every other action badge.
+
 ## v26.999.0 Open-actions scoreboard: per-metric help text + fix Payments overdue count
 - Each metric now shows a one-line explainer under its label (what it measures), incl. clarifying "PO action items" = PO housekeeping (no supplier set, or a past landing date while unshipped).
 - FIX: "Payments overdue" read 0 while the Payments Due report showed 27. The metric used a narrow first-pass (completion-date + deposits only). Now mirrors the report exactly (buildPaymentsDue): unpaid Completion + Balance PO milestones (final-invoice-confirmed) + unpaid Deposits/Other, due in [2026-01-01, today), via the shared poRowsCache. Now reads 27.
