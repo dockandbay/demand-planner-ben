@@ -1,3 +1,7 @@
+## v26.999.0 Open-actions scoreboard: per-metric help text + fix Payments overdue count
+- Each metric now shows a one-line explainer under its label (what it measures), incl. clarifying "PO action items" = PO housekeeping (no supplier set, or a past landing date while unshipped).
+- FIX: "Payments overdue" read 0 while the Payments Due report showed 27. The metric used a narrow first-pass (completion-date + deposits only). Now mirrors the report exactly (buildPaymentsDue): unpaid Completion + Balance PO milestones (final-invoice-confirmed) + unpaid Deposits/Other, due in [2026-01-01, today), via the shared poRowsCache. Now reads 27.
+
 ## v26.998.0 Manage 3PL/FBA: move "unregistered receipt" PO note into the DIFF cell
 - The 📦 candidate-PO note now sits under the DIFF number (Manage FBA: the Diff cell; Manage 3PL: under the AVAILABLE Diff), instead of under the SKU. Same content, same drawer links.
 

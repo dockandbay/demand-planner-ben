@@ -7791,10 +7791,22 @@ async function computeOpenActions() {
       AND ((s.production_status='shipped' OR coalesce(s.tracking_code,'')<>'') OR (s.completion_date_required IS NOT NULL AND current_date > s.completion_date_required)
         OR EXISTS (SELECT 1 FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending')
         OR EXISTS (SELECT 1 FROM planner.sample_notes n WHERE n.sample_id=s.id AND n.author_kind='supplier' AND n.read_at IS NULL))`);
-  // payments overdue — FIRST PASS (completion payment date past + not marked assigned; deposits past due + unpaid). Balance-paid
-  // lives in the ledger so this may under-count balances — confirm the exact definition against the live Payments Due badge.
-  const payments_overdue = await one(`SELECT ((SELECT count(*) FROM planner.purchase_orders p WHERE ${nd} AND p.master_po IS NULL AND p.pay_completion_date < current_date AND p.pay_completion_assigned IS NULL)
-      + (SELECT count(*) FROM planner.deposits d WHERE coalesce(d.is_deposit,false) AND lower(coalesce(d.status,''))<>'closed' AND d.date_paid IS NULL AND d.date_due < current_date)) n`);
+  // Payments overdue — mirror the Payments Due report EXACTLY (client buildPaymentsDue / the PAYMENTS nav badge): count
+  // UNPAID Completion + Balance PO milestones (final-invoice-confirmed only) plus unpaid Deposits/Other, each with a due
+  // date in [2026-01-01, today). Uses the same poRowsCache the PO grid / cash flow use, so the number matches the report.
+  let payments_overdue = 0;
+  try {
+    const _poAll = await poRowsCache.get();   // master POs already excluded (child money rolls into master)
+    const _deps = await q(`SELECT coalesce(status,'') status, to_char(date_due,'YYYY-MM-DD') date_due, date_paid FROM planner.deposits`);
+    const _MIN = '2026-01-01', _tdy = new Date().toISOString().slice(0, 10);
+    const _ov = (paid, due) => !paid && !!due && due >= _MIN && due < _tdy;
+    for (const p of _poAll) {
+      if (!p.is_final) continue;   // milestones surface only once the final invoice amount is confirmed
+      if (Number(p.completion_calc) > 0.009 && p.completion_due && _ov(Number(p.completion_assigned) > 0.009, p.completion_due)) payments_overdue++;
+      if (Number(p.balance_owing) > 0.009 && p.balance_due && _ov(Number(p.balance_1_amount) > 0.009, p.balance_due)) payments_overdue++;
+    }
+    for (const d of _deps) { if (String(d.status).toLowerCase() === 'closed') continue; if (_ov(!!d.date_paid, d.date_due)) payments_overdue++; }
+  } catch (e) {}
   const dtc_issues = await one(`WITH oso AS (SELECT s.cin7_id, s.reference FROM planner.dtc_sales_orders s LEFT JOIN planner.dtc_mismatch_review r ON r.so_cin7_id=s.cin7_id WHERE NOT s.is_void AND s.dispatched_date IS NULL AND NOT coalesce(r.accepted,false)),
     sol AS (SELECT l.so_cin7_id, l.code, sum(l.qty) q FROM planner.dtc_sales_order_lines l WHERE l.so_cin7_id IN (SELECT cin7_id FROM oso) GROUP BY 1,2),
     mp AS (SELECT o.cin7_id, po.po FROM oso o JOIN planner.purchase_orders po ON po.sales_order_ref=o.reference),
