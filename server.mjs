@@ -2958,6 +2958,7 @@ app.get('/api/supply/:section', async (req, res, next) => {
           (SELECT count(*) FROM planner.sample_request_lines l WHERE l.sample_id=s.id)::int line_count,
           (SELECT coalesce(sum(l.qty),0) FROM planner.sample_request_lines l WHERE l.sample_id=s.id)::int units,
           (SELECT count(*) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending')::int pending_charges,
+          (SELECT coalesce(sum(c.freight_cost+c.product_cost),0) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending') pending_charge_amount,
           (SELECT coalesce(sum(c.freight_cost+c.product_cost),0) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='accepted') accepted_charge,
           (SELECT count(*) FROM planner.sample_notes n WHERE n.sample_id=s.id AND n.author_kind='supplier' AND n.read_at IS NULL)::int unread_notes,
           coalesce(s.change_requested,false) change_requested,
@@ -11164,6 +11165,14 @@ app.post('/api/supply/sample-note-read/:id', async (req, res) => {
 });
 
 // ── SUPPLIER CHARGES (samples + shipments) → Other Payment on accept ─────────────
+// Post a charge event onto the source's timeline (sample_notes for a sample, shipment_notes for a shipment). Best-effort.
+async function chargeTimelineNote(db, sourceType, sourceRef, body, by) {
+  try {
+    if (sourceType === 'sample') await db.query(`INSERT INTO planner.sample_notes (sample_id, author_kind, author_email, body) SELECT id,'internal',$2,$3 FROM planner.sample_requests WHERE ref=$1`, [sourceRef, by || null, body]);
+    else if (sourceType === 'shipment') await db.query(`INSERT INTO planner.shipment_notes (shipment_ref, author_kind, author_email, body) VALUES ($1,'internal',$2,$3)`, [sourceRef, by || null, body]);
+  } catch (e) {}
+}
+const chargeLbl = (fr, pr, desc) => `freight $${Math.round(Number(fr)||0)} + product $${Math.round(Number(pr)||0)}${desc ? ` · ${desc}` : ''}`;
 app.post('/api/supply/charge-create', async (req, res) => {
   const b = req.body || {};
   if (!b.source_type || !b.source_ref) return res.status(400).json({ error: 'source_type and source_ref required' });
@@ -11171,10 +11180,12 @@ app.post('/api/supply/charge-create', async (req, res) => {
     (source_type, source_ref, supplier_name, freight_cost, product_cost, description, created_by)
     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
     [b.source_type, b.source_ref, b.supplier_name||null, Number(b.freight_cost)||0, Number(b.product_cost)||0, b.description||null, b.created_by||null]);
+    await chargeTimelineNote(pool, b.source_type, b.source_ref, `💰 Charge added — ${chargeLbl(b.freight_cost, b.product_cost, b.description)}`, shortUser(authUser(req)) || b.created_by || null);
     res.json({ ok:true, id: r.rows[0].id }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/charge/:id/reject', async (req, res) => {
-  try { await pool.query(`UPDATE planner.supplier_charges SET status='rejected' WHERE id=$1::bigint AND status='pending'`, [req.params.id]);
+  try { const c = (await pool.query(`UPDATE planner.supplier_charges SET status='rejected' WHERE id=$1::bigint AND status='pending' RETURNING source_type, source_ref, freight_cost, product_cost, description`, [req.params.id])).rows[0];
+    if (c) await chargeTimelineNote(pool, c.source_type, c.source_ref, `🚫 Charge rejected — ${chargeLbl(c.freight_cost, c.product_cost, c.description)}`, shortUser(authUser(req)) || null);
     res.json({ ok:true }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/charge/:id/accept', async (req, res) => {   // accept → Other Payment (deposits, is_deposit=false)
@@ -11200,6 +11211,7 @@ app.post('/api/supply/charge/:id/accept', async (req, res) => {   // accept → 
     const op = await client.query(`INSERT INTO planner.deposits (is_deposit, supplier_name, amount, description, reference, date_due)
       VALUES (false, $1, $2, $3, $4, current_date) RETURNING id`, [c.supplier_name || null, amount, desc, c.source_ref]);
     await client.query(`UPDATE planner.supplier_charges SET status='accepted', accepted_at=now(), other_payment_id=$1 WHERE id=$2::bigint`, [op.rows[0].id, req.params.id]);
+    await chargeTimelineNote(client, c.source_type, c.source_ref, `✅ Charge accepted → Other Payment $${amount} (${chargeLbl(c.freight_cost, c.product_cost, c.description)})`, shortUser(authUser(req)) || null);
     await client.query('COMMIT');
     invalidateSupplyCaches();   // the new Other Payment must flow through to the cached deposits / cash flow / payments-due builds immediately
     res.json({ ok:true, other_payment_id: op.rows[0].id, amount });
@@ -13159,7 +13171,8 @@ app.post('/api/portal/sample-charge', portalAuth, async (req, res) => {   // sup
   const b = req.body || {};
   try { const s = await portalOwnsSample(req, b.id); if(!s) return res.status(403).json({ error: 'not your sample' });
     const r = await pool.query(`INSERT INTO planner.supplier_charges (source_type, source_ref, supplier_name, freight_cost, product_cost, description, created_by)
-      VALUES ('sample',$1,$2,$3,$4,$5,$6) RETURNING id`, [s.ref, s.supplier_name, Number(b.freight_cost)||0, Number(b.product_cost)||0, b.description||null, req.portal.email||'supplier']); res.json({ ok: true, id: r.rows[0].id }); }
+      VALUES ('sample',$1,$2,$3,$4,$5,$6) RETURNING id`, [s.ref, s.supplier_name, Number(b.freight_cost)||0, Number(b.product_cost)||0, b.description||null, req.portal.email||'supplier']);
+    await chargeTimelineNote(pool, 'sample', s.ref, `💰 Charge added by supplier — ${chargeLbl(b.freight_cost, b.product_cost, b.description)}`, req.portal.email || 'supplier'); res.json({ ok: true, id: r.rows[0].id }); }
   catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample-create', portalAuth, async (req, res) => {   // supplier originates a sample request
   const b = req.body || {}; const names = req.portal.suppliers||[], ids = req.portal.supplierIds||[];

@@ -1,3 +1,7 @@
+## v27.4.0 Sample charges: show pending+accepted amounts in grid; timeline notes on add/accept/reject
+- Samples grid Charges column now shows the pending amount ("$X pending") alongside the accepted amount ("$Y accepted"), stacked (server adds pending_charge_amount).
+- Adding, accepting or rejecting a charge (admin or supplier portal) now posts a note to the sample/shipment timeline (💰 added / ✅ accepted → Other Payment / 🚫 rejected).
+
 ## v27.3.0 Samples: admin stakeholder emails + charges; portal sample UX
 - Admin new-sample form: added "Email when shipped (stakeholders)" field with email validation; saved to sample_requests.notify_emails.
 - Admin sample detail (…/charges): can now create charges directly (freight/product/note → + Add charge), not only from the supplier portal.
