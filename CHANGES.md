@@ -1,3 +1,6 @@
+## v27.6.9 Plan Shipments: combined "Apply all" recommendations (one batch, single undo)
+- New "✓ Apply all (N)" button in the Recommendations header applies every visible recommendation at once — all top-ups plus all multi-PO new-container groups — deduped by PO, persisted together, and recorded as a SINGLE undo entry so one Undo reverts the whole set. Answers "can a recommendation change 2+ containers and both apply": yes, as an atomic batch.
+
 ## v27.6.8 Plan Shipments: "Top up existing container" recommendations
 - The Recommendations panel now suggests adding a loose (unassigned) PO to an existing, non-confirmed container that has spare capacity — best-fit into the fullest container it still fits (≤20 pal). Applying keeps that container's existing master ref (no reshuffle), unlike the from-scratch bins. Shown under a new "Top up existing containers" heading above "New containers".
 
