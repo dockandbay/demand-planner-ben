@@ -1,3 +1,7 @@
+## v27.6.15 Samples timeline: detailed SKU/qty changes + confirm as notifications
+- "SKUs / quantities updated" record-of-change now spells out exactly what changed — "Added A ×2, B ×1; Removed C; Qty D 3→5" — instead of a bare label, and no-op re-saves no longer log. Applies to both the admin and supplier-portal line edits.
+- SKU/qty changes and supplier "Confirmed the sample request" now also post a shared timeline NOTE (visible to both sides + drives the unread bell), so key events surface on the timeline for supplier and D&B.
+
 ## v27.6.14 Samples: new admin sample request appears in the portal immediately
 - The admin sample-create now invalidates supply caches on commit. Previously a newly created sample only showed in the supplier portal after the per-supplier bootstrap cache TTL expired (SR-15 "took a lot of time" to appear). Now it flows through straight away.
 

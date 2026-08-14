@@ -11104,6 +11104,7 @@ app.post('/api/supply/sample/:id/lines', async (req, res) => {   // replace all 
   const lines = Array.isArray(req.body && req.body.lines) ? req.body.lines : [];
   const client = await pool.connect();
   try { await client.query('BEGIN');
+    const _oldLines = (await client.query(`SELECT sku, qty FROM planner.sample_request_lines WHERE sample_id=$1::bigint`, [req.params.id])).rows;   // snapshot for the change diff
     await client.query(`DELETE FROM planner.sample_request_lines WHERE sample_id=$1::bigint`, [req.params.id]);
     for (const l of lines) { if (!l || !l.sku) continue;
       await client.query(`INSERT INTO planner.sample_request_lines (sample_id, sku, qty) VALUES ($1::bigint,$2,$3)`,
@@ -11115,7 +11116,7 @@ app.post('/api/supply/sample/:id/lines', async (req, res) => {   // replace all 
       WHERE s.id=$1::bigint AND s.accepted_at IS NOT NULL
         AND s.approved_lines IS DISTINCT FROM (SELECT jsonb_object_agg(sku,qty) FROM (SELECT sku, sum(qty) qty FROM planner.sample_request_lines WHERE sample_id=$1::bigint GROUP BY sku) z)`, [req.params.id]);
     await client.query('COMMIT');
-    await logSampleChange(req.params.id, 'SKUs / quantities updated', null, authUser(req) || 'Dock & Bay');   // record of change (D&B side)
+    await logSampleLinesChanged(req.params.id, _oldLines, lines, authUser(req) || 'Dock & Bay', 'internal');   // detailed record-of-change + timeline note (skips no-op saves)
     res.json({ ok:true, count: lines.length });
   } catch (e) { await client.query('ROLLBACK').catch(()=>{}); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
@@ -11123,6 +11124,7 @@ app.post('/api/supply/sample/:id/lines', async (req, res) => {   // replace all 
 app.post('/api/supply/sample/:id/accept', async (req, res) => {   // supplier accepts the request
   try { await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), change_requested=false, approved_lines=(SELECT jsonb_object_agg(sku,qty) FROM (SELECT sku, sum(qty) qty FROM planner.sample_request_lines WHERE sample_id=$1::bigint GROUP BY sku) z), updated_at=now() WHERE id=$1::bigint`, [req.params.id]);
     await logSampleChange(req.params.id, 'Confirmed sample request', null, authUser(req) || 'Dock & Bay');   // record of change
+    await sampleTimelineNote(req.params.id, 'Confirmed the sample request', 'internal', authUser(req));   // shared timeline notification
     res.json({ ok:true }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/sample/:id/delete', async (req, res) => {
@@ -11934,6 +11936,36 @@ async function logPoChange(po, event, detail, by) {
 async function logSampleChange(sampleId, event, detail, by) {
   try { await pool.query(`INSERT INTO planner.sample_change_log (sample_id,event,detail,changed_by) VALUES ($1::bigint,$2,$3,$4)`, [sampleId, event, detail || null, by || null]); }
   catch (e) { /* table absent pre-migration 172 — non-fatal */ }
+}
+// Post a sample TIMELINE NOTE (shared with the supplier + drives the unread bell). kind: 'internal' = from D&B
+// (unread for the supplier), 'supplier' = from the supplier (unread for D&B). Best-effort.
+async function sampleTimelineNote(sampleId, body, kind, email) {
+  try { await pool.query(`INSERT INTO planner.sample_notes (sample_id, author_email, author_kind, body) VALUES ($1,$2,$3,$4)`,
+    [sampleId, email || null, kind === 'supplier' ? 'supplier' : 'internal', body]); }
+  catch (e) { /* best-effort */ }
+}
+async function getSampleLines(sampleId) {
+  try { return (await pool.query(`SELECT sku, qty FROM planner.sample_request_lines WHERE sample_id=$1::bigint`, [sampleId])).rows; }
+  catch (e) { return []; }
+}
+// Human diff of two sample line sets (summed per SKU) → "Added A ×2, B ×1; Removed C; Qty D 3→5" (or '' if unchanged).
+function sampleLinesDiffText(oldLines, newLines) {
+  const norm = arr => { const m = {}; (arr || []).forEach(l => { if (!l || !l.sku) return; const k = String(l.sku).trim(); if (!k) return; m[k] = (m[k] || 0) + (Number(l.qty) || 0); }); return m; };
+  const o = norm(oldLines), n = norm(newLines), added = [], removed = [], changed = [];
+  Object.keys(n).forEach(k => { if (!(k in o)) added.push(k + ' ×' + n[k]); else if (o[k] !== n[k]) changed.push(k + ' ' + o[k] + '→' + n[k]); });
+  Object.keys(o).forEach(k => { if (!(k in n)) removed.push(k); });
+  const parts = [];
+  if (added.length) parts.push('Added ' + added.join(', '));
+  if (removed.length) parts.push('Removed ' + removed.join(', '));
+  if (changed.length) parts.push('Qty ' + changed.join(', '));
+  return parts.join('; ');
+}
+// Record + notify a SKU/qty change: detailed record-of-change (admin audit) + a shared timeline note (notification).
+async function logSampleLinesChanged(sampleId, oldLines, newLines, by, kind) {
+  const diff = sampleLinesDiffText(oldLines, newLines);
+  if (!diff) return;   // no real change → don't log (e.g. a no-op re-save while editing another field)
+  await logSampleChange(sampleId, 'SKUs / quantities updated', diff, by);
+  await sampleTimelineNote(sampleId, 'SKUs / quantities updated — ' + diff, kind, by);
 }
 // Record of change for a PRODUCT development item (migration 181). Surfaced in PRODUCT ▸ Timeline (merged with notes).
 async function logProductChange(ref, event, detail, by) {
@@ -13174,8 +13206,9 @@ app.get('/api/portal/product-skus', portalAuth, async (req, res) => {   // bulk-
   try { res.json(await supplierSkuCandidates(req.portal.suppliers, (req.query.q || '').trim(), !!req.query.dev)); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample/:id/lines', portalAuth, async (req, res) => {   // replace-all bulk-SKU lines
   try { const s = await portalOwnsSample(req, req.params.id); if (!s) return res.status(403).json({ error: 'not your sample' });
+    const _oldLines = await getSampleLines(req.params.id);
     await setSampleLines(req.params.id, (req.body || {}).lines);
-    await logSampleChange(req.params.id, 'SKUs / quantities updated', null, req.portal.email || 'supplier');   // record of change (supplier side)
+    await logSampleLinesChanged(req.params.id, _oldLines, (req.body || {}).lines, req.portal.email || 'supplier', 'supplier');   // detailed record-of-change + timeline note (supplier side)
     res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample/:id/dev-samples', portalAuth, async (req, res) => {   // replace-all product-development sample links
   const b = req.body || {};
@@ -13228,6 +13261,7 @@ app.post('/api/portal/sample-accept', portalAuth, async (req, res) => {
   try { const s = await portalOwnsSample(req, req.body && req.body.id); if(!s) return res.status(403).json({ error: 'not your sample' });
     await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), change_requested=false, approved_lines=(SELECT jsonb_object_agg(sku,qty) FROM (SELECT sku, sum(qty) qty FROM planner.sample_request_lines WHERE sample_id=$1::bigint GROUP BY sku) z), updated_at=now() WHERE id=$1::bigint`, [s.id]);
     await logSampleChange(s.id, 'Confirmed sample request', null, req.portal.email || 'supplier');   // record of change (supplier side)
+    await sampleTimelineNote(s.id, 'Confirmed the sample request', 'supplier', req.portal.email);   // shared timeline notification → shows to both sides + notifies D&B
     res.json({ ok: true }); }
   catch (e) { res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample-update', portalAuth, async (req, res) => {   // supplier: expected completion / tracking / carrier
