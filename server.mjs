@@ -3467,13 +3467,18 @@ app.get('/api/supply/:section', async (req, res, next) => {
         // Sample-derived Other Payments: attach a per-account split (the sample's type/purpose × its Xero account code)
         // so the Payments Report Xero download can split the single total line across accounts. Register still shows the total.
         const _sampRefs = [...new Set(lines.filter(l => l.source === 'other' && /^SR-/i.test(l.reference || '')).map(l => l.reference))];
-        const _sampPurp = {};
-        if (_sampRefs.length) (await pool.query(`SELECT ref, purpose FROM planner.sample_requests WHERE ref = ANY($1)`, [_sampRefs])).rows
-          .forEach(r => { _sampPurp[r.ref] = Array.isArray(r.purpose) ? r.purpose.filter(Boolean) : []; });
+        const _sampPurp = {}, _sampMeta = {};
+        if (_sampRefs.length) (await pool.query(`SELECT ref, purpose, upper(coalesce(country,'')) country, coalesce(first_name,'') first_name, coalesce(last_name,'') last_name, coalesce(recipient_company,'') company, coalesce(carrier,'') carrier, coalesce(tracking_code,'') tracking FROM planner.sample_requests WHERE ref = ANY($1)`, [_sampRefs])).rows
+          .forEach(r => { _sampPurp[r.ref] = Array.isArray(r.purpose) ? r.purpose.filter(Boolean) : []; _sampMeta[r.ref] = r; });
         const _acct = {}; (await pool.query(`SELECT purpose, account_code FROM planner.sample_purpose_accounts`)).rows.forEach(r => _acct[r.purpose] = r.account_code);
+        // Xero description for a sample line: "SR-14 - UK - Samples for First Last (Company). Shipped with CARRIER TRACKING"
+        const _sampDesc = (ref) => { const m = _sampMeta[ref]; if (!m) return ref;
+          const who = [m.first_name, m.last_name].filter(Boolean).join(' ') || '—';
+          const ship = (m.carrier || m.tracking) ? `. Shipped with ${[m.carrier, m.tracking].filter(Boolean).join(' ')}` : '';
+          return `${ref}${m.country ? ` - ${m.country}` : ''} - Samples for ${who}${m.company ? ` (${m.company})` : ''}${ship}`; };
         const _sampleSplit = (ref, amt) => { const ps = _sampPurp[ref]; if (!ps || !ps.length) return null;
-          const n = ps.length, base = Math.floor((Number(amt) / n) * 100) / 100;
-          const arr = ps.map(p => ({ account_code: _acct[p] || '', purpose: p, amount: base }));
+          const n = ps.length, base = Math.floor((Number(amt) / n) * 100) / 100, desc = _sampDesc(ref);
+          const arr = ps.map(p => ({ account_code: _acct[p] || '', purpose: p, amount: base, desc }));
           const resid = Math.round((Number(amt) - base * n) * 100) / 100; if (resid) arr[0].amount = Math.round((arr[0].amount + resid) * 100) / 100;
           return arr; };
         const fx = (await pool.query(`SELECT to_char(run_date,'YYYY-MM-DD') dt, supplier, paid_amount, coalesce(paid_currency,'') ccy FROM planner.payment_fx`)).rows;
@@ -11166,6 +11171,30 @@ app.post('/api/supply/sample-note-read/:id', async (req, res) => {
 });
 
 // ── SUPPLIER CHARGES (samples + shipments) → Other Payment on accept ─────────────
+// Admin: rename a sample's reference (default SR-<id>, editable, must stay unique). Cascades into the sample's linked
+// supplier charges + their Other Payments so nothing orphans on the SR- reference.
+app.post('/api/supply/sample/:id/ref', async (req, res) => {
+  const newRef = String((req.body || {}).ref || '').trim();
+  if (!newRef) return res.status(400).json({ error: 'reference required' });
+  if (!/^[A-Za-z0-9._-]+$/.test(newRef)) return res.status(400).json({ error: 'reference may only contain letters, numbers, and . _ -' });
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const cur = (await client.query(`SELECT ref FROM planner.sample_requests WHERE id=$1::bigint FOR UPDATE`, [req.params.id])).rows[0];
+    if (!cur) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'sample not found' }); }
+    const oldRef = cur.ref;
+    if (newRef === oldRef) { await client.query('ROLLBACK'); return res.json({ ok: true, ref: newRef }); }
+    const dup = (await client.query(`SELECT 1 FROM planner.sample_requests WHERE ref=$1 AND id<>$2::bigint`, [newRef, req.params.id])).rows[0];
+    if (dup) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'That reference is already used by another sample.' }); }
+    await client.query(`UPDATE planner.sample_requests SET ref=$1, updated_at=now() WHERE id=$2::bigint`, [newRef, req.params.id]);
+    await client.query(`UPDATE planner.supplier_charges SET source_ref=$1 WHERE source_type='sample' AND source_ref=$2`, [newRef, oldRef]);
+    await client.query(`UPDATE planner.deposits SET reference=$1 WHERE is_deposit=false AND reference=$2`, [newRef, oldRef]);
+    await client.query('COMMIT');
+    invalidateSupplyCaches();
+    res.json({ ok: true, ref: newRef, old_ref: oldRef });
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
 // Post a charge event onto the source's timeline (sample_notes for a sample, shipment_notes for a shipment). Best-effort.
 async function chargeTimelineNote(db, sourceType, sourceRef, body, by) {
   try {

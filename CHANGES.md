@@ -1,3 +1,8 @@
+## v27.6.0 Samples: Xero sample-charge description, single portal badge, editable reference
+- Payments Report Xero download: sample-charge lines now read "SR-14 - COUNTRY - Samples for First Last (Company). Shipped with CARRIER TRACKING" (the "Shipped with…" part only when a carrier or tracking code is set) instead of "Other (product)".
+- Supplier portal samples: removed the orange (unread) badge next to the reference — the single red badge already includes unread notes.
+- Admin sample detail: the reference is now editable (defaults to SR-<id>, must stay unique); renaming cascades into the sample's linked charges + Other Payments.
+
 ## v27.5.0 Buy plan: non-GRS 3PL runs down for FBA transfers (spares GRS SOH 3PL)
 - For a SKU with non-GRS 3PL stock (UK/US), FBA transfers now draw the non-GRS pool down FIRST — the GRS SOH 3PL line no longer reduces from FBA transfers while non-GRS stock remains. New "SOH 3PL non-GRS (closing)" row in the SKU plan popup (shown only when non-GRS stock exists), reducing only on FBA transfers.
 - Effect: less 3PL buying for non-GRS SKUs (the non-GRS pool feeds FBA instead). Validated before/after: e.g. TOWLB-SUM-LG-UNICN-R/UK buy 160→0 (non-GRS 3178→2455), TOWLB-CAB-XL-NAVY-R/UK 9660→7620; FBA transfer quantities unchanged; SKUs without non-GRS completely unchanged.

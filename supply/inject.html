@@ -8100,7 +8100,7 @@
     var out=[];
     (run.lines||[]).forEach(function(l){
       if(l.source!=='other'){ out.push(l); return; }
-      if(l.sample_split && l.sample_split.length){ l.sample_split.forEach(function(sp){ out.push({ reference:l.reference, type:l.type+(sp.purpose?' ('+sp.purpose+')':''), amount:sp.amount, account_code:sp.account_code||'', source:'sample' }); }); }
+      if(l.sample_split && l.sample_split.length){ l.sample_split.forEach(function(sp){ out.push({ reference:l.reference, type:l.type+(sp.purpose?' ('+sp.purpose+')':''), amount:sp.amount, account_code:sp.account_code||'', source:'sample', xdesc:sp.desc||'' }); }); }
     });
     if(!out.length) return null;
     var ccy=(liveCcy && liveCcy!=='USD') ? liveCcy : 'USD';
@@ -8120,7 +8120,7 @@
       if(resid!==0 && prelim.length){ var bi=0; for(var i=1;i<prelim.length;i++){ if(Math.abs(prelim[i].unit)>Math.abs(prelim[bi].unit)) bi=i; }
         prelim[bi].unit=Math.round((prelim[bi].unit+resid)*100)/100; } }
     var rows=prelim.map(function(p){ var l=p.l; var usd=p.usd;
-      var desc=l.reference+' - '+l.type+(alt?' ('+(usd%1===0?usd:usd.toFixed(2))+' USD)':'');
+      var desc=(l.xdesc||(l.reference+' - '+l.type))+(alt?' ('+(usd%1===0?usd:usd.toFixed(2))+' USD)':'');
       return [run.supplier,'','','','','','','','','',inv,dmy,dmy,'','',desc,'1',p.unit.toFixed(2),l.account_code||'','No VAT','','','','','',ccy,usd.toFixed(2)]; });
     return { header: header, rows: rows };
   }
@@ -9813,7 +9813,8 @@
           +'<div><input type="file" class="samp-att-file" style="font-size:11px"> <button class="save-btn samp-att-up">Upload attachment</button></div>';
         var chargesPanel='<div class="tw"><table><thead><tr><th class="l">Status</th><th class="l">Freight</th><th class="l">Product</th><th class="l">Total</th><th class="l">Description</th><th class="l"></th></tr></thead><tbody>'+charges+'</tbody></table></div>'
           +'<div style="display:flex;gap:8px;align-items:flex-end;margin-top:6px;flex-wrap:wrap"><div><div class="mut tiny">Freight</div><input class="fci samp-cf" style="width:80px" placeholder="0.00"></div><div><div class="mut tiny">Product</div><input class="fci samp-cp" style="width:80px" placeholder="0.00"></div><div><div class="mut tiny">Note</div><input class="fci txt samp-cd" style="width:220px" placeholder="optional"></div><button class="save-btn samp-charge-add" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd">+ Add charge</button></div>';
-        box.innerHTML='<div class="po-subnav samp-subnav" style="margin-bottom:12px">'
+        box.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><span class="mut tiny" style="font-weight:600">Reference</span><input class="fci txt samp-ref-in" value="'+esc(s.ref)+'" style="width:130px;font-weight:700" title="edit the sample reference (must stay unique)"><button class="save-btn samp-ref-save" style="padding:2px 9px">Save ref</button><span class="samp-ref-msg mut tiny"></span></div>'
+          +'<div class="po-subnav samp-subnav" style="margin-bottom:12px">'
             // badges only flag ACTIONS/exceptions (date overdue, pending charges, unread notes) — not plain counts
             +tb('details','Details'+bdge(dateExc))+tb('charges','Charges'+bdge(pend))+tb('attachments','Attachments')+tb('timeline','Timeline'+bdge(_unread))+'</div>'
           +panel('details',detailsPanel)+panel('charges',chargesPanel)+panel('attachments',attachPanel)
@@ -9821,6 +9822,9 @@
               return '<div class="sect-h" style="font-size:13px">Timeline <span class="mut tiny" style="font-weight:400">— shared with the supplier; record of change is admin-only</span>'
                 +' <label style="font-size:11px;font-weight:400;margin-left:8px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="samp-hide-chg"'+(_h?' checked':'')+' style="vertical-align:middle;margin-right:3px">hide record of change</label></div>'
                 +'<div class="sp-timeline" data-ref="'+esc(s.ref)+'"></div>'; })());
+        var _refSave=box.querySelector('.samp-ref-save'); if(_refSave)_refSave.onclick=function(){ var inp=box.querySelector('.samp-ref-in'), msg=box.querySelector('.samp-ref-msg'), nv=(inp.value||'').trim();
+          if(!nv||nv===s.ref){ if(msg)msg.textContent=''; return; } _refSave.disabled=true; if(msg){msg.style.color='#94a3b8';msg.textContent='saving…';}
+          shipPost('/api/supply/sample/'+s.id+'/ref',{ref:nv},function(j){ _refSave.disabled=false; if(j&&j.error){ if(msg){msg.style.color='#dc2626';msg.textContent=j.error;} return; } if(msg){msg.style.color='#16a34a';msg.textContent='✓ renamed';} try{invalidateDerived();}catch(e){} delete cache['samples']; setTimeout(function(){ selectSection('samples'); },700); }); };
         box.querySelectorAll('.samp-tab').forEach(function(t){ t.onclick=function(){ curTab=t.dataset.st; box._sampTab=curTab; try{ if(i!=='DRAWER')writeHash(curTab==='details'?['supply','samples',s.ref]:['supply','samples',s.ref,curTab]); }catch(e){}   // in a drawer (e.g. from PRODUCT) don't hijack the URL to #/supply/samples
           box.querySelectorAll('.samp-tab').forEach(function(x){x.classList.toggle('active',x===t);});
           box.querySelectorAll('.samp-panel').forEach(function(p){p.style.display=(p.dataset.st===curTab)?'':'none';}); }; });

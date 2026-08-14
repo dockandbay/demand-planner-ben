@@ -1509,7 +1509,7 @@
           function sampActions(s){ return ((s.unread_dnb)||0)+(sampCdMissing(s)?1:0)+(sampStMissing(s)?1:0)+(sampDateConflict(s)?1:0); }
           function setSampBadge(){ var n=((_ppData&&_ppData.samples)||[]).reduce(function(a,s){return a+sampActions(s);},0);   // supplier actions: needs-(re)accept + unread D&B notes
             var sbg=document.getElementById('pp-samp-badge'); if(sbg)sbg.innerHTML=n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
-          function sampRowBadgeHtml(s){ var n=sampActions(s); var act=n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;margin-left:4px" title="needs your attention">'+n+'</span>':''; var nu=s.unread_dnb?'<span style="background:#f59e0b;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;margin-left:3px" title="new note from Dock &amp; Bay">'+s.unread_dnb+'</span>':''; return act+nu; }
+          function sampRowBadgeHtml(s){ var n=sampActions(s); return n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;margin-left:4px" title="needs your attention">'+n+'</span>':''; }   // single red badge (sampActions already includes unread D&B notes); the separate orange badge was removed per Ben
           function sampById(id){ return ((_ppData&&_ppData.samples)||[]).filter(function(x){return String(x.id)===String(id);})[0]; }
           // Silent in-place refresh of one sample card + its row/top badges (no full reload / no screen refresh).
           function refreshSampleCard(id){ var s=sampById(id); if(!s)return;
