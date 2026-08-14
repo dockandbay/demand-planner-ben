@@ -14550,9 +14550,12 @@ function attachSkuMultiExpand(inputId,onApply){
   // Add the "paste many SKUs" expander to the demand-plan and BUY & MOVE (buy/fba/transfer share #qry) filters
   attachSkuMultiExpand('plan-sku-qry',function(v){ setPlanSkuQry(v); });
   attachSkuMultiExpand('qry',function(){ if(typeof BP!=='undefined'&&BP.render)BP.render(); });
-  // HORIZON default landing is SUPPLY (the harness routes to it). Only paint a demand-side view up front when
-  // the URL explicitly asks for one — avoids the DEMAND flash/redirect on a plain first load.
-  if(/^#\/?(planning|demand|buy-move|buy|fba|exec|reports)(\/|$)/.test(location.hash||'')) render();
+  // HORIZON default landing is SUPPLY (the harness routes to it). Only paint up front for a DEMAND/planning hash —
+  // that's the one view whose default VIEW_MODE ('planning') already matches, so render() lands correctly. For every
+  // other artifact view (buy-move / buy / fba / exec / reports) VIEW_MODE is still 'planning' here, so an up-front
+  // render() would paint the DEMAND plan first and flash before the harness's applyRoute() switches to the real view.
+  // The harness applyRoute() (runs on load) routes those via nav clicks, so we leave them to it — no flash.
+  if(/^#\/?(planning|demand)(\/|$)/.test(location.hash||'')) render();
 })();
 
 /* ── Mobile drawer navigation (phone only; CSS gates visibility) ────────────

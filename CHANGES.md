@@ -1,3 +1,7 @@
+## v26.997.0 Fix: DEMAND-plan flash when deep-linking buy-move / exec / reports URLs
+- On load, the artifact pre-painted `render()` for any of planning/demand/buy-move/buy/fba/exec/reports hashes — but VIEW_MODE is still 'planning' at that point, so every non-demand hash flashed the DEMAND plan before the harness's applyRoute() switched to the real view (e.g. #/buy-move/inventory/manage3pl/US flashed DEMAND then loaded 3PL).
+- Narrowed the up-front render to only planning/demand hashes (where the default view already matches). All other artifact views are routed by applyRoute() on load via nav clicks, so they now paint once, no flash.
+
 ## v26.996.0 Fix: "fd is not defined" on Manage 3PL/FBA unregistered-receipt note
 - The v26.995 PO note called `fd()` (a SUPPLY-module fn) from the artifact, which doesn't have it → "fd is not defined". Replaced with a self-contained dd-mmm-yy formatter (`_recentPoDate`).
 
