@@ -653,10 +653,10 @@ app.use(async (req, res, next) => {
     if (!cap) return next();
     const me = await permsFor(req);
     if (!me.live) return next();   // sandbox / no auth proxy → full access
-    const ok = cap === 'demand' ? me.demand_edit
-             : cap === 'supply' ? me.supply_edit
+    const ok = cap === 'demand' ? (me.demand_edit || me.is_admin)
+             : cap === 'supply' ? (me.supply_edit || me.is_admin)
              : cap === 'product' ? (me.product_edit || me.is_admin)
-             : cap === 'config' ? (me.supply_edit || me.demand_edit) : true;
+             : cap === 'config' ? (me.supply_edit || me.demand_edit || me.is_admin) : true;   // admins always have edit rights (was missing for demand/supply/config → false "Read-only" on auto-smooth etc.)
     if (ok) return next();
     const label = cap === 'demand' ? 'DEMAND' : cap === 'config' ? 'CONFIG' : cap === 'product' ? 'PRODUCT' : 'SUPPLY';
     return res.status(403).json({ error: 'Read-only access — you don’t have ' + label + ' edit rights. Ask an admin (CONFIG ▸ Permissions).', code: 'readonly', cap });
