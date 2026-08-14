@@ -1,3 +1,7 @@
+## v27.6.7 Shipments Orphans: redefine as empty shipment records + delete on clean-up
+- Corrected the Orphans filter: an orphan is now a shipment RECORD with no POs aboard (by shipment_ref or master_po) that is NOT completed — i.e. an empty/dangling container. (Previously it flagged POs pointing at a missing shipment, which wrongly caught live active self-shipments like PO-55UKWK2-AIR.)
+- "🧹 Clean up orphans" now DELETES those empty shipment rows (plus their notes / change-log), in a transaction. POs are never touched. Completed shipments are excluded so history is preserved.
+
 ## v27.6.6 Auto-smooth: popup lists the month-cells left un-smoothed (+ copy / CSV)
 - The one-click auto-smooth sweep now shows a proper result popup instead of a bare alert. It lists every forecast month-cell it LEFT un-smoothed because the gap exceeded the threshold (country · channel, sub-category, month, SKU sum, target, gap %), so you can see exactly what needs manual review. Two buttons: Copy to clipboard and Download CSV (autosmooth_unsmoothed.csv).
 
