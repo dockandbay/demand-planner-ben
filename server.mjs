@@ -2960,6 +2960,7 @@ app.get('/api/supply/:section', async (req, res, next) => {
           (SELECT count(*) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending')::int pending_charges,
           (SELECT coalesce(sum(c.freight_cost+c.product_cost),0) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending') pending_charge_amount,
           (SELECT coalesce(sum(c.freight_cost+c.product_cost),0) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='accepted') accepted_charge,
+          (SELECT count(*) FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='rejected')::int rejected_charges,
           (SELECT count(*) FROM planner.sample_notes n WHERE n.sample_id=s.id AND n.author_kind='supplier' AND n.read_at IS NULL)::int unread_notes,
           coalesce(s.change_requested,false) change_requested,
           coalesce(s.approved_lines,'{}'::jsonb) approved_lines,   -- snapshot at last accept → portal diffs vs current

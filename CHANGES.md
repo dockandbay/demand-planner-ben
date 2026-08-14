@@ -1,3 +1,6 @@
+## v27.4.3 Samples grid: red badge for rejected charges
+- The Charges column now shows a red "N rejected" badge (alongside pending/accepted) when a sample has rejected charges (server adds rejected_charges count).
+
 ## v27.4.2 DEMAND plan: smoothing shows a tooltip when clicked in SEARCH mode
 - Smoothing rebalances the whole subcategory, so it needs every SKU visible — it's disabled while a SKU search is active. The smooth cell now shows a hover title + a transient click tooltip ("clear the SKU search to smooth") instead of silently doing nothing.
 

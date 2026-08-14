@@ -9568,7 +9568,8 @@
       var tr=r.tracking_code?((_tu?'<a href="'+_tu+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;font-weight:600">'+esc(r.tracking_code)+' ↗</a>':esc(r.tracking_code))+(r.carrier?' <span class="mut tiny">'+esc(r.carrier)+'</span>':'')):'<span class="mut">—</span>';
       var ch=r.pending_charges>0?'<span class="ex-badge" title="'+r.pending_charges+' charge(s) to review">'+r.pending_charges+'</span> <span style="color:#b45309;font-weight:600">'+money(r.pending_charge_amount)+' pending</span>':'';
       var acc=Number(r.accepted_charge)>0?'<span style="color:#166534;font-weight:600">'+money(r.accepted_charge)+' accepted</span>':'';
-      var chCell=[ch,acc].filter(Boolean).join('<br>')||'<span class="mut">—</span>';
+      var rej=r.rejected_charges>0?'<span class="tool-badge bg-red" style="font-size:9px" title="'+r.rejected_charges+' rejected charge(s)">'+r.rejected_charges+' rejected</span>':'';
+      var chCell=[ch,acc,rej].filter(Boolean).join('<br>')||'<span class="mut">—</span>';
       var reqDate=r.completion_required?('<span'+(r.overdue?' style="color:#dc2626;font-weight:700"':'')+'>'+fd(r.completion_required)+'</span>'):'<span class="mut">—</span>';
       return '<tr><td class="l"><button class="planbtn samp-exp" data-id="'+r.id+'" data-ref="'+esc(r.ref||'')+'" data-i="'+i+'">PLAN</button>'+actFlag+'</td>'
         +'<td class="l"><b>'+esc(r.ref||'')+'</b></td>'
