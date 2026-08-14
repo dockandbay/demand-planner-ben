@@ -8354,6 +8354,7 @@ app.post('/api/supply/buyplan-pos', async (req, res) => {
           [p.po + '|' + l.sku, p.po, l.sku, l.qty]);
       created++;
     }
+    invalidateSupplyCaches();   // new POs written → bump the epoch so the cached PO-rows / order-plan build rebuilds; otherwise the new POs don't show in Order Plan until the TTL / a hard refresh
     res.json({ committed: true, created, pos, warnings: warn });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -9117,6 +9118,7 @@ app.post('/api/supply/po-create', async (req, res) => {
       [po, b.supplier_name || null, supId, b.country_code || null, b.branch || null,
        b.status || null, b.start_production || null, b.prod_no || null, b.batch_id || null]);
     await notePoCreated(pool, po, authUser(req));
+    invalidateSupplyCaches();   // new PO written → rebuild cached PO-rows / order-plan so it shows without a hard refresh
     res.json({ ok: true, po });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -9208,6 +9210,7 @@ app.post('/api/supply/po-bulk', async (req, res) => {
       }
     } catch (e) { errors.push(po + ': ' + e.message); }
   }
+  if (created || existing || lines) invalidateSupplyCaches();   // POs written/updated → rebuild cached grids so they show without a hard refresh
   res.json({ created, existing, lines, errors });
 });
 // PO detail — the linked records across tables (lines, deposit, payments, flexport) for one PO.

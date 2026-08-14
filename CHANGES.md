@@ -1,3 +1,6 @@
+## v27.6.5 Create POs → Order Plan visible immediately (no hard refresh)
+- The buy-plan PO creation (`buyplan-pos` commit) and the manual `po-create` / `po-bulk` write paths now call invalidateSupplyCaches() after writing. Previously the server's cached PO-rows / order-plan build kept serving the pre-create snapshot until its TTL, so new POs only appeared after a hard refresh. Now they show as soon as the user lands on Order Plan.
+
 ## v27.6.4 Shipments: Orphans filter + "Clean up orphans" button
 - New "⚠ Orphans" pill filters the shipments grid to dangling self-shipments (PO shipment_ref with no shipments row; server flags is_orphan). "🧹 Clean up orphans" clears the shipment_ref on all of them (un-assigns), with a confirm.
 
