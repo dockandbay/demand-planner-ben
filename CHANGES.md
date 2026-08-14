@@ -1,3 +1,7 @@
+## v27.6.11 Plan Shipments: merge top-up recs per container + single Apply; remove "Apply all"
+- Top-up recommendations now show ONE card per container listing every loose PO that fits it (largest-first best-fit packing into spare capacity), with a single "✓ Apply" button that adds them all at once (single undo). Previously each loose PO made its own "Top up TRF-…" card, so the same container appeared many times.
+- Removed the "Apply all" button (superseded by the merged per-container cards).
+
 ## v27.6.10 DEMAND More Filters — reworked layout + inline category checklist
 - Reordered the More Filters popup to: Tier → Release → From replacement → Category.
 - Category is now an inline checklist of ALL categories (grouped, 2-col) with real checkboxes — no more "All categories" button / pop-out / chips. Selected categories get a light-green background so the selection is obvious. "Select all" resets to all; count shown. Uses the same SEL state + setCat() so filtering behaviour is unchanged.
