@@ -796,6 +796,10 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
           <label style="font-size:12px;color:#334155;cursor:pointer;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="filt-fc-act" onchange="setShowFcAct(this.checked)"> Forecast to Actuals Compare</label>
         </div>
         <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:12px">
+          <span class="pill-lbl" style="width:80px" title="Show discontinued (run-off) categories — kept for their remaining stock sell-down. Hidden by default.">Run-off</span>
+          <label style="font-size:12px;color:#334155;cursor:pointer;display:inline-flex;align-items:center;gap:6px"><input type="checkbox" id="filt-runoff-cats" onchange="setShowRunoffCats(this.checked)"> Show run-off (discontinued) categories</label>
+        </div>
+        <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:12px">
           <span class="pill-lbl" style="width:80px" title="Row / column layout options for the plan grid">Layout</span>
           <div style="display:flex;flex-direction:column;gap:6px">
             <label style="font-size:12px;color:#334155;cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Show a total row at the foot of each category"><input type="checkbox" id="disp-cattot" onchange="setShowCatTot(this.checked)"> Category totals</label>
@@ -1390,16 +1394,22 @@ function _subcatParent(subName){
 // Inactive PARENT CATEGORIES are dropped outright. Inactive SUB-categories are now KEPT as "run-off" (flagged in
 // RUNOFF_SUBS) so the plan can still forecast out their remaining stock; they're hidden at render once nearly sold
 // out (<50u on-hand+inbound per country×channel, recoverable via Active-only OFF) and excluded from the buy cascade.
-var RUNOFF_SUBS=new Set();
+// Inactive CATEGORIES are also kept now (run-off categories, flagged RUNOFF_CATS) — extended so the plan can forecast
+// out their remaining stock; they're hidden at render by default and revealed via Display Settings ▸ "Show run-off categories".
+var RUNOFF_SUBS=new Set(), RUNOFF_CATS=new Set();
 DATA=(DATA||[]).filter(function(r){
   if(!r)return false;
-  var keepCat=ACTIVE_CATS.size===0||ACTIVE_CATS.has(r.c);
+  var cmeta=r.c?CATS_META[r.c]:null;
+  var catActive=ACTIVE_CATS.size===0||ACTIVE_CATS.has(r.c);
+  var catRunoff=!!(cmeta&&cmeta.a===false);   // KNOWN inactive category → run-off category (unknown/null category still dropped)
   var sm=SUBS_META[r.s];
-  var isRunoff=!!(sm&&sm.a===false);
-  var hideTotally=isRunoff&&HIDE_TOTALLY_SUBS.indexOf(r.s)>=0;   // CONFIG-flagged retired shell → blanket-drop (buy-safe), never shown
-  var keepSub=ACTIVE_SUBS.size===0||ACTIVE_SUBS.has(r.s)||(isRunoff&&!hideTotally);   // active OR run-off-not-hidden; unknown subcats + hide-totally dropped
-  var keep=keepCat&&keepSub;
-  if(keep&&isRunoff&&!hideTotally)RUNOFF_SUBS.add(r.s);   // only mark run-off subcats that actually survive to the plan (need an active parent category)
+  var subRunoff=!!(sm&&sm.a===false);
+  var isRunoff=subRunoff||catRunoff;
+  var hideTotally=isRunoff&&HIDE_TOTALLY_SUBS.indexOf(r.s)>=0;   // CONFIG-flagged retired shell → blanket-drop, never shown
+  var catOK=catActive||catRunoff;
+  var subOK=ACTIVE_SUBS.size===0||ACTIVE_SUBS.has(r.s)||(subRunoff&&!hideTotally)||catRunoff;   // run-off category brings all its subcats along
+  var keep=catOK&&subOK&&!hideTotally;
+  if(keep){ if(catRunoff)RUNOFF_CATS.add(r.c); if(isRunoff&&!hideTotally)RUNOFF_SUBS.add(r.s); }
   return keep;
 });
 (function synthesizeMissingSubcats(){
@@ -4187,6 +4197,8 @@ try{TIME_COLS=buildTimeCols();}catch(e){}   // rebuild now that SHOW_Q/SHOW_H ho
 function setShowQtr(on){SHOW_Q=!!on;try{localStorage.setItem('hzShowQtr',SHOW_Q?'1':'0');}catch(e){}TIME_COLS=buildTimeCols();var b=document.getElementById('qtr-tot-toggle');if(b){b.classList.toggle('active',SHOW_Q);b.setAttribute('aria-pressed',SHOW_Q?'true':'false');}render();}
 function setShowHalf(on){SHOW_H=!!on;try{localStorage.setItem('hzShowHalf',SHOW_H?'1':'0');}catch(e){}TIME_COLS=buildTimeCols();var b=document.getElementById('half-tot-toggle');if(b){b.classList.toggle('active',SHOW_H);b.setAttribute('aria-pressed',SHOW_H?'true':'false');}render();}
 var SHOW_VARIANT_IMG=(function(){try{return localStorage.getItem('hzShowVarImg')==='1';}catch(e){return false;}})(); // variant-image thumbnail in the SKU label — hidden by default; toggle in More Filters & Settings
+var SHOW_RUNOFF_CATS=(function(){try{return localStorage.getItem('hzShowRunoffCats')==='1';}catch(e){return false;}})(); // run-off (discontinued) CATEGORIES in the plan — hidden by default; toggle in Display Settings
+function setShowRunoffCats(on){ SHOW_RUNOFF_CATS=!!on; try{localStorage.setItem('hzShowRunoffCats',SHOW_RUNOFF_CATS?'1':'0');}catch(e){} render(); }
 var SHOW_FC_ACT=(function(){try{return localStorage.getItem('hzShowFcAct')!=='0';}catch(e){return true;}})(); // locked-forecast-vs-actual "fc … +%" in completed-month cells; on by default; toggle in Display Settings
 function setShowVariantImg(on){SHOW_VARIANT_IMG=!!on;try{localStorage.setItem('hzShowVarImg',SHOW_VARIANT_IMG?'1':'0');}catch(e){}var b=document.getElementById('var-img-toggle');if(b){b.classList.toggle('active',SHOW_VARIANT_IMG);b.setAttribute('aria-pressed',SHOW_VARIANT_IMG?'true':'false');}renderMain();}
 function setShowFcAct(on){SHOW_FC_ACT=!!on;try{localStorage.setItem('hzShowFcAct',SHOW_FC_ACT?'1':'0');}catch(e){}try{renderMain();}catch(e){}}
@@ -8215,9 +8227,11 @@ function buildBody(){
   Object.keys(cm).forEach(function(cat){
     var rows=cm[cat].sort(function(a,b){return a.s.localeCompare(b.s)||(a.ch.localeCompare(b.ch));});
     if(PLAN_SKU_QRY||PLAN_RW!=='ALL'||PLAN_FROM_REP){rows=rows.filter(function(row){return filteredSkus(row.s,CUR,row.ch).length>0;});if(!rows.length)return;}
+    // Run-off (discontinued) CATEGORIES: hidden by default; revealed via Display Settings ▸ "Show run-off categories".
+    if(!SHOW_RUNOFF_CATS){ rows=rows.filter(function(row){ return !RUNOFF_CATS.has(row.c); }); if(!rows.length)return; }
     // Run-off (inactive) subcats: auto-hide once nearly sold out — <50 units sellable (on-hand+inbound) in this
-    // country×channel. Recoverable by turning "Active only" OFF (same pill that reveals discontinued SKUs).
-    if(SKU_FILTER.active){ rows=rows.filter(function(row){ if(!RUNOFF_SUBS.has(row.s))return true; var st=stockFor(row.s,CUR,row.ch); return (st.oh+st.inb)>=50; }); if(!rows.length)return; }
+    // country×channel. Recoverable by turning "Active only" OFF. (Category run-off is toggle-gated above, not by <50.)
+    if(SKU_FILTER.active){ rows=rows.filter(function(row){ if(RUNOFF_CATS.has(row.c))return true; if(!RUNOFF_SUBS.has(row.s))return true; var st=stockFor(row.s,CUR,row.ch); return (st.oh+st.inb)>=50; }); if(!rows.length)return; }
     // Category header — skip when redundant (the category's only subcategory has the same name, e.g. "Bag - Cooling"),
     // since the data row already labels it. Otherwise render it with the name PINNED left (sticky) so it stays visible
     // when the grid is scrolled right — previously the name scrolled out of view leaving a blank grey bar.
@@ -8516,7 +8530,7 @@ function _displayPopClose(){ var x=document.getElementById('plan-display-pop'); 
 function _displayPopBind(){ if(window._displayPopBound)return; window._displayPopBound=true; document.addEventListener('click',function(ev){ var b=document.getElementById('plan-display-btn'), pop=document.getElementById('plan-display-pop'); if(pop&&pop.style.display==='block'&&!(b&&b.contains(ev.target))&&!pop.contains(ev.target))pop.style.display='none'; },true); }
 function toggleDisplaySettings(e){ if(e)e.stopPropagation(); var p=document.getElementById('plan-display-pop'); if(!p)return; var open=p.style.display==='block'; _planPopClose(); if(!open){p.style.display='block';
     try{ var b=document.getElementById('plan-display-btn'); if(b){ var br=b.getBoundingClientRect(), w=p.offsetWidth||360; p.style.position='fixed'; p.style.top=(br.bottom+4)+'px'; p.style.right='auto'; p.style.left=Math.max(6,Math.min(br.right-w, window.innerWidth-w-6))+'px'; } }catch(e){} }   // clamp within the viewport (was right:0 → half off-screen on wide windows)
-    var sc=document.getElementById('filt-show-changes'); if(sc)sc.checked=(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES); var hp=document.getElementById('filt-hide-past-changes'); if(hp)hp.checked=(typeof HIDE_PAST_CHANGES==='undefined'||HIDE_PAST_CHANGES); var fa=document.getElementById('filt-fc-act'); if(fa)fa.checked=(typeof SHOW_FC_ACT==='undefined'||SHOW_FC_ACT); var _cc=document.getElementById('disp-cattot'); if(_cc)_cc.checked=(typeof SHOW_CAT_TOT!=='undefined'&&SHOW_CAT_TOT); var _vi=document.getElementById('disp-varimg'); if(_vi)_vi.checked=(typeof SHOW_VARIANT_IMG!=='undefined'&&SHOW_VARIANT_IMG); var _qq=document.getElementById('disp-qtr'); if(_qq)_qq.checked=(typeof SHOW_Q!=='undefined'&&SHOW_Q); var _hh=document.getElementById('disp-half'); if(_hh)_hh.checked=(typeof SHOW_H!=='undefined'&&SHOW_H); var _sv=document.getElementById('disp-sets'); if(_sv)_sv.value=(typeof SETS_VIEW!=='undefined'?SETS_VIEW:'show'); _displayPopBind(); }
+    var sc=document.getElementById('filt-show-changes'); if(sc)sc.checked=(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES); var hp=document.getElementById('filt-hide-past-changes'); if(hp)hp.checked=(typeof HIDE_PAST_CHANGES==='undefined'||HIDE_PAST_CHANGES); var fa=document.getElementById('filt-fc-act'); if(fa)fa.checked=(typeof SHOW_FC_ACT==='undefined'||SHOW_FC_ACT); var _cc=document.getElementById('disp-cattot'); if(_cc)_cc.checked=(typeof SHOW_CAT_TOT!=='undefined'&&SHOW_CAT_TOT); var _vi=document.getElementById('disp-varimg'); if(_vi)_vi.checked=(typeof SHOW_VARIANT_IMG!=='undefined'&&SHOW_VARIANT_IMG); var _qq=document.getElementById('disp-qtr'); if(_qq)_qq.checked=(typeof SHOW_Q!=='undefined'&&SHOW_Q); var _hh=document.getElementById('disp-half'); if(_hh)_hh.checked=(typeof SHOW_H!=='undefined'&&SHOW_H); var _sv=document.getElementById('disp-sets'); if(_sv)_sv.value=(typeof SETS_VIEW!=='undefined'?SETS_VIEW:'show'); var _ro=document.getElementById('filt-runoff-cats'); if(_ro)_ro.checked=(typeof SHOW_RUNOFF_CATS!=='undefined'&&SHOW_RUNOFF_CATS); _displayPopBind(); }
 // (removed dead fn togglePlanTools — v26.759)
 function resetPlanFilters(){ try{setPlanTier('ALL');}catch(e){} try{setCat('ALL');}catch(e){} try{setPlanFromRep(false);}catch(e){} var rw=document.getElementById('plan-rw-sel'); if(rw){rw.value='ALL'; try{setPlanRw('ALL');}catch(e){}} try{setPlanSort('alpha');}catch(e){} var ct=document.getElementById('cat-tot-toggle'); if(ct&&ct.classList.contains('active')){try{setShowCatTot(false);}catch(e){}} try{resetPlanActiveDates();}catch(e){} try{renderPlanChips();}catch(e){} }
 function _planClearFilter(k){ if(k==='all')setPlanActiveMode('active'); else if(k==='tier')setPlanTier('ALL');

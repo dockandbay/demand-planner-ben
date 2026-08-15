@@ -1178,7 +1178,8 @@
       var _hi=_acts.filter(function(r){return r.severity==='high' && (!r.status||r.status==='open');}).length;   // high-priority open actions → red counter on the ACTIONS sub-tab
       return '<div class="po-subnav" id="act-subnav">'+tab('actions','ACTIONS',_hi,true)+tab('recommendations','💡 RECOMMENDATIONS',_recOpen)+tab('erp-compare','⬆ ERP COMPARE',_actErpCount||0)+'</div>'; }
     c.innerHTML=annot('actions')+_partBanner+lookupDatalists()+actSubNav()+'<div id="act-sub"></div>';
-    document.querySelectorAll('#act-subnav .act-subtab').forEach(function(t){ t.onclick=function(){ actSub=t.dataset.as; document.querySelectorAll('#act-subnav .act-subtab').forEach(function(x){x.classList.toggle('active',x===t);}); renderActSub(); }; });
+    document.querySelectorAll('#act-subnav .act-subtab').forEach(function(t){ t.onclick=function(){ actSub=t.dataset.as; if(typeof writeHash==='function')writeHash(['supply','actions'].concat(actSub!=='actions'?[actSub]:[]));   // deep-link #/supply/actions/<recommendations|erp-compare>
+      document.querySelectorAll('#act-subnav .act-subtab').forEach(function(x){x.classList.toggle('active',x===t);}); renderActSub(); }; });
     function renderActSub(){ var sb=document.getElementById('act-sub'); if(!sb)return;
       if(actSub==='recommendations'){ renderRecsTab(sb); return; }
       if(actSub==='erp-compare'){ renderErpTab(sb); return; }
@@ -9217,10 +9218,12 @@
     else if(current==='purchase-orders') writeHash(['supply','purchase-orders'].concat(poSub&&PO_SUB_KEYS.indexOf(poSub)>=0&&poSub!=='plan'?[poSub]:[]));
     else if(current==='payments') writeHash(['supply','payments'].concat(poSub&&PAY_SUB_KEYS.indexOf(poSub)>=0&&poSub!=='paydue'?[poSub]:[]));
     else if(current==='config') writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['config','portal',encodeURIComponent(PORTAL_SUP.toLowerCase())]:['config',CONFIG_SUB]);
+    else if(current==='actions') writeHash(['supply','actions'].concat(actSub&&actSub!=='actions'?[actSub]:[]));   // ACTIONS ▸ Recommendations / ERP Compare deep-link
     else if(current) writeHash(['supply',current]); }
   function applyRoute(){ var seg=(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean); _expectedHash=location.hash;
     if(seg[0]==='supply'){ showSupply(true); var sec=seg[1]||'actions';   // (true) = show chrome but don't auto-select Actions; we select the routed section next
       if(sec==='reports') selectReport(seg[2]||reportTab||'metrics');
+      else if(sec==='actions'){ actSub=(seg[2]&&['recommendations','erp-compare'].indexOf(seg[2])>=0)?seg[2]:'actions'; selectSection('actions'); }   // #/supply/actions/<recommendations|erp-compare> deep-link
       else if(sec==='productions'){ showPoSub(seg[2]&&PO_SUB_KEYS.indexOf(seg[2])>=0?seg[2]:'list'); }   // legacy links → PURCHASE ORDERS umbrella
       else if(sec==='payments'){ showPoSub(seg[2]&&PAY_SUB_KEYS.indexOf(seg[2])>=0?seg[2]:'paydue'); }   // PAYMENTS umbrella (default Payments Due)
       else if(sec==='config'){ if(seg[2])CONFIG_SUB=seg[2]; enterConfig(); }   // legacy #/supply/config → top-level CONFIG

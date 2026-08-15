@@ -1,3 +1,11 @@
+## v27.022 Run-off extended to discontinued CATEGORIES + Display Settings toggle
+- Inactive **categories** (`categories.is_active=false`) are now kept in the plan too (flagged `RUNOFF_CATS`), so their remaining stock forecasts + shows as run-off — previously they were dropped outright by the category filter (a harder hide than the sub-category one).
+- **New Display Settings toggle "Show run-off (discontinued) categories"** (`hzShowRunoffCats`, default **OFF/hidden**). Off → run-off categories are hidden (prior behaviour); on → they appear with the ∅ run-off treatment (badge, stock-capped targets). Category run-off is toggle-gated (not the <50 auto-hide that governs sub-category run-off).
+- **Buy plan byte-identical** (442/2043, 0 diffs) — keeping inactive-category rows in DATA had no buy impact (their SKUs are discontinue-date-capped). Run-off subcats of these categories fold into `RUNOFF_SUBS` so they get the badge + capped targets automatically.
+
+## v27.021 Deep-link SUPPLY ▸ Actions L3 sub-tabs
+- The Actions section's level-3 sub-tabs (**Actions / Recommendations / ERP Compare**) now deep-link: `#/supply/actions`, `#/supply/actions/recommendations`, `#/supply/actions/erp-compare`. Clicking a sub-tab updates the hash; loading the hash opens the right sub-tab. Mirrors the existing reports/purchase-orders/payments sub-tab routing (syncHash + applyRoute + the sub-tab click).
+
 ## v27.020 Run-off sub-categories — stock-capped targets (Set-targets, Part A)
 - In **DEMAND ▸ Targets ▸ Set targets**, a **discontinued (run-off) sub-category that still has stock** is now shown as a **light-orange row** with an **∅** marker and its remaining units ("420u left").
 - Its **target auto-caps to remaining sellable stock** (on-hand + inbound), run down over future months following last-year's unit shape — so once the stock is used the later months fall to **0**, instead of repeating last year. Where the cap bites, the target readout shows the capped £ + units with a **⚠** and a tooltip ("can't sell more than is left").
