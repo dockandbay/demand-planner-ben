@@ -6242,8 +6242,8 @@
     var SC_LABEL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'BOM',products:'Products',barcodegen:'Barcodes'};
     var ADM_KEYS=['admin-general','exchange-rates','channels','permissions','email-log'];
     var ADM_LABEL={'admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels',permissions:'Permissions','email-log':'Email log'};
-    var DM_KEYS=['contribmodel'];   // CONFIG ▸ Demand group (SETS feature P3)
-    var DM_LABEL={contribmodel:'Contribution model'};
+    var DM_KEYS=['contribmodel','runoffsubs'];   // CONFIG ▸ Demand group (SETS feature P3 + run-off subcats)
+    var DM_LABEL={contribmodel:'Contribution model',runoffsubs:'Discontinued sub-categories'};
     // Supply chain sits second (next to General settings); it expands to the level-3 members below / nested.
     var L2=[['general','General settings'],['supplychain','Supply chain'],['demand','Demand'],['portalusers','Portal users'],['portal','Portal'],['keyaccounts','Key accounts'],['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']];
     if(ME&&ME.is_admin){L2.push(['admin','Admin']);}   // Admin grouping → Permissions / Email log as level-3 tabs
@@ -7584,6 +7584,49 @@
           try{ _cmModel=s.contrib_model?JSON.parse(s.contrib_model):{}; }catch(e){ _cmModel={}; }
           draw();
         }).catch(function(){ _cmModel={}; draw(); });
+      };
+      // ── CONFIG ▸ Demand ▸ Discontinued sub-categories ──
+      // Per-inactive-subcat toggle: show as ⌀ run-off (wind down remaining stock, auto-hide <50u) vs HIDE TOTALLY
+      // (blanket-drop a retired shell whose live SKUs were reassigned in the PIM). Stored in app_settings.runoff_hidden_subs.
+      SUBS['runoffsubs']=function(){
+        b.innerHTML='<div class="count">Loading…</div>';
+        function _e(x){ return String(x==null?'':x).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+        var INACT=[]; try{ if(typeof SUBS_META!=='undefined'){ for(var k in SUBS_META){ if(SUBS_META[k]&&SUBS_META[k].a===false)INACT.push(k); } } }catch(e){}
+        INACT.sort();
+        if(!INACT.length){ b.innerHTML='<div class="count">No inactive sub-categories — or open the planner (DEMAND) first so the list loads, then reopen this tab.</div>'; return; }
+        var _roHidden=[], _roSaveT=null;
+        function roSave(){
+          var m=document.getElementById('ro-msg'); if(m){ m.textContent='Saving…'; m.style.color='#64748b'; }
+          clearTimeout(_roSaveT);
+          _roSaveT=setTimeout(function(){
+            fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'runoff_hidden_subs',value:JSON.stringify(_roHidden)})})
+              .then(function(r){return r.json();}).then(function(j){ var m2=document.getElementById('ro-msg');
+                if(j&&j.error){ if(m2){m2.textContent='Save failed: '+j.error;m2.style.color='#dc2626';} return; }
+                if(m2){ m2.textContent='Saved ✓ — reload the demand plan to see the change'; m2.style.color='#16a34a'; }
+              }).catch(function(){ var m2=document.getElementById('ro-msg'); if(m2){m2.textContent='Save failed';m2.style.color='#dc2626';} });
+          },300);
+        }
+        function draw(){
+          var info='<div class="annot"><b>CONFIG ▸ Demand ▸ Discontinued sub-categories.</b> Sub-categories flagged <b>inactive</b> in the PIM. By default they show in the demand plan as <b>∅ run-off</b> — selling down remaining stock, then auto-hidden below <b>50 units</b> (on-hand+inbound) per country×channel. Tick <b>Hide totally</b> for a retired shell instead (e.g. a SEASONAL bucket whose live SKUs were reassigned to the combined category). Hidden sub-categories never show and never affect the buy plan.</div>';
+          var rows=INACT.map(function(s){ var hid=_roHidden.indexOf(s)>=0;
+            return '<tr data-sub="'+_e(s)+'"><td style="padding:5px 12px;border-bottom:1px solid #eef2f7;text-align:left">'+_e(s)+'</td>'
+              +'<td style="padding:5px 12px;border-bottom:1px solid #eef2f7;text-align:center">'+(hid?'<span style="font-size:11px;color:#94a3b8">hidden</span>':'<span style="font-size:8px;font-weight:700;color:#92400e;background:#fef3c7;border:1px solid #fcd34d;border-radius:3px;padding:1px 4px">∅ RUN-OFF</span>')+'</td>'
+              +'<td style="padding:5px 12px;border-bottom:1px solid #eef2f7;text-align:center"><label style="font-size:12px;color:#334155;cursor:pointer;white-space:nowrap"><input type="checkbox" class="ro-hide" data-sub="'+_e(s)+'"'+(hid?' checked':'')+' style="vertical-align:middle;margin-right:5px">Hide totally</label></td></tr>';
+          }).join('');
+          b.innerHTML=info+'<div id="ro-msg" style="font-size:12px;min-height:16px;margin:6px 2px"></div>'
+            +'<table style="border-collapse:collapse;font-size:13px"><thead><tr>'
+            +'<th style="text-align:left;padding:5px 12px;border-bottom:2px solid #cbd5e1">Inactive sub-category</th>'
+            +'<th style="padding:5px 12px;border-bottom:2px solid #cbd5e1">Plan display</th>'
+            +'<th style="padding:5px 12px;border-bottom:2px solid #cbd5e1"> </th></tr></thead><tbody>'+rows+'</tbody></table>';
+          b.querySelectorAll('.ro-hide').forEach(function(cb){ cb.onchange=function(){ var s=cb.dataset.sub, i=_roHidden.indexOf(s);
+            if(cb.checked){ if(i<0)_roHidden.push(s); } else { if(i>=0)_roHidden.splice(i,1); }
+            draw(); roSave(); }; });
+        }
+        fetch('/api/app-settings').then(function(r){return r.json();}).then(function(s){ s=s||{};
+          try{ _roHidden=s.runoff_hidden_subs?JSON.parse(s.runoff_hidden_subs):[]; }catch(e){ _roHidden=[]; }
+          if(!Array.isArray(_roHidden))_roHidden=[];
+          draw();
+        }).catch(function(){ _roHidden=[]; draw(); });
       };
       (SUBS[CONFIG_SUB]||function(){})();
     }

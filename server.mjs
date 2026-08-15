@@ -937,6 +937,9 @@ app.get('/', async (req, res) => {
     // CONFIG ▸ Demand ▸ Contribution model (app_settings.contrib_model, JSON keyed "CO|CH|subcat" with '*' wildcards).
     // Drives the Leader-mode smoothing tier mix (SETS feature P3b). Empty {} => tierMix falls back to CONTRIB_TARGETS/default.
     try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='contrib_model'`)).rows[0]; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'CONTRIB_MODEL', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { /* leave the {} default */ }
+    // CONFIG ▸ Demand ▸ Discontinued sub-categories: which inactive subcats to HIDE TOTALLY (vs show as run-off).
+    // app_settings.runoff_hidden_subs = JSON array of subcat names. Empty [] => all inactive subcats show as run-off.
+    try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='runoff_hidden_subs'`)).rows[0]; const a = (r && r.value) ? JSON.parse(r.value) : []; html = replaceGlobal(html, 'HIDE_TOTALLY_SUBS', JSON.stringify(Array.isArray(a) ? a : [])); } catch (e) { /* leave the [] default */ }
     // DEMAND Set-targets £→units: average EX-TAX retail price per market × subcategory from planner.products.
     // Ben's formula: UK/EU ÷1.2 (VAT), AU ÷1.1 (GST), US/CA already ex-tax. Client applies the channel factor
     // (B2B ×0.5, DTC/FBA ×0.95) to get net £/unit, then units = £target ÷ net price.

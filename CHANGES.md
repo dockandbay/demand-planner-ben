@@ -1,3 +1,16 @@
+## v27.020 Run-off sub-categories — stock-capped targets (Set-targets, Part A)
+- In **DEMAND ▸ Targets ▸ Set targets**, a **discontinued (run-off) sub-category that still has stock** is now shown as a **light-orange row** with an **∅** marker and its remaining units ("420u left").
+- Its **target auto-caps to remaining sellable stock** (on-hand + inbound), run down over future months following last-year's unit shape — so once the stock is used the later months fall to **0**, instead of repeating last year. Where the cap bites, the target readout shows the capped £ + units with a **⚠** and a tooltip ("can't sell more than is left").
+- Still editable; the cap is applied to the resolved target display, the stored growth %/£ and the market-total balancing maths are unchanged. **No writes to buy** — verified byte-identical (433/2043). Rundown allocation unit-tested (420 stock → 380/40/0/0…).
+- **Dormant on today's data:** like the plan display, it only shows once the run-off subcats have in-scope SKUs with stock (the PIM cleanup). Verified: renders without error, buy untouched; rundown maths correct.
+
+## v27.019 Run-off (discontinued) sub-categories — display + Hide-totally config
+- Inactive sub-categories (`SUBS_META.a = false`) now appear in the demand plan as **∅ RUN-OFF** (amber badge next to the name), **auto-hidden** once under **50 units** sellable (on-hand + inbound, via `stockFor`) per country×channel — recoverable by turning **Active only** off. Previously they were blanket-dropped from `DATA`.
+- **Display-only, buy-plan-safe:** verified byte-identical (433 buying / 2043 pairs) once the retired shells are hidden.
+- New **CONFIG ▸ Demand ▸ Discontinued sub-categories**: per-subcat toggle **∅ run-off** vs **Hide totally** (`app_settings.runoff_hidden_subs`, JSON array). Retired SEASONAL shells whose live SKUs were reassigned to the combined active subcat should be **Hidden**; genuinely-winding-down lines stay run-off.
+- Seeded `Poncho - Adults/Kids SEASONAL` to **Hidden** (their live SKUs are being reassigned to the active `Poncho - Kids` / `Poncho - Adults` subcats in the PIM). That removes the 9 phantom Poncho buys and restores buy to 433.
+- **Data note:** 100 SKUs across 6 discontinued subcats still have no past discontinue date (CSV: `Claude Analyses/DISCONTINUED_SUBCAT_MISMATCHES_2026-08-15.csv`) — PIM cleanup; the app relies on SKU-level dates for buy. **Still TODO:** run-off target representation in Summary/Set-targets (auto-lowered target + carve-out + stock-cap alert).
+
 ## v27.018 Fix: Financial Forecast Model (and Exec Summary) crash on TIK data
 - `#/demand/scenario/finmodel` was stuck on "Loading…". Root cause (pre-existing, unrelated to the audit): `buildExecData` lets `TIK`-channel rows through its filter but only has `{DTC,FBA,B2B}` buckets, so `ensure(ch['TIK'],…)` read a property of `undefined` and threw — silently, inside a promise. Now TIK folds into the **DTC** bucket (TIK is a DTC clone; its own forecast/ASP still drive the numbers), matching the finmodel's DTC/FBA/B2B channel set. Also fixes the same latent crash in the Exec Summary. Buy plan unaffected (exec/reporting only).
 

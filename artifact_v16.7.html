@@ -1340,6 +1340,9 @@ var CONTRIB_TARGETS={"Eye Mask|UK|FBA|B":25,"Tea Towel|US|B2B|B":25,"Poncho - Ad
 // app_settings.contrib_model. Keyed "<co>|<ch>|<subcat>" with '*' wildcards; cascade cell→channel→
 // country→default. Value = {A,B,C,sets}. Drives the Leader-mode smoothing tier split (SETS feature P3b).
 var CONTRIB_MODEL={};
+// Discontinued sub-categories to HIDE TOTALLY (blanket-drop from the plan) instead of showing as run-off. Set in
+// CONFIG ▸ Demand ▸ Discontinued sub-categories (app_settings.runoff_hidden_subs, JSON array of subcat names).
+var HIDE_TOTALLY_SUBS=[];
 // Resolve the saved contribution row for a subcat × country × channel via the cascade (most-specific wins).
 function contribResolve(s,co,ch){
   if(typeof CONTRIB_MODEL!=='object'||!CONTRIB_MODEL)return null;
@@ -1384,11 +1387,20 @@ function _subcatParent(subName){
 //     or subcats with no historical sales like Lanyard), synthesize a row for each of
 //     the 12 standard country × channel combinations with empty monthly history.
 //     This makes the planner show every active line even before the summary is rebuilt.
+// Inactive PARENT CATEGORIES are dropped outright. Inactive SUB-categories are now KEPT as "run-off" (flagged in
+// RUNOFF_SUBS) so the plan can still forecast out their remaining stock; they're hidden at render once nearly sold
+// out (<50u on-hand+inbound per country×channel, recoverable via Active-only OFF) and excluded from the buy cascade.
+var RUNOFF_SUBS=new Set();
 DATA=(DATA||[]).filter(function(r){
   if(!r)return false;
   var keepCat=ACTIVE_CATS.size===0||ACTIVE_CATS.has(r.c);
-  var keepSub=ACTIVE_SUBS.size===0||ACTIVE_SUBS.has(r.s);
-  return keepCat&&keepSub;
+  var sm=SUBS_META[r.s];
+  var isRunoff=!!(sm&&sm.a===false);
+  var hideTotally=isRunoff&&HIDE_TOTALLY_SUBS.indexOf(r.s)>=0;   // CONFIG-flagged retired shell → blanket-drop (buy-safe), never shown
+  var keepSub=ACTIVE_SUBS.size===0||ACTIVE_SUBS.has(r.s)||(isRunoff&&!hideTotally);   // active OR run-off-not-hidden; unknown subcats + hide-totally dropped
+  var keep=keepCat&&keepSub;
+  if(keep&&isRunoff&&!hideTotally)RUNOFF_SUBS.add(r.s);   // only mark run-off subcats that actually survive to the plan (need an active parent category)
+  return keep;
 });
 (function synthesizeMissingSubcats(){
   if(!ACTIVE_SUBS.size)return;
@@ -5752,6 +5764,7 @@ function buildDataRow(s,co,ch,x,fu_cache){
     +'<button class="sku-toggle" data-s="'+s+'" data-co="'+co+'" data-ch="'+ch+'" style="font-size:9px;padding:0 4px;border:1px solid #d0d0d0;border-radius:3px;background:#f8f8f8;color:#666;cursor:pointer;flex-shrink:0;line-height:1.6;transition:transform 0.1s">'+(isExp?'▾':'▸')+'</button>'
     +(biIconHtmlSub||'')
     +'<span style="min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word;line-height:1.2">'+s+'</span>'
+    +((typeof RUNOFF_SUBS!=='undefined'&&RUNOFF_SUBS.has(s))?'<span title="Discontinued sub-category — selling down remaining stock, then auto-hidden once under 50 units (on-hand + inbound). Turn Active only off to always see it." style="flex-shrink:0;font-size:8px;font-weight:700;letter-spacing:.03em;color:#92400e;background:#fef3c7;border:1px solid #fcd34d;border-radius:3px;padding:0 4px;line-height:1.6;white-space:nowrap">&#8709; RUN-OFF</span>':'')
     +(CF?'':'<span class="chbg" style="flex-shrink:0">'+ch+'</span>')
     +'</span>'
     +'</div>';
@@ -8202,6 +8215,9 @@ function buildBody(){
   Object.keys(cm).forEach(function(cat){
     var rows=cm[cat].sort(function(a,b){return a.s.localeCompare(b.s)||(a.ch.localeCompare(b.ch));});
     if(PLAN_SKU_QRY||PLAN_RW!=='ALL'||PLAN_FROM_REP){rows=rows.filter(function(row){return filteredSkus(row.s,CUR,row.ch).length>0;});if(!rows.length)return;}
+    // Run-off (inactive) subcats: auto-hide once nearly sold out — <50 units sellable (on-hand+inbound) in this
+    // country×channel. Recoverable by turning "Active only" OFF (same pill that reveals discontinued SKUs).
+    if(SKU_FILTER.active){ rows=rows.filter(function(row){ if(!RUNOFF_SUBS.has(row.s))return true; var st=stockFor(row.s,CUR,row.ch); return (st.oh+st.inb)>=50; }); if(!rows.length)return; }
     // Category header — skip when redundant (the category's only subcategory has the same name, e.g. "Bag - Cooling"),
     // since the data row already labels it. Otherwise render it with the name PINNED left (sticky) so it stays visible
     // when the grid is scrolled right — previously the name scrolled out of view leaving a blank grey bar.
@@ -8945,14 +8961,31 @@ function renderSummaryView(body){
         var tgt=ly*(1+Number(gStored)/100); cellTgt=tgt; ttxt=(ly>0?('£'+Math.round(tgt).toLocaleString()):'')+_uTxt(tgt,sub); }
       else { var eff=(inh!=null?inh:0), tgt2=ly*(1+eff/100); cellTgt=tgt2; if(imp!=null)bg='background:#FDFBD4'; else if(inh!=null)bg='background:#F0FFF0';   // implied (balances to market total) → pale yellow; level-inherited → green
         ttxt=(ly>0?('£'+Math.round(tgt2).toLocaleString()):'')+_uTxt(tgt2,sub); }
+      // Part A: run-off subcat → cap this period's target at what remaining stock allows (units), back-out £ via last-year £/unit.
+      var _roCapped=false;
+      if(_roStockU&&_roStockU[sub]>0){ var _luC=0,_capC=0; mths.forEach(function(m){ _luC+=(_roLyU[sub][m]||0); _capC+=(_roCapU[sub][m]||0); });
+        var _effNet=(_luC>0)?(ly/_luC):0, _tgtU=(_effNet>0)?(cellTgt/_effNet):0;
+        if(_effNet>0&&_tgtU>_capC+0.5){ cellTgt=_capC*_effNet; _roCapped=true; }
+        ttxt=(ly>0?('£'+Math.round(cellTgt).toLocaleString()):'')+((_effNet>0)?(' · '+Math.round(cellTgt/_effNet).toLocaleString()+'u'):'');
+        if(_roCapped)ttxt='<span title="Discontinued sub-category — target capped to '+Math.round(_capC).toLocaleString()+' units this period ('+Math.round(_roStockU[sub]).toLocaleString()+' units of stock left in total). Last-year basis would be higher; can\'t sell more than is left." style="color:#b45309;cursor:help;font-weight:800">&#9888;</span> '+ttxt; }
       if(lockConflict)ttxt='<span title="Target conflict: the locked category targets for this period together exceed what the market-total budget allows — the remaining (untyped) categories get floored at −100% / forced negative even though the market total is a positive or flat growth. Lower a locked category’s growth (this one or another), or raise the market total." style="color:#b91c1c;cursor:help;font-weight:800">⚠</span> '+ttxt;
-      return '<td class="ecell" style="padding:2px 4px;border:1px solid #e5e7eb;text-align:right'+(lockConflict?';background:#fff1f1':'')+'"><input class="tgin" data-sub="'+encodeURIComponent(sub)+'" data-fy="'+Y+'" data-lvl="'+lvl+'" data-idx="'+idx+'" data-ly="'+Math.round(ly)+'" data-inh="'+(inh!=null?inh:'')+'" data-net="'+_tgtNet(sub)+'" value="'+v+'" placeholder="'+ph+'" title="Type a % growth vs last year (e.g. 40) OR a £ revenue target (e.g. £120000 or 120000). Blank = inherit." style="'+bg+'"><div class="ttgt tgt-hov" data-sub="'+encodeURIComponent(sub)+'" data-mths="'+mths.join(',')+'" data-tgt="'+Math.round(cellTgt)+'" data-ly="'+Math.round(ly)+'" data-net="'+_tgtNet(sub)+'" style="font-size:9px;color:#64748b;text-align:right;font-variant-numeric:tabular-nums;margin-top:1px;cursor:help">'+ttxt+'</div></td>'; }
+      return '<td class="ecell" style="padding:2px 4px;border:1px solid #e5e7eb;text-align:right'+(lockConflict?';background:#fff1f1':((_roStockU&&_roStockU[sub]>0)?';background:#FFF3E6':''))+'"><input class="tgin" data-sub="'+encodeURIComponent(sub)+'" data-fy="'+Y+'" data-lvl="'+lvl+'" data-idx="'+idx+'" data-ly="'+Math.round(ly)+'" data-inh="'+(inh!=null?inh:'')+'" data-net="'+_tgtNet(sub)+'" value="'+v+'" placeholder="'+ph+'" title="Type a % growth vs last year (e.g. 40) OR a £ revenue target (e.g. £120000 or 120000). Blank = inherit." style="'+bg+'"><div class="ttgt tgt-hov" data-sub="'+encodeURIComponent(sub)+'" data-mths="'+mths.join(',')+'" data-tgt="'+Math.round(cellTgt)+'" data-ly="'+Math.round(ly)+'" data-net="'+_tgtNet(sub)+'" style="font-size:9px;color:#64748b;text-align:right;font-variant-numeric:tabular-nums;margin-top:1px;cursor:help">'+ttxt+'</div></td>'; }
     if(SUMM_TGT_EDIT&&!rangeMode){
       // Target £ baseline = prior-year revenue per month. If the prior-year month is itself still a FORECAST
       // (e.g. FY27/28 H2 → FY26/27 H2 not complete), inherit the forecast revenue (subData.val, which is
       // actual-or-forecast for revtgt) instead of showing 0 → so the £ target appears for future halves too.
       var _lyRev={}; subs.forEach(function(_s){ var _sd=subData(_s), _a=_sd.a||{}, _mm={}; DISP_MONTHS.forEach(function(m){ var py=prevY(m); _mm[m]=(py in _sd.val)?_sd.val[py]:((_a[py]&&_a[py][1])||0); }); _lyRev[_s]=_mm; });
       var _mmT={}; DISP_MONTHS.forEach(function(m){ var _t=0; subs.forEach(function(_s){ _t+=_lyRev[_s][m]||0; }); _mmT[m]=_t; }); _lyRev['']=_mmT;
+      // Part A — run-off (discontinued) subcats with stock: cap the target at remaining sellable stock (on-hand+inbound),
+      // run down over FUTURE months following last-year's unit shape. _roCapU[sub][m] = units the stock allows that month;
+      // _roLyU[sub][m] = last-year units that month (for the £/unit back-out). Only subcats in RUNOFF_SUBS with stock>0.
+      var _roStockU={}, _roCapU={}, _roLyU={}, _roMonths=DISP_MONTHS.slice().sort();   // sorted = chronological rundown
+      subs.forEach(function(s){ if(!(typeof RUNOFF_SUBS!=='undefined'&&RUNOFF_SUBS.has(s)))return;
+        var st=(typeof stockFor==='function')?stockFor(s,co,ch):{oh:0,inb:0}, stock=(st.oh||0)+(st.inb||0); if(!(stock>0))return;
+        _roStockU[s]=stock; _roCapU[s]={}; _roLyU[s]={}; var _a=ga(co,ch,s)||{}, rem=stock;
+        _roMonths.forEach(function(m){ var lyu=(_a[prevY(m)]&&_a[prevY(m)][0])||0; _roLyU[s][m]=lyu;
+          if(m<CUR_MONTH){ _roCapU[s][m]=0; return; }   // stock sells in current/future months only
+          var cap=Math.min(lyu,Math.max(0,rem)); _roCapU[s][m]=cap; rem-=cap; }); });
       var eThead='<thead><tr>'+h1+'</tr><tr>'+h2+'</tr></thead>';
       // #4 category filter (text + pills, session-persisted)
       var _tcatsMap={}; subs.forEach(function(s){ _tcatsMap[_subcatParent(s)||'(uncategorised)']=1; }); var _tcatList=Object.keys(_tcatsMap).sort();
@@ -8966,7 +8999,9 @@ function renderSummaryView(body){
       var _gList=_gOrder.filter(function(g){return _byG[g];}); Object.keys(_byG).sort().forEach(function(g){ if(_gList.indexOf(g)<0)_gList.push(g); });
       _gList.forEach(function(gp){
         eRows+='<tr class="grp"><td class="lbl grp-lbl" colspan="'+(cols.length+1)+'">'+e(gp)+'</td></tr>';
-        _byG[gp].forEach(function(s){ eRows+='<tr class="sub"><td class="lbl">'+e(s)+'</td>'+cols.map(function(c){return ecell(s,c);}).join('')+'</tr>'; });
+        _byG[gp].forEach(function(s){ var _ro=(_roStockU&&_roStockU[s]>0);   // discontinued subcat with stock → light-orange run-off row + stock note
+          var _lbl=_ro?('<span title="Discontinued (run-off) — selling down remaining stock; target capped to what\'s available, not last year." style="font-size:8px;font-weight:700;color:#92400e;background:#fde3c4;border:1px solid #f6c896;border-radius:3px;padding:0 3px;margin-right:4px">&#8709;</span>'+e(s)+' <span style="font-size:9px;color:#b45309;font-weight:600">'+Math.round(_roStockU[s]).toLocaleString()+'u left</span>'):e(s);
+          eRows+='<tr class="sub"'+(_ro?' style="background:#FFF7EE"':'')+'><td class="lbl">'+_lbl+'</td>'+cols.map(function(c){return ecell(s,c);}).join('')+'</tr>'; });
       });
       var _selN=_tsel?_tsel.size:0, _catBtnLbl=(_selN?(_selN+' categor'+(_selN>1?'ies':'y')):'All categories');
       function _tgtOpt(cat,label,on){ return '<div class="tgt-cat-opt" data-c="'+encodeURIComponent(cat)+'" style="display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:4px;cursor:pointer;font-size:12px'+(cat==='__ALL__'?';font-weight:600':'')+'"><span style="width:14px;height:14px;border-radius:3px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;font-size:10px;color:#fff;border:1px solid '+(on?'#1a1a1a':'#ccc')+';background:'+(on?'#1a1a1a':'#fff')+'">'+(on?'✓':'')+'</span><span>'+e(label)+'</span></div>'; }
