@@ -782,7 +782,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
     <button id="smoothset-btn" onclick="openSmoothSettings(event)" title="Smoothing settings — disregard discontinued + auto-smooth" style="font-size:10px;padding:3px 10px;border:1px solid #93c5fd;border-radius:5px;background:#eff6ff;color:#1e40af;cursor:pointer;flex-shrink:0;font-weight:600">&#9881; Smoothing</button>
     <span style="position:relative;display:inline-flex;align-items:center">
       <button id="plan-display-btn" onclick="toggleDisplaySettings(event)" title="Display settings — record of change, forecast-to-actuals compare" style="font-size:10px;padding:3px 10px;border:1px solid #cbd5e1;border-radius:5px;background:#f8fafc;color:#334155;cursor:pointer;flex-shrink:0;font-weight:600">&#9881; Display Settings <span style="opacity:.55;font-size:9px">▾</span></button>
-      <div id="plan-display-pop" style="display:none;position:absolute;top:100%;right:0;margin-top:4px;z-index:300;background:#fff;border:1px solid #d0d0d0;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.2);width:360px;max-width:94vw;padding:14px 16px">
+      <div id="plan-display-pop" style="display:none;position:absolute;top:100%;right:0;margin-top:4px;z-index:300;background:#fff;border:1px solid #d0d0d0;border-radius:10px;box-shadow:0 10px 30px rgba(0,0,0,.2);width:430px;max-width:94vw;padding:14px 16px">
         <div style="display:flex;align-items:center;margin-bottom:12px"><div style="font-weight:700;font-size:14px;color:#0f172a">Display settings</div></div>
         <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:12px">
           <span class="pill-lbl" style="width:80px" title="Show the R record-of-change indicator on cells with edit history (loads on demand)">Records</span>
@@ -8229,9 +8229,9 @@ function buildBody(){
     if(PLAN_SKU_QRY||PLAN_RW!=='ALL'||PLAN_FROM_REP){rows=rows.filter(function(row){return filteredSkus(row.s,CUR,row.ch).length>0;});if(!rows.length)return;}
     // Run-off (discontinued) CATEGORIES: hidden by default; revealed via Display Settings ▸ "Show run-off categories".
     if(!SHOW_RUNOFF_CATS){ rows=rows.filter(function(row){ return !RUNOFF_CATS.has(row.c); }); if(!rows.length)return; }
-    // Run-off (inactive) subcats: auto-hide once nearly sold out — <50 units sellable (on-hand+inbound) in this
-    // country×channel. Recoverable by turning "Active only" OFF. (Category run-off is toggle-gated above, not by <50.)
-    if(SKU_FILTER.active){ rows=rows.filter(function(row){ if(RUNOFF_CATS.has(row.c))return true; if(!RUNOFF_SUBS.has(row.s))return true; var st=stockFor(row.s,CUR,row.ch); return (st.oh+st.inb)>=50; }); if(!rows.length)return; }
+    // Run-off (inactive) subcats AND categories: auto-hide once nearly sold out — <50 units sellable (on-hand+inbound)
+    // in this country×channel. So a discontinued category with no real stock is fully hidden. Recoverable via Active-only OFF.
+    if(SKU_FILTER.active){ rows=rows.filter(function(row){ if(!RUNOFF_SUBS.has(row.s))return true; var st=stockFor(row.s,CUR,row.ch); return (st.oh+st.inb)>=50; }); if(!rows.length)return; }
     // Category header — skip when redundant (the category's only subcategory has the same name, e.g. "Bag - Cooling"),
     // since the data row already labels it. Otherwise render it with the name PINNED left (sticky) so it stays visible
     // when the grid is scrolled right — previously the name scrolled out of view leaving a blank grey bar.
@@ -8636,6 +8636,7 @@ function render(){
     else if(DEMAND_VIEW==='pricechanges'||DEMAND_VIEW==='revenue') renderPriceChangesView(body);   // Revenue & growth report removed (superseded by Summary + targets); this Inputs tab now hosts Price changes. 'revenue' kept as an alias for old hashes/bookmarks.
     else if(DEMAND_VIEW==='klaviyobis') renderKlaviyoBisView(body);
     else if(DEMAND_VIEW==='scenario'){ if(typeof renderScenarioDemandView==='function')renderScenarioDemandView(body); }   // Scenario planner now nested under DEMAND (L2); tools are the light-blue L3
+    else if(DEMAND_VIEW==='trends') renderTrendsView(body);   // DEMAND ▸ Trends — category trends analysis report (#/demand/trends)
     else renderDemandActionsView(body);
     return;
   }
@@ -8783,6 +8784,96 @@ function renderSnapshotsView(body){
     var _fqi=document.getElementById('snapf-q'); if(_fqi)_fqi.oninput=function(){ var cp=this.selectionStart; SNAP_F_Q=this.value; drawCmp(); var n=document.getElementById('snapf-q'); if(n){n.focus(); try{n.setSelectionRange(cp,cp);}catch(e){}} };
     out.querySelectorAll('.snap-subrow').forEach(function(r){ r.onclick=function(){ var sn=decodeURIComponent(r.dataset.sub); if(SNAP_EXP[sn])delete SNAP_EXP[sn]; else SNAP_EXP[sn]=1; drawCmp(); }; });
   }
+}
+// ─── DEMAND ▸ Trends — Category Trends analysis report (#/demand/trends) ──────────────────────────────────────
+// Read-only, units-based. Three panels: Channel mix · Multi-year trend · Plan sanity. Scaffold here (chrome + filters
+// + panel tabs); the panels build in order Plan sanity → Multi-year → Channel mix (per the spec). No writes ever.
+var TRENDS_PANEL='plan-sanity', TRENDS_MKT='All', TRENDS_GRP='All', TRENDS_BASIS='ytd', TRENDS_MINU=1000, TRENDS_UNMAPPED=true;
+function _trMonLbl(ym){ if(!ym)return '—'; var p=String(ym).split('_'); var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return (MN[(+p[1]||1)-1]||p[1])+'-'+String(p[0]).slice(2); }
+function _trendsCutoff(){ try{ var ms=(typeof ACTUAL_MONTHS!=='undefined'?ACTUAL_MONTHS.slice():[]).sort(); var last=ms[ms.length-1]||''; if(last===CUR_MONTH&&ms.length>1)last=ms[ms.length-2]; return last; }catch(e){ return ''; } }
+function renderTrendsView(body){
+  var cut=_trendsCutoff(), curL=_trMonLbl(CUR_MONTH);
+  var PANELS=[['channel-mix','Channel mix'],['multi-year','Multi-year trend'],['plan-sanity','Plan sanity']];
+  var GRP_MAP={}; try{ for(var k in CAT_GROUPING){ if(CAT_GROUPING[k])GRP_MAP[CAT_GROUPING[k]]=1; } }catch(e){}
+  var GROUPS=['All'].concat(Object.keys(GRP_MAP).sort()), MKTS=['All','UK','US','EU','AU','CA'];
+  var LBL='font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;font-weight:700';
+  var SEL='font-size:12px;padding:3px 6px;border:1px solid #e2e8f0;border-radius:4px;text-transform:none;color:#0f172a;font-weight:400';
+  function opt(v,cur){ return '<option value="'+esc(v)+'"'+(v===cur?' selected':'')+'>'+esc(v)+'</option>'; }
+  var h=''
+    +'<div style="margin:2px 0 12px"><div style="font-size:19px;font-weight:700;letter-spacing:-.01em">Category trends</div>'
+      +'<div style="font-size:11.5px;color:#64748b">Data through <b style="color:#0f172a">'+_trMonLbl(cut)+'</b>. '+esc(curL)+' is partial and excluded. History begins <b>Jan-2024</b>, so comparisons run across part-years only.</div></div>'
+    +'<div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:9px 11px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'
+      +'<label style="'+LBL+'">Market <select id="tr-mkt" style="'+SEL+'">'+MKTS.map(function(m){return opt(m,TRENDS_MKT);}).join('')+'</select></label>'
+      +'<label style="'+LBL+'">Group <select id="tr-grp" style="'+SEL+'">'+GROUPS.map(function(g){return opt(g,TRENDS_GRP);}).join('')+'</select></label>'
+      +'<label style="'+LBL+'">Basis <select id="tr-basis" style="'+SEL+'"><option value="ytd"'+(TRENDS_BASIS==='ytd'?' selected':'')+'>Jan to cut-off (like for like)</option><option value="r12"'+(TRENDS_BASIS==='r12'?' selected':'')+'>Rolling 12 months</option></select></label>'
+      +'<label style="'+LBL+'">Min units <input id="tr-minu" value="'+esc(String(TRENDS_MINU))+'" style="'+SEL+';width:56px;text-align:right"></label>'
+      +'<label style="font-size:12px;color:#334155;display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="tr-unmapped"'+(TRENDS_UNMAPPED?' checked':'')+'> Include unmapped</label>'
+      +'<span style="flex:1"></span>'
+      +'<button id="tr-csv" style="font-size:11px;font-weight:600;border:1px solid #e2e8f0;background:#fff;color:#1f6fb2;border-radius:4px;padding:4px 10px;cursor:pointer">Export CSV</button>'
+    +'</div>'
+    +'<div style="display:flex;border-bottom:2px solid #e2e8f0">'
+      +PANELS.map(function(p){ var on=p[0]===TRENDS_PANEL; return '<button class="tr-tab" data-p="'+p[0]+'" style="font-size:12.5px;font-weight:600;background:none;border:0;border-bottom:2px solid '+(on?'#1f6fb2':'transparent')+';margin-bottom:-2px;padding:9px 15px;color:'+(on?'#0f172a':'#64748b')+';cursor:pointer">'+esc(p[1])+'</button>'; }).join('')
+    +'</div>'
+    +'<div id="tr-panel" style="background:#fff;border:1px solid #e2e8f0;border-top:0;border-radius:0 0 4px 4px;padding:16px;min-height:200px"></div>';
+  body.innerHTML=h;
+  var _m=body.querySelector('#tr-mkt'); if(_m)_m.onchange=function(){ TRENDS_MKT=this.value; drawPanel(); };
+  var _g=body.querySelector('#tr-grp'); if(_g)_g.onchange=function(){ TRENDS_GRP=this.value; drawPanel(); };
+  var _b=body.querySelector('#tr-basis'); if(_b)_b.onchange=function(){ TRENDS_BASIS=this.value; drawPanel(); };
+  var _mu=body.querySelector('#tr-minu'); if(_mu)_mu.onchange=function(){ TRENDS_MINU=Math.max(0,parseInt(String(this.value).replace(/[^0-9]/g,''),10)||0); drawPanel(); };
+  var _u=body.querySelector('#tr-unmapped'); if(_u)_u.onchange=function(){ TRENDS_UNMAPPED=this.checked; drawPanel(); };
+  body.querySelectorAll('.tr-tab').forEach(function(t){ t.onclick=function(){ TRENDS_PANEL=t.dataset.p; renderTrendsView(body); }; });
+  var _cv=body.querySelector('#tr-csv'); if(_cv)_cv.onclick=function(){ if(TRENDS_PANEL==='plan-sanity'&&typeof _trendsPsCsv==='function')_trendsPsCsv(); };
+  function drawPanel(){ var host=body.querySelector('#tr-panel'); if(!host)return;
+    if(TRENDS_PANEL==='plan-sanity'){ _trendsPlanSanity(host); return; }
+    var nm=({'channel-mix':'Channel mix','multi-year':'Multi-year trend'})[TRENDS_PANEL]||'';
+    host.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:24px 4px;text-align:center"><b>'+esc(nm)+'</b> — panel building next.</div>'; }
+  drawPanel();
+}
+// Panel 3 — Plan sanity: fetch the rule-checked rows and render the table (status bar, band track, rules, deep-links).
+var _TR_PS_DATA=null;
+function _trPsRows(){ var rows=((_TR_PS_DATA&&_TR_PS_DATA.rows)||[]).filter(function(r){
+    if(TRENDS_MKT!=='All'&&r.market!==TRENDS_MKT)return false;
+    if(!TRENDS_UNMAPPED&&r.category==='Unmapped')return false;
+    if(Math.max(r.latest||0,r.plan||0)<TRENDS_MINU)return false; return true; }); return rows; }
+function _trendsPlanSanity(host){
+  host.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:24px 4px;text-align:center">Loading…</div>';
+  function render(){ var rows=_trPsRows();
+    var CH={ 'Blocked':['#FF746C','#40100b'], 'No plan':['#fdf0d8','#8a5a06'], 'Review':['#FFD6D1','#9e2b1f'], 'OK':['#e0f0e6','#166d43'] };
+    function chip(s){ var c=CH[s]||['#eef2f7','#64748b']; return '<span style="display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:3px;background:'+c[0]+';color:'+c[1]+';white-space:nowrap">'+esc(s)+'</span>'; }
+    function fn(n){ return (Math.round(n)||0).toLocaleString(); }
+    var cnt=rows.reduce(function(a,r){a[r.status]=(a[r.status]||0)+1;return a;},{});
+    var bar='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
+      +[['Blocked','resolve before submit'],['No plan','no plan rows for the market'],['Review','flagged, submit allowed'],['OK','within tolerance']].map(function(s){ var c=CH[s[0]]; return '<div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-width:120px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;font-weight:700">'+s[0]+'</div><div style="font-family:ui-monospace,Menlo,monospace;font-size:19px;font-weight:600;color:'+c[1]+'">'+(cnt[s[0]]||0)+'</div><div style="font-size:11px;color:#94a3b8">'+s[1]+'</div></div>'; }).join('')+'</div>';
+    var head='<tr style="text-align:left"><th style="padding:0 8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;border-bottom:1px solid #e2e8f0">Category</th><th style="padding:0 8px 6px;font-size:10px;color:#94a3b8">Mkt</th>'
+      +['Plan '+((_TR_PS_DATA&&_TR_PS_DATA.planYear)||''),'2026 actual','Band 24-26','vs latest'].map(function(h){return '<th style="padding:0 8px 6px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;border-bottom:1px solid #e2e8f0">'+esc(h)+'</th>';}).join('')
+      +'<th style="padding:0 8px 6px;font-size:10px;color:#94a3b8;text-align:center">Band · plan</th><th style="padding:0 8px 6px;font-size:10px;color:#94a3b8">Rules</th><th style="padding:0 8px 6px;font-size:10px;color:#94a3b8">Status</th><th></th></tr>';
+    var body2=rows.map(function(r,i){ var mx=Math.max(r.bandHigh||0,r.plan||0)||1;
+      var bL=(r.bandLow/mx*100), bW=Math.max(1,(r.bandHigh-r.bandLow)/mx*100), mL=Math.min(100,r.plan/mx*100);
+      var track='<div style="position:relative;width:120px;height:13px;background:#eef0f6;border-radius:2px"><div style="position:absolute;top:0;bottom:0;left:'+bL+'%;width:'+bW+'%;background:#cfdcea;border-radius:2px"></div><div style="position:absolute;top:-3px;bottom:-3px;left:'+mL+'%;width:3px;background:'+(r.status==='OK'?'#166d43':'#9e2b1f')+';border-radius:1px"></div></div>';
+      var vs=r.planVsLatest==null?'<span style="color:#cbd5e1">n/a</span>':(r.planVsLatest>=1?'<span style="color:#166d43">':'<span style="color:#9e2b1f">')+((Math.round(r.planVsLatest*100)/100))+'x</span>';
+      var N='font-family:ui-monospace,Menlo,monospace;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;padding:6px 8px;border-bottom:1px solid #f1f5f9';
+      var T='padding:6px 8px;border-bottom:1px solid #f1f5f9';
+      return '<tr'+(r.status==='Blocked'?' style="background:#fff7f6"':'')+'><td style="'+T+';font-weight:600;white-space:nowrap">'+esc(r.category)+'</td><td style="'+T+';font-size:11px;color:#64748b">'+esc(r.market)+'</td>'
+        +'<td style="'+N+(r.status==='Blocked'?';font-weight:700':'')+'">'+(r.hasPlan?fn(r.plan):'<span style="color:#94a3b8;font-size:11px">no plan</span>')+'</td>'
+        +'<td style="'+N+'">'+fn(r.latest)+'</td><td style="'+N+'">'+fn(r.bandLow)+'–'+fn(r.bandHigh)+'</td>'
+        +'<td style="'+N+'">'+vs+'</td><td style="'+T+';text-align:center">'+track+'</td>'
+        +'<td style="'+T+';font-family:ui-monospace,Menlo,monospace;font-size:10.5px;color:#9e2b1f;letter-spacing:.04em;white-space:nowrap">'+esc(r.rules.join(' '))+'</td>'
+        +'<td style="'+T+'">'+chip(r.status)+'</td>'
+        +'<td style="'+T+'"><button class="tr-openplan" data-cat="'+esc(r.category)+'" data-mkt="'+esc(r.market)+'" style="font-size:10.5px;font-weight:600;border:1px solid #e2e8f0;background:#fff;color:#1f6fb2;border-radius:4px;padding:3px 8px;cursor:pointer;white-space:nowrap">Open plan</button></td></tr>'; }).join('');
+    host.innerHTML=bar+'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'+head+body2+'</table></div>'
+      +(rows.length?'':'<div style="color:#94a3b8;font-size:12px;padding:16px 4px;text-align:center">No categories above the '+fn(TRENDS_MINU)+'-unit minimum for this market.</div>');
+    host.querySelectorAll('.tr-openplan').forEach(function(b){ b.onclick=function(){ var cat=b.dataset.cat, mkt=b.dataset.mkt;
+      try{ if(mkt&&mkt!=='Unmapped')CUR=mkt; if(typeof SEL!=='undefined'&&cat&&cat!=='Unmapped'){ SEL=new Set([cat]); } DEMAND_VIEW='plan'; if(window.writeHash)writeHash(['demand']); render(); }catch(e){} }; });
+  }
+  if(_TR_PS_DATA){ render(); return; }
+  fetch('/api/demand/trends/plan-sanity').then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); _TR_PS_DATA=j; render(); })
+    .catch(function(e){ host.innerHTML='<div style="color:#b91c1c;font-size:12px;padding:16px 4px">Could not load Plan sanity: '+esc(String(e&&e.message||e))+'</div>'; });
+}
+function _trendsPsCsv(){ var rows=_trPsRows(); if(!rows.length)return;
+  var hdr=['Category','Market','Plan','Actual2026','BandLow','BandHigh','PlanVsLatest','Rules','Status'];
+  var esc2=function(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v; };
+  var lines=[hdr.join(',')].concat(rows.map(function(r){ return [r.category,r.market,Math.round(r.plan),Math.round(r.latest),Math.round(r.bandLow),Math.round(r.bandHigh),(r.planVsLatest==null?'':Math.round(r.planVsLatest*100)/100),r.rules.join(' '),r.status].map(esc2).join(','); }));
+  var blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'}), u=URL.createObjectURL(blob), a=document.createElement('a'); a.href=u; a.download='trends_plan_sanity.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000);
 }
 // "Summary with targets" report — three tabs: Summary (read), Edit targets (SUMM_TGT_EDIT), Target recommendations
 // (the embedded recs, formerly a standalone drawer). The tab bar sits outside the content div so each tab's own
@@ -9423,7 +9514,7 @@ function renderAccuracyView(kb,body){
   }).catch(function(){ kb.innerHTML='<div style="color:#dc2626;font-size:12px">Failed to load.</div>'; });
 }
 // ─── DEMAND sub-tabs (PLAN / KPIs / TARGETS / ACTIONS / CALENDAR) ───────────────────────────
-var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['targets','Sell-through targets'],['pricechanges','Price changes'],['actions','Actions'],['calendar','Calendar'],['scenario','Scenario planner']];
+var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['targets','Sell-through targets'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['calendar','Calendar'],['scenario','Scenario planner']];
 function renderDemandTabs(){
   var bar=document.getElementById('demand-tabs');
   var _sb=document.getElementById('statusbar');
@@ -9440,7 +9531,7 @@ function renderDemandTabs(){
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   // Primary tabs inline; the reference/input views (Sell-through targets, Key accounts, Calendar, Revenue) are grouped under an "Inputs ▾" dropdown.
   var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['snapshots']='Snapshots';
-  var PRIMARY=['plan','summary','snapshots','kpis','actions','scenario'], INPUTS=['targets','keyaccounts','calendar','pricechanges','klaviyobis'];
+  var PRIMARY=['plan','summary','snapshots','kpis','trends','actions','scenario'], INPUTS=['targets','keyaccounts','calendar','pricechanges','klaviyobis'];
   var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0;
   var _isPlanV=(DEMAND_VIEW==='plan');
   // Release Window now lives in the More Filters panel; Undo + Download now sit on the right of the plan controls

@@ -803,6 +803,47 @@ async function getDataVals() {
 function invalidateDataCache() { _dataCache = null; refreshDataCache().catch((e) => console.error('[cache] rebuild failed:', e.message)); }
 // Boot warm: on Vercel read the pre-built blob from KV (no Supabase); only build from Supabase if KV is empty/off.
 (async () => { try { if (KV_ON) { const v = await kvReadBlob(); if (v) { _dataCache = { at: Date.now(), vals: v }; return; } } await refreshDataCache(); } catch (e) { /* first real request will retry */ } })();
+// DEMAND ▸ Trends ▸ Panel 3 (Plan sanity). Compares next-year forecast_outputs against the like-for-like 2024-26
+// actual band per category × market, then runs the rule set (R1 over-plan, R2 under-plan, R3 step change, R6 zero
+// plan on live range; "no plan" ≠ "plan is low"). Units only, read-only. Cutoff = last complete month (current partial
+// excluded). Plan window = same Jan-to-cutoff months, next year. forecast_outputs warehouse prefix → market.
+const _TRENDS_CFG = { r1: 1.5, r2: 0.7, r3lo: 0.5, r3hi: 2.0 };   // thresholds (tunable after a cycle)
+app.get('/api/demand/trends/plan-sanity', async (_req, res) => {
+  try {
+    const cut = (await pool.query(`SELECT extract(month from max(month))::int mm, extract(year from max(month))::int yy FROM planner.sales_actuals`)).rows[0];
+    const cutoffNum = Math.max(1, (cut.mm || 1) - 1);           // last complete month (exclude the current partial)
+    const planYear = (cut.yy || 2026) + 1;                       // next-year plan window
+    const [actR, planR] = await Promise.all([
+      pool.query(`SELECT coalesce(nullif(btrim(p.category),''),'Unmapped') category, sa.country market, extract(year from sa.month)::int yr, sum(sa.units)::numeric units
+        FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku
+        WHERE extract(month from sa.month) <= $1 AND extract(year from sa.month) BETWEEN 2024 AND 2026 GROUP BY 1,2,3`, [cutoffNum]),
+      pool.query(`SELECT coalesce(nullif(btrim(p.category),''),'Unmapped') category, upper(split_part(fo.warehouse,'_',1)) market, sum(fo.units)::numeric units
+        FROM planner.forecast_outputs fo JOIN planner.products p ON p.sku=fo.sku
+        WHERE extract(month from fo.month) <= $1 AND extract(year from fo.month) = $2 GROUP BY 1,2`, [cutoffNum, planYear]),
+    ]);
+    const band = {}, plan = {};
+    for (const r of actR.rows) { const k = r.category + '|' + r.market; (band[k] = band[k] || {})[r.yr] = Number(r.units) || 0; }
+    for (const r of planR.rows) plan[r.category + '|' + r.market] = Number(r.units) || 0;
+    const C = _TRENDS_CFG, rows = [];
+    for (const k of new Set([...Object.keys(band), ...Object.keys(plan)])) {
+      const i = k.indexOf('|'), category = k.slice(0, i), market = k.slice(i + 1);
+      const b = band[k] || {}, a24 = b[2024] || 0, a25 = b[2025] || 0, a26 = b[2026] || 0;
+      const latest = a26, bandLow = Math.min(a24, a25, a26), bandHigh = Math.max(a24, a25, a26);
+      const hasPlan = (k in plan), pl = plan[k] || 0, rules = []; let status = 'OK';
+      if (!hasPlan) { if (latest <= 0) continue; rules.push('R6'); status = 'No plan'; }
+      else {
+        if (bandHigh > 0 && pl > C.r1 * bandHigh) rules.push('R1');
+        if (latest > 0 && pl < C.r2 * latest) rules.push('R2');
+        if (latest > 0) { const ratio = pl / latest; if (ratio < C.r3lo || ratio > C.r3hi) rules.push('R3'); }
+        if (pl === 0 && latest > 0) rules.push('R6');
+        status = rules.indexOf('R3') >= 0 ? 'Blocked' : (rules.length ? 'Review' : 'OK');
+      }
+      rows.push({ category, market, plan: pl, hasPlan, a2024: a24, a2025: a25, a2026: a26, latest, bandLow, bandHigh, planVsLatest: latest > 0 ? pl / latest : null, rules, status });
+    }
+    rows.sort((x, y) => { const o = { Blocked: 0, 'No plan': 1, Review: 2, OK: 3 }; return (o[x.status] - o[y.status]) || (y.plan - x.plan); });
+    res.json({ cutoffMonth: cutoffNum, planYear, cfg: C, rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // SKU-data lazy-load (opt-in ?lazysku=1): the heavy _SKU_RAW + FC_OUTPUTS are shipped EMPTY in the page and the
 // client fetches them here after first paint. Served from the warm data cache (vals[3]=SKU_RAW, vals[2]=FC_OUTPUTS).
 app.get('/api/demand/sku-data', async (req, res) => {

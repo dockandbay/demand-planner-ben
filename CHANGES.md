@@ -1,3 +1,17 @@
+## v27.025 Trends — Panel 3 (Plan sanity) built
+- First real Trends panel. New server endpoint `GET /api/demand/trends/plan-sanity`: compares next-year `forecast_outputs` (warehouse prefix → market) against the like-for-like 2024-26 actual band per category × market (cutoff = last complete month), and runs the rule set — **R1** over-plan (>150% best year), **R2** under-plan (<70% latest), **R3** step change (outside 0.5-2.0×), **R6** zero-plan-on-live-range; distinguishes **"no plan"** from "plan is low". Thresholds in a config block.
+- Client table: status summary bar (Blocked / No plan / Review / OK), band+plan-marker track, rules, status chips, **Open plan** deep-links (sets market + category filter), and **CSV export** with the Market / Min-units / Unmapped filters applied.
+- **Acceptance met:** R1+R3 fire on **Cooling** and **Non Core** vs the saved 2027 plan; Blocked rows sort to the top. Read-only, no writes. (R4 dead-range + R5 stale-copy are follow-ups; Panels 2 & 1 next.)
+
+## v27.024 Run-off: <50 auto-hide now covers categories + Display Settings box widened
+- The <50-unit auto-hide now applies to run-off **categories** too (not just sub-categories) — a discontinued category with no real stock (e.g. Makeup Remover, 0 units) is **fully hidden** even with the "Show run-off categories" toggle on. Ones that still hold stock (e.g. Towel-Dog) still show. Recoverable via Active-only OFF.
+- Widened the Display Settings popup (360→430px) so "Show run-off (discontinued) categories" fits on one line with its checkbox aligned to the others.
+
+## v27.023 DEMAND ▸ Trends — Category Trends report (scaffold)
+- New **DEMAND ▸ Trends** tab, deep-linked `#/demand/trends`. Read-only category-trends analysis (units).
+- Scaffold in place: header (data cut-off auto-derived = last complete month, "history begins Jan-2024"), filter row (Market / Group / Basis / Min units / Include unmapped), and three panel tabs (**Channel mix · Multi-year trend · Plan sanity**). Panels render placeholders for now.
+- Next: build the panels in order **Plan sanity → Multi-year trend → Channel mix** (each with its server aggregate over sales_actuals + products + forecast_outputs, the shared track/marker visual, CSV export, and row deep-links to the plan). Separately, the inventory-snapshot seed + weekly capture are ETL work for Diviyaj (spec provided).
+
 ## v27.022 Run-off extended to discontinued CATEGORIES + Display Settings toggle
 - Inactive **categories** (`categories.is_active=false`) are now kept in the plan too (flagged `RUNOFF_CATS`), so their remaining stock forecasts + shows as run-off — previously they were dropped outright by the category filter (a harder hide than the sub-category one).
 - **New Display Settings toggle "Show run-off (discontinued) categories"** (`hzShowRunoffCats`, default **OFF/hidden**). Off → run-off categories are hidden (prior behaviour); on → they appear with the ∅ run-off treatment (badge, stock-capped targets). Category run-off is toggle-gated (not the <50 auto-hide that governs sub-category run-off).
