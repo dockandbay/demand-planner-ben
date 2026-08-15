@@ -1,3 +1,7 @@
+## v27.032 Inventory-snapshots loader — Vercel-ready
+- Verified the loader works on Vercel: the endpoint ships via api/index.mjs → server.mjs; exceljs/pg are dependencies (bundled by npm install); functions maxDuration 300 + memory 1024; stock exports (~72KB) are far under Vercel's ~4.5MB request-body cap.
+- Added a client-side size guard: a file whose base64 would exceed the Vercel body cap is rejected up front with a clear message pointing to the CLI loader, instead of a cryptic 413. Shows the chosen file size.
+
 ## v27.031 Inventory-snapshots loader — drag-and-drop
 - The CONFIG ▸ Admin ▸ Inventory snapshots page now takes a **drag-and-drop** .xlsx (dashed drop zone, highlights on hover) as well as click-to-choose. Validates the .xlsx extension.
 

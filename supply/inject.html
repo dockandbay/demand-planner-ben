@@ -7252,7 +7252,9 @@
             +'<span id="invs-msg" style="font-size:12px;margin-left:6px"></span></div>'
           +'<div id="invs-out"></div>';
         var fEl=document.getElementById('invs-file'), fnEl=document.getElementById('invs-fname'), msg=document.getElementById('invs-msg'), out=document.getElementById('invs-out'), drop=document.getElementById('invs-drop');
-        function takeFile(f){ if(!f)return; if(!/\.xlsx$/i.test(f.name)){ msg.style.color='#dc2626'; msg.textContent='Please choose an .xlsx file.'; return; } fnEl.textContent=f.name; fnEl.style.color='#0f172a'; msg.textContent=''; var rd=new FileReader(); rd.onload=function(){ _f.b64=String(rd.result).split(',')[1]||''; _f.name=f.name; }; rd.readAsDataURL(f); }
+        function takeFile(f){ if(!f)return; if(!/\.xlsx$/i.test(f.name)){ msg.style.color='#dc2626'; msg.textContent='Please choose an .xlsx file.'; return; }
+          if(f.size>3.3*1024*1024){ msg.style.color='#dc2626'; msg.textContent='File is '+(f.size/1024/1024).toFixed(1)+'MB — over the ~4.5MB Vercel upload limit once base64-encoded. Split the export, or use the command-line loader (scripts/seed_inventory_snapshots.mjs).'; return; }   // Vercel serverless caps the request body regardless of the app limit
+          fnEl.textContent=f.name+' · '+(f.size/1024).toFixed(0)+' KB'; fnEl.style.color='#0f172a'; msg.textContent=''; var rd=new FileReader(); rd.onload=function(){ _f.b64=String(rd.result).split(',')[1]||''; _f.name=f.name; }; rd.readAsDataURL(f); }
         fEl.onchange=function(){ takeFile(this.files&&this.files[0]); };
         drop.onclick=function(e){ if(e.target!==fEl)fEl.click(); };
         function _dz(on){ drop.style.borderColor=on?'#7c3aed':'#cbd5e1'; drop.style.background=on?'#f5f3ff':'#f8fafc'; }
