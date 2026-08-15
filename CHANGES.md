@@ -1,3 +1,6 @@
+## v27.045 Demand plan: stack current-month actuals onto its own line in category rows
+- In the category/aggregate (subcategory) rows the actuals numbers are large, so `(34) 120` on one line made the current-month column too wide. Actuals now sit on their **own line above the forecast** in those rows. SKU rows keep the compact inline `(34) 120`.
+
 ## v27.044 Demand plan: merge current-month actual + forecast into one column
 - The current month (e.g. Aug 2026) was showing as **two columns** (a read-only actuals column + a forecast column), which was confusing and split the PP rail onto the actuals side. Now it's **one column** (the forecast cell): the forecast number with **actuals-to-date in green brackets before it**, e.g. `(34) 120`.
 - The **cell rail (PP / N / BI / C / R) now sits on the current-month forecast cell** in both subcat rows (`curFcCell`) and SKU rows (`skuCurFcCell`) — fixes the PP badge not showing on the forecast side.

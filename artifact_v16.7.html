@@ -5870,7 +5870,7 @@ function buildDataRow(s,co,ch,x,fu_cache){
       d2.appendChild(inp2);
       const res2=document.createElement('div');res2.className='fcr'+(stored?' ovc':' flat');
       var _mtd=(a[fym]&&a[fym][0])||0;   // actuals month-to-date → shown in green BEFORE the forecast number: "(34) 120"
-      if(_mtd>0){ var _actS=document.createElement('span'); _actS.style.cssText='color:#16a34a;font-weight:700;margin-right:3px'; _actS.textContent='('+fn(_mtd)+')'; _actS.title='Actuals month-to-date'; res2.appendChild(_actS); }
+      if(_mtd>0){ var _actS=document.createElement('span'); _actS.style.cssText='color:#16a34a;font-weight:700;display:block;line-height:1.05'; _actS.textContent='('+fn(_mtd)+')'; _actS.title='Actuals month-to-date'; res2.appendChild(_actS); }   // category rows: actuals on its own line (bigger numbers → keep the column narrow)
       var _fcS=document.createElement('span');_fcS.textContent=fn(fcv);_fcS.dataset.curfc=rk;res2.appendChild(_fcS);
       d2.appendChild(res2);
       // Revenue line for current-month forecast: forecast_units × LY_ASP
