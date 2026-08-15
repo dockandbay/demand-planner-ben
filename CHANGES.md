@@ -1,3 +1,8 @@
+## v27.046 Prepack rail: per-channel demand + partial current month
+- The PP rail tooltip was showing the **DTC+FBA combined** set demand (e.g. 52) on a single-channel cell where the grid shows just that channel (50). Cover is now recorded **per channel** (`set|CO|CH|month`), so a DTC cell shows the DTC figure and an FBA cell the FBA figure — matching the grid.
+- **Partial current month**: the prepack now nets against the **remaining** forecast (forecast − actuals-to-date), and the already-sold actuals are dropped from the component build. E.g. Aug forecast 50, actuals 4 → the rail shows "covers 46 of 46 … still to sell this month".
+- Buy impact: **-240u** (439,442 → 439,202) — prepack sets no longer build components for the current month's already-shipped actuals. FBA set demand still folds into the 3PL sets-demand line and draws down 3PL SOH (unchanged).
+
 ## v27.045 Demand plan: stack current-month actuals onto its own line in category rows
 - In the category/aggregate (subcategory) rows the actuals numbers are large, so `(34) 120` on one line made the current-month column too wide. Actuals now sit on their **own line above the forecast** in those rows. SKU rows keep the compact inline `(34) 120`.
 

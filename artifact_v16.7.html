@@ -6192,7 +6192,7 @@ function cellRailForKey(nk){ if(!nk)return ''; var p=nk.split('|'); var level=p[
   var calTip=isSku?'':calTipHtml(item,co,m);
   var hasNote=(typeof FC_NOTES!=='undefined'&&FC_NOTES[nk]&&FC_NOTES[nk].length);
   var locked=(isSku&&typeof SMOOTH_LOCKS!=='undefined'&&SMOOTH_LOCKS[nk]);
-  var ppc=(isSku&&typeof PREPACK_COVER!=='undefined')?PREPACK_COVER[item+'|'+(co||'').toUpperCase()+'|'+m]:null;   // prepack cover for this set·country·month
+  var ppc=(isSku&&typeof PREPACK_COVER!=='undefined')?PREPACK_COVER[item+'|'+(co||'').toUpperCase()+'|'+ch+'|'+m]:null;   // prepack cover for this set·country·channel·month
   var o='';
   if(biTip)o+='<span class="cf cf-i" data-bi-tip="'+biTip.replace(/"/g,'&quot;')+'">i</span>';
   if(calTip)o+='<span class="cf cf-c" data-cal-tip="'+calTip.replace(/"/g,'&quot;')+'">C</span>';
@@ -6200,8 +6200,9 @@ function cellRailForKey(nk){ if(!nk)return ''; var p=nk.split('|'); var level=p[
   if(locked)o+='<span class="cf cf-s" title="Do not smooth — this SKU forecast is locked; smoothing leaves it fixed, only a manual override changes it">S</span>';
   if(ppc){ var _r=function(n){return Math.round(Number(n)||0).toLocaleString();};
     var _pl=(PREPACK_BY_SET[item]||[]); var _av=(ppc.avail!=null?ppc.avail:ppc.onHand);
-    var _pt='Prepack '+(_pl.length?(_pl.join(', ')+' — '):'')+_r(_av)+'u available this month'
-      +(ppc.fc>0?(' · covers '+_r(ppc.covered)+' of '+_r(ppc.fc)+' set demand · '+_r(ppc.remaining)+'u left after'):' · no set demand this month')
+    var _dl=(ch||'')+' '+(ppc.cur?'demand still to sell this month':'demand');
+    var _pt='Prepack '+(_pl.length?(_pl.join(', ')+' — '):'')+_r(_av)+'u available'
+      +(ppc.fc>0?(' · covers '+_r(ppc.covered)+' of '+_r(ppc.fc)+' '+_dl+' · '+_r(ppc.remaining)+'u left after'):' · no '+(ch||'')+' demand this month')
       +(ppc.fc>0&&ppc.covered>=ppc.fc?' · no component buy this month':'');
     o+='<span class="cf cf-pp" title="'+_pt.replace(/"/g,'&quot;')+'">PP</span>'; }
   if(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES&&typeof FC_CHANGE_KEYS!=='undefined'&&FC_CHANGE_KEYS.has(nk)
@@ -12987,7 +12988,7 @@ function buildLiveDemand(){
         var ctry=co.toLowerCase(), av=(sp.av||{})[ctry]||'';
         var chans=[]; if(av.indexOf('d')>=0)chans.push('DTC'); if(av.indexOf('f')>=0)chans.push('FBA');   // DTC + FBA (decision 3)
         if(!chans.length)return;
-        var setFC={};   // set forecast per future month = sum over its DTC/FBA channels. Sets forecast like NORMAL SKUs
+        var setFC={}, cfc={}, cact={};   // setFC = total per month (DTC+FBA); cfc[ch] = per-channel monthly forecast (matches the grid); cact[ch] = current-month actuals-to-date
         chans.forEach(function(ch){                                    // (Ben P3b): override → last-year chain → subcat×share (same cascade as buildLiveDemand §2).
           var subcat=sp.s||'', subcatFU={}, share=0, chKey=(ch==='DTC'?'d':(ch==='FBA'?'f':'b'));
           try{ subcatFU=(calc(subcat,co,ch)||{}).fu||{}; }catch(e){}
@@ -13007,6 +13008,7 @@ function buildLiveDemand(){
             else fc=Math.round(raw);
             if(fc>0){ chFC[fym]=fc; setFC[fym]=(setFC[fym]||0)+fc; }
           });
+          cfc[ch]=chFC; cact[ch]=(s2sales[CUR_MONTH]||0);   // stash for the prepack netting (per-channel display + partial current month)
         });
         // PREPACK netting (prepack feature): a mapped prepack's (PP-…) on-hand stock fulfils this set's demand
         // directly, so draw it down against setFC month-by-month (carried forward). Only the UNCOVERED remainder
@@ -13019,10 +13021,18 @@ function buildLiveDemand(){
           if(ppOpen<=0)return;
           var rem2=ppOpen;
           LIVE_FC_MONTHS.forEach(function(fym){ if(rem2<=0)return;   // prepack sold through → no more entries (badge stops from here)
-            var d=setFC[fym]||0, opening=rem2;                        // opening = prepack still available at the START of this month (draws down over time)
-            if(d<=0){ PREPACK_COVER[setSku+'|'+co+'|'+fym]={onHand:ppOpen,avail:opening,fc:0,covered:0,remaining:rem2}; return; }
-            var cov=Math.min(d,rem2); rem2-=cov; setFC[fym]=d-cov;
-            PREPACK_COVER[setSku+'|'+co+'|'+fym]={onHand:ppOpen,avail:opening,fc:d,covered:cov,remaining:rem2}; });
+            // Current month is PARTIAL: the actuals already shipped, so drop them from the demand to build AND net the
+            // prepack against the REMAINING forecast only (forecast − actuals-to-date). Per channel so the rail badge on
+            // a DTC (or FBA) cell shows that channel's number, matching the grid (not the DTC+FBA combined total).
+            if(fym===CUR_MONTH){ var actTot=chans.reduce(function(a,ch){return a+(cact[ch]||0);},0); if(actTot>0)setFC[fym]=Math.max(0,(setFC[fym]||0)-actTot); }
+            chans.forEach(function(ch){ if(rem2<=0)return;
+              var d=(cfc[ch]||{})[fym]||0;
+              if(fym===CUR_MONTH)d=Math.max(0,d-(cact[ch]||0));       // remaining this partial month
+              if(d<=0)return;
+              var opening=rem2, cov=Math.min(d,rem2); rem2-=cov;
+              setFC[fym]=Math.max(0,(setFC[fym]||0)-cov);             // uncovered remainder explodes into components (3PL pool)
+              PREPACK_COVER[setSku+'|'+co+'|'+ch+'|'+fym]={onHand:ppOpen,avail:opening,fc:d,covered:cov,remaining:rem2,cur:(fym===CUR_MONTH)}; });
+          });
         })();
         if(!Object.keys(setFC).length)return;
         comps.forEach(function(cc){
