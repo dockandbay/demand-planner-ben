@@ -6192,7 +6192,10 @@
   var PORTAL_SUP='', PORTAL_TAB='pos', PORTAL_PO_ST=null, _pendingPortalSup=null;   // CONFIG ▸ Portal preview: chosen supplier + inner tab + PO status filter (+ pending supplier slug from #/config/portal/<name>)
   var ROW_EDIT={};   // per-sub-tab: which row key is currently in Edit mode (Edit/Save rows for suppliers + productions)
   var ME=null;   // caller's app permissions (/api/me): {email,live,supply_edit,demand_edit,is_admin}. null until loaded; sandbox = full access.
-  function fetchMe(cb){ fetch('/api/me').then(function(r){return r.json();}).then(function(j){ ME=j||null; try{window.ME=ME;}catch(e){} try{updatePermBanner();}catch(e){} try{startSessionGuard();}catch(e){} if(cb)cb(); }).catch(function(){ if(cb)cb(); }); }
+  function fetchMe(cb){ fetch('/api/me').then(function(r){return r.json();}).then(function(j){ ME=j||null; try{window.ME=ME;}catch(e){} try{updatePermBanner();}catch(e){} try{startSessionGuard();}catch(e){}
+    try{ if(ME&&ME.email&&Array.isArray(ME.favourites)){ HZ_FAVES=ME.favourites.slice(); try{localStorage.setItem('hzFaves',JSON.stringify(HZ_FAVES));}catch(e){} } }catch(e){}   // server is source of truth once ME loads
+    try{ if(typeof renderFaves==='function')renderFaves(); }catch(e){}
+    if(cb)cb(); }).catch(function(){ if(cb)cb(); }); }
   // SUG-0007: on LIVE only, silently re-check the session every 4h + hard-expire at 7 days. If /api/me stops
   // returning our email (proxy session gone / Google account revoked), log out via the proxy logout URL (from
   // app_settings.auth_logout_url) — falling back to a reload, which the proxy will bounce to Google sign-in.
@@ -9257,14 +9260,20 @@
   // ============ SUPPLY ▸ BI & REPORTS — BI sub-tabs (render into #rep-body) ============
   function biBody(){ return document.getElementById('rep-body')||document.getElementById('supply-content'); }
   // SUG-0020 DTC MISMATCH — open Direct-to-Client sales orders vs their POs (mapped by sales_order_ref)
-  function _dtcPill(lbl,n,color){ return '<span style="font-size:11px;color:#64748b">'+lbl+' <b style="color:'+color+'">'+n+'</b></span>'; }
+  var _dtcHideAcc=(function(){try{return localStorage.getItem('dtcHideAcc')==='1';}catch(e){return false;}})();   // DTC mismatch: hide accepted discrepancy rows
+  function _dtcPill(lbl,n,color){ return '<span style="font-size:11px;color:#64748b">'+lbl+' <b data-dtcpill="'+lbl+'" style="color:'+color+'">'+n+'</b></span>'; }
+  function _dtcBumpPill(lbl,d){ var el=document.querySelector('b[data-dtcpill="'+lbl+'"]'); if(el){ var v=(parseInt(el.textContent,10)||0)+d; el.textContent=(v<0?0:v); } }
+  function _dtcBadge(o){ return o.accepted?'<span class="tool-badge bg-blue">accepted</span>':o.issue==='no_po'?'<span class="tool-badge bg-red">no PO mapped</span>':o.issue==='qty_mismatch'?'<span class="tool-badge bg-amber">SKU / qty mismatch</span>':'<span class="tool-badge bg-green">OK</span>'; }
+  function _dtcFlash(el){ if(!el)return; var p=el.style.backgroundColor; el.style.transition='background-color .12s'; el.style.backgroundColor='#bbf7d0'; setTimeout(function(){ el.style.backgroundColor=p||''; setTimeout(function(){try{el.style.transition='';}catch(e){}},200); },520); }   // green flash on note save
+  function _dtcApplyHideAcc(){ var host=document.getElementById('dtc-list'); if(host)host.querySelectorAll('tr.dtc-order-row').forEach(function(tr){ if(tr.dataset.acc==='1')tr.style.display=_dtcHideAcc?'none':''; });
+    var btn=document.getElementById('dtc-hide-acc'); if(btn){ btn.style.background=_dtcHideAcc?'#1d4ed8':'#fff'; btn.style.color=_dtcHideAcc?'#fff':'#475569'; btn.style.borderColor=_dtcHideAcc?'#1d4ed8':'#cbd5e1'; btn.textContent=(_dtcHideAcc?'✓ ':'')+'Hide accepted'; } }
   function refreshDtcBadge(){ var els=[document.getElementById('nav-dtc-badge'),document.getElementById('nav-dtc-badge-l3')].filter(Boolean); if(!els.length)return;   // level-2 (BI&Reports tab) + level-3 (DTC Mismatch sub-tab)
     fetch('/api/supply/dtc/mismatch?count=1').then(function(r){return r.json();}).then(function(j){ var c=(j&&j.counts)||{}; var n=(c.issues||0)+(c.unmapped_pos||0); els.forEach(function(el){ el.textContent=n?String(n):''; el.style.display=n?'':'none'; }); }).catch(function(){}); }
   function renderDtcMismatch(d){ var b=biBody(); d=d||{orders:[],counts:{}}; var counts=d.counts||{};
     b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:#0f172a">DTC mismatch</div>'
       +'<div class="mut tiny" style="margin-bottom:10px;max-width:840px">Open Direct-to-Client sales orders (not void, not dispatched) reconciled against their purchase orders (mapped by sales order ref). Flags orders with <b>no PO</b> or a <b>SKU / quantity mismatch</b>. Add a note or <b>accept</b> a discrepancy to clear it from the count.</div>'
       +'<div class="bar" style="gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><button class="save-btn" id="dtc-import">&#8635; Import sales orders</button><span id="dtc-impmsg" class="mut tiny"></span>'
-        +'<span style="margin-left:auto;display:inline-flex;gap:12px">'+_dtcPill('Issues',counts.issues||0,'#dc2626')+_dtcPill('Accepted',counts.accepted||0,'#64748b')+_dtcPill('OK',counts.ok||0,'#166534')+_dtcPill('Unmapped POs',counts.unmapped_pos||0,'#b45309')+'</span></div>'
+        +'<span style="margin-left:auto;display:inline-flex;gap:12px;align-items:center">'+_dtcPill('Issues',counts.issues||0,'#dc2626')+_dtcPill('Accepted',counts.accepted||0,'#64748b')+_dtcPill('OK',counts.ok||0,'#166534')+_dtcPill('Unmapped POs',counts.unmapped_pos||0,'#b45309')+'<button id="dtc-hide-acc" style="font-size:11px;padding:2px 10px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;color:#475569;cursor:pointer;white-space:nowrap">Hide accepted</button></span></div>'
       +'<div id="dtc-list"></div><div id="dtc-unmapped"></div>';
     fetch('/api/supply/dtc/status').then(function(r){return r.json();}).then(function(s){ var m=document.getElementById('dtc-impmsg'); if(m)m.textContent=s.imported_at?('last import '+s.imported_at+' · '+s.orders+' orders ('+s.open+' open)'):'not imported yet — click Import'; }).catch(function(){});
     var ib=document.getElementById('dtc-import'); if(ib)ib.onclick=function(){ if(!confirm('Import the latest Direct-to-Client sales orders from Cin7 now? (read-only pull)'))return;
@@ -9281,6 +9290,8 @@
       step({}); };
     _drawDtcList((d.orders||[]).slice());
     _drawDtcUnmapped(d.unmapped_pos||[]);
+    var _hb=document.getElementById('dtc-hide-acc'); if(_hb)_hb.onclick=function(){ _dtcHideAcc=!_dtcHideAcc; try{localStorage.setItem('dtcHideAcc',_dtcHideAcc?'1':'0');}catch(e){} _dtcApplyHideAcc(); };
+    try{ _dtcApplyHideAcc(); }catch(e){}
     try{ refreshDtcBadge(); }catch(e){}
   }
   // #1 reverse view — open, not-received DTC-branch POs with no sales-order mapping
@@ -9290,34 +9301,58 @@
     var rows=list.map(function(p){ var acc=!!p.accepted;
       return '<tr'+(acc?' style="opacity:.6"':'')+'><td class="l">'+(acc?'<span class="tool-badge bg-blue">accepted</span> ':'')+'<button class="lnk-btn dtc-po" data-po="'+esc(p.po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer">'+esc(p.po)+'</button>'+(p.supplier?' <span class="mut">('+esc(p.supplier)+')</span>':'')+'</td>'
         +'<td class="l">'+esc(p.branch||'')+'</td><td class="l">'+esc(p.country_code||'')+'</td><td class="l">'+esc(p.status||'')+'</td>'
-        +'<td class="l"><input class="fci txt dtcpo-note" data-po="'+esc(p.po)+'" value="'+esc(p.note||'')+'" placeholder="note…" style="width:150px"></td>'
+        +'<td class="l"><textarea class="dtcpo-note" data-po="'+esc(p.po)+'" rows="1" placeholder="note…" style="width:180px;min-height:22px;resize:vertical;overflow:hidden;font-family:inherit;font-size:12px;padding:3px 5px;border:1px solid #cbd5e1;border-radius:4px;box-sizing:border-box" oninput="this.style.height=\'auto\';this.style.height=this.scrollHeight+\'px\'">'+esc(p.note||'')+'</textarea></td>'
         +'<td class="l"><label style="font-size:11px;white-space:nowrap"><input type="checkbox" class="dtcpo-acc" data-po="'+esc(p.po)+'"'+(acc?' checked':'')+'> accept</label></td></tr>'; }).join('');
     el.innerHTML='<div style="font-weight:700;font-size:13px;margin:18px 0 3px;color:#0f172a">Open purchase orders, not mapped to a sales order <span class="mut">('+openN+')</span></div>'
       +'<div class="mut tiny" style="margin-bottom:6px;max-width:840px">Open (not received) POs in the Direct-to-Client branches with no sales-order reference. Accept a row to clear it from the count.</div>'
       +'<div style="overflow-x:auto;max-width:100%"><table style="width:max-content;min-width:100%;border-collapse:collapse"><thead><tr><th class="l">PO (supplier)</th><th class="l">Branch</th><th class="l">Country</th><th class="l">Status</th><th class="l">Note</th><th class="l">Accept</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
     el.querySelectorAll('.dtc-po').forEach(function(x){ x.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(x.dataset.po,'oplan'); else if(typeof gotoPO==='function')gotoPO(x.dataset.po,'oplan'); }; });
     function savePo(po,accepted,note){ fetch('/api/supply/dtc/po-review',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,accepted:accepted,note:note})}).then(function(r){return r.json();}).then(function(){ selectReport('dtc-mismatch'); }).catch(function(){}); }
+    function persistPo(po,accepted,note){ fetch('/api/supply/dtc/po-review',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,accepted:accepted,note:note})}).catch(function(){}); }   // silent (for note edits) — no re-render so the green flash shows
     el.querySelectorAll('.dtcpo-acc').forEach(function(cb){ cb.onclick=function(){ var po=cb.dataset.po, ne=el.querySelector('.dtcpo-note[data-po="'+(window.CSS&&CSS.escape?CSS.escape(po):po)+'"]'); savePo(po,cb.checked,ne?ne.value:''); }; });
-    el.querySelectorAll('.dtcpo-note').forEach(function(inp){ inp.onchange=function(){ var po=inp.dataset.po, ce=el.querySelector('.dtcpo-acc[data-po="'+(window.CSS&&CSS.escape?CSS.escape(po):po)+'"]'); savePo(po,ce?ce.checked:false,inp.value); }; });
+    el.querySelectorAll('.dtcpo-note').forEach(function(inp){ inp.onchange=function(){ var po=inp.dataset.po, ce=el.querySelector('.dtcpo-acc[data-po="'+(window.CSS&&CSS.escape?CSS.escape(po):po)+'"]'); persistPo(po,ce?ce.checked:false,inp.value); _dtcFlash(inp); };
+      inp.style.height='auto'; inp.style.height=inp.scrollHeight+'px'; });   // same auto-grow + flash as the sales-order notes
   }
   function _drawDtcList(orders){ var el=document.getElementById('dtc-list'); if(!el)return;
     if(!orders.length){ el.innerHTML='<div class="mut tiny" style="padding:8px 0">No open DTC sales orders imported yet. Click <b>Import sales orders</b> to pull them from Cin7.</div>'; return; }
     orders.sort(function(a,b){ var ra=(a.issue&&!a.accepted)?0:(a.accepted?2:1), rb=(b.issue&&!b.accepted)?0:(b.accepted?2:1); return ra-rb; });
     var rows=orders.map(function(o){
-      var badge=o.accepted?'<span class="tool-badge bg-blue">accepted</span>':o.issue==='no_po'?'<span class="tool-badge bg-red">no PO mapped</span>':o.issue==='qty_mismatch'?'<span class="tool-badge bg-amber">SKU / qty mismatch</span>':'<span class="tool-badge bg-green">OK</span>';
-      var diffs=(o.diffs&&o.diffs.length)?'<div style="max-width:300px;overflow-x:auto;margin-top:4px"><table class="tiny" style="border-collapse:collapse;width:100%"><thead><tr style="color:#94a3b8"><th style="text-align:left;padding:1px 10px 1px 0">SKU</th><th style="text-align:right;padding:1px 8px">SO</th><th style="text-align:right;padding:1px 8px">PO</th></tr></thead><tbody>'+o.diffs.map(function(x){var c=((x.poQty||0)===(x.soQty||0))?'#64748b':'#b91c1c';return '<tr><td style="padding:1px 10px 1px 0">'+esc(x.sku)+'</td><td style="text-align:right;padding:1px 8px">'+units(x.soQty)+'</td><td style="text-align:right;padding:1px 8px;color:'+c+'">'+units(x.poQty)+'</td></tr>';}).join('')+'</tbody></table></div>':'';
+      var badge=_dtcBadge(o);
+      var mism=(o.diffs||[]).filter(function(x){return (x.soQty||0)!==(x.poQty||0);});
+      var match=(o.diffs||[]).filter(function(x){return (x.soQty||0)===(x.poQty||0);});   // matching lines (SO qty === PO qty)
+      function dline(x,matched){ var po=matched?'<span style="color:#166534;font-weight:600">&#10003; '+units(x.poQty)+'</span>':'<span style="color:#b91c1c">'+units(x.poQty)+'</span>';
+        return '<tr'+(matched?' class="dtc-match-line" style="display:none"':'')+'><td style="padding:1px 8px 1px 0;white-space:normal;word-break:break-word">'+esc(x.sku)+'</td><td style="text-align:right;padding:1px 4px">'+units(x.soQty)+'</td><td style="text-align:right;padding:1px 4px">'+po+'</td></tr>'; }
+      // SKU column ~2× wider + wraps (was cut off); SO/PO ~40% narrower. Matching lines hidden behind a per-row toggle (K).
+      var diffs=(o.diffs&&o.diffs.length)?('<div class="dtc-diff" data-diffid="'+o.cin7_id+'" style="max-width:460px;overflow-x:auto;margin-top:4px">'
+        +'<table class="tiny" style="border-collapse:collapse;width:100%;table-layout:fixed"><colgroup><col><col style="width:44px"><col style="width:44px"></colgroup>'
+        +'<thead><tr style="color:#94a3b8"><th style="text-align:left;padding:1px 8px 1px 0">SKU</th><th style="text-align:right;padding:1px 4px">SO</th><th style="text-align:right;padding:1px 4px">PO</th></tr></thead><tbody>'
+        +mism.map(function(x){return dline(x,false);}).join('')+match.map(function(x){return dline(x,true);}).join('')+'</tbody></table>'
+        +(match.length?'<button class="dtc-showmatch" data-id="'+o.cin7_id+'" style="font-size:10px;margin-top:3px;padding:1px 7px;border:1px solid #bbf7d0;border-radius:8px;background:#f0fdf4;color:#166534;cursor:pointer">&#10003; show matching ('+match.length+')</button>':'')
+        +'</div>'):'';
       var pos=(o.po_refs&&o.po_refs.length)?o.po_refs.map(function(p){var po=(p&&p.po!=null)?p.po:p,sup=(p&&p.supplier)?(' <span class="mut">('+esc(p.supplier)+')</span>'):'';return '<button class="lnk-btn dtc-po" data-po="'+esc(po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer">'+esc(po)+'</button>'+sup;}).join('<br>'):'<span class="mut">—</span>';
-      return '<tr><td class="l" style="vertical-align:top"><b>'+esc(o.reference||'')+'</b><div class="mut tiny">'+esc(o.company||'')+' · '+esc(o.branch_name||'')+(o.created_date?' · '+esc(o.created_date):'')+'</div></td>'
+      return '<tr class="dtc-order-row" data-id="'+o.cin7_id+'" data-acc="'+(o.accepted?'1':'0')+'"'+(o.accepted?' style="background:#dcfce7"':'')+'><td class="l" style="vertical-align:top"><b>'+esc(o.reference||'')+'</b><div class="mut tiny">'+esc(o.company||'')+' · '+esc(o.branch_name||'')+(o.created_date?' · '+esc(o.created_date):'')+'</div></td>'
         +'<td class="l" style="vertical-align:top">'+badge+diffs+'</td>'
         +'<td class="l" style="vertical-align:top">'+pos+'</td>'
-        +'<td class="l" style="vertical-align:top"><input class="fci txt dtc-note" data-id="'+o.cin7_id+'" value="'+esc(o.note||'')+'" placeholder="note…" style="width:150px"></td>'
+        +'<td class="l" style="vertical-align:top"><textarea class="dtc-note" data-id="'+o.cin7_id+'" rows="1" placeholder="note…" style="width:180px;min-height:22px;resize:vertical;overflow:hidden;font-family:inherit;font-size:12px;padding:3px 5px;border:1px solid #cbd5e1;border-radius:4px;box-sizing:border-box" oninput="this.style.height=\'auto\';this.style.height=this.scrollHeight+\'px\'">'+esc(o.note||'')+'</textarea></td>'
         +'<td class="l" style="vertical-align:top"><label style="font-size:11px;white-space:nowrap"><input type="checkbox" class="dtc-acc" data-id="'+o.cin7_id+'"'+(o.accepted?' checked':'')+'> accept</label></td></tr>';
     }).join('');
     el.innerHTML='<div style="overflow-x:auto;max-width:100%"><table style="width:max-content;min-width:100%;border-collapse:collapse"><thead><tr><th class="l">Sales order</th><th class="l">Status</th><th class="l">PO(s)</th><th class="l">Note</th><th class="l">Accept</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
     el.querySelectorAll('.dtc-po').forEach(function(x){ x.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(x.dataset.po,'oplan'); else if(typeof gotoPO==='function')gotoPO(x.dataset.po,'oplan'); }; });
-    function save(id,accepted,note){ fetch('/api/supply/dtc/review',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({so_cin7_id:Number(id),accepted:accepted,note:note})}).then(function(r){return r.json();}).then(function(){ selectReport('dtc-mismatch'); }).catch(function(){}); }
-    el.querySelectorAll('.dtc-acc').forEach(function(cb){ cb.onclick=function(){ var id=cb.dataset.id, ne=el.querySelector('.dtc-note[data-id="'+id+'"]'); save(id,cb.checked,ne?ne.value:''); }; });
-    el.querySelectorAll('.dtc-note').forEach(function(inp){ inp.onchange=function(){ var id=inp.dataset.id, ce=el.querySelector('.dtc-acc[data-id="'+id+'"]'); save(id,ce?ce.checked:false,inp.value); }; });
+    el.querySelectorAll('.dtc-showmatch').forEach(function(btn){ btn.onclick=function(){ var id=btn.dataset.id, blk=el.querySelector('.dtc-diff[data-diffid="'+id+'"]'); if(!blk)return; var lines=blk.querySelectorAll('.dtc-match-line'), show=btn.dataset.shown!=='1'; btn.dataset.shown=show?'1':'0'; lines.forEach(function(l){l.style.display=show?'':'none';}); btn.innerHTML=(show?'&#9662; hide matching (':'&#10003; show matching (')+lines.length+')'; }; });
+    function persist(id,accepted,note){ fetch('/api/supply/dtc/review',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({so_cin7_id:Number(id),accepted:accepted,note:note})}).catch(function(){}); }
+    // ACCEPT: persist silently, move the row to the bottom, highlight light-green, update counters live — no page refresh (I1).
+    el.querySelectorAll('.dtc-acc').forEach(function(cb){ cb.onclick=function(){
+      var id=cb.dataset.id, o=orders.filter(function(x){return String(x.cin7_id)===String(id);})[0]||{}, ne=el.querySelector('.dtc-note[data-id="'+id+'"]'), note=ne?ne.value:'', acc=cb.checked, tr=cb.closest('tr');
+      o.accepted=acc; persist(id,acc,note);
+      if(tr){ tr.dataset.acc=acc?'1':'0'; var bcell=tr.children[1], bd=bcell&&bcell.querySelector('.tool-badge');
+        if(bd){ if(acc){bd.className='tool-badge bg-blue';bd.textContent='accepted';} else { var tmp=document.createElement('span'); tmp.innerHTML=_dtcBadge(o); if(tmp.firstChild){bd.className=tmp.firstChild.className;bd.textContent=tmp.firstChild.textContent;} } }
+        if(acc){ tr.style.background='#dcfce7'; tr.parentNode.appendChild(tr); _dtcBumpPill('Accepted',1); _dtcBumpPill(o.issue?'Issues':'OK',-1); if(_dtcHideAcc)tr.style.display='none'; }
+        else { tr.style.background=''; tr.style.display=''; _dtcBumpPill('Accepted',-1); _dtcBumpPill(o.issue?'Issues':'OK',1); }
+      }
+    }; });
+    el.querySelectorAll('.dtc-note').forEach(function(inp){ inp.onchange=function(){ var id=inp.dataset.id, ce=el.querySelector('.dtc-acc[data-id="'+id+'"]'); persist(id,ce?ce.checked:false,inp.value); _dtcFlash(inp); };
+      inp.style.height='auto'; inp.style.height=inp.scrollHeight+'px'; });   // auto-size notes on load (J)
+    try{ _dtcApplyHideAcc(); }catch(e){}
   }
   function biTile(label,val,sub,accent){ return '<div style="flex:1 1 160px;min-width:160px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px">'
     +'<div style="font-size:23px;font-weight:800;line-height:1.1;color:'+(accent||'#0f172a')+'">'+val+'</div>'
@@ -10223,6 +10258,36 @@
     var bell=document.getElementById('tl-bell'); if(bell)row.insertBefore(b,bell); else row.appendChild(b);
     b.onclick=function(e){ e.stopPropagation(); toggleActDrop(); };
     if(!document.getElementById('act-drop')){ var d=document.createElement('div'); d.id='act-drop'; document.body.appendChild(d); } }
+  // ── Favourites (top bar) — per-user, up to 5. Star (far right) favourites the current L2/L3 view; chips (left of
+  //    "🕘 Recent") link to each favourite. Stored per user in app_permissions.favourites (+ localStorage fallback). ──
+  var HZ_FAVES=(function(){ try{ if(typeof ME!=='undefined'&&ME&&Array.isArray(ME.favourites))return ME.favourites.slice(); }catch(e){} try{ return JSON.parse(localStorage.getItem('hzFaves')||'[]'); }catch(e){ return []; } })();
+  function _favSlug(){ return (location.hash||'').replace(/^#\/?/,'').replace(/\/+$/,''); }
+  function _favLabel(){ var sels=['#config-subs-l3 .rtab.active','#rep-subnav .rtab.active','#config-subs .rtab.active','#scenario-subnav .stab.active','#product-subnav .stab.active','#buymove-tabs .active','#view-tabs-row .view-toggle.active'];
+    for(var i=0;i<sels.length;i++){ var el=document.querySelector(sels[i]); if(el){ var t=(el.textContent||'').replace(/\s+/g,' ').trim(); if(t)return t.slice(0,40); } }
+    var s=(_favSlug().split('/').pop()||''); return s?s.replace(/[-_]/g,' ').replace(/\b\w/g,function(c){return c.toUpperCase();}):'Page'; }
+  function _favIdx(slug){ for(var i=0;i<HZ_FAVES.length;i++){ if(HZ_FAVES[i]&&HZ_FAVES[i].slug===slug)return i; } return -1; }
+  function _favSave(){ try{localStorage.setItem('hzFaves',JSON.stringify(HZ_FAVES));}catch(e){}
+    fetch('/api/me/favourites',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({favourites:HZ_FAVES})}).catch(function(){}); }
+  function _favGo(slug){ location.hash='#/'+slug; if(typeof applyRoute==='function')try{applyRoute();}catch(e){} }
+  function _favToggle(){ var s=_favSlug(); if(!s)return; var i=_favIdx(s);
+    if(i>=0){ HZ_FAVES.splice(i,1); } else { if(HZ_FAVES.length>=5)return; HZ_FAVES.push({slug:s,label:_favLabel()}); }
+    _favSave(); renderFaves(); }
+  function _favRename(slug){ var i=_favIdx(slug); if(i<0)return; var nn=prompt('Rename this favourite (shown only to you):',HZ_FAVES[i].label||''); if(nn==null)return; nn=String(nn).trim().slice(0,40); if(!nn)return; HZ_FAVES[i].label=nn; _favSave(); renderFaves(); }
+  function _favRemove(slug){ var i=_favIdx(slug); if(i<0)return; HZ_FAVES.splice(i,1); _favSave(); renderFaves(); }
+  function ensureFaves(){ var row=document.getElementById('view-tabs-row'); if(!row)return;
+    var chips=document.getElementById('hz-fav-chips'); if(!chips){ chips=document.createElement('span'); chips.id='hz-fav-chips'; chips.style.cssText='display:inline-flex;align-items:center;gap:4px;margin-right:4px';
+      var act=document.getElementById('act-btn'); if(act)row.insertBefore(chips,act); else row.appendChild(chips); }
+    var star=document.getElementById('hz-fav-star'); if(!star){ star=document.createElement('button'); star.id='hz-fav-star'; star.style.cssText='margin-left:4px;width:24px;height:24px;border-radius:50%;border:1px solid #6b7280;background:#4b5563;cursor:pointer;font-size:14px;line-height:1;flex:0 0 auto'; star.onclick=function(e){ e.stopPropagation(); if(!star.disabled)_favToggle(); }; row.appendChild(star); }
+    renderFaves(); }
+  function renderFaves(){ var chips=document.getElementById('hz-fav-chips'), star=document.getElementById('hz-fav-star'); if(!chips||!star)return;
+    chips.innerHTML=HZ_FAVES.map(function(f){ return '<span class="hz-fav-chip" data-slug="'+esc(f.slug)+'" title="'+esc(f.slug)+' — click to open · double-click to rename" style="cursor:pointer;font-size:12px;font-weight:600;color:#cbd5e1;white-space:nowrap;padding:5px 6px;letter-spacing:.01em">★ '+esc(f.label||f.slug)+'</span>'; }).join('');   // plain link like the other top-bar items (no badge/✕/truncation) — remove via un-starring the page
+    chips.querySelectorAll('.hz-fav-chip').forEach(function(c){ c.onclick=function(){ _favGo(c.dataset.slug); }; c.ondblclick=function(e){ e.stopPropagation(); _favRename(c.dataset.slug); }; });
+    var s=_favSlug(); if(!s){ star.style.display='none'; return; } star.style.display='';
+    var isFav=_favIdx(s)>=0, atMax=HZ_FAVES.length>=5;
+    if(isFav){ star.disabled=false; star.textContent='★'; star.style.color='#fbbf24'; star.style.opacity='1'; star.style.cursor='pointer'; star.title='Remove this page from favourites'; }
+    else if(atMax){ star.disabled=true; star.textContent='☆'; star.style.color='#9ca3af'; star.style.opacity='.5'; star.style.cursor='not-allowed'; star.title='You can only have 5 favourites — un-favourite an existing one to add more'; }
+    else { star.disabled=false; star.textContent='☆'; star.style.color='#e5e7eb'; star.style.opacity='1'; star.style.cursor='pointer'; star.title='Add this page to favourites'; } }
+  window.addEventListener('hashchange',function(){ try{ensureFaves();}catch(e){} });   // update the star for the new view + re-insert if a view wiped the top bar
   // ── Suggestion Box ─────────────────────────────────────────────────────────
   // 💡 top-bar button (next to the bell) opens a submit modal; anyone can drop a suggestion. It's stored with the
   // submitter's email + timestamp and gets a stable reference (SUG-0001) shown on submit. Triage in CONFIG ▸ Suggestions.
@@ -12026,7 +12091,7 @@
     var pb=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]');
     var onDemand=!nonDemand && pb && pb.classList.contains('active');
     document.documentElement.classList.toggle('hz-preboot', !onDemand); }catch(e){} }
-  function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureBellButton(); ensureActivityButton(); ensureSuggestButton(); ensureScenarioRoot(); ensureScenarioButton(); ensureProductButton(); ensureConfigButton();   // order: … REPORTS, SCENARIO, PRODUCT, CONFIG
+  function boot(){ try{ if(ME===null)fetchMe(); ensureRoot(); ensureNavButton(); ensureBellButton(); ensureActivityButton(); ensureSuggestButton(); ensureScenarioRoot(); ensureScenarioButton(); ensureProductButton(); ensureConfigButton(); ensureFaves();   // order: … REPORTS, SCENARIO, PRODUCT, CONFIG, Favourites (star far right)
     var _vtr=document.getElementById('view-tabs-row'); if(_vtr&&!_vtr._hzPillWired){ _vtr._hzPillWired=1; _vtr.addEventListener('click',function(e){ if(e.target&&e.target.closest('.view-toggle'))setTimeout(hzSyncDemandPills,0); }); }
     if(!_routed){ _routed=true; try{ if(/^#\/?(supply|config|scenario|demand|reports|buy-move|buy|fba|planning|exec|product)(\/|$)/.test(location.hash)) applyRoute();
       else { var _land=(window.__HZ_LANDING||'supply/purchase-orders').replace(/^#?\/?/,''); location.hash='#/'+_land; applyRoute(); }   // no hash → per-user landing slug (server-injected), default SUPPLY ▸ Purchase Orders

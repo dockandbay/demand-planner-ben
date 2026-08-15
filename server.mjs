@@ -5584,12 +5584,26 @@ async function notePoEdited(db, po, user) {
 // planner.app_permissions is read-only everywhere.
 async function permsFor(req) {
   const email = authUser(req);
-  if (!email) return { email: null, live: false, supply_edit: true, demand_edit: true, product_edit: true, is_admin: true, landing_page: 'supply/purchase-orders' };
+  if (!email) return { email: null, live: false, supply_edit: true, demand_edit: true, product_edit: true, is_admin: true, landing_page: 'supply/purchase-orders', favourites: [] };
   const e = email.toLowerCase();
   let row = null;
-  try { row = (await pool.query('SELECT supply_edit, demand_edit, product_edit, is_admin, landing_page FROM planner.app_permissions WHERE lower(email)=$1', [e])).rows[0] || null; } catch (_) {}
-  return { email: e, live: true, supply_edit: !!(row && row.supply_edit), demand_edit: !!(row && row.demand_edit), product_edit: !!(row && row.product_edit), is_admin: !!(row && row.is_admin), landing_page: (row && row.landing_page) || 'supply/purchase-orders' };
+  try { row = (await pool.query('SELECT supply_edit, demand_edit, product_edit, is_admin, landing_page, favourites FROM planner.app_permissions WHERE lower(email)=$1', [e])).rows[0] || null; } catch (_) {}
+  let faves = []; try { if (row && row.favourites) faves = JSON.parse(row.favourites) || []; } catch (_) {}
+  return { email: e, live: true, supply_edit: !!(row && row.supply_edit), demand_edit: !!(row && row.demand_edit), product_edit: !!(row && row.product_edit), is_admin: !!(row && row.is_admin), landing_page: (row && row.landing_page) || 'supply/purchase-orders', favourites: Array.isArray(faves) ? faves : [] };
 }
+// Save the signed-in user's top-bar Favourites ([{slug,label}], max 5). Per-user (app_permissions.favourites).
+// No auth email (sandbox without DEV_USER) → no-op with ok:false so the client keeps them in localStorage.
+app.post('/api/me/favourites', async (req, res) => {
+  const email = authUser(req);
+  const favs = (Array.isArray(req.body && req.body.favourites) ? req.body.favourites : [])
+    .filter(f => f && f.slug).slice(0, 5).map(f => ({ slug: String(f.slug).slice(0, 200), label: String(f.label || '').slice(0, 60) }));
+  if (!email) return res.json({ ok: false, reason: 'no-auth', favourites: favs });
+  try {
+    await pool.query(`INSERT INTO planner.app_permissions (email, favourites, updated_at, updated_by) VALUES ($1,$2,now(),$1)
+      ON CONFLICT (email) DO UPDATE SET favourites=excluded.favourites, updated_at=now()`, [email.toLowerCase(), JSON.stringify(favs)]);
+    res.json({ ok: true, favourites: favs });
+  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+});
 // What the client asks on load to decide what to enable (read-only UI otherwise).
 app.get('/api/me', async (req, res) => { try { const me = await permsFor(req);
   // logout URL for the client session-guard (SUG-0007) — set app_settings.auth_logout_url to your proxy's sign-out path

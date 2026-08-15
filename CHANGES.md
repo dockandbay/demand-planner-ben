@@ -1,3 +1,16 @@
+## v27.013 Favourites in the top menu bar (per-user, up to 5) — needs migration 231
+- A **★ star** on the far right of the top bar favourites the **current L2/L3 view**; favourited views appear as **chips left of "🕘 Recent"** that link straight there.
+- **Rename** a favourite (double-click the chip — label is per-user), **remove** it (✕ on the chip, or un-star on the page).
+- **Cap of 5:** at 5, the star on a non-favourited page is **greyed/disabled** with tooltip "You can only have 5 favourites — un-favourite an existing one to add more".
+- **Per user:** stored in `planner.app_permissions.favourites` (JSON `[{slug,label}]`) via `POST /api/me/favourites` and returned on `/api/me`; falls back to localStorage when there's no auth email (sandbox). ⚠️ **Diviyaj: run migration 231** (`app_permissions.favourites` column).
+
+## v27.012 DTC mismatch — accept UX, notes, matching lines, column widths
+- **Accept moves the row down silently:** clicking accept on a discrepancy now persists in the background (no page refresh), highlights the row **light green**, and moves it to the bottom; the Issues/Accepted/OK counters update live.
+- **"Hide accepted" toggle** pill next to the counters (persists) — hides accepted discrepancy rows.
+- **Notes field is now a multi-line, auto-growing textarea** (wraps + grows to fit long notes); saving a note **flashes the cell green**. The lower "unmapped POs" table uses the same note layout/format + flash.
+- **Show matching lines:** on a SKU/qty-mismatch row, a "✓ show matching (N)" button (default hidden) reveals the matching SKU/qty lines with a green tick.
+- **Diff table widths:** SKU column widened and wraps (was cut off); SO/PO columns narrowed.
+
 ## v27.011 3PL invoicing — two live fixes (need Diviyaj redeploy)
 - **US Geneva PDF parse failed on live** ("Cannot find module …pdfjs-dist/legacy/build/pdf.worker.mjs"): the pdfjs worker isn't traced into the Vercel bundle (dynamic import). Added it to `vercel.json` `includeFiles`. ⚠️ **Diviyaj: needs a redeploy** for the bundle to pick it up.
 - **3PL import summary showed another 3PL's orders:** `tplCin7Summary` counted orders/imports by **period only**, so AU Coghlans showed US Geneva's "Imported 2,437 orders". Now scoped to the current 3PL — orders by the 3PL's Cin7 branch, imports by `tpl`. (The Analyse step was already tpl-scoped, hence it correctly reported no Coghlans orders.)
