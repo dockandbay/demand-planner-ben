@@ -1,3 +1,8 @@
+## v27.042 Prepack rail: draw-down + sell-through stop + PREPACK stock column
+- **Rail now draws down + stops at sell-through** (was showing constant on-hand on every future month). Each month's tooltip shows the prepack **available at the start of that month** (running balance), and the badge **disappears once the prepack is sold through** — e.g. `TOWLB-CAB-XL-6SETI` (1u prepack) shows only in Aug then stops, instead of "1u on-hand" forever.
+- **PREPACK in the stock column**: on the BUY & MOVE grid, a set row with prepack on-hand in the current market now shows **`PREPACK: n`** (green) in the SOH FBA column (empty for a 3PL-only set). New `ppStockForSet(sku,mkt)` helper.
+- Confirmed the badge renders on the **current month** (Aug 2026) actual cell too.
+
 ## v27.041 Prepack rail "PP" badge shows on the demand plan
 - Fix: the rail **PP** badge depends on `PREPACK_COVER`, which is filled by `buildLiveDemand()`. On a fresh demand-plan view that hadn't run, so the badge only appeared after opening the buy plan or editing a forecast. The demand render now builds the cover **once** (`_PP_COVER_INIT` guard) so the badge shows out of the box. Verified: `TOWLB-CAB-LG-6SETI` UK rail renders the badge (233u prepack on-hand).
 

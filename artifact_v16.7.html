@@ -1321,6 +1321,8 @@ try{ Object.keys(PREPACK_MAP).forEach(function(pp){ var s=PREPACK_MAP[pp]; if(s)
 function isPrepackSku(sku){ return !!(sku && PREPACK_MAP[sku]); }            // true if this SKU is a mapped prepack (PP-…) — hidden from demand lines + buy
 function prepackSetOf(sku){ return (sku && PREPACK_MAP[sku]) || null; }      // prepack SKU → the set SKU whose demand it fulfils (or null)
 function prepacksForSet(setSku){ return (setSku && PREPACK_BY_SET[setSku]) || null; }   // set SKU → [prepack SKUs] fulfilling it (or null)
+function ppStockForSet(setSku,mkt){ var pps=(setSku&&PREPACK_BY_SET[setSku])||null; if(!pps||!pps.length)return 0; var pre=String(mkt||'').toLowerCase()+'_', t=0;   // prepack on-hand for a set in one market (sum across that market's warehouses)
+  pps.forEach(function(pp){ var iv=PREPACK_STOCK[pp]||{}; Object.keys(iv).forEach(function(wh){ if(wh.indexOf(pre)===0)t+=Number(iv[wh])||0; }); }); return t; }
 var PREPACK_STOCK={};    // server-injected prepack on-hand {prepack_sku:{wh:qty}} — prepacks are out of SKUM scope, so their stock rides separately for the buy-plan netting.
 var PREPACK_COVER={};    // filled during buildLiveDemand §4: {"setSku|CO|fym":{onHand,fc,covered,remaining}} — drives the demand-rail "PP" badge (prepack stock drawn down against set demand, carried forward).
 var _PP_COVER_INIT=false; // one-time guard: build PREPACK_COVER on the first demand-plan render so the rail "PP" badge shows without first opening the buy plan.
@@ -2446,7 +2448,9 @@ function render(){
           ? MKTS.map(function(m){var mm=PD[s.s]&&PD[s.s].mkts&&PD[s.s].mkts[m];var v=mm?(mm.i3||0):0;return '<td class="iv"'+(m===CUR?' style="background:#eff6ff"':'')+'><span class="iv-v '+(v<0?'iv-neg':'iv-pos')+'">'+(mm?fmt(v):'—')+'</span></td>';}).join('')
           : `<td class="iv"><span class="iv-v ${i3<0?'iv-neg':'iv-pos'}">${fmt(i3)}</span></td>`}
         ${showNonGRS?`<td class="iv"><span class="iv-v" style="color:#475569" title="Non-GRS on-hand (sellable via 3PL; display only)">${(function(){var ng=nonGrsOf(s.s,CUR);return ng>0?fmt(ng):'—';})()}</span></td>`:''}
-        <td class="iv"${BP_VIEW==='fba'?` style="background:${ifv<=2?'#FFD6D1':'#fef9c3'}"`:''}><span class="iv-v ${ifv<0?'iv-neg':'iv-pos'}">${fmt(ifv)}</span></td>
+        ${(function(){ var _pp=(typeof ppStockForSet==='function')?ppStockForSet(s.s,CUR):0;
+          if(_pp>0) return `<td class="iv" title="Prepack on-hand (${CUR}) — offsets this set's demand before components are built (see the PP rail on the demand plan)"><span class="iv-v" style="color:#059669;font-weight:700;font-size:9px;white-space:nowrap">PREPACK: ${fmt(_pp)}</span></td>`;
+          return `<td class="iv"${BP_VIEW==='fba'?` style="background:${ifv<=2?'#FFD6D1':'#fef9c3'}"`:''}><span class="iv-v ${ifv<0?'iv-neg':'iv-pos'}">${fmt(ifv)}</span></td>`; })()}
         ${showAWD?`<td class="iv" style="background:#fef9c3"><span class="iv-v" style="color:#475569" title="AWD (US upstream) — pooled into FBA cover for the transfer calc">${(function(){var a=awdOf(s.s,CUR);return a>0?fmt(a):'—';})()}</span></td>`:''}
         ${BP_VIEW==='fba'?'':`<td class="iv"><span class="iv-v">${oo>0?fmt(oo):'—'}</span></td>`}
         ${trail}
@@ -6181,9 +6185,10 @@ function cellRailForKey(nk){ if(!nk)return ''; var p=nk.split('|'); var level=p[
   if(hasNote)o+='<span class="cf cf-n" data-nk="'+nk+'" title="'+cellNoteTitle(nk).replace(/"/g,'&quot;')+'">N</span>';
   if(locked)o+='<span class="cf cf-s" title="Do not smooth — this SKU forecast is locked; smoothing leaves it fixed, only a manual override changes it">S</span>';
   if(ppc){ var _r=function(n){return Math.round(Number(n)||0).toLocaleString();};
-    var _pl=(PREPACK_BY_SET[item]||[]); var _pt='Prepack cover — '+_r(ppc.onHand)+'u on-hand'+(_pl.length?(' ('+_pl.join(', ')+')'):'')
-      +' · this month covers '+_r(ppc.covered)+' of '+_r(ppc.fc)+' set demand · '+_r(ppc.remaining)+'u prepack left after'
-      +(ppc.covered>=ppc.fc&&ppc.fc>0?' · no component buy this month':'');
+    var _pl=(PREPACK_BY_SET[item]||[]); var _av=(ppc.avail!=null?ppc.avail:ppc.onHand);
+    var _pt='Prepack '+(_pl.length?(_pl.join(', ')+' — '):'')+_r(_av)+'u available this month'
+      +(ppc.fc>0?(' · covers '+_r(ppc.covered)+' of '+_r(ppc.fc)+' set demand · '+_r(ppc.remaining)+'u left after'):' · no set demand this month')
+      +(ppc.fc>0&&ppc.covered>=ppc.fc?' · no component buy this month':'');
     o+='<span class="cf cf-pp" title="'+_pt.replace(/"/g,'&quot;')+'">PP</span>'; }
   if(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES&&typeof FC_CHANGE_KEYS!=='undefined'&&FC_CHANGE_KEYS.has(nk)
      && !(typeof HIDE_PAST_CHANGES!=='undefined'&&HIDE_PAST_CHANGES&&typeof CUR_MONTH!=='undefined'&&m<CUR_MONTH))   // hide R on past months when the setting is on
@@ -12988,9 +12993,11 @@ function buildLiveDemand(){
           pps.forEach(function(pp){ var iv=PREPACK_STOCK[pp]||{}; Object.keys(iv).forEach(function(wh){ if(wh.indexOf(ctry+'_')===0)ppOpen+=Number(iv[wh])||0; }); });
           if(ppOpen<=0)return;
           var rem2=ppOpen;
-          LIVE_FC_MONTHS.forEach(function(fym){ var d=setFC[fym]||0; if(d<=0){ if(rem2>0)PREPACK_COVER[setSku+'|'+co+'|'+fym]={onHand:ppOpen,fc:0,covered:0,remaining:rem2}; return; }
+          LIVE_FC_MONTHS.forEach(function(fym){ if(rem2<=0)return;   // prepack sold through → no more entries (badge stops from here)
+            var d=setFC[fym]||0, opening=rem2;                        // opening = prepack still available at the START of this month (draws down over time)
+            if(d<=0){ PREPACK_COVER[setSku+'|'+co+'|'+fym]={onHand:ppOpen,avail:opening,fc:0,covered:0,remaining:rem2}; return; }
             var cov=Math.min(d,rem2); rem2-=cov; setFC[fym]=d-cov;
-            PREPACK_COVER[setSku+'|'+co+'|'+fym]={onHand:ppOpen,fc:d,covered:cov,remaining:rem2}; });
+            PREPACK_COVER[setSku+'|'+co+'|'+fym]={onHand:ppOpen,avail:opening,fc:d,covered:cov,remaining:rem2}; });
         })();
         if(!Object.keys(setFC).length)return;
         comps.forEach(function(cc){
