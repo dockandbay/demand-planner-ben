@@ -1,3 +1,8 @@
+## v27.035 Trends — left-align Multi-year, multi-select Category filter, Include-discontinued toggle
+- **Multi-year table** headers + data values now **left-aligned** (matching Plan sanity); “Mkt”→“Country”.
+- **Multi-select Category filter** on all 3 panels: a Categories dropdown (All / Clear + per-category checkboxes) that narrows every panel client-side; button shows the count.
+- **Include discontinued** toggle (default OFF): discontinued categories (is_active = false or null) stay hidden unless ticked; composes with the multi-select.
+
 ## v27.034 Trends — remove non-working “Open plan” button (Plan sanity)
 - Removed the Plan-sanity “Open plan” deep-link button (and its Action column) — it didn’t reliably switch the plan filter; dropped per Ben. The plan deep-link can return properly alongside the deferred override/deep-link-to-month work.
 

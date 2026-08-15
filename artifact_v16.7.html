@@ -8788,7 +8788,7 @@ function renderSnapshotsView(body){
 // ─── DEMAND ▸ Trends — Category Trends analysis report (#/demand/trends) ──────────────────────────────────────
 // Read-only, units-based. Three panels: Channel mix · Multi-year trend · Plan sanity. Scaffold here (chrome + filters
 // + panel tabs); the panels build in order Plan sanity → Multi-year → Channel mix (per the spec). No writes ever.
-var TRENDS_PANEL='plan-sanity', TRENDS_MKT='All', TRENDS_GRP='All', TRENDS_GRAIN='category', TRENDS_FROM=1, TRENDS_TO=null, TRENDS_MINU=1000, TRENDS_UNMAPPED=true, TRENDS_REFRESH=false;
+var TRENDS_PANEL='plan-sanity', TRENDS_MKT='All', TRENDS_GRP='All', TRENDS_CATS=null, TRENDS_GRAIN='category', TRENDS_FROM=1, TRENDS_TO=null, TRENDS_MINU=1000, TRENDS_UNMAPPED=true, TRENDS_INCL_DISC=false, TRENDS_REFRESH=false, _trCatsDocBound=false;
 var _TR_MON=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function _trCutoffNum(){ var c=(typeof _trendsCutoff==='function')?_trendsCutoff():''; return c?(parseInt(c.split('_')[1],10)||12):12; }
 function _trQS(){ var r=TRENDS_REFRESH?'&refresh=1':''; TRENDS_REFRESH=false; return '?grain='+encodeURIComponent(TRENDS_GRAIN)+'&from='+TRENDS_FROM+'&to='+TRENDS_TO+r; }   // server-affecting params (grain + month range) + one-shot cache-bust
@@ -8802,6 +8802,7 @@ function renderTrendsView(body){
   var PANELS=[['channel-mix','Channel mix'],['multi-year','Multi-year trend'],['plan-sanity','Plan sanity']];
   var GRP_MAP={}; try{ for(var k in CAT_GROUPING){ if(CAT_GROUPING[k])GRP_MAP[CAT_GROUPING[k]]=1; } }catch(e){}
   var GROUPS=['All'].concat(Object.keys(GRP_MAP).sort()), MKTS=['All','UK','US','EU','AU','CA'];
+  var CATLIST=[]; try{ for(var _ck in CATS_META){ if(_ck)CATLIST.push(_ck); } }catch(e){} CATLIST.sort();   // multi-select category list (active + discontinued; the discontinued toggle governs visibility)
   var LBL='font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;font-weight:700';
   var SEL='font-size:12px;padding:3px 6px;border:1px solid #e2e8f0;border-radius:4px;text-transform:none;color:#0f172a;font-weight:400';
   function opt(v,cur){ return '<option value="'+esc(v)+'"'+(v===cur?' selected':'')+'>'+esc(v)+'</option>'; }
@@ -8811,10 +8812,16 @@ function renderTrendsView(body){
     +'<div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:9px 11px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'
       +'<label style="'+LBL+'">Country <select id="tr-mkt" style="'+SEL+'">'+MKTS.map(function(m){return opt(m,TRENDS_MKT);}).join('')+'</select></label>'
       +'<label style="'+LBL+'">Group <select id="tr-grp" style="'+SEL+'">'+GROUPS.map(function(g){return opt(g,TRENDS_GRP);}).join('')+'</select></label>'
+      +'<div style="position:relative"><span style="'+LBL+'">Categories </span><button type="button" id="tr-cats-btn" style="'+SEL+';cursor:pointer">'+(TRENDS_CATS&&TRENDS_CATS.size?TRENDS_CATS.size+' selected':'All')+' &#9662;</button>'
+        +'<div id="tr-cats-pop" style="display:none;position:absolute;top:100%;left:0;z-index:60;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:8px;max-height:300px;overflow:auto;min-width:210px">'
+          +'<div style="display:flex;gap:6px;margin-bottom:6px"><button type="button" id="tr-cats-all" style="font-size:11px;border:1px solid #e2e8f0;background:#f8fafc;border-radius:4px;padding:2px 8px;cursor:pointer">All</button><button type="button" id="tr-cats-none" style="font-size:11px;border:1px solid #e2e8f0;background:#f8fafc;border-radius:4px;padding:2px 8px;cursor:pointer">Clear</button></div>'
+          +CATLIST.map(function(cc){ var on=!TRENDS_CATS||TRENDS_CATS.has(cc); return '<label style="display:block;font-size:12px;padding:2px 4px;cursor:pointer;white-space:nowrap;color:#334155"><input type="checkbox" class="tr-cat-cb" data-c="'+esc(cc)+'"'+(on?' checked':'')+' style="vertical-align:middle;margin-right:5px">'+esc(cc)+'</label>'; }).join('')
+        +'</div></div>'
       +'<label style="'+LBL+'">View <select id="tr-grain" style="'+SEL+'"><option value="category"'+(TRENDS_GRAIN==='category'?' selected':'')+'>Category</option><option value="subcategory"'+(TRENDS_GRAIN==='subcategory'?' selected':'')+'>Sub-category</option></select></label>'
       +'<label style="'+LBL+'">Months <select id="tr-from" style="'+SEL+'">'+_trMonOpts(TRENDS_FROM)+'</select> <span style="color:#94a3b8">to</span> <select id="tr-to" style="'+SEL+'">'+_trMonOpts(TRENDS_TO)+'</select></label>'
       +'<label style="'+LBL+'">Min units <input id="tr-minu" value="'+esc(String(TRENDS_MINU))+'" style="'+SEL+';width:56px;text-align:right"></label>'
       +'<label style="font-size:12px;color:#334155;display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="tr-unmapped"'+(TRENDS_UNMAPPED?' checked':'')+'> Include unmapped</label>'
+      +'<label style="font-size:12px;color:#334155;display:inline-flex;align-items:center;gap:5px;cursor:pointer" title="Show categories flagged discontinued (is_active = false or null)"><input type="checkbox" id="tr-incldisc"'+(TRENDS_INCL_DISC?' checked':'')+'> Include discontinued</label>'
       +'<span style="flex:1"></span>'
       +'<button id="tr-refresh" title="Re-run the query (data is cached for 10 minutes)" style="font-size:11px;font-weight:600;border:1px solid #e2e8f0;background:#fff;color:#334155;border-radius:4px;padding:4px 10px;cursor:pointer">&#8635; Refresh</button>'
       +'<button id="tr-csv" style="font-size:11px;font-weight:600;border:1px solid #e2e8f0;background:#fff;color:#1f6fb2;border-radius:4px;padding:4px 10px;cursor:pointer">Export CSV</button>'
@@ -8831,6 +8838,16 @@ function renderTrendsView(body){
   var _to=body.querySelector('#tr-to'); if(_to)_to.onchange=function(){ TRENDS_TO=parseInt(this.value,10)||_trCutoffNum(); if(TRENDS_TO<TRENDS_FROM)TRENDS_FROM=TRENDS_TO; _trInvalidate(); renderTrendsView(body); };
   var _mu=body.querySelector('#tr-minu'); if(_mu)_mu.onchange=function(){ TRENDS_MINU=Math.max(0,parseInt(String(this.value).replace(/[^0-9]/g,''),10)||0); drawPanel(); };
   var _u=body.querySelector('#tr-unmapped'); if(_u)_u.onchange=function(){ TRENDS_UNMAPPED=this.checked; drawPanel(); };
+  var _id=body.querySelector('#tr-incldisc'); if(_id)_id.onchange=function(){ TRENDS_INCL_DISC=this.checked; drawPanel(); };
+  // multi-select category filter (client-side re-filter)
+  var _cbtn=body.querySelector('#tr-cats-btn'), _cpop=body.querySelector('#tr-cats-pop');
+  if(_cbtn)_cbtn.onclick=function(e){ e.stopPropagation(); if(_cpop)_cpop.style.display=(_cpop.style.display==='none'?'block':'none'); };
+  if(_cpop)_cpop.onclick=function(e){ e.stopPropagation(); };
+  function _trCatsLbl(){ var b=body.querySelector('#tr-cats-btn'); if(b)b.innerHTML=(TRENDS_CATS&&TRENDS_CATS.size?TRENDS_CATS.size+' selected':'All')+' &#9662;'; }
+  body.querySelectorAll('.tr-cat-cb').forEach(function(cb){ cb.onchange=function(){ if(!TRENDS_CATS)TRENDS_CATS=new Set(CATLIST); if(cb.checked)TRENDS_CATS.add(cb.dataset.c); else TRENDS_CATS['delete'](cb.dataset.c); if(TRENDS_CATS.size>=CATLIST.length)TRENDS_CATS=null; _trCatsLbl(); drawPanel(); }; });
+  var _call=body.querySelector('#tr-cats-all'); if(_call)_call.onclick=function(){ TRENDS_CATS=null; body.querySelectorAll('.tr-cat-cb').forEach(function(x){x.checked=true;}); _trCatsLbl(); drawPanel(); };
+  var _cnone=body.querySelector('#tr-cats-none'); if(_cnone)_cnone.onclick=function(){ TRENDS_CATS=new Set(); body.querySelectorAll('.tr-cat-cb').forEach(function(x){x.checked=false;}); _trCatsLbl(); drawPanel(); };
+  if(!_trCatsDocBound){ _trCatsDocBound=true; document.addEventListener('click',function(){ var p=document.getElementById('tr-cats-pop'); if(p)p.style.display='none'; }); }
   body.querySelectorAll('.tr-tab').forEach(function(t){ t.onclick=function(){ TRENDS_PANEL=t.dataset.p; renderTrendsView(body); }; });
   var _cv=body.querySelector('#tr-csv'); if(_cv)_cv.onclick=function(){ if(TRENDS_PANEL==='plan-sanity'&&typeof _trendsPsCsv==='function')_trendsPsCsv(); else if(TRENDS_PANEL==='multi-year'&&typeof _trendsMyCsv==='function')_trendsMyCsv(); else if(TRENDS_PANEL==='channel-mix'&&typeof _trendsCmCsv==='function')_trendsCmCsv(); };
   var _rf=body.querySelector('#tr-refresh'); if(_rf)_rf.onclick=function(){ TRENDS_REFRESH=true; _trInvalidate(); drawPanel(); };   // one-shot server cache-bust for the current panel
@@ -8844,8 +8861,8 @@ function renderTrendsView(body){
 // Trends filters shared: category-group match (planner.categories.grouping via CAT_GROUPING) + exclude discontinued
 // (is_active=false) categories from the trend analysis. Unmapped is governed by its own toggle, not these.
 function _trGrpOk(cat){ if(TRENDS_GRP==='All')return true; try{ return (typeof CAT_GROUPING!=='undefined'&&CAT_GROUPING[cat]===TRENDS_GRP); }catch(e){ return true; } }
-function _trActiveCat(cat){ if(cat==='Unmapped')return true; try{ return !(typeof CATS_META!=='undefined'&&CATS_META[cat]&&CATS_META[cat].a===false); }catch(e){ return true; } }
-function _trCatOk(cat){ return _trGrpOk(cat)&&_trActiveCat(cat); }
+function _trActiveCat(cat){ if(cat==='Unmapped'||TRENDS_INCL_DISC)return true; try{ var m=(typeof CATS_META!=='undefined')?CATS_META[cat]:null; return !(m&&(m.a===false||m.a==null)); }catch(e){ return true; } }   // discontinued = is_active false OR null; hidden unless the "include discontinued" toggle is on
+function _trCatOk(cat){ if(TRENDS_CATS&&!TRENDS_CATS.has(cat))return false; return _trGrpOk(cat)&&_trActiveCat(cat); }
 // Rule + status explainers (tooltips).
 var _TR_RULE_TXT={ R1:'R1 · Over-plan: plan is above 150% of the best comparable year', R2:'R2 · Under-plan: plan is below 70% of the most recent comparable actual', R3:'R3 · Step change: plan ÷ latest actual is outside 0.5–2.0×', R4:'R4 · Dead range', R5:'R5 · Stale copy', R6:'R6 · Zero plan where the category still has live SKUs' };
 var _TR_STATUS_TXT={ 'Blocked':'BLOCKED — do not submit until resolved or explicitly overridden with a note. A hard rule fired (a step change vs history).', 'Review':'REVIEW — flagged for a look, but you can still submit.', 'OK':'OK — passes all rules.', 'No plan':'NO PLAN — there are no forecast rows for this category in this market. Different (and more serious) than a plan of zero.' };
@@ -8917,8 +8934,8 @@ function _trendsMultiYear(host){
         nh=rows.filter(function(r){return r.cls==='New high';}).length, susp=rows.reduce(function(a,r){return a+(r.suspectCount||0);},0);
     var cards=[['Below peak',below,'of '+rows.length+' category-markets'],['Two-season fall',tsf,'down in 2025 and 2026'],['New high in 2026',nh,'peak year is current'],['Suspect months',susp,'likely stockouts, excluded']];
     var bar='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'+cards.map(function(s){return '<div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-width:120px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;font-weight:700">'+s[0]+'</div><div style="font-family:ui-monospace,Menlo,monospace;font-size:19px;font-weight:600">'+s[1]+'</div><div style="font-size:11px;color:#94a3b8">'+s[2]+'</div></div>';}).join('')+'</div>';
-    var N='font-family:ui-monospace,Menlo,monospace;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;padding:6px 8px;border-bottom:1px solid #f1f5f9', T='padding:6px 8px;border-bottom:1px solid #f1f5f9', TH='padding:0 8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;border-bottom:1px solid #e2e8f0';
-    var head='<tr><th style="'+TH+';text-align:left">Category</th><th style="'+TH+'">Mkt</th><th style="'+TH+';text-align:right">2024</th><th style="'+TH+';text-align:right">2025</th><th style="'+TH+';text-align:right">2026</th><th style="'+TH+';text-align:center">Shape</th><th style="'+TH+';text-align:right">YoY</th><th style="'+TH+'">Peak</th><th style="'+TH+';text-align:center">2026 vs peak</th><th style="'+TH+';text-align:right">vs peak</th><th style="'+TH+';text-align:right">Plan '+((_TR_MY_DATA&&_TR_MY_DATA.planYear)||'')+'</th><th style="'+TH+';text-align:right">vs peak</th><th style="'+TH+'">Class</th></tr>';
+    var N='font-family:ui-monospace,Menlo,monospace;text-align:left;font-variant-numeric:tabular-nums;white-space:nowrap;padding:6px 8px;border-bottom:1px solid #f1f5f9', T='padding:6px 8px;border-bottom:1px solid #f1f5f9', TH='padding:0 8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;border-bottom:1px solid #e2e8f0;text-align:left';
+    var head='<tr><th style="'+TH+'">Category</th><th style="'+TH+'">Country</th><th style="'+TH+'">2024</th><th style="'+TH+'">2025</th><th style="'+TH+'">2026</th><th style="'+TH+'">Shape</th><th style="'+TH+'">YoY</th><th style="'+TH+'">Peak</th><th style="'+TH+'">2026 vs peak</th><th style="'+TH+'">vs peak</th><th style="'+TH+'">Plan '+((_TR_MY_DATA&&_TR_MY_DATA.planYear)||'')+'</th><th style="'+TH+'">vs peak</th><th style="'+TH+'">Class</th></tr>';
     function shape(r){ var mos=[]; for(var m=r.from;m<=r.to;m++)mos.push(m);
       var hdr='<th style="text-align:left;padding:2px 7px;font-size:10px;color:#94a3b8">Year</th>'+mos.map(function(m){return '<th style="text-align:right;padding:2px 7px;font-size:10px;color:#94a3b8">'+_TR_MON[m]+'</th>';}).join('')+'<th style="text-align:right;padding:2px 7px;font-size:10px;color:#94a3b8">Peak</th>';
       var bdy=[2024,2025,2026].map(function(y){ var arr=(r.monthly&&r.monthly[y])||[], pm=r.peakMonth&&r.peakMonth[y];
