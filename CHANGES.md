@@ -1,3 +1,6 @@
+## v27.039 Trends — Plan sanity "vs latest" now a % change
+- The Plan-sanity **"vs latest"** column is now expressed as a **% change** vs this-year actual (e.g. −47%) instead of a ×-multiplier. Decreases show **red** (bold), increases green. Header → "vs latest %"; CSV column → PlanVsLatestPct. R3 tolerance is −50% to +100%.
+
 ## v27.038 Trends — Type mix split by channel (DTC set% then FBA set%)
 - **Type mix** now shows SET% **split by channel**: a **DTC set%** group (all compare-markets) then an **FBA set%** group (all compare-markets), under a two-tier header. Previously it blended DTC+FBA into one figure.
 - Endpoint returns per-channel set/master/total; each cell tooltips its own channel's SET vs MASTER units. CSV emits DTC set% and FBA set% columns per market.

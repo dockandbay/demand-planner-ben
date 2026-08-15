@@ -8895,12 +8895,12 @@ function _trendsPlanSanity(host){
     var bar='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
       +[['Blocked','resolve before submit'],['No plan','no plan rows for the market'],['Review','flagged, submit allowed'],['OK','within tolerance']].map(function(s){ var c=CH[s[0]]; return '<div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-width:120px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;font-weight:700">'+s[0]+'</div><div style="font-family:ui-monospace,Menlo,monospace;font-size:19px;font-weight:600;color:'+c[1]+'">'+(cnt[s[0]]||0)+'</div><div style="font-size:11px;color:#94a3b8">'+s[1]+'</div></div>'; }).join('')+'</div>';
     var head='<tr><th style="'+TH+'">Category</th><th style="'+TH+'">Country</th>'
-      +[['Plan '+((_TR_PS_DATA&&_TR_PS_DATA.planYear)||''),'Next-year forecast for the same Jan-to-cutoff window'],['2026 actual','This year, Jan to cutoff — the latest comparable actual'],['Band 24-26','Low–high of the 2024 / 2025 / 2026 like-for-like actuals'],['vs latest','Plan ÷ this-year actual — R3 fires outside 0.5–2.0×']].map(function(h){return '<th title="'+esc(h[1])+'" style="'+TH+';cursor:help">'+esc(h[0])+'</th>';}).join('')
+      +[['Plan '+((_TR_PS_DATA&&_TR_PS_DATA.planYear)||''),'Next-year forecast for the same Jan-to-cutoff window'],['2026 actual','This year, Jan to cutoff — the latest comparable actual'],['Band 24-26','Low–high of the 2024 / 2025 / 2026 like-for-like actuals'],['vs latest %','Plan vs this-year actual as a % change (−50% to +100% is the R3 tolerance)']].map(function(h){return '<th title="'+esc(h[1])+'" style="'+TH+';cursor:help">'+esc(h[0])+'</th>';}).join('')
       +'<th title="The 2024-26 actual band (grey) with a marker where next year\'s plan sits" style="'+TH+';text-align:center;cursor:help">Band · plan</th><th title="Which rules fired — hover a row\'s Rules cell for what each means" style="'+TH+';cursor:help">Rules</th><th title="Blocked = a hard rule fired, do not submit; Review = flagged but submittable; OK = passes; No plan = no forecast rows for this country" style="'+TH+';cursor:help">Status</th></tr>';
     var body2=rows.map(function(r,i){ var mx=Math.max(r.bandHigh||0,r.plan||0)||1;
       var bL=(r.bandLow/mx*100), bW=Math.max(1,(r.bandHigh-r.bandLow)/mx*100), mL=Math.min(100,r.plan/mx*100);
       var track='<div style="position:relative;width:120px;height:13px;background:#eef0f6;border-radius:2px"><div style="position:absolute;top:0;bottom:0;left:'+bL+'%;width:'+bW+'%;background:#cfdcea;border-radius:2px"></div><div style="position:absolute;top:-3px;bottom:-3px;left:'+mL+'%;width:3px;background:'+(r.status==='OK'?'#166d43':'#9e2b1f')+';border-radius:1px"></div></div>';
-      var vs=r.planVsLatest==null?'<span style="color:#cbd5e1">n/a</span>':(r.planVsLatest>=1?'<span style="color:#166d43">':'<span style="color:#9e2b1f">')+((Math.round(r.planVsLatest*100)/100))+'x</span>';
+      var vs; if(r.planVsLatest==null){ vs='<span style="color:#cbd5e1">n/a</span>'; } else { var pc=Math.round((r.planVsLatest-1)*100), up=pc>=0; vs='<span style="color:'+(up?'#166d43':'#9e2b1f')+(up?'':';font-weight:700')+'" title="plan '+fn(r.plan)+' vs '+fn(r.latest)+' actual">'+(up?'+':'')+pc+'%</span>'; }
       var N='font-family:ui-monospace,Menlo,monospace;text-align:left;font-variant-numeric:tabular-nums;white-space:nowrap;padding:6px 8px;border-bottom:1px solid #f1f5f9';
       var T='padding:6px 8px;border-bottom:1px solid #f1f5f9;text-align:left';
       var ruleTip=r.rules.map(function(rr){return _TR_RULE_TXT[rr]||rr;}).join('\n')||'No rules fired';
@@ -8919,9 +8919,9 @@ function _trendsPlanSanity(host){
     .catch(function(e){ host.innerHTML='<div style="color:#b91c1c;font-size:12px;padding:16px 4px">Could not load Plan sanity: '+esc(String(e&&e.message||e))+'</div>'; });
 }
 function _trendsPsCsv(){ var rows=_trPsRows(); if(!rows.length)return;
-  var hdr=['Category','Market','Plan','Actual2026','BandLow','BandHigh','PlanVsLatest','Rules','Status'];
+  var hdr=['Category','Market','Plan','Actual2026','BandLow','BandHigh','PlanVsLatestPct','Rules','Status'];
   var esc2=function(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v; };
-  var lines=[hdr.join(',')].concat(rows.map(function(r){ return [(r.label||r.category),r.market,Math.round(r.plan),Math.round(r.latest),Math.round(r.bandLow),Math.round(r.bandHigh),(r.planVsLatest==null?'':Math.round(r.planVsLatest*100)/100),r.rules.join(' '),r.status].map(esc2).join(','); }));
+  var lines=[hdr.join(',')].concat(rows.map(function(r){ return [(r.label||r.category),r.market,Math.round(r.plan),Math.round(r.latest),Math.round(r.bandLow),Math.round(r.bandHigh),(r.planVsLatest==null?'':(Math.round((r.planVsLatest-1)*100)+'%')),r.rules.join(' '),r.status].map(esc2).join(','); }));
   var blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'}), u=URL.createObjectURL(blob), a=document.createElement('a'); a.href=u; a.download='trends_plan_sanity.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000);
 }
 // Panel 2 — Multi-year trend: gap-to-peak headline (default sort), trend class, plan-next, suspect-month marks.
