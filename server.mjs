@@ -896,9 +896,8 @@ app.get('/', async (req, res) => {
     // first load (or the load right after a save-invalidation) waits on a synchronous build.
     const _vals = await getDataVals();   // in-process → KV (cold start, off-Supabase) → Supabase build; SWR handled inside
     const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS, SA_EXTRA, GBP_RATE, BRANCH_FREIGHT, TRANSFER_LEADS, CAT_ASP_GBP, LOCKED_FC] = _vals;
-    const KLAVIYO_BIS = await buildKlaviyoBis();   // fresh (uploads are infrequent, not in the data cache)
-    const MKT_COLORS = await buildMktColors();
-    const SET_BOM = await buildSetBom();           // {output_set_sku:[{sku,qty}]} — SETS component explosion (SETS feature)
+    // Fetched fresh (not in the data cache); independent of each other, so run concurrently.
+    const [KLAVIYO_BIS, MKT_COLORS, SET_BOM] = await Promise.all([buildKlaviyoBis(), buildMktColors(), buildSetBom()]);   // SET_BOM = {output_set_sku:[{sku,qty}]} SETS explosion
     let html = DEV ? loadHTML() : HTML;
     html = replaceGlobal(html, 'DATA', JSON.stringify(DATA));
     html = replaceGlobal(html, 'FC_CURRENT', JSON.stringify(FC_CURRENT));
@@ -921,15 +920,14 @@ app.get('/', async (req, res) => {
     html = replaceGlobal(html, 'TRANSFER_LEADS', JSON.stringify(TRANSFER_LEADS || {}));
     // Definitive price changes (DEMAND ▸ Revenue) — injected fresh (not in the 5-min data cache) so an edit shows
     // on the next load. getASP applies these to lift the revenue forecast.
-    try { const PRICE_CHANGES = await buildPriceChanges(); html = replaceGlobal(html, 'PRICE_CHANGES', JSON.stringify(PRICE_CHANGES)); } catch (e) { /* leave the [] default */ }
-    try { const CHINA_STOCK = await buildChinaStock(); html = replaceGlobal(html, 'CHINA_STOCK', JSON.stringify(CHINA_STOCK)); } catch (e) { /* leave the {} default */ }   // buy-plan "China stock to allocate" flag
-    try { const ZAL_STOCK = await buildZalStock(); html = replaceGlobal(html, 'ZAL_STOCK', JSON.stringify(ZAL_STOCK)); } catch (e) { /* leave the {} default */ }   // EU Zalando buy-feed gate + forecast-vs-stock netting
-    try { const ZAL_SKUS = await buildZalSkus(); html = replaceGlobal(html, 'ZAL_SKUS', JSON.stringify(ZAL_SKUS)); } catch (e) { /* leave the [] default */ }   // EU ZAL demand-channel scope
-    try { const CHANNELS = await buildChannels(); html = replaceGlobal(html, 'CHANNELS', JSON.stringify(CHANNELS)); } catch (e) { /* leave the [] default */ }   // modular channel registry (P1: inert)
-    try { const COUNTRIES = await buildCountries(); html = replaceGlobal(html, 'COUNTRIES', JSON.stringify(COUNTRIES)); } catch (e) { /* leave the [] default */ }   // country master list
-    // BUY ▸ Complex Rules — cover-target override rules (replaces First Buy). Injected fresh (not cached) so an
-    // add/edit shows on the next load. The buy engine reads these to override the 3PL cover target per SKU/window.
-    try { const COMPLEX_RULES = await buildComplexRules(); html = replaceGlobal(html, 'COMPLEX_RULES', JSON.stringify(COMPLEX_RULES)); } catch (e) { /* leave the [] default */ }
+    // These 7 are all independent fresh fetches (not cached), incl. BUY ▸ Complex Rules (cover-target overrides that
+    // replaced First Buy). Run concurrently, then inject in order. allSettled preserves the original semantics:
+    // inject on success (even a null value), leave the baked default on throw.
+    {
+      const _R = await Promise.allSettled([buildPriceChanges(), buildChinaStock(), buildZalStock(), buildZalSkus(), buildChannels(), buildCountries(), buildComplexRules()]);
+      const _inj = (i, name) => { if (_R[i].status === 'fulfilled') html = replaceGlobal(html, name, JSON.stringify(_R[i].value)); };
+      _inj(0, 'PRICE_CHANGES'); _inj(1, 'CHINA_STOCK'); _inj(2, 'ZAL_STOCK'); _inj(3, 'ZAL_SKUS'); _inj(4, 'CHANNELS'); _inj(5, 'COUNTRIES'); _inj(6, 'COMPLEX_RULES');
+    }
     // DEMAND ▸ smoothing "disregard discontinued" flags per co|ch|subcat (app_settings.smooth_disregard_disc, JSON). Fresh so a toggle shows next load.
     try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='smooth_disregard_disc'`)).rows[0]; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'SMOOTH_DISREGARD_DISC', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { /* leave the {} default */ }
     // DEMAND ▸ auto-smooth config (app_settings.smooth_auto = {flags:{'CO|CH|subcat':true}, threshold, mode}). One-click sweep smooths flagged subcats over the threshold.
@@ -3854,7 +3852,7 @@ app.post('/api/supply/deposit/:id/apply-all', async (req, res) => {
       WHERE coalesce(po.prod_no,'')=$1 AND lower(trim(coalesce(po.supplier_name,'')))=lower(trim($2))
         AND coalesce(po.deposit_ref,'')='' AND coalesce(po.status,'') NOT ILIKE '%complete%'`, [d.prod_no, d.supplier_name])).rows;
     const match = cand.filter(r => (/^AU$/.test(r.ctry || '')) === depAU);
-    for (const r of match) await pool.query(`UPDATE planner.purchase_orders SET deposit_ref=$1 WHERE po=$2`, [d.reference, r.po]);
+    if (match.length) await pool.query(`UPDATE planner.purchase_orders SET deposit_ref=$1 WHERE po = ANY($2::text[])`, [d.reference, match.map(r => r.po)]);
     res.json({ assigned: match.length, skipped_region: cand.length - match.length, reference: d.reference, pos: match.map(r => r.po) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -4192,7 +4190,10 @@ app.post('/api/klaviyo-bis/upload', async (req, res) => {
     await pool.query('BEGIN');
     try {
       await pool.query(`DELETE FROM planner.klaviyo_bis WHERE market=$1`, [market]);
-      for (const s of skus) await pool.query(`INSERT INTO planner.klaviyo_bis (sku,market,subs,updated_at) VALUES ($1,$2,$3,now())`, [s, market, bySku[s]]);
+      if (skus.length) {   // single multi-row insert (was N+1 per SKU)
+        const vals = skus.map((_, i) => `($${i * 3 + 1},$${i * 3 + 2},$${i * 3 + 3},now())`).join(',');
+        await pool.query(`INSERT INTO planner.klaviyo_bis (sku,market,subs,updated_at) VALUES ${vals}`, skus.flatMap(s => [s, market, bySku[s]]));
+      }
       await pool.query(`INSERT INTO planner.klaviyo_bis_uploads (market,filename,uploaded_by,uploaded_at,n_skus,total_subs)
           VALUES ($1,$2,$3,now(),$4,$5)
         ON CONFLICT (market) DO UPDATE SET filename=EXCLUDED.filename, uploaded_by=EXCLUDED.uploaded_by, uploaded_at=now(), n_skus=EXCLUDED.n_skus, total_subs=EXCLUDED.total_subs`,
@@ -4899,7 +4900,11 @@ app.post('/api/product/item', async (req, res) => {
     const ins = await client.query(`INSERT INTO planner.product_dev_items (ref, type, season, category, category_code, seq_in_group, colour_name, description, supplier, supplier_code, created_by, approval_method)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`, [ref, type, season || null, category, code, seq, (b.colour_name || '').trim() || null, (b.description || '').trim() || null, supplier || null, supCode, (b.created_by || '').trim() || null, (b.approval_method || '').trim() || null]);
     const id = ins.rows[0].id, sizes = Array.isArray(b.sizes) ? b.sizes : [];
-    for (let k = 0; k < sizes.length; k++) { const sl = String(sizes[k] || '').trim(); if (sl) await client.query(`INSERT INTO planner.product_dev_sizes (item_id, size_label, sort) VALUES ($1,$2,$3)`, [id, sl, k]); }
+    const _szRows = sizes.map((s, k) => ({ sl: String(s || '').trim(), k })).filter(r => r.sl);   // keep raw index as sort (blanks leave gaps, as before)
+    if (_szRows.length) {   // single multi-row insert (was N+1 per size)
+      const vals = _szRows.map((_, i) => `($${i * 3 + 1},$${i * 3 + 2},$${i * 3 + 3})`).join(',');
+      await client.query(`INSERT INTO planner.product_dev_sizes (item_id, size_label, sort) VALUES ${vals}`, _szRows.flatMap(r => [id, r.sl, r.k]));
+    }
     // Auto timeline note (author_kind='internal' = from D&B → shows as an UNREAD action for the supplier in the
     // portal Product tab). Keyed by the product ref, same as the rest of the product timeline.
     const who = shortUser((b.created_by || '').trim()) || 'A user';

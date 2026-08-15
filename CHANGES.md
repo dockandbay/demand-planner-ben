@@ -1,3 +1,24 @@
+## v27.018 Fix: Financial Forecast Model (and Exec Summary) crash on TIK data
+- `#/demand/scenario/finmodel` was stuck on "Loading…". Root cause (pre-existing, unrelated to the audit): `buildExecData` lets `TIK`-channel rows through its filter but only has `{DTC,FBA,B2B}` buckets, so `ensure(ch['TIK'],…)` read a property of `undefined` and threw — silently, inside a promise. Now TIK folds into the **DTC** bucket (TIK is a DTC clone; its own forecast/ASP still drive the numbers), matching the finmodel's DTC/FBA/B2B channel set. Also fixes the same latent crash in the Exec Summary. Buy plan unaffected (exec/reporting only).
+
+## v27.017 Fix: favourite label on demand deep-links
+- Favouriting a DEMAND deep-link (e.g. `#/demand/scenario/finmodel`) labelled the chip "DEMAND" instead of the actual view. `_favLabel` still looked for the pre-v27.014 scenario nav (`#scenario-subnav .stab`), which no longer exists, so it fell through to the L1 view-toggle. Now it reads the new DEMAND L3/L2 nav (`#demand-scenario-nav .d3tab.active` → e.g. "FINANCIAL FORECAST MODEL", then inputs L3, then the L2 tab) before the "DEMAND" fallback.
+
+## v27.016 Code audit fixes — dead code + efficiency (no behaviour change)
+- **Dead code removed:** the retired Revenue view (`renderRevenueView` + `renderRevTargets` + `recalcRev` + `saveRevTargetQ`, 86 lines; the Revenue tab was dropped in v26.733). `PRICE_CHANGES`/`getASP` and the still-used `renderPriceChanges`/`revReload`/`revSubcats`/revenue-popup helpers were **kept**. Also removed the now-unused `_favRemove` (favourites are plain links with no ✕).
+- **Server page-load latency:** the "/" handler fetched ~10 independent data globals **sequentially** on every load. Now the 3 fresh builds (Klaviyo BIS / market colours / SET_BOM) and the 7 independent builds (price changes, China stock, Zalando stock/SKUs, channels, countries, complex rules) run **concurrently** (`Promise.all` / `Promise.allSettled`), injected in the same order with the same per-item fallback semantics. Verified: all globals still inject and the buy plan is byte-identical.
+- **N+1 writes collapsed to single statements:** deposit→PO assignment (`UPDATE … WHERE po = ANY($2)`), Klaviyo BIS upload (multi-row `INSERT`), and product dev sizes (multi-row `INSERT`, raw sort index preserved).
+- **Client:** the products/inventory search box now **debounces** (250ms) instead of re-filtering + re-rendering the whole grid on every keystroke.
+
+## v27.015 Fix: Scenario planner L3 nav flashed then hid
+- The light-blue **L3 nav** (Prime Day / B2B / etc.) appeared then vanished when clicking the **Scenario planner** L2 tab. Root cause: the nav was drawn by a delegated SUPPLY function on create-only, and a second `render()` in the real browser could leave it orphaned; the leaving-DEMAND teardown also never removed `#demand-scenario-nav`.
+- Now the scenario L3 nav is rendered **inline in `renderDemandTabs`, identical shape to the proven DEMAND ▸ Inputs L3** (create-or-reshow on **every** render), driven by SUPPLY-exposed `window.SCEN_SECTIONS` / `window.scenCur()`. Added `demand-scenario-nav` to the leaving-DEMAND cleanup so no stale nav lingers. No behaviour/slug change.
+
+## v27.014 Scenario moved under DEMAND ▸ Scenario planner
+- **Scenario is no longer a top-level section.** It's now a DEMAND **L2 tab "Scenario planner"**, and its 5 tools (Prime Day, B2B Allocation, Financial Forecast, PO Stock Priority, Sales Planning) are the **light-blue L3** nav (same `.d3nav`/`.d3tab` style as DEMAND ▸ Inputs). The top-level **SCENARIO** button is removed.
+- **Slugs deep-linked under /demand:** `#/demand/scenario` and `#/demand/scenario/<key>`. Old `#/scenario/*` links **redirect** to the new path; the landing-page option is now "DEMAND ▸ Scenario planner".
+- The scenario tools themselves are unchanged — only the nav wrapper moved (a top-level mode → a Demand L2), rendered into the demand body (wrapped in `#scenario-root` so the tools' scoped styles still apply). Buy engine unaffected.
+
 ## v27.013 Favourites in the top menu bar (per-user, up to 5) — needs migration 231
 - A **★ star** on the far right of the top bar favourites the **current L2/L3 view**; favourited views appear as **chips left of "🕘 Recent"** that link straight there.
 - **Rename** a favourite (double-click the chip — label is per-user), **remove** it (✕ on the chip, or un-star on the page).

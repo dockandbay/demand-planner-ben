@@ -8567,7 +8567,7 @@ function render(){
     var _sb=document.getElementById('statusbar');
     ['st','ver'].forEach(function(id){ var el=document.getElementById(id); if(_sb&&el&&el.parentNode!==_sb){ if(id==='st'){el.removeAttribute('style');el.className='status';} else {el.style.cssText='color:#0f172a;background:#fbbf24;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:800;line-height:1.2;letter-spacing:.02em;margin-left:auto;white-space:nowrap;position:relative';} _sb.appendChild(el); } });   // amber badge, matches SUPPLY
     if(_sb)_sb.style.display='';
-    ['demand-tabs','demand-inputs-nav','demand-body'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
+    ['demand-tabs','demand-inputs-nav','demand-scenario-nav','demand-body'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
   }
   // Leaving the BUY & MOVE group → tear down its sub-nav + the ACTIONS/TRANSFER pages.
   var _inBM=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='zalando'||VIEW_MODE==='inventory');
@@ -8605,6 +8605,7 @@ function render(){
     else if(DEMAND_VIEW==='kpis') renderKpisView(body);
     else if(DEMAND_VIEW==='pricechanges'||DEMAND_VIEW==='revenue') renderPriceChangesView(body);   // Revenue & growth report removed (superseded by Summary + targets); this Inputs tab now hosts Price changes. 'revenue' kept as an alias for old hashes/bookmarks.
     else if(DEMAND_VIEW==='klaviyobis') renderKlaviyoBisView(body);
+    else if(DEMAND_VIEW==='scenario'){ if(typeof renderScenarioDemandView==='function')renderScenarioDemandView(body); }   // Scenario planner now nested under DEMAND (L2); tools are the light-blue L3
     else renderDemandActionsView(body);
     return;
   }
@@ -9373,7 +9374,7 @@ function renderAccuracyView(kb,body){
   }).catch(function(){ kb.innerHTML='<div style="color:#dc2626;font-size:12px">Failed to load.</div>'; });
 }
 // ─── DEMAND sub-tabs (PLAN / KPIs / TARGETS / ACTIONS / CALENDAR) ───────────────────────────
-var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['targets','Sell-through targets'],['pricechanges','Price changes'],['actions','Actions'],['calendar','Calendar']];
+var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['targets','Sell-through targets'],['pricechanges','Price changes'],['actions','Actions'],['calendar','Calendar'],['scenario','Scenario planner']];
 function renderDemandTabs(){
   var bar=document.getElementById('demand-tabs');
   var _sb=document.getElementById('statusbar');
@@ -9390,7 +9391,7 @@ function renderDemandTabs(){
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   // Primary tabs inline; the reference/input views (Sell-through targets, Key accounts, Calendar, Revenue) are grouped under an "Inputs ▾" dropdown.
   var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['snapshots']='Snapshots';
-  var PRIMARY=['plan','summary','snapshots','kpis','actions'], INPUTS=['targets','keyaccounts','calendar','pricechanges','klaviyobis'];
+  var PRIMARY=['plan','summary','snapshots','kpis','actions','scenario'], INPUTS=['targets','keyaccounts','calendar','pricechanges','klaviyobis'];
   var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0;
   var _isPlanV=(DEMAND_VIEW==='plan');
   // Release Window now lives in the More Filters panel; Undo + Download now sit on the right of the plan controls
@@ -9410,6 +9411,16 @@ function renderDemandTabs(){
     _in3.innerHTML=INPUTS.map(function(k){return '<button class="d3tab'+(k===DEMAND_VIEW?' active':'')+'" data-di="'+k+'">'+_dlbl[k]+'</button>';}).join('');
     _in3.querySelectorAll('[data-di]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); VIEW_MODE='planning'; DEMAND_VIEW=b.dataset.di; if(window.writeHash)window.writeHash(['demand','inputs',DEMAND_VIEW]); render(); }; });
   } else if(_in3){ _in3.style.display='none'; _in3.innerHTML=''; }
+  // Scenario planner L3 (light-blue d3nav) — the 5 scenario tools, deep-linked #/demand/scenario/<key>. Rendered inline
+  // here (identical shape to the Inputs L3 above) using the SUPPLY-exposed window.SCEN_SECTIONS / window.scenCur().
+  var _sc3=document.getElementById('demand-scenario-nav');
+  if(DEMAND_VIEW==='scenario'){
+    if(!_sc3){ _sc3=document.createElement('div'); _sc3.id='demand-scenario-nav'; bar.parentNode.insertBefore(_sc3, bar.nextSibling); }
+    _sc3.className='d3nav'; _sc3.style.display=''; _sc3.style.marginTop='6px';
+    var _scs=(window.SCEN_SECTIONS||[]), _sck=(window.scenCur?window.scenCur():'');
+    _sc3.innerHTML=_scs.map(function(s){return '<button class="d3tab'+(s[0]===_sck?' active':'')+'" data-sc="'+s[0]+'">'+s[1]+'</button>';}).join('');
+    _sc3.querySelectorAll('[data-sc]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); if(window.scenCur)window.scenCur(b.dataset.sc); VIEW_MODE='planning'; DEMAND_VIEW='scenario'; if(window.writeHash)window.writeHash(['demand','scenario',b.dataset.sc]); render(); }; });
+  } else if(_sc3){ _sc3.style.display='none'; _sc3.innerHTML=''; }
   // relocate the demand-plan AI tool-bar into this secondary menu (moved back on teardown)
   var pt=document.getElementById('plan-tools'); if(pt)bar.appendChild(pt);
   // ONE global currency toggle (GBP / local) for the whole DEMAND area — a right-aligned spacer that also carries
@@ -10504,92 +10515,7 @@ function renderPriceChangesView(body){ _revBody=body;
     PRICE_CHANGES=pc||[]; var rb=document.getElementById('rev-body'); if(!rb)return;
     try{ renderPriceChanges(rb); }catch(err){ rb.innerHTML='<div style="padding:12px;color:#b91c1c;font-size:12px">Could not render price changes: '+esc(String(err&&err.message||err))+'</div>'; if(window.console)console.error('[pricechanges] render error',err); }
   }); }
-function renderRevenueView(body){ _revBody=body; if(REV_FY==null)REV_FY=CUR_FY_START;
-  var subs=[['targets','Targets &amp; tracking'],['prices','Price changes']];
-  body.innerHTML='<style>.rev-tbl{border-collapse:collapse;font-size:12px;margin-top:6px}.rev-tbl th,.rev-tbl td{padding:4px 11px;border-bottom:1px solid #eef2f7;text-align:left;white-space:nowrap}.rev-tbl .r{text-align:right;font-variant-numeric:tabular-nums}.rev-tbl .c{text-align:center}.rev-tbl tr.tot td{border-top:2px solid #999;font-weight:700}.rev-tbl tr.rev-cotot td{background:#f1f5f9;border-top:2px solid #cbd5e1;font-weight:600}.rev-tbl .mut{color:#9aa5b1}.rev-tbl .tiny{font-size:10px;font-weight:400}.rev-tbl input,.rev-tbl select{font-size:12px}</style>'
-    +'<div style="display:flex;gap:2px;margin:2px 0 12px;border-bottom:1px solid #e0e0e0;flex-wrap:wrap">'+subs.map(function(s){return '<button class="dnav'+(s[0]===REV_SUB?' active':'')+'" data-rs="'+s[0]+'">'+s[1]+'</button>';}).join('')+'</div><div id="rev-body"><div class="count">Loading…</div></div>';
-  body.querySelectorAll('.dnav[data-rs]').forEach(function(b){ b.onclick=function(){ REV_SUB=b.dataset.rs; revReload(); }; });
-  Promise.all([fetch('/api/price-changes').then(function(r){return r.json();}).catch(function(){return [];}),
-               fetch('/api/demand-revenue-targets').then(function(r){return r.json();}).catch(function(){return [];})]).then(function(res){
-    PRICE_CHANGES=res[0]||[];   // refresh so the tracking reflects the latest price changes without a page reload
-    REV_TARGETS={}; (res[1]||[]).forEach(function(t){ REV_TARGETS[t.country+'|'+t.channel+'|'+t.fy]={type:t.target_type,pct:t.target_pct,value:t.target_value,q1:t.target_q1_pct,q2:t.target_q2_pct,q3:t.target_q3_pct,q4:t.target_q4_pct}; });
-    var rb=document.getElementById('rev-body'); if(!rb)return;
-    try { if(REV_SUB==='prices')renderPriceChanges(rb); else renderRevTargets(rb); }
-    catch(err){ rb.innerHTML='<div style="padding:12px;color:#b91c1c;font-size:12px">Could not render this view: '+esc(String(err&&err.message||err))+'</div>'; if(window.console)console.error('[revenue] render error',err); }
-  }).catch(function(err){ var rb=document.getElementById('rev-body'); if(rb)rb.innerHTML='<div style="padding:12px;color:#b91c1c;font-size:12px">Could not load revenue data: '+esc(String(err&&err.message||err))+'</div>'; if(window.console)console.error('[revenue] load error',err); }); }
-// (removed dead fn saveRevTarget — v26.759)
-function renderRevTargets(el){ _revCache={}; var combos=revCombos(), fys=[CUR_FY_START,CUR_FY_START+1,CUR_FY_START+2], fy=REV_FY;
-  var fyLbl=function(y){return 'FY'+String(y).slice(2)+'/'+String(y+1).slice(2);};
-  var months=fyMonths(fy), MON=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  var qMonLbl=function(q){return MON[pa(months[q*3]).mo]+'-'+MON[pa(months[q*3+2]).mo];};
-  var sel='<span style="font-weight:700;font-size:13px;margin-right:8px">Targets for financial year:</span> '+fys.map(function(y){return '<button class="pill catpill'+(y===fy?' active':'')+'" data-fy="'+y+'" style="font-weight:600'+(y===fy?';box-shadow:0 0 0 2px #2563eb inset':'')+'">'+fyLbl(y)+'</button>';}).join(' ')+'<span style="font-size:11px;color:#888;margin-left:10px">quarterly growth % vs last year &middot; each year keeps its own targets</span>';
-  var byCo={}; combos.forEach(function(c){ (byCo[c.co]=byCo[c.co]||[]).push(c.ch); });
-  var cos=Object.keys(byCo).sort(function(a,b){var ia=CTRS.indexOf(a),ib=CTRS.indexOf(b);ia=ia<0?99:ia;ib=ib<0?99:ib;return ia-ib;});
-  function qInit(t,q){ if(!t)return ''; if(t.type==='quarterly'){ var p=t['q'+(q+1)]; return (p==null||p==='')?'':((Number(p)>=0?'+':'')+Number(p)); } if(t.type==='pct'&&t.pct!=null&&t.pct!==''){ return (Number(t.pct)>=0?'+':'')+Number(t.pct); } return ''; }
-  function mini(lbl,val){ return '<tr><td style="color:#94a3b8;text-align:left;padding:0 5px 0 0;font-weight:400">'+lbl+'</td><td style="text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap">'+val+'</td></tr>'; }
-  var CT='vertical-align:top;padding:5px 9px;border-left:1px solid #eef2f7';
-  REV_ROWS=[];
-  var totQLy=[0,0,0,0], totQFc=[0,0,0,0], totLy=0, totFc=0;
-  function qCell(rowid,q,initv,qLy,qFc){
-    return '<td class="c" style="'+CT+'"><input id="rq_'+rowid+'_'+q+'" class="revqi" data-rid="'+rowid+'" value="'+esc(initv)+'" placeholder="gr %" style="width:52px;text-align:right;padding:2px 3px;border:1px solid #cbd5e1;border-radius:4px;margin-bottom:3px">'
-      +'<table style="border-collapse:collapse;font-size:11px;width:100%">'
-      +mini('LY',fr(qLy))
-      +mini('Tgt','<span id="rqt_'+rowid+'_'+q+'"></span> <span id="rqd_'+rowid+'_'+q+'"></span>')
-      +mini('Fc',fr(qFc))
-      +mini('&Delta;','<span id="rqdl_'+rowid+'_'+q+'"></span>')
-      +'</table></td>'; }
-  function fyCell(rowid,ly,fc,grw){
-    return '<td class="c" style="'+CT+';border-left:2px solid #cbd5e1"><table style="border-collapse:collapse;font-size:11px;width:100%">'
-      +mini('LY',fr(ly))
-      +mini('Tgt','<b><span id="rfyt_'+rowid+'"></span></b> <span id="rfyd_'+rowid+'"></span>')
-      +mini('Fc','<b>'+fr(fc)+'</b>')
-      +mini('&Delta;','<span id="rfydl_'+rowid+'"></span>')
-      +mini('Grw',(grw!=null?((grw>=0?'+':'')+grw+'%'):'&mdash;'))
-      +'</table></td>'; }
-  function row(co,ch,isCo){ var r=revMonthly(co,isCo?null:ch,fy), tKey=isCo?'ALL':ch, t=REV_TARGETS[co+'|'+tKey+'|'+fy];
-    var rowid=co+'_'+tKey, grw=r.ly>0?Math.round((r.fc-r.ly)/r.ly*100):null;
-    var qLy=[0,0,0,0],qFc=[0,0,0,0]; for(var q=0;q<4;q++){ qLy[q]=revQtrLy(r,q); qFc[q]=(r.mon[months[q*3]]||0)+(r.mon[months[q*3+1]]||0)+(r.mon[months[q*3+2]]||0); }
-    REV_ROWS.push({rowid:rowid,co:co,tKey:tKey,isCo:isCo,qLy:qLy,qFc:qFc,fc:r.fc,ly:r.ly});
-    if(isCo){ for(var q2=0;q2<4;q2++){ totQLy[q2]+=qLy[q2]; totQFc[q2]+=qFc[q2]; } totLy+=r.ly; totFc+=r.fc; }
-    var qc=''; for(var q3=0;q3<4;q3++){ qc+=qCell(rowid,q3,qInit(t,q3),qLy[q3],qFc[q3]); }
-    return '<tr'+(isCo?' class="rev-cotot"':'')+'><td style="vertical-align:top;padding:6px 8px">'+(isCo?'<b>'+esc(co)+'</b> <span class="mut tiny">all channels</span>':'<span style="padding-left:16px">'+esc(ch)+'</span>')+'</td>'+qc+fyCell(rowid,r.ly,r.fc,grw)+'</tr>'; }
-  var body='';
-  cos.forEach(function(co){ body+=row(co,'ALL',true); byCo[co].sort().forEach(function(ch){ body+=row(co,ch,false); }); });
-  var qHdr=''; for(var q4=0;q4<4;q4++){ qHdr+='<th class="c" style="border-left:1px solid #eef2f7;vertical-align:bottom">Q'+(q4+1)+'<br><span class="tiny mut">'+qMonLbl(q4)+'</span></th>'; }
-  var totRow='<tr class="tot"><td style="vertical-align:top;padding:6px 8px">Total</td>';
-  for(var q5=0;q5<4;q5++){ totRow+='<td class="c" style="'+CT+'"><table style="border-collapse:collapse;font-size:11px;width:100%">'+mini('LY',fr(totQLy[q5]))+mini('Tgt','<b><span id="rtqt_'+q5+'"></span></b> <span id="rtqd_'+q5+'"></span>')+mini('Fc',fr(totQFc[q5]))+mini('&Delta;','<span id="rtqdl_'+q5+'"></span>')+'</table></td>'; }
-  totRow+='<td class="c" style="'+CT+';border-left:2px solid #cbd5e1"><table style="border-collapse:collapse;font-size:11px;width:100%">'+mini('LY',fr(totLy))+mini('Tgt','<b><span id="rtot_tgt"></span></b> <span id="rtot_fyd"></span>')+mini('Fc','<b>'+fr(totFc)+'</b>')+mini('&Delta;','<span id="rtot_dl"></span>')+'</table></td></tr>';
-  el.innerHTML='<div class="bar" style="margin-bottom:6px;padding:7px 10px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;align-items:center;flex-wrap:wrap">'+sel+'</div>'
-    +'<div style="font-size:11px;color:#888;margin:2px 0 6px">Months grouped by <b>quarter</b> (FY starts March). Set a <b>growth %</b> per quarter (vs last-year same quarter); each quarter shows <b>LY</b>, <b>Target</b> (LY &times; growth), <b>Forecast</b> (incl. price changes) and <b>&Delta;</b> (forecast &minus; target). Target, &Delta; and RAG update live as you type. Blank quarter = flat (last year). RAG: <span style="color:#16a34a">&#9632;</span> &ge; target &middot; <span style="color:#f59e0b">&#9632;</span> within 5% &middot; <span style="color:#dc2626">&#9632;</span> below.</div>'
-    +'<div style="overflow-x:auto"><table class="rev-tbl"><thead><tr><th style="position:sticky;left:0;background:#fff;z-index:1;text-align:left">Country / channel</th>'+qHdr+'<th class="c" style="border-left:2px solid #cbd5e1;vertical-align:bottom">'+fyLbl(fy)+'<br><span class="tiny mut">full year</span></th></tr></thead><tbody>'+body+totRow+'</tbody></table></div>';
-  el.querySelectorAll('.pill[data-fy]').forEach(function(b){ b.onclick=function(){ REV_FY=+b.dataset.fy; renderRevTargets(el); }; });
-  el.querySelectorAll('.revqi').forEach(function(inp){ inp.oninput=function(){ recalcRev(); }; inp.onchange=function(){ saveRevTargetQ(inp.dataset.rid); }; });
-  recalcRev(); }
-function recalcRev(){
-  function ragDot(fc,t){ if(t==null||!isFinite(t))return ''; var c=fc>=t?'#16a34a':(fc>=t*0.95?'#f59e0b':'#dc2626'); return '<span title="green >= target, amber within 5%, red below" style="display:inline-block;width:9px;height:9px;border-radius:50%;background:'+c+'"></span>'; }
-  function dlt(d){ var c=d>=0?'#166534':'#b91c1c'; return '<span style="color:'+c+';font-weight:600">'+(d>=0?'+':'-')+fr(Math.abs(d))+'</span>'; }
-  var totQt=[0,0,0,0], totFyt=0, totQFc=[0,0,0,0], totFcAll=0;
-  (REV_ROWS||[]).forEach(function(rw){ var fyt=0;
-    for(var q=0;q<4;q++){ var inp=document.getElementById('rq_'+rw.rowid+'_'+q); var raw=inp?String(inp.value).trim():''; var pct=(raw===''||isNaN(parseFloat(raw)))?null:parseFloat(raw);
-      var qt=(pct==null)?rw.qLy[q]:rw.qLy[q]*(1+pct/100); fyt+=qt;
-      var ts=document.getElementById('rqt_'+rw.rowid+'_'+q); if(ts)ts.innerHTML=(pct==null)?('<span class="mut">'+fr(qt)+'</span>'):('<b>'+fr(qt)+'</b>');
-      var dt=document.getElementById('rqd_'+rw.rowid+'_'+q); if(dt)dt.innerHTML=ragDot(rw.qFc[q],qt);
-      var dl=document.getElementById('rqdl_'+rw.rowid+'_'+q); if(dl)dl.innerHTML=dlt(rw.qFc[q]-qt);
-      if(rw.isCo){ totQt[q]+=qt; totQFc[q]+=rw.qFc[q]; } }
-    var fytEl=document.getElementById('rfyt_'+rw.rowid); if(fytEl)fytEl.innerHTML=fr(fyt);
-    var fyd=document.getElementById('rfyd_'+rw.rowid); if(fyd)fyd.innerHTML=ragDot(rw.fc,fyt);
-    var fydl=document.getElementById('rfydl_'+rw.rowid); if(fydl)fydl.innerHTML=dlt(rw.fc-fyt);
-    if(rw.isCo){ totFyt+=fyt; totFcAll+=rw.fc; } });
-  for(var q6=0;q6<4;q6++){ var a=document.getElementById('rtqt_'+q6); if(a)a.innerHTML=fr(totQt[q6]);
-    var b2=document.getElementById('rtqd_'+q6); if(b2)b2.innerHTML=ragDot(totQFc[q6],totQt[q6]);
-    var c2=document.getElementById('rtqdl_'+q6); if(c2)c2.innerHTML=dlt(totQFc[q6]-totQt[q6]); }
-  var tt=document.getElementById('rtot_tgt'); if(tt)tt.innerHTML=fr(totFyt);
-  var td=document.getElementById('rtot_fyd'); if(td)td.innerHTML=ragDot(totFcAll,totFyt);
-  var tdl=document.getElementById('rtot_dl'); if(tdl)tdl.innerHTML=dlt(totFcAll-totFyt); }
-function saveRevTargetQ(rowid){ var rw=null; (REV_ROWS||[]).forEach(function(x){ if(x.rowid===rowid)rw=x; }); if(!rw)return;
-  var b={country:rw.co,channel:rw.tKey,fy:REV_FY,target_type:'quarterly'};
-  for(var q=0;q<4;q++){ var inp=document.getElementById('rq_'+rowid+'_'+q); var raw=inp?String(inp.value).replace(/[^0-9.\-]/g,''):''; b['target_q'+(q+1)+'_pct']=raw; }
-  fetch('/api/demand-revenue-targets',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b)}).then(function(r){return r.json();}).then(function(){ if(typeof ensureRevTargets==='function')ensureRevTargets(); }).catch(function(){}); }
+// (removed dead Revenue view — renderRevenueView/renderRevTargets/recalcRev/saveRevTargetQ; retired with the Revenue tab v26.733, cleaned v27.015)
 function renderPriceChanges(el){
   var _fm=function(ym){var s=String(ym||'');var p=s.split('-');if(p.length<2||!p[1])return esc(s);var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];return (MN[+p[1]-1]||p[1])+'-'+p[0].slice(2);};   // YYYY-MM → mmm-yy (house date style)
   var rows=(PRICE_CHANGES||[]).map(function(p){ return '<tr><td><b>'+esc(p.country)+'</b></td><td>'+(p.channel?esc(p.channel):'<span class="mut">all</span>')+'</td><td>'+(p.subcategory?esc(p.subcategory):'<span class="mut">all</span>')+'</td><td>'+_fm(p.effective_month)+'</td><td style="text-align:left;font-weight:600;color:'+(Number(p.uplift_pct)>=0?'#166534':'#b91c1c')+'">'+(Number(p.uplift_pct)>=0?'+':'')+Number(p.uplift_pct)+'%</td><td>'+esc(p.note||'')+'</td><td><button class="pc-del" data-id="'+p.id+'" title="delete" style="color:#dc2626;cursor:pointer;border:none;background:none;font-size:13px">✕</button></td></tr>'; }).join('')||'<tr><td colspan="7" class="mut" style="padding:10px">No price changes yet.</td></tr>';
@@ -11511,6 +11437,7 @@ function buildExecData(){
   function ensure(o,m){if(!o[m])o[m]={u:0,r:0,lyU:0,lyR:0};}
   DATA.forEach(function(row){
     if(['DTC','FBA','B2B','TIK'].indexOf(row.ch)<0)return;
+    var chKey=(row.ch==='TIK')?'DTC':row.ch;   // TIK is a DTC clone (v26.955) — fold into the DTC bucket for exec/finmodel (data + ASP still use TIK's own forecast). Prevents ch['TIK'] undefined crash.
     // Reports mirror the DEMAND plan (Ben's call): use the RAW forecast (no BI_CACHE / AI overlay), and for the
     // current partial month use the FULL-month forecast (curMonthForecast) — matching the plan's fyTot — rather
     // than month-to-date actual (which understated the in-flight month).
@@ -11544,13 +11471,13 @@ function buildExecData(){
         lyU=Number(fu[lyYM])||0;
         if(lyU>0){var lyAsp=Number(getASP(row.co,row.ch,row.s,pm.y-1,pm.mo))||0;lyR=lyU*lyAsp;}
       }
-      ensure(ch[row.ch],fym);ch[row.ch][fym].u+=u;ch[row.ch][fym].r+=r;ch[row.ch][fym].lyU+=lyU;ch[row.ch][fym].lyR+=lyR;
-      if(!coc[row.ch][row.co])coc[row.ch][row.co]={};
-      ensure(coc[row.ch][row.co],fym);coc[row.ch][row.co][fym].u+=u;coc[row.ch][row.co][fym].r+=r;coc[row.ch][row.co][fym].lyU+=lyU;coc[row.ch][row.co][fym].lyR+=lyR;
+      ensure(ch[chKey],fym);ch[chKey][fym].u+=u;ch[chKey][fym].r+=r;ch[chKey][fym].lyU+=lyU;ch[chKey][fym].lyR+=lyR;
+      if(!coc[chKey][row.co])coc[chKey][row.co]={};
+      ensure(coc[chKey][row.co],fym);coc[chKey][row.co][fym].u+=u;coc[chKey][row.co][fym].r+=r;coc[chKey][row.co][fym].lyU+=lyU;coc[chKey][row.co][fym].lyR+=lyR;
       // sub-category level (channel → country → subcategory → month) for the financial model overlay
-      if(!cocs[row.ch][row.co])cocs[row.ch][row.co]={};
-      if(!cocs[row.ch][row.co][row.s])cocs[row.ch][row.co][row.s]={};
-      ensure(cocs[row.ch][row.co][row.s],fym);cocs[row.ch][row.co][row.s][fym].u+=u;cocs[row.ch][row.co][row.s][fym].r+=r;cocs[row.ch][row.co][row.s][fym].lyU+=lyU;cocs[row.ch][row.co][row.s][fym].lyR+=lyR;
+      if(!cocs[chKey][row.co])cocs[chKey][row.co]={};
+      if(!cocs[chKey][row.co][row.s])cocs[chKey][row.co][row.s]={};
+      ensure(cocs[chKey][row.co][row.s],fym);cocs[chKey][row.co][row.s][fym].u+=u;cocs[chKey][row.co][row.s][fym].r+=r;cocs[chKey][row.co][row.s][fym].lyU+=lyU;cocs[chKey][row.co][row.s][fym].lyR+=lyR;
       ensure(tot,fym);tot[fym].u+=u;tot[fym].r+=r;tot[fym].lyU+=lyU;tot[fym].lyR+=lyR;
     });
   });
@@ -14818,7 +14745,10 @@ function attachSkuMultiExpand(inputId,onApply){
   // other artifact view (buy-move / buy / fba / exec / reports) VIEW_MODE is still 'planning' here, so an up-front
   // render() would paint the DEMAND plan first and flash before the harness's applyRoute() switches to the real view.
   // The harness applyRoute() (runs on load) routes those via nav clicks, so we leave them to it — no flash.
-  if(/^#\/?(planning|demand)(\/|$)/.test(location.hash||'')) render();
+  // Up-front paint ONLY the plan (whose default DEMAND_VIEW/VIEW_MODE already match). For a DEMAND sub-view hash
+  // (scenario / summary / kpis / inputs…) the harness applyRoute() paints the correct view — up-front rendering here
+  // would flash the PLAN first (and, for the supply-provided Scenario view, could paint before it's wired). (Ben: scenario flash)
+  if(/^#\/?planning(\/|$)/.test(location.hash||'') || /^#\/?demand(\/(plan)?)?$/.test(location.hash||'')) render();
 })();
 
 /* ── Mobile drawer navigation (phone only; CSS gates visibility) ────────────
