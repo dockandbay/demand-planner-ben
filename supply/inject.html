@@ -7241,16 +7241,24 @@
             +'<div style="color:#b45309">Unmatched SKU codes <b>'+n(j.unmatchedCount)+'</b> ('+n(j.unmatchedUnits)+' units, dropped)'+((j.unmatchedTop&&j.unmatchedTop.length)?(' — '+esc(j.unmatchedTop.join(', '))):'')+'</div></div>';
         }
         b.innerHTML='<div class="annot"><b>CONFIG ▸ Admin ▸ Inventory snapshots.</b> <span style="color:#b45309;font-weight:700">Temporary loader.</span> Upload a Cin7 <b>"Historic and Current Stock Valuations"</b> export (.xlsx) and set the snapshot <b>date</b>; it loads into <code>inventory_snapshots</code> for the Category Trends report. <b>Preview</b> (dry run) first, then <b>Load</b>. Idempotent — re-loading a date overwrites it. Reconciles to the file&rsquo;s Grand Total and halts on any unmapped branch.</div>'
+          +'<div id="invs-drop" style="border:2px dashed #cbd5e1;border-radius:8px;padding:20px;text-align:center;cursor:pointer;background:#f8fafc;margin:10px 0;max-width:900px;transition:border-color .1s,background .1s">'
+            +'<div style="font-size:13px;color:#334155"><b>&#8593; Drag a .xlsx here</b> <span style="color:#94a3b8">or click to choose</span></div>'
+            +'<div id="invs-fname" style="font-size:12px;color:#94a3b8;margin-top:5px">no file chosen</div>'
+            +'<input type="file" id="invs-file" accept=".xlsx" style="display:none"></div>'
           +'<div class="bar" style="gap:10px;flex-wrap:wrap;align-items:center;margin:10px 0">'
-            +'<label class="save-btn light" style="cursor:pointer">&#8593; Choose .xlsx<input type="file" id="invs-file" accept=".xlsx" style="display:none"></label>'
-            +'<span id="invs-fname" style="font-size:12px;color:#64748b">no file chosen</span>'
-            +'<span class="pill-lbl" style="margin-left:6px">Snapshot date</span><input class="flt" id="invs-date" type="date" style="width:150px" title="the AS-OF date of the stock, not the export date">'
+            +'<span class="pill-lbl">Snapshot date</span><input class="flt" id="invs-date" type="date" style="width:150px" title="the AS-OF date of the stock, not the export date">'
             +'<button class="save-btn light" id="invs-dry">Preview (dry run)</button>'
             +'<button class="save-btn" id="invs-load" style="background:#7c3aed;color:#fff">Load to database</button>'
             +'<span id="invs-msg" style="font-size:12px;margin-left:6px"></span></div>'
           +'<div id="invs-out"></div>';
-        var fEl=document.getElementById('invs-file'), fnEl=document.getElementById('invs-fname'), msg=document.getElementById('invs-msg'), out=document.getElementById('invs-out');
-        fEl.onchange=function(){ var f=this.files&&this.files[0]; if(!f)return; fnEl.textContent=f.name; var rd=new FileReader(); rd.onload=function(){ _f.b64=String(rd.result).split(',')[1]||''; _f.name=f.name; }; rd.readAsDataURL(f); };
+        var fEl=document.getElementById('invs-file'), fnEl=document.getElementById('invs-fname'), msg=document.getElementById('invs-msg'), out=document.getElementById('invs-out'), drop=document.getElementById('invs-drop');
+        function takeFile(f){ if(!f)return; if(!/\.xlsx$/i.test(f.name)){ msg.style.color='#dc2626'; msg.textContent='Please choose an .xlsx file.'; return; } fnEl.textContent=f.name; fnEl.style.color='#0f172a'; msg.textContent=''; var rd=new FileReader(); rd.onload=function(){ _f.b64=String(rd.result).split(',')[1]||''; _f.name=f.name; }; rd.readAsDataURL(f); }
+        fEl.onchange=function(){ takeFile(this.files&&this.files[0]); };
+        drop.onclick=function(e){ if(e.target!==fEl)fEl.click(); };
+        function _dz(on){ drop.style.borderColor=on?'#7c3aed':'#cbd5e1'; drop.style.background=on?'#f5f3ff':'#f8fafc'; }
+        drop.ondragover=function(e){ e.preventDefault(); e.stopPropagation(); _dz(true); };
+        drop.ondragleave=function(e){ e.preventDefault(); e.stopPropagation(); _dz(false); };
+        drop.ondrop=function(e){ e.preventDefault(); e.stopPropagation(); _dz(false); takeFile(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]); };
         function run(apply){ if(!_f.b64){ msg.style.color='#dc2626'; msg.textContent='Choose an .xlsx file first.'; return; }
           var date=document.getElementById('invs-date').value; if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){ msg.style.color='#dc2626'; msg.textContent='Pick a snapshot date.'; return; }
           msg.style.color='#64748b'; msg.textContent=apply?'Loading…':'Previewing…'; out.innerHTML='';

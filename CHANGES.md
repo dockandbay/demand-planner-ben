@@ -1,3 +1,6 @@
+## v27.031 Inventory-snapshots loader — drag-and-drop
+- The CONFIG ▸ Admin ▸ Inventory snapshots page now takes a **drag-and-drop** .xlsx (dashed drop zone, highlights on hover) as well as click-to-choose. Validates the .xlsx extension.
+
 ## v27.030 CONFIG ▸ Admin ▸ Inventory snapshots — temporary upload loader page
 - New **CONFIG ▸ Admin ▸ Inventory snapshots** page (marked temporary/removable): choose a Cin7 stock-valuations **.xlsx**, set the **snapshot date**, **Preview (dry run)** then **Load to database**. Shows the full summary (rows, Grand-Total reconciliation, coverage %, warehouse split, excluded branches, unmatched SKUs).
 - New endpoint `POST /api/config/inventory-snapshot-load` (admin-gated) — same parse/reconcile/branch-map/SKU-resolve/upsert logic as the CLI loader, dry-run unless `apply`. Base64 upload (25mb JSON limit; note Vercel's ~4.5MB body cap on prod for very large files). Verified against the 30-Apr export.
