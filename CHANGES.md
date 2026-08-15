@@ -1,3 +1,10 @@
+## v27.027 Trends — feedback round 1 (filters + Plan Sanity polish)
+- **Market → Country** (filter label + table column).
+- **Group filter now works** across all 3 panels (filters by `categories.grouping`); removed the non-functional **Basis** control.
+- **Discontinued (is_active=false) categories are excluded** from the trend analysis (all 3 panels).
+- **Plan Sanity**: row data **left-aligned**; **BLOCKED explained** — a legend line up top plus hover tooltips on every Status chip, Rules cell (what R1/R2/R3/R6 mean), and column header.
+- **Still to build** (need endpoint work): month-range filter (e.g. Jan-Apr / Feb-Aug), sub-category drill-down grain, surfacing next-year forecast on the other panels.
+
 ## v27.026 Trends — Panels 2 (Multi-year trend) + 1 (Channel mix) built — report complete
 - **Panel 2 Multi-year trend** (`/api/demand/trends/multi-year`): per category × market, Jan-cutoff 2024/25/26. Headline **gap-to-peak** (default sort, not YoY), YoY, peak year, trend **class** (New high / Recovering / Two-season fall / Declining / Collapsed), 3-point sparkline, plan-next (2027) + plan-vs-peak. **Suspect-month heuristic** (units <40% trailing-3mo avg AND >30% of usual SKUs zero) marks likely stockouts (dotted) and excludes them like-for-like from growth, with the count shown. Verified: Cooling UK gap −33%, US −78% (matches spec).
 - **Panel 1 Channel mix** (`/api/demand/trends/channel-mix`): house benchmark per market (FBA/(DTC+FBA), rolling 12m, B2B excluded — UK 20.3% / US 55.6%), category FBA share vs benchmark (index track), gap pp, **headroom units**, and the **SKU-grain stockout proxy** (`pct_sku_months_no_fba`, computed at SKU-month grain per the spec) driving a Read (Stocking gap / Demand gap / Investigate / Over-indexed).

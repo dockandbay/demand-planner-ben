@@ -8803,9 +8803,8 @@ function renderTrendsView(body){
     +'<div style="margin:2px 0 12px"><div style="font-size:19px;font-weight:700;letter-spacing:-.01em">Category trends</div>'
       +'<div style="font-size:11.5px;color:#64748b">Data through <b style="color:#0f172a">'+_trMonLbl(cut)+'</b>. '+esc(curL)+' is partial and excluded. History begins <b>Jan-2024</b>, so comparisons run across part-years only.</div></div>'
     +'<div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:9px 11px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'
-      +'<label style="'+LBL+'">Market <select id="tr-mkt" style="'+SEL+'">'+MKTS.map(function(m){return opt(m,TRENDS_MKT);}).join('')+'</select></label>'
+      +'<label style="'+LBL+'">Country <select id="tr-mkt" style="'+SEL+'">'+MKTS.map(function(m){return opt(m,TRENDS_MKT);}).join('')+'</select></label>'
       +'<label style="'+LBL+'">Group <select id="tr-grp" style="'+SEL+'">'+GROUPS.map(function(g){return opt(g,TRENDS_GRP);}).join('')+'</select></label>'
-      +'<label style="'+LBL+'">Basis <select id="tr-basis" style="'+SEL+'"><option value="ytd"'+(TRENDS_BASIS==='ytd'?' selected':'')+'>Jan to cut-off (like for like)</option><option value="r12"'+(TRENDS_BASIS==='r12'?' selected':'')+'>Rolling 12 months</option></select></label>'
       +'<label style="'+LBL+'">Min units <input id="tr-minu" value="'+esc(String(TRENDS_MINU))+'" style="'+SEL+';width:56px;text-align:right"></label>'
       +'<label style="font-size:12px;color:#334155;display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="tr-unmapped"'+(TRENDS_UNMAPPED?' checked':'')+'> Include unmapped</label>'
       +'<span style="flex:1"></span>'
@@ -8818,7 +8817,6 @@ function renderTrendsView(body){
   body.innerHTML=h;
   var _m=body.querySelector('#tr-mkt'); if(_m)_m.onchange=function(){ TRENDS_MKT=this.value; drawPanel(); };
   var _g=body.querySelector('#tr-grp'); if(_g)_g.onchange=function(){ TRENDS_GRP=this.value; drawPanel(); };
-  var _b=body.querySelector('#tr-basis'); if(_b)_b.onchange=function(){ TRENDS_BASIS=this.value; drawPanel(); };
   var _mu=body.querySelector('#tr-minu'); if(_mu)_mu.onchange=function(){ TRENDS_MINU=Math.max(0,parseInt(String(this.value).replace(/[^0-9]/g,''),10)||0); drawPanel(); };
   var _u=body.querySelector('#tr-unmapped'); if(_u)_u.onchange=function(){ TRENDS_UNMAPPED=this.checked; drawPanel(); };
   body.querySelectorAll('.tr-tab').forEach(function(t){ t.onclick=function(){ TRENDS_PANEL=t.dataset.p; renderTrendsView(body); }; });
@@ -8830,39 +8828,51 @@ function renderTrendsView(body){
     host.innerHTML=''; }
   drawPanel();
 }
+// Trends filters shared: category-group match (planner.categories.grouping via CAT_GROUPING) + exclude discontinued
+// (is_active=false) categories from the trend analysis. Unmapped is governed by its own toggle, not these.
+function _trGrpOk(cat){ if(TRENDS_GRP==='All')return true; try{ return (typeof CAT_GROUPING!=='undefined'&&CAT_GROUPING[cat]===TRENDS_GRP); }catch(e){ return true; } }
+function _trActiveCat(cat){ if(cat==='Unmapped')return true; try{ return !(typeof CATS_META!=='undefined'&&CATS_META[cat]&&CATS_META[cat].a===false); }catch(e){ return true; } }
+function _trCatOk(cat){ return _trGrpOk(cat)&&_trActiveCat(cat); }
+// Rule + status explainers (tooltips).
+var _TR_RULE_TXT={ R1:'R1 · Over-plan: plan is above 150% of the best comparable year', R2:'R2 · Under-plan: plan is below 70% of the most recent comparable actual', R3:'R3 · Step change: plan ÷ latest actual is outside 0.5–2.0×', R4:'R4 · Dead range', R5:'R5 · Stale copy', R6:'R6 · Zero plan where the category still has live SKUs' };
+var _TR_STATUS_TXT={ 'Blocked':'BLOCKED — do not submit until resolved or explicitly overridden with a note. A hard rule fired (a step change vs history).', 'Review':'REVIEW — flagged for a look, but you can still submit.', 'OK':'OK — passes all rules.', 'No plan':'NO PLAN — there are no forecast rows for this category in this market. Different (and more serious) than a plan of zero.' };
 // Panel 3 — Plan sanity: fetch the rule-checked rows and render the table (status bar, band track, rules, deep-links).
 var _TR_PS_DATA=null;
 function _trPsRows(){ var rows=((_TR_PS_DATA&&_TR_PS_DATA.rows)||[]).filter(function(r){
     if(TRENDS_MKT!=='All'&&r.market!==TRENDS_MKT)return false;
+    if(!_trCatOk(r.category))return false;
     if(!TRENDS_UNMAPPED&&r.category==='Unmapped')return false;
     if(Math.max(r.latest||0,r.plan||0)<TRENDS_MINU)return false; return true; }); return rows; }
 function _trendsPlanSanity(host){
   host.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:24px 4px;text-align:center">Loading…</div>';
   function render(){ var rows=_trPsRows();
     var CH={ 'Blocked':['#FF746C','#40100b'], 'No plan':['#fdf0d8','#8a5a06'], 'Review':['#FFD6D1','#9e2b1f'], 'OK':['#e0f0e6','#166d43'] };
-    function chip(s){ var c=CH[s]||['#eef2f7','#64748b']; return '<span style="display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:3px;background:'+c[0]+';color:'+c[1]+';white-space:nowrap">'+esc(s)+'</span>'; }
+    function chip(s){ var c=CH[s]||['#eef2f7','#64748b']; return '<span title="'+esc(_TR_STATUS_TXT[s]||'')+'" style="display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:3px;background:'+c[0]+';color:'+c[1]+';white-space:nowrap;cursor:help">'+esc(s)+'</span>'; }
     function fn(n){ return (Math.round(n)||0).toLocaleString(); }
+    var TH='padding:0 8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;border-bottom:1px solid #e2e8f0;text-align:left';
     var cnt=rows.reduce(function(a,r){a[r.status]=(a[r.status]||0)+1;return a;},{});
     var bar='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
       +[['Blocked','resolve before submit'],['No plan','no plan rows for the market'],['Review','flagged, submit allowed'],['OK','within tolerance']].map(function(s){ var c=CH[s[0]]; return '<div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-width:120px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;font-weight:700">'+s[0]+'</div><div style="font-family:ui-monospace,Menlo,monospace;font-size:19px;font-weight:600;color:'+c[1]+'">'+(cnt[s[0]]||0)+'</div><div style="font-size:11px;color:#94a3b8">'+s[1]+'</div></div>'; }).join('')+'</div>';
-    var head='<tr style="text-align:left"><th style="padding:0 8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;border-bottom:1px solid #e2e8f0">Category</th><th style="padding:0 8px 6px;font-size:10px;color:#94a3b8">Mkt</th>'
-      +['Plan '+((_TR_PS_DATA&&_TR_PS_DATA.planYear)||''),'2026 actual','Band 24-26','vs latest'].map(function(h){return '<th style="padding:0 8px 6px;text-align:right;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;border-bottom:1px solid #e2e8f0">'+esc(h)+'</th>';}).join('')
-      +'<th style="padding:0 8px 6px;font-size:10px;color:#94a3b8;text-align:center">Band · plan</th><th style="padding:0 8px 6px;font-size:10px;color:#94a3b8">Rules</th><th style="padding:0 8px 6px;font-size:10px;color:#94a3b8">Status</th><th></th></tr>';
+    var head='<tr><th style="'+TH+'">Category</th><th style="'+TH+'">Country</th>'
+      +[['Plan '+((_TR_PS_DATA&&_TR_PS_DATA.planYear)||''),'Next-year forecast for the same Jan-to-cutoff window'],['2026 actual','This year, Jan to cutoff — the latest comparable actual'],['Band 24-26','Low–high of the 2024 / 2025 / 2026 like-for-like actuals'],['vs latest','Plan ÷ this-year actual — R3 fires outside 0.5–2.0×']].map(function(h){return '<th title="'+esc(h[1])+'" style="'+TH+';cursor:help">'+esc(h[0])+'</th>';}).join('')
+      +'<th title="The 2024-26 actual band (grey) with a marker where next year\'s plan sits" style="'+TH+';text-align:center;cursor:help">Band · plan</th><th title="Which rules fired — hover a row\'s Rules cell for what each means" style="'+TH+';cursor:help">Rules</th><th title="Blocked = a hard rule fired, do not submit; Review = flagged but submittable; OK = passes; No plan = no forecast rows for this country" style="'+TH+';cursor:help">Status</th><th style="'+TH+'"></th></tr>';
     var body2=rows.map(function(r,i){ var mx=Math.max(r.bandHigh||0,r.plan||0)||1;
       var bL=(r.bandLow/mx*100), bW=Math.max(1,(r.bandHigh-r.bandLow)/mx*100), mL=Math.min(100,r.plan/mx*100);
       var track='<div style="position:relative;width:120px;height:13px;background:#eef0f6;border-radius:2px"><div style="position:absolute;top:0;bottom:0;left:'+bL+'%;width:'+bW+'%;background:#cfdcea;border-radius:2px"></div><div style="position:absolute;top:-3px;bottom:-3px;left:'+mL+'%;width:3px;background:'+(r.status==='OK'?'#166d43':'#9e2b1f')+';border-radius:1px"></div></div>';
       var vs=r.planVsLatest==null?'<span style="color:#cbd5e1">n/a</span>':(r.planVsLatest>=1?'<span style="color:#166d43">':'<span style="color:#9e2b1f">')+((Math.round(r.planVsLatest*100)/100))+'x</span>';
-      var N='font-family:ui-monospace,Menlo,monospace;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;padding:6px 8px;border-bottom:1px solid #f1f5f9';
-      var T='padding:6px 8px;border-bottom:1px solid #f1f5f9';
+      var N='font-family:ui-monospace,Menlo,monospace;text-align:left;font-variant-numeric:tabular-nums;white-space:nowrap;padding:6px 8px;border-bottom:1px solid #f1f5f9';
+      var T='padding:6px 8px;border-bottom:1px solid #f1f5f9;text-align:left';
+      var ruleTip=r.rules.map(function(rr){return _TR_RULE_TXT[rr]||rr;}).join('\n')||'No rules fired';
       return '<tr'+(r.status==='Blocked'?' style="background:#fff7f6"':'')+'><td style="'+T+';font-weight:600;white-space:nowrap">'+esc(r.category)+'</td><td style="'+T+';font-size:11px;color:#64748b">'+esc(r.market)+'</td>'
         +'<td style="'+N+(r.status==='Blocked'?';font-weight:700':'')+'">'+(r.hasPlan?fn(r.plan):'<span style="color:#94a3b8;font-size:11px">no plan</span>')+'</td>'
         +'<td style="'+N+'">'+fn(r.latest)+'</td><td style="'+N+'">'+fn(r.bandLow)+'–'+fn(r.bandHigh)+'</td>'
         +'<td style="'+N+'">'+vs+'</td><td style="'+T+';text-align:center">'+track+'</td>'
-        +'<td style="'+T+';font-family:ui-monospace,Menlo,monospace;font-size:10.5px;color:#9e2b1f;letter-spacing:.04em;white-space:nowrap">'+esc(r.rules.join(' '))+'</td>'
+        +'<td title="'+esc(ruleTip)+'" style="'+T+';font-family:ui-monospace,Menlo,monospace;font-size:10.5px;color:#9e2b1f;letter-spacing:.04em;white-space:nowrap;cursor:help">'+esc(r.rules.join(' ')||'—')+'</td>'
         +'<td style="'+T+'">'+chip(r.status)+'</td>'
         +'<td style="'+T+'"><button class="tr-openplan" data-cat="'+esc(r.category)+'" data-mkt="'+esc(r.market)+'" style="font-size:10.5px;font-weight:600;border:1px solid #e2e8f0;background:#fff;color:#1f6fb2;border-radius:4px;padding:3px 8px;cursor:pointer;white-space:nowrap">Open plan</button></td></tr>'; }).join('');
-    host.innerHTML=bar+'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'+head+body2+'</table></div>'
-      +(rows.length?'':'<div style="color:#94a3b8;font-size:12px;padding:16px 4px;text-align:center">No categories above the '+fn(TRENDS_MINU)+'-unit minimum for this market.</div>');
+    var legend='<div style="font-size:11px;color:#64748b;margin-bottom:10px;line-height:1.55"><b style="color:#9e2b1f">Blocked</b> = a hard rule fired (usually a big step change vs history) — resolve it or override with a note before submitting. <b>Review</b> = flagged for a look, but you can still submit. <b>No plan</b> = there are no forecast rows for that country (more serious than a plan of zero). Hover any <b>Rules</b> or <b>Status</b> cell for the detail.</div>';
+    host.innerHTML=bar+legend+'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'+head+body2+'</table></div>'
+      +(rows.length?'':'<div style="color:#94a3b8;font-size:12px;padding:16px 4px;text-align:center">No categories above the '+fn(TRENDS_MINU)+'-unit minimum for this country.</div>');
     host.querySelectorAll('.tr-openplan').forEach(function(b){ b.onclick=function(){ var cat=b.dataset.cat, mkt=b.dataset.mkt;
       try{ if(mkt&&mkt!=='Unmapped')CUR=mkt; if(typeof SEL!=='undefined'&&cat&&cat!=='Unmapped'){ SEL=new Set([cat]); } DEMAND_VIEW='plan'; if(window.writeHash)writeHash(['demand']); render(); }catch(e){} }; });
   }
@@ -8880,6 +8890,7 @@ function _trendsPsCsv(){ var rows=_trPsRows(); if(!rows.length)return;
 var _TR_MY_DATA=null;
 function _trMyRows(){ return ((_TR_MY_DATA&&_TR_MY_DATA.rows)||[]).filter(function(r){
     if(TRENDS_MKT!=='All'&&r.market!==TRENDS_MKT)return false;
+    if(!_trCatOk(r.category))return false;
     if(!TRENDS_UNMAPPED&&r.category==='Unmapped')return false;
     if(Math.max(r.a2024||0,r.a2025||0,r.a2026||0,r.planNext||0)<TRENDS_MINU)return false; return true; }); }
 function _trendsMultiYear(host){
@@ -8925,6 +8936,7 @@ function _trendsMyCsv(){ var rows=_trMyRows(); if(!rows.length)return;
 var _TR_CM_DATA=null;
 function _trCmRows(){ return ((_TR_CM_DATA&&_TR_CM_DATA.rows)||[]).filter(function(r){
     if(TRENDS_MKT!=='All'&&r.market!==TRENDS_MKT)return false;
+    if(!_trCatOk(r.category))return false;
     if(!TRENDS_UNMAPPED&&r.category==='Unmapped')return false;
     if(((r.dtc||0)+(r.fba||0))<TRENDS_MINU)return false; return true; }); }
 function _trendsChannelMix(host){
