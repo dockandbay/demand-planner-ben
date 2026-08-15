@@ -973,6 +973,28 @@ app.get('/api/demand/trends/channel-mix', async (req, res) => {
     res.json(out);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// DEMAND ▸ Trends ▸ Type mix. Share of DTC+FBA sales that are SETS vs MASTER (products.variant_type), per category ×
+// market, rolling 12 months — compared across markets. setPct = SET / (SET + MASTER). Read-only.
+app.get('/api/demand/trends/type-mix', async (req, res) => {
+  try {
+    const W = _trendsWin(req, 12);
+    const out = await _trendsCached('tm|' + W.grain, req.query.refresh === '1', async () => {
+      const r = await pool.query(`
+        WITH bounds AS ( SELECT (max(month) - interval '1 month')::date cutoff FROM planner.sales_actuals ),
+        win AS ( SELECT cutoff, (cutoff - interval '11 months')::date start FROM bounds )
+        SELECT ${W.catExpr} category, ${W.lblExpr} label, sa.country market,
+          sum(sa.units) FILTER (WHERE p.variant_type='SET')::numeric set_units,
+          sum(sa.units) FILTER (WHERE p.variant_type='MASTER')::numeric master_units,
+          sum(sa.units)::numeric total_units
+        FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku CROSS JOIN win
+        WHERE sa.channel IN ('DTC','FBA') AND sa.month >= win.start AND sa.month <= win.cutoff GROUP BY 1,2,3`);
+      const rows = r.rows.map(x => { const set = Number(x.set_units) || 0, mas = Number(x.master_units) || 0, sm = set + mas;
+        return { category: x.category, label: x.label, market: x.market, setUnits: set, masterUnits: mas, total: Number(x.total_units) || 0, setPct: sm > 0 ? set / sm : null }; });
+      return { grain: W.grain, rows };
+    });
+    res.json(out);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // CONFIG ▸ Admin ▸ Inventory snapshots — TEMPORARY loader (remove later). Upload the Cin7 "Historic and Current Stock
 // Valuations" xlsx + a snapshot date → load into planner.inventory_snapshots. Same logic as
 // scripts/seed_inventory_snapshots.mjs. Dry-run unless apply=true. Requires migration 232.

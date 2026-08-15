@@ -1,3 +1,9 @@
+## v27.037 Trends — Channel mix as market comparison matrix + new Type mix panel
+- **Channel mix rebuilt as a comparison matrix** (left-aligned): one row per category, one **FBA-share column per compare-market** (UK / US / EU / AU), each cell a mini track vs that market's own house benchmark (dark marker; red when below). **Headroom** and **Read** columns are for the selected Country. B2B still excluded.
+- **New "Type mix" panel** (after Channel mix): % of **DTC + FBA** units that are **SETS vs MASTER** (via variant_type), per category, compared across the same markets. Rolling-12. Server endpoint `/api/demand/trends/type-mix`.
+- **Compare-markets toggle** (UK / US / EU / AU pills, all on by default, CA excluded) drives which comparison columns show on both Channel mix and Type mix; re-filters client-side.
+- Both panels' **CSV export** now emit the wide matrix (one row per category, a column per compare-market).
+
 ## v27.036 Trends — Country pills, exclude junk categories, non-core under toggle
 - **Country is now pills** (UK / US / EU / AU — no CA, no All), single-select, **default UK**, replacing the dropdown.
 - **Junk categories excluded:** product.category values with no row in the categories table (Bundle Mixed, Sunglasses, Bath Robe, Shorts) are now fully excluded from every panel (always, regardless of toggles).
