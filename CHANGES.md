@@ -1,3 +1,8 @@
+## v27.044 Demand plan: merge current-month actual + forecast into one column
+- The current month (e.g. Aug 2026) was showing as **two columns** (a read-only actuals column + a forecast column), which was confusing and split the PP rail onto the actuals side. Now it's **one column** (the forecast cell): the forecast number with **actuals-to-date in green brackets before it**, e.g. `(34) 120`.
+- The **cell rail (PP / N / BI / C / R) now sits on the current-month forecast cell** in both subcat rows (`curFcCell`) and SKU rows (`skuCurFcCell`) — fixes the PP badge not showing on the forecast side.
+- Implemented in `buildTimeCols` (current month emits one column, not two); header/colgroup/cells all follow since they're TIME_COLS-driven. Buy plan + FY/period totals untouched (they use `curMonthForecast`/`isActualMonth`, independent of the display column). Past actual months unchanged.
+
 ## v27.043 Demand plan: BOM explosion in SKU tooltip + "x:" explode search
 - **Column-1 SKU hover** now lists the **BOM Explosion** (component SKU × qty, one per line) under the product name for SET SKUs. Uses SET_BOM.
 - **Explode search**: typing **`x:<SET-SKU>`** (e.g. `x:TOWLB-CAB-XL-6SETI`) in the demand-plan SKU search shows the set **and** each of its exploded component SKUs. Plain search + the prepack-code resolution are unchanged.

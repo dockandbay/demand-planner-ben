@@ -4363,7 +4363,7 @@ var DISP_MONTHS=[]; DISP_FY_STARTS.forEach(function(Y){fyMonths(Y).forEach(funct
 // CUR_MONTH is known (see init IIFE). Entries: {t:'m',m} | {t:'fc',m} current-month extra | {t:'tot',startY,label}
 function tcFY(tc){return (tc.t==='m'||tc.t==='fc')?fyStartOf(tc.m):tc.startY;}   // FY a time-column belongs to (q/h/tot carry startY; m/fc carry a month)
 function buildTimeCols(){var out=[];DISP_FY_STARTS.forEach(function(Y){
-  if(!FY_COLLAPSED.has(Y)){ var fm=fyMonths(Y); fm.forEach(function(m,idx){ out.push({t:'m',m:m}); if(m===CUR_MONTH)out.push({t:'fc',m:m});
+  if(!FY_COLLAPSED.has(Y)){ var fm=fyMonths(Y); fm.forEach(function(m,idx){ if(m===CUR_MONTH){out.push({t:'fc',m:m});}else{out.push({t:'m',m:m});}   // current month = ONE column (forecast cell, with actuals-to-date shown in green brackets); no separate actuals column
     if(SHOW_Q&&(idx+1)%3===0){var qn=(idx+1)/3;out.push({t:'q',startY:Y,months:fm.slice(idx-2,idx+1),label:'Q'+qn});}   // quarter total after each 3rd fiscal month (Q1 Mar-May …)
     if(SHOW_H&&(idx+1)%6===0){var hn=(idx+1)/6;out.push({t:'h',startY:Y,months:fm.slice(idx-5,idx+1),label:'H'+hn});}   // half total after month 6 (H1 Mar-Aug) and 12 (H2 Sep-Feb)
   }); }
@@ -4552,7 +4552,7 @@ function refreshRow(s,co,ch){
   const f27u=F27.reduce(function(a,m){return a+(fu[m]||0);},0);
   const rk=s+'|'+co+'|'+ch;
   // Current-month forecast cell (Jun FC) — driven by its input box, refreshed separately from the actual cell.
-  try{var _ce=document.querySelector('.fcr[data-curfc="'+esc(rk)+'"]');if(_ce)_ce.textContent=fn(curMonthForecast(s,co,ch));}catch(e){}
+  try{var _ce=document.querySelector('[data-curfc="'+esc(rk)+'"]');if(_ce)_ce.textContent=fn(curMonthForecast(s,co,ch));}catch(e){}
   DISP_MONTHS.forEach(function(fym){
     if(isActualMonth(fym))return; // read-only actual cells never change
     const ik=s+'|'+co+'|'+ch+'|'+fym;
@@ -4798,7 +4798,7 @@ function buildHdr(){
       var p=pa(tc.m),Y=fyStartOf(tc.m),isAct=isActualMonth(tc.m),first=(tc.m===fyMonths(Y)[0]);
       s2((isAct?'* ':'')+MN[p.mo-1]+' '+String(p.y).slice(2),(first?'sep2 ':'')+fyBg(Y)+(isAct?' actual-hdr':''));
     } else if(tc.t==='fc'){
-      var pf=pa(tc.m);s2(MN[pf.mo-1]+' fc',fyBg(fyStartOf(tc.m)));
+      var pf=pa(tc.m);s2(MN[pf.mo-1]+' '+String(pf.y).slice(2),fyBg(fyStartOf(tc.m)));   // current month (holds actuals-to-date + forecast)
     } else {
       // FY total column header — plain label; the expand/minimise control lives in the group bar above (r1).
       var th=document.createElement('th');th.className='sep2 '+((tc.t==='q')?'ptot-q':(tc.t==='h')?'ptot-h':fyTotBg(tc.startY));
@@ -5847,6 +5847,10 @@ function buildDataRow(s,co,ch,x,fu_cache){
       const yoyPct=ly_u>0?Math.round((fcv-ly_u)/ly_u*100):null;
       const yoyStr=yoyPct!=null?(gPct(yoyPct)):'';
       const fcTd=document.createElement('td');fcTd.className='fctd bg26';
+      // current month is now a single column — carry the cell rail (PP / N / BI / C / R) here (was on the removed actuals cell)
+      var _nkC=((typeof SKUM!=='undefined'&&SKUM[s])?'sku':'subcat')+'|'+s+'|'+co+'|'+ch+'|'+fym; fcTd.dataset.nk=_nkC;
+      var _rhC=cellRailForKey(_nkC); if(_rhC){ fcTd.classList.add('has-rail'); fcTd.style.position='relative'; fcTd.insertAdjacentHTML('afterbegin',_rhC); }
+      try{applyCellNote(fcTd,_nkC);}catch(e){}
       const d2=document.createElement('div');d2.className='fcin';
       const lyD2=document.createElement('div');lyD2.className='fcly';lyD2.textContent=ly_u?fn(ly_u):'--';d2.appendChild(lyD2);
       const inp2=document.createElement('input');inp2.type='text';
@@ -5865,7 +5869,10 @@ function buildDataRow(s,co,ch,x,fu_cache){
       });
       d2.appendChild(inp2);
       const res2=document.createElement('div');res2.className='fcr'+(stored?' ovc':' flat');
-      res2.textContent=fn(fcv);res2.dataset.curfc=rk;d2.appendChild(res2);
+      var _mtd=(a[fym]&&a[fym][0])||0;   // actuals month-to-date → shown in green BEFORE the forecast number: "(34) 120"
+      if(_mtd>0){ var _actS=document.createElement('span'); _actS.style.cssText='color:#16a34a;font-weight:700;margin-right:3px'; _actS.textContent='('+fn(_mtd)+')'; _actS.title='Actuals month-to-date'; res2.appendChild(_actS); }
+      var _fcS=document.createElement('span');_fcS.textContent=fn(fcv);_fcS.dataset.curfc=rk;res2.appendChild(_fcS);
+      d2.appendChild(res2);
       // Revenue line for current-month forecast: forecast_units × LY_ASP
       var aspCur=getASP(co,ch,s,y,mo);
       var fcRevCur=fcv*aspCur;
@@ -7967,6 +7974,10 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       td.className=fyBg(CUR_FY_START);
       td.style.cssText='padding:1px 2px;border-bottom:1px solid #f0f0ee;border-left:1px dashed #86efac';
       if(preLaunchM(mCur))td.style.setProperty('background','#d9d9d9','important');   // pre-launch current month greyed — Ben
+      // current month is now a single column — carry the cell rail (PP / N / BI / C / R) here (was on the removed actuals cell)
+      var _rkC='sku|'+sku+'|'+co+'|'+ch+'|'+mCur; td.dataset.nk=_rkC;
+      var _rhC=cellRailForKey(_rkC); if(_rhC){ td.classList.add('has-rail'); td.style.position='relative'; td.insertAdjacentHTML('afterbegin',_rhC); }
+      try{applyCellNote(td,_rkC);}catch(e){}
       var w=document.createElement('div');w.style.cssText='display:flex;flex-direction:column;padding:1px 2px';
       var ly=document.createElement('div');ly.style.cssText='font-size:8px;color:#94a3b8;text-align:right;font-variant-numeric:tabular-nums';if(preLaunchM(mCur)){ly.textContent='pre launch';ly.style.cssText='font-size:7px;color:#3b82f6;text-align:right;font-style:italic;white-space:nowrap';}else{ly.textContent=fn(lyCur);}
       w.appendChild(ly);
@@ -7975,7 +7986,9 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       inp.dataset.ovkey=sku+'|'+co+'|'+ch+'|'+mCur;inp.dataset.ly=fcCur;skuNav(inp,parentKey);
       inp.addEventListener('change',function(){skuCommitOv(this.dataset.ovkey,this.value,parseFloat(this.dataset.ly));refreshRow(s,co,ch);});
       w.appendChild(inp);
-      var fcD=document.createElement('div');fcD.style.cssText='font-size:9px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;color:#334155';fcD.textContent=fn(fcvCur);w.appendChild(fcD);
+      var fcD=document.createElement('div');fcD.style.cssText='font-size:9px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums;color:#334155';
+      var _mtdCur=sales[mCur]||0;   // actuals month-to-date → green, BEFORE the forecast number: "(34) 120"
+      fcD.innerHTML=(_mtdCur>0?'<span style="color:#16a34a;font-weight:700" title="Actuals month-to-date">('+fn(_mtdCur)+')</span> ':'')+fn(fcvCur);w.appendChild(fcD);
       var yD=document.createElement('div');yD.style.cssText='font-size:7px;text-align:right';yD.className=yoyCur>0?'gp':yoyCur<0?'rp':'fp';yD.textContent=gPct(yoyCur);w.appendChild(yD);
       td.appendChild(w);applyDisc(inp,fcD,skuDiscOut[mCur],td);markDiscRundown(td,skuRundown[mCur]&&!skuDiscOut[mCur]);applyPreview(inp,fcD,mCur,sku);return td;
     }
