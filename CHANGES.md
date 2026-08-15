@@ -1,3 +1,6 @@
+## v27.041 Prepack rail "PP" badge shows on the demand plan
+- Fix: the rail **PP** badge depends on `PREPACK_COVER`, which is filled by `buildLiveDemand()`. On a fresh demand-plan view that hadn't run, so the badge only appeared after opening the buy plan or editing a forecast. The demand render now builds the cover **once** (`_PP_COVER_INIT` guard) so the badge shows out of the box. Verified: `TOWLB-CAB-LG-6SETI` UK rail renders the badge (233u prepack on-hand).
+
 ## v27.040 Prepack set mapping (PP- prepacks offset mapped set demand)
 - **New feature.** A prepack SKU (PP-…) maps to the build-on-fly SET whose demand its on-hand offsets. New table `planner.prepack_map` (**migration 233**), seeded from the CHILD-Prepack CSV (59 rows).
 - **Buy plan:** in the SET explosion, the mapped prepack's on-hand is drawn down against the set's monthly demand (carried forward); only the **uncovered** remainder explodes into `set_bom` components. While prepack stock fully covers a month → **0 component buy** that month. Sandbox impact: **-2,260u** across 22 towel-component pairs (441,702 → 439,442).

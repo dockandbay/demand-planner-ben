@@ -1323,6 +1323,7 @@ function prepackSetOf(sku){ return (sku && PREPACK_MAP[sku]) || null; }      // 
 function prepacksForSet(setSku){ return (setSku && PREPACK_BY_SET[setSku]) || null; }   // set SKU → [prepack SKUs] fulfilling it (or null)
 var PREPACK_STOCK={};    // server-injected prepack on-hand {prepack_sku:{wh:qty}} — prepacks are out of SKUM scope, so their stock rides separately for the buy-plan netting.
 var PREPACK_COVER={};    // filled during buildLiveDemand §4: {"setSku|CO|fym":{onHand,fc,covered,remaining}} — drives the demand-rail "PP" badge (prepack stock drawn down against set demand, carried forward).
+var _PP_COVER_INIT=false; // one-time guard: build PREPACK_COVER on the first demand-plan render so the rail "PP" badge shows without first opening the buy plan.
 var BIS_CFG={take_rate:35};   // SUG-0018 P2: % of waiting subscribers → suggested forecast uplift (real conversion ~30-40%; also signals strong sold-out interest). app_settings-injected.
 function bisCount(sku,mkt){ try{ return (KLAVIYO_BIS[sku]&&KLAVIYO_BIS[sku][mkt])||0; }catch(e){ return 0; } }
 function bisUplift(sku,mkt){ var n=bisCount(sku,mkt); return n>0?Math.round(n*(Number(BIS_CFG.take_rate)||35)/100):0; }   // enhanced-demand units
@@ -2255,6 +2256,8 @@ function render(){
   // Rebuild the demand overlay if a forecast edit made it stale, so buy quantities reflect the latest forecast
   // (was only refreshed on BUY-tab entry). Gated on the flag so settings/filter re-renders stay cheap.
   try{ if(typeof BUY_FC_STALE!=='undefined' && BUY_FC_STALE && typeof buildLiveDemand==='function'){ buildLiveDemand(); BUY_FC_STALE=false; } }catch(e){}
+  // First demand-plan render: build the prepack cover once so the rail "PP" badge shows without opening the buy plan.
+  try{ if(!_PP_COVER_INIT && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length && typeof buildLiveDemand==='function'){ buildLiveDemand(); _PP_COVER_INIT=true; } }catch(e){}
   // Load AWD / NonGRS pools once, then re-render (mirrors CAL_EVENTS).
   if(EXTRA_STOCK===null){ EXTRA_STOCK={}; fetch('/api/buy-extra-stock').then(function(r){return r.json();}).then(function(d){ EXTRA_STOCK=(d&&d.stock)||{}; render(); }).catch(function(){}); }
   // Extra stock columns on the FBA view: SOH NON GRS (UK+US), SOH AWD (US only).
@@ -8587,6 +8590,8 @@ function st(msg){var e=document.getElementById('st');if(e)e.textContent=msg;}
 (function(){document.getElementById('ver').innerHTML='HORIZON <b>'+VERSION+'</b>';var _hv=document.getElementById('hz-ver');if(_hv)_hv.innerHTML='HORIZON<br>'+VERSION;})();
 function render(){
   CALC_MEMO={};   // fresh per-render forecast memo (see decl) — cleared here so it never survives an edit
+  // Build prepack cover once so the demand rail "PP" badge shows on the plan without first opening the buy plan.
+  try{ if(!_PP_COVER_INIT && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length && typeof buildLiveDemand==='function'){ buildLiveDemand(); _PP_COVER_INIT=true; } }catch(e){}
   // load trading-calendar events once (for the PLAN month-cell "C" markers); re-render when they arrive
   if(CAL_EVENTS===null){ CAL_EVENTS=[]; fetch('/api/trading-calendar').then(function(r){return r.json();}).then(function(d){ CAL_EVENTS=(d&&d.events)||[]; if(VIEW_MODE==='planning')render(); }).catch(function(){}); }
   // Toggle filter rows visibility based on view mode.
