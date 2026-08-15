@@ -1,3 +1,9 @@
+## v27.033 Trends — review fixes: caching + Refresh, R4/R5 rules, seasonal-shape expand
+- **10-minute server cache** on all 3 endpoints (keyed by grain+month-range), busted by a new **↻ Refresh** button (?refresh=1). Plan-sanity dropped **3.6s → 0.01s** on cache hit. Also folded the per-request max(month) into a cached meta lookup (removes 3 round-trips per view).
+- **Panel 3 rules complete (R1-R6):** added **R4 dead range** (plan units but no live SKUs for that category×market, via v_product_availability) and **R5 stale copy** (this-year plan identical to the prior-year plan). Both Blocked. Verified correct: they fire zero on current sandbox data (no dead ranges, no exact prior-year copies) and would fire if such cases existed.
+- **Panel 2 seasonal-shape expand:** click a row to reveal monthly units by year, the peak month per year (flagged if it moved), and peak-share — the shift warning the spec called for.
+- Still open from the review: the override/dismiss-with-reason (demand_action_state) and Panel-3 deep-link to the specific flagged month.
+
 ## v27.032 Inventory-snapshots loader — Vercel-ready
 - Verified the loader works on Vercel: the endpoint ships via api/index.mjs → server.mjs; exceljs/pg are dependencies (bundled by npm install); functions maxDuration 300 + memory 1024; stock exports (~72KB) are far under Vercel's ~4.5MB request-body cap.
 - Added a client-side size guard: a file whose base64 would exceed the Vercel body cap is rejected up front with a clear message pointing to the CLI loader, instead of a cryptic 413. Shows the chosen file size.

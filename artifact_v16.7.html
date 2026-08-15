@@ -8788,10 +8788,10 @@ function renderSnapshotsView(body){
 // ─── DEMAND ▸ Trends — Category Trends analysis report (#/demand/trends) ──────────────────────────────────────
 // Read-only, units-based. Three panels: Channel mix · Multi-year trend · Plan sanity. Scaffold here (chrome + filters
 // + panel tabs); the panels build in order Plan sanity → Multi-year → Channel mix (per the spec). No writes ever.
-var TRENDS_PANEL='plan-sanity', TRENDS_MKT='All', TRENDS_GRP='All', TRENDS_GRAIN='category', TRENDS_FROM=1, TRENDS_TO=null, TRENDS_MINU=1000, TRENDS_UNMAPPED=true;
+var TRENDS_PANEL='plan-sanity', TRENDS_MKT='All', TRENDS_GRP='All', TRENDS_GRAIN='category', TRENDS_FROM=1, TRENDS_TO=null, TRENDS_MINU=1000, TRENDS_UNMAPPED=true, TRENDS_REFRESH=false;
 var _TR_MON=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function _trCutoffNum(){ var c=(typeof _trendsCutoff==='function')?_trendsCutoff():''; return c?(parseInt(c.split('_')[1],10)||12):12; }
-function _trQS(){ return '?grain='+encodeURIComponent(TRENDS_GRAIN)+'&from='+TRENDS_FROM+'&to='+TRENDS_TO; }   // server-affecting params (grain + month range)
+function _trQS(){ var r=TRENDS_REFRESH?'&refresh=1':''; TRENDS_REFRESH=false; return '?grain='+encodeURIComponent(TRENDS_GRAIN)+'&from='+TRENDS_FROM+'&to='+TRENDS_TO+r; }   // server-affecting params (grain + month range) + one-shot cache-bust
 function _trInvalidate(){ _TR_PS_DATA=null; _TR_MY_DATA=null; _TR_CM_DATA=null; }   // grain/range change → the cached server data is stale
 function _trMonLbl(ym){ if(!ym)return '—'; var p=String(ym).split('_'); var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return (MN[(+p[1]||1)-1]||p[1])+'-'+String(p[0]).slice(2); }
 function _trendsCutoff(){ try{ var ms=(typeof ACTUAL_MONTHS!=='undefined'?ACTUAL_MONTHS.slice():[]).sort(); var last=ms[ms.length-1]||''; if(last===CUR_MONTH&&ms.length>1)last=ms[ms.length-2]; return last; }catch(e){ return ''; } }
@@ -8816,6 +8816,7 @@ function renderTrendsView(body){
       +'<label style="'+LBL+'">Min units <input id="tr-minu" value="'+esc(String(TRENDS_MINU))+'" style="'+SEL+';width:56px;text-align:right"></label>'
       +'<label style="font-size:12px;color:#334155;display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="tr-unmapped"'+(TRENDS_UNMAPPED?' checked':'')+'> Include unmapped</label>'
       +'<span style="flex:1"></span>'
+      +'<button id="tr-refresh" title="Re-run the query (data is cached for 10 minutes)" style="font-size:11px;font-weight:600;border:1px solid #e2e8f0;background:#fff;color:#334155;border-radius:4px;padding:4px 10px;cursor:pointer">&#8635; Refresh</button>'
       +'<button id="tr-csv" style="font-size:11px;font-weight:600;border:1px solid #e2e8f0;background:#fff;color:#1f6fb2;border-radius:4px;padding:4px 10px;cursor:pointer">Export CSV</button>'
     +'</div>'
     +'<div style="display:flex;border-bottom:2px solid #e2e8f0">'
@@ -8832,6 +8833,7 @@ function renderTrendsView(body){
   var _u=body.querySelector('#tr-unmapped'); if(_u)_u.onchange=function(){ TRENDS_UNMAPPED=this.checked; drawPanel(); };
   body.querySelectorAll('.tr-tab').forEach(function(t){ t.onclick=function(){ TRENDS_PANEL=t.dataset.p; renderTrendsView(body); }; });
   var _cv=body.querySelector('#tr-csv'); if(_cv)_cv.onclick=function(){ if(TRENDS_PANEL==='plan-sanity'&&typeof _trendsPsCsv==='function')_trendsPsCsv(); else if(TRENDS_PANEL==='multi-year'&&typeof _trendsMyCsv==='function')_trendsMyCsv(); else if(TRENDS_PANEL==='channel-mix'&&typeof _trendsCmCsv==='function')_trendsCmCsv(); };
+  var _rf=body.querySelector('#tr-refresh'); if(_rf)_rf.onclick=function(){ TRENDS_REFRESH=true; _trInvalidate(); drawPanel(); };   // one-shot server cache-bust for the current panel
   function drawPanel(){ var host=body.querySelector('#tr-panel'); if(!host)return;
     if(TRENDS_PANEL==='plan-sanity'){ _trendsPlanSanity(host); return; }
     if(TRENDS_PANEL==='multi-year'){ _trendsMultiYear(host); return; }
@@ -8898,7 +8900,7 @@ function _trendsPsCsv(){ var rows=_trPsRows(); if(!rows.length)return;
   var blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'}), u=URL.createObjectURL(blob), a=document.createElement('a'); a.href=u; a.download='trends_plan_sanity.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000);
 }
 // Panel 2 — Multi-year trend: gap-to-peak headline (default sort), trend class, plan-next, suspect-month marks.
-var _TR_MY_DATA=null;
+var _TR_MY_DATA=null, _TR_MY_EXP={};
 function _trMyRows(){ return ((_TR_MY_DATA&&_TR_MY_DATA.rows)||[]).filter(function(r){
     if(TRENDS_MKT!=='All'&&r.market!==TRENDS_MKT)return false;
     if(!_trCatOk(r.category))return false;
@@ -8920,18 +8922,27 @@ function _trendsMultiYear(host){
     var bar='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'+cards.map(function(s){return '<div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-width:120px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;font-weight:700">'+s[0]+'</div><div style="font-family:ui-monospace,Menlo,monospace;font-size:19px;font-weight:600">'+s[1]+'</div><div style="font-size:11px;color:#94a3b8">'+s[2]+'</div></div>';}).join('')+'</div>';
     var N='font-family:ui-monospace,Menlo,monospace;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;padding:6px 8px;border-bottom:1px solid #f1f5f9', T='padding:6px 8px;border-bottom:1px solid #f1f5f9', TH='padding:0 8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;border-bottom:1px solid #e2e8f0';
     var head='<tr><th style="'+TH+';text-align:left">Category</th><th style="'+TH+'">Mkt</th><th style="'+TH+';text-align:right">2024</th><th style="'+TH+';text-align:right">2025</th><th style="'+TH+';text-align:right">2026</th><th style="'+TH+';text-align:center">Shape</th><th style="'+TH+';text-align:right">YoY</th><th style="'+TH+'">Peak</th><th style="'+TH+';text-align:center">2026 vs peak</th><th style="'+TH+';text-align:right">vs peak</th><th style="'+TH+';text-align:right">Plan '+((_TR_MY_DATA&&_TR_MY_DATA.planYear)||'')+'</th><th style="'+TH+';text-align:right">vs peak</th><th style="'+TH+'">Class</th></tr>';
+    function shape(r){ var mos=[]; for(var m=r.from;m<=r.to;m++)mos.push(m);
+      var hdr='<th style="text-align:left;padding:2px 7px;font-size:10px;color:#94a3b8">Year</th>'+mos.map(function(m){return '<th style="text-align:right;padding:2px 7px;font-size:10px;color:#94a3b8">'+_TR_MON[m]+'</th>';}).join('')+'<th style="text-align:right;padding:2px 7px;font-size:10px;color:#94a3b8">Peak</th>';
+      var bdy=[2024,2025,2026].map(function(y){ var arr=(r.monthly&&r.monthly[y])||[], pm=r.peakMonth&&r.peakMonth[y];
+        return '<tr><td style="padding:2px 7px;font-weight:600">'+y+'</td>'+arr.map(function(u,i){ var pk=(mos[i]===pm); return '<td style="text-align:right;padding:2px 7px;font-variant-numeric:tabular-nums'+(pk?';font-weight:700;color:#166d43':'')+'">'+fn(u)+'</td>'; }).join('')+'<td style="text-align:right;padding:2px 7px;font-size:11px;color:#64748b">'+(pm?_TR_MON[pm]:'—')+'</td></tr>'; }).join('');
+      var moved=(r.peakMonth&&r.peakMonth[2024]&&r.peakMonth[2026]&&r.peakMonth[2024]!==r.peakMonth[2026]);
+      var note=moved?('<span style="color:#b45309;font-weight:600">Peak moved '+_TR_MON[r.peakMonth[2024]]+' &rarr; '+_TR_MON[r.peakMonth[2026]]+'</span> — spreading a total on the old curve buys stock at the wrong time.'):'Peak month steady across years.';
+      return '<tr><td colspan="13" style="padding:9px 14px;background:#f8fafc;border-bottom:1px solid #eef2f7"><div style="font-size:11px;color:#334155;margin-bottom:5px"><b>Seasonal shape</b> · peak-share '+(r.peakShare!=null?(Math.round(r.peakShare*100)+'% of the year'):'n/a')+' · '+note+'</div><table style="border-collapse:collapse;font-size:11.5px"><thead><tr>'+hdr+'</tr></thead><tbody>'+bdy+'</tbody></table></div></tr>'; }
     var body2=rows.map(function(r){ var fill=r.gapToPeak==null?0:Math.max(0,Math.min(100,(1+r.gapToPeak)*100));
       var track='<div style="position:relative;width:100px;height:13px;background:#eef0f6;border-radius:2px"><div style="position:absolute;top:0;bottom:0;left:0;width:'+fill+'%;background:'+(fill>=99?'#7fbf9b':'#FF746C')+';opacity:.72;border-radius:2px"></div><div style="position:absolute;top:-3px;bottom:-3px;left:100%;width:2px;background:#14202e;transform:translateX(-2px)"></div></div>';
       var s26=(r.suspectCount>0)?'<span title="'+r.suspectCount+' suspect month(s) excluded from growth (likely stockout)" style="border-bottom:1px dotted #94a3b8;cursor:help">'+fn(r.a2026)+'</span>':fn(r.a2026);
-      return '<tr><td style="'+T+';font-weight:600;white-space:nowrap">'+esc(r.label||r.category)+'</td><td style="'+T+';font-size:11px;color:#64748b">'+esc(r.market)+'</td>'
+      var key=r.category+'|'+r.label+'|'+r.market, exp=!!_TR_MY_EXP[key];
+      return '<tr class="my-row" data-mk="'+esc(key)+'" style="cursor:pointer" title="click to see the monthly seasonal shape"><td style="'+T+';font-weight:600;white-space:nowrap"><span style="color:#94a3b8;font-size:9px;margin-right:3px">'+(exp?'&#9662;':'&#9656;')+'</span>'+esc(r.label||r.category)+'</td><td style="'+T+';font-size:11px;color:#64748b">'+esc(r.market)+'</td>'
         +'<td style="'+N+'">'+fn(r.a2024)+'</td><td style="'+N+'">'+fn(r.a2025)+'</td><td style="'+N+'">'+s26+'</td>'
         +'<td style="'+T+';text-align:center">'+spark(r)+'</td><td style="'+N+'">'+pct(r.yoy)+'</td><td style="'+N+';font-size:11px">'+r.peakYear+'</td>'
         +'<td style="'+T+';text-align:center">'+track+'</td><td style="'+N+'">'+pct(r.gapToPeak)+'</td>'
         +'<td style="'+N+'">'+(r.planNext==null?'<span style="color:#cbd5e1">n/a</span>':fn(r.planNext))+'</td><td style="'+N+'">'+pct(r.planVsPeak)+'</td>'
-        +'<td style="'+T+'">'+chip(r.cls)+'</td></tr>'; }).join('');
-    host.innerHTML=bar+'<div style="font-size:11px;color:#94a3b8;margin-bottom:8px">Sorted by <b>gap to peak</b> (most below peak first). '+susp+' suspect month(s) excluded from growth across '+rows.length+' rows.</div>'
+        +'<td style="'+T+'">'+chip(r.cls)+'</td></tr>'+(exp?shape(r):''); }).join('');
+    host.innerHTML=bar+'<div style="font-size:11px;color:#94a3b8;margin-bottom:8px">Sorted by <b>gap to peak</b> (most below peak first). Click a row for its <b>seasonal shape</b>. '+susp+' suspect month(s) excluded from growth across '+rows.length+' rows.</div>'
       +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'+head+body2+'</table></div>'
       +(rows.length?'':'<div style="color:#94a3b8;font-size:12px;padding:16px;text-align:center">No categories above the '+fn(TRENDS_MINU)+'-unit minimum for this market.</div>');
+    host.querySelectorAll('.my-row').forEach(function(tr){ tr.onclick=function(){ var mk=tr.dataset.mk; _TR_MY_EXP[mk]=!_TR_MY_EXP[mk]; render(); }; });
   }
   if(_TR_MY_DATA){render();return;}
   fetch('/api/demand/trends/multi-year'+_trQS()).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); _TR_MY_DATA=j; render(); })
