@@ -1,3 +1,6 @@
+## v27.034 Trends — remove non-working “Open plan” button (Plan sanity)
+- Removed the Plan-sanity “Open plan” deep-link button (and its Action column) — it didn’t reliably switch the plan filter; dropped per Ben. The plan deep-link can return properly alongside the deferred override/deep-link-to-month work.
+
 ## v27.033 Trends — review fixes: caching + Refresh, R4/R5 rules, seasonal-shape expand
 - **10-minute server cache** on all 3 endpoints (keyed by grain+month-range), busted by a new **↻ Refresh** button (?refresh=1). Plan-sanity dropped **3.6s → 0.01s** on cache hit. Also folded the per-request max(month) into a cached meta lookup (removes 3 round-trips per view).
 - **Panel 3 rules complete (R1-R6):** added **R4 dead range** (plan units but no live SKUs for that category×market, via v_product_availability) and **R5 stale copy** (this-year plan identical to the prior-year plan). Both Blocked. Verified correct: they fire zero on current sandbox data (no dead ranges, no exact prior-year copies) and would fire if such cases existed.
