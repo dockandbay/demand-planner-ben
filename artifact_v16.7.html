@@ -8788,7 +8788,7 @@ function renderSnapshotsView(body){
 // ─── DEMAND ▸ Trends — Category Trends analysis report (#/demand/trends) ──────────────────────────────────────
 // Read-only, units-based. Three panels: Channel mix · Multi-year trend · Plan sanity. Scaffold here (chrome + filters
 // + panel tabs); the panels build in order Plan sanity → Multi-year → Channel mix (per the spec). No writes ever.
-var TRENDS_PANEL='plan-sanity', TRENDS_MKT='All', TRENDS_GRP='All', TRENDS_CATS=null, TRENDS_GRAIN='category', TRENDS_FROM=1, TRENDS_TO=null, TRENDS_MINU=1000, TRENDS_UNMAPPED=true, TRENDS_INCL_DISC=false, TRENDS_REFRESH=false, _trCatsDocBound=false;
+var TRENDS_PANEL='plan-sanity', TRENDS_MKT='UK', TRENDS_GRP='All', TRENDS_CATS=null, TRENDS_GRAIN='category', TRENDS_FROM=1, TRENDS_TO=null, TRENDS_MINU=1000, TRENDS_UNMAPPED=true, TRENDS_INCL_DISC=false, TRENDS_REFRESH=false, _trCatsDocBound=false;
 var _TR_MON=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 function _trCutoffNum(){ var c=(typeof _trendsCutoff==='function')?_trendsCutoff():''; return c?(parseInt(c.split('_')[1],10)||12):12; }
 function _trQS(){ var r=TRENDS_REFRESH?'&refresh=1':''; TRENDS_REFRESH=false; return '?grain='+encodeURIComponent(TRENDS_GRAIN)+'&from='+TRENDS_FROM+'&to='+TRENDS_TO+r; }   // server-affecting params (grain + month range) + one-shot cache-bust
@@ -8810,7 +8810,7 @@ function renderTrendsView(body){
     +'<div style="margin:2px 0 12px"><div style="font-size:19px;font-weight:700;letter-spacing:-.01em">Category trends</div>'
       +'<div style="font-size:11.5px;color:#64748b">Data through <b style="color:#0f172a">'+_trMonLbl(cut)+'</b>. '+esc(curL)+' is partial and excluded. History begins <b>Jan-2024</b>, so comparisons run across part-years only.</div></div>'
     +'<div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:9px 11px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'
-      +'<label style="'+LBL+'">Country <select id="tr-mkt" style="'+SEL+'">'+MKTS.map(function(m){return opt(m,TRENDS_MKT);}).join('')+'</select></label>'
+      +'<div style="display:inline-flex;align-items:center;gap:6px"><span style="'+LBL+'">Country</span>'+['UK','US','EU','AU'].map(function(m){ var on=m===TRENDS_MKT; return '<button type="button" class="tr-mkt-pill" data-m="'+m+'" style="font-size:12px;font-weight:600;border:1px solid '+(on?'#1f6fb2':'#e2e8f0')+';background:'+(on?'#1f6fb2':'#fff')+';color:'+(on?'#fff':'#334155')+';border-radius:4px;padding:3px 11px;cursor:pointer">'+m+'</button>'; }).join('')+'</div>'
       +'<label style="'+LBL+'">Group <select id="tr-grp" style="'+SEL+'">'+GROUPS.map(function(g){return opt(g,TRENDS_GRP);}).join('')+'</select></label>'
       +'<div style="position:relative"><span style="'+LBL+'">Categories </span><button type="button" id="tr-cats-btn" style="'+SEL+';cursor:pointer">'+(TRENDS_CATS&&TRENDS_CATS.size?TRENDS_CATS.size+' selected':'All')+' &#9662;</button>'
         +'<div id="tr-cats-pop" style="display:none;position:absolute;top:100%;left:0;z-index:60;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.15);padding:8px;max-height:300px;overflow:auto;min-width:210px">'
@@ -8821,7 +8821,7 @@ function renderTrendsView(body){
       +'<label style="'+LBL+'">Months <select id="tr-from" style="'+SEL+'">'+_trMonOpts(TRENDS_FROM)+'</select> <span style="color:#94a3b8">to</span> <select id="tr-to" style="'+SEL+'">'+_trMonOpts(TRENDS_TO)+'</select></label>'
       +'<label style="'+LBL+'">Min units <input id="tr-minu" value="'+esc(String(TRENDS_MINU))+'" style="'+SEL+';width:56px;text-align:right"></label>'
       +'<label style="font-size:12px;color:#334155;display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="tr-unmapped"'+(TRENDS_UNMAPPED?' checked':'')+'> Include unmapped</label>'
-      +'<label style="font-size:12px;color:#334155;display:inline-flex;align-items:center;gap:5px;cursor:pointer" title="Show categories flagged discontinued (is_active = false or null)"><input type="checkbox" id="tr-incldisc"'+(TRENDS_INCL_DISC?' checked':'')+'> Include discontinued</label>'
+      +'<label style="font-size:12px;color:#334155;display:inline-flex;align-items:center;gap:5px;cursor:pointer" title="Show categories flagged discontinued (is_active = false or null) and the Non Core category"><input type="checkbox" id="tr-incldisc"'+(TRENDS_INCL_DISC?' checked':'')+'> Include discontinued &amp; non core</label>'
       +'<span style="flex:1"></span>'
       +'<button id="tr-refresh" title="Re-run the query (data is cached for 10 minutes)" style="font-size:11px;font-weight:600;border:1px solid #e2e8f0;background:#fff;color:#334155;border-radius:4px;padding:4px 10px;cursor:pointer">&#8635; Refresh</button>'
       +'<button id="tr-csv" style="font-size:11px;font-weight:600;border:1px solid #e2e8f0;background:#fff;color:#1f6fb2;border-radius:4px;padding:4px 10px;cursor:pointer">Export CSV</button>'
@@ -8831,7 +8831,7 @@ function renderTrendsView(body){
     +'</div>'
     +'<div id="tr-panel" style="background:#fff;border:1px solid #e2e8f0;border-top:0;border-radius:0 0 4px 4px;padding:16px;min-height:200px"></div>';
   body.innerHTML=h;
-  var _m=body.querySelector('#tr-mkt'); if(_m)_m.onchange=function(){ TRENDS_MKT=this.value; drawPanel(); };
+  body.querySelectorAll('.tr-mkt-pill').forEach(function(p){ p.onclick=function(){ TRENDS_MKT=p.dataset.m; renderTrendsView(body); }; });   // single-select country pills
   var _g=body.querySelector('#tr-grp'); if(_g)_g.onchange=function(){ TRENDS_GRP=this.value; drawPanel(); };
   var _gr=body.querySelector('#tr-grain'); if(_gr)_gr.onchange=function(){ TRENDS_GRAIN=this.value; _trInvalidate(); drawPanel(); };   // grain changes server data → refetch
   var _fr=body.querySelector('#tr-from'); if(_fr)_fr.onchange=function(){ TRENDS_FROM=parseInt(this.value,10)||1; if(TRENDS_FROM>TRENDS_TO)TRENDS_TO=TRENDS_FROM; _trInvalidate(); renderTrendsView(body); };   // re-render to resync the To dropdown
@@ -8861,7 +8861,13 @@ function renderTrendsView(body){
 // Trends filters shared: category-group match (planner.categories.grouping via CAT_GROUPING) + exclude discontinued
 // (is_active=false) categories from the trend analysis. Unmapped is governed by its own toggle, not these.
 function _trGrpOk(cat){ if(TRENDS_GRP==='All')return true; try{ return (typeof CAT_GROUPING!=='undefined'&&CAT_GROUPING[cat]===TRENDS_GRP); }catch(e){ return true; } }
-function _trActiveCat(cat){ if(cat==='Unmapped'||TRENDS_INCL_DISC)return true; try{ var m=(typeof CATS_META!=='undefined')?CATS_META[cat]:null; return !(m&&(m.a===false||m.a==null)); }catch(e){ return true; } }   // discontinued = is_active false OR null; hidden unless the "include discontinued" toggle is on
+function _trActiveCat(cat){ if(cat==='Unmapped')return true;   // Unmapped is governed by its own toggle
+  try{ var m=(typeof CATS_META!=='undefined')?CATS_META[cat]:null;
+    if(!m)return false;                       // not a real category (Bundle Mixed, Sunglasses, Bath Robe, Shorts…) → always excluded
+    if(TRENDS_INCL_DISC)return true;          // toggle reveals discontinued + non-core
+    if(cat==='Non Core')return false;         // non-core → hidden by default
+    return !(m.a===false||m.a==null);         // discontinued (is_active false OR null) → hidden by default
+  }catch(e){ return true; } }
 function _trCatOk(cat){ if(TRENDS_CATS&&!TRENDS_CATS.has(cat))return false; return _trGrpOk(cat)&&_trActiveCat(cat); }
 // Rule + status explainers (tooltips).
 var _TR_RULE_TXT={ R1:'R1 · Over-plan: plan is above 150% of the best comparable year', R2:'R2 · Under-plan: plan is below 70% of the most recent comparable actual', R3:'R3 · Step change: plan ÷ latest actual is outside 0.5–2.0×', R4:'R4 · Dead range', R5:'R5 · Stale copy', R6:'R6 · Zero plan where the category still has live SKUs' };

@@ -1,3 +1,8 @@
+## v27.036 Trends — Country pills, exclude junk categories, non-core under toggle
+- **Country is now pills** (UK / US / EU / AU — no CA, no All), single-select, **default UK**, replacing the dropdown.
+- **Junk categories excluded:** product.category values with no row in the categories table (Bundle Mixed, Sunglasses, Bath Robe, Shorts) are now fully excluded from every panel (always, regardless of toggles).
+- **“Include discontinued” → “Include discontinued & non core”:** the toggle now also governs the Non Core category — hidden by default, revealed when ticked (along with is_active false/null categories).
+
 ## v27.035 Trends — left-align Multi-year, multi-select Category filter, Include-discontinued toggle
 - **Multi-year table** headers + data values now **left-aligned** (matching Plan sanity); “Mkt”→“Country”.
 - **Multi-select Category filter** on all 3 panels: a Categories dropdown (All / Clear + per-category checkboxes) that narrows every panel client-side; button shows the count.
