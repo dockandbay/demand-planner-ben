@@ -1,3 +1,7 @@
+## v27.038 Trends — Type mix split by channel (DTC set% then FBA set%)
+- **Type mix** now shows SET% **split by channel**: a **DTC set%** group (all compare-markets) then an **FBA set%** group (all compare-markets), under a two-tier header. Previously it blended DTC+FBA into one figure.
+- Endpoint returns per-channel set/master/total; each cell tooltips its own channel's SET vs MASTER units. CSV emits DTC set% and FBA set% columns per market.
+
 ## v27.037 Trends — Channel mix as market comparison matrix + new Type mix panel
 - **Channel mix rebuilt as a comparison matrix** (left-aligned): one row per category, one **FBA-share column per compare-market** (UK / US / EU / AU), each cell a mini track vs that market's own house benchmark (dark marker; red when below). **Headroom** and **Read** columns are for the selected Country. B2B still excluded.
 - **New "Type mix" panel** (after Channel mix): % of **DTC + FBA** units that are **SETS vs MASTER** (via variant_type), per category, compared across the same markets. Rolling-12. Server endpoint `/api/demand/trends/type-mix`.

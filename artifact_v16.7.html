@@ -9021,7 +9021,7 @@ function _trendsCmCsv(){ var P=_trCmPivot(); if(!P.labels.length)return;
     return [row.label].concat(P.CM.map(function(m){var r=row.mk[m];return r?(Math.round(r.fbaShare*1000)/10)+'%':'';}),P.CM.map(function(m){var r=row.mk[m];return r?(Math.round(r.gapPp*1000)/10)+'pp':'';}),[sel?Math.round(sel.headroom):'',sel?sel.read:'']).map(e2).join(','); }));
   var blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'}), u=URL.createObjectURL(blob), a=document.createElement('a'); a.href=u; a.download='trends_channel_mix.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000);
 }
-// Panel — Type mix: % of DTC+FBA sales that are SETS vs MASTER, per category, compared across markets.
+// Panel — Type mix: % of sales that are SETS vs MASTER, per category, split DTC then FBA, compared across markets.
 var _TR_TM_DATA=null;
 function _trTmRows(){ return ((_TR_TM_DATA&&_TR_TM_DATA.rows)||[]).filter(function(r){ if(!_trCatOk(r.category))return false; if(!TRENDS_UNMAPPED&&r.category==='Unmapped')return false; return true; }); }
 function _trTmPivot(){ var rows=_trTmRows(), CM=_TR_CMP_MKTS.filter(function(m){return TRENDS_CMP[m];}), by={};
@@ -9033,11 +9033,20 @@ function _trendsTypeMix(host){
   function render(){ var P=_trTmPivot(), CM=P.CM;
     function fn(n){ return (Math.round(n)||0).toLocaleString(); }
     var TH='padding:0 8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;border-bottom:1px solid #e2e8f0;text-align:left', T='padding:6px 8px;border-bottom:1px solid #f1f5f9;text-align:left';
-    function cell(r,sel){ if(!r||r.setPct==null)return '<span style="color:#cbd5e1">–</span>'; var p=Math.round(r.setPct*100);
-      return '<div style="display:flex;align-items:center;gap:6px"><div style="position:relative;width:54px;height:11px;background:#eef0f6;border-radius:2px"><div style="position:absolute;top:0;bottom:0;left:0;width:'+Math.max(2,Math.min(100,p))+'%;background:#7fbf9b;border-radius:2px"></div></div><span style="font-family:ui-monospace,Menlo,monospace'+(sel?';font-weight:700':'')+'" title="SET '+fn(r.setUnits)+' vs MASTER '+fn(r.masterUnits)+' units (DTC+FBA, rolling 12m)">'+p+'%</span></div>'; }
-    var head='<tr><th style="'+TH+'">Category</th>'+CM.map(function(m){ return '<th style="'+TH+(m===TRENDS_MKT?';color:#1f6fb2':'')+'">'+m+' set%</th>'; }).join('')+'</tr>';
-    var body2=P.labels.map(function(k){ var row=P.by[k]; return '<tr><td style="'+T+';font-weight:600;white-space:nowrap">'+esc(row.label)+'</td>'+CM.map(function(m){ return '<td style="'+T+';font-family:ui-monospace,Menlo,monospace">'+cell(row.mk[m],m===TRENDS_MKT)+'</td>'; }).join('')+'</tr>'; }).join('');
-    host.innerHTML='<div style="font-size:11px;color:#64748b;margin-bottom:10px"><b>Type mix</b> — share of <b>DTC + FBA</b> sales that are <b>SETS</b> (the rest is MASTER), rolling 12 months, per market (bars scale to the set share). Use the <b>Compare</b> markets toggle above; the selected Country column is highlighted.</div>'
+    function cell(pct,setU,masU,sel,chan){ if(pct==null)return '<span style="color:#cbd5e1">–</span>'; var p=Math.round(pct*100);
+      return '<div style="display:flex;align-items:center;gap:6px"><div style="position:relative;width:52px;height:11px;background:#eef0f6;border-radius:2px"><div style="position:absolute;top:0;bottom:0;left:0;width:'+Math.max(2,Math.min(100,p))+'%;background:#7fbf9b;border-radius:2px"></div></div><span style="font-family:ui-monospace,Menlo,monospace'+(sel?';font-weight:700':'')+'" title="'+chan+': SET '+fn(setU)+' vs MASTER '+fn(masU)+' units (rolling 12m)">'+p+'%</span></div>'; }
+    // two-tier header: DTC group then FBA group, each spanning the compare-markets
+    var GRP='padding:2px 8px 4px;font-size:10px;font-weight:700;letter-spacing:.06em;color:#475569;border-bottom:1px solid #e2e8f0;text-align:center';
+    var head='<tr><th rowspan="2" style="'+TH+';vertical-align:bottom">Category</th>'
+      +'<th colspan="'+CM.length+'" style="'+GRP+';border-left:2px solid #e2e8f0">DTC set%</th>'
+      +'<th colspan="'+CM.length+'" style="'+GRP+';border-left:2px solid #cbd5e1">FBA set%</th></tr>';
+    head+='<tr>'+CM.map(function(m,i){ return '<th style="'+TH+(m===TRENDS_MKT?';color:#1f6fb2':'')+(i===0?';border-left:2px solid #e2e8f0':'')+'">'+m+'</th>'; }).join('')
+      +CM.map(function(m,i){ return '<th style="'+TH+(m===TRENDS_MKT?';color:#1f6fb2':'')+(i===0?';border-left:2px solid #cbd5e1':'')+'">'+m+'</th>'; }).join('')+'</tr>';
+    var body2=P.labels.map(function(k){ var row=P.by[k];
+      var dtc=CM.map(function(m,i){ var r=row.mk[m]; return '<td style="'+T+';font-family:ui-monospace,Menlo,monospace'+(i===0?';border-left:2px solid #f1f5f9':'')+'">'+(r?cell(r.dtcSetPct,r.dtcSet,r.dtcMaster,m===TRENDS_MKT,'DTC'):'<span style="color:#cbd5e1">–</span>')+'</td>'; }).join('');
+      var fba=CM.map(function(m,i){ var r=row.mk[m]; return '<td style="'+T+';font-family:ui-monospace,Menlo,monospace'+(i===0?';border-left:2px solid #e2e8f0':'')+'">'+(r?cell(r.fbaSetPct,r.fbaSet,r.fbaMaster,m===TRENDS_MKT,'FBA'):'<span style="color:#cbd5e1">–</span>')+'</td>'; }).join('');
+      return '<tr><td style="'+T+';font-weight:600;white-space:nowrap">'+esc(row.label)+'</td>'+dtc+fba+'</tr>'; }).join('');
+    host.innerHTML='<div style="font-size:11px;color:#64748b;margin-bottom:10px"><b>Type mix</b> — share of sales that are <b>SETS</b> (the rest is MASTER), rolling 12 months, split <b>DTC</b> then <b>FBA</b> across markets (bars scale to the set share). Use the <b>Compare</b> markets toggle above; the selected Country columns are highlighted.</div>'
       +(CM.length?('<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'+head+body2+'</table></div>'):'<div style="color:#94a3b8;font-size:12px;padding:16px;text-align:center">Turn on at least one Compare market.</div>')
       +((CM.length&&!P.labels.length)?'<div style="color:#94a3b8;font-size:12px;padding:16px;text-align:center">No categories above the '+fn(TRENDS_MINU)+'-unit minimum.</div>':'');
   }
@@ -9046,9 +9055,10 @@ function _trendsTypeMix(host){
     .catch(function(e){ host.innerHTML='<div style="color:#b91c1c;font-size:12px;padding:16px">Could not load Type mix: '+esc(String(e&&e.message||e))+'</div>'; });
 }
 function _trendsTmCsv(){ var P=_trTmPivot(); if(!P.labels.length)return;
-  var hdr=['Category'].concat(P.CM.map(function(m){return m+' SET%';}),P.CM.map(function(m){return m+' SET units';}),P.CM.map(function(m){return m+' MASTER units';}));
+  var hdr=['Category'].concat(P.CM.map(function(m){return m+' DTC set%';}),P.CM.map(function(m){return m+' FBA set%';}));
   var e2=function(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v; };
-  var lines=[hdr.join(',')].concat(P.labels.map(function(k){ var row=P.by[k]; return [row.label].concat(P.CM.map(function(m){var r=row.mk[m];return r&&r.setPct!=null?Math.round(r.setPct*100)+'%':'';}),P.CM.map(function(m){var r=row.mk[m];return r?Math.round(r.setUnits):'';}),P.CM.map(function(m){var r=row.mk[m];return r?Math.round(r.masterUnits):'';})).map(e2).join(','); }));
+  var pc=function(v){ return v==null?'':Math.round(v*100)+'%'; };
+  var lines=[hdr.join(',')].concat(P.labels.map(function(k){ var row=P.by[k]; return [row.label].concat(P.CM.map(function(m){var r=row.mk[m];return r?pc(r.dtcSetPct):'';}),P.CM.map(function(m){var r=row.mk[m];return r?pc(r.fbaSetPct):'';})).map(e2).join(','); }));
   var blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'}), u=URL.createObjectURL(blob), a=document.createElement('a'); a.href=u; a.download='trends_type_mix.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000);
 }
 // "Summary with targets" report — three tabs: Summary (read), Edit targets (SUMM_TGT_EDIT), Target recommendations

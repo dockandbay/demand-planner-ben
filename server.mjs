@@ -983,13 +983,21 @@ app.get('/api/demand/trends/type-mix', async (req, res) => {
         WITH bounds AS ( SELECT (max(month) - interval '1 month')::date cutoff FROM planner.sales_actuals ),
         win AS ( SELECT cutoff, (cutoff - interval '11 months')::date start FROM bounds )
         SELECT ${W.catExpr} category, ${W.lblExpr} label, sa.country market,
-          sum(sa.units) FILTER (WHERE p.variant_type='SET')::numeric set_units,
-          sum(sa.units) FILTER (WHERE p.variant_type='MASTER')::numeric master_units,
+          sum(sa.units) FILTER (WHERE p.variant_type='SET' AND sa.channel='DTC')::numeric dtc_set,
+          sum(sa.units) FILTER (WHERE p.variant_type='MASTER' AND sa.channel='DTC')::numeric dtc_master,
+          sum(sa.units) FILTER (WHERE sa.channel='DTC')::numeric dtc_total,
+          sum(sa.units) FILTER (WHERE p.variant_type='SET' AND sa.channel='FBA')::numeric fba_set,
+          sum(sa.units) FILTER (WHERE p.variant_type='MASTER' AND sa.channel='FBA')::numeric fba_master,
+          sum(sa.units) FILTER (WHERE sa.channel='FBA')::numeric fba_total,
           sum(sa.units)::numeric total_units
         FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku CROSS JOIN win
         WHERE sa.channel IN ('DTC','FBA') AND sa.month >= win.start AND sa.month <= win.cutoff GROUP BY 1,2,3`);
-      const rows = r.rows.map(x => { const set = Number(x.set_units) || 0, mas = Number(x.master_units) || 0, sm = set + mas;
-        return { category: x.category, label: x.label, market: x.market, setUnits: set, masterUnits: mas, total: Number(x.total_units) || 0, setPct: sm > 0 ? set / sm : null }; });
+      const rows = r.rows.map(x => {
+        const ds = Number(x.dtc_set) || 0, dm = Number(x.dtc_master) || 0, dsm = ds + dm;
+        const fs = Number(x.fba_set) || 0, fm = Number(x.fba_master) || 0, fsm = fs + fm;
+        return { category: x.category, label: x.label, market: x.market, total: Number(x.total_units) || 0,
+          dtcSet: ds, dtcMaster: dm, dtcTotal: Number(x.dtc_total) || 0, dtcSetPct: dsm > 0 ? ds / dsm : null,
+          fbaSet: fs, fbaMaster: fm, fbaTotal: Number(x.fba_total) || 0, fbaSetPct: fsm > 0 ? fs / fsm : null }; });
       return { grain: W.grain, rows };
     });
     res.json(out);
