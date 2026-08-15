@@ -8822,11 +8822,12 @@ function renderTrendsView(body){
   var _mu=body.querySelector('#tr-minu'); if(_mu)_mu.onchange=function(){ TRENDS_MINU=Math.max(0,parseInt(String(this.value).replace(/[^0-9]/g,''),10)||0); drawPanel(); };
   var _u=body.querySelector('#tr-unmapped'); if(_u)_u.onchange=function(){ TRENDS_UNMAPPED=this.checked; drawPanel(); };
   body.querySelectorAll('.tr-tab').forEach(function(t){ t.onclick=function(){ TRENDS_PANEL=t.dataset.p; renderTrendsView(body); }; });
-  var _cv=body.querySelector('#tr-csv'); if(_cv)_cv.onclick=function(){ if(TRENDS_PANEL==='plan-sanity'&&typeof _trendsPsCsv==='function')_trendsPsCsv(); };
+  var _cv=body.querySelector('#tr-csv'); if(_cv)_cv.onclick=function(){ if(TRENDS_PANEL==='plan-sanity'&&typeof _trendsPsCsv==='function')_trendsPsCsv(); else if(TRENDS_PANEL==='multi-year'&&typeof _trendsMyCsv==='function')_trendsMyCsv(); else if(TRENDS_PANEL==='channel-mix'&&typeof _trendsCmCsv==='function')_trendsCmCsv(); };
   function drawPanel(){ var host=body.querySelector('#tr-panel'); if(!host)return;
     if(TRENDS_PANEL==='plan-sanity'){ _trendsPlanSanity(host); return; }
-    var nm=({'channel-mix':'Channel mix','multi-year':'Multi-year trend'})[TRENDS_PANEL]||'';
-    host.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:24px 4px;text-align:center"><b>'+esc(nm)+'</b> — panel building next.</div>'; }
+    if(TRENDS_PANEL==='multi-year'){ _trendsMultiYear(host); return; }
+    if(TRENDS_PANEL==='channel-mix'){ _trendsChannelMix(host); return; }
+    host.innerHTML=''; }
   drawPanel();
 }
 // Panel 3 — Plan sanity: fetch the rule-checked rows and render the table (status bar, band track, rules, deep-links).
@@ -8874,6 +8875,93 @@ function _trendsPsCsv(){ var rows=_trPsRows(); if(!rows.length)return;
   var esc2=function(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v; };
   var lines=[hdr.join(',')].concat(rows.map(function(r){ return [r.category,r.market,Math.round(r.plan),Math.round(r.latest),Math.round(r.bandLow),Math.round(r.bandHigh),(r.planVsLatest==null?'':Math.round(r.planVsLatest*100)/100),r.rules.join(' '),r.status].map(esc2).join(','); }));
   var blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'}), u=URL.createObjectURL(blob), a=document.createElement('a'); a.href=u; a.download='trends_plan_sanity.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000);
+}
+// Panel 2 — Multi-year trend: gap-to-peak headline (default sort), trend class, plan-next, suspect-month marks.
+var _TR_MY_DATA=null;
+function _trMyRows(){ return ((_TR_MY_DATA&&_TR_MY_DATA.rows)||[]).filter(function(r){
+    if(TRENDS_MKT!=='All'&&r.market!==TRENDS_MKT)return false;
+    if(!TRENDS_UNMAPPED&&r.category==='Unmapped')return false;
+    if(Math.max(r.a2024||0,r.a2025||0,r.a2026||0,r.planNext||0)<TRENDS_MINU)return false; return true; }); }
+function _trendsMultiYear(host){
+  host.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:24px 4px;text-align:center">Loading…</div>';
+  function render(){ var rows=_trMyRows();
+    var CL={ 'New high':['#e0f0e6','#166d43'], 'Recovering':['#fdf0d8','#8a5a06'], 'Two-season fall':['#FFD6D1','#9e2b1f'], 'Declining':['#FFD6D1','#9e2b1f'], 'Collapsed':['#FF746C','#40100b'] };
+    function chip(s){ var c=CL[s]||['#eef2f7','#64748b']; return '<span style="display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:3px;background:'+c[0]+';color:'+c[1]+';white-space:nowrap">'+esc(s)+'</span>'; }
+    function fn(n){ return (Math.round(n)||0).toLocaleString(); }
+    function pct(v){ return v==null?'<span style="color:#cbd5e1">n/a</span>':((v>=0?'<span style="color:#166d43">+':'<span style="color:#9e2b1f">')+Math.round(v*100)+'%</span>'); }
+    function spark(r){ var vals=[r.a2024,r.a2025,r.a2026], mx=Math.max.apply(null,vals)||1, col=(r.cls==='New high')?'#166d43':(r.cls==='Recovering'?'#b8730b':'#9e2b1f');
+      var pts=vals.map(function(v,i){ return (2+i*24)+','+(2+(1-v/mx)*12).toFixed(1); }).join(' ');
+      return '<svg width="52" height="16" viewBox="0 0 52 16"><polyline points="'+pts+'" fill="none" stroke="'+col+'" stroke-width="1.6"/></svg>'; }
+    var below=rows.filter(function(r){return r.gapToPeak!=null&&r.gapToPeak<-0.0001;}).length, tsf=rows.filter(function(r){return r.cls==='Two-season fall';}).length,
+        nh=rows.filter(function(r){return r.cls==='New high';}).length, susp=rows.reduce(function(a,r){return a+(r.suspectCount||0);},0);
+    var cards=[['Below peak',below,'of '+rows.length+' category-markets'],['Two-season fall',tsf,'down in 2025 and 2026'],['New high in 2026',nh,'peak year is current'],['Suspect months',susp,'likely stockouts, excluded']];
+    var bar='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'+cards.map(function(s){return '<div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-width:120px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;font-weight:700">'+s[0]+'</div><div style="font-family:ui-monospace,Menlo,monospace;font-size:19px;font-weight:600">'+s[1]+'</div><div style="font-size:11px;color:#94a3b8">'+s[2]+'</div></div>';}).join('')+'</div>';
+    var N='font-family:ui-monospace,Menlo,monospace;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;padding:6px 8px;border-bottom:1px solid #f1f5f9', T='padding:6px 8px;border-bottom:1px solid #f1f5f9', TH='padding:0 8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;border-bottom:1px solid #e2e8f0';
+    var head='<tr><th style="'+TH+';text-align:left">Category</th><th style="'+TH+'">Mkt</th><th style="'+TH+';text-align:right">2024</th><th style="'+TH+';text-align:right">2025</th><th style="'+TH+';text-align:right">2026</th><th style="'+TH+';text-align:center">Shape</th><th style="'+TH+';text-align:right">YoY</th><th style="'+TH+'">Peak</th><th style="'+TH+';text-align:center">2026 vs peak</th><th style="'+TH+';text-align:right">vs peak</th><th style="'+TH+';text-align:right">Plan '+((_TR_MY_DATA&&_TR_MY_DATA.planYear)||'')+'</th><th style="'+TH+';text-align:right">vs peak</th><th style="'+TH+'">Class</th></tr>';
+    var body2=rows.map(function(r){ var fill=r.gapToPeak==null?0:Math.max(0,Math.min(100,(1+r.gapToPeak)*100));
+      var track='<div style="position:relative;width:100px;height:13px;background:#eef0f6;border-radius:2px"><div style="position:absolute;top:0;bottom:0;left:0;width:'+fill+'%;background:'+(fill>=99?'#7fbf9b':'#FF746C')+';opacity:.72;border-radius:2px"></div><div style="position:absolute;top:-3px;bottom:-3px;left:100%;width:2px;background:#14202e;transform:translateX(-2px)"></div></div>';
+      var s26=(r.suspectCount>0)?'<span title="'+r.suspectCount+' suspect month(s) excluded from growth (likely stockout)" style="border-bottom:1px dotted #94a3b8;cursor:help">'+fn(r.a2026)+'</span>':fn(r.a2026);
+      return '<tr><td style="'+T+';font-weight:600;white-space:nowrap">'+esc(r.category)+'</td><td style="'+T+';font-size:11px;color:#64748b">'+esc(r.market)+'</td>'
+        +'<td style="'+N+'">'+fn(r.a2024)+'</td><td style="'+N+'">'+fn(r.a2025)+'</td><td style="'+N+'">'+s26+'</td>'
+        +'<td style="'+T+';text-align:center">'+spark(r)+'</td><td style="'+N+'">'+pct(r.yoy)+'</td><td style="'+N+';font-size:11px">'+r.peakYear+'</td>'
+        +'<td style="'+T+';text-align:center">'+track+'</td><td style="'+N+'">'+pct(r.gapToPeak)+'</td>'
+        +'<td style="'+N+'">'+(r.planNext==null?'<span style="color:#cbd5e1">n/a</span>':fn(r.planNext))+'</td><td style="'+N+'">'+pct(r.planVsPeak)+'</td>'
+        +'<td style="'+T+'">'+chip(r.cls)+'</td></tr>'; }).join('');
+    host.innerHTML=bar+'<div style="font-size:11px;color:#94a3b8;margin-bottom:8px">Sorted by <b>gap to peak</b> (most below peak first). '+susp+' suspect month(s) excluded from growth across '+rows.length+' rows.</div>'
+      +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'+head+body2+'</table></div>'
+      +(rows.length?'':'<div style="color:#94a3b8;font-size:12px;padding:16px;text-align:center">No categories above the '+fn(TRENDS_MINU)+'-unit minimum for this market.</div>');
+  }
+  if(_TR_MY_DATA){render();return;}
+  fetch('/api/demand/trends/multi-year').then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); _TR_MY_DATA=j; render(); })
+    .catch(function(e){ host.innerHTML='<div style="color:#b91c1c;font-size:12px;padding:16px">Could not load Multi-year trend: '+esc(String(e&&e.message||e))+'</div>'; });
+}
+function _trendsMyCsv(){ var rows=_trMyRows(); if(!rows.length)return;
+  var hdr=['Category','Market','2024','2025','2026','YoY','PeakYear','GapToPeak','PlanNext','PlanVsPeak','Class','SuspectMonths'];
+  var e2=function(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v; };
+  var lines=[hdr.join(',')].concat(rows.map(function(r){ return [r.category,r.market,Math.round(r.a2024),Math.round(r.a2025),Math.round(r.a2026),(r.yoy==null?'':Math.round(r.yoy*100)+'%'),r.peakYear,(r.gapToPeak==null?'':Math.round(r.gapToPeak*100)+'%'),(r.planNext==null?'':Math.round(r.planNext)),(r.planVsPeak==null?'':Math.round(r.planVsPeak*100)+'%'),r.cls,r.suspectCount].map(e2).join(','); }));
+  var blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'}), u=URL.createObjectURL(blob), a=document.createElement('a'); a.href=u; a.download='trends_multi_year.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000);
+}
+// Panel 1 — Channel mix: house benchmark vs category FBA share, gap, SKU-grain stockout proxy, headroom, read.
+var _TR_CM_DATA=null;
+function _trCmRows(){ return ((_TR_CM_DATA&&_TR_CM_DATA.rows)||[]).filter(function(r){
+    if(TRENDS_MKT!=='All'&&r.market!==TRENDS_MKT)return false;
+    if(!TRENDS_UNMAPPED&&r.category==='Unmapped')return false;
+    if(((r.dtc||0)+(r.fba||0))<TRENDS_MINU)return false; return true; }); }
+function _trendsChannelMix(host){
+  host.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:24px 4px;text-align:center">Loading…</div>';
+  function render(){ var rows=_trCmRows(), bench=(_TR_CM_DATA&&_TR_CM_DATA.benchmark)||{};
+    var RD={ 'Stocking gap':['#FFD6D1','#9e2b1f'], 'Demand gap':['#fdf0d8','#8a5a06'], 'Over-indexed':['#e0f0e6','#166d43'], 'Investigate':['#eef2f7','#64748b'] };
+    function chip(s){ var c=RD[s]||['#eef2f7','#64748b']; return '<span style="display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:3px;background:'+c[0]+';color:'+c[1]+';white-space:nowrap">'+esc(s)+'</span>'; }
+    function fn(n){ return (Math.round(n)||0).toLocaleString(); }
+    var totHead=rows.reduce(function(a,r){return a+(r.headroom||0);},0), stocking=rows.filter(function(r){return r.read==='Stocking gap';}).length;
+    var benchM=(TRENDS_MKT!=='All'?[TRENDS_MKT]:['UK','US']).filter(function(m){return bench[m]!=null;});
+    var cards=benchM.map(function(m){return [m+' benchmark',(Math.round(bench[m]*1000)/10)+'%','FBA share of DTC+FBA'];})
+      .concat([['Total headroom',fn(totHead),'units/yr if all reached benchmark'],['Stocking gaps',stocking,'low share + poor FBA coverage']]);
+    var bar='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'+cards.map(function(s){return '<div style="border:1px solid #e2e8f0;border-radius:4px;padding:8px 12px;min-width:120px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;font-weight:700">'+s[0]+'</div><div style="font-family:ui-monospace,Menlo,monospace;font-size:19px;font-weight:600">'+s[1]+'</div><div style="font-size:11px;color:#94a3b8">'+s[2]+'</div></div>';}).join('')+'</div>';
+    var N='font-family:ui-monospace,Menlo,monospace;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap;padding:6px 8px;border-bottom:1px solid #f1f5f9', T='padding:6px 8px;border-bottom:1px solid #f1f5f9', TH='padding:0 8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;border-bottom:1px solid #e2e8f0';
+    var head='<tr><th style="'+TH+';text-align:left">Category</th><th style="'+TH+'">Mkt</th><th style="'+TH+';text-align:right">DTC 12m</th><th style="'+TH+';text-align:right">FBA 12m</th><th style="'+TH+';text-align:right">FBA share</th><th style="'+TH+';text-align:center">vs benchmark</th><th style="'+TH+';text-align:right">Gap</th><th style="'+TH+';text-align:right">SKU-mo no FBA</th><th style="'+TH+';text-align:right">Headroom</th><th style="'+TH+'">Read</th></tr>';
+    var body2=rows.map(function(r){ var short=r.gapPp<0, fillPct=Math.max(0,Math.min(100,r.fbaShare*100)), refPct=Math.max(0,Math.min(100,r.benchmark*100));
+      var track='<div style="position:relative;width:112px;height:13px;background:#eef0f6;border-radius:2px"><div style="position:absolute;top:0;bottom:0;left:0;width:'+fillPct+'%;background:'+(short?'#FF746C':'#7fbf9b')+';opacity:.72;border-radius:2px"></div><div style="position:absolute;top:-3px;bottom:-3px;left:'+refPct+'%;width:2px;background:#14202e"></div></div>';
+      var gap='<span style="color:'+(short?'#9e2b1f':'#166d43')+';font-weight:600">'+(r.gapPp>=0?'+':'')+(Math.round(r.gapPp*1000)/10)+'pp</span>';
+      var cov=r.coverage==null?'<span style="color:#cbd5e1">thin</span>':'<span'+(r.coverage>0.25?' style="color:#9e2b1f;font-weight:700"':'')+'>'+Math.round(r.coverage*100)+'%</span>';
+      return '<tr><td style="'+T+';font-weight:600;white-space:nowrap">'+esc(r.category)+'</td><td style="'+T+';font-size:11px;color:#64748b">'+esc(r.market)+'</td>'
+        +'<td style="'+N+'">'+fn(r.dtc)+'</td><td style="'+N+'">'+fn(r.fba)+'</td><td style="'+N+'">'+(Math.round(r.fbaShare*1000)/10)+'%</td>'
+        +'<td style="'+T+';text-align:center">'+track+'</td><td style="'+N+'">'+gap+'</td><td style="'+N+'">'+cov+'</td>'
+        +'<td style="'+N+';font-weight:'+(r.headroom>=1000?'700':'400')+'">'+(r.headroom>=1?('+'+fn(r.headroom)):'<span style="color:#94a3b8;font-size:11px">at benchmark</span>')+'</td>'
+        +'<td style="'+T+'">'+chip(r.read)+'</td></tr>'; }).join('');
+    host.innerHTML=bar+'<div style="font-size:11px;color:#94a3b8;margin-bottom:8px">B2B excluded. <b>Headroom</b> = DTC re-indexed at the house benchmark minus actual FBA — a size-of-prize, not a forecast. <b>SKU-mo no FBA</b> is the stockout proxy (SKU grain). Benchmarks us vs ourselves, not the Amazon category.</div>'
+      +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'+head+body2+'</table></div>'
+      +(rows.length?'':'<div style="color:#94a3b8;font-size:12px;padding:16px;text-align:center">No categories above the '+fn(TRENDS_MINU)+'-unit minimum for this market.</div>');
+  }
+  if(_TR_CM_DATA){render();return;}
+  fetch('/api/demand/trends/channel-mix').then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); _TR_CM_DATA=j; render(); })
+    .catch(function(e){ host.innerHTML='<div style="color:#b91c1c;font-size:12px;padding:16px">Could not load Channel mix: '+esc(String(e&&e.message||e))+'</div>'; });
+}
+function _trendsCmCsv(){ var rows=_trCmRows(); if(!rows.length)return;
+  var hdr=['Category','Market','DTC12m','FBA12m','FBAShare','Benchmark','GapPp','SkuMonthsNoFbaPct','Headroom','Read'];
+  var e2=function(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v; };
+  var lines=[hdr.join(',')].concat(rows.map(function(r){ return [r.category,r.market,Math.round(r.dtc),Math.round(r.fba),(Math.round(r.fbaShare*1000)/10)+'%',(Math.round(r.benchmark*1000)/10)+'%',(Math.round(r.gapPp*1000)/10)+'pp',(r.coverage==null?'':Math.round(r.coverage*100)+'%'),Math.round(r.headroom),r.read].map(e2).join(','); }));
+  var blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'}), u=URL.createObjectURL(blob), a=document.createElement('a'); a.href=u; a.download='trends_channel_mix.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000);
 }
 // "Summary with targets" report — three tabs: Summary (read), Edit targets (SUMM_TGT_EDIT), Target recommendations
 // (the embedded recs, formerly a standalone drawer). The tab bar sits outside the content div so each tab's own
