@@ -1,3 +1,12 @@
+## v27.040 Prepack set mapping (PP- prepacks offset mapped set demand)
+- **New feature.** A prepack SKU (PP-…) maps to the build-on-fly SET whose demand its on-hand offsets. New table `planner.prepack_map` (**migration 233**), seeded from the CHILD-Prepack CSV (59 rows).
+- **Buy plan:** in the SET explosion, the mapped prepack's on-hand is drawn down against the set's monthly demand (carried forward); only the **uncovered** remainder explodes into `set_bom` components. While prepack stock fully covers a month → **0 component buy** that month. Sandbox impact: **-2,260u** across 22 towel-component pairs (441,702 → 439,442).
+- **Prepack stock** rides in via a new `PREPACK_STOCK` inject ({prepack_sku:{wh:qty}}) from `v_product_inventory`, since prepacks are out of `SKUM` scope.
+- **Demand rail:** new green **"PP"** badge on a set row → hover shows prepack on-hand + set forecast covered/remaining that month (carried forward). Driven by `PREPACK_COVER`.
+- **Search:** typing a prepack (PP-) code in the demand-plan SKU search resolves to its mapped set row (`skuMatchQ`). Prepacks stay excluded from demand lines + buy (out of scope).
+- **Config:** CONFIG ▸ BOM ▸ **Prepack sets** — list/add/delete/upload prepack→set mappings. Endpoints `GET /api/supply/prepack-map`, POST `prepack-map-{save,delete,upload}`.
+- **Sandbox seed (2026-08-15):** reseeded `sales_actuals` for UK/US/EU/AU from the "EXCLUDE B2B ORDERS" Airtable exports + refreshed `products` on-hand/classification from SKU_CHILD grid. (CA untouched.)
+
 ## v27.039 Trends — Plan sanity "vs latest" now a % change
 - The Plan-sanity **"vs latest"** column is now expressed as a **% change** vs this-year actual (e.g. −47%) instead of a ×-multiplier. Decreases show **red** (bold), increases green. Header → "vs latest %"; CSV column → PlanVsLatestPct. R3 tolerance is −50% to +100%.
 

@@ -331,6 +331,7 @@ td.has-rail{position:relative}
 .cell-rail .cf-n{color:#0e7490}
 .cell-rail .cf-s{color:#b45309;text-decoration:line-through}
 .cell-rail .cf-r{color:#be185d;cursor:pointer}
+.cell-rail .cf-pp{color:#059669;font-size:7.5px;letter-spacing:-.5px;cursor:help}
 #fc-note-pop{position:absolute;z-index:100050;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 30px rgba(15,23,42,.18);padding:10px 12px;width:300px;font-size:12px;color:#0f172a;text-align:left}
 #fc-note-tip{position:fixed;z-index:100060;max-width:300px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none;display:none;text-align:left}
 td.stk{position:sticky;left:0;z-index:6;background:#fff;text-align:left;width:160px;min-width:160px;max-width:160px}
@@ -1314,6 +1315,14 @@ var BRANCH_FREIGHT={};   // {uk:{air,sea days},…} — expedite freight leads f
 var TRANSFER_LEADS={};   // {UK:{US:6,EU:2,AU:8},…} — inter-market 3PL→3PL transfer lead times (weeks); missing lane = we don't transfer that way. Server-injected (migration 171).
 var KLAVIYO_BIS={};      // Klaviyo back-in-stock: {sku:{UK:n,US:n,…}, _at:'YYYY-MM-DD'} — server-injected (SUG-0018). DEMAND plan 🔔 badge.
 var SET_BOM={};          // Build-on-fly SETS BOM: {output_set_sku:[{sku:input_sku,qty:input_quantity}]} — server-injected from planner.set_bom. Buy plan explodes set demand into these components (SETS feature P2).
+var PREPACK_MAP={};      // Prepack set mapping: {prepack_sku:set_sku} — server-injected from planner.prepack_map. Prepack (PP-) on-hand offsets the mapped set's demand (drawn down monthly); PP- SKUs excluded from demand lines + buy; a demand search for a PP- SKU resolves to its set. See PREPACK_BY_SET / prepackSetOf().
+var PREPACK_BY_SET={};   // reverse of PREPACK_MAP, built at init: {set_sku:[prepack_sku,…]} (a set may be fulfilled by >1 prepack colour/variant).
+try{ Object.keys(PREPACK_MAP).forEach(function(pp){ var s=PREPACK_MAP[pp]; if(s)(PREPACK_BY_SET[s]=PREPACK_BY_SET[s]||[]).push(pp); }); }catch(e){}
+function isPrepackSku(sku){ return !!(sku && PREPACK_MAP[sku]); }            // true if this SKU is a mapped prepack (PP-…) — hidden from demand lines + buy
+function prepackSetOf(sku){ return (sku && PREPACK_MAP[sku]) || null; }      // prepack SKU → the set SKU whose demand it fulfils (or null)
+function prepacksForSet(setSku){ return (setSku && PREPACK_BY_SET[setSku]) || null; }   // set SKU → [prepack SKUs] fulfilling it (or null)
+var PREPACK_STOCK={};    // server-injected prepack on-hand {prepack_sku:{wh:qty}} — prepacks are out of SKUM scope, so their stock rides separately for the buy-plan netting.
+var PREPACK_COVER={};    // filled during buildLiveDemand §4: {"setSku|CO|fym":{onHand,fc,covered,remaining}} — drives the demand-rail "PP" badge (prepack stock drawn down against set demand, carried forward).
 var BIS_CFG={take_rate:35};   // SUG-0018 P2: % of waiting subscribers → suggested forecast uplift (real conversion ~30-40%; also signals strong sold-out interest). app_settings-injected.
 function bisCount(sku,mkt){ try{ return (KLAVIYO_BIS[sku]&&KLAVIYO_BIS[sku][mkt])||0; }catch(e){ return 0; } }
 function bisUplift(sku,mkt){ var n=bisCount(sku,mkt); return n>0?Math.round(n*(Number(BIS_CFG.take_rate)||35)/100):0; }   // enhanced-demand units
@@ -1838,7 +1847,7 @@ function _fbaTrfShowList(){ var p=document.getElementById('fba-trf-list');
 // Clear all overrides + ticks, then re-render.
 // SKU filter supports a LIST: split on whitespace/commas/semicolons/newlines; match if the SKU
 // contains ANY token (so you can paste many SKUs to filter the view).
-function skuMatchQ(sku,q){ if(!q)return true; var toks=String(q).toLowerCase().split(/[\s,;]+/).filter(Boolean); if(!toks.length)return true; var sl=String(sku).toLowerCase(); var m=(typeof SKUM!=='undefined')?SKUM[sku]:null; var nl=(m&&m.n)?String(m.n).toLowerCase():''; return toks.some(function(t){return sl.indexOf(t)>=0||(nl&&nl.indexOf(t)>=0);}); }   // match SKU code OR product name
+function skuMatchQ(sku,q){ if(!q)return true; var toks=String(q).toLowerCase().split(/[\s,;]+/).filter(Boolean); if(!toks.length)return true; var sl=String(sku).toLowerCase(); var m=(typeof SKUM!=='undefined')?SKUM[sku]:null; var nl=(m&&m.n)?String(m.n).toLowerCase():''; return toks.some(function(t){ if(sl.indexOf(t)>=0||(nl&&nl.indexOf(t)>=0))return true; if(typeof PREPACK_MAP!=='undefined'){var _s=PREPACK_MAP[t.toUpperCase()]; if(_s&&String(_s).toLowerCase()===sl)return true;} return false; }); }   // match SKU code OR product name; a prepack (PP-) code resolves to its mapped set row
 try{ window.skuMatchQ=skuMatchQ; }catch(_e){}   // BUGFIX: skuMatchQ is defined INSIDE the BP IIFE; expose it globally so the DEMAND module (filteredSkus / buildPlanDownload) can call it. Without this, any SKU-search in the DEMAND plan threw ReferenceError and aborted the whole grid render → "nothing shows".
 function fbaClearAll(){
   for(const k in FBA_OV)delete FBA_OV[k];
@@ -6162,11 +6171,17 @@ function cellRailForKey(nk){ if(!nk)return ''; var p=nk.split('|'); var level=p[
   var calTip=isSku?'':calTipHtml(item,co,m);
   var hasNote=(typeof FC_NOTES!=='undefined'&&FC_NOTES[nk]&&FC_NOTES[nk].length);
   var locked=(isSku&&typeof SMOOTH_LOCKS!=='undefined'&&SMOOTH_LOCKS[nk]);
+  var ppc=(isSku&&typeof PREPACK_COVER!=='undefined')?PREPACK_COVER[item+'|'+(co||'').toUpperCase()+'|'+m]:null;   // prepack cover for this set·country·month
   var o='';
   if(biTip)o+='<span class="cf cf-i" data-bi-tip="'+biTip.replace(/"/g,'&quot;')+'">i</span>';
   if(calTip)o+='<span class="cf cf-c" data-cal-tip="'+calTip.replace(/"/g,'&quot;')+'">C</span>';
   if(hasNote)o+='<span class="cf cf-n" data-nk="'+nk+'" title="'+cellNoteTitle(nk).replace(/"/g,'&quot;')+'">N</span>';
   if(locked)o+='<span class="cf cf-s" title="Do not smooth — this SKU forecast is locked; smoothing leaves it fixed, only a manual override changes it">S</span>';
+  if(ppc){ var _r=function(n){return Math.round(Number(n)||0).toLocaleString();};
+    var _pl=(PREPACK_BY_SET[item]||[]); var _pt='Prepack cover — '+_r(ppc.onHand)+'u on-hand'+(_pl.length?(' ('+_pl.join(', ')+')'):'')
+      +' · this month covers '+_r(ppc.covered)+' of '+_r(ppc.fc)+' set demand · '+_r(ppc.remaining)+'u prepack left after'
+      +(ppc.covered>=ppc.fc&&ppc.fc>0?' · no component buy this month':'');
+    o+='<span class="cf cf-pp" title="'+_pt.replace(/"/g,'&quot;')+'">PP</span>'; }
   if(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES&&typeof FC_CHANGE_KEYS!=='undefined'&&FC_CHANGE_KEYS.has(nk)
      && !(typeof HIDE_PAST_CHANGES!=='undefined'&&HIDE_PAST_CHANGES&&typeof CUR_MONTH!=='undefined'&&m<CUR_MONTH))   // hide R on past months when the setting is on
      o+='<span class="cf cf-r" data-nk="'+nk+'" title="Record of change — click to view history">R</span>';
@@ -12926,6 +12941,7 @@ function buildLiveDemand(){
     if(typeof SET_BOM!=='object'||!SET_BOM)return;
     var setSkus=Object.keys(SET_BOM); if(!setSkus.length)return;
     var skips={};
+    Object.keys(PREPACK_COVER).forEach(function(k){ delete PREPACK_COVER[k]; });   // idempotent across rebuilds (prepack netting overlay)
     // Clear any prior explosion overlay first (idempotent across rebuilds; section 1 already cleared md.demand.DTC forecast months).
     Object.keys(BP_DATA.products).forEach(function(sku){ var mk=BP_DATA.products[sku].mkts; if(!mk)return;
       Object.keys(mk).forEach(function(co){ delete mk[co].demand_sets; delete mk[co].demand_sets_src; }); });
@@ -12957,6 +12973,20 @@ function buildLiveDemand(){
             if(fc>0){ chFC[fym]=fc; setFC[fym]=(setFC[fym]||0)+fc; }
           });
         });
+        // PREPACK netting (prepack feature): a mapped prepack's (PP-…) on-hand stock fulfils this set's demand
+        // directly, so draw it down against setFC month-by-month (carried forward). Only the UNCOVERED remainder
+        // explodes into components below — while prepack stock fully covers a month, that month buys 0 components.
+        // Prepack stock is per-country: sum the prepack SKUs' on-hand across this country's warehouses.
+        (function(){
+          var pps=prepacksForSet(setSku); if(!pps||!pps.length)return;
+          var ppOpen=0;
+          pps.forEach(function(pp){ var iv=PREPACK_STOCK[pp]||{}; Object.keys(iv).forEach(function(wh){ if(wh.indexOf(ctry+'_')===0)ppOpen+=Number(iv[wh])||0; }); });
+          if(ppOpen<=0)return;
+          var rem2=ppOpen;
+          LIVE_FC_MONTHS.forEach(function(fym){ var d=setFC[fym]||0; if(d<=0){ if(rem2>0)PREPACK_COVER[setSku+'|'+co+'|'+fym]={onHand:ppOpen,fc:0,covered:0,remaining:rem2}; return; }
+            var cov=Math.min(d,rem2); rem2-=cov; setFC[fym]=d-cov;
+            PREPACK_COVER[setSku+'|'+co+'|'+fym]={onHand:ppOpen,fc:d,covered:cov,remaining:rem2}; });
+        })();
         if(!Object.keys(setFC).length)return;
         comps.forEach(function(cc){
           var cs=cc&&cc.sku, q=Number(cc&&cc.qty)||0; if(!cs||q<=0)return;

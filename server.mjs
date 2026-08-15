@@ -152,6 +152,29 @@ async function buildSetBom() {
   } catch { /* table absent pre-migration 229 → empty map (no explosion) */ }
   return out;
 }
+// Prepack set mapping → {prepack_sku: set_sku}. A PP- prepack's on-hand stock offsets the mapped SET's demand
+// (drawn down monthly, carried forward); uncovered demand explodes via set_bom. Prepack SKUs are excluded from the
+// demand plan lines + buy plan, and a demand-plan search for a prepack SKU resolves to its set. See migration 233.
+async function buildPrepackMap() {
+  const out = {};
+  try {
+    (await pool.query(`SELECT prepack_sku, set_sku FROM planner.prepack_map`)).rows.forEach(r => { out[r.prepack_sku] = r.set_sku; });
+  } catch { /* table absent pre-migration 233 → empty map (feature inert) */ }
+  return out;
+}
+// Prepack on-hand by SKU/warehouse → {prepack_sku:{wh:qty}}. Prepack SKUs are out of planning scope so they are NOT
+// in SKUM; the buy-plan netting needs their stock separately. Sourced from v_product_inventory (same on-hand the app
+// uses), restricted to the SKUs in prepack_map.
+async function buildPrepackStock() {
+  const out = {};
+  try {
+    (await pool.query(`SELECT i.sku, i.warehouse wh, i.available qty FROM planner.v_product_inventory i
+                       JOIN planner.prepack_map m ON m.prepack_sku = i.sku WHERE i.available > 0`)).rows.forEach(r => {
+      (out[r.sku] = out[r.sku] || {})[r.wh] = Number(r.qty) || 0;
+    });
+  } catch { /* tables absent → empty (no netting) */ }
+  return out;
+}
 const SUPPLY_INJECT = loadInject();
 // Dev convenience: re-read the artefact + supply inject on each page load so edits show on a refresh WITHOUT
 // restarting the server (the boot-time consts above are kept for server-side global parsing + prod speed).
@@ -631,6 +654,7 @@ const CONFIG_WRITE = [   // config reference-data writes — editable by anyone 
   /^\/api\/supply\/supplier-create$/, /^\/api\/supply\/key-account/, /^\/api\/supply\/batch\//,
   /^\/api\/supply\/batch-create$/, /^\/api\/supply\/production-create$/, /^\/api\/supply\/prod-number\//,
   /^\/api\/supply\/portal-user/, /^\/api\/supply\/manufacturing-bom-(save|delete)$/, /^\/api\/supply\/set-bom-(save|delete|upload)$/,
+  /^\/api\/supply\/prepack-map-(save|delete|upload)$/,
   /^\/api\/supply\/manufacturing-accept$/, /^\/api\/supply\/manufacturing-stock$/, /^\/api\/supply\/settings$/,
 ];
 function requiredCap(method, p) {
@@ -1168,7 +1192,7 @@ app.get('/', async (req, res) => {
     const _vals = await getDataVals();   // in-process → KV (cold start, off-Supabase) → Supabase build; SWR handled inside
     const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS, SA_EXTRA, GBP_RATE, BRANCH_FREIGHT, TRANSFER_LEADS, CAT_ASP_GBP, LOCKED_FC] = _vals;
     // Fetched fresh (not in the data cache); independent of each other, so run concurrently.
-    const [KLAVIYO_BIS, MKT_COLORS, SET_BOM] = await Promise.all([buildKlaviyoBis(), buildMktColors(), buildSetBom()]);   // SET_BOM = {output_set_sku:[{sku,qty}]} SETS explosion
+    const [KLAVIYO_BIS, MKT_COLORS, SET_BOM, PREPACK_MAP, PREPACK_STOCK] = await Promise.all([buildKlaviyoBis(), buildMktColors(), buildSetBom(), buildPrepackMap(), buildPrepackStock()]);   // SET_BOM = {output_set_sku:[{sku,qty}]} SETS explosion; PREPACK_MAP = {prepack_sku:set_sku}; PREPACK_STOCK = {prepack_sku:{wh:qty}}
     let html = DEV ? loadHTML() : HTML;
     html = replaceGlobal(html, 'DATA', JSON.stringify(DATA));
     html = replaceGlobal(html, 'FC_CURRENT', JSON.stringify(FC_CURRENT));
@@ -1184,6 +1208,8 @@ app.get('/', async (req, res) => {
     //  the buy feed builds dem.ZAL from the live cascade, and /api/supply/zalando/data serves the send-to-Zalando tab.)
     html = replaceGlobal(html, 'KLAVIYO_BIS', JSON.stringify(KLAVIYO_BIS));   // {sku:{UK:n,…}, _at:'YYYY-MM-DD'} — DEMAND BIS badge
     html = replaceGlobal(html, 'SET_BOM', JSON.stringify(SET_BOM || {}));     // {output_set_sku:[{sku,qty}]} — SETS build-on-fly explosion map
+    html = replaceGlobal(html, 'PREPACK_MAP', JSON.stringify(PREPACK_MAP || {}));   // {prepack_sku:set_sku} — prepack stock offsets mapped set demand; PP- excluded from demand+buy
+    html = replaceGlobal(html, 'PREPACK_STOCK', JSON.stringify(PREPACK_STOCK || {}));   // {prepack_sku:{wh:qty}} — prepack on-hand (out of SKUM scope; feeds buy-plan netting)
     html = replaceGlobal(html, 'MKT_COLORS', JSON.stringify(MKT_COLORS));     // reusable market colour palette
     html = replaceGlobal(html, 'BRANCH_FREIGHT', JSON.stringify(BRANCH_FREIGHT || {}));
     html = replaceGlobal(html, 'CAT_ASP_GBP', JSON.stringify(CAT_ASP_GBP || {}));
@@ -3406,6 +3432,9 @@ app.get('/api/supply/:section', async (req, res, next) => {
         return res.json(await q(`SELECT parent_sku, component_sku, qty::numeric qty FROM planner.manufacturing_bom ORDER BY parent_sku, component_sku`));
       case 'set-bom':             // CONFIG ▸ BOM ▸ Build on Fly Sets — SET output SKU → component input SKU × qty
         return res.json(await q(`SELECT output_sku, input_sku, input_quantity::numeric input_quantity FROM planner.set_bom ORDER BY output_sku, input_sku`));
+      case 'prepack-map':         // CONFIG ▸ BOM ▸ Prepack sets — prepack (PP-) SKU → the SET SKU whose demand its on-hand offsets
+        try { return res.json(await q(`SELECT prepack_sku, set_sku FROM planner.prepack_map ORDER BY set_sku, prepack_sku`)); }
+        catch { return res.json([]); }   // table absent pre-migration 233
       case 'manufacturing': {     // SUPPLY ▸ PURCHASE ORDERS ▸ Manufacturing — finished-bundle demand vs manufacturing-PO component supply
         const data = await manufacturingData();
         // Recently CLOSED manufacturing orders (branch = Manufacturing, status complete, closed in the last 30 days),
@@ -6655,6 +6684,45 @@ app.post('/api/supply/set-bom-upload', async (req, res) => {
       if (!isFinite(qty) || qty <= 0) { errors.push(out + '→' + inp + ': bad qty'); continue; }
       await client.query(`INSERT INTO planner.set_bom (output_sku, input_sku, input_quantity, updated_at)
         VALUES ($1,$2,$3, now()) ON CONFLICT (output_sku, input_sku) DO UPDATE SET input_quantity=$3, updated_at=now()`, [out, inp, qty]);
+      n++;
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true, saved: n, errors: errors.slice(0, 10) });
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
+// CONFIG ▸ BOM ▸ Prepack sets — upsert one prepack→set mapping (prepack_sku is unique; a prepack maps to one set).
+app.post('/api/supply/prepack-map-save', async (req, res) => {
+  const b = req.body || {};
+  const pp = String(b.prepack_sku || '').trim(), set = String(b.set_sku || '').trim();
+  if (!pp || !set) return res.status(400).json({ error: 'prepack_sku and set_sku required' });
+  try {
+    await pool.query(`INSERT INTO planner.prepack_map (prepack_sku, set_sku, updated_at)
+      VALUES ($1,$2, now()) ON CONFLICT (prepack_sku) DO UPDATE SET set_sku=$2, updated_at=now()`, [pp, set]);
+    res.json({ ok: true, prepack_sku: pp, set_sku: set });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// CONFIG ▸ BOM ▸ Prepack sets — delete one prepack mapping.
+app.post('/api/supply/prepack-map-delete', async (req, res) => {
+  const pp = String((req.body || {}).prepack_sku || '').trim();
+  if (!pp) return res.status(400).json({ error: 'prepack_sku required' });
+  try { const r = await pool.query(`DELETE FROM planner.prepack_map WHERE prepack_sku=$1`, [pp]); res.json({ ok: true, prepack_sku: pp, deleted: r.rowCount }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+// CONFIG ▸ BOM ▸ Prepack sets — bulk upload rows [{prepack_sku,set_sku}] (replace=true wipes first).
+app.post('/api/supply/prepack-map-upload', async (req, res) => {
+  const b = req.body || {};
+  const rows = Array.isArray(b.rows) ? b.rows : [];
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    if (b.replace) await client.query(`DELETE FROM planner.prepack_map`);
+    let n = 0; const errors = [];
+    for (const r of rows) {
+      const pp = String((r && r.prepack_sku) || '').trim(), set = String((r && r.set_sku) || '').trim();
+      if (!pp || !set) { errors.push('missing prepack/set on a row'); continue; }
+      await client.query(`INSERT INTO planner.prepack_map (prepack_sku, set_sku, updated_at)
+        VALUES ($1,$2, now()) ON CONFLICT (prepack_sku) DO UPDATE SET set_sku=$2, updated_at=now()`, [pp, set]);
       n++;
     }
     await client.query('COMMIT');

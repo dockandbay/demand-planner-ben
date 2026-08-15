@@ -7478,13 +7478,49 @@
             } });
         }).catch(function(e){ b.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>'; }); }
       // CONFIG ▸ BOM — one menu, two inner sub-tabs: Manufacturing (finished-goods) + Build on Fly Sets (set explosion).
-      SUBS['mfgbom']=function(){ var tab=_cfgBomInner==='set'?'set':'mfg';
+      SUBS['mfgbom']=function(){ var tab=(_cfgBomInner==='set'||_cfgBomInner==='prepack')?_cfgBomInner:'mfg';
         b.innerHTML='<div style="display:flex;gap:2px;border-bottom:1px solid #e5e7eb;margin-bottom:2px">'
-          +[['mfg','Manufacturing'],['set','Build on Fly Sets']].map(function(t){ var on=t[0]===tab; return '<button class="cfg-bom-tab" data-t="'+t[0]+'" style="cursor:pointer;border:none;background:none;padding:7px 15px;font-size:12px;font-weight:'+(on?'700':'500')+';color:'+(on?'#0f172a':'#64748b')+';border-bottom:2px solid '+(on?'#2563eb':'transparent')+'">'+t[1]+'</button>'; }).join('')
+          +[['mfg','Manufacturing'],['set','Build on Fly Sets'],['prepack','Prepack sets']].map(function(t){ var on=t[0]===tab; return '<button class="cfg-bom-tab" data-t="'+t[0]+'" style="cursor:pointer;border:none;background:none;padding:7px 15px;font-size:12px;font-weight:'+(on?'700':'500')+';color:'+(on?'#0f172a':'#64748b')+';border-bottom:2px solid '+(on?'#2563eb':'transparent')+'">'+t[1]+'</button>'; }).join('')
           +'</div><div id="bom-inner"></div>';
         b.querySelectorAll('.cfg-bom-tab').forEach(function(x){ x.onclick=function(){ _cfgBomInner=x.dataset.t; SUBS['mfgbom'](); }; });
         var inner=document.getElementById('bom-inner');
-        if(tab==='set')renderSetBomInner(inner); else renderMfgBomInner(inner); };
+        if(tab==='set')renderSetBomInner(inner); else if(tab==='prepack')renderPrepackInner(inner); else renderMfgBomInner(inner); };
+      // Prepack sets — a prepack (PP-) SKU's on-hand offsets the mapped SET's demand (drawn down monthly, carried
+      // forward); the uncovered remainder explodes into the set's components. Prepack SKUs are excluded from the demand
+      // plan lines + buy plan; a demand-plan search for a prepack SKU resolves to its set.
+      function renderPrepackInner(host){ host.innerHTML='<div class="count">Loading…</div>';
+        Promise.all([fetch('/api/supply/prepack-map').then(function(r){return r.json();}), fetch('/api/supply/skus').then(function(r){return r.json();}).catch(function(){return [];})]).then(function(R){
+          var rows=Array.isArray(R[0])?R[0]:[]; var skus=(Array.isArray(R[1])?R[1]:[]).filter(function(s){return s&&s.sku;});
+          function reload(){ fetch('/api/supply/prepack-map').then(function(r){return r.json();}).then(function(rw){ rows=Array.isArray(rw)?rw:[]; draw(); }); }
+          function draw(){ var byS={}; rows.forEach(function(x){(byS[x.set_sku]=byS[x.set_sku]||[]).push(x.prepack_sku);}); var sets=Object.keys(byS).sort();
+            var h='<div class="sect-h">Prepack sets <span class="mut tiny">(a prepack SKU’s on-hand offsets the mapped set’s demand before it explodes into components; prepacks are hidden from demand lines + buy, and a demand search for a prepack resolves to its set)</span> <button class="tool-badge bg-blue" id="ppm-upload" style="cursor:pointer;border:none;margin-left:8px">⬆ Upload</button></div>';
+            h+='<div class="count" style="margin-top:8px">'+rows.length+' prepack'+(rows.length===1?'':'s')+' → '+sets.length+' set'+(sets.length===1?'':'s')+'</div>';
+            h+=rows.length?('<div style="margin-top:4px"><table style="border-collapse:collapse;font-size:12px;width:100%;table-layout:fixed"><colgroup><col style="width:260px"><col><col style="width:80px"></colgroup><thead><tr>'
+              +['Set','Prepack SKUs',''].map(function(hd,i){return '<th style="text-align:'+(i===2?'right':'left')+';padding:4px 10px 6px 0;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #e5e7eb;white-space:nowrap">'+hd+'</th>';}).join('')+'</tr></thead><tbody>'
+              +sets.map(function(s){ var pps=byS[s]; return '<tr style="border-bottom:1px solid #f1f5f9">'
+                +'<td style="padding:6px 10px 6px 0;font-weight:700;vertical-align:top;word-break:break-word">'+esc(s)+'</td>'
+                +'<td style="padding:6px 10px 6px 0;vertical-align:top;white-space:normal;word-break:break-word;line-height:1.5">'+pps.map(function(p){ return '<span style="display:inline-flex;align-items:center;gap:5px;margin:0 6px 4px 0">'+esc(p)+' <button class="ppm-del" data-p="'+esc(p)+'" title="Remove" style="cursor:pointer;border:1px solid #fecaca;background:#fef2f2;color:#b91c1c;padding:0 6px;border-radius:5px;font-size:11px;line-height:1.6">×</button></span>'; }).join('')+'</td>'
+                +'<td style="padding:6px 0;text-align:right;color:#94a3b8;white-space:nowrap;vertical-align:top">'+pps.length+' pp'+(pps.length===1?'':'s')+'</td></tr>'; }).join('')
+              +'</tbody></table></div>'):'<div class="count" style="padding:10px 2px">No prepacks configured yet — Upload, or add one below.</div>';
+            h+='<div style="margin-top:14px;padding-top:10px;border-top:1px solid #eef2f7"><div style="font-weight:700;font-size:12px;margin-bottom:5px">Add / update a prepack</div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><input class="fci" id="ppm-pp" list="ppm-skus" placeholder="prepack SKU (PP-…)" style="width:260px"><span class="mut">→</span><input class="fci" id="ppm-set" list="ppm-skus" placeholder="set SKU" style="width:260px"><button class="save-btn" id="ppm-add" style="background:#16a34a;color:#fff;border-color:#15803d;font-weight:700">Add</button><span id="ppm-msg" class="mut tiny"></span></div><datalist id="ppm-skus">'+skus.slice(0,4000).map(function(s){return '<option value="'+esc(s.sku)+'">';}).join('')+'</datalist></div>';
+            host.innerHTML=h;
+            host.querySelector('#ppm-add').onclick=function(){ var pp=host.querySelector('#ppm-pp').value.trim(), set=host.querySelector('#ppm-set').value.trim(), msg=host.querySelector('#ppm-msg'); if(!pp||!set){msg.style.color='#dc2626';msg.textContent='prepack + set required';return;} msg.style.color='#64748b';msg.textContent='Saving…'; fetch('/api/supply/prepack-map-save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({prepack_sku:pp,set_sku:set})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;return;} reload(); }); };
+            host.querySelectorAll('.ppm-del').forEach(function(bd){ bd.onclick=function(){ var p=bd.dataset.p; if(!confirm('Remove prepack "'+p+'"?'))return; fetch('/api/supply/prepack-map-delete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({prepack_sku:p})}).then(function(r){return r.json();}).then(function(){ reload(); }); }; });
+            var ub=host.querySelector('#ppm-upload'); if(ub)ub.onclick=function(){ _prepackUpload(reload); };
+          }
+          draw();
+        }).catch(function(e){ host.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(String(e))+'</div>'; }); }
+      // Paste popup: prepack_sku, set_sku (comma/tab per line) → bulk upsert.
+      function _prepackUpload(onDone){ var ex=document.getElementById('ppm-paste'); if(ex)ex.remove();
+        var ov=document.createElement('div'); ov.id='ppm-paste'; ov.style.cssText='position:fixed;inset:0;z-index:200000;background:rgba(15,23,42,.35);display:flex;align-items:center;justify-content:center';
+        ov.innerHTML='<div style="background:#fff;border-radius:10px;padding:16px 18px;width:460px;max-width:92vw;box-shadow:0 12px 40px rgba(15,23,42,.25)"><div style="font-weight:700;margin-bottom:5px">Upload prepack mappings</div><div class="mut tiny" style="margin-bottom:6px">One per line: <b>prepack_sku, set_sku</b> (comma or tab). A header row is ignored. Existing prepacks are updated.</div><textarea id="ppp-ta" rows="9" style="width:100%;box-sizing:border-box;font:12px ui-monospace,Menlo,monospace;border:1px solid #d0d0d0;border-radius:6px;padding:8px" placeholder="PP-TOWLB-CAB-LG-4SET-BLUE, TOWLB-CAB-LG-4SET-BLUE"></textarea><label style="display:block;font-size:11px;margin-top:6px"><input type="checkbox" id="ppp-replace"> Replace ALL existing prepacks first</label><div style="text-align:right;margin-top:10px"><button class="save-btn light" id="ppp-cancel">Cancel</button> <button class="save-btn" id="ppp-go" style="background:#16a34a;color:#fff;border-color:#15803d">Upload</button></div></div>';
+        document.body.appendChild(ov); function close(){ ov.remove(); }
+        ov.addEventListener('mousedown',function(e){ if(e.target===ov)close(); });
+        document.getElementById('ppp-cancel').onclick=close; document.getElementById('ppp-ta').focus();
+        document.getElementById('ppp-go').onclick=function(){ var t=document.getElementById('ppp-ta').value, out=[];
+          t.split(/\n/).forEach(function(ln){ var p=ln.split(/[,\t]/); var pp=(p[0]||'').trim(), set=(p[1]||'').trim(); if(!pp||!set)return; if(/prepack/i.test(pp)&&/set/i.test(set))return; out.push({prepack_sku:pp,set_sku:set}); });
+          if(!out.length){ alert('No rows detected'); return; }
+          fetch('/api/supply/prepack-map-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({rows:out,replace:document.getElementById('ppp-replace').checked})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} close(); alert('Uploaded '+(j.saved||0)+' row(s)'+(j.errors&&j.errors.length?'; '+j.errors.length+' skipped':'')+'.'); onDone&&onDone(); }).catch(function(e){ alert('Upload failed: '+(e.message||e)); }); }; }
       // Build on Fly Sets — a SET output SKU explodes into component input SKUs × qty (feeds set demand into the component buy plan).
       function renderSetBomInner(host){ host.innerHTML='<div class="count">Loading…</div>';
         Promise.all([fetch('/api/supply/set-bom').then(function(r){return r.json();}), fetch('/api/supply/skus').then(function(r){return r.json();}).catch(function(){return [];})]).then(function(R){
