@@ -1850,7 +1850,14 @@ function _fbaTrfShowList(){ var p=document.getElementById('fba-trf-list');
 // Clear all overrides + ticks, then re-render.
 // SKU filter supports a LIST: split on whitespace/commas/semicolons/newlines; match if the SKU
 // contains ANY token (so you can paste many SKUs to filter the view).
-function skuMatchQ(sku,q){ if(!q)return true; var toks=String(q).toLowerCase().split(/[\s,;]+/).filter(Boolean); if(!toks.length)return true; var sl=String(sku).toLowerCase(); var m=(typeof SKUM!=='undefined')?SKUM[sku]:null; var nl=(m&&m.n)?String(m.n).toLowerCase():''; return toks.some(function(t){ if(sl.indexOf(t)>=0||(nl&&nl.indexOf(t)>=0))return true; if(typeof PREPACK_MAP!=='undefined'){var _s=PREPACK_MAP[t.toUpperCase()]; if(_s&&String(_s).toLowerCase()===sl)return true;} return false; }); }   // match SKU code OR product name; a prepack (PP-) code resolves to its mapped set row
+function skuMatchQ(sku,q){ if(!q)return true; var toks=String(q).toLowerCase().split(/[\s,;]+/).filter(Boolean); if(!toks.length)return true; var sl=String(sku).toLowerCase(); var m=(typeof SKUM!=='undefined')?SKUM[sku]:null; var nl=(m&&m.n)?String(m.n).toLowerCase():''; return toks.some(function(t){
+    // "x:SET-SKU" → explode: show the set AND each of its set_bom component SKUs
+    if(t.indexOf('x:')===0){ var setId=t.slice(2); if(!setId)return false; if(sl===setId)return true;
+      var comps=(typeof SET_BOM!=='undefined'&&SET_BOM[setId.toUpperCase()])||null;
+      return !!(comps&&comps.some(function(c){return c.sku&&String(c.sku).toLowerCase()===sl;})); }
+    if(sl.indexOf(t)>=0||(nl&&nl.indexOf(t)>=0))return true;
+    if(typeof PREPACK_MAP!=='undefined'){var _s=PREPACK_MAP[t.toUpperCase()]; if(_s&&String(_s).toLowerCase()===sl)return true;}
+    return false; }); }   // match SKU code OR product name; "x:SET" explodes to its components; a prepack (PP-) code resolves to its mapped set row
 try{ window.skuMatchQ=skuMatchQ; }catch(_e){}   // BUGFIX: skuMatchQ is defined INSIDE the BP IIFE; expose it globally so the DEMAND module (filteredSkus / buildPlanDownload) can call it. Without this, any SKU-search in the DEMAND plan threw ReferenceError and aborted the whole grid render → "nothing shows".
 function fbaClearAll(){
   for(const k in FBA_OV)delete FBA_OV[k];
@@ -7506,8 +7513,13 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         // Label cell - sticky
         td.style.cssText='position:sticky;left:0;background:#fafafa;border-bottom:1px solid #f0f0ee;padding:0;min-width:160px;max-width:160px;z-index:1';
         var tierCls='tier-'+(p.ti||'c').toLowerCase();
+        // Column-1 hover tip = product name, plus (for SET SKUs) the BOM explosion: component SKU × qty, one per line.
+        var _te=function(v){return String(v==null?'':v).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;');};
+        var _bom=(typeof SET_BOM!=='undefined'&&SET_BOM[sku]&&SET_BOM[sku].length)?SET_BOM[sku]:null;
+        var _dpTip=p.n?_te(p.n):'';
+        if(_bom){ _dpTip+=(_dpTip?'<br><br>':'')+'<b>BOM Explosion:</b><br>'+_bom.map(function(c){return _te(c.sku)+' &times; '+_te(c.qty);}).join('<br>'); }
         td.innerHTML='<div style="padding:2px 4px;text-align:left">'
-          +'<div class="dp-sku-tip"'+(p.n?' data-tip="'+String(p.n).replace(/"/g,'&quot;').replace(/</g,'&lt;')+'"':'')+' style="font-size:9px;font-weight:700;color:#1a1a1a;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left'+(p.n?';cursor:help':'')+'">'+sku+'</div>'
+          +'<div class="dp-sku-tip"'+(_dpTip?' data-tip="'+_dpTip.replace(/"/g,'&quot;')+'"':'')+' style="font-size:9px;font-weight:700;color:#1a1a1a;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left'+(_dpTip?';cursor:help':'')+'">'+sku+'</div>'
           +(p.rep?'<div style="font-size:7px;font-style:italic;color:#7c3aed;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="Forecast inherits the sales history of the replaced SKU '+String(p.rep).replace(/"/g,'&quot;')+'">&#8617; from '+String(p.rep).replace(/</g,'&lt;')+'</div>':'')
           +'<div style="display:flex;gap:2px;align-items:center;flex-wrap:wrap">'
           +'<span class="sku-tier '+tierCls+'" style="font-size:7px">'+(p.ti||'C')+'</span>'

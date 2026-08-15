@@ -1,3 +1,7 @@
+## v27.043 Demand plan: BOM explosion in SKU tooltip + "x:" explode search
+- **Column-1 SKU hover** now lists the **BOM Explosion** (component SKU × qty, one per line) under the product name for SET SKUs. Uses SET_BOM.
+- **Explode search**: typing **`x:<SET-SKU>`** (e.g. `x:TOWLB-CAB-XL-6SETI`) in the demand-plan SKU search shows the set **and** each of its exploded component SKUs. Plain search + the prepack-code resolution are unchanged.
+
 ## v27.042 Prepack rail: draw-down + sell-through stop + PREPACK stock column
 - **Rail now draws down + stops at sell-through** (was showing constant on-hand on every future month). Each month's tooltip shows the prepack **available at the start of that month** (running balance), and the badge **disappears once the prepack is sold through** — e.g. `TOWLB-CAB-XL-6SETI` (1u prepack) shows only in Aug then stops, instead of "1u on-hand" forever.
 - **PREPACK in the stock column**: on the BUY & MOVE grid, a set row with prepack on-hand in the current market now shows **`PREPACK: n`** (green) in the SOH FBA column (empty for a 3PL-only set). New `ppStockForSet(sku,mkt)` helper.
