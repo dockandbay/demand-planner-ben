@@ -8788,11 +8788,17 @@ function renderSnapshotsView(body){
 // ─── DEMAND ▸ Trends — Category Trends analysis report (#/demand/trends) ──────────────────────────────────────
 // Read-only, units-based. Three panels: Channel mix · Multi-year trend · Plan sanity. Scaffold here (chrome + filters
 // + panel tabs); the panels build in order Plan sanity → Multi-year → Channel mix (per the spec). No writes ever.
-var TRENDS_PANEL='plan-sanity', TRENDS_MKT='All', TRENDS_GRP='All', TRENDS_BASIS='ytd', TRENDS_MINU=1000, TRENDS_UNMAPPED=true;
+var TRENDS_PANEL='plan-sanity', TRENDS_MKT='All', TRENDS_GRP='All', TRENDS_GRAIN='category', TRENDS_FROM=1, TRENDS_TO=null, TRENDS_MINU=1000, TRENDS_UNMAPPED=true;
+var _TR_MON=['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+function _trCutoffNum(){ var c=(typeof _trendsCutoff==='function')?_trendsCutoff():''; return c?(parseInt(c.split('_')[1],10)||12):12; }
+function _trQS(){ return '?grain='+encodeURIComponent(TRENDS_GRAIN)+'&from='+TRENDS_FROM+'&to='+TRENDS_TO; }   // server-affecting params (grain + month range)
+function _trInvalidate(){ _TR_PS_DATA=null; _TR_MY_DATA=null; _TR_CM_DATA=null; }   // grain/range change → the cached server data is stale
 function _trMonLbl(ym){ if(!ym)return '—'; var p=String(ym).split('_'); var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return (MN[(+p[1]||1)-1]||p[1])+'-'+String(p[0]).slice(2); }
 function _trendsCutoff(){ try{ var ms=(typeof ACTUAL_MONTHS!=='undefined'?ACTUAL_MONTHS.slice():[]).sort(); var last=ms[ms.length-1]||''; if(last===CUR_MONTH&&ms.length>1)last=ms[ms.length-2]; return last; }catch(e){ return ''; } }
 function renderTrendsView(body){
   var cut=_trendsCutoff(), curL=_trMonLbl(CUR_MONTH);
+  if(TRENDS_TO==null)TRENDS_TO=_trCutoffNum();
+  function _trMonOpts(selv){ var mx=_trCutoffNum(), o=''; for(var m=1;m<=mx;m++)o+='<option value="'+m+'"'+(m===selv?' selected':'')+'>'+_TR_MON[m]+'</option>'; return o; }
   var PANELS=[['channel-mix','Channel mix'],['multi-year','Multi-year trend'],['plan-sanity','Plan sanity']];
   var GRP_MAP={}; try{ for(var k in CAT_GROUPING){ if(CAT_GROUPING[k])GRP_MAP[CAT_GROUPING[k]]=1; } }catch(e){}
   var GROUPS=['All'].concat(Object.keys(GRP_MAP).sort()), MKTS=['All','UK','US','EU','AU','CA'];
@@ -8805,6 +8811,8 @@ function renderTrendsView(body){
     +'<div style="background:#fff;border:1px solid #e2e8f0;border-radius:6px;padding:9px 11px;display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'
       +'<label style="'+LBL+'">Country <select id="tr-mkt" style="'+SEL+'">'+MKTS.map(function(m){return opt(m,TRENDS_MKT);}).join('')+'</select></label>'
       +'<label style="'+LBL+'">Group <select id="tr-grp" style="'+SEL+'">'+GROUPS.map(function(g){return opt(g,TRENDS_GRP);}).join('')+'</select></label>'
+      +'<label style="'+LBL+'">View <select id="tr-grain" style="'+SEL+'"><option value="category"'+(TRENDS_GRAIN==='category'?' selected':'')+'>Category</option><option value="subcategory"'+(TRENDS_GRAIN==='subcategory'?' selected':'')+'>Sub-category</option></select></label>'
+      +'<label style="'+LBL+'">Months <select id="tr-from" style="'+SEL+'">'+_trMonOpts(TRENDS_FROM)+'</select> <span style="color:#94a3b8">to</span> <select id="tr-to" style="'+SEL+'">'+_trMonOpts(TRENDS_TO)+'</select></label>'
       +'<label style="'+LBL+'">Min units <input id="tr-minu" value="'+esc(String(TRENDS_MINU))+'" style="'+SEL+';width:56px;text-align:right"></label>'
       +'<label style="font-size:12px;color:#334155;display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="tr-unmapped"'+(TRENDS_UNMAPPED?' checked':'')+'> Include unmapped</label>'
       +'<span style="flex:1"></span>'
@@ -8817,6 +8825,9 @@ function renderTrendsView(body){
   body.innerHTML=h;
   var _m=body.querySelector('#tr-mkt'); if(_m)_m.onchange=function(){ TRENDS_MKT=this.value; drawPanel(); };
   var _g=body.querySelector('#tr-grp'); if(_g)_g.onchange=function(){ TRENDS_GRP=this.value; drawPanel(); };
+  var _gr=body.querySelector('#tr-grain'); if(_gr)_gr.onchange=function(){ TRENDS_GRAIN=this.value; _trInvalidate(); drawPanel(); };   // grain changes server data → refetch
+  var _fr=body.querySelector('#tr-from'); if(_fr)_fr.onchange=function(){ TRENDS_FROM=parseInt(this.value,10)||1; if(TRENDS_FROM>TRENDS_TO)TRENDS_TO=TRENDS_FROM; _trInvalidate(); renderTrendsView(body); };   // re-render to resync the To dropdown
+  var _to=body.querySelector('#tr-to'); if(_to)_to.onchange=function(){ TRENDS_TO=parseInt(this.value,10)||_trCutoffNum(); if(TRENDS_TO<TRENDS_FROM)TRENDS_FROM=TRENDS_TO; _trInvalidate(); renderTrendsView(body); };
   var _mu=body.querySelector('#tr-minu'); if(_mu)_mu.onchange=function(){ TRENDS_MINU=Math.max(0,parseInt(String(this.value).replace(/[^0-9]/g,''),10)||0); drawPanel(); };
   var _u=body.querySelector('#tr-unmapped'); if(_u)_u.onchange=function(){ TRENDS_UNMAPPED=this.checked; drawPanel(); };
   body.querySelectorAll('.tr-tab').forEach(function(t){ t.onclick=function(){ TRENDS_PANEL=t.dataset.p; renderTrendsView(body); }; });
@@ -8863,7 +8874,7 @@ function _trendsPlanSanity(host){
       var N='font-family:ui-monospace,Menlo,monospace;text-align:left;font-variant-numeric:tabular-nums;white-space:nowrap;padding:6px 8px;border-bottom:1px solid #f1f5f9';
       var T='padding:6px 8px;border-bottom:1px solid #f1f5f9;text-align:left';
       var ruleTip=r.rules.map(function(rr){return _TR_RULE_TXT[rr]||rr;}).join('\n')||'No rules fired';
-      return '<tr'+(r.status==='Blocked'?' style="background:#fff7f6"':'')+'><td style="'+T+';font-weight:600;white-space:nowrap">'+esc(r.category)+'</td><td style="'+T+';font-size:11px;color:#64748b">'+esc(r.market)+'</td>'
+      return '<tr'+(r.status==='Blocked'?' style="background:#fff7f6"':'')+'><td style="'+T+';font-weight:600;white-space:nowrap">'+esc(r.label||r.category)+'</td><td style="'+T+';font-size:11px;color:#64748b">'+esc(r.market)+'</td>'
         +'<td style="'+N+(r.status==='Blocked'?';font-weight:700':'')+'">'+(r.hasPlan?fn(r.plan):'<span style="color:#94a3b8;font-size:11px">no plan</span>')+'</td>'
         +'<td style="'+N+'">'+fn(r.latest)+'</td><td style="'+N+'">'+fn(r.bandLow)+'–'+fn(r.bandHigh)+'</td>'
         +'<td style="'+N+'">'+vs+'</td><td style="'+T+';text-align:center">'+track+'</td>'
@@ -8877,13 +8888,13 @@ function _trendsPlanSanity(host){
       try{ if(mkt&&mkt!=='Unmapped')CUR=mkt; if(typeof SEL!=='undefined'&&cat&&cat!=='Unmapped'){ SEL=new Set([cat]); } DEMAND_VIEW='plan'; if(window.writeHash)writeHash(['demand']); render(); }catch(e){} }; });
   }
   if(_TR_PS_DATA){ render(); return; }
-  fetch('/api/demand/trends/plan-sanity').then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); _TR_PS_DATA=j; render(); })
+  fetch('/api/demand/trends/plan-sanity'+_trQS()).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); _TR_PS_DATA=j; render(); })
     .catch(function(e){ host.innerHTML='<div style="color:#b91c1c;font-size:12px;padding:16px 4px">Could not load Plan sanity: '+esc(String(e&&e.message||e))+'</div>'; });
 }
 function _trendsPsCsv(){ var rows=_trPsRows(); if(!rows.length)return;
   var hdr=['Category','Market','Plan','Actual2026','BandLow','BandHigh','PlanVsLatest','Rules','Status'];
   var esc2=function(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v; };
-  var lines=[hdr.join(',')].concat(rows.map(function(r){ return [r.category,r.market,Math.round(r.plan),Math.round(r.latest),Math.round(r.bandLow),Math.round(r.bandHigh),(r.planVsLatest==null?'':Math.round(r.planVsLatest*100)/100),r.rules.join(' '),r.status].map(esc2).join(','); }));
+  var lines=[hdr.join(',')].concat(rows.map(function(r){ return [(r.label||r.category),r.market,Math.round(r.plan),Math.round(r.latest),Math.round(r.bandLow),Math.round(r.bandHigh),(r.planVsLatest==null?'':Math.round(r.planVsLatest*100)/100),r.rules.join(' '),r.status].map(esc2).join(','); }));
   var blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'}), u=URL.createObjectURL(blob), a=document.createElement('a'); a.href=u; a.download='trends_plan_sanity.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000);
 }
 // Panel 2 — Multi-year trend: gap-to-peak headline (default sort), trend class, plan-next, suspect-month marks.
@@ -8912,7 +8923,7 @@ function _trendsMultiYear(host){
     var body2=rows.map(function(r){ var fill=r.gapToPeak==null?0:Math.max(0,Math.min(100,(1+r.gapToPeak)*100));
       var track='<div style="position:relative;width:100px;height:13px;background:#eef0f6;border-radius:2px"><div style="position:absolute;top:0;bottom:0;left:0;width:'+fill+'%;background:'+(fill>=99?'#7fbf9b':'#FF746C')+';opacity:.72;border-radius:2px"></div><div style="position:absolute;top:-3px;bottom:-3px;left:100%;width:2px;background:#14202e;transform:translateX(-2px)"></div></div>';
       var s26=(r.suspectCount>0)?'<span title="'+r.suspectCount+' suspect month(s) excluded from growth (likely stockout)" style="border-bottom:1px dotted #94a3b8;cursor:help">'+fn(r.a2026)+'</span>':fn(r.a2026);
-      return '<tr><td style="'+T+';font-weight:600;white-space:nowrap">'+esc(r.category)+'</td><td style="'+T+';font-size:11px;color:#64748b">'+esc(r.market)+'</td>'
+      return '<tr><td style="'+T+';font-weight:600;white-space:nowrap">'+esc(r.label||r.category)+'</td><td style="'+T+';font-size:11px;color:#64748b">'+esc(r.market)+'</td>'
         +'<td style="'+N+'">'+fn(r.a2024)+'</td><td style="'+N+'">'+fn(r.a2025)+'</td><td style="'+N+'">'+s26+'</td>'
         +'<td style="'+T+';text-align:center">'+spark(r)+'</td><td style="'+N+'">'+pct(r.yoy)+'</td><td style="'+N+';font-size:11px">'+r.peakYear+'</td>'
         +'<td style="'+T+';text-align:center">'+track+'</td><td style="'+N+'">'+pct(r.gapToPeak)+'</td>'
@@ -8923,13 +8934,13 @@ function _trendsMultiYear(host){
       +(rows.length?'':'<div style="color:#94a3b8;font-size:12px;padding:16px;text-align:center">No categories above the '+fn(TRENDS_MINU)+'-unit minimum for this market.</div>');
   }
   if(_TR_MY_DATA){render();return;}
-  fetch('/api/demand/trends/multi-year').then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); _TR_MY_DATA=j; render(); })
+  fetch('/api/demand/trends/multi-year'+_trQS()).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); _TR_MY_DATA=j; render(); })
     .catch(function(e){ host.innerHTML='<div style="color:#b91c1c;font-size:12px;padding:16px">Could not load Multi-year trend: '+esc(String(e&&e.message||e))+'</div>'; });
 }
 function _trendsMyCsv(){ var rows=_trMyRows(); if(!rows.length)return;
   var hdr=['Category','Market','2024','2025','2026','YoY','PeakYear','GapToPeak','PlanNext','PlanVsPeak','Class','SuspectMonths'];
   var e2=function(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v; };
-  var lines=[hdr.join(',')].concat(rows.map(function(r){ return [r.category,r.market,Math.round(r.a2024),Math.round(r.a2025),Math.round(r.a2026),(r.yoy==null?'':Math.round(r.yoy*100)+'%'),r.peakYear,(r.gapToPeak==null?'':Math.round(r.gapToPeak*100)+'%'),(r.planNext==null?'':Math.round(r.planNext)),(r.planVsPeak==null?'':Math.round(r.planVsPeak*100)+'%'),r.cls,r.suspectCount].map(e2).join(','); }));
+  var lines=[hdr.join(',')].concat(rows.map(function(r){ return [(r.label||r.category),r.market,Math.round(r.a2024),Math.round(r.a2025),Math.round(r.a2026),(r.yoy==null?'':Math.round(r.yoy*100)+'%'),r.peakYear,(r.gapToPeak==null?'':Math.round(r.gapToPeak*100)+'%'),(r.planNext==null?'':Math.round(r.planNext)),(r.planVsPeak==null?'':Math.round(r.planVsPeak*100)+'%'),r.cls,r.suspectCount].map(e2).join(','); }));
   var blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'}), u=URL.createObjectURL(blob), a=document.createElement('a'); a.href=u; a.download='trends_multi_year.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000);
 }
 // Panel 1 — Channel mix: house benchmark vs category FBA share, gap, SKU-grain stockout proxy, headroom, read.
@@ -8956,7 +8967,7 @@ function _trendsChannelMix(host){
       var track='<div style="position:relative;width:112px;height:13px;background:#eef0f6;border-radius:2px"><div style="position:absolute;top:0;bottom:0;left:0;width:'+fillPct+'%;background:'+(short?'#FF746C':'#7fbf9b')+';opacity:.72;border-radius:2px"></div><div style="position:absolute;top:-3px;bottom:-3px;left:'+refPct+'%;width:2px;background:#14202e"></div></div>';
       var gap='<span style="color:'+(short?'#9e2b1f':'#166d43')+';font-weight:600">'+(r.gapPp>=0?'+':'')+(Math.round(r.gapPp*1000)/10)+'pp</span>';
       var cov=r.coverage==null?'<span style="color:#cbd5e1">thin</span>':'<span'+(r.coverage>0.25?' style="color:#9e2b1f;font-weight:700"':'')+'>'+Math.round(r.coverage*100)+'%</span>';
-      return '<tr><td style="'+T+';font-weight:600;white-space:nowrap">'+esc(r.category)+'</td><td style="'+T+';font-size:11px;color:#64748b">'+esc(r.market)+'</td>'
+      return '<tr><td style="'+T+';font-weight:600;white-space:nowrap">'+esc(r.label||r.category)+'</td><td style="'+T+';font-size:11px;color:#64748b">'+esc(r.market)+'</td>'
         +'<td style="'+N+'">'+fn(r.dtc)+'</td><td style="'+N+'">'+fn(r.fba)+'</td><td style="'+N+'">'+(Math.round(r.fbaShare*1000)/10)+'%</td>'
         +'<td style="'+T+';text-align:center">'+track+'</td><td style="'+N+'">'+gap+'</td><td style="'+N+'">'+cov+'</td>'
         +'<td style="'+N+';font-weight:'+(r.headroom>=1000?'700':'400')+'">'+(r.headroom>=1?('+'+fn(r.headroom)):'<span style="color:#94a3b8;font-size:11px">at benchmark</span>')+'</td>'
@@ -8966,13 +8977,13 @@ function _trendsChannelMix(host){
       +(rows.length?'':'<div style="color:#94a3b8;font-size:12px;padding:16px;text-align:center">No categories above the '+fn(TRENDS_MINU)+'-unit minimum for this market.</div>');
   }
   if(_TR_CM_DATA){render();return;}
-  fetch('/api/demand/trends/channel-mix').then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); _TR_CM_DATA=j; render(); })
+  fetch('/api/demand/trends/channel-mix'+_trQS()).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); _TR_CM_DATA=j; render(); })
     .catch(function(e){ host.innerHTML='<div style="color:#b91c1c;font-size:12px;padding:16px">Could not load Channel mix: '+esc(String(e&&e.message||e))+'</div>'; });
 }
 function _trendsCmCsv(){ var rows=_trCmRows(); if(!rows.length)return;
   var hdr=['Category','Market','DTC12m','FBA12m','FBAShare','Benchmark','GapPp','SkuMonthsNoFbaPct','Headroom','Read'];
   var e2=function(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?('"'+v.replace(/"/g,'""')+'"'):v; };
-  var lines=[hdr.join(',')].concat(rows.map(function(r){ return [r.category,r.market,Math.round(r.dtc),Math.round(r.fba),(Math.round(r.fbaShare*1000)/10)+'%',(Math.round(r.benchmark*1000)/10)+'%',(Math.round(r.gapPp*1000)/10)+'pp',(r.coverage==null?'':Math.round(r.coverage*100)+'%'),Math.round(r.headroom),r.read].map(e2).join(','); }));
+  var lines=[hdr.join(',')].concat(rows.map(function(r){ return [(r.label||r.category),r.market,Math.round(r.dtc),Math.round(r.fba),(Math.round(r.fbaShare*1000)/10)+'%',(Math.round(r.benchmark*1000)/10)+'%',(Math.round(r.gapPp*1000)/10)+'pp',(r.coverage==null?'':Math.round(r.coverage*100)+'%'),Math.round(r.headroom),r.read].map(e2).join(','); }));
   var blob=new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'}), u=URL.createObjectURL(blob), a=document.createElement('a'); a.href=u; a.download='trends_channel_mix.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000);
 }
 // "Summary with targets" report — three tabs: Summary (read), Edit targets (SUMM_TGT_EDIT), Target recommendations

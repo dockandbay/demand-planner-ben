@@ -1,3 +1,8 @@
+## v27.028 Trends — month-range filter + sub-category drill-down
+- **Month range**: pick the comparison window (e.g. Feb → May) via From/To pickers (Jan…cutoff); all panels compare that window **like-for-like** across 2024/25/26 + next-year plan. Replaces the removed Basis control with something flexible.
+- **Sub-category drill-down**: a **View: Category / Sub-category** toggle. Sub-category mode regroups every panel by `products.subcategory` (parent category still drives the Group + exclude-inactive filters). Server-side across all 3 endpoints (`grain` + `from`/`to` params; Channel mix stays rolling-12, grain only).
+- Client refetches on grain/range change (server-affecting), re-filters in place for Country/Group/Min/Unmapped. Row label + CSV first column now show the drilled grain.
+
 ## v27.027 Trends — feedback round 1 (filters + Plan Sanity polish)
 - **Market → Country** (filter label + table column).
 - **Group filter now works** across all 3 panels (filters by `categories.grouping`); removed the non-functional **Basis** control.

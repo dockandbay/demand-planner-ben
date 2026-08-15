@@ -808,25 +808,38 @@ function invalidateDataCache() { _dataCache = null; refreshDataCache().catch((e)
 // plan on live range; "no plan" ≠ "plan is low"). Units only, read-only. Cutoff = last complete month (current partial
 // excluded). Plan window = same Jan-to-cutoff months, next year. forecast_outputs warehouse prefix → market.
 const _TRENDS_CFG = { r1: 1.5, r2: 0.7, r3lo: 0.5, r3hi: 2.0 };   // thresholds (tunable after a cycle)
-app.get('/api/demand/trends/plan-sanity', async (_req, res) => {
+// Shared Trends query params: from/to month range (clamped to [1, cutoff]; like-for-like across years) + grain
+// (category | subcategory). catExpr = the parent category (always returned, for group/active filtering); lblExpr = the
+// row label (subcategory when drilling down). Null category/subcategory → 'Unmapped'.
+function _trendsWin(req, cutoffNum) {
+  const cl = (v, d) => { const n = parseInt(v, 10); return (Number.isFinite(n) && n >= 1 && n <= 12) ? Math.min(n, cutoffNum) : d; };
+  let from = cl(req.query.from, 1), to = cl(req.query.to, cutoffNum);
+  if (from > to) { const t = from; from = to; to = t; }
+  const grain = (req.query.grain === 'subcategory') ? 'subcategory' : 'category';
+  const catExpr = `coalesce(nullif(btrim(p.category),''),'Unmapped')`;
+  const lblExpr = grain === 'subcategory' ? `coalesce(nullif(btrim(p.subcategory),''),'Unmapped')` : catExpr;
+  return { from, to, grain, catExpr, lblExpr };
+}
+app.get('/api/demand/trends/plan-sanity', async (req, res) => {
   try {
     const cut = (await pool.query(`SELECT extract(month from max(month))::int mm, extract(year from max(month))::int yy FROM planner.sales_actuals`)).rows[0];
     const cutoffNum = Math.max(1, (cut.mm || 1) - 1);           // last complete month (exclude the current partial)
     const planYear = (cut.yy || 2026) + 1;                       // next-year plan window
+    const W = _trendsWin(req, cutoffNum);
     const [actR, planR] = await Promise.all([
-      pool.query(`SELECT coalesce(nullif(btrim(p.category),''),'Unmapped') category, sa.country market, extract(year from sa.month)::int yr, sum(sa.units)::numeric units
+      pool.query(`SELECT ${W.catExpr} category, ${W.lblExpr} label, sa.country market, extract(year from sa.month)::int yr, sum(sa.units)::numeric units
         FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku
-        WHERE extract(month from sa.month) <= $1 AND extract(year from sa.month) BETWEEN 2024 AND 2026 GROUP BY 1,2,3`, [cutoffNum]),
-      pool.query(`SELECT coalesce(nullif(btrim(p.category),''),'Unmapped') category, upper(split_part(fo.warehouse,'_',1)) market, sum(fo.units)::numeric units
+        WHERE extract(month from sa.month) BETWEEN $1 AND $2 AND extract(year from sa.month) BETWEEN 2024 AND 2026 GROUP BY 1,2,3,4`, [W.from, W.to]),
+      pool.query(`SELECT ${W.catExpr} category, ${W.lblExpr} label, upper(split_part(fo.warehouse,'_',1)) market, sum(fo.units)::numeric units
         FROM planner.forecast_outputs fo JOIN planner.products p ON p.sku=fo.sku
-        WHERE extract(month from fo.month) <= $1 AND extract(year from fo.month) = $2 GROUP BY 1,2`, [cutoffNum, planYear]),
+        WHERE extract(month from fo.month) BETWEEN $1 AND $2 AND extract(year from fo.month) = $3 GROUP BY 1,2,3`, [W.from, W.to, planYear]),
     ]);
-    const band = {}, plan = {};
-    for (const r of actR.rows) { const k = r.category + '|' + r.market; (band[k] = band[k] || {})[r.yr] = Number(r.units) || 0; }
-    for (const r of planR.rows) plan[r.category + '|' + r.market] = Number(r.units) || 0;
+    const band = {}, plan = {}, meta = {};
+    for (const r of actR.rows) { const k = [r.category, r.label, r.market].join(String.fromCharCode(31)); (band[k] = band[k] || {})[r.yr] = Number(r.units) || 0; meta[k] = { category: r.category, label: r.label, market: r.market }; }
+    for (const r of planR.rows) { const k = [r.category, r.label, r.market].join(String.fromCharCode(31)); plan[k] = Number(r.units) || 0; meta[k] = meta[k] || { category: r.category, label: r.label, market: r.market }; }
     const C = _TRENDS_CFG, rows = [];
     for (const k of new Set([...Object.keys(band), ...Object.keys(plan)])) {
-      const i = k.indexOf('|'), category = k.slice(0, i), market = k.slice(i + 1);
+      const m = meta[k], category = m.category, label = m.label, market = m.market;
       const b = band[k] || {}, a24 = b[2024] || 0, a25 = b[2025] || 0, a26 = b[2026] || 0;
       const latest = a26, bandLow = Math.min(a24, a25, a26), bandHigh = Math.max(a24, a25, a26);
       const hasPlan = (k in plan), pl = plan[k] || 0, rules = []; let status = 'OK';
@@ -838,45 +851,46 @@ app.get('/api/demand/trends/plan-sanity', async (_req, res) => {
         if (pl === 0 && latest > 0) rules.push('R6');
         status = rules.indexOf('R3') >= 0 ? 'Blocked' : (rules.length ? 'Review' : 'OK');
       }
-      rows.push({ category, market, plan: pl, hasPlan, a2024: a24, a2025: a25, a2026: a26, latest, bandLow, bandHigh, planVsLatest: latest > 0 ? pl / latest : null, rules, status });
+      rows.push({ category, label, market, plan: pl, hasPlan, a2024: a24, a2025: a25, a2026: a26, latest, bandLow, bandHigh, planVsLatest: latest > 0 ? pl / latest : null, rules, status });
     }
     rows.sort((x, y) => { const o = { Blocked: 0, 'No plan': 1, Review: 2, OK: 3 }; return (o[x.status] - o[y.status]) || (y.plan - x.plan); });
-    res.json({ cutoffMonth: cutoffNum, planYear, cfg: C, rows });
+    res.json({ cutoffMonth: cutoffNum, planYear, from: W.from, to: W.to, grain: W.grain, cfg: C, rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // DEMAND ▸ Trends ▸ Panel 2 (Multi-year trend). Per category × market, Jan-to-cutoff for 2024/25/26. Headline =
 // gap-to-peak (not YoY). Trend class + plan_next (2027). Suspect-month heuristic (units <40% trailing-3mo avg AND
 // >30% of the usual SKUs recorded zero) marks likely stockouts and EXCLUDES them, like-for-like, from the growth rates.
-app.get('/api/demand/trends/multi-year', async (_req, res) => {
+app.get('/api/demand/trends/multi-year', async (req, res) => {
   try {
     const cut = (await pool.query(`SELECT extract(month from max(month))::int mm, extract(year from max(month))::int yy FROM planner.sales_actuals`)).rows[0];
     const cutoffNum = Math.max(1, (cut.mm || 1) - 1), planYear = (cut.yy || 2026) + 1;
+    const W = _trendsWin(req, cutoffNum);
     const [mR, planR] = await Promise.all([
-      pool.query(`SELECT coalesce(nullif(btrim(p.category),''),'Unmapped') category, sa.country market, extract(year from sa.month)::int yr, extract(month from sa.month)::int mo,
+      pool.query(`SELECT ${W.catExpr} category, ${W.lblExpr} label, sa.country market, extract(year from sa.month)::int yr, extract(month from sa.month)::int mo,
           sum(sa.units)::numeric units, count(DISTINCT sa.sku) FILTER (WHERE sa.units>0) active
         FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku
-        WHERE extract(month from sa.month) <= $1 AND extract(year from sa.month) BETWEEN 2024 AND 2026 GROUP BY 1,2,3,4`, [cutoffNum]),
-      pool.query(`SELECT coalesce(nullif(btrim(p.category),''),'Unmapped') category, upper(split_part(fo.warehouse,'_',1)) market, sum(fo.units)::numeric units
+        WHERE extract(month from sa.month) BETWEEN $1 AND $2 AND extract(year from sa.month) BETWEEN 2024 AND 2026 GROUP BY 1,2,3,4,5`, [W.from, W.to]),
+      pool.query(`SELECT ${W.catExpr} category, ${W.lblExpr} label, upper(split_part(fo.warehouse,'_',1)) market, sum(fo.units)::numeric units
         FROM planner.forecast_outputs fo JOIN planner.products p ON p.sku=fo.sku
-        WHERE extract(month from fo.month) <= $1 AND extract(year from fo.month) = $2 GROUP BY 1,2`, [cutoffNum, planYear]),
+        WHERE extract(month from fo.month) BETWEEN $1 AND $2 AND extract(year from fo.month) = $3 GROUP BY 1,2,3`, [W.from, W.to, planYear]),
     ]);
-    const M = {}, plan = {};
-    for (const r of mR.rows) { const k = r.category + '|' + r.market; (M[k] = M[k] || {}); (M[k][r.yr] = M[k][r.yr] || {}); M[k][r.yr][r.mo] = { u: Number(r.units) || 0, a: Number(r.active) || 0 }; }
-    for (const r of planR.rows) plan[r.category + '|' + r.market] = Number(r.units) || 0;
+    const M = {}, plan = {}, meta = {};
+    for (const r of mR.rows) { const k = [r.category, r.label, r.market].join(String.fromCharCode(31)); (M[k] = M[k] || {}); (M[k][r.yr] = M[k][r.yr] || {}); M[k][r.yr][r.mo] = { u: Number(r.units) || 0, a: Number(r.active) || 0 }; meta[k] = { category: r.category, label: r.label, market: r.market }; }
+    for (const r of planR.rows) plan[[r.category, r.label, r.market].join(String.fromCharCode(31))] = Number(r.units) || 0;
     const rows = [];
     for (const k of Object.keys(M)) {
-      const i = k.indexOf('|'), category = k.slice(0, i), market = k.slice(i + 1), mm = M[k];
-      const yrTot = (y) => { let t = 0; const o = mm[y] || {}; for (let m = 1; m <= cutoffNum; m++) t += (o[m] && o[m].u) || 0; return t; };
+      const mt = meta[k], category = mt.category, label = mt.label, market = mt.market, mm = M[k];
+      const yrTot = (y) => { let t = 0; const o = mm[y] || {}; for (let m = W.from; m <= W.to; m++) t += (o[m] && o[m].u) || 0; return t; };
       const a24 = yrTot(2024), a25 = yrTot(2025), a26 = yrTot(2026);
       let maxActive = 0; for (const y of Object.keys(mm)) for (const m of Object.keys(mm[y])) maxActive = Math.max(maxActive, mm[y][m].a);
       const suspect = [], o26 = mm[2026] || {};
-      for (let m = 1; m <= cutoffNum; m++) {
+      for (let m = W.from; m <= W.to; m++) {
         const cur = (o26[m] && o26[m].u) || 0, act = (o26[m] && o26[m].a) || 0, tv = [];
         for (let d = 1; d <= 3; d++) { let ym = m - d, yy = 2026; if (ym < 1) { ym += 12; yy = 2025; } const src = mm[yy] && mm[yy][ym]; if (src) tv.push(src.u); }
         const tavg = tv.length ? tv.reduce((a, b) => a + b, 0) / tv.length : 0, zeroPct = maxActive > 0 ? (1 - act / maxActive) : 0;
         if (tavg > 0 && cur < 0.4 * tavg && zeroPct > 0.3) suspect.push(m);
       }
-      const sus = new Set(suspect), adj = (y) => { let t = 0; const o = mm[y] || {}; for (let m = 1; m <= cutoffNum; m++) { if (sus.has(m)) continue; t += (o[m] && o[m].u) || 0; } return t; };
+      const sus = new Set(suspect), adj = (y) => { let t = 0; const o = mm[y] || {}; for (let m = W.from; m <= W.to; m++) { if (sus.has(m)) continue; t += (o[m] && o[m].u) || 0; } return t; };
       const j = { 2024: adj(2024), 2025: adj(2025), 2026: adj(2026) };
       const peakYear = [2024, 2025, 2026].reduce((p, y) => j[y] > j[p] ? y : p, 2024), peakVal = j[peakYear];
       const yoy = j[2025] > 0 ? (j[2026] / j[2025] - 1) : null, gapToPeak = peakVal > 0 ? (j[2026] / peakVal - 1) : null;
@@ -884,29 +898,30 @@ app.get('/api/demand/trends/multi-year', async (_req, res) => {
       let cls; if (peakVal > 0 && j[2026] < 0.25 * peakVal) cls = 'Collapsed'; else if (peakYear === 2026) cls = 'New high';
       else if (j[2024] > j[2025] && j[2025] > j[2026]) cls = 'Two-season fall'; else if (j[2026] < j[2025]) cls = 'Declining';
       else if (j[2026] > j[2025] && j[2026] < peakVal) cls = 'Recovering'; else cls = 'Recovering';
-      rows.push({ category, market, a2024: a24, a2025: a25, a2026: a26, peakYear, yoy, gapToPeak, planNext: pl, planVsPeak, cls, suspectMonths: suspect, suspectCount: suspect.length });
+      rows.push({ category, label, market, a2024: a24, a2025: a25, a2026: a26, peakYear, yoy, gapToPeak, planNext: pl, planVsPeak, cls, suspectMonths: suspect, suspectCount: suspect.length });
     }
     rows.sort((x, y) => { const gx = x.gapToPeak == null ? 99 : x.gapToPeak, gy = y.gapToPeak == null ? 99 : y.gapToPeak; return gx - gy; });
-    res.json({ cutoffMonth: cutoffNum, planYear, rows });
+    res.json({ cutoffMonth: cutoffNum, planYear, from: W.from, to: W.to, grain: W.grain, rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // DEMAND ▸ Trends ▸ Panel 1 (Channel mix). House benchmark per market = total FBA / (DTC+FBA), rolling 12 months to
 // cutoff (B2B excluded). Per category: FBA share, gap vs benchmark, headroom units. Stockout confound computed at
 // SKU-month grain: pct_sku_months_no_fba = share of SKU-months where a SKU sold DTC but recorded zero FBA (then a read).
-app.get('/api/demand/trends/channel-mix', async (_req, res) => {
+app.get('/api/demand/trends/channel-mix', async (req, res) => {
   try {
+    const W = _trendsWin(req, 12);   // channel mix is rolling-12; only the grain (category|subcategory) applies here
     const r = await pool.query(`
       WITH bounds AS ( SELECT (max(month) - interval '1 month')::date cutoff FROM planner.sales_actuals ),
       win AS ( SELECT cutoff, (cutoff - interval '11 months')::date start FROM bounds ),
       sm AS (
-        SELECT coalesce(nullif(btrim(p.category),''),'Unmapped') category, sa.country market, sa.sku, sa.month,
+        SELECT ${W.catExpr} category, ${W.lblExpr} label, sa.country market, sa.sku, sa.month,
           sum(sa.units) FILTER (WHERE sa.channel='DTC') dtc, sum(sa.units) FILTER (WHERE sa.channel='FBA') fba
         FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku CROSS JOIN win
-        WHERE sa.month >= win.start AND sa.month <= win.cutoff GROUP BY 1,2,3,4 )
-      SELECT category, market, sum(coalesce(dtc,0))::numeric dtc_units, sum(coalesce(fba,0))::numeric fba_units,
+        WHERE sa.month >= win.start AND sa.month <= win.cutoff GROUP BY 1,2,3,4,5 )
+      SELECT category, label, market, sum(coalesce(dtc,0))::numeric dtc_units, sum(coalesce(fba,0))::numeric fba_units,
         count(*) FILTER (WHERE coalesce(dtc,0)>0) dtc_skumonths,
         count(*) FILTER (WHERE coalesce(dtc,0)>0 AND coalesce(fba,0)=0) nofba_skumonths
-      FROM sm GROUP BY 1,2`);
+      FROM sm GROUP BY 1,2,3`);
     const perMkt = {};
     for (const x of r.rows) { const m = x.market; (perMkt[m] = perMkt[m] || { dtc: 0, fba: 0 }); perMkt[m].dtc += Number(x.dtc_units) || 0; perMkt[m].fba += Number(x.fba_units) || 0; }
     const bench = {}; for (const m of Object.keys(perMkt)) { const d = perMkt[m].dtc, f = perMkt[m].fba; bench[m] = (d + f) > 0 ? f / (d + f) : 0; }
@@ -917,10 +932,10 @@ app.get('/api/demand/trends/channel-mix', async (_req, res) => {
       const headroom = (b < 1) ? Math.max(0, dtc * b / (1 - b) - fba) : 0;
       const dm = Number(x.dtc_skumonths) || 0, nf = Number(x.nofba_skumonths) || 0, coverage = dm > 0 ? nf / dm : null;
       let read; if (gapPp < 0) { read = (coverage != null && coverage > 0.25) ? 'Stocking gap' : (coverage != null && coverage < 0.15) ? 'Demand gap' : 'Investigate'; } else read = 'Over-indexed';
-      rows.push({ category: x.category, market: x.market, dtc, fba, fbaShare: share, benchmark: b, gapPp, coverage, headroom, read });
+      rows.push({ category: x.category, label: x.label, market: x.market, dtc, fba, fbaShare: share, benchmark: b, gapPp, coverage, headroom, read });
     }
     rows.sort((a, c) => c.headroom - a.headroom);
-    res.json({ benchmark: bench, rows });
+    res.json({ benchmark: bench, grain: W.grain, rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // SKU-data lazy-load (opt-in ?lazysku=1): the heavy _SKU_RAW + FC_OUTPUTS are shipped EMPTY in the page and the
