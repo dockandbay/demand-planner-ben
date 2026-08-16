@@ -1,3 +1,11 @@
+## v27.060 Safety stock: demand unconstraining from inventory snapshots (censored-demand fix)
+- Server `buildStockoutHistory()` derives stockout months per SKU/market from `inventory_snapshots` (market on-hand ≤ 0), injected as `INV_STOCKOUTS`. Sandbox: 43 SKUs flagged from the single Apr-2026 snapshot.
+- New **Unconstrain OOS** toggle on the Safety-stock tab: lifts stockout-censored sales to the SKU's seasonal norm before computing σ, so SKUs that stocked out aren't under-planned. Shows how many SKU-months were lifted.
+- Effect is small today (one snapshot); grows as **monthly snapshots back to 2025** are loaded via the CONFIG loader (each upload is dated). That history also unlocks the full backtest (SS method vs cover-weeks vs realised stockouts / on-hand) and a proper model review.
+
+## v27.059 Safety stock: data-driven lead-time variability from PO delivery history
+- Server `buildLeadTimeVar()` computes stdev of (actual − planned delivery) in weeks (global + per supplier) from `po_delivery_history` joined to `purchase_orders`, injected as `LEADTIME_VAR`. New **Data** lead-variability option uses it (per-supplier where n≥5, else global). Sandbox: σ≈5.36 wk (mean +2.46 late, 59 POs) → UK-DTC safety stock 75k → 134k units.
+
 ## v27.058 Safety stock: add lead-time variability (combined formula)
 - Safety stock now uses the **combined formula** `Z × √(L·σ_d² + d²·σ_L²)` — demand variability **and** lead-time variability. New **Lead variability** control (None / ±15 / ±25 / ±40% of lead). On long China leads this roughly doubles the buffer at ±25% (sandbox UK-DTC: 75k → 130k units), which cover-weeks is blind to.
 - Data-derived σ_L (from po_delivery_history) is a follow-up: that table stores only the actual delivery date, so it needs a join to the PO's expected ETA to compute lead-time error.

@@ -180,6 +180,18 @@ async function buildLeadTimeVar() {
   } catch { /* tables absent → empty (Safety-stock 'Data' falls back to 0) */ }
   return out;
 }
+// Stockout history from inventory snapshots → {sku:{MKT:[YYYY_MM,…]}} — months where a market's total on-hand was ≤0.
+// Feeds the Safety-stock "unconstrain OOS" option: sales in a stockout month understate true demand (censored), so we
+// lift them before computing demand mean/σ. Sparse today (needs monthly snapshots back to 2025 loaded to be useful).
+async function buildStockoutHistory() {
+  const out = {};
+  try {
+    const rows = (await pool.query(`SELECT sku, upper(split_part(warehouse,'_',1)) mkt, to_char(snapshot_date,'YYYY_MM') mon, sum(available) oh
+      FROM planner.inventory_snapshots GROUP BY 1,2,3 HAVING sum(available) <= 0`)).rows;
+    rows.forEach((r) => { const m = String(r.mkt); if (!['UK', 'US', 'EU', 'AU', 'CA'].includes(m)) return; (out[r.sku] = out[r.sku] || {}); (out[r.sku][m] = out[r.sku][m] || []).push(r.mon); });
+  } catch { /* table absent / pre-seed → empty (feature inert) */ }
+  return out;
+}
 // Prepack on-hand by SKU/warehouse → {prepack_sku:{wh:qty}}. Prepack SKUs are out of planning scope so they are NOT
 // in SKUM; the buy-plan netting needs their stock separately. Sourced from v_product_inventory (same on-hand the app
 // uses), restricted to the SKUs in prepack_map.
@@ -1210,7 +1222,7 @@ app.get('/', async (req, res) => {
     const _vals = await getDataVals();   // in-process → KV (cold start, off-Supabase) → Supabase build; SWR handled inside
     const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS, SA_EXTRA, GBP_RATE, BRANCH_FREIGHT, TRANSFER_LEADS, CAT_ASP_GBP, LOCKED_FC] = _vals;
     // Fetched fresh (not in the data cache); independent of each other, so run concurrently.
-    const [KLAVIYO_BIS, MKT_COLORS, SET_BOM, PREPACK_MAP, PREPACK_STOCK, LEADTIME_VAR] = await Promise.all([buildKlaviyoBis(), buildMktColors(), buildSetBom(), buildPrepackMap(), buildPrepackStock(), buildLeadTimeVar()]);   // …; LEADTIME_VAR = {global:{sig,mean,n},bySupplier:{}} lead-time variability (weeks)
+    const [KLAVIYO_BIS, MKT_COLORS, SET_BOM, PREPACK_MAP, PREPACK_STOCK, LEADTIME_VAR, INV_STOCKOUTS] = await Promise.all([buildKlaviyoBis(), buildMktColors(), buildSetBom(), buildPrepackMap(), buildPrepackStock(), buildLeadTimeVar(), buildStockoutHistory()]);   // …; LEADTIME_VAR lead-time variability (weeks); INV_STOCKOUTS {sku:{MKT:[months]}} OOS from snapshots
     let html = DEV ? loadHTML() : HTML;
     html = replaceGlobal(html, 'DATA', JSON.stringify(DATA));
     html = replaceGlobal(html, 'FC_CURRENT', JSON.stringify(FC_CURRENT));
@@ -1229,6 +1241,7 @@ app.get('/', async (req, res) => {
     html = replaceGlobal(html, 'PREPACK_MAP', JSON.stringify(PREPACK_MAP || {}));   // {prepack_sku:set_sku} — prepack stock offsets mapped set demand; PP- excluded from demand+buy
     html = replaceGlobal(html, 'PREPACK_STOCK', JSON.stringify(PREPACK_STOCK || {}));   // {prepack_sku:{wh:qty}} — prepack on-hand (out of SKUM scope; feeds buy-plan netting)
     html = replaceGlobal(html, 'LEADTIME_VAR', JSON.stringify(LEADTIME_VAR || {}));   // lead-time variability (weeks) from PO delivery history — Safety-stock data-driven σ_L
+    html = replaceGlobal(html, 'INV_STOCKOUTS', JSON.stringify(INV_STOCKOUTS || {}));   // {sku:{MKT:[YYYY_MM]}} stockout months from inventory snapshots — Safety-stock demand unconstraining
     html = replaceGlobal(html, 'MKT_COLORS', JSON.stringify(MKT_COLORS));     // reusable market colour palette
     html = replaceGlobal(html, 'BRANCH_FREIGHT', JSON.stringify(BRANCH_FREIGHT || {}));
     html = replaceGlobal(html, 'CAT_ASP_GBP', JSON.stringify(CAT_ASP_GBP || {}));
