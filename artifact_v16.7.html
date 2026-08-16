@@ -4173,7 +4173,7 @@ let REPORT_VIEW='ex'; // REPORTS sub-tab: 'ex' (Exec Summary) | 'slow' (Slow Mov
 let KPI_SUB='instock', KPI_T3PL=5, KPI_TFBA=5, KPI_GRP='', KPI_COVER=6, KPI_WITHIN=3, KPI_ACCM=3; // DEMAND ▸ KPIs state
 let KPI_ACC_LEVEL='cc', KPI_ACC_LAG=1; // Forecast-accuracy view: drill level (cc|category|sku) + lag (months forecast made before target)
 let DEMAND_VIEW='plan'; // DEMAND sub-tab: 'plan' (the demand plan) | 'targets' (sell-through targets) | 'actions'
-var EXC_MKT='UK', EXC_CH='DTC', EXC_GRAIN='sku', EXC_SUBTAB='fclt', EXC_SEV='all', EXC_MINDELTA=0;   // DEMAND ▸ Exceptions filters (fclt = "Forecast < Actual" sub-tab; EXC_SEV = all|RED|AMBER; EXC_MINDELTA = min |delta| units)
+var EXC_MKT='all', EXC_CH='all', EXC_GRAIN='sku', EXC_SUBTAB='fclt', EXC_SEV='all', EXC_MINDELTA=0, EXC_COLLAPSED=new Set();   // DEMAND ▸ Exceptions filters (default show all, grouped tree by Country ▸ Channel ▸ Subcategory; EXC_COLLAPSED = minimised group keys)
 var TGT_CACHE=null;
 var _da={sec:'actions',mkt:'all',cat:'all',status:'open'}; // DEMAND ▸ Actions filters (sec: actions|insights|weather; status: open|snoozed|dismissed|done|all)
 // Which level-3 section a given action TYPE belongs to. ACTIONS = act-on-it now (sell-through, events,
@@ -9769,94 +9769,93 @@ function renderExceptionsView(body){
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function fn(n){n=Math.round(Number(n)||0);return n?n.toLocaleString():'0';}
   var _cd=(typeof CUR_DAYS!=='undefined'&&CUR_DAYS)?CUR_DAYS:{elapsed:16,total:30};
-  var elapsed=Math.max(1,_cd.elapsed||1), total=_cd.total||30;
+  var elapsed=Math.max(1,_cd.elapsed||1), total=_cd.total||30, frac=elapsed/total;
   var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var _cm=(typeof CUR_MONTH!=='undefined')?CUR_MONTH:'', curLbl=_cm?(MN[(+_cm.split('_')[1])-1]+" '"+_cm.slice(2,4)):'';
   var _sc2cat={}; try{ (typeof DATA!=='undefined'?DATA:[]).forEach(function(r){ if(r.s&&r.c)_sc2cat[r.s]=r.c; }); }catch(e){}
-  function buildRows(){
-    var co=EXC_MKT, ch=EXC_CH, ctry=co.toLowerCase(), chKey=(ch==='DTC'?'d':ch==='FBA'?'f':ch==='B2B'?'b':ch==='ZAL'?'z':'t');
-    // "No availability" sub-tab: SKUs holding stock in a warehouse whose linked channels the SKU isn't sellable in.
-    // 3PL pool (co_3pl + non-GRS) sells via DTC/B2B/ZAL/TIK; FBA pool (co_fba + US AWD) sells via FBA. RED = no
-    // availability at all in this market (stock fully stranded); AMBER = sellable in another channel but not this pool's.
-    if(EXC_SUBTAB==='noavail'){ var agg={}, rows=[];
+  var lym=(typeof lyYearMonths!=='undefined')?lyYearMonths:undefined;
+  var _isNA=(EXC_SUBTAB==='noavail'), isSku=(EXC_GRAIN!=='category'), hasOv=(!_isNA&&isSku);
+  var ALLC=['UK','US','EU','AU'], ALLCH=['DTC','FBA','B2B'];
+  var cos=(EXC_MKT==='all')?ALLC:[EXC_MKT], chs=(EXC_CH==='all')?ALLCH:[EXC_CH];
+  function chipOf(st){ return st==='RED'?'<span style="display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:3px;background:#FFD6D1;color:#9e2b1f">RED</span>':'<span style="display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:3px;background:#fdf0d8;color:#8a5a06">AMBER</span>'; }
+  function classify(r){ if(_isNA){ r.delta=r.units; return; }
+    r.run=elapsed>0?(r.act/elapsed*total):r.act;
+    if(EXC_SUBTAB==='fgtr'){ r.delta=r.fc-r.run; r.status=(r.fc>0&&r.act>0&&frac>=0.34)?(r.run<r.fc*0.5?'RED':(r.run<r.fc*0.75?'AMBER':'')):''; }
+    else { r.delta=r.act-r.fc; r.status=(r.fc>0&&r.act>=r.fc)?'RED':((r.fc>0&&r.run>r.fc&&r.act<r.fc)?'AMBER':''); } }
+  // ---- build flat exception rows, each tagged with a group path (Country ▸ Channel/Pool ▸ Subcategory) ----
+  var flat=[];
+  if(_isNA){
+    cos.forEach(function(co){ var ctry=co.toLowerCase(), catMap={};
       Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||p.vt==='SET')return; var av=(p.av&&p.av[ctry])||'', inv=p.inv||{};
         var s3=(inv[ctry+'_3pl']||0)+(inv[ctry+'_nongrs']||0), sf=(inv[ctry+'_fba']||0)+(co==='US'?(inv['us_awd']||0):0);
-        var has3=/[dbzt]/.test(av), hasF=av.indexOf('f')>=0, none=!av;
-        function add(pool,units){ if(EXC_GRAIN==='category'){ var cat=_sc2cat[p.s]||p.s||'Unmapped'; var g=agg[cat]||(agg[cat]={label:cat,sub:'',units:0,n:0,av:'',none:true}); g.units+=units; g.n++; if(av)g.none=false; }
-          else rows.push({label:sku,sku:sku,name:p.n||'',sub:p.s||'',pool:pool,units:units,av:av,status:none?'RED':'AMBER',delta:units}); }
+        var has3=/[dbzt]/.test(av), hasF=av.indexOf('f')>=0, none=!av, sub=p.s||'Unmapped', cat=_sc2cat[sub]||sub;
+        function add(pool,units){ if(units<=0)return; var st=none?'RED':'AMBER';
+          if(isSku)flat.push({path:[co,pool,sub],label:sku,sku:sku,name:p.n||'',pool:pool,units:units,av:av,status:st,delta:units});
+          else { var k=co+'|'+pool+'|'+cat; var g=catMap[k]||(catMap[k]={path:[co,pool],label:cat,pool:pool,units:0,n:0,none:true}); g.units+=units; g.n++; if(av)g.none=false; } }
         if(s3>0&&!has3)add('3PL',s3); if(sf>0&&!hasF)add('FBA',sf); });
-      if(EXC_GRAIN==='category')rows=Object.keys(agg).map(function(k){var g=agg[k];g.pool='mixed';g.status=g.none?'RED':'AMBER';g.delta=g.units;return g;});
-      rows.sort(function(a,b){var o={RED:0,AMBER:1};if(o[a.status]!==o[b.status])return o[a.status]-o[b.status];return b.units-a.units;});
-      return rows; }
-    // Forecast-vs-actual sub-tabs: forecast = skuMonthlyMap (grid number); actuals = skuSales current month.
-    var lym=(typeof lyYearMonths!=='undefined')?lyYearMonths:undefined;
-    var bySub={}; Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||p.vt==='SET')return; if((((p.av||{})[ctry])||'').indexOf(chKey)<0)return; (bySub[p.s]=bySub[p.s]||[]).push(sku); });
-    var agg={}, rows=[];
-    Object.keys(bySub).forEach(function(sub){ var subSkus=bySub[sub];
-      var subcatFU={}; try{ subcatFU=(calc(sub,co,ch)||{}).fu||{}; }catch(e){}
-      var shares={}; try{ shares=buildSkuShares(subSkus,co,ch,lym)||{}; }catch(e){}
-      subSkus.forEach(function(sku){
-        var invOH=(SKUM[sku].inv&&SKUM[sku].inv[skuWh(co,ch)])||0, fc=0, act=0;
-        try{ var mm=skuMonthlyMap(sku,co,ch,[_cm],subcatFU,shares[sku]||0,invOH)||{}; fc=mm[_cm]||0; }catch(e){}
-        try{ var ss=skuSales(sku,co,ch); act=(ss&&ss[_cm])||0; }catch(e){}
-        if(fc<=0&&act<=0)return;
-        if(EXC_GRAIN==='category'){ var cat=_sc2cat[sub]||sub||'Unmapped'; var g=agg[cat]||(agg[cat]={label:cat,sub:'',fc:0,act:0,n:0}); g.fc+=fc; g.act+=act; g.n++; }
-        else rows.push({label:sku,sku:sku,name:(SKUM[sku].n)||'',sub:sub,fc:fc,act:act});
-      });
+      if(!isSku)Object.keys(catMap).forEach(function(k){ var g=catMap[k]; g.status=g.none?'RED':'AMBER'; g.delta=g.units; g.av=g.none?'':'(mixed)'; flat.push(g); });
     });
-    if(EXC_GRAIN==='category')rows=Object.keys(agg).map(function(k){return agg[k];});
-    var frac=elapsed/total;
-    rows.forEach(function(r){ r.run=elapsed>0?(r.act/elapsed*total):r.act;
-      if(EXC_SUBTAB==='fgtr'){ r.delta=r.fc-r.run;   // over-forecast: run-rate pacing BELOW forecast (largest gaps worst)
-        r.status=(r.fc>0&&r.act>0&&frac>=0.34)?(r.run<r.fc*0.5?'RED':(r.run<r.fc*0.75?'AMBER':'')):''; }
-      else { r.delta=r.act-r.fc;                      // under-forecast: actuals at/over or pacing over forecast
-        r.status=(r.fc>0&&r.act>=r.fc)?'RED':((r.fc>0&&r.run>r.fc&&r.act<r.fc)?'AMBER':''); } });
-    rows=rows.filter(function(r){return r.status;});
-    rows.sort(function(a,b){ var o={RED:0,AMBER:1}; if(o[a.status]!==o[b.status])return o[a.status]-o[b.status]; return (b.delta||0)-(a.delta||0); });
-    return rows;
+  } else {
+    cos.forEach(function(co){ chs.forEach(function(ch){ var ctry=co.toLowerCase(), chKey=(ch==='DTC'?'d':ch==='FBA'?'f':'b'), catMap={};
+      var bySub={}; Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||p.vt==='SET')return; if((((p.av||{})[ctry])||'').indexOf(chKey)<0)return; (bySub[p.s]=bySub[p.s]||[]).push(sku); });
+      Object.keys(bySub).forEach(function(sub){ var subSkus=bySub[sub], cat=_sc2cat[sub]||sub;
+        var subcatFU={}; try{ subcatFU=(calc(sub,co,ch)||{}).fu||{}; }catch(e){}
+        var shares={}; try{ shares=buildSkuShares(subSkus,co,ch,lym)||{}; }catch(e){}
+        subSkus.forEach(function(sku){ var invOH=(SKUM[sku].inv&&SKUM[sku].inv[skuWh(co,ch)])||0, fc=0, act=0;
+          try{ var mm=skuMonthlyMap(sku,co,ch,[_cm],subcatFU,shares[sku]||0,invOH)||{}; fc=mm[_cm]||0; }catch(e){}
+          try{ var ss=skuSales(sku,co,ch); act=(ss&&ss[_cm])||0; }catch(e){}
+          if(fc<=0&&act<=0)return;
+          if(isSku){ var r={path:[co,ch,sub],label:sku,sku:sku,name:SKUM[sku].n||'',co:co,ch:ch,fc:fc,act:act}; classify(r); if(r.status)flat.push(r); }
+          else { var g=catMap[cat]||(catMap[cat]={path:[co,ch],label:cat,co:co,ch:ch,fc:0,act:0,n:0}); g.fc+=fc; g.act+=act; g.n++; }
+        });
+      });
+      if(!isSku)Object.keys(catMap).forEach(function(k){ var g=catMap[k]; classify(g); if(g.status)flat.push(g); });
+    }); });
   }
-  var allRows=buildRows(), nRed=allRows.filter(function(r){return r.status==='RED';}).length, nAmb=allRows.length-nRed;
-  var rows=allRows.filter(function(r){ if(EXC_SEV!=='all'&&r.status!==EXC_SEV)return false; if(EXC_MINDELTA>0&&Math.abs(r.delta||0)<EXC_MINDELTA)return false; return true; });
-  var _isNA=(EXC_SUBTAB==='noavail');
-  var PILL=function(cls,val,active,lbl){ return '<button class="exc-'+cls+'" data-v="'+val+'" style="font-size:12px;font-weight:600;border:1px solid '+(active?'#7c3aed':'#e2e8f0')+';background:'+(active?'#f3e8ff':'#fff')+';color:'+(active?'#6b21a8':'#64748b')+';border-radius:5px;padding:3px 11px;cursor:pointer;margin-right:4px">'+lbl+'</button>'; };
+  var nRed=flat.filter(function(r){return r.status==='RED';}).length, nAmb=flat.length-nRed;
+  var rows=flat.filter(function(r){ if(EXC_SEV!=='all'&&r.status!==EXC_SEV)return false; if(EXC_MINDELTA>0&&Math.abs(r.delta||0)<EXC_MINDELTA)return false; return true; });
+  // ---- filter bar ----
+  var PILL=function(cls,val,active,lbl){ return '<button class="exc-'+cls+'" data-v="'+val+'" style="font-size:12px;font-weight:600;border:1px solid '+(active?'#7c3aed':'#e2e8f0')+';background:'+(active?'#f3e8ff':'#fff')+';color:'+(active?'#6b21a8':'#64748b')+';border-radius:5px;padding:3px 10px;cursor:pointer;margin-right:4px">'+lbl+'</button>'; };
   var LBL='font-size:11px;color:#475569;font-weight:600;margin-right:6px';
   var bar='<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:2px 0 10px;font-size:12px">'
-    +'<div><span style="'+LBL+'">Country</span>'+['UK','US','EU','AU'].map(function(m){return PILL('mkt',m,EXC_MKT===m,m);}).join('')+'</div>'
-    +(_isNA?'':'<div><span style="'+LBL+'">Channel</span>'+['DTC','FBA','B2B'].map(function(c){return PILL('ch',c,EXC_CH===c,c);}).join('')+'</div>')
-    +'<div><span style="'+LBL+'">View</span>'+PILL('grain','sku',EXC_GRAIN==='sku','SKUs')+PILL('grain','category',EXC_GRAIN==='category','Categories')+'</div>'
+    +'<div><span style="'+LBL+'">Country</span>'+[['all','All'],['UK','UK'],['US','US'],['EU','EU'],['AU','AU']].map(function(x){return PILL('mkt',x[0],EXC_MKT===x[0],x[1]);}).join('')+'</div>'
+    +(_isNA?'':'<div><span style="'+LBL+'">Channel</span>'+[['all','All'],['DTC','DTC'],['FBA','FBA'],['B2B','B2B']].map(function(x){return PILL('ch',x[0],EXC_CH===x[0],x[1]);}).join('')+'</div>')
+    +'<div><span style="'+LBL+'">View</span>'+PILL('grain','sku',isSku,'SKUs')+PILL('grain','category',!isSku,'Categories')+'</div>'
     +'<div><span style="'+LBL+'">Risk</span>'+[['all','All'],['RED','Red'],['AMBER','Amber']].map(function(x){return PILL('sev',x[0],EXC_SEV===x[0],x[1]);}).join('')+'</div>'
-    +'<div><span style="'+LBL+'">'+(_isNA?'Min units':'Min delta')+'</span><input class="exc-mind" type="number" min="0" step="50" value="'+(EXC_MINDELTA||'')+'" placeholder="0" title="Hide rows below this many units" style="width:66px;font-size:12px;padding:2px 5px;border:1px solid #cbd5e1;border-radius:5px;text-align:right"></div>'
-    +'<div style="margin-left:auto;color:#94a3b8">'+curLbl+' · '+elapsed+'/'+total+' days · <b style="color:#9e2b1f">'+nRed+' red</b> · <b style="color:#b45309">'+nAmb+' amber</b></div></div>';
+    +'<div><span style="'+LBL+'">'+(_isNA?'Min units':'Min delta')+'</span><input class="exc-mind" type="number" min="0" step="50" value="'+(EXC_MINDELTA||'')+'" placeholder="0" title="Hide rows below this many units" style="width:64px;font-size:12px;padding:2px 5px;border:1px solid #cbd5e1;border-radius:5px;text-align:left"></div>'
+    +'<div style="margin-left:auto;color:#94a3b8">'+(_isNA?'':(curLbl+' · '+elapsed+'/'+total+'d · '))+'<b style="color:#9e2b1f">'+nRed+' red</b> · <b style="color:#b45309">'+nAmb+' amber</b></div></div>';
   var subtab='<div style="display:flex;gap:3px;border-bottom:1px solid #e5e7eb;margin-bottom:8px">'
     +[['fclt','Forecast < Actual'],['fgtr','Forecast > Run-rate'],['noavail','No availability']].map(function(t){var on=EXC_SUBTAB===t[0];return '<button class="exc-sub" data-s="'+t[0]+'" style="border:none;background:none;padding:6px 14px;font-size:12px;font-weight:'+(on?'700':'500')+';color:'+(on?'#0f172a':'#64748b')+';border-bottom:2px solid '+(on?'#7c3aed':'transparent')+';cursor:pointer">'+t[1]+'</button>';}).join('')+'</div>';
-  var _ovNote=(EXC_GRAIN==='sku'?'Type a units figure in <b>Override</b> to reset this SKU’s current-month forecast (binds to the plan; Save Forecasts to persist).':'Switch to <b>SKUs</b> to edit individual forecasts.');
+  var _ovNote=(hasOv?'Type a units figure in <b>Override</b> (next to the forecast) to reset a SKU’s current-month forecast — binds to the plan; Save Forecasts to persist.':'');
   var legend=(_isNA
-    ? '<div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.5">SKUs holding stock in a '+esc(EXC_MKT)+' warehouse whose channels the SKU isn’t sellable in. <b style="color:#9e2b1f">Red</b> = no availability at all in '+esc(EXC_MKT)+' (stock fully stranded). <b style="color:#b45309">Amber</b> = sellable in another channel but not the one that ships this pool (e.g. FBA stock but FBA-off). <b>3PL</b> pool = DTC/B2B/ZAL/TIK; <b>FBA</b> pool = FBA (+US AWD). Fix availability in the product master (Airtable).</div>'
+    ? '<div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.5">SKUs holding stock in a warehouse whose channels the SKU isn’t sellable in. <b style="color:#9e2b1f">Red</b> = no availability at all in that country (stock fully stranded). <b style="color:#b45309">Amber</b> = sellable in another channel but not the one that ships this pool. <b>3PL</b> = DTC/B2B/ZAL/TIK; <b>FBA</b> = FBA (+US AWD). Fix availability in the product master.</div>'
     : (EXC_SUBTAB==='fgtr'
-    ? '<div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.5"><b style="color:#9e2b1f">Red</b> = the run-rate is pacing below <b>half</b> the month’s forecast (forecast likely far too high). <b style="color:#b45309">Amber</b> = pacing below 75% of forecast. Only rows with some sales and ≥⅓ of the month elapsed; largest gaps first. '+_ovNote+'</div>'
-    : '<div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.5"><b style="color:#9e2b1f">Red</b> = actuals have already reached the month’s forecast (buy plan infers 0 remaining — likely under-forecast). <b style="color:#b45309">Amber</b> = actuals still under forecast but the run-rate is pacing past it. '+_ovNote+'</div>'));
-  var TH='padding:0 8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;border-bottom:1px solid #e2e8f0;text-align:left', T='padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:left', N='padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,monospace';
-  function chipOf(st){ return st==='RED'?'<span style="display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:3px;background:#FFD6D1;color:#9e2b1f">RED</span>':'<span style="display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:3px;background:#fdf0d8;color:#8a5a06">AMBER</span>'; }
-  var head, bodyRows;
-  if(_isNA){
-    head='<tr><th style="'+TH+'">'+(EXC_GRAIN==='category'?'Category':'SKU')+'</th><th style="'+TH+'">'+(EXC_GRAIN==='category'?'SKUs':'Subcategory')+'</th><th style="'+TH+'">Pool</th><th style="'+TH+';text-align:right">Stock ('+esc(EXC_MKT)+')</th><th style="'+TH+'">Availability</th><th style="'+TH+'">Status</th></tr>';
-    bodyRows=rows.map(function(r){ return '<tr><td style="'+T+';font-weight:600;white-space:nowrap">'+esc(r.label)+(r.name?'<div style="font-size:9px;color:#94a3b8;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px">'+esc(r.name)+'</div>':'')+'</td>'
-      +'<td style="'+T+';font-size:11px;color:#64748b">'+esc(EXC_GRAIN==='category'?(r.n+' SKU'+(r.n===1?'':'s')):r.sub)+'</td>'
-      +'<td style="'+T+';font-size:11px;font-weight:600;color:#475569">'+esc(r.pool)+'</td>'
-      +'<td style="'+N+';font-weight:700">'+fn(r.units)+'</td>'
-      +'<td style="'+T+';font-size:11px;color:'+(r.av?'#64748b':'#9e2b1f')+';font-weight:'+(r.av?'400':'700')+'">'+(r.av?esc(r.av):'none')+'</td>'
-      +'<td style="'+T+'">'+chipOf(r.status)+'</td></tr>'; }).join('');
-  } else {
-    head='<tr><th style="'+TH+'">'+(EXC_GRAIN==='category'?'Category':'SKU')+'</th><th style="'+TH+'">'+(EXC_GRAIN==='category'?'SKUs':'Subcategory')+'</th><th style="'+TH+';text-align:right">Forecast</th><th style="'+TH+';text-align:right">Actual ('+curLbl+')</th><th style="'+TH+';text-align:right">Run-rate</th><th style="'+TH+'">Status</th>'+(EXC_GRAIN==='sku'?'<th style="'+TH+';text-align:right">Override</th>':'')+'</tr>';
-    bodyRows=rows.map(function(r){ var over='';
-      if(EXC_GRAIN==='sku')over='<td style="'+N+'"><input class="exc-ov" data-sku="'+esc(r.sku)+'" data-fc="'+r.fc+'" placeholder="'+fn(r.fc)+'" style="width:64px;text-align:right;font-size:11px;border:1px solid #cbd5e1;border-radius:4px;padding:2px 5px;font-variant-numeric:tabular-nums"></td>';
-      return '<tr><td style="'+T+';font-weight:600;white-space:nowrap">'+esc(r.label)+(r.name?'<div style="font-size:9px;color:#94a3b8;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px">'+esc(r.name)+'</div>':'')+'</td>'
-        +'<td style="'+T+';font-size:11px;color:#64748b">'+esc(EXC_GRAIN==='category'?(r.n+' SKU'+(r.n===1?'':'s')):r.sub)+'</td>'
-        +'<td style="'+N+'">'+fn(r.fc)+'</td><td style="'+N+';font-weight:700;color:'+(r.status==='RED'?'#9e2b1f':'#0f172a')+'">'+fn(r.act)+'</td><td style="'+N+';color:#64748b">'+fn(r.run)+'</td><td style="'+T+'">'+chipOf(r.status)+'</td>'+over+'</tr>'; }).join('');
+    ? '<div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.5"><b style="color:#9e2b1f">Red</b> = run-rate pacing below <b>half</b> the forecast (forecast likely too high). <b style="color:#b45309">Amber</b> = below 75%. Rows with some sales and ≥⅓ of the month elapsed. '+_ovNote+'</div>'
+    : '<div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.5"><b style="color:#9e2b1f">Red</b> = actuals already reached forecast (buy plan infers 0 remaining). <b style="color:#b45309">Amber</b> = under forecast but run-rate pacing past it. '+_ovNote+'</div>'));
+  // ---- collapsible tree (Country ▸ Channel/Pool ▸ Subcategory ▸ leaf) ----
+  var TH='padding:0 8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;border-bottom:1px solid #e2e8f0;text-align:left';
+  var TL='padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:left;font-variant-numeric:tabular-nums';
+  var COLS=_isNA?['Item','Pool','Stock','Availability','Status']:(['Item','Forecast'].concat(hasOv?['Override']:[]).concat(['Actual ('+curLbl+')','Run-rate','Status']));
+  var NC=COLS.length;
+  var tree={__c:{}};
+  rows.forEach(function(r){ var node=tree; r.path.forEach(function(k){ node.__c=node.__c||{}; node=node.__c[k]||(node.__c[k]={__k:k}); }); (node.__rows=node.__rows||[]).push(r); });
+  function agg(node){ var a={red:0,amber:0}; if(node.__rows)node.__rows.forEach(function(r){ if(r.status==='RED')a.red++; else a.amber++; }); if(node.__c)Object.keys(node.__c).forEach(function(k){ var c=agg(node.__c[k]); a.red+=c.red; a.amber+=c.amber; }); return a; }
+  function leaf(r,depth){ var pl=8+depth*16;
+    var c0='<td style="'+TL+';padding-left:'+pl+'px;font-weight:600;white-space:nowrap">'+esc(r.label)+(r.name?'<span style="font-size:9px;color:#94a3b8;font-weight:400;margin-left:6px">'+esc(String(r.name).slice(0,26))+'</span>':'')+'</td>';
+    if(_isNA)return '<tr>'+c0+'<td style="'+TL+'">'+esc(r.pool||'')+'</td><td style="'+TL+'">'+fn(r.units)+'</td><td style="'+TL+';color:'+(r.av?'#64748b':'#9e2b1f')+';font-weight:'+(r.av?'400':'700')+'">'+(r.av?esc(r.av):'none')+'</td><td style="'+TL+'">'+chipOf(r.status)+'</td></tr>';
+    var ov=hasOv?'<td style="'+TL+'"><input class="exc-ov" data-sku="'+esc(r.sku)+'" data-co="'+esc(r.co)+'" data-ch="'+esc(r.ch)+'" data-fc="'+r.fc+'" placeholder="'+fn(r.fc)+'" style="width:56px;text-align:left;font-size:11px;border:1px solid #cbd5e1;border-radius:4px;padding:2px 5px"></td>':'';
+    return '<tr>'+c0+'<td style="'+TL+'">'+fn(r.fc)+'</td>'+ov+'<td style="'+TL+';font-weight:700;color:'+(r.status==='RED'?'#9e2b1f':'#0f172a')+'">'+fn(r.act)+'</td><td style="'+TL+';color:#64748b">'+fn(r.run)+'</td><td style="'+TL+'">'+chipOf(r.status)+'</td></tr>';
   }
-  var emptyMsg=_isNA?('No '+esc(EXC_MKT)+' stranded stock — every SKU with inventory is sellable in a matching channel.'):('No '+esc(EXC_MKT)+' '+esc(EXC_CH)+' exceptions this month.');
+  var treeHtml='';
+  function emit(node,prefix,depth){ Object.keys(node.__c||{}).forEach(function(k){ var child=node.__c[k], pkey=(prefix?prefix+'¦':'')+k, col=EXC_COLLAPSED.has(pkey), a=agg(child);
+    treeHtml+='<tr class="exc-grp" data-k="'+esc(pkey)+'" style="cursor:pointer"><td colspan="'+NC+'" style="padding:4px 8px 4px '+(8+depth*16)+'px;border-bottom:1px solid #e2e8f0;background:'+(depth===0?'#eef2f7':'#f8fafc')+';font-weight:'+(depth===0?'700':'600')+';color:#0f172a">'+(col?'▸':'▾')+' '+esc(k)+' <span style="color:#94a3b8;font-weight:400;font-size:11px;margin-left:6px">'+a.red+'R / '+a.amber+'A</span></td></tr>';
+    if(!col){ if(child.__c&&Object.keys(child.__c).length)emit(child,pkey,depth+1); if(child.__rows)child.__rows.forEach(function(r){ treeHtml+=leaf(r,depth+1); }); }
+  }); }
+  emit(tree,'',0);
+  var headHtml='<tr>'+COLS.map(function(h){return '<th style="'+TH+'">'+esc(h)+'</th>';}).join('')+'</tr>';
+  var emptyMsg=_isNA?'No stranded stock — every SKU with inventory is sellable in a matching channel.':'No exceptions for this selection.';
   body.innerHTML='<div style="padding:2px 2px 20px">'+subtab+bar+legend
-    +(rows.length?('<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'+head+bodyRows+'</table></div>')
+    +(rows.length?('<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'+headHtml+treeHtml+'</table></div>')
       :'<div style="color:#94a3b8;font-size:13px;padding:24px;text-align:center">'+emptyMsg+'</div>')
     +'</div>';
   body.querySelectorAll('.exc-sub').forEach(function(b){ b.onclick=function(){ EXC_SUBTAB=b.dataset.s; renderExceptionsView(body); }; });
@@ -9865,8 +9864,9 @@ function renderExceptionsView(body){
   body.querySelectorAll('.exc-grain').forEach(function(b){ b.onclick=function(){ EXC_GRAIN=b.dataset.v; renderExceptionsView(body); }; });
   body.querySelectorAll('.exc-sev').forEach(function(b){ b.onclick=function(){ EXC_SEV=b.dataset.v; renderExceptionsView(body); }; });
   var _md=body.querySelector('.exc-mind'); if(_md)_md.onchange=function(){ EXC_MINDELTA=parseInt(this.value,10)||0; renderExceptionsView(body); };
+  body.querySelectorAll('.exc-grp').forEach(function(g){ g.onclick=function(){ var k=g.dataset.k; if(EXC_COLLAPSED.has(k))EXC_COLLAPSED.delete(k); else EXC_COLLAPSED.add(k); renderExceptionsView(body); }; });
   body.querySelectorAll('.exc-ov').forEach(function(inp){ inp.onchange=function(){ var v=this.value.trim(); if(v==='')return;
-    try{ if(typeof skuCommitOv==='function'){ skuCommitOv(this.dataset.sku+'|'+EXC_MKT+'|'+EXC_CH+'|'+_cm, v, parseFloat(this.dataset.fc)||0); } if(typeof markDirty==='function')markDirty(); }catch(e){}
+    try{ if(typeof skuCommitOv==='function')skuCommitOv(this.dataset.sku+'|'+this.dataset.co+'|'+this.dataset.ch+'|'+_cm, v, parseFloat(this.dataset.fc)||0); if(typeof markDirty==='function')markDirty(); }catch(e){}
     renderExceptionsView(body); }; });
 }
 var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['targets','Sell-through targets'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['exceptions','Exceptions'],['calendar','Calendar'],['scenario','Scenario planner']];

@@ -1,3 +1,9 @@
+## v27.049 Exceptions: default all + collapsible tree + left-align + override by forecast
+- **Defaults to All** country + All channel (was UK/DTC).
+- **Collapsible grouped tree**: rows grouped **Country ▸ Channel ▸ Subcategory** (Country ▸ Pool ▸ Subcategory for No-availability), each header showing an **nR / nA** count and click-to-expand/minimise. Category grain rolls up to category leaves under Country ▸ Channel.
+- **All left-aligned** (numbers included).
+- **Override moved next to Forecast** (`Item | Forecast | Override | Actual | Run-rate | Status`) so it isn't off to the right; table is narrower.
+
 ## v27.048 Exceptions: "No availability" sub-tab (stranded stock)
 - New third Exceptions sub-tab. Lists SKUs holding stock in a market's warehouse whose linked channels the SKU isn't sellable in. **3PL** pool (co_3pl + non-GRS) sells via DTC/B2B/ZAL/TIK; **FBA** pool (co_fba + US AWD) via FBA. **RED** = no availability at all in the market (fully stranded); **AMBER** = sellable in another channel but not the one that ships this pool. SKU + Category grain, Country + Risk + Min-units filters, sorted by units. Sandbox UK: 99 rows (95 red). Fix = availability flags in the product master.
 
