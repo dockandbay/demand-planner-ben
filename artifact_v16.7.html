@@ -3095,9 +3095,11 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
       const _mtd=md['mtd_'+_CUR_MON_LC]||{};
       const{elapsed,remaining,total}=CUR_DAYS;
       const _fD=(dem.DTC&&dem.DTC[key])||0,_fB=(dem.B2B&&dem.B2B[key])||0,_fF=(dem.FBA&&dem.FBA[key])||0;
-      const _rdtc=Math.round((elapsed>0?(_mtd.DTC||0)/elapsed:_fD/total)*remaining);
-      const _rb2b=Math.round((elapsed>0?(_mtd.B2B||0)/elapsed:_fB/total)*remaining);
-      const _rfba=Math.round((elapsed>0?(_mtd.FBA||0)/elapsed:_fF/total)*remaining);
+      // Current-month remaining = forecast − actuals-to-date, floored at 0 (Ben). Buy engine draws SOH down by the
+      // remaining forecast (never a run-rate extrapolation past forecast); once actuals reach forecast → 0 more.
+      const _rdtc=Math.max(0,_fD-(_mtd.DTC||0));
+      const _rb2b=Math.max(0,_fB-(_mtd.B2B||0));
+      const _rfba=Math.max(0,_fF-(_mtd.FBA||0));
       const _ri3=(ib3[key]||[]).filter(s=>s.eta&&s.eta.slice(8,10)>String(TODAY.getDate()).padStart(2,'0')).reduce((s,x)=>s+(x.qty||0),0);
       const _riF=(ibF[key]||[]).filter(s=>s.eta&&s.eta.slice(8,10)>String(TODAY.getDate()).padStart(2,'0')).reduce((s,x)=>s+(x.qty||0),0);
       // Zalando (EU): this month's remaining net demand also draws the 3PL pool (forecast-only → prorate by days left).
@@ -3414,11 +3416,13 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     }
     if(isForecast){
       const mtd=md['mtd_'+_CUR_MON_LC]||{};
-      const{elapsed,remaining,total}=CUR_DAYS;
       const fullDTC=(dem.DTC&&dem.DTC[key])||0,fullB2B=(dem.B2B&&dem.B2B[key])||0,fullFBA=(dem.FBA&&dem.FBA[key])||0;
-      const dtc=Math.round((elapsed>0?(mtd.DTC||0)/elapsed:fullDTC/total)*remaining);
-      const b2b=Math.round((elapsed>0?(mtd.B2B||0)/elapsed:fullB2B/total)*remaining);
-      const fba=Math.round((elapsed>0?(mtd.FBA||0)/elapsed:fullFBA/total)*remaining);
+      // Current-month remaining = forecast − actuals-to-date, floored at 0 (Ben). Once actuals reach the month's
+      // forecast, plan 0 more this month; never extrapolate a spike beyond forecast. Replaced the old MTD run-rate.
+      // Situations where actuals already exceed (or are pacing past) forecast surface in DEMAND ▸ Exceptions.
+      const dtc=Math.max(0,fullDTC-(mtd.DTC||0));
+      const b2b=Math.max(0,fullB2B-(mtd.B2B||0));
+      const fba=Math.max(0,fullFBA-(mtd.FBA||0));
       const tot=dtc+b2b+fba;
       const remInb3=(ib3[key]||[]).filter(s=>s.eta&&s.eta.slice(8,10)>String(TODAY.getDate()).padStart(2,'0'));
       const remInbF=(ibF[key]||[]).filter(s=>s.eta&&s.eta.slice(8,10)>String(TODAY.getDate()).padStart(2,'0'));
@@ -4169,6 +4173,7 @@ let REPORT_VIEW='ex'; // REPORTS sub-tab: 'ex' (Exec Summary) | 'slow' (Slow Mov
 let KPI_SUB='instock', KPI_T3PL=5, KPI_TFBA=5, KPI_GRP='', KPI_COVER=6, KPI_WITHIN=3, KPI_ACCM=3; // DEMAND ▸ KPIs state
 let KPI_ACC_LEVEL='cc', KPI_ACC_LAG=1; // Forecast-accuracy view: drill level (cc|category|sku) + lag (months forecast made before target)
 let DEMAND_VIEW='plan'; // DEMAND sub-tab: 'plan' (the demand plan) | 'targets' (sell-through targets) | 'actions'
+var EXC_MKT='UK', EXC_CH='DTC', EXC_GRAIN='sku', EXC_SUBTAB='fclt', EXC_SEV='all', EXC_MINDELTA=0;   // DEMAND ▸ Exceptions filters (fclt = "Forecast < Actual" sub-tab; EXC_SEV = all|RED|AMBER; EXC_MINDELTA = min |delta| units)
 var TGT_CACHE=null;
 var _da={sec:'actions',mkt:'all',cat:'all',status:'open'}; // DEMAND ▸ Actions filters (sec: actions|insights|weather; status: open|snoozed|dismissed|done|all)
 // Which level-3 section a given action TYPE belongs to. ACTIONS = act-on-it now (sell-through, events,
@@ -8688,6 +8693,7 @@ function render(){
     else if(DEMAND_VIEW==='klaviyobis') renderKlaviyoBisView(body);
     else if(DEMAND_VIEW==='scenario'){ if(typeof renderScenarioDemandView==='function')renderScenarioDemandView(body); }   // Scenario planner now nested under DEMAND (L2); tools are the light-blue L3
     else if(DEMAND_VIEW==='trends') renderTrendsView(body);   // DEMAND ▸ Trends — category trends analysis report (#/demand/trends)
+    else if(DEMAND_VIEW==='exceptions') renderExceptionsView(body);   // DEMAND ▸ Exceptions — current-month forecast-vs-actual risk report (#/demand/exceptions)
     else renderDemandActionsView(body);
     return;
   }
@@ -9751,7 +9757,92 @@ function renderAccuracyView(kb,body){
   }).catch(function(){ kb.innerHTML='<div style="color:#dc2626;font-size:12px">Failed to load.</div>'; });
 }
 // ─── DEMAND sub-tabs (PLAN / KPIs / TARGETS / ACTIONS / CALENDAR) ───────────────────────────
-var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['targets','Sell-through targets'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['calendar','Calendar'],['scenario','Scenario planner']];
+// ─── DEMAND ▸ Exceptions — current-month forecast-vs-actual risk report (#/demand/exceptions) ───────────────
+// Sub-tab 1 "Forecast < Actual": current-month situations (per country × channel) where actuals have reached or are
+// pacing past the month's forecast. RED = actuals ≥ forecast (already exceeded → the buy plan now infers 0 remaining).
+// AMBER = actuals < forecast BUT the run-rate (actuals ÷ days elapsed × days in month) projects past forecast.
+// Read-only except the inline forecast override (SKU grain). Forecast = live buy-overlay demand (md.demand, the grid
+// number); actuals = sales_actuals current month (ga), the same figure shown green in the plan's current-month cell.
+function renderExceptionsView(body){
+  try{ if(typeof buildLiveDemand==='function')buildLiveDemand(); }catch(e){}
+  try{ if(typeof buildLiveBpOverlay==='function')buildLiveBpOverlay(); }catch(e){}   // ensure BP_DATA.products + md.demand are built (this view can open before the buy plan)
+  function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function fn(n){n=Math.round(Number(n)||0);return n?n.toLocaleString():'0';}
+  var _cd=(typeof CUR_DAYS!=='undefined'&&CUR_DAYS)?CUR_DAYS:{elapsed:16,total:30};
+  var elapsed=Math.max(1,_cd.elapsed||1), total=_cd.total||30;
+  var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var _cm=(typeof CUR_MONTH!=='undefined')?CUR_MONTH:'', curLbl=_cm?(MN[(+_cm.split('_')[1])-1]+" '"+_cm.slice(2,4)):'';
+  var _sc2cat={}; try{ (typeof DATA!=='undefined'?DATA:[]).forEach(function(r){ if(r.s&&r.c)_sc2cat[r.s]=r.c; }); }catch(e){}
+  function buildRows(){
+    // Same sources the plan's SKU rows use: forecast = skuMonthlyMap (per-SKU current-month forecast); actuals =
+    // skuSales current month. (ga / md.demand don't expose current-month actuals reliably.)
+    var co=EXC_MKT, ch=EXC_CH, ctry=co.toLowerCase(), chKey=(ch==='DTC'?'d':ch==='FBA'?'f':ch==='B2B'?'b':ch==='ZAL'?'z':'t');
+    var lym=(typeof lyYearMonths!=='undefined')?lyYearMonths:undefined;
+    var bySub={}; Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||p.vt==='SET')return; if((((p.av||{})[ctry])||'').indexOf(chKey)<0)return; (bySub[p.s]=bySub[p.s]||[]).push(sku); });
+    var agg={}, rows=[];
+    Object.keys(bySub).forEach(function(sub){ var subSkus=bySub[sub];
+      var subcatFU={}; try{ subcatFU=(calc(sub,co,ch)||{}).fu||{}; }catch(e){}
+      var shares={}; try{ shares=buildSkuShares(subSkus,co,ch,lym)||{}; }catch(e){}
+      subSkus.forEach(function(sku){
+        var invOH=(SKUM[sku].inv&&SKUM[sku].inv[skuWh(co,ch)])||0, fc=0, act=0;
+        try{ var mm=skuMonthlyMap(sku,co,ch,[_cm],subcatFU,shares[sku]||0,invOH)||{}; fc=mm[_cm]||0; }catch(e){}
+        try{ var ss=skuSales(sku,co,ch); act=(ss&&ss[_cm])||0; }catch(e){}
+        if(fc<=0&&act<=0)return;
+        if(EXC_GRAIN==='category'){ var cat=_sc2cat[sub]||sub||'Unmapped'; var g=agg[cat]||(agg[cat]={label:cat,sub:'',fc:0,act:0,n:0}); g.fc+=fc; g.act+=act; g.n++; }
+        else rows.push({label:sku,sku:sku,name:(SKUM[sku].n)||'',sub:sub,fc:fc,act:act});
+      });
+    });
+    if(EXC_GRAIN==='category')rows=Object.keys(agg).map(function(k){return agg[k];});
+    var frac=elapsed/total;
+    rows.forEach(function(r){ r.run=elapsed>0?(r.act/elapsed*total):r.act;
+      if(EXC_SUBTAB==='fgtr'){ r.delta=r.fc-r.run;   // over-forecast: run-rate pacing BELOW forecast (largest gaps worst)
+        r.status=(r.fc>0&&r.act>0&&frac>=0.34)?(r.run<r.fc*0.5?'RED':(r.run<r.fc*0.75?'AMBER':'')):''; }
+      else { r.delta=r.act-r.fc;                      // under-forecast: actuals at/over or pacing over forecast
+        r.status=(r.fc>0&&r.act>=r.fc)?'RED':((r.fc>0&&r.run>r.fc&&r.act<r.fc)?'AMBER':''); } });
+    rows=rows.filter(function(r){return r.status;});
+    rows.sort(function(a,b){ var o={RED:0,AMBER:1}; if(o[a.status]!==o[b.status])return o[a.status]-o[b.status]; return (b.delta||0)-(a.delta||0); });
+    return rows;
+  }
+  var allRows=buildRows(), nRed=allRows.filter(function(r){return r.status==='RED';}).length, nAmb=allRows.length-nRed;
+  var rows=allRows.filter(function(r){ if(EXC_SEV!=='all'&&r.status!==EXC_SEV)return false; if(EXC_MINDELTA>0&&Math.abs(r.delta||0)<EXC_MINDELTA)return false; return true; });
+  var PILL=function(cls,val,active,lbl){ return '<button class="exc-'+cls+'" data-v="'+val+'" style="font-size:12px;font-weight:600;border:1px solid '+(active?'#7c3aed':'#e2e8f0')+';background:'+(active?'#f3e8ff':'#fff')+';color:'+(active?'#6b21a8':'#64748b')+';border-radius:5px;padding:3px 11px;cursor:pointer;margin-right:4px">'+lbl+'</button>'; };
+  var LBL='font-size:11px;color:#475569;font-weight:600;margin-right:6px';
+  var bar='<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:2px 0 10px;font-size:12px">'
+    +'<div><span style="'+LBL+'">Country</span>'+['UK','US','EU','AU'].map(function(m){return PILL('mkt',m,EXC_MKT===m,m);}).join('')+'</div>'
+    +'<div><span style="'+LBL+'">Channel</span>'+['DTC','FBA','B2B'].map(function(c){return PILL('ch',c,EXC_CH===c,c);}).join('')+'</div>'
+    +'<div><span style="'+LBL+'">View</span>'+PILL('grain','sku',EXC_GRAIN==='sku','SKUs')+PILL('grain','category',EXC_GRAIN==='category','Categories')+'</div>'
+    +'<div><span style="'+LBL+'">Risk</span>'+[['all','All'],['RED','Red'],['AMBER','Amber']].map(function(x){return PILL('sev',x[0],EXC_SEV===x[0],x[1]);}).join('')+'</div>'
+    +'<div><span style="'+LBL+'">Min delta</span><input class="exc-mind" type="number" min="0" step="50" value="'+(EXC_MINDELTA||'')+'" placeholder="0" title="Hide rows whose forecast-vs-actual gap is below this many units" style="width:66px;font-size:12px;padding:2px 5px;border:1px solid #cbd5e1;border-radius:5px;text-align:right"></div>'
+    +'<div style="margin-left:auto;color:#94a3b8">'+curLbl+' · '+elapsed+'/'+total+' days · <b style="color:#9e2b1f">'+nRed+' red</b> · <b style="color:#b45309">'+nAmb+' amber</b></div></div>';
+  var subtab='<div style="display:flex;gap:3px;border-bottom:1px solid #e5e7eb;margin-bottom:8px">'
+    +[['fclt','Forecast < Actual'],['fgtr','Forecast > Run-rate']].map(function(t){var on=EXC_SUBTAB===t[0];return '<button class="exc-sub" data-s="'+t[0]+'" style="border:none;background:none;padding:6px 14px;font-size:12px;font-weight:'+(on?'700':'500')+';color:'+(on?'#0f172a':'#64748b')+';border-bottom:2px solid '+(on?'#7c3aed':'transparent')+';cursor:pointer">'+t[1]+'</button>';}).join('')+'</div>';
+  var _ovNote=(EXC_GRAIN==='sku'?'Type a units figure in <b>Override</b> to reset this SKU’s current-month forecast (binds to the plan; Save Forecasts to persist).':'Switch to <b>SKUs</b> to edit individual forecasts.');
+  var legend=(EXC_SUBTAB==='fgtr'
+    ? '<div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.5"><b style="color:#9e2b1f">Red</b> = the run-rate is pacing below <b>half</b> the month’s forecast (forecast likely far too high). <b style="color:#b45309">Amber</b> = pacing below 75% of forecast. Only rows with some sales and ≥⅓ of the month elapsed; largest gaps first. '+_ovNote+'</div>'
+    : '<div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.5"><b style="color:#9e2b1f">Red</b> = actuals have already reached the month’s forecast (buy plan infers 0 remaining — likely under-forecast). <b style="color:#b45309">Amber</b> = actuals still under forecast but the run-rate is pacing past it. '+_ovNote+'</div>');
+  var TH='padding:0 8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;border-bottom:1px solid #e2e8f0;text-align:left', T='padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:left', N='padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,monospace';
+  var head='<tr><th style="'+TH+'">'+(EXC_GRAIN==='category'?'Category':'SKU')+'</th><th style="'+TH+'">'+(EXC_GRAIN==='category'?'SKUs':'Subcategory')+'</th><th style="'+TH+';text-align:right">Forecast</th><th style="'+TH+';text-align:right">Actual ('+curLbl+')</th><th style="'+TH+';text-align:right">Run-rate</th><th style="'+TH+'">Status</th>'+(EXC_GRAIN==='sku'?'<th style="'+TH+';text-align:right">Override</th>':'')+'</tr>';
+  var bodyRows=rows.map(function(r){ var chip=r.status==='RED'?'<span style="display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:3px;background:#FFD6D1;color:#9e2b1f">RED</span>':'<span style="display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:3px;background:#fdf0d8;color:#8a5a06">AMBER</span>';
+    var over='';
+    if(EXC_GRAIN==='sku')over='<td style="'+N+'"><input class="exc-ov" data-sku="'+esc(r.sku)+'" data-fc="'+r.fc+'" placeholder="'+fn(r.fc)+'" style="width:64px;text-align:right;font-size:11px;border:1px solid #cbd5e1;border-radius:4px;padding:2px 5px;font-variant-numeric:tabular-nums"></td>';
+    return '<tr><td style="'+T+';font-weight:600;white-space:nowrap">'+esc(r.label)+(r.name?'<div style="font-size:9px;color:#94a3b8;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px">'+esc(r.name)+'</div>':'')+'</td>'
+      +'<td style="'+T+';font-size:11px;color:#64748b">'+esc(EXC_GRAIN==='category'?(r.n+' SKU'+(r.n===1?'':'s')):r.sub)+'</td>'
+      +'<td style="'+N+'">'+fn(r.fc)+'</td><td style="'+N+';font-weight:700;color:'+(r.status==='RED'?'#9e2b1f':'#0f172a')+'">'+fn(r.act)+'</td><td style="'+N+';color:#64748b">'+fn(r.run)+'</td><td style="'+T+'">'+chip+'</td>'+over+'</tr>'; }).join('');
+  body.innerHTML='<div style="padding:2px 2px 20px">'+subtab+bar+legend
+    +(rows.length?('<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'+head+bodyRows+'</table></div>')
+      :'<div style="color:#94a3b8;font-size:13px;padding:24px;text-align:center">No '+esc(EXC_MKT)+' '+esc(EXC_CH)+' exceptions this month — nothing pacing past forecast.</div>')
+    +'</div>';
+  body.querySelectorAll('.exc-sub').forEach(function(b){ b.onclick=function(){ EXC_SUBTAB=b.dataset.s; renderExceptionsView(body); }; });
+  body.querySelectorAll('.exc-mkt').forEach(function(b){ b.onclick=function(){ EXC_MKT=b.dataset.v; renderExceptionsView(body); }; });
+  body.querySelectorAll('.exc-ch').forEach(function(b){ b.onclick=function(){ EXC_CH=b.dataset.v; renderExceptionsView(body); }; });
+  body.querySelectorAll('.exc-grain').forEach(function(b){ b.onclick=function(){ EXC_GRAIN=b.dataset.v; renderExceptionsView(body); }; });
+  body.querySelectorAll('.exc-sev').forEach(function(b){ b.onclick=function(){ EXC_SEV=b.dataset.v; renderExceptionsView(body); }; });
+  var _md=body.querySelector('.exc-mind'); if(_md)_md.onchange=function(){ EXC_MINDELTA=parseInt(this.value,10)||0; renderExceptionsView(body); };
+  body.querySelectorAll('.exc-ov').forEach(function(inp){ inp.onchange=function(){ var v=this.value.trim(); if(v==='')return;
+    try{ if(typeof skuCommitOv==='function'){ skuCommitOv(this.dataset.sku+'|'+EXC_MKT+'|'+EXC_CH+'|'+_cm, v, parseFloat(this.dataset.fc)||0); } if(typeof markDirty==='function')markDirty(); }catch(e){}
+    renderExceptionsView(body); }; });
+}
+var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['targets','Sell-through targets'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['exceptions','Exceptions'],['calendar','Calendar'],['scenario','Scenario planner']];
 function renderDemandTabs(){
   var bar=document.getElementById('demand-tabs');
   var _sb=document.getElementById('statusbar');
@@ -9768,7 +9859,7 @@ function renderDemandTabs(){
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   // Primary tabs inline; the reference/input views (Sell-through targets, Key accounts, Calendar, Revenue) are grouped under an "Inputs ▾" dropdown.
   var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['snapshots']='Snapshots';
-  var PRIMARY=['plan','summary','snapshots','kpis','trends','actions','scenario'], INPUTS=['targets','keyaccounts','calendar','pricechanges','klaviyobis'];
+  var PRIMARY=['plan','summary','snapshots','kpis','trends','actions','exceptions','scenario'], INPUTS=['targets','keyaccounts','calendar','pricechanges','klaviyobis'];
   var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0;
   var _isPlanV=(DEMAND_VIEW==='plan');
   // Release Window now lives in the More Filters panel; Undo + Download now sit on the right of the plan controls
