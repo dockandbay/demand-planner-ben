@@ -1,3 +1,8 @@
+## v27.055 Demand plan: forecast-vs-actual discrepancy highlight (past 4 months)
+- New Display-Settings highlight (off by default): shades the **past 4 completed-month** cells by actual vs the **locked forecast** (LOCKED_FC snapshot):
+  - `#F87C63` light red = ≥30% below forecast · `#F54927` brighter red = ≥70% below · `#00FF3C` = ≥50% above · `#00D131` = ≥100% above. Within ±(30% below / 50% above) → no shade.
+- Applied to subcat + SKU actual cells (`makeFCTd` / `skuMonthCell`); `hlDiscColor` + `_last4Has` helpers.
+
 ## v27.054 Exceptions: "Forecast anomalies" sub-tab (robust outlier detector)
 - New sub-tab (4th, after Selling-no-forecast). Scans each SKU's next 6 forecast months for **statistical outliers** vs its own seasonal norm using a **robust median ± MAD / modified z-score** (not mean/stdev, which outliers distort), plus a **share-of-sub-category** test (a SKU taking an abnormal slice of its category that month).
 - **Red = spike** (likely a one-off large client order last year inflating the forecast); **Amber = dip** (likely a stockout suppressing last year, so true demand is higher).
