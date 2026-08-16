@@ -1,3 +1,7 @@
+## v27.058 Safety stock: add lead-time variability (combined formula)
+- Safety stock now uses the **combined formula** `Z × √(L·σ_d² + d²·σ_L²)` — demand variability **and** lead-time variability. New **Lead variability** control (None / ±15 / ±25 / ±40% of lead). On long China leads this roughly doubles the buffer at ±25% (sandbox UK-DTC: 75k → 130k units), which cover-weeks is blind to.
+- Data-derived σ_L (from po_delivery_history) is a follow-up: that table stores only the actual delivery date, so it needs a join to the PO's expected ETA to compute lead-time error.
+
 ## v27.057 New DEMAND ▸ Safety stock tab (service-level safety stock, parallel)
 - Statistical safety stock = **Z × σ × √lead** at a chosen service level (90/95/97.5/99%), run **alongside** the buy plan (recommendation only, nothing applied). σ = forecast error (locked snapshots) where ≥3 points, else demand variability, else a thin-history fallback (tagged; improves as snapshots build — matches "starting from scratch").
 - Suggested on-hand target = safety stock + a 4-week review cycle, compared to the current cover-weeks target. Headline: SS-method vs cover-weeks inventory value + %, total safety stock, and a verdict (how many SKUs cover over- vs under-stocks). Table: Demand/mo · CoV · σ src · Lead wk · Safety stock · Safety wk · Current vs Suggested units · Δ. Country/Channel/grain/service-level/sort filters.
