@@ -1,3 +1,9 @@
+## v27.053 Demand plan: two cell highlights in Display Settings (baby blue)
+- New **Highlight** row in Display Settings, both **off by default**:
+  - **Highlight forecast < actual** — shades the current-month cell baby-blue (`#8FD9FB`) when actuals have reached/passed the forecast.
+  - **No forecast but inventory** — shades forecast cells baby-blue when the cell's forecast is 0 while the SKU (or subcategory, in the cell's warehouse) still has stock on hand.
+- Applied across SKU and subcategory cells (current + forward months). Persisted in localStorage; `applyHlCell` + `subcatInvFor` helpers.
+
 ## v27.052 Exceptions polish: Selling-no-forecast columns, order, centred cells
 - **Selling, no forecast**: added a **Last mo** sales column, and **widened the Item column** (whitespace before the sales columns). Now: Item · Last mo · LY sales · SOH 3PL · SOH FBA · next 4 months.
 - Moved **Selling, no forecast to the 3rd sub-tab** (after Forecast > Run-rate).
