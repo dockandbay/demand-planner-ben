@@ -1,3 +1,8 @@
+## v27.051 Exceptions: L3 nav + deep links, left-align + country colours, richer Selling-no-forecast
+- **Sub-tabs moved to a Level-3 light-blue nav** (`d3nav`, like Inputs/Scenario), each **deep-linked** `#/demand/exceptions/<slug>` (fclt/fgtr/noavail/nocover/disc/sellnofc/dataconfig). Route parsing added in the harness.
+- **Group rows left-aligned** (fixes the recurring right-align on the collapsible headers), and **Country group rows now take the CONFIG market colour** (`MKT_COLORS`, e.g. UK salmon).
+- **Selling, no forecast** enriched into an inline entry grid: **LY sales · SOH 3PL · SOH FBA · next 4 months (incl. current)** with an **editable override on each month** to populate the forecast in place (binds to the plan; Save Forecasts to persist).
+
 ## v27.050 Exceptions: 4 more sub-tabs (spec-driven)
 - Report refactored to a spec-driven builder + generic collapsible tree, and 4 sub-tabs added:
   - **Available, no cover** — sellable SKUs (forecast this month) whose on-hand + inbound + on-order can't cover it. Red = zero cover (stockout); Amber = below the month's forecast.

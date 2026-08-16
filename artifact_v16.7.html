@@ -4174,6 +4174,7 @@ let KPI_SUB='instock', KPI_T3PL=5, KPI_TFBA=5, KPI_GRP='', KPI_COVER=6, KPI_WITH
 let KPI_ACC_LEVEL='cc', KPI_ACC_LAG=1; // Forecast-accuracy view: drill level (cc|category|sku) + lag (months forecast made before target)
 let DEMAND_VIEW='plan'; // DEMAND sub-tab: 'plan' (the demand plan) | 'targets' (sell-through targets) | 'actions'
 var EXC_MKT='all', EXC_CH='all', EXC_GRAIN='sku', EXC_SUBTAB='fclt', EXC_SEV='all', EXC_MINDELTA=0, EXC_COLLAPSED=new Set();   // DEMAND ▸ Exceptions filters (default show all, grouped tree by Country ▸ Channel ▸ Subcategory; EXC_COLLAPSED = minimised group keys)
+var EXC_SUBTABS=[['fclt','Forecast < Actual',1,1],['fgtr','Forecast > Run-rate',1,1],['noavail','No availability',0,1],['nocover','Available, no cover',1,1],['disc','Discontinued, active',0,1],['sellnofc','Selling, no forecast',1,1],['dataconfig','Data & config',0,0]];   // [key,label,usesChannel,usesCountry] — DEMAND ▸ Exceptions L3 sub-tabs (deep-linked #/demand/exceptions/<key>)
 var TGT_CACHE=null;
 var _da={sec:'actions',mkt:'all',cat:'all',status:'open'}; // DEMAND ▸ Actions filters (sec: actions|insights|weather; status: open|snoozed|dismissed|done|all)
 // Which level-3 section a given action TYPE belongs to. ACTIONS = act-on-it now (sell-through, events,
@@ -8653,7 +8654,7 @@ function render(){
     var _sb=document.getElementById('statusbar');
     ['st','ver'].forEach(function(id){ var el=document.getElementById(id); if(_sb&&el&&el.parentNode!==_sb){ if(id==='st'){el.removeAttribute('style');el.className='status';} else {el.style.cssText='color:#0f172a;background:#fbbf24;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:800;line-height:1.2;letter-spacing:.02em;margin-left:auto;white-space:nowrap;position:relative';} _sb.appendChild(el); } });   // amber badge, matches SUPPLY
     if(_sb)_sb.style.display='';
-    ['demand-tabs','demand-inputs-nav','demand-scenario-nav','demand-body'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
+    ['demand-tabs','demand-inputs-nav','demand-scenario-nav','demand-exceptions-nav','demand-body'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
   }
   // Leaving the BUY & MOVE group → tear down its sub-nav + the ACTIONS/TRANSFER pages.
   var _inBM=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='zalando'||VIEW_MODE==='inventory');
@@ -9774,14 +9775,14 @@ function renderExceptionsView(body){
   var _cm=(typeof CUR_MONTH!=='undefined')?CUR_MONTH:'', curLbl=_cm?(MN[(+_cm.split('_')[1])-1]+" '"+_cm.slice(2,4)):'';
   function monDec(m){ var y=+m.slice(0,4),mo=+m.slice(5,7); mo--; if(mo<1){mo=12;y--;} return y+'_'+(mo<10?'0':'')+mo; }
   var lym=(typeof lyYearMonths!=='undefined')?lyYearMonths:undefined;
-  var fwd=(typeof LIVE_FC_MONTHS!=='undefined')?LIVE_FC_MONTHS.slice(0,3):[_cm];
+  var fwd=(typeof LIVE_FC_MONTHS!=='undefined')?LIVE_FC_MONTHS.slice(0,4):[_cm];   // next 4 months incl current (Selling-no-forecast shows these editable)
   var prev3=[monDec(_cm)]; prev3.push(monDec(prev3[0])); prev3.push(monDec(prev3[1]));
   var ALLC=['UK','US','EU','AU'], ALLCH=['DTC','FBA','B2B'];
   var cos=(EXC_MKT==='all')?ALLC:[EXC_MKT], chs=(EXC_CH==='all')?ALLCH:[EXC_CH];
   var isSku=(EXC_GRAIN!=='category');
   function chipOf(st){ return st==='RED'?'<span style="display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:3px;background:#FFD6D1;color:#9e2b1f">RED</span>':'<span style="display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:3px;background:#fdf0d8;color:#8a5a06">AMBER</span>'; }
   // sub-tab registry: usesCh/usesCo drive which filter pills show
-  var SUBS=[['fclt','Forecast < Actual',1,1],['fgtr','Forecast > Run-rate',1,1],['noavail','No availability',0,1],['nocover','Available, no cover',1,1],['disc','Discontinued, active',0,1],['sellnofc','Selling, no forecast',1,1],['dataconfig','Data & config',0,0]];
+  var SUBS=EXC_SUBTABS;
   var _cur=SUBS.filter(function(s){return s[0]===EXC_SUBTAB;})[0]||SUBS[0];
   var usesCh=!!_cur[2], usesCo=!!_cur[3];
   // ---- shared per-SKU walker over co × ch × subcat (forecast + sales) ----
@@ -9851,13 +9852,17 @@ function renderExceptionsView(body){
     function ddFmt(){}
   }
   function buildSellNoFc(){ var flat=[], catMap={};
+    function lyOf(sales,m){ return (sales&&sales[(+m.slice(0,4)-1)+'_'+m.slice(5)])||0; }   // last-year same month
     eachSku(function(sku,co,ch,sub,fcMap,sales){ var recent=0; prev3.forEach(function(m){ recent+=(sales&&sales[m])||0; }); if(recent<10)return;
       var fwdFc=0; fwd.forEach(function(m){ fwdFc+=fcMap[m]||0; }); if(fwdFc>recent*0.1)return;   // still has meaningful forward forecast → not an exception
-      var status=(recent>=60)?'RED':'AMBER', delta=recent;
-      if(isSku)flat.push({path:[co,ch,sub],label:sku,sku:sku,name:SKUM[sku].n||'',status:status,delta:delta,vals:[fn(recent),fn(fwdFc)]});
+      var status=(recent>=60)?'RED':'AMBER';
+      if(isSku){ var p=SKUM[sku], ctry=co.toLowerCase(), soh3=(p.inv&&p.inv[ctry+'_3pl'])||0, sohf=(p.inv&&p.inv[ctry+'_fba'])||0, ly=0; fwd.forEach(function(m){ ly+=lyOf(sales,m); });
+        var monVals=fwd.map(function(m){ var fcv=fcMap[m]||0; return '<span style="white-space:nowrap">'+fn(fcv)+' <input class="exc-ov4" data-sku="'+esc(sku)+'" data-co="'+co+'" data-ch="'+ch+'" data-m="'+m+'" data-fc="'+fcv+'" placeholder="ov" title="Set '+m.replace('_','-')+' forecast for '+esc(sku)+'" style="width:42px;text-align:left;font-size:10px;border:1px solid #cbd5e1;border-radius:3px;padding:1px 3px"></span>'; });
+        flat.push({path:[co,ch,sub],label:sku,sku:sku,name:p.n||'',status:status,delta:recent,vals:[fn(ly),fn(soh3),fn(sohf)].concat(monVals)}); }
       else { var k=co+'|'+ch+'|'+_catOf(sku), g=catMap[k]||(catMap[k]={path:[co,ch],label:_catOf(sku),recent:0,fwdFc:0,n:0}); g.recent+=recent;g.fwdFc+=fwdFc;g.n++; } });
-    if(!isSku)Object.keys(catMap).forEach(function(k){var g=catMap[k];g.status=g.recent>=200?'RED':'AMBER';g.delta=g.recent;g.vals=[fn(g.recent),fn(g.fwdFc)];flat.push(g);});
-    return {rows:flat, cols:['Recent 3mo sales','Forward forecast']};
+    if(!isSku){ Object.keys(catMap).forEach(function(k){var g=catMap[k];g.status=g.recent>=200?'RED':'AMBER';g.delta=g.recent;g.vals=[fn(g.recent),fn(g.fwdFc)];flat.push(g);}); return {rows:flat, cols:['Recent 3mo sales','Forward forecast']}; }
+    var monLbls=fwd.map(function(m){ return (MN[(+m.slice(5,7))-1]||'')+" '"+m.slice(2,4); });
+    return {rows:flat, cols:['LY sales','SOH 3PL','SOH FBA'].concat(monLbls)};
   }
   function buildDataConfig(){ var flat=[];
     // 6) config integrity — client-side
@@ -9892,14 +9897,13 @@ function renderExceptionsView(body){
     +'<div><span style="'+LBL+'">Risk</span>'+[['all','All'],['RED','Red'],['AMBER','Amber']].map(function(x){return PILL('sev',x[0],EXC_SEV===x[0],x[1]);}).join('')+'</div>'
     +'<div><span style="'+LBL+'">Min</span><input class="exc-mind" type="number" min="0" step="50" value="'+(EXC_MINDELTA||'')+'" placeholder="0" title="Hide rows below this many units" style="width:60px;font-size:12px;padding:2px 5px;border:1px solid #cbd5e1;border-radius:5px;text-align:left"></div>'
     +'<div style="margin-left:auto;color:#94a3b8"><b style="color:#9e2b1f">'+nRed+' red</b> · <b style="color:#b45309">'+nAmb+' amber</b></div></div>';
-  var subtab='<div style="display:flex;gap:2px;border-bottom:1px solid #e5e7eb;margin-bottom:8px;flex-wrap:wrap">'
-    +SUBS.map(function(t){var on=EXC_SUBTAB===t[0];return '<button class="exc-sub" data-s="'+t[0]+'" style="border:none;background:none;padding:6px 11px;font-size:12px;font-weight:'+(on?'700':'500')+';color:'+(on?'#0f172a':'#64748b')+';border-bottom:2px solid '+(on?'#7c3aed':'transparent')+';cursor:pointer">'+t[1]+'</button>';}).join('')+'</div>';
+  var subtab='';   // sub-tabs now live in the L3 (light-blue) nav rendered by renderDemandTabs, deep-linked #/demand/exceptions/<key>
   var LEG={fclt:'<b style="color:#9e2b1f">Red</b> = actuals already reached forecast (buy plan infers 0 remaining). <b style="color:#b45309">Amber</b> = under forecast but run-rate pacing past it. Override (next to forecast) resets the current-month forecast; Save Forecasts to persist.',
     fgtr:'<b style="color:#9e2b1f">Red</b> = run-rate pacing below half the forecast (likely too high). <b style="color:#b45309">Amber</b> = below 75%. Rows with sales and ≥⅓ of the month elapsed.',
     noavail:'SKUs holding stock in a warehouse whose channels the SKU isn’t sellable in. <b style="color:#9e2b1f">Red</b> = no availability at all in that country. <b style="color:#b45309">Amber</b> = sellable elsewhere but not this pool. Fix availability in the product master.',
     nocover:'Sellable SKUs (forecast this month) whose on-hand + inbound + on-order can’t cover it. <b style="color:#9e2b1f">Red</b> = zero cover (stockout). <b style="color:#b45309">Amber</b> = some, but below the month’s forecast.',
     disc:'SKUs past their discontinue date still carrying a forward forecast. <b style="color:#9e2b1f">Red</b> = discontinued in a past month yet still forecasting future demand. <b style="color:#b45309">Amber</b> = discontinues this month. Fix the discontinue date / forecast.',
-    sellnofc:'SKUs with real sales in the last 3 months but ~no forward forecast (forecast gap → under-buy). <b style="color:#9e2b1f">Red</b> = strong recent sales. <b style="color:#b45309">Amber</b> = modest.',
+    sellnofc:'SKUs with real sales in the last 3 months but ~no forward forecast (forecast gap → under-buy). <b style="color:#9e2b1f">Red</b> = strong recent sales. <b style="color:#b45309">Amber</b> = modest. Fill the next 4 months inline (type in the box next to each month\'s forecast); LY sales + SOH 3PL/FBA shown to help. Save Forecasts to persist.',
     dataconfig:'Config + master-data integrity: sets without a BOM recipe, unmapped prepacks, and SKUs missing a cost / carton qty. <b style="color:#9e2b1f">Red</b> = buy-breaking. <b style="color:#b45309">Amber</b> = degraded. Fix in CONFIG ▸ BOM or the product master.'};
   var legend='<div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.5">'+(LEG[EXC_SUBTAB]||'')+(built.loadingData?' <i style="color:#94a3b8">(loading cost/carton checks…)</i>':'')+'</div>';
   // ---- tree ----
@@ -9915,7 +9919,8 @@ function renderExceptionsView(body){
       +'<td style="'+TL+'">'+chipOf(r.status)+'</td></tr>'; }
   var treeHtml='';
   function emit(node,prefix,depth){ Object.keys(node.__c||{}).forEach(function(k){ var child=node.__c[k], pkey=(prefix?prefix+'¦':'')+k, col=EXC_COLLAPSED.has(pkey), a=agg(child);
-    treeHtml+='<tr class="exc-grp" data-k="'+esc(pkey)+'" style="cursor:pointer"><td colspan="'+NC+'" style="padding:4px 8px 4px '+(8+depth*16)+'px;border-bottom:1px solid #e2e8f0;background:'+(depth===0?'#eef2f7':'#f8fafc')+';font-weight:'+(depth===0?'700':'600')+';color:#0f172a">'+(col?'▸':'▾')+' '+esc(k)+' <span style="color:#94a3b8;font-weight:400;font-size:11px;margin-left:6px">'+a.red+'R / '+a.amber+'A</span></td></tr>';
+    var _gbg=(depth===0&&typeof MKT_COLORS!=='undefined'&&MKT_COLORS[k])?MKT_COLORS[k]:(depth===0?'#eef2f7':'#f8fafc');   // country rows take the CONFIG market colour
+    treeHtml+='<tr class="exc-grp" data-k="'+esc(pkey)+'" style="cursor:pointer"><td colspan="'+NC+'" style="text-align:left;padding:4px 8px 4px '+(8+depth*16)+'px;border-bottom:1px solid #e2e8f0;background:'+_gbg+';font-weight:'+(depth===0?'700':'600')+';color:#0f172a">'+(col?'▸':'▾')+' '+esc(k)+' <span style="color:#475569;font-weight:400;font-size:11px;margin-left:6px">'+a.red+' R / '+a.amber+' A</span></td></tr>';
     if(!col){ if(child.__c&&Object.keys(child.__c).length)emit(child,pkey,depth+1); if(child.__rows)child.__rows.forEach(function(r){ treeHtml+=leaf(r,depth+1); }); }
   }); }
   emit(tree,'',0);
@@ -9924,7 +9929,6 @@ function renderExceptionsView(body){
     +(rows.length?('<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'+headHtml+treeHtml+'</table></div>')
       :'<div style="color:#94a3b8;font-size:13px;padding:24px;text-align:center">'+(built.loadingData?'Loading…':'No exceptions for this selection.')+'</div>')
     +'</div>';
-  body.querySelectorAll('.exc-sub').forEach(function(b){ b.onclick=function(){ EXC_SUBTAB=b.dataset.s; renderExceptionsView(body); }; });
   body.querySelectorAll('.exc-mkt').forEach(function(b){ b.onclick=function(){ EXC_MKT=b.dataset.v; renderExceptionsView(body); }; });
   body.querySelectorAll('.exc-ch').forEach(function(b){ b.onclick=function(){ EXC_CH=b.dataset.v; renderExceptionsView(body); }; });
   body.querySelectorAll('.exc-grain').forEach(function(b){ b.onclick=function(){ EXC_GRAIN=b.dataset.v; renderExceptionsView(body); }; });
@@ -9933,6 +9937,9 @@ function renderExceptionsView(body){
   body.querySelectorAll('.exc-grp').forEach(function(g){ g.onclick=function(){ var k=g.dataset.k; if(EXC_COLLAPSED.has(k))EXC_COLLAPSED.delete(k); else EXC_COLLAPSED.add(k); renderExceptionsView(body); }; });
   body.querySelectorAll('.exc-ov').forEach(function(inp){ inp.onchange=function(){ var v=this.value.trim(); if(v==='')return;
     try{ if(typeof skuCommitOv==='function')skuCommitOv(this.dataset.sku+'|'+this.dataset.co+'|'+this.dataset.ch+'|'+_cm, v, parseFloat(this.dataset.fc)||0); if(typeof markDirty==='function')markDirty(); }catch(e){}
+    renderExceptionsView(body); }; });
+  body.querySelectorAll('.exc-ov4').forEach(function(inp){ inp.onchange=function(){ var v=this.value.trim(); if(v==='')return;   // per-month forecast entry (Selling-no-forecast)
+    try{ if(typeof skuCommitOv==='function')skuCommitOv(this.dataset.sku+'|'+this.dataset.co+'|'+this.dataset.ch+'|'+this.dataset.m, v, parseFloat(this.dataset.fc)||0); if(typeof markDirty==='function')markDirty(); }catch(e){}
     renderExceptionsView(body); }; });
 }
 var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['targets','Sell-through targets'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['exceptions','Exceptions'],['calendar','Calendar'],['scenario','Scenario planner']];
@@ -9982,6 +9989,14 @@ function renderDemandTabs(){
     _sc3.innerHTML=_scs.map(function(s){return '<button class="d3tab'+(s[0]===_sck?' active':'')+'" data-sc="'+s[0]+'">'+s[1]+'</button>';}).join('');
     _sc3.querySelectorAll('[data-sc]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); if(window.scenCur)window.scenCur(b.dataset.sc); VIEW_MODE='planning'; DEMAND_VIEW='scenario'; if(window.writeHash)window.writeHash(['demand','scenario',b.dataset.sc]); render(); }; });
   } else if(_sc3){ _sc3.style.display='none'; _sc3.innerHTML=''; }
+  // Exceptions L3 (light-blue d3nav) — the report sub-tabs, deep-linked #/demand/exceptions/<key>.
+  var _ex3=document.getElementById('demand-exceptions-nav');
+  if(DEMAND_VIEW==='exceptions'){
+    if(!_ex3){ _ex3=document.createElement('div'); _ex3.id='demand-exceptions-nav'; bar.parentNode.insertBefore(_ex3, bar.nextSibling); }
+    _ex3.className='d3nav'; _ex3.style.display=''; _ex3.style.marginTop='6px';
+    _ex3.innerHTML=(typeof EXC_SUBTABS!=='undefined'?EXC_SUBTABS:[]).map(function(s){return '<button class="d3tab'+(s[0]===EXC_SUBTAB?' active':'')+'" data-ex="'+s[0]+'">'+s[1]+'</button>';}).join('');
+    _ex3.querySelectorAll('[data-ex]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); EXC_SUBTAB=b.dataset.ex; VIEW_MODE='planning'; DEMAND_VIEW='exceptions'; if(window.writeHash)window.writeHash(['demand','exceptions',b.dataset.ex]); render(); }; });
+  } else if(_ex3){ _ex3.style.display='none'; _ex3.innerHTML=''; }
   // relocate the demand-plan AI tool-bar into this secondary menu (moved back on teardown)
   var pt=document.getElementById('plan-tools'); if(pt)bar.appendChild(pt);
   // ONE global currency toggle (GBP / local) for the whole DEMAND area — a right-aligned spacer that also carries
