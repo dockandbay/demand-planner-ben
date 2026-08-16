@@ -9765,87 +9765,154 @@ function renderAccuracyView(kb,body){
 // number); actuals = sales_actuals current month (ga), the same figure shown green in the plan's current-month cell.
 function renderExceptionsView(body){
   try{ if(typeof buildLiveDemand==='function')buildLiveDemand(); }catch(e){}
-  try{ if(typeof buildLiveBpOverlay==='function')buildLiveBpOverlay(); }catch(e){}   // ensure BP_DATA.products + md.demand are built (this view can open before the buy plan)
+  try{ if(typeof buildLiveBpOverlay==='function')buildLiveBpOverlay(); }catch(e){}
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function fn(n){n=Math.round(Number(n)||0);return n?n.toLocaleString():'0';}
   var _cd=(typeof CUR_DAYS!=='undefined'&&CUR_DAYS)?CUR_DAYS:{elapsed:16,total:30};
   var elapsed=Math.max(1,_cd.elapsed||1), total=_cd.total||30, frac=elapsed/total;
   var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var _cm=(typeof CUR_MONTH!=='undefined')?CUR_MONTH:'', curLbl=_cm?(MN[(+_cm.split('_')[1])-1]+" '"+_cm.slice(2,4)):'';
-  var _sc2cat={}; try{ (typeof DATA!=='undefined'?DATA:[]).forEach(function(r){ if(r.s&&r.c)_sc2cat[r.s]=r.c; }); }catch(e){}
+  function monDec(m){ var y=+m.slice(0,4),mo=+m.slice(5,7); mo--; if(mo<1){mo=12;y--;} return y+'_'+(mo<10?'0':'')+mo; }
   var lym=(typeof lyYearMonths!=='undefined')?lyYearMonths:undefined;
-  var _isNA=(EXC_SUBTAB==='noavail'), isSku=(EXC_GRAIN!=='category'), hasOv=(!_isNA&&isSku);
+  var fwd=(typeof LIVE_FC_MONTHS!=='undefined')?LIVE_FC_MONTHS.slice(0,3):[_cm];
+  var prev3=[monDec(_cm)]; prev3.push(monDec(prev3[0])); prev3.push(monDec(prev3[1]));
   var ALLC=['UK','US','EU','AU'], ALLCH=['DTC','FBA','B2B'];
   var cos=(EXC_MKT==='all')?ALLC:[EXC_MKT], chs=(EXC_CH==='all')?ALLCH:[EXC_CH];
+  var isSku=(EXC_GRAIN!=='category');
   function chipOf(st){ return st==='RED'?'<span style="display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:3px;background:#FFD6D1;color:#9e2b1f">RED</span>':'<span style="display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:3px;background:#fdf0d8;color:#8a5a06">AMBER</span>'; }
-  function classify(r){ if(_isNA){ r.delta=r.units; return; }
-    r.run=elapsed>0?(r.act/elapsed*total):r.act;
-    if(EXC_SUBTAB==='fgtr'){ r.delta=r.fc-r.run; r.status=(r.fc>0&&r.act>0&&frac>=0.34)?(r.run<r.fc*0.5?'RED':(r.run<r.fc*0.75?'AMBER':'')):''; }
-    else { r.delta=r.act-r.fc; r.status=(r.fc>0&&r.act>=r.fc)?'RED':((r.fc>0&&r.run>r.fc&&r.act<r.fc)?'AMBER':''); } }
-  // ---- build flat exception rows, each tagged with a group path (Country ▸ Channel/Pool ▸ Subcategory) ----
-  var flat=[];
-  if(_isNA){
-    cos.forEach(function(co){ var ctry=co.toLowerCase(), catMap={};
+  // sub-tab registry: usesCh/usesCo drive which filter pills show
+  var SUBS=[['fclt','Forecast < Actual',1,1],['fgtr','Forecast > Run-rate',1,1],['noavail','No availability',0,1],['nocover','Available, no cover',1,1],['disc','Discontinued, active',0,1],['sellnofc','Selling, no forecast',1,1],['dataconfig','Data & config',0,0]];
+  var _cur=SUBS.filter(function(s){return s[0]===EXC_SUBTAB;})[0]||SUBS[0];
+  var usesCh=!!_cur[2], usesCo=!!_cur[3];
+  // ---- shared per-SKU walker over co × ch × subcat (forecast + sales) ----
+  function eachSku(cb){ cos.forEach(function(co){ (usesCh?chs:['DTC']).forEach(function(ch){ var ctry=co.toLowerCase(), chKey=(ch==='DTC'?'d':ch==='FBA'?'f':'b');
+    var bySub={}; Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||p.vt==='SET')return; if(usesCh){ if((((p.av||{})[ctry])||'').indexOf(chKey)<0)return; } else { if(!((p.av||{})[ctry]))return; } (bySub[p.s]=bySub[p.s]||[]).push(sku); });
+    Object.keys(bySub).forEach(function(sub){ var subSkus=bySub[sub];
+      var subcatFU={}; try{subcatFU=(calc(sub,co,ch)||{}).fu||{};}catch(e){}
+      var shares={}; try{shares=buildSkuShares(subSkus,co,ch,lym)||{};}catch(e){}
+      subSkus.forEach(function(sku){ var invOH=(SKUM[sku].inv&&SKUM[sku].inv[skuWh(co,ch)])||0, fcMap={};
+        try{fcMap=skuMonthlyMap(sku,co,ch,fwd,subcatFU,shares[sku]||0,invOH)||{};}catch(e){}
+        var sales=null; try{sales=skuSales(sku,co,ch);}catch(e){}
+        cb(sku,co,ch,sub,fcMap,sales); }); }); }); }); }
+  var _catOf=function(sku){ return (SKUM[sku]&&(SKUM[sku].c||SKUM[sku].s))||'Unmapped'; };
+  // ---- builders: each returns {rows, cols} (cols = middle column headers; rows carry vals[] to match) ----
+  function pushLeaf(rows,catAgg,mkRow,agg){ /* helper unused placeholder */ }
+  function inbAt(sku,wh){ var v=(typeof SKUI!=='undefined')&&SKUI[sku+'|'+wh]; var t=0; if(v)(Array.isArray(v)?v:[v]).forEach(function(x){t+=x.qty||0;}); return t; }
+  function ooAt(sku,wh){ var v=(typeof SKUOI!=='undefined')&&SKUOI[sku+'|'+wh]; var t=0; if(v)(Array.isArray(v)?v:[v]).forEach(function(x){t+=x.qty||0;}); return t; }
+  function ovCell(r){ return '<input class="exc-ov" data-sku="'+esc(r.sku)+'" data-co="'+esc(r.co)+'" data-ch="'+esc(r.ch)+'" data-fc="'+(r.fc||0)+'" placeholder="'+fn(r.fc||0)+'" style="width:56px;text-align:left;font-size:11px;border:1px solid #cbd5e1;border-radius:4px;padding:2px 5px">'; }
+  function grpAgg(map,cat,path){ var g=map[cat]; if(!g){g=map[cat]={path:path,label:cat,agg:{},n:0};} return g; }
+  function buildFA(){ var flat=[], catMap={}, hasOv=isSku;
+    eachSku(function(sku,co,ch,sub,fcMap,sales){ var fc=fcMap[_cm]||0, act=(sales&&sales[_cm])||0; if(fc<=0&&act<=0)return;
+      var run=elapsed>0?(act/elapsed*total):act, status, delta;
+      if(EXC_SUBTAB==='fgtr'){ delta=fc-run; status=(fc>0&&act>0&&frac>=0.34)?(run<fc*0.5?'RED':(run<fc*0.75?'AMBER':'')):''; }
+      else { delta=act-fc; status=(fc>0&&act>=fc)?'RED':((fc>0&&run>fc&&act<fc)?'AMBER':''); }
+      if(!status)return;
+      if(isSku)flat.push({path:[co,ch,sub],label:sku,sku:sku,name:SKUM[sku].n||'',co:co,ch:ch,fc:fc,act:act,run:run,status:status,delta:delta});
+      else { var k=co+'|'+ch+'|'+(_catOf(sku)); var g=catMap[k]||(catMap[k]={path:[co,ch],label:_catOf(sku),co:co,ch:ch,fc:0,act:0,n:0}); g.fc+=fc; g.act+=act; g.n++; } });
+    if(!isSku)Object.keys(catMap).forEach(function(k){ var g=catMap[k]; g.run=elapsed>0?(g.act/elapsed*total):g.act; if(EXC_SUBTAB==='fgtr'){g.delta=g.fc-g.run;g.status=(g.fc>0&&g.act>0&&frac>=0.34)?(g.run<g.fc*0.5?'RED':(g.run<g.fc*0.75?'AMBER':'')):'';} else {g.delta=g.act-g.fc;g.status=(g.fc>0&&g.act>=g.fc)?'RED':((g.fc>0&&g.run>g.fc&&g.act<g.fc)?'AMBER':'');} if(g.status)flat.push(g); });
+    flat.forEach(function(r){ r.vals=[fn(r.fc)].concat(hasOv?[ovCell(r)]:[]).concat([fn(r.act),fn(r.run)]); });
+    return {rows:flat, cols:['Forecast'].concat(hasOv?['Override']:[]).concat(['Actual ('+curLbl+')','Run-rate'])};
+  }
+  function buildNoAvail(){ var flat=[], catMap={};
+    cos.forEach(function(co){ var ctry=co.toLowerCase();
       Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||p.vt==='SET')return; var av=(p.av&&p.av[ctry])||'', inv=p.inv||{};
         var s3=(inv[ctry+'_3pl']||0)+(inv[ctry+'_nongrs']||0), sf=(inv[ctry+'_fba']||0)+(co==='US'?(inv['us_awd']||0):0);
-        var has3=/[dbzt]/.test(av), hasF=av.indexOf('f')>=0, none=!av, sub=p.s||'Unmapped', cat=_sc2cat[sub]||sub;
+        var has3=/[dbzt]/.test(av), hasF=av.indexOf('f')>=0, none=!av;
         function add(pool,units){ if(units<=0)return; var st=none?'RED':'AMBER';
-          if(isSku)flat.push({path:[co,pool,sub],label:sku,sku:sku,name:p.n||'',pool:pool,units:units,av:av,status:st,delta:units});
-          else { var k=co+'|'+pool+'|'+cat; var g=catMap[k]||(catMap[k]={path:[co,pool],label:cat,pool:pool,units:0,n:0,none:true}); g.units+=units; g.n++; if(av)g.none=false; } }
+          if(isSku)flat.push({path:[co,pool,p.s||'Unmapped'],label:sku,sku:sku,name:p.n||'',status:st,delta:units,vals:[pool,fn(units),av?esc(av):'<span style="color:#9e2b1f;font-weight:700">none</span>']});
+          else { var cat=_catOf(sku), k=co+'|'+pool+'|'+cat, g=catMap[k]||(catMap[k]={path:[co,pool],label:cat,units:0,n:0,none:true,pool:pool}); g.units+=units; g.n++; if(av)g.none=false; } }
         if(s3>0&&!has3)add('3PL',s3); if(sf>0&&!hasF)add('FBA',sf); });
-      if(!isSku)Object.keys(catMap).forEach(function(k){ var g=catMap[k]; g.status=g.none?'RED':'AMBER'; g.delta=g.units; g.av=g.none?'':'(mixed)'; flat.push(g); });
     });
-  } else {
-    cos.forEach(function(co){ chs.forEach(function(ch){ var ctry=co.toLowerCase(), chKey=(ch==='DTC'?'d':ch==='FBA'?'f':'b'), catMap={};
-      var bySub={}; Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||p.vt==='SET')return; if((((p.av||{})[ctry])||'').indexOf(chKey)<0)return; (bySub[p.s]=bySub[p.s]||[]).push(sku); });
-      Object.keys(bySub).forEach(function(sub){ var subSkus=bySub[sub], cat=_sc2cat[sub]||sub;
-        var subcatFU={}; try{ subcatFU=(calc(sub,co,ch)||{}).fu||{}; }catch(e){}
-        var shares={}; try{ shares=buildSkuShares(subSkus,co,ch,lym)||{}; }catch(e){}
-        subSkus.forEach(function(sku){ var invOH=(SKUM[sku].inv&&SKUM[sku].inv[skuWh(co,ch)])||0, fc=0, act=0;
-          try{ var mm=skuMonthlyMap(sku,co,ch,[_cm],subcatFU,shares[sku]||0,invOH)||{}; fc=mm[_cm]||0; }catch(e){}
-          try{ var ss=skuSales(sku,co,ch); act=(ss&&ss[_cm])||0; }catch(e){}
-          if(fc<=0&&act<=0)return;
-          if(isSku){ var r={path:[co,ch,sub],label:sku,sku:sku,name:SKUM[sku].n||'',co:co,ch:ch,fc:fc,act:act}; classify(r); if(r.status)flat.push(r); }
-          else { var g=catMap[cat]||(catMap[cat]={path:[co,ch],label:cat,co:co,ch:ch,fc:0,act:0,n:0}); g.fc+=fc; g.act+=act; g.n++; }
-        });
-      });
-      if(!isSku)Object.keys(catMap).forEach(function(k){ var g=catMap[k]; classify(g); if(g.status)flat.push(g); });
-    }); });
+    if(!isSku)Object.keys(catMap).forEach(function(k){var g=catMap[k];g.status=g.none?'RED':'AMBER';g.delta=g.units;g.vals=[g.pool,fn(g.units),g.none?'<span style="color:#9e2b1f;font-weight:700">none</span>':'(mixed)'];flat.push(g);});
+    return {rows:flat, cols:['Pool','Stock','Availability']};
   }
+  function buildNoCover(){ var flat=[], catMap={};
+    eachSku(function(sku,co,ch,sub,fcMap,sales){ var fc=fcMap[_cm]||0; if(fc<=0)return; var wh=skuWh(co,ch);
+      var oh=(SKUM[sku].inv&&SKUM[sku].inv[wh])||0, inb=inbAt(sku,wh), oo=ooAt(sku,wh), avail=oh+inb+oo;
+      if(avail>=fc)return; var status=avail<=0?'RED':'AMBER', delta=fc-avail;
+      if(isSku)flat.push({path:[co,ch,sub],label:sku,sku:sku,name:SKUM[sku].n||'',status:status,delta:delta,vals:[fn(fc),fn(oh),fn(inb),fn(oo),fn(avail)]});
+      else { var k=co+'|'+ch+'|'+_catOf(sku), g=catMap[k]||(catMap[k]={path:[co,ch],label:_catOf(sku),fc:0,oh:0,inb:0,oo:0,n:0}); g.fc+=fc;g.oh+=oh;g.inb+=inb;g.oo+=oo;g.n++; } });
+    if(!isSku)Object.keys(catMap).forEach(function(k){var g=catMap[k];var avail=g.oh+g.inb+g.oo; g.status=avail<=0?'RED':'AMBER'; g.delta=g.fc-avail; g.vals=[fn(g.fc),fn(g.oh),fn(g.inb),fn(g.oo),fn(avail)]; flat.push(g);});
+    return {rows:flat, cols:['Forecast','On-hand','Inbound','On-order','Available']};
+  }
+  function buildDisc(){ var flat=[], catMap={};
+    cos.forEach(function(co){ var ctry=co.toLowerCase();
+      Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||p.vt==='SET')return; var dd=(p.disc&&p.disc[ctry])||''; if(!dd)return;
+        var dm=dd.slice(0,7).replace('-','_'); if(!(dm<=_cm))return;   // disc month reached (or past)
+        var chsA=[]; var av=(p.av&&p.av[ctry])||''; if(av.indexOf('d')>=0)chsA.push('DTC'); if(av.indexOf('f')>=0)chsA.push('FBA'); if(av.indexOf('b')>=0)chsA.push('B2B'); if(!chsA.length)return;
+        var fwdFc=0; chsA.forEach(function(ch){ var invOH=(p.inv&&p.inv[skuWh(co,ch)])||0; try{ var mm=skuMonthlyMap(sku,co,ch,fwd,(calc(p.s,co,ch)||{}).fu||{},0,invOH)||{}; fwd.forEach(function(m){ if(m>dm)fwdFc+=mm[m]||0; }); }catch(e){} });
+        if(fwdFc<=0)return; var status=(dm<_cm)?'RED':'AMBER';   // RED = disc in a PAST month yet still forecasting future
+        if(isSku)flat.push({path:[co,p.s||'Unmapped'],label:sku,sku:sku,name:p.n||'',status:status,delta:fwdFc,vals:[ddFmt(dd),fn(fwdFc)]});
+        else { var k=co+'|'+_catOf(sku), g=catMap[k]||(catMap[k]={path:[co],label:_catOf(sku),fwdFc:0,n:0,pastOnly:true}); g.fwdFc+=fwdFc; g.n++; if(dm>=_cm)g.pastOnly=false; } });
+    });
+    function ddFmt(d){ var p=d.split('-'); return p.length>=3?(+p[2]+' '+(MN[(+p[1])-1]||'')+" '"+p[0].slice(2)):d; }
+    if(!isSku)Object.keys(catMap).forEach(function(k){var g=catMap[k];g.status=g.pastOnly?'RED':'AMBER';g.delta=g.fwdFc;g.vals=['—',fn(g.fwdFc)];flat.push(g);});
+    return {rows:flat, cols:['Discontinued','Forward forecast']};
+    function ddFmt(){}
+  }
+  function buildSellNoFc(){ var flat=[], catMap={};
+    eachSku(function(sku,co,ch,sub,fcMap,sales){ var recent=0; prev3.forEach(function(m){ recent+=(sales&&sales[m])||0; }); if(recent<10)return;
+      var fwdFc=0; fwd.forEach(function(m){ fwdFc+=fcMap[m]||0; }); if(fwdFc>recent*0.1)return;   // still has meaningful forward forecast → not an exception
+      var status=(recent>=60)?'RED':'AMBER', delta=recent;
+      if(isSku)flat.push({path:[co,ch,sub],label:sku,sku:sku,name:SKUM[sku].n||'',status:status,delta:delta,vals:[fn(recent),fn(fwdFc)]});
+      else { var k=co+'|'+ch+'|'+_catOf(sku), g=catMap[k]||(catMap[k]={path:[co,ch],label:_catOf(sku),recent:0,fwdFc:0,n:0}); g.recent+=recent;g.fwdFc+=fwdFc;g.n++; } });
+    if(!isSku)Object.keys(catMap).forEach(function(k){var g=catMap[k];g.status=g.recent>=200?'RED':'AMBER';g.delta=g.recent;g.vals=[fn(g.recent),fn(g.fwdFc)];flat.push(g);});
+    return {rows:flat, cols:['Recent 3mo sales','Forward forecast']};
+  }
+  function buildDataConfig(){ var flat=[];
+    // 6) config integrity — client-side
+    Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p)return;
+      if(p.vt==='SET' && !(typeof SET_BOM!=='undefined'&&SET_BOM[sku])) flat.push({path:['Set — no BOM recipe'],label:sku,name:p.n||'',status:'RED',delta:3,vals:['Set — no BOM recipe','Build-on-fly set has no components; buy plan can’t explode it']});
+      if(sku.indexOf('PP-')===0 && !(typeof PREPACK_MAP!=='undefined'&&PREPACK_MAP[sku])) flat.push({path:['Prepack — unmapped'],label:sku,name:p.n||'',status:'AMBER',delta:1,vals:['Prepack — unmapped','PP- SKU not linked to a set in prepack_map']});
+    });
+    if(typeof PREPACK_MAP!=='undefined')Object.keys(PREPACK_MAP).forEach(function(pp){ var set=PREPACK_MAP[pp]; if(set && !(typeof SET_BOM!=='undefined'&&SET_BOM[set])) flat.push({path:['Prepack set — no BOM'],label:pp,name:'',status:'AMBER',delta:2,vals:['Prepack set — no BOM','Mapped set '+set+' has no BOM recipe']}); });
+    // 4) missing buy-critical master data — from products-all (cost / carton qty), fetched once
+    var P=(typeof window!=='undefined')?window._EXC_PROD:null;
+    if(P&&!P.error&&Array.isArray(P.rows)){ var cols=P.columns||[]; var hasCost=cols.indexOf('cost')>=0, hasCart=cols.indexOf('carton_qty')>=0;
+      P.rows.forEach(function(r){ var sku=r.sku||r.SKU; if(!sku||!SKUM[sku])return; if(SKUM[sku].vt==='SET')return;
+        if(hasCost){ var c=Number(String(r.cost||'').replace(/,/g,'')); if(!(c>0)) flat.push({path:['Missing cost'],label:sku,name:SKUM[sku].n||'',status:'RED',delta:3,vals:['Missing cost','No cost price → buy plan can’t value / may mis-size']}); }
+        if(hasCart){ var q=Number(String(r.carton_qty||'').replace(/,/g,'')); if(!(q>0)) flat.push({path:['Missing carton qty'],label:sku,name:SKUM[sku].n||'',status:'AMBER',delta:1,vals:['Missing carton qty','No carton qty → FBA cartonisation defaults']}); }
+      });
+    }
+    return {rows:flat, cols:['Issue','Detail'], loadingData:!(P)};
+  }
+  var BUILDERS={fclt:buildFA,fgtr:buildFA,noavail:buildNoAvail,nocover:buildNoCover,disc:buildDisc,sellnofc:buildSellNoFc,dataconfig:buildDataConfig};
+  var built=(BUILDERS[EXC_SUBTAB]||buildFA)(); var flat=built.rows, midCols=built.cols;
+  // kick the products-all fetch for the Data & config tab (once), then re-render
+  if(EXC_SUBTAB==='dataconfig' && !window._EXC_PROD){ fetch('/api/supply/products-all').then(function(r){return r.json();}).then(function(d){ window._EXC_PROD=d&&!d.error?d:{error:1}; renderExceptionsView(body); }).catch(function(){ window._EXC_PROD={error:1}; renderExceptionsView(body); }); }
   var nRed=flat.filter(function(r){return r.status==='RED';}).length, nAmb=flat.length-nRed;
   var rows=flat.filter(function(r){ if(EXC_SEV!=='all'&&r.status!==EXC_SEV)return false; if(EXC_MINDELTA>0&&Math.abs(r.delta||0)<EXC_MINDELTA)return false; return true; });
   // ---- filter bar ----
   var PILL=function(cls,val,active,lbl){ return '<button class="exc-'+cls+'" data-v="'+val+'" style="font-size:12px;font-weight:600;border:1px solid '+(active?'#7c3aed':'#e2e8f0')+';background:'+(active?'#f3e8ff':'#fff')+';color:'+(active?'#6b21a8':'#64748b')+';border-radius:5px;padding:3px 10px;cursor:pointer;margin-right:4px">'+lbl+'</button>'; };
   var LBL='font-size:11px;color:#475569;font-weight:600;margin-right:6px';
   var bar='<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:2px 0 10px;font-size:12px">'
-    +'<div><span style="'+LBL+'">Country</span>'+[['all','All'],['UK','UK'],['US','US'],['EU','EU'],['AU','AU']].map(function(x){return PILL('mkt',x[0],EXC_MKT===x[0],x[1]);}).join('')+'</div>'
-    +(_isNA?'':'<div><span style="'+LBL+'">Channel</span>'+[['all','All'],['DTC','DTC'],['FBA','FBA'],['B2B','B2B']].map(function(x){return PILL('ch',x[0],EXC_CH===x[0],x[1]);}).join('')+'</div>')
-    +'<div><span style="'+LBL+'">View</span>'+PILL('grain','sku',isSku,'SKUs')+PILL('grain','category',!isSku,'Categories')+'</div>'
+    +(usesCo?'<div><span style="'+LBL+'">Country</span>'+[['all','All'],['UK','UK'],['US','US'],['EU','EU'],['AU','AU']].map(function(x){return PILL('mkt',x[0],EXC_MKT===x[0],x[1]);}).join('')+'</div>':'')
+    +(usesCh?'<div><span style="'+LBL+'">Channel</span>'+[['all','All'],['DTC','DTC'],['FBA','FBA'],['B2B','B2B']].map(function(x){return PILL('ch',x[0],EXC_CH===x[0],x[1]);}).join('')+'</div>':'')
+    +(EXC_SUBTAB==='dataconfig'?'':'<div><span style="'+LBL+'">View</span>'+PILL('grain','sku',isSku,'SKUs')+PILL('grain','category',!isSku,'Categories')+'</div>')
     +'<div><span style="'+LBL+'">Risk</span>'+[['all','All'],['RED','Red'],['AMBER','Amber']].map(function(x){return PILL('sev',x[0],EXC_SEV===x[0],x[1]);}).join('')+'</div>'
-    +'<div><span style="'+LBL+'">'+(_isNA?'Min units':'Min delta')+'</span><input class="exc-mind" type="number" min="0" step="50" value="'+(EXC_MINDELTA||'')+'" placeholder="0" title="Hide rows below this many units" style="width:64px;font-size:12px;padding:2px 5px;border:1px solid #cbd5e1;border-radius:5px;text-align:left"></div>'
-    +'<div style="margin-left:auto;color:#94a3b8">'+(_isNA?'':(curLbl+' · '+elapsed+'/'+total+'d · '))+'<b style="color:#9e2b1f">'+nRed+' red</b> · <b style="color:#b45309">'+nAmb+' amber</b></div></div>';
-  var subtab='<div style="display:flex;gap:3px;border-bottom:1px solid #e5e7eb;margin-bottom:8px">'
-    +[['fclt','Forecast < Actual'],['fgtr','Forecast > Run-rate'],['noavail','No availability']].map(function(t){var on=EXC_SUBTAB===t[0];return '<button class="exc-sub" data-s="'+t[0]+'" style="border:none;background:none;padding:6px 14px;font-size:12px;font-weight:'+(on?'700':'500')+';color:'+(on?'#0f172a':'#64748b')+';border-bottom:2px solid '+(on?'#7c3aed':'transparent')+';cursor:pointer">'+t[1]+'</button>';}).join('')+'</div>';
-  var _ovNote=(hasOv?'Type a units figure in <b>Override</b> (next to the forecast) to reset a SKU’s current-month forecast — binds to the plan; Save Forecasts to persist.':'');
-  var legend=(_isNA
-    ? '<div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.5">SKUs holding stock in a warehouse whose channels the SKU isn’t sellable in. <b style="color:#9e2b1f">Red</b> = no availability at all in that country (stock fully stranded). <b style="color:#b45309">Amber</b> = sellable in another channel but not the one that ships this pool. <b>3PL</b> = DTC/B2B/ZAL/TIK; <b>FBA</b> = FBA (+US AWD). Fix availability in the product master.</div>'
-    : (EXC_SUBTAB==='fgtr'
-    ? '<div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.5"><b style="color:#9e2b1f">Red</b> = run-rate pacing below <b>half</b> the forecast (forecast likely too high). <b style="color:#b45309">Amber</b> = below 75%. Rows with some sales and ≥⅓ of the month elapsed. '+_ovNote+'</div>'
-    : '<div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.5"><b style="color:#9e2b1f">Red</b> = actuals already reached forecast (buy plan infers 0 remaining). <b style="color:#b45309">Amber</b> = under forecast but run-rate pacing past it. '+_ovNote+'</div>'));
-  // ---- collapsible tree (Country ▸ Channel/Pool ▸ Subcategory ▸ leaf) ----
+    +'<div><span style="'+LBL+'">Min</span><input class="exc-mind" type="number" min="0" step="50" value="'+(EXC_MINDELTA||'')+'" placeholder="0" title="Hide rows below this many units" style="width:60px;font-size:12px;padding:2px 5px;border:1px solid #cbd5e1;border-radius:5px;text-align:left"></div>'
+    +'<div style="margin-left:auto;color:#94a3b8"><b style="color:#9e2b1f">'+nRed+' red</b> · <b style="color:#b45309">'+nAmb+' amber</b></div></div>';
+  var subtab='<div style="display:flex;gap:2px;border-bottom:1px solid #e5e7eb;margin-bottom:8px;flex-wrap:wrap">'
+    +SUBS.map(function(t){var on=EXC_SUBTAB===t[0];return '<button class="exc-sub" data-s="'+t[0]+'" style="border:none;background:none;padding:6px 11px;font-size:12px;font-weight:'+(on?'700':'500')+';color:'+(on?'#0f172a':'#64748b')+';border-bottom:2px solid '+(on?'#7c3aed':'transparent')+';cursor:pointer">'+t[1]+'</button>';}).join('')+'</div>';
+  var LEG={fclt:'<b style="color:#9e2b1f">Red</b> = actuals already reached forecast (buy plan infers 0 remaining). <b style="color:#b45309">Amber</b> = under forecast but run-rate pacing past it. Override (next to forecast) resets the current-month forecast; Save Forecasts to persist.',
+    fgtr:'<b style="color:#9e2b1f">Red</b> = run-rate pacing below half the forecast (likely too high). <b style="color:#b45309">Amber</b> = below 75%. Rows with sales and ≥⅓ of the month elapsed.',
+    noavail:'SKUs holding stock in a warehouse whose channels the SKU isn’t sellable in. <b style="color:#9e2b1f">Red</b> = no availability at all in that country. <b style="color:#b45309">Amber</b> = sellable elsewhere but not this pool. Fix availability in the product master.',
+    nocover:'Sellable SKUs (forecast this month) whose on-hand + inbound + on-order can’t cover it. <b style="color:#9e2b1f">Red</b> = zero cover (stockout). <b style="color:#b45309">Amber</b> = some, but below the month’s forecast.',
+    disc:'SKUs past their discontinue date still carrying a forward forecast. <b style="color:#9e2b1f">Red</b> = discontinued in a past month yet still forecasting future demand. <b style="color:#b45309">Amber</b> = discontinues this month. Fix the discontinue date / forecast.',
+    sellnofc:'SKUs with real sales in the last 3 months but ~no forward forecast (forecast gap → under-buy). <b style="color:#9e2b1f">Red</b> = strong recent sales. <b style="color:#b45309">Amber</b> = modest.',
+    dataconfig:'Config + master-data integrity: sets without a BOM recipe, unmapped prepacks, and SKUs missing a cost / carton qty. <b style="color:#9e2b1f">Red</b> = buy-breaking. <b style="color:#b45309">Amber</b> = degraded. Fix in CONFIG ▸ BOM or the product master.'};
+  var legend='<div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.5">'+(LEG[EXC_SUBTAB]||'')+(built.loadingData?' <i style="color:#94a3b8">(loading cost/carton checks…)</i>':'')+'</div>';
+  // ---- tree ----
   var TH='padding:0 8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;border-bottom:1px solid #e2e8f0;text-align:left';
   var TL='padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:left;font-variant-numeric:tabular-nums';
-  var COLS=_isNA?['Item','Pool','Stock','Availability','Status']:(['Item','Forecast'].concat(hasOv?['Override']:[]).concat(['Actual ('+curLbl+')','Run-rate','Status']));
-  var NC=COLS.length;
+  var COLS=['Item'].concat(midCols,['Status']); var NC=COLS.length;
   var tree={__c:{}};
-  rows.forEach(function(r){ var node=tree; r.path.forEach(function(k){ node.__c=node.__c||{}; node=node.__c[k]||(node.__c[k]={__k:k}); }); (node.__rows=node.__rows||[]).push(r); });
+  rows.forEach(function(r){ var node=tree; (r.path||['(all)']).forEach(function(k){ node.__c=node.__c||{}; node=node.__c[k]||(node.__c[k]={__k:k}); }); (node.__rows=node.__rows||[]).push(r); });
   function agg(node){ var a={red:0,amber:0}; if(node.__rows)node.__rows.forEach(function(r){ if(r.status==='RED')a.red++; else a.amber++; }); if(node.__c)Object.keys(node.__c).forEach(function(k){ var c=agg(node.__c[k]); a.red+=c.red; a.amber+=c.amber; }); return a; }
   function leaf(r,depth){ var pl=8+depth*16;
-    var c0='<td style="'+TL+';padding-left:'+pl+'px;font-weight:600;white-space:nowrap">'+esc(r.label)+(r.name?'<span style="font-size:9px;color:#94a3b8;font-weight:400;margin-left:6px">'+esc(String(r.name).slice(0,26))+'</span>':'')+'</td>';
-    if(_isNA)return '<tr>'+c0+'<td style="'+TL+'">'+esc(r.pool||'')+'</td><td style="'+TL+'">'+fn(r.units)+'</td><td style="'+TL+';color:'+(r.av?'#64748b':'#9e2b1f')+';font-weight:'+(r.av?'400':'700')+'">'+(r.av?esc(r.av):'none')+'</td><td style="'+TL+'">'+chipOf(r.status)+'</td></tr>';
-    var ov=hasOv?'<td style="'+TL+'"><input class="exc-ov" data-sku="'+esc(r.sku)+'" data-co="'+esc(r.co)+'" data-ch="'+esc(r.ch)+'" data-fc="'+r.fc+'" placeholder="'+fn(r.fc)+'" style="width:56px;text-align:left;font-size:11px;border:1px solid #cbd5e1;border-radius:4px;padding:2px 5px"></td>':'';
-    return '<tr>'+c0+'<td style="'+TL+'">'+fn(r.fc)+'</td>'+ov+'<td style="'+TL+';font-weight:700;color:'+(r.status==='RED'?'#9e2b1f':'#0f172a')+'">'+fn(r.act)+'</td><td style="'+TL+';color:#64748b">'+fn(r.run)+'</td><td style="'+TL+'">'+chipOf(r.status)+'</td></tr>';
-  }
+    return '<tr><td style="'+TL+';padding-left:'+pl+'px;font-weight:600;white-space:nowrap">'+esc(r.label)+(r.name?'<span style="font-size:9px;color:#94a3b8;font-weight:400;margin-left:6px">'+esc(String(r.name).slice(0,26))+'</span>':'')+'</td>'
+      +(r.vals||[]).map(function(v){return '<td style="'+TL+'">'+v+'</td>';}).join('')
+      +'<td style="'+TL+'">'+chipOf(r.status)+'</td></tr>'; }
   var treeHtml='';
   function emit(node,prefix,depth){ Object.keys(node.__c||{}).forEach(function(k){ var child=node.__c[k], pkey=(prefix?prefix+'¦':'')+k, col=EXC_COLLAPSED.has(pkey), a=agg(child);
     treeHtml+='<tr class="exc-grp" data-k="'+esc(pkey)+'" style="cursor:pointer"><td colspan="'+NC+'" style="padding:4px 8px 4px '+(8+depth*16)+'px;border-bottom:1px solid #e2e8f0;background:'+(depth===0?'#eef2f7':'#f8fafc')+';font-weight:'+(depth===0?'700':'600')+';color:#0f172a">'+(col?'▸':'▾')+' '+esc(k)+' <span style="color:#94a3b8;font-weight:400;font-size:11px;margin-left:6px">'+a.red+'R / '+a.amber+'A</span></td></tr>';
@@ -9853,10 +9920,9 @@ function renderExceptionsView(body){
   }); }
   emit(tree,'',0);
   var headHtml='<tr>'+COLS.map(function(h){return '<th style="'+TH+'">'+esc(h)+'</th>';}).join('')+'</tr>';
-  var emptyMsg=_isNA?'No stranded stock — every SKU with inventory is sellable in a matching channel.':'No exceptions for this selection.';
   body.innerHTML='<div style="padding:2px 2px 20px">'+subtab+bar+legend
     +(rows.length?('<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'+headHtml+treeHtml+'</table></div>')
-      :'<div style="color:#94a3b8;font-size:13px;padding:24px;text-align:center">'+emptyMsg+'</div>')
+      :'<div style="color:#94a3b8;font-size:13px;padding:24px;text-align:center">'+(built.loadingData?'Loading…':'No exceptions for this selection.')+'</div>')
     +'</div>';
   body.querySelectorAll('.exc-sub').forEach(function(b){ b.onclick=function(){ EXC_SUBTAB=b.dataset.s; renderExceptionsView(body); }; });
   body.querySelectorAll('.exc-mkt').forEach(function(b){ b.onclick=function(){ EXC_MKT=b.dataset.v; renderExceptionsView(body); }; });

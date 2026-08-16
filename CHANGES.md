@@ -1,3 +1,11 @@
+## v27.050 Exceptions: 4 more sub-tabs (spec-driven)
+- Report refactored to a spec-driven builder + generic collapsible tree, and 4 sub-tabs added:
+  - **Available, no cover** — sellable SKUs (forecast this month) whose on-hand + inbound + on-order can't cover it. Red = zero cover (stockout); Amber = below the month's forecast.
+  - **Discontinued, active** — SKUs past their discontinue date still carrying a forward forecast. Red = discontinued in a past month yet still forecasting.
+  - **Selling, no forecast** — real sales in the last 3 months but ~no forward forecast (forecast gap → under-buy).
+  - **Data & config** (merges suggested #4 + #6) — sets without a BOM recipe, unmapped prepacks, prepack→set-with-no-BOM (client-side), plus SKUs missing a cost / carton qty (from /api/supply/products-all). Sandbox: 67 sets without BOM.
+- All share the Country/Channel/Risk/Min + SKU/Category-grain filters and the collapsible tree; global tabs (Data & config) hide country/channel pills.
+
 ## v27.049 Exceptions: default all + collapsible tree + left-align + override by forecast
 - **Defaults to All** country + All channel (was UK/DTC).
 - **Collapsible grouped tree**: rows grouped **Country ▸ Channel ▸ Subcategory** (Country ▸ Pool ▸ Subcategory for No-availability), each header showing an **nR / nA** count and click-to-expand/minimise. Category grain rolls up to category leaves under Country ▸ Channel.
