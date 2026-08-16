@@ -1,3 +1,8 @@
+## v27.052 Exceptions polish: Selling-no-forecast columns, order, centred cells
+- **Selling, no forecast**: added a **Last mo** sales column, and **widened the Item column** (whitespace before the sales columns). Now: Item · Last mo · LY sales · SOH 3PL · SOH FBA · next 4 months.
+- Moved **Selling, no forecast to the 3rd sub-tab** (after Forecast > Run-rate).
+- **Centred** all column headers + data cells **except column 1 (Item) and the group rows**, which stay left-aligned.
+
 ## v27.051 Exceptions: L3 nav + deep links, left-align + country colours, richer Selling-no-forecast
 - **Sub-tabs moved to a Level-3 light-blue nav** (`d3nav`, like Inputs/Scenario), each **deep-linked** `#/demand/exceptions/<slug>` (fclt/fgtr/noavail/nocover/disc/sellnofc/dataconfig). Route parsing added in the harness.
 - **Group rows left-aligned** (fixes the recurring right-align on the collapsible headers), and **Country group rows now take the CONFIG market colour** (`MKT_COLORS`, e.g. UK salmon).
