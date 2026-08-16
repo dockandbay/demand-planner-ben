@@ -1,3 +1,8 @@
+## v27.056 New DEMAND ▸ Accuracy tab (forecast accuracy & bias)
+- New tab scoring the plan against the **locked-forecast snapshots** (the forecast taken before each completed month) vs actuals — the first step toward a world-class engine (measure before you optimise).
+- **Headline KPIs**: WMAPE (volume-weighted, robust), Bias (+ over-forecast / − under-forecast), Hit-rate (±30%), SKU-months evaluated. **WMAPE-by-month trend** bars. **Breakdown table** by Category / Sub-category / SKU, sortable by worst WMAPE / biggest bias / volume, with colour bands (green/amber/red WMAPE; red=over, blue=under bias).
+- Filters: Country · Channel · grain · lookback window (3/6/12 mo). Read-only. NOTE: sandbox numbers are inflated/meaningless because the locked snapshots predate the actuals reseed (different data generations); meaningful in production where snapshots and actuals share lineage.
+
 ## v27.055 Demand plan: forecast-vs-actual discrepancy highlight (past 4 months)
 - New Display-Settings highlight (off by default): shades the **past 4 completed-month** cells by actual vs the **locked forecast** (LOCKED_FC snapshot):
   - `#F87C63` light red = ≥30% below forecast · `#F54927` brighter red = ≥70% below · `#00FF3C` = ≥50% above · `#00D131` = ≥100% above. Within ±(30% below / 50% above) → no shade.

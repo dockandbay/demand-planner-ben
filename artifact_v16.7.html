@@ -4183,6 +4183,7 @@ let KPI_ACC_LEVEL='cc', KPI_ACC_LAG=1; // Forecast-accuracy view: drill level (c
 let DEMAND_VIEW='plan'; // DEMAND sub-tab: 'plan' (the demand plan) | 'targets' (sell-through targets) | 'actions'
 var EXC_MKT='all', EXC_CH='all', EXC_GRAIN='sku', EXC_SUBTAB='fclt', EXC_SEV='all', EXC_MINDELTA=0, EXC_COLLAPSED=new Set();   // DEMAND ▸ Exceptions filters (default show all, grouped tree by Country ▸ Channel ▸ Subcategory; EXC_COLLAPSED = minimised group keys)
 var EXC_SUBTABS=[['fclt','Forecast < Actual',1,1],['fgtr','Forecast > Run-rate',1,1],['sellnofc','Selling, no forecast',1,1],['anomaly','Forecast anomalies',1,1],['noavail','No availability',0,1],['nocover','Available, no cover',1,1],['disc','Discontinued, active',0,1],['dataconfig','Data & config',0,0]];   // [key,label,usesChannel,usesCountry] — DEMAND ▸ Exceptions L3 sub-tabs (deep-linked #/demand/exceptions/<key>)
+var ACC_MKT='all', ACC_CH='all', ACC_GRAIN='category', ACC_LOOKBACK=6, ACC_SORT='wmape';   // DEMAND ▸ Accuracy filters (forecast accuracy & bias vs locked snapshots)
 var TGT_CACHE=null;
 var _da={sec:'actions',mkt:'all',cat:'all',status:'open'}; // DEMAND ▸ Actions filters (sec: actions|insights|weather; status: open|snoozed|dismissed|done|all)
 // Which level-3 section a given action TYPE belongs to. ACTIONS = act-on-it now (sell-through, events,
@@ -8730,6 +8731,7 @@ function render(){
     else if(DEMAND_VIEW==='scenario'){ if(typeof renderScenarioDemandView==='function')renderScenarioDemandView(body); }   // Scenario planner now nested under DEMAND (L2); tools are the light-blue L3
     else if(DEMAND_VIEW==='trends') renderTrendsView(body);   // DEMAND ▸ Trends — category trends analysis report (#/demand/trends)
     else if(DEMAND_VIEW==='exceptions') renderExceptionsView(body);   // DEMAND ▸ Exceptions — current-month forecast-vs-actual risk report (#/demand/exceptions)
+    else if(DEMAND_VIEW==='accuracy') renderAccuracyView(body);   // DEMAND ▸ Accuracy — forecast accuracy & bias vs locked snapshots (#/demand/accuracy)
     else renderDemandActionsView(body);
     return;
   }
@@ -10004,7 +10006,79 @@ function renderExceptionsView(body){
     try{ if(typeof skuCommitOv==='function')skuCommitOv(this.dataset.sku+'|'+this.dataset.co+'|'+this.dataset.ch+'|'+this.dataset.m, v, parseFloat(this.dataset.fc)||0); if(typeof markDirty==='function')markDirty(); }catch(e){}
     renderExceptionsView(body); }; });
 }
-var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['targets','Sell-through targets'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['exceptions','Exceptions'],['calendar','Calendar'],['scenario','Scenario planner']];
+// ─── DEMAND ▸ Accuracy — forecast accuracy & bias vs the locked-forecast snapshots (#/demand/accuracy) ──────────
+// For each completed month with a locked snapshot (the forecast taken BEFORE that month), compare vs actuals.
+// WMAPE = Σ|fc−act| / Σact (volume-weighted, robust to tiny denominators). Bias = Σ(fc−act) / Σact (+ = over-forecast,
+// cash tied up; − = under-forecast, lost sales). Hit-rate = % of SKU-months within ±30%. No writes.
+function renderAccuracyView(body){
+  function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function fn(n){n=Math.round(Number(n)||0);return n?n.toLocaleString():'0';}
+  function pc(x){return x==null?'—':((x>=0?'':'')+(Math.round(x*1000)/10)+'%');}
+  var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  var cm=(typeof CUR_MONTH!=='undefined')?CUR_MONTH:'';
+  // completed-month window (the ACC_LOOKBACK months before the current partial month)
+  var winArr=[]; (function(){ var y=+cm.slice(0,4),mo=+cm.slice(5,7); for(var i=0;i<ACC_LOOKBACK;i++){ mo--; if(mo<1){mo=12;y--;} winArr.unshift(y+'_'+(mo<10?'0':'')+mo); } })();
+  var win={}; winArr.forEach(function(m){win[m]=true;});
+  var L=(typeof LOCKED_FC!=='undefined'&&LOCKED_FC.sku)?LOCKED_FC.sku:{};
+  var _sc={}; function salesOf(sku,co,ch){ var k=sku+'|'+co+'|'+ch; if(_sc[k])return _sc[k]; var s={}; try{s=skuSales(sku,co,ch)||{};}catch(e){} _sc[k]=s; return s; }
+  var groups={}, byMonth={}, ov={ae:0,act:0,fc:0,se:0,n:0,hit:0,hitN:0};
+  Object.keys(L).forEach(function(key){ var p=key.split('|'); if(p.length<4)return; var sku=p[0],co=p[1],ch=p[2],m=p[3];
+    if(!win[m])return; if(ACC_MKT!=='all'&&co!==ACC_MKT)return; if(ACC_CH!=='all'&&ch!==ACC_CH)return;
+    var pm=SKUM[sku]; if(!pm||pm.vt==='SET')return;
+    var fc=Number(L[key])||0, act=(salesOf(sku,co,ch)[m])||0; if(fc<=0&&act<=0)return;
+    var ae=Math.abs(fc-act), se=fc-act;
+    var gk=ACC_GRAIN==='sku'?sku:(ACC_GRAIN==='subcat'?(pm.s||'Unmapped'):(pm.c||pm.s||'Unmapped'));
+    var g=groups[gk]||(groups[gk]={label:gk,name:(ACC_GRAIN==='sku'?(pm.n||''):''),sub:(ACC_GRAIN==='sku'?(pm.s||''):''),ae:0,act:0,fc:0,se:0,n:0});
+    g.ae+=ae;g.act+=act;g.fc+=fc;g.se+=se;g.n++;
+    var mo=byMonth[m]||(byMonth[m]={ae:0,act:0,se:0}); mo.ae+=ae;mo.act+=act;mo.se+=se;
+    ov.ae+=ae;ov.act+=act;ov.fc+=fc;ov.se+=se;ov.n++; if(act>0){ov.hitN++;if(ae/act<=0.30)ov.hit++;} });
+  var rows=Object.keys(groups).map(function(k){var g=groups[k];g.wmape=g.act>0?g.ae/g.act:null;g.bias=g.act>0?g.se/g.act:null;return g;});
+  rows.sort(function(a,b){ if(ACC_SORT==='bias')return Math.abs(b.bias||0)-Math.abs(a.bias||0); if(ACC_SORT==='vol')return b.act-a.act; return (b.wmape||0)-(a.wmape||0); });
+  var oW=ov.act>0?ov.ae/ov.act:null, oB=ov.act>0?ov.se/ov.act:null, oH=ov.hitN>0?ov.hit/ov.hitN:null;
+  function wCol(w){ return w==null?'#94a3b8':(w<0.2?'#166d43':w<0.5?'#8a5a06':'#9e2b1f'); }
+  function bCol(b){ return b==null?'#94a3b8':(Math.abs(b)<0.1?'#64748b':b>0?'#9e2b1f':'#1f6fb2'); }   // over=red, under=blue
+  // ---- filter bar ----
+  var PILL=function(cls,val,active,lbl){ return '<button class="acc-'+cls+'" data-v="'+val+'" style="font-size:12px;font-weight:600;border:1px solid '+(active?'#7c3aed':'#e2e8f0')+';background:'+(active?'#f3e8ff':'#fff')+';color:'+(active?'#6b21a8':'#64748b')+';border-radius:5px;padding:3px 10px;cursor:pointer;margin-right:4px">'+lbl+'</button>'; };
+  var LBL='font-size:11px;color:#475569;font-weight:600;margin-right:6px';
+  var bar='<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:2px 0 12px;font-size:12px">'
+    +'<div><span style="'+LBL+'">Country</span>'+[['all','All'],['UK','UK'],['US','US'],['EU','EU'],['AU','AU']].map(function(x){return PILL('mkt',x[0],ACC_MKT===x[0],x[1]);}).join('')+'</div>'
+    +'<div><span style="'+LBL+'">Channel</span>'+[['all','All'],['DTC','DTC'],['FBA','FBA'],['B2B','B2B']].map(function(x){return PILL('ch',x[0],ACC_CH===x[0],x[1]);}).join('')+'</div>'
+    +'<div><span style="'+LBL+'">View</span>'+[['category','Category'],['subcat','Sub-cat'],['sku','SKU']].map(function(x){return PILL('grain',x[0],ACC_GRAIN===x[0],x[1]);}).join('')+'</div>'
+    +'<div><span style="'+LBL+'">Window</span>'+[[3,'3 mo'],[6,'6 mo'],[12,'12 mo']].map(function(x){return PILL('lb',x[0],ACC_LOOKBACK===x[0],x[1]);}).join('')+'</div>'
+    +'<div><span style="'+LBL+'">Sort</span>'+[['wmape','Worst WMAPE'],['bias','Biggest bias'],['vol','Volume']].map(function(x){return PILL('sort',x[0],ACC_SORT===x[0],x[1]);}).join('')+'</div></div>';
+  // ---- headline cards ----
+  function card(lbl,val,sub,col){ return '<div style="border:1px solid #e2e8f0;border-radius:6px;padding:9px 14px;min-width:130px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;font-weight:700">'+lbl+'</div><div style="font-family:ui-monospace,Menlo,monospace;font-size:22px;font-weight:600;color:'+(col||'#0f172a')+'">'+val+'</div><div style="font-size:11px;color:#94a3b8">'+sub+'</div></div>'; }
+  var cards='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px">'
+    +card('WMAPE',oW==null?'—':(Math.round(oW*1000)/10)+'%',(100-(oW==null?0:Math.round(oW*100)))+'% accurate',wCol(oW))
+    +card('Bias',oB==null?'—':((oB>0?'+':'')+(Math.round(oB*1000)/10)+'%'),oB==null?'':(oB>0?'over-forecasting':'under-forecasting'),bCol(oB))
+    +card('Hit rate',oH==null?'—':(Math.round(oH*100)+'%'),'within ±30%','#0f172a')
+    +card('Evaluated',fn(ov.n),'SKU-months · '+winArr.length+' mo','#0f172a')+'</div>';
+  // ---- month trend (WMAPE per completed month) ----
+  var maxW=0; winArr.forEach(function(m){var mo=byMonth[m];var w=mo&&mo.act>0?mo.ae/mo.act:0;if(w>maxW)maxW=w;}); if(maxW<=0)maxW=1;
+  var trend='<div style="margin-bottom:14px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;font-weight:700;margin-bottom:6px">WMAPE by month</div><div style="display:flex;gap:8px;align-items:flex-end;height:70px">'
+    +winArr.map(function(m){ var mo=byMonth[m], w=mo&&mo.act>0?mo.ae/mo.act:null, h=w==null?0:Math.max(3,Math.round(w/maxW*56)), lbl=MN[(+m.slice(5,7))-1]+" '"+m.slice(2,4);
+      return '<div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:3px" title="'+lbl+': WMAPE '+(w==null?'n/a':(Math.round(w*1000)/10)+'%')+'"><div style="font-size:8px;color:'+wCol(w)+';font-weight:700">'+(w==null?'—':(Math.round(w*100)+'%'))+'</div><div style="width:34px;height:'+h+'px;background:'+wCol(w)+';opacity:.75;border-radius:2px 2px 0 0"></div><div style="font-size:9px;color:#94a3b8">'+lbl+'</div></div>'; }).join('')+'</div></div>';
+  // ---- breakdown table ----
+  var TH='padding:0 8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;border-bottom:1px solid #e2e8f0;text-align:left', TC='padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:center;font-variant-numeric:tabular-nums', TL='padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:left';
+  var head='<tr><th style="'+TH+';min-width:210px">'+(ACC_GRAIN==='sku'?'SKU':ACC_GRAIN==='subcat'?'Sub-category':'Category')+'</th>'
+    +['Forecast','Actual','WMAPE','Bias','SKU-mo'].map(function(h){return '<th style="'+TH+';text-align:center">'+h+'</th>';}).join('')+'</tr>';
+  var bodyRows=rows.map(function(g){ return '<tr><td style="'+TL+';font-weight:600;white-space:nowrap">'+esc(g.label)+(g.name?'<span style="font-size:9px;color:#94a3b8;font-weight:400;margin-left:6px">'+esc(String(g.name).slice(0,26))+'</span>':'')+'</td>'
+    +'<td style="'+TC+'">'+fn(g.fc)+'</td><td style="'+TC+'">'+fn(g.act)+'</td>'
+    +'<td style="'+TC+';font-weight:700;color:'+wCol(g.wmape)+'">'+(g.wmape==null?'—':(Math.round(g.wmape*1000)/10)+'%')+'</td>'
+    +'<td style="'+TC+';font-weight:700;color:'+bCol(g.bias)+'">'+(g.bias==null?'—':((g.bias>0?'+':'')+(Math.round(g.bias*1000)/10)+'%'))+'</td>'
+    +'<td style="'+TC+';color:#64748b">'+g.n+'</td></tr>'; }).join('');
+  var legend='<div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.5">Actuals vs the <b>locked forecast</b> snapshot taken before each month. <b>WMAPE</b> lower is better (green &lt;20%, amber &lt;50%, red higher). <b>Bias</b>: <b style="color:#9e2b1f">red = over-forecasting</b> (cash tied up), <b style="color:#1f6fb2">blue = under-forecasting</b> (lost sales). Window = last '+ACC_LOOKBACK+' completed months.</div>';
+  body.innerHTML='<div style="padding:2px 2px 24px">'+bar+legend+cards+trend
+    +(rows.length?('<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'+head+bodyRows+'</table></div>')
+      :'<div style="color:#94a3b8;font-size:13px;padding:24px;text-align:center">No locked-forecast snapshots in this window to score. Accuracy builds as monthly snapshots accumulate.</div>')
+    +'</div>';
+  body.querySelectorAll('.acc-mkt').forEach(function(b){ b.onclick=function(){ ACC_MKT=b.dataset.v; renderAccuracyView(body); }; });
+  body.querySelectorAll('.acc-ch').forEach(function(b){ b.onclick=function(){ ACC_CH=b.dataset.v; renderAccuracyView(body); }; });
+  body.querySelectorAll('.acc-grain').forEach(function(b){ b.onclick=function(){ ACC_GRAIN=b.dataset.v; renderAccuracyView(body); }; });
+  body.querySelectorAll('.acc-lb').forEach(function(b){ b.onclick=function(){ ACC_LOOKBACK=parseInt(b.dataset.v,10)||6; renderAccuracyView(body); }; });
+  body.querySelectorAll('.acc-sort').forEach(function(b){ b.onclick=function(){ ACC_SORT=b.dataset.v; renderAccuracyView(body); }; });
+}
+var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['targets','Sell-through targets'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['exceptions','Exceptions'],['accuracy','Accuracy'],['calendar','Calendar'],['scenario','Scenario planner']];
 function renderDemandTabs(){
   var bar=document.getElementById('demand-tabs');
   var _sb=document.getElementById('statusbar');
@@ -10021,7 +10095,7 @@ function renderDemandTabs(){
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   // Primary tabs inline; the reference/input views (Sell-through targets, Key accounts, Calendar, Revenue) are grouped under an "Inputs ▾" dropdown.
   var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['snapshots']='Snapshots';
-  var PRIMARY=['plan','summary','snapshots','kpis','trends','actions','exceptions','scenario'], INPUTS=['targets','keyaccounts','calendar','pricechanges','klaviyobis'];
+  var PRIMARY=['plan','summary','snapshots','kpis','trends','actions','exceptions','accuracy','scenario'], INPUTS=['targets','keyaccounts','calendar','pricechanges','klaviyobis'];
   var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0;
   var _isPlanV=(DEMAND_VIEW==='plan');
   // Release Window now lives in the More Filters panel; Undo + Download now sit on the right of the plan controls
