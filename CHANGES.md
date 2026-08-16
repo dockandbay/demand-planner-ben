@@ -1,3 +1,8 @@
+## v27.054 Exceptions: "Forecast anomalies" sub-tab (robust outlier detector)
+- New sub-tab (4th, after Selling-no-forecast). Scans each SKU's next 6 forecast months for **statistical outliers** vs its own seasonal norm using a **robust median ± MAD / modified z-score** (not mean/stdev, which outliers distort), plus a **share-of-sub-category** test (a SKU taking an abnormal slice of its category that month).
+- **Red = spike** (likely a one-off large client order last year inflating the forecast); **Amber = dip** (likely a stockout suppressing last year, so true demand is higher).
+- Every flag comes with a **Normal range** (what to expect, e.g. 56–104) and a **Why flagged** reason. Worst month per SKU shown; SKU + category grain; inline override to correct.
+
 ## v27.053 Demand plan: two cell highlights in Display Settings (baby blue)
 - New **Highlight** row in Display Settings, both **off by default**:
   - **Highlight forecast < actual** — shades the current-month cell baby-blue (`#8FD9FB`) when actuals have reached/passed the forecast.

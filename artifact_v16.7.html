@@ -4181,7 +4181,7 @@ let KPI_SUB='instock', KPI_T3PL=5, KPI_TFBA=5, KPI_GRP='', KPI_COVER=6, KPI_WITH
 let KPI_ACC_LEVEL='cc', KPI_ACC_LAG=1; // Forecast-accuracy view: drill level (cc|category|sku) + lag (months forecast made before target)
 let DEMAND_VIEW='plan'; // DEMAND sub-tab: 'plan' (the demand plan) | 'targets' (sell-through targets) | 'actions'
 var EXC_MKT='all', EXC_CH='all', EXC_GRAIN='sku', EXC_SUBTAB='fclt', EXC_SEV='all', EXC_MINDELTA=0, EXC_COLLAPSED=new Set();   // DEMAND ▸ Exceptions filters (default show all, grouped tree by Country ▸ Channel ▸ Subcategory; EXC_COLLAPSED = minimised group keys)
-var EXC_SUBTABS=[['fclt','Forecast < Actual',1,1],['fgtr','Forecast > Run-rate',1,1],['sellnofc','Selling, no forecast',1,1],['noavail','No availability',0,1],['nocover','Available, no cover',1,1],['disc','Discontinued, active',0,1],['dataconfig','Data & config',0,0]];   // [key,label,usesChannel,usesCountry] — DEMAND ▸ Exceptions L3 sub-tabs (deep-linked #/demand/exceptions/<key>)
+var EXC_SUBTABS=[['fclt','Forecast < Actual',1,1],['fgtr','Forecast > Run-rate',1,1],['sellnofc','Selling, no forecast',1,1],['anomaly','Forecast anomalies',1,1],['noavail','No availability',0,1],['nocover','Available, no cover',1,1],['disc','Discontinued, active',0,1],['dataconfig','Data & config',0,0]];   // [key,label,usesChannel,usesCountry] — DEMAND ▸ Exceptions L3 sub-tabs (deep-linked #/demand/exceptions/<key>)
 var TGT_CACHE=null;
 var _da={sec:'actions',mkt:'all',cat:'all',status:'open'}; // DEMAND ▸ Actions filters (sec: actions|insights|weather; status: open|snoozed|dismissed|done|all)
 // Which level-3 section a given action TYPE belongs to. ACTIONS = act-on-it now (sell-through, events,
@@ -9799,6 +9799,7 @@ function renderExceptionsView(body){
   function monDec(m){ var y=+m.slice(0,4),mo=+m.slice(5,7); mo--; if(mo<1){mo=12;y--;} return y+'_'+(mo<10?'0':'')+mo; }
   var lym=(typeof lyYearMonths!=='undefined')?lyYearMonths:undefined;
   var fwd=(typeof LIVE_FC_MONTHS!=='undefined')?LIVE_FC_MONTHS.slice(0,4):[_cm];   // next 4 months incl current (Selling-no-forecast shows these editable)
+  var fwd6=(typeof LIVE_FC_MONTHS!=='undefined')?LIVE_FC_MONTHS.slice(0,6):[_cm];   // 6-month window scanned for forecast anomalies
   var prev3=[monDec(_cm)]; prev3.push(monDec(prev3[0])); prev3.push(monDec(prev3[1]));
   var ALLC=['UK','US','EU','AU'], ALLCH=['DTC','FBA','B2B'];
   var cos=(EXC_MKT==='all')?ALLC:[EXC_MKT], chs=(EXC_CH==='all')?ALLCH:[EXC_CH];
@@ -9815,9 +9816,9 @@ function renderExceptionsView(body){
       var subcatFU={}; try{subcatFU=(calc(sub,co,ch)||{}).fu||{};}catch(e){}
       var shares={}; try{shares=buildSkuShares(subSkus,co,ch,lym)||{};}catch(e){}
       subSkus.forEach(function(sku){ var invOH=(SKUM[sku].inv&&SKUM[sku].inv[skuWh(co,ch)])||0, fcMap={};
-        try{fcMap=skuMonthlyMap(sku,co,ch,fwd,subcatFU,shares[sku]||0,invOH)||{};}catch(e){}
+        try{fcMap=skuMonthlyMap(sku,co,ch,(EXC_SUBTAB==='anomaly'?fwd6:fwd),subcatFU,shares[sku]||0,invOH)||{};}catch(e){}
         var sales=null; try{sales=skuSales(sku,co,ch);}catch(e){}
-        cb(sku,co,ch,sub,fcMap,sales); }); }); }); }); }
+        cb(sku,co,ch,sub,fcMap,sales,subcatFU,shares[sku]||0); }); }); }); }); }
   var _catOf=function(sku){ return (SKUM[sku]&&(SKUM[sku].c||SKUM[sku].s))||'Unmapped'; };
   // ---- builders: each returns {rows, cols} (cols = middle column headers; rows carry vals[] to match) ----
   function pushLeaf(rows,catAgg,mkRow,agg){ /* helper unused placeholder */ }
@@ -9905,7 +9906,30 @@ function renderExceptionsView(body){
     }
     return {rows:flat, cols:['Issue','Detail'], loadingData:!(P)};
   }
-  var BUILDERS={fclt:buildFA,fgtr:buildFA,noavail:buildNoAvail,nocover:buildNoCover,disc:buildDisc,sellnofc:buildSellNoFc,dataconfig:buildDataConfig};
+  function buildAnomaly(){ var flat=[];
+    function median(a){ if(!a.length)return 0; var b=a.slice().sort(function(x,y){return x-y;}), n=b.length; return n%2?b[(n-1)/2]:(b[n/2-1]+b[n/2])/2; }
+    eachSku(function(sku,co,ch,sub,fcMap,sales,subcatFU,share){ if(!sales)return; var best=null;
+      fwd6.forEach(function(fym){ var mm=fym.slice(5,7), yr=+fym.slice(0,4), fc=fcMap[fym]||0;
+        // seasonal baseline: same calendar month, prior 3 years (robust median + MAD)
+        var hist=[]; for(var yy=yr-1; yy>=yr-3; yy--){ var v=sales[yy+'_'+mm]; if(v!=null)hist.push(v); }
+        if(hist.length<2)return;
+        var M=median(hist), MAD=median(hist.map(function(x){return Math.abs(x-M);})), sd=(MAD||M*0.3);
+        var lo=Math.max(0,Math.round(M-2*sd)), hi=Math.round(M+2*sd), z=sd>0?0.6745*(fc-M)/MAD:0;
+        var isSpike=(fc>hi)&&(Math.abs(z)>3.5||fc>M*3), isDip=(fc<lo)&&M>=5&&(Math.abs(z)>3.5||fc<M*0.25);
+        // share-of-subcategory test: this SKU taking an abnormal slice of the category that month
+        var subFc=subcatFU?(subcatFU[fym]||0):0, shImp=subFc>0?(fc/subFc):0, shareAbn=(share>0&&subFc>0&&shImp>Math.max(share*3,share+0.15));
+        if(!isSpike&&!isDip&&!shareAbn)return;
+        var mag=Math.abs(fc-M); if(best&&mag<=best.mag)return;
+        var reasons=[];
+        if(isSpike)reasons.push('forecast '+fn(fc)+' is well above the seasonal norm (~'+fn(M)+'); likely a one-off large client order in last year’s actuals');
+        if(isDip)reasons.push('forecast '+fn(fc)+' is well below the seasonal norm (~'+fn(M)+'); likely a stockout suppressed last year’s sales (true demand higher)');
+        if(shareAbn)reasons.push('this SKU would be ~'+Math.round(shImp*100)+'% of the sub-category vs a typical ~'+Math.round(share*100)+'%');
+        best={fym:fym,fc:fc,lo:lo,hi:hi,M:M,status:(isDip&&!isSpike?'AMBER':'RED'),reason:reasons.join('; '),mag:mag}; });
+      if(best)flat.push({path:[co,ch,sub],label:sku,sku:sku,name:SKUM[sku].n||'',status:best.status,delta:best.mag,
+        vals:[best.fym.replace('_','-'),fn(best.fc),fn(best.lo)+'–'+fn(best.hi),best.reason]}); });
+    return {rows:flat, cols:['Month','Forecast','Normal range','Why flagged']};
+  }
+  var BUILDERS={fclt:buildFA,fgtr:buildFA,anomaly:buildAnomaly,noavail:buildNoAvail,nocover:buildNoCover,disc:buildDisc,sellnofc:buildSellNoFc,dataconfig:buildDataConfig};
   var built=(BUILDERS[EXC_SUBTAB]||buildFA)(); var flat=built.rows, midCols=built.cols;
   // kick the products-all fetch for the Data & config tab (once), then re-render
   if(EXC_SUBTAB==='dataconfig' && !window._EXC_PROD){ fetch('/api/supply/products-all').then(function(r){return r.json();}).then(function(d){ window._EXC_PROD=d&&!d.error?d:{error:1}; renderExceptionsView(body); }).catch(function(){ window._EXC_PROD={error:1}; renderExceptionsView(body); }); }
@@ -9928,6 +9952,7 @@ function renderExceptionsView(body){
     nocover:'Sellable SKUs (forecast this month) whose on-hand + inbound + on-order can’t cover it. <b style="color:#9e2b1f">Red</b> = zero cover (stockout). <b style="color:#b45309">Amber</b> = some, but below the month’s forecast.',
     disc:'SKUs past their discontinue date still carrying a forward forecast. <b style="color:#9e2b1f">Red</b> = discontinued in a past month yet still forecasting future demand. <b style="color:#b45309">Amber</b> = discontinues this month. Fix the discontinue date / forecast.',
     sellnofc:'SKUs with real sales in the last 3 months but ~no forward forecast (forecast gap → under-buy). <b style="color:#9e2b1f">Red</b> = strong recent sales. <b style="color:#b45309">Amber</b> = modest. Fill the next 4 months inline (type in the box next to each month\'s forecast); LY sales + SOH 3PL/FBA shown to help. Save Forecasts to persist.',
+    anomaly:'Forward forecast months that are statistical outliers vs the SKU’s own seasonal norm (robust median ± MAD) or take an abnormal share of the sub-category. <b style="color:#9e2b1f">Red = spike</b> (likely a one-off large client order last year inflating the forecast). <b style="color:#b45309">Amber = dip</b> (likely a stockout suppressing last year → true demand higher). <b>Normal range</b> = what to expect; <b>Why flagged</b> = the reason. Worst month per SKU shown.',
     dataconfig:'Config + master-data integrity: sets without a BOM recipe, unmapped prepacks, and SKUs missing a cost / carton qty. <b style="color:#9e2b1f">Red</b> = buy-breaking. <b style="color:#b45309">Amber</b> = degraded. Fix in CONFIG ▸ BOM or the product master.'};
   var legend='<div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.5">'+(LEG[EXC_SUBTAB]||'')+(built.loadingData?' <i style="color:#94a3b8">(loading cost/carton checks…)</i>':'')+'</div>';
   // ---- tree ----
