@@ -162,6 +162,24 @@ async function buildPrepackMap() {
   } catch { /* table absent pre-migration 233 → empty map (feature inert) */ }
   return out;
 }
+// Lead-time variability from PO delivery history: stdev of (actual delivery − planned delivery) in WEEKS, global + per
+// supplier. Feeds the Safety-stock tab's data-driven σ_L (combined safety-stock formula). Robust global default; per
+// supplier only used where it has enough POs.
+async function buildLeadTimeVar() {
+  const out = { global: { sig: 0, mean: 0, n: 0 }, bySupplier: {} };
+  try {
+    const rows = (await pool.query(`SELECT po.supplier_name sup,
+        (h.delivery_date::date - COALESCE(po.delivery_date_overide::date, po.landing_date_overide::date)) delay
+      FROM planner.po_delivery_history h JOIN planner.purchase_orders po ON po.po = h.po
+      WHERE h.delivery_date IS NOT NULL AND COALESCE(po.delivery_date_overide, po.landing_date_overide) IS NOT NULL`)).rows;
+    const all = [], bs = {};
+    rows.forEach((r) => { const d = Number(r.delay); if (!Number.isFinite(d) || Math.abs(d) >= 400) return; all.push(d); const k = String(r.sup || '').trim(); if (k) (bs[k] = bs[k] || []).push(d); });
+    const stat = (a) => { if (a.length < 2) return { sig: 0, mean: 0, n: a.length }; const m = a.reduce((x, y) => x + y, 0) / a.length; const v = a.reduce((x, y) => x + (y - m) * (y - m), 0) / (a.length - 1); return { sig: +(Math.sqrt(v) / 7).toFixed(2), mean: +(m / 7).toFixed(2), n: a.length }; };
+    out.global = stat(all);
+    Object.keys(bs).forEach((k) => { out.bySupplier[k] = stat(bs[k]); });
+  } catch { /* tables absent → empty (Safety-stock 'Data' falls back to 0) */ }
+  return out;
+}
 // Prepack on-hand by SKU/warehouse → {prepack_sku:{wh:qty}}. Prepack SKUs are out of planning scope so they are NOT
 // in SKUM; the buy-plan netting needs their stock separately. Sourced from v_product_inventory (same on-hand the app
 // uses), restricted to the SKUs in prepack_map.
@@ -1192,7 +1210,7 @@ app.get('/', async (req, res) => {
     const _vals = await getDataVals();   // in-process → KV (cold start, off-Supabase) → Supabase build; SWR handled inside
     const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS, SA_EXTRA, GBP_RATE, BRANCH_FREIGHT, TRANSFER_LEADS, CAT_ASP_GBP, LOCKED_FC] = _vals;
     // Fetched fresh (not in the data cache); independent of each other, so run concurrently.
-    const [KLAVIYO_BIS, MKT_COLORS, SET_BOM, PREPACK_MAP, PREPACK_STOCK] = await Promise.all([buildKlaviyoBis(), buildMktColors(), buildSetBom(), buildPrepackMap(), buildPrepackStock()]);   // SET_BOM = {output_set_sku:[{sku,qty}]} SETS explosion; PREPACK_MAP = {prepack_sku:set_sku}; PREPACK_STOCK = {prepack_sku:{wh:qty}}
+    const [KLAVIYO_BIS, MKT_COLORS, SET_BOM, PREPACK_MAP, PREPACK_STOCK, LEADTIME_VAR] = await Promise.all([buildKlaviyoBis(), buildMktColors(), buildSetBom(), buildPrepackMap(), buildPrepackStock(), buildLeadTimeVar()]);   // …; LEADTIME_VAR = {global:{sig,mean,n},bySupplier:{}} lead-time variability (weeks)
     let html = DEV ? loadHTML() : HTML;
     html = replaceGlobal(html, 'DATA', JSON.stringify(DATA));
     html = replaceGlobal(html, 'FC_CURRENT', JSON.stringify(FC_CURRENT));
@@ -1210,6 +1228,7 @@ app.get('/', async (req, res) => {
     html = replaceGlobal(html, 'SET_BOM', JSON.stringify(SET_BOM || {}));     // {output_set_sku:[{sku,qty}]} — SETS build-on-fly explosion map
     html = replaceGlobal(html, 'PREPACK_MAP', JSON.stringify(PREPACK_MAP || {}));   // {prepack_sku:set_sku} — prepack stock offsets mapped set demand; PP- excluded from demand+buy
     html = replaceGlobal(html, 'PREPACK_STOCK', JSON.stringify(PREPACK_STOCK || {}));   // {prepack_sku:{wh:qty}} — prepack on-hand (out of SKUM scope; feeds buy-plan netting)
+    html = replaceGlobal(html, 'LEADTIME_VAR', JSON.stringify(LEADTIME_VAR || {}));   // lead-time variability (weeks) from PO delivery history — Safety-stock data-driven σ_L
     html = replaceGlobal(html, 'MKT_COLORS', JSON.stringify(MKT_COLORS));     // reusable market colour palette
     html = replaceGlobal(html, 'BRANCH_FREIGHT', JSON.stringify(BRANCH_FREIGHT || {}));
     html = replaceGlobal(html, 'CAT_ASP_GBP', JSON.stringify(CAT_ASP_GBP || {}));

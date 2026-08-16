@@ -1332,6 +1332,7 @@ function prepacksForSet(setSku){ return (setSku && PREPACK_BY_SET[setSku]) || nu
 function ppStockForSet(setSku,mkt){ var pps=(setSku&&PREPACK_BY_SET[setSku])||null; if(!pps||!pps.length)return 0; var pre=String(mkt||'').toLowerCase()+'_', t=0;   // prepack on-hand for a set in one market (sum across that market's warehouses)
   pps.forEach(function(pp){ var iv=PREPACK_STOCK[pp]||{}; Object.keys(iv).forEach(function(wh){ if(wh.indexOf(pre)===0)t+=Number(iv[wh])||0; }); }); return t; }
 var PREPACK_STOCK={};    // server-injected prepack on-hand {prepack_sku:{wh:qty}} — prepacks are out of SKUM scope, so their stock rides separately for the buy-plan netting.
+var LEADTIME_VAR={};     // server-injected lead-time variability (weeks) {global:{sig,mean,n},bySupplier:{name:{sig,mean,n}}} from PO delivery history — Safety-stock data-driven σ_L.
 var PREPACK_COVER={};    // filled during buildLiveDemand §4: {"setSku|CO|fym":{onHand,fc,covered,remaining}} — drives the demand-rail "PP" badge (prepack stock drawn down against set demand, carried forward).
 var _PP_COVER_INIT=false; // one-time guard: build PREPACK_COVER on the first demand-plan render so the rail "PP" badge shows without first opening the buy plan.
 var BIS_CFG={take_rate:35};   // SUG-0018 P2: % of waiting subscribers → suggested forecast uplift (real conversion ~30-40%; also signals strong sold-out interest). app_settings-injected.
@@ -10108,7 +10109,9 @@ function renderSafetyStockView(body){
       var sig, src; if(errs.length>=3){ var se=0; errs.forEach(function(e){se+=e*e;}); sig=Math.sqrt(se/errs.length); src='fc-err'; }
       else { var hv=trail.map(function(m){return (skuSales(sku,co,ch)[m]);}).filter(function(x){return x!=null;}); if(hv.length>=4){ sig=stdev(hv); src='demand'; } else { sig=d*0.5; src='est'; } }
       var Lwk=(ch==='FBA'?(md.tf||md.t3||8):(md.l3||md.lt||12)), Lmo=Lwk/4.33;
-      var sigLmo=SS_LEADCV*Lmo, sigLT=Math.sqrt(Lmo*sig*sig + d*d*sigLmo*sigLmo);   // combined demand + lead-time variability
+      var sigLwk; if(SS_LEADCV==='data'){ var sv=LEADTIME_VAR&&LEADTIME_VAR.bySupplier&&LEADTIME_VAR.bySupplier[pd.supp]; sigLwk=(sv&&sv.n>=5)?sv.sig:((LEADTIME_VAR&&LEADTIME_VAR.global&&LEADTIME_VAR.global.sig)||0); }
+      else { sigLwk=(SS_LEADCV||0)*Lwk; }
+      var sigLmo=sigLwk/4.33, sigLT=Math.sqrt(Lmo*sig*sig + d*d*sigLmo*sigLmo);   // combined demand + lead-time variability
       var ss=Math.round(Z*sigLT);
       var suggU=Math.round(ss+CYCLE_WK*wk);                              // suggested on-hand target = safety + cycle
       var curWk=(ch==='FBA'?(md.tf||8):(md.t3||12)), curU=Math.round(curWk*wk);   // current cover-weeks target
@@ -10127,7 +10130,7 @@ function renderSafetyStockView(body){
     +'<div><span style="'+LBL+'">Channel</span>'+[['all','All'],['DTC','DTC'],['FBA','FBA'],['B2B','B2B']].map(function(x){return PILL('ch',x[0],SS_CH===x[0],x[1]);}).join('')+'</div>'
     +'<div><span style="'+LBL+'">View</span>'+[['category','Category'],['subcat','Sub-cat'],['sku','SKU']].map(function(x){return PILL('grain',x[0],SS_GRAIN===x[0],x[1]);}).join('')+'</div>'
     +'<div><span style="'+LBL+'">Service level</span>'+[[90,'90%'],[95,'95%'],[97.5,'97.5%'],[99,'99%']].map(function(x){return PILL('sl',x[0],SS_SL===x[0],x[1]);}).join('')+'</div>'
-    +'<div><span style="'+LBL+'">Lead variability</span>'+[[0,'None'],[0.15,'±15%'],[0.25,'±25%'],[0.4,'±40%']].map(function(x){return PILL('lcv',x[0],SS_LEADCV===x[0],x[1]);}).join('')+'</div>'
+    +'<div><span style="'+LBL+'">Lead variability</span>'+[['data','Data'+((LEADTIME_VAR&&LEADTIME_VAR.global&&LEADTIME_VAR.global.sig)?(' '+LEADTIME_VAR.global.sig+'w'):'')],[0,'None'],[0.15,'±15%'],[0.25,'±25%'],[0.4,'±40%']].map(function(x){return PILL('lcv',x[0],SS_LEADCV===x[0],x[1]);}).join('')+'</div>'
     +'<div><span style="'+LBL+'">Sort</span>'+[['delta','Biggest Δ'],['cov','Most variable'],['ss','Most safety stock']].map(function(x){return PILL('sort',x[0],SS_SORT===x[0],x[1]);}).join('')+'</div></div>';
   function crd(l,v,s,c){ return '<div style="border:1px solid #e2e8f0;border-radius:6px;padding:9px 14px;min-width:140px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;font-weight:700">'+l+'</div><div style="font-family:ui-monospace,Menlo,monospace;font-size:20px;font-weight:600;color:'+(c||'#0f172a')+'">'+v+'</div><div style="font-size:11px;color:#94a3b8">'+s+'</div></div>'; }
   var dV=ov.suggVal-ov.curVal, dPct=ov.curVal>0?Math.round(dV/ov.curVal*100):0;
@@ -10137,7 +10140,7 @@ function renderSafetyStockView(body){
     +crd('Difference',(dV>=0?'+':'')+money(dV),(dPct>=0?'+':'')+dPct+'% inventory',dV>0?'#9e2b1f':'#1f6fb2')
     +crd('Total safety stock',fn(ov.ss),'units of statistical buffer','#0f172a')
     +crd('Verdict',ov.over+' over · '+ov.under+' under','SKUs cover over/under-stocks','#0f172a')+'</div>';
-  var legend='<div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.5">Statistical safety stock = <b>Z × √(L·σ<sub>d</sub>² + d²·σ<sub>L</sub>²)</b> — demand variability <b>and</b> lead-time variability ('+Math.round(SS_LEADCV*100)+'% of lead, adjustable; matters a lot on long China leads). Suggested on-hand target = safety stock + a '+CYCLE_WK+'-week review cycle. <b>σ src</b>: <i>fc-err</i> = forecast error (locked snapshots), <i>demand</i> = actuals variability, <i>est</i> = thin-history fallback (improves as snapshots build). <b>Δ</b> vs the current cover-weeks target: <b style="color:#9e2b1f">red = SS wants more</b> (variable / long-lead SKU under-protected), <b style="color:#1f6fb2">blue = SS wants less</b> (steady SKU over-stocked). Recommendation only — nothing is applied to the buy plan.</div>';
+  var legend='<div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.5">Statistical safety stock = <b>Z × √(L·σ<sub>d</sub>² + d²·σ<sub>L</sub>²)</b> — demand variability <b>and</b> lead-time variability ('+(SS_LEADCV==='data'?('from PO delivery history, σ≈'+((LEADTIME_VAR&&LEADTIME_VAR.global&&LEADTIME_VAR.global.sig)||0)+'wk, '+((LEADTIME_VAR&&LEADTIME_VAR.global&&LEADTIME_VAR.global.n)||0)+' POs'):(Math.round(SS_LEADCV*100)+'% of lead'))+'; matters a lot on long China leads). Suggested on-hand target = safety stock + a '+CYCLE_WK+'-week review cycle. <b>σ src</b>: <i>fc-err</i> = forecast error (locked snapshots), <i>demand</i> = actuals variability, <i>est</i> = thin-history fallback (improves as snapshots build). <b>Δ</b> vs the current cover-weeks target: <b style="color:#9e2b1f">red = SS wants more</b> (variable / long-lead SKU under-protected), <b style="color:#1f6fb2">blue = SS wants less</b> (steady SKU over-stocked). Recommendation only — nothing is applied to the buy plan.</div>';
   var TH='padding:0 8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;border-bottom:1px solid #e2e8f0;text-align:left', TC='padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:center;font-variant-numeric:tabular-nums', TL='padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:left';
   var head='<tr><th style="'+TH+';min-width:210px">'+(SS_GRAIN==='sku'?'SKU':SS_GRAIN==='subcat'?'Sub-category':'Category')+'</th>'
     +['Demand/mo','CoV','σ src','Lead wk','Safety stock','Safety wk','Current cover (u)','Suggested (u)','Δ units'].map(function(h){return '<th style="'+TH+';text-align:center">'+h+'</th>';}).join('')+'</tr>';
@@ -10156,7 +10159,7 @@ function renderSafetyStockView(body){
   body.querySelectorAll('.ss-ch').forEach(function(b){ b.onclick=function(){ SS_CH=b.dataset.v; renderSafetyStockView(body); }; });
   body.querySelectorAll('.ss-grain').forEach(function(b){ b.onclick=function(){ SS_GRAIN=b.dataset.v; renderSafetyStockView(body); }; });
   body.querySelectorAll('.ss-sl').forEach(function(b){ b.onclick=function(){ SS_SL=parseFloat(b.dataset.v); renderSafetyStockView(body); }; });
-  body.querySelectorAll('.ss-lcv').forEach(function(b){ b.onclick=function(){ SS_LEADCV=parseFloat(b.dataset.v); renderSafetyStockView(body); }; });
+  body.querySelectorAll('.ss-lcv').forEach(function(b){ b.onclick=function(){ SS_LEADCV=(b.dataset.v==='data')?'data':parseFloat(b.dataset.v); renderSafetyStockView(body); }; });
   body.querySelectorAll('.ss-sort').forEach(function(b){ b.onclick=function(){ SS_SORT=b.dataset.v; renderSafetyStockView(body); }; });
 }
 var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['targets','Sell-through targets'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['exceptions','Exceptions'],['accuracy','Accuracy'],['safetystock','Safety stock'],['calendar','Calendar'],['scenario','Scenario planner']];
