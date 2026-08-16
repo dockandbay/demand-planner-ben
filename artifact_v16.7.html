@@ -9774,9 +9774,21 @@ function renderExceptionsView(body){
   var _cm=(typeof CUR_MONTH!=='undefined')?CUR_MONTH:'', curLbl=_cm?(MN[(+_cm.split('_')[1])-1]+" '"+_cm.slice(2,4)):'';
   var _sc2cat={}; try{ (typeof DATA!=='undefined'?DATA:[]).forEach(function(r){ if(r.s&&r.c)_sc2cat[r.s]=r.c; }); }catch(e){}
   function buildRows(){
-    // Same sources the plan's SKU rows use: forecast = skuMonthlyMap (per-SKU current-month forecast); actuals =
-    // skuSales current month. (ga / md.demand don't expose current-month actuals reliably.)
     var co=EXC_MKT, ch=EXC_CH, ctry=co.toLowerCase(), chKey=(ch==='DTC'?'d':ch==='FBA'?'f':ch==='B2B'?'b':ch==='ZAL'?'z':'t');
+    // "No availability" sub-tab: SKUs holding stock in a warehouse whose linked channels the SKU isn't sellable in.
+    // 3PL pool (co_3pl + non-GRS) sells via DTC/B2B/ZAL/TIK; FBA pool (co_fba + US AWD) sells via FBA. RED = no
+    // availability at all in this market (stock fully stranded); AMBER = sellable in another channel but not this pool's.
+    if(EXC_SUBTAB==='noavail'){ var agg={}, rows=[];
+      Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||p.vt==='SET')return; var av=(p.av&&p.av[ctry])||'', inv=p.inv||{};
+        var s3=(inv[ctry+'_3pl']||0)+(inv[ctry+'_nongrs']||0), sf=(inv[ctry+'_fba']||0)+(co==='US'?(inv['us_awd']||0):0);
+        var has3=/[dbzt]/.test(av), hasF=av.indexOf('f')>=0, none=!av;
+        function add(pool,units){ if(EXC_GRAIN==='category'){ var cat=_sc2cat[p.s]||p.s||'Unmapped'; var g=agg[cat]||(agg[cat]={label:cat,sub:'',units:0,n:0,av:'',none:true}); g.units+=units; g.n++; if(av)g.none=false; }
+          else rows.push({label:sku,sku:sku,name:p.n||'',sub:p.s||'',pool:pool,units:units,av:av,status:none?'RED':'AMBER',delta:units}); }
+        if(s3>0&&!has3)add('3PL',s3); if(sf>0&&!hasF)add('FBA',sf); });
+      if(EXC_GRAIN==='category')rows=Object.keys(agg).map(function(k){var g=agg[k];g.pool='mixed';g.status=g.none?'RED':'AMBER';g.delta=g.units;return g;});
+      rows.sort(function(a,b){var o={RED:0,AMBER:1};if(o[a.status]!==o[b.status])return o[a.status]-o[b.status];return b.units-a.units;});
+      return rows; }
+    // Forecast-vs-actual sub-tabs: forecast = skuMonthlyMap (grid number); actuals = skuSales current month.
     var lym=(typeof lyYearMonths!=='undefined')?lyYearMonths:undefined;
     var bySub={}; Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||p.vt==='SET')return; if((((p.av||{})[ctry])||'').indexOf(chKey)<0)return; (bySub[p.s]=bySub[p.s]||[]).push(sku); });
     var agg={}, rows=[];
@@ -9805,32 +9817,47 @@ function renderExceptionsView(body){
   }
   var allRows=buildRows(), nRed=allRows.filter(function(r){return r.status==='RED';}).length, nAmb=allRows.length-nRed;
   var rows=allRows.filter(function(r){ if(EXC_SEV!=='all'&&r.status!==EXC_SEV)return false; if(EXC_MINDELTA>0&&Math.abs(r.delta||0)<EXC_MINDELTA)return false; return true; });
+  var _isNA=(EXC_SUBTAB==='noavail');
   var PILL=function(cls,val,active,lbl){ return '<button class="exc-'+cls+'" data-v="'+val+'" style="font-size:12px;font-weight:600;border:1px solid '+(active?'#7c3aed':'#e2e8f0')+';background:'+(active?'#f3e8ff':'#fff')+';color:'+(active?'#6b21a8':'#64748b')+';border-radius:5px;padding:3px 11px;cursor:pointer;margin-right:4px">'+lbl+'</button>'; };
   var LBL='font-size:11px;color:#475569;font-weight:600;margin-right:6px';
   var bar='<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:2px 0 10px;font-size:12px">'
     +'<div><span style="'+LBL+'">Country</span>'+['UK','US','EU','AU'].map(function(m){return PILL('mkt',m,EXC_MKT===m,m);}).join('')+'</div>'
-    +'<div><span style="'+LBL+'">Channel</span>'+['DTC','FBA','B2B'].map(function(c){return PILL('ch',c,EXC_CH===c,c);}).join('')+'</div>'
+    +(_isNA?'':'<div><span style="'+LBL+'">Channel</span>'+['DTC','FBA','B2B'].map(function(c){return PILL('ch',c,EXC_CH===c,c);}).join('')+'</div>')
     +'<div><span style="'+LBL+'">View</span>'+PILL('grain','sku',EXC_GRAIN==='sku','SKUs')+PILL('grain','category',EXC_GRAIN==='category','Categories')+'</div>'
     +'<div><span style="'+LBL+'">Risk</span>'+[['all','All'],['RED','Red'],['AMBER','Amber']].map(function(x){return PILL('sev',x[0],EXC_SEV===x[0],x[1]);}).join('')+'</div>'
-    +'<div><span style="'+LBL+'">Min delta</span><input class="exc-mind" type="number" min="0" step="50" value="'+(EXC_MINDELTA||'')+'" placeholder="0" title="Hide rows whose forecast-vs-actual gap is below this many units" style="width:66px;font-size:12px;padding:2px 5px;border:1px solid #cbd5e1;border-radius:5px;text-align:right"></div>'
+    +'<div><span style="'+LBL+'">'+(_isNA?'Min units':'Min delta')+'</span><input class="exc-mind" type="number" min="0" step="50" value="'+(EXC_MINDELTA||'')+'" placeholder="0" title="Hide rows below this many units" style="width:66px;font-size:12px;padding:2px 5px;border:1px solid #cbd5e1;border-radius:5px;text-align:right"></div>'
     +'<div style="margin-left:auto;color:#94a3b8">'+curLbl+' · '+elapsed+'/'+total+' days · <b style="color:#9e2b1f">'+nRed+' red</b> · <b style="color:#b45309">'+nAmb+' amber</b></div></div>';
   var subtab='<div style="display:flex;gap:3px;border-bottom:1px solid #e5e7eb;margin-bottom:8px">'
-    +[['fclt','Forecast < Actual'],['fgtr','Forecast > Run-rate']].map(function(t){var on=EXC_SUBTAB===t[0];return '<button class="exc-sub" data-s="'+t[0]+'" style="border:none;background:none;padding:6px 14px;font-size:12px;font-weight:'+(on?'700':'500')+';color:'+(on?'#0f172a':'#64748b')+';border-bottom:2px solid '+(on?'#7c3aed':'transparent')+';cursor:pointer">'+t[1]+'</button>';}).join('')+'</div>';
+    +[['fclt','Forecast < Actual'],['fgtr','Forecast > Run-rate'],['noavail','No availability']].map(function(t){var on=EXC_SUBTAB===t[0];return '<button class="exc-sub" data-s="'+t[0]+'" style="border:none;background:none;padding:6px 14px;font-size:12px;font-weight:'+(on?'700':'500')+';color:'+(on?'#0f172a':'#64748b')+';border-bottom:2px solid '+(on?'#7c3aed':'transparent')+';cursor:pointer">'+t[1]+'</button>';}).join('')+'</div>';
   var _ovNote=(EXC_GRAIN==='sku'?'Type a units figure in <b>Override</b> to reset this SKU’s current-month forecast (binds to the plan; Save Forecasts to persist).':'Switch to <b>SKUs</b> to edit individual forecasts.');
-  var legend=(EXC_SUBTAB==='fgtr'
+  var legend=(_isNA
+    ? '<div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.5">SKUs holding stock in a '+esc(EXC_MKT)+' warehouse whose channels the SKU isn’t sellable in. <b style="color:#9e2b1f">Red</b> = no availability at all in '+esc(EXC_MKT)+' (stock fully stranded). <b style="color:#b45309">Amber</b> = sellable in another channel but not the one that ships this pool (e.g. FBA stock but FBA-off). <b>3PL</b> pool = DTC/B2B/ZAL/TIK; <b>FBA</b> pool = FBA (+US AWD). Fix availability in the product master (Airtable).</div>'
+    : (EXC_SUBTAB==='fgtr'
     ? '<div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.5"><b style="color:#9e2b1f">Red</b> = the run-rate is pacing below <b>half</b> the month’s forecast (forecast likely far too high). <b style="color:#b45309">Amber</b> = pacing below 75% of forecast. Only rows with some sales and ≥⅓ of the month elapsed; largest gaps first. '+_ovNote+'</div>'
-    : '<div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.5"><b style="color:#9e2b1f">Red</b> = actuals have already reached the month’s forecast (buy plan infers 0 remaining — likely under-forecast). <b style="color:#b45309">Amber</b> = actuals still under forecast but the run-rate is pacing past it. '+_ovNote+'</div>');
+    : '<div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.5"><b style="color:#9e2b1f">Red</b> = actuals have already reached the month’s forecast (buy plan infers 0 remaining — likely under-forecast). <b style="color:#b45309">Amber</b> = actuals still under forecast but the run-rate is pacing past it. '+_ovNote+'</div>'));
   var TH='padding:0 8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;border-bottom:1px solid #e2e8f0;text-align:left', T='padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:left', N='padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-variant-numeric:tabular-nums;font-family:ui-monospace,Menlo,monospace';
-  var head='<tr><th style="'+TH+'">'+(EXC_GRAIN==='category'?'Category':'SKU')+'</th><th style="'+TH+'">'+(EXC_GRAIN==='category'?'SKUs':'Subcategory')+'</th><th style="'+TH+';text-align:right">Forecast</th><th style="'+TH+';text-align:right">Actual ('+curLbl+')</th><th style="'+TH+';text-align:right">Run-rate</th><th style="'+TH+'">Status</th>'+(EXC_GRAIN==='sku'?'<th style="'+TH+';text-align:right">Override</th>':'')+'</tr>';
-  var bodyRows=rows.map(function(r){ var chip=r.status==='RED'?'<span style="display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:3px;background:#FFD6D1;color:#9e2b1f">RED</span>':'<span style="display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:3px;background:#fdf0d8;color:#8a5a06">AMBER</span>';
-    var over='';
-    if(EXC_GRAIN==='sku')over='<td style="'+N+'"><input class="exc-ov" data-sku="'+esc(r.sku)+'" data-fc="'+r.fc+'" placeholder="'+fn(r.fc)+'" style="width:64px;text-align:right;font-size:11px;border:1px solid #cbd5e1;border-radius:4px;padding:2px 5px;font-variant-numeric:tabular-nums"></td>';
-    return '<tr><td style="'+T+';font-weight:600;white-space:nowrap">'+esc(r.label)+(r.name?'<div style="font-size:9px;color:#94a3b8;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px">'+esc(r.name)+'</div>':'')+'</td>'
+  function chipOf(st){ return st==='RED'?'<span style="display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:3px;background:#FFD6D1;color:#9e2b1f">RED</span>':'<span style="display:inline-block;font-size:10.5px;font-weight:700;padding:2px 7px;border-radius:3px;background:#fdf0d8;color:#8a5a06">AMBER</span>'; }
+  var head, bodyRows;
+  if(_isNA){
+    head='<tr><th style="'+TH+'">'+(EXC_GRAIN==='category'?'Category':'SKU')+'</th><th style="'+TH+'">'+(EXC_GRAIN==='category'?'SKUs':'Subcategory')+'</th><th style="'+TH+'">Pool</th><th style="'+TH+';text-align:right">Stock ('+esc(EXC_MKT)+')</th><th style="'+TH+'">Availability</th><th style="'+TH+'">Status</th></tr>';
+    bodyRows=rows.map(function(r){ return '<tr><td style="'+T+';font-weight:600;white-space:nowrap">'+esc(r.label)+(r.name?'<div style="font-size:9px;color:#94a3b8;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px">'+esc(r.name)+'</div>':'')+'</td>'
       +'<td style="'+T+';font-size:11px;color:#64748b">'+esc(EXC_GRAIN==='category'?(r.n+' SKU'+(r.n===1?'':'s')):r.sub)+'</td>'
-      +'<td style="'+N+'">'+fn(r.fc)+'</td><td style="'+N+';font-weight:700;color:'+(r.status==='RED'?'#9e2b1f':'#0f172a')+'">'+fn(r.act)+'</td><td style="'+N+';color:#64748b">'+fn(r.run)+'</td><td style="'+T+'">'+chip+'</td>'+over+'</tr>'; }).join('');
+      +'<td style="'+T+';font-size:11px;font-weight:600;color:#475569">'+esc(r.pool)+'</td>'
+      +'<td style="'+N+';font-weight:700">'+fn(r.units)+'</td>'
+      +'<td style="'+T+';font-size:11px;color:'+(r.av?'#64748b':'#9e2b1f')+';font-weight:'+(r.av?'400':'700')+'">'+(r.av?esc(r.av):'none')+'</td>'
+      +'<td style="'+T+'">'+chipOf(r.status)+'</td></tr>'; }).join('');
+  } else {
+    head='<tr><th style="'+TH+'">'+(EXC_GRAIN==='category'?'Category':'SKU')+'</th><th style="'+TH+'">'+(EXC_GRAIN==='category'?'SKUs':'Subcategory')+'</th><th style="'+TH+';text-align:right">Forecast</th><th style="'+TH+';text-align:right">Actual ('+curLbl+')</th><th style="'+TH+';text-align:right">Run-rate</th><th style="'+TH+'">Status</th>'+(EXC_GRAIN==='sku'?'<th style="'+TH+';text-align:right">Override</th>':'')+'</tr>';
+    bodyRows=rows.map(function(r){ var over='';
+      if(EXC_GRAIN==='sku')over='<td style="'+N+'"><input class="exc-ov" data-sku="'+esc(r.sku)+'" data-fc="'+r.fc+'" placeholder="'+fn(r.fc)+'" style="width:64px;text-align:right;font-size:11px;border:1px solid #cbd5e1;border-radius:4px;padding:2px 5px;font-variant-numeric:tabular-nums"></td>';
+      return '<tr><td style="'+T+';font-weight:600;white-space:nowrap">'+esc(r.label)+(r.name?'<div style="font-size:9px;color:#94a3b8;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px">'+esc(r.name)+'</div>':'')+'</td>'
+        +'<td style="'+T+';font-size:11px;color:#64748b">'+esc(EXC_GRAIN==='category'?(r.n+' SKU'+(r.n===1?'':'s')):r.sub)+'</td>'
+        +'<td style="'+N+'">'+fn(r.fc)+'</td><td style="'+N+';font-weight:700;color:'+(r.status==='RED'?'#9e2b1f':'#0f172a')+'">'+fn(r.act)+'</td><td style="'+N+';color:#64748b">'+fn(r.run)+'</td><td style="'+T+'">'+chipOf(r.status)+'</td>'+over+'</tr>'; }).join('');
+  }
+  var emptyMsg=_isNA?('No '+esc(EXC_MKT)+' stranded stock — every SKU with inventory is sellable in a matching channel.'):('No '+esc(EXC_MKT)+' '+esc(EXC_CH)+' exceptions this month.');
   body.innerHTML='<div style="padding:2px 2px 20px">'+subtab+bar+legend
     +(rows.length?('<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'+head+bodyRows+'</table></div>')
-      :'<div style="color:#94a3b8;font-size:13px;padding:24px;text-align:center">No '+esc(EXC_MKT)+' '+esc(EXC_CH)+' exceptions this month — nothing pacing past forecast.</div>')
+      :'<div style="color:#94a3b8;font-size:13px;padding:24px;text-align:center">'+emptyMsg+'</div>')
     +'</div>';
   body.querySelectorAll('.exc-sub').forEach(function(b){ b.onclick=function(){ EXC_SUBTAB=b.dataset.s; renderExceptionsView(body); }; });
   body.querySelectorAll('.exc-mkt').forEach(function(b){ b.onclick=function(){ EXC_MKT=b.dataset.v; renderExceptionsView(body); }; });
