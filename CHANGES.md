@@ -1,3 +1,8 @@
+## v27.061 New DEMAND ▸ Ship bags tab (packaging forecast from units → orders)
+- Forecasts ship-bag (packaging) demand from the **DTC units forecast**, not bag sales history. Units ÷ avg-units-per-order → orders, split by size into **Medium / Large / XL** bags, across the forward 12 months per country/3PL.
+- **Product-mix aware**: "always-large" categories (default **Picnic**) take a Large bag even on 1-unit orders — their share of the 1-unit (Medium) orders is reassigned to Large. Also captures the mix shift (more Picnic → more Large, more Cooling → more Medium) automatically.
+- Configurable toggles: the split % per bucket, the avg units per bucket, and the always-large category list. Sandbox Aug'26 UK: 69,415 units → 23,138 orders → 8,998 M / 9,513 L / 4,628 XL. Next: map to the ship-bag SKUs to push into the buy plan.
+
 ## v27.060 Safety stock: demand unconstraining from inventory snapshots (censored-demand fix)
 - Server `buildStockoutHistory()` derives stockout months per SKU/market from `inventory_snapshots` (market on-hand ≤ 0), injected as `INV_STOCKOUTS`. Sandbox: 43 SKUs flagged from the single Apr-2026 snapshot.
 - New **Unconstrain OOS** toggle on the Safety-stock tab: lifts stockout-censored sales to the SKU's seasonal norm before computing σ, so SKUs that stocked out aren't under-planned. Shows how many SKU-months were lifted.
