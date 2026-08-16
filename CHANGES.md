@@ -1,3 +1,8 @@
+## v27.057 New DEMAND ▸ Safety stock tab (service-level safety stock, parallel)
+- Statistical safety stock = **Z × σ × √lead** at a chosen service level (90/95/97.5/99%), run **alongside** the buy plan (recommendation only, nothing applied). σ = forecast error (locked snapshots) where ≥3 points, else demand variability, else a thin-history fallback (tagged; improves as snapshots build — matches "starting from scratch").
+- Suggested on-hand target = safety stock + a 4-week review cycle, compared to the current cover-weeks target. Headline: SS-method vs cover-weeks inventory value + %, total safety stock, and a verdict (how many SKUs cover over- vs under-stocks). Table: Demand/mo · CoV · σ src · Lead wk · Safety stock · Safety wk · Current vs Suggested units · Δ. Country/Channel/grain/service-level/sort filters.
+- Roadmap #2 Phase 1. Next: lead-time variability from po_delivery_history; then snapshot the recommendation monthly to backtest it vs cover-weeks on stockouts / on-hand.
+
 ## v27.056 New DEMAND ▸ Accuracy tab (forecast accuracy & bias)
 - New tab scoring the plan against the **locked-forecast snapshots** (the forecast taken before each completed month) vs actuals — the first step toward a world-class engine (measure before you optimise).
 - **Headline KPIs**: WMAPE (volume-weighted, robust), Bias (+ over-forecast / − under-forecast), Hit-rate (±30%), SKU-months evaluated. **WMAPE-by-month trend** bars. **Breakdown table** by Category / Sub-category / SKU, sortable by worst WMAPE / biggest bias / volume, with colour bands (green/amber/red WMAPE; red=over, blue=under bias).
