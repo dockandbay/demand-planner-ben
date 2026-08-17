@@ -4,6 +4,16 @@ From: Ben · 17-Aug-26 · Three scheduled snapshot flows, all **straightforward*
 
 Production app: `https://horizon.dockandbay.com` · Supabase prod `oolwklahstnvocaugryg`, schema `planner`.
 
+## At a glance
+
+| Flow | Schedule | Action |
+|---|---|---|
+| **1. Forecast snapshot** | 5th of each month | `POST /api/forecast/snapshot` (endpoint exists) |
+| **2. Inventory available** | 1st / 10th / 20th | Cin7 stock → branch→warehouse map (CA excluded) → upsert `planner.inventory_snapshots` |
+| **3. Open-actions snapshot** | Thursday 11:59 GMT | `snapshotOpenActions()` via `POST /api/supply/action-metrics/snapshot` (or `GET /api/cron/action-metrics`) |
+
+> **Heads-up on Flow 3:** it already runs on a **Vercel cron** (`59 23 * * 4` → `GET /api/cron/action-metrics`, Thursday **23:59** GMT). To hit Ben's 11:59 GMT: either (simplest) change the Vercel cron to `59 11 * * 4`, or move it to n8n at 11:59 **and remove the Vercel cron** so it doesn't fire twice. Details in Flow 3 below.
+
 **Follow-up (after these are confirmed live):** the manual "📸 Snapshot now" buttons in the app (forecast snapshot on the Accuracy page; open-actions snapshot on the Metrics report) will be moved into **CONFIG ▸ Admin** (kept as a manual fallback). Ben will confirm the n8n flows are running first; then Ben's team relocates the buttons.
 
 ---
