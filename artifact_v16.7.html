@@ -10703,7 +10703,7 @@ function _zalRender(wrap,d){
 // ACTIONS: per-country summary of the buy/move actions (Buy 3PL, Urgent Sea/Air, Buy FBA, FBA Transfer) —
 // total units per action with expand-to-SKU. Uses BP.getBuyQtys across each market's visible SKUs.
 // ── BUY & MOVE ▸ INVENTORY (scaffold) — Status Report | Manage 3PL (US/UK/AU/EU) | Manage FBA (US/UK/AU/EU/CA) ──
-var INV_SUB='status', INV_3PL='US', INV_FBA='US', INV_FBA_GAP='gaps', INV_FBA_Q='', _invFbaLast=null, INV_3PL_GAP='gaps', INV_3PL_Q='', _inv3plLast=null, INV_STATUS_MKT='US', FBA_AGED_F=null;
+var INV_SUB='status', INV_3PL='US', INV_FBA='US', INV_FBA_GAP='gaps', INV_FBA_Q='', _invFbaLast=null, INV_3PL_GAP='gaps', INV_3PL_Q='', _inv3plLast=null, INV_STATUS_MKT='US', FBA_AGED_F=null, _inv3plUnmOpen=false, _invFbaUnmOpen=false;   // *UnmOpen = show the "in 3PL/FBA but not in the product list (with stock)" list
 function renderInventory(){
   var host=document.querySelector('.wrap'); if(!host)return;
   var ex=document.getElementById('inventory-wrap'); if(ex)ex.remove();
@@ -11132,7 +11132,7 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
   var det=document.getElementById('fba-detail'); var _fbaOpen=null;
   (panel.querySelectorAll('.fba-toggle')||[]).forEach(function(btn){ btn.onclick=function(){ var t=btn.dataset.t; if(!det)return;
     if(_fbaOpen===t){ det.innerHTML=''; _fbaOpen=null; return; } _fbaOpen=t;
-    if(t==='notinerp'){ var L=j.not_in_erp||[]; det.innerHTML=fbaListTbl(['SKU','ASIN','FBA report'], L.map(function(x){return [x.sku, x.asin||'—', x.report_fba];}), 'Report SKUs (amzn.gr. already ignored) that match no product by SKU or ASIN'); }
+    if(t==='notinerp'){ var L=(j.not_in_erp||[]).filter(function(x){return (Number(x.report_fba)||0)>0;}).sort(function(a,b){return (Number(b.report_fba)||0)-(Number(a.report_fba)||0);}); det.innerHTML=fbaListTbl(['SKU','ASIN','FBA report'], L.map(function(x){return [x.sku, x.asin||'—', x.report_fba];}), L.length+' report SKU'+(L.length===1?'':'s')+' with FBA stock that match no product by SKU or ASIN (amzn.gr. already ignored)'); }
     else { var M=j.erp_missing||[]; det.innerHTML=fbaListTbl(['SKU','ERP '+INV_FBA+' FBA'], M.map(function(x){return [x.sku, x.erp_fba];}), 'Products with ERP FBA stock > 0 that are absent from the uploaded report'); }
   }; });
   var gp=document.getElementById('fba-gap'); if(gp)gp.onchange=function(){ INV_FBA_GAP=this.value; invFbaRender('manage',_invFbaLast); };
@@ -11196,9 +11196,23 @@ function inv3plRender(j){ var panel=document.getElementById('inv3pl-panel'); if(
     var _q3=String(INV_3PL_Q||'').trim().toLowerCase();
     var fr=rows.filter(passGap3).filter(function(r){ return !_q3 || String(r.sku||'').toLowerCase().indexOf(_q3)>=0; });
     var stk=fr.filter(function(r){return r.matched;}).map(function(r){ return [r.sku, r.report_onhand]; }); window._inv3plStk=stk;   // Cin7 Stocktake: Code=SKU, Count=3PL Report - On Hand
+    // Items in the 3PL report but NOT in the product list, that still hold stock (Ben) — surfaced as a toggled list.
+    var _unm=rows.filter(function(r){return !r.matched && ((Number(r.report_onhand)||0)>0 || (Number(r.report_avail)||0)>0);})
+      .sort(function(a,b){return ((Number(b.report_avail)||0)+(Number(b.report_onhand)||0))-((Number(a.report_avail)||0)+(Number(a.report_onhand)||0));});
     var summary='<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:6px;font-size:12px;align-items:center"><span><b>'+j.report_skus+'</b> report SKUs</span>'
-      +'<span style="color:#16a34a"><b>'+j.matched+'</b> matched</span><span style="color:#b45309"><b>'+j.unmatched+'</b> not in ERP</span>'
+      +'<span style="color:#16a34a"><b>'+j.matched+'</b> matched</span>'
+      +'<button id="inv3pl-unm-tgl" title="Show items in the 3PL report with stock that aren\'t in the product list" style="background:'+(_inv3plUnmOpen?'#f59e0b':'#fff7ed')+';color:'+(_inv3plUnmOpen?'#fff':'#b45309')+';border:1px solid #f59e0b;border-radius:6px;padding:2px 9px;font-size:12px;font-weight:600;cursor:pointer"><b>'+_unm.length+'</b> not in product list (with stock) '+(_inv3plUnmOpen?'▾':'▸')+'</button>'
       +'<span style="color:#b91c1c"><b>'+j.erp_not_in_report+'</b> ERP stock missing from report</span></div>';
+    var unmBlock='';
+    if(_inv3plUnmOpen){ unmBlock='<div style="margin:0 0 12px;border:1px solid #fed7aa;border-radius:8px;overflow:hidden">'
+      +'<div style="background:#fff7ed;color:#9a3412;font-weight:700;font-size:12px;padding:6px 10px">In the 3PL report with stock, but not in the product list — '+_unm.length+' SKU'+(_unm.length===1?'':'s')+'</div>'
+      +(_unm.length?('<div style="max-height:280px;overflow:auto"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'
+        +'<th style="text-align:left;padding:5px 10px;border-bottom:1px solid #fed7aa;position:sticky;top:0;background:#fffaf5">SKU</th>'
+        +'<th style="text-align:left;padding:5px 10px;border-bottom:1px solid #fed7aa;position:sticky;top:0;background:#fffaf5">On hand</th>'
+        +'<th style="text-align:left;padding:5px 10px;border-bottom:1px solid #fed7aa;position:sticky;top:0;background:#fffaf5">Available</th></tr></thead><tbody>'
+        +_unm.map(function(r){ return '<tr><td style="padding:4px 10px;font-family:ui-monospace,Menlo,monospace">'+tHesc(r.sku)+'</td><td style="padding:4px 10px">'+(r.report_onhand==null?'—':r.report_onhand)+'</td><td style="padding:4px 10px">'+(r.report_avail==null?'—':r.report_avail)+'</td></tr>'; }).join('')
+        +'</tbody></table></div>'):'<div class="mut" style="font-size:12px;padding:8px 10px">None — every SKU with 3PL stock is in the product list.</div>')
+      +'</div>'; }
     var ctl='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 10px">'
       +'<label class="mut" style="font-size:12px">Show</label><select id="inv3pl-gap" style="width:auto;max-width:200px;padding:4px 8px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#334155;font-size:12px;cursor:pointer">'
       +[['gaps','All gaps (on-hand)'],['pct20','Gap more than 20%'],['items10','Gap more than 10 items'],['all','All (incl. matches)']].map(function(o){return '<option value="'+o[0]+'"'+(o[0]===INV_3PL_GAP?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'
@@ -11220,12 +11234,13 @@ function inv3plRender(j){ var panel=document.getElementById('inv3pl-panel'); if(
       +'<td style="padding:4px 10px;text-align:left">'+num(r.report_onhand)+'</td><td style="padding:4px 10px;text-align:left">'+num(r.erp_onhand)+'</td>'+dcell(r.diff_onhand)
       +sepTd
       +'<td style="padding:4px 10px;text-align:left">'+num(r.report_avail)+'</td><td style="padding:4px 10px;text-align:left">'+num(r.erp_avail)+'</td>'+dcell(r.diff_avail,((r.diff_onhand>0)||(r.diff_avail>0))?_recentPoNote(r.recent_pos):'')+'</tr>'; }).join('');
-    content=summary+ctl+'<div style="max-height:520px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead>'+head2+'</thead><tbody>'+trs+'</tbody></table></div>'
+    content=summary+unmBlock+ctl+'<div style="max-height:520px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead>'+head2+'</thead><tbody>'+trs+'</tbody></table></div>'
       +(fr.length>800?'<div class="mut" style="font-size:11px;margin-top:4px">Showing first 800 of '+fr.length+'</div>':''); }
   panel.innerHTML=head+content;
   _bindRecentPo(panel);
   var ib=document.getElementById('inv3pl-import'); if(ib)ib.onclick=inv3plImport;
   var g3=document.getElementById('inv3pl-gap'); if(g3)g3.onchange=function(){ INV_3PL_GAP=this.value; inv3plRender(_inv3plLast); };
+  var u3=document.getElementById('inv3pl-unm-tgl'); if(u3)u3.onclick=function(){ _inv3plUnmOpen=!_inv3plUnmOpen; inv3plRender(_inv3plLast); };
   var q3=document.getElementById('inv3pl-q'); if(q3)q3.oninput=function(){ var cp=this.selectionStart; INV_3PL_Q=this.value; inv3plRender(_inv3plLast); var n=document.getElementById('inv3pl-q'); if(n){n.focus(); try{n.setSelectionRange(cp,cp);}catch(e){}} };
   invStkBind('inv3pl-stk','inv3pl-stk-menu','3PL-'+INV_3PL,function(){ return window._inv3plStk||[]; }); }
 function renderBuyMoveActions(){

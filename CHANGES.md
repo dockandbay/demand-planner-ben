@@ -1,3 +1,8 @@
+## v27.096 Manage 3PL / FBA: list items with stock that aren't in the product list
+- **Manage 3PL** — the summary's "not in ERP" count is now a clickable **"N not in product list (with stock) ▸"** toggle that opens a table of the report SKUs holding 3PL stock (on-hand / available) that don't exist in `planner.products`. Zero-stock unmatched rows are excluded (Ben: "do have inventory").
+- **Manage FBA** — the existing "not in ERP ▾" list is now filtered to report SKUs with **FBA stock > 0** and sorted by qty (was showing zero-stock rows too).
+- Data already came from the server (`inv3plCompare` rows where `!matched`; `invFbaCompare.not_in_erp`); this is a display add. Harness-verified: orphan SKUs with stock listed, zero-stock excluded, count correct.
+
 ## v27.095 Auto-smooth popup: "Convert categories to %" button
 - New button in the ⚙ Smoothing (auto-smooth) popup. For the **current country/channel**, it rewrites each **hard-coded (absolute) sub-category forecast** in the **next 11 months** as a growth **% vs the same month last-year ACTUAL**, rounded to **1 dp** — but only where that growth is **≤ 200%**; larger jumps keep the absolute number. Cells already entered as %, blank cells, SKU rows, and months with no last-year actual are left untouched. Shows a summary line (converted / kept-absolute / skipped counts).
 - Verified in harness: +23.4% → `0.234`, +50% → `0.5`, +250% → kept absolute. Manual/opt-in (default state unchanged); marks dirty → the normal auto-save persists it. ⚠ buy-plan-affecting when used — rounding a converted cell to 1 dp nudges its units by <0.1%, and a converted cell then flexes with LY on reload (was fixed).
