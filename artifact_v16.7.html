@@ -4323,9 +4323,11 @@ function setHlNoFcInv(on){ HL_NOFC_INV=!!on; try{localStorage.setItem('hzHlNoFcI
 var HL_FCACT_DISC=(function(){try{return localStorage.getItem('hzHlFcActDisc')==='1';}catch(e){return false;}})();  // shade past-4-completed-month cells by actual-vs-locked-forecast discrepancy
 function setHlFcActDisc(on){ HL_FCACT_DISC=!!on; try{localStorage.setItem('hzHlFcActDisc',HL_FCACT_DISC?'1':'0');}catch(e){}
   if(HL_FCACT_DISC){ HL_GROWTH_LY=false; try{localStorage.setItem('hzHlGrowthLY','0');}catch(e){} var _g=document.getElementById('filt-hl-growthly'); if(_g)_g.checked=false; }   // mutually exclusive with Growth-on-LY (Ben)
-  try{renderMain();}catch(e){} }
+  try{paintHighlights();}catch(e){} }   // instant repaint from precomputed cell colours — no full re-render
 function _last4Has(m){ if(typeof CUR_MONTH==='undefined')return false; var y=+CUR_MONTH.slice(0,4),mo=+CUR_MONTH.slice(5,7); for(var i=0;i<4;i++){ mo--; if(mo<1){mo=12;y--;} if(m===y+'_'+(mo<10?'0':'')+mo)return true; } return false; }   // last 4 completed months (before current)
-function hlDiscColor(act,fc){ if(!HL_FCACT_DISC||!(fc>0))return null; var r=(act||0)/fc;   // actual vs locked forecast → discrepancy colour scale (Ben)
+// Raw discrepancy / growth colour scales — NO toggle check (paintHighlights decides which is active). Each cell
+// stores its own colour in data-hld (fc-vs-actual) / data-hlg (growth-vs-LY) at render; toggling just repaints.
+function hlDiscColor(act,fc){ if(!(fc>0))return null; var r=(act||0)/fc;   // actual vs locked forecast → discrepancy colour scale (Ben)
   if(r<=0.30)return '#F54927';   // ≥70% below forecast — brighter red
   if(r<=0.70)return '#F87C63';   // ≥30% below forecast — light red
   if(r>=2.00)return '#00D131';   // ≥100% above forecast
@@ -4335,14 +4337,22 @@ var HL_GROWTH_LY=(function(){try{return localStorage.getItem('hzHlGrowthLY')==='
 if(HL_GROWTH_LY&&HL_FCACT_DISC){ HL_GROWTH_LY=false; try{localStorage.setItem('hzHlGrowthLY','0');}catch(e){} }   // the two highlights are mutually exclusive — reconcile a stale both-on state (Ben)
 function setHlGrowthLY(on){ HL_GROWTH_LY=!!on; try{localStorage.setItem('hzHlGrowthLY',HL_GROWTH_LY?'1':'0');}catch(e){}
   if(HL_GROWTH_LY){ HL_FCACT_DISC=false; try{localStorage.setItem('hzHlFcActDisc','0');}catch(e){} var _d=document.getElementById('filt-hl-disc'); if(_d)_d.checked=false; }   // mutually exclusive with Forecast-vs-actual (Ben)
-  try{renderMain();}catch(e){} }
-function hlGrowthColor(cur,ly){ if(!HL_GROWTH_LY||!(ly>0))return null; var r=(cur||0)/ly;   // growth vs LY colour scale; ly<=0 excluded (no growth-from-zero) — Ben
+  try{paintHighlights();}catch(e){} }
+function hlGrowthColor(cur,ly){ if(!(ly>0))return null; var r=(cur||0)/ly;   // growth vs LY colour scale; ly<=0 excluded (no growth-from-zero) — Ben
   if(r<=0.30)return '#F54927';   // ≥70% down on LY — brighter red
   if(r<=0.70)return '#F87C63';   // ≥30% down on LY — light red
   if(r>=2.00)return '#00D131';   // ≥100% up on LY
   if(r>=1.50)return '#00FF3C';   // ≥50% up on LY
   return null; }
 function _hlShade(td,c){ if(!td||!c)return; td.style.setProperty('background',c,'important'); td.classList.add('hl-blk'); }   // shade a cell + force all its text black for readability (Ben)
+// Apply the active highlight to every cell that carries a precomputed colour. Cheap DOM pass so toggling is INSTANT
+// (was a full renderMain rebuild of the ~6MB plan). data-hld = fc-vs-actual colour, data-hlg = growth-vs-LY colour.
+function paintHighlights(){ var mode=HL_FCACT_DISC?'d':(HL_GROWTH_LY?'g':'');
+  var els=document.querySelectorAll('td[data-hld],td[data-hlg]');
+  for(var i=0;i<els.length;i++){ var td=els[i];
+    var c=mode==='d'?(td.getAttribute('data-hld')||''):(mode==='g'?(td.getAttribute('data-hlg')||''):'');
+    if(c){ td.style.setProperty('background',c,'important'); td.classList.add('hl-blk'); td._hlon=1; }
+    else if(td._hlon){ td.style.removeProperty('background'); td.classList.remove('hl-blk'); td._hlon=0; } } }
 function applyHlCell(td,fc,act,invUnits,isCur){ if(!td)return; var hl=false;   // baby-blue cell highlights (Display Settings)
   if(isCur&&typeof HL_FC_LT_ACT!=='undefined'&&HL_FC_LT_ACT&&(act||0)>0&&(act||0)>(fc||0))hl=true;   // forecast < actual (current month)
   if(typeof HL_NOFC_INV!=='undefined'&&HL_NOFC_INV&&(fc||0)<=0&&(invUnits||0)>0)hl=true;              // no forecast but stock on hand
@@ -5742,8 +5752,8 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
     if(!isCurMo&&SHOW_FC_ACT){ var _lf=LOCKED_FC.sub[ik]; if(_lf!=null){ var _dl=actualUnits>0?Math.round((_lf-actualUnits)/actualUnits*100):null;
       var lfDiv=document.createElement('div'); lfDiv.style.cssText='font-size:8px;color:#6366f1;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap';
       lfDiv.title='Locked forecast — most recent snapshot taken before this month'+(_dl!=null?' ('+gPct(_dl)+' vs actual)':''); lfDiv.textContent='fc '+fn(_lf)+(_dl!=null?'  '+gPct(_dl):''); d.appendChild(lfDiv); } }
-    if(!isCurMo&&typeof HL_FCACT_DISC!=='undefined'&&HL_FCACT_DISC&&_last4Has(fym)){ _hlShade(td,hlDiscColor(actualUnits,(LOCKED_FC.sub&&LOCKED_FC.sub[ik]))); }   // forecast-vs-actual discrepancy shade (past 4 mo)
-    if(typeof HL_GROWTH_LY!=='undefined'&&HL_GROWTH_LY){ _hlShade(td,hlGrowthColor(actualUnits,ly_u)); }   // growth-vs-LY shade (actual months; LY=0 excluded)
+    if(!isCurMo&&_last4Has(fym)){ var _dh=hlDiscColor(actualUnits,(LOCKED_FC.sub&&LOCKED_FC.sub[ik])); if(_dh)td.dataset.hld=_dh; }   // fc-vs-actual colour (past 4 mo) — painted per toggle
+    if(!isCurMo){ var _gh=hlGrowthColor(actualUnits,ly_u); if(_gh)td.dataset.hlg=_gh; }   // growth-vs-LY colour (completed actual months; LY=0 excluded)
     td.appendChild(d);return td;
   }
 
@@ -5790,7 +5800,7 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   res.textContent=fn(fcv);res.dataset.rk=ik;
   if(reasons&&reasons[fym])res.title=reasons[fym];
   d.appendChild(res);
-  if(typeof HL_GROWTH_LY!=='undefined'&&HL_GROWTH_LY){ _hlShade(td,hlGrowthColor(fcv,ly_u)); }   // growth-vs-LY shade (forecast months; LY=0 excluded)
+  // (growth-vs-LY is NOT applied to forecast/future months — actual months only; see the actual branch above)
   // Anomaly suggestion with tooltip
   if(aflags&&aflags[fym]){
     var af=aflags[fym];
@@ -8050,7 +8060,6 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       td.className=fyBg(Y)+(first?' sep2':'')+(isAct?' sku-act-cell':'');
       td.style.cssText='padding:1px 2px;border-bottom:1px solid #f0f0ee';
       if(preLaunchM(m))td.style.setProperty('background','#d9d9d9','important');   // pre-launch months (incl. actuals) greyed — Ben (inline !important beats the .bg26/.sku-act-cell !important)
-      if(typeof HL_GROWTH_LY!=='undefined'&&HL_GROWTH_LY&&!preLaunchM(m)){ _hlShade(td,hlGrowthColor(fcv,lyVal)); }   // growth-vs-LY shade (all months; LY=0 excluded) — AFTER cssText (which would wipe an inline background) — Ben
       var _rk='sku|'+sku+'|'+co+'|'+ch+'|'+m; td.dataset.nk=_rk;   // enables dbl-click notes + do-not-smooth popup on SKU cells
       var _rh=cellRailForKey(_rk); if(_rh){ td.classList.add('has-rail'); td.style.position='relative'; td.insertAdjacentHTML('afterbegin',_rh); }
       applyCellNote(td,_rk);
@@ -8067,7 +8076,10 @@ function insertInlineSkuRows(s,co,ch,afterTr){
           +'<div style="font-size:9px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums">'+fn(act)+'</div>'
           +'<div style="font-size:7px;text-align:right" class="'+yc+'">'+ys+'</div>'+_lfHtml+'</div>';
         if(_rh)td.insertAdjacentHTML('afterbegin',_rh);   // innerHTML above wiped the rail — re-add for actual-month cells
-        if(m!==CUR_MONTH&&typeof HL_FCACT_DISC!=='undefined'&&HL_FCACT_DISC&&_last4Has(m)){ _hlShade(td,hlDiscColor(act,(LOCKED_FC.sku&&LOCKED_FC.sku[sku+'|'+co+'|'+ch+'|'+m]))); }   // forecast-vs-actual discrepancy shade (past 4 mo)
+        if(!preLaunchM(m)&&m!==CUR_MONTH){   // store highlight colours (painted per active toggle) — completed actual months only, never future/current
+          if(_last4Has(m)){ var _dh=hlDiscColor(act,(LOCKED_FC.sku&&LOCKED_FC.sku[sku+'|'+co+'|'+ch+'|'+m])); if(_dh)td.dataset.hld=_dh; }   // fc-vs-actual (past 4 mo)
+          var _gh=hlGrowthColor(act,lyVal); if(_gh)td.dataset.hlg=_gh;   // growth-vs-LY (LY=0 excluded)
+        }
         return td;
       }
       var af=(fc>0&&!skuRundown[m])?skuAF[m]:null;
@@ -8291,6 +8303,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     SKU_FOCUS_NEXT=null;
     if(_tgt){_tgt.focus();try{_tgt.select();}catch(_){}}
   }
+  try{ paintHighlights(); }catch(e){}   // paint highlights on the just-expanded SKU rows (per active toggle)
 }
 
 var _makeGrandTotRow=null;   // set by buildBody; lets refreshRow() rebuild the grand-total row in place on an edit
@@ -8613,6 +8626,7 @@ function renderMain(){
     });
   }
   if(typeof planRevPopRefresh==='function')planRevPopRefresh(); // keep the pop-out in sync with forecast/scope changes
+  try{ paintHighlights(); }catch(e){}   // apply the active cell-highlight from each cell's precomputed data-hld/data-hlg
   if(typeof hzPlanSave==='function')hzPlanSave();   // persist the current plan filters (1h)
 }
 

@@ -1,3 +1,8 @@
+## v27.088 Highlights: growth is past-only, instant toggle (no re-render)
+- **Growth on last year no longer shades future months** — it now only applies to completed actual months (not forecast/future, not the current partial month). The subtotal-grid forecast-branch shade and the SKU common-path shade were removed; growth is stored only in the actual branches.
+- **Instant toggle:** the two Highlight toggles no longer trigger a full `renderMain()` rebuild of the ~6MB plan. Each cell now precomputes its colour into `data-hld` (fc-vs-actual) / `data-hlg` (growth-vs-LY) during render; toggling runs a lightweight `paintHighlights()` DOM pass that applies/clears the active colour. Also runs on SKU-row expansion.
+- Verified in harness: 69 growth cells all on past months (0 future/current), toggle paints/clears exactly the right cells, and the two remain mutually exclusive.
+
 ## v27.087 Growth-on-LY: works on SKU lines + mutually exclusive with Forecast-vs-actual
 - **SKU-line fix:** the growth shade wasn't showing on SKU rows because it was applied *before* `td.style.cssText='…'`, which replaces all inline styles and wiped the background (the `hl-blk` black-text class survived, so text looked right but no shade). Moved the shade to *after* the `cssText` assignment.
 - **Mutual exclusivity:** "Forecast vs actual (past 4 mo)" and "Growth on last year" can no longer both be active — enabling one turns the other off (state + checkbox + localStorage), and a stale both-on state is reconciled on load.
