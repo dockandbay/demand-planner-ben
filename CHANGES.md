@@ -1,3 +1,7 @@
+## v27.100 Stock cover: flat vs SSM-aligned target, side by side
+- New "Cover vs targets" table on the Stock cover tab showing, per warehouse + overall, the two metrics side by side: **Cover (wks)** actual, **Flat target** (+ excess £), and **SSM target** (+ excess £). The SSM target is the Service-Level Stock Model's own per-SKU cover (`ssmCoverWeeks`, exposed on `window`) demand-value-weighted per warehouse, so you compare actual holdings against both a flat business goal and the model's goal. This is effectively the SSM backtest scoreboard.
+- Verified: `window.ssmCoverWeeks` exposed, rollup produces real per-warehouse SSM targets, table renders with both columns populated.
+
 ## v27.099 Stock cover: "ALL WAREHOUSES" overall-average row
 - Added a value-weighted overall row at the top of the Stock cover grid: total SOH value ÷ total weekly demand value per month = the portfolio weeks of cover across all warehouses, shaded vs target, with the combined releasable £ (over-target warehouses) in the Excess column.
 

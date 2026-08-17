@@ -1731,6 +1731,7 @@ function ssmCoverWeeks(sku,co,pool,md,pd){             // → effective base cov
     return Math.max(1,Math.min(cover,cap));
   }catch(e){ return null; }
 }
+try{ window.ssmCoverWeeks=ssmCoverWeeks; }catch(e){}   // expose for DEMAND ▸ Stock cover (SSM-aligned target rollup, outside the BP module)
 // Complex Rules — return the enabled rules (with parsed dates) whose SCOPE matches this SKU in this market.
 // Scope filters (sku/category/tier/season) are optional and AND'd; a rule with no scope matches every SKU.
 function crMatch(sku,mkt){
@@ -10504,9 +10505,39 @@ function scDraw(body){
   var grid='<div style="overflow:auto;border:1px solid #e5e7eb;border-radius:8px;max-height:calc(100vh - 320px)"><table style="border-collapse:collapse;font-size:12px;min-width:900px"><thead>'+head+'</thead><tbody>'+totRow+rowsH+'</tbody></table></div>';
   var legend='<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;font-size:11px;color:#64748b;align-items:center">Cover vs target: '
     +'<span style="background:#fecaca;padding:1px 8px;border-radius:3px">≤50% (risk)</span><span style="background:#dcfce7;padding:1px 8px;border-radius:3px">on target</span><span style="background:#fef3c7;padding:1px 8px;border-radius:3px">excess</span><span style="background:#fde68a;padding:1px 8px;border-radius:3px">heavy excess</span></div>';
+  // ── SSM-aligned target: demand-value-weighted average of each SKU's SSM cover-weeks, rolled up per warehouse ──
+  function _scFwd6(){ var cm=(typeof CUR_MONTH!=='undefined')?CUR_MONTH:null; if(!cm)return []; var y=+cm.slice(0,4),mo=+cm.slice(5,7),o=[]; for(var i=0;i<6;i++){ o.push(y+'_'+(mo<10?'0':'')+mo); mo++; if(mo>12){mo=1;y++;} } return o; }
+  var _scFwd=_scFwd6(), _ssmCache={};
+  function ssmTargetFor(wh){ if(wh in _ssmCache)return _ssmCache[wh]; var res=null;
+    try{ if(typeof window.ssmCoverWeeks==='function'&&typeof BP_DATA!=='undefined'&&BP_DATA.products){
+      var mk=mktOf(wh), pool=(function(){var p=wh.split('_').slice(1).join('_');return (p==='fba'||p==='awd')?'FBA':'3PL';})();
+      var chs=pool==='FBA'?['FBA']:['DTC','B2B','ZAL']; var prods=BP_DATA.products, sumCW=0, sumW=0;
+      Object.keys(prods).forEach(function(sku){ var pd=prods[sku], md=pd&&pd.mkts&&pd.mkts[mk]; if(!md)return;
+        var cov; try{ cov=window.ssmCoverWeeks(sku,mk,pool,md,pd); }catch(e){ cov=null; } if(!(cov>0))return;
+        var dem=md.demand||{}, dsum=0; _scFwd.forEach(function(m){ chs.forEach(function(ch){ var mm=dem[ch]; if(mm&&mm[m]!=null)dsum+=mm[m]; }); }); var d=dsum/6; if(!(d>0))return;
+        var cost=Number(pd.cp)||0, w=(d/4.33)*cost; if(!(w>0))return; sumCW+=cov*w; sumW+=w; });
+      if(sumW>0)res=sumCW/sumW;
+    } }catch(e){ res=null; } _ssmCache[wh]=res; return res; }
+  var _ssmAll=(function(){ var s=0,w=0; whs.forEach(function(wh){ var t=ssmTargetFor(wh), wd=wdemVal(wh,last); if(t!=null&&wd>0){s+=t*wd;w+=wd;} }); return w>0?s/w:null; })();
+  function _cmpRow(lbl,actual,wd,ssmT,bold){
+    var exFlat=(actual!=null&&actual>tgt&&wd>0)?(actual-tgt)*wd:0, exSSM=(actual!=null&&ssmT!=null&&actual>ssmT&&wd>0)?(actual-ssmT)*wd:0, b=bold?'font-weight:800;background:#eef2ff;':'';
+    return '<tr style="'+b+'"><td style="padding:4px 10px;text-align:left;'+b+'">'+_scE(lbl)+'</td>'
+      +'<td style="padding:4px 10px;text-align:right;'+shade(actual)+'">'+(actual==null?'—':actual.toFixed(1))+'</td>'
+      +'<td style="padding:4px 10px;text-align:right;color:#7c3aed">'+tgt.toFixed(1)+'</td>'
+      +'<td style="padding:4px 10px;text-align:right;color:'+(exFlat>0?'#b45309':'#94a3b8')+'">'+(exFlat>0?fMoney(exFlat):'—')+'</td>'
+      +'<td style="padding:4px 10px;text-align:right;color:#0369a1;font-weight:600">'+(ssmT==null?'—':ssmT.toFixed(1))+'</td>'
+      +'<td style="padding:4px 10px;text-align:right;color:'+(exSSM>0?'#b45309':'#94a3b8')+'">'+(exSSM>0?fMoney(exSSM):'—')+'</td></tr>'; }
+  var _cth=function(t,al){return '<th style="padding:5px 10px;text-align:'+(al||'right')+';border-bottom:2px solid #cbd5e1;font-size:11px;white-space:nowrap;background:#f8fafc">'+t+'</th>';};
+  var cmpTable='<div style="font-weight:700;font-size:13px;margin:20px 0 6px">Cover vs targets — '+mlab(last)+' · flat and SSM-aligned side by side</div>'
+    +'<div style="overflow:auto;border:1px solid #e5e7eb;border-radius:8px;max-width:780px"><table style="border-collapse:collapse;font-size:12px;width:100%"><thead><tr>'
+    +_cth('Warehouse','left')+_cth('Cover (wks)')+_cth('Flat target')+_cth('Excess £ (flat)')+_cth('SSM target')+_cth('Excess £ (SSM)')+'</tr></thead><tbody>'
+    +_cmpRow('ALL WAREHOUSES',overallWoc(last),(function(){var w=0;whs.forEach(function(wh){w+=wdemVal(wh,last);});return w;})(),_ssmAll,true)
+    +whs.map(function(wh){ return _cmpRow(_SC_WHLBL[wh]||wh, woc(wh,last), wdemVal(wh,last), ssmTargetFor(wh), false); }).join('')
+    +'</tbody></table></div>'
+    +'<div class="mut" style="font-size:11px;margin-top:5px;max-width:780px">Two metrics side by side: <b>Flat target</b> = the number you set. <b>SSM target</b> = the Service-Level Stock Model\'s own cover (per-SKU safety stock by tier / lead / volatility, FBA capped), demand-weighted per warehouse. Excess £ = working capital held above each target.</div>';
   body.innerHTML='<div style="padding:6px 2px 24px"><div style="font-weight:800;font-size:16px;margin:2px 0 4px">Stock cover</div>'
     +'<div style="font-size:12px;color:#64748b;max-width:900px;margin:0 0 12px">Weeks of stock on hand vs demand, per warehouse, from the monthly end-of-month inventory snapshots (last 18 months). Value(£)-weighted, so cover above target is working capital that could be released to improve cash flow.</div>'
-    +kpi+tctl+grid+legend+'</div>';
+    +kpi+tctl+cmpTable+grid+legend+'</div>';
   var si=body.querySelector('#sc-tgt'), sv=body.querySelector('#sc-tgt-save'), sm=body.querySelector('#sc-tgt-msg');
   if(sv)sv.onclick=function(){ var v=parseFloat(si.value); if(!(v>0)){ if(sm){sm.style.color='#dc2626';sm.textContent='Enter a positive number';} return; } SC_TARGET=v; if(sm){sm.style.color='#64748b';sm.textContent='Saving…';}
     fetch('/api/demand/stock-cover/target',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({target:v})}).then(function(r){return r.json();}).then(function(k){ if(k&&k.error){ if(sm){sm.style.color='#dc2626';sm.textContent='Error: '+k.error;} return; } if(sm){sm.style.color='#16a34a';sm.textContent='Saved ✓';} scDraw(body); }).catch(function(){ if(sm){sm.style.color='#dc2626';sm.textContent='Save failed';} }); };
