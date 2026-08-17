@@ -1,3 +1,8 @@
+## v27.082 Decommission Sell-through targets / Set-targets feature (page + endpoints + table)
+- Removed DEMAND ▸ Inputs ▸ **Sell-through targets** entirely: the tab + renderTargetsView, GET/POST /api/targets, the help entry, and the route guard.
+- Decoupled the two consumers from planner.sell_through_targets so the table can go: the **Auto-Forecast** report now always uses the default cover; **Demand Actions** shows ST% without a target comparison (empty targets).
+- **Migration 234** drops planner.sell_through_targets (applied to sandbox; Diviyaj to run on live).
+
 ## v27.081 DEMAND ▸ Config group (nav overhaul stage 4 — final)
 - New **Config** group in the DEMAND nav: **Contribution model · Buy plan logic · Discontinued sub-categories**, deep-linked #/demand/config/<item>. Buy plan logic is artefact-native; Contribution model + Discontinued sub-categories were lifted out of the SUPPLY config machinery to module-scope window functions (hzCfgContribModel/hzCfgRunoffSubs) so they render natively on the DEMAND surface. Removed the Demand group from the ⚙ cog CONFIG; legacy #/config/demand/<item> redirects to #/demand/config/<item>.
 

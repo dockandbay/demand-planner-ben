@@ -1085,7 +1085,6 @@ function closeSmoothSettings(){ var e=document.getElementById('smoothset-ov'); i
 var CTX_HELP={
   'planning|plan':{t:'DEMAND ▸ Plan',h:'The monthly demand plan, category → SKU × market. Edit a forecast input (growth % like 0.3, an absolute like &gt;=4, or a literal) and the cascade rebuilds the SKU-level forecast. In a month cell, <b>i</b> = a BI rule applies, <b>C</b> = a trading-calendar event for that category × market × month.'},
   'planning|kpis':{t:'DEMAND ▸ KPIs',h:'Headline demand-planning KPIs (forecast vs actuals, units / value by country &amp; channel, growth, stock cover). Metric set to be confirmed.'},
-  'planning|targets':{t:'DEMAND ▸ Sell-through targets',h:'A sell-through scorecard by category × market. Set ST% and cover-week targets; the table shows actual vs target with a RAG status and a plain-English recommendation. Where no target is set, “apply ~X%” adopts last year’s seasonal pace.'},
   'planning|actions':{t:'DEMAND ▸ Actions',h:'Demand exceptions: behind / ahead of sell-through target, trading vs last year, and upcoming trading-calendar events (with cover-at-uplift). Filter by market / category / status; dismiss, snooze or mark done — handled items stay viewable under the status pills.'},
   'planning|calendar':{t:'DEMAND ▸ Calendar',h:'Trading calendar of promo / campaign events by date × market × category (optional SKU list + uplift %). Upload / download CSV; the timeline focuses on the next 6 months. Events surface as “C” markers in Plan and as Demand Actions.'},
   'buy':{t:'BUY plan',h:'Recommended buys by SKU × market — Buy 3PL, Urgent, Buy FBA, and 3PL→market transfer opportunities. <b>3PL / FBA – Create POs</b> turn those quantities into proposed POs split into ≤20-pallet containers (supplier picked per SKU). <b>On Order</b> includes confirmed inbound + open POs (deduped by PO ref).'},
@@ -8796,7 +8795,6 @@ function render(){
     if(DEMAND_VIEW==='summary') renderSummaryReport(body);
     else if(DEMAND_VIEW==='snapshots') renderSnapshotsView(body);
     else if(DEMAND_VIEW==='keyaccounts') renderKeyAccountsView(body);
-    else if(DEMAND_VIEW==='targets') renderTargetsView(body);
     else if(DEMAND_VIEW==='calendar') renderCalendarView(body);
     else if(DEMAND_VIEW==='kpis') renderKpisView(body);
     else if(DEMAND_VIEW==='pricechanges'||DEMAND_VIEW==='revenue') renderPriceChangesView(body);   // Revenue & growth report removed (superseded by Summary + targets); this Inputs tab now hosts Price changes. 'revenue' kept as an alias for old hashes/bookmarks.
@@ -10402,7 +10400,7 @@ function renderShipBagView(body){
   Object.keys(mp).forEach(function(k){ var el=body.querySelector('.sb-'+k); if(el)el.onchange=function(){ window[mp[k]]=num(this,window[mp[k]]); renderShipBagView(body); }; });
   var lc=body.querySelector('.sb-lc'); if(lc)lc.onchange=function(){ SB_LC=this.value; renderShipBagView(body); };
 }
-var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['targets','Sell-through targets'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['exceptions','Exceptions'],['accuracy','Accuracy'],['safetystock','Safety stock'],['shipbags','Ship bags'],['calendar','Calendar'],['scenario','Scenario planner']];
+var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['exceptions','Exceptions'],['accuracy','Accuracy'],['safetystock','Safety stock'],['shipbags','Ship bags'],['calendar','Calendar'],['scenario','Scenario planner']];   // Sell-through targets decommissioned (Ben 17-Aug-26)
 function renderDemandTabs(){
   var bar=document.getElementById('demand-tabs');
   var _sb=document.getElementById('statusbar');
@@ -10419,7 +10417,7 @@ function renderDemandTabs(){
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   // Primary tabs inline; the reference/input views (Sell-through targets, Key accounts, Calendar, Revenue) are grouped under an "Inputs ▾" dropdown.
   var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['snapshots']='Snapshots'; _dlbl['contribmodel']='Contribution model'; _dlbl['buyplan']='Buy plan logic'; _dlbl['runoffsubs']='Discontinued sub-categories';
-  var PRIMARY=['plan','kpis','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','snapshots','trends','safetystock','shipbags'], CONFIGD=['contribmodel','buyplan','runoffsubs'], INPUTS=['targets','keyaccounts','calendar','pricechanges','klaviyobis'];
+  var PRIMARY=['plan','kpis','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','snapshots','trends','safetystock','shipbags'], CONFIGD=['contribmodel','buyplan','runoffsubs'], INPUTS=['keyaccounts','calendar','pricechanges','klaviyobis'];
   var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0, _anlActive=ANALYSIS.indexOf(DEMAND_VIEW)>=0, _cfgActive=CONFIGD.indexOf(DEMAND_VIEW)>=0;
   var _isPlanV=(DEMAND_VIEW==='plan');
   // Release Window now lives in the More Filters panel; Undo + Download now sit on the right of the plan controls
@@ -10427,7 +10425,7 @@ function renderDemandTabs(){
   bar.innerHTML=PRIMARY.map(function(k){ if(!_dlbl[k])return ''; return '<button class="dnav'+(k===DEMAND_VIEW?' active':'')+'" data-d="'+k+'">'+_dlbl[k]+'</button>'; }).join('')
     +'<button class="dnav'+(_anlActive?' active':'')+'" id="dnav-analysis-btn" title="Summary, Snapshots, Trends, Safety stock, Ship bags">Analysis</button>'
     +'<button class="dnav'+(_cfgActive?' active':'')+'" id="dnav-config-btn" title="Contribution model, Buy plan logic, Discontinued sub-categories">Config</button>'
-    +'<button class="dnav'+(_inpActive?' active':'')+'" id="dnav-inputs-btn" title="Sell-through targets, Key accounts, Calendar, Price changes">Inputs</button>';
+    +'<button class="dnav'+(_inpActive?' active':'')+'" id="dnav-inputs-btn" title="Key accounts, Calendar, Price changes">Inputs</button>';
   if(_isPlanV){ try{ fillPlanRwSel(); }catch(e){} try{ updateUndoBtn(); }catch(e){} }
   bar.querySelectorAll('.dnav[data-d]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); VIEW_MODE='planning'; DEMAND_VIEW=b.dataset.d; if(window.writeHash)window.writeHash(['demand',DEMAND_VIEW]); render(); }; });   // a demand sub-tab is a planning view — force planning mode
   // "Inputs" → enter the inputs group (keep the current input view, else default to the first)
@@ -11595,87 +11593,6 @@ function renderPriceChanges(el){
     msg.style.color='#64748b'; msg.textContent='Saving…';
     fetch('/api/price-changes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;return;} revReload(); }).catch(function(e){ msg.style.color='#dc2626'; msg.textContent=(e.message||e); }); };
   el.querySelectorAll('.pc-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete this price change?'))return; fetch('/api/price-changes/'+b.dataset.id+'/delete',{method:'POST'}).then(function(r){return r.json();}).then(function(){ revReload(); }); }; }); }
-function renderTargetsView(body){
-  var viewTog=function(){ var t=function(v,l){return '<button class="d3tab'+(_tgtView===v?' active':'')+'" data-tv="'+v+'">'+l+'</button>';};
-    return '<div class="d3nav">'+t('score','Sell Through Scorecard')+t('edit','Set targets')+'</div>'; };
-  var wireView=function(){ body.querySelectorAll('[data-tv]').forEach(function(b){ b.onclick=function(){ _tgtView=b.dataset.tv; draw(TGT_CACHE); }; }); };
-  var drawScore=function(d){
-    var s=(d.score||[]);
-    var cnt=function(st){ return st==='all'?s.length:s.filter(function(x){return x.status===st;}).length; };
-    var exposure=s.filter(function(x){return x.status==='behind';}).reduce(function(a,b){return a+(b.value||0);},0);
-    var STAT=[['all','All'],['behind','Behind'],['ahead','Ahead'],['on','On track'],['none','No target']];
-    var f=s.filter(function(x){ return _tgtStatus==='all'?true:x.status===_tgtStatus; });
-    var tile=function(v,l,c){ return '<div style="flex:1;min-width:120px;background:#f6f7f9;border-radius:6px;padding:8px 12px"><div style="font-size:18px;font-weight:700;color:'+(c||'#222')+'">'+v+'</div><div style="font-size:11px;color:#777">'+l+'</div></div>'; };
-    var sev={behind:['#b91c1c','#fee2e2','Behind'],ahead:['#b45309','#fef3c7','Ahead'],on:['#15803d','#dcfce7','On track'],none:['#666','#eef0f2','No target']};
-    var pill=function(st,lbl){ return '<button class="dsub'+(_tgtStatus===st?' active':'')+'" data-ts="'+st+'">'+lbl+' ('+cnt(st)+')</button>'; };
-    var badge=function(st){ var c=sev[st]; return '<span style="background:'+c[1]+';color:'+c[0]+';font-weight:600;padding:2px 7px;border-radius:10px;font-size:10px;white-space:nowrap">'+c[2]+'</span>'; };
-    var h=viewTog()
-      +'<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px">'
-      +tile(cnt('behind'),'Behind target','#b91c1c')+tile(cnt('ahead'),'Ahead of target','#b45309')
-      +tile(cnt('on'),'On track','#15803d')+tile(cnt('none'),'No target set','#666')
-      +tile('£'+exposure.toLocaleString(),'Stock £ behind target','#b91c1c')+'</div>'
-      +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><span style="font-size:11px;font-weight:700;color:#888">STATUS</span>'+STAT.map(function(x){return pill(x[0],x[1]);}).join('')+'</div>'
-      +'<div style="overflow-x:auto"><table class="tw" style="font-size:11px;min-width:900px"><thead><tr>'
-      +'<th style="text-align:left;padding:4px 6px">Category</th><th style="text-align:left;padding:4px 6px">Mkt</th>'
-      +'<th style="text-align:right;padding:4px 6px">ST act</th><th style="text-align:right;padding:4px 6px">ST tgt</th>'
-      +'<th style="text-align:right;padding:4px 6px">Cover</th><th style="text-align:left;padding:4px 6px">Status</th>'
-      +'<th style="text-align:left;padding:4px 6px">Recommendation</th></tr></thead><tbody>';
-    f.forEach(function(x){
-      var gap=(x.st_target!=null)?(x.st-x.st_target):null;
-      var gapTxt=gap==null?'':' <span style="color:'+(gap<0?'#b91c1c':'#15803d')+';font-size:10px">('+(gap>0?'+':'')+gap+')</span>';
-      var sugTxt=(x.st_target==null&&x.suggest!=null)?'<a href="#" class="me-apply" data-cat="'+tHesc(x.cat)+'" data-mkt="'+x.market+'" data-pct="'+x.suggest+'" style="color:#1d4ed8;text-decoration:none">apply ~'+x.suggest+'%</a>':'';
-      h+='<tr><td style="padding:3px 6px;font-weight:600;text-align:left">'+tHesc(x.cat)+'</td>'
-        +'<td style="padding:3px 6px;color:#666">'+x.market+'</td>'
-        +'<td style="text-align:right;padding:3px 6px;font-weight:600">'+(x.st==null?'–':x.st+'%')+gapTxt+'</td>'
-        +'<td style="text-align:right;padding:3px 6px;color:#666">'+(x.st_target!=null?x.st_target+'%':sugTxt||'–')+'</td>'
-        +'<td style="text-align:right;padding:3px 6px;color:#666">'+(x.cover==null?'–':x.cover+'wk')+(x.cover_target!=null?' /'+x.cover_target:'')+'</td>'
-        +'<td style="padding:3px 6px">'+badge(x.status)+'</td>'
-        +'<td style="padding:3px 6px;color:#444;max-width:420px">'+tHesc(x.rec)+'</td></tr>';
-    });
-    h+='</tbody></table></div><div style="font-size:11px;color:#888;margin-top:8px">Recommendations combine sell-through vs target and weeks of cover. <b>apply ~X%</b> sets the target to the LY seasonal pace (what historically sold by this point). Behind + healthy cover → promote/markdown; ahead + thin cover → buy (Open-to-Buy).</div>';
-    body.innerHTML=h;
-    wireView();
-    body.querySelectorAll('[data-ts]').forEach(function(b){ b.onclick=function(){ _tgtStatus=b.dataset.ts; drawScore(d); }; });
-    body.querySelectorAll('.me-apply').forEach(function(a){ a.onclick=function(e){ e.preventDefault(); a.textContent='saving…';
-      applyTarget(a.dataset.cat,a.dataset.mkt,Number(a.dataset.pct)).then(function(j){ if(j&&j.error)throw 0; TGT_CACHE=null; fetch('/api/targets').then(function(r){return r.json();}).then(function(nd){ TGT_CACHE=nd; drawScore(nd); }); }).catch(function(){ a.textContent='error'; }); }; });
-  };
-  var draw=function(d){
-    if(!d||d.error){ body.innerHTML='<div style="padding:20px;color:#b91c1c">Could not load targets: '+((d&&d.error)||'?')+'</div>'; return; }
-    if(_tgtView==='score') return drawScore(d);
-    var mk=d.markets, cats=d.categories, isCover=(_tgtMetric==='cover');
-    var tgtMap=isCover?(d.covers||{}):(d.targets||{}), actMap=isCover?(d.actualsCover||{}):(d.actuals||{}), unit=isCover?'wk':'%';
-    var th=mk.map(function(m){return '<th style="text-align:center;padding:6px 10px">'+m+'</th>';}).join('');
-    var rows=cats.map(function(cat){
-      return '<tr><td style="padding:5px 10px;font-weight:600;white-space:nowrap">'+tHesc(cat)+'</td>'
-        +mk.map(function(m){ var key=cat+'|'+m; var v=tgtMap[key]; v=(v==null?'':v);
-          var a=actMap[key], actHtml='';
-          if(a!=null){ var tgt=(v===''?null:Number(v)); var col='#888';
-            if(tgt!=null){ if(isCover) col=(a>=tgt?'#15803d':(a>=tgt*0.7?'#d97706':'#b91c1c'));   // cover: below target = stockout risk
-                           else col=(a>=tgt?'#15803d':(a>=tgt-5?'#d97706':'#b91c1c')); }
-            actHtml='<div style="font-size:10px;color:'+col+'" title="actual">act '+a+unit+'</div>'; }
-          return '<td style="text-align:center;padding:3px 6px"><input class="tgt-in" data-cat="'+cat.replace(/"/g,'&quot;')+'" data-mkt="'+m+'" value="'+v+'" '
-            +'style="width:54px;text-align:right;padding:3px 5px;border:1px solid #d0d0d0;border-radius:5px;font-size:12px">'
-            +'<span style="color:#999;font-size:11px"> '+unit+'</span>'+actHtml+'</td>'; }).join('')+'</tr>';
-    }).join('');
-    var tog=function(v,lbl){ return '<button class="dsub'+(_tgtMetric===v?' active':'')+'" data-tm="'+v+'">'+lbl+'</button>'; };
-    body.innerHTML=viewTog()
-      +'<div style="display:flex;align-items:center;gap:8px;margin:4px 0 8px"><div style="font-size:12px;font-weight:600;color:#555">Set by category × market</div>'
-      +'<span style="margin-left:8px">'+tog('st','Sell-through %')+tog('cover','Cover weeks')+'</span></div>'
-      +'<div style="overflow-x:auto"><table class="tw" style="font-size:12px;min-width:520px;max-width:760px"><thead><tr><th style="text-align:left;padding:6px 10px">Category</th>'+th+'</tr></thead><tbody>'+rows+'</tbody></table></div>'
-      +'<div style="font-size:11px;color:#888;margin-top:10px;line-height:1.5">Saves on change. <b>act</b> = actual season-to-date (sell-through = sold ÷ sold+on-hand; cover = on-hand ÷ recent run rate). '
-      +(isCover?'Cover below target = stock-out risk (red). Typical 8–16wk.':'Typical sell-through: continuity ~70%, seasonal 85–90%.')+' Feeds the Scorecard &amp; Demand Actions. Blank = no target.</div>';
-    wireView();
-    body.querySelectorAll('[data-tm]').forEach(function(b){ b.onclick=function(){ _tgtMetric=b.dataset.tm; draw(d); }; });
-    body.querySelectorAll('.tgt-in').forEach(function(inp){ inp.onchange=function(){
-      var v=inp.value.trim().replace(/[,%\s]/g,''); inp.style.borderColor='#d0d0d0';
-      fetch('/api/targets',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({category:inp.dataset.cat,market:inp.dataset.mkt,metric:_tgtMetric,value:v})})
-        .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); inp.style.borderColor='#16a34a'; TGT_CACHE=null; })
-        .catch(function(){ inp.style.borderColor='#dc2626'; }); }; });
-  };
-  if(TGT_CACHE) return draw(TGT_CACHE);
-  body.innerHTML='<div style="padding:18px;color:#666;font-size:12px">Loading…</div>';
-  fetch('/api/targets').then(function(r){return r.json();}).then(function(d){ TGT_CACHE=d; draw(d); }).catch(function(e){ draw({error:String(e)}); });
-}
 function daMoney(n){ return '£'+Math.round(n||0).toLocaleString(); }
 // "Open in Plan ↗" — switch to DEMAND ▸ Plan and land on the relevant item.
 // arg is either a SKU string (pops that SKU's detail panel) or {sub,co,ch} (scrolls to
@@ -13139,7 +13056,7 @@ function renderOtbReport(body){
       +'<span style="display:inline-flex;gap:4px;align-items:center"><span style="font-size:11px;font-weight:700;color:#888">MARKET</span>'+otbPills('market',MK)+'</span>'
       +'<span style="display:inline-flex;gap:4px;align-items:center"><span style="font-size:11px;font-weight:700;color:#888">STATUS</span>'+otbPills('status',ST)+'</span>'
       +ninp('months','HORIZON','mo')+ninp('defcover','DEFAULT COVER','wk')
-      +'<span style="font-size:11px;color:#999">'+d.months+'mo horizon · cover target from DEMAND ▸ Sell-through targets ('+d.def_cover+'wk where unset)</span>'
+      +'<span style="font-size:11px;color:#999">'+d.months+'mo horizon · '+d.def_cover+'wk default cover target</span>'
       +'</div><div id="otb-body"></div>';
     body.querySelectorAll('.otb-market,.otb-status').forEach(function(b){ var k=b.classList.contains('otb-market')?'market':'status'; b.onclick=function(){ OTB[k]=b.dataset.v; renderOtbReport(body); }; });
     body.querySelectorAll('.otb-num').forEach(function(el){ el.onchange=function(){ var v=Number(el.value)||0; if(v>0){OTB[el.dataset.k]=v; renderOtbReport(body);} }; });
@@ -13175,7 +13092,7 @@ function renderOtbReport(body){
         +'<td style="text-align:right;padding:3px 6px;font-weight:600;color:'+oc+'">'+(r.otb_cost<0?'-£'+Math.abs(r.otb_cost).toLocaleString():'£'+r.otb_cost.toLocaleString())+'</td>'
         +'<td style="padding:3px 6px">'+badge(r.status)+'</td></tr>';
     });
-    h+='</tbody></table></div><div style="font-size:11px;color:#999;margin-top:6px">* no cover target set for this category·market — using the '+d.def_cover+'wk default. Set targets in DEMAND ▸ Sell-through targets.</div>';
+    h+='</tbody></table></div><div style="font-size:11px;color:#999;margin-top:6px">* using the '+d.def_cover+'wk default cover target.</div>';
     document.getElementById('otb-body').innerHTML=h;
   };
   if(OTB_CACHE[key]) return draw(OTB_CACHE[key]);

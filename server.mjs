@@ -744,7 +744,7 @@ function requiredCap(method, p) {
   if (p.startsWith('/api/config/permissions')) return null;  // permissions API self-checks admin
   if (p.startsWith('/api/config/channel') || p.startsWith('/api/config/countr')) return null;  // channel registry — reads open; writes self-check admin
   if (p === '/api/me' || p === '/api/ai') return null;       // profile + AI helper (no gated DB write)
-  if (p === '/api/save-forecasts' || p === '/api/save-sku-forecasts' || p === '/api/targets'
+  if (p === '/api/save-forecasts' || p === '/api/save-sku-forecasts'
       || p === '/api/demand-actions/state' || p.startsWith('/api/trading-calendar')
       || p.startsWith('/api/price-changes') || p.startsWith('/api/demand-revenue-targets')
       || p.startsWith('/api/buy-complex-rules')
@@ -10916,17 +10916,15 @@ app.get('/api/scenario/otb', async (req, res) => {
           WHERE p.in_planning_scope GROUP BY 1,2),
       cost AS (SELECT pr.category, avg(l.cost_price) c FROM planner.purchase_order_lines l
           JOIN planner.products pr ON pr.sku=l.sku WHERE l.cost_price>0 AND pr.category IS NOT NULL GROUP BY 1),
-      tgt AS (SELECT category, market, cover_weeks_target FROM planner.sell_through_targets WHERE cover_weeks_target IS NOT NULL),
       keys AS (SELECT category, market FROM fc UNION SELECT category, market FROM oh UNION SELECT category, market FROM oo)
       SELECT k.category, k.market,
         coalesce(oh.onhand,0) onhand, coalesce(oo.qty,0) onorder, coalesce(fc.demand,0) demand,
-        coalesce(c.c,0) unit_cost, t.cover_weeks_target
+        coalesce(c.c,0) unit_cost, NULL::numeric cover_weeks_target   -- Sell-through targets decommissioned → always the default cover
       FROM keys k
       LEFT JOIN fc   ON fc.category=k.category AND fc.market=k.market
       LEFT JOIN oo   ON oo.category=k.category AND oo.market=k.market
       LEFT JOIN oh   ON oh.category=k.category AND oh.market=k.market
       LEFT JOIN cost c ON c.category=k.category
-      LEFT JOIN tgt  t ON t.category=k.category AND t.market=upper(k.market)
       WHERE k.category IS NOT NULL AND k.market <> ''`, [String(months)])).rows;
     // OTB is only meaningful where there's forward demand; zero-demand stock is a markdown/slow-moving signal, not a buy decision
     const out = rows.filter(r => TARGET_MARKETS.includes((r.market || '').toUpperCase()) && Number(r.demand) > 0)
@@ -11169,76 +11167,8 @@ app.post('/api/demand-revenue-targets/periods/bulk', async (req, res) => {
 // Sell-through targets (DEMAND ▸ Sell-through targets) — target % by category × market. GET returns the in-scope
 // category list + markets + the saved targets; POST upserts one cell.
 const TARGET_MARKETS = ['UK', 'US', 'EU', 'AU'];
-app.get('/api/targets', async (req, res) => {
-  try {
-    // fire all independent queries at once → one parallel wave instead of 5 serial round-trips (~2.7s → ~1s)
-    const _pCats = pool.query(`SELECT DISTINCT category FROM planner.products
-      WHERE in_planning_scope AND category IS NOT NULL ORDER BY category`);
-    const _pRows = pool.query(`SELECT category, market, target_pct, cover_weeks_target FROM planner.sell_through_targets`);
-    const _pSt   = stActuals();
-    const _pCost = pool.query(`SELECT pr.category, avg(l.cost_price) c FROM planner.purchase_order_lines l
-      JOIN planner.products pr ON pr.sku=l.sku WHERE l.cost_price>0 AND pr.category IS NOT NULL GROUP BY 1`);
-    const _pPace = pool.query(`
-      WITH ss AS (SELECT make_date(extract(year from current_date)::int - CASE WHEN extract(month from current_date)<3 THEN 1 ELSE 0 END, 3, 1) d),
-      sly AS (SELECT (SELECT d FROM ss) - interval '1 year' d)
-      SELECT p.category, upper(sa.country) market,
-        sum(CASE WHEN sa.month >= (SELECT d FROM sly) AND sa.month < (date_trunc('month',current_date) - interval '1 year') THEN sa.units ELSE 0 END)::numeric todate,
-        sum(CASE WHEN sa.month >= (SELECT d FROM sly) AND sa.month < (SELECT d FROM sly) + interval '12 months' THEN sa.units ELSE 0 END)::numeric fullseason
-      FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku
-      WHERE p.category IS NOT NULL GROUP BY 1,2`);
-    const cats = (await _pCats).rows.map(r => r.category);
-    const rows = (await _pRows).rows;
-    const targets = {}, covers = {};
-    rows.forEach(r => { var k = r.category + '|' + r.market;
-      targets[k] = r.target_pct == null ? null : Number(r.target_pct);
-      covers[k] = r.cover_weeks_target == null ? null : Number(r.cover_weeks_target); });
-    const full = await _pSt; const actuals = {}, actualsCover = {};
-    for (const k of Object.keys(full)) { actuals[k] = full[k].st; actualsCover[k] = full[k].cover; }
-    // avg PO cost per category → £ exposure
-    const cost = {};
-    (await _pCost).rows.forEach(r => { cost[r.category] = Number(r.c) || 0; });
-    // LY seasonal pace: % of the prior season's full-year demand that had sold by this point last year — a
-    // data-driven "expected sell-through to date" used to suggest a target where none is set.
-    const pace = {};
-    (await _pPace).rows.forEach(r => { const t = Number(r.todate), f = Number(r.fullseason);
-        if (f > 0) pace[r.category + '|' + r.market] = Math.round(t / f * 100); });
-    // scorecard: status + plain-English recommendation per category × market (ST gap × cover position)
-    const score = [];
-    for (const k of Object.keys(full)) {
-      const [cat, market] = k.split('|'); const a = full[k];
-      const stT = targets[k], cvT = covers[k], cst = cost[cat] || 0, value = Math.round(a.onhand * cst), sug = pace[k] != null ? pace[k] : null;
-      let status, rec;
-      if (stT == null && cvT == null) {
-        status = 'none';
-        rec = sug != null ? 'No target set — LY pace suggests ~' + sug + '% by now. Set a target to monitor & alert.' : 'No target set — set one to monitor sell-through.';
-      } else if (stT != null && a.st < stT - 5) {
-        status = 'behind';
-        const healthy = (cvT != null ? a.cover != null && a.cover >= cvT : a.cover != null && a.cover >= 12);
-        rec = healthy
-          ? a.st + '% vs ' + stT + '% target with ' + (a.cover != null ? a.cover + 'wk' : 'high') + ' cover — under-selling on healthy stock. Promote / markdown to shift ' + a.onhand.toLocaleString() + ' units (£' + value.toLocaleString() + ').'
-          : a.st + '% vs ' + stT + '% target but cover ' + (a.cover != null ? a.cover + 'wk' : 'thin') + ' — selling slow yet stock is tight; monitor, don\'t over-discount.';
-      } else if (stT != null && a.st > stT + 10) {
-        status = 'ahead';
-        const thin = cvT != null ? (a.cover != null && a.cover < cvT) : (a.cover != null && a.cover < 6);
-        rec = thin
-          ? a.st + '% vs ' + stT + '% target, cover only ' + (a.cover != null ? a.cover + 'wk' : 'thin') + ' — selling ahead of plan with thin cover. Buy / expedite (see Open-to-Buy).'
-          : a.st + '% vs ' + stT + '% — strong sell-through, cover healthy. On track.';
-      } else {
-        status = 'on';
-        rec = stT != null ? 'On track — ' + a.st + '% vs ' + stT + '% target' + (cvT != null && a.cover != null ? ' · cover ' + a.cover + 'wk vs ' + cvT + 'wk' : '') + '.'
-          : 'Cover ' + (a.cover != null ? a.cover + 'wk' : '–') + ' vs ' + cvT + 'wk target.';
-      }
-      score.push({ cat, market, st: a.st, st_target: stT == null ? null : stT, cover: a.cover, cover_target: cvT == null ? null : cvT,
-        onhand: a.onhand, run: a.run, value, suggest: sug, status, rec });
-    }
-    const rk = { behind: 0, ahead: 1, none: 2, on: 3 };
-    score.sort((x, y) => (rk[x.status] - rk[y.status]) || (y.value - x.value) || (x.cat < y.cat ? -1 : 1));
-    res.json({ categories: cats, markets: TARGET_MARKETS, targets, covers, actuals, actualsCover, score });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
 // Season-to-date sell-through per category × market = sold ÷ (sold + on-hand). Season starts 1 Mar
-// (FY Mar–Feb); on-hand pools AWD into US. A monthly-data proxy (no opening/intake history). Shared by
-// the Targets view and Demand Actions.
+// (FY Mar–Feb); on-hand pools AWD into US. A monthly-data proxy (no opening/intake history). Used by Demand Actions.
 async function stActuals() {
   const act = (await pool.query(`
     WITH ss AS (SELECT make_date(extract(year from current_date)::int - CASE WHEN extract(month from current_date)<3 THEN 1 ELSE 0 END, 3, 1) d),
@@ -11266,27 +11196,13 @@ async function stActuals() {
       run: Math.round(run), cover: run > 0 ? Math.round(o / (run / 4.345)) : null }; } });
   return actuals;
 }
-app.post('/api/targets', async (req, res) => {
-  const b = req.body || {}, cat = (b.category || '').trim(), mkt = (b.market || '').trim().toUpperCase();
-  if (!cat || !mkt) return res.status(400).json({ error: 'category + market required' });
-  // edit one metric at a time: 'st' → target_pct, 'cover' → cover_weeks_target (back-compat: target_pct in body)
-  const col = b.metric === 'cover' ? 'cover_weeks_target' : 'target_pct';
-  const raw = b.metric ? b.value : b.target_pct;
-  const val = (raw === '' || raw == null) ? null : Number(raw);
-  try {
-    await pool.query(`INSERT INTO planner.sell_through_targets (category, market, ${col})
-      VALUES ($1,$2,$3) ON CONFLICT (category, market) DO UPDATE SET ${col}=excluded.${col}, updated_at=now()`,
-      [cat, mkt, val]);
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
 // DEMAND ▸ Actions — demand-side exceptions (category × market): sell-through vs target (markdown / stock
 // signals) and trading vs last year. Monthly data; season-to-date ST + last complete month YoY.
 app.get('/api/demand-actions', async (req, res) => {
   try {
     // fire every independent query at once (none depends on another) → collapses ~7 serial round-trips into
     // one parallel wave (~2.6s → ~0.7s); the processing below is unchanged.
-    const _pTargets = pool.query(`SELECT category, market, target_pct, cover_weeks_target FROM planner.sell_through_targets`);
+    const _pTargets = Promise.resolve({ rows: [] });   // Sell-through targets decommissioned (Ben 17-Aug-26) — no targets; Demand Actions shows ST% without a target comparison
     const _pSt = stActuals();
     const _pCost = pool.query(`SELECT pr.category, avg(l.cost_price) c FROM planner.purchase_order_lines l
       JOIN planner.products pr ON pr.sku=l.sku WHERE l.cost_price>0 AND pr.category IS NOT NULL GROUP BY 1`);
