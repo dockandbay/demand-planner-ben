@@ -1128,6 +1128,37 @@ app.get('/api/demand/sku-data', async (req, res) => {
   try { const v = await getDataVals(); res.json({ sku_raw: v[3] || {}, fc_outputs: v[2] || {} }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// ── DEMAND ▸ Analysis ▸ Stock cover — weeks-of-cover per warehouse per month from the monthly inventory snapshots ──
+// SOH value (cost-weighted, end-of-month = latest snapshot in the month) ÷ weekly demand value (trailing-3-mo actual
+// sales, cost-weighted). The client maps each warehouse to the sales channels it fulfils and shows the 18-month trend
+// vs an editable target (weeks). Value(£)-weighted so it ties to working capital / cash flow. Report-only.
+app.get('/api/demand/stock-cover', async (_req, res) => {
+  try {
+    const soh = (await pool.query(`
+      WITH latest AS (
+        SELECT DISTINCT ON (warehouse, sku, date_trunc('month', snapshot_date))
+          warehouse, sku, date_trunc('month', snapshot_date) mon, available
+        FROM planner.inventory_snapshots
+        ORDER BY warehouse, sku, date_trunc('month', snapshot_date), snapshot_date DESC)
+      SELECT l.warehouse wh, to_char(l.mon, 'YYYY-MM') ym,
+             round(sum(l.available * coalesce(p.cost, 0))::numeric, 2) soh_val
+      FROM latest l JOIN planner.products p ON p.sku = l.sku
+      GROUP BY 1, 2`)).rows;
+    const dem = (await pool.query(`
+      SELECT upper(sa.country) co, sa.channel ch, to_char(sa.month, 'YYYY-MM') ym,
+             round(sum(sa.units * coalesce(p.cost, 0))::numeric, 2) dem_val
+      FROM planner.sales_actuals sa JOIN planner.products p ON p.sku = sa.sku
+      GROUP BY 1, 2, 3`)).rows;
+    let target = 12; try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='stock_cover_target_wks'`)).rows[0]; if (r && Number(r.value) > 0) target = Number(r.value); } catch (e) {}
+    res.json({ soh, dem, target });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+app.post('/api/demand/stock-cover/target', async (req, res) => {
+  const v = Number((req.body || {}).target); if (!(v > 0)) return res.status(400).json({ error: 'target must be > 0' });
+  try { await pool.query(`INSERT INTO planner.app_settings(key, value) VALUES('stock_cover_target_wks',$1)
+    ON CONFLICT (key) DO UPDATE SET value=excluded.value`, [String(v)]); res.json({ ok: true, target: v }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
 // ── Forecast Snapshots (DEMAND ▸ Snapshots) — lock a copy of forecast_outputs; compare later + past-month locked-vs-actual ──
 app.get('/api/demand/snapshots', async (_req, res) => {
   try { res.json((await pool.query(`SELECT id, name, to_char(taken_at,'YYYY-MM-DD"T"HH24:MI:SS') taken_at, taken_by, row_count

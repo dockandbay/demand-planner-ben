@@ -1,3 +1,8 @@
+## v27.098 New DEMAND ▸ Analysis ▸ Stock cover — weeks-of-cover trend vs target (cash flow)
+- New tab. **Weeks of cover = SOH value ÷ weekly demand value**, cost(£)-weighted so it maps to working capital. SOH from the end-of-month inventory snapshots (latest snapshot in each month); demand = trailing-3-month actual sales; each warehouse mapped to the channels it fulfils (3PL/non-GRS → DTC/B2B/ZAL/TIK, FBA/AWD → FBA).
+- **18-month trend grid** (warehouse × month), cells shaded vs the target (risk → on-target → excess → heavy excess). Editable **target weeks** (persists to `app_settings.stock_cover_target_wks`). Headline KPIs for the latest month: inventory value, portfolio weeks of cover, target, and **working capital above target** (the £ that could be released). CA pools excluded.
+- Server `/api/demand/stock-cover` (+ `/target` POST). Value(£)-weighted per Ben; framed relative to target. Sandbox shows 1 month (its only snapshot); live's 18-month history fills the trend. Harness-verified render + endpoint.
+
 ## v27.097 Manage 3PL / FBA: "Dead stock" pill filter + left-align the unmatched list
 - New **🪦 Dead stock (N)** pill on Manage 3PL and Manage FBA. Filters to SKUs **discontinued (for that market) > 24 months ago** that, per `planner.inventory_snapshots`, are **still holding stock and not selling down** — available has stayed flat (varies < 10% over the last 6 months) and is still > 0 in that warehouse. Report-only. Server helper `deadStockSkus(warehouse, market)` (disc column per market; snapshot trend query); rows get a `dead_stock` flag + a count. Sandbox shows 0 (its snapshots are sparse); the 20-month history on live will populate it.
 - Left-aligned the "not in product list (with stock)" table cells (Ben).
