@@ -1,3 +1,8 @@
+## v27.085 Fix: Buy plan logic toggle didn't visibly switch to SSM on click
+- DEMAND ▸ Config ▸ Buy plan logic: clicking "Service-level SSM" saved the setting (and a reload applied it) but the segment buttons never restyled, so the ACTIVE badge/border stayed on Cover-weeks — it looked like the switch didn't take. The save + server re-injection were already working correctly.
+- The seg-builder is now a reusable `segHtml(v)` and the click handler repaints the segment immediately (ACTIVE badge + purple border move to the clicked option) before/independent of the save round-trip. Delegated click via `#bpl-seg`.
+- (Sandbox `buy_logic` reset to the default `cover_weeks`.)
+
 ## v27.084 DEMAND plan: "Growth on last year" highlight + black text in shaded cells
 - New Display Settings ▸ Highlight toggle **Growth on last year**: shades every month cell (SKU grid + subtotal grid) green/red by growth vs the same month last year, same colour scale as Forecast-vs-actual. Cells where last year = 0 are **not** shaded (no growth-from-zero artefacts). Persists to localStorage; restores on panel open.
 - Both highlight features (Forecast vs actual + Growth on LY) now **force all cell text to black** when a cell is shaded (`.hl-blk` class via `_hlShade`), so the last-year / YoY figures stay readable on the coloured backgrounds.
