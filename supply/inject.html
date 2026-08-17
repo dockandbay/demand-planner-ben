@@ -7854,7 +7854,10 @@
                    :'<span class="src fx">due</span>';
         var estBadge=x.estimate?' <span class="tool-badge bg-neutral" title="estimate — '+esc(x.basis)+(x.src?' · '+esc(x.src):'')+'">est·'+esc(x.basis==='shipment'?'shpmt':x.basis==='register'?'pool':'po')+'</span>':'';
         var st=x.paid?'<span class="tool-badge bg-green">paid ✓</span>':x.overdue?'<span class="tool-badge bg-red">overdue</span>':'<span class="tool-badge bg-neutral">due</span>';
-        var likely=(x.overdue&&!x.paid)? dateField(x.likely_date,{attrs:'data-key="'+esc(x.key)+'" title="likely payment date"', cls:'cf-likely'}) :'<span class="mut tiny">—</span>';
+        // Likely pay date: editable input for overdue+unpaid (manual reschedule); otherwise show it READ-ONLY whenever one is set
+        // (it still drives the cash-flow timing even when the row isn't overdue — e.g. a future completion with a likely date). "—" only when none.
+        var likely=(x.overdue&&!x.paid)? dateField(x.likely_date,{attrs:'data-key="'+esc(x.key)+'" title="likely payment date"', cls:'cf-likely'})
+                   : (!x.paid&&x.likely_date? esc(fd(x.likely_date)) : '<span class="mut tiny">—</span>');
         return '<tr><td class="l" style="white-space:nowrap">'+(x.due?esc(fd(x.due)):'<span class="mut tiny">—</span>')+'</td>'
           +'<td class="l">'+likely+'</td>'
           +'<td class="l" style="white-space:nowrap">'+(x.paid_date?esc(fd(x.paid_date)):'<span class="mut tiny">—</span>')+'</td>'

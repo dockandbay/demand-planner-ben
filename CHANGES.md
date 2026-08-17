@@ -1,3 +1,7 @@
+## v27.086 Fix: Cash Flow report hid the likely-pay-date on non-overdue payments
+- SUPPLY ▸ Payments ▸ Cash Flow: the "Likely pay date" column only rendered a value when the row was **overdue** (editable input). A payment with a likely date set but a **future** due date (e.g. PO-1712946's completion) showed "—" — even though that likely date is already driving the cash-flow timing (`mkLine` applies a likely date whenever one is set, not just when overdue).
+- Now the likely date shows **read-only whenever one is set** on an unpaid row (overdue rows keep the editable input for manual reschedule; paid rows / no-likely rows still show "—"). Matches how Payments Due already displays it. Display-only — no buy-plan or cash-timing change.
+
 ## v27.085 Fix: Buy plan logic toggle didn't visibly switch to SSM on click
 - DEMAND ▸ Config ▸ Buy plan logic: clicking "Service-level SSM" saved the setting (and a reload applied it) but the segment buttons never restyled, so the ACTIVE badge/border stayed on Cover-weeks — it looked like the switch didn't take. The save + server re-injection were already working correctly.
 - The seg-builder is now a reusable `segHtml(v)` and the click handler repaints the segment immediately (ACTIVE badge + purple border move to the clicked option) before/independent of the save round-trip. Delegated click via `#bpl-seg`.
