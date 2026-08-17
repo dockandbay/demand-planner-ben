@@ -1,3 +1,8 @@
+## v27.094 Summary & targets: B2B "H1 includes February" toggle (H1 = Feb–Aug)
+- New checkbox **"B2B — H1 includes February"** next to "Show from" (shows only when the channel is B2B). When ticked, the report treats B2B's fiscal window as **Feb→Jan**, so **H1 = Feb–Aug (7 mo)** and **H2 = Sep–Jan (5 mo)** — February is lifted out of the prior year's H2 (interpretation (i)). Applies to unit + revenue totals, the target column, and growth %.
+- Implemented via a report-local `_febShift` with `fyMs()` (Feb→Jan window) + `halfIdx()` (H1 = FY-index 1–7), threaded through `bucketize`, `monFyIdx`, `resolveG`, `inheritG`, `_periodMonths`, `impliedFor`, the column build and FY totals. Report-only; buy plan + other channels + other markets untouched. Persists to localStorage.
+- REMAINING (next): apply the same Feb-in-H1 shift to the **Target Recommendations** forecast engine (`trecResolve`/`renderTargetRecs`), which is a separate subsystem — not yet shifted.
+
 ## v27.093 Inventory-snapshot branch map: 5 new Cin7 branches excluded + metrics caption to 11:59
 - Added the 5 branches Diviyaj flagged to `_INV_BRANCH_MAP` (single source of truth for the n8n inventory flow), all as excluded: China Consolidation (like China Stock), UK B2B NEXT (like UK B2B/JLEW), EU Embroidery (like CA/AU Embroidery), Nordstrom DSCO Test (like Nordstrom Test), and US Bonded (duty-unpaid/not-available — ⚠ pending Ben's confirm; if it's saleable US stock it should map to `us_3pl`). Mirrored into both copies of `SPEC_N8N_FLOWS_FOR_DIVIYAJ.md`.
 - Metrics scoreboard caption changed Thursday 23:59 → **11:59 GMT** (per the reconciled Flow 3 schedule).

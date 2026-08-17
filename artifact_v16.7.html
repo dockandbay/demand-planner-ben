@@ -8874,6 +8874,8 @@ function render(){
 // ── DEMAND ▸ SUMMARY — clean read-only rollup of the PLAN forecast, by country/channel, grouped by
 //    subcategory (expand → SKU), across financial years (past FYs minimised) or a custom month range.
 var SUMM_FROM='', SUMM_TO='', SUMM_OPEN={}, SUMM_FYOPEN={}, SUMM_METRIC=(function(){try{return localStorage.getItem('summ_metric')||'units';}catch(e){return 'units';}})(), SUMM_GROUP=(function(){try{return localStorage.getItem('summ_group')||'month';}catch(e){return 'month';}})(), SUMM_TGT_EDIT=false, SUMM_TGT={}, SUMM_TGT_GBP={}, SUMM_TGT_KEY='', _SUMM_RANGE_STASH=null, SUMM_TAB='summary';
+var SUMM_B2B_H1FEB=(function(){try{return localStorage.getItem('summ_b2b_h1feb')==='1';}catch(e){return false;}})();   // B2B only: treat H1 as Feb→Aug (7mo) instead of Mar→Aug — the FY view shifts to Feb→Jan for B2B in this report
+function setSummB2BH1Feb(on){ SUMM_B2B_H1FEB=!!on; try{localStorage.setItem('summ_b2b_h1feb',SUMM_B2B_H1FEB?'1':'0');}catch(e){} }
 // Target-edit mode ignores the month-range filter (targets are per-FY/half, not per arbitrary range).
 // Entering stashes + clears the range so the full FY view shows; exiting restores the previous filter.
 function summSetTgtEdit(on){
@@ -9308,17 +9310,23 @@ function renderSummaryView(body){
   var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   function mlab(m){ return MON[(+m.slice(5,7))-1]+" '"+m.slice(2,4); }
   function bucketize(ms,g){ if(g==='quarter'){ var o=[]; for(var i=0;i<ms.length;i+=3)o.push({label:'Q'+(i/3+1),months:ms.slice(i,i+3),idx:i/3+1,level:'quarter'}); return o; }
-    if(g==='half'){ var o=[]; for(var i=0;i<ms.length;i+=6)o.push({label:'H'+(i/6+1),months:ms.slice(i,i+6),idx:i/6+1,level:'half'}); return o; }
+    if(g==='half'){ if(_febShift){ return [{label:'H1',months:ms.slice(0,7),idx:1,level:'half'},{label:'H2',months:ms.slice(7,12),idx:2,level:'half'}]; } var o=[]; for(var i=0;i<ms.length;i+=6)o.push({label:'H'+(i/6+1),months:ms.slice(i,i+6),idx:i/6+1,level:'half'}); return o; }
     return ms.map(function(m,i){return {label:MON[(+m.slice(5,7))-1],months:[m],single:m,idx:i+1,level:'month'};}); }
-  function monFyIdx(m){ var y=+m.slice(0,4),mo=+m.slice(5,7); return {Y:(mo>=3?y:y-1), idx:(mo>=3?mo-2:mo+10)}; }
+  function monFyIdx(m){ var y=+m.slice(0,4),mo=+m.slice(5,7); if(_febShift){ return {Y:(mo>=2?y:y-1), idx:(mo>=2?mo-1:12)}; } return {Y:(mo>=3?y:y-1), idx:(mo>=3?mo-2:mo+10)}; }
   function tgKey(Y,sub,lvl,idx){ return Y+'|'+(sub||'')+'|'+lvl+'|'+idx; }
-  function resolveG(Y,sub,mIdx){ var k; k=tgKey(Y,sub,'month',mIdx); if(SUMM_TGT[k]!=null)return Number(SUMM_TGT[k]); k=tgKey(Y,sub,'quarter',Math.ceil(mIdx/3)); if(SUMM_TGT[k]!=null)return Number(SUMM_TGT[k]); k=tgKey(Y,sub,'half',Math.ceil(mIdx/6)); if(SUMM_TGT[k]!=null)return Number(SUMM_TGT[k]);
-    if(sub!==''){ var im=impliedG(Y,'month',mIdx); if(im==null)im=impliedG(Y,'quarter',Math.ceil(mIdx/3)); if(im==null)im=impliedG(Y,'half',Math.ceil(mIdx/6)); if(im!=null)return im; }   // untyped subcat → market-total balanced implied growth
+  function resolveG(Y,sub,mIdx){ var k; k=tgKey(Y,sub,'month',mIdx); if(SUMM_TGT[k]!=null)return Number(SUMM_TGT[k]); k=tgKey(Y,sub,'quarter',Math.ceil(mIdx/3)); if(SUMM_TGT[k]!=null)return Number(SUMM_TGT[k]); k=tgKey(Y,sub,'half',halfIdx(mIdx)); if(SUMM_TGT[k]!=null)return Number(SUMM_TGT[k]);
+    if(sub!==''){ var im=impliedG(Y,'month',mIdx); if(im==null)im=impliedG(Y,'quarter',Math.ceil(mIdx/3)); if(im==null)im=impliedG(Y,'half',halfIdx(mIdx)); if(im!=null)return im; }   // untyped subcat → market-total balanced implied growth
     return null; }
-  function inheritG(Y,sub,lvl,idx){ var k; if(lvl==='month'){ k=tgKey(Y,sub,'quarter',Math.ceil(idx/3)); if(SUMM_TGT[k]!=null)return Number(SUMM_TGT[k]); k=tgKey(Y,sub,'half',Math.ceil(idx/6)); if(SUMM_TGT[k]!=null)return Number(SUMM_TGT[k]); return null; } if(lvl==='quarter'){ k=tgKey(Y,sub,'half',Math.ceil(idx/2)); if(SUMM_TGT[k]!=null)return Number(SUMM_TGT[k]); return null; } return null; }
+  function inheritG(Y,sub,lvl,idx){ var k; if(lvl==='month'){ k=tgKey(Y,sub,'quarter',Math.ceil(idx/3)); if(SUMM_TGT[k]!=null)return Number(SUMM_TGT[k]); k=tgKey(Y,sub,'half',halfIdx(idx)); if(SUMM_TGT[k]!=null)return Number(SUMM_TGT[k]); return null; } if(lvl==='quarter'){ k=tgKey(Y,sub,'half',Math.ceil(idx/2)); if(SUMM_TGT[k]!=null)return Number(SUMM_TGT[k]); return null; } return null; }
   function fdate(v){ var m=String(v||'').match(/^(\d{4})-(\d{2})-(\d{2})/); return m?(m[3]+'-'+MON[(+m[2])-1]+'-'+m[1].slice(2)):''; }
   function prevY(m){ return (+m.slice(0,4)-1)+'_'+m.slice(5,7); }
   var co=CUR, ch=CF;
+  // ── B2B "H1 includes February" (opt-in, B2B only) ─────────────────────────────────────────────
+  // Shifts this report's fiscal window to Feb→Jan for B2B so H1 = Feb–Aug (7mo) and H2 = Sep–Jan (5mo).
+  // Feb is lifted out of the PRIOR year's H2 (interpretation (i)). Report-only: buy plan + other channels untouched.
+  var _febShift=(ch==='B2B'&&typeof SUMM_B2B_H1FEB!=='undefined'&&SUMM_B2B_H1FEB);
+  function fyMs(Y){ if(!_febShift)return fyMonths(Y); var o=[ym(Y,2)]; for(var _m=3;_m<=12;_m++)o.push(ym(Y,_m)); o.push(ym(Y+1,1)); return o; }   // Feb(Y),Mar..Dec(Y),Jan(Y+1)
+  function halfIdx(idx){ return _febShift ? (idx<=7?1:2) : Math.ceil(idx/6); }   // month FY-index → half (feb-shift: H1=idx1–7 = Feb–Aug)
   // Resolve display currency: SUMM_CCY is a mode (GBP|LOCAL); local = the market's currency if there's a rate.
   var _localC=mktCcy(co); _curCcy=(SUMM_CCY==='LOCAL'&&_localC&&fxRate(_localC,0)!=null)?_localC:'GBP'; _symC=CCY_SYM[_curCcy]||'£';
   function cvR(Y){ return fxRate(_curCcy,Y)||1; }   // GBP→display rate for a given FY start year (1 when GBP)
@@ -9335,7 +9343,7 @@ function renderSummaryView(body){
   //    untyped subcats share the remaining budget at a UNIFORM implied growth (∝ their LY) so subcats always sum
   //    back to the market total. impliedG returns that uniform % for a period (null if no market total set).
   var _impCache={}, _impConflict={}, _lastImpCk=null;
-  function _periodMonths(Y,level,idx){ var fm=fyMonths(Y); if(level==='month')return [fm[idx-1]]; if(level==='quarter')return fm.slice((idx-1)*3,idx*3); if(level==='half')return fm.slice((idx-1)*6,idx*6); return fm.slice(); }
+  function _periodMonths(Y,level,idx){ var fm=fyMs(Y); if(level==='month')return [fm[idx-1]]; if(level==='quarter')return fm.slice((idx-1)*3,idx*3); if(level==='half')return _febShift?(idx===1?fm.slice(0,7):fm.slice(7,12)):fm.slice((idx-1)*6,idx*6); return fm.slice(); }
   function _lyPer(sub,mths){ var t=0; function one(s){ var sd=subData(s); mths.forEach(function(m){ var py=prevY(m); t+=((py in sd.val)?sd.val[py]:((sd.a[py]&&sd.a[py][1])||0)); }); } if(sub===''){ subs.forEach(one); } else one(sub); return t; }
   function impliedG(Y,level,idx){ var ck=Y+'|'+level+'|'+idx; if(ck in _impCache)return _impCache[ck];
     var mk=tgKey(Y,'',level,idx), mg=SUMM_TGT[mk], mgbp=SUMM_TGT_GBP[mk];
@@ -9352,7 +9360,7 @@ function renderSummaryView(body){
     var g=Math.round(Math.max(-100,raw)*10)/10;   // floor at −100% — can't imply negative revenue
     return (_impCache[ck]=g); }
   function impliedFor(Y,lvl,idx){ var g=impliedG(Y,lvl,idx); if(g!=null){ _lastImpCk=Y+'|'+lvl+'|'+idx; return g; }
-    if(lvl==='month'){ g=impliedG(Y,'quarter',Math.ceil(idx/3)); if(g!=null){ _lastImpCk=Y+'|quarter|'+Math.ceil(idx/3); return g; } g=impliedG(Y,'half',Math.ceil(idx/6)); if(g!=null){ _lastImpCk=Y+'|half|'+Math.ceil(idx/6); return g; } return null; }
+    if(lvl==='month'){ g=impliedG(Y,'quarter',Math.ceil(idx/3)); if(g!=null){ _lastImpCk=Y+'|quarter|'+Math.ceil(idx/3); return g; } g=impliedG(Y,'half',halfIdx(idx)); if(g!=null){ _lastImpCk=Y+'|half|'+halfIdx(idx); return g; } return null; }
     if(lvl==='quarter'){ g=impliedG(Y,'half',Math.ceil(idx/2)); if(g!=null){ _lastImpCk=Y+'|half|'+Math.ceil(idx/2); return g; } return null; } return null; }
   function skuRows(s){ var wh=skuWh(co,ch), ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':ch==='TIK'?'t':'b'; var sd=subData(s), a=sd.a, fu=sd.fu;
     var all=Object.keys(SKUM).filter(function(sku){var p=SKUM[sku];if(!p||p.s!==s)return false;var av=(p.av||{})[ctry]||'';return av.indexOf(chKey)>=0;});
@@ -9385,6 +9393,7 @@ function renderSummaryView(body){
     +'<span style="display:flex;gap:3px">'+[['month','Month'],['quarter','Quarter'],['half','Half']].map(function(x){return '<button class="sm-group'+(x[0]===SUMM_GROUP?' on':'')+'" data-g="'+x[0]+'">'+x[1]+'</button>';}).join('')+'</span>'
     +''   /* currency toggle moved to the single global control in the DEMAND nav; targets edit + recommendations are now the report's own tabs */
     +'<span style="margin-left:14px;font-size:12px;color:#475569;display:flex;align-items:center;gap:5px">Show from <select id="sm-from" style="padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px">'+moOpts(SUMM_FROM)+'</select> to <select id="sm-to" style="padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px">'+moOpts(SUMM_TO)+'</select>'+(rangeMode?' <button id="sm-clear" style="font-size:11px;padding:3px 9px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;cursor:pointer">✕ clear · FY view</button>':'')+'</span>'
+    +((ch==='B2B'&&!rangeMode)?'<label id="sm-h1feb-lbl" style="margin-left:10px;font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:5px;cursor:pointer" title="B2B only: count February in H1 (so H1 = Feb–Aug, H2 = Sep–Jan) for the totals, targets, growth and recommendations in this report"><input type="checkbox" id="sm-h1feb"'+(SUMM_B2B_H1FEB?' checked':'')+'> B2B — H1 includes February</label>':'')
     +'</div>'
     +'<div style="font-size:12px;color:#666;margin:0 0 10px">'+e(co)+' · '+e(ch)+' — each cell stacks <b>LY actual</b> / <b>forecast</b> / <b>growth%</b>. Click a subcategory to see its SKUs. '+(rangeMode?('Showing '+mlab(SUMM_FROM)+' → '+mlab(SUMM_TO)+' with a period total.'):'FYs Mar–Feb; past years minimised (click a year to expand). ')+'<span style="background:#ecfdf5;padding:0 4px">actual</span> <span style="background:#f1f5f9;padding:0 4px">pre-launch</span> <span style="background:#fee2e2;padding:0 4px">discontinued</span></div>'
     +'<div id="smc-tools" style="background:#fff"></div>'   /* edit-mode toolbar (buttons/desc/filter) — outside #smc so it stays fixed while rows scroll */
@@ -9397,6 +9406,7 @@ function renderSummaryView(body){
   function applyRange(){ SUMM_FROM=fSel.value; SUMM_TO=tSel.value; renderSummaryView(body); }   // full silent re-render so the month range + header/clear update immediately
   fSel.onchange=applyRange; tSel.onchange=applyRange;
   var clr=body.querySelector('#sm-clear'); if(clr)clr.onclick=function(){ SUMM_FROM=''; SUMM_TO=''; renderSummaryView(body); };
+  var _h1f=body.querySelector('#sm-h1feb'); if(_h1f)_h1f.onchange=function(){ setSummB2BH1Feb(this.checked); SUMM_TGT_KEY=''; renderSummaryView(body); };   // B2B H1-includes-Feb toggle → re-render with shifted halves
   var host=body.querySelector('#smc'), tools=body.querySelector('#smc-tools');
   function fitHost(){ try{ var r=host.getBoundingClientRect(); host.style.maxHeight=Math.max(180,(window.innerHeight-r.top-14))+'px'; }catch(e){} }   // size the table so ONLY its rows scroll — everything above (pills, description, toolbar) stays put, whatever the toolbar height
   if(!window.__smcFit){ window.__smcFit=1; window.addEventListener('resize',function(){ var h=document.getElementById('smc'); if(h){ try{ h.style.maxHeight=Math.max(180,(window.innerHeight-h.getBoundingClientRect().top-14))+'px'; }catch(e){} } }); }
@@ -9424,7 +9434,7 @@ function renderSummaryView(body){
       h2='<th class="lbl">Subcategory / SKU</th>'+rangeMonths.map(function(m){return '<th class="'+(isActualMonth(m)?'act':'')+'">'+mlab(m)+'</th>';}).join('')+'<th class="tot">Total</th>';
       rangeMonths.forEach(function(m){ cols.push({type:'m',m:m}); }); cols.push({type:'ptot'});
     } else {
-      DISP_FY_STARTS.forEach(function(Y){ var op=fyOpen(Y), bkts=op?bucketize(fyMonths(Y),SUMM_GROUP):[];
+      DISP_FY_STARTS.forEach(function(Y){ var op=fyOpen(Y), bkts=op?bucketize(fyMs(Y),SUMM_GROUP):[];
         h1+='<th class="fyh" data-fy="'+Y+'" colspan="'+(op?bkts.length+1:1)+'">'+(op?'▾ ':'▸ ')+fyLabel(Y)+'</th>';
         if(op){ bkts.forEach(function(bk){ var allAct=bk.months.length>0&&bk.months.every(function(m){return isActualMonth(m);}); h2+='<th class="'+(allAct?'act':'')+'">'+e(bk.label)+'</th>'; cols.push(bk.single?{type:'m',m:bk.single,Y:Y,level:'month',idx:bk.idx}:{type:'grp',months:bk.months,Y:Y,level:bk.level,idx:bk.idx}); }); }
         h2+='<th class="tot">'+(op?'Total':fyLabel(Y).replace('FY',''))+'</th>'; cols.push({type:'tot',Y:Y}); });
@@ -9445,7 +9455,7 @@ function renderSummaryView(body){
         +'<div class="c3t"><span style="'+L+'">tgt</span> <b style="color:'+vtxt+'">'+mf(tgt)+'</b> <span style="color:'+col(tg)+'">'+lab(tg)+'</span></div>'
         +'<div class="c3t"><span style="'+L+'">&Delta;</span> <span style="color:'+vc+';font-weight:600">'+(vv>=0?'+':'')+mf(vv)+'</span></div></td>'; }
     function cells(val,ly,lch,disc,sub){ return cols.map(function(c){
-        var months=(c.type==='m')?[c.m]:(c.type==='grp')?c.months:(c.type==='ptot'?rangeMonths:fyMonths(c.Y));
+        var months=(c.type==='m')?[c.m]:(c.type==='grp')?c.months:(c.type==='ptot'?rangeMonths:fyMs(c.Y));
         var vT=0,lT=0,_fx=(SUMM_METRIC==='rev'||SUMM_METRIC==='revtgt'); months.forEach(function(m){ var rt=_fx?cvR(monFyIdx(m).Y):1; vT+=(val[m]||0)*rt; lT+=(ly[m]||0)*rt; });   // convert £→display currency per month by its FY rate (revenue metrics only)
         var shade;
         if(c.type==='tot'||c.type==='ptot')shade='tot';
@@ -9535,7 +9545,7 @@ function renderSummaryView(body){
             +'<div style="border-top:1px solid #eee;margin-top:6px;padding-top:6px;text-align:right"><button id="tgt-cat-clear" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;font-size:10px;padding:2px 9px;border-radius:5px;cursor:pointer;font-weight:600">Clear all</button></div>'
           +'</div></span>'
         +'<span style="font-size:10px;color:#94a3b8">'+_subsV.length+' / '+subs.length+' subcategories</span></div>';
-      function _tgtCols(){ var out=[]; DISP_FY_STARTS.forEach(function(Y){ bucketize(fyMonths(Y),SUMM_GROUP).forEach(function(bk){ out.push({fy:Y,level:bk.single?'month':bk.level,idx:bk.idx,label:fyLabel(Y)+' '+bk.label}); }); }); return out; }
+      function _tgtCols(){ var out=[]; DISP_FY_STARTS.forEach(function(Y){ bucketize(fyMs(Y),SUMM_GROUP).forEach(function(bk){ out.push({fy:Y,level:bk.single?'month':bk.level,idx:bk.idx,label:fyLabel(Y)+' '+bk.label}); }); }); return out; }
       function _csvCell(x){ x=String(x==null?'':x); return /[",\n]/.test(x)?('"'+x.replace(/"/g,'""')+'"'):x; }
       function _parseCsvLine(l){ var o=[],cur='',q=false; for(var i=0;i<l.length;i++){ var ch=l[i]; if(q){ if(ch==='"'){ if(l[i+1]==='"'){cur+='"';i++;} else q=false; } else cur+=ch; } else { if(ch==='"')q=true; else if(ch===','){o.push(cur);cur='';} else cur+=ch; } } o.push(cur); return o; }
       function tgtTemplate(){ var cols=_tgtCols(); var hdr=['Subcategory'].concat(cols.map(function(c){return c.label;}));
