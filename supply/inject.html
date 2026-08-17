@@ -9294,7 +9294,7 @@
   function writePoTabHash(po,tab){ if(!po)return; writeHash(['supply','purchase-orders',po,POTAB_SLUG[tab]||tab]); }   // #/supply/purchase-orders/<PO>/<tab-slug>
   // Friendly top-level view URLs: planning→#/demand/<sub>, exec→#/reports/<sub>, others as-is.
   function writeViewHash(v){
-    if(v==='planning'){ var _dv=(typeof DEMAND_VIEW!=='undefined'&&DEMAND_VIEW)||'plan'; var _dinp=['targets','keyaccounts','calendar','revenue','pricechanges','klaviyobis']; var _danl=['summary','snapshots','trends','safetystock','shipbags']; writeHash(_dinp.indexOf(_dv)>=0?['demand','inputs',_dv]:(_danl.indexOf(_dv)>=0?['demand','analysis',_dv]:['demand',_dv])); }   // input → #/demand/inputs/<slug>; analysis → #/demand/analysis/<slug>
+    if(v==='planning'){ var _dv=(typeof DEMAND_VIEW!=='undefined'&&DEMAND_VIEW)||'plan'; var _dinp=['targets','keyaccounts','calendar','revenue','pricechanges','klaviyobis']; var _danl=['summary','accuracy','snapshots','trends','safetystock','shipbags']; writeHash(_dinp.indexOf(_dv)>=0?['demand','inputs',_dv]:(_danl.indexOf(_dv)>=0?['demand','analysis',_dv]:['demand',_dv])); }   // input → #/demand/inputs/<slug>; analysis → #/demand/analysis/<slug>
     else if(v==='exec')writeHash(['reports',(typeof REPORT_VIEW!=='undefined'&&REPORT_VIEW)||'ex']);
     else if(v==='actions'||v==='buy'||v==='fba'||v==='transfer'){   // BUY & MOVE group: #/buy-move/<actions|buy|fba|transfer>
       var _sub=v;   // entering via the top BUY & MOVE button (data-view='actions') → restore the last sub-tab the user was on

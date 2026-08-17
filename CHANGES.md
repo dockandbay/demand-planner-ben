@@ -1,3 +1,6 @@
+## v27.071 DEMAND: Accuracy moved under Analysis (position 2)
+- **Accuracy** report moved out of the primary DEMAND row into the **Analysis** group as the 2nd item (Summary, Accuracy, Snapshots, Trends, Safety stock, Ship bags). Deep-links as #/demand/analysis/accuracy; legacy #/demand/accuracy still resolves.
+
 ## v27.070 SSM P2: seasonal pre-buy (commit the whole season up front)
 - Under Service-level SSM, a **seasonal** SKU’s **3PL** cover now extends to the **end of the remaining season** (last forward month with demand) + the safety buffer, so the engine’s forward-demand target buys the whole season in one up-front commitment — because the long China lead means there is no mid-season reorder. Implemented via ssmSeasonEndWeeks() feeding the 3PL cover in ssmCoverWeeks(). FBA is NOT pre-bought (stays capped at the FBA cap) — it is topped up in-season by the fast ~2wk 3PL→FBA transfer. Non-seasonal SKUs and Cover-weeks mode unchanged.
 
