@@ -6604,23 +6604,22 @@
           var f=(stFilt==='all')?rows:rows.filter(function(r){return r.status===stFilt;});
           var pills='<div class="bar" style="gap:6px"><span class="pill-lbl">Status</span>'
             +[['all','All']].concat(SS.map(function(s){return [s[0],s[1]];})).map(function(p){ return '<button class="rtab sug-filt'+(p[0]===stFilt?' active':'')+'" data-s="'+p[0]+'">'+esc(p[1])+' <span class="mut">'+(counts[p[0]]||0)+'</span></button>'; }).join('')+'</div>';
-          function statusSel(r){ return '<select class="fci sug-st" data-id="'+r.id+'" style="font-size:11px;padding:3px 6px">'+SS.map(function(s){return '<option value="'+s[0]+'"'+(s[0]===r.status?' selected':'')+'>'+s[1]+'</option>';}).join('')+'</select>'; }
+          function statusSel(r){ return '<select class="fci sug-st" data-id="'+r.id+'" style="font-size:11px;padding:3px 4px;width:100%;box-sizing:border-box">'+SS.map(function(s){return '<option value="'+s[0]+'"'+(s[0]===r.status?' selected':'')+'>'+s[1]+'</option>';}).join('')+'</select>'; }
           function chip(st){ var s=SMAP[st]||SMAP['new']; return '<span style="display:inline-block;font-size:10px;font-weight:700;color:'+s[2]+';background:'+s[3]+';border:1px solid '+s[2]+'33;border-radius:5px;padding:1px 7px">'+esc(s[1])+'</span>'; }
           var body=f.map(function(r){ return '<tr'+(r.status==='new'?' style="background:#fbfdff"':'')+'>'
-            +'<td class="l" style="white-space:nowrap;font-weight:700;font-family:ui-monospace,Menlo,monospace">'+esc(r.ref)+'</td>'
-            +'<td class="l" style="min-width:280px;white-space:pre-wrap">'+esc(r.body)+'</td>'
-            +'<td class="l" style="white-space:nowrap">'+(r.area?esc(r.area):'<span class="mut">—</span>')+'</td>'
-            +'<td class="l" style="white-space:nowrap">'+(r.created_by?esc(shortUser(r.created_by)):'<span class="mut">—</span>')+'</td>'
-            +'<td class="l" style="white-space:nowrap">'+esc(r.created_at)+'</td>'
-            +'<td class="l">'+chip(r.status)+'</td>'
-            +'<td class="l" style="white-space:nowrap">'+statusSel(r)+'</td>'
-            +'<td class="l"><input class="fci sug-stk" data-id="'+r.id+'" value="'+esc(r.stakeholders||'')+'" placeholder="email, email…" style="font-size:11px;width:190px;text-align:left" title="emailed on THIS suggestion&rsquo;s status changes (in addition to the global list)"></td>'
+            +'<td class="l" style="font-weight:700;font-family:ui-monospace,Menlo,monospace;overflow:hidden;text-overflow:ellipsis">'+esc(r.ref)+'</td>'
+            +'<td class="l" style="white-space:pre-wrap;word-break:break-word">'+esc(r.body)+'</td>'
+            +'<td class="l" style="overflow:hidden;text-overflow:ellipsis">'+(r.area?esc(r.area):'<span class="mut">—</span>')+'</td>'
+            +'<td class="l" style="overflow:hidden;text-overflow:ellipsis">'+(r.created_by?esc(shortUser(r.created_by)):'<span class="mut">—</span>')+'</td>'
+            +'<td class="l" style="white-space:normal">'+esc(r.created_at)+'</td>'
+            +'<td class="l">'+statusSel(r)+'</td>'
+            +'<td class="l"><textarea class="fci sug-stk" data-id="'+r.id+'" rows="2" placeholder="email, email…" style="font-size:11px;width:100%;box-sizing:border-box;text-align:left;resize:vertical;font-family:inherit" title="emailed on THIS suggestion&rsquo;s status changes (in addition to the global list)">'+esc(r.stakeholders||'')+'</textarea></td>'
             +'<td class="l"><a class="sug-del mut" data-id="'+r.id+'" title="delete" style="color:#dc2626;cursor:pointer">×</a></td></tr>'; }).join('')
-            ||'<tr><td colspan="9" class="count">No '+(stFilt==='all'?'':stFilt+' ')+'suggestions.</td></tr>';
+            ||'<tr><td colspan="8" class="count">No '+(stFilt==='all'?'':stFilt+' ')+'suggestions.</td></tr>';
           b.innerHTML='<div class="annot"><b>CONFIG ▸ Suggestions.</b> Everything submitted from the top-bar 💡 <b>Suggestion box</b>. Each has a reference (<b>SUG-nnnn</b>) you can quote in chat. Set a status: <b>Complete</b> when done (emails the submitter "this feature is going live", cc sarah/ben/diviyaj), <b>Future</b> for the backlog, <b>Deferred</b> to park it.</div>'
             +'<div class="bar" style="gap:8px;align-items:center;margin-bottom:10px"><span class="pill-lbl">Global stakeholders <span class="mut tiny">(emailed on <b>every</b> new suggestion + status change)</span></span><input class="flt" id="sug-stake" value="'+esc(_sugStake)+'" placeholder="email, email…" style="width:340px"><button class="save-btn" id="sug-stake-save">Save</button><span class="mut tiny" id="sug-stake-msg"></span> <span class="mut tiny">· per-suggestion followers are set in the <b>Stakeholders</b> column below</span></div>'
             +(flash?'<div style="background:#f0fdf4;border:1px solid #16a34a;color:#166534;font-size:12px;border-radius:6px;padding:7px 11px;margin-bottom:10px">'+esc(flash)+'</div>':'')
-            +pills+'<div class="tw"><table class="samp-tbl" style="font-size:12px"><thead><tr><th class="l">Ref</th><th class="l">Suggestion</th><th class="l">Area</th><th class="l">By</th><th class="l">When</th><th class="l">Status</th><th class="l">Set status</th><th class="l">Stakeholders</th><th></th></tr></thead><tbody>'+body+'</tbody></table></div>';
+            +pills+'<div class="tw"><table class="samp-tbl" style="font-size:12px;width:100%;table-layout:fixed"><colgroup><col style="width:8%"><col style="width:40%"><col style="width:7%"><col style="width:8%"><col style="width:10%"><col style="width:12%"><col style="width:13%"><col style="width:2%"></colgroup><thead><tr><th class="l">Ref</th><th class="l">Suggestion</th><th class="l">Area</th><th class="l">By</th><th class="l">When</th><th class="l">Status</th><th class="l">Stakeholders</th><th></th></tr></thead><tbody>'+body+'</tbody></table></div>';
           b.querySelectorAll('.sug-filt').forEach(function(p){ p.onclick=function(){ stFilt=p.dataset.s; draw(rows); }; });
           b.querySelectorAll('.sug-st').forEach(function(sel){ sel.onchange=function(){ var id=sel.dataset.id, ns=sel.value;
             shipPost('/api/supply/suggestion/'+id+'/status',{status:ns,status_by:(window.ME&&ME.email)||''},function(j){ if(j&&j.error){alert(j.error);return;} var r=rows.filter(function(x){return String(x.id)===String(id);})[0]; if(r)r.status=ns;

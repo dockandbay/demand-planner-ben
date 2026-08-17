@@ -1,3 +1,8 @@
+## v27.080 CONFIG ▸ Suggestions table: 40% Suggestion column, merged Status, wrapping stakeholders
+- Suggestion column now fills 40% of the table (table-layout:fixed + colgroup); remaining columns share the rest.
+- Merged the read-only Status chip + the Set-status dropdown into a single editable **Status** field (the dropdown).
+- Stakeholders is now a wrapping textarea (fills its column, wraps long email lists) instead of a fixed-width input.
+
 ## v27.079 Remove the in-app inventory-snapshot uploader (page + endpoint)
 - Deleted CONFIG ▸ Admin ▸ Inventory snapshots (SUBS[invsnap] + the ADM key) and the server POST /api/config/inventory-snapshot-load endpoint + its route guard. Snapshots are now loaded via CSV/SQL (backfill) and, going forward, the n8n flow. KEPT _INV_BRANCH_MAP (reference map for n8n), buildStockoutHistory/INV_STOCKOUTS, and planner.inventory_snapshots (feed the safety-stock model).
 
