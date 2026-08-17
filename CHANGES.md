@@ -1,3 +1,6 @@
+## v27.070 SSM P2: seasonal pre-buy (commit the whole season up front)
+- Under Service-level SSM, a **seasonal** SKU’s **3PL** cover now extends to the **end of the remaining season** (last forward month with demand) + the safety buffer, so the engine’s forward-demand target buys the whole season in one up-front commitment — because the long China lead means there is no mid-season reorder. Implemented via ssmSeasonEndWeeks() feeding the 3PL cover in ssmCoverWeeks(). FBA is NOT pre-bought (stays capped at the FBA cap) — it is topped up in-season by the fast ~2wk 3PL→FBA transfer. Non-seasonal SKUs and Cover-weeks mode unchanged.
+
 ## v27.069 SSM parameters editable in CONFIG ▸ Demand ▸ Buy plan logic
 - The SSM dials are now editable (app_settings.ssm_params → SSM_PARAMS): **service level by tier** (A/B/C/untiered), **seasonal floor**, **review cycle (wks)**, and **FBA cover cap (wks)**. Previously hardcoded (A99/B97/C93, floor 97, cycle 4, FBA cap 8) — now tunable without a code change; the buy engine reads SSM_PARAMS. Save + reload applies.
 

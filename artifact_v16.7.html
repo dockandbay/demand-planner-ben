@@ -1634,6 +1634,15 @@ function ssmServiceLevel(sku){                          // tier → service leve
   if(p&&p.cs==='S')base=Math.max(base,P.seasonalFloor);   // seasonal service-level FLOOR (ABC under-rates seasonal)
   return base;
 }
+// Weeks from now to the end of the remaining SEASON = the last forward month (within 15) that still has 3PL demand.
+// For a seasonal SKU demand runs through the season then falls to 0, so this spans the rest of the selling window.
+function ssmSeasonEndWeeks(sku,co,md){
+  var cm=(typeof CUR_MONTH!=='undefined')?CUR_MONTH:null; if(!cm)return 0;
+  var dem=md.demand||{}, chs=['DTC','B2B','ZAL'];
+  var y=+cm.slice(0,4),mo=+cm.slice(5,7), lastK=-1;
+  for(var i=0;i<15;i++){ var m=y+'_'+(mo<10?'0':'')+mo, t=0; chs.forEach(function(ch){ var mm=dem[ch]; if(mm&&mm[m]!=null)t+=mm[m]; }); if(t>0)lastK=i; mo++; if(mo>12){mo=1;y++;} }
+  return (lastK+1)*4.33;   // weeks through the end of the last demand month (0 if no forward demand)
+}
 function ssmCoverWeeks(sku,co,pool,md,pd){             // → effective base cover-weeks (SS+cycle)/wk, or null to fall back
   try{
     if(!sku||!md)return null;
@@ -1661,7 +1670,13 @@ function ssmCoverWeeks(sku,co,pool,md,pd){             // → effective base cov
     var Z=ssmZ(ssmServiceLevel(sku));
     var ss=Z*Math.sqrt(Lmo*sig*sig + d*d*sigLmo*sigLmo);
     var _P=(typeof SSM_PARAMS!=='undefined'&&SSM_PARAMS)?SSM_PARAMS:{cycleWk:4,fbaCapWk:8};
-    var cover=ss/wk + (_P.cycleWk||4);                  // + review cycle (SSM_PARAMS.cycleWk)
+    // Seasonal PRE-BUY (P2): for a seasonal SKU's 3PL pool, cover the whole REMAINING SEASON up front (long China
+    // lead → no mid-season reorder) plus the safety buffer. The engine's forward-demand target then buys the full
+    // season in one commitment. FBA is NOT pre-bought (stays capped) — it's topped up in-season by the fast transfer.
+    var _seasonal=(typeof SKUM!=='undefined'&&SKUM[sku]&&SKUM[sku].cs==='S');
+    var cover;
+    if(_seasonal && !isFba){ var wSea=ssmSeasonEndWeeks(sku,co,md); cover=(wSea>0?wSea:(_P.cycleWk||4)) + ss/wk; }
+    else { cover=ss/wk + (_P.cycleWk||4); }             // steady: safety + review cycle
     if(!(cover>0))return null;
     var cap=isFba?(_P.fbaCapWk||8):52;                  // FBA capped (SSM_PARAMS.fbaCapWk); 3PL effectively uncapped
     return Math.max(1,Math.min(cover,cap));
