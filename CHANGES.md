@@ -1,3 +1,6 @@
+## v27.079 Remove the in-app inventory-snapshot uploader (page + endpoint)
+- Deleted CONFIG ▸ Admin ▸ Inventory snapshots (SUBS[invsnap] + the ADM key) and the server POST /api/config/inventory-snapshot-load endpoint + its route guard. Snapshots are now loaded via CSV/SQL (backfill) and, going forward, the n8n flow. KEPT _INV_BRANCH_MAP (reference map for n8n), buildStockoutHistory/INV_STOCKOUTS, and planner.inventory_snapshots (feed the safety-stock model).
+
 ## v27.078 Cog glyph fills ~90% of its circle (font-size 14→20px)
 
 ## v27.077 SUPPLY ▸ CONFIG: flatten supply-chain group + de-dupe version badge

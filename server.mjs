@@ -752,7 +752,6 @@ function requiredCap(method, p) {
       || p.startsWith('/api/forecast/')) return 'demand';    // DEMAND / forecasting domain
   if (p === '/api/consignee' || p.startsWith('/api/consignee/')) return 'config'; // CONFIG ▸ Consignees
   if (p === '/api/app-settings') return 'config';            // CONFIG ▸ General settings
-  if (p === '/api/config/inventory-snapshot-load') return 'config';   // CONFIG ▸ Admin ▸ Inventory snapshots (temporary loader)
   if (CONFIG_WRITE.some((re) => re.test(p))) return 'config'; // config reference data → supply OR demand
   if (p.startsWith('/api/product/')) return 'product';        // PRODUCT module writes → 'product' capability
   if (p.startsWith('/api/supply/zalando/')) return null;      // Zalando stock upload / send-file — open to all (no edit rights needed)
@@ -1107,9 +1106,9 @@ app.get('/api/demand/trends/type-mix', async (req, res) => {
     res.json(out);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-// CONFIG ▸ Admin ▸ Inventory snapshots — TEMPORARY loader (remove later). Upload the Cin7 "Historic and Current Stock
-// Valuations" xlsx + a snapshot date → load into planner.inventory_snapshots. Same logic as
-// scripts/seed_inventory_snapshots.mjs. Dry-run unless apply=true. Requires migration 232.
+// Cin7 branch → warehouse-code map (branches mapping to null are unmanaged and excluded). The in-app snapshot
+// uploader was removed (Ben 17-Aug-26); this map is kept as the single source of truth for the n8n inventory-snapshot
+// flow (1st/10th/20th → planner.inventory_snapshots) — see Claude Analyses/SPEC_N8N_FLOWS_FOR_DIVIYAJ.md.
 const _INV_BRANCH_MAP = {
   'UK ILG': 'uk_3pl', 'US Geneva': 'us_3pl', 'AU Coghlans': 'au_3pl', 'US AWD': 'us_awd', 'US FBA': 'us_fba',
   'EU iFulfillment': 'eu_3pl', 'UK FBA': 'uk_fba', 'UK ILG non grs': 'uk_nongrs', 'US Geneva non GRS': 'us_nongrs',
@@ -1119,64 +1118,6 @@ const _INV_BRANCH_MAP = {
   '3PL Test': null, 'Nordstrom Test': null, 'Test': null, 'US Walmart': null, 'Direct to Client': null, 'UK Head Office': null,
   'EU Preorder': null, 'US Preorder': null, 'UK Preorder': null, 'AU Preorder': null, 'CA Preorder': null,
 };
-app.post('/api/config/inventory-snapshot-load', async (req, res) => {
-  try {
-    const b = req.body || {};
-    const date = String(b.date || '');
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'Pick a snapshot date (YYYY-MM-DD) — the as-of date, not the export date.' });
-    const b64 = String(b.content_base64 || '').replace(/^data:[^;]+;base64,/, '');
-    if (!b64) return res.status(400).json({ error: 'No file uploaded.' });
-    const apply = !!b.apply, source = String(b.source || 'erp_seed');
-    const num = (v) => { if (v == null) return NaN; const n = Number(String(v).replace(/,/g, '').trim()); return Number.isFinite(n) ? n : NaN; };
-    const ExcelJS = (await import('exceljs')).default;
-    const wb = new ExcelJS.Workbook(); await wb.xlsx.load(Buffer.from(b64, 'base64'));
-    const ws = wb.worksheets[0];
-    let headerRow = 0, col = {};
-    for (let r = 1; r <= Math.min(ws.rowCount, 20); r++) {
-      const vals = []; for (let c = 1; c <= ws.columnCount; c++) vals.push(String(ws.getRow(r).getCell(c).value ?? '').trim());
-      const bi = vals.indexOf('Branch'), ci = vals.indexOf('Code'), si = vals.findIndex(v => /^SOH Total$/i.test(v));
-      if (bi >= 0 && ci >= 0 && si >= 0) { headerRow = r; col = { branch: bi + 1, code: ci + 1, soh: si + 1 }; break; }
-    }
-    if (!headerRow) return res.status(400).json({ error: 'Could not find the header row (Branch / Code / SOH Total). Is this the stock-valuations export?' });
-    let read = 0, dropped = 0, detailSum = 0, grandTotal = null, negatives = 0;
-    const byPair = new Map(), excluded = {}, unmapped = new Map();
-    for (let r = headerRow + 1; r <= ws.rowCount; r++) {
-      const branch = String(ws.getRow(r).getCell(col.branch).value ?? '').trim();
-      const code = String(ws.getRow(r).getCell(col.code).value ?? '').trim();
-      const soh = num(ws.getRow(r).getCell(col.soh).value);
-      if (branch === 'Grand Total' || code === 'Grand Total') { if (Number.isFinite(soh) && grandTotal == null) grandTotal = soh; continue; }
-      if (!code || !Number.isFinite(soh)) { dropped++; continue; }
-      read++; detailSum += soh; if (soh < 0) negatives++;
-      if (!(branch in _INV_BRANCH_MAP)) { unmapped.set(branch, (unmapped.get(branch) || 0) + soh); continue; }
-      const wh = _INV_BRANCH_MAP[branch];
-      if (wh === null) { excluded[branch] = (excluded[branch] || 0) + soh; continue; }
-      const key = code + '\x1f' + wh; byPair.set(key, (byPair.get(key) || 0) + soh);
-    }
-    if (grandTotal == null) return res.status(400).json({ error: 'No Grand Total row found to reconcile against.' });
-    if (Math.round(detailSum) !== Math.round(grandTotal)) return res.status(400).json({ error: `Reconciliation failed: detail sum ${Math.round(detailSum).toLocaleString()} ≠ Grand Total ${Math.round(grandTotal).toLocaleString()}.` });
-    if (unmapped.size) return res.status(400).json({ error: 'Unmapped branch(es) — map or exclude then re-run: ' + [...unmapped.keys()].map(x => '"' + x + '"').join(', ') });
-    const known = new Set((await pool.query('SELECT sku FROM planner.products')).rows.map(r => r.sku));
-    const rows = [], unmatched = new Map(); let mappedUnits = 0;
-    for (const [key, units] of byPair) { const [sku, wh] = key.split('\x1f'); if (!known.has(sku)) { unmatched.set(sku, (unmatched.get(sku) || 0) + units); continue; } rows.push({ sku, wh, units }); mappedUnits += units; }
-    const byWh = {}; rows.forEach(r => byWh[r.wh] = (byWh[r.wh] || 0) + r.units);
-    let written = 0;
-    if (apply) {
-      for (let i = 0; i < rows.length; i += 1000) {
-        const chunk = rows.slice(i, i + 1000);
-        const vals = chunk.map((_, j) => `($${j * 5 + 1},$${j * 5 + 2},$${j * 5 + 3}::date,$${j * 5 + 4},$${j * 5 + 5})`).join(',');
-        await pool.query(`INSERT INTO planner.inventory_snapshots (sku,warehouse,snapshot_date,available,source) VALUES ${vals}
-          ON CONFLICT (sku,warehouse,snapshot_date) DO UPDATE SET available=EXCLUDED.available, source=EXCLUDED.source`, chunk.flatMap(r => [r.sku, r.wh, date, r.units, source]));
-        written += chunk.length;
-      }
-    }
-    res.json({
-      applied: apply, date, source, detailRows: read, dropped, grandTotal: Math.round(grandTotal), negatives,
-      excluded: Object.entries(excluded).map(([k, v]) => ({ branch: k, units: Math.round(v) })),
-      unmatchedCount: unmatched.size, unmatchedUnits: Math.round([...unmatched.values()].reduce((a, x) => a + x, 0)),
-      unmatchedTop: [...unmatched.entries()].sort((a, x) => x[1] - a[1]).slice(0, 15).map(([s, u]) => `${s} (${Math.round(u)})`),
-      pairs: rows.length, mappedUnits: Math.round(mappedUnits), byWarehouse: byWh, written,
-      coveragePct: Math.round(100 * mappedUnits / grandTotal),
-    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // SKU-data lazy-load (opt-in ?lazysku=1): the heavy _SKU_RAW + FC_OUTPUTS are shipped EMPTY in the page and the

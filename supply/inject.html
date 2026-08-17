@@ -6242,8 +6242,8 @@
     // when active, expands a level-3 row of its member config tabs.
     var SC_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom','products','barcodegen'];
     var SC_LABEL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'BOM',products:'Products',barcodegen:'Barcodes'};
-    var ADM_KEYS=['email-notifications','admin-general','exchange-rates','channels','permissions','email-log','invsnap'];
-    var ADM_LABEL={'email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels',permissions:'Permissions','email-log':'Email log',invsnap:'Inventory snapshots'};
+    var ADM_KEYS=['email-notifications','admin-general','exchange-rates','channels','permissions','email-log'];
+    var ADM_LABEL={'email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels',permissions:'Permissions','email-log':'Email log'};
     var DM_KEYS=['contribmodel','buyplan','runoffsubs'];   // CONFIG ▸ Demand group (SETS contribution model + buy-plan logic + run-off subcats)
     var DM_LABEL={contribmodel:'Contribution model',buyplan:'Buy plan logic',runoffsubs:'Discontinued sub-categories'};
     // Supply chain sits second (next to General settings); it expands to the level-3 members below / nested.
@@ -7230,55 +7230,6 @@
         qEl.oninput=debounce(function(){ st.q=qEl.value.trim(); draw(); },350);
         document.getElementById('el-clear').onclick=function(){ st={from:'',to:'',q:''}; fromEl.value=''; toEl.value=''; qEl.value=''; draw(); };
         draw();
-      };
-      // CONFIG ▸ Admin ▸ Inventory snapshots — TEMPORARY loader (remove later). Upload the Cin7 stock-valuations xlsx +
-      // a snapshot date → server parses/reconciles/maps and loads planner.inventory_snapshots. Preview (dry run) then Load.
-      SUBS['invsnap']=function(){
-        var _f={b64:'',name:''};
-        function n(x){ return (Math.round(x)||0).toLocaleString(); }
-        function summary(j){
-          var wh=Object.keys(j.byWarehouse||{}).sort(function(a,c){return j.byWarehouse[c]-j.byWarehouse[a];}).map(function(w){return w+' = '+n(j.byWarehouse[w]);}).join('  ·  ');
-          var exc=(j.excluded||[]).map(function(x){return x.branch+'='+n(x.units);}).join(', ')||'none';
-          return '<div style="border:1px solid #e2e8f0;border-radius:6px;padding:12px 14px;font-size:12.5px;line-height:1.75;max-width:900px">'
-            +'<div><b>'+(j.applied?'Loaded':'Dry run')+'</b> · date <b>'+esc(j.date)+'</b> · source <code>'+esc(j.source)+'</code></div>'
-            +'<div>Detail rows <b>'+n(j.detailRows)+'</b> · reconciled to Grand Total <b>'+n(j.grandTotal)+'</b> &#10003; · dropped '+n(j.dropped)+' · negatives '+n(j.negatives)+'</div>'
-            +'<div>Rows to database <b>'+n(j.pairs)+'</b> ('+n(j.mappedUnits)+' units, ~'+j.coveragePct+'% of Grand Total)'+(j.applied?(' · <b style="color:#166534">written '+n(j.written)+'</b>'):'')+'</div>'
-            +'<div style="color:#475569">Warehouses: '+esc(wh)+'</div>'
-            +'<div style="color:#64748b">Excluded branches: '+esc(exc)+'</div>'
-            +'<div style="color:#b45309">Unmatched SKU codes <b>'+n(j.unmatchedCount)+'</b> ('+n(j.unmatchedUnits)+' units, dropped)'+((j.unmatchedTop&&j.unmatchedTop.length)?(' — '+esc(j.unmatchedTop.join(', '))):'')+'</div></div>';
-        }
-        b.innerHTML='<div class="annot"><b>CONFIG ▸ Admin ▸ Inventory snapshots.</b> <span style="color:#b45309;font-weight:700">Temporary loader.</span> Upload a Cin7 <b>"Historic and Current Stock Valuations"</b> export (.xlsx) and set the snapshot <b>date</b>; it loads into <code>inventory_snapshots</code> for the Category Trends report. <b>Preview</b> (dry run) first, then <b>Load</b>. Idempotent — re-loading a date overwrites it. Reconciles to the file&rsquo;s Grand Total and halts on any unmapped branch.</div>'
-          +'<div id="invs-drop" style="border:2px dashed #cbd5e1;border-radius:8px;padding:20px;text-align:center;cursor:pointer;background:#f8fafc;margin:10px 0;max-width:900px;transition:border-color .1s,background .1s">'
-            +'<div style="font-size:13px;color:#334155"><b>&#8593; Drag a .xlsx here</b> <span style="color:#94a3b8">or click to choose</span></div>'
-            +'<div id="invs-fname" style="font-size:12px;color:#94a3b8;margin-top:5px">no file chosen</div>'
-            +'<input type="file" id="invs-file" accept=".xlsx" style="display:none"></div>'
-          +'<div class="bar" style="gap:10px;flex-wrap:wrap;align-items:center;margin:10px 0">'
-            +'<span class="pill-lbl">Snapshot date</span><input class="flt" id="invs-date" type="date" style="width:150px" title="the AS-OF date of the stock, not the export date">'
-            +'<button class="save-btn light" id="invs-dry">Preview (dry run)</button>'
-            +'<button class="save-btn" id="invs-load" style="background:#7c3aed;color:#fff">Load to database</button>'
-            +'<span id="invs-msg" style="font-size:12px;margin-left:6px"></span></div>'
-          +'<div id="invs-out"></div>';
-        var fEl=document.getElementById('invs-file'), fnEl=document.getElementById('invs-fname'), msg=document.getElementById('invs-msg'), out=document.getElementById('invs-out'), drop=document.getElementById('invs-drop');
-        function takeFile(f){ if(!f)return; if(!/\.xlsx$/i.test(f.name)){ msg.style.color='#dc2626'; msg.textContent='Please choose an .xlsx file.'; return; }
-          if(f.size>3.3*1024*1024){ msg.style.color='#dc2626'; msg.textContent='File is '+(f.size/1024/1024).toFixed(1)+'MB — over the ~4.5MB Vercel upload limit once base64-encoded. Split the export, or use the command-line loader (scripts/seed_inventory_snapshots.mjs).'; return; }   // Vercel serverless caps the request body regardless of the app limit
-          fnEl.textContent=f.name+' · '+(f.size/1024).toFixed(0)+' KB'; fnEl.style.color='#0f172a'; msg.textContent=''; var rd=new FileReader(); rd.onload=function(){ _f.b64=String(rd.result).split(',')[1]||''; _f.name=f.name; }; rd.readAsDataURL(f); }
-        fEl.onchange=function(){ takeFile(this.files&&this.files[0]); };
-        drop.onclick=function(e){ if(e.target!==fEl)fEl.click(); };
-        function _dz(on){ drop.style.borderColor=on?'#7c3aed':'#cbd5e1'; drop.style.background=on?'#f5f3ff':'#f8fafc'; }
-        drop.ondragover=function(e){ e.preventDefault(); e.stopPropagation(); _dz(true); };
-        drop.ondragleave=function(e){ e.preventDefault(); e.stopPropagation(); _dz(false); };
-        drop.ondrop=function(e){ e.preventDefault(); e.stopPropagation(); _dz(false); takeFile(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]); };
-        function run(apply){ if(!_f.b64){ msg.style.color='#dc2626'; msg.textContent='Choose an .xlsx file first.'; return; }
-          var date=document.getElementById('invs-date').value; if(!/^\d{4}-\d{2}-\d{2}$/.test(date)){ msg.style.color='#dc2626'; msg.textContent='Pick a snapshot date.'; return; }
-          msg.style.color='#64748b'; msg.textContent=apply?'Loading…':'Previewing…'; out.innerHTML='';
-          fetch('/api/config/inventory-snapshot-load',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({content_base64:_f.b64,filename:_f.name,date:date,apply:apply})})
-            .then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ msg.style.color='#dc2626'; msg.textContent=j.error; return; }
-              msg.style.color=j.applied?'#16a34a':'#0369a1'; msg.textContent=j.applied?('✓ Loaded '+n(j.written)+' rows for '+j.date):'Dry run OK — review below, then Load.';
-              out.innerHTML=summary(j);
-            }).catch(function(e){ msg.style.color='#dc2626'; msg.textContent='Failed: '+((e&&e.message)||e); });
-        }
-        document.getElementById('invs-dry').onclick=function(){ run(false); };
-        document.getElementById('invs-load').onclick=function(){ run(true); };
       };
       SUBS['portal']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/suppliers').then(function(r){return r.json();}).then(function(sups){
@@ -9315,7 +9266,7 @@
     else if(current==='payments') writeHash(['supply','payments'].concat(poSub&&PAY_SUB_KEYS.indexOf(poSub)>=0&&poSub!=='paydue'?[poSub]:[]));
     else if(current==='config'){
       if(CONFIG_CTX==='supply') writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['supply','config','portal',encodeURIComponent(PORTAL_SUP.toLowerCase())]:['supply','config',CONFIG_SUB]);   // SUPPLY ▸ CONFIG → #/supply/config/<item>
-      else writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['config','portal',encodeURIComponent(PORTAL_SUP.toLowerCase())]:(['email-notifications','admin-general','exchange-rates','channels','permissions','email-log','invsnap'].indexOf(CONFIG_SUB)>=0?['config','admin',CONFIG_SUB]:(['contribmodel','buyplan','runoffsubs'].indexOf(CONFIG_SUB)>=0?['config','demand',CONFIG_SUB]:['config',CONFIG_SUB])));   // Admin → #/config/admin/<item>, Demand → #/config/demand/<item>
+      else writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['config','portal',encodeURIComponent(PORTAL_SUP.toLowerCase())]:(['email-notifications','admin-general','exchange-rates','channels','permissions','email-log'].indexOf(CONFIG_SUB)>=0?['config','admin',CONFIG_SUB]:(['contribmodel','buyplan','runoffsubs'].indexOf(CONFIG_SUB)>=0?['config','demand',CONFIG_SUB]:['config',CONFIG_SUB])));   // Admin → #/config/admin/<item>, Demand → #/config/demand/<item>
     }
     else if(current==='actions') writeHash(['supply','actions'].concat(actSub&&actSub!=='actions'?[actSub]:[]));   // ACTIONS ▸ Recommendations / ERP Compare deep-link
     else if(current) writeHash(['supply',current]); }
