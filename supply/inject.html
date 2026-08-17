@@ -10348,7 +10348,7 @@
   function ensureConfigButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('config-btn'))return;
     // CONFIG is no longer a top-bar text button — it's a ⚙ cog icon sitting just left of the ? help icon (top-right).
     var btn=document.createElement('button'); btn.id='config-btn'; btn.className='config-toggle'; btn.title='Settings (CONFIG)'; btn.setAttribute('aria-label','Settings'); btn.innerHTML='⚙';   // NOT .view-toggle → no border-bottom underline
-    btn.style.cssText='margin-right:2px;width:24px;height:24px;border-radius:50%;border:1px solid #6b7280;background:#4b5563;color:#fff;cursor:pointer;font-weight:700;font-size:14px;line-height:1;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center';   // match the ? help icon
+    btn.style.cssText='margin-right:2px;width:24px;height:24px;border-radius:50%;border:1px solid #6b7280;background:#4b5563;color:#fff;cursor:pointer;font-weight:700;font-size:20px;line-height:1;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;overflow:hidden';   // match the ? help icon; cog glyph fills ~90% of the circle
     var help=document.getElementById('ctx-help-btn');
     if(help&&help.parentNode===row){ row.insertBefore(btn, help); }   // sit immediately LEFT of the ? help icon
     else { var spacer=row.querySelector('div[style*="flex:1"]'); if(spacer)row.appendChild(btn); else row.appendChild(btn); }
