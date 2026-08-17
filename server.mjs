@@ -1118,8 +1118,6 @@ const _INV_BRANCH_MAP = {
   '3PL Test': null, 'Nordstrom Test': null, 'Test': null, 'US Walmart': null, 'Direct to Client': null, 'UK Head Office': null,
   'EU Preorder': null, 'US Preorder': null, 'UK Preorder': null, 'AU Preorder': null, 'CA Preorder': null,
 };
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
 // SKU-data lazy-load (opt-in ?lazysku=1): the heavy _SKU_RAW + FC_OUTPUTS are shipped EMPTY in the page and the
 // client fetches them here after first paint. Served from the warm data cache (vals[3]=SKU_RAW, vals[2]=FC_OUTPUTS).
 app.get('/api/demand/sku-data', async (req, res) => {
