@@ -6189,7 +6189,7 @@
 
   // ---- SETTINGS (landed-cost rate cards: import tax by country, freight by lane × size) ----
   // ---- CONFIG: reference data, one editable table per sub-tab ----
-  var CONFIG_SUB='general';
+  var CONFIG_SUB='email-notifications';   // was 'general' (now re-homed under Admin ▸ Email notifications)
   var PORTAL_SUP='', PORTAL_TAB='pos', PORTAL_PO_ST=null, _pendingPortalSup=null;   // CONFIG ▸ Portal preview: chosen supplier + inner tab + PO status filter (+ pending supplier slug from #/config/portal/<name>)
   var ROW_EDIT={};   // per-sub-tab: which row key is currently in Edit mode (Edit/Save rows for suppliers + productions)
   var ME=null;   // caller's app permissions (/api/me): {email,live,supply_edit,demand_edit,is_admin}. null until loaded; sandbox = full access.
@@ -6241,15 +6241,15 @@
     // when active, expands a level-3 row of its member config tabs.
     var SC_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom','products','barcodegen'];
     var SC_LABEL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'BOM',products:'Products',barcodegen:'Barcodes'};
-    var ADM_KEYS=['admin-general','exchange-rates','channels','permissions','email-log','invsnap'];
-    var ADM_LABEL={'admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels',permissions:'Permissions','email-log':'Email log',invsnap:'Inventory snapshots'};
+    var ADM_KEYS=['email-notifications','admin-general','exchange-rates','channels','permissions','email-log','invsnap'];
+    var ADM_LABEL={'email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels',permissions:'Permissions','email-log':'Email log',invsnap:'Inventory snapshots'};
     var DM_KEYS=['contribmodel','buyplan','runoffsubs'];   // CONFIG ▸ Demand group (SETS contribution model + buy-plan logic + run-off subcats)
     var DM_LABEL={contribmodel:'Contribution model',buyplan:'Buy plan logic',runoffsubs:'Discontinued sub-categories'};
     // Supply chain sits second (next to General settings); it expands to the level-3 members below / nested.
-    var L2=[['general','General settings'],['supplychain','Supply chain'],['demand','Demand'],['portalusers','Portal users'],['portal','Portal'],['keyaccounts','Key accounts'],['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']];
+    var L2=[['supplychain','Supply chain'],['demand','Demand'],['portalusers','Portal users'],['portal','Portal'],['keyaccounts','Key accounts'],['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']];   // 'general' moved under Admin as 'email-notifications'; supplychain/demand/keyaccounts/portal* move to SUPPLY/DEMAND in later stages
     if(ME&&ME.is_admin){L2.push(['admin','Admin']);}   // Admin grouping → Permissions / Email log as level-3 tabs
     if(CONFIG_SUB==='forecast-export')CONFIG_SUB='export-uploads';   // legacy slug redirect
-    if((CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log'||CONFIG_SUB==='admin-general'||CONFIG_SUB==='exchange-rates'||CONFIG_SUB==='channels')&&!(ME&&ME.is_admin))CONFIG_SUB='general';   // guard: non-admins can't land on admin-only tabs
+    if((CONFIG_SUB==='email-notifications'||CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log'||CONFIG_SUB==='admin-general'||CONFIG_SUB==='exchange-rates'||CONFIG_SUB==='channels')&&!(ME&&ME.is_admin))CONFIG_SUB='export-uploads';   // guard: non-admins can't land on admin-only tabs (General/email-notifications now admin-only)
     function reload(){ delete cache['config']; selectSection('config'); }   // refresh after a rate add (keeps sub-tab)
     // Generic Edit/Save row table: read-only cells + an Edit button per row; Edit swaps that row's cells to inputs
     // and shows Save/Cancel; Save POSTs all editable fields at once. cols: [{f,h,t:'text|num|select',ro,opts,w}].
@@ -7718,6 +7718,7 @@
           draw();
         }).catch(function(){ _roHidden=[]; draw(); });
       };
+      SUBS['email-notifications']=SUBS['general'];   // 'General settings' page re-homed under Admin ▸ Email notifications (same renderer)
       (SUBS[CONFIG_SUB]||function(){})();
     }
     showSub();
@@ -9306,7 +9307,7 @@
   function syncHash(){ if(current==='reports') writeHash(['supply','reports',reportTab]);
     else if(current==='purchase-orders') writeHash(['supply','purchase-orders'].concat(poSub&&PO_SUB_KEYS.indexOf(poSub)>=0&&poSub!=='plan'?[poSub]:[]));
     else if(current==='payments') writeHash(['supply','payments'].concat(poSub&&PAY_SUB_KEYS.indexOf(poSub)>=0&&poSub!=='paydue'?[poSub]:[]));
-    else if(current==='config') writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['config','portal',encodeURIComponent(PORTAL_SUP.toLowerCase())]:(['contribmodel','buyplan','runoffsubs'].indexOf(CONFIG_SUB)>=0?['config','demand',CONFIG_SUB]:['config',CONFIG_SUB]));   // Demand group items nest as #/config/demand/<item>
+    else if(current==='config') writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['config','portal',encodeURIComponent(PORTAL_SUP.toLowerCase())]:(['email-notifications','admin-general','exchange-rates','channels','permissions','email-log','invsnap'].indexOf(CONFIG_SUB)>=0?['config','admin',CONFIG_SUB]:(['contribmodel','buyplan','runoffsubs'].indexOf(CONFIG_SUB)>=0?['config','demand',CONFIG_SUB]:['config',CONFIG_SUB])));   // Admin → #/config/admin/<item>, Demand → #/config/demand/<item>
     else if(current==='actions') writeHash(['supply','actions'].concat(actSub&&actSub!=='actions'?[actSub]:[]));   // ACTIONS ▸ Recommendations / ERP Compare deep-link
     else if(current) writeHash(['supply',current]); }
   function applyRoute(){ var seg=(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean); _expectedHash=location.hash;
@@ -9325,7 +9326,7 @@
       else if(sec==='shipments'){ if(seg[2])_pendingShip=decodeURIComponent(seg[2]); showPoSub('shipments'); }   // legacy: shipments moved under purchase-orders
       else if(sec==='samples'){ if(seg[2])_pendingSampleRef=decodeURIComponent(seg[2]); if(seg[3])_pendingSampleTab=decodeURIComponent(seg[3]); selectSection('samples'); }   // #/supply/samples/<ref>[/<tab>] → open & expand that sample on the tab
       else selectSection(sec);
-    } else if(seg[0]==='config'){ if(seg[1]==='demand'){ CONFIG_SUB=seg[2]||'contribmodel'; } else if(seg[1])CONFIG_SUB=seg[1]; if(seg[1]==='portal'&&seg[2])_pendingPortalSup=decodeURIComponent(seg[2]); if(typeof enterConfig==='function')enterConfig(); }   // #/config/demand/<item> nested; legacy #/config/<item> still resolves
+    } else if(seg[0]==='config'){ if(seg[1]==='admin'){ CONFIG_SUB=seg[2]||'email-notifications'; } else if(seg[1]==='demand'){ CONFIG_SUB=seg[2]||'contribmodel'; } else if(seg[1]==='general'){ CONFIG_SUB='email-notifications'; } else if(seg[1])CONFIG_SUB=seg[1]; if(seg[1]==='portal'&&seg[2])_pendingPortalSup=decodeURIComponent(seg[2]); if(typeof enterConfig==='function')enterConfig(); }   // #/config/admin|demand/<item> nested; #/config/general → admin/email-notifications; legacy #/config/<item> still resolves
     else if(seg[0]==='scenario'){ if(typeof DEMAND_VIEW!=='undefined')DEMAND_VIEW='scenario'; if(seg[1])scenCurrent=seg[1]; var _sdb=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]'); if(_sdb)_sdb.click(); }   // legacy #/scenario/<key> → redirect to DEMAND ▸ Scenario planner (#/demand/scenario/<key>)
     else if(seg[0]==='demand'){ if(typeof DEMAND_VIEW!=='undefined'){ if(seg[1]==='scenario'){ DEMAND_VIEW='scenario'; if(seg[2])scenCurrent=seg[2]; } else if((seg[1]==='inputs'||seg[1]==='analysis')&&seg[2])DEMAND_VIEW=seg[2]; else if(seg[1]==='exceptions'){ DEMAND_VIEW='exceptions'; if(seg[2]&&typeof EXC_SUBTAB!=='undefined')window.EXC_SUBTAB=seg[2]; } else if(seg[1])DEMAND_VIEW=seg[1]; } var _db=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]'); if(_db)_db.click(); }   // #/demand/scenario/<key> + #/demand/inputs|analysis/<slug> + #/demand/exceptions/<slug> deep-links (legacy #/demand/<slug> still resolves)
     else if(seg[0]==='reports'){ if(seg[1]&&typeof REPORT_VIEW!=='undefined')REPORT_VIEW=seg[1]; var _rb=document.querySelector('#view-tabs-row .view-toggle[data-view="exec"]'); if(_rb)_rb.click(); }
@@ -10326,7 +10327,7 @@
     var help=document.getElementById('ctx-help-btn');
     if(help&&help.parentNode===row){ row.insertBefore(btn, help); }   // sit immediately LEFT of the ? help icon
     else { var spacer=row.querySelector('div[style*="flex:1"]'); if(spacer)row.appendChild(btn); else row.appendChild(btn); }
-    btn.onclick=function(){ CONFIG_SUB='general'; enterConfig(); };   // cog opens the CONFIG section (deep-links via hash still honour their sub-tab)
+    btn.onclick=function(){ CONFIG_SUB='email-notifications'; enterConfig(); };   // cog opens the CONFIG section (Admin ▸ Email notifications for admins; guard bounces non-admins). Deep-links honour their sub-tab.
     }
 
   // Decoupled builders — SUPPLY works even if the nav can't be augmented.

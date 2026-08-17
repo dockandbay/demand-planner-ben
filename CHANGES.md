@@ -1,3 +1,6 @@
+## v27.074 CONFIG: General → Admin ▸ Email notifications (3-level slugs)
+- The old CONFIG ▸ General settings page (escalation email recipients + supplier notifications) is renamed **Email notifications** and moved under **CONFIG ▸ Admin** (admin-only). Admin items now deep-link 3-level as **#/config/admin/<item>** (e.g. #/config/admin/email-notifications, #/config/admin/permissions). Redirects: #/config/general → #/config/admin/email-notifications; legacy flat #/config/<admin item> still resolves. The cog opens CONFIG at Admin ▸ Email notifications. (supplychain/demand/keyaccounts/portal groups still in CONFIG pending stages 3-4.)
+
 ## v27.073 CONFIG → ⚙ cog icon (nav overhaul stage 1)
 - CONFIG is no longer a top-bar text button; it is now a **⚙ cog icon** sitting just left of the **?** help icon (top-right). Clicking it opens the CONFIG section as before. First stage of the nav overhaul (DEMAND▸Config / SUPPLY▸Config group moves + redirects to follow).
 
