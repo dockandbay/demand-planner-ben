@@ -6249,7 +6249,7 @@
     // Supply chain sits second (next to General settings); it expands to the level-3 members below / nested.
     // L2 groups are scoped by CONFIG_CTX: 'supply' (SUPPLY ▸ CONFIG) vs 'admin' (the ⚙ cog CONFIG section).
     var L2;
-    if(CONFIG_CTX==='supply'){ L2=[['supplychain','Supply chain'],['keyaccounts','Key accounts'],['portalusers','Portal users'],['portal','Portal']]; }
+    if(CONFIG_CTX==='supply'){ L2=[['suppliers','Suppliers'],['batches','Batches'],['productions','Productions'],['keyaccounts','Key accounts'],['portal','Portal'],['portalusers','Portal users'],['mfgbom','BOM'],['branches','Branches'],['freight','Freight rates'],['tax','Import tax'],['products','Products'],['barcodegen','Barcodes'],['duty','Import duty'],['consignees','Consignees']]; }   // flat (Supply chain group removed); Ben's order + duty/consignees appended
     else { L2=[['demand','Demand'],['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']]; if(ME&&ME.is_admin)L2.unshift(['admin','Admin']); }   // ('demand' moves to DEMAND ▸ Config in stage 4)
     if(CONFIG_SUB==='forecast-export')CONFIG_SUB='export-uploads';   // legacy slug redirect
     if((CONFIG_SUB==='email-notifications'||CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log'||CONFIG_SUB==='admin-general'||CONFIG_SUB==='exchange-rates'||CONFIG_SUB==='channels')&&!(ME&&ME.is_admin))CONFIG_SUB='export-uploads';   // guard: non-admins can't land on admin-only tabs (General/email-notifications now admin-only)
@@ -6526,10 +6526,13 @@
     c.innerHTML=annot('config')+dl('szlist',sizes)
       +'<div id="config-nav"></div>'
       +'<div id="config-body"><div class="count">Loading…</div></div>';
-    function navHtml(){ var inSC=SC_KEYS.indexOf(CONFIG_SUB)>=0, inADM=ADM_KEYS.indexOf(CONFIG_SUB)>=0, inDM=DM_KEYS.indexOf(CONFIG_SUB)>=0;
-      var l2='<div id="config-subs">'+L2.map(function(s){ var act=(s[0]===CONFIG_SUB)||(s[0]==='supplychain'&&inSC)||(s[0]==='admin'&&inADM)||(s[0]==='demand'&&inDM);
-        return '<span class="rtab'+(act?' active':'')+'" data-cs="'+s[0]+'">'+esc(s[1])+'</span>'; }).join('')+'<span class="ver">HORIZON __APP_VERSION__</span></div>';
-      var l3keys=inSC?SC_KEYS:(inADM?ADM_KEYS:(inDM?DM_KEYS:null)), l3lbl=inSC?SC_LABEL:(inADM?ADM_LABEL:(inDM?DM_LABEL:ADM_LABEL));
+    function navHtml(){ var inADM=ADM_KEYS.indexOf(CONFIG_SUB)>=0, inDM=DM_KEYS.indexOf(CONFIG_SUB)>=0;
+      // Version badge only in the ⚙ cog CONFIG (admin ctx); in supply ctx the SUPPLY sub-nav already shows it (avoid the duplicate).
+      var ver=(CONFIG_CTX==='supply')?'':'<span class="ver">HORIZON __APP_VERSION__</span>';
+      var l2='<div id="config-subs">'+L2.map(function(s){ var act=(s[0]===CONFIG_SUB)||(s[0]==='admin'&&inADM)||(s[0]==='demand'&&inDM);
+        return '<span class="rtab'+(act?' active':'')+'" data-cs="'+s[0]+'">'+esc(s[1])+'</span>'; }).join('')+ver+'</div>';
+      // supply ctx is FLAT (no L3); admin ctx keeps L3 for the Admin/Demand groups
+      var l3keys=(CONFIG_CTX==='supply')?null:(inADM?ADM_KEYS:(inDM?DM_KEYS:null)), l3lbl=inADM?ADM_LABEL:DM_LABEL;
       var l3=l3keys?'<div id="config-subs-l3">'+l3keys.map(function(k){ return '<span class="rtab'+(k===CONFIG_SUB?' active':'')+'" data-cs="'+k+'">'+esc(l3lbl[k])+'</span>'; }).join('')+'</div>':'';
       return l2+l3; }
     function drawNav(){ var nv=document.getElementById('config-nav'); nv.innerHTML=navHtml();

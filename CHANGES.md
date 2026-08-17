@@ -1,3 +1,7 @@
+## v27.077 SUPPLY ▸ CONFIG: flatten supply-chain group + de-dupe version badge
+- The **Supply chain** sub-group is removed — its 11 items (Suppliers/Batches/Productions/BOM/Branches/Freight/Import tax/Products/Barcodes/Import duty/Consignees) now sit **directly** under SUPPLY ▸ CONFIG alongside Key accounts / Portal / Portal users, in the order: Suppliers, Batches, Productions, Key accounts, Portal, Portal users, BOM, Branches, Freight rates, Import tax, Products, Barcodes, Import duty, Consignees. Supply ▸ Config is now single-level (no L3).
+- Fixed the duplicate HORIZON version badge in SUPPLY ▸ CONFIG (the config nav no longer repeats it in supply context — the SUPPLY sub-nav shows it).
+
 ## v27.076 Cog icon styling — match the ? help icon
 - The ⚙ settings cog is now a 24×24 circular icon matching the ? help button (same size/background), and no longer carries the .view-toggle border-bottom underline.
 
