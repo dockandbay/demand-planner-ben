@@ -1,3 +1,7 @@
+## v27.092 Summary & targets: total-line target now reflects the blended growth (not 0%)
+- The Summary total ("ALL SUBCATEGORIES") row computed its target as `LY_total × (1 + market-level growth)`. With no market-level target set, that growth is 0, so the total target just echoed LY and showed **0%** even though the individual sub-categories had growth targets.
+- The total row now, per period, honours an explicit market-total growth if one is set; otherwise it **sums each sub-category's own target**, so the total's growth % reflects the real blend of the set targets. Verified render clean.
+
 ## v27.091 Demand plan cell-sum: exclude Quarter/Half/FY-total columns
 - The ⌘/Ctrl running-sum (`#plan-sum-inline`) selected any numeric cell, so hovering across a row also picked up the Quarter / Half / FY-total columns and double-counted the months. `valEl` now only accepts real month cells (every month cell carries a `data-nk` keyed "…|YYYY_MM"; aggregate columns have none). Verified: 936 month cells stay summable, all 141 total columns are excluded.
 

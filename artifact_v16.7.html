@@ -9451,7 +9451,14 @@ function renderSummaryView(body){
         if(c.type==='tot'||c.type==='ptot')shade='tot';
         else if(c.type==='m')shade=shadeOf(c.m,lch,disc);
         else { var allAct=true; months.forEach(function(m){ if(!isActualMonth(m))allAct=false; }); shade=allAct?'act':''; if(disc){ var dm=disc.slice(0,7).replace('-','_'); if(months.every(function(m){return m>dm;}))shade='disc'; } else if(lch){ var lm=lch.slice(0,7).replace('-','_'); if(months.every(function(m){return m<lm;}))shade='pre'; } }
-        if(SUMM_METRIC==='revtgt'&&sub!=null&&!rangeMode){ var tgt=0; months.forEach(function(m){ var fi=monFyIdx(m); var g=resolveG(fi.Y,sub,fi.idx); if(g==null)g=0; tgt+=(ly[m]||0)*(1+g/100)*cvR(fi.Y); }); return tcell(vT,lT,true,tgt,shade); }
+        if(SUMM_METRIC==='revtgt'&&sub!=null&&!rangeMode){ var tgt=0;
+          if(sub===''){ // TOTAL row: per period, honour an explicit market-total growth if one is set; otherwise SUM each
+            // subcategory's own target so the growth% reflects the blend of the set targets rather than echoing LY at 0%. — Ben
+            months.forEach(function(m){ var fi=monFyIdx(m), mg=resolveG(fi.Y,'',fi.idx);
+              if(mg!=null){ tgt+=(ly[m]||0)*(1+mg/100)*cvR(fi.Y); }
+              else { subs.forEach(function(_s){ var _sd=subData(_s), g=resolveG(fi.Y,_s,fi.idx); if(g==null)g=0; tgt+=(((_sd.ly&&_sd.ly[m])||0))*(1+g/100)*cvR(fi.Y); }); } }); }
+          else { months.forEach(function(m){ var fi=monFyIdx(m); var g=resolveG(fi.Y,sub,fi.idx); if(g==null)g=0; tgt+=(ly[m]||0)*(1+g/100)*cvR(fi.Y); }); }
+          return tcell(vT,lT,true,tgt,shade); }
         return c3(lT,vT,shade); }).join(''); }
     // Net £/unit for £→units: ex-tax retail (SUBCAT_RT) × channel factor (B2B ×0.5, else ×0.95). 0 if no price.
     function _tgtNet(sub){ var rt=(SUBCAT_RT[co]&&SUBCAT_RT[co][sub])||0; return rt>0?(rt*(ch==='B2B'?0.5:0.95)):0; }
