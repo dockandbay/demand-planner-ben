@@ -1,3 +1,6 @@
+## v27.075 SUPPLY ▸ CONFIG (nav overhaul stage 3)
+- New **CONFIG** tab in the SUPPLY sub-nav hosting the supply-chain settings (Import duty/Freight/Tax/Suppliers/Branches/Consignees/Batches/Productions/BOM/Products/Barcodes) + **Key accounts** + **Portal users** + **Portal**, deep-linked **#/supply/config/<item>**. Reuses the config machinery via a new CONFIG_CTX (supply vs admin) — the SUPPLY sub-nav stays visible (no config-mode). The ⚙ cog CONFIG now shows only Admin / Demand(temp) / Exports & uploads / Product / Suggestions. Redirects: legacy #/config/<supply item> and #/config/supplychain/* → #/supply/config/<item>.
+
 ## v27.074 CONFIG: General → Admin ▸ Email notifications (3-level slugs)
 - The old CONFIG ▸ General settings page (escalation email recipients + supplier notifications) is renamed **Email notifications** and moved under **CONFIG ▸ Admin** (admin-only). Admin items now deep-link 3-level as **#/config/admin/<item>** (e.g. #/config/admin/email-notifications, #/config/admin/permissions). Redirects: #/config/general → #/config/admin/email-notifications; legacy flat #/config/<admin item> still resolves. The cog opens CONFIG at Admin ▸ Email notifications. (supplychain/demand/keyaccounts/portal groups still in CONFIG pending stages 3-4.)
 

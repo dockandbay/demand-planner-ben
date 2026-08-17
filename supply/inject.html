@@ -732,7 +732,7 @@
 <script>
 (function(){
   var SECTIONS=[['actions','ACTIONS'],['reports','BI & REPORTS'],['purchase-orders','PURCHASE ORDERS'],['order-plan','ORDER PLAN'],
-    ['payments','PAYMENTS'],['samples','SAMPLES'],['quality-control','QUALITY CONTROL']];   // CONFIG is now a top-level view (see enterConfig); SHIPMENTS lives under the PURCHASE ORDERS sub-nav (poSub 'shipments'); PAYMENTS umbrella holds Deposits / Other Payments / Payments Due / Payments Report
+    ['payments','PAYMENTS'],['samples','SAMPLES'],['quality-control','QUALITY CONTROL'],['config','CONFIG']];   // CONFIG here = SUPPLY ▸ CONFIG (supply-chain settings + Key accounts + Portal); the ⚙ cog opens the admin CONFIG. SHIPMENTS under PURCHASE ORDERS; PAYMENTS umbrella holds Deposits / Other Payments / Payments Due / Payments Report
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
   var REPORT_SECTIONS=[['metrics','METRICS'],['production-summary','PRODUCTION SUMMARY'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
     ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['supplier-timing','SUPPLIER DELAYS'],['directclient','DIRECT TO CLIENT'],['dtc-mismatch','DTC MISMATCH'],['customorders','CUSTOM ORDERS'],['flexport','FLEXPORT']];   // ERP COMPARE moved to ACTIONS ▸ ERP Compare sub-tab; CASH FLOW moved to PAYMENTS ▸ Cash Flow
@@ -6190,6 +6190,7 @@
   // ---- SETTINGS (landed-cost rate cards: import tax by country, freight by lane × size) ----
   // ---- CONFIG: reference data, one editable table per sub-tab ----
   var CONFIG_SUB='email-notifications';   // was 'general' (now re-homed under Admin ▸ Email notifications)
+  var CONFIG_CTX='admin';   // which host owns the config panels: 'admin' = the ⚙ cog CONFIG section (config-mode, groups Admin/Exports/Product/Suggestions) · 'supply' = SUPPLY ▸ CONFIG sub-tab (sub-nav visible, groups Supply chain/Key accounts/Portal users/Portal)
   var PORTAL_SUP='', PORTAL_TAB='pos', PORTAL_PO_ST=null, _pendingPortalSup=null;   // CONFIG ▸ Portal preview: chosen supplier + inner tab + PO status filter (+ pending supplier slug from #/config/portal/<name>)
   var ROW_EDIT={};   // per-sub-tab: which row key is currently in Edit mode (Edit/Save rows for suppliers + productions)
   var ME=null;   // caller's app permissions (/api/me): {email,live,supply_edit,demand_edit,is_admin}. null until loaded; sandbox = full access.
@@ -6246,8 +6247,10 @@
     var DM_KEYS=['contribmodel','buyplan','runoffsubs'];   // CONFIG ▸ Demand group (SETS contribution model + buy-plan logic + run-off subcats)
     var DM_LABEL={contribmodel:'Contribution model',buyplan:'Buy plan logic',runoffsubs:'Discontinued sub-categories'};
     // Supply chain sits second (next to General settings); it expands to the level-3 members below / nested.
-    var L2=[['supplychain','Supply chain'],['demand','Demand'],['portalusers','Portal users'],['portal','Portal'],['keyaccounts','Key accounts'],['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']];   // 'general' moved under Admin as 'email-notifications'; supplychain/demand/keyaccounts/portal* move to SUPPLY/DEMAND in later stages
-    if(ME&&ME.is_admin){L2.push(['admin','Admin']);}   // Admin grouping → Permissions / Email log as level-3 tabs
+    // L2 groups are scoped by CONFIG_CTX: 'supply' (SUPPLY ▸ CONFIG) vs 'admin' (the ⚙ cog CONFIG section).
+    var L2;
+    if(CONFIG_CTX==='supply'){ L2=[['supplychain','Supply chain'],['keyaccounts','Key accounts'],['portalusers','Portal users'],['portal','Portal']]; }
+    else { L2=[['demand','Demand'],['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']]; if(ME&&ME.is_admin)L2.unshift(['admin','Admin']); }   // ('demand' moves to DEMAND ▸ Config in stage 4)
     if(CONFIG_SUB==='forecast-export')CONFIG_SUB='export-uploads';   // legacy slug redirect
     if((CONFIG_SUB==='email-notifications'||CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log'||CONFIG_SUB==='admin-general'||CONFIG_SUB==='exchange-rates'||CONFIG_SUB==='channels')&&!(ME&&ME.is_admin))CONFIG_SUB='export-uploads';   // guard: non-admins can't land on admin-only tabs (General/email-notifications now admin-only)
     function reload(){ delete cache['config']; selectSection('config'); }   // refresh after a rate add (keeps sub-tab)
@@ -9307,7 +9310,10 @@
   function syncHash(){ if(current==='reports') writeHash(['supply','reports',reportTab]);
     else if(current==='purchase-orders') writeHash(['supply','purchase-orders'].concat(poSub&&PO_SUB_KEYS.indexOf(poSub)>=0&&poSub!=='plan'?[poSub]:[]));
     else if(current==='payments') writeHash(['supply','payments'].concat(poSub&&PAY_SUB_KEYS.indexOf(poSub)>=0&&poSub!=='paydue'?[poSub]:[]));
-    else if(current==='config') writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['config','portal',encodeURIComponent(PORTAL_SUP.toLowerCase())]:(['email-notifications','admin-general','exchange-rates','channels','permissions','email-log','invsnap'].indexOf(CONFIG_SUB)>=0?['config','admin',CONFIG_SUB]:(['contribmodel','buyplan','runoffsubs'].indexOf(CONFIG_SUB)>=0?['config','demand',CONFIG_SUB]:['config',CONFIG_SUB])));   // Admin → #/config/admin/<item>, Demand → #/config/demand/<item>
+    else if(current==='config'){
+      if(CONFIG_CTX==='supply') writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['supply','config','portal',encodeURIComponent(PORTAL_SUP.toLowerCase())]:['supply','config',CONFIG_SUB]);   // SUPPLY ▸ CONFIG → #/supply/config/<item>
+      else writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['config','portal',encodeURIComponent(PORTAL_SUP.toLowerCase())]:(['email-notifications','admin-general','exchange-rates','channels','permissions','email-log','invsnap'].indexOf(CONFIG_SUB)>=0?['config','admin',CONFIG_SUB]:(['contribmodel','buyplan','runoffsubs'].indexOf(CONFIG_SUB)>=0?['config','demand',CONFIG_SUB]:['config',CONFIG_SUB])));   // Admin → #/config/admin/<item>, Demand → #/config/demand/<item>
+    }
     else if(current==='actions') writeHash(['supply','actions'].concat(actSub&&actSub!=='actions'?[actSub]:[]));   // ACTIONS ▸ Recommendations / ERP Compare deep-link
     else if(current) writeHash(['supply',current]); }
   function applyRoute(){ var seg=(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean); _expectedHash=location.hash;
@@ -9316,7 +9322,7 @@
       else if(sec==='actions'){ actSub=(seg[2]&&['recommendations','erp-compare'].indexOf(seg[2])>=0)?seg[2]:'actions'; selectSection('actions'); }   // #/supply/actions/<recommendations|erp-compare> deep-link
       else if(sec==='productions'){ showPoSub(seg[2]&&PO_SUB_KEYS.indexOf(seg[2])>=0?seg[2]:'list'); }   // legacy links → PURCHASE ORDERS umbrella
       else if(sec==='payments'){ showPoSub(seg[2]&&PAY_SUB_KEYS.indexOf(seg[2])>=0?seg[2]:'paydue'); }   // PAYMENTS umbrella (default Payments Due)
-      else if(sec==='config'){ if(seg[2])CONFIG_SUB=seg[2]; enterConfig(); }   // legacy #/supply/config → top-level CONFIG
+      else if(sec==='config'){ if(seg[2]==='portal'&&seg[3])_pendingPortalSup=decodeURIComponent(seg[3]); enterSupplyConfig(seg[2]); }   // #/supply/config/<item> — SUPPLY ▸ CONFIG
       else if(sec==='purchase-orders'){ var _s2=seg[2]?decodeURIComponent(seg[2]):null, _s3=seg[3]?decodeURIComponent(seg[3]):null;
         if(_s2 && POTAB_FROM_SLUG[_s2] && _s3){ _pendingPO=_s3; _pendingPOTab=POTAB_FROM_SLUG[_s2]; showPoSub('plan'); }   // LEGACY deep-link: .../<slug>/<PO>
         else if(_s2 && PO_SUB_KEYS.indexOf(_s2)>=0){ showPoSub(_s2); }   // PURCHASE ORDERS umbrella sub-tab
@@ -9326,7 +9332,15 @@
       else if(sec==='shipments'){ if(seg[2])_pendingShip=decodeURIComponent(seg[2]); showPoSub('shipments'); }   // legacy: shipments moved under purchase-orders
       else if(sec==='samples'){ if(seg[2])_pendingSampleRef=decodeURIComponent(seg[2]); if(seg[3])_pendingSampleTab=decodeURIComponent(seg[3]); selectSection('samples'); }   // #/supply/samples/<ref>[/<tab>] → open & expand that sample on the tab
       else selectSection(sec);
-    } else if(seg[0]==='config'){ if(seg[1]==='admin'){ CONFIG_SUB=seg[2]||'email-notifications'; } else if(seg[1]==='demand'){ CONFIG_SUB=seg[2]||'contribmodel'; } else if(seg[1]==='general'){ CONFIG_SUB='email-notifications'; } else if(seg[1])CONFIG_SUB=seg[1]; if(seg[1]==='portal'&&seg[2])_pendingPortalSup=decodeURIComponent(seg[2]); if(typeof enterConfig==='function')enterConfig(); }   // #/config/admin|demand/<item> nested; #/config/general → admin/email-notifications; legacy #/config/<item> still resolves
+    } else if(seg[0]==='config'){
+      if(seg[1]==='admin'){ CONFIG_SUB=seg[2]||'email-notifications'; enterConfig(); }
+      else if(seg[1]==='general'){ CONFIG_SUB='email-notifications'; enterConfig(); }   // redirect old General → Admin ▸ Email notifications
+      else if(seg[1]==='demand'){ CONFIG_SUB=seg[2]||'contribmodel'; enterConfig(); }   // (stage 4 will move to #/demand/config)
+      else if(seg[1]==='supplychain'){ enterSupplyConfig(seg[2]||'suppliers'); }        // redirect old supplychain group → SUPPLY ▸ CONFIG
+      else if(seg[1]&&_SUPCFG_KEYS.indexOf(seg[1])>=0){ if(seg[1]==='portal'&&seg[2])_pendingPortalSup=decodeURIComponent(seg[2]); enterSupplyConfig(seg[1]); }   // redirect legacy #/config/<supply item> → SUPPLY ▸ CONFIG
+      else if(seg[1]){ CONFIG_SUB=seg[1]; enterConfig(); }
+      else enterConfig();
+    }   // #/config/admin|demand/<item> nested; #/config/general → email-notifications; supply-group slugs redirect to #/supply/config; legacy #/config/<item> still resolves
     else if(seg[0]==='scenario'){ if(typeof DEMAND_VIEW!=='undefined')DEMAND_VIEW='scenario'; if(seg[1])scenCurrent=seg[1]; var _sdb=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]'); if(_sdb)_sdb.click(); }   // legacy #/scenario/<key> → redirect to DEMAND ▸ Scenario planner (#/demand/scenario/<key>)
     else if(seg[0]==='demand'){ if(typeof DEMAND_VIEW!=='undefined'){ if(seg[1]==='scenario'){ DEMAND_VIEW='scenario'; if(seg[2])scenCurrent=seg[2]; } else if((seg[1]==='inputs'||seg[1]==='analysis')&&seg[2])DEMAND_VIEW=seg[2]; else if(seg[1]==='exceptions'){ DEMAND_VIEW='exceptions'; if(seg[2]&&typeof EXC_SUBTAB!=='undefined')window.EXC_SUBTAB=seg[2]; } else if(seg[1])DEMAND_VIEW=seg[1]; } var _db=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]'); if(_db)_db.click(); }   // #/demand/scenario/<key> + #/demand/inputs|analysis/<slug> + #/demand/exceptions/<slug> deep-links (legacy #/demand/<slug> still resolves)
     else if(seg[0]==='reports'){ if(seg[1]&&typeof REPORT_VIEW!=='undefined')REPORT_VIEW=seg[1]; var _rb=document.querySelector('#view-tabs-row .view-toggle[data-view="exec"]'); if(_rb)_rb.click(); }
@@ -10296,7 +10310,7 @@
   try{window.__supplyNav={sections:SECTIONS,reports:REPORT_SECTIONS,select:function(k){selectSection(k);},current:function(){return current;}};}catch(e){}   // bridge for the app-level mobile drawer
   // CONFIG sub-nav bridge for the mobile drawer — a STATIC list so the drawer can render sub-items immediately,
   // without waiting for CONFIG's (sometimes slow) DOM render. Mirror L2 in renderConfig if that list changes.
-  try{window.__configNav={items:[['general','General settings'],['supplychain','Supply chain'],['portalusers','Portal users'],['portal','Portal'],['keyaccounts','Key accounts'],['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']],select:function(k){CONFIG_SUB=k;enterConfig();},current:function(){return CONFIG_SUB;}};}catch(e){}
+  try{window.__configNav={items:[['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']],select:function(k){ if(typeof _SUPCFG_KEYS!=='undefined'&&_SUPCFG_KEYS.indexOf(k)>=0){ enterSupplyConfig(k); } else { CONFIG_SUB=k; enterConfig(); } },current:function(){return CONFIG_SUB;}};}catch(e){}
   function showSupply(noSelect){ ensureRoot(); if(typeof hideScenario==='function')hideScenario(); var app=document.getElementById('app'); if(app){app.classList.add('supply-active');app.classList.remove('config-mode');}
     try{ refreshDtcBadge(); }catch(e){}   // DTC mismatch issue count on the BI & REPORTS top tab
     document.body.classList.add('supply-on');   // reveals the mobile top-bar search
@@ -10315,10 +10329,18 @@
     var fb=document.getElementById('supply-float'); if(fb)fb.style.display=''; setTimeout(hzSyncDemandPills,0); }
   // CONFIG top-level view: reuse the SUPPLY surface (supply-root + supply-content) but flag config-mode so
   // the SUPPLY section sub-nav is hidden and the CONFIG button (not SUPPLY) reads active.
-  function enterConfig(){ showSupply(true); var app=document.getElementById('app'); if(app)app.classList.add('config-mode');
+  function enterConfig(){ CONFIG_CTX='admin'; showSupply(true); var app=document.getElementById('app'); if(app)app.classList.add('config-mode');
     var sb=document.getElementById('supply-btn'); if(sb)sb.classList.remove('active');
     var cb=document.getElementById('config-btn'); if(cb)cb.classList.add('active');
     try{updatePermBanner();}catch(e){}
+    selectSection('config'); }
+  // SUPPLY ▸ CONFIG (Option B native embed): reuse the config machinery but keep the SUPPLY sub-nav visible
+  // (no config-mode) and scope the groups to Supply chain / Key accounts / Portal users / Portal.
+  var _SUPCFG_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom','products','barcodegen','keyaccounts','portalusers','portal'];
+  function enterSupplyConfig(sub){ CONFIG_CTX='supply'; showSupply(true);
+    var app=document.getElementById('app'); if(app)app.classList.remove('config-mode');
+    var cb=document.getElementById('config-btn'); if(cb)cb.classList.remove('active');
+    if(sub&&_SUPCFG_KEYS.indexOf(sub)>=0)CONFIG_SUB=sub; else if(_SUPCFG_KEYS.indexOf(CONFIG_SUB)<0)CONFIG_SUB='suppliers';
     selectSection('config'); }
   function ensureConfigButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('config-btn'))return;
     // CONFIG is no longer a top-bar text button — it's a ⚙ cog icon sitting just left of the ? help icon (top-right).
@@ -10340,8 +10362,8 @@
       +'<select id="supply-nav-sel" aria-label="Section">'+SECTIONS.map(function(s){return '<option value="'+s[0]+'">'+s[1]+'</option>';}).join('')+'</select>'
       +'<div id="supply-content"></div>';
     app.appendChild(rootEl);
-    rootEl.querySelectorAll('.stab').forEach(function(b){b.onclick=function(e){ if(e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return; e.preventDefault(); selectSection(b.dataset.k); };});   // Cmd/Ctrl/Shift/Alt-click (or middle-click) opens the section in a new tab via its deep-link href
-    var _navSel=rootEl.querySelector('#supply-nav-sel'); if(_navSel)_navSel.onchange=function(){selectSection(this.value);};
+    rootEl.querySelectorAll('.stab').forEach(function(b){b.onclick=function(e){ if(e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return; e.preventDefault(); if(b.dataset.k==='config'){ enterSupplyConfig(); return; } selectSection(b.dataset.k); };});   // Cmd/Ctrl/Shift/Alt-click (or middle-click) opens the section in a new tab via its deep-link href
+    var _navSel=rootEl.querySelector('#supply-nav-sel'); if(_navSel)_navSel.onchange=function(){ if(this.value==='config'){ enterSupplyConfig(); return; } selectSection(this.value); };
     var _rc=rootEl.querySelector('#supply-refresh-cache'); if(_rc)_rc.onclick=function(){ var b=this; b.disabled=true; b.textContent='Refreshing…';
       try{ for(var k in cache)delete cache[k]; }catch(e){}   // drop the client section cache
       fetch('/api/supply/cache/invalidate',{method:'POST'}).catch(function(){}).then(function(){ location.reload(); }); };   // reset the server read-cache, then a full reload re-fetches all data + rebuilds the demand/buy overlays
