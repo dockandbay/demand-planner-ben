@@ -66,9 +66,9 @@ Primary key: `(sku, warehouse, snapshot_date)`.
    'UK ILG non grs'    -> uk_nongrs     'US Geneva non GRS'  -> us_nongrs
 
    EXCLUDE (-> null): CA FBA, CA Propack, CA Embroidery   (CA is decommissioned)
-                      3PL Test, Nordstrom Test, Test, US Walmart, UK Head Office,
-                      AU Embroidery, Direct to Client, US B2B, UK B2B, UK B2B JLEW,
-                      China Stock, Zalando, JP FBA, and all *Preorder branches
+                      3PL Test, Nordstrom Test, Nordstrom DSCO Test, Test, US Walmart, UK Head Office,
+                      AU Embroidery, EU Embroidery, Direct to Client, US B2B, UK B2B, UK B2B JLEW, UK B2B NEXT,
+                      China Stock, China Consolidation, US Bonded, Zalando, JP FBA, and all *Preorder branches
    ```
    If a **new branch** appears that isn't in this list, please skip it and flag it to Ben (don't guess a mapping). Multiple branches can map to the same warehouse (e.g. EU iFulfillment + EU ILG → `eu_3pl`) — sum their units per (sku, warehouse).
 

@@ -1,3 +1,8 @@
+## v27.093 Inventory-snapshot branch map: 5 new Cin7 branches excluded + metrics caption to 11:59
+- Added the 5 branches Diviyaj flagged to `_INV_BRANCH_MAP` (single source of truth for the n8n inventory flow), all as excluded: China Consolidation (like China Stock), UK B2B NEXT (like UK B2B/JLEW), EU Embroidery (like CA/AU Embroidery), Nordstrom DSCO Test (like Nordstrom Test), and US Bonded (duty-unpaid/not-available — ⚠ pending Ben's confirm; if it's saleable US stock it should map to `us_3pl`). Mirrored into both copies of `SPEC_N8N_FLOWS_FOR_DIVIYAJ.md`.
+- Metrics scoreboard caption changed Thursday 23:59 → **11:59 GMT** (per the reconciled Flow 3 schedule).
+- NOTE: the manual "Snapshot now" buttons stay put for now — the n8n flows are built but switched OFF; move them into CONFIG ▸ Admin only once Diviyaj confirms the flows are live.
+
 ## v27.092 Summary & targets: total-line target now reflects the blended growth (not 0%)
 - The Summary total ("ALL SUBCATEGORIES") row computed its target as `LY_total × (1 + market-level growth)`. With no market-level target set, that growth is 0, so the total target just echoed LY and showed **0%** even though the individual sub-categories had growth targets.
 - The total row now, per period, honours an explicit market-total growth if one is set; otherwise it **sums each sub-category's own target**, so the total's growth % reflects the real blend of the set targets. Verified render clean.

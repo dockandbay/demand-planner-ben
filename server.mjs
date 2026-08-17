@@ -1117,6 +1117,10 @@ const _INV_BRANCH_MAP = {
   'AU Embroidery': null, 'US B2B': null, 'UK B2B': null, 'Zalando': null, 'China Stock': null, 'UK B2B JLEW': null, 'JP FBA': null,
   '3PL Test': null, 'Nordstrom Test': null, 'Test': null, 'US Walmart': null, 'Direct to Client': null, 'UK Head Office': null,
   'EU Preorder': null, 'US Preorder': null, 'UK Preorder': null, 'AU Preorder': null, 'CA Preorder': null,
+  // New branches Diviyaj flagged 17-Aug-26 — all excluded (matched to existing patterns): China Consolidation like China Stock;
+  // UK B2B NEXT like UK B2B/JLEW; EU Embroidery like CA/AU Embroidery; Nordstrom DSCO Test like Nordstrom Test.
+  'China Consolidation': null, 'UK B2B NEXT': null, 'EU Embroidery': null, 'Nordstrom DSCO Test': null,
+  'US Bonded': null,   // bonded = duty-unpaid / not-yet-available stock → excluded. ⚠ CONFIRM with Ben: if it's really saleable US stock, map to 'us_3pl'.
 };
 // SKU-data lazy-load (opt-in ?lazysku=1): the heavy _SKU_RAW + FC_OUTPUTS are shipped EMPTY in the page and the
 // client fetches them here after first paint. Served from the warm data cache (vals[3]=SKU_RAW, vals[2]=FC_OUTPUTS).
