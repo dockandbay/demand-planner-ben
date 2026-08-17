@@ -1,3 +1,8 @@
+## v27.090 Summary & targets: always refresh targets + recompute forecast on open
+- The Summary was recomputing forecast from a shared per-render memo (`CALC_MEMO`) that could hold stale figures, so target-vs-forecast numbers didn't always move after a plan-forecast change. It now clears the memo on every Summary open → forecast recomputes fresh from the current plan/overlay.
+- Targets were only re-fetched when country/channel changed (a guard), so a target changed on another tab/import/session wasn't picked up. The Summary now re-pulls saved targets every time it opens / on pill / tab / metric change (in-cell edits still update locally without a round-trip). "Rev + targets" now reflects the latest saved targets.
+- KNOWN LIMIT: a forecast refreshed **server-side** (n8n job, or a Save Forecasts from another session) is still only reflected after a page reload — the base forecast dataset is injected at page load. In-session plan edits are fine.
+
 ## v27.089 SSM finalise: fix seasonal pre-buy over-extension
 - The seasonal pre-buy was targeting the LAST forward month with demand, so a SKU flagged Seasonal that actually sells ~all year got an 8+ month pre-buy and its 3PL buy roughly doubled (220 of 337 seasonal SKUs sold 10+ months). `ssmSeasonEndWeeks` now detects the FIRST contiguous forward demand block (skips leading pre-season zeros so an upcoming season still pre-buys; ends on a sustained 2-month zero gap so single-month dips don't false-end it) and returns 0 when the block never stops within the horizon (year-round → steady-state).
 - `ssmCoverWeeks` only pre-buys when that window is a genuinely short season (<= `seasonMaxWk`, default 30). Longer/continuous seasons use steady-state cover (they can reorder within the window).

@@ -9297,6 +9297,7 @@ function renderSummaryReport(body){
 }
 function renderSummaryView(body){
   try{ zalInit(); }catch(e){} try{ tikInit(); }catch(e){}   // ensure the EU ZAL channel (av 'z' + synth DATA rows) is wired if the Summary is opened before the plan renders
+  CALC_MEMO={};   // recompute forecast fresh every time the Summary opens so it reflects the latest plan edits (the memo is shared with the plan and can hold stale figures) — Ben "should update as forecasts update"
   function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function fn2(n){ n=Math.round(Number(n)||0); return n?n.toLocaleString():''; }
   var _curCcy='GBP', _symC='£';   // display currency (set once co is known); mf() uses the resolved symbol
@@ -9639,7 +9640,11 @@ function renderSummaryView(body){
   }
   // Only (re)fetch targets when they're actually shown (Rev+targets metric or editing). Otherwise draw immediately —
   // no async gap, so switching country/channel pills doesn't blank-flash the table.
-  if((SUMM_METRIC==='revtgt'||SUMM_TGT_EDIT) && SUMM_TGT_KEY!==(co+'|'+ch)){ SUMM_TGT={}; SUMM_TGT_GBP={}; draw();   // paint the styled grid immediately (no blank/unstyled flash), then fill targets when the fetch returns
+  // Always re-pull targets when the Summary/edit view is (re)opened so it reflects the latest saved targets — including
+  // ones changed on another tab, by an import, or in another session (the old SUMM_TGT_KEY guard skipped the re-fetch
+  // while you stayed on the same country/channel, so external target changes went unseen). In-cell edits still update
+  // SUMM_TGT locally + draw() without a round-trip; this only re-fetches on a full view render (open / pill / tab / metric).
+  if(SUMM_METRIC==='revtgt'||SUMM_TGT_EDIT){ var _hadKey=(SUMM_TGT_KEY===(co+'|'+ch)); if(!_hadKey){ SUMM_TGT={}; SUMM_TGT_GBP={}; } draw();   // paint immediately (no blank flash); keep existing targets on a same-market re-render, refresh them below
     fetch('/api/demand-revenue-targets/periods?country='+encodeURIComponent(co)+'&channel='+encodeURIComponent(ch)).then(function(r){return r.json();}).then(function(rows){ SUMM_TGT={}; SUMM_TGT_GBP={}; (rows||[]).forEach(function(t){ var k=t.fy+'|'+(t.subcategory||'')+'|'+t.level+'|'+t.idx; if(t.growth_pct!=null)SUMM_TGT[k]=t.growth_pct; if(t.target_gbp!=null)SUMM_TGT_GBP[k]=Number(t.target_gbp); }); SUMM_TGT_KEY=co+'|'+ch; draw(); }).catch(function(){ SUMM_TGT_KEY=co+'|'+ch; draw(); }); }
   else draw();
 }
