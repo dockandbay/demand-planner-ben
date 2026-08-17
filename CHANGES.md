@@ -1,3 +1,6 @@
+## v27.081 DEMAND ▸ Config group (nav overhaul stage 4 — final)
+- New **Config** group in the DEMAND nav: **Contribution model · Buy plan logic · Discontinued sub-categories**, deep-linked #/demand/config/<item>. Buy plan logic is artefact-native; Contribution model + Discontinued sub-categories were lifted out of the SUPPLY config machinery to module-scope window functions (hzCfgContribModel/hzCfgRunoffSubs) so they render natively on the DEMAND surface. Removed the Demand group from the ⚙ cog CONFIG; legacy #/config/demand/<item> redirects to #/demand/config/<item>.
+
 ## v27.080 CONFIG ▸ Suggestions table: 40% Suggestion column, merged Status, wrapping stakeholders
 - Suggestion column now fills 40% of the table (table-layout:fixed + colgroup); remaining columns share the rest.
 - Merged the read-only Status chip + the Set-status dropdown into a single editable **Status** field (the dropdown).

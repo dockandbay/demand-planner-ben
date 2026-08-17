@@ -8763,7 +8763,7 @@ function render(){
     var _sb=document.getElementById('statusbar');
     ['st','ver'].forEach(function(id){ var el=document.getElementById(id); if(_sb&&el&&el.parentNode!==_sb){ if(id==='st'){el.removeAttribute('style');el.className='status';} else {el.style.cssText='color:#0f172a;background:#fbbf24;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:800;line-height:1.2;letter-spacing:.02em;margin-left:auto;white-space:nowrap;position:relative';} _sb.appendChild(el); } });   // amber badge, matches SUPPLY
     if(_sb)_sb.style.display='';
-    ['demand-tabs','demand-inputs-nav','demand-analysis-nav','demand-scenario-nav','demand-exceptions-nav','demand-body'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
+    ['demand-tabs','demand-inputs-nav','demand-analysis-nav','demand-config-nav','demand-scenario-nav','demand-exceptions-nav','demand-body'].forEach(function(id){var e=document.getElementById(id);if(e)e.remove();});
   }
   // Leaving the BUY & MOVE group → tear down its sub-nav + the ACTIONS/TRANSFER pages.
   var _inBM=(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='zalando'||VIEW_MODE==='inventory');
@@ -8806,7 +8806,10 @@ function render(){
     else if(DEMAND_VIEW==='exceptions') renderExceptionsView(body);   // DEMAND ▸ Exceptions — current-month forecast-vs-actual risk report (#/demand/exceptions)
     else if(DEMAND_VIEW==='accuracy') renderAccuracyView(body);   // DEMAND ▸ Accuracy — forecast accuracy & bias vs locked snapshots (#/demand/accuracy)
     else if(DEMAND_VIEW==='safetystock') renderSafetyStockView(body);   // DEMAND ▸ Safety stock — service-level safety-stock recommendation (run alongside)
-    // Buy-plan logic switch moved to CONFIG ▸ Demand ▸ Buy plan logic (renderBuyPlanView reused there)
+    // DEMAND ▸ Config group (#/demand/config/<item>): Buy plan logic (native), Contribution model + Discontinued sub-cats (rendered via the SUPPLY-side config panels, lifted to window.hzCfg*).
+    else if(DEMAND_VIEW==='buyplan') renderBuyPlanView(body);
+    else if(DEMAND_VIEW==='contribmodel'){ if(window.hzCfgContribModel)window.hzCfgContribModel(body); else body.innerHTML='<div style="padding:22px;color:#94a3b8;font-size:13px">Config panel not loaded yet — open the SUPPLY tab once, then retry.</div>'; }
+    else if(DEMAND_VIEW==='runoffsubs'){ if(window.hzCfgRunoffSubs)window.hzCfgRunoffSubs(body); else body.innerHTML='<div style="padding:22px;color:#94a3b8;font-size:13px">Config panel not loaded yet — open the SUPPLY tab once, then retry.</div>'; }
     else if(DEMAND_VIEW==='shipbags') renderShipBagView(body);   // DEMAND ▸ Ship bags — packaging forecast from units→orders
     else renderDemandActionsView(body);
     return;
@@ -10415,14 +10418,15 @@ function renderDemandTabs(){
     // sit directly below the main tabs but ABOVE the filters (same header column, right after the tab row)
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   // Primary tabs inline; the reference/input views (Sell-through targets, Key accounts, Calendar, Revenue) are grouped under an "Inputs ▾" dropdown.
-  var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['snapshots']='Snapshots';
-  var PRIMARY=['plan','kpis','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','snapshots','trends','safetystock','shipbags'], INPUTS=['targets','keyaccounts','calendar','pricechanges','klaviyobis'];
-  var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0, _anlActive=ANALYSIS.indexOf(DEMAND_VIEW)>=0;
+  var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['snapshots']='Snapshots'; _dlbl['contribmodel']='Contribution model'; _dlbl['buyplan']='Buy plan logic'; _dlbl['runoffsubs']='Discontinued sub-categories';
+  var PRIMARY=['plan','kpis','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','snapshots','trends','safetystock','shipbags'], CONFIGD=['contribmodel','buyplan','runoffsubs'], INPUTS=['targets','keyaccounts','calendar','pricechanges','klaviyobis'];
+  var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0, _anlActive=ANALYSIS.indexOf(DEMAND_VIEW)>=0, _cfgActive=CONFIGD.indexOf(DEMAND_VIEW)>=0;
   var _isPlanV=(DEMAND_VIEW==='plan');
   // Release Window now lives in the More Filters panel; Undo + Download now sit on the right of the plan controls
   // row (#filters-row2), not on this tab menu row. (Ben: keep the tab menu clean.)
   bar.innerHTML=PRIMARY.map(function(k){ if(!_dlbl[k])return ''; return '<button class="dnav'+(k===DEMAND_VIEW?' active':'')+'" data-d="'+k+'">'+_dlbl[k]+'</button>'; }).join('')
     +'<button class="dnav'+(_anlActive?' active':'')+'" id="dnav-analysis-btn" title="Summary, Snapshots, Trends, Safety stock, Ship bags">Analysis</button>'
+    +'<button class="dnav'+(_cfgActive?' active':'')+'" id="dnav-config-btn" title="Contribution model, Buy plan logic, Discontinued sub-categories">Config</button>'
     +'<button class="dnav'+(_inpActive?' active':'')+'" id="dnav-inputs-btn" title="Sell-through targets, Key accounts, Calendar, Price changes">Inputs</button>';
   if(_isPlanV){ try{ fillPlanRwSel(); }catch(e){} try{ updateUndoBtn(); }catch(e){} }
   bar.querySelectorAll('.dnav[data-d]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); VIEW_MODE='planning'; DEMAND_VIEW=b.dataset.d; if(window.writeHash)window.writeHash(['demand',DEMAND_VIEW]); render(); }; });   // a demand sub-tab is a planning view — force planning mode
@@ -10446,6 +10450,15 @@ function renderDemandTabs(){
     _an3.innerHTML=ANALYSIS.map(function(k){return '<button class="d3tab'+(k===DEMAND_VIEW?' active':'')+'" data-da="'+k+'">'+(_dlbl[k]||k)+'</button>';}).join('');
     _an3.querySelectorAll('[data-da]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); VIEW_MODE='planning'; DEMAND_VIEW=b.dataset.da; if(window.writeHash)window.writeHash(['demand','analysis',DEMAND_VIEW]); render(); }; });
   } else if(_an3){ _an3.style.display='none'; _an3.innerHTML=''; }
+  // "Config" group (Contribution model, Buy plan logic, Discontinued sub-categories) — L2 button + L3 nav, deep-linked #/demand/config/<slug>.
+  var _cb2=document.getElementById('dnav-config-btn'); if(_cb2)_cb2.onclick=function(e){ e.stopPropagation(); VIEW_MODE='planning'; if(CONFIGD.indexOf(DEMAND_VIEW)<0)DEMAND_VIEW=CONFIGD[0]; if(window.writeHash)window.writeHash(['demand','config',DEMAND_VIEW]); render(); };
+  var _cf3=document.getElementById('demand-config-nav');
+  if(_cfgActive){
+    if(!_cf3){ _cf3=document.createElement('div'); _cf3.id='demand-config-nav'; bar.parentNode.insertBefore(_cf3, bar.nextSibling); }
+    _cf3.className='d3nav'; _cf3.style.display=''; _cf3.style.marginTop='6px';
+    _cf3.innerHTML=CONFIGD.map(function(k){return '<button class="d3tab'+(k===DEMAND_VIEW?' active':'')+'" data-dc="'+k+'">'+(_dlbl[k]||k)+'</button>';}).join('');
+    _cf3.querySelectorAll('[data-dc]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); VIEW_MODE='planning'; DEMAND_VIEW=b.dataset.dc; if(window.writeHash)window.writeHash(['demand','config',DEMAND_VIEW]); render(); }; });
+  } else if(_cf3){ _cf3.style.display='none'; _cf3.innerHTML=''; }
   // Scenario planner L3 (light-blue d3nav) — the 5 scenario tools, deep-linked #/demand/scenario/<key>. Rendered inline
   // here (identical shape to the Inputs L3 above) using the SUPPLY-exposed window.SCEN_SECTIONS / window.scenCur().
   var _sc3=document.getElementById('demand-scenario-nav');

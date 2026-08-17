@@ -6184,7 +6184,7 @@
     var sr=document.getElementById('supply-root');
     if(sr && sr.classList.contains('hz-drawer-overlay') && !document.getElementById('podrawer-bg') && !document.getElementById('shipdrawer-bg')){ sr.classList.remove('hz-drawer-overlay'); sr.style.display='none'; }
     if(!silent){ _poPatchRow=_poDrawerPrevPatch; _poRefresh=_poDrawerPrevRefresh; _poDrawerPrevPatch=null; _poDrawerPrevRefresh=null; } }
-  try{ window.openPODrawer=openPODrawer; window.closePODrawer=closePODrawer; }catch(e){}   // let the DEMAND/BUY artifact (inbound PO links in the plan popup) open the PO drawer
+  try{ window.openPODrawer=openPODrawer; window.closePODrawer=closePODrawer; window.hzCfgContribModel=hzCfgContribModel; window.hzCfgRunoffSubs=hzCfgRunoffSubs; }catch(e){}   // let the DEMAND/BUY artifact open the PO drawer + render the lifted config panels (DEMAND ▸ Config)
   // (Removed dead unassignedTable + bindAssign — superseded by the shipments-assign flow. v25.652)
 
   // ---- SETTINGS (landed-cost rate cards: import tax by country, freight by lane × size) ----
@@ -6237,6 +6237,140 @@
     el.style.display='block'; el.textContent='👁 Read-only access — you don’t have '+(inConfig?'CONFIG':'SUPPLY')+' edit rights here. Edits are rejected; ask an admin (CONFIG ▸ Permissions).'; }
   var _cfgBomInner='mfg';   // CONFIG ▸ BOM inner sub-tab: 'mfg' (Manufacturing) | 'set' (Build on Fly Sets)
   var _cmCo='ALL',_cmCh='ALL',_cmModel={};   // CONFIG ▸ Demand ▸ Contribution model: scope selection + saved/edited overrides (SETS feature P3)
+  // Lifted from the config SUBS closure so DEMAND ▸ Config renders them natively (target element param).
+      function hzCfgContribModel(b){
+        b.innerHTML='<div class="count">Loading…</div>';
+        var SUBLIST=[]; try{ if(typeof ACTIVE_SUBS!=='undefined'&&ACTIVE_SUBS&&ACTIVE_SUBS.size){ ACTIVE_SUBS.forEach(function(s){SUBLIST.push(s);}); } else if(typeof SUBS_META!=='undefined'){ for(var k in SUBS_META){ if(SUBS_META[k]&&SUBS_META[k].a)SUBLIST.push(k); } } }catch(e){}
+        SUBLIST.sort();
+        if(!SUBLIST.length){ b.innerHTML='<div class="count">Open the planner (DEMAND) first so the sub-category list loads, then reopen this tab.</div>'; return; }
+        var COS=['ALL','UK','US','EU','AU','CA'], CHS=['ALL','DTC','FBA','B2B'];
+        var DEF={A:50,B:25,C:25,sets:0};   // methodology default (today's CONTRIB_TARGETS is uniformly 50/25/25)
+        function st(v){ return v==='ALL'?'*':v; }
+        function keyOf(co,ch,sub){ return st(co)+'|'+st(ch)+'|'+sub; }
+        function parents(co,ch){ var co2=st(co),ch2=st(ch),out=[];   // scopes more general than (co,ch), precedence cell>channel>country>default
+          if(co2!=='*'&&ch2!=='*'){ out.push(['*',ch2]); out.push([co2,'*']); out.push(['*','*']); }
+          else if(co2!=='*'){ out.push(['*','*']); }
+          else if(ch2!=='*'){ out.push(['*','*']); }
+          return out; }
+        function inherited(co,ch,sub){ var ps=parents(co,ch); for(var i=0;i<ps.length;i++){ var v=_cmModel[ps[i][0]+'|'+ps[i][1]+'|'+sub]; if(v)return {val:v,from:ps[i]}; } return {val:DEF,from:null}; }
+        function scopeLabel(co,ch){ return (co==='ALL'?'All countries':co)+' · '+(ch==='ALL'?'All channels':ch); }
+        function fromLabel(f){ if(!f)return 'default'; return (f[0]==='*'?'All':f[0])+'·'+(f[1]==='*'?'All':f[1]); }
+        // Auto-save: every edit persists to app_settings (debounced) with a light-green flash on the cell to confirm the commit.
+        var _cmSaveT=null;
+        function flashGreen(el){ if(!el)return; el.style.transition='background-color .12s'; var _revert=el.style.backgroundColor; el.style.backgroundColor='#bbf7d0';
+          setTimeout(function(){ el.style.backgroundColor=_revert||''; setTimeout(function(){ try{el.style.transition='';}catch(e){} },200); },480); }
+        function cmSave(flashEl){
+          var msg=document.getElementById('cm-msg'); if(msg){ msg.textContent='Saving…'; msg.style.color='#64748b'; }
+          clearTimeout(_cmSaveT);
+          _cmSaveT=setTimeout(function(){
+            fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'contrib_model',value:JSON.stringify(_cmModel)})})
+              .then(function(r){return r.json();}).then(function(j){ var m=document.getElementById('cm-msg');
+                if(j&&j.error){ if(m){m.textContent='Save failed: '+j.error;m.style.color='#dc2626';} return; }
+                if(m){ m.textContent='Saved ✓'; m.style.color='#16a34a'; setTimeout(function(){ if(m&&m.textContent==='Saved ✓')m.textContent=''; },1400); }
+                if(flashEl)flashGreen(flashEl);
+              }).catch(function(e){ var m=document.getElementById('cm-msg'); if(m){m.textContent='Save failed';m.style.color='#dc2626';} });
+          },300);
+        }
+        function draw(){
+          var curCo=_cmCo,curCh=_cmCh;
+          var info='<div class="annot"><b>CONFIG ▸ Demand ▸ Contribution model.</b> The <b>A/B/C tier mix</b> per sub-category (how a sub-category’s forecast is split across its A/B/C-tier SKUs) plus the new <b>Sets vs SKUs</b> split.'
+            +'<br><b>How the forecast uses it:</b> when you <b>auto-smooth</b> a sub-category to its target in <b>Leader mode</b>, each tier receives its % of the target and historically-strong SKUs in that tier are floored so top performers aren’t diluted (see <b>▤ Forecast Logic</b> on the demand toolbar). The base month-by-month forecast (chained last-year + SKU contribution shares) is unchanged.'
+            +'<br>The <b>Sets %</b> reserves that share of the sub-category forecast for build-on-fly SETS — <i>stored now; wired into auto-forecast next</i>.'
+            +'<br><b>Cascade:</b> set a <b>Default</b> (All·All) once and it cascades to every country×channel; narrow the scope to override (most-specific wins: cell → channel → country → default). A/B/C is normalised to 100 at compute; SKUs % = 100 − Sets %.</div>';
+          function sel(id,opts,cur){ return '<select id="'+id+'" class="fci" style="font-size:12px;padding:3px 6px;text-align:left">'+opts.map(function(o){return '<option value="'+o+'"'+(o===cur?' selected':'')+'>'+(o==='ALL'?'All':o)+'</option>';}).join('')+'</select>'; }
+          var bar='<div style="display:flex;gap:14px;align-items:center;margin:8px 0 10px;flex-wrap:wrap">'
+            +'<span style="font-weight:600;font-size:13px;color:#334155">Scope</span>'
+            +'<label style="font-size:12px;color:#64748b">Country '+sel('cm-co',COS,curCo)+'</label>'
+            +'<label style="font-size:12px;color:#64748b">Channel '+sel('cm-ch',CHS,curCh)+'</label>'
+            +'<span class="mut tiny" style="font-style:italic">'+(curCo==='ALL'&&curCh==='ALL'?'editing the DEFAULT — cascades everywhere':'editing '+scopeLabel(curCo,curCh)+' — blank inherits from above')+'</span>'
+            +'<span class="mut tiny" style="margin-left:auto;font-style:italic">Changes auto-save</span>'
+            +'<span id="cm-msg" class="mut tiny" style="min-width:70px"></span></div>';
+          var head='<tr><th style="text-align:left;padding:4px 8px">Sub-category</th><th style="padding:4px 6px">A %</th><th style="padding:4px 6px">B %</th><th style="padding:4px 6px">C %</th><th style="padding:4px 6px;border-left:1px dashed #cbd5e1;color:#7c3aed">Sets %</th><th style="padding:4px 6px">SKUs %</th><th style="text-align:left;padding:4px 8px">Status</th></tr>';
+          function statHtml(sub,isOv,abc,fromF){ return isOv ? '<span style="color:#1d4ed8">● override <a class="cm-clr" data-sub="'+esc(sub)+'" title="Clear this override" style="cursor:pointer;color:#dc2626;font-weight:700">×</a></span>'
+                          : (abc===100?'<span style="color:#94a3b8">↑ '+fromLabel(fromF)+'</span>':'<span style="color:#b45309">⚠ '+abc+'% → normalises</span>'); }
+          var body=SUBLIST.map(function(sub){
+            var own=_cmModel[keyOf(curCo,curCh,sub)]||null, inh=inherited(curCo,curCh,sub), eff=own||inh.val, isOv=!!own;
+            var abc=(Number(eff.A)||0)+(Number(eff.B)||0)+(Number(eff.C)||0), over=abc>100, under=abc<100;
+            function inp(fld){ var val=eff[fld]!=null?eff[fld]:0, grey=!isOv, abg=(fld!=='sets')?(over?'#fee2e2':(under?'#ffedd5':'#fff')):'#fff';   // A/B/C cells: light-red >100%, light-orange <100%
+              return '<input class="cm-inp'+(grey?' cm-inh':'')+'" data-sub="'+esc(sub)+'" data-f="'+fld+'" value="'+val+'" onfocus="this.select()" style="width:60px;text-align:center;font-size:12px;padding:3px;border:1px solid '+(grey?'#e2e8f0':'#94a3b8')+';border-radius:4px;color:'+(grey?'#94a3b8':'#0f172a')+';background:'+abg+'">'; }
+            var skus=100-(Number(eff.sets)||0);
+            return '<tr data-sub="'+esc(sub)+'" style="border-top:1px solid #f1f5f9"><td style="text-align:left;padding:3px 8px">'+esc(sub)+'</td><td style="padding:3px 6px">'+inp('A')+'</td><td style="padding:3px 6px">'+inp('B')+'</td><td style="padding:3px 6px">'+inp('C')+'</td>'
+              +'<td style="padding:3px 6px;border-left:1px dashed #cbd5e1">'+inp('sets')+'</td><td class="cm-skus" data-sub="'+esc(sub)+'" style="padding:3px 6px;color:#64748b;text-align:center">'+skus+'</td><td class="cm-stat" data-sub="'+esc(sub)+'" style="text-align:left;padding:3px 8px;font-size:11px">'+statHtml(sub,isOv,abc,inh.from)+'</td></tr>';
+          }).join('');
+          b.innerHTML=info+bar+'<div style="max-height:calc(100vh - 340px);overflow:auto;border:1px solid #e2e8f0;border-radius:6px"><table style="border-collapse:collapse;font-size:12px;width:880px;table-layout:fixed">'
+            +'<colgroup><col style="width:240px"><col style="width:100px"><col style="width:100px"><col style="width:100px"><col style="width:100px"><col style="width:100px"><col style="width:140px"></colgroup>'
+            +'<thead style="position:sticky;top:0;background:#e2e8f0">'+head+'</thead><tbody>'+body+'</tbody></table></div>';
+          document.getElementById('cm-co').onchange=function(){ _cmCo=this.value; draw(); };
+          document.getElementById('cm-ch').onchange=function(){ _cmCh=this.value; draw(); };
+          function rowEls(sub,cls){ return Array.prototype.filter.call(b.querySelectorAll('.'+cls),function(el){return el.dataset.sub===sub;}); }
+          function wireClr(a){ a.onclick=function(){ delete _cmModel[keyOf(_cmCo,_cmCh,a.dataset.sub)]; draw(); cmSave(); }; }
+          // Patch a single row IN PLACE after an edit — no full re-render, so focus + Tab survive.
+          function patchRow(sub){
+            var own=_cmModel[keyOf(_cmCo,_cmCh,sub)]||null, isOv=!!own, inh2=inherited(_cmCo,_cmCh,sub), eff=own||inh2.val;
+            var abc=(Number(eff.A)||0)+(Number(eff.B)||0)+(Number(eff.C)||0), over=abc>100, under=abc<100;
+            rowEls(sub,'cm-inp').forEach(function(el){ var isAbc=el.dataset.f!=='sets';
+              el.style.border='1px solid '+(isOv?'#94a3b8':'#e2e8f0'); el.style.color=isOv?'#0f172a':'#94a3b8';
+              el.style.background=isAbc?(over?'#fee2e2':(under?'#ffedd5':'#fff')):'#fff';
+              if(document.activeElement!==el){ el.value=(eff[el.dataset.f]!=null?eff[el.dataset.f]:0); } });
+            var sk=rowEls(sub,'cm-skus')[0]; if(sk)sk.textContent=100-(Number(eff.sets)||0);
+            var stc=rowEls(sub,'cm-stat')[0]; if(stc){ stc.innerHTML=statHtml(sub,isOv,abc,inh2.from); var c=stc.querySelector('.cm-clr'); if(c)wireClr(c); }
+          }
+          b.querySelectorAll('.cm-inp').forEach(function(el){ el.onchange=function(){
+            var sub=el.dataset.sub, f=el.dataset.f, v=Math.max(0,Math.min(100,parseInt(el.value)||0)), k=keyOf(_cmCo,_cmCh,sub);
+            el.value=v; if(!_cmModel[k]){ var base=inherited(_cmCo,_cmCh,sub).val; _cmModel[k]={A:base.A,B:base.B,C:base.C,sets:base.sets}; }
+            _cmModel[k][f]=v; patchRow(sub); cmSave(el); }; });   // auto-save + green flash on commit
+          b.querySelectorAll('.cm-clr').forEach(wireClr);
+        }
+        fetch('/api/app-settings').then(function(r){return r.json();}).then(function(s){ s=s||{};
+          try{ _cmModel=s.contrib_model?JSON.parse(s.contrib_model):{}; }catch(e){ _cmModel={}; }
+          draw();
+        }).catch(function(){ _cmModel={}; draw(); });
+      };
+      // ── CONFIG ▸ Demand ▸ Discontinued sub-categories ──
+      // Per-inactive-subcat toggle: show as ⌀ run-off (wind down remaining stock, auto-hide <50u) vs HIDE TOTALLY
+      // (blanket-drop a retired shell whose live SKUs were reassigned in the PIM). Stored in app_settings.runoff_hidden_subs.
+      function hzCfgRunoffSubs(b){
+        b.innerHTML='<div class="count">Loading…</div>';
+        function _e(x){ return String(x==null?'':x).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+        var INACT=[]; try{ if(typeof SUBS_META!=='undefined'){ for(var k in SUBS_META){ if(SUBS_META[k]&&SUBS_META[k].a===false)INACT.push(k); } } }catch(e){}
+        INACT.sort();
+        if(!INACT.length){ b.innerHTML='<div class="count">No inactive sub-categories — or open the planner (DEMAND) first so the list loads, then reopen this tab.</div>'; return; }
+        var _roHidden=[], _roSaveT=null;
+        function roSave(){
+          var m=document.getElementById('ro-msg'); if(m){ m.textContent='Saving…'; m.style.color='#64748b'; }
+          clearTimeout(_roSaveT);
+          _roSaveT=setTimeout(function(){
+            fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'runoff_hidden_subs',value:JSON.stringify(_roHidden)})})
+              .then(function(r){return r.json();}).then(function(j){ var m2=document.getElementById('ro-msg');
+                if(j&&j.error){ if(m2){m2.textContent='Save failed: '+j.error;m2.style.color='#dc2626';} return; }
+                if(m2){ m2.textContent='Saved ✓ — reload the demand plan to see the change'; m2.style.color='#16a34a'; }
+              }).catch(function(){ var m2=document.getElementById('ro-msg'); if(m2){m2.textContent='Save failed';m2.style.color='#dc2626';} });
+          },300);
+        }
+        function draw(){
+          var info='<div class="annot"><b>CONFIG ▸ Demand ▸ Discontinued sub-categories.</b> Sub-categories flagged <b>inactive</b> in the PIM. By default they show in the demand plan as <b>∅ run-off</b> — selling down remaining stock, then auto-hidden below <b>50 units</b> (on-hand+inbound) per country×channel. Tick <b>Hide totally</b> for a retired shell instead (e.g. a SEASONAL bucket whose live SKUs were reassigned to the combined category). Hidden sub-categories never show and never affect the buy plan.</div>';
+          var rows=INACT.map(function(s){ var hid=_roHidden.indexOf(s)>=0;
+            return '<tr data-sub="'+_e(s)+'"><td style="padding:5px 12px;border-bottom:1px solid #eef2f7;text-align:left">'+_e(s)+'</td>'
+              +'<td style="padding:5px 12px;border-bottom:1px solid #eef2f7;text-align:center">'+(hid?'<span style="font-size:11px;color:#94a3b8">hidden</span>':'<span style="font-size:8px;font-weight:700;color:#92400e;background:#fef3c7;border:1px solid #fcd34d;border-radius:3px;padding:1px 4px">∅ RUN-OFF</span>')+'</td>'
+              +'<td style="padding:5px 12px;border-bottom:1px solid #eef2f7;text-align:center"><label style="font-size:12px;color:#334155;cursor:pointer;white-space:nowrap"><input type="checkbox" class="ro-hide" data-sub="'+_e(s)+'"'+(hid?' checked':'')+' style="vertical-align:middle;margin-right:5px">Hide totally</label></td></tr>';
+          }).join('');
+          b.innerHTML=info+'<div id="ro-msg" style="font-size:12px;min-height:16px;margin:6px 2px"></div>'
+            +'<table style="border-collapse:collapse;font-size:13px"><thead><tr>'
+            +'<th style="text-align:left;padding:5px 12px;border-bottom:2px solid #cbd5e1">Inactive sub-category</th>'
+            +'<th style="padding:5px 12px;border-bottom:2px solid #cbd5e1">Plan display</th>'
+            +'<th style="padding:5px 12px;border-bottom:2px solid #cbd5e1"> </th></tr></thead><tbody>'+rows+'</tbody></table>';
+          b.querySelectorAll('.ro-hide').forEach(function(cb){ cb.onchange=function(){ var s=cb.dataset.sub, i=_roHidden.indexOf(s);
+            if(cb.checked){ if(i<0)_roHidden.push(s); } else { if(i>=0)_roHidden.splice(i,1); }
+            draw(); roSave(); }; });
+        }
+        fetch('/api/app-settings').then(function(r){return r.json();}).then(function(s){ s=s||{};
+          try{ _roHidden=s.runoff_hidden_subs?JSON.parse(s.runoff_hidden_subs):[]; }catch(e){ _roHidden=[]; }
+          if(!Array.isArray(_roHidden))_roHidden=[];
+          draw();
+        }).catch(function(){ _roHidden=[]; draw(); });
+      };
+      SUBS['email-notifications']=SUBS['general'];   // 'General settings' page re-homed under Admin ▸ Email notifications (same renderer)
+  try{ window.hzCfgContribModel=hzCfgContribModel; window.hzCfgRunoffSubs=hzCfgRunoffSubs; }catch(e){}
   function renderConfig(d){ var c=document.getElementById('supply-content'); var sizes=d.sizes||[];
     // CONFIG nav is two tiers: level-2 tabs (like every other page) + a "Supply chain" tab that,
     // when active, expands a level-3 row of its member config tabs.
@@ -6250,7 +6384,7 @@
     // L2 groups are scoped by CONFIG_CTX: 'supply' (SUPPLY ▸ CONFIG) vs 'admin' (the ⚙ cog CONFIG section).
     var L2;
     if(CONFIG_CTX==='supply'){ L2=[['suppliers','Suppliers'],['batches','Batches'],['productions','Productions'],['keyaccounts','Key accounts'],['portal','Portal'],['portalusers','Portal users'],['mfgbom','BOM'],['branches','Branches'],['freight','Freight rates'],['tax','Import tax'],['products','Products'],['barcodegen','Barcodes'],['duty','Import duty'],['consignees','Consignees']]; }   // flat (Supply chain group removed); Ben's order + duty/consignees appended
-    else { L2=[['demand','Demand'],['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']]; if(ME&&ME.is_admin)L2.unshift(['admin','Admin']); }   // ('demand' moves to DEMAND ▸ Config in stage 4)
+    else { L2=[['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']]; if(ME&&ME.is_admin)L2.unshift(['admin','Admin']); }   // 'demand' group moved to DEMAND ▸ Config
     if(CONFIG_SUB==='forecast-export')CONFIG_SUB='export-uploads';   // legacy slug redirect
     if((CONFIG_SUB==='email-notifications'||CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log'||CONFIG_SUB==='admin-general'||CONFIG_SUB==='exchange-rates'||CONFIG_SUB==='channels')&&!(ME&&ME.is_admin))CONFIG_SUB='export-uploads';   // guard: non-admins can't land on admin-only tabs (General/email-notifications now admin-only)
     function reload(){ delete cache['config']; selectSection('config'); }   // refresh after a rate add (keeps sub-tab)
@@ -7543,138 +7677,8 @@
       SUBS['buyplan']=function(){   // CONFIG ▸ Demand ▸ Buy plan logic — reuses the artefact's renderBuyPlanView (setting + explainer)
         if(typeof window.renderBuyPlanView==='function'){ try{ window.renderBuyPlanView(b); return; }catch(e){} }
         b.innerHTML='<div class="count" style="color:#dc2626">Buy plan settings unavailable — reload the page.</div>'; };
-      SUBS['contribmodel']=function(){
-        b.innerHTML='<div class="count">Loading…</div>';
-        var SUBLIST=[]; try{ if(typeof ACTIVE_SUBS!=='undefined'&&ACTIVE_SUBS&&ACTIVE_SUBS.size){ ACTIVE_SUBS.forEach(function(s){SUBLIST.push(s);}); } else if(typeof SUBS_META!=='undefined'){ for(var k in SUBS_META){ if(SUBS_META[k]&&SUBS_META[k].a)SUBLIST.push(k); } } }catch(e){}
-        SUBLIST.sort();
-        if(!SUBLIST.length){ b.innerHTML='<div class="count">Open the planner (DEMAND) first so the sub-category list loads, then reopen this tab.</div>'; return; }
-        var COS=['ALL','UK','US','EU','AU','CA'], CHS=['ALL','DTC','FBA','B2B'];
-        var DEF={A:50,B:25,C:25,sets:0};   // methodology default (today's CONTRIB_TARGETS is uniformly 50/25/25)
-        function st(v){ return v==='ALL'?'*':v; }
-        function keyOf(co,ch,sub){ return st(co)+'|'+st(ch)+'|'+sub; }
-        function parents(co,ch){ var co2=st(co),ch2=st(ch),out=[];   // scopes more general than (co,ch), precedence cell>channel>country>default
-          if(co2!=='*'&&ch2!=='*'){ out.push(['*',ch2]); out.push([co2,'*']); out.push(['*','*']); }
-          else if(co2!=='*'){ out.push(['*','*']); }
-          else if(ch2!=='*'){ out.push(['*','*']); }
-          return out; }
-        function inherited(co,ch,sub){ var ps=parents(co,ch); for(var i=0;i<ps.length;i++){ var v=_cmModel[ps[i][0]+'|'+ps[i][1]+'|'+sub]; if(v)return {val:v,from:ps[i]}; } return {val:DEF,from:null}; }
-        function scopeLabel(co,ch){ return (co==='ALL'?'All countries':co)+' · '+(ch==='ALL'?'All channels':ch); }
-        function fromLabel(f){ if(!f)return 'default'; return (f[0]==='*'?'All':f[0])+'·'+(f[1]==='*'?'All':f[1]); }
-        // Auto-save: every edit persists to app_settings (debounced) with a light-green flash on the cell to confirm the commit.
-        var _cmSaveT=null;
-        function flashGreen(el){ if(!el)return; el.style.transition='background-color .12s'; var _revert=el.style.backgroundColor; el.style.backgroundColor='#bbf7d0';
-          setTimeout(function(){ el.style.backgroundColor=_revert||''; setTimeout(function(){ try{el.style.transition='';}catch(e){} },200); },480); }
-        function cmSave(flashEl){
-          var msg=document.getElementById('cm-msg'); if(msg){ msg.textContent='Saving…'; msg.style.color='#64748b'; }
-          clearTimeout(_cmSaveT);
-          _cmSaveT=setTimeout(function(){
-            fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'contrib_model',value:JSON.stringify(_cmModel)})})
-              .then(function(r){return r.json();}).then(function(j){ var m=document.getElementById('cm-msg');
-                if(j&&j.error){ if(m){m.textContent='Save failed: '+j.error;m.style.color='#dc2626';} return; }
-                if(m){ m.textContent='Saved ✓'; m.style.color='#16a34a'; setTimeout(function(){ if(m&&m.textContent==='Saved ✓')m.textContent=''; },1400); }
-                if(flashEl)flashGreen(flashEl);
-              }).catch(function(e){ var m=document.getElementById('cm-msg'); if(m){m.textContent='Save failed';m.style.color='#dc2626';} });
-          },300);
-        }
-        function draw(){
-          var curCo=_cmCo,curCh=_cmCh;
-          var info='<div class="annot"><b>CONFIG ▸ Demand ▸ Contribution model.</b> The <b>A/B/C tier mix</b> per sub-category (how a sub-category’s forecast is split across its A/B/C-tier SKUs) plus the new <b>Sets vs SKUs</b> split.'
-            +'<br><b>How the forecast uses it:</b> when you <b>auto-smooth</b> a sub-category to its target in <b>Leader mode</b>, each tier receives its % of the target and historically-strong SKUs in that tier are floored so top performers aren’t diluted (see <b>▤ Forecast Logic</b> on the demand toolbar). The base month-by-month forecast (chained last-year + SKU contribution shares) is unchanged.'
-            +'<br>The <b>Sets %</b> reserves that share of the sub-category forecast for build-on-fly SETS — <i>stored now; wired into auto-forecast next</i>.'
-            +'<br><b>Cascade:</b> set a <b>Default</b> (All·All) once and it cascades to every country×channel; narrow the scope to override (most-specific wins: cell → channel → country → default). A/B/C is normalised to 100 at compute; SKUs % = 100 − Sets %.</div>';
-          function sel(id,opts,cur){ return '<select id="'+id+'" class="fci" style="font-size:12px;padding:3px 6px;text-align:left">'+opts.map(function(o){return '<option value="'+o+'"'+(o===cur?' selected':'')+'>'+(o==='ALL'?'All':o)+'</option>';}).join('')+'</select>'; }
-          var bar='<div style="display:flex;gap:14px;align-items:center;margin:8px 0 10px;flex-wrap:wrap">'
-            +'<span style="font-weight:600;font-size:13px;color:#334155">Scope</span>'
-            +'<label style="font-size:12px;color:#64748b">Country '+sel('cm-co',COS,curCo)+'</label>'
-            +'<label style="font-size:12px;color:#64748b">Channel '+sel('cm-ch',CHS,curCh)+'</label>'
-            +'<span class="mut tiny" style="font-style:italic">'+(curCo==='ALL'&&curCh==='ALL'?'editing the DEFAULT — cascades everywhere':'editing '+scopeLabel(curCo,curCh)+' — blank inherits from above')+'</span>'
-            +'<span class="mut tiny" style="margin-left:auto;font-style:italic">Changes auto-save</span>'
-            +'<span id="cm-msg" class="mut tiny" style="min-width:70px"></span></div>';
-          var head='<tr><th style="text-align:left;padding:4px 8px">Sub-category</th><th style="padding:4px 6px">A %</th><th style="padding:4px 6px">B %</th><th style="padding:4px 6px">C %</th><th style="padding:4px 6px;border-left:1px dashed #cbd5e1;color:#7c3aed">Sets %</th><th style="padding:4px 6px">SKUs %</th><th style="text-align:left;padding:4px 8px">Status</th></tr>';
-          function statHtml(sub,isOv,abc,fromF){ return isOv ? '<span style="color:#1d4ed8">● override <a class="cm-clr" data-sub="'+esc(sub)+'" title="Clear this override" style="cursor:pointer;color:#dc2626;font-weight:700">×</a></span>'
-                          : (abc===100?'<span style="color:#94a3b8">↑ '+fromLabel(fromF)+'</span>':'<span style="color:#b45309">⚠ '+abc+'% → normalises</span>'); }
-          var body=SUBLIST.map(function(sub){
-            var own=_cmModel[keyOf(curCo,curCh,sub)]||null, inh=inherited(curCo,curCh,sub), eff=own||inh.val, isOv=!!own;
-            var abc=(Number(eff.A)||0)+(Number(eff.B)||0)+(Number(eff.C)||0), over=abc>100, under=abc<100;
-            function inp(fld){ var val=eff[fld]!=null?eff[fld]:0, grey=!isOv, abg=(fld!=='sets')?(over?'#fee2e2':(under?'#ffedd5':'#fff')):'#fff';   // A/B/C cells: light-red >100%, light-orange <100%
-              return '<input class="cm-inp'+(grey?' cm-inh':'')+'" data-sub="'+esc(sub)+'" data-f="'+fld+'" value="'+val+'" onfocus="this.select()" style="width:60px;text-align:center;font-size:12px;padding:3px;border:1px solid '+(grey?'#e2e8f0':'#94a3b8')+';border-radius:4px;color:'+(grey?'#94a3b8':'#0f172a')+';background:'+abg+'">'; }
-            var skus=100-(Number(eff.sets)||0);
-            return '<tr data-sub="'+esc(sub)+'" style="border-top:1px solid #f1f5f9"><td style="text-align:left;padding:3px 8px">'+esc(sub)+'</td><td style="padding:3px 6px">'+inp('A')+'</td><td style="padding:3px 6px">'+inp('B')+'</td><td style="padding:3px 6px">'+inp('C')+'</td>'
-              +'<td style="padding:3px 6px;border-left:1px dashed #cbd5e1">'+inp('sets')+'</td><td class="cm-skus" data-sub="'+esc(sub)+'" style="padding:3px 6px;color:#64748b;text-align:center">'+skus+'</td><td class="cm-stat" data-sub="'+esc(sub)+'" style="text-align:left;padding:3px 8px;font-size:11px">'+statHtml(sub,isOv,abc,inh.from)+'</td></tr>';
-          }).join('');
-          b.innerHTML=info+bar+'<div style="max-height:calc(100vh - 340px);overflow:auto;border:1px solid #e2e8f0;border-radius:6px"><table style="border-collapse:collapse;font-size:12px;width:880px;table-layout:fixed">'
-            +'<colgroup><col style="width:240px"><col style="width:100px"><col style="width:100px"><col style="width:100px"><col style="width:100px"><col style="width:100px"><col style="width:140px"></colgroup>'
-            +'<thead style="position:sticky;top:0;background:#e2e8f0">'+head+'</thead><tbody>'+body+'</tbody></table></div>';
-          document.getElementById('cm-co').onchange=function(){ _cmCo=this.value; draw(); };
-          document.getElementById('cm-ch').onchange=function(){ _cmCh=this.value; draw(); };
-          function rowEls(sub,cls){ return Array.prototype.filter.call(b.querySelectorAll('.'+cls),function(el){return el.dataset.sub===sub;}); }
-          function wireClr(a){ a.onclick=function(){ delete _cmModel[keyOf(_cmCo,_cmCh,a.dataset.sub)]; draw(); cmSave(); }; }
-          // Patch a single row IN PLACE after an edit — no full re-render, so focus + Tab survive.
-          function patchRow(sub){
-            var own=_cmModel[keyOf(_cmCo,_cmCh,sub)]||null, isOv=!!own, inh2=inherited(_cmCo,_cmCh,sub), eff=own||inh2.val;
-            var abc=(Number(eff.A)||0)+(Number(eff.B)||0)+(Number(eff.C)||0), over=abc>100, under=abc<100;
-            rowEls(sub,'cm-inp').forEach(function(el){ var isAbc=el.dataset.f!=='sets';
-              el.style.border='1px solid '+(isOv?'#94a3b8':'#e2e8f0'); el.style.color=isOv?'#0f172a':'#94a3b8';
-              el.style.background=isAbc?(over?'#fee2e2':(under?'#ffedd5':'#fff')):'#fff';
-              if(document.activeElement!==el){ el.value=(eff[el.dataset.f]!=null?eff[el.dataset.f]:0); } });
-            var sk=rowEls(sub,'cm-skus')[0]; if(sk)sk.textContent=100-(Number(eff.sets)||0);
-            var stc=rowEls(sub,'cm-stat')[0]; if(stc){ stc.innerHTML=statHtml(sub,isOv,abc,inh2.from); var c=stc.querySelector('.cm-clr'); if(c)wireClr(c); }
-          }
-          b.querySelectorAll('.cm-inp').forEach(function(el){ el.onchange=function(){
-            var sub=el.dataset.sub, f=el.dataset.f, v=Math.max(0,Math.min(100,parseInt(el.value)||0)), k=keyOf(_cmCo,_cmCh,sub);
-            el.value=v; if(!_cmModel[k]){ var base=inherited(_cmCo,_cmCh,sub).val; _cmModel[k]={A:base.A,B:base.B,C:base.C,sets:base.sets}; }
-            _cmModel[k][f]=v; patchRow(sub); cmSave(el); }; });   // auto-save + green flash on commit
-          b.querySelectorAll('.cm-clr').forEach(wireClr);
-        }
-        fetch('/api/app-settings').then(function(r){return r.json();}).then(function(s){ s=s||{};
-          try{ _cmModel=s.contrib_model?JSON.parse(s.contrib_model):{}; }catch(e){ _cmModel={}; }
-          draw();
-        }).catch(function(){ _cmModel={}; draw(); });
-      };
-      // ── CONFIG ▸ Demand ▸ Discontinued sub-categories ──
-      // Per-inactive-subcat toggle: show as ⌀ run-off (wind down remaining stock, auto-hide <50u) vs HIDE TOTALLY
-      // (blanket-drop a retired shell whose live SKUs were reassigned in the PIM). Stored in app_settings.runoff_hidden_subs.
-      SUBS['runoffsubs']=function(){
-        b.innerHTML='<div class="count">Loading…</div>';
-        function _e(x){ return String(x==null?'':x).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
-        var INACT=[]; try{ if(typeof SUBS_META!=='undefined'){ for(var k in SUBS_META){ if(SUBS_META[k]&&SUBS_META[k].a===false)INACT.push(k); } } }catch(e){}
-        INACT.sort();
-        if(!INACT.length){ b.innerHTML='<div class="count">No inactive sub-categories — or open the planner (DEMAND) first so the list loads, then reopen this tab.</div>'; return; }
-        var _roHidden=[], _roSaveT=null;
-        function roSave(){
-          var m=document.getElementById('ro-msg'); if(m){ m.textContent='Saving…'; m.style.color='#64748b'; }
-          clearTimeout(_roSaveT);
-          _roSaveT=setTimeout(function(){
-            fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'runoff_hidden_subs',value:JSON.stringify(_roHidden)})})
-              .then(function(r){return r.json();}).then(function(j){ var m2=document.getElementById('ro-msg');
-                if(j&&j.error){ if(m2){m2.textContent='Save failed: '+j.error;m2.style.color='#dc2626';} return; }
-                if(m2){ m2.textContent='Saved ✓ — reload the demand plan to see the change'; m2.style.color='#16a34a'; }
-              }).catch(function(){ var m2=document.getElementById('ro-msg'); if(m2){m2.textContent='Save failed';m2.style.color='#dc2626';} });
-          },300);
-        }
-        function draw(){
-          var info='<div class="annot"><b>CONFIG ▸ Demand ▸ Discontinued sub-categories.</b> Sub-categories flagged <b>inactive</b> in the PIM. By default they show in the demand plan as <b>∅ run-off</b> — selling down remaining stock, then auto-hidden below <b>50 units</b> (on-hand+inbound) per country×channel. Tick <b>Hide totally</b> for a retired shell instead (e.g. a SEASONAL bucket whose live SKUs were reassigned to the combined category). Hidden sub-categories never show and never affect the buy plan.</div>';
-          var rows=INACT.map(function(s){ var hid=_roHidden.indexOf(s)>=0;
-            return '<tr data-sub="'+_e(s)+'"><td style="padding:5px 12px;border-bottom:1px solid #eef2f7;text-align:left">'+_e(s)+'</td>'
-              +'<td style="padding:5px 12px;border-bottom:1px solid #eef2f7;text-align:center">'+(hid?'<span style="font-size:11px;color:#94a3b8">hidden</span>':'<span style="font-size:8px;font-weight:700;color:#92400e;background:#fef3c7;border:1px solid #fcd34d;border-radius:3px;padding:1px 4px">∅ RUN-OFF</span>')+'</td>'
-              +'<td style="padding:5px 12px;border-bottom:1px solid #eef2f7;text-align:center"><label style="font-size:12px;color:#334155;cursor:pointer;white-space:nowrap"><input type="checkbox" class="ro-hide" data-sub="'+_e(s)+'"'+(hid?' checked':'')+' style="vertical-align:middle;margin-right:5px">Hide totally</label></td></tr>';
-          }).join('');
-          b.innerHTML=info+'<div id="ro-msg" style="font-size:12px;min-height:16px;margin:6px 2px"></div>'
-            +'<table style="border-collapse:collapse;font-size:13px"><thead><tr>'
-            +'<th style="text-align:left;padding:5px 12px;border-bottom:2px solid #cbd5e1">Inactive sub-category</th>'
-            +'<th style="padding:5px 12px;border-bottom:2px solid #cbd5e1">Plan display</th>'
-            +'<th style="padding:5px 12px;border-bottom:2px solid #cbd5e1"> </th></tr></thead><tbody>'+rows+'</tbody></table>';
-          b.querySelectorAll('.ro-hide').forEach(function(cb){ cb.onchange=function(){ var s=cb.dataset.sub, i=_roHidden.indexOf(s);
-            if(cb.checked){ if(i<0)_roHidden.push(s); } else { if(i>=0)_roHidden.splice(i,1); }
-            draw(); roSave(); }; });
-        }
-        fetch('/api/app-settings').then(function(r){return r.json();}).then(function(s){ s=s||{};
-          try{ _roHidden=s.runoff_hidden_subs?JSON.parse(s.runoff_hidden_subs):[]; }catch(e){ _roHidden=[]; }
-          if(!Array.isArray(_roHidden))_roHidden=[];
-          draw();
-        }).catch(function(){ _roHidden=[]; draw(); });
-      };
-      SUBS['email-notifications']=SUBS['general'];   // 'General settings' page re-homed under Admin ▸ Email notifications (same renderer)
+      SUBS['contribmodel']=function(){ hzCfgContribModel(document.getElementById('config-body')); };
+      SUBS['runoffsubs']=function(){ hzCfgRunoffSubs(document.getElementById('config-body')); };
       (SUBS[CONFIG_SUB]||function(){})();
     }
     showSub();
@@ -9251,7 +9255,7 @@
   function writePoTabHash(po,tab){ if(!po)return; writeHash(['supply','purchase-orders',po,POTAB_SLUG[tab]||tab]); }   // #/supply/purchase-orders/<PO>/<tab-slug>
   // Friendly top-level view URLs: planning→#/demand/<sub>, exec→#/reports/<sub>, others as-is.
   function writeViewHash(v){
-    if(v==='planning'){ var _dv=(typeof DEMAND_VIEW!=='undefined'&&DEMAND_VIEW)||'plan'; var _dinp=['targets','keyaccounts','calendar','revenue','pricechanges','klaviyobis']; var _danl=['summary','accuracy','snapshots','trends','safetystock','shipbags']; writeHash(_dinp.indexOf(_dv)>=0?['demand','inputs',_dv]:(_danl.indexOf(_dv)>=0?['demand','analysis',_dv]:['demand',_dv])); }   // input → #/demand/inputs/<slug>; analysis → #/demand/analysis/<slug>
+    if(v==='planning'){ var _dv=(typeof DEMAND_VIEW!=='undefined'&&DEMAND_VIEW)||'plan'; var _dinp=['targets','keyaccounts','calendar','revenue','pricechanges','klaviyobis']; var _danl=['summary','accuracy','snapshots','trends','safetystock','shipbags']; var _dcfg=['contribmodel','buyplan','runoffsubs']; writeHash(_dinp.indexOf(_dv)>=0?['demand','inputs',_dv]:(_danl.indexOf(_dv)>=0?['demand','analysis',_dv]:(_dcfg.indexOf(_dv)>=0?['demand','config',_dv]:['demand',_dv]))); }   // input/analysis/config → #/demand/<group>/<slug>
     else if(v==='exec')writeHash(['reports',(typeof REPORT_VIEW!=='undefined'&&REPORT_VIEW)||'ex']);
     else if(v==='actions'||v==='buy'||v==='fba'||v==='transfer'){   // BUY & MOVE group: #/buy-move/<actions|buy|fba|transfer>
       var _sub=v;   // entering via the top BUY & MOVE button (data-view='actions') → restore the last sub-tab the user was on
@@ -9288,14 +9292,14 @@
     } else if(seg[0]==='config'){
       if(seg[1]==='admin'){ CONFIG_SUB=seg[2]||'email-notifications'; enterConfig(); }
       else if(seg[1]==='general'){ CONFIG_SUB='email-notifications'; enterConfig(); }   // redirect old General → Admin ▸ Email notifications
-      else if(seg[1]==='demand'){ CONFIG_SUB=seg[2]||'contribmodel'; enterConfig(); }   // (stage 4 will move to #/demand/config)
+      else if(seg[1]==='demand'){ if(typeof DEMAND_VIEW!=='undefined')DEMAND_VIEW=seg[2]||'buyplan'; var _dbb=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]'); if(_dbb)_dbb.click(); }   // legacy #/config/demand/<item> → DEMAND ▸ Config
       else if(seg[1]==='supplychain'){ enterSupplyConfig(seg[2]||'suppliers'); }        // redirect old supplychain group → SUPPLY ▸ CONFIG
       else if(seg[1]&&_SUPCFG_KEYS.indexOf(seg[1])>=0){ if(seg[1]==='portal'&&seg[2])_pendingPortalSup=decodeURIComponent(seg[2]); enterSupplyConfig(seg[1]); }   // redirect legacy #/config/<supply item> → SUPPLY ▸ CONFIG
       else if(seg[1]){ CONFIG_SUB=seg[1]; enterConfig(); }
       else enterConfig();
     }   // #/config/admin|demand/<item> nested; #/config/general → email-notifications; supply-group slugs redirect to #/supply/config; legacy #/config/<item> still resolves
     else if(seg[0]==='scenario'){ if(typeof DEMAND_VIEW!=='undefined')DEMAND_VIEW='scenario'; if(seg[1])scenCurrent=seg[1]; var _sdb=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]'); if(_sdb)_sdb.click(); }   // legacy #/scenario/<key> → redirect to DEMAND ▸ Scenario planner (#/demand/scenario/<key>)
-    else if(seg[0]==='demand'){ if(typeof DEMAND_VIEW!=='undefined'){ if(seg[1]==='scenario'){ DEMAND_VIEW='scenario'; if(seg[2])scenCurrent=seg[2]; } else if((seg[1]==='inputs'||seg[1]==='analysis')&&seg[2])DEMAND_VIEW=seg[2]; else if(seg[1]==='exceptions'){ DEMAND_VIEW='exceptions'; if(seg[2]&&typeof EXC_SUBTAB!=='undefined')window.EXC_SUBTAB=seg[2]; } else if(seg[1])DEMAND_VIEW=seg[1]; } var _db=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]'); if(_db)_db.click(); }   // #/demand/scenario/<key> + #/demand/inputs|analysis/<slug> + #/demand/exceptions/<slug> deep-links (legacy #/demand/<slug> still resolves)
+    else if(seg[0]==='demand'){ if(typeof DEMAND_VIEW!=='undefined'){ if(seg[1]==='scenario'){ DEMAND_VIEW='scenario'; if(seg[2])scenCurrent=seg[2]; } else if((seg[1]==='inputs'||seg[1]==='analysis'||seg[1]==='config')&&seg[2])DEMAND_VIEW=seg[2]; else if(seg[1]==='exceptions'){ DEMAND_VIEW='exceptions'; if(seg[2]&&typeof EXC_SUBTAB!=='undefined')window.EXC_SUBTAB=seg[2]; } else if(seg[1])DEMAND_VIEW=seg[1]; } var _db=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]'); if(_db)_db.click(); }   // #/demand/scenario/<key> + #/demand/inputs|analysis/<slug> + #/demand/exceptions/<slug> deep-links (legacy #/demand/<slug> still resolves)
     else if(seg[0]==='reports'){ if(seg[1]&&typeof REPORT_VIEW!=='undefined')REPORT_VIEW=seg[1]; var _rb=document.querySelector('#view-tabs-row .view-toggle[data-view="exec"]'); if(_rb)_rb.click(); }
     else if(seg[0]==='product'){ if(typeof showProduct==='function'){ showProduct();
       if(seg[1]&&seg[1]!=='plan'&&seg[1]!=='reports'){ _pendingProdRef=decodeURIComponent(seg[1]); if(seg[2])_pendingProdTab=decodeURIComponent(seg[2]); selectProductSub('plan'); }   // #/product/<ref>[/<tab>]
