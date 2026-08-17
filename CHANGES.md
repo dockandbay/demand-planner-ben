@@ -1,3 +1,6 @@
+## v27.099 Stock cover: "ALL WAREHOUSES" overall-average row
+- Added a value-weighted overall row at the top of the Stock cover grid: total SOH value ÷ total weekly demand value per month = the portfolio weeks of cover across all warehouses, shaded vs target, with the combined releasable £ (over-target warehouses) in the Excess column.
+
 ## v27.098 New DEMAND ▸ Analysis ▸ Stock cover — weeks-of-cover trend vs target (cash flow)
 - New tab. **Weeks of cover = SOH value ÷ weekly demand value**, cost(£)-weighted so it maps to working capital. SOH from the end-of-month inventory snapshots (latest snapshot in each month); demand = trailing-3-month actual sales; each warehouse mapped to the channels it fulfils (3PL/non-GRS → DTC/B2B/ZAL/TIK, FBA/AWD → FBA).
 - **18-month trend grid** (warehouse × month), cells shaded vs the target (risk → on-target → excess → heavy excess). Editable **target weeks** (persists to `app_settings.stock_cover_target_wks`). Headline KPIs for the latest month: inventory value, portfolio weeks of cover, target, and **working capital above target** (the £ that could be released). CA pools excluded.

@@ -10494,7 +10494,14 @@ function scDraw(body){
     return '<tr><td style="padding:4px 8px;text-align:left;font-weight:600;white-space:nowrap;position:sticky;left:0;background:#fff">'+_scE(_SC_WHLBL[wh]||wh)+'</td>'
       +months.map(function(m){ var w=woc(wh,m); return '<td style="padding:4px 8px;text-align:right;font-variant-numeric:tabular-nums;'+shade(w)+'">'+(w==null?'<span class="mut">—</span>':w.toFixed(1))+'</td>'; }).join('')
       +'<td style="padding:4px 8px;text-align:right;font-weight:600;color:'+(ex>0?'#b45309':'#94a3b8')+'">'+(ex>0?fMoney(ex):'—')+'</td></tr>'; }).join('');
-  var grid='<div style="overflow:auto;border:1px solid #e5e7eb;border-radius:8px;max-height:calc(100vh - 320px)"><table style="border-collapse:collapse;font-size:12px;min-width:900px"><thead>'+head+'</thead><tbody>'+rowsH+'</tbody></table></div>';
+  // Overall (all warehouses) value-weighted cover per month = total SOH value ÷ total weekly demand value.
+  function overallWoc(ym){ var s=0,wd=0; whs.forEach(function(wh){ s+=sohIx[wh+'|'+ym]||0; wd+=wdemVal(wh,ym); }); return wd>0?s/wd:null; }
+  function overallExcess(ym){ var ex=0; whs.forEach(function(wh){ var w=woc(wh,ym), wd=wdemVal(wh,ym); if(w!=null&&w>tgt&&wd>0)ex+=(w-tgt)*wd; }); return ex; }   // releasable £ (only over-target warehouses)
+  var totRow='<tr style="background:#eef2ff">'
+    +'<td style="padding:5px 8px;text-align:left;font-weight:800;white-space:nowrap;position:sticky;left:0;background:#eef2ff;border-top:2px solid #c7d2fe;border-bottom:2px solid #c7d2fe">ALL WAREHOUSES</td>'
+    +months.map(function(m){ var w=overallWoc(m); return '<td style="padding:4px 8px;text-align:right;font-weight:700;font-variant-numeric:tabular-nums;border-top:2px solid #c7d2fe;border-bottom:2px solid #c7d2fe;'+shade(w)+'">'+(w==null?'<span class="mut">—</span>':w.toFixed(1))+'</td>'; }).join('')
+    +'<td style="padding:4px 8px;text-align:right;font-weight:800;border-top:2px solid #c7d2fe;border-bottom:2px solid #c7d2fe;color:'+(overallExcess(last)>0?'#b45309':'#94a3b8')+'">'+(overallExcess(last)>0?fMoney(overallExcess(last)):'—')+'</td></tr>';
+  var grid='<div style="overflow:auto;border:1px solid #e5e7eb;border-radius:8px;max-height:calc(100vh - 320px)"><table style="border-collapse:collapse;font-size:12px;min-width:900px"><thead>'+head+'</thead><tbody>'+totRow+rowsH+'</tbody></table></div>';
   var legend='<div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:8px;font-size:11px;color:#64748b;align-items:center">Cover vs target: '
     +'<span style="background:#fecaca;padding:1px 8px;border-radius:3px">≤50% (risk)</span><span style="background:#dcfce7;padding:1px 8px;border-radius:3px">on target</span><span style="background:#fef3c7;padding:1px 8px;border-radius:3px">excess</span><span style="background:#fde68a;padding:1px 8px;border-radius:3px">heavy excess</span></div>';
   body.innerHTML='<div style="padding:6px 2px 24px"><div style="font-weight:800;font-size:16px;margin:2px 0 4px">Stock cover</div>'
