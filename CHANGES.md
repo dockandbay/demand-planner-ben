@@ -1,3 +1,8 @@
+## v27.084 DEMAND plan: "Growth on last year" highlight + black text in shaded cells
+- New Display Settings ▸ Highlight toggle **Growth on last year**: shades every month cell (SKU grid + subtotal grid) green/red by growth vs the same month last year, same colour scale as Forecast-vs-actual. Cells where last year = 0 are **not** shaded (no growth-from-zero artefacts). Persists to localStorage; restores on panel open.
+- Both highlight features (Forecast vs actual + Growth on LY) now **force all cell text to black** when a cell is shaded (`.hl-blk` class via `_hlShade`), so the last-year / YoY figures stay readable on the coloured backgrounds.
+- Display Settings legend chips: reordered to **-70% -30% +50% +100%** and set to black text.
+
 ## v27.083 Fix: blank page on load (SUBS is not defined at module init)
 - The v27.081 relocation of Contribution model / Discontinued sub-cats to module scope left the alias `SUBS['email-notifications']=SUBS['general'];` stranded at module scope (just before renderConfig), where `SUBS` doesn't exist yet — it threw `ReferenceError: SUBS is not defined` at init and blanked the whole page.
 - Moved the alias back inside the `showSub` closure, immediately after `SUBS['general']` is registered. jsdom boot check now renders (demandTabs:true, bodyLen ~7.4MB, 0 DOM errors).

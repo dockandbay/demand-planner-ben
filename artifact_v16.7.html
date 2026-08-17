@@ -269,6 +269,7 @@ thead tr.sub th.stk2{background:#f3f3f1}
 .bg26{background:#edf4ff !important}
 .bg26.actual-hdr{background:#F0FFF0 !important;color:#166534 !important}
 .bg26.sku-act-cell{background:#F0FFF0 !important;border-left-color:#86efac !important}
+.hl-blk,.hl-blk *{color:#000 !important}   /* highlighted cells (fc-vs-actual / growth-on-LY): force all text black for readability */
 .bg26.anom-hi-cell{background:#fef9c3 !important;border-left-color:#f59e0b !important}
 .bg26.anom-lo-cell{background:#fff !important;border-left-color:#e5e5e5 !important}
 .bg27.anom-hi-cell{background:#fef9c3 !important;border-left-color:#f59e0b !important}
@@ -805,7 +806,8 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
           <div style="display:flex;flex-direction:column;gap:6px">
             <label style="font-size:12px;color:#334155;cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Baby-blue shade the current-month cell where actuals have already reached / passed the forecast"><input type="checkbox" id="filt-hl-fclt" onchange="setHlFcLtAct(this.checked)"> Highlight forecast &lt; actual</label>
             <label style="font-size:12px;color:#334155;cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Baby-blue shade forecast cells that are zero while the SKU still has stock on hand"><input type="checkbox" id="filt-hl-nofcinv" onchange="setHlNoFcInv(this.checked)"> No forecast but inventory</label>
-            <label style="font-size:12px;color:#334155;cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Shade the past 4 completed-month cells by actual-vs-forecast: red when below forecast (deeper = worse), green when well above"><input type="checkbox" id="filt-hl-disc" onchange="setHlFcActDisc(this.checked)"> Forecast vs actual (past 4 mo) <span style="font-size:9px;color:#94a3b8">&nbsp;<span style="background:#F87C63;padding:0 4px;border-radius:2px">-30%</span> <span style="background:#F54927;color:#fff;padding:0 4px;border-radius:2px">-70%</span> <span style="background:#00FF3C;padding:0 4px;border-radius:2px">+50%</span> <span style="background:#00D131;color:#fff;padding:0 4px;border-radius:2px">+100%</span></span></label>
+            <label style="font-size:12px;color:#334155;cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Shade the past 4 completed-month cells by actual-vs-forecast: red when below forecast (deeper = worse), green when well above"><input type="checkbox" id="filt-hl-disc" onchange="setHlFcActDisc(this.checked)"> Forecast vs actual (past 4 mo) <span style="font-size:9px;color:#94a3b8">&nbsp;<span style="background:#F54927;padding:0 4px;border-radius:2px;color:#000">-70%</span> <span style="background:#F87C63;padding:0 4px;border-radius:2px;color:#000">-30%</span> <span style="background:#00FF3C;padding:0 4px;border-radius:2px;color:#000">+50%</span> <span style="background:#00D131;padding:0 4px;border-radius:2px;color:#000">+100%</span></span></label>
+            <label style="font-size:12px;color:#334155;cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Shade every month cell by growth vs the same month last year: red when down on LY (deeper = worse), green when well up. Cells with no sales last year (growth from 0) are not shaded."><input type="checkbox" id="filt-hl-growthly" onchange="setHlGrowthLY(this.checked)"> Growth on last year <span style="font-size:9px;color:#94a3b8">&nbsp;<span style="background:#F54927;padding:0 4px;border-radius:2px;color:#000">-70%</span> <span style="background:#F87C63;padding:0 4px;border-radius:2px;color:#000">-30%</span> <span style="background:#00FF3C;padding:0 4px;border-radius:2px;color:#000">+50%</span> <span style="background:#00D131;padding:0 4px;border-radius:2px;color:#000">+100%</span></span></label>
           </div>
         </div>
         <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:12px">
@@ -4327,6 +4329,15 @@ function hlDiscColor(act,fc){ if(!HL_FCACT_DISC||!(fc>0))return null; var r=(act
   if(r>=2.00)return '#00D131';   // ≥100% above forecast
   if(r>=1.50)return '#00FF3C';   // ≥50% above forecast
   return null; }
+var HL_GROWTH_LY=(function(){try{return localStorage.getItem('hzHlGrowthLY')==='1';}catch(e){return false;}})();   // shade cells by growth vs same month last year
+function setHlGrowthLY(on){ HL_GROWTH_LY=!!on; try{localStorage.setItem('hzHlGrowthLY',HL_GROWTH_LY?'1':'0');}catch(e){} try{renderMain();}catch(e){} }
+function hlGrowthColor(cur,ly){ if(!HL_GROWTH_LY||!(ly>0))return null; var r=(cur||0)/ly;   // growth vs LY colour scale; ly<=0 excluded (no growth-from-zero) — Ben
+  if(r<=0.30)return '#F54927';   // ≥70% down on LY — brighter red
+  if(r<=0.70)return '#F87C63';   // ≥30% down on LY — light red
+  if(r>=2.00)return '#00D131';   // ≥100% up on LY
+  if(r>=1.50)return '#00FF3C';   // ≥50% up on LY
+  return null; }
+function _hlShade(td,c){ if(!td||!c)return; td.style.setProperty('background',c,'important'); td.classList.add('hl-blk'); }   // shade a cell + force all its text black for readability (Ben)
 function applyHlCell(td,fc,act,invUnits,isCur){ if(!td)return; var hl=false;   // baby-blue cell highlights (Display Settings)
   if(isCur&&typeof HL_FC_LT_ACT!=='undefined'&&HL_FC_LT_ACT&&(act||0)>0&&(act||0)>(fc||0))hl=true;   // forecast < actual (current month)
   if(typeof HL_NOFC_INV!=='undefined'&&HL_NOFC_INV&&(fc||0)<=0&&(invUnits||0)>0)hl=true;              // no forecast but stock on hand
@@ -5726,7 +5737,8 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
     if(!isCurMo&&SHOW_FC_ACT){ var _lf=LOCKED_FC.sub[ik]; if(_lf!=null){ var _dl=actualUnits>0?Math.round((_lf-actualUnits)/actualUnits*100):null;
       var lfDiv=document.createElement('div'); lfDiv.style.cssText='font-size:8px;color:#6366f1;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap';
       lfDiv.title='Locked forecast — most recent snapshot taken before this month'+(_dl!=null?' ('+gPct(_dl)+' vs actual)':''); lfDiv.textContent='fc '+fn(_lf)+(_dl!=null?'  '+gPct(_dl):''); d.appendChild(lfDiv); } }
-    if(!isCurMo&&typeof HL_FCACT_DISC!=='undefined'&&HL_FCACT_DISC&&_last4Has(fym)){ var _dc=hlDiscColor(actualUnits,(LOCKED_FC.sub&&LOCKED_FC.sub[ik]));if(_dc)td.style.setProperty('background',_dc,'important'); }   // forecast-vs-actual discrepancy shade (past 4 mo)
+    if(!isCurMo&&typeof HL_FCACT_DISC!=='undefined'&&HL_FCACT_DISC&&_last4Has(fym)){ _hlShade(td,hlDiscColor(actualUnits,(LOCKED_FC.sub&&LOCKED_FC.sub[ik]))); }   // forecast-vs-actual discrepancy shade (past 4 mo)
+    if(typeof HL_GROWTH_LY!=='undefined'&&HL_GROWTH_LY){ _hlShade(td,hlGrowthColor(actualUnits,ly_u)); }   // growth-vs-LY shade (actual months; LY=0 excluded)
     td.appendChild(d);return td;
   }
 
@@ -5773,6 +5785,7 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   res.textContent=fn(fcv);res.dataset.rk=ik;
   if(reasons&&reasons[fym])res.title=reasons[fym];
   d.appendChild(res);
+  if(typeof HL_GROWTH_LY!=='undefined'&&HL_GROWTH_LY){ _hlShade(td,hlGrowthColor(fcv,ly_u)); }   // growth-vs-LY shade (forecast months; LY=0 excluded)
   // Anomaly suggestion with tooltip
   if(aflags&&aflags[fym]){
     var af=aflags[fym];
@@ -8030,6 +8043,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       var act=sales[m]||0,fc=skuFC[m]||0,stored=skuOvGetK(sku+'|'+co+'|'+ch+'|'+m);
       var fcv=isAct?act:fc;
       td.className=fyBg(Y)+(first?' sep2':'')+(isAct?' sku-act-cell':'');
+      if(typeof HL_GROWTH_LY!=='undefined'&&HL_GROWTH_LY&&!preLaunchM(m)){ _hlShade(td,hlGrowthColor(fcv,lyVal)); }   // growth-vs-LY shade (all months; LY=0 excluded)
       td.style.cssText='padding:1px 2px;border-bottom:1px solid #f0f0ee';
       if(preLaunchM(m))td.style.setProperty('background','#d9d9d9','important');   // pre-launch months (incl. actuals) greyed — Ben (inline !important beats the .bg26/.sku-act-cell !important)
       var _rk='sku|'+sku+'|'+co+'|'+ch+'|'+m; td.dataset.nk=_rk;   // enables dbl-click notes + do-not-smooth popup on SKU cells
@@ -8048,7 +8062,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
           +'<div style="font-size:9px;font-weight:600;text-align:right;font-variant-numeric:tabular-nums">'+fn(act)+'</div>'
           +'<div style="font-size:7px;text-align:right" class="'+yc+'">'+ys+'</div>'+_lfHtml+'</div>';
         if(_rh)td.insertAdjacentHTML('afterbegin',_rh);   // innerHTML above wiped the rail — re-add for actual-month cells
-        if(m!==CUR_MONTH&&typeof HL_FCACT_DISC!=='undefined'&&HL_FCACT_DISC&&_last4Has(m)){ var _dc=hlDiscColor(act,(LOCKED_FC.sku&&LOCKED_FC.sku[sku+'|'+co+'|'+ch+'|'+m]));if(_dc)td.style.setProperty('background',_dc,'important'); }   // forecast-vs-actual discrepancy shade (past 4 mo)
+        if(m!==CUR_MONTH&&typeof HL_FCACT_DISC!=='undefined'&&HL_FCACT_DISC&&_last4Has(m)){ _hlShade(td,hlDiscColor(act,(LOCKED_FC.sku&&LOCKED_FC.sku[sku+'|'+co+'|'+ch+'|'+m]))); }   // forecast-vs-actual discrepancy shade (past 4 mo)
         return td;
       }
       var af=(fc>0&&!skuRundown[m])?skuAF[m]:null;
@@ -8693,7 +8707,7 @@ function _displayPopClose(){ var x=document.getElementById('plan-display-pop'); 
 function _displayPopBind(){ if(window._displayPopBound)return; window._displayPopBound=true; document.addEventListener('click',function(ev){ var b=document.getElementById('plan-display-btn'), pop=document.getElementById('plan-display-pop'); if(pop&&pop.style.display==='block'&&!(b&&b.contains(ev.target))&&!pop.contains(ev.target))pop.style.display='none'; },true); }
 function toggleDisplaySettings(e){ if(e)e.stopPropagation(); var p=document.getElementById('plan-display-pop'); if(!p)return; var open=p.style.display==='block'; _planPopClose(); if(!open){p.style.display='block';
     try{ var b=document.getElementById('plan-display-btn'); if(b){ var br=b.getBoundingClientRect(), w=p.offsetWidth||360; p.style.position='fixed'; p.style.top=(br.bottom+4)+'px'; p.style.right='auto'; p.style.left=Math.max(6,Math.min(br.right-w, window.innerWidth-w-6))+'px'; } }catch(e){} }   // clamp within the viewport (was right:0 → half off-screen on wide windows)
-    var sc=document.getElementById('filt-show-changes'); if(sc)sc.checked=(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES); var hp=document.getElementById('filt-hide-past-changes'); if(hp)hp.checked=(typeof HIDE_PAST_CHANGES==='undefined'||HIDE_PAST_CHANGES); var fa=document.getElementById('filt-fc-act'); if(fa)fa.checked=(typeof SHOW_FC_ACT==='undefined'||SHOW_FC_ACT); var _cc=document.getElementById('disp-cattot'); if(_cc)_cc.checked=(typeof SHOW_CAT_TOT!=='undefined'&&SHOW_CAT_TOT); var _vi=document.getElementById('disp-varimg'); if(_vi)_vi.checked=(typeof SHOW_VARIANT_IMG!=='undefined'&&SHOW_VARIANT_IMG); var _qq=document.getElementById('disp-qtr'); if(_qq)_qq.checked=(typeof SHOW_Q!=='undefined'&&SHOW_Q); var _hh=document.getElementById('disp-half'); if(_hh)_hh.checked=(typeof SHOW_H!=='undefined'&&SHOW_H); var _sv=document.getElementById('disp-sets'); if(_sv)_sv.value=(typeof SETS_VIEW!=='undefined'?SETS_VIEW:'show'); var _ro=document.getElementById('filt-runoff-cats'); if(_ro)_ro.checked=(typeof SHOW_RUNOFF_CATS!=='undefined'&&SHOW_RUNOFF_CATS); var _h1=document.getElementById('filt-hl-fclt'); if(_h1)_h1.checked=(typeof HL_FC_LT_ACT!=='undefined'&&HL_FC_LT_ACT); var _h2=document.getElementById('filt-hl-nofcinv'); if(_h2)_h2.checked=(typeof HL_NOFC_INV!=='undefined'&&HL_NOFC_INV); var _h3=document.getElementById('filt-hl-disc'); if(_h3)_h3.checked=(typeof HL_FCACT_DISC!=='undefined'&&HL_FCACT_DISC); _displayPopBind(); }
+    var sc=document.getElementById('filt-show-changes'); if(sc)sc.checked=(typeof SHOW_CHANGES!=='undefined'&&SHOW_CHANGES); var hp=document.getElementById('filt-hide-past-changes'); if(hp)hp.checked=(typeof HIDE_PAST_CHANGES==='undefined'||HIDE_PAST_CHANGES); var fa=document.getElementById('filt-fc-act'); if(fa)fa.checked=(typeof SHOW_FC_ACT==='undefined'||SHOW_FC_ACT); var _cc=document.getElementById('disp-cattot'); if(_cc)_cc.checked=(typeof SHOW_CAT_TOT!=='undefined'&&SHOW_CAT_TOT); var _vi=document.getElementById('disp-varimg'); if(_vi)_vi.checked=(typeof SHOW_VARIANT_IMG!=='undefined'&&SHOW_VARIANT_IMG); var _qq=document.getElementById('disp-qtr'); if(_qq)_qq.checked=(typeof SHOW_Q!=='undefined'&&SHOW_Q); var _hh=document.getElementById('disp-half'); if(_hh)_hh.checked=(typeof SHOW_H!=='undefined'&&SHOW_H); var _sv=document.getElementById('disp-sets'); if(_sv)_sv.value=(typeof SETS_VIEW!=='undefined'?SETS_VIEW:'show'); var _ro=document.getElementById('filt-runoff-cats'); if(_ro)_ro.checked=(typeof SHOW_RUNOFF_CATS!=='undefined'&&SHOW_RUNOFF_CATS); var _h1=document.getElementById('filt-hl-fclt'); if(_h1)_h1.checked=(typeof HL_FC_LT_ACT!=='undefined'&&HL_FC_LT_ACT); var _h2=document.getElementById('filt-hl-nofcinv'); if(_h2)_h2.checked=(typeof HL_NOFC_INV!=='undefined'&&HL_NOFC_INV); var _h3=document.getElementById('filt-hl-disc'); if(_h3)_h3.checked=(typeof HL_FCACT_DISC!=='undefined'&&HL_FCACT_DISC); var _h4=document.getElementById('filt-hl-growthly'); if(_h4)_h4.checked=(typeof HL_GROWTH_LY!=='undefined'&&HL_GROWTH_LY); _displayPopBind(); }
 // (removed dead fn togglePlanTools — v26.759)
 function resetPlanFilters(){ try{setPlanTier('ALL');}catch(e){} try{setCat('ALL');}catch(e){} try{setPlanFromRep(false);}catch(e){} var rw=document.getElementById('plan-rw-sel'); if(rw){rw.value='ALL'; try{setPlanRw('ALL');}catch(e){}} try{setPlanSort('alpha');}catch(e){} var ct=document.getElementById('cat-tot-toggle'); if(ct&&ct.classList.contains('active')){try{setShowCatTot(false);}catch(e){}} try{resetPlanActiveDates();}catch(e){} try{renderPlanChips();}catch(e){} }
 function _planClearFilter(k){ if(k==='all')setPlanActiveMode('active'); else if(k==='tier')setPlanTier('ALL');
