@@ -1,8 +1,10 @@
-# Spec: two n8n flows for HORIZON (for Diviyaj)
+# Spec: n8n flows for HORIZON (for Diviyaj)
 
-From: Ben · 17-Aug-26 · Both flows are **straightforward** (Ben asked me to flag if complex — they aren't). Flow 1 is a scheduled authenticated POST; Flow 2 is a Cin7 stock pull → transform → Supabase insert.
+From: Ben · 17-Aug-26 · Three scheduled snapshot flows, all **straightforward** (Ben asked me to flag if complex — they aren't). Flows 1 & 3 are scheduled authenticated POSTs; Flow 2 is a Cin7 stock pull → transform → Supabase insert.
 
 Production app: `https://horizon.dockandbay.com` · Supabase prod `oolwklahstnvocaugryg`, schema `planner`.
+
+**Follow-up (after these are confirmed live):** the manual "📸 Snapshot now" buttons in the app (forecast snapshot on the Accuracy page; open-actions snapshot on the Metrics report) will be moved into **CONFIG ▸ Admin** (kept as a manual fallback). Ben will confirm the n8n flows are running first; then Ben's team relocates the buttons.
 
 ---
 
@@ -74,6 +76,21 @@ Primary key: `(sku, warehouse, snapshot_date)`.
 6. Only insert SKUs that exist in `planner.products` (a left-join / filter avoids orphan rows; `amzn.gr.*` Amazon label variants and 0-unit noise can be dropped).
 
 **Reference:** the manual loader (`POST /api/config/inventory-snapshot-load`, in `server.mjs`) implements this exact mapping/exclusion/reconciliation logic if you want to mirror it. A direct Cin7 → Supabase flow is cleaner for n8n; alternatively I can add a small JSON endpoint (`{date, rows:[{sku,warehouse,available}]}`) if you'd prefer to post to the app instead of writing Supabase directly — tell me which you'd like.
+
+---
+
+## Flow 3 — Open-actions snapshot (weekly)
+
+**Purpose.** Every **Thursday at 11:59 GMT**, snapshot the count of open supply actions (per the ACTIONS engine) into a weekly time-series. Feeds the **Open-actions scoreboard** on `#/supply/reports/metrics` (the weekly trend). Replaces the manual "📸 Snapshot now" button there.
+
+**⚠️ Already partly automated — please reconcile, don't duplicate.** This snapshot **already runs on a Vercel cron**: `vercel.json` schedules `59 23 * * 4` (Thursday **23:59** GMT) → `GET /api/cron/action-metrics` → `snapshotOpenActions()` → upserts `planner.action_metrics_snapshot`. Ben wants it at **Thursday 11:59 GMT**. So the cleanest options are:
+
+- **Option A (simplest — no n8n):** change the Vercel cron in `vercel.json` from `59 23 * * 4` to `59 11 * * 4`. One line, done. The endpoint upserts the current ISO-week row, so re-running is idempotent.
+- **Option B (n8n, for consistency with Flows 1 & 2):** create an n8n cron `59 11 * * 4` that calls the snapshot endpoint (auth as per Flow 1), **and remove the Vercel cron** so it doesn't also fire at 23:59 (otherwise you'd snapshot twice — same week row, so it just overwrites, but cleaner to have one owner).
+
+**Endpoint:** either `GET /api/cron/action-metrics` (the existing cron target) or `POST /api/supply/action-metrics/snapshot` (what the manual button hits) — both call the same `snapshotOpenActions()`.
+
+**Note:** the scoreboard's caption currently reads "weekly snapshot — Thursday 23:59 GMT". If you change the time to 11:59, ping Ben and he'll update that label (a 1-word app change).
 
 ---
 
