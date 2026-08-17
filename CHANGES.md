@@ -1,3 +1,8 @@
+## v27.101 Stock cover: separate discontinued-stock metric (>4 months)
+- New **Discontinued stock (>4 months)** table: per warehouse + overall, the £ value of stock for SKUs discontinued more than 4 months ago (per that market's discontinue date, time-aware vs the snapshot month), and its % of total stock value. Obsolete inventory = pure working-capital drag, now surfaced separately.
+- New **"Exclude discontinued (>4mo) from cover"** toggle — when on, the weeks-of-cover (grid, overall, comparison, KPIs) is based on **active** stock only, so cover isn't inflated by dead stock. Server adds `disc_val` per warehouse/month to `/api/demand/stock-cover`.
+- Verified: disc_val populates (e.g. UK FBA £5,955 of £88,578), table + toggle render, 0 errors.
+
 ## v27.100 Stock cover: flat vs SSM-aligned target, side by side
 - New "Cover vs targets" table on the Stock cover tab showing, per warehouse + overall, the two metrics side by side: **Cover (wks)** actual, **Flat target** (+ excess £), and **SSM target** (+ excess £). The SSM target is the Service-Level Stock Model's own per-SKU cover (`ssmCoverWeeks`, exposed on `window`) demand-value-weighted per warehouse, so you compare actual holdings against both a flat business goal and the model's goal. This is effectively the SSM backtest scoreboard.
 - Verified: `window.ssmCoverWeeks` exposed, rollup produces real per-warehouse SSM targets, table renders with both columns populated.

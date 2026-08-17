@@ -10438,7 +10438,7 @@ function renderSafetyStockView(body){
 // Weeks of cover = SOH value (cost-weighted, end-of-month snapshot) ÷ weekly demand value (trailing-3-mo actual sales,
 // cost-weighted). Value(£)-weighted so it maps to cash tied up in stock. 18-month trend per warehouse; excess above the
 // target = working capital that could be released. Server: /api/demand/stock-cover (report-only).
-var _scData=null, SC_TARGET=null;
+var _scData=null, SC_TARGET=null, SC_EXDISC=false;   // SC_EXDISC = exclude stock discontinued >4mo from the cover calc (track it as a separate metric)
 function _scPrevMonths(ym,n){ var y=+ym.slice(0,4),mo=+ym.slice(5,7),out=[]; for(var i=0;i<n;i++){ out.push(y+'-'+(mo<10?'0':'')+mo); mo--; if(mo<1){mo=12;y--;} } return out; }
 var _SC_WHLBL={uk_3pl:'UK 3PL',us_3pl:'US 3PL',eu_3pl:'EU 3PL',au_3pl:'AU 3PL',uk_fba:'UK FBA',us_fba:'US FBA',eu_fba:'EU FBA',au_fba:'AU FBA',uk_nongrs:'UK 3PL (non-GRS)',us_nongrs:'US 3PL (non-GRS)',us_awd:'US AWD'};
 function renderStockCoverView(body){
@@ -10455,13 +10455,14 @@ function scDraw(body){
   var mset={}; (j.soh||[]).forEach(function(r){mset[r.ym]=1;});
   var months=Object.keys(mset).sort().slice(-18);
   if(!months.length){ body.innerHTML='<div style="padding:14px;color:#64748b">No inventory snapshots loaded yet — the stock-cover trend needs the monthly snapshots.</div>'; return; }
-  var sohIx={}, whset={}; (j.soh||[]).forEach(function(r){ sohIx[r.wh+'|'+r.ym]=Number(r.soh_val)||0; whset[r.wh]=1; });
+  var sohIx={}, discIx={}, whset={}; (j.soh||[]).forEach(function(r){ sohIx[r.wh+'|'+r.ym]=Number(r.soh_val)||0; discIx[r.wh+'|'+r.ym]=Number(r.disc_val)||0; whset[r.wh]=1; });
+  function activeSoh(wh,ym){ var s=sohIx[wh+'|'+ym]; if(s==null)return null; return SC_EXDISC?Math.max(0,s-(discIx[wh+'|'+ym]||0)):s; }   // SOH value used for cover (optionally net of discontinued >4mo)
   var demIx={}; (j.dem||[]).forEach(function(r){ demIx[r.co+'|'+r.ch+'|'+r.ym]=Number(r.dem_val)||0; });
   var whs=Object.keys(whset).filter(function(w){ return !/^ca_/.test(w); }).sort(function(a,b){ return (_SC_WHLBL[a]||a).localeCompare(_SC_WHLBL[b]||b); });   // CA decommissioned — drop ca_* pools
   function chsFor(wh){ var pool=wh.split('_').slice(1).join('_'); return (pool==='fba'||pool==='awd')?['FBA']:['DTC','B2B','ZAL','TIK']; }
   function mktOf(wh){ return wh.split('_')[0].toUpperCase(); }
   function wdemVal(wh,ym){ var mk=mktOf(wh), chs=chsFor(wh), tot=0; _scPrevMonths(ym,3).forEach(function(mm){ chs.forEach(function(ch){ tot+=demIx[mk+'|'+ch+'|'+mm]||0; }); }); return tot/3/4.33; }   // trailing-3mo avg weekly demand value
-  function woc(wh,ym){ var wd=wdemVal(wh,ym); if(!(wd>0))return null; var s=sohIx[wh+'|'+ym]; if(s==null)return null; return s/wd; }
+  function woc(wh,ym){ var wd=wdemVal(wh,ym); if(!(wd>0))return null; var s=activeSoh(wh,ym); if(s==null)return null; return s/wd; }
   function shade(w){ if(w==null)return ''; var r=w/tgt;
     if(r<=0.5)return 'background:#fecaca';                 // well under target — stockout risk
     if(r<0.8)return 'background:#fee2e2';
@@ -10486,6 +10487,7 @@ function scDraw(body){
     +'<label>Target weeks of cover</label><input id="sc-tgt" type="number" step="0.5" min="0.5" value="'+tgt+'" style="width:70px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;text-align:center">'
     +'<button id="sc-tgt-save" style="border:1px solid #7c3aed;background:#7c3aed;color:#fff;font-weight:600;font-size:12px;padding:4px 12px;border-radius:6px;cursor:pointer">Save target</button>'
     +'<span id="sc-tgt-msg" style="font-size:12px"></span>'
+    +'<label style="margin-left:10px;display:inline-flex;align-items:center;gap:5px;cursor:pointer;color:#334155"><input type="checkbox" id="sc-exdisc"'+(SC_EXDISC?' checked':'')+'> Exclude discontinued (&gt;4mo) from cover</label>'
     +'<span class="mut" style="font-size:11px;margin-left:8px">Value(£)-weighted · weeks = SOH value ÷ trailing-3-mo weekly demand value · shaded vs target</span></div>';
   // grid
   var th=function(t,al){return '<th style="padding:5px 8px;border-bottom:2px solid #cbd5e1;text-align:'+(al||'right')+';white-space:nowrap;position:sticky;top:0;background:#f8fafc;font-size:11px">'+t+'</th>';};
@@ -10496,7 +10498,7 @@ function scDraw(body){
       +months.map(function(m){ var w=woc(wh,m); return '<td style="padding:4px 8px;text-align:right;font-variant-numeric:tabular-nums;'+shade(w)+'">'+(w==null?'<span class="mut">—</span>':w.toFixed(1))+'</td>'; }).join('')
       +'<td style="padding:4px 8px;text-align:right;font-weight:600;color:'+(ex>0?'#b45309':'#94a3b8')+'">'+(ex>0?fMoney(ex):'—')+'</td></tr>'; }).join('');
   // Overall (all warehouses) value-weighted cover per month = total SOH value ÷ total weekly demand value.
-  function overallWoc(ym){ var s=0,wd=0; whs.forEach(function(wh){ s+=sohIx[wh+'|'+ym]||0; wd+=wdemVal(wh,ym); }); return wd>0?s/wd:null; }
+  function overallWoc(ym){ var s=0,wd=0; whs.forEach(function(wh){ s+=(activeSoh(wh,ym)||0); wd+=wdemVal(wh,ym); }); return wd>0?s/wd:null; }
   function overallExcess(ym){ var ex=0; whs.forEach(function(wh){ var w=woc(wh,ym), wd=wdemVal(wh,ym); if(w!=null&&w>tgt&&wd>0)ex+=(w-tgt)*wd; }); return ex; }   // releasable £ (only over-target warehouses)
   var totRow='<tr style="background:#eef2ff">'
     +'<td style="padding:5px 8px;text-align:left;font-weight:800;white-space:nowrap;position:sticky;left:0;background:#eef2ff;border-top:2px solid #c7d2fe;border-bottom:2px solid #c7d2fe">ALL WAREHOUSES</td>'
@@ -10535,9 +10537,24 @@ function scDraw(body){
     +whs.map(function(wh){ return _cmpRow(_SC_WHLBL[wh]||wh, woc(wh,last), wdemVal(wh,last), ssmTargetFor(wh), false); }).join('')
     +'</tbody></table></div>'
     +'<div class="mut" style="font-size:11px;margin-top:5px;max-width:780px">Two metrics side by side: <b>Flat target</b> = the number you set. <b>SSM target</b> = the Service-Level Stock Model\'s own cover (per-SKU safety stock by tier / lead / volatility, FBA capped), demand-weighted per warehouse. Excess £ = working capital held above each target.</div>';
+  // ── Discontinued stock (>4 months since discontinue date) — a separate metric (obsolete inventory / cash drag) ──
+  var _discAll=0, _sohAll=0; whs.forEach(function(wh){ _discAll+=discIx[wh+'|'+last]||0; _sohAll+=sohIx[wh+'|'+last]||0; });
+  function _discRow(lbl,dv,sv,bold){ var pct=sv>0?(dv/sv*100):0, b=bold?'font-weight:800;background:#fff7ed;':'';
+    return '<tr style="'+b+'"><td style="padding:4px 10px;text-align:left;'+b+'">'+_scE(lbl)+'</td>'
+      +'<td style="padding:4px 10px;text-align:right;color:#b45309;font-weight:600">'+(dv>0?fMoney(dv):'—')+'</td>'
+      +'<td style="padding:4px 10px;text-align:right">'+(sv>0?fMoney(sv):'—')+'</td>'
+      +'<td style="padding:4px 10px;text-align:right;color:'+(pct>=25?'#b91c1c':pct>=10?'#b45309':'#64748b')+'">'+(sv>0?pct.toFixed(1)+'%':'—')+'</td></tr>'; }
+  var discTable='<div style="font-weight:700;font-size:13px;margin:20px 0 6px">Discontinued stock (&gt;4 months since discontinue date) — '+mlab(last)+'</div>'
+    +'<div style="overflow:auto;border:1px solid #e5e7eb;border-radius:8px;max-width:640px"><table style="border-collapse:collapse;font-size:12px;width:100%"><thead><tr>'
+    +_cth('Warehouse','left')+_cth('Discontinued £')+_cth('Total stock £')+_cth('% discontinued')+'</tr></thead><tbody>'
+    +_discRow('ALL WAREHOUSES',_discAll,_sohAll,true)
+    +whs.map(function(wh){ return _discRow(_SC_WHLBL[wh]||wh, discIx[wh+'|'+last]||0, sohIx[wh+'|'+last]||0, false); }).join('')
+    +'</tbody></table></div>'
+    +'<div class="mut" style="font-size:11px;margin-top:5px;max-width:640px">Working capital tied up in SKUs discontinued more than 4 months ago (per that market\'s discontinue date). Tick "Exclude discontinued (&gt;4mo) from cover" above to base the weeks-of-cover on active stock only.</div>';
   body.innerHTML='<div style="padding:6px 2px 24px"><div style="font-weight:800;font-size:16px;margin:2px 0 4px">Stock cover</div>'
     +'<div style="font-size:12px;color:#64748b;max-width:900px;margin:0 0 12px">Weeks of stock on hand vs demand, per warehouse, from the monthly end-of-month inventory snapshots (last 18 months). Value(£)-weighted, so cover above target is working capital that could be released to improve cash flow.</div>'
-    +kpi+tctl+cmpTable+grid+legend+'</div>';
+    +kpi+tctl+cmpTable+discTable+grid+legend+'</div>';
+  var xd=body.querySelector('#sc-exdisc'); if(xd)xd.onchange=function(){ SC_EXDISC=this.checked; scDraw(body); };
   var si=body.querySelector('#sc-tgt'), sv=body.querySelector('#sc-tgt-save'), sm=body.querySelector('#sc-tgt-msg');
   if(sv)sv.onclick=function(){ var v=parseFloat(si.value); if(!(v>0)){ if(sm){sm.style.color='#dc2626';sm.textContent='Enter a positive number';} return; } SC_TARGET=v; if(sm){sm.style.color='#64748b';sm.textContent='Saving…';}
     fetch('/api/demand/stock-cover/target',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({target:v})}).then(function(r){return r.json();}).then(function(k){ if(k&&k.error){ if(sm){sm.style.color='#dc2626';sm.textContent='Error: '+k.error;} return; } if(sm){sm.style.color='#16a34a';sm.textContent='Saved ✓';} scDraw(body); }).catch(function(){ if(sm){sm.style.color='#dc2626';sm.textContent='Save failed';} }); };

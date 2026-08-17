@@ -1141,7 +1141,11 @@ app.get('/api/demand/stock-cover', async (_req, res) => {
         FROM planner.inventory_snapshots
         ORDER BY warehouse, sku, date_trunc('month', snapshot_date), snapshot_date DESC)
       SELECT l.warehouse wh, to_char(l.mon, 'YYYY-MM') ym,
-             round(sum(l.available * coalesce(p.cost, 0))::numeric, 2) soh_val
+             round(sum(l.available * coalesce(p.cost, 0))::numeric, 2) soh_val,
+             round(sum(l.available * coalesce(p.cost, 0)) FILTER (WHERE
+               (CASE upper(split_part(l.warehouse,'_',1)) WHEN 'AU' THEN p.discontinue_date_au_final WHEN 'CA' THEN p.discontinue_date_ca ELSE p.discontinue_date_final END) ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}'
+               AND (CASE upper(split_part(l.warehouse,'_',1)) WHEN 'AU' THEN p.discontinue_date_au_final WHEN 'CA' THEN p.discontinue_date_ca ELSE p.discontinue_date_final END)::date < (l.mon - interval '4 months')
+             )::numeric, 2) disc_val
       FROM latest l JOIN planner.products p ON p.sku = l.sku
       GROUP BY 1, 2`)).rows;
     const dem = (await pool.query(`
