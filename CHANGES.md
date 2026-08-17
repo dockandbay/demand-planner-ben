@@ -1,3 +1,9 @@
+## v27.089 SSM finalise: fix seasonal pre-buy over-extension
+- The seasonal pre-buy was targeting the LAST forward month with demand, so a SKU flagged Seasonal that actually sells ~all year got an 8+ month pre-buy and its 3PL buy roughly doubled (220 of 337 seasonal SKUs sold 10+ months). `ssmSeasonEndWeeks` now detects the FIRST contiguous forward demand block (skips leading pre-season zeros so an upcoming season still pre-buys; ends on a sustained 2-month zero gap so single-month dips don't false-end it) and returns 0 when the block never stops within the horizon (year-round → steady-state).
+- `ssmCoverWeeks` only pre-buys when that window is a genuinely short season (<= `seasonMaxWk`, default 30). Longer/continuous seasons use steady-state cover (they can reorder within the window).
+- New tunable `seasonMaxWk` (SSM_PARAMS, default 30) editable in DEMAND ▸ Config ▸ Buy plan logic; server injects it into ssm_params.
+- Verified (jsdom buy snapshot, sandbox): cover_weeks unchanged at 33,060 (= live baseline); SSM seasonal buy now 16,018 vs cover 14,978 (+7%, sane) instead of a ~2x blow-up. SSM stays OFF by default so live is unaffected.
+
 ## v27.088 Highlights: growth is past-only, instant toggle (no re-render)
 - **Growth on last year no longer shades future months** — it now only applies to completed actual months (not forecast/future, not the current partial month). The subtotal-grid forecast-branch shade and the SKU common-path shade were removed; growth is stored only in the actual branches.
 - **Instant toggle:** the two Highlight toggles no longer trigger a full `renderMain()` rebuild of the ~6MB plan. Each cell now precomputes its colour into `data-hld` (fc-vs-actual) / `data-hlg` (growth-vs-LY) during render; toggling runs a lightweight `paintHighlights()` DOM pass that applies/clears the active colour. Also runs on SKU-row expansion.

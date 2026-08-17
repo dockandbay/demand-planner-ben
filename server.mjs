@@ -1258,7 +1258,7 @@ app.get('/', async (req, res) => {
     try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='buy_logic'`)).rows[0]; const v = (r && r.value === 'ssm') ? 'ssm' : 'cover_weeks'; html = html.replace("var BUY_LOGIC='cover_weeks';", "var BUY_LOGIC='" + v + "';"); } catch (e) { /* default cover_weeks — BUY_LOGIC is a scalar so replaceGlobal (object/array only) can't be used */ }
     // SSM tunable parameters (app_settings.ssm_params JSON) — service level by tier, seasonal floor, review cycle, FBA cover cap. Editable at CONFIG ▸ Demand ▸ Buy plan logic.
     try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='ssm_params'`)).rows[0]; let o = {}; try { o = r && r.value ? JSON.parse(r.value) : {}; } catch (_) { o = {}; } const sl = o.sl || {}; const num = (v, d) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : d; };
-      const m = { sl: { A: num(sl.A, 99), B: num(sl.B, 97), C: num(sl.C, 93), def: num(sl.def, 90) }, seasonalFloor: num(o.seasonalFloor, 97), cycleWk: num(o.cycleWk, 4), fbaCapWk: num(o.fbaCapWk, 8) };
+      const m = { sl: { A: num(sl.A, 99), B: num(sl.B, 97), C: num(sl.C, 93), def: num(sl.def, 90) }, seasonalFloor: num(o.seasonalFloor, 97), cycleWk: num(o.cycleWk, 4), fbaCapWk: num(o.fbaCapWk, 8), seasonMaxWk: num(o.seasonMaxWk, 30) };
       html = replaceGlobal(html, 'SSM_PARAMS', JSON.stringify(m)); } catch (e) { /* defaults in the artefact */ }
     // CONFIG ▸ Demand ▸ Contribution model (app_settings.contrib_model, JSON keyed "CO|CH|subcat" with '*' wildcards).
     // Drives the Leader-mode smoothing tier mix (SETS feature P3b). Empty {} => tierMix falls back to CONTRIB_TARGETS/default.
