@@ -1,3 +1,6 @@
+## v27.076 Cog icon styling — match the ? help icon
+- The ⚙ settings cog is now a 24×24 circular icon matching the ? help button (same size/background), and no longer carries the .view-toggle border-bottom underline.
+
 ## v27.075 SUPPLY ▸ CONFIG (nav overhaul stage 3)
 - New **CONFIG** tab in the SUPPLY sub-nav hosting the supply-chain settings (Import duty/Freight/Tax/Suppliers/Branches/Consignees/Batches/Productions/BOM/Products/Barcodes) + **Key accounts** + **Portal users** + **Portal**, deep-linked **#/supply/config/<item>**. Reuses the config machinery via a new CONFIG_CTX (supply vs admin) — the SUPPLY sub-nav stays visible (no config-mode). The ⚙ cog CONFIG now shows only Admin / Demand(temp) / Exports & uploads / Product / Suggestions. Redirects: legacy #/config/<supply item> and #/config/supplychain/* → #/supply/config/<item>.
 
