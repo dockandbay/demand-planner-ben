@@ -911,6 +911,12 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
       <label style="font-size:12px;color:#64748b;margin-left:6px">Mode</label><select id="ss-mode" style="font-size:12px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px"><option value="standard">Standard</option><option value="leader">Leader</option></select>
       <button id="ss-run" style="margin-left:auto;font-size:12px;font-weight:600;padding:4px 12px;border:1px solid #16a34a;border-radius:6px;background:#16a34a;color:#fff;cursor:pointer">&#8623; Run auto-smooth now</button>
     </div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;padding:8px 10px;margin-bottom:10px">
+      <span style="font-weight:700;font-size:12px;color:#6b21a8">Category forecasts → %</span>
+      <span style="font-size:12px;color:#64748b" title="For the CURRENT country/channel, rewrite each hard-coded (absolute) sub-category forecast in the next 11 months as a growth % vs the same month LAST YEAR ACTUAL, rounded to 1 decimal place — but only where that growth is 200% or less; larger jumps keep the absolute number. Cells already entered as % are left as-is.">Convert hard-coded sub-category numbers (next 11 mo) to a % growth vs last-year actual, 1 dp — skips growth &gt; 200%.</span>
+      <button id="ss-pct" style="margin-left:auto;font-size:12px;font-weight:600;padding:4px 12px;border:1px solid #7c3aed;border-radius:6px;background:#7c3aed;color:#fff;cursor:pointer">% Convert categories to %</button>
+      <div id="ss-pct-msg" style="flex-basis:100%;font-size:11px;color:#6b21a8;margin-top:2px"></div>
+    </div>
     <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px"><label style="font-size:12px;color:#64748b">Country</label><select id="ss-co" style="font-size:12px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px"></select><label style="font-size:12px;color:#64748b;margin-left:6px">Channel</label><select id="ss-ch" style="font-size:12px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px"></select><span style="margin-left:auto;font-size:11px;color:#64748b">Select all: <label style="cursor:pointer"><input type="checkbox" id="ss-all-dis"> disc</label> <label style="cursor:pointer;margin-left:6px"><input type="checkbox" id="ss-all-auto"> auto</label></span></div>
     <div id="ss-list"></div>
   </div>
@@ -1079,9 +1085,37 @@ function openSmoothSettings(ev){ if(ev)ev.stopPropagation(); var e=document.getE
   var thI=document.getElementById('ss-th'); if(thI)thI.onchange=function(){ var v=Math.max(1,Math.min(100,parseInt(this.value,10)||20)); SMOOTH_AUTO.threshold=v; this.value=v; saveSmoothAuto(); };
   var mSel=document.getElementById('ss-mode'); if(mSel)mSel.onchange=function(){ SMOOTH_AUTO.mode=(this.value==='leader')?'leader':'standard'; saveSmoothAuto(); };
   var run=document.getElementById('ss-run'); if(run)run.onclick=function(){ runAutoSmooth(); };
+  var pct=document.getElementById('ss-pct'); if(pct)pct.onclick=function(){ smoothCatsToPct(); };
   var adis=document.getElementById('ss-all-dis'); if(adis)adis.onchange=function(){ var byCat=ssSubcatsFor(_ssCo,_ssCh), on=this.checked; Object.keys(byCat).forEach(function(c){ Object.keys(byCat[c]).forEach(function(s){ var k=_ssCo+'|'+_ssCh+'|'+s; if(on)SMOOTH_DISREGARD_DISC[k]=true; else delete SMOOTH_DISREGARD_DISC[k]; }); }); saveSmoothDisregard(); renderSmoothSettings(); try{renderMain();}catch(e){} };
   var aau=document.getElementById('ss-all-auto'); if(aau)aau.onchange=function(){ var byCat=ssSubcatsFor(_ssCo,_ssCh), on=this.checked; SMOOTH_AUTO.flags=SMOOTH_AUTO.flags||{}; Object.keys(byCat).forEach(function(c){ Object.keys(byCat[c]).forEach(function(s){ var k=_ssCo+'|'+_ssCh+'|'+s; if(on)SMOOTH_AUTO.flags[k]=true; else delete SMOOTH_AUTO.flags[k]; }); }); saveSmoothAuto(); renderSmoothSettings(); };
   renderSmoothSettings(); }
+// Convert hard-coded (absolute) sub-category forecasts for the CURRENT country/channel, over the next 11 months,
+// into a growth % vs the same month LAST-YEAR ACTUAL, rounded to 1 dp — but only where that growth is <= 200%.
+// Bigger jumps (and cells already entered as %, or with no LY actual) are left untouched. Category rows only; SKU
+// rows are stored separately and unaffected. Marks dirty → the normal Save-Forecasts/auto-save persists it.
+function smoothCatsToPct(){
+  var co=CUR, ch=CF, msg=document.getElementById('ss-pct-msg');
+  var win=[]; (function(){ var p=pa(CUR_MONTH), y=p.y, mo=p.mo; for(var i=0;i<11;i++){ win.push(ym(y,mo)); mo++; if(mo>12){mo=1;y++;} } })();   // next 11 months from the current month
+  var subs=[]; DATA.forEach(function(d){ if(d.co===co&&d.ch===ch&&d.s&&subs.indexOf(d.s)<0)subs.push(d.s); });
+  var changed=0, keptBig=0, noLy=0;
+  subs.forEach(function(s){ var a=ga(co,ch,s)||{};
+    win.forEach(function(m){ if(isActualMonth(m))return;                              // forecast months only
+      var key=s+'|'+co+'|'+ch+'|'+m, ps=parseStored(IV[key]);
+      if(!ps||!ps.lit)return;                                                          // only hard-coded absolutes (leave %/blank)
+      var lyKey=(pa(m).y-1)+'_'+m.slice(5,7), lyU=(a[lyKey]?(a[lyKey][0]||0):0);
+      if(!(lyU>0)){ noLy++; return; }                                                  // need a last-year ACTUAL to grow from
+      var g=ps.n/lyU-1;                                                                // growth vs LY actual (decimal)
+      if(g>2){ keptBig++; return; }                                                    // > 200% growth → keep the absolute number
+      IV[key]=String(Math.round(g*1000)/1000);                                         // store as % growth, 1 dp (0.1%) — calc() applies LY×(1+g)
+      changed++;
+    });
+  });
+  try{ if(typeof markDirty==='function')markDirty(); }catch(e){}
+  try{ renderMain(); }catch(e){}
+  var txt='✓ Converted '+changed+' hard-coded '+co+' · '+ch+' sub-category forecast'+(changed===1?'':'s')+' (next 11 mo) to % vs last-year actual, 1 dp.'
+    +(keptBig?' '+keptBig+' kept as absolute (growth > 200%).':'')+(noLy?' '+noLy+' skipped (no last-year actual).':'');
+  if(msg){ msg.textContent=txt; } else { try{ alert(txt); }catch(e){} }
+}
 function closeSmoothSettings(){ var e=document.getElementById('smoothset-ov'); if(e)e.style.display='none'; }
 // Context help — one icon in the top nav; content matches the current tab / sub-tab.
 var CTX_HELP={
