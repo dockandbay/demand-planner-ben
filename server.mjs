@@ -192,6 +192,56 @@ async function buildStockoutHistory() {
   } catch { /* table absent / pre-seed → empty (feature inert) */ }
   return out;
 }
+// ABC re-tier recommendations (DEMAND ▸ Exceptions ▸ Recommendations). Compares each product's ASSIGNED market_tier
+// (A/B/C, marketing's classification) to the tier it EARNS on actual sales, benchmarked WITHIN its group:
+// Core (continuing range) on trailing-12mo revenue; Seasonal (finite-life) on peak in-season month revenue — so a
+// seasonal line's low ANNUAL revenue never unfairly demotes it. Conservative: only clear, material, ≥1-tier gaps.
+// Advisory only — the tier itself is owned in Airtable (marketing); this just surfaces candidates. Returns
+// {core:[{sku,cat,assigned,earned,metric,dir}], seasonal:[...], asof}. See [[inventory-snapshot-backfill]] §tier.
+async function buildTierRecommendations() {
+  const out = { core: [], seasonal: [], asof: '' };
+  try {
+    const r = await pool.query(`
+      WITH grp AS (
+        SELECT sku, market_tier assigned, category,
+          CASE WHEN core_seasonal='Seasonal' THEN 'Seasonal'
+               WHEN core_seasonal='Core' OR is_core ILIKE 'true' THEN 'Core' END ctx
+        FROM planner.products
+        WHERE market_tier IN ('A','B','C')
+          AND (core_seasonal IN ('Core','Seasonal') OR is_core ILIKE 'true')),
+      win AS (SELECT (date_trunc('month', max(month)) - interval '11 months')::date lo,
+                     to_char(max(month),'YYYY-MM') hi FROM planner.sales_actuals),
+      perf AS (
+        SELECT g.sku, g.assigned, g.ctx, g.category,
+          CASE WHEN g.ctx='Seasonal' THEN coalesce(max(sa.mrev),0) ELSE coalesce(sum(sa.mrev),0) END metric
+        FROM grp g
+        LEFT JOIN (SELECT sku, month, sum(revenue) mrev FROM planner.sales_actuals
+                   WHERE month >= (SELECT lo FROM win) GROUP BY 1,2) sa ON sa.sku=g.sku
+        GROUP BY 1,2,3,4),
+      cum AS (SELECT *, sum(metric) OVER (PARTITION BY ctx ORDER BY metric DESC)
+                        / nullif(sum(metric) OVER (PARTITION BY ctx),0) cs FROM perf),
+      thr AS (SELECT ctx, min(metric) FILTER (WHERE cs<=0.80) t80,
+                          min(metric) FILTER (WHERE cs<=0.95) t95 FROM cum GROUP BY 1),
+      earned AS (SELECT c.*, t.t80, t.t95,
+          CASE WHEN c.metric>=t.t80 THEN 'A' WHEN c.metric>=t.t95 THEN 'B' ELSE 'C' END earned
+        FROM cum c JOIN thr t USING(ctx))
+      SELECT ctx, sku, coalesce(category,'') category, assigned, earned, round(metric)::int metric,
+        CASE WHEN earned<assigned THEN 'promote' ELSE 'demote' END dir,
+        (SELECT hi FROM win) asof
+      FROM earned
+      WHERE earned<>assigned
+        AND metric >= CASE WHEN ctx='Core' THEN 8000 ELSE 3000 END          -- materiality floor
+        AND ( (earned<assigned AND metric >= 1.3 * CASE WHEN earned='A' THEN t80 ELSE t95 END)     -- clear promote
+           OR (earned>assigned AND metric <= 0.7 * CASE WHEN assigned='A' THEN t80 ELSE t95 END) ) -- clear demote
+      ORDER BY ctx, metric DESC`);
+    r.rows.forEach((x) => {
+      out.asof = x.asof || out.asof;
+      (x.ctx === 'Core' ? out.core : out.seasonal).push(
+        { sku: x.sku, cat: x.category, assigned: x.assigned, earned: x.earned, metric: Number(x.metric) || 0, dir: x.dir });
+    });
+  } catch { /* products/sales absent → empty (feature inert) */ }
+  return out;
+}
 // Prepack on-hand by SKU/warehouse → {prepack_sku:{wh:qty}}. Prepack SKUs are out of planning scope so they are NOT
 // in SKUM; the buy-plan netting needs their stock separately. Sourced from v_product_inventory (same on-hand the app
 // uses), restricted to the SKUs in prepack_map.
@@ -1063,10 +1113,11 @@ app.get('/api/demand/trends/type-mix', async (req, res) => {
 const _INV_BRANCH_MAP = {
   'UK ILG': 'uk_3pl', 'US Geneva': 'us_3pl', 'AU Coghlans': 'au_3pl', 'US AWD': 'us_awd', 'US FBA': 'us_fba',
   'EU iFulfillment': 'eu_3pl', 'UK FBA': 'uk_fba', 'UK ILG non grs': 'uk_nongrs', 'US Geneva non GRS': 'us_nongrs',
-  'AU FBA': 'au_fba', 'EU FBA': 'eu_fba', 'CA FBA': 'ca_fba', 'EU ILG': 'eu_3pl',
-  'AU Embroidery': null, 'US B2B': null, 'Zalando': null, 'China Stock': null, 'UK B2B JLEW': null, 'JP FBA': null,
-  '3PL Test': null, 'Nordstrom Test': null, 'US Walmart': null, 'CA Propack': null, 'Direct to Client': null, 'UK Head Office': null,
-  'EU Preorder': null, 'US Preorder': null, 'UK Preorder': null, 'AU Preorder': null,
+  'AU FBA': 'au_fba', 'EU FBA': 'eu_fba', 'EU ILG': 'eu_3pl',
+  'CA FBA': null, 'CA Propack': null, 'CA Embroidery': null,   // CA decommissioned (Ben 17-Aug-26) — exclude from all imports
+  'AU Embroidery': null, 'US B2B': null, 'UK B2B': null, 'Zalando': null, 'China Stock': null, 'UK B2B JLEW': null, 'JP FBA': null,
+  '3PL Test': null, 'Nordstrom Test': null, 'Test': null, 'US Walmart': null, 'Direct to Client': null, 'UK Head Office': null,
+  'EU Preorder': null, 'US Preorder': null, 'UK Preorder': null, 'AU Preorder': null, 'CA Preorder': null,
 };
 app.post('/api/config/inventory-snapshot-load', async (req, res) => {
   try {
@@ -1222,7 +1273,7 @@ app.get('/', async (req, res) => {
     const _vals = await getDataVals();   // in-process → KV (cold start, off-Supabase) → Supabase build; SWR handled inside
     const [DATA, FC_CURRENT, FC_OUTPUTS, SKU_RAW, CATS, SUBS, BI, PROD_CONST, ts, FBADIMS, SA_EXTRA, GBP_RATE, BRANCH_FREIGHT, TRANSFER_LEADS, CAT_ASP_GBP, LOCKED_FC] = _vals;
     // Fetched fresh (not in the data cache); independent of each other, so run concurrently.
-    const [KLAVIYO_BIS, MKT_COLORS, SET_BOM, PREPACK_MAP, PREPACK_STOCK, LEADTIME_VAR, INV_STOCKOUTS] = await Promise.all([buildKlaviyoBis(), buildMktColors(), buildSetBom(), buildPrepackMap(), buildPrepackStock(), buildLeadTimeVar(), buildStockoutHistory()]);   // …; LEADTIME_VAR lead-time variability (weeks); INV_STOCKOUTS {sku:{MKT:[months]}} OOS from snapshots
+    const [KLAVIYO_BIS, MKT_COLORS, SET_BOM, PREPACK_MAP, PREPACK_STOCK, LEADTIME_VAR, INV_STOCKOUTS, TIER_RECS] = await Promise.all([buildKlaviyoBis(), buildMktColors(), buildSetBom(), buildPrepackMap(), buildPrepackStock(), buildLeadTimeVar(), buildStockoutHistory(), buildTierRecommendations()]);   // …; LEADTIME_VAR lead-time variability (weeks); INV_STOCKOUTS {sku:{MKT:[months]}} OOS from snapshots; TIER_RECS ABC re-tier recommendations (Exceptions ▸ Recommendations)
     let html = DEV ? loadHTML() : HTML;
     html = replaceGlobal(html, 'DATA', JSON.stringify(DATA));
     html = replaceGlobal(html, 'FC_CURRENT', JSON.stringify(FC_CURRENT));
@@ -1242,6 +1293,7 @@ app.get('/', async (req, res) => {
     html = replaceGlobal(html, 'PREPACK_STOCK', JSON.stringify(PREPACK_STOCK || {}));   // {prepack_sku:{wh:qty}} — prepack on-hand (out of SKUM scope; feeds buy-plan netting)
     html = replaceGlobal(html, 'LEADTIME_VAR', JSON.stringify(LEADTIME_VAR || {}));   // lead-time variability (weeks) from PO delivery history — Safety-stock data-driven σ_L
     html = replaceGlobal(html, 'INV_STOCKOUTS', JSON.stringify(INV_STOCKOUTS || {}));   // {sku:{MKT:[YYYY_MM]}} stockout months from inventory snapshots — Safety-stock demand unconstraining
+    html = replaceGlobal(html, 'TIER_RECS', JSON.stringify(TIER_RECS || {}));   // {core:[],seasonal:[]} ABC re-tier recommendations — DEMAND ▸ Exceptions ▸ Recommendations
     html = replaceGlobal(html, 'MKT_COLORS', JSON.stringify(MKT_COLORS));     // reusable market colour palette
     html = replaceGlobal(html, 'BRANCH_FREIGHT', JSON.stringify(BRANCH_FREIGHT || {}));
     html = replaceGlobal(html, 'CAT_ASP_GBP', JSON.stringify(CAT_ASP_GBP || {}));
@@ -1263,6 +1315,12 @@ app.get('/', async (req, res) => {
     try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='smooth_auto'`)).rows[0]; const o = (r && r.value) ? JSON.parse(r.value) : {}; const cfg = { flags: (o && o.flags) || {}, threshold: (o && o.threshold != null) ? o.threshold : 20, mode: (o && o.mode === 'leader') ? 'leader' : 'standard', lastRun: (o && o.lastRun) || null }; html = replaceGlobal(html, 'SMOOTH_AUTO', JSON.stringify(cfg)); } catch (e) { /* leave the default */ }
     // DEMAND ▸ do-not-smooth locks (app_settings.smooth_locks = {'sku|CO|CH|YYYY_MM':true}). SKU-cell forecasts smoothing must leave fixed. Fresh so a toggle shows next load.
     try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='smooth_locks'`)).rows[0]; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'SMOOTH_LOCKS', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { /* leave the {} default */ }
+    // BUY ▸ buy-plan logic switch (app_settings.buy_logic): 'cover_weeks' (default, today's flat cover) | 'ssm' (service-level safety stock). CONFIG ▸ Admin ▸ General.
+    try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='buy_logic'`)).rows[0]; const v = (r && r.value === 'ssm') ? 'ssm' : 'cover_weeks'; html = html.replace("var BUY_LOGIC='cover_weeks';", "var BUY_LOGIC='" + v + "';"); } catch (e) { /* default cover_weeks — BUY_LOGIC is a scalar so replaceGlobal (object/array only) can't be used */ }
+    // SSM tunable parameters (app_settings.ssm_params JSON) — service level by tier, seasonal floor, review cycle, FBA cover cap. Editable at CONFIG ▸ Demand ▸ Buy plan logic.
+    try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='ssm_params'`)).rows[0]; let o = {}; try { o = r && r.value ? JSON.parse(r.value) : {}; } catch (_) { o = {}; } const sl = o.sl || {}; const num = (v, d) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? n : d; };
+      const m = { sl: { A: num(sl.A, 99), B: num(sl.B, 97), C: num(sl.C, 93), def: num(sl.def, 90) }, seasonalFloor: num(o.seasonalFloor, 97), cycleWk: num(o.cycleWk, 4), fbaCapWk: num(o.fbaCapWk, 8) };
+      html = replaceGlobal(html, 'SSM_PARAMS', JSON.stringify(m)); } catch (e) { /* defaults in the artefact */ }
     // CONFIG ▸ Demand ▸ Contribution model (app_settings.contrib_model, JSON keyed "CO|CH|subcat" with '*' wildcards).
     // Drives the Leader-mode smoothing tier mix (SETS feature P3b). Empty {} => tierMix falls back to CONTRIB_TARGETS/default.
     try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='contrib_model'`)).rows[0]; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'CONTRIB_MODEL', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { /* leave the {} default */ }

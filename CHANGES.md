@@ -1,3 +1,32 @@
+## v27.069 SSM parameters editable in CONFIG ▸ Demand ▸ Buy plan logic
+- The SSM dials are now editable (app_settings.ssm_params → SSM_PARAMS): **service level by tier** (A/B/C/untiered), **seasonal floor**, **review cycle (wks)**, and **FBA cover cap (wks)**. Previously hardcoded (A99/B97/C93, floor 97, cycle 4, FBA cap 8) — now tunable without a code change; the buy engine reads SSM_PARAMS. Save + reload applies.
+
+## v27.068 Buy plan logic → CONFIG ▸ Demand (nested deep-links)
+- Corrected v27.066: the Buy-plan-logic setting (Cover-weeks ↔ SSM, with the full explainer) now lives under **CONFIG ▸ Demand ▸ Buy plan logic** (reusing renderBuyPlanView), not a DEMAND tab. Removed the DEMAND ▸ Buy Plan tab.
+- CONFIG ▸ **Demand** group items now deep-link as **#/config/demand/<item>** (e.g. #/config/demand/contribmodel, #/config/demand/buyplan) instead of the flat #/config/<item>; legacy flat links still resolve.
+
+## v27.067 DEMAND ▸ Analysis group (nav restructure)
+- New **Analysis** group in the DEMAND tab bar containing **Summary, Snapshots, Trends, Safety stock, Ship bags** (moved out of the primary row), with a light-blue L3 sub-nav like Inputs. Each item deep-links as **#/demand/analysis/<slug>**; legacy **#/demand/<slug>** links (e.g. #/demand/summary) still resolve. Router + planning-view canonical hash updated.
+
+## v27.066 New DEMAND ▸ Buy Plan tab (buy-logic switch + explainer)
+- Moved the Cover-weeks ↔ SSM switch out of CONFIG into a dedicated **DEMAND ▸ Buy Plan** tab (#/demand/buyplan): the setting sits at the top, followed by a plain-English explanation of what it controls, how Cover-weeks vs Service-level SSM each work (tier→service level, seasonal floor, 3PL strategic buffer, China-direct Buy FBA capped at 8wk, Complex Rules on top), and a recommended-approach note. Saves app_settings.buy_logic; reload applies. Removed the toggle from CONFIG ▸ Admin ▸ General.
+
+## v27.065 SSM: Buy FBA is China-direct (long lead), capped at 8wk
+- Correction to v27.064: the **Buy FBA** quantity is a **China-direct-to-FBA production order** (long China lead, sequenced before Buy 3PL), NOT a fast 2-week echelon. So under SSM, FBA is now sized on the **same long China lead + lead-time variability as 3PL** — its leanness comes from **FBA-only demand** (lower σ, no B2B anomalies) and an **8-week cover cap** (Amazon storage cost), not a short lead. The reliable ~2-week 3PL→FBA transfer remains a separate top-up mechanism (unchanged).
+
+## v27.064 SSM: FBA treated as a lean fast-replenish echelon
+- Under Service-level SSM, FBA no longer inherits the long China-PO lead-time variability. FBA σ_L is now its own small internal-transfer variability (25% of the reliable ~2-week 3PL→FBA transfer), FBA uses a **2-week** review cycle (vs 4 for 3PL), and FBA cover is **capped at 8 weeks** (high Amazon storage cost). The strategic safety buffer against long/variable China leads stays at **3PL**; FBA holds just enough to cover the transfer + a thin buffer, topped up fast from 3PL. 3PL logic unchanged. Reflects: FBA is more predictable (FBA-only demand, no B2B anomalies) and more expensive to hold.
+
+## v27.063 Buy plan logic toggle — Cover-weeks ↔ Service-level SSM (CONFIG)
+- New **CONFIG ▸ Admin ▸ General ▸ "Buy plan logic"** toggle (`app_settings.buy_logic`, injected as `BUY_LOGIC`): **Cover-weeks** (default, today's flat cover) or **Service-level SSM**. Default leaves the buy plan **byte-identical** — the SSM path is guarded and only entered when set to `ssm`.
+- SSM mode replaces each SKU's base cover-weeks (`md.t3`/`md.tf`) with a **statistical safety-stock-derived cover**: `ssmCoverWeeks()` = (`Z·√(L·σ_d² + d²·σ_L²)` + 4-week cycle) ÷ weekly demand, per pool (3PL/FBA). `Z` from the **marketing tier** (A 99% / B 97% / C 93% / untiered 90%) with a **seasonal service-level floor (97%)**. σ_d from trailing pooled sales; σ_L from `LEADTIME_VAR` (PO delivery history); leads from `md.l3`/`md.lt`.
+- **Complex Rules still apply on top** (raise-only `crCoverWeeks`), so legacy cover rules act as floors. A-tier extra is skipped in SSM mode (tier already sets the service level → no double count). Both Buy-3PL and Urgent passes flow through unchanged. Verified: buy plan identical with the toggle OFF; rebalances when ON (per the ~£752k backtest). Part of the SSM rollout — spec in `Claude Analyses/SPEC_SSM_Buy_Logic_and_Complex_Rules.md`.
+
+## v27.062 New DEMAND ▸ Exceptions ▸ Recommendations (ABC re-tier advisory)
+- New sub-tab surfacing products whose assigned **marketing tier** (`market_tier` A/B/C) differs from the tier they **earn** on actual sales, benchmarked **within their group**: **Core** (continuing) scored on trailing-12mo revenue, **Seasonal** (finite-life) on peak-month revenue — so a seasonal line's low annual revenue never unfairly demotes it. Grouped Core / Seasonal, deep-linked `#/demand/exceptions/recs`.
+- **Promote** (▲, red) = under-tiered → raise service level / cover; **Demote** (▼, amber) = over-tiered → run leaner, free cash. Conservative filter: only clear, material, ≥1-tier gaps. **Advisory only** — the tier is owned in Airtable (marketing); this surfaces candidates, no write-back.
+- Server `buildTierRecommendations()` → `TIER_RECS`. Ties into the Service-Level Stock Model: fixes the flaw that ABC-by-annual-revenue mislabels seasonal best-sellers (e.g. core Cabana beach towels doing £200k+/yr sitting in tier C). Live: 75 Core / ~79 Seasonal promote candidates; sandbox 57 Core / 73 Seasonal.
+
 ## v27.061 New DEMAND ▸ Ship bags tab (packaging forecast from units → orders)
 - Forecasts ship-bag (packaging) demand from the **DTC units forecast**, not bag sales history. Units ÷ avg-units-per-order → orders, split by size into **Medium / Large / XL** bags, across the forward 12 months per country/3PL.
 - **Product-mix aware**: "always-large" categories (default **Picnic**) take a Large bag even on 1-unit orders — their share of the 1-unit (Medium) orders is reassigned to Large. Also captures the mix shift (more Picnic → more Large, more Cooling → more Medium) automatically.

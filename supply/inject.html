@@ -6243,8 +6243,8 @@
     var SC_LABEL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'BOM',products:'Products',barcodegen:'Barcodes'};
     var ADM_KEYS=['admin-general','exchange-rates','channels','permissions','email-log','invsnap'];
     var ADM_LABEL={'admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels',permissions:'Permissions','email-log':'Email log',invsnap:'Inventory snapshots'};
-    var DM_KEYS=['contribmodel','runoffsubs'];   // CONFIG ▸ Demand group (SETS feature P3 + run-off subcats)
-    var DM_LABEL={contribmodel:'Contribution model',runoffsubs:'Discontinued sub-categories'};
+    var DM_KEYS=['contribmodel','buyplan','runoffsubs'];   // CONFIG ▸ Demand group (SETS contribution model + buy-plan logic + run-off subcats)
+    var DM_LABEL={contribmodel:'Contribution model',buyplan:'Buy plan logic',runoffsubs:'Discontinued sub-categories'};
     // Supply chain sits second (next to General settings); it expands to the level-3 members below / nested.
     var L2=[['general','General settings'],['supplychain','Supply chain'],['demand','Demand'],['portalusers','Portal users'],['portal','Portal'],['keyaccounts','Key accounts'],['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']];
     if(ME&&ME.is_admin){L2.push(['admin','Admin']);}   // Admin grouping → Permissions / Email log as level-3 tabs
@@ -6555,7 +6555,8 @@
               +'<div class="mut tiny" style="margin:1px 0 4px">Emailed when a supplier submits invoice information on a PO. Comma-separate multiple addresses.</div>'
               +'<input class="fci gs-set" data-key="invoice_submit_notify" value="'+esc(s.invoice_submit_notify||'zera@dockandbay.com, ben@dockandbay.com')+'" placeholder="email@dockandbay.com, other@dockandbay.com" style="width:100%;box-sizing:border-box;text-align:left"></div></div>'
             +'<div class="sect-h" style="margin-top:18px">Finance</div>'
-            +'<div class="mut tiny" style="max-width:720px;margin:0 0 12px">Exchange rates now live in <b>CONFIG ▸ Admin ▸ Exchange rates</b> (a blended GBP↔USD/EUR/AUD rate per financial year). They drive the local-currency toggle and the Cash Flow / Auto Forecast GBP columns.</div>';
+            +'<div class="mut tiny" style="max-width:720px;margin:0 0 12px">Exchange rates now live in <b>CONFIG ▸ Admin ▸ Exchange rates</b> (a blended GBP↔USD/EUR/AUD rate per financial year). They drive the local-currency toggle and the Cash Flow / Auto Forecast GBP columns.</div>'
+            ;   // (Buy plan logic toggle moved to DEMAND ▸ Buy Plan)
           b.querySelectorAll('.gs-set').forEach(function(inp){ inp.onchange=function(){ inp.style.borderColor='#d0d0d0';
             fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:inp.dataset.key,value:inp.value})})
               .then(function(r){return r.json();}).then(function(j){ inp.style.borderColor=(j&&j.error)?'#dc2626':'#16a34a'; setTimeout(function(){inp.style.borderColor='';},900); })
@@ -7583,6 +7584,9 @@
       // Editable A/B/C tier mix + Sets-vs-SKUs split per sub-category, with a Default → Country → Channel → cell
       // cascade. Shares page scope with the demand artifact, so it reads ACTIVE_SUBS/SUBS_META directly. INERT for
       // now (stored in app_settings.contrib_model); the forecast/smoothing wiring is a later phase.
+      SUBS['buyplan']=function(){   // CONFIG ▸ Demand ▸ Buy plan logic — reuses the artefact's renderBuyPlanView (setting + explainer)
+        if(typeof window.renderBuyPlanView==='function'){ try{ window.renderBuyPlanView(b); return; }catch(e){} }
+        b.innerHTML='<div class="count" style="color:#dc2626">Buy plan settings unavailable — reload the page.</div>'; };
       SUBS['contribmodel']=function(){
         b.innerHTML='<div class="count">Loading…</div>';
         var SUBLIST=[]; try{ if(typeof ACTIVE_SUBS!=='undefined'&&ACTIVE_SUBS&&ACTIVE_SUBS.size){ ACTIVE_SUBS.forEach(function(s){SUBLIST.push(s);}); } else if(typeof SUBS_META!=='undefined'){ for(var k in SUBS_META){ if(SUBS_META[k]&&SUBS_META[k].a)SUBLIST.push(k); } } }catch(e){}
@@ -9290,7 +9294,7 @@
   function writePoTabHash(po,tab){ if(!po)return; writeHash(['supply','purchase-orders',po,POTAB_SLUG[tab]||tab]); }   // #/supply/purchase-orders/<PO>/<tab-slug>
   // Friendly top-level view URLs: planning→#/demand/<sub>, exec→#/reports/<sub>, others as-is.
   function writeViewHash(v){
-    if(v==='planning'){ var _dv=(typeof DEMAND_VIEW!=='undefined'&&DEMAND_VIEW)||'plan'; var _dinp=['targets','keyaccounts','calendar','revenue']; writeHash(_dinp.indexOf(_dv)>=0?['demand','inputs',_dv]:['demand',_dv]); }   // input views deep-link as #/demand/inputs/<slug>
+    if(v==='planning'){ var _dv=(typeof DEMAND_VIEW!=='undefined'&&DEMAND_VIEW)||'plan'; var _dinp=['targets','keyaccounts','calendar','revenue','pricechanges','klaviyobis']; var _danl=['summary','snapshots','trends','safetystock','shipbags']; writeHash(_dinp.indexOf(_dv)>=0?['demand','inputs',_dv]:(_danl.indexOf(_dv)>=0?['demand','analysis',_dv]:['demand',_dv])); }   // input → #/demand/inputs/<slug>; analysis → #/demand/analysis/<slug>
     else if(v==='exec')writeHash(['reports',(typeof REPORT_VIEW!=='undefined'&&REPORT_VIEW)||'ex']);
     else if(v==='actions'||v==='buy'||v==='fba'||v==='transfer'){   // BUY & MOVE group: #/buy-move/<actions|buy|fba|transfer>
       var _sub=v;   // entering via the top BUY & MOVE button (data-view='actions') → restore the last sub-tab the user was on
@@ -9302,7 +9306,7 @@
   function syncHash(){ if(current==='reports') writeHash(['supply','reports',reportTab]);
     else if(current==='purchase-orders') writeHash(['supply','purchase-orders'].concat(poSub&&PO_SUB_KEYS.indexOf(poSub)>=0&&poSub!=='plan'?[poSub]:[]));
     else if(current==='payments') writeHash(['supply','payments'].concat(poSub&&PAY_SUB_KEYS.indexOf(poSub)>=0&&poSub!=='paydue'?[poSub]:[]));
-    else if(current==='config') writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['config','portal',encodeURIComponent(PORTAL_SUP.toLowerCase())]:['config',CONFIG_SUB]);
+    else if(current==='config') writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['config','portal',encodeURIComponent(PORTAL_SUP.toLowerCase())]:(['contribmodel','buyplan','runoffsubs'].indexOf(CONFIG_SUB)>=0?['config','demand',CONFIG_SUB]:['config',CONFIG_SUB]));   // Demand group items nest as #/config/demand/<item>
     else if(current==='actions') writeHash(['supply','actions'].concat(actSub&&actSub!=='actions'?[actSub]:[]));   // ACTIONS ▸ Recommendations / ERP Compare deep-link
     else if(current) writeHash(['supply',current]); }
   function applyRoute(){ var seg=(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean); _expectedHash=location.hash;
@@ -9321,9 +9325,9 @@
       else if(sec==='shipments'){ if(seg[2])_pendingShip=decodeURIComponent(seg[2]); showPoSub('shipments'); }   // legacy: shipments moved under purchase-orders
       else if(sec==='samples'){ if(seg[2])_pendingSampleRef=decodeURIComponent(seg[2]); if(seg[3])_pendingSampleTab=decodeURIComponent(seg[3]); selectSection('samples'); }   // #/supply/samples/<ref>[/<tab>] → open & expand that sample on the tab
       else selectSection(sec);
-    } else if(seg[0]==='config'){ if(seg[1])CONFIG_SUB=seg[1]; if(seg[1]==='portal'&&seg[2])_pendingPortalSup=decodeURIComponent(seg[2]); if(typeof enterConfig==='function')enterConfig(); }
+    } else if(seg[0]==='config'){ if(seg[1]==='demand'){ CONFIG_SUB=seg[2]||'contribmodel'; } else if(seg[1])CONFIG_SUB=seg[1]; if(seg[1]==='portal'&&seg[2])_pendingPortalSup=decodeURIComponent(seg[2]); if(typeof enterConfig==='function')enterConfig(); }   // #/config/demand/<item> nested; legacy #/config/<item> still resolves
     else if(seg[0]==='scenario'){ if(typeof DEMAND_VIEW!=='undefined')DEMAND_VIEW='scenario'; if(seg[1])scenCurrent=seg[1]; var _sdb=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]'); if(_sdb)_sdb.click(); }   // legacy #/scenario/<key> → redirect to DEMAND ▸ Scenario planner (#/demand/scenario/<key>)
-    else if(seg[0]==='demand'){ if(typeof DEMAND_VIEW!=='undefined'){ if(seg[1]==='scenario'){ DEMAND_VIEW='scenario'; if(seg[2])scenCurrent=seg[2]; } else if(seg[1]==='inputs'&&seg[2])DEMAND_VIEW=seg[2]; else if(seg[1]==='exceptions'){ DEMAND_VIEW='exceptions'; if(seg[2]&&typeof EXC_SUBTAB!=='undefined')window.EXC_SUBTAB=seg[2]; } else if(seg[1])DEMAND_VIEW=seg[1]; } var _db=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]'); if(_db)_db.click(); }   // #/demand/scenario/<key> + #/demand/inputs/<slug> + #/demand/exceptions/<slug> deep-links
+    else if(seg[0]==='demand'){ if(typeof DEMAND_VIEW!=='undefined'){ if(seg[1]==='scenario'){ DEMAND_VIEW='scenario'; if(seg[2])scenCurrent=seg[2]; } else if((seg[1]==='inputs'||seg[1]==='analysis')&&seg[2])DEMAND_VIEW=seg[2]; else if(seg[1]==='exceptions'){ DEMAND_VIEW='exceptions'; if(seg[2]&&typeof EXC_SUBTAB!=='undefined')window.EXC_SUBTAB=seg[2]; } else if(seg[1])DEMAND_VIEW=seg[1]; } var _db=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]'); if(_db)_db.click(); }   // #/demand/scenario/<key> + #/demand/inputs|analysis/<slug> + #/demand/exceptions/<slug> deep-links (legacy #/demand/<slug> still resolves)
     else if(seg[0]==='reports'){ if(seg[1]&&typeof REPORT_VIEW!=='undefined')REPORT_VIEW=seg[1]; var _rb=document.querySelector('#view-tabs-row .view-toggle[data-view="exec"]'); if(_rb)_rb.click(); }
     else if(seg[0]==='product'){ if(typeof showProduct==='function'){ showProduct();
       if(seg[1]&&seg[1]!=='plan'&&seg[1]!=='reports'){ _pendingProdRef=decodeURIComponent(seg[1]); if(seg[2])_pendingProdTab=decodeURIComponent(seg[2]); selectProductSub('plan'); }   // #/product/<ref>[/<tab>]
