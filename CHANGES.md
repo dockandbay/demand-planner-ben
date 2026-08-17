@@ -1,3 +1,6 @@
+## v27.073 CONFIG → ⚙ cog icon (nav overhaul stage 1)
+- CONFIG is no longer a top-bar text button; it is now a **⚙ cog icon** sitting just left of the **?** help icon (top-right). Clicking it opens the CONFIG section as before. First stage of the nav overhaul (DEMAND▸Config / SUPPLY▸Config group moves + redirects to follow).
+
 ## v27.072 Ship bags: SKU forecast table + Apply-to-forecast
 - DEMAND ▸ Analysis ▸ Ship bags now shows a **Ship-bag SKU forecast** table: rows = SHIPBAG-MED / SHIPBAG-LAR / SHIPBAG-XLG, columns = each market (UK/US/EU/AU) with current vs recommended 12-mo forecast (Medium→MED, Large→LAR, XL→XLG). An **Apply** button writes the recommended monthly values into each SKU’s DTC forecast override across all markets and saves, so they feed the buy plan.
 
