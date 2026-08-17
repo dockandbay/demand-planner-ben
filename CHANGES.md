@@ -1,3 +1,6 @@
+## v27.091 Demand plan cell-sum: exclude Quarter/Half/FY-total columns
+- The ⌘/Ctrl running-sum (`#plan-sum-inline`) selected any numeric cell, so hovering across a row also picked up the Quarter / Half / FY-total columns and double-counted the months. `valEl` now only accepts real month cells (every month cell carries a `data-nk` keyed "…|YYYY_MM"; aggregate columns have none). Verified: 936 month cells stay summable, all 141 total columns are excluded.
+
 ## v27.090 Summary & targets: always refresh targets + recompute forecast on open
 - The Summary was recomputing forecast from a shared per-render memo (`CALC_MEMO`) that could hold stale figures, so target-vs-forecast numbers didn't always move after a plan-forecast change. It now clears the memo on every Summary open → forecast recomputes fresh from the current plan/overlay.
 - Targets were only re-fetched when country/channel changed (a guard), so a target changed on another tab/import/session wasn't picked up. The Summary now re-pulls saved targets every time it opens / on pill / tab / metric change (in-cell edits still update locally without a round-trip). "Rev + targets" now reflects the latest saved targets.

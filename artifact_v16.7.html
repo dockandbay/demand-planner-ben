@@ -6260,6 +6260,9 @@ function inbDiv(inb, entries, color){
   // The forecast value element in a plan cell: subcat rows have a `.fcr`; SKU/subtotal rows render it as the first
   // numeric leaf <div>. Return that element so hovering/clicking ANYWHERE in the cell sums the forecast (both row types).
   function valEl(e){ var td=(e.target&&e.target.closest)?e.target.closest('#t td'):null; if(!td)return null;
+    // Only real MONTH cells are summable — every month cell carries a data-nk keyed "...|YYYY_MM". Quarter / Half /
+    // FY-total (and any aggregate) columns have no per-month key, so exclude them (they'd double-count the months). — Ben
+    var _nk=(td.dataset&&td.dataset.nk)||'', _pp=_nk.split('|'); if(!/^\d{4}_\d{2}$/.test(_pp[_pp.length-1]))return null;
     var f=td.querySelector('.fcr'); if(f)return f;   // category rows (and any tagged) — the forecast is .fcr
     // SKU rows stack [LY (grey), input, forecast (bold), YoY (%)]. Pick the BOLD numeric leaf div with no '%' = the
     // forecast (not the first div, which is LY). Fall back to the first plain number (e.g. subtotal rows).
