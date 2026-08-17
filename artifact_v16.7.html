@@ -10703,7 +10703,7 @@ function _zalRender(wrap,d){
 // ACTIONS: per-country summary of the buy/move actions (Buy 3PL, Urgent Sea/Air, Buy FBA, FBA Transfer) —
 // total units per action with expand-to-SKU. Uses BP.getBuyQtys across each market's visible SKUs.
 // ── BUY & MOVE ▸ INVENTORY (scaffold) — Status Report | Manage 3PL (US/UK/AU/EU) | Manage FBA (US/UK/AU/EU/CA) ──
-var INV_SUB='status', INV_3PL='US', INV_FBA='US', INV_FBA_GAP='gaps', INV_FBA_Q='', _invFbaLast=null, INV_3PL_GAP='gaps', INV_3PL_Q='', _inv3plLast=null, INV_STATUS_MKT='US', FBA_AGED_F=null, _inv3plUnmOpen=false, _invFbaUnmOpen=false;   // *UnmOpen = show the "in 3PL/FBA but not in the product list (with stock)" list
+var INV_SUB='status', INV_3PL='US', INV_FBA='US', INV_FBA_GAP='gaps', INV_FBA_Q='', _invFbaLast=null, INV_3PL_GAP='gaps', INV_3PL_Q='', _inv3plLast=null, INV_STATUS_MKT='US', FBA_AGED_F=null, _inv3plUnmOpen=false, _invFbaUnmOpen=false, INV_3PL_DEAD=false, INV_FBA_DEAD=false;   // *UnmOpen = show the "in 3PL/FBA but not in the product list (with stock)" list; *_DEAD = dead-stock pill filter (disc >24mo, not moving)
 function renderInventory(){
   var host=document.querySelector('.wrap'); if(!host)return;
   var ex=document.getElementById('inventory-wrap'); if(ex)ex.remove();
@@ -11090,7 +11090,7 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
       if(INV_FBA_GAP==='items10')return Math.abs(r.diff)>10;
       if(INV_FBA_GAP==='pct20')return (r.erp_fba>0)?(Math.abs(r.diff)/r.erp_fba>0.20):(r.report_fba>0); return true; }
     var _qf=String(INV_FBA_Q||'').trim().toLowerCase();
-    var fr=rows.filter(passGap).filter(function(r){ return !_qf || (String(r.erp_sku||'')+' '+String(r.sku||'')+' '+String(r.asin||'')).toLowerCase().indexOf(_qf)>=0; });
+    var fr=(INV_FBA_DEAD?rows.filter(function(r){return r.dead_stock;}):rows.filter(passGap)).filter(function(r){ return !_qf || (String(r.erp_sku||'')+' '+String(r.sku||'')+' '+String(r.asin||'')).toLowerCase().indexOf(_qf)>=0; });
     // Cin7 Stocktake export = matched rows in the current filter: Code = products SKU, Count = Amazon FBA (available+fc-transfer)
     var stkRows=fr.filter(function(r){return r.matched;}).map(function(r){ return [r.erp_sku, r.report_fba]; });
     window._invFbaStk=stkRows;
@@ -11104,6 +11104,7 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
       +'<label class="mut" style="font-size:12px">Show</label><select id="fba-gap" style="width:auto;max-width:200px;padding:4px 8px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#334155;font-size:12px;cursor:pointer">'
       +[['gaps','All gaps (on-hand)'],['pct20','Gap more than 20%'],['items10','Gap more than 10 items'],['all','All (incl. matches)']].map(function(o){return '<option value="'+o[0]+'"'+(o[0]===INV_FBA_GAP?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'
       +'<input id="fba-q" placeholder="search SKU…" value="'+tHesc(INV_FBA_Q||'')+'" style="width:150px;padding:4px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px">'
+      +'<button id="fba-dead" title="Discontinued more than 24 months ago and, per the inventory snapshots, still holding FBA stock that isn\'t selling down (flat < 10% over the last 6 months) — dead / obsolete FBA stock" style="background:'+(INV_FBA_DEAD?'#7f1d1d':'#fef2f2')+';color:'+(INV_FBA_DEAD?'#fff':'#b91c1c')+';border:1px solid #b91c1c;border-radius:14px;padding:3px 11px;font-size:12px;font-weight:600;cursor:pointer">🪦 Dead stock ('+(j.dead_stock||0)+')</button>'
       +'<span class="mut" style="font-size:11px">'+fr.length+' shown</span>'
       +'<span style="margin-left:auto;position:relative"><button id="fba-stk" class="save-btn" style="background:#dcfce7;color:#166534;border:1px solid #16a34a;font-weight:600">⤓ Cin7 Stocktake ▾</button>'
         +'<div id="fba-stk-menu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);z-index:50;min-width:190px">'
@@ -11136,6 +11137,7 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
     else { var M=j.erp_missing||[]; det.innerHTML=fbaListTbl(['SKU','ERP '+INV_FBA+' FBA'], M.map(function(x){return [x.sku, x.erp_fba];}), 'Products with ERP FBA stock > 0 that are absent from the uploaded report'); }
   }; });
   var gp=document.getElementById('fba-gap'); if(gp)gp.onchange=function(){ INV_FBA_GAP=this.value; invFbaRender('manage',_invFbaLast); };
+  var fd=document.getElementById('fba-dead'); if(fd)fd.onclick=function(){ INV_FBA_DEAD=!INV_FBA_DEAD; invFbaRender('manage',_invFbaLast); };
   var qf=document.getElementById('fba-q'); if(qf)qf.oninput=function(){ var cp=this.selectionStart; INV_FBA_Q=this.value; invFbaRender('manage',_invFbaLast); var n=document.getElementById('fba-q'); if(n){n.focus(); try{n.setSelectionRange(cp,cp);}catch(e){}} };
   invStkBind('fba-stk','fba-stk-menu','FBA-'+INV_FBA,function(){ return window._invFbaStk||[]; });
 }
@@ -11194,7 +11196,7 @@ function inv3plRender(j){ var panel=document.getElementById('inv3pl-panel'); if(
       var ck=function(d,e){ if(d==null)return false; if(INV_3PL_GAP==='items10')return Math.abs(d)>10; if(INV_3PL_GAP==='pct20')return (e>0)?(Math.abs(d)/e>0.20):(Math.abs(d)>0); return false; };
       return ck(r.diff_onhand,r.erp_onhand)||ck(r.diff_avail,r.erp_avail); }
     var _q3=String(INV_3PL_Q||'').trim().toLowerCase();
-    var fr=rows.filter(passGap3).filter(function(r){ return !_q3 || String(r.sku||'').toLowerCase().indexOf(_q3)>=0; });
+    var fr=(INV_3PL_DEAD?rows.filter(function(r){return r.dead_stock;}):rows.filter(passGap3)).filter(function(r){ return !_q3 || String(r.sku||'').toLowerCase().indexOf(_q3)>=0; });
     var stk=fr.filter(function(r){return r.matched;}).map(function(r){ return [r.sku, r.report_onhand]; }); window._inv3plStk=stk;   // Cin7 Stocktake: Code=SKU, Count=3PL Report - On Hand
     // Items in the 3PL report but NOT in the product list, that still hold stock (Ben) — surfaced as a toggled list.
     var _unm=rows.filter(function(r){return !r.matched && ((Number(r.report_onhand)||0)>0 || (Number(r.report_avail)||0)>0);})
@@ -11210,13 +11212,14 @@ function inv3plRender(j){ var panel=document.getElementById('inv3pl-panel'); if(
         +'<th style="text-align:left;padding:5px 10px;border-bottom:1px solid #fed7aa;position:sticky;top:0;background:#fffaf5">SKU</th>'
         +'<th style="text-align:left;padding:5px 10px;border-bottom:1px solid #fed7aa;position:sticky;top:0;background:#fffaf5">On hand</th>'
         +'<th style="text-align:left;padding:5px 10px;border-bottom:1px solid #fed7aa;position:sticky;top:0;background:#fffaf5">Available</th></tr></thead><tbody>'
-        +_unm.map(function(r){ return '<tr><td style="padding:4px 10px;font-family:ui-monospace,Menlo,monospace">'+tHesc(r.sku)+'</td><td style="padding:4px 10px">'+(r.report_onhand==null?'—':r.report_onhand)+'</td><td style="padding:4px 10px">'+(r.report_avail==null?'—':r.report_avail)+'</td></tr>'; }).join('')
+        +_unm.map(function(r){ return '<tr><td style="padding:4px 10px;text-align:left;font-family:ui-monospace,Menlo,monospace">'+tHesc(r.sku)+'</td><td style="padding:4px 10px;text-align:left">'+(r.report_onhand==null?'—':r.report_onhand)+'</td><td style="padding:4px 10px;text-align:left">'+(r.report_avail==null?'—':r.report_avail)+'</td></tr>'; }).join('')
         +'</tbody></table></div>'):'<div class="mut" style="font-size:12px;padding:8px 10px">None — every SKU with 3PL stock is in the product list.</div>')
       +'</div>'; }
     var ctl='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 10px">'
       +'<label class="mut" style="font-size:12px">Show</label><select id="inv3pl-gap" style="width:auto;max-width:200px;padding:4px 8px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#334155;font-size:12px;cursor:pointer">'
       +[['gaps','All gaps (on-hand)'],['pct20','Gap more than 20%'],['items10','Gap more than 10 items'],['all','All (incl. matches)']].map(function(o){return '<option value="'+o[0]+'"'+(o[0]===INV_3PL_GAP?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'
       +'<input id="inv3pl-q" placeholder="search SKU…" value="'+tHesc(INV_3PL_Q||'')+'" style="width:150px;padding:4px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px">'
+      +'<button id="inv3pl-dead" title="Discontinued more than 24 months ago and, per the inventory snapshots, still holding stock that isn\'t selling down (flat < 10% over the last 6 months) — dead / obsolete stock in this warehouse" style="background:'+(INV_3PL_DEAD?'#7f1d1d':'#fef2f2')+';color:'+(INV_3PL_DEAD?'#fff':'#b91c1c')+';border:1px solid #b91c1c;border-radius:14px;padding:3px 11px;font-size:12px;font-weight:600;cursor:pointer">🪦 Dead stock ('+(j.dead_stock||0)+')</button>'
       +'<span class="mut" style="font-size:11px">'+fr.length+' shown</span>'
       +'<span style="margin-left:auto;position:relative"><button id="inv3pl-stk" class="save-btn" style="background:#dcfce7;color:#166534;border:1px solid #16a34a;font-weight:600">⤓ Cin7 Stocktake ▾</button>'
         +'<div id="inv3pl-stk-menu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);z-index:50;min-width:190px">'
@@ -11241,6 +11244,7 @@ function inv3plRender(j){ var panel=document.getElementById('inv3pl-panel'); if(
   var ib=document.getElementById('inv3pl-import'); if(ib)ib.onclick=inv3plImport;
   var g3=document.getElementById('inv3pl-gap'); if(g3)g3.onchange=function(){ INV_3PL_GAP=this.value; inv3plRender(_inv3plLast); };
   var u3=document.getElementById('inv3pl-unm-tgl'); if(u3)u3.onclick=function(){ _inv3plUnmOpen=!_inv3plUnmOpen; inv3plRender(_inv3plLast); };
+  var d3=document.getElementById('inv3pl-dead'); if(d3)d3.onclick=function(){ INV_3PL_DEAD=!INV_3PL_DEAD; inv3plRender(_inv3plLast); };
   var q3=document.getElementById('inv3pl-q'); if(q3)q3.oninput=function(){ var cp=this.selectionStart; INV_3PL_Q=this.value; inv3plRender(_inv3plLast); var n=document.getElementById('inv3pl-q'); if(n){n.focus(); try{n.setSelectionRange(cp,cp);}catch(e){}} };
   invStkBind('inv3pl-stk','inv3pl-stk-menu','3PL-'+INV_3PL,function(){ return window._inv3plStk||[]; }); }
 function renderBuyMoveActions(){

@@ -1,3 +1,8 @@
+## v27.097 Manage 3PL / FBA: "Dead stock" pill filter + left-align the unmatched list
+- New **🪦 Dead stock (N)** pill on Manage 3PL and Manage FBA. Filters to SKUs **discontinued (for that market) > 24 months ago** that, per `planner.inventory_snapshots`, are **still holding stock and not selling down** — available has stayed flat (varies < 10% over the last 6 months) and is still > 0 in that warehouse. Report-only. Server helper `deadStockSkus(warehouse, market)` (disc column per market; snapshot trend query); rows get a `dead_stock` flag + a count. Sandbox shows 0 (its snapshots are sparse); the 20-month history on live will populate it.
+- Left-aligned the "not in product list (with stock)" table cells (Ben).
+- Verified: pill renders + count, filter shows only dead-stock rows, snapshot SQL runs clean on the live 3PL endpoint.
+
 ## v27.096 Manage 3PL / FBA: list items with stock that aren't in the product list
 - **Manage 3PL** — the summary's "not in ERP" count is now a clickable **"N not in product list (with stock) ▸"** toggle that opens a table of the report SKUs holding 3PL stock (on-hand / available) that don't exist in `planner.products`. Zero-stock unmatched rows are excluded (Ben: "do have inventory").
 - **Manage FBA** — the existing "not in ERP ▾" list is now filtered to report SKUs with **FBA stock > 0** and sorted by qty (was showing zero-stock rows too).

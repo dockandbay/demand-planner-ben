@@ -7560,6 +7560,28 @@ async function recentCompletionPOs(mkt, isFba) {
   rows.forEach(r => { (map[r.sku] = map[r.sku] || []).push({ po: r.po, completion: r.completion, qty: r.qty }); });
   return map;
 }
+// "Dead stock" for a warehouse: SKUs discontinued (for this market) > 24 months ago that, per the inventory
+// snapshot history, are STILL holding stock and NOT selling down — i.e. the available qty has stayed flat
+// (varies < 10% over the last 6 months) and is still > 0. Report-only. Empty if the snapshots aren't loaded.
+async function deadStockSkus(warehouse, market) {
+  try {
+    const discCol = market === 'AU' ? 'discontinue_date_au_final' : market === 'CA' ? 'discontinue_date_ca' : 'discontinue_date_final';
+    const disc = new Set((await pool.query(
+      `SELECT sku FROM planner.products
+        WHERE ${discCol} ~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}' AND (${discCol})::date < (current_date - interval '24 months')`
+    )).rows.map(r => r.sku));
+    if (!disc.size) return new Set();
+    const snap = (await pool.query(
+      `SELECT sku, min(available) mn, max(available) mx, (array_agg(available ORDER BY snapshot_date DESC))[1] last_av, count(*) n
+         FROM planner.inventory_snapshots
+        WHERE warehouse = $1 AND snapshot_date >= (current_date - interval '6 months')
+        GROUP BY sku`, [warehouse])).rows;
+    const dead = new Set();
+    snap.forEach(r => { const last = Number(r.last_av) || 0, mx = Number(r.mx) || 0, mn = Number(r.mn) || 0, n = Number(r.n) || 0;
+      if (disc.has(r.sku) && n >= 2 && last > 0 && (mx - mn) <= mx * 0.1) dead.add(r.sku); });
+    return dead;
+  } catch (e) { return new Set(); }
+}
 async function inv3plCompare(mkt, rep) {
   const cfg = INV3PL_SRC[mkt] || {};   // non-GRS tabs override the ERP compare columns (inventory_<mkt>_nongrs); GRS tabs derive them
   const ohCol = cfg.ohCol || ('inventory_' + mkt.toLowerCase() + '_3pl_onhand');   // mkt/cols are whitelisted → safe to interpolate
@@ -7573,7 +7595,11 @@ async function inv3plCompare(mkt, rep) {
       matched, diff_onhand: e ? rep[sku].oh - e.oh : null, diff_avail: e ? rep[sku].av - e.av : null }; })
     .sort((a, b) => (Math.abs(b.diff_avail || 0) + Math.abs(b.diff_onhand || 0)) - (Math.abs(a.diff_avail || 0) + Math.abs(a.diff_onhand || 0)));   // biggest combined mismatch first
   try { const poMap = await recentCompletionPOs(mkt, false); rows.forEach(r => { if (poMap[r.sku]) r.recent_pos = poMap[r.sku]; }); } catch (e) {}
+  try { const wh = (cfg.avCol || ('inventory_' + mkt.toLowerCase() + '_3pl')).replace(/^inventory_/, '');
+    const dead = await deadStockSkus(wh, String(mkt).split('_')[0].toUpperCase());
+    rows.forEach(r => { r.dead_stock = dead.has(r.sku); }); } catch (e) {}
   return { rows, report_skus: skus.length, matched: rows.filter(r => r.matched).length, unmatched: rows.filter(r => !r.matched).length,
+    dead_stock: rows.filter(r => r.dead_stock).length,
     erp_not_in_report: Object.keys(erp).filter(s => (erp[s].oh > 0 || erp[s].av > 0) && !(s in rep)).length };
 }
 function inv3plParse(cfg, text) {   // CSV text -> { sku: {oh,av} } (sum duplicate rows)
@@ -7711,7 +7737,10 @@ async function invFbaCompare(mkt, rep) {
   const rates = await getFbaAgedRates(), rate = rates[mkt] || FBA_AGED_RATE_DEFAULT[mkt] || null;
   const aged_cost = await fbaAgedCost(mkt, aged, rate, dimsBySku);
   try { const poMap = await recentCompletionPOs(mkt, true); rows.forEach(r => { const k = r.erp_sku || r.sku; if (poMap[k]) r.recent_pos = poMap[k]; }); } catch (e) {}
+  try { const dead = await deadStockSkus(mkt.toLowerCase() + '_fba', mkt);
+    rows.forEach(r => { r.dead_stock = !!(r.erp_sku && dead.has(r.erp_sku)); }); } catch (e) {}
   return { rows, aged, aged_cost, report_skus: skus.length, matched: rows.filter(r => r.matched).length, unmatched: not_in_erp.length,
+    dead_stock: rows.filter(r => r.dead_stock).length,
     not_in_erp, erp_missing, erp_not_in_report: erp_missing.length, dup_asins: dupAsins.length };
 }
 // Estimate monthly aged-storage cost. Uses each SKU's per-unit volume × the market rate (base + age-tier surcharge; greater
