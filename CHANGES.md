@@ -1,3 +1,7 @@
+## v27.087 Growth-on-LY: works on SKU lines + mutually exclusive with Forecast-vs-actual
+- **SKU-line fix:** the growth shade wasn't showing on SKU rows because it was applied *before* `td.style.cssText='…'`, which replaces all inline styles and wiped the background (the `hl-blk` black-text class survived, so text looked right but no shade). Moved the shade to *after* the `cssText` assignment.
+- **Mutual exclusivity:** "Forecast vs actual (past 4 mo)" and "Growth on last year" can no longer both be active — enabling one turns the other off (state + checkbox + localStorage), and a stale both-on state is reconciled on load.
+
 ## v27.086 Fix: Cash Flow report hid the likely-pay-date on non-overdue payments
 - SUPPLY ▸ Payments ▸ Cash Flow: the "Likely pay date" column only rendered a value when the row was **overdue** (editable input). A payment with a likely date set but a **future** due date (e.g. PO-1712946's completion) showed "—" — even though that likely date is already driving the cash-flow timing (`mkLine` applies a likely date whenever one is set, not just when overdue).
 - Now the likely date shows **read-only whenever one is set** on an unpaid row (overdue rows keep the editable input for manual reschedule; paid rows / no-likely rows still show "—"). Matches how Payments Due already displays it. Display-only — no buy-plan or cash-timing change.

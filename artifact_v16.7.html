@@ -4321,7 +4321,9 @@ function setHlFcLtAct(on){ HL_FC_LT_ACT=!!on; try{localStorage.setItem('hzHlFcLt
 var HL_NOFC_INV=(function(){try{return localStorage.getItem('hzHlNoFcInv')==='1';}catch(e){return false;}})();     // shade forecast cells that are 0 while stock is on hand
 function setHlNoFcInv(on){ HL_NOFC_INV=!!on; try{localStorage.setItem('hzHlNoFcInv',HL_NOFC_INV?'1':'0');}catch(e){} try{renderMain();}catch(e){} }
 var HL_FCACT_DISC=(function(){try{return localStorage.getItem('hzHlFcActDisc')==='1';}catch(e){return false;}})();  // shade past-4-completed-month cells by actual-vs-locked-forecast discrepancy
-function setHlFcActDisc(on){ HL_FCACT_DISC=!!on; try{localStorage.setItem('hzHlFcActDisc',HL_FCACT_DISC?'1':'0');}catch(e){} try{renderMain();}catch(e){} }
+function setHlFcActDisc(on){ HL_FCACT_DISC=!!on; try{localStorage.setItem('hzHlFcActDisc',HL_FCACT_DISC?'1':'0');}catch(e){}
+  if(HL_FCACT_DISC){ HL_GROWTH_LY=false; try{localStorage.setItem('hzHlGrowthLY','0');}catch(e){} var _g=document.getElementById('filt-hl-growthly'); if(_g)_g.checked=false; }   // mutually exclusive with Growth-on-LY (Ben)
+  try{renderMain();}catch(e){} }
 function _last4Has(m){ if(typeof CUR_MONTH==='undefined')return false; var y=+CUR_MONTH.slice(0,4),mo=+CUR_MONTH.slice(5,7); for(var i=0;i<4;i++){ mo--; if(mo<1){mo=12;y--;} if(m===y+'_'+(mo<10?'0':'')+mo)return true; } return false; }   // last 4 completed months (before current)
 function hlDiscColor(act,fc){ if(!HL_FCACT_DISC||!(fc>0))return null; var r=(act||0)/fc;   // actual vs locked forecast → discrepancy colour scale (Ben)
   if(r<=0.30)return '#F54927';   // ≥70% below forecast — brighter red
@@ -4330,7 +4332,10 @@ function hlDiscColor(act,fc){ if(!HL_FCACT_DISC||!(fc>0))return null; var r=(act
   if(r>=1.50)return '#00FF3C';   // ≥50% above forecast
   return null; }
 var HL_GROWTH_LY=(function(){try{return localStorage.getItem('hzHlGrowthLY')==='1';}catch(e){return false;}})();   // shade cells by growth vs same month last year
-function setHlGrowthLY(on){ HL_GROWTH_LY=!!on; try{localStorage.setItem('hzHlGrowthLY',HL_GROWTH_LY?'1':'0');}catch(e){} try{renderMain();}catch(e){} }
+if(HL_GROWTH_LY&&HL_FCACT_DISC){ HL_GROWTH_LY=false; try{localStorage.setItem('hzHlGrowthLY','0');}catch(e){} }   // the two highlights are mutually exclusive — reconcile a stale both-on state (Ben)
+function setHlGrowthLY(on){ HL_GROWTH_LY=!!on; try{localStorage.setItem('hzHlGrowthLY',HL_GROWTH_LY?'1':'0');}catch(e){}
+  if(HL_GROWTH_LY){ HL_FCACT_DISC=false; try{localStorage.setItem('hzHlFcActDisc','0');}catch(e){} var _d=document.getElementById('filt-hl-disc'); if(_d)_d.checked=false; }   // mutually exclusive with Forecast-vs-actual (Ben)
+  try{renderMain();}catch(e){} }
 function hlGrowthColor(cur,ly){ if(!HL_GROWTH_LY||!(ly>0))return null; var r=(cur||0)/ly;   // growth vs LY colour scale; ly<=0 excluded (no growth-from-zero) — Ben
   if(r<=0.30)return '#F54927';   // ≥70% down on LY — brighter red
   if(r<=0.70)return '#F87C63';   // ≥30% down on LY — light red
@@ -8043,9 +8048,9 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       var act=sales[m]||0,fc=skuFC[m]||0,stored=skuOvGetK(sku+'|'+co+'|'+ch+'|'+m);
       var fcv=isAct?act:fc;
       td.className=fyBg(Y)+(first?' sep2':'')+(isAct?' sku-act-cell':'');
-      if(typeof HL_GROWTH_LY!=='undefined'&&HL_GROWTH_LY&&!preLaunchM(m)){ _hlShade(td,hlGrowthColor(fcv,lyVal)); }   // growth-vs-LY shade (all months; LY=0 excluded)
       td.style.cssText='padding:1px 2px;border-bottom:1px solid #f0f0ee';
       if(preLaunchM(m))td.style.setProperty('background','#d9d9d9','important');   // pre-launch months (incl. actuals) greyed — Ben (inline !important beats the .bg26/.sku-act-cell !important)
+      if(typeof HL_GROWTH_LY!=='undefined'&&HL_GROWTH_LY&&!preLaunchM(m)){ _hlShade(td,hlGrowthColor(fcv,lyVal)); }   // growth-vs-LY shade (all months; LY=0 excluded) — AFTER cssText (which would wipe an inline background) — Ben
       var _rk='sku|'+sku+'|'+co+'|'+ch+'|'+m; td.dataset.nk=_rk;   // enables dbl-click notes + do-not-smooth popup on SKU cells
       var _rh=cellRailForKey(_rk); if(_rh){ td.classList.add('has-rail'); td.style.position='relative'; td.insertAdjacentHTML('afterbegin',_rh); }
       applyCellNote(td,_rk);
