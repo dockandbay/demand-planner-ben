@@ -1,3 +1,7 @@
+## v27.083 Fix: blank page on load (SUBS is not defined at module init)
+- The v27.081 relocation of Contribution model / Discontinued sub-cats to module scope left the alias `SUBS['email-notifications']=SUBS['general'];` stranded at module scope (just before renderConfig), where `SUBS` doesn't exist yet — it threw `ReferenceError: SUBS is not defined` at init and blanked the whole page.
+- Moved the alias back inside the `showSub` closure, immediately after `SUBS['general']` is registered. jsdom boot check now renders (demandTabs:true, bodyLen ~7.4MB, 0 DOM errors).
+
 ## v27.082 Decommission Sell-through targets / Set-targets feature (page + endpoints + table)
 - Removed DEMAND ▸ Inputs ▸ **Sell-through targets** entirely: the tab + renderTargetsView, GET/POST /api/targets, the help entry, and the route guard.
 - Decoupled the two consumers from planner.sell_through_targets so the table can go: the **Auto-Forecast** report now always uses the default cover; **Demand Actions** shows ST% without a target comparison (empty targets).

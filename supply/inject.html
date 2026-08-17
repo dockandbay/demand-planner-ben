@@ -6369,7 +6369,6 @@
           draw();
         }).catch(function(){ _roHidden=[]; draw(); });
       };
-      SUBS['email-notifications']=SUBS['general'];   // 'General settings' page re-homed under Admin ▸ Email notifications (same renderer)
   try{ window.hzCfgContribModel=hzCfgContribModel; window.hzCfgRunoffSubs=hzCfgRunoffSubs; }catch(e){}
   function renderConfig(d){ var c=document.getElementById('supply-content'); var sizes=d.sizes||[];
     // CONFIG nav is two tiers: level-2 tabs (like every other page) + a "Supply chain" tab that,
@@ -6705,6 +6704,7 @@
             function dot(ok){ return ok?'<span style="color:#16a34a">✓ configured</span>':'<span style="color:#b45309">⚠ keys missing</span>'; }
             el.innerHTML='Fulfil API keys in server env — Sandbox: '+dot(st&&st.fulfil&&st.fulfil.sandbox)+' &nbsp;·&nbsp; Live: '+dot(st&&st.fulfil&&st.fulfil.live); }).catch(function(){});
         }).catch(function(e){ b.innerHTML='<div class="count" style="color:#dc2626">'+esc(String(e))+'</div>'; }); };
+      SUBS['email-notifications']=SUBS['general'];   // 'General settings' page re-homed under Admin ▸ Email notifications (same renderer)
       SUBS['productcfg']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/product/config').then(function(r){return r.json();}).then(function(d){ d=d||{seasons:[],categories:[]};
           function draw(){
