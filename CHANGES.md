@@ -1,3 +1,6 @@
+## v27.072 Ship bags: SKU forecast table + Apply-to-forecast
+- DEMAND ▸ Analysis ▸ Ship bags now shows a **Ship-bag SKU forecast** table: rows = SHIPBAG-MED / SHIPBAG-LAR / SHIPBAG-XLG, columns = each market (UK/US/EU/AU) with current vs recommended 12-mo forecast (Medium→MED, Large→LAR, XL→XLG). An **Apply** button writes the recommended monthly values into each SKU’s DTC forecast override across all markets and saves, so they feed the buy plan.
+
 ## v27.071 DEMAND: Accuracy moved under Analysis (position 2)
 - **Accuracy** report moved out of the primary DEMAND row into the **Analysis** group as the 2nd item (Summary, Accuracy, Snapshots, Trends, Safety stock, Ship bags). Deep-links as #/demand/analysis/accuracy; legacy #/demand/accuracy still resolves.
 
