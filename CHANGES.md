@@ -1,3 +1,6 @@
+## v27.136 Docs: metrics-snapshot comments → Thursday 11:59 (n8n)
+- Updated the action-metrics comments to reflect the live n8n schedule (Thursday 11:59 GMT), not the old 23:59 Vercel cron. The user-facing Metrics scoreboard caption was already 11:59 (v27.093). Flagged the now-redundant vercel.json cron (`59 23 * * 4`) for Diviyaj to remove/retime.
+
 ## v27.135 Backtest: recency weighting on demand stats (configurable half-life)
 - The backtest's demand mean / σ / **CV** (which drive the recommendation) are now **recency-weighted** — exponential decay by months from the latest snapshot, so recent demand behaviour dominates. Half-life is configurable in the recommender settings (**Recency half-life (mo)**, default 6; **0 = equal weight**), persisted in `app_settings.ssm_backtest_cfg`. Note: the "avg cover held" column stays observational and, once a market is SSM-driven, reads as an SSM-monitoring metric rather than an independent baseline.
 

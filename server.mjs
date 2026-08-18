@@ -8537,7 +8537,7 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
 // Cin7 import audit log — every import run (range, kind, orders, status, error, calls).
 // ── Open-actions scoreboard (SUPPLY ▸ Reports ▸ Metrics) — weekly snapshot of open actions (mig 226) ──────────
 // Each count is a server-side definition that tracks the live badges. total_our = sum of the OUR-actions counts only;
-// supplier-waiting (supplier_pos / supplier_dtc) is kept separate. Snapshotted every Thursday 23:59 GMT by the cron.
+// supplier-waiting (supplier_pos / supplier_dtc) is kept separate. Snapshotted every Thursday 11:59 GMT by the n8n workflow (Diviyaj, live 2026-08-18).
 async function computeOpenActions() {
   const q = s => pool.query(s).then(r => r.rows);
   const one = async s => Number(((await q(s))[0] || {}).n || 0);
@@ -8637,7 +8637,9 @@ app.get('/api/supply/action-metrics/pos', async (_req, res) => {
     res.json({ ok: true, pos });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
-// Vercel cron target — vercel.json schedules `59 23 * * 4` (Thursday 23:59 GMT) to hit this; computes + upserts this week's row.
+// Weekly snapshot target — now driven by the n8n workflow (Thursday 11:59 GMT, live 2026-08-18); computes + upserts this
+// week's row (idempotent). NOTE: vercel.json still has a legacy cron `59 23 * * 4` pointing here — redundant with n8n
+// (and blocked by the webhook-secret gate); Diviyaj to remove or retime it.
 app.get('/api/cron/action-metrics', async (_req, res) => {
   try { res.json({ ok: true, snapshot: await snapshotOpenActions() }); } catch (e) { res.status(500).json({ error: e.message }); }
 });
