@@ -9721,24 +9721,23 @@
     var byCoTL={}; tooLate.forEach(function(r){ (byCoTL[r.country]=byCoTL[r.country]||[]).push(r); });
     var countries=Object.keys(byCo).concat(Object.keys(byCoTL)).filter(function(c,i,a){return a.indexOf(c)===i;})
       .sort(function(a,b){ return ((byCo[b]||[]).length+(byCoTL[b]||[]).length)-((byCo[a]||[]).length+(byCoTL[a]||[]).length) || (a<b?-1:1); });
-    var TW='max-width:1340px', SKUW='min-width:550px;white-space:nowrap';   // SKU +100px again; table +100px so it isn't stolen from other cols. nowrap keeps SKU single-line
+    var TW='max-width:1340px', SKUW='width:550px;white-space:nowrap';   // explicit width (min-width is unreliable on table cells) so the SKU column is genuinely 550px
+    var TSTYLE='width:max-content;min-width:100%';   // override the global `#supply-root table{width:100%}` which was pinning the table and squashing the SKU column
     var planBtn=function(sku){ return '<button class="ub-plan" onclick="if(window._ubOpenPlan)window._ubOpenPlan(\''+esc(sku)+'\')" title="Open the buy plan for this SKU" style="font-size:9px;padding:1px 7px;margin-right:6px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer;font-weight:600">Plan ▸</button>'; };
     function rowH(r){ var u=r.urgency==='critical'?['#fee2e2','#991b1b']:['#fef3c7','#92400e'];
-      return '<tr><td class="l" style="'+SKUW+'">'+planBtn(r.sku)+'<b>'+esc(r.sku)+'</b></td><td class="l" style="min-width:160px"><span class="mut tiny">'+esc(r.subcat||r.category||'')+'</span></td>'
+      return '<tr><td class="l" style="'+SKUW+'">'+planBtn(r.sku)+'<b>'+esc(r.sku)+'</b></td><td class="l" style="width:180px"><span class="mut tiny">'+esc(r.subcat||r.category||'')+'</span></td>'
         +'<td class="l"><span class="mut tiny">'+(r.disc?esc(fd(r.disc)):'—')+'</span></td>'
-        +'<td>'+units(r.on_hand)+'</td><td>'+(r.inbound>0?units(r.inbound):'<span class="mut">—</span>')+'</td>'
+        +'<td>'+units(r.on_hand)+'</td>'
         +'<td'+(r.cover_now!=null&&r.cover_now<1?' style="color:#dc2626;font-weight:700"':'')+'>'+(r.cover_now==null?'<span class="mut">∞</span>':r.cover_now+' mo')+'</td>'
         +'<td'+(r.cover_with_inbound!=null&&r.cover_with_inbound<1?' style="color:#dc2626;font-weight:700"':'')+'>'+(r.cover_with_inbound==null?'<span class="mut">∞</span>':r.cover_with_inbound+' mo')+'</td>'
-        +'<td class="mut">'+(r.target_weeks!=null?r.target_weeks+'wk':'—')+'</td>'
-        +'<td>'+units(r.demand_12m)+'</td>'
         +'<td'+(r.need_qty>0?' style="font-weight:700"':'')+'>'+(r.need_qty>0?units(r.need_qty):'<span class="mut">—</span>')+'</td>'
         +'<td><span class="tool-badge" style="background:'+u[0]+';color:'+u[1]+'">'+esc(r.urgency)+'</span></td></tr>'; }
     function tbl(list){ list.sort(function(a,b){ return (ord[a.urgency]-ord[b.urgency]) || (b.demand_12m-a.demand_12m); });
-      return '<div class="tw" style="'+TW+'"><table style="min-width:100%"><thead><tr><th class="l" style="'+SKUW+'">SKU</th><th class="l" style="min-width:160px">Cat</th><th class="l">Disc date</th><th>On hand</th><th>Inbound</th><th>Cover now</th><th>+ inbound</th><th>Target</th><th>12m demand</th><th>Buy to target</th><th>Urgency</th></tr></thead><tbody>'+list.map(rowH).join('')+'</tbody></table></div>'; }
+      return '<div class="tw" style="'+TW+'"><table style="'+TSTYLE+'"><thead><tr><th class="l" style="'+SKUW+'">SKU</th><th class="l" style="width:180px">Cat</th><th class="l">Disc date</th><th>On hand</th><th>Cover now</th><th>+ inbound</th><th>Buy to target</th><th>Urgency</th></tr></thead><tbody>'+list.map(rowH).join('')+'</tbody></table></div>'; }
     // "Too late to order" — active + low stock, but lead time lands stock after the discontinue date (Ben). Shown under the market's risk table.
-    function tlTbl(list){ return '<div class="tw" style="'+TW+'"><table style="min-width:100%"><thead><tr><th class="l" style="'+SKUW+'">SKU</th><th class="l" style="min-width:160px">Cat</th><th class="l">Disc date</th><th>Lead</th><th>On hand</th><th>Cover now</th></tr></thead><tbody>'
+    function tlTbl(list){ return '<div class="tw" style="'+TW+'"><table style="'+TSTYLE+'"><thead><tr><th class="l" style="'+SKUW+'">SKU</th><th class="l" style="width:180px">Cat</th><th class="l">Disc date</th><th>Lead</th><th>On hand</th><th>Cover now</th></tr></thead><tbody>'
       +list.map(function(r){ return '<tr><td class="l" style="'+SKUW+'">'+planBtn(r.sku)+'<b>'+esc(r.sku)+'</b></td>'
-        +'<td class="l" style="min-width:160px"><span class="mut tiny">'+esc(r.subcat||r.category||'')+'</span></td>'
+        +'<td class="l" style="width:180px"><span class="mut tiny">'+esc(r.subcat||r.category||'')+'</span></td>'
         +'<td class="l"><span style="color:#b91c1c">'+(r.disc?esc(fd(r.disc)):'—')+'</span></td>'
         +'<td class="mut">'+(r.lead_weeks!=null?r.lead_weeks+'wk':'—')+'</td>'
         +'<td>'+units(r.on_hand)+'</td>'

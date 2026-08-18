@@ -1,3 +1,7 @@
+## v27.113 Urgent buy: fix SKU width at the root + trim columns
+- **Actual root cause found & fixed.** The global rule `#supply-root table{width:100%}` was pinning every table to its container, so the SKU column could never grow past the squashed width regardless of min-width. The table now sets `width:max-content;min-width:100%` inline (overriding the global), and the SKU column uses an explicit `width:550px` (min-width is unreliable on table cells). The `.tw` wrapper scrolls sideways when needed. Long SKUs now show in full.
+- Removed the **Inbound**, **Target**, and **12m demand** columns (Ben) to declutter. Risk table is now: SKU · Cat · Disc date · On hand · Cover now · + inbound · Buy to target · Urgency. Cat column set to a solid 180px.
+
 ## v27.112 Urgent buy: SKU column truly widens + CRITICAL action counter on the menu tab
 - **SKU no longer clipped.** The table was `width:100%`, which pinned it to the wrapper and stopped the SKU column expanding past the squeezed width. Changed to `min-width:100%` so the table grows to fit the 550px SKU column and the `.tw` wrapper scrolls sideways — the SKU (e.g. TOWLB-SUM-XL-RAINB-R) now shows in full.
 - **CRITICAL count is now a red action counter** on the URGENT BUY reports-menu tab (same mechanism as the REALLOCATE badge). Counts only actionable criticals — excludes "too late to order" SKUs. Refreshes in the background from any report tab and stays in sync with the report. (Sandbox shows 0 because every critical there is also too-late; live data will populate it.)
