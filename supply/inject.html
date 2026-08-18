@@ -4757,7 +4757,7 @@
   // PURCHASE ORDERS is now the umbrella: PLAN (the PO grid) + the former PRODUCTIONS sub-tabs.
   var poSub='plan';
   var PO_SUBS=[['plan','PLAN'],['shipments','Shipments'],['crossdock','Crossdock & Labels'],['manufacturing','Manufacturing'],['list','Productions'],['barcodes','Barcodes']];   // children now show in the main grid (with a 'child' badge) — no separate Child PO sub-tab
-  var PAY_SUBS=[['deposits','Deposits'],['drawdown','Deposits Drawdown'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['bysupplier','By Supplier'],['cashflow','Cash Flow'],['xerocompare','Xero Compare']];   // the PAYMENTS umbrella (moved out of PURCHASE ORDERS); Cash Flow moved here from BI & REPORTS
+  var PAY_SUBS=[['deposits','Deposits'],['drawdown','Deposits Drawdown'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['bysupplier','By Supplier'],['cashflow','Cash Flow'],['af','Auto Forecast'],['xerocompare','Xero Compare']];   // PAYMENTS umbrella; Cash Flow + Auto Forecast (payments plan) moved here from BI & REPORTS
   var PO_SUB_KEYS=PO_SUBS.map(function(t){return t[0];});
   var PAY_SUB_KEYS=PAY_SUBS.map(function(t){return t[0];});
   var ALL_SUB_KEYS=PO_SUB_KEYS.concat(PAY_SUB_KEYS);
@@ -5272,6 +5272,7 @@
     if(prodTab==='payreport'){ renderPaymentsReport(b); return; }
     if(prodTab==='bysupplier'){ renderBySupplier(b); return; }
     if(prodTab==='cashflow'){ b.innerHTML='<div class="count">Loading…</div>'; fetch('/api/supply/cashflow').then(function(r){return r.json();}).then(function(d){ renderCashflow(d); }).catch(function(e){ b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>'; }); return; }   // Cash Flow now lives under PAYMENTS
+    if(prodTab==='af'){ if(typeof window.renderAutoForecastReport==='function'){ b.innerHTML='<div class="count">Loading…</div>'; try{ window.renderAutoForecastReport(b); }catch(e){ b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>'; } } else { b.innerHTML='<div class="count">Auto Forecast report unavailable.</div>'; } return; }   // Auto Forecast (payments plan) — render the artefact’s report into the PAYMENTS body
     if(prodTab==='xerocompare'){ renderXeroCompare(b); return; }
     if(prodTab==='barcodes'){ b.innerHTML='<div class="count">Loading…</div>';
       fetch('/api/supply/barcodes').then(function(r){return r.json();}).then(function(d){ renderBarcodes(d, b); })
@@ -7427,7 +7428,7 @@
                 +'<button class="save-btn fx-drive-btn" data-c="'+c+'">⬆ DriveHQ</button></td></tr>'; }).join('')
             +'</tbody></table></div>';
           // ── Report exports — email a report CSV to a saved recipient ──
-          var RX=[['cf_transactions','Cash Flow Transactions','all cash-flow transactions','#/supply/payments/cashflow'],['cf_arrivals','Cash Flow Stock Arrivals','stock arrivals (goods + duty per PO)','#/supply/payments/cashflow'],['cf_starting_deposits','Cash Flow Starting Deposits','starting deposits (type = Deposit)','#/supply/payments/cashflow'],['auto_forecast','Auto Forecast','payments plan — cash out by month (USD + GBP)','#/reports/af']];
+          var RX=[['cf_transactions','Cash Flow Transactions','all cash-flow transactions','#/supply/payments/cashflow'],['cf_arrivals','Cash Flow Stock Arrivals','stock arrivals (goods + duty per PO)','#/supply/payments/cashflow'],['cf_starting_deposits','Cash Flow Starting Deposits','starting deposits (type = Deposit)','#/supply/payments/cashflow'],['auto_forecast','Auto Forecast','payments plan — cash out by month (USD + GBP)','#/supply/payments/af']];
           var rxHead='<div class="sect-h" style="margin-top:22px">Report exports — email <span class="mut tiny">— set a recipient and email the current CSV (same data as the on-screen export). Report names link to the source page.</span></div>';
           var rxTbl='<div class="tw" style="max-width:820px"><table><thead><tr><th class="l">Report</th><th class="l">Email to</th><th class="l">Action</th></tr></thead><tbody>'
             +RX.map(function(x){ var ek=x[0], em=esc(_appset['export_email_'+ek]||'');

@@ -1,3 +1,6 @@
+## v27.107 Move Auto Forecast report to SUPPLY ▸ Payments (next to Cash Flow)
+- The Auto Forecast (payments plan) report moved from the top-level REPORTS view into **SUPPLY ▸ Payments ▸ Auto Forecast**, sitting right after Cash Flow. Added as a Payments sub-tab (`#/supply/payments/af`) that renders the artefact's `renderAutoForecastReport` into the payments body; removed the `af` tab from `REPORT_TABS`; old `#/reports/af` bookmarks redirect to the new home; the Auto Forecast download link updated.
+
 ## v27.106 Urgent buy: plan button, availability fix, "too late to order" list
 - **Plan ▸ button** on every urgent-buy row (and the too-late list) opens the buy plan for that SKU (`openDemandPlanPopup`).
 - **Availability bug fixed:** SKUs not available in a market's DTC (`available_<mkt>_dtc=false`) no longer appear for that market — the projection now gates on `v_product_availability` DTC channel (Ben: TOWLB-DES-LG-GTTLINES was showing in AU despite `available_au_dtc=false`, because it's AU-FBA-available).
