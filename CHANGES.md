@@ -1,3 +1,5 @@
+## v27.114 Urgent buy: SKU column width 550→270px (was over-wide once width was honored)
+
 ## v27.113 Urgent buy: fix SKU width at the root + trim columns
 - **Actual root cause found & fixed.** The global rule `#supply-root table{width:100%}` was pinning every table to its container, so the SKU column could never grow past the squashed width regardless of min-width. The table now sets `width:max-content;min-width:100%` inline (overriding the global), and the SKU column uses an explicit `width:550px` (min-width is unreliable on table cells). The `.tw` wrapper scrolls sideways when needed. Long SKUs now show in full.
 - Removed the **Inbound**, **Target**, and **12m demand** columns (Ben) to declutter. Risk table is now: SKU · Cat · Disc date · On hand · Cover now · + inbound · Buy to target · Urgency. Cat column set to a solid 180px.
