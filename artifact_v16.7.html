@@ -10835,6 +10835,7 @@ function _zalRender(wrap,d){
 // total units per action with expand-to-SKU. Uses BP.getBuyQtys across each market's visible SKUs.
 // ── BUY & MOVE ▸ INVENTORY (scaffold) — Status Report | Manage 3PL (US/UK/AU/EU) | Manage FBA (US/UK/AU/EU/CA) ──
 var INV_SUB='status', INV_3PL='US', INV_FBA='US', INV_FBA_GAP='gaps', INV_FBA_Q='', _invFbaLast=null, INV_3PL_GAP='gaps', INV_3PL_Q='', _inv3plLast=null, INV_STATUS_MKT='US', FBA_AGED_F=null, _inv3plUnmOpen=false, _invFbaUnmOpen=false, INV_3PL_DEAD=false, INV_FBA_DEAD=false;   // *UnmOpen = show the "in 3PL/FBA but not in the product list (with stock)" list; *_DEAD = dead-stock pill filter (disc >24mo, not moving)
+var INV_STATUS_COLLAPSE={};   // Inventory Status Report: per "location|status" collapsed state (expand/hide the Out-of-stock / Low / Backorder / Overstock groups)
 function renderInventory(){
   var host=document.querySelector('.wrap'); if(!host)return;
   var ex=document.getElementById('inventory-wrap'); if(ex)ex.remove();
@@ -10939,12 +10940,13 @@ function renderInvStatus(){
   // Status order: out of stock → low stock → backorders → overstock (Ben: low stock is the higher weekly-review priority, before backorders).
   var STATUS_META=[['oos','Out of stock','#b91c1c'],['low','Low stock','#b45309'],['bo','Backorders','#7c3aed'],['over','Overstock','#1e40af']];
   function statusBlock(g,loc,key,label,color){ var b=g[key], n=b.A.length+b.B.length+b.C.length;
-    var hdr='<div style="font-weight:700;font-size:12.5px;margin:12px 0 3px;color:'+color+'">'+label+' <span class="mut" style="font-weight:400">('+n+')</span></div>';
-    if(!n)return hdr+'<div class="mut" style="font-size:11px;margin:0 0 2px">— none</div>';
+    if(!n)return '<div style="font-weight:700;font-size:12.5px;margin:12px 0 3px;color:'+color+'">'+label+' <span class="mut" style="font-weight:400">(0)</span></div><div class="mut" style="font-size:11px;margin:0 0 2px">— none</div>';
+    var ck=loc+'|'+key, collapsed=!!INV_STATUS_COLLAPSE[ck];   // per location×status expand/collapse, remembered across market changes
+    var hdr='<div class="inv-status-hd" data-k="'+ck+'" style="font-weight:700;font-size:12.5px;margin:12px 0 3px;color:'+color+';cursor:pointer;user-select:none"><span class="inv-status-chev" style="display:inline-block;width:12px;font-size:10px">'+(collapsed?'▸':'▾')+'</span>'+label+' <span class="mut" style="font-weight:400">('+n+')</span></div>';
     var sortFn=(key==='over')
       ? function(a,b2){ var ca=(loc==='fba'?a.covf:a.cov3), cb=(loc==='fba'?b2.covf:b2.cov3); return (cb===Infinity?9e9:cb)-(ca===Infinity?9e9:ca)||a.sku.localeCompare(b2.sku); }   // most-overstocked first
       : function(a,b2){ return a.sku.localeCompare(b2.sku); };
-    return hdr+tierTables(b,locCols(loc,key),'',sortFn);
+    return hdr+'<div class="inv-status-bd" data-k="'+ck+'"'+(collapsed?' style="display:none"':'')+'>'+tierTables(b,locCols(loc,key),'',sortFn)+'</div>';
   }
   function locGroup(title,sub,g,loc){
     var tot=['oos','low','bo','over'].reduce(function(t,k){return t+g[k].A.length+g[k].B.length+g[k].C.length;},0);
@@ -11039,6 +11041,9 @@ function renderInvStatus(){
       +'</tbody></table></div></div>'; });
 
   panel.innerHTML=html;
+  panel.querySelectorAll('.inv-status-hd').forEach(function(h){ h.onclick=function(){ var k=h.dataset.k; INV_STATUS_COLLAPSE[k]=!INV_STATUS_COLLAPSE[k];
+    var bd=panel.querySelector('.inv-status-bd[data-k="'+(k.replace(/"/g,''))+'"]'); if(bd)bd.style.display=INV_STATUS_COLLAPSE[k]?'none':'';
+    var chev=h.querySelector('.inv-status-chev'); if(chev)chev.textContent=INV_STATUS_COLLAPSE[k]?'▸':'▾'; }; });   // expand/hide the status group
   loadInvS6(mkt);   // fill section 6 async (server delay-detection + impact)
 }
 // Section 6 loader: fetch slipped POs impacting this market and render impacted-product tables. Re-guards on market.

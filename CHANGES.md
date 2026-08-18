@@ -1,3 +1,6 @@
+## v27.123 Inventory Status: expand/collapse the status groups
+- Each status group under a location (Out of stock · Low stock · Backorders · Overstock) is now a **click-to-expand/hide** header with a ▾/▸ chevron. State is remembered per location×status across market-pill changes. Empty ("— none") groups stay static.
+
 ## v27.122 3PL Xero bill (Coghlans): date + reference from the file's Period End + Invoice Number
 - Coghlans (AU) invoices **weekly**, but the Xero bill was dated/referenced off the calendar-month end (FULFILLMENT-AU-2026-08-**31** · 31/08/2026). For au_coghlans the bill now reads the **Period End (Effective Date)** and **Invoice Number** from the "Coghlan Settings" sheet: bill date = **07/08/2026**, reference = **FULFILLMENT-AU-2026-08-07-DOK50362**. Other 3PLs (monthly) unchanged. This drives both the preview line and the downloaded Xero bill CSV.
 
