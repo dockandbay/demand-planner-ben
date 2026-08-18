@@ -1,3 +1,7 @@
+## v27.115 Exec Summary: full FY28 (Mar 27 – Feb 28) + equal UNITS/REVENUE size
+- FY28 column group now spans the **full financial year Mar 27 – Feb 28** (12 months) instead of "Mar 27 – Dec 27 (partial)". Jan/Feb 28 are forecast (FM already covers them); the FY28 TOTAL is now a full-year figure. Colour banding + hint text updated; header colspan 10→12.
+- **UNITS and REVENUE rendered at the same font size** in exec cells (revenue 10→12px main rows, 9→11px country rows); colour/weight distinction kept.
+
 ## v27.114 Urgent buy: SKU column width 550→270px (was over-wide once width was honored)
 
 ## v27.113 Urgent buy: fix SKU width at the root + trim columns

@@ -186,7 +186,7 @@ body{font-family:system-ui,-apple-system,sans-serif;font-size:12px;color:#1a1a1a
 .exec-tw tbody tr.total-row .exec-units{color:#fff}
 .exec-tw tbody tr.total-row .exec-rev{color:#cbd5e1}
 .exec-tw .exec-units{font-size:12px;font-weight:700;color:#1a1a1a}
-.exec-tw .exec-rev{font-size:10px;color:#666;margin-top:2px;font-weight:500}
+.exec-tw .exec-rev{font-size:12px;color:#666;margin-top:2px;font-weight:500}
 /* YoY indicator badges (very small, on every cell) */
 .exec-yoy{font-size:8.5px;font-weight:700;letter-spacing:-.02em;display:inline-block;margin-left:3px;vertical-align:1px}
 .exec-yoy.up{color:#16a34a}
@@ -207,7 +207,7 @@ body{font-family:system-ui,-apple-system,sans-serif;font-size:12px;color:#1a1a1a
 .exec-tw tbody tr.country-row td.lbl-col{font-weight:500;font-size:11px;color:#555;background:#f9fafb;cursor:default}
 .exec-tw tbody tr.country-row td.lbl-col:hover{background:#f9fafb}
 .exec-tw tbody tr.country-row .exec-units{font-size:11px;color:#555;font-weight:500}
-.exec-tw tbody tr.country-row .exec-rev{font-size:9px;color:#888}
+.exec-tw tbody tr.country-row .exec-rev{font-size:11px;color:#888}
 .exec-tw tbody tr.country-row td.yr-26-total{background:#dbeafe;color:#1e3a8a}
 .exec-tw tbody tr.country-row td.yr-27-total{background:#ede9fe;color:#5b21b6}
 .exec-tw tbody tr.country-row td.yr-total .exec-units{color:#1a1a1a;font-weight:600}
@@ -13524,8 +13524,8 @@ function renderExecView(host){
   // Financial year = March → February. Data window covers FY27 (Mar26–Feb27) fully and FY28
   // (Mar27–Dec27) partially. FY26 (Mar25–Feb26) comes from each FY27 month's prior-year value (lyU).
   var FY27_months=['2026_03','2026_04','2026_05','2026_06','2026_07','2026_08','2026_09','2026_10','2026_11','2026_12','2027_01','2027_02'];
-  var FY28_months=['2027_03','2027_04','2027_05','2027_06','2027_07','2027_08','2027_09','2027_10','2027_11','2027_12'];
-  var FY_ORDER=FY27_months.concat(FY28_months); // table column order (Mar 26 → Dec 27)
+  var FY28_months=['2027_03','2027_04','2027_05','2027_06','2027_07','2027_08','2027_09','2027_10','2027_11','2027_12','2028_01','2028_02'];   // full FY28: Mar 27 – Feb 28 (Jan/Feb 28 are forecast; FM covers them)
+  var FY_ORDER=FY27_months.concat(FY28_months); // table column order (Mar 26 → Feb 28)
   function periodSum(monthMap,months){
     var u=0,r=0;
     months.forEach(function(m){if(monthMap[m]){u+=monthMap[m].u;r+=monthMap[m].r;}});
@@ -13581,7 +13581,7 @@ function renderExecView(host){
 
   // Hint
   var hint=document.createElement('div');hint.style.cssText='font-size:10px;color:#888;margin-bottom:4px';
-  hint.innerHTML='Financial year Mar–Feb. Click <b>DTC</b>, <b>FBA</b>, or <b>B2B</b> to expand and see country contribution. Scroll right for FY28 (partial, to Dec 27).';
+  hint.innerHTML='Financial year Mar–Feb. Click <b>DTC</b>, <b>FBA</b>, or <b>B2B</b> to expand and see country contribution. Scroll right for FY28 (Mar 27 – Feb 28; Jan/Feb 28 forecast).';
   wrap.appendChild(hint);
 
   // Table wrapper
@@ -13595,7 +13595,7 @@ function renderExecView(host){
   var glbl=document.createElement('th');glbl.className='lbl-col grp-th';glbl.rowSpan=2;glbl.textContent='Channel';gr.appendChild(glbl);
   var g26=document.createElement('th');g26.colSpan=12;g26.className='grp-th year-26';g26.textContent='FY27 · Mar 26 – Feb 27';gr.appendChild(g26);
   var g26t=document.createElement('th');g26t.rowSpan=2;g26t.className='grp-th yr-total-th yr-26-total';g26t.textContent='FY27 TOTAL';gr.appendChild(g26t);
-  var g27=document.createElement('th');g27.colSpan=10;g27.className='grp-th year-27';g27.textContent='FY28 · Mar 27 – Dec 27 (partial)';gr.appendChild(g27);
+  var g27=document.createElement('th');g27.colSpan=12;g27.className='grp-th year-27';g27.textContent='FY28 · Mar 27 – Feb 28';gr.appendChild(g27);
   var g27t=document.createElement('th');g27t.rowSpan=2;g27t.className='grp-th yr-total-th yr-27-total';g27t.textContent='FY28 TOTAL';gr.appendChild(g27t);
   thead.appendChild(gr);
   // Month row
@@ -13603,7 +13603,7 @@ function renderExecView(host){
   FY_ORDER.forEach(function(fym,fi){
     var th=document.createElement('th');
     var isAct=ACTUAL_MONTHS.indexOf(fym)>=0;
-    var is27=fym.startsWith('2027');
+    var is27=FY28_months.indexOf(fym)>=0;   // FY28 month (incl Jan/Feb 28) → FY28 colour, not by year-prefix
     th.className=(isAct?'actual-mo':(is27?'fc-27':'fc-26'))+(fym===CUR_MONTH?' actual-hdr':'');
     var pm=pa(fym);
     th.textContent=MN[pm.mo-1];
@@ -13618,7 +13618,7 @@ function renderExecView(host){
   function renderCell(data,fym,extra){
     var td=document.createElement('td');
     var isAct=ACTUAL_MONTHS.indexOf(fym)>=0;
-    var is27=fym.startsWith('2027');
+    var is27=FY28_months.indexOf(fym)>=0;   // FY28 month (incl Jan/Feb 28) → FY28 colour banding
     td.className=(isAct?'actual-mo':(is27?'fc-27':'fc-26'))+(extra||'');
     var v=data&&data[fym]||{u:0,r:0,lyU:0,lyR:0};
     td.innerHTML='<div class="exec-units">'+fn(Math.round(v.u))+yoyBadge(v.u,v.lyU)+'</div><div class="exec-rev">'+fnGBP(v.r)+yoyBadge(v.r,v.lyR)+'</div>';
