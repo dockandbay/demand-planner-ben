@@ -1,3 +1,8 @@
+## v27.109 Urgent buy: Plan button fix + wider columns + too-late folded per market
+- **Plan ▸ button now works.** It was calling `openDemandPlanPopup`, which only exists in the DEMAND scope; the SUPPLY report now uses the SUPPLY-scope opener (`window._ubOpenPlan` → `_openSkuBuyPlan` → `window.open_`), same path the Reallocate report uses.
+- **Wider layout.** SKU column +100px (350→450), Cat column given a 160px min-width (+~100px), table max-width 1020→1240 so nothing is squeezed.
+- **Too-late SKUs folded under each market** — the "⏱ Too late to order" list is now a sub-block beneath the relevant country's risk table (with market count in the header), instead of one separate table at the bottom.
+
 ## v27.108 Urgent buy: gate on the buy plan's "target stock on hand" (3PL pool)
 - Replaced the DTC-availability gate with the buy plan's own logic: the urgent-buy target is now the **3PL Target Units** the buy plan steers toward — cover × weekly demand on the **3PL pool** (`_3pl` + `_nongrs`, excluding FBA/AWD), and a SKU is only included if it has an **available 3PL channel** (DTC/B2B/ZAL/TIK). A SKU with no 3PL target (FBA-only, or only a stale forecast in an unavailable channel) drops out — matching "target stock on hand = 0" in the buy plan. (Ben: TOWLB-DES-LG-GTTLINES is AU-FBA-only → gone; EYEMASK-DES-CHKOUT stays but flagged too-late.)
 

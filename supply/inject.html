@@ -9711,9 +9711,13 @@
     var risk=rows.filter(function(r){return (r.urgency==='critical'||r.urgency==='soon')&&!r.too_late;});
     var tooLate=rows.filter(function(r){return (r.urgency==='critical'||r.urgency==='soon')&&r.too_late;}).sort(function(a,b){return (a.disc||'').localeCompare(b.disc||'')||(b.demand_12m-a.demand_12m);});
     var byCo={}; risk.forEach(function(r){ (byCo[r.country]=byCo[r.country]||[]).push(r); });
-    var countries=Object.keys(byCo).sort(function(a,b){ return byCo[b].length-byCo[a].length || (a<b?-1:1); });
+    var byCoTL={}; tooLate.forEach(function(r){ (byCoTL[r.country]=byCoTL[r.country]||[]).push(r); });
+    var countries=Object.keys(byCo).concat(Object.keys(byCoTL)).filter(function(c,i,a){return a.indexOf(c)===i;})
+      .sort(function(a,b){ return ((byCo[b]||[]).length+(byCoTL[b]||[]).length)-((byCo[a]||[]).length+(byCoTL[a]||[]).length) || (a<b?-1:1); });
+    var TW='max-width:1240px', SKUW='min-width:450px';   // SKU +100px, table +200px so Cat/Disc get more room
+    var planBtn=function(sku){ return '<button class="ub-plan" onclick="if(window._ubOpenPlan)window._ubOpenPlan(\''+esc(sku)+'\')" title="Open the buy plan for this SKU" style="font-size:9px;padding:1px 7px;margin-right:6px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer;font-weight:600">Plan ▸</button>'; };
     function rowH(r){ var u=r.urgency==='critical'?['#fee2e2','#991b1b']:['#fef3c7','#92400e'];
-      return '<tr><td class="l" style="min-width:350px"><button class="ub-plan" onclick="if(window.openDemandPlanPopup)openDemandPlanPopup(\''+esc(r.sku)+'\')" title="Open the buy plan for this SKU" style="font-size:9px;padding:1px 7px;margin-right:6px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer;font-weight:600">Plan ▸</button><b>'+esc(r.sku)+'</b></td><td class="l"><span class="mut tiny">'+esc(r.subcat||r.category||'')+'</span></td>'
+      return '<tr><td class="l" style="'+SKUW+'">'+planBtn(r.sku)+'<b>'+esc(r.sku)+'</b></td><td class="l" style="min-width:160px"><span class="mut tiny">'+esc(r.subcat||r.category||'')+'</span></td>'
         +'<td class="l"><span class="mut tiny">'+(r.disc?esc(fd(r.disc)):'—')+'</span></td>'
         +'<td>'+units(r.on_hand)+'</td><td>'+(r.inbound>0?units(r.inbound):'<span class="mut">—</span>')+'</td>'
         +'<td'+(r.cover_now!=null&&r.cover_now<1?' style="color:#dc2626;font-weight:700"':'')+'>'+(r.cover_now==null?'<span class="mut">∞</span>':r.cover_now+' mo')+'</td>'
@@ -9723,27 +9727,27 @@
         +'<td'+(r.need_qty>0?' style="font-weight:700"':'')+'>'+(r.need_qty>0?units(r.need_qty):'<span class="mut">—</span>')+'</td>'
         +'<td><span class="tool-badge" style="background:'+u[0]+';color:'+u[1]+'">'+esc(r.urgency)+'</span></td></tr>'; }
     function tbl(list){ list.sort(function(a,b){ return (ord[a.urgency]-ord[b.urgency]) || (b.demand_12m-a.demand_12m); });
-      return '<div class="tw" style="max-width:1020px"><table style="width:100%"><thead><tr><th class="l" style="min-width:350px">SKU</th><th class="l">Cat</th><th class="l">Disc date</th><th>On hand</th><th>Inbound</th><th>Cover now</th><th>+ inbound</th><th>Target</th><th>12m demand</th><th>Buy to target</th><th>Urgency</th></tr></thead><tbody>'+list.map(rowH).join('')+'</tbody></table></div>'; }
-    var body=countries.map(function(co){ var crit=byCo[co].filter(function(r){return r.urgency==='critical';}).length;
-      return '<div style="margin-top:14px;font-weight:700;font-size:13px;color:#0f172a">'+esc(co)+' <span class="mut tiny" style="font-weight:400">· '+byCo[co].length+' at risk'+(crit?' ('+crit+' critical)':'')+'</span></div>'+tbl(byCo[co]); }).join('');
-    // "Too late to order" — active + low stock, but lead time lands stock after the discontinue date (Ben).
-    function tlTbl(list){ return '<div class="tw" style="max-width:1020px"><table style="width:100%"><thead><tr><th class="l" style="min-width:350px">SKU</th><th class="l">Cat</th><th class="l">Disc date</th><th>Lead</th><th>On hand</th><th>Cover now</th><th>Market</th></tr></thead><tbody>'
-      +list.map(function(r){ return '<tr><td class="l" style="min-width:350px"><button class="ub-plan" onclick="if(window.openDemandPlanPopup)openDemandPlanPopup(\''+esc(r.sku)+'\')" title="Open the buy plan for this SKU" style="font-size:9px;padding:1px 7px;margin-right:6px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer;font-weight:600">Plan ▸</button><b>'+esc(r.sku)+'</b></td>'
-        +'<td class="l"><span class="mut tiny">'+esc(r.subcat||r.category||'')+'</span></td>'
+      return '<div class="tw" style="'+TW+'"><table style="width:100%"><thead><tr><th class="l" style="'+SKUW+'">SKU</th><th class="l" style="min-width:160px">Cat</th><th class="l">Disc date</th><th>On hand</th><th>Inbound</th><th>Cover now</th><th>+ inbound</th><th>Target</th><th>12m demand</th><th>Buy to target</th><th>Urgency</th></tr></thead><tbody>'+list.map(rowH).join('')+'</tbody></table></div>'; }
+    // "Too late to order" — active + low stock, but lead time lands stock after the discontinue date (Ben). Shown under the market's risk table.
+    function tlTbl(list){ return '<div class="tw" style="'+TW+'"><table style="width:100%"><thead><tr><th class="l" style="'+SKUW+'">SKU</th><th class="l" style="min-width:160px">Cat</th><th class="l">Disc date</th><th>Lead</th><th>On hand</th><th>Cover now</th></tr></thead><tbody>'
+      +list.map(function(r){ return '<tr><td class="l" style="'+SKUW+'">'+planBtn(r.sku)+'<b>'+esc(r.sku)+'</b></td>'
+        +'<td class="l" style="min-width:160px"><span class="mut tiny">'+esc(r.subcat||r.category||'')+'</span></td>'
         +'<td class="l"><span style="color:#b91c1c">'+(r.disc?esc(fd(r.disc)):'—')+'</span></td>'
         +'<td class="mut">'+(r.lead_weeks!=null?r.lead_weeks+'wk':'—')+'</td>'
         +'<td>'+units(r.on_hand)+'</td>'
-        +'<td'+(r.cover_now!=null&&r.cover_now<1?' style="color:#dc2626;font-weight:700"':'')+'>'+(r.cover_now==null?'<span class="mut">∞</span>':r.cover_now+' mo')+'</td>'
-        +'<td class="mut">'+esc(r.country)+'</td></tr>'; }).join('')+'</tbody></table></div>'; }
-    var tooLateH=tooLate.length?('<div style="margin-top:24px;font-weight:700;font-size:13px;color:#b45309">⏱ Too late to order — '+tooLate.length+' SKU'+(tooLate.length===1?'':'s')+'</div>'
-      +'<div class="mut tiny" style="margin:2px 0 4px;max-width:900px">Active with low stock, but the lead time would land a new order <b>after</b> the discontinue date — not worth restocking. Run down or transfer existing stock instead.</div>'+tlTbl(tooLate)):'';
+        +'<td'+(r.cover_now!=null&&r.cover_now<1?' style="color:#dc2626;font-weight:700"':'')+'>'+(r.cover_now==null?'<span class="mut">∞</span>':r.cover_now+' mo')+'</td></tr>'; }).join('')+'</tbody></table></div>'; }
+    var body=countries.map(function(co){ var rk=byCo[co]||[], tl=byCoTL[co]||[]; var crit=rk.filter(function(r){return r.urgency==='critical';}).length;
+      var head='<div style="margin-top:14px;font-weight:700;font-size:13px;color:#0f172a">'+esc(co)+' <span class="mut tiny" style="font-weight:400">· '+rk.length+' at risk'+(crit?' ('+crit+' critical)':'')+(tl.length?' · '+tl.length+' too late':'')+'</span></div>';
+      var tlBlk=tl.length?('<div style="margin-top:8px;font-weight:600;font-size:11px;color:#b45309">⏱ Too late to order — '+tl.length+' SKU'+(tl.length===1?'':'s')+'</div>'
+        +'<div class="mut tiny" style="margin:1px 0 3px;max-width:900px">Active with low stock, but the lead time would land a new order <b>after</b> the discontinue date — run down or transfer existing stock instead.</div>'+tlTbl(tl)):'';
+      return head+(rk.length?tbl(rk):'')+tlBlk; }).join('');
     b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 6px;color:#0f172a">Urgent buy — stock-out risk</div>'
       +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px;align-items:center">'
         +chip('⚠ Critical',cc.critical,'#fee2e2','#991b1b')+chip('Soon',cc.soon,'#fef3c7','#92400e')
         +chip('OK',cc.ok,'#dcfce7','#166534')+chip('Surplus',cc.surplus,'#dbeafe','#1e40af')
         +(tooLate.length?'<span class="tool-badge" style="background:#fef3c7;color:#b45309;font-size:11px;padding:3px 9px">⏱ Too late '+tooLate.length+'</span>':'')
         +'<span class="mut tiny" style="margin-left:6px">grouped by market · target = per category/SKU (12wk default) · 3PL pool (on-hand + inbound vs 3PL forecast) · needs an available 3PL channel</span></div>'
-      +(risk.length?body:'<div class="count">No stock-out risks 🎉</div>')+tooLateH; }
+      +((risk.length||tooLate.length)?body:'<div class="count">No stock-out risks 🎉</div>'); }
   // CONTAINER FILL — spare capacity matched to urgent buys from an on-board supplier. Add / Snooze / Dismiss.
   function renderContainerFill(d){ var b=biBody(); d=d||{}; var recs=d.recs||[];
     if(!recs.length){ b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 6px">Container fill</div><div class="count">No fill opportunities — no shipment with spare capacity matches an urgent buy from a supplier already on board.</div>'; return; }
@@ -9799,6 +9803,7 @@
     var app=document.getElementById('app'); if(app)app.classList.add('plan-ov-open');
     try{ window.open_(sku); }catch(e){ if(app)app.classList.remove('plan-ov-open'); return; }
     var o2=document.getElementById('ov'); if(o2){ o2.style.zIndex='300000'; var mo=new MutationObserver(function(){ if(!o2.classList.contains('open')){ if(app)app.classList.remove('plan-ov-open'); mo.disconnect(); } }); mo.observe(o2,{attributes:true,attributeFilter:['class']}); } }
+  try{ window._ubOpenPlan=_openSkuBuyPlan; }catch(e){}   // urgent-buy Plan button lives in global-scope inline onclick; expose the SUPPLY opener
   // Snooze dropdown (1/3/7 days) popped from a single "Snooze ▾" button — consistent with the PO / shipment / sample snooze menus.
   function openReallocSnz(btn,key,after){ var ex=document.getElementById('snz-menu'); if(ex)ex.remove();
     var m=document.createElement('div'); m.id='snz-menu'; m.style.cssText='position:absolute;z-index:200002;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 6px 20px rgba(15,23,42,.18);padding:4px;font-size:12px;min-width:96px';
