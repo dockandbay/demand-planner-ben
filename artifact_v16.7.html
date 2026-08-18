@@ -11398,9 +11398,9 @@ function inv3plRender(j){ var panel=document.getElementById('inv3pl-panel'); if(
     var head2=grp+'<tr>'+th('SKU')+th('3PL Report')+th('ERP')+th('Diff')+sepTh+th('3PL Report')+th('ERP')+th('Diff')+'</tr>';
     var trs=fr.slice(0,800).map(function(r){ return '<tr'+(!r.matched?' style="background:#fff7ed"':'')+'>'
       +'<td style="padding:4px 10px;text-align:left">'+tHesc(r.sku)+(!r.matched?' <span class="mut" style="font-size:10px">(not in ERP)</span>':'')+'</td>'
-      +'<td style="padding:4px 10px;text-align:left">'+num(r.report_onhand)+'</td><td style="padding:4px 10px;text-align:left">'+num(r.erp_onhand)+'</td>'+dcell(r.diff_onhand)
+      +'<td style="padding:4px 10px;text-align:left">'+num(r.report_onhand)+'</td><td style="padding:4px 10px;text-align:left">'+num(r.erp_onhand)+'</td>'+dcell(r.diff_onhand,((r.diff_onhand>0)||(r.diff_avail>0))?_recentPoNote(r.recent_pos):'')
       +sepTd
-      +'<td style="padding:4px 10px;text-align:left">'+num(r.report_avail)+'</td><td style="padding:4px 10px;text-align:left">'+num(r.erp_avail)+'</td>'+dcell(r.diff_avail,((r.diff_onhand>0)||(r.diff_avail>0))?_recentPoNote(r.recent_pos):'')+'</tr>'; }).join('');
+      +'<td style="padding:4px 10px;text-align:left">'+num(r.report_avail)+'</td><td style="padding:4px 10px;text-align:left">'+num(r.erp_avail)+'</td>'+dcell(r.diff_avail)+'</tr>'; }).join('');
     content=summary+unmBlock+ctl+'<div style="max-height:520px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead>'+head2+'</thead><tbody>'+trs+'</tbody></table></div>'
       +(fr.length>800?'<div class="mut" style="font-size:11px;margin-top:4px">Showing first 800 of '+fr.length+'</div>':''); }
   panel.innerHTML=head+content;

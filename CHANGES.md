@@ -1,3 +1,6 @@
+## v27.126 Manage 3PL reconciliation: move "completing ~now" PO note to the On Hand Diff
+- The "📦 completing ~now (maybe received, not yet in ERP)" PO note now sits under the **On Hand** Diff cell instead of the Available Diff cell (same trigger: positive on-hand or available diff). It's about physical stock received, so On Hand is the right home.
+
 ## v27.125 Inventory Status: section headers as black bars (match location headers)
 - The Delivery / PO inbound delays / In-production section headers now use the same **black bar, white text** style as the location headers (e.g. "FBA · Amazon · 198 flagged"), so all top-level sections read consistently. Sub-descriptions stay as muted lines beneath.
 
