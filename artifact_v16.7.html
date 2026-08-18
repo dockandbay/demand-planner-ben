@@ -9008,16 +9008,22 @@ function renderSnapshotsView(body){
     var mons=Object.keys(monSet).sort();
     var _snapSide=(SNAP_A!=='live')?window._SNAP_CMP.A:(SNAP_B!=='live'?window._SNAP_CMP.B:null), _snapMons=null;
     if(_snapSide){ _snapMons={}; Object.keys(_snapSide).forEach(function(k){ Object.keys(_snapSide[k]||{}).forEach(function(y){_snapMons[y]=1;}); }); mons=mons.filter(function(y){ return _snapMons[y]; }); }
-    if(!mons.length){ out.innerHTML='<div style="color:#94a3b8;font-size:13px">No forecast rows for this filter.</div>'; return; }
     function dcell(o){ o=o||{a:0,b:0}; var d=Math.round((o.b||0)-(o.a||0)); if(!d)return '<td style="text-align:right;padding:2px 8px;color:#cbd5e1">·</td>'; var col=d>0?'#166534':'#dc2626'; return '<td style="text-align:right;padding:2px 8px;color:'+col+'" title="'+_snapUnits(o.a)+' → '+_snapUnits(o.b)+'">'+(d>0?'+':'')+_snapUnits(d)+'</td>'; }
     function rowTot(map){ var a=0,b=0; mons.forEach(function(ym){ var o=map[ym]; if(o){a+=o.a||0;b+=o.b||0;} }); return {a:a,b:b}; }
     var lblA=(SNAP_A==='live')?'Live':((SNAP_LIST.filter(function(s){return String(s.id)===String(SNAP_A);})[0]||{}).name||('#'+SNAP_A));
     var lblB=(SNAP_B==='live')?'Live':((SNAP_LIST.filter(function(s){return String(s.id)===String(SNAP_B);})[0]||{}).name||('#'+SNAP_B));
-    var h='<div style="font-size:12px;color:#475569;margin:2px 0 6px">A = <b>'+lblA+'</b> → B = <b>'+lblB+'</b>. Cells show <b>Δ units</b> (hover for A → B).</div>';
     var _allCats=Object.keys(SKUM).reduce(function(o,k){var c=SKUM[k]&&SKUM[k].s; if(c)o[c]=1; return o;},{}); _allCats=Object.keys(_allCats).sort();
     function _pill(fk,fv,on){ return '<span class="snapf" data-fk="'+fk+'" data-fv="'+esc(fv)+'" style="cursor:pointer;padding:2px 8px;border-radius:10px;font-size:11px;border:1px solid '+(on?'#2563eb':'#cbd5e1')+';background:'+(on?'#2563eb':'#fff')+';color:'+(on?'#fff':'#334155')+'">'+(fv||'All')+'</span>'; }
     function _vpill(v,lbl){ var on=SNAP_VIEW===v; return '<span class="snapv" data-v="'+v+'" style="cursor:pointer;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:600;border:1px solid '+(on?'#0f172a':'#cbd5e1')+';background:'+(on?'#0f172a':'#fff')+';color:'+(on?'#fff':'#334155')+'">'+lbl+'</span>'; }
+    // Bind the filter pills/inputs — called in BOTH the normal render AND the empty state, so a filter that yields
+    // no rows still leaves the pills clickable (previously the empty state wiped them → the report got stuck). — Ben
+    function _bindSnapF(){ out.querySelectorAll('.snapv').forEach(function(p){ p.onclick=function(){ SNAP_VIEW=p.dataset.v; drawCmp(); }; });
+      out.querySelectorAll('.snapf').forEach(function(p){ p.onclick=function(){ var fk=p.dataset.fk, fv=p.dataset.fv; if(fk==='co')SNAP_F_CO=fv; else if(fk==='ch')SNAP_F_CH=fv; drawCmp(); }; });
+      var _fc=document.getElementById('snapf-cat'); if(_fc)_fc.onchange=function(){ SNAP_F_CAT=this.value; drawCmp(); };
+      var _fqi=document.getElementById('snapf-q'); if(_fqi)_fqi.oninput=function(){ var cp=this.selectionStart; SNAP_F_Q=this.value; drawCmp(); var n=document.getElementById('snapf-q'); if(n){n.focus(); try{n.setSelectionRange(cp,cp);}catch(e){}} }; }
+    var h='<div style="font-size:12px;color:#475569;margin:2px 0 6px">A = <b>'+lblA+'</b> → B = <b>'+lblB+'</b>. Cells show <b>Δ units</b> (hover for A → B).</div>';
     h+='<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:2px 0 8px;font-size:12px"><span style="color:#475569">Show</span>'+_vpill('cat','Categories')+_vpill('sku','SKUs')+'<span style="width:1px;height:16px;background:#e2e8f0;margin:0 2px"></span><span style="color:#475569">Country</span>'+['','UK','US','EU','AU','CA'].map(function(c){return _pill('co',c,SNAP_F_CO===c);}).join('')+'<span style="color:#475569;margin-left:4px">Channel</span>'+['','DTC','FBA','B2B','ZAL','TIK'].map(function(c){return _pill('ch',c,SNAP_F_CH===c);}).join('')+'<select id="snapf-cat" style="padding:3px 6px;font-size:12px;margin-left:4px"><option value="">All categories</option>'+_allCats.map(function(c){return '<option value="'+esc(c)+'"'+(SNAP_F_CAT===c?' selected':'')+'>'+esc(c)+'</option>';}).join('')+'</select><input id="snapf-q" placeholder="search SKU…" value="'+esc(SNAP_F_Q||'')+'" style="padding:3px 6px;font-size:12px;width:130px"></div>';
+    if(!mons.length){ out.innerHTML=h+'<div style="color:#94a3b8;font-size:13px;margin-top:6px">No forecast rows for this filter — change or clear the filters above.</div>'; _bindSnapF(); return; }
     h+='<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px">'
       +'<thead><tr style="background:#f1f5f9"><th style="text-align:left;padding:4px 10px;position:sticky;left:0;background:#f1f5f9">'+(SNAP_VIEW==='sku'?'SKU':'Category')+'</th>';
     mons.forEach(function(ym){ h+='<th style="text-align:right;padding:4px 8px;white-space:nowrap">'+_snapMonLbl(ym)+'</th>'; });
@@ -9038,10 +9044,7 @@ function renderSnapshotsView(body){
     }
     h+='</tbody></table></div>';
     out.innerHTML=h;
-    out.querySelectorAll('.snapv').forEach(function(p){ p.onclick=function(){ SNAP_VIEW=p.dataset.v; drawCmp(); }; });
-    out.querySelectorAll('.snapf').forEach(function(p){ p.onclick=function(){ var fk=p.dataset.fk, fv=p.dataset.fv; if(fk==='co')SNAP_F_CO=fv; else if(fk==='ch')SNAP_F_CH=fv; drawCmp(); }; });
-    var _fc=document.getElementById('snapf-cat'); if(_fc)_fc.onchange=function(){ SNAP_F_CAT=this.value; drawCmp(); };
-    var _fqi=document.getElementById('snapf-q'); if(_fqi)_fqi.oninput=function(){ var cp=this.selectionStart; SNAP_F_Q=this.value; drawCmp(); var n=document.getElementById('snapf-q'); if(n){n.focus(); try{n.setSelectionRange(cp,cp);}catch(e){}} };
+    _bindSnapF();
     out.querySelectorAll('.snap-subrow').forEach(function(r){ r.onclick=function(){ var sn=decodeURIComponent(r.dataset.sub); if(SNAP_EXP[sn])delete SNAP_EXP[sn]; else SNAP_EXP[sn]=1; drawCmp(); }; });
   }
 }

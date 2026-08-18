@@ -1,3 +1,6 @@
+## v27.104 Snapshots compare: filter pills survive an empty result
+- DEMAND ▸ Analysis ▸ Snapshots: when a country/channel/category filter (or A/B combo) produced no rows, the "No forecast rows" message replaced the whole compare panel — including the filter pills — so the report got stuck (couldn't change the filter, Compare did nothing). The filter bar is now always rendered and its handlers bound in the empty state too, so you can change or clear the filter and continue.
+
 ## v27.103 SUPPLY reports: reorder + urgent-buy fixes (pre-launch bug, subcat, disc date)
 - Reordered BI & Reports tabs so **DTC MISMATCH, REALLOCATE, URGENT BUY** come first, then the rest.
 - **Urgent buy** report: SKU column widened +100px; the **Cat** column now shows `subcategory_name_final` (was core_seasonal); added a **Disc date** column after Cat.
