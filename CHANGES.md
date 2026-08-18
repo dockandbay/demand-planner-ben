@@ -1,3 +1,10 @@
+## v27.117 Inventory Status Report: group by location → status
+- **Restructured the top of the report to group by stock location (3PL, then FBA), each with its status sub-sections** in the order Out of stock → **Low stock → Backorders** → Overstock (low stock before backorders — the higher weekly-review priority, per Ben). A SKU is classified once per warehouse it uses, so it can appear under both locations.
+- **Out of stock reformatted to the Low-Stock column layout** Ben likes: SKU · Season · SOH · 3PL/FBA cover · On order · Inbound qty/ETA (dropped the lost-forecast £-at-risk columns). Tier A/B/C sub-grouping kept across all statuses.
+- **New Overstock status** = cover above **2× the cover target** (most-overstocked first; ∞-cover dead stock sorts top).
+- Delivery / PO-delays / In-production sections kept below the location groups (unchanged).
+- **Delivery section: added a "Release window" column** (after SKU).
+
 ## v27.116 Target recommendations: honour "B2B — H1 includes February"
 - The Target-recommendations engine now respects the **B2B · H1 includes February** toggle. Previously it always used the standard Mar→Feb fiscal window (`fyMonths`/`trecMonFyIdx`), so FY27/28 recommendations started at March and there was **no February** to apply a target to. With the toggle on, the engine now spans the **feb-shifted window Feb(fy)→Jan(fy+1)** and resolves month/quarter/half targets on the same feb-shifted index the Summary stores them under (H1 = Feb–Aug). So a February forecast is generated and the H1 target flows through.
 - Mirrors the Summary's `fyMs`/`monFyIdx`/`halfIdx` exactly; new-category GBP spread + fiscal→calendar month mapping also feb-shift-aware.

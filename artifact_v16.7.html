@@ -10879,20 +10879,28 @@ function renderInvStatus(){
   // In scope for the market = launched (launch date passed) AND not discontinued (disc date not in the past) AND sold via
   // at least one channel (3PL/shp and/or FBA/amz). Per warehouse: only flag/consider a warehouse the SKU actually uses.
   var _today=new Date().toISOString().slice(0,10);
-  var bo={A:[],B:[],C:[]}, low={A:[],B:[],C:[]}, oos3=[], oosF=[], oosBoth=[];   // out of stock split into 3 lists: 3PL-only, FBA-only, both
+  // Grouped by LOCATION (3PL, FBA) then STATUS. A SKU is classified once per warehouse it uses, so it can appear under
+  // both locations. Out of stock only counts with demand to lose (wk>0). Overstock = cover above 2× the cover target (Ben).
+  function _mkG(){ return {oos:{A:[],B:[],C:[]}, low:{A:[],B:[],C:[]}, bo:{A:[],B:[],C:[]}, over:{A:[],B:[],C:[]}}; }
+  var g3=_mkG(), gf=_mkG();
+  var _push=function(b,r){ (b[r.ti]||b.C).push(r); };
   rows.forEach(function(r){
-    if(r.launch && r.launch>_today) return;      // launch date not yet passed → not sellable yet
-    if(r.disc && r.disc<_today) return;          // discontinue date in the past (market-specific: AU uses its own) → discontinued, not a stockout
-    if(!r.has3 && !r.hasf) return;               // not available in this market on any channel (per availability_<mkt>_<chan>)
-    // Out of stock only counts when there's demand to lose: a 0-stock SKU with NO forecast for this country/warehouse
-    // isn't a stockout (nothing to sell). wk3 = 3PL (DTC+B2B) demand, wkf = FBA demand, both over the next 90 days.
-    var out3=r.has3&&r.i3===0&&r.wk3>0, outf=r.hasf&&r.iff<=0&&r.wkf>0;
-    var low3=r.has3&&r.i3>0&&r.cov3<r.t3, lowf=r.hasf&&r.iff>0&&r.covf<r.tf;
-    r.out3=out3; r.outf=outf; r.low3=low3; r.lowf=lowf;
-    if(r.has3&&r.i3<0){ (bo[r.ti]||bo.C).push(r); }          // backorder: negative 3PL available
-    else if(out3||outf){ if(out3&&outf)oosBoth.push(r); else if(out3)oos3.push(r); else oosF.push(r); }   // out of stock: 3PL / FBA / both
-    else if(low3||lowf){ (low[r.ti]||low.C).push(r); } });    // low stock: below cover target
-  var nBo=bo.A.length+bo.B.length+bo.C.length, nOos=oos3.length+oosF.length+oosBoth.length, nLow=low.A.length+low.B.length+low.C.length;
+    if(r.launch && r.launch>_today) return;      // not yet launched → not sellable
+    if(r.disc && r.disc<_today) return;          // discontinued → not a stockout
+    if(!r.has3 && !r.hasf) return;               // not sold in this market on any channel
+    if(r.has3){                                  // 3PL (DTC+B2B) — wk3 = 90-day 3PL demand
+      if(r.i3<0) _push(g3.bo,r);                                     // backorder: negative available
+      else if(r.i3===0 && r.wk3>0) _push(g3.oos,r);                  // out of stock (with demand)
+      else if(r.i3>0 && r.cov3<r.t3) _push(g3.low,r);                // low: below cover target
+      else if(r.i3>0 && r.t3>0 && r.cov3>2*r.t3) _push(g3.over,r);   // overstock: cover > 2× target
+    }
+    if(r.hasf){                                  // FBA (Amazon) — wkf = 90-day FBA demand
+      if(r.iff<0) _push(gf.bo,r);
+      else if(r.iff===0 && r.wkf>0) _push(gf.oos,r);
+      else if(r.iff>0 && r.covf<r.tf) _push(gf.low,r);
+      else if(r.iff>0 && r.tf>0 && r.covf>2*r.tf) _push(gf.over,r);
+    }
+  });
   function sectHdr(n,title,sub){ return '<div style="font-weight:800;font-size:14px;margin:'+(n===1?'2px':'22px')+' 0 2px">'+title+'</div>'
     +'<div class="mut" style="font-size:11px;margin-bottom:10px">'+sub+'</div>'; }
   // Shared table renderer. `cols` = [{h,align,f}] where f(r)->cell html.
@@ -10913,18 +10921,33 @@ function renderInvStatus(){
   var naCell='<span style="color:#cbd5e1">n/a</span>';   // light grey — this warehouse (shp/3PL or amz/FBA) isn't in scope for the SKU in this market
   var skuCol={h:'SKU',align:'left',f:function(r){return esc(r.sku);}};
   var relCol={h:'Release',align:'left',f:function(r){return r.rw?esc(r.rw):'<span class="mut">—</span>';}};   // release window (season)
-  var boCols=[skuCol,relCol,
-    {h:'3PL available',f:function(r){return '<span style="color:#b91c1c;font-weight:700">'+invNum(r.i3)+'</span>';}},
-    {h:'FBA SOH',f:function(r){return r.hasf?sohCell(r.iff,r.outf):naCell;}},
-    {h:'On order',f:function(r){return invNum(r.oo);}},
-    {h:'Inbound (next ETA)',f:inbCell}];
-  var lowCols=[skuCol,relCol,
-    {h:'3PL SOH',f:function(r){return r.has3?invNum(r.i3):naCell;}},
-    {h:'3PL cover',f:function(r){return r.has3?wkCell(r.cov3,r.t3,r.low3):naCell;}},
-    {h:'FBA SOH',f:function(r){return r.hasf?invNum(r.iff):naCell;}},
-    {h:'FBA cover',f:function(r){return r.hasf?wkCell(r.covf,r.tf,r.lowf):naCell;}},
-    {h:'On order',f:function(r){return invNum(r.oo);}},
-    {h:'Inbound (next ETA)',f:inbCell}];
+  var seasonCol={h:'Season',align:'left',f:function(r){return r.rw?esc(r.rw):'<span class="mut">—</span>';}};
+  // Per-location column set — the Low-Stock layout Ben likes: SKU · Season · SOH · Cover · On order · Inbound qty/ETA.
+  function locCols(loc,status){ var isF=(loc==='fba');
+    var soh=function(r){return isF?r.iff:r.i3;}, cov=function(r){return isF?r.covf:r.cov3;}, tgt=function(r){return isF?r.tf:r.t3;};
+    var sohBad=(status==='oos'||status==='bo'), covAmber=(status==='low'), covHigh=(status==='over');
+    return [skuCol, seasonCol,
+      {h:'SOH',f:function(r){var v=soh(r); return '<span style="'+((sohBad||v<0)?'color:#b91c1c;font-weight:700':'')+'">'+invNum(v)+'</span>';}},
+      {h:(isF?'FBA cover':'3PL cover'),f:function(r){var v=cov(r),t=tgt(r); var c=covAmber?'color:#b45309;font-weight:700':(covHigh?'color:#1e40af;font-weight:700':''); return '<span style="'+c+'">'+invWks(v)+'</span> <span class="mut" style="font-size:10px">/ '+t+'w</span>';}},
+      {h:'On order',f:function(r){return invNum(r.oo);}},
+      {h:'Inbound qty / ETA',f:inbCell}];
+  }
+  // Status order: out of stock → low stock → backorders → overstock (Ben: low stock is the higher weekly-review priority, before backorders).
+  var STATUS_META=[['oos','Out of stock','#b91c1c'],['low','Low stock','#b45309'],['bo','Backorders','#7c3aed'],['over','Overstock','#1e40af']];
+  function statusBlock(g,loc,key,label,color){ var b=g[key], n=b.A.length+b.B.length+b.C.length;
+    var hdr='<div style="font-weight:700;font-size:12.5px;margin:12px 0 3px;color:'+color+'">'+label+' <span class="mut" style="font-weight:400">('+n+')</span></div>';
+    if(!n)return hdr+'<div class="mut" style="font-size:11px;margin:0 0 2px">— none</div>';
+    var sortFn=(key==='over')
+      ? function(a,b2){ var ca=(loc==='fba'?a.covf:a.cov3), cb=(loc==='fba'?b2.covf:b2.cov3); return (cb===Infinity?9e9:cb)-(ca===Infinity?9e9:ca)||a.sku.localeCompare(b2.sku); }   // most-overstocked first
+      : function(a,b2){ return a.sku.localeCompare(b2.sku); };
+    return hdr+tierTables(b,locCols(loc,key),'',sortFn);
+  }
+  function locGroup(title,sub,g,loc){
+    var tot=['oos','low','bo','over'].reduce(function(t,k){return t+g[k].A.length+g[k].B.length+g[k].C.length;},0);
+    var h='<div style="font-weight:800;font-size:14px;margin:20px 0 4px;padding:7px 11px;background:#0f172a;color:#fff;border-radius:7px">'+esc(title)+' <span style="font-weight:400;font-size:12px;opacity:.75">· '+esc(sub)+' · '+tot+' flagged</span></div>';
+    STATUS_META.forEach(function(m){ h+=statusBlock(g,loc,m[0],m[1],m[2]); });
+    return h;
+  }
   // ── Out-of-stock lost-sales helpers ─────────────────────────────────────────────────────────────
   var _nowT=Date.now();
   function gapWks(eta){ if(!eta)return null; var w=(Date.parse(eta)-_nowT)/6048e5; return w>0?w:0; }   // weeks from now to an ETA
@@ -10961,14 +10984,10 @@ function renderInvStatus(){
           +'<td style="padding:4px 10px;text-align:left">'+inb+'</td></tr>'; }).join('')
       +'</tbody></table></div></div>';
   }
-  var html='<div style="font-weight:800;font-size:15px;margin:2px 0 10px">Inventory status — '+esc(mkt)+'</div>';
-  html+=sectHdr(1,'1 · Out of stock ('+nOos+')','ACTIVE, in-scope products out of stock, split by warehouse: <b>3PL</b> (web/wholesale), <b>FBA</b> (Amazon), or <b>both</b>. <b>Lost fcst / £</b> = forecast sales (DTC+B2B for 3PL, FBA for Amazon) over the period until the next inbound lands, valued at each channel\'s average selling price. PO links open in a drawer.');
-  if(!nOos){ html+='<div style="padding:12px 4px;color:#16a34a;font-size:12px">No out-of-stock in-scope products in '+esc(mkt)+' 🎉</div>'; }
-  else { html+=oosList('Out of stock — 3PL (web / wholesale)',oos3,'3pl')+oosList('Out of stock — FBA (Amazon)',oosF,'fba')+oosList('Out of stock — both 3PL & FBA',oosBoth,'both'); }
-  html+=sectHdr(2,'2 · Backorders — negative 3PL available, vs inbound ('+nBo+')','ACTIVE products with negative available stock in 3PL (orders owed). Inbound column shows units + next ETA to clear the backorder.');
-  html+=tierTables(bo,boCols,'No 3PL backorders in '+esc(mkt)+' 🎉');
-  html+=sectHdr(3,'3 · Low stock — below cover target ('+nLow+')','ACTIVE products in stock but with weeks-cover (on hand + on order ÷ avg weekly demand) below the market cover target, by tier. Amber = the warehouse below target.');
-  html+=tierTables(low,lowCols,'No low-stock active products in '+esc(mkt)+' 🎉');
+  var html='<div style="font-weight:800;font-size:15px;margin:2px 0 4px">Inventory status — '+esc(mkt)+'</div>'
+    +'<div class="mut" style="font-size:11px;margin-bottom:6px">Grouped by <b>stock location</b> then status. In scope = launched, not discontinued, sold on that channel. Cover = (on hand + on order) ÷ avg weekly demand, vs the market target. <b>Overstock</b> = cover above 2× target.</div>';
+  html+=locGroup('3PL','web / wholesale',g3,'3pl');
+  html+=locGroup('FBA','Amazon',gf,'fba');
 
   // Section 4 · Delivery — SOH + inbound vs forecast. Flag ACTIVE SKUs projected to go out of stock within 6 months.
   var risk={A:[],B:[],C:[]};
@@ -10976,6 +10995,7 @@ function renderInvStatus(){
   var nRisk=risk.A.length+risk.B.length+risk.C.length;
   var mtip=function(r){ return r.dl.months.map(function(m){ return m.lbl+': −'+invNum(m.dem)+(m.inb?' +'+invNum(m.inb):'')+' → '+invNum(Math.round(m.close)); }).join('  |  '); };
   var dlCols=[{h:'SKU',align:'left',f:function(r){return esc(r.sku);}},
+    {h:'Release window',align:'left',f:function(r){return r.rw?esc(r.rw):'<span class="mut">—</span>';}},
     {h:'SOH now',f:function(r){return invNum(r.dl.soh);}},
     {h:'+ Inbound (6mo)',f:function(r){return r.dl.inb>0?invNum(r.dl.inb):'<span class="mut">0</span>';}},
     {h:'− Forecast (6mo)',f:function(r){return invNum(r.dl.dem);}},
