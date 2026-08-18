@@ -1,3 +1,8 @@
+## v27.110 Urgent buy: SKU no-wrap, chips exclude too-late, drop Surplus
+- SKU cells now `white-space:nowrap` so the SKU never wraps to two lines in the 11-column risk table (it looked squished; the too-late table was fine because it has fewer columns).
+- **Critical / Soon chips now exclude "too late to order"** SKUs (counted from the risk list, which is `!too_late`), so the headline counts match the tables shown.
+- Removed the **Surplus** chip (no actionable meaning here).
+
 ## v27.109 Urgent buy: Plan button fix + wider columns + too-late folded per market
 - **Plan ▸ button now works.** It was calling `openDemandPlanPopup`, which only exists in the DEMAND scope; the SUPPLY report now uses the SUPPLY-scope opener (`window._ubOpenPlan` → `_openSkuBuyPlan` → `window.open_`), same path the Reallocate report uses.
 - **Wider layout.** SKU column +100px (350→450), Cat column given a 160px min-width (+~100px), table max-width 1020→1240 so nothing is squeezed.

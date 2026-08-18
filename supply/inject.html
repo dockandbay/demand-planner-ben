@@ -9714,7 +9714,7 @@
     var byCoTL={}; tooLate.forEach(function(r){ (byCoTL[r.country]=byCoTL[r.country]||[]).push(r); });
     var countries=Object.keys(byCo).concat(Object.keys(byCoTL)).filter(function(c,i,a){return a.indexOf(c)===i;})
       .sort(function(a,b){ return ((byCo[b]||[]).length+(byCoTL[b]||[]).length)-((byCo[a]||[]).length+(byCoTL[a]||[]).length) || (a<b?-1:1); });
-    var TW='max-width:1240px', SKUW='min-width:450px';   // SKU +100px, table +200px so Cat/Disc get more room
+    var TW='max-width:1240px', SKUW='min-width:450px;white-space:nowrap';   // nowrap so the SKU never wraps to 2 lines in the 11-col risk table
     var planBtn=function(sku){ return '<button class="ub-plan" onclick="if(window._ubOpenPlan)window._ubOpenPlan(\''+esc(sku)+'\')" title="Open the buy plan for this SKU" style="font-size:9px;padding:1px 7px;margin-right:6px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer;font-weight:600">Plan ▸</button>'; };
     function rowH(r){ var u=r.urgency==='critical'?['#fee2e2','#991b1b']:['#fef3c7','#92400e'];
       return '<tr><td class="l" style="'+SKUW+'">'+planBtn(r.sku)+'<b>'+esc(r.sku)+'</b></td><td class="l" style="min-width:160px"><span class="mut tiny">'+esc(r.subcat||r.category||'')+'</span></td>'
@@ -9743,8 +9743,8 @@
       return head+(rk.length?tbl(rk):'')+tlBlk; }).join('');
     b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 6px;color:#0f172a">Urgent buy — stock-out risk</div>'
       +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px;align-items:center">'
-        +chip('⚠ Critical',cc.critical,'#fee2e2','#991b1b')+chip('Soon',cc.soon,'#fef3c7','#92400e')
-        +chip('OK',cc.ok,'#dcfce7','#166534')+chip('Surplus',cc.surplus,'#dbeafe','#1e40af')
+        +chip('⚠ Critical',risk.filter(function(r){return r.urgency==='critical';}).length,'#fee2e2','#991b1b')+chip('Soon',risk.filter(function(r){return r.urgency==='soon';}).length,'#fef3c7','#92400e')
+        +chip('OK',cc.ok,'#dcfce7','#166534')
         +(tooLate.length?'<span class="tool-badge" style="background:#fef3c7;color:#b45309;font-size:11px;padding:3px 9px">⏱ Too late '+tooLate.length+'</span>':'')
         +'<span class="mut tiny" style="margin-left:6px">grouped by market · target = per category/SKU (12wk default) · 3PL pool (on-hand + inbound vs 3PL forecast) · needs an available 3PL channel</span></div>'
       +((risk.length||tooLate.length)?body:'<div class="count">No stock-out risks 🎉</div>'); }
