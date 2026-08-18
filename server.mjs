@@ -1231,6 +1231,10 @@ app.get('/api/demand/ssm-backtest', async (req, res) => {
       UNION ALL SELECT 'EU', avg(china_to_eu_lead_time_weeks) FROM planner.products WHERE in_planning_scope
       UNION ALL SELECT 'AU', avg(china_to_au_lead_time_weeks) FROM planner.products WHERE in_planning_scope`)).rows
       .forEach(r => { lead[r.co] = Number(r.l) || 9; });
+    const cost = {};   // demand-weighted avg unit cost per market (for the £ working-capital estimate)
+    try { (await pool.query(`SELECT upper(sa.country) co, sum(sa.units*coalesce(p.cost,0))/nullif(sum(sa.units),0) c
+        FROM planner.sales_actuals sa JOIN planner.products p ON p.sku=sa.sku WHERE coalesce(p.cost,0)>0 GROUP BY 1`)).rows
+      .forEach(r => { cost[r.co] = Number(r.c) || 0; }); } catch (e) {}
     const dm = {}; demRows.forEach(r => { dm[r.co + '|' + r.pool + '|' + r.m] = r.u; });
     const g = {};   // co|pool -> {covers:[], dem:[]}
     sohRows.forEach(r => { const k = r.co + '|' + r.pool; const d = dm[k + '|' + r.m]; if (d == null || !(d > 0)) return;
@@ -1244,12 +1248,19 @@ app.get('/api/demand/ssm-backtest', async (req, res) => {
       const dVar = o.dem.reduce((a, b) => a + (b - dMean) * (b - dMean), 0) / (n > 1 ? n - 1 : 1), dSd = Math.sqrt(dVar), cv = dMean > 0 ? dSd / dMean : 0;
       const Lw = lead[co] || 9, cycle = 4, capW = pool === 'FBA' ? 8 : 52;
       // safety weeks = Z·CV·√(L) with the monthly→weekly σ conversion (√4.33), + review cycle — matches ssmCoverWeeks' cover shape (excludes the lead base, held separately by the engine).
-      const options = [90, 93, 95, 97, 99].map(sl => { let cw = Math.round(Z[sl] * cv * Math.sqrt(Lw) * 2.081 + cycle); cw = Math.max(1, Math.min(cw, capW)); return { sl, coverWks: cw, avgUnits: Math.round(cw * wkMean) }; });
-      const recSl = cv < 0.35 ? 93 : cv < 0.6 ? 95 : 97, recOpt = options.find(o2 => o2.sl === recSl);
+      const cu = cost[co] || 0;   // avg unit cost £ for the working-capital estimate
+      // safety weeks = Z·CV·√(L) with the monthly→weekly σ conversion (√4.081²), + review cycle — matches ssmCoverWeeks' cover shape (excludes the lead base, held separately by the engine). estGbp = avg units held × unit cost.
+      const mk = sl => { let cw = Math.round(Z[sl] * cv * Math.sqrt(Lw) * 2.081 + cycle); cw = Math.max(1, Math.min(cw, capW)); const au = Math.round(cw * wkMean); return { sl, coverWks: cw, avgUnits: au, estGbp: Math.round(au * cu), stockoutPct: 100 - sl }; };
+      const options = [90, 93, 95, 97, 99].map(mk);
+      // 3 risk tiers: Low risk = safe/overstock (99%), Medium (95%), High risk = tight (90%). Suggested from demand volatility (more volatile → hold more).
+      const RISK = { 99: 'Low risk (safe)', 95: 'Medium', 90: 'High risk (tight)' };
+      const riskOptions = [99, 95, 90].map(sl => { const x = mk(sl); x.level = RISK[sl]; return x; });
+      const suggestedSl = cv >= 0.7 ? 99 : cv >= 0.45 ? 95 : 90;
+      const recOpt = options.find(o2 => o2.sl === suggestedSl) || mk(suggestedSl);
       const overstockMonths = o.covers.filter(c => c > 2 * recOpt.coverWks).length;
       const flag = avgCov > recOpt.coverWks * 1.5 ? 'overstocked' : (minCov < recOpt.coverWks ? 'tight' : 'ok');
       out.push({ co, pool, months: n, from: o.months[0], to: o.months[n - 1], avgCover: Math.round(avgCov * 10) / 10, minCover: Math.round(minCov * 10) / 10, maxCover: Math.round(maxCov * 10) / 10,
-        weeklyDemand: Math.round(wkMean), cv: Math.round(cv * 100) / 100, leadWks: Math.round(Lw * 10) / 10, overstockMonths, options, recSl, recCoverWks: recOpt.coverWks, flag }); });
+        weeklyDemand: Math.round(wkMean), cv: Math.round(cv * 100) / 100, leadWks: Math.round(Lw * 10) / 10, unitCost: Math.round(cu * 100) / 100, overstockMonths, options, riskOptions, suggestedSl, recSl: suggestedSl, recCoverWks: recOpt.coverWks, flag }); });
     const dates = (await pool.query(`SELECT to_char(snapshot_date,'YYYY-MM-DD') d FROM planner.inventory_snapshots GROUP BY 1 ORDER BY 1`)).rows.map(r => r.d);
     res.json({ ok: true, rows: out, snapshotDates: dates });
   } catch (e) { res.status(500).json({ error: e.message }); }

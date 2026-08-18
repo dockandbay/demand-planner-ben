@@ -1,3 +1,8 @@
+## v27.133 Backtest: 3 risk options in financial terms + own wrapping column
+- Replaced the confusing inline "options" line with a dedicated **Recommendation** column showing **three risk options** per market×pool: **Low risk (safe, 99%)**, **Medium (95%)**, **High risk (tight, 90%)** — each with target cover weeks, **capital held (£ = avg units × unit cost)**, and **stockout risk (~100 − service level)**. The **suggested** level (rises with the market's demand volatility) is highlighted.
+- Each risk level has its own **Apply** button (apply one channel at one risk level), plus **Apply ALL suggested**. Applying still shifts the A/B/C tier spread onto the chosen level (A-tier keeps its extra buffer) and enables SSM for that pool only.
+- Server: added demand-weighted avg unit cost per market → £ capital estimate; riskOptions + suggestedSl.
+
 ## v27.131 Backtest upload: drag-and-drop + click-to-choose
 - The snapshot upload is now a drag-and-drop zone (drag a Cin7 export onto it, or click to choose), showing the selected filename. Same parse/upsert as before.
 

@@ -10325,31 +10325,34 @@ function renderSsmBacktestView(body){
     var rows=d.rows||[];
     if(!rows.length){ bb.innerHTML='<div class="mut" style="font-size:12px;padding:10px 2px">No overlapping snapshot + sales history yet. Upload monthly Cin7 snapshots above to build the backtest ('+((d.snapshotDates||[]).length)+' snapshot month'+(((d.snapshotDates||[]).length)===1?'':'s')+' on file).</div>'; return; }
     var fc={overstocked:'#b45309',tight:'#b91c1c',ok:'#16a34a'};
+    function gbp(v){ v=Number(v)||0; if(v>=1e6)return '£'+(v/1e6).toFixed(2)+'M'; if(v>=1e3)return '£'+Math.round(v/1e3)+'k'; return '£'+Math.round(v); }
     var head='<tr style="font-size:10px;text-transform:uppercase;color:#475569;background:#f8fafc">'
-      +['Market · Pool','Snapshots','Avg cover','Min','Wk demand','CV','Lead','Overstock mo','Status','Recommended','Apply'].map(function(h){return '<th style="text-align:left;padding:5px 9px;border-bottom:1px solid #e5e7eb;white-space:nowrap">'+h+'</th>';}).join('')+'</tr>';
+      +['Market · Pool','Snapshots','Avg cover','Min','Wk demand','CV','Lead','Overstock mo','Status','Recommendation — risk options (cover · capital held · stockout risk)'].map(function(h){return '<th style="text-align:left;padding:5px 9px;border-bottom:1px solid #e5e7eb;white-space:nowrap">'+h+'</th>';}).join('')+'</tr>';
     var trs=rows.map(function(r){
-      var opts=r.options.map(function(o){ var rec=o.sl===r.recSl; return '<span style="'+(rec?'font-weight:800;color:#6b21a8;text-decoration:underline':'color:#94a3b8')+'" title="'+fn(o.avgUnits)+'u avg held">'+o.sl+'%:'+o.coverWks+'wk</span>'; }).join(' · ');
-      return '<tr style="border-bottom:1px solid #f1f5f9">'
-        +'<td style="padding:5px 9px;font-weight:700;white-space:nowrap">'+esc(r.co)+' · '+esc(r.pool)+'</td>'
-        +'<td style="padding:5px 9px;white-space:nowrap">'+r.months+' <span class="mut" style="font-size:10px">'+esc(r.from)+'…'+esc(r.to)+'</span></td>'
-        +'<td style="padding:5px 9px">'+r.avgCover+'wk</td><td style="padding:5px 9px">'+r.minCover+'wk</td>'
-        +'<td style="padding:5px 9px">'+fn(r.weeklyDemand)+'</td><td style="padding:5px 9px">'+r.cv+'</td><td style="padding:5px 9px">'+r.leadWks+'wk</td>'
-        +'<td style="padding:5px 9px">'+r.overstockMonths+'/'+r.months+'</td>'
-        +'<td style="padding:5px 9px"><span style="font-weight:700;color:'+(fc[r.flag]||'#64748b')+'">'+esc(r.flag)+'</span></td>'
-        +'<td style="padding:5px 9px;white-space:nowrap"><b>'+r.recSl+'% · '+r.recCoverWks+'wk</b></td>'
-        +'<td style="padding:5px 9px"><button class="bt-applyone" data-k="'+esc(r.co+'|'+r.pool)+'" title="Apply just this market×pool" style="border:1px solid #16a34a;background:#dcfce7;color:#166534;font-weight:700;font-size:10px;padding:3px 10px;border-radius:4px;cursor:pointer">Apply</button></td></tr>'
-        +'<tr><td colspan="11" style="padding:0 9px 7px 24px"><span class="mut" style="font-size:10px">Options (service level : safety+cycle cover · hover = avg units held): </span><span style="font-size:11px">'+opts+'</span></td></tr>'; }).join('');
+      var risk=(r.riskOptions||[]).map(function(o){ var sug=o.sl===r.suggestedSl;
+        return '<div style="white-space:nowrap;margin:1px 0;line-height:1.5">'
+          +'<button class="bt-applyone" data-k="'+esc(r.co+'|'+r.pool)+'" data-sl="'+o.sl+'" title="Apply this risk level to '+esc(r.co+' · '+r.pool)+'" style="border:1px solid #16a34a;background:'+(sug?'#16a34a':'#dcfce7')+';color:'+(sug?'#fff':'#166534')+';font-weight:700;font-size:9px;padding:1px 7px;border-radius:4px;cursor:pointer;margin-right:6px">Apply</button>'
+          +'<b style="color:'+(sug?'#6b21a8':'#334155')+'">'+esc(o.level)+' ('+o.sl+'%)</b>'+(sug?' <span style="font-size:9px;color:#6b21a8;font-weight:700">◄ suggested</span>':'')
+          +'<span class="mut" style="font-size:10px"> · '+o.coverWks+'wk · '+gbp(o.estGbp)+' · ~'+o.stockoutPct+'% stockout</span></div>'; }).join('');
+      return '<tr style="border-bottom:1px solid #eef2f7">'
+        +'<td style="padding:6px 9px;font-weight:700;white-space:nowrap;vertical-align:top">'+esc(r.co)+' · '+esc(r.pool)+'</td>'
+        +'<td style="padding:6px 9px;white-space:nowrap;vertical-align:top">'+r.months+' <span class="mut" style="font-size:10px">'+esc(r.from)+'…'+esc(r.to)+'</span></td>'
+        +'<td style="padding:6px 9px;vertical-align:top">'+r.avgCover+'wk</td><td style="padding:6px 9px;vertical-align:top">'+r.minCover+'wk</td>'
+        +'<td style="padding:6px 9px;vertical-align:top">'+fn(r.weeklyDemand)+'</td><td style="padding:6px 9px;vertical-align:top">'+r.cv+'</td><td style="padding:6px 9px;vertical-align:top">'+r.leadWks+'wk</td>'
+        +'<td style="padding:6px 9px;vertical-align:top">'+r.overstockMonths+'/'+r.months+'</td>'
+        +'<td style="padding:6px 9px;vertical-align:top"><span style="font-weight:700;color:'+(fc[r.flag]||'#64748b')+'">'+esc(r.flag)+'</span></td>'
+        +'<td style="padding:6px 9px;vertical-align:top;min-width:340px">'+risk+'</td></tr>'; }).join('');
     bb.innerHTML='<style>#bt-body td,#bt-body th{text-align:left !important}</style>'
-      +'<div style="font-size:12px;color:#64748b;margin:2px 0 10px">Per <b>market × pool</b> over the uploaded snapshot months: weeks of cover actually held vs sell-through, and service-level <b>options</b> with a <b>recommended</b> pick (from that market’s demand volatility + China lead). <b>Status</b>: overstocked = held far more than needed · tight = dipped below the recommendation. Recommended lead uses the market average — the actual buy plan sizes each SKU on its own lead. Apply a single row with its <b>Apply</b> button, or all at once below. Review/adjust in <a href="#/demand/config/buyplan" style="color:#7c3aed;font-weight:600">DEMAND ▸ Buy Plan</a>.</div>'
+      +'<div style="font-size:12px;color:#64748b;margin:2px 0 10px">Per <b>market × pool</b> over the uploaded snapshot months: weeks of cover actually held vs sell-through, then three <b>risk options</b> in financial terms — each shows the target cover, the <b>capital held</b> (avg units × unit cost) and the <b>stockout risk</b> (≈ 100 − service level). <b>Low risk</b> holds more stock (more cash tied up, ~1% stockout); <b>High risk</b> runs tight (frees cash, ~10% stockout). The <b>suggested</b> level rises with that market’s demand volatility (CV). <b>Status</b>: overstocked = held far more than the suggested level · tight = dipped below it. Recommended lead uses the market average — the actual buy plan sizes each SKU on its own lead. Click <b>Apply</b> on a risk level to set just that market×pool, or Apply ALL below.</div>'
       +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">'+head+trs+'</table></div>'
-      +'<div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button id="bt-apply" style="border:1px solid #16a34a;background:#16a34a;color:#fff;font-weight:700;font-size:13px;padding:8px 18px;border-radius:6px;cursor:pointer">Apply ALL recommended → SSM matrix</button><span id="bt-applymsg" style="font-size:12px"></span></div>'
-      +'<div class="mut" style="font-size:11px;margin-top:4px;max-width:900px">Applying sets that market×pool’s service levels to the recommendation (shifting the A/B/C tier spread onto it) <b>and enables SSM</b> for that pool only. Reversible in DEMAND ▸ Buy Plan; nothing changes until you reload.</div>';
-    // Apply one or more market×pool rows — merges into the current SSM matrix (keeps other markets' settings untouched).
+      +'<div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button id="bt-apply" style="border:1px solid #16a34a;background:#16a34a;color:#fff;font-weight:700;font-size:13px;padding:8px 18px;border-radius:6px;cursor:pointer">Apply ALL suggested → SSM matrix</button><span id="bt-applymsg" style="font-size:12px"></span></div>'
+      +'<div class="mut" style="font-size:11px;margin-top:4px;max-width:960px">Applying sets that market×pool’s service levels to the chosen level (shifting the A/B/C tier spread onto it — so A-tier keeps its extra buffer) <b>and enables SSM</b> for that pool only. Reversible in DEMAND ▸ Buy Plan; nothing changes until you reload.</div>';
+    // Apply one or more {r, sl} — merges the chosen service level into the SSM matrix, leaving other markets untouched.
     function applyRows(list, m){ if(!list||!list.length)return;
       var G=(typeof SSM_PARAMS!=='undefined'&&SSM_PARAMS)?SSM_PARAMS:{};
       var byMkt={}; try{ if(G.byMkt)for(var k in G.byMkt)byMkt[k]=G.byMkt[k]; }catch(e){}
       var enabled={}; try{ if(typeof SSM_ENABLED!=='undefined'&&SSM_ENABLED)for(var k2 in SSM_ENABLED)enabled[k2]=SSM_ENABLED[k2]; }catch(e){}
-      list.forEach(function(r){ var key=r.co+'|'+r.pool, cur=ssmParamsFor(r.co,r.pool), o={sl:shiftSl(r.recSl),seasonalFloor:cur.seasonalFloor,cycleWk:cur.cycleWk};
+      list.forEach(function(it){ var r=it.r, sl=it.sl, key=r.co+'|'+r.pool, cur=ssmParamsFor(r.co,r.pool), o={sl:shiftSl(sl),seasonalFloor:cur.seasonalFloor,cycleWk:cur.cycleWk};
         if(r.pool==='FBA')o.fbaCapWk=cur.fbaCapWk; if(r.pool==='3PL')o.seasonMaxWk=cur.seasonMaxWk; byMkt[key]=o; enabled[key]=true; });
       var params={sl:(G.sl||{A:99,B:97,C:93,def:90}),seasonalFloor:(G.seasonalFloor||97),cycleWk:(G.cycleWk||4),fbaCapWk:(G.fbaCapWk||8),seasonMaxWk:(G.seasonMaxWk||30),byMkt:byMkt};
       if(m){m.style.color='#64748b';m.textContent='Applying…';}
@@ -10357,15 +10360,15 @@ function renderSsmBacktestView(body){
         .then(function(r){return r.json();})
         .then(function(){ return fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'ssm_enabled',value:JSON.stringify(enabled)})}); })
         .then(function(r){return r.json();})
-        .then(function(j){ if(m){ if(j&&j.error){m.style.color='#dc2626';m.textContent='Error: '+j.error;} else { m.innerHTML='<span style="color:#16a34a;font-weight:700">Applied '+list.map(function(x){return x.co+'·'+x.pool;}).join(', ')+' ✓</span> — <a href="javascript:location.reload()" style="color:#7c3aed;font-weight:700">reload to apply to the buy plan</a>.'; } } })
+        .then(function(j){ if(m){ if(j&&j.error){m.style.color='#dc2626';m.textContent='Error: '+j.error;} else { m.innerHTML='<span style="color:#16a34a;font-weight:700">Applied '+list.map(function(x){return x.r.co+'·'+x.r.pool+' @'+x.sl+'%';}).join(', ')+' ✓</span> — <a href="javascript:location.reload()" style="color:#7c3aed;font-weight:700">reload to apply to the buy plan</a>.'; } } })
         .catch(function(){ if(m){m.style.color='#dc2626';m.textContent='Apply failed.'; } }); }
     var byKey={}; rows.forEach(function(r){ byKey[r.co+'|'+r.pool]=r; });
     var ab=body.querySelector('#bt-apply'); if(ab)ab.onclick=function(){ var m=body.querySelector('#bt-applymsg');
-      if(!confirm('Apply the recommended service levels to ALL '+rows.length+' market×pool rows AND enable SSM for them? Changes the buy plan on the next reload (reversible).'))return;
-      applyRows(rows, m); };
-    body.querySelectorAll('.bt-applyone').forEach(function(btn){ btn.onclick=function(){ var r=byKey[btn.dataset.k]; if(!r)return;
-      if(!confirm('Apply '+r.co+' · '+r.pool+' → '+r.recSl+'% and enable SSM for that pool? Reversible; reload to apply.'))return;
-      applyRows([r], body.querySelector('#bt-applymsg')); }; });
+      if(!confirm('Apply the SUGGESTED risk level to ALL '+rows.length+' market×pool rows AND enable SSM for them? Changes the buy plan on the next reload (reversible).'))return;
+      applyRows(rows.map(function(r){return {r:r, sl:r.suggestedSl};}), m); };
+    body.querySelectorAll('.bt-applyone').forEach(function(btn){ btn.onclick=function(){ var r=byKey[btn.dataset.k]; if(!r)return; var sl=parseInt(btn.dataset.sl,10)||r.suggestedSl;
+      if(!confirm('Apply '+r.co+' · '+r.pool+' → '+sl+'% service and enable SSM for that pool? Reversible; reload to apply.'))return;
+      applyRows([{r:r, sl:sl}], body.querySelector('#bt-applymsg')); }; });
   }
   load();
 }
