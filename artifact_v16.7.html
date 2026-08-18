@@ -10266,6 +10266,10 @@ function renderBuyPlanView(body){
     +h('Recommended approach')
     +p('Leave it on <b>Cover-weeks</b> to start. Review the per-SKU differences in <a href="#/demand/safetystock" style="color:#7c3aed;font-weight:600">Safety stock</a> and the tier fixes in <a href="#/demand/exceptions/recs" style="color:#7c3aed;font-weight:600">Exceptions ▸ Recommendations</a>, then switch to <b>SSM</b> when you’re confident. You can flip back at any time.');
   body.innerHTML='<div style="padding:2px 2px 28px">'+box+explain+'</div>';
+  // Backtest & recommended settings merged in below (Ben) — reads uploaded Cin7 snapshots, recommends per market×pool.
+  try{ var _btHr=document.createElement('div'); _btHr.style.cssText='border-top:2px solid #e2e8f0;margin:26px 0 10px';
+    var _btWrap=document.createElement('div'); body.appendChild(_btHr); body.appendChild(_btWrap);
+    if(typeof renderSsmBacktestView==='function')renderSsmBacktestView(_btWrap); }catch(e){ if(window.console)console.error('backtest merge',e); }
   var _sv=body.querySelector('#bpl-save'); if(_sv)_sv.onclick=function(){ var m=body.querySelector('#bpl-msg');
     function nv(id,d){var el=body.querySelector('#'+id);var v=el?parseFloat(el.value):NaN;return isFinite(v)&&v>0?v:d;}
     var enabled={}, byMkt={};
@@ -10318,8 +10322,10 @@ function renderSsmBacktestView(body){
         .then(function(r){return r.json();}).then(function(j){ if(j&&j.ok){ upMsg.style.color='#16a34a'; upMsg.innerHTML='Saved '+esc(j.date)+' — '+fn(j.rows)+' rows / '+fn(j.units)+'u across '+j.warehouses.length+' warehouses.'; load(); } else { upMsg.style.color='#dc2626'; upMsg.textContent='Error: '+((j&&j.error)||'failed'); } })
         .catch(function(){ upMsg.style.color='#dc2626'; upMsg.textContent='Upload failed.'; }); };
     rd.readAsDataURL(f); };
+  var _st={from:'',to:'',target:''};   // backtest window + target-service, driven by the controls
   function load(){ var bb=body.querySelector('#bt-body'); if(bb)bb.innerHTML='<div class="mut" style="font-size:12px;padding:10px 2px">Loading backtest…</div>';
-    fetch('/api/demand/ssm-backtest').then(function(r){return r.json();}).then(draw).catch(function(e){ if(bb)bb.innerHTML='<div style="color:#dc2626">'+esc(e&&e.message||e)+'</div>'; }); }
+    var qs=[]; if(_st.from)qs.push('from='+encodeURIComponent(_st.from)); if(_st.to)qs.push('to='+encodeURIComponent(_st.to)); if(_st.target)qs.push('target='+encodeURIComponent(_st.target));
+    fetch('/api/demand/ssm-backtest'+(qs.length?('?'+qs.join('&')):'')).then(function(r){return r.json();}).then(draw).catch(function(e){ if(bb)bb.innerHTML='<div style="color:#dc2626">'+esc(e&&e.message||e)+'</div>'; }); }
   function draw(d){ var bb=body.querySelector('#bt-body'); if(!bb)return;
     if(!d||!d.ok){ bb.innerHTML='<div style="color:#dc2626;font-size:12px">'+esc((d&&d.error)||'backtest failed')+'</div>'; return; }
     var rows=d.rows||[];
@@ -10333,7 +10339,7 @@ function renderSsmBacktestView(body){
         return '<div style="white-space:nowrap;margin:1px 0;line-height:1.5">'
           +'<button class="bt-applyone" data-k="'+esc(r.co+'|'+r.pool)+'" data-sl="'+o.sl+'" title="Apply this risk level to '+esc(r.co+' · '+r.pool)+'" style="border:1px solid #16a34a;background:'+(sug?'#16a34a':'#dcfce7')+';color:'+(sug?'#fff':'#166534')+';font-weight:700;font-size:9px;padding:1px 7px;border-radius:4px;cursor:pointer;margin-right:6px">Apply</button>'
           +'<b style="color:'+(sug?'#6b21a8':'#334155')+'">'+esc(o.level)+' ('+o.sl+'%)</b>'+(sug?' <span style="font-size:9px;color:#6b21a8;font-weight:700">◄ suggested</span>':'')
-          +'<span class="mut" style="font-size:10px"> · '+o.coverWks+'wk · '+gbp(o.estGbp)+' · ~'+o.stockoutPct+'% stockout</span></div>'; }).join('');
+          +'<span class="mut" style="font-size:10px"> · '+o.coverWks+'wk · '+gbp(o.estGbp)+' · ~'+o.stockoutPct+'% stockout · replay: '+(o.empStockoutMonths||0)+'/'+r.months+'mo short</span></div>'; }).join('');
       return '<tr style="border-bottom:1px solid #eef2f7">'
         +'<td style="padding:6px 9px;font-weight:700;white-space:nowrap;vertical-align:top">'+esc(r.co)+' · '+esc(r.pool)+'</td>'
         +'<td style="padding:6px 9px;white-space:nowrap;vertical-align:top">'+r.months+' <span class="mut" style="font-size:10px">'+esc(r.from)+'…'+esc(r.to)+'</span></td>'
@@ -10342,7 +10348,25 @@ function renderSsmBacktestView(body){
         +'<td style="padding:6px 9px;vertical-align:top">'+r.overstockMonths+'/'+r.months+'</td>'
         +'<td style="padding:6px 9px;vertical-align:top"><span style="font-weight:700;color:'+(fc[r.flag]||'#64748b')+'">'+esc(r.flag)+'</span></td>'
         +'<td style="padding:6px 9px;vertical-align:top;min-width:340px">'+risk+'</td></tr>'; }).join('');
-    bb.innerHTML='<style>#bt-body td,#bt-body th{text-align:left !important}</style>'
+    var months=[]; (d.snapshotDates||[]).forEach(function(x){ var mm=String(x).slice(0,7); if(months.indexOf(mm)<0)months.push(mm); }); months.sort();
+    var win=d.window||{}, cfg=d.cfg||{};
+    var opt=function(v,sel,lbl){ return '<option value="'+v+'"'+(v===(sel||'')?' selected':'')+'>'+(lbl||v)+'</option>'; };
+    var ctrl='<div style="border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px;margin-bottom:12px;background:#fafafa;display:flex;gap:18px;align-items:flex-end;flex-wrap:wrap">'
+      +'<div><div style="font-size:10px;text-transform:uppercase;color:#64748b;font-weight:700;margin-bottom:3px">Backtest window</div>'
+        +'<select id="bt-from" style="font-size:12px;padding:3px 6px">'+opt('',win.from,'From: all')+months.map(function(m){return opt(m,win.from,'From '+m);}).join('')+'</select> '
+        +'<select id="bt-to" style="font-size:12px;padding:3px 6px">'+opt('',win.to,'To: all')+months.map(function(m){return opt(m,win.to,'To '+m);}).join('')+'</select></div>'
+      +'<div><div style="font-size:10px;text-transform:uppercase;color:#64748b;font-weight:700;margin-bottom:3px">Target service (status)</div><input id="bt-target" type="number" step="0.5" value="'+(d.target||95)+'" style="width:58px;font-size:12px;padding:3px 6px"> %</div>'
+      +'<div style="border-left:1px solid #e2e8f0;padding-left:16px"><div style="font-size:10px;text-transform:uppercase;color:#64748b;font-weight:700;margin-bottom:3px">Recommender settings</div>'
+        +'<span style="font-size:11px;color:#475569">Risk % Low/Med/High '
+        +'<input id="bt-slLow" type="number" value="'+(cfg.slLow||99)+'" title="Low-risk service level" style="width:44px;font-size:11px;padding:2px 4px"> '
+        +'<input id="bt-slMed" type="number" value="'+(cfg.slMed||95)+'" title="Medium" style="width:44px;font-size:11px;padding:2px 4px"> '
+        +'<input id="bt-slHigh" type="number" value="'+(cfg.slHigh||90)+'" title="High-risk (tight)" style="width:44px;font-size:11px;padding:2px 4px"> '
+        +'· CV med/hi '
+        +'<input id="bt-cvMed" type="number" step="0.05" value="'+(cfg.cvMed||0.45)+'" title="CV above this → Medium suggested" style="width:50px;font-size:11px;padding:2px 4px"> '
+        +'<input id="bt-cvHi" type="number" step="0.05" value="'+(cfg.cvHi||0.7)+'" title="CV above this → Low-risk suggested" style="width:50px;font-size:11px;padding:2px 4px"> '
+        +'<button id="bt-cfgsave" style="border:1px solid #7c3aed;background:#7c3aed;color:#fff;font-weight:700;font-size:11px;padding:3px 10px;border-radius:5px;cursor:pointer;margin-left:4px">Save settings</button> <span id="bt-cfgmsg" style="font-size:11px"></span></span></div>'
+      +'</div>';
+    bb.innerHTML='<style>#bt-body td,#bt-body th{text-align:left !important}</style>'+ctrl
       +'<div style="font-size:12px;color:#64748b;margin:2px 0 10px">Per <b>market × pool</b> over the uploaded snapshot months: weeks of cover actually held vs sell-through, then three <b>risk options</b> in financial terms — each shows the target cover, the <b>capital held</b> (avg units × unit cost) and the <b>stockout risk</b> (≈ 100 − service level). <b>Low risk</b> holds more stock (more cash tied up, ~1% stockout); <b>High risk</b> runs tight (frees cash, ~10% stockout). The <b>suggested</b> level rises with that market’s demand volatility (CV). <b>Status</b>: overstocked = held far more than the suggested level · tight = dipped below it. Recommended lead uses the market average — the actual buy plan sizes each SKU on its own lead. Click <b>Apply</b> on a risk level to set just that market×pool, or Apply ALL below.</div>'
       +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">'+head+trs+'</table></div>'
       +'<div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button id="bt-apply" style="border:1px solid #16a34a;background:#16a34a;color:#fff;font-weight:700;font-size:13px;padding:8px 18px;border-radius:6px;cursor:pointer">Apply ALL suggested → SSM matrix</button><span id="bt-applymsg" style="font-size:12px"></span></div>'
@@ -10369,6 +10393,19 @@ function renderSsmBacktestView(body){
     body.querySelectorAll('.bt-applyone').forEach(function(btn){ btn.onclick=function(){ var r=byKey[btn.dataset.k]; if(!r)return; var sl=parseInt(btn.dataset.sl,10)||r.suggestedSl;
       if(!confirm('Apply '+r.co+' · '+r.pool+' → '+sl+'% service and enable SSM for that pool? Reversible; reload to apply.'))return;
       applyRows([{r:r, sl:sl}], body.querySelector('#bt-applymsg')); }; });
+    // window / target controls → re-run the backtest
+    var ff=body.querySelector('#bt-from'), tt=body.querySelector('#bt-to'), tg=body.querySelector('#bt-target');
+    if(ff)ff.onchange=function(){ _st.from=ff.value; load(); };
+    if(tt)tt.onchange=function(){ _st.to=tt.value; load(); };
+    if(tg)tg.onchange=function(){ _st.target=tg.value; load(); };
+    // recommender settings (risk levels + CV thresholds) → persist + re-run
+    var cs=body.querySelector('#bt-cfgsave'); if(cs)cs.onclick=function(){ var cm=body.querySelector('#bt-cfgmsg');
+      function nv(id,dv){ var el=body.querySelector('#'+id); var v=el?parseFloat(el.value):NaN; return isFinite(v)&&v>0?v:dv; }
+      var cfg2={slLow:nv('bt-slLow',99),slMed:nv('bt-slMed',95),slHigh:nv('bt-slHigh',90),cvMed:nv('bt-cvMed',0.45),cvHi:nv('bt-cvHi',0.7)};
+      if(cm){cm.style.color='#64748b';cm.textContent='Saving…';}
+      fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'ssm_backtest_cfg',value:JSON.stringify(cfg2)})})
+        .then(function(r){return r.json();}).then(function(j){ if(cm){ if(j&&j.error){cm.style.color='#dc2626';cm.textContent='Error';} else { cm.style.color='#16a34a';cm.textContent='Saved ✓'; load(); } } })
+        .catch(function(){ if(cm){cm.style.color='#dc2626';cm.textContent='Failed';} }); };
   }
   load();
 }
@@ -10748,7 +10785,7 @@ function renderDemandTabs(){
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   // Primary tabs inline; the reference/input views (Sell-through targets, Key accounts, Calendar, Revenue) are grouped under an "Inputs ▾" dropdown.
   var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['snapshots']='Snapshots'; _dlbl['contribmodel']='Contribution model'; _dlbl['buyplan']='Buy plan logic'; _dlbl['runoffsubs']='Discontinued sub-categories'; _dlbl['ssmbacktest']='Backtest';
-  var PRIMARY=['plan','kpis','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','snapshots','trends','safetystock','stockcover','shipbags'], CONFIGD=['contribmodel','buyplan','runoffsubs'], INPUTS=['keyaccounts','calendar','pricechanges','klaviyobis','ssmbacktest'];
+  var PRIMARY=['plan','kpis','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','snapshots','trends','safetystock','stockcover','shipbags'], CONFIGD=['contribmodel','buyplan','runoffsubs'], INPUTS=['keyaccounts','calendar','pricechanges','klaviyobis'];   // 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
   var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0, _anlActive=ANALYSIS.indexOf(DEMAND_VIEW)>=0, _cfgActive=CONFIGD.indexOf(DEMAND_VIEW)>=0;
   var _isPlanV=(DEMAND_VIEW==='plan');
   // Release Window now lives in the More Filters panel; Undo + Download now sit on the right of the plan controls

@@ -1216,12 +1216,32 @@ app.post('/api/demand/inventory-upload', async (req, res) => {
     res.json({ ok: true, date, rows: keys.length, units, warehouses: whs, skipped, dates });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Inverse normal CDF (Acklam) — service level fraction → Z. Lets any service level be used (not just a fixed set).
+function _normInv(p) { if (!(p > 0)) return -100; if (p >= 1) return 100;
+  const a = [-3.969683028665376e1, 2.209460984245205e2, -2.759285104469687e2, 1.38357751867269e2, -3.066479806614716e1, 2.506628277459239];
+  const b = [-5.447609879822406e1, 1.615858368580409e2, -1.556989798598866e2, 6.680131188771972e1, -1.328068155288572e1];
+  const c = [-7.784894002430293e-3, -3.223964580411365e-1, -2.400758277161838, -2.549732539343734, 4.374664141464968, 2.938163982698783];
+  const d = [7.784695709041462e-3, 3.224671290700398e-1, 2.445134137142996, 3.754408661907416];
+  const pl = 0.02425, ph = 1 - pl; let q, r;
+  if (p < pl) { q = Math.sqrt(-2 * Math.log(p)); return (((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1); }
+  if (p <= ph) { q = p - 0.5; r = q * q; return (((((a[0] * r + a[1]) * r + a[2]) * r + a[3]) * r + a[4]) * r + a[5]) * q / (((((b[0] * r + b[1]) * r + b[2]) * r + b[3]) * r + b[4]) * r + 1); }
+  q = Math.sqrt(-2 * Math.log(1 - p)); return -(((((c[0] * q + c[1]) * q + c[2]) * q + c[3]) * q + c[4]) * q + c[5]) / ((((d[0] * q + d[1]) * q + d[2]) * q + d[3]) * q + 1);
+}
 // ── DEMAND ▸ Inputs ▸ Backtest — per market×pool historical cover vs demand + service-level options/recommendation ──
+// Query: from/to (YYYY-MM window), target (service-level baseline for the status flag). Config (risk levels + CV
+// thresholds) in app_settings.ssm_backtest_cfg. Each risk option carries a WHAT-IF replay (empStockoutMonths) on the window.
 app.get('/api/demand/ssm-backtest', async (req, res) => {
   try {
+    const q0 = req.query || {};
+    const from = /^\d{4}-\d{2}$/.test(String(q0.from || '')) ? q0.from : null;
+    const to = /^\d{4}-\d{2}$/.test(String(q0.to || '')) ? q0.to : null;
+    let cfg = { slLow: 99, slMed: 95, slHigh: 90, cvMed: 0.45, cvHi: 0.7 };
+    try { const cr = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='ssm_backtest_cfg'`)).rows[0]; if (cr && cr.value) { const o = JSON.parse(cr.value); ['slLow', 'slMed', 'slHigh', 'cvMed', 'cvHi'].forEach(k => { const v = Number(o[k]); if (Number.isFinite(v) && v > 0) cfg[k] = v; }); } } catch (e) {}
+    const target = (() => { const t = Number(q0.target); return Number.isFinite(t) && t >= 50 && t < 100 ? t : cfg.slMed; })();
+    const inWin = m => (!from || m >= from) && (!to || m <= to);
     const sohRows = (await pool.query(`SELECT to_char(snapshot_date,'YYYY-MM') m, upper(split_part(warehouse,'_',1)) co,
         CASE WHEN warehouse LIKE '%fba' THEN 'FBA' ELSE '3PL' END pool, sum(available)::float oh
-      FROM planner.inventory_snapshots GROUP BY 1,2,3`)).rows;
+      FROM planner.inventory_snapshots GROUP BY 1,2,3`)).rows.filter(r => inWin(r.m));
     const demRows = (await pool.query(`SELECT to_char(month,'YYYY-MM') m, upper(country) co,
         CASE WHEN channel='FBA' THEN 'FBA' ELSE '3PL' END pool, sum(units)::float u
       FROM planner.sales_actuals GROUP BY 1,2,3`)).rows;
@@ -1240,29 +1260,28 @@ app.get('/api/demand/ssm-backtest', async (req, res) => {
     sohRows.forEach(r => { const k = r.co + '|' + r.pool; const d = dm[k + '|' + r.m]; if (d == null || !(d > 0)) return;
       (g[k] || (g[k] = { covers: [], dem: [], months: [] })); const wk = d / 4.33; const cov = r.oh / wk;
       g[k].covers.push(cov); g[k].dem.push(d); g[k].months.push(r.m); });
-    const Z = { 90: 1.2816, 93: 1.4758, 95: 1.6449, 97: 1.8808, 99: 2.3263 };
+    const Zof = sl => _normInv(sl / 100);
     const out = [];
     Object.keys(g).sort().forEach(k => { const [co, pool] = k.split('|'); const o = g[k]; const n = o.covers.length; if (!n) return;
       const avgCov = o.covers.reduce((a, b) => a + b, 0) / n, minCov = Math.min.apply(null, o.covers), maxCov = Math.max.apply(null, o.covers);
       const dMean = o.dem.reduce((a, b) => a + b, 0) / n, wkMean = dMean / 4.33;
       const dVar = o.dem.reduce((a, b) => a + (b - dMean) * (b - dMean), 0) / (n > 1 ? n - 1 : 1), dSd = Math.sqrt(dVar), cv = dMean > 0 ? dSd / dMean : 0;
-      const Lw = lead[co] || 9, cycle = 4, capW = pool === 'FBA' ? 8 : 52;
-      // safety weeks = Z·CV·√(L) with the monthly→weekly σ conversion (√4.33), + review cycle — matches ssmCoverWeeks' cover shape (excludes the lead base, held separately by the engine).
-      const cu = cost[co] || 0;   // avg unit cost £ for the working-capital estimate
-      // safety weeks = Z·CV·√(L) with the monthly→weekly σ conversion (√4.081²), + review cycle — matches ssmCoverWeeks' cover shape (excludes the lead base, held separately by the engine). estGbp = avg units held × unit cost.
-      const mk = sl => { let cw = Math.round(Z[sl] * cv * Math.sqrt(Lw) * 2.081 + cycle); cw = Math.max(1, Math.min(cw, capW)); const au = Math.round(cw * wkMean); return { sl, coverWks: cw, avgUnits: au, estGbp: Math.round(au * cu), stockoutPct: 100 - sl }; };
-      const options = [90, 93, 95, 97, 99].map(mk);
-      // 3 risk tiers: Low risk = safe/overstock (99%), Medium (95%), High risk = tight (90%). Suggested from demand volatility (more volatile → hold more).
-      const RISK = { 99: 'Low risk (safe)', 95: 'Medium', 90: 'High risk (tight)' };
-      const riskOptions = [99, 95, 90].map(sl => { const x = mk(sl); x.level = RISK[sl]; return x; });
-      const suggestedSl = cv >= 0.7 ? 99 : cv >= 0.45 ? 95 : 90;
-      const recOpt = options.find(o2 => o2.sl === suggestedSl) || mk(suggestedSl);
-      const overstockMonths = o.covers.filter(c => c > 2 * recOpt.coverWks).length;
-      const flag = avgCov > recOpt.coverWks * 1.5 ? 'overstocked' : (minCov < recOpt.coverWks ? 'tight' : 'ok');
+      const Lw = lead[co] || 9, cycle = 4, capW = pool === 'FBA' ? 8 : 52, cu = cost[co] || 0;
+      // safety weeks = Z·CV·√(L)·√4.33 + review cycle — matches ssmCoverWeeks' cover shape. estGbp = avg units held × unit cost.
+      // WHAT-IF replay: safety units = Z·σ_monthly·√(lead months); a "stockout month" = a month whose demand surprise beat that buffer.
+      const empStock = sl => { const su = Zof(sl) * dSd * Math.sqrt(Lw / 4.33); return o.dem.filter(x => (x - dMean) > su).length; };
+      const mk = sl => { let cw = Math.round(Zof(sl) * cv * Math.sqrt(Lw) * 2.081 + cycle); cw = Math.max(1, Math.min(cw, capW)); const au = Math.round(cw * wkMean);
+        return { sl: Math.round(sl * 10) / 10, coverWks: cw, avgUnits: au, estGbp: Math.round(au * cu), stockoutPct: Math.round((100 - sl) * 10) / 10, empStockoutMonths: empStock(sl) }; };
+      const RISK = {}; RISK[cfg.slLow] = 'Low risk (safe)'; RISK[cfg.slMed] = 'Medium'; RISK[cfg.slHigh] = 'High risk (tight)';
+      const riskOptions = [cfg.slLow, cfg.slMed, cfg.slHigh].map(sl => { const x = mk(sl); x.level = RISK[sl] || (sl + '%'); return x; });
+      const suggestedSl = cv >= cfg.cvHi ? cfg.slLow : cv >= cfg.cvMed ? cfg.slMed : cfg.slHigh;
+      const recOpt = mk(suggestedSl), tgtOpt = mk(target);
+      const overstockMonths = o.covers.filter(c => c > 2 * tgtOpt.coverWks).length;
+      const flag = avgCov > tgtOpt.coverWks * 1.5 ? 'overstocked' : (minCov < tgtOpt.coverWks ? 'tight' : 'ok');
       out.push({ co, pool, months: n, from: o.months[0], to: o.months[n - 1], avgCover: Math.round(avgCov * 10) / 10, minCover: Math.round(minCov * 10) / 10, maxCover: Math.round(maxCov * 10) / 10,
-        weeklyDemand: Math.round(wkMean), cv: Math.round(cv * 100) / 100, leadWks: Math.round(Lw * 10) / 10, unitCost: Math.round(cu * 100) / 100, overstockMonths, options, riskOptions, suggestedSl, recSl: suggestedSl, recCoverWks: recOpt.coverWks, flag }); });
+        weeklyDemand: Math.round(wkMean), cv: Math.round(cv * 100) / 100, leadWks: Math.round(Lw * 10) / 10, unitCost: Math.round(cu * 100) / 100, overstockMonths, riskOptions, suggestedSl: Math.round(suggestedSl * 10) / 10, recSl: Math.round(suggestedSl * 10) / 10, recCoverWks: recOpt.coverWks, targetSl: target, targetCoverWks: tgtOpt.coverWks, flag }); });
     const dates = (await pool.query(`SELECT to_char(snapshot_date,'YYYY-MM-DD') d FROM planner.inventory_snapshots GROUP BY 1 ORDER BY 1`)).rows.map(r => r.d);
-    res.json({ ok: true, rows: out, snapshotDates: dates });
+    res.json({ ok: true, rows: out, snapshotDates: dates, cfg, window: { from, to }, target });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 // ── Forecast Snapshots (DEMAND ▸ Snapshots) — lock a copy of forecast_outputs; compare later + past-month locked-vs-actual ──
