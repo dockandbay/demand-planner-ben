@@ -1,3 +1,9 @@
+## v27.127 SSM buy logic: per market × pool opt-in + parameters
+- The Service-level SSM buy logic is now **per market × pool (3PL / FBA)** instead of one global switch. At **DEMAND ▸ Buy Plan** a matrix lets you tick SSM on for any market×pool independently and set **all** SSM parameters per row (service levels A/B/C/default, seasonal floor, review cycle; FBA-cap on FBA pools, season-max on 3PL pools). Unticked rows keep today's weeks-cover logic.
+- Data model: `SSM_ENABLED` (`{"CO|POOL":true}`, server-injected from `app_settings.ssm_enabled`) drives opt-in per pool; `SSM_PARAMS.byMkt["CO|POOL"]` holds per-market×pool params over the global defaults. `ssmServiceLevel`/`ssmCoverWeeks` are now market×pool-aware; `project()` checks opt-in independently for 3PL vs FBA.
+- Back-compat: legacy global `buy_logic='ssm'` maps to all-markets-on. **Default (nothing opted in) leaves the buy plan byte-identical** (verified: UK 3PL 45180 / FBA 660 unchanged; enabling UK·3PL moved 3PL to 51696 with FBA untouched).
+- No migration (reuses `app_settings` key/value).
+
 ## v27.126 Manage 3PL reconciliation: move "completing ~now" PO note to the On Hand Diff
 - The "📦 completing ~now (maybe received, not yet in ERP)" PO note now sits under the **On Hand** Diff cell instead of the Available Diff cell (same trigger: positive on-hand or available diff). It's about physical stock received, so On Hand is the right home.
 

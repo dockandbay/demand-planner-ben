@@ -1369,8 +1369,16 @@ function ppStockForSet(setSku,mkt){ var pps=(setSku&&PREPACK_BY_SET[setSku])||nu
 var PREPACK_STOCK={};    // server-injected prepack on-hand {prepack_sku:{wh:qty}} — prepacks are out of SKUM scope, so their stock rides separately for the buy-plan netting.
 var LEADTIME_VAR={};     // server-injected lead-time variability (weeks) {global:{sig,mean,n},bySupplier:{name:{sig,mean,n}}} from PO delivery history — Safety-stock data-driven σ_L.
 var INV_STOCKOUTS={};    // server-injected {sku:{MKT:[YYYY_MM]}} stockout months from inventory snapshots — demand unconstraining (censored sales in OOS months lifted to the seasonal norm).
-var SSM_PARAMS={sl:{A:99,B:97,C:93,def:90},seasonalFloor:97,cycleWk:4,fbaCapWk:8,seasonMaxWk:30};   // server-injected SSM tunables (app_settings.ssm_params) — editable at CONFIG ▸ Demand ▸ Buy plan logic. seasonMaxWk = longest window still treated as a one-shot seasonal pre-buy; beyond it a "seasonal" SKU sells long enough to reorder → steady-state.
-var BUY_LOGIC='cover_weeks';   // server-injected buy-plan logic switch (app_settings.buy_logic): 'cover_weeks' (default, flat products cover) | 'ssm' (service-level safety stock via ssmCoverWeeks). CONFIG ▸ Admin ▸ General. Default leaves the buy plan byte-identical.
+var SSM_PARAMS={sl:{A:99,B:97,C:93,def:90},seasonalFloor:97,cycleWk:4,fbaCapWk:8,seasonMaxWk:30,byMkt:{}};   // server-injected SSM tunables (app_settings.ssm_params). Top level = global default; byMkt["CO|POOL"] = per market×pool overrides (ALL params). Editable at DEMAND ▸ Buy Plan. seasonMaxWk = longest window still treated as a one-shot seasonal pre-buy.
+var BUY_LOGIC='cover_weeks';   // legacy global switch (app_settings.buy_logic) — retained for back-compat; the engine now reads SSM_ENABLED per market×pool.
+var SSM_ENABLED={};   // per "CO|POOL" SSM opt-in map (server-injected from app_settings.ssm_enabled); {} = all markets/pools on weeks-cover (byte-identical). A pool opted in uses ssmCoverWeeks with that pool's SSM_PARAMS.byMkt params.
+// Effective SSM params for a market×pool: byMkt["CO|POOL"] merged over the global defaults (ALL params per market×pool, Ben).
+function ssmParamsFor(co,pool){ var G=(typeof SSM_PARAMS!=='undefined'&&SSM_PARAMS)?SSM_PARAMS:{}; var gsl=G.sl||{A:99,B:97,C:93,def:90};
+  var base={sl:{A:gsl.A,B:gsl.B,C:gsl.C,def:gsl.def}, seasonalFloor:(G.seasonalFloor!=null?G.seasonalFloor:97), cycleWk:(G.cycleWk||4), fbaCapWk:(G.fbaCapWk||8), seasonMaxWk:(G.seasonMaxWk||30)};
+  var m=(G.byMkt&&G.byMkt[String(co).toUpperCase()+'|'+String(pool).toUpperCase()])||null;
+  if(m){ if(m.sl){['A','B','C','def'].forEach(function(k){ if(m.sl[k]!=null)base.sl[k]=m.sl[k]; });} ['seasonalFloor','cycleWk','fbaCapWk','seasonMaxWk'].forEach(function(k){ if(m[k]!=null)base[k]=m[k]; }); }
+  return base; }
+function ssmEnabled(co,pool){ try{ return !!(typeof SSM_ENABLED!=='undefined'&&SSM_ENABLED&&SSM_ENABLED[String(co).toUpperCase()+'|'+String(pool).toUpperCase()]); }catch(e){ return false; } }
 var TIER_RECS={core:[],seasonal:[],asof:''};   // server-injected ABC re-tier recommendations — DEMAND ▸ Exceptions ▸ Recommendations. {core:[{sku,cat,assigned,earned,metric,dir}],seasonal:[...]}. Core scored on trailing-12mo revenue, Seasonal on peak-month revenue, tiers earned WITHIN group; conservative (clear ≥1-tier gaps). Advisory — tier owned in Airtable (marketing).
 var PREPACK_COVER={};    // filled during buildLiveDemand §4: {"setSku|CO|fym":{onHand,fc,covered,remaining}} — drives the demand-rail "PP" badge (prepack stock drawn down against set demand, carried forward).
 var _PP_COVER_INIT=false; // one-time guard: build PREPACK_COVER on the first demand-plan render so the rail "PP" badge shows without first opening the buy plan.
@@ -1661,8 +1669,8 @@ const CR_SKUMETA={};SL.forEach(s=>{CR_SKUMETA[s.s]={cat:s.c||'',tier:s.ti||'',rw
 // raise-only on top, so legacy cover rules act as floors. Default 'cover_weeks' leaves the buy plan untouched.
 // See Claude Analyses/SPEC_SSM_Buy_Logic_and_Complex_Rules.md. Mirrors the Safety-stock tab maths.
 function ssmZ(sl){ return sl>=99.5?2.58:sl>=99?2.33:sl>=97?1.88:sl>=95?1.64:sl>=93?1.48:1.28; }
-function ssmServiceLevel(sku){                          // tier → service level %, with seasonal floor (params from SSM_PARAMS)
-  var P=(typeof SSM_PARAMS!=='undefined'&&SSM_PARAMS&&SSM_PARAMS.sl)?SSM_PARAMS:{sl:{A:99,B:97,C:93,def:90},seasonalFloor:97};
+function ssmServiceLevel(sku,co,pool){                  // tier → service level %, with seasonal floor (params per market×pool)
+  var P=ssmParamsFor(co,pool);
   var p=(typeof SKUM!=='undefined')?SKUM[sku]:null;
   var tier=(typeof TIER_MAP!=='undefined'&&TIER_MAP[sku])||(p&&p.ti)||'';
   var base=tier==='A'?P.sl.A:tier==='B'?P.sl.B:tier==='C'?P.sl.C:P.sl.def;
@@ -1710,9 +1718,9 @@ function ssmCoverWeeks(sku,co,pool,md,pd){             // → effective base cov
     var Lwk=md.l3||9; if(!(Lwk>0))Lwk=9; var Lmo=Lwk/4.33;
     var sigLwk=0; if(typeof LEADTIME_VAR!=='undefined'&&LEADTIME_VAR){ var sv=LEADTIME_VAR.bySupplier&&pd&&LEADTIME_VAR.bySupplier[pd.supp]; sigLwk=(sv&&sv.n>=5)?sv.sig:((LEADTIME_VAR.global&&LEADTIME_VAR.global.sig)||0); }
     var sigLmo=sigLwk/4.33;
-    var Z=ssmZ(ssmServiceLevel(sku));
+    var Z=ssmZ(ssmServiceLevel(sku,co,pool));
     var ss=Z*Math.sqrt(Lmo*sig*sig + d*d*sigLmo*sigLmo);
-    var _P=(typeof SSM_PARAMS!=='undefined'&&SSM_PARAMS)?SSM_PARAMS:{cycleWk:4,fbaCapWk:8};
+    var _P=ssmParamsFor(co,pool);   // per market×pool params (cycle / FBA cap / season-max)
     // Seasonal PRE-BUY (P2): for a seasonal SKU's 3PL pool, cover the whole REMAINING SEASON up front (long China
     // lead → no mid-season reorder) plus the safety buffer. The engine's forward-demand target then buys the full
     // season in one commitment. FBA is NOT pre-bought (stays capped) — it's topped up in-season by the fast transfer.
@@ -3103,18 +3111,19 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
   // A-tier extra: optional safety-stock cover added to every A SKU's 3PL target (Settings ▸ 3PL A-tier extra).
   const _atr=(typeof document!=='undefined'&&document.getElementById('atr'))?parseInt(document.getElementById('atr').value,10):0;
   const atrExtra=isFinite(_atr)&&_atr>=0?_atr:0;
-  const _ssmOn=(typeof BUY_LOGIC!=='undefined'&&BUY_LOGIC==='ssm');
+  const _ssmOn3=ssmEnabled(mkt,'3PL');   // SSM opt-in per market×pool (independent for 3PL vs FBA)
+  const _ssmOnF=ssmEnabled(mkt,'FBA');
   let t3base=md.t3||12;
-  if(_ssmOn){ const _sc3=ssmCoverWeeks(skuKey||PSKU,mkt,'3PL',md,pd); if(_sc3>0)t3base=_sc3; }   // SSM: safety-stock-derived cover replaces flat products cover
+  if(_ssmOn3){ const _sc3=ssmCoverWeeks(skuKey||PSKU,mkt,'3PL',md,pd); if(_sc3>0)t3base=_sc3; }   // SSM: safety-stock-derived cover replaces flat products cover (3PL opted in)
   const skuTier=skuKey?TIER_MAP[skuKey]:(PSKU?TIER_MAP[PSKU]:null);
-  const tierAExtra=(skuTier==='A'&&!_ssmOn)?atrExtra:0;   // A-tier extra only in cover-weeks mode (SSM handles tier via service level → no double count)
+  const tierAExtra=(skuTier==='A'&&!_ssmOn3)?atrExtra:0;   // A-tier extra only in cover-weeks mode (SSM handles tier via service level → no double count)
   const l3=Math.max((md.l3||9)+(ple||0),0);
   const ltWks=md.lt||2;
   const lt=ltWks<=2?0:Math.round(ltWks/4.33);
   const t3=t3base+tierAExtra;                           // effective 3PL target cover (wks)
   const crMatched=crMatch(skuKey,mkt);                 // Complex Rules matching this SKU's scope in this market (per-month window applied in the loop)
   let tf=(tfOverride!==undefined&&tfOverride!==null)?tfOverride:(md.tf||4);
-  if(_ssmOn&&(tfOverride===undefined||tfOverride===null)){ const _scf=ssmCoverWeeks(skuKey||PSKU,mkt,'FBA',md,pd); if(_scf>0)tf=_scf; }   // SSM: safety-stock-derived FBA cover
+  if(_ssmOnF&&(tfOverride===undefined||tfOverride===null)){ const _scf=ssmCoverWeeks(skuKey||PSKU,mkt,'FBA',md,pd); if(_scf>0)tf=_scf; }   // SSM: safety-stock-derived FBA cover (FBA opted in)
   const fm=md.fm||24;
   const hasFBA=(md.ch||[]).includes('FBA');
 
@@ -10222,20 +10231,26 @@ function renderExceptionsView(body){
 // whole buy plan. Default 'cover_weeks' leaves buys unchanged. See Claude Analyses/SPEC_SSM_Buy_Logic_and_Complex_Rules.md.
 function renderBuyPlanView(body){
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
-  var cur=(typeof BUY_LOGIC!=='undefined'&&BUY_LOGIC==='ssm')?'ssm':'cover_weeks';
-  var OPT=[['cover_weeks','Cover-weeks','Current — flat weeks of cover'],['ssm','Service-level SSM','Statistical safety stock per SKU']];
-  function segHtml(v){ return OPT.map(function(o){ var on=v===o[0];
-    return '<button class="bpl-opt" data-v="'+o[0]+'" style="text-align:left;flex:1;min-width:220px;border:2px solid '+(on?'#7c3aed':'#e2e8f0')+';background:'+(on?'#f5f3ff':'#fff')+';border-radius:8px;padding:12px 14px;cursor:pointer">'
-      +'<div style="display:flex;align-items:center;gap:8px"><span style="width:14px;height:14px;border-radius:50%;border:2px solid '+(on?'#7c3aed':'#cbd5e1')+';background:'+(on?'#7c3aed':'#fff')+';display:inline-block"></span>'
-      +'<span style="font-weight:700;font-size:14px;color:#0f172a">'+o[1]+'</span>'+(on?'<span style="margin-left:auto;font-size:10px;font-weight:700;color:#6b21a8;background:#ede9fe;padding:2px 8px;border-radius:10px">ACTIVE</span>':'')+'</div>'
-      +'<div style="font-size:11px;color:#64748b;margin-top:4px;padding-left:22px">'+o[2]+'</div></button>'; }).join(''); }
-  var seg=segHtml(cur);
+  var MP=[['UK','3PL'],['UK','FBA'],['US','3PL'],['US','FBA'],['EU','3PL'],['EU','FBA'],['AU','3PL'],['AU','FBA'],['CA','FBA']];   // market × pool rows (CA is FBA-only)
+  function ipt(id,val){ return '<input id="'+id+'" type="number" step="0.5" value="'+(val==null?'':val)+'" style="width:50px;font-size:11px;padding:2px 3px;border:1px solid #cbd5e1;border-radius:4px;text-align:center">'; }
+  function thc(t,tip){ return '<th style="padding:5px 6px;font-size:10px;color:#475569;text-transform:uppercase;letter-spacing:.03em;white-space:nowrap;border-bottom:1px solid #e5e7eb"'+(tip?' title="'+esc(tip)+'"':'')+'>'+t+'</th>'; }
+  var rowsH=MP.map(function(mp){ var co=mp[0],pool=mp[1], key=co+'|'+pool, id=co+'_'+pool; var P=ssmParamsFor(co,pool); var on=ssmEnabled(co,pool);
+    return '<tr style="border-bottom:1px solid #f1f5f9'+(on?';background:#f5f3ff':'')+'">'
+      +'<td style="padding:4px 8px;font-weight:700;white-space:nowrap;color:#0f172a">'+co+' · '+pool+'</td>'
+      +'<td style="text-align:center;padding:4px 6px"><input type="checkbox" class="bpl-on" data-k="'+key+'"'+(on?' checked':'')+'></td>'
+      +'<td style="text-align:center">'+ipt('slA_'+id,P.sl.A)+'</td><td style="text-align:center">'+ipt('slB_'+id,P.sl.B)+'</td><td style="text-align:center">'+ipt('slC_'+id,P.sl.C)+'</td><td style="text-align:center">'+ipt('slD_'+id,P.sl.def)+'</td>'
+      +'<td style="text-align:center">'+ipt('sf_'+id,P.seasonalFloor)+'</td><td style="text-align:center">'+ipt('cy_'+id,P.cycleWk)+'</td>'
+      +'<td style="text-align:center">'+(pool==='FBA'?ipt('fc_'+id,P.fbaCapWk):'<span class="mut" style="font-size:11px">—</span>')+'</td>'
+      +'<td style="text-align:center">'+(pool==='3PL'?ipt('smx_'+id,P.seasonMaxWk):'<span class="mut" style="font-size:11px">—</span>')+'</td>'
+      +'</tr>'; }).join('');
   var box='<div style="border:1px solid #e2e8f0;border-radius:10px;padding:16px 18px;margin-bottom:20px;background:#fafafa">'
     +'<div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:#7c3aed;font-weight:800;margin-bottom:2px">Setting</div>'
-    +'<div style="font-size:16px;font-weight:700;color:#0f172a;margin-bottom:3px">Buy plan logic</div>'
-    +'<div style="font-size:12px;color:#64748b;margin-bottom:12px">How the buy plan decides each SKU’s target stock (and therefore what to buy). Changing this rebuilds the whole buy plan on the next load. Compare the two first in <a href="#/demand/safetystock" style="color:#7c3aed;font-weight:600">DEMAND ▸ Safety stock</a>.</div>'
-    +'<div id="bpl-seg" style="display:flex;gap:12px;flex-wrap:wrap">'+seg+'</div>'
-    +'<div id="bpl-msg" style="font-size:12px;margin-top:10px;min-height:16px"></div></div>';
+    +'<div style="font-size:16px;font-weight:700;color:#0f172a;margin-bottom:3px">Buy plan logic — per market × pool</div>'
+    +'<div style="font-size:12px;color:#64748b;margin-bottom:12px">Tick a market×pool to drive its buys by <b>service-level SSM</b> with the parameters on that row; leave unticked for the current <b>weeks-cover</b> logic (unchanged). 3PL and FBA are independent. Complex Rules still apply on top (raise-only). Changing this rebuilds the buy plan on the next load — compare first in <a href="#/demand/safetystock" style="color:#7c3aed;font-weight:600">DEMAND ▸ Safety stock</a>.</div>'
+    +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px"><thead><tr>'
+      +thc('Market · Pool')+thc('SSM?')+thc('Svc A %','Service level for tier-A SKUs')+thc('Svc B %')+thc('Svc C %')+thc('Default %','Untiered SKUs')+thc('Seas floor %','Seasonal service-level floor')+thc('Cycle wk','Review-cycle weeks')+thc('FBA cap','FBA cover cap — FBA pools only')+thc('Season max','Longest one-shot seasonal pre-buy — 3PL pools only')
+      +'</tr></thead><tbody>'+rowsH+'</tbody></table></div>'
+    +'<div style="margin-top:12px;display:flex;gap:10px;align-items:center"><button id="bpl-save" style="border:1px solid #7c3aed;background:#7c3aed;color:#fff;font-weight:700;font-size:13px;padding:8px 18px;border-radius:6px;cursor:pointer">Save</button><span id="bpl-msg" style="font-size:12px;min-height:16px"></span></div></div>';
   function h(t){return '<div style="font-size:14px;font-weight:700;color:#0f172a;margin:18px 0 6px">'+t+'</div>';}
   function p(t){return '<div style="font-size:12.5px;color:#334155;line-height:1.6;max-width:820px;margin-bottom:6px">'+t+'</div>';}
   var explain=''
@@ -10249,38 +10264,23 @@ function renderBuyPlanView(body){
     +p('<span style="color:#64748b">Runs behind this switch so you can adopt it when ready. Back-test on 20 months of our own data: it frees roughly <b>£0.75M</b> of working capital while improving availability on the lines that actually sell out, by moving stock from over-stocked steady sellers to the volatile tail.</span>')
     +h('Recommended approach')
     +p('Leave it on <b>Cover-weeks</b> to start. Review the per-SKU differences in <a href="#/demand/safetystock" style="color:#7c3aed;font-weight:600">Safety stock</a> and the tier fixes in <a href="#/demand/exceptions/recs" style="color:#7c3aed;font-weight:600">Exceptions ▸ Recommendations</a>, then switch to <b>SSM</b> when you’re confident. You can flip back at any time.');
-  // ── SSM parameters (editable) — service level by tier, seasonal floor, review cycle, FBA cap ──
-  var _P=(typeof SSM_PARAMS!=='undefined'&&SSM_PARAMS&&SSM_PARAMS.sl)?SSM_PARAMS:{sl:{A:99,B:97,C:93,def:90},seasonalFloor:97,cycleWk:4,fbaCapWk:8};
-  var _LBL='font-size:11px;color:#475569;font-weight:600';
-  function _ipt(id,val,step){return '<input id="'+id+'" type="number" step="'+(step||'0.5')+'" value="'+val+'" style="width:60px;font-size:12px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;text-align:center">';}
-  var params='<div style="border:1px solid #e2e8f0;border-radius:10px;padding:16px 18px;margin-bottom:20px">'
-    +'<div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:2px">SSM parameters</div>'
-    +'<div style="font-size:12px;color:#64748b;margin-bottom:14px">Only used when <b>Service-level SSM</b> is active. Marketing owns the tier; these dials set the <i>promise</i> per tier. Changes rebuild the buy plan on the next load.</div>'
-    +'<div style="display:flex;gap:26px;flex-wrap:wrap;align-items:flex-end">'
-      +'<div><div style="'+_LBL+';margin-bottom:6px">Service level by tier (%)</div><div style="display:flex;gap:10px;align-items:center;font-size:12px;color:#334155">'
-        +'<label>A '+_ipt('bpl-slA',_P.sl.A)+'</label><label>B '+_ipt('bpl-slB',_P.sl.B)+'</label><label>C '+_ipt('bpl-slC',_P.sl.C)+'</label><label>Untiered '+_ipt('bpl-slD',_P.sl.def)+'</label></div></div>'
-      +'<div><div style="'+_LBL+';margin-bottom:6px">Seasonal floor (%)</div>'+_ipt('bpl-sf',_P.seasonalFloor)+'</div>'
-      +'<div><div style="'+_LBL+';margin-bottom:6px">Review cycle (wks)</div>'+_ipt('bpl-cy',_P.cycleWk)+'</div>'
-      +'<div><div style="'+_LBL+';margin-bottom:6px">FBA cover cap (wks)</div>'+_ipt('bpl-fc',_P.fbaCapWk)+'</div>'
-      +'<div><div style="'+_LBL+';margin-bottom:6px" title="Longest season window still pre-bought in one shot; beyond this a seasonal SKU sells long enough to reorder, so it uses steady-state cover">Season pre-buy max (wks)</div>'+_ipt('bpl-smx',_P.seasonMaxWk||30)+'</div>'
-      +'<button id="bpl-psave" style="border:1px solid #7c3aed;background:#7c3aed;color:#fff;font-weight:700;font-size:12px;padding:8px 16px;border-radius:6px;cursor:pointer">Save parameters</button>'
-      +'<span id="bpl-psave-msg" style="font-size:12px"></span>'
-    +'</div></div>';
-  body.innerHTML='<div style="padding:2px 2px 28px">'+box+params+explain+'</div>';
-  var _seg=body.querySelector('#bpl-seg');
-  if(_seg)_seg.onclick=function(e){ var b=e.target.closest('.bpl-opt'); if(!b)return; var v=b.dataset.v; if(v===cur){return;}
-    cur=v; _seg.innerHTML=segHtml(cur);   // repaint immediately so the ACTIVE badge / border move to the clicked option
-    var m=body.querySelector('#bpl-msg');
-    if(m){m.style.color='#64748b';m.textContent='Saving…';}
-    fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'buy_logic',value:v})})
-      .then(function(r){return r.json();}).then(function(j){ if(m){ if(j&&j.error){m.style.color='#dc2626';m.textContent='Error: '+j.error;} else { m.innerHTML='<span style="color:#16a34a;font-weight:600">Saved ✓</span> — <a href="javascript:location.reload()" style="color:#7c3aed;font-weight:700">reload to apply to the buy plan</a>.'; } } })
-      .catch(function(){ if(m){m.style.color='#dc2626';m.textContent='Save failed.';} }); };
-  var _sv=body.querySelector('#bpl-psave'); if(_sv)_sv.onclick=function(){ var m=body.querySelector('#bpl-psave-msg');
+  body.innerHTML='<div style="padding:2px 2px 28px">'+box+explain+'</div>';
+  var _sv=body.querySelector('#bpl-save'); if(_sv)_sv.onclick=function(){ var m=body.querySelector('#bpl-msg');
     function nv(id,d){var el=body.querySelector('#'+id);var v=el?parseFloat(el.value):NaN;return isFinite(v)&&v>0?v:d;}
-    var payload={sl:{A:nv('bpl-slA',99),B:nv('bpl-slB',97),C:nv('bpl-slC',93),def:nv('bpl-slD',90)},seasonalFloor:nv('bpl-sf',97),cycleWk:nv('bpl-cy',4),fbaCapWk:nv('bpl-fc',8),seasonMaxWk:nv('bpl-smx',30)};
+    var enabled={}, byMkt={};
+    MP.forEach(function(mp){ var co=mp[0],pool=mp[1], key=co+'|'+pool, id=co+'_'+pool;
+      var cb=body.querySelector('.bpl-on[data-k="'+key+'"]'); if(cb&&cb.checked)enabled[key]=true;
+      var o={sl:{A:nv('slA_'+id,99),B:nv('slB_'+id,97),C:nv('slC_'+id,93),def:nv('slD_'+id,90)},seasonalFloor:nv('sf_'+id,97),cycleWk:nv('cy_'+id,4)};
+      if(pool==='FBA')o.fbaCapWk=nv('fc_'+id,8); if(pool==='3PL')o.seasonMaxWk=nv('smx_'+id,30);
+      byMkt[key]=o; });
+    var G=(typeof SSM_PARAMS!=='undefined'&&SSM_PARAMS)?SSM_PARAMS:{};
+    var params={sl:(G.sl||{A:99,B:97,C:93,def:90}),seasonalFloor:(G.seasonalFloor||97),cycleWk:(G.cycleWk||4),fbaCapWk:(G.fbaCapWk||8),seasonMaxWk:(G.seasonMaxWk||30),byMkt:byMkt};
     if(m){m.style.color='#64748b';m.textContent='Saving…';}
-    fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'ssm_params',value:JSON.stringify(payload)})})
-      .then(function(r){return r.json();}).then(function(j){ if(m){ if(j&&j.error){m.style.color='#dc2626';m.textContent='Error: '+j.error;} else { m.innerHTML='<span style="color:#16a34a;font-weight:600">Saved ✓</span> — <a href="javascript:location.reload()" style="color:#7c3aed;font-weight:700">reload to apply</a>.'; } } })
+    fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'ssm_params',value:JSON.stringify(params)})})
+      .then(function(r){return r.json();})
+      .then(function(){ return fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'ssm_enabled',value:JSON.stringify(enabled)})}); })
+      .then(function(r){return r.json();})
+      .then(function(j){ if(m){ if(j&&j.error){m.style.color='#dc2626';m.textContent='Error: '+j.error;} else { m.innerHTML='<span style="color:#16a34a;font-weight:600">Saved ✓</span> — <a href="javascript:location.reload()" style="color:#7c3aed;font-weight:700">reload to apply to the buy plan</a>.'; } } })
       .catch(function(){ if(m){m.style.color='#dc2626';m.textContent='Save failed.';} }); };
 }
 function renderAccuracyView(body){
