@@ -324,6 +324,10 @@ async function freshnessCached() {
 // sorts it to the top). (Ben, v26.833.)
 const UNDEF_SUBCAT = 'Undefined sub category';
 function _normCat(v) { const t = (v == null ? '' : String(v).trim()); return (t === '' || t === 'Unknown') ? UNDEF_SUBCAT : t; }
+// Non-SKUs / data artefacts that must never appear in the planner (Ben: GIFTWRAP-BOX is not a real SKU). Excluded at the
+// data-load queries below. The complete fix is removing them from the PIM; this is a hard guard so they can't leak through.
+const NON_SKUS = ['GIFTWRAP-BOX'];
+const NON_SKU_LIST = NON_SKUS.map(s => `'${String(s).replace(/'/g, "''")}'`).join(',');
 async function buildDATA() {
   const [salesR, availR] = await Promise.all([
     pool.query(`SELECT category c, subcategory s, country co, channel ch,
@@ -332,7 +336,7 @@ async function buildDATA() {
     // one row per (category, subcategory, country, channel) that has ≥1 AVAILABLE SKU in planning scope
     pool.query(`SELECT DISTINCT p.category c, p.subcategory s, upper(a.country) co, a.channel ch
                 FROM planner.v_product_availability a JOIN planner.products p ON p.sku = a.sku
-                WHERE a.is_available AND p.in_planning_scope`),
+                WHERE a.is_available AND p.in_planning_scope AND p.sku NOT IN (${NON_SKU_LIST})`),
   ]);
   const byKey = {};
   for (const row of salesR.rows) {
@@ -409,7 +413,7 @@ async function buildSKURAW() {
                        nullif(trim(p.colour_swatch_url),'') sw,   -- colour swatch URL — client-side fallback when the variant image URL 404s
                        upper(coalesce(nullif(btrim(p.status),''),'')) st,
                        upper(coalesce(nullif(btrim(p.variant_type),''),'MASTER')) vt   -- MASTER | SET (blank ⇒ MASTER); SETS feature identifies build-on-fly set SKUs
-                FROM planner.products p LEFT JOIN planner.v_sku_attrs sl ON sl.sku=p.sku WHERE p.in_planning_scope`),
+                FROM planner.products p LEFT JOIN planner.v_sku_attrs sl ON sl.sku=p.sku WHERE p.in_planning_scope AND p.sku NOT IN (${NON_SKU_LIST})`),
     // Launch + discontinue dates per country, from planner.products (Ben's single source of truth).
     // Values are already ISO text on products, so pass through; the artifact compares them as strings.
     pool.query(`SELECT sku, co, lch, disc FROM (
@@ -534,7 +538,7 @@ async function buildSKURAW() {
 async function buildSAEXTRA() {
   const [prods, inv, pcs, inbSkus, poSkus] = await Promise.all([
     pool.query(`SELECT sku, product_name n, subcategory s, category c, market_tier ti, core_seasonal cs
-                FROM planner.products WHERE NOT in_planning_scope`),
+                FROM planner.products WHERE NOT in_planning_scope AND sku NOT IN (${NON_SKU_LIST})`),
     pool.query(`SELECT sku, warehouse wh, available::int qty FROM planner.v_product_inventory WHERE available <> 0`),
     pool.query(`SELECT sku, co, lch, disc FROM (
                   SELECT sku, 'uk' co, coalesce(nullif(launch_date_uk_final,''), nullif(launch_date_uk,'')) lch, nullif(discontinue_date_final,'') disc FROM planner.products WHERE NOT in_planning_scope
@@ -617,7 +621,7 @@ async function buildPROD_CONST() {
       target_cover_weeks_uk_3pl t3_uk, target_cover_weeks_us_3pl t3_us, target_cover_weeks_eu_3pl t3_eu, target_cover_weeks_au_3pl t3_au,
       target_cover_weeks_uk_fba tf_uk, target_cover_weeks_us_fba tf_us, target_cover_weeks_eu_fba tf_eu, target_cover_weeks_au_fba tf_au, target_cover_weeks_ca_fba tf_ca,
       fba_transfer_min_units_uk fm_uk, fba_transfer_min_units_us fm_us, fba_transfer_min_units_eu fm_eu, fba_transfer_min_units_au fm_au, fba_transfer_min_units_ca fm_ca
-    FROM planner.products WHERE in_planning_scope`);
+    FROM planner.products WHERE in_planning_scope AND sku NOT IN (${NON_SKU_LIST})`);
   const num1 = v => { if (v == null) return null; const m = String(v).match(/-?\d+(\.\d+)?/); return m ? Number(m[0]) : null; };
   // Supplier expedited production weeks (for Buy 3PL Urgent Air/Sea). Blank/no-supplier → default 6 weeks (Ben).
   const supEx = {}; try { (await pool.query(`SELECT name, expedited_production_weeks x FROM planner.suppliers`)).rows.forEach(r => { if (r.name != null && r.x != null) supEx[r.name] = Number(r.x); }); } catch (e) {}
@@ -660,7 +664,7 @@ async function buildFBADIMS() {
   const { rows } = await pool.query(`SELECT sku, carton_qty cp,
     uk_carton_length,uk_carton_width,uk_carton_height,uk_carton_weight,
     us_carton_length,us_carton_width,us_carton_height,us_carton_weight
-    FROM planner.products WHERE coalesce(uk_carton_length, us_carton_length) IS NOT NULL`);
+    FROM planner.products WHERE coalesce(uk_carton_length, us_carton_length) IS NOT NULL AND sku NOT IN (${NON_SKU_LIST})`);
   const o = {};
   for (const r of rows) o[r.sku] = { cp: r.cp,
     u: [r.uk_carton_length, r.uk_carton_width, r.uk_carton_height, r.uk_carton_weight],

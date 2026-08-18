@@ -1,3 +1,7 @@
+## v27.121 Exclude non-SKU GIFTWRAP-BOX + future-launch can't be out-of-stock
+- **GIFTWRAP-BOX** (a data artefact, not a real SKU — its real variants are GIFTWRAP-BOX-SM/-MD/-LG…) is now hard-excluded from the planner via a NON_SKUS guard applied to every product data-load query (SKU master, availability, DATA, out-of-scope-with-stock, buy-plan constants, FBA dims). Variants are unaffected.
+- **Inventory Status Report:** a SKU with a future launch date (status FUTURE) can no longer appear as out-of-stock / low / etc. — it's shown only under In-production launches. (Belt-and-braces on top of the existing launch-date guard.)
+
 ## v27.120 Target recommendations ▸ Apply: store as % growth when ≤200% over a completed LY actual
 - When you Apply a target recommendation, each month is now written as a **% growth vs last year** (instead of an absolute unit number) **when** the implied growth is **≤200%** AND last year's same month is a **completed actual**. Otherwise it stays absolute (growth >200%, new categories, or no completed LY actual to grow from). The % encoding applies LY×(1+n), so it reproduces the same target units at apply-time but then flexes with LY actuals — mirroring the smoothing "convert to %" rule.
 

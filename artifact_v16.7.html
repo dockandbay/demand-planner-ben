@@ -10888,6 +10888,7 @@ function renderInvStatus(){
   var g3=_mkG(), gf=_mkG();
   var _push=function(b,r){ (b[r.ti]||b.C).push(r); };
   rows.forEach(function(r){
+    if(r.st==='FUTURE') return;                  // pre-launch (future launch date) → can't be a stockout; shown under In-production launches instead
     if(r.launch && r.launch>_today) return;      // not yet launched → not sellable
     if(r.disc && r.disc<_today) return;          // discontinued → not a stockout
     if(!r.has3 && !r.hasf) return;               // not sold in this market on any channel
