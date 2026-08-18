@@ -9707,11 +9707,12 @@
   function renderUrgentBuy(pj){ var b=biBody(); pj=pj||{}; var rows=pj.rows||[], cc=pj.counts||{};
     function chip(label,n,bg,fg){ return '<span class="tool-badge" style="background:'+bg+';color:'+fg+';font-size:11px;padding:3px 9px">'+label+' '+(n||0)+'</span>'; }
     var ord={critical:0,soon:1};
-    var risk=rows.filter(function(r){return r.urgency==='critical'||r.urgency==='soon';});
+    var risk=rows.filter(function(r){return (r.urgency==='critical'||r.urgency==='soon')&&!r.too_late;});
+    var tooLate=rows.filter(function(r){return (r.urgency==='critical'||r.urgency==='soon')&&r.too_late;}).sort(function(a,b){return (a.disc||'').localeCompare(b.disc||'')||(b.demand_12m-a.demand_12m);});
     var byCo={}; risk.forEach(function(r){ (byCo[r.country]=byCo[r.country]||[]).push(r); });
     var countries=Object.keys(byCo).sort(function(a,b){ return byCo[b].length-byCo[a].length || (a<b?-1:1); });
     function rowH(r){ var u=r.urgency==='critical'?['#fee2e2','#991b1b']:['#fef3c7','#92400e'];
-      return '<tr><td class="l" style="min-width:350px"><b>'+esc(r.sku)+'</b></td><td class="l"><span class="mut tiny">'+esc(r.subcat||r.category||'')+'</span></td>'
+      return '<tr><td class="l" style="min-width:350px"><button class="ub-plan" onclick="if(window.openDemandPlanPopup)openDemandPlanPopup(\''+esc(r.sku)+'\')" title="Open the buy plan for this SKU" style="font-size:9px;padding:1px 7px;margin-right:6px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer;font-weight:600">Plan ▸</button><b>'+esc(r.sku)+'</b></td><td class="l"><span class="mut tiny">'+esc(r.subcat||r.category||'')+'</span></td>'
         +'<td class="l"><span class="mut tiny">'+(r.disc?esc(fd(r.disc)):'—')+'</span></td>'
         +'<td>'+units(r.on_hand)+'</td><td>'+(r.inbound>0?units(r.inbound):'<span class="mut">—</span>')+'</td>'
         +'<td'+(r.cover_now!=null&&r.cover_now<1?' style="color:#dc2626;font-weight:700"':'')+'>'+(r.cover_now==null?'<span class="mut">∞</span>':r.cover_now+' mo')+'</td>'
@@ -9724,12 +9725,24 @@
       return '<div class="tw" style="max-width:1020px"><table style="width:100%"><thead><tr><th class="l" style="min-width:350px">SKU</th><th class="l">Cat</th><th class="l">Disc date</th><th>On hand</th><th>Inbound</th><th>Cover now</th><th>+ inbound</th><th>Target</th><th>12m demand</th><th>Buy to target</th><th>Urgency</th></tr></thead><tbody>'+list.map(rowH).join('')+'</tbody></table></div>'; }
     var body=countries.map(function(co){ var crit=byCo[co].filter(function(r){return r.urgency==='critical';}).length;
       return '<div style="margin-top:14px;font-weight:700;font-size:13px;color:#0f172a">'+esc(co)+' <span class="mut tiny" style="font-weight:400">· '+byCo[co].length+' at risk'+(crit?' ('+crit+' critical)':'')+'</span></div>'+tbl(byCo[co]); }).join('');
+    // "Too late to order" — active + low stock, but lead time lands stock after the discontinue date (Ben).
+    function tlTbl(list){ return '<div class="tw" style="max-width:1020px"><table style="width:100%"><thead><tr><th class="l" style="min-width:350px">SKU</th><th class="l">Cat</th><th class="l">Disc date</th><th>Lead</th><th>On hand</th><th>Cover now</th><th>Market</th></tr></thead><tbody>'
+      +list.map(function(r){ return '<tr><td class="l" style="min-width:350px"><button class="ub-plan" onclick="if(window.openDemandPlanPopup)openDemandPlanPopup(\''+esc(r.sku)+'\')" title="Open the buy plan for this SKU" style="font-size:9px;padding:1px 7px;margin-right:6px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer;font-weight:600">Plan ▸</button><b>'+esc(r.sku)+'</b></td>'
+        +'<td class="l"><span class="mut tiny">'+esc(r.subcat||r.category||'')+'</span></td>'
+        +'<td class="l"><span style="color:#b91c1c">'+(r.disc?esc(fd(r.disc)):'—')+'</span></td>'
+        +'<td class="mut">'+(r.lead_weeks!=null?r.lead_weeks+'wk':'—')+'</td>'
+        +'<td>'+units(r.on_hand)+'</td>'
+        +'<td'+(r.cover_now!=null&&r.cover_now<1?' style="color:#dc2626;font-weight:700"':'')+'>'+(r.cover_now==null?'<span class="mut">∞</span>':r.cover_now+' mo')+'</td>'
+        +'<td class="mut">'+esc(r.country)+'</td></tr>'; }).join('')+'</tbody></table></div>'; }
+    var tooLateH=tooLate.length?('<div style="margin-top:24px;font-weight:700;font-size:13px;color:#b45309">⏱ Too late to order — '+tooLate.length+' SKU'+(tooLate.length===1?'':'s')+'</div>'
+      +'<div class="mut tiny" style="margin:2px 0 4px;max-width:900px">Active with low stock, but the lead time would land a new order <b>after</b> the discontinue date — not worth restocking. Run down or transfer existing stock instead.</div>'+tlTbl(tooLate)):'';
     b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 6px;color:#0f172a">Urgent buy — stock-out risk</div>'
       +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px;align-items:center">'
         +chip('⚠ Critical',cc.critical,'#fee2e2','#991b1b')+chip('Soon',cc.soon,'#fef3c7','#92400e')
         +chip('OK',cc.ok,'#dcfce7','#166534')+chip('Surplus',cc.surplus,'#dbeafe','#1e40af')
-        +'<span class="mut tiny" style="margin-left:6px">grouped by market · target = per category/SKU (12wk default) · on-hand + inbound vs forecast</span></div>'
-      +(risk.length?body:'<div class="count">No stock-out risks 🎉</div>'); }
+        +(tooLate.length?'<span class="tool-badge" style="background:#fef3c7;color:#b45309;font-size:11px;padding:3px 9px">⏱ Too late '+tooLate.length+'</span>':'')
+        +'<span class="mut tiny" style="margin-left:6px">grouped by market · target = per category/SKU (12wk default) · on-hand + inbound vs forecast · DTC-available only</span></div>'
+      +(risk.length?body:'<div class="count">No stock-out risks 🎉</div>')+tooLateH; }
   // CONTAINER FILL — spare capacity matched to urgent buys from an on-board supplier. Add / Snooze / Dismiss.
   function renderContainerFill(d){ var b=biBody(); d=d||{}; var recs=d.recs||[];
     if(!recs.length){ b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 6px">Container fill</div><div class="count">No fill opportunities — no shipment with spare capacity matches an urgent buy from a supplier already on board.</div>'; return; }

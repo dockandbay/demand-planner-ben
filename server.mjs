@@ -12020,6 +12020,16 @@ async function _biProjectionCompute() {
       WHERE coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(l.qty,0)>0
       GROUP BY l.sku, country`)).rows
     .forEach(r => { if (!r.country) return; (inb[r.sku] = inb[r.sku] || {})[r.country] = Number(r.qty) || 0; });
+  // availability per market — DTC specifically (available_<mkt>_dtc); an unavailable SKU isn't an active urgent buy
+  const avail = {};
+  (await pool.query(`SELECT DISTINCT sku, upper(country) co FROM planner.v_product_availability WHERE is_available AND upper(channel)='DTC'`)).rows
+    .forEach(r => { avail[r.sku + '|' + r.co] = true; });
+  // total lead weeks (production + China→market) per sku|market — for the "too late to order" check vs discontinue date
+  const lead = {};
+  (await pool.query(`SELECT sku, coalesce(production_lead_time_weeks,0) pl, coalesce(china_to_uk_lead_time_weeks,0) uk,
+      coalesce(china_to_us_lead_time_weeks,0) us, coalesce(china_to_eu_lead_time_weeks,0) eu, coalesce(china_to_au_lead_time_weeks,0) au, coalesce(china_to_ca_lead_time_weeks,0) ca
+    FROM planner.products`)).rows
+    .forEach(r => { const pl = Number(r.pl) || 0; lead[r.sku] = { UK: pl + (Number(r.uk) || 0), US: pl + (Number(r.us) || 0), EU: pl + (Number(r.eu) || 0), AU: pl + (Number(r.au) || 0), CA: pl + (Number(r.ca) || 0) }; });
   const WK_PER_MO = 4.345, DEF_WK = 12;
   const rows = [];
   for (const sku of Object.keys(prods)) {
@@ -12031,6 +12041,7 @@ async function _biProjectionCompute() {
     for (const co of BI_COUNTRIES) {
       if (kpiDisc(p, co)) continue;
       if (kpiPreLaunch(p, co)) continue;   // pre-launch in this market → no current demand, can't be an urgent stockout (Ben: LANYARD-SUM-PSTPIER launches Feb-27 UK)
+      if (!avail[sku + '|' + co]) continue;   // not available in this market → not an active urgent buy (Ben: TOWLB-DES-LG-GTTLINES available_au_dtc=false in AU)
       const d12 = dm[co] || 0, onh = oh[co] || 0, inbound = (inb[sku] || {})[co] || 0;
       if (d12 <= 0 && onh <= 0 && inbound <= 0) continue;
       const tgtWk = (twDen[co] > 0) ? (twNum[co] / twDen[co]) : DEF_WK;   // weeks → months
@@ -12047,7 +12058,14 @@ async function _biProjectionCompute() {
       else if (coverInb < TM) urgency = 'soon';
       else if (coverInb > TM * 2) urgency = 'surplus';
       else urgency = 'ok';
-      rows.push({ sku, country: co, category: p.cs || '', subcat: p.subcat || '', disc: kpiDiscDate(p, co) || '', tier: p.tier || '',
+      // "Too late to order": active + discontinuing, but the lead time means stock would land AFTER the discontinue date.
+      const _disc = kpiDiscDate(p, co), _lw = (lead[sku] && lead[sku][co]) || 0;
+      let too_late = false;
+      if (_disc && /^\d{4}-\d{2}-\d{2}/.test(_disc) && _lw > 0) {
+        const arr = new Date(); arr.setDate(arr.getDate() + Math.round(_lw * 7));
+        too_late = arr.toISOString().slice(0, 10) > _disc.slice(0, 10);
+      }
+      rows.push({ sku, country: co, category: p.cs || '', subcat: p.subcat || '', disc: _disc || '', lead_weeks: Math.round(_lw), too_late, tier: p.tier || '',
         on_hand: Math.round(onh), inbound: Math.round(inbound), demand_12m: Math.round(d12),
         cover_now: avgM > 0 ? Math.round(coverNow * 10) / 10 : null,
         cover_with_inbound: avgM > 0 ? Math.round(coverInb * 10) / 10 : null,

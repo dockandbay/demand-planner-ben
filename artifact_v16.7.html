@@ -10630,9 +10630,10 @@ function renderShipBagView(body){
   var _ap=body.querySelector('#sb-apply'); if(_ap)_ap.onclick=function(){ var m2=body.querySelector('#sb-apply-msg');
     if(!confirm('Apply recommended ship-bag forecasts for '+co+' (this market, '+months.length+' months)? This overrides the current DTC forecast for SHIPBAG-MED / LAR / XLG and saves.'))return;
     var n=0; months.forEach(function(mm){ var r=recByM[mm]; if(!r)return; skuOvSet('SHIPBAG-MED',co,'DTC',mm,Math.round(r.medium)); skuOvSet('SHIPBAG-LAR',co,'DTC',mm,Math.round(r.large)); skuOvSet('SHIPBAG-XLG',co,'DTC',mm,Math.round(r.xl)); n+=3; });
-    if(m2){m2.style.color='#64748b';m2.textContent='Saving '+n+' values…';}
-    if(typeof saveForecasts==='function'){ Promise.resolve(saveForecasts()).then(function(){ if(m2){m2.style.color='#16a34a';m2.textContent='Applied ✓ — '+n+' values saved for '+co+'.';} renderShipBagView(body); }).catch(function(e){ if(m2){m2.style.color='#dc2626';m2.textContent='Save failed: '+(e&&e.message||e);} }); }
-    else { renderShipBagView(body); } };
+    // Optimistic: update the grid immediately + confirm; skuOvSet already marked dirty so the auto-save persists in the background (don't block/flash on the save).
+    if(m2){m2.style.color='#16a34a';m2.textContent='Applied ✓ — '+n+' values for '+co+' (saving…).';}
+    renderShipBagView(body);
+    if(typeof saveForecasts==='function'){ Promise.resolve(saveForecasts()).catch(function(){}); } };
   function num(el,dflt){ var v=parseFloat(el.value); return isFinite(v)?v:dflt; }
   var mp={p1:'SB_P1',p2:'SB_P2',p3:'SB_P3',a1:'SB_A1',a2:'SB_A2',a3:'SB_A3'};
   Object.keys(mp).forEach(function(k){ var el=body.querySelector('.sb-'+k); if(el)el.onchange=function(){ window[mp[k]]=num(this,window[mp[k]]); renderShipBagView(body); }; });

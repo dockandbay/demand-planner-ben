@@ -1,3 +1,9 @@
+## v27.106 Urgent buy: plan button, availability fix, "too late to order" list
+- **Plan ▸ button** on every urgent-buy row (and the too-late list) opens the buy plan for that SKU (`openDemandPlanPopup`).
+- **Availability bug fixed:** SKUs not available in a market's DTC (`available_<mkt>_dtc=false`) no longer appear for that market — the projection now gates on `v_product_availability` DTC channel (Ben: TOWLB-DES-LG-GTTLINES was showing in AU despite `available_au_dtc=false`, because it's AU-FBA-available).
+- **New "Too late to order" list:** active + low-stock SKUs whose lead time (production + China→market) would land a new order AFTER the discontinue date — separated out of urgent buy since restocking isn't viable (Ben: EYEMASK-DES-CHKOUT discontinues 01-Sept, 16wk lead). Shows disc date + lead weeks.
+- (from v27.103: pre-launch exclusion, SKU col +100px, Cat = subcategory, Disc date column.)
+
 ## v27.105 Ship bags: exclude ship-bags + non-core from the order-unit count
 - The recommended ship-bag demand was computed from ALL DTC units — including the ship-bag SKUs themselves and non-core products — inflating the order count. `recFor` now excludes SHIPBAG-* SKUs and non-core products (subcategory/category "Non Core") from the units → orders → bags calc. — Ben
 
