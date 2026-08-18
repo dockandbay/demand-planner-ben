@@ -10909,8 +10909,8 @@ function renderInvStatus(){
       else if(r.iff>0 && r.tf>0 && r.covf>2*r.tf) _push(gf.over,r);
     }
   });
-  function sectHdr(n,title,sub){ return '<div style="font-weight:800;font-size:14px;margin:'+(n===1?'2px':'22px')+' 0 2px">'+title+'</div>'
-    +'<div class="mut" style="font-size:11px;margin-bottom:10px">'+sub+'</div>'; }
+  function sectHdr(n,title,sub){ return '<div style="font-weight:800;font-size:14px;margin:'+(n===1?'8px':'24px')+' 0 4px;padding:7px 11px;background:#0f172a;color:#fff;border-radius:7px">'+esc(title)+'</div>'
+    +(sub?'<div class="mut" style="font-size:11px;margin-bottom:10px">'+sub+'</div>':''); }
   // Shared table renderer. `cols` = [{h,align,f}] where f(r)->cell html.
   function tierTables(buckets, cols, emptyMsg, sortFn){
     var any=buckets.A.length+buckets.B.length+buckets.C.length;

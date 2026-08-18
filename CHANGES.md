@@ -1,3 +1,6 @@
+## v27.125 Inventory Status: section headers as black bars (match location headers)
+- The Delivery / PO inbound delays / In-production section headers now use the same **black bar, white text** style as the location headers (e.g. "FBA · Amazon · 198 flagged"), so all top-level sections read consistently. Sub-descriptions stay as muted lines beneath.
+
 ## v27.124 Inventory Status: discontinued toggle + Status column + full-width header bars
 - **Show discontinued** toggle in the report header — off by default (discontinued SKUs hidden, as before); on includes them.
 - New **Status** column on every line: **Active** (green) · **Soon discontinued** (amber, discontinue date ≤4 weeks) · **Discontinued** (red).
