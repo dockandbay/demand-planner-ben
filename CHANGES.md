@@ -1,3 +1,6 @@
+## v27.130 Backtest page: left-align all table fields
+- Forced left-alignment across the Backtest table (headers + cells) so numeric columns don't inherit the default right-align.
+
 ## v27.129 Backtest: one-click "Apply recommended settings → SSM matrix"
 - The Backtest page now has an **Apply** button: writes each market×pool's recommended service levels into `SSM_PARAMS.byMkt` (shifting the standard A/B/C/def tier spread so tier-B lands on the recommendation) **and enables SSM** for those pools, then prompts a reload. Merges with any existing per-market settings; fully reversible in DEMAND ▸ Buy Plan; nothing changes until reload (confirm dialog first).
 - Clarified in the UI that the recommended cover uses the market-average lead, while the actual buy plan sizes each SKU on its own lead (lead spread e.g. UK 9–21wk, US/AU 4–16wk).
