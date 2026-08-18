@@ -1,3 +1,5 @@
+## v27.111 Urgent buy: SKU column +100px again (450→550), table +100px (1240→1340)
+
 ## v27.110 Urgent buy: SKU no-wrap, chips exclude too-late, drop Surplus
 - SKU cells now `white-space:nowrap` so the SKU never wraps to two lines in the 11-column risk table (it looked squished; the too-late table was fine because it has fewer columns).
 - **Critical / Soon chips now exclude "too late to order"** SKUs (counted from the risk list, which is `!too_late`), so the headline counts match the tables shown.
