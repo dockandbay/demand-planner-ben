@@ -9845,9 +9845,12 @@ function renderKeyAccountsView(body){
   }
 }
 function renderKpisView(body){
-  var subTabs=[['instock','In Stock'],['slowmoving','Slow moving'],['inventory','Inventory cover'],['stockout','Stockout risk'],['discontinued','Discontinued'],['accuracy','Forecast accuracy']];
+  var subTabs=[['instock','In Stock'],['slowmoving','Slow moving'],['inventory','Inventory cover'],['stockout','Stockout risk'],['discontinued','Discontinued']];   // 'accuracy' removed — it duplicated DEMAND ▸ Analysis ▸ Accuracy (same renderAccuracyView), which is the canonical home
+  // Old KPIs ▸ Forecast accuracy deep-links redirect to the canonical DEMAND ▸ Analysis ▸ Accuracy report (same view).
+  try{ if(/^#\/demand\/kpis\/accuracy\b/.test(location.hash||'')){ DEMAND_VIEW='accuracy'; if(window.writeHash)window.writeHash(['demand','analysis','accuracy']); render(); return; } }catch(e){}
   // sync the sub-tab from a deep-link hash (#/demand/kpis/<sub>) when present & valid
   try{ var _hs=(location.hash||'').replace(/^#\/?/,'').split('/'); if(_hs[0]==='demand'&&_hs[1]==='kpis'&&_hs[2]&&subTabs.some(function(t){return t[0]===_hs[2];}))KPI_SUB=_hs[2]; }catch(e){}
+  if(!subTabs.some(function(t){return t[0]===KPI_SUB;}))KPI_SUB='instock';   // never leave KPI_SUB on the removed 'accuracy'
   var nav='<div class="d3nav">'
     +subTabs.map(function(t){return '<button class="d3tab'+(t[0]===KPI_SUB?' active':'')+'" data-k="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div>';
   body.innerHTML=nav+'<div id="kpi-body"></div>';

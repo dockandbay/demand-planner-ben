@@ -1,3 +1,6 @@
+## v27.118 Remove duplicate Accuracy report from KPIs menu
+- DEMAND ▸ KPIs ▸ "Forecast accuracy" removed — it rendered the exact same view as DEMAND ▸ Analysis ▸ Accuracy (both call renderAccuracyView; the Analysis one is defined later and overrides, so they were literally identical). Analysis ▸ Accuracy is now the single home. Old #/demand/kpis/accuracy deep-links redirect there.
+
 ## v27.117 Inventory Status Report: group by location → status
 - **Restructured the top of the report to group by stock location (3PL, then FBA), each with its status sub-sections** in the order Out of stock → **Low stock → Backorders** → Overstock (low stock before backorders — the higher weekly-review priority, per Ben). A SKU is classified once per warehouse it uses, so it can appear under both locations.
 - **Out of stock reformatted to the Low-Stock column layout** Ben likes: SKU · Season · SOH · 3PL/FBA cover · On order · Inbound qty/ETA (dropped the lost-forecast £-at-risk columns). Tier A/B/C sub-grouping kept across all statuses.
