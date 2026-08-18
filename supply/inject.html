@@ -10130,6 +10130,7 @@
         function bdge(n){ return n>0?' <span class="ex-badge">'+n+'</span>':''; }
         var pend=(d.charges||[]).filter(function(c){return c.status==='pending';}).length, _unread=(d.notes||[]).filter(function(n){return n.author_kind==='supplier'&&!n.read;}).length;
         var dateExc=(s.overdue && s.status!=='complete' && s.status!=='cancelled')?1:0;   // date exception → flag on the Details tab + inline
+        var _needSetShip=setShip?1:0;   // supplier marked shipped / entered tracking but our status isn't SHIPPED yet → a pending "Set shipping" action, flag it on Details
         if(curTab==='contents')curTab='details';   // Contents merged into Details
         function tb(k,label){ return '<button class="rtab samp-tab'+(curTab===k?' active':'')+'" data-st="'+k+'">'+label+'</button>'; }
         function panel(k,html){ return '<div class="samp-panel" data-st="'+k+'"'+(curTab===k?'':' style="display:none"')+'>'+html+'</div>'; }
@@ -10165,7 +10166,7 @@
         box.innerHTML='<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px"><span class="mut tiny" style="font-weight:600">Reference</span><input class="fci txt samp-ref-in" value="'+esc(s.ref)+'" style="width:130px;font-weight:700" title="edit the sample reference (must stay unique)"><button class="save-btn samp-ref-save" style="padding:2px 9px">Save ref</button><span class="samp-ref-msg mut tiny"></span></div>'
           +'<div class="po-subnav samp-subnav" style="margin-bottom:12px">'
             // badges only flag ACTIONS/exceptions (date overdue, pending charges, unread notes) — not plain counts
-            +tb('details','Details'+bdge(dateExc))+tb('charges','Charges'+bdge(pend))+tb('attachments','Attachments')+tb('timeline','Timeline'+bdge(_unread))+'</div>'
+            +tb('details','Details'+bdge(dateExc+_needSetShip))+tb('charges','Charges'+bdge(pend))+tb('attachments','Attachments')+tb('timeline','Timeline'+bdge(_unread))+'</div>'
           +panel('details',detailsPanel)+panel('charges',chargesPanel)+panel('attachments',attachPanel)
           +panel('timeline',(function(){ _sampChangeLog[s.ref]=(d.change_log||[]); var _h=rocIsHidden(s.ref);
               return '<div class="sect-h" style="font-size:13px">Timeline <span class="mut tiny" style="font-weight:400">— shared with the supplier; record of change is admin-only</span>'

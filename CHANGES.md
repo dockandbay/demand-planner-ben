@@ -1,3 +1,6 @@
+## v27.119 Samples: count the "Set shipping" action in the Details tab badge
+- On a sample where the supplier marked shipped / entered tracking but our status isn't SHIPPED yet, the Details tab now shows a count badge (e.g. "1") for that pending "🚢 Set shipping" action. Previously the Details badge only counted a date-overdue exception, so this action was un-flagged (Ben: SR-6). Folded into the existing badge so it sums with any overdue flag.
+
 ## v27.118 Remove duplicate Accuracy report from KPIs menu
 - DEMAND ▸ KPIs ▸ "Forecast accuracy" removed — it rendered the exact same view as DEMAND ▸ Analysis ▸ Accuracy (both call renderAccuracyView; the Analysis one is defined later and overrides, so they were literally identical). Analysis ▸ Accuracy is now the single home. Old #/demand/kpis/accuracy deep-links redirect there.
 
