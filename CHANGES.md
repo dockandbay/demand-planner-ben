@@ -1,3 +1,8 @@
+## v27.124 Inventory Status: discontinued toggle + Status column + full-width header bars
+- **Show discontinued** toggle in the report header — off by default (discontinued SKUs hidden, as before); on includes them.
+- New **Status** column on every line: **Active** (green) · **Soon discontinued** (amber, discontinue date ≤4 weeks) · **Discontinued** (red).
+- Status group headers (Out of stock / Low stock / Backorders / Overstock) are now **full-width coloured bars** (tinted background + colour-matched left accent) so each section reads as a clear separator; the ▾/▸ collapse toggle still works.
+
 ## v27.123 Inventory Status: expand/collapse the status groups
 - Each status group under a location (Out of stock · Low stock · Backorders · Overstock) is now a **click-to-expand/hide** header with a ▾/▸ chevron. State is remembered per location×status across market-pill changes. Empty ("— none") groups stay static.
 
