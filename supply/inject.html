@@ -7760,6 +7760,18 @@
   function fxLink(ref){ if(!ref)return ''; var m=String(ref).match(/(\d+)/);
     return m?('<a href="https://app.flexport.com/shipments/'+m[1]+'" target="_blank" rel="noopener" class="tool-badge bg-blue" style="text-decoration:none">'+esc(ref)+' ↗</a>'):esc(ref); }
   function fxTable(rows){ if(!rows.length)return '<div class="count">No shipments.</div>';
+    if(actMob()){   // mobile: stacked cards (a 10-col table squashes on a phone)
+      var fld=function(l,v){ return v?'<div style="display:flex;gap:8px;font-size:12px;line-height:1.5"><span style="color:#64748b;flex:0 0 76px">'+l+'</span><span style="color:#0f172a;font-weight:500;word-break:break-word">'+v+'</span></div>':''; };
+      return '<div style="display:flex;flex-direction:column;gap:8px">'+rows.map(function(r){
+        return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;background:#fff">'
+          +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px;flex-wrap:wrap">'
+            +'<div style="font-weight:700;font-size:13px;color:#0f172a">'+(esc(r.shipment_name||'')||'—')+'</div>'
+            +'<span class="tool-badge '+(r.status_group==='Completed'?'bg-green':'bg-amber')+'">'+esc(r.status_group||'')+'</span></div>'
+          +fld('Flexport',fxLink(r.flex_id))+fld('Mode',esc(r.mode||''))
+          +fld('Packing',esc(fd(r.packing)))+fld('Departure',esc(fd(r.departure)))+fld('Landing',esc(fd(r.landing)))+fld('Arrival',esc(fd(r.arrival)))
+          +fld('Container',esc(r.container_numbers||''))+fld('Freight',money(r.total_freight_cost))
+          +'</div>';
+      }).join('')+'</div>'; }
     var h='<div class="tw"><table><thead><tr><th class="l">Flexport</th><th class="l">PO / name</th><th class="l">Mode</th><th class="l">Status</th><th class="l">Packing</th><th class="l">Departure</th><th class="l">Landing</th><th class="l">Arrival</th><th class="l">Container</th><th>Freight</th></tr></thead><tbody>';
     h+=rows.map(function(r){return '<tr><td class="l">'+fxLink(r.flex_id)+'</td><td class="l">'+esc(r.shipment_name||'')+'</td><td class="l">'+esc(r.mode||'')+'</td>'
       +'<td class="l"><span class="tool-badge '+(r.status_group==='Completed'?'bg-green':'bg-amber')+'">'+esc(r.status_group||'')+'</span></td>'

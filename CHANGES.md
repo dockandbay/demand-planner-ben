@@ -1,3 +1,6 @@
+## v27.137 Flexport report: mobile card layout (no longer squashed)
+- On mobile (≤700px) the SUPPLY ▸ Reports ▸ Flexport shipment list now renders as **stacked cards** (shipment name + status, then Flexport/Mode/Packing/Departure/Landing/Arrival/Container/Freight as label:value rows) instead of the 10-column table that squashed onto one screen. Desktop keeps the full table. Uses the existing `actMob()` breakpoint.
+
 ## v27.136 Docs: metrics-snapshot comments → Thursday 11:59 (n8n)
 - Updated the action-metrics comments to reflect the live n8n schedule (Thursday 11:59 GMT), not the old 23:59 Vercel cron. The user-facing Metrics scoreboard caption was already 11:59 (v27.093). Flagged the now-redundant vercel.json cron (`59 23 * * 4`) for Diviyaj to remove/retime.
 
