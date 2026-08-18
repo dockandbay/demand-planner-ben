@@ -1,3 +1,7 @@
+## v27.112 Urgent buy: SKU column truly widens + CRITICAL action counter on the menu tab
+- **SKU no longer clipped.** The table was `width:100%`, which pinned it to the wrapper and stopped the SKU column expanding past the squeezed width. Changed to `min-width:100%` so the table grows to fit the 550px SKU column and the `.tw` wrapper scrolls sideways — the SKU (e.g. TOWLB-SUM-XL-RAINB-R) now shows in full.
+- **CRITICAL count is now a red action counter** on the URGENT BUY reports-menu tab (same mechanism as the REALLOCATE badge). Counts only actionable criticals — excludes "too late to order" SKUs. Refreshes in the background from any report tab and stays in sync with the report. (Sandbox shows 0 because every critical there is also too-late; live data will populate it.)
+
 ## v27.111 Urgent buy: SKU column +100px again (450→550), table +100px (1240→1340)
 
 ## v27.110 Urgent buy: SKU no-wrap, chips exclude too-late, drop Surplus
