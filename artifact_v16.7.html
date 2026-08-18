@@ -10364,6 +10364,7 @@ function renderSsmBacktestView(body){
         +'· CV med/hi '
         +'<input id="bt-cvMed" type="number" step="0.05" value="'+(cfg.cvMed||0.45)+'" title="CV above this → Medium suggested" style="width:50px;font-size:11px;padding:2px 4px"> '
         +'<input id="bt-cvHi" type="number" step="0.05" value="'+(cfg.cvHi||0.7)+'" title="CV above this → Low-risk suggested" style="width:50px;font-size:11px;padding:2px 4px"> '
+        +'· Recency half-life (mo) <input id="bt-hl" type="number" step="1" value="'+(cfg.halfLifeMo==null?6:cfg.halfLifeMo)+'" title="Exponential recency weighting on demand stats — recent months count more. 0 = equal weight." style="width:44px;font-size:11px;padding:2px 4px"> '
         +'<button id="bt-cfgsave" style="border:1px solid #7c3aed;background:#7c3aed;color:#fff;font-weight:700;font-size:11px;padding:3px 10px;border-radius:5px;cursor:pointer;margin-left:4px">Save settings</button> <span id="bt-cfgmsg" style="font-size:11px"></span></span></div>'
       +'</div>';
     bb.innerHTML='<style>#bt-body td,#bt-body th{text-align:left !important}</style>'+ctrl
@@ -10401,7 +10402,8 @@ function renderSsmBacktestView(body){
     // recommender settings (risk levels + CV thresholds) → persist + re-run
     var cs=body.querySelector('#bt-cfgsave'); if(cs)cs.onclick=function(){ var cm=body.querySelector('#bt-cfgmsg');
       function nv(id,dv){ var el=body.querySelector('#'+id); var v=el?parseFloat(el.value):NaN; return isFinite(v)&&v>0?v:dv; }
-      var cfg2={slLow:nv('bt-slLow',99),slMed:nv('bt-slMed',95),slHigh:nv('bt-slHigh',90),cvMed:nv('bt-cvMed',0.45),cvHi:nv('bt-cvHi',0.7)};
+      var _hlEl=body.querySelector('#bt-hl'); var _hl=_hlEl?parseFloat(_hlEl.value):6; if(!(isFinite(_hl)&&_hl>=0))_hl=6;
+      var cfg2={slLow:nv('bt-slLow',99),slMed:nv('bt-slMed',95),slHigh:nv('bt-slHigh',90),cvMed:nv('bt-cvMed',0.45),cvHi:nv('bt-cvHi',0.7),halfLifeMo:_hl};
       if(cm){cm.style.color='#64748b';cm.textContent='Saving…';}
       fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'ssm_backtest_cfg',value:JSON.stringify(cfg2)})})
         .then(function(r){return r.json();}).then(function(j){ if(cm){ if(j&&j.error){cm.style.color='#dc2626';cm.textContent='Error';} else { cm.style.color='#16a34a';cm.textContent='Saved ✓'; load(); } } })

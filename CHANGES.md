@@ -1,3 +1,6 @@
+## v27.135 Backtest: recency weighting on demand stats (configurable half-life)
+- The backtest's demand mean / σ / **CV** (which drive the recommendation) are now **recency-weighted** — exponential decay by months from the latest snapshot, so recent demand behaviour dominates. Half-life is configurable in the recommender settings (**Recency half-life (mo)**, default 6; **0 = equal weight**), persisted in `app_settings.ssm_backtest_cfg`. Note: the "avg cover held" column stays observational and, once a market is SSM-driven, reads as an SSM-monitoring metric rather than an independent baseline.
+
 ## v27.134 Backtest: refinement controls (window/target/config) + what-if replay + merged into Buy Plan
 - **Backtest window** (from/to month) and **Target service level** controls at the top — re-run the backtest over any window and set the status baseline live.
 - **Recommender settings** editable + persisted (`app_settings.ssm_backtest_cfg`): the 3 risk service levels (Low/Med/High) and the CV thresholds that pick the suggested level. Server uses an inverse-normal (Acklam) so any service level works.

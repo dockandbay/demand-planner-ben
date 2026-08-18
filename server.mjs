@@ -1235,8 +1235,8 @@ app.get('/api/demand/ssm-backtest', async (req, res) => {
     const q0 = req.query || {};
     const from = /^\d{4}-\d{2}$/.test(String(q0.from || '')) ? q0.from : null;
     const to = /^\d{4}-\d{2}$/.test(String(q0.to || '')) ? q0.to : null;
-    let cfg = { slLow: 99, slMed: 95, slHigh: 90, cvMed: 0.45, cvHi: 0.7 };
-    try { const cr = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='ssm_backtest_cfg'`)).rows[0]; if (cr && cr.value) { const o = JSON.parse(cr.value); ['slLow', 'slMed', 'slHigh', 'cvMed', 'cvHi'].forEach(k => { const v = Number(o[k]); if (Number.isFinite(v) && v > 0) cfg[k] = v; }); } } catch (e) {}
+    let cfg = { slLow: 99, slMed: 95, slHigh: 90, cvMed: 0.45, cvHi: 0.7, halfLifeMo: 6 };   // halfLifeMo=0 → equal weight
+    try { const cr = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='ssm_backtest_cfg'`)).rows[0]; if (cr && cr.value) { const o = JSON.parse(cr.value); ['slLow', 'slMed', 'slHigh', 'cvMed', 'cvHi'].forEach(k => { const v = Number(o[k]); if (Number.isFinite(v) && v > 0) cfg[k] = v; }); if (Number.isFinite(Number(o.halfLifeMo)) && Number(o.halfLifeMo) >= 0) cfg.halfLifeMo = Number(o.halfLifeMo); } } catch (e) {}
     const target = (() => { const t = Number(q0.target); return Number.isFinite(t) && t >= 50 && t < 100 ? t : cfg.slMed; })();
     const inWin = m => (!from || m >= from) && (!to || m <= to);
     const sohRows = (await pool.query(`SELECT to_char(snapshot_date,'YYYY-MM') m, upper(split_part(warehouse,'_',1)) co,
@@ -1264,8 +1264,13 @@ app.get('/api/demand/ssm-backtest', async (req, res) => {
     const out = [];
     Object.keys(g).sort().forEach(k => { const [co, pool] = k.split('|'); const o = g[k]; const n = o.covers.length; if (!n) return;
       const avgCov = o.covers.reduce((a, b) => a + b, 0) / n, minCov = Math.min.apply(null, o.covers), maxCov = Math.max.apply(null, o.covers);
-      const dMean = o.dem.reduce((a, b) => a + b, 0) / n, wkMean = dMean / 4.33;
-      const dVar = o.dem.reduce((a, b) => a + (b - dMean) * (b - dMean), 0) / (n > 1 ? n - 1 : 1), dSd = Math.sqrt(dVar), cv = dMean > 0 ? dSd / dMean : 0;
+      // Recency-weighted demand stats — exponential decay by months from the latest snapshot (half-life = cfg.halfLifeMo;
+      // 0 → equal weight). So the recommendation tracks RECENT demand behaviour (mix shifts, and eventually SSM-driven buys).
+      const idxOf = m => (+m.slice(0, 4)) * 12 + (+m.slice(5, 7)), maxIdx = Math.max.apply(null, o.months.map(idxOf));
+      const wt = o.months.map(m => cfg.halfLifeMo > 0 ? Math.pow(0.5, (maxIdx - idxOf(m)) / cfg.halfLifeMo) : 1);
+      const W = wt.reduce((a, b) => a + b, 0) || 1;
+      const dMean = o.dem.reduce((a, x, i) => a + wt[i] * x, 0) / W, wkMean = dMean / 4.33;
+      const dVar = o.dem.reduce((a, x, i) => a + wt[i] * (x - dMean) * (x - dMean), 0) / W, dSd = Math.sqrt(dVar), cv = dMean > 0 ? dSd / dMean : 0;
       const Lw = lead[co] || 9, cycle = 4, capW = pool === 'FBA' ? 8 : 52, cu = cost[co] || 0;
       // safety weeks = Z·CV·√(L)·√4.33 + review cycle — matches ssmCoverWeeks' cover shape. estGbp = avg units held × unit cost.
       // WHAT-IF replay: safety units = Z·σ_monthly·√(lead months); a "stockout month" = a month whose demand surprise beat that buffer.
