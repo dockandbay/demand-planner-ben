@@ -1,3 +1,6 @@
+## v27.131 Backtest upload: drag-and-drop + click-to-choose
+- The snapshot upload is now a drag-and-drop zone (drag a Cin7 export onto it, or click to choose), showing the selected filename. Same parse/upsert as before.
+
 ## v27.130 Backtest page: left-align all table fields
 - Forced left-alignment across the Backtest table (headers + cells) so numeric columns don't inherit the default right-align.
 

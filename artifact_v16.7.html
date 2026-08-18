@@ -10295,15 +10295,23 @@ function renderSsmBacktestView(body){
   var uploadBox='<div style="border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;margin-bottom:16px;background:#fafafa">'
     +'<div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:3px">Upload inventory snapshot</div>'
     +'<div style="font-size:12px;color:#64748b;margin-bottom:10px">A Cin7 <b>Historic &amp; Current Stock Valuations</b> export (Branch / Category / Code / SOH). Branches map to warehouses exactly as production; CA / Test / Preorder / Embroidery etc. are excluded. Upserts on (sku, warehouse, date) — safe to re-upload.</div>'
+    +'<div id="bt-drop" style="border:2px dashed #cbd5e1;border-radius:8px;padding:16px;text-align:center;color:#64748b;font-size:12px;cursor:pointer;background:#fff;margin-bottom:10px">&#128196; <b>Drag &amp; drop</b> a Cin7 export here, or <span style="color:#7c3aed;font-weight:700">click to choose</span><div id="bt-fname" style="font-size:11px;color:#0f172a;margin-top:5px;font-weight:600"></div></div>'
+    +'<input type="file" id="bt-file" accept=".xlsx,.csv" style="display:none">'
     +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
-      +'<input type="file" id="bt-file" accept=".xlsx,.csv" style="font-size:12px">'
       +'<label style="font-size:12px;color:#475569">Snapshot date <input type="date" id="bt-date" style="font-size:12px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px"></label>'
       +'<button id="bt-up" style="border:1px solid #7c3aed;background:#7c3aed;color:#fff;font-weight:700;font-size:12px;padding:7px 16px;border-radius:6px;cursor:pointer">Upload</button>'
       +'<span id="bt-upmsg" style="font-size:12px"></span></div></div>';
   body.innerHTML='<div style="padding:4px 2px 28px"><div style="font-weight:800;font-size:15px;margin:2px 0 8px">Backtest &amp; recommended settings</div>'+uploadBox+'<div id="bt-body"><div class="mut" style="font-size:12px;padding:10px 2px">Loading backtest…</div></div></div>';
   var fileEl=body.querySelector('#bt-file'), dateEl=body.querySelector('#bt-date'), upBtn=body.querySelector('#bt-up'), upMsg=body.querySelector('#bt-upmsg');
-  if(upBtn)upBtn.onclick=function(){ var f=fileEl&&fileEl.files&&fileEl.files[0]; var dt=dateEl&&dateEl.value;
-    if(!f){upMsg.style.color='#dc2626';upMsg.textContent='Choose a file.';return;} if(!dt){upMsg.style.color='#dc2626';upMsg.textContent='Set the snapshot date.';return;}
+  var _btFile=null, dropEl=body.querySelector('#bt-drop'), fnameEl=body.querySelector('#bt-fname');
+  function setFile(f){ _btFile=f||null; if(fnameEl)fnameEl.textContent=f?('Selected: '+f.name):''; }
+  if(fileEl)fileEl.onchange=function(){ setFile(fileEl.files&&fileEl.files[0]); };
+  if(dropEl){ dropEl.onclick=function(){ if(fileEl)fileEl.click(); };
+    dropEl.ondragover=function(e){ e.preventDefault(); dropEl.style.borderColor='#7c3aed'; dropEl.style.background='#f5f3ff'; };
+    dropEl.ondragleave=function(){ dropEl.style.borderColor='#cbd5e1'; dropEl.style.background='#fff'; };
+    dropEl.ondrop=function(e){ e.preventDefault(); dropEl.style.borderColor='#cbd5e1'; dropEl.style.background='#fff'; var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]; if(f)setFile(f); }; }
+  if(upBtn)upBtn.onclick=function(){ var f=_btFile; var dt=dateEl&&dateEl.value;
+    if(!f){upMsg.style.color='#dc2626';upMsg.textContent='Choose or drop a file.';return;} if(!dt){upMsg.style.color='#dc2626';upMsg.textContent='Set the snapshot date.';return;}
     upMsg.style.color='#64748b';upMsg.textContent='Uploading…'; var rd=new FileReader();
     rd.onload=function(){ var b64=String(rd.result).replace(/^data:[^;]+;base64,/,'');
       fetch('/api/demand/inventory-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({snapshot_date:dt,filename:f.name,data_base64:b64})})
