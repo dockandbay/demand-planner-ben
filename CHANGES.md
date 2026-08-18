@@ -1,3 +1,6 @@
+## v27.108 Urgent buy: gate on the buy plan's "target stock on hand" (3PL pool)
+- Replaced the DTC-availability gate with the buy plan's own logic: the urgent-buy target is now the **3PL Target Units** the buy plan steers toward — cover × weekly demand on the **3PL pool** (`_3pl` + `_nongrs`, excluding FBA/AWD), and a SKU is only included if it has an **available 3PL channel** (DTC/B2B/ZAL/TIK). A SKU with no 3PL target (FBA-only, or only a stale forecast in an unavailable channel) drops out — matching "target stock on hand = 0" in the buy plan. (Ben: TOWLB-DES-LG-GTTLINES is AU-FBA-only → gone; EYEMASK-DES-CHKOUT stays but flagged too-late.)
+
 ## v27.107 Move Auto Forecast report to SUPPLY ▸ Payments (next to Cash Flow)
 - The Auto Forecast (payments plan) report moved from the top-level REPORTS view into **SUPPLY ▸ Payments ▸ Auto Forecast**, sitting right after Cash Flow. Added as a Payments sub-tab (`#/supply/payments/af`) that renders the artefact's `renderAutoForecastReport` into the payments body; removed the `af` tab from `REPORT_TABS`; old `#/reports/af` bookmarks redirect to the new home; the Auto Forecast download link updated.
 

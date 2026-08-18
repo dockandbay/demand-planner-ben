@@ -9742,7 +9742,7 @@
         +chip('⚠ Critical',cc.critical,'#fee2e2','#991b1b')+chip('Soon',cc.soon,'#fef3c7','#92400e')
         +chip('OK',cc.ok,'#dcfce7','#166534')+chip('Surplus',cc.surplus,'#dbeafe','#1e40af')
         +(tooLate.length?'<span class="tool-badge" style="background:#fef3c7;color:#b45309;font-size:11px;padding:3px 9px">⏱ Too late '+tooLate.length+'</span>':'')
-        +'<span class="mut tiny" style="margin-left:6px">grouped by market · target = per category/SKU (12wk default) · on-hand + inbound vs forecast · DTC-available only</span></div>'
+        +'<span class="mut tiny" style="margin-left:6px">grouped by market · target = per category/SKU (12wk default) · 3PL pool (on-hand + inbound vs 3PL forecast) · needs an available 3PL channel</span></div>'
       +(risk.length?body:'<div class="count">No stock-out risks 🎉</div>')+tooLateH; }
   // CONTAINER FILL — spare capacity matched to urgent buys from an on-board supplier. Add / Snooze / Dismiss.
   function renderContainerFill(d){ var b=biBody(); d=d||{}; var recs=d.recs||[];

@@ -12001,6 +12001,7 @@ const BI_TARGET_MONTHS = 3;
 async function _biProjectionCompute() {
   const { prods, onhand, dem } = await kpiBase();
   const whCo = wh => String(wh || '').split('_')[0].toUpperCase();   // 'us_3pl' -> 'US'
+  const is3plPool = wh => { const p = String(wh || '').split('_').slice(1).join('_'); return p === '3pl' || p === 'nongrs'; };   // buyable 3PL pool (excludes _fba / _awd)
   // cover targets (WEEKS) — same source as the buy plan: SKU override ▸ category, per warehouse. Default 12wk.
   const catCover = {}, skuOvr = {}, skuCat = {};
   (await pool.query(`SELECT category, warehouse, target_cover_weeks::float w FROM planner.category_target_cover`)).rows
@@ -12020,10 +12021,12 @@ async function _biProjectionCompute() {
       WHERE coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(l.qty,0)>0
       GROUP BY l.sku, country`)).rows
     .forEach(r => { if (!r.country) return; (inb[r.sku] = inb[r.sku] || {})[r.country] = Number(r.qty) || 0; });
-  // availability per market — DTC specifically (available_<mkt>_dtc); an unavailable SKU isn't an active urgent buy
-  const avail = {};
-  (await pool.query(`SELECT DISTINCT sku, upper(country) co FROM planner.v_product_availability WHERE is_available AND upper(channel)='DTC'`)).rows
-    .forEach(r => { avail[r.sku + '|' + r.co] = true; });
+  // available in a 3PL channel (DTC/B2B/ZAL/TIK) per market — the buy plan only builds a 3PL "target stock on hand"
+  // for channels the SKU is actually sold in, so a SKU with only stale 3PL forecast in an unavailable channel has a
+  // 0 target and isn't an urgent BUY (Ben: TOWLB-DES-LG-GTTLINES AU is FBA-only → no 3PL target → not urgent).
+  const avail3pl = {};
+  (await pool.query(`SELECT DISTINCT sku, upper(country) co FROM planner.v_product_availability WHERE is_available AND upper(channel) IN ('DTC','B2B','ZAL','TIK')`)).rows
+    .forEach(r => { avail3pl[r.sku + '|' + r.co] = true; });
   // total lead weeks (production + China→market) per sku|market — for the "too late to order" check vs discontinue date
   const lead = {};
   (await pool.query(`SELECT sku, coalesce(production_lead_time_weeks,0) pl, coalesce(china_to_uk_lead_time_weeks,0) uk,
@@ -12035,13 +12038,16 @@ async function _biProjectionCompute() {
   for (const sku of Object.keys(prods)) {
     const p = prods[sku]; if (!p.act) continue;
     const oh = {}, dm = {}, twNum = {}, twDen = {};   // twNum/twDen → demand-weighted target weeks per country
-    for (const wh of Object.keys(onhand[sku] || {})) { const co = whCo(wh); oh[co] = (oh[co] || 0) + onhand[sku][wh]; }
-    for (const wh of Object.keys(dem[sku] || {})) { const co = whCo(wh); dm[co] = (dm[co] || 0) + dem[sku][wh];
+    // Urgent buy = the buy plan's "target stock on hand" = 3PL Target Units (cover × weekly 3PL demand), so scope to the
+    // 3PL pool (_3pl + _nongrs). A SKU with no 3PL demand/target (e.g. DTC-unavailable, FBA-only) then has target 0 and
+    // isn't an urgent BUY (FBA is topped up by transfer, not bought). — Ben (TOWLB-DES-LG-GTTLINES AU: DTC off, FBA on)
+    for (const wh of Object.keys(onhand[sku] || {})) { if (!is3plPool(wh)) continue; const co = whCo(wh); oh[co] = (oh[co] || 0) + onhand[sku][wh]; }
+    for (const wh of Object.keys(dem[sku] || {})) { if (!is3plPool(wh)) continue; const co = whCo(wh); dm[co] = (dm[co] || 0) + dem[sku][wh];
       const tw = twFor(sku, wh); if (tw != null) { twNum[co] = (twNum[co] || 0) + tw * dem[sku][wh]; twDen[co] = (twDen[co] || 0) + dem[sku][wh]; } }
     for (const co of BI_COUNTRIES) {
       if (kpiDisc(p, co)) continue;
       if (kpiPreLaunch(p, co)) continue;   // pre-launch in this market → no current demand, can't be an urgent stockout (Ben: LANYARD-SUM-PSTPIER launches Feb-27 UK)
-      if (!avail[sku + '|' + co]) continue;   // not available in this market → not an active urgent buy (Ben: TOWLB-DES-LG-GTTLINES available_au_dtc=false in AU)
+      if (!avail3pl[sku + '|' + co]) continue;   // no available 3PL channel → the buy plan holds no 3PL target stock for it → not an urgent buy
       const d12 = dm[co] || 0, onh = oh[co] || 0, inbound = (inb[sku] || {})[co] || 0;
       if (d12 <= 0 && onh <= 0 && inbound <= 0) continue;
       const tgtWk = (twDen[co] > 0) ? (twNum[co] / twDen[co]) : DEF_WK;   // weeks → months
