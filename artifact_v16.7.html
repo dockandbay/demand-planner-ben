@@ -10588,8 +10588,10 @@ function renderShipBagView(body){
   // months = this month + next 10 (11 months), keyed YYYY_MM
   var months=(function(){ var o=[],y=+CUR_MONTH.slice(0,4),mo=+CUR_MONTH.slice(5,7); for(var i=0;i<11;i++){ o.push(y+'_'+(mo<10?'0':'')+mo); mo++; if(mo>12){mo=1;y++;} } return o; })();
   // recommended bag demand per month for a market (from the DTC units forecast → orders → bag sizes)
+  // Exclude the ship bags themselves + non-core products from the order-unit count (they don't generate an order that needs a bag). — Ben
+  function _sbExclude(sku){ if(/^SHIPBAG/i.test(sku))return true; var sm=(typeof SKUM!=='undefined')&&SKUM[sku]; if(sm){ var s=(sm.s||''), c=(sm.c||''); if(/^non[\s-]?core$/i.test(s)||/^non[\s-]?core$/i.test(c))return true; } return false; }
   function recFor(mco){ return months.map(function(m){ var tu=0,lu=0;
-    Object.keys(BP_DATA.products||{}).forEach(function(sku){ var pd=BP_DATA.products[sku], md=pd&&pd.mkts&&pd.mkts[mco]; if(!md)return; var v=(md.demand&&md.demand.DTC&&md.demand.DTC[m])||0; if(v<=0)return; tu+=v; if(isLargeCat(sku))lu+=v; });
+    Object.keys(BP_DATA.products||{}).forEach(function(sku){ if(_sbExclude(sku))return; var pd=BP_DATA.products[sku], md=pd&&pd.mkts&&pd.mkts[mco]; if(!md)return; var v=(md.demand&&md.demand.DTC&&md.demand.DTC[m])||0; if(v<=0)return; tu+=v; if(isLargeCat(sku))lu+=v; });
     var orders=avgUPO>0?tu/avgUPO:0, med=orders*p1,lg=orders*p2,xl=orders*p3, lFrac=tu>0?lu/tu:0, picMed=med*lFrac; return {m:m, medium:med-picMed, large:lg+picMed, xl:xl}; }); }
   var recByM={}; recFor(co).forEach(function(r){ recByM[r.m]=r; });
   var BAGMAP=[['SHIPBAG-MED','medium','Medium'],['SHIPBAG-LAR','large','Large'],['SHIPBAG-XLG','xl','XL']];

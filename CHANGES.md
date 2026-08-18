@@ -1,3 +1,6 @@
+## v27.105 Ship bags: exclude ship-bags + non-core from the order-unit count
+- The recommended ship-bag demand was computed from ALL DTC units — including the ship-bag SKUs themselves and non-core products — inflating the order count. `recFor` now excludes SHIPBAG-* SKUs and non-core products (subcategory/category "Non Core") from the units → orders → bags calc. — Ben
+
 ## v27.104 Snapshots compare: filter pills survive an empty result
 - DEMAND ▸ Analysis ▸ Snapshots: when a country/channel/category filter (or A/B combo) produced no rows, the "No forecast rows" message replaced the whole compare panel — including the filter pills — so the report got stuck (couldn't change the filter, Compare did nothing). The filter bar is now always rendered and its handlers bound in the empty state too, so you can change or clear the filter and continue.
 
