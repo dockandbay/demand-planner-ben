@@ -11710,7 +11710,12 @@ function computeTargetRecs(fy,coA,chA){ var co=coA||CUR,ch=chA||CF;
 function applyTargetRecs(recs){ var co=CUR,ch=CF; var _chg=[]; var _fyForDk=(typeof TREC_FY!=='undefined'&&TREC_FY!=null)?TREC_FY:CUR_FY_START;
   recs.forEach(function(rc){ var _fu=(calc(rc.s,co,ch).fu)||{}; var _prior={}; rc.rows.forEach(function(r){ var ik=rc.s+'|'+co+'|'+ch+'|'+r.m; _prior[ik]=(IV[ik]!==undefined?IV[ik]:''); var u=Math.max(0,Math.round(r.reqU));
     var _old=Math.round(_fu[r.m]||0); if(_old!==u)_chg.push({level:'subcat',item:rc.s,country:co,channel:ch,month:r.m,action:'applied target recommendation',from:_old,to:u});
-    IV[ik]=(u>=4?String(u):("'"+u)); });
+    // Store as a % growth vs LY (instead of an absolute) when the growth is ≤200% AND last year's month is a COMPLETED actual —
+    // so it flexes with LY actuals, mirroring the smoothing "convert to %" rule. The % encoding applies LY×(1+n) → reproduces reqU.
+    var _pk=trecPrevY(r.m); var _lyDone=(typeof isActualMonth==='function'&&isActualMonth(_pk)&&_pk!==CUR_MONTH);
+    var _lyU=Number(r.lyU)||0; var _g=(_lyU>0)?(u/_lyU-1):null;
+    if(_lyDone && !r.newcat && _lyU>0 && _g!=null && _g<=2){ IV[ik]=String(Math.round(_g*1000)/1000); }   // % growth (1dp), always <4 so parsed as a %
+    else { IV[ik]=(u>=4?String(u):("'"+u)); } });   // absolute (growth >200%, or no completed LY actual to grow from)
     TREC_APPLIED[trecDKey(co,ch,_fyForDk,rc.s)]={prior:_prior};   // keep visible as applied + enable undo
   });
   try{ logChangesBulk(_chg); }catch(e){}

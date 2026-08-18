@@ -1,3 +1,6 @@
+## v27.120 Target recommendations ▸ Apply: store as % growth when ≤200% over a completed LY actual
+- When you Apply a target recommendation, each month is now written as a **% growth vs last year** (instead of an absolute unit number) **when** the implied growth is **≤200%** AND last year's same month is a **completed actual**. Otherwise it stays absolute (growth >200%, new categories, or no completed LY actual to grow from). The % encoding applies LY×(1+n), so it reproduces the same target units at apply-time but then flexes with LY actuals — mirroring the smoothing "convert to %" rule.
+
 ## v27.119 Samples: count the "Set shipping" action in the Details tab badge
 - On a sample where the supplier marked shipped / entered tracking but our status isn't SHIPPED yet, the Details tab now shows a count badge (e.g. "1") for that pending "🚢 Set shipping" action. Previously the Details badge only counted a date-overdue exception, so this action was un-flagged (Ben: SR-6). Folded into the existing badge so it sums with any overdue flag.
 
