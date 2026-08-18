@@ -11594,15 +11594,15 @@ function openTrendGapsPopout(){ var d=document.getElementById('tg-drawer');
 var TREC_FY=null, TREC_ALL={}, TREC_GBP={}, TREC_KEY='';   // TREC_ALL[co|ch][fy|sub|level|idx] = growth_pct; TREC_GBP = same key → absolute target_gbp (new categories with no LY base)
 function trecPrevY(m){ return (+m.slice(0,4)-1)+'_'+m.slice(5,7); }
 function trecMonFyIdx(m){ var mo=+m.slice(5,7),y=+m.slice(0,4); return {Y:(mo>=3?y:y-1), idx:(mo>=3?mo-2:mo+10)}; }
-function trecResolve(Y,sub,mIdx,co,ch){ var M=TREC_ALL[(co||CUR)+'|'+(ch||CF)]; if(!M)return null; var k; k=Y+'|'+sub+'|month|'+mIdx; if(M[k]!=null)return Number(M[k]); k=Y+'|'+sub+'|quarter|'+Math.ceil(mIdx/3); if(M[k]!=null)return Number(M[k]); k=Y+'|'+sub+'|half|'+Math.ceil(mIdx/6); if(M[k]!=null)return Number(M[k]); return null; }
+function trecResolve(Y,sub,mIdx,co,ch,febShift){ var M=TREC_ALL[(co||CUR)+'|'+(ch||CF)]; if(!M)return null; var k; k=Y+'|'+sub+'|month|'+mIdx; if(M[k]!=null)return Number(M[k]); k=Y+'|'+sub+'|quarter|'+Math.ceil(mIdx/3); if(M[k]!=null)return Number(M[k]); k=Y+'|'+sub+'|half|'+(febShift?(mIdx<=7?1:2):Math.ceil(mIdx/6)); if(M[k]!=null)return Number(M[k]); return null; }
 // Absolute GBP period target (for new categories with no growth% base). Returns {gbp, lo, hi} where lo..hi is the
 // fiscal-month-index span the target covers (month=1, quarter=3, half=6), so it can be spread across those months.
-function trecResolveGBP(Y,sub,mIdx,co,ch){ var M=TREC_GBP[(co||CUR)+'|'+(ch||CF)]; if(!M)return null; var k;
+function trecResolveGBP(Y,sub,mIdx,co,ch,febShift){ var M=TREC_GBP[(co||CUR)+'|'+(ch||CF)]; if(!M)return null; var k;
   k=Y+'|'+sub+'|month|'+mIdx; if(M[k]!=null)return {gbp:Number(M[k]),lo:mIdx,hi:mIdx};
   var q=Math.ceil(mIdx/3); k=Y+'|'+sub+'|quarter|'+q; if(M[k]!=null)return {gbp:Number(M[k]),lo:(q-1)*3+1,hi:q*3};
-  var h=Math.ceil(mIdx/6); k=Y+'|'+sub+'|half|'+h; if(M[k]!=null)return {gbp:Number(M[k]),lo:(h-1)*6+1,hi:h*6};
+  var h=febShift?(mIdx<=7?1:2):Math.ceil(mIdx/6); k=Y+'|'+sub+'|half|'+h; if(M[k]!=null)return {gbp:Number(M[k]),lo:(febShift?(h===1?1:8):(h-1)*6+1),hi:(febShift?(h===1?7:12):h*6)};
   return null; }
-function trecFiCal(i){ return ((i+1)%12)+1; }   // fiscal idx (1=Mar…12=Feb) → calendar month (1..12)
+function trecFiCal(i,febShift){ return febShift?((i%12)+1):(((i+1)%12)+1); }   // fiscal idx → calendar month (1..12). Standard: 1=Mar…12=Feb. Feb-shift (B2B H1-Feb): 1=Feb…12=Jan
 // Monthly seasonality curve (calendar month → fraction of annual) borrowed from the OTHER (sub)categories in the same
 // `grouping` — for a new category with no history. Falls back co×ch → co → all → flat. Excludes the target subcat.
 var _grpCurveCache={};
@@ -11636,24 +11636,30 @@ function trecMeaningful(rc){ if(rc.noAsp)return true; var gp=trecGapPct(rc); ret
 function trecOpen(rc,co,ch,fy){ return !rc.noAsp && trecMeaningful(rc) && !TREC_DISM[trecDKey(co,ch,fy,rc.s)]; }   // no-ASP recs aren't applyable → excluded from the open count / Apply-all
 function trecCount(co,ch,fy){ try{ return computeTargetRecs(fy,co,ch).filter(function(rc){return trecOpen(rc,co,ch,fy);}).length; }catch(e){ return 0; } }
 var _trecRecCache={};   // memoise per (fy|co|ch) within a render pass (pill counters compute across all combos); cleared each renderTargetRecs
-function computeTargetRecs(fy,coA,chA){ var co=coA||CUR,ch=chA||CF; var _ck=fy+'|'+co+'|'+ch; if(_trecRecCache[_ck])return _trecRecCache[_ck];
+function computeTargetRecs(fy,coA,chA){ var co=coA||CUR,ch=chA||CF;
+  // B2B "H1 includes February": the fiscal window shifts to Feb→Jan, so recommendations must span Feb(fy)…Jan(fy+1)
+  // (February lifted in as the first H1 month) and resolve targets on the same feb-shifted index the summary stores them under.
+  var _febShift=(ch==='B2B' && typeof SUMM_B2B_H1FEB!=='undefined' && SUMM_B2B_H1FEB);
+  var _ck=fy+'|'+co+'|'+ch+'|'+(_febShift?'F':''); if(_trecRecCache[_ck])return _trecRecCache[_ck];
+  function _fyMs(Y){ if(!_febShift)return fyMonths(Y); var o=[ym(Y,2)]; for(var _m=3;_m<=12;_m++)o.push(ym(Y,_m)); o.push(ym(Y+1,1)); return o; }   // Feb(Y),Mar…Dec(Y),Jan(Y+1)
+  function _monFi(m){ if(!_febShift)return trecMonFyIdx(m); var mo=+m.slice(5,7),y=+m.slice(0,4); return {Y:(mo>=2?y:y-1), idx:(mo>=2?mo-1:12)}; }
   var subs=[]; (typeof DATA!=='undefined'?DATA:[]).forEach(function(d){ if(d.co===co&&d.ch===ch&&d.s&&subs.indexOf(d.s)<0)subs.push(d.s); }); subs.sort();
   // The current CALENDAR month is still in progress, so its last-year figure is a poor base (e.g. a product that
   // grew YoY): growing last year drags the forecast DOWN. For that one month we grow the FULL-MONTH FORECAST instead,
   // and show the forecast on BOTH the ly/fc baselines. Future months keep the "X% over last year" target. (Ben)
   var _n=new Date(), THIS_MONTH=_n.getFullYear()+'_'+((_n.getMonth()+1)<10?'0':'')+(_n.getMonth()+1);
-  var months=fyMonths(fy).filter(function(m){ return !isActualMonth(m) || m===THIS_MONTH; });   // include the current (incomplete) month
+  var months=_fyMs(fy).filter(function(m){ return !isActualMonth(m) || m===THIS_MONTH; });   // include the current (incomplete) month
   var out=[];
   subs.forEach(function(s){ var a=ga(co,ch,s)||{}, cr=null; var rows=[], fyCur=0, fyTgt=0, noAsp=false;   // cr computed lazily — only for subs that actually have a target (keeps the pill-counter roll-up fast); noAsp = GBP target set but no derivable ASP
-    months.forEach(function(m){ var fi=trecMonFyIdx(m); var g=trecResolve(fi.Y,s,fi.idx,co,ch);
-      var gb=(g==null)?trecResolveGBP(fi.Y,s,fi.idx,co,ch):null;   // no growth% → maybe an absolute GBP target (new category)
+    months.forEach(function(m){ var fi=_monFi(m); var g=trecResolve(fi.Y,s,fi.idx,co,ch,_febShift);
+      var gb=(g==null)?trecResolveGBP(fi.Y,s,fi.idx,co,ch,_febShift):null;   // no growth% → maybe an absolute GBP target (new category)
       if(g==null&&!gb)return;
       var p=pa(m);
       if(!cr)cr=calc(s,co,ch);
       if(gb){   // ── NEW CATEGORY: no last-year base → spread the GBP target on the grouping seasonality curve, ÷ category GBP ASP → units
         var aspG=(typeof CAT_ASP_GBP!=='undefined'&&CAT_ASP_GBP[s]&&CAT_ASP_GBP[s][co])||0; if(!(aspG>0)){ noAsp=true; return; }   // no derivable ASP for this market → flag "set a price", can't compute units
-        var cv=groupingCurve(s,co,ch), wSum=0; for(var ii=gb.lo;ii<=gb.hi;ii++)wSum+=(cv[trecFiCal(ii)]||0); if(!(wSum>0))return;
-        var monthRev=gb.gbp*((cv[trecFiCal(fi.idx)]||0)/wSum); if(!(monthRev>0))return;
+        var cv=groupingCurve(s,co,ch), wSum=0; for(var ii=gb.lo;ii<=gb.hi;ii++)wSum+=(cv[trecFiCal(ii,_febShift)]||0); if(!(wSum>0))return;
+        var monthRev=gb.gbp*((cv[trecFiCal(fi.idx,_febShift)]||0)/wSum); if(!(monthRev>0))return;
         var curUg=(cr.fu[m]||0), reqUg=Math.max(0,Math.round(monthRev/aspG));
         rows.push({m:m, curU:curUg, lyU:0, curRev:curUg*aspG, tgtRev:monthRev, reqU:reqUg, g:null, pctCur:(curUg>0?(reqUg/curUg-1):null), pctLY:null, newcat:true});
         fyCur+=curUg*aspG; fyTgt+=monthRev; return;
@@ -11728,7 +11734,8 @@ function renderTargetRecs(body){ if(TREC_FY==null)TREC_FY=CUR_FY_START;
         +'<tr'+(dism?' style="opacity:.45"':'')+'><td colspan="5" style="padding:0 10px 8px 22px;text-align:left">'+monTbl+'</td></tr>'; }).join('');
     var tCur=openRecs.reduce(function(a,b){return a+b.fyCur;},0), tTgt=openRecs.reduce(function(a,b){return a+b.fyTgt;},0), tGap=tTgt-tCur;
     body.innerHTML='<div style="padding:4px 2px 4px">'+coPills+'</div><div style="padding:0 2px 8px">'+pills+'</div>'
-      +'<div style="font-size:11px;color:#666;margin:0 0 8px">Recommended <b>subcategory</b> forecast changes to meet your revenue targets in '+fyLbl(TREC_FY)+' &middot; '+esc(co)+' &middot; '+esc(ch)+'. Units = <b>target &pound; &divide; ASP</b> (price changes accounted for). Current month uses the full-month forecast. Recs under a 2% gap are hidden. <b>Apply</b> a row (or Apply all open) writes subcategory overrides — then <b>Save Forecasts</b>.</div>'
+      +'<div style="font-size:11px;color:#666;margin:0 0 8px">Recommended <b>subcategory</b> forecast changes to meet your revenue targets in '+fyLbl(TREC_FY)+' &middot; '+esc(co)+' &middot; '+esc(ch)+'. Units = <b>target &pound; &divide; ASP</b> (price changes accounted for). Current month uses the full-month forecast. Recs under a 2% gap are hidden. <b>Apply</b> a row (or Apply all open) writes subcategory overrides — then <b>Save Forecasts</b>.'
+        +((ch==='B2B'&&typeof SUMM_B2B_H1FEB!=='undefined'&&SUMM_B2B_H1FEB)?'<br><span style="display:inline-block;margin-top:4px;background:#fef3c7;color:#92400e;border:1px solid #fde68a;border-radius:4px;padding:1px 7px;font-weight:700;font-size:10px">B2B · H1 includes February — fiscal window Feb→Jan, so recommendations start at February</span>':'')+'</div>'
       +'<table style="border-collapse:collapse;font-size:12px;width:100%"><thead><tr style="background:#f8fafc;font-size:10px;text-transform:uppercase;color:#475569"><th style="padding:5px 10px;text-align:left">Subcategory</th><th style="padding:5px 10px;text-align:right">Forecast</th><th style="padding:5px 10px;text-align:right">Target</th><th style="padding:5px 10px;text-align:right">Gap</th><th style="padding:5px 10px;text-align:right">Action</th></tr></thead><tbody>'+rowsH
       +'<tr style="border-top:2px solid #cbd5e1;font-weight:700"><td style="padding:5px 10px;text-align:left">Total (open)</td><td style="padding:5px 10px;text-align:right;font-variant-numeric:tabular-nums">'+money(tCur)+'</td><td style="padding:5px 10px;text-align:right;font-variant-numeric:tabular-nums">'+money(tTgt)+'</td><td style="padding:5px 10px;text-align:right;color:'+(tGap>=0?'#166534':'#b91c1c')+';font-variant-numeric:tabular-nums">'+(tGap>=0?'+':'')+money(tGap)+'</td><td></td></tr>'
       +'</tbody></table>'

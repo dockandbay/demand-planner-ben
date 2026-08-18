@@ -1,3 +1,8 @@
+## v27.116 Target recommendations: honour "B2B — H1 includes February"
+- The Target-recommendations engine now respects the **B2B · H1 includes February** toggle. Previously it always used the standard Mar→Feb fiscal window (`fyMonths`/`trecMonFyIdx`), so FY27/28 recommendations started at March and there was **no February** to apply a target to. With the toggle on, the engine now spans the **feb-shifted window Feb(fy)→Jan(fy+1)** and resolves month/quarter/half targets on the same feb-shifted index the Summary stores them under (H1 = Feb–Aug). So a February forecast is generated and the H1 target flows through.
+- Mirrors the Summary's `fyMs`/`monFyIdx`/`halfIdx` exactly; new-category GBP spread + fiscal→calendar month mapping also feb-shift-aware.
+- Added a visible **"B2B · H1 includes February — fiscal window Feb→Jan"** badge in the recommendations tab when the toggle is active, so the state is obvious there too.
+
 ## v27.115 Exec Summary: full FY28 (Mar 27 – Feb 28) + equal UNITS/REVENUE size
 - FY28 column group now spans the **full financial year Mar 27 – Feb 28** (12 months) instead of "Mar 27 – Dec 27 (partial)". Jan/Feb 28 are forecast (FM already covers them); the FY28 TOTAL is now a full-year figure. Colour banding + hint text updated; header colspan 10→12.
 - **UNITS and REVENUE rendered at the same font size** in exec cells (revenue 10→12px main rows, 9→11px country rows); colour/weight distinction kept.
