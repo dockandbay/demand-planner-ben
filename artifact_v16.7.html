@@ -10289,6 +10289,9 @@ function renderBuyPlanView(body){
 function renderSsmBacktestView(body){
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function fn(n){n=Math.round(Number(n)||0);return n.toLocaleString();}
+  // Map a single recommended market service level onto the A/B/C/def tier structure by shifting the standard
+  // spread (A99·B97·C93·def90) so the B tier lands on the recommendation, keeping the tier gaps intact.
+  function shiftSl(recSl){ var sh=recSl-97, cl=function(x){return Math.round(Math.max(50,Math.min(99.5,x))*10)/10;}; return {A:cl(99+sh),B:cl(97+sh),C:cl(93+sh),def:cl(90+sh)}; }
   var uploadBox='<div style="border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;margin-bottom:16px;background:#fafafa">'
     +'<div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:3px">Upload inventory snapshot</div>'
     +'<div style="font-size:12px;color:#64748b;margin-bottom:10px">A Cin7 <b>Historic &amp; Current Stock Valuations</b> export (Branch / Category / Code / SOH). Branches map to warehouses exactly as production; CA / Test / Preorder / Embroidery etc. are excluded. Upserts on (sku, warehouse, date) — safe to re-upload.</div>'
@@ -10327,8 +10330,25 @@ function renderSsmBacktestView(body){
         +'<td style="padding:5px 9px"><span style="font-weight:700;color:'+(fc[r.flag]||'#64748b')+'">'+esc(r.flag)+'</span></td>'
         +'<td style="padding:5px 9px;white-space:nowrap"><b>'+r.recSl+'% · '+r.recCoverWks+'wk</b></td></tr>'
         +'<tr><td colspan="10" style="padding:0 9px 7px 24px"><span class="mut" style="font-size:10px">Options (service level : safety+cycle cover · hover = avg units held): </span><span style="font-size:11px">'+opts+'</span></td></tr>'; }).join('');
-    bb.innerHTML='<div style="font-size:12px;color:#64748b;margin:2px 0 10px">Per <b>market × pool</b> over the uploaded snapshot months: weeks of cover actually held vs sell-through, and service-level <b>options</b> with a <b>recommended</b> pick (from that market’s demand volatility + China lead). <b>Status</b>: overstocked = held far more than needed · tight = dipped below the recommendation. Apply the chosen levels in <a href="#/demand/config/buyplan" style="color:#7c3aed;font-weight:600">DEMAND ▸ Buy Plan</a>.</div>'
-      +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">'+head+trs+'</table></div>';
+    bb.innerHTML='<div style="font-size:12px;color:#64748b;margin:2px 0 10px">Per <b>market × pool</b> over the uploaded snapshot months: weeks of cover actually held vs sell-through, and service-level <b>options</b> with a <b>recommended</b> pick (from that market’s demand volatility + China lead). <b>Status</b>: overstocked = held far more than needed · tight = dipped below the recommendation. Recommended lead uses the market average — the actual buy plan sizes each SKU on its own lead. Review/adjust in <a href="#/demand/config/buyplan" style="color:#7c3aed;font-weight:600">DEMAND ▸ Buy Plan</a>.</div>'
+      +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">'+head+trs+'</table></div>'
+      +'<div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button id="bt-apply" style="border:1px solid #16a34a;background:#16a34a;color:#fff;font-weight:700;font-size:13px;padding:8px 18px;border-radius:6px;cursor:pointer">Apply recommended settings → SSM matrix</button><span id="bt-applymsg" style="font-size:12px"></span></div>'
+      +'<div class="mut" style="font-size:11px;margin-top:4px;max-width:900px">Sets each market×pool’s service levels to the recommendation (shifting the A/B/C tier spread onto it) <b>and enables SSM</b> for those pools. Reversible in DEMAND ▸ Buy Plan; nothing changes until you reload.</div>';
+    var ab=body.querySelector('#bt-apply'); if(ab)ab.onclick=function(){ var m=body.querySelector('#bt-applymsg');
+      if(!confirm('Apply the recommended service levels to '+rows.length+' market×pool rows AND enable SSM for them? This changes the buy plan on the next reload (fully reversible in DEMAND ▸ Buy Plan).'))return;
+      var G=(typeof SSM_PARAMS!=='undefined'&&SSM_PARAMS)?SSM_PARAMS:{};
+      var byMkt={}; try{ if(G.byMkt)for(var k in G.byMkt)byMkt[k]=G.byMkt[k]; }catch(e){}
+      var enabled={}; try{ if(typeof SSM_ENABLED!=='undefined'&&SSM_ENABLED)for(var k2 in SSM_ENABLED)enabled[k2]=SSM_ENABLED[k2]; }catch(e){}
+      rows.forEach(function(r){ var key=r.co+'|'+r.pool, cur=ssmParamsFor(r.co,r.pool), o={sl:shiftSl(r.recSl),seasonalFloor:cur.seasonalFloor,cycleWk:cur.cycleWk};
+        if(r.pool==='FBA')o.fbaCapWk=cur.fbaCapWk; if(r.pool==='3PL')o.seasonMaxWk=cur.seasonMaxWk; byMkt[key]=o; enabled[key]=true; });
+      var params={sl:(G.sl||{A:99,B:97,C:93,def:90}),seasonalFloor:(G.seasonalFloor||97),cycleWk:(G.cycleWk||4),fbaCapWk:(G.fbaCapWk||8),seasonMaxWk:(G.seasonMaxWk||30),byMkt:byMkt};
+      m.style.color='#64748b';m.textContent='Applying…';
+      fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'ssm_params',value:JSON.stringify(params)})})
+        .then(function(r){return r.json();})
+        .then(function(){ return fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'ssm_enabled',value:JSON.stringify(enabled)})}); })
+        .then(function(r){return r.json();})
+        .then(function(j){ if(j&&j.error){m.style.color='#dc2626';m.textContent='Error: '+j.error;} else { m.innerHTML='<span style="color:#16a34a;font-weight:700">Applied ✓</span> — <a href="javascript:location.reload()" style="color:#7c3aed;font-weight:700">reload to apply to the buy plan</a>. Review/adjust in <a href="#/demand/config/buyplan" style="color:#7c3aed;font-weight:600">DEMAND ▸ Buy Plan</a>.'; } })
+        .catch(function(){ m.style.color='#dc2626';m.textContent='Apply failed.'; }); };
   }
   load();
 }

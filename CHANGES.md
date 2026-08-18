@@ -1,3 +1,7 @@
+## v27.129 Backtest: one-click "Apply recommended settings → SSM matrix"
+- The Backtest page now has an **Apply** button: writes each market×pool's recommended service levels into `SSM_PARAMS.byMkt` (shifting the standard A/B/C/def tier spread so tier-B lands on the recommendation) **and enables SSM** for those pools, then prompts a reload. Merges with any existing per-market settings; fully reversible in DEMAND ▸ Buy Plan; nothing changes until reload (confirm dialog first).
+- Clarified in the UI that the recommended cover uses the market-average lead, while the actual buy plan sizes each SKU on its own lead (lead spread e.g. UK 9–21wk, US/AU 4–16wk).
+
 ## v27.128 DEMAND ▸ Inputs ▸ Backtest — Cin7 snapshot upload + per-market SSM recommendations
 - New page at **DEMAND ▸ Inputs ▸ Backtest**:
   - **Upload** a Cin7 "Historic & Current Stock Valuations" export (.xlsx/.csv) with a snapshot date → parses Branch/Category/Code/SOH, maps branches→warehouses (same map as production; CA/Test/Preorder/Embroidery excluded), upserts into `inventory_snapshots` (`source='cin7_upload'`). No more manual SQL.
