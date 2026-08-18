@@ -1,3 +1,8 @@
+## v27.103 SUPPLY reports: reorder + urgent-buy fixes (pre-launch bug, subcat, disc date)
+- Reordered BI & Reports tabs so **DTC MISMATCH, REALLOCATE, URGENT BUY** come first, then the rest.
+- **Urgent buy** report: SKU column widened +100px; the **Cat** column now shows `subcategory_name_final` (was core_seasonal); added a **Disc date** column after Cat.
+- **Bug fix:** pre-launch SKUs no longer appear in urgent buy. A SKU whose launch date is in the future for a market (e.g. LANYARD-SUM-PSTPIER, UK launch Feb-27) has post-launch forward demand but no stock, which was flagging it critical. The projection now skips `kpiPreLaunch(p,co)` (launch date > today). Verified LANYARD-SUM-PSTPIER is now excluded; projection returns subcat + disc per row.
+
 ## v27.102 Ship bags: focused per-SKU × month forecast grid (+ Large=4u / XL=6u defaults)
 - Reworked DEMAND ▸ Analysis ▸ Ship bags into a focused editable grid: rows = the 3 ship-bag SKUs (SHIPBAG-MED/LAR/XLG), columns = this month + next 10 (11 months). Each cell stacks current forecast · recommended · an **override input that writes straight to the demand-plan forecast** (skuOvSet → auto-save), same binding as the plan. Market pills US/UK/AU/EU, each with its own forecast + recommendations. "Apply recommendations" now targets the selected market. Removed the old cards + units/orders month table.
 - Per Ben's model note: **Large bag = 4-unit orders, XL = 6+ units** — changed the XL default from 7u to **6u** and Large from 3u to **4u**.

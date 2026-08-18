@@ -734,9 +734,9 @@
   var SECTIONS=[['actions','ACTIONS'],['reports','BI & REPORTS'],['purchase-orders','PURCHASE ORDERS'],['order-plan','ORDER PLAN'],
     ['payments','PAYMENTS'],['samples','SAMPLES'],['quality-control','QUALITY CONTROL'],['config','CONFIG']];   // CONFIG here = SUPPLY ▸ CONFIG (supply-chain settings + Key accounts + Portal); the ⚙ cog opens the admin CONFIG. SHIPMENTS under PURCHASE ORDERS; PAYMENTS umbrella holds Deposits / Other Payments / Payments Due / Payments Report
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
-  var REPORT_SECTIONS=[['metrics','METRICS'],['production-summary','PRODUCTION SUMMARY'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
-    ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['supplier-timing','SUPPLIER DELAYS'],['directclient','DIRECT TO CLIENT'],['dtc-mismatch','DTC MISMATCH'],['customorders','CUSTOM ORDERS'],['flexport','FLEXPORT']];   // ERP COMPARE moved to ACTIONS ▸ ERP Compare sub-tab; CASH FLOW moved to PAYMENTS ▸ Cash Flow
-  var REPORT_KEYS=['metrics','production-summary','reallocate','urgent-buy','container-fill','consolidate','upcoming','pipeline','supplier-timing','directclient','dtc-mismatch','customorders','flexport'];
+  var REPORT_SECTIONS=[['dtc-mismatch','DTC MISMATCH'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['metrics','METRICS'],['production-summary','PRODUCTION SUMMARY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
+    ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['supplier-timing','SUPPLIER DELAYS'],['directclient','DIRECT TO CLIENT'],['customorders','CUSTOM ORDERS'],['flexport','FLEXPORT']];   // Ben: DTC MISMATCH / REALLOCATE / URGENT BUY first. ERP COMPARE → ACTIONS; CASH FLOW → PAYMENTS
+  var REPORT_KEYS=['dtc-mismatch','reallocate','urgent-buy','metrics','production-summary','container-fill','consolidate','upcoming','pipeline','supplier-timing','directclient','customorders','flexport'];
   var BI_TABS={'metrics':'/api/supply/bi','production-summary':'/api/supply/bi/production-summary','urgent-buy':'/api/supply/bi/projection','reallocate':'/api/supply/bi/reallocations','container-fill':'/api/supply/bi/container-fill','consolidate':'/api/supply/bi/consolidations','erp-compare':'/api/supply/bi/erp-compare','supplier-timing':'/api/supply/supplier-timing','dtc-mismatch':'/api/supply/dtc/mismatch'};   // fluid: always re-fetch
   var reportTab='metrics';   // BI & REPORTS opens on METRICS by default
   var ANNOT={
@@ -9711,7 +9711,8 @@
     var byCo={}; risk.forEach(function(r){ (byCo[r.country]=byCo[r.country]||[]).push(r); });
     var countries=Object.keys(byCo).sort(function(a,b){ return byCo[b].length-byCo[a].length || (a<b?-1:1); });
     function rowH(r){ var u=r.urgency==='critical'?['#fee2e2','#991b1b']:['#fef3c7','#92400e'];
-      return '<tr><td class="l" style="min-width:250px"><b>'+esc(r.sku)+'</b></td><td class="l"><span class="mut tiny">'+esc(r.category||'')+'</span></td>'
+      return '<tr><td class="l" style="min-width:350px"><b>'+esc(r.sku)+'</b></td><td class="l"><span class="mut tiny">'+esc(r.subcat||r.category||'')+'</span></td>'
+        +'<td class="l"><span class="mut tiny">'+(r.disc?esc(fd(r.disc)):'—')+'</span></td>'
         +'<td>'+units(r.on_hand)+'</td><td>'+(r.inbound>0?units(r.inbound):'<span class="mut">—</span>')+'</td>'
         +'<td'+(r.cover_now!=null&&r.cover_now<1?' style="color:#dc2626;font-weight:700"':'')+'>'+(r.cover_now==null?'<span class="mut">∞</span>':r.cover_now+' mo')+'</td>'
         +'<td'+(r.cover_with_inbound!=null&&r.cover_with_inbound<1?' style="color:#dc2626;font-weight:700"':'')+'>'+(r.cover_with_inbound==null?'<span class="mut">∞</span>':r.cover_with_inbound+' mo')+'</td>'
@@ -9720,7 +9721,7 @@
         +'<td'+(r.need_qty>0?' style="font-weight:700"':'')+'>'+(r.need_qty>0?units(r.need_qty):'<span class="mut">—</span>')+'</td>'
         +'<td><span class="tool-badge" style="background:'+u[0]+';color:'+u[1]+'">'+esc(r.urgency)+'</span></td></tr>'; }
     function tbl(list){ list.sort(function(a,b){ return (ord[a.urgency]-ord[b.urgency]) || (b.demand_12m-a.demand_12m); });
-      return '<div class="tw" style="max-width:1020px"><table style="width:100%"><thead><tr><th class="l" style="min-width:250px">SKU</th><th class="l">Cat</th><th>On hand</th><th>Inbound</th><th>Cover now</th><th>+ inbound</th><th>Target</th><th>12m demand</th><th>Buy to target</th><th>Urgency</th></tr></thead><tbody>'+list.map(rowH).join('')+'</tbody></table></div>'; }
+      return '<div class="tw" style="max-width:1020px"><table style="width:100%"><thead><tr><th class="l" style="min-width:350px">SKU</th><th class="l">Cat</th><th class="l">Disc date</th><th>On hand</th><th>Inbound</th><th>Cover now</th><th>+ inbound</th><th>Target</th><th>12m demand</th><th>Buy to target</th><th>Urgency</th></tr></thead><tbody>'+list.map(rowH).join('')+'</tbody></table></div>'; }
     var body=countries.map(function(co){ var crit=byCo[co].filter(function(r){return r.urgency==='critical';}).length;
       return '<div style="margin-top:14px;font-weight:700;font-size:13px;color:#0f172a">'+esc(co)+' <span class="mut tiny" style="font-weight:400">· '+byCo[co].length+' at risk'+(crit?' ('+crit+' critical)':'')+'</span></div>'+tbl(byCo[co]); }).join('');
     b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 6px;color:#0f172a">Urgent buy — stock-out risk</div>'

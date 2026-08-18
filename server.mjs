@@ -11971,7 +11971,10 @@ async function biProjection() {
 async function _kpiBaseCompute() {
   const prods = {};
   (await pool.query(`SELECT sku, coalesce(in_planning_scope,false) act, coalesce(market_tier,'') tier, coalesce(core_seasonal,'') cs,
+      coalesce(nullif(subcategory_name_final,''), subcategory, '') subcat,
       coalesce(discontinue_date_final,'') disc, coalesce(discontinue_date_au_final,'') disc_au, coalesce(discontinue_date_ca,'') disc_ca,
+      coalesce(nullif(launch_date_uk_final,''),nullif(launch_date_uk,'')) lch_uk, nullif(launch_date_us,'') lch_us, nullif(launch_date_eu,'') lch_eu,
+      coalesce(nullif(launch_date_au_final,''),nullif(launch_date_au,'')) lch_au, nullif(launch_date_ca_retail,'') lch_ca,
       coalesce(cogs_uk_3pl_final,0) cogs_UK, coalesce(cogs_us_3pl_final,0) cogs_US, coalesce(cogs_eu_3pl_final,0) cogs_EU, coalesce(cogs_au_3pl_final,0) cogs_AU, coalesce(cogs_ca_3pl_final,0) cogs_CA
     FROM planner.products`)).rows.forEach(r => { prods[r.sku] = r; });
   const onhand = {}; (await pool.query(`SELECT sku, warehouse, coalesce(available,0) a FROM planner.v_product_inventory`)).rows
@@ -11984,6 +11987,10 @@ async function _kpiBaseCompute() {
 const kpiToday = () => new Date().toISOString().slice(0, 10);
 const kpiDpast = s => { const m = /^(\d{4}-\d{2}-\d{2})/.exec(s || ''); return !!(m && m[1] < kpiToday()); };
 const kpiDisc = (p, co) => kpiDpast(co === 'AU' ? (p.disc_au || p.disc) : co === 'CA' ? (p.disc_ca || p.disc) : p.disc);
+const kpiFuture = s => { const m = /^(\d{4}-\d{2}-\d{2})/.exec(s || ''); return !!(m && m[1] > kpiToday()); };
+const kpiLaunchFor = (p, co) => co === 'UK' ? p.lch_uk : co === 'US' ? p.lch_us : co === 'EU' ? p.lch_eu : co === 'AU' ? p.lch_au : co === 'CA' ? p.lch_ca : '';
+const kpiPreLaunch = (p, co) => kpiFuture(kpiLaunchFor(p, co));   // launch date in the FUTURE → not yet selling in that market (exclude from urgent-buy stockout risk)
+const kpiDiscDate = (p, co) => co === 'AU' ? (p.disc_au || p.disc) : co === 'CA' ? (p.disc_ca || p.disc) : p.disc;
 
 // ── SUPPLY ▸ BI core engine — fluid net-position projection (Phase 0b). Per SKU × country:
 //    cover = (on_hand + inbound) / avg monthly demand; urgency band; need-to-target qty.
@@ -12023,6 +12030,7 @@ async function _biProjectionCompute() {
       const tw = twFor(sku, wh); if (tw != null) { twNum[co] = (twNum[co] || 0) + tw * dem[sku][wh]; twDen[co] = (twDen[co] || 0) + dem[sku][wh]; } }
     for (const co of BI_COUNTRIES) {
       if (kpiDisc(p, co)) continue;
+      if (kpiPreLaunch(p, co)) continue;   // pre-launch in this market → no current demand, can't be an urgent stockout (Ben: LANYARD-SUM-PSTPIER launches Feb-27 UK)
       const d12 = dm[co] || 0, onh = oh[co] || 0, inbound = (inb[sku] || {})[co] || 0;
       if (d12 <= 0 && onh <= 0 && inbound <= 0) continue;
       const tgtWk = (twDen[co] > 0) ? (twNum[co] / twDen[co]) : DEF_WK;   // weeks → months
@@ -12039,7 +12047,7 @@ async function _biProjectionCompute() {
       else if (coverInb < TM) urgency = 'soon';
       else if (coverInb > TM * 2) urgency = 'surplus';
       else urgency = 'ok';
-      rows.push({ sku, country: co, category: p.cs || '', tier: p.tier || '',
+      rows.push({ sku, country: co, category: p.cs || '', subcat: p.subcat || '', disc: kpiDiscDate(p, co) || '', tier: p.tier || '',
         on_hand: Math.round(onh), inbound: Math.round(inbound), demand_12m: Math.round(d12),
         cover_now: avgM > 0 ? Math.round(coverNow * 10) / 10 : null,
         cover_with_inbound: avgM > 0 ? Math.round(coverInb * 10) / 10 : null,
