@@ -8892,6 +8892,7 @@ function render(){
     else if(DEMAND_VIEW==='calendar') renderCalendarView(body);
     else if(DEMAND_VIEW==='kpis') renderKpisView(body);
     else if(DEMAND_VIEW==='pricechanges'||DEMAND_VIEW==='revenue') renderPriceChangesView(body);   // Revenue & growth report removed (superseded by Summary + targets); this Inputs tab now hosts Price changes. 'revenue' kept as an alias for old hashes/bookmarks.
+    else if(DEMAND_VIEW==='ssmbacktest') renderSsmBacktestView(body);   // DEMAND ▸ Inputs ▸ Backtest — Cin7 snapshot upload + per-market cover backtest + SSM recommendations
     else if(DEMAND_VIEW==='klaviyobis') renderKlaviyoBisView(body);
     else if(DEMAND_VIEW==='scenario'){ if(typeof renderScenarioDemandView==='function')renderScenarioDemandView(body); }   // Scenario planner now nested under DEMAND (L2); tools are the light-blue L3
     else if(DEMAND_VIEW==='trends') renderTrendsView(body);   // DEMAND ▸ Trends — category trends analysis report (#/demand/trends)
@@ -10283,6 +10284,54 @@ function renderBuyPlanView(body){
       .then(function(j){ if(m){ if(j&&j.error){m.style.color='#dc2626';m.textContent='Error: '+j.error;} else { m.innerHTML='<span style="color:#16a34a;font-weight:600">Saved ✓</span> — <a href="javascript:location.reload()" style="color:#7c3aed;font-weight:700">reload to apply to the buy plan</a>.'; } } })
       .catch(function(){ if(m){m.style.color='#dc2626';m.textContent='Save failed.';} }); };
 }
+// DEMAND ▸ Inputs ▸ Backtest — upload Cin7 stock-valuation snapshots + backtest historical cover vs demand per market×pool,
+// with service-level options and a recommended setting per market (feeds the SSM matrix at DEMAND ▸ Buy Plan).
+function renderSsmBacktestView(body){
+  function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function fn(n){n=Math.round(Number(n)||0);return n.toLocaleString();}
+  var uploadBox='<div style="border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;margin-bottom:16px;background:#fafafa">'
+    +'<div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:3px">Upload inventory snapshot</div>'
+    +'<div style="font-size:12px;color:#64748b;margin-bottom:10px">A Cin7 <b>Historic &amp; Current Stock Valuations</b> export (Branch / Category / Code / SOH). Branches map to warehouses exactly as production; CA / Test / Preorder / Embroidery etc. are excluded. Upserts on (sku, warehouse, date) — safe to re-upload.</div>'
+    +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">'
+      +'<input type="file" id="bt-file" accept=".xlsx,.csv" style="font-size:12px">'
+      +'<label style="font-size:12px;color:#475569">Snapshot date <input type="date" id="bt-date" style="font-size:12px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px"></label>'
+      +'<button id="bt-up" style="border:1px solid #7c3aed;background:#7c3aed;color:#fff;font-weight:700;font-size:12px;padding:7px 16px;border-radius:6px;cursor:pointer">Upload</button>'
+      +'<span id="bt-upmsg" style="font-size:12px"></span></div></div>';
+  body.innerHTML='<div style="padding:4px 2px 28px"><div style="font-weight:800;font-size:15px;margin:2px 0 8px">Backtest &amp; recommended settings</div>'+uploadBox+'<div id="bt-body"><div class="mut" style="font-size:12px;padding:10px 2px">Loading backtest…</div></div></div>';
+  var fileEl=body.querySelector('#bt-file'), dateEl=body.querySelector('#bt-date'), upBtn=body.querySelector('#bt-up'), upMsg=body.querySelector('#bt-upmsg');
+  if(upBtn)upBtn.onclick=function(){ var f=fileEl&&fileEl.files&&fileEl.files[0]; var dt=dateEl&&dateEl.value;
+    if(!f){upMsg.style.color='#dc2626';upMsg.textContent='Choose a file.';return;} if(!dt){upMsg.style.color='#dc2626';upMsg.textContent='Set the snapshot date.';return;}
+    upMsg.style.color='#64748b';upMsg.textContent='Uploading…'; var rd=new FileReader();
+    rd.onload=function(){ var b64=String(rd.result).replace(/^data:[^;]+;base64,/,'');
+      fetch('/api/demand/inventory-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({snapshot_date:dt,filename:f.name,data_base64:b64})})
+        .then(function(r){return r.json();}).then(function(j){ if(j&&j.ok){ upMsg.style.color='#16a34a'; upMsg.innerHTML='Saved '+esc(j.date)+' — '+fn(j.rows)+' rows / '+fn(j.units)+'u across '+j.warehouses.length+' warehouses.'; load(); } else { upMsg.style.color='#dc2626'; upMsg.textContent='Error: '+((j&&j.error)||'failed'); } })
+        .catch(function(){ upMsg.style.color='#dc2626'; upMsg.textContent='Upload failed.'; }); };
+    rd.readAsDataURL(f); };
+  function load(){ var bb=body.querySelector('#bt-body'); if(bb)bb.innerHTML='<div class="mut" style="font-size:12px;padding:10px 2px">Loading backtest…</div>';
+    fetch('/api/demand/ssm-backtest').then(function(r){return r.json();}).then(draw).catch(function(e){ if(bb)bb.innerHTML='<div style="color:#dc2626">'+esc(e&&e.message||e)+'</div>'; }); }
+  function draw(d){ var bb=body.querySelector('#bt-body'); if(!bb)return;
+    if(!d||!d.ok){ bb.innerHTML='<div style="color:#dc2626;font-size:12px">'+esc((d&&d.error)||'backtest failed')+'</div>'; return; }
+    var rows=d.rows||[];
+    if(!rows.length){ bb.innerHTML='<div class="mut" style="font-size:12px;padding:10px 2px">No overlapping snapshot + sales history yet. Upload monthly Cin7 snapshots above to build the backtest ('+((d.snapshotDates||[]).length)+' snapshot month'+(((d.snapshotDates||[]).length)===1?'':'s')+' on file).</div>'; return; }
+    var fc={overstocked:'#b45309',tight:'#b91c1c',ok:'#16a34a'};
+    var head='<tr style="font-size:10px;text-transform:uppercase;color:#475569;background:#f8fafc">'
+      +['Market · Pool','Snapshots','Avg cover','Min','Wk demand','CV','Lead','Overstock mo','Status','Recommended'].map(function(h){return '<th style="text-align:left;padding:5px 9px;border-bottom:1px solid #e5e7eb;white-space:nowrap">'+h+'</th>';}).join('')+'</tr>';
+    var trs=rows.map(function(r){
+      var opts=r.options.map(function(o){ var rec=o.sl===r.recSl; return '<span style="'+(rec?'font-weight:800;color:#6b21a8;text-decoration:underline':'color:#94a3b8')+'" title="'+fn(o.avgUnits)+'u avg held">'+o.sl+'%:'+o.coverWks+'wk</span>'; }).join(' · ');
+      return '<tr style="border-bottom:1px solid #f1f5f9">'
+        +'<td style="padding:5px 9px;font-weight:700;white-space:nowrap">'+esc(r.co)+' · '+esc(r.pool)+'</td>'
+        +'<td style="padding:5px 9px;white-space:nowrap">'+r.months+' <span class="mut" style="font-size:10px">'+esc(r.from)+'…'+esc(r.to)+'</span></td>'
+        +'<td style="padding:5px 9px">'+r.avgCover+'wk</td><td style="padding:5px 9px">'+r.minCover+'wk</td>'
+        +'<td style="padding:5px 9px">'+fn(r.weeklyDemand)+'</td><td style="padding:5px 9px">'+r.cv+'</td><td style="padding:5px 9px">'+r.leadWks+'wk</td>'
+        +'<td style="padding:5px 9px">'+r.overstockMonths+'/'+r.months+'</td>'
+        +'<td style="padding:5px 9px"><span style="font-weight:700;color:'+(fc[r.flag]||'#64748b')+'">'+esc(r.flag)+'</span></td>'
+        +'<td style="padding:5px 9px;white-space:nowrap"><b>'+r.recSl+'% · '+r.recCoverWks+'wk</b></td></tr>'
+        +'<tr><td colspan="10" style="padding:0 9px 7px 24px"><span class="mut" style="font-size:10px">Options (service level : safety+cycle cover · hover = avg units held): </span><span style="font-size:11px">'+opts+'</span></td></tr>'; }).join('');
+    bb.innerHTML='<div style="font-size:12px;color:#64748b;margin:2px 0 10px">Per <b>market × pool</b> over the uploaded snapshot months: weeks of cover actually held vs sell-through, and service-level <b>options</b> with a <b>recommended</b> pick (from that market’s demand volatility + China lead). <b>Status</b>: overstocked = held far more than needed · tight = dipped below the recommendation. Apply the chosen levels in <a href="#/demand/config/buyplan" style="color:#7c3aed;font-weight:600">DEMAND ▸ Buy Plan</a>.</div>'
+      +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%">'+head+trs+'</table></div>';
+  }
+  load();
+}
 function renderAccuracyView(body){
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function fn(n){n=Math.round(Number(n)||0);return n?n.toLocaleString():'0';}
@@ -10658,8 +10707,8 @@ function renderDemandTabs(){
     // sit directly below the main tabs but ABOVE the filters (same header column, right after the tab row)
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   // Primary tabs inline; the reference/input views (Sell-through targets, Key accounts, Calendar, Revenue) are grouped under an "Inputs ▾" dropdown.
-  var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['snapshots']='Snapshots'; _dlbl['contribmodel']='Contribution model'; _dlbl['buyplan']='Buy plan logic'; _dlbl['runoffsubs']='Discontinued sub-categories';
-  var PRIMARY=['plan','kpis','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','snapshots','trends','safetystock','stockcover','shipbags'], CONFIGD=['contribmodel','buyplan','runoffsubs'], INPUTS=['keyaccounts','calendar','pricechanges','klaviyobis'];
+  var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['snapshots']='Snapshots'; _dlbl['contribmodel']='Contribution model'; _dlbl['buyplan']='Buy plan logic'; _dlbl['runoffsubs']='Discontinued sub-categories'; _dlbl['ssmbacktest']='Backtest';
+  var PRIMARY=['plan','kpis','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','snapshots','trends','safetystock','stockcover','shipbags'], CONFIGD=['contribmodel','buyplan','runoffsubs'], INPUTS=['keyaccounts','calendar','pricechanges','klaviyobis','ssmbacktest'];
   var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0, _anlActive=ANALYSIS.indexOf(DEMAND_VIEW)>=0, _cfgActive=CONFIGD.indexOf(DEMAND_VIEW)>=0;
   var _isPlanV=(DEMAND_VIEW==='plan');
   // Release Window now lives in the More Filters panel; Undo + Download now sit on the right of the plan controls

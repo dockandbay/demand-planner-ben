@@ -1,3 +1,10 @@
+## v27.128 DEMAND ▸ Inputs ▸ Backtest — Cin7 snapshot upload + per-market SSM recommendations
+- New page at **DEMAND ▸ Inputs ▸ Backtest**:
+  - **Upload** a Cin7 "Historic & Current Stock Valuations" export (.xlsx/.csv) with a snapshot date → parses Branch/Category/Code/SOH, maps branches→warehouses (same map as production; CA/Test/Preorder/Embroidery excluded), upserts into `inventory_snapshots` (`source='cin7_upload'`). No more manual SQL.
+  - **Backtest** table per **market × pool**: weeks of cover actually held vs sell-through over the uploaded months (avg/min cover, weekly demand, CV, China lead, overstock-months), a **Status** flag (overstocked / tight / ok), and service-level **options** (90/93/95/97/99% → safety+cycle cover + avg units held) with a **recommended** pick driven by that market's demand volatility.
+  - Recommendations feed the SSM matrix at DEMAND ▸ Buy Plan.
+- Server: `POST /api/demand/inventory-upload` + `GET /api/demand/ssm-backtest`. No migration (reads inventory_snapshots + sales_actuals). Sandbox seeded with Jul–Dec 2024 for the backtest; all 4 markets show heavy historical overstock (36–83wk cover) vs ~7–20wk recommended.
+
 ## v27.127 SSM buy logic: per market × pool opt-in + parameters
 - The Service-level SSM buy logic is now **per market × pool (3PL / FBA)** instead of one global switch. At **DEMAND ▸ Buy Plan** a matrix lets you tick SSM on for any market×pool independently and set **all** SSM parameters per row (service levels A/B/C/default, seasonal floor, review cycle; FBA-cap on FBA pools, season-max on 3PL pools). Unticked rows keep today's weeks-cover logic.
 - Data model: `SSM_ENABLED` (`{"CO|POOL":true}`, server-injected from `app_settings.ssm_enabled`) drives opt-in per pool; `SSM_PARAMS.byMkt["CO|POOL"]` holds per-market×pool params over the global defaults. `ssmServiceLevel`/`ssmCoverWeeks` are now market×pool-aware; `project()` checks opt-in independently for 3PL vs FBA.

@@ -1167,6 +1167,93 @@ app.post('/api/demand/stock-cover/target', async (req, res) => {
     ON CONFLICT (key) DO UPDATE SET value=excluded.value`, [String(v)]); res.json({ ok: true, target: v }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
+// ── DEMAND ▸ Inputs ▸ Backtest — upload a Cin7 stock-valuation export as a dated inventory snapshot ──
+// Body: { snapshot_date:'YYYY-MM-DD', filename, data_base64 }. Parses Branch/Category/Code/SOH, maps branch→warehouse
+// (same _INV_BRANCH_MAP as production), aggregates per (warehouse,sku), upserts into inventory_snapshots.
+app.post('/api/demand/inventory-upload', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const date = String(b.snapshot_date || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'snapshot_date (YYYY-MM-DD) required' });
+    if (!b.data_base64) return res.status(400).json({ error: 'data_base64 (the Cin7 export) required' });
+    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    const isCsv = /\.csv$/i.test(b.filename || '') || /csv/i.test(b.content_type || '');
+    const raw = [];
+    if (isCsv) {
+      const lines = buf.toString('utf8').replace(/^﻿/, '').split(/\r?\n/).filter(l => l.trim());
+      for (let i = 1; i < lines.length; i++) { const c = lines[i].split(','); raw.push([c[0], c[1], c[2], c[3]]); }
+    } else {
+      const ExcelJS = (await import('exceljs')).default; const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf);
+      const ws = wb.worksheets[0]; if (!ws) return res.status(400).json({ error: 'empty workbook' });
+      ws.eachRow({ includeEmpty: false }, (r, rn) => { if (rn === 1) return; const g = i => { const v = r.getCell(i).value; return (v && v.text) ? v.text : v; }; raw.push([g(1), g(2), g(3), g(4)]); });
+    }
+    const agg = {}, skipped = {};
+    for (const r of raw) {
+      let br = r[0], sku = r[2], q = Number(r[3]);
+      if (br == null || sku == null || !Number.isFinite(q)) continue;
+      br = String(br).trim(); sku = String(sku).trim();
+      if (br === 'Grand Total' || sku === '' || sku === 'Grand Total') continue;
+      const wh = _INV_BRANCH_MAP[br];
+      if (wh === undefined) { skipped['unmapped: ' + br] = (skipped['unmapped: ' + br] || 0) + 1; continue; }
+      if (wh === null) { skipped['excluded: ' + br] = (skipped['excluded: ' + br] || 0) + 1; continue; }
+      const k = wh + '\t' + sku; agg[k] = (agg[k] || 0) + q;
+    }
+    const keys = Object.keys(agg);
+    if (!keys.length) return res.json({ ok: false, error: 'No mappable rows found — expected Branch / Category / Code / SOH columns.', skipped });
+    const client = await pool.connect(); let units = 0;
+    try {
+      await client.query('BEGIN');
+      for (let i = 0; i < keys.length; i += 400) {
+        const slice = keys.slice(i, i + 400), params = [], tuples = [];
+        slice.forEach(k => { const t = k.split('\t'); params.push(t[1], t[0], date, agg[k]); const o = params.length; tuples.push(`($${o - 3},$${o - 2},$${o - 1},$${o},'cin7_upload')`); units += agg[k]; });
+        await client.query(`INSERT INTO planner.inventory_snapshots (sku, warehouse, snapshot_date, available, source) VALUES ${tuples.join(',')}
+          ON CONFLICT (sku, warehouse, snapshot_date) DO UPDATE SET available=EXCLUDED.available, source=EXCLUDED.source`, params);
+      }
+      await client.query('COMMIT');
+    } catch (e) { await client.query('ROLLBACK').catch(() => {}); throw e; } finally { client.release(); }
+    const whs = [...new Set(keys.map(k => k.split('\t')[0]))].sort();
+    const dates = (await pool.query(`SELECT to_char(snapshot_date,'YYYY-MM-DD') d, count(*)::int n, sum(available)::int u FROM planner.inventory_snapshots GROUP BY 1 ORDER BY 1`)).rows;
+    res.json({ ok: true, date, rows: keys.length, units, warehouses: whs, skipped, dates });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+// ── DEMAND ▸ Inputs ▸ Backtest — per market×pool historical cover vs demand + service-level options/recommendation ──
+app.get('/api/demand/ssm-backtest', async (req, res) => {
+  try {
+    const sohRows = (await pool.query(`SELECT to_char(snapshot_date,'YYYY-MM') m, upper(split_part(warehouse,'_',1)) co,
+        CASE WHEN warehouse LIKE '%fba' THEN 'FBA' ELSE '3PL' END pool, sum(available)::float oh
+      FROM planner.inventory_snapshots GROUP BY 1,2,3`)).rows;
+    const demRows = (await pool.query(`SELECT to_char(month,'YYYY-MM') m, upper(country) co,
+        CASE WHEN channel='FBA' THEN 'FBA' ELSE '3PL' END pool, sum(units)::float u
+      FROM planner.sales_actuals GROUP BY 1,2,3`)).rows;
+    const lead = {};
+    (await pool.query(`SELECT 'UK' co, avg(china_to_uk_lead_time_weeks) l FROM planner.products WHERE in_planning_scope
+      UNION ALL SELECT 'US', avg(china_to_us_lead_time_weeks) FROM planner.products WHERE in_planning_scope
+      UNION ALL SELECT 'EU', avg(china_to_eu_lead_time_weeks) FROM planner.products WHERE in_planning_scope
+      UNION ALL SELECT 'AU', avg(china_to_au_lead_time_weeks) FROM planner.products WHERE in_planning_scope`)).rows
+      .forEach(r => { lead[r.co] = Number(r.l) || 9; });
+    const dm = {}; demRows.forEach(r => { dm[r.co + '|' + r.pool + '|' + r.m] = r.u; });
+    const g = {};   // co|pool -> {covers:[], dem:[]}
+    sohRows.forEach(r => { const k = r.co + '|' + r.pool; const d = dm[k + '|' + r.m]; if (d == null || !(d > 0)) return;
+      (g[k] || (g[k] = { covers: [], dem: [], months: [] })); const wk = d / 4.33; const cov = r.oh / wk;
+      g[k].covers.push(cov); g[k].dem.push(d); g[k].months.push(r.m); });
+    const Z = { 90: 1.2816, 93: 1.4758, 95: 1.6449, 97: 1.8808, 99: 2.3263 };
+    const out = [];
+    Object.keys(g).sort().forEach(k => { const [co, pool] = k.split('|'); const o = g[k]; const n = o.covers.length; if (!n) return;
+      const avgCov = o.covers.reduce((a, b) => a + b, 0) / n, minCov = Math.min.apply(null, o.covers), maxCov = Math.max.apply(null, o.covers);
+      const dMean = o.dem.reduce((a, b) => a + b, 0) / n, wkMean = dMean / 4.33;
+      const dVar = o.dem.reduce((a, b) => a + (b - dMean) * (b - dMean), 0) / (n > 1 ? n - 1 : 1), dSd = Math.sqrt(dVar), cv = dMean > 0 ? dSd / dMean : 0;
+      const Lw = lead[co] || 9, cycle = 4, capW = pool === 'FBA' ? 8 : 52;
+      // safety weeks = Z·CV·√(L) with the monthly→weekly σ conversion (√4.33), + review cycle — matches ssmCoverWeeks' cover shape (excludes the lead base, held separately by the engine).
+      const options = [90, 93, 95, 97, 99].map(sl => { let cw = Math.round(Z[sl] * cv * Math.sqrt(Lw) * 2.081 + cycle); cw = Math.max(1, Math.min(cw, capW)); return { sl, coverWks: cw, avgUnits: Math.round(cw * wkMean) }; });
+      const recSl = cv < 0.35 ? 93 : cv < 0.6 ? 95 : 97, recOpt = options.find(o2 => o2.sl === recSl);
+      const overstockMonths = o.covers.filter(c => c > 2 * recOpt.coverWks).length;
+      const flag = avgCov > recOpt.coverWks * 1.5 ? 'overstocked' : (minCov < recOpt.coverWks ? 'tight' : 'ok');
+      out.push({ co, pool, months: n, from: o.months[0], to: o.months[n - 1], avgCover: Math.round(avgCov * 10) / 10, minCover: Math.round(minCov * 10) / 10, maxCover: Math.round(maxCov * 10) / 10,
+        weeklyDemand: Math.round(wkMean), cv: Math.round(cv * 100) / 100, leadWks: Math.round(Lw * 10) / 10, overstockMonths, options, recSl, recCoverWks: recOpt.coverWks, flag }); });
+    const dates = (await pool.query(`SELECT to_char(snapshot_date,'YYYY-MM-DD') d FROM planner.inventory_snapshots GROUP BY 1 ORDER BY 1`)).rows.map(r => r.d);
+    res.json({ ok: true, rows: out, snapshotDates: dates });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 // ── Forecast Snapshots (DEMAND ▸ Snapshots) — lock a copy of forecast_outputs; compare later + past-month locked-vs-actual ──
 app.get('/api/demand/snapshots', async (_req, res) => {
   try { res.json((await pool.query(`SELECT id, name, to_char(taken_at,'YYYY-MM-DD"T"HH24:MI:SS') taken_at, taken_by, row_count
