@@ -1,3 +1,6 @@
+## v27.122 3PL Xero bill (Coghlans): date + reference from the file's Period End + Invoice Number
+- Coghlans (AU) invoices **weekly**, but the Xero bill was dated/referenced off the calendar-month end (FULFILLMENT-AU-2026-08-**31** · 31/08/2026). For au_coghlans the bill now reads the **Period End (Effective Date)** and **Invoice Number** from the "Coghlan Settings" sheet: bill date = **07/08/2026**, reference = **FULFILLMENT-AU-2026-08-07-DOK50362**. Other 3PLs (monthly) unchanged. This drives both the preview line and the downloaded Xero bill CSV.
+
 ## v27.121 Exclude non-SKU GIFTWRAP-BOX + future-launch can't be out-of-stock
 - **GIFTWRAP-BOX** (a data artefact, not a real SKU — its real variants are GIFTWRAP-BOX-SM/-MD/-LG…) is now hard-excluded from the planner via a NON_SKUS guard applied to every product data-load query (SKU master, availability, DATA, out-of-scope-with-stock, buy-plan constants, FBA dims). Variants are unaffected.
 - **Inventory Status Report:** a SKU with a future launch date (status FUTURE) can no longer appear as out-of-stock / low / etc. — it's shown only under In-production launches. (Belt-and-braces on top of the existing launch-date guard.)

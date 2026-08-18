@@ -8306,6 +8306,19 @@ app.post('/api/supply/tpl/journal/:id', async (req, res) => {
     res.setHeader('Content-Type', 'text/csv;charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="journal-' + (REG || tpl0) + '-' + period + '.csv"'); res.send(csv);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
+// Coghlans (AU) invoices WEEKLY, not monthly — pull the Period End (Effective Date) + Invoice Number from the
+// "Coghlan Settings" sheet so the Xero bill's date + reference reflect the week, not the calendar-month end.
+function _coghlansMeta(grids) {
+  const iso = v => { if (v == null) return null; if (v instanceof Date && !isNaN(v)) return v.toISOString().slice(0, 10);
+    const s = String(v).trim(); const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/); if (m) return m[0];
+    const d = new Date(s); return (!isNaN(d.getTime()) && /\d{4}/.test(s)) ? d.toISOString().slice(0, 10) : null; };
+  let periodEnd = null, invoiceNo = null;
+  const g = (grids || []).find(x => /setting/i.test(x.name || ''));
+  if (g) for (const row of g.grid) { const a = String(row[0] == null ? '' : row[0]).trim().toLowerCase();
+    if (a === 'effective date' || a === 'period end') { const d = iso(row[1]); if (d) periodEnd = d; }
+    if (a === 'invoice number') { const n = String(row[1] == null ? '' : row[1]).trim(); if (n) invoiceNo = n; } }
+  return { periodEnd, invoiceNo };
+}
 app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
   try {
     const period = String((req.body && req.body.period) || req.query.period || '').trim();
@@ -8331,9 +8344,16 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
     const XERO = { eu_ifulfilment: { contact: 'I-Fulfilment', region: 'EU', currency: 'EUR' }, us_geneva: { contact: 'Geneva', region: 'US', currency: 'USD' }, uk_ilg: { contact: 'ILG', region: 'UK', currency: 'GBP' }, au_coghlans: { contact: 'Coghlan Sydney Pty Ltd', region: 'AU', currency: 'AUD' } };
     const meta = XERO[tpl0] || { contact: tpl0 || '3PL', region: 'EU' };
     const pm = /^\d{4}-\d{2}$/.test(period) ? period : (new Date().toISOString().slice(0, 7));
-    const [py, pmo] = pm.split('-').map(Number); const endISO = new Date(Date.UTC(py, pmo, 0)).toISOString().slice(0, 10);
+    const [py, pmo] = pm.split('-').map(Number);
+    let endISO = new Date(Date.UTC(py, pmo, 0)).toISOString().slice(0, 10);   // default = invoice-month end
+    let invSuffix = '';
+    if (tpl0 === 'au_coghlans') {   // weekly invoicing → take the date + reference suffix from the file itself
+      const cm = _coghlansMeta(grids);
+      if (cm.periodEnd) endISO = cm.periodEnd;      // bill date = Period End (e.g. 2026-08-07), not month-end
+      if (cm.invoiceNo) invSuffix = '-' + cm.invoiceNo;   // reference suffix = invoice number (e.g. -DOK50362)
+    }
     const dd = endISO.slice(8, 10) + '/' + endISO.slice(5, 7) + '/' + endISO.slice(0, 4);
-    const invNo = 'FULFILLMENT-' + meta.region + '-' + endISO;
+    const invNo = 'FULFILLMENT-' + meta.region + '-' + endISO + invSuffix;
     const ordSheet = sheetSums.find(s => s.ct === 'orders'); const cur = (ordSheet && ordSheet.sum.currency) || meta.currency || 'EUR';
     // Tax is region-specific: EU/UK book 20% VAT (Xero auto-computes the amount → left blank); AU books GST at
     // 10% inclusive so the amount is supplied (= line/11); US is tax-exempt. Default = 20% VAT.
