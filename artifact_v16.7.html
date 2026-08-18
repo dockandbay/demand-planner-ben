@@ -4306,7 +4306,7 @@ var EXC_MKT='all', EXC_CH='all', EXC_GRAIN='sku', EXC_SUBTAB='fclt', EXC_SEV='al
 var EXC_SUBTABS=[['fclt','Forecast < Actual',1,1],['fgtr','Forecast > Run-rate',1,1],['sellnofc','Selling, no forecast',1,1],['anomaly','Forecast anomalies',1,1],['noavail','No availability',0,1],['nocover','Available, no cover',1,1],['disc','Discontinued, active',0,1],['recs','Recommendations',0,0],['dataconfig','Data & config',0,0]];   // [key,label,usesChannel,usesCountry] — DEMAND ▸ Exceptions L3 sub-tabs (deep-linked #/demand/exceptions/<key>)
 var ACC_MKT='all', ACC_CH='all', ACC_GRAIN='category', ACC_LOOKBACK=6, ACC_SORT='wmape';   // DEMAND ▸ Accuracy filters (forecast accuracy & bias vs locked snapshots)
 var SS_MKT='all', SS_CH='all', SS_GRAIN='category', SS_SL=95, SS_SORT='delta', SS_LEADCV=0.25, SS_UNCON=false;   // DEMAND ▸ Safety stock filters (SS_LEADCV = lead-time variability; SS_UNCON = unconstrain stockout-censored demand)
-var SB_MKT='UK', SB_P1=40, SB_P2=40, SB_P3=20, SB_A1=1, SB_A2=3, SB_A3=7, SB_LC='Picnic';   // DEMAND ▸ Ship bags — order-size split + always-large cats
+var SB_MKT='UK', SB_P1=40, SB_P2=40, SB_P3=20, SB_A1=1, SB_A2=4, SB_A3=6, SB_LC='Picnic';   // DEMAND ▸ Ship bags — order-size split + always-large cats (Ben: set of 4u = Large, 6u+ = XL)
 var TGT_CACHE=null;
 var _da={sec:'actions',mkt:'all',cat:'all',status:'open'}; // DEMAND ▸ Actions filters (sec: actions|insights|weather; status: open|snoozed|dismissed|done|all)
 // Which level-3 section a given action TYPE belongs to. ACTIONS = act-on-it now (sell-through, events,
@@ -10581,59 +10581,53 @@ function renderShipBagView(body){
     var orders=avgUPO>0?tu/avgUPO:0, med=orders*p1, lg=orders*p2, xl=orders*p3;
     var lFrac=tu>0?lu/tu:0, picMed=med*lFrac;   // always-large units' share of the 1-unit (medium) orders → reassign to large
     return {m:m, units:tu, orders:orders, medium:med-picMed, large:lg+picMed, xl:xl}; }); }
-  var rows=calcMkt(co);
-  var T={med:0,lg:0,xl:0,ord:0,u:0}; rows.forEach(function(r){T.med+=r.medium;T.lg+=r.large;T.xl+=r.xl;T.ord+=r.orders;T.u+=r.units;});
+  var MKTS4=['US','UK','AU','EU'];
+  // months = this month + next 10 (11 months), keyed YYYY_MM
+  var months=(function(){ var o=[],y=+CUR_MONTH.slice(0,4),mo=+CUR_MONTH.slice(5,7); for(var i=0;i<11;i++){ o.push(y+'_'+(mo<10?'0':'')+mo); mo++; if(mo>12){mo=1;y++;} } return o; })();
+  // recommended bag demand per month for a market (from the DTC units forecast → orders → bag sizes)
+  function recFor(mco){ return months.map(function(m){ var tu=0,lu=0;
+    Object.keys(BP_DATA.products||{}).forEach(function(sku){ var pd=BP_DATA.products[sku], md=pd&&pd.mkts&&pd.mkts[mco]; if(!md)return; var v=(md.demand&&md.demand.DTC&&md.demand.DTC[m])||0; if(v<=0)return; tu+=v; if(isLargeCat(sku))lu+=v; });
+    var orders=avgUPO>0?tu/avgUPO:0, med=orders*p1,lg=orders*p2,xl=orders*p3, lFrac=tu>0?lu/tu:0, picMed=med*lFrac; return {m:m, medium:med-picMed, large:lg+picMed, xl:xl}; }); }
+  var recByM={}; recFor(co).forEach(function(r){ recByM[r.m]=r; });
+  var BAGMAP=[['SHIPBAG-MED','medium','Medium'],['SHIPBAG-LAR','large','Large'],['SHIPBAG-XLG','xl','XL']];
+  function curFcM(sku,m){ var pd=(BP_DATA.products||{})[sku], md=pd&&pd.mkts&&pd.mkts[co]; if(md&&md.demand&&md.demand.DTC&&md.demand.DTC[m]!=null)return md.demand.DTC[m]||0; var o=skuOvGetK(sku+'|'+co+'|DTC|'+m); return o!=null?o:0; }
+  var mlab=function(m){ return MN[(+m.slice(5,7))-1]+" '"+m.slice(2,4); };
   var PILL=function(cls,val,active,lbl){ return '<button class="sb-'+cls+'" data-v="'+val+'" style="font-size:12px;font-weight:600;border:1px solid '+(active?'#7c3aed':'#e2e8f0')+';background:'+(active?'#f3e8ff':'#fff')+';color:'+(active?'#6b21a8':'#64748b')+';border-radius:5px;padding:3px 10px;cursor:pointer;margin-right:4px">'+lbl+'</button>'; };
   var LBL='font-size:11px;color:#475569;font-weight:600;margin-right:6px';
   var IN=function(cls,v,w){ return '<input class="sb-'+cls+'" value="'+esc(v)+'" style="width:'+(w||44)+'px;font-size:12px;padding:2px 5px;border:1px solid #cbd5e1;border-radius:5px;text-align:center">'; };
   var bar='<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:2px 0 8px;font-size:12px">'
-    +'<div><span style="'+LBL+'">Country / 3PL</span>'+['UK','US','EU','AU'].map(function(x){return PILL('mkt',x,SB_MKT===x,x);}).join('')+'</div></div>';
-  var cfg='<div style="display:flex;gap:18px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px;font-size:12px;border:1px solid #eef2f7;border-radius:8px;padding:10px 12px">'
+    +'<div><span style="'+LBL+'">Country / 3PL</span>'+MKTS4.map(function(x){return PILL('mkt',x,SB_MKT===x,x);}).join('')+'</div></div>';
+  var cfg='<div style="display:flex;gap:18px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;font-size:12px;border:1px solid #eef2f7;border-radius:8px;padding:10px 12px">'
+    +'<div style="font-size:11px;color:#64748b;font-weight:700;width:100%;margin-bottom:2px">Recommendation settings (drive the purple recommended figures)</div>'
     +'<div><div style="'+LBL+';margin-bottom:4px">Order-size split (% of orders → avg units → bag)</div>'
       +'<div style="display:flex;gap:10px;align-items:center"><span>'+IN('p1',SB_P1)+'% @ '+IN('a1',SB_A1)+'u → <b>Medium</b></span>'
       +'<span>'+IN('p2',SB_P2)+'% @ '+IN('a2',SB_A2)+'u → <b>Large</b></span>'
       +'<span>'+IN('p3',SB_P3)+'% @ '+IN('a3',SB_A3)+'u → <b>XL</b></span></div></div>'
-    +'<div><div style="'+LBL+';margin-bottom:4px">Always-large categories (comma-sep)</div>'+IN('lc',SB_LC,220)+'</div>'
-    +'<div style="color:#94a3b8">≈ '+(Math.round(avgUPO*100)/100)+' units / order</div></div>';
-  function crd(l,v,s){ return '<div style="border:1px solid #e2e8f0;border-radius:6px;padding:9px 14px;min-width:120px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.06em;color:#94a3b8;font-weight:700">'+l+'</div><div style="font-family:ui-monospace,Menlo,monospace;font-size:20px;font-weight:600">'+v+'</div><div style="font-size:11px;color:#94a3b8">'+s+'</div></div>'; }
-  var cards='<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px">'
-    +crd('Medium bags',fn(T.med),'12-mo total')+crd('Large bags',fn(T.lg),'incl. always-large cats')+crd('XL bags',fn(T.xl),'5+ unit orders')
-    +crd('Orders',fn(T.ord),'from '+fn(T.u)+' units')+'</div>';
-  var legend='<div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.5">Ship-bag demand modelled from the <b>DTC units forecast</b> (not bag history): units ÷ '+(Math.round(avgUPO*100)/100)+' avg units/order = orders, split by size. Categories matching <b>'+esc(SB_LC)+'</b> take a <b>Large</b> bag even on 1-unit orders (their share of medium orders is moved to large). Change the split above; feeds forward 12 months. Next: map these to your ship-bag SKUs to push into the buy plan.</div>';
-  var TH='padding:0 8px 6px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8;border-bottom:1px solid #e2e8f0;text-align:center', TC='padding:5px 8px;border-bottom:1px solid #f1f5f9;text-align:center;font-variant-numeric:tabular-nums';
-  var head='<tr><th style="'+TH+';text-align:left">Month</th>'+['DTC units','Orders','Medium','Large','XL'].map(function(h){return '<th style="'+TH+'">'+h+'</th>';}).join('')+'</tr>';
-  var bodyRows=rows.map(function(r){ return '<tr><td style="'+TC+';text-align:left;font-weight:600">'+(MN[(+r.m.slice(5,7))-1]||'')+" '"+r.m.slice(2,4)+'</td>'
-    +'<td style="'+TC+';color:#64748b">'+fn(r.units)+'</td><td style="'+TC+';color:#64748b">'+fn(r.orders)+'</td>'
-    +'<td style="'+TC+';font-weight:700">'+fn(r.medium)+'</td><td style="'+TC+';font-weight:700">'+fn(r.large)+'</td><td style="'+TC+';font-weight:700">'+fn(r.xl)+'</td></tr>'; }).join('');
-  // ── Ship-bag SKU forecast (rows = the 3 ship-bag SKUs × markets: current vs recommended) + APPLY to forecast override ──
-  var MKTS4=['UK','US','EU','AU'];
-  var recByMkt={}; MKTS4.forEach(function(mc){ recByMkt[mc]=calcMkt(mc); });
-  var BAGMAP=[['SHIPBAG-MED','medium','Medium'],['SHIPBAG-LAR','large','Large'],['SHIPBAG-XLG','xl','XL']];
-  function _curFc(sku,mc){ var pd=(BP_DATA.products||{})[sku], md=pd&&pd.mkts&&pd.mkts[mc]; if(!md||!md.demand||!md.demand.DTC)return 0; var s=0; fwd12.forEach(function(m){ s+=md.demand.DTC[m]||0; }); return s; }
-  function _recTot(mc,key){ var s=0; recByMkt[mc].forEach(function(r){ s+=r[key]; }); return s; }
-  var skuHead='<tr><th style="'+TH+';text-align:left;min-width:150px">Ship-bag SKU</th>'+MKTS4.map(function(mc){return '<th style="'+TH+'" colspan="2">'+mc+'</th>';}).join('')+'<th style="'+TH+'">Total rec</th></tr>'
-    +'<tr><th style="'+TH+';text-align:left"></th>'+MKTS4.map(function(){return '<th style="'+TH+';font-size:9px;text-transform:none">current</th><th style="'+TH+';font-size:9px;text-transform:none;color:#6b21a8">recommended</th>';}).join('')+'<th style="'+TH+'"></th></tr>';
-  var skuBody=BAGMAP.map(function(bm){ var totR=0;
-    var cells=MKTS4.map(function(mc){ var cur=_curFc(bm[0],mc), rec=_recTot(mc,bm[1]); totR+=rec;
-      return '<td style="'+TC+';color:#94a3b8">'+fn(cur)+'</td><td style="'+TC+';font-weight:700;color:#6b21a8">'+fn(rec)+'</td>'; }).join('');
-    return '<tr><td style="'+TC+';text-align:left;font-weight:700;font-family:ui-monospace,Menlo,monospace">'+bm[0]+'<span style="font-size:9px;color:#94a3b8;font-weight:400;margin-left:6px">'+bm[2]+'</span></td>'+cells+'<td style="'+TC+';font-weight:700">'+fn(totR)+'</td></tr>'; }).join('');
-  var skuTbl='<div style="margin-top:26px"><div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:2px">Ship-bag SKU forecast</div>'
-    +'<div style="font-size:11px;color:#64748b;margin-bottom:8px;line-height:1.5">Recommended = the modelled 12-mo bag demand mapped to each ship-bag SKU per market (Medium→SHIPBAG-MED, Large→SHIPBAG-LAR, XL→SHIPBAG-XLG). Current = the SKU’s existing forecast. <b>Apply</b> writes the recommended <b>monthly</b> values into each SKU’s forecast override (DTC) across all 4 markets and saves, so they feed the buy plan.</div>'
-    +'<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'+skuHead+skuBody+'</table></div>'
-    +'<div style="margin-top:10px"><button id="sb-apply" style="border:1px solid #7c3aed;background:#7c3aed;color:#fff;font-weight:700;font-size:13px;padding:8px 18px;border-radius:6px;cursor:pointer">Apply recommendations to forecast</button> <span id="sb-apply-msg" style="font-size:12px;margin-left:8px"></span></div></div>';
-  body.innerHTML='<div style="padding:2px 2px 24px">'+bar+cfg+legend+cards
-    +(rows.length?('<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'+head+bodyRows+'</table></div>')
-      :'<div style="color:#94a3b8;font-size:13px;padding:24px;text-align:center">No forward DTC demand for '+esc(SB_MKT)+'.</div>')
-    +skuTbl
-    +'</div>';
+    +'<div><div style="'+LBL+';margin-bottom:4px">Always-large categories (comma-sep)</div>'+IN('lc',SB_LC,180)+'</div>'
+    +'<div style="color:#94a3b8">≈ '+(Math.round(avgUPO*100)/100)+' units / order · <b>Large = 4u, XL = 6u+</b></div></div>';
+  var TH='padding:4px 6px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:2px solid #e2e8f0;text-align:right;white-space:nowrap', TC='padding:4px 6px;border-bottom:1px solid #f1f5f9;text-align:right;font-variant-numeric:tabular-nums';
+  var head='<tr><th style="'+TH+';text-align:left;position:sticky;left:0;background:#f8fafc">Ship-bag SKU</th>'
+    +months.map(function(m,i){ return '<th style="'+TH+'">'+(i===0?'<span style="color:#7c3aed">this mo</span><br>':'')+mlab(m)+'</th>'; }).join('')+'</tr>';
+  var gridBody=BAGMAP.map(function(bm){ var sku=bm[0];
+    var cells=months.map(function(m){ var cur=curFcM(sku,m), r=recByM[m], rc=r?Math.round(r[bm[1]]):0, ov=skuOvGetK(sku+'|'+co+'|DTC|'+m);
+      return '<td style="'+TC+'"><div style="font-size:9px;color:#94a3b8" title="current forecast">'+fn(cur)+'</div>'
+        +'<div style="font-size:9px;color:#6b21a8;font-weight:700" title="recommended">'+fn(rc)+'</div>'
+        +'<input class="sb-ov" data-sku="'+esc(sku)+'" data-m="'+m+'" value="'+(ov!=null?esc(String(ov)):'')+'" placeholder="–" title="override the demand-plan forecast (auto-saves)" style="width:46px;font-size:11px;padding:1px 3px;border:1px solid #cbd5e1;border-radius:4px;text-align:right;margin-top:1px;color:#7c3aed;font-weight:600"></td>'; }).join('');
+    return '<tr><td style="'+TC+';text-align:left;font-weight:700;font-family:ui-monospace,Menlo,monospace;white-space:nowrap;position:sticky;left:0;background:#fff">'+esc(sku)+'<div style="font-size:9px;color:#94a3b8;font-weight:400">'+bm[2]+'</div></td>'+cells+'</tr>'; }).join('');
+  var grid='<div style="overflow-x:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="border-collapse:collapse;font-size:12px;min-width:900px"><thead>'+head+'</thead><tbody>'+gridBody+'</tbody></table></div>';
+  var legend='<div style="font-size:11px;color:#64748b;margin:8px 0 4px;line-height:1.5">Per ship-bag SKU × month for <b>'+esc(co)+'</b> (DTC). Each cell stacks: <span style="color:#94a3b8">current forecast</span> · <span style="color:#6b21a8;font-weight:700">recommended</span> · <b style="color:#7c3aed">override input</b> (writes straight to the demand-plan forecast, auto-saves). Switch market with the pills — each has its own forecast + recommendations.</div>';
+  var applyBtn='<div style="margin-top:10px"><button id="sb-apply" style="border:1px solid #7c3aed;background:#7c3aed;color:#fff;font-weight:700;font-size:13px;padding:8px 18px;border-radius:6px;cursor:pointer">Apply recommendations to '+esc(co)+'</button> <span id="sb-apply-msg" style="font-size:12px;margin-left:8px"></span></div>';
+  body.innerHTML='<div style="padding:2px 2px 24px"><div style="font-weight:800;font-size:16px;margin:2px 0 6px">Ship bags — SKU forecast</div>'+bar+cfg+grid+legend+applyBtn+'</div>';
   body.querySelectorAll('.sb-mkt').forEach(function(b){ b.onclick=function(){ SB_MKT=b.dataset.v; renderShipBagView(body); }; });
-  var _ap=body.querySelector('#sb-apply'); if(_ap)_ap.onclick=function(){ var m=body.querySelector('#sb-apply-msg');
-    if(!confirm('Apply recommended ship-bag forecasts to SHIPBAG-MED / LAR / XLG across UK/US/EU/AU (forward 12 months)? This overrides their current DTC forecast and saves.'))return;
-    var n=0; MKTS4.forEach(function(mc){ recByMkt[mc].forEach(function(r,i){ var mo=fwd12[i];
-      skuOvSet('SHIPBAG-MED',mc,'DTC',mo,Math.round(r.medium)); skuOvSet('SHIPBAG-LAR',mc,'DTC',mo,Math.round(r.large)); skuOvSet('SHIPBAG-XLG',mc,'DTC',mo,Math.round(r.xl)); n+=3; }); });
-    if(m){m.style.color='#64748b';m.textContent='Saving '+n+' values…';}
-    if(typeof saveForecasts==='function'){ Promise.resolve(saveForecasts()).then(function(){ if(m){m.style.color='#16a34a';m.textContent='Applied ✓ — '+n+' forecast values saved; they now feed the buy plan.';} }).catch(function(e){ if(m){m.style.color='#dc2626';m.textContent='Save failed: '+(e&&e.message||e);} }); }
-    else if(m){m.style.color='#16a34a';m.textContent='Applied '+n+' overrides — click Save Forecasts to persist.';} };
+  body.querySelectorAll('.sb-ov').forEach(function(inp){ inp.onchange=function(){ var sku=inp.dataset.sku, m=inp.dataset.m, raw=(inp.value||'').trim();
+    if(raw===''){ skuOvSet(sku,co,'DTC',m,''); } else { var v=parseFloat(raw.replace(/[^0-9.\-]/g,'')); if(isFinite(v))skuOvSet(sku,co,'DTC',m,Math.round(v)); }
+    renderShipBagView(body); }; });   // skuOvSet auto-saves (markDirty) → binds to the demand plan
+  var _ap=body.querySelector('#sb-apply'); if(_ap)_ap.onclick=function(){ var m2=body.querySelector('#sb-apply-msg');
+    if(!confirm('Apply recommended ship-bag forecasts for '+co+' (this market, '+months.length+' months)? This overrides the current DTC forecast for SHIPBAG-MED / LAR / XLG and saves.'))return;
+    var n=0; months.forEach(function(mm){ var r=recByM[mm]; if(!r)return; skuOvSet('SHIPBAG-MED',co,'DTC',mm,Math.round(r.medium)); skuOvSet('SHIPBAG-LAR',co,'DTC',mm,Math.round(r.large)); skuOvSet('SHIPBAG-XLG',co,'DTC',mm,Math.round(r.xl)); n+=3; });
+    if(m2){m2.style.color='#64748b';m2.textContent='Saving '+n+' values…';}
+    if(typeof saveForecasts==='function'){ Promise.resolve(saveForecasts()).then(function(){ if(m2){m2.style.color='#16a34a';m2.textContent='Applied ✓ — '+n+' values saved for '+co+'.';} renderShipBagView(body); }).catch(function(e){ if(m2){m2.style.color='#dc2626';m2.textContent='Save failed: '+(e&&e.message||e);} }); }
+    else { renderShipBagView(body); } };
   function num(el,dflt){ var v=parseFloat(el.value); return isFinite(v)?v:dflt; }
   var mp={p1:'SB_P1',p2:'SB_P2',p3:'SB_P3',a1:'SB_A1',a2:'SB_A2',a3:'SB_A3'};
   Object.keys(mp).forEach(function(k){ var el=body.querySelector('.sb-'+k); if(el)el.onchange=function(){ window[mp[k]]=num(this,window[mp[k]]); renderShipBagView(body); }; });

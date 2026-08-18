@@ -1,3 +1,8 @@
+## v27.102 Ship bags: focused per-SKU × month forecast grid (+ Large=4u / XL=6u defaults)
+- Reworked DEMAND ▸ Analysis ▸ Ship bags into a focused editable grid: rows = the 3 ship-bag SKUs (SHIPBAG-MED/LAR/XLG), columns = this month + next 10 (11 months). Each cell stacks current forecast · recommended · an **override input that writes straight to the demand-plan forecast** (skuOvSet → auto-save), same binding as the plan. Market pills US/UK/AU/EU, each with its own forecast + recommendations. "Apply recommendations" now targets the selected market. Removed the old cards + units/orders month table.
+- Per Ben's model note: **Large bag = 4-unit orders, XL = 6+ units** — changed the XL default from 7u to **6u** and Large from 3u to **4u**.
+- Verified: 3 SKU rows × 11 months, 33 override inputs, new defaults, 0 errors.
+
 ## v27.101 Stock cover: separate discontinued-stock metric (>4 months)
 - New **Discontinued stock (>4 months)** table: per warehouse + overall, the £ value of stock for SKUs discontinued more than 4 months ago (per that market's discontinue date, time-aware vs the snapshot month), and its % of total stock value. Obsolete inventory = pure working-capital drag, now surfaced separately.
 - New **"Exclude discontinued (>4mo) from cover"** toggle — when on, the weeks-of-cover (grid, overall, comparison, KPIs) is based on **active** stock only, so cover isn't inflated by dead stock. Server adds `disc_val` per warehouse/month to `/api/demand/stock-cover`.
