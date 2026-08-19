@@ -1,3 +1,13 @@
+## v27.156 Blank-deposit ESTIMATE — a not-yet-funded deposit is pre-funded to its estimated total
+- **What:** a deposit whose **amount is blank** (a real row exists, not the `NO DEPOSIT` sentinel) now behaves as if its amount = its **estimated total** = Σ of its linked open POs' start deposit (order value × supplier start%). Previously a blank deposit read as £0, so its POs' start deposits rolled into completion.
+- **Where it shows:**
+  - **PO drawdown (finance view):** each linked PO draws its full start deposit instead of being capped at £0 — the start no longer rolls into completion. **Migration 235** rebuilds `planner.v_po_finance` (DROP + CREATE; base does `SELECT po.*` so a later table column blocks CREATE OR REPLACE). Real-amount deposits are byte-identical (the availability cap still applies); `NO DEPOSIT` / dangling refs untouched.
+  - **Deposits report:** the **Amount** column shows the estimate as `~1,234 est` (italic) and **Remaining** = estimate − used.
+  - **Cash flow:** the deposit pool line uses the estimated amount (flagged as an estimate), dated on the earliest linked-PO start due.
+  - **Payments Due:** unchanged — still reads the entered amount, so an estimated deposit stays hidden until a real amount > 0 **and** a due date are entered.
+- **Also fixed (pre-existing):** cash flow 500'd on a `r.shipment_ref` typo (undefined alias) in the shipment-freight query → corrected to `sh.shipment_ref`. Worth checking live cash flow with shipments.
+- **Deploy:** run migration **235** (view rebuild) before the server change; no other migrations.
+
 ## v27.155 Deposits: delete a deposit with linked POs → choose NO DEPOSIT / UNASSIGNED / Cancel
 - A deposit with linked purchase orders can now be **deleted** (it was locked before). On delete you're prompted: **Set to NO DEPOSIT** (the sentinel — start deposit rolls into completion), **Set to UNASSIGNED** (clears the deposit ref so the POs can be reassigned), or **Cancel**. The chosen disposition is applied to every linked PO before the deposit is removed. (Deposits with a payment date are still locked.)
 

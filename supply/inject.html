@@ -5369,7 +5369,10 @@
       var c_prod= locked?'<td class="l">'+txt(d.prod_no)+'</td>'
         :'<td class="l"><button class="cell-pick dep-prod-pick" data-id="'+d.id+'" title="pick an active production">'+(d.prod_no?esc(d.prod_no):'<span class="mut">— set</span>')+' ▾</button></td>';
       // Amount: display with thousands separators when locked (money()); the editor stays a raw number (no commas → no parse crash).
-      var c_amt = locked?'<td style="font-variant-numeric:tabular-nums">'+((d.amount==null||d.amount==='')?'<span class="mut">—</span>':money(d.amount))+'</td>':'<td>'+editCell(ep,'amount',d.amount)+'</td>';
+      var _amtDisp = d.amount_is_est
+        ? '<span style="color:#64748b;font-style:italic" title="Estimated — Σ start deposit of the linked POs (no amount entered yet). Drives cash flow + the POs\' drawdown so the start isn\'t pushed into completion.">~'+money(d.amount_est)+' <span style="font-size:9px">est</span></span>'
+        : ((d.amount==null||d.amount==='')?'<span class="mut">—</span>':money(d.amount));
+      var c_amt = locked?'<td style="font-variant-numeric:tabular-nums">'+_amtDisp+'</td>':'<td>'+editCell(ep,'amount',d.amount)+'</td>';
       var c_fx  = locked?'<td'+(fxBlank?_redTd:'')+'>'+txt(d.xero_fx)+'</td>':'<td'+(fxBlank?_redTd:'')+'>'+editCell(ep,'xero_fx',d.xero_fx)+'</td>';
       // Dates — Due / Likely pay / Paid merged into one stacked cell with small labels. Likely pay hides once paid (unpaid-only).
       var _dl='display:inline-block;width:38px;color:#94a3b8';   // little row label
@@ -5422,7 +5425,7 @@
       var v_sup = locked?txt(d.supplier_name):'<button class="cell-pick dep-sup-pick" data-id="'+d.id+'" data-val="'+esc(d.supplier_name||'')+'" title="pick a supplier">'+(d.supplier_name?esc(d.supplier_name):'<span class="mut">— set</span>')+' ▾</button>';
       var v_ctry= locked?txt(d.country):'<select class="fci" data-ep="'+esc(ep)+'" data-field="country"><option value=""></option>'+DEP_MKTS.map(function(mk){return '<option'+(String(d.country||'').toUpperCase()===mk?' selected':'')+'>'+mk+'</option>';}).join('')+'</select>';
       var v_prod= locked?txt(d.prod_no):'<button class="cell-pick dep-prod-pick" data-id="'+d.id+'" title="pick an active production">'+(d.prod_no?esc(d.prod_no):'<span class="mut">— set</span>')+' ▾</button>';
-      var v_amt = locked?((d.amount==null||d.amount==='')?'<span class="mut">—</span>':money(d.amount)):editCell(ep,'amount',d.amount,'','style="width:120px"');
+      var v_amt = locked?(d.amount_is_est?'<span style="color:#64748b;font-style:italic" title="Estimated — Σ start deposit of the linked POs (no amount entered yet)">~'+money(d.amount_est)+' est</span>':((d.amount==null||d.amount==='')?'<span class="mut">—</span>':money(d.amount))):editCell(ep,'amount',d.amount,'','style="width:120px"');
       var v_fx  = locked?txt(d.xero_fx):editCell(ep,'xero_fx',d.xero_fx,'','style="width:90px"');
       var _dl='display:inline-block;width:46px;color:#94a3b8';
       var v_dates = locked

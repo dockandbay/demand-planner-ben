@@ -1643,11 +1643,22 @@ async function cashflowResponse(pos, q) {
     .rows.forEach(r => { likely[r.line_key] = r.d; }); } catch (e) { /* table not yet created */ }
   // referenced-deposit pools (one cash line per reference; replaces the PO's own deposit line)
   const depPools = await q(`
-    SELECT reference, round(sum(coalesce(amount,0)),2) amount, max(supplier_name) supplier, max(country) country,
-      max(coalesce(prod_no,'')) prod_no,
-      to_char(max(date_paid),'YYYY-MM-DD') date_paid, bool_and(date_paid IS NOT NULL) all_paid,
-      to_char(min(date_due),'YYYY-MM-DD') date_due, to_char(min(date_likely_pay),'YYYY-MM-DD') date_likely_pay
-    FROM planner.deposits WHERE is_deposit AND coalesce(reference,'') <> '' GROUP BY reference`);
+    SELECT dep.reference,
+      -- BLANK deposit (no entered amount, not NO DEPOSIT) → its cash-flow amount is the ESTIMATED total (Σ start
+      -- deposit of its open POs), so the outflow shows even before the deposit is funded (mig 235).
+      CASE WHEN dep.amt=0 AND round(coalesce(et.est_total,0),2)>0 AND upper(dep.reference)<>'NO DEPOSIT' THEN round(et.est_total,2) ELSE dep.amt END amount,
+      (dep.amt=0 AND round(coalesce(et.est_total,0),2)>0 AND upper(dep.reference)<>'NO DEPOSIT') amount_is_est,
+      dep.supplier, dep.country, dep.prod_no, dep.date_paid, dep.all_paid, dep.date_due, dep.date_likely_pay
+    FROM (
+      SELECT reference, round(sum(coalesce(amount,0)),2) amt, max(supplier_name) supplier, max(country) country,
+        max(coalesce(prod_no,'')) prod_no,
+        to_char(max(date_paid),'YYYY-MM-DD') date_paid, bool_and(date_paid IS NOT NULL) all_paid,
+        to_char(min(date_due),'YYYY-MM-DD') date_due, to_char(min(date_likely_pay),'YYYY-MM-DD') date_likely_pay
+      FROM planner.deposits WHERE is_deposit AND coalesce(reference,'') <> '' GROUP BY reference
+    ) dep
+    LEFT JOIN (SELECT deposit_ref, round(sum(start_calc),2) est_total FROM planner.v_po_finance
+               WHERE coalesce(deposit_ref,'')<>'' AND coalesce(status,'') NOT ILIKE '%complete%' GROUP BY deposit_ref) et
+      ON et.deposit_ref=dep.reference`);
   // deposit reference → its production number (for the export's "UK Deposit Ref" column).
   const depProdByRef = {}; depPools.forEach(d => { if (d.reference) depProdByRef[d.reference] = d.prod_no || ''; });
   // "Other payments" — sundry register rows (is_deposit=false): freight/fees/etc. entered directly.
@@ -1678,7 +1689,7 @@ async function cashflowResponse(pos, q) {
     FROM planner.shipments sh
     LEFT JOIN agg a ON a.shipment_ref=sh.shipment_ref
     LEFT JOIN LATERAL (SELECT f.* FROM planner.flexport_shipments f
-      WHERE f.flex_id=sh.carrier_ref OR f.shipment_name=r.shipment_ref
+      WHERE f.flex_id=sh.carrier_ref OR f.shipment_name=sh.shipment_ref
       ORDER BY (f.flex_id=sh.carrier_ref) DESC NULLS LAST LIMIT 1) fx ON true`);
   const shipFreight = {};
   shipRows.forEach(s => { shipFreight[s.shipment_ref] = shipFreightSrv(s); });
@@ -1738,7 +1749,7 @@ async function cashflowResponse(pos, q) {
     const earliest = linked.map(p => p.start_due).filter(Boolean).sort()[0] || null;
     // due = the deposit's own due date (register) ▸ earliest linked-PO start due; likely = the deposit's likely-pay date
     add({ key: 'deppool:' + d.reference, type: 'Deposit', ref: d.reference, supplier: d.supplier, country: d.country,
-      amount: d.amount, due: d.date_due || earliest, likely: d.date_likely_pay || null,
+      amount: d.amount, due: d.date_due || earliest, likely: d.date_likely_pay || null, estimate: !!d.amount_is_est,
       paid_date: d.all_paid ? d.date_paid : null, basis: 'register' });
   }
   // 5. freight + duty + tax — by shipment where assigned, else per PO. Skip complete POs (settled).
@@ -3858,12 +3869,23 @@ app.get('/api/supply/:section', async (req, res, next) => {
               AND round(coalesce(po.supplier_invoice_total, lv.line_value, po.order_value_estimation, 0)
                         * coalesce(po.start_deposit_pct_override, s.start_deposit_pct, 0)/100, 2) > 0
             GROUP BY po.deposit_ref
+          ), etot AS (
+            -- estimated total per ref = Σ of the ref's open POs' start deposit (from the finance view, so it matches
+            -- the drawdown). Drives a BLANK deposit's amount/remaining (mig 235: a blank deposit is pre-funded to this).
+            SELECT deposit_ref, round(sum(start_calc),2) est_total FROM planner.v_po_finance
+            WHERE coalesce(deposit_ref,'')<>'' AND coalesce(status,'') NOT ILIKE '%complete%' GROUP BY deposit_ref
           )
           SELECT d.id,d.reference,d.is_deposit,d.supplier_name,d.prod_no,d.country,d.description,
             d.amount,d.xero_fx,d.xero_account_code, coalesce(d.status,'') status, to_char(d.date_paid,'YYYY-MM-DD') date_paid,
             to_char(d.date_due,'YYYY-MM-DD') date_due, to_char(d.date_likely_pay,'YYYY-MM-DD') date_likely_pay,
             CASE WHEN d.is_deposit THEN coalesce(dr.used,0) END deposit_used,
-            CASE WHEN d.is_deposit THEN coalesce(p.pool_amount, coalesce(d.amount,0))-coalesce(dr.used,0) END deposit_remaining,
+            -- BLANK deposit (no entered amount, real row, not NO DEPOSIT) → its amount/remaining are the estimated total.
+            (d.is_deposit AND coalesce(p.pool_amount,0)=0 AND round(coalesce(et.est_total,0),2)>0 AND upper(coalesce(d.reference,''))<>'NO DEPOSIT') amount_is_est,
+            CASE WHEN d.is_deposit THEN round(coalesce(et.est_total,0),2) END amount_est,
+            CASE WHEN d.is_deposit THEN
+              (CASE WHEN coalesce(p.pool_amount,0)=0 AND round(coalesce(et.est_total,0),2)>0 AND upper(coalesce(d.reference,''))<>'NO DEPOSIT'
+                    THEN round(coalesce(et.est_total,0),2) ELSE coalesce(p.pool_amount, coalesce(d.amount,0)) END)
+              - coalesce(dr.used,0) END deposit_remaining,
             CASE WHEN d.is_deposit THEN round(coalesce(ea.est_alloc,0),2) END est_alloc,
             CASE WHEN d.is_deposit THEN coalesce(ea.open_unalloc,0) END open_unalloc,
             CASE WHEN d.is_deposit THEN ea.pos_unalloc END pos_unalloc,
@@ -3913,6 +3935,7 @@ app.get('/api/supply/:section', async (req, res, next) => {
           LEFT JOIN draw dr ON dr.deposit_ref=d.reference
           LEFT JOIN pool p ON p.reference=d.reference
           LEFT JOIN est ea ON ea.deposit_ref=d.reference
+          LEFT JOIN etot et ON et.deposit_ref=d.reference
           ORDER BY d.is_deposit DESC, d.date_paid DESC NULLS FIRST, d.id DESC`));
       case 'productions': {
         // A PRODUCTION = one supplier within a prod_no (the bulk factory run for that supplier).
