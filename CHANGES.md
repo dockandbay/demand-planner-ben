@@ -1,3 +1,8 @@
+## v27.143 BI & REPORTS: one combined counter + high-priority ACTIONS L3 badge
+- The **BI & REPORTS** L2 tab now shows a **single** counter = high-priority Actions + ERP Compare + DTC Mismatch + Reallocate (previously two separate numbers — actions + DTC). Hover shows the breakdown.
+- The **ACTIONS** L3 sub-tab gets its own red counter = number of high-priority (severity=high / required-field-missing) open actions.
+- All four counts refresh in the background on entering SUPPLY and on each report-tab switch, so the combined number stays current without opening each report.
+
 ## v27.142 Manage FBA: include Reserved Staging in on-hand + show the 3 columns
 - Amazon FBA on-hand now = **available + fc-transfer + Reserved Staging** (report col CE was previously ignored). The Manage FBA reconciliation shows all three columns (Available · FC-transfer · Reserved staging) and the summed **FBA report (avail+fc+staging)** vs ERP for the discrepancy. All markets. (UK example: 24,047 → 25,937 on-hand.)
 

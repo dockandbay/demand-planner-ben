@@ -4787,8 +4787,7 @@
   function paymentsNavBadge(n){ n=Number(n)||0; var btn=document.querySelector('#supply-subnav .stab[data-k="payments"]'); if(btn)btn.innerHTML='PAYMENTS'+(n>0?' <span class="ex-badge" title="'+n+' payment'+(n>1?'s':'')+' overdue">'+n+'</span>':'');
     var opt=document.querySelector('#supply-nav-sel option[value="payments"]'); if(opt)opt.textContent='PAYMENTS'+(n>0?' ('+n+')':''); }
   // ACTIONS tab badge = number of OPEN, HIGH-severity actions (the red items you should tackle first)
-  function actionsNavBadge(n){ n=Number(n)||0; var b=document.getElementById('nav-actions-badge');   // Actions folded into BI & REPORTS → the high-priority counter rides that L2 tab
-    if(b){ if(n>0){ b.textContent=n; b.style.display=''; b.title=n+' high-priority action'+(n>1?'s':''); } else { b.textContent=''; b.style.display='none'; } } }
+  function actionsNavBadge(n){ _actHi=Number(n)||0; try{ paintReportsL2Badge(); }catch(e){} }   // Actions folded into BI & REPORTS → count feeds the combined L2 counter + the ACTIONS L3 tab
   function setActionsBadgeFrom(rows){ try{ actionsNavBadge((rows||[]).filter(function(r){return (r.severity==='high' || r.type==='Required field missing') && (!r.status||r.status==='open');}).length); }catch(e){} }   // master-data-missing (amber) also counts on the ACTIONS badge (Ben, item 13)
   function poSubNav(){ return '<div id="prod-subtabs">'+subListFor(poSub).map(function(t){ var bd=(_NAVLBL[t[0]]!==undefined)?navBadge(_navCounts[t[0]],_NAVNOUN[t[0]]):''; return '<span class="rtab'+(poSub===t[0]?' active':'')+'" data-posub="'+t[0]+'">'+t[1]+bd+'</span>'; }).join('')+'</div>'; }
   // count of OVERDUE payments — mirrors buildPaymentsDue's r.overdue (unpaid, has a due date, 2026-01-01 ≤ due < today).
@@ -9354,18 +9353,26 @@
       var btn=document.querySelector('#view-tabs-row .view-toggle[data-view="'+seg[0]+'"]'); if(btn)btn.click(); } }
   window.addEventListener('hashchange',function(){ if(location.hash===_expectedHash)return; applyRoute(); });
 
+  // BI & REPORTS L2 tab shows ONE combined counter (Ben) = high-priority Actions + ERP Compare + DTC Mismatch + Reallocate.
+  var _actHi=0, _dtcCount=0;   // _erpcCount / _reallocCount declared below
+  function paintReportsL2Badge(){ var b=document.getElementById('nav-actions-badge');
+    var n=(_actHi||0)+(Number(_erpcCount)||0)+(_dtcCount||0)+(Number(_reallocCount)||0);
+    if(b){ if(n>0){ b.textContent=n; b.style.display=''; b.title=n+' item'+(n>1?'s':'')+' needing attention — high-priority actions + ERP compare + DTC mismatch + reallocate'; } else { b.textContent=''; b.style.display='none'; } }
+    var d=document.getElementById('nav-dtc-badge'); if(d)d.style.display='none';   // folded into the single combined counter
+    var ab=document.getElementById('rep-actions-badge');   // ACTIONS L3 tab high-priority counter
+    if(ab){ if(_actHi>0){ ab.textContent=_actHi; ab.style.display=''; ab.title=_actHi+' high-priority action'+(_actHi>1?'s':''); } else { ab.textContent=''; ab.style.display='none'; } } }
   // ERP-compare "to review" (non-ignored) counter shown next to the ERP COMPARE sub-nav tab.
   var _erpcCount=null;
   function paintErpcBadge(){ var el=document.getElementById('rep-erpc-badge'); if(!el)return;
     if(_erpcCount==null||_erpcCount===0){ el.textContent=''; el.style.display='none'; }
     else { el.textContent=_erpcCount; el.style.display=''; el.title=_erpcCount+' open ERP PO(s) to review (not ignored)'; } }
-  function refreshErpcBadge(){ fetch('/api/supply/bi/erp-compare').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _erpcCount=j.count; paintErpcBadge(); } }).catch(function(){}); }
+  function refreshErpcBadge(){ fetch('/api/supply/bi/erp-compare').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _erpcCount=j.count; paintErpcBadge(); try{ paintReportsL2Badge(); }catch(e){} } }).catch(function(){}); }
   // Open reallocation-options counter next to the REALLOCATE sub-nav tab (amber — these are opportunities, not overdue actions).
   var _reallocCount=null;
   function paintReallocBadge(){ var el=document.getElementById('rep-realloc-badge'); if(!el)return;
     if(_reallocCount==null||_reallocCount===0){ el.textContent=''; el.style.display='none'; }
     else { el.textContent=_reallocCount; el.style.display=''; el.title=_reallocCount+' open reallocation option'+(_reallocCount===1?'':'s'); } }
-  function refreshReallocBadge(){ fetch('/api/supply/bi/reallocations').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _reallocCount=j.count; paintReallocBadge(); } }).catch(function(){}); }
+  function refreshReallocBadge(){ fetch('/api/supply/bi/reallocations').then(function(r){return r.json();}).then(function(j){ if(j&&typeof j.count==='number'){ _reallocCount=j.count; paintReallocBadge(); try{ paintReportsL2Badge(); }catch(e){} } }).catch(function(){}); }
   var _urgentCrit=null;   // count of CRITICAL urgent-buy SKUs (excludes too-late-to-order), shown as a red action counter on the URGENT BUY tab
   function paintUrgentBadge(){ var el=document.getElementById('rep-urgent-badge'); if(!el)return;
     if(_urgentCrit==null||_urgentCrit===0){ el.textContent=''; el.style.display='none'; }
@@ -9377,13 +9384,15 @@
     document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k==='reports');});
     var _ns=document.getElementById('supply-nav-sel'); if(_ns)_ns.value='reports';
     var c=document.getElementById('supply-content');
-    c.innerHTML='<div id="rep-subnav">'+REPORT_SECTIONS.map(function(s){return '<span class="rtab'+(s[0]===rk?' active':'')+'" data-rk="'+s[0]+'">'+s[1]+(s[0]==='erp-compare'?'<span id="rep-erpc-badge" class="rtab-count" style="display:none"></span>':s[0]==='dtc-mismatch'?'<span id="nav-dtc-badge-l3" class="rtab-count" style="display:none"></span>':s[0]==='reallocate'?'<span id="rep-realloc-badge" class="rtab-count" style="display:none"></span>':s[0]==='urgent-buy'?'<span id="rep-urgent-badge" class="rtab-count" style="display:none;background:#dc2626;color:#fff"></span>':'')+'</span>';}).join('')+'</div><div id="rep-body"><div class="count">Loading…</div></div>';
+    c.innerHTML='<div id="rep-subnav">'+REPORT_SECTIONS.map(function(s){return '<span class="rtab'+(s[0]===rk?' active':'')+'" data-rk="'+s[0]+'">'+s[1]+(s[0]==='actions'?'<span id="rep-actions-badge" class="rtab-count" style="display:none;background:#dc2626;color:#fff"></span>':s[0]==='erp-compare'?'<span id="rep-erpc-badge" class="rtab-count" style="display:none"></span>':s[0]==='dtc-mismatch'?'<span id="nav-dtc-badge-l3" class="rtab-count" style="display:none"></span>':s[0]==='reallocate'?'<span id="rep-realloc-badge" class="rtab-count" style="display:none"></span>':s[0]==='urgent-buy'?'<span id="rep-urgent-badge" class="rtab-count" style="display:none;background:#dc2626;color:#fff"></span>':'')+'</span>';}).join('')+'</div><div id="rep-body"><div class="count">Loading…</div></div>';
     c.querySelectorAll('#rep-subnav .rtab').forEach(function(p){p.onclick=function(){selectReport(p.dataset.rk);};});
     paintErpcBadge();   // repaint from last-known count; refresh in the background unless we're about to load the report itself (which sets it)
     if(rk!=='erp-compare') refreshErpcBadge();
     paintReallocBadge(); if(rk!=='reallocate') refreshReallocBadge();   // REALLOCATE opens set the count itself; other tabs refresh it in the background
     paintUrgentBadge(); if(rk!=='urgent-buy') refreshUrgentBadge();   // URGENT BUY critical count — the report itself sets it; other tabs refresh in the background
     try{ refreshDtcBadge(); }catch(e){}   // DTC mismatch issue-count badge on its sub-tab
+    try{ paintReportsL2Badge(); }catch(e){}   // paint the ACTIONS L3 high-priority badge + combined L2 counter from last-known counts
+    if(rk!=='actions'&&typeof prewarmActions==='function') prewarmActions();   // keep the high-priority actions count fresh in the background
     if(rk==='actions'||rk==='recommendations'||rk==='erp-compare'){   // folded-in Actions views → render into rep-body without the act-subnav
       actSub=rk; _actHost=document.getElementById('rep-body');
       if(cache['actions']){ try{ renderActions(cache['actions']); }catch(e){} } else { renderActionsProgressive(_actHost,_tk); } return; }
@@ -9419,8 +9428,10 @@
   function _dtcFlash(el){ if(!el)return; var p=el.style.backgroundColor; el.style.transition='background-color .12s'; el.style.backgroundColor='#bbf7d0'; setTimeout(function(){ el.style.backgroundColor=p||''; setTimeout(function(){try{el.style.transition='';}catch(e){}},200); },520); }   // green flash on note save
   function _dtcApplyHideAcc(){ var host=document.getElementById('dtc-list'); if(host)host.querySelectorAll('tr.dtc-order-row').forEach(function(tr){ if(tr.dataset.acc==='1')tr.style.display=_dtcHideAcc?'none':''; });
     var btn=document.getElementById('dtc-hide-acc'); if(btn){ btn.style.background=_dtcHideAcc?'#1d4ed8':'#fff'; btn.style.color=_dtcHideAcc?'#fff':'#475569'; btn.style.borderColor=_dtcHideAcc?'#1d4ed8':'#cbd5e1'; btn.textContent=(_dtcHideAcc?'✓ ':'')+'Hide accepted'; } }
-  function refreshDtcBadge(){ var els=[document.getElementById('nav-dtc-badge'),document.getElementById('nav-dtc-badge-l3')].filter(Boolean); if(!els.length)return;   // level-2 (BI&Reports tab) + level-3 (DTC Mismatch sub-tab)
-    fetch('/api/supply/dtc/mismatch?count=1').then(function(r){return r.json();}).then(function(j){ var c=(j&&j.counts)||{}; var n=(c.issues||0)+(c.unmapped_pos||0); els.forEach(function(el){ el.textContent=n?String(n):''; el.style.display=n?'':'none'; }); }).catch(function(){}); }
+  function refreshDtcBadge(){   // DTC mismatch count → its own L3 sub-tab badge + folded into the combined BI & REPORTS L2 counter
+    fetch('/api/supply/dtc/mismatch?count=1').then(function(r){return r.json();}).then(function(j){ var c=(j&&j.counts)||{}; _dtcCount=(c.issues||0)+(c.unmapped_pos||0);
+      var el=document.getElementById('nav-dtc-badge-l3'); if(el){ el.textContent=_dtcCount?String(_dtcCount):''; el.style.display=_dtcCount?'':'none'; }
+      try{ paintReportsL2Badge(); }catch(e){} }).catch(function(){}); }
   function renderDtcMismatch(d){ var b=biBody(); d=d||{orders:[],counts:{}}; var counts=d.counts||{};
     b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:#0f172a">DTC mismatch</div>'
       +'<div class="mut tiny" style="margin-bottom:10px;max-width:840px">Open Direct-to-Client sales orders (not void, not dispatched) reconciled against their purchase orders (mapped by sales order ref). Flags orders with <b>no PO</b> or a <b>SKU / quantity mismatch</b>. Add a note or <b>accept</b> a discrepancy to clear it from the count.</div>'
@@ -9718,7 +9729,7 @@
   // ERP COMPARE — open/draft ERP POs missing from the planner (supplier must be a planner product supplier)
   function renderErpCompare(d,_cont,_re){ var b=_cont||biBody(); d=d||{}; var all=d.rows||[];
     var active=all.filter(function(r){return !r.ignored;}), ignored=all.filter(function(r){return r.ignored;});
-    _erpcCount=active.length; paintErpcBadge();   // keep the sub-nav counter in sync (incl. after ignore / un-ignore)
+    _erpcCount=active.length; paintErpcBadge(); try{ paintReportsL2Badge(); }catch(e){}   // keep the sub-nav counter in sync (incl. after ignore / un-ignore)
     var head='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:#0f172a">ERP compare — open ERP POs missing from the planner</div>'
       +'<div class="mut tiny" style="margin-bottom:12px">Open/draft purchase orders in the ERP (Cin7) that are <b>not</b> in your PURCHASE ORDERS list — limited to POs whose supplier is a supplier in the planner (freight / internal / test vendors like Flexport &amp; HMRC are excluded). <b>'+active.length+'</b> to review'+(ignored.length?' · '+ignored.length+' ignored':'')+'.</div>';
     function tbl(list,isIgnored){
@@ -9857,7 +9868,7 @@
     m.querySelectorAll('.snz-opt').forEach(function(o){ o.onmouseenter=function(){o.style.background='#eff6ff';}; o.onmouseleave=function(){o.style.background='';};
       o.onclick=function(){ close(); fetch('/api/supply/actions/state',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key,status:'snoozed',snooze_days:parseInt(o.dataset.d,10)||7})}).then(function(){ if(after)after(); }); }; }); }
   function renderReallocate(d){ var b=biBody(); d=d||{}; var recs=d.recs||[];
-    _reallocCount=recs.length; paintReallocBadge();
+    _reallocCount=recs.length; paintReallocBadge(); try{ paintReportsL2Badge(); }catch(e){}
     if(!recs.length){ b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 6px">Reallocate — order-plan adjustments</div><div class="count">No reallocation opportunities right now — every editable production’s split matches demand. 🎉</div>'; return; }
     var tgt=d.target_months||3;
     function card(r){ var crit=r.to_urgency==='critical';
@@ -10334,7 +10345,10 @@
   // without waiting for CONFIG's (sometimes slow) DOM render. Mirror L2 in renderConfig if that list changes.
   try{window.__configNav={items:[['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']],select:function(k){ if(typeof _SUPCFG_KEYS!=='undefined'&&_SUPCFG_KEYS.indexOf(k)>=0){ enterSupplyConfig(k); } else { CONFIG_SUB=k; enterConfig(); } },current:function(){return CONFIG_SUB;}};}catch(e){}
   function showSupply(noSelect){ ensureRoot(); if(typeof hideScenario==='function')hideScenario(); var app=document.getElementById('app'); if(app){app.classList.add('supply-active');app.classList.remove('config-mode');}
-    try{ refreshDtcBadge(); }catch(e){}   // DTC mismatch issue count on the BI & REPORTS top tab
+    try{ refreshDtcBadge(); }catch(e){}   // populate the combined BI & REPORTS L2 counter (DTC + ERP compare + reallocate + high-priority actions)
+    try{ refreshErpcBadge(); }catch(e){}
+    try{ refreshReallocBadge(); }catch(e){}
+    try{ if(typeof prewarmActions==='function')prewarmActions(); }catch(e){}
     document.body.classList.add('supply-on');   // reveals the mobile top-bar search
     var r=document.getElementById('supply-root'); if(r)r.style.display='block';
     document.querySelectorAll('#view-tabs-row .view-toggle').forEach(function(b){b.classList.remove('active');});
@@ -10378,7 +10392,7 @@
   function ensureRoot(){ if(document.getElementById('supply-root'))return;
     var app=document.getElementById('app')||document.body; if(!app)return;
     var rootEl=document.createElement('div'); rootEl.id='supply-root';
-    rootEl.innerHTML='<div id="supply-subnav">'+SECTIONS.map(function(s){return '<a class="stab" data-k="'+s[0]+'" href="#/supply/'+s[0]+'">'+s[1]+(s[0]==='reports'?'<span id="nav-actions-badge" title="high-priority actions" style="display:none;margin-left:5px;background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;vertical-align:middle"></span><span id="nav-dtc-badge" title="DTC mismatch issues" style="display:none;margin-left:5px;background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;vertical-align:middle"></span>':'')+'</a>';}).join('')
+    rootEl.innerHTML='<div id="supply-subnav">'+SECTIONS.map(function(s){return '<a class="stab" data-k="'+s[0]+'" href="#/supply/'+s[0]+'">'+s[1]+(s[0]==='reports'?'<span id="nav-actions-badge" title="items needing attention" style="display:none;margin-left:5px;background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;vertical-align:middle"></span>':'')+'</a>';}).join('')
       +'<button id="supply-refresh-cache" title="Reload every report from the database fresh and reset all caches (client + server)" style="margin-left:auto;background:#fff;border:1px solid #cbd5e1;border-radius:5px;color:#2563eb;font-weight:600;font-size:11px;padding:2px 10px;cursor:pointer">↻ Refresh cache</button>'
       +'<span class="ver">HORIZON __APP_VERSION__</span></div>'
       +'<select id="supply-nav-sel" aria-label="Section">'+SECTIONS.map(function(s){return '<option value="'+s[0]+'">'+s[1]+'</option>';}).join('')+'</select>'
