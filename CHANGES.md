@@ -1,3 +1,10 @@
+## v27.148 Payments tables: mobile card layout (Deposits, Other Payments, Payments Due, Payments Report)
+- On phones (≤700px) the four payment tables now render as **stacked cards** (like the Flexport report) instead of a squashed wide table; desktop is unchanged.
+- **Deposits** — card per deposit with the linked-POs mini-table, edit/close/delete/apply actions; edit unlocks the fields inline as on desktop.
+- **Other Payments** & **Payments Due** — fully inline-editable cards (amount / dates / assigned + the green "pay" button).
+- **Payments Report** — card per payment run with the bank amount / currency inputs, Paid-USD, remittance + notify, and an expandable per-run line list.
+- All existing actions/bindings work in card mode (handlers made card-aware via `closest('tr,.mob-card')`).
+
 ## v27.147 Deposits register: wider linked-POs, merged Dates column, comma amounts, Xero code dropped
 - **Linked purchase orders** column widened (freed by the changes below).
 - **Dates** — Due / Likely pay / Date paid merged into one stacked column with small row labels; **Likely pay** hides once a Date paid is set (unpaid-only).

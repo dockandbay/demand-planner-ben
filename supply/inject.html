@@ -1268,6 +1268,15 @@
   // On mobile the Actions/Recommendations/ERP tables scroll horizontally with the first two columns pinned, and
   // Type + Ref are merged into one cell to save width. actHead() returns the matching <thead> for either layout.
   function actMob(){ return !!(window.matchMedia && window.matchMedia('(max-width:700px)').matches); }
+  // ── Mobile card helpers — render register/report rows as stacked cards (like the Flexport report) instead of a wide table.
+  // The value passed to mobFld can be interactive HTML (editCell/supSel/buttons); bindings still attach by class after render.
+  function mobFld(l,v){ return (v==null||v==='')?'':'<div style="display:flex;gap:10px;font-size:12px;line-height:1.55;align-items:baseline;margin-top:2px"><span style="color:#64748b;flex:0 0 92px">'+l+'</span><span style="color:#0f172a;font-weight:500;word-break:break-word;flex:1 1 auto;min-width:0">'+v+'</span></div>'; }
+  function mobCard(title,badge,fieldsHtml,actionsHtml){ return '<div class="mob-card" style="border:1px solid #e5e7eb;border-radius:10px;padding:11px 13px;background:#fff">'
+    +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap"><div style="font-weight:700;font-size:13px;color:#0f172a;word-break:break-word">'+(title||'—')+'</div>'+(badge||'')+'</div>'
+    +(fieldsHtml||'')
+    +(actionsHtml?'<div style="margin-top:9px;display:flex;gap:14px;flex-wrap:wrap;align-items:center">'+actionsHtml+'</div>':'')
+    +'</div>'; }
+  function mobCards(cardsHtml){ return '<div class="mob-cards" style="display:flex;flex-direction:column;gap:9px">'+(cardsHtml||'')+'</div>'; }
   function actHead(){ return actMob()
     ? '<thead><tr><th title="Severity" style="text-align:center">!</th><th>Type / Ref</th><th>Detail</th><th>Fix</th><th>Manage</th></tr></thead>'
     : '<thead><tr><th title="Severity" style="text-align:center">!</th><th>Type</th><th>Ref</th><th>Detail</th><th>Fix</th><th>Manage</th></tr></thead>'; }
@@ -5327,11 +5336,23 @@
       +'<input class="flt" id="dep-q" placeholder="Filter reference / supplier…" style="margin-left:6px"><span class="count" id="dep-cnt"></span></div>'
       +'<style>#deptbl{table-layout:fixed;width:100%}#deptbl td,#deptbl th{white-space:normal;overflow-wrap:break-word;vertical-align:top}#deptbl .fci{width:100%;box-sizing:border-box;min-width:0;text-align:left}'
       +'#deptbl .datewrap{display:flex;width:100%;max-width:100%}#deptbl .datewrap .dateinp{flex:1 1 auto;min-width:0;width:auto!important;text-align:left!important}#deptbl .datewrap .datepick{flex:0 0 auto}</style>'
-      +'<div class="tw"><table id="deptbl"><colgroup>'
+      +'<div class="tw" id="dep-tblwrap"><table id="deptbl"><colgroup>'
       +'<col style="width:120px"><col style="width:140px"><col style="width:56px"><col style="width:50px"><col style="width:96px"><col style="width:56px"><col style="width:124px"><col style="width:82px"><col style="width:92px"><col><col style="width:132px"></colgroup>'
-      +'<thead><tr><th class="l">Reference</th><th class="l">Supplier</th><th class="l" title="AU deposits are region-isolated; a PO can only use a deposit in its own region">Country</th><th class="l">PROD#</th><th>Amount</th><th>FX</th><th class="l" title="Due · Likely pay (unpaid only) · Date paid">Dates</th><th>Remaining</th><th title="Σ calculated start deposits of OPEN, not-yet-allocated POs on this reference">Est. alloc.</th><th class="l">Linked purchase orders</th><th class="l"></th></tr></thead><tbody id="dep-rows"></tbody></table></div>';
+      +'<thead><tr><th class="l">Reference</th><th class="l">Supplier</th><th class="l" title="AU deposits are region-isolated; a PO can only use a deposit in its own region">Country</th><th class="l">PROD#</th><th>Amount</th><th>FX</th><th class="l" title="Due · Likely pay (unpaid only) · Date paid">Dates</th><th>Remaining</th><th title="Σ calculated start deposits of OPEN, not-yet-allocated POs on this reference">Est. alloc.</th><th class="l">Linked purchase orders</th><th class="l"></th></tr></thead><tbody id="dep-rows"></tbody></table></div><div id="dep-cards"></div>';
     // Every deposit row is read-only by default; click Edit to unlock it, Save to relock. (A closed row must
     // be reopened first.) Edit state (DEP_EDIT) holds while you edit; saving relocks all rows.
+    // Linked purchase orders → a 3-column mini-table (PO Ref · Allocated · Estimated) with a Σ total row.
+    // Filter the per-PO breakdown by the toggle: Unallocated (default) / Open / All linked. Shared by the table + mobile cards.
+    function linkedPOsMini(d){
+      var arr=(d.po_alloc||[]).filter(function(p){ if(depPoView==='all')return true; if(depPoView==='open')return !p.complete; return !p.complete && !(Number(p.allocated)>0) && Number(p.estimated)>0; });
+      if(!arr.length) return '<span class="mut tiny">—</span>';
+      var tA=0,tE=0;
+      var body=arr.map(function(p){ tA+=Number(p.allocated)||0; tE+=Number(p.estimated)||0;
+        return '<tr><td class="l" style="padding:1px 6px 1px 0">'+(p.complete?'<span class="mut tiny" title="PO complete" style="margin-right:2px">✓</span>':'')+'<button class="lnk-btn dep-po-link" data-po="'+esc(p.po)+'" title="open this PO — payments tab" style="font-size:10px">'+esc(p.po)+'</button></td>'
+          +'<td style="text-align:right;padding:1px 0 1px 8px;font-variant-numeric:tabular-nums">'+(Number(p.allocated)>0?money(p.allocated):'<span class="mut">—</span>')+'</td>'
+          +'<td style="text-align:right;padding:1px 0 1px 10px;font-variant-numeric:tabular-nums">'+(Number(p.estimated)>0?money(p.estimated):'<span class="mut">—</span>')+'</td></tr>'; }).join('');
+      return '<table class="dep-po-tbl" style="width:100%;border-collapse:collapse;font-size:10px;line-height:1.5"><thead><tr><th class="l" style="font-weight:600;color:#64748b;padding:0 6px 2px 0">PO Ref</th><th style="text-align:right;font-weight:600;color:#64748b;padding:0 0 2px 8px">Allocated</th><th style="text-align:right;font-weight:600;color:#64748b;padding:0 0 2px 10px">Estimated</th></tr></thead><tbody>'+body+'</tbody>'
+        +'<tfoot><tr style="border-top:1px solid #cbd5e1;font-weight:700"><td class="l" style="padding:2px 6px 0 0">Total</td><td style="text-align:right;padding:2px 0 0 8px;font-variant-numeric:tabular-nums">'+money(tA)+'</td><td style="text-align:right;padding:2px 0 0 10px;font-variant-numeric:tabular-nums">'+money(tE)+'</td></tr></tfoot></table>'; }
     function rowHTML(d){ var ep='/api/supply/deposit/'+encodeURIComponent(d.id);
       var closed=d.status==='closed';
       var lockedPay=!!(d.date_paid && d.xero_fx!=null && String(d.xero_fx)!=='');   // paid + FX applied (info badge only)
@@ -5371,24 +5392,9 @@
         +(d.open_unalloc>0?'<div class="mut tiny" title="'+d.open_unalloc+' open linked PO'+(d.open_unalloc===1?'':'s')+' on this deposit with no start deposit allocated yet" style="color:#64748b;cursor:help;margin-top:1px;white-space:nowrap">'+d.open_unalloc+' unalloc</div>':'')
         +'</td>';   // "N unalloc" on its own second line (Ben)
       var c_est = '<td style="width:84px;white-space:nowrap'+(estOver?';color:#dc2626;font-weight:700':'')+'"'+(estOver?' title="Estimated allocation exceeds the remaining deposit">':'>')+(d.is_deposit?money(d.est_alloc):'')+'</td>';
-      // purchase orders linked to this deposit (open-only by default; toggle shows all) — each links to the
-      // PO opened on its PAYMENTS tab; the cell wraps so long lists flow onto multiple lines.
-      // Linked purchase orders → a 3-column mini-table (PO Ref · Allocated · Estimated) with a Σ total row.
-      // Filter the per-PO breakdown by the toggle: Unallocated (default) / Open / All linked.
-      var _poArr=d.po_alloc||[];
-      var _shownPO=_poArr.filter(function(p){ if(depPoView==='all')return true; if(depPoView==='open')return !p.complete; return !p.complete && !(Number(p.allocated)>0) && Number(p.estimated)>0; });   // 'unalloc' = open, nothing allocated yet, has an estimate
-      var c_asg;
-      if(!_shownPO.length){ c_asg='<td class="l" style="min-width:360px"><span class="mut tiny">—</span></td>'; }
-      else { var _tA=0,_tE=0;
-        var _body=_shownPO.map(function(p){ _tA+=Number(p.allocated)||0; _tE+=Number(p.estimated)||0;
-          return '<tr><td class="l" style="padding:1px 6px 1px 0">'+(p.complete?'<span class="mut tiny" title="PO complete" style="margin-right:2px">✓</span>':'')+'<button class="lnk-btn dep-po-link" data-po="'+esc(p.po)+'" title="open this PO — payments tab" style="font-size:10px">'+esc(p.po)+'</button></td>'
-            +'<td style="text-align:right;padding:1px 0 1px 8px;font-variant-numeric:tabular-nums">'+(Number(p.allocated)>0?money(p.allocated):'<span class="mut">—</span>')+'</td>'
-            +'<td style="text-align:right;padding:1px 0 1px 10px;font-variant-numeric:tabular-nums">'+(Number(p.estimated)>0?money(p.estimated):'<span class="mut">—</span>')+'</td></tr>'; }).join('');
-        c_asg='<td class="l" style="min-width:360px;max-width:560px;padding:3px 4px"><table class="dep-po-tbl" style="width:100%;border-collapse:collapse;font-size:10px;line-height:1.5">'
-          +'<thead><tr><th class="l" style="font-weight:600;color:#64748b;padding:0 6px 2px 0">PO Ref</th><th style="text-align:right;font-weight:600;color:#64748b;padding:0 0 2px 8px">Allocated</th><th style="text-align:right;font-weight:600;color:#64748b;padding:0 0 2px 10px">Estimated</th></tr></thead>'
-          +'<tbody>'+_body+'</tbody>'
-          +'<tfoot><tr style="border-top:1px solid #cbd5e1;font-weight:700"><td class="l" style="padding:2px 6px 0 0">Total</td><td style="text-align:right;padding:2px 0 0 8px;font-variant-numeric:tabular-nums">'+money(_tA)+'</td><td style="text-align:right;padding:2px 0 0 10px;font-variant-numeric:tabular-nums">'+money(_tE)+'</td></tr></tfoot>'
-          +'</table></td>'; }
+      // purchase orders linked to this deposit → the shared 3-column mini-table (toggle: Unallocated / Open / All)
+      var _lp=linkedPOsMini(d);
+      var c_asg = (_lp==='<span class="mut tiny">—</span>') ? '<td class="l" style="min-width:360px">'+_lp+'</td>' : '<td class="l" style="min-width:360px;max-width:560px;padding:3px 4px">'+_lp+'</td>';
       var act;
       if(closed) act='<span class="tool-badge bg-neutral" style="margin-right:5px">closed</span><button class="lnk-btn dep-close" data-id="'+d.id+'" data-st="">reopen</button>';
       else { var paidTag = lockedPay ? '<span class="tool-badge bg-green" style="margin-right:5px" title="paid &amp; FX applied">paid</span>' : '';
@@ -5405,20 +5411,49 @@
         ? '<button class="lnk-btn dep-apply-all" data-id="'+d.id+'" style="color:#6d28d9" title="assign this deposit to every open '+esc(d.supplier_name)+' PO in production '+esc(d.prod_no)+' ('+esc(d.country||'?')+' region) that has no deposit yet">⤿ apply to prod '+esc(d.prod_no)+'</button>'
         : '';
       return '<tr'+(editing?' style="background:#f0f6ff"':(closed?' style="opacity:.55"':''))+'>'+c_ref+c_sup+c_ctry+c_prod+c_amt+c_fx+c_dates+c_rem+c_est+c_asg+'<td class="l" style="white-space:nowrap;vertical-align:top">'+act+(applyBtn?'<div style="margin-top:4px">'+applyBtn+'</div>':'')+'</td></tr>'; }
+    // mobile: same fields + actions as the row, stacked into a card. Editable when the row is unlocked (edit); else read-only.
+    function depCard(d){ var ep='/api/supply/deposit/'+encodeURIComponent(d.id);
+      var closed=d.status==='closed', lockedPay=!!(d.date_paid && d.xero_fx!=null && String(d.xero_fx)!==''), editing=!!DEP_EDIT[d.id], locked=!editing;
+      function txt(v,isd){ return (v==null||v==='')?'<span class="mut">—</span>':esc(isd?fd(v):v); }
+      var badge = closed?'<span class="tool-badge bg-neutral">closed</span>':((lockedPay||d.date_paid)?'<span class="tool-badge bg-green">paid</span>':'<span class="tool-badge bg-amber">open</span>');
+      var DEP_MKTS=['UK','AU','EU','US','CA'];
+      var v_sup = locked?txt(d.supplier_name):supSel(ep,d.supplier_name);
+      var v_ctry= locked?txt(d.country):'<select class="fci" data-ep="'+esc(ep)+'" data-field="country"><option value=""></option>'+DEP_MKTS.map(function(mk){return '<option'+(String(d.country||'').toUpperCase()===mk?' selected':'')+'>'+mk+'</option>';}).join('')+'</select>';
+      var v_prod= locked?txt(d.prod_no):'<button class="cell-pick dep-prod-pick" data-id="'+d.id+'" title="pick an active production">'+(d.prod_no?esc(d.prod_no):'<span class="mut">— set</span>')+' ▾</button>';
+      var v_amt = locked?((d.amount==null||d.amount==='')?'<span class="mut">—</span>':money(d.amount)):editCell(ep,'amount',d.amount,'','style="width:120px"');
+      var v_fx  = locked?txt(d.xero_fx):editCell(ep,'xero_fx',d.xero_fx,'','style="width:90px"');
+      var _dl='display:inline-block;width:46px;color:#94a3b8';
+      var v_dates = locked
+        ? '<div><span style="'+_dl+'">Due</span>'+txt(d.date_due,true)+'</div>'+(d.date_paid?'':'<div><span style="'+_dl+'">Likely</span>'+txt(d.date_likely_pay,true)+'</div>')+'<div><span style="'+_dl+'">Paid</span>'+txt(d.date_paid,true)+'</div>'
+        : '<div><span style="'+_dl+'">Due</span>'+editCell(ep,'date_due',d.date_due,'date','style="width:124px"')+'</div><div style="margin-top:3px"><span style="'+_dl+'">Likely</span>'+editCell(ep,'date_likely_pay',d.date_likely_pay,'date','style="width:124px"')+'</div><div style="margin-top:3px"><span style="'+_dl+'">Paid</span>'+editCell(ep,'date_paid',d.date_paid,'date','style="width:124px"')+'</div>';
+      var v_rem = (d.is_deposit? money(d.deposit_remaining) : '—')+(d.open_unalloc>0?' <span class="mut tiny" style="color:#64748b">('+d.open_unalloc+' unalloc)</span>':'')+(d.shared_ref?' <span class="src fx">pool</span>':'');
+      var v_est = d.is_deposit?money(d.est_alloc):'';
+      var act;
+      if(closed) act='<button class="lnk-btn dep-close" data-id="'+d.id+'" data-st="">reopen</button>';
+      else act = editing?'<button class="lnk-btn dep-save" data-id="'+d.id+'">✓ save</button>':'<button class="lnk-btn dep-edit" data-id="'+d.id+'">edit</button> <button class="lnk-btn dep-close" data-id="'+d.id+'" data-st="closed">close</button>';
+      var hasPOs=(d.linked_pos||'').trim()!=='';
+      if(!(hasPOs||d.date_paid)) act+=' <button class="lnk-btn dep-del" data-id="'+d.id+'" data-ref="'+esc(d.reference||('#'+d.id))+'" style="color:#dc2626">delete</button>';
+      if(d.is_deposit && d.prod_no && d.supplier_name && !closed) act+=' <button class="lnk-btn dep-apply-all" data-id="'+d.id+'" style="color:#6d28d9" title="assign this deposit to every open '+esc(d.supplier_name)+' PO in production '+esc(d.prod_no)+' ('+esc(d.country||'?')+' region) that has no deposit yet">⤿ apply to prod '+esc(d.prod_no)+'</button>';
+      var title = locked?esc(d.reference||'(no reference)'):editCell(ep,'reference',d.reference,'txt');
+      var f=mobFld('Supplier',v_sup)+mobFld('Country',v_ctry)+mobFld('PROD#',v_prod)+mobFld('Amount',v_amt)+mobFld('FX',v_fx)+mobFld('Dates',v_dates)+mobFld('Remaining',v_rem)+mobFld('Est. alloc.',v_est)+mobFld('Linked POs',linkedPOsMini(d));
+      return mobCard(title,badge,f,act); }
     function cur(){ return deps.filter(function(d){ if(st.f==='all')return true; if(st.f==='closed')return d.status==='closed';
       if(st.f==='remaining')return d.status!=='closed' && ((Number(d.deposit_remaining)||0)>0.01 || !(Number(d.amount)>0));   // open + still holds money, OR a new/blank deposit not yet filled in (so +Deposit is visible here)
       return d.status!=='closed'; }); }
     function draw(){ try{hzFilterSave('deposits',{f:st.f,sup:st.sup});}catch(e){}   // persist filters (not the search) — sliding 1h TTL
       var f=cur().filter(function(d){return (!st.q||((d.reference||'')+' '+(d.supplier_name||'')).toLowerCase().indexOf(st.q)>=0) && (!st.sup||(d.supplier_name||'')===st.sup);});
       document.getElementById('dep-cnt').textContent=f.length+' / '+deps.length+' deposits';
-      document.getElementById('dep-rows').innerHTML=f.map(rowHTML).join(''); bindEdits();
+      var _tw=document.getElementById('dep-tblwrap'), _dc=document.getElementById('dep-cards');
+      if(actMob()){ if(_tw)_tw.style.display='none'; if(_dc)_dc.innerHTML=mobCards(f.length?f.map(depCard).join(''):'<div class="count">No deposits.</div>'); }   // mobile: stacked cards
+      else { if(_tw)_tw.style.display=''; if(_dc)_dc.innerHTML=''; document.getElementById('dep-rows').innerHTML=f.map(rowHTML).join(''); }
+      bindEdits();
       b.querySelectorAll('.dep-prod-pick').forEach(function(btn){ btn.onclick=function(e){ e.stopPropagation(); openDepProdNoPick(btn); }; });   // searchable active-productions picker
       b.querySelectorAll('.dep-po-link').forEach(function(btn){ btn.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(btn.dataset.po,'pay'); else gotoPO(btn.dataset.po,'pay'); }; });   // popout drawer (Payments tab), not a full navigation
       b.querySelectorAll('.dep-edit').forEach(function(btn){ btn.onclick=function(){ DEP_EDIT[btn.dataset.id]=true; draw(); }; });   // unlock this row in place
       b.querySelectorAll('.dep-save').forEach(function(btn){ btn.onclick=function(){ var id=btn.dataset.id;
         // Cell edits are auto-saved inline (bindEdits). Sync the in-memory row from its inputs, then relock in
         // place — no full refetch / page refresh. Derived columns (remaining / est. alloc.) refresh on next load.
-        var tr=btn.closest('tr'), d=deps.filter(function(x){return String(x.id)===String(id);})[0];
+        var tr=btn.closest('tr,.mob-card'), d=deps.filter(function(x){return String(x.id)===String(id);})[0];
         if(tr&&d)tr.querySelectorAll('.fci[data-field]').forEach(function(inp){ d[inp.dataset.field]=(inp.type==='checkbox')?inp.checked:inp.value; });
         delete DEP_EDIT[id]; delete cache['productions']; draw(); }; });   // relock silently (edits already saved)
       // custom confirm for closing a deposit that still holds money (native confirm can't relabel buttons)
@@ -8024,6 +8059,16 @@
         var cells='<td class="l">'+refCell+'</td><td class="l">'+supSel(ep,d.supplier_name)+'</td><td class="l">'+editCell(ep,'description',d.description,'txt','style="width:100%;min-width:240px;box-sizing:border-box"')+'</td><td>'+editCell(ep,'amount',d.amount,'','style="width:70px"')+'</td><td class="l">'+editCell(ep,'date_due',d.date_due,'date')+'</td><td class="l">'+editCell(ep,'date_likely_pay',d.date_likely_pay,'date')+'</td><td class="l">'+editCell(ep,'date_paid',d.date_paid,'date')+'</td>';
         var act = paid ? '' : '<button class="lnk-btn oth-del" data-id="'+d.id+'" data-ref="'+esc(d.reference||d.description||('#'+d.id))+'" title="delete this payment" style="color:#dc2626">delete</button>';
         return '<tr>'+cells+'<td class="l">'+badge+'</td><td class="l" style="white-space:nowrap">'+act+'</td></tr>'; }
+      // mobile: same inline-editable fields, stacked into a card (bindings attach by class as on the table)
+      function otherCard(d){ var ep='/api/supply/deposit/'+encodeURIComponent(d.id); var paid=!!d.date_paid, stt=statusOf(d);
+        var badge=stt==='paid'?'<span class="tool-badge bg-green">Paid</span>':stt==='overdue'?'<span class="tool-badge bg-red">Overdue</span>':'<span class="tool-badge bg-amber">Unpaid</span>';
+        var isSamp=/^SR-\d/i.test(d.reference||'');
+        var title=esc(d.reference||'(no reference)')+(isSamp?' <button class="lnk-btn oth-samp" data-ref="'+esc(d.reference)+'" title="open '+esc(d.reference)+' in Samples" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;background:none;border:none;padding:0;font:inherit">↗</button>':'');
+        var f=mobFld('Supplier',supSel(ep,d.supplier_name))+mobFld('Description',editCell(ep,'description',d.description,'txt','style="width:100%;box-sizing:border-box"'))
+          +mobFld('Amount',editCell(ep,'amount',d.amount,'','style="width:100px"'))+mobFld('Due date',editCell(ep,'date_due',d.date_due,'date'))
+          +mobFld('Likely pay',editCell(ep,'date_likely_pay',d.date_likely_pay,'date'))+mobFld('Date paid',editCell(ep,'date_paid',d.date_paid,'date'));
+        var act=paid?'':'<button class="lnk-btn oth-del" data-id="'+d.id+'" data-ref="'+esc(d.reference||d.description||('#'+d.id))+'" title="delete this payment" style="color:#dc2626">delete</button>';
+        return mobCard(title,badge,f,act); }
       // status filter is inclusive: "unpaid" = anything not paid (incl. overdue); "overdue" = not paid & past due
       function matchStatus(d){ var s=OTH_STATE.status; if(s==='all')return true; var paid=!!d.date_paid;
         if(s==='paid')return paid; if(s==='unpaid')return !paid; if(s==='overdue')return !paid && d.date_due && d.date_due<today; return true; }
@@ -8036,7 +8081,9 @@
         document.getElementById('oth-wrap').innerHTML='<div class="bar pay-filters" style="gap:5px"><span class="pill-lbl">Status</span>'+stPills
           +' <span class="pill-lbl" style="margin-left:8px">Supplier</span><select class="flt" id="oth-sup" style="width:auto">'+supOpts+'</select>'
           +'<span class="count" style="margin-left:auto">'+f.length+' / '+oth.length+'</span></div>'
-          +'<div class="tw"><table class="pay-tbl"><thead><tr><th class="l">Reference</th><th class="l">Supplier</th><th class="l">Description</th><th>Amount</th><th class="l">Due date</th><th class="l">Likely pay</th><th class="l">Date paid</th><th class="l">Status</th><th class="l"></th></tr></thead><tbody>'+(f.map(otherRow).join('')||'<tr><td colspan="9" class="l mut">No other payments match.</td></tr>')+'</tbody></table></div>';
+          +(actMob()
+            ? mobCards(f.map(otherCard).join('')||'<div class="count">No other payments match.</div>')
+            : '<div class="tw"><table class="pay-tbl"><thead><tr><th class="l">Reference</th><th class="l">Supplier</th><th class="l">Description</th><th>Amount</th><th class="l">Due date</th><th class="l">Likely pay</th><th class="l">Date paid</th><th class="l">Status</th><th class="l"></th></tr></thead><tbody>'+(f.map(otherRow).join('')||'<tr><td colspan="9" class="l mut">No other payments match.</td></tr>')+'</tbody></table></div>');
         bindEdits();
         document.querySelectorAll('#oth-wrap .pill[data-os]').forEach(function(p){p.onclick=function(){OTH_STATE.status=p.dataset.os;draw();};});
         document.getElementById('oth-sup').onchange=function(){OTH_STATE.supplier=this.value;draw();};
@@ -8200,6 +8247,22 @@
       if(PDUE_STATE.supplier&&r.sup!==PDUE_STATE.supplier)return false; return true; }
     b.innerHTML=lookupDatalists()+'<button class="pay-filt-toggle">⚙ Filters</button><div class="bar pay-filters" id="pdue-bar"></div><div id="pdue-wrap"></div>';
     ensurePayFilt();
+    // mobile: one card per payment (same inline fields + pay button; bindings attach by class as on the table)
+    function pdueCard(r){
+      var dueTxt=r.due?(r.overdue?'<span style="color:#dc2626;font-weight:700">'+esc(fd(r.due))+'</span>':esc(fd(r.due))):'<span class="mut">—</span>';
+      var _lk=r.po?((r.type==='Completion'?'comp:':(r.bal2?'bal2:':'bal:'))+r.ref):null;
+      var likelyC = r.overdue
+        ? (r.po ? dateField(r.likely,{attrs:'data-key="'+esc(_lk)+'" title="likely payment date (drives cash flow)"',cls:'pdue-likely'}) : editCell(r.ep,'date_likely_pay',r.likely,'date'))
+        : (r.likely?esc(fd(r.likely)):'<span class="mut">—</span>');
+      var refCell = r.po ? '<button class="lnk-btn pdue-ref" data-go="po" data-k="'+esc(r.ref)+'" title="open this PO — payment plan (PAYMENTS tab)">'+esc(r.ref)+'</button>'
+        : r.type==='Deposit' ? '<button class="lnk-btn pdue-ref" data-go="dep" data-k="'+esc(r.ref)+'" title="open this deposit (Productions ▸ Deposits)">'+esc(r.ref)+'</button>'
+        : '<button class="lnk-btn pdue-ref" data-go="other" title="open Other Payments">'+esc(r.ref)+'</button>';
+      var badge='<span class="tool-badge '+(PDUE_BG[r.type]||'bg-neutral')+'">'+esc(r.type)+'</span>'+(r.overdue?' <span class="tool-badge bg-red">overdue</span>':(r.paid?' <span class="tool-badge bg-green">paid</span>':''));
+      var f=mobFld('Amount due',fmtCur(r.due_amt, supCcyOf(r.sup)))+mobFld('Due date',dueTxt)+mobFld('Likely pay',likelyC)
+        +mobFld('Assigned',editCell(r.ep,r.amt_field,r.amt_val))+mobFld('Payment date',editCell(r.ep,r.dt_field,r.dt_val,'date'));
+      var act=!r.paid?'<button class="save-btn pdue-pay" data-ep="'+esc(r.ep)+'" data-af="'+esc(r.amt_field)+'" data-amt="'+esc(r.due_amt)+'" data-df="'+esc(r.dt_field)+'" style="background:#16a34a;color:#fff;border-color:#15803d;padding:3px 12px" title="mark paid — set amount to '+money(r.due_amt)+' and date to today ('+localToday()+')">pay</button>':'';
+      return mobCard(refCell,badge,f,act);
+    }
     function draw(){ var f=rows.filter(pass);
       // group by supplier; order groups by earliest due date, rows within a group by due date
       var groups={}; f.forEach(function(r){ (groups[r.sup||'—']=groups[r.sup||'—']||[]).push(r); });
@@ -8243,7 +8306,15 @@
       var _curs=Array.from(new Set(f.map(function(r){return supCcyOf(r.sup);})));   // one symbol only if every visible row shares a currency; else flag mixed
       var _totCell=_curs.length===1?fmtCur(grand,_curs[0]):(money(grand)+' <span class="tiny mut">(mixed currencies)</span>');
       h+='<tr class="batchrow"><td class="l" colspan="2"><b>TOTAL DUE</b></td><td><b>'+_totCell+'</b></td><td colspan="4"></td></tr>';
-      document.getElementById('pdue-wrap').innerHTML=h+'</tbody></table></div>';
+      if(actMob()){   // mobile: stacked cards grouped by supplier
+        var cardsHtml = f.length ? '' : '<div class="count">No payments match this filter.</div>';
+        order.forEach(function(s){ var gr=groups[s].slice().sort(function(a,c){return (a.due||'9999').localeCompare(c.due||'9999')||a.type.localeCompare(c.type);});
+          var sub=gr.reduce(function(t,r){return t+(r.due_amt||0);},0);
+          cardsHtml+='<div style="font-weight:700;font-size:13px;margin:8px 0 1px;color:#0f172a">'+esc(s)+' <span class="tiny mut">'+gr.length+' payment(s) · subtotal '+fmtCur(sub,supCcyOf(s))+'</span></div>';
+          gr.forEach(function(r){ cardsHtml+=pdueCard(r); }); });
+        cardsHtml+='<div style="text-align:right;font-weight:700;margin-top:10px;padding-top:8px;border-top:2px solid #cbd5e1">TOTAL DUE '+_totCell+'</div>';
+        document.getElementById('pdue-wrap').innerHTML=mobCards(cardsHtml);
+      } else document.getElementById('pdue-wrap').innerHTML=h+'</tbody></table></div>';
       bindEdits();   // deposit likely (date_likely_pay) auto-binds here; PO-milestone likely is bound below
       // PO-milestone Likely pay date (overdue rows only) → payment_likely_dates via line_key. Silent save.
       document.querySelectorAll('#pdue-wrap .pdue-likely').forEach(function(inp){ if(inp._b)return; inp._b=1; inp.onchange=function(){
@@ -8258,7 +8329,7 @@
       document.getElementById('pdue-sup').onchange=function(){PDUE_STATE.supplier=this.value;draw();};
       // green "pay" → fill the row's amount (= due) + payment date (today, local tz) and save via the same path as
       // typing, so the row STAYS on screen (no re-filter) until the next manual refresh — matching manual entry.
-      document.querySelectorAll('#pdue-wrap .pdue-pay').forEach(function(b){ b.onclick=function(){ var tr=b.closest('tr'); if(!tr)return;
+      document.querySelectorAll('#pdue-wrap .pdue-pay').forEach(function(b){ b.onclick=function(){ var tr=b.closest('tr,.mob-card'); if(!tr)return;
         // Save amount + date in ONE request (was two racing change events → the PO could end up with only one field).
         // OPTIMISTIC: paint the amount+date and flip to ✓ IMMEDIATELY so the click feels instant — the write runs in
         // the background (the PO POST recomputes a grid row + can pay a cold-DB stall on live, up to a few seconds).
@@ -8389,7 +8460,7 @@
           var d=r.dt||''; return (!PAY_FROM || d>=PAY_FROM) && (!PAY_TO || d.slice(0,PAY_TO.length)<=PAY_TO); });
         var rep=document.getElementById('pay-rep'); rep.innerHTML=payReportHTML(f); bindPayFx(rep);
         // read the LIVE bank ccy/amount from the row inputs so a just-typed currency applies without refresh
-        function liveFx(btn){ var tr=btn.closest('tr'); var a=tr.querySelector('.pfx-amt'), c=tr.querySelector('.pfx-ccy'); return {ccy:c?c.value:'', amt:a?a.value:''}; }
+        function liveFx(btn){ var tr=btn.closest('tr,.mob-card'); var a=tr.querySelector('.pfx-amt'), c=tr.querySelector('.pfx-ccy'); return {ccy:c?c.value:'', amt:a?a.value:''}; }
         rep.querySelectorAll('.pay-xero-dl').forEach(function(btn){ btn.onclick=function(){ var fx=liveFx(btn); xbDownload(f[+btn.dataset.i],fx.ccy,fx.amt); }; });
         rep.querySelectorAll('.pay-xero-copy').forEach(function(btn){ btn.onclick=function(){ var fx=liveFx(btn); xbCopy(f[+btn.dataset.i],fx.ccy,fx.amt,btn); }; });
         rep.querySelectorAll('.pay-sum-copy').forEach(function(btn){ btn.onclick=function(){ var fx=liveFx(btn); xbCopySummary(f[+btn.dataset.i],fx.ccy,fx.amt,btn); }; }); }
@@ -8509,7 +8580,47 @@
     } else { navigator.clipboard.writeText(text).then(done).catch(fail); } }
   // master row = one bank payment (date + supplier): base (USD) total + actual bank amount/currency.
   // expand to see the sub-payments (reference · amount · type · deposit ref).
+  // mobile: one card per payment run (same pfx inputs / Paid-USD / remittance / notify / expand — bindPayFx attaches by class)
+  function payReportCards(rows){ if(!rows||!rows.length)return '<div class="count">No payments.</div>';
+    var tT=0;
+    var cards=rows.map(function(r,i){ tT+=+r.total; var dk='data-dt="'+esc(r.dt)+'" data-sup="'+esc(r.supplier)+'"';
+      var rk=payRunKey(r), rem=PAY_REMIT[rk]||[], em=PAY_EMAILS[rk];
+      var remHtml = rem.length
+        ? '<span class="tool-badge bg-green" title="'+esc(rem.length>1?(rem.length+' files'):rem[0].filename)+'">📎 attached</span> <a class="lnk-btn" href="/api/supply/remittance/'+rem[0].id+'" title="download remittance">⬇</a> <button class="lnk-btn pr-remit-del" data-id="'+rem[0].id+'" title="remove remittance">✕</button>'
+        : '<button class="save-btn light pr-remit-up" data-rk="'+esc(rk)+'" data-sup="'+esc(r.supplier)+'" title="Upload a remittance">⬆ Remittance</button>';
+      var ndata='data-rk="'+esc(rk)+'" data-sup="'+esc(r.supplier)+'" data-dt="'+esc(r.dt)+'" data-bt="'+esc(r.total)+'" data-bc="'+esc(r.base_ccy||'USD')+'"';
+      var notifyHtml;
+      if(em && em.status==='queued'){ notifyHtml='<span class="tool-badge bg-amber pr-cd" data-until="'+esc(em.send_after)+'">✉ sending…</span> <button class="lnk-btn pr-notify-cancel" data-id="'+em.id+'">Cancel</button>'; }
+      else if(em && em.status==='sending'){ notifyHtml='<span class="tool-badge bg-amber">✉ sending…</span>'; }
+      else if(em && em.status==='sent'){ notifyHtml='<span class="tool-badge bg-green" title="sent '+esc(em.sent_at||'')+'">✉ sent</span>'; }
+      else if(em && em.status==='failed'){ notifyHtml='<span class="tool-badge" style="background:#fee2e2;color:#b91c1c">✉ failed</span> <button class="save-btn light pr-notify" '+ndata+'>retry</button>'; }
+      else if(r.other_amount!=null){ notifyHtml='<span class="tool-badge bg-green">✓ paid</span>'; }
+      else { notifyHtml='<button class="save-btn pr-notify" '+ndata+' style="background:#7c3aed;color:#fff;border-color:#6d28d9">✉ Mark paid &amp; notify</button>'; }
+      var lines=(r.lines||[]).map(function(l){
+        var depKey=(l.reference||'').split(',')[0].trim();
+        var refCell = l.reference ? (l.type==='Other' ? '<button class="lnk-btn pr-ref" data-go="other">'+esc(l.reference)+'</button>'
+            : l.type==='Deposit' ? '<button class="lnk-btn pr-ref" data-go="dep" data-k="'+esc(depKey)+'">'+esc(l.reference)+'</button>'
+            : '<button class="lnk-btn pr-ref" data-go="po" data-k="'+esc(l.reference)+'">'+esc(l.reference)+'</button>') : '—';
+        var drKey=(l.deposit_ref||'').split(',')[0].trim();
+        var drCell = l.deposit_ref ? '<button class="lnk-btn pr-ref" data-go="dep" data-k="'+esc(drKey)+'">'+esc(l.deposit_ref)+'</button>' : '—';
+        return '<tr><td class="l">'+refCell+'</td><td>'+money(l.amount)+'</td><td class="l"><span class="tool-badge '+(PTYPE_BG[l.type]||'bg-neutral')+'">'+esc(l.type)+'</span></td><td class="l">'+(l.prod_no?esc(l.prod_no):'<span class="mut">—</span>')+'</td><td class="l">'+drCell+'</td></tr>'; }).join('');
+      var det='<div id="payexp-'+i+'" style="display:none;margin-top:8px;border-top:1px solid #e5e7eb;padding-top:6px"><div class="sect-h" style="margin-top:0">Payments in this run ('+(r.lines||[]).length+')</div><div class="tw"><table style="font-size:11px;width:100%"><thead><tr><th class="l">Reference</th><th>Amount ('+esc(r.base_ccy||'USD')+')</th><th class="l">Type</th><th class="l">Prod</th><th class="l">Deposit ref</th></tr></thead><tbody>'+lines+'</tbody></table></div></div>';
+      var hasBill=(r.lines||[]).some(function(l){return l.source!=='other';});
+      var xeroIco='<svg width="13" height="13" viewBox="0 0 32 32" style="vertical-align:middle"><circle cx="16" cy="16" r="16" fill="#13B5EA"/><text x="16" y="23" font-size="21" font-weight="700" text-anchor="middle" fill="#fff" font-family="Arial,Helvetica,sans-serif">x</text></svg>';
+      var emailIco='<svg width="15" height="12" viewBox="0 0 24 20" style="vertical-align:middle"><rect x="1.5" y="2" width="21" height="16" rx="2.5" fill="none" stroke="#7c3aed" stroke-width="2.2"/><path d="M2.5 4L12 11.5 21.5 4" fill="none" stroke="#7c3aed" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+      var xbBtns=hasBill?' <button class="lnk-btn pay-xero-dl" data-i="'+i+'" title="Download Xero bill details">⬇</button> <button class="lnk-btn pay-xero-copy" data-i="'+i+'" title="Copy Xero bill details">'+xeroIco+'</button>':'';
+      xbBtns+=((r.lines||[]).length?' <button class="lnk-btn pay-sum-copy" data-i="'+i+'" title="Copy payment summary for email" style="color:#7c3aed;font-weight:700">'+emailIco+'</button>':'');
+      var amtField='<input class="fci pfx-amt" '+dk+' style="width:140px;text-align:right" placeholder="bank amount" value="'+(r.other_amount==null?'':fmtAmt(r.other_amount))+'">';
+      var ccyField='<select class="fci pfx-ccy" '+dk+' style="width:74px'+((r.bank_ccy&&r.bank_ccy!=='USD')?';background:#fef3c7;color:#b45309;font-weight:700':'')+'">'+PAY_CCY.map(function(cc){return '<option'+(cc===(r.bank_ccy||'')?' selected':'')+'>'+cc+'</option>';}).join('')+'</select>';
+      var paidUsdBtn=(((r.other_amount!=null)&&String(r.bank_ccy||'').trim())?'':'<button class="save-btn pay-usd" '+dk+' data-total="'+esc(r.total)+'" title="Mark this run paid in USD" style="background:#16a34a;color:#fff;border-color:#15803d">Paid USD</button>');
+      var badge='<span class="tool-badge '+((r.base_ccy&&r.base_ccy!=='USD')?'bg-amber':'bg-neutral')+'">'+esc(r.base_ccy||'USD')+'</span>';
+      var f=mobFld('Total (base)','<b>'+money(r.total)+'</b>')+mobFld('Bank amount',amtField)+mobFld('Bank ccy',ccyField)+(paidUsdBtn?mobFld(' ',paidUsdBtn):'')+mobFld('Remittance',remHtml)+mobFld('Notify',notifyHtml);
+      return '<div class="mob-card" style="border:1px solid #e5e7eb;border-radius:10px;padding:11px 13px;background:#fff">'
+        +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap"><div style="font-weight:700;font-size:13px;color:#0f172a">'+esc(fd(r.dt))+' · '+esc(r.supplier)+'</div>'+badge+'</div>'
+        +f+'<div style="margin-top:9px;display:flex;gap:12px;flex-wrap:wrap;align-items:center"><button class="planbtn pay-exp" data-i="'+i+'">▸ lines</button>'+xbBtns+'</div>'+det+'</div>'; }).join('');
+    return mobCards(cards)+'<div style="text-align:right;font-weight:700;margin-top:10px;padding-top:8px;border-top:2px solid #cbd5e1">TOTAL '+money(tT)+'</div>'; }
   function payReportHTML(rows){ if(!rows||!rows.length)return '<div class="count">No payments.</div>';
+    if(actMob())return payReportCards(rows);
     var tT=0;
     var body=rows.map(function(r,i){ tT+=+r.total; var dk='data-dt="'+esc(r.dt)+'" data-sup="'+esc(r.supplier)+'"';
       var rk=payRunKey(r), rem=PAY_REMIT[rk]||[], em=PAY_EMAILS[rk];
@@ -8563,14 +8674,14 @@
     // bank-amount box: show with thousands separators; reformat on blur, strip commas before saving
     b.querySelectorAll('.pfx-amt').forEach(function(el){ el.onblur=function(){ if(el.value.trim()!=='') el.value=fmtAmt(el.value); }; });
     b.querySelectorAll('.pfx-ccy, .pfx-amt').forEach(function(el){ el.onchange=function(){
-      var tr=el.closest('tr'); var dt=el.dataset.dt, sup=el.dataset.sup;
+      var tr=el.closest('tr,.mob-card'); var dt=el.dataset.dt, sup=el.dataset.sup;
       var ccy=tr.querySelector('.pfx-ccy').value, amt=tr.querySelector('.pfx-amt').value.replace(/,/g,'');
       if(el.classList.contains('pfx-amt') && amt!=='') el.value=fmtAmt(amt);
       el.classList.add('saved');
       fetch('/api/supply/payment-fx',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run_date:dt,supplier:sup,paid_currency:ccy,paid_amount:amt})})
         .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); if(j&&j.emailPreview)showEmailPreview(j.emailPreview); setTimeout(function(){el.classList.remove('saved');},1000); }).catch(function(){el.classList.remove('saved');el.classList.add('err');}); }; });
     // "Paid USD" — fill bank amount = base total, currency = USD, save (which confirms the run → notification fires)
-    b.querySelectorAll('.pay-usd').forEach(function(btn){ btn.onclick=function(){ var tr=btn.closest('tr');
+    b.querySelectorAll('.pay-usd').forEach(function(btn){ btn.onclick=function(){ var tr=btn.closest('tr,.mob-card');
       var amtEl=tr.querySelector('.pfx-amt'), ccyEl=tr.querySelector('.pfx-ccy'), total=String(btn.dataset.total||'').replace(/,/g,'');
       if(amtEl)amtEl.value=fmtAmt(total); if(ccyEl)ccyEl.value='USD';
       btn.disabled=true; var o=btn.textContent; btn.textContent='…';
@@ -8591,7 +8702,7 @@
       fi.click(); }; });
     b.querySelectorAll('.pr-remit-del').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Remove this remittance?'))return;
       fetch('/api/supply/remittance/'+btn.dataset.id+'/delete',{method:'POST'}).then(function(r){return r.json();}).then(function(){ payRefreshState(); }); }; });
-    b.querySelectorAll('.pr-notify').forEach(function(btn){ btn.onclick=function(){ var tr=btn.closest('tr');
+    b.querySelectorAll('.pr-notify').forEach(function(btn){ btn.onclick=function(){ var tr=btn.closest('tr,.mob-card');
       var amtEl=tr&&tr.querySelector('.pfx-amt'), ccyEl=tr&&tr.querySelector('.pfx-ccy');
       var amt=(amtEl&&amtEl.value.replace(/,/g,'').trim())||btn.dataset.bt||'';
       var ccy=(ccyEl&&ccyEl.value)||btn.dataset.bc||'USD';
