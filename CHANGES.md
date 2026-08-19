@@ -1,3 +1,8 @@
+## v27.170 Payments Report: supplier paid-email is automatic + immediate (no button, no delay)
+- Removed the **"✉ Mark paid & notify"** button and the **5-minute queue** (+ its live countdown). The supplier paid-confirmation email now fires **automatically and immediately** the moment a run is marked paid (bank amount + currency saved, or **Paid USD**) — this was already wired in `payment-fx`; the button/queue were a redundant second path.
+- `payment-fx` now records the send outcome, so the report shows **✉ emailed** (green) or **✉ email failed** (red, with the error) per run; unpaid runs show a quiet "auto-emails on paid" hint.
+- **Smoother UX:** the countdown timer used to re-fetch + redraw the whole report ~35s after queuing, which reset the bank amount / currency you were mid-editing. That periodic redraw is gone — typed values stay put. (The old `payment-notify` endpoint + worker remain server-side but are no longer called.)
+
 ## v27.169 Observability: every 500 catch now logs its route + stack (server-wide)
 - Extended v27.168 to **all ~407 `catch → res.status(500)` sites** in `server.mjs`. Added a `log500(e)` helper backed by an `AsyncLocalStorage` request context (one middleware wraps every request), so each 500 logs `[500] <METHOD> <originalUrl> — <stack>` — including in helpers like `patch()` that have no `req` in scope. Verified: a forced bad-numeric POST logged `[500] POST /api/supply/deposit/… — invalid input syntax for type numeric`. Normal requests unaffected. No more silent 500s.
 

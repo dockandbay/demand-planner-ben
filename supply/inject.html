@@ -8653,14 +8653,12 @@
       var remHtml = rem.length
         ? '<span class="tool-badge bg-green" title="'+esc(rem.length>1?(rem.length+' files'):rem[0].filename)+'">📎 attached</span> <a class="lnk-btn" href="/api/supply/remittance/'+rem[0].id+'" title="download remittance">⬇</a> <button class="lnk-btn pr-remit-del" data-id="'+rem[0].id+'" title="remove remittance">✕</button>'
         : '<button class="save-btn light pr-remit-up" data-rk="'+esc(rk)+'" data-sup="'+esc(r.supplier)+'" title="Upload a remittance">⬆ Remittance</button>';
-      var ndata='data-rk="'+esc(rk)+'" data-sup="'+esc(r.supplier)+'" data-dt="'+esc(r.dt)+'" data-bt="'+esc(r.total)+'" data-bc="'+esc(r.base_ccy||'USD')+'"';
+      // Paid email sends automatically + immediately on paid — no button, no delay (Ben). Just reflect the outcome.
       var notifyHtml;
-      if(em && em.status==='queued'){ notifyHtml='<span class="tool-badge bg-amber pr-cd" data-until="'+esc(em.send_after)+'">✉ sending…</span> <button class="lnk-btn pr-notify-cancel" data-id="'+em.id+'">Cancel</button>'; }
-      else if(em && em.status==='sending'){ notifyHtml='<span class="tool-badge bg-amber">✉ sending…</span>'; }
-      else if(em && em.status==='sent'){ notifyHtml='<span class="tool-badge bg-green" title="sent '+esc(em.sent_at||'')+'">✉ sent</span>'; }
-      else if(em && em.status==='failed'){ notifyHtml='<span class="tool-badge" style="background:#fee2e2;color:#b91c1c">✉ failed</span> <button class="save-btn light pr-notify" '+ndata+'>retry</button>'; }
+      if(em && em.status==='sent'){ notifyHtml='<span class="tool-badge bg-green" title="Paid confirmation emailed '+esc(em.sent_at||'')+'">✉ emailed</span>'; }
+      else if(em && em.status==='failed'){ notifyHtml='<span class="tool-badge" style="background:#fee2e2;color:#b91c1c" title="'+esc(em.error||'')+'">✉ email failed</span>'; }
       else if(r.other_amount!=null){ notifyHtml='<span class="tool-badge bg-green">✓ paid</span>'; }
-      else { notifyHtml='<button class="save-btn pr-notify" '+ndata+' style="background:#7c3aed;color:#fff;border-color:#6d28d9">✉ Mark paid &amp; notify</button>'; }
+      else { notifyHtml='<span class="mut tiny">auto-emails on paid</span>'; }
       var lines=(r.lines||[]).map(function(l){
         var depKey=(l.reference||'').split(',')[0].trim();
         var refCell = l.reference ? (l.type==='Other' ? '<button class="lnk-btn pr-ref" data-go="other">'+esc(l.reference)+'</button>'
@@ -8692,14 +8690,12 @@
       var remHtml = rem.length
         ? '<span class="tool-badge bg-green" title="'+esc(rem.length>1?(rem.length+' files'):rem[0].filename)+'">📎 attached</span> <a class="lnk-btn" href="/api/supply/remittance/'+rem[0].id+'" title="download remittance">⬇</a> <button class="lnk-btn pr-remit-del" data-id="'+rem[0].id+'" title="remove remittance">✕</button>'
         : '<button class="save-btn light pr-remit-up" data-rk="'+esc(rk)+'" data-sup="'+esc(r.supplier)+'" title="Upload a remittance — it gets attached to the paid email">⬆ Remittance</button>';
-      var ndata='data-rk="'+esc(rk)+'" data-sup="'+esc(r.supplier)+'" data-dt="'+esc(r.dt)+'" data-bt="'+esc(r.total)+'" data-bc="'+esc(r.base_ccy||'USD')+'"';
+      // Paid-confirmation email now sends AUTOMATICALLY + IMMEDIATELY when a run is marked paid (bank amount + currency, or Paid USD) — no button, no 5-min delay (Ben). We just reflect the send outcome.
       var notifyHtml;
-      if(em && em.status==='queued'){ notifyHtml='<span class="tool-badge bg-amber pr-cd" data-until="'+esc(em.send_after)+'">✉ sending…</span> <button class="lnk-btn pr-notify-cancel" data-id="'+em.id+'" title="cancel this email">Cancel</button>'; }
-      else if(em && em.status==='sending'){ notifyHtml='<span class="tool-badge bg-amber">✉ sending…</span>'; }
-      else if(em && em.status==='sent'){ notifyHtml='<span class="tool-badge bg-green" title="sent '+esc(em.sent_at||'')+' → '+esc(em.to_emails||'')+'">✉ sent</span>'; }
-      else if(em && em.status==='failed'){ notifyHtml='<span class="tool-badge" style="background:#fee2e2;color:#b91c1c" title="'+esc(em.error||'')+'">✉ failed</span> <button class="save-btn light pr-notify" '+ndata+'>retry</button>'; }
-      else if(r.other_amount!=null){ notifyHtml='<span class="tool-badge bg-green" title="Marked paid — bank amount recorded. (The supplier is emailed separately.)">✓ paid</span>'; }   // once paid (bank amount recorded), drop the "Mark paid & notify" button
-      else { notifyHtml='<button class="save-btn pr-notify" '+ndata+' title="Email the supplier a paid confirmation — sends in 5 min so you can upload a remittance first" style="background:#7c3aed;color:#fff;border-color:#6d28d9;white-space:nowrap">✉ Mark paid &amp; notify</button>'; }
+      if(em && em.status==='sent'){ notifyHtml='<span class="tool-badge bg-green" title="Paid confirmation emailed '+esc(em.sent_at||'')+' → '+esc(em.to_emails||'')+'">✉ emailed</span>'; }
+      else if(em && em.status==='failed'){ notifyHtml='<span class="tool-badge" style="background:#fee2e2;color:#b91c1c" title="'+esc(em.error||'')+'">✉ email failed</span>'; }
+      else if(r.other_amount!=null){ notifyHtml='<span class="tool-badge bg-green" title="Marked paid. The supplier is emailed the paid confirmation automatically when a recipient is opted in.">✓ paid</span>'; }
+      else { notifyHtml='<span class="mut tiny" title="Mark this run paid (bank amount + currency, or Paid USD) and the supplier is emailed the paid confirmation automatically — no delay.">auto-emails on paid</span>'; }
       var lines=(r.lines||[]).map(function(l){
         var depKey=(l.reference||'').split(',')[0].trim();   // register reference is just the code (e.g. P55-UK-WK2); line ref may append the description
         var refCell = l.reference ? (l.type==='Other'
@@ -8767,18 +8763,10 @@
       fi.click(); }; });
     b.querySelectorAll('.pr-remit-del').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Remove this remittance?'))return;
       fetch('/api/supply/remittance/'+btn.dataset.id+'/delete',{method:'POST'}).then(function(r){return r.json();}).then(function(){ payRefreshState(); }); }; });
-    b.querySelectorAll('.pr-notify').forEach(function(btn){ btn.onclick=function(){ var tr=btn.closest('tr,.mob-card');
-      var amtEl=tr&&tr.querySelector('.pfx-amt'), ccyEl=tr&&tr.querySelector('.pfx-ccy');
-      var amt=(amtEl&&amtEl.value.replace(/,/g,'').trim())||btn.dataset.bt||'';
-      var ccy=(ccyEl&&ccyEl.value)||btn.dataset.bc||'USD';
-      if(!confirm('Email the supplier a paid confirmation for '+(amt?fmtAmt(amt)+' '+ccy:'this payment')+'?\nIt sends in 5 minutes — upload a remittance in the meantime to attach it.'))return;
-      var o=btn.textContent; btn.disabled=true; btn.textContent='…';
-      fetch('/api/supply/payment-notify',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run_key:btn.dataset.rk,supplier_name:btn.dataset.sup,amount:amt,currency:ccy,pay_date:btn.dataset.dt})})
-        .then(function(r){return r.json();}).then(function(j){ if(j&&j.error){btn.disabled=false;btn.textContent=o;return alert(j.error);} payRefreshState(); })
-        .catch(function(e){ btn.disabled=false; btn.textContent=o; alert('Failed: '+(e.message||e)); }); }; });
-    b.querySelectorAll('.pr-notify-cancel').forEach(function(btn){ btn.onclick=function(){
-      fetch('/api/supply/payment-notify/'+btn.dataset.id+'/cancel',{method:'POST'}).then(function(r){return r.json();}).then(function(){ payRefreshState(); }); }; });
-    payTickCountdown(); }
+    /* "Mark paid & notify" button + 5-min queue + live countdown removed (Ben) — the paid email now fires
+       automatically + immediately from /api/supply/payment-fx when a run is marked paid. No periodic redraw,
+       so typed bank amount / currency no longer get reset mid-edit. */
+  }
   // Live countdown for queued paid-notification emails; auto-refreshes state ~35s after the window elapses (worker runs every 30s).
   function payTickCountdown(){ if(window._payCdT)return; window._payCdT=setInterval(function(){
     var els=document.querySelectorAll('.pr-cd'); if(!els.length)return; var now=Date.now();

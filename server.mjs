@@ -10311,11 +10311,18 @@ app.post('/api/supply/payment-fx', async (req, res) => {
       [b.run_date, b.supplier, newCcy, newAmt]);
     const nowConfirmed = (newAmt != null && newCcy && String(newCcy).trim() !== '');
     let emailPreview;
-    if (nowConfirmed && !wasConfirmed) {   // fire the supplier payment-confirmed notification ONCE, on transition
+    if (nowConfirmed && !wasConfirmed) {   // fire the supplier payment-confirmed notification ONCE, on transition — IMMEDIATELY (no delay)
+      const runKey = b.run_date + '|' + b.supplier;
       try { const em = await emailPaymentConfirmed(b.run_date, b.supplier, newAmt, newCcy);
         // sandbox (no RESEND key) → hand the rendered email back so the UI can pop it up for testing; prod sends silently
         if (!process.env.RESEND_API_KEY && em && em.preview) emailPreview = em.preview;
-      } catch (e) { console.error('[payment-confirmed email]', e.message); }
+        // record the outcome so the Payments Report shows "✉ emailed" (or skipped when no recipient opted in). Best-effort.
+        const to = (em && em.preview && em.preview.to) || [];
+        if (to.length) { try { await pool.query(`INSERT INTO planner.payment_emails (run_key, supplier_name, to_emails, amount, currency, pay_date, send_after, status, sent_at, created_by)
+          VALUES ($1,$2,$3,$4,$5,$6::date,now(),'sent',now(),$7)`, [runKey, b.supplier, to.join(', '), newAmt, newCcy, b.run_date, authUser(req) || 'system']); } catch (e2) {} }
+      } catch (e) { console.error('[payment-confirmed email]', e.message);
+        try { await pool.query(`INSERT INTO planner.payment_emails (run_key, supplier_name, to_emails, amount, currency, pay_date, send_after, status, error, created_by)
+          VALUES ($1,$2,'',$3,$4,$5::date,now(),'failed',$6,$7)`, [runKey, b.supplier, newAmt, newCcy, b.run_date, String(e.message || e).slice(0, 300), authUser(req) || 'system']); } catch (e2) {} }
     }
     res.json({ ok: true, confirmed: nowConfirmed, emailPreview });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
