@@ -4336,7 +4336,7 @@ app.get('/api/supply/:section', async (req, res, next) => {
       default:
         return res.status(404).json({ error: 'unknown section: ' + req.params.section });
     }
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { console.error('[500] GET /api/supply/' + req.params.section + (req._parsedUrl && req._parsedUrl.search ? req._parsedUrl.search : '') + ' — ' + (e && e.stack || e && e.message || e)); res.status(500).json({ error: e.message }); }   // name the route + stack in the logs (a swallowed error hid a 5-day dead Cash Flow — Diviyaj)
 });
 
 // ── SUPPLY writes — editable cells in PAYMENTS/DEPOSITS save here. Targets the configured DB

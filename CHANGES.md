@@ -1,3 +1,6 @@
+## v27.168 Observability: log the route + stack on a /api/supply/:section 500
+- The `/api/supply/:section` catch now `console.error`s the route (`/api/supply/<section>` + query) and the error stack before returning 500. Previously it swallowed the message, so the 5-day dead Cash Flow produced nothing useful in the logs (the alert could only name `/api/index`). One line → same-day diagnosis next time. (Diviyaj's ask.)
+
 ## v27.167 REPORTS ▸ Performance (new) — Supply metrics (moved) + Inventory metrics (new)
 - New **Performance** tab in the top-level REPORTS hub, with two sub-pages (deep-linked `#/reports/performance/<sub>`):
   - **Supply metrics** — the Metrics report **moved here** from SUPPLY ▸ BI & REPORTS (removed there; legacy `#/supply/reports/metrics` redirects to `#/reports/performance/supply-metrics`). Rendered by exposing `window.renderSupplyMetrics`.
