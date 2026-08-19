@@ -5406,11 +5406,13 @@
       act += (hasPOs || d.date_paid)
         ? ' <span class="mut tiny" title="Can’t delete — '+(d.date_paid?'this deposit has a payment date':'purchase order(s) are assigned to this deposit ('+esc(d.linked_pos)+')')+'.">🔒 locked</span>'
         : ' <button class="lnk-btn dep-del" data-id="'+d.id+'" data-ref="'+esc(d.reference||('#'+d.id))+'" title="delete this deposit" style="color:#dc2626">delete</button>';
-      // apply this deposit to all open, unassigned POs in its production + supplier (region-matched) — on its own second line
-      var applyBtn = (d.is_deposit && d.prod_no && d.supplier_name && !closed)
-        ? '<button class="lnk-btn dep-apply-all" data-id="'+d.id+'" style="color:#6d28d9" title="assign this deposit to every open '+esc(d.supplier_name)+' PO in production '+esc(d.prod_no)+' ('+esc(d.country||'?')+' region) that has no deposit yet">⤿ apply to prod '+esc(d.prod_no)+'</button>'
+      // apply this deposit to the open, unassigned POs in its production + supplier (region-matched) — the button
+      // lists those exact POs, and only shows when there are any (d.apply_pos). On its own second line.
+      var _pLbl=/^p/i.test(String(d.prod_no||''))?d.prod_no:('P'+d.prod_no);
+      var applyBtn = (d.is_deposit && d.prod_no && d.supplier_name && !closed && (d.apply_pos||'').trim())
+        ? '<button class="lnk-btn dep-apply-all" data-id="'+d.id+'" style="color:#6d28d9;white-space:normal;text-align:left;max-width:230px" title="assign this deposit to these open '+esc(d.supplier_name)+' PO(s) in '+esc(_pLbl)+' ('+esc(d.country||'?')+' region) with no deposit yet">⤿ apply to unassigned '+esc(_pLbl)+' - '+esc(d.apply_pos)+'</button>'
         : '';
-      return '<tr'+(editing?' style="background:#f0f6ff"':(closed?' style="opacity:.55"':''))+'>'+c_ref+c_sup+c_ctry+c_prod+c_amt+c_fx+c_dates+c_rem+c_est+c_asg+'<td class="l" style="white-space:nowrap;vertical-align:top">'+act+(applyBtn?'<div style="margin-top:4px">'+applyBtn+'</div>':'')+'</td></tr>'; }
+      return '<tr'+(editing?' style="background:#f0f6ff"':(closed?' style="opacity:.55"':''))+'>'+c_ref+c_sup+c_ctry+c_prod+c_amt+c_fx+c_dates+c_rem+c_est+c_asg+'<td class="l" style="white-space:nowrap;vertical-align:top">'+act+(applyBtn?'<div style="margin-top:4px;white-space:normal">'+applyBtn+'</div>':'')+'</td></tr>'; }
     // mobile: same fields + actions as the row, stacked into a card. Editable when the row is unlocked (edit); else read-only.
     function depCard(d){ var ep='/api/supply/deposit/'+encodeURIComponent(d.id);
       var closed=d.status==='closed', lockedPay=!!(d.date_paid && d.xero_fx!=null && String(d.xero_fx)!==''), editing=!!DEP_EDIT[d.id], locked=!editing;
@@ -5433,7 +5435,7 @@
       else act = editing?'<button class="lnk-btn dep-save" data-id="'+d.id+'">✓ save</button>':'<button class="lnk-btn dep-edit" data-id="'+d.id+'">edit</button> <button class="lnk-btn dep-close" data-id="'+d.id+'" data-st="closed">close</button>';
       var hasPOs=(d.linked_pos||'').trim()!=='';
       if(!(hasPOs||d.date_paid)) act+=' <button class="lnk-btn dep-del" data-id="'+d.id+'" data-ref="'+esc(d.reference||('#'+d.id))+'" style="color:#dc2626">delete</button>';
-      if(d.is_deposit && d.prod_no && d.supplier_name && !closed) act+=' <button class="lnk-btn dep-apply-all" data-id="'+d.id+'" style="color:#6d28d9" title="assign this deposit to every open '+esc(d.supplier_name)+' PO in production '+esc(d.prod_no)+' ('+esc(d.country||'?')+' region) that has no deposit yet">⤿ apply to prod '+esc(d.prod_no)+'</button>';
+      if(d.is_deposit && d.prod_no && d.supplier_name && !closed && (d.apply_pos||'').trim()){ var _pLbl2=/^p/i.test(String(d.prod_no||''))?d.prod_no:('P'+d.prod_no); act+=' <button class="lnk-btn dep-apply-all" data-id="'+d.id+'" style="color:#6d28d9;white-space:normal;text-align:left" title="assign this deposit to these open '+esc(d.supplier_name)+' PO(s) in '+esc(_pLbl2)+' ('+esc(d.country||'?')+' region) with no deposit yet">⤿ apply to unassigned '+esc(_pLbl2)+' - '+esc(d.apply_pos)+'</button>'; }
       var title = locked?esc(d.reference||'(no reference)'):editCell(ep,'reference',d.reference,'txt');
       var f=mobFld('Supplier',v_sup)+mobFld('Country',v_ctry)+mobFld('PROD#',v_prod)+mobFld('Amount',v_amt)+mobFld('FX',v_fx)+mobFld('Dates',v_dates)+mobFld('Remaining',v_rem)+mobFld('Est. alloc.',v_est)+mobFld('Linked POs',linkedPOsMini(d));
       return mobCard(title,badge,f,act); }

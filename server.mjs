@@ -3878,6 +3878,16 @@ app.get('/api/supply/:section', async (req, res, next) => {
             -- complete; the full list is linked_pos above ("all").
             (SELECT string_agg(po.po, ', ' ORDER BY po.po) FROM planner.purchase_orders po
                WHERE po.deposit_ref=d.reference AND coalesce(po.status,'') NOT ILIKE '%complete%') pos_open,
+            -- POs the "apply to unassigned" button would assign: same production + supplier, region-matched
+            -- (AU isolation), open, with NO deposit yet. Empty ⇒ nothing to apply ⇒ hide the button.
+            CASE WHEN d.is_deposit AND coalesce(d.prod_no,'')<>'' AND coalesce(d.supplier_name,'')<>'' THEN (
+              SELECT string_agg(po.po, ', ' ORDER BY po.po) FROM planner.purchase_orders po
+              WHERE coalesce(po.prod_no,'')=d.prod_no
+                AND lower(trim(coalesce(po.supplier_name,'')))=lower(trim(d.supplier_name))
+                AND coalesce(po.deposit_ref,'')='' AND coalesce(po.status,'') NOT ILIKE '%complete%'
+                AND ( (upper(coalesce(nullif(po.country_code,''),(SELECT b.country_code FROM planner.branches b WHERE b.name=po.branch),''))='AU')
+                    = (upper(trim(coalesce(d.country,'')))='AU') )
+            ) END apply_pos,
             -- per-PO breakdown for the "Linked purchase orders" mini-table: allocated (start deposit already
             -- assigned) + estimated (value × start%). One object per linked PO; the client filters by toggle.
             CASE WHEN d.is_deposit THEN (

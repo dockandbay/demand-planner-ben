@@ -1,3 +1,6 @@
+## v27.151 Deposits "apply to unassigned" button lists the target POs (and hides when none)
+- The apply-to-production button now reads **"⤿ apply to unassigned P56 - PO-1731755, PO-1744735"** — it lists the exact open, region-matched, no-deposit-yet POs it will assign, and is **hidden entirely when there are none**. New `apply_pos` field on `GET /api/supply/deposits`.
+
 ## v27.150 Deposits linked-POs: allocated takes priority over estimated
 - In the linked-POs mini-table, a PO that already has an **allocated** amount now shows **—** for Estimated (and is excluded from the Estimated Σ). Allocated takes priority; the two columns no longer double-count the same PO. So the mini-table Estimated total reconciles with the deposit's Est. alloc. column.
 
