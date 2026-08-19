@@ -1,3 +1,7 @@
+## v27.162 Manage FBA ▸ US AWD: accept the new "AWD inventory report" as well as the ledger
+- The US AWD upload now takes **either** export: the daily **AWD Inventory Ledger** (existing) **or** the newer per-SKU **AWD inventory report** (has a Timestamp/Merchant preamble + an `Available in AWD (units)` column). Auto-detected server-side; both produce the same reconciliation.
+- **Reconciled the two:** on Ben's 08/19 exports they agree — 89 SKUs, ledger 41,640 vs report 41,570 units; only 2 SKUs differ (TOWLB-CAB-LG-KHAKI-R 200/160, TOWLB-SUM-XL-RAINB-R 150/120), explained by the report being pulled 3 days after the ledger's latest date. The snapshot is the cleaner source of truth (units given directly; no cartons×pkg maths, no daily-row dedupe).
+
 ## v27.161 Xero Compare: drag-and-drop the XLSX onto a drop box
 - The "choose file" input on PAYMENTS ▸ Xero Compare now sits in a small dashed drop box — drag the Xero XLSX onto it (highlights on hover) and it loads + auto-analyses. Clicking still opens the file picker.
 

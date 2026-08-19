@@ -8032,8 +8032,35 @@ function awdLedgerParse(text) {
     const r = agg[u.msku] || (agg[u.msku] = { msku: u.msku, cartons: 0, units: 0, pkg: 0, asin: '', facility: '' });
     r.cartons += u.cartons; if (u.pkg) r.pkg = u.pkg; if (!r.asin) r.asin = u.asin; if (!r.facility) r.facility = u.fac; });
   const rows = Object.keys(agg).map(k => { const r = agg[k]; r.units = r.cartons * r.pkg; return r; }).filter(r => r.cartons !== 0 || r.units !== 0);
-  return { rep: { rows, total_units: rows.reduce((s, r) => s + r.units, 0), total_cartons: rows.reduce((s, r) => s + r.cartons, 0), skus: rows.length } };
+  return { rep: { rows, total_units: rows.reduce((s, r) => s + r.units, 0), total_cartons: rows.reduce((s, r) => s + r.cartons, 0), skus: rows.length, source: 'ledger' } };
 }
+// The newer "AWD inventory report" — a per-SKU SNAPSHOT (units given directly) with a Timestamp/Merchant preamble, e.g.
+// Product Name,SKU,FNSKU,ASIN,…,Available in AWD (units),Available in AWD (cases),Available Units in AWD (US),…
+// Reconciles to the ledger's latest-date balance (verified). Output shape is identical to awdLedgerParse's rep.
+function awdSnapshotParse(text) {
+  const lines = String(text).split(/\r?\n/); if (!lines.length) return null;
+  const isTsv = (lines.find(l => l.trim()) || '').indexOf('\t') >= 0;
+  const split = isTsv ? (l => l.split('\t').map(s => String(s).replace(/^"|"$/g, '').trim()))
+                      : (l => parseCsvLine(l).map(s => String(s).replace(/^"|"$/g, '').trim()));
+  let hi = -1, hdr = null;   // skip the Timestamp / Merchant ID / blank preamble; find the real header row
+  for (let i = 0; i < Math.min(lines.length, 12); i++) { const h = split(lines[i]).map(x => x.toLowerCase());
+    if (h.indexOf('sku') >= 0 && h.some(x => x.indexOf('available') >= 0 && x.indexOf('awd') >= 0 && x.indexOf('unit') >= 0)) { hi = i; hdr = h; break; } }
+  if (hi < 0) return null;   // not a snapshot → let the caller try the ledger parser
+  const iSku = hdr.indexOf('sku'), iAsin = hdr.indexOf('asin');
+  const uCol = hdr.indexOf('available units in awd (us)') >= 0 ? hdr.indexOf('available units in awd (us)') : hdr.indexOf('available in awd (units)');
+  const cCol = hdr.indexOf('available cartons in awd (us)') >= 0 ? hdr.indexOf('available cartons in awd (us)') : hdr.indexOf('available in awd (cases)');
+  if (uCol < 0) return { error: 'Not an AWD inventory report (needs an "Available in AWD (units)" column)', headers: hdr.slice(0, 26) };
+  const agg = {};
+  for (let i = hi + 1; i < lines.length; i++) { if (!lines[i].trim()) continue; const f = split(lines[i]); const msku = String(f[iSku] || '').trim(); if (!msku) continue;
+    const units = csvNum(f[uCol]), cartons = cCol >= 0 ? csvNum(f[cCol]) : 0;
+    const r = agg[msku] || (agg[msku] = { msku, cartons: 0, units: 0, pkg: 0, asin: '', facility: '' });
+    r.units += units; r.cartons += cartons; if (!r.asin && iAsin >= 0) r.asin = String(f[iAsin] || '').trim(); }
+  const rows = Object.keys(agg).map(k => { const r = agg[k]; if (r.cartons > 0) r.pkg = Math.round(r.units / r.cartons); return r; }).filter(r => r.units !== 0 || r.cartons !== 0);
+  return { rep: { rows, total_units: rows.reduce((s, r) => s + r.units, 0), total_cartons: rows.reduce((s, r) => s + r.cartons, 0), skus: rows.length, source: 'snapshot' } };
+}
+// Accept EITHER AWD export: the per-SKU snapshot ("AWD inventory report") or the daily ledger. Try snapshot first
+// (it self-identifies via its SKU + "Available in AWD (units)" header); otherwise fall back to the ledger parser.
+function awdParse(text) { const snap = awdSnapshotParse(text); if (snap && (snap.rep || snap.error)) return snap; return awdLedgerParse(text); }
 async function awdCompare(rep) {
   const rows = (rep && rep.rows) || [];
   const prod = (await pool.query(`SELECT sku, coalesce(inventory_us_awd,0) awd FROM planner.products`)).rows;
@@ -8056,7 +8083,7 @@ app.post('/api/supply/inventory-awd/import', async (req, res) => {
   const b = req.body || {}; let text = String(b.csv || '');
   if (b.csv_base64) { try { text = Buffer.from(String(b.csv_base64).split(',').pop(), 'base64').toString('utf8'); } catch (e) {} }
   if (!text.trim()) return res.json({ error: 'Empty file' });
-  try { const parsed = awdLedgerParse(text);
+  try { const parsed = awdParse(text);
     if (!parsed) return res.json({ error: 'Empty report' });
     if (parsed.error) return res.json({ headers: parsed.headers, error: parsed.error });
     const by = authUser(req) || 'admin';

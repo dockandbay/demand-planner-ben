@@ -11264,13 +11264,13 @@ function invAwdWire(){ var drop=document.getElementById('invawd-drop'), file=doc
 }
 function invAwdRender(j){ var panel=document.getElementById('invawd-panel'); if(!panel)return; _AWD_LAST=j;
   var host='<div style="padding-top:4px"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px"><b style="font-size:15px">US AWD — Amazon Warehousing &amp; Distribution</b>'
-    +'<span class="mut" style="font-size:11px">upload the <b>AWD Inventory Ledger</b> report (Seller Central). On-hand units = Ending cartons × Package Qty.</span></div>';
+    +'<span class="mut" style="font-size:11px">upload the <b>AWD inventory report</b> <i>or</i> the <b>AWD Inventory Ledger</b> (Seller Central) — either works. On-hand = available AWD units.</span></div>';
   var drop='<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:0 0 8px">'
-    +'<div id="invawd-drop" style="border:2px dashed #93c5fd;border-radius:8px;background:#f8fbff;padding:8px 10px;text-align:center;cursor:pointer;max-width:220px;box-sizing:border-box;font-size:11px">Drop AWD Inventory Ledger CSV<br>or click to choose</div>'
+    +'<div id="invawd-drop" style="border:2px dashed #93c5fd;border-radius:8px;background:#f8fbff;padding:8px 10px;text-align:center;cursor:pointer;max-width:220px;box-sizing:border-box;font-size:11px">Drop AWD report or ledger CSV<br>or click to choose</div>'
     +'<input id="invawd-file" type="file" accept=".csv,.tsv,.txt" style="display:none">'
     +'<span id="invawd-msg" class="mut" style="font-size:11px"></span></div>';
   if(j&&j.error){ panel.innerHTML=host+drop+'<div style="color:#dc2626;font-size:12px">'+tHesc(j.error)+(j.headers?'<div class="mut" style="font-size:11px;margin-top:4px">Detected headers: '+tHesc(j.headers.join(', '))+'</div>':'')+'</div></div>'; invAwdWire(); return; }
-  if(!j||!j.imported){ panel.innerHTML=host+drop+'<div class="mut" style="font-size:12px">No AWD ledger uploaded yet.</div></div>'; invAwdWire(); return; }
+  if(!j||!j.imported){ panel.innerHTML=host+drop+'<div class="mut" style="font-size:12px">No AWD report uploaded yet.</div></div>'; invAwdWire(); return; }
   var awd=j.awd||[], nUn=j.unmatched||0;
   var meta='<span class="mut" style="font-size:12px">'+invFbaMeta(j)+' · '+awd.length+' SKUs'+(nUn?' <span style="color:#b45309;font-weight:600">· ⚠ '+nUn+' unmatched</span>':'')+'</span>';
   var head=['Amazon MSKU','Our SKU','Cartons','Pkg qty','AWD units','Current AWD','Δ'].map(function(h,i){return '<th style="text-align:'+(i<=1?'left':'right')+';padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+h+'</th>';}).join('');
