@@ -1,3 +1,6 @@
+## v27.160 PO deposit-ref: "not applicable" for 0%-start POs (instead of "no deposit")
+- On the PO grid / order-plan deposit-ref column, a PO with **no start %** (0%) now reads **"not applicable"** (same light-grey style) instead of "no deposit" — deposit genuinely doesn't apply. "no deposit" is reserved for the other empty case; the explicit `NO DEPOSIT` sentinel and `— assign` prompt are unchanged.
+
 ## v27.159 Deposits: delete/apply now bust the server cache (stale linked-POs fix)
 - **Bug:** deleting a deposit (or "apply to unassigned") did raw DB writes but didn't invalidate the cached `deposits`/PO/cash-flow section responses, so a silent reload re-served the **stale** list — the deposit and its linked POs kept showing even though the POs were already re-pointed. A second delete then hit "Failed: deposit not found".
 - **Fix:** the delete and apply-all endpoints now call `invalidateSupplyCaches()`, and a delete of an already-gone deposit is **idempotent** (returns ok + busts cache) instead of erroring. A reload now reflects reality immediately.

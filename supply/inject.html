@@ -1785,8 +1785,9 @@
     }); }
   // fully paid = value(+credit) − all assigned/paid milestones ≤ 0 → no deposit is "needed" any more
   function poFullyPaid(r){ var n=function(v){return Number(v)||0;}; var paid=n(r.start_assigned)+n(r.completion_assigned)+n(r.balance_1_amount)+n(r.balance_2_amount); return Math.round((n(r.value_used)+n(r.credit_amount)-paid)*100)/100 <= 0.02; }
-  function depPickBtn(po,val,needed){ var empty=!val; var cls='dep-pick'+(needed&&empty?' needdep':(empty?' nodep':''));
-    return '<button class="'+cls+'" data-po="'+esc(po)+'">'+(val?esc(val):(needed?'— assign':'no deposit'))+' ▾</button>'; }
+  // notApplicable = the PO has no start % (0%), so a deposit doesn't apply → show "not applicable" (same grey) instead of "no deposit".
+  function depPickBtn(po,val,needed,notApplicable){ var empty=!val; var cls='dep-pick'+(needed&&empty?' needdep':(empty?' nodep':''));
+    return '<button class="'+cls+'" data-po="'+esc(po)+'">'+(val?esc(val):(needed?'— assign':(notApplicable?'not applicable':'no deposit')))+' ▾</button>'; }
   function bindDepPick(done){ document.querySelectorAll('#supply-root .dep-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openDepPick(b.dataset.po,b,done); }; }); }
   // Generic searchable cell picker (same UX as the shipment/deposit popovers) — used for Supplier & Branch.
   // Not a link to a table; just the dropdown/search to set the value. data-list: 'supplier' | 'branch'.
@@ -2899,7 +2900,7 @@
         +(((r.status==='PRODUCTION'||r.status==='SHIPPED TO MASTER')&&r.ship_status==='Shipping')?'<div style="margin-top:3px"><button class="po-set-shipping" data-po="'+esc(r.po)+'" title="This PO&rsquo;s shipment has departed (Shipping) but the PO is still upstream — set this PO and every PO on the same shipment still upstream to SHIPPING">→ set shipping</button></div>':'')
         +'</td>'
       +'<td class="l">'+shipcell+'</td>'
-      +'<td class="l">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0 && !poFullyPaid(r))+'</td>'
+      +'<td class="l">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0 && !poFullyPaid(r),!(Number(r.start_pct)>0))+'</td>'
       +gDate(r,'start_production',r.prod_start,'',(r.status==='FUTURE'&&datePast(r.prod_start))?DTD_LRED:'')
       +gDate(r,'end_production_overide',r.prod_end,(r.status==='PRODUCTION'?endDaysBadge(r.prod_end):'')+subCompBtn(r),(r.status==='PRODUCTION'&&datePast(r.prod_end))?DTD_LRED:'')
       +'<td class="l">'+dcell(r.ship)+srctagLink(r.ship_src,r)+'</td>'
@@ -3452,7 +3453,7 @@
             +'<div class="dep-atrisk-slot" data-po="'+esc(r.po)+'"></div></td>'; })()
       +'<td class="l">'+payIn(ep,'pay_start_deposit_assigned',r.start_assigned,false,false,(r.deposit_ref&&r.deposit_avail!=null)?('data-avail="'+esc(Math.round((Number(r.deposit_avail||0)+Number(r.start_assigned||0))*100)/100)+'"'):'')+'</td>'
       +'<td class="l">'+payIn(ep,'pay_start_deposit_date',r.start_date,true,!(n(r.start_assigned)>0))+'</td>'
-      +'<td class="l" style="white-space:normal">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0 && !poFullyPaid(r))+(r.deposit_avail!=null?'<div class="mut tiny" style="margin-top:2px">'+money(r.deposit_avail)+' avail'+(r.deposit_fx!=null&&r.deposit_fx!==''?' · FX '+Number(r.deposit_fx).toFixed(4):'')+'</div>':'')+'</td>'
+      +'<td class="l" style="white-space:normal">'+depPickBtn(r.po,r.deposit_ref,Number(r.start_pct)>0 && !poFullyPaid(r),!(Number(r.start_pct)>0))+(r.deposit_avail!=null?'<div class="mut tiny" style="margin-top:2px">'+money(r.deposit_avail)+' avail'+(r.deposit_fx!=null&&r.deposit_fx!==''?' · FX '+Number(r.deposit_fx).toFixed(4):'')+'</div>':'')+'</td>'
       +mkPay(dueCell(r.start_due,startUnpaid,'',startOwed),_startOver)+likelyCell('dep:'+r.po,startUnpaid&&startOwed,r.likely_start)+'<td class="l">'+(startOwed?payBadge(sStat[0],sStat[1]):payBadge('—','bg-neutral'))+'</td>');
     h+=tr('<td class="l"><b>Completion</b> <input class="fci pctin payin" data-ep="'+ep+'" data-field="completion_pct_override" value="'+esc(r.completion_pct)+'"><span class="mut tiny">%</span><div class="mut tiny" style="margin-top:2px">+ catch-up'+(Number(r.catch_up)?' '+(Number(r.catch_up)>0?'+':'')+money(r.catch_up):'')+'</div></td>'
       +'<td>'+money(r.completion_calc)+((compOwed && compUnpaid)?payFillBtn('pay_completion_assigned','pay_completion_date',r.completion_calc):'')+'</td>'
