@@ -1,3 +1,6 @@
+## v27.138 PO actions: new "Deposit not assigned" master-data action
+- A PO with a start deposit but no deposit reference linked now raises **"Deposit not assigned"** — a **Master Data** action (separate from the payment "deposit not paid"). Excludes FUTURE and completed POs. Added a **Deposit reference** row on the PO's Master Data tab (deposit picker + action mark) so it's actionable there — assign a production deposit or mark No Deposit.
+
 ## v27.137 Flexport report: mobile card layout (no longer squashed)
 - On mobile (≤700px) the SUPPLY ▸ Reports ▸ Flexport shipment list now renders as **stacked cards** (shipment name + status, then Flexport/Mode/Packing/Departure/Landing/Arrival/Container/Freight as label:value rows) instead of the 10-column table that squashed onto one screen. Desktop keeps the full table. Uses the existing `actMob()` breakpoint.
 
