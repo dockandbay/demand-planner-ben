@@ -5347,10 +5347,10 @@
       var arr=(d.po_alloc||[]).filter(function(p){ if(depPoView==='all')return true; if(depPoView==='open')return !p.complete; return !p.complete && !(Number(p.allocated)>0) && Number(p.estimated)>0; });
       if(!arr.length) return '<span class="mut tiny">—</span>';
       var tA=0,tE=0;
-      var body=arr.map(function(p){ tA+=Number(p.allocated)||0; tE+=Number(p.estimated)||0;
+      var body=arr.map(function(p){ var al=Number(p.allocated)||0, es=al>0?0:(Number(p.estimated)||0); tA+=al; tE+=es;   // allocated takes priority — a PO with an allocation shows no estimate (Ben)
         return '<tr><td class="l" style="padding:1px 6px 1px 0">'+(p.complete?'<span class="mut tiny" title="PO complete" style="margin-right:2px">✓</span>':'')+'<button class="lnk-btn dep-po-link" data-po="'+esc(p.po)+'" title="open this PO — payments tab" style="font-size:10px">'+esc(p.po)+'</button></td>'
-          +'<td style="text-align:right;padding:1px 0 1px 8px;font-variant-numeric:tabular-nums">'+(Number(p.allocated)>0?money(p.allocated):'<span class="mut">—</span>')+'</td>'
-          +'<td style="text-align:right;padding:1px 0 1px 10px;font-variant-numeric:tabular-nums">'+(Number(p.estimated)>0?money(p.estimated):'<span class="mut">—</span>')+'</td></tr>'; }).join('');
+          +'<td style="text-align:right;padding:1px 0 1px 8px;font-variant-numeric:tabular-nums">'+(al>0?money(al):'<span class="mut">—</span>')+'</td>'
+          +'<td style="text-align:right;padding:1px 0 1px 10px;font-variant-numeric:tabular-nums">'+(es>0?money(es):'<span class="mut">—</span>')+'</td></tr>'; }).join('');
       return '<table class="dep-po-tbl" style="width:100%;border-collapse:collapse;font-size:10px;line-height:1.5"><thead><tr><th class="l" style="font-weight:600;color:#64748b;padding:0 6px 2px 0">PO Ref</th><th style="text-align:right;font-weight:600;color:#64748b;padding:0 0 2px 8px">Allocated</th><th style="text-align:right;font-weight:600;color:#64748b;padding:0 0 2px 10px">Estimated</th></tr></thead><tbody>'+body+'</tbody>'
         +'<tfoot><tr style="border-top:1px solid #cbd5e1;font-weight:700"><td class="l" style="padding:2px 6px 0 0">Total</td><td style="text-align:right;padding:2px 0 0 8px;font-variant-numeric:tabular-nums">'+money(tA)+'</td><td style="text-align:right;padding:2px 0 0 10px;font-variant-numeric:tabular-nums">'+money(tE)+'</td></tr></tfoot></table>'; }
     function rowHTML(d){ var ep='/api/supply/deposit/'+encodeURIComponent(d.id);

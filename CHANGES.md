@@ -1,3 +1,6 @@
+## v27.150 Deposits linked-POs: allocated takes priority over estimated
+- In the linked-POs mini-table, a PO that already has an **allocated** amount now shows **—** for Estimated (and is excluded from the Estimated Σ). Allocated takes priority; the two columns no longer double-count the same PO. So the mini-table Estimated total reconciles with the deposit's Est. alloc. column.
+
 ## v27.149 Deposits register: Dates column +50% width, Linked purchase orders −50%
 - Widened the **Dates** column (124→186px) and narrowed the **Linked purchase orders** mini-table cell by half (min 360→180, max 560→280; col fixed at 200px).
 
