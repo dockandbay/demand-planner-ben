@@ -5360,7 +5360,7 @@
       var locked=!editing;   // uniform: nothing editable until its Edit button is clicked
       function txt(v,isd){ return (v==null||v==='')?'<span class="mut">—</span>':esc(isd?fd(v):v); }
       var c_ref = locked?'<td class="l">'+txt(d.reference)+'</td>':'<td class="l">'+editCell(ep,'reference',d.reference,'txt')+'</td>';
-      var c_sup = locked?'<td class="l">'+txt(d.supplier_name)+'</td>':'<td class="l">'+supSel(ep,d.supplier_name)+'</td>';
+      var c_sup = locked?'<td class="l">'+txt(d.supplier_name)+'</td>':'<td class="l"><button class="cell-pick dep-sup-pick" data-id="'+d.id+'" data-val="'+esc(d.supplier_name||'')+'" title="pick a supplier">'+(d.supplier_name?esc(d.supplier_name):'<span class="mut">— set</span>')+' ▾</button></td>';
       var DEP_MKTS=['UK','AU','EU','US','CA'];   // deposit region — drives which POs can use it (AU is isolated)
       var ctryBlank=!String(d.country||'').trim(), fxBlank=(d.xero_fx==null||String(d.xero_fx).trim()===''); // flag missing region / FX rate
       var _redTd=' style="background:#fee2e2"';   // highlight a blank required cell
@@ -5419,7 +5419,7 @@
       function txt(v,isd){ return (v==null||v==='')?'<span class="mut">—</span>':esc(isd?fd(v):v); }
       var badge = closed?'<span class="tool-badge bg-neutral">closed</span>':((lockedPay||d.date_paid)?'<span class="tool-badge bg-green">paid</span>':'<span class="tool-badge bg-amber">open</span>');
       var DEP_MKTS=['UK','AU','EU','US','CA'];
-      var v_sup = locked?txt(d.supplier_name):supSel(ep,d.supplier_name);
+      var v_sup = locked?txt(d.supplier_name):'<button class="cell-pick dep-sup-pick" data-id="'+d.id+'" data-val="'+esc(d.supplier_name||'')+'" title="pick a supplier">'+(d.supplier_name?esc(d.supplier_name):'<span class="mut">— set</span>')+' ▾</button>';
       var v_ctry= locked?txt(d.country):'<select class="fci" data-ep="'+esc(ep)+'" data-field="country"><option value=""></option>'+DEP_MKTS.map(function(mk){return '<option'+(String(d.country||'').toUpperCase()===mk?' selected':'')+'>'+mk+'</option>';}).join('')+'</select>';
       var v_prod= locked?txt(d.prod_no):'<button class="cell-pick dep-prod-pick" data-id="'+d.id+'" title="pick an active production">'+(d.prod_no?esc(d.prod_no):'<span class="mut">— set</span>')+' ▾</button>';
       var v_amt = locked?((d.amount==null||d.amount==='')?'<span class="mut">—</span>':money(d.amount)):editCell(ep,'amount',d.amount,'','style="width:120px"');
@@ -5450,6 +5450,7 @@
       else { if(_tw)_tw.style.display=''; if(_dc)_dc.innerHTML=''; document.getElementById('dep-rows').innerHTML=f.map(rowHTML).join(''); }
       bindEdits();
       b.querySelectorAll('.dep-prod-pick').forEach(function(btn){ btn.onclick=function(e){ e.stopPropagation(); openDepProdNoPick(btn); }; });   // searchable active-productions picker
+      b.querySelectorAll('.dep-sup-pick').forEach(function(btn){ btn.onclick=function(e){ e.stopPropagation(); openDepSupPick(btn); }; });   // searchable supplier picker (no free-text)
       b.querySelectorAll('.dep-po-link').forEach(function(btn){ btn.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(btn.dataset.po,'pay'); else gotoPO(btn.dataset.po,'pay'); }; });   // popout drawer (Payments tab), not a full navigation
       b.querySelectorAll('.dep-edit').forEach(function(btn){ btn.onclick=function(){ DEP_EDIT[btn.dataset.id]=true; draw(); }; });   // unlock this row in place
       b.querySelectorAll('.dep-save').forEach(function(btn){ btn.onclick=function(){ var id=btn.dataset.id;
@@ -5533,6 +5534,21 @@
     else fetch('/api/supply/prod-numbers').then(function(r){return r.json();}).then(function(rows){
       _depProdsCache=(rows||[]).filter(function(p){return String(p.status||'').toUpperCase()==='ACTIVE';}).sort(function(a,b){return String(b.prod_no).localeCompare(String(a.prod_no),undefined,{numeric:true});});
       render(''); }).catch(function(){ var l=document.getElementById('shpop-list'); if(l)l.innerHTML='<div class="count" style="padding:8px;color:#dc2626">could not load productions</div>'; }); }
+  // Deposit Supplier — searchable pick popover (same style as the PO grid "assign supplier"); no free-text entry.
+  function openDepSupPick(btn){ closeShPop(); var id=btn.dataset.id, cur=(btn.dataset.val||'').trim();
+    var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
+    var rc=btn.getBoundingClientRect(); pop.style.cssText='position:fixed;z-index:100000;top:'+(rc.bottom+4)+'px;left:'+Math.max(8,Math.min(rc.left,window.innerWidth-312))+'px';
+    pop.innerHTML='<div class="shpop-h">Set supplier</div><input class="shpop-q" placeholder="search supplier…"><div id="shpop-list"><div class="count" style="padding:8px">Loading…</div></div>';
+    document.body.appendChild(pop); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
+    function save(val){ shipPost('/api/supply/deposit/'+id,{supplier_name:val},function(){ closeShPop(); delete cache['productions']; showPoSub('deposits'); }); }
+    function render(q){ q=(q||'').trim().toLowerCase(); var list=(supplierList||[]).slice().sort();
+      var ms=list.filter(function(s){return (!q||String(s).toLowerCase().indexOf(q)>=0) && s!==cur;});
+      var html=(cur?'<div class="shpop-opt" data-v="'+esc(cur)+'" style="background:#eff6ff;border-bottom:1px solid #dbeafe"><b>'+esc(cur)+'</b> <span class="mut tiny">— current</span></div>':'')
+        +'<div class="shpop-opt unassign" data-clear="1">— Clear</div>'+ms.slice(0,q?80:15).map(function(s){return '<div class="shpop-opt" data-v="'+esc(s)+'">'+esc(s)+'</div>';}).join('')
+        +((!q&&ms.length>15)?'<div class="mut tiny" style="padding:5px 10px">'+(ms.length-15)+' more — type to search…</div>':'');
+      var l=document.getElementById('shpop-list'); if(l){ l.innerHTML=html; l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ save(o.dataset.clear?'':o.dataset.v); }; }); } }
+    var qi=pop.querySelector('.shpop-q'); qi.oninput=function(){render(this.value);}; qi.focus();
+    if(supplierList&&supplierList.length){ render(''); } else fetchLookups(function(){ render(''); }); }
   function prodTable(rows){ if(!rows.length)return '<div class="count">No productions in this filter.</div>';
     var h='<div class="tw"><table><thead><tr><th class="l"></th><th class="l">PROD#</th><th class="l">Supplier</th><th>POs</th><th>Units</th><th>Value</th><th class="l">Deposits</th><th class="l">Status</th></tr></thead><tbody>';
     rows.forEach(function(p,i){

@@ -1,3 +1,6 @@
+## v27.152 Deposits: Supplier is a searchable picker (no free-text)
+- In the Deposits register, the **Supplier** field (when a row is unlocked / on mobile cards) is now a **searchable pick popover** in the same style as the PO grid's "assign supplier" — pick from the supplier list, no free-text data entry. (Read-only text when the row is locked.)
+
 ## v27.151 Deposits "apply to unassigned" button lists the target POs (and hides when none)
 - The apply-to-production button now reads **"⤿ apply to unassigned P56 - PO-1731755, PO-1744735"** — it lists the exact open, region-matched, no-deposit-yet POs it will assign, and is **hidden entirely when there are none**. New `apply_pos` field on `GET /api/supply/deposits`.
 
