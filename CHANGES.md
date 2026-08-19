@@ -1,3 +1,6 @@
+## v27.149 Deposits register: Dates column +50% width, Linked purchase orders −50%
+- Widened the **Dates** column (124→186px) and narrowed the **Linked purchase orders** mini-table cell by half (min 360→180, max 560→280; col fixed at 200px).
+
 ## v27.148 Payments tables: mobile card layout (Deposits, Other Payments, Payments Due, Payments Report)
 - On phones (≤700px) the four payment tables now render as **stacked cards** (like the Flexport report) instead of a squashed wide table; desktop is unchanged.
 - **Deposits** — card per deposit with the linked-POs mini-table, edit/close/delete/apply actions; edit unlocks the fields inline as on desktop.

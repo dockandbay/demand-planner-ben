@@ -5337,7 +5337,7 @@
       +'<style>#deptbl{table-layout:fixed;width:100%}#deptbl td,#deptbl th{white-space:normal;overflow-wrap:break-word;vertical-align:top}#deptbl .fci{width:100%;box-sizing:border-box;min-width:0;text-align:left}'
       +'#deptbl .datewrap{display:flex;width:100%;max-width:100%}#deptbl .datewrap .dateinp{flex:1 1 auto;min-width:0;width:auto!important;text-align:left!important}#deptbl .datewrap .datepick{flex:0 0 auto}</style>'
       +'<div class="tw" id="dep-tblwrap"><table id="deptbl"><colgroup>'
-      +'<col style="width:120px"><col style="width:140px"><col style="width:56px"><col style="width:50px"><col style="width:96px"><col style="width:56px"><col style="width:124px"><col style="width:82px"><col style="width:92px"><col><col style="width:132px"></colgroup>'
+      +'<col style="width:120px"><col style="width:140px"><col style="width:56px"><col style="width:50px"><col style="width:96px"><col style="width:56px"><col style="width:186px"><col style="width:82px"><col style="width:92px"><col style="width:200px"><col style="width:132px"></colgroup>'
       +'<thead><tr><th class="l">Reference</th><th class="l">Supplier</th><th class="l" title="AU deposits are region-isolated; a PO can only use a deposit in its own region">Country</th><th class="l">PROD#</th><th>Amount</th><th>FX</th><th class="l" title="Due · Likely pay (unpaid only) · Date paid">Dates</th><th>Remaining</th><th title="Σ calculated start deposits of OPEN, not-yet-allocated POs on this reference">Est. alloc.</th><th class="l">Linked purchase orders</th><th class="l"></th></tr></thead><tbody id="dep-rows"></tbody></table></div><div id="dep-cards"></div>';
     // Every deposit row is read-only by default; click Edit to unlock it, Save to relock. (A closed row must
     // be reopened first.) Edit state (DEP_EDIT) holds while you edit; saving relocks all rows.
@@ -5394,7 +5394,7 @@
       var c_est = '<td style="width:84px;white-space:nowrap'+(estOver?';color:#dc2626;font-weight:700':'')+'"'+(estOver?' title="Estimated allocation exceeds the remaining deposit">':'>')+(d.is_deposit?money(d.est_alloc):'')+'</td>';
       // purchase orders linked to this deposit → the shared 3-column mini-table (toggle: Unallocated / Open / All)
       var _lp=linkedPOsMini(d);
-      var c_asg = (_lp==='<span class="mut tiny">—</span>') ? '<td class="l" style="min-width:360px">'+_lp+'</td>' : '<td class="l" style="min-width:360px;max-width:560px;padding:3px 4px">'+_lp+'</td>';
+      var c_asg = (_lp==='<span class="mut tiny">—</span>') ? '<td class="l" style="min-width:180px">'+_lp+'</td>' : '<td class="l" style="min-width:180px;max-width:280px;padding:3px 4px">'+_lp+'</td>';
       var act;
       if(closed) act='<span class="tool-badge bg-neutral" style="margin-right:5px">closed</span><button class="lnk-btn dep-close" data-id="'+d.id+'" data-st="">reopen</button>';
       else { var paidTag = lockedPay ? '<span class="tool-badge bg-green" style="margin-right:5px" title="paid &amp; FX applied">paid</span>' : '';
