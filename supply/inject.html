@@ -736,7 +736,7 @@
 <script src="/portal-view.js?v=__APP_VERSION__"></script>
 <script>
 (function(){
-  var SECTIONS=[['purchase-orders','PURCHASE ORDERS'],['order-plan','ORDER PLAN'],['reports','BI & REPORTS'],
+  var SECTIONS=[['purchase-orders','PURCHASE ORDERS'],['reports','BI & REPORTS'],
     ['payments','PAYMENTS'],['samples','SAMPLES'],['quality-control','QUALITY CONTROL'],['config','CONFIG']];   // Ben: Actions/Recommendations/ERP Compare folded into BI & REPORTS (first 3 L3 tabs) — no standalone ACTIONS section   // CONFIG here = SUPPLY ▸ CONFIG (supply-chain settings + Key accounts + Portal); the ⚙ cog opens the admin CONFIG. SHIPMENTS under PURCHASE ORDERS; PAYMENTS umbrella holds Deposits / Other Payments / Payments Due / Payments Report
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
   var REPORT_SECTIONS=[['actions','ACTIONS'],['recommendations','💡 RECOMMENDATIONS'],['erp-compare','⬆ ERP COMPARE'],['dtc-mismatch','DTC MISMATCH'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['metrics','METRICS'],['production-summary','PRODUCTION SUMMARY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
@@ -4372,7 +4372,7 @@
     function pillsHTML(opts,setv,noAll){ return opts.map(function(o){return '<span class="pill'+(setv.has(o)?' active':'')+'" data-v="'+esc(o)+'">'+esc(o)+'</span>';}).join('')+(noAll?'':'<span class="pill" data-all="1">All</span>'); }
     function sel(id,label,opts,val){return '<span class="pill-lbl">'+label+'</span><select class="flt'+(val&&val!=='All'?' sel-on':'')+'" id="'+id+'" style="width:auto;padding:3px 6px"><option>All</option>'+opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>';}
     function markSel(el){ if(el)el.classList.toggle('sel-on', el.value && el.value!=='All'); }   // black-highlight a dropdown when a non-All option is chosen
-    c.innerHTML=annot('order-plan')
+    c.innerHTML=poSubNav()+annot('order-plan')   // Order plan is a PURCHASE ORDERS sub-tab — show the PO sub-nav above it
       +'<div class="bar op-filt-head"><button class="save-btn op-filt-toggle" id="op-filt-toggle">⚙ Filters</button><button class="save-btn op-dl-top" id="op-dl-top" style="background:#2563eb;color:#fff;border-color:#2563eb" title="Download XLSX report">⤓ Download report</button></div>'
       +'<div id="op-filters">'
       +'<div class="bar"><span class="pill-lbl">Status</span><span id="op-status">'+opStatusPills(st.statuses)+'</span><span class="mut tiny op-hint" style="margin-left:6px">completed POs: search a PO number below</span>'
@@ -4395,6 +4395,7 @@
       +'<div id="op-empties"></div>'
       +'<div style="display:flex;align-items:center;gap:10px;margin:6px 0 3px;flex-wrap:wrap"><div id="op-changes" style="flex:1 1 62%;min-width:260px"></div><span class="count" id="op-count" style="flex:0 1 34%;min-width:150px;text-align:right;margin-left:auto"></span></div>'   // supplier-changes banner (~65%) + count/Load-more (~35%) on one row
       +'<div id="op-grid"></div>';
+    try{ bindPoSubNav(); }catch(e){}   // wire the PO sub-nav tabs (Order plan is a PO sub-tab now)
     // POs with no SKU lines yet don't appear in the SKU×PO grid — surface them here so they're visible + openable.
     (function(){ var el=document.getElementById('op-empties'); if(!el)return;
       fetch('/api/supply/pos-no-lines').then(function(r){return r.json();}).then(function(rows){ if(!Array.isArray(rows)||!rows.length){el.innerHTML='';return;}
@@ -4768,8 +4769,8 @@
   var prodTab='list', _prodList=[];
   // PURCHASE ORDERS is now the umbrella: PLAN (the PO grid) + the former PRODUCTIONS sub-tabs.
   var poSub='plan';
-  var PO_SUBS=[['plan','PLAN'],['shipments','Shipments'],['crossdock','Crossdock & Labels'],['manufacturing','Manufacturing'],['list','Productions'],['barcodes','Barcodes'],['directclient','Direct to Client'],['customorders','Custom Orders'],['flexport','Flexport']];   // children now show in the main grid (with a 'child' badge). Direct to Client / Custom Orders / Flexport moved here from BI & REPORTS (Ben).
-  var PAY_SUBS=[['deposits','Deposits'],['drawdown','Deposits Drawdown'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['bysupplier','By Supplier'],['cashflow','Cash Flow'],['af','Auto Forecast'],['xerocompare','Xero Compare']];   // PAYMENTS umbrella; Cash Flow + Auto Forecast (payments plan) moved here from BI & REPORTS
+  var PO_SUBS=[['plan','PLAN'],['orderplan','Order plan'],['shipments','Shipments'],['crossdock','Crossdock & Labels'],['manufacturing','Manufacturing'],['list','Productions'],['barcodes','Barcodes'],['directclient','Direct to Client'],['customorders','Custom Orders'],['flexport','Flexport']];   // Order plan moved here from the L2 menu (next to PLAN). Direct to Client / Custom Orders / Flexport moved here from BI & REPORTS (Ben).
+  var PAY_SUBS=[['deposits','Deposits'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['bysupplier','By Supplier'],['cashflow','Cash Flow'],['drawdown','Deposits Drawdown'],['af','Auto Forecast'],['xerocompare','Xero Compare']];   // PAYMENTS umbrella; Cash Flow + Auto Forecast (payments plan) moved here from BI & REPORTS. Deposits Drawdown sits after Cash Flow (Ben).
   var PO_SUB_KEYS=PO_SUBS.map(function(t){return t[0];});
   var PAY_SUB_KEYS=PAY_SUBS.map(function(t){return t[0];});
   var ALL_SUB_KEYS=PO_SUB_KEYS.concat(PAY_SUB_KEYS);
@@ -4789,7 +4790,7 @@
   // ACTIONS tab badge = number of OPEN, HIGH-severity actions (the red items you should tackle first)
   function actionsNavBadge(n){ _actHi=Number(n)||0; try{ paintReportsL2Badge(); }catch(e){} }   // Actions folded into BI & REPORTS → count feeds the combined L2 counter + the ACTIONS L3 tab
   function setActionsBadgeFrom(rows){ try{ actionsNavBadge((rows||[]).filter(function(r){return (r.severity==='high' || r.type==='Required field missing') && (!r.status||r.status==='open');}).length); }catch(e){} }   // master-data-missing (amber) also counts on the ACTIONS badge (Ben, item 13)
-  function poSubNav(){ return '<div id="prod-subtabs">'+subListFor(poSub).map(function(t){ var bd=(_NAVLBL[t[0]]!==undefined)?navBadge(_navCounts[t[0]],_NAVNOUN[t[0]]):''; return '<span class="rtab'+(poSub===t[0]?' active':'')+'" data-posub="'+t[0]+'">'+t[1]+bd+'</span>'; }).join('')+'</div>'; }
+  function poSubNav(){ return '<div id="prod-subtabs">'+subListFor(poSub).map(function(t){ var bd=(_NAVLBL[t[0]]!==undefined)?navBadge(_navCounts[t[0]],_NAVNOUN[t[0]]):(t[0]==='orderplan'&&_opExc&&_opExc.count>0?' <span class="ex-badge" title="'+_opExc.count+' PO(s) with unapproved order-plan exceptions">'+_opExc.count+'</span>':''); return '<span class="rtab'+(poSub===t[0]?' active':'')+'" data-posub="'+t[0]+'">'+t[1]+bd+'</span>'; }).join('')+'</div>'; }
   // count of OVERDUE payments — mirrors buildPaymentsDue's r.overdue (unpaid, has a due date, 2026-01-01 ≤ due < today).
   var PDUE_MIN_DUE='2026-01-01';   // Payments Due cutoff: hide payments whose due date is before this (old/legacy)
   function paymentsDueOverdueCount(pos, deps){ var today=new Date().toISOString().slice(0,10), n=0;
@@ -4931,6 +4932,9 @@
     prefetchNavCounts();   // fill Shipments + Manufacturing counters in the background so all sub-nav badges show
     if(poSub==='plan'){ if(cache['purchase-orders'])return renderPO(cache['purchase-orders']); c.innerHTML='<div class="count">Loading…</div>';
       fetch('/api/supply/purchase-orders'+(_poInclArch?'?includeArchived=1':'')).then(function(r){return r.json();}).then(function(d){cache['purchase-orders']=d; if(_tk!==_navToken)return; renderPO(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
+    if(poSub==='orderplan'){ var showOP=function(d){ if(_tk!==_navToken)return; renderOrderPlan(d); };   // Order plan folded under PURCHASE ORDERS (was an L2 section). renderOrderPlan/opBuild prepend the PO sub-nav.
+      if(cache['order-plan'])return showOP(cache['order-plan']); c.innerHTML='<div class="count">Loading…</div>';
+      fetch('/api/supply/order-plan').then(function(r){return r.json();}).then(function(d){cache['order-plan']=d; showOP(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
     if(poSub==='shipments'){ var showShip=function(d){ if(_tk!==_navToken)return; c.innerHTML=poSubNav()+'<div id="prod-body"></div>'; bindPoSubNav(); fetchLookups(function(){ if(_tk!==_navToken)return; shipInner(d, document.getElementById('prod-body')); }); };
       if(cache['shipments'])return showShip(cache['shipments']); c.innerHTML='<div class="count">Loading…</div>';
       fetch('/api/supply/shipments').then(function(r){return r.json();}).then(function(d){cache['shipments']=d; showShip(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
@@ -10310,6 +10314,7 @@
   function selectSection(key){
     var _tk=++_navToken;   // bump on EVERY nav (even the early-return sections below) so an in-flight async render from a PRIOR section (e.g. Actions on boot) can't overwrite the section we just chose
     if(key==='barcodes')return showPoSub('barcodes');                                   // now a PURCHASE ORDERS sub-tab
+    if(key==='order-plan')return showPoSub('orderplan');                                // Order plan folded under PURCHASE ORDERS (next to PLAN)
     if(key==='productions')return showPoSub(PO_SUB_KEYS.indexOf(prodTab)>=0&&prodTab!=='plan'?prodTab:'list');   // PRODUCTIONS folded under PURCHASE ORDERS
     if(key==='purchase-orders')return showPoSub(PO_SUB_KEYS.indexOf(poSub)>=0?poSub:'plan');
     if(key==='payments')return showPoSub(PAY_SUB_KEYS.indexOf(poSub)>=0?poSub:'paydue');   // PAYMENTS umbrella: default tab = Payments Due
@@ -10409,7 +10414,7 @@
     try{ if(cache['actions']!==undefined){ setActionsBadgeFrom(cache['actions']); }
       else { fetch('/api/supply/actions').then(function(r){return r.json();}).then(function(d){ if(Array.isArray(d)){ cache['actions']=d; setActionsBadgeFrom(d); } }).catch(function(){}); } }catch(e){} }
   // ORDER PLAN exception counter (# POs impacted by unapproved partials / supplier-risk / discontinued / country-risk)
-  function orderPlanNavBadge(n){ var btn=document.querySelector('#supply-subnav .stab[data-k="order-plan"]'); if(btn)btn.innerHTML='ORDER PLAN'+(n>0?' <span class="ex-badge" title="'+n+' PO(s) with unapproved order-plan exceptions">'+n+'</span>':'');
+  function orderPlanNavBadge(n){ var btn=document.querySelector('#supply-content #prod-subtabs .rtab[data-posub="orderplan"]'); if(btn)btn.innerHTML='Order plan'+(n>0?' <span class="ex-badge" title="'+n+' PO(s) with unapproved order-plan exceptions">'+n+'</span>':'');   // Order plan is now a PURCHASE ORDERS sub-tab
     var opt=document.querySelector('#supply-nav-sel option[value="order-plan"]'); if(opt)opt.textContent='ORDER PLAN'+(n>0?' ('+n+')':''); }
   function refreshOpExc(){ fetch('/api/supply/order-plan-exceptions').then(function(r){return r.json();}).then(function(d){ if(!d||d.error)return;
     _opExc={count:d.count||0,byPo:d.byPo||{}}; orderPlanNavBadge(_opExc.count);

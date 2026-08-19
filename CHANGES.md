@@ -1,3 +1,7 @@
+## v27.144 SUPPLY nav: ORDER PLAN → a PURCHASE ORDERS sub-tab; Deposits Drawdown after Cash Flow
+- **Order plan** is no longer an L2 section. It now sits as a **PURCHASE ORDERS sub-tab**, immediately after **PLAN** (PLAN · Order plan · Shipments · Crossdock & Labels · …). The view is unchanged; the PO sub-nav renders above it and its unapproved-exceptions badge now rides the sub-tab. Old links (`#/supply/order-plan`) redirect; new hash is `#/supply/purchase-orders/orderplan`.
+- **Payments** L3 order: **Deposits Drawdown** moved to sit **after Cash Flow** (Deposits · Other Payments · Payments Due · Payments Report · By Supplier · Cash Flow · Deposits Drawdown · Auto Forecast · Xero Compare).
+
 ## v27.143 BI & REPORTS: one combined counter + high-priority ACTIONS L3 badge
 - The **BI & REPORTS** L2 tab now shows a **single** counter = high-priority Actions + ERP Compare + DTC Mismatch + Reallocate (previously two separate numbers — actions + DTC). Hover shows the breakdown.
 - The **ACTIONS** L3 sub-tab gets its own red counter = number of high-priority (severity=high / required-field-missing) open actions.
