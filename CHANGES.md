@@ -1,3 +1,7 @@
+## v27.172 Supply metrics "open actions" board: cached (was 20–30s / never loaded on live)
+- The open-actions board on REPORTS ▸ Performance ▸ Supply metrics called `computeOpenActions()` on every request — ~a dozen sequential COUNT queries, 20–30s+ on the live pooler, so "Loading open actions…" often never resolved on live.
+- Added a serve-stale-while-revalidate cache (5-min TTL, boot-warmed, refreshes in the background; only the first cold call blocks). Endpoint now returns in ~0.3s after warm (was 20–30s). Deliberately not epoch-gated — the board doesn't need to re-pay the full compute on every PO edit.
+
 ## v27.171 Pipeline report: read Flexport dates (fixes Flexport POs mis-filed as "Checked in")
 - The Pipeline report's Flexport join only pulled `flex_id`/`mode`, **not the Flexport arrival/landing/departure dates**. So a PO whose arrival comes from Flexport (FLEX) had no real arrival — the pipeline synthesised one from production + lead, which for an overdue-production PO lands in the past → the PO was mis-bucketed as **Checked in** even though it hadn't arrived (e.g. PO-56USLX2, Flexport arrival 21-Aug, showed as Checked in).
 - Now folds Flexport `arrival_date`/`landing_date` into the arrival chain and `departure_date` into the ship/departed check (mirroring `v_po_finance`). Flexport POs now get their real arrival, so imminent ones land in **Arriving ≤2wk** (and genuinely-arrived ones in Checked in). Verified: sandbox flex PO arriving 05-Sep → In transit (>14d); the arriving bucket populates correctly.

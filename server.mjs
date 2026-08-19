@@ -8711,12 +8711,27 @@ async function snapshotOpenActions() {
     [wk, m.supplier_pos, m.supplier_dtc, m.po_actions, m.order_plan, m.shipments, m.manufacturing, m.samples, m.payments_overdue, m.dtc_mismatch, m.reallocations, m.total_our]);
   return { week_ending: wk, ...m };
 }
+// computeOpenActions() fires ~dozen sequential COUNT queries → 20–30s+ on the live pooler, so the "open actions"
+// board on REPORTS ▸ Performance ▸ Supply metrics could spin forever. Cache it: serve-stale-while-revalidate, 5-min
+// TTL, boot-warm. Deliberately NOT epoch-gated (unlike makeCache) — a metrics board doesn't need to re-pay the whole
+// 20–30s compute on every PO edit; it just refreshes in the background on the TTL. Only the very first cold call blocks.
+let _oaEntry = null, _oaInflight = null; const _OA_TTL = 5 * 60 * 1000;
+function _oaRefresh() { if (_oaInflight) return _oaInflight;
+  _oaInflight = Promise.resolve().then(computeOpenActions)
+    .then(v => { _oaEntry = { v, at: Date.now() }; _oaInflight = null; return v; })
+    .catch(e => { _oaInflight = null; throw e; });
+  return _oaInflight; }
+async function getOpenActionsCached() {
+  if (_oaEntry) { if (Date.now() - _oaEntry.at >= _OA_TTL && !_oaInflight) _oaRefresh().catch(() => {}); return _oaEntry.v; }
+  return _oaRefresh(); }
+_oaRefresh().catch(() => {});                              // warm on boot
+setInterval(() => { _oaRefresh().catch(() => {}); }, _OA_TTL).unref?.();
 app.get('/api/supply/action-metrics/data', async (_req, res) => {   // 2-segment path so the generic /api/supply/:section dispatcher doesn't swallow it
   try {
     const history = (await pool.query(`SELECT to_char(week_ending,'YYYY-MM-DD') week_ending, to_char(captured_at,'YYYY-MM-DD HH24:MI') captured_at,
         supplier_pos, supplier_dtc, po_actions, order_plan, shipments, manufacturing, samples, payments_overdue, dtc_mismatch, coalesce(reallocations,0) reallocations, total_our
       FROM planner.action_metrics_snapshot ORDER BY week_ending DESC LIMIT 52`)).rows;
-    res.json({ ok: true, current: await computeOpenActions(), history });
+    res.json({ ok: true, current: await getOpenActionsCached(), history });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/action-metrics/snapshot', async (_req, res) => {
