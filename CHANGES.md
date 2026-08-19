@@ -1,3 +1,6 @@
+## v27.164 Timeline messages popup: add an X close button
+- The ✉ Timeline messages dropdown now has an **X** in its header to close it (previously on mobile there was no tap-outside affordance to dismiss it). Desktop tap-outside still works too.
+
 ## v27.163 Stock Availability: compact multi-column cards on mobile
 - On phones (≤640px), the Stock Availability report (REPORTS ▸ Stock Availability + the "SA" drawer) now renders **compact cards in a responsive multi-column grid** per category instead of a squashed wide table. Each card shows SKU + status, a compact line (type / launch / disc), and the SOH 3PL / FBA / AWD + Next / 2nd inbound figures. Desktop table unchanged; inbound PO links still work.
 

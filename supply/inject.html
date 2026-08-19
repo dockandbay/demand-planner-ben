@@ -6222,8 +6222,9 @@
     m.querySelectorAll('.snz-opt').forEach(function(o){ o.onmouseenter=function(){o.style.background='#eff6ff';}; o.onmouseleave=function(){o.style.background='';};
       o.onclick=function(){ close(); var d=parseInt(o.dataset.d,10); tlAct(id,'snooze',null,d<0?{indef:1}:{days:d}); }; }); }
   function renderTlDrop(){ var d=document.getElementById('tl-drop'); if(!d)return;
-    d.innerHTML='<div style="padding:9px 12px;border-bottom:1px solid #e5e7eb;font-weight:700;font-size:12px">Timeline messages'+(TL_NOTIFS.length?' <span class="mut tiny">('+TL_NOTIFS.length+' unread)</span>':'')+'</div>'
+    d.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 12px;border-bottom:1px solid #e5e7eb;font-weight:700;font-size:12px"><span>Timeline messages'+(TL_NOTIFS.length?' <span class="mut tiny">('+TL_NOTIFS.length+' unread)</span>':'')+'</span><button class="tl-close" title="Close" aria-label="Close" style="border:1px solid #cbd5e1;background:#f8fafc;color:#475569;width:26px;height:26px;border-radius:6px;cursor:pointer;font-size:16px;line-height:1;flex:0 0 auto">&times;</button></div>'
       +(TL_NOTIFS.length?TL_NOTIFS.map(tlItemHtml).join(''):'<div class="count" style="padding:16px 12px">No unread timeline messages 🎉</div>');
+    var _xb=d.querySelector('.tl-close'); if(_xb)_xb.onclick=function(e){ e.stopPropagation(); closeTlDropdown(); };
     d.querySelectorAll('.tl-po').forEach(function(el){ el.onclick=function(){ var po=el.dataset.po; if(!po)return; closeTlDropdown();
       var sr=document.getElementById('supply-root'); if((!sr||sr.style.display==='none')&&typeof showSupply==='function'){ showSupply(true); if(typeof selectSection==='function')selectSection('purchase-orders'); }   // clicked from DEMAND/BUY/etc → reveal SUPPLY so the PO drawer is visible
       if(typeof openPODrawer==='function')openPODrawer(po,'timeline'); }; });
