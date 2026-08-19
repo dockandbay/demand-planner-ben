@@ -1,3 +1,8 @@
+## v27.139 SUPPLY nav restructure (1/2): reports → PO sub-tabs + Config L3 restyle
+- Moved **Direct to Client · Custom Orders · Flexport** out of BI & Reports into **PURCHASE ORDERS** sub-tabs (after Barcodes); wired their fetch/render into `showPoSub`, deep-links resolve at `#/supply/purchase-orders/<x>`, and old `#/supply/reports/<x>` links redirect there.
+- SUPPLY ▸ Config **L3 menu** now uses the same light-blue pill style (`#f0f6ff`/`#dbeafe`, un-indented) as the other L3 menus.
+- (Commit 2 to follow: fold Actions/Recommendations/ERP Compare into BI & Reports + L2 reorder + remaining deep-link rewiring.)
+
 ## v27.138 PO actions: new "Deposit not assigned" master-data action
 - A PO with a start deposit but no deposit reference linked now raises **"Deposit not assigned"** — a **Master Data** action (separate from the payment "deposit not paid"). Excludes FUTURE and completed POs. Added a **Deposit reference** row on the PO's Master Data tab (deposit picker + action mark) so it's actionable there — assign a production deposit or mark No Deposit.
 

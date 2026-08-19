@@ -207,7 +207,7 @@
 #supply-root #config-subs .rtab:hover{color:#1a1a1a}
 #supply-root #config-subs .rtab.active{color:#1a1a1a;border-bottom-color:#1a1a1a;font-weight:600}
 /* CONFIG level-3 nav (members of the "Supply chain" tab): a lighter, indented strip under the level-2 row */
-#supply-root #config-subs-l3{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f8fbff;border:1px solid #e5eefb;border-radius:6px;padding:2px 5px;margin:-6px 0 12px 16px}
+#supply-root #config-subs-l3{display:flex;gap:2px;align-items:center;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 12px}   /* match the other L3 menus (rep-subnav / prod-subtabs) — light blue, not indented */
 /* Searchable SKU dropdown (Manufacturing BOM): input + filtering popover, picks from the product list */
 #supply-root .skusel-drop{display:none;position:absolute;z-index:60;left:0;top:100%;min-width:260px;max-width:380px;max-height:240px;overflow:auto;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 6px 18px rgba(15,23,42,.14);margin-top:2px}
 #supply-root .skusel-drop.open{display:block}
@@ -735,8 +735,8 @@
     ['payments','PAYMENTS'],['samples','SAMPLES'],['quality-control','QUALITY CONTROL'],['config','CONFIG']];   // CONFIG here = SUPPLY ▸ CONFIG (supply-chain settings + Key accounts + Portal); the ⚙ cog opens the admin CONFIG. SHIPMENTS under PURCHASE ORDERS; PAYMENTS umbrella holds Deposits / Other Payments / Payments Due / Payments Report
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
   var REPORT_SECTIONS=[['dtc-mismatch','DTC MISMATCH'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['metrics','METRICS'],['production-summary','PRODUCTION SUMMARY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
-    ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['supplier-timing','SUPPLIER DELAYS'],['directclient','DIRECT TO CLIENT'],['customorders','CUSTOM ORDERS'],['flexport','FLEXPORT']];   // Ben: DTC MISMATCH / REALLOCATE / URGENT BUY first. ERP COMPARE → ACTIONS; CASH FLOW → PAYMENTS
-  var REPORT_KEYS=['dtc-mismatch','reallocate','urgent-buy','metrics','production-summary','container-fill','consolidate','upcoming','pipeline','supplier-timing','directclient','customorders','flexport'];
+    ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['supplier-timing','SUPPLIER DELAYS']];   // Direct to Client / Custom Orders / Flexport moved to PURCHASE ORDERS sub-tabs (Ben)
+  var REPORT_KEYS=['dtc-mismatch','reallocate','urgent-buy','metrics','production-summary','container-fill','consolidate','upcoming','pipeline','supplier-timing'];
   var BI_TABS={'metrics':'/api/supply/bi','production-summary':'/api/supply/bi/production-summary','urgent-buy':'/api/supply/bi/projection','reallocate':'/api/supply/bi/reallocations','container-fill':'/api/supply/bi/container-fill','consolidate':'/api/supply/bi/consolidations','erp-compare':'/api/supply/bi/erp-compare','supplier-timing':'/api/supply/supplier-timing','dtc-mismatch':'/api/supply/dtc/mismatch'};   // fluid: always re-fetch
   var reportTab='metrics';   // BI & REPORTS opens on METRICS by default
   var ANNOT={
@@ -4762,7 +4762,7 @@
   var prodTab='list', _prodList=[];
   // PURCHASE ORDERS is now the umbrella: PLAN (the PO grid) + the former PRODUCTIONS sub-tabs.
   var poSub='plan';
-  var PO_SUBS=[['plan','PLAN'],['shipments','Shipments'],['crossdock','Crossdock & Labels'],['manufacturing','Manufacturing'],['list','Productions'],['barcodes','Barcodes']];   // children now show in the main grid (with a 'child' badge) — no separate Child PO sub-tab
+  var PO_SUBS=[['plan','PLAN'],['shipments','Shipments'],['crossdock','Crossdock & Labels'],['manufacturing','Manufacturing'],['list','Productions'],['barcodes','Barcodes'],['directclient','Direct to Client'],['customorders','Custom Orders'],['flexport','Flexport']];   // children now show in the main grid (with a 'child' badge). Direct to Client / Custom Orders / Flexport moved here from BI & REPORTS (Ben).
   var PAY_SUBS=[['deposits','Deposits'],['drawdown','Deposits Drawdown'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['bysupplier','By Supplier'],['cashflow','Cash Flow'],['af','Auto Forecast'],['xerocompare','Xero Compare']];   // PAYMENTS umbrella; Cash Flow + Auto Forecast (payments plan) moved here from BI & REPORTS
   var PO_SUB_KEYS=PO_SUBS.map(function(t){return t[0];});
   var PAY_SUB_KEYS=PAY_SUBS.map(function(t){return t[0];});
@@ -4935,6 +4935,13 @@
     if(poSub==='crossdock'){ c.innerHTML=poSubNav()+'<div id="prod-body"><div class="count">Loading…</div></div>'; bindPoSubNav();
       fetch('/api/supply/crossdock-report').then(function(r){return r.json();}).then(function(d){ if(_tk!==_navToken)return; renderCrossdock(d, document.getElementById('prod-body')); })
         .catch(function(e){ if(_tk!==_navToken)return; var pb=document.getElementById('prod-body'); if(pb)pb.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>'; }); return; }
+    if(poSub==='directclient'||poSub==='customorders'){ var _rf=(poSub==='directclient')?renderDirectClient:renderCustomOrders;   // moved from BI & REPORTS — render under the PO sub-nav
+      var showR=function(d){ if(_tk!==_navToken)return; c.innerHTML=poSubNav()+'<div id="rep-body"></div>'; bindPoSubNav(); _rf(d); };
+      if(cache['purchase-orders'])return showR(cache['purchase-orders']); c.innerHTML='<div class="count">Loading…</div>';
+      fetch('/api/supply/purchase-orders'+(_poInclArch?'?includeArchived=1':'')).then(function(r){return r.json();}).then(function(d){cache['purchase-orders']=d; showR(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
+    if(poSub==='flexport'){ var showFx=function(d){ if(_tk!==_navToken)return; c.innerHTML=poSubNav()+'<div id="rep-body"></div>'; bindPoSubNav(); renderFlexport(d); };
+      if(cache['flexport'])return showFx(cache['flexport']); c.innerHTML='<div class="count">Loading…</div>';
+      fetch('/api/supply/flexport').then(function(r){return r.json();}).then(function(d){cache['flexport']=d; showFx(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); return; }
     prodTab=poSub;
     if(cache['productions'])return renderProductions(cache['productions']); c.innerHTML='<div class="count">Loading…</div>';
     fetch('/api/supply/productions').then(function(r){return r.json();}).then(function(d){cache['productions']=d; if(_tk!==_navToken)return; renderProductions(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); }
@@ -9297,7 +9304,8 @@
     else if(current) writeHash(['supply',current]); }
   function applyRoute(){ var seg=(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean); _expectedHash=location.hash;
     if(seg[0]==='supply'){ showSupply(true); var sec=seg[1]||'actions';   // (true) = show chrome but don't auto-select Actions; we select the routed section next
-      if(sec==='reports') selectReport(seg[2]||reportTab||'metrics');
+      if(sec==='reports'){ if(['directclient','customorders','flexport'].indexOf(seg[2])>=0) showPoSub(seg[2]);   // moved to PURCHASE ORDERS — redirect old #/supply/reports/<x>
+        else selectReport(seg[2]||reportTab||'metrics'); }
       else if(sec==='actions'){ actSub=(seg[2]&&['recommendations','erp-compare'].indexOf(seg[2])>=0)?seg[2]:'actions'; selectSection('actions'); }   // #/supply/actions/<recommendations|erp-compare> deep-link
       else if(sec==='productions'){ showPoSub(seg[2]&&PO_SUB_KEYS.indexOf(seg[2])>=0?seg[2]:'list'); }   // legacy links → PURCHASE ORDERS umbrella
       else if(sec==='payments'){ showPoSub(seg[2]&&PAY_SUB_KEYS.indexOf(seg[2])>=0?seg[2]:'paydue'); }   // PAYMENTS umbrella (default Payments Due)
