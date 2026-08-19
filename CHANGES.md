@@ -1,3 +1,6 @@
+## v27.140 SUPPLY Config: flat menu now light-blue (correct container)
+- The SUPPLY ▸ Config nav is a flat one-level menu rendered in #config-subs (not the L3 #config-subs-l3 I'd restyled). Tagged it `cfg-flat` in supply context and styled it as the light-blue pill row (like rep-subnav / prod-subtabs) — Suppliers / Batches / Productions / etc. now match the other L3 menus.
+
 ## v27.139 SUPPLY nav restructure (1/2): reports → PO sub-tabs + Config L3 restyle
 - Moved **Direct to Client · Custom Orders · Flexport** out of BI & Reports into **PURCHASE ORDERS** sub-tabs (after Barcodes); wired their fetch/render into `showPoSub`, deep-links resolve at `#/supply/purchase-orders/<x>`, and old `#/supply/reports/<x>` links redirect there.
 - SUPPLY ▸ Config **L3 menu** now uses the same light-blue pill style (`#f0f6ff`/`#dbeafe`, un-indented) as the other L3 menus.
