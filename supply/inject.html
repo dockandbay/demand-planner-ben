@@ -739,9 +739,9 @@
   var SECTIONS=[['purchase-orders','PURCHASE ORDERS'],['reports','BI & REPORTS'],
     ['payments','PAYMENTS'],['samples','SAMPLES'],['quality-control','QUALITY CONTROL'],['config','CONFIG']];   // Ben: Actions/Recommendations/ERP Compare folded into BI & REPORTS (first 3 L3 tabs) — no standalone ACTIONS section   // CONFIG here = SUPPLY ▸ CONFIG (supply-chain settings + Key accounts + Portal); the ⚙ cog opens the admin CONFIG. SHIPMENTS under PURCHASE ORDERS; PAYMENTS umbrella holds Deposits / Other Payments / Payments Due / Payments Report
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
-  var REPORT_SECTIONS=[['actions','ACTIONS'],['recommendations','💡 RECOMMENDATIONS'],['erp-compare','⬆ ERP COMPARE'],['dtc-mismatch','DTC MISMATCH'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['metrics','METRICS'],['production-summary','PRODUCTION SUMMARY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
+  var REPORT_SECTIONS=[['actions','ACTIONS'],['recommendations','💡 RECOMMENDATIONS'],['erp-compare','⬆ ERP COMPARE'],['dtc-mismatch','DTC MISMATCH'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['production-summary','PRODUCTION SUMMARY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
     ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['supplier-timing','SUPPLIER DELAYS']];   // Actions/Recommendations/ERP Compare folded in as the first 3 (Ben). Direct to Client / Custom Orders / Flexport moved to PURCHASE ORDERS sub-tabs.
-  var REPORT_KEYS=['actions','recommendations','erp-compare','dtc-mismatch','reallocate','urgent-buy','metrics','production-summary','container-fill','consolidate','upcoming','pipeline','supplier-timing'];
+  var REPORT_KEYS=['actions','recommendations','erp-compare','dtc-mismatch','reallocate','urgent-buy','production-summary','container-fill','consolidate','upcoming','pipeline','supplier-timing'];   // 'metrics' moved to top-level REPORTS ▸ Performance ▸ Supply metrics
   var BI_TABS={'metrics':'/api/supply/bi','production-summary':'/api/supply/bi/production-summary','urgent-buy':'/api/supply/bi/projection','reallocate':'/api/supply/bi/reallocations','container-fill':'/api/supply/bi/container-fill','consolidate':'/api/supply/bi/consolidations','erp-compare':'/api/supply/bi/erp-compare','supplier-timing':'/api/supply/supplier-timing','dtc-mismatch':'/api/supply/dtc/mismatch'};   // fluid: always re-fetch
   var reportTab='actions';   // BI & REPORTS opens on ACTIONS by default (Ben)
   var ANNOT={
@@ -9581,6 +9581,7 @@
     else { el.textContent=_urgentCrit; el.style.display=''; el.title=_urgentCrit+' critical stock-out risk'+(_urgentCrit===1?'':'s')+' to buy'; } }
   function refreshUrgentBadge(){ fetch('/api/supply/bi/projection').then(function(r){return r.json();}).then(function(j){ var rows=(j&&j.rows)||[]; _urgentCrit=rows.filter(function(r){return r.urgency==='critical'&&!r.too_late;}).length; paintUrgentBadge(); }).catch(function(){}); }
   function selectReport(rk){ if(rk==='cashflow')return showPoSub('cashflow');   // Cash Flow moved to PAYMENTS ▸ Cash Flow
+    if(rk==='metrics'){ try{ location.hash='#/reports/performance/supply-metrics'; }catch(e){} return; }   // Metrics moved to top-level REPORTS ▸ Performance ▸ Supply metrics
     current='reports'; reportTab=rk; _actHost=null; syncHash();
     var _tk=++_navToken;   // invalidate any in-flight section load (e.g. the ACTIONS fetch) so it can't paint over this report
     document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k==='reports');});
@@ -9825,7 +9826,7 @@
     draw();
   }
   // METRICS — live operational counts
-  function renderBIMetrics(d){ var b=biBody(); d=d||{}; var op=d.open_pos||{};
+  function renderBIMetrics(d,_host){ var b=_host||biBody(); d=d||{}; var op=d.open_pos||{};
     var cont=Math.round(((Number(d.containers_shipping)||0)+(Number(d.containers_in_production)||0))*10)/10;
     b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:#0f172a">Metrics summary</div>'
       +'<div class="mut tiny" style="margin-bottom:12px">Live operational snapshot · counts derived from POs + shipments</div>'
@@ -9844,6 +9845,11 @@
     (function(){ var el=b.querySelector('#oa-board'); if(!el)return;
       fetch('/api/supply/action-metrics/data').then(function(r){return r.json();}).then(function(j){ _renderOpenActionsBoard(el,j); }).catch(function(){ el.innerHTML='<div style="color:#dc2626;font-size:12px">Open actions failed to load</div>'; }); })();
   }
+  // Exposed so the top-level REPORTS ▸ Performance ▸ Supply metrics page (in the artifact) can render this same report.
+  try{ window.renderSupplyMetrics=function(host){ if(!host)return;
+    host.innerHTML='<div class="count" style="padding:12px;color:#888">Loading metrics…</div>';
+    fetch('/api/supply/bi').then(function(r){return r.json();}).then(function(d){ try{ renderBIMetrics(d,host); }catch(e){ host.innerHTML='<div style="color:#dc2626;padding:10px">'+esc((e&&e.message)||e)+'</div>'; } })
+      .catch(function(e){ host.innerHTML='<div style="color:#dc2626;padding:10px">Failed to load metrics: '+esc((e&&e.message)||e)+'</div>'; }); }; }catch(e){}
   // Open-actions scoreboard on the Metrics report — current counts (our actions + waiting-on-supplier) + weekly trend + manual snapshot.
   function _oaSpark(vals,w,hgt,color){ vals=(vals||[]).map(Number); if(vals.length<2)return '<span class="mut tiny">—</span>'; var mn=Math.min.apply(null,vals),mx=Math.max.apply(null,vals),rng=(mx-mn)||1; var pts=vals.map(function(v,i){ var x=(i/(vals.length-1))*(w-2)+1; var y=(hgt-1)-((v-mn)/rng)*(hgt-2); return x.toFixed(1)+','+y.toFixed(1); }).join(' '); return '<svg width="'+w+'" height="'+hgt+'" style="vertical-align:middle"><polyline points="'+pts+'" fill="none" stroke="'+(color||'#2563eb')+'" stroke-width="1.5"/></svg>'; }
   function _renderOaPoList(el,pos){

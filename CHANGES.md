@@ -1,3 +1,8 @@
+## v27.167 REPORTS ▸ Performance (new) — Supply metrics (moved) + Inventory metrics (new)
+- New **Performance** tab in the top-level REPORTS hub, with two sub-pages (deep-linked `#/reports/performance/<sub>`):
+  - **Supply metrics** — the Metrics report **moved here** from SUPPLY ▸ BI & REPORTS (removed there; legacy `#/supply/reports/metrics` redirects to `#/reports/performance/supply-metrics`). Rendered by exposing `window.renderSupplyMetrics`.
+  - **Inventory metrics** (new): **3PL discrepancy** — UK/US/AU/EU count of SKUs with a gap > 10% vs ERP; **FBA discrepancy** — SKUs > 10% per market; **FBA aged** — storage cost + units over 270 days (a3+a4+a5 buckets) per market. Reconciles the latest uploaded 3PL/FBA reports live.
+
 ## v27.166 Inventory Status Report: card view on mobile
 - On phones (≤640px), the Inventory ▸ Status Report renders each SKU as a **slimline card** (SKU + status badge, then Season / SOH / cover / on-order / inbound as labelled fields) within its location→status group, instead of the wide table. Section bars, tier grouping, expand/collapse and the discontinued toggle all still work. Desktop table unchanged.
 

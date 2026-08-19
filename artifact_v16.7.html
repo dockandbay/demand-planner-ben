@@ -12926,7 +12926,9 @@ var EXPANDED_CHANNELS=new Set(); // which channel rows are expanded
 // ─── REPORTS area: sub-tab shell ──────────────────────────────────────────
 // REPORT view hosts several reports under a sub-tab bar. Exec Summary is the existing report;
 // Slow Moving and Auto Forecast are the new ones.
-var REPORT_TABS=[['ex','Exec Summary'],['slow','Slow Moving'],['ka','Key Arrivals'],['me','Markdown & EOS'],['otb','Open-to-Buy'],['sa','Stock Availability'],['3pl-invoicing','3PL Invoicing']];   // Auto Forecast moved to SUPPLY ▸ Payments ▸ Auto Forecast
+var REPORT_TABS=[['ex','Exec Summary'],['performance','Performance'],['slow','Slow Moving'],['ka','Key Arrivals'],['me','Markdown & EOS'],['otb','Open-to-Buy'],['sa','Stock Availability'],['3pl-invoicing','3PL Invoicing']];   // Auto Forecast moved to SUPPLY ▸ Payments ▸ Auto Forecast
+var PERF_SUBS=[['supply-metrics','Supply metrics'],['inventory-metrics','Inventory metrics']];
+var PERF_SUB='supply-metrics';   // REPORTS ▸ Performance sub-tab; deep-linked #/reports/performance/<sub>
 // Mobile: collapse a view's leading filter bar(s) behind a consistent "⚙ Filters" button. Generic + idempotent —
 // grabs the leading child DIVs that hold filter controls (before the first table / KPI / content block) and tucks
 // them into a collapsible panel with a toggle. No-op on desktop and when there are no leading filter rows.
@@ -13111,6 +13113,7 @@ function renderReportView(){
   var ew=document.getElementById('exec-wrap'); if(ew)ew.remove();
   var body=document.getElementById('report-body');
   if(!body){ body=document.createElement('div'); body.id='report-body'; document.querySelector('.wrap').appendChild(body); }
+  if(REPORT_VIEW==='performance'){ renderPerformanceReport(body); return; }
   if(REPORT_VIEW==='slow'){ renderSlowMovingReport(body); mobileFilterCollapse(body); return; }
   if(REPORT_VIEW==='af'){ REPORT_VIEW='ex'; try{ if(window.location)location.hash='#/supply/payments/af'; }catch(e){} return; }   // Auto Forecast moved to SUPPLY ▸ Payments — redirect old #/reports/af
   if(REPORT_VIEW==='ka'){ renderKeyArrivalsReport(body); mobileFilterCollapse(body); return; }
@@ -13119,6 +13122,45 @@ function renderReportView(){
   if(REPORT_VIEW==='sa'){ renderStockAvailability(body); mobileFilterCollapse(body); return; }
   if(REPORT_VIEW==='tpl')REPORT_VIEW='3pl-invoicing';
   if(REPORT_VIEW==='3pl-invoicing'){ render3plInvoice(body); return; }
+}
+// REPORTS ▸ Performance — sub-nav (Supply metrics · Inventory metrics). Deep-linked #/reports/performance/<sub>.
+function renderPerformanceReport(body){
+  try{ var _h=(location.hash||'').replace(/^#\/?/,'').split('/'); if(_h[0]==='reports'&&_h[1]==='performance'&&_h[2]&&PERF_SUBS.some(function(t){return t[0]===_h[2];}))PERF_SUB=_h[2]; }catch(e){}
+  var nav='<div style="display:flex;gap:6px;margin:0 0 12px;flex-wrap:wrap">'+PERF_SUBS.map(function(t){ var on=t[0]===PERF_SUB;
+    return '<button data-perf="'+t[0]+'" style="font-size:12px;padding:5px 13px;border:1px solid '+(on?'#1d4ed8':'#cbd5e1')+';background:'+(on?'#1d4ed8':'#fff')+';color:'+(on?'#fff':'#334155')+';border-radius:14px;cursor:pointer;font-weight:600">'+t[1]+'</button>'; }).join('')+'</div>';
+  body.innerHTML=nav+'<div id="perf-body"><div class="mut" style="font-size:12px;padding:10px">Loading…</div></div>';
+  body.querySelectorAll('[data-perf]').forEach(function(b){ b.onclick=function(){ PERF_SUB=b.dataset.perf; if(window.writeHash)window.writeHash(['reports','performance',PERF_SUB]); renderPerformanceReport(document.getElementById('report-body')); }; });
+  var host=document.getElementById('perf-body');
+  if(PERF_SUB==='supply-metrics'){ if(typeof window.renderSupplyMetrics==='function')window.renderSupplyMetrics(host); else host.innerHTML='<div class="mut" style="font-size:12px;padding:10px">Supply metrics unavailable — open SUPPLY once, then reopen this tab.</div>'; }
+  else if(PERF_SUB==='inventory-metrics'){ renderInventoryMetrics(host); }
+}
+// Inventory metrics: 3PL discrepancy (UK/US/AU/EU, SKUs >10%), FBA discrepancy (>10%), FBA aged (money + units >270d) per market.
+function renderInventoryMetrics(host){
+  host.innerHTML='<div class="mut" style="font-size:12px;padding:10px">Loading inventory metrics… (reconciling the latest 3PL + FBA reports)</div>';
+  function esc2(s){return String(s==null?'':s).replace(/[&<>]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;'}[c];});}
+  function pctBad(d,e){ if(d==null)return false; return (e>0)?(Math.abs(d)/e>0.10):(Math.abs(d)>0); }   // >10% vs ERP (or any gap when ERP=0)
+  var TPL_MKTS=['UK','US','AU','EU'], FBA_MKTS=['US','UK','EU','AU','CA'];
+  var tplP=TPL_MKTS.map(function(m){ return fetch('/api/supply/inventory-3pl/status?market='+m).then(function(r){return r.json();}).then(function(j){return {m:m,j:j};}).catch(function(){return {m:m,j:null};}); });
+  var fbaP=FBA_MKTS.map(function(m){ return fetch('/api/supply/inventory-fba/status?market='+m).then(function(r){return r.json();}).then(function(j){return {m:m,j:j};}).catch(function(){return {m:m,j:null};}); });
+  Promise.all([Promise.all(tplP),Promise.all(fbaP)]).then(function(res){
+    var tpl=res[0], fba=res[1];
+    function tplCount(j){ if(!j||!j.rows)return null; return j.rows.filter(function(r){ return r.matched && (pctBad(r.diff_onhand,r.erp_onhand)||pctBad(r.diff_avail,r.erp_avail)); }).length; }
+    function fbaCount(j){ if(!j||!j.rows)return null; return j.rows.filter(function(r){ return r.matched && pctBad(r.diff,r.erp_fba); }).length; }
+    function agedOf(j){ if(!j)return null; var ac=j.aged_cost||{}, b=ac.buckets||{};
+      var units=((b.a3&&b.a3.units)||0)+((b.a4&&b.a4.units)||0)+((b.a5&&b.a5.units)||0);   // a3=271-365, a4=366-455, a5=456+ → >270 days
+      return {money:(ac.grand_total!=null?ac.grand_total:null), ccy:ac.currency||'', units:units, imported:!!j.imported}; }
+    function tile(label,val,sub,color){ return '<div style="flex:0 1 150px;min-width:120px;border:1px solid #e5e7eb;border-radius:10px;padding:10px 13px;background:#fff"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#94a3b8">'+esc2(label)+'</div><div style="font-size:21px;font-weight:800;color:'+(color||'#0f172a')+'">'+val+'</div>'+(sub?'<div class="mut" style="font-size:10px;margin-top:2px">'+esc2(sub)+'</div>':'')+'</div>'; }
+    function hdr(t){ return '<div style="font-weight:800;font-size:14px;margin:18px 0 7px;padding:7px 11px;background:#0f172a;color:#fff;border-radius:7px">'+t+'</div>'; }
+    var h=hdr('3PL discrepancy · SKUs with a gap &gt; 10%')
+      +'<div style="display:flex;gap:10px;flex-wrap:wrap">'+tpl.map(function(x){ var n=tplCount(x.j); return tile(x.m, n==null?'—':n, n==null?'no report imported':'SKUs > 10%', (n>0?'#b45309':'#16a34a')); }).join('')+'</div>';
+    h+=hdr('FBA discrepancy · SKUs with a gap &gt; 10%')
+      +'<div style="display:flex;gap:10px;flex-wrap:wrap">'+fba.map(function(x){ var n=fbaCount(x.j); return tile(x.m, n==null?'—':n, n==null?'no report imported':'SKUs > 10%', (n>0?'#b45309':'#16a34a')); }).join('')+'</div>';
+    h+=hdr('FBA aged · storage cost &amp; units over 270 days');
+    h+='<div style="display:flex;gap:10px;flex-wrap:wrap">'+fba.map(function(x){ var a=agedOf(x.j); if(!a||!a.imported)return tile(x.m,'—','no report imported');
+      var money=(a.money!=null)?((a.ccy?a.ccy+' ':'')+Math.round(a.money).toLocaleString()):'—';
+      return tile(x.m, money, (a.units||0).toLocaleString()+' units > 270 days', '#b45309'); }).join('')+'</div>';
+    host.innerHTML=h;
+  }).catch(function(e){ host.innerHTML='<div style="color:#dc2626;padding:10px">Failed to load inventory metrics: '+esc2((e&&e.message)||e)+'</div>'; });
 }
 // REPORTS ▸ 3PL Invoice — per-3PL (UK ILG / US Geneva / EU iFulfilment / AU Coghlans) monthly invoice files +
 // account config. Upload/list/delete invoice files for a chosen month; edit per-3PL storage/other cost accounts;
