@@ -1,3 +1,6 @@
+## v27.157 Deposits: tag the Remaining column as an estimate too (`est 61,754.87`)
+- For a blank/estimated deposit, the **Remaining** column now shows a small italic `est` prefix (matching the Amount column), so it reads e.g. `est 61,754.87`.
+
 ## v27.156 Blank-deposit ESTIMATE — a not-yet-funded deposit is pre-funded to its estimated total
 - **What:** a deposit whose **amount is blank** (a real row exists, not the `NO DEPOSIT` sentinel) now behaves as if its amount = its **estimated total** = Σ of its linked open POs' start deposit (order value × supplier start%). Previously a blank deposit read as £0, so its POs' start deposits rolled into completion.
 - **Where it shows:**

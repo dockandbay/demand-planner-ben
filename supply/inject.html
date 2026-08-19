@@ -5392,7 +5392,7 @@
       // at risk: remaining is over 50% of the open, not-yet-allocated POs' order value (may be over-funded / stranded)
       var uval=Number(d.unalloc_value)||0, depAtRisk = d.is_deposit && uval>0 && rem>0.5*uval && !redRem;
       var remTitle=remNoOpenPO?'Deposit remaining, no open PO':(remStranded?'Deposit remaining, none left to be allocated':(depAtRisk?('At risk — '+money(rem)+' remaining is over 50% of the '+money(uval)+' open PO value with no start deposit allocated'):''));
-      var c_rem = '<td style="width:82px;vertical-align:top'+(redRem?';color:#dc2626;font-weight:700':(depAtRisk?';background:#fef3c7;color:#92400e;font-weight:700':''))+'"'+(remTitle?(' title="'+remTitle+'"'):'')+'><div style="white-space:nowrap">'+money(d.deposit_remaining)+(depAtRisk?' ⚠':'')+(d.shared_ref?' <span class="src fx">pool</span>':'')+'</div>'
+      var c_rem = '<td style="width:82px;vertical-align:top'+(redRem?';color:#dc2626;font-weight:700':(depAtRisk?';background:#fef3c7;color:#92400e;font-weight:700':''))+'"'+(remTitle?(' title="'+remTitle+'"'):'')+'><div style="white-space:nowrap"'+(d.amount_is_est?' title="estimated — the deposit has no amount entered yet"':'')+'>'+(d.amount_is_est?'<span style="font-style:italic;color:#64748b;font-size:9px">est</span> ':'')+money(d.deposit_remaining)+(depAtRisk?' ⚠':'')+(d.shared_ref?' <span class="src fx">pool</span>':'')+'</div>'
         +(d.open_unalloc>0?'<div class="mut tiny" title="'+d.open_unalloc+' open linked PO'+(d.open_unalloc===1?'':'s')+' on this deposit with no start deposit allocated yet" style="color:#64748b;cursor:help;margin-top:1px;white-space:nowrap">'+d.open_unalloc+' unalloc</div>':'')
         +'</td>';   // "N unalloc" on its own second line (Ben)
       var c_est = '<td style="width:84px;white-space:nowrap'+(estOver?';color:#dc2626;font-weight:700':'')+'"'+(estOver?' title="Estimated allocation exceeds the remaining deposit">':'>')+(d.is_deposit?money(d.est_alloc):'')+'</td>';
@@ -5431,7 +5431,7 @@
       var v_dates = locked
         ? '<div><span style="'+_dl+'">Due</span>'+txt(d.date_due,true)+'</div>'+(d.date_paid?'':'<div><span style="'+_dl+'">Likely</span>'+txt(d.date_likely_pay,true)+'</div>')+'<div><span style="'+_dl+'">Paid</span>'+txt(d.date_paid,true)+'</div>'
         : '<div><span style="'+_dl+'">Due</span>'+editCell(ep,'date_due',d.date_due,'date','style="width:124px"')+'</div><div style="margin-top:3px"><span style="'+_dl+'">Likely</span>'+editCell(ep,'date_likely_pay',d.date_likely_pay,'date','style="width:124px"')+'</div><div style="margin-top:3px"><span style="'+_dl+'">Paid</span>'+editCell(ep,'date_paid',d.date_paid,'date','style="width:124px"')+'</div>';
-      var v_rem = (d.is_deposit? money(d.deposit_remaining) : '—')+(d.open_unalloc>0?' <span class="mut tiny" style="color:#64748b">('+d.open_unalloc+' unalloc)</span>':'')+(d.shared_ref?' <span class="src fx">pool</span>':'');
+      var v_rem = (d.is_deposit? ((d.amount_is_est?'<span style="font-style:italic;color:#64748b;font-size:9px">est</span> ':'')+money(d.deposit_remaining)) : '—')+(d.open_unalloc>0?' <span class="mut tiny" style="color:#64748b">('+d.open_unalloc+' unalloc)</span>':'')+(d.shared_ref?' <span class="src fx">pool</span>':'');
       var v_est = d.is_deposit?money(d.est_alloc):'';
       var act;
       if(closed) act='<button class="lnk-btn dep-close" data-id="'+d.id+'" data-st="">reopen</button>';
