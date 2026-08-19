@@ -4365,7 +4365,15 @@ app.post('/api/supply/deposit/:id/delete', async (req, res) => {
     if (d.date_paid) return res.status(400).json({ error: 'Cannot delete — this item has a payment date. Clear the paid date first if it was entered in error.' });
     if (d.is_deposit && d.reference) {
       const n = Number((await pool.query(`SELECT count(*) n FROM planner.purchase_orders WHERE deposit_ref=$1`, [d.reference])).rows[0].n);
-      if (n > 0) return res.status(400).json({ error: `Cannot delete — ${n} purchase order(s) are assigned to this deposit. Unassign them first.` });
+      if (n > 0) {
+        // Linked POs must be re-pointed before the deposit can go. Caller chooses: 'no_deposit' (explicit NO DEPOSIT
+        // sentinel → start rolls into completion) or 'unassign' (clear deposit_ref → reassignable). Missing → prompt.
+        const linked = String((req.body && req.body.linked) || '').toLowerCase();
+        if (linked !== 'no_deposit' && linked !== 'unassign')
+          return res.status(409).json({ error: `${n} purchase order(s) are assigned to this deposit.`, needs_choice: true, linked_count: n });
+        const newRef = linked === 'no_deposit' ? 'NO DEPOSIT' : '';
+        await pool.query(`UPDATE planner.purchase_orders SET deposit_ref=$2 WHERE deposit_ref=$1`, [d.reference, newRef]);
+      }
       await pool.query(`DELETE FROM planner.production_deposits WHERE deposit_ref=$1`, [d.reference]);
     }
     await pool.query(`DELETE FROM planner.deposits WHERE id=$1`, [req.params.id]);

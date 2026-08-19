@@ -5403,10 +5403,9 @@
             ? '<button class="lnk-btn dep-save" data-id="'+d.id+'">✓ save</button> '   // editing: just Save (no Close)
             : '<button class="lnk-btn dep-edit" data-id="'+d.id+'">edit</button> <button class="lnk-btn dep-close" data-id="'+d.id+'" data-st="closed">close</button>'); }
       // delete allowed only when NO purchase orders are assigned AND not paid (a payment date locks deletion)
-      var hasPOs=(d.linked_pos||'').trim()!=='';
-      act += (hasPOs || d.date_paid)
-        ? ' <span class="mut tiny" title="Can’t delete — '+(d.date_paid?'this deposit has a payment date':'purchase order(s) are assigned to this deposit ('+esc(d.linked_pos)+')')+'.">🔒 locked</span>'
-        : ' <button class="lnk-btn dep-del" data-id="'+d.id+'" data-ref="'+esc(d.reference||('#'+d.id))+'" title="delete this deposit" style="color:#dc2626">delete</button>';
+      act += d.date_paid
+        ? ' <span class="mut tiny" title="Can’t delete — this deposit has a payment date.">🔒 locked</span>'
+        : ' <button class="lnk-btn dep-del" data-id="'+d.id+'" data-ref="'+esc(d.reference||('#'+d.id))+'" title="delete this deposit'+((d.linked_pos||'').trim()?' — you\'ll choose what happens to its linked POs':'')+'" style="color:#dc2626">delete</button>';   // linked POs handled via the NO DEPOSIT / UNASSIGNED prompt
       // apply this deposit to the open, unassigned POs in its production + supplier (region-matched) — the button
       // lists those exact POs, and only shows when there are any (d.apply_pos). On its own second line.
       var _pLbl=/^p/i.test(String(d.prod_no||''))?d.prod_no:('P'+d.prod_no);
@@ -5434,8 +5433,7 @@
       var act;
       if(closed) act='<button class="lnk-btn dep-close" data-id="'+d.id+'" data-st="">reopen</button>';
       else act = editing?'<button class="lnk-btn dep-save" data-id="'+d.id+'">✓ save</button>':'<button class="lnk-btn dep-edit" data-id="'+d.id+'">edit</button> <button class="lnk-btn dep-close" data-id="'+d.id+'" data-st="closed">close</button>';
-      var hasPOs=(d.linked_pos||'').trim()!=='';
-      if(!(hasPOs||d.date_paid)) act+=' <button class="lnk-btn dep-del" data-id="'+d.id+'" data-ref="'+esc(d.reference||('#'+d.id))+'" style="color:#dc2626">delete</button>';
+      if(!d.date_paid) act+=' <button class="lnk-btn dep-del" data-id="'+d.id+'" data-ref="'+esc(d.reference||('#'+d.id))+'" style="color:#dc2626">delete</button>';   // linked POs handled via the NO DEPOSIT / UNASSIGNED prompt
       if(d.is_deposit && d.prod_no && d.supplier_name && !closed && (d.apply_pos||'').trim()){ var _pLbl2=/^p/i.test(String(d.prod_no||''))?d.prod_no:('P'+d.prod_no); act+=' <button class="lnk-btn dep-apply-all" data-id="'+d.id+'" style="color:#6d28d9;white-space:normal;text-align:left" title="assign this deposit to these open '+esc(d.supplier_name)+' PO(s) in '+esc(_pLbl2)+' ('+esc(d.country||'?')+' region) with no deposit yet">⤿ apply to unassigned '+esc(_pLbl2)+' - '+esc(d.apply_pos)+'</button>'; }
       var title = locked?esc(d.reference||'(no reference)'):editCell(ep,'reference',d.reference,'txt');
       var f=mobFld('Supplier',v_sup)+mobFld('Country',v_ctry)+mobFld('PROD#',v_prod)+mobFld('Amount',v_amt)+mobFld('FX',v_fx)+mobFld('Dates',v_dates)+mobFld('Remaining',v_rem)+mobFld('Est. alloc.',v_est)+mobFld('Linked POs',linkedPOsMini(d));
@@ -5482,6 +5480,23 @@
         document.body.appendChild(ov); var close=function(){ ov.remove(); };
         ov.addEventListener('click',function(e){ if(e.target===ov)close(); });
         ov.querySelector('#dcc-cancel').onclick=close; ov.querySelector('#dcc-yes').onclick=function(){ close(); onYes(); }; }
+      // Deleting a deposit that still has linked POs — ask what to do with them: NO DEPOSIT (sentinel; start rolls
+      // into completion) or UNASSIGNED (clear the ref so they can be reassigned). onChoice('no_deposit'|'unassign').
+      function depDeleteConfirm(ref,list,onChoice){
+        var ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200001;display:flex;align-items:center;justify-content:center;padding:20px';
+        ov.innerHTML='<div style="background:#fff;border-radius:10px;max-width:440px;padding:18px 20px;box-shadow:0 10px 40px rgba(0,0,0,.3)">'
+          +'<div style="font-size:14px;font-weight:700;color:#0f172a;margin-bottom:6px">Delete deposit '+esc(ref)+'</div>'
+          +'<div style="font-size:12px;color:#334155;line-height:1.5;margin-bottom:4px">This deposit has linked purchase order(s)'+(list?' — <b>'+esc(list)+'</b>':'')+'. What should happen to them?</div>'
+          +'<div class="mut tiny" style="margin-bottom:14px"><b>NO DEPOSIT</b> = mark them explicitly no-deposit (the start deposit rolls into completion). <b>Unassign</b> = clear the deposit reference so they can be reassigned.</div>'
+          +'<div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">'
+          +'<button id="ddc-cancel" style="font-size:12px;padding:6px 14px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;cursor:pointer">Cancel</button>'
+          +'<button id="ddc-unassign" style="font-size:12px;padding:6px 14px;border:1px solid #94a3b8;border-radius:5px;background:#f1f5f9;color:#334155;cursor:pointer;font-weight:600">Set to UNASSIGNED</button>'
+          +'<button id="ddc-nodep" style="font-size:12px;padding:6px 14px;border:1px solid #b91c1c;border-radius:5px;background:#dc2626;color:#fff;cursor:pointer;font-weight:600">Set to NO DEPOSIT</button></div></div>';
+        document.body.appendChild(ov); var close=function(){ ov.remove(); };
+        ov.addEventListener('click',function(e){ if(e.target===ov)close(); });
+        ov.querySelector('#ddc-cancel').onclick=close;
+        ov.querySelector('#ddc-unassign').onclick=function(){ close(); onChoice('unassign'); };
+        ov.querySelector('#ddc-nodep').onclick=function(){ close(); onChoice('no_deposit'); }; }
       b.querySelectorAll('.dep-close').forEach(function(btn){ btn.onclick=function(){
         var doClose=function(){ btn.disabled=true;
           shipPost('/api/supply/deposit/'+btn.dataset.id,{status:btn.dataset.st},function(){
@@ -5491,8 +5506,11 @@
         if(btn.dataset.st==='closed'){ var dd=deps.filter(function(x){return String(x.id)===String(btn.dataset.id);})[0]; var rem=dd?Number(dd.deposit_remaining)||0:0;
           if(rem>0.01){ depCloseConfirm(rem,doClose); return; } }
         doClose(); }; });
-      b.querySelectorAll('.dep-del').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Delete deposit "'+btn.dataset.ref+'"? This cannot be undone.'))return;
-        shipPost('/api/supply/deposit/'+btn.dataset.id+'/delete',{},function(){ delete cache['productions']; showPoSub('deposits'); }); }; });
+      b.querySelectorAll('.dep-del').forEach(function(btn){ btn.onclick=function(){ var id=btn.dataset.id, ref=btn.dataset.ref;
+        function doDelete(linkedOpt){ shipPost('/api/supply/deposit/'+id+'/delete', linkedOpt?{linked:linkedOpt}:{}, function(){ delete cache['productions']; reloadDeps(); }); }
+        var dd=deps.filter(function(x){return String(x.id)===String(id);})[0];
+        if(dd && (dd.linked_pos||'').trim()){ depDeleteConfirm(ref, dd.linked_pos, doDelete); }   // linked POs → choose NO DEPOSIT / UNASSIGNED / Cancel
+        else { if(!confirm('Delete deposit "'+ref+'"? This cannot be undone.'))return; doDelete(); } }; });
       b.querySelectorAll('.dep-apply-all').forEach(function(btn){ btn.onclick=function(){ var d=deps.filter(function(x){return String(x.id)===String(btn.dataset.id);})[0]; if(!d)return;
         if(!confirm('Assign deposit '+d.reference+' to every open '+d.supplier_name+' PO in production '+d.prod_no+' ('+(d.country||'?')+' region) that has no deposit yet?'))return;
         btn.disabled=true; btn.textContent='…';

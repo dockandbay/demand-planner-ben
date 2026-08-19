@@ -1,3 +1,6 @@
+## v27.155 Deposits: delete a deposit with linked POs → choose NO DEPOSIT / UNASSIGNED / Cancel
+- A deposit with linked purchase orders can now be **deleted** (it was locked before). On delete you're prompted: **Set to NO DEPOSIT** (the sentinel — start deposit rolls into completion), **Set to UNASSIGNED** (clears the deposit ref so the POs can be reassigned), or **Cancel**. The chosen disposition is applied to every linked PO before the deposit is removed. (Deposits with a payment date are still locked.)
+
 ## v27.154 Deposits: PROD#/Supplier picks apply optimistically (instant)
 - Picking a **PROD#** or **Supplier** now paints the new value **instantly** (row stays in edit), saves in the background, then refreshes the server-derived columns (Est. alloc / linked POs / apply list) when that returns — instead of blocking on the save + a full deposits refetch. Reverts on failure.
 
