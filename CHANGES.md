@@ -1,3 +1,6 @@
+## v27.142 Manage FBA: include Reserved Staging in on-hand + show the 3 columns
+- Amazon FBA on-hand now = **available + fc-transfer + Reserved Staging** (report col CE was previously ignored). The Manage FBA reconciliation shows all three columns (Available · FC-transfer · Reserved staging) and the summed **FBA report (avail+fc+staging)** vs ERP for the discrepancy. All markets. (UK example: 24,047 → 25,937 on-hand.)
+
 ## v27.141 SUPPLY nav restructure (2/2): fold Actions into BI & Reports + L2 reorder
 - **Actions · Recommendations · ERP Compare** are now the **first 3 L3 tabs of BI & Reports** (which opens on Actions). The standalone Actions section is removed; the views render into the reports body via an `_actHost` (no duplicate sub-nav), keeping the progressive load + cache. The high-priority red counter now rides the **BI & REPORTS** L2 tab.
 - **L2 reorder:** Purchase Orders · Order Plan · BI & Reports · Payments · Samples · Quality Control · Config.

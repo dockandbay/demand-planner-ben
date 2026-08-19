@@ -7825,7 +7825,7 @@ app.post('/api/supply/inventory-3pl/import', async (req, res) => {
 // ── Manage FBA / FBA Aged: manually-uploaded Amazon FBA inventory report per market. Compare (available + fc-transfer)
 // vs planner.products.inventory_<mkt>_fba; the aged buckets (91-180 … 456+) feed the FBA Aged tab. Persisted per market.
 const INVFBA_MKTS = ['US','UK','AU','EU','CA'];
-const INVFBA_COLS = { sku:'sku', asin:'asin', av:'available', fc:'fc-transfer',
+const INVFBA_COLS = { sku:'sku', asin:'asin', av:'available', fc:'fc-transfer', rs:'Reserved Staging',
   a1:'inv-age-91-to-180-days', a2:'inv-age-181-to-270-days', a3:'inv-age-271-to-365-days', a4:'inv-age-366-to-455-days', a5:'inv-age-456-plus-days' };
 function invFbaParse(text) {
   const lines = text.split(/\r?\n/).filter(x => x.trim().length); if (!lines.length) return null;
@@ -7839,9 +7839,9 @@ function invFbaParse(text) {
   const rep = {};
   for (let i = 1; i < lines.length; i++) { const f = split(lines[i]); const sku = String(f[ci.sku] || '').trim(); if (!sku) continue;
     if (/^amzn\.gr\./i.test(sku)) continue;   // ignore Amazon "amzn.gr." listings entirely — not inventory we count
-    const r = rep[sku] || (rep[sku] = { av: 0, fc: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, asin: '' });
+    const r = rep[sku] || (rep[sku] = { av: 0, fc: 0, rs: 0, a1: 0, a2: 0, a3: 0, a4: 0, a5: 0, asin: '' });
     if (!r.asin && ci.asin >= 0) r.asin = String(f[ci.asin] || '').trim();
-    ['av', 'fc', 'a1', 'a2', 'a3', 'a4', 'a5'].forEach(k => { if (ci[k] >= 0) r[k] += csvNum(f[ci[k]]); }); }
+    ['av', 'fc', 'rs', 'a1', 'a2', 'a3', 'a4', 'a5'].forEach(k => { if (ci[k] >= 0) r[k] += csvNum(f[ci[k]]); }); }
   return { rep };
 }
 // FBA aged-inventory storage-cost rates. Amazon bills MONTHLY per volume (greater of per-cu-ft/cu-m or per-unit at the top
@@ -7885,12 +7885,12 @@ async function invFbaCompare(mkt, rep) {
   const asin2sku = {}, dupAsins = [];
   for (const a in asinSkus) { if (asinSkus[a].length === 1) asin2sku[a] = asinSkus[a][0]; else dupAsins.push(a); }
   const skus = Object.keys(rep);
-  const rows = skus.map(sku => { const r = rep[sku], fba = (r.av || 0) + (r.fc || 0);
+  const rows = skus.map(sku => { const r = rep[sku], fba = (r.av || 0) + (r.fc || 0) + (r.rs || 0);   // FBA on-hand = available + fc-transfer + Reserved Staging (Ben)
     // match by SKU first, else by unambiguous ASIN (Amazon SKU sometimes differs from ours but the ASIN maps)
     let mSku = (sku in erp) ? sku : null, via = mSku ? 'sku' : null;
     if (!mSku && r.asin && asin2sku[r.asin.toUpperCase()]) { mSku = asin2sku[r.asin.toUpperCase()]; via = 'asin'; }
     const e = mSku ? erp[mSku] : null;
-    return { sku, asin: r.asin || '', available: r.av || 0, fc_transfer: r.fc || 0, report_fba: fba, erp_sku: mSku, matched_via: via, erp_fba: e, matched: !!mSku, diff: (e == null ? null : fba - e) }; })
+    return { sku, asin: r.asin || '', available: r.av || 0, fc_transfer: r.fc || 0, reserved_staging: r.rs || 0, report_fba: fba, erp_sku: mSku, matched_via: via, erp_fba: e, matched: !!mSku, diff: (e == null ? null : fba - e) }; })
     .sort((a, b) => Math.abs(b.diff || 0) - Math.abs(a.diff || 0));
   const matchedSkus = new Set(rows.filter(r => r.erp_sku).map(r => r.erp_sku));
   const erp_missing = Object.keys(erp).filter(s => erp[s] > 0 && !matchedSkus.has(s)).map(s => ({ sku: s, erp_fba: erp[s] })).sort((a, b) => b.erp_fba - a.erp_fba);

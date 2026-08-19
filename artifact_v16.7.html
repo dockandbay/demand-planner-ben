@@ -11402,7 +11402,7 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
         +'<div id="fba-stk-menu" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 24px rgba(0,0,0,.15);z-index:50;min-width:190px">'
         +'<div class="fba-stk-opt" data-a="csv" style="padding:8px 12px;cursor:pointer;font-size:12px">⬇ Download CSV</div>'
         +'<div class="fba-stk-opt" data-a="clip" style="padding:8px 12px;cursor:pointer;font-size:12px;border-top:1px solid #eef2f7">📋 Copy to clipboard</div></div></span></div>';
-    var H=['SKU','ASIN','Available','FC-transfer','FBA report (avail+fc)','ERP ('+tHesc(INV_FBA)+' FBA)','Diff'];
+    var H=['SKU','ASIN','Available','FC-transfer','Reserved staging','FBA report (avail+fc+staging)','ERP ('+tHesc(INV_FBA)+' FBA)','Diff'];
     var head=H.map(function(h){return '<th style="text-align:left;padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+h+'</th>';}).join('');
     var num=function(v){return v==null?'—':v;};
     var dc=function(d,note){ var c=(d==null?'#94a3b8':(d>0?'#166534':(d===0?'#16a34a':'#b91c1c'))); return '<td style="padding:4px 10px;text-align:left;color:'+c+';font-weight:600;white-space:normal">'+(d==null?'—':(d>0?'+':'')+d)+(note||'')+'</td>'; };   // positive diff (report > ERP) shown green — likely stock received but not yet registered in ERP; note sits under the number
@@ -11410,7 +11410,7 @@ function invFbaRender(mode,j){ var panel=document.getElementById(mode==='aged'?'
       return '<tr'+(!r.matched?' style="background:#fff7ed"':'')+'>'
       +'<td style="padding:4px 10px;text-align:left">'+tHesc(r.sku)+note+'</td>'
       +'<td style="padding:4px 10px;text-align:left;font-family:ui-monospace,Menlo,monospace;font-size:11px">'+tHesc(r.asin||'—')+'</td>'
-      +'<td style="padding:4px 10px;text-align:left">'+r.available+'</td><td style="padding:4px 10px;text-align:left">'+r.fc_transfer+'</td>'
+      +'<td style="padding:4px 10px;text-align:left">'+r.available+'</td><td style="padding:4px 10px;text-align:left">'+r.fc_transfer+'</td><td style="padding:4px 10px;text-align:left">'+(r.reserved_staging||0)+'</td>'
       +'<td style="padding:4px 10px;text-align:left;font-weight:600">'+r.report_fba+'</td><td style="padding:4px 10px;text-align:left">'+num(r.erp_fba)+'</td>'+dc(r.diff,(r.diff>0)?_recentPoNote(r.recent_pos):'')+'</tr>'; }).join('');
     content=summary+ctl+'<div style="max-height:520px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'+head+'</tr></thead><tbody>'+trs+'</tbody></table></div>'
       +(fr.length>800?'<div class="mut" style="font-size:11px;margin-top:4px">Showing first 800 of '+fr.length+'</div>':''); }
