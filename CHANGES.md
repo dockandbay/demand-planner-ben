@@ -1,3 +1,8 @@
+## v27.141 SUPPLY nav restructure (2/2): fold Actions into BI & Reports + L2 reorder
+- **Actions · Recommendations · ERP Compare** are now the **first 3 L3 tabs of BI & Reports** (which opens on Actions). The standalone Actions section is removed; the views render into the reports body via an `_actHost` (no duplicate sub-nav), keeping the progressive load + cache. The high-priority red counter now rides the **BI & REPORTS** L2 tab.
+- **L2 reorder:** Purchase Orders · Order Plan · BI & Reports · Payments · Samples · Quality Control · Config.
+- **Deep links:** `#/supply/reports/actions|recommendations|erp-compare`; old `#/supply/actions[/<sub>]` redirects there. (Direct to Client / Custom Orders / Flexport already moved to Purchase Orders in v27.139.)
+
 ## v27.140 SUPPLY Config: flat menu now light-blue (correct container)
 - The SUPPLY ▸ Config nav is a flat one-level menu rendered in #config-subs (not the L3 #config-subs-l3 I'd restyled). Tagged it `cfg-flat` in supply context and styled it as the light-blue pill row (like rep-subnav / prod-subtabs) — Suppliers / Batches / Productions / etc. now match the other L3 menus.
 

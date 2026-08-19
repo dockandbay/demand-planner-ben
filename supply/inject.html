@@ -736,14 +736,14 @@
 <script src="/portal-view.js?v=__APP_VERSION__"></script>
 <script>
 (function(){
-  var SECTIONS=[['actions','ACTIONS'],['reports','BI & REPORTS'],['purchase-orders','PURCHASE ORDERS'],['order-plan','ORDER PLAN'],
-    ['payments','PAYMENTS'],['samples','SAMPLES'],['quality-control','QUALITY CONTROL'],['config','CONFIG']];   // CONFIG here = SUPPLY ▸ CONFIG (supply-chain settings + Key accounts + Portal); the ⚙ cog opens the admin CONFIG. SHIPMENTS under PURCHASE ORDERS; PAYMENTS umbrella holds Deposits / Other Payments / Payments Due / Payments Report
+  var SECTIONS=[['purchase-orders','PURCHASE ORDERS'],['order-plan','ORDER PLAN'],['reports','BI & REPORTS'],
+    ['payments','PAYMENTS'],['samples','SAMPLES'],['quality-control','QUALITY CONTROL'],['config','CONFIG']];   // Ben: Actions/Recommendations/ERP Compare folded into BI & REPORTS (first 3 L3 tabs) — no standalone ACTIONS section   // CONFIG here = SUPPLY ▸ CONFIG (supply-chain settings + Key accounts + Portal); the ⚙ cog opens the admin CONFIG. SHIPMENTS under PURCHASE ORDERS; PAYMENTS umbrella holds Deposits / Other Payments / Payments Due / Payments Report
   // REPORTS is a parent tab; these are its sub-tabs (the read-across views).
-  var REPORT_SECTIONS=[['dtc-mismatch','DTC MISMATCH'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['metrics','METRICS'],['production-summary','PRODUCTION SUMMARY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
-    ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['supplier-timing','SUPPLIER DELAYS']];   // Direct to Client / Custom Orders / Flexport moved to PURCHASE ORDERS sub-tabs (Ben)
-  var REPORT_KEYS=['dtc-mismatch','reallocate','urgent-buy','metrics','production-summary','container-fill','consolidate','upcoming','pipeline','supplier-timing'];
+  var REPORT_SECTIONS=[['actions','ACTIONS'],['recommendations','💡 RECOMMENDATIONS'],['erp-compare','⬆ ERP COMPARE'],['dtc-mismatch','DTC MISMATCH'],['reallocate','REALLOCATE'],['urgent-buy','URGENT BUY'],['metrics','METRICS'],['production-summary','PRODUCTION SUMMARY'],['container-fill','CONTAINER FILL'],['consolidate','CONSOLIDATE'],
+    ['upcoming',"WHAT'S NEXT"],['pipeline','PIPELINE'],['supplier-timing','SUPPLIER DELAYS']];   // Actions/Recommendations/ERP Compare folded in as the first 3 (Ben). Direct to Client / Custom Orders / Flexport moved to PURCHASE ORDERS sub-tabs.
+  var REPORT_KEYS=['actions','recommendations','erp-compare','dtc-mismatch','reallocate','urgent-buy','metrics','production-summary','container-fill','consolidate','upcoming','pipeline','supplier-timing'];
   var BI_TABS={'metrics':'/api/supply/bi','production-summary':'/api/supply/bi/production-summary','urgent-buy':'/api/supply/bi/projection','reallocate':'/api/supply/bi/reallocations','container-fill':'/api/supply/bi/container-fill','consolidate':'/api/supply/bi/consolidations','erp-compare':'/api/supply/bi/erp-compare','supplier-timing':'/api/supply/supplier-timing','dtc-mismatch':'/api/supply/dtc/mismatch'};   // fluid: always re-fetch
-  var reportTab='metrics';   // BI & REPORTS opens on METRICS by default
+  var reportTab='actions';   // BI & REPORTS opens on ACTIONS by default (Ben)
   var ANNOT={
     actions:'<b>SUPPLY ▸ Actions.</b> Exceptions surfaced from the supply picture — date conflicts, unassigned shipments, missing supplier, unpaid deposits. Grouped by type.',
     reports:'<b>SUPPLY ▸ Reports.</b> The read-across views, pick one from the sub-tabs: <b>What\'s Next</b> (forward calendar), <b>Pipeline</b> (every PO by stage), <b>Payments</b> (the run register), <b>Cash Flow</b> (itemised monthly payments) and <b>Flexport</b> (the Flexport shipment feed).',
@@ -1095,7 +1095,7 @@
         detail:x.type+' · $'+units(x.amount)+' · '+(x.likely_date?('likely '+fd(x.likely_date)):('due '+(x.due?fd(x.due):'—')))+' · '+cfMonthLabel(x.month),
         fix:'gotoitem', gotarget:go, target:'', target_key:x.ref }); });
     return out; }
-  function renderActions(rows,partial){ var c=document.getElementById('supply-content'); var _tk=_navToken; fetchLookups(function(){
+  function renderActions(rows,partial){ var c=_actHost||document.getElementById('supply-content'); var _tk=_navToken; fetchLookups(function(){
     if(_tk!==_navToken)return;   // navigated away during the (async) lookups warm-up → don't paint over the newer view
     if(partial){ actBuild(rows,c,true); return; }   // priority preview — skip the (slow) cashflow fetch; the full phase adds it
     fetch('/api/supply/cashflow').then(function(r){return r.json();}).then(function(cf){
@@ -1106,12 +1106,12 @@
   // Instant shell: paint the Actions header + sub-nav + a spinner synchronously so the section appears immediately
   // (before any fetch resolves). actBuild() re-renders this same structure with live data + wired sub-tabs.
   function actShell(c){ if(!c)return;
-    c.innerHTML=annot('actions')
+    c.innerHTML=(_actHost?'':annot('actions')
       +'<div class="po-subnav" id="act-subnav">'
         +'<span class="rtab act-subtab active" data-as="actions">ACTIONS</span>'
         +'<span class="rtab act-subtab" data-as="recommendations">💡 RECOMMENDATIONS</span>'
         +'<span class="rtab act-subtab" data-as="erp-compare">⬆ ERP COMPARE</span>'
-      +'</div>'
+      +'</div>')
       +'<div id="act-sub"><div class="count" style="opacity:.7;padding:16px 2px">⏳ Loading priority actions…</div></div>'; }
   // Lazy load: paint the shell instantly, warm lookups in parallel, then render the fast HIGH-severity subset (~1s),
   // then the full set (~4s) replaces it.
@@ -1134,7 +1134,7 @@
     fetch('/api/supply/actions').then(function(r){return r.json();}).then(function(full){
       if(!Array.isArray(full))return; cache['actions']=full;
       try{ setActionsBadgeFrom(full); }catch(e){}
-      if(current==='actions')try{ renderActions(full); }catch(e){}   // refresh in place if the user is on Actions
+      if(current==='reports'&&['actions','recommendations','erp-compare'].indexOf(reportTab)>=0&&_actHost)try{ renderActions(full); }catch(e){}   // refresh in place if on a folded-in Actions tab
     }).catch(function(){}); }
   function startActionsWarm(){ if(_actWarmStarted)return; _actWarmStarted=true;
     setInterval(function(){ prewarmActions(true); }, 600000); }   // every 10 min, matching the server cache TTL
@@ -1148,6 +1148,7 @@
   function actGroup(t){ return ACT_GROUP[t]||'OTHER'; }   // everything else (supplier, ERP, partials, unassigned) → OTHER
   var ACT_CHIP={PRIORITY:'PRIORITY',PAYMENTS:'PAYMENTS',DATES:'DATES',OTHER:'OTHER',RECOMMENDATIONS:'ADVISORY'};   // short category tag on each triage row
   var actSub='actions';   // Actions section sub-tab: 'actions' | 'recommendations' | 'erp-compare'
+  var _actHost=null;   // when set (BI & Reports Actions/Recommendations/ERP Compare tab), render the Actions view into this container WITHOUT its own sub-nav (the reports L3 provides the tabs)
   var _actErpCount=null;   // ERP-compare "to review" count for the sub-tab badge (lazy)
   // Which PO detail sub-tab an action should deep-link to (payment issues → PAYMENTS, date issues → DATES,
   // shipping → SHIPMENTS, ERP/order-plan → ORDER PLAN). Null → the default (first) tab.
@@ -1182,8 +1183,8 @@
     function actSubNav(){ function tab(k,lbl,n,red){ return '<span class="rtab act-subtab'+(actSub===k?' active':'')+'" data-as="'+k+'">'+lbl+(n>0?' <span class="ex-badge"'+(red?' style="background:#dc2626;color:#fff"':'')+'>'+n+'</span>':'')+'</span>'; }
       var _hi=_acts.filter(function(r){return r.severity==='high' && (!r.status||r.status==='open');}).length;   // high-priority open actions → red counter on the ACTIONS sub-tab
       return '<div class="po-subnav" id="act-subnav">'+tab('actions','ACTIONS',_hi,true)+tab('recommendations','💡 RECOMMENDATIONS',_recOpen)+tab('erp-compare','⬆ ERP COMPARE',_actErpCount||0)+'</div>'; }
-    c.innerHTML=annot('actions')+_partBanner+lookupDatalists()+actSubNav()+'<div id="act-sub"></div>';
-    document.querySelectorAll('#act-subnav .act-subtab').forEach(function(t){ t.onclick=function(){ actSub=t.dataset.as; if(typeof writeHash==='function')writeHash(['supply','actions'].concat(actSub!=='actions'?[actSub]:[]));   // deep-link #/supply/actions/<recommendations|erp-compare>
+    c.innerHTML=(_actHost?'':annot('actions')+_partBanner)+lookupDatalists()+(_actHost?'':actSubNav())+'<div id="act-sub"></div>';   // in BI & Reports the L3 tabs replace the act-subnav
+    if(!_actHost)document.querySelectorAll('#act-subnav .act-subtab').forEach(function(t){ t.onclick=function(){ actSub=t.dataset.as; if(typeof writeHash==='function')writeHash(['supply','reports',actSub]);   // deep-link #/supply/reports/<actions|recommendations|erp-compare>
       document.querySelectorAll('#act-subnav .act-subtab').forEach(function(x){x.classList.toggle('active',x===t);}); renderActSub(); }; });
     function renderActSub(){ var sb=document.getElementById('act-sub'); if(!sb)return;
       if(actSub==='recommendations'){ renderRecsTab(sb); return; }
@@ -1394,7 +1395,7 @@
     document.querySelectorAll('#act-sub .act-go').forEach(function(b){b.onclick=function(){ if(b.dataset.go==='po'){ if(typeof openPODrawer==='function')openPODrawer(b.dataset.k, b.dataset.tab||undefined); else gotoPO(b.dataset.k, b.dataset.tab||undefined); } else { if(typeof openShipDrawer==='function')openShipDrawer(b.dataset.k); else gotoShipment(b.dataset.k); } };});
     document.querySelectorAll('#act-sub .act-open-op').forEach(function(b){b.onclick=function(){ var f=b.dataset.flt||'partials'; var op={po:b.dataset.k}; op[f==='suprisk'?'suprisk':f==='disc'?'disc':'partials']=true; _pendingOP=op; selectSection('order-plan'); };});
     document.querySelectorAll('#act-sub .act-gotoreport').forEach(function(b){b.onclick=function(){ var rk=b.dataset.rk||'erp-compare';
-      if(rk==='erp-compare'){ actSub='erp-compare'; selectSection('actions'); return; }   // ERP Compare now lives under ACTIONS ▸ ERP Compare
+      if(rk==='erp-compare'){ return selectReport('erp-compare'); }   // ERP Compare now lives under BI & Reports ▸ ERP Compare
       if(rk==='cashflow'){ if(b.dataset.cfstatus)_cfState.status=b.dataset.cfstatus; if(b.dataset.cfmonth)_cfState.month=b.dataset.cfmonth; }
       selectReport(rk); };});
     document.querySelectorAll('#act-sub .act-gotoitem').forEach(function(b){b.onclick=function(){ var g=b.dataset.go, k=b.dataset.k;
@@ -4786,8 +4787,8 @@
   function paymentsNavBadge(n){ n=Number(n)||0; var btn=document.querySelector('#supply-subnav .stab[data-k="payments"]'); if(btn)btn.innerHTML='PAYMENTS'+(n>0?' <span class="ex-badge" title="'+n+' payment'+(n>1?'s':'')+' overdue">'+n+'</span>':'');
     var opt=document.querySelector('#supply-nav-sel option[value="payments"]'); if(opt)opt.textContent='PAYMENTS'+(n>0?' ('+n+')':''); }
   // ACTIONS tab badge = number of OPEN, HIGH-severity actions (the red items you should tackle first)
-  function actionsNavBadge(n){ n=Number(n)||0; var btn=document.querySelector('#supply-subnav .stab[data-k="actions"]'); if(btn)btn.innerHTML='ACTIONS'+(n>0?' <span class="ex-badge" style="background:#dc2626;color:#fff" title="'+n+' high-priority action'+(n>1?'s':'')+'">'+n+'</span>':'');
-    var opt=document.querySelector('#supply-nav-sel option[value="actions"]'); if(opt)opt.textContent='ACTIONS'+(n>0?' ('+n+')':''); }
+  function actionsNavBadge(n){ n=Number(n)||0; var b=document.getElementById('nav-actions-badge');   // Actions folded into BI & REPORTS → the high-priority counter rides that L2 tab
+    if(b){ if(n>0){ b.textContent=n; b.style.display=''; b.title=n+' high-priority action'+(n>1?'s':''); } else { b.textContent=''; b.style.display='none'; } } }
   function setActionsBadgeFrom(rows){ try{ actionsNavBadge((rows||[]).filter(function(r){return (r.severity==='high' || r.type==='Required field missing') && (!r.status||r.status==='open');}).length); }catch(e){} }   // master-data-missing (amber) also counts on the ACTIONS badge (Ben, item 13)
   function poSubNav(){ return '<div id="prod-subtabs">'+subListFor(poSub).map(function(t){ var bd=(_NAVLBL[t[0]]!==undefined)?navBadge(_navCounts[t[0]],_NAVNOUN[t[0]]):''; return '<span class="rtab'+(poSub===t[0]?' active':'')+'" data-posub="'+t[0]+'">'+t[1]+bd+'</span>'; }).join('')+'</div>'; }
   // count of OVERDUE payments — mirrors buildPaymentsDue's r.overdue (unpaid, has a due date, 2026-01-01 ≤ due < today).
@@ -9310,8 +9311,8 @@
   function applyRoute(){ var seg=(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean); _expectedHash=location.hash;
     if(seg[0]==='supply'){ showSupply(true); var sec=seg[1]||'actions';   // (true) = show chrome but don't auto-select Actions; we select the routed section next
       if(sec==='reports'){ if(['directclient','customorders','flexport'].indexOf(seg[2])>=0) showPoSub(seg[2]);   // moved to PURCHASE ORDERS — redirect old #/supply/reports/<x>
-        else selectReport(seg[2]||reportTab||'metrics'); }
-      else if(sec==='actions'){ actSub=(seg[2]&&['recommendations','erp-compare'].indexOf(seg[2])>=0)?seg[2]:'actions'; selectSection('actions'); }   // #/supply/actions/<recommendations|erp-compare> deep-link
+        else selectReport(seg[2]||reportTab||'actions'); }   // #/supply/reports/<actions|recommendations|erp-compare|…>
+      else if(sec==='actions'){ selectReport(seg[2]&&['recommendations','erp-compare'].indexOf(seg[2])>=0?seg[2]:'actions'); }   // Actions folded into BI & Reports — redirect old #/supply/actions[/<sub>]
       else if(sec==='productions'){ showPoSub(seg[2]&&PO_SUB_KEYS.indexOf(seg[2])>=0?seg[2]:'list'); }   // legacy links → PURCHASE ORDERS umbrella
       else if(sec==='payments'){ showPoSub(seg[2]&&PAY_SUB_KEYS.indexOf(seg[2])>=0?seg[2]:'paydue'); }   // PAYMENTS umbrella (default Payments Due)
       else if(sec==='config'){ if(seg[2]==='portal'&&seg[3])_pendingPortalSup=decodeURIComponent(seg[3]); enterSupplyConfig(seg[2]); }   // #/supply/config/<item> — SUPPLY ▸ CONFIG
@@ -9371,7 +9372,7 @@
     else { el.textContent=_urgentCrit; el.style.display=''; el.title=_urgentCrit+' critical stock-out risk'+(_urgentCrit===1?'':'s')+' to buy'; } }
   function refreshUrgentBadge(){ fetch('/api/supply/bi/projection').then(function(r){return r.json();}).then(function(j){ var rows=(j&&j.rows)||[]; _urgentCrit=rows.filter(function(r){return r.urgency==='critical'&&!r.too_late;}).length; paintUrgentBadge(); }).catch(function(){}); }
   function selectReport(rk){ if(rk==='cashflow')return showPoSub('cashflow');   // Cash Flow moved to PAYMENTS ▸ Cash Flow
-    current='reports'; reportTab=rk; syncHash();
+    current='reports'; reportTab=rk; _actHost=null; syncHash();
     var _tk=++_navToken;   // invalidate any in-flight section load (e.g. the ACTIONS fetch) so it can't paint over this report
     document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k==='reports');});
     var _ns=document.getElementById('supply-nav-sel'); if(_ns)_ns.value='reports';
@@ -9383,6 +9384,9 @@
     paintReallocBadge(); if(rk!=='reallocate') refreshReallocBadge();   // REALLOCATE opens set the count itself; other tabs refresh it in the background
     paintUrgentBadge(); if(rk!=='urgent-buy') refreshUrgentBadge();   // URGENT BUY critical count — the report itself sets it; other tabs refresh in the background
     try{ refreshDtcBadge(); }catch(e){}   // DTC mismatch issue-count badge on its sub-tab
+    if(rk==='actions'||rk==='recommendations'||rk==='erp-compare'){   // folded-in Actions views → render into rep-body without the act-subnav
+      actSub=rk; _actHost=document.getElementById('rep-body');
+      if(cache['actions']){ try{ renderActions(cache['actions']); }catch(e){} } else { renderActionsProgressive(_actHost,_tk); } return; }
     var done=function(d){
       if(_tk!==_navToken)return;   // navigated away (or to another report) before this resolved → don't overwrite the newer view
       if(rk==='metrics')return renderBIMetrics(d);
@@ -10298,8 +10302,8 @@
     if(key==='productions')return showPoSub(PO_SUB_KEYS.indexOf(prodTab)>=0&&prodTab!=='plan'?prodTab:'list');   // PRODUCTIONS folded under PURCHASE ORDERS
     if(key==='purchase-orders')return showPoSub(PO_SUB_KEYS.indexOf(poSub)>=0?poSub:'plan');
     if(key==='payments')return showPoSub(PAY_SUB_KEYS.indexOf(poSub)>=0?poSub:'paydue');   // PAYMENTS umbrella: default tab = Payments Due
-    if(key==='reports')return selectReport(reportTab||'metrics');
-    if(REPORT_KEYS.indexOf(key)>=0)return selectReport(key);
+    if(key==='reports')return selectReport(reportTab||'actions');
+    if(REPORT_KEYS.indexOf(key)>=0)return selectReport(key);   // includes actions/recommendations/erp-compare (folded into BI & Reports)
     if(key==='quality-control'){ current=key; syncHash(); document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k===key);}); var _qns=document.getElementById('supply-nav-sel'); if(_qns&&_qns.value!==key)_qns.value=key; return renderQualityControl(); }
     current=key; syncHash();
     document.querySelectorAll('.stab').forEach(function(b){b.classList.toggle('active',b.dataset.k===key);});
@@ -10374,7 +10378,7 @@
   function ensureRoot(){ if(document.getElementById('supply-root'))return;
     var app=document.getElementById('app')||document.body; if(!app)return;
     var rootEl=document.createElement('div'); rootEl.id='supply-root';
-    rootEl.innerHTML='<div id="supply-subnav">'+SECTIONS.map(function(s){return '<a class="stab" data-k="'+s[0]+'" href="#/supply/'+s[0]+'">'+s[1]+(s[0]==='reports'?'<span id="nav-dtc-badge" title="DTC mismatch issues" style="display:none;margin-left:5px;background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;vertical-align:middle"></span>':'')+'</a>';}).join('')
+    rootEl.innerHTML='<div id="supply-subnav">'+SECTIONS.map(function(s){return '<a class="stab" data-k="'+s[0]+'" href="#/supply/'+s[0]+'">'+s[1]+(s[0]==='reports'?'<span id="nav-actions-badge" title="high-priority actions" style="display:none;margin-left:5px;background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;vertical-align:middle"></span><span id="nav-dtc-badge" title="DTC mismatch issues" style="display:none;margin-left:5px;background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;vertical-align:middle"></span>':'')+'</a>';}).join('')
       +'<button id="supply-refresh-cache" title="Reload every report from the database fresh and reset all caches (client + server)" style="margin-left:auto;background:#fff;border:1px solid #cbd5e1;border-radius:5px;color:#2563eb;font-weight:600;font-size:11px;padding:2px 10px;cursor:pointer">↻ Refresh cache</button>'
       +'<span class="ver">HORIZON __APP_VERSION__</span></div>'
       +'<select id="supply-nav-sel" aria-label="Section">'+SECTIONS.map(function(s){return '<option value="'+s[0]+'">'+s[1]+'</option>';}).join('')+'</select>'
