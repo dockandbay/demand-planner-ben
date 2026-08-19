@@ -4381,7 +4381,7 @@ app.post('/api/supply/deposit/:id', async (req, res) => {
 app.post('/api/supply/deposit/:id/delete', async (req, res) => {
   try {
     const d = (await pool.query(`SELECT id, is_deposit, coalesce(reference,'') reference, date_paid FROM planner.deposits WHERE id=$1`, [req.params.id])).rows[0];
-    if (!d) return res.status(404).json({ error: 'deposit not found' });
+    if (!d) { invalidateSupplyCaches(); return res.json({ ok: true, already_deleted: true }); }   // idempotent: already gone (e.g. a double-click) → succeed + bust cache so the list refreshes to reality
     if (d.date_paid) return res.status(400).json({ error: 'Cannot delete — this item has a payment date. Clear the paid date first if it was entered in error.' });
     if (d.is_deposit && d.reference) {
       const n = Number((await pool.query(`SELECT count(*) n FROM planner.purchase_orders WHERE deposit_ref=$1`, [d.reference])).rows[0].n);
@@ -4397,6 +4397,7 @@ app.post('/api/supply/deposit/:id/delete', async (req, res) => {
       await pool.query(`DELETE FROM planner.production_deposits WHERE deposit_ref=$1`, [d.reference]);
     }
     await pool.query(`DELETE FROM planner.deposits WHERE id=$1`, [req.params.id]);
+    invalidateSupplyCaches();   // deposit removed + linked POs re-pointed → bust the cached deposits/PO/cashflow sections so a silent reload shows reality
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -4416,7 +4417,7 @@ app.post('/api/supply/deposit/:id/apply-all', async (req, res) => {
       WHERE coalesce(po.prod_no,'')=$1 AND lower(trim(coalesce(po.supplier_name,'')))=lower(trim($2))
         AND coalesce(po.deposit_ref,'')='' AND coalesce(po.status,'') NOT ILIKE '%complete%'`, [d.prod_no, d.supplier_name])).rows;
     const match = cand.filter(r => (/^AU$/.test(r.ctry || '')) === depAU);
-    if (match.length) await pool.query(`UPDATE planner.purchase_orders SET deposit_ref=$1 WHERE po = ANY($2::text[])`, [d.reference, match.map(r => r.po)]);
+    if (match.length) { await pool.query(`UPDATE planner.purchase_orders SET deposit_ref=$1 WHERE po = ANY($2::text[])`, [d.reference, match.map(r => r.po)]); invalidateSupplyCaches(); }   // POs re-pointed → bust cached deposits/PO sections
     res.json({ assigned: match.length, skipped_region: cand.length - match.length, reference: d.reference, pos: match.map(r => r.po) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

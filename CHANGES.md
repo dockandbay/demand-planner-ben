@@ -1,3 +1,7 @@
+## v27.159 Deposits: delete/apply now bust the server cache (stale linked-POs fix)
+- **Bug:** deleting a deposit (or "apply to unassigned") did raw DB writes but didn't invalidate the cached `deposits`/PO/cash-flow section responses, so a silent reload re-served the **stale** list — the deposit and its linked POs kept showing even though the POs were already re-pointed. A second delete then hit "Failed: deposit not found".
+- **Fix:** the delete and apply-all endpoints now call `invalidateSupplyCaches()`, and a delete of an already-gone deposit is **idempotent** (returns ok + busts cache) instead of erroring. A reload now reflects reality immediately.
+
 ## v27.158 Deposits linked-POs: Estimated column uses the finance-view start deposit
 - The per-PO **Estimated** column in the linked-POs mini-table now reads `v_po_finance.start_calc` (value × start%, incl. the products-cost fallback + <$500 rule) instead of a simpler line-value calc — so it shows a figure for POs with unpriced lines and its Σ matches the deposit's est. total + the PO drawdown. (Was blank for the blank-deposit test case.)
 
