@@ -11473,6 +11473,18 @@ function inv3plImport(){ var mkt=INV_3PL, btn=document.getElementById('inv3pl-im
   if(btn)btn.disabled=true; if(msg)msg.textContent='Fetching '+mkt+' report…';
   fetch('/api/supply/inventory-3pl/import?market='+mkt,{method:'POST'}).then(function(r){return r.json();}).then(inv3plRender)
     .catch(function(e){ if(btn)btn.disabled=false; if(msg)msg.textContent=''; var p=document.getElementById('inv3pl-panel'); if(p)p.innerHTML='<div style="color:#dc2626">Failed: '+tHesc((e&&e.message)||e)+'</div>'; }); }
+// Mobile: slimline card per SKU (ON HAND + AVAILABLE each as 3PL / ERP / Δ) instead of the wide grouped table.
+function inv3plCardsHTML(fr){
+  if(!fr.length)return '<div class="mut" style="font-size:12px;padding:10px">No rows match this filter.</div>';
+  var num=function(v){return v==null?'—':v;};
+  var dc=function(d){ var c=(d==null?'#94a3b8':(d>0?'#166534':(d===0?'#16a34a':'#b91c1c'))); return '<span style="color:'+c+';font-weight:700">'+(d==null?'—':(d>0?'+':'')+d)+'</span>'; };
+  function grp(lbl,rep,erp,diff){ return '<div style="flex:1 1 50%;min-width:120px"><div style="font-size:8px;text-transform:uppercase;letter-spacing:.03em;color:#1e40af;font-weight:700;margin-bottom:2px">'+lbl+'</div>'
+    +'<div style="font-size:11px;display:flex;gap:9px;flex-wrap:wrap"><span class="mut">3PL</span><b>'+num(rep)+'</b><span class="mut">ERP</span><b>'+num(erp)+'</b><span class="mut">Δ</span>'+dc(diff)+'</div></div>'; }
+  return '<div style="display:flex;flex-direction:column;gap:7px">'+fr.slice(0,800).map(function(r){
+    return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px 10px;background:'+(!r.matched?'#fff7ed':'#fff')+'">'
+      +'<div style="font-weight:700;font-size:11.5px;overflow-wrap:anywhere;margin-bottom:5px">'+tHesc(r.sku)+(!r.matched?' <span class="mut" style="font-size:9px">(not in ERP)</span>':'')+'</div>'
+      +'<div style="display:flex;gap:10px;flex-wrap:wrap">'+grp('On hand',r.report_onhand,r.erp_onhand,r.diff_onhand)+grp('Available',r.report_avail,r.erp_avail,r.diff_avail)+'</div>'
+      +'</div>'; }).join('')+'</div>'; }
 function inv3plRender(j){ var panel=document.getElementById('inv3pl-panel'); if(!panel)return;
   if(j&&j.error){ panel.innerHTML='<div style="color:#dc2626">'+tHesc(j.error)+(j.headers?'<div class="mut" style="font-size:11px;margin-top:4px">Report headers: '+tHesc(j.headers.join(', '))+'</div>':'')+'</div>'; return; }
   var meta=j.imported?(function(){ var a=inv3plAge(j.imported_at); return '<span class="mut" style="font-size:12px">'+tHesc(a.age)+' · last imported <b>'+tHesc(inv3plUser(j.imported_by))+'</b> on '+tHesc(a.stamp)+'</span>'; })()
@@ -11484,11 +11496,13 @@ function inv3plRender(j){ var panel=document.getElementById('inv3pl-panel'); if(
     // gap filter — passes if EITHER the on-hand OR the available gap exceeds the threshold
     function passGap3(r){ if(INV_3PL_GAP==='all')return true;
       if(INV_3PL_GAP==='gaps')return (r.diff_onhand!=null && r.diff_onhand!==0);   // "All gaps" = ON HAND difference only (Ben)
+      // In 3PL, not in ERP — 3PL available > 2 but ERP available < 2 (incl. SKUs not in ERP at all). Ben.
+      if(INV_3PL_GAP==='in3pl_not_erp')return (Number(r.report_avail)||0)>2 && (Number(r.erp_avail)||0)<2;
       if(!r.matched)return false;
       var ck=function(d,e){ if(d==null)return false; if(INV_3PL_GAP==='items10')return Math.abs(d)>10; if(INV_3PL_GAP==='pct20')return (e>0)?(Math.abs(d)/e>0.20):(Math.abs(d)>0); return false; };
       return ck(r.diff_onhand,r.erp_onhand)||ck(r.diff_avail,r.erp_avail); }
-    var _q3=String(INV_3PL_Q||'').trim().toLowerCase();
-    var fr=(INV_3PL_DEAD?rows.filter(function(r){return r.dead_stock;}):rows.filter(passGap3)).filter(function(r){ return !_q3 || String(r.sku||'').toLowerCase().indexOf(_q3)>=0; });
+    var _q3=String(INV_3PL_Q||'').trim().toLowerCase(); var _toks3=_q3?_q3.split(/[\s,]+/).filter(Boolean):[];   // SKU filter: space/comma-separated, matches any token
+    var fr=(INV_3PL_DEAD?rows.filter(function(r){return r.dead_stock;}):rows.filter(passGap3)).filter(function(r){ if(!_toks3.length)return true; var s=String(r.sku||'').toLowerCase(); return _toks3.some(function(t){return s.indexOf(t)>=0;}); });
     var stk=fr.filter(function(r){return r.matched;}).map(function(r){ return [r.sku, r.report_onhand]; }); window._inv3plStk=stk;   // Cin7 Stocktake: Code=SKU, Count=3PL Report - On Hand
     // Items in the 3PL report but NOT in the product list, that still hold stock (Ben) — surfaced as a toggled list.
     var _unm=rows.filter(function(r){return !r.matched && ((Number(r.report_onhand)||0)>0 || (Number(r.report_avail)||0)>0);})
@@ -11509,8 +11523,8 @@ function inv3plRender(j){ var panel=document.getElementById('inv3pl-panel'); if(
       +'</div>'; }
     var ctl='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0 0 10px">'
       +'<label class="mut" style="font-size:12px">Show</label><select id="inv3pl-gap" style="width:auto;max-width:200px;padding:4px 8px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#334155;font-size:12px;cursor:pointer">'
-      +[['gaps','All gaps (on-hand)'],['pct20','Gap more than 20%'],['items10','Gap more than 10 items'],['all','All (incl. matches)']].map(function(o){return '<option value="'+o[0]+'"'+(o[0]===INV_3PL_GAP?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'
-      +'<input id="inv3pl-q" placeholder="search SKU…" value="'+tHesc(INV_3PL_Q||'')+'" style="width:150px;padding:4px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px">'
+      +[['gaps','All gaps (on-hand)'],['in3pl_not_erp','In 3PL, not in ERP'],['pct20','Gap more than 20%'],['items10','Gap more than 10 items'],['all','All (incl. matches)']].map(function(o){return '<option value="'+o[0]+'"'+(o[0]===INV_3PL_GAP?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'
+      +'<input id="inv3pl-q" placeholder="filter SKU(s) — space/comma…" value="'+tHesc(INV_3PL_Q||'')+'" style="width:190px;max-width:60vw;padding:4px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px">'
       +'<button id="inv3pl-dead" title="Discontinued more than 24 months ago and, per the inventory snapshots, still holding stock that isn\'t selling down (flat < 10% over the last 6 months) — dead / obsolete stock in this warehouse" style="background:'+(INV_3PL_DEAD?'#7f1d1d':'#fef2f2')+';color:'+(INV_3PL_DEAD?'#fff':'#b91c1c')+';border:1px solid #b91c1c;border-radius:14px;padding:3px 11px;font-size:12px;font-weight:600;cursor:pointer">🪦 Dead stock ('+(j.dead_stock||0)+')</button>'
       +'<span class="mut" style="font-size:11px">'+fr.length+' shown</span>'
       +'<span style="margin-left:auto;position:relative"><button id="inv3pl-stk" class="save-btn" style="background:#dcfce7;color:#166534;border:1px solid #16a34a;font-weight:600">⤓ Cin7 Stocktake ▾</button>'
@@ -11529,7 +11543,11 @@ function inv3plRender(j){ var panel=document.getElementById('inv3pl-panel'); if(
       +'<td style="padding:4px 10px;text-align:left">'+num(r.report_onhand)+'</td><td style="padding:4px 10px;text-align:left">'+num(r.erp_onhand)+'</td>'+dcell(r.diff_onhand,((r.diff_onhand>0)||(r.diff_avail>0))?_recentPoNote(r.recent_pos):'')
       +sepTd
       +'<td style="padding:4px 10px;text-align:left">'+num(r.report_avail)+'</td><td style="padding:4px 10px;text-align:left">'+num(r.erp_avail)+'</td>'+dcell(r.diff_avail)+'</tr>'; }).join('');
-    content=summary+unmBlock+ctl+'<div style="max-height:520px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead>'+head2+'</thead><tbody>'+trs+'</tbody></table></div>'
+    var _isMob3=!!(window.matchMedia&&window.matchMedia('(max-width:640px)').matches);
+    var body3=_isMob3
+      ? '<div style="max-height:calc(100dvh - 230px);overflow:auto">'+inv3plCardsHTML(fr)+'</div>'
+      : '<div style="max-height:520px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead>'+head2+'</thead><tbody>'+trs+'</tbody></table></div>';
+    content=summary+unmBlock+ctl+body3
       +(fr.length>800?'<div class="mut" style="font-size:11px;margin-top:4px">Showing first 800 of '+fr.length+'</div>':''); }
   panel.innerHTML=head+content;
   _bindRecentPo(panel);

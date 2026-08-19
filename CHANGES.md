@@ -1,3 +1,8 @@
+## v27.165 Manage 3PL: "In 3PL, not in ERP" filter + mobile cards + multi-SKU filter
+- New **"In 3PL, not in ERP"** option in the Show dropdown — surfaces SKUs with **3PL available > 2 but ERP available < 2** (incl. SKUs not in ERP at all): stock sitting in the 3PL that ERP thinks is empty.
+- **Mobile:** on phones (≤640px) all Manage-3PL country tabs (US/UK/AU/EU/US-NG/UK-NG) render as **slimline cards** (SKU + On-hand and Available, each 3PL / ERP / Δ) instead of the wide grouped table.
+- **SKU filter** upgraded from a single-substring search to a **multi-SKU filter** (space/comma separated, matches any) and widened.
+
 ## v27.164 Timeline messages popup: add an X close button
 - The ✉ Timeline messages dropdown now has an **X** in its header to close it (previously on mobile there was no tap-outside affordance to dismiss it). Desktop tap-outside still works too.
 
