@@ -4217,10 +4217,11 @@ app.get('/api/supply/:section', async (req, res, next) => {
               coalesce(po.shipment_ref,'') shipment_ref,
               po.start_production prod_start,
               coalesce(po.end_production_overide, po.start_production + (coalesce(sup.production_days,0)||' days')::interval)::date prod_end,
-              coalesce(sh.departure_date, po.supplier_ship_date,
+              coalesce(sh.departure_date, fxs.fx_dep, po.supplier_ship_date,
                        coalesce(po.end_production_overide, po.start_production + (coalesce(sup.production_days,0)||' days')::interval) + interval '7 days')::date ship_date,
-              coalesce(sh.delivery_date, sh.arrival_date, sh.landing_date, po.delivery_date_overide, po.landing_date_overide)::date arr_known,
-              po.supplier_ship_date sup_ship, sh.departure_date sh_dep, coalesce(sh.status,'') sh_status,
+              -- arrival: shipment dates ▸ FLEXPORT dates (was ignored — mis-filed Flexport POs as Checked in) ▸ PO overrides
+              coalesce(sh.delivery_date, sh.arrival_date, sh.landing_date, fxs.fx_arr, fxs.fx_land, po.delivery_date_overide, po.landing_date_overide)::date arr_known,
+              po.supplier_ship_date sup_ship, sh.departure_date sh_dep, fxs.fx_dep fx_dep, coalesce(sh.status,'') sh_status,
               lower(coalesce(sh.mode,'')) sh_mode, coalesce(po.branch,'') branch, coalesce(fxs.fxmode,'') fxmode,
               b.sea_lead_time_days sea_lead,
               coalesce(po.supplier_invoice_total,
@@ -4232,7 +4233,7 @@ app.get('/api/supply/:section', async (req, res, next) => {
             LEFT JOIN planner.suppliers sup ON sup.id=po.supplier_id
             LEFT JOIN planner.branches b ON b.name=po.branch
             LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
-            LEFT JOIN LATERAL (SELECT f.flex_id, f.mode fxmode FROM planner.flexport_shipments f
+            LEFT JOIN LATERAL (SELECT f.flex_id, f.mode fxmode, f.departure_date fx_dep, f.arrival_date fx_arr, f.landing_date fx_land FROM planner.flexport_shipments f
               WHERE f.flex_id=po.flexport_reference OR f.shipment_name=po.po OR f.shipment_name=po.shipment_ref
               ORDER BY (f.flex_id=po.flexport_reference) DESC NULLS LAST LIMIT 1) fxs ON true
             WHERE coalesce(po.status,'') NOT ILIKE '%complete%')
@@ -4249,7 +4250,7 @@ app.get('/api/supply/:section', async (req, res, next) => {
                  ELSE 'sea' END mode,
             -- planned-vs-confirmed inputs for the OVERDUE check (a passed planned date with no confirmation)
             to_char(coalesce(sup_ship, prod_end + interval '7 days'),'YYYY-MM-DD') planned_ship,
-            (sh_dep IS NOT NULL) departed,
+            (sh_dep IS NOT NULL OR fx_dep IS NOT NULL) departed,
             (sh_status ~* 'arriv|deliver|complete|receiv') arrived,
             to_char(coalesce(arr_known, coalesce(sup_ship, prod_end + interval '7 days') + (coalesce(sea_lead,0)||' days')::interval),'YYYY-MM-DD') eta
           FROM s`)).rows;

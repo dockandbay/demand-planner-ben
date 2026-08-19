@@ -1,3 +1,7 @@
+## v27.171 Pipeline report: read Flexport dates (fixes Flexport POs mis-filed as "Checked in")
+- The Pipeline report's Flexport join only pulled `flex_id`/`mode`, **not the Flexport arrival/landing/departure dates**. So a PO whose arrival comes from Flexport (FLEX) had no real arrival — the pipeline synthesised one from production + lead, which for an overdue-production PO lands in the past → the PO was mis-bucketed as **Checked in** even though it hadn't arrived (e.g. PO-56USLX2, Flexport arrival 21-Aug, showed as Checked in).
+- Now folds Flexport `arrival_date`/`landing_date` into the arrival chain and `departure_date` into the ship/departed check (mirroring `v_po_finance`). Flexport POs now get their real arrival, so imminent ones land in **Arriving ≤2wk** (and genuinely-arrived ones in Checked in). Verified: sandbox flex PO arriving 05-Sep → In transit (>14d); the arriving bucket populates correctly.
+
 ## v27.170 Payments Report: supplier paid-email is automatic + immediate (no button, no delay)
 - Removed the **"✉ Mark paid & notify"** button and the **5-minute queue** (+ its live countdown). The supplier paid-confirmation email now fires **automatically and immediately** the moment a run is marked paid (bank amount + currency saved, or **Paid USD**) — this was already wired in `payment-fx`; the button/queue were a redundant second path.
 - `payment-fx` now records the send outcome, so the report shows **✉ emailed** (green) or **✉ email failed** (red, with the error) per run; unpaid runs show a quiet "auto-emails on paid" hint.
