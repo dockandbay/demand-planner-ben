@@ -1,3 +1,6 @@
+## v27.161 Xero Compare: drag-and-drop the XLSX onto a drop box
+- The "choose file" input on PAYMENTS ▸ Xero Compare now sits in a small dashed drop box — drag the Xero XLSX onto it (highlights on hover) and it loads + auto-analyses. Clicking still opens the file picker.
+
 ## v27.160 PO deposit-ref: "not applicable" for 0%-start POs (instead of "no deposit")
 - On the PO grid / order-plan deposit-ref column, a PO with **no start %** (0%) now reads **"not applicable"** (same light-grey style) instead of "no deposit" — deposit genuinely doesn't apply. "no deposit" is reserved for the other empty case; the explicit `NO DEPOSIT` sentinel and `— assign` prompt are unchanged.
 
