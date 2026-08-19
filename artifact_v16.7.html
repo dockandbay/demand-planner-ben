@@ -12981,6 +12981,26 @@ function saTableHTML(rows,awCol){ var ncols=awCol?10:9;
       +'<td class="soh">'+saFmt(r.s3)+'</td><td class="soh">'+saFmt(r.sf)+'</td>'+(awCol?'<td class="soh">'+(r.aw?saFmt(r.aw):'—')+'</td>':'')
       +saInbCell(r.inb[0])+saInbCell(r.inb[1])+'</tr>'; });
   return h+'</tbody></table>'; }
+// Mobile: compact cards in a responsive multi-column grid per category (a wide table squashes on a phone).
+function saCardsHTML(rows,awCol){
+  if(!rows.length)return '<div class="count" style="padding:10px;color:#888">No SKUs match.</div>';
+  function cell(lbl,v){ return '<div style="flex:1 1 28%;min-width:56px"><div style="font-size:8px;text-transform:uppercase;letter-spacing:.02em;color:#94a3b8">'+lbl+'</div><div style="font-size:12px;font-weight:700">'+v+'</div></div>'; }
+  function inb(lbl,x){ var v=x?('<div style="font-size:12px;font-weight:700">'+saFmt(x.qty)+'</div><div style="font-size:9px;color:#666">'+(x.eta?saDate(x.eta):'no date')+(x.ref?' · <a class="sa-poref" data-po="'+saEsc(x.ref)+'" style="color:#1d4ed8;text-decoration:underline;cursor:pointer">'+saEsc(x.ref)+'</a>':'')+'</div>'):'<div style="font-size:12px;color:#bbb">—</div>';
+    return '<div style="flex:1 1 44%;min-width:88px"><div style="font-size:8px;text-transform:uppercase;letter-spacing:.02em;color:#94a3b8">'+lbl+'</div>'+v+'</div>'; }
+  var h='', cur=null, open=false;
+  rows.forEach(function(r){
+    if(r.cat!==cur){ if(open)h+='</div>'; cur=r.cat;
+      h+='<div style="font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#333;background:#e8e8e6;padding:4px 8px;margin:8px 0 4px;border-radius:4px">'+saEsc(r.cat)+'</div>'
+        +'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:8px">'; open=true; }
+    h+='<div style="border:1px solid #e5e5e5;border-radius:8px;padding:8px 10px;background:#fff">'
+      +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;margin-bottom:4px"><div style="font-weight:700;font-size:11.5px;overflow-wrap:anywhere">'+saEsc(r.sku)+'</div>'+saStatusBadge(r.st)+'</div>'
+      +'<div style="font-size:9.5px;color:#64748b;margin-bottom:6px">'+saEsc(r.cs||'—')+(r.ti?' · '+saEsc(r.ti):'')+' · L '+(r.lch?saDate(r.lch):'—')+' · D '+(r.disc?saDate(r.disc):'—')+'</div>'
+      +'<div style="display:flex;flex-wrap:wrap;gap:7px 4px;border-top:1px solid #f1f1f1;padding-top:5px">'
+        +cell('SOH 3PL',saFmt(r.s3))+cell('SOH FBA',saFmt(r.sf))+(awCol?cell('SOH AWD',r.aw?saFmt(r.aw):'—'):'')
+        +inb('Next inbound',r.inb[0])+inb('2nd inbound',r.inb[1])
+      +'</div></div>'; });
+  if(open)h+='</div>';
+  return h; }
 function renderStockAvailability(container){ if(!container)return;
   if(!SA_CUR)SA_CUR=(typeof CUR!=='undefined'&&CUR)?CUR:'UK';
   var all=saRows(SA_CUR), cats=[], seen={};
@@ -13006,7 +13026,7 @@ function renderStockAvailability(container){ if(!container)return;
       +'<span style="width:1px;height:16px;background:#e0e0e0;margin:0 4px"></span>'
       +'<input class="sa-q" placeholder="Filter by SKU(s) — space/comma separated…" value="'+saEsc(SA_Q||'')+'" style="font-size:11px;padding:3px 8px;border:1px solid #d0d0d0;border-radius:4px;width:280px">'
       +'<select class="sa-cat" style="font-size:11px;padding:3px 8px;border:1px solid #d0d0d0;border-radius:4px;max-width:220px">'+catOpts+'</select>'
-    +'</div>'+saTableHTML(rows,SA_CUR==='US')+'</div>';
+    +'</div>'+((window.matchMedia&&window.matchMedia('(max-width:640px)').matches)?saCardsHTML(rows,SA_CUR==='US'):saTableHTML(rows,SA_CUR==='US'))+'</div>';
   container.querySelectorAll('.sa-mkt').forEach(function(b){ b.onclick=function(){ SA_CUR=b.dataset.m; renderStockAvailability(container); }; });
   var cs=container.querySelector('.sa-cat'); if(cs)cs.onchange=function(){ SA_CAT=this.value; renderStockAvailability(container); };
   var qi=container.querySelector('.sa-q'); if(qi)qi.oninput=function(){ SA_Q=this.value; var foc=document.activeElement===qi; renderStockAvailability(container); if(foc){ var n=container.querySelector('.sa-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } } };
