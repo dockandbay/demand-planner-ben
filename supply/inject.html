@@ -5335,7 +5335,8 @@
       +'<span class="pill-lbl" style="margin-left:6px">Supplier</span><select class="flt" id="dep-sup" style="width:auto;max-width:190px" title="filter by supplier"><option value="">All suppliers</option>'+depSups.map(function(s){return '<option value="'+esc(s)+'"'+(st.sup===s?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select>'
       +'<input class="flt" id="dep-q" placeholder="Filter reference / supplier…" style="margin-left:6px"><span class="count" id="dep-cnt"></span></div>'
       +'<style>#deptbl{table-layout:fixed;width:100%}#deptbl td,#deptbl th{white-space:normal;overflow-wrap:break-word;vertical-align:top}#deptbl .fci{width:100%;box-sizing:border-box;min-width:0;text-align:left}'
-      +'#deptbl .datewrap{display:flex;width:100%;max-width:100%}#deptbl .datewrap .dateinp{flex:1 1 auto;min-width:0;width:auto!important;text-align:left!important}#deptbl .datewrap .datepick{flex:0 0 auto}</style>'
+      +'#deptbl .datewrap{display:flex;width:100%;max-width:100%}#deptbl .datewrap .dateinp{flex:1 1 auto;min-width:0;width:auto!important;text-align:left!important}#deptbl .datewrap .datepick{flex:0 0 auto}'
+      +'#deptbl td.dep-dates .datewrap{display:inline-flex;width:auto;max-width:100%}#deptbl td.dep-dates .datewrap .dateinp{flex:0 1 auto;width:88px!important}#deptbl td.dep-dates .datewrap .datepick{margin-left:2px}</style>'   // Dates edit cell: narrow input so the 📅 picker button stays visible
       +'<div class="tw" id="dep-tblwrap"><table id="deptbl"><colgroup>'
       +'<col style="width:120px"><col style="width:140px"><col style="width:56px"><col style="width:50px"><col style="width:96px"><col style="width:56px"><col style="width:186px"><col style="width:82px"><col style="width:92px"><col style="width:200px"><col style="width:132px"></colgroup>'
       +'<thead><tr><th class="l">Reference</th><th class="l">Supplier</th><th class="l" title="AU deposits are region-isolated; a PO can only use a deposit in its own region">Country</th><th class="l">PROD#</th><th>Amount</th><th>FX</th><th class="l" title="Due · Likely pay (unpaid only) · Date paid">Dates</th><th>Remaining</th><th title="Σ calculated start deposits of OPEN, not-yet-allocated POs on this reference">Est. alloc.</th><th class="l">Linked purchase orders</th><th class="l"></th></tr></thead><tbody id="dep-rows"></tbody></table></div><div id="dep-cards"></div>';
@@ -5376,9 +5377,9 @@
         ? '<td class="l" style="font-size:11px;line-height:1.5;vertical-align:top"><div><span style="'+_dl+'">Due</span>'+txt(d.date_due,true)+'</div>'
             +(d.date_paid?'':'<div><span style="'+_dl+'">Likely</span>'+txt(d.date_likely_pay,true)+'</div>')
             +'<div><span style="'+_dl+'">Paid</span>'+txt(d.date_paid,true)+'</div></td>'
-        : '<td class="l" style="font-size:11px;line-height:1.7;vertical-align:top"><div><span style="'+_dl+'">Due</span>'+editCell(ep,'date_due',d.date_due,'date','style="width:104px"')+'</div>'
-            +'<div><span style="'+_dl+'">Likely</span>'+editCell(ep,'date_likely_pay',d.date_likely_pay,'date','style="width:104px"')+'</div>'
-            +'<div><span style="'+_dl+'">Paid</span>'+editCell(ep,'date_paid',d.date_paid,'date','style="width:104px"')+'</div></td>';
+        : '<td class="l dep-dates" style="font-size:11px;line-height:1.9;vertical-align:top"><div><span style="'+_dl+'">Due</span>'+editCell(ep,'date_due',d.date_due,'date')+'</div>'
+            +'<div><span style="'+_dl+'">Likely</span>'+editCell(ep,'date_likely_pay',d.date_likely_pay,'date')+'</div>'
+            +'<div><span style="'+_dl+'">Paid</span>'+editCell(ep,'date_paid',d.date_paid,'date')+'</div></td>';
       // Remaining + Estimated allocation (Σ start deposits of open, not-yet-allocated POs on this ref).
       var rem=Number(d.deposit_remaining)||0, est=Number(d.est_alloc)||0, hasOpenPO=(d.pos_open||'').trim()!=='';
       var estOver = d.is_deposit && est>rem;                       // est allocation exceeds what's left → red est
@@ -5442,6 +5443,9 @@
     function cur(){ return deps.filter(function(d){ if(st.f==='all')return true; if(st.f==='closed')return d.status==='closed';
       if(st.f==='remaining')return d.status!=='closed' && ((Number(d.deposit_remaining)||0)>0.01 || !(Number(d.amount)>0));   // open + still holds money, OR a new/blank deposit not yet filled in (so +Deposit is visible here)
       return d.status!=='closed'; }); }
+    // Silent in-place refresh — refetch deposits, swap the in-memory list, redraw. DEP_EDIT persists (closure) so an
+    // unlocked row STAYS in edit mode after a prod#/supplier pick; no page navigation.
+    function reloadDeps(){ fetch('/api/supply/deposits').then(function(r){return r.json();}).then(function(rows){ deps=(rows||[]).filter(function(x){return x.is_deposit;}); try{delete cache['productions'];}catch(e){} draw(); }).catch(function(){ draw(); }); }
     function draw(){ try{hzFilterSave('deposits',{f:st.f,sup:st.sup});}catch(e){}   // persist filters (not the search) — sliding 1h TTL
       var f=cur().filter(function(d){return (!st.q||((d.reference||'')+' '+(d.supplier_name||'')).toLowerCase().indexOf(st.q)>=0) && (!st.sup||(d.supplier_name||'')===st.sup);});
       document.getElementById('dep-cnt').textContent=f.length+' / '+deps.length+' deposits';
@@ -5449,8 +5453,8 @@
       if(actMob()){ if(_tw)_tw.style.display='none'; if(_dc)_dc.innerHTML=mobCards(f.length?f.map(depCard).join(''):'<div class="count">No deposits.</div>'); }   // mobile: stacked cards
       else { if(_tw)_tw.style.display=''; if(_dc)_dc.innerHTML=''; document.getElementById('dep-rows').innerHTML=f.map(rowHTML).join(''); }
       bindEdits();
-      b.querySelectorAll('.dep-prod-pick').forEach(function(btn){ btn.onclick=function(e){ e.stopPropagation(); openDepProdNoPick(btn); }; });   // searchable active-productions picker
-      b.querySelectorAll('.dep-sup-pick').forEach(function(btn){ btn.onclick=function(e){ e.stopPropagation(); openDepSupPick(btn); }; });   // searchable supplier picker (no free-text)
+      b.querySelectorAll('.dep-prod-pick').forEach(function(btn){ btn.onclick=function(e){ e.stopPropagation(); openDepProdNoPick(btn,reloadDeps); }; });   // searchable active-productions picker — silent refresh, stays in edit
+      b.querySelectorAll('.dep-sup-pick').forEach(function(btn){ btn.onclick=function(e){ e.stopPropagation(); openDepSupPick(btn,reloadDeps); }; });   // searchable supplier picker (no free-text) — silent refresh, stays in edit
       b.querySelectorAll('.dep-po-link').forEach(function(btn){ btn.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(btn.dataset.po,'pay'); else gotoPO(btn.dataset.po,'pay'); }; });   // popout drawer (Payments tab), not a full navigation
       b.querySelectorAll('.dep-edit').forEach(function(btn){ btn.onclick=function(){ DEP_EDIT[btn.dataset.id]=true; draw(); }; });   // unlock this row in place
       b.querySelectorAll('.dep-save').forEach(function(btn){ btn.onclick=function(){ var id=btn.dataset.id;
@@ -5519,12 +5523,12 @@
   // Set a deposit's PROD# via a searchable dropdown over the ACTIVE productions in the CONFIG > Productions
   // table (planner.prod_numbers). Saves the deposit's prod_no field. Active list cached after first load.
   var _depProdsCache=null;
-  function openDepProdNoPick(btn){ closeShPop(); var id=btn.dataset.id;
+  function openDepProdNoPick(btn,done){ closeShPop(); var id=btn.dataset.id;
     var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
     var rc=btn.getBoundingClientRect(); pop.style.cssText='position:fixed;z-index:100000;top:'+(rc.bottom+4)+'px;left:'+Math.max(8,Math.min(rc.left,window.innerWidth-312))+'px';
     pop.innerHTML='<div class="shpop-h">Set production #</div><input class="shpop-q" placeholder="search production #…"><div id="shpop-list"><div class="count" style="padding:8px">Loading…</div></div>';
     document.body.appendChild(pop); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
-    function save(val){ shipPost('/api/supply/deposit/'+id,{prod_no:val},function(){ closeShPop(); delete cache['productions']; showPoSub('deposits'); }); }
+    function save(val){ shipPost('/api/supply/deposit/'+id,{prod_no:val},function(){ closeShPop(); delete cache['productions']; if(done)done(); else showPoSub('deposits'); }); }   // silent in-place refresh when a callback is given (stays in edit mode)
     function render(q){ q=(q||'').trim().toLowerCase(); var list=_depProdsCache||[];
       var ms=list.filter(function(p){return !q||String(p.prod_no||'').toLowerCase().indexOf(q)>=0;});
       var html='<div class="shpop-opt unassign" data-clear="1">— Clear</div>'+ms.slice(0,q?80:20).map(function(p){return '<div class="shpop-opt" data-v="'+esc(p.prod_no)+'">'+esc(p.prod_no)+(p.xero_account_code?' <span class="mut tiny">'+esc(p.xero_account_code)+'</span>':'')+'</div>';}).join('');
@@ -5535,12 +5539,12 @@
       _depProdsCache=(rows||[]).filter(function(p){return String(p.status||'').toUpperCase()==='ACTIVE';}).sort(function(a,b){return String(b.prod_no).localeCompare(String(a.prod_no),undefined,{numeric:true});});
       render(''); }).catch(function(){ var l=document.getElementById('shpop-list'); if(l)l.innerHTML='<div class="count" style="padding:8px;color:#dc2626">could not load productions</div>'; }); }
   // Deposit Supplier — searchable pick popover (same style as the PO grid "assign supplier"); no free-text entry.
-  function openDepSupPick(btn){ closeShPop(); var id=btn.dataset.id, cur=(btn.dataset.val||'').trim();
+  function openDepSupPick(btn,done){ closeShPop(); var id=btn.dataset.id, cur=(btn.dataset.val||'').trim();
     var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
     var rc=btn.getBoundingClientRect(); pop.style.cssText='position:fixed;z-index:100000;top:'+(rc.bottom+4)+'px;left:'+Math.max(8,Math.min(rc.left,window.innerWidth-312))+'px';
     pop.innerHTML='<div class="shpop-h">Set supplier</div><input class="shpop-q" placeholder="search supplier…"><div id="shpop-list"><div class="count" style="padding:8px">Loading…</div></div>';
     document.body.appendChild(pop); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
-    function save(val){ shipPost('/api/supply/deposit/'+id,{supplier_name:val},function(){ closeShPop(); delete cache['productions']; showPoSub('deposits'); }); }
+    function save(val){ shipPost('/api/supply/deposit/'+id,{supplier_name:val},function(){ closeShPop(); delete cache['productions']; if(done)done(); else showPoSub('deposits'); }); }   // silent in-place refresh when a callback is given (stays in edit mode)
     function render(q){ q=(q||'').trim().toLowerCase(); var list=(supplierList||[]).slice().sort();
       var ms=list.filter(function(s){return (!q||String(s).toLowerCase().indexOf(q)>=0) && s!==cur;});
       var html=(cur?'<div class="shpop-opt" data-v="'+esc(cur)+'" style="background:#eff6ff;border-bottom:1px solid #dbeafe"><b>'+esc(cur)+'</b> <span class="mut tiny">— current</span></div>':'')

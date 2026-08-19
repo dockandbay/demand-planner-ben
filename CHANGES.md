@@ -1,3 +1,7 @@
+## v27.153 Deposits edit UX: silent refresh (stay in edit), narrower date boxes
+- Picking a **PROD#** or **Supplier** now refreshes the row **silently in place** (no page reload) and **keeps the row in edit mode** until you Save. (Other fields already auto-saved silently via inline edit.)
+- The **Dates** edit boxes were too wide (the `#deptbl` flex rule stretched them full-width and hid the 📅 button) — narrowed to 88px so the calendar picker button is visible again.
+
 ## v27.152 Deposits: Supplier is a searchable picker (no free-text)
 - In the Deposits register, the **Supplier** field (when a row is unlocked / on mobile cards) is now a **searchable pick popover** in the same style as the PO grid's "assign supplier" — pick from the supplier list, no free-text data entry. (Read-only text when the row is locked.)
 
