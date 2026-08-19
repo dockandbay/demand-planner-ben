@@ -1,3 +1,6 @@
+## v27.169 Observability: every 500 catch now logs its route + stack (server-wide)
+- Extended v27.168 to **all ~407 `catch → res.status(500)` sites** in `server.mjs`. Added a `log500(e)` helper backed by an `AsyncLocalStorage` request context (one middleware wraps every request), so each 500 logs `[500] <METHOD> <originalUrl> — <stack>` — including in helpers like `patch()` that have no `req` in scope. Verified: a forced bad-numeric POST logged `[500] POST /api/supply/deposit/… — invalid input syntax for type numeric`. Normal requests unaffected. No more silent 500s.
+
 ## v27.168 Observability: log the route + stack on a /api/supply/:section 500
 - The `/api/supply/:section` catch now `console.error`s the route (`/api/supply/<section>` + query) and the error stack before returning 500. Previously it swallowed the message, so the 5-day dead Cash Flow produced nothing useful in the logs (the alert could only name `/api/index`). One line → same-day diagnosis next time. (Diviyaj's ask.)
 

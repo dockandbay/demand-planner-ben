@@ -6,6 +6,7 @@
 //   WRITE : POST /api/save-forecasts upserts edited subcat inputs back to forecast_inputs.
 import 'dotenv/config';
 import express from 'express';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { readFileSync, appendFile } from 'fs';
 import pg from 'pg';
 import { buildInvoice, buildDtcPackingList } from './invoice.mjs';
@@ -673,6 +674,13 @@ async function buildFBADIMS() {
 }
 
 const app = express();
+// Per-request context so any 500 catch can name its route in the logs (a swallowed error once hid a 5-day dead
+// Cash Flow — the alert could only name /api/index). log500(e) reads the current req via AsyncLocalStorage, so it
+// works even in helpers that don't have `req` in scope (e.g. patch()). Call log500(e) before every res.status(500).
+const _reqStore = new AsyncLocalStorage();
+function log500(e) { try { const s = _reqStore.getStore(); const r = s && s.req;
+  console.error('[500] ' + ((r && r.method) || '?') + ' ' + ((r && (r.originalUrl || r.url)) || '?') + ' — ' + ((e && e.stack) || (e && e.message) || e)); } catch (_) { /* logging must never throw */ } }
+app.use((req, res, next) => _reqStore.run({ req }, next));   // wrap every request so log500 can find it
 app.use(express.json({ limit: '25mb' }));   // 25mb: document/invoice uploads arrive as base64 JSON (~33% inflation). NOTE for Diviyaj: Vercel serverless caps the request body at ~4.5MB regardless — large doc uploads need direct-to-storage (Supabase signed URL) on live; this limit only helps local/self-hosted.
 // Supplier-entered money fields can arrive with thousands separators / currency symbols (e.g. "3,262.35" or
 // "$1,200"). Strip everything but digits/dot/minus, then validate — returns a clean numeric string, or null if
@@ -988,7 +996,7 @@ app.get('/api/demand/trends/plan-sanity', async (req, res) => {
     return { cutoffMonth: cutoffNum, planYear, from: W.from, to: W.to, grain: W.grain, cfg: C, rows };
     });
     res.json(out);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // DEMAND ▸ Trends ▸ Panel 2 (Multi-year trend). Per category × market, Jan-to-cutoff for 2024/25/26. Headline =
 // gap-to-peak (not YoY). Trend class + plan_next (2027). Suspect-month heuristic (units <40% trailing-3mo avg AND
@@ -1041,7 +1049,7 @@ app.get('/api/demand/trends/multi-year', async (req, res) => {
     return { cutoffMonth: cutoffNum, planYear, from: W.from, to: W.to, grain: W.grain, rows };
     });
     res.json(out);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // DEMAND ▸ Trends ▸ Panel 1 (Channel mix). House benchmark per market = total FBA / (DTC+FBA), rolling 12 months to
 // cutoff (B2B excluded). Per category: FBA share, gap vs benchmark, headroom units. Stockout confound computed at
@@ -1078,7 +1086,7 @@ app.get('/api/demand/trends/channel-mix', async (req, res) => {
     return { benchmark: bench, grain: W.grain, rows };
     });
     res.json(out);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // DEMAND ▸ Trends ▸ Type mix. Share of DTC+FBA sales that are SETS vs MASTER (products.variant_type), per category ×
 // market, rolling 12 months — compared across markets. setPct = SET / (SET + MASTER). Read-only.
@@ -1108,7 +1116,7 @@ app.get('/api/demand/trends/type-mix', async (req, res) => {
       return { grain: W.grain, rows };
     });
     res.json(out);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Cin7 branch → warehouse-code map (branches mapping to null are unmanaged and excluded). The in-app snapshot
 // uploader was removed (Ben 17-Aug-26); this map is kept as the single source of truth for the n8n inventory-snapshot
@@ -1130,7 +1138,7 @@ const _INV_BRANCH_MAP = {
 // client fetches them here after first paint. Served from the warm data cache (vals[3]=SKU_RAW, vals[2]=FC_OUTPUTS).
 app.get('/api/demand/sku-data', async (req, res) => {
   try { const v = await getDataVals(); res.json({ sku_raw: v[3] || {}, fc_outputs: v[2] || {} }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── DEMAND ▸ Analysis ▸ Stock cover — weeks-of-cover per warehouse per month from the monthly inventory snapshots ──
 // SOH value (cost-weighted, end-of-month = latest snapshot in the month) ÷ weekly demand value (trailing-3-mo actual
@@ -1159,13 +1167,13 @@ app.get('/api/demand/stock-cover', async (_req, res) => {
       GROUP BY 1, 2, 3`)).rows;
     let target = 12; try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='stock_cover_target_wks'`)).rows[0]; if (r && Number(r.value) > 0) target = Number(r.value); } catch (e) {}
     res.json({ soh, dem, target });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/demand/stock-cover/target', async (req, res) => {
   const v = Number((req.body || {}).target); if (!(v > 0)) return res.status(400).json({ error: 'target must be > 0' });
   try { await pool.query(`INSERT INTO planner.app_settings(key, value) VALUES('stock_cover_target_wks',$1)
     ON CONFLICT (key) DO UPDATE SET value=excluded.value`, [String(v)]); res.json({ ok: true, target: v }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── DEMAND ▸ Inputs ▸ Backtest — upload a Cin7 stock-valuation export as a dated inventory snapshot ──
 // Body: { snapshot_date:'YYYY-MM-DD', filename, data_base64 }. Parses Branch/Category/Code/SOH, maps branch→warehouse
@@ -1214,7 +1222,7 @@ app.post('/api/demand/inventory-upload', async (req, res) => {
     const whs = [...new Set(keys.map(k => k.split('\t')[0]))].sort();
     const dates = (await pool.query(`SELECT to_char(snapshot_date,'YYYY-MM-DD') d, count(*)::int n, sum(available)::int u FROM planner.inventory_snapshots GROUP BY 1 ORDER BY 1`)).rows;
     res.json({ ok: true, date, rows: keys.length, units, warehouses: whs, skipped, dates });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Inverse normal CDF (Acklam) — service level fraction → Z. Lets any service level be used (not just a fixed set).
 function _normInv(p) { if (!(p > 0)) return -100; if (p >= 1) return 100;
@@ -1287,13 +1295,13 @@ app.get('/api/demand/ssm-backtest', async (req, res) => {
         weeklyDemand: Math.round(wkMean), cv: Math.round(cv * 100) / 100, leadWks: Math.round(Lw * 10) / 10, unitCost: Math.round(cu * 100) / 100, overstockMonths, riskOptions, suggestedSl: Math.round(suggestedSl * 10) / 10, recSl: Math.round(suggestedSl * 10) / 10, recCoverWks: recOpt.coverWks, targetSl: target, targetCoverWks: tgtOpt.coverWks, flag }); });
     const dates = (await pool.query(`SELECT to_char(snapshot_date,'YYYY-MM-DD') d FROM planner.inventory_snapshots GROUP BY 1 ORDER BY 1`)).rows.map(r => r.d);
     res.json({ ok: true, rows: out, snapshotDates: dates, cfg, window: { from, to }, target });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── Forecast Snapshots (DEMAND ▸ Snapshots) — lock a copy of forecast_outputs; compare later + past-month locked-vs-actual ──
 app.get('/api/demand/snapshots', async (_req, res) => {
   try { res.json((await pool.query(`SELECT id, name, to_char(taken_at,'YYYY-MM-DD"T"HH24:MI:SS') taken_at, taken_by, row_count
     FROM planner.forecast_snapshots ORDER BY taken_at DESC`)).rows); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/demand/snapshots', async (req, res) => {
   const name = String((req.body && req.body.name) || '').trim() || ('Snapshot ' + new Date().toISOString().slice(0, 16).replace('T', ' '));
@@ -1306,11 +1314,11 @@ app.post('/api/demand/snapshots', async (req, res) => {
         AND month < date_trunc('month', current_date) + interval '18 months'`, [id]);   // forward 18 months only (Ben) — keeps snapshots lean; still captures near-forward months that later become past (for #4)
     await pool.query(`UPDATE planner.forecast_snapshots SET row_count=$2 WHERE id=$1`, [id, r.rowCount]);
     res.json({ ok: true, id: id, name: name, rows: r.rowCount });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/demand/snapshots/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.forecast_snapshots WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Snapshot data as an FC_OUTPUTS-shaped map { "sku|wh|ch": { "YYYY_MM": units } } — client diffs vs live (or another snapshot).
 app.get('/api/demand/snapshots/:id/data', async (req, res) => {
@@ -1318,7 +1326,7 @@ app.get('/api/demand/snapshots/:id/data', async (req, res) => {
       FROM planner.forecast_snapshot_rows WHERE snapshot_id=$1`, [req.params.id])).rows;
     const out = {}; rows.forEach(r => { const k = r.sku + '|' + r.wh + '|' + r.ch; (out[k] || (out[k] = {}))[r.ym] = r.units; });
     res.json({ id: Number(req.params.id), fc: out });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Un-allocated "China Stock" holding stock per SKU = qty on open China Stock branch POs (the MOQ top-ups). The buy
 // plan flags this as available to allocate. Display-only (does NOT alter buy quantities — allocation is a later step).
@@ -2044,7 +2052,7 @@ app.get('/api/weather', async (_req, res) => {
       forecast_json, history_json, to_char(last_fetched,'YYYY-MM-DD"T"HH24:MI:SS"Z"') last_fetched
       FROM planner.weather_cache ORDER BY city`)).rows;
     res.set('Cache-Control', 'no-store').json({ cities: rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Preorders + key-account order forecasts (moved off Airtable → Supabase). The BUY plan reads this instead
 // of calling Airtable via the MCP. Tables are kept current by n8n (see Diviyaj note).
@@ -2055,7 +2063,7 @@ app.get('/api/preorders-ka', async (_req, res) => {
       pool.query(`SELECT sku, quantity qty, warehouse wh, to_char(ship_date,'YYYY-MM-DD') date FROM planner.key_account_forecasts WHERE coalesce(sku,'')<>''`),
     ]);
     res.set('Cache-Control', 'no-store').json({ preorder: pre.rows, ka: ka.rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/health', async (_req, res) => {
   try {
@@ -2071,7 +2079,7 @@ app.get('/api/health', async (_req, res) => {
       cats: Object.keys(CATS).length, subs: Object.keys(SUBS).length, bi_rules: BI.length,
       prod_const: Object.keys(PC).length, sample_pc: PC[Object.keys(PC)[0]],
     });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // Same-origin image proxy — lets the barcode-label PNG export embed a remote swatch without tainting the
@@ -2085,7 +2093,7 @@ app.get('/api/supply/img', async (req, res) => {
     res.setHeader('content-type', r.headers.get('content-type') || 'image/jpeg');
     res.setHeader('cache-control', 'public, max-age=86400');
     res.end(Buffer.from(await r.arrayBuffer()));
-  } catch (e) { res.status(500).end(); }
+  } catch (e) { log500(e); res.status(500).end(); }
 });
 
 // Static brand asset for the carton/inner labels — the Global Recycled Standard logo (same-origin so it can be
@@ -2136,7 +2144,7 @@ app.get('/api/supply/label-data', async (req, res) => {
       rows.forEach(r => { r.batch = batchCode; r.batch_date = bd; });
     }
     res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // SUG-0012 — PO-grid SKU filter: return the PO refs whose order-plan lines contain ANY of the given SKUs
@@ -2148,7 +2156,7 @@ app.get('/api/supply/pos-by-sku', async (req, res) => {
     const conds = toks.map((_, i) => `l.sku ILIKE '%'||$${i + 1}||'%'`).join(' OR ');
     const pos = (await pool.query(`SELECT DISTINCT l.po FROM planner.purchase_order_lines l WHERE ${conds}`, toks)).rows.map(r => r.po);
     res.json({ pos });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── ERP integration (Cin7 ▸ Fulfil migration) ──────────────────────────────────────────────────────────
 // Which ERP the app targets + (for Fulfil) which environment, both from CONFIG ▸ General settings (app_settings).
@@ -2179,7 +2187,7 @@ const archivedSql = (alias, param) =>
 app.get('/api/supply/erp-status', async (req, res) => {
   try { res.json({ erp: await activeErp(), fulfil_env: await activeFulfilEnv(),
     fulfil: { sandbox: fulfilConfigFor('sandbox').configured, live: fulfilConfigFor('live').configured } }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ===================== Fulfil ERP client (v2 REST / Tryton model API) =====================
 // Targets Fulfil when Active ERP = Fulfil, mirroring the Cin7 push process (dates + line items, create-if-absent).
@@ -2330,12 +2338,12 @@ app.get('/api/supply/portal-line-costs', async (req, res) => {
   try { res.json((await pool.query(`SELECT po, sku, actual_cost, amended_qty, coalesce(is_added,false) is_added, final_cost,
     (actual_cost IS NOT NULL OR amended_qty IS NOT NULL OR is_added=true) AND (confirmed_at IS NULL OR confirmed_at < submitted_at) unconfirmed
     FROM planner.portal_line_costs`)).rows); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Crossdock shipped quantities (supplier-entered, per PO × crossdock SKU). Reflects on the PO + master shipment.
 app.get('/api/supply/crossdock-shipments', async (req, res) => {
   try { res.json((await pool.query('SELECT po, sku, qty FROM planner.crossdock_shipments')).rows); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/crossdock-qty', async (req, res) => {
   const b = req.body || {};
@@ -2346,12 +2354,12 @@ app.post('/api/supply/crossdock-qty', async (req, res) => {
       VALUES ($1,$2,$3,$4, now()) ON CONFLICT (po, sku) DO UPDATE SET qty=excluded.qty, submitted_by=excluded.submitted_by, submitted_at=now()`,
       [b.po, b.sku, qty, b.submitted_by || null]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Supplier-entered additional cost lines (description / qty / price) per PO — sum into the total invoice cost.
 app.get('/api/supply/additional-costs', async (req, res) => {
   try { res.json((await pool.query(`SELECT id, po, coalesce(description,'') description, qty, price, coalesce(approved,false) approved FROM planner.portal_additional_costs ORDER BY id`)).rows); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/additional-cost', async (req, res) => {
   const b = req.body || {};
@@ -2368,24 +2376,24 @@ app.post('/api/supply/additional-cost', async (req, res) => {
         [b.po, b.description || '', num(b.qty), num(b.price), b.submitted_by || null]);
       res.json({ ok: true, id: r.rows[0].id });
     }
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/additional-cost-remove', async (req, res) => {
   if (!req.body || !req.body.id) return res.status(400).json({ error: 'id required' });
   try { await pool.query('DELETE FROM planner.portal_additional_costs WHERE id=$1', [req.body.id]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // D&B approves (or un-approves) a supplier's additional cost line on the admin PO ▸ Payments tab.
 app.post('/api/supply/additional-cost-approve', async (req, res) => {
   const b = req.body || {};
   if (!b.id) return res.status(400).json({ error: 'id required' });
   try { await pool.query('UPDATE planner.portal_additional_costs SET approved=$2 WHERE id=$1', [b.id, b.approved !== false]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // One PO's fully-computed grid row (same SQL as the grid) — for in-place row refresh after an edit.
 app.get('/api/supply/po-row/:po', async (req, res) => {
   try { res.json((await pool.query(PO_ROWS_SQL + ' WHERE calc4.po = $1', [req.params.po])).rows); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Lean PO picker for one supplier — just po/prod_no/country for the "assign a PO to a production" popover
 // (was fetching all ~1,376 POs via the heavy grid SQL to build one supplier's short list).
@@ -2398,13 +2406,13 @@ app.get('/api/supply/po-picker/:supplier', async (req, res) => {
       LEFT JOIN planner.branches b ON b.name=p.branch
       WHERE coalesce(p.supplier_name,'')=$1
       ORDER BY p.po`, [req.params.supplier])).rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Tiny global po→supplier map (2 fields, all POs) — the admin portal-preview needs it to resolve "ships with
 // <other supplier>" without pulling the full 2.7MB PO grid.
 app.get('/api/supply/po-suppliers', async (_req, res) => {
   try { res.json((await pool.query(`SELECT po, coalesce(supplier_name,'') supplier_name FROM planner.purchase_orders`)).rows); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Crossdock rollup for one shipment: every crossdock SKU across the POs on the shipment, with qty + source PO/supplier/client.
 app.get('/api/supply/shipment-crossdock/:ref', async (req, res) => {
@@ -2416,7 +2424,7 @@ app.get('/api/supply/shipment-crossdock/:ref', async (req, res) => {
     CROSS JOIN LATERAL unnest(string_to_array(coalesce(po.crossdock_skus,''), ',')) AS s(sku)
     LEFT JOIN planner.crossdock_shipments cs ON cs.po=po.po AND cs.sku=trim(s.sku)
     WHERE po.shipment_ref=$1 AND trim(s.sku)<>'' ORDER BY po.po, sku`, [req.params.ref])); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // ── CONSOLIDATION analysis (assign-shipment ▸ "Analyse consolidation") — for an anchor PO, find other POs
@@ -2436,7 +2444,7 @@ app.get('/api/supply/po/:po/pallets', async (req, res) => {
     if (!r) return res.status(404).json({ error: 'PO not found' });
     res.json({ po: req.params.po, est_cartons: Number(r.est_cartons) || 0, est_pallets: Number(r.est_pallets) || 0,
       pallets_override: r.pallets_override == null ? null : Number(r.pallets_override) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Plan Shipments drawer — READY-TO-SHIP POs (sea only, not FOB/manufacturing, standard destinations) with their
 // effective pallets (override or estimate) and current shipment/container assignment. Client groups: unassigned
@@ -2477,7 +2485,7 @@ app.get('/api/supply/ship-plan', async (req, res) => {
         ${cfilter}
       ORDER BY container NULLS FIRST, prod_end NULLS LAST, p.po`, params)).rows;
     res.json({ ok: true, country: country || null, pos: rows.map(r => ({ po: r.po, supplier: r.supplier, country: r.country, shipment_ref: r.shipment_ref, container: r.container || null, status: r.status, ready: !!r.ready, confirmed: !!r.confirmed, pallets: Math.round((Number(r.pallets) || 0) * 10) / 10, prod_end: r.prod_end })) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Plan Shipments "Confirmed — do not change" lock toggle (mig 223), keyed by container/master ref.
 app.post('/api/supply/ship-plan/lock', async (req, res) => {
@@ -2488,7 +2496,7 @@ app.post('/api/supply/ship-plan/lock', async (req, res) => {
       ON CONFLICT (ref) DO UPDATE SET confirmed=true, updated_by=$2, updated_at=now()`, [ref, authUser(req) || 'admin']);
     else await pool.query(`DELETE FROM planner.ship_plan_locks WHERE ref=$1`, [ref]);
     res.json({ ok: true, ref, confirmed: !!b.confirmed });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/consolidation', async (req, res) => {
   const po = String(req.query.po || '').trim();
@@ -2537,7 +2545,7 @@ app.get('/api/supply/consolidation', async (req, res) => {
     const pfx = (a.prod_no ? 'P' + a.prod_no + '-' : '') + a.country + '-CONSOL-';
     const n = (await pool.query(`SELECT count(*)::int c FROM planner.shipments WHERE shipment_ref ILIKE $1`, [pfx + '%'])).rows[0].c;
     res.json({ anchor: { ...a, pallets: Number(a.pallets) || 0 }, candidates, suggested_ref: pfx + (n + 1), truncated, window_days: 21 });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Clean up orphan self-shipments: clear the shipment_ref on every PO whose shipment_ref has no planner.shipments row
 // (dangling refs — the shipment record was never created or was deleted). The POs become unassigned again.
@@ -2562,7 +2570,7 @@ app.post('/api/supply/shipments/cleanup-orphans', async (req, res) => {
     await client.query('COMMIT');
     invalidateSupplyCaches();
     res.json({ ok: true, deleted: del.rowCount });
-  } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 // Perform a consolidation: assign `pos` onto one shipment. create=true makes a NEW master-less shipment
@@ -2601,7 +2609,7 @@ app.post('/api/supply/consolidate', async (req, res) => {
     for (const pr of priors) { await pruneEmptySelfShipment(client, pr); }   // clean up orphaned self-shipments
     await client.query('COMMIT');
     res.json({ ok: true, ref, assigned: upd.rowCount });
-  } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 
@@ -2659,7 +2667,7 @@ app.get('/api/supply/crossdock-report', async (req, res) => {
     const expected = poR.rows.filter(r => !r.has_inbound).map(r => ({ sku: r.sku, po: r.po, client: r.client, so: r.so, country: r.country, shipped: r.shipped }));
     rows.sort((a, b) => a.wh.localeCompare(b.wh) || a.sku.localeCompare(b.sku));
     res.json({ warehouses: XD_WH, rows, expected });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/crossdock-note', async (req, res) => {
   const b = req.body || {}, wh = (b.warehouse || '').trim(), sku = (b.sku || '').trim();
@@ -2670,7 +2678,7 @@ app.post('/api/supply/crossdock-note', async (req, res) => {
     await pool.query(`INSERT INTO planner.crossdock_notes (warehouse,sku,note,updated_by,updated_at) VALUES ($1,$2,$3,$4,now())
       ON CONFLICT (warehouse,sku) DO UPDATE SET note=excluded.note, updated_by=excluded.updated_by, updated_at=now()`, [wh, sku, b.note, who || null]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // Parse an uploaded Xero "Payable Invoice Summary" XLSX → structured rows for PAYMENTS ▸ Xero Compare.
@@ -2717,7 +2725,7 @@ app.post('/api/supply/xero-parse', async (req, res) => {
         invoice_date: g(col.invdate).trim(), planned_date: g(col.planned).trim() });
     }
     res.json({ rows, period_start, period_end });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // ── Xero Compare shared snapshot (migration 183) — whoever uploads, everyone sees the same last upload
@@ -2729,7 +2737,7 @@ app.get('/api/supply/xero-compare/latest', async (req, res) => {
         (nullif(file_b64,'') IS NOT NULL) has_file
       FROM planner.xero_compare_snapshot WHERE id=1 AND uploaded_at > now() - interval '7 days'`)).rows[0];
     res.set('Cache-Control', 'no-store').json(r ? { ok: true, rows: r.rows, filename: r.filename, period: r.period, uploaded_by: r.uploaded_by, uploaded_at: r.uploaded_at, has_file: !!r.has_file } : { ok: true, rows: null });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/xero-compare/save', async (req, res) => {
   try {
@@ -2739,11 +2747,11 @@ app.post('/api/supply/xero-compare/save', async (req, res) => {
       ON CONFLICT (id) DO UPDATE SET rows=EXCLUDED.rows, filename=EXCLUDED.filename, period=EXCLUDED.period, uploaded_by=EXCLUDED.uploaded_by, uploaded_at=now(), file_b64=EXCLUDED.file_b64`,
       [JSON.stringify(b.rows), String(b.filename || ''), String(b.period || ''), authUser(req) || '', (b.file_b64 ? String(b.file_b64) : null)]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/xero-compare/clear', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.xero_compare_snapshot WHERE id=1`); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Download the ORIGINAL uploaded XLSX for the current Xero Compare snapshot (stored as base64 on upload).
 app.get('/api/supply/xero-compare/file', async (req, res) => {
@@ -2756,7 +2764,7 @@ app.get('/api/supply/xero-compare/file', async (req, res) => {
     res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
        .set('Content-Disposition', 'attachment; filename="' + name + '"')
        .set('Cache-Control', 'no-store').send(buf);
-  } catch (e) { res.status(500).send('file error: ' + e.message); }
+  } catch (e) { log500(e); res.status(500).send('file error: ' + e.message); }
 });
 
 // Paper Store carton labels — client-specific carton labels for a PO's order-plan lines. One carton record per
@@ -2798,7 +2806,7 @@ app.get('/api/supply/paperstore-labels/:po', async (req, res) => {
     });
     cartons.forEach((c, i) => { c.ctn = i + 1; c.total = cartons.length; });
     res.set('Cache-Control', 'no-store').json({ ok: true, client: 'The Paper Store', po_ref: poRef, dc_addr1: addr[0] || '', dc_addr2: addr.slice(1).join(', ') || '', cartons });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // ── SAMPLES — detail / address autocomplete / timeline (specific routes BEFORE the :section catch-all)
@@ -2835,7 +2843,7 @@ app.get('/api/supply/sample-detail/:id', async (req, res) => {
     const change_log = (await pool.query(`SELECT event, coalesce(detail,'') detail, coalesce(changed_by,'') changed_by,
       to_char(changed_at,'YYYY-MM-DD HH24:MI') changed_at FROM planner.sample_change_log WHERE sample_id=$1::bigint ORDER BY changed_at DESC LIMIT 200`, [id]).catch(() => ({ rows: [] }))).rows;
     res.json({ sample: s, lines, notes, charges, attachments, change_log });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/sample-addresses', async (req, res) => {
   const ql = '%' + String(req.query.q || '').toLowerCase() + '%';
@@ -2851,20 +2859,20 @@ app.get('/api/supply/sample-addresses', async (req, res) => {
         OR lower(coalesce(first_name,'')||' '||coalesce(last_name,'')) LIKE $1)
       ORDER BY lower(btrim(coalesce(recipient_company,''))), lower(btrim(coalesce(first_name,''))), lower(btrim(coalesce(last_name,''))), lower(btrim(coalesce(address_line1,''))), lower(btrim(coalesce(postcode,''))), created_at DESC
     ) d ORDER BY recipient_company LIMIT 20`, [ql])).rows); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/sample-notes', async (req, res) => {
   try { res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
     to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read
     FROM planner.sample_notes WHERE sample_id=$1::bigint ORDER BY created_at`, [req.query.id || '0'])).rows); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Charges for a shipment (admin) — list + status; create/accept/reject reuse /api/supply/charge-*.
 app.get('/api/supply/shipment-charges/:ref', async (req, res) => {
   try { res.json((await pool.query(`SELECT id, coalesce(supplier_name,'') supplier_name, freight_cost, product_cost,
     coalesce(description,'') description, status, to_char(created_at,'YYYY-MM-DD') created_at, other_payment_id
     FROM planner.supplier_charges WHERE source_type='shipment' AND source_ref=$1 ORDER BY created_at`, [req.params.ref])).rows); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Create a shipment charge (admin / "preview as supplier" — mirrors /api/portal/shipment-charge without scoping)
 app.post('/api/supply/shipment-charge', async (req, res) => {
@@ -2872,7 +2880,7 @@ app.post('/api/supply/shipment-charge', async (req, res) => {
   try { const sup = (await pool.query(`SELECT string_agg(DISTINCT supplier_name,', ') s FROM planner.purchase_orders WHERE shipment_ref=$1`, [b.shipment_ref])).rows[0].s || null;
     const r = await pool.query(`INSERT INTO planner.supplier_charges (source_type, source_ref, supplier_name, freight_cost, product_cost, description, created_by)
       VALUES ('shipment',$1,$2,$3,$4,$5,$6) RETURNING id`, [b.shipment_ref, b.supplier_name||sup, Number(b.freight_cost)||0, Number(b.product_cost)||0, b.description||null, b.created_by||'preview']);
-    res.json({ ok:true, id: r.rows[0].id }); } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ ok:true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // The DtC-details fields a supplier approves — snapshotted at approval so we can later show WHAT changed.
 const DTC_SNAPSHOT_SQL = `jsonb_build_object(
@@ -2888,7 +2896,7 @@ const DTC_SNAPSHOT_SQL = `jsonb_build_object(
 app.post('/api/supply/dtc-accept', async (req, res) => {
   const po = req.body && req.body.po; if(!po) return res.status(400).json({ error: 'po required' });
   try { await pool.query(`UPDATE planner.purchase_orders SET dtc_accepted_at=now(), dtc_accepted_by=$2, dtc_approved_snapshot=${DTC_SNAPSHOT_SQL} WHERE po=$1`, [po, req.body.by||'D&B (preview)']);
-    res.json({ ok:true }); } catch(e){ res.status(500).json({ error: e.message }); } });
+    res.json({ ok:true }); } catch(e){ log500(e); res.status(500).json({ error: e.message }); } });
 
 // ── SUPPLY tab (Production Planner) read APIs — one route, section in the path.
 // Read-only JSON from the Phase-2 planner tables. No writes (writes are a later, gated step).
@@ -3419,7 +3427,7 @@ app.get('/api/supply/deposit-drawdown', async (_req, res) => {
       c.remaining = Math.round(run * 100) / 100; c.drawn = Math.round((c.paid - c.remaining) * 100) / 100; c.paid = Math.round(c.paid * 100) / 100; });
     tx.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.ref < b.ref ? -1 : 1)));
     res.json({ months, columns: columns.map(({ mov, prodNum, ...c }) => c), balances, transactions: tx, gbpRate: rUSD });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/:section', async (req, res, next) => {
   if (req.params.section === 'po-delays') return next();   // handled by its own route below (has bespoke logic)
@@ -4361,7 +4369,7 @@ async function patch(res, table, keyCol, keyVal, allowed, body, keyType, extraFn
     let extra = {};
     if (extraFn) { try { extra = (await extraFn(r.rowCount)) || {}; } catch (e) { /* non-fatal — still report the save */ } }
     res.json({ updated: r.rowCount, ...extra });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 }
 app.post('/api/supply/deposit/:id', async (req, res) => {
   // a typed supplier that isn't in the master gets added (so the picker stays a real dropdown)
@@ -4399,7 +4407,7 @@ app.post('/api/supply/deposit/:id/delete', async (req, res) => {
     await pool.query(`DELETE FROM planner.deposits WHERE id=$1`, [req.params.id]);
     invalidateSupplyCaches();   // deposit removed + linked POs re-pointed → bust the cached deposits/PO/cashflow sections so a silent reload shows reality
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Apply a deposit to every open PO in its production + supplier that has no deposit yet.
 // Region-guarded: an AU deposit only lands on AU POs, a non-AU deposit only on non-AU POs.
@@ -4419,7 +4427,7 @@ app.post('/api/supply/deposit/:id/apply-all', async (req, res) => {
     const match = cand.filter(r => (/^AU$/.test(r.ctry || '')) === depAU);
     if (match.length) { await pool.query(`UPDATE planner.purchase_orders SET deposit_ref=$1 WHERE po = ANY($2::text[])`, [d.reference, match.map(r => r.po)]); invalidateSupplyCaches(); }   // POs re-pointed → bust cached deposits/PO sections
     res.json({ assigned: match.length, skipped_region: cand.length - match.length, reference: d.reference, pos: match.map(r => r.po) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // CASH FLOW — manual "likely payment date" for an overdue line. Empty date clears the override.
 app.post('/api/supply/likely-date', async (req, res) => {
@@ -4431,7 +4439,7 @@ app.post('/api/supply/likely-date', async (req, res) => {
       ON CONFLICT (line_key) DO UPDATE SET likely_date=excluded.likely_date, updated_at=now()`, [line_key, likely_date]);
     invalidateSupplyCaches();   // bump the epoch so the CACHED purchase-orders / cash flow / payments-due builds rebuild — otherwise a new likely date shows in the PO drawer (fresh fetch) but not in the payment LISTS until the TTL
     res.json({ saved: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Settings — landed-cost rate cards. Import tax keyed by country (upsert); freight rates by id.
 app.post('/api/supply/tax-rate/:country', async (req, res) => {
@@ -4443,7 +4451,7 @@ app.post('/api/supply/tax-rate/:country', async (req, res) => {
     await pool.query(`INSERT INTO planner.import_tax_rates (${cols.join(',')}) VALUES (${ph.join(',')})
       ON CONFLICT (country) DO UPDATE SET ${upd}, updated_at=now()`, vals);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // (Removed dead routes freight-rate/:id, freight-rate-create, duty-rate/:id, duty-rate-create —
 //  superseded by the pivot endpoints freight-upsert / freight-pallets / duty-upsert. v25.652)
@@ -4457,7 +4465,7 @@ app.post('/api/supply/branch/:name', async (req, res) => {
     await pool.query(`INSERT INTO planner.branches (${cols.join(',')}) VALUES (${ph.join(',')})
       ON CONFLICT (name) DO UPDATE SET ${upd}`, vals);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Deposit context for a PO's Payments tab: remaining on the deposit, how many OTHER open POs on the same
 // ref have no start deposit allocated, the extra start deposit this PO could take (deposit remaining minus the
@@ -4497,7 +4505,7 @@ app.get('/api/supply/deposit-context/:po', async (req, res) => {
       est_others: estOthers, unalloc_value: unallocValue, is_last: isLast,
       suggest_extra: (isLast || estOthers < remaining) ? extra : null,
       at_risk: unallocValue > 0 && remaining > 0.5 * unallocValue });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Suppliers — editable terms table (CONFIG). Edit by id; create a new supplier (name required).
 app.post('/api/supply/supplier/:id', (req, res) =>
@@ -4519,7 +4527,7 @@ app.post('/api/supply/supplier-create', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.suppliers (name, code, kind) VALUES ($1,$2,$3) RETURNING id`,
       [name, (b.code || '').trim() || null, kind]);
     res.json({ ok: true, id: r.rows[0].id });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── KEY ACCOUNTS (CONFIG) — clients whose packing/labelling + requirements + address default onto a PO's
 // Direct-to-Client details when selected. List / create / edit / delete, plus apply-to-PO.
@@ -4535,13 +4543,13 @@ app.post('/api/supply/key-account-create', async (req, res) => {
   const name = ((req.body || {}).name || '').trim();
   if (!name) return res.status(400).json({ error: 'key account name required' });
   try { const r = await pool.query(`INSERT INTO planner.key_accounts (name) VALUES ($1) RETURNING id`, [name]); res.json({ ok: true, id: r.rows[0].id }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/key-account/:id', (req, res) =>
   patch(res, 'planner.key_accounts', 'id', req.params.id, KA_FIELDS, req.body, 'int'));
 app.post('/api/supply/key-account/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.key_accounts WHERE id=$1::int`, [req.params.id]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Copy a key account's stored settings onto a PO's Direct-to-Client details + tag it a key-account order.
 app.post('/api/supply/po/:po/apply-key-account', async (req, res) => {
@@ -4562,7 +4570,7 @@ app.post('/api/supply/po/:po/apply-key-account', async (req, res) => {
        ka.pack_rfid_barcodes, ka.pack_rfid_barcodes_notes, ka.pack_dnb_carton, ka.pack_dnb_carton_notes,
        ka.pack_client_carton, ka.pack_client_carton_notes, ka.pack_pallet_notes, ka.pack_other_notes, req.params.po]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Create a key account in config FROM a PO's current Direct-to-Client details (client name + packing +
 // requirements + address), and tag the PO as a key-account order. For clients not yet in the config list.
@@ -4587,7 +4595,7 @@ app.post('/api/supply/po/:po/create-key-account', async (req, res) => {
        p.pack_pallet_notes, p.pack_other_notes]);
     await pool.query(`UPDATE planner.purchase_orders SET dtc_key_account=true, updated_at=now() WHERE po=$1`, [req.params.po]);
     res.json({ ok: true, id: r.rows[0].id, name });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Batches — editable buying-batch table (CONFIG). Edit by batch name; create a new batch.
 app.post('/api/supply/batch/:batch', (req, res) =>
@@ -4601,7 +4609,7 @@ app.post('/api/supply/batch-create', async (req, res) => {
     if (dup.rowCount) return res.status(409).json({ error: 'batch ' + batch + ' already exists' });
     await pool.query(`INSERT INTO planner.batches (batch, batch_date) VALUES ($1,$2)`, [batch, b.batch_date || null]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Delete a batch — ONLY if no PO is linked to it (guarded server-side; the UI also hides the button when POs exist).
 app.post('/api/supply/batch-delete/:batch', async (req, res) => {
@@ -4611,7 +4619,7 @@ app.post('/api/supply/batch-delete/:batch', async (req, res) => {
     if (n > 0) return res.status(409).json({ error: 'Cannot delete — ' + n + ' PO' + (n === 1 ? '' : 's') + ' linked to batch ' + batch });
     const r = await pool.query(`DELETE FROM planner.batches WHERE batch=$1`, [batch]);
     res.json({ ok: true, deleted: r.rowCount });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Create a production number (registers it in prod_numbers so it's pickable; a PO joins a production by
 // setting its prod_no). A production row appears in PRODUCTIONS once a PO carries the prod_no.
@@ -4623,7 +4631,7 @@ app.post('/api/supply/production-create', async (req, res) => {
     if (dup.rowCount) return res.status(409).json({ error: 'production ' + prod + ' already exists' });
     await pool.query(`INSERT INTO planner.prod_numbers (prod_no, status) VALUES ($1,'active')`, [prod]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Edit a production row (CONFIG ▸ Productions). Edit/Save sends all fields at once.
 app.post('/api/supply/prod-number/:id', (req, res) =>
@@ -4643,11 +4651,11 @@ app.post('/api/supply/portal-user-create', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.supplier_portal_users (email, supplier_id, supplier_name, contact_name)
       VALUES ($1,$2,$3,$4) RETURNING id`, [email, sid, sname, b.contact_name || null]);
     res.json({ id: r.rows[0].id });
-  } catch (e) { res.status(500).json({ error: /unique/i.test(e.message) ? 'that email is already on the list' : e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: /unique/i.test(e.message) ? 'that email is already on the list' : e.message }); }
 });
 app.post('/api/supply/portal-user/:id', async (req, res) => {
   const b = req.body || {};
-  if (b._delete) { try { await pool.query(`DELETE FROM planner.supplier_portal_users WHERE id=$1`, [req.params.id]); return res.json({ deleted: true }); } catch (e) { return res.status(500).json({ error: e.message }); } }
+  if (b._delete) { try { await pool.query(`DELETE FROM planner.supplier_portal_users WHERE id=$1`, [req.params.id]); return res.json({ deleted: true }); } catch (e) { log500(e); return res.status(500).json({ error: e.message }); } }
   // if supplier_name changes, re-resolve supplier_id
   if (b.supplier_name !== undefined && b.supplier_id === undefined) {
     const r = await pool.query(`SELECT id FROM planner.suppliers WHERE name=$1`, [b.supplier_name]);
@@ -4667,7 +4675,7 @@ app.post('/api/supply/portal-magic/:id', async (req, res) => {
     await pool.query(`INSERT INTO planner.portal_magic_tokens (token, email, expires_at) VALUES ($1,$2, now() + interval '7 days')`, [token, u.email]);
     const base = (req.headers['x-forwarded-proto'] ? req.headers['x-forwarded-proto'] + '://' : 'http://') + (req.headers['x-forwarded-host'] || req.headers.host);
     res.json({ email: u.email, url: base + '/portal?token=' + token, expires_days: 7 });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // Bulk signals for the CONFIG ▸ Portal Users open-action counts: unread internal (D&B) notes per PO +
@@ -4678,7 +4686,7 @@ app.get('/api/supply/portal-signals', async (req, res) => {
     const unread = (await pool.query(`SELECT po, count(*)::int n FROM planner.supplier_notes WHERE author_kind='internal' AND read_at IS NULL GROUP BY po`)).rows;
     const subs = (await pool.query(`SELECT po, kind, coalesce(status,'') status, coalesce(value,'') value FROM planner.supplier_submissions`)).rows;
     res.json({ unread, subs });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Send an open-actions reminder email to a supplier's registered portal address(es) — LIVE via Resend.
 // Recipients are derived server-side from ACTIVE portal users for the supplier_id (the client cannot email
@@ -4699,13 +4707,13 @@ app.post('/api/supply/portal-remind', async (req, res) => {
     const _rid = await r.json().then(j => j && j.id).catch(() => null);
     logEmail({ recipients: emails.join(', '), subject, kind: 'portal-remind', ref: b.supplier_name || null, by: authUser(req), status: 'sent', resend_id: _rid });
     res.json({ ok: true, sent: emails.length, emails });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // ── General settings (CONFIG ▸ General Settings) — key/value store ──────────────────────────────
 app.get('/api/app-settings', async (req, res) => {
   try { const o = {}; (await pool.query(`SELECT key, value FROM planner.app_settings`)).rows.forEach(r => { o[r.key] = r.value; }); res.json(o); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/app-settings', async (req, res) => {
   const b = req.body || {}, key = (b.key || '').trim();
@@ -4714,7 +4722,7 @@ app.post('/api/app-settings', async (req, res) => {
     await pool.query(`INSERT INTO planner.app_settings (key,value,updated_by,updated_at) VALUES ($1,$2,$3,now())
       ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`, [key, b.value || '', authUser(req) || null]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // Klaviyo BIS per-market upload (SUG-0018). Raw Klaviyo back-in-stock export → sum "Queued Subscriptions" per SKU
@@ -4766,7 +4774,7 @@ app.post('/api/klaviyo-bis/upload', async (req, res) => {
       await pool.query('COMMIT');
     } catch (e) { await pool.query('ROLLBACK'); throw e; }
     res.json({ ok: true, market, n_skus: skus.length, total_subs: totalSubs });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/klaviyo-bis/status', async (req, res) => {
   try {
@@ -4780,7 +4788,7 @@ app.get('/api/klaviyo-bis/status', async (req, res) => {
     });
     const rows = Object.values(agg).sort((x, y) => y.total - x.total);
     res.set('Cache-Control', 'no-store').json({ ok: true, markets: by, rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // Manufacturing notes: save the shared free-text notes (top of the Manufacturing tab). Supply-edit gated by the
@@ -4791,7 +4799,7 @@ app.post('/api/supply/manufacturing-notes', async (req, res) => {
       ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`,
       [String((req.body || {}).body || ''), authUser(req) || null]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── Escalate a timeline message as an email ─────────────────────────────────────────────────────
 // initiator 'supplier' (portal) → routed to a CONFIG-managed internal list by context; link → planner.
@@ -5028,7 +5036,7 @@ app.post('/api/supply/escalate', async (req, res) => {
     const user = initiator === 'internal' ? (shortUser(authUser(req)) || b.user || 'A user') : (b.user || 'The supplier');
     const replyTo = initiator === 'internal' ? authUser(req) : (b.reply_to || b.email || null);   // reply-to = the person who escalated
     res.json(await escalateCore({ initiator, kind: b.kind, ref: b.ref, message: b.message, user, supplierId: b.supplier_id, setEscalated: !!b.set_escalated, postNote: !!b.post_note, replyTo }));
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 const qp = (sql, vals) => pool.query(sql, vals).then(r => r.rows);   // rows helper for the standalone portal routes
@@ -5051,14 +5059,14 @@ app.post('/api/supply/portal-line-cost', async (req, res) => {
         is_added=planner.portal_line_costs.is_added OR excluded.is_added, submitted_by=excluded.submitted_by, submitted_at=now()`,
       [b.po, b.sku, cost, qty, added, b.submitted_by || null]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // supplier removes a SKU they had added to the order (only removes supplier-added rows)
 app.post('/api/supply/portal-line-remove', async (req, res) => {
   const b = req.body || {};
   if (!b.po || !b.sku) return res.status(400).json({ error: 'po and sku required' });
   try { await pool.query(`DELETE FROM planner.portal_line_costs WHERE po=$1 AND sku=$2 AND is_added=true`, [b.po, b.sku]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // SKUs assignable by a supplier (from products.supplier_multiple_all) — for the portal "add SKU" picker
 app.get('/api/supply/supplier-skus/:supplier', async (req, res) => {
@@ -5066,7 +5074,7 @@ app.get('/api/supply/supplier-skus/:supplier', async (req, res) => {
       coalesce(product_ean,'') ean, coalesce(carton_qty::text,'') carton_qty, coalesce(size_long,'') size_long,
       coalesce(colour_long,'') colour, coalesce(release_window,'') release_window
     FROM planner.products WHERE coalesce(supplier_multiple_all,'') ILIKE '%'||$1||'%' AND coalesce(sku,'')<>'' ORDER BY sku`, [req.params.supplier])); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Internal (PO PLAN) sets the FINAL agreed cost price per line (the value that would push to ERP). Upserts onto
 // the same portal_line_costs row so supplier-submitted (actual_cost) and D&B-final (final_cost) sit side by side.
@@ -5084,7 +5092,7 @@ app.post('/api/supply/po-line-final', async (req, res) => {
         confirmed_at = CASE WHEN excluded.final_cost IS NOT NULL THEN now() ELSE planner.portal_line_costs.confirmed_at END`,
       [b.po, b.sku, cost]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // PO PLAN order plan: D&B accepts a supplier-submitted change (cost / amended qty / added SKU). Confirms the line
 // and, if no final price set yet, adopts the supplier's cost as the final. `all:true` accepts every unconfirmed line on the PO.
@@ -5115,7 +5123,7 @@ app.post('/api/supply/po-line-accept', async (req, res) => {
     // 3) mark the portal lines confirmed; adopt supplier cost as final if none set
     await pool.query(`UPDATE planner.portal_line_costs plc SET confirmed_at=now(), final_cost=coalesce(plc.final_cost, plc.actual_cost) WHERE ${scope}`, params);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // PO PLAN order plan: D&B REJECTS a supplier-submitted change — discard it WITHOUT touching the order-plan line.
 // Added-SKU proposals are removed outright; qty/cost amendments are cleared and marked reviewed (confirmed_at=now)
@@ -5132,7 +5140,7 @@ app.post('/api/supply/po-line-reject', async (req, res) => {
     await pool.query(`DELETE FROM planner.portal_line_costs WHERE ${scope} AND is_added=true`, params);
     await pool.query(`UPDATE planner.portal_line_costs SET amended_qty=NULL, actual_cost=NULL, confirmed_at=now() WHERE ${scope}`, params);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // PO PLAN Timeline: mark a supplier note read / unread (toggle).
 // DEMAND ▸ Key Accounts Forecast inline editor — upsert a row (insert when no id, else update) direct to Supabase.
@@ -5150,11 +5158,11 @@ app.post('/api/supply/ka-forecast', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.key_account_forecasts (client, sku, warehouse, ship_date, quantity, source, loaded_at)
       VALUES ($1,$2,$3,$4::date,$5,'manual',now()) RETURNING id`, [client, sku, warehouse, ship, qty]);
     res.json({ ok: true, id: r.rows[0].id });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/ka-forecast/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.key_account_forecasts WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Month-cell upsert for the pivoted Key Accounts grid: (client, sku, warehouse, month) is authoritative.
 // Deletes any existing forecast rows for that client/sku/warehouse within the month, then inserts one row at
@@ -5221,7 +5229,7 @@ app.post('/api/supply/suggestion', async (req, res) => {
       }
     } catch (e) { /* email is best-effort — never fail the submit */ }
     res.json({ ok: true, id: r.rows[0].id, ref });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/suggestion/:id/status', async (req, res) => {
   const b = req.body || {}, status = (b.status || '').trim(), by = (b.status_by || '').trim() || null;
@@ -5256,17 +5264,17 @@ app.post('/api/supply/suggestion/:id/status', async (req, res) => {
       }
     } catch (e) { /* best-effort */ }
     res.json({ ok: true, emailed });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Per-suggestion stakeholders (mig 162) — comma/space-separated emails, notified on this suggestion's status changes.
 app.post('/api/supply/suggestion/:id/stakeholders', async (req, res) => {
   const v = parseEmails((req.body || {}).stakeholders).join(', ');
   try { await pool.query(`UPDATE planner.suggestions SET stakeholders=$2 WHERE id=$1`, [req.params.id, v || null]); res.json({ ok: true, stakeholders: v }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/suggestion/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.suggestions WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ════════════════════════════════════════════════════════════════════════════
 // PRODUCT module — product-development management (migration 128). Reads are open (GET); writes require the
@@ -5278,7 +5286,7 @@ const _prodCatCode = (name, code) => { code = (code || '').trim(); if (code) ret
 app.get('/api/product/unread', async (_req, res) => {   // total unread supplier notes across all product-dev items → PRODUCT top-menu badge
   try { const r = await pool.query(`SELECT count(*)::int n FROM planner.supplier_notes n
     WHERE n.author_kind='supplier' AND n.read_at IS NULL AND EXISTS (SELECT 1 FROM planner.product_dev_items i WHERE i.ref=n.po)`);
-    res.json({ count: r.rows[0].n }); } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ count: r.rows[0].n }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/product/items', async (_req, res) => {
   try {
@@ -5312,7 +5320,7 @@ app.get('/api/product/items', async (_req, res) => {
         WHERE ps.item_ref=i.ref ORDER BY sr.created_at DESC LIMIT 1) latest_shipment
       FROM planner.product_dev_items i ORDER BY i.created_at DESC`);
     res.json(r.rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // PRODUCT ▸ DASHBOARD — approval matrix: one row per product with per-component-type {required, approved} counts.
 app.get('/api/product/dashboard', async (req, res) => {
@@ -5329,7 +5337,7 @@ app.get('/api/product/dashboard', async (req, res) => {
         WHERE s.item_id=i.id GROUP BY sd.dimension) t),'{}'::json) comps
       FROM planner.product_dev_items i ORDER BY i.category, i.ref`);
     res.json(r.rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/product/item/:ref', async (req, res) => {
   const ref = req.params.ref;
@@ -5373,7 +5381,7 @@ app.get('/api/product/item/:ref', async (req, res) => {
     const byS = {}; dims.forEach(d => { (byS[d.size_id] = byS[d.size_id] || []).push(d); });
     sizes.forEach(s => { s.dimensions = byS[s.id] || []; });
     res.json({ item, sizes, docs, samples, unread_supplier });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Fast first paint: just the item row + unread count (no sizes/components). Master-data fields render instantly off this.
 app.get('/api/product/item/:ref/core', async (req, res) => {
@@ -5392,7 +5400,7 @@ app.get('/api/product/item/:ref/core', async (req, res) => {
     ]);
     const item = itemR.rows[0]; if (!item) return res.status(404).json({ error: 'not found' });
     res.json({ item, unread_supplier: unreadR.rows[0].n });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Light docs-only endpoint — the Documents tab used to re-fetch the whole heavy /item/:ref (5 queries) just for
 // this. One indexed query instead → the tab loads fast (esp. on the remote sandbox pooler ~330ms/query).
@@ -5400,7 +5408,7 @@ app.get('/api/product/item/:ref/docs', async (req, res) => {
   try {
     const docs = (await pool.query(`SELECT id, filename, mime, byte_size, coalesce(uploaded_by,'') uploaded_by, coalesce(uploader_kind,'internal') uploader_kind, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments WHERE po=$1 AND category='product' ORDER BY uploaded_at DESC`, [req.params.ref])).rows;
     res.json({ docs });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Record of change (PRODUCT ▸ Timeline). Light — its own endpoint so the timeline can merge it with the notes.
 app.get('/api/product/item/:ref/changes', async (req, res) => {
@@ -5434,7 +5442,7 @@ app.get('/api/product/item/:ref/sizes', async (req, res) => {
     const byS = {}; dims.forEach(d => { (byS[d.size_id] = byS[d.size_id] || []).push(d); });
     sizes.forEach(s => { s.dimensions = byS[s.id] || []; });
     res.json({ sizes, samples });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/product/swatch/:ref', async (req, res) => {
   try { const r = (await pool.query(`SELECT swatch, swatch_mime FROM planner.product_dev_items WHERE ref=$1`, [req.params.ref])).rows[0];
@@ -5442,7 +5450,7 @@ app.get('/api/product/swatch/:ref', async (req, res) => {
     // The client always requests with ?t=<updated_at>, so a re-uploaded swatch is a new URL — safe to cache hard.
     // (Was 'no-cache', which forced a full re-download of the image on every render → the Product grid felt slow.)
     res.setHeader('Content-Type', r.swatch_mime || 'image/png'); res.setHeader('Cache-Control', 'public, max-age=31536000, immutable'); res.end(r.swatch);
-  } catch (e) { res.status(500).end(); }
+  } catch (e) { log500(e); res.status(500).end(); }
 });
 app.post('/api/product/item', async (req, res) => {
   const b = req.body || {};
@@ -5509,7 +5517,7 @@ app.post('/api/product/item/:ref', async (req, res) => {
     if (_recNote) { const label = _recNote.split(',').map(x => x.trim()).filter(Boolean).join(' and ') || 'UK';
       try { await pool.query(`INSERT INTO planner.supplier_notes (po, author_kind, author_email, body) VALUES ($1,'internal',$2,$3)`, [ref, authUser(req) || null, 'Recipient country updated to ' + label]); } catch (e) { /* note best-effort */ } }
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Rename a product's reference — cascades to samples, timeline notes, product documents & any staged submissions.
 app.post('/api/product/item/:ref/rename', async (req, res) => {
@@ -5537,7 +5545,7 @@ app.post('/api/product/item/:ref/rename', async (req, res) => {
 });
 app.post('/api/product/item/:ref/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.product_dev_items WHERE ref=$1`, [req.params.ref]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // PRODUCT ▸ Reports — counts + sample/approval metrics grouped by season, category, supplier.
 app.get('/api/product/reports', async (_req, res) => {
@@ -5558,7 +5566,7 @@ app.get('/api/product/reports', async (_req, res) => {
       return Object.values(m).map(fin).sort((a, b) => String(a.key).localeCompare(String(b.key))); };
     const o = Object.assign(mk(), { key: 'overall' }); rows.forEach(r => roll(o, r));
     res.json({ overall: fin(o), bySeason: groupBy(r => r.season), byCategory: groupBy(r => r.category), bySupplier: groupBy(r => r.supplier) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/size', async (req, res) => {
   const b = req.body || {}, ref = (b.ref || '').trim(), label = (b.size_label || '').trim();
@@ -5566,7 +5574,7 @@ app.post('/api/product/size', async (req, res) => {
   try { const it = (await pool.query(`SELECT id FROM planner.product_dev_items WHERE ref=$1`, [ref])).rows[0]; if (!it) return res.status(404).json({ error: 'item not found' });
     const so = (await pool.query(`SELECT coalesce(max(sort),0)+1 n FROM planner.product_dev_sizes WHERE item_id=$1`, [it.id])).rows[0].n;
     const r = await pool.query(`INSERT INTO planner.product_dev_sizes (item_id, size_label, sort) VALUES ($1,$2,$3) RETURNING id`, [it.id, label, so]);
-    res.json({ ok: true, id: r.rows[0].id }); } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ ok: true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/size/:id', (req, res) =>
   patch(res, 'planner.product_dev_sizes', 'id', req.params.id, { size_label: 'text', approval_status: 'text', mapped_sku: 'text', approved_sample_id: 'bigint' }, req.body, 'bigint'));
@@ -5575,7 +5583,7 @@ app.get('/api/product/skus', async (_req, res) => {
   try { const rows = (await pool.query(`SELECT sku,
       trim(both ' ' from coalesce(colour_long,'')||' '||coalesce(size_short,'')) label
       FROM planner.products ORDER BY sku`)).rows;
-    res.json(rows); } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json(rows); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Create a D&B-uploaded DESIGN version for a dimension (packaging / polybag / labels). Version numbers per (ref, dimension).
 app.post('/api/product/design-version', async (req, res) => {
@@ -5586,7 +5594,7 @@ app.post('/api/product/design-version', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.product_dev_samples (item_ref, version, dimension, description, created_by)
       VALUES ($1,$2,$3,$4,$5) RETURNING id`, [ref, v, dim, (b.description || '').trim() || null, shortUser(authUser(req)) || null]);
     res.json({ ok: true, id: r.rows[0].id, version: v });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 const PROD_COMPONENTS = ['product', 'packaging', 'labels', 'polybag', 'other'];
 // Upsert a size's component state (description / required / approval status / packaging type / approved version).
@@ -5601,7 +5609,7 @@ app.post('/api/product/size/:id/dimension', async (req, res) => {
     await pool.query(`INSERT INTO planner.product_dev_size_dimensions (size_id, dimension) VALUES ($1,$2) ON CONFLICT (size_id, dimension) DO NOTHING`, [sizeId, dim]);
     if (fields.length) await pool.query(`UPDATE planner.product_dev_size_dimensions SET ${fields.join(',')} WHERE size_id=$1 AND dimension=$2`, params);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Upload a versioned file to a size's component (ensures the component row exists first). Returns the new file id.
 app.post('/api/product/component-file', async (req, res) => {
@@ -5617,17 +5625,17 @@ app.post('/api/product/component-file', async (req, res) => {
       VALUES ($1,$2,$3,$4,$5,$6,'product_dim','internal',$7) RETURNING id`,
       ['PDIM-' + row.id, b.filename || 'file', b.mime || 'application/octet-stream', buf.length, buf, (b.uploaded_by || '').trim() || null, v]);
     res.json({ ok: true, id: r.rows[0].id });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/component-file/:id/delete', async (req, res) => {
-  try { await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1 AND category='product_dim'`, [req.params.id]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+  try { await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1 AND category='product_dim'`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/component-file/:id', async (req, res) => {   // assign / change a file's version number
   const v = (req.body || {}).version, vv = (v === '' || v == null) ? null : parseInt(v, 10) || null;
-  try { await pool.query(`UPDATE planner.portal_attachments SET version=$2 WHERE id=$1 AND category='product_dim'`, [req.params.id, vv]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+  try { await pool.query(`UPDATE planner.portal_attachments SET version=$2 WHERE id=$1 AND category='product_dim'`, [req.params.id, vv]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/size/:id/delete', async (req, res) => {
-  try { await pool.query(`DELETE FROM planner.product_dev_sizes WHERE id=$1`, [req.params.id]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+  try { await pool.query(`DELETE FROM planner.product_dev_sizes WHERE id=$1`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/swatch', async (req, res) => {
   const b = req.body || {}, ref = (b.ref || '').trim(), mime = b.mime || 'image/png';
@@ -5636,7 +5644,7 @@ app.post('/api/product/swatch', async (req, res) => {
   try { const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
     if (buf.length > 2 * 1024 * 1024) return res.status(413).json({ error: 'swatch exceeds 2MB' });
     await pool.query(`UPDATE planner.product_dev_items SET swatch=$2, swatch_mime=$3, updated_at=now() WHERE ref=$1`, [ref, buf, mime]);
-    res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/doc', async (req, res) => {
   const b = req.body || {}, ref = (b.ref || '').trim();
@@ -5645,21 +5653,21 @@ app.post('/api/product/doc', async (req, res) => {
     if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: 'file exceeds 10MB' });
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, uploaded_by, category) VALUES ($1,$2,$3,$4,$5,$6,'product') RETURNING id`,
       [ref, b.filename || 'document', b.mime || 'application/octet-stream', buf.length, buf, (b.uploaded_by || '').trim() || null]);
-    res.json({ ok: true, id: r.rows[0].id, byte_size: buf.length }); } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ ok: true, id: r.rows[0].id, byte_size: buf.length }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/product/doc/:id', async (req, res) => {
   try { const r = (await pool.query(`SELECT filename, mime, data FROM planner.portal_attachments WHERE id=$1 AND category='product'`, [req.params.id])).rows[0];
     if (!r) return res.status(404).send('not found');
     res.setHeader('Content-Type', r.mime || 'application/octet-stream'); res.setHeader('Content-Disposition', 'attachment; filename="' + (r.filename || 'document').replace(/"/g, '') + '"'); res.send(r.data);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/doc/:id/delete', async (req, res) => {
-  try { await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1 AND category='product'`, [req.params.id]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+  try { await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1 AND category='product'`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── PRODUCT ▸ SPECIFICATIONS (SUG-0019) — source-of-truth packaging/labelling docs. P1: admin upload + scope + effective-from. ──
 app.get('/api/product/spec-types', async (_req, res) => {
   try { const r = await pool.query(`SELECT id, name, sort FROM planner.product_spec_types WHERE active ORDER BY sort, name`); res.json(r.rows); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/spec-types', async (req, res) => {
   const b = req.body || {}, act = (b.action || '').trim(), id = b.id, name = String(b.name || '').trim();
@@ -5670,7 +5678,7 @@ app.post('/api/product/spec-types', async (req, res) => {
     const mx = (await pool.query(`SELECT coalesce(max(sort),0)+1 s FROM planner.product_spec_types`)).rows[0].s;
     const r = await pool.query(`INSERT INTO planner.product_spec_types (name, sort) VALUES ($1,$2) ON CONFLICT (name) DO UPDATE SET active=true RETURNING id`, [name, mx]);
     res.json({ ok: true, id: r.rows[0].id });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/product/spec-scope-options', async (_req, res) => {   // categories, size-within-category, and production numbers for the assignment form
   try {
@@ -5682,7 +5690,7 @@ app.get('/api/product/spec-scope-options', async (_req, res) => {   // categorie
     const mx = (await pool.query(`SELECT max(prod_no::int) m FROM planner.purchase_orders WHERE prod_no ~ '^[0-9]+$'`)).rows[0].m;
     const defaultProdNo = (mx != null) ? String(mx + 1) : (productions[0] || '');
     res.json({ categories: cats, catSizes, productions, defaultProdNo });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // scope → WHERE clause on planner.products (shared by spec-suppliers)
 function specScopeWhere(q) {
@@ -5710,7 +5718,7 @@ app.get('/api/product/spec-suppliers', async (req, res) => {   // distinct suppl
     if (names.length) { sup = (await pool.query(`SELECT name, coalesce(email,'') email, coalesce(active,true) active FROM planner.suppliers WHERE name = ANY($1)`, [names])).rows; }
     const byName = {}; sup.forEach(s => { byName[s.name] = s; });
     res.json({ suppliers: names.map(n => ({ name: n, email: (byName[n] || {}).email || '', known: !!byName[n] })) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/product/specs', async (_req, res) => {
   try { const r = await pool.query(`SELECT id, spec_type, filename, mime, scope_type,
@@ -5728,7 +5736,7 @@ app.get('/api/product/specs', async (_req, res) => {
       s.approval_status = s.confirm_with_supplier ? (directed.length > 0 && done.length >= directed.length ? 'approved' : 'pending') : 'pending';
     });
     res.json(r.rows); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/specs/:id/approval', async (req, res) => {   // admin override: approve-all directed suppliers, or reset to pending
   const id = req.params.id, st = ((req.body || {}).status || '').trim() === 'approved' ? 'approved' : 'pending';
@@ -5739,7 +5747,7 @@ app.post('/api/product/specs/:id/approval', async (req, res) => {   // admin ove
     else { await pool.query(`DELETE FROM planner.product_spec_approvals WHERE spec_id=$1`, [id]); }
     await pool.query(`UPDATE planner.product_specs SET approval_status=$2 WHERE id=$1`, [id, st]);   // legacy column kept in sync
     res.json({ ok: true, status: st });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/specs', async (req, res) => {
   const b = req.body || {}, st = String(b.spec_type || '').trim(), scope = (b.scope_type || 'all').trim();
@@ -5773,7 +5781,7 @@ app.post('/api/product/specs', async (req, res) => {
       } catch (e) { console.log('[spec-email] ' + e.message); }
     }
     res.json({ ok: true, id: newId, superseded: sup.rowCount, emailed });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/product/specs/past', async (_req, res) => {   // superseded specs (kept for history) — most recent first
   try { const r = await pool.query(`SELECT id, spec_type, filename, scope_type,
@@ -5782,18 +5790,18 @@ app.get('/api/product/specs/past', async (_req, res) => {   // superseded specs 
       confirm_with_supplier, coalesce(confirm_suppliers,'') confirm_suppliers, superseded_by,
       coalesce(uploaded_by,'') uploaded_by, to_char(uploaded_at,'DD-Mon-YY') uploaded_at, to_char(superseded_at,'DD-Mon-YY HH24:MI') superseded_at
       FROM planner.product_specs WHERE NOT active AND superseded_at IS NOT NULL ORDER BY superseded_at DESC`); res.json(r.rows); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/specs/:id/delete', async (req, res) => {
   try { await pool.query(`UPDATE planner.product_specs SET active=false WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/product/spec-file/:id', async (req, res) => {
   try { const r = (await pool.query(`SELECT filename, mime, data FROM planner.product_specs WHERE id=$1`, [req.params.id])).rows[0];
     if (!r) return res.status(404).send('not found');
     res.setHeader('Content-Type', r.mime || 'application/octet-stream');
     res.setHeader('Content-Disposition', 'inline; filename="' + (r.filename || 'file').replace(/"/g, '') + '"'); res.send(r.data);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/product/notes/:ref', async (req, res) => {
   try { const r = await pool.query(`SELECT n.id, n.author_kind, coalesce(n.author_email,'') author_email, n.body,
@@ -5801,19 +5809,19 @@ app.get('/api/product/notes/:ref', async (req, res) => {
     n.attachment_id, coalesce(a.filename,'') attachment_name
     FROM planner.supplier_notes n LEFT JOIN planner.portal_attachments a ON a.id=n.attachment_id
     WHERE n.po=$1 ORDER BY n.created_at`, [req.params.ref]);
-    res.json(r.rows); } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json(r.rows); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/note', async (req, res) => {
   const b = req.body || {}, ref = (b.ref || '').trim();
   if (!ref || !String(b.body || '').trim()) return res.status(400).json({ error: 'ref and body required' });
   try { await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`, [ref, internalAuthor(req, b.author_email), String(b.body).trim()]);
-    res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/notes-read', async (req, res) => {   // mark this product's internal (D&B) timeline notes read
   const ref = ((req.body || {}).ref || '').trim();
   if (!ref) return res.status(400).json({ error: 'ref required' });
   try { await pool.query(`UPDATE planner.supplier_notes SET read_at=now() WHERE po=$1 AND author_kind='internal' AND read_at IS NULL`, [ref]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── SAMPLE SHIPMENT CONTENTS — candidate lists for the "Add contents" picker ──
 // A sample shipment IS a sample_request; its contents are bulk-SKU lines (sample_request_lines)
@@ -5882,15 +5890,15 @@ async function setSampleLines(sampleId, lines) {   // replace-all the bulk-SKU l
 }
 // Candidate lists (admin/preview — supplier passed as ?supplier=)
 app.get('/api/product/open-samples', async (req, res) => { const sup = (req.query.supplier || '').trim();
-  try { res.json(await openSampleCandidates(sup ? [sup] : null)); } catch (e) { res.status(500).json({ error: e.message }); } });
+  try { res.json(await openSampleCandidates(sup ? [sup] : null)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // Supplier-scoped SKU + dev-item SEARCH (supplier / q / dev). Its own path because the plain /api/product/skus above
 // returns the full {sku,label} list (used elsewhere) and, being registered first, would otherwise shadow this.
 app.get('/api/product/sku-search', async (req, res) => { const sup = (req.query.supplier || '').trim();
-  try { res.json(await supplierSkuCandidates(sup ? [sup] : null, (req.query.q || '').trim(), !!req.query.dev)); } catch (e) { res.status(500).json({ error: e.message }); } });
+  try { res.json(await supplierSkuCandidates(sup ? [sup] : null, (req.query.q || '').trim(), !!req.query.dev)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // Sample-shipment contents (admin/preview) — dev samples attach to a sample_request
 app.post('/api/supply/sample/:id/dev-samples', async (req, res) => { const b = req.body || {};
   try { await setSampleDevSamples(req.params.id, b.dev_samples || b.dev_sample_ids, shortUser(authUser(req)) || null); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 async function sampleContents(id) {   // one sample shipment's contents — light payload for silent in-place refresh
   const lines = (await pool.query(`SELECT sku, qty FROM planner.sample_request_lines WHERE sample_id=$1::bigint ORDER BY id`, [id])).rows;
   const dev = (await pool.query(`SELECT ds.id, (ds.item_ref||'_v'||ds.version) ref, ds.item_ref, ls.qty, coalesce(i.colour_name,'') colour_name
@@ -5899,12 +5907,12 @@ async function sampleContents(id) {   // one sample shipment's contents — ligh
   return { lines, dev_samples: dev };
 }
 app.get('/api/supply/sample/:id/contents', async (req, res) => {
-  try { res.json(await sampleContents(req.params.id)); } catch (e) { res.status(500).json({ error: e.message }); } });
+  try { res.json(await sampleContents(req.params.id)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/product/notes-read-supplier', async (req, res) => {   // D&B side: mark SUPPLIER notes read (clears the main-app unread badge + ✉ bell)
   const ref = ((req.body || {}).ref || '').trim();
   if (!ref) return res.status(400).json({ error: 'ref required' });
   try { await pool.query(`UPDATE planner.supplier_notes SET read_at=now() WHERE po=$1 AND author_kind='supplier' AND read_at IS NULL`, [ref]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/escalate', async (req, res) => {
   const b = req.body || {}, ref = (b.ref || '').trim(), message = String(b.message || '').trim();
@@ -5923,12 +5931,12 @@ app.post('/api/product/escalate', async (req, res) => {
       + '<p><a href="' + link + '">Open ' + _eh(ref) + ' &rarr;</a></p>';
     const sent = await sendResendEmail({ to: emails, subject: 'horizon escalation - ' + ref, html, kind: 'escalation', ref: ref });
     res.json({ ok: true, sent: sent.sent || 0, emails, sandbox: !!sent.sandbox });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/product/config', async (_req, res) => {
   try { const seasons = (await pool.query(`SELECT code, coalesce(label,'') label, active, sort FROM planner.seasons ORDER BY sort, code`)).rows;
     const categories = (await pool.query(`SELECT category, coalesce(code,'') code FROM planner.categories WHERE coalesce(is_active,true) ORDER BY category`)).rows;
-    res.json({ seasons, categories }); } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ seasons, categories }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/season', async (req, res) => {
   const b = req.body || {}, code = (b.code || '').trim().toUpperCase();
@@ -5936,15 +5944,15 @@ app.post('/api/product/season', async (req, res) => {
   try { await pool.query(`INSERT INTO planner.seasons (code, label, active, sort) VALUES ($1,$2,$3,$4)
     ON CONFLICT (code) DO UPDATE SET label=excluded.label, active=excluded.active, sort=excluded.sort`,
     [code, (b.label || '').trim() || null, b.active == null ? true : !!b.active, b.sort == null ? null : parseInt(b.sort, 10)]);
-    res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/season/:code/delete', async (req, res) => {
-  try { await pool.query(`DELETE FROM planner.seasons WHERE code=$1`, [req.params.code]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+  try { await pool.query(`DELETE FROM planner.seasons WHERE code=$1`, [req.params.code]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/category-code', async (req, res) => {
   const b = req.body || {}, category = (b.category || '').trim();
   if (!category) return res.status(400).json({ error: 'category required' });
-  try { await pool.query(`UPDATE planner.categories SET code=$2 WHERE category=$1`, [category, (b.code || '').trim().toUpperCase() || null]); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+  try { await pool.query(`UPDATE planner.categories SET code=$2 WHERE category=$1`, [category, (b.code || '').trim().toUpperCase() || null]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── Product SAMPLE VERSIONS (v1/v2…) — supplier-created in the portal; visible in the main app (migration 130) ──
 async function productSampleList(itemRef) {
@@ -5996,7 +6004,7 @@ async function insertProductSamplePhoto(sampleId, b, by, kind) {
   return r.rows[0].id;
 }
 app.get('/api/product/samples/:ref', async (req, res) => {
-  try { res.json(await productSampleList(decodeURIComponent(req.params.ref))); } catch (e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await productSampleList(decodeURIComponent(req.params.ref))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Sample REQUESTS (SR-nn) linked to this product — either a line SKU maps to one of the product's sizes,
 // or a dev-sample on the request belongs to this product (product_dev_samples.item_ref = ref).
@@ -6023,7 +6031,7 @@ app.get('/api/product/:ref/sample-requests', async (req, res) => {
               WHERE ls.sample_request_id=s.id AND ds.item_ref=$1)
       ORDER BY s.created_at DESC`, [ref])).rows;
     res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/sample', async (req, res) => {
   try { res.json({ ok: true, ...(await createProductSample(req.body || {}, ((req.body || {}).created_by || '').trim() || shortUser(authUser(req)) || null)) }); }
@@ -6040,29 +6048,29 @@ app.post('/api/product/sample/:id/feedback', async (req, res) => {   // admin-au
       await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`, [prev.item_ref, by, 'Feedback on sample ' + verRef + ': ' + fb]);
     }
     res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/sample/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.product_dev_samples WHERE id=$1`, [req.params.id]);
     await pool.query(`DELETE FROM planner.portal_attachments WHERE po=$1 AND category='product_sample'`, ['PSAMPLE-' + req.params.id]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/sample-photo', async (req, res) => {   // body-based (sample_id in body) — matches the portal shape; used by the admin "preview as supplier"
   const b = req.body || {}, id = b.sample_id;
   if (!id || !b.data_base64) return res.status(400).json({ error: 'sample_id + data_base64 required' });
   try { res.json({ ok: true, id: await insertProductSamplePhoto(id, b, (b.uploaded_by || '').trim() || null) }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/product/sample/:id/photo', async (req, res) => {
   if (!(req.body && req.body.data_base64)) return res.status(400).json({ error: 'data_base64 required' });
   try { res.json({ ok: true, id: await insertProductSamplePhoto(req.params.id, req.body, (req.body.uploaded_by || '').trim() || null) }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/note-read/:id', async (req, res) => {
   try {
     const read = !(req.body && req.body.read === false);
     await pool.query(`UPDATE planner.supplier_notes SET read_at=${read ? 'now()' : 'NULL'} WHERE id=$1`, [req.params.id]);
     res.json({ ok: true, read });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Delete the MOST RECENT note in a timeline thread. Guards against deleting older history: the id must be the
 // latest note for its thread (looked up from the note's own thread key). Optional supplierOnly restricts to
@@ -6084,7 +6092,7 @@ async function deleteLatestNote(res, table, keyCol, id, opts) {
     if (!latest || String(latest.id) !== String(id)) return res.status(409).json({ error: 'only the most recent message can be deleted' });
     await pool.query(`DELETE FROM planner.${table} WHERE id=$1`, [id]);
     res.json({ ok: true, deleted: id });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 }
 // Admin: delete the latest note on a PO/product (supplier_notes), shipment, or sample timeline. You can only
 // delete YOUR OWN most-recent Dock & Bay message (ownAuthorOnly) — the signed-in user (authUser), or the client's
@@ -6172,17 +6180,17 @@ app.post('/api/me/favourites', async (req, res) => {
     await pool.query(`INSERT INTO planner.app_permissions (email, favourites, updated_at, updated_by) VALUES ($1,$2,now(),$1)
       ON CONFLICT (email) DO UPDATE SET favourites=excluded.favourites, updated_at=now()`, [email.toLowerCase(), JSON.stringify(favs)]);
     res.json({ ok: true, favourites: favs });
-  } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ ok: false, error: e.message }); }
 });
 // What the client asks on load to decide what to enable (read-only UI otherwise).
 app.get('/api/me', async (req, res) => { try { const me = await permsFor(req);
   // logout URL for the client session-guard (SUG-0007) — set app_settings.auth_logout_url to your proxy's sign-out path
   let lo = ''; try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='auth_logout_url'`)).rows[0]; lo = (r && r.value) || ''; } catch (e) {}
-  me.logout_url = lo; res.json(me); } catch (e) { res.status(500).json({ error: e.message }); } });
+  me.logout_url = lo; res.json(me); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // Permissions admin — ADMIN-ONLY (sandbox counts as admin so Ben can build/test locally).
 app.get('/api/config/permissions', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   try { const r = await pool.query('SELECT email, supply_edit, demand_edit, product_edit, is_admin, coalesce(landing_page,\'\') landing_page, to_char(updated_at,\'YYYY-MM-DD HH24:MI\') updated_at, updated_by FROM planner.app_permissions ORDER BY email'); res.json(r.rows); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // ── Recently-received POs feed (populated by n8n) → auto-complete + timeline + supply-planner email. ──
 // Idempotent: each row processed once. Action ONLY when a not-yet-COMPLETE PO is received (Ben): already-COMPLETE
 // or PO-not-found → no action, just mark processed. Sandbox has no RESEND_API_KEY → the email logs, doesn't send.
@@ -6228,13 +6236,13 @@ app.post('/api/supply/received-pos/process', async (req, res) => {
   const secret = process.env.N8N_WEBHOOK_SECRET;
   if (secret && req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
   try { res.json({ ok: true, ...(await processReceivedPos()) }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // ── Modular channel registry (CONFIG ▸ Admin ▸ Channels) — Phase 1. Reads open; writes admin-only. ──
 app.get('/api/config/channels', async (req, res) => {
   try { res.set('Cache-Control', 'no-store').json({ ok: true, channels: await buildChannels(), countries: await buildCountries() }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/config/channel', async (req, res) => {
   const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
@@ -6259,7 +6267,7 @@ app.post('/api/config/channel', async (req, res) => {
     await pool.query(`DELETE FROM planner.channel_countries WHERE channel_code=$1`, [code]);
     for (const cc of countries) await pool.query(`INSERT INTO planner.channel_countries (channel_code,country_code) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [code, cc]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/config/country', async (req, res) => {
   const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
@@ -6271,7 +6279,7 @@ app.post('/api/config/country', async (req, res) => {
         ON CONFLICT (code) DO UPDATE SET label=excluded.label,sort=excluded.sort,active=excluded.active,updated_at=now()`,
       [code, String(b.label).trim(), Number.isFinite(+b.sort) ? +b.sort : 0, b.active !== false]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/config/permissions', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   const b = req.body || {}; const email = String(b.email || '').trim().toLowerCase();
@@ -6279,31 +6287,31 @@ app.post('/api/config/permissions', async (req, res) => { const me = await perms
   try { await pool.query(`INSERT INTO planner.app_permissions (email, supply_edit, demand_edit, product_edit, is_admin, landing_page, updated_at, updated_by)
       VALUES ($1,$2,$3,$4,$5,$6,now(),$7) ON CONFLICT (email) DO UPDATE SET supply_edit=excluded.supply_edit, demand_edit=excluded.demand_edit, product_edit=excluded.product_edit, is_admin=excluded.is_admin, landing_page=excluded.landing_page, updated_at=now(), updated_by=excluded.updated_by`,
       [email, !!b.supply_edit, !!b.demand_edit, !!b.product_edit, !!b.is_admin, (b.landing_page || '').trim() || null, me.email || 'sandbox']);
-    res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.delete('/api/config/permissions/:email', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   const email = String(req.params.email || '').trim().toLowerCase(); if (!email) return res.status(400).json({ error: 'email required' });
   try { // never let the last admin be removed (lockout guard)
     const isAdminRow = (await pool.query('SELECT is_admin FROM planner.app_permissions WHERE lower(email)=$1', [email])).rows[0];
     if (isAdminRow && isAdminRow.is_admin) { const n = (await pool.query('SELECT count(*)::int n FROM planner.app_permissions WHERE is_admin')).rows[0].n; if (n <= 1) return res.status(400).json({ error: 'cannot remove the last admin' }); }
     await pool.query('DELETE FROM planner.app_permissions WHERE lower(email)=$1', [email]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 
 // ── CONFIG ▸ Consignees ── per-delivery-country consignee + notify-party addresses for the invoice generator.
 // The generator falls back to the UK row for any country not listed here. Config-gated (see CONFIG_WRITE).
 app.get('/api/consignees', async (req, res) => {
   try { const r = await pool.query("SELECT country, consignee, notify_party, port_of_discharge, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at, updated_by FROM planner.invoice_consignees ORDER BY country");
-    res.json(r.rows); } catch (e) { res.status(500).json({ error: e.message }); } });
+    res.json(r.rows); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/consignee', async (req, res) => {
   const b = req.body || {}; const country = String(b.country || '').trim().toUpperCase();
   if (!country) return res.status(400).json({ error: 'country required' });
   try { await pool.query(`INSERT INTO planner.invoice_consignees (country, consignee, notify_party, port_of_discharge, updated_at, updated_by)
       VALUES ($1,$2,$3,$4,now(),$5) ON CONFLICT (country) DO UPDATE SET consignee=excluded.consignee, notify_party=excluded.notify_party, port_of_discharge=excluded.port_of_discharge, updated_at=now(), updated_by=excluded.updated_by`,
       [country, b.consignee || null, b.notify_party || null, b.port_of_discharge || null, (await permsFor(req)).email || 'sandbox']);
-    res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/consignee/:country/delete', async (req, res) => {
   const country = String(req.params.country || '').trim().toUpperCase();
   try { await pool.query('DELETE FROM planner.invoice_consignees WHERE country=$1', [country]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 
 // ── Invoice + Packing List generator (xlsx download) ──
 // Commercial Invoice = one PO. Tax Invoice = a shipment (every PO whose shipment_ref is the master PO ref).
@@ -6315,7 +6323,7 @@ function sendXlsx(res, r) {
 app.get('/api/invoice/po/:po', async (req, res) => {
   const po = decodeURIComponent(req.params.po || '');
   try { sendXlsx(res, await buildInvoice(pool, { type: 'commercial', pos: [po], ref: po, master: po })); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/invoice/shipment/:ref', async (req, res) => {
   const ref = decodeURIComponent(req.params.ref || '');
@@ -6323,13 +6331,13 @@ app.get('/api/invoice/shipment/:ref', async (req, res) => {
     const pos = (await pool.query('SELECT po FROM planner.purchase_orders WHERE shipment_ref=$1 OR po=$1', [ref])).rows.map((r) => r.po);
     if (!pos.length) return res.status(404).json({ error: 'No POs found for shipment ' + ref });
     sendXlsx(res, await buildInvoice(pool, { type: 'tax', pos, ref, master: ref }));
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Direct-to-Client packing list for one PO (seller = Dock & Bay, consignee = the client).
 app.get('/api/invoice/dtc-packing/:po', async (req, res) => {
   const po = decodeURIComponent(req.params.po || '');
   try { sendXlsx(res, await buildDtcPackingList(pool, { pos: [po], master: po })); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Consolidated Direct-to-Client packing list for a whole shipment (all POs aboard).
 app.get('/api/invoice/dtc-packing/shipment/:ref', async (req, res) => {
@@ -6338,7 +6346,7 @@ app.get('/api/invoice/dtc-packing/shipment/:ref', async (req, res) => {
     const pos = (await pool.query('SELECT po FROM planner.purchase_orders WHERE shipment_ref=$1 OR po=$1', [ref])).rows.map((r) => r.po);
     if (!pos.length) return res.status(404).json({ error: 'No POs found for shipment ' + ref });
     sendXlsx(res, await buildDtcPackingList(pool, { pos, master: ref }));
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Portal-scoped invoice downloads — same generator, namespaced under /api/portal/* (so they route on the
 // portal host) and scoped to the caller's own suppliers. The supplier portal fetches these as a blob.
@@ -6348,13 +6356,13 @@ app.get('/api/portal/invoice/shipment/:ref', portalAuth, async (req, res) => {
     const pos = (await pool.query('SELECT po FROM planner.purchase_orders WHERE (shipment_ref=$1 OR po=$1) AND supplier_name = ANY($2)', [ref, names])).rows.map((r) => r.po);
     if (!pos.length) return res.status(404).json({ error: 'No POs found for shipment ' + ref });
     sendXlsx(res, await buildInvoice(pool, { type: 'tax', pos, ref, master: ref }));
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/portal/invoice/po/:po', portalAuth, async (req, res) => {
   const po = decodeURIComponent(req.params.po || '');
   try { if (!await portalOwnsPO(req, po)) return res.status(403).json({ error: 'not your PO' });
     sendXlsx(res, await buildInvoice(pool, { type: 'commercial', pos: [po], ref: po, master: po }));
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ASN pallet labels PDF (AU Coghlans) — one A4 landscape page per ASN number (1 ASN = 1 pallet).
 app.get('/api/asn-labels/:po', async (req, res) => {
@@ -6367,7 +6375,7 @@ app.get('/api/asn-labels/:po', async (req, res) => {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent('ASN Pallet Labels - ' + po + '.pdf'));
     res.send(buf);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Portal-side ASN download (gate-exempt supplier session) — same generated PDF.
 app.get('/api/portal/asn-labels/:po', async (req, res) => {
@@ -6380,7 +6388,7 @@ app.get('/api/portal/asn-labels/:po', async (req, res) => {
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader('Content-Disposition', "attachment; filename*=UTF-8''" + encodeURIComponent('ASN Pallet Labels - ' + po + '.pdf'));
     res.send(buf);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // DTC shipment details (supplier-entered in portal ▸ SHIPMENT). Upsert + a supplier timeline note so it shows on
 // the PO timeline and lights the admin ✉ bell. entered_by/entered_at are kept from the first entry; updated_at moves.
@@ -6407,7 +6415,7 @@ app.post('/api/supply/dtc-shipment', async (req, res) => {
     const sid = (sr.rows[0] && sr.rows[0].id) || null;
     await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body) VALUES ($1,$2,$3,'supplier',$4)`, [po, sid, by, noteBody]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/portal-note', async (req, res) => {
   const b = req.body || {};
@@ -6456,7 +6464,7 @@ app.post('/api/supply/portal-note', async (req, res) => {
       } catch (e) { console.error('[mention] email failed:', e.message); }
     }
     res.json({ ok: true, mentions, mailed, email: preview });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/portal-upload', async (req, res) => {
   const b = req.body || {};
@@ -6466,28 +6474,28 @@ app.post('/api/supply/portal-upload', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, supplier_id, filename, mime, byte_size, data, uploaded_by, category)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, [b.po, b.supplier_id || null, b.filename || 'invoice', b.mime || 'application/octet-stream', buf.length, buf, b.uploaded_by || null, b.category || 'invoice']);
     res.json({ id: r.rows[0].id, byte_size: buf.length });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Remove a supplier-uploaded document. (Won't remove Client/FBA docs — those are managed admin-side.)
 app.post('/api/supply/portal-attachment-remove', async (req, res) => {
   const id = req.body && req.body.id;
   if (!id) return res.status(400).json({ error: 'id required' });
   try { const r = await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1 AND coalesce(category,'')<>'client'`, [id]); res.json({ ok: true, deleted: r.rowCount }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Admin PO ▸ DOCUMENTS tab: delete ANY document for a PO (incl. client/FBA docs — admin-managed here).
 app.post('/api/supply/po-doc-delete', async (req, res) => {
   const id = req.body && req.body.id;
   if (!id) return res.status(400).json({ error: 'id required' });
   try { const r = await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1`, [id]); res.json({ ok: true, deleted: r.rowCount }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // PO ▸ DOCUMENTS tab: change a document's type/category inline (drives which tab surfaces it, e.g. Payments ▸ Invoice).
 app.post('/api/supply/po-doc-category', async (req, res) => {
   const { id, category } = req.body || {};
   if (!id || !category) return res.status(400).json({ error: 'id and category required' });
   try { const r = await pool.query(`UPDATE planner.portal_attachments SET category=$2 WHERE id=$1 RETURNING id`, [id, String(category)]); res.json({ ok: true, updated: r.rowCount }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Admin PO ▸ DOCUMENTS tab: upload a document against a PO (held in the DB, like all other uploads).
 app.post('/api/supply/po-doc-upload', async (req, res) => {
@@ -6498,7 +6506,7 @@ app.post('/api/supply/po-doc-upload', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, uploaded_by, category)
       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`, [b.po, b.filename || 'document', b.mime || 'application/octet-stream', buf.length, buf, b.uploaded_by || 'admin', b.category || 'document']);
     res.json({ id: r.rows[0].id, byte_size: buf.length });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── SUPPLY ▸ Quality Control (migration 160): test reports / GRS certs etc., stored in-DB, mapped to prod/batch/PO.
 // Admin upload (supply-edit gated by the global write guard). Requires at least one of prod_no / batch_id / po.
@@ -6513,11 +6521,11 @@ app.post('/api/supply/quality-doc', async (req, res) => {
       [String(b.doc_type), b.filename || 'document', b.mime || 'application/octet-stream', buf.length, buf,
        b.prod_no || null, b.batch_id || null, b.po || null, b.supplier_name || null, authUser(req) || 'admin']);
     res.json({ id: r.rows[0].id, byte_size: buf.length });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/quality-doc/:id/delete', async (req, res) => {
   try { const r = await pool.query(`DELETE FROM planner.quality_docs WHERE id=$1`, [req.params.id]); res.json({ ok: true, deleted: r.rowCount }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/quality-doc/:id', async (req, res) => {
   try {
@@ -6526,7 +6534,7 @@ app.get('/api/supply/quality-doc/:id', async (req, res) => {
     res.setHeader('Content-Type', r.mime || 'application/octet-stream');
     res.setHeader('Content-Disposition', 'attachment; filename="' + String(r.filename || 'document').replace(/"/g, '') + '"');
     res.send(r.data);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // ── Payments Report: remittance upload + delayed "paid" notification to the supplier (migration 164) ──────────
@@ -6544,7 +6552,7 @@ app.post('/api/supply/remittance', async (req, res) => {
       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
       [String(b.run_key), b.supplier_name || null, b.filename || 'remittance', b.mime || 'application/octet-stream', buf.length, buf, authUser(req) || 'admin']);
     res.json({ id: r.rows[0].id, byte_size: buf.length });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // (List endpoints /api/supply/remittances + /api/supply/payment-emails are served by the /api/supply/:section switch above.)
 app.get('/api/supply/remittance/:id', async (req, res) => {
@@ -6554,11 +6562,11 @@ app.get('/api/supply/remittance/:id', async (req, res) => {
     res.setHeader('Content-Type', r.mime || 'application/octet-stream');
     res.setHeader('Content-Disposition', 'attachment; filename="' + String(r.filename || 'remittance').replace(/"/g, '') + '"');
     res.send(r.data);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/remittance/:id/delete', async (req, res) => {
   try { const r = await pool.query(`DELETE FROM planner.payment_remittances WHERE id=$1`, [req.params.id]); res.json({ ok: true, deleted: r.rowCount }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Resolve a supplier name → its active portal-user emails.
 async function supplierPortalEmails(name) {
@@ -6581,12 +6589,12 @@ app.post('/api/supply/payment-notify', async (req, res) => {
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
       [b.run_key, b.supplier_name, emails.join(', '), (b.amount == null || b.amount === '') ? null : Number(b.amount), (b.currency || '').toUpperCase() || null, b.pay_date || null, sendAfter, authUser(req) || 'admin']);
     res.json({ id: r.rows[0].id, to_emails: emails, send_after: sendAfter });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/payment-notify/:id/cancel', async (req, res) => {
   try { const r = await pool.query(`UPDATE planner.payment_emails SET status='cancelled' WHERE id=$1 AND status='queued'`, [req.params.id]);
     res.json({ ok: true, cancelled: r.rowCount }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // (Status list /api/supply/payment-emails is served by the /api/supply/:section switch above.)
 // Build + send one queued paid-notification. Attaches the remittance(s) for the run if any exist.
@@ -6645,7 +6653,7 @@ app.post('/api/supply/po-doc-review', async (req, res) => {
         [doc.po, internalAuthor(req, b.reviewed_by), body]); } catch (e) { /* timeline best-effort */ }
     }
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/portal-submit', async (req, res) => {
   const b = req.body || {}; const sid = b.supplier_id || null, by = b.submitted_by || 'portal';
@@ -6863,7 +6871,7 @@ app.post('/api/supply/manufacturing-accept', async (req, res) => {
       VALUES ($1, true, $2, now()) ON CONFLICT (component_sku) DO UPDATE SET accepted=true, accepted_by=$2, accepted_at=now()`, [b.component_sku, b.accepted_by || 'PO PLAN']);
     else await pool.query(`DELETE FROM planner.manufacturing_accept WHERE component_sku=$1`, [b.component_sku]);
     res.json({ ok: true, component_sku: b.component_sku, accepted: on });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // SUPPLY ▸ Manufacturing — manual "covered by existing stock" per (prod_no, component_sku). (mig 197)
 app.post('/api/supply/manufacturing-stock', async (req, res) => {
@@ -6878,7 +6886,7 @@ app.post('/api/supply/manufacturing-stock', async (req, res) => {
       [prod, comp, qty, b.updated_by || null]);
     else await pool.query(`DELETE FROM planner.manufacturing_stock_cover WHERE prod_no=$1 AND component_sku=$2`, [prod, comp]);
     res.json({ ok: true, prod_no: prod, component_sku: comp, qty });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // CONFIG ▸ Manufacturing BOM — upsert a parent→component row (qty per finished unit). Add or edit.
 app.post('/api/supply/manufacturing-bom-save', async (req, res) => {
@@ -6891,7 +6899,7 @@ app.post('/api/supply/manufacturing-bom-save', async (req, res) => {
     await pool.query(`INSERT INTO planner.manufacturing_bom (parent_sku, component_sku, qty, updated_at)
       VALUES ($1,$2,$3, now()) ON CONFLICT (parent_sku, component_sku) DO UPDATE SET qty=$3, updated_at=now()`, [parent, comp, qty]);
     res.json({ ok: true, parent_sku: parent, component_sku: comp, qty });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // CONFIG ▸ Manufacturing BOM — delete a parent→component row, or the WHOLE bundle when no component given.
 app.post('/api/supply/manufacturing-bom-delete', async (req, res) => {
@@ -6906,7 +6914,7 @@ app.post('/api/supply/manufacturing-bom-delete', async (req, res) => {
       const r = await pool.query(`DELETE FROM planner.manufacturing_bom WHERE parent_sku=$1`, [parent]);
       res.json({ ok: true, parent_sku: parent, deleted: r.rowCount });
     }
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // CONFIG ▸ BOM ▸ Build on Fly Sets — upsert a set output→input row (component qty per set). Add or edit.
 app.post('/api/supply/set-bom-save', async (req, res) => {
@@ -6919,7 +6927,7 @@ app.post('/api/supply/set-bom-save', async (req, res) => {
     await pool.query(`INSERT INTO planner.set_bom (output_sku, input_sku, input_quantity, updated_at)
       VALUES ($1,$2,$3, now()) ON CONFLICT (output_sku, input_sku) DO UPDATE SET input_quantity=$3, updated_at=now()`, [out, inp, qty]);
     res.json({ ok: true, output_sku: out, input_sku: inp, input_quantity: qty });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // CONFIG ▸ BOM ▸ Build on Fly Sets — delete one component row, or the WHOLE set when no input given.
 app.post('/api/supply/set-bom-delete', async (req, res) => {
@@ -6929,7 +6937,7 @@ app.post('/api/supply/set-bom-delete', async (req, res) => {
   try {
     if (inp) { await pool.query(`DELETE FROM planner.set_bom WHERE output_sku=$1 AND input_sku=$2`, [out, inp]); res.json({ ok: true, output_sku: out, input_sku: inp }); }
     else { const r = await pool.query(`DELETE FROM planner.set_bom WHERE output_sku=$1`, [out]); res.json({ ok: true, output_sku: out, deleted: r.rowCount }); }
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // CONFIG ▸ BOM ▸ Build on Fly Sets — bulk upload rows [{output_sku,input_sku,input_quantity}] (replace=true wipes first).
 app.post('/api/supply/set-bom-upload', async (req, res) => {
@@ -6962,14 +6970,14 @@ app.post('/api/supply/prepack-map-save', async (req, res) => {
     await pool.query(`INSERT INTO planner.prepack_map (prepack_sku, set_sku, updated_at)
       VALUES ($1,$2, now()) ON CONFLICT (prepack_sku) DO UPDATE SET set_sku=$2, updated_at=now()`, [pp, set]);
     res.json({ ok: true, prepack_sku: pp, set_sku: set });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // CONFIG ▸ BOM ▸ Prepack sets — delete one prepack mapping.
 app.post('/api/supply/prepack-map-delete', async (req, res) => {
   const pp = String((req.body || {}).prepack_sku || '').trim();
   if (!pp) return res.status(400).json({ error: 'prepack_sku required' });
   try { const r = await pool.query(`DELETE FROM planner.prepack_map WHERE prepack_sku=$1`, [pp]); res.json({ ok: true, prepack_sku: pp, deleted: r.rowCount }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // CONFIG ▸ BOM ▸ Prepack sets — bulk upload rows [{prepack_sku,set_sku}] (replace=true wipes first).
 app.post('/api/supply/prepack-map-upload', async (req, res) => {
@@ -7000,7 +7008,7 @@ app.post('/api/supply/shipment/:ref/escalate', async (req, res) => {
       VALUES ($1,$2, CASE WHEN $2 THEN now() END)
       ON CONFLICT (shipment_ref) DO UPDATE SET escalated=$2, escalated_at=CASE WHEN $2 THEN now() ELSE NULL END, updated_at=now()`, [ref, on]);
     res.json({ ok: true, escalated: on });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Shipment Plan timeline — post a note against a master shipment (admin or supplier).
 app.post('/api/supply/shipment-note', async (req, res) => {
@@ -7012,7 +7020,7 @@ app.post('/api/supply/shipment-note', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.shipment_notes (shipment_ref, author_kind, author_email, body)
       VALUES ($1,$2,$3,$4) RETURNING id`, [b.shipment_ref, kind, email, String(b.body)]);
     res.json({ id: r.rows[0].id });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Shipment Plan timeline: mark a supplier note read / unread (toggle) — admin side, mirrors note-read for POs.
 app.post('/api/supply/shipment-note-read/:id', async (req, res) => {
@@ -7020,19 +7028,19 @@ app.post('/api/supply/shipment-note-read/:id', async (req, res) => {
     const read = !(req.body && req.body.read === false);
     await pool.query(`UPDATE planner.shipment_notes SET read_at=${read ? 'now()' : 'NULL'} WHERE id=$1`, [req.params.id]);
     res.json({ ok: true, read });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Portal data for the preview/portal: notes + submissions for a supplier (scoped by supplier_id).
 app.get('/api/supply/portal-notes/:sid', async (req, res) => {
   try { res.json(await qp(`SELECT id, po, author_kind, coalesce(author_email,'') author_email, body,
       to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read
     FROM planner.supplier_notes WHERE supplier_id=$1 AND NOT coalesce(private,false) ORDER BY created_at`, [req.params.sid])); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/portal-submissions/:sid', async (req, res) => {
   try { res.json(await qp(`SELECT id, po, kind, value, status, attachment_id, to_char(submitted_at,'YYYY-MM-DD') submitted_at, to_char(applied_at,'YYYY-MM-DD') applied_at, note
     FROM planner.supplier_submissions WHERE supplier_id=$1 ORDER BY submitted_at DESC`, [req.params.sid])); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Payments made to a supplier (payment ledger) — feeds the CONFIG ▸ Portal preview's master PAYMENTS tab (the
 // real portal gets the same data via /api/portal/bootstrap).
@@ -7057,7 +7065,7 @@ app.get('/api/supply/supplier-payments/:name', async (req, res) => {
       SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(nullif(reference,''), description, ''), round(amount,2), 'Other', ''
         FROM planner.deposits WHERE is_deposit=false AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND lower(trim(supplier_name))=ANY($1)
     ) t ORDER BY payment_date DESC NULLS LAST`, [nm]).then(r => r.rows)); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Internal one-click apply / dismiss of a staged supplier submission (Phase 4). Apply writes to the live PO
 // (the internal click is the confirmation); completion_date → end_production_overide, invoice_value → supplier_invoice_total.
@@ -7074,11 +7082,11 @@ app.post('/api/supply/submission/:id/apply', async (req, res) => {
     else return res.status(400).json({ error: 'kind ' + s.kind + ' is not applyable here' });
     await pool.query(`UPDATE planner.supplier_submissions SET status='applied', applied_at=now(), applied_by=$1 WHERE id=$2`, [(req.body && req.body.by) || 'internal', req.params.id]);
     res.json({ applied });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/submission/:id/dismiss', async (req, res) => {
   try { await pool.query(`UPDATE planner.supplier_submissions SET status='dismissed' WHERE id=$1`, [req.params.id]); res.json({ dismissed: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/portal-attachment/:id', async (req, res) => {
   try { const r = (await pool.query(`SELECT filename, mime, data FROM planner.portal_attachments WHERE id=$1`, [req.params.id])).rows[0];
@@ -7086,7 +7094,7 @@ app.get('/api/supply/portal-attachment/:id', async (req, res) => {
     res.setHeader('Content-Type', r.mime || 'application/octet-stream');
     res.setHeader('Content-Disposition', 'inline; filename="' + (r.filename || 'file').replace(/"/g, '') + '"');
     res.send(r.data);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── 3PL Invoice (REPORTS ▸ 3PL Invoice) ─────────────────────────────────────
 // 3PLs: uk_ilg | us_geneva | eu_ifulfilment (=Blade) | au_coghlans. Phase 1: uploaded invoice files per
@@ -7107,7 +7115,7 @@ app.get('/api/supply/tpl/data', async (req, res) => {
       FROM planner.tpl_account_map ORDER BY region NULLS LAST, channel NULLS LAST, label`)).rows;
     const cin7_summary = /^\d{4}-\d{2}$/.test(period) ? await tplCin7Summary(period, tpl) : null;
     res.json({ ok: true, files, cost_accounts: cost, account_map: map, cin7_summary });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/tpl/upload', async (req, res) => {
   const b = req.body || {};
@@ -7118,7 +7126,7 @@ app.post('/api/supply/tpl/upload', async (req, res) => {
       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
       [b.tpl, b.period, b.filename || 'invoice', b.mime || 'application/octet-stream', buf, buf.length, b.uploaded_by || null]);
     res.json({ ok: true, id: r.rows[0].id, byte_size: buf.length });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/tpl/file/:id', async (req, res) => {
   try { const r = (await pool.query(`SELECT filename, content_type, content FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
@@ -7126,11 +7134,11 @@ app.get('/api/supply/tpl/file/:id', async (req, res) => {
     res.setHeader('Content-Type', r.content_type || 'application/octet-stream');
     res.setHeader('Content-Disposition', 'attachment; filename="' + (r.filename || 'invoice').replace(/"/g, '') + '"');
     res.send(r.content);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/tpl/file/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/tpl/cost-account', async (req, res) => {
   const b = req.body || {};
@@ -7140,7 +7148,7 @@ app.post('/api/supply/tpl/cost-account', async (req, res) => {
       ON CONFLICT (tpl, cost_type) DO UPDATE SET account_code=excluded.account_code, account_name=excluded.account_name`,
       [b.tpl, b.cost_type, (b.account_code || '').trim() || null, (b.account_name || '').trim() || null]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Edit a single account-map cell (region×channel → COGS/Sales/Fulfilment/Cost of Sales), keyed by label.
 app.post('/api/supply/tpl/account-map', async (req, res) => {
@@ -7151,7 +7159,7 @@ app.post('/api/supply/tpl/account-map', async (req, res) => {
     const r = await pool.query(`UPDATE planner.tpl_account_map SET ${b.field}=$2 WHERE label=$1`, [b.label, (String(b.value == null ? '' : b.value).trim()) || null]);
     if (!r.rowCount) return res.status(404).json({ error: 'label not found' });
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // 3PL invoice — Phase 1: parse an uploaded file and return the sum of every numeric field per sheet.
 // Generic (works for any 3PL export): finds each sheet's header row, then sums numeric columns. Named
@@ -7276,7 +7284,7 @@ app.post('/api/supply/tpl/parse/:id', async (req, res) => {
       });
     }
     res.json({ ok: true, filename: fname, sheets });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // 3PL invoice — Phase 2: map each order line's Reference to its Cin7 sales-order CostCenter, then group the
 // freight (Shipping Fee) + fulfilment (Total Excl Shipping) cost by CostCenter. 2-pass match (Reference, then
@@ -7544,7 +7552,7 @@ app.post('/api/supply/tpl/map/:id', async (req, res) => {
     refs.forEach(ref => { const ov = _tplRefOverride(ref, tpl0); if (ov) { refCC[ref] = ov; if (/^OTHER/.test(ov)) ruleTrf++; else ruleFba++; } else refCC[ref] = (byRef[ref] != null) ? byRef[ref] : (byCon[ref] != null ? byCon[ref] : null); });
     const summary = _tplAggregateAccounts(orders, refCC);
     res.json({ ok: true, imported_matched: dbrows.length, ruleAssigned: { fba: ruleFba, trf: ruleTrf }, ...summary });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // 3PL invoice — MANUAL Cin7 sales-order import for the previous month (by InvoiceDate). Populates
 // planner.tpl_cin7_orders so the Map step can resolve Reference -> CostCenter offline. Paginated, throttled,
@@ -7622,7 +7630,7 @@ app.post('/api/supply/tpl/cin7-import', async (req, res) => {
     await setLog(runId, imported, calls, done ? 'ok' : 'running', null);
     if (done) { const summary = await tplCin7Summary(period, tpl0); return res.json({ ok: true, done: true, period, from: start, to: end, kind, imported, cin7_calls: calls, run_id: runId, summary }); }
     return res.json({ ok: true, done: false, imported, cin7_calls: calls, run_id: runId, resume: { run_id: runId, start, end, period, kind, page, imported } });
-  } catch (e) { await setLog(runId, 0, 0, 'error', e.message); res.status(500).json({ error: e.message }); }
+  } catch (e) { await setLog(runId, 0, 0, 'error', e.message); log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── SUG-0020 DTC Mismatch ── on-demand Cin7 sales-order import for the Direct-to-Client branches (read-only Cin7).
 const DTC_BRANCHES = { 5051: 'Direct to Client', 27889: 'UK B2B JLEW', 27890: 'UK B2B NEXT' };
@@ -7667,12 +7675,12 @@ app.post('/api/supply/dtc/import', async (req, res) => {
     await setLog(runId, imported, calls, done ? 'ok' : 'running', null);
     if (done) return res.json({ ok: true, done: true, imported, cin7_calls: calls, run_id: runId });
     return res.json({ ok: true, done: false, imported, cin7_calls: calls, run_id: runId, resume: { run_id: runId, bi, page, imported, days } });
-  } catch (e) { await setLog(runId, 0, 0, 'error', e.message); res.status(500).json({ error: e.message }); }
+  } catch (e) { await setLog(runId, 0, 0, 'error', e.message); log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/dtc/status', async (_req, res) => {
   try { const o = (await pool.query(`SELECT count(*)::int n, count(*) FILTER (WHERE NOT is_void AND dispatched_date IS NULL)::int open, to_char(max(imported_at),'DD-Mon-YY HH24:MI') at FROM planner.dtc_sales_orders`)).rows[0] || {};
     res.json({ orders: o.n || 0, open: o.open || 0, imported_at: o.at || null }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Supplier Timing: mark a PO's delay as OUR issue (excluded from supplier slip stats) + optional manual delay days/note.
 app.post('/api/supply/supplier-timing/review', async (req, res) => {
@@ -7684,7 +7692,7 @@ app.post('/api/supply/supplier-timing/review', async (req, res) => {
       ON CONFLICT (po) DO UPDATE SET our_issue=excluded.our_issue, manual_delay_days=excluded.manual_delay_days, note=excluded.note, updated_by=excluded.updated_by, updated_at=now()`,
       [po, !!b.our_issue, (md != null && !isNaN(md)) ? md : null, b.note ? String(b.note) : null, authUser(req)]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── Manage 3PL: import a market's 3PL stock report (drivehq CSV) and compare on-hand vs planner.products.inventory_<mkt>_3pl ──
 // EU has no source yet. URLs are cache-busted with a timestamp. Read-only (no writes) — it's a comparison view.
@@ -7855,7 +7863,7 @@ app.get('/api/supply/inventory-3pl/status', async (req, res) => {
     if (!m || !m.report) return res.json({ market: mkt, label: INV3PL_SRC[mkt].label || mkt, configured: true, imported: false });
     const rep = {}; Object.keys(m.report).forEach(sku => { const a = m.report[sku]; rep[sku] = { oh: Number(a[0]) || 0, av: Number(a[1]) || 0 }; });
     res.json({ market: mkt, label: INV3PL_SRC[mkt].label || mkt, configured: true, imported: true, imported_by: m.imported_by, imported_at: m.imported_at, ...(await inv3plCompare(mkt, rep)) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // POST: fetch the market's report fresh, parse, persist (who/when + report), and return the comparison.
 app.post('/api/supply/inventory-3pl/import', async (req, res) => {
@@ -7880,7 +7888,7 @@ app.post('/api/supply/inventory-3pl/import', async (req, res) => {
       ON CONFLICT (market) DO UPDATE SET imported_by=excluded.imported_by, imported_at=now(), report=excluded.report`, [mkt, by, JSON.stringify(store)]);
     const m = (await pool.query(`SELECT to_char(imported_at,'YYYY-MM-DD"T"HH24:MI:SS') imported_at FROM planner.inventory_3pl_imports WHERE market=$1`, [mkt])).rows[0];
     res.json({ market: mkt, label: cfg.label || mkt, configured: true, imported: true, imported_by: by, imported_at: m.imported_at, url: cfg.url || 'BLADE API', ...(await inv3plCompare(mkt, parsed.rep)) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── Manage FBA / FBA Aged: manually-uploaded Amazon FBA inventory report per market. Compare (available + fc-transfer)
 // vs planner.products.inventory_<mkt>_fba; the aged buckets (91-180 … 456+) feed the FBA Aged tab. Persisted per market.
@@ -8077,7 +8085,7 @@ app.get('/api/supply/inventory-awd/status', async (_req, res) => {
   try { const m = (await pool.query(`SELECT imported_by, to_char(imported_at,'YYYY-MM-DD"T"HH24:MI:SS') imported_at, report FROM planner.inventory_fba_imports WHERE market='US_AWD'`)).rows[0];
     if (!m || !m.report) return res.json({ market: 'US_AWD', imported: false });
     res.json({ market: 'US_AWD', imported: true, imported_by: m.imported_by, imported_at: m.imported_at, ...(await awdCompare(m.report)) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/inventory-awd/import', async (req, res) => {
   const b = req.body || {}; let text = String(b.csv || '');
@@ -8091,7 +8099,7 @@ app.post('/api/supply/inventory-awd/import', async (req, res) => {
       ON CONFLICT (market) DO UPDATE SET imported_by=excluded.imported_by, imported_at=now(), report=excluded.report`, [by, JSON.stringify(parsed.rep)]);
     const m = (await pool.query(`SELECT to_char(imported_at,'YYYY-MM-DD"T"HH24:MI:SS') imported_at FROM planner.inventory_fba_imports WHERE market='US_AWD'`)).rows[0];
     res.json({ market: 'US_AWD', imported: true, imported_by: by, imported_at: m.imported_at, ...(await awdCompare(parsed.rep)) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/inventory-fba/aged-rates', async (req, res) => {
   const b = req.body || {}, mkt = String(b.market || '').toUpperCase();
@@ -8100,7 +8108,7 @@ app.post('/api/supply/inventory-fba/aged-rates', async (req, res) => {
     await pool.query(`INSERT INTO planner.app_settings(key,value) VALUES('fba_aged_rates',$1)
       ON CONFLICT (key) DO UPDATE SET value=excluded.value`, [JSON.stringify(cur)]);
     res.json({ ok: true, market: mkt, rates: cur[mkt] });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/inventory-fba/status', async (req, res) => {
   const mkt = String((req.query && req.query.market) || '').toUpperCase();
@@ -8109,7 +8117,7 @@ app.get('/api/supply/inventory-fba/status', async (req, res) => {
     const m = (await pool.query(`SELECT imported_by, to_char(imported_at,'YYYY-MM-DD"T"HH24:MI:SS') imported_at, report FROM planner.inventory_fba_imports WHERE market=$1`, [mkt])).rows[0];
     if (!m || !m.report) return res.json({ market: mkt, imported: false });
     res.json({ market: mkt, imported: true, imported_by: m.imported_by, imported_at: m.imported_at, ...(await invFbaCompare(mkt, m.report)) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/inventory-fba/import', async (req, res) => {
   const b = req.body || {}, mkt = String(b.market || '').toUpperCase();
@@ -8126,7 +8134,7 @@ app.post('/api/supply/inventory-fba/import', async (req, res) => {
       ON CONFLICT (market) DO UPDATE SET imported_by=excluded.imported_by, imported_at=now(), report=excluded.report`, [mkt, by, JSON.stringify(parsed.rep)]);
     const m = (await pool.query(`SELECT to_char(imported_at,'YYYY-MM-DD"T"HH24:MI:SS') imported_at FROM planner.inventory_fba_imports WHERE market=$1`, [mkt])).rows[0];
     res.json({ market: mkt, imported: true, imported_by: by, imported_at: m.imported_at, ...(await invFbaCompare(mkt, parsed.rep)) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── PO inbound delays + impacted products (SUG-0024 Inventory Status Report §6) ───────────────
 // Landing (into-stock) date per open PO = coalesce(shipment arrival/delivery/landing, PO override, prod_end+7+sea lead).
@@ -8214,7 +8222,7 @@ async function poDeliveryDelays(market) {
 app.get('/api/supply/po-delays', async (req, res) => {
   const mkt = String((req.query && req.query.market) || '').toUpperCase();
   try { res.json(await poDeliveryDelays(mkt)); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── Master PO (consolidated supplier invoice) ─────────────────────────────────────────────────
 // A MASTER is a REAL purchase_orders row (is_master=true) that consolidates N child POs (one supplier).
@@ -8241,7 +8249,7 @@ app.get('/api/supply/master-po/new-data', async (req, res) => {   // suppliers w
       LEFT JOIN planner.suppliers s ON lower(trim(s.name))=lower(trim(f.supplier_name))
       WHERE p.master_po IS NULL AND NOT coalesce(p.is_master,false) AND coalesce(f.supplier_name,'')<>'' ORDER BY 1`)).rows;
     res.json({ suppliers: rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/master-po/eligible', async (req, res) => {   // POs eligible to become children of a master
   const sup = String((req.query && req.query.supplier) || '').trim(); if (!sup) return res.json({ pos: [] });
@@ -8250,7 +8258,7 @@ app.get('/api/supply/master-po/eligible', async (req, res) => {   // POs eligibl
       AND lower(trim(f.supplier_name))=lower(trim($1)) AND coalesce(p.status,'') NOT ILIKE '%cancel%' AND coalesce(p.status,'') NOT ILIKE '%complete%'
       AND NOT EXISTS (SELECT 1 FROM planner.inbound_shipments i WHERE i.reference=p.po) ORDER BY p.po`, [sup])).rows;
     res.json({ pos: rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/master-po/children', async (req, res) => {   // Child PO tab: all children grouped by master + master link/status
   try {
@@ -8260,7 +8268,7 @@ app.get('/api/supply/master-po/children', async (req, res) => {   // Child PO ta
       LEFT JOIN planner.purchase_orders mp ON mp.po=p.master_po
       WHERE p.master_po IS NOT NULL ORDER BY p.master_po, p.po`)).rows;
     res.json({ children: rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/master-po/create', async (req, res) => {
   const b = req.body || {}, childPos = Array.isArray(b.child_pos) ? b.child_pos.filter(Boolean) : [];
@@ -8369,7 +8377,7 @@ app.post('/api/supply/dtc/review', async (req, res) => {   // per-order note / a
   try { await pool.query(`INSERT INTO planner.dtc_mismatch_review (so_cin7_id,note,accepted,accepted_by,updated_at) VALUES ($1,$2,$3,$4,now())
       ON CONFLICT (so_cin7_id) DO UPDATE SET note=coalesce(excluded.note,planner.dtc_mismatch_review.note), accepted=excluded.accepted, accepted_by=excluded.accepted_by, updated_at=now()`,
       [id, (b.note != null ? String(b.note) : null), !!b.accepted, !!b.accepted ? authUser(req) : null]);
-    res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // The mismatch report: OPEN DTC sales orders (not void, not dispatched) vs the POs mapped by sales_order_ref.
 // Issue 1 = no PO mapped; Issue 2 = SKU/qty on the SO ≠ summed across its POs. Accepted orders drop out of the count.
@@ -8417,7 +8425,7 @@ app.get('/api/supply/dtc/mismatch', async (req, res) => {
     const unmappedOpen = unmapped.filter(u => !u.accepted).length;   // badge/count = non-accepted only
     if (countOnly) return res.json({ orders: [], counts: { issues, accepted, ok, unmapped_pos: unmappedOpen } });
     res.json({ orders, unmapped_pos: unmapped, counts: { issues, accepted, ok, unmapped_pos: unmappedOpen } });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Accept / note an unmapped-PO row (the reverse DTC view) — mig 222
 app.post('/api/supply/dtc/po-review', async (req, res) => {
@@ -8429,7 +8437,7 @@ app.post('/api/supply/dtc/po-review', async (req, res) => {
       ON CONFLICT (po) DO UPDATE SET accepted=excluded.accepted, accepted_by=excluded.accepted_by, note=coalesce(excluded.note, planner.dtc_po_review.note), updated_at=now()`,
       [po, !!b.accepted, by, b.note != null ? String(b.note) : null]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // 3PL invoice — reference-based CLEAN-UP SWEEP for one invoice file. Fetches the invoice's references that
 // aren't yet cached, directly from Cin7 (Reference IN, then CustomerOrderNo IN) with NO branch/date filter,
@@ -8479,7 +8487,7 @@ app.post('/api/supply/tpl/cin7-sweep/:id', async (req, res) => {
     await logRun(fetched, 'ok', null, calls);
     const cov3 = await covOf(sweepable); const stillMissing = sweepable.filter(r => !cov3.has(r));
     res.json({ ok: true, refs: refs.length, missing_before: missingBefore, fetched, cin7_calls: calls, rule_excluded: ruleRefs.length, still_missing: stillMissing.length, still_missing_refs: stillMissing.slice(0, 50) });
-  } catch (e) { await logRun(0, 'error', e.message, 0); res.status(500).json({ error: e.message }); }
+  } catch (e) { await logRun(0, 'error', e.message, 0); log500(e); res.status(500).json({ error: e.message }); }
 });
 // 3PL invoice — Xero bill CSV (Phase 3). Assembles a Xero bills-import CSV: one line per non-order cost type
 // (Storage/Returns/Inbound/Other → the cost-type account codes) + two lines per cost centre (Freight + Fulfilment
@@ -8521,7 +8529,7 @@ app.post('/api/supply/tpl/journal/:id', async (req, res) => {
     const esc = x => { x = String(x == null ? '' : x); return /[",\n]/.test(x) ? ('"' + x.replace(/"/g, '""') + '"') : x; };
     const csv = HDR + '\n' + lines.map(l => [l.narration, l.date, l.desc, l.code, l.taxRate, l.amount.toFixed(2), '', '', '', ''].map(esc).join(',')).join('\n');
     res.setHeader('Content-Type', 'text/csv;charset=utf-8'); res.setHeader('Content-Disposition', 'attachment; filename="journal-' + (REG || tpl0) + '-' + period + '.csv"'); res.send(csv);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Coghlans (AU) invoices WEEKLY, not monthly — pull the Period End (Effective Date) + Invoice Number from the
 // "Coghlan Settings" sheet so the Xero bill's date + reference reflect the week, not the calendar-month end.
@@ -8619,7 +8627,7 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
     res.setHeader('Content-Type', 'text/csv;charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="xero-bill-' + meta.region + '-' + endISO + '.csv"');
     res.send(csv);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Cin7 import audit log — every import run (range, kind, orders, status, error, calls).
 // ── Open-actions scoreboard (SUPPLY ▸ Reports ▸ Metrics) — weekly snapshot of open actions (mig 226) ──────────
@@ -8708,10 +8716,10 @@ app.get('/api/supply/action-metrics/data', async (_req, res) => {   // 2-segment
         supplier_pos, supplier_dtc, po_actions, order_plan, shipments, manufacturing, samples, payments_overdue, dtc_mismatch, coalesce(reallocations,0) reallocations, total_our
       FROM planner.action_metrics_snapshot ORDER BY week_ending DESC LIMIT 52`)).rows;
     res.json({ ok: true, current: await computeOpenActions(), history });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/action-metrics/snapshot', async (_req, res) => {
-  try { res.json({ ok: true, snapshot: await snapshotOpenActions() }); } catch (e) { res.status(500).json({ error: e.message }); }
+  try { res.json({ ok: true, snapshot: await snapshotOpenActions() }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // The individual PO-level open actions (from the same exceptions engine as the ACTIONS tab) — PO + type + explainer,
 // so the Metrics scoreboard can list every PO with an open action and link each to its drawer.
@@ -8722,13 +8730,13 @@ app.get('/api/supply/action-metrics/pos', async (_req, res) => {
     const pos = rows.filter(r => r.target === 'po' && (r.ref || r.target_key))
       .map(r => ({ po: r.ref || r.target_key, type: r.type, detail: r.detail, severity: r.severity }));
     res.json({ ok: true, pos });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Weekly snapshot target — now driven by the n8n workflow (Thursday 11:59 GMT, live 2026-08-18); computes + upserts this
 // week's row (idempotent). NOTE: vercel.json still has a legacy cron `59 23 * * 4` pointing here — redundant with n8n
 // (and blocked by the webhook-secret gate); Diviyaj to remove or retime it.
 app.get('/api/cron/action-metrics', async (_req, res) => {
-  try { res.json({ ok: true, snapshot: await snapshotOpenActions() }); } catch (e) { res.status(500).json({ error: e.message }); }
+  try { res.json({ ok: true, snapshot: await snapshotOpenActions() }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/tpl/cin7-log', async (req, res) => {
   try {
@@ -8778,7 +8786,7 @@ app.post('/api/supply/fba-transfers/refresh', async (req, res) => {
     const pr = await pool.query(`DELETE FROM planner.fba_pending_transfers WHERE received_date IS NOT NULL OR (reference IS NOT NULL AND reference IN (SELECT DISTINCT reference FROM planner.inbound_shipments WHERE reference IS NOT NULL))`);
     await pool.query(`INSERT INTO planner.app_settings (key,value,updated_at) VALUES ('fba_transfers_last_run',$1,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_at=now()`, [new Date().toISOString()]);
     res.json({ ok: true, transfers: kept, lines, pruned: pr.rowCount, cin7_calls: calls });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── Zalando: baked per-SKU forecast + uploaded stock-on-hand (planner.zalando_stock). Feeds the BUY & MOVE ▸ Zalando tab.
 app.get('/api/supply/zalando/data', async (req, res) => {   // /data suffix: single-segment /api/supply/zalando is caught by the :section catch-all
@@ -8790,7 +8798,7 @@ app.get('/api/supply/zalando/data', async (req, res) => {   // /data suffix: sin
     const skus = Object.keys(forecast); const eans = {};   // SKU → EAN (strip the leading apostrophe Sheets adds) for the ZALANDO_UP (EAN,Quantity) download
     if (skus.length) (await pool.query(`SELECT sku, replace(coalesce(product_ean,''), chr(39), '') ean FROM planner.products WHERE sku = ANY($1)`, [skus])).rows.forEach(r => { if (r.ean) eans[r.sku] = r.ean; });
     res.set('Cache-Control', 'no-store').json({ ok: true, forecast, months, stock, eans, stock_updated: up.d || null, stock_updated_ts: up.ts || null, stock_skus: up.n || 0, stock_updated_by: up.by || null });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Upload the combined Zalando stock file (csv/xls/xlsx). Flexible: finds the header row with a "Sku" + "…sellable_stock" column.
 app.post('/api/supply/zalando/stock-upload', async (req, res) => {
@@ -8810,7 +8818,7 @@ app.post('/api/supply/zalando/stock-upload', async (req, res) => {
     await pool.query(`DELETE FROM planner.zalando_stock`);   // dedicated snapshot table — each upload replaces with the latest
     for (const [sku, q] of rows) await pool.query(`INSERT INTO planner.zalando_stock (sku, qty, updated_at, uploaded_by) VALUES ($1,$2,now(),$3) ON CONFLICT (sku) DO UPDATE SET qty=excluded.qty, updated_at=now(), uploaded_by=excluded.uploaded_by`, [sku, q, by]);
     res.json({ ok: true, count: rows.length });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Serve the in-flight (not-yet-inbound) FBA transfers for the FBA tab + last-run stamp. Only rows whose
 // reference isn't already in inbound_shipments (defensive — the refresh also prunes them).
@@ -8830,7 +8838,7 @@ app.get('/api/supply/actions/state', async (req, res) => {
   try {
     const r = await pool.query(`SELECT action_key, status, to_char(snooze_until,'YYYY-MM-DD') snooze_until, snoozed_by, to_char(snoozed_at,'YYYY-MM-DD HH24:MI') snoozed_at FROM planner.supply_action_state`);
     res.json(r.rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Lifecycle for SUPPLY ▸ Actions (dismiss / snooze / done) by stable key. Absent row = open; restore deletes.
 app.post('/api/supply/actions/state', async (req, res) => {
@@ -8846,7 +8854,7 @@ app.post('/api/supply/actions/state', async (req, res) => {
       ON CONFLICT (action_key) DO UPDATE SET status=excluded.status, snooze_until=excluded.snooze_until, note=excluded.note, snoozed_by=excluded.snoozed_by, snoozed_at=excluded.snoozed_at, updated_at=now()`,
       [key, b.status || 'dismissed', days, b.note || null, who || null, indef]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Drop the cached Actions build so the next fetch reflects a just-made data edit (the client calls this from
 // invalidateDerived after any PO/shipment/payment change). Idle visits still ride the 10-min cache; editors get
@@ -8862,7 +8870,7 @@ app.post('/api/data-cache/invalidate', async (req, res) => {
   if (secret && req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
   try { _dataCache = null; const vals = await refreshDataCache(); invalidateBiCache();
     res.json({ ok: true, rebuilt: Array.isArray(vals) ? vals.length : 0, kv: KV_ON, at: new Date().toISOString() }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Import-duty pivot (CONFIG ▸ Import duty): set duty % for a category × country. Upserts the duty_rates row.
 app.post('/api/supply/duty-upsert', async (req, res) => {
@@ -8874,7 +8882,7 @@ app.post('/api/supply/duty-upsert', async (req, res) => {
     if (ex.rowCount) await pool.query(`UPDATE planner.duty_rates SET duty_pct=$1 WHERE id=$2`, [dv, ex.rows[0].id]);
     else await pool.query(`INSERT INTO planner.duty_rates (category, country, duty_pct) VALUES ($1,$2,$3)`, [cat, country, dv]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Transfer lead-time matrix (CONFIG ▸ Branches ▸ Transfer lead times): set the weeks for one from→to lane.
 // Empty/blank weeks DELETES the lane (a missing lane = "we don't transfer that way", so the recommendations skip it).
@@ -8893,7 +8901,7 @@ app.post('/api/supply/transfer-lead-upsert', async (req, res) => {
         [from, to, wk, authUser(req) || null]);
     }
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Air-freight tier rate edit (CONFIG ▸ Freight rates ▸ Air): rate per kg by weight band.
 app.post('/api/supply/air-rate/:id', (req, res) =>
@@ -8905,7 +8913,7 @@ app.post('/api/supply/freight-pallets', async (req, res) => {
   if (!sz) return res.status(400).json({ error: 'container_size required' });
   const p = (b.pallets === '' || b.pallets == null) ? null : parseInt(b.pallets, 10);
   try { await pool.query(`UPDATE planner.freight_rates SET pallets=$1 WHERE container_size=$2`, [p, sz]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Freight-rate pivot (CONFIG ▸ Freight rates): set the USD rate for a container size × destination. Upserts.
 app.post('/api/supply/freight-upsert', async (req, res) => {
@@ -8917,7 +8925,7 @@ app.post('/api/supply/freight-upsert', async (req, res) => {
     if (ex.rowCount) await pool.query(`UPDATE planner.freight_rates SET cost=$1 WHERE id=$2`, [cost, ex.rows[0].id]);
     else await pool.query(`INSERT INTO planner.freight_rates (destination, container_size, cost, currency) VALUES ($1,$2,$3,'USD')`, [dest, sz, cost]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Create a deposit ("Deposit") or a sundry payment ("Other", is_deposit=false). Fields then edit
 // inline. reference is optional (Other payments often have none) and need not be unique.
@@ -8929,7 +8937,7 @@ app.post('/api/supply/deposit-create', async (req, res) => {
       [(b.reference || '').trim() || null, b.is_deposit !== false, b.supplier_name || null,
        b.description || null, b.amount === '' || b.amount == null ? null : b.amount]);
     res.json({ ok: true, id: r.rows[0].id });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/payment-txn/:id', (req, res) =>
   patch(res, 'planner.payment_transactions', 'id', req.params.id,
@@ -8948,7 +8956,7 @@ app.post('/api/supply/run-meta/:date', async (req, res) => {
     await pool.query(`INSERT INTO planner.payment_run_meta (${cols.join(',')}) VALUES (${ph.join(',')})
       ON CONFLICT (run_date) DO UPDATE SET ${upd}, updated_at=now()`, vals);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Order-plan line qty edit — sets our planned qty and stamps proposed_at/by while it differs from
 // the ERP source of truth (erp_qty). Clears the stamp if the edit returns it to the ERP value.
@@ -8997,7 +9005,7 @@ app.post('/api/supply/po-line/:po_sku', async (req, res) => {
       logPoChange(po, 'Order plan', detail, authUser(req) || b.who || null);
     }
     res.json({ updated: r.rowCount });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── Pallet rebalance: even a production's open POs toward 20 pallets each (one container). Pools all line
 // qty across the same supplier+production's open, UNSHIPPED, non-Direct POs and first-fit packs into the
@@ -9068,7 +9076,7 @@ app.post('/api/supply/rebalance-apply/:po', async (req, res) => {
         [m.po + '|' + m.sku, m.po, m.sku, m.new]);
     }
     res.json({ applied: plan.moves.length, bins: plan.bins.map(b => ({ po: b.po, pallets: b.pallets })) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Per-SKU supplier resolution for BUY→PO: main supplier (default) + all options (multi-supplier) + pallet_qty.
 // Supplier name→code via suppliers.name (exact, case-insensitive) then first-word fallback (handles "MQ Print
@@ -9177,7 +9185,7 @@ app.post('/api/supply/buyplan-pos', async (req, res) => {
     }
     invalidateSupplyCaches();   // new POs written → bump the epoch so the cached PO-rows / order-plan build rebuilds; otherwise the new POs don't show in Order Plan until the TTL / a hard refresh
     res.json({ committed: true, created, pos, warnings: warn });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Per-SKU supplier options for the BUY→PO dialog: each SKU's qty, pallet_qty, main supplier (default) and the
 // full option list (multi-supplier). The UI shows a tick + supplier picker per SKU.
@@ -9191,7 +9199,7 @@ app.post('/api/supply/buyplan-skus', async (req, res) => {
     res.json({ skus: items.map(it => { const sku = String(it.sku).toUpperCase(), m = map[sku] || { options: [] };
       return { sku, qty: Math.round(Number(it.qty)), pallet_qty: m.pallet_qty || 0, category: m.category || '', main_code: m.main_code || null,
         main_name: m.main_name || '', options: (m.options || []).map(o => ({ code: o.code, name: o.name })), moq: (m.moq || null), discontinue: discFor(m) }; }) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Approve an order-plan exception on a line. field selects which: partial (default) → partial_carton_approved,
 // supplier → supplier_risk_approved, discontinue → discontinue_approved.
@@ -9215,7 +9223,7 @@ app.post('/api/supply/po/:po/upload', async (req, res) => {
        VALUES ('supply_erp_push','pending',$1,$2)`,
       [r.rowCount, `${r.rowCount} line(s) staged to push to ERP (qty + cost) for ${req.params.po}`]);
     res.json({ uploaded: r.rowCount });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Delete a Purchase Order and its owned children (Master Data tab). Gated/confirmed in the UI.
 app.post('/api/supply/po/:po/delete', async (req, res) => {
@@ -9235,7 +9243,7 @@ app.post('/api/supply/po/:po/delete', async (req, res) => {
     const r = await client.query('DELETE FROM planner.purchase_orders WHERE po=$1', [po]);
     await client.query('COMMIT');
     res.json({ deleted: r.rowCount });
-  } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 // Resolve the Cin7 Authorization header from env — accepts EITHER form, so it's flexible:
@@ -9326,7 +9334,7 @@ app.post('/api/supply/po/merge', async (req, res) => {
     await client.query('DELETE FROM planner.purchase_orders WHERE po=$1', [from]);
     await client.query('COMMIT');
     res.json({ ok: true, into, from, lines: fromLines.length, summed, copied });
-  } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 // BULK paste SKU/qty rows into a PO's order plan (Excel / Sheets paste). Each row is validated against our SKU
@@ -9365,7 +9373,7 @@ app.post('/api/supply/po-lines-paste', async (req, res) => {
     }
     await client.query('COMMIT');
     res.json({ ok: true, po, added, updated, skipped, badQty });
-  } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 app.post('/api/supply/po/:po/cin7-date', async (req, res) => {
@@ -9407,7 +9415,7 @@ app.post('/api/supply/po/:po/cin7-date', async (req, res) => {
     res.json({ ok: true, cin7_id: cin7Id, estimatedDeliveryDate: edd, erp_mirror_updated: mirrored,
       approval_preserved: curApproved === undefined ? 'unchanged' : (curApproved ? 'approved' : 'draft'),
       link: 'https://go.cin7.com/Cloud/TransactionEntry/TransactionEntry.aspx?idCustomerAppsLink=951111&OrderId=' + encodeURIComponent(cin7Id) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Push a PO's line items (SKU / qty / price) to Cin7 (#14b). Price = the approved supplier final cost where
 // there is one (portal_line_costs.final_cost, confirmed), else the standard plan cost (cost_price).
@@ -9649,7 +9657,7 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
     res.json({ ok: true, mode, cin7_id: newId, cin7_member_id: memberId || null, cin7_branch_id: branchId || null, lines: lines.length, approved: lines.filter(l => l.approved_price).length, erp_mirror_updated: mirrored, validation, cin7_trace: trace,
       total_units, total_cost: Math.round(total_cost * 100) / 100, currency: poRow.currency || 'USD',
       link: newId ? 'https://go.cin7.com/Cloud/TransactionEntry/TransactionEntry.aspx?idCustomerAppsLink=951111&OrderId=' + encodeURIComponent(newId) : null });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // READ-ONLY verify: GET the Cin7 PO's line items and compare to the planner order plan (qty AND price).
 // No write. price = approved supplier final cost, else cost_price (same as the push). ratio = cin7/plan
@@ -9689,7 +9697,7 @@ app.get('/api/supply/po/:po/cin7-verify', async (req, res) => {
       qty_off: rows.filter(r => !r.qty_ok).map(r => r.sku),
       price_off: rows.filter(r => !r.price_ok).map(r => ({ sku: r.sku, plan_usd: r.plan_price, cin7_usd: r.cin7_usd, created: r.created, qtyShipped: r.qtyShipped, holdingQty: r.holdingQty })),
       extras_in_cin7: extras });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // BULK "Update Cin7 Date" — push the planner completion date to Cin7 EstimatedDeliveryDate for every supplied PO.
 // body: { pos: [{ po, completion_date }] }. Server RE-VALIDATES: only ACTIVE (non-complete) POs that exist in Cin7
@@ -9739,7 +9747,7 @@ app.post('/api/supply/cin7-dates-sync', async (req, res) => {
     let mirrored = 0;
     for (const t of todo) { try { const u = await pool.query(`UPDATE planner.erp_purchase_orders SET final_delivery_date=$2::date, synced_at=now() WHERE po=$1`, [t.po, t.date]); mirrored += u.rowCount; } catch (e) { /* non-fatal */ } }
     res.json({ ok: true, updated: batch.length, erp_mirror_updated: mirrored, skipped: skipped.length, skippedDetail: skipped });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Rename a PO (Master Data tab) — cascades the key across all owned tables + shipment pointers.
 app.post('/api/supply/po/:po/rename', async (req, res) => {
@@ -9763,7 +9771,7 @@ app.post('/api/supply/po/:po/rename', async (req, res) => {
     await client.query('UPDATE planner.shipments SET master_po=$1 WHERE master_po=$2', [newpo, oldpo]).catch(() => {});
     await client.query('COMMIT');
     res.json({ ok: true });
-  } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 // PO management engine — inline edits on the purchase_orders inputs/overrides.
@@ -9853,7 +9861,7 @@ app.post('/api/supply/po/:po/set-shipping', async (req, res) => {
       `UPDATE planner.purchase_orders SET status='SHIPPING', production_status='shipped', production_confirmed_at=coalesce(production_confirmed_at,now()), updated_at=now()
         WHERE po=$1 AND status ILIKE '%production%' RETURNING po`, [req.params.po])).rows;
     res.json({ updated: rows.length, pos: rows.map(x => x.po), shipment: r.shipment_ref || null });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // "Shipped to master": a rider PO the supplier shipped to the consolidator, but the master hasn't sailed. OUR
 // side stays upstream (≈ ready to ship) — set the single PO to SHIPPED TO MASTER. When the master departs, the
@@ -9867,7 +9875,7 @@ app.post('/api/supply/po/:po/set-shipped-to-master', async (req, res) => {
         RETURNING po`, [req.params.po])).rows;
     if (!rows.length) return res.status(409).json({ error: 'PO not eligible (already shipped/complete, or not found)' });
     res.json({ updated: rows.length, po: req.params.po });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Shared: advance every PO on a shipment still in PRODUCTION to SHIPPING + production_status 'shipped'.
 // Matches the shipment's children (shipment_ref=ref), the ref itself (self-master), and the shipment's
@@ -9905,7 +9913,7 @@ app.post('/api/supply/po/:po/supplier', async (req, res) => {
       SET supplier_id=(SELECT id FROM planner.suppliers WHERE name=$2 LIMIT 1)
       WHERE po=$1 AND supplier_id IS NULL`, [req.params.po, name]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Supplier production-confidence: set the confirmed production status and stamp the confirmation time
 // (now). Clearing the status clears the stamp. Drives the "Production unconfirmed" action.
@@ -9918,7 +9926,7 @@ app.post('/api/supply/po/:po/prod-status', async (req, res) => {
       SET production_status=$2, production_confirmed_at=CASE WHEN $2='' THEN NULL ELSE now() END WHERE po=$1`,
       [req.params.po, st]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Create / input a new purchase order. Minimal header; the rest is filled inline + in the PLAN panel.
 // supplier_id is resolved from the supplier name so payment terms / production lead apply immediately.
@@ -9941,7 +9949,7 @@ app.post('/api/supply/po-create', async (req, res) => {
     await notePoCreated(pool, po, authUser(req));
     invalidateSupplyCaches();   // new PO written → rebuild cached PO-rows / order-plan so it shows without a hard refresh
     res.json({ ok: true, po });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Import a purchase order FROM Cin7 into the planner (reverse of the push). Provide a Cin7 PO reference; we
 // read it from Cin7, map the supplier (via suppliers.cin7_member_id, else the Cin7 company name) and branch
@@ -9989,7 +9997,7 @@ app.post('/api/supply/po-import-cin7', async (req, res) => {
     await pool.query("INSERT INTO planner.erp_purchase_orders (po, erp_po_id, supplier_name, status, synced_at) VALUES ($1,$2,$3,'open',now())", [o.reference, String(o.id), supplier_name]);
     if (!exists) await notePoCreated(pool, o.reference, authUser(req));
     res.json({ ok: true, imported: true, po: o.reference, lines: lines.length, supplier_name, branch, currency: o.currencyCode || null, cin7_id: o.id });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Bulk-upload POs from a pasted/uploaded list. Each row: PO (+ optional supplier/ship-to/branch/status/start
 // + optional SKU/Qty). Rows are grouped by PO — a NEW PO is created from its header fields; an EXISTING PO is
@@ -10195,7 +10203,7 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
       notes: notes.rows, subs: subs.rows, line_costs: lc,
       sup_completion: supComp.rows[0] || null, crossdock_shipped: xdShip.rows, additional_costs: addCosts.rows,
       erp_complete: !!(poMeta.rows[0] && poMeta.rows[0].is_complete) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // SHIPS-WITH master label fields for one PO. source supplier + production ref = this PO; ships-with supplier + PO
 // = the supplier/ref of the master shipment this PO rides on (sh.master_po, fallback shipment_ref); plus dest + client.
@@ -10214,7 +10222,7 @@ app.get('/api/supply/ships-with/:po', async (req, res) => {
       LEFT JOIN planner.purchase_orders mpo ON mpo.po = coalesce(nullif(sh.master_po,''), sh.shipment_ref)
       WHERE po.po=$1`, [req.params.po]);
     res.json(r.rows[0] || {});
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Production detail (a prod_no × supplier): SKU × total qty, the POs, and assigned deposits.
 app.get('/api/supply/production-detail/:prod', async (req, res) => {
@@ -10241,7 +10249,7 @@ app.get('/api/supply/production-detail/:prod', async (req, res) => {
         WHERE pd.prod_no=$1 AND coalesce(pd.supplier_name,'')=$2 ORDER BY pd.deposit_ref`, [prod, supplier]),
     ]);
     res.json({ skus: skus.rows, pos: pos.rows, deposits: deps.rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Assign / unassign a deposit to a production (prod_no × supplier).
 app.post('/api/supply/production-deposit', async (req, res) => {
@@ -10255,7 +10263,7 @@ app.post('/api/supply/production-deposit', async (req, res) => {
         VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [b.prod_no, sup, b.deposit_ref]);
     }
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Create a deposit FOR a production (prod_no × supplier) and assign it. Reference auto-formats as
 // {prod_no}-{supplier 2-digit code}-{n}; amount defaults to 30% of the production value LESS deposits
@@ -10284,7 +10292,7 @@ app.post('/api/supply/production-deposit-create', async (req, res) => {
     await pool.query(`INSERT INTO planner.production_deposits (prod_no, supplier_name, deposit_ref)
       VALUES ($1,$2,$3) ON CONFLICT DO NOTHING`, [prod, sup, ref]);
     res.json({ ok: true, reference: ref, amount });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Record the actual paid currency + amount for a payment (date × supplier) — alt to the USD legs.
 app.post('/api/supply/payment-fx', async (req, res) => {
@@ -10310,7 +10318,7 @@ app.post('/api/supply/payment-fx', async (req, res) => {
       } catch (e) { console.error('[payment-confirmed email]', e.message); }
     }
     res.json({ ok: true, confirmed: nowConfirmed, emailPreview });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Shipment detail — the POs aboard a shipment (master first).
 app.get('/api/supply/shipment-detail/:ref', async (req, res) => {
@@ -10324,7 +10332,7 @@ app.get('/api/supply/shipment-detail/:ref', async (req, res) => {
       FROM planner.purchase_orders po WHERE po.shipment_ref=$1
       ORDER BY is_master DESC, po.po`, [req.params.ref]);
     res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Shipment edit (upsert) — carrier/ref/master/status/notes + the date OVERRIDES that win over the
 // POs aboard. Row may not exist yet (a shipment_ref freshly typed onto a PO), so insert-on-conflict.
@@ -10415,7 +10423,7 @@ app.post('/api/supply/shipment/:ref', async (req, res) => {
     // Record of change on the SHIPMENT's own timeline (field edits: carrier / status / mode / freight / dates).
     try { if (_oldShipFull) await logShipFieldChanges(ref, _oldShipFull, req.body, authUser(req)); } catch (e) { /* best-effort */ }
     res.json({ ok: true, rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Create a new shipment (header only; POs are assigned separately). master_po defaults to the ref.
 app.post('/api/supply/shipment-create', async (req, res) => {
@@ -10427,7 +10435,7 @@ app.post('/api/supply/shipment-create', async (req, res) => {
       [ref, (req.body.master_po || ref), req.body.carrier || null, req.body.carrier_ref || null]);
     if (ins.rowCount) await noteShipmentCreated(pool, ref, authUser(req));
     res.json({ ok: true, shipment_ref: ref });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Delete a now-empty SELF-shipment (its master IS itself) left orphaned when its only PO was reassigned away.
 // Guarded: only when no POs reference it AND it has no supplier charges (protects money/claim data). Notes are removed with it.
@@ -10464,7 +10472,7 @@ app.post('/api/supply/shipment/:ref/assign', async (req, res) => {
     // the PO's PRIOR shipment may now be an empty self-shipment → clean it up
     if (prior) await pruneEmptySelfShipment(pool, prior);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Delete a shipment. Unassigns every PO aboard (clears their shipment_ref), removes its timeline notes,
 // then deletes the shipment row. POs themselves are left intact.
@@ -10478,7 +10486,7 @@ app.post('/api/supply/shipment/:ref/delete', async (req, res) => {
     const r = await client.query(`DELETE FROM planner.shipments WHERE shipment_ref=$1`, [ref]);
     await client.query('COMMIT');
     res.json({ deleted: r.rowCount, unassigned_pos: unassigned.rowCount });
-  } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 // SELF-SHIPMENT mode gate (PO ▸ SHIPMENTS). Picking a mode turns the PO into its own shipment (a planner.shipments
@@ -10610,7 +10618,7 @@ app.post('/api/scenario/sales-planning', async (req, res) => {
         trail_cover: trailCover, days_since: daysSince, slow_moving: slowMoving, rec_clearance: recClearance };
     });
     res.json({ rows, country, channel, month, isUS, forecast_run: run });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 app.post('/api/scenario/prime-day', async (req, res) => {
@@ -10640,7 +10648,7 @@ app.post('/api/scenario/prime-day', async (req, res) => {
       ORDER BY total DESC`, [...vals, awdApplies, skus.length > 0]);
     const tot = rows.reduce((a, r) => { a.fba += r.fba; a.three_pl += r.three_pl; a.awd += r.awd; a.total += r.total; return a; }, { fba: 0, three_pl: 0, awd: 0, total: 0 });
     res.json({ rows, totals: tot, sku_count: rows.length, awd_available: awdApplies });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // Buy-plan extra stock pools per SKU: AWD (US upstream, inventory_us_awd) + NonGRS on-hand (UK/US). The buy
@@ -10658,7 +10666,7 @@ app.get('/api/buy-extra-stock', async (req, res) => {
     const stock = {};
     rows.forEach(r => { if (r.awd || r.nuk || r.nus) stock[r.sku] = { awd: r.awd, nuk: r.nuk, nus: r.nus }; });
     res.json({ stock, has_nongrs: cols.length === 2 });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // B2B Allocation — per requested SKU: available stock in the market, recent velocity (cover),
@@ -10707,7 +10715,7 @@ app.post('/api/scenario/b2b', async (req, res) => {
              AND coalesce(po2.branch,'') NOT ILIKE '%jlew%' AND coalesce(po2.branch,'') NOT ILIKE '%next%'), '[]'::json) production
       FROM planner.products p WHERE upper(p.sku) = ANY($1)`, [skus, market, date]);
     res.json({ market: market.toUpperCase(), date, rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // ── Shared B2B analyses (migration 184) — "Save & share" a run so the team sees recent analyses by others.
@@ -10718,7 +10726,7 @@ app.get('/api/scenario/b2b/recent', async (req, res) => {
         coalesce(created_by,'') created_by, to_char(created_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') created_at
       FROM planner.b2b_analysis ORDER BY created_at DESC LIMIT 20`)).rows;
     res.set('Cache-Control', 'no-store').json({ ok: true, rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/scenario/b2b/save', async (req, res) => {
   try {
@@ -10727,7 +10735,7 @@ app.post('/api/scenario/b2b/save', async (req, res) => {
         VALUES ($1,$2,$3,$4::jsonb,$5::jsonb,$6) RETURNING id`,
       [String(b.client || ''), String(b.market || ''), b.date || null, JSON.stringify(b.lines), JSON.stringify(b.result || null), authUser(req) || ''])).rows[0];
     res.json({ ok: true, id: r.id });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/scenario/b2b/open/:id', async (req, res) => {
   try {
@@ -10736,12 +10744,12 @@ app.get('/api/scenario/b2b/open/:id', async (req, res) => {
       FROM planner.b2b_analysis WHERE id=$1`, [req.params.id])).rows[0];
     if (!r) return res.status(404).json({ error: 'not found' });
     res.set('Cache-Control', 'no-store').json({ ok: true, ...r });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // settings USD→GBP rate (app_settings.usd_gbp_rate; USD per GBP) for the B2B air-rush £ bracket
 app.get('/api/scenario/fx', async (req, res) => {
   try { res.set('Cache-Control', 'no-store').json({ ok: true, usd_gbp: await gbpRate() }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // all-SKU search for the B2B SKU picker (not supplier-scoped) — sku code or name
 app.get('/api/scenario/b2b/sku-search', async (req, res) => {
@@ -10752,7 +10760,7 @@ app.get('/api/scenario/b2b/sku-search', async (req, res) => {
         AND (sku ILIKE '%'||$1||'%' OR product_name ILIKE '%'||$1||'%')
       ORDER BY (sku ILIKE $1||'%') DESC, sku LIMIT 40`, [q])).rows;
     res.set('Cache-Control', 'no-store').json({ ok: true, rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // (Removed dead /api/scenario/fin-model GET/POST/import — old FY×category×quarter model on
@@ -10762,7 +10770,7 @@ app.get('/api/scenario/b2b/sku-search', async (req, res) => {
 // Financial Forecast scenario overlays (exec-summary-style view): growth % + price % per channel × country.
 app.get('/api/scenario/fin-overlay', async (req, res) => {
   try { res.json((await pool.query(`SELECT channel, country, coalesce(subcategory,'') subcategory, coalesce(period,'') period, growth_pct, price_pct FROM planner.scenario_fin_overlay`)).rows); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/scenario/fin-overlay', async (req, res) => {
   const b = req.body || {};
@@ -10775,7 +10783,7 @@ app.post('/api/scenario/fin-overlay', async (req, res) => {
       VALUES ($1,$2,$3,$4,$5,$6, now()) ON CONFLICT (channel, country, subcategory, period) DO UPDATE SET growth_pct=excluded.growth_pct, price_pct=excluded.price_pct, updated_at=now()`,
       [b.channel, b.country, sub, period, num(b.growth_pct), num(b.price_pct)]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // PO STOCK PRIORITY — for a given PO, how critical is each SKU's quantity, vs stock-on-hand + OTHER inbound
@@ -10822,7 +10830,7 @@ app.get('/api/scenario/po-stock-priority/:po', async (req, res) => {
     });
     res.json({ po: meta.po, warehouse: meta.wh, supplier_name: meta.supplier_name, status: meta.status,
       landing: meta.landing, cover_weeks: PO_STOCK_COVER_WEEKS, rows: out });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // Auto Forecast — a 12-month buy plan by subcategory × primary supplier, and the resulting
@@ -11026,7 +11034,7 @@ async function computeAutoForecast(markets) {
 }
 app.get('/api/scenario/auto-forecast', async (req, res) => {
   const markets = (req.query.market||'all').toLowerCase()==='all' ? ['uk','us','eu','au'] : [(req.query.market||'uk').toLowerCase()];
-  try { res.json(await computeAutoForecast(markets)); } catch (e) { res.status(500).json({ error: e.message }); }
+  try { res.json(await computeAutoForecast(markets)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Auto Forecast EMAIL — sends the payments plan + transactions CSV to the recipients configured in
 // CONFIG ▸ General settings (app_settings.af_email_recipients, comma-separated). Gated on RESEND_API_KEY (sandbox stubs).
@@ -11058,7 +11066,7 @@ app.post('/api/auto-forecast/email', async (req, res) => {
     const r = await sendResendEmail({ to: emails, subject, html, kind: 'auto-forecast', by: authUser(req),
       attachments: [{ filename: 'auto_forecast_buy_plan.csv', content: Buffer.from(csv).toString('base64') }] });
     res.json({ ok: true, recipients: emails, sent: r.sandbox ? 0 : emails.length, sandbox: !!r.sandbox });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // Slow Moving — per SKU × warehouse stock health. Returns the raw metrics (on-hand, trailing velocity,
@@ -11118,7 +11126,7 @@ app.get('/api/scenario/slow-moving', async (req, res) => {
         value: Math.round(r.on_hand * Number(r.unit_cost)) };
     });
     res.json({ rows: out, vel_weeks: VEL_WEEKS });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // Markdown & EOS plan — at end of season, which stock won't clear, and what to do with it. Per SKU × market:
@@ -11191,7 +11199,7 @@ app.get('/api/scenario/markdown-eos', async (req, res) => {
     }).filter(r => r.residual > 0 || r.status === 'clear');
     out.sort((a, b) => (b.residual_cost - a.residual_cost) || (b.residual - a.residual));
     res.json({ rows: out, season_end: endISO, wks_to_eos: Math.round(wksToEos), vel_weeks: VEL_WEEKS, basis });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // Open-To-Buy (OTB) — per category × market, how much is left to buy (or how over-committed you are) to hit
@@ -11256,7 +11264,7 @@ app.get('/api/scenario/otb', async (req, res) => {
     out.sort((a, b) => Math.abs(b.otb_cost) - Math.abs(a.otb_cost));
     const f = mkt === 'all' ? out : out.filter(r => r.market.toLowerCase() === mkt);
     res.json({ rows: f, months, weeks: Math.round(weeks), def_cover: defCover });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // Key Stock Arrivals — what is landing soon and how desperately it's needed. For every open PO with an
@@ -11326,7 +11334,7 @@ app.get('/api/scenario/key-arrivals', async (req, res) => {
         lines: g.lines };
     }).sort((a, b) => a.arrival < b.arrival ? -1 : a.arrival > b.arrival ? 1 : 0);
     res.json({ arrivals, fc_weeks: FC_WEEKS });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // ── DEMAND ▸ Revenue: price changes + revenue-growth targets (migrations 168/169) ──────────────────────────
@@ -11346,11 +11354,11 @@ app.post('/api/price-changes', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.price_changes (country, channel, subcategory, effective_month, uplift_pct, note, created_by)
       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`, [b.country, b.channel || null, b.subcategory || null, b.effective_month, Number(b.uplift_pct), b.note || null, authUser(req) || null]);
     res.json({ id: r.rows[0].id });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/price-changes/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.price_changes WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // BUY ▸ Complex Rules — cover-target override rules for the buy engine. GET returns all (enabled + disabled,
 // newest first); POST upserts one rule; /:id/delete removes it. Read-only fields are the scope/window/coverage.
@@ -11389,11 +11397,11 @@ app.post('/api/buy-complex-rules', async (req, res) => {
       [b.country, nn(b.name), nn(b.sku), nn(b.category), nn(b.tier), nn(b.season), nn(b.window_from), nn(b.window_to),
        ct, cm, rf, rt, b.enabled !== false, authUser(req) || null]);
     res.json({ id: r.rows[0].id });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/buy-complex-rules/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.buy_complex_rules WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Revenue-growth targets per country × channel × FY. GET returns all; POST upserts one cell (blank clears it).
 app.get('/api/demand-revenue-targets', async (_req, res) => {
@@ -11425,7 +11433,7 @@ app.post('/api/demand-revenue-targets', async (req, res) => {
       DO UPDATE SET target_type=excluded.target_type, target_pct=excluded.target_pct, target_value=excluded.target_value, target_q1_pct=excluded.target_q1_pct, target_q2_pct=excluded.target_q2_pct, target_q3_pct=excluded.target_q3_pct, target_q4_pct=excluded.target_q4_pct, updated_by=excluded.updated_by, updated_at=now()`,
       [b.country, b.channel, b.fy, type, pct, val, q1, q2, q3, q4, authUser(req) || null]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Per-subcategory month/quarter/half revenue growth-% targets (migration 175). subcategory='' = market total.
 app.get('/api/demand-revenue-targets/periods', async (req, res) => {
@@ -11453,7 +11461,7 @@ app.post('/api/demand-revenue-targets/periods', async (req, res) => {
       DO UPDATE SET growth_pct=excluded.growth_pct, target_gbp=excluded.target_gbp, updated_by=excluded.updated_by, updated_at=now()`,
       [b.country, b.channel, b.fy, sub, b.level, b.idx, g, tg, authUser(req) || null]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Bulk upsert/clear of per-subcategory period targets (used by the Summary ▸ Add targets CSV import).
 app.post('/api/demand-revenue-targets/periods/bulk', async (req, res) => {
@@ -11602,7 +11610,7 @@ app.get('/api/demand-actions', async (req, res) => {
     const rank = { high: 0, amber: 1, info: 2 };
     out.sort((a, b) => (rank[a.severity] - rank[b.severity]) || (b.impact - a.impact) || (a.cat < b.cat ? -1 : 1));
     res.json(out);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Lifecycle: dismiss / snooze / done a demand action (by stable key); restore (status:'open') deletes it.
 app.post('/api/demand-actions/state', async (req, res) => {
@@ -11617,7 +11625,7 @@ app.post('/api/demand-actions/state', async (req, res) => {
       ON CONFLICT (action_key) DO UPDATE SET status=excluded.status, snooze_until=excluded.snooze_until, note=excluded.note, updated_at=now()`,
       [key, b.status || 'dismissed', days, b.note || null, indef]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Read the lifecycle state map (for client-side-computed demand actions to apply their own
 // done/snooze/dismiss status). Snoozes past their date read back as 'open'.
@@ -11632,7 +11640,7 @@ app.get('/api/demand-actions/state', async (req, res) => {
         if (status !== 'open') state[s.action_key] = { status, snooze_until };
       });
     res.json({ today, state });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // ── Forecast cell notes (DEMAND ▸ Plan grid) — per-cell notes keyed level|item|country|channel|month.
@@ -11646,7 +11654,7 @@ app.get('/api/forecast/notes', async (req, res) => {
       FROM planner.forecast_notes WHERE upper(country)=$1 AND upper(channel)=$2 ORDER BY created_at`,
       [country, channel])).rows;
     res.json({ rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/forecast/notes', async (req, res) => {
   const b = req.body || {}, level = (b.level || 'sku').trim(), item = (b.item || '').trim();
@@ -11658,7 +11666,7 @@ app.post('/api/forecast/notes', async (req, res) => {
       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at`,
       [level, item, country, channel, month, note, who || null])).rows[0];
     res.json({ ok: true, id: r.id, created_at: r.created_at, created_by: who || '' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/forecast/note/:id', async (req, res) => {
   const id = req.params.id, b = req.body || {};
@@ -11669,7 +11677,7 @@ app.post('/api/forecast/note/:id', async (req, res) => {
     if (!note) return res.status(400).json({ error: 'note required (or delete:true)' });
     await pool.query(`UPDATE planner.forecast_notes SET note=$2, updated_by=$3, updated_at=now() WHERE id=$1`, [id, note, who || null]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // ── DEMAND plan "R" record-of-change (forecast_changes) ──────────────────────────────────────────
@@ -11680,7 +11688,7 @@ app.get('/api/forecast/changes/keys', async (req, res) => {
     const rows = (await pool.query(`SELECT DISTINCT level, item, month FROM planner.forecast_changes
       WHERE upper(country)=$1 AND upper(channel)=$2`, [country, channel])).rows;
     res.json({ keys: rows.map(r => r.level + '|' + r.item + '|' + country + '|' + channel + '|' + r.month) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Full history for ONE cell (descending), loaded on click.
 app.get('/api/forecast/changes', async (req, res) => {
@@ -11693,7 +11701,7 @@ app.get('/api/forecast/changes', async (req, res) => {
       WHERE upper(country)=$1 AND upper(channel)=$2 AND level=$3 AND item=$4 AND month=$5
       ORDER BY created_at DESC, id DESC`, [country, channel, level, item, month])).rows;
     res.json({ rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Record a change. Actor from the auth layer (falls back to body.actor for local/sandbox).
 app.post('/api/forecast/change', async (req, res) => {
@@ -11707,7 +11715,7 @@ app.post('/api/forecast/change', async (req, res) => {
     await pool.query(`INSERT INTO planner.forecast_changes (level,item,country,channel,month,actor,action,from_val,to_val)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [level, item, country, channel, month, who, action, num(b.from), num(b.to)]);
     res.json({ ok: true, actor: who || '' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Bulk-record changes (a smoothing sweep / target-rec apply touches many cells at once).
 app.post('/api/forecast/changes/bulk', async (req, res) => {
@@ -11725,7 +11733,7 @@ app.post('/api/forecast/changes/bulk', async (req, res) => {
     });
     await pool.query(`INSERT INTO planner.forecast_changes (level,item,country,channel,month,actor,action,from_val,to_val) VALUES ${vals.join(',')}`, params);
     res.json({ ok: true, saved: rows.length, actor: who || '' });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // Trading calendar (DEMAND ▸ Calendar) — events by date × market; editable + CSV up/down.
@@ -11738,7 +11746,7 @@ app.get('/api/trading-calendar', async (req, res) => {
       FROM planner.trading_calendar ORDER BY event_date NULLS LAST, id`);
     const cats = (await pool.query(`SELECT DISTINCT category FROM planner.products WHERE in_planning_scope AND category IS NOT NULL ORDER BY category`)).rows.map(c => c.category);
     res.json({ events: r.rows, categories: cats });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/trading-calendar', async (req, res) => {     // create a row (blank or with fields)
   const b = req.body || {};
@@ -11746,7 +11754,7 @@ app.post('/api/trading-calendar', async (req, res) => {     // create a row (bla
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
     [b.event_date || null, b.market || 'ALL', b.category || 'ALL', b.sku_list || null, b.event_type || null, b.title || null,
      (b.uplift_pct === '' || b.uplift_pct == null ? null : b.uplift_pct), b.notes || null]);
-    res.json({ ok: true, id: r.rows[0].id }); } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ ok: true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/trading-calendar/import', async (req, res) => {   // declared before /:id so it isn't caught by it
   const rows = Array.isArray(req.body && req.body.rows) ? req.body.rows : [];
@@ -11761,11 +11769,11 @@ app.post('/api/trading-calendar/import', async (req, res) => {   // declared bef
          (r.uplift_pct === '' || r.uplift_pct == null ? null : r.uplift_pct), r.notes || null]); n++;
     }
     res.json({ ok: true, imported: n });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/trading-calendar/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.trading_calendar WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/trading-calendar/:id', (req, res) =>
   patch(res, 'planner.trading_calendar', 'id', req.params.id, CAL_FIELDS, req.body, 'bigint'));
@@ -11842,11 +11850,11 @@ app.post('/api/supply/sample/:id/accept', async (req, res) => {   // supplier ac
   try { await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), change_requested=false, approved_lines=(SELECT jsonb_object_agg(sku,qty) FROM (SELECT sku, sum(qty) qty FROM planner.sample_request_lines WHERE sample_id=$1::bigint GROUP BY sku) z), updated_at=now() WHERE id=$1::bigint`, [req.params.id]);
     await logSampleChange(req.params.id, 'Confirmed sample request', null, authUser(req) || 'Dock & Bay');   // record of change
     await sampleTimelineNote(req.params.id, 'Confirmed the sample request', 'internal', authUser(req));   // shared timeline notification
-    res.json({ ok:true }); } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ ok:true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/sample/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.sample_requests WHERE id=$1::bigint`, [req.params.id]); res.json({ ok:true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Email the "notify when shipped" stakeholders: tracking code, carrier + a direct link to the sample in HORIZON.
 async function sendSampleShippedEmail(ref, emails, tracking, carrier, recipient, by) {
@@ -11893,14 +11901,14 @@ app.post('/api/supply/sample-note', async (req, res) => {
     const email = kind === 'internal' ? internalAuthor(req, b.author_email) : (b.author_email || null);
     const r = await pool.query(`INSERT INTO planner.sample_notes (sample_id, author_kind, author_email, body)
     VALUES ($1::bigint,$2,$3,$4) RETURNING id`, [sid, kind, email, String(b.body)]);
-    res.json({ id: r.rows[0].id }); } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Admin-gated sample actions matching the portal-view body shapes ({id} in body) — used by the
 // admin "preview as supplier" (the real portal uses the /api/portal/sample-* equivalents).
 app.post('/api/supply/sample-accept', async (req, res) => {
   const id = req.body && req.body.id; if(!id) return res.status(400).json({ error: 'id required' });
   try { await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), change_requested=false, approved_lines=(SELECT jsonb_object_agg(sku,qty) FROM (SELECT sku, sum(qty) qty FROM planner.sample_request_lines WHERE sample_id=$1::bigint GROUP BY sku) z), updated_at=now() WHERE id=$1::bigint`, [id]); res.json({ ok:true }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/supply/sample-update', async (req, res) => {
   const b = req.body || {}; if(!b.id) return res.status(400).json({ error: 'id required' });
   await maybeShippedNote(b.id, b, 'supplier', 'D&B');   // preview/admin acting as supplier → "D&B as <supplier>"
@@ -11911,22 +11919,22 @@ app.post('/api/supply/sample-charge', async (req, res) => {
     if(!s) return res.status(404).json({ error: 'sample not found' });
     const r = await pool.query(`INSERT INTO planner.supplier_charges (source_type, source_ref, supplier_name, freight_cost, product_cost, description, created_by)
       VALUES ('sample',$1,$2,$3,$4,$5,$6) RETURNING id`, [s.ref, s.supplier_name, Number(b.freight_cost)||0, Number(b.product_cost)||0, b.description||null, b.created_by||'preview']); res.json({ ok:true, id: r.rows[0].id }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/supply/sample-attachment', async (req, res) => {   // admin/preview upload to a sample (body {id})
   const b = req.body || {}; if(!b.id || !b.data_base64) return res.status(400).json({ error: 'id and data_base64 required' });
   try { const s = (await pool.query(`SELECT ref FROM planner.sample_requests WHERE id=$1::bigint`, [b.id])).rows[0]; if(!s) return res.status(404).json({ error: 'sample not found' });
     const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, uploaded_by, category) VALUES ($1,$2,$3,$4,$5,$6,'sample') RETURNING id`,
       [s.ref, b.filename||'attachment', b.mime||'application/octet-stream', buf.length, buf, b.uploaded_by||'PO PLAN']); res.json({ ok:true, id: r.rows[0].id }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/supply/sample-attachment-remove', async (req, res) => {
   const id = req.body && req.body.att_id;
   try { await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1 AND category='sample'`, [id]); res.json({ ok:true }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/supply/sample-note-read/:id', async (req, res) => {
   try { const read = !(req.body && req.body.read === false);
     await pool.query(`UPDATE planner.sample_notes SET read_at=${read?'now()':'NULL'} WHERE id=$1::bigint`, [req.params.id]);
-    res.json({ ok:true, read }); } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ ok:true, read }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // ── SUPPLIER CHARGES (samples + shipments) → Other Payment on accept ─────────────
@@ -11970,17 +11978,17 @@ app.post('/api/supply/charge-create', async (req, res) => {
     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
     [b.source_type, b.source_ref, b.supplier_name||null, Number(b.freight_cost)||0, Number(b.product_cost)||0, b.description||null, b.created_by||null]);
     await chargeTimelineNote(pool, b.source_type, b.source_ref, `💰 Charge added — ${chargeLbl(b.freight_cost, b.product_cost, b.description)}`, shortUser(authUser(req)) || b.created_by || null);
-    res.json({ ok:true, id: r.rows[0].id }); } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ ok:true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/charge/:id/reject', async (req, res) => {
   try { const c = (await pool.query(`UPDATE planner.supplier_charges SET status='rejected' WHERE id=$1::bigint AND status='pending' RETURNING source_type, source_ref, freight_cost, product_cost, description`, [req.params.id])).rows[0];
     if (c) await chargeTimelineNote(pool, c.source_type, c.source_ref, `🚫 Charge rejected — ${chargeLbl(c.freight_cost, c.product_cost, c.description)}`, shortUser(authUser(req)) || null);
-    res.json({ ok:true }); } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ ok:true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/charge/:id/unreject', async (req, res) => {   // put a rejected charge back to pending so it can be accepted
   try { const c = (await pool.query(`UPDATE planner.supplier_charges SET status='pending' WHERE id=$1::bigint AND status='rejected' RETURNING source_type, source_ref, freight_cost, product_cost, description`, [req.params.id])).rows[0];
     if (c) await chargeTimelineNote(pool, c.source_type, c.source_ref, `↺ Charge un-rejected (back to pending) — ${chargeLbl(c.freight_cost, c.product_cost, c.description)}`, shortUser(authUser(req)) || null);
-    res.json({ ok:true }); } catch (e) { res.status(500).json({ error: e.message }); }
+    res.json({ ok:true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/charge/:id/accept', async (req, res) => {   // accept → Other Payment (deposits, is_deposit=false)
   const client = await pool.connect();
@@ -12184,7 +12192,7 @@ app.get('/api/kpi/in-stock', async (req, res) => {
     const tot = type => { const r = rows.filter(x => x.type === type); const s = k => r.reduce((a, x) => a + x[k], 0);
       return { channel: 'Total ' + type, type: 'TOTAL', skus: s('skus'), instock: s('instock'), pct: s('skus') ? Math.round(s('instock') / s('skus') * 100) : 0, a_skus: s('a_skus'), a_instock: s('a_instock'), a_pct: s('a_skus') ? Math.round(s('a_instock') / s('a_skus') * 100) : 0 }; };
     res.json({ ok: true, t3pl: T3, tfba: TF, group: grp || 'All', rows: rows.filter(r => r.type === '3PL').concat([tot('3PL')], rows.filter(r => r.type === 'FBA'), [tot('FBA')]) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // market × channel → inventory warehouse (3PL stock serves DTC+B2B; FBA stock serves FBA)
 const KPI_WH = [['US 3PL', 'US', 'us_3pl', '3PL'], ['UK 3PL', 'UK', 'uk_3pl', '3PL'], ['EU 3PL', 'EU', 'eu_3pl', '3PL'], ['AU 3PL', 'AU', 'au_3pl', '3PL'],
@@ -12331,7 +12339,7 @@ app.get('/api/supply/bi/projection', async (req, res) => {
     const counts = { critical: 0, soon: 0, ok: 0, surplus: 0, none: 0 };
     rows.forEach(r => { counts[r.urgency] = (counts[r.urgency] || 0) + 1; });
     res.json({ ok: true, target_months: BI_TARGET_MONTHS, counts, rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // ── BI ▸ REALLOCATE (Phase 1) — within an EDITABLE production (Future/Production), move order-plan qty for a
@@ -12413,7 +12421,7 @@ app.get('/api/supply/bi/reallocations', async (req, res) => {
       if (s.status === 'snoozed' && s.snooze_until && s.snooze_until >= today) return false; return true; });
     open.sort((a, b) => (a.to_urgency === 'critical' ? 0 : 1) - (b.to_urgency === 'critical' ? 0 : 1) || b.qty - a.qty);
     res.json({ ok: true, target_months: BI_TARGET_MONTHS, count: open.length, recs: open });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Apply a reallocation: zero-sum move of `qty` of `sku` from from_po → to_po (transactional), then mark applied.
 app.post('/api/supply/bi/apply-reallocation', async (req, res) => {
@@ -12433,7 +12441,7 @@ app.post('/api/supply/bi/apply-reallocation', async (req, res) => {
       [key, 'reallocated ' + qty + ' ' + sku + ' ' + fromPo + '→' + toPo]);
     await client.query('COMMIT');
     res.json({ ok: true, moved: qty, from_po: fromPo, to_po: toPo, sku });
-  } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 
@@ -12506,7 +12514,7 @@ app.get('/api/supply/bi/container-fill', async (req, res) => {
       if (s.status === 'dismissed' || s.status === 'applied') return false;
       if (s.status === 'snoozed' && s.snooze_until && s.snooze_until >= today) return false; return true; });
     res.json({ ok: true, target_months: BI_TARGET_MONTHS, count: open.length, recs: open });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Apply a container-fill: ADD add_qty of sku to the on-board PO (increases the supplier order), then mark applied.
 app.post('/api/supply/bi/apply-fill', async (req, res) => {
@@ -12523,7 +12531,7 @@ app.post('/api/supply/bi/apply-fill', async (req, res) => {
       [key, 'container-fill +' + qty + ' ' + sku + ' → ' + toPo]);
     await client.query('COMMIT');
     res.json({ ok: true, added: qty, to_po: toPo, sku });
-  } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 
@@ -12583,7 +12591,7 @@ app.get('/api/supply/bi/consolidations', async (req, res) => {
       if (s.status === 'snoozed' && s.snooze_until && s.snooze_until >= today) return false; return true; });
     open.sort((a, b) => b.combined - a.combined);
     res.json({ ok: true, count: open.length, recs: open });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // PRODUCTION SUMMARY (SUG-0009) — total qty for a production run / batch, grouped by category → SKU.
 // Always returns the filter option lists; rows only when a prod# or batch is chosen (report shows nothing until then).
@@ -12610,7 +12618,7 @@ app.get('/api/supply/bi/production-summary', async (req, res) => {
         ORDER BY 1, qty DESC`, [prod, batch, supplier])).rows.map(r => ({ ...r, qty: Number(r.qty) }));
     }
     res.json({ prods, batches, suppliers, rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ERP COMPARE — open/draft ERP POs that are NOT in the planner's purchase_orders, limited to POs whose
 // supplier matches a product supplier in the planner (planner.suppliers, kind='supplier') so freight/
@@ -12647,7 +12655,7 @@ app.get('/api/supply/bi/erp-compare', async (req, res) => {
   try {
     const rows = (await pool.query(ERP_COMPARE_SQL)).rows;
     res.json({ ok: true, count: rows.filter(r => !r.ignored).length, rows });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Ignore / un-ignore an ERP PO on the compare report.
 app.post('/api/supply/bi/erp-compare/ignore', async (req, res) => {
@@ -12657,7 +12665,7 @@ app.post('/api/supply/bi/erp-compare/ignore', async (req, res) => {
     else await pool.query(`INSERT INTO planner.erp_compare_ignored (po, ignored_by) VALUES ($1,$2)
       ON CONFLICT (po) DO UPDATE SET ignored_by=excluded.ignored_by, ignored_at=now()`, [b.po, b.by || 'admin']);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ORDER PLAN unapproved exceptions per PO (partials / supplier-risk / discontinued / country-risk). Drives the
 // ORDER PLAN top-nav counter (# POs impacted) + the per-PO ORDER PLAN sub-tab badge. Gates mirror the grid:
@@ -13113,7 +13121,7 @@ app.post('/api/supply/bi/apply-consolidate', async (req, res) => {
       [key, 'consolidated ' + merge + ' → ' + keep + ' (' + r.rowCount + ' PO)']);
     await client.query('COMMIT');
     res.json({ ok: true, repointed: r.rowCount, keep, merge });
-  } catch (e) { await client.query('ROLLBACK'); res.status(500).json({ error: e.message }); }
+  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
 const kpiGroup = q => (['Core', 'Seasonal', 'Non-Core'].includes(q) ? q : '');
@@ -13134,7 +13142,7 @@ app.get('/api/kpi/slow-moving', async (req, res) => {
       return { channel: label, type: ct, slow_skus: slow, slow_units: sUnits, slow_value: sValue, stocked_skus: skus }; });
     const t = kpiTotals(rows, ['slow_skus', 'slow_units', 'slow_value', 'stocked_skus']);
     res.json({ ok: true, cover: COV, group: grp || 'All', rows: rows.filter(r => r.type === '3PL').concat([t.TOTAL3], rows.filter(r => r.type === 'FBA'), [t.TOTALF]) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // KPI 2 — Inventory months of cover: on-hand units, value and weighted months of cover per market×channel
@@ -13151,7 +13159,7 @@ app.get('/api/kpi/inventory-cover', async (req, res) => {
     ['TOTAL3', 'TOTALF'].forEach(k => { const sub = rows.filter(r => r.type === (k === 'TOTAL3' ? '3PL' : 'FBA')); const md = sub.reduce((a, r) => a + r.monthly_demand, 0);
       t[k].monthly_demand = md; t[k].months_cover = md > 0 ? Math.round(t[k].units / md * 10) / 10 : null; });
     res.json({ ok: true, group: grp || 'All', rows: rows.filter(r => r.type === '3PL').concat([t.TOTAL3], rows.filter(r => r.type === 'FBA'), [t.TOTALF]) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // KPI 3 — Stockout risk: active SKUs whose cumulative forecast demand over the next N months exceeds on-hand
@@ -13173,7 +13181,7 @@ app.get('/api/kpi/stockout-risk', async (req, res) => {
     const t = kpiTotals(rows, ['at_risk_skus', 'units_short', 'with_demand']);
     ['TOTAL3', 'TOTALF'].forEach(k => { t[k].pct = t[k].with_demand ? Math.round(t[k].at_risk_skus / t[k].with_demand * 100) : 0; });
     res.json({ ok: true, within: N, group: grp || 'All', rows: rows.filter(r => r.type === '3PL').concat([t.TOTAL3], rows.filter(r => r.type === 'FBA'), [t.TOTALF]) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // KPI 4 — Discontinued holding stock: SKUs past their discontinue date that still carry on-hand units
@@ -13186,7 +13194,7 @@ app.get('/api/kpi/discontinued-stock', async (req, res) => {
       return { channel: label, type: ct, skus, units, value }; });
     const t = kpiTotals(rows, ['skus', 'units', 'value']);
     res.json({ ok: true, rows: rows.filter(r => r.type === '3PL').concat([t.TOTAL3], rows.filter(r => r.type === 'FBA'), [t.TOTALF]) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // Snapshot the current SKU-level forecast (forecast_outputs) into forecast_runs + forecasts(level='sku').
@@ -13283,7 +13291,7 @@ app.get('/api/kpi/forecast-accuracy', async (req, res) => {
 
     res.json({ ok: true, level, lag, window: win, snapshots: { runs: Number(snap.runs) || 0, sku_runs: Number(snap.sku_runs) || 0, last_at: snap.last_at },
       accuracy: { overall, rows: accRows }, runrate: { months: rr, rows: rrows } });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── Forecast export by country (CSV download · email · DriveHQ upload) ───────────────────────────────────
 const FC_EXPORT_COUNTRIES = ['UK', 'US', 'EU', 'AU', 'CA'];
@@ -13343,17 +13351,17 @@ app.get('/api/forecast/country-csv/:country', async (req, res) => {
     res.setHeader('Content-Type', 'text/csv');
     res.setHeader('Content-Disposition', `attachment; filename="forecast_${String(req.params.country).toUpperCase()}_12mo.csv"`);
     res.send(csv);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/forecast/export-settings', async (req, res) => {
   try { res.json((await pool.query(`SELECT country, coalesce(email,'') email FROM planner.forecast_export_settings ORDER BY country`)).rows); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/forecast/export-settings/:country', async (req, res) => {
   const co = String(req.params.country || '').toUpperCase(), email = (req.body && req.body.email || '').trim();
   try { await pool.query(`INSERT INTO planner.forecast_export_settings (country,email,updated_at) VALUES ($1,$2,now())
     ON CONFLICT (country) DO UPDATE SET email=$2, updated_at=now()`, [co, email || null]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 function drivehqConfigured() { return !!(process.env.WEBDAV_BASE && process.env.DRIVEHQ_USER && process.env.DRIVEHQ_PASS); }
 // email one country's CSV to its stored address (gated on RESEND_API_KEY; stubbed when absent)
@@ -13376,8 +13384,8 @@ async function emailForecastCountry(country) {
   logEmail({ recipients: email, subject: 'Dock & Bay forecast — ' + co + ' (next 12 months)', kind: 'report-export', ref: co, status: 'sent', resend_id: _rid });
   return { country: co, ok: true, sent_to: email, rows: rowCount };
 }
-app.post('/api/forecast/email/:country', async (req, res) => { try { res.json(await emailForecastCountry(req.params.country)); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/forecast/email-all', async (req, res) => { try { const out = []; for (const c of FC_EXPORT_COUNTRIES) out.push(await emailForecastCountry(c)); res.json({ ok: true, results: out }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/forecast/email/:country', async (req, res) => { try { res.json(await emailForecastCountry(req.params.country)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.post('/api/forecast/email-all', async (req, res) => { try { const out = []; for (const c of FC_EXPORT_COUNTRIES) out.push(await emailForecastCountry(c)); res.json({ ok: true, results: out }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // Email a report CSV (built client-side, sent here) to the recipient SAVED for that report key (app_settings
 // export_email_<key>). The client supplies the CSV; the recipient is server-controlled (not client-supplied).
 app.post('/api/export/email-csv', async (req, res) => {
@@ -13401,7 +13409,7 @@ app.post('/api/export/email-csv', async (req, res) => {
         attachments: [{ filename, content: Buffer.from(csv).toString('base64') }] }) });
     if (!r.ok) return res.json({ ok: false, reason: 'Resend error ' + r.status + ': ' + (await r.text()).slice(0, 200) });
     res.json({ ok: true, sent_to: email });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // upload one country's CSV to DriveHQ over WebDAV (HTTP PUT, Basic auth) — gated on WEBDAV_BASE/DRIVEHQ_USER/PASS.
 // Mirrors the Apps Script routine: PUT {base}/{TARGET_FOLDER}/{filename}. Fixed filename → overwrites in place.
@@ -13421,8 +13429,8 @@ async function drivehqForecastCountry(country) {
     return { country: co, ok: true, url, rows: rowCount, bytes: Buffer.byteLength(csv) };
   } catch (e) { return { country: co, ok: false, reason: 'DriveHQ upload error: ' + e.message }; }
 }
-app.post('/api/forecast/drivehq/:country', async (req, res) => { try { res.json(await drivehqForecastCountry(req.params.country)); } catch (e) { res.status(500).json({ error: e.message }); } });
-app.post('/api/forecast/drivehq-all', async (req, res) => { try { const out = []; for (const c of FC_EXPORT_COUNTRIES) out.push(await drivehqForecastCountry(c)); res.json({ ok: true, results: out }); } catch (e) { res.status(500).json({ error: e.message }); } });
+app.post('/api/forecast/drivehq/:country', async (req, res) => { try { res.json(await drivehqForecastCountry(req.params.country)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+app.post('/api/forecast/drivehq-all', async (req, res) => { try { const out = []; for (const c of FC_EXPORT_COUNTRIES) out.push(await drivehqForecastCountry(c)); res.json({ ok: true, results: out }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // Session middleware for /api/portal/* (except request-link). Sets req.portal = {email, suppliers:[names], supplierIds:[ids]}.
 async function portalAuth(req, res, next) {
   try {
@@ -13434,7 +13442,7 @@ async function portalAuth(req, res, next) {
     if (!sups.length) return res.status(403).json({ error: 'no supplier linked to this account' });
     req.portal = { email: s.email, suppliers: sups.map(x => x.supplier_name), supplierIds: sups.map(x => x.supplier_id).filter(v => v != null) };
     next();
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 }
 // Ownership guard: the PO must belong to one of the session's suppliers.
 async function portalOwnsPO(req, po) {
@@ -13462,7 +13470,7 @@ app.get('/portal', async (req, res) => {
     var _pp = (DEV ? loadPortalPage() : PORTAL_PAGE).split('__APP_VERSION__').join(APP_VERSION);   // stamp version for the auto-update poll
     if (IS_SANDBOX) _pp = _pp.replace(/<body[^>]*>/, m => m + SANDBOX_BANNER);
     res.set('content-type', 'text/html').set('Cache-Control', 'no-store').send(_pp);
-  } catch (e) { res.status(500).send('portal error'); }
+  } catch (e) { log500(e); res.status(500).send('portal error'); }
 });
 
 app.post('/api/portal/request-link', async (req, res) => {
@@ -13512,7 +13520,7 @@ app.post('/api/portal/quality-doc', portalAuth, async (req, res) => {
       [String(b.doc_type), b.filename || 'document', b.mime || 'application/octet-stream', buf.length, buf,
        b.prod_no || null, b.batch_id || null, b.po || null, sup, req.portal.email || null]);
     res.json({ id: r.rows[0].id, byte_size: buf.length });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/portal/quality-doc/:id', portalAuth, async (req, res) => {
   try {
@@ -13522,7 +13530,7 @@ app.get('/api/portal/quality-doc/:id', portalAuth, async (req, res) => {
     res.setHeader('Content-Type', r.mime || 'application/octet-stream');
     res.setHeader('Content-Disposition', 'attachment; filename="' + String(r.filename || 'document').replace(/"/g, '') + '"');
     res.send(r.data);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Supplier may delete their OWN QC upload within 24h of uploading it (mistake window). Scoped to their supplier + uploader_kind='supplier'.
 app.delete('/api/portal/quality-doc/:id', portalAuth, async (req, res) => {
@@ -13535,7 +13543,7 @@ app.delete('/api/portal/quality-doc/:id', portalAuth, async (req, res) => {
     if (!r.within24) return res.status(403).json({ error: 'delete window (24h) has passed' });
     await pool.query(`DELETE FROM planner.quality_docs WHERE id=$1`, [req.params.id]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // Shared portal renderer (generated from inject.html). Served to the supplier portal page.
@@ -13557,7 +13565,7 @@ app.get('/api/portal/notes/:sid', portalAuth, async (req, res) => {
     res.json((await pool.query(`SELECT id, po, author_kind, coalesce(author_email,'') author_email, body,
       to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read
       FROM planner.supplier_notes WHERE supplier_id = ANY($1) AND NOT coalesce(private,false) ORDER BY created_at`, [req.portal.supplierIds])).rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Mark a note read/unread — only notes belonging to the session's supplier.
 app.post('/api/portal/note-read/:id', portalAuth, async (req, res) => {
@@ -13567,7 +13575,7 @@ app.post('/api/portal/note-read/:id', portalAuth, async (req, res) => {
     const read = !(req.body && req.body.read === false);
     await pool.query(`UPDATE planner.supplier_notes SET read_at=${read ? 'now()' : 'NULL'} WHERE id=$1`, [req.params.id]);
     res.json({ ok: true, read });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Portal: delete the most recent timeline message — the supplier's OWN latest note only, on a thread they own.
 app.post('/api/portal/note-delete/:id', portalAuth, (req, res) =>
@@ -13584,7 +13592,7 @@ app.get('/api/portal/attachment/:id', portalAuth, async (req, res) => {
     res.setHeader('Content-Type', r.mime || 'application/octet-stream');
     res.setHeader('Content-Disposition', 'inline; filename="' + (r.filename || 'file').replace(/"/g, '') + '"');
     res.send(r.data);
-  } catch (e) { res.status(500).send('error'); }
+  } catch (e) { log500(e); res.status(500).send('error'); }
 });
 
 // Full _ppData payload in the EXACT shape the shared portal renderer expects, scoped to the session's
@@ -13773,7 +13781,7 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
     } catch (e) { console.log('[portal-specs] ' + e.message); }
     res.json({ pos, lb, sdep: deps, sid: ids[0] || null, supplierName: names.join(', '),
       notesByPo, subsByPo, costsByPo, supSkus, xdByPo, addByPo, approvedByPo, docsByPo, samples, payments, shipmentPlan, productEnabled, products, specs });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // SUG-0019 P3: supplier confirms a spec — record a per-supplier acknowledgement for each of their directed names.
 app.post('/api/portal/spec-approve', portalAuth, async (req, res) => {
@@ -13789,7 +13797,7 @@ app.post('/api/portal/spec-approve', portalAuth, async (req, res) => {
     const doneN = (await pool.query(`SELECT count(*)::int n FROM planner.product_spec_approvals WHERE spec_id=$1 AND supplier_name = ANY($2)`, [specId, directed])).rows[0].n;
     await pool.query(`UPDATE planner.product_specs SET approval_status=$2 WHERE id=$1`, [specId, doneN >= directed.length ? 'approved' : 'pending']);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Serve a spec file to a supplier — only if the spec is relevant to (directed at / covers a product of) their account.
 app.get('/api/portal/spec-file/:id', portalAuth, async (req, res) => {
@@ -13802,7 +13810,7 @@ app.get('/api/portal/spec-file/:id', portalAuth, async (req, res) => {
     if (!ok) return res.status(403).send('forbidden');
     res.setHeader('Content-Type', s.mime || 'application/octet-stream');
     res.setHeader('Content-Disposition', 'inline; filename="' + (s.filename || 'file').replace(/"/g, '') + '"'); res.send(s.data);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Portal "recent changes" drawer — key events for THIS supplier, newest first (new PO, payment received, sample).
 app.get('/api/portal/recent-activity', portalAuth, async (req, res) => {
@@ -13834,7 +13842,7 @@ app.get('/api/portal/recent-activity', portalAuth, async (req, res) => {
         UNION ALL SELECT created_at, 'sample_created', 'New sample request SR-'||id, 'SR-'||id
           FROM planner.sample_requests WHERE created_at IS NOT NULL AND supplier_name = ANY($1)
       ) z ORDER BY at DESC NULLS LAST LIMIT 15`, [names])).rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Portal "Inbox" drawer — the actual UNREAD Dock & Bay messages for THIS supplier across every thread type
 // (PO, shipment, sample, product), newest first. Each row carries the note id + its thread type/ref so the
@@ -13862,7 +13870,7 @@ app.get('/api/portal/unread-messages', portalAuth, async (req, res) => {
           FROM planner.supplier_notes n JOIN planner.product_dev_items pdi ON pdi.ref=n.po
           WHERE n.author_kind='internal' AND n.read_at IS NULL AND pdi.supplier = ANY($1)
       ) z ORDER BY created_at DESC NULLS LAST LIMIT 40`, [names])).rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── PORTAL PRODUCT (supplier-scoped): timeline view + comment on their assigned product-dev items ──
 async function portalOwnsProduct(req, ref) { if (!ref || !req.portal.suppliers.length) return false;
@@ -13871,20 +13879,20 @@ app.get('/api/portal/product-notes/:ref', portalAuth, async (req, res) => { cons
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
   try { res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
     to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read FROM planner.supplier_notes WHERE po=$1 ORDER BY created_at`, [ref])).rows); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/product-note', portalAuth, async (req, res) => { const b = req.body || {}, ref = (b.ref || '').trim();
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
   if (!String(b.body || '').trim()) return res.status(400).json({ error: 'body required' });
   try { await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'supplier',$3)`, [ref, req.portal.email || null, String(b.body).trim()]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/product-notes-read', portalAuth, async (req, res) => { const ref = ((req.body || {}).ref || '').trim();
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
   try { await pool.query(`UPDATE planner.supplier_notes SET read_at=now() WHERE po=$1 AND author_kind='internal' AND read_at IS NULL`, [ref]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // PORTAL product-sample versions (supplier-created, scoped to their assigned products)
 app.get('/api/portal/product-samples/:ref', portalAuth, async (req, res) => { const ref = decodeURIComponent(req.params.ref || '');
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
-  try { res.json(await productSampleList(ref)); } catch (e) { res.status(500).json({ error: e.message }); } });
+  try { res.json(await productSampleList(ref)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/product-sample', portalAuth, async (req, res) => { const b = req.body || {}, ref = (b.item_ref || '').trim();
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
   try { res.json({ ok: true, ...(await createProductSample(b, req.portal.email || null)) }); } catch (e) { res.status(400).json({ error: e.message }); } });
@@ -13893,7 +13901,7 @@ app.post('/api/portal/product-sample/:id/status', portalAuth, async (req, res) =
   if (!['in_development', 'completed', 'cancelled'].includes(st)) return res.status(400).json({ error: 'invalid status' });
   if (!(await portalOwnsProductSample(req, id))) return res.status(403).json({ error: 'not your sample' });
   try { await pool.query(`UPDATE planner.product_dev_samples SET supplier_status=$2 WHERE id=$1`, [id, st]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // Supplier edits which sizes + item types (aspects) a sample covers — so older/shipped samples can be backfilled.
 app.post('/api/portal/product-sample/:id/meta', portalAuth, async (req, res) => { const id = req.params.id, b = req.body || {};
   if (!(await portalOwnsProductSample(req, id))) return res.status(403).json({ error: 'not your sample' });
@@ -13903,7 +13911,7 @@ app.post('/api/portal/product-sample/:id/meta', portalAuth, async (req, res) => 
     const valid = (await pool.query(`SELECT coalesce(size_label,'') l FROM planner.product_dev_sizes s JOIN planner.product_dev_items i ON i.id=s.item_id WHERE i.ref=$1`, [sr ? sr.item_ref : ''])).rows.map(x => x.l);
     const sizes = (Array.isArray(b.sample_sizes) ? b.sample_sizes : []).map(String).filter(s => valid.includes(s));
     await pool.query(`UPDATE planner.product_dev_samples SET sample_sizes=$2, sampled_aspects=$3 WHERE id=$1`, [id, sizes, aspects]);
-    res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // Supplier assigns a sample version to a sample shipment (SR), marks it not-shipped, or unassigns it.
 app.post('/api/portal/product-sample/:id/assign', portalAuth, async (req, res) => { const id = req.params.id, b = req.body || {};
   if (!(await portalOwnsProductSample(req, id))) return res.status(403).json({ error: 'not your sample' });
@@ -13915,7 +13923,7 @@ app.post('/api/portal/product-sample/:id/assign', portalAuth, async (req, res) =
       if (mode === 'shipment' && !srId) return res.status(400).json({ error: 'sample_request_id required' });
       await assignSampleToShipment(id, srId, notShipped, req.portal.email || null); }
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); } });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/product-sample-photo', portalAuth, async (req, res) => { const b = req.body || {}, id = b.sample_id;
   if (!b.data_base64 || !id) return res.status(400).json({ error: 'sample_id + data_base64 required' });
   try { const sr = (await pool.query(`SELECT item_ref, version FROM planner.product_dev_samples WHERE id=$1`, [id])).rows[0];
@@ -13924,7 +13932,7 @@ app.post('/api/portal/product-sample-photo', portalAuth, async (req, res) => { c
     // timeline note → admin PRODUCT ✉ unread
     await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, attachment_id) VALUES ($1,$2,'supplier',$3,$4)`,
       [sr.item_ref, req.portal.email || null, 'Supplier uploaded a file to sample v' + sr.version + ': ' + (b.filename || 'file'), attId]);
-    res.json({ ok: true, id: attId }); } catch (e) { res.status(500).json({ error: e.message }); } });
+    res.json({ ok: true, id: attId }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // Supplier deletes a file they uploaded to a sample (only their own uploads on their own sample).
 app.post('/api/portal/product-sample-photo/:id/delete', portalAuth, async (req, res) => {
   try { const a = (await pool.query(`SELECT po, coalesce(uploader_kind,'internal') uploader_kind FROM planner.portal_attachments WHERE id=$1 AND category='product_sample'`, [req.params.id])).rows[0];
@@ -13933,7 +13941,7 @@ app.post('/api/portal/product-sample-photo/:id/delete', portalAuth, async (req, 
     if (!(await portalOwnsProductSample(req, sampleId))) return res.status(403).json({ error: 'not your sample' });
     if (a.uploader_kind !== 'supplier') return res.status(403).json({ error: 'you can only delete files you uploaded' });
     await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1`, [req.params.id]);
-    res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // Supplier uploads a document/photo directly into a product's Documents list (category='product', uploader_kind='supplier').
 app.post('/api/portal/product-doc', portalAuth, async (req, res) => { const b = req.body || {}, ref = (b.ref || '').trim();
   if (!ref || !b.data_base64) return res.status(400).json({ error: 'ref + data_base64 required' });
@@ -13945,25 +13953,25 @@ app.post('/api/portal/product-doc', portalAuth, async (req, res) => { const b = 
       [ref, b.filename || 'document', b.mime || 'application/octet-stream', buf.length, buf, req.portal.email || null]);
     await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, attachment_id) VALUES ($1,$2,'supplier',$3,$4)`,
       [ref, req.portal.email || null, 'Supplier uploaded a document: ' + (b.filename || 'document'), r.rows[0].id]);
-    res.json({ ok: true, id: r.rows[0].id }); } catch (e) { res.status(500).json({ error: e.message }); } });
+    res.json({ ok: true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // SAMPLE SHIPMENT CONTENTS (portal) — candidate lists + replace-all contents on a sample_request
 app.get('/api/portal/product-open-samples', portalAuth, async (req, res) => {   // in-development dev-sample candidates for the picker
-  try { res.json(await openSampleCandidates(req.portal.suppliers)); } catch (e) { res.status(500).json({ error: e.message }); } });
+  try { res.json(await openSampleCandidates(req.portal.suppliers)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.get('/api/portal/product-skus', portalAuth, async (req, res) => {   // bulk-SKU candidates, scoped to this supplier
-  try { res.json(await supplierSkuCandidates(req.portal.suppliers, (req.query.q || '').trim(), !!req.query.dev)); } catch (e) { res.status(500).json({ error: e.message }); } });
+  try { res.json(await supplierSkuCandidates(req.portal.suppliers, (req.query.q || '').trim(), !!req.query.dev)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample/:id/lines', portalAuth, async (req, res) => {   // replace-all bulk-SKU lines
   try { const s = await portalOwnsSample(req, req.params.id); if (!s) return res.status(403).json({ error: 'not your sample' });
     const _oldLines = await getSampleLines(req.params.id);
     await setSampleLines(req.params.id, (req.body || {}).lines);
     await logSampleLinesChanged(req.params.id, _oldLines, (req.body || {}).lines, req.portal.email || 'supplier', 'supplier');   // detailed record-of-change + timeline note (supplier side)
-    res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample/:id/dev-samples', portalAuth, async (req, res) => {   // replace-all product-development sample links
   const b = req.body || {};
   try { const s = await portalOwnsSample(req, req.params.id); if (!s) return res.status(403).json({ error: 'not your sample' });
-    await setSampleDevSamples(req.params.id, b.dev_samples || b.dev_sample_ids, req.portal.email || null); res.json({ ok: true }); } catch (e) { res.status(500).json({ error: e.message }); } });
+    await setSampleDevSamples(req.params.id, b.dev_samples || b.dev_sample_ids, req.portal.email || null); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.get('/api/portal/sample/:id/contents', portalAuth, async (req, res) => {
   try { const s = await portalOwnsSample(req, req.params.id); if (!s) return res.status(403).json({ error: 'not your sample' });
-    res.json(await sampleContents(req.params.id)); } catch (e) { res.status(500).json({ error: e.message }); } });
+    res.json(await sampleContents(req.params.id)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 
 // ── PORTAL SAMPLES (supplier-scoped) ──────────────────────────────────────────
 async function portalOwnsSample(req, id){ if(!id)return null;
@@ -13984,17 +13992,17 @@ app.post('/api/portal/sample-attachment', portalAuth, async (req, res) => {   //
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po, supplier_id, filename, mime, byte_size, data, uploaded_by, category)
       VALUES ($1,$2,$3,$4,$5,$6,$7,'sample') RETURNING id`, [s.ref, (req.portal.supplierIds||[])[0]||null, b.filename||'attachment', b.mime||'application/octet-stream', buf.length, buf, req.portal.email||'supplier']);
     res.json({ ok:true, id: r.rows[0].id }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample-attachment-remove', portalAuth, async (req, res) => {
   const id = req.body && req.body.att_id;
   try { const a = (await pool.query(`SELECT po, category FROM planner.portal_attachments WHERE id=$1`, [id])).rows[0];
     if(!a || a.category!=='sample' || !await portalOwnsSampleRef(req, a.po)) return res.status(403).json({ error: 'not allowed' });
     await pool.query(`DELETE FROM planner.portal_attachments WHERE id=$1`, [id]); res.json({ ok:true }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.get('/api/portal/sample-notes/:id', portalAuth, async (req, res) => {
   try { const s = await portalOwnsSample(req, req.params.id); if(!s) return res.status(403).json({ error: 'not your sample' });
     res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read FROM planner.sample_notes WHERE sample_id=$1::bigint ORDER BY created_at`, [s.id])).rows); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample-note-read/:id', portalAuth, async (req, res) => {   // supplier marks a D&B (internal) note read/unread
   try { const n = (await pool.query(`SELECT sr.supplier_name, sr.supplier_id, n.author_kind FROM planner.sample_notes n JOIN planner.sample_requests sr ON sr.id=n.sample_id WHERE n.id=$1::bigint`, [req.params.id])).rows[0];
     if(!n) return res.status(404).json({ error: 'not found' });
@@ -14003,33 +14011,33 @@ app.post('/api/portal/sample-note-read/:id', portalAuth, async (req, res) => {  
     const read = !(req.body && req.body.read === false);
     await pool.query(`UPDATE planner.sample_notes SET read_at=${read?'now()':'NULL'} WHERE id=$1::bigint AND author_kind='internal'`, [req.params.id]);
     res.json({ ok: true, read }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample-accept', portalAuth, async (req, res) => {
   try { const s = await portalOwnsSample(req, req.body && req.body.id); if(!s) return res.status(403).json({ error: 'not your sample' });
     await pool.query(`UPDATE planner.sample_requests SET accepted_at=coalesce(accepted_at,now()), change_requested=false, approved_lines=(SELECT jsonb_object_agg(sku,qty) FROM (SELECT sku, sum(qty) qty FROM planner.sample_request_lines WHERE sample_id=$1::bigint GROUP BY sku) z), updated_at=now() WHERE id=$1::bigint`, [s.id]);
     await logSampleChange(s.id, 'Confirmed sample request', null, req.portal.email || 'supplier');   // record of change (supplier side)
     await sampleTimelineNote(s.id, 'Confirmed the sample request', 'supplier', req.portal.email);   // shared timeline notification → shows to both sides + notifies D&B
     res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample-update', portalAuth, async (req, res) => {   // supplier: expected completion / tracking / carrier
   const b = req.body || {};
   try { const s = await portalOwnsSample(req, b.id); if(!s) return res.status(403).json({ error: 'not your sample' });
     await maybeShippedNote(s.id, b, 'supplier', req.portal.email);
     await logSampleFieldChanges(s.id, b, req.portal.email || 'supplier');   // record of change (supplier side)
     patch(res, 'planner.sample_requests', 'id', s.id, { supplier_expected_completion:'date', tracking_code:'text', carrier:'text', production_status:'text' }, b, 'bigint'); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample-note', portalAuth, async (req, res) => {
   const b = req.body || {};
   try { const s = await portalOwnsSample(req, b.id); if(!s) return res.status(403).json({ error: 'not your sample' }); if(!b.body) return res.status(400).json({ error: 'body required' });
     const r = await pool.query(`INSERT INTO planner.sample_notes (sample_id, author_kind, author_email, body) VALUES ($1::bigint,'supplier',$2,$3) RETURNING id`, [s.id, req.portal.email||null, String(b.body)]); res.json({ id: r.rows[0].id }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample-charge', portalAuth, async (req, res) => {   // supplier creates a charge → admin accepts → Other Payment
   const b = req.body || {};
   try { const s = await portalOwnsSample(req, b.id); if(!s) return res.status(403).json({ error: 'not your sample' });
     const r = await pool.query(`INSERT INTO planner.supplier_charges (source_type, source_ref, supplier_name, freight_cost, product_cost, description, created_by)
       VALUES ('sample',$1,$2,$3,$4,$5,$6) RETURNING id`, [s.ref, s.supplier_name, Number(b.freight_cost)||0, Number(b.product_cost)||0, b.description||null, req.portal.email||'supplier']);
     await chargeTimelineNote(pool, 'sample', s.ref, `💰 Charge added by supplier — ${chargeLbl(b.freight_cost, b.product_cost, b.description)}`, req.portal.email || 'supplier'); res.json({ ok: true, id: r.rows[0].id }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample-create', portalAuth, async (req, res) => {   // supplier originates a sample request
   const b = req.body || {}; const names = req.portal.suppliers||[], ids = req.portal.supplierIds||[];
   const supName = names[0]||null, supId = ids[0]||null; const client = await pool.connect();
@@ -14056,7 +14064,7 @@ app.post('/api/portal/shipment-notes-read', portalAuth, async (req, res) => {
     if (!own) return res.status(403).json({ error: 'not your shipment' });
     await pool.query(`UPDATE planner.shipment_notes SET read_at=now() WHERE shipment_ref=$1 AND author_kind='internal' AND read_at IS NULL`, [ref]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // The supplier must be on the shipment (has a PO with that shipment_ref) to see/add its timeline notes.
@@ -14069,7 +14077,7 @@ app.get('/api/portal/shipment-notes/:ref', portalAuth, async (req, res) => {   /
     if (!await portalOwnsShipmentRef(req, req.params.ref)) return res.status(403).json({ error: 'not your shipment' });
     res.json(await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
       to_char(created_at,'YYYY-MM-DD HH24:MI') created_at FROM planner.shipment_notes WHERE shipment_ref=$1 ORDER BY created_at`, [req.params.ref]).then(r => r.rows));
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/portal/shipment-note', portalAuth, async (req, res) => {   // supplier posts a shipment timeline note
   const b = req.body || {}; const ref = (b.shipment_ref || '').trim();
@@ -14079,7 +14087,7 @@ app.post('/api/portal/shipment-note', portalAuth, async (req, res) => {   // sup
     const r = await pool.query(`INSERT INTO planner.shipment_notes (shipment_ref, author_kind, author_email, body)
       VALUES ($1,'supplier',$2,$3) RETURNING id`, [ref, req.portal.email || null, String(b.body)]);
     res.json({ id: r.rows[0].id });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // Supplier updates their shipment's carrier / tracking / ship (departure) date / status directly.
@@ -14114,14 +14122,14 @@ app.post('/api/portal/shipment/:ref', portalAuth, async (req, res) => {
         VALUES ($1,'supplier',$2,$3)`, [ref, req.portal.email || null, who + ' set the ship date to ' + newDate]); } catch (e) { /* note best-effort */ }
     }
     res.json({ ok: true, date_note: dateChanged });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/portal/shipment-charges/:ref', portalAuth, async (req, res) => {   // supplier: charges on a shipment they're on
   const names = req.portal.suppliers||[];
   try { const own = (await pool.query(`SELECT 1 FROM planner.purchase_orders WHERE shipment_ref=$1 AND supplier_name=ANY($2) LIMIT 1`, [req.params.ref, names])).rows[0];
     if(!own) return res.status(403).json({ error: 'not your shipment' });
     res.json((await pool.query(`SELECT id, freight_cost, product_cost, coalesce(description,'') description, status, to_char(created_at,'YYYY-MM-DD') created_at FROM planner.supplier_charges WHERE source_type='shipment' AND source_ref=$1 ORDER BY created_at`, [req.params.ref])).rows); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/shipment-charge', portalAuth, async (req, res) => {   // supplier creates a charge on a shipment
   const b = req.body||{}, names = req.portal.suppliers||[];
   if(!b.shipment_ref) return res.status(400).json({ error: 'shipment_ref required' });
@@ -14129,7 +14137,7 @@ app.post('/api/portal/shipment-charge', portalAuth, async (req, res) => {   // s
     if(!own) return res.status(403).json({ error: 'not your shipment' });
     const r = await pool.query(`INSERT INTO planner.supplier_charges (source_type, source_ref, supplier_name, freight_cost, product_cost, description, created_by)
       VALUES ('shipment',$1,$2,$3,$4,$5,$6) RETURNING id`, [b.shipment_ref, names[0]||null, Number(b.freight_cost)||0, Number(b.product_cost)||0, b.description||null, req.portal.email||'supplier']); res.json({ ok: true, id: r.rows[0].id }); }
-  catch (e) { res.status(500).json({ error: e.message }); } });
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // Direct to Client details — supplier approves the PO's packing & labelling requirements
 app.post('/api/portal/dtc-accept', portalAuth, async (req, res) => {
   const po = req.body && req.body.po; const names = req.portal.suppliers||[];
@@ -14137,7 +14145,7 @@ app.post('/api/portal/dtc-accept', portalAuth, async (req, res) => {
   try { const own = (await pool.query(`SELECT 1 FROM planner.purchase_orders WHERE po=$1 AND supplier_name=ANY($2) LIMIT 1`, [po, names])).rows[0];
     if(!own) return res.status(403).json({ error: 'not your PO' });
     await pool.query(`UPDATE planner.purchase_orders SET dtc_accepted_at=now(), dtc_accepted_by=$2, dtc_approved_snapshot=${DTC_SNAPSHOT_SQL} WHERE po=$1`, [po, req.portal.email||'supplier']);
-    res.json({ ok:true }); } catch(e){ res.status(500).json({ error: e.message }); } });
+    res.json({ ok:true }); } catch(e){ log500(e); res.status(500).json({ error: e.message }); } });
 
 // (Removed dead /api/portal/data — old supplier loader, superseded by /api/portal/bootstrap. Zero callers. v25.653)
 
@@ -14158,7 +14166,7 @@ app.get('/api/portal/img', portalAuth, async (req, res) => {
     res.setHeader('content-type', r.headers.get('content-type') || 'image/jpeg');
     res.setHeader('cache-control', 'public, max-age=86400');
     res.end(Buffer.from(await r.arrayBuffer()));
-  } catch (e) { res.status(500).end(); }
+  } catch (e) { log500(e); res.status(500).end(); }
 });
 // Barcode label rows — only for SKUs that appear on THIS supplier's POs (intersect with owned SKUs).
 // SHIPS-WITH shipment-label fields for one PO — supplier-scoped mirror of /api/supply/ships-with/:po.
@@ -14177,7 +14185,7 @@ app.get('/api/portal/ships-with/:po', portalAuth, async (req, res) => {
       LEFT JOIN planner.purchase_orders mpo ON mpo.po = coalesce(nullif(sh.master_po,''), sh.shipment_ref)
       WHERE po.po=$1`, [req.params.po]);
     res.json(r.rows[0] || {});
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/portal/label-data', portalAuth, async (req, res) => {
   try {
@@ -14213,7 +14221,7 @@ app.get('/api/portal/label-data', portalAuth, async (req, res) => {
       rows.forEach(r => { r.batch = batchCode; r.batch_date = bd; });
     }
     res.json(rows);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // ── Session-scoped write-backs (mirror the admin /api/supply/* logic, ownership-checked, submitted_by = session email)
@@ -14226,7 +14234,7 @@ app.post('/api/portal/crossdock-qty', portalAuth, async (req, res) => {
     await pool.query(`INSERT INTO planner.crossdock_shipments (po,sku,qty,submitted_by,submitted_at) VALUES ($1,$2,$3,$4,now())
       ON CONFLICT (po,sku) DO UPDATE SET qty=excluded.qty, submitted_by=excluded.submitted_by, submitted_at=now()`, [b.po, b.sku, qty, req.portal.email]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/portal/line-cost', portalAuth, async (req, res) => {
   const b = req.body || {}; if (!b.po || !b.sku) return res.status(400).json({ error: 'po and sku required' });
@@ -14238,13 +14246,13 @@ app.post('/api/portal/line-cost', portalAuth, async (req, res) => {
         is_added=planner.portal_line_costs.is_added OR excluded.is_added, submitted_by=excluded.submitted_by, submitted_at=now()`,
       [b.po, b.sku, num(b.actual_cost), num(b.amended_qty), !!b.is_added, req.portal.email]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/portal/line-remove', portalAuth, async (req, res) => {
   const b = req.body || {}; if (!b.po || !b.sku) return res.status(400).json({ error: 'po and sku required' });
   if (!await portalOwnsPO(req, b.po)) return portalDeny(res);
   try { await pool.query(`DELETE FROM planner.portal_line_costs WHERE po=$1 AND sku=$2 AND is_added=true`, [b.po, b.sku]); res.json({ ok: true }); }
-  catch (e) { res.status(500).json({ error: e.message }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/portal/additional-cost', portalAuth, async (req, res) => {
   const b = req.body || {}; const num = v => (v === '' || v == null) ? null : Number(v);
@@ -14261,7 +14269,7 @@ app.post('/api/portal/additional-cost', portalAuth, async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.portal_additional_costs (po,description,qty,price,submitted_by) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
       [b.po, b.description || '', num(b.qty), num(b.price), req.portal.email]);
     res.json({ ok: true, id: r.rows[0].id });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/portal/additional-cost-remove', portalAuth, async (req, res) => {
   const id = req.body && req.body.id; if (!id) return res.status(400).json({ error: 'id required' });
@@ -14269,7 +14277,7 @@ app.post('/api/portal/additional-cost-remove', portalAuth, async (req, res) => {
     const r = (await pool.query(`SELECT po FROM planner.portal_additional_costs WHERE id=$1`, [id])).rows[0];
     if (!r || !await portalOwnsPO(req, r.po)) return portalDeny(res);
     await pool.query(`DELETE FROM planner.portal_additional_costs WHERE id=$1`, [id]); res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Supplier submits a document for approval (Documents section, PAYMENTS & DOCUMENTS tab). Sets it 'submitted',
 // drops an UNREAD supplier timeline note on the PO (→ admin notification badge) and pushes an email to D&B.
@@ -14286,7 +14294,7 @@ app.post('/api/portal/doc-submit', portalAuth, async (req, res) => {
       [doc.po, sid, req.portal.email || null, 'Submitted document “' + doc.filename + '” for approval']); } catch (e) { /* timeline best-effort */ }
     emailDocSubmit(doc.po, doc.filename, req.portal.email).catch(() => {});
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/portal/note', portalAuth, async (req, res) => {
   const b = req.body || {}; if (!b.po || !String(b.body || '').trim()) return res.status(400).json({ error: 'po and body required' });
@@ -14296,7 +14304,7 @@ app.post('/api/portal/note', portalAuth, async (req, res) => {
     await pool.query(`INSERT INTO planner.supplier_notes (po,supplier_id,author_email,author_kind,body) VALUES ($1,$2,$3,'supplier',$4)`,
       [b.po, sid, req.portal.email, String(b.body).trim()]);
     res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Supplier escalates a timeline message → routed to a CONFIG internal list by context; link → planner.
 app.post('/api/portal/escalate', portalAuth, async (req, res) => {
@@ -14305,7 +14313,7 @@ app.post('/api/portal/escalate', portalAuth, async (req, res) => {
   try {
     const user = (req.portal.suppliers && req.portal.suppliers[0]) || 'The supplier';
     res.json(await escalateCore({ initiator: 'supplier', kind, ref: b.ref, message: b.message, user, setEscalated: !!b.set_escalated, postNote: !!b.post_note }));
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/portal/upload', portalAuth, async (req, res) => {
   const b = req.body || {}; if (!b.po || !b.data_base64) return res.status(400).json({ error: 'po and data_base64 required' });
@@ -14317,7 +14325,7 @@ app.post('/api/portal/upload', portalAuth, async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.portal_attachments (po,supplier_id,filename,mime,byte_size,data,uploaded_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
       [b.po, sid, b.filename || 'invoice', b.mime || 'application/octet-stream', buf.length, buf, req.portal.email]);
     res.json({ id: r.rows[0].id, byte_size: buf.length });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // #A supplier enters the pallet count on the portal PO card — same purchase_orders.pallets_override field the admin
 // SHIPMENTS tab uses (so it feeds freight/cash flow), and every change is logged to the PO timeline. Blank clears it.
@@ -14336,7 +14344,7 @@ app.post('/api/portal/po-pallets', portalAuth, async (req, res) => {
     await pool.query(`UPDATE planner.purchase_orders SET pallets_override=$2, updated_at=now() WHERE po=$1`, [po, val]);
     try { await logPoFieldChanges(po, ['pallets_override'], old, { pallets_override: val }, by); } catch (e) {}
     res.json({ ok: true, po, pallets_override: val });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/portal/po-pallets/:po', portalAuth, async (req, res) => {   // #A portal-scoped estimate + override for the PO card
   const po = req.params.po;
@@ -14345,7 +14353,7 @@ app.get('/api/portal/po-pallets/:po', portalAuth, async (req, res) => {   // #A 
     const r = (await pool.query(`SELECT ${PO_CARTONS_SQL} est_cartons, ${PO_PALLETS_SQL} est_pallets, p.pallets_override FROM planner.purchase_orders p WHERE p.po=$1`, [po])).rows[0];
     if (!r) return res.status(404).json({ error: 'not found' });
     res.json({ po, est_cartons: Number(r.est_cartons) || 0, est_pallets: Number(r.est_pallets) || 0, pallets_override: r.pallets_override == null ? null : Number(r.pallets_override) });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/portal/submit', portalAuth, async (req, res) => {
   const b = req.body || {}; if (!b.po) return res.status(400).json({ error: 'po required' });
@@ -14395,7 +14403,7 @@ app.post('/api/portal/submit', portalAuth, async (req, res) => {
     }
     if (_invoiceSubmit != null && !(await invoiceSubmitIsRepeat(b.po, _invoiceSubmit))) await emailInvoiceSubmit(b.po, _invoiceSubmit, by).catch(() => {});   // skip duplicate emails from repeated Submit clicks with the same amount
     res.json(out);
-  } catch (e) { res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // Local dev: listen. On Vercel (serverless) the platform imports `app` instead.
