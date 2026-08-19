@@ -1,3 +1,6 @@
+## v27.154 Deposits: PROD#/Supplier picks apply optimistically (instant)
+- Picking a **PROD#** or **Supplier** now paints the new value **instantly** (row stays in edit), saves in the background, then refreshes the server-derived columns (Est. alloc / linked POs / apply list) when that returns — instead of blocking on the save + a full deposits refetch. Reverts on failure.
+
 ## v27.153 Deposits edit UX: silent refresh (stay in edit), narrower date boxes
 - Picking a **PROD#** or **Supplier** now refreshes the row **silently in place** (no page reload) and **keeps the row in edit mode** until you Save. (Other fields already auto-saved silently via inline edit.)
 - The **Dates** edit boxes were too wide (the `#deptbl` flex rule stretched them full-width and hid the 📅 button) — narrowed to 88px so the calendar picker button is visible again.

@@ -5446,6 +5446,14 @@
     // Silent in-place refresh — refetch deposits, swap the in-memory list, redraw. DEP_EDIT persists (closure) so an
     // unlocked row STAYS in edit mode after a prod#/supplier pick; no page navigation.
     function reloadDeps(){ fetch('/api/supply/deposits').then(function(r){return r.json();}).then(function(rows){ deps=(rows||[]).filter(function(x){return x.is_deposit;}); try{delete cache['productions'];}catch(e){} draw(); }).catch(function(){ draw(); }); }
+    // OPTIMISTIC field set — paint the picked value instantly (row stays in edit), POST in the background, then a
+    // background reloadDeps refreshes the server-derived columns (est. alloc / linked POs / apply list). Revert on failure.
+    function depOptimisticSet(id,field,val){ var d=deps.filter(function(x){return String(x.id)===String(id);})[0]; if(!d)return;
+      var prev=d[field]; d[field]=val; draw();   // instant
+      var body={}; body[field]=val;
+      fetch('/api/supply/deposit/'+id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
+        .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); try{delete cache['productions'];}catch(e){} reloadDeps(); })   // background: refresh derived columns
+        .catch(function(e){ d[field]=prev; draw(); alert('Failed: '+(e.message||e)); }); }
     function draw(){ try{hzFilterSave('deposits',{f:st.f,sup:st.sup});}catch(e){}   // persist filters (not the search) — sliding 1h TTL
       var f=cur().filter(function(d){return (!st.q||((d.reference||'')+' '+(d.supplier_name||'')).toLowerCase().indexOf(st.q)>=0) && (!st.sup||(d.supplier_name||'')===st.sup);});
       document.getElementById('dep-cnt').textContent=f.length+' / '+deps.length+' deposits';
@@ -5453,8 +5461,8 @@
       if(actMob()){ if(_tw)_tw.style.display='none'; if(_dc)_dc.innerHTML=mobCards(f.length?f.map(depCard).join(''):'<div class="count">No deposits.</div>'); }   // mobile: stacked cards
       else { if(_tw)_tw.style.display=''; if(_dc)_dc.innerHTML=''; document.getElementById('dep-rows').innerHTML=f.map(rowHTML).join(''); }
       bindEdits();
-      b.querySelectorAll('.dep-prod-pick').forEach(function(btn){ btn.onclick=function(e){ e.stopPropagation(); openDepProdNoPick(btn,reloadDeps); }; });   // searchable active-productions picker — silent refresh, stays in edit
-      b.querySelectorAll('.dep-sup-pick').forEach(function(btn){ btn.onclick=function(e){ e.stopPropagation(); openDepSupPick(btn,reloadDeps); }; });   // searchable supplier picker (no free-text) — silent refresh, stays in edit
+      b.querySelectorAll('.dep-prod-pick').forEach(function(btn){ btn.onclick=function(e){ e.stopPropagation(); openDepProdNoPick(btn,function(val){ depOptimisticSet(btn.dataset.id,'prod_no',val); }); }; });   // searchable active-productions picker — optimistic, stays in edit
+      b.querySelectorAll('.dep-sup-pick').forEach(function(btn){ btn.onclick=function(e){ e.stopPropagation(); openDepSupPick(btn,function(val){ depOptimisticSet(btn.dataset.id,'supplier_name',val); }); }; });   // searchable supplier picker (no free-text) — optimistic, stays in edit
       b.querySelectorAll('.dep-po-link').forEach(function(btn){ btn.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(btn.dataset.po,'pay'); else gotoPO(btn.dataset.po,'pay'); }; });   // popout drawer (Payments tab), not a full navigation
       b.querySelectorAll('.dep-edit').forEach(function(btn){ btn.onclick=function(){ DEP_EDIT[btn.dataset.id]=true; draw(); }; });   // unlock this row in place
       b.querySelectorAll('.dep-save').forEach(function(btn){ btn.onclick=function(){ var id=btn.dataset.id;
@@ -5528,7 +5536,7 @@
     var rc=btn.getBoundingClientRect(); pop.style.cssText='position:fixed;z-index:100000;top:'+(rc.bottom+4)+'px;left:'+Math.max(8,Math.min(rc.left,window.innerWidth-312))+'px';
     pop.innerHTML='<div class="shpop-h">Set production #</div><input class="shpop-q" placeholder="search production #…"><div id="shpop-list"><div class="count" style="padding:8px">Loading…</div></div>';
     document.body.appendChild(pop); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
-    function save(val){ shipPost('/api/supply/deposit/'+id,{prod_no:val},function(){ closeShPop(); delete cache['productions']; if(done)done(); else showPoSub('deposits'); }); }   // silent in-place refresh when a callback is given (stays in edit mode)
+    function save(val){ if(done){ closeShPop(); done(val); return; } shipPost('/api/supply/deposit/'+id,{prod_no:val},function(){ closeShPop(); delete cache['productions']; showPoSub('deposits'); }); }   // callback given → optimistic update handled by the caller (instant); else legacy save+reload
     function render(q){ q=(q||'').trim().toLowerCase(); var list=_depProdsCache||[];
       var ms=list.filter(function(p){return !q||String(p.prod_no||'').toLowerCase().indexOf(q)>=0;});
       var html='<div class="shpop-opt unassign" data-clear="1">— Clear</div>'+ms.slice(0,q?80:20).map(function(p){return '<div class="shpop-opt" data-v="'+esc(p.prod_no)+'">'+esc(p.prod_no)+(p.xero_account_code?' <span class="mut tiny">'+esc(p.xero_account_code)+'</span>':'')+'</div>';}).join('');
@@ -5544,7 +5552,7 @@
     var rc=btn.getBoundingClientRect(); pop.style.cssText='position:fixed;z-index:100000;top:'+(rc.bottom+4)+'px;left:'+Math.max(8,Math.min(rc.left,window.innerWidth-312))+'px';
     pop.innerHTML='<div class="shpop-h">Set supplier</div><input class="shpop-q" placeholder="search supplier…"><div id="shpop-list"><div class="count" style="padding:8px">Loading…</div></div>';
     document.body.appendChild(pop); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
-    function save(val){ shipPost('/api/supply/deposit/'+id,{supplier_name:val},function(){ closeShPop(); delete cache['productions']; if(done)done(); else showPoSub('deposits'); }); }   // silent in-place refresh when a callback is given (stays in edit mode)
+    function save(val){ if(done){ closeShPop(); done(val); return; } shipPost('/api/supply/deposit/'+id,{supplier_name:val},function(){ closeShPop(); delete cache['productions']; showPoSub('deposits'); }); }   // callback given → optimistic update handled by the caller (instant); else legacy save+reload
     function render(q){ q=(q||'').trim().toLowerCase(); var list=(supplierList||[]).slice().sort();
       var ms=list.filter(function(s){return (!q||String(s).toLowerCase().indexOf(q)>=0) && s!==cur;});
       var html=(cur?'<div class="shpop-opt" data-v="'+esc(cur)+'" style="background:#eff6ff;border-bottom:1px solid #dbeafe"><b>'+esc(cur)+'</b> <span class="mut tiny">— current</span></div>':'')
