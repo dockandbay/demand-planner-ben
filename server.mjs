@@ -3877,7 +3877,28 @@ app.get('/api/supply/:section', async (req, res, next) => {
             -- purchase orders linked to this deposit (po.deposit_ref = reference). pos_open = only POs not yet
             -- complete; the full list is linked_pos above ("all").
             (SELECT string_agg(po.po, ', ' ORDER BY po.po) FROM planner.purchase_orders po
-               WHERE po.deposit_ref=d.reference AND coalesce(po.status,'') NOT ILIKE '%complete%') pos_open
+               WHERE po.deposit_ref=d.reference AND coalesce(po.status,'') NOT ILIKE '%complete%') pos_open,
+            -- per-PO breakdown for the "Linked purchase orders" mini-table: allocated (start deposit already
+            -- assigned) + estimated (value × start%). One object per linked PO; the client filters by toggle.
+            CASE WHEN d.is_deposit THEN (
+              SELECT json_agg(json_build_object(
+                  'po', x.po, 'status', x.status,
+                  'allocated', round(coalesce(x.assigned,0),2),
+                  'estimated', x.est,
+                  'complete', (x.status ILIKE '%complete%')
+                ) ORDER BY x.po)
+              FROM (
+                SELECT po.po, coalesce(po.status,'') status, po.pay_start_deposit_assigned assigned,
+                  round(coalesce(po.supplier_invoice_total, lv.line_value, po.order_value_estimation, 0)
+                        * coalesce(po.start_deposit_pct_override, s.start_deposit_pct, 0)/100, 2) est
+                FROM planner.purchase_orders po
+                LEFT JOIN planner.suppliers s ON s.id=po.supplier_id
+                LEFT JOIN LATERAL (SELECT sum(l.qty * coalesce(
+                    (SELECT plc.final_cost FROM planner.portal_line_costs plc WHERE plc.po=l.po AND plc.sku=l.sku AND plc.confirmed_at IS NOT NULL AND plc.final_cost IS NOT NULL),
+                    l.cost_price)) line_value FROM planner.purchase_order_lines l WHERE l.po=po.po) lv ON true
+                WHERE po.deposit_ref=d.reference
+              ) x
+            ) END po_alloc
           FROM planner.deposits d
           LEFT JOIN draw dr ON dr.deposit_ref=d.reference
           LEFT JOIN pool p ON p.reference=d.reference

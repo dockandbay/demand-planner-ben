@@ -5366,9 +5366,22 @@
       var c_est = '<td style="width:84px;white-space:nowrap'+(estOver?';color:#dc2626;font-weight:700':'')+'"'+(estOver?' title="Estimated allocation exceeds the remaining deposit">':'>')+(d.is_deposit?money(d.est_alloc):'')+'</td>';
       // purchase orders linked to this deposit (open-only by default; toggle shows all) — each links to the
       // PO opened on its PAYMENTS tab; the cell wraps so long lists flow onto multiple lines.
-      var ap=(depPoView==='all' ? d.linked_pos : (depPoView==='open' ? d.pos_open : d.pos_unalloc))||'';   // Unallocated (default) / Open / All linked
-      var poLinks = ap ? ap.split(',').map(function(p){ p=p.trim(); return p?'<button class="lnk-btn dep-po-link" data-po="'+esc(p)+'" title="open this PO — payments tab" style="font-size:9px">'+esc(p)+'</button>':''; }).filter(Boolean).join(' ') : '<span class="mut tiny">—</span>';
-      var c_asg = '<td class="l" style="white-space:normal;min-width:480px;max-width:640px;line-height:1.7">'+poLinks+'</td>';
+      // Linked purchase orders → a 3-column mini-table (PO Ref · Allocated · Estimated) with a Σ total row.
+      // Filter the per-PO breakdown by the toggle: Unallocated (default) / Open / All linked.
+      var _poArr=d.po_alloc||[];
+      var _shownPO=_poArr.filter(function(p){ if(depPoView==='all')return true; if(depPoView==='open')return !p.complete; return !p.complete && !(Number(p.allocated)>0) && Number(p.estimated)>0; });   // 'unalloc' = open, nothing allocated yet, has an estimate
+      var c_asg;
+      if(!_shownPO.length){ c_asg='<td class="l" style="min-width:300px"><span class="mut tiny">—</span></td>'; }
+      else { var _tA=0,_tE=0;
+        var _body=_shownPO.map(function(p){ _tA+=Number(p.allocated)||0; _tE+=Number(p.estimated)||0;
+          return '<tr><td class="l" style="padding:1px 6px 1px 0">'+(p.complete?'<span class="mut tiny" title="PO complete" style="margin-right:2px">✓</span>':'')+'<button class="lnk-btn dep-po-link" data-po="'+esc(p.po)+'" title="open this PO — payments tab" style="font-size:10px">'+esc(p.po)+'</button></td>'
+            +'<td style="text-align:right;padding:1px 0 1px 8px;font-variant-numeric:tabular-nums">'+(Number(p.allocated)>0?money(p.allocated):'<span class="mut">—</span>')+'</td>'
+            +'<td style="text-align:right;padding:1px 0 1px 10px;font-variant-numeric:tabular-nums">'+(Number(p.estimated)>0?money(p.estimated):'<span class="mut">—</span>')+'</td></tr>'; }).join('');
+        c_asg='<td class="l" style="min-width:300px;max-width:420px;padding:3px 4px"><table class="dep-po-tbl" style="width:100%;border-collapse:collapse;font-size:10px;line-height:1.5">'
+          +'<thead><tr><th class="l" style="font-weight:600;color:#64748b;padding:0 6px 2px 0">PO Ref</th><th style="text-align:right;font-weight:600;color:#64748b;padding:0 0 2px 8px">Allocated</th><th style="text-align:right;font-weight:600;color:#64748b;padding:0 0 2px 10px">Estimated</th></tr></thead>'
+          +'<tbody>'+_body+'</tbody>'
+          +'<tfoot><tr style="border-top:1px solid #cbd5e1;font-weight:700"><td class="l" style="padding:2px 6px 0 0">Total</td><td style="text-align:right;padding:2px 0 0 8px;font-variant-numeric:tabular-nums">'+money(_tA)+'</td><td style="text-align:right;padding:2px 0 0 10px;font-variant-numeric:tabular-nums">'+money(_tE)+'</td></tr></tfoot>'
+          +'</table></td>'; }
       var act;
       if(closed) act='<span class="tool-badge bg-neutral" style="margin-right:5px">closed</span><button class="lnk-btn dep-close" data-id="'+d.id+'" data-st="">reopen</button>';
       else { var paidTag = lockedPay ? '<span class="tool-badge bg-green" style="margin-right:5px" title="paid &amp; FX applied">paid</span>' : '';
@@ -10397,7 +10410,7 @@
   function ensureRoot(){ if(document.getElementById('supply-root'))return;
     var app=document.getElementById('app')||document.body; if(!app)return;
     var rootEl=document.createElement('div'); rootEl.id='supply-root';
-    rootEl.innerHTML='<div id="supply-subnav">'+SECTIONS.map(function(s){return '<a class="stab" data-k="'+s[0]+'" href="#/supply/'+s[0]+'">'+s[1]+(s[0]==='reports'?'<span id="nav-actions-badge" title="items needing attention" style="display:none;margin-left:5px;background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;vertical-align:middle"></span>':'')+'</a>';}).join('')
+    rootEl.innerHTML='<div id="supply-subnav">'+SECTIONS.map(function(s){return '<a class="stab" data-k="'+s[0]+'" href="#/supply/'+s[0]+'">'+s[1]+(s[0]==='reports'?' <span id="nav-actions-badge" class="ex-badge" title="items needing attention" style="display:none"></span>':'')+'</a>';}).join('')
       +'<button id="supply-refresh-cache" title="Reload every report from the database fresh and reset all caches (client + server)" style="margin-left:auto;background:#fff;border:1px solid #cbd5e1;border-radius:5px;color:#2563eb;font-weight:600;font-size:11px;padding:2px 10px;cursor:pointer">↻ Refresh cache</button>'
       +'<span class="ver">HORIZON __APP_VERSION__</span></div>'
       +'<select id="supply-nav-sel" aria-label="Section">'+SECTIONS.map(function(s){return '<option value="'+s[0]+'">'+s[1]+'</option>';}).join('')+'</select>'

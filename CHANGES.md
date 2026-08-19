@@ -1,3 +1,9 @@
+## v27.146 BI & REPORTS L2 counter matches the PURCHASE ORDERS badge styling
+- The combined BI & REPORTS L2 counter now uses the same `.ex-badge` chip as the PURCHASE ORDERS counter (same size / padding / pill), instead of a smaller custom style.
+
+## v27.145 Deposits register: "Linked purchase orders" as a PO Ref · Allocated · Estimated mini-table
+- On PAYMENTS ▸ Deposits, the linked-POs column is now a small 3-column table — **PO Ref** (opens the PO drawer on its Payments tab), **Allocated** (start deposit already assigned), **Estimated** (calculated start deposit = value × start%) — with a **Σ total** row for Allocated + Estimated. Honours the existing Unallocated / Open / All-linked toggle. New `po_alloc` per-PO JSON on `GET /api/supply/deposits` (existing tables).
+
 ## v27.144 SUPPLY nav: ORDER PLAN → a PURCHASE ORDERS sub-tab; Deposits Drawdown after Cash Flow
 - **Order plan** is no longer an L2 section. It now sits as a **PURCHASE ORDERS sub-tab**, immediately after **PLAN** (PLAN · Order plan · Shipments · Crossdock & Labels · …). The view is unchanged; the PO sub-nav renders above it and its unapproved-exceptions badge now rides the sub-tab. Old links (`#/supply/order-plan`) redirect; new hash is `#/supply/purchase-orders/orderplan`.
 - **Payments** L3 order: **Deposits Drawdown** moved to sit **after Cash Flow** (Deposits · Other Payments · Payments Due · Payments Report · By Supplier · Cash Flow · Deposits Drawdown · Auto Forecast · Xero Compare).
