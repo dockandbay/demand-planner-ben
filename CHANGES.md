@@ -1,3 +1,6 @@
+## v27.166 Inventory Status Report: card view on mobile
+- On phones (≤640px), the Inventory ▸ Status Report renders each SKU as a **slimline card** (SKU + status badge, then Season / SOH / cover / on-order / inbound as labelled fields) within its location→status group, instead of the wide table. Section bars, tier grouping, expand/collapse and the discontinued toggle all still work. Desktop table unchanged.
+
 ## v27.165 Manage 3PL: "In 3PL, not in ERP" filter + mobile cards + multi-SKU filter
 - New **"In 3PL, not in ERP"** option in the Show dropdown — surfaces SKUs with **3PL available > 2 but ERP available < 2** (incl. SKUs not in ERP at all): stock sitting in the 3PL that ERP thinks is empty.
 - **Mobile:** on phones (≤640px) all Manage-3PL country tabs (US/UK/AU/EU/US-NG/UK-NG) render as **slimline cards** (SKU + On-hand and Available, each 3PL / ERP / Δ) instead of the wide grouped table.

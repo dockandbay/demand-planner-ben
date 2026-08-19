@@ -11040,12 +11040,24 @@ function renderInvStatus(){
   function sectHdr(n,title,sub){ return '<div style="font-weight:800;font-size:14px;margin:'+(n===1?'8px':'24px')+' 0 4px;padding:7px 11px;background:#0f172a;color:#fff;border-radius:7px">'+esc(title)+'</div>'
     +(sub?'<div class="mut" style="font-size:11px;margin-bottom:10px">'+sub+'</div>':''); }
   // Shared table renderer. `cols` = [{h,align,f}] where f(r)->cell html.
+  var _invMob=!!(window.matchMedia&&window.matchMedia('(max-width:640px)').matches);
   function tierTables(buckets, cols, emptyMsg, sortFn){
     var any=buckets.A.length+buckets.B.length+buckets.C.length;
     if(!any)return '<div style="padding:12px 4px;color:#16a34a;font-size:12px">'+emptyMsg+'</div>';
+    // mobile: a slimline card per SKU — title = SKU col, Status col (if any) as a badge, the rest as labelled fields.
+    var titleC=null, statusC=null; cols.forEach(function(c){ if(c.h==='SKU')titleC=c; if(c.h==='Status')statusC=c; }); if(!titleC)titleC=cols[0];
+    var restC=cols.filter(function(c){ return c!==titleC && c!==statusC; });
     return ['A','B','C'].map(function(t){ var L=buckets[t]; if(!L.length)return '';
       L.sort(sortFn||function(a,b){ return a.sku.localeCompare(b.sku); });
-      return '<div style="margin-bottom:12px"><div style="font-weight:700;font-size:12px;color:'+TC[t]+';margin-bottom:4px">'+TL[t]+' <span class="mut" style="font-weight:400">('+L.length+')</span></div>'
+      var lbl='<div style="font-weight:700;font-size:12px;color:'+TC[t]+';margin-bottom:4px">'+TL[t]+' <span class="mut" style="font-weight:400">('+L.length+')</span></div>';
+      if(_invMob){
+        return '<div style="margin-bottom:12px">'+lbl+L.map(function(r){
+          return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:7px 9px;margin-bottom:6px;background:#fff">'
+            +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;margin-bottom:5px"><div style="font-weight:700;font-size:11.5px;overflow-wrap:anywhere">'+titleC.f(r)+'</div>'+(statusC?'<div style="flex:0 0 auto">'+statusC.f(r)+'</div>':'')+'</div>'
+            +'<div style="display:flex;flex-wrap:wrap;gap:7px 12px">'+restC.map(function(c){return '<div style="min-width:64px"><div style="font-size:8px;text-transform:uppercase;letter-spacing:.02em;color:#94a3b8">'+c.h+'</div><div style="font-size:11px;font-weight:600">'+c.f(r)+'</div></div>';}).join('')+'</div>'
+            +'</div>'; }).join('')+'</div>';
+      }
+      return '<div style="margin-bottom:12px">'+lbl
         +'<div style="max-height:300px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'
         +cols.map(function(c){return '<th style="text-align:'+(c.align||'right')+';padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+c.h+'</th>';}).join('')+'</tr></thead><tbody>'
         +L.map(function(r){ return '<tr>'+cols.map(function(c){return '<td style="padding:4px 10px;text-align:'+(c.align||'right')+';white-space:nowrap">'+c.f(r)+'</td>';}).join('')+'</tr>'; }).join('')
