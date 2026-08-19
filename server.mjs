@@ -3920,14 +3920,11 @@ app.get('/api/supply/:section', async (req, res, next) => {
                   'complete', (x.status ILIKE '%complete%')
                 ) ORDER BY x.po)
               FROM (
+                -- estimated per PO = the finance view's start deposit (value × start%, incl. products-cost fallback +
+                -- the <$500 rule), so the mini-table matches the deposit's est. total + the PO drawdown exactly.
                 SELECT po.po, coalesce(po.status,'') status, po.pay_start_deposit_assigned assigned,
-                  round(coalesce(po.supplier_invoice_total, lv.line_value, po.order_value_estimation, 0)
-                        * coalesce(po.start_deposit_pct_override, s.start_deposit_pct, 0)/100, 2) est
+                  (SELECT round(f.start_calc,2) FROM planner.v_po_finance f WHERE f.po=po.po) est
                 FROM planner.purchase_orders po
-                LEFT JOIN planner.suppliers s ON s.id=po.supplier_id
-                LEFT JOIN LATERAL (SELECT sum(l.qty * coalesce(
-                    (SELECT plc.final_cost FROM planner.portal_line_costs plc WHERE plc.po=l.po AND plc.sku=l.sku AND plc.confirmed_at IS NOT NULL AND plc.final_cost IS NOT NULL),
-                    l.cost_price)) line_value FROM planner.purchase_order_lines l WHERE l.po=po.po) lv ON true
                 WHERE po.deposit_ref=d.reference
               ) x
             ) END po_alloc

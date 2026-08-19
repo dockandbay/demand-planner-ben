@@ -1,3 +1,6 @@
+## v27.158 Deposits linked-POs: Estimated column uses the finance-view start deposit
+- The per-PO **Estimated** column in the linked-POs mini-table now reads `v_po_finance.start_calc` (value × start%, incl. the products-cost fallback + <$500 rule) instead of a simpler line-value calc — so it shows a figure for POs with unpriced lines and its Σ matches the deposit's est. total + the PO drawdown. (Was blank for the blank-deposit test case.)
+
 ## v27.157 Deposits: tag the Remaining column as an estimate too (`est 61,754.87`)
 - For a blank/estimated deposit, the **Remaining** column now shows a small italic `est` prefix (matching the Amount column), so it reads e.g. `est 61,754.87`.
 
