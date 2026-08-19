@@ -1,3 +1,11 @@
+## v27.147 Deposits register: wider linked-POs, merged Dates column, comma amounts, Xero code dropped
+- **Linked purchase orders** column widened (freed by the changes below).
+- **Dates** — Due / Likely pay / Date paid merged into one stacked column with small row labels; **Likely pay** hides once a Date paid is set (unpaid-only).
+- **Remaining** — the "N unalloc" note now sits on its own second line.
+- **Actions** — "⤿ apply to prod N" now drops to its own second line.
+- **Amount** shows thousands separators in the read-only view (editor stays a raw number — no comma parsing, no crash).
+- **Xero code** column removed as an input — it is derived read-only from the production (prod_numbers.xero_account_code) and no longer entered on the deposit.
+
 ## v27.146 BI & REPORTS L2 counter matches the PURCHASE ORDERS badge styling
 - The combined BI & REPORTS L2 counter now uses the same `.ex-badge` chip as the PURCHASE ORDERS counter (same size / padding / pill), instead of a smaller custom style.
 

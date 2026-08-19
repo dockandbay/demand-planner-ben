@@ -5328,8 +5328,8 @@
       +'<style>#deptbl{table-layout:fixed;width:100%}#deptbl td,#deptbl th{white-space:normal;overflow-wrap:break-word;vertical-align:top}#deptbl .fci{width:100%;box-sizing:border-box;min-width:0;text-align:left}'
       +'#deptbl .datewrap{display:flex;width:100%;max-width:100%}#deptbl .datewrap .dateinp{flex:1 1 auto;min-width:0;width:auto!important;text-align:left!important}#deptbl .datewrap .datepick{flex:0 0 auto}</style>'
       +'<div class="tw"><table id="deptbl"><colgroup>'
-      +'<col style="width:120px"><col style="width:140px"><col style="width:56px"><col style="width:50px"><col style="width:102px"><col style="width:90px"><col style="width:60px"><col style="width:118px"><col style="width:118px"><col style="width:118px"><col><col style="width:128px"></colgroup>'
-      +'<thead><tr><th class="l">Reference</th><th class="l">Supplier</th><th class="l" title="AU deposits are region-isolated; a PO can only use a deposit in its own region">Country</th><th class="l">PROD#</th><th class="l">Xero code</th><th>Amount</th><th>FX</th><th class="l">Due</th><th class="l">Likely pay</th><th class="l">Date paid</th><th>Remaining</th><th title="Σ calculated start deposits of OPEN, not-yet-allocated POs on this reference">Est. alloc.</th><th class="l">Linked purchase orders</th><th class="l"></th></tr></thead><tbody id="dep-rows"></tbody></table></div>';
+      +'<col style="width:120px"><col style="width:140px"><col style="width:56px"><col style="width:50px"><col style="width:96px"><col style="width:56px"><col style="width:124px"><col style="width:82px"><col style="width:92px"><col><col style="width:132px"></colgroup>'
+      +'<thead><tr><th class="l">Reference</th><th class="l">Supplier</th><th class="l" title="AU deposits are region-isolated; a PO can only use a deposit in its own region">Country</th><th class="l">PROD#</th><th>Amount</th><th>FX</th><th class="l" title="Due · Likely pay (unpaid only) · Date paid">Dates</th><th>Remaining</th><th title="Σ calculated start deposits of OPEN, not-yet-allocated POs on this reference">Est. alloc.</th><th class="l">Linked purchase orders</th><th class="l"></th></tr></thead><tbody id="dep-rows"></tbody></table></div>';
     // Every deposit row is read-only by default; click Edit to unlock it, Save to relock. (A closed row must
     // be reopened first.) Edit state (DEP_EDIT) holds while you edit; saving relocks all rows.
     function rowHTML(d){ var ep='/api/supply/deposit/'+encodeURIComponent(d.id);
@@ -5346,13 +5346,18 @@
       var c_ctry= locked?'<td class="l"'+(ctryBlank?_redTd:'')+'>'+txt(d.country)+'</td>':'<td class="l"'+(ctryBlank?_redTd:'')+'><select class="fci" data-ep="'+esc(ep)+'" data-field="country"><option value=""></option>'+DEP_MKTS.map(function(mk){return '<option'+(String(d.country||'').toUpperCase()===mk?' selected':'')+'>'+mk+'</option>';}).join('')+'</select></td>';
       var c_prod= locked?'<td class="l">'+txt(d.prod_no)+'</td>'
         :'<td class="l"><button class="cell-pick dep-prod-pick" data-id="'+d.id+'" title="pick an active production">'+(d.prod_no?esc(d.prod_no):'<span class="mut">— set</span>')+' ▾</button></td>';
-      var c_xero= locked?'<td class="l">'+txt(d.xero_account_code)+'</td>':'<td class="l">'+editCell(ep,'xero_account_code',d.xero_account_code,'txt')+'</td>';
-      var c_amt = locked?'<td>'+txt(d.amount)+'</td>':'<td>'+editCell(ep,'amount',d.amount)+'</td>';
+      // Amount: display with thousands separators when locked (money()); the editor stays a raw number (no commas → no parse crash).
+      var c_amt = locked?'<td style="font-variant-numeric:tabular-nums">'+((d.amount==null||d.amount==='')?'<span class="mut">—</span>':money(d.amount))+'</td>':'<td>'+editCell(ep,'amount',d.amount)+'</td>';
       var c_fx  = locked?'<td'+(fxBlank?_redTd:'')+'>'+txt(d.xero_fx)+'</td>':'<td'+(fxBlank?_redTd:'')+'>'+editCell(ep,'xero_fx',d.xero_fx)+'</td>';
-      var c_due = locked?'<td class="l" style="width:120px">'+txt(d.date_due,true)+'</td>':'<td class="l" style="width:120px">'+editCell(ep,'date_due',d.date_due,'date','style="width:118px"')+'</td>';
-      // likely pay: only meaningful while unpaid — once paid, show a dash in the locked view
-      var c_likely = locked?'<td class="l" style="width:120px">'+(d.date_paid?'<span class="mut">—</span>':txt(d.date_likely_pay,true))+'</td>':'<td class="l" style="width:120px">'+editCell(ep,'date_likely_pay',d.date_likely_pay,'date','style="width:118px"')+'</td>';
-      var c_paid= locked?'<td class="l" style="width:120px">'+txt(d.date_paid,true)+'</td>':'<td class="l" style="width:120px">'+editCell(ep,'date_paid',d.date_paid,'date','style="width:118px"')+'</td>';
+      // Dates — Due / Likely pay / Paid merged into one stacked cell with small labels. Likely pay hides once paid (unpaid-only).
+      var _dl='display:inline-block;width:38px;color:#94a3b8';   // little row label
+      var c_dates = locked
+        ? '<td class="l" style="font-size:11px;line-height:1.5;vertical-align:top"><div><span style="'+_dl+'">Due</span>'+txt(d.date_due,true)+'</div>'
+            +(d.date_paid?'':'<div><span style="'+_dl+'">Likely</span>'+txt(d.date_likely_pay,true)+'</div>')
+            +'<div><span style="'+_dl+'">Paid</span>'+txt(d.date_paid,true)+'</div></td>'
+        : '<td class="l" style="font-size:11px;line-height:1.7;vertical-align:top"><div><span style="'+_dl+'">Due</span>'+editCell(ep,'date_due',d.date_due,'date','style="width:104px"')+'</div>'
+            +'<div><span style="'+_dl+'">Likely</span>'+editCell(ep,'date_likely_pay',d.date_likely_pay,'date','style="width:104px"')+'</div>'
+            +'<div><span style="'+_dl+'">Paid</span>'+editCell(ep,'date_paid',d.date_paid,'date','style="width:104px"')+'</div></td>';
       // Remaining + Estimated allocation (Σ start deposits of open, not-yet-allocated POs on this ref).
       var rem=Number(d.deposit_remaining)||0, est=Number(d.est_alloc)||0, hasOpenPO=(d.pos_open||'').trim()!=='';
       var estOver = d.is_deposit && est>rem;                       // est allocation exceeds what's left → red est
@@ -5362,7 +5367,9 @@
       // at risk: remaining is over 50% of the open, not-yet-allocated POs' order value (may be over-funded / stranded)
       var uval=Number(d.unalloc_value)||0, depAtRisk = d.is_deposit && uval>0 && rem>0.5*uval && !redRem;
       var remTitle=remNoOpenPO?'Deposit remaining, no open PO':(remStranded?'Deposit remaining, none left to be allocated':(depAtRisk?('At risk — '+money(rem)+' remaining is over 50% of the '+money(uval)+' open PO value with no start deposit allocated'):''));
-      var c_rem = '<td style="width:64px;white-space:nowrap'+(redRem?';color:#dc2626;font-weight:700':(depAtRisk?';background:#fef3c7;color:#92400e;font-weight:700':''))+'"'+(remTitle?(' title="'+remTitle+'"'):'')+'>'+money(d.deposit_remaining)+(depAtRisk?' ⚠':'')+(d.open_unalloc>0?' <span class="mut tiny" title="'+d.open_unalloc+' open linked PO'+(d.open_unalloc===1?'':'s')+' on this deposit with no start deposit allocated yet" style="color:#64748b;cursor:help;border-bottom:1px dotted #94a3b8">'+d.open_unalloc+' unalloc</span>':'')+(d.shared_ref?' <span class="src fx">pool</span>':'')+'</td>';
+      var c_rem = '<td style="width:82px;vertical-align:top'+(redRem?';color:#dc2626;font-weight:700':(depAtRisk?';background:#fef3c7;color:#92400e;font-weight:700':''))+'"'+(remTitle?(' title="'+remTitle+'"'):'')+'><div style="white-space:nowrap">'+money(d.deposit_remaining)+(depAtRisk?' ⚠':'')+(d.shared_ref?' <span class="src fx">pool</span>':'')+'</div>'
+        +(d.open_unalloc>0?'<div class="mut tiny" title="'+d.open_unalloc+' open linked PO'+(d.open_unalloc===1?'':'s')+' on this deposit with no start deposit allocated yet" style="color:#64748b;cursor:help;margin-top:1px;white-space:nowrap">'+d.open_unalloc+' unalloc</div>':'')
+        +'</td>';   // "N unalloc" on its own second line (Ben)
       var c_est = '<td style="width:84px;white-space:nowrap'+(estOver?';color:#dc2626;font-weight:700':'')+'"'+(estOver?' title="Estimated allocation exceeds the remaining deposit">':'>')+(d.is_deposit?money(d.est_alloc):'')+'</td>';
       // purchase orders linked to this deposit (open-only by default; toggle shows all) — each links to the
       // PO opened on its PAYMENTS tab; the cell wraps so long lists flow onto multiple lines.
@@ -5371,13 +5378,13 @@
       var _poArr=d.po_alloc||[];
       var _shownPO=_poArr.filter(function(p){ if(depPoView==='all')return true; if(depPoView==='open')return !p.complete; return !p.complete && !(Number(p.allocated)>0) && Number(p.estimated)>0; });   // 'unalloc' = open, nothing allocated yet, has an estimate
       var c_asg;
-      if(!_shownPO.length){ c_asg='<td class="l" style="min-width:300px"><span class="mut tiny">—</span></td>'; }
+      if(!_shownPO.length){ c_asg='<td class="l" style="min-width:360px"><span class="mut tiny">—</span></td>'; }
       else { var _tA=0,_tE=0;
         var _body=_shownPO.map(function(p){ _tA+=Number(p.allocated)||0; _tE+=Number(p.estimated)||0;
           return '<tr><td class="l" style="padding:1px 6px 1px 0">'+(p.complete?'<span class="mut tiny" title="PO complete" style="margin-right:2px">✓</span>':'')+'<button class="lnk-btn dep-po-link" data-po="'+esc(p.po)+'" title="open this PO — payments tab" style="font-size:10px">'+esc(p.po)+'</button></td>'
             +'<td style="text-align:right;padding:1px 0 1px 8px;font-variant-numeric:tabular-nums">'+(Number(p.allocated)>0?money(p.allocated):'<span class="mut">—</span>')+'</td>'
             +'<td style="text-align:right;padding:1px 0 1px 10px;font-variant-numeric:tabular-nums">'+(Number(p.estimated)>0?money(p.estimated):'<span class="mut">—</span>')+'</td></tr>'; }).join('');
-        c_asg='<td class="l" style="min-width:300px;max-width:420px;padding:3px 4px"><table class="dep-po-tbl" style="width:100%;border-collapse:collapse;font-size:10px;line-height:1.5">'
+        c_asg='<td class="l" style="min-width:360px;max-width:560px;padding:3px 4px"><table class="dep-po-tbl" style="width:100%;border-collapse:collapse;font-size:10px;line-height:1.5">'
           +'<thead><tr><th class="l" style="font-weight:600;color:#64748b;padding:0 6px 2px 0">PO Ref</th><th style="text-align:right;font-weight:600;color:#64748b;padding:0 0 2px 8px">Allocated</th><th style="text-align:right;font-weight:600;color:#64748b;padding:0 0 2px 10px">Estimated</th></tr></thead>'
           +'<tbody>'+_body+'</tbody>'
           +'<tfoot><tr style="border-top:1px solid #cbd5e1;font-weight:700"><td class="l" style="padding:2px 6px 0 0">Total</td><td style="text-align:right;padding:2px 0 0 8px;font-variant-numeric:tabular-nums">'+money(_tA)+'</td><td style="text-align:right;padding:2px 0 0 10px;font-variant-numeric:tabular-nums">'+money(_tE)+'</td></tr></tfoot>'
@@ -5393,9 +5400,11 @@
       act += (hasPOs || d.date_paid)
         ? ' <span class="mut tiny" title="Can’t delete — '+(d.date_paid?'this deposit has a payment date':'purchase order(s) are assigned to this deposit ('+esc(d.linked_pos)+')')+'.">🔒 locked</span>'
         : ' <button class="lnk-btn dep-del" data-id="'+d.id+'" data-ref="'+esc(d.reference||('#'+d.id))+'" title="delete this deposit" style="color:#dc2626">delete</button>';
-      // apply this deposit to all open, unassigned POs in its production + supplier (region-matched)
-      if(d.is_deposit && d.prod_no && d.supplier_name && !closed) act += ' <button class="lnk-btn dep-apply-all" data-id="'+d.id+'" style="color:#6d28d9" title="assign this deposit to every open '+esc(d.supplier_name)+' PO in production '+esc(d.prod_no)+' ('+esc(d.country||'?')+' region) that has no deposit yet">⤿ apply to prod '+esc(d.prod_no)+'</button>';
-      return '<tr'+(editing?' style="background:#f0f6ff"':(closed?' style="opacity:.55"':''))+'>'+c_ref+c_sup+c_ctry+c_prod+c_xero+c_amt+c_fx+c_due+c_likely+c_paid+c_rem+c_est+c_asg+'<td class="l" style="white-space:nowrap">'+act+'</td></tr>'; }
+      // apply this deposit to all open, unassigned POs in its production + supplier (region-matched) — on its own second line
+      var applyBtn = (d.is_deposit && d.prod_no && d.supplier_name && !closed)
+        ? '<button class="lnk-btn dep-apply-all" data-id="'+d.id+'" style="color:#6d28d9" title="assign this deposit to every open '+esc(d.supplier_name)+' PO in production '+esc(d.prod_no)+' ('+esc(d.country||'?')+' region) that has no deposit yet">⤿ apply to prod '+esc(d.prod_no)+'</button>'
+        : '';
+      return '<tr'+(editing?' style="background:#f0f6ff"':(closed?' style="opacity:.55"':''))+'>'+c_ref+c_sup+c_ctry+c_prod+c_amt+c_fx+c_dates+c_rem+c_est+c_asg+'<td class="l" style="white-space:nowrap;vertical-align:top">'+act+(applyBtn?'<div style="margin-top:4px">'+applyBtn+'</div>':'')+'</td></tr>'; }
     function cur(){ return deps.filter(function(d){ if(st.f==='all')return true; if(st.f==='closed')return d.status==='closed';
       if(st.f==='remaining')return d.status!=='closed' && ((Number(d.deposit_remaining)||0)>0.01 || !(Number(d.amount)>0));   // open + still holds money, OR a new/blank deposit not yet filled in (so +Deposit is visible here)
       return d.status!=='closed'; }); }
