@@ -1,3 +1,6 @@
+## v27.201 Price Lists: wider supplier + Size columns
+- Widened the **supplier** columns (~50%, min 210px, name shows up to 220px) and the **Size** column (120→180px); the table widens to suit. Colour stays 120px.
+
 ## v27.200 Price Lists: always show 3 supplier columns
 - Always render **Main / Secondary / Tertiary** supplier columns (was 2, growing to 3 only when needed) — spaces the grid better and leaves a slot ready for a third supplier.
 
