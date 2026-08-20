@@ -1,3 +1,6 @@
+## v27.214 Price tier validation highlights the offending tier's quantity cell
+- When a tier breaks "larger quantity = lower unit price", the offending tier's **quantity** cell is now flagged red (alongside its price), so it's clear which tier is wrong. Fixed in both the supplier portal and the admin editor.
+
 ## v27.213 Supplier portal price list: edit-approval label, prod-aware "now", inline tier validation
 - Clicking an **awaiting-approval** price opens the form titled "Edit price request" with an **Edit approval** button (was "Submit for approval").
 - The "Applies from" default now reads **"Now — current production (P60)"** (was "current price"); future options read "from production P##".

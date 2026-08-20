@@ -8774,7 +8774,7 @@
         rows.forEach(function(x){ if(x.craw===''||!isFinite(x.c)){ x.uc.style.borderColor='#ef4444'; errs.push('enter a unit price'); ok=false; } if(isNaN(x.q)||x.q<1){ x.mq.style.borderColor='#ef4444'; errs.push('min qty must be ≥ 1'); ok=false; } });
         var srt=rows.filter(function(x){return !isNaN(x.q);}).slice().sort(function(a,b){return a.q-b.q;});
         for(var i=1;i<srt.length;i++){ if(srt[i].q===srt[i-1].q){ srt[i].mq.style.borderColor='#ef4444'; srt[i-1].mq.style.borderColor='#ef4444'; errs.push('duplicate min qty '+srt[i].q); ok=false; }
-          else if(isFinite(srt[i].c)&&isFinite(srt[i-1].c)&&srt[i].c>srt[i-1].c+1e-9){ srt[i].uc.style.borderColor='#ef4444'; errs.push('price at '+srt[i].q+'+ units must be ≤ the price at '+srt[i-1].q+'+'); ok=false; } }
+          else if(isFinite(srt[i].c)&&isFinite(srt[i-1].c)&&srt[i].c>srt[i-1].c+1e-9){ srt[i].mq.style.borderColor='#ef4444'; srt[i].uc.style.borderColor='#ef4444'; errs.push('price at '+srt[i].q+'+ units must be ≤ the price at '+srt[i-1].q+'+'); ok=false; } }
         var v=versions[vi]; if(v&&!isCurV(v)){ var efn=parseInt(v.efp,10); if(isNaN(efn)||efn<=curProd){ errs.push('a future price change must be from a production after '+curProd); ok=false; } }   // only future-price blocks are checked; the current price is never flagged
         var e=vb.querySelector('.pl-ver-err'); if(e)e.textContent=errs.length?('⚠ '+errs[0]):''; });
       var sb=ov.querySelector('#pl-save'); if(sb){ sb.disabled=!ok; sb.style.opacity=ok?'1':'.55'; sb.style.cursor=ok?'pointer':'not-allowed'; } return ok; }
