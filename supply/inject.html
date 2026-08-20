@@ -8570,8 +8570,9 @@
     fetch('/api/supply/price-list/log').then(function(r){return r.json();}).then(function(rows){ ROWS=Array.isArray(rows)?rows:[]; draw(); }).catch(function(){ body.innerHTML='<div style="color:#dc2626">Could not load the log.</div>'; });
   }
   function plPending(b,d){ var exo=document.getElementById('pl-pend-ov'); if(exo)exo.remove();
-    var pend=(d.entries||[]).filter(function(e){return e.status==='pending';});
-    var actByKey={}; (d.entries||[]).filter(function(e){return e.status==='active';}).forEach(function(e){ var k=e.supplier+'|'+e.scope+'|'+(e.scope==='sku'?e.sku:e.price_type)+'|'+(e.effective_from_production||''); (actByKey[k]=actByKey[k]||[]).push(e); });
+    var pend=[], actByKey={};
+    function recompute(){ pend=(d.entries||[]).filter(function(e){return e.status==='pending';}); actByKey={}; (d.entries||[]).filter(function(e){return e.status==='active';}).forEach(function(e){ var k=e.supplier+'|'+e.scope+'|'+(e.scope==='sku'?e.sku:e.price_type)+'|'+(e.effective_from_production||''); (actByKey[k]=actByKey[k]||[]).push(e); }); }
+    recompute();
     function effAt(tiers,q){ if(!tiers||!tiers.length)return null; var best=null; tiers.forEach(function(t){ if(Number(t.min_qty)<=q&&(best==null||Number(t.min_qty)>=best.mq))best={mq:Number(t.min_qty),uc:Number(t.unit_cost)}; }); return best?best.uc:null; }
     function cmpTable(cur,e){ var sym=curSym(e.currency), qs={};
       (cur&&cur.tiers||[]).forEach(function(t){qs[t.min_qty]=1;}); (e.tiers||[]).forEach(function(t){qs[t.min_qty]=1;});
@@ -8590,13 +8591,22 @@
           +'<div class="mut tiny" style="margin-top:5px">submitted '+(e.submitted_by?('by '+esc(e.submitted_by)+' '):'')+actWhen(e.submitted_at)+'</div>'
           +'<div style="text-align:right;margin-top:6px"><button class="save-btn light pl-pend-reject" data-id="'+e.id+'" style="color:#b91c1c;border-color:#fca5a5">Reject</button> <button class="save-btn pl-pend-approve" data-id="'+e.id+'" style="background:#16a34a;color:#fff;border-color:#15803d">Approve</button></div></div>'; }).join(''); }
     var ov=document.createElement('div'); ov.id='pl-pend-ov'; ov.style.cssText='position:fixed;inset:0;z-index:200000;background:rgba(15,23,42,.35);display:flex;align-items:center;justify-content:center;padding:16px';
-    ov.innerHTML='<div style="background:#fff;border-radius:10px;padding:16px 18px;width:520px;max-width:95vw;max-height:90vh;overflow:auto;box-shadow:0 12px 40px rgba(15,23,42,.25)"><div style="font-weight:700;margin-bottom:8px">Pending supplier price changes <span class="mut tiny">('+pend.length+')</span></div>'+rows()+'<div style="text-align:right;margin-top:8px"><button id="pl-pend-close" class="save-btn light">Close</button></div></div>';
+    ov.innerHTML='<div style="background:#fff;border-radius:10px;padding:16px 18px;width:520px;max-width:95vw;max-height:90vh;overflow:auto;box-shadow:0 12px 40px rgba(15,23,42,.25)"><div style="font-weight:700;margin-bottom:8px">Pending supplier price changes <span class="mut tiny">(<span id="pl-pend-count">'+pend.length+'</span>)</span></div><div id="pl-pend-body">'+rows()+'</div><div style="text-align:right;margin-top:8px"><button id="pl-pend-close" class="save-btn light">Close</button></div></div>';
     document.body.appendChild(ov); function close(){ ov.remove(); }
     ov.addEventListener('mousedown',function(e){ if(e.target===ov)close(); });
     document.getElementById('pl-pend-close').onclick=close;
-    function act(id,path){ fetch('/api/supply/price-list/'+id+'/'+path,{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} try{_navCounts.pricelists=undefined;prefetchNavCounts();}catch(e){} close(); renderPriceLists(b); }).catch(function(e){ alert('Failed: '+(e.message||e)); }); }
-    ov.querySelectorAll('.pl-pend-approve').forEach(function(x){ x.onclick=function(){ act(x.dataset.id,'approve'); }; });
-    ov.querySelectorAll('.pl-pend-reject').forEach(function(x){ x.onclick=function(){ if(confirm('Reject this proposed price change?'))act(x.dataset.id,'reject'); }; });
+    function bindActs(){ ov.querySelectorAll('.pl-pend-approve').forEach(function(x){ x.onclick=function(){ act(x.dataset.id,'approve'); }; });
+      ov.querySelectorAll('.pl-pend-reject').forEach(function(x){ x.onclick=function(){ if(confirm('Reject this proposed price change?'))act(x.dataset.id,'reject'); }; }); }
+    function refresh(){ recompute(); document.getElementById('pl-pend-body').innerHTML=rows(); document.getElementById('pl-pend-count').textContent=pend.length; bindActs(); }
+    function act(id,path){ var e=(d.entries||[]).filter(function(x){return String(x.id)===String(id);})[0];
+      fetch('/api/supply/price-list/'+id+'/'+path,{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;}
+        // update in-memory data + redraw silently (no full refetch / page refresh)
+        if(e){ if(path==='approve'){ d.entries=(d.entries||[]).filter(function(x){ return !(x.status==='active'&&x.supplier===e.supplier&&x.scope===e.scope&&(x.scope==='sku'?x.sku===e.sku:x.price_type===e.price_type)&&(x.effective_from_production||'')===(e.effective_from_production||'')); }); var ne=(d.entries||[]).filter(function(x){return String(x.id)===String(id);})[0]; if(ne)ne.status='active'; }
+          else { d.entries=(d.entries||[]).filter(function(x){return String(x.id)!==String(id);}); } }
+        d.pending=(d.entries||[]).filter(function(x){return x.status==='pending';}).length;
+        try{ _navCounts.pricelists=d.pending; updateNavBadges(); }catch(e2){}
+        refresh(); try{ plDraw(b,d); }catch(e2){} }).catch(function(err){ alert('Failed: '+(err.message||err)); }); }
+    bindActs();
   }
   function plExclude(b,excl){ var ex=document.getElementById('pl-excl-ov'); if(ex)ex.remove();
     var ov=document.createElement('div'); ov.id='pl-excl-ov'; ov.style.cssText='position:fixed;inset:0;z-index:200000;background:rgba(15,23,42,.35);display:flex;align-items:center;justify-content:center;padding:16px';
