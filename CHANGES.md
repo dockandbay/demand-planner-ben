@@ -1,3 +1,9 @@
+## v27.213 Supplier portal price list: edit-approval label, prod-aware "now", inline tier validation
+- Clicking an **awaiting-approval** price opens the form titled "Edit price request" with an **Edit approval** button (was "Submit for approval").
+- The "Applies from" default now reads **"Now — current production (P60)"** (was "current price"); future options read "from production P##".
+- **Inline tier validation** on the portal form: quantities must increase and unit price must decrease (distinct min qtys) — offending inputs turn red with a message and the submit button greys out.
+- Removed the 💲 icon from the "Price List" nav tab.
+
 ## v27.212 Supplier portal Price List: pending in its own column + nav tab
 - **Pending approvals moved to a separate "Pending approval" column** (right of the price columns) — the price column keeps showing the current price; the pending column shows the ⚑ awaiting-approval badge + proposed price (+ from-production).
 - **Price List is now a nav tab** in the portal menu (next to Productions), not a header button.

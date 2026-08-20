@@ -100,7 +100,7 @@
     // Add a "Price List" tab to the portal nav (next to Productions), gated by the server — instead of a header button.
     if(me.price_list_enabled){ var _tries=0, _iv=setInterval(function(){ _tries++;
       var tabs=document.getElementById('pp-tabs'), prod=tabs&&tabs.querySelector('.rtab[data-pt="productions"]');
-      if(tabs&&prod&&!document.getElementById('pp-pricelist-tab')){ var t=document.createElement('span'); t.className='rtab'; t.id='pp-pricelist-tab'; t.textContent='💲 Price List'; t.style.cursor='pointer';
+      if(tabs&&prod&&!document.getElementById('pp-pricelist-tab')){ var t=document.createElement('span'); t.className='rtab'; t.id='pp-pricelist-tab'; t.textContent='Price List'; t.style.cursor='pointer';
         t.onclick=function(e){ e.stopPropagation(); ppPriceList(me); }; prod.parentNode.insertBefore(t, prod.nextSibling); clearInterval(_iv); }
       if(_tries>40)clearInterval(_iv); }, 250); }
   }
@@ -145,29 +145,36 @@
         proposeModal({supplier:td.dataset.sup,scope:td.dataset.scope,key:td.dataset.key,pt:td.dataset.pt,cur:a.cur||(td.dataset.scope==='sku'?at.cur:null),pend:a.pendEntry,currency:(a.cur&&a.cur.currency)||(at.cur&&at.cur.currency)||supCcy[td.dataset.sup]||'USD'}); }; });
     }
     function proposeModal(ctx){ var exm=document.getElementById('pl-prop-ov'); if(exm)exm.remove();
-      var sym=CCY(ctx.currency), src=ctx.pend||ctx.cur;
+      var sym=CCY(ctx.currency), src=ctx.pend||ctx.cur, editing=!!ctx.pend, subLbl=editing?'Edit approval':'Submit for approval';
       var tiers=(src&&src.tiers&&src.tiers.length?src.tiers.map(function(t){return {min_qty:t.min_qty,unit_cost:t.unit_cost};}):[{min_qty:1,unit_cost:''}]);
-      var prodOpts='<option value="">Now (current price)</option>'+_prods.map(function(p){return '<option value="'+p+'">from production '+p+'</option>';}).join('');
+      var prodOpts='<option value="">Now — current production (P'+_cur+')</option>'+_prods.map(function(p){return '<option value="'+p+'">from production P'+p+'</option>';}).join('');
       var mv=document.createElement('div'); mv.id='pl-prop-ov'; mv.style.cssText='position:fixed;inset:0;z-index:9500;background:rgba(15,23,42,.4);display:flex;align-items:center;justify-content:center;padding:16px';
-      mv.innerHTML='<div style="background:#fff;border-radius:10px;padding:16px 18px;width:440px;max-width:94vw;box-shadow:0 12px 40px rgba(15,23,42,.3)"><div style="font-weight:700;margin-bottom:8px">Propose price — '+esc(ctx.scope==='sku'?ctx.key:ctx.pt)+(ctx.scope==='sku'&&ctx.pt?(' <span style="color:#94a3b8;font-size:12px">('+esc(ctx.pt)+')</span>'):'')+'</div><div id="pl-prop-body"></div></div>';
+      mv.innerHTML='<div style="background:#fff;border-radius:10px;padding:16px 18px;width:440px;max-width:94vw;box-shadow:0 12px 40px rgba(15,23,42,.3)"><div style="font-weight:700;margin-bottom:8px">'+(editing?'Edit price request — ':'Propose price — ')+esc(ctx.scope==='sku'?ctx.key:ctx.pt)+(ctx.scope==='sku'&&ctx.pt?(' <span style="color:#94a3b8;font-size:12px">('+esc(ctx.pt)+')</span>'):'')+'</div><div id="pl-prop-body"></div></div>';
       document.body.appendChild(mv); mv.addEventListener('mousedown',function(e){ if(e.target===mv)mv.remove(); });
       var host=document.getElementById('pl-prop-body');
       function readT(){ tiers=[]; host.querySelectorAll('.pl-tr').forEach(function(r){ tiers.push({min_qty:r.querySelector('.pl-mq').value,unit_cost:r.querySelector('.pl-uc').value}); }); if(!tiers.length)tiers=[{min_qty:1,unit_cost:''}]; }
+      function validate(){ var ok=true, msg='', err=host.querySelector('.pl-err');
+        var rows=[].slice.call(host.querySelectorAll('.pl-tr')).map(function(r){ var mq=r.querySelector('.pl-mq'),uc=r.querySelector('.pl-uc'); return {mq:mq,uc:uc,q:parseInt(mq.value,10),c:Number(uc.value),craw:uc.value}; });
+        rows.forEach(function(x){ x.mq.style.borderColor='#cbd5e1'; x.uc.style.borderColor='#cbd5e1'; });
+        rows.forEach(function(x){ if(x.craw===''||!isFinite(x.c)){x.uc.style.borderColor='#ef4444';ok=false;if(!msg)msg='Enter a unit price for every tier.';} if(isNaN(x.q)||x.q<1){x.mq.style.borderColor='#ef4444';ok=false;if(!msg)msg='Min quantity must be at least 1.';} });
+        var srt=rows.filter(function(x){return !isNaN(x.q);}).slice().sort(function(a,b){return a.q-b.q;});
+        for(var i=1;i<srt.length;i++){ if(srt[i].q===srt[i-1].q){srt[i].mq.style.borderColor='#ef4444';srt[i-1].mq.style.borderColor='#ef4444';ok=false;if(!msg)msg='Two tiers have the same minimum quantity.';} else if(isFinite(srt[i].c)&&isFinite(srt[i-1].c)&&srt[i].c>srt[i-1].c+1e-9){srt[i].uc.style.borderColor='#ef4444';ok=false;if(!msg)msg='A larger quantity must have a lower unit price than a smaller one.';} }
+        if(err)err.textContent=ok?'':('⚠ '+msg); var sb=host.querySelector('.pl-submit'); if(sb){ sb.disabled=!ok; sb.style.opacity=ok?'1':'.5'; sb.style.cursor=ok?'pointer':'not-allowed'; } return ok; }
       function draw(){ host.innerHTML='<div style="font-size:12px;color:#475569;margin-bottom:7px">Applies from: <select class="pl-efp" style="padding:4px 7px;border:1px solid #cbd5e1;border-radius:5px">'+prodOpts+'</select></div>'
         +'<div class="pl-tiers">'+tiers.map(function(t,ti){return '<div class="pl-tr" style="display:flex;gap:6px;align-items:center;margin-bottom:5px"><span style="color:#64748b;width:30px">min</span><input class="pl-mq" type="number" min="1" value="'+esc(t.min_qty)+'" style="width:82px;padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px"><span style="color:#64748b">qty → '+sym+'</span><input class="pl-uc" type="number" step="0.0001" value="'+esc(t.unit_cost)+'" style="width:100px;padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px">'+(tiers.length>1?'<button class="pl-trx" data-ti="'+ti+'" style="border:none;background:none;color:#b91c1c;cursor:pointer;font-size:15px">✕</button>':'')+'</div>';}).join('')+'</div>'
         +'<button class="pl-addtier" style="font-size:12px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;cursor:pointer">+ tier</button>'
         +'<div style="font-size:12px;color:#475569;margin:8px 0 3px">Note to reviewer <span style="color:#94a3b8">(optional)</span></div><textarea class="pl-note" rows="3" placeholder="Any details about this price change request…" style="width:100%;box-sizing:border-box;font-family:inherit;font-size:12px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px">'+esc((src&&src.note)||'')+'</textarea>'
         +'<div class="pl-err" style="color:#b91c1c;font-size:12px;font-weight:600;min-height:14px;margin-top:6px"></div>'
-        +'<div style="text-align:right;margin-top:2px"><button class="pl-cancel pv-btn ghost" style="color:#334155;border-color:#cbd5e1;margin-right:6px">Cancel</button><button class="pl-submit pv-btn" style="padding:6px 14px">Submit for approval</button></div>';
+        +'<div style="text-align:right;margin-top:2px"><button class="pl-cancel pv-btn ghost" style="color:#334155;border-color:#cbd5e1;margin-right:6px">Cancel</button><button class="pl-submit pv-btn" style="padding:6px 14px">'+subLbl+'</button></div>';
         host.querySelectorAll('.pl-trx').forEach(function(x){x.onclick=function(){readT();tiers.splice(+x.dataset.ti,1);if(!tiers.length)tiers=[{min_qty:1,unit_cost:''}];draw();};});
         host.querySelector('.pl-addtier').onclick=function(){readT();tiers.push({min_qty:'',unit_cost:''});draw();};
+        host.querySelectorAll('.pl-mq,.pl-uc').forEach(function(inp){ inp.oninput=validate; });
         host.querySelector('.pl-cancel').onclick=function(){ mv.remove(); };
-        host.querySelector('.pl-submit').onclick=function(){ readT(); var err=host.querySelector('.pl-err');
-          var ts=tiers.map(function(t){return {min_qty:parseInt(t.min_qty,10)||1,unit_cost:Number(t.unit_cost)};}).filter(function(t){return isFinite(t.unit_cost)&&String(t.unit_cost)!=='';});
-          if(!ts.length){err.textContent='Enter at least one price.';return;} ts.sort(function(a,b){return a.min_qty-b.min_qty;});
-          for(var i=1;i<ts.length;i++){ if(ts[i].min_qty===ts[i-1].min_qty){err.textContent='Two tiers have the same min quantity.';return;} if(ts[i].unit_cost>ts[i-1].unit_cost+1e-9){err.textContent='Larger quantity must be a lower unit cost.';return;} }
+        host.querySelector('.pl-submit').onclick=function(){ readT(); if(!validate())return;
+          var ts=tiers.map(function(t){return {min_qty:parseInt(t.min_qty,10)||1,unit_cost:Number(t.unit_cost)};}).filter(function(t){return isFinite(t.unit_cost)&&String(t.unit_cost)!=='';}).sort(function(a,b){return a.min_qty-b.min_qty;});
           var sb=host.querySelector('.pl-submit'); sb.disabled=true; sb.textContent='Submitting…';
-          api('/api/portal/price-list/submit',{supplier:ctx.supplier,scope:ctx.scope,price_type:(ctx.scope==='type'?ctx.key:ctx.pt),sku:(ctx.scope==='sku'?ctx.key:''),currency:ctx.currency,effective_from_production:host.querySelector('.pl-efp').value,note:host.querySelector('.pl-note').value,tiers:ts}).then(function(j){ if(j&&j.error){sb.disabled=false;sb.textContent='Submit for approval';err.textContent=j.error;return;} mv.remove(); load(); }).catch(function(){sb.disabled=false;sb.textContent='Submit for approval';err.textContent='Could not submit.';}); };
+          api('/api/portal/price-list/submit',{supplier:ctx.supplier,scope:ctx.scope,price_type:(ctx.scope==='type'?ctx.key:ctx.pt),sku:(ctx.scope==='sku'?ctx.key:''),currency:ctx.currency,effective_from_production:host.querySelector('.pl-efp').value,note:host.querySelector('.pl-note').value,tiers:ts}).then(function(j){ if(j&&j.error){sb.disabled=false;sb.textContent=subLbl;host.querySelector('.pl-err').textContent=j.error;return;} mv.remove(); load(); }).catch(function(){sb.disabled=false;sb.textContent=subLbl;host.querySelector('.pl-err').textContent='Could not submit.';}); };
+        validate();
       }
       draw();
     }
