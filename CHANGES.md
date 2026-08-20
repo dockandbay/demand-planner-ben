@@ -1,3 +1,6 @@
+## v27.216 Supplier portal: Price List deep link (/portal#pricelist)
+- The supplier portal Price List now has a deep link — opening/clicking it sets `#pricelist` in the URL, and visiting `/portal#pricelist` opens it directly (after sign-in). Closing clears the hash; hashchange keeps it in sync.
+
 ## v27.215 Price Lists: approve/reject silently (no full refresh)
 - Approving or rejecting a pending price change now updates the review panel + the grid + the pending counters **in place** — no re-fetch or page refresh. The review popup stays open (shows the remaining pending), the grid cell flips, and the badges update instantly.
 
