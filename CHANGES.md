@@ -1,3 +1,7 @@
+## v27.197 Exec Summary: "Hide last year" toggle + darker growth colours on expanded rows
+- New **"Hide last year"** toggle (default off) — suppresses the vs-last-year growth badges on every cell.
+- On **expanded (country) rows**, the FY-total columns have a light background, but the growth badges were using the light green/red meant for the dark channel totals (invisible). They now use **dark green/red** so they read on the light background.
+
 ## v27.196 Price Lists Phase 1.5 (Ben's feedback rework)
 - **(1)** Moved to the **end** of the Purchase Orders menu (after Custom Orders).
 - **(2)** Columns are now **positional** — **Main / Secondary / Tertiary supplier** (max 3, 2 by default), with the supplier name shown inside each cell — instead of one column per supplier. Main supplier derived from `products.main_supplier_final`.
