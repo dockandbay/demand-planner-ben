@@ -10672,10 +10672,12 @@
   //    "🕘 Recent") link to each favourite. Stored per user in app_permissions.favourites (+ localStorage fallback). ──
   var HZ_FAVES=(function(){ try{ if(typeof ME!=='undefined'&&ME&&Array.isArray(ME.favourites))return ME.favourites.slice(); }catch(e){} try{ return JSON.parse(localStorage.getItem('hzFaves')||'[]'); }catch(e){ return []; } })();
   function _favSlug(){ return (location.hash||'').replace(/^#\/?/,'').replace(/\/+$/,''); }
-  function _favLabel(){ var sels=['#config-subs-l3 .rtab.active','#rep-subnav .rtab.active','#config-subs .rtab.active','#scenario-subnav .stab.active','#product-subnav .stab.active','#buymove-tabs .active',
+  function _favTabTxt(el){ try{ var c=el.cloneNode(true); c.querySelectorAll('.ex-badge,.rtab-count,.count,.nav-badge').forEach(function(x){ if(x.parentNode)x.parentNode.removeChild(x); }); return (c.textContent||'').replace(/\s+/g,' ').trim(); }catch(e){ return (el.textContent||'').replace(/\s+/g,' ').trim(); } }   // label = the tab's own text minus any count badge
+  function _favLabel(){ var sels=['#config-subs-l3 .rtab.active','#rep-subnav .rtab.active','#prod-subtabs .rtab.active','#config-subs .rtab.active','#scenario-subnav .stab.active','#product-subnav .stab.active','#buymove-tabs .active',
     '#demand-scenario-nav .d3tab.active','#demand-inputs-nav .d3tab.active','#demand-tabs .dnav.active',   // DEMAND L3 tool (e.g. scenario "FINANCIAL FORECAST MODEL") / L3 input / L2 tab — before the L1 "DEMAND" fallback
-    '#view-tabs-row .view-toggle.active'];
-    for(var i=0;i<sels.length;i++){ var el=document.querySelector(sels[i]); if(el){ var t=(el.textContent||'').replace(/\s+/g,' ').trim(); if(t)return t.slice(0,40); } }
+    '#supply-subnav .stab.active',   // SUPPLY L2 section (PAYMENTS / INVENTORY / …) — deeper than the L1 "SUPPLY" toggle, so favouriting a SUPPLY page names it by its menu, not "supply"
+    '#view-tabs-row .view-toggle.active'];   // L1 view (DEMAND / SUPPLY / …) — last-resort only
+    for(var i=0;i<sels.length;i++){ var el=document.querySelector(sels[i]); if(el){ var t=_favTabTxt(el); if(t)return t.slice(0,40); } }
     var s=(_favSlug().split('/').pop()||''); return s?s.replace(/[-_]/g,' ').replace(/\b\w/g,function(c){return c.toUpperCase();}):'Page'; }
   function _favIdx(slug){ for(var i=0;i<HZ_FAVES.length;i++){ if(HZ_FAVES[i]&&HZ_FAVES[i].slug===slug)return i; } return -1; }
   function _favSave(){ try{localStorage.setItem('hzFaves',JSON.stringify(HZ_FAVES));}catch(e){}

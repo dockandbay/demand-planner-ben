@@ -1,3 +1,6 @@
+## v27.180 Favourites: name a SUPPLY page by its menu (not "supply")
+- Star-favouriting a SUPPLY page (e.g. Payments Report) was labelling the favourite **"supply"** — `_favLabel()` had no selector for the SUPPLY L2/L3 nav, so it fell through to the L1 view toggle. Now it reads the **deepest active tab** first (`#prod-subtabs .rtab.active` for the PO/Payments umbrella, then the `#supply-subnav` L2 section) so Payments Report favourites as **"Payments Report"**. Count badges are stripped from the captured label. Users can still rename (double-click the chip).
+
 ## v27.179 Payments Report: searched line stays yellow on hover (no flash)
 - The yellow highlight on a searched PO/ref line no longer flashes when hovered — the cell-level row-hover background was painting over it. Now a `pay-hit` class keeps the line yellow through hover.
 
