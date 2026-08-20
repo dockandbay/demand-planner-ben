@@ -1,3 +1,7 @@
+## v27.191 BOM upload: also accepts the bundle-export format (SKU + comma-list bom_sku)
+- CONFIG ▸ BOM ▸ **Build on Fly Sets ▸ Upload** now auto-detects a second format alongside the classic `output_sku, input_sku, input_quantity` (one component per line): a **bundle export** whose header has **SKU** + **bom_sku** columns — one SET per row, where `bom_sku` is a **comma-separated list** of child SKUs (quoted cell), each at `bom_qty` (default 1). Extra columns are ignored. Parser is now quote-aware so the embedded comma-list doesn't break column splitting.
+- Also loaded the 3 GIFT-BOX-HOME bundle SETs from the F1 export into the sandbox; live SQL provided (`deploy notes/set_bom_bundles_f1_2026-08-20.sql`).
+
 ## v27.190 KPIs moved to REPORTS ▸ Performance ▸ Demand Metrics
 - The five ex-DEMAND ▸ KPIs pages (In Stock, Slow moving, Inventory cover, Stockout risk, Discontinued) are now the **Demand Metrics** L3 tab under **REPORTS ▸ Performance** (`#/reports/performance/demand-metrics`), alongside Supply metrics + Inventory metrics. Removed the KPIs tab from the DEMAND nav. `renderKpisView` is now hash-base-aware. Legacy `#/demand/kpis[/<sub>]` redirects to the new location (`#/demand/kpis/accuracy` still → DEMAND ▸ Analysis ▸ Accuracy). Favouriting names it by the L3 (Demand Metrics) with the sub in the hash.
 
