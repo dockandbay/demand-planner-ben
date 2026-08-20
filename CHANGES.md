@@ -1,3 +1,7 @@
+## v27.206 Price Lists: bolder approval flags
+- A cell with a pending change now shows a bright **red "⚑ APPROVAL REQUIRED"** badge filling the cell (with the current price small beneath) instead of a faint ⚑; clicking it opens the review panel.
+- The top pill is now **red and bigger**: "⚑ N APPROVAL(S) REQUIRED — review".
+
 ## v27.205 Price Lists — Phase 2: approval workflow
 - Supplier-submitted price changes arrive as **pending** (status='pending', source='supplier'). The ⚑ badge in the toolbar is now a **"N pending — review"** button that opens a review panel showing each proposed change (supplier · type/SKU · from-production · **current vs proposed tiers** · who/when submitted) with **Approve** / **Reject**.
 - **Approve** → the proposed price becomes **active** and **supersedes** the prior active price for that supplier/scope/key/effective-from (so the PO estimate immediately uses the new price). **Reject** → marked rejected (never used). Endpoints `/api/supply/price-list/:id/approve` + `/reject`.

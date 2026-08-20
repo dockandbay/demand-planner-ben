@@ -8587,6 +8587,7 @@
     function priceDisp(e){ if(!e||!e.tiers||!e.tiers.length)return ''; var sym=curSym(e.currency), t=e.tiers.map(function(x){return Number(x.unit_cost);}); var mn=Math.min.apply(null,t), mx=Math.max.apply(null,t);
       if(t.length<2||mn===mx)return '<b style="font-size:13px">'+sym+money(mx)+'</b>'; return '<span style="font-size:10px;color:#64748b">'+sym+money(mn)+'</span><span style="color:#cbd5e1"> – </span><b style="font-size:13px">'+sym+money(mx)+'</b>'; }
     function efpTag(e){ return e&&e.effective_from_production?(' <span class="mut tiny" title="applies from production '+e.effective_from_production+' onwards">P'+e.effective_from_production+'</span>'):''; }
+    function pendBadge(){ return '<span style="display:inline-block;background:#dc2626;color:#fff;font-weight:800;font-size:9px;letter-spacing:.03em;padding:2px 7px;border-radius:4px;white-space:nowrap">⚑ APPROVAL REQUIRED</span>'; }
     function orderedSups(pt){ var set={}; entries.forEach(function(e){ if(e.scope==='type'&&e.price_type===pt)set[e.supplier]=1; }); var arr=Object.keys(set); var main=typeMain[pt]; arr.sort(function(a,b){ return a===main?-1:b===main?1:(a<b?-1:1); }); return arr; }
     var q=(PL_ST.q||'').trim().toLowerCase();
     function typeMatches(pt){ if(PL_ST.sup&&!entries.some(function(e){return e.supplier===PL_ST.sup&&e.price_type===pt;}))return false; if(!q)return true; if(pt.toLowerCase().indexOf(q)>=0)return true; return (typeSkus[pt]||[]).some(function(s){return s.sku.toLowerCase().indexOf(q)>=0;}); }
@@ -8601,7 +8602,7 @@
       +'<span class="pill-lbl" style="margin-left:10px">Supplier</span><select class="flt" id="pl-sup" style="min-width:140px">'+supOpts+'</select>'
       +'<span class="pill-lbl" style="margin-left:10px">Prices as of</span><input class="flt" id="pl-prod" list="pl-prod-dl" placeholder="current" value="'+esc(PL_ST.prod)+'" style="width:110px" title="Show prices effective as of this production (future productions from '+curProd+' up). Blank = current.">'
       +'<label style="margin-left:10px;font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:5px;cursor:pointer" title="Hide discontinued SKUs (they still show when searched)"><input type="checkbox" id="pl-active"'+(PL_ST.active?' checked':'')+'> Active SKUs only</label>'
-      +(d.pending>0?'<button id="pl-pending" class="ex-badge" style="margin-left:10px;background:#b45309;border:none;cursor:pointer" title="'+d.pending+' pending supplier price change(s) — click to review + approve/reject">⚑ '+d.pending+' pending — review</button>':'')
+      +(d.pending>0?'<button id="pl-pending" style="margin-left:10px;background:#dc2626;color:#fff;border:none;cursor:pointer;font-weight:800;font-size:13px;padding:6px 14px;border-radius:8px;box-shadow:0 1px 4px rgba(220,38,38,.4)" title="'+d.pending+' pending supplier price change(s) — click to review + approve/reject">⚑ '+d.pending+' APPROVAL'+(d.pending>1?'S':'')+' REQUIRED — review</button>':'')
       +'<button id="pl-excl" class="save-btn light" style="margin-left:10px;font-size:11px" title="SKUs hidden from the price list — paste to manage">Excluded SKUs'+((d.excluded&&d.excluded.length)?(' ('+d.excluded.length+')'):'')+'</button>'
       +'<span class="mut tiny" style="margin-left:auto">click a cell to set price + tiers · SKUs inherit the type price (↳) until overridden</span></div>';
     var head='<tr><th class="pl-lbl" style="min-width:230px">Price type / SKU</th><th class="pl-szh" style="text-align:left">Size</th><th class="pl-colh" style="text-align:left">Colour</th>'+COLLBL.slice(0,maxCols).map(function(l){return '<th style="text-align:left">'+l+'</th>';}).join('')+'</tr>';
@@ -8612,7 +8613,9 @@
       for(var i=0;i<maxCols;i++){ var sup=sups[i];
         if(!sup){ cells+='<td class="pl-empty"></td>'; continue; }
         var a=applicable(byKey[sup+'|type|'+pt]);
-        cells+='<td class="pl-cell" data-scope="type" data-pt="'+esc(pt)+'" data-sup="'+esc(sup)+'" style="cursor:pointer"><div class="mut tiny" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px">'+esc(sup)+'</div>'+(a.cur?((a.pending?'<span style="color:#b45309">⚑ </span>':'')+priceDisp(a.cur)+efpTag(a.cur)):'<span style="color:#cbd5e1">— set price</span>')+'</td>';
+        var _sn='<div class="mut tiny" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px">'+esc(sup)+'</div>';
+        if(a.pending){ cells+='<td class="pl-cell" data-pending="1" data-scope="type" data-pt="'+esc(pt)+'" data-sup="'+esc(sup)+'" style="cursor:pointer;background:#fef2f2">'+_sn+pendBadge()+(a.cur?' <span class="mut tiny">now '+priceDisp(a.cur)+'</span>':'')+'</td>'; }
+        else cells+='<td class="pl-cell" data-scope="type" data-pt="'+esc(pt)+'" data-sup="'+esc(sup)+'" style="cursor:pointer">'+_sn+(a.cur?priceDisp(a.cur)+efpTag(a.cur):'<span style="color:#cbd5e1">— set price</span>')+'</td>';
       }
       var _ti=ptInfo[pt]||{}, _szOv=!!_ti.sizeOverride, _szV=_ti.size||'';
       var szCell='<td class="pl-tsize pl-szh"><input class="pl-size-in" data-pt="'+esc(pt)+'" value="'+esc(_szV)+'" placeholder="size" title="'+(_szOv?'manual size — clear to use the SKUs’ common size':'from the SKUs’ common size — type to override')+'" style="width:100%;box-sizing:border-box;padding:2px 5px;border:1px solid '+(_szOv?'#cbd5e1':'transparent')+';border-radius:4px;font-size:11px;color:'+(_szOv?'#0f172a':'#94a3b8')+';background:transparent"></td>';
@@ -8622,9 +8625,11 @@
         for(var i=0;i<maxCols;i++){ var sup=sups[i];
           if(!sup){ sc+='<td class="pl-cell pl-empty"></td>'; continue; }
           var ax=applicable(byKey[sup+'|sku|'+s.sku]);
-          if(ax.cur){ sc+='<td class="pl-cell" data-scope="sku" data-pt="'+esc(pt)+'" data-sku="'+esc(s.sku)+'" data-sup="'+esc(sup)+'" style="cursor:pointer">'+(ax.pending?'<span style="color:#b45309">⚑ </span>':'')+priceDisp(ax.cur)+efpTag(ax.cur)+'</td>'; }
+          var _da='data-scope="sku" data-pt="'+esc(pt)+'" data-sku="'+esc(s.sku)+'" data-sup="'+esc(sup)+'"';
+          if(ax.pending){ sc+='<td class="pl-cell" data-pending="1" '+_da+' style="cursor:pointer;background:#fef2f2">'+pendBadge()+(ax.cur?' <span class="mut tiny">now '+priceDisp(ax.cur)+'</span>':'')+'</td>'; }
+          else if(ax.cur){ sc+='<td class="pl-cell" '+_da+' style="cursor:pointer">'+priceDisp(ax.cur)+efpTag(ax.cur)+'</td>'; }
           else { var at=applicable(byKey[sup+'|type|'+pt]); var inh=at.cur?priceDisp(at.cur):'<span style="color:#cbd5e1">—</span>';
-            sc+='<td class="pl-cell pl-inh" data-scope="sku" data-pt="'+esc(pt)+'" data-sku="'+esc(s.sku)+'" data-sup="'+esc(sup)+'" title="inherits the '+esc(pt)+' price — click to set a SKU-specific price" style="cursor:pointer"><span title="inherited" style="color:#cbd5e1">↳</span> <span style="opacity:.6">'+inh+'</span></td>'; }
+            sc+='<td class="pl-cell pl-inh" '+_da+' title="inherits the '+esc(pt)+' price — click to set a SKU-specific price" style="cursor:pointer"><span title="inherited" style="color:#cbd5e1">↳</span> <span style="opacity:.6">'+inh+'</span></td>'; }
         }
         var disc=s.active?'':' <span class="mut tiny" style="color:#b45309" title="discontinued">disc</span>';
         body+='<tr class="pl-sku"><td class="pl-lbl" style="padding-left:22px;font-family:ui-monospace,Menlo,monospace"><span title="'+esc(s.name)+'">'+esc(s.sku)+'</span>'+disc+'</td><td class="mut tiny pl-szh">'+esc(s.size||'')+'</td><td class="mut tiny pl-colh">'+esc(s.colour||'')+'</td>'+sc+'</tr>';
@@ -8640,7 +8645,9 @@
         body+='<tr class="pl-mansup"><td colspan="'+span+'" style="background:#eef2ff;font-weight:700;color:#334155;padding:4px 10px">'+esc(sup)+' <span class="mut tiny">· '+bySupM[sup].length+' SKU'+(bySupM[sup].length>1?'s':'')+'</span></td></tr>';
         bySupM[sup].forEach(function(s){ var real=(sup!=='(no supplier)');
           var ax=real?applicable(byKey[sup+'|sku|'+s.sku]):{cur:null};
-          var pcell='<td class="pl-cell" data-scope="sku" data-sku="'+esc(s.sku)+'" data-sup="'+esc(real?sup:'')+'" data-pt="'+esc(s.price_type||'')+'" style="cursor:pointer">'+(ax.cur?priceDisp(ax.cur)+efpTag(ax.cur):'<span style="color:#cbd5e1">— set price</span>')+'</td>';
+          var _mda='data-scope="sku" data-sku="'+esc(s.sku)+'" data-sup="'+esc(real?sup:'')+'" data-pt="'+esc(s.price_type||'')+'"';
+          var pcell=ax.pending?('<td class="pl-cell" data-pending="1" '+_mda+' style="cursor:pointer;background:#fef2f2">'+pendBadge()+(ax.cur?' <span class="mut tiny">now '+priceDisp(ax.cur)+'</span>':'')+'</td>')
+            :('<td class="pl-cell" '+_mda+' style="cursor:pointer">'+(ax.cur?priceDisp(ax.cur)+efpTag(ax.cur):'<span style="color:#cbd5e1">— set price</span>')+'</td>');
           var extra=''; for(var k=1;k<maxCols;k++)extra+='<td class="pl-empty"></td>';
           var disc=s.active?'':' <span class="mut tiny" style="color:#b45309">disc</span>';
           body+='<tr class="pl-sku"><td class="pl-lbl" style="padding-left:22px;font-family:ui-monospace,Menlo,monospace"><span title="'+esc(s.name)+'">'+esc(s.sku)+'</span>'+disc+'</td><td class="mut tiny pl-szh">'+esc(s.size||'')+'</td><td class="mut tiny pl-colh">'+esc(s.colour||'')+'</td>'+pcell+extra+'</tr>';
@@ -8665,7 +8672,7 @@
     var pri=b.querySelector('#pl-prod'); if(pri)pri.onchange=function(){ PL_ST.prod=this.value.trim(); plDraw(b,d); };
     var ai=b.querySelector('#pl-active'); if(ai)ai.onchange=function(){ PL_ST.active=this.checked; plDraw(b,d); };
     b.querySelectorAll('.pl-lbl[data-tgl]').forEach(function(td){ td.onclick=function(){ var t=td.dataset.tgl; PL_ST.open[t]=!PL_ST.open[t]; plDraw(b,d); }; });   // expand/minimise — redraw from cache, NO refetch
-    b.querySelectorAll('.pl-cell').forEach(function(td){ td.onclick=function(){ plEditor(b,{d:d,scope:td.dataset.scope,pt:td.dataset.pt,sku:td.dataset.sku||'',sup:td.dataset.sup||''}); }; });
+    b.querySelectorAll('.pl-cell').forEach(function(td){ td.onclick=function(){ if(td.dataset.pending){ plPending(b,d); return; } plEditor(b,{d:d,scope:td.dataset.scope,pt:td.dataset.pt,sku:td.dataset.sku||'',sup:td.dataset.sup||''}); }; });
     var xb=b.querySelector('#pl-excl'); if(xb)xb.onclick=function(){ plExclude(b,d.excluded||[]); };
     var pb=b.querySelector('#pl-pending'); if(pb)pb.onclick=function(){ plPending(b,d); };
     b.querySelectorAll('.pl-size-in').forEach(function(inp){ inp.onchange=function(){ var ptn=inp.dataset.pt, v=inp.value.trim();
