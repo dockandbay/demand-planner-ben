@@ -1,3 +1,9 @@
+## v27.210 Price Lists: portal grid mirrors admin + supplier notes + change log
+- **Supplier portal Price List now looks like the admin grid**: price-type rows (expand ▸ to SKUs) × the supplier's own price column, with Size/Colour, tier ranges, inherited-price (↳) SKUs, and red **⚑ AWAITING APPROVAL** cells. Clicking a price opens a Propose-change form.
+- **Supplier can add a multi-line note** with a proposed change; it shows in the admin approval box.
+- **Admin approval box table left-aligned** (Min qty · Current · Proposed · Change).
+- **Admin Change log** (toolbar button): history of **approved / rejected / superseded** supplier price changes — grouped by supplier · price type/SKU, newest first, with a **search** box (supplier / price type / SKU). Endpoint `/api/supply/price-list/log`.
+
 ## v27.209 Price Lists approval box: current vs proposed comparison table
 - The pending-approval review now shows a clear **table** per change — **Min qty · Current · Proposed · Change %** (per tier breakpoint, effective price on each side; green = cheaper, red = dearer, "new" where there's no current). Submitted date shown in **dd-mmm-yy** (e.g. 20-Aug-26 06:16).
 

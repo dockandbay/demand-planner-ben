@@ -2525,6 +2525,19 @@ app.post('/api/supply/price-list/:id/approve', async (req, res) => {
   } catch (err) { await client.query('ROLLBACK'); log500(err); res.status(500).json({ error: err.message }); }
   finally { client.release(); }
 });
+// Price-list change log — supplier-submitted changes that were decided (approved → active/superseded, or rejected).
+app.get('/api/supply/price-list/log', async (_req, res) => {
+  try {
+    res.json((await pool.query(`SELECT e.id, e.supplier, e.scope, coalesce(e.price_type,'') price_type, coalesce(e.sku,'') sku, e.currency,
+        e.effective_from_production, e.status, coalesce(e.note,'') note, coalesce(e.submitted_by,'') submitted_by,
+        to_char(e.submitted_at,'YYYY-MM-DD HH24:MI') submitted_at, coalesce(e.approved_by,'') approved_by,
+        to_char(coalesce(e.approved_at,e.updated_at),'YYYY-MM-DD HH24:MI') decided_at,
+        coalesce((SELECT json_agg(json_build_object('min_qty',t.min_qty,'unit_cost',t.unit_cost) ORDER BY t.min_qty) FROM planner.price_list_tiers t WHERE t.entry_id=e.id),'[]') tiers
+      FROM planner.price_list_entries e
+      WHERE e.source='supplier' AND e.status IN ('active','rejected','superseded')
+      ORDER BY coalesce(e.approved_at,e.updated_at) DESC NULLS LAST LIMIT 500`)).rows);
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // Cheap count of unapproved (pending) price changes — for the Price Lists sub-tab nav badge.
 app.get('/api/supply/price-list/pending-count', async (_req, res) => {
   try { res.json({ count: (await pool.query(`SELECT count(*)::int n FROM planner.price_list_entries WHERE status='pending'`)).rows[0].n }); }
@@ -13713,19 +13726,39 @@ app.get('/api/portal/price-list', portalAuth, async (req, res) => {
   if (!IS_SANDBOX) return res.status(404).json({ error: 'not enabled' });
   const sups = req.portal.suppliers || [];
   try {
-    if (!sups.length) return res.json({ entries: [], suppliers: [], productions: [], currentProduction: 0 });
+    if (!sups.length) return res.json({ entries: [], suppliers: [], priceTypes: [], manualSkus: [], productions: [], currentProduction: 0 });
     const entries = (await pool.query(`
       SELECT e.id, e.supplier, e.scope, coalesce(e.price_type,'') price_type, coalesce(e.sku,'') sku, e.currency,
              e.effective_from_production, e.status, coalesce(e.note,'') note,
              coalesce((SELECT json_agg(json_build_object('min_qty',t.min_qty,'unit_cost',t.unit_cost) ORDER BY t.min_qty) FROM planner.price_list_tiers t WHERE t.entry_id=e.id),'[]') tiers
       FROM planner.price_list_entries e WHERE e.supplier = ANY($1) AND e.status IN ('active','pending')
       ORDER BY e.price_type, e.scope DESC, e.sku`, [sups])).rows;
+    // the supplier's own price types (from their type entries) → grid rows; their manual/blank sku entries → manual section
+    const isManual = (v) => (v === '' || String(v).toUpperCase() === 'MANUAL');
+    const myTypes = [...new Set(entries.filter((e) => e.scope === 'type' && !isManual(e.price_type)).map((e) => e.price_type))];
+    const manualSet = new Set(entries.filter((e) => e.scope === 'sku' && isManual(e.price_type)).map((e) => e.sku));
+    const ptMeta = {}; (await pool.query(`SELECT price_type, coalesce(size,'') size FROM planner.price_type_meta`)).rows.forEach((r) => { ptMeta[r.price_type] = r.size; });
+    let priceTypes = [], manualSkus = [];
+    if (myTypes.length) {
+      const pt = (await pool.query(`SELECT price_type, sku, coalesce(product_name_final,product_name,'') name, coalesce(main_supplier_final,'') main_supplier,
+             coalesce(colour_long,'') colour, coalesce(nullif(size_long,''),size,'') size,
+             (lower(coalesce(status,'')) NOT LIKE '%discont%' AND NOT (coalesce(discontinue_date_final,'') ~ '^\d{4}-\d{2}-\d{2}' AND to_date(discontinue_date_final,'YYYY-MM-DD') <= current_date)) active
+        FROM planner.products WHERE coalesce(variant_type,'')='MASTER' AND upper(coalesce(status,''))<>'NON STOCKED' AND price_type = ANY($1) ORDER BY price_type, sku`, [myTypes])).rows;
+      const tm = {}; pt.forEach((r) => { const t = (tm[r.price_type] = tm[r.price_type] || { skus: [], sizes: {} }); t.skus.push({ sku: r.sku, name: r.name, active: !!r.active, colour: r.colour, size: r.size }); if (r.size) t.sizes[r.size] = 1; });
+      priceTypes = myTypes.slice().sort().map((k) => { const t = tm[k] || { skus: [], sizes: {} }; const uniq = Object.keys(t.sizes); const def = uniq.length === 1 ? uniq[0] : ''; const ov = (ptMeta[k] != null && ptMeta[k] !== ''); return { price_type: k, skus: t.skus, mainSupplier: sups[0] || '', size: ov ? ptMeta[k] : def, sizeOverride: ov, sizeDefault: def }; });
+    }
+    if (manualSet.size) {
+      manualSkus = (await pool.query(`SELECT sku, coalesce(product_name_final,product_name,'') name, coalesce(colour_long,'') colour, coalesce(nullif(size_long,''),size,'') size,
+             coalesce(main_supplier_final,'') main_supplier, coalesce(price_type,'') price_type,
+             (lower(coalesce(status,'')) NOT LIKE '%discont%' AND NOT (coalesce(discontinue_date_final,'') ~ '^\d{4}-\d{2}-\d{2}' AND to_date(discontinue_date_final,'YYYY-MM-DD') <= current_date)) active
+        FROM planner.products WHERE sku = ANY($1) ORDER BY sku`, [[...manualSet]])).rows.map((r) => ({ ...r, active: !!r.active, main_supplier: sups[0] || r.main_supplier }));
+    }
     const cpRow = (await pool.query(`SELECT max(regexp_replace(prod_no,'[^0-9]','','g')::int) mx FROM planner.purchase_orders
       WHERE lower(coalesce(status,'')) LIKE '%production%' AND regexp_replace(coalesce(prod_no,''),'[^0-9]','','g')<>''`)).rows[0];
     const currentProduction = (cpRow && cpRow.mx) ? cpRow.mx : 0;
     const prods = (await pool.query(`SELECT DISTINCT regexp_replace(prod_no,'[^0-9]','','g') n FROM planner.purchase_orders WHERE regexp_replace(coalesce(prod_no,''),'[^0-9]','','g')<>''`)).rows
       .map((r) => parseInt(r.n, 10)).filter((n) => !isNaN(n) && n > currentProduction).sort((a, b) => b - a);
-    res.json({ entries, suppliers: sups, productions: [...new Set(prods)], currentProduction });
+    res.json({ entries, suppliers: sups, priceTypes, manualSkus, productions: [...new Set(prods)], currentProduction });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/portal/price-list/submit', portalAuth, async (req, res) => {

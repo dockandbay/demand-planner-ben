@@ -8549,6 +8549,26 @@
   var PL_ST={q:'',sup:'',prod:'',open:{},active:true}, PL_DATA=null;
   function renderPriceLists(b){ b.innerHTML='<div class="count">Loading…</div>';
     fetch('/api/supply/price-list').then(function(r){return r.json();}).then(function(d){ if(d&&d.error){ b.innerHTML='<div style="color:#dc2626">'+esc(d.error)+'</div>'; return; } PL_DATA=d; plDraw(b,d); }).catch(function(e){ b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>'; }); }
+  function plLog(){ var ex=document.getElementById('pl-log-ov'); if(ex)ex.remove();
+    var ov=document.createElement('div'); ov.id='pl-log-ov'; ov.style.cssText='position:fixed;inset:0;z-index:200000;background:rgba(15,23,42,.35);display:flex;align-items:center;justify-content:center;padding:16px';
+    ov.innerHTML='<div style="background:#fff;border-radius:10px;padding:16px 18px;width:640px;max-width:96vw;max-height:90vh;overflow:auto;box-shadow:0 12px 40px rgba(15,23,42,.25)"><div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><div style="font-weight:700">Price change log</div><input id="pl-log-q" placeholder="search supplier / price type / SKU…" style="flex:1;padding:5px 9px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px"><button id="pl-log-close" class="save-btn light">Close</button></div><div id="pl-log-body"><div class="count">Loading…</div></div></div>';
+    document.body.appendChild(ov); function close(){ ov.remove(); }
+    ov.addEventListener('mousedown',function(e){ if(e.target===ov)close(); });
+    document.getElementById('pl-log-close').onclick=close;
+    var q=document.getElementById('pl-log-q'), body=document.getElementById('pl-log-body'), ROWS=[];
+    function tierStr(r){ if(!r.tiers||!r.tiers.length)return '—'; var sym=curSym(r.currency); return r.tiers.map(function(t){return t.min_qty+':'+sym+money(t.unit_cost);}).join(' · '); }
+    function outcome(s){ return s==='active'?'<span style="color:#15803d;font-weight:700">✓ Approved</span>':s==='rejected'?'<span style="color:#b91c1c;font-weight:700">✕ Rejected</span>':'<span style="color:#64748b">⤴ Superseded</span>'; }
+    function draw(){ var ql=(q.value||'').trim().toLowerCase();
+      var f=ROWS.filter(function(r){ return !ql||((r.supplier+' '+r.price_type+' '+r.sku).toLowerCase().indexOf(ql)>=0); });
+      var groups={}, order=[]; f.forEach(function(r){ var k=r.supplier+' · '+(r.scope==='sku'?r.sku:r.price_type); if(!groups[k]){groups[k]=[];order.push(k);} groups[k].push(r); });
+      order.sort(function(a,b){ return String((groups[b][0]||{}).decided_at||'').localeCompare(String((groups[a][0]||{}).decided_at||'')); });
+      body.innerHTML= order.length? order.map(function(k){ return '<div style="margin-bottom:12px"><div style="font-weight:700;font-size:12px;border-bottom:1px solid #e5e7eb;padding-bottom:3px;margin-bottom:4px">'+esc(k)+'</div>'
+        +groups[k].map(function(r){ return '<div style="font-size:12px;display:flex;gap:10px;align-items:baseline;padding:2px 0"><span style="width:130px;color:#64748b;flex:0 0 auto">'+esc(actWhen(r.decided_at))+'</span><span style="width:88px;flex:0 0 auto">'+outcome(r.status)+'</span><span style="flex:1">'+tierStr(r)+(r.effective_from_production?(' <span class="mut tiny">from prod '+r.effective_from_production+'</span>'):'')+'</span><span class="mut tiny" style="flex:0 0 auto">'+(r.approved_by?('by '+esc(r.approved_by)):'')+'</span></div>'+(r.note?'<div class="mut tiny" style="padding-left:130px;white-space:pre-wrap">“'+esc(r.note)+'”</div>':''); }).join('')
+        +'</div>'; }).join('') : '<div class="count">No approved / rejected supplier price changes'+(ql?' match your search':' yet')+'.</div>';
+    }
+    q.oninput=draw;
+    fetch('/api/supply/price-list/log').then(function(r){return r.json();}).then(function(rows){ ROWS=Array.isArray(rows)?rows:[]; draw(); }).catch(function(){ body.innerHTML='<div style="color:#dc2626">Could not load the log.</div>'; });
+  }
   function plPending(b,d){ var exo=document.getElementById('pl-pend-ov'); if(exo)exo.remove();
     var pend=(d.entries||[]).filter(function(e){return e.status==='pending';});
     var actByKey={}; (d.entries||[]).filter(function(e){return e.status==='active';}).forEach(function(e){ var k=e.supplier+'|'+e.scope+'|'+(e.scope==='sku'?e.sku:e.price_type)+'|'+(e.effective_from_production||''); (actByKey[k]=actByKey[k]||[]).push(e); });
@@ -8559,13 +8579,14 @@
       var body=list.map(function(q){ var cu=cur?effAt(cur.tiers,q):null, pr=effAt(e.tiers,q);
         var chg=(cu!=null&&cu!==0&&pr!=null)?Math.round((pr/cu-1)*1000)/10:null;
         var cc=chg==null?'#94a3b8':chg>0?'#b91c1c':chg<0?'#15803d':'#64748b';
-        return '<tr><td style="padding:2px 8px;text-align:right;border-top:1px solid #f1f5f9">'+q+'+</td><td style="padding:2px 8px;text-align:right;border-top:1px solid #f1f5f9;color:#475569">'+(cu!=null?sym+cu.toFixed(2):'—')+'</td><td style="padding:2px 8px;text-align:right;border-top:1px solid #f1f5f9;font-weight:700">'+(pr!=null?sym+pr.toFixed(2):'—')+'</td><td style="padding:2px 8px;text-align:right;border-top:1px solid #f1f5f9;color:'+cc+';font-weight:600">'+(chg==null?(pr!=null&&cu==null?'new':'—'):((chg>0?'+':'')+chg+'%'))+'</td></tr>'; }).join('');
-      return '<table style="border-collapse:collapse;font-size:11px;margin-top:6px;width:100%;font-variant-numeric:tabular-nums"><thead><tr style="color:#94a3b8;text-transform:uppercase;font-size:9px;letter-spacing:.03em"><th style="padding:2px 8px;text-align:right">Min qty</th><th style="padding:2px 8px;text-align:right">Current</th><th style="padding:2px 8px;text-align:right">Proposed</th><th style="padding:2px 8px;text-align:right">Change</th></tr></thead><tbody>'+body+'</tbody></table>'; }
+        return '<tr><td style="padding:2px 14px 2px 0;text-align:left;border-top:1px solid #f1f5f9">'+q+'+</td><td style="padding:2px 14px 2px 0;text-align:left;border-top:1px solid #f1f5f9;color:#475569">'+(cu!=null?sym+cu.toFixed(2):'—')+'</td><td style="padding:2px 14px 2px 0;text-align:left;border-top:1px solid #f1f5f9;font-weight:700">'+(pr!=null?sym+pr.toFixed(2):'—')+'</td><td style="padding:2px 0;text-align:left;border-top:1px solid #f1f5f9;color:'+cc+';font-weight:600">'+(chg==null?(pr!=null&&cu==null?'new':'—'):((chg>0?'+':'')+chg+'%'))+'</td></tr>'; }).join('');
+      return '<table style="border-collapse:collapse;font-size:11px;margin-top:6px;width:auto;text-align:left;font-variant-numeric:tabular-nums"><thead><tr style="color:#94a3b8;text-transform:uppercase;font-size:9px;letter-spacing:.03em"><th style="padding:2px 14px 2px 0;text-align:left">Min qty</th><th style="padding:2px 14px 2px 0;text-align:left">Current</th><th style="padding:2px 14px 2px 0;text-align:left">Proposed</th><th style="padding:2px 0;text-align:left">Change</th></tr></thead><tbody>'+body+'</tbody></table>'; }
     function rows(){ if(!pend.length)return '<div class="mut" style="padding:14px 2px">No pending changes.</div>';
       return pend.map(function(e){ var k=e.supplier+'|'+e.scope+'|'+(e.scope==='sku'?e.sku:e.price_type)+'|'+(e.effective_from_production||''); var cur=(actByKey[k]||[])[0];
         return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:8px">'
           +'<div style="font-weight:700;font-size:12px">'+esc(e.supplier)+' · '+(e.scope==='sku'?(esc(e.sku)+' <span class="mut tiny">('+esc(e.price_type)+')</span>'):esc(e.price_type))+(e.effective_from_production?(' <span class="mut tiny">from prod '+e.effective_from_production+'</span>'):'')+'</div>'
           +cmpTable(cur,e)
+          +(e.note?'<div style="margin-top:6px;font-size:12px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px;padding:6px 9px;white-space:pre-wrap"><span class="mut tiny" style="text-transform:uppercase;letter-spacing:.03em">Supplier note</span><br>'+esc(e.note)+'</div>':'')
           +'<div class="mut tiny" style="margin-top:5px">submitted '+(e.submitted_by?('by '+esc(e.submitted_by)+' '):'')+actWhen(e.submitted_at)+'</div>'
           +'<div style="text-align:right;margin-top:6px"><button class="save-btn light pl-pend-reject" data-id="'+e.id+'" style="color:#b91c1c;border-color:#fca5a5">Reject</button> <button class="save-btn pl-pend-approve" data-id="'+e.id+'" style="background:#16a34a;color:#fff;border-color:#15803d">Approve</button></div></div>'; }).join(''); }
     var ov=document.createElement('div'); ov.id='pl-pend-ov'; ov.style.cssText='position:fixed;inset:0;z-index:200000;background:rgba(15,23,42,.35);display:flex;align-items:center;justify-content:center;padding:16px';
@@ -8614,6 +8635,7 @@
       +'<label style="margin-left:10px;font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:5px;cursor:pointer" title="Hide discontinued SKUs (they still show when searched)"><input type="checkbox" id="pl-active"'+(PL_ST.active?' checked':'')+'> Active SKUs only</label>'
       +(d.pending>0?'<button id="pl-pending" style="margin-left:10px;background:#dc2626;color:#fff;border:none;cursor:pointer;font-weight:800;font-size:13px;padding:6px 14px;border-radius:8px;box-shadow:0 1px 4px rgba(220,38,38,.4)" title="'+d.pending+' pending supplier price change(s) — click to review + approve/reject">⚑ '+d.pending+' APPROVAL'+(d.pending>1?'S':'')+' REQUIRED — review</button>':'')
       +'<button id="pl-excl" class="save-btn light" style="margin-left:10px;font-size:11px" title="SKUs hidden from the price list — paste to manage">Excluded SKUs'+((d.excluded&&d.excluded.length)?(' ('+d.excluded.length+')'):'')+'</button>'
+      +'<button id="pl-log" class="save-btn light" style="margin-left:6px;font-size:11px" title="History of approved / rejected supplier price changes">Change log</button>'
       +'<span class="mut tiny" style="margin-left:auto">click a cell to set price + tiers · SKUs inherit the type price (↳) until overridden</span></div>';
     var head='<tr><th class="pl-lbl" style="min-width:230px">Price type / SKU</th><th class="pl-szh" style="text-align:left">Size</th><th class="pl-colh" style="text-align:left">Colour</th>'+COLLBL.slice(0,maxCols).map(function(l){return '<th style="text-align:left">'+l+'</th>';}).join('')+'</tr>';
     var body='';
@@ -8685,6 +8707,7 @@
     b.querySelectorAll('.pl-cell').forEach(function(td){ td.onclick=function(){ if(td.dataset.pending){ plPending(b,d); return; } plEditor(b,{d:d,scope:td.dataset.scope,pt:td.dataset.pt,sku:td.dataset.sku||'',sup:td.dataset.sup||''}); }; });
     var xb=b.querySelector('#pl-excl'); if(xb)xb.onclick=function(){ plExclude(b,d.excluded||[]); };
     var pb=b.querySelector('#pl-pending'); if(pb)pb.onclick=function(){ plPending(b,d); };
+    var lgb=b.querySelector('#pl-log'); if(lgb)lgb.onclick=function(){ plLog(); };
     b.querySelectorAll('.pl-size-in').forEach(function(inp){ inp.onchange=function(){ var ptn=inp.dataset.pt, v=inp.value.trim();
       fetch('/api/supply/price-type-meta',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({price_type:ptn,size:v})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;}
         var t=ptInfo[ptn]; if(t){ t.size=v?v:(t.sizeDefault||''); t.sizeOverride=!!v; } plDraw(b,d); }).catch(function(e){ alert('Save failed: '+(e.message||e)); }); }; });   // silent redraw, no full refresh

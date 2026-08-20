@@ -102,46 +102,68 @@
   }
 
   // ── Supplier Price List (gated: only shown when the server enables it) ──
+  // ── Supplier Price List (gated) — grid mirroring the admin Price Lists UI, scoped to this supplier ──
   function ppPriceList(me){ var ex=document.getElementById('pv-pl-ov'); if(ex)ex.remove();
-    var _prods=[];
+    var _prods=[], _cur=0, OPEN={};
     function CCY(c){ return ({USD:'$',GBP:'£',EUR:'€',AUD:'A$',CAD:'C$'})[String(c||'').toUpperCase()]||''; }
-    function tierStr(e){ if(!e.tiers||!e.tiers.length)return '—'; var sym=CCY(e.currency); return e.tiers.map(function(t){return t.min_qty+'+ : '+sym+(+t.unit_cost).toFixed(2);}).join('   ·   '); }
+    function applicable(list){ if(!list||!list.length)return {cur:null,pending:false}; var act=list.filter(function(e){return e.status==='active';}),pend=list.filter(function(e){return e.status==='pending';}),pick=null;
+      act.slice().sort(function(a,b){return (a.effective_from_production||0)-(b.effective_from_production||0);}).forEach(function(e){pick=e;}); return {cur:pick,pending:pend.length>0,pendEntry:pend[0]}; }
+    function priceDisp(e){ if(!e||!e.tiers||!e.tiers.length)return ''; var sym=CCY(e.currency), t=e.tiers.map(function(x){return Number(x.unit_cost);}), mn=Math.min.apply(null,t),mx=Math.max.apply(null,t);
+      if(t.length<2||mn===mx)return '<b>'+sym+mx.toFixed(2)+'</b>'; return '<span style="font-size:11px;color:#64748b">'+sym+mn.toFixed(2)+'</span> – <b style="font-size:14px">'+sym+mx.toFixed(2)+'</b>'; }
     var ov=document.createElement('div'); ov.id='pv-pl-ov'; ov.style.cssText='position:fixed;inset:0;z-index:9000;background:#fff;overflow:auto';
     ov.innerHTML='<header class="pv-top"><h1>Dock &amp; Bay</h1><span class="sup">Price List</span><span class="sp"></span><button class="pv-btn ghost" id="pl-back">← Back</button></header><div id="pv-wrap"><div id="pl-body"><div class="pv-empty">Loading…</div></div></div>';
     document.body.appendChild(ov);
     document.getElementById('pl-back').onclick=function(){ ov.remove(); };
     function load(){ get('/api/portal/price-list').then(render).catch(function(e){ document.getElementById('pl-body').innerHTML='<div class="pv-empty">Could not load price list.</div>'; }); }
-    function render(d){ var b=document.getElementById('pl-body'); var ents=d.entries||[]; _prods=d.productions||[];
-      var active=ents.filter(function(e){return e.status==='active';}), pending=ents.filter(function(e){return e.status==='pending';});
-      var html='<div style="max-width:840px"><p style="color:#64748b">Your current prices. Propose a change and we’ll review and approve it. Larger quantities must be a lower unit cost.</p>';
-      if(pending.length){ html+='<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 12px;margin-bottom:14px"><b>⏳ Awaiting approval</b>'+pending.map(function(e){return '<div style="font-size:12px;margin-top:4px">'+esc(e.scope==='type'?e.price_type:e.sku)+(e.effective_from_production?(' <span style="color:#92400e">from prod '+e.effective_from_production+'</span>'):'')+' → '+tierStr(e)+'</div>';}).join('')+'</div>'; }
-      if(!active.length)html+='<div class="pv-empty">No prices on file yet.</div>';
-      active.forEach(function(e,i){ html+='<div style="border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:8px">'
-        +'<div style="font-weight:700">'+esc(e.scope==='type'?('Price type: '+e.price_type):('SKU: '+e.sku))+' <span style="color:#94a3b8;font-weight:400;font-size:12px">('+esc(e.currency)+')</span></div>'
-        +'<div style="color:#334155;font-size:13px;margin-top:3px">Current: '+tierStr(e)+'</div>'
-        +'<button class="pv-btn pl-prop" data-i="'+i+'" style="margin-top:8px;padding:5px 12px;font-size:12px">Propose change</button>'
-        +'<div class="pl-form" data-i="'+i+'" style="display:none;margin-top:8px"></div></div>'; });
-      html+='</div>'; b.innerHTML=html;
-      b.querySelectorAll('.pl-prop').forEach(function(btn){ btn.onclick=function(){ openForm(active[+btn.dataset.i], b.querySelector('.pl-form[data-i="'+btn.dataset.i+'"]')); }; });
+    function render(d){ var b=document.getElementById('pl-body'); var ents=d.entries||[], pts=d.priceTypes||[], man=d.manualSkus||[], sups=(d.suppliers&&d.suppliers.length?d.suppliers:['']); _prods=d.productions||[]; _cur=d.currentProduction||0;
+      var byKey={}, supCcy={}; ents.forEach(function(e){ var k=e.supplier+'|'+e.scope+'|'+(e.scope==='sku'?e.sku:e.price_type); (byKey[k]=byKey[k]||[]).push(e); if(e.currency)supCcy[e.supplier]=e.currency; });
+      var typeSkus={}, ptInfo={}; pts.forEach(function(t){ typeSkus[t.price_type]=t.skus||[]; ptInfo[t.price_type]=t; });
+      function pendBadge(){ return '<span style="display:inline-block;background:#dc2626;color:#fff;font-weight:800;font-size:9px;letter-spacing:.03em;padding:2px 7px;border-radius:4px">⚑ AWAITING APPROVAL</span>'; }
+      function cell(scope,keyval,sup,pt,inheritOK){ var a=applicable(byKey[sup+'|'+scope+'|'+keyval]);
+        var da='data-scope="'+scope+'" data-key="'+esc(keyval)+'" data-sup="'+esc(sup)+'" data-pt="'+esc(pt||'')+'"';
+        if(a.pending)return '<td class="plc" data-pend="1" '+da+' style="cursor:pointer;background:#fef2f2">'+pendBadge()+(a.cur?' <span style="color:#94a3b8;font-size:10px">now '+priceDisp(a.cur)+'</span>':'')+'</td>';
+        if(a.cur)return '<td class="plc" '+da+' style="cursor:pointer">'+priceDisp(a.cur)+'</td>';
+        if(inheritOK){ var at=applicable(byKey[sup+'|type|'+pt]); return '<td class="plc" '+da+' style="cursor:pointer;color:#94a3b8"><span style="color:#cbd5e1">↳</span> <span style="opacity:.6">'+(at.cur?priceDisp(at.cur):'—')+'</span></td>'; }
+        return '<td class="plc" '+da+' style="cursor:pointer;color:#cbd5e1">— set</td>'; }
+      var head='<tr><th style="text-align:left">Price type / SKU</th><th style="text-align:left">Size</th><th style="text-align:left">Colour</th>'+sups.map(function(s){return '<th style="text-align:left">'+esc(s||'Your price')+'</th>';}).join('')+'</tr>';
+      var bd='';
+      pts.forEach(function(t){ var pt=t.price_type, op=!!OPEN[pt];
+        bd+='<tr class="plt"><td class="pll" data-tgl="'+esc(pt)+'" style="cursor:pointer;font-weight:700"><span style="color:#94a3b8">'+(op?'▾':'▸')+'</span> '+esc(pt)+'</td><td style="color:#64748b;font-size:11px">'+esc(t.size||'')+'</td><td></td>'+sups.map(function(s){return cell('type',pt,s,pt,false);}).join('')+'</tr>';
+        if(op)(typeSkus[pt]||[]).forEach(function(s){ if(!s.active)return;
+          bd+='<tr><td class="pll" style="padding-left:20px;font-family:ui-monospace,Menlo,monospace;font-size:12px">'+esc(s.sku)+'</td><td style="color:#64748b;font-size:11px">'+esc(s.size||'')+'</td><td style="color:#64748b;font-size:11px">'+esc(s.colour||'')+'</td>'+sups.map(function(su){return cell('sku',s.sku,su,pt,true);}).join('')+'</tr>'; });
+      });
+      if(man.length){ var span=sups.length+3; bd+='<tr><td colspan="'+span+'" style="background:#0f172a;color:#fff;font-weight:700;font-size:11px;padding:6px 10px;text-transform:uppercase;letter-spacing:.04em">No price type / manual — priced per SKU</td></tr>';
+        man.forEach(function(s){ if(!s.active)return; bd+='<tr><td class="pll" style="padding-left:20px;font-family:ui-monospace,Menlo,monospace;font-size:12px">'+esc(s.sku)+'</td><td style="color:#64748b;font-size:11px">'+esc(s.size||'')+'</td><td style="color:#64748b;font-size:11px">'+esc(s.colour||'')+'</td>'+sups.map(function(su){return cell('sku',s.sku,su,s.price_type||'',false);}).join('')+'</tr>'; }); }
+      b.innerHTML='<p style="color:#64748b;max-width:860px">Your prices. Click any price to <b>propose a change</b> — we’ll review and approve it. Larger quantities must be a lower unit cost. Expand ▸ a price type to price individual SKUs.</p><div style="overflow:auto"><table class="pltbl"><thead>'+head+'</thead><tbody>'+bd+'</tbody></table></div>';
+      if(!document.getElementById('pltbl-sty')){ var st=document.createElement('style'); st.id='pltbl-sty'; st.textContent='.pltbl{border-collapse:separate;border-spacing:0;font-size:13px}.pltbl th{position:sticky;top:0;background:#f8fafc;padding:6px 10px;border-bottom:1px solid #e2e8f0;font-size:10px;text-transform:uppercase;color:#475569;white-space:nowrap}.pltbl td{padding:5px 10px;border-bottom:1px solid #f1f5f9;white-space:nowrap}.pltbl tr.plt td{background:#f6f8ff}.pltbl .plc:hover{background:#eff6ff}'; document.head.appendChild(st); }
+      b.querySelectorAll('.pll[data-tgl]').forEach(function(td){ td.onclick=function(){ OPEN[td.dataset.tgl]=!OPEN[td.dataset.tgl]; render(d); }; });
+      b.querySelectorAll('.plc').forEach(function(td){ td.onclick=function(){ var a=applicable(byKey[td.dataset.sup+'|'+td.dataset.scope+'|'+td.dataset.key]); var at=applicable(byKey[td.dataset.sup+'|type|'+td.dataset.pt]);
+        proposeModal({supplier:td.dataset.sup,scope:td.dataset.scope,key:td.dataset.key,pt:td.dataset.pt,cur:a.cur||(td.dataset.scope==='sku'?at.cur:null),pend:a.pendEntry,currency:(a.cur&&a.cur.currency)||(at.cur&&at.cur.currency)||supCcy[td.dataset.sup]||'USD'}); }; });
     }
-    function openForm(e, host){ if(host.style.display!=='none'){ host.style.display='none'; host.innerHTML=''; return; } host.style.display='';
-      var sym=CCY(e.currency), tiers=(e.tiers&&e.tiers.length?e.tiers.map(function(t){return {min_qty:t.min_qty,unit_cost:t.unit_cost};}):[{min_qty:1,unit_cost:''}]);
+    function proposeModal(ctx){ var exm=document.getElementById('pl-prop-ov'); if(exm)exm.remove();
+      var sym=CCY(ctx.currency), src=ctx.pend||ctx.cur;
+      var tiers=(src&&src.tiers&&src.tiers.length?src.tiers.map(function(t){return {min_qty:t.min_qty,unit_cost:t.unit_cost};}):[{min_qty:1,unit_cost:''}]);
       var prodOpts='<option value="">Now (current price)</option>'+_prods.map(function(p){return '<option value="'+p+'">from production '+p+'</option>';}).join('');
+      var mv=document.createElement('div'); mv.id='pl-prop-ov'; mv.style.cssText='position:fixed;inset:0;z-index:9500;background:rgba(15,23,42,.4);display:flex;align-items:center;justify-content:center;padding:16px';
+      mv.innerHTML='<div style="background:#fff;border-radius:10px;padding:16px 18px;width:440px;max-width:94vw;box-shadow:0 12px 40px rgba(15,23,42,.3)"><div style="font-weight:700;margin-bottom:8px">Propose price — '+esc(ctx.scope==='sku'?ctx.key:ctx.pt)+(ctx.scope==='sku'&&ctx.pt?(' <span style="color:#94a3b8;font-size:12px">('+esc(ctx.pt)+')</span>'):'')+'</div><div id="pl-prop-body"></div></div>';
+      document.body.appendChild(mv); mv.addEventListener('mousedown',function(e){ if(e.target===mv)mv.remove(); });
+      var host=document.getElementById('pl-prop-body');
       function readT(){ tiers=[]; host.querySelectorAll('.pl-tr').forEach(function(r){ tiers.push({min_qty:r.querySelector('.pl-mq').value,unit_cost:r.querySelector('.pl-uc').value}); }); if(!tiers.length)tiers=[{min_qty:1,unit_cost:''}]; }
-      function draw(){ host.innerHTML='<div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px">'
-        +'<div style="font-size:12px;color:#475569;margin-bottom:7px">Applies from: <select class="pl-efp" style="padding:4px 7px;border:1px solid #cbd5e1;border-radius:5px">'+prodOpts+'</select></div>'
+      function draw(){ host.innerHTML='<div style="font-size:12px;color:#475569;margin-bottom:7px">Applies from: <select class="pl-efp" style="padding:4px 7px;border:1px solid #cbd5e1;border-radius:5px">'+prodOpts+'</select></div>'
         +'<div class="pl-tiers">'+tiers.map(function(t,ti){return '<div class="pl-tr" style="display:flex;gap:6px;align-items:center;margin-bottom:5px"><span style="color:#64748b;width:30px">min</span><input class="pl-mq" type="number" min="1" value="'+esc(t.min_qty)+'" style="width:82px;padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px"><span style="color:#64748b">qty → '+sym+'</span><input class="pl-uc" type="number" step="0.0001" value="'+esc(t.unit_cost)+'" style="width:100px;padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px">'+(tiers.length>1?'<button class="pl-trx" data-ti="'+ti+'" style="border:none;background:none;color:#b91c1c;cursor:pointer;font-size:15px">✕</button>':'')+'</div>';}).join('')+'</div>'
         +'<button class="pl-addtier" style="font-size:12px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;cursor:pointer">+ tier</button>'
+        +'<div style="font-size:12px;color:#475569;margin:8px 0 3px">Note to reviewer <span style="color:#94a3b8">(optional)</span></div><textarea class="pl-note" rows="3" placeholder="Any details about this price change request…" style="width:100%;box-sizing:border-box;font-family:inherit;font-size:12px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px">'+esc((src&&src.note)||'')+'</textarea>'
         +'<div class="pl-err" style="color:#b91c1c;font-size:12px;font-weight:600;min-height:14px;margin-top:6px"></div>'
-        +'<div style="text-align:right"><button class="pl-submit pv-btn" style="padding:6px 14px">Submit for approval</button></div></div>';
+        +'<div style="text-align:right;margin-top:2px"><button class="pl-cancel pv-btn ghost" style="color:#334155;border-color:#cbd5e1;margin-right:6px">Cancel</button><button class="pl-submit pv-btn" style="padding:6px 14px">Submit for approval</button></div>';
         host.querySelectorAll('.pl-trx').forEach(function(x){x.onclick=function(){readT();tiers.splice(+x.dataset.ti,1);if(!tiers.length)tiers=[{min_qty:1,unit_cost:''}];draw();};});
         host.querySelector('.pl-addtier').onclick=function(){readT();tiers.push({min_qty:'',unit_cost:''});draw();};
+        host.querySelector('.pl-cancel').onclick=function(){ mv.remove(); };
         host.querySelector('.pl-submit').onclick=function(){ readT(); var err=host.querySelector('.pl-err');
           var ts=tiers.map(function(t){return {min_qty:parseInt(t.min_qty,10)||1,unit_cost:Number(t.unit_cost)};}).filter(function(t){return isFinite(t.unit_cost)&&String(t.unit_cost)!=='';});
           if(!ts.length){err.textContent='Enter at least one price.';return;} ts.sort(function(a,b){return a.min_qty-b.min_qty;});
           for(var i=1;i<ts.length;i++){ if(ts[i].min_qty===ts[i-1].min_qty){err.textContent='Two tiers have the same min quantity.';return;} if(ts[i].unit_cost>ts[i-1].unit_cost+1e-9){err.textContent='Larger quantity must be a lower unit cost.';return;} }
           var sb=host.querySelector('.pl-submit'); sb.disabled=true; sb.textContent='Submitting…';
-          api('/api/portal/price-list/submit',{supplier:e.supplier,scope:e.scope,price_type:e.price_type,sku:e.sku,currency:e.currency,effective_from_production:host.querySelector('.pl-efp').value,tiers:ts}).then(function(j){ if(j&&j.error){sb.disabled=false;sb.textContent='Submit for approval';err.textContent=j.error;return;} load(); }).catch(function(){sb.disabled=false;sb.textContent='Submit for approval';err.textContent='Could not submit.';}); };
+          api('/api/portal/price-list/submit',{supplier:ctx.supplier,scope:ctx.scope,price_type:(ctx.scope==='type'?ctx.key:ctx.pt),sku:(ctx.scope==='sku'?ctx.key:''),currency:ctx.currency,effective_from_production:host.querySelector('.pl-efp').value,note:host.querySelector('.pl-note').value,tiers:ts}).then(function(j){ if(j&&j.error){sb.disabled=false;sb.textContent='Submit for approval';err.textContent=j.error;return;} mv.remove(); load(); }).catch(function(){sb.disabled=false;sb.textContent='Submit for approval';err.textContent='Could not submit.';}); };
       }
       draw();
     }
