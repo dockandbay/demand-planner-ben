@@ -14724,23 +14724,34 @@ function buildSavePayload(){
 // Persist edited SKU forecasts to Supabase (planner.forecast_outputs) via the rehost server.
 // Surgical: only the months actually edited (tracked in FC_DIRTY) are written; untouched
 // months on the row are never overwritten. Deleted cell -> 0 (matches the old behaviour).
-// Push a big change list to the server in throttled, sequential batches, so a large edit (e.g. a
-// smoothing sweep) doesn't fire thousands of writes in one request and trip DB pool cutoffs. Runs
-// in the background at its own pace (small gap between batches) and shows progress. Batches are
-// idempotent upserts, so a mid-way failure just leaves the rest to the next save.
-var SAVE_CHUNK=500, SAVE_GAP_MS=150;
+// Push a big change list to the server in SEQUENTIAL batches so a large edit (e.g. a smoothing
+// sweep) never fires thousands of writes at once and trips DB pool cutoffs. Each chunk is awaited
+// (durably acknowledged) BEFORE the next is sent — one write in flight at a time, no artificial
+// throttle. On failure a chunk is retried with exponential backoff (1s/2s/4s… cap 30s); after
+// SAVE_MAX_FAILS consecutive failures the save PAUSES (leaves the edit dirty for the next autosave
+// to retry) rather than hammering. Chunks are idempotent upserts, so a retry/re-send is safe.
+var SAVE_CHUNK=5000;                                   // rows per request; the server multi-row-inserts them
+var SAVE_BACKOFF=[1000,2000,4000,8000,16000,30000];   // ms between retries, grows then caps at 30s
+var SAVE_MAX_FAILS=3;                                  // consecutive failures → pause (circuit breaker)
 async function postChangesBatched(url,items,extra,label){
-  var saved=0, total=items.length;
-  for(var i=0;i<total;i+=SAVE_CHUNK){
+  var saved=0, total=items.length, fails=0, tries=0;
+  for(var i=0;i<total;){
     var slice=items.slice(i,i+SAVE_CHUNK);
-    var body=Object.assign({changes:slice},extra||{});
-    var resp=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-    var data=await resp.json();
-    if(!resp.ok||data.error)throw new Error((data&&data.error)||('HTTP '+resp.status));
-    saved+=(data.saved!=null?data.saved:slice.length);
-    var done=Math.min(i+SAVE_CHUNK,total);
-    if(total>SAVE_CHUNK){ try{ st((label||'Saving')+' '+done+'/'+total+'…'); }catch(e){} }
-    if(done<total)await new Promise(function(r){setTimeout(r,SAVE_GAP_MS);});   // throttle: let the pool breathe between batches
+    try{
+      var resp=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({changes:slice},extra||{}))});
+      var data=await resp.json();
+      if(!resp.ok||data.error)throw new Error((data&&data.error)||('HTTP '+resp.status));
+      saved+=(data.saved!=null?data.saved:slice.length);
+      i+=SAVE_CHUNK; fails=0; tries=0;                 // acknowledged — advance; next chunk goes immediately (serialised, not throttled)
+      if(total>SAVE_CHUNK){ try{ st((label||'Saving')+' '+Math.min(i,total)+'/'+total+'…'); }catch(e){} }
+    }catch(e){
+      fails++;
+      if(fails>=SAVE_MAX_FAILS){ try{ st('Save paused after '+fails+' failed attempts — will retry automatically.'); }catch(_){}
+        throw new Error('save paused after '+fails+' consecutive failures: '+((e&&e.message)||e)); }
+      var wait=SAVE_BACKOFF[Math.min(tries,SAVE_BACKOFF.length-1)]; tries++;
+      try{ st((label||'Saving')+' — connection issue, retrying in '+(wait/1000)+'s ('+fails+'/'+SAVE_MAX_FAILS+')…'); }catch(_){}
+      await new Promise(function(r){setTimeout(r,wait);});   // same slice retried (i not advanced)
+    }
   }
   return saved;
 }

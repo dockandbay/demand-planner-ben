@@ -1,3 +1,10 @@
+## v27.222 Big saves: serialise (not throttle) + retry/backoff + circuit breaker (Diviyaj feedback)
+- Per Diviyaj: **don't slow the writes, send them one at a time.** Dropped the artificial inter-batch delay — chunks are now sent **strictly sequentially** (each awaited/acknowledged before the next), which is what prevents pool starvation. Client chunk size raised to **5,000 rows** (server still multi-row-inserts them).
+- **Backoff on failure:** a failed chunk retries with exponential backoff **1s → 2s → 4s → … cap 30s** (same slice, idempotent upsert).
+- **Circuit breaker:** after **3 consecutive failures** the save **pauses** (leaves the edit dirty so the next autosave retries) instead of hammering the DB.
+- The sweep already routes through the same `FC_DIRTY` buffer + `saveForecasts` flusher as manual edits — no separate sweep-save path.
+- The `changes/bulk` silent-truncation-at-5,000 (reported full count as saved) was already fixed in v27.221 — verified: 6,500 rows now report `saved: 6500`.
+
 ## v27.221 Big demand-plan saves (smoothing sweeps) — batched + throttled, no more pool cutoffs
 - **Root cause:** a smoothing sweep marked thousands of cells dirty, then saved them as **one query per row inside a single long transaction** — holding one DB pool connection open for thousands of round-trips, long enough to hit connection timeouts / cutoffs.
 - **Server:** `save-sku-forecasts`, `save-forecasts`, and the record-of-change `changes/bulk` now write in **batched multi-row statements (~500–1000 rows/query)** with per-key de-dupe and a 120s statement guard. A 5,000-cell save drops from ~5,000 round-trips to ~10 queries — sub-second, connection released fast. (`changes/bulk` also no longer silently caps the audit trail at 5,000 rows.)
