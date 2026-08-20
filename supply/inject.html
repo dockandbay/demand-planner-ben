@@ -12543,8 +12543,13 @@
   var BOOT='__APP_VERSION__';                       // version this tab booted with (replaced at serve time)
   if(!/^v?\d/.test(BOOT))return;                     // only run when a real version was injected
   var BOOT_DATA=(typeof EXTRACT_TS!=='undefined'&&EXTRACT_TS&&EXTRACT_TS.slice(0,2)!=='__')?EXTRACT_TS:null;   // source-data timestamp at load
-  var pending=false, nagShown=false, nagMsg='HORIZON has an update ready.', lastAct=Date.now();
-  var STALE_MS=30*60*1000, IDLE_MS=90*1000;   // reload a session open >30 min; "idle" = no interaction 90s
+  // Two kinds of staleness, handled very differently (Ben):
+  //   CODE  — a newer deploy is live. The tab is running old JS/HTML; only a full reload can apply it. Rare (deploys).
+  //   DATA  — the ETL refreshed a source table (sales / products / inbound / Flexport). Frequent (n8n). This must
+  //           NOT interrupt someone reading or entering data with a surprise full-page reload. We apply it silently
+  //           only at a natural boundary: the NEXT navigation (hash change), or while the tab is backgrounded.
+  var pendingCode=false, pendingData=false, lastAct=Date.now();
+  var STALE_MS=30*60*1000, IDLE_MS=90*1000;   // hard cap on a very old session; "idle" = no interaction 90s
   ['mousemove','keydown','mousedown','scroll','touchstart'].forEach(function(ev){ window.addEventListener(ev,function(){ lastAct=Date.now(); },{passive:true,capture:true}); });
   // Reload, but FIRST flush any unsaved forecast edits to the DB. SMOOTH / cell edits sit in-memory until a 60s
   // debounced autosave; a reload inside that window would discard them (lost-smooth bug). saveForecasts() is a
@@ -12560,27 +12565,22 @@
       }
     }catch(e){}
     location.reload(); }
-  function nag(){ if(nagShown||!document.body)return; nagShown=true;
-    var d=document.createElement('div'); d.id='hz-update-nag';
-    d.style.cssText='position:fixed;top:0;left:0;right:0;z-index:2147483000;background:#fde047;color:#111827;font:700 15px system-ui;padding:11px 18px;display:flex;gap:16px;align-items:center;justify-content:center;box-shadow:0 3px 14px rgba(0,0,0,.28);border-bottom:2px solid #eab308';
-    d.innerHTML='<span style="font-size:16px">🔄 '+nagMsg+'</span><button id="hz-update-go" style="background:#111827;color:#fde047;border:0;border-radius:6px;padding:8px 18px;font-weight:700;font-size:14px;cursor:pointer">Refresh now</button>';
-    document.body.appendChild(d); document.getElementById('hz-update-go').onclick=function(){ safeReload(); }; }
-  function apply(){ if(!pending)return;
-    if(document.hidden){ safeReload(); return; }              // backgrounded → reload silently (saves first)
-    if(Date.now()-lastAct>IDLE_MS){ safeReload(); return; }   // visible but idle → reload silently (saves first)
-    /* actively in use → do NOT interrupt: no banner, no forced full reload (Ben). Stays `pending`; the 30s retry
-       loop + focus/visibility handlers reload SILENTLY at the next idle/backgrounded moment. */ }
+  function apply(){ if(!pendingCode && !pendingData)return;
+    if(document.hidden){ safeReload(); return; }                             // backgrounded → reload silently (invisible; saves first). Applies code OR data.
+    if(pendingCode && Date.now()-lastAct>IDLE_MS){ safeReload(); return; }   // NEW CODE + visible but idle → reload (new JS genuinely needs it)
+    /* DATA-only while the tab is visible: never interrupt — no banner, no reload. The user is reading/entering data.
+       It's applied on the next hashchange (navigation) below, or once the tab is backgrounded. — Ben */ }
   function check(){ fetch('/api/version',{cache:'no-store',credentials:'same-origin'}).then(function(r){return r.ok?r.json():null;}).then(function(j){
     if(!j)return;
-    var newCode=(j.version&&j.version!==BOOT);
-    var newData=(BOOT_DATA&&j.data&&j.data!==BOOT_DATA);   // ETL/source data changed since this tab loaded
-    if(newCode||newData){ nagMsg=newCode?'A new version of HORIZON is ready.':'Newer data is available.'; pending=true; apply(); } }).catch(function(){}); }
+    if(j.version&&j.version!==BOOT)pendingCode=true;                 // newer deploy
+    if(BOOT_DATA&&j.data&&j.data!==BOOT_DATA)pendingData=true;       // ETL/source data changed since this tab loaded
+    if(pendingCode||pendingData)apply(); }).catch(function(){}); }
   document.addEventListener('visibilitychange',function(){ if(document.hidden){ apply(); } else { lastAct=Date.now(); check(); } });
   window.addEventListener('focus',function(){ lastAct=Date.now(); check(); });
-  window.addEventListener('hashchange',function(){ if(pending)safeReload(); });   // Ben: apply a pending update silently on the NEXT page navigation (a natural, non-disruptive moment)
+  window.addEventListener('hashchange',function(){ if(pendingCode||pendingData)safeReload(); });   // apply a pending update on the NEXT page navigation — a natural, non-disruptive moment (Ben)
   setInterval(check,5*60*1000);                        // poll for new version / data every 5 minutes
-  setInterval(function(){ if(pending)apply(); },30*1000);   // once stale/updated, reload at the next safe moment
+  setInterval(function(){ if(pendingCode||pendingData)apply(); },30*1000);   // retry at safe moments (won't reload a visible page for DATA — only when backgrounded or on navigation)
   setTimeout(check,15000);                             // and shortly after load
-  setTimeout(function(){ if(!pending){ pending=true; nagMsg='This session has been open a while — refreshing to stay current.'; } apply(); }, STALE_MS);   // hard 30-min staleness cap
+  setTimeout(function(){ pendingCode=true; apply(); }, STALE_MS);   // hard 30-min staleness cap → treat as code-level (reload only when idle / backgrounded / on next navigation)
 })();
 </script>
