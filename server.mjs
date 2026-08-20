@@ -2456,9 +2456,8 @@ app.get('/api/supply/price-list', async (_req, res) => {
     const cpRow = (await pool.query(`SELECT max(regexp_replace(prod_no,'[^0-9]','','g')::int) mx FROM planner.purchase_orders
       WHERE lower(coalesce(status,'')) LIKE '%production%' AND regexp_replace(coalesce(prod_no,''),'[^0-9]','','g')<>''`)).rows[0];
     const currentProduction = (cpRow && cpRow.mx) ? cpRow.mx : 0;
-    const prods = (await pool.query(`SELECT DISTINCT regexp_replace(prod_no,'[^0-9]','','g') n FROM planner.purchase_orders
-      WHERE regexp_replace(coalesce(prod_no,''),'[^0-9]','','g')<>''`)).rows
-      .map(r => parseInt(r.n, 10)).filter(n => !isNaN(n) && n >= currentProduction).sort((a, b) => b - a);
+    const prods = (await pool.query(`SELECT prod_no FROM planner.prod_numbers WHERE coalesce(status,'')='ACTIVE'`)).rows
+      .map(r => parseInt(String(r.prod_no).replace(/[^0-9]/g, ''), 10)).filter(n => !isNaN(n) && n >= currentProduction).sort((a, b) => b - a);   // future productions from the productions table
     const pending = entries.filter(e => e.status === 'pending').length;
     res.json({ entries, suppliers, priceTypes, manualSkus, excluded, productions: [...new Set(prods)], currentProduction, pending });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -13756,8 +13755,8 @@ app.get('/api/portal/price-list', portalAuth, async (req, res) => {
     const cpRow = (await pool.query(`SELECT max(regexp_replace(prod_no,'[^0-9]','','g')::int) mx FROM planner.purchase_orders
       WHERE lower(coalesce(status,'')) LIKE '%production%' AND regexp_replace(coalesce(prod_no,''),'[^0-9]','','g')<>''`)).rows[0];
     const currentProduction = (cpRow && cpRow.mx) ? cpRow.mx : 0;
-    const prods = (await pool.query(`SELECT DISTINCT regexp_replace(prod_no,'[^0-9]','','g') n FROM planner.purchase_orders WHERE regexp_replace(coalesce(prod_no,''),'[^0-9]','','g')<>''`)).rows
-      .map((r) => parseInt(r.n, 10)).filter((n) => !isNaN(n) && n > currentProduction).sort((a, b) => b - a);
+    const prods = (await pool.query(`SELECT prod_no FROM planner.prod_numbers WHERE coalesce(status,'')='ACTIVE'`)).rows
+      .map((r) => parseInt(String(r.prod_no).replace(/[^0-9]/g, ''), 10)).filter((n) => !isNaN(n) && n > currentProduction).sort((a, b) => b - a);   // ALL future productions from the productions table (Ben)
     res.json({ entries, suppliers: sups, priceTypes, manualSkus, productions: [...new Set(prods)], currentProduction });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });

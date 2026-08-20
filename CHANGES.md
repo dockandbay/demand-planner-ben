@@ -1,3 +1,6 @@
+## v27.211 Price Lists: production picker uses the productions table (all future)
+- The "from production" pickers (supplier portal propose form + admin editor/"prices as of") now list **all future productions from `planner.prod_numbers`** (ACTIVE), not just the sparse set that already exists on POs. Portal offers > current in-production; admin ≥ current.
+
 ## v27.210 Price Lists: portal grid mirrors admin + supplier notes + change log
 - **Supplier portal Price List now looks like the admin grid**: price-type rows (expand ▸ to SKUs) × the supplier's own price column, with Size/Colour, tier ranges, inherited-price (↳) SKUs, and red **⚑ AWAITING APPROVAL** cells. Clicking a price opens a Propose-change form.
 - **Supplier can add a multi-line note** with a proposed change; it shows in the admin approval box.
