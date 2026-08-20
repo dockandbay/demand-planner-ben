@@ -2414,6 +2414,70 @@ app.get('/api/supply/po-suppliers', async (_req, res) => {
   try { res.json((await pool.query(`SELECT po, coalesce(supplier_name,'') supplier_name FROM planner.purchase_orders`)).rows); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+
+// ── PRICE LISTS (SUPPLY ▸ Purchase Orders ▸ Price Lists) ─────────────────────────────────────────────
+// Cost price per product × supplier, grouped by products.price_type (type-level base + per-SKU exceptions),
+// with quantity tiers and "from production N" versioning. Supplier-portal submissions arrive as status='pending'.
+app.get('/api/supply/price-list', async (_req, res) => {
+  try {
+    const entries = (await pool.query(`
+      SELECT e.id, e.supplier, e.scope, coalesce(e.price_type,'') price_type, coalesce(e.sku,'') sku,
+             e.currency, e.effective_from_production, e.status, e.source, coalesce(e.note,'') note,
+             coalesce(e.submitted_by,'') submitted_by, to_char(e.submitted_at,'YYYY-MM-DD HH24:MI') submitted_at,
+             coalesce(e.approved_by,'') approved_by,
+             coalesce((SELECT json_agg(json_build_object('min_qty',t.min_qty,'unit_cost',t.unit_cost) ORDER BY t.min_qty)
+                       FROM planner.price_list_tiers t WHERE t.entry_id=e.id),'[]') tiers
+      FROM planner.price_list_entries e
+      WHERE e.status IN ('active','pending')
+      ORDER BY e.price_type, e.scope DESC, e.sku, e.supplier`)).rows;
+    // supplier columns = active suppliers (so admin can add a price for any), currency from suppliers
+    const suppliers = (await pool.query(`SELECT name, coalesce(default_currency,'USD') currency FROM planner.suppliers WHERE coalesce(active,true) ORDER BY name`)).rows;
+    // price_type → its SKUs (for grouping + the "add exception" picker)
+    const pt = (await pool.query(`SELECT price_type, sku, coalesce(product_name_final,product_name,'') name,
+             coalesce(supplier_multiple_all,'') suppliers
+      FROM planner.products WHERE coalesce(sku,'')<>'' AND coalesce(price_type,'')<>'' ORDER BY price_type, sku`)).rows;
+    const typeMap = {}; pt.forEach(r => { (typeMap[r.price_type] = typeMap[r.price_type] || []).push({ sku: r.sku, name: r.name, suppliers: r.suppliers }); });
+    const priceTypes = Object.keys(typeMap).sort().map(k => ({ price_type: k, skus: typeMap[k] }));
+    // distinct production numbers (for the "from production" selector) — integers parsed from PO prod_no
+    const prods = (await pool.query(`SELECT DISTINCT (regexp_replace(prod_no,'[^0-9]','','g')) n FROM planner.purchase_orders
+      WHERE coalesce(prod_no,'')<>'' AND regexp_replace(prod_no,'[^0-9]','','g')<>''`)).rows
+      .map(r => parseInt(r.n, 10)).filter(n => !isNaN(n)).sort((a, b) => b - a);
+    const pending = entries.filter(e => e.status === 'pending').length;
+    res.json({ entries, suppliers, priceTypes, productions: [...new Set(prods)], pending });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Admin upsert of a price entry + its tiers (id present = update, else insert). Always active/admin-sourced.
+app.post('/api/supply/price-list', async (req, res) => {
+  const b = req.body || {}, me = (await permsFor(req)).email || '';
+  const scope = (b.scope === 'sku') ? 'sku' : 'type';
+  const tiers = Array.isArray(b.tiers) ? b.tiers.map(t => ({ min_qty: Math.max(1, parseInt(t.min_qty, 10) || 1), unit_cost: Number(t.unit_cost) })).filter(t => isFinite(t.unit_cost)) : [];
+  if (!b.supplier || (scope === 'type' && !b.price_type) || (scope === 'sku' && !b.sku)) return res.status(400).json({ error: 'supplier + price_type (type) or sku (sku) required' });
+  if (!tiers.length) return res.status(400).json({ error: 'at least one tier (min_qty, unit_cost) required' });
+  const efp = (b.effective_from_production === '' || b.effective_from_production == null) ? null : (parseInt(b.effective_from_production, 10) || null);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    let id = b.id ? parseInt(b.id, 10) : null;
+    if (id) {
+      await client.query(`UPDATE planner.price_list_entries SET supplier=$2, scope=$3, price_type=$4, sku=$5, currency=$6,
+        effective_from_production=$7, note=$8, status='active', source='admin', approved_by=$9, approved_at=now(), updated_at=now() WHERE id=$1`,
+        [id, b.supplier, scope, scope === 'type' ? b.price_type : (b.price_type || null), scope === 'sku' ? b.sku : null, b.currency || 'USD', efp, b.note || null, me]);
+    } else {
+      id = (await client.query(`INSERT INTO planner.price_list_entries (supplier,scope,price_type,sku,currency,effective_from_production,note,status,source,approved_by,approved_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,'active','admin',$8,now()) RETURNING id`,
+        [b.supplier, scope, scope === 'type' ? b.price_type : (b.price_type || null), scope === 'sku' ? b.sku : null, b.currency || 'USD', efp, b.note || null, me])).rows[0].id;
+    }
+    await client.query('DELETE FROM planner.price_list_tiers WHERE entry_id=$1', [id]);
+    for (const t of tiers) await client.query('INSERT INTO planner.price_list_tiers (entry_id,min_qty,unit_cost) VALUES ($1,$2,$3) ON CONFLICT (entry_id,min_qty) DO UPDATE SET unit_cost=excluded.unit_cost', [id, t.min_qty, t.unit_cost]);
+    await client.query('COMMIT');
+    res.json({ ok: true, id });
+  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
+app.post('/api/supply/price-list/:id/delete', async (req, res) => {
+  try { await pool.query('DELETE FROM planner.price_list_entries WHERE id=$1', [parseInt(req.params.id, 10)]); res.json({ ok: true }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // Crossdock rollup for one shipment: every crossdock SKU across the POs on the shipment, with qty + source PO/supplier/client.
 app.get('/api/supply/shipment-crossdock/:ref', async (req, res) => {
   try { res.json(await qp(`
