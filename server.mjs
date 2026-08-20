@@ -4213,6 +4213,7 @@ app.get('/api/supply/:section', async (req, res, next) => {
             SELECT po.po, coalesce(po.status,'') status, coalesce(po.supplier_name,'') supplier,
               upper(coalesce(nullif(po.country_code,''), b.country_code,'')) market,
               coalesce(po.production_status,'') production_status,
+              coalesce(po.confirmed_in_3pl,false) confirmed_3pl,
               (CURRENT_DATE - po.production_confirmed_at::date)::int prod_conf_age,
               coalesce(po.shipment_ref,'') shipment_ref,
               po.start_production prod_start,
@@ -4237,7 +4238,7 @@ app.get('/api/supply/:section', async (req, res, next) => {
               WHERE f.flex_id=po.flexport_reference OR f.shipment_name=po.po OR f.shipment_name=po.shipment_ref
               ORDER BY (f.flex_id=po.flexport_reference) DESC NULLS LAST LIMIT 1) fxs ON true
             WHERE coalesce(po.status,'') NOT ILIKE '%complete%')
-          SELECT po, status, supplier, market, production_status, prod_conf_age, shipment_ref,
+          SELECT po, status, supplier, market, production_status, confirmed_3pl, prod_conf_age, shipment_ref,
             to_char(prod_start,'YYYY-MM-DD') prod_start,
             to_char(prod_end,'YYYY-MM-DD') prod_end,
             to_char(ship_date,'YYYY-MM-DD') ship_date,
@@ -4292,6 +4293,7 @@ app.get('/api/supply/:section', async (req, res, next) => {
           if (overdue) overdue.days = -dleft(overdue.date);
           return { po: r.po, supplier: r.supplier, market: r.market, units: r.units, val: r.val, mode: r.mode || 'sea',
             shipment_ref: r.shipment_ref, flex: r.flex || '', production_status: r.production_status, prod_conf_age: r.prod_conf_age,
+            confirmed_3pl: !!r.confirmed_3pl,
             stage: st, next_date: nextDate, next_days: d, health, overdue,
             prod_start: r.prod_start, prod_end: r.prod_end, ship_date: r.ship_date, arrival: r.arrival, arrival_known: r.arrival_known };
         });
@@ -9832,6 +9834,7 @@ app.post('/api/supply/po/:po', async (req, res) => {
     status: 'text', ship_type: 'text', deposit_ref: 'text', shipment_ref: 'text', prod_no: 'text',
     starred: 'boolean',   // ⭐ Focus / favourite toggle (migration 082)
     preship_not_required: 'boolean',   // "not required" tick suppresses the pre-shipment-docs action (migration 107)
+    confirmed_in_3pl: 'boolean',   // PO ▸ Shipments tick — this PO is entered in the 3PL's system (migration 236); shows ✅3pl on the pipeline card
     batch_id: 'text', branch: 'text', erp_po: 'text', notes: 'text', container_size: 'text',
     country_code: 'text', client: 'text', client_requirements: 'text', sales_order_ref: 'text', client_deadline_date: 'date', asn_numbers: 'text',
     client_po_ref: 'text', dispatch_order_ref: 'text', final_delivery_address: 'text', crossdock_skus: 'text', branch_delivery_notes: 'text',
@@ -12802,6 +12805,7 @@ const ORDER_PLAN_SELECT = `SELECT l.po, l.sku, l.qty, el.qty erp_qty,
           pol.supplier_risk_approved, pol.discontinue_approved, pol.country_risk_approved,
           coalesce(p.prod_no,'') prod_no, coalesce(p.status,'') status, coalesce(p.starred,false) starred,
           coalesce(p.preship_not_required,false) preship_not_required,
+          coalesce(p.confirmed_in_3pl,false) confirmed_in_3pl,
           (SELECT string_agg(DISTINCT category,',') FROM planner.portal_attachments a WHERE a.po=p.po) doc_cats,
           coalesce(p.batch_id,'') batch_id,
           coalesce(p.supplier_name,'') supplier_name, coalesce(p.shipment_ref,'') shipment_ref,

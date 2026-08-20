@@ -1,3 +1,7 @@
+## v27.174 PO ▸ Shipments: “Confirmed in 3PL system” tickbox + Pipeline ✅/❓ badge
+- New tickbox on PO ▸ Shipments: **Confirmed in 3PL system** (per-PO flag that the PO has been entered into the 3PL’s own system). Migration **236** (`purchase_orders.confirmed_in_3pl boolean`).
+- On the **Pipeline** report each PO card shows a top-right badge: **✅ 3pl** when confirmed (tooltip: “Confirmed on PO ▸ Shipments that this PO is in the 3PL system”) or **❓ 3pl** when not (tooltip prompts ticking it on PO ▸ Shipments).
+
 ## v27.173 Pipeline report: click a PO opens the popout drawer (not full navigation)
 - Clicking a PO card in the Pipeline report now opens its **details drawer** (openPODrawer, dates tab) instead of navigating away to Purchase Orders.
 
