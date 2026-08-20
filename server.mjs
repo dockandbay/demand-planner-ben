@@ -13705,7 +13705,55 @@ app.post('/api/portal/logout', portalAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/api/portal/me', portalAuth, (req, res) => res.json({ email: req.portal.email, suppliers: req.portal.suppliers }));
+app.get('/api/portal/me', portalAuth, (req, res) => res.json({ email: req.portal.email, suppliers: req.portal.suppliers, price_list_enabled: IS_SANDBOX }));
+// ── Supplier portal ▸ Price List (Phase 3 — GATED: only wired in when IS_SANDBOX until Ben confirms) ──
+// The supplier sees their OWN active prices + any changes they've submitted (pending), and can propose changes
+// (new tiers / from a future production) which land as status='pending' for admin approval.
+app.get('/api/portal/price-list', portalAuth, async (req, res) => {
+  if (!IS_SANDBOX) return res.status(404).json({ error: 'not enabled' });
+  const sups = req.portal.suppliers || [];
+  try {
+    if (!sups.length) return res.json({ entries: [], suppliers: [], productions: [], currentProduction: 0 });
+    const entries = (await pool.query(`
+      SELECT e.id, e.supplier, e.scope, coalesce(e.price_type,'') price_type, coalesce(e.sku,'') sku, e.currency,
+             e.effective_from_production, e.status, coalesce(e.note,'') note,
+             coalesce((SELECT json_agg(json_build_object('min_qty',t.min_qty,'unit_cost',t.unit_cost) ORDER BY t.min_qty) FROM planner.price_list_tiers t WHERE t.entry_id=e.id),'[]') tiers
+      FROM planner.price_list_entries e WHERE e.supplier = ANY($1) AND e.status IN ('active','pending')
+      ORDER BY e.price_type, e.scope DESC, e.sku`, [sups])).rows;
+    const cpRow = (await pool.query(`SELECT max(regexp_replace(prod_no,'[^0-9]','','g')::int) mx FROM planner.purchase_orders
+      WHERE lower(coalesce(status,'')) LIKE '%production%' AND regexp_replace(coalesce(prod_no,''),'[^0-9]','','g')<>''`)).rows[0];
+    const currentProduction = (cpRow && cpRow.mx) ? cpRow.mx : 0;
+    const prods = (await pool.query(`SELECT DISTINCT regexp_replace(prod_no,'[^0-9]','','g') n FROM planner.purchase_orders WHERE regexp_replace(coalesce(prod_no,''),'[^0-9]','','g')<>''`)).rows
+      .map((r) => parseInt(r.n, 10)).filter((n) => !isNaN(n) && n > currentProduction).sort((a, b) => b - a);
+    res.json({ entries, suppliers: sups, productions: [...new Set(prods)], currentProduction });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/portal/price-list/submit', portalAuth, async (req, res) => {
+  if (!IS_SANDBOX) return res.status(404).json({ error: 'not enabled' });
+  const b = req.body || {}, sups = req.portal.suppliers || [];
+  if (!sups.includes(b.supplier)) return res.status(403).json({ error: 'not your supplier' });
+  const scope = (b.scope === 'sku') ? 'sku' : 'type';
+  if ((scope === 'type' && !b.price_type) || (scope === 'sku' && !b.sku)) return res.status(400).json({ error: 'price_type or sku required' });
+  let tiers = Array.isArray(b.tiers) ? b.tiers.map((t) => ({ min_qty: Math.max(1, parseInt(t.min_qty, 10) || 1), unit_cost: Number(t.unit_cost) })).filter((t) => isFinite(t.unit_cost)) : [];
+  if (!tiers.length) return res.status(400).json({ error: 'at least one tier price required' });
+  tiers.sort((a, b2) => a.min_qty - b2.min_qty);
+  for (let i = 1; i < tiers.length; i++) { if (tiers[i].min_qty === tiers[i - 1].min_qty) return res.status(400).json({ error: 'duplicate min quantity' }); if (tiers[i].unit_cost > tiers[i - 1].unit_cost + 1e-9) return res.status(400).json({ error: 'price must decrease as quantity increases' }); }
+  const efp = (b.effective_from_production === '' || b.effective_from_production == null) ? null : (parseInt(b.effective_from_production, 10) || null);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // drop any earlier still-pending submission for the same key+efp (latest supplier proposal wins)
+    await client.query(`DELETE FROM planner.price_list_entries WHERE status='pending' AND source='supplier' AND supplier=$1 AND scope=$2
+      AND coalesce(price_type,'')=coalesce($3,'') AND coalesce(sku,'')=coalesce($4,'') AND effective_from_production IS NOT DISTINCT FROM $5`,
+      [b.supplier, scope, scope === 'type' ? b.price_type : (b.price_type || null), scope === 'sku' ? b.sku : null, efp]);
+    const id = (await client.query(`INSERT INTO planner.price_list_entries (supplier,scope,price_type,sku,currency,effective_from_production,note,status,source,submitted_by,submitted_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,'pending','supplier',$8,now()) RETURNING id`,
+      [b.supplier, scope, scope === 'type' ? b.price_type : (b.price_type || null), scope === 'sku' ? b.sku : null, b.currency || 'USD', efp, b.note || null, req.portal.email || ''])).rows[0].id;
+    for (const t of tiers) await client.query('INSERT INTO planner.price_list_tiers (entry_id,min_qty,unit_cost) VALUES ($1,$2,$3)', [id, t.min_qty, t.unit_cost]);
+    await client.query('COMMIT'); res.json({ ok: true, id });
+  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
 // Supplier portal ▸ Quality Control (migration 160): the supplier's own uploaded QC docs, scoped to their supplier(s).
 app.get('/api/portal/quality-docs', portalAuth, async (req, res) => {
   try {

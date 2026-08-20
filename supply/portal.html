@@ -84,8 +84,10 @@
     var realSup=(me.suppliers||[]).join(', ')||'Supplier';
     var sup=ANON_NAME||realSup;
     root.innerHTML='<header class="pv-top"><h1>Dock &amp; Bay</h1><span class="sup">'+esc(sup)+'</span><span class="sp"></span>'
+      +(me.price_list_enabled?'<button class="pv-btn ghost" id="pv-pl-btn" style="margin-right:10px">💲 Price List</button>':'')
       +'<span style="font-size:10px;opacity:.5;margin-right:10px" title="app version — tell Ben this if something looks stale">__APP_VERSION__</span>'
       +'</header><div id="pv-wrap"><div id="pv"></div></div>';   // Sign out removed — sessions expire on their own
+    var _plb=document.getElementById('pv-pl-btn'); if(_plb)_plb.onclick=function(){ ppPriceList(me); };
     var s=document.createElement('script'); s.src='/portal-view.js?v='+Date.now();   // cache-bust: always fetch the latest portal-view.js (tunnels/proxies were serving stale CSS + JS)
     s.onload=function(){
       window.DBPortalView.mount({
@@ -97,6 +99,53 @@
     };
     s.onerror=function(){ document.getElementById('pv').innerHTML='<div class="pv-empty">Could not load the portal view.</div>'; };
     document.body.appendChild(s);
+  }
+
+  // ── Supplier Price List (gated: only shown when the server enables it) ──
+  function ppPriceList(me){ var ex=document.getElementById('pv-pl-ov'); if(ex)ex.remove();
+    var _prods=[];
+    function CCY(c){ return ({USD:'$',GBP:'£',EUR:'€',AUD:'A$',CAD:'C$'})[String(c||'').toUpperCase()]||''; }
+    function tierStr(e){ if(!e.tiers||!e.tiers.length)return '—'; var sym=CCY(e.currency); return e.tiers.map(function(t){return t.min_qty+'+ : '+sym+(+t.unit_cost).toFixed(2);}).join('   ·   '); }
+    var ov=document.createElement('div'); ov.id='pv-pl-ov'; ov.style.cssText='position:fixed;inset:0;z-index:9000;background:#fff;overflow:auto';
+    ov.innerHTML='<header class="pv-top"><h1>Dock &amp; Bay</h1><span class="sup">Price List</span><span class="sp"></span><button class="pv-btn ghost" id="pl-back">← Back</button></header><div id="pv-wrap"><div id="pl-body"><div class="pv-empty">Loading…</div></div></div>';
+    document.body.appendChild(ov);
+    document.getElementById('pl-back').onclick=function(){ ov.remove(); };
+    function load(){ get('/api/portal/price-list').then(render).catch(function(e){ document.getElementById('pl-body').innerHTML='<div class="pv-empty">Could not load price list.</div>'; }); }
+    function render(d){ var b=document.getElementById('pl-body'); var ents=d.entries||[]; _prods=d.productions||[];
+      var active=ents.filter(function(e){return e.status==='active';}), pending=ents.filter(function(e){return e.status==='pending';});
+      var html='<div style="max-width:840px"><p style="color:#64748b">Your current prices. Propose a change and we’ll review and approve it. Larger quantities must be a lower unit cost.</p>';
+      if(pending.length){ html+='<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:8px;padding:10px 12px;margin-bottom:14px"><b>⏳ Awaiting approval</b>'+pending.map(function(e){return '<div style="font-size:12px;margin-top:4px">'+esc(e.scope==='type'?e.price_type:e.sku)+(e.effective_from_production?(' <span style="color:#92400e">from prod '+e.effective_from_production+'</span>'):'')+' → '+tierStr(e)+'</div>';}).join('')+'</div>'; }
+      if(!active.length)html+='<div class="pv-empty">No prices on file yet.</div>';
+      active.forEach(function(e,i){ html+='<div style="border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:8px">'
+        +'<div style="font-weight:700">'+esc(e.scope==='type'?('Price type: '+e.price_type):('SKU: '+e.sku))+' <span style="color:#94a3b8;font-weight:400;font-size:12px">('+esc(e.currency)+')</span></div>'
+        +'<div style="color:#334155;font-size:13px;margin-top:3px">Current: '+tierStr(e)+'</div>'
+        +'<button class="pv-btn pl-prop" data-i="'+i+'" style="margin-top:8px;padding:5px 12px;font-size:12px">Propose change</button>'
+        +'<div class="pl-form" data-i="'+i+'" style="display:none;margin-top:8px"></div></div>'; });
+      html+='</div>'; b.innerHTML=html;
+      b.querySelectorAll('.pl-prop').forEach(function(btn){ btn.onclick=function(){ openForm(active[+btn.dataset.i], b.querySelector('.pl-form[data-i="'+btn.dataset.i+'"]')); }; });
+    }
+    function openForm(e, host){ if(host.style.display!=='none'){ host.style.display='none'; host.innerHTML=''; return; } host.style.display='';
+      var sym=CCY(e.currency), tiers=(e.tiers&&e.tiers.length?e.tiers.map(function(t){return {min_qty:t.min_qty,unit_cost:t.unit_cost};}):[{min_qty:1,unit_cost:''}]);
+      var prodOpts='<option value="">Now (current price)</option>'+_prods.map(function(p){return '<option value="'+p+'">from production '+p+'</option>';}).join('');
+      function readT(){ tiers=[]; host.querySelectorAll('.pl-tr').forEach(function(r){ tiers.push({min_qty:r.querySelector('.pl-mq').value,unit_cost:r.querySelector('.pl-uc').value}); }); if(!tiers.length)tiers=[{min_qty:1,unit_cost:''}]; }
+      function draw(){ host.innerHTML='<div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px">'
+        +'<div style="font-size:12px;color:#475569;margin-bottom:7px">Applies from: <select class="pl-efp" style="padding:4px 7px;border:1px solid #cbd5e1;border-radius:5px">'+prodOpts+'</select></div>'
+        +'<div class="pl-tiers">'+tiers.map(function(t,ti){return '<div class="pl-tr" style="display:flex;gap:6px;align-items:center;margin-bottom:5px"><span style="color:#64748b;width:30px">min</span><input class="pl-mq" type="number" min="1" value="'+esc(t.min_qty)+'" style="width:82px;padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px"><span style="color:#64748b">qty → '+sym+'</span><input class="pl-uc" type="number" step="0.0001" value="'+esc(t.unit_cost)+'" style="width:100px;padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px">'+(tiers.length>1?'<button class="pl-trx" data-ti="'+ti+'" style="border:none;background:none;color:#b91c1c;cursor:pointer;font-size:15px">✕</button>':'')+'</div>';}).join('')+'</div>'
+        +'<button class="pl-addtier" style="font-size:12px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;cursor:pointer">+ tier</button>'
+        +'<div class="pl-err" style="color:#b91c1c;font-size:12px;font-weight:600;min-height:14px;margin-top:6px"></div>'
+        +'<div style="text-align:right"><button class="pl-submit pv-btn" style="padding:6px 14px">Submit for approval</button></div></div>';
+        host.querySelectorAll('.pl-trx').forEach(function(x){x.onclick=function(){readT();tiers.splice(+x.dataset.ti,1);if(!tiers.length)tiers=[{min_qty:1,unit_cost:''}];draw();};});
+        host.querySelector('.pl-addtier').onclick=function(){readT();tiers.push({min_qty:'',unit_cost:''});draw();};
+        host.querySelector('.pl-submit').onclick=function(){ readT(); var err=host.querySelector('.pl-err');
+          var ts=tiers.map(function(t){return {min_qty:parseInt(t.min_qty,10)||1,unit_cost:Number(t.unit_cost)};}).filter(function(t){return isFinite(t.unit_cost)&&String(t.unit_cost)!=='';});
+          if(!ts.length){err.textContent='Enter at least one price.';return;} ts.sort(function(a,b){return a.min_qty-b.min_qty;});
+          for(var i=1;i<ts.length;i++){ if(ts[i].min_qty===ts[i-1].min_qty){err.textContent='Two tiers have the same min quantity.';return;} if(ts[i].unit_cost>ts[i-1].unit_cost+1e-9){err.textContent='Larger quantity must be a lower unit cost.';return;} }
+          var sb=host.querySelector('.pl-submit'); sb.disabled=true; sb.textContent='Submitting…';
+          api('/api/portal/price-list/submit',{supplier:e.supplier,scope:e.scope,price_type:e.price_type,sku:e.sku,currency:e.currency,effective_from_production:host.querySelector('.pl-efp').value,tiers:ts}).then(function(j){ if(j&&j.error){sb.disabled=false;sb.textContent='Submit for approval';err.textContent=j.error;return;} load(); }).catch(function(){sb.disabled=false;sb.textContent='Submit for approval';err.textContent='Could not submit.';}); };
+      }
+      draw();
+    }
+    load();
   }
 
   get('/api/portal/me').then(showPortal).catch(function(){ showLogin(); });

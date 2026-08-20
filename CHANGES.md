@@ -1,3 +1,8 @@
+## v27.208 Price Lists — Phase 3: supplier portal (GATED, sandbox only)
+- New **"💲 Price List"** button in the supplier portal (shown ONLY when `IS_SANDBOX` — hidden on live until Ben confirms). Opens a panel where the supplier sees **their own** current prices (per price type / SKU, with tiers) and any **⏳ awaiting-approval** submissions.
+- Supplier can **Propose change**: edit tiers + optionally choose a **future production** it applies from, then **Submit for approval** → creates a `pending` (source='supplier') entry that shows up in the admin **⚑ APPROVAL REQUIRED** flow (grid badge, sub-tab counter, review panel). Client + server validate tiers (bigger qty → lower unit cost). A supplier's newer submission replaces their earlier still-pending one for the same key.
+- Endpoints `GET /api/portal/price-list` + `POST /api/portal/price-list/submit` (both portal-auth + sandbox-gated, supplier-scoped). `/api/portal/me` now returns `price_list_enabled`.
+
 ## v27.207 Price Lists: pending-approval counter on the Price Lists menu tab
 - The **Price Lists** sub-tab (SUPPLY ▸ Purchase Orders) now shows a **red badge** with the number of **unapproved pending** price changes, visible whenever you're in Purchase Orders. Cheap `/api/supply/price-list/pending-count` endpoint; refreshes after approve/reject.
 
