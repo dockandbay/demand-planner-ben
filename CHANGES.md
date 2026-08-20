@@ -1,3 +1,6 @@
+## v27.175 Pipeline: show the 3pl-confirmed badge only on In transit + Arriving ≤2wk
+- The ✅/❓ 3pl badge now appears only on cards in the **In transit** and **Arriving ≤2wk** stages (where 3PL confirmation matters), not on every card.
+
 ## v27.174 PO ▸ Shipments: “Confirmed in 3PL system” tickbox + Pipeline ✅/❓ badge
 - New tickbox on PO ▸ Shipments: **Confirmed in 3PL system** (per-PO flag that the PO has been entered into the 3PL’s own system). Migration **236** (`purchase_orders.confirmed_in_3pl boolean`).
 - On the **Pipeline** report each PO card shows a top-right badge: **✅ 3pl** when confirmed (tooltip: “Confirmed on PO ▸ Shipments that this PO is in the 3PL system”) or **❓ 3pl** when not (tooltip prompts ticking it on PO ▸ Shipments).

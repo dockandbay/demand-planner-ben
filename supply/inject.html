@@ -1435,10 +1435,11 @@
         var ps=f.filter(function(p){return p.stage===key;}).sort(function(a,b){ var x=a.next_date||'9999',y=b.next_date||'9999'; return x<y?-1:x>y?1:0; });
         var u=ps.reduce(function(a,p){return a+(p.units||0);},0), v=ps.reduce(function(a,p){return a+(p.val||0);},0);
         var cards=ps.map(function(p){ var hc=PIPE_HC[p.health]||'#9ca3af';
-          var tpl3=p.confirmed_3pl
+          var showTpl3=(p.stage==='in_transit'||p.stage==='arriving');   // 3PL-confirmed badge only relevant once shipping/arriving (Ben)
+          var tpl3=!showTpl3 ? '' : (p.confirmed_3pl
             ? '<span style="position:absolute;top:3px;right:5px;font-size:9.5px;line-height:1" title="Confirmed on PO ▸ Shipments that this PO is in the 3PL system">✅3pl</span>'
-            : '<span style="position:absolute;top:3px;right:5px;font-size:9.5px;line-height:1;opacity:.75" title="Not yet confirmed in the 3PL system — tick it on PO ▸ Shipments">❓3pl</span>';
-          return '<div class="pipe-card" data-po="'+esc(p.po)+'" style="position:relative;border-left:3px solid '+hc+';background:#fff;border:1px solid #e8e8e8;border-left:3px solid '+hc+';border-radius:5px;padding:6px 34px 6px 8px;margin-bottom:6px;cursor:pointer">'+tpl3
+            : '<span style="position:absolute;top:3px;right:5px;font-size:9.5px;line-height:1;opacity:.75" title="Not yet confirmed in the 3PL system — tick it on PO ▸ Shipments">❓3pl</span>');
+          return '<div class="pipe-card" data-po="'+esc(p.po)+'" style="position:relative;border-left:3px solid '+hc+';background:#fff;border:1px solid #e8e8e8;border-left:3px solid '+hc+';border-radius:5px;padding:6px '+(showTpl3?'34px':'8px')+' 6px 8px;margin-bottom:6px;cursor:pointer">'+tpl3
             +'<div style="font-weight:700;font-size:11px">'+esc(p.po)+' <span class="mut tiny" style="font-weight:400">'+esc(p.market||'')+'</span></div>'
             +'<div class="mut tiny" style="margin:1px 0">'+esc(p.supplier||'—')+'</div>'
             +'<div style="font-size:10px;margin:2px 0">'+units(p.units)+' u · '+csymFor(p.market)+fmInt(p.val)+'</div>'
