@@ -8546,8 +8546,17 @@
   var PL_ST={q:'',sup:'',prod:'',open:{},active:true}, PL_DATA=null;
   function renderPriceLists(b){ b.innerHTML='<div class="count">Loading…</div>';
     fetch('/api/supply/price-list').then(function(r){return r.json();}).then(function(d){ if(d&&d.error){ b.innerHTML='<div style="color:#dc2626">'+esc(d.error)+'</div>'; return; } PL_DATA=d; plDraw(b,d); }).catch(function(e){ b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>'; }); }
+  function plExclude(b,excl){ var ex=document.getElementById('pl-excl-ov'); if(ex)ex.remove();
+    var ov=document.createElement('div'); ov.id='pl-excl-ov'; ov.style.cssText='position:fixed;inset:0;z-index:200000;background:rgba(15,23,42,.35);display:flex;align-items:center;justify-content:center;padding:16px';
+    ov.innerHTML='<div style="background:#fff;border-radius:10px;padding:16px 18px;width:460px;max-width:94vw;box-shadow:0 12px 40px rgba(15,23,42,.25)"><div style="font-weight:700;margin-bottom:5px">Excluded SKUs</div><div class="mut tiny" style="margin-bottom:6px">Paste SKUs to hide from the price list (one per line, or comma/space separated). Saving <b>replaces</b> the whole list.</div><textarea id="pl-excl-ta" rows="10" style="width:100%;box-sizing:border-box;font:12px ui-monospace,Menlo,monospace;border:1px solid #d0d0d0;border-radius:6px;padding:8px">'+esc((excl||[]).join("\n"))+'</textarea><div style="text-align:right;margin-top:10px"><button id="pl-excl-cancel" class="save-btn light">Cancel</button> <button id="pl-excl-save" class="save-btn" style="background:#16a34a;color:#fff;border-color:#15803d">Save</button></div></div>';
+    document.body.appendChild(ov); function close(){ ov.remove(); }
+    ov.addEventListener('mousedown',function(e){ if(e.target===ov)close(); });
+    document.getElementById('pl-excl-cancel').onclick=close;
+    document.getElementById('pl-excl-save').onclick=function(){ var v=document.getElementById('pl-excl-ta').value, sb=document.getElementById('pl-excl-save'); sb.disabled=true; sb.textContent='Saving…';
+      fetch('/api/supply/price-list/exclude',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({skus:v})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){sb.disabled=false;sb.textContent='Save';alert(j.error);return;} close(); renderPriceLists(b); }).catch(function(e){ sb.disabled=false;sb.textContent='Save'; alert('Save failed: '+(e.message||e)); }); }; }
   function plDraw(b,d){
-    var entries=d.entries||[], suppliers=d.suppliers||[], priceTypes=d.priceTypes||[], productions=d.productions||[], curProd=d.currentProduction||0;
+    var _keepT=(function(){ var s=b.querySelector('.pl-scroll'); return s?s.scrollTop:0; })(), _keepW=window.scrollY;   // preserve scroll across a redraw (expand/filter) so the view doesn't jump to the top
+    var entries=d.entries||[], suppliers=d.suppliers||[], priceTypes=d.priceTypes||[], productions=d.productions||[], curProd=d.currentProduction||0, manualSkus=d.manualSkus||[];
     var typeSkus={}, typeMain={}, ptInfo={}; priceTypes.forEach(function(t){ typeSkus[t.price_type]=t.skus||[]; typeMain[t.price_type]=t.mainSupplier||''; ptInfo[t.price_type]=t; });
     var byKey={}; entries.forEach(function(e){ var k=e.supplier+'|'+e.scope+'|'+(e.scope==='sku'?e.sku:e.price_type); (byKey[k]=byKey[k]||[]).push(e); });
     var prodSel=PL_ST.prod?parseInt(PL_ST.prod,10):null;
@@ -8572,6 +8581,7 @@
       +'<span class="pill-lbl" style="margin-left:10px">Prices as of</span><input class="flt" id="pl-prod" list="pl-prod-dl" placeholder="current" value="'+esc(PL_ST.prod)+'" style="width:110px" title="Show prices effective as of this production (future productions from '+curProd+' up). Blank = current.">'
       +'<label style="margin-left:10px;font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:5px;cursor:pointer" title="Hide discontinued SKUs (they still show when searched)"><input type="checkbox" id="pl-active"'+(PL_ST.active?' checked':'')+'> Active SKUs only</label>'
       +(d.pending>0?'<span class="ex-badge" style="margin-left:10px;background:#b45309" title="'+d.pending+' pending supplier price change(s)">⚑ '+d.pending+' pending</span>':'')
+      +'<button id="pl-excl" class="save-btn light" style="margin-left:10px;font-size:11px" title="SKUs hidden from the price list — paste to manage">Excluded SKUs'+((d.excluded&&d.excluded.length)?(' ('+d.excluded.length+')'):'')+'</button>'
       +'<span class="mut tiny" style="margin-left:auto">click a cell to set price + tiers · SKUs inherit the type price (↳) until overridden</span></div>';
     var head='<tr><th class="pl-lbl" style="min-width:230px">Price type / SKU</th><th class="pl-szh" style="text-align:left">Size</th><th class="pl-colh" style="text-align:left">Colour</th>'+COLLBL.slice(0,maxCols).map(function(l){return '<th style="text-align:left">'+l+'</th>';}).join('')+'</tr>';
     var body='';
@@ -8599,8 +8609,26 @@
         body+='<tr class="pl-sku"><td class="pl-lbl" style="padding-left:22px;font-family:ui-monospace,Menlo,monospace"><span title="'+esc(s.name)+'">'+esc(s.sku)+'</span>'+disc+'</td><td class="mut tiny pl-szh">'+esc(s.size||'')+'</td><td class="mut tiny pl-colh">'+esc(s.colour||'')+'</td>'+sc+'</tr>';
       }); }
     });
-    if(!showTypes.length)body='<tr><td colspan="'+(maxCols+3)+'" class="count">No price types match.</td></tr>';
-    b.innerHTML=bar+'<div style="overflow:auto;max-height:calc(100vh - 230px)"><table class="pl-tbl" style="border-collapse:separate;border-spacing:0;font-size:12px;width:auto"><thead>'+head+'</thead><tbody>'+body+'</tbody></table></div>';
+    // ── Manual / no-price-type SKUs — open list at the bottom, grouped by supplier (each SKU priced individually) ──
+    var mfil=manualSkus.filter(function(s){ if(q){ return s.sku.toLowerCase().indexOf(q)>=0||(s.main_supplier||'').toLowerCase().indexOf(q)>=0; } return (!PL_ST.active||s.active); });
+    if(PL_ST.sup)mfil=mfil.filter(function(s){ return s.main_supplier===PL_ST.sup; });
+    if(mfil.length){ var span=maxCols+3;
+      body+='<tr class="pl-manhdr"><td colspan="'+span+'" style="background:#0f172a;color:#fff;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;padding:6px 10px">No price type / Manual — priced per SKU</td></tr>';
+      var bySupM={}; mfil.forEach(function(s){ (bySupM[s.main_supplier||'(no supplier)']=bySupM[s.main_supplier||'(no supplier)']||[]).push(s); });
+      Object.keys(bySupM).sort().forEach(function(sup){
+        body+='<tr class="pl-mansup"><td colspan="'+span+'" style="background:#eef2ff;font-weight:700;color:#334155;padding:4px 10px">'+esc(sup)+' <span class="mut tiny">· '+bySupM[sup].length+' SKU'+(bySupM[sup].length>1?'s':'')+'</span></td></tr>';
+        bySupM[sup].forEach(function(s){ var real=(sup!=='(no supplier)');
+          var ax=real?applicable(byKey[sup+'|sku|'+s.sku]):{cur:null};
+          var pcell='<td class="pl-cell" data-scope="sku" data-sku="'+esc(s.sku)+'" data-sup="'+esc(real?sup:'')+'" data-pt="'+esc(s.price_type||'')+'" style="cursor:pointer">'+(ax.cur?priceDisp(ax.cur)+efpTag(ax.cur):'<span style="color:#cbd5e1">— set price</span>')+'</td>';
+          var extra=''; for(var k=1;k<maxCols;k++)extra+='<td class="pl-empty"></td>';
+          var disc=s.active?'':' <span class="mut tiny" style="color:#b45309">disc</span>';
+          body+='<tr class="pl-sku"><td class="pl-lbl" style="padding-left:22px;font-family:ui-monospace,Menlo,monospace"><span title="'+esc(s.name)+'">'+esc(s.sku)+'</span>'+disc+'</td><td class="mut tiny pl-szh">'+esc(s.size||'')+'</td><td class="mut tiny pl-colh">'+esc(s.colour||'')+'</td>'+pcell+extra+'</tr>';
+        });
+      });
+    }
+    if(!showTypes.length&&!mfil.length)body='<tr><td colspan="'+(maxCols+3)+'" class="count">No price types match.</td></tr>';
+    b.innerHTML=bar+'<div class="pl-scroll" style="overflow:auto;max-height:calc(100vh - 230px)"><table class="pl-tbl" style="border-collapse:separate;border-spacing:0;font-size:12px;width:auto"><thead>'+head+'</thead><tbody>'+body+'</tbody></table></div>';
+    (function(){ var s=b.querySelector('.pl-scroll'); if(s&&_keepT)s.scrollTop=_keepT; if(_keepW)window.scrollTo(0,_keepW); })();   // restore scroll position
     if(!document.getElementById('pl-sty')){ var st=document.createElement('style'); st.id='pl-sty'; st.textContent=
       '#supply-root .pl-tbl th{position:sticky;top:0;background:#f8fafc;z-index:2;padding:5px 8px;border-bottom:1px solid #e2e8f0;font-size:10px;text-transform:uppercase;color:#475569;white-space:nowrap}'
       +'#supply-root .pl-tbl td{padding:4px 8px;border-bottom:1px solid #f1f5f9;white-space:nowrap;text-align:left}'
@@ -8617,6 +8645,7 @@
     var ai=b.querySelector('#pl-active'); if(ai)ai.onchange=function(){ PL_ST.active=this.checked; plDraw(b,d); };
     b.querySelectorAll('.pl-lbl[data-tgl]').forEach(function(td){ td.onclick=function(){ var t=td.dataset.tgl; PL_ST.open[t]=!PL_ST.open[t]; plDraw(b,d); }; });   // expand/minimise — redraw from cache, NO refetch
     b.querySelectorAll('.pl-cell').forEach(function(td){ td.onclick=function(){ plEditor(b,{d:d,scope:td.dataset.scope,pt:td.dataset.pt,sku:td.dataset.sku||'',sup:td.dataset.sup||''}); }; });
+    var xb=b.querySelector('#pl-excl'); if(xb)xb.onclick=function(){ plExclude(b,d.excluded||[]); };
     b.querySelectorAll('.pl-size-in').forEach(function(inp){ inp.onchange=function(){ var ptn=inp.dataset.pt, v=inp.value.trim();
       fetch('/api/supply/price-type-meta',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({price_type:ptn,size:v})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;}
         var t=ptInfo[ptn]; if(t){ t.size=v?v:(t.sizeDefault||''); t.sizeOverride=!!v; } plDraw(b,d); }).catch(function(e){ alert('Save failed: '+(e.message||e)); }); }; });   // silent redraw, no full refresh

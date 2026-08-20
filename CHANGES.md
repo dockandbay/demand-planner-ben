@@ -1,3 +1,9 @@
+## v27.202 Price Lists: MANUAL/no-price-type section, exclude list, MASTER-only, scroll fix
+- **Only `variant_type='MASTER'`** products appear (SETs + variant children excluded), and **`status='NON STOCKED'`** products are hidden.
+- **MANUAL / no-price-type** SKUs (price_type = MANUAL or blank) now render as an **open SKU list at the bottom, grouped by supplier** — each SKU priced individually (no type inherit).
+- New **Excluded SKUs** manager (toolbar button) — paste SKUs to hide from the list (replaces the whole list; migration 241 `price_list_excluded_skus`, endpoint `/api/supply/price-list/exclude`).
+- **Expand/redraw no longer jumps to the top** — scroll position is preserved.
+
 ## v27.201 Price Lists: wider supplier + Size columns
 - Widened the **supplier** columns (~50%, min 210px, name shows up to 220px) and the **Size** column (120→180px); the table widens to suit. Colour stays 120px.
 

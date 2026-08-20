@@ -2432,13 +2432,22 @@ app.get('/api/supply/price-list', async (_req, res) => {
       ORDER BY e.price_type, e.scope DESC, e.sku, e.supplier`)).rows;
     // supplier columns = active suppliers (so admin can add a price for any), currency from suppliers
     const suppliers = (await pool.query(`SELECT name, coalesce(default_currency,'USD') currency FROM planner.suppliers WHERE coalesce(active,true) ORDER BY name`)).rows;
-    // price_type → its SKUs (for grouping + the "add exception" picker)
-    const pt = (await pool.query(`SELECT price_type, sku, coalesce(product_name_final,product_name,'') name,
+    // ONLY variant_type='MASTER' (SETs + variant children excluded), minus the user-managed exclude list.
+    const excluded = (await pool.query(`SELECT sku FROM planner.price_list_excluded_skus ORDER BY sku`)).rows.map(r => r.sku);
+    const exclSet = new Set(excluded);
+    const pt = (await pool.query(`SELECT coalesce(price_type,'') price_type, sku, coalesce(product_name_final,product_name,'') name,
              coalesce(main_supplier_final,'') main_supplier, coalesce(colour_long,'') colour, coalesce(nullif(size_long,''),size,'') size,
              (lower(coalesce(status,'')) NOT LIKE '%discont%' AND NOT (coalesce(discontinue_date_final,'') ~ '^\d{4}-\d{2}-\d{2}' AND to_date(discontinue_date_final,'YYYY-MM-DD') <= current_date)) active
-      FROM planner.products WHERE coalesce(sku,'')<>'' AND coalesce(price_type,'')<>'' ORDER BY price_type, sku`)).rows;
+      FROM planner.products WHERE coalesce(sku,'')<>'' AND coalesce(variant_type,'')='MASTER' AND upper(coalesce(status,''))<>'NON STOCKED' ORDER BY price_type, sku`)).rows
+      .filter(r => !exclSet.has(r.sku));
     const ptMeta = {}; (await pool.query(`SELECT price_type, coalesce(size,'') size FROM planner.price_type_meta`)).rows.forEach(r => { ptMeta[r.price_type] = r.size; });
-    const typeMap = {}; pt.forEach(r => { const t = (typeMap[r.price_type] = typeMap[r.price_type] || { skus: [], mc: {}, sizes: {} }); t.skus.push({ sku: r.sku, name: r.name, active: !!r.active, colour: r.colour, size: r.size }); if (r.main_supplier) t.mc[r.main_supplier] = (t.mc[r.main_supplier] || 0) + 1; if (r.size) t.sizes[r.size] = 1; });
+    // MANUAL / no price_type → per-SKU pricing, shown grouped by supplier at the bottom (no type inherit)
+    const isManual = (v) => (v === '' || String(v).toUpperCase() === 'MANUAL');
+    const typeMap = {}, manualSkus = [];
+    pt.forEach(r => {
+      if (isManual(r.price_type)) { manualSkus.push({ sku: r.sku, name: r.name, active: !!r.active, colour: r.colour, size: r.size, main_supplier: r.main_supplier, price_type: r.price_type }); return; }
+      const t = (typeMap[r.price_type] = typeMap[r.price_type] || { skus: [], mc: {}, sizes: {} }); t.skus.push({ sku: r.sku, name: r.name, active: !!r.active, colour: r.colour, size: r.size }); if (r.main_supplier) t.mc[r.main_supplier] = (t.mc[r.main_supplier] || 0) + 1; if (r.size) t.sizes[r.size] = 1;
+    });
     const priceTypes = Object.keys(typeMap).sort().map(k => { const t = typeMap[k]; const main = Object.keys(t.mc).sort((a, b) => t.mc[b] - t.mc[a])[0] || '';
       const uniq = Object.keys(t.sizes); const defaultSize = uniq.length === 1 ? uniq[0] : '';   // common SKU size only when uniform
       const override = (ptMeta[k] != null && ptMeta[k] !== '');
@@ -2451,7 +2460,7 @@ app.get('/api/supply/price-list', async (_req, res) => {
       WHERE regexp_replace(coalesce(prod_no,''),'[^0-9]','','g')<>''`)).rows
       .map(r => parseInt(r.n, 10)).filter(n => !isNaN(n) && n >= currentProduction).sort((a, b) => b - a);
     const pending = entries.filter(e => e.status === 'pending').length;
-    res.json({ entries, suppliers, priceTypes, productions: [...new Set(prods)], currentProduction, pending });
+    res.json({ entries, suppliers, priceTypes, manualSkus, excluded, productions: [...new Set(prods)], currentProduction, pending });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Admin upsert of a price entry + its tiers (id present = update, else insert). Always active/admin-sourced.
@@ -2496,6 +2505,20 @@ app.post('/api/supply/price-type-meta', async (req, res) => {
       ON CONFLICT (price_type) DO UPDATE SET size=excluded.size, updated_at=now()`, [b.price_type, size]);
     res.json({ ok: true });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Manage the Price Lists exclude list. body.skus = the FULL list (replaces). Accepts comma/space/newline-separated.
+app.post('/api/supply/price-list/exclude', async (req, res) => {
+  const raw = (req.body && req.body.skus) || '';
+  const skus = (Array.isArray(raw) ? raw : String(raw).split(/[\s,]+/)).map(s => String(s).trim()).filter(Boolean);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    await client.query('TRUNCATE planner.price_list_excluded_skus');
+    for (const s of [...new Set(skus)]) await client.query('INSERT INTO planner.price_list_excluded_skus (sku) VALUES ($1) ON CONFLICT (sku) DO NOTHING', [s]);
+    await client.query('COMMIT');
+    res.json({ ok: true, count: skus.length });
+  } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
 });
 // Crossdock rollup for one shipment: every crossdock SKU across the POs on the shipment, with qty + source PO/supplier/client.
 app.get('/api/supply/shipment-crossdock/:ref', async (req, res) => {
