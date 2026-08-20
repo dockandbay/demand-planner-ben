@@ -8919,7 +8919,7 @@ function render(){
 // to planner.key_account_forecasts (replaces the old n8n Airtable flow). SKU is a type-to-search dropdown from SKUM.
 // ── DEMAND ▸ SUMMARY — clean read-only rollup of the PLAN forecast, by country/channel, grouped by
 //    subcategory (expand → SKU), across financial years (past FYs minimised) or a custom month range.
-var SUMM_FROM='', SUMM_TO='', SUMM_OPEN={}, SUMM_FYOPEN={}, SUMM_METRIC=(function(){try{return localStorage.getItem('summ_metric')||'units';}catch(e){return 'units';}})(), SUMM_GROUP=(function(){try{return localStorage.getItem('summ_group')||'month';}catch(e){return 'month';}})(), SUMM_TGT_EDIT=false, SUMM_TGT={}, SUMM_TGT_GBP={}, SUMM_TGT_KEY='', _SUMM_RANGE_STASH=null, SUMM_TAB='summary';
+var SUMM_FROM='', SUMM_TO='', SUMM_OPEN={}, SUMM_FYOPEN={}, SUMM_METRIC=(function(){try{return localStorage.getItem('summ_metric')||'units';}catch(e){return 'units';}})(), SUMM_GROUP=(function(){try{return localStorage.getItem('summ_group')||'month';}catch(e){return 'month';}})(), SUMM_TGT_EDIT=false, SUMM_TGT={}, SUMM_TGT_GBP={}, SUMM_TGT_KEY='', _SUMM_RANGE_STASH=null, SUMM_TAB='summary', SUMM_CAT_TOT=(function(){try{return localStorage.getItem('summ_cattot')==='1';}catch(e){return false;}})();   // Category totals: bold per-category (subcat-parent) roll-up rows showing LY→target for units + revenue
 var SUMM_B2B_H1FEB=(function(){try{return localStorage.getItem('summ_b2b_h1feb')==='1';}catch(e){return false;}})();   // B2B only: treat H1 as Feb→Aug (7mo) instead of Mar→Aug — the FY view shifts to Feb→Jan for B2B in this report
 function setSummB2BH1Feb(on){ SUMM_B2B_H1FEB=!!on; try{localStorage.setItem('summ_b2b_h1feb',SUMM_B2B_H1FEB?'1':'0');}catch(e){} }
 // Target-edit mode ignores the month-range filter (targets are per-FY/half, not per arbitrary range).
@@ -9440,6 +9440,7 @@ function renderSummaryView(body){
     +'<span style="display:flex;gap:3px">'+CH_PILLS.map(function(c){return '<button class="sm-ch'+(c===ch?' on':'')+'" data-c="'+c+'">'+c+'</button>';}).join('')+'</span>'
     +'<span style="display:flex;gap:3px;margin-left:8px">'+[['units','Units'],['rev','Revenue'],['revtgt','Rev + targets']].map(function(x){return '<button class="sm-metric'+(x[0]===SUMM_METRIC?' on':'')+'" data-m="'+x[0]+'">'+x[1]+'</button>';}).join('')+'</span>'
     +'<span style="display:flex;gap:3px">'+[['month','Month'],['quarter','Quarter'],['half','Half']].map(function(x){return '<button class="sm-group'+(x[0]===SUMM_GROUP?' on':'')+'" data-g="'+x[0]+'">'+x[1]+'</button>';}).join('')+'</span>'
+    +'<label style="margin-left:8px;font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:5px;cursor:pointer" title="Group by category and show a bold roll-up per category: last-year → target for units AND revenue, from the subcategory target growths"><input type="checkbox" id="sm-cattot"'+(SUMM_CAT_TOT?' checked':'')+'> Category totals</label>'
     +''   /* currency toggle moved to the single global control in the DEMAND nav; targets edit + recommendations are now the report's own tabs */
     +'<span style="margin-left:14px;font-size:12px;color:#475569;display:flex;align-items:center;gap:5px">Show from <select id="sm-from" style="padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px">'+moOpts(SUMM_FROM)+'</select> to <select id="sm-to" style="padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px">'+moOpts(SUMM_TO)+'</select>'+(rangeMode?' <button id="sm-clear" style="font-size:11px;padding:3px 9px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;cursor:pointer">✕ clear · FY view</button>':'')+'</span>'
     +((ch==='B2B'&&!rangeMode)?'<label id="sm-h1feb-lbl" style="margin-left:10px;font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:5px;cursor:pointer" title="B2B only: count February in H1 (so H1 = Feb–Aug, H2 = Sep–Jan) for the totals, targets, growth and recommendations in this report"><input type="checkbox" id="sm-h1feb"'+(SUMM_B2B_H1FEB?' checked':'')+'> B2B — H1 includes February</label>':'')
@@ -9451,6 +9452,7 @@ function renderSummaryView(body){
   body.querySelectorAll('.sm-ch').forEach(function(b){ b.onclick=function(){ CF=b.dataset.c; renderSummaryView(body); try{refreshDispCcy();}catch(e){} }; });
   body.querySelectorAll('.sm-metric').forEach(function(b){ b.onclick=function(){ SUMM_METRIC=b.dataset.m; try{localStorage.setItem('summ_metric',SUMM_METRIC);}catch(e){} renderSummaryView(body); }; });
   body.querySelectorAll('.sm-group').forEach(function(b){ b.onclick=function(){ SUMM_GROUP=b.dataset.g; try{localStorage.setItem('summ_group',SUMM_GROUP);}catch(e){} renderSummaryView(body); }; });
+  var _ct=body.querySelector('#sm-cattot'); if(_ct)_ct.onchange=function(){ SUMM_CAT_TOT=this.checked; try{localStorage.setItem('summ_cattot',SUMM_CAT_TOT?'1':'');}catch(e){} renderSummaryView(body); };
   var fSel=body.querySelector('#sm-from'), tSel=body.querySelector('#sm-to');
   function applyRange(){ SUMM_FROM=fSel.value; SUMM_TO=tSel.value; renderSummaryView(body); }   // full silent re-render so the month range + header/clear update immediately
   fSel.onchange=applyRange; tSel.onchange=applyRange;
@@ -9550,6 +9552,28 @@ function renderSummaryView(body){
         if(_roCapped)ttxt='<span title="Discontinued sub-category — target capped to '+Math.round(_capC).toLocaleString()+' units this period ('+Math.round(_roStockU[sub]).toLocaleString()+' units of stock left in total). Last-year basis would be higher; can\'t sell more than is left." style="color:#b45309;cursor:help;font-weight:800">&#9888;</span> '+ttxt; }
       if(lockConflict)ttxt='<span title="Target conflict: the locked category targets for this period together exceed what the market-total budget allows — the remaining (untyped) categories get floored at −100% / forced negative even though the market total is a positive or flat growth. Lower a locked category’s growth (this one or another), or raise the market total." style="color:#b91c1c;cursor:help;font-weight:800">⚠</span> '+ttxt;
       return '<td class="ecell" style="padding:2px 4px;border:1px solid #e5e7eb;text-align:right'+(lockConflict?';background:#fff1f1':((_roStockU&&_roStockU[sub]>0)?';background:#FFF3E6':''))+'"><input class="tgin" data-sub="'+encodeURIComponent(sub)+'" data-fy="'+Y+'" data-lvl="'+lvl+'" data-idx="'+idx+'" data-ly="'+Math.round(ly)+'" data-inh="'+(inh!=null?inh:'')+'" data-net="'+_tgtNet(sub)+'" value="'+v+'" placeholder="'+ph+'" title="Type a % growth vs last year (e.g. 40) OR a £ revenue target (e.g. £120000 or 120000). Blank = inherit." style="'+bg+'"><div class="ttgt tgt-hov" data-sub="'+encodeURIComponent(sub)+'" data-mths="'+mths.join(',')+'" data-tgt="'+Math.round(cellTgt)+'" data-ly="'+Math.round(ly)+'" data-net="'+_tgtNet(sub)+'" style="font-size:9px;color:#64748b;text-align:right;font-variant-numeric:tabular-nums;margin-top:1px;cursor:help">'+ttxt+'</div></td>'; }
+    // ── Category totals (Ben): group subcats under their parent CATEGORY and roll up LY→target for BOTH units and
+    //    revenue, from each subcat's set target growth. Metric-independent (reads raw actuals a[m]=[units,£]); revenue
+    //    converted to display currency per FY. Untyped subcats: read tab holds flat (matches the summary target cells);
+    //    edit tab uses the implied balancing (matches the edit grid's implied cells). Covers the visible horizon
+    //    (open FYs, or the Show-from→to range) — collapse a year or set a range to narrow it.
+    var _catVisM=[]; if(rangeMode){ _catVisM=rangeMonths.slice(); } else { DISP_FY_STARTS.forEach(function(Y){ if(fyOpen(Y))fyMs(Y).forEach(function(m){ _catVisM.push(m); }); }); }
+    function catRollup(catSubs,useImplied){ var lyU=0,lyR=0,toU=0,toR=0;
+      catSubs.forEach(function(s){ var a=ga(co,ch,s)||{};
+        _catVisM.forEach(function(m){ var py=prevY(m), lu=(a[py]&&a[py][0])||0, lr=(a[py]&&a[py][1])||0, fi=monFyIdx(m), rt=cvR(fi.Y);
+          var g=resolveG(fi.Y,s,fi.idx); if(g==null&&useImplied)g=impliedFor(fi.Y,'month',fi.idx); if(g==null)g=0; var f=1+g/100;
+          lyU+=lu; toU+=lu*f; lyR+=lr*rt; toR+=lr*f*rt; }); });
+      return {lyU:lyU,lyR:lyR,toU:toU,toR:toR}; }
+    function catRowHTML(catName,r,span){ var f=function(n){return Math.round(n).toLocaleString();}, sym=(_symC||'£');
+      var gU=r.lyU>0?Math.round((r.toU/r.lyU-1)*100):null, gR=r.lyR>0?Math.round((r.toR/r.lyR-1)*100):null;
+      var gc=function(g){return g==null?'#94a3b8':g>0?'#15803d':g<0?'#b91c1c':'#64748b';};
+      var gl=function(g){return g==null?'':' <span style="color:'+gc(g)+';font-weight:700">('+(g>0?'+':'')+g+'%)</span>';};
+      var line=function(lab,from,to,g,money){ var pfx=money?sym:''; return '<div style="display:flex;gap:6px;align-items:baseline;justify-content:flex-end"><span style="width:30px;color:#8b95a7;font-size:9px;text-transform:uppercase;letter-spacing:.03em;text-align:left">'+lab+'</span><b style="color:#475569">'+pfx+f(from)+'</b><span style="color:#94a3b8">→</span><b style="color:#0f172a">'+pfx+f(to)+'</b>'+gl(g)+'</div>'; };
+      return '<tr class="catrow"><td colspan="'+span+'" style="padding:5px 10px;background:#eef2ff;border-top:2px solid #c7d2fe;border-bottom:1px solid #dbe3ff">'
+        +'<div style="display:flex;justify-content:space-between;align-items:center;gap:18px;flex-wrap:wrap">'
+        +'<div style="font-weight:800;font-size:11px;color:#1e3a8a;text-transform:uppercase;letter-spacing:.03em">'+e(catName)+'</div>'
+        +'<div style="display:flex;flex-direction:column;gap:1px;font-size:11px;font-variant-numeric:tabular-nums">'+line('units',r.lyU,r.toU,gU,false)+line('rev',r.lyR,r.toR,gR,true)+'</div>'
+        +'</div></td></tr>'; }
     if(SUMM_TGT_EDIT&&!rangeMode){
       // Target £ baseline = prior-year revenue per month. If the prior-year month is itself still a FORECAST
       // (e.g. FY27/28 H2 → FY26/27 H2 not complete), inherit the forecast revenue (subData.val, which is
@@ -9577,11 +9601,14 @@ function renderSummaryView(body){
       var _gOrder=(CAT_GROUPING&&Object.keys(CAT_GROUPING).length)?catGroups().map(function(g){return g[0];}):['Priority','Beach','Bags','Home'];
       var _byG={}; _subsV.forEach(function(s){ var gp=(CAT_GROUPING&&CAT_GROUPING[_subcatParent(s)])||'Other'; (_byG[gp]=_byG[gp]||[]).push(s); });
       var _gList=_gOrder.filter(function(g){return _byG[g];}); Object.keys(_byG).sort().forEach(function(g){ if(_gList.indexOf(g)<0)_gList.push(g); });
+      function _eSubRow(s){ var _ro=(_roStockU&&_roStockU[s]>0);   // discontinued subcat with stock → light-orange run-off row + stock note
+        var _lbl=_ro?('<span title="Discontinued (run-off) — selling down remaining stock; target capped to what\'s available, not last year." style="font-size:8px;font-weight:700;color:#92400e;background:#fde3c4;border:1px solid #f6c896;border-radius:3px;padding:0 3px;margin-right:4px">&#8709;</span>'+e(s)+' <span style="font-size:9px;color:#b45309;font-weight:600">'+Math.round(_roStockU[s]).toLocaleString()+'u left</span>'):e(s);
+        return '<tr class="sub"'+(_ro?' style="background:#FFF7EE"':'')+'><td class="lbl">'+_lbl+'</td>'+cols.map(function(c){return ecell(s,c);}).join('')+'</tr>'; }
       _gList.forEach(function(gp){
         eRows+='<tr class="grp"><td class="lbl grp-lbl" colspan="'+(cols.length+1)+'">'+e(gp)+'</td></tr>';
-        _byG[gp].forEach(function(s){ var _ro=(_roStockU&&_roStockU[s]>0);   // discontinued subcat with stock → light-orange run-off row + stock note
-          var _lbl=_ro?('<span title="Discontinued (run-off) — selling down remaining stock; target capped to what\'s available, not last year." style="font-size:8px;font-weight:700;color:#92400e;background:#fde3c4;border:1px solid #f6c896;border-radius:3px;padding:0 3px;margin-right:4px">&#8709;</span>'+e(s)+' <span style="font-size:9px;color:#b45309;font-weight:600">'+Math.round(_roStockU[s]).toLocaleString()+'u left</span>'):e(s);
-          eRows+='<tr class="sub"'+(_ro?' style="background:#FFF7EE"':'')+'><td class="lbl">'+_lbl+'</td>'+cols.map(function(c){return ecell(s,c);}).join('')+'</tr>'; });
+        if(SUMM_CAT_TOT){ var _byCc={}; _byG[gp].forEach(function(s){ var cat=_subcatParent(s)||'(uncategorised)'; (_byCc[cat]=_byCc[cat]||[]).push(s); });
+          Object.keys(_byCc).sort().forEach(function(cat){ eRows+=catRowHTML(cat,catRollup(_byCc[cat],true),cols.length+1); _byCc[cat].forEach(function(s){ eRows+=_eSubRow(s); }); }); }
+        else { _byG[gp].forEach(function(s){ eRows+=_eSubRow(s); }); }
       });
       var _selN=_tsel?_tsel.size:0, _catBtnLbl=(_selN?(_selN+' categor'+(_selN>1?'ies':'y')):'All categories');
       function _tgtOpt(cat,label,on){ return '<div class="tgt-cat-opt" data-c="'+encodeURIComponent(cat)+'" style="display:flex;align-items:center;gap:8px;padding:4px 6px;border-radius:4px;cursor:pointer;font-size:12px'+(cat==='__ALL__'?';font-weight:600':'')+'"><span style="width:14px;height:14px;border-radius:3px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;font-size:10px;color:#fff;border:1px solid '+(on?'#1a1a1a':'#ccc')+';background:'+(on?'#1a1a1a':'#fff')+'">'+(on?'✓':'')+'</span><span>'+e(label)+'</span></div>'; }
@@ -9695,13 +9722,17 @@ function renderSummaryView(body){
     // grand total = sum of subcats
     var gtV={}, gtL={}; subs.forEach(function(s){ var sd=subData(s); DISP_MONTHS.forEach(function(m){ gtV[m]=(gtV[m]||0)+sd.val[m]; gtL[m]=(gtL[m]||0)+sd.ly[m]; }); });
     var bodyH='<tr class="gt"><td class="lbl">ALL SUBCATEGORIES</td>'+cells(gtV,gtL,null,null,'')+'</tr>';
-    subs.forEach(function(s){ var sd=subData(s);
-      bodyH+='<tr class="sub"><td class="lbl" data-sub="'+e(s)+'"><span class="smx">'+(SUMM_OPEN[s]?'▾':'▸')+'</span>'+e(s)+'</td>'+cells(sd.val,sd.ly,null,null,s)+'</tr>';
+    var _span=cols.length+1;
+    function _subRow(s){ var sd=subData(s);
+      var h='<tr class="sub"><td class="lbl" data-sub="'+e(s)+'"><span class="smx">'+(SUMM_OPEN[s]?'▾':'▸')+'</span>'+e(s)+'</td>'+cells(sd.val,sd.ly,null,null,s)+'</tr>';
       if(SUMM_OPEN[s]){ skuRows(s).forEach(function(r){
         var tb=r.tier?'<span style="font-size:9px;font-weight:700;padding:0 4px;border-radius:3px;margin-left:5px;'+({A:'background:#dcfce7;color:#166534',B:'background:#fef9c3;color:#854d0e',C:'background:#f1f5f9;color:#64748b'}[r.tier]||'background:#f1f5f9;color:#64748b')+'">'+e(r.tier)+'</span>':'';
         var dts=(r.lch?'<span style="color:#64748b">launch '+fdate(r.lch)+'</span>':'')+(r.disc?'<span style="color:#b91c1c;margin-left:8px">disc '+fdate(r.disc)+'</span>':'');
-        bodyH+='<tr class="sku"><td class="lbl">'+e(r.sku)+tb+(dts?'<div style="font-size:9px;font-family:system-ui">'+dts+'</div>':'')+'</td>'+cells(r.val,r.ly,r.lch,r.disc,null)+'</tr>'; }); }
-    });
+        h+='<tr class="sku"><td class="lbl">'+e(r.sku)+tb+(dts?'<div style="font-size:9px;font-family:system-ui">'+dts+'</div>':'')+'</td>'+cells(r.val,r.ly,r.lch,r.disc,null)+'</tr>'; }); }
+      return h; }
+    if(SUMM_CAT_TOT){ var _byC={}; subs.forEach(function(s){ var cat=_subcatParent(s)||'(uncategorised)'; (_byC[cat]=_byC[cat]||[]).push(s); });
+      Object.keys(_byC).sort().forEach(function(cat){ bodyH+=catRowHTML(cat,catRollup(_byC[cat],false),_span); _byC[cat].forEach(function(s){ bodyH+=_subRow(s); }); }); }
+    else { subs.forEach(function(s){ bodyH+=_subRow(s); }); }
     var thead=rangeMode?('<thead><tr>'+h2+'</tr></thead>'):('<thead><tr>'+h1+'</tr><tr>'+h2+'</tr></thead>');
     host.innerHTML='<table>'+thead+'<tbody>'+bodyH+'</tbody></table>'; fitHost();
     host.querySelectorAll('td.lbl[data-sub]').forEach(function(td){ td.onclick=function(){ var s=td.dataset.sub; SUMM_OPEN[s]=!SUMM_OPEN[s]; draw(); }; });
@@ -9713,7 +9744,7 @@ function renderSummaryView(body){
   // ones changed on another tab, by an import, or in another session (the old SUMM_TGT_KEY guard skipped the re-fetch
   // while you stayed on the same country/channel, so external target changes went unseen). In-cell edits still update
   // SUMM_TGT locally + draw() without a round-trip; this only re-fetches on a full view render (open / pill / tab / metric).
-  if(SUMM_METRIC==='revtgt'||SUMM_TGT_EDIT){ var _hadKey=(SUMM_TGT_KEY===(co+'|'+ch)); if(!_hadKey){ SUMM_TGT={}; SUMM_TGT_GBP={}; } draw();   // paint immediately (no blank flash); keep existing targets on a same-market re-render, refresh them below
+  if(SUMM_METRIC==='revtgt'||SUMM_TGT_EDIT||SUMM_CAT_TOT){ var _hadKey=(SUMM_TGT_KEY===(co+'|'+ch)); if(!_hadKey){ SUMM_TGT={}; SUMM_TGT_GBP={}; } draw();   // paint immediately (no blank flash); keep existing targets on a same-market re-render, refresh them below (Category totals needs targets even under Units/Revenue)
     fetch('/api/demand-revenue-targets/periods?country='+encodeURIComponent(co)+'&channel='+encodeURIComponent(ch)).then(function(r){return r.json();}).then(function(rows){ SUMM_TGT={}; SUMM_TGT_GBP={}; (rows||[]).forEach(function(t){ var k=t.fy+'|'+(t.subcategory||'')+'|'+t.level+'|'+t.idx; if(t.growth_pct!=null)SUMM_TGT[k]=t.growth_pct; if(t.target_gbp!=null)SUMM_TGT_GBP[k]=Number(t.target_gbp); }); SUMM_TGT_KEY=co+'|'+ch; draw(); }).catch(function(){ SUMM_TGT_KEY=co+'|'+ch; draw(); }); }
   else draw();
 }
