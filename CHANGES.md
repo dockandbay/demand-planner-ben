@@ -1,3 +1,6 @@
+## v27.173 Pipeline report: click a PO opens the popout drawer (not full navigation)
+- Clicking a PO card in the Pipeline report now opens its **details drawer** (openPODrawer, dates tab) instead of navigating away to Purchase Orders.
+
 ## v27.172 Supply metrics "open actions" board: cached (was 20–30s / never loaded on live)
 - The open-actions board on REPORTS ▸ Performance ▸ Supply metrics called `computeOpenActions()` on every request — ~a dozen sequential COUNT queries, 20–30s+ on the live pooler, so "Loading open actions…" often never resolved on live.
 - Added a serve-stale-while-revalidate cache (5-min TTL, boot-warmed, refreshes in the background; only the first cold call blocks). Endpoint now returns in ~0.3s after warm (was 20–30s). Deliberately not epoch-gated — the board doesn't need to re-pay the full compute on every PO edit.

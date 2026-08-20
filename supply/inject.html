@@ -1452,10 +1452,10 @@
           +'<span class="count" style="margin-left:auto">'+f.length+' open PO · '+units(totU)+' units · £'+fmInt(totVal)+' · '
           +'<b style="color:#b91c1c">'+nLate+' late</b> · <b style="color:#d97706">'+nSoon+' due ≤7d</b></span></div>'
         +'<div style="display:flex;overflow-x:auto;padding-bottom:6px;align-items:flex-start">'+cols+'</div>'
-        +'<div class="mut tiny" style="margin-top:6px">Each PO sits in one stage from its date chain + supplier-confirmed production status; cards are ordered by the next milestone and coloured <b style="color:#b91c1c">late</b> / <b style="color:#d97706">due ≤7d</b> / <b style="color:#15803d">on track</b>. Click a PO to open it in Purchase Orders. Checked-in POs older than 4 weeks are hidden by default.</div>';
+        +'<div class="mut tiny" style="margin-top:6px">Each PO sits in one stage from its date chain + supplier-confirmed production status; cards are ordered by the next milestone and coloured <b style="color:#b91c1c">late</b> / <b style="color:#d97706">due ≤7d</b> / <b style="color:#15803d">on track</b>. Click a PO to open its details drawer. Checked-in POs older than 4 weeks are hidden by default.</div>';
       c.querySelectorAll('.bar .pill[data-m]').forEach(function(b){b.onclick=function(){_pipe.mkt=b.dataset.m;view();};});
       var po=document.getElementById('pipe-old'); if(po)po.onclick=function(){_pipe.hideOld=!_pipe.hideOld;view();};
-      c.querySelectorAll('.pipe-card').forEach(function(b){b.onclick=function(){gotoPO(b.dataset.po);};});
+      c.querySelectorAll('.pipe-card').forEach(function(b){b.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(b.dataset.po); else gotoPO(b.dataset.po); };});   // popout drawer, not a full page navigation
     };
     view(); }
   function csymFor(m){ return m==='US'?'$':m==='EU'?'€':m==='AU'?'A$':m==='CA'?'C$':'£'; }
