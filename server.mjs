@@ -2434,11 +2434,15 @@ app.get('/api/supply/price-list', async (_req, res) => {
     const suppliers = (await pool.query(`SELECT name, coalesce(default_currency,'USD') currency FROM planner.suppliers WHERE coalesce(active,true) ORDER BY name`)).rows;
     // price_type → its SKUs (for grouping + the "add exception" picker)
     const pt = (await pool.query(`SELECT price_type, sku, coalesce(product_name_final,product_name,'') name,
-             coalesce(main_supplier_final,'') main_supplier,
+             coalesce(main_supplier_final,'') main_supplier, coalesce(colour_long,'') colour, coalesce(nullif(size_long,''),size,'') size,
              (lower(coalesce(status,'')) NOT LIKE '%discont%' AND NOT (coalesce(discontinue_date_final,'') ~ '^\d{4}-\d{2}-\d{2}' AND to_date(discontinue_date_final,'YYYY-MM-DD') <= current_date)) active
       FROM planner.products WHERE coalesce(sku,'')<>'' AND coalesce(price_type,'')<>'' ORDER BY price_type, sku`)).rows;
-    const typeMap = {}; pt.forEach(r => { const t = (typeMap[r.price_type] = typeMap[r.price_type] || { skus: [], mc: {} }); t.skus.push({ sku: r.sku, name: r.name, active: !!r.active }); if (r.main_supplier) t.mc[r.main_supplier] = (t.mc[r.main_supplier] || 0) + 1; });
-    const priceTypes = Object.keys(typeMap).sort().map(k => { const t = typeMap[k]; const main = Object.keys(t.mc).sort((a, b) => t.mc[b] - t.mc[a])[0] || ''; return { price_type: k, skus: t.skus, mainSupplier: main }; });
+    const ptMeta = {}; (await pool.query(`SELECT price_type, coalesce(size,'') size FROM planner.price_type_meta`)).rows.forEach(r => { ptMeta[r.price_type] = r.size; });
+    const typeMap = {}; pt.forEach(r => { const t = (typeMap[r.price_type] = typeMap[r.price_type] || { skus: [], mc: {}, sizes: {} }); t.skus.push({ sku: r.sku, name: r.name, active: !!r.active, colour: r.colour, size: r.size }); if (r.main_supplier) t.mc[r.main_supplier] = (t.mc[r.main_supplier] || 0) + 1; if (r.size) t.sizes[r.size] = 1; });
+    const priceTypes = Object.keys(typeMap).sort().map(k => { const t = typeMap[k]; const main = Object.keys(t.mc).sort((a, b) => t.mc[b] - t.mc[a])[0] || '';
+      const uniq = Object.keys(t.sizes); const defaultSize = uniq.length === 1 ? uniq[0] : '';   // common SKU size only when uniform
+      const override = (ptMeta[k] != null && ptMeta[k] !== '');
+      return { price_type: k, skus: t.skus, mainSupplier: main, size: override ? ptMeta[k] : defaultSize, sizeOverride: override, sizeDefault: defaultSize }; });
     // current production = latest IN-PRODUCTION number; the "from production" picker offers this + higher (future only)
     const cpRow = (await pool.query(`SELECT max(regexp_replace(prod_no,'[^0-9]','','g')::int) mx FROM planner.purchase_orders
       WHERE lower(coalesce(status,'')) LIKE '%production%' AND regexp_replace(coalesce(prod_no,''),'[^0-9]','','g')<>''`)).rows[0];
@@ -2481,6 +2485,17 @@ app.post('/api/supply/price-list', async (req, res) => {
 app.post('/api/supply/price-list/:id/delete', async (req, res) => {
   try { await pool.query('DELETE FROM planner.price_list_entries WHERE id=$1', [parseInt(req.params.id, 10)]); res.json({ ok: true }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Per-price_type size override (blank = clear → fall back to the common SKU size)
+app.post('/api/supply/price-type-meta', async (req, res) => {
+  const b = req.body || {}; if (!b.price_type) return res.status(400).json({ error: 'price_type required' });
+  const size = (b.size == null ? '' : String(b.size)).trim();
+  try {
+    if (!size) await pool.query('DELETE FROM planner.price_type_meta WHERE price_type=$1', [b.price_type]);
+    else await pool.query(`INSERT INTO planner.price_type_meta (price_type,size,updated_at) VALUES ($1,$2,now())
+      ON CONFLICT (price_type) DO UPDATE SET size=excluded.size, updated_at=now()`, [b.price_type, size]);
+    res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Crossdock rollup for one shipment: every crossdock SKU across the POs on the shipment, with qty + source PO/supplier/client.
 app.get('/api/supply/shipment-crossdock/:ref', async (req, res) => {

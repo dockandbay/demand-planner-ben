@@ -1,3 +1,13 @@
+## v27.198 Price Lists — round-2 feedback
+- **(1)** Removed the "+ add supplier" cell.
+- **(2)** Added **Colour** (`colour_long`) and **Size** (`size_long`) columns next to the SKU.
+- **(3)** Adding a price tier now redraws **only that version's tier list** (no popup/page refresh).
+- **(4)** The editor's "From production" is now a **searchable dropdown popover** (like the PO grid) offering **future productions only** (> current in-production), no manual entry.
+- **(5a)** Each **price type shows a Size** — defaults to the SKUs' **common size** when uniform, **inline-editable** to override (saved to `price_type_meta`, silent redraw). Grey = auto/inherited, solid = manual.
+- **(5b)** Tier validation is now **inline**: offending inputs turn **red** with an inline error message and the **Save button greys out** (no more alert popups). Rule: bigger quantity → lower unit cost, distinct min-qty, future change after current production.
+- **Widths:** table sizes to content (no forced full width), every column capped at **250px** with ellipsis, so Colour/Size aren't over-wide.
+- Schema: migration 240 (`planner.price_type_meta`); endpoint `/api/supply/price-type-meta`.
+
 ## v27.197 Exec Summary: "Hide last year" toggle + darker growth colours on expanded rows
 - New **"Hide last year"** toggle (default off) — suppresses the vs-last-year growth badges on every cell.
 - On **expanded (country) rows**, the FY-total columns have a light background, but the growth badges were using the light green/red meant for the dark channel totals (invisible). They now use **dark green/red** so they read on the light background.
