@@ -1029,6 +1029,10 @@
     var body={}; body[inp.dataset.field]=(inp.type==='checkbox')?inp.checked:inp.value;
     fetch(inp.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
       .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); inp.classList.remove('err'); if(!inp.classList.contains('boolsel')){ inp.classList.add('saved'); setTimeout(function(){inp.classList.remove('saved');},1200); } invalidateDerived();
+        // keep the open PO drawer's in-memory detail in sync so an async re-render (e.g. the pallets estimate) can't revert this edit
+        try{ var _pdet=inp.closest&&inp.closest('[id^="podet-"]'); if(_pdet&&_pdet._poDetail)_pdet._poDetail[inp.dataset.field]=(inp.type==='checkbox')?inp.checked:inp.value; }catch(e){}
+        // "Confirmed in 3PL system" → silently refresh the Pipeline behind the drawer so its ✅3pl badge updates without a manual reload
+        if(inp.dataset.field==='confirmed_in_3pl'){ try{ delete cache['pipeline']; if(current==='reports'&&reportTab==='pipeline'){ fetch('/api/supply/pipeline').then(function(r){return r.json();}).then(function(j2){ cache['pipeline']=j2; renderPipeline(j2); }).catch(function(){}); } }catch(e){} }
         // keep any DUPLICATE control for the same record+field in sync in place (e.g. the shipments grid Mode/Carrier
         // dropdown vs the same field in the expanded "Dates & tracking" panel) — no full refresh needed
         var ep=inp.dataset.ep, fld=inp.dataset.field, val=inp.value;
@@ -1641,7 +1645,7 @@
     return '<div class="sect-h">Shipments <span class="mut tiny">— assign a shipment or mark FOB, ASN numbers, Ships With Supplier pallet labels</span></div>'
       +lookupDatalists()+'<div class="cli-form" style="max-width:620px">'
       +shipBlock
-      +row('Confirmed in 3PL system','<label style="font-size:12px;cursor:pointer"><input type="checkbox" class="fci" data-ep="'+ep+'" data-field="confirmed_in_3pl" '+(r.confirmed_in_3pl?'checked':'')+' style="width:auto;min-width:0;vertical-align:middle;margin-right:5px">tick when this PO has been entered into the 3PL&rsquo;s own system (shows ✅3pl on the Pipeline card)</label>')
+      +row('Confirmed in 3PL system','<label style="font-size:12px;cursor:pointer"><input type="checkbox" class="fci" data-ep="'+ep+'" data-field="confirmed_in_3pl" '+(r.confirmed_in_3pl?'checked':'')+' style="width:auto;min-width:0;vertical-align:middle;margin-right:5px">confirmed that PO shows in 3PL system</label>')
       +row('Cartons / pallets <span class="mut tiny">(estimate = qty ÷ carton/pallet qty; a pallet override feeds freight &amp; cash flow)</span>',
         '<div id="po-pallets-est" data-po="'+esc(po)+'" style="font-size:12px;color:#334155;font-weight:600;margin-bottom:5px">loading estimate…</div>'
         +'<label style="font-size:12px">Pallet override <input class="fci txtin" data-ep="'+ep+'" data-field="pallets_override" placeholder="(use estimate)" style="width:90px;text-align:right"></label> <span class="mut tiny">leave blank to use the estimate</span>')

@@ -9859,9 +9859,12 @@ app.post('/api/supply/po/:po', async (req, res) => {
   // Step 1+2: hand back the recomputed grid row so the client repaints WITHOUT a second fetch — but only when the
   // edit can move a value shown in the grid. Purely detail-panel / cosmetic fields (client text, refs, packing,
   // notes) skip the ~0.4s row query entirely: the client just repaints the cell it already changed.
-  (Object.keys(body).some(k => !PO_COSMETIC_FIELDS.has(k))
+  ((Object.keys(body).some(k => !PO_COSMETIC_FIELDS.has(k)) || _trackKeys.length)
     ? async () => { if (_trackKeys.length) await logPoFieldChanges(req.params.po, _trackKeys, _trackOld, body, _trackBy);
-        return { row: (await pool.query(PO_ROWS_SQL + ' WHERE calc4.po = $1', [req.params.po])).rows[0] || null }; }
+        // return the recomputed grid row ONLY for non-cosmetic edits (drives the client repaint). A cosmetic-but-tracked
+        // edit (e.g. the confirmed_in_3pl tickbox) logs the change but returns NO row → no panel re-render → the box stays ticked.
+        return Object.keys(body).some(k => !PO_COSMETIC_FIELDS.has(k))
+          ? { row: (await pool.query(PO_ROWS_SQL + ' WHERE calc4.po = $1', [req.params.po])).rows[0] || null } : {}; }
     : undefined));
 });
 // Advance a PO (and every PO on the same master shipment still in PRODUCTION) to SHIPPING. Offered on the
@@ -12700,7 +12703,7 @@ app.post('/api/supply/bi/erp-compare/ignore', async (req, res) => {
 // one skips the recomputed-row query in the save response (client just repaints the cell it already changed).
 // Deliberately small/conservative: anything touching DtC approval (pack_*, sales/client refs), dates, amounts,
 // %, deposit, shipment, branch, status, prod#/batch is NOT here, so those still refresh the row.
-const PO_COSMETIC_FIELDS = new Set(['client', 'dispatch_order_ref', 'final_delivery_address', 'branch_delivery_notes', 'notes', 'custom_dev_ref']);
+const PO_COSMETIC_FIELDS = new Set(['client', 'dispatch_order_ref', 'final_delivery_address', 'branch_delivery_notes', 'notes', 'custom_dev_ref', 'confirmed_in_3pl']);   // confirmed_in_3pl: cosmetic (no grid recompute) so its save doesn't re-render + untick the box; still logged (see extraFn)
 // PO audit log (migration 158): fields whose edits are recorded on the timeline as a "record of change".
 const PO_TRACK = { status: 'Status', end_production_overide: 'Production end date', shipment_ref: 'Shipment assignment',
   deposit_ref: 'Deposit assignment',
@@ -12709,7 +12712,8 @@ const PO_TRACK = { status: 'Status', end_production_overide: 'Production end dat
   pay_completion_assigned: 'Completion paid', pay_completion_date: 'Completion date',
   pay_balance_1_amount: 'Balance 1 paid', pay_balance_1_date: 'Balance 1 date',
   pay_balance_2_amount: 'Balance 2 paid', pay_balance_2_date: 'Balance 2 date',
-  pallets_override: 'Pallet count' };   // #A pallet override → timeline "Pallet count: M → N"
+  pallets_override: 'Pallet count',   // #A pallet override → timeline "Pallet count: M → N"
+  confirmed_in_3pl: 'Confirmed in 3PL system' };   // tickbox → record-of-change "Confirmed in 3PL system: no → yes"
 async function logPoChange(po, event, detail, by) {
   try { await pool.query(`INSERT INTO planner.po_change_log (po,event,detail,changed_by) VALUES ($1,$2,$3,$4)`, [po, event, detail || null, by || null]); }
   catch (e) { /* table absent pre-migration 158 — non-fatal, never breaks the underlying save */ }

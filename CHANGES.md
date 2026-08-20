@@ -1,3 +1,9 @@
+## v27.176 3PL-confirmed tick: silent pipeline update, record-of-change, no-untick, reworded
+- Ticking **Confirmed in 3PL system** on PO ▸ Shipments now **silently refreshes the Pipeline** behind the drawer (its ✅3pl badge updates with no manual reload).
+- Fixed the box un-ticking itself: the save is now treated as a cosmetic edit (no grid recompute → no panel re-render), and the drawer’s in-memory detail is updated so an async re-render (e.g. the pallets estimate) can’t revert it.
+- The tick is now recorded in the PO **record-of-change** (“Confirmed in 3PL system: false → true”).
+- Reworded the label to “confirmed that PO shows in 3PL system”.
+
 ## v27.175 Pipeline: show the 3pl-confirmed badge only on In transit + Arriving ≤2wk
 - The ✅/❓ 3pl badge now appears only on cards in the **In transit** and **Arriving ≤2wk** stages (where 3PL confirmation matters), not on every card.
 
