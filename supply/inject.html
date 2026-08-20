@@ -7882,7 +7882,7 @@
     function view(){ var f=filt(base.filter(function(r){ return st.tag==='key'?r.dtc_key_account:st.tag==='custom'?r.dtc_custom:true; }), st.q);
       document.getElementById('dc-count').textContent=f.length+(st.q?' / '+base.length:'')+' in-progress direct-to-client / B2B orders';
       document.getElementById('dc-grid').innerHTML=f.length?dcTable(f):'<div class="count">'+(st.q?'No matches.':'No in-progress direct-to-client orders.')+'</div>';
-      document.querySelectorAll('#dc-grid .dc-po').forEach(function(b){ b.onclick=function(){ gotoPO(b.dataset.po,'client'); }; }); }
+      document.querySelectorAll('#dc-grid .dc-po').forEach(function(b){ b.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(b.dataset.po,'client'); else gotoPO(b.dataset.po,'client'); }; }); }
     document.getElementById('dc-q').oninput=debounce(function(){ st.q=this.value; view(); },200);
     c.querySelectorAll('.dc-tag').forEach(function(p){ p.onclick=function(){ st.tag=p.dataset.tag; c.querySelectorAll('.dc-tag').forEach(function(x){x.classList.toggle('active',x===p);}); view(); }; });
     view(); }
@@ -7911,7 +7911,7 @@
     function view(){ var f=filt(base, st.q);
       document.getElementById('co-count').textContent=f.length+(st.q?' / '+base.length:'')+' in-progress custom orders';
       document.getElementById('co-grid').innerHTML=f.length?coTable(f):'<div class="count">'+(st.q?'No matches.':'No in-progress custom orders. Tag a PO ‘Custom’ on its Client/FBA tab.')+'</div>';
-      document.querySelectorAll('#co-grid .co-po').forEach(function(b){ b.onclick=function(){ gotoPO(b.dataset.po,'client'); }; }); }
+      document.querySelectorAll('#co-grid .co-po').forEach(function(b){ b.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(b.dataset.po,'client'); else gotoPO(b.dataset.po,'client'); }; }); }
     document.getElementById('co-q').oninput=debounce(function(){ st.q=this.value; view(); },200);
     view(); }
   function renderFlexport(rows){ var c=document.getElementById('rep-body')||document.getElementById('supply-content');
