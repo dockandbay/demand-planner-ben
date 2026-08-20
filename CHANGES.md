@@ -1,3 +1,6 @@
+## v27.186 Auto-smooth complete: un-smoothed cells shown as a pivot (months across)
+- The "Auto-smooth complete" popup's list of left-un-smoothed cells is now a **pivot table**: months across the top, (market·)sub-category down a **sticky** left column, each cell showing **current SKU sum → sub-category target · gap%**. Horizontally scrollable with the label column pinned; header row sticky. When everything smoothed is under one market·channel, the left column shows just the sub-category (with the market·channel noted in the caption). Copy/CSV export unchanged (long format).
+
 ## v27.185 REPORTS: Supply metrics + Inventory metrics are now their own L2 tabs
 - The "Performance" wrapper (with its inline Supply/Inventory sub-tabs) is gone; **Supply metrics** and **Inventory metrics** are now normal top-level REPORTS L2 tabs (same `.dnav` style as Exec Summary / Slow Moving). New slugs `#/reports/supply-metrics` and `#/reports/inventory-metrics`. Legacy `#/reports/performance` (and `.../inventory-metrics`) redirect to the flattened tabs. Also fixes favouriting these pages — they now name themselves "Supply metrics" / "Inventory metrics".
 

@@ -1046,28 +1046,31 @@ function _showAutoSmoothResult(applied,keyCount,skipped){
   var old=document.getElementById('as-result-ov'); if(old)old.parentNode.removeChild(old);
   var ov=document.createElement('div'); ov.id='as-result-ov';
   ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:100000;display:flex;align-items:center;justify-content:center;padding:16px';
-  var rows=skipped.map(function(x){ return '<tr>'
-      +'<td style="padding:4px 8px;border-bottom:1px solid #f1f5f9">'+x.co+' · '+x.ch+'</td>'
-      +'<td style="padding:4px 8px;border-bottom:1px solid #f1f5f9">'+he(x.subcat)+'</td>'
-      +'<td style="padding:4px 8px;border-bottom:1px solid #f1f5f9">'+mlab(x.month)+'</td>'
-      +'<td style="padding:4px 8px;border-bottom:1px solid #f1f5f9;text-align:right">'+x.sum.toLocaleString()+'</td>'
-      +'<td style="padding:4px 8px;border-bottom:1px solid #f1f5f9;text-align:right">'+x.target.toLocaleString()+'</td>'
-      +'<td style="padding:4px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-weight:600;color:#b45309">'+x.gapPct+'%</td>'
-    +'</tr>'; }).join('');
+  // Pivot the skipped cells: months across the top, (market·)sub-category down a sticky left column, current→target+gap per cell.
+  var _months=[]; (function(){ var seen={}; skipped.forEach(function(x){ if(!seen[x.month]){seen[x.month]=1;_months.push(x.month);} }); _months.sort(); })();
+  var _rowMap={}, _rowOrder=[]; skipped.forEach(function(x){ var rk=x.co+'|'+x.ch+'|'+x.subcat; if(!_rowMap[rk]){ _rowMap[rk]={co:x.co,ch:x.ch,subcat:x.subcat,cells:{}}; _rowOrder.push(rk); } _rowMap[rk].cells[x.month]=x; });
+  var _cochSet={}; skipped.forEach(function(x){ _cochSet[x.co+' · '+x.ch]=1; }); var _cochList=Object.keys(_cochSet), _oneCoch=(_cochList.length===1);
+  var pivHead='<tr><th class="as-cell as-lbl">'+(_oneCoch?'Sub-category':'Market · Sub-category')+'</th>'+_months.map(function(m){return '<th class="as-cell as-mh">'+mlab(m)+'</th>';}).join('')+'</tr>';
+  var pivBody=_rowOrder.map(function(rk){ var r=_rowMap[rk]; var lbl=_oneCoch?he(r.subcat):(he(r.co)+'·'+he(r.ch)+' · '+he(r.subcat));
+    return '<tr><td class="as-cell as-lbl" title="'+he(rk.replace(/\|/g,' · '))+'">'+lbl+'</td>'+_months.map(function(m){ var c=r.cells[m];
+        if(!c)return '<td class="as-cell as-empty"></td>';
+        return '<td class="as-cell as-data" title="SKU sum '+c.sum.toLocaleString()+' → target '+c.target.toLocaleString()+' · gap '+c.gapPct+'%"><div class="as-sum">'+c.sum.toLocaleString()+'</div><div class="as-tgt">&rarr; '+c.target.toLocaleString()+'</div><div class="as-gap">'+c.gapPct+'%</div></td>'; }).join('')+'</tr>'; }).join('');
+  var pivSty='<style>#as-result-ov .as-tbl{border-collapse:separate;border-spacing:0;font-size:11px;font-variant-numeric:tabular-nums}'
+    +'#as-result-ov .as-cell{padding:4px 8px;border-bottom:1px solid #f1f5f9;border-right:1px solid #f6f7f9;white-space:nowrap}'
+    +'#as-result-ov thead .as-cell{position:sticky;top:0;background:#f8fafc;z-index:2;text-align:right;color:#475569;font-weight:700;border-bottom:1px solid #e2e8f0}'
+    +'#as-result-ov .as-lbl{position:sticky;left:0;background:#fff;z-index:1;text-align:left;font-weight:700;color:#0f172a;box-shadow:2px 0 3px -2px rgba(15,23,42,.15);min-width:150px;max-width:240px;overflow:hidden;text-overflow:ellipsis}'
+    +'#as-result-ov thead .as-lbl{z-index:3;background:#f8fafc}'
+    +'#as-result-ov .as-mh{min-width:78px}'
+    +'#as-result-ov td.as-data{text-align:right}#as-result-ov td.as-empty{background:#fcfcfd}'
+    +'#as-result-ov .as-sum{font-weight:700;color:#0f172a;line-height:1.15}#as-result-ov .as-tgt{color:#64748b;line-height:1.15}#as-result-ov .as-gap{font-weight:700;color:#b45309;font-size:10px;line-height:1.15}</style>';
   var tbl=skipped.length
-    ? '<div style="font-size:12px;color:#334155;margin:10px 0 4px"><b>'+skipped.length+'</b> month-cell'+(skipped.length===1?'':'s')+' left un-smoothed (gap ≥ '+th+'% — review manually):</div>'
-      +'<div style="max-height:300px;overflow:auto;border:1px solid #e2e8f0;border-radius:6px">'
-      +'<table style="border-collapse:collapse;width:100%;font-size:11px"><thead><tr style="position:sticky;top:0;background:#f8fafc">'
-      +'<th style="padding:5px 8px;text-align:left;border-bottom:1px solid #e2e8f0">Country · Channel</th>'
-      +'<th style="padding:5px 8px;text-align:left;border-bottom:1px solid #e2e8f0">Sub-category</th>'
-      +'<th style="padding:5px 8px;text-align:left;border-bottom:1px solid #e2e8f0">Month</th>'
-      +'<th style="padding:5px 8px;text-align:right;border-bottom:1px solid #e2e8f0">SKU sum</th>'
-      +'<th style="padding:5px 8px;text-align:right;border-bottom:1px solid #e2e8f0">Target</th>'
-      +'<th style="padding:5px 8px;text-align:right;border-bottom:1px solid #e2e8f0">Gap</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+    ? pivSty+'<div style="font-size:12px;color:#334155;margin:10px 0 4px"><b>'+skipped.length+'</b> month-cell'+(skipped.length===1?'':'s')+' left un-smoothed (gap ≥ '+th+'% — review manually)'+(_oneCoch?(' · '+he(_cochList[0])):'')+'. Each cell = <b>current SKU sum</b> &rarr; <b>sub-category target</b> · gap:</div>'
+      +'<div style="max-height:58vh;overflow:auto;border:1px solid #e2e8f0;border-radius:6px">'
+      +'<table class="as-tbl"><thead>'+pivHead+'</thead><tbody>'+pivBody+'</tbody></table></div>'
       +'<div style="display:flex;gap:8px;margin-top:10px"><button id="as-copy" style="font-size:12px;padding:5px 12px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;cursor:pointer">Copy to clipboard</button>'
       +'<button id="as-csv" style="font-size:12px;padding:5px 12px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;cursor:pointer">Download CSV</button></div>'
     : '<div style="font-size:12px;color:#16a34a;margin:10px 0 4px">✓ No sub-categories were left over the '+th+'% limit — everything auto-smoothable was smoothed.</div>';
-  ov.innerHTML='<div style="background:#fff;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.25);max-width:640px;width:100%;padding:18px 20px">'
+  ov.innerHTML='<div style="background:#fff;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.25);max-width:'+(skipped.length?'960px':'640px')+';width:'+(skipped.length?'94vw':'100%')+';padding:18px 20px">'
     +'<div style="font-weight:700;font-size:15px;color:#0f172a">Auto-smooth complete</div>'
     +'<div style="font-size:12px;color:#475569;margin-top:4px">Smoothed <b>'+applied+'</b> forecast month-cell'+(applied===1?'':'s')+' across '+keyCount+' sub-categor'+(keyCount===1?'y':'ies')+' (gap under '+th+'%). Review the numbers, then Save Forecasts. Undo reverts the whole sweep.</div>'
     +tbl
