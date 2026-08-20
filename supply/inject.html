@@ -8563,7 +8563,7 @@
     function skuVisible(pt,s){ if(q){ if(s.sku.toLowerCase().indexOf(q)>=0)return true; if(pt.toLowerCase().indexOf(q)>=0)return (!PL_ST.active||s.active); return false; } return (!PL_ST.active||s.active); }
     var typesWith={}; entries.forEach(function(e){ if(e.price_type)typesWith[e.price_type]=1; });
     var showTypes=Object.keys(typesWith).filter(typeMatches).sort();
-    var maxLen=0; showTypes.forEach(function(pt){ var n=orderedSups(pt).length; if(n>maxLen)maxLen=n; }); var maxCols=maxLen>=3?3:2;
+    var maxCols=3;   // always show Main / Secondary / Tertiary supplier columns (Ben — spaces the grid better + ready for a 3rd)
     var COLLBL=['Main supplier','Secondary supplier','Tertiary supplier'];
     var supOpts='<option value="">All suppliers</option>'+suppliers.map(function(s){return '<option value="'+esc(s.name)+'"'+(PL_ST.sup===s.name?' selected':'')+'>'+esc(s.name)+'</option>';}).join('');
     var prodDL='<datalist id="pl-prod-dl">'+productions.map(function(p){return '<option value="'+p+'">';}).join('')+'</datalist>';

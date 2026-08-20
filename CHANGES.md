@@ -1,3 +1,6 @@
+## v27.200 Price Lists: always show 3 supplier columns
+- Always render **Main / Secondary / Tertiary** supplier columns (was 2, growing to 3 only when needed) — spaces the grid better and leaves a slot ready for a third supplier.
+
 ## v27.199 Price Lists: Size before Colour + narrower columns
 - Swapped column order to **Size, then Colour**, and capped both at **120px** (was up to 250) so they're not over-wide.
 
