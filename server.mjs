@@ -3538,7 +3538,25 @@ async function bumpSupplyEpoch() {
     _epochAt = 0;   // force this instance to re-read on the next check so it sees its own bump immediately
   } catch (e) { /* non-fatal */ }
 }
-function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS) {
+// Run a heavy read with a hard server-side time cap, so a slow rebuild (e.g. under DB contention) can't hold a
+// pooled connection open for a minute. SET LOCAL scopes the cap to this one read-only transaction/connection; on
+// timeout the query throws and SWR keeps serving the last good cached value. (ORDER_PLAN_SELECT hit 57s worst-case
+// during the outage — this caps such a rebuild instead of letting it starve the pool.)
+async function queryCapped(sql, params, ms = 25000) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN READ ONLY');
+    await client.query(`SET LOCAL statement_timeout = ${parseInt(ms, 10) || 25000}`);
+    const r = await client.query(sql, params);
+    await client.query('COMMIT');
+    return r;
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} throw e; }
+  finally { client.release(); }
+}
+// opts.proactive=false → no 10-min re-warm timer; the cache refreshes lazily (on the first request after it goes
+// stale, serving stale meanwhile). Use for EXPENSIVE builds so an idle app doesn't re-run a 6s query 144×/day and
+// hold a connection each time. Correctness is unaffected: get() still rebuilds on a cold miss or an epoch change.
+function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS, opts = {}) {
   let entry = null, inflight = null;
   function refresh(ep) {
     if (inflight) return inflight;                 // single-flight: coalesce concurrent refreshes
@@ -3555,7 +3573,7 @@ function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS) {
   const c = { name, get, refresh, invalidate() { entry = null; refresh().catch(() => {}); } };
   _supplyCaches.push(c);
   refresh().catch(() => {});                       // warm on boot
-  setInterval(() => { refresh().catch(() => {}); }, ttlMs).unref?.();
+  if (opts.proactive !== false) setInterval(() => { refresh().catch(() => {}); }, ttlMs).unref?.();   // proactive re-warm (heavy builds opt out → lazy SWR)
   return c;
 }
 // Section response-cache (Phase 2). For a whitelist of EXPENSIVE, param-free, user-independent GET sections we cache
@@ -3911,9 +3929,9 @@ app.get('/api/supply/:section', async (req, res, next) => {
         // Per-supplier portal-preview and the "show archived" toggle run LIVE (rare paths). The DEFAULT admin grid
         // (no supplier, archived hidden) is the common, expensive load → served from orderPlanCache (boot-warm + SWR).
         if (req.query.supplier)
-          return res.json((await pool.query(ORDER_PLAN_SELECT + ` WHERE coalesce(p.supplier_name,'')=$1 ORDER BY l.po, l.sku`, [req.query.supplier])).rows);
+          return res.json((await queryCapped(ORDER_PLAN_SELECT + ` WHERE coalesce(p.supplier_name,'')=$1 ORDER BY l.po, l.sku`, [req.query.supplier])).rows);
         if (req.query.includeArchived)
-          return res.json((await pool.query(ORDER_PLAN_SELECT + ' ORDER BY l.po, l.sku')).rows);
+          return res.json((await queryCapped(ORDER_PLAN_SELECT + ' ORDER BY l.po, l.sku')).rows);
         return res.json(await orderPlanCache.get());
       }
       case 'shipments': {
@@ -13360,15 +13378,15 @@ function _poRowArchived(r, cutoff) {
 }
 // Full, unfiltered PO grid rows (the expensive PO_ROWS_SQL, run once). Feeds the admin PO grid (archive-filtered in
 // JS per request) and Cash Flow (uses the full set as today). The per-supplier / portal-preview path stays live.
-const poRowsCache = makeCache('po-rows', async () => (await pool.query(PO_ROWS_SQL + ' ORDER BY po')).rows.filter(r => !r.master_po));   // CHILD POs are consolidated into their master and hidden from the grid + cash flow (the master, is_master, stays)
+const poRowsCache = makeCache('po-rows', async () => (await queryCapped(PO_ROWS_SQL + ' ORDER BY po')).rows.filter(r => !r.master_po), SUPPLY_CACHE_TTL_MS, { proactive: false });   // CHILD POs are consolidated into their master and hidden from the grid + cash flow (the master, is_master, stays)
 // Default ORDER PLAN grid (no supplier, archived hidden per the cutoff) — the common heavy load. supplier/includeArchived variants run live in the route.
 const orderPlanCache = makeCache('order-plan', async () => {
   const cut = await poArchiveCutoff();
   const w = cut ? ` WHERE NOT (${archivedSql('p', '$1')})` : '';
-  const rows = (await pool.query(ORDER_PLAN_SELECT + w + ' ORDER BY l.po, l.sku', cut ? [cut] : [])).rows;
+  const rows = (await queryCapped(ORDER_PLAN_SELECT + w + ' ORDER BY l.po, l.sku', cut ? [cut] : [])).rows;
   try { const pl = await priceListEstIndex(); rows.forEach((r) => { const est = plEstimate(pl, r.supplier_name, r.sku, r.qty, plProdNum(r.prod_no)); if (est != null) r.sku_cost = est; }); } catch (e) { /* price list optional */ }
   return rows;
-});
+}, SUPPLY_CACHE_TTL_MS, { proactive: false });   // 6.6s build — lazy SWR (no idle 10-min re-warm) + statement cap; this was the outage's biggest connection hog
 // Dropdown sources for PO editing — hit by fetchLookups on nearly every SUPPLY render.
 const lookupsCache = makeCache('lookups', async () => {
   const q = (sql) => pool.query(sql).then((r) => r.rows);
@@ -13394,11 +13412,11 @@ const lookupsCache = makeCache('lookups', async () => {
 });
 // Order-plan exception counts — runs on every SUPPLY mount as a nav/sub-tab badge (refreshOpExc in showSupply).
 const opExcCache = makeCache('order-plan-exceptions', async () => {
-  const exr = (await pool.query(OP_EXC_SQL)).rows;
+  const exr = (await queryCapped(OP_EXC_SQL)).rows;
   const byPo = {}, pos = new Set();
   exr.forEach((x) => { pos.add(x.po); (byPo[x.po] = byPo[x.po] || {})[x.typ] = true; });
   return { count: pos.size, byPo };
-});
+}, SUPPLY_CACHE_TTL_MS, { proactive: false });
 
 // Apply a consolidation: re-point the merge shipment's POs onto the keep shipment, then mark applied.
 app.post('/api/supply/bi/apply-consolidate', async (req, res) => {

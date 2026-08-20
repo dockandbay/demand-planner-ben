@@ -1,3 +1,10 @@
+## v27.223 ORDER_PLAN query: lazy cache + 25s statement cap (fix connection starvation)
+- Diviyaj traced the outage's biggest connection hog to **`ORDER_PLAN_SELECT`** (~150 runs/day, 6.6s avg, 57s worst). It's already served from `orderPlanCache`, but the `makeCache` framework **proactively re-ran it every 10 min via `setInterval` (~144×/day) even at idle**, holding a connection each time — that's the 150.
+- The three heavy caches (`order-plan`, `po-rows`, `order-plan-exceptions`) now refresh **lazily** (stale-while-revalidate on the first request after they go stale) — the idle re-warm timer is dropped for them. Cheap caches (lookups) keep the timer.
+- All heavy rebuilds + the live `supplier` / `includeArchived` order-plan variants now run under a **25s `statement_timeout`** (read-only txn, `SET LOCAL`), so a slow rebuild can't hold a pooled connection for a minute during contention; SWR keeps serving the last good value.
+- Correctness unchanged: boot-warm retained, and an edit still forces a rebuild via the epoch gate. No migration.
+- Also fixed `migrations/238` (was a 1-byte "L" placeholder) — regenerated as the real idempotent SET-BOM + prepack_map seed (1700 + 59 rows; already on live, kept for the record).
+
 ## v27.222 Big saves: serialise (not throttle) + retry/backoff + circuit breaker (Diviyaj feedback)
 - Per Diviyaj: **don't slow the writes, send them one at a time.** Dropped the artificial inter-batch delay — chunks are now sent **strictly sequentially** (each awaited/acknowledged before the next), which is what prevents pool starvation. Client chunk size raised to **5,000 rows** (server still multi-row-inserts them).
 - **Backoff on failure:** a failed chunk retries with exponential backoff **1s → 2s → 4s → … cap 30s** (same slice, idempotent upsert).
