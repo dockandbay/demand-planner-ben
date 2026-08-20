@@ -10065,8 +10065,11 @@ function renderExceptionsView(body){
     Object.keys(bySub).forEach(function(sub){ var subSkus=bySub[sub];
       var subcatFU={}; try{subcatFU=(calc(sub,co,ch)||{}).fu||{};}catch(e){}
       var shares={}; try{shares=buildSkuShares(subSkus,co,ch,lym)||{};}catch(e){}
-      subSkus.forEach(function(sku){ var invOH=(SKUM[sku].inv&&SKUM[sku].inv[skuWh(co,ch)])||0, fcMap={};
-        try{fcMap=skuMonthlyMap(sku,co,ch,(EXC_SUBTAB==='anomaly'?fwd6:fwd),subcatFU,shares[sku]||0,invOH)||{};}catch(e){}
+      subSkus.forEach(function(sku){ var invOH=(SKUM[sku].inv&&SKUM[sku].inv[skuWh(co,ch)])||0, fcMap={}, _mset=(EXC_SUBTAB==='anomaly'?fwd6:fwd);
+        try{fcMap=skuMonthlyMap(sku,co,ch,_mset,subcatFU,shares[sku]||0,invOH)||{};}catch(e){}
+        // Overlay per-SKU manual overrides so the report matches the DEMAND grid: skuMonthlyMap drops the override for
+        // POST-discontinue months (the grid keeps it), which is why a discontinued SKU showed 0 here vs 276 in the plan. — Ben
+        try{ _mset.forEach(function(m){ var ov=skuOvGetK(sku+'|'+co+'|'+ch+'|'+m); if(ov!=null&&ov!=='')fcMap[m]=parseInt(ov,10)||0; }); }catch(e){}
         var sales=null; try{sales=skuSales(sku,co,ch);}catch(e){}
         cb(sku,co,ch,sub,fcMap,sales,subcatFU,shares[sku]||0); }); }); }); }); }
   var _catOf=function(sku){ return (SKUM[sku]&&(SKUM[sku].c||SKUM[sku].s))||'Unmapped'; };
