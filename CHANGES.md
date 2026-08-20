@@ -1,3 +1,6 @@
+## v27.203 Price Lists: current-price edit no longer flagged as a future-price error
+- A price from the current production (or earlier, or blank effective-from) is now treated as the **current price**, not a future change — so editing it no longer shows "future price must be from a production after 60". Only genuine **future** price-change blocks (effective from a production after the current one) are validated on that rule; and a current price normalises its effective-from to blank on save. (A stale test entry with effective-from=1 was the trigger.)
+
 ## v27.202 Price Lists: MANUAL/no-price-type section, exclude list, MASTER-only, scroll fix
 - **Only `variant_type='MASTER'`** products appear (SETs + variant children excluded), and **`status='NON STOCKED'`** products are hidden.
 - **MANUAL / no-price-type** SKUs (price_type = MANUAL or blank) now render as an **open SKU list at the bottom, grouped by supplier** — each SKU priced individually (no type inherit).
