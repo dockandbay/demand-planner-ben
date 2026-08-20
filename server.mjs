@@ -13793,6 +13793,20 @@ app.post('/api/portal/price-list/submit', portalAuth, async (req, res) => {
   } catch (e) { await client.query('ROLLBACK'); log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
+// Portal price-list change log (scoped to the supplier). No params → recent decisions (approved/rejected/superseded)
+// for the notification banner; with scope+key → full history for that price point.
+app.get('/api/portal/price-list/log', portalAuth, async (req, res) => {
+  if (!IS_SANDBOX) return res.status(404).json({ error: 'not enabled' });
+  const sups = req.portal.suppliers || [], q = req.query || {};
+  if (!sups.length) return res.json([]);
+  try {
+    let where = 'e.supplier=ANY($1)', params = [sups];
+    if (q.scope && q.key) { const col = q.scope === 'sku' ? 'sku' : 'price_type'; where += ` AND e.scope=$2 AND coalesce(e.${col},'')=$3`; params.push(q.scope, q.key); }
+    else where += ` AND e.source='supplier' AND e.status IN ('active','rejected','superseded')`;
+    res.json((await pool.query(`SELECT ${PL_LOG_COLS} FROM planner.price_list_entries e WHERE ${where}
+      ORDER BY coalesce(e.approved_at,e.updated_at) DESC NULLS LAST LIMIT 300`, params)).rows);
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // Supplier portal ▸ Quality Control (migration 160): the supplier's own uploaded QC docs, scoped to their supplier(s).
 app.get('/api/portal/quality-docs', portalAuth, async (req, res) => {
   try {

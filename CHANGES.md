@@ -1,3 +1,8 @@
+## v27.218 Supplier portal Price List: per-point change log, decisions banner, roomier table
+- Each price-type and SKU row in the supplier portal now has a subtle **🕘** button opening the **change log for just that price point** (dated history: approved / rejected / superseded / pending, with tiers + note) — mirrors the admin side. Endpoint `GET /api/portal/price-list/log?scope=&key=` (portal-scoped, sandbox-gated).
+- Added a **"Recent decisions on your proposals"** banner at the top of the portal Price List — shows the supplier's latest approved/rejected changes so they get feedback (previously silent).
+- Widened the portal table (more cell padding + header spacing) so columns are less crowded.
+
 ## v27.217 Price Lists admin: per-price-point change log (subtle 🕘 per row)
 - Each price-type and SKU row now has a subtle **🕘** button that opens the **full change log for just that price point** (all history: pending / approved / rejected / superseded, dated, with tiers + note). The toolbar "Change log" (global) still works. Log endpoint now accepts `scope`+`key` (+optional `supplier`).
 
