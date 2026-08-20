@@ -4797,7 +4797,7 @@
   var prodTab='list', _prodList=[];
   // PURCHASE ORDERS is now the umbrella: PLAN (the PO grid) + the former PRODUCTIONS sub-tabs.
   var poSub='plan';
-  var PO_SUBS=[['plan','PLAN'],['orderplan','Order plan'],['pricelists','Price Lists'],['shipments','Shipments'],['crossdock','Crossdock & Labels'],['manufacturing','Manufacturing'],['list','Productions'],['barcodes','Barcodes'],['directclient','Direct to Client'],['customorders','Custom Orders'],['flexport','Flexport']];   // Order plan moved here from the L2 menu (next to PLAN). Direct to Client / Custom Orders / Flexport moved here from BI & REPORTS (Ben).
+  var PO_SUBS=[['plan','PLAN'],['orderplan','Order plan'],['shipments','Shipments'],['crossdock','Crossdock & Labels'],['manufacturing','Manufacturing'],['list','Productions'],['barcodes','Barcodes'],['directclient','Direct to Client'],['customorders','Custom Orders'],['flexport','Flexport'],['pricelists','Price Lists']];   // Order plan moved here from the L2 menu (next to PLAN). Direct to Client / Custom Orders / Flexport moved here from BI & REPORTS (Ben).
   var PAY_SUBS=[['deposits','Deposits'],['other','Other Payments'],['paydue','Payments Due'],['payreport','Payments Report'],['bysupplier','By Supplier'],['cashflow','Cash Flow'],['drawdown','Deposits Drawdown'],['af','Auto Forecast'],['xerocompare','Xero Compare']];   // PAYMENTS umbrella; Cash Flow + Auto Forecast (payments plan) moved here from BI & REPORTS. Deposits Drawdown sits after Cash Flow (Ben).
   var PO_SUB_KEYS=PO_SUBS.map(function(t){return t[0];});
   var PAY_SUB_KEYS=PAY_SUBS.map(function(t){return t[0];});
@@ -8538,112 +8538,140 @@
       fetch('/api/supply/portal-user-create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({email:em,supplier_name:list.dataset.sup,contact_name:ct||null})}).then(function(x){return x.json();}).then(function(j){ btn.disabled=false; if(j&&j.error){ msg.style.color='#dc2626'; msg.textContent=j.error; return; } var emp=list.querySelector('.supd-pu-empty'); if(emp)emp.remove(); var tmp=document.createElement('div'); tmp.innerHTML='<div class="supd-pu-row" data-id="'+esc(String(j.id||''))+'" style="display:flex;align-items:center;gap:8px;font-size:12px;margin:3px 0"><label style="cursor:pointer"><input type="checkbox" class="supd-pu-active" checked></label><span style="flex:1;word-break:break-word">'+esc(em)+(ct?' <span class="mut tiny">· '+esc(ct)+'</span>':'')+'</span><button class="lnk-btn supd-pu-magic" title="copy a 7-day portal login link for this user" style="color:#2563eb">🔗 link</button> <button class="lnk-btn supd-pu-del" style="color:#b91c1c">✕</button></div>'; var row=tmp.firstChild; list.appendChild(row); wireRow(row); emEl.value=''; ctEl.value=''; msg.style.color='#16a34a'; msg.textContent='Added.'; }).catch(function(e){ btn.disabled=false; msg.style.color='#dc2626'; msg.textContent=(e.message||e); }); };
   }
   window.openSupplierDrawer=openSupplierDrawer; window.closeSupplierDrawer=closeSupplierDrawer;
-  // ── PRICE LISTS (SUPPLY ▸ Purchase Orders ▸ Price Lists) — admin grid: price_type rows (expand → SKU exceptions)
-  //    × supplier columns; each cell = the applicable price (base tier) with tiers + "from production N" versioning.
-  var PL_ST={q:'',sup:'',prod:'',open:{}};
+  // ── PRICE LISTS (SUPPLY ▸ Purchase Orders ▸ Price Lists) ─────────────────────────────────────────────
+  //    Rows = price_type (expand → ALL its SKUs; SKUs inherit the type price in grey unless overridden).
+  //    Columns are POSITIONAL: Main / Secondary / Tertiary supplier (name shown in each cell), not one-per-supplier.
+  //    Tiers (qty breaks), "from production N" versioning, and future price changes. Data cached (PL_DATA) so
+  //    expand / filter never re-fetch (no page refresh).
+  var PL_ST={q:'',sup:'',prod:'',open:{},active:true}, PL_DATA=null;
   function renderPriceLists(b){ b.innerHTML='<div class="count">Loading…</div>';
-    fetch('/api/supply/price-list').then(function(r){return r.json();}).then(function(d){
-      if(d&&d.error){ b.innerHTML='<div style="color:#dc2626">'+esc(d.error)+'</div>'; return; }
-      var entries=d.entries||[], suppliers=d.suppliers||[], priceTypes=d.priceTypes||[], productions=d.productions||[];
-      var typeSkus={}; priceTypes.forEach(function(t){ typeSkus[t.price_type]=t.skus||[]; });
-      var byKey={}; entries.forEach(function(e){ var k=e.supplier+'|'+e.scope+'|'+(e.scope==='sku'?e.sku:e.price_type); (byKey[k]=byKey[k]||[]).push(e); });
-      var supCcy={}; suppliers.forEach(function(s){ supCcy[s.name]=s.currency; });
-      var supsWith={}; entries.forEach(function(e){ supsWith[e.supplier]=1; });
-      var cols=suppliers.filter(function(s){ return PL_ST.sup?(s.name===PL_ST.sup):supsWith[s.name]; });
-      if(!cols.length)cols=suppliers.filter(function(s){return supsWith[s.name];});
-      var prodSel=PL_ST.prod?parseInt(PL_ST.prod,10):null;
-      function applicable(list){ if(!list||!list.length)return {cur:null,pending:false};
-        var act=list.filter(function(e){return e.status==='active';}), pend=list.filter(function(e){return e.status==='pending';}), pick=null;
-        var pool2=(prodSel==null)?act:act.filter(function(e){return (e.effective_from_production||0)<=prodSel;});
-        if(!pool2.length)pool2=act.filter(function(e){return e.effective_from_production==null;});
-        pool2.slice().sort(function(a,b){return (a.effective_from_production||0)-(b.effective_from_production||0);}).forEach(function(e){pick=e;});
-        return {cur:pick,pending:pend.length>0}; }
-      function baseCost(e){ if(!e||!e.tiers||!e.tiers.length)return null; var t=e.tiers.filter(function(x){return x.min_qty<=1;}); return (t[0]||e.tiers[0]).unit_cost; }
-      function cellHtml(sup,scope,keyval,pt){ var a=applicable(byKey[sup.name+'|'+scope+'|'+keyval]);
-        var base='text-align:right;cursor:pointer;', warn=a.pending?'<span title="pending supplier change — click to review/approve" style="color:#b45309">⚑</span> ':'';
-        if(!a.cur){ return '<td class="pl-cell" data-sup="'+esc(sup.name)+'" data-scope="'+scope+'" data-key="'+esc(keyval)+'" data-pt="'+esc(pt||keyval)+'" style="'+base+'color:#cbd5e1">'+warn+'+</td>'; }
-        var e=a.cur, sym=curSym(e.currency), tiers=e.tiers||[];
-        var tip=tiers.map(function(t){return t.min_qty+':'+sym+money(t.unit_cost);}).join(' · ');
-        var efp=e.effective_from_production?(' <span class="mut tiny" title="effective from production '+e.effective_from_production+'">P'+e.effective_from_production+'</span>'):'';
-        return '<td class="pl-cell" data-id="'+e.id+'" data-sup="'+esc(sup.name)+'" data-scope="'+scope+'" data-key="'+esc(keyval)+'" data-pt="'+esc(pt||keyval)+'" title="'+esc(tip)+'" style="'+base+'">'+warn+'<b>'+sym+money(baseCost(e))+'</b>'+(tiers.length>1?' <span class="mut tiny">·'+tiers.length+'t</span>':'')+efp+'</td>'; }
-      var q=(PL_ST.q||'').trim().toLowerCase();
-      function typeMatches(pt){ if(!q)return true; if(pt.toLowerCase().indexOf(q)>=0)return true; return (typeSkus[pt]||[]).some(function(s){return s.sku.toLowerCase().indexOf(q)>=0;}); }
-      var typesWithEntries={}; entries.forEach(function(e){ if(e.price_type)typesWithEntries[e.price_type]=1; });
-      var showTypes=Object.keys(typesWithEntries).filter(typeMatches).sort();
-      var supOpts='<option value="">All suppliers</option>'+suppliers.map(function(s){return '<option value="'+esc(s.name)+'"'+(PL_ST.sup===s.name?' selected':'')+'>'+esc(s.name)+'</option>';}).join('');
-      var prodOpts='<option value="">Current prices</option>'+productions.map(function(p){return '<option value="'+p+'"'+(String(PL_ST.prod)===String(p)?' selected':'')+'>as of prod '+p+'</option>';}).join('');
-      var bar='<div class="bar"><span class="pill-lbl">Search</span><input class="flt" id="pl-q" placeholder="SKU or price type…" value="'+esc(PL_ST.q)+'" style="width:190px">'
-        +'<span class="pill-lbl" style="margin-left:12px">Supplier</span><select class="flt" id="pl-sup" style="min-width:150px">'+supOpts+'</select>'
-        +'<span class="pill-lbl" style="margin-left:12px">Prices</span><select class="flt" id="pl-prod" style="min-width:140px">'+prodOpts+'</select>'
-        +(d.pending>0?'<span class="ex-badge" style="margin-left:12px;background:#b45309" title="'+d.pending+' pending supplier price change(s)">⚑ '+d.pending+' pending</span>':'')
-        +'<span class="mut tiny" style="margin-left:auto">click a cell to edit price + tiers · ▸ to see SKU exceptions</span></div>';
-      var head='<tr><th class="pl-lbl" style="min-width:260px">Price type / SKU</th>'+cols.map(function(s){return '<th style="text-align:right">'+esc(s.name)+' <span class="mut tiny">'+esc(s.currency)+'</span></th>';}).join('')+'</tr>';
-      var body='';
-      showTypes.forEach(function(pt){ var excSkus=Array.from(new Set(entries.filter(function(e){return e.scope==='sku'&&e.price_type===pt;}).map(function(e){return e.sku;})));
-        var op=!!PL_ST.open[pt];
-        body+='<tr class="pl-type"><td class="pl-lbl" data-tgl="'+esc(pt)+'" style="cursor:pointer;font-weight:700"><span class="mut">'+(op?'▾':'▸')+'</span> '+esc(pt)+(excSkus.length?' <span class="mut tiny">·'+excSkus.length+' exc</span>':'')+'</td>'+cols.map(function(s){return cellHtml(s,'type',pt,pt);}).join('')+'</tr>';
-        if(op){ excSkus.forEach(function(sku){ var nm=((typeSkus[pt]||[]).filter(function(x){return x.sku===sku;})[0]||{}).name||'';
-            body+='<tr class="pl-sku"><td class="pl-lbl" style="padding-left:22px;font-family:ui-monospace,Menlo,monospace"><span title="'+esc(nm)+'">'+esc(sku)+'</span> <span class="mut tiny" style="font-family:system-ui">exc</span></td>'+cols.map(function(s){return cellHtml(s,'sku',sku,pt);}).join('')+'</tr>'; });
-          body+='<tr class="pl-sku"><td class="pl-lbl" style="padding-left:22px"><button class="save-btn light pl-addexc" data-pt="'+esc(pt)+'" style="font-size:11px;padding:2px 8px">+ SKU exception</button></td><td colspan="'+cols.length+'"></td></tr>'; }
-      });
-      if(!showTypes.length)body='<tr><td colspan="'+(cols.length+1)+'" class="count">No price types match.</td></tr>';
-      b.innerHTML=bar+'<div style="overflow:auto;max-height:calc(100vh - 230px)"><table class="pl-tbl" style="border-collapse:separate;border-spacing:0;font-size:12px;width:100%">'
-        +'<thead>'+head+'</thead><tbody>'+body+'</tbody></table></div>';
-      if(!document.getElementById('pl-sty')){ var st=document.createElement('style'); st.id='pl-sty'; st.textContent=
-        '#supply-root .pl-tbl th{position:sticky;top:0;background:#f8fafc;z-index:2;padding:5px 8px;border-bottom:1px solid #e2e8f0;font-size:10px;text-transform:uppercase;color:#475569;white-space:nowrap}'
-        +'#supply-root .pl-tbl td{padding:4px 8px;border-bottom:1px solid #f1f5f9;white-space:nowrap}'
-        +'#supply-root .pl-tbl .pl-lbl{position:sticky;left:0;background:#fff;z-index:1;text-align:left;box-shadow:2px 0 3px -2px rgba(15,23,42,.15)}'
-        +'#supply-root .pl-tbl th.pl-lbl{z-index:3;background:#f8fafc}'
-        +'#supply-root .pl-tbl tr.pl-type td{background:#f6f8ff}#supply-root .pl-tbl tr.pl-type td.pl-lbl{background:#eef2ff}'
-        +'#supply-root .pl-tbl .pl-cell:hover{background:#eff6ff}'; document.head.appendChild(st); }
-      var qi=b.querySelector('#pl-q'); if(qi)qi.oninput=function(){ PL_ST.q=this.value; renderPriceLists(b); var n=document.getElementById('pl-q'); if(n){n.focus();var L=n.value.length;try{n.setSelectionRange(L,L);}catch(e){}} };
-      var si=b.querySelector('#pl-sup'); if(si)si.onchange=function(){ PL_ST.sup=this.value; renderPriceLists(b); };
-      var pi=b.querySelector('#pl-prod'); if(pi)pi.onchange=function(){ PL_ST.prod=this.value; renderPriceLists(b); };
-      b.querySelectorAll('.pl-lbl[data-tgl]').forEach(function(td){ td.onclick=function(){ var t=td.dataset.tgl; PL_ST.open[t]=!PL_ST.open[t]; renderPriceLists(b); }; });
-      b.querySelectorAll('.pl-cell').forEach(function(td){ td.onclick=function(){ plEditor(b,{id:td.dataset.id||null,supplier:td.dataset.sup,scope:td.dataset.scope,key:td.dataset.key,pt:td.dataset.pt,suppliers:suppliers,supCcy:supCcy,byKey:byKey,typeSkus:typeSkus}); }; });
-      b.querySelectorAll('.pl-addexc').forEach(function(btn){ btn.onclick=function(){ plEditor(b,{id:null,supplier:'',scope:'sku',key:'',pt:btn.dataset.pt,suppliers:suppliers,supCcy:supCcy,byKey:byKey,typeSkus:typeSkus}); }; });
-    }).catch(function(e){ b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>'; });
+    fetch('/api/supply/price-list').then(function(r){return r.json();}).then(function(d){ if(d&&d.error){ b.innerHTML='<div style="color:#dc2626">'+esc(d.error)+'</div>'; return; } PL_DATA=d; plDraw(b,d); }).catch(function(e){ b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>'; }); }
+  function plDraw(b,d){
+    var entries=d.entries||[], suppliers=d.suppliers||[], priceTypes=d.priceTypes||[], productions=d.productions||[], curProd=d.currentProduction||0;
+    var typeSkus={}, typeMain={}; priceTypes.forEach(function(t){ typeSkus[t.price_type]=t.skus||[]; typeMain[t.price_type]=t.mainSupplier||''; });
+    var byKey={}; entries.forEach(function(e){ var k=e.supplier+'|'+e.scope+'|'+(e.scope==='sku'?e.sku:e.price_type); (byKey[k]=byKey[k]||[]).push(e); });
+    var prodSel=PL_ST.prod?parseInt(PL_ST.prod,10):null;
+    function applicable(list){ if(!list||!list.length)return {cur:null,pending:false}; var act=list.filter(function(e){return e.status==='active';}), pend=list.filter(function(e){return e.status==='pending';}), pick=null;
+      var pool2=(prodSel==null)?act:act.filter(function(e){return (e.effective_from_production||0)<=prodSel;}); if(!pool2.length)pool2=act.filter(function(e){return e.effective_from_production==null;});
+      pool2.slice().sort(function(a,b){return (a.effective_from_production||0)-(b.effective_from_production||0);}).forEach(function(e){pick=e;}); return {cur:pick,pending:pend.length>0}; }
+    function priceDisp(e){ if(!e||!e.tiers||!e.tiers.length)return ''; var sym=curSym(e.currency), t=e.tiers.map(function(x){return Number(x.unit_cost);}); var mn=Math.min.apply(null,t), mx=Math.max.apply(null,t);
+      if(t.length<2||mn===mx)return '<b style="font-size:13px">'+sym+money(mx)+'</b>'; return '<span style="font-size:10px;color:#64748b">'+sym+money(mn)+'</span><span style="color:#cbd5e1"> – </span><b style="font-size:13px">'+sym+money(mx)+'</b>'; }
+    function efpTag(e){ return e&&e.effective_from_production?(' <span class="mut tiny" title="applies from production '+e.effective_from_production+' onwards">P'+e.effective_from_production+'</span>'):''; }
+    function orderedSups(pt){ var set={}; entries.forEach(function(e){ if(e.scope==='type'&&e.price_type===pt)set[e.supplier]=1; }); var arr=Object.keys(set); var main=typeMain[pt]; arr.sort(function(a,b){ return a===main?-1:b===main?1:(a<b?-1:1); }); return arr; }
+    var q=(PL_ST.q||'').trim().toLowerCase();
+    function typeMatches(pt){ if(PL_ST.sup&&!entries.some(function(e){return e.supplier===PL_ST.sup&&e.price_type===pt;}))return false; if(!q)return true; if(pt.toLowerCase().indexOf(q)>=0)return true; return (typeSkus[pt]||[]).some(function(s){return s.sku.toLowerCase().indexOf(q)>=0;}); }
+    function skuVisible(pt,s){ if(q){ if(s.sku.toLowerCase().indexOf(q)>=0)return true; if(pt.toLowerCase().indexOf(q)>=0)return (!PL_ST.active||s.active); return false; } return (!PL_ST.active||s.active); }
+    var typesWith={}; entries.forEach(function(e){ if(e.price_type)typesWith[e.price_type]=1; });
+    var showTypes=Object.keys(typesWith).filter(typeMatches).sort();
+    var maxLen=0; showTypes.forEach(function(pt){ var n=orderedSups(pt).length; if(n>maxLen)maxLen=n; }); var maxCols=maxLen>=3?3:2;
+    var COLLBL=['Main supplier','Secondary supplier','Tertiary supplier'];
+    var supOpts='<option value="">All suppliers</option>'+suppliers.map(function(s){return '<option value="'+esc(s.name)+'"'+(PL_ST.sup===s.name?' selected':'')+'>'+esc(s.name)+'</option>';}).join('');
+    var prodDL='<datalist id="pl-prod-dl">'+productions.map(function(p){return '<option value="'+p+'">';}).join('')+'</datalist>';
+    var bar='<div class="bar">'+prodDL+'<span class="pill-lbl">Search</span><input class="flt" id="pl-q" placeholder="SKU or price type…" value="'+esc(PL_ST.q)+'" style="width:180px">'
+      +'<span class="pill-lbl" style="margin-left:10px">Supplier</span><select class="flt" id="pl-sup" style="min-width:140px">'+supOpts+'</select>'
+      +'<span class="pill-lbl" style="margin-left:10px">Prices as of</span><input class="flt" id="pl-prod" list="pl-prod-dl" placeholder="current" value="'+esc(PL_ST.prod)+'" style="width:110px" title="Show prices effective as of this production (future productions from '+curProd+' up). Blank = current.">'
+      +'<label style="margin-left:10px;font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:5px;cursor:pointer" title="Hide discontinued SKUs (they still show when searched)"><input type="checkbox" id="pl-active"'+(PL_ST.active?' checked':'')+'> Active SKUs only</label>'
+      +(d.pending>0?'<span class="ex-badge" style="margin-left:10px;background:#b45309" title="'+d.pending+' pending supplier price change(s)">⚑ '+d.pending+' pending</span>':'')
+      +'<span class="mut tiny" style="margin-left:auto">click a cell to set price + tiers · SKUs inherit the type price (↳) until overridden</span></div>';
+    var head='<tr><th class="pl-lbl" style="min-width:280px">Price type / SKU</th>'+COLLBL.slice(0,maxCols).map(function(l){return '<th style="text-align:left">'+l+'</th>';}).join('')+'</tr>';
+    var body='';
+    showTypes.forEach(function(pt){ var sups=orderedSups(pt), op=!!PL_ST.open[pt];
+      var excCount=entries.filter(function(e){return e.scope==='sku'&&e.price_type===pt;}).length;
+      var cells='';
+      for(var i=0;i<maxCols;i++){ var sup=sups[i];
+        if(!sup){ cells+='<td class="pl-cell pl-add" data-scope="type" data-pt="'+esc(pt)+'" style="cursor:pointer;color:#94a3b8">+ add supplier</td>'; continue; }
+        var a=applicable(byKey[sup+'|type|'+pt]);
+        cells+='<td class="pl-cell" data-scope="type" data-pt="'+esc(pt)+'" data-sup="'+esc(sup)+'" style="cursor:pointer"><div class="mut tiny" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px">'+esc(sup)+'</div>'+(a.cur?((a.pending?'<span style="color:#b45309">⚑ </span>':'')+priceDisp(a.cur)+efpTag(a.cur)):'<span style="color:#cbd5e1">— set price</span>')+'</td>';
+      }
+      body+='<tr class="pl-type"><td class="pl-lbl" data-tgl="'+esc(pt)+'" style="cursor:pointer;font-weight:700"><span class="mut">'+(op?'▾':'▸')+'</span> '+esc(pt)+(excCount?' <span class="mut tiny">·'+excCount+' exc</span>':'')+'</td>'+cells+'</tr>';
+      if(op){ (typeSkus[pt]||[]).filter(function(s){return skuVisible(pt,s);}).forEach(function(s){
+        var sc='';
+        for(var i=0;i<maxCols;i++){ var sup=sups[i];
+          if(!sup){ sc+='<td class="pl-cell pl-empty"></td>'; continue; }
+          var ax=applicable(byKey[sup+'|sku|'+s.sku]);
+          if(ax.cur){ sc+='<td class="pl-cell" data-scope="sku" data-pt="'+esc(pt)+'" data-sku="'+esc(s.sku)+'" data-sup="'+esc(sup)+'" style="cursor:pointer">'+(ax.pending?'<span style="color:#b45309">⚑ </span>':'')+priceDisp(ax.cur)+efpTag(ax.cur)+'</td>'; }
+          else { var at=applicable(byKey[sup+'|type|'+pt]); var inh=at.cur?priceDisp(at.cur):'<span style="color:#cbd5e1">—</span>';
+            sc+='<td class="pl-cell pl-inh" data-scope="sku" data-pt="'+esc(pt)+'" data-sku="'+esc(s.sku)+'" data-sup="'+esc(sup)+'" title="inherits the '+esc(pt)+' price — click to set a SKU-specific price" style="cursor:pointer"><span title="inherited" style="color:#cbd5e1">↳</span> <span style="opacity:.6">'+inh+'</span></td>'; }
+        }
+        var disc=s.active?'':' <span class="mut tiny" style="color:#b45309" title="discontinued">disc</span>';
+        body+='<tr class="pl-sku"><td class="pl-lbl" style="padding-left:22px;font-family:ui-monospace,Menlo,monospace"><span title="'+esc(s.name)+'">'+esc(s.sku)+'</span>'+disc+'</td>'+sc+'</tr>';
+      }); }
+    });
+    if(!showTypes.length)body='<tr><td colspan="'+(maxCols+1)+'" class="count">No price types match.</td></tr>';
+    b.innerHTML=bar+'<div style="overflow:auto;max-height:calc(100vh - 230px)"><table class="pl-tbl" style="border-collapse:separate;border-spacing:0;font-size:12px;width:100%"><thead>'+head+'</thead><tbody>'+body+'</tbody></table></div>';
+    if(!document.getElementById('pl-sty')){ var st=document.createElement('style'); st.id='pl-sty'; st.textContent=
+      '#supply-root .pl-tbl th{position:sticky;top:0;background:#f8fafc;z-index:2;padding:5px 8px;border-bottom:1px solid #e2e8f0;font-size:10px;text-transform:uppercase;color:#475569;white-space:nowrap}'
+      +'#supply-root .pl-tbl td{padding:4px 8px;border-bottom:1px solid #f1f5f9;white-space:nowrap;text-align:left}'
+      +'#supply-root .pl-tbl .pl-lbl{position:sticky;left:0;background:#fff;z-index:1;text-align:left;box-shadow:2px 0 3px -2px rgba(15,23,42,.15)}'
+      +'#supply-root .pl-tbl th.pl-lbl{z-index:3;background:#f8fafc}'
+      +'#supply-root .pl-tbl tr.pl-type td{background:#f6f8ff}#supply-root .pl-tbl tr.pl-type td.pl-lbl{background:#eef2ff}'
+      +'#supply-root .pl-tbl .pl-cell:hover{background:#eff6ff}#supply-root .pl-tbl td.pl-inh:hover{background:#eff6ff}'; document.head.appendChild(st); }
+    var qi=b.querySelector('#pl-q'); if(qi)qi.oninput=function(){ PL_ST.q=this.value; plDraw(b,d); var n=document.getElementById('pl-q'); if(n){n.focus();var L=n.value.length;try{n.setSelectionRange(L,L);}catch(e){}} };
+    var si=b.querySelector('#pl-sup'); if(si)si.onchange=function(){ PL_ST.sup=this.value; plDraw(b,d); };
+    var pri=b.querySelector('#pl-prod'); if(pri)pri.onchange=function(){ PL_ST.prod=this.value.trim(); plDraw(b,d); };
+    var ai=b.querySelector('#pl-active'); if(ai)ai.onchange=function(){ PL_ST.active=this.checked; plDraw(b,d); };
+    b.querySelectorAll('.pl-lbl[data-tgl]').forEach(function(td){ td.onclick=function(){ var t=td.dataset.tgl; PL_ST.open[t]=!PL_ST.open[t]; plDraw(b,d); }; });   // expand/minimise — redraw from cache, NO refetch
+    b.querySelectorAll('.pl-cell').forEach(function(td){ td.onclick=function(){ plEditor(b,{d:d,scope:td.dataset.scope,pt:td.dataset.pt,sku:td.dataset.sku||'',sup:td.dataset.sup||''}); }; });
   }
-  // Price editor popup: supplier + (type or SKU) + currency + effective-from-production + quantity tiers. Admin save.
-  function plEditor(b,ctx){ var ex=document.getElementById('pl-ed'); if(ex)ex.remove();
-    // prefill from the currently-applicable entry for this key (if editing an existing cell)
-    var cur=null; if(ctx.id){ var list=ctx.byKey[ctx.supplier+'|'+ctx.scope+'|'+ctx.key]||[]; cur=list.filter(function(e){return String(e.id)===String(ctx.id);})[0]||null; }
-    var ccy=(cur&&cur.currency)||ctx.supCcy[ctx.supplier]||'USD';
-    var tiers=(cur&&cur.tiers&&cur.tiers.length)?cur.tiers.slice():[{min_qty:1,unit_cost:''}];
-    var efp=(cur&&cur.effective_from_production)||'';
+  // Price editor: shows the CURRENT price (tiers) + any FUTURE price changes (each effective from a production),
+  // lets you add a future change, and validates tiers (bigger quantity → smaller price).
+  function plEditor(b,ctx){ var exo=document.getElementById('pl-ed'); if(exo)exo.remove();
+    var d=ctx.d, suppliers=d.suppliers||[], supCcy={}; suppliers.forEach(function(s){supCcy[s.name]=s.currency;});
+    var productions=d.productions||[], curProd=d.currentProduction||0;
+    var byKey={}; (d.entries||[]).forEach(function(e){ var k=e.supplier+'|'+e.scope+'|'+(e.scope==='sku'?e.sku:e.price_type); (byKey[k]=byKey[k]||[]).push(e); });
+    var scope=ctx.scope, pt=ctx.pt||'', sku=ctx.sku||'', supplier=ctx.sup||'';
+    if(!supplier){ var used={}; (d.entries||[]).forEach(function(e){ if(e.scope==='type'&&e.price_type===pt)used[e.supplier]=1; }); var main=(d.priceTypes.filter(function(t){return t.price_type===pt;})[0]||{}).mainSupplier;
+      var order=suppliers.map(function(s){return s.name;}); supplier=(main&&!used[main])?main:(order.filter(function(n){return !used[n];})[0]||main||order[0]||''); }
+    function verListFor(sup){ var key=sup+'|'+scope+'|'+(scope==='sku'?sku:pt); return (byKey[key]||[]).slice().sort(function(a,b){return (a.effective_from_production||0)-(b.effective_from_production||0);}); }
+    function inheritTiers(sup){ var list=(byKey[sup+'|type|'+pt]||[]).filter(function(e){return e.status==='active';}).sort(function(a,b){return (a.effective_from_production||0)-(b.effective_from_production||0);}); var last=list[list.length-1]; return (last&&last.tiers&&last.tiers.length)?last.tiers.map(function(t){return {min_qty:t.min_qty,unit_cost:t.unit_cost};}):[{min_qty:1,unit_cost:''}]; }
+    function loadVersions(sup){ var ex=verListFor(sup); return ex.length? ex.map(function(e){return {id:e.id, efp:(e.effective_from_production||''), tiers:(e.tiers&&e.tiers.length?e.tiers.map(function(t){return {min_qty:t.min_qty,unit_cost:t.unit_cost};}):[{min_qty:1,unit_cost:''}])};}) : [{id:null, efp:'', tiers:(scope==='sku'?inheritTiers(sup):[{min_qty:1,unit_cost:''}])}]; }
+    var versions=loadVersions(supplier), deleted=[];
     var ov=document.createElement('div'); ov.id='pl-ed'; ov.style.cssText='position:fixed;inset:0;z-index:200000;background:rgba(15,23,42,.35);display:flex;align-items:center;justify-content:center;padding:16px';
-    function supSel(){ return '<select id="pl-ed-sup" style="width:100%;padding:6px 9px;border:1px solid #cbd5e1;border-radius:6px">'+ctx.suppliers.map(function(s){return '<option value="'+esc(s.name)+'"'+(s.name===ctx.supplier?' selected':'')+'>'+esc(s.name)+' ('+esc(s.currency)+')</option>';}).join('')+'</select>'; }
-    function skuSel(){ var opts=(ctx.typeSkus[ctx.pt]||[]).map(function(s){return '<option value="'+esc(s.sku)+'"'+(s.sku===ctx.key?' selected':'')+'>'+esc(s.sku)+(s.name?(' — '+esc(s.name)):'')+'</option>';}).join(''); return '<select id="pl-ed-sku" style="width:100%;padding:6px 9px;border:1px solid #cbd5e1;border-radius:6px"><option value="">— pick a SKU —</option>'+opts+'</select>'; }
-    function tierRows(){ return tiers.map(function(t,i){ return '<div class="pl-tr" style="display:flex;gap:6px;align-items:center;margin-bottom:5px"><span class="mut tiny" style="width:34px">min</span><input class="pl-mq" data-i="'+i+'" type="number" min="1" value="'+esc(t.min_qty)+'" style="width:80px;padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px"><span class="mut tiny">qty  →  '+curSym(ccy)+'</span><input class="pl-uc" data-i="'+i+'" type="number" step="0.0001" value="'+esc(t.unit_cost)+'" style="width:100px;padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px">'+(tiers.length>1?'<button class="pl-trx" data-i="'+i+'" title="remove tier" style="border:none;background:none;color:#b91c1c;cursor:pointer;font-size:15px">✕</button>':'')+'</div>'; }).join(''); }
-    var isType=(ctx.scope==='type');
-    ov.innerHTML='<div style="background:#fff;border-radius:10px;padding:16px 18px;width:440px;max-width:94vw;box-shadow:0 12px 40px rgba(15,23,42,.25)">'
-      +'<div style="font-weight:700;margin-bottom:10px">'+(ctx.id?'Edit':'Add')+' price — '+(isType?('type <b>'+esc(ctx.pt)+'</b>'):'SKU exception'+(ctx.pt?(' in <b>'+esc(ctx.pt)+'</b>'):''))+'</div>'
-      +'<div style="font-size:11px;color:#475569;margin-bottom:3px">Supplier</div>'+supSel()
-      +(isType?'':('<div style="font-size:11px;color:#475569;margin:8px 0 3px">SKU</div>'+skuSel()))
-      +'<div style="display:flex;gap:12px;margin-top:8px"><div style="flex:1"><div style="font-size:11px;color:#475569;margin-bottom:3px">Currency</div><input id="pl-ed-ccy" value="'+esc(ccy)+'" style="width:100%;padding:6px 9px;border:1px solid #cbd5e1;border-radius:6px"></div>'
-      +'<div style="flex:1"><div style="font-size:11px;color:#475569;margin-bottom:3px" title="Blank = current/always. A number = this price applies from that production onwards until superseded.">From production</div><input id="pl-ed-efp" type="number" value="'+esc(efp)+'" placeholder="current" style="width:100%;padding:6px 9px;border:1px solid #cbd5e1;border-radius:6px"></div></div>'
-      +'<div style="font-size:11px;color:#475569;margin:10px 0 4px">Quantity tiers <span class="mut tiny">(unit cost applies from that min qty up)</span></div><div id="pl-ed-tiers">'+tierRows()+'</div>'
-      +'<button id="pl-ed-addtier" class="save-btn light" style="font-size:11px;padding:2px 8px">+ tier</button>'
-      +'<div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px">'+(ctx.id?'<button id="pl-ed-del" class="save-btn light" style="color:#b91c1c;border-color:#fca5a5">Delete</button>':'<span></span>')
-      +'<div><button id="pl-ed-cancel" class="save-btn light">Cancel</button> <button id="pl-ed-save" class="save-btn" style="background:#16a34a;color:#fff;border-color:#15803d">Save</button></div></div></div>';
-    document.body.appendChild(ov); function close(){ ov.remove(); }
-    ov.addEventListener('mousedown',function(e){ if(e.target===ov)close(); });
-    document.getElementById('pl-ed-cancel').onclick=close;
-    function readTiers(){ tiers=[]; ov.querySelectorAll('.pl-tr').forEach(function(row){ var mq=row.querySelector('.pl-mq').value, uc=row.querySelector('.pl-uc').value; tiers.push({min_qty:mq,unit_cost:uc}); }); }
-    function redrawTiers(){ document.getElementById('pl-ed-tiers').innerHTML=tierRows(); wireTiers(); }
-    function wireTiers(){ ov.querySelectorAll('.pl-trx').forEach(function(x){ x.onclick=function(){ readTiers(); tiers.splice(+x.dataset.i,1); if(!tiers.length)tiers=[{min_qty:1,unit_cost:''}]; redrawTiers(); }; }); }
-    wireTiers();
-    document.getElementById('pl-ed-addtier').onclick=function(){ readTiers(); tiers.push({min_qty:'',unit_cost:''}); redrawTiers(); };
-    var ccyIn=document.getElementById('pl-ed-ccy'); ccyIn.oninput=function(){ ccy=this.value; }; var supIn=document.getElementById('pl-ed-sup'); if(supIn)supIn.onchange=function(){ if(!ctx.id){ var s=ctx.suppliers.filter(function(x){return x.name===this.value;},this)[0]; } };
-    if(ctx.id){ document.getElementById('pl-ed-del').onclick=function(){ if(!confirm('Delete this price entry?'))return; fetch('/api/supply/price-list/'+ctx.id+'/delete',{method:'POST'}).then(function(r){return r.json();}).then(function(){ close(); renderPriceLists(b); }).catch(function(e){ alert('Delete failed: '+(e.message||e)); }); }; }
-    document.getElementById('pl-ed-save').onclick=function(){ readTiers();
-      var supplier=document.getElementById('pl-ed-sup').value, sku=isType?null:(document.getElementById('pl-ed-sku')?document.getElementById('pl-ed-sku').value:ctx.key);
-      var payload={id:ctx.id||undefined,supplier:supplier,scope:ctx.scope,price_type:ctx.pt||null,sku:sku,currency:document.getElementById('pl-ed-ccy').value||'USD',effective_from_production:document.getElementById('pl-ed-efp').value,
-        tiers:tiers.map(function(t){return {min_qty:t.min_qty,unit_cost:t.unit_cost};}).filter(function(t){return t.unit_cost!==''&&t.unit_cost!=null;})};
-      if(!isType&&!sku){ alert('Pick a SKU for the exception.'); return; }
-      if(!payload.tiers.length){ alert('Enter at least one tier price.'); return; }
-      var go=document.getElementById('pl-ed-save'); go.disabled=true; go.textContent='Saving…';
-      fetch('/api/supply/price-list',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){go.disabled=false;go.textContent='Save';alert(j.error);return;} close(); if(ctx.pt)PL_ST.open[ctx.pt]=true; renderPriceLists(b); }).catch(function(e){ go.disabled=false;go.textContent='Save'; alert('Save failed: '+(e.message||e)); }); };
+    function sym(){ return curSym(supCcy[supplier]||'USD'); }
+    function tierRows(v,vi){ return v.tiers.map(function(t,ti){ return '<div class="pl-tr" data-vi="'+vi+'" data-ti="'+ti+'" style="display:flex;gap:6px;align-items:center;margin-bottom:4px"><span class="mut tiny" style="width:26px">min</span><input class="pl-mq" type="number" min="1" value="'+esc(t.min_qty)+'" style="width:74px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px"><span class="mut tiny">qty → '+sym()+'</span><input class="pl-uc" type="number" step="0.0001" value="'+esc(t.unit_cost)+'" style="width:92px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px">'+(v.tiers.length>1?'<button class="pl-trx" title="remove tier" style="border:none;background:none;color:#b91c1c;cursor:pointer;font-size:14px">✕</button>':'')+'</div>'; }).join(''); }
+    function verBlock(v,vi){ var isCur=(v.efp===''||v.efp==null);
+      var prodDL='<datalist id="pl-ed-pdl">'+productions.map(function(p){return '<option value="'+p+'">';}).join('')+'</datalist>';
+      return '<div class="pl-ver" data-vi="'+vi+'" style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:8px;background:'+(isCur?'#f8fafc':'#fffbeb')+'">'
+        +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">'
+        +(isCur?'<b style="font-size:12px">Current price</b>':'<span style="font-size:12px;display:inline-flex;align-items:center;gap:5px"><b>From production</b> '+prodDL+'<input class="pl-efp" list="pl-ed-pdl" value="'+esc(v.efp)+'" placeholder="≥ '+curProd+'" style="width:80px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px"></span>')
+        +'<button class="pl-verdel" title="remove this price version" style="border:none;background:none;color:#b91c1c;cursor:pointer;font-size:12px">'+(isCur&&versions.length===1?'':'✕ remove')+'</button></div>'
+        +'<div class="pl-tiers">'+tierRows(v,vi)+'</div>'
+        +'<button class="pl-addtier" style="font-size:11px;padding:2px 8px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;cursor:pointer">+ tier</button></div>'; }
+    function paint(){ var supSel='<select id="pl-ed-sup" style="padding:5px 8px;border:1px solid #cbd5e1;border-radius:6px">'+suppliers.map(function(s){return '<option value="'+esc(s.name)+'"'+(s.name===supplier?' selected':'')+'>'+esc(s.name)+' ('+esc(s.currency)+')</option>';}).join('')+'</select>';
+      ov.innerHTML='<div style="background:#fff;border-radius:10px;padding:16px 18px;width:520px;max-width:95vw;max-height:90vh;overflow:auto;box-shadow:0 12px 40px rgba(15,23,42,.25)">'
+        +'<div style="font-weight:700;margin-bottom:8px">'+(scope==='type'?('Price for type '):('SKU price — '))+'<b>'+esc(scope==='sku'?sku:pt)+'</b>'+(scope==='sku'?(' <span class="mut tiny">('+esc(pt)+')</span>'):'')+'</div>'
+        +'<div style="font-size:11px;color:#475569;margin-bottom:3px">Supplier</div><div style="margin-bottom:10px">'+supSel+'</div>'
+        +'<div style="font-size:11px;color:#475569;margin-bottom:5px">Prices <span class="mut tiny">— larger quantity must be a lower unit cost</span></div>'
+        +'<div id="pl-vers">'+versions.map(verBlock).join('')+'</div>'
+        +'<button id="pl-addver" style="font-size:11px;padding:3px 10px;border:1px dashed #94a3b8;border-radius:6px;background:#fff;cursor:pointer;color:#334155">＋ Add future price change</button>'
+        +'<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px"><button id="pl-cancel" class="save-btn light">Cancel</button> <button id="pl-save" class="save-btn" style="background:#16a34a;color:#fff;border-color:#15803d">Save</button></div></div>';
+      wire(); }
+    function readDom(){ ov.querySelectorAll('.pl-ver').forEach(function(vb){ var vi=+vb.dataset.vi, v=versions[vi]; if(!v)return; var ef=vb.querySelector('.pl-efp'); v.efp=ef?ef.value.trim():''; var ts=[]; vb.querySelectorAll('.pl-tr').forEach(function(r){ ts.push({min_qty:r.querySelector('.pl-mq').value, unit_cost:r.querySelector('.pl-uc').value}); }); v.tiers=ts.length?ts:[{min_qty:1,unit_cost:''}]; }); }
+    function wire(){
+      ov.querySelector('#pl-ed-sup').onchange=function(){ readDom(); supplier=this.value; versions=loadVersions(supplier); deleted=[]; paint(); };
+      ov.querySelectorAll('.pl-verdel').forEach(function(x){ x.onclick=function(){ readDom(); var vi=+x.closest('.pl-ver').dataset.vi; if(versions[vi]&&versions[vi].id)deleted.push(versions[vi].id); versions.splice(vi,1); if(!versions.length)versions=[{id:null,efp:'',tiers:[{min_qty:1,unit_cost:''}]}]; paint(); }; });
+      ov.querySelectorAll('.pl-addtier').forEach(function(x){ x.onclick=function(){ readDom(); var vi=+x.closest('.pl-ver').dataset.vi; versions[vi].tiers.push({min_qty:'',unit_cost:''}); paint(); }; });
+      ov.querySelectorAll('.pl-trx').forEach(function(x){ x.onclick=function(){ readDom(); var r=x.closest('.pl-tr'), vi=+r.dataset.vi, ti=+r.dataset.ti; versions[vi].tiers.splice(ti,1); if(!versions[vi].tiers.length)versions[vi].tiers=[{min_qty:1,unit_cost:''}]; paint(); }; });
+      ov.querySelector('#pl-addver').onclick=function(){ readDom(); var seed=versions[versions.length-1]; versions.push({id:null, efp:String(Math.max(curProd, (Number(seed&&seed.efp)||curProd))), tiers:(seed&&seed.tiers?seed.tiers.map(function(t){return {min_qty:t.min_qty,unit_cost:t.unit_cost};}):[{min_qty:1,unit_cost:''}])}); paint(); };
+      ov.querySelector('#pl-cancel').onclick=function(){ ov.remove(); };
+      ov.querySelector('#pl-save').onclick=doSave;
+    }
+    ov.addEventListener('mousedown',function(e){ if(e.target===ov)ov.remove(); });
+    function doSave(){ readDom();
+      // validate each version's tiers: sort by qty, ensure unit cost non-increasing as qty rises
+      for(var vi=0;vi<versions.length;vi++){ var v=versions[vi];
+        var ts=v.tiers.map(function(t){return {min_qty:Math.max(1,parseInt(t.min_qty,10)||1), unit_cost:Number(t.unit_cost)};}).filter(function(t){return isFinite(t.unit_cost)&&t.unit_cost!=='';});
+        if(!ts.length){ alert('Each price needs at least one tier.'); return; }
+        ts.sort(function(a,b){return a.min_qty-b.min_qty;});
+        for(var i=1;i<ts.length;i++){ if(ts[i].min_qty===ts[i-1].min_qty){ alert('Duplicate min quantity ('+ts[i].min_qty+') in a price — each tier needs a distinct min qty.'); return; }
+          if(ts[i].unit_cost>ts[i-1].unit_cost+1e-9){ alert('Tier prices must go DOWN as quantity goes up: '+ts[i].min_qty+'+ units can’t cost more than '+ts[i-1].min_qty+'+ units.'); return; } }
+        if(v.efp!==''&&v.efp!=null){ var efn=parseInt(v.efp,10); if(isNaN(efn)||efn<curProd){ alert('A future price change must be from production '+curProd+' or later.'); return; } }
+        v._ts=ts; }
+      var jobs=deleted.map(function(id){ return fetch('/api/supply/price-list/'+id+'/delete',{method:'POST'}); })
+        .concat(versions.map(function(v){ return fetch('/api/supply/price-list',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:v.id||undefined, supplier:supplier, scope:scope, price_type:pt||null, sku:(scope==='sku'?sku:null), currency:(supCcy[supplier]||'USD'), effective_from_production:(v.efp===''?null:v.efp), tiers:v._ts})}).then(function(r){return r.json();}); }));
+      var sb=ov.querySelector('#pl-save'); sb.disabled=true; sb.textContent='Saving…';
+      Promise.all(jobs).then(function(res){ var err=res.filter(function(x){return x&&x.error;})[0]; if(err){ sb.disabled=false;sb.textContent='Save'; alert(err.error); return; } ov.remove(); if(pt)PL_ST.open[pt]=true; renderPriceLists(b); }).catch(function(e){ sb.disabled=false;sb.textContent='Save'; alert('Save failed: '+(e.message||e)); }); }
+    document.body.appendChild(ov); paint();
   }
   function renderPaymentsReport(b){ b.innerHTML='<div class="count">Loading…</div>';
     Promise.all([

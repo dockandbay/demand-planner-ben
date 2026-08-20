@@ -1,3 +1,12 @@
+## v27.196 Price Lists Phase 1.5 (Ben's feedback rework)
+- **(1)** Moved to the **end** of the Purchase Orders menu (after Custom Orders).
+- **(2)** Columns are now **positional** — **Main / Secondary / Tertiary supplier** (max 3, 2 by default), with the supplier name shown inside each cell — instead of one column per supplier. Main supplier derived from `products.main_supplier_final`.
+- **(3)** Expand/minimise a price type **no longer refreshes** (data cached in `PL_DATA`; redraw only). Expanding shows **all** the type's SKUs; each inherits the type price shown in **grey with a ↳ inherit indicator**, click to override with a SKU-specific price.
+- **(4)** New **"Active SKUs only"** filter (default ON) — discontinued SKUs hidden (from `products` status / discontinue date) but still appear when searched.
+- **(5)** Multi-tier prices show as a **range** "min – **max**" with the max (list price) largest.
+- **(6)** "Prices as of" + the editor's "from production" are **searchable** (datalist) and only offer **future** productions (≥ current in-production = 60).
+- **(7)** Editor reworked: shows the **Current price** plus any **future price changes** (each *From production N* with its own tiers); **"＋ Add future price change"** adds one. **Tier validation**: larger quantity must be a lower unit cost (and distinct min-qty), future change must be ≥ current production.
+
 ## v27.195 Exec Summary: H1/H2 subtotal toggle + FY26 growth vs FY25
 - **FY26 card** in the top summary box now shows **growth vs FY25** (units + revenue), same as the FY27-vs-FY26 card. Computed from two-years-ago actuals (added `lyU2`/`lyR2` to `buildExecData`'s totals); shown only when FY25 actuals exist.
 - New **"H1 / H2 subtotals"** toggle (default OFF). When on, each financial year gets **H1 (Mar–Aug)** and **H2 (Sep–Feb)** subtotal columns before the FY total, in a lighter shade. Applies to every row (channels, expanded countries, TOTAL). Persisted.

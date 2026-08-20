@@ -2434,16 +2434,20 @@ app.get('/api/supply/price-list', async (_req, res) => {
     const suppliers = (await pool.query(`SELECT name, coalesce(default_currency,'USD') currency FROM planner.suppliers WHERE coalesce(active,true) ORDER BY name`)).rows;
     // price_type → its SKUs (for grouping + the "add exception" picker)
     const pt = (await pool.query(`SELECT price_type, sku, coalesce(product_name_final,product_name,'') name,
-             coalesce(supplier_multiple_all,'') suppliers
+             coalesce(main_supplier_final,'') main_supplier,
+             (lower(coalesce(status,'')) NOT LIKE '%discont%' AND NOT (coalesce(discontinue_date_final,'') ~ '^\d{4}-\d{2}-\d{2}' AND to_date(discontinue_date_final,'YYYY-MM-DD') <= current_date)) active
       FROM planner.products WHERE coalesce(sku,'')<>'' AND coalesce(price_type,'')<>'' ORDER BY price_type, sku`)).rows;
-    const typeMap = {}; pt.forEach(r => { (typeMap[r.price_type] = typeMap[r.price_type] || []).push({ sku: r.sku, name: r.name, suppliers: r.suppliers }); });
-    const priceTypes = Object.keys(typeMap).sort().map(k => ({ price_type: k, skus: typeMap[k] }));
-    // distinct production numbers (for the "from production" selector) — integers parsed from PO prod_no
-    const prods = (await pool.query(`SELECT DISTINCT (regexp_replace(prod_no,'[^0-9]','','g')) n FROM planner.purchase_orders
-      WHERE coalesce(prod_no,'')<>'' AND regexp_replace(prod_no,'[^0-9]','','g')<>''`)).rows
-      .map(r => parseInt(r.n, 10)).filter(n => !isNaN(n)).sort((a, b) => b - a);
+    const typeMap = {}; pt.forEach(r => { const t = (typeMap[r.price_type] = typeMap[r.price_type] || { skus: [], mc: {} }); t.skus.push({ sku: r.sku, name: r.name, active: !!r.active }); if (r.main_supplier) t.mc[r.main_supplier] = (t.mc[r.main_supplier] || 0) + 1; });
+    const priceTypes = Object.keys(typeMap).sort().map(k => { const t = typeMap[k]; const main = Object.keys(t.mc).sort((a, b) => t.mc[b] - t.mc[a])[0] || ''; return { price_type: k, skus: t.skus, mainSupplier: main }; });
+    // current production = latest IN-PRODUCTION number; the "from production" picker offers this + higher (future only)
+    const cpRow = (await pool.query(`SELECT max(regexp_replace(prod_no,'[^0-9]','','g')::int) mx FROM planner.purchase_orders
+      WHERE lower(coalesce(status,'')) LIKE '%production%' AND regexp_replace(coalesce(prod_no,''),'[^0-9]','','g')<>''`)).rows[0];
+    const currentProduction = (cpRow && cpRow.mx) ? cpRow.mx : 0;
+    const prods = (await pool.query(`SELECT DISTINCT regexp_replace(prod_no,'[^0-9]','','g') n FROM planner.purchase_orders
+      WHERE regexp_replace(coalesce(prod_no,''),'[^0-9]','','g')<>''`)).rows
+      .map(r => parseInt(r.n, 10)).filter(n => !isNaN(n) && n >= currentProduction).sort((a, b) => b - a);
     const pending = entries.filter(e => e.status === 'pending').length;
-    res.json({ entries, suppliers, priceTypes, productions: [...new Set(prods)], pending });
+    res.json({ entries, suppliers, priceTypes, productions: [...new Set(prods)], currentProduction, pending });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Admin upsert of a price entry + its tiers (id present = update, else insert). Always active/admin-sourced.
