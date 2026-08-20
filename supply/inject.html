@@ -9644,7 +9644,7 @@
     else if(current==='actions') writeHash(['supply','actions'].concat(actSub&&actSub!=='actions'?[actSub]:[]));   // ACTIONS ▸ Recommendations / ERP Compare deep-link
     else if(current) writeHash(['supply',current]); }
   function applyRoute(){ var seg=(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean); _expectedHash=location.hash;
-    if(seg[0]==='supply'){ showSupply(true); var sec=seg[1]||'actions';   // (true) = show chrome but don't auto-select Actions; we select the routed section next
+    if(seg[0]==='supply'){ showSupply(true); var sec=seg[1]||'purchase-orders';   // (true) = show chrome but don't auto-select; default SUPPLY landing = Purchase Orders ▸ Plan (Ben)
       if(sec==='reports'){ if(['directclient','customorders','flexport'].indexOf(seg[2])>=0) showPoSub(seg[2]);   // moved to PURCHASE ORDERS — redirect old #/supply/reports/<x>
         else selectReport(seg[2]||reportTab||'actions'); }   // #/supply/reports/<actions|recommendations|erp-compare|…>
       else if(sec==='actions'){ selectReport(seg[2]&&['recommendations','erp-compare'].indexOf(seg[2])>=0?seg[2]:'actions'); }   // Actions folded into BI & Reports — redirect old #/supply/actions[/<sub>]
@@ -10699,7 +10699,7 @@
     var sb=document.getElementById('supply-btn'); if(sb)sb.classList.add('active');
     var fb=document.getElementById('supply-float'); if(fb)fb.style.display='none';
     try{updatePermBanner();}catch(e){}
-    if(noSelect!==true)selectSection(current||'actions'); hzSyncDemandPills();
+    if(noSelect!==true)selectSection(current||'purchase-orders'); hzSyncDemandPills();
     try{ startActionsWarm(); }catch(e){} }   // begin the 10-min background Actions warm (once) so ACTIONS stays instant
   function hideSupply(){ var app=document.getElementById('app'); if(app){app.classList.remove('supply-active');app.classList.remove('config-mode');}
     document.body.classList.remove('supply-on');
@@ -10886,7 +10886,7 @@
     else { var spacer=row.querySelector('div[style*="flex:1"]'); if(spacer)row.insertBefore(btn,spacer); else row.appendChild(btn); }
     // From CONFIG (or any non-supply state), the SUPPLY tab lands on PURCHASE ORDERS; otherwise it returns
     // to the last supply section. (current==='config' isn't a supply section, so it would render blank.)
-    btn.onclick=function(){ var cfg=(current==='config'); showSupply(true); selectSection(cfg?'purchase-orders':(current||'actions')); };
+    btn.onclick=function(){ var cfg=(current==='config'); showSupply(true); selectSection(cfg?'purchase-orders':(current||'purchase-orders')); };
     row.querySelectorAll('.view-toggle:not(.supply-toggle)').forEach(function(b){b.addEventListener('click',function(){hideSupply(); if(b.dataset.view)writeViewHash(b.dataset.view);});}); }
   // (Removed the bottom-right floating "SUPPLY" button at Ben's request — the top-nav SUPPLY tab is
   // the single entry point now.)

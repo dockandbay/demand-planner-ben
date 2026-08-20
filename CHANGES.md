@@ -1,3 +1,6 @@
+## v27.194 SUPPLY defaults to Purchase Orders ▸ Plan (was Actions)
+- Clicking SUPPLY (or entering it with no sub-section) now lands on **Purchase Orders ▸ Plan** instead of BI & Reports ▸ Actions. Changed the three `'actions'` fallbacks (deep-link default, `showSupply`, and the SUPPLY toggle onclick) to `purchase-orders`. Last-viewed section is still preserved within a session.
+
 ## v27.193 Exceptions: forecast now matches the plan for discontinued SKUs with overrides
 - DEMAND ▸ Exceptions (incl. **anomaly**) showed **0** forecast for a month where the plan showed the real number (e.g. TOWLB-CAB-LG-KHAKI-R UK DTC 2026_12 = 276). Cause: `skuMonthlyMap` (the report's forecast source) drops the per-SKU manual **override** for **post-discontinue** months, whereas the plan grid keeps it. The exceptions walker now **overlays the per-SKU override** (`skuOvGetK`) on top of `skuMonthlyMap` for every scanned month, so all exception reports match the grid. Display-only — the buy plan (which also reads `skuMonthlyMap`) is unchanged.
 
