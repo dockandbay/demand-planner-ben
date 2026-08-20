@@ -12953,7 +12953,9 @@ function buildExecData(){
       if(!cocs[chKey][row.co])cocs[chKey][row.co]={};
       if(!cocs[chKey][row.co][row.s])cocs[chKey][row.co][row.s]={};
       ensure(cocs[chKey][row.co][row.s],fym);cocs[chKey][row.co][row.s][fym].u+=u;cocs[chKey][row.co][row.s][fym].r+=r;cocs[chKey][row.co][row.s][fym].lyU+=lyU;cocs[chKey][row.co][row.s][fym].lyR+=lyR;
-      ensure(tot,fym);tot[fym].u+=u;tot[fym].r+=r;tot[fym].lyU+=lyU;tot[fym].lyR+=lyR;
+      // two-years-ago actuals (FY25 for the FY27 columns) — for the top-box FY26-vs-FY25 growth
+      var llyYM=ym(pm.y-2,pm.mo), lyU2=(a[llyYM]?(a[llyYM][0]||0):0), lyR2=(a[llyYM]?(a[llyYM][1]||0):0);
+      ensure(tot,fym);tot[fym].u+=u;tot[fym].r+=r;tot[fym].lyU+=lyU;tot[fym].lyR+=lyR;tot[fym].lyU2=(tot[fym].lyU2||0)+lyU2;tot[fym].lyR2=(tot[fym].lyR2||0)+lyR2;
     });
   });
   return {ch:ch,coc:coc,cocs:cocs,tot:tot};
@@ -13814,6 +13816,7 @@ function renderKeyArrivalsReport(body){
 }
 
 var _execHost=null;   // when set, renderExecView renders into this container (the 50% drawer) instead of the Reports page
+var EXEC_SHOW_H=(function(){try{return localStorage.getItem('exec_show_h')==='1';}catch(e){return false;}})();   // Exec Summary: show H1/H2 subtotal columns (default off)
 function renderExecView(host){
   _execHost=host||null;
   if(!host){
@@ -13846,6 +13849,12 @@ function renderExecView(host){
   FY27_months.forEach(function(m){if(d.tot[m]){p_fy26.u+=d.tot[m].lyU||0;p_fy26.r+=d.tot[m].lyR||0;}});
   var yoy_u=p_fy26.u>0?Math.round((p_fy27.u-p_fy26.u)/p_fy26.u*100):0;
   var yoy_r=p_fy26.r>0?Math.round((p_fy27.r-p_fy26.r)/p_fy26.r*100):0;
+  // FY25 (Mar24–Feb25) = Σ two-years-ago actuals on each FY27 month → lets the FY26 card show growth vs FY25
+  var p_fy25={u:0,r:0};
+  FY27_months.forEach(function(m){if(d.tot[m]){p_fy25.u+=d.tot[m].lyU2||0;p_fy25.r+=d.tot[m].lyR2||0;}});
+  var yoy26_u=p_fy25.u>0?Math.round((p_fy26.u-p_fy25.u)/p_fy25.u*100):0;
+  var yoy26_r=p_fy25.r>0?Math.round((p_fy26.r-p_fy25.r)/p_fy25.r*100):0;
+  var fy26grow=(p_fy25.u>0||p_fy25.r>0)?{u:yoy26_u,r:yoy26_r}:null;   // only if FY25 actuals exist
 
   // Container
   var wrap=document.createElement('div');wrap.id='exec-wrap';
@@ -13884,9 +13893,18 @@ function renderExecView(host){
   }
   var yrBar=document.createElement('div');yrBar.className='yr-summary';
   yrBar.innerHTML=''
-    +yearCard('FY26','Mar 25 – Feb 26 · prior year',p_fy26.u,p_fy26.r,'actual')
+    +yearCard('FY26','Mar 25 – Feb 26 · prior year',p_fy26.u,p_fy26.r,'actual',fy26grow,'FY25')
     +yearCard('FY27','Mar 26 – Feb 27 · Actual + Forecast',p_fy27.u,p_fy27.r,'mixed',{u:yoy_u,r:yoy_r},'FY26');
   wrap.appendChild(yrBar);
+
+  if(!document.getElementById('exec-half-sty')){ var _hs=document.createElement('style'); _hs.id='exec-half-sty';
+    _hs.textContent='.exec-tw td.yr-half-total,.exec-tw th.yr-half-total{background:#eef4fb !important;color:#1f2937}.exec-tw th.yr-half-total{font-size:9px;letter-spacing:.02em}.exec-tw td.yr-half-total .exec-units{color:#1f2937}.exec-tw td.yr-half-total.country-cell{background:#f3f7fc !important}'
+      +'.exec-half-tgl{border:1px solid #cbd5e1;background:#fff;color:#334155;font-size:11px;padding:3px 11px;border-radius:12px;cursor:pointer;font-weight:600;font-family:inherit}.exec-half-tgl.on{background:#0f172a;color:#fff;border-color:#0f172a}';
+    document.head.appendChild(_hs); }
+  var htog=document.createElement('div'); htog.style.cssText='margin:0 0 6px';
+  htog.innerHTML='<button id="exec-half-toggle" class="exec-half-tgl'+(EXEC_SHOW_H?' on':'')+'" title="Show H1 (Mar–Aug) and H2 (Sep–Feb) subtotal columns per financial year">'+(EXEC_SHOW_H?'✓ ':'')+'H1 / H2 subtotals</button>';
+  wrap.appendChild(htog);
+  htog.querySelector('#exec-half-toggle').onclick=function(){ EXEC_SHOW_H=!EXEC_SHOW_H; try{localStorage.setItem('exec_show_h',EXEC_SHOW_H?'1':'0');}catch(e){} renderExecView(_execHost); };
 
   // Hint
   var hint=document.createElement('div');hint.style.cssText='font-size:10px;color:#888;margin-bottom:4px';
@@ -13902,9 +13920,12 @@ function renderExecView(host){
   // Group row: 2026 / FY26 Total / 2027 / FY27 Total
   var gr=document.createElement('tr');
   var glbl=document.createElement('th');glbl.className='lbl-col grp-th';glbl.rowSpan=2;glbl.textContent='Channel';gr.appendChild(glbl);
+  function halfHdrs(){ if(!EXEC_SHOW_H)return; ['H1','H2'].forEach(function(h){ var th=document.createElement('th');th.rowSpan=2;th.className='grp-th yr-total-th yr-half-total';th.textContent=h;gr.appendChild(th); }); }
   var g26=document.createElement('th');g26.colSpan=12;g26.className='grp-th year-26';g26.textContent='FY27 · Mar 26 – Feb 27';gr.appendChild(g26);
+  halfHdrs();
   var g26t=document.createElement('th');g26t.rowSpan=2;g26t.className='grp-th yr-total-th yr-26-total';g26t.textContent='FY27 TOTAL';gr.appendChild(g26t);
   var g27=document.createElement('th');g27.colSpan=12;g27.className='grp-th year-27';g27.textContent='FY28 · Mar 27 – Feb 28';gr.appendChild(g27);
+  halfHdrs();
   var g27t=document.createElement('th');g27t.rowSpan=2;g27t.className='grp-th yr-total-th yr-27-total';g27t.textContent='FY28 TOTAL';gr.appendChild(g27t);
   thead.appendChild(gr);
   // Month row
@@ -13941,6 +13962,10 @@ function renderExecView(host){
     td.innerHTML='<div class="exec-units">'+fn(Math.round(u))+yoyBadge(u,lyU)+'</div><div class="exec-rev">'+fnGBP(r)+yoyBadge(r,lyR)+'</div>';
     return td;
   }
+  // Append a FY's summary cells to a row: optional H1/H2 half-subtotals (lighter) then the FY total.
+  function fySum(tr,data,fyMonths,totClass,extra){ extra=extra?(' '+extra):'';
+    if(EXEC_SHOW_H){ tr.appendChild(renderTotalCell(data,fyMonths.slice(0,6),'yr-half-total'+extra)); tr.appendChild(renderTotalCell(data,fyMonths.slice(6,12),'yr-half-total'+extra)); }
+    tr.appendChild(renderTotalCell(data,fyMonths,totClass+extra)); }
   function yoyBadge(cur,ly){
     if(ly<=0&&cur<=0)return '';
     if(ly<=0)return ' <span class="exec-yoy new">new</span>';
@@ -13964,10 +13989,10 @@ function renderExecView(host){
     tr.appendChild(lbl);
     FY_ORDER.forEach(function(fym){
       tr.appendChild(renderCell(d.ch[chKey],fym));
-      // Insert FY27 total after Feb 2027
-      if(fym==='2027_02')tr.appendChild(renderTotalCell(d.ch[chKey],FY27_months,'yr-26-total'));
+      // Insert FY27 summary (H1/H2 if on, then total) after Feb 2027
+      if(fym==='2027_02')fySum(tr,d.ch[chKey],FY27_months,'yr-26-total');
     });
-    tr.appendChild(renderTotalCell(d.ch[chKey],FY28_months,'yr-27-total'));
+    fySum(tr,d.ch[chKey],FY28_months,'yr-27-total');
     tbody.appendChild(tr);
     // If expanded, add country sub-rows
     if(isExp){
@@ -13979,9 +14004,9 @@ function renderExecView(host){
         ctr.appendChild(clbl);
         FY_ORDER.forEach(function(fym){
           ctr.appendChild(renderCell(d.coc[chKey][co],fym,' country-cell'));
-          if(fym==='2027_02')ctr.appendChild(renderTotalCell(d.coc[chKey][co],FY27_months,'yr-26-total country-cell'));
+          if(fym==='2027_02')fySum(ctr,d.coc[chKey][co],FY27_months,'yr-26-total','country-cell');
         });
-        ctr.appendChild(renderTotalCell(d.coc[chKey][co],FY28_months,'yr-27-total country-cell'));
+        fySum(ctr,d.coc[chKey][co],FY28_months,'yr-27-total','country-cell');
         tbody.appendChild(ctr);
       });
     }
@@ -13993,9 +14018,9 @@ function renderExecView(host){
   var lblT=document.createElement('td');lblT.className='lbl-col';lblT.textContent='TOTAL';trT.appendChild(lblT);
   FY_ORDER.forEach(function(fym){
     trT.appendChild(renderCell(d.tot,fym));
-    if(fym==='2027_02')trT.appendChild(renderTotalCell(d.tot,FY27_months,'yr-26-total'));
+    if(fym==='2027_02')fySum(trT,d.tot,FY27_months,'yr-26-total');
   });
-  trT.appendChild(renderTotalCell(d.tot,FY28_months,'yr-27-total'));
+  fySum(trT,d.tot,FY28_months,'yr-27-total');
   tbody.appendChild(trT);
 
   tbl.appendChild(tbody);

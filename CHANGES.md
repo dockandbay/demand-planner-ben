@@ -1,3 +1,7 @@
+## v27.195 Exec Summary: H1/H2 subtotal toggle + FY26 growth vs FY25
+- **FY26 card** in the top summary box now shows **growth vs FY25** (units + revenue), same as the FY27-vs-FY26 card. Computed from two-years-ago actuals (added `lyU2`/`lyR2` to `buildExecData`'s totals); shown only when FY25 actuals exist.
+- New **"H1 / H2 subtotals"** toggle (default OFF). When on, each financial year gets **H1 (Mar–Aug)** and **H2 (Sep–Feb)** subtotal columns before the FY total, in a lighter shade. Applies to every row (channels, expanded countries, TOTAL). Persisted.
+
 ## v27.194 SUPPLY defaults to Purchase Orders ▸ Plan (was Actions)
 - Clicking SUPPLY (or entering it with no sub-section) now lands on **Purchase Orders ▸ Plan** instead of BI & Reports ▸ Actions. Changed the three `'actions'` fallbacks (deep-link default, `showSupply`, and the SUPPLY toggle onclick) to `purchase-orders`. Last-viewed section is still preserved within a session.
 
