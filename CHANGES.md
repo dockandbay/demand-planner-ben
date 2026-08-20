@@ -1,3 +1,6 @@
+## v27.209 Price Lists approval box: current vs proposed comparison table
+- The pending-approval review now shows a clear **table** per change — **Min qty · Current · Proposed · Change %** (per tier breakpoint, effective price on each side; green = cheaper, red = dearer, "new" where there's no current). Submitted date shown in **dd-mmm-yy** (e.g. 20-Aug-26 06:16).
+
 ## v27.208 Price Lists — Phase 3: supplier portal (GATED, sandbox only)
 - New **"💲 Price List"** button in the supplier portal (shown ONLY when `IS_SANDBOX` — hidden on live until Ben confirms). Opens a panel where the supplier sees **their own** current prices (per price type / SKU, with tiers) and any **⏳ awaiting-approval** submissions.
 - Supplier can **Propose change**: edit tiers + optionally choose a **future production** it applies from, then **Submit for approval** → creates a `pending` (source='supplier') entry that shows up in the admin **⚑ APPROVAL REQUIRED** flow (grid badge, sub-tab counter, review panel). Client + server validate tiers (bigger qty → lower unit cost). A supplier's newer submission replaces their earlier still-pending one for the same key.

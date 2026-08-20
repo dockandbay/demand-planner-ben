@@ -8552,14 +8552,21 @@
   function plPending(b,d){ var exo=document.getElementById('pl-pend-ov'); if(exo)exo.remove();
     var pend=(d.entries||[]).filter(function(e){return e.status==='pending';});
     var actByKey={}; (d.entries||[]).filter(function(e){return e.status==='active';}).forEach(function(e){ var k=e.supplier+'|'+e.scope+'|'+(e.scope==='sku'?e.sku:e.price_type)+'|'+(e.effective_from_production||''); (actByKey[k]=actByKey[k]||[]).push(e); });
-    function tierStr(e){ if(!e||!e.tiers||!e.tiers.length)return '—'; var sym=curSym(e.currency); return e.tiers.map(function(t){return t.min_qty+':'+sym+money(t.unit_cost);}).join(' · '); }
+    function effAt(tiers,q){ if(!tiers||!tiers.length)return null; var best=null; tiers.forEach(function(t){ if(Number(t.min_qty)<=q&&(best==null||Number(t.min_qty)>=best.mq))best={mq:Number(t.min_qty),uc:Number(t.unit_cost)}; }); return best?best.uc:null; }
+    function cmpTable(cur,e){ var sym=curSym(e.currency), qs={};
+      (cur&&cur.tiers||[]).forEach(function(t){qs[t.min_qty]=1;}); (e.tiers||[]).forEach(function(t){qs[t.min_qty]=1;});
+      var list=Object.keys(qs).map(Number).sort(function(a,b){return a-b;});
+      var body=list.map(function(q){ var cu=cur?effAt(cur.tiers,q):null, pr=effAt(e.tiers,q);
+        var chg=(cu!=null&&cu!==0&&pr!=null)?Math.round((pr/cu-1)*1000)/10:null;
+        var cc=chg==null?'#94a3b8':chg>0?'#b91c1c':chg<0?'#15803d':'#64748b';
+        return '<tr><td style="padding:2px 8px;text-align:right;border-top:1px solid #f1f5f9">'+q+'+</td><td style="padding:2px 8px;text-align:right;border-top:1px solid #f1f5f9;color:#475569">'+(cu!=null?sym+cu.toFixed(2):'—')+'</td><td style="padding:2px 8px;text-align:right;border-top:1px solid #f1f5f9;font-weight:700">'+(pr!=null?sym+pr.toFixed(2):'—')+'</td><td style="padding:2px 8px;text-align:right;border-top:1px solid #f1f5f9;color:'+cc+';font-weight:600">'+(chg==null?(pr!=null&&cu==null?'new':'—'):((chg>0?'+':'')+chg+'%'))+'</td></tr>'; }).join('');
+      return '<table style="border-collapse:collapse;font-size:11px;margin-top:6px;width:100%;font-variant-numeric:tabular-nums"><thead><tr style="color:#94a3b8;text-transform:uppercase;font-size:9px;letter-spacing:.03em"><th style="padding:2px 8px;text-align:right">Min qty</th><th style="padding:2px 8px;text-align:right">Current</th><th style="padding:2px 8px;text-align:right">Proposed</th><th style="padding:2px 8px;text-align:right">Change</th></tr></thead><tbody>'+body+'</tbody></table>'; }
     function rows(){ if(!pend.length)return '<div class="mut" style="padding:14px 2px">No pending changes.</div>';
       return pend.map(function(e){ var k=e.supplier+'|'+e.scope+'|'+(e.scope==='sku'?e.sku:e.price_type)+'|'+(e.effective_from_production||''); var cur=(actByKey[k]||[])[0];
         return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:8px">'
           +'<div style="font-weight:700;font-size:12px">'+esc(e.supplier)+' · '+(e.scope==='sku'?(esc(e.sku)+' <span class="mut tiny">('+esc(e.price_type)+')</span>'):esc(e.price_type))+(e.effective_from_production?(' <span class="mut tiny">from prod '+e.effective_from_production+'</span>'):'')+'</div>'
-          +'<div style="font-size:11px;margin-top:4px"><span class="mut">current:</span> '+tierStr(cur)+'</div>'
-          +'<div style="font-size:11px;color:#b45309"><span class="mut" style="color:#94a3b8">proposed:</span> <b>'+tierStr(e)+'</b></div>'
-          +'<div class="mut tiny" style="margin-top:3px">submitted '+(e.submitted_by?('by '+esc(e.submitted_by)+' '):'')+esc(e.submitted_at||'')+'</div>'
+          +cmpTable(cur,e)
+          +'<div class="mut tiny" style="margin-top:5px">submitted '+(e.submitted_by?('by '+esc(e.submitted_by)+' '):'')+actWhen(e.submitted_at)+'</div>'
           +'<div style="text-align:right;margin-top:6px"><button class="save-btn light pl-pend-reject" data-id="'+e.id+'" style="color:#b91c1c;border-color:#fca5a5">Reject</button> <button class="save-btn pl-pend-approve" data-id="'+e.id+'" style="background:#16a34a;color:#fff;border-color:#15803d">Approve</button></div></div>'; }).join(''); }
     var ov=document.createElement('div'); ov.id='pl-pend-ov'; ov.style.cssText='position:fixed;inset:0;z-index:200000;background:rgba(15,23,42,.35);display:flex;align-items:center;justify-content:center;padding:16px';
     ov.innerHTML='<div style="background:#fff;border-radius:10px;padding:16px 18px;width:520px;max-width:95vw;max-height:90vh;overflow:auto;box-shadow:0 12px 40px rgba(15,23,42,.25)"><div style="font-weight:700;margin-bottom:8px">Pending supplier price changes <span class="mut tiny">('+pend.length+')</span></div>'+rows()+'<div style="text-align:right;margin-top:8px"><button id="pl-pend-close" class="save-btn light">Close</button></div></div>';
