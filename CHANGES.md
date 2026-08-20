@@ -1,3 +1,7 @@
+## v27.187 Access control: founder super-admin allowlist (can never be locked out)
+- Added a built-in super-admin allowlist in `permsFor()`: **ben@dockandbay.com** is always full admin (all edit rights + `is_admin`) **regardless of the `app_permissions` row**, so a missing/incorrect DB row can never lock the founder out. Also honours an optional **`ADMIN_EMAILS`** env var (comma-separated) so Diviyaj can add alternates/others without a code change. Match is against the proxy-forwarded email (case-insensitive). Everyone else is unchanged (DB-row driven).
+- NB: this only helps if the auth proxy forwards `ben@dockandbay.com`. If `/api/me` on live shows a *different* address for Ben, add that address to `ADMIN_EMAILS`. **New env var for Diviyaj: `ADMIN_EMAILS` (optional).**
+
 ## v27.186 Auto-smooth complete: un-smoothed cells shown as a pivot (months across)
 - The "Auto-smooth complete" popup's list of left-un-smoothed cells is now a **pivot table**: months across the top, (market·)sub-category down a **sticky** left column, each cell showing **current SKU sum → sub-category target · gap%**. Horizontally scrollable with the label column pinned; header row sticky. When everything smoothed is under one market·channel, the left column shows just the sub-category (with the market·channel noted in the caption). Copy/CSV export unchanged (long format).
 

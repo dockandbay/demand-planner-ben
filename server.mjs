@@ -6163,14 +6163,23 @@ async function notePoEdited(db, po, user) {
 // Resolve the caller's app permissions. LIVE-ONLY: with no auth proxy (sandbox/local) there is no email,
 // so everyone is full access (live=false) and the model doesn't bite. On live, an email absent from
 // planner.app_permissions is read-only everywhere.
+// Built-in super-admins can NEVER be locked out by a bad/missing DB row: ben@ (founder) is always full admin,
+// plus any address in the ADMIN_EMAILS env var (comma-separated) — lets Diviyaj add alternates without a code
+// change. Match is against the proxy-forwarded email (case-insensitive). If the proxy forwards a different
+// address than expected, add it to ADMIN_EMAILS.
+const SUPER_ADMINS = new Set(
+  ['ben@dockandbay.com']
+    .concat(String(process.env.ADMIN_EMAILS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean))
+);
 async function permsFor(req) {
   const email = authUser(req);
   if (!email) return { email: null, live: false, supply_edit: true, demand_edit: true, product_edit: true, is_admin: true, landing_page: 'supply/purchase-orders', favourites: [] };
   const e = email.toLowerCase();
+  const sa = SUPER_ADMINS.has(e);   // founder / env allowlist → full rights regardless of the app_permissions row
   let row = null;
   try { row = (await pool.query('SELECT supply_edit, demand_edit, product_edit, is_admin, landing_page, favourites FROM planner.app_permissions WHERE lower(email)=$1', [e])).rows[0] || null; } catch (_) {}
   let faves = []; try { if (row && row.favourites) faves = JSON.parse(row.favourites) || []; } catch (_) {}
-  return { email: e, live: true, supply_edit: !!(row && row.supply_edit), demand_edit: !!(row && row.demand_edit), product_edit: !!(row && row.product_edit), is_admin: !!(row && row.is_admin), landing_page: (row && row.landing_page) || 'supply/purchase-orders', favourites: Array.isArray(faves) ? faves : [] };
+  return { email: e, live: true, supply_edit: sa || !!(row && row.supply_edit), demand_edit: sa || !!(row && row.demand_edit), product_edit: sa || !!(row && row.product_edit), is_admin: sa || !!(row && row.is_admin), landing_page: (row && row.landing_page) || 'supply/purchase-orders', favourites: Array.isArray(faves) ? faves : [] };
 }
 // Save the signed-in user's top-bar Favourites ([{slug,label}], max 5). Per-user (app_permissions.favourites).
 // No auth email (sandbox without DEV_USER) → no-op with ok:false so the client keeps them in localStorage.
