@@ -1,3 +1,6 @@
+## v27.184 Favourites: only read the VISIBLE view's nav (fixes stale label)
+- Follow-up to v27.180. Favouriting `#/reports/slow` labelled it **"Other Payments"** — a page navigated from earlier — because other sections keep a stale `.active` on their hidden (display:none) nav, and the selector matched that first. Now `_favLabel()` skips any nav element that isn't actually visible (`getClientRects().length`), and the top-level **REPORTS hub** nav (`#report-tabs .dnav.active`) was added so those pages name correctly (e.g. "Slow Moving", "Performance").
+
 ## v27.183 Edit targets: enter a units target (e.g. "100u") → converted to a £ total
 - In **Summary ▸ Edit targets** a cell now also accepts a **units** entry: type `100u` and it's converted to a **£ revenue target** using the subcategory's net £/unit (ex-tax retail × channel factor) — stored/behaving exactly like a typed £ target (blue), with the unit count shown in the under-cell figure and hover. Growth %, £ target, and blank all work as before. If a subcategory has no price (e.g. the market-total row), the cell shows "no £/unit price" and ignores a units entry. Cell tooltip + toolbar help updated.
 
