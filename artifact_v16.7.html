@@ -14724,19 +14724,34 @@ function buildSavePayload(){
 // Persist edited SKU forecasts to Supabase (planner.forecast_outputs) via the rehost server.
 // Surgical: only the months actually edited (tracked in FC_DIRTY) are written; untouched
 // months on the row are never overwritten. Deleted cell -> 0 (matches the old behaviour).
+// Push a big change list to the server in throttled, sequential batches, so a large edit (e.g. a
+// smoothing sweep) doesn't fire thousands of writes in one request and trip DB pool cutoffs. Runs
+// in the background at its own pace (small gap between batches) and shows progress. Batches are
+// idempotent upserts, so a mid-way failure just leaves the rest to the next save.
+var SAVE_CHUNK=500, SAVE_GAP_MS=150;
+async function postChangesBatched(url,items,extra,label){
+  var saved=0, total=items.length;
+  for(var i=0;i<total;i+=SAVE_CHUNK){
+    var slice=items.slice(i,i+SAVE_CHUNK);
+    var body=Object.assign({changes:slice},extra||{});
+    var resp=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    var data=await resp.json();
+    if(!resp.ok||data.error)throw new Error((data&&data.error)||('HTTP '+resp.status));
+    saved+=(data.saved!=null?data.saved:slice.length);
+    var done=Math.min(i+SAVE_CHUNK,total);
+    if(total>SAVE_CHUNK){ try{ st((label||'Saving')+' '+done+'/'+total+'…'); }catch(e){} }
+    if(done<total)await new Promise(function(r){setTimeout(r,SAVE_GAP_MS);});   // throttle: let the pool breathe between batches
+  }
+  return saved;
+}
 async function saveSkuForecasts(btn){
-  if(!Object.keys(FC_DIRTY).length)return 0;
+  var keys=Object.keys(FC_DIRTY); if(!keys.length)return 0;
   var changes=buildSkuChanges();
-  if(!changes.length){FC_DIRTY={};return 0;}
-  if(btn)btn.textContent='Saving SKUs...';
-  var resp=await fetch('/api/save-sku-forecasts',{
-    method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({changes:changes,who:'review_ui'})
-  });
-  var data=await resp.json();
-  if(!resp.ok||data.error)throw new Error('SKU save: '+((data&&data.error)||('HTTP '+resp.status)));
-  FC_DIRTY={};
-  return data.saved||0;
+  if(!changes.length){keys.forEach(function(k){delete FC_DIRTY[k];});return 0;}
+  if(btn)btn.textContent='Saving SKUs…';
+  var saved=await postChangesBatched('/api/save-sku-forecasts',changes,{who:'review_ui'},'Saving SKU forecasts');
+  keys.forEach(function(k){ delete FC_DIRTY[k]; });   // clear only the snapshotted keys — edits made during the save survive
+  return saved;
 }
 
 // Rehost: build the flat list of changed subcat forecast inputs (IV diffed against the
@@ -14848,14 +14863,7 @@ async function saveForecasts(){
   try{
     var written=0;
     if(changes.length){
-      var resp=await fetch('/api/save-forecasts',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({changes:changes,who:'review_ui'})
-      });
-      var data=await resp.json();
-      if(!resp.ok||data.error)throw new Error((data&&data.error)||('HTTP '+resp.status));
-      written=data.saved||0;
+      written=await postChangesBatched('/api/save-forecasts',changes,{who:'review_ui'},'Saving forecast inputs');
     }
 
     // SKU-level forecasts (FC_OUTPUTS) -> planner.forecast_outputs. Clears FC_DIRTY on success.

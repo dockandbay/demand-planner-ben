@@ -1,3 +1,9 @@
+## v27.221 Big demand-plan saves (smoothing sweeps) — batched + throttled, no more pool cutoffs
+- **Root cause:** a smoothing sweep marked thousands of cells dirty, then saved them as **one query per row inside a single long transaction** — holding one DB pool connection open for thousands of round-trips, long enough to hit connection timeouts / cutoffs.
+- **Server:** `save-sku-forecasts`, `save-forecasts`, and the record-of-change `changes/bulk` now write in **batched multi-row statements (~500–1000 rows/query)** with per-key de-dupe and a 120s statement guard. A 5,000-cell save drops from ~5,000 round-trips to ~10 queries — sub-second, connection released fast. (`changes/bulk` also no longer silently caps the audit trail at 5,000 rows.)
+- **Client:** big saves are now sent in **throttled sequential batches** (500 rows, ~150ms gap) that proceed in the background with progress (“Saving SKU forecasts 1500/4200…”), instead of one giant request. SKU save now clears only the cells it snapshotted, so edits made mid-save aren’t lost.
+- No schema change; behaviour identical (same upserts/clears), just spread out and far lighter on the pool.
+
 ## v27.220 Price Lists download → Excel (.xlsx), two sheets: Price types + SKUs
 - The Price Lists download is now an **Excel workbook** (was CSV) with **two sheets**: **"Price types"** (one row per price type × supplier — the type base price) and **"SKUs"** (one row per SKU × supplier — effective price, with product/colour + price source). Both carry **Category**, currency, from-production, base unit cost, and all tiers. Header row bold + frozen.
 - Generated **server-side** with exceljs (shared `plXlsxBuffer`); refactored the admin + portal price-list GETs into reusable `plAdminData()` / `plPortalData()` builders. New endpoints `GET /api/supply/price-list/export.xlsx` and `GET /api/portal/price-list/export.xlsx` (portal sandbox-gated, cookie-auth). Button relabelled **⬇ Excel** / **⬇ Download Excel**.

@@ -1530,28 +1530,38 @@ app.get('/', async (req, res) => {
 app.post('/api/save-forecasts', async (req, res) => {
   const { changes, who } = req.body || {};
   if (!Array.isArray(changes)) return res.status(400).json({ error: 'changes[] required' });
+  // De-dupe per key (last write wins); split into upserts vs clears so each side batches cleanly.
+  const upMap = new Map(), delMap = new Map();
+  for (const c of changes) {
+    if (!c.subcategory || !c.country || !c.channel || !c.month) continue;
+    const month = String(c.month).replace('_', '-') + '-01';
+    const key = c.subcategory + '|' + c.country + '|' + c.channel + '|' + month;
+    if (c.value === null || c.value === undefined || c.value === '') { delMap.set(key, [c.subcategory, c.country, c.channel, month]); upMap.delete(key); }
+    else { upMap.set(key, [c.subcategory, c.country, c.channel, month, String(c.value)]); delMap.delete(key); }
+  }
+  const ups = [...upMap.values()], dels = [...delMap.values()];
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    let upserts = 0, deletes = 0;
-    for (const c of changes) {
-      if (!c.subcategory || !c.country || !c.channel || !c.month) continue;
-      const month = c.month.replace('_', '-') + '-01';
-      if (c.value === null || c.value === undefined || c.value === '') {
-        await client.query(
-          `DELETE FROM planner.forecast_inputs
-           WHERE subcategory=$1 AND country=$2 AND channel=$3 AND month=$4`,
-          [c.subcategory, c.country, c.channel, month]);
-        deletes++;
-      } else {
-        await client.query(
-          `INSERT INTO planner.forecast_inputs (subcategory, country, channel, month, value_raw, source, updated_at)
-           VALUES ($1,$2,$3,$4,$5,'review_ui',now())
-           ON CONFLICT (subcategory, country, channel, month)
-           DO UPDATE SET value_raw=EXCLUDED.value_raw, source='review_ui', updated_at=now()`,
-          [c.subcategory, c.country, c.channel, month, String(c.value)]);
-        upserts++;
-      }
+    await client.query("SET LOCAL statement_timeout = '120s'");
+    // Batched multi-row writes (was one query per row — a big smoothing sweep held the pool
+    // connection open for thousands of round-trips and timed out). ~500 rows per query.
+    const CH = 500; let upserts = 0, deletes = 0;
+    for (let i = 0; i < ups.length; i += CH) {
+      const slice = ups.slice(i, i + CH), vals = [], params = [];
+      slice.forEach((r, j) => { const o = j * 5; vals.push(`($${o+1},$${o+2},$${o+3},$${o+4},$${o+5},'review_ui',now())`); params.push(r[0], r[1], r[2], r[3], r[4]); });
+      await client.query(
+        `INSERT INTO planner.forecast_inputs (subcategory, country, channel, month, value_raw, source, updated_at)
+         VALUES ${vals.join(',')}
+         ON CONFLICT (subcategory, country, channel, month)
+         DO UPDATE SET value_raw=EXCLUDED.value_raw, source='review_ui', updated_at=now()`, params);
+      upserts += slice.length;
+    }
+    for (let i = 0; i < dels.length; i += CH) {
+      const slice = dels.slice(i, i + CH), tup = [], params = [];
+      slice.forEach((r, j) => { const o = j * 4; tup.push(`($${o+1},$${o+2},$${o+3},$${o+4}::date)`); params.push(r[0], r[1], r[2], r[3]); });
+      await client.query(`DELETE FROM planner.forecast_inputs WHERE (subcategory,country,channel,month) IN (VALUES ${tup.join(',')})`, params);
+      deletes += slice.length;
     }
     await client.query(
       `INSERT INTO planner.etl_runs (job, status, rows_affected, message)
@@ -1575,21 +1585,31 @@ app.post('/api/save-forecasts', async (req, res) => {
 app.post('/api/save-sku-forecasts', async (req, res) => {
   const { changes, who } = req.body || {};
   if (!Array.isArray(changes)) return res.status(400).json({ error: 'changes[] required' });
+  // De-dupe (keep last value per key) so one multi-row upsert can't hit the same conflict key twice.
+  const map = new Map();
+  for (const c of changes) {
+    if (!c.sku || !c.warehouse || !c.channel || !c.month) continue;
+    const month = String(c.month).replace('_', '-') + '-01';
+    map.set(c.sku + '|' + c.warehouse + '|' + c.channel + '|' + month,
+      [c.sku, c.warehouse, c.channel, month, Math.round(Number(c.units) || 0)]);
+  }
+  const rows = [...map.values()];
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    let n = 0;
-    for (const c of changes) {
-      if (!c.sku || !c.warehouse || !c.channel || !c.month) continue;
-      const month = c.month.replace('_', '-') + '-01';
-      const units = Math.round(Number(c.units) || 0);
+    await client.query("SET LOCAL statement_timeout = '120s'");
+    // Batched multi-row upserts (was one query per row → thousands of round-trips held the pool
+    // connection open long enough to time out on a big smoothing sweep). ~500 rows per query.
+    const CH = 500; let n = 0;
+    for (let i = 0; i < rows.length; i += CH) {
+      const slice = rows.slice(i, i + CH), vals = [], params = [];
+      slice.forEach((r, j) => { const o = j * 5; vals.push(`($${o+1},$${o+2},$${o+3},$${o+4},$${o+5},'review_ui',now())`); params.push(r[0], r[1], r[2], r[3], r[4]); });
       await client.query(
         `INSERT INTO planner.forecast_outputs (sku, warehouse, channel, month, units, source, updated_at)
-         VALUES ($1,$2,$3,$4,$5,'review_ui',now())
+         VALUES ${vals.join(',')}
          ON CONFLICT (sku, warehouse, channel, month)
-         DO UPDATE SET units=EXCLUDED.units, source='review_ui', updated_at=now()`,
-        [c.sku, c.warehouse, c.channel, month, units]);
-      n++;
+         DO UPDATE SET units=EXCLUDED.units, source='review_ui', updated_at=now()`, params);
+      n += slice.length;
     }
     await client.query(
       `INSERT INTO planner.etl_runs (job, status, rows_affected, message)
@@ -11957,15 +11977,20 @@ app.post('/api/forecast/changes/bulk', async (req, res) => {
   const num = (v) => (v === '' || v == null || isNaN(+v)) ? null : +v;
   try {
     const who = authUser(req) || (b.actor || '').trim() || null;
-    const vals = [], params = [];
-    rows.slice(0, 5000).forEach((r, i) => {
-      const o = i * 9;
-      vals.push(`($${o+1},$${o+2},$${o+3},$${o+4},$${o+5},$${o+6},$${o+7},$${o+8},$${o+9})`);
-      params.push((r.level||'sku').trim(), (r.item||'').trim(), (r.country||'').trim(), (r.channel||'').trim(),
-        (r.month||'').trim(), who, (r.action||'changed').trim(), num(r.from), num(r.to));
-    });
-    await pool.query(`INSERT INTO planner.forecast_changes (level,item,country,channel,month,actor,action,from_val,to_val) VALUES ${vals.join(',')}`, params);
-    res.json({ ok: true, saved: rows.length, actor: who || '' });
+    // Sub-batch (was capped at 5000 → a big sweep silently lost the tail of its audit trail). ~1000/query.
+    const CH = 1000; let saved = 0;
+    for (let i = 0; i < rows.length; i += CH) {
+      const slice = rows.slice(i, i + CH), vals = [], params = [];
+      slice.forEach((r, k) => {
+        const o = k * 9;
+        vals.push(`($${o+1},$${o+2},$${o+3},$${o+4},$${o+5},$${o+6},$${o+7},$${o+8},$${o+9})`);
+        params.push((r.level||'sku').trim(), (r.item||'').trim(), (r.country||'').trim(), (r.channel||'').trim(),
+          (r.month||'').trim(), who, (r.action||'changed').trim(), num(r.from), num(r.to));
+      });
+      await pool.query(`INSERT INTO planner.forecast_changes (level,item,country,channel,month,actor,action,from_val,to_val) VALUES ${vals.join(',')}`, params);
+      saved += slice.length;
+    }
+    res.json({ ok: true, saved, actor: who || '' });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
