@@ -84,10 +84,8 @@
     var realSup=(me.suppliers||[]).join(', ')||'Supplier';
     var sup=ANON_NAME||realSup;
     root.innerHTML='<header class="pv-top"><h1>Dock &amp; Bay</h1><span class="sup">'+esc(sup)+'</span><span class="sp"></span>'
-      +(me.price_list_enabled?'<button class="pv-btn ghost" id="pv-pl-btn" style="margin-right:10px">💲 Price List</button>':'')
       +'<span style="font-size:10px;opacity:.5;margin-right:10px" title="app version — tell Ben this if something looks stale">__APP_VERSION__</span>'
       +'</header><div id="pv-wrap"><div id="pv"></div></div>';   // Sign out removed — sessions expire on their own
-    var _plb=document.getElementById('pv-pl-btn'); if(_plb)_plb.onclick=function(){ ppPriceList(me); };
     var s=document.createElement('script'); s.src='/portal-view.js?v='+Date.now();   // cache-bust: always fetch the latest portal-view.js (tunnels/proxies were serving stale CSS + JS)
     s.onload=function(){
       window.DBPortalView.mount({
@@ -99,6 +97,12 @@
     };
     s.onerror=function(){ document.getElementById('pv').innerHTML='<div class="pv-empty">Could not load the portal view.</div>'; };
     document.body.appendChild(s);
+    // Add a "Price List" tab to the portal nav (next to Productions), gated by the server — instead of a header button.
+    if(me.price_list_enabled){ var _tries=0, _iv=setInterval(function(){ _tries++;
+      var tabs=document.getElementById('pp-tabs'), prod=tabs&&tabs.querySelector('.rtab[data-pt="productions"]');
+      if(tabs&&prod&&!document.getElementById('pp-pricelist-tab')){ var t=document.createElement('span'); t.className='rtab'; t.id='pp-pricelist-tab'; t.textContent='💲 Price List'; t.style.cursor='pointer';
+        t.onclick=function(e){ e.stopPropagation(); ppPriceList(me); }; prod.parentNode.insertBefore(t, prod.nextSibling); clearInterval(_iv); }
+      if(_tries>40)clearInterval(_iv); }, 250); }
   }
 
   // ── Supplier Price List (gated: only shown when the server enables it) ──
@@ -121,19 +125,19 @@
       function pendBadge(){ return '<span style="display:inline-block;background:#dc2626;color:#fff;font-weight:800;font-size:9px;letter-spacing:.03em;padding:2px 7px;border-radius:4px">⚑ AWAITING APPROVAL</span>'; }
       function cell(scope,keyval,sup,pt,inheritOK){ var a=applicable(byKey[sup+'|'+scope+'|'+keyval]);
         var da='data-scope="'+scope+'" data-key="'+esc(keyval)+'" data-sup="'+esc(sup)+'" data-pt="'+esc(pt||'')+'"';
-        if(a.pending)return '<td class="plc" data-pend="1" '+da+' style="cursor:pointer;background:#fef2f2">'+pendBadge()+(a.cur?' <span style="color:#94a3b8;font-size:10px">now '+priceDisp(a.cur)+'</span>':'')+'</td>';
         if(a.cur)return '<td class="plc" '+da+' style="cursor:pointer">'+priceDisp(a.cur)+'</td>';
         if(inheritOK){ var at=applicable(byKey[sup+'|type|'+pt]); return '<td class="plc" '+da+' style="cursor:pointer;color:#94a3b8"><span style="color:#cbd5e1">↳</span> <span style="opacity:.6">'+(at.cur?priceDisp(at.cur):'—')+'</span></td>'; }
         return '<td class="plc" '+da+' style="cursor:pointer;color:#cbd5e1">— set</td>'; }
-      var head='<tr><th style="text-align:left">Price type / SKU</th><th style="text-align:left">Size</th><th style="text-align:left">Colour</th>'+sups.map(function(s){return '<th style="text-align:left">'+esc(s||'Your price')+'</th>';}).join('')+'</tr>';
+      function pendCol(scope,keyval,pt){ for(var i=0;i<sups.length;i++){ var a=applicable(byKey[sups[i]+'|'+scope+'|'+keyval]); if(a.pending){ return '<td class="plc" data-pend="1" data-scope="'+scope+'" data-key="'+esc(keyval)+'" data-sup="'+esc(sups[i])+'" data-pt="'+esc(pt||'')+'" style="cursor:pointer;background:#fef2f2">'+pendBadge()+(a.pendEntry?' <b style="font-size:11px">'+priceDisp(a.pendEntry)+'</b>':'')+(a.pendEntry&&a.pendEntry.effective_from_production?(' <span style="color:#92400e;font-size:10px">from prod '+a.pendEntry.effective_from_production+'</span>'):'')+'</td>'; } } return '<td style="color:#cbd5e1;text-align:center">—</td>'; }
+      var head='<tr><th style="text-align:left">Price type / SKU</th><th style="text-align:left">Size</th><th style="text-align:left">Colour</th>'+sups.map(function(s){return '<th style="text-align:left">'+esc(s||'Your price')+'</th>';}).join('')+'<th style="text-align:left">Pending approval</th></tr>';
       var bd='';
       pts.forEach(function(t){ var pt=t.price_type, op=!!OPEN[pt];
-        bd+='<tr class="plt"><td class="pll" data-tgl="'+esc(pt)+'" style="cursor:pointer;font-weight:700"><span style="color:#94a3b8">'+(op?'▾':'▸')+'</span> '+esc(pt)+'</td><td style="color:#64748b;font-size:11px">'+esc(t.size||'')+'</td><td></td>'+sups.map(function(s){return cell('type',pt,s,pt,false);}).join('')+'</tr>';
+        bd+='<tr class="plt"><td class="pll" data-tgl="'+esc(pt)+'" style="cursor:pointer;font-weight:700"><span style="color:#94a3b8">'+(op?'▾':'▸')+'</span> '+esc(pt)+'</td><td style="color:#64748b;font-size:11px">'+esc(t.size||'')+'</td><td></td>'+sups.map(function(s){return cell('type',pt,s,pt,false);}).join('')+pendCol('type',pt,pt)+'</tr>';
         if(op)(typeSkus[pt]||[]).forEach(function(s){ if(!s.active)return;
-          bd+='<tr><td class="pll" style="padding-left:20px;font-family:ui-monospace,Menlo,monospace;font-size:12px">'+esc(s.sku)+'</td><td style="color:#64748b;font-size:11px">'+esc(s.size||'')+'</td><td style="color:#64748b;font-size:11px">'+esc(s.colour||'')+'</td>'+sups.map(function(su){return cell('sku',s.sku,su,pt,true);}).join('')+'</tr>'; });
+          bd+='<tr><td class="pll" style="padding-left:20px;font-family:ui-monospace,Menlo,monospace;font-size:12px">'+esc(s.sku)+'</td><td style="color:#64748b;font-size:11px">'+esc(s.size||'')+'</td><td style="color:#64748b;font-size:11px">'+esc(s.colour||'')+'</td>'+sups.map(function(su){return cell('sku',s.sku,su,pt,true);}).join('')+pendCol('sku',s.sku,pt)+'</tr>'; });
       });
-      if(man.length){ var span=sups.length+3; bd+='<tr><td colspan="'+span+'" style="background:#0f172a;color:#fff;font-weight:700;font-size:11px;padding:6px 10px;text-transform:uppercase;letter-spacing:.04em">No price type / manual — priced per SKU</td></tr>';
-        man.forEach(function(s){ if(!s.active)return; bd+='<tr><td class="pll" style="padding-left:20px;font-family:ui-monospace,Menlo,monospace;font-size:12px">'+esc(s.sku)+'</td><td style="color:#64748b;font-size:11px">'+esc(s.size||'')+'</td><td style="color:#64748b;font-size:11px">'+esc(s.colour||'')+'</td>'+sups.map(function(su){return cell('sku',s.sku,su,s.price_type||'',false);}).join('')+'</tr>'; }); }
+      if(man.length){ var span=sups.length+4; bd+='<tr><td colspan="'+span+'" style="background:#0f172a;color:#fff;font-weight:700;font-size:11px;padding:6px 10px;text-transform:uppercase;letter-spacing:.04em">No price type / manual — priced per SKU</td></tr>';
+        man.forEach(function(s){ if(!s.active)return; bd+='<tr><td class="pll" style="padding-left:20px;font-family:ui-monospace,Menlo,monospace;font-size:12px">'+esc(s.sku)+'</td><td style="color:#64748b;font-size:11px">'+esc(s.size||'')+'</td><td style="color:#64748b;font-size:11px">'+esc(s.colour||'')+'</td>'+sups.map(function(su){return cell('sku',s.sku,su,s.price_type||'',false);}).join('')+pendCol('sku',s.sku,s.price_type||'')+'</tr>'; }); }
       b.innerHTML='<p style="color:#64748b;max-width:860px">Your prices. Click any price to <b>propose a change</b> — we’ll review and approve it. Larger quantities must be a lower unit cost. Expand ▸ a price type to price individual SKUs.</p><div style="overflow:auto"><table class="pltbl"><thead>'+head+'</thead><tbody>'+bd+'</tbody></table></div>';
       if(!document.getElementById('pltbl-sty')){ var st=document.createElement('style'); st.id='pltbl-sty'; st.textContent='.pltbl{border-collapse:separate;border-spacing:0;font-size:13px}.pltbl th{position:sticky;top:0;background:#f8fafc;padding:6px 10px;border-bottom:1px solid #e2e8f0;font-size:10px;text-transform:uppercase;color:#475569;white-space:nowrap}.pltbl td{padding:5px 10px;border-bottom:1px solid #f1f5f9;white-space:nowrap}.pltbl tr.plt td{background:#f6f8ff}.pltbl .plc:hover{background:#eff6ff}'; document.head.appendChild(st); }
       b.querySelectorAll('.pll[data-tgl]').forEach(function(td){ td.onclick=function(){ OPEN[td.dataset.tgl]=!OPEN[td.dataset.tgl]; render(d); }; });

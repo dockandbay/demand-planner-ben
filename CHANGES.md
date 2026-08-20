@@ -1,3 +1,7 @@
+## v27.212 Supplier portal Price List: pending in its own column + nav tab
+- **Pending approvals moved to a separate "Pending approval" column** (right of the price columns) — the price column keeps showing the current price; the pending column shows the ⚑ awaiting-approval badge + proposed price (+ from-production).
+- **Price List is now a nav tab** in the portal menu (next to Productions), not a header button.
+
 ## v27.211 Price Lists: production picker uses the productions table (all future)
 - The "from production" pickers (supplier portal propose form + admin editor/"prices as of") now list **all future productions from `planner.prod_numbers`** (ACTIVE), not just the sparse set that already exists on POs. Portal offers > current in-production; admin ≥ current.
 
