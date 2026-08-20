@@ -1,3 +1,6 @@
+## v27.185 REPORTS: Supply metrics + Inventory metrics are now their own L2 tabs
+- The "Performance" wrapper (with its inline Supply/Inventory sub-tabs) is gone; **Supply metrics** and **Inventory metrics** are now normal top-level REPORTS L2 tabs (same `.dnav` style as Exec Summary / Slow Moving). New slugs `#/reports/supply-metrics` and `#/reports/inventory-metrics`. Legacy `#/reports/performance` (and `.../inventory-metrics`) redirect to the flattened tabs. Also fixes favouriting these pages — they now name themselves "Supply metrics" / "Inventory metrics".
+
 ## v27.184 Favourites: only read the VISIBLE view's nav (fixes stale label)
 - Follow-up to v27.180. Favouriting `#/reports/slow` labelled it **"Other Payments"** — a page navigated from earlier — because other sections keep a stale `.active` on their hidden (display:none) nav, and the selector matched that first. Now `_favLabel()` skips any nav element that isn't actually visible (`getClientRects().length`), and the top-level **REPORTS hub** nav (`#report-tabs .dnav.active`) was added so those pages name correctly (e.g. "Slow Moving", "Performance").
 
