@@ -10676,6 +10676,7 @@
   function _favVis(el){ try{ return !!(el && el.getClientRects && el.getClientRects().length); }catch(e){ return true; } }   // only the VISIBLE view's nav — other sections keep a stale .active on their hidden (display:none) nav, which would mislabel the favourite (e.g. "Other Payments" while on a REPORTS page)
   function _favLabel(){ var sels=['#config-subs-l3 .rtab.active','#rep-subnav .rtab.active','#prod-subtabs .rtab.active','#config-subs .rtab.active','#scenario-subnav .stab.active','#product-subnav .stab.active','#buymove-tabs .active',
     '#demand-scenario-nav .d3tab.active','#demand-inputs-nav .d3tab.active','#demand-tabs .dnav.active',   // DEMAND L3 tool (e.g. scenario "FINANCIAL FORECAST MODEL") / L3 input / L2 tab — before the L1 "DEMAND" fallback
+    '#perf-subnav .dnav3.active',   // REPORTS ▸ Performance L3 (Supply metrics / Inventory metrics)
     '#report-tabs .dnav.active',   // top-level REPORTS hub L2 (Slow Moving / Performance / …)
     '#supply-subnav .stab.active',   // SUPPLY L2 section (PAYMENTS / INVENTORY / …) — deeper than the L1 "SUPPLY" toggle, so favouriting a SUPPLY page names it by its menu, not "supply"
     '#view-tabs-row .view-toggle.active'];   // L1 view (DEMAND / SUPPLY / …) — last-resort only
