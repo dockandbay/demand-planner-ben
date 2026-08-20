@@ -1,3 +1,6 @@
+## v27.179 Payments Report: searched line stays yellow on hover (no flash)
+- The yellow highlight on a searched PO/ref line no longer flashes when hovered — the cell-level row-hover background was painting over it. Now a `pay-hit` class keeps the line yellow through hover.
+
 ## v27.178 Payments Report: search by PO (opens its run + highlights the line yellow)
 - The search box now also matches a **PO / deposit reference** (in addition to supplier + amount). Searching a PO shows the payment run(s) it’s in, **auto-expands** them, and **highlights the matching line in yellow**. Placeholder/hint updated to “supplier / PO / amount”.
 

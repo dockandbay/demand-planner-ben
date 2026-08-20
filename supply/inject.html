@@ -326,6 +326,7 @@
 #supply-root table.samp-grid th:nth-child(2){z-index:3}
 #supply-root table.samp-grid tr.exp-row td{position:static!important;white-space:normal}   /* the expanded detail spans full width — never pin it */
 #supply-root tbody tr:hover td{background:#fafaf8}
+#supply-root tbody tr.pay-hit td,#supply-root tbody tr.pay-hit:hover td{background:#fef08a!important}   /* searched PO/ref line stays yellow (the cell-level hover bg would otherwise flash over it) */
 #supply-root tr.exp-row>td{background:#f8fafc;text-align:left;white-space:normal}
 #supply-root .tool-badge,#scenario-root .tool-badge{font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;letter-spacing:.2px;display:inline-block}
 #supply-root .chip{display:inline-block;background:#e0f2fe;color:#075985;font-size:11px;padding:2px 6px;border-radius:10px;margin:2px 2px;white-space:nowrap}
@@ -8678,7 +8679,7 @@
             : '<button class="lnk-btn pr-ref" data-go="po" data-k="'+esc(l.reference)+'">'+esc(l.reference)+'</button>') : '—';
         var drKey=(l.deposit_ref||'').split(',')[0].trim();
         var drCell = l.deposit_ref ? '<button class="lnk-btn pr-ref" data-go="dep" data-k="'+esc(drKey)+'">'+esc(l.deposit_ref)+'</button>' : '—';
-        return '<tr'+(_lhit(l)?' style="background:#fef08a"':'')+'><td class="l">'+refCell+'</td><td>'+money(l.amount)+'</td><td class="l"><span class="tool-badge '+(PTYPE_BG[l.type]||'bg-neutral')+'">'+esc(l.type)+'</span></td><td class="l">'+(l.prod_no?esc(l.prod_no):'<span class="mut">—</span>')+'</td><td class="l">'+drCell+'</td></tr>'; }).join('');
+        return '<tr'+(_lhit(l)?' class="pay-hit"':'')+'><td class="l">'+refCell+'</td><td>'+money(l.amount)+'</td><td class="l"><span class="tool-badge '+(PTYPE_BG[l.type]||'bg-neutral')+'">'+esc(l.type)+'</span></td><td class="l">'+(l.prod_no?esc(l.prod_no):'<span class="mut">—</span>')+'</td><td class="l">'+drCell+'</td></tr>'; }).join('');
       var det='<div id="payexp-'+i+'" style="display:'+(_poHit?'block':'none')+';margin-top:8px;border-top:1px solid #e5e7eb;padding-top:6px"><div class="sect-h" style="margin-top:0">Payments in this run ('+(r.lines||[]).length+')</div><div class="tw"><table style="font-size:11px;width:100%"><thead><tr><th class="l">Reference</th><th>Amount ('+esc(r.base_ccy||'USD')+')</th><th class="l">Type</th><th class="l">Prod</th><th class="l">Deposit ref</th></tr></thead><tbody>'+lines+'</tbody></table></div></div>';
       var hasBill=(r.lines||[]).some(function(l){return l.source!=='other';});
       var xeroIco='<svg width="13" height="13" viewBox="0 0 32 32" style="vertical-align:middle"><circle cx="16" cy="16" r="16" fill="#13B5EA"/><text x="16" y="23" font-size="21" font-weight="700" text-anchor="middle" fill="#fff" font-family="Arial,Helvetica,sans-serif">x</text></svg>';
@@ -8719,7 +8720,7 @@
             : '<button class="lnk-btn pr-ref" data-go="po" data-k="'+esc(l.reference)+'" title="open this PO’s payment plan">'+esc(l.reference)+'</button>') : '—';
         var drKey=(l.deposit_ref||'').split(',')[0].trim();
         var drCell = l.deposit_ref ? '<button class="lnk-btn pr-ref" data-go="dep" data-k="'+esc(drKey)+'" title="open this deposit (Productions ▸ Deposits)">'+esc(l.deposit_ref)+'</button>' : '—';
-        return '<tr'+(_lhit(l)?' style="background:#fef08a"':'')+'><td class="l">'+refCell+'</td><td>'+money(l.amount)+'</td>'
+        return '<tr'+(_lhit(l)?' class="pay-hit"':'')+'><td class="l">'+refCell+'</td><td>'+money(l.amount)+'</td>'
           +'<td class="l"><span class="tool-badge '+(PTYPE_BG[l.type]||'bg-neutral')+'">'+esc(l.type)+'</span></td>'
           +'<td class="l">'+(l.prod_no?esc(l.prod_no):'<span class="mut">—</span>')+'</td>'
           +'<td class="l">'+drCell+'</td></tr>'; }).join('');
