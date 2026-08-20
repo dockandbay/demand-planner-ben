@@ -8573,7 +8573,7 @@
       +'<label style="margin-left:10px;font-size:12px;color:#475569;display:inline-flex;align-items:center;gap:5px;cursor:pointer" title="Hide discontinued SKUs (they still show when searched)"><input type="checkbox" id="pl-active"'+(PL_ST.active?' checked':'')+'> Active SKUs only</label>'
       +(d.pending>0?'<span class="ex-badge" style="margin-left:10px;background:#b45309" title="'+d.pending+' pending supplier price change(s)">⚑ '+d.pending+' pending</span>':'')
       +'<span class="mut tiny" style="margin-left:auto">click a cell to set price + tiers · SKUs inherit the type price (↳) until overridden</span></div>';
-    var head='<tr><th class="pl-lbl" style="min-width:230px">Price type / SKU</th><th style="text-align:left">Colour</th><th style="text-align:left">Size</th>'+COLLBL.slice(0,maxCols).map(function(l){return '<th style="text-align:left">'+l+'</th>';}).join('')+'</tr>';
+    var head='<tr><th class="pl-lbl" style="min-width:230px">Price type / SKU</th><th class="pl-szh" style="text-align:left">Size</th><th class="pl-colh" style="text-align:left">Colour</th>'+COLLBL.slice(0,maxCols).map(function(l){return '<th style="text-align:left">'+l+'</th>';}).join('')+'</tr>';
     var body='';
     showTypes.forEach(function(pt){ var sups=orderedSups(pt), op=!!PL_ST.open[pt];
       var excCount=entries.filter(function(e){return e.scope==='sku'&&e.price_type===pt;}).length;
@@ -8584,8 +8584,8 @@
         cells+='<td class="pl-cell" data-scope="type" data-pt="'+esc(pt)+'" data-sup="'+esc(sup)+'" style="cursor:pointer"><div class="mut tiny" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:150px">'+esc(sup)+'</div>'+(a.cur?((a.pending?'<span style="color:#b45309">⚑ </span>':'')+priceDisp(a.cur)+efpTag(a.cur)):'<span style="color:#cbd5e1">— set price</span>')+'</td>';
       }
       var _ti=ptInfo[pt]||{}, _szOv=!!_ti.sizeOverride, _szV=_ti.size||'';
-      var szCell='<td class="pl-tsize"><input class="pl-size-in" data-pt="'+esc(pt)+'" value="'+esc(_szV)+'" placeholder="size" title="'+(_szOv?'manual size — clear to use the SKUs’ common size':'from the SKUs’ common size — type to override')+'" style="width:120px;padding:2px 5px;border:1px solid '+(_szOv?'#cbd5e1':'transparent')+';border-radius:4px;font-size:11px;color:'+(_szOv?'#0f172a':'#94a3b8')+';background:transparent"></td>';
-      body+='<tr class="pl-type"><td class="pl-lbl" data-tgl="'+esc(pt)+'" style="cursor:pointer;font-weight:700"><span class="mut">'+(op?'▾':'▸')+'</span> '+esc(pt)+(excCount?' <span class="mut tiny">·'+excCount+' exc</span>':'')+'</td><td></td>'+szCell+cells+'</tr>';
+      var szCell='<td class="pl-tsize pl-szh"><input class="pl-size-in" data-pt="'+esc(pt)+'" value="'+esc(_szV)+'" placeholder="size" title="'+(_szOv?'manual size — clear to use the SKUs’ common size':'from the SKUs’ common size — type to override')+'" style="width:100%;box-sizing:border-box;padding:2px 5px;border:1px solid '+(_szOv?'#cbd5e1':'transparent')+';border-radius:4px;font-size:11px;color:'+(_szOv?'#0f172a':'#94a3b8')+';background:transparent"></td>';
+      body+='<tr class="pl-type"><td class="pl-lbl" data-tgl="'+esc(pt)+'" style="cursor:pointer;font-weight:700"><span class="mut">'+(op?'▾':'▸')+'</span> '+esc(pt)+(excCount?' <span class="mut tiny">·'+excCount+' exc</span>':'')+'</td>'+szCell+'<td class="pl-colh"></td>'+cells+'</tr>';
       if(op){ (typeSkus[pt]||[]).filter(function(s){return skuVisible(pt,s);}).forEach(function(s){
         var sc='';
         for(var i=0;i<maxCols;i++){ var sup=sups[i];
@@ -8596,7 +8596,7 @@
             sc+='<td class="pl-cell pl-inh" data-scope="sku" data-pt="'+esc(pt)+'" data-sku="'+esc(s.sku)+'" data-sup="'+esc(sup)+'" title="inherits the '+esc(pt)+' price — click to set a SKU-specific price" style="cursor:pointer"><span title="inherited" style="color:#cbd5e1">↳</span> <span style="opacity:.6">'+inh+'</span></td>'; }
         }
         var disc=s.active?'':' <span class="mut tiny" style="color:#b45309" title="discontinued">disc</span>';
-        body+='<tr class="pl-sku"><td class="pl-lbl" style="padding-left:22px;font-family:ui-monospace,Menlo,monospace"><span title="'+esc(s.name)+'">'+esc(s.sku)+'</span>'+disc+'</td><td class="mut tiny">'+esc(s.colour||'')+'</td><td class="mut tiny">'+esc(s.size||'')+'</td>'+sc+'</tr>';
+        body+='<tr class="pl-sku"><td class="pl-lbl" style="padding-left:22px;font-family:ui-monospace,Menlo,monospace"><span title="'+esc(s.name)+'">'+esc(s.sku)+'</span>'+disc+'</td><td class="mut tiny pl-szh">'+esc(s.size||'')+'</td><td class="mut tiny pl-colh">'+esc(s.colour||'')+'</td>'+sc+'</tr>';
       }); }
     });
     if(!showTypes.length)body='<tr><td colspan="'+(maxCols+3)+'" class="count">No price types match.</td></tr>';
@@ -8605,6 +8605,7 @@
       '#supply-root .pl-tbl th{position:sticky;top:0;background:#f8fafc;z-index:2;padding:5px 8px;border-bottom:1px solid #e2e8f0;font-size:10px;text-transform:uppercase;color:#475569;white-space:nowrap}'
       +'#supply-root .pl-tbl td{padding:4px 8px;border-bottom:1px solid #f1f5f9;white-space:nowrap;text-align:left}'
       +'#supply-root .pl-tbl td,#supply-root .pl-tbl th{max-width:250px;overflow:hidden;text-overflow:ellipsis}'
+      +'#supply-root .pl-tbl .pl-szh,#supply-root .pl-tbl .pl-colh{max-width:120px;width:120px}'
       +'#supply-root .pl-tbl .pl-lbl{position:sticky;left:0;background:#fff;z-index:1;text-align:left;box-shadow:2px 0 3px -2px rgba(15,23,42,.15)}'
       +'#supply-root .pl-tbl th.pl-lbl{z-index:3;background:#f8fafc}'
       +'#supply-root .pl-tbl tr.pl-type td{background:#f6f8ff}#supply-root .pl-tbl tr.pl-type td.pl-lbl{background:#eef2ff}'

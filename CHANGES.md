@@ -1,3 +1,6 @@
+## v27.199 Price Lists: Size before Colour + narrower columns
+- Swapped column order to **Size, then Colour**, and capped both at **120px** (was up to 250) so they're not over-wide.
+
 ## v27.198 Price Lists — round-2 feedback
 - **(1)** Removed the "+ add supplier" cell.
 - **(2)** Added **Colour** (`colour_long`) and **Size** (`size_long`) columns next to the SKU.
