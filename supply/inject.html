@@ -794,6 +794,10 @@
     // then re-warm the client cache. Debounced so a burst of edits collapses into one rebuild.
     clearTimeout(_actInvTimer); _actInvTimer=setTimeout(function(){ try{ fetch('/api/supply/cache/invalidate',{method:'POST'}).then(function(){ if(typeof prewarmActions==='function')prewarmActions(true); }).catch(function(){}); }catch(e){} },800); }   // 'manufacturing' + 'paydue' nav badges recompute after a PO/order-plan/payment edit → tabs update on next nav; no hard refresh
 
+  // Silent data refresh: drop ALL client-cached section responses (+ lookups + nav counts) so the NEXT view render
+  // re-fetches fresh from the API — no full page reload. Called by the version poll when the ETL bumped source data
+  // and the user navigates (so nav picks up fresh data without the disruptive location.reload). — Ben (nav lag/refresh)
+  try{ window.__hzBustSupplyCache=function(){ try{ for(var k in cache)delete cache[k]; _lookupsAt=0; if(typeof _navCounts!=='undefined'){ _navCounts.shipments=undefined; _navCounts.manufacturing=undefined; _navCounts.paydue=undefined; _navCounts.plan=undefined; } }catch(e){} }; }catch(e){}
   function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function shortUser(s){return String(s==null?'':s).replace(/@dockandbay\.com\b/gi,'@');}  // ben@dockandbay.com → ben@ (display only)
   function shortNotes(arr){ (arr||[]).forEach(function(n){ if(n){ if(n.body)n.body=shortUser(n.body); if(n.author_email)n.author_email=shortUser(n.author_email); } }); return arr; }  // shorten user emails in timeline bodies/authors
@@ -4355,6 +4359,10 @@
     var skuCat={},skuRW={},skuAttr={}; skuMaster.forEach(function(s){skuCat[s.sku]=s.category;skuRW[s.sku]=s.release_window;
       skuAttr[s.sku]={sup:s.supplier||'',cq:s.carton_qty||'',dis:s.discontinue||'',disAu:s.discontinue_au||'',disCa:s.discontinue_ca||'',sm:s.supplier_multiple_all||'',ean:s.product_ean||'',title:s.product_name||'',size:s.size||'',size_long:s.size_long||'',colour:s.colour_long||''};});
     lines.forEach(function(l){if(l.category)skuCat[l.sku]=l.category; if(l.release_window)skuRW[l.sku]=l.release_window;});
+    // Backfill missing carton qty from the PO lines — the products master (/api/supply/skus) is sparse (~45%) but the
+    // order-plan lines carry carton_qty for ~99% of rows, so the "Cartons" view had no divisor for most SKUs and looked
+    // like it did nothing. Prefer the master value; fill the gap (and create a stub attr for line-only SKUs) from the line.
+    lines.forEach(function(l){ if(l.carton_qty==null||l.carton_qty===''||!(Number(l.carton_qty)>0))return; var a=skuAttr[l.sku]||(skuAttr[l.sku]={sup:'',cq:'',dis:'',disAu:'',disCa:'',sm:'',ean:'',title:'',size:'',size_long:'',colour:''}); if(a.cq===''||a.cq==null)a.cq=String(l.carton_qty); });
     var defS=OP_ST_KEYS.indexOf('production')>=0?['production']:OP_ST_KEYS.slice(0,1);   // default to Production (same as the PO grid)
     // default PROD# = the latest production number that still has POs IN PRODUCTION (a small, relevant, fast first load)
     var _prodDef='All'; (function(){ var bestN=-1; lines.forEach(function(l){ if(stGroup(l.status)!=='production'||!l.prod_no)return; var n=parseInt(String(l.prod_no).replace(/[^0-9]/g,''),10); if(!isNaN(n)&&n>bestN){bestN=n;_prodDef=String(l.prod_no);} }); })();
@@ -8295,8 +8303,11 @@
   }
   function renderPaymentsDue(b){ b.innerHTML='<div class="count">Loading…</div>';
     fetchLookups(function(){   // ensure supplierCcy is loaded so amounts show in each supplier's currency
-    Promise.all([fetch('/api/supply/purchase-orders').then(function(r){return r.json();}),
-                 fetch('/api/supply/deposits').then(function(r){return r.json();})])
+    // Reuse the PO grid already fetched for PLAN/PURCHASE ORDERS if we have it (same session data) — clicking PAYMENTS
+    // straight after viewing the PO grid then skips a second big /api/supply/purchase-orders fetch. The data-refresh
+    // poll busts this cache when the ETL changes, so it can't go stale across a real update. — Ben (nav lag)
+    var _poP=cache['purchase-orders']?Promise.resolve(cache['purchase-orders']):fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(d){cache['purchase-orders']=d;return d;});
+    Promise.all([_poP, fetch('/api/supply/deposits').then(function(r){return r.json();})])
       .then(function(res){ buildPaymentsDue(b, res[0]||[], res[1]||[]); })
       .catch(function(e){b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>';}); }); }
   function buildPaymentsDue(b, pos, deps){
@@ -12581,7 +12592,10 @@
     if(pendingCode||pendingData)apply(); }).catch(function(){}); }
   document.addEventListener('visibilitychange',function(){ if(document.hidden){ apply(); } else { lastAct=Date.now(); check(); } });
   window.addEventListener('focus',function(){ lastAct=Date.now(); check(); });
-  window.addEventListener('hashchange',function(){ if(pendingCode||pendingData)safeReload(); });   // apply a pending update on the NEXT page navigation — a natural, non-disruptive moment (Ben)
+  window.addEventListener('hashchange',function(){
+    if(pendingCode){ safeReload(); return; }   // a new DEPLOY needs the new JS/HTML → full reload at this navigation (rare)
+    if(pendingData){ try{ if(window.__hzBustSupplyCache)window.__hzBustSupplyCache(); }catch(e){} }   // DATA changed: silently drop cached section data so the destination view re-fetches fresh — NO full reload (nav must stay snappy). — Ben
+  });
   setInterval(check,5*60*1000);                        // poll for new version / data every 5 minutes
   setInterval(function(){ if(pendingCode||pendingData)apply(); },30*1000);   // retry at safe moments (won't reload a visible page for DATA — only when backgrounded or on navigation)
   setTimeout(check,15000);                             // and shortly after load
