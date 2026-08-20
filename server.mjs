@@ -2418,8 +2418,7 @@ app.get('/api/supply/po-suppliers', async (_req, res) => {
 // ── PRICE LISTS (SUPPLY ▸ Purchase Orders ▸ Price Lists) ─────────────────────────────────────────────
 // Cost price per product × supplier, grouped by products.price_type (type-level base + per-SKU exceptions),
 // with quantity tiers and "from production N" versioning. Supplier-portal submissions arrive as status='pending'.
-app.get('/api/supply/price-list', async (_req, res) => {
-  try {
+async function plAdminData() {
     const entries = (await pool.query(`
       SELECT e.id, e.supplier, e.scope, coalesce(e.price_type,'') price_type, coalesce(e.sku,'') sku,
              e.currency, e.effective_from_production, e.status, e.source, coalesce(e.note,'') note,
@@ -2461,8 +2460,46 @@ app.get('/api/supply/price-list', async (_req, res) => {
     const prods = (await pool.query(`SELECT prod_no FROM planner.prod_numbers WHERE coalesce(status,'')='ACTIVE'`)).rows
       .map(r => parseInt(String(r.prod_no).replace(/[^0-9]/g, ''), 10)).filter(n => !isNaN(n) && n >= currentProduction).sort((a, b) => b - a);   // future productions from the productions table
     const pending = entries.filter(e => e.status === 'pending').length;
-    res.json({ entries, suppliers, priceTypes, manualSkus, excluded, productions: [...new Set(prods)], currentProduction, pending });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    return { entries, suppliers, priceTypes, manualSkus, excluded, productions: [...new Set(prods)], currentProduction, pending };
+}
+app.get('/api/supply/price-list', async (_req, res) => {
+  try { res.json(await plAdminData()); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Build a 2-sheet XLSX (Price types · SKUs) from a price-list data object (shared by admin + portal export).
+async function plXlsxBuffer(data) {
+  const ExcelJS = (await import('exceljs')).default;
+  const entries = data.entries || [], priceTypes = data.priceTypes || [], manualSkus = data.manualSkus || [], curProd = data.currentProduction || 0;
+  const byKey = {}; entries.forEach(e => { const k = e.supplier + '|' + e.scope + '|' + (e.scope === 'sku' ? e.sku : e.price_type); (byKey[k] = byKey[k] || []).push(e); });
+  const curOf = (list) => { if (!list || !list.length) return null; const act = list.filter(e => e.status === 'active'); let p2 = act.filter(e => e.effective_from_production == null || e.effective_from_production <= curProd); if (!p2.length) p2 = act.filter(e => e.effective_from_production == null); let pick = null; p2.slice().sort((a, b) => (a.effective_from_production || 0) - (b.effective_from_production || 0)).forEach(e => pick = e); return pick; };
+  const tl = (e) => (e && e.tiers && e.tiers.length) ? e.tiers.slice().sort((a, b) => a.min_qty - b.min_qty) : [];
+  const tiersStr = (e) => tl(e).map(t => t.min_qty + ':' + Number(t.unit_cost)).join(' | ');
+  const baseCost = (e) => { const t = tl(e); return t.length ? Number(t[0].unit_cost) : null; };
+  const wb = new ExcelJS.Workbook(); wb.creator = 'HORIZON';
+  const ptS = wb.addWorksheet('Price types');
+  ptS.columns = [{ header: 'Price type', width: 26 }, { header: 'Category', width: 20 }, { header: 'Size', width: 12 },
+    { header: 'Supplier', width: 22 }, { header: 'Currency', width: 9 }, { header: 'From production', width: 14 },
+    { header: 'Base unit cost', width: 13 }, { header: 'Price tiers (qty:cost)', width: 30 }];
+  priceTypes.forEach(t => { const pt = t.price_type; const supSet = {}; entries.forEach(e => { if (e.price_type === pt && e.scope === 'type' && e.status === 'active') supSet[e.supplier] = 1; });
+    Object.keys(supSet).sort().forEach(sup => { const use = curOf(byKey[sup + '|type|' + pt]); if (!use) return;
+      ptS.addRow([pt, t.category || '', t.size || '', sup, use.currency || '', use.effective_from_production || 'current', baseCost(use), tiersStr(use)]); }); });
+  const skS = wb.addWorksheet('SKUs');
+  skS.columns = [{ header: 'Price type', width: 22 }, { header: 'Category', width: 20 }, { header: 'SKU', width: 24 },
+    { header: 'Product', width: 34 }, { header: 'Size', width: 12 }, { header: 'Colour', width: 16 },
+    { header: 'Supplier', width: 22 }, { header: 'Currency', width: 9 }, { header: 'From production', width: 14 },
+    { header: 'Base unit cost', width: 13 }, { header: 'Price tiers (qty:cost)', width: 30 }, { header: 'Price source', width: 18 }];
+  priceTypes.forEach(t => { const pt = t.price_type; const supSet = {}; entries.forEach(e => { if (e.price_type === pt && e.status === 'active') supSet[e.supplier] = 1; }); const sups = Object.keys(supSet).sort();
+    (t.skus || []).forEach(s => { sups.forEach(sup => { const ov = curOf(byKey[sup + '|sku|' + s.sku]), base = curOf(byKey[sup + '|type|' + pt]), use = ov || base; if (!use) return;
+      skS.addRow([pt, s.category || t.category || '', s.sku, s.name || '', s.size || '', s.colour || '', sup, use.currency || '', use.effective_from_production || 'current', baseCost(use), tiersStr(use), ov ? 'SKU price' : 'inherited type price']); }); }); });
+  manualSkus.forEach(s => { const sup = s.main_supplier || ''; const use = sup ? curOf(byKey[sup + '|sku|' + s.sku]) : null; if (!use) return;
+    skS.addRow([s.price_type || 'MANUAL', s.category || '', s.sku, s.name || '', s.size || '', s.colour || '', sup, use.currency || '', use.effective_from_production || 'current', baseCost(use), tiersStr(use), 'SKU price']); });
+  [ptS, skS].forEach(ws => { ws.getRow(1).font = { bold: true }; ws.views = [{ state: 'frozen', ySplit: 1 }]; });
+  return await wb.xlsx.writeBuffer();
+}
+app.get('/api/supply/price-list/export.xlsx', async (_req, res) => {
+  try { const buf = await plXlsxBuffer(await plAdminData());
+    res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+       .set('Content-Disposition', 'attachment; filename="price-list.xlsx"').set('Cache-Control', 'no-store').send(Buffer.from(buf));
+  } catch (e) { log500(e); res.status(500).send('export error: ' + e.message); }
 });
 // Admin upsert of a price entry + its tiers (id present = update, else insert). Always active/admin-sourced.
 app.post('/api/supply/price-list', async (req, res) => {
@@ -13730,11 +13767,8 @@ app.get('/api/portal/me', portalAuth, (req, res) => res.json({ email: req.portal
 // ── Supplier portal ▸ Price List (Phase 3 — GATED: only wired in when IS_SANDBOX until Ben confirms) ──
 // The supplier sees their OWN active prices + any changes they've submitted (pending), and can propose changes
 // (new tiers / from a future production) which land as status='pending' for admin approval.
-app.get('/api/portal/price-list', portalAuth, async (req, res) => {
-  if (!IS_SANDBOX) return res.status(404).json({ error: 'not enabled' });
-  const sups = req.portal.suppliers || [];
-  try {
-    if (!sups.length) return res.json({ entries: [], suppliers: [], priceTypes: [], manualSkus: [], productions: [], currentProduction: 0 });
+async function plPortalData(sups) {
+    if (!sups.length) return { entries: [], suppliers: [], priceTypes: [], manualSkus: [], productions: [], currentProduction: 0 };
     const entries = (await pool.query(`
       SELECT e.id, e.supplier, e.scope, coalesce(e.price_type,'') price_type, coalesce(e.sku,'') sku, e.currency,
              e.effective_from_production, e.status, coalesce(e.note,'') note,
@@ -13768,8 +13802,18 @@ app.get('/api/portal/price-list', portalAuth, async (req, res) => {
     const currentProduction = (cpRow && cpRow.mx) ? cpRow.mx : 0;
     const prods = (await pool.query(`SELECT prod_no FROM planner.prod_numbers WHERE coalesce(status,'')='ACTIVE'`)).rows
       .map((r) => parseInt(String(r.prod_no).replace(/[^0-9]/g, ''), 10)).filter((n) => !isNaN(n) && n > currentProduction).sort((a, b) => b - a);   // ALL future productions from the productions table (Ben)
-    res.json({ entries, suppliers: sups, priceTypes, manualSkus, productions: [...new Set(prods)], currentProduction });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    return { entries, suppliers: sups, priceTypes, manualSkus, productions: [...new Set(prods)], currentProduction };
+}
+app.get('/api/portal/price-list', portalAuth, async (req, res) => {
+  if (!IS_SANDBOX) return res.status(404).json({ error: 'not enabled' });
+  try { res.json(await plPortalData(req.portal.suppliers || [])); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/portal/price-list/export.xlsx', portalAuth, async (req, res) => {
+  if (!IS_SANDBOX) return res.status(404).send('not enabled');
+  try { const buf = await plXlsxBuffer(await plPortalData(req.portal.suppliers || []));
+    res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+       .set('Content-Disposition', 'attachment; filename="price-list.xlsx"').set('Cache-Control', 'no-store').send(Buffer.from(buf));
+  } catch (e) { log500(e); res.status(500).send('export error: ' + e.message); }
 });
 app.post('/api/portal/price-list/submit', portalAuth, async (req, res) => {
   if (!IS_SANDBOX) return res.status(404).json({ error: 'not enabled' });

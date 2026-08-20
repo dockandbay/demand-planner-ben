@@ -1,3 +1,7 @@
+## v27.220 Price Lists download → Excel (.xlsx), two sheets: Price types + SKUs
+- The Price Lists download is now an **Excel workbook** (was CSV) with **two sheets**: **"Price types"** (one row per price type × supplier — the type base price) and **"SKUs"** (one row per SKU × supplier — effective price, with product/colour + price source). Both carry **Category**, currency, from-production, base unit cost, and all tiers. Header row bold + frozen.
+- Generated **server-side** with exceljs (shared `plXlsxBuffer`); refactored the admin + portal price-list GETs into reusable `plAdminData()` / `plPortalData()` builders. New endpoints `GET /api/supply/price-list/export.xlsx` and `GET /api/portal/price-list/export.xlsx` (portal sandbox-gated, cookie-auth). Button relabelled **⬇ Excel** / **⬇ Download Excel**.
+
 ## v27.219 Price Lists: download CSV (admin + supplier portal), with category + SKUs
 - **Admin** SUPPLY ▸ Purchase Orders ▸ Price Lists now has a **⬇ CSV** button — exports the full current price list: one row per **SKU × supplier**, with **Category**, price type, product, size, colour, currency, from-production, base unit cost, all tiers, and price source (SKU / inherited type / type). Uses the current effective price (highest production ≤ current).
 - **Supplier portal** Price List has a **⬇ Download CSV** button — the supplier's own prices, same per-SKU layout with category.
