@@ -2524,17 +2524,24 @@ app.post('/api/supply/price-list/:id/approve', async (req, res) => {
   } catch (err) { await client.query('ROLLBACK'); log500(err); res.status(500).json({ error: err.message }); }
   finally { client.release(); }
 });
-// Price-list change log — supplier-submitted changes that were decided (approved → active/superseded, or rejected).
-app.get('/api/supply/price-list/log', async (_req, res) => {
+// Price-list change log. No params → supplier-submitted decisions (approved/rejected/superseded) across everything.
+// With scope+key (+ optional supplier) → the FULL history for one price point (any source/status), for the per-row log.
+const PL_LOG_COLS = `e.id, e.supplier, e.scope, coalesce(e.price_type,'') price_type, coalesce(e.sku,'') sku, e.currency,
+    e.effective_from_production, e.status, e.source, coalesce(e.note,'') note, coalesce(e.submitted_by,'') submitted_by,
+    to_char(e.submitted_at,'YYYY-MM-DD HH24:MI') submitted_at, coalesce(e.approved_by,'') approved_by,
+    to_char(coalesce(e.approved_at,e.updated_at),'YYYY-MM-DD HH24:MI') decided_at,
+    coalesce((SELECT json_agg(json_build_object('min_qty',t.min_qty,'unit_cost',t.unit_cost) ORDER BY t.min_qty) FROM planner.price_list_tiers t WHERE t.entry_id=e.id),'[]') tiers`;
+app.get('/api/supply/price-list/log', async (req, res) => {
+  const q = req.query || {};
   try {
-    res.json((await pool.query(`SELECT e.id, e.supplier, e.scope, coalesce(e.price_type,'') price_type, coalesce(e.sku,'') sku, e.currency,
-        e.effective_from_production, e.status, coalesce(e.note,'') note, coalesce(e.submitted_by,'') submitted_by,
-        to_char(e.submitted_at,'YYYY-MM-DD HH24:MI') submitted_at, coalesce(e.approved_by,'') approved_by,
-        to_char(coalesce(e.approved_at,e.updated_at),'YYYY-MM-DD HH24:MI') decided_at,
-        coalesce((SELECT json_agg(json_build_object('min_qty',t.min_qty,'unit_cost',t.unit_cost) ORDER BY t.min_qty) FROM planner.price_list_tiers t WHERE t.entry_id=e.id),'[]') tiers
-      FROM planner.price_list_entries e
-      WHERE e.source='supplier' AND e.status IN ('active','rejected','superseded')
-      ORDER BY coalesce(e.approved_at,e.updated_at) DESC NULLS LAST LIMIT 500`)).rows);
+    let where, params;
+    if (q.scope && q.key) {
+      const col = q.scope === 'sku' ? 'sku' : 'price_type';
+      where = `e.scope=$1 AND coalesce(e.${col},'')=$2`; params = [q.scope, q.key];
+      if (q.supplier) { where += ` AND e.supplier=$3`; params.push(q.supplier); }
+    } else { where = `e.source='supplier' AND e.status IN ('active','rejected','superseded')`; params = []; }
+    res.json((await pool.query(`SELECT ${PL_LOG_COLS} FROM planner.price_list_entries e WHERE ${where}
+      ORDER BY coalesce(e.approved_at,e.updated_at) DESC NULLS LAST LIMIT 500`, params)).rows);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Cheap count of unapproved (pending) price changes — for the Price Lists sub-tab nav badge.

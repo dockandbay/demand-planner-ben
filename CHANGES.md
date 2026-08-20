@@ -1,3 +1,6 @@
+## v27.217 Price Lists admin: per-price-point change log (subtle 🕘 per row)
+- Each price-type and SKU row now has a subtle **🕘** button that opens the **full change log for just that price point** (all history: pending / approved / rejected / superseded, dated, with tiers + note). The toolbar "Change log" (global) still works. Log endpoint now accepts `scope`+`key` (+optional `supplier`).
+
 ## v27.216 Supplier portal: Price List deep link (/portal#pricelist)
 - The supplier portal Price List now has a deep link — opening/clicking it sets `#pricelist` in the URL, and visiting `/portal#pricelist` opens it directly (after sign-in). Closing clears the hash; hashchange keeps it in sync.
 
