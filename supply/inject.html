@@ -8619,6 +8619,32 @@
     document.getElementById('pl-excl-cancel').onclick=close;
     document.getElementById('pl-excl-save').onclick=function(){ var v=document.getElementById('pl-excl-ta').value, sb=document.getElementById('pl-excl-save'); sb.disabled=true; sb.textContent='Saving…';
       fetch('/api/supply/price-list/exclude',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({skus:v})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){sb.disabled=false;sb.textContent='Save';alert(j.error);return;} close(); renderPriceLists(b); }).catch(function(e){ sb.disabled=false;sb.textContent='Save'; alert('Save failed: '+(e.message||e)); }); }; }
+  // Download the full CURRENT price list as CSV — one row per SKU × supplier (with category), effective price as of the current production.
+  function plExportCsv(d){
+    var entries=d.entries||[], priceTypes=d.priceTypes||[], manualSkus=d.manualSkus||[], curProd=d.currentProduction||0;
+    var byKey={}; entries.forEach(function(e){ var k=e.supplier+'|'+e.scope+'|'+(e.scope==='sku'?e.sku:e.price_type); (byKey[k]=byKey[k]||[]).push(e); });
+    function curOf(list){ if(!list||!list.length)return null; var act=list.filter(function(e){return e.status==='active';}); var pool2=act.filter(function(e){return e.effective_from_production==null||e.effective_from_production<=curProd;}); if(!pool2.length)pool2=act.filter(function(e){return e.effective_from_production==null;}); var pick=null; pool2.slice().sort(function(a,b){return (a.effective_from_production||0)-(b.effective_from_production||0);}).forEach(function(e){pick=e;}); return pick; }
+    function tierList(e){ return (e&&e.tiers&&e.tiers.length)?e.tiers.slice().sort(function(a,b){return a.min_qty-b.min_qty;}):[]; }
+    function tiersStr(e){ return tierList(e).map(function(t){return t.min_qty+':'+Number(t.unit_cost);}).join(' | '); }
+    function baseCost(e){ var t=tierList(e); return t.length?Number(t[0].unit_cost):''; }   // smallest-qty tier = headline unit cost
+    function esc(v){ v=(v==null?'':String(v)); return /[",\n\r]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; }
+    var rows=[['Price type','Category','SKU','Product','Size','Colour','Supplier','Currency','From production','Base unit cost','Price tiers (qty:cost)','Price source']];
+    priceTypes.forEach(function(t){ var pt=t.price_type;
+      var supSet={}; entries.forEach(function(e){ if(e.price_type===pt&&e.status==='active')supSet[e.supplier]=1; }); var sups=Object.keys(supSet).sort();
+      var skus=t.skus||[];
+      if(skus.length){ skus.forEach(function(s){ sups.forEach(function(sup){
+        var ov=curOf(byKey[sup+'|sku|'+s.sku]), base=curOf(byKey[sup+'|type|'+pt]), use=ov||base; if(!use)return;
+        rows.push([pt,s.category||t.category||'',s.sku,s.name||'',s.size||'',s.colour||'',sup,use.currency||'',use.effective_from_production||'current',baseCost(use),tiersStr(use),ov?'SKU price':'inherited type price']);
+      }); }); }
+      else { sups.forEach(function(sup){ var use=curOf(byKey[sup+'|type|'+pt]); if(!use)return; rows.push([pt,t.category||'','','','','',sup,use.currency||'',use.effective_from_production||'current',baseCost(use),tiersStr(use),'type price']); }); }
+    });
+    manualSkus.forEach(function(s){ var sup=s.main_supplier||''; var use=sup?curOf(byKey[sup+'|sku|'+s.sku]):null; if(!use)return;
+      rows.push([s.price_type||'MANUAL',s.category||'',s.sku,s.name||'',s.size||'',s.colour||'',sup,use.currency||'',use.effective_from_production||'current',baseCost(use),tiersStr(use),'SKU price']); });
+    var csv=rows.map(function(r){return r.map(esc).join(',');}).join('\r\n');
+    var d2=new Date(), stamp=d2.getFullYear()+('0'+(d2.getMonth()+1)).slice(-2)+('0'+d2.getDate()).slice(-2);
+    var a=document.createElement('a'); a.href=URL.createObjectURL(new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'})); a.download='price-list-'+stamp+'.csv';
+    document.body.appendChild(a); a.click(); setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); },2000);
+  }
   function plDraw(b,d){
     var _keepT=(function(){ var s=b.querySelector('.pl-scroll'); return s?s.scrollTop:0; })(), _keepW=window.scrollY;   // preserve scroll across a redraw (expand/filter) so the view doesn't jump to the top
     var entries=d.entries||[], suppliers=d.suppliers||[], priceTypes=d.priceTypes||[], productions=d.productions||[], curProd=d.currentProduction||0, manualSkus=d.manualSkus||[];
@@ -8650,6 +8676,7 @@
       +(d.pending>0?'<button id="pl-pending" style="margin-left:10px;background:#dc2626;color:#fff;border:none;cursor:pointer;font-weight:800;font-size:13px;padding:6px 14px;border-radius:8px;box-shadow:0 1px 4px rgba(220,38,38,.4)" title="'+d.pending+' pending supplier price change(s) — click to review + approve/reject">⚑ '+d.pending+' APPROVAL'+(d.pending>1?'S':'')+' REQUIRED — review</button>':'')
       +'<button id="pl-excl" class="save-btn light" style="margin-left:10px;font-size:11px" title="SKUs hidden from the price list — paste to manage">Excluded SKUs'+((d.excluded&&d.excluded.length)?(' ('+d.excluded.length+')'):'')+'</button>'
       +'<button id="pl-log" class="save-btn light" style="margin-left:6px;font-size:11px" title="History of approved / rejected supplier price changes">Change log</button>'
+      +'<button id="pl-csv" class="save-btn light" style="margin-left:6px;font-size:11px" title="Download the full current price list as CSV — one row per SKU × supplier, with category">⬇ CSV</button>'
       +'<span class="mut tiny" style="margin-left:auto">click a cell to set price + tiers · SKUs inherit the type price (↳) until overridden</span></div>';
     var head='<tr><th class="pl-lbl" style="min-width:230px">Price type / SKU</th><th class="pl-szh" style="text-align:left">Size</th><th class="pl-colh" style="text-align:left">Colour</th>'+COLLBL.slice(0,maxCols).map(function(l){return '<th style="text-align:left">'+l+'</th>';}).join('')+'</tr>';
     var body='';
@@ -8722,6 +8749,7 @@
     var xb=b.querySelector('#pl-excl'); if(xb)xb.onclick=function(){ plExclude(b,d.excluded||[]); };
     var pb=b.querySelector('#pl-pending'); if(pb)pb.onclick=function(){ plPending(b,d); };
     var lgb=b.querySelector('#pl-log'); if(lgb)lgb.onclick=function(){ plLog(); };
+    var csvb=b.querySelector('#pl-csv'); if(csvb)csvb.onclick=function(){ plExportCsv(d); };
     b.querySelectorAll('.pl-rowlog').forEach(function(s){ s.onclick=function(e){ e.stopPropagation(); plLog({scope:s.dataset.scope,key:s.dataset.key,label:s.dataset.key}); }; });
     b.querySelectorAll('.pl-size-in').forEach(function(inp){ inp.onchange=function(){ var ptn=inp.dataset.pt, v=inp.value.trim();
       fetch('/api/supply/price-type-meta',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({price_type:ptn,size:v})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;}

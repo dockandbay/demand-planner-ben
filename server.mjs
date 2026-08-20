@@ -2436,6 +2436,7 @@ app.get('/api/supply/price-list', async (_req, res) => {
     const excluded = (await pool.query(`SELECT sku FROM planner.price_list_excluded_skus ORDER BY sku`)).rows.map(r => r.sku);
     const exclSet = new Set(excluded);
     const pt = (await pool.query(`SELECT coalesce(price_type,'') price_type, sku, coalesce(product_name_final,product_name,'') name,
+             coalesce(nullif(category_name_final,''),category,'') category,
              coalesce(main_supplier_final,'') main_supplier, coalesce(colour_long,'') colour, coalesce(nullif(size_long,''),size,'') size,
              (lower(coalesce(status,'')) NOT LIKE '%discont%' AND NOT (coalesce(discontinue_date_final,'') ~ '^\d{4}-\d{2}-\d{2}' AND to_date(discontinue_date_final,'YYYY-MM-DD') <= current_date)) active
       FROM planner.products WHERE coalesce(sku,'')<>'' AND coalesce(variant_type,'')='MASTER' AND upper(coalesce(status,''))<>'NON STOCKED' ORDER BY price_type, sku`)).rows
@@ -2445,13 +2446,14 @@ app.get('/api/supply/price-list', async (_req, res) => {
     const isManual = (v) => (v === '' || String(v).toUpperCase() === 'MANUAL');
     const typeMap = {}, manualSkus = [];
     pt.forEach(r => {
-      if (isManual(r.price_type)) { manualSkus.push({ sku: r.sku, name: r.name, active: !!r.active, colour: r.colour, size: r.size, main_supplier: r.main_supplier, price_type: r.price_type }); return; }
-      const t = (typeMap[r.price_type] = typeMap[r.price_type] || { skus: [], mc: {}, sizes: {} }); t.skus.push({ sku: r.sku, name: r.name, active: !!r.active, colour: r.colour, size: r.size }); if (r.main_supplier) t.mc[r.main_supplier] = (t.mc[r.main_supplier] || 0) + 1; if (r.size) t.sizes[r.size] = 1;
+      if (isManual(r.price_type)) { manualSkus.push({ sku: r.sku, name: r.name, active: !!r.active, colour: r.colour, size: r.size, category: r.category, main_supplier: r.main_supplier, price_type: r.price_type }); return; }
+      const t = (typeMap[r.price_type] = typeMap[r.price_type] || { skus: [], mc: {}, sizes: {}, cats: {} }); t.skus.push({ sku: r.sku, name: r.name, active: !!r.active, colour: r.colour, size: r.size, category: r.category }); if (r.main_supplier) t.mc[r.main_supplier] = (t.mc[r.main_supplier] || 0) + 1; if (r.size) t.sizes[r.size] = 1; if (r.category) t.cats[r.category] = (t.cats[r.category] || 0) + 1;
     });
     const priceTypes = Object.keys(typeMap).sort().map(k => { const t = typeMap[k]; const main = Object.keys(t.mc).sort((a, b) => t.mc[b] - t.mc[a])[0] || '';
       const uniq = Object.keys(t.sizes); const defaultSize = uniq.length === 1 ? uniq[0] : '';   // common SKU size only when uniform
+      const category = Object.keys(t.cats).sort((a, b) => t.cats[b] - t.cats[a])[0] || '';   // dominant category across the type's SKUs
       const override = (ptMeta[k] != null && ptMeta[k] !== '');
-      return { price_type: k, skus: t.skus, mainSupplier: main, size: override ? ptMeta[k] : defaultSize, sizeOverride: override, sizeDefault: defaultSize }; });
+      return { price_type: k, skus: t.skus, category, mainSupplier: main, size: override ? ptMeta[k] : defaultSize, sizeOverride: override, sizeDefault: defaultSize }; });
     // current production = latest IN-PRODUCTION number; the "from production" picker offers this + higher (future only)
     const cpRow = (await pool.query(`SELECT max(regexp_replace(prod_no,'[^0-9]','','g')::int) mx FROM planner.purchase_orders
       WHERE lower(coalesce(status,'')) LIKE '%production%' AND regexp_replace(coalesce(prod_no,''),'[^0-9]','','g')<>''`)).rows[0];
@@ -13747,14 +13749,16 @@ app.get('/api/portal/price-list', portalAuth, async (req, res) => {
     let priceTypes = [], manualSkus = [];
     if (myTypes.length) {
       const pt = (await pool.query(`SELECT price_type, sku, coalesce(product_name_final,product_name,'') name, coalesce(main_supplier_final,'') main_supplier,
+             coalesce(nullif(category_name_final,''),category,'') category,
              coalesce(colour_long,'') colour, coalesce(nullif(size_long,''),size,'') size,
              (lower(coalesce(status,'')) NOT LIKE '%discont%' AND NOT (coalesce(discontinue_date_final,'') ~ '^\d{4}-\d{2}-\d{2}' AND to_date(discontinue_date_final,'YYYY-MM-DD') <= current_date)) active
         FROM planner.products WHERE coalesce(variant_type,'')='MASTER' AND upper(coalesce(status,''))<>'NON STOCKED' AND price_type = ANY($1) ORDER BY price_type, sku`, [myTypes])).rows;
-      const tm = {}; pt.forEach((r) => { const t = (tm[r.price_type] = tm[r.price_type] || { skus: [], sizes: {} }); t.skus.push({ sku: r.sku, name: r.name, active: !!r.active, colour: r.colour, size: r.size }); if (r.size) t.sizes[r.size] = 1; });
-      priceTypes = myTypes.slice().sort().map((k) => { const t = tm[k] || { skus: [], sizes: {} }; const uniq = Object.keys(t.sizes); const def = uniq.length === 1 ? uniq[0] : ''; const ov = (ptMeta[k] != null && ptMeta[k] !== ''); return { price_type: k, skus: t.skus, mainSupplier: sups[0] || '', size: ov ? ptMeta[k] : def, sizeOverride: ov, sizeDefault: def }; });
+      const tm = {}; pt.forEach((r) => { const t = (tm[r.price_type] = tm[r.price_type] || { skus: [], sizes: {}, cats: {} }); t.skus.push({ sku: r.sku, name: r.name, active: !!r.active, colour: r.colour, size: r.size, category: r.category }); if (r.size) t.sizes[r.size] = 1; if (r.category) t.cats[r.category] = (t.cats[r.category] || 0) + 1; });
+      priceTypes = myTypes.slice().sort().map((k) => { const t = tm[k] || { skus: [], sizes: {}, cats: {} }; const uniq = Object.keys(t.sizes); const def = uniq.length === 1 ? uniq[0] : ''; const cat = Object.keys(t.cats).sort((a, b) => t.cats[b] - t.cats[a])[0] || ''; const ov = (ptMeta[k] != null && ptMeta[k] !== ''); return { price_type: k, skus: t.skus, category: cat, mainSupplier: sups[0] || '', size: ov ? ptMeta[k] : def, sizeOverride: ov, sizeDefault: def }; });
     }
     if (manualSet.size) {
       manualSkus = (await pool.query(`SELECT sku, coalesce(product_name_final,product_name,'') name, coalesce(colour_long,'') colour, coalesce(nullif(size_long,''),size,'') size,
+             coalesce(nullif(category_name_final,''),category,'') category,
              coalesce(main_supplier_final,'') main_supplier, coalesce(price_type,'') price_type,
              (lower(coalesce(status,'')) NOT LIKE '%discont%' AND NOT (coalesce(discontinue_date_final,'') ~ '^\d{4}-\d{2}-\d{2}' AND to_date(discontinue_date_final,'YYYY-MM-DD') <= current_date)) active
         FROM planner.products WHERE sku = ANY($1) ORDER BY sku`, [[...manualSet]])).rows.map((r) => ({ ...r, active: !!r.active, main_supplier: sups[0] || r.main_supplier }));

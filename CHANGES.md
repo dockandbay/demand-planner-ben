@@ -1,3 +1,8 @@
+## v27.219 Price Lists: download CSV (admin + supplier portal), with category + SKUs
+- **Admin** SUPPLY ▸ Purchase Orders ▸ Price Lists now has a **⬇ CSV** button — exports the full current price list: one row per **SKU × supplier**, with **Category**, price type, product, size, colour, currency, from-production, base unit cost, all tiers, and price source (SKU / inherited type / type). Uses the current effective price (highest production ≤ current).
+- **Supplier portal** Price List has a **⬇ Download CSV** button — the supplier's own prices, same per-SKU layout with category.
+- Server now returns `category` (coalesce category_name_final → category) on price-list SKUs, manual SKUs, and a dominant category per price type (admin + portal GETs).
+
 ## v27.218 Supplier portal Price List: per-point change log, decisions banner, roomier table
 - Each price-type and SKU row in the supplier portal now has a subtle **🕘** button opening the **change log for just that price point** (dated history: approved / rejected / superseded / pending, with tiers + note) — mirrors the admin side. Endpoint `GET /api/portal/price-list/log?scope=&key=` (portal-scoped, sandbox-gated).
 - Added a **"Recent decisions on your proposals"** banner at the top of the portal Price List — shows the supplier's latest approved/rejected changes so they get feedback (previously silent).
