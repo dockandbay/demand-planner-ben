@@ -2412,7 +2412,7 @@ app.post('/api/supply/additional-cost-approve', async (req, res) => {
 });
 // One PO's fully-computed grid row (same SQL as the grid) — for in-place row refresh after an edit.
 app.get('/api/supply/po-row/:po', async (req, res) => {
-  try { res.json((await pool.query(PO_ROWS_SQL + ' WHERE calc4.po = $1', [req.params.po])).rows); }
+  try { res.json((await queryCapped(PO_ROWS_SQL + ' WHERE calc4.po = $1', [req.params.po])).rows); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Lean PO picker for one supplier — just po/prod_no/country for the "assign a PO to a production" popover
@@ -3843,7 +3843,7 @@ app.get('/api/supply/:section', async (req, res, next) => {
         // Landing imports from linked Flexport (FLEX) unless manually overridden (M).
         // 'cashflow' reuses this exact PO calc, then re-shapes the rows into dated payment line items.
         if (req.params.section === 'purchase-orders' && req.query.supplier) {   // admin portal-preview: only this supplier's POs (full rows, unthinned)
-          return res.json((await pool.query(PO_ROWS_SQL + ' WHERE calc4.supplier_name = $1 ORDER BY po', [req.query.supplier])).rows.filter(r => !r.master_po));
+          return res.json((await queryCapped(PO_ROWS_SQL + ' WHERE calc4.supplier_name = $1 ORDER BY po', [req.query.supplier])).rows.filter(r => !r.master_po));
         }
         // Both non-supplier paths derive from ONE cached full PO_ROWS_SQL build (poRowsCache) — see the 10-min
         // stale-while-revalidate cache. Cash Flow uses the full set as before (cashflowResponse doesn't mutate it).
@@ -3854,7 +3854,7 @@ app.get('/api/supply/:section', async (req, res, next) => {
         let _kept = _cut ? _all.filter((r) => !_poRowArchived(r, _cut)) : _all;
         // Child POs are kept OUT of poRowsCache (so Cash Flow above doesn't double-count the master) but SHOULD appear in
         // the grid — append them here only. The client suppresses their actions + shows a 'child' badge.
-        const _kids = (await pool.query(PO_ROWS_SQL + ` WHERE (SELECT po3.master_po FROM planner.purchase_orders po3 WHERE po3.po=calc4.po) IS NOT NULL ORDER BY po`)).rows;
+        const _kids = (await queryCapped(PO_ROWS_SQL + ` WHERE (SELECT po3.master_po FROM planner.purchase_orders po3 WHERE po3.po=calc4.po) IS NOT NULL ORDER BY po`)).rows;
         if (_kids.length) _kept = _kept.concat(_kids);
         // COMPLETE POs (≈85% of all POs, rarely opened) keep their list/filter/sort + PAYMENT-action fields but shed
         // the heavy expand-only fields (big JSON snapshots, packing, forwarder, landed cost, delivery notes, ERP
@@ -10104,7 +10104,7 @@ app.post('/api/supply/po/:po', async (req, res) => {
         // return the recomputed grid row ONLY for non-cosmetic edits (drives the client repaint). A cosmetic-but-tracked
         // edit (e.g. the confirmed_in_3pl tickbox) logs the change but returns NO row → no panel re-render → the box stays ticked.
         return Object.keys(body).some(k => !PO_COSMETIC_FIELDS.has(k))
-          ? { row: (await pool.query(PO_ROWS_SQL + ' WHERE calc4.po = $1', [req.params.po])).rows[0] || null } : {}; }
+          ? { row: (await queryCapped(PO_ROWS_SQL + ' WHERE calc4.po = $1', [req.params.po])).rows[0] || null } : {}; }
     : undefined));
 });
 // Advance a PO (and every PO on the same master shipment still in PRODUCTION) to SHIPPING. Offered on the
@@ -10656,7 +10656,7 @@ app.post('/api/supply/shipment/:ref', async (req, res) => {
     _oldShip = (await pool.query(`SELECT departure_date::text dep, landing_date::text land, delivery_date::text del, arrival_date::text arr, tracked_delivery_date::text trk FROM planner.shipments WHERE shipment_ref=$1`, [ref])).rows[0] || null;
     _oldShipFull = (await pool.query(`SELECT master_po, carrier, carrier_ref, status, mode, cost_manual::text, departure_date::text, landing_date::text, delivery_date::text, arrival_date::text, tracked_delivery_date::text, branch, export_port FROM planner.shipments WHERE shipment_ref=$1`, [ref])).rows[0] || null;
     const _pa = (await pool.query(`SELECT po FROM planner.purchase_orders WHERE shipment_ref=$1 UNION SELECT master_po FROM planner.shipments WHERE shipment_ref=$1 AND coalesce(master_po,'')<>''`, [ref])).rows.map(x => x.po);
-    if (_pa.length) (await pool.query(PO_ROWS_SQL + ' WHERE calc4.po = ANY($1)', [_pa])).rows.forEach(r => { _preCheckin[r.po] = r.checkin ? String(r.checkin).slice(0, 10) : ''; });
+    if (_pa.length) (await queryCapped(PO_ROWS_SQL + ' WHERE calc4.po = ANY($1)', [_pa])).rows.forEach(r => { _preCheckin[r.po] = r.checkin ? String(r.checkin).slice(0, 10) : ''; });
   } catch (e) { /* snapshot best-effort */ }
   try {
     const up = await pool.query(`INSERT INTO planner.shipments (${cols.join(',')}) VALUES (${ph.join(',')})
@@ -10671,7 +10671,7 @@ app.post('/api/supply/shipment/:ref', async (req, res) => {
       const aboard = (await pool.query(
         `SELECT po FROM planner.purchase_orders WHERE shipment_ref=$1
          UNION SELECT master_po FROM planner.shipments WHERE shipment_ref=$1 AND coalesce(master_po,'')<>''`, [ref])).rows.map(x => x.po);
-      if (aboard.length) rows = (await pool.query(PO_ROWS_SQL + ' WHERE calc4.po = ANY($1)', [aboard])).rows;
+      if (aboard.length) rows = (await queryCapped(PO_ROWS_SQL + ' WHERE calc4.po = ANY($1)', [aboard])).rows;
     } catch (e) { /* non-fatal — client falls back to per-PO refresh */ }
     // Record of change: for every aboard PO whose effective completion shifted from the shipment date edit, log it.
     try {
@@ -10783,7 +10783,7 @@ app.post('/api/supply/po/:po/ship-mode', async (req, res) => {
       await client.query(`DELETE FROM planner.shipment_notes WHERE shipment_ref=$1`, [po]);
       await client.query(`DELETE FROM planner.shipments WHERE shipment_ref=$1`, [po]);
       await client.query('COMMIT');
-      const row0 = (await pool.query(PO_ROWS_SQL + ' WHERE calc4.po=$1', [po])).rows[0] || null;
+      const row0 = (await queryCapped(PO_ROWS_SQL + ' WHERE calc4.po=$1', [po])).rows[0] || null;
       return res.json({ ok: true, mode: '', is_shipment: false, ship: null, row: row0 });
     }
     const ins = await client.query(`INSERT INTO planner.shipments (shipment_ref, master_po, mode, branch, country_code)
@@ -10797,7 +10797,7 @@ app.post('/api/supply/po/:po/ship-mode', async (req, res) => {
     await client.query(`UPDATE planner.purchase_orders SET shipment_ref=$1 WHERE po=$1`, [po]);
     await client.query('COMMIT');
     const ship = await poShipObj(po);   // includes the FINAL calculated dates so the client can fill them silently
-    const row1 = (await pool.query(PO_ROWS_SQL + ' WHERE calc4.po=$1', [po])).rows[0] || null;   // recomputed grid row (ship/landing/delivery dates) so the main PO grid stays bound
+    const row1 = (await queryCapped(PO_ROWS_SQL + ' WHERE calc4.po=$1', [po])).rows[0] || null;   // recomputed grid row (ship/landing/delivery dates) so the main PO grid stays bound
     res.json({ ok: true, mode, is_shipment: true, manufacturing, ship, row: row1 });
   } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} res.status(500).json({ error: e.message }); }
   finally { client.release(); }

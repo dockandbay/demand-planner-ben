@@ -14733,6 +14733,7 @@ function buildSavePayload(){
 var SAVE_CHUNK=5000;                                   // rows per request; the server multi-row-inserts them
 var SAVE_BACKOFF=[1000,2000,4000,8000,16000,30000];   // ms between retries, grows then caps at 30s
 var SAVE_MAX_FAILS=3;                                  // consecutive failures → pause (circuit breaker)
+var SAVE_COOLDOWN_MS=30000, _savePausedUntil=0;        // after a pause, block new save attempts for a cooldown so tab-focus / autosave can't hammer the DB during an outage
 async function postChangesBatched(url,items,extra,label){
   var saved=0, total=items.length, fails=0, tries=0;
   for(var i=0;i<total;){
@@ -14746,7 +14747,8 @@ async function postChangesBatched(url,items,extra,label){
       if(total>SAVE_CHUNK){ try{ st((label||'Saving')+' '+Math.min(i,total)+'/'+total+'…'); }catch(e){} }
     }catch(e){
       fails++;
-      if(fails>=SAVE_MAX_FAILS){ try{ st('Save paused after '+fails+' failed attempts — will retry automatically.'); }catch(_){}
+      if(fails>=SAVE_MAX_FAILS){ _savePausedUntil=Date.now()+SAVE_COOLDOWN_MS;   // global cooldown → no new attempt until it elapses (autosave retries after)
+        try{ st('Save paused after '+fails+' failed attempts — will retry automatically.'); }catch(_){}
         throw new Error('save paused after '+fails+' consecutive failures: '+((e&&e.message)||e)); }
       var wait=SAVE_BACKOFF[Math.min(tries,SAVE_BACKOFF.length-1)]; tries++;
       try{ st((label||'Saving')+' — connection issue, retrying in '+(wait/1000)+'s ('+fails+'/'+SAVE_MAX_FAILS+')…'); }catch(_){}
@@ -14855,10 +14857,11 @@ function flushSaveBeacon(){ if(!navigator.sendBeacon)return;
   if(!_dirty)return;
   try{ var sc=buildInputChanges(); if(sc.length)navigator.sendBeacon('/api/save-forecasts',new Blob([JSON.stringify({changes:sc,who:'autosave-flush'})],{type:'application/json'}));
        var kc=buildSkuChanges(); if(kc.length)navigator.sendBeacon('/api/save-sku-forecasts',new Blob([JSON.stringify({changes:kc,who:'autosave-flush'})],{type:'application/json'})); }catch(e){} }
-document.addEventListener('visibilitychange',function(){ if(document.hidden && _dirty && !_saving) saveForecasts(); });   // tab hidden → save now (still open, fetch completes)
+document.addEventListener('visibilitychange',function(){ if(document.hidden && _dirty && !_saving && Date.now()>=_savePausedUntil) saveForecasts(); });   // tab hidden → save now (still open, fetch completes); respect the pause cooldown
 window.addEventListener('pagehide',flushSaveBeacon);   // page closing → beacon (best-effort, survives unload)
 async function saveForecasts(){
   if(_saving)return;                 // a save is already running — the scheduler re-fires if still dirty
+  if(Date.now()<_savePausedUntil){ try{st('Save paused (DB busy) — will retry shortly.');}catch(e){} return; }   // circuit-breaker cooldown: don't hammer during an outage
   try{ flushChangeBuffer(); }catch(e){}   // flush buffered record-of-change rows on the same 60s cadence
   if(!_dirty){st('No changes to save');return;}
   _saving=true;
@@ -14883,7 +14886,7 @@ async function saveForecasts(){
     // New baseline — both layers persisted.
     for(var ik in IV){if(IV[ik]&&!ik.startsWith('__g'))SV[ik]=IV[ik];}
     FC_INITIAL=Object.assign({},IV); // subsequent saves diff against this
-    _dirty=false;
+    _dirty=false; _savePausedUntil=0;   // success → clear any pause cooldown
     try{localStorage.setItem('db_inputs_v1',JSON.stringify(IV));}catch(e){} // local cache only
     if(btn)btn.textContent='Save Forecasts';
     st('');   // (save-confirmation toast removed per Ben — no "✓ Saved N forecast inputs…" message)
