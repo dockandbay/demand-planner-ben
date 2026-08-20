@@ -10329,6 +10329,8 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
     const children = await pool.query(`SELECT p.po, coalesce(p.branch,'') branch, coalesce(p.client,'') client, coalesce(p.status,'') status,
         coalesce(f.value_est,0)::numeric value_est FROM planner.purchase_orders p JOIN planner.v_po_finance f ON f.po=p.po
       WHERE p.master_po=$1 ORDER BY p.po`, [po]).catch(() => ({ rows: [] }));
+    // Price-list estimate → override each line's Est. cost (sku_cost) for this PO's supplier / production / qty
+    try { const pl = await priceListEstIndex(); const _pm = (await pool.query(`SELECT coalesce(supplier_name,'') supplier_name, coalesce(prod_no,'') prod_no FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0] || {}; const _pn = plProdNum(_pm.prod_no); lines.rows.forEach((l) => { const est = plEstimate(pl, _pm.supplier_name, l.sku, l.qty, _pn); if (est != null) l.sku_cost = est; }); } catch (e) { /* price list optional */ }
     res.json({ ship, lines: lines.rows, deposit: deposit.rows, payments: payments.rows, flexport: flexport.rows, dtc,
       children: children.rows,
       changes: changes.rows, quality_docs: qdocs.rows,
@@ -12951,6 +12953,37 @@ const ORDER_PLAN_SELECT = `SELECT l.po, l.sku, l.qty, el.qty erp_qty,
           LEFT JOIN LATERAL (SELECT f.departure_date, f.landing_date FROM planner.flexport_shipments f
             WHERE f.flex_id=p.flexport_reference OR f.shipment_name=p.po OR f.shipment_name=p.shipment_ref
             ORDER BY (f.flex_id=p.flexport_reference) DESC NULLS LAST LIMIT 1) fx ON true`;
+
+// ── Price-list → PO estimated cost ────────────────────────────────────────────────────────────────
+// A PO line's estimated unit cost, from the Price Lists feature: the ACTIVE (approved, not pending/rejected)
+// price for the PO's supplier, effective as of the PO's production number, at the tier for the order quantity.
+// SKU-specific price wins over the price_type base. Returns null when there's no price-list match (caller keeps
+// its products.cost fallback). Only affects the ESTIMATE — never the negotiated cost_price that pushes to ERP.
+let _plEstCache = { at: 0, val: null };
+async function priceListEstIndex() {
+  const now = Date.now(); if (_plEstCache.val && now - _plEstCache.at < 60000) return _plEstCache.val;
+  const rows = (await pool.query(`SELECT e.supplier, e.scope, coalesce(e.price_type,'') price_type, coalesce(e.sku,'') sku, e.effective_from_production efp,
+      (SELECT json_agg(json_build_object('mq',t.min_qty,'uc',t.unit_cost) ORDER BY t.min_qty) FROM planner.price_list_tiers t WHERE t.entry_id=e.id) tiers
+     FROM planner.price_list_entries e WHERE e.status='active'`)).rows;
+  const idx = new Map();
+  rows.forEach((e) => { if (!e.tiers) return; const key = e.supplier + '|' + e.scope + '|' + (e.scope === 'sku' ? e.sku : e.price_type); if (!idx.has(key)) idx.set(key, []); idx.get(key).push({ efp: e.efp, tiers: e.tiers }); });
+  const skuType = new Map(); (await pool.query(`SELECT sku, price_type FROM planner.products WHERE coalesce(price_type,'')<>''`)).rows.forEach((r) => skuType.set(r.sku, r.price_type));
+  const val = { idx, skuType }; _plEstCache = { at: now, val }; return val;
+}
+function plProdNum(prod_no) { const m = String(prod_no == null ? '' : prod_no).replace(/[^0-9]/g, ''); return m ? parseInt(m, 10) : null; }
+function plEstimate(pl, supplier, sku, qty, prod) {
+  if (!pl || !supplier || !sku) return null;
+  const num = (e) => (e.efp == null ? 0 : Number(e.efp));
+  const pick = (list) => { if (!list || !list.length) return null;
+    if (prod == null) { const base = list.find((e) => e.efp == null); if (base) return base; return list.slice().sort((a, b) => num(a) - num(b))[0]; }
+    const elig = list.filter((e) => num(e) <= prod); if (!elig.length) return list.find((e) => e.efp == null) || null;
+    return elig.slice().sort((a, b) => num(a) - num(b)).pop(); };
+  let e = pick(pl.idx.get(supplier + '|sku|' + sku));
+  if (!e) { const pt = pl.skuType.get(sku); if (pt) e = pick(pl.idx.get(supplier + '|type|' + pt)); }
+  if (!e || !e.tiers || !e.tiers.length) return null;
+  const q = Number(qty) || 1; let tier = null; e.tiers.forEach((t) => { if (Number(t.mq) <= q && (!tier || Number(t.mq) >= Number(tier.mq))) tier = t; }); if (!tier) tier = e.tiers[0];
+  return Number(tier.uc);
+}
 const PO_ROWS_SQL = `
           -- Canonical per-PO payment/date core comes from the SHARED view planner.v_po_finance (migration 123),
           -- so admin + supplier portal compute identical figures (no drift). Admin layers shipment MASTERING on
@@ -13220,7 +13253,9 @@ const poRowsCache = makeCache('po-rows', async () => (await pool.query(PO_ROWS_S
 const orderPlanCache = makeCache('order-plan', async () => {
   const cut = await poArchiveCutoff();
   const w = cut ? ` WHERE NOT (${archivedSql('p', '$1')})` : '';
-  return (await pool.query(ORDER_PLAN_SELECT + w + ' ORDER BY l.po, l.sku', cut ? [cut] : [])).rows;
+  const rows = (await pool.query(ORDER_PLAN_SELECT + w + ' ORDER BY l.po, l.sku', cut ? [cut] : [])).rows;
+  try { const pl = await priceListEstIndex(); rows.forEach((r) => { const est = plEstimate(pl, r.supplier_name, r.sku, r.qty, plProdNum(r.prod_no)); if (est != null) r.sku_cost = est; }); } catch (e) { /* price list optional */ }
+  return rows;
 });
 // Dropdown sources for PO editing — hit by fetchLookups on nearly every SUPPLY render.
 const lookupsCache = makeCache('lookups', async () => {

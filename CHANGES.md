@@ -1,3 +1,7 @@
+## v27.204 Price Lists → PO estimated cost (supplier / tier / production aware)
+- A PO line's **Est. cost** now comes from the **Price Lists** feature: the **active** (approved — not pending/rejected) price for the **PO's supplier**, effective as of the **PO's production number**, at the **tier for the order quantity**. SKU-specific price wins over the price_type base; falls back to the products default cost when there's no price-list match.
+- Wired into **po-detail** (PO drawer ▸ Order plan Est. cost) and the **Order Plan** grid value. Only affects the **estimate** — the negotiated `cost_price` (which pushes to ERP) is untouched. New server helper `priceListEstIndex`/`plEstimate` (60s cache).
+
 ## v27.203 Price Lists: current-price edit no longer flagged as a future-price error
 - A price from the current production (or earlier, or blank effective-from) is now treated as the **current price**, not a future change — so editing it no longer shows "future price must be from a production after 60". Only genuine **future** price-change blocks (effective from a production after the current one) are validated on that rule; and a current price normalises its effective-from to blank on save. (A stale test entry with effective-from=1 was the trigger.)
 

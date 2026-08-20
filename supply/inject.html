@@ -4704,7 +4704,7 @@
     if(!skuList.length){ if(cn)cn.textContent='0 SKUs'; return '<div class="count">No SKUs for this filter (pick a Category for \"All in category\").</div>'; }
     var pos=[],psn={},cell={},meta={};
     rows.forEach(function(l){ if(!psn[l.po]){psn[l.po]=1;pos.push(l.po);meta[l.po]={s:l.supplier_name,co:l.country,ps:l.prod_start,pe:l.prod_end,sd:l.ship_date,dl:l.delivery,st:l.status,cl:l.client,so:l.sales_order_ref};}
-      cell[l.po+'|'+l.sku]={q:l.qty,eq:(l.erp_qty==null?l.qty:l.erp_qty),c:Number(l.cost_price)||0,pq:Number(l.pallet_qty)||0,fcc:(l.full_carton_check||''),sra:!!l.supplier_risk_approved,dca:!!l.discontinue_approved,nm:!!l.not_avail_market,cra:!!l.country_risk_approved}; });
+      cell[l.po+'|'+l.sku]={q:l.qty,eq:(l.erp_qty==null?l.qty:l.erp_qty),c:(Number(l.cost_price)||Number(l.sku_cost)||0),pq:Number(l.pallet_qty)||0,fcc:(l.full_carton_check||''),sra:!!l.supplier_risk_approved,dca:!!l.discontinue_approved,nm:!!l.not_avail_market,cra:!!l.country_risk_approved}; });   // value uses negotiated cost_price, else the price-list estimate (sku_cost)
     pos.sort().reverse();   // purchase orders across the top, descending (newest first)
     var _lim=showAllPos?pos.length:(opLimit||OP_POCAP);
     var poTotal=pos.length, poCapped=(!showAllPos && poTotal>_lim);
