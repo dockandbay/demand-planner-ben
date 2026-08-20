@@ -2525,6 +2525,11 @@ app.post('/api/supply/price-list/:id/approve', async (req, res) => {
   } catch (err) { await client.query('ROLLBACK'); log500(err); res.status(500).json({ error: err.message }); }
   finally { client.release(); }
 });
+// Cheap count of unapproved (pending) price changes — for the Price Lists sub-tab nav badge.
+app.get('/api/supply/price-list/pending-count', async (_req, res) => {
+  try { res.json({ count: (await pool.query(`SELECT count(*)::int n FROM planner.price_list_entries WHERE status='pending'`)).rows[0].n }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.post('/api/supply/price-list/:id/reject', async (req, res) => {
   const me = (await permsFor(req)).email || '';
   try { await pool.query(`UPDATE planner.price_list_entries SET status='rejected', approved_by=$2, approved_at=now(), note=coalesce(nullif($3,''),note), updated_at=now() WHERE id=$1`, [parseInt(req.params.id, 10), me, (req.body && req.body.note) || '']); res.json({ ok: true }); }

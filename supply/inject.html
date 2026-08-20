@@ -4806,9 +4806,11 @@
   function subListFor(tab){ return subUmbrella(tab)==='payments'?PAY_SUBS:PO_SUBS; }
   // Sub-menu action counters: rows-needing-action count per sub-tab (open = snooze-excluded). Populated as each
   // section's data renders (_navCounts.plan / .shipments / .manufacturing) + a background prefetch on entry.
-  var _navCounts={}, _allShips=[], _NAVLBL={plan:'PLAN',shipments:'Shipments',manufacturing:'Manufacturing',paydue:'Payments Due'}, _NAVNOUN={paydue:'overdue payment'};
+  var _navCounts={}, _allShips=[], _NAVLBL={plan:'PLAN',shipments:'Shipments',manufacturing:'Manufacturing',paydue:'Payments Due',pricelists:'Price Lists'}, _NAVNOUN={paydue:'overdue payment'};
   function navBadge(n,noun){ n=Number(n)||0; return n>0?' <span class="ex-badge" title="'+n+' '+(noun?esc(noun)+(n>1?'s':''):('item'+(n>1?'s':'')+' needing action'))+'">'+n+'</span>':''; }
-  function updateNavBadges(){ document.querySelectorAll('#supply-content #prod-subtabs .rtab[data-posub]').forEach(function(sp){ var k=sp.dataset.posub; if(_NAVLBL[k]!==undefined) sp.innerHTML=_NAVLBL[k]+navBadge(_navCounts[k],_NAVNOUN[k]); }); paymentsNavBadge(_navCounts.paydue); poSectionNavBadge(_navCounts.plan); }
+  function plNavBadge(n){ n=Number(n)||0; return n>0?' <span class="ex-badge" style="background:#dc2626;color:#fff" title="'+n+' price approval'+(n>1?'s':'')+' required">'+n+'</span>':''; }   // red = unapproved price changes
+  function _navBd(k){ return k==='pricelists'?plNavBadge(_navCounts.pricelists):navBadge(_navCounts[k],_NAVNOUN[k]); }
+  function updateNavBadges(){ document.querySelectorAll('#supply-content #prod-subtabs .rtab[data-posub]').forEach(function(sp){ var k=sp.dataset.posub; if(_NAVLBL[k]!==undefined) sp.innerHTML=_NAVLBL[k]+_navBd(k); }); paymentsNavBadge(_navCounts.paydue); poSectionNavBadge(_navCounts.plan); }
   // Roll the PLAN action-item count up to the top-level PURCHASE ORDERS section tab (mirrors the PLAN sub-tab badge).
   function poSectionNavBadge(n){ n=Number(n)||0; var btn=document.querySelector('#supply-subnav .stab[data-k="purchase-orders"]'); if(btn)btn.innerHTML='PURCHASE ORDERS'+(n>0?' <span class="ex-badge" style="background:#dc2626;color:#fff" title="'+n+' open action item'+(n>1?'s':'')+' across purchase orders">'+n+'</span>':'');
     var opt=document.querySelector('#supply-nav-sel option[value="purchase-orders"]'); if(opt)opt.textContent='PURCHASE ORDERS'+(n>0?' ('+n+')':''); }
@@ -4818,7 +4820,7 @@
   // ACTIONS tab badge = number of OPEN, HIGH-severity actions (the red items you should tackle first)
   function actionsNavBadge(n){ _actHi=Number(n)||0; try{ paintReportsL2Badge(); }catch(e){} }   // Actions folded into BI & REPORTS → count feeds the combined L2 counter + the ACTIONS L3 tab
   function setActionsBadgeFrom(rows){ try{ actionsNavBadge((rows||[]).filter(function(r){return (r.severity==='high' || r.type==='Required field missing') && (!r.status||r.status==='open');}).length); }catch(e){} }   // master-data-missing (amber) also counts on the ACTIONS badge (Ben, item 13)
-  function poSubNav(){ return '<div id="prod-subtabs">'+subListFor(poSub).map(function(t){ var bd=(_NAVLBL[t[0]]!==undefined)?navBadge(_navCounts[t[0]],_NAVNOUN[t[0]]):(t[0]==='orderplan'&&_opExc&&_opExc.count>0?' <span class="ex-badge" title="'+_opExc.count+' PO(s) with unapproved order-plan exceptions">'+_opExc.count+'</span>':''); return '<span class="rtab'+(poSub===t[0]?' active':'')+'" data-posub="'+t[0]+'">'+t[1]+bd+'</span>'; }).join('')+'</div>'; }
+  function poSubNav(){ return '<div id="prod-subtabs">'+subListFor(poSub).map(function(t){ var bd=(_NAVLBL[t[0]]!==undefined)?_navBd(t[0]):(t[0]==='orderplan'&&_opExc&&_opExc.count>0?' <span class="ex-badge" title="'+_opExc.count+' PO(s) with unapproved order-plan exceptions">'+_opExc.count+'</span>':''); return '<span class="rtab'+(poSub===t[0]?' active':'')+'" data-posub="'+t[0]+'">'+t[1]+bd+'</span>'; }).join('')+'</div>'; }
   // count of OVERDUE payments — mirrors buildPaymentsDue's r.overdue (unpaid, has a due date, 2026-01-01 ≤ due < today).
   var PDUE_MIN_DUE='2026-01-01';   // Payments Due cutoff: hide payments whose due date is before this (old/legacy)
   function paymentsDueOverdueCount(pos, deps){ var today=new Date().toISOString().slice(0,10), n=0;
@@ -4842,6 +4844,7 @@
     // PLAN action-item count → rolls up to the top-level PURCHASE ORDERS tab (so it shows before the grid is opened)
     if(_navCounts.plan===undefined){ (cache['purchase-orders']?Promise.resolve(cache['purchase-orders']):fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(d){cache['purchase-orders']=d;return d;}))
       .then(function(rows){ rows=Array.isArray(rows)?rows:[]; var go=function(){ _navCounts.plan=rows.reduce(function(a,r){return a+poActions(r).length;},0); updateNavBadges(); }; if(!_poActStateLoaded)loadPoActState(go); else go(); }).catch(function(){}); }
+    if(_navCounts.pricelists===undefined){ fetch('/api/supply/price-list/pending-count').then(function(r){return r.json();}).then(function(j){ _navCounts.pricelists=(j&&j.count)||0; updateNavBadges(); }).catch(function(){}); }
   }
   function bindPoSubNav(){ document.querySelectorAll('#supply-content .rtab[data-posub]').forEach(function(p){ p.onclick=function(){ showPoSub(p.dataset.posub); }; }); }
   // ── 🚢 Plan Shipments drawer — allocate READY-TO-SHIP POs (sea, excl. FOB/air) onto containers by drag & drop.
@@ -8563,7 +8566,7 @@
     document.body.appendChild(ov); function close(){ ov.remove(); }
     ov.addEventListener('mousedown',function(e){ if(e.target===ov)close(); });
     document.getElementById('pl-pend-close').onclick=close;
-    function act(id,path){ fetch('/api/supply/price-list/'+id+'/'+path,{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} close(); renderPriceLists(b); }).catch(function(e){ alert('Failed: '+(e.message||e)); }); }
+    function act(id,path){ fetch('/api/supply/price-list/'+id+'/'+path,{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} try{_navCounts.pricelists=undefined;prefetchNavCounts();}catch(e){} close(); renderPriceLists(b); }).catch(function(e){ alert('Failed: '+(e.message||e)); }); }
     ov.querySelectorAll('.pl-pend-approve').forEach(function(x){ x.onclick=function(){ act(x.dataset.id,'approve'); }; });
     ov.querySelectorAll('.pl-pend-reject').forEach(function(x){ x.onclick=function(){ if(confirm('Reject this proposed price change?'))act(x.dataset.id,'reject'); }; });
   }

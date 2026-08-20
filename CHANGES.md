@@ -1,3 +1,6 @@
+## v27.207 Price Lists: pending-approval counter on the Price Lists menu tab
+- The **Price Lists** sub-tab (SUPPLY ▸ Purchase Orders) now shows a **red badge** with the number of **unapproved pending** price changes, visible whenever you're in Purchase Orders. Cheap `/api/supply/price-list/pending-count` endpoint; refreshes after approve/reject.
+
 ## v27.206 Price Lists: bolder approval flags
 - A cell with a pending change now shows a bright **red "⚑ APPROVAL REQUIRED"** badge filling the cell (with the current price small beneath) instead of a faint ⚑; clicking it opens the review panel.
 - The top pill is now **red and bigger**: "⚑ N APPROVAL(S) REQUIRED — review".
