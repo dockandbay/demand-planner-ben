@@ -2506,6 +2506,30 @@ app.post('/api/supply/price-type-meta', async (req, res) => {
     res.json({ ok: true });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// Phase 2 approval workflow: approve a pending (supplier-submitted) price → active, superseding the prior active
+// price for the same supplier / scope / key / effective-from. Reject → status='rejected'.
+app.post('/api/supply/price-list/:id/approve', async (req, res) => {
+  const id = parseInt(req.params.id, 10), me = (await permsFor(req)).email || '';
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const e = (await client.query('SELECT * FROM planner.price_list_entries WHERE id=$1', [id])).rows[0];
+    if (!e) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'not found' }); }
+    await client.query(`UPDATE planner.price_list_entries SET status='superseded', updated_at=now()
+      WHERE id<>$1 AND status='active' AND supplier=$2 AND scope=$3
+        AND coalesce(price_type,'')=coalesce($4,'') AND coalesce(sku,'')=coalesce($5,'')
+        AND effective_from_production IS NOT DISTINCT FROM $6`,
+      [id, e.supplier, e.scope, e.price_type, e.sku, e.effective_from_production]);
+    await client.query(`UPDATE planner.price_list_entries SET status='active', approved_by=$2, approved_at=now(), updated_at=now() WHERE id=$1`, [id, me]);
+    await client.query('COMMIT'); res.json({ ok: true });
+  } catch (err) { await client.query('ROLLBACK'); log500(err); res.status(500).json({ error: err.message }); }
+  finally { client.release(); }
+});
+app.post('/api/supply/price-list/:id/reject', async (req, res) => {
+  const me = (await permsFor(req)).email || '';
+  try { await pool.query(`UPDATE planner.price_list_entries SET status='rejected', approved_by=$2, approved_at=now(), note=coalesce(nullif($3,''),note), updated_at=now() WHERE id=$1`, [parseInt(req.params.id, 10), me, (req.body && req.body.note) || '']); res.json({ ok: true }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // Manage the Price Lists exclude list. body.skus = the FULL list (replaces). Accepts comma/space/newline-separated.
 app.post('/api/supply/price-list/exclude', async (req, res) => {
   const raw = (req.body && req.body.skus) || '';

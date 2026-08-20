@@ -1,3 +1,8 @@
+## v27.205 Price Lists — Phase 2: approval workflow
+- Supplier-submitted price changes arrive as **pending** (status='pending', source='supplier'). The ⚑ badge in the toolbar is now a **"N pending — review"** button that opens a review panel showing each proposed change (supplier · type/SKU · from-production · **current vs proposed tiers** · who/when submitted) with **Approve** / **Reject**.
+- **Approve** → the proposed price becomes **active** and **supersedes** the prior active price for that supplier/scope/key/effective-from (so the PO estimate immediately uses the new price). **Reject** → marked rejected (never used). Endpoints `/api/supply/price-list/:id/approve` + `/reject`.
+- Phase 3 (the gated supplier-portal form that creates these pending changes) still to come. A sample pending change is seeded in the sandbox to try the flow.
+
 ## v27.204 Price Lists → PO estimated cost (supplier / tier / production aware)
 - A PO line's **Est. cost** now comes from the **Price Lists** feature: the **active** (approved — not pending/rejected) price for the **PO's supplier**, effective as of the **PO's production number**, at the **tier for the order quantity**. SKU-specific price wins over the price_type base; falls back to the products default cost when there's no price-list match.
 - Wired into **po-detail** (PO drawer ▸ Order plan Est. cost) and the **Order Plan** grid value. Only affects the **estimate** — the negotiated `cost_price` (which pushes to ERP) is untouched. New server helper `priceListEstIndex`/`plEstimate` (60s cache).
