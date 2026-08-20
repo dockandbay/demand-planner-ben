@@ -1,3 +1,6 @@
+## v27.190 KPIs moved to REPORTS ▸ Performance ▸ Demand Metrics
+- The five ex-DEMAND ▸ KPIs pages (In Stock, Slow moving, Inventory cover, Stockout risk, Discontinued) are now the **Demand Metrics** L3 tab under **REPORTS ▸ Performance** (`#/reports/performance/demand-metrics`), alongside Supply metrics + Inventory metrics. Removed the KPIs tab from the DEMAND nav. `renderKpisView` is now hash-base-aware. Legacy `#/demand/kpis[/<sub>]` redirects to the new location (`#/demand/kpis/accuracy` still → DEMAND ▸ Analysis ▸ Accuracy). Favouriting names it by the L3 (Demand Metrics) with the sub in the hash.
+
 ## v27.189 Navigation: no full-reload on data changes + faster Payments + Order Plan cartons
 Addresses the laggy/"refreshing" feel navigating DEMAND → SUPPLY ▸ PO ▸ Plan → Payments, and the dead Order Plan "Cartons" view.
 - **No more full-page reload on navigation for DATA changes.** The auto-update poll was doing `location.reload()` on *every* hash change whenever the ETL had bumped a source table (which is often on live) — that's the "refreshing". Now navigation reloads **only for a new code deploy**; a data change instead **silently drops the client section cache** (new `window.__hzBustSupplyCache`) so the destination view re-fetches fresh — no reload. (Backgrounded tabs still reload silently; code deploys still reload at a safe moment.)

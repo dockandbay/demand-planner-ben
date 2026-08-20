@@ -8893,7 +8893,7 @@ function render(){
     else if(DEMAND_VIEW==='snapshots') renderSnapshotsView(body);
     else if(DEMAND_VIEW==='keyaccounts') renderKeyAccountsView(body);
     else if(DEMAND_VIEW==='calendar') renderCalendarView(body);
-    else if(DEMAND_VIEW==='kpis') renderKpisView(body);
+    else if(DEMAND_VIEW==='kpis'){ try{ location.hash='#/reports/performance/demand-metrics'; }catch(e){} return; }   // KPIs moved to REPORTS ▸ Performance ▸ Demand Metrics — bounce any stale DEMAND_VIEW='kpis' there
     else if(DEMAND_VIEW==='pricechanges'||DEMAND_VIEW==='revenue') renderPriceChangesView(body);   // Revenue & growth report removed (superseded by Summary + targets); this Inputs tab now hosts Price changes. 'revenue' kept as an alias for old hashes/bookmarks.
     else if(DEMAND_VIEW==='ssmbacktest') renderSsmBacktestView(body);   // DEMAND ▸ Inputs ▸ Backtest — Cin7 snapshot upload + per-market cover backtest + SSM recommendations
     else if(DEMAND_VIEW==='klaviyobis') renderKlaviyoBisView(body);
@@ -9890,17 +9890,16 @@ function renderKeyAccountsView(body){
       var sk=skus[i++]; fetch('/api/supply/ka-forecast-cell',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({client:client,sku:sk,warehouse:KAF_CTRY,month:month,quantity:agg[sk]})}).then(function(){ nx(); }).catch(function(){ nx(); }); })();
   }
 }
-function renderKpisView(body){
+function renderKpisView(body,hashBase){
+  hashBase=hashBase||['reports','performance','demand-metrics'];   // now lives under REPORTS ▸ Performance ▸ Demand Metrics (was DEMAND ▸ KPIs)
   var subTabs=[['instock','In Stock'],['slowmoving','Slow moving'],['inventory','Inventory cover'],['stockout','Stockout risk'],['discontinued','Discontinued']];   // 'accuracy' removed — it duplicated DEMAND ▸ Analysis ▸ Accuracy (same renderAccuracyView), which is the canonical home
-  // Old KPIs ▸ Forecast accuracy deep-links redirect to the canonical DEMAND ▸ Analysis ▸ Accuracy report (same view).
-  try{ if(/^#\/demand\/kpis\/accuracy\b/.test(location.hash||'')){ DEMAND_VIEW='accuracy'; if(window.writeHash)window.writeHash(['demand','analysis','accuracy']); render(); return; } }catch(e){}
-  // sync the sub-tab from a deep-link hash (#/demand/kpis/<sub>) when present & valid
-  try{ var _hs=(location.hash||'').replace(/^#\/?/,'').split('/'); if(_hs[0]==='demand'&&_hs[1]==='kpis'&&_hs[2]&&subTabs.some(function(t){return t[0]===_hs[2];}))KPI_SUB=_hs[2]; }catch(e){}
+  // sync the sub-tab from a deep-link hash (<hashBase>/<sub>) when present & valid
+  try{ var _hs=(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean); var _bl=hashBase.length; if(_hs.slice(0,_bl).join('/')===hashBase.join('/')&&_hs[_bl]&&subTabs.some(function(t){return t[0]===_hs[_bl];}))KPI_SUB=_hs[_bl]; }catch(e){}
   if(!subTabs.some(function(t){return t[0]===KPI_SUB;}))KPI_SUB='instock';   // never leave KPI_SUB on the removed 'accuracy'
   var nav='<div class="d3nav">'
     +subTabs.map(function(t){return '<button class="d3tab'+(t[0]===KPI_SUB?' active':'')+'" data-k="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div>';
   body.innerHTML=nav+'<div id="kpi-body"></div>';
-  body.querySelectorAll('.d3tab[data-k]').forEach(function(b){ b.onclick=function(){ KPI_SUB=b.dataset.k; if(window.writeHash)window.writeHash(['demand','kpis',KPI_SUB]); renderKpisView(body); }; });
+  body.querySelectorAll('.d3tab[data-k]').forEach(function(b){ b.onclick=function(){ KPI_SUB=b.dataset.k; if(window.writeHash)window.writeHash(hashBase.concat(KPI_SUB)); renderKpisView(body,hashBase); }; });
   var kb=body.querySelector('#kpi-body');
   function numIn(id,v){ return '<input type="number" id="'+id+'" value="'+v+'" min="0" style="width:56px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px">'; }
   function grpPills(){ var grps=[['','All'],['Core','Core'],['Seasonal','Seasonal'],['Non-Core','Non-Core']];
@@ -10823,7 +10822,7 @@ function renderDemandTabs(){
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   // Primary tabs inline; the reference/input views (Sell-through targets, Key accounts, Calendar, Revenue) are grouped under an "Inputs ▾" dropdown.
   var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['snapshots']='Snapshots'; _dlbl['contribmodel']='Contribution model'; _dlbl['buyplan']='Buy plan logic'; _dlbl['runoffsubs']='Discontinued sub-categories'; _dlbl['ssmbacktest']='Backtest';
-  var PRIMARY=['plan','kpis','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','snapshots','trends','safetystock','stockcover','shipbags'], CONFIGD=['contribmodel','buyplan','runoffsubs'], INPUTS=['keyaccounts','calendar','pricechanges','klaviyobis'];   // 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
+  var PRIMARY=['plan','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','snapshots','trends','safetystock','stockcover','shipbags'], CONFIGD=['contribmodel','buyplan','runoffsubs'], INPUTS=['keyaccounts','calendar','pricechanges','klaviyobis'];   // 'kpis' moved to REPORTS ▸ Performance ▸ Demand Metrics; 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
   var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0, _anlActive=ANALYSIS.indexOf(DEMAND_VIEW)>=0, _cfgActive=CONFIGD.indexOf(DEMAND_VIEW)>=0;
   var _isPlanV=(DEMAND_VIEW==='plan');
   // Release Window now lives in the More Filters panel; Undo + Download now sit on the right of the plan controls
@@ -12963,7 +12962,7 @@ var EXPANDED_CHANNELS=new Set(); // which channel rows are expanded
 // REPORT view hosts several reports under a sub-tab bar. Exec Summary is the existing report;
 // Slow Moving and Auto Forecast are the new ones.
 var REPORT_TABS=[['ex','Exec Summary'],['performance','Performance'],['slow','Slow Moving'],['ka','Key Arrivals'],['me','Markdown & EOS'],['otb','Open-to-Buy'],['sa','Stock Availability'],['3pl-invoicing','3PL Invoicing']];   // Performance (L2) holds Supply metrics + Inventory metrics (L3). Auto Forecast moved to SUPPLY ▸ Payments ▸ Auto Forecast
-var PERF_SUBS=[['supply-metrics','Supply metrics'],['inventory-metrics','Inventory metrics']];
+var PERF_SUBS=[['demand-metrics','Demand Metrics'],['supply-metrics','Supply metrics'],['inventory-metrics','Inventory metrics']];   // Demand Metrics = the ex-DEMAND ▸ KPIs pages (In Stock / Slow moving / Inventory cover / Stockout risk / Discontinued)
 var PERF_SUB='supply-metrics';   // REPORTS ▸ Performance sub-tab; deep-linked #/reports/performance/<sub>
 // Mobile: collapse a view's leading filter bar(s) behind a consistent "⚙ Filters" button. Generic + idempotent —
 // grabs the leading child DIVs that hold filter controls (before the first table / KPI / content block) and tucks
@@ -13169,7 +13168,8 @@ function renderPerformanceReport(body){
   body.innerHTML=nav+'<div id="perf-body"><div class="mut" style="font-size:12px;padding:10px">Loading…</div></div>';
   body.querySelectorAll('#perf-subnav .dnav3').forEach(function(b){ b.onclick=function(){ PERF_SUB=b.dataset.perf; if(window.writeHash)window.writeHash(['reports','performance',PERF_SUB]); renderPerformanceReport(document.getElementById('report-body')); }; });
   var host=document.getElementById('perf-body');
-  if(PERF_SUB==='supply-metrics'){ if(typeof window.renderSupplyMetrics==='function')window.renderSupplyMetrics(host); else host.innerHTML='<div class="mut" style="font-size:12px;padding:10px">Supply metrics unavailable — open SUPPLY once, then reopen this tab.</div>'; }
+  if(PERF_SUB==='demand-metrics'){ renderKpisView(host,['reports','performance','demand-metrics']); }   // the ex-DEMAND ▸ KPIs pages, now an L3 under Performance
+  else if(PERF_SUB==='supply-metrics'){ if(typeof window.renderSupplyMetrics==='function')window.renderSupplyMetrics(host); else host.innerHTML='<div class="mut" style="font-size:12px;padding:10px">Supply metrics unavailable — open SUPPLY once, then reopen this tab.</div>'; }
   else if(PERF_SUB==='inventory-metrics'){ renderInventoryMetrics(host); }
 }
 // Inventory metrics: 3PL discrepancy (UK/US/AU/EU, SKUs >10%), FBA discrepancy (>10%), FBA aged (money + units >270d) per market.
