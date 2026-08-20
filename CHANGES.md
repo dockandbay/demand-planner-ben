@@ -1,3 +1,10 @@
+## v27.178 Payments Report: search by PO (opens its run + highlights the line yellow)
+- The search box now also matches a **PO / deposit reference** (in addition to supplier + amount). Searching a PO shows the payment run(s) it’s in, **auto-expands** them, and **highlights the matching line in yellow**. Placeholder/hint updated to “supplier / PO / amount”.
+
+## v27.177 Finance view: completion can’t go negative (over-paid start deposit) — mig 237
+- When a PO’s recorded start deposit exceeds start%+completion% of value, the **completion milestone went negative** (e.g. PO-55USLX2: 50% × 56,369 = 28,185 but a 40,048 start deposit → completion −11,864). A milestone can’t be negative — the over-payment should reduce the **balance**, not show as a negative completion.
+- Migration **237** rebuilds `planner.v_po_finance` with `completion_calc` (and `catch_up`) **floored at 0** (`GREATEST(0, …)`). Verified: PO-55USLX2 completion −11,863.63 → **0.00**; normal POs unchanged. Everything else identical to mig 235.
+
 ## v27.176 3PL-confirmed tick: silent pipeline update, record-of-change, no-untick, reworded
 - Ticking **Confirmed in 3PL system** on PO ▸ Shipments now **silently refreshes the Pipeline** behind the drawer (its ✅3pl badge updates with no manual reload).
 - Fixed the box un-ticking itself: the save is now treated as a cosmetic edit (no grid recompute → no panel re-render), and the drawer’s in-memory detail is updated so an async re-render (e.g. the pallets estimate) can’t revert it.

@@ -8521,11 +8521,12 @@
     ]).then(function(_res){ payBuildMaps(_res[1],_res[2]); _payRows=Array.isArray(_res[0])?_res[0]:((_res[0]&&(_res[0].rows||_res[0].payments))||[]); var rows=_payRows;   // tolerate a non-array response (error/shape) instead of crashing the page; keep rows in a shared ref so payRefreshState can update it
       // date filter: type a date (or partial, e.g. 2026-06) into From / To — no date picker
       b.innerHTML='<div class="bar"><span class="pill-lbl">Date</span><span class="tiny mut">from</span> <input class="flt" id="pay-from" placeholder="YYYY-MM-DD" value="'+esc(PAY_FROM)+'" style="width:118px"> <span class="tiny mut">to</span> <input class="flt" id="pay-to" placeholder="YYYY-MM-DD" value="'+esc(PAY_TO)+'" style="width:118px"> <button class="save-btn light" id="pay-clear">Clear</button>'
-        +'<span class="pill-lbl" style="margin-left:14px">Search</span><input class="flt" id="pay-q" placeholder="supplier / amount…" value="'+esc(PAY_Q)+'" style="width:180px;background:#eff6ff;border-color:#93c5fd" title="search by supplier name or amount — overrides the date filter (spans all history)"> <span class="tiny mut">supplier or amount (spans all dates)</span></div><div id="pay-rep"></div>';
+        +'<span class="pill-lbl" style="margin-left:14px">Search</span><input class="flt" id="pay-q" placeholder="supplier / PO / amount…" value="'+esc(PAY_Q)+'" style="width:200px;background:#eff6ff;border-color:#93c5fd" title="search by supplier name, PO reference or amount — overrides the date filter (spans all history). A PO match opens its run and highlights the line."> <span class="tiny mut">supplier, PO or amount (spans all dates)</span></div><div id="pay-rep"></div>';
       bindFastTips(b);   // fast (120ms) tooltips on all payments-report icons — delegated, covers re-rendered rows
       function draw(){ var q=(PAY_Q||'').trim().toLowerCase();
         var f=_payRows.filter(function(r){
           if(q){ var sup=String(r.supplier||'').toLowerCase(); if(sup.indexOf(q)>=0) return true;   // search overrides the date filter → all history
+            if((r.lines||[]).some(function(l){ return String(l.reference||'').toLowerCase().indexOf(q)>=0 || String(l.deposit_ref||'').toLowerCase().indexOf(q)>=0; })) return true;   // PO / deposit reference match (opens the run + highlights the line)
             var qn=q.replace(/[^0-9.]/g,''); if(qn==='') return false;                              // amount: comma-agnostic, matches the 2dp base amount
             var qNum=Number(qn);
             var vals=[Number(String(r.total==null?'':r.total).replace(/,/g,''))];
@@ -8656,8 +8657,10 @@
   // expand to see the sub-payments (reference · amount · type · deposit ref).
   // mobile: one card per payment run (same pfx inputs / Paid-USD / remittance / notify / expand — bindPayFx attaches by class)
   function payReportCards(rows){ if(!rows||!rows.length)return '<div class="count">No payments.</div>';
-    var tT=0;
+    var tT=0; var _pq=(PAY_Q||'').trim().toLowerCase();
+    var _lhit=function(l){ return _pq && (String(l.reference||'').toLowerCase().indexOf(_pq)>=0 || String(l.deposit_ref||'').toLowerCase().indexOf(_pq)>=0); };
     var cards=rows.map(function(r,i){ tT+=+r.total; var dk='data-dt="'+esc(r.dt)+'" data-sup="'+esc(r.supplier)+'"';
+      var _poHit=(r.lines||[]).some(_lhit);
       var rk=payRunKey(r), rem=PAY_REMIT[rk]||[], em=PAY_EMAILS[rk];
       var remHtml = rem.length
         ? '<span class="tool-badge bg-green" title="'+esc(rem.length>1?(rem.length+' files'):rem[0].filename)+'">📎 attached</span> <a class="lnk-btn" href="/api/supply/remittance/'+rem[0].id+'" title="download remittance">⬇</a> <button class="lnk-btn pr-remit-del" data-id="'+rem[0].id+'" title="remove remittance">✕</button>'
@@ -8675,8 +8678,8 @@
             : '<button class="lnk-btn pr-ref" data-go="po" data-k="'+esc(l.reference)+'">'+esc(l.reference)+'</button>') : '—';
         var drKey=(l.deposit_ref||'').split(',')[0].trim();
         var drCell = l.deposit_ref ? '<button class="lnk-btn pr-ref" data-go="dep" data-k="'+esc(drKey)+'">'+esc(l.deposit_ref)+'</button>' : '—';
-        return '<tr><td class="l">'+refCell+'</td><td>'+money(l.amount)+'</td><td class="l"><span class="tool-badge '+(PTYPE_BG[l.type]||'bg-neutral')+'">'+esc(l.type)+'</span></td><td class="l">'+(l.prod_no?esc(l.prod_no):'<span class="mut">—</span>')+'</td><td class="l">'+drCell+'</td></tr>'; }).join('');
-      var det='<div id="payexp-'+i+'" style="display:none;margin-top:8px;border-top:1px solid #e5e7eb;padding-top:6px"><div class="sect-h" style="margin-top:0">Payments in this run ('+(r.lines||[]).length+')</div><div class="tw"><table style="font-size:11px;width:100%"><thead><tr><th class="l">Reference</th><th>Amount ('+esc(r.base_ccy||'USD')+')</th><th class="l">Type</th><th class="l">Prod</th><th class="l">Deposit ref</th></tr></thead><tbody>'+lines+'</tbody></table></div></div>';
+        return '<tr'+(_lhit(l)?' style="background:#fef08a"':'')+'><td class="l">'+refCell+'</td><td>'+money(l.amount)+'</td><td class="l"><span class="tool-badge '+(PTYPE_BG[l.type]||'bg-neutral')+'">'+esc(l.type)+'</span></td><td class="l">'+(l.prod_no?esc(l.prod_no):'<span class="mut">—</span>')+'</td><td class="l">'+drCell+'</td></tr>'; }).join('');
+      var det='<div id="payexp-'+i+'" style="display:'+(_poHit?'block':'none')+';margin-top:8px;border-top:1px solid #e5e7eb;padding-top:6px"><div class="sect-h" style="margin-top:0">Payments in this run ('+(r.lines||[]).length+')</div><div class="tw"><table style="font-size:11px;width:100%"><thead><tr><th class="l">Reference</th><th>Amount ('+esc(r.base_ccy||'USD')+')</th><th class="l">Type</th><th class="l">Prod</th><th class="l">Deposit ref</th></tr></thead><tbody>'+lines+'</tbody></table></div></div>';
       var hasBill=(r.lines||[]).some(function(l){return l.source!=='other';});
       var xeroIco='<svg width="13" height="13" viewBox="0 0 32 32" style="vertical-align:middle"><circle cx="16" cy="16" r="16" fill="#13B5EA"/><text x="16" y="23" font-size="21" font-weight="700" text-anchor="middle" fill="#fff" font-family="Arial,Helvetica,sans-serif">x</text></svg>';
       var emailIco='<svg width="15" height="12" viewBox="0 0 24 20" style="vertical-align:middle"><rect x="1.5" y="2" width="21" height="16" rx="2.5" fill="none" stroke="#7c3aed" stroke-width="2.2"/><path d="M2.5 4L12 11.5 21.5 4" fill="none" stroke="#7c3aed" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -8689,12 +8692,14 @@
       var f=mobFld('Total (base)','<b>'+money(r.total)+'</b>')+mobFld('Bank amount',amtField)+mobFld('Bank ccy',ccyField)+(paidUsdBtn?mobFld(' ',paidUsdBtn):'')+mobFld('Remittance',remHtml)+mobFld('Notify',notifyHtml);
       return '<div class="mob-card" style="border:1px solid #e5e7eb;border-radius:10px;padding:11px 13px;background:#fff">'
         +'<div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap"><div style="font-weight:700;font-size:13px;color:#0f172a">'+esc(fd(r.dt))+' · '+esc(r.supplier)+'</div>'+badge+'</div>'
-        +f+'<div style="margin-top:9px;display:flex;gap:12px;flex-wrap:wrap;align-items:center"><button class="planbtn pay-exp" data-i="'+i+'">▸ lines</button>'+xbBtns+'</div>'+det+'</div>'; }).join('');
+        +f+'<div style="margin-top:9px;display:flex;gap:12px;flex-wrap:wrap;align-items:center"><button class="planbtn pay-exp" data-i="'+i+'">'+(_poHit?'▾':'▸')+' lines</button>'+xbBtns+'</div>'+det+'</div>'; }).join('');
     return mobCards(cards)+'<div style="text-align:right;font-weight:700;margin-top:10px;padding-top:8px;border-top:2px solid #cbd5e1">TOTAL '+money(tT)+'</div>'; }
   function payReportHTML(rows){ if(!rows||!rows.length)return '<div class="count">No payments.</div>';
     if(actMob())return payReportCards(rows);
-    var tT=0;
+    var tT=0; var _pq=(PAY_Q||'').trim().toLowerCase();   // searched term → PO/ref lines highlight yellow + their run opens
+    var _lhit=function(l){ return _pq && (String(l.reference||'').toLowerCase().indexOf(_pq)>=0 || String(l.deposit_ref||'').toLowerCase().indexOf(_pq)>=0); };
     var body=rows.map(function(r,i){ tT+=+r.total; var dk='data-dt="'+esc(r.dt)+'" data-sup="'+esc(r.supplier)+'"';
+      var _poHit=(r.lines||[]).some(_lhit);   // this run contains the searched PO/ref → open it + highlight the line
       var rk=payRunKey(r), rem=PAY_REMIT[rk]||[], em=PAY_EMAILS[rk];
       var remHtml = rem.length
         ? '<span class="tool-badge bg-green" title="'+esc(rem.length>1?(rem.length+' files'):rem[0].filename)+'">📎 attached</span> <a class="lnk-btn" href="/api/supply/remittance/'+rem[0].id+'" title="download remittance">⬇</a> <button class="lnk-btn pr-remit-del" data-id="'+rem[0].id+'" title="remove remittance">✕</button>'
@@ -8714,11 +8719,11 @@
             : '<button class="lnk-btn pr-ref" data-go="po" data-k="'+esc(l.reference)+'" title="open this PO’s payment plan">'+esc(l.reference)+'</button>') : '—';
         var drKey=(l.deposit_ref||'').split(',')[0].trim();
         var drCell = l.deposit_ref ? '<button class="lnk-btn pr-ref" data-go="dep" data-k="'+esc(drKey)+'" title="open this deposit (Productions ▸ Deposits)">'+esc(l.deposit_ref)+'</button>' : '—';
-        return '<tr><td class="l">'+refCell+'</td><td>'+money(l.amount)+'</td>'
+        return '<tr'+(_lhit(l)?' style="background:#fef08a"':'')+'><td class="l">'+refCell+'</td><td>'+money(l.amount)+'</td>'
           +'<td class="l"><span class="tool-badge '+(PTYPE_BG[l.type]||'bg-neutral')+'">'+esc(l.type)+'</span></td>'
           +'<td class="l">'+(l.prod_no?esc(l.prod_no):'<span class="mut">—</span>')+'</td>'
           +'<td class="l">'+drCell+'</td></tr>'; }).join('');
-      var det='<tr class="exp-row" id="payexp-'+i+'" style="display:none"><td colspan="9"><div style="padding:2px">'
+      var det='<tr class="exp-row" id="payexp-'+i+'" style="display:'+(_poHit?'':'none')+'"><td colspan="9"><div style="padding:2px">'
         +'<div class="sect-h" style="margin-top:2px">Payments in this run ('+(r.lines||[]).length+')</div>'
         +'<table style="font-size:11px"><thead><tr><th class="l">Reference</th><th>Amount ('+esc(r.base_ccy||'USD')+')</th><th class="l">Type</th><th class="l">Production</th><th class="l">Deposit ref</th></tr></thead><tbody>'+lines+'</tbody></table></div></td></tr>';
       var hasBill=(r.lines||[]).some(function(l){return l.source!=='other';});   // bill = everything except "other"
@@ -8726,7 +8731,7 @@
       var emailIco='<svg width="15" height="12" viewBox="0 0 24 20" style="vertical-align:middle"><rect x="1.5" y="2" width="21" height="16" rx="2.5" fill="none" stroke="#7c3aed" stroke-width="2.2"/><path d="M2.5 4L12 11.5 21.5 4" fill="none" stroke="#7c3aed" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
       var xbBtns=hasBill?' <button class="lnk-btn pay-xero-dl" data-i="'+i+'" title="Download Xero bill details">⬇</button> <button class="lnk-btn pay-xero-copy" data-i="'+i+'" title="Copy Xero bill details to the clipboard">'+xeroIco+'</button>':'';
       xbBtns+=((r.lines||[]).length?' <button class="lnk-btn pay-sum-copy" data-i="'+i+'" title="Copy payment summary for email (supplier, amount, reference + line table)" style="color:#7c3aed;font-weight:700">'+emailIco+'</button>':'');
-      return '<tr><td class="l" style="white-space:nowrap"><button class="planbtn pay-exp" data-i="'+i+'">▸</button>'+xbBtns+'</td>'
+      return '<tr'+(_poHit?' style="background:#fffbeb"':'')+'><td class="l" style="white-space:nowrap"><button class="planbtn pay-exp" data-i="'+i+'">'+(_poHit?'▾':'▸')+'</button>'+xbBtns+'</td>'
         +'<td class="l">'+esc(fd(r.dt))+'</td><td class="l">'+esc(r.supplier)+'</td>'
         +'<td><b>'+money(r.total)+'</b></td><td class="l"'+((r.base_ccy&&r.base_ccy!=='USD')?' style="background:#fef3c7;color:#b45309;font-weight:700"':'')+'>'+r.base_ccy+'</td>'
         +'<td class="l"><input class="fci pfx-amt" '+dk+' style="width:104px;text-align:right" placeholder="bank amount" value="'+(r.other_amount==null?'':fmtAmt(r.other_amount))+'"></td>'
