@@ -1,3 +1,9 @@
+## v27.243 Price Lists: suppliers from products + seed prices from cost
+- **Supplier columns now come from `planner.products`** (`main_supplier_final` + `supplier_multiple_all`, dominant first), not just from who has a manually-entered price. So a minority-supplier SKU's supplier shows automatically — e.g. HAIRW-WAFFLE-PRINT now shows **both XR Textile and Lixin** columns. All price types are listed (collapsed).
+- **Blank cells show a seed** = the generic `products.cost`, greyed + a "seed" tag. Clicking one opens the editor **pre-filled** with that cost, so saving turns it into a real price in one step.
+- **🌱 Seed from cost** button (toolbar): bulk-creates **real** `price_list_entries` (`source='seed'`, one tier @ min qty 1) from the generic product cost for every product-supplier that has no type price yet. Explicit + idempotent (only fills gaps) — new endpoint `POST /api/supply/price-list/seed-missing` (`preview:true` = count only). Sandbox currently has **42** to seed.
+- Server: `plAdminData` returns `prodSuppliers` + `seedCost` per type and `cost`/`suppliers` per SKU.
+
 ## v27.242 Create-PO: MOQ from price-list tiers + tier-savings hint
 - In the **Create Purchase Orders** modal (buy plan ▸ 🏭 Create Purchase Orders), each SKU's **MOQ now comes from the price-list tiers** — the lowest tier's min qty for the **chosen supplier**, resolved to the price version effective for the **selected production** (blank = current). Falls back to `products.moq` when the supplier has no price-list tiers (so BAGDRY 500 etc. unchanged). Drives the ⚑ MOQ-short flag + China-stock top-up as before.
 - **💡 tier-savings hint** on the Total column when an order sits between two price tiers: shows current vs next-tier unit cost, the per-unit saving, the extra units to reach the next break, and the net total change. **Negative-marginal case** ("the extra units are effectively FREE — buying more costs less in total") is called out.

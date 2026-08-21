@@ -2461,24 +2461,34 @@ async function plAdminData() {
     const exclSet = new Set(excluded);
     const pt = (await pool.query(`SELECT coalesce(price_type,'') price_type, sku, coalesce(product_name_final,product_name,'') name,
              coalesce(nullif(category_name_final,''),category,'') category,
-             coalesce(main_supplier_final,'') main_supplier, coalesce(colour_long,'') colour, coalesce(nullif(size_long,''),size,'') size,
+             coalesce(main_supplier_final,'') main_supplier, coalesce(supplier_multiple_all,'') multi, cost,
+             coalesce(colour_long,'') colour, coalesce(nullif(size_long,''),size,'') size,
              (lower(coalesce(status,'')) NOT LIKE '%discont%' AND NOT (coalesce(discontinue_date_final,'') ~ '^\d{4}-\d{2}-\d{2}' AND to_date(discontinue_date_final,'YYYY-MM-DD') <= current_date)) active
       FROM planner.products WHERE coalesce(sku,'')<>'' AND coalesce(variant_type,'')='MASTER' AND upper(coalesce(status,''))<>'NON STOCKED'
         AND upper(coalesce(price_type,''))<>'NA' ORDER BY price_type, sku`)).rows
       .filter(r => !exclSet.has(r.sku));
+    // suppliers a SKU can be bought from, per planner.products (main_supplier_final + supplier_multiple_all)
+    const supListOf = (main, multi) => { const seen = {}, out = [];
+      [main].concat(String(multi || '').split(',')).map(x => String(x || '').trim()).filter(Boolean)
+        .forEach(nm => { const k = nm.toLowerCase(); if (!seen[k]) { seen[k] = 1; out.push(nm); } }); return out; };
     const ptMeta = {}; (await pool.query(`SELECT price_type, coalesce(size,'') size FROM planner.price_type_meta`)).rows.forEach(r => { ptMeta[r.price_type] = r.size; });
     // MANUAL / no price_type → per-SKU pricing, shown grouped by supplier at the bottom (no type inherit)
     const isManual = (v) => (v === '' || String(v).toUpperCase() === 'MANUAL');
     const typeMap = {}, manualSkus = [];
+    const num = v => { const n = Number(v); return isFinite(n) && n > 0 ? n : null; };
+    const modeCost = arr => { const c = {}; arr.forEach(v => { if (v != null) c[v] = (c[v] || 0) + 1; }); const k = Object.keys(c).sort((a, b) => c[b] - c[a])[0]; return k != null ? Number(k) : null; };
     pt.forEach(r => {
-      if (isManual(r.price_type)) { manualSkus.push({ sku: r.sku, name: r.name, active: !!r.active, colour: r.colour, size: r.size, category: r.category, main_supplier: r.main_supplier, price_type: r.price_type }); return; }
-      const t = (typeMap[r.price_type] = typeMap[r.price_type] || { skus: [], mc: {}, sizes: {}, cats: {} }); t.skus.push({ sku: r.sku, name: r.name, active: !!r.active, colour: r.colour, size: r.size, category: r.category }); if (r.main_supplier) t.mc[r.main_supplier] = (t.mc[r.main_supplier] || 0) + 1; if (r.size) t.sizes[r.size] = 1; if (r.category) t.cats[r.category] = (t.cats[r.category] || 0) + 1;
+      const sups = supListOf(r.main_supplier, r.multi), cost = num(r.cost);
+      if (isManual(r.price_type)) { manualSkus.push({ sku: r.sku, name: r.name, active: !!r.active, colour: r.colour, size: r.size, category: r.category, main_supplier: r.main_supplier, suppliers: sups, cost, price_type: r.price_type }); return; }
+      const t = (typeMap[r.price_type] = typeMap[r.price_type] || { skus: [], mc: {}, sizes: {}, cats: {}, sc: {}, costs: [] }); t.skus.push({ sku: r.sku, name: r.name, active: !!r.active, colour: r.colour, size: r.size, category: r.category, main_supplier: r.main_supplier, suppliers: sups, cost }); if (r.main_supplier) t.mc[r.main_supplier] = (t.mc[r.main_supplier] || 0) + 1; sups.forEach(nm => t.sc[nm] = (t.sc[nm] || 0) + 1); if (cost != null) t.costs.push(cost); if (r.size) t.sizes[r.size] = 1; if (r.category) t.cats[r.category] = (t.cats[r.category] || 0) + 1;
     });
     const priceTypes = Object.keys(typeMap).sort().map(k => { const t = typeMap[k]; const main = Object.keys(t.mc).sort((a, b) => t.mc[b] - t.mc[a])[0] || '';
+      const prodSuppliers = Object.keys(t.sc).sort((a, b) => t.sc[b] - t.sc[a] || (a < b ? -1 : 1));   // suppliers from products, dominant first (= the columns)
+      const seedCost = modeCost(t.costs);   // representative generic product cost for the type (seed source)
       const uniq = Object.keys(t.sizes); const defaultSize = uniq.length === 1 ? uniq[0] : '';   // common SKU size only when uniform
       const category = Object.keys(t.cats).sort((a, b) => t.cats[b] - t.cats[a])[0] || '';   // dominant category across the type's SKUs
       const override = (ptMeta[k] != null && ptMeta[k] !== '');
-      return { price_type: k, skus: t.skus, category, mainSupplier: main, size: override ? ptMeta[k] : defaultSize, sizeOverride: override, sizeDefault: defaultSize }; });
+      return { price_type: k, skus: t.skus, category, mainSupplier: main, prodSuppliers, seedCost, size: override ? ptMeta[k] : defaultSize, sizeOverride: override, sizeDefault: defaultSize }; });
     // current production = latest IN-PRODUCTION number; the "from production" picker offers this + higher (future only)
     const cpRow = (await pool.query(`SELECT max(regexp_replace(prod_no,'[^0-9]','','g')::int) mx FROM planner.purchase_orders
       WHERE lower(coalesce(status,'')) LIKE '%production%' AND regexp_replace(coalesce(prod_no,''),'[^0-9]','','g')<>''`)).rows[0];
@@ -2558,6 +2568,39 @@ app.post('/api/supply/price-list', async (req, res) => {
 app.post('/api/supply/price-list/:id/delete', async (req, res) => {
   try { await pool.query('DELETE FROM planner.price_list_entries WHERE id=$1', [parseInt(req.params.id, 10)]); res.json({ ok: true }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// SEED FROM COST (Ben): create a REAL price-list entry for every (price_type × supplier) that planner.products says
+// supplies the type but has no active type-scope price yet — seeded from the generic product cost (source='seed',
+// one tier @ min_qty 1), editable like any other. Explicit + idempotent (only fills gaps). preview=1 → count only.
+app.post('/api/supply/price-list/seed-missing', async (req, res) => {
+  const preview = !!(req.body && req.body.preview);
+  const me = (await permsFor(req)).email || '';
+  const client = await pool.connect();
+  try {
+    const cand = (await client.query(`
+      SELECT p.price_type, trim(s.supplier) supplier, mode() WITHIN GROUP (ORDER BY p.cost) seed_cost
+      FROM planner.products p
+      CROSS JOIN LATERAL unnest(string_to_array(coalesce(p.main_supplier_final,'')||','||coalesce(p.supplier_multiple_all,''), ',')) AS s(supplier)
+      WHERE coalesce(p.variant_type,'')='MASTER' AND upper(coalesce(p.status,''))<>'NON STOCKED'
+        AND coalesce(p.price_type,'')<>'' AND upper(coalesce(p.price_type,''))<>'NA'
+        AND trim(s.supplier)<>'' AND p.cost IS NOT NULL AND p.cost>0
+      GROUP BY 1,2`)).rows;
+    const existing = new Set((await client.query(`SELECT supplier||'|'||price_type k FROM planner.price_list_entries WHERE status='active' AND scope='type'`)).rows.map(r => r.k));
+    const supCcy = {}; (await client.query(`SELECT name, upper(coalesce(nullif(default_currency,''),'USD')) ccy FROM planner.suppliers WHERE coalesce(active,true)`)).rows.forEach(r => { supCcy[r.name] = r.ccy; });
+    const todo = cand.filter(c => supCcy[c.supplier] && !existing.has(c.supplier + '|' + c.price_type) && Number(c.seed_cost) > 0);
+    if (preview || !todo.length) return res.json({ ok: true, created: 0, pending: todo.length });
+    await client.query('BEGIN');
+    for (const c of todo) {
+      const id = (await client.query(`INSERT INTO planner.price_list_entries (supplier,scope,price_type,sku,currency,effective_from_production,note,status,source,approved_by,approved_at)
+        VALUES ($1,'type',$2,NULL,$3,NULL,'seeded from product cost','active','seed',$4,now()) RETURNING id`,
+        [c.supplier, c.price_type, supCcy[c.supplier], me])).rows[0].id;
+      await client.query(`INSERT INTO planner.price_list_tiers (entry_id,min_qty,unit_cost) VALUES ($1,1,$2)
+        ON CONFLICT (entry_id,min_qty) DO UPDATE SET unit_cost=excluded.unit_cost`, [id, Number(c.seed_cost)]);
+    }
+    await client.query('COMMIT');
+    res.json({ ok: true, created: todo.length });
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} log500(e); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
 });
 // Per-price_type size override (blank = clear → fall back to the common SKU size)
 app.post('/api/supply/price-type-meta', async (req, res) => {

@@ -8703,14 +8703,20 @@
     function efpTag(e){ return e&&e.effective_from_production?(' <span class="mut tiny" title="applies from production '+e.effective_from_production+' onwards">P'+e.effective_from_production+'</span>'):''; }
     function pendBadge(){ return '<span style="display:inline-block;background:#dc2626;color:#fff;font-weight:800;font-size:9px;letter-spacing:.03em;padding:2px 7px;border-radius:4px;white-space:nowrap">⚑ APPROVAL REQUIRED</span>'; }
     function logBtn(scope,key){ return ' <span class="pl-rowlog" data-scope="'+scope+'" data-key="'+esc(key)+'" title="Price change log for this '+(scope==='sku'?'SKU':'price type')+'" style="opacity:.4;cursor:pointer;font-size:11px;font-weight:400" onmouseover="this.style.opacity=1" onmouseout="this.style.opacity=.4">🕘</span>'; }
-    function orderedSups(pt){ var set={}; entries.forEach(function(e){ if(e.scope==='type'&&e.price_type===pt)set[e.supplier]=1; }); var arr=Object.keys(set); var main=typeMain[pt]; arr.sort(function(a,b){ return a===main?-1:b===main?1:(a<b?-1:1); }); return arr; }
+    var supCcy={}; suppliers.forEach(function(s){ supCcy[s.name]=s.currency; });
+    // Supplier columns come from planner.products (main_supplier_final + supplier_multiple_all), dominant first, plus
+    // any supplier that already has a type-scope price. (Ben: suppliers come from products; blank cells seed from cost.)
+    function colSups(pt){ var out=[], seen={}; ((ptInfo[pt]||{}).prodSuppliers||[]).forEach(function(nm){ if(nm&&!seen[nm]){seen[nm]=1;out.push(nm);} });
+      entries.forEach(function(e){ if(e.scope==='type'&&e.price_type===pt&&e.supplier&&!seen[e.supplier]){seen[e.supplier]=1;out.push(e.supplier);} }); return out; }
     var q=(PL_ST.q||'').trim().toLowerCase();
-    function typeMatches(pt){ if(PL_ST.sup&&!entries.some(function(e){return e.supplier===PL_ST.sup&&e.price_type===pt;}))return false; if(!q)return true; if(pt.toLowerCase().indexOf(q)>=0)return true; return (typeSkus[pt]||[]).some(function(s){return s.sku.toLowerCase().indexOf(q)>=0;}); }
+    function typeMatches(pt){ if(PL_ST.sup&&colSups(pt).indexOf(PL_ST.sup)<0)return false; if(!q)return true; if(pt.toLowerCase().indexOf(q)>=0)return true; return (typeSkus[pt]||[]).some(function(s){return s.sku.toLowerCase().indexOf(q)>=0;}); }
     function skuVisible(pt,s){ if(q){ if(s.sku.toLowerCase().indexOf(q)>=0)return true; if(pt.toLowerCase().indexOf(q)>=0)return (!PL_ST.active||s.active); return false; } return (!PL_ST.active||s.active); }
-    var typesWith={}; entries.forEach(function(e){ if(e.price_type)typesWith[e.price_type]=1; });
-    var showTypes=Object.keys(typesWith).filter(typeMatches).sort();
-    var maxCols=3;   // always show Main / Secondary / Tertiary supplier columns (Ben — spaces the grid better + ready for a 3rd)
-    var COLLBL=['Main supplier','Secondary supplier','Tertiary supplier'];
+    var showTypes=(priceTypes||[]).map(function(t){return t.price_type;}).filter(typeMatches).sort();
+    var maxCols=3; showTypes.forEach(function(pt){ maxCols=Math.max(maxCols, colSups(pt).length); }); maxCols=Math.min(maxCols,5);
+    var COLLBL=['Main supplier','Secondary supplier','Tertiary supplier','4th supplier','5th supplier'];
+    function seedCellHtml(scope,pt,sku,sup,seedVal){ var da='data-scope="'+scope+'" data-pt="'+esc(pt)+'"'+(scope==='sku'?' data-sku="'+esc(sku)+'"':'')+' data-sup="'+esc(sup)+'" data-seed="'+(seedVal!=null?seedVal:'')+'"';
+      var inner=(seedVal!=null)?('<span title="seed from the generic product cost — click to save it as '+esc(sup)+'’s price" style="color:#94a3b8;font-style:italic">'+curSym(supCcy[sup]||'USD')+money(seedVal)+' <span style="font-size:8px;font-style:normal;background:#f1f5f9;color:#64748b;border-radius:3px;padding:0 3px;vertical-align:middle">seed</span></span>'):'<span style="color:#cbd5e1">— set price</span>';
+      return '<td class="pl-cell pl-seed" '+da+' style="cursor:pointer">'+inner+'</td>'; }
     var supOpts='<option value="">All suppliers</option>'+suppliers.map(function(s){return '<option value="'+esc(s.name)+'"'+(PL_ST.sup===s.name?' selected':'')+'>'+esc(s.name)+'</option>';}).join('');
     var prodDL='<datalist id="pl-prod-dl">'+productions.map(function(p){return '<option value="'+p+'">';}).join('')+'</datalist>';
     var bar='<div class="bar">'+prodDL+'<span class="pill-lbl">Search</span><input class="flt" id="pl-q" placeholder="SKU or price type…" value="'+esc(PL_ST.q)+'" style="width:180px">'
@@ -8721,10 +8727,11 @@
       +'<button id="pl-excl" class="save-btn light" style="margin-left:10px;font-size:11px" title="SKUs hidden from the price list — paste to manage">Excluded SKUs'+((d.excluded&&d.excluded.length)?(' ('+d.excluded.length+')'):'')+'</button>'
       +'<button id="pl-log" class="save-btn light" style="margin-left:6px;font-size:11px" title="History of approved / rejected supplier price changes">Change log</button>'
       +'<button id="pl-csv" class="save-btn light" style="margin-left:6px;font-size:11px" title="Download the full current price list as Excel — a Price types sheet + a SKUs sheet, with category">⬇ Excel</button>'
+      +'<button id="pl-seed" class="save-btn light" style="margin-left:6px;font-size:11px" title="Create real price points seeded from the generic product cost for every supplier (from planner.products) that has no price for its type yet — editable afterwards">🌱 Seed from cost</button>'
       +'<span class="mut tiny" style="margin-left:auto">click a cell to set price + tiers · SKUs inherit the type price (↳) until overridden</span></div>';
     var head='<tr><th class="pl-lbl" style="min-width:230px">Price type / SKU</th><th class="pl-szh" style="text-align:left">Size</th><th class="pl-colh" style="text-align:left">Colour</th>'+COLLBL.slice(0,maxCols).map(function(l){return '<th style="text-align:left">'+l+'</th>';}).join('')+'</tr>';
     var body='';
-    showTypes.forEach(function(pt){ var sups=orderedSups(pt), op=!!PL_ST.open[pt];
+    showTypes.forEach(function(pt){ var sups=colSups(pt), op=!!PL_ST.open[pt];
       var excCount=entries.filter(function(e){return e.scope==='sku'&&e.price_type===pt;}).length;
       var cells='', addedBtn=false;
       for(var i=0;i<maxCols;i++){ var sup=sups[i];
@@ -8732,7 +8739,8 @@
         var a=applicable(byKey[sup+'|type|'+pt]);
         var _sn='<div class="mut tiny" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px">'+esc(sup)+'</div>';
         if(a.pending){ cells+='<td class="pl-cell" data-pending="1" data-scope="type" data-pt="'+esc(pt)+'" data-sup="'+esc(sup)+'" style="cursor:pointer;background:#fef2f2">'+_sn+pendBadge()+(a.cur?' <span class="mut tiny">now '+priceDisp(a.cur)+'</span>':'')+'</td>'; }
-        else cells+='<td class="pl-cell" data-scope="type" data-pt="'+esc(pt)+'" data-sup="'+esc(sup)+'" style="cursor:pointer">'+_sn+(a.cur?priceDisp(a.cur)+efpTag(a.cur):'<span style="color:#cbd5e1">— set price</span>')+'</td>';
+        else if(a.cur){ cells+='<td class="pl-cell" data-scope="type" data-pt="'+esc(pt)+'" data-sup="'+esc(sup)+'" style="cursor:pointer">'+_sn+priceDisp(a.cur)+efpTag(a.cur)+'</td>'; }
+        else { var _sd=(ptInfo[pt]||{}).seedCost; cells+='<td class="pl-cell pl-seed" data-scope="type" data-pt="'+esc(pt)+'" data-sup="'+esc(sup)+'" data-seed="'+(_sd!=null?_sd:'')+'" style="cursor:pointer">'+_sn+((_sd!=null)?('<span title="seed from generic product cost — click to save as '+esc(sup)+'’s price" style="color:#94a3b8;font-style:italic">'+curSym(supCcy[sup]||'USD')+money(_sd)+' <span style="font-size:8px;font-style:normal;background:#f1f5f9;color:#64748b;border-radius:3px;padding:0 3px;vertical-align:middle">seed</span></span>'):'<span style="color:#cbd5e1">— set price</span>')+'</td>'; }
       }
       var _ti=ptInfo[pt]||{}, _szOv=!!_ti.sizeOverride, _szV=_ti.size||'';
       var szCell='<td class="pl-tsize pl-szh"><input class="pl-size-in" data-pt="'+esc(pt)+'" value="'+esc(_szV)+'" placeholder="size" title="'+(_szOv?'manual size — clear to use the SKUs’ common size':'from the SKUs’ common size — type to override')+'" style="width:100%;box-sizing:border-box;padding:2px 5px;border:1px solid '+(_szOv?'#cbd5e1':'transparent')+';border-radius:4px;font-size:11px;color:'+(_szOv?'#0f172a':'#94a3b8')+';background:transparent"></td>';
@@ -8745,8 +8753,9 @@
           var _da='data-scope="sku" data-pt="'+esc(pt)+'" data-sku="'+esc(s.sku)+'" data-sup="'+esc(sup)+'"';
           if(ax.pending){ sc+='<td class="pl-cell" data-pending="1" '+_da+' style="cursor:pointer;background:#fef2f2">'+pendBadge()+(ax.cur?' <span class="mut tiny">now '+priceDisp(ax.cur)+'</span>':'')+'</td>'; }
           else if(ax.cur){ sc+='<td class="pl-cell" '+_da+' style="cursor:pointer">'+priceDisp(ax.cur)+efpTag(ax.cur)+'</td>'; }
-          else { var at=applicable(byKey[sup+'|type|'+pt]); var inh=at.cur?priceDisp(at.cur):'<span style="color:#cbd5e1">—</span>';
-            sc+='<td class="pl-cell pl-inh" '+_da+' title="inherits the '+esc(pt)+' price — click to set a SKU-specific price" style="cursor:pointer"><span title="inherited" style="color:#cbd5e1">↳</span> <span style="opacity:.6">'+inh+'</span></td>'; }
+          else { var at=applicable(byKey[sup+'|type|'+pt]);
+            if(at.cur){ sc+='<td class="pl-cell pl-inh" '+_da+' title="inherits the '+esc(pt)+' price — click to set a SKU-specific price" style="cursor:pointer"><span title="inherited" style="color:#cbd5e1">↳</span> <span style="opacity:.6">'+priceDisp(at.cur)+'</span></td>'; }
+            else { sc+=seedCellHtml('sku',pt,s.sku,sup,(s.cost!=null?s.cost:null)); } }
         }
         var disc=s.active?'':' <span class="mut tiny" style="color:#b45309" title="discontinued">disc</span>';
         body+='<tr class="pl-sku"><td class="pl-lbl" style="padding-left:22px;font-family:ui-monospace,Menlo,monospace"><span title="'+esc(s.name)+'">'+esc(s.sku)+'</span>'+disc+logBtn('sku',s.sku)+'</td><td class="mut tiny pl-szh">'+esc(s.size||'')+'</td><td class="mut tiny pl-colh">'+esc(s.colour||'')+'</td>'+sc+'</tr>';
@@ -8789,11 +8798,21 @@
     var pri=b.querySelector('#pl-prod'); if(pri)pri.onchange=function(){ PL_ST.prod=this.value.trim(); plDraw(b,d); };
     var ai=b.querySelector('#pl-active'); if(ai)ai.onchange=function(){ PL_ST.active=this.checked; plDraw(b,d); };
     b.querySelectorAll('.pl-lbl[data-tgl]').forEach(function(td){ td.onclick=function(){ var t=td.dataset.tgl; PL_ST.open[t]=!PL_ST.open[t]; plDraw(b,d); }; });   // expand/minimise — redraw from cache, NO refetch
-    b.querySelectorAll('.pl-cell').forEach(function(td){ td.onclick=function(){ if(td.dataset.pending){ plPending(b,d); return; } plEditor(b,{d:d,scope:td.dataset.scope,pt:td.dataset.pt,sku:td.dataset.sku||'',sup:td.dataset.sup||''}); }; });
+    b.querySelectorAll('.pl-cell').forEach(function(td){ td.onclick=function(){ if(td.dataset.pending){ plPending(b,d); return; } plEditor(b,{d:d,scope:td.dataset.scope,pt:td.dataset.pt,sku:td.dataset.sku||'',sup:td.dataset.sup||'',seed:td.dataset.seed||''}); }; });
     var xb=b.querySelector('#pl-excl'); if(xb)xb.onclick=function(){ plExclude(b,d.excluded||[]); };
     var pb=b.querySelector('#pl-pending'); if(pb)pb.onclick=function(){ plPending(b,d); };
     var lgb=b.querySelector('#pl-log'); if(lgb)lgb.onclick=function(){ plLog(); };
     var csvb=b.querySelector('#pl-csv'); if(csvb)csvb.onclick=function(){ var a=document.createElement('a'); a.href='/api/supply/price-list/export.xlsx'; a.download='price-list.xlsx'; document.body.appendChild(a); a.click(); a.remove(); };
+    var sdb=b.querySelector('#pl-seed'); if(sdb)sdb.onclick=function(){ var o=sdb.textContent; sdb.disabled=true; sdb.textContent='Checking…';
+      fetch('/api/supply/price-list/seed-missing',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({preview:true})}).then(function(r){return r.json();}).then(function(j){
+        var n=(j&&j.pending)||0; if(!n){ sdb.disabled=false; sdb.textContent=o; alert('Every product-supplier already has a price for its type — nothing to seed.'); return; }
+        if(!confirm('Create '+n+' seed price point(s) from the generic product cost?\n\nThese become real, editable prices (one tier @ min qty 1) for suppliers that planner.products lists but that have no price yet.')){ sdb.disabled=false; sdb.textContent=o; return; }
+        sdb.textContent='Seeding…';
+        fetch('/api/supply/price-list/seed-missing',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({})}).then(function(r){return r.json();}).then(function(j2){
+          if(j2&&j2.error){ sdb.disabled=false; sdb.textContent=o; alert(j2.error); return; }
+          alert('Seeded '+((j2&&j2.created)||0)+' price point(s) from product cost. You can now edit any of them.'); renderPriceLists(b);
+        }).catch(function(e){ sdb.disabled=false; sdb.textContent=o; alert('Seed failed: '+(e.message||e)); });
+      }).catch(function(e){ sdb.disabled=false; sdb.textContent=o; alert('Seed check failed: '+(e.message||e)); }); };
     b.querySelectorAll('.pl-rowlog').forEach(function(s){ s.onclick=function(e){ e.stopPropagation(); plLog({scope:s.dataset.scope,key:s.dataset.key,label:s.dataset.key}); }; });
     b.querySelectorAll('.pl-size-in').forEach(function(inp){ inp.onchange=function(){ var ptn=inp.dataset.pt, v=inp.value.trim();
       fetch('/api/supply/price-type-meta',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({price_type:ptn,size:v})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;}
@@ -8810,7 +8829,8 @@
       var order=suppliers.map(function(s){return s.name;}); supplier=(main&&!used[main])?main:(order.filter(function(n){return !used[n];})[0]||main||order[0]||''); }
     function verListFor(sup){ var key=sup+'|'+scope+'|'+(scope==='sku'?sku:pt); return (byKey[key]||[]).slice().sort(function(a,b){return (a.effective_from_production||0)-(b.effective_from_production||0);}); }
     function inheritTiers(sup){ var list=(byKey[sup+'|type|'+pt]||[]).filter(function(e){return e.status==='active';}).sort(function(a,b){return (a.effective_from_production||0)-(b.effective_from_production||0);}); var last=list[list.length-1]; return (last&&last.tiers&&last.tiers.length)?last.tiers.map(function(t){return {min_qty:t.min_qty,unit_cost:t.unit_cost};}):[{min_qty:1,unit_cost:''}]; }
-    function loadVersions(sup){ var ex=verListFor(sup); return ex.length? ex.map(function(e){return {id:e.id, efp:(e.effective_from_production||''), tiers:(e.tiers&&e.tiers.length?e.tiers.map(function(t){return {min_qty:t.min_qty,unit_cost:t.unit_cost};}):[{min_qty:1,unit_cost:''}])};}) : [{id:null, efp:'', tiers:(scope==='sku'?inheritTiers(sup):[{min_qty:1,unit_cost:''}])}]; }
+    var _seed=(ctx.seed!=null&&ctx.seed!=='')?Number(ctx.seed):null;   // seed price from the generic product cost (blank-cell click)
+    function loadVersions(sup){ var ex=verListFor(sup); return ex.length? ex.map(function(e){return {id:e.id, efp:(e.effective_from_production||''), tiers:(e.tiers&&e.tiers.length?e.tiers.map(function(t){return {min_qty:t.min_qty,unit_cost:t.unit_cost};}):[{min_qty:1,unit_cost:''}])};}) : [{id:null, efp:'', tiers:((_seed!=null&&isFinite(_seed))?[{min_qty:1,unit_cost:_seed}]:(scope==='sku'?inheritTiers(sup):[{min_qty:1,unit_cost:''}]))}]; }
     var versions=loadVersions(supplier), deleted=[];
     var ov=document.createElement('div'); ov.id='pl-ed'; ov.style.cssText='position:fixed;inset:0;z-index:200000;background:rgba(15,23,42,.35);display:flex;align-items:center;justify-content:center;padding:16px';
     function sym(){ return curSym(supCcy[supplier]||'USD'); }
