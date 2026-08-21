@@ -1,3 +1,7 @@
+## v27.227 Timeline mention email sends silently in live; DtC/Custom Orders action-count badges
+- **Timeline internal-note @mention:** the email now **sends silently in live** — the "mention email preview" popup only appears in **sandbox** (where nothing is actually sent). Server returns a `sandbox` flag; the client only shows the preview when sandbox. (Live still warns via a small alert if a tagged name isn't a Dock & Bay user, so it's not silently dropped.)
+- **Direct to Client + Custom Orders reports:** each PO now shows a small red **count badge** of its open **Timeline** (unread note) + **Client/FBA** (not-approved) actions next to the PO number, and the **sum shows on the report's sub-nav tab** (persists across PO sub-tabs) plus in the report's header count line.
+
 ## v27.226 DTC Mismatch: stale-import red badge (>4 days) + light-blue Import button
 - The "last import … · N orders (M open)" line now becomes a **large red badge** ("⚠ … — over 4 days old, re-import") when the last Cin7 import is **more than 4 days old**; otherwise it stays the normal muted line. Freshness parsed client-side from the DD-Mon-YY HH:MM stamp.
 - The **Import sales orders** button is now **light blue** (blue-100 fill, blue border/text) so it stands out.

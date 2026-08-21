@@ -6706,7 +6706,7 @@ app.post('/api/supply/portal-note', async (req, res) => {
         }
       } catch (e) { console.error('[mention] email failed:', e.message); }
     }
-    res.json({ ok: true, mentions, mailed, email: preview });
+    res.json({ ok: true, mentions, mailed, email: preview, sandbox: IS_SANDBOX });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/portal-upload', async (req, res) => {
