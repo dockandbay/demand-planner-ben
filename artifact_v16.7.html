@@ -3238,7 +3238,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
       // future month starts from on-hand + this month's confirmed POs. Previously this month
       // was skipped, so the buy pass understated stock (and over-recommended buying).
       // Mirrors the display pass's Remaining branch exactly.
-      const _mtd=md['mtd_'+_CUR_MON_LC]||{};
+      const _mtd=curMtdActuals(skuKey,mkt);
       const{elapsed,remaining,total}=CUR_DAYS;
       const _fD=(dem.DTC&&dem.DTC[key])||0,_fB=(dem.B2B&&dem.B2B[key])||0,_fF=(dem.FBA&&dem.FBA[key])||0;
       // Current-month remaining = forecast − actuals-to-date, floored at 0 (Ben). Buy engine draws SOH down by the
@@ -3551,7 +3551,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
 
   return PROJ.map(({y,m,key,lbl,lbl2,now,isActual,isForecast},i)=>{
     if(isActual){
-      const mtd=md['mtd_'+_CUR_MON_LC]||{};
+      const mtd=curMtdActuals(skuKey,mkt);
       const mtdDTC=mtd.DTC||0,mtdB2B=mtd.B2B||0,mtdFBA=mtd.FBA||0;
       return{key,lbl,lbl2,now:true,isActual:true,isForecast:false,
         dtc:mtdDTC,b2b:mtdB2B,fba:mtdFBA,tot:mtdDTC+mtdB2B+mtdFBA,pka:(md.pka&&md.pka[key])||0,
@@ -3561,7 +3561,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
         fdQ:fbaBuyDisp[i]||0,tx:transferOut[i]||0,zx:zalOut[i]||0,overdue:buyOverdue[i]||false,inbLines3:[],inbLinesF:[]};
     }
     if(isForecast){
-      const mtd=md['mtd_'+_CUR_MON_LC]||{};
+      const mtd=curMtdActuals(skuKey,mkt);
       const fullDTC=(dem.DTC&&dem.DTC[key])||0,fullB2B=(dem.B2B&&dem.B2B[key])||0,fullFBA=(dem.FBA&&dem.FBA[key])||0;
       // Current-month remaining = forecast − actuals-to-date, floored at 0 (Ben). Once actuals reach the month's
       // forecast, plan 0 more this month; never extrapolate a spike beyond forecast. Replaced the old MTD run-rate.
@@ -6182,6 +6182,10 @@ function skuSales(sku,co,ch){
   if(pred&&Object.keys(pred).length){ out={}; for(var k in pred)out[k]=pred[k]; for(var k2 in own)out[k2]=own[k2]; }  // predecessor base, own overrides
   _SKUSALES_CACHE[ck]=out; return out;
 }
+// Current-month actuals-to-date per channel, from the sales history (which already includes the partial current
+// month, refreshed by the daily sales sync). Replaces the never-populated md.mtd_<mon> field so the current-month
+// "Actuals" columns show sales-to-date and remaining = forecast − actuals (Ben 1a). CUR_MONTH format = 'YYYY_MM'.
+function curMtdActuals(sku,co){ var f=function(ch){ return (skuSales(sku,co,ch)||{})[CUR_MONTH]||0; }; return {DTC:f('DTC'),B2B:f('B2B'),FBA:f('FBA')}; }
 
 // Stock for a subcategory at the channel's warehouse (DTC/B2B -> 3PL, FBA -> FBA).
 // Sums on-hand (inv) and inbound (on_order) over all SKUs available in this country+channel.

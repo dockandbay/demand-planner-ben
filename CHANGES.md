@@ -1,3 +1,7 @@
+## v27.235 Buy plan 1a: current-month remaining = forecast − actuals-to-date (was reading a dead field)
+- The buy engine + display already compute current-month remaining = **forecast − actuals** and show actuals in the DTC/B2B/FBA "Actuals" columns — but they read `md.mtd_<mon>`, which was **never populated** (0 everywhere), so it subtracted the *full* month forecast and showed 0 actuals. Now sourced from the sales history (`skuSales(sku,mkt)[CUR_MONTH]`, which already includes the partial current month via the daily sales sync) at all 3 sites in `project()`. Current-month Actuals columns now show sales-to-date; remaining = forecast − actuals; 3PL/FBA closing stock corrects.
+- **Buy-plan impact (intended):** current-month buy quantities reduce by sales already made this month. Only the current partial month is affected; future months unchanged. **Needs Ben's numeric verification on the tunnel** (I confirmed the data flows — CUR_MONTH matches the sales keys, market case matches, the SKU has current-month sales — but did not run a full before/after snapshot; happy to on request.)
+
 ## v27.234 Auto Forecast: export buttons → 3 coloured dropdowns (Summary USD / GBP / Transactions)
 - Replaced the 6 grey export buttons with **3 coloured dropdown buttons** — **Summary USD** (green), **Summary GBP** (blue), **Transactions** (purple) — each with **Copy to clipboard** and **Download CSV** under the dropdown. Clearer + easier to spot.
 
