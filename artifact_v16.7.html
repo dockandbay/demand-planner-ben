@@ -20,6 +20,8 @@ body{font-family:system-ui,-apple-system,sans-serif;font-size:12px;color:#1a1a1a
   .wrap{padding:6px 7px;padding-top:52px}                 /* clear the fixed top bar */
   #view-tabs-row{display:none !important}                 /* replaced by the drawer on phone */
   #supply-nav-sel{display:none !important}                /* section dropdown replaced by the drawer */
+  /* L2 sub-nav lives in the hamburger on phone (Ben) — not on the page. Every top view's L2 is mirrored in #hz-drawer. */
+  #demand-tabs,#buymove-tabs,#scenario-subnav,#supply-subnav,#config-subs,#report-tabs,#product-subnav{display:none !important}
   #ver,.ver{display:none !important}                      /* sub-nav HORIZON version badge is redundant on phone — the top bar (#hz-ver) already shows it */
   #hz-topbar{display:flex !important}
   body.supply-on #hz-search{display:block}                /* search only useful inside SUPPLY */
@@ -16454,7 +16456,7 @@ function attachSkuMultiExpand(inputId,onApply){
     var supplyActive=false, demandActive=false, scenActive=false, configActive=false;
     views.forEach(function(vb){
       if(!vb.dataset.view && vb.id!=='supply-btn' && vb.id!=='scenario-btn' && vb.id!=='config-btn' && vb.id!=='product-btn')return;   // skip tools/help, keep view + SUPPLY + SCENARIO + CONFIG + PRODUCT buttons
-      var isSup=vb.id==='supply-btn', isScen=vb.id==='scenario-btn', isCfg=vb.id==='config-btn';
+      var isSup=vb.id==='supply-btn', isScen=vb.id==='scenario-btn', isCfg=vb.id==='config-btn', isProd=vb.id==='product-btn', isReports=vb.dataset.view==='exec';
       var active=vb.classList.contains('active');
       if(isSup && active)supplyActive=true;
       if(isScen && active)scenActive=true;
@@ -16469,6 +16471,8 @@ function attachSkuMultiExpand(inputId,onApply){
         else if(isScen){ waitBuild(function(){ return document.querySelectorAll('#scenario-subnav .stab').length>0; }); }
         else if(vb.dataset.view==='planning'){ waitBuild(function(){ return document.querySelectorAll('#demand-tabs .dnav').length>0; }); }
         else if(vb.dataset.group==='buymove'){ waitBuild(function(){ return document.querySelectorAll('#buymove-tabs .dnav').length>0; }); }
+        else if(isReports){ waitBuild(function(){ return document.querySelectorAll('#report-tabs [data-report]').length>0; }); }
+        else if(isProd){ waitBuild(function(){ return document.querySelectorAll('#product-subnav .stab').length>0; }); }
         else { close(); }
       }));
       // nest the active view's sub-nav directly UNDER its button (indented), rather than at the bottom of the drawer
@@ -16485,6 +16489,10 @@ function attachSkuMultiExpand(inputId,onApply){
         var cnav=window.__configNav;
         if(cnav && cnav.items){ var ccur=cnav.current&&cnav.current();
           cnav.items.forEach(function(s){ drawer.appendChild(subItem(s[1], s[0]===ccur, function(){ clearSearch(); cnav.select(s[0]); close(); })); }); }
+      } else if(active && isReports){   // REPORTS sub-nav (#report-tabs)
+        Array.prototype.slice.call(document.querySelectorAll('#report-tabs [data-report]')).forEach(function(rb){ drawer.appendChild(subItem(rb.textContent.trim(), rb.classList.contains('active'), function(){ rb.click(); close(); })); });
+      } else if(active && isProd){   // PRODUCT sub-nav (#product-subnav)
+        Array.prototype.slice.call(document.querySelectorAll('#product-subnav .stab')).forEach(function(pb){ drawer.appendChild(subItem(pb.textContent.trim(), pb.classList.contains('active'), function(){ pb.click(); close(); })); });
       }
     });
     // Quick actions — mirror the desktop top-bar buttons that aren't views (Stock Availability + Messages bell),

@@ -11003,7 +11003,12 @@
   try{window.__supplyNav={sections:SECTIONS,reports:REPORT_SECTIONS,select:function(k){selectSection(k);},current:function(){return current;}};}catch(e){}   // bridge for the app-level mobile drawer
   // CONFIG sub-nav bridge for the mobile drawer — a STATIC list so the drawer can render sub-items immediately,
   // without waiting for CONFIG's (sometimes slow) DOM render. Mirror L2 in renderConfig if that list changes.
-  try{window.__configNav={items:[['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']],select:function(k){ if(typeof _SUPCFG_KEYS!=='undefined'&&_SUPCFG_KEYS.indexOf(k)>=0){ enterSupplyConfig(k); } else { CONFIG_SUB=k; enterConfig(); } },current:function(){return CONFIG_SUB;}};}catch(e){}
+  // Mobile CONFIG menu bridge. `items` is a GETTER so it re-checks ME each time the drawer opens (ME loads async) and
+  // mirrors the desktop L2 groups exactly — incl. Admin for admins (was missing on mobile). Selecting 'admin' opens Admin ▸ General.
+  try{window.__configNav={
+    get items(){ var it=[['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']]; if(typeof ME!=='undefined'&&ME&&ME.is_admin)it.unshift(['admin','Admin']); return it; },
+    select:function(k){ if(k==='admin')k='admin-general'; if(typeof _SUPCFG_KEYS!=='undefined'&&_SUPCFG_KEYS.indexOf(k)>=0){ enterSupplyConfig(k); } else { CONFIG_SUB=k; enterConfig(); } },
+    current:function(){return CONFIG_SUB;}};}catch(e){}
   function showSupply(noSelect){ ensureRoot(); if(typeof hideScenario==='function')hideScenario(); var app=document.getElementById('app'); if(app){app.classList.add('supply-active');app.classList.remove('config-mode');}
     try{ refreshDtcBadge(); }catch(e){}   // populate the combined BI & REPORTS L2 counter (DTC + ERP compare + reallocate + high-priority actions)
     try{ refreshErpcBadge(); }catch(e){}

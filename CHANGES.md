@@ -1,3 +1,8 @@
+## v27.249 Mobile nav: L2 lives in the hamburger (all views), + Admin config
+- **Admin now in the mobile CONFIG menu** — the `__configNav` bridge was hardcoded to Exports/Product/Suggestions and never included Admin. Now mirrors the desktop L2 (Admin prepended for admins; `items` is a getter so it re-checks `ME` each open). Tapping Admin opens Admin ▸ General.
+- **REPORTS and PRODUCT now expand** in the hamburger drawer (were top-level items with no sub-nav) — REPORTS mirrors `#report-tabs`, PRODUCT mirrors `#product-subnav`, with the same waitBuild polling as SUPPLY/CONFIG so sub-items appear on first tap.
+- **L2 sub-nav moved into the hamburger, off the page (phone only)** — hides `#demand-tabs, #buymove-tabs, #scenario-subnav, #supply-subnav, #config-subs, #report-tabs, #product-subnav` under `@media (max-width:640px)`. Every top view's L2 is now mirrored in the drawer, so nothing becomes unreachable. Desktop unchanged.
+
 ## v27.248 3PL invoice upload: client-side gzip (beat Vercel's ~4.5MB cap)
 - The 3PL invoice upload (REPORTS ▸ 3PL Invoice) now **gzips the file in the browser** (`CompressionStream`) before the base64 POST, so the request body stays under Vercel's ~4.5MB serverless cap. Server **gunzips before storing** the original bytes (`b.gzip` flag on `POST /api/supply/tpl/upload`) — the stored file, download, and parser are byte-identical/unchanged (verified round-trip). CSV compresses ~3-5x, so CSV invoices up to ~11-15MB now upload on live (was ~3.3MB). Already-compressed `.xlsx` gzips barely — those still hit the cap and get a clear "export as CSV" message. Falls back to raw upload if `CompressionStream` is unavailable.
 
