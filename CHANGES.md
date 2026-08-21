@@ -1,3 +1,7 @@
+## v27.226 DTC Mismatch: stale-import red badge (>4 days) + light-blue Import button
+- The "last import … · N orders (M open)" line now becomes a **large red badge** ("⚠ … — over 4 days old, re-import") when the last Cin7 import is **more than 4 days old**; otherwise it stays the normal muted line. Freshness parsed client-side from the DD-Mon-YY HH:MM stamp.
+- The **Import sales orders** button is now **light blue** (blue-100 fill, blue border/text) so it stands out.
+
 ## v27.225 Direct-to-Client + Custom Orders: PO link opens the drawer on the Client/FBA tab
 - Clicking a PO in the **Direct to Client** and **Custom Orders** reports now opens the **PO drawer straight to its Client/FBA tab** (was a full-page navigation via `gotoPO`). Uses `openPODrawer(po,'client')` with the standard `gotoPO` fallback — matches the report help text that already said "Click a PO to open its Client/FBA tab."
 
