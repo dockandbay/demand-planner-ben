@@ -2463,7 +2463,8 @@ async function plAdminData() {
              coalesce(nullif(category_name_final,''),category,'') category,
              coalesce(main_supplier_final,'') main_supplier, coalesce(colour_long,'') colour, coalesce(nullif(size_long,''),size,'') size,
              (lower(coalesce(status,'')) NOT LIKE '%discont%' AND NOT (coalesce(discontinue_date_final,'') ~ '^\d{4}-\d{2}-\d{2}' AND to_date(discontinue_date_final,'YYYY-MM-DD') <= current_date)) active
-      FROM planner.products WHERE coalesce(sku,'')<>'' AND coalesce(variant_type,'')='MASTER' AND upper(coalesce(status,''))<>'NON STOCKED' ORDER BY price_type, sku`)).rows
+      FROM planner.products WHERE coalesce(sku,'')<>'' AND coalesce(variant_type,'')='MASTER' AND upper(coalesce(status,''))<>'NON STOCKED'
+        AND upper(coalesce(price_type,''))<>'NA' ORDER BY price_type, sku`)).rows
       .filter(r => !exclSet.has(r.sku));
     const ptMeta = {}; (await pool.query(`SELECT price_type, coalesce(size,'') size FROM planner.price_type_meta`)).rows.forEach(r => { ptMeta[r.price_type] = r.size; });
     // MANUAL / no price_type → per-SKU pricing, shown grouped by supplier at the bottom (no type inherit)

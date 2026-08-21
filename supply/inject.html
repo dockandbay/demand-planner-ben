@@ -8726,9 +8726,9 @@
     var body='';
     showTypes.forEach(function(pt){ var sups=orderedSups(pt), op=!!PL_ST.open[pt];
       var excCount=entries.filter(function(e){return e.scope==='sku'&&e.price_type===pt;}).length;
-      var cells='';
+      var cells='', addedBtn=false;
       for(var i=0;i<maxCols;i++){ var sup=sups[i];
-        if(!sup){ cells+='<td class="pl-empty"></td>'; continue; }
+        if(!sup){ if(!addedBtn){ addedBtn=true; cells+='<td class="pl-cell pl-addsup" data-scope="type" data-pt="'+esc(pt)+'" data-sup="" title="Add a price point for another supplier at this price type (e.g. a SKU whose main supplier differs from the type)"><span style="color:#cbd5e1;font-weight:600">＋ add supplier</span></td>'; } else cells+='<td class="pl-empty"></td>'; continue; }
         var a=applicable(byKey[sup+'|type|'+pt]);
         var _sn='<div class="mut tiny" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px">'+esc(sup)+'</div>';
         if(a.pending){ cells+='<td class="pl-cell" data-pending="1" data-scope="type" data-pt="'+esc(pt)+'" data-sup="'+esc(sup)+'" style="cursor:pointer;background:#fef2f2">'+_sn+pendBadge()+(a.cur?' <span class="mut tiny">now '+priceDisp(a.cur)+'</span>':'')+'</td>'; }
