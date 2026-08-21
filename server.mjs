@@ -8994,60 +8994,65 @@ async function computeOpenActions() {
   const DTC = `(lower(coalesce(p.branch,'')) LIKE '%direct to client%' OR lower(coalesce(p.branch,'')) LIKE '%jlew%' OR lower(coalesce(p.branch,'')) LIKE '%next%' OR coalesce(p.sales_order_ref,'')<>'')`;
   const nd = `coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%cancel%'`;
   const hasLines = `EXISTS (SELECT 1 FROM planner.purchase_order_lines l WHERE l.po=p.po AND coalesce(l.qty,0)>0)`;
-  const supplier_pos = await one(`SELECT count(*) n FROM planner.purchase_orders p LEFT JOIN planner.prod_numbers pn ON pn.prod_no=p.prod_no
-    WHERE p.supplier_confirmed_at IS NULL AND coalesce(pn.require_supplier_confirmation,false) AND ${nd}
-      AND coalesce(p.status,'') NOT ILIKE 'ship%' AND coalesce(p.status,'') NOT ILIKE '%deliver%' AND p.master_po IS NULL AND ${hasLines} AND NOT ${DTC}`);
-  const supplier_dtc = await one(`SELECT count(*) n FROM planner.purchase_orders p LEFT JOIN planner.prod_numbers pn ON pn.prod_no=p.prod_no
-    WHERE ${DTC} AND p.dtc_accepted_at IS NULL AND coalesce(pn.require_supplier_confirmation,false) AND ${nd} AND p.master_po IS NULL AND ${hasLines}`);
-  // PO action items (first pass — PO housekeeping): missing supplier, or a past landing date while not yet shipping. TUNE vs the live badge.
-  const po_actions = await one(`SELECT count(DISTINCT p.po) n FROM planner.purchase_orders p WHERE ${nd} AND p.master_po IS NULL AND ${hasLines}
-      AND (coalesce(p.supplier_name,'')='' OR (p.landing_date_overide < current_date AND coalesce(p.status,'') NOT ILIKE 'ship%' AND coalesce(p.status,'') NOT ILIKE '%deliver%'))`);
-  const order_plan = await one(`SELECT count(DISTINCT l.po) n FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po
-    LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku WHERE ${nd} AND coalesce(el.qty,0) IS DISTINCT FROM coalesce(l.qty,0)`);
-  const shipments = await one(`SELECT count(*) n FROM planner.purchase_orders p WHERE p.shipment_ref IS NULL AND ${nd} AND p.master_po IS NULL
-      AND (p.status ILIKE '%production%' OR p.status ILIKE '%ready to ship%') AND coalesce(p.end_production_overide, current_date) <= current_date + interval '21 days' AND ${hasLines}`);
-  let manufacturing = 0; try { manufacturing = (await manufacturingActions()).length; } catch (e) {}
-  const samples = await one(`SELECT count(*) n FROM planner.sample_requests s WHERE upper(coalesce(s.status,'')) NOT IN ('SHIPPED','CANCELLED','COMPLETE')
-      AND ((s.production_status='shipped' OR coalesce(s.tracking_code,'')<>'') OR (s.completion_date_required IS NOT NULL AND current_date > s.completion_date_required)
-        OR EXISTS (SELECT 1 FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending')
-        OR EXISTS (SELECT 1 FROM planner.sample_notes n WHERE n.sample_id=s.id AND n.author_kind='supplier' AND n.read_at IS NULL))`);
-  // Payments overdue — mirror the Payments Due report EXACTLY (client buildPaymentsDue / the PAYMENTS nav badge): count
-  // UNPAID Completion + Balance PO milestones (final-invoice-confirmed only) plus unpaid Deposits/Other, each with a due
-  // date in [2026-01-01, today). Uses the same poRowsCache the PO grid / cash flow use, so the number matches the report.
-  let payments_overdue = 0;
-  try {
-    const _poAll = await poRowsCache.get();   // master POs already excluded (child money rolls into master)
-    const _deps = await q(`SELECT coalesce(status,'') status, to_char(date_due,'YYYY-MM-DD') date_due, date_paid FROM planner.deposits`);
-    const _MIN = '2026-01-01', _tdy = new Date().toISOString().slice(0, 10);
-    const _ov = (paid, due) => !paid && !!due && due >= _MIN && due < _tdy;
-    for (const p of _poAll) {
-      if (!p.is_final) continue;   // milestones surface only once the final invoice amount is confirmed
-      if (Number(p.completion_calc) > 0.009 && p.completion_due && _ov(Number(p.completion_assigned) > 0.009, p.completion_due)) payments_overdue++;
-      if (Number(p.balance_owing) > 0.009 && p.balance_due && _ov(Number(p.balance_1_amount) > 0.009, p.balance_due)) payments_overdue++;
-    }
-    for (const d of _deps) { if (String(d.status).toLowerCase() === 'closed') continue; if (_ov(!!d.date_paid, d.date_due)) payments_overdue++; }
-  } catch (e) {}
-  const dtc_issues = await one(`WITH oso AS (SELECT s.cin7_id, s.reference FROM planner.dtc_sales_orders s LEFT JOIN planner.dtc_mismatch_review r ON r.so_cin7_id=s.cin7_id WHERE NOT s.is_void AND s.dispatched_date IS NULL AND NOT coalesce(r.accepted,false)),
+  // Run all the (independent) metrics in PARALLEL — was ~a dozen SEQUENTIAL awaits (20-30s on the live pooler, which
+  // could time out the serverless function → the board spun forever on "Loading open actions…"). Now wall-time ≈ the
+  // slowest single query (pool queues excess; no task holds a connection across an await, so no deadlock).
+  const [supplier_pos, supplier_dtc, po_actions, order_plan, shipments, manufacturing, samples, payments_overdue, dtc_issues, dtc_unmapped, reallocations] = await Promise.all([
+    one(`SELECT count(*) n FROM planner.purchase_orders p LEFT JOIN planner.prod_numbers pn ON pn.prod_no=p.prod_no
+      WHERE p.supplier_confirmed_at IS NULL AND coalesce(pn.require_supplier_confirmation,false) AND ${nd}
+        AND coalesce(p.status,'') NOT ILIKE 'ship%' AND coalesce(p.status,'') NOT ILIKE '%deliver%' AND p.master_po IS NULL AND ${hasLines} AND NOT ${DTC}`),
+    one(`SELECT count(*) n FROM planner.purchase_orders p LEFT JOIN planner.prod_numbers pn ON pn.prod_no=p.prod_no
+      WHERE ${DTC} AND p.dtc_accepted_at IS NULL AND coalesce(pn.require_supplier_confirmation,false) AND ${nd} AND p.master_po IS NULL AND ${hasLines}`),
+    // PO action items (first pass — PO housekeeping): missing supplier, or a past landing date while not yet shipping.
+    one(`SELECT count(DISTINCT p.po) n FROM planner.purchase_orders p WHERE ${nd} AND p.master_po IS NULL AND ${hasLines}
+        AND (coalesce(p.supplier_name,'')='' OR (p.landing_date_overide < current_date AND coalesce(p.status,'') NOT ILIKE 'ship%' AND coalesce(p.status,'') NOT ILIKE '%deliver%'))`),
+    one(`SELECT count(DISTINCT l.po) n FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po
+      LEFT JOIN planner.erp_purchase_order_lines el ON el.po=l.po AND el.sku=l.sku WHERE ${nd} AND coalesce(el.qty,0) IS DISTINCT FROM coalesce(l.qty,0)`),
+    one(`SELECT count(*) n FROM planner.purchase_orders p WHERE p.shipment_ref IS NULL AND ${nd} AND p.master_po IS NULL
+        AND (p.status ILIKE '%production%' OR p.status ILIKE '%ready to ship%') AND coalesce(p.end_production_overide, current_date) <= current_date + interval '21 days' AND ${hasLines}`),
+    (async () => { try { return (await manufacturingActions()).length; } catch (e) { return 0; } })(),
+    one(`SELECT count(*) n FROM planner.sample_requests s WHERE upper(coalesce(s.status,'')) NOT IN ('SHIPPED','CANCELLED','COMPLETE')
+        AND ((s.production_status='shipped' OR coalesce(s.tracking_code,'')<>'') OR (s.completion_date_required IS NOT NULL AND current_date > s.completion_date_required)
+          OR EXISTS (SELECT 1 FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending')
+          OR EXISTS (SELECT 1 FROM planner.sample_notes n WHERE n.sample_id=s.id AND n.author_kind='supplier' AND n.read_at IS NULL))`),
+    // Payments overdue — mirror the Payments Due report EXACTLY (client buildPaymentsDue / the PAYMENTS nav badge):
+    // count UNPAID Completion + Balance PO milestones (final-invoice-confirmed) + unpaid Deposits/Other, due in [2026-01-01, today).
+    (async () => { let payments_overdue = 0;
+      try {
+        const _poAll = await poRowsCache.get();   // master POs already excluded (child money rolls into master)
+        const _deps = await q(`SELECT coalesce(status,'') status, to_char(date_due,'YYYY-MM-DD') date_due, date_paid FROM planner.deposits`);
+        const _MIN = '2026-01-01', _tdy = new Date().toISOString().slice(0, 10);
+        const _ov = (paid, due) => !paid && !!due && due >= _MIN && due < _tdy;
+        for (const p of _poAll) {
+          if (!p.is_final) continue;   // milestones surface only once the final invoice amount is confirmed
+          if (Number(p.completion_calc) > 0.009 && p.completion_due && _ov(Number(p.completion_assigned) > 0.009, p.completion_due)) payments_overdue++;
+          if (Number(p.balance_owing) > 0.009 && p.balance_due && _ov(Number(p.balance_1_amount) > 0.009, p.balance_due)) payments_overdue++;
+        }
+        for (const d of _deps) { if (String(d.status).toLowerCase() === 'closed') continue; if (_ov(!!d.date_paid, d.date_due)) payments_overdue++; }
+      } catch (e) {}
+      return payments_overdue; })(),
+    one(`WITH oso AS (SELECT s.cin7_id, s.reference FROM planner.dtc_sales_orders s LEFT JOIN planner.dtc_mismatch_review r ON r.so_cin7_id=s.cin7_id WHERE NOT s.is_void AND s.dispatched_date IS NULL AND NOT coalesce(r.accepted,false)),
     sol AS (SELECT l.so_cin7_id, l.code, sum(l.qty) q FROM planner.dtc_sales_order_lines l WHERE l.so_cin7_id IN (SELECT cin7_id FROM oso) GROUP BY 1,2),
     mp AS (SELECT o.cin7_id, po.po FROM oso o JOIN planner.purchase_orders po ON po.sales_order_ref=o.reference),
     pol AS (SELECT m.cin7_id, l.sku, sum(l.qty) q FROM mp m JOIN planner.purchase_order_lines l ON l.po=m.po GROUP BY 1,2)
     SELECT count(*) n FROM oso o WHERE NOT EXISTS (SELECT 1 FROM mp WHERE mp.cin7_id=o.cin7_id)
-      OR EXISTS (SELECT 1 FROM (SELECT coalesce(s2.q,0) sq, coalesce(p2.q,0) pq FROM (SELECT code, q FROM sol WHERE so_cin7_id=o.cin7_id) s2 FULL OUTER JOIN (SELECT sku, q FROM pol WHERE cin7_id=o.cin7_id) p2 ON p2.sku=s2.code) x WHERE x.sq <> x.pq)`);
-  const dtc_unmapped = await one(`SELECT count(*) n FROM planner.purchase_orders p LEFT JOIN planner.dtc_po_review r ON r.po=p.po
-    WHERE (lower(coalesce(p.branch,'')) LIKE '%direct to client%' OR lower(coalesce(p.branch,'')) LIKE '%jlew%' OR lower(coalesce(p.branch,'')) LIKE '%next%')
-      AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%cancel%' AND coalesce(p.status,'') NOT ILIKE '%void%' AND coalesce(p.sales_order_ref,'')='' AND NOT coalesce(r.accepted,false)`);
+      OR EXISTS (SELECT 1 FROM (SELECT coalesce(s2.q,0) sq, coalesce(p2.q,0) pq FROM (SELECT code, q FROM sol WHERE so_cin7_id=o.cin7_id) s2 FULL OUTER JOIN (SELECT sku, q FROM pol WHERE cin7_id=o.cin7_id) p2 ON p2.sku=s2.code) x WHERE x.sq <> x.pq)`),
+    one(`SELECT count(*) n FROM planner.purchase_orders p LEFT JOIN planner.dtc_po_review r ON r.po=p.po
+      WHERE (lower(coalesce(p.branch,'')) LIKE '%direct to client%' OR lower(coalesce(p.branch,'')) LIKE '%jlew%' OR lower(coalesce(p.branch,'')) LIKE '%next%')
+        AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%cancel%' AND coalesce(p.status,'') NOT ILIKE '%void%' AND coalesce(p.sales_order_ref,'')='' AND NOT coalesce(r.accepted,false)`),
+    // Reallocation options (zero-cost order-plan moves) — tracked separately, NOT part of total_our (optional opportunities).
+    (async () => { let reallocations = 0;
+      try {
+        const recs = await biReallocations();
+        const st = {}; (await q(`SELECT action_key, status, to_char(snooze_until,'YYYY-MM-DD') snooze_until FROM planner.supply_action_state`)).forEach(s => { st[s.action_key] = s; });
+        const today = new Date().toISOString().slice(0, 10);
+        reallocations = recs.filter(rc => { const s = st[rc.key]; if (!s) return true;
+          if (s.status === 'dismissed' || s.status === 'applied') return false;
+          if (s.status === 'snoozed' && s.snooze_until && s.snooze_until >= today) return false; return true; }).length;
+      } catch (e) {}
+      return reallocations; })(),
+  ]);
   const dtc_mismatch = dtc_issues + dtc_unmapped;
-  // Reallocation options (zero-cost order-plan moves) — tracked separately, NOT part of total_our (they're optional
-  // opportunities, not required actions, so they don't belong in the mandatory-action total the PO list reflects).
-  let reallocations = 0;
-  try {
-    const recs = await biReallocations();
-    const st = {}; (await q(`SELECT action_key, status, to_char(snooze_until,'YYYY-MM-DD') snooze_until FROM planner.supply_action_state`)).forEach(s => { st[s.action_key] = s; });
-    const today = new Date().toISOString().slice(0, 10);
-    reallocations = recs.filter(rc => { const s = st[rc.key]; if (!s) return true;
-      if (s.status === 'dismissed' || s.status === 'applied') return false;
-      if (s.status === 'snoozed' && s.snooze_until && s.snooze_until >= today) return false; return true; }).length;
-  } catch (e) {}
   const total_our = po_actions + order_plan + shipments + manufacturing + samples + payments_overdue + dtc_mismatch;
   return { supplier_pos, supplier_dtc, po_actions, order_plan, shipments, manufacturing, samples, payments_overdue, dtc_mismatch, reallocations, total_our };
 }

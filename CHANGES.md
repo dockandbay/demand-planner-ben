@@ -1,3 +1,8 @@
+## v27.247 Fix: BI ▸ Metrics froze on "loading actions" (live)
+- **Root cause:** `computeOpenActions()` ran ~a dozen heavy COUNT/CTE queries **sequentially** (20-30s on the live pooler), which could exceed the serverless function timeout on a cold instance → the open-actions board spun forever on "Loading open actions…".
+- **Fix:** run all the independent metrics **in parallel** (`Promise.all`) — wall-time ≈ the slowest single query. Same queries, same numbers (verified total_our=217 etc.); no held connection across an await, so no pool deadlock (excess just queues).
+- **Client defense-in-depth:** the board fetch now has a **45s abort timeout + Retry link**, so it degrades to a retry prompt instead of an infinite spinner. Warm calls stay ~0.3s (the open-actions compute is cached, SWR, 5-min TTL).
+
 ## v27.246 Remove manual snapshot buttons (n8n now handles them)
 - n8n snapshot flows are live, so removed the two manual triggers: **"📸 Take forecast snapshot now"** on DEMAND ▸ Accuracy (kept the snapshot-count line, now "Captured automatically via n8n") and **"📸 Snapshot now"** on SUPPLY ▸ BI ▸ Metrics open-actions board (+ handlers + the "click Snapshot now" hint). Endpoints (`/api/forecast/snapshot`, `/api/supply/action-metrics/snapshot`) left in place, just no longer surfaced.
 - **KEPT:** DEMAND ▸ Snapshots (the manual named-forecast-snapshot comparison feature, `/api/demand/snapshots`) — that's a separate, intentionally-manual tool.

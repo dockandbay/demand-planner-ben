@@ -10293,7 +10293,10 @@
       +'</div>'
       +'<div id="oa-board" style="margin-top:22px;border-top:1px solid #e5e7eb;padding-top:14px"><div class="mut tiny">Loading open actions…</div></div>';
     (function(){ var el=b.querySelector('#oa-board'); if(!el)return;
-      fetch('/api/supply/action-metrics/data').then(function(r){return r.json();}).then(function(j){ _renderOpenActionsBoard(el,j); }).catch(function(){ el.innerHTML='<div style="color:#dc2626;font-size:12px">Open actions failed to load</div>'; }); })();
+      function loadBoard(){ el.innerHTML='<div class="mut tiny">Loading open actions…</div>';
+        var ctrl=(typeof AbortController!=='undefined')?new AbortController():null, tmo=setTimeout(function(){ if(ctrl)ctrl.abort(); },45000);   // never spin forever
+        fetch('/api/supply/action-metrics/data',ctrl?{signal:ctrl.signal}:{}).then(function(r){return r.json();}).then(function(j){ clearTimeout(tmo); _renderOpenActionsBoard(el,j); }).catch(function(){ clearTimeout(tmo); el.innerHTML='<div style="color:#dc2626;font-size:12px">Open actions took too long or failed. <a href="#" class="oa-retry" style="color:#1d4ed8">Retry</a></div>'; var rt=el.querySelector('.oa-retry'); if(rt)rt.onclick=function(ev){ ev.preventDefault(); loadBoard(); }; }); }
+      loadBoard(); })();
   }
   // Exposed so the top-level REPORTS ▸ Performance ▸ Supply metrics page (in the artifact) can render this same report.
   try{ window.renderSupplyMetrics=function(host){ if(!host)return;
