@@ -7464,7 +7464,8 @@ app.post('/api/supply/tpl/upload', async (req, res) => {
   const b = req.body || {};
   if (!TPL_KEYS.includes(b.tpl) || !b.period || !b.data_base64) return res.status(400).json({ error: 'tpl, period and data_base64 required' });
   try {
-    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    const raw = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    const buf = b.gzip ? zlib.gunzipSync(raw) : raw;   // client gzips to beat Vercel's ~4.5MB body cap; store the ORIGINAL bytes
     const r = await pool.query(`INSERT INTO planner.tpl_invoice_files (tpl, period, filename, content_type, content, byte_size, uploaded_by)
       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
       [b.tpl, b.period, b.filename || 'invoice', b.mime || 'application/octet-stream', buf, buf.length, b.uploaded_by || null]);

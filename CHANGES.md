@@ -1,3 +1,6 @@
+## v27.248 3PL invoice upload: client-side gzip (beat Vercel's ~4.5MB cap)
+- The 3PL invoice upload (REPORTS ▸ 3PL Invoice) now **gzips the file in the browser** (`CompressionStream`) before the base64 POST, so the request body stays under Vercel's ~4.5MB serverless cap. Server **gunzips before storing** the original bytes (`b.gzip` flag on `POST /api/supply/tpl/upload`) — the stored file, download, and parser are byte-identical/unchanged (verified round-trip). CSV compresses ~3-5x, so CSV invoices up to ~11-15MB now upload on live (was ~3.3MB). Already-compressed `.xlsx` gzips barely — those still hit the cap and get a clear "export as CSV" message. Falls back to raw upload if `CompressionStream` is unavailable.
+
 ## v27.247 Fix: BI ▸ Metrics froze on "loading actions" (live)
 - **Root cause:** `computeOpenActions()` ran ~a dozen heavy COUNT/CTE queries **sequentially** (20-30s on the live pooler), which could exceed the serverless function timeout on a cold instance → the open-actions board spun forever on "Loading open actions…".
 - **Fix:** run all the independent metrics **in parallel** (`Promise.all`) — wall-time ≈ the slowest single query. Same queries, same numbers (verified total_our=217 etc.); no held connection across an await, so no pool deadlock (excess just queues).

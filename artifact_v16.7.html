@@ -13387,13 +13387,22 @@ function render3plInvoice(body){
       +'</div>';
     var fi=b.querySelector('#tpl-file'), up=b.querySelector('#tpl-up'), msg=b.querySelector('#tpl-upmsg'), drop=b.querySelector('#tpl-drop');
     function doUpload(f){ if(!f){ msg.style.color='#dc2626'; msg.textContent='Choose a file first.'; return; }
-      up.disabled=true; msg.style.color='#64748b'; msg.textContent='Uploading '+f.name+'…'; var rd=new FileReader();
-      rd.onload=function(){ fetch('/api/supply/tpl/upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({tpl:TPL3_STATE.tpl,period:TPL3_STATE.period,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:(window.ME&&ME.email)||''})})
-        // a too-large upload comes back as a non-JSON "Request Entity Too Large" (413) — the live host (Vercel) caps
-        // request bodies at ~4.5MB. Detect it and show a clear message instead of a raw JSON-parse error.
-        .then(function(r){ if(!r.ok){ return r.text().then(function(t){ var big=(r.status===413)||/too large|request entity/i.test(t||''); throw new Error(big?('This file is '+(f.size/1048576).toFixed(1)+'MB — too large for the live server (uploads are capped at ~4.5MB). Ask Diviyaj to enable the direct-to-storage uploader, or upload a smaller / zipped file.'):('Upload failed ('+r.status+')')); }); } return r.json(); })
-        .then(function(j){ if(j&&j.error)throw new Error(j.error); load(true); }).catch(function(err){ msg.style.color='#dc2626'; msg.textContent='Failed: '+(err.message||err); up.disabled=false; }); };   // silent reload (no Loading… flash) — updates the file list in place
-      rd.readAsDataURL(f); }
+      up.disabled=true; msg.style.color='#64748b'; msg.textContent='Uploading '+f.name+'…';
+      var base={tpl:TPL3_STATE.tpl,period:TPL3_STATE.period,filename:f.name,mime:f.type||'application/octet-stream',uploaded_by:(window.ME&&ME.email)||''};
+      function send(payload){ fetch('/api/supply/tpl/upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)})
+        // Vercel caps request bodies at ~4.5MB. We gzip client-side first (gets CSV well under); an already-compressed
+        // .xlsx that is still too big returns a non-JSON 413 → show a clear message (suggest CSV / direct-to-storage).
+        .then(function(r){ if(!r.ok){ return r.text().then(function(t){ var big=(r.status===413)||/too large|request entity/i.test(t||''); throw new Error(big?('This file is '+(f.size/1048576).toFixed(1)+'MB and still too large after compression for the live server (~4.5MB cap). Export it as CSV, or ask Diviyaj to enable the direct-to-storage uploader.'):('Upload failed ('+r.status+')')); }); } return r.json(); })
+        .then(function(j){ if(j&&j.error)throw new Error(j.error); load(true); }).catch(function(err){ msg.style.color='#dc2626'; msg.textContent='Failed: '+(err.message||err); up.disabled=false; }); }   // silent reload (no Loading… flash)
+      function rawUpload(){ var rd=new FileReader(); rd.onload=function(){ base.data_base64=String(rd.result); base.gzip=false; send(base); }; rd.readAsDataURL(f); }
+      // Gzip in the browser (CompressionStream) so the base64 body stays under Vercel's ~4.5MB cap; server gunzips before storing.
+      if(typeof CompressionStream!=='undefined' && f.arrayBuffer){
+        msg.textContent='Compressing '+f.name+'…';
+        f.arrayBuffer().then(function(ab){ var stream=new Blob([ab]).stream().pipeThrough(new CompressionStream('gzip')); return new Response(stream).arrayBuffer(); })
+          .then(function(comp){ var bytes=new Uint8Array(comp), bin='', CH=0x8000; for(var i=0;i<bytes.length;i+=CH){ bin+=String.fromCharCode.apply(null, bytes.subarray(i,i+CH)); } base.data_base64=btoa(bin); base.gzip=true; msg.textContent='Uploading '+f.name+' ('+(comp.byteLength/1048576).toFixed(1)+'MB compressed)…'; send(base); })
+          .catch(function(){ rawUpload(); }); }
+      else rawUpload();
+    }
     up.onclick=function(){ doUpload(fi&&fi.files&&fi.files[0]); };
     if(fi)fi.onchange=function(){ if(fi.files&&fi.files[0])doUpload(fi.files[0]); };   // auto-upload on select OR drop-onto-input (silent — no Upload click)
     if(drop){ var hi=function(on){ drop.style.background=on?'#eff6ff':'#f8fafc'; drop.style.borderColor=on?'#2563eb':'#cbd5e1'; };
