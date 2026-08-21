@@ -8693,6 +8693,15 @@ app.get('/api/supply/dtc/mismatch', async (req, res) => {
     const allPos = pos.map(p => p.po), poLineByPo = {};
     if (allPos.length) (await pool.query(`SELECT po, sku, sum(qty) qty FROM planner.purchase_order_lines WHERE po = ANY($1) GROUP BY po, sku`, [allPos])).rows
       .forEach(l => { (poLineByPo[l.po] = poLineByPo[l.po] || {})[l.sku] = (poLineByPo[l.po][l.sku] || 0) + (Number(l.qty) || 0); });
+    // Per-PO timeline: latest note + total count for each mapped PO (the report's Timeline column). Skip on count polls.
+    const lastNoteByPo = {}, noteCountByPo = {};
+    if (!countOnly && allPos.length) {
+      (await pool.query(`SELECT DISTINCT ON (po) po, body, coalesce(author_email,'') author_email, coalesce(author_kind,'') author_kind,
+          to_char(created_at,'DD-Mon-YY HH24:MI') at, created_at FROM planner.supplier_notes WHERE po = ANY($1) ORDER BY po, created_at DESC`, [allPos])).rows
+        .forEach(n => { lastNoteByPo[n.po] = n; });
+      (await pool.query(`SELECT po, count(*)::int n FROM planner.supplier_notes WHERE po = ANY($1) GROUP BY po`, [allPos])).rows
+        .forEach(r => { noteCountByPo[r.po] = r.n; });
+    }
     let issues = 0, accepted = 0, ok = 0;
     const orders = sos.map(s => {
       const poRefs = posByRef[s.reference] || [], soL = soLineMap[s.cin7_id] || {}, poAgg = {};
@@ -8704,7 +8713,10 @@ app.get('/api/supply/dtc/mismatch', async (req, res) => {
         if (diffs.length) issue = 'qty_mismatch'; }
       const isIssue = !!issue && !s.accepted;
       if (s.accepted) accepted++; else if (isIssue) issues++; else ok++;
-      return { cin7_id: s.cin7_id, reference: s.reference, branch_name: s.branch_name, company: s.company, created_date: s.created_date, po_refs: poRefs, issue, diffs: diffs.slice(0, 60), note: s.note, accepted: s.accepted };
+      let _ln = null, _lnPo = null, _tlc = 0;
+      poRefs.forEach(pr => { _tlc += (noteCountByPo[pr.po] || 0); const c = lastNoteByPo[pr.po]; if (c && (!_ln || c.created_at > _ln.created_at)) { _ln = c; _lnPo = pr.po; } });
+      return { cin7_id: s.cin7_id, reference: s.reference, branch_name: s.branch_name, company: s.company, created_date: s.created_date, po_refs: poRefs, issue, diffs: diffs.slice(0, 60), note: s.note, accepted: s.accepted,
+        tl_po: _lnPo || (poRefs[0] && poRefs[0].po) || null, tl_last: _ln ? { body: _ln.body, author: _ln.author_email, kind: _ln.author_kind, at: _ln.at } : null, tl_count: _tlc };
     });
     // #1 reverse view — open, not-received POs in the DTC branches (Direct to Client / JLEW / NEXT) with NO sales-order
     // mapping → "open purchase order, not mapped to a sales order". Accept/note via dtc_po_review (mig 222) clears it

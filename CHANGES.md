@@ -1,3 +1,9 @@
+## v27.230 DTC Mismatch: per-PO Timeline column + instant read/unread (timeline was ~10s/click)
+- **Timeline is now per PO**: a new **Timeline** column (after Note) shows each row's PO's **last message** (author + time, truncated) with **"open timeline →"** to view/reply the full thread in the drawer. Replaces the single report-level notes section. Server: the mismatch endpoint now returns each order's latest mapped-PO note + count (from the existing `supplier_notes`).
+- **Perf — read/unread is now instant.** Marking a timeline note read/unread was refetching the whole panel (`po-row` ~2.5s + `po-detail` ~7.7s ≈ **10s per click**) just to flip `read_at` (a 0.6s write). It now updates the control **in place with no refetch**.
+- Note: `report_notes` (mig 242) is now unused — the timeline lives on the PO's own `supplier_notes` thread. Diviyaj can **skip mig 242**.
+- Known-slow, separate: opening the PO panel/drawer still costs ~7.7s (`po-detail`) + ~2.5s (`po-row`) — expensive views (`v_purchase_order_lines` / `v_product_availability` / `v_po_finance`). Same family as the ORDER_PLAN finance query; wants a DB-side matview/optimisation (flagged to Diviyaj).
+
 ## v27.229 Mobile card layouts (DTC Mismatch / Direct to Client / Custom Orders) + expand fix
 - **Mobile card layout** for the **DTC Mismatch**, **Direct to Client** and **Custom Orders** reports (stacked cards instead of wide tables on phones), matching the other mobile reports. Desktop tables unchanged. All interactive bits (PO links, notes, accept, SKU/qty diff, action badges) preserved in the cards.
 - **Expand fix (Ben):** the first-5/expand on DTC Mismatch is now on the **per-row SKU/qty mismatch mini-table** (under the "SKU / qty mismatch" badge) — shows the first 5 SKU lines with a "show all N SKUs" toggle — **not** the outer list of orders. Removed the outer-row collapse added in v27.228.

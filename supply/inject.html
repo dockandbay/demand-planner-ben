@@ -4051,10 +4051,14 @@
             else if(j.email.dropped&&j.email.dropped.length) alert('Note posted. Not emailed (not a Dock & Bay user): '+j.email.dropped.join(', ')); }
           poRefetchPanel(po,i); })
         .catch(function(e){ b.disabled=false; alert('Could not post: '+(e.message||e)); }); }; });
-    document.querySelectorAll('#podet-'+i+' .note-read').forEach(function(b){ b.onclick=function(){ var read=b.dataset.read!=='1'; b.disabled=true;
-      fetch('/api/supply/note-read/'+b.dataset.id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({read:read})}).then(function(r){return r.json();})
-        .then(function(j){ if(j&&j.error)throw new Error(j.error); invalidateDerived(); poRefetchPanel(po,i); })
-        .catch(function(e){ b.disabled=false; alert('Could not update: '+(e.message||e)); }); }; });
+    // Read/unread only flips read_at — update the control IN PLACE; do NOT refetch the panel (that was po-row ~2.5s + po-detail ~7.7s ≈ 10s per click).
+    var _bindNoteRead=function(b){ b.onclick=function(){ var read=b.dataset.read!=='1', id=b.dataset.id; b.style.pointerEvents='none'; b.style.opacity='.5';
+      fetch('/api/supply/note-read/'+id,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({read:read})}).then(function(r){return r.json();})
+        .then(function(j){ if(j&&j.error)throw new Error(j.error);
+          var repl=read?'<a class="note-read" data-id="'+id+'" data-read="1" style="font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline;white-space:nowrap">mark unread</a>':'<button class="save-btn light note-read" data-id="'+id+'" data-read="0">Mark read</button>';
+          var tmp=document.createElement('span'); tmp.innerHTML=repl; var neo=tmp.firstChild; if(b.parentNode){ b.parentNode.replaceChild(neo,b); _bindNoteRead(neo); } })
+        .catch(function(e){ b.style.pointerEvents=''; b.style.opacity=''; alert('Could not update: '+(e.message||e)); }); }; };
+    document.querySelectorAll('#podet-'+i+' .note-read').forEach(_bindNoteRead);
     // Escalate the most recent timeline message → email the supplier's portal users (internal-initiated)
     document.querySelectorAll('#podet-'+i+' .po-esc').forEach(function(b){ b.onclick=function(){ var msg=b.dataset.msg||''; if(!msg){alert('No message to escalate.');return;}
       if(!confirm('Escalate this message to '+b.dataset.po+' — email the supplier’s portal user(s)?'))return; b.disabled=true; var t=b.textContent; b.textContent='Sending…';
@@ -9981,7 +9985,7 @@
       +'<div class="mut tiny" style="margin-bottom:10px;max-width:840px">Open Direct-to-Client sales orders (not void, not dispatched) reconciled against their purchase orders (mapped by sales order ref). Flags orders with <b>no PO</b> or a <b>SKU / quantity mismatch</b>. Add a note or <b>accept</b> a discrepancy to clear it from the count.</div>'
       +'<div class="bar" style="gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><button class="save-btn" id="dtc-import" style="background:#dbeafe;color:#1e40af;border:1px solid #60a5fa;font-weight:700">&#8635; Import sales orders</button><span id="dtc-impmsg" class="mut tiny"></span>'
         +'<span style="margin-left:auto;display:inline-flex;gap:12px;align-items:center">'+_dtcPill('Issues',counts.issues||0,'#dc2626')+_dtcPill('Accepted',counts.accepted||0,'#64748b')+_dtcPill('OK',counts.ok||0,'#166534')+_dtcPill('Unmapped POs',counts.unmapped_pos||0,'#b45309')+'<button id="dtc-hide-acc" style="font-size:11px;padding:2px 10px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;color:#475569;cursor:pointer;white-space:nowrap">Hide accepted</button></span></div>'
-      +'<div id="dtc-list"></div><div id="dtc-unmapped"></div><div id="dtc-notes"></div>';
+      +'<div id="dtc-list"></div><div id="dtc-unmapped"></div>';
     fetch('/api/supply/dtc/status').then(function(r){return r.json();}).then(function(s){ var m=document.getElementById('dtc-impmsg'); if(!m)return;
       if(!s.imported_at){ m.className='mut tiny'; m.removeAttribute('style'); m.textContent='not imported yet — click Import'; return; }
       var txt='last import '+s.imported_at+' · '+s.orders+' orders ('+s.open+' open)';
@@ -10005,7 +10009,6 @@
     var _hb=document.getElementById('dtc-hide-acc'); if(_hb)_hb.onclick=function(){ _dtcHideAcc=!_dtcHideAcc; try{localStorage.setItem('dtcHideAcc',_dtcHideAcc?'1':'0');}catch(e){} _dtcApplyHideAcc(); };
     try{ _dtcApplyHideAcc(); }catch(e){}
     try{ refreshDtcBadge(); }catch(e){}
-    try{ renderReportNotes('dtc-mismatch'); }catch(e){}
   }
   // Report-level internal timeline notes (@-mention → email a teammate a link to this report). Reuses the PO
   // note infra: ensureTeam/_team for handle→email, noteBodyHtml for @bolding, showMentionEmail (sandbox preview).
@@ -10062,6 +10065,11 @@
     if(!orders.length){ el.innerHTML='<div class="mut tiny" style="padding:8px 0">No open DTC sales orders imported yet. Click <b>Import sales orders</b> to pull them from Cin7.</div>'; return; }
     orders.sort(function(a,b){ var ra=(a.issue&&!a.accepted)?0:(a.accepted?2:1), rb=(b.issue&&!b.accepted)?0:(b.accepted?2:1); return ra-rb; });
     var mob=actMob(), DCAP=5;   // per-SKU/qty table: show first 5 lines, "expand" reveals the rest (Ben)
+    function tlCell(o){ if(!o.tl_po)return '<span class="mut">—</span>';   // per-PO timeline: last message + open the full thread
+      var last=o.tl_last;
+      if(!last)return '<button class="lnk-btn dtc-tl" data-po="'+esc(o.tl_po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer;font-size:11px">+ add note</button>';
+      var who=shortUser(last.author||'')||(last.kind==='supplier'?'Supplier':'—'), body=String(last.body||''), shortB=esc(body.length>64?body.slice(0,64)+'…':body);
+      return '<div style="font-size:11px;max-width:230px"><div class="mut" style="font-size:10px">'+esc(who)+' · '+esc(last.at||'')+'</div><div style="white-space:pre-wrap;word-break:break-word;margin:1px 0">'+shortB+'</div><button class="lnk-btn dtc-tl" data-po="'+esc(o.tl_po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer;font-size:11px">'+(o.tl_count>1?('view all '+o.tl_count+' →'):'open timeline →')+'</button></div>'; }
     var rows=orders.map(function(o){
       var badge=_dtcBadge(o);
       var mism=(o.diffs||[]).filter(function(x){return (x.soQty||0)!==(x.poQty||0);});
@@ -10085,18 +10093,22 @@
         +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;flex-wrap:wrap"><div style="font-weight:700;font-size:13px">'+esc(o.reference||'')+'</div><span style="flex:1"></span>'+badge+'</div>'
         +'<div class="mut tiny" style="margin-bottom:5px">'+meta+'</div>'+diffs
         +'<div style="margin-top:6px;font-size:12px"><span style="color:#64748b">PO(s): </span>'+pos+'</div>'
-        +'<div style="margin-top:6px">'+noteTa+'</div><div style="margin-top:6px">'+accCb+'</div></div>'; }
+        +'<div style="margin-top:6px">'+noteTa+'</div>'
+        +'<div style="margin-top:6px"><div style="color:#64748b;font-size:11px;margin-bottom:2px">Timeline</div>'+tlCell(o)+'</div>'
+        +'<div style="margin-top:6px">'+accCb+'</div></div>'; }
       return '<tr class="dtc-order-row" data-id="'+o.cin7_id+'" data-acc="'+(o.accepted?'1':'0')+'"'+(o.accepted?' style="background:#dcfce7"':'')+'><td class="l" style="vertical-align:top"><b>'+esc(o.reference||'')+'</b><div class="mut tiny">'+meta+'</div></td>'
         +'<td class="l" style="vertical-align:top">'+badge+diffs+'</td>'
         +'<td class="l" style="vertical-align:top">'+pos+'</td>'
         +'<td class="l" style="vertical-align:top">'+noteTa+'</td>'
+        +'<td class="l" style="vertical-align:top">'+tlCell(o)+'</td>'
         +'<td class="l" style="vertical-align:top">'+accCb+'</td></tr>';
     }).join('');
     el.innerHTML=mob?('<div style="display:flex;flex-direction:column;gap:8px">'+rows+'</div>')
-      :('<div style="overflow-x:auto;max-width:100%"><table style="width:max-content;min-width:100%;border-collapse:collapse"><thead><tr><th class="l">Sales order</th><th class="l">Status</th><th class="l">PO(s)</th><th class="l">Note</th><th class="l">Accept</th></tr></thead><tbody>'+rows+'</tbody></table></div>');
+      :('<div style="overflow-x:auto;max-width:100%"><table style="width:max-content;min-width:100%;border-collapse:collapse"><thead><tr><th class="l">Sales order</th><th class="l">Status</th><th class="l">PO(s)</th><th class="l">Note</th><th class="l">Timeline</th><th class="l">Accept</th></tr></thead><tbody>'+rows+'</tbody></table></div>');
     el.querySelectorAll('.dtc-po').forEach(function(x){ x.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(x.dataset.po,'oplan'); else if(typeof gotoPO==='function')gotoPO(x.dataset.po,'oplan'); }; });
     el.querySelectorAll('.dtc-showmatch').forEach(function(btn){ btn.onclick=function(){ var id=btn.dataset.id, blk=el.querySelector('.dtc-diff[data-diffid="'+id+'"]'); if(!blk)return; var lines=blk.querySelectorAll('.dtc-match-line'), show=btn.dataset.shown!=='1'; btn.dataset.shown=show?'1':'0'; lines.forEach(function(l){l.style.display=show?'':'none';}); btn.innerHTML=(show?'&#9662; hide matching (':'&#10003; show matching (')+lines.length+')'; }; });
     el.querySelectorAll('.dtc-morelines').forEach(function(btn){ btn.onclick=function(){ var blk=el.querySelector('.dtc-diff[data-diffid="'+btn.dataset.id+'"]'); if(!blk)return; var lines=blk.querySelectorAll('.dtc-xline'), show=btn.dataset.shown!=='1'; btn.dataset.shown=show?'1':'0'; lines.forEach(function(l){l.style.display=show?'':'none';}); btn.innerHTML=show?'&#9652; show fewer':('&#9662; show all '+(btn.dataset.n||'')+' SKUs'); }; });
+    el.querySelectorAll('.dtc-tl').forEach(function(b){ b.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(b.dataset.po,'timeline'); else if(typeof gotoPO==='function')gotoPO(b.dataset.po,'timeline'); }; });
     function persist(id,accepted,note){ fetch('/api/supply/dtc/review',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({so_cin7_id:Number(id),accepted:accepted,note:note})}).catch(function(){}); }
     // ACCEPT: persist silently, move the row/card to the bottom, highlight light-green, update counters live — no page refresh (I1).
     el.querySelectorAll('.dtc-acc').forEach(function(cb){ cb.onclick=function(){
