@@ -9939,7 +9939,15 @@
   function _dtcBumpPill(lbl,d){ var el=document.querySelector('b[data-dtcpill="'+lbl+'"]'); if(el){ var v=(parseInt(el.textContent,10)||0)+d; el.textContent=(v<0?0:v); } }
   function _dtcBadge(o){ return o.accepted?'<span class="tool-badge bg-blue">accepted</span>':o.issue==='no_po'?'<span class="tool-badge bg-red">no PO mapped</span>':o.issue==='qty_mismatch'?'<span class="tool-badge bg-amber">SKU / qty mismatch</span>':'<span class="tool-badge bg-green">OK</span>'; }
   function _dtcFlash(el){ if(!el)return; var p=el.style.backgroundColor; el.style.transition='background-color .12s'; el.style.backgroundColor='#bbf7d0'; setTimeout(function(){ el.style.backgroundColor=p||''; setTimeout(function(){try{el.style.transition='';}catch(e){}},200); },520); }   // green flash on note save
-  function _dtcApplyHideAcc(){ var host=document.getElementById('dtc-list'); if(host)host.querySelectorAll('tr.dtc-order-row').forEach(function(tr){ if(tr.dataset.acc==='1')tr.style.display=_dtcHideAcc?'none':''; });
+  var _dtcListExpanded=false, _DTC_LIST_CAP=5;   // mismatch table: show first 5, "expand" reveals the rest
+  function _dtcApplyHideAcc(){ var host=document.getElementById('dtc-list');
+    if(host){ var cand=0;   // position-based (reorder-safe): walk current DOM order, hide accepted (if toggled) then cap the rest at 5
+      host.querySelectorAll('tr.dtc-order-row').forEach(function(tr){ var acc=tr.dataset.acc==='1';
+        if(acc&&_dtcHideAcc){ tr.style.display='none'; return; }
+        cand++; tr.style.display=(!_dtcListExpanded && cand>_DTC_LIST_CAP)?'none':''; });
+      var mb=document.getElementById('dtc-list-more'); if(mb){ var hidden=Math.max(0,cand-_DTC_LIST_CAP);
+        if(hidden<=0&&!_dtcListExpanded){ mb.style.display='none'; } else { mb.style.display=''; mb.textContent=_dtcListExpanded?'▲ Show fewer':('▼ Expand — show all '+cand+' ('+hidden+' more)'); } }
+    }
     var btn=document.getElementById('dtc-hide-acc'); if(btn){ btn.style.background=_dtcHideAcc?'#1d4ed8':'#fff'; btn.style.color=_dtcHideAcc?'#fff':'#475569'; btn.style.borderColor=_dtcHideAcc?'#1d4ed8':'#cbd5e1'; btn.textContent=(_dtcHideAcc?'✓ ':'')+'Hide accepted'; } }
   function refreshDtcBadge(){   // DTC mismatch count → its own L3 sub-tab badge + folded into the combined BI & REPORTS L2 counter
     fetch('/api/supply/dtc/mismatch?count=1').then(function(r){return r.json();}).then(function(j){ var c=(j&&j.counts)||{}; _dtcCount=(c.issues||0)+(c.unmapped_pos||0);
@@ -9955,7 +9963,7 @@
       +'<div class="mut tiny" style="margin-bottom:10px;max-width:840px">Open Direct-to-Client sales orders (not void, not dispatched) reconciled against their purchase orders (mapped by sales order ref). Flags orders with <b>no PO</b> or a <b>SKU / quantity mismatch</b>. Add a note or <b>accept</b> a discrepancy to clear it from the count.</div>'
       +'<div class="bar" style="gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><button class="save-btn" id="dtc-import" style="background:#dbeafe;color:#1e40af;border:1px solid #60a5fa;font-weight:700">&#8635; Import sales orders</button><span id="dtc-impmsg" class="mut tiny"></span>'
         +'<span style="margin-left:auto;display:inline-flex;gap:12px;align-items:center">'+_dtcPill('Issues',counts.issues||0,'#dc2626')+_dtcPill('Accepted',counts.accepted||0,'#64748b')+_dtcPill('OK',counts.ok||0,'#166534')+_dtcPill('Unmapped POs',counts.unmapped_pos||0,'#b45309')+'<button id="dtc-hide-acc" style="font-size:11px;padding:2px 10px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;color:#475569;cursor:pointer;white-space:nowrap">Hide accepted</button></span></div>'
-      +'<div id="dtc-list"></div><div id="dtc-unmapped"></div>';
+      +'<div id="dtc-list"></div><div id="dtc-unmapped"></div><div id="dtc-notes"></div>';
     fetch('/api/supply/dtc/status').then(function(r){return r.json();}).then(function(s){ var m=document.getElementById('dtc-impmsg'); if(!m)return;
       if(!s.imported_at){ m.className='mut tiny'; m.removeAttribute('style'); m.textContent='not imported yet — click Import'; return; }
       var txt='last import '+s.imported_at+' · '+s.orders+' orders ('+s.open+' open)';
@@ -9979,6 +9987,30 @@
     var _hb=document.getElementById('dtc-hide-acc'); if(_hb)_hb.onclick=function(){ _dtcHideAcc=!_dtcHideAcc; try{localStorage.setItem('dtcHideAcc',_dtcHideAcc?'1':'0');}catch(e){} _dtcApplyHideAcc(); };
     try{ _dtcApplyHideAcc(); }catch(e){}
     try{ refreshDtcBadge(); }catch(e){}
+    try{ renderReportNotes('dtc-mismatch'); }catch(e){}
+  }
+  // Report-level internal timeline notes (@-mention → email a teammate a link to this report). Reuses the PO
+  // note infra: ensureTeam/_team for handle→email, noteBodyHtml for @bolding, showMentionEmail (sandbox preview).
+  function renderReportNotes(key){ var host=document.getElementById('dtc-notes'); if(!host)return;
+    host.innerHTML='<div style="font-weight:700;font-size:13px;margin:22px 0 6px;color:#0f172a">Timeline notes <span class="mut tiny">— internal; type <b>@name</b> to tag a teammate (they get an email with a link to this report)</span></div>'
+      +'<div style="max-width:720px"><textarea id="rn-body" rows="2" placeholder="Add an internal note… type @ to tag a teammate" style="width:100%;box-sizing:border-box;font:13px/1.5 inherit;border:1px solid #cbd5e1;border-radius:6px;padding:6px 8px;resize:vertical"></textarea>'
+      +'<div style="margin-top:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button class="save-btn" id="rn-post" style="background:#4f46e5;color:#fff;border-color:#4338ca">Post note</button><span id="rn-msg" class="mut tiny"></span><span id="rn-team" class="mut tiny" style="margin-left:auto"></span></div>'
+      +'<div id="rn-list" style="margin-top:12px"></div></div>';
+    ensureTeam().then(function(t){ var el=document.getElementById('rn-team'); if(el&&t&&t.length)el.textContent='Tag: '+t.slice(0,8).map(function(x){return '@'+x.handle;}).join(' '); });
+    var meL=((window.ME&&ME.email)||'').toLowerCase();
+    function load(){ fetch('/api/supply/report-notes/list?key='+encodeURIComponent(key)).then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[]; var el=document.getElementById('rn-list'); if(!el)return;
+      el.innerHTML=rows.length?rows.map(function(n){ var mine=(n.author_email||'').toLowerCase()===meL;
+        return '<div style="border-top:1px solid #f1f5f9;padding:7px 0;font-size:13px"><div class="mut tiny" style="margin-bottom:2px">'+esc(shortUser(n.author_email||'—'))+' · '+esc(n.created_at||'')+(mine?' · <span class="rn-del" data-id="'+n.id+'" style="color:#b91c1c;cursor:pointer;text-decoration:underline">delete</span>':'')+'</div><div style="white-space:pre-wrap;line-height:1.5">'+noteBodyHtml({body:n.body,mentions:n.mentions})+'</div></div>'; }).join(''):'<div class="mut tiny">No notes yet.</div>';
+      el.querySelectorAll('.rn-del').forEach(function(d){ d.onclick=function(){ if(!confirm('Delete this note?'))return; fetch('/api/supply/report-note/'+d.dataset.id+'/delete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({by:(window.ME&&ME.email)||''})}).then(function(r){return r.json();}).then(function(){ load(); }).catch(function(){}); }; });
+    }).catch(function(){}); }
+    load();
+    var pb=document.getElementById('rn-post'); if(pb)pb.onclick=function(){ var ta=document.getElementById('rn-body'), v=(ta&&ta.value||'').trim(); if(!v)return;
+      var handles=(v.match(/@([a-z0-9._-]+)/gi)||[]).map(function(s){return s.slice(1).toLowerCase();});
+      var mentions=_team.filter(function(t){return handles.indexOf(t.handle)>=0;}).map(function(t){return t.email;});
+      pb.disabled=true; var m=document.getElementById('rn-msg'); if(m){m.style.color='#64748b';m.textContent='Posting…';}
+      fetch('/api/supply/report-note',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:key,body:v,mentions:mentions,author_email:(window.ME&&ME.email)||'Dock & Bay'})}).then(function(r){return r.json();}).then(function(j){ pb.disabled=false; if(j&&j.error){ if(m){m.style.color='#b91c1c';m.textContent='Error: '+j.error;} return; } if(m)m.textContent=''; if(ta)ta.value='';
+        if(j&&j.email){ if(j.sandbox) showMentionEmail(j.email); else if(j.email.dropped&&j.email.dropped.length) alert('Note posted. Not emailed (not a Dock & Bay user): '+j.email.dropped.join(', ')); }
+        load(); }).catch(function(e){ pb.disabled=false; if(m){m.style.color='#b91c1c';m.textContent='Failed: '+(e.message||e);} }); };
   }
   // #1 reverse view — open, not-received DTC-branch POs with no sales-order mapping
   function _drawDtcUnmapped(list){ var el=document.getElementById('dtc-unmapped'); if(!el)return;
@@ -9998,8 +10030,12 @@
     el.querySelectorAll('.dtcpo-acc').forEach(function(cb){ cb.onclick=function(){ var po=cb.dataset.po, ne=el.querySelector('.dtcpo-note[data-po="'+(window.CSS&&CSS.escape?CSS.escape(po):po)+'"]'); savePo(po,cb.checked,ne?ne.value:''); }; });
     el.querySelectorAll('.dtcpo-note').forEach(function(inp){ inp.onchange=function(){ var po=inp.dataset.po, ce=el.querySelector('.dtcpo-acc[data-po="'+(window.CSS&&CSS.escape?CSS.escape(po):po)+'"]'); persistPo(po,ce?ce.checked:false,inp.value); _dtcFlash(inp); };
       inp.style.height='auto'; inp.style.height=inp.scrollHeight+'px'; });   // same auto-grow + flash as the sales-order notes
+    (function(){ var trs=el.querySelectorAll('tbody tr'); if(trs.length<=5)return; var exp=false;   // show first 5, expand for the rest
+      var mb=document.createElement('button'); mb.style.cssText='margin-top:8px;font-size:12px;padding:4px 12px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;color:#334155;cursor:pointer'; el.appendChild(mb);
+      function apply(){ trs.forEach(function(tr,i){ tr.style.display=(!exp&&i>=5)?'none':''; }); mb.textContent=exp?'▲ Show fewer':('▼ Expand — show all '+trs.length+' ('+(trs.length-5)+' more)'); }
+      mb.onclick=function(){ exp=!exp; apply(); }; apply(); })();
   }
-  function _drawDtcList(orders){ var el=document.getElementById('dtc-list'); if(!el)return;
+  function _drawDtcList(orders){ var el=document.getElementById('dtc-list'); if(!el)return; _dtcListExpanded=false;
     if(!orders.length){ el.innerHTML='<div class="mut tiny" style="padding:8px 0">No open DTC sales orders imported yet. Click <b>Import sales orders</b> to pull them from Cin7.</div>'; return; }
     orders.sort(function(a,b){ var ra=(a.issue&&!a.accepted)?0:(a.accepted?2:1), rb=(b.issue&&!b.accepted)?0:(b.accepted?2:1); return ra-rb; });
     var rows=orders.map(function(o){
@@ -10022,7 +10058,9 @@
         +'<td class="l" style="vertical-align:top"><textarea class="dtc-note" data-id="'+o.cin7_id+'" rows="1" placeholder="note…" style="width:180px;min-height:22px;resize:vertical;overflow:hidden;font-family:inherit;font-size:12px;padding:3px 5px;border:1px solid #cbd5e1;border-radius:4px;box-sizing:border-box" oninput="this.style.height=\'auto\';this.style.height=this.scrollHeight+\'px\'">'+esc(o.note||'')+'</textarea></td>'
         +'<td class="l" style="vertical-align:top"><label style="font-size:11px;white-space:nowrap"><input type="checkbox" class="dtc-acc" data-id="'+o.cin7_id+'"'+(o.accepted?' checked':'')+'> accept</label></td></tr>';
     }).join('');
-    el.innerHTML='<div style="overflow-x:auto;max-width:100%"><table style="width:max-content;min-width:100%;border-collapse:collapse"><thead><tr><th class="l">Sales order</th><th class="l">Status</th><th class="l">PO(s)</th><th class="l">Note</th><th class="l">Accept</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+    el.innerHTML='<div style="overflow-x:auto;max-width:100%"><table style="width:max-content;min-width:100%;border-collapse:collapse"><thead><tr><th class="l">Sales order</th><th class="l">Status</th><th class="l">PO(s)</th><th class="l">Note</th><th class="l">Accept</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+      +'<button id="dtc-list-more" style="display:none;margin-top:8px;font-size:12px;padding:4px 12px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;color:#334155;cursor:pointer"></button>';
+    var _mb=document.getElementById('dtc-list-more'); if(_mb)_mb.onclick=function(){ _dtcListExpanded=!_dtcListExpanded; _dtcApplyHideAcc(); };
     el.querySelectorAll('.dtc-po').forEach(function(x){ x.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(x.dataset.po,'oplan'); else if(typeof gotoPO==='function')gotoPO(x.dataset.po,'oplan'); }; });
     el.querySelectorAll('.dtc-showmatch').forEach(function(btn){ btn.onclick=function(){ var id=btn.dataset.id, blk=el.querySelector('.dtc-diff[data-diffid="'+id+'"]'); if(!blk)return; var lines=blk.querySelectorAll('.dtc-match-line'), show=btn.dataset.shown!=='1'; btn.dataset.shown=show?'1':'0'; lines.forEach(function(l){l.style.display=show?'':'none';}); btn.innerHTML=(show?'&#9662; hide matching (':'&#10003; show matching (')+lines.length+')'; }; });
     function persist(id,accepted,note){ fetch('/api/supply/dtc/review',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({so_cin7_id:Number(id),accepted:accepted,note:note})}).catch(function(){}); }
@@ -10032,9 +10070,10 @@
       o.accepted=acc; persist(id,acc,note);
       if(tr){ tr.dataset.acc=acc?'1':'0'; var bcell=tr.children[1], bd=bcell&&bcell.querySelector('.tool-badge');
         if(bd){ if(acc){bd.className='tool-badge bg-blue';bd.textContent='accepted';} else { var tmp=document.createElement('span'); tmp.innerHTML=_dtcBadge(o); if(tmp.firstChild){bd.className=tmp.firstChild.className;bd.textContent=tmp.firstChild.textContent;} } }
-        if(acc){ tr.style.background='#dcfce7'; tr.parentNode.appendChild(tr); _dtcBumpPill('Accepted',1); _dtcBumpPill(o.issue?'Issues':'OK',-1); if(_dtcHideAcc)tr.style.display='none'; }
-        else { tr.style.background=''; tr.style.display=''; _dtcBumpPill('Accepted',-1); _dtcBumpPill(o.issue?'Issues':'OK',1); }
+        if(acc){ tr.style.background='#dcfce7'; tr.parentNode.appendChild(tr); _dtcBumpPill('Accepted',1); _dtcBumpPill(o.issue?'Issues':'OK',-1); }
+        else { tr.style.background=''; _dtcBumpPill('Accepted',-1); _dtcBumpPill(o.issue?'Issues':'OK',1); }
       }
+      _dtcApplyHideAcc();   // recompute hide-accepted + first-5 collapse after the change (row may have moved to the bottom)
     }; });
     el.querySelectorAll('.dtc-note').forEach(function(inp){ inp.onchange=function(){ var id=inp.dataset.id, ce=el.querySelector('.dtc-acc[data-id="'+id+'"]'); persist(id,ce?ce.checked:false,inp.value); _dtcFlash(inp); };
       inp.style.height='auto'; inp.style.height=inp.scrollHeight+'px'; });   // auto-size notes on load (J)

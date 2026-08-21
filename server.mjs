@@ -6709,6 +6709,57 @@ app.post('/api/supply/portal-note', async (req, res) => {
     res.json({ ok: true, mentions, mailed, email: preview, sandbox: IS_SANDBOX });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// ── Report-level internal notes (timeline) — first use: the DTC Mismatch report. Internal-only thread per report_key;
+// @mentions email tagged Dock & Bay users a link straight to that report. Mirrors the PO timeline note mention flow.
+const REPORT_LABELS = { 'dtc-mismatch': 'DTC Mismatch report' };
+function reportLabel(key) { return REPORT_LABELS[key] || (key + ' report'); }
+function reportLink(key) { return PLANNER_URL + '/#/supply/reports/' + encodeURIComponent(key); }
+app.get('/api/supply/report-notes/list', async (req, res) => {   // 2-segment path so it isn't swallowed by the /api/supply/:section catch-all
+  const key = String((req.query && req.query.key) || '').trim(); if (!key) return res.json([]);
+  try {
+    const rows = (await pool.query(`SELECT id, coalesce(author_email,'') author_email, body, coalesce(mentions,'{}') mentions,
+      to_char(created_at,'DD-Mon-YY HH24:MI') created_at FROM planner.report_notes WHERE report_key=$1 ORDER BY created_at DESC, id DESC LIMIT 300`, [key])).rows;
+    res.json(rows);
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/report-note', async (req, res) => {
+  const b = req.body || {}, key = String(b.key || '').trim(), body = String(b.body || '').trim();
+  if (!key || !body) return res.status(400).json({ error: 'key and body required' });
+  try {
+    const author = internalAuthor(req, b.author_email);
+    const mentions = Array.isArray(b.mentions)
+      ? Array.from(new Set(b.mentions.map(m => String(m || '').trim().toLowerCase()).filter(m => m.indexOf('@') > 0))) : [];
+    const ins = (await pool.query(`INSERT INTO planner.report_notes (report_key, author_email, body, mentions)
+      VALUES ($1,$2,$3,$4) RETURNING id, to_char(created_at,'DD-Mon-YY HH24:MI') created_at`,
+      [key, author, body, mentions.length ? mentions : null])).rows[0];
+    let preview = null;
+    if (mentions.length) {
+      try {
+        const valid = (await pool.query(`SELECT lower(email) email FROM planner.app_permissions WHERE lower(email) = ANY($1)`, [mentions])).rows.map(r => r.email);
+        const send = mentions.filter(m => valid.includes(m)), dropped = mentions.filter(m => !valid.includes(m));
+        if (send.length) {
+          const who = author ? String(author).replace(/@dockandbay\.com$/i, '@') : 'A teammate';
+          const label = reportLabel(key), link = reportLink(key), subject = who + ' tagged you on the ' + label;
+          const html = '<div style="font:14px/1.6 system-ui,-apple-system,sans-serif;color:#1a1a1a">'
+            + '<p><b>' + escHtml(who) + '</b> tagged you in a note on the <b>' + escHtml(label) + '</b>:</p>'
+            + '<blockquote style="margin:10px 0;padding:8px 12px;border-left:3px solid #6366f1;background:#f5f3ff;color:#334155">' + escHtml(body) + '</blockquote>'
+            + '<p style="margin-top:14px"><a href="' + link + '" style="color:#4f46e5">Open the ' + escHtml(label) + ' in HORIZON &rarr;</a></p></div>';
+          const text = who + ' tagged you in a note on the ' + label + ':\n\n' + body + '\n\nOpen: ' + link;
+          const r = await sendResendEmail({ to: send, subject, html, kind: 'report-mention', ref: key, by: author });
+          preview = { to: send, subject, text, sent: !(r && r.sandbox), dropped };
+        } else if (dropped.length) { preview = { to: [], subject: '', text: '', sent: false, dropped }; }
+      } catch (e) { console.error('[report-note mention] failed:', e.message); }
+    }
+    res.json({ ok: true, note: { id: ins.id, author_email: author, body, mentions, created_at: ins.created_at }, email: preview, sandbox: IS_SANDBOX });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/report-note/:id/delete', async (req, res) => {
+  try {
+    const me = internalAuthor(req, (req.body || {}).by);
+    const r = await pool.query(`DELETE FROM planner.report_notes WHERE id=$1 AND lower(coalesce(author_email,''))=lower($2)`, [parseInt(req.params.id, 10), me || '']);
+    res.json({ ok: true, deleted: r.rowCount });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.post('/api/supply/portal-upload', async (req, res) => {
   const b = req.body || {};
   if (!b.po || !b.data_base64) return res.status(400).json({ error: 'po and data_base64 required' });
