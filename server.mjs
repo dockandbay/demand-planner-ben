@@ -11471,25 +11471,29 @@ async function computeAutoForecastFromFeed(feed, markets, includeGap=true){
       FROM planner.products WHERE subcategory IS NOT NULL GROUP BY 1`);
     const mm={}; lr.rows.forEach(r=> mm[r.s]=Math.max(1,Math.round(Number(r.wk)/4.345))); leadM[mk]=mm; }));
   const winMin=win[0], winMax=win[win.length-1];
+  // 1b: from the 20th of the month, "order now" rolls to NEXT month (too late to place this month's orders), so the
+  // deposit for overdue/current-month buys lands next month rather than the current month.
+  const _afterCut=(new Date().getDate()>=20), orderFloor=(_afterCut?afAddMonths(winMin,1):winMin);
   // phase ONE buy order (subcat s, market mk, ARRIVAL month m, units) into cash — shared by the buy feed + the gap.
   const phaseOne=(s, mk, m, arrive)=>{
     if(!(arrive>0))return;
     const lm=(leadM[mk]||{})[s]||2;
     let om=afAddMonths(m,-lm);
-    if(om<winMin){ overdueUnits+=arrive; om=winMin; }          // fold overdue order into "order now" (month 0)
+    if(om<orderFloor){ if(om<winMin)overdueUnits+=arrive; om=orderFloor; }   // fold overdue + roll current month (past the 20th) into "order now"
+    const mm=(m<om)?om:m;   // arrival can't precede the (rolled) order month
     const nm=supName[s]||'—', c=unitCost[s]||0;
     const t=terms[nm]||{start_deposit_pct:30,completion_pct:0,balance_pct:70,production_days:60,credit_days:0};
     const u=unitsBy[nm]||(unitsBy[nm]={t:0}); u[om]=(u[om]||0)+arrive; u.t+=arrive;
     const val=arrive*c;
     const _dep=val*Number(t.start_deposit_pct||0)/100, _com=val*Number(t.completion_pct||0)/100, _bal=val*Number(t.balance_pct||0)/100;
     const _dutyRate=dutyPct[(catOf[s]||'')+'|'+mk.toUpperCase()]||0, _duty=val*_dutyRate/100;   // duty = value × duty%(category,country)
-    const _comM=afAddMonths(om, Math.round((t.production_days||0)/30)), _balM=afAddMonths(m, Math.round((t.credit_days||0)/30));
-    addPay('deposit', om, _dep); addPay('completion', _comM, _com); addPay('balance', _balM, _bal); addPay('duty', m, _duty);
-    (monthPallets[mk]||(monthPallets[mk]={}))[m]=((monthPallets[mk]||{})[m]||0)+arrive*(ppu[s]||0);   // freight pallets (containerised after)
+    const _comM=afAddMonths(om, Math.round((t.production_days||0)/30)), _balM=afAddMonths(mm, Math.round((t.credit_days||0)/30));
+    addPay('deposit', om, _dep); addPay('completion', _comM, _com); addPay('balance', _balM, _bal); addPay('duty', mm, _duty);
+    (monthPallets[mk]||(monthPallets[mk]={}))[mm]=((monthPallets[mk]||{})[mm]||0)+arrive*(ppu[s]||0);   // freight pallets (containerised after)
     const _sc=(t.code||'').trim()||nm.replace(/[^A-Za-z0-9]/g,'').slice(0,3).toUpperCase()||'??';
     const _ref='FC-'+mk.toUpperCase()+'-'+om+'-'+_sc;
     addTxn(_ref,'Starting deposit',om,_dep,mk,nm); addTxn(_ref,'Completion deposit',_comM,_com,mk,nm);
-    addTxn(_ref,'Balance payment',_balM,_bal,mk,nm); if(_duty>0)addTxn(_ref,'Import duty',m,_duty,mk,nm);
+    addTxn(_ref,'Balance payment',_balM,_bal,mk,nm); if(_duty>0)addTxn(_ref,'Import duty',mm,_duty,mk,nm);
   };
   // 1) KNOWN SKUs — the buy plan's own buys (client feed)
   for(const row of (feed||[])){
@@ -14064,13 +14068,18 @@ async function plPortalData(sups) {
     const ptMeta = {}; (await pool.query(`SELECT price_type, coalesce(size,'') size FROM planner.price_type_meta`)).rows.forEach((r) => { ptMeta[r.price_type] = r.size; });
     let priceTypes = [], manualSkus = [];
     if (myTypes.length) {
+      // SCOPE TO THE SUPPLIER: only SKUs this supplier actually supplies (main_supplier_final OR supplier_multiple_all).
+      // A price_type can span multiple suppliers, so a type price alone must NOT expose another supplier's SKUs in their portal.
       const pt = (await pool.query(`SELECT price_type, sku, coalesce(product_name_final,product_name,'') name, coalesce(main_supplier_final,'') main_supplier,
              coalesce(nullif(category_name_final,''),category,'') category,
              coalesce(colour_long,'') colour, coalesce(nullif(size_long,''),size,'') size,
              (lower(coalesce(status,'')) NOT LIKE '%discont%' AND NOT (coalesce(discontinue_date_final,'') ~ '^\d{4}-\d{2}-\d{2}' AND to_date(discontinue_date_final,'YYYY-MM-DD') <= current_date)) active
-        FROM planner.products WHERE coalesce(variant_type,'')='MASTER' AND upper(coalesce(status,''))<>'NON STOCKED' AND price_type = ANY($1) ORDER BY price_type, sku`, [myTypes])).rows;
+        FROM planner.products WHERE coalesce(variant_type,'')='MASTER' AND upper(coalesce(status,''))<>'NON STOCKED' AND price_type = ANY($1)
+          AND EXISTS (SELECT 1 FROM unnest(string_to_array(coalesce(main_supplier_final,'')||','||coalesce(supplier_multiple_all,''), ',')) x
+                      WHERE lower(trim(x)) = ANY($2))
+        ORDER BY price_type, sku`, [myTypes, sups.map(s => String(s).toLowerCase())])).rows;
       const tm = {}; pt.forEach((r) => { const t = (tm[r.price_type] = tm[r.price_type] || { skus: [], sizes: {}, cats: {} }); t.skus.push({ sku: r.sku, name: r.name, active: !!r.active, colour: r.colour, size: r.size, category: r.category }); if (r.size) t.sizes[r.size] = 1; if (r.category) t.cats[r.category] = (t.cats[r.category] || 0) + 1; });
-      priceTypes = myTypes.slice().sort().map((k) => { const t = tm[k] || { skus: [], sizes: {}, cats: {} }; const uniq = Object.keys(t.sizes); const def = uniq.length === 1 ? uniq[0] : ''; const cat = Object.keys(t.cats).sort((a, b) => t.cats[b] - t.cats[a])[0] || ''; const ov = (ptMeta[k] != null && ptMeta[k] !== ''); return { price_type: k, skus: t.skus, category: cat, mainSupplier: sups[0] || '', size: ov ? ptMeta[k] : def, sizeOverride: ov, sizeDefault: def }; });
+      priceTypes = myTypes.slice().sort().filter((k) => tm[k] && tm[k].skus.length).map((k) => { const t = tm[k]; const uniq = Object.keys(t.sizes); const def = uniq.length === 1 ? uniq[0] : ''; const cat = Object.keys(t.cats).sort((a, b) => t.cats[b] - t.cats[a])[0] || ''; const ov = (ptMeta[k] != null && ptMeta[k] !== ''); return { price_type: k, skus: t.skus, category: cat, mainSupplier: sups[0] || '', size: ov ? ptMeta[k] : def, sizeOverride: ov, sizeDefault: def }; });
     }
     if (manualSet.size) {
       manualSkus = (await pool.query(`SELECT sku, coalesce(product_name_final,product_name,'') name, coalesce(colour_long,'') colour, coalesce(nullif(size_long,''),size,'') size,
