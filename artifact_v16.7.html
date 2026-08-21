@@ -13730,15 +13730,17 @@ function renderAutoForecastReport(body){
     var afToCsv=function(rows){ return rows.map(function(r){return r.map(function(c){var s=String(c==null?'':c); return /[",\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}).join(',');}).join('\n'); };
     var afDl=function(csv,fn){ var blob=new Blob([csv],{type:'text/csv;charset=utf-8'}), url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download=fn; document.body.appendChild(a); a.click(); document.body.removeChild(a); setTimeout(function(){URL.revokeObjectURL(url);},1000); };
     var afFlash=function(btn){ var o=btn.textContent; btn.textContent='✓'; setTimeout(function(){btn.textContent=o;},1200); };
-    var pay='<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:16px 0 0"><span style="font-size:11px;font-weight:700;color:#888">PAYMENTS PLAN</span>'
-      +'<button class="view-toggle" id="af-pay-copy" style="font-size:11px">⧉ Copy (USD)</button>'
-      +'<button class="view-toggle" id="af-pay-copy-gbp" style="font-size:11px">⧉ Copy (GBP)</button>'
-      +'<button class="view-toggle" id="af-pay-csv" style="font-size:11px">⬇ CSV (USD)</button>'
-      +'<button class="view-toggle" id="af-pay-csv-gbp" style="font-size:11px">⬇ CSV (GBP)</button>'
-      +'<span style="width:1px;height:16px;background:#ddd;margin:0 4px"></span>'
-      +'<span style="font-size:11px;font-weight:700;color:#888">TRANSACTIONS</span>'
-      +'<button class="view-toggle" id="af-txn-copy" style="font-size:11px">⧉ Copy</button>'
-      +'<button class="view-toggle" id="af-txn-csv" style="font-size:11px">⬇ CSV</button></div>'
+    var ddBtn=function(id,label,bg,fg,br){ return '<span class="af-dd" style="position:relative;display:inline-block">'
+      +'<button class="af-dd-btn" id="af-dd-'+id+'" style="font-size:12px;font-weight:700;padding:6px 13px;border-radius:7px;cursor:pointer;background:'+bg+';color:'+fg+';border:1px solid '+br+'">'+label+' ▾</button>'
+      +'<div class="af-menu" id="af-menu-'+id+'" style="display:none;position:absolute;z-index:60;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid #cbd5e1;border-radius:7px;box-shadow:0 8px 22px rgba(0,0,0,.16);min-width:172px;overflow:hidden">'
+      +'<div class="af-opt" data-k="'+id+'" data-act="copy" style="padding:8px 13px;cursor:pointer;font-size:12px">⧉ Copy to clipboard</div>'
+      +'<div class="af-opt" data-k="'+id+'" data-act="csv" style="padding:8px 13px;cursor:pointer;font-size:12px;border-top:1px solid #f1f5f9">⬇ Download CSV</div>'
+      +'</div></span>'; };
+    var pay='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:16px 0 0"><span style="font-size:11px;font-weight:700;color:#888;letter-spacing:.04em">EXPORT</span>'
+      +ddBtn('usd','Summary USD','#dcfce7','#166534','#86efac')
+      +ddBtn('gbp','Summary GBP','#dbeafe','#1e40af','#93c5fd')
+      +ddBtn('txn','Transactions','#f3e8ff','#6d28d9','#d8b4fe')
+      +'</div>'
       +payTbl('USD',1)+payTbl('GBP',AF_GBP);
     var a=d.assumptions;
     var note='<div style="font-size:11px;color:#888;margin-top:12px;line-height:1.5">'
@@ -13749,15 +13751,14 @@ function renderAutoForecastReport(body){
       +(a.truncated?' <span style="color:#b45309">Some orders fall outside the window and are not shown.</span>':'')
       +(a.overdue_units>0?' <span style="color:#b45309">'+fn(a.overdue_units)+' units have an order date already in the past (overdue) — their cash still shows below, but they’re omitted from the units grid above.</span>':'')+'</div>';
     content.innerHTML=u+pay+note;
-    var afCopyCur=function(btn,div){ var tsv=afPayCur(div).map(function(r){return r.join('\t');}).join('\n');
-      navigator.clipboard.writeText(tsv).then(function(){var o=btn.textContent;btn.textContent='✓ Copied';setTimeout(function(){btn.textContent=o;},1400);}).catch(function(){alert('Copy blocked by the browser.');}); };
-    var cpBtn=content.querySelector('#af-pay-copy'); if(cpBtn)cpBtn.onclick=function(){ afCopyCur(cpBtn,1); };
-    var cpGbp=content.querySelector('#af-pay-copy-gbp'); if(cpGbp)cpGbp.onclick=function(){ afCopyCur(cpGbp,AF_GBP); };
-    var csBtn=content.querySelector('#af-pay-csv'); if(csBtn)csBtn.onclick=function(){ afDl(afToCsv(afPayCur(1)),'auto_forecast_payments_plan_USD.csv'); afFlash(csBtn); };
-    var csGbp=content.querySelector('#af-pay-csv-gbp'); if(csGbp)csGbp.onclick=function(){ afDl(afToCsv(afPayCur(AF_GBP)),'auto_forecast_payments_plan_GBP.csv'); afFlash(csGbp); };
-    var txCp=content.querySelector('#af-txn-copy'); if(txCp)txCp.onclick=function(){ var tsv=afTxnRows().map(function(r){return r.join('\t');}).join('\n');
-      navigator.clipboard.writeText(tsv).then(function(){var o=txCp.textContent;txCp.textContent='✓ Copied';setTimeout(function(){txCp.textContent=o;},1400);}).catch(function(){alert('Copy blocked by the browser.');}); };
-    var txCsv=content.querySelector('#af-txn-csv'); if(txCsv)txCsv.onclick=function(){ afDl(afToCsv(afTxnRows()),'auto_forecast_transactions.csv'); afFlash(txCsv); };
+    // Export dropdowns: one coloured button each (Summary USD / GBP / Transactions), Copy + CSV under a menu.
+    function afCopyTsv(rows){ var tsv=rows.map(function(r){return r.join('\t');}).join('\n'); navigator.clipboard.writeText(tsv).then(function(){},function(){alert('Copy blocked by the browser.');}); }
+    var afAct={ usd:{copy:function(){afCopyTsv(afPayCur(1));}, csv:function(){afDl(afToCsv(afPayCur(1)),'auto_forecast_summary_USD.csv');}},
+                gbp:{copy:function(){afCopyTsv(afPayCur(AF_GBP));}, csv:function(){afDl(afToCsv(afPayCur(AF_GBP)),'auto_forecast_summary_GBP.csv');}},
+                txn:{copy:function(){afCopyTsv(afTxnRows());}, csv:function(){afDl(afToCsv(afTxnRows()),'auto_forecast_transactions.csv');}} };
+    content.querySelectorAll('.af-dd-btn').forEach(function(b){ b.onclick=function(ev){ ev.stopPropagation(); var id=b.id.replace('af-dd-',''); var m=content.querySelector('#af-menu-'+id); var open=m&&m.style.display!=='none'; content.querySelectorAll('.af-menu').forEach(function(x){x.style.display='none';}); if(m&&!open)m.style.display='block'; }; });
+    content.querySelectorAll('.af-opt').forEach(function(o){ o.onmouseenter=function(){o.style.background='#f1f5f9';}; o.onmouseleave=function(){o.style.background='';}; o.onclick=function(ev){ ev.stopPropagation(); var a=afAct[o.dataset.k]; if(a&&a[o.dataset.act])a[o.dataset.act](); content.querySelectorAll('.af-menu').forEach(function(x){x.style.display='none';}); }; });
+    if(!window.__afDdClose){ window.__afDdClose=true; document.addEventListener('click',function(){ document.querySelectorAll('.af-menu').forEach(function(m){m.style.display='none';}); }); }
   };
   var key=AF_MARKET;
   if(AF_CACHE[key]) return draw(AF_CACHE[key]);

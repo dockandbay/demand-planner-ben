@@ -1,3 +1,6 @@
+## v27.234 Auto Forecast: export buttons → 3 coloured dropdowns (Summary USD / GBP / Transactions)
+- Replaced the 6 grey export buttons with **3 coloured dropdown buttons** — **Summary USD** (green), **Summary GBP** (blue), **Transactions** (purple) — each with **Copy to clipboard** and **Download CSV** under the dropdown. Clearer + easier to spot.
+
 ## v27.233 Direct to Client: Group-by dropdown (Client / Completion date) + Completion column
 - New **Group by** dropdown on the Direct to Client report: **Client** (default — grouped by client name, POs alphabetical within each) or **Completion date** (bucketed **Within 1 week / 1–2 weeks / 2–4 weeks / 4+ weeks**, plus a "No completion date" group, by the PO's production-end date).
 - New **Completion** column (after Deadline) showing the PO's completion date (`prod_end`) with the **same days-to-go badge as the PO grid END column** (`endDaysBadge` — red/orange/blue/green by days remaining).
