@@ -7886,13 +7886,22 @@
     var isDC=function(b){ b=(b||'').toLowerCase(); return b.indexOf('direct to client')>=0 || b.indexOf('b2b jlew')>=0 || b.indexOf('b2b next')>=0; };
     var base=(rows||[]).filter(function(r){ return isDC(r.branch) && !/complete/i.test(r.status||''); })
       .sort(function(a,z){ return (a.client_deadline||'9999').localeCompare(z.client_deadline||'9999') || (a.delivery||'9999').localeCompare(z.delivery||'9999'); });
-    var today=new Date().toISOString().slice(0,10), st={q:'',tag:''};
+    var today=new Date().toISOString().slice(0,10), st={q:'',tag:'',group:'client'};
     var dcActSum=base.reduce(function(n,r){return n+poTabActs(r).length;},0); _setPoSubActBadge('directclient',dcActSum);
     function dtcBadges(r){ return ((r.dtc_key_account?'<span class="tool-badge bg-blue">Key account</span> ':'')+(r.dtc_custom?'<span class="tool-badge bg-neutral">Custom</span>':''))||'<span class="mut">—</span>'; }
-    function dcTable(list){
-      if(actMob()){   // mobile: stacked cards (the 12-col table squashes on a phone)
+    function compCell(r){ return (r.prod_end?fd(r.prod_end):'<span class="mut">—</span>')+endDaysBadge(r.prod_end,'completion'); }   // completion date = production-end + the same days-to-go badge as the PO grid END column
+    function compBucket(r){ var iso=r.prod_end, m=iso&&/^(\d{4}-\d{2}-\d{2})/.exec(String(iso)); if(!m)return {i:4,label:'No completion date'};
+      var t=new Date();t.setHours(0,0,0,0); var days=Math.round((new Date(m[1]+'T00:00:00')-t)/86400000);
+      return days<7?{i:0,label:'Within 1 week'}:days<14?{i:1,label:'1–2 weeks'}:days<28?{i:2,label:'2–4 weeks'}:{i:3,label:'4+ weeks'}; }
+    function groupsFor(list){
+      if(st.group==='completion'){ var m={}; list.forEach(function(r){ var b=compBucket(r); (m[b.i]=m[b.i]||{i:b.i,label:b.label,rows:[]}).rows.push(r); });
+        return Object.keys(m).map(function(k){return m[k];}).sort(function(a,z){return a.i-z.i;}).map(function(g){ g.rows.sort(function(a,z){return (a.prod_end||'9999').localeCompare(z.prod_end||'9999');}); return {label:g.label,rows:g.rows}; }); }
+      var mm={}; list.forEach(function(r){ var k=(r.client||'').trim()||'— No client —'; (mm[k]=mm[k]||[]).push(r); });   // by client, then PO alphabetical
+      return Object.keys(mm).sort(function(a,z){return a.toLowerCase().localeCompare(z.toLowerCase());}).map(function(k){ return {label:k,rows:mm[k].slice().sort(function(a,z){return String(a.po||'').localeCompare(String(z.po||''));})}; }); }
+    function dcTable(list){ var groups=groupsFor(list);
+      if(actMob()){   // mobile: stacked cards, grouped
         var fld=function(l,v){ return v?'<div style="display:flex;gap:8px;font-size:12px;line-height:1.5"><span style="color:#64748b;flex:0 0 92px">'+l+'</span><span style="color:#0f172a;font-weight:500;word-break:break-word">'+v+'</span></div>':''; };
-        return '<div style="display:flex;flex-direction:column;gap:8px">'+list.map(function(r){
+        var card=function(r){
           var late=r.client_deadline && ((r.checkin && r.checkin>r.client_deadline) || (r.delivery && r.delivery>r.client_deadline)), dlOver=r.client_deadline && r.client_deadline<today;
           var dl=r.client_deadline?('<span'+((late||dlOver)?' style="color:#dc2626;font-weight:600"':'')+'>'+fd(r.client_deadline)+((late||dlOver)?' ⚠':'')+'</span>'):'';
           var d2c=!poIsDtc(r)?'':(r.dtc_accepted_at?'<span class="tool-badge bg-green">✓ Approved</span>':'<span class="tool-badge bg-amber">Awaiting</span>');
@@ -7900,11 +7909,11 @@
             +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap"><button class="lnk-btn dc-po" data-po="'+esc(r.po)+'" style="font-weight:700;font-size:13px;color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer">'+esc(r.po)+'</button>'+poTabActBadge(r)+'<span style="flex:1"></span>'+dtcBadges(r)+'</div>'
             +fld('Client',esc(r.client||''))+fld('Branch',esc(r.branch||''))+fld('Supplier',esc(r.supplier_name||''))
             +fld('Sales ref',esc(r.sales_order_ref||''))+fld('Dispatch',esc(r.dispatch_order_ref||''))+fld('D2C details',d2c)
-            +fld('Deadline',dl)+fld('Likely arrival',esc(fd(r.delivery)))
-            +fld('Shipment',/manufactur/i.test(r.branch||'')?'FOB':esc(r.shipment||''))+fld('Crossdock',esc(r.crossdock_skus||''))+'</div>';
-        }).join('')+'</div>'; }
-      var h='<div class="tw"><table style="width:max-content"><thead><tr><th class="l">PO</th><th class="l">Client</th><th class="l">Type</th><th class="l">Branch</th><th class="l">Supplier</th><th class="l">Client sales ref</th><th class="l">Dispatch order</th><th class="l">D2C details</th><th class="l">Deadline</th><th class="l">Likely arrival</th><th class="l">Shipment</th><th class="l">Crossdock refs</th></tr></thead><tbody>';
-      h+=list.map(function(r){
+            +fld('Deadline',dl)+fld('Completion',compCell(r))+fld('Likely arrival',esc(fd(r.delivery)))
+            +fld('Shipment',/manufactur/i.test(r.branch||'')?'FOB':esc(r.shipment||''))+fld('Crossdock',esc(r.crossdock_skus||''))+'</div>'; };
+        return groups.map(function(g){ return '<div style="font-weight:700;font-size:12px;color:#334155;background:#eef2ff;border-radius:6px;padding:5px 10px;margin:10px 0 6px">'+esc(g.label)+' <span class="mut">('+g.rows.length+')</span></div><div style="display:flex;flex-direction:column;gap:8px">'+g.rows.map(card).join('')+'</div>'; }).join(''); }
+      var NCOLS=13;
+      var rowTr=function(r){
         var late=r.client_deadline && ((r.checkin && r.checkin>r.client_deadline) || (r.delivery && r.delivery>r.client_deadline));
         var dlOver=r.client_deadline && r.client_deadline<today;
         return '<tr><td class="l"><button class="lnk-btn dc-po" data-po="'+esc(r.po)+'" title="open this PO’s Client/FBA tab"><b>'+esc(r.po)+'</b></button>'+poTabActBadge(r)+'</td>'
@@ -7915,12 +7924,16 @@
           +'<td class="l">'+(r.dispatch_order_ref?esc(r.dispatch_order_ref):'<span class="mut">—</span>')+'</td>'
           +'<td class="l">'+(!poIsDtc(r)?'<span class="mut">—</span>':(r.dtc_accepted_at?'<span class="tool-badge bg-green" title="approved '+esc(r.dtc_accepted_at)+(r.dtc_accepted_by?' by '+esc(r.dtc_accepted_by):'')+'">✓ Approved</span>':'<span class="tool-badge bg-amber">Awaiting</span>'))+'</td>'
           +'<td class="l"'+((late||dlOver)?' style="color:#dc2626;font-weight:600"':'')+'>'+(r.client_deadline?fd(r.client_deadline):'<span class="mut">—</span>')+((late||dlOver)?' ⚠':'')+'</td>'
+          +'<td class="l">'+compCell(r)+'</td>'
           +'<td class="l">'+(r.delivery?fd(r.delivery):'<span class="mut">—</span>')+'</td>'
           +'<td class="l">'+(/manufactur/i.test(r.branch||'')?'FOB':(r.shipment?esc(r.shipment):'<span class="mut">— none</span>'))+'</td>'
-          +'<td class="l tiny">'+esc(r.crossdock_skus||'')+'</td></tr>'; }).join('');
+          +'<td class="l tiny">'+esc(r.crossdock_skus||'')+'</td></tr>'; };
+      var h='<div class="tw"><table style="width:max-content"><thead><tr><th class="l">PO</th><th class="l">Client</th><th class="l">Type</th><th class="l">Branch</th><th class="l">Supplier</th><th class="l">Client sales ref</th><th class="l">Dispatch order</th><th class="l">D2C details</th><th class="l">Deadline</th><th class="l">Completion</th><th class="l">Likely arrival</th><th class="l">Shipment</th><th class="l">Crossdock refs</th></tr></thead><tbody>';
+      h+=groups.map(function(g){ return '<tr class="dc-grp"><td class="l" colspan="'+NCOLS+'" style="background:#eef2ff;font-weight:700;color:#334155;padding:5px 10px">'+esc(g.label)+' <span class="mut">('+g.rows.length+')</span></td></tr>'+g.rows.map(rowTr).join(''); }).join('');
       return h+'</tbody></table></div>'; }
     c.innerHTML=annot('directclient')+'<div class="bar"><input class="flt" id="dc-q" placeholder="Filter PO / client / supplier / ref…" style="background:#eff6ff;border-color:#93c5fd">'
       +'<span class="pill-lbl" style="margin-left:10px">Type</span>'+[['','All'],['key','Key account'],['custom','Custom']].map(function(o){return '<span class="pill dc-tag'+(o[0]===''?' active':'')+'" data-tag="'+o[0]+'">'+o[1]+'</span>';}).join('')
+      +'<span class="pill-lbl" style="margin-left:12px">Group by</span><select class="flt" id="dc-group" style="min-width:130px"><option value="client">Client</option><option value="completion">Completion date</option></select>'
       +'<span class="count" id="dc-count" style="margin-left:auto"></span></div><div id="dc-grid"></div>';
     function view(){ var f=filt(base.filter(function(r){ return st.tag==='key'?r.dtc_key_account:st.tag==='custom'?r.dtc_custom:true; }), st.q);
       document.getElementById('dc-count').textContent=f.length+(st.q?' / '+base.length:'')+' in-progress direct-to-client / B2B orders'+(dcActSum?' · '+dcActSum+' open timeline / Client-FBA action'+(dcActSum>1?'s':''):'');
@@ -7928,6 +7941,7 @@
       document.querySelectorAll('#dc-grid .dc-po').forEach(function(b){ b.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(b.dataset.po,'client'); else gotoPO(b.dataset.po,'client'); }; }); }
     document.getElementById('dc-q').oninput=debounce(function(){ st.q=this.value; view(); },200);
     c.querySelectorAll('.dc-tag').forEach(function(p){ p.onclick=function(){ st.tag=p.dataset.tag; c.querySelectorAll('.dc-tag').forEach(function(x){x.classList.toggle('active',x===p);}); view(); }; });
+    var _gsel=document.getElementById('dc-group'); if(_gsel)_gsel.onchange=function(){ st.group=this.value; view(); };
     view(); }
   // CUSTOM ORDERS report — in-progress POs tagged Custom (dtc_custom), with their linked product development(s).
   function renderCustomOrders(rows){ var c=document.getElementById('rep-body')||document.getElementById('supply-content');

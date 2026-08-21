@@ -1,3 +1,8 @@
+## v27.233 Direct to Client: Group-by dropdown (Client / Completion date) + Completion column
+- New **Group by** dropdown on the Direct to Client report: **Client** (default — grouped by client name, POs alphabetical within each) or **Completion date** (bucketed **Within 1 week / 1–2 weeks / 2–4 weeks / 4+ weeks**, plus a "No completion date" group, by the PO's production-end date).
+- New **Completion** column (after Deadline) showing the PO's completion date (`prod_end`) with the **same days-to-go badge as the PO grid END column** (`endDaysBadge` — red/orange/blue/green by days remaining).
+- Grouped rendering on both the desktop table (group header rows) and the mobile cards.
+
 ## v27.232 PLAN deep link + counters render on refresh + @-picker off-screen fix (drawer transform)
 - **PLAN deep link:** `#/supply/purchase-orders/plan` now has its own hash (was dropped to `…/purchase-orders`), so PLAN is deep-linkable + refresh-stable.
 - **Counters on refresh:** the **Direct to Client** / **Custom Orders** sub-tab action counters and the **DTC Mismatch** issue counter now populate on page refresh (prefetched in `prefetchNavCounts`), not only after clicking into the page.
