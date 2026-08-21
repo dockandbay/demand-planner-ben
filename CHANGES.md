@@ -1,3 +1,7 @@
+## v27.246 Remove manual snapshot buttons (n8n now handles them)
+- n8n snapshot flows are live, so removed the two manual triggers: **"📸 Take forecast snapshot now"** on DEMAND ▸ Accuracy (kept the snapshot-count line, now "Captured automatically via n8n") and **"📸 Snapshot now"** on SUPPLY ▸ BI ▸ Metrics open-actions board (+ handlers + the "click Snapshot now" hint). Endpoints (`/api/forecast/snapshot`, `/api/supply/action-metrics/snapshot`) left in place, just no longer surfaced.
+- **KEPT:** DEMAND ▸ Snapshots (the manual named-forecast-snapshot comparison feature, `/api/demand/snapshots`) — that's a separate, intentionally-manual tool.
+
 ## v27.245 Portal price list: hide discontinued SKUs
 - The supplier portal price list now **excludes discontinued SKUs** entirely (both the price-type rows and the manual section), server-side in `plPortalData` via the existing active/discontinue flag. Price types left with no active SKUs are dropped. The admin grid is unchanged (keeps its "Active SKUs only" toggle).
 

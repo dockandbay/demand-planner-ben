@@ -9989,9 +9989,8 @@ function renderAccuracyView(kb,body){
     var pc=function(v){ return v==null?'—':(v>0?'+':'')+v+'%'; };
     // snapshot bar + manual trigger
     var snapBar='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'
-      +'<button id="acc-snap" style="font-size:12px;padding:5px 12px;border-radius:6px;cursor:pointer;border:1px solid #1d4ed8;background:#2563eb;color:#fff;font-weight:600">📸 Take forecast snapshot now</button>'
       +'<span style="font-size:11px;color:#64748b">Snapshots: <b>'+(s.runs||0)+'</b> &middot; SKU snapshots: <b>'+(s.sku_runs||0)+'</b>'+(s.last_at?' &middot; last: '+s.last_at:'')+'</span>'
-      +'<span style="font-size:11px;color:#94a3b8;margin-left:auto">Diviyaj can add a monthly n8n trigger later</span></div>';
+      +'<span style="font-size:11px;color:#94a3b8;margin-left:auto">Captured automatically via n8n</span></div>';
     // accrual banner when no true-accuracy data yet
     var banner=(ov.matched_rows>0)?'':'<div style="background:#eff6ff;border:1px solid #bfdbfe;color:#1e40af;font-size:12px;border-radius:8px;padding:9px 12px;margin-bottom:10px">'
       +'<b>True forecast accuracy accrues over time.</b> It compares each month’s actuals to the SKU forecast that was snapshotted <i>before</i> that month. '
@@ -10037,8 +10036,6 @@ function renderAccuracyView(kb,body){
     kb.innerHTML=snapBar+banner+cards+ctrl+accTbl+rrPanel;
     // wire
     kb.querySelectorAll('.acc-lvl').forEach(function(b){ b.onclick=function(){ KPI_ACC_LEVEL=b.dataset.v; renderAccuracyView(kb,body); }; });
-    var snapB=kb.querySelector('#acc-snap'); if(snapB)snapB.onclick=function(){ if(!confirm('Take a snapshot of the current SKU forecast now? This records what we forecast today so accuracy can be measured later.'))return; snapB.disabled=true; snapB.textContent='Snapshotting…';
-      fetch('/api/forecast/snapshot',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({note:'manual from KPIs'})}).then(function(r){return r.json();}).then(function(jj){ if(jj&&jj.error){alert('Failed: '+jj.error);snapB.disabled=false;snapB.textContent='📸 Take forecast snapshot now';return;} alert('Snapshot taken: '+jj.rows.toLocaleString()+' SKU-month rows captured.'); renderAccuracyView(kb,body); }).catch(function(){ alert('Snapshot failed.'); snapB.disabled=false; }); };
     var csvB=kb.querySelector('#acc-csv'); if(csvB)csvB.onclick=function(){ var m=[headCols.map(function(c){return c[1];})].concat(rows.map(function(r){return headCols.map(function(c){return r[c[0]]==null?'':r[c[0]];});})); dl('forecast_accuracy_'+KPI_ACC_LEVEL+'.csv',m); };
     var rrB=kb.querySelector('#acc-rr-csv'); if(rrB)rrB.onclick=function(){ var m=[['Country','Channel','Actual/mo','Forecast/mo','Variance%']].concat(rr.map(function(r){return [r.country,r.channel,r.actual_avg,r.forecast_avg,r.variance_pct];})); dl('plan_vs_runrate.csv',m); };
   }).catch(function(){ kb.innerHTML='<div style="color:#dc2626;font-size:12px">Failed to load.</div>'; });
