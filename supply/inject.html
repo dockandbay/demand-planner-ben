@@ -7875,6 +7875,19 @@
     var dcActSum=base.reduce(function(n,r){return n+poTabActs(r).length;},0); _setPoSubActBadge('directclient',dcActSum);
     function dtcBadges(r){ return ((r.dtc_key_account?'<span class="tool-badge bg-blue">Key account</span> ':'')+(r.dtc_custom?'<span class="tool-badge bg-neutral">Custom</span>':''))||'<span class="mut">—</span>'; }
     function dcTable(list){
+      if(actMob()){   // mobile: stacked cards (the 12-col table squashes on a phone)
+        var fld=function(l,v){ return v?'<div style="display:flex;gap:8px;font-size:12px;line-height:1.5"><span style="color:#64748b;flex:0 0 92px">'+l+'</span><span style="color:#0f172a;font-weight:500;word-break:break-word">'+v+'</span></div>':''; };
+        return '<div style="display:flex;flex-direction:column;gap:8px">'+list.map(function(r){
+          var late=r.client_deadline && ((r.checkin && r.checkin>r.client_deadline) || (r.delivery && r.delivery>r.client_deadline)), dlOver=r.client_deadline && r.client_deadline<today;
+          var dl=r.client_deadline?('<span'+((late||dlOver)?' style="color:#dc2626;font-weight:600"':'')+'>'+fd(r.client_deadline)+((late||dlOver)?' ⚠':'')+'</span>'):'';
+          var d2c=!poIsDtc(r)?'':(r.dtc_accepted_at?'<span class="tool-badge bg-green">✓ Approved</span>':'<span class="tool-badge bg-amber">Awaiting</span>');
+          return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;background:#fff">'
+            +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap"><button class="lnk-btn dc-po" data-po="'+esc(r.po)+'" style="font-weight:700;font-size:13px;color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer">'+esc(r.po)+'</button>'+poTabActBadge(r)+'<span style="flex:1"></span>'+dtcBadges(r)+'</div>'
+            +fld('Client',esc(r.client||''))+fld('Branch',esc(r.branch||''))+fld('Supplier',esc(r.supplier_name||''))
+            +fld('Sales ref',esc(r.sales_order_ref||''))+fld('Dispatch',esc(r.dispatch_order_ref||''))+fld('D2C details',d2c)
+            +fld('Deadline',dl)+fld('Likely arrival',esc(fd(r.delivery)))
+            +fld('Shipment',/manufactur/i.test(r.branch||'')?'FOB':esc(r.shipment||''))+fld('Crossdock',esc(r.crossdock_skus||''))+'</div>';
+        }).join('')+'</div>'; }
       var h='<div class="tw"><table style="width:max-content"><thead><tr><th class="l">PO</th><th class="l">Client</th><th class="l">Type</th><th class="l">Branch</th><th class="l">Supplier</th><th class="l">Client sales ref</th><th class="l">Dispatch order</th><th class="l">D2C details</th><th class="l">Deadline</th><th class="l">Likely arrival</th><th class="l">Shipment</th><th class="l">Crossdock refs</th></tr></thead><tbody>';
       h+=list.map(function(r){
         var late=r.client_deadline && ((r.checkin && r.checkin>r.client_deadline) || (r.delivery && r.delivery>r.client_deadline));
@@ -7909,6 +7922,18 @@
     var coActSum=base.reduce(function(n,r){return n+poTabActs(r).length;},0); _setPoSubActBadge('customorders',coActSum);
     function devCell(r){ var refs=(r.custom_dev_ref||'').split(',').map(function(x){return x.trim();}).filter(Boolean); return refs.length?refs.map(function(x){return '<span class="tool-badge bg-neutral">'+esc(x)+'</span>';}).join(' '):'<span class="mut" title="no product development linked — set it on the PO Client/FBA tab">—</span>'; }
     function coTable(list){
+      if(actMob()){   // mobile: stacked cards
+        var fld=function(l,v){ return v?'<div style="display:flex;gap:8px;font-size:12px;line-height:1.5"><span style="color:#64748b;flex:0 0 92px">'+l+'</span><span style="color:#0f172a;font-weight:500;word-break:break-word">'+v+'</span></div>':''; };
+        return '<div style="display:flex;flex-direction:column;gap:8px">'+list.map(function(r){
+          var late=r.client_deadline && ((r.checkin && r.checkin>r.client_deadline) || (r.delivery && r.delivery>r.client_deadline)), dlOver=r.client_deadline && r.client_deadline<today;
+          var dl=r.client_deadline?('<span'+((late||dlOver)?' style="color:#dc2626;font-weight:600"':'')+'>'+fd(r.client_deadline)+((late||dlOver)?' ⚠':'')+'</span>'):'';
+          return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;background:#fff">'
+            +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:5px;flex-wrap:wrap"><button class="lnk-btn co-po" data-po="'+esc(r.po)+'" style="font-weight:700;font-size:13px;color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer">'+esc(r.po)+'</button>'+poTabActBadge(r)+'</div>'
+            +fld('Client',esc(r.client||''))+fld('Supplier',esc(r.supplier_name||''))+fld('Product dev',devCell(r))
+            +fld('Sales ref',esc(r.sales_order_ref||''))+fld('Branch',esc(r.branch||''))
+            +fld('Deadline',dl)+fld('Likely arrival',esc(fd(r.delivery)))
+            +fld('Shipment',/manufactur/i.test(r.branch||'')?'FOB':esc(r.shipment||''))+'</div>';
+        }).join('')+'</div>'; }
       var h='<div class="tw"><table style="width:max-content"><thead><tr><th class="l">PO</th><th class="l">Client</th><th class="l">Supplier</th><th class="l">Product development(s)</th><th class="l">Sales ref</th><th class="l">Branch</th><th class="l">Deadline</th><th class="l">Likely arrival</th><th class="l">Shipment</th></tr></thead><tbody>';
       h+=list.map(function(r){
         var late=r.client_deadline && ((r.checkin && r.checkin>r.client_deadline) || (r.delivery && r.delivery>r.client_deadline));
@@ -9939,15 +9964,8 @@
   function _dtcBumpPill(lbl,d){ var el=document.querySelector('b[data-dtcpill="'+lbl+'"]'); if(el){ var v=(parseInt(el.textContent,10)||0)+d; el.textContent=(v<0?0:v); } }
   function _dtcBadge(o){ return o.accepted?'<span class="tool-badge bg-blue">accepted</span>':o.issue==='no_po'?'<span class="tool-badge bg-red">no PO mapped</span>':o.issue==='qty_mismatch'?'<span class="tool-badge bg-amber">SKU / qty mismatch</span>':'<span class="tool-badge bg-green">OK</span>'; }
   function _dtcFlash(el){ if(!el)return; var p=el.style.backgroundColor; el.style.transition='background-color .12s'; el.style.backgroundColor='#bbf7d0'; setTimeout(function(){ el.style.backgroundColor=p||''; setTimeout(function(){try{el.style.transition='';}catch(e){}},200); },520); }   // green flash on note save
-  var _dtcListExpanded=false, _DTC_LIST_CAP=5;   // mismatch table: show first 5, "expand" reveals the rest
-  function _dtcApplyHideAcc(){ var host=document.getElementById('dtc-list');
-    if(host){ var cand=0;   // position-based (reorder-safe): walk current DOM order, hide accepted (if toggled) then cap the rest at 5
-      host.querySelectorAll('tr.dtc-order-row').forEach(function(tr){ var acc=tr.dataset.acc==='1';
-        if(acc&&_dtcHideAcc){ tr.style.display='none'; return; }
-        cand++; tr.style.display=(!_dtcListExpanded && cand>_DTC_LIST_CAP)?'none':''; });
-      var mb=document.getElementById('dtc-list-more'); if(mb){ var hidden=Math.max(0,cand-_DTC_LIST_CAP);
-        if(hidden<=0&&!_dtcListExpanded){ mb.style.display='none'; } else { mb.style.display=''; mb.textContent=_dtcListExpanded?'▲ Show fewer':('▼ Expand — show all '+cand+' ('+hidden+' more)'); } }
-    }
+  function _dtcApplyHideAcc(){ var host=document.getElementById('dtc-list');   // .dtc-order-row = table row (desktop) or card (mobile)
+    if(host)host.querySelectorAll('.dtc-order-row').forEach(function(tr){ if(tr.dataset.acc==='1')tr.style.display=_dtcHideAcc?'none':''; });
     var btn=document.getElementById('dtc-hide-acc'); if(btn){ btn.style.background=_dtcHideAcc?'#1d4ed8':'#fff'; btn.style.color=_dtcHideAcc?'#fff':'#475569'; btn.style.borderColor=_dtcHideAcc?'#1d4ed8':'#cbd5e1'; btn.textContent=(_dtcHideAcc?'✓ ':'')+'Hide accepted'; } }
   function refreshDtcBadge(){   // DTC mismatch count → its own L3 sub-tab badge + folded into the combined BI & REPORTS L2 counter
     fetch('/api/supply/dtc/mismatch?count=1').then(function(r){return r.json();}).then(function(j){ var c=(j&&j.counts)||{}; _dtcCount=(c.issues||0)+(c.unmapped_pos||0);
@@ -10015,65 +10033,81 @@
   // #1 reverse view — open, not-received DTC-branch POs with no sales-order mapping
   function _drawDtcUnmapped(list){ var el=document.getElementById('dtc-unmapped'); if(!el)return;
     if(!list.length){ el.innerHTML=''; return; }
-    var openN=list.filter(function(p){return !p.accepted;}).length;
-    var rows=list.map(function(p){ var acc=!!p.accepted;
-      return '<tr'+(acc?' style="opacity:.6"':'')+'><td class="l">'+(acc?'<span class="tool-badge bg-blue">accepted</span> ':'')+'<button class="lnk-btn dtc-po" data-po="'+esc(p.po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer">'+esc(p.po)+'</button>'+(p.supplier?' <span class="mut">('+esc(p.supplier)+')</span>':'')+'</td>'
-        +'<td class="l">'+esc(p.branch||'')+'</td><td class="l">'+esc(p.country_code||'')+'</td><td class="l">'+esc(p.status||'')+'</td>'
-        +'<td class="l"><textarea class="dtcpo-note" data-po="'+esc(p.po)+'" rows="1" placeholder="note…" style="width:180px;min-height:22px;resize:vertical;overflow:hidden;font-family:inherit;font-size:12px;padding:3px 5px;border:1px solid #cbd5e1;border-radius:4px;box-sizing:border-box" oninput="this.style.height=\'auto\';this.style.height=this.scrollHeight+\'px\'">'+esc(p.note||'')+'</textarea></td>'
-        +'<td class="l"><label style="font-size:11px;white-space:nowrap"><input type="checkbox" class="dtcpo-acc" data-po="'+esc(p.po)+'"'+(acc?' checked':'')+'> accept</label></td></tr>'; }).join('');
-    el.innerHTML='<div style="font-weight:700;font-size:13px;margin:18px 0 3px;color:#0f172a">Open purchase orders, not mapped to a sales order <span class="mut">('+openN+')</span></div>'
-      +'<div class="mut tiny" style="margin-bottom:6px;max-width:840px">Open (not received) POs in the Direct-to-Client branches with no sales-order reference. Accept a row to clear it from the count.</div>'
-      +'<div style="overflow-x:auto;max-width:100%"><table style="width:max-content;min-width:100%;border-collapse:collapse"><thead><tr><th class="l">PO (supplier)</th><th class="l">Branch</th><th class="l">Country</th><th class="l">Status</th><th class="l">Note</th><th class="l">Accept</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+    var openN=list.filter(function(p){return !p.accepted;}).length, mob=actMob();
+    var hdr='<div style="font-weight:700;font-size:13px;margin:18px 0 3px;color:#0f172a">Open purchase orders, not mapped to a sales order <span class="mut">('+openN+')</span></div>'
+      +'<div class="mut tiny" style="margin-bottom:6px;max-width:840px">Open (not received) POs in the Direct-to-Client branches with no sales-order reference. Accept a row to clear it from the count.</div>';
+    function poBtn(p){ return '<button class="lnk-btn dtc-po" data-po="'+esc(p.po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer">'+esc(p.po)+'</button>'; }
+    function noteTa(p){ return '<textarea class="dtcpo-note" data-po="'+esc(p.po)+'" rows="1" placeholder="note…" style="width:'+(mob?'100%':'180px')+';min-height:22px;resize:vertical;overflow:hidden;font-family:inherit;font-size:12px;padding:3px 5px;border:1px solid #cbd5e1;border-radius:4px;box-sizing:border-box" oninput="this.style.height=\'auto\';this.style.height=this.scrollHeight+\'px\'">'+esc(p.note||'')+'</textarea>'; }
+    function accCb(p){ return '<label style="font-size:11px;white-space:nowrap"><input type="checkbox" class="dtcpo-acc" data-po="'+esc(p.po)+'"'+(p.accepted?' checked':'')+'> accept</label>'; }
+    if(mob){ var fld=function(l,v){ return v?'<div style="display:flex;gap:8px;font-size:12px;line-height:1.5"><span style="color:#64748b;flex:0 0 72px">'+l+'</span><span style="color:#0f172a;font-weight:500;word-break:break-word">'+v+'</span></div>':''; };
+      el.innerHTML=hdr+'<div style="display:flex;flex-direction:column;gap:8px">'+list.map(function(p){ var acc=!!p.accepted;
+        return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;background:'+(acc?'#eff6ff':'#fff')+'">'
+          +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">'+(acc?'<span class="tool-badge bg-blue">accepted</span> ':'')+poBtn(p)+(p.supplier?' <span class="mut">('+esc(p.supplier)+')</span>':'')+'</div>'
+          +fld('Branch',esc(p.branch||''))+fld('Country',esc(p.country_code||''))+fld('Status',esc(p.status||''))
+          +'<div style="margin-top:6px">'+noteTa(p)+'</div><div style="margin-top:6px">'+accCb(p)+'</div></div>'; }).join('')+'</div>';
+    } else { var rows=list.map(function(p){ var acc=!!p.accepted;
+        return '<tr'+(acc?' style="opacity:.6"':'')+'><td class="l">'+(acc?'<span class="tool-badge bg-blue">accepted</span> ':'')+poBtn(p)+(p.supplier?' <span class="mut">('+esc(p.supplier)+')</span>':'')+'</td>'
+          +'<td class="l">'+esc(p.branch||'')+'</td><td class="l">'+esc(p.country_code||'')+'</td><td class="l">'+esc(p.status||'')+'</td>'
+          +'<td class="l">'+noteTa(p)+'</td><td class="l">'+accCb(p)+'</td></tr>'; }).join('');
+      el.innerHTML=hdr+'<div style="overflow-x:auto;max-width:100%"><table style="width:max-content;min-width:100%;border-collapse:collapse"><thead><tr><th class="l">PO (supplier)</th><th class="l">Branch</th><th class="l">Country</th><th class="l">Status</th><th class="l">Note</th><th class="l">Accept</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
+    }
     el.querySelectorAll('.dtc-po').forEach(function(x){ x.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(x.dataset.po,'oplan'); else if(typeof gotoPO==='function')gotoPO(x.dataset.po,'oplan'); }; });
     function savePo(po,accepted,note){ fetch('/api/supply/dtc/po-review',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,accepted:accepted,note:note})}).then(function(r){return r.json();}).then(function(){ selectReport('dtc-mismatch'); }).catch(function(){}); }
     function persistPo(po,accepted,note){ fetch('/api/supply/dtc/po-review',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,accepted:accepted,note:note})}).catch(function(){}); }   // silent (for note edits) — no re-render so the green flash shows
     el.querySelectorAll('.dtcpo-acc').forEach(function(cb){ cb.onclick=function(){ var po=cb.dataset.po, ne=el.querySelector('.dtcpo-note[data-po="'+(window.CSS&&CSS.escape?CSS.escape(po):po)+'"]'); savePo(po,cb.checked,ne?ne.value:''); }; });
     el.querySelectorAll('.dtcpo-note').forEach(function(inp){ inp.onchange=function(){ var po=inp.dataset.po, ce=el.querySelector('.dtcpo-acc[data-po="'+(window.CSS&&CSS.escape?CSS.escape(po):po)+'"]'); persistPo(po,ce?ce.checked:false,inp.value); _dtcFlash(inp); };
       inp.style.height='auto'; inp.style.height=inp.scrollHeight+'px'; });   // same auto-grow + flash as the sales-order notes
-    (function(){ var trs=el.querySelectorAll('tbody tr'); if(trs.length<=5)return; var exp=false;   // show first 5, expand for the rest
-      var mb=document.createElement('button'); mb.style.cssText='margin-top:8px;font-size:12px;padding:4px 12px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;color:#334155;cursor:pointer'; el.appendChild(mb);
-      function apply(){ trs.forEach(function(tr,i){ tr.style.display=(!exp&&i>=5)?'none':''; }); mb.textContent=exp?'▲ Show fewer':('▼ Expand — show all '+trs.length+' ('+(trs.length-5)+' more)'); }
-      mb.onclick=function(){ exp=!exp; apply(); }; apply(); })();
   }
-  function _drawDtcList(orders){ var el=document.getElementById('dtc-list'); if(!el)return; _dtcListExpanded=false;
+  function _drawDtcList(orders){ var el=document.getElementById('dtc-list'); if(!el)return;
     if(!orders.length){ el.innerHTML='<div class="mut tiny" style="padding:8px 0">No open DTC sales orders imported yet. Click <b>Import sales orders</b> to pull them from Cin7.</div>'; return; }
     orders.sort(function(a,b){ var ra=(a.issue&&!a.accepted)?0:(a.accepted?2:1), rb=(b.issue&&!b.accepted)?0:(b.accepted?2:1); return ra-rb; });
+    var mob=actMob(), DCAP=5;   // per-SKU/qty table: show first 5 lines, "expand" reveals the rest (Ben)
     var rows=orders.map(function(o){
       var badge=_dtcBadge(o);
       var mism=(o.diffs||[]).filter(function(x){return (x.soQty||0)!==(x.poQty||0);});
       var match=(o.diffs||[]).filter(function(x){return (x.soQty||0)===(x.poQty||0);});   // matching lines (SO qty === PO qty)
-      function dline(x,matched){ var po=matched?'<span style="color:#166534;font-weight:600">&#10003; '+units(x.poQty)+'</span>':'<span style="color:#b91c1c">'+units(x.poQty)+'</span>';
-        return '<tr'+(matched?' class="dtc-match-line" style="display:none"':'')+'><td style="padding:1px 8px 1px 0;white-space:normal;word-break:break-word">'+esc(x.sku)+'</td><td style="text-align:right;padding:1px 4px">'+units(x.soQty)+'</td><td style="text-align:right;padding:1px 4px">'+po+'</td></tr>'; }
-      // SKU column ~2× wider + wraps (was cut off); SO/PO ~40% narrower. Matching lines hidden behind a per-row toggle (K).
+      function drow(x,matched,cls,hidden){ var po=matched?'<span style="color:#166534;font-weight:600">&#10003; '+units(x.poQty)+'</span>':'<span style="color:#b91c1c">'+units(x.poQty)+'</span>';
+        return '<tr'+(cls?' class="'+cls+'"':'')+(hidden?' style="display:none"':'')+'><td style="padding:1px 8px 1px 0;white-space:normal;word-break:break-word">'+esc(x.sku)+'</td><td style="text-align:right;padding:1px 4px">'+units(x.soQty)+'</td><td style="text-align:right;padding:1px 4px">'+po+'</td></tr>'; }
+      // SKU column wraps; SO/PO narrow. Mismatch lines past the first 5 hidden behind a per-row "show all N SKUs" toggle; matching lines behind their own toggle.
+      var mismRows=mism.map(function(x,i){ return drow(x,false,(i>=DCAP?'dtc-xline':''),i>=DCAP); }).join('');
+      var matchRows=match.map(function(x){ return drow(x,true,'dtc-match-line',true); }).join('');
+      var moreBtn=(mism.length>DCAP)?'<button class="dtc-morelines" data-id="'+o.cin7_id+'" data-n="'+mism.length+'" style="font-size:10px;margin-top:3px;margin-right:6px;padding:1px 7px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;color:#334155;cursor:pointer">&#9662; show all '+mism.length+' SKUs</button>':'';
+      var showMatchBtn=(match.length?'<button class="dtc-showmatch" data-id="'+o.cin7_id+'" style="font-size:10px;margin-top:3px;padding:1px 7px;border:1px solid #bbf7d0;border-radius:8px;background:#f0fdf4;color:#166534;cursor:pointer">&#10003; show matching ('+match.length+')</button>':'');
       var diffs=(o.diffs&&o.diffs.length)?('<div class="dtc-diff" data-diffid="'+o.cin7_id+'" style="max-width:460px;overflow-x:auto;margin-top:4px">'
         +'<table class="tiny" style="border-collapse:collapse;width:100%;table-layout:fixed"><colgroup><col><col style="width:44px"><col style="width:44px"></colgroup>'
         +'<thead><tr style="color:#94a3b8"><th style="text-align:left;padding:1px 8px 1px 0">SKU</th><th style="text-align:right;padding:1px 4px">SO</th><th style="text-align:right;padding:1px 4px">PO</th></tr></thead><tbody>'
-        +mism.map(function(x){return dline(x,false);}).join('')+match.map(function(x){return dline(x,true);}).join('')+'</tbody></table>'
-        +(match.length?'<button class="dtc-showmatch" data-id="'+o.cin7_id+'" style="font-size:10px;margin-top:3px;padding:1px 7px;border:1px solid #bbf7d0;border-radius:8px;background:#f0fdf4;color:#166534;cursor:pointer">&#10003; show matching ('+match.length+')</button>':'')
-        +'</div>'):'';
+        +mismRows+matchRows+'</tbody></table>'+moreBtn+showMatchBtn+'</div>'):'';
       var pos=(o.po_refs&&o.po_refs.length)?o.po_refs.map(function(p){var po=(p&&p.po!=null)?p.po:p,sup=(p&&p.supplier)?(' <span class="mut">('+esc(p.supplier)+')</span>'):'';return '<button class="lnk-btn dtc-po" data-po="'+esc(po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer">'+esc(po)+'</button>'+sup;}).join('<br>'):'<span class="mut">—</span>';
-      return '<tr class="dtc-order-row" data-id="'+o.cin7_id+'" data-acc="'+(o.accepted?'1':'0')+'"'+(o.accepted?' style="background:#dcfce7"':'')+'><td class="l" style="vertical-align:top"><b>'+esc(o.reference||'')+'</b><div class="mut tiny">'+esc(o.company||'')+' · '+esc(o.branch_name||'')+(o.created_date?' · '+esc(o.created_date):'')+'</div></td>'
+      var noteTa='<textarea class="dtc-note" data-id="'+o.cin7_id+'" rows="1" placeholder="note…" style="width:'+(mob?'100%':'180px')+';min-height:22px;resize:vertical;overflow:hidden;font-family:inherit;font-size:12px;padding:3px 5px;border:1px solid #cbd5e1;border-radius:4px;box-sizing:border-box" oninput="this.style.height=\'auto\';this.style.height=this.scrollHeight+\'px\'">'+esc(o.note||'')+'</textarea>';
+      var accCb='<label style="font-size:11px;white-space:nowrap"><input type="checkbox" class="dtc-acc" data-id="'+o.cin7_id+'"'+(o.accepted?' checked':'')+'> accept</label>';
+      var meta=esc(o.company||'')+' · '+esc(o.branch_name||'')+(o.created_date?' · '+esc(o.created_date):'');
+      if(mob){ return '<div class="dtc-order-row" data-id="'+o.cin7_id+'" data-acc="'+(o.accepted?'1':'0')+'" style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;background:'+(o.accepted?'#dcfce7':'#fff')+'">'
+        +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;flex-wrap:wrap"><div style="font-weight:700;font-size:13px">'+esc(o.reference||'')+'</div><span style="flex:1"></span>'+badge+'</div>'
+        +'<div class="mut tiny" style="margin-bottom:5px">'+meta+'</div>'+diffs
+        +'<div style="margin-top:6px;font-size:12px"><span style="color:#64748b">PO(s): </span>'+pos+'</div>'
+        +'<div style="margin-top:6px">'+noteTa+'</div><div style="margin-top:6px">'+accCb+'</div></div>'; }
+      return '<tr class="dtc-order-row" data-id="'+o.cin7_id+'" data-acc="'+(o.accepted?'1':'0')+'"'+(o.accepted?' style="background:#dcfce7"':'')+'><td class="l" style="vertical-align:top"><b>'+esc(o.reference||'')+'</b><div class="mut tiny">'+meta+'</div></td>'
         +'<td class="l" style="vertical-align:top">'+badge+diffs+'</td>'
         +'<td class="l" style="vertical-align:top">'+pos+'</td>'
-        +'<td class="l" style="vertical-align:top"><textarea class="dtc-note" data-id="'+o.cin7_id+'" rows="1" placeholder="note…" style="width:180px;min-height:22px;resize:vertical;overflow:hidden;font-family:inherit;font-size:12px;padding:3px 5px;border:1px solid #cbd5e1;border-radius:4px;box-sizing:border-box" oninput="this.style.height=\'auto\';this.style.height=this.scrollHeight+\'px\'">'+esc(o.note||'')+'</textarea></td>'
-        +'<td class="l" style="vertical-align:top"><label style="font-size:11px;white-space:nowrap"><input type="checkbox" class="dtc-acc" data-id="'+o.cin7_id+'"'+(o.accepted?' checked':'')+'> accept</label></td></tr>';
+        +'<td class="l" style="vertical-align:top">'+noteTa+'</td>'
+        +'<td class="l" style="vertical-align:top">'+accCb+'</td></tr>';
     }).join('');
-    el.innerHTML='<div style="overflow-x:auto;max-width:100%"><table style="width:max-content;min-width:100%;border-collapse:collapse"><thead><tr><th class="l">Sales order</th><th class="l">Status</th><th class="l">PO(s)</th><th class="l">Note</th><th class="l">Accept</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
-      +'<button id="dtc-list-more" style="display:none;margin-top:8px;font-size:12px;padding:4px 12px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;color:#334155;cursor:pointer"></button>';
-    var _mb=document.getElementById('dtc-list-more'); if(_mb)_mb.onclick=function(){ _dtcListExpanded=!_dtcListExpanded; _dtcApplyHideAcc(); };
+    el.innerHTML=mob?('<div style="display:flex;flex-direction:column;gap:8px">'+rows+'</div>')
+      :('<div style="overflow-x:auto;max-width:100%"><table style="width:max-content;min-width:100%;border-collapse:collapse"><thead><tr><th class="l">Sales order</th><th class="l">Status</th><th class="l">PO(s)</th><th class="l">Note</th><th class="l">Accept</th></tr></thead><tbody>'+rows+'</tbody></table></div>');
     el.querySelectorAll('.dtc-po').forEach(function(x){ x.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(x.dataset.po,'oplan'); else if(typeof gotoPO==='function')gotoPO(x.dataset.po,'oplan'); }; });
     el.querySelectorAll('.dtc-showmatch').forEach(function(btn){ btn.onclick=function(){ var id=btn.dataset.id, blk=el.querySelector('.dtc-diff[data-diffid="'+id+'"]'); if(!blk)return; var lines=blk.querySelectorAll('.dtc-match-line'), show=btn.dataset.shown!=='1'; btn.dataset.shown=show?'1':'0'; lines.forEach(function(l){l.style.display=show?'':'none';}); btn.innerHTML=(show?'&#9662; hide matching (':'&#10003; show matching (')+lines.length+')'; }; });
+    el.querySelectorAll('.dtc-morelines').forEach(function(btn){ btn.onclick=function(){ var blk=el.querySelector('.dtc-diff[data-diffid="'+btn.dataset.id+'"]'); if(!blk)return; var lines=blk.querySelectorAll('.dtc-xline'), show=btn.dataset.shown!=='1'; btn.dataset.shown=show?'1':'0'; lines.forEach(function(l){l.style.display=show?'':'none';}); btn.innerHTML=show?'&#9652; show fewer':('&#9662; show all '+(btn.dataset.n||'')+' SKUs'); }; });
     function persist(id,accepted,note){ fetch('/api/supply/dtc/review',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({so_cin7_id:Number(id),accepted:accepted,note:note})}).catch(function(){}); }
-    // ACCEPT: persist silently, move the row to the bottom, highlight light-green, update counters live — no page refresh (I1).
+    // ACCEPT: persist silently, move the row/card to the bottom, highlight light-green, update counters live — no page refresh (I1).
     el.querySelectorAll('.dtc-acc').forEach(function(cb){ cb.onclick=function(){
-      var id=cb.dataset.id, o=orders.filter(function(x){return String(x.cin7_id)===String(id);})[0]||{}, ne=el.querySelector('.dtc-note[data-id="'+id+'"]'), note=ne?ne.value:'', acc=cb.checked, tr=cb.closest('tr');
+      var id=cb.dataset.id, o=orders.filter(function(x){return String(x.cin7_id)===String(id);})[0]||{}, ne=el.querySelector('.dtc-note[data-id="'+id+'"]'), note=ne?ne.value:'', acc=cb.checked, cont=cb.closest('.dtc-order-row');
       o.accepted=acc; persist(id,acc,note);
-      if(tr){ tr.dataset.acc=acc?'1':'0'; var bcell=tr.children[1], bd=bcell&&bcell.querySelector('.tool-badge');
+      if(cont){ cont.dataset.acc=acc?'1':'0'; var bd=cont.querySelector('.tool-badge');
         if(bd){ if(acc){bd.className='tool-badge bg-blue';bd.textContent='accepted';} else { var tmp=document.createElement('span'); tmp.innerHTML=_dtcBadge(o); if(tmp.firstChild){bd.className=tmp.firstChild.className;bd.textContent=tmp.firstChild.textContent;} } }
-        if(acc){ tr.style.background='#dcfce7'; tr.parentNode.appendChild(tr); _dtcBumpPill('Accepted',1); _dtcBumpPill(o.issue?'Issues':'OK',-1); }
-        else { tr.style.background=''; _dtcBumpPill('Accepted',-1); _dtcBumpPill(o.issue?'Issues':'OK',1); }
+        if(acc){ cont.style.background='#dcfce7'; cont.parentNode.appendChild(cont); _dtcBumpPill('Accepted',1); _dtcBumpPill(o.issue?'Issues':'OK',-1); }
+        else { cont.style.background=(mob?'#fff':''); _dtcBumpPill('Accepted',-1); _dtcBumpPill(o.issue?'Issues':'OK',1); }
       }
-      _dtcApplyHideAcc();   // recompute hide-accepted + first-5 collapse after the change (row may have moved to the bottom)
+      _dtcApplyHideAcc();   // recompute hide-accepted visibility after the change (row/card may have moved to the bottom)
     }; });
     el.querySelectorAll('.dtc-note').forEach(function(inp){ inp.onchange=function(){ var id=inp.dataset.id, ce=el.querySelector('.dtc-acc[data-id="'+id+'"]'); persist(id,ce?ce.checked:false,inp.value); _dtcFlash(inp); };
       inp.style.height='auto'; inp.style.height=inp.scrollHeight+'px'; });   // auto-size notes on load (J)

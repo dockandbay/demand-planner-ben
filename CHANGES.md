@@ -1,3 +1,7 @@
+## v27.229 Mobile card layouts (DTC Mismatch / Direct to Client / Custom Orders) + expand fix
+- **Mobile card layout** for the **DTC Mismatch**, **Direct to Client** and **Custom Orders** reports (stacked cards instead of wide tables on phones), matching the other mobile reports. Desktop tables unchanged. All interactive bits (PO links, notes, accept, SKU/qty diff, action badges) preserved in the cards.
+- **Expand fix (Ben):** the first-5/expand on DTC Mismatch is now on the **per-row SKU/qty mismatch mini-table** (under the "SKU / qty mismatch" badge) — shows the first 5 SKU lines with a "show all N SKUs" toggle — **not** the outer list of orders. Removed the outer-row collapse added in v27.228.
+
 ## v27.228 DTC Mismatch: Timeline notes (@mention → email) + first-5/expand on both tables
 - **Timeline notes** section on the DTC Mismatch report: internal thread where you type **@name** to tag a teammate, who gets an **email with a link to the report** (live sends silently; sandbox shows the preview). New table `planner.report_notes` (**migration 242**) + endpoints `GET /api/supply/report-notes/list`, `POST /api/supply/report-note`, `POST /api/supply/report-note/:id/delete`. Reuses the PO note infra (team handles, @bolding, sandbox preview).
 - Both report tables (the SKU/quantity mismatch sales-order table and the unmapped-PO table) now **show the first 5 rows with an "Expand — show all" toggle**. The mismatch-table expand is position-based so it coexists with the "Hide accepted" toggle and accept-row-reordering.
