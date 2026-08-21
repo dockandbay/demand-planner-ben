@@ -13685,14 +13685,39 @@ function afMonthLabel(ym){ var p=ym.split('-'); var mn=['Jan','Feb','Mar','Apr',
 // (Removed dead afK — superseded by afN in the payments plan. v25.652)
 function afN(n){ return n? Math.round(n).toLocaleString() : '–'; }   // whole number with thousands separators
 var AF_GBP=1.34;   // USD → GBP rate for the payments plan GBP summary
+var AF_ENGINE='bp';   // 'bp' = new buy-plan-driven engine (Option B) · 'old' = legacy rolling subcategory model
+var AF_FEED=null;     // cached client buy feed (all markets) for the buy-plan engine
+// Build the buy feed for the Auto Forecast (Option B): the buy plan's OWN per-SKU × market × arrival-month buys
+// (3PL bQ + FBA fdQ, skipping the actuals slot i=0), aggregated to subcategory × market × arrival-month. The server
+// phases these into cash. This is the same buy schedule the Buy Plan tab shows, so the two are identical by construction.
+function afBuildBuyFeed(){
+  try{ if(typeof buildLiveDemand==='function') buildLiveDemand(); if(typeof buildLiveBpOverlay==='function') buildLiveBpOverlay(); }catch(e){}
+  var D=(typeof BP!=='undefined'&&BP.D)||null; if(!D) return [];
+  var SL=D.sku_list||[], PD=D.products||{}, MK=['UK','US','EU','AU'], SEP='', agg={};
+  for(var n=0;n<SL.length;n++){ var row=SL[n]; var sku=row.s; var sub=row.sc||row.c; if(!sku||!sub)continue;
+    var pd=PD[sku]; if(!pd||!pd.mkts)continue;
+    for(var mi=0;mi<MK.length;mi++){ var mk=MK[mi]; var md=pd.mkts[mk]; if(!md)continue;
+      var proj; try{ proj=BP.project(md,pd,0,mk,null,sku); }catch(e){ continue; }
+      if(!proj)continue;
+      for(var i=1;i<proj.length;i++){ var un=(proj[i].bQ||0)+(proj[i].fdQ||0); if(!(un>0))continue;
+        var ym=String(proj[i].key||'').replace('_','-'); if(ym.length!==7)continue;
+        var k=sub+SEP+mk.toLowerCase()+SEP+ym; agg[k]=(agg[k]||0)+un; }
+    } }
+  var feed=[]; for(var k in agg){ var p=k.split(SEP); feed.push({subcat:p[0], mkt:p[1], m:p[2], units:Math.round(agg[k])}); }
+  return feed;
+}
 function renderAutoForecastReport(body){
   var MKTS=[['all','All'],['uk','UK'],['us','US'],['eu','EU'],['au','AU']];
   body.innerHTML='<div style="display:flex;flex-wrap:wrap;gap:10px 18px;align-items:center;margin-bottom:10px">'
     +'<span style="display:inline-flex;gap:6px;align-items:center"><span style="font-size:11px;font-weight:700;color:#888;letter-spacing:.04em">MARKET</span>'
     +MKTS.map(function(m){return '<button class="view-toggle af-mkt'+(m[0]===AF_MARKET?' active':'')+'" data-mkt="'+m[0]+'">'+m[1]+'</button>';}).join('')+'</span>'
+    +'<span style="display:inline-flex;gap:6px;align-items:center"><span style="font-size:11px;font-weight:700;color:#888;letter-spacing:.04em">ENGINE</span>'
+    +'<button class="view-toggle af-eng'+(AF_ENGINE==='bp'?' active':'')+'" data-eng="bp" title="Driven by the buy plan\'s actual buys (Option B)">Buy plan</button>'
+    +'<button class="view-toggle af-eng'+(AF_ENGINE==='old'?' active':'')+'" data-eng="old" title="Legacy rolling subcategory model">Rolling (old)</button></span>'
     +'<span style="font-size:11px;color:#94a3b8">Freight = containerised from the config freight table · Duty = category × country</span>'
     +'</div><div id="af-content" style="color:#666;font-size:12px;padding:8px">Loading…</div>';
   body.querySelectorAll('.af-mkt').forEach(function(b){ b.onclick=function(){ AF_MARKET=b.dataset.mkt; renderAutoForecastReport(body); }; });
+  body.querySelectorAll('.af-eng').forEach(function(b){ b.onclick=function(){ AF_ENGINE=b.dataset.eng; renderAutoForecastReport(body); }; });
   var content=body.querySelector('#af-content');
   var draw=function(d){
     if(!d||d.error||!d.months||!d.payments||!d.assumptions){ content.innerHTML='<div style="color:#b91c1c">Could not load: '+((d&&d.error)||'incomplete response')+'</div>'; return; }
@@ -13750,14 +13775,19 @@ function renderAutoForecastReport(body){
       +ddBtn('txn','Transactions','#f3e8ff','#6d28d9','#d8b4fe')
       +'</div>'
       +payTbl('USD',1)+payTbl('GBP',AF_GBP);
-    var a=d.assumptions;
+    var a=d.assumptions; var isBP=a.engine==='buyplan';
     var note='<div style="font-size:11px;color:#888;margin-top:12px;line-height:1.5">'
-      +'<b>Model:</b> a <b>rolling monthly buy plan</b> per subcategory. Demand = the <b>full forecast</b> (existing SKUs’ forecast + the category gap for future SKUs). Stock rolls forward crediting open-PO arrivals (already in the cash-flow forecast); each month buys the shortfall — the <b>unconfirmed PO</b> on top. '
-      +'order month = demand month − lead time (supplier production + China→market sea shipping). Payments phased off each subcategory’s primary supplier’s terms '
+      +(isBP
+        ? '<b>Model (Buy plan):</b> driven by the <b>buy plan’s own buys</b> — the exact per-SKU 3PL + FBA quantities the Buy Plan tab computes (cover targets, urgent, EOL cap, MOQ, FBA-first, non-GRS, Complex Rules), aggregated by subcategory × market × arrival month, then phased into cash. So this report and the buy plan are <b>identical by construction</b>. '
+        : '<b>Model (Rolling · old):</b> a rolling monthly buy plan per subcategory. Demand = the <b>full forecast</b> (existing SKUs’ forecast + the category gap for future SKUs). Stock rolls forward crediting open-PO arrivals; each month buys the shortfall — the unconfirmed PO on top. ')
+      +'order month = arrival month − lead time (supplier production + China→market sea shipping). Payments phased off each subcategory’s primary supplier’s terms '
       +'(deposit at order · completion at order+production days · balance at arrival+credit days). <b>Freight</b> = each market’s monthly delivery pallets packed into the cheapest containers (CONFIG ▸ freight table); <b>Duty</b> = value × duty % (category × country, CONFIG ▸ Import duty), both at the delivery month. '
       +'<span style="color:#94a3b8">Cost = forecast-weighted current product cost per subcategory (USD) and may blend supplier currencies — treat as indicative.</span>'
       +(a.truncated?' <span style="color:#b45309">Some orders fall outside the window and are not shown.</span>':'')
-      +(a.overdue_units>0?' <span style="color:#b45309">'+fn(a.overdue_units)+' units have an order date already in the past (overdue) — their cash still shows below, but they’re omitted from the units grid above.</span>':'')+'</div>';
+      +(a.overdue_units>0?(isBP
+        ? ' <span style="color:#b45309">'+fn(a.overdue_units)+' units had an order date already in the past — <b>folded into the first month</b> (order now), so they’re included in the grid.</span>'
+        : ' <span style="color:#b45309">'+fn(a.overdue_units)+' units have an order date already in the past (overdue) — their cash still shows below, but they’re omitted from the units grid above.</span>')
+       :'')+'</div>';
     content.innerHTML=u+pay+note;
     // Export dropdowns: one coloured button each (Summary USD / GBP / Transactions), Copy + CSV under a menu.
     function afCopyTsv(rows){ var tsv=rows.map(function(r){return r.join('\t');}).join('\n'); navigator.clipboard.writeText(tsv).then(function(){},function(){alert('Copy blocked by the browser.');}); }
@@ -13768,9 +13798,16 @@ function renderAutoForecastReport(body){
     content.querySelectorAll('.af-opt').forEach(function(o){ o.onmouseenter=function(){o.style.background='#f1f5f9';}; o.onmouseleave=function(){o.style.background='';}; o.onclick=function(ev){ ev.stopPropagation(); var a=afAct[o.dataset.k]; if(a&&a[o.dataset.act])a[o.dataset.act](); content.querySelectorAll('.af-menu').forEach(function(x){x.style.display='none';}); }; });
     if(!window.__afDdClose){ window.__afDdClose=true; document.addEventListener('click',function(){ document.querySelectorAll('.af-menu').forEach(function(m){m.style.display='none';}); }); }
   };
-  var key=AF_MARKET;
+  var key=AF_ENGINE+'|'+AF_MARKET;
   if(AF_CACHE[key]) return draw(AF_CACHE[key]);
-  fetch('/api/scenario/auto-forecast?market='+AF_MARKET).then(function(r){return r.json();}).then(function(d){ AF_CACHE[key]=d; if(AF_MARKET===key) draw(d); }).catch(function(e){ draw({error:String(e)}); });
+  var done=function(d){ AF_CACHE[key]=d; if(AF_ENGINE+'|'+AF_MARKET===key) draw(d); };
+  var fail=function(e){ if(AF_ENGINE+'|'+AF_MARKET===key) draw({error:String(e)}); };
+  if(AF_ENGINE==='old'){
+    fetch('/api/scenario/auto-forecast?market='+AF_MARKET).then(function(r){return r.json();}).then(done).catch(fail);
+  } else {
+    if(!AF_FEED){ try{ AF_FEED=afBuildBuyFeed(); }catch(e){ AF_FEED=[]; } }
+    fetch('/api/scenario/auto-forecast',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({market:AF_MARKET,buyFeed:AF_FEED})}).then(function(r){return r.json();}).then(done).catch(fail);
+  }
 }
 
 function kaPills(name,opts){ return opts.map(function(o){return '<button class="view-toggle ka-'+name+(o[0]===KA[name]?' active':'')+'" data-v="'+o[0]+'">'+o[1]+'</button>';}).join(''); }
