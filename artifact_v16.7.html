@@ -3742,11 +3742,11 @@ function buildTable(proj,md,pd,is3,hasFBA){
   const rows=[];
 
   // Helper: build custom tooltip cell
-  function tipCell(val,valCls,lines,valStyle){
+  function tipCell(val,valCls,lines,valStyle,tipTitle){
     if(!val&&val!==0)return c('\u2014','cv0');
     const inner=lines.map(l=>`<div>${l}</div>`).join('');
     const spanAttrs=(valCls?` class="${valCls}"`:'')+(valStyle?` style="${valStyle}"`:'');
-    return `<td><div class="tip-wrap inb-tip"><span${spanAttrs}>${val}</span><div class="tip-box">${inner}</div></div></td>`;
+    return `<td><div class="tip-wrap inb-tip"${tipTitle?` data-tiptitle="${tipTitle}"`:''}><span${spanAttrs}>${val}</span><div class="tip-box">${inner}</div></div></td>`;
   }
 
   // ── FBA Stock ──
@@ -3765,7 +3765,7 @@ function buildTable(proj,md,pd,is3,hasFBA){
     rows.push(dr('FBA Transfer In',proj,p=>
       (p.trfIn||0)>0?`<td style="color:#a78bfa;font-weight:500">${fmt(p.trfIn)}</td>`:c('\u2014','cv0')
     ,true));
-    rows.push(dr('SOH FBA (closing)',proj,p=>p.isActual?`<td style="background:#f0fdf4;color:#166534;font-weight:700">${fmt(p.cF)}</td>`:c(fmt(p.cF),p.cF<0?'red':p.cvF<tf?'red':'grn')));
+    rows.push(dr('SOH FBA (closing)',proj,p=>p.isActual?`<td title="FBA inventory right now" style="background:#f0fdf4;color:#166534;font-weight:700">${fmt(p.cF)}</td>`:c(fmt(p.cF),p.cF<0?'red':p.cvF<tf?'red':'grn')));
     rows.push(dr('FBA Target Units',proj,p=>c(fmt(Math.round(p.tgF)),'tgt')));
     if(proj.some(p=>p.fSh>0))rows.push(dr('FBA Shortfall',proj,p=>{ if(!(p.fSh>0))return c('\u2014','cv0'); var _cp=(pd.cp)||1; var _fs=Math.ceil(p.fSh/_cp)*_cp; return c(fmt(_fs),'red'); }));   // shown rounded UP to whole cartons (topped up in full cartons)
   }
@@ -3774,14 +3774,17 @@ function buildTable(proj,md,pd,is3,hasFBA){
   if(is3){
     rows.push(sec('3PL Stock',proj.length));
     // DTC
-    if(hasDTC)rows.push(dr('DTC demand',proj,p=>{var _t=(md.demand_tik&&md.demand_tik[p.key])||0,_s=(md.demand_sets&&md.demand_sets[p.key])||0,_pd=(p.dtc||0)-_t-_s;return p.isActual?`<td style="color:#6b7280;font-style:italic">${_pd?fmt(_pd):'\u2014'}</td>`:p.isForecast?`<td style="color:#9ca3af">${_pd?fmt(_pd):'\u2014'}</td>`:c(_pd?fmt(_pd):'\u2014',_pd?'cv':'cv0');}));
+    if(hasDTC)rows.push(dr('DTC demand',proj,p=>{var _t=(md.demand_tik&&md.demand_tik[p.key])||0,_s=(md.demand_sets&&md.demand_sets[p.key])||0,_pd=p.isActual?(p.dtc||0):((p.dtc||0)-_t-_s);return p.isActual?`<td style="color:#6b7280;font-style:italic">${_pd?fmt(_pd):'\u2014'}</td>`:p.isForecast?`<td style="color:#9ca3af">${_pd?fmt(_pd):'\u2014'}</td>`:c(_pd?fmt(_pd):'\u2014',_pd?'cv':'cv0');}));
     // DTC demand (sets): 3PL component demand exploded from build-on-fly set forecasts (SETS feature P2/P1d). Included
     // in the DTC total above (subtracted out there so the two lines don't double-count); tooltip lists the source sets.
     if(hasSETS)rows.push(dr('DTC demand (sets)',proj,p=>{
       var s=(md.demand_sets&&md.demand_sets[p.key])||0; if(!s)return c('\u2014','cv0');
       var src=(md.demand_sets_src&&md.demand_sets_src[p.key])||[];
-      var lines=['<b>Set demand \u2192 component</b>'].concat(src.length?src.map(function(x){return x.set+': '+fmt(x.units)+(x.q>1?(' ('+fmt(x.units/x.q)+'\u00d7'+x.q+')'):'');}):['From build-on-fly set forecasts']);
-      return tipCell(fmt(s),'',lines,'color:#7c3aed;font-weight:500'+(p.isActual?';font-style:italic':(p.isForecast?';opacity:.65':'')));
+      var _amz=src.reduce(function(a,x){return a+(x.fbaU||0);},0), _shp=src.reduce(function(a,x){return a+(x.dtcU||0);},0);
+      var lines=['<b>Forecast demand (sets \u2192 component)</b>'];
+      if(_amz||_shp)lines.push('Amazon (FBA): '+fmt(_amz)+' \u00b7 Shopify (DTC): '+fmt(_shp));
+      lines=lines.concat(src.length?src.map(function(x){return x.set+': '+fmt(x.units)+(x.q>1?(' ('+fmt(x.units/x.q)+'\u00d7'+x.q+')'):'');}):['From build-on-fly set forecasts']);
+      return tipCell(fmt(s),'',lines,'color:#7c3aed;font-weight:500'+(p.isActual?';font-style:italic':(p.isForecast?';opacity:.65':'')),'Forecast demand');
     }));
     if(hasTIK)rows.push(dr('TikTok demand',proj,p=>{var t=(md.demand_tik&&md.demand_tik[p.key])||0;return p.isActual?`<td style="color:#6b7280;font-style:italic">${t?fmt(t):'\u2014'}</td>`:p.isForecast?`<td style="color:#9ca3af">${t?fmt(t):'\u2014'}</td>`:c(t?fmt(t):'\u2014',t?'cv':'cv0');}));
     // B2B
@@ -3801,7 +3804,7 @@ function buildTable(proj,md,pd,is3,hasFBA){
       }));
     }
     // Total Demand = DTC + B2B + FBA Transfer + Zalando
-    rows.push(dr('Total Demand',proj,p=>p.isActual?c('','cv0'):c(p.tot3pl?fmt(p.tot3pl):'\u2014',p.tot3pl?'cv':'cv0')));
+    rows.push(dr('Total Demand',proj,p=>p.isActual?`<td title="total actual sales this month to date" style="background:#f0fdf4;color:#166534;font-weight:700">${p.tot?fmt(p.tot):'\u2014'}</td>`:c(p.tot3pl?fmt(p.tot3pl):'\u2014',p.tot3pl?'cv':'cv0')));
     // Inbound
     rows.push(dr('Inbound',proj,p=>{
       const conf=p.confQty3||0,assumed=p.assumedQty3||0;
@@ -3825,7 +3828,7 @@ function buildTable(proj,md,pd,is3,hasFBA){
     };
     // SOH 3PL closing
     rows.push(dr('SOH 3PL (closing)',proj,p=>{
-      if(p.isActual)return `<td style="background:#f0fdf4;color:#166534;font-weight:700">${fmt(p.c3)}</td>`;
+      if(p.isActual)return `<td title="3PL inventory right now" style="background:#f0fdf4;color:#166534;font-weight:700">${fmt(p.c3)}</td>`;
       const cls={ok:'grn',amb:'amb',lo:'red',hi:'red-dk'}[covDevTier(p.c3,p.tg3)];
       return c(fmt(p.c3),cls);
     }));
@@ -14247,7 +14250,9 @@ function buildLiveDemand(){
           Object.keys(setFC).forEach(function(fym){ var add=setFC[fym]*q; if(!add)return;
             cmd.demand.DTC[fym]=(cmd.demand.DTC[fym]||0)+add;
             cmd.demand_sets[fym]=(cmd.demand_sets[fym]||0)+add;
-            (cmd.demand_sets_src[fym]||(cmd.demand_sets_src[fym]=[])).push({set:setSku,units:add,q:q}); });
+            var _cd=(cfc['DTC']||{})[fym]||0,_cf=(cfc['FBA']||{})[fym]||0,_ct=_cd+_cf;   // split the exploded set demand: Shopify (DTC) vs Amazon (FBA), proportional to the source channel forecast
+            var _dtcU=_ct>0?add*_cd/_ct:add,_fbaU=add-_dtcU;
+            (cmd.demand_sets_src[fym]||(cmd.demand_sets_src[fym]=[])).push({set:setSku,units:add,q:q,dtcU:_dtcU,fbaU:_fbaU}); });
         });
       });
     });
@@ -14327,10 +14332,10 @@ function _getInbPop(){
   document.body.appendChild(p);_INB_POP=p;return p;
 }
 function hideInbPop(){if(_INB_POP)_INB_POP.style.display='none';}
-function showInbPop(anchor,innerHtml){
+function showInbPop(anchor,innerHtml,title){
   var p=_getInbPop();
   if(!innerHtml){hideInbPop();return;}
-  p.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;gap:14px;padding:6px 10px;border-bottom:1px solid #333;font-weight:600;color:#9ca3af;font-size:9px;text-transform:uppercase;letter-spacing:.05em">Inbound<span style="cursor:pointer;color:#9ca3af;font-size:13px;line-height:1" onclick="hideInbPop()">\u2715</span></div>'
+  p.innerHTML='<div style="display:flex;align-items:center;justify-content:space-between;gap:14px;padding:6px 10px;border-bottom:1px solid #333;font-weight:600;color:#9ca3af;font-size:9px;text-transform:uppercase;letter-spacing:.05em">'+(title||'Inbound')+'<span style="cursor:pointer;color:#9ca3af;font-size:13px;line-height:1" onclick="hideInbPop()">\u2715</span></div>'
     +'<div style="padding:7px 10px;white-space:nowrap;max-height:60vh;overflow:auto">'+innerHtml+'</div>';
   p.style.display='block';
   var r=anchor.getBoundingClientRect(),pw=p.offsetWidth,ph=p.offsetHeight,vw=window.innerWidth,vh=window.innerHeight;
@@ -14342,7 +14347,7 @@ document.addEventListener('click',function(e){
   var tip=e.target.closest&&e.target.closest('.tip-wrap.inb-tip');
   if(tip){ // open the copyable inbound popover (never clipped — it's fixed on <body>)
     var box=tip.querySelector('.tip-box');
-    showInbPop(tip,box?box.innerHTML:'');
+    showInbPop(tip,box?box.innerHTML:'',tip.getAttribute('data-tiptitle')||'Inbound');
     return;
   }
   if(_INB_POP&&_INB_POP.style.display==='block'){
