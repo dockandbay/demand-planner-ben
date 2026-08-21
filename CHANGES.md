@@ -1,3 +1,6 @@
+## v27.245 Portal price list: hide discontinued SKUs
+- The supplier portal price list now **excludes discontinued SKUs** entirely (both the price-type rows and the manual section), server-side in `plPortalData` via the existing active/discontinue flag. Price types left with no active SKUs are dropped. The admin grid is unchanged (keeps its "Active SKUs only" toggle).
+
 ## v27.244 Auto Forecast 1b roll-to-next-month + Portal price-list supplier scoping
 - **Auto Forecast (buy-plan engine):** past the **20th**, "order now" rolls to next month — overdue/current-month buys' **starting deposit** now lands next month, not the current month. (Sandbox: the ~152k August deposit moved to September.) `orderFloor = after-20th ? next month : current`; arrival-based legs (balance/duty/freight) shift with it when the order rolls.
 - **Portal price-list leak FIX:** a supplier's portal listed **every** SKU in a price_type they had a price for — exposing other suppliers' SKUs when a price_type spans suppliers (e.g. XR Textile saw the Lixin SKUs HAIRW-WAF-SEASOIR/BOHMDRM/WTRSPRZ). Now `plPortalData` scopes SKUs to the ones the supplier actually supplies (`main_supplier_final`/`supplier_multiple_all`); empty price types are dropped. XR Textile now sees only their 7 of 10; shared-supplier SKUs still show for both.

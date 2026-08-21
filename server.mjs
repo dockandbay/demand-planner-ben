@@ -14078,7 +14078,8 @@ async function plPortalData(sups) {
           AND EXISTS (SELECT 1 FROM unnest(string_to_array(coalesce(main_supplier_final,'')||','||coalesce(supplier_multiple_all,''), ',')) x
                       WHERE lower(trim(x)) = ANY($2))
         ORDER BY price_type, sku`, [myTypes, sups.map(s => String(s).toLowerCase())])).rows;
-      const tm = {}; pt.forEach((r) => { const t = (tm[r.price_type] = tm[r.price_type] || { skus: [], sizes: {}, cats: {} }); t.skus.push({ sku: r.sku, name: r.name, active: !!r.active, colour: r.colour, size: r.size, category: r.category }); if (r.size) t.sizes[r.size] = 1; if (r.category) t.cats[r.category] = (t.cats[r.category] || 0) + 1; });
+      const tm = {}; pt.forEach((r) => { if (!r.active) return;   // portal hides discontinued SKUs entirely
+        const t = (tm[r.price_type] = tm[r.price_type] || { skus: [], sizes: {}, cats: {} }); t.skus.push({ sku: r.sku, name: r.name, active: !!r.active, colour: r.colour, size: r.size, category: r.category }); if (r.size) t.sizes[r.size] = 1; if (r.category) t.cats[r.category] = (t.cats[r.category] || 0) + 1; });
       priceTypes = myTypes.slice().sort().filter((k) => tm[k] && tm[k].skus.length).map((k) => { const t = tm[k]; const uniq = Object.keys(t.sizes); const def = uniq.length === 1 ? uniq[0] : ''; const cat = Object.keys(t.cats).sort((a, b) => t.cats[b] - t.cats[a])[0] || ''; const ov = (ptMeta[k] != null && ptMeta[k] !== ''); return { price_type: k, skus: t.skus, category: cat, mainSupplier: sups[0] || '', size: ov ? ptMeta[k] : def, sizeOverride: ov, sizeDefault: def }; });
     }
     if (manualSet.size) {
@@ -14086,7 +14087,7 @@ async function plPortalData(sups) {
              coalesce(nullif(category_name_final,''),category,'') category,
              coalesce(main_supplier_final,'') main_supplier, coalesce(price_type,'') price_type,
              (lower(coalesce(status,'')) NOT LIKE '%discont%' AND NOT (coalesce(discontinue_date_final,'') ~ '^\d{4}-\d{2}-\d{2}' AND to_date(discontinue_date_final,'YYYY-MM-DD') <= current_date)) active
-        FROM planner.products WHERE sku = ANY($1) ORDER BY sku`, [[...manualSet]])).rows.map((r) => ({ ...r, active: !!r.active, main_supplier: sups[0] || r.main_supplier }));
+        FROM planner.products WHERE sku = ANY($1) ORDER BY sku`, [[...manualSet]])).rows.filter((r) => r.active).map((r) => ({ ...r, active: !!r.active, main_supplier: sups[0] || r.main_supplier }));
     }
     const cpRow = (await pool.query(`SELECT max(regexp_replace(prod_no,'[^0-9]','','g')::int) mx FROM planner.purchase_orders
       WHERE lower(coalesce(status,'')) LIKE '%production%' AND regexp_replace(coalesce(prod_no,''),'[^0-9]','','g')<>''`)).rows[0];
