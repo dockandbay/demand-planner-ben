@@ -62,9 +62,14 @@ const pool = new pg.Pool({
   ssl: { rejectUnauthorized: false },
   // Session-mode Supabase pooler caps the whole session at ~15 server connections. Keep `max` well under
   // that so a stranded generation (after a restart/crash) plus the live process can't blow the cap.
-  max: process.env.VERCEL ? 4 : 6,
+  // Sandbox (non-Vercel) uses 8 so multi-query endpoints (e.g. po-detail's ~13 parallel queries) run in fewer
+  // waves over the high-latency remote pooler — closer to live's behaviour. Still well under the ~15 cap.
+  max: process.env.VERCEL ? 4 : 8,
   allowExitOnIdle: true,
-  idleTimeoutMillis: 8000,
+  // Sandbox keeps connections warm longer (30s) so working continuously doesn't keep paying the ~1.7s reconnect to
+  // the remote pooler — the residual per-query ~300ms is network RTT to the remote sandbox (not present on live).
+  idleTimeoutMillis: process.env.VERCEL ? 8000 : 30000,
+  keepAlive: true,
 });
 // ── Resilience guards ─────────────────────────────────────────────────────────
 // A dropped idle DB connection makes the pool emit 'error'; with no listener Node treats it as

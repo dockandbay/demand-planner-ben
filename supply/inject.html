@@ -4021,9 +4021,12 @@
     ensureTeam();
     document.querySelectorAll('#podet-'+i+' .po-int-body').forEach(function(ta){ var pop=ta.parentNode.querySelector('.po-int-pop');
       function hide(){ if(pop){ pop.style.display='none'; pop._opts=null; } }
-      // position:fixed → escapes the timeline's overflow clip; prefer ABOVE the textarea (over the table) so it's never cut off, falling back to below only when there's no room up top.
-      function place(){ if(!pop)return; var r=ta.getBoundingClientRect(); pop.style.position='fixed'; pop.style.zIndex='100000'; pop.style.left=r.left+'px'; pop.style.minWidth=Math.max(200,r.width)+'px'; pop.style.bottom=''; var ph=pop.offsetHeight||190;
-        pop.style.top=((r.top-ph-4)>=0 ? (r.top-ph-4) : (r.bottom+2))+'px'; }
+      // position:fixed → escapes the timeline's overflow clip. Sit INLINE directly under the entry box, and clamp to
+      // the viewport so it can't run off-screen (the PO drawer sits on the right, so an unclamped left overflowed).
+      function place(){ if(!pop)return; var r=ta.getBoundingClientRect(); pop.style.position='fixed'; pop.style.zIndex='100000'; pop.style.minWidth=Math.max(200,r.width)+'px'; pop.style.bottom='';
+        var pw=pop.offsetWidth||Math.max(200,r.width), ph=pop.offsetHeight||190;
+        pop.style.left=Math.max(8, Math.min(r.left, window.innerWidth-pw-8))+'px';
+        var below=r.bottom+2; pop.style.top=((below+ph<=window.innerHeight-8) ? below : Math.max(8, r.top-ph-4))+'px'; }
       function paint(){ pop.querySelectorAll('.po-int-opt').forEach(function(o,ix){ o.style.background=(ix===pop._sel)?'#eef2ff':'#fff'; }); }
       function applyHandle(h){ var pos=ta.selectionStart, upto=ta.value.slice(0,pos); var before=upto.replace(/@([a-z0-9._-]*)$/i,'@'+h+' '); ta.value=before+ta.value.slice(pos); var np=before.length; ta.focus(); ta.setSelectionRange(np,np); hide(); }
       ta.addEventListener('input',function(){ if(!pop)return; var pos=ta.selectionStart, upto=ta.value.slice(0,pos), m=upto.match(/@([a-z0-9._-]*)$/i);
