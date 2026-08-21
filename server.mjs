@@ -9428,6 +9428,28 @@ async function buyplanSkuMeta(skus) {
     map[r.sku] = { pallet_qty: Number(r.pallet_qty) || 0, category: r.category || '', main_code: codeOf(r.main_name), main_name: r.main_name || '', options,
       moq: (Number(r.moq) > 0 ? Number(r.moq) : null), disc: r.disc || '', disc_au: r.disc_au || '', disc_ca: r.disc_ca || '' };
   });
+  // Price-list tiers per SKU × supplier NAME (SKU-scope override else the SKU's price_type). The Create-PO modal
+  // derives MOQ (= lowest tier min_qty) + a tier-savings hint from these. Prefer sku-scope + current version.
+  try {
+    const plr = (await pool.query(`SELECT upper(p.sku) sku, e.supplier, coalesce(e.currency,'USD') currency, e.scope,
+        e.effective_from_production efp,
+        coalesce((SELECT json_agg(json_build_object('min_qty',t.min_qty,'unit_cost',t.unit_cost) ORDER BY t.min_qty)
+                  FROM planner.price_list_tiers t WHERE t.entry_id=e.id),'[]') tiers
+      FROM planner.products p
+      JOIN planner.price_list_entries e ON e.status='active' AND (
+           (e.scope='sku'  AND upper(e.sku)=upper(p.sku)) OR
+           (e.scope='type' AND e.price_type=p.price_type AND coalesce(p.price_type,'')<>'') )
+      WHERE upper(p.sku)=ANY($1)`, [skus])).rows;
+    // keep ALL versions per supplier (current + future); the client resolves the one effective for the chosen
+    // production (sku-scope overrides type-scope) so MOQ/tiers match the price you'd actually pay for that PO.
+    plr.forEach(r => {
+      const tiers = ((typeof r.tiers === 'string' ? JSON.parse(r.tiers) : r.tiers) || [])
+        .map(t => ({ min_qty: Number(t.min_qty) || 1, unit_cost: Number(t.unit_cost) })).filter(t => isFinite(t.unit_cost));
+      if (!tiers.length) return;
+      const m = map[r.sku]; if (!m) return; m.pl = m.pl || {};
+      (m.pl[r.supplier] = m.pl[r.supplier] || []).push({ efp: (r.efp == null ? null : Number(r.efp)), scope: r.scope, currency: r.currency, tiers });
+    });
+  } catch (e) { /* price list optional — leave map.pl undefined */ }
   return map;
 }
 // BUY PLAN → PURCHASE ORDERS. Take buy-plan items (each may carry an explicit supplier_code chosen in the UI,
@@ -9524,8 +9546,9 @@ app.post('/api/supply/buyplan-skus', async (req, res) => {
     const ctry = String((req.body && req.body.country) || '').toUpperCase();
     const discFor = m => ctry === 'AU' ? (m.disc_au || m.disc || '') : ctry === 'CA' ? (m.disc_ca || m.disc || '') : (m.disc || '');
     res.json({ skus: items.map(it => { const sku = String(it.sku).toUpperCase(), m = map[sku] || { options: [] };
+      const pl = m.pl || {};   // { supplierName: [{efp, scope, currency, tiers}] }  (client resolves by chosen production)
       return { sku, qty: Math.round(Number(it.qty)), pallet_qty: m.pallet_qty || 0, category: m.category || '', main_code: m.main_code || null,
-        main_name: m.main_name || '', options: (m.options || []).map(o => ({ code: o.code, name: o.name })), moq: (m.moq || null), discontinue: discFor(m) }; }) });
+        main_name: m.main_name || '', options: (m.options || []).map(o => ({ code: o.code, name: o.name })), moq: (m.moq || null), pl, discontinue: discFor(m) }; }) });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Approve an order-plan exception on a line. field selects which: partial (default) → partial_carton_approved,
