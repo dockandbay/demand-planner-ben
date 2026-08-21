@@ -1,3 +1,7 @@
+## v27.237 Buy plan 1b: roll-forward cutoff moved to the 20th (was the 15th)
+- The buy window's roll-forward cutoff (`AFTER15` → `AFTER20`) now triggers **from the 20th onwards**: from the 20th, the actionable Buy 3PL/FBA window includes **next month** so unmet current-month demand rolls into next month's buy (not lost). Before the 20th, current month only. (Today is the 21st, so today's buy quantities are unchanged; the behaviour differs only on days 16-19, which now correctly stay current-month-only.)
+- **Left unchanged (flagging for a consistency decision):** a separate 15th-rounding for the discontinue month (`day>15` → disc rounds to next month). Say if you want that moved to the 20th too, since it changes discontinue-month timing (affects the EOL cap).
+
 ## v27.236 Buy plan: actuals-month fixes (DTC−set negative, Total Demand, SOH tooltips) + sets tooltip
 - **Fix DTC demand going negative on the actuals month** (e.g. TOWLB-CAB-LG-GREEN-R showed −248 = 27 actual DTC − 275 forecast set demand). The "DTC demand" row was subtracting the *forecast* set-component demand from the *actual* DTC sales. Now the actuals month shows raw DTC actuals (no set/TikTok subtraction — those overlays are forecast-only); forecast months unchanged.
 - **Total Demand now shows for the actuals month**, highlighted green (was blank) = total actual sales to date (DTC+B2B+FBA).

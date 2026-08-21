@@ -1817,9 +1817,10 @@ function crWinRule(i,base,matched){
   return win;
 }
 
-// After-15th logic: include M+0 and M+1
+// After-the-20th logic (1b, Ben): from the 20th onwards, roll next month's buy into the actionable buy window
+// (unmet current-month demand rolls into next month so it's not lost). Was the 15th.
 const TODAY=new Date();
-const AFTER15=TODAY.getDate()>15;
+const AFTER20=TODAY.getDate()>=20;
 // CUR_DAYS: days elapsed / remaining / total for the current calendar month.
 // Prefer D.cur_days (future-proof extract field), else D.may_days when we're
 // genuinely in May (legacy), else compute from today's date.
@@ -1832,10 +1833,10 @@ const CUR_DAYS=(function(){
 })();
 // BUY_KEYS: the actionable placement months shown in the list summary
 // PROJ[0]=current Actuals, PROJ[1]=current Remaining, PROJ[2]=next month
-// After 15th: show next-month + month-after as buy window; before 15th: next-month only
-// Sum buys: current month (idx 1) + if after 15th also next month (idx 2)
-const BUY_KEYS=AFTER15?[PROJ[1].key,PROJ[2].key]:[PROJ[1].key];
-const BUY_LBL=AFTER15?`${MN[_CUR_M]} + ${PROJ[2].lbl}`:`${MN[_CUR_M]}`;
+// From the 20th: buy window = current-month remaining + next month (unmet current month rolls into next month's buy);
+// before the 20th: current month only. Sum buys: idx 1 (current remaining) + if from-the-20th also idx 2 (next month).
+const BUY_KEYS=AFTER20?[PROJ[1].key,PROJ[2].key]:[PROJ[1].key];
+const BUY_LBL=AFTER20?`${MN[_CUR_M]} + ${PROJ[2].lbl}`:`${MN[_CUR_M]}`;
 
 let CUR='UK',SC_SEL=new Set(['ALL']),TI_SEL=new Set(['ALL']),ST_SEL=new Set(['ACTIVE','FUTURE']),CS_SEL=new Set(['ALL']),BU_SEL='ALL',RW_SEL='ALL';   // RW_SEL = Release Window filter (BUY/FBA)
 let FBA_CARTON_MODE='FULL';  // FBA transfer sizing (default FULL = whole cartons, per the agreed rules): 'FULL' = whole cartons only | 'ANY' = full shortfall, no rounding | 'PARTIAL' = raw shortfall with floor
@@ -1894,7 +1895,7 @@ function getBuyQtys(sku,mkt){
   const tfOv=parseInt(document.getElementById('fbw')?.value)||null;
   const proj=project(md,pd,ple,mkt,tfOv,sku);
   const START_IDX=1;
-  const idxCount=AFTER15?2:1;
+  const idxCount=AFTER20?2:1;
   let b3=0,b3u=0,b3uSea=0,b3uAir=0,bf=0,buyTip='',urgTip='';
   for(let i=START_IDX;i<START_IDX+idxCount&&i<proj.length;i++){
     b3+=proj[i].bQ||0;
