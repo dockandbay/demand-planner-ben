@@ -11304,8 +11304,9 @@ async function computeAutoForecast(markets) {
           FROM planner.forecasts WHERE level='subcategory' AND upper(country)=$1
             AND run_id = (SELECT max(run_id) FROM planner.forecasts WHERE level='subcategory')
           GROUP BY 1,2`,[mk.toUpperCase()]),
-        // lead = supplier production lead + China→market sea lead (weeks → months)
-        pool.query(`SELECT subcategory s, avg(coalesce(production_lead_time_weeks,0)+coalesce(${lc},0)) wk
+        // lead = China→market lead (weeks → months). NOTE (Ben): china_to_<mkt>_lead_time_weeks ALREADY includes
+        // production lead — do NOT add production_lead_time_weeks (that double-counts).
+        pool.query(`SELECT subcategory s, avg(coalesce(${lc},0)) wk
           FROM planner.products WHERE subcategory IS NOT NULL GROUP BY 1`),
       ]);
       const skuDem={}, catDem={}, leadM={};
@@ -11383,7 +11384,7 @@ async function computeAutoForecast(markets) {
 // month (arrival − subcat lead, same lead source as the rolling engine) and phases. Overdue orders (order month
 // already before the window) FOLD into the first window month ("order now") instead of being hidden.
 // feed = [{subcat, mkt:'uk', m:'YYYY-MM', units}].
-async function computeAutoForecastFromFeed(feed, markets){
+async function computeAutoForecastFromFeed(feed, markets, includeGap=true){
   const C = await afLoadCommon();
   const { win, unitCost, supName, terms, freightTiers, dutyPct, ppu, catOf, leadCol } = C;
   const unitsBy={};
@@ -11395,17 +11396,17 @@ async function computeAutoForecastFromFeed(feed, markets){
     txMap[k].amount_usd+=v; };
   let truncated=false, overdueUnits=0;
   const monthPallets={};
-  // per-market subcat lead (weeks→months), same source/formula as the rolling engine
+  // per-market subcat lead (weeks→months), same source/formula as the rolling engine.
+  // NOTE (Ben): china_to_<mkt>_lead_time_weeks ALREADY includes production lead — do NOT add production_lead_time_weeks.
   const leadM={};
   await Promise.all(markets.map(async(mk)=>{ const lc=leadCol[mk]; if(!lc)return;
-    const lr=await pool.query(`SELECT subcategory s, avg(coalesce(production_lead_time_weeks,0)+coalesce(${lc},0)) wk
+    const lr=await pool.query(`SELECT subcategory s, avg(coalesce(${lc},0)) wk
       FROM planner.products WHERE subcategory IS NOT NULL GROUP BY 1`);
     const mm={}; lr.rows.forEach(r=> mm[r.s]=Math.max(1,Math.round(Number(r.wk)/4.345))); leadM[mk]=mm; }));
   const winMin=win[0], winMax=win[win.length-1];
-  for(const row of (feed||[])){
-    const s=row.subcat, mk=(row.mkt||'').toLowerCase(), m=row.m; const arrive=Math.round(Number(row.units)||0);
-    if(!s||!mk||!m||!(arrive>0)||markets.indexOf(mk)<0)continue;
-    if(m>winMax){ truncated=true; continue; }                 // arrival beyond the window → surfaced, not phased
+  // phase ONE buy order (subcat s, market mk, ARRIVAL month m, units) into cash — shared by the buy feed + the gap.
+  const phaseOne=(s, mk, m, arrive)=>{
+    if(!(arrive>0))return;
     const lm=(leadM[mk]||{})[s]||2;
     let om=afAddMonths(m,-lm);
     if(om<winMin){ overdueUnits+=arrive; om=winMin; }          // fold overdue order into "order now" (month 0)
@@ -11414,14 +11415,41 @@ async function computeAutoForecastFromFeed(feed, markets){
     const u=unitsBy[nm]||(unitsBy[nm]={t:0}); u[om]=(u[om]||0)+arrive; u.t+=arrive;
     const val=arrive*c;
     const _dep=val*Number(t.start_deposit_pct||0)/100, _com=val*Number(t.completion_pct||0)/100, _bal=val*Number(t.balance_pct||0)/100;
-    const _dutyRate=dutyPct[(catOf[s]||'')+'|'+mk.toUpperCase()]||0, _duty=val*_dutyRate/100;
+    const _dutyRate=dutyPct[(catOf[s]||'')+'|'+mk.toUpperCase()]||0, _duty=val*_dutyRate/100;   // duty = value × duty%(category,country)
     const _comM=afAddMonths(om, Math.round((t.production_days||0)/30)), _balM=afAddMonths(m, Math.round((t.credit_days||0)/30));
     addPay('deposit', om, _dep); addPay('completion', _comM, _com); addPay('balance', _balM, _bal); addPay('duty', m, _duty);
-    (monthPallets[mk]||(monthPallets[mk]={}))[m]=((monthPallets[mk]||{})[m]||0)+arrive*(ppu[s]||0);
+    (monthPallets[mk]||(monthPallets[mk]={}))[m]=((monthPallets[mk]||{})[m]||0)+arrive*(ppu[s]||0);   // freight pallets (containerised after)
     const _sc=(t.code||'').trim()||nm.replace(/[^A-Za-z0-9]/g,'').slice(0,3).toUpperCase()||'??';
     const _ref='FC-'+mk.toUpperCase()+'-'+om+'-'+_sc;
     addTxn(_ref,'Starting deposit',om,_dep,mk,nm); addTxn(_ref,'Completion deposit',_comM,_com,mk,nm);
     addTxn(_ref,'Balance payment',_balM,_bal,mk,nm); if(_duty>0)addTxn(_ref,'Import duty',m,_duty,mk,nm);
+  };
+  // 1) KNOWN SKUs — the buy plan's own buys (client feed)
+  for(const row of (feed||[])){
+    const s=row.subcat, mk=(row.mkt||'').toLowerCase(), m=row.m; const arrive=Math.round(Number(row.units)||0);
+    if(!s||!mk||!m||!(arrive>0)||markets.indexOf(mk)<0)continue;
+    if(m>winMax){ truncated=true; continue; }                 // arrival beyond the window → surfaced, not phased
+    phaseOne(s, mk, m, arrive);
+  }
+  // 2) CATEGORY GAP — demand for future/uncreated SKUs the buy plan can't see = subcategory forecast − sum of
+  // known-SKU forecasts (same gap definition as the legacy engine's max(catDem,skuDem)). Future SKUs have no
+  // stock/POs, so the gap buy = the gap demand for that arrival month. Priced + led at the subcat cost/lead.
+  let gapUnits=0;
+  if(includeGap){
+    await Promise.all(markets.map(async(mk)=>{
+      const [catR, skuR] = await Promise.all([
+        pool.query(`SELECT subcategory s, to_char(month,'YYYY-MM') m, sum(units)::numeric u
+          FROM planner.forecasts WHERE level='subcategory' AND upper(country)=$1
+            AND run_id=(SELECT max(run_id) FROM planner.forecasts WHERE level='subcategory') GROUP BY 1,2`,[mk.toUpperCase()]),
+        pool.query(`SELECT p.subcategory s, to_char(fo.month,'YYYY-MM') m, sum(fo.units)::numeric u
+          FROM planner.forecast_outputs fo JOIN planner.products p ON p.sku=fo.sku
+          WHERE split_part(fo.warehouse,'_',1)=$1 AND p.subcategory IS NOT NULL GROUP BY 1,2`,[mk]),
+      ]);
+      const skuD={}; skuR.rows.forEach(r=>{ (skuD[r.s]||(skuD[r.s]={}))[r.m]=Number(r.u); });
+      for(const r of catR.rows){ const s=r.s, m=r.m; if(m<winMin||m>winMax)continue;
+        const gap=Math.round(Math.max(0, Number(r.u) - ((skuD[s]||{})[m]||0)));
+        if(!(gap>0))continue; gapUnits+=gap; phaseOne(s, mk, m, gap); }
+    }));
   }
   for(const mk of markets){ const tiers=freightTiers[mk.toUpperCase()]||[]; const mp=monthPallets[mk]||{};
     for(const mo of Object.keys(mp)){ const pallets=mp[mo]; if(!(pallets>0)||!tiers.length)continue;
@@ -11437,7 +11465,7 @@ async function computeAutoForecastFromFeed(feed, markets){
   return { months:win, units:unitRows,
     payments:{deposit:dep,completion:comp,balance:bal,freight:frt,duty:dty,total},
     transactions:txns,
-    assumptions:{truncated, overdue_units:Math.round(overdueUnits), engine:'buyplan'} };
+    assumptions:{truncated, overdue_units:Math.round(overdueUnits), gap_units:Math.round(gapUnits), gap_included:!!includeGap, engine:'buyplan'} };
 }
 app.get('/api/scenario/auto-forecast', async (req, res) => {
   const markets = (req.query.market||'all').toLowerCase()==='all' ? ['uk','us','eu','au'] : [(req.query.market||'uk').toLowerCase()];
@@ -11448,7 +11476,8 @@ app.post('/api/scenario/auto-forecast', async (req, res) => {
   const b = req.body || {};
   const markets = (b.market||'all').toLowerCase()==='all' ? ['uk','us','eu','au'] : [(b.market||'uk').toLowerCase()];
   const feed = Array.isArray(b.buyFeed) ? b.buyFeed : [];
-  try { res.json(await computeAutoForecastFromFeed(feed, markets)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  const includeGap = b.includeGap!==false;   // default on
+  try { res.json(await computeAutoForecastFromFeed(feed, markets, includeGap)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Auto Forecast EMAIL — sends the payments plan + transactions CSV to the recipients configured in
 // CONFIG ▸ General settings (app_settings.af_email_recipients, comma-separated). Gated on RESEND_API_KEY (sandbox stubs).

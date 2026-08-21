@@ -1,3 +1,8 @@
+## v27.240 Auto Forecast — category-gap layer + lead-time double-count fix
+- **Category gap layer (buy-plan engine):** adds demand for future/uncreated SKUs = `max(0, subcategory forecast − Σ known-SKU forecasts)`, per subcat × market × month, phased at the subcat cost/lead (future SKUs have no stock, so gap buy = gap demand). Fills the tail the SKU-only feed left at 0. New **FUTURE-SKU GAP On/Off** toggle (default On); `assumptions.gap_units` surfaced in the notes.
+- **Lead-time fix (both engines):** `china_to_<mkt>_lead_time_weeks` ALREADY includes production lead — the AF was adding `production_lead_time_weeks` on top (double-count). Removed. Order months are now later/correct (old engine's overdue dropped 36.6k → 14.7k).
+- **⚠️ Finding for review:** with the gap on (sandbox, all markets) the gap = **782,831 units, larger than the 627k known-SKU buys** → the subcategory forecast is ~2× the summed SKU forecast. Needs Ben's judgement: is that real NPD, or are the two forecasts on different bases? Toggle Off to see known-SKU-only.
+
 ## v27.239 Auto Forecast Option B — client wired + engine toggle (buy plan vs old)
 - The AF report now defaults to the **Buy plan** engine: the client builds a feed from the buy plan's OWN per-SKU 3PL+FBA buys (`BP.project`, all months, aggregated to subcat × market × arrival-month) and POSTs it; the server phases it into cash. **Identical by construction to the Buy Plan tab.**
 - **ENGINE toggle** in the report header — "Buy plan" (new, default) vs "Rolling (old)" — so the two can be compared side by side. Cache + notes are engine-aware; overdue now reads "folded into the first month (order now)".
