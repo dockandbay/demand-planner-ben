@@ -1,3 +1,8 @@
+## v27.238 Auto Forecast Option B — server foundation (buy-plan-driven engine)
+- Extracted the AF's shared market-independent lookups into `afLoadCommon()` (cost, supplier, terms, freight tiers, duty, pallets, on-hand/on-order, window). Old rolling engine now consumes it and is **byte-identical** (verified md5 across all/uk/us/eu/au).
+- New engine `computeAutoForecastFromFeed(feed, markets)` + `POST /api/scenario/auto-forecast`: phases the **real buy plan's** per-subcat × market × arrival-month buys into cash using the SAME deposit/completion/balance/duty/freight phasing. Overdue orders (order month before the window) **fold into "order now" (month 0)** instead of being hidden. Not yet wired to the client (old GET still serves the report).
+- Next: client builds the buy feed from the buy plan output and POSTs it; old-vs-new cash comparison for sign-off.
+
 ## v27.237 Buy plan 1b: roll-forward cutoff moved to the 20th (was the 15th)
 - The buy window's roll-forward cutoff (`AFTER15` → `AFTER20`) now triggers **from the 20th onwards**: from the 20th, the actionable Buy 3PL/FBA window includes **next month** so unmet current-month demand rolls into next month's buy (not lost). Before the 20th, current month only. (Today is the 21st, so today's buy quantities are unchanged; the behaviour differs only on days 16-19, which now correctly stay current-month-only.)
 - **Left unchanged (flagging for a consistency decision):** a separate 15th-rounding for the discontinue month (`day>15` → disc rounds to next month). Say if you want that moved to the 20th too, since it changes discontinue-month timing (affects the EOL cap).

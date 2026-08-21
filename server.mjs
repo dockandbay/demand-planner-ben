@@ -11185,8 +11185,8 @@ app.get('/api/scenario/po-stock-priority/:po', async (req, res) => {
 //   DUTY = value × duty%(category, country) from CONFIG ▸ Import duty. Both land at the delivery month.
 // NOTE (read-only report): never written back to forecast_outputs/forecasts — a decision view + CSV only.
 function afAddMonths(ym, n){ let [y,m]=ym.split('-').map(Number); let t=(y*12+(m-1))+n; return Math.floor(t/12)+'-'+String(t%12+1).padStart(2,'0'); }
-async function computeAutoForecast(markets) {
-  {
+// Shared market-independent lookups for the Auto Forecast engines (old rolling subcat model + new buy-plan feed).
+async function afLoadCommon() {
     // window START = the CURRENT month (don't plan months already in the past), clamped to the forecast data
     // range; END = the last forecast month. (Was hardcoded 2026-06, which went stale once we passed it.)
     const _fr = (await pool.query(`SELECT to_char(min(month),'YYYY-MM') mn, to_char(max(month),'YYYY-MM') mx FROM (
@@ -11197,15 +11197,6 @@ async function computeAutoForecast(markets) {
     const win=[]; for(let i=0;i<18;i++){ const _mm=afAddMonths(dataMin,i); if(_mm>dataMax)break; win.push(_mm); }
     const allMonths=[]; { let m=dataMin; while(m<=dataMax){ allMonths.push(m); m=afAddMonths(m,1); } }
     const leadCol={uk:'china_to_uk_lead_time_weeks',us:'china_to_us_lead_time_weeks',eu:'china_to_eu_lead_time_weeks',au:'china_to_au_lead_time_weeks'};
-    // one combined pass per market then aggregate the output tables
-    const unitsBy={};                                     // supplier -> {month->units, total}
-    const pay={deposit:{},completion:{},balance:{},freight:{},duty:{}}; // bucket -> month -> amount
-    const addPay=(b,mo,v)=>{ if(win.indexOf(mo)<0||!(v>0))return; (pay[b][mo]=(pay[b][mo]||0)+v); };
-    const txMap={};  // transaction detail, aggregated 1 row per supplier: key = reference|type|month
-    const addTxn=(ref,type,mo,v,mk2,sup)=>{ if(win.indexOf(mo)<0||!(v>0))return; const k=ref+'|'+type+'|'+mo;
-      if(!txMap[k])txMap[k]={reference:ref, type, amount_usd:0, date:mo+'-01', country:(mk2||'').toUpperCase(), supplier:sup||'—', month:mo};
-      txMap[k].amount_usd+=v; };
-    let truncated=false, overdueUnits=0;   // overdueUnits = gap whose order month is already past the window start → shows in cash but not in the units grid (surface it, don't hide it)
     // market-independent lookups — compute ONCE (previously re-queried inside every market iteration):
     // unit cost per subcat, the volume-dominant supplier per subcat, and supplier payment terms.
     // COST BASIS (Ben): forecast-WEIGHTED current product cost — for each subcategory, Σ(SKU forecast units ×
@@ -11280,6 +11271,21 @@ async function computeAutoForecast(markets) {
     const catOf={}; scatRows.rows.forEach(r=> catOf[r.s]=r.category);
     const onHand={}; ohRows.rows.forEach(r=> onHand[r.s+'|'+r.market]=Number(r.onhand)||0);              // subcat|market → current stock
     const onOrder={}; ooRows.rows.forEach(r=>{ const k=r.s+'|'+r.market; (onOrder[k]||(onOrder[k]={}))[r.m]=(onOrder[k][r.m]||0)+(Number(r.qty)||0); });   // subcat|market → arrivalMonth → open-PO qty
+    return { win, allMonths, leadCol, unitCost, supName, terms, freightTiers, dutyPct, ppu, catOf, onHand, onOrder };
+}
+async function computeAutoForecast(markets) {
+  {
+    const C = await afLoadCommon();
+    const { win, allMonths, leadCol, unitCost, supName, terms, freightTiers, dutyPct, ppu, catOf, onHand, onOrder } = C;
+    // per-computation state
+    const unitsBy={};                                     // supplier -> {month->units, total}
+    const pay={deposit:{},completion:{},balance:{},freight:{},duty:{}}; // bucket -> month -> amount
+    const addPay=(b,mo,v)=>{ if(win.indexOf(mo)<0||!(v>0))return; (pay[b][mo]=(pay[b][mo]||0)+v); };
+    const txMap={};  // transaction detail, aggregated 1 row per supplier: key = reference|type|month
+    const addTxn=(ref,type,mo,v,mk2,sup)=>{ if(win.indexOf(mo)<0||!(v>0))return; const k=ref+'|'+type+'|'+mo;
+      if(!txMap[k])txMap[k]={reference:ref, type, amount_usd:0, date:mo+'-01', country:(mk2||'').toUpperCase(), supplier:sup||'—', month:mo};
+      txMap[k].amount_usd+=v; };
+    let truncated=false, overdueUnits=0;   // overdueUnits = gap whose order month is already past the window start → shows in cash but not in the units grid (surface it, don't hide it)
     const monthPallets={};   // market → delivery month → pallets (containerised into freight after the loop)
     // per-market pass — run all markets in PARALLEL. The only shared writes (unitsBy / pay / txMap / truncated)
     // are additive and commutative, and each market's synchronous aggregation block runs to completion without
@@ -11371,9 +11377,78 @@ async function computeAutoForecast(markets) {
       assumptions:{truncated,overdue_units:Math.round(overdueUnits)} };
   }
 }
+// NEW Auto Forecast engine (Option B): phase the REAL buy plan's buys (posted by the client) into cash, reusing the
+// shared lookups + the SAME deposit/completion/balance/duty/freight phasing as the rolling model. The client posts
+// per subcategory × market × ARRIVAL-month buy units (the buy plan's own numbers); the server derives the order
+// month (arrival − subcat lead, same lead source as the rolling engine) and phases. Overdue orders (order month
+// already before the window) FOLD into the first window month ("order now") instead of being hidden.
+// feed = [{subcat, mkt:'uk', m:'YYYY-MM', units}].
+async function computeAutoForecastFromFeed(feed, markets){
+  const C = await afLoadCommon();
+  const { win, unitCost, supName, terms, freightTiers, dutyPct, ppu, catOf, leadCol } = C;
+  const unitsBy={};
+  const pay={deposit:{},completion:{},balance:{},freight:{},duty:{}};
+  const addPay=(b,mo,v)=>{ if(win.indexOf(mo)<0||!(v>0))return; (pay[b][mo]=(pay[b][mo]||0)+v); };
+  const txMap={};
+  const addTxn=(ref,type,mo,v,mk2,sup)=>{ if(win.indexOf(mo)<0||!(v>0))return; const k=ref+'|'+type+'|'+mo;
+    if(!txMap[k])txMap[k]={reference:ref, type, amount_usd:0, date:mo+'-01', country:(mk2||'').toUpperCase(), supplier:sup||'—', month:mo};
+    txMap[k].amount_usd+=v; };
+  let truncated=false, overdueUnits=0;
+  const monthPallets={};
+  // per-market subcat lead (weeks→months), same source/formula as the rolling engine
+  const leadM={};
+  await Promise.all(markets.map(async(mk)=>{ const lc=leadCol[mk]; if(!lc)return;
+    const lr=await pool.query(`SELECT subcategory s, avg(coalesce(production_lead_time_weeks,0)+coalesce(${lc},0)) wk
+      FROM planner.products WHERE subcategory IS NOT NULL GROUP BY 1`);
+    const mm={}; lr.rows.forEach(r=> mm[r.s]=Math.max(1,Math.round(Number(r.wk)/4.345))); leadM[mk]=mm; }));
+  const winMin=win[0], winMax=win[win.length-1];
+  for(const row of (feed||[])){
+    const s=row.subcat, mk=(row.mkt||'').toLowerCase(), m=row.m; const arrive=Math.round(Number(row.units)||0);
+    if(!s||!mk||!m||!(arrive>0)||markets.indexOf(mk)<0)continue;
+    if(m>winMax){ truncated=true; continue; }                 // arrival beyond the window → surfaced, not phased
+    const lm=(leadM[mk]||{})[s]||2;
+    let om=afAddMonths(m,-lm);
+    if(om<winMin){ overdueUnits+=arrive; om=winMin; }          // fold overdue order into "order now" (month 0)
+    const nm=supName[s]||'—', c=unitCost[s]||0;
+    const t=terms[nm]||{start_deposit_pct:30,completion_pct:0,balance_pct:70,production_days:60,credit_days:0};
+    const u=unitsBy[nm]||(unitsBy[nm]={t:0}); u[om]=(u[om]||0)+arrive; u.t+=arrive;
+    const val=arrive*c;
+    const _dep=val*Number(t.start_deposit_pct||0)/100, _com=val*Number(t.completion_pct||0)/100, _bal=val*Number(t.balance_pct||0)/100;
+    const _dutyRate=dutyPct[(catOf[s]||'')+'|'+mk.toUpperCase()]||0, _duty=val*_dutyRate/100;
+    const _comM=afAddMonths(om, Math.round((t.production_days||0)/30)), _balM=afAddMonths(m, Math.round((t.credit_days||0)/30));
+    addPay('deposit', om, _dep); addPay('completion', _comM, _com); addPay('balance', _balM, _bal); addPay('duty', m, _duty);
+    (monthPallets[mk]||(monthPallets[mk]={}))[m]=((monthPallets[mk]||{})[m]||0)+arrive*(ppu[s]||0);
+    const _sc=(t.code||'').trim()||nm.replace(/[^A-Za-z0-9]/g,'').slice(0,3).toUpperCase()||'??';
+    const _ref='FC-'+mk.toUpperCase()+'-'+om+'-'+_sc;
+    addTxn(_ref,'Starting deposit',om,_dep,mk,nm); addTxn(_ref,'Completion deposit',_comM,_com,mk,nm);
+    addTxn(_ref,'Balance payment',_balM,_bal,mk,nm); if(_duty>0)addTxn(_ref,'Import duty',m,_duty,mk,nm);
+  }
+  for(const mk of markets){ const tiers=freightTiers[mk.toUpperCase()]||[]; const mp=monthPallets[mk]||{};
+    for(const mo of Object.keys(mp)){ const pallets=mp[mo]; if(!(pallets>0)||!tiers.length)continue;
+      const frtCost=seaEstSrv(tiers, pallets); if(!(frtCost>0))continue;
+      addPay('freight', mo, frtCost); addTxn('FC-'+mk.toUpperCase()+'-'+mo+'-FRT','Freight (containers)',mo,frtCost,mk,'—'); } }
+  const unitRows=Object.keys(unitsBy).filter(nm=>unitsBy[nm].t>0).sort().map(nm=>({
+    supplier:nm, months:win.map(m=>Math.round(unitsBy[nm][m]||0)), total:Math.round(unitsBy[nm].t) }));
+  const payRow=b=>win.map(m=>Math.round(pay[b][m]||0));
+  const dep=payRow('deposit'),comp=payRow('completion'),bal=payRow('balance'),frt=payRow('freight'),dty=payRow('duty');
+  const total=win.map((m,i)=>dep[i]+comp[i]+bal[i]+frt[i]+dty[i]);
+  const txns=Object.values(txMap).map(t=>({...t, amount_usd:Math.round(t.amount_usd*100)/100}));
+  txns.sort((a,b)=> a.date<b.date?-1 : a.date>b.date?1 : (a.reference<b.reference?-1 : a.reference>b.reference?1 : 0));
+  return { months:win, units:unitRows,
+    payments:{deposit:dep,completion:comp,balance:bal,freight:frt,duty:dty,total},
+    transactions:txns,
+    assumptions:{truncated, overdue_units:Math.round(overdueUnits), engine:'buyplan'} };
+}
 app.get('/api/scenario/auto-forecast', async (req, res) => {
   const markets = (req.query.market||'all').toLowerCase()==='all' ? ['uk','us','eu','au'] : [(req.query.market||'uk').toLowerCase()];
   try { res.json(await computeAutoForecast(markets)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Option B: client posts the buy plan's per-subcat×market×arrival-month buys; server phases into cash.
+app.post('/api/scenario/auto-forecast', async (req, res) => {
+  const b = req.body || {};
+  const markets = (b.market||'all').toLowerCase()==='all' ? ['uk','us','eu','au'] : [(b.market||'uk').toLowerCase()];
+  const feed = Array.isArray(b.buyFeed) ? b.buyFeed : [];
+  try { res.json(await computeAutoForecastFromFeed(feed, markets)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Auto Forecast EMAIL — sends the payments plan + transactions CSV to the recipients configured in
 // CONFIG ▸ General settings (app_settings.af_email_recipients, comma-separated). Gated on RESEND_API_KEY (sandbox stubs).
