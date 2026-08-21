@@ -4020,10 +4020,12 @@
     // Internal (team-only) note with @-mentions — hidden from the supplier; tagged teammates get an email.
     ensureTeam();
     document.querySelectorAll('#podet-'+i+' .po-int-body').forEach(function(ta){ var pop=ta.parentNode.querySelector('.po-int-pop');
-      function hide(){ if(pop){ pop.style.display='none'; pop._opts=null; } }
-      // position:fixed → escapes the timeline's overflow clip. Sit INLINE directly under the entry box, and clamp to
-      // the viewport so it can't run off-screen (the PO drawer sits on the right, so an unclamped left overflowed).
-      function place(){ if(!pop)return; var r=ta.getBoundingClientRect(); pop.style.position='fixed'; pop.style.zIndex='100000'; pop.style.minWidth=Math.max(200,r.width)+'px'; pop.style.bottom='';
+      function hide(){ if(pop){ pop.style.display='none'; pop._opts=null; if(pop.parentNode===document.body)document.body.removeChild(pop); } }
+      // The PO drawer slides in via CSS `transform`, which makes a descendant `position:fixed` relative to the DRAWER,
+      // not the viewport → the picker landed off-screen. Fix: move the popup to <body> so fixed is truly viewport-
+      // relative (also escapes the timeline's overflow clip). Sit inline under the entry box; clamp to the viewport.
+      function place(){ if(!pop)return; if(pop.parentNode!==document.body)document.body.appendChild(pop);
+        var r=ta.getBoundingClientRect(); pop.style.position='fixed'; pop.style.zIndex='100000'; pop.style.minWidth=Math.max(200,r.width)+'px'; pop.style.bottom='';
         var pw=pop.offsetWidth||Math.max(200,r.width), ph=pop.offsetHeight||190;
         pop.style.left=Math.max(8, Math.min(r.left, window.innerWidth-pw-8))+'px';
         var below=r.bottom+2; pop.style.top=((below+ph<=window.innerHeight-8) ? below : Math.max(8, r.top-ph-4))+'px'; }
@@ -4857,9 +4859,15 @@
       .then(function(res){ _navCounts.paydue=paymentsDueOverdueCount(res[0]||[], res[1]||[]); updateNavBadges(); }).catch(function(){}); }
     // PLAN action-item count → rolls up to the top-level PURCHASE ORDERS tab (so it shows before the grid is opened)
     if(_navCounts.plan===undefined){ (cache['purchase-orders']?Promise.resolve(cache['purchase-orders']):fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(d){cache['purchase-orders']=d;return d;}))
-      .then(function(rows){ rows=Array.isArray(rows)?rows:[]; var go=function(){ _navCounts.plan=rows.reduce(function(a,r){return a+poActions(r).length;},0); updateNavBadges(); }; if(!_poActStateLoaded)loadPoActState(go); else go(); }).catch(function(){}); }
+      .then(function(rows){ rows=Array.isArray(rows)?rows:[]; var go=function(){ _navCounts.plan=rows.reduce(function(a,r){return a+poActions(r).length;},0); updateNavBadges(); }; if(!_poActStateLoaded)loadPoActState(go); else go();
+        // Direct-to-Client + Custom Orders sub-tab action counters — compute here so they show on refresh (not only after visiting the report)
+        try{ var _isDC=function(b){b=(b||'').toLowerCase();return b.indexOf('direct to client')>=0||b.indexOf('b2b jlew')>=0||b.indexOf('b2b next')>=0;};
+          var _dcS=0,_coS=0; rows.forEach(function(r){ if(/complete/i.test(r.status||''))return; var n=poTabActs(r).length; if(!n)return; if(_isDC(r.branch))_dcS+=n; if(r.dtc_custom)_coS+=n; });
+          _setPoSubActBadge('directclient',_dcS); _setPoSubActBadge('customorders',_coS); }catch(e){} }).catch(function(){}); }
     if(_navCounts.pricelists===undefined){ fetch('/api/supply/price-list/pending-count').then(function(r){return r.json();}).then(function(j){ _navCounts.pricelists=(j&&j.count)||0; updateNavBadges(); }).catch(function(){}); }
+    if(!_dtcPrefetched){ _dtcPrefetched=true; try{ refreshDtcBadge(); }catch(e){} }   // DTC-mismatch issue count on the BI & REPORTS menu — populate on load, not only after opening the report
   }
+  var _dtcPrefetched=false;
   function bindPoSubNav(){ document.querySelectorAll('#supply-content .rtab[data-posub]').forEach(function(p){ p.onclick=function(){ showPoSub(p.dataset.posub); }; }); }
   // ── 🚢 Plan Shipments drawer — allocate READY-TO-SHIP POs (sea, excl. FOB/air) onto containers by drag & drop.
   //    Drop sets shipment_ref LIVE (same as the assign flow, timeline-logged). "Recommend" greedily fills 20-pallet
@@ -9842,7 +9850,7 @@
     else writeHash([v]);
   }
   function syncHash(){ if(current==='reports') writeHash(['supply','reports',reportTab]);
-    else if(current==='purchase-orders') writeHash(['supply','purchase-orders'].concat(poSub&&PO_SUB_KEYS.indexOf(poSub)>=0&&poSub!=='plan'?[poSub]:[]));
+    else if(current==='purchase-orders') writeHash(['supply','purchase-orders'].concat(poSub&&PO_SUB_KEYS.indexOf(poSub)>=0?[poSub]:[]));   // include 'plan' so PLAN has its own deep link
     else if(current==='payments') writeHash(['supply','payments'].concat(poSub&&PAY_SUB_KEYS.indexOf(poSub)>=0&&poSub!=='paydue'?[poSub]:[]));
     else if(current==='config'){
       if(CONFIG_CTX==='supply') writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['supply','config','portal',encodeURIComponent(PORTAL_SUP.toLowerCase())]:['supply','config',CONFIG_SUB]);   // SUPPLY ▸ CONFIG → #/supply/config/<item>
