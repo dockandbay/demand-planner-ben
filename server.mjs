@@ -7861,29 +7861,33 @@ async function _tplIlgAllocate(period) {
     if (di.channel) channels.add(ILG_CHAN[di.channel.toUpperCase()] || di.channel);
     di.items.forEach(it => { const c = _ilgClassify(it.label, di.channel); add(c.account, c.kind, it.vat > 0.005, it.total, it.vat); }); }
   // Shipping detail (invoice_00) → per-order Gross freight → Cin7 cost centre → channel freight (VAT / No-VAT).
-  const shipFile = files.find(f => /invoice_0/i.test(f.filename || ''));
-  let shipUnmapped = 0, shipTotal = 0;
-  if (shipFile) {
-    const isCsv = /\.csv$/i.test(shipFile.filename || '') || /csv/i.test(shipFile.content_type || '');
-    let ship = []; try { ship = await _tplIlgShipDetail(shipFile.content, isCsv); } catch (e) { ship = []; }
-    const refs = [...new Set(ship.map(s => s.ref).filter(Boolean))];
+  const shipFiles = files.filter(f => /invoice_0/i.test(f.filename || ''));   // ALL per-order freight files (invoice_00…) — combine them
+  let shipUnmapped = 0, shipTotal = 0, shipRefCount = 0; const unmappedRefs = new Set();
+  if (shipFiles.length) {
+    let ship = [];
+    for (const sf of shipFiles) { const isCsv = /\.csv$/i.test(sf.filename || '') || /csv/i.test(sf.content_type || ''); try { ship = ship.concat(await _tplIlgShipDetail(sf.content, isCsv)); } catch (e) {} }
+    const refs = [...new Set(ship.map(s => s.ref).filter(Boolean))]; shipRefCount = refs.length;
     const dbrows = refs.length ? (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [refs])).rows : [];
     const byRef = {}, byCon = {}; dbrows.forEach(r => { const cc = String(r.cc || '').trim(); if (r.reference) byRef[r.reference] = cc; if (r.customer_order_no) byCon[r.customer_order_no] = cc; });
     ship.forEach(s => { shipTotal += s.gross; const cc = (byRef[s.ref] != null) ? byRef[s.ref] : (byCon[s.ref] != null ? byCon[s.ref] : null);
-      if (cc) add('Fulfilment - ' + String(cc).replace(/^COGS\s*-\s*/i, ''), 'freight', s.vat, s.gross, s.vatAmt); else shipUnmapped += s.gross; });
+      if (cc) add('Fulfilment - ' + String(cc).replace(/^COGS\s*-\s*/i, ''), 'freight', s.vat, s.gross, s.vatAmt);
+      else { shipUnmapped += s.gross; if (s.ref && !_tplRefOverride(s.ref, 'uk_ilg')) unmappedRefs.add(s.ref); } });   // track sweepable refs (excl. FBA/TRF rule refs) so the client can offer the Clean-up sweep
   }
   const lines = Object.values(bucket).filter(b => Math.abs(b.amount) > 0.005).map(b => ({ ...b, amount: Math.round(b.amount * 100) / 100, tax: Math.round(b.tax * 100) / 100, code: ILG_CODE[b.account] || '' }));
   const total = Math.round(lines.reduce((s, l) => s + l.amount, 0) * 100) / 100;
   // Missing-file detection: the big Ecom/Shopify/Marketplace freight comes from the shipping-detail file; flag its absence.
   const missing = [];
-  if (!shipFile) missing.push('Shipping-detail file (invoice_00 .csv/.xlsx) — the per-order Ecom/Shopify/Marketplace freight (the largest part of the bill). Not uploaded.');
-  else if (shipUnmapped > 0.5) missing.push('£' + shipUnmapped.toFixed(2) + ' of shipping-detail freight has no Cin7 cost centre yet — run "Import Cin7 orders" for the month so it can be split by channel.');
+  if (!shipFiles.length) missing.push('Shipping-detail file (invoice_00 .csv/.xlsx) — the per-order Ecom/Shopify/Marketplace freight (the largest part of the bill). Not uploaded.');
+  else if (shipUnmapped > 0.5) missing.push('£' + shipUnmapped.toFixed(2) + ' of shipping-detail freight (' + unmappedRefs.size + ' order' + (unmappedRefs.size === 1 ? '' : 's') + ') has no Cin7 cost centre yet — run the Clean-up sweep below to fetch these references from Cin7 (catches orders shipped in an earlier month than the invoice).');
   const xlsUnread = files.filter(f => /\.xls$/i.test(f.filename || '')).map(f => f.filename);
   if (xlsUnread.length) missing.push('Old-format .xls file(s) can\'t be read — re-export as .xlsx: ' + xlsUnread.join(', '));
   const ccAgg = {};   // aggregate the per-fee lines to a per-account cost-centre view (so the Map table renders)
   lines.forEach(l => { if (!ccAgg[l.account]) ccAgg[l.account] = { costCenter: l.account, orders: 0, freight: 0, fulfilment: 0 }; if (l.kind === 'freight') ccAgg[l.account].freight += l.amount; else ccAgg[l.account].fulfilment += l.amount; });
   const costCenters = Object.values(ccAgg).map(c => ({ ...c, freight: Math.round(c.freight * 100) / 100, fulfilment: Math.round(c.fulfilment * 100) / 100, total: Math.round((c.freight + c.fulfilment) * 100) / 100 })).sort((a, b) => b.total - a.total);
-  return { ok: true, ilg: true, costCenters, lines, total, totals: { orders: 0, matched: 0, freight: 0, fulfilment: 0 }, invoicesSeen: seen, channelsCovered: [...channels], missing };
+  return { ok: true, ilg: true, costCenters, lines, total,
+    totals: { orders: shipRefCount, matched: Math.max(0, shipRefCount - unmappedRefs.size), freight: 0, fulfilment: 0 },
+    unmapped: { orders: unmappedRefs.size, freight: Math.round(shipUnmapped * 100) / 100, fulfilment: 0, total: Math.round(shipUnmapped * 100) / 100, refs: [...unmappedRefs].slice(0, 100) },
+    invoicesSeen: seen, channelsCovered: [...channels], missing };
 }
 app.post('/api/supply/tpl/map/:id', async (req, res) => {
   try {
@@ -8819,9 +8823,17 @@ app.post('/api/supply/tpl/cin7-sweep/:id', async (req, res) => {
     const auth = cin7Auth(); if (!auth) { await logRun(0, 'error', 'No CIN7 credentials', 0); return res.json({ ok: false, error: 'Cin7 is not configured in this environment (no CIN7 credentials).' }); }
     const row = (await pool.query(`SELECT filename, content_type, content, tpl, period FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
     if (!row) return res.status(404).json({ error: 'not found' });
-    const isCsv = /\.csv$/i.test(row.filename || '') || /csv/i.test(row.content_type || '');
-    const orders = await _tplOrderRows(row.content, isCsv, row.tpl, row.period);
-    const refs = [...new Set(orders.map(o => o.reference).filter(Boolean))];
+    let refs;
+    if (row.tpl === 'uk_ilg') {   // ILG freight files use "Your reference"/"Gross" columns (not the generic parser) — gather refs from ALL freight files for the period
+      const shipFiles = (await pool.query(`SELECT filename, content_type, content FROM planner.tpl_invoice_files WHERE tpl='uk_ilg' AND period=$1 AND filename ~* 'invoice_0'`, [row.period])).rows;
+      let ship = [];
+      for (const sf of shipFiles) { const csv = /\.csv$/i.test(sf.filename || '') || /csv/i.test(sf.content_type || ''); try { ship = ship.concat(await _tplIlgShipDetail(sf.content, csv)); } catch (e) {} }
+      refs = [...new Set(ship.map(s => s.ref).filter(Boolean))];
+    } else {
+      const isCsv = /\.csv$/i.test(row.filename || '') || /csv/i.test(row.content_type || '');
+      const orders = await _tplOrderRows(row.content, isCsv, row.tpl, row.period);
+      refs = [...new Set(orders.map(o => o.reference).filter(Boolean))];
+    }
     if (!refs.length) return res.json({ ok: false, error: 'No order references found on this invoice to sweep.' });
     const covOf = async keys => { const have = (await pool.query(`SELECT reference, customer_order_no FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [keys])).rows; const s = new Set(); have.forEach(h => { if (h.reference) s.add(h.reference); if (h.customer_order_no) s.add(h.customer_order_no); }); return s; };
     // FBA*/TRF* are assigned by standing rule (not sales orders) — never sweep them from Cin7.

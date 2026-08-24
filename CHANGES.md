@@ -1,3 +1,10 @@
+## v27.260 3PL invoice (UK ILG): combine all freight files + fix Clean-up sweep detection
+- **Combine freight files:** ILG allocation now reads **all** `invoice_0*` per-order freight files for the period combined (was: only the first via `.find`), so split/multiple freight files are all counted.
+- **Sweep now offered when freight is unmapped:** `_tplIlgAllocate` returns an `unmapped` {orders, freight, refs} object + real `totals`, so the client correctly shows the Clean-up sweep button + "N unmapped — run clean-up sweep" instead of the wrong "✓ All orders mapped — no sweep needed."
+- **Sweep actually works for ILG:** the sweep endpoint now extracts ILG refs via the ship-detail parser ("Your reference"/"Gross") across all freight files (was using the generic parser whose columns don't match ILG → it found nothing to sweep).
+- **Clearer message:** the unmapped-freight note points to the Clean-up sweep (which catches cross-month refs — orders shipped earlier than the invoice) instead of "Import Cin7 orders" (which can't).
+- Other 3PLs (iFulfilment/Geneva/Coghlans) unchanged.
+
 ## v27.259 3PL invoice reconcile: VAT gross-up (display only, Xero upload stays net)
 - The parsed grand total + Xero bill are **net** (Xero adds VAT via each line's tax type); the 3PL invoice PDF total is **gross**. The reconcile box compared net-to-gross, so it always read ~1/6 over even when correct.
 - **Added:** an editable **"+ VAT %"** field (default 20) in the reconcile box → shows the grossed-up **"inc. VAT"** total, and the "Invoice total (from PDF, inc. VAT)" input now varies against the **gross** figure. Type the PDF total and it reads "matches". Change the % for other regimes (AU 10, US 0).
