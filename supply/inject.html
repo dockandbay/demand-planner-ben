@@ -11874,11 +11874,12 @@
     // Tier trade-off hint when the order sits BETWEEN two price tiers — worth topping up to the next break.
     function tierHint(s){ var t=plTiersOf(s); if(!t||t.length<2)return ''; var qty=rowTotal(s); if(!(qty>0))return ''; var sym=curSym(plCcyOf(s));
       var cur=null,next=null; t.forEach(function(x){ var mq=Number(x.min_qty)||1; if(mq<=qty&&(!cur||mq>(Number(cur.min_qty)||1)))cur=x; if(mq>qty&&(!next||mq<(Number(next.min_qty)||1)))next=x; });
-      if(!cur||!next)return ''; var nextUC=Number(next.unit_cost), nextMin=Number(next.min_qty)||1;
-      var extra=nextMin-qty; if(!(extra>0))return ''; var delta=(nextMin*nextUC)-(qty*Number(cur.unit_cost));
+      if(!cur||!next)return ''; var curUC=Number(cur.unit_cost), nextUC=Number(next.unit_cost), nextMin=Number(next.min_qty)||1;
+      var extra=nextMin-qty; if(!(extra>0))return ''; var delta=(nextMin*nextUC)-(qty*curUC);
       var f2=function(n){ return sym+Math.abs(n).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); };
-      if(delta<=0){ return 'Increase to '+nextMin.toLocaleString()+' ('+sym+money(nextUC)+'/unit) — the extra '+extra.toLocaleString()+' units are FREE, '+f2(delta)+' cheaper overall.'; }
-      return 'The extra '+extra.toLocaleString()+' units to reach '+nextMin.toLocaleString()+' ('+sym+money(nextUC)+'/unit) cost '+f2(delta)+' — '+f2(delta/extra)+' per unit.'; }
+      var pre=qty.toLocaleString()+' units cost '+f2(curUC)+' per unit. ';
+      if(delta<=0){ return pre+'Increase to '+nextMin.toLocaleString()+' ('+f2(nextUC)+'/unit) — the extra '+extra.toLocaleString()+' units are FREE, '+f2(delta)+' cheaper overall.'; }
+      return pre+'The extra '+extra.toLocaleString()+' units to reach '+nextMin.toLocaleString()+' ('+f2(nextUC)+'/unit) cost '+f2(delta)+' — '+f2(delta/extra)+' per unit.'; }
     var ov=document.createElement('div'); ov.id='bp-po-modal-multi';
     ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200000;display:flex;flex-direction:column;padding:16px 8px;overflow:hidden';
     ov.innerHTML='<div class="pomodal" style="width:100%;max-width:none;flex:1 1 auto;display:flex;flex-direction:column;overflow:hidden;opacity:0;transition:opacity .12s ease">'
