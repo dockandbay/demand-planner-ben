@@ -1,3 +1,8 @@
+## v27.259 3PL invoice reconcile: VAT gross-up (display only, Xero upload stays net)
+- The parsed grand total + Xero bill are **net** (Xero adds VAT via each line's tax type); the 3PL invoice PDF total is **gross**. The reconcile box compared net-to-gross, so it always read ~1/6 over even when correct.
+- **Added:** an editable **"+ VAT %"** field (default 20) in the reconcile box → shows the grossed-up **"inc. VAT"** total, and the "Invoice total (from PDF, inc. VAT)" input now varies against the **gross** figure. Type the PDF total and it reads "matches". Change the % for other regimes (AU 10, US 0).
+- **Display only** — the Xero bill/CSV export is unchanged (still net lines + tax type). Non-iFulfilment 3PLs unaffected apart from the same net→gross helper in the reconcile box.
+
 ## v27.258 3PL invoice (EU iFulfilment): book "Consumables Cost" at the order level
 - **Problem:** iFulfilment bills a separate **Consumables Cost** column on the order sheet that sits OUTSIDE "Total Excl Shipping" (and outside "Total Cost" = Shipping + Total Excl Shipping). Horizon allocated off those columns, so consumables were never booked — ~€942.74/month (~€11k/yr) dropped. Confirmed against INV-192570 (Jul-26): net €48,259.51 = app-booked €47,316.77 + Consumables €942.74; ×1.2 VAT = €57,911.41 invoice total.
 - **Fix:** the order-line parser (`_tplOrderRows`) now folds a "Consumables Cost" column into each order's **fulfilment**, so it lands on the Xero bill against the order's cost centre. The Analyse reconcile grand total (`_tplGridSummary`) also folds it into the order sheet's total so both panels agree and tie to the invoice net.

@@ -13312,8 +13312,11 @@ function render3plInvoice(body){
       var _gk=Object.keys(grand), _grandStr=_gk.length?_gk.map(function(c){return e(c)+' '+fmt(grand[c]);}).join(' · '):'—';
       var _reconCur=(_gk.indexOf('EUR')>=0)?'EUR':(_gk[0]||null), _reconBase=_reconCur?grand[_reconCur]:0;
       html+='<div style="border-top:2px solid #cbd5e1;margin-top:12px;padding-top:8px;font-size:12px">'
-        +'Grand total (sum of each sheet&rsquo;s Total column, by currency): <b>'+_grandStr+'</b>'
-        +'<div style="margin-top:6px">Invoice total (from PDF)'+(_reconCur?(' — '+e(_reconCur)):'')+': <input id="tpl-recon" type="text" placeholder="0.00" style="width:130px;text-align:right;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px"> <span id="tpl-recon-var" class="mut"></span></div></div></div>';
+        +'Grand total, net (sum of each sheet&rsquo;s Total column, by currency): <b>'+_grandStr+'</b>'
+        // The parsed totals + Xero bill are NET (Xero adds VAT via each line&rsquo;s tax type). The 3PL invoice PDF total is
+        // GROSS. Gross the net base up here so it compares like-for-like — DISPLAY ONLY, the Xero upload stays net.
+        +'<div style="margin-top:6px;display:flex;align-items:center;gap:6px;flex-wrap:wrap">+ VAT <input id="tpl-recon-vat" type="text" value="20" style="width:44px;text-align:right;padding:3px 5px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px">% <span class="mut">&rarr; inc. VAT'+(_reconCur?(' ('+e(_reconCur)+')'):'')+': <b id="tpl-recon-gross">&mdash;</b></span></div>'
+        +'<div style="margin-top:6px">Invoice total (from PDF, inc. VAT)'+(_reconCur?(' — '+e(_reconCur)):'')+': <input id="tpl-recon" type="text" placeholder="0.00" style="width:130px;text-align:right;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px"> <span id="tpl-recon-var" class="mut"></span></div></div></div>';
       // 2-column: LEFT = what will go to Xero (bill preview), RIGHT = the parsed data analysis.
       var wrap='<div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start;margin-top:12px">'
         +'<div id="tpl-xero" style="flex:1 1 380px;min-width:330px"></div>'
@@ -13321,8 +13324,10 @@ function render3plInvoice(body){
       cont.innerHTML=wrap; cont.dataset.aid=String(id);
       var _xo=cont.querySelector('#tpl-xero'); if(_xo)renderXero(_xo, id);          // left: Xero bill preview
       var _mo=document.getElementById('tpl-map-out'); if(_mo)renderMap(_mo, id);   // auto-map on analyse — only exceptions + sweep to manage
-      var ri=cont.querySelector('#tpl-recon'), rv=cont.querySelector('#tpl-recon-var');
-      if(ri)ri.oninput=function(){ var v=parseFloat(String(ri.value).replace(/[^0-9.\-]/g,'')); if(!isFinite(v)){rv.textContent='';return;} var diff=v-_reconBase; rv.style.color=Math.abs(diff)<0.01?'#166534':'#b91c1c'; rv.textContent=(Math.abs(diff)<0.01?'matches':('variance '+(diff>=0?'+':'')+fmt(diff))); };
+      var ri=cont.querySelector('#tpl-recon'), rv=cont.querySelector('#tpl-recon-var'), rvat=cont.querySelector('#tpl-recon-vat'), rgr=cont.querySelector('#tpl-recon-gross');
+      function _reconCalc(){ var vat=parseFloat(String((rvat&&rvat.value)||'0').replace(/[^0-9.\-]/g,'')); if(!isFinite(vat))vat=0; var gross=_reconBase*(1+vat/100); if(rgr)rgr.textContent=_reconCur?fmt(gross):'—';
+        var v=parseFloat(String((ri&&ri.value)||'').replace(/[^0-9.\-]/g,'')); if(!isFinite(v)){ if(rv)rv.textContent=''; return; } var diff=v-gross; if(rv){ rv.style.color=Math.abs(diff)<0.01?'#166534':'#b91c1c'; rv.textContent=(Math.abs(diff)<0.01?'matches':('variance '+(diff>=0?'+':'')+fmt(diff))); } }
+      if(ri)ri.oninput=_reconCalc; if(rvat)rvat.oninput=_reconCalc; _reconCalc();
   }
   var host=body;
   function shell(){
