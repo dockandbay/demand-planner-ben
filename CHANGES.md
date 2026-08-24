@@ -1,3 +1,6 @@
+## v27.253 Price editor: copy tiers from another SKU
+- The **SET PRICE** editor (Price Lists) now has a **"📋 Copy tiers from"** control — a SKU **search box** that lists any SKU with an active tiered price (SKU · supplier · tier summary); click one to copy its tiers. An **"apply to"** selector chooses which version receives them — the **current** price or any **future** price change — so you pick the target. (Preserves your other edits; larger-qty-lower-cost validation still applies on save.)
+
 ## v27.252 Create-PO tier-savings hint: persistent bright-yellow box
 - The tier trade-off hint next to MOQ in the Create-PO modal is now a **persistent bright-yellow box** (was a dim hover-only 💡). Reworded to Ben's format, e.g. "The extra 6,000 units to reach 10,000 ($2.00/unit) cost $880.00 — $0.15 per unit." (free/negative-marginal case still called out). Recomputes on qty/supplier/production change.
 

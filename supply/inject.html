@@ -8832,6 +8832,10 @@
     var _seed=(ctx.seed!=null&&ctx.seed!=='')?Number(ctx.seed):null;   // seed price from the generic product cost (blank-cell click)
     function loadVersions(sup){ var ex=verListFor(sup); return ex.length? ex.map(function(e){return {id:e.id, efp:(e.effective_from_production||''), tiers:(e.tiers&&e.tiers.length?e.tiers.map(function(t){return {min_qty:t.min_qty,unit_cost:t.unit_cost};}):[{min_qty:1,unit_cost:''}])};}) : [{id:null, efp:'', tiers:((_seed!=null&&isFinite(_seed))?[{min_qty:1,unit_cost:_seed}]:(scope==='sku'?inheritTiers(sup):[{min_qty:1,unit_cost:''}]))}]; }
     var versions=loadVersions(supplier), deleted=[];
+    // "Copy tiers from another SKU" sources — every SKU with an active tiered price (current version preferred per SKU)
+    var copyList=(function(){ var by={}; (d.entries||[]).forEach(function(e){ if(e.scope!=='sku'||e.status!=='active'||!(e.tiers&&e.tiers.length))return; var isCur=(e.effective_from_production==null||e.effective_from_production<=curProd); var ex=by[e.sku]; if(!ex){ by[e.sku]=e; return; } var exCur=(ex.effective_from_production==null||ex.effective_from_production<=curProd); if((isCur&&!exCur)||(isCur===exCur&&(e.effective_from_production||0)>(ex.effective_from_production||0)))by[e.sku]=e; });
+      return Object.keys(by).sort().map(function(k){ var e=by[k]; return {sku:k, supplier:e.supplier, ccy:e.currency||'USD', tiers:(e.tiers||[]).map(function(t){return {min_qty:t.min_qty,unit_cost:t.unit_cost};})}; }); })();
+    function tiersSummary(ts,ccy){ var s=curSym(ccy||'USD'); return (ts||[]).map(function(t){return t.min_qty+':'+s+money(Number(t.unit_cost));}).join(' · '); }
     var ov=document.createElement('div'); ov.id='pl-ed'; ov.style.cssText='position:fixed;inset:0;z-index:200000;background:rgba(15,23,42,.35);display:flex;align-items:center;justify-content:center;padding:16px';
     function sym(){ return curSym(supCcy[supplier]||'USD'); }
     var futureProds=productions.filter(function(p){return p>curProd;});   // editor: future price changes only (strictly after current in-production)
@@ -8850,6 +8854,11 @@
       ov.innerHTML='<div style="background:#fff;border-radius:10px;padding:16px 18px;width:520px;max-width:95vw;max-height:90vh;overflow:auto;box-shadow:0 12px 40px rgba(15,23,42,.25)">'
         +'<div style="font-weight:700;margin-bottom:8px">'+(scope==='type'?('Price for type '):('SKU price — '))+'<b>'+esc(scope==='sku'?sku:pt)+'</b>'+(scope==='sku'?(' <span class="mut tiny">('+esc(pt)+')</span>'):'')+'</div>'
         +'<div style="font-size:11px;color:#475569;margin-bottom:3px">Supplier</div><div style="margin-bottom:10px">'+supSel+'</div>'
+        +'<div style="margin-bottom:10px;border:1px dashed #cbd5e1;border-radius:8px;padding:8px 10px;background:#f8fafc">'
+          +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><span style="font-size:11px;font-weight:600;color:#475569">📋 Copy tiers from</span>'
+          +'<input id="pl-copy-q" placeholder="search another SKU…" style="flex:1 1 150px;min-width:130px;padding:4px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px">'
+          +'<span class="mut tiny">apply to</span><select id="pl-copy-tgt" style="padding:4px 6px;border:1px solid #cbd5e1;border-radius:6px;font-size:12px">'+versions.map(function(v,vi){return '<option value="'+vi+'">'+(isCurV(v)?'Current price':('From prod '+esc(v.efp||'?')))+'</option>';}).join('')+'</select></div>'
+          +'<div id="pl-copy-res" style="max-height:150px;overflow:auto;margin-top:6px"></div></div>'
         +'<div style="font-size:11px;color:#475569;margin-bottom:5px">Prices <span class="mut tiny">— larger quantity must be a lower unit cost</span></div>'
         +'<div id="pl-vers">'+versions.map(verBlock).join('')+'</div>'
         +'<button id="pl-addver" style="font-size:11px;padding:3px 10px;border:1px dashed #94a3b8;border-radius:6px;background:#fff;cursor:pointer;color:#334155"'+(futureProds.length?'':' disabled title="no future productions available"')+'>＋ Add future price change</button>'
@@ -8866,7 +8875,16 @@
       ov.querySelectorAll('.pl-ver').forEach(wireVer);
       var av=ov.querySelector('#pl-addver'); if(av)av.onclick=function(){ if(!futureProds.length)return; readDom(); var seed=versions[versions.length-1]; versions.push({id:null, efp:String(futureProds[0]), tiers:(seed&&seed.tiers?seed.tiers.map(function(t){return {min_qty:t.min_qty,unit_cost:t.unit_cost};}):[{min_qty:1,unit_cost:''}])}); paint(); };
       ov.querySelector('#pl-cancel').onclick=function(){ ov.remove(); };
-      ov.querySelector('#pl-save').onclick=doSave; }
+      ov.querySelector('#pl-save').onclick=doSave;
+      // Copy tiers from another SKU → into the chosen version (current or a future price change)
+      var cq=ov.querySelector('#pl-copy-q'), cr=ov.querySelector('#pl-copy-res');
+      function renderCopy(){ if(!cr)return; var q=(cq.value||'').trim().toLowerCase();
+        if(!q){ cr.innerHTML='<div class="mut tiny" style="padding:4px 2px">Type a SKU to find its price to copy.</div>'; return; }
+        var hits=copyList.filter(function(x){ return x.sku.toLowerCase().indexOf(q)>=0 && x.sku!==sku; }).slice(0,15);
+        if(!hits.length){ cr.innerHTML='<div class="mut tiny" style="padding:4px 2px">No priced SKU matches “'+esc(q)+'”.</div>'; return; }
+        cr.innerHTML=hits.map(function(x){ return '<div class="pl-copy-row" data-sku="'+esc(x.sku)+'" style="cursor:pointer;padding:4px 6px;border-radius:5px" onmouseover="this.style.background=\'#eef2ff\'" onmouseout="this.style.background=\'\'"><div style="font-family:ui-monospace,Menlo,monospace;font-size:11px;font-weight:600">'+esc(x.sku)+' <span class="mut tiny" style="font-weight:400">'+esc(x.supplier)+'</span></div><div class="mut tiny">'+esc(tiersSummary(x.tiers,x.ccy))+'</div></div>'; }).join('');
+        cr.querySelectorAll('.pl-copy-row').forEach(function(row){ row.onclick=function(){ var src=copyList.filter(function(y){return y.sku===row.dataset.sku;})[0]; if(!src)return; var ti=parseInt((ov.querySelector('#pl-copy-tgt')||{}).value,10)||0; readDom(); if(versions[ti])versions[ti].tiers=src.tiers.map(function(t){return {min_qty:t.min_qty,unit_cost:t.unit_cost};}); paint(); }; }); }
+      if(cq){ cq.oninput=renderCopy; renderCopy(); } }
     function plProdPick(anchor,cur,prods,onPick){ var exp=document.getElementById('shpop'); if(exp)exp.remove(); var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
       pop.innerHTML='<div class="shpop-h">From production <span class="mut tiny" style="font-weight:400">(future only)</span></div><input class="shpop-q" placeholder="search production…"><div id="shpop-list"></div>';
       placePop(pop, anchor.getBoundingClientRect()); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
