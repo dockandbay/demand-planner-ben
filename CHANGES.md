@@ -1,3 +1,7 @@
+## v27.256 Fix: price-editor production picker sat behind the modal
+- The "from production" picker popup (`.shpop`) in the price editor had no `z-index`, so it opened **behind** the SET PRICE modal (z-index 200000). Given it `z-index:200060` so it sits in front.
+- (Investigated the DEMAND-plan marketing-tier filter "A shows nothing": the code is correct — `SKUM.ti` is built from `products.market_tier`, `filteredSkus` returns A-tier SKUs, `setPlanTier` applies + re-renders; verified in-build. Live failure is almost certainly a **stale injected SKU cache** — the `_SKU_RAW` blob predates `market_tier` being populated on live, so `SKUM.ti` is blank there. Fix = rebuild the live data cache. No code change.)
+
 ## v27.255 Copy-tiers UX (select + Apply, incl. new future price) + XLSX Summary tweaks
 - **Copy tiers from another SKU** reworked to be explicit: search → **click a SKU to select it** (held in the box, green ✓ with its tiers) → choose **apply to** → **Apply**. The "apply to" list now includes existing versions **and** "＋ new — from prod N" options that **add a new future price point** at that production with the copied tiers.
 - **Create-PO XLSX ▸ Summary:** category name **left-aligned**; new **Tier** column (A/B/C marketing tier, from `products.market_tier`) after Product, centred.
