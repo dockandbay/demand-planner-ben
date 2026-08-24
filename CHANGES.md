@@ -1,3 +1,6 @@
+## v27.252 Create-PO tier-savings hint: persistent bright-yellow box
+- The tier trade-off hint next to MOQ in the Create-PO modal is now a **persistent bright-yellow box** (was a dim hover-only 💡). Reworded to Ben's format, e.g. "The extra 6,000 units to reach 10,000 ($2.00/unit) cost $880.00 — $0.15 per unit." (free/negative-marginal case still called out). Recomputes on qty/supplier/production change.
+
 ## v27.251 Create-PO XLSX formatting tweaks
 - **Summary tab:** the country columns (UK/US/EU/AU/CA) are now **centred** and **coloured to the app's country colours** — the header cell in the full country colour (white text), and each SKU's country cells in a light tint of it (only where there's a qty). Client sends the `MKT_COLORS` per country.
 - **Purchase Orders tab:** reordered to **SKU · Qty · Product** (Qty next to SKU, product name moved last), Qty column centred, and each PO's **"PO total" now sits under the SKU column** with the total under the Qty column.
