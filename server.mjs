@@ -9612,9 +9612,10 @@ app.post('/api/supply/buyplan-pos/export.xlsx', async (req, res) => {
     const skuSet = new Set(); summary.forEach(r => { if (r.sku) skuSet.add(String(r.sku).toUpperCase()); });
     pos.forEach(p => (p.lines || []).forEach(l => { if (l.sku) skuSet.add(String(l.sku).toUpperCase()); }));
     const skus = [...skuSet];
-    const nameBy = {}; if (skus.length) (await pool.query(`SELECT upper(sku) sku, coalesce(nullif(product_name_final,''),product_name,'') nm FROM planner.products WHERE upper(sku)=ANY($1)`, [skus])).rows.forEach(r => nameBy[r.sku] = r.nm);
+    const nameBy = {}, tierBy = {}; if (skus.length) (await pool.query(`SELECT upper(sku) sku, coalesce(nullif(product_name_final,''),product_name,'') nm, coalesce(market_tier,'') tier FROM planner.products WHERE upper(sku)=ANY($1)`, [skus])).rows.forEach(r => { nameBy[r.sku] = r.nm; tierBy[r.sku] = r.tier; });
     const supBy = {}; (await pool.query(`SELECT upper(code) code, name FROM planner.suppliers WHERE code IS NOT NULL`)).rows.forEach(r => supBy[r.code] = r.name);
     const nm = s => nameBy[String(s || '').toUpperCase()] || '';
+    const tier = s => tierBy[String(s || '').toUpperCase()] || '';
     const ExcelJS = (await import('exceljs')).default;
     const wb = new ExcelJS.Workbook(); wb.creator = 'HORIZON';
     const HFILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF2F7' } };
@@ -9626,28 +9627,31 @@ app.post('/api/supply/buyplan-pos/export.xlsx', async (req, res) => {
     const titleFor = w => 'Production ' + (prodLbl || '?') + (batchLbl ? (' · batch ' + batchLbl) : '') + ' · ' + modeLbl;
     // ── Summary tab: SKUs grouped by category, one column per country + Total ──
     const S = wb.addWorksheet('Summary');
-    const sCols = 2 + countries.length + 1;
-    S.columns = [{ width: 26 }, { width: 42 }].concat(countries.map(() => ({ width: 11 }))).concat([{ width: 12 }]);
+    const sCols = 3 + countries.length + 1;   // SKU · Product · Tier · <countries> · Total
+    const CC0 = 4;   // first country column index (after SKU/Product/Tier)
+    S.columns = [{ width: 26 }, { width: 42 }, { width: 7 }].concat(countries.map(() => ({ width: 11 }))).concat([{ width: 12 }]);
     S.addRow(['Buy plan — ' + titleFor()]); S.mergeCells(1, 1, 1, sCols); S.getRow(1).font = { bold: true, size: 13 };
     S.addRow([]);
-    const hr = S.addRow(['SKU', 'Product'].concat(countries).concat(['Total'])); hr.font = { bold: true }; hr.eachCell(c => { c.fill = HFILL; });
+    const hr = S.addRow(['SKU', 'Product', 'Tier'].concat(countries).concat(['Total'])); hr.font = { bold: true }; hr.eachCell(c => { c.fill = HFILL; });
     // country header cells → the country's own colour (white bold); centring is set on the columns below
-    countries.forEach((c, i) => { const cell = hr.getCell(3 + i); if (COL[c]) { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: argb(COL[c]) } }; cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; } });
+    countries.forEach((c, i) => { const cell = hr.getCell(CC0 + i); if (COL[c]) { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: argb(COL[c]) } }; cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; } });
     const byCat = {}; summary.forEach(r => { const k = r.category || '(uncategorised)'; (byCat[k] = byCat[k] || []).push(r); });
     const grand = {}; countries.forEach(c => grand[c] = 0); let grandTot = 0;
     Object.keys(byCat).sort().forEach(cat => {
-      const cr = S.addRow([cat]); S.mergeCells(cr.number, 1, cr.number, sCols); cr.font = { bold: true }; cr.eachCell(c => { c.fill = CATFILL; });
+      const cr = S.addRow([cat]); S.mergeCells(cr.number, 1, cr.number, sCols); cr.font = { bold: true }; cr.eachCell(c => { c.fill = CATFILL; }); cr.getCell(1).alignment = { horizontal: 'left' };
       const sub = {}; countries.forEach(c => sub[c] = 0); let subTot = 0;
       byCat[cat].slice().sort((a, b2) => a.sku < b2.sku ? -1 : 1).forEach(r => {
-        const rr = S.addRow([r.sku, nm(r.sku)].concat(countries.map(c => { const v = (r.byCountry || {})[c] || 0; sub[c] += v; grand[c] += v; return v || ''; })).concat([r.total || 0]));
-        countries.forEach((c, i) => { if (COL[c] && (r.byCountry || {})[c]) rr.getCell(3 + i).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: tintArgb(COL[c], 0.82) } }; });   // light country tint on cells with a qty
+        const rr = S.addRow([r.sku, nm(r.sku), tier(r.sku)].concat(countries.map(c => { const v = (r.byCountry || {})[c] || 0; sub[c] += v; grand[c] += v; return v || ''; })).concat([r.total || 0]));
+        rr.getCell(3).alignment = { horizontal: 'center' };
+        countries.forEach((c, i) => { if (COL[c] && (r.byCountry || {})[c]) rr.getCell(CC0 + i).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: tintArgb(COL[c], 0.82) } }; });   // light country tint on cells with a qty
         subTot += r.total || 0; });
       grandTot += subTot;
-      const sr = S.addRow([cat + ' total', ''].concat(countries.map(c => sub[c] || '')).concat([subTot])); sr.font = { bold: true };
+      const sr = S.addRow([cat + ' total', '', ''].concat(countries.map(c => sub[c] || '')).concat([subTot])); sr.font = { bold: true };
       S.addRow([]);
     });
-    const gr = S.addRow(['TOTAL', ''].concat(countries.map(c => grand[c] || '')).concat([grandTot])); gr.font = { bold: true }; gr.eachCell(c => { c.fill = HFILL; });
-    for (let i = 0; i < countries.length; i++) S.getColumn(3 + i).alignment = { horizontal: 'center' };   // centre the country columns
+    const gr = S.addRow(['TOTAL', '', ''].concat(countries.map(c => grand[c] || '')).concat([grandTot])); gr.font = { bold: true }; gr.eachCell(c => { c.fill = HFILL; });
+    S.getColumn(3).alignment = { horizontal: 'center' };   // centre the Tier column
+    for (let i = 0; i < countries.length; i++) S.getColumn(CC0 + i).alignment = { horizontal: 'center' };   // centre the country columns
     S.getColumn(sCols).alignment = { horizontal: 'center' };   // centre Total
     S.views = [{ state: 'frozen', ySplit: 3 }];
     // ── Purchase Orders tab: grouped by supplier, each PO with its own SKU/qty list ──

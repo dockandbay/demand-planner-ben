@@ -1,3 +1,7 @@
+## v27.255 Copy-tiers UX (select + Apply, incl. new future price) + XLSX Summary tweaks
+- **Copy tiers from another SKU** reworked to be explicit: search → **click a SKU to select it** (held in the box, green ✓ with its tiers) → choose **apply to** → **Apply**. The "apply to" list now includes existing versions **and** "＋ new — from prod N" options that **add a new future price point** at that production with the copied tiers.
+- **Create-PO XLSX ▸ Summary:** category name **left-aligned**; new **Tier** column (A/B/C marketing tier, from `products.market_tier`) after Product, centred.
+
 ## v27.254 Tier hint: lead with the current tier
 - The Create-PO tier-savings box now leads with the current tier before the trade-off: e.g. "**14,000 units cost $0.28 per unit.** The extra 6,000 units to reach 20,000 ($0.24/unit) cost $880.00 — $0.15 per unit." Unit prices shown at 2dp throughout.
 
