@@ -1,3 +1,6 @@
+## v27.254 Tier hint: lead with the current tier
+- The Create-PO tier-savings box now leads with the current tier before the trade-off: e.g. "**14,000 units cost $0.28 per unit.** The extra 6,000 units to reach 20,000 ($0.24/unit) cost $880.00 — $0.15 per unit." Unit prices shown at 2dp throughout.
+
 ## v27.253 Price editor: copy tiers from another SKU
 - The **SET PRICE** editor (Price Lists) now has a **"📋 Copy tiers from"** control — a SKU **search box** that lists any SKU with an active tiered price (SKU · supplier · tier summary); click one to copy its tiers. An **"apply to"** selector chooses which version receives them — the **current** price or any **future** price change — so you pick the target. (Preserves your other edits; larger-qty-lower-cost validation still applies on save.)
 
