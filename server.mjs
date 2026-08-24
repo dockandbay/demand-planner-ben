@@ -7560,9 +7560,15 @@ function _tplGridSummary(name, grid) {
   const totCol = find('total cost') || find('total') || find('total ($)') || cols.find(c => /^total\b/i.test(c.name));
   const frCol = find('shipping fee') || find('carrier cost ($)') || find('carrier cost');
   const fuCol = find('total excl shipping') || find('fulfilment cost ($)') || find('fulfillment cost ($)') || find('fulfilment cost');
+  // iFulfilment's "Total Cost" = Shipping + Total Excl Shipping and EXCLUDES the separately-billed "Consumables
+  // Cost" column. Fold it into the sheet total so the reconcile grand total ties to the invoice + matches the
+  // per-order fulfilment booking. Fires only on the order sheet (has both a freight col + a consumables cost col).
+  const conCol = find('consumables cost');
+  let totalHi = (totCol || {}).sum ?? null;
+  if (totalHi != null && conCol && frCol) totalHi += conCol.sum;
   return {
     name, headerRow: hr + 1, dataRows: data.length, columns: cols, currencies, currency,
-    highlights: { freight: (frCol || {}).sum ?? null, fulfilment: (fuCol || {}).sum ?? null, total: (totCol || {}).sum ?? null }
+    highlights: { freight: (frCol || {}).sum ?? null, fulfilment: (fuCol || {}).sum ?? null, total: totalHi }
   };
 }
 // Some 3PLs (e.g. Coghlans) list small cost lines ONLY on a summary "Invoice" recap sheet — Support fee,
@@ -7720,20 +7726,24 @@ async function _tplOrderRows(buf, isCsv, tpl, period) {
   const REF = ['reference', 'customer ref', 'customer reference', 'customerref', 'order ref'];
   const FRT = ['shipping fee', 'carrier cost ($)', 'carrier cost', 'freight'];
   const FUL = ['total excl shipping', 'fulfilment cost ($)', 'fulfillment cost ($)', 'fulfilment cost', 'fulfillment cost'];
+  // iFulfilment bills a separate "Consumables Cost" column that sits OUTSIDE "Total Excl Shipping" (and outside
+  // "Total Cost" = Shipping + Total Excl Shipping). It's a real per-order fulfilment charge on the invoice, so
+  // fold it into fulfilment here. Exact-match only → fires on iFulfilment; other 3PLs (no such column) unchanged.
+  const CON = ['consumables cost'];
   const idxOf = (hs, cands) => { for (const cnd of cands) { const ix = hs.indexOf(cnd); if (ix >= 0) return ix; } return -1; };
   for (const { grid } of grids) {
-    let hr = -1, ri = -1, si = -1, fi = -1;
+    let hr = -1, ri = -1, si = -1, fi = -1, ci = -1;
     for (let i = 0; i < Math.min(20, grid.length); i++) {
       const hs = (grid[i] || []).map(x => String(x == null ? '' : x).trim().toLowerCase());
       const r = idxOf(hs, REF), s = idxOf(hs, FRT);
-      if (r >= 0 && s >= 0) { hr = i; ri = r; si = s; fi = idxOf(hs, FUL); break; }
+      if (r >= 0 && s >= 0) { hr = i; ri = r; si = s; fi = idxOf(hs, FUL); ci = idxOf(hs, CON); break; }
     }
     if (hr < 0) continue;
     const out = [];
     for (let r = hr + 1; r < grid.length; r++) {
       const row = grid[r] || []; const k = (row[0] != null ? String(row[0]).trim() : '');
       if (k === '' || /^total/i.test(k)) continue;
-      out.push({ reference: (ri >= 0 && row[ri] != null) ? String(row[ri]).trim() : '', shipping: _tplNum(row[si]) || 0, fulfilment: fi >= 0 ? (_tplNum(row[fi]) || 0) : 0 });
+      out.push({ reference: (ri >= 0 && row[ri] != null) ? String(row[ri]).trim() : '', shipping: _tplNum(row[si]) || 0, fulfilment: (fi >= 0 ? (_tplNum(row[fi]) || 0) : 0) + (ci >= 0 ? (_tplNum(row[ci]) || 0) : 0) });
     }
     return out;
   }
