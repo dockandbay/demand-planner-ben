@@ -13251,9 +13251,11 @@ function render3plInvoice(body){
           var dl=document.getElementById('tpl-journal-dl'); if(dl)dl.onclick=function(){ fetch('/api/supply/tpl/journal/'+id,{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(function(r){return r.text();}).then(function(csv){ var blob=new Blob([csv],{type:'text/csv;charset=utf-8'}); var url=URL.createObjectURL(blob); var a=document.createElement('a'); a.href=url; a.download='xero-journal-'+e(jd.region||'')+'-'+e(jd.period||'')+'.csv'; document.body.appendChild(a); a.click(); setTimeout(function(){URL.revokeObjectURL(url);a.remove();},150); }); };
         }).catch(function(){ jo.innerHTML=''; });
       })();
-      var _sw=document.getElementById('tpl-cin7sweep'), _swm=document.getElementById('tpl-sweep-msg'), _un=(um&&um.orders)||0;
-      if(_sw)_sw.style.display=_un>0?'':'none';
-      if(_swm){ if(_un>0){ var _sr=(um.refs||[]).slice(0,50); _swm.style.color='#b45309'; _swm.innerHTML='<b>'+_un+'</b> order(s) unmapped — run the clean-up sweep to fetch them from Cin7.'+(_sr.length?('<div style="margin-top:3px;color:#7c2d12">First '+_sr.length+': '+_sr.map(function(x){return e(String(x));}).join(', ')+(um.orders>_sr.length?' …':'')+'</div>'):''); } else { _swm.style.color='#166534'; _swm.textContent='✓ All orders mapped — no sweep needed.'; } }
+      var _sw=document.getElementById('tpl-cin7sweep'), _swm=document.getElementById('tpl-sweep-msg'), _un=(um&&um.orders)||0, _ao=(d.autoOther&&d.autoOther.orders)||0;
+      if(_sw)_sw.style.display=(_un>0||_ao>0)?'':'none';
+      if(_swm){ if(_un>0){ var _sr=(um.refs||[]).slice(0,50); _swm.style.color='#b45309'; _swm.innerHTML='<b>'+_un+'</b> order(s) unmapped — run the clean-up sweep to fetch them from Cin7.'+(_sr.length?('<div style="margin-top:3px;color:#7c2d12">First '+_sr.length+': '+_sr.map(function(x){return e(String(x));}).join(', ')+(um.orders>_sr.length?' …':'')+'</div>'):''); }
+        else if(_ao>0){ _swm.style.color='#b45309'; _swm.innerHTML='<b>£'+fmt((d.autoOther&&d.autoOther.total)||0)+'</b> of freight ('+_ao+' ref'+(_ao===1?'':'s')+') had no Cin7 cost centre → booked to <b>Other Fees</b>. Run the sweep to split it by channel.'; }
+        else { _swm.style.color='#166534'; _swm.textContent='✓ All orders mapped — no sweep needed.'; } }
     }).catch(function(err){ cont.innerHTML='<div style="color:#dc2626;font-size:12px;padding:8px 0">Mapping failed: '+e(err.message||err)+'</div>'; }); }
   // LEFT column: a faithful preview of the Xero bill (same source as the CSV — server preview:true), grouped
   // into non-order costs, per-cost-centre freight/fulfilment, and any unmapped lines, with the tax column.

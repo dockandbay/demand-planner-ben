@@ -1,3 +1,8 @@
+## v27.262 3PL invoice (UK ILG): unmapped freight auto-books to Other Fees
+- Freight whose order reference has no Cin7 cost centre is now **auto-booked to "Other Fees" (303.33)** instead of sitting as a "COST CENTRE MISSING" gap — so the Xero bill always balances to the invoice (nothing stranded).
+- The Clean-up sweep is **still offered** (amber note: "£X (N refs) booked to Other Fees — run the sweep to split it by channel"), so you can reclassify to the real channel and re-analyse if you want the proper split.
+- ILG only (per Ben, ref UK ILG July). iFulfilment/Geneva/Coghlans keep their existing "COST CENTRE MISSING" behaviour — say the word to extend it there too.
+
 ## v27.261 3PL invoice: clear 5-step workflow (Analyse is its own step)
 - Reworked the tab into numbered steps: **1** Upload file · **2** Import Cin7 orders · **3** Analyse · **4** Clean-up sweep · **5** Review Xero summary & download.
 - **Removed the confusing per-file "Analyse" button** in the file list (it read "not analysable" next to PDFs). Analyse is now a single dedicated **step-3** button that auto-picks the data file (ILG → the shipping-detail `invoice_0*`; other 3PLs → newest `.csv/.xlsx`) and renders results in step 5.

@@ -7871,14 +7871,14 @@ async function _tplIlgAllocate(period) {
     const byRef = {}, byCon = {}; dbrows.forEach(r => { const cc = String(r.cc || '').trim(); if (r.reference) byRef[r.reference] = cc; if (r.customer_order_no) byCon[r.customer_order_no] = cc; });
     ship.forEach(s => { shipTotal += s.gross; const cc = (byRef[s.ref] != null) ? byRef[s.ref] : (byCon[s.ref] != null ? byCon[s.ref] : null);
       if (cc) add('Fulfilment - ' + String(cc).replace(/^COGS\s*-\s*/i, ''), 'freight', s.vat, s.gross, s.vatAmt);
-      else { shipUnmapped += s.gross; if (s.ref && !_tplRefOverride(s.ref, 'uk_ilg')) unmappedRefs.add(s.ref); } });   // track sweepable refs (excl. FBA/TRF rule refs) so the client can offer the Clean-up sweep
+      else { shipUnmapped += s.gross; add('Other Fees', 'freight', s.vat, s.gross, s.vatAmt); if (s.ref && !_tplRefOverride(s.ref, 'uk_ilg')) unmappedRefs.add(s.ref); } });   // no Cin7 cost centre → auto-book freight to Other Fees (nothing stranded); track sweepable refs so the Clean-up sweep can still reclassify to the real channel
   }
   const lines = Object.values(bucket).filter(b => Math.abs(b.amount) > 0.005).map(b => ({ ...b, amount: Math.round(b.amount * 100) / 100, tax: Math.round(b.tax * 100) / 100, code: ILG_CODE[b.account] || '' }));
   const total = Math.round(lines.reduce((s, l) => s + l.amount, 0) * 100) / 100;
   // Missing-file detection: the big Ecom/Shopify/Marketplace freight comes from the shipping-detail file; flag its absence.
   const missing = [];
   if (!shipFiles.length) missing.push('Shipping-detail file (invoice_00 .csv/.xlsx) — the per-order Ecom/Shopify/Marketplace freight (the largest part of the bill). Not uploaded.');
-  else if (shipUnmapped > 0.5) missing.push('£' + shipUnmapped.toFixed(2) + ' of shipping-detail freight (' + unmappedRefs.size + ' order' + (unmappedRefs.size === 1 ? '' : 's') + ') has no Cin7 cost centre yet — run the Clean-up sweep below to fetch these references from Cin7 (catches orders shipped in an earlier month than the invoice).');
+  else if (shipUnmapped > 0.5) missing.push('£' + shipUnmapped.toFixed(2) + ' of shipping-detail freight (' + unmappedRefs.size + ' order' + (unmappedRefs.size === 1 ? '' : 's') + ') had no Cin7 cost centre → auto-booked to Other Fees. Run the Clean-up sweep + re-analyse to split it by channel instead.');
   const xlsUnread = files.filter(f => /\.xls$/i.test(f.filename || '')).map(f => f.filename);
   if (xlsUnread.length) missing.push('Old-format .xls file(s) can\'t be read — re-export as .xlsx: ' + xlsUnread.join(', '));
   const ccAgg = {};   // aggregate the per-fee lines to a per-account cost-centre view (so the Map table renders)
@@ -7886,7 +7886,8 @@ async function _tplIlgAllocate(period) {
   const costCenters = Object.values(ccAgg).map(c => ({ ...c, freight: Math.round(c.freight * 100) / 100, fulfilment: Math.round(c.fulfilment * 100) / 100, total: Math.round((c.freight + c.fulfilment) * 100) / 100 })).sort((a, b) => b.total - a.total);
   return { ok: true, ilg: true, costCenters, lines, total,
     totals: { orders: shipRefCount, matched: Math.max(0, shipRefCount - unmappedRefs.size), freight: 0, fulfilment: 0 },
-    unmapped: { orders: unmappedRefs.size, freight: Math.round(shipUnmapped * 100) / 100, fulfilment: 0, total: Math.round(shipUnmapped * 100) / 100, refs: [...unmappedRefs].slice(0, 100) },
+    unmapped: { orders: 0, freight: 0, fulfilment: 0, total: 0, refs: [] },   // freight with no cost centre is auto-booked to Other Fees, not left as a "COST CENTRE MISSING" gap
+    autoOther: { orders: unmappedRefs.size, total: Math.round(shipUnmapped * 100) / 100, refs: [...unmappedRefs].slice(0, 100) },
     invoicesSeen: seen, channelsCovered: [...channels], missing };
 }
 app.post('/api/supply/tpl/map/:id', async (req, res) => {
