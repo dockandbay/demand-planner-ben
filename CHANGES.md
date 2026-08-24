@@ -1,3 +1,8 @@
+## v27.263 3PL invoice: auto-to-Other for ALL 3PLs + "could not reconcile" warning box
+- Extended v27.262's auto-book-to-Other to **every 3PL**: iFulfilment & Coghlans → "Other Costs" account; Geneva → "Geneva USA - Other fees"; ILG → "Other Fees" (already). Any order ref with no Cin7 cost centre is booked to that 3PL's Other account instead of a "COST CENTRE MISSING" gap — so every bill balances to the invoice.
+- **New prominent amber warning box** on Analyse: "**N items could not be reconciled — £X auto-booked to Other**", listing the exact references that couldn't be matched, with the Clean-up sweep offered to fetch + split them by channel.
+- Removed the old "COST CENTRE MISSING" cost-centre row + scattered unmapped notes — unified into the one warning box. Uniform `autoOther {orders, total, refs}` signal across all 3PL allocators.
+
 ## v27.262 3PL invoice (UK ILG): unmapped freight auto-books to Other Fees
 - Freight whose order reference has no Cin7 cost centre is now **auto-booked to "Other Fees" (303.33)** instead of sitting as a "COST CENTRE MISSING" gap — so the Xero bill always balances to the invoice (nothing stranded).
 - The Clean-up sweep is **still offered** (amber note: "£X (N refs) booked to Other Fees — run the sweep to split it by channel"), so you can reclassify to the real channel and re-analyse if you want the proper split.

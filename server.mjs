@@ -7759,15 +7759,16 @@ function _tplRefOverride(ref, tpl) {
   return null;
 }
 function _tplAggregateAccounts(orders, refCC) {
-  const byCC = {}, unmapped = { orders: 0, freight: 0, fulfilment: 0, refs: [] };
+  const byCC = {}, autoOther = { orders: 0, freight: 0, fulfilment: 0, refs: [] };
   let mFreight = 0, mFulfil = 0, mCount = 0;
   orders.forEach(o => {
-    const cc = (o.reference != null ? refCC[o.reference] : '') || '';
-    if (cc === '') { unmapped.orders++; unmapped.freight += o.shipping; unmapped.fulfilment += o.fulfilment; if (unmapped.refs.length < 100 && o.reference) unmapped.refs.push(o.reference); }
-    else { if (!byCC[cc]) byCC[cc] = { costCenter: cc, orders: 0, freight: 0, fulfilment: 0 }; byCC[cc].orders++; byCC[cc].freight += o.shipping; byCC[cc].fulfilment += o.fulfilment; mFreight += o.shipping; mFulfil += o.fulfilment; mCount++; }
+    let cc = (o.reference != null ? refCC[o.reference] : '') || '';
+    if (cc === '') { autoOther.orders++; autoOther.freight += o.shipping; autoOther.fulfilment += o.fulfilment; if (autoOther.refs.length < 100 && o.reference) autoOther.refs.push(o.reference); cc = 'OTHER COSTS'; }   // no cost centre → auto-book to Other (nothing stranded)
+    else { mFreight += o.shipping; mFulfil += o.fulfilment; mCount++; }
+    if (!byCC[cc]) byCC[cc] = { costCenter: cc, orders: 0, freight: 0, fulfilment: 0 }; byCC[cc].orders++; byCC[cc].freight += o.shipping; byCC[cc].fulfilment += o.fulfilment;
   });
   const costCenters = Object.values(byCC).map(x => ({ ...x, total: x.freight + x.fulfilment })).sort((a, b) => b.total - a.total);
-  return { costCenters, unmapped: { ...unmapped, total: unmapped.freight + unmapped.fulfilment }, totals: { orders: orders.length, matched: mCount, freight: mFreight, fulfilment: mFulfil } };
+  return { costCenters, unmapped: { orders: 0, freight: 0, fulfilment: 0, total: 0, refs: [] }, autoOther: { ...autoOther, total: autoOther.freight + autoOther.fulfilment }, totals: { orders: orders.length, matched: mCount, freight: mFreight, fulfilment: mFulfil } };
 }
 // US Geneva FULL allocation: PDF fee totals + xlsx per-order freight/units + Cin7 CostCentres → per-Xero-account
 // breakdown (freight per-order→CostCentre; fulfilment by fee-type; B2B split Wholesale/Faire by units; overhead→Geneva
@@ -7787,7 +7788,7 @@ async function _tplGenevaAllocate(period) {
   const ccOf = ref => { const ov = _tplRefOverride(ref, 'us_geneva'); if (ov) return ov; return (byRef[ref] != null) ? byRef[ref] : (byCon[ref] != null ? byCon[ref] : null); };
   const acct = {}; const add = (a, f, u) => { if (!a) return; if (!acct[a]) acct[a] = { freight: 0, fulfilment: 0 }; acct[a].freight += (f || 0); acct[a].fulfilment += (u || 0); };
   let unmappedFreight = 0; const unmappedRefs = [];
-  Object.keys(freight).forEach(ref => { const cc = ccOf(ref); if (cc) add(cc, freight[ref], 0); else { unmappedFreight += freight[ref]; if (unmappedRefs.length < 50) unmappedRefs.push(ref); } });
+  Object.keys(freight).forEach(ref => { const cc = ccOf(ref); if (cc) add(cc, freight[ref], 0); else { unmappedFreight += freight[ref]; add('Geneva USA - Other fees', freight[ref], 0); if (unmappedRefs.length < 50) unmappedRefs.push(ref); } });   // no CostCentre → auto-book freight to Geneva Other fees
   let faireU = 0, whslU = 0; Object.keys(b2bUnits).forEach(ref => { const cc = (ccOf(ref) || '').toUpperCase(); const u = b2bUnits[ref] || 0; if (cc.indexOf('FAIRE') >= 0) faireU += u; else whslU += u; });
   const faireShare = (faireU + whslU) > 0 ? faireU / (faireU + whslU) : 0;
   items.forEach(it => { const code = it.code.toUpperCase(); if (code === 'SHIPPING') return;   // freight handled per-order above
@@ -7795,8 +7796,8 @@ async function _tplGenevaAllocate(period) {
     if (map.indexOf('|') >= 0) { const [w, f] = map.split('|'); add(f, 0, it.amount * faireShare); add(w, 0, it.amount * (1 - faireShare)); }
     else add(map, 0, it.amount); });
   const costCenters = Object.keys(acct).map(a => ({ costCenter: a, orders: 0, freight: Math.round(acct[a].freight * 100) / 100, fulfilment: Math.round(acct[a].fulfilment * 100) / 100, total: Math.round((acct[a].freight + acct[a].fulfilment) * 100) / 100 })).sort((a, b) => b.total - a.total);
-  const allocated = costCenters.reduce((s, c) => s + c.total, 0) + unmappedFreight;
-  return { ok: true, geneva: true, costCenters, unmapped: { orders: unmappedRefs.length, freight: Math.round(unmappedFreight * 100) / 100, fulfilment: 0, total: Math.round(unmappedFreight * 100) / 100, refs: unmappedRefs }, totals: { orders: refs.length, matched: refs.length - unmappedRefs.length, freight: 0, fulfilment: 0 }, invoiceTotal: Math.round(items.reduce((s, i) => s + i.amount, 0) * 100) / 100, allocated: Math.round(allocated * 100) / 100, faireSharePct: Math.round(faireShare * 1000) / 10 };
+  const allocated = costCenters.reduce((s, c) => s + c.total, 0);   // unmapped freight is now folded into Geneva Other fees (in costCenters), so don't add it again
+  return { ok: true, geneva: true, costCenters, unmapped: { orders: 0, freight: 0, fulfilment: 0, total: 0, refs: [] }, autoOther: { orders: unmappedRefs.length, freight: Math.round(unmappedFreight * 100) / 100, fulfilment: 0, total: Math.round(unmappedFreight * 100) / 100, refs: unmappedRefs }, totals: { orders: refs.length, matched: refs.length - unmappedRefs.length, freight: 0, fulfilment: 0 }, invoiceTotal: Math.round(items.reduce((s, i) => s + i.amount, 0) * 100) / 100, allocated: Math.round(allocated * 100) / 100, faireSharePct: Math.round(faireShare * 1000) / 10 };
 }
 // ── UK ILG accounting. Charge-code → Xero account (from Ben's ILG.csv mapping); channel delivery/order charges →
 // the DI's channel Freight/Fulfilment; VAT split by whether the line carries 20% VAT. Cin7-independent — the DI
@@ -7878,7 +7879,6 @@ async function _tplIlgAllocate(period) {
   // Missing-file detection: the big Ecom/Shopify/Marketplace freight comes from the shipping-detail file; flag its absence.
   const missing = [];
   if (!shipFiles.length) missing.push('Shipping-detail file (invoice_00 .csv/.xlsx) — the per-order Ecom/Shopify/Marketplace freight (the largest part of the bill). Not uploaded.');
-  else if (shipUnmapped > 0.5) missing.push('£' + shipUnmapped.toFixed(2) + ' of shipping-detail freight (' + unmappedRefs.size + ' order' + (unmappedRefs.size === 1 ? '' : 's') + ') had no Cin7 cost centre → auto-booked to Other Fees. Run the Clean-up sweep + re-analyse to split it by channel instead.');
   const xlsUnread = files.filter(f => /\.xls$/i.test(f.filename || '')).map(f => f.filename);
   if (xlsUnread.length) missing.push('Old-format .xls file(s) can\'t be read — re-export as .xlsx: ' + xlsUnread.join(', '));
   const ccAgg = {};   // aggregate the per-fee lines to a per-account cost-centre view (so the Map table renders)
@@ -8993,7 +8993,7 @@ app.post('/api/supply/tpl/xero-bill/:id', async (req, res) => {
     _tplInvoiceExtras(grids).forEach(x => push(x.desc, x.amount, cacc[x.costType] || '', cur, 'non-order'));
     (agg.costCenters || []).forEach(cc => {
       let label, code, grp;
-      if (/^OTHER COSTS$/i.test(cc.costCenter)) { label = 'Other Costs (branch transfers)'; code = cacc['other'] || ''; grp = 'non-order'; }   // TRF* rule → the 'other' cost-type account
+      if (/^OTHER COSTS$/i.test(cc.costCenter)) { label = 'Other Costs'; code = cacc['other'] || ''; grp = 'non-order'; }   // TRF* rule + refs with no Cin7 cost centre → the 'other' cost-type account
       else { label = String(cc.costCenter).replace(/^COGS\s*-\s*/i, ''); code = amap[label.toLowerCase()] || ''; grp = 'cost-centre'; }
       push('Freight - Fulfilment - ' + label, cc.freight, code, null, grp); push('Fulfilment - Fulfilment - ' + label, cc.fulfilment, code, null, grp);
     });
