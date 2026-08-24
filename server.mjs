@@ -809,8 +809,9 @@ app.use((req, res, next) => {
 // values for a few seconds coalesces bursts (refresh, multiple tabs, the auto-update reload) → repeat loads skip
 // the build. We cache DATA only, NOT the HTML, so DEV live-editing still works (the file is re-read + re-injected
 // each request). Invalidated on forecast saves so an edit shows on the next load.
-let _dataCache = null, _dataRefresh = null, _bgRefreshing = false;
+let _dataCache = null, _dataRefresh = null, _bgRefreshing = false, _kvBlobAt = 0;   // _kvBlobAt = build time of the KV blob currently loaded (drives the self-heal rebuild)
 const DATA_TTL_MS = 600000;   // 10 min — with KV + n8n-triggered invalidation this is just a staleness heartbeat, not the primary refresh.
+const MAX_BLOB_AGE_MS = 6 * 60 * 60 * 1000;   // 6h — SELF-HEAL: rebuild the KV blob FROM SUPABASE at least this often so daily n8n product-field syncs (market_tier, launch dates, cost…) surface WITHOUT needing an explicit /api/data-cache/invalidate. n8n can still invalidate post-sync for instant freshness; this is the safety net so live data can never sit stale for more than ~6h.
 // ── Shared cross-instance data cache (Vercel KV / Upstash REST) ───────────────────────────────────────────────
 // FEATURE-FLAGGED: active only when KV_REST_API_URL + KV_REST_API_TOKEN are set (Vercel prod). When absent (sandbox/
 // local) every path falls back to the in-process cache — behaviour identical to before. On Vercel the ~12MB build
@@ -833,7 +834,7 @@ async function kvWriteBlob(vals) {   // store the built 14-tuple as gzip+base64 
 }
 async function kvReadBlob() {   // reassemble the blob from KV; null on miss/corruption (caller falls back to Supabase)
   const meta = await kvCmd(['GET', KV_KEY + ':meta']); if (!meta) return null;
-  const m = JSON.parse(meta); let b64 = '';
+  const m = JSON.parse(meta); _kvBlobAt = Number(m.at) || 0; let b64 = '';
   for (let i = 0; i < m.n; i++) { const c = await kvCmd(['GET', KV_KEY + ':' + i]); if (c == null) return null; b64 += c; }
   let vals; try { vals = JSON.parse(zlib.gunzipSync(Buffer.from(b64, 'base64')).toString()); } catch (e) { return null; }
   return (Array.isArray(vals) && vals.length >= 14) ? vals : null;   // sanity-check shape before trusting it
@@ -900,7 +901,7 @@ async function _buildDataVals() {
 function refreshDataCache() {   // AUTHORITATIVE rebuild from Supabase (single-flight) + push to KV so other instances pick it up
   if (_dataRefresh) return _dataRefresh;
   _dataRefresh = _buildDataVals()
-    .then(async (vals) => { _dataCache = { at: Date.now(), vals }; _dataRefresh = null;
+    .then(async (vals) => { _dataCache = { at: Date.now(), vals }; _kvBlobAt = Date.now(); _dataRefresh = null;
       if (KV_ON) { try { await kvWriteBlob(vals); } catch (e) { console.error('[kv] write failed:', e.message); } } return vals; })
     .catch((e) => { _dataRefresh = null; throw e; });
   return _dataRefresh;
@@ -910,6 +911,7 @@ function refreshDataCache() {   // AUTHORITATIVE rebuild from Supabase (single-f
 function bgRefresh() {
   if (_bgRefreshing || _dataRefresh) return;
   if (!KV_ON) { refreshDataCache().catch(() => {}); return; }
+  if (_kvBlobAt && (Date.now() - _kvBlobAt) > MAX_BLOB_AGE_MS) { refreshDataCache().catch(() => {}); return; }   // blob past max age → authoritative rebuild from Supabase (surfaces ETL'd product-field changes), else just re-read
   _bgRefreshing = true;
   kvReadBlob().then((v) => { if (v) _dataCache = { at: Date.now(), vals: v }; }).catch(() => {}).finally(() => { _bgRefreshing = false; });
 }
@@ -923,7 +925,7 @@ async function getDataVals() {
 // background so every instance converges. Fire-and-forget so a forecast save isn't blocked on the ~12MB rebuild.
 function invalidateDataCache() { _dataCache = null; refreshDataCache().catch((e) => console.error('[cache] rebuild failed:', e.message)); }
 // Boot warm: on Vercel read the pre-built blob from KV (no Supabase); only build from Supabase if KV is empty/off.
-(async () => { try { if (KV_ON) { const v = await kvReadBlob(); if (v) { _dataCache = { at: Date.now(), vals: v }; return; } } await refreshDataCache(); } catch (e) { /* first real request will retry */ } })();
+(async () => { try { if (KV_ON) { const v = await kvReadBlob(); if (v) { _dataCache = { at: Date.now(), vals: v }; if (_kvBlobAt && (Date.now() - _kvBlobAt) > MAX_BLOB_AGE_MS) refreshDataCache().catch(() => {}); return; } } await refreshDataCache(); } catch (e) { /* first real request will retry */ } })();
 // DEMAND ▸ Trends ▸ Panel 3 (Plan sanity). Compares next-year forecast_outputs against the like-for-like 2024-26
 // actual band per category × market, then runs the rule set (R1 over-plan, R2 under-plan, R3 step change, R6 zero
 // plan on live range; "no plan" ≠ "plan is low"). Units only, read-only. Cutoff = last complete month (current partial
