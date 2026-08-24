@@ -7944,7 +7944,7 @@ app.post('/api/supply/tpl/cin7-import', async (req, res) => {
         const monEnd = lastComplete < lastDay ? lastComplete : lastDay;
         if (sweep) { start = monStart; end = monEnd; kind = 'sweep'; }
         else {
-          const cov = (await pool.query(`SELECT to_char(max(to_date),'YYYY-MM-DD') ct FROM planner.tpl_cin7_imports WHERE period=$1 AND status<>'error'`, [period])).rows[0];
+          const cov = (await pool.query(`SELECT to_char(max(to_date),'YYYY-MM-DD') ct FROM planner.tpl_cin7_imports WHERE period=$1 AND tpl=$2 AND status<>'error'`, [period, tpl0])).rows[0];   // per-3PL coverage — was period-only, so one 3PL's import wrongly marked the others "already imported"
           if (cov && cov.ct) { const d = new Date(cov.ct + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + 1); start = d.toISOString().slice(0, 10); } else start = monStart;
           end = monEnd; kind = 'incremental';
           if (start > end) { const summary = await tplCin7Summary(period, tpl0); return res.json({ ok: true, done: true, imported: 0, period, kind, note: 'Already imported through ' + cov.ct + ' — nothing new. Use Sweep up to re-scan the month.', summary }); }
@@ -9599,6 +9599,72 @@ app.post('/api/supply/buyplan-skus', async (req, res) => {
       return { sku, qty: Math.round(Number(it.qty)), pallet_qty: m.pallet_qty || 0, category: m.category || '', main_code: m.main_code || null,
         main_name: m.main_name || '', options: (m.options || []).map(o => ({ code: o.code, name: o.name })), moq: (m.moq || null), pl, discontinue: discFor(m) }; }) });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Formatted XLSX of the Create-PO preview: "Summary" tab (SKUs by category × country) + "Purchase Orders" tab
+// (POs grouped by supplier, each with its SKU/qty list). Pure formatting — the client posts the previewed numbers;
+// the server just enriches SKU→product name + supplier code→name and lays it out with exceljs.
+app.post('/api/supply/buyplan-pos/export.xlsx', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const countries = (Array.isArray(b.countries) ? b.countries : []).map(String);
+    const summary = Array.isArray(b.summary) ? b.summary : [];
+    const pos = Array.isArray(b.purchaseOrders) ? b.purchaseOrders : [];
+    const skuSet = new Set(); summary.forEach(r => { if (r.sku) skuSet.add(String(r.sku).toUpperCase()); });
+    pos.forEach(p => (p.lines || []).forEach(l => { if (l.sku) skuSet.add(String(l.sku).toUpperCase()); }));
+    const skus = [...skuSet];
+    const nameBy = {}; if (skus.length) (await pool.query(`SELECT upper(sku) sku, coalesce(nullif(product_name_final,''),product_name,'') nm FROM planner.products WHERE upper(sku)=ANY($1)`, [skus])).rows.forEach(r => nameBy[r.sku] = r.nm);
+    const supBy = {}; (await pool.query(`SELECT upper(code) code, name FROM planner.suppliers WHERE code IS NOT NULL`)).rows.forEach(r => supBy[r.code] = r.name);
+    const nm = s => nameBy[String(s || '').toUpperCase()] || '';
+    const ExcelJS = (await import('exceljs')).default;
+    const wb = new ExcelJS.Workbook(); wb.creator = 'HORIZON';
+    const HFILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF2F7' } };
+    const CATFILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+    const prodLbl = String(b.production || '').trim(), batchLbl = String(b.batch || '').trim(), modeLbl = (b.mode === 'fba' ? 'FBA (Amazon direct)' : '3PL');
+    const titleFor = w => 'Production ' + (prodLbl || '?') + (batchLbl ? (' · batch ' + batchLbl) : '') + ' · ' + modeLbl;
+    // ── Summary tab: SKUs grouped by category, one column per country + Total ──
+    const S = wb.addWorksheet('Summary');
+    const sCols = 2 + countries.length + 1;
+    S.columns = [{ width: 26 }, { width: 42 }].concat(countries.map(() => ({ width: 11 }))).concat([{ width: 12 }]);
+    S.addRow(['Buy plan — ' + titleFor()]); S.mergeCells(1, 1, 1, sCols); S.getRow(1).font = { bold: true, size: 13 };
+    S.addRow([]);
+    const hr = S.addRow(['SKU', 'Product'].concat(countries).concat(['Total'])); hr.font = { bold: true }; hr.eachCell(c => { c.fill = HFILL; });
+    const byCat = {}; summary.forEach(r => { const k = r.category || '(uncategorised)'; (byCat[k] = byCat[k] || []).push(r); });
+    const grand = {}; countries.forEach(c => grand[c] = 0); let grandTot = 0;
+    Object.keys(byCat).sort().forEach(cat => {
+      const cr = S.addRow([cat]); S.mergeCells(cr.number, 1, cr.number, sCols); cr.font = { bold: true }; cr.eachCell(c => { c.fill = CATFILL; });
+      const sub = {}; countries.forEach(c => sub[c] = 0); let subTot = 0;
+      byCat[cat].slice().sort((a, b2) => a.sku < b2.sku ? -1 : 1).forEach(r => {
+        S.addRow([r.sku, nm(r.sku)].concat(countries.map(c => { const v = (r.byCountry || {})[c] || 0; sub[c] += v; grand[c] += v; return v || ''; })).concat([r.total || 0]));
+        subTot += r.total || 0; });
+      grandTot += subTot;
+      const sr = S.addRow([cat + ' total', ''].concat(countries.map(c => sub[c] || '')).concat([subTot])); sr.font = { bold: true };
+      S.addRow([]);
+    });
+    const gr = S.addRow(['TOTAL', ''].concat(countries.map(c => grand[c] || '')).concat([grandTot])); gr.font = { bold: true }; gr.eachCell(c => { c.fill = HFILL; });
+    S.views = [{ state: 'frozen', ySplit: 3 }];
+    // ── Purchase Orders tab: grouped by supplier, each PO with its own SKU/qty list ──
+    const P = wb.addWorksheet('Purchase Orders');
+    P.columns = [{ width: 28 }, { width: 42 }, { width: 12 }, { width: 12 }];
+    P.addRow(['Purchase orders — ' + titleFor()]); P.mergeCells(1, 1, 1, 4); P.getRow(1).font = { bold: true, size: 13 };
+    P.addRow([]);
+    const bySup = {}; pos.forEach(p => { const sn = supBy[String(p.supplier_code || '').toUpperCase()] || p.supplier_code || '(no supplier)'; (bySup[sn] = bySup[sn] || []).push(p); });
+    Object.keys(bySup).sort().forEach(sn => {
+      const supRow = P.addRow(['Supplier: ' + sn]); P.mergeCells(supRow.number, 1, supRow.number, 4); supRow.font = { bold: true, size: 12 }; supRow.eachCell(c => { c.fill = CATFILL; });
+      bySup[sn].forEach(p => {
+        const u = (p.lines || []).reduce((a, l) => a + (Number(l.qty) || 0), 0);
+        const poRow = P.addRow([p.po + '  ·  ' + p.market + '  ·  ' + (p.pallets || 0) + ' pallet' + (Number(p.pallets) === 1 ? '' : 's') + '  ·  ' + u.toLocaleString() + ' units']);
+        P.mergeCells(poRow.number, 1, poRow.number, 4); poRow.font = { bold: true }; poRow.eachCell(c => { c.fill = HFILL; });
+        const lh = P.addRow(['SKU', 'Product', '', 'Qty']); lh.font = { italic: true, size: 10 };
+        (p.lines || []).slice().sort((a, l) => a.sku < l.sku ? -1 : 1).forEach(l => { P.addRow([l.sku, nm(l.sku), '', Number(l.qty) || 0]); });
+        const tr = P.addRow(['', '', 'PO total', u]); tr.font = { bold: true };
+        P.addRow([]);
+      });
+    });
+    P.views = [{ state: 'frozen', ySplit: 2 }];
+    const buf = await wb.xlsx.writeBuffer();
+    res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+       .set('Content-Disposition', 'attachment; filename="buy-plan.xlsx"').set('Cache-Control', 'no-store').send(Buffer.from(buf));
+  } catch (e) { log500(e); res.status(500).send('export error: ' + e.message); }
 });
 // Approve an order-plan exception on a line. field selects which: partial (default) → partial_carton_approved,
 // supplier → supplier_risk_approved, discontinue → discontinue_approved.

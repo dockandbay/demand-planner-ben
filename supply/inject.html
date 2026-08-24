@@ -11887,6 +11887,7 @@
         +'<div style="flex:2 1 320px;min-width:280px;border:1px solid #cfe8d6;border-radius:8px;padding:8px 10px;background:#f6fdf8;display:flex;flex-direction:column">'
           +'<div style="font-weight:800;color:#166534;margin-bottom:8px;display:flex;align-items:center;gap:7px"><span style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#166534;color:#fff;font-size:15px;font-weight:800;flex-shrink:0">3</span><span style="font-size:12px;letter-spacing:.03em">STEP 3 · Create</span></div>'
           +'<div style="flex:0 0 auto"><button id="bpm-create" class="tool-badge bg-green" style="border:none;cursor:pointer;padding:7px 15px;font-size:13px;font-weight:700;display:none">Create POs</button>'
+            +'<button id="bpm-xlsx" class="save-btn light" style="margin-left:8px;font-size:12px;display:none" title="Download a formatted XLSX — a Summary tab (SKUs by category × country) and a Purchase Orders tab (POs by supplier, each with its SKU/qty list)">⬇ Download XLSX</button>'
             +'<span style="font-size:10px;color:#64748b;margin-left:6px">POs create as <b>FUTURE</b>, then Order Plan opens filtered to this production + batch.</span></div>'
           +'<div id="bpm-result" style="flex:1 1 auto;max-height:24vh;overflow:auto;margin-top:7px;font-size:11px;color:#94a3b8">Preview to see the PO plan here.</div>'
         +'</div>'
@@ -11898,7 +11899,8 @@
     requestAnimationFrame(function(){ var _pm=ov.querySelector('.pomodal'); if(_pm)_pm.style.opacity='1'; });   // reveal once styles have applied (no unstyled flash)
     var close=function(){ ov.remove(); };
     document.getElementById('bpm-x').onclick=close;
-    function invalidatePreview(){ var r=document.getElementById('bpm-result'); if(r){ r.style.color='#94a3b8'; r.innerHTML='Preview to see the PO plan here.'; } var cb=document.getElementById('bpm-create'); if(cb)cb.style.display='none'; }
+    var _lastPreview=null;   // stashed preview PO split for the XLSX download (cleared whenever the preview is invalidated)
+    function invalidatePreview(){ var r=document.getElementById('bpm-result'); if(r){ r.style.color='#94a3b8'; r.innerHTML='Preview to see the PO plan here.'; } var cb=document.getElementById('bpm-create'); if(cb)cb.style.display='none'; var xb=document.getElementById('bpm-xlsx'); if(xb)xb.style.display='none'; _lastPreview=null; }
     try{ var _sd=document.getElementById('bpm-start'); if(_sd)_sd.value=new Date().toISOString().slice(0,10); }catch(e){}   // start date defaults to today
     fetch('/api/supply/prod-numbers').then(function(r){return r.json();}).then(function(rows){ var prods=(rows||[]).map(function(p){return p.prod_no;}).filter(Boolean);
       var sel=document.getElementById('bpm-prod'); if(sel){ sel.innerHTML='<option value="">— choose production —</option>'+prods.map(function(p){return '<option>'+esc(p)+'</option>';}).join('');
@@ -12002,6 +12004,7 @@
       var js=jobs(false); if(!js.length){alert('Tick at least one SKU with a quantity in a shown market');return;}
       var res=document.getElementById('bpm-result'); res.innerHTML='<div class="count">Working…</div>'; document.getElementById('bpm-create').style.display='none';
       Promise.all(js.map(function(j){ return fetch('/api/supply/buyplan-pos',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(j.payload)}).then(function(r){return r.json();}).then(function(d){return {j:j,d:d};}).catch(function(e){return {j:j,d:{error:String(e)}};}); })).then(function(all){
+        _lastPreview={all:all, countries:shown.slice(), mode:MODE};
         var h='',totPos=0;
         all.forEach(function(x){ var d=x.d||{}, lab=x.j.label, col=x.j.china?'#b45309':colOf(lab); if(d.error){ h+='<div style="break-inside:avoid;font-size:11px;color:#dc2626;margin:0 0 8px"><b>'+esc(lab)+':</b> '+esc(d.error)+'</div>'; return; } var pos=d.pos||[]; totPos+=pos.length;
           var gh='<div style="font-size:12px;margin:0 0 2px;font-weight:700;color:'+col+'">'+(x.j.china?'🏭 ':'')+esc(lab)+' — '+pos.length+' PO(s) · branch '+esc(d.branch||'(none)')+(d.warnings&&d.warnings.length?(' · <span style="color:#b45309">'+d.warnings.length+' not placed</span>'):'')+'</div>';
@@ -12009,13 +12012,23 @@
           h+='<div style="break-inside:avoid;margin:0 0 8px">'+gh+pl+'</div>';   // keep a country group intact within a column
         });
         res.style.color='#0f172a';
-        res.innerHTML=h?('<div style="column-width:260px;column-gap:18px">'+h+'</div>'):'<div style="color:#64748b">Nothing to place.</div>'; var cb=document.getElementById('bpm-create'); cb.style.display=totPos?'':'none'; }); };
+        res.innerHTML=h?('<div style="column-width:260px;column-gap:18px">'+h+'</div>'):'<div style="color:#64748b">Nothing to place.</div>'; var cb=document.getElementById('bpm-create'); cb.style.display=totPos?'':'none'; var xb=document.getElementById('bpm-xlsx'); if(xb)xb.style.display=totPos?'':'none'; }); };
     document.getElementById('bpm-create').onclick=function(){ var btn=this; if(!prodVal())return; var _prod=prodVal(), _bb=document.getElementById('bpm-batch'), _batch=(_bb&&_bb.value)||''; if(!_batch||_batch==='__addbatch__'){ alert('Choose a batch — it is required. Pick one from the Batch dropdown in Step 1 (or add a new batch number).'); if(_bb)_bb.focus(); return; } var js=jobs(true); if(!js.length)return; btn.disabled=true; btn.textContent='Creating…';
       Promise.all(js.map(function(j){ return fetch('/api/supply/buyplan-pos',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(j.payload)}).then(function(r){return r.json();}).then(function(d){ if(d&&d.error)throw new Error(j.label+': '+d.error); return (d&&d.created)||0; }); })).then(function(counts){
         var tot=counts.reduce(function(a,b){return a+b;},0); invalidateDerived(); close();
         _pendingOP={status:'future'}; if(_prod)_pendingOP.prod=_prod; if(_batch)_pendingOP.batch=_batch;   // Order Plan opens filtered to Future + this production + batch
         if(window.gotoSupplySection)window.gotoSupplySection('order-plan'); setTimeout(function(){ alert('Created '+tot+' PO(s) for '+_prod+' (incl. any China-stock top-up). Showing them in Order Plan — Future · '+_prod+(_batch?' · '+_batch:'')+'.'); },250); })
         .catch(function(e){ btn.disabled=false; btn.textContent='Create POs'; alert('Create failed: '+(e.message||e)); }); };
+    // Download a formatted XLSX of the previewed plan — Summary (SKUs by category × country) + Purchase Orders (by supplier).
+    document.getElementById('bpm-xlsx').onclick=function(){ var btn=this; if(!_lastPreview){ alert('Preview first.'); return; }
+      var summary=[]; Object.keys(REC[MODE]).forEach(function(s){ var tot=rowTotal(s); if(!(tot>0))return; var bc={}; shown.forEach(function(c){ if(isTicked(s,c)){ var q=qtyVal(s,c); if(q>0)bc[c]=q; } }); summary.push({category:(META[s]&&META[s].category)||'(uncategorised)', sku:s, byCountry:bc, total:tot}); });
+      var pos=[]; (_lastPreview.all||[]).forEach(function(x){ var lbl=x.j.label, d=x.d||{}; (d.pos||[]).forEach(function(p){ pos.push({market:lbl, po:p.po, supplier_code:p.supplier_code||'', pallets:p.pallets||0, lines:(p.lines||[]).map(function(l){return {sku:l.sku, qty:l.qty};})}); }); });
+      var bb=document.getElementById('bpm-batch'), _prod=prodVal(), _batch=(bb&&bb.value&&bb.value!=='__addbatch__')?bb.value:'';
+      var o=btn.textContent; btn.disabled=true; btn.textContent='Building…';
+      fetch('/api/supply/buyplan-pos/export.xlsx',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({production:_prod, batch:_batch, mode:MODE, countries:_lastPreview.countries||shown, summary:summary, purchaseOrders:pos})})
+        .then(function(r){ if(!r.ok)throw new Error('export failed ('+r.status+')'); return r.blob(); })
+        .then(function(blob){ var url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download='buy_plan_'+(_prod||'plan')+(_batch?('_'+_batch):'')+'_'+MODE+'.xlsx'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(url);},1500); btn.disabled=false; btn.textContent=o; })
+        .catch(function(e){ btn.disabled=false; btn.textContent=o; alert('Download failed: '+(e.message||e)); }); };
   }
   window.openBuyplanModalMulti=function(itemsByMode,mode){ try{ buyplanModalMulti(itemsByMode,mode); }catch(e){ if(window.console)console.log('[SUPPLY] buyplanModalMulti',e&&e.message); } };
   window.gotoSupplySection=function(k){ try{ showSupply(true); selectSection(k); }catch(e){ if(window.console)console.log('[SUPPLY] goto',e&&e.message); } };
