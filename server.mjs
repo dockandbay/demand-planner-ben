@@ -9619,6 +9619,9 @@ app.post('/api/supply/buyplan-pos/export.xlsx', async (req, res) => {
     const wb = new ExcelJS.Workbook(); wb.creator = 'HORIZON';
     const HFILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEFF2F7' } };
     const CATFILL = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+    const COL = b.colours || {};   // per-country hex (from the app's MKT_COLORS) for the Summary country columns
+    const argb = h => { h = String(h || '').replace('#', ''); if (h.length === 3) h = h.split('').map(c => c + c).join(''); return 'FF' + (h + '000000').slice(0, 6).toUpperCase(); };
+    const tintArgb = (h, f) => { h = String(h || '').replace('#', ''); if (h.length === 3) h = h.split('').map(c => c + c).join(''); const r = parseInt(h.slice(0, 2), 16) || 0, g = parseInt(h.slice(2, 4), 16) || 0, bl = parseInt(h.slice(4, 6), 16) || 0; const m = v => Math.round(v + (255 - v) * f).toString(16).padStart(2, '0'); return ('FF' + m(r) + m(g) + m(bl)).toUpperCase(); };
     const prodLbl = String(b.production || '').trim(), batchLbl = String(b.batch || '').trim(), modeLbl = (b.mode === 'fba' ? 'FBA (Amazon direct)' : '3PL');
     const titleFor = w => 'Production ' + (prodLbl || '?') + (batchLbl ? (' · batch ' + batchLbl) : '') + ' · ' + modeLbl;
     // ── Summary tab: SKUs grouped by category, one column per country + Total ──
@@ -9628,38 +9631,44 @@ app.post('/api/supply/buyplan-pos/export.xlsx', async (req, res) => {
     S.addRow(['Buy plan — ' + titleFor()]); S.mergeCells(1, 1, 1, sCols); S.getRow(1).font = { bold: true, size: 13 };
     S.addRow([]);
     const hr = S.addRow(['SKU', 'Product'].concat(countries).concat(['Total'])); hr.font = { bold: true }; hr.eachCell(c => { c.fill = HFILL; });
+    // country header cells → the country's own colour (white bold); centring is set on the columns below
+    countries.forEach((c, i) => { const cell = hr.getCell(3 + i); if (COL[c]) { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: argb(COL[c]) } }; cell.font = { bold: true, color: { argb: 'FFFFFFFF' } }; } });
     const byCat = {}; summary.forEach(r => { const k = r.category || '(uncategorised)'; (byCat[k] = byCat[k] || []).push(r); });
     const grand = {}; countries.forEach(c => grand[c] = 0); let grandTot = 0;
     Object.keys(byCat).sort().forEach(cat => {
       const cr = S.addRow([cat]); S.mergeCells(cr.number, 1, cr.number, sCols); cr.font = { bold: true }; cr.eachCell(c => { c.fill = CATFILL; });
       const sub = {}; countries.forEach(c => sub[c] = 0); let subTot = 0;
       byCat[cat].slice().sort((a, b2) => a.sku < b2.sku ? -1 : 1).forEach(r => {
-        S.addRow([r.sku, nm(r.sku)].concat(countries.map(c => { const v = (r.byCountry || {})[c] || 0; sub[c] += v; grand[c] += v; return v || ''; })).concat([r.total || 0]));
+        const rr = S.addRow([r.sku, nm(r.sku)].concat(countries.map(c => { const v = (r.byCountry || {})[c] || 0; sub[c] += v; grand[c] += v; return v || ''; })).concat([r.total || 0]));
+        countries.forEach((c, i) => { if (COL[c] && (r.byCountry || {})[c]) rr.getCell(3 + i).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: tintArgb(COL[c], 0.82) } }; });   // light country tint on cells with a qty
         subTot += r.total || 0; });
       grandTot += subTot;
       const sr = S.addRow([cat + ' total', ''].concat(countries.map(c => sub[c] || '')).concat([subTot])); sr.font = { bold: true };
       S.addRow([]);
     });
     const gr = S.addRow(['TOTAL', ''].concat(countries.map(c => grand[c] || '')).concat([grandTot])); gr.font = { bold: true }; gr.eachCell(c => { c.fill = HFILL; });
+    for (let i = 0; i < countries.length; i++) S.getColumn(3 + i).alignment = { horizontal: 'center' };   // centre the country columns
+    S.getColumn(sCols).alignment = { horizontal: 'center' };   // centre Total
     S.views = [{ state: 'frozen', ySplit: 3 }];
     // ── Purchase Orders tab: grouped by supplier, each PO with its own SKU/qty list ──
     const P = wb.addWorksheet('Purchase Orders');
-    P.columns = [{ width: 28 }, { width: 42 }, { width: 12 }, { width: 12 }];
-    P.addRow(['Purchase orders — ' + titleFor()]); P.mergeCells(1, 1, 1, 4); P.getRow(1).font = { bold: true, size: 13 };
+    P.columns = [{ width: 28 }, { width: 12 }, { width: 42 }];   // SKU · Qty · Product
+    P.addRow(['Purchase orders — ' + titleFor()]); P.mergeCells(1, 1, 1, 3); P.getRow(1).font = { bold: true, size: 13 };
     P.addRow([]);
     const bySup = {}; pos.forEach(p => { const sn = supBy[String(p.supplier_code || '').toUpperCase()] || p.supplier_code || '(no supplier)'; (bySup[sn] = bySup[sn] || []).push(p); });
     Object.keys(bySup).sort().forEach(sn => {
-      const supRow = P.addRow(['Supplier: ' + sn]); P.mergeCells(supRow.number, 1, supRow.number, 4); supRow.font = { bold: true, size: 12 }; supRow.eachCell(c => { c.fill = CATFILL; });
+      const supRow = P.addRow(['Supplier: ' + sn]); P.mergeCells(supRow.number, 1, supRow.number, 3); supRow.font = { bold: true, size: 12 }; supRow.eachCell(c => { c.fill = CATFILL; });
       bySup[sn].forEach(p => {
         const u = (p.lines || []).reduce((a, l) => a + (Number(l.qty) || 0), 0);
         const poRow = P.addRow([p.po + '  ·  ' + p.market + '  ·  ' + (p.pallets || 0) + ' pallet' + (Number(p.pallets) === 1 ? '' : 's') + '  ·  ' + u.toLocaleString() + ' units']);
-        P.mergeCells(poRow.number, 1, poRow.number, 4); poRow.font = { bold: true }; poRow.eachCell(c => { c.fill = HFILL; });
-        const lh = P.addRow(['SKU', 'Product', '', 'Qty']); lh.font = { italic: true, size: 10 };
-        (p.lines || []).slice().sort((a, l) => a.sku < l.sku ? -1 : 1).forEach(l => { P.addRow([l.sku, nm(l.sku), '', Number(l.qty) || 0]); });
-        const tr = P.addRow(['', '', 'PO total', u]); tr.font = { bold: true };
+        P.mergeCells(poRow.number, 1, poRow.number, 3); poRow.font = { bold: true }; poRow.eachCell(c => { c.fill = HFILL; });
+        const lh = P.addRow(['SKU', 'Qty', 'Product']); lh.font = { italic: true, size: 10 };
+        (p.lines || []).slice().sort((a, l) => a.sku < l.sku ? -1 : 1).forEach(l => { P.addRow([l.sku, Number(l.qty) || 0, nm(l.sku)]); });
+        const tr = P.addRow(['PO total', u, '']); tr.font = { bold: true };   // PO total under the SKU column, total under Qty
         P.addRow([]);
       });
     });
+    P.getColumn(2).alignment = { horizontal: 'center' };   // centre the Qty column
     P.views = [{ state: 'frozen', ySplit: 2 }];
     const buf = await wb.xlsx.writeBuffer();
     res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
