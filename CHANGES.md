@@ -1,3 +1,9 @@
+## v27.261 3PL invoice: clear 5-step workflow (Analyse is its own step)
+- Reworked the tab into numbered steps: **1** Upload file · **2** Import Cin7 orders · **3** Analyse · **4** Clean-up sweep · **5** Review Xero summary & download.
+- **Removed the confusing per-file "Analyse" button** in the file list (it read "not analysable" next to PDFs). Analyse is now a single dedicated **step-3** button that auto-picks the data file (ILG → the shipping-detail `invoice_0*`; other 3PLs → newest `.csv/.xlsx`) and renders results in step 5.
+- **Clean-up sweep now auto re-analyses** on completion (was: only re-mapped) — so the unmapped figure refreshes immediately.
+- Layout only; all endpoints/logic unchanged.
+
 ## v27.260 3PL invoice (UK ILG): combine all freight files + fix Clean-up sweep detection
 - **Combine freight files:** ILG allocation now reads **all** `invoice_0*` per-order freight files for the period combined (was: only the first via `.find`), so split/multiple freight files are all counted.
 - **Sweep now offered when freight is unmapped:** `_tplIlgAllocate` returns an `unmapped` {orders, freight, refs} object + real `totals`, so the client correctly shows the Clean-up sweep button + "N unmapped — run clean-up sweep" instead of the wrong "✓ All orders mapped — no sweep needed."
