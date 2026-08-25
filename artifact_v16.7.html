@@ -10429,25 +10429,35 @@ function renderBuyPlanView(body){
       var cost={}; if(P&&Array.isArray(P.rows)){ P.rows.forEach(function(r){ var s=r.sku||r.SKU; if(!s)return; cost[s]=Number(String(r.cost||'').replace(/,/g,''))||0; }); }
       try{ if(typeof buildLiveDemand==='function')buildLiveDemand(); if(typeof buildLiveBpOverlay==='function')buildLiveBpOverlay(); }catch(e){}
       var CT=(typeof CTRS!=='undefined'&&CTRS.length)?CTRS:['UK','US','EU','AU','CA'];
-      var order=[], lblOf={}; try{ if(typeof PROJ!=='undefined')PROJ.forEach(function(p){lblOf[p.key]=p.lbl;}); }catch(e){}
+      var order=[];
+      var _MN3=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      function _mk(y,m){ return y+'_'+(m<10?'0':'')+m; }
+      function cfMon(k){ var mm=String(k).match(/^(\d{4})_(\d{2})/); return mm?(_MN3[(+mm[2])-1]+' '+mm[1]):String(k); }   // 2026_08 → Aug 2026
+      // Derive the buy window from the date (PROJ is module-scoped, not visible here): current month, next month,
+      // the 1b after-the-20th roll, and a 12-month buying horizon.
+      var _now=new Date(), _cy=_now.getFullYear(), _cm=_now.getMonth()+1;
+      var CURK=_mk(_cy,_cm); var _ny=_cy,_nm=_cm+1; if(_nm>12){_nm=1;_ny++;} var NEXTK=_mk(_ny,_nm);
+      var after20=_now.getDate()>=20;                 // 1b: from the 20th, this month's orders roll into next month
+      var allowed={}; (function(){ var y=_cy,m=_cm; if(after20){ m++; if(m>12){m=1;y++;} }   // 12-month horizon (starts next month when past the 20th)
+        for(var _h=0;_h<12;_h++){ allowed[_mk(y,m)]=1; m++; if(m>12){m=1;y++;} } })();
       function clearCache(){ try{ if(window.BP&&BP.BUY_CACHE)Object.keys(BP.BUY_CACHE).forEach(function(k){delete BP.BUY_CACHE[k];}); }catch(e){} }
       function run(ssmMap){ var saved=window.SSM_ENABLED; window.SSM_ENABLED=ssmMap; clearCache(); var bm={}; var so=BP.skuOptions();
         for(var a=0;a<so.length;a++){ var sku=so[a].s; var pd=BP_DATA.products[sku]; if(!pd||!pd.mkts)continue; var c=cost[sku]||0;
           for(var m2=0;m2<CT.length;m2++){ var mkt=CT[m2]; var md=pd.mkts[mkt]; if(!md)continue; var proj; try{ proj=BP.project(md,pd,0,mkt,null,sku); }catch(e){ continue; }
-            for(var i=0;i<proj.length;i++){ var q=(proj[i].bQ||0)+(proj[i].bQu||0); if(!q)continue; var k=proj[i].key; if(order.indexOf(k)<0)order.push(k); bm[k]=(bm[k]||0)+q*c; } } }
+            for(var i=0;i<proj.length;i++){ var q=(proj[i].bQ||0)+(proj[i].bQu||0); if(!q)continue; var k=proj[i].key; if(after20&&k===CURK&&NEXTK)k=NEXTK; if(!allowed[k])continue; if(order.indexOf(k)<0)order.push(k); bm[k]=(bm[k]||0)+q*c; } } }
         window.SSM_ENABLED=saved; clearCache(); return bm; }
       var allOn={}; CT.forEach(function(c2){['3PL','FBA'].forEach(function(pl){allOn[c2+'|'+pl]=true;});});
       var std=run({}), ssm=run(allOn);
       order.sort();
       var rows='', totS=0,totM=0,cumD=0;
       order.forEach(function(k){ var s=std[k]||0,m=ssm[k]||0; if(Math.round(s)===0&&Math.round(m)===0)return; totS+=s;totM+=m; var d=m-s; cumD+=d;
-        rows+='<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:5px 8px;white-space:nowrap">'+esc(lblOf[k]||k)+'</td>'
+        rows+='<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:5px 8px;white-space:nowrap">'+esc(cfMon(k))+'</td>'
           +'<td style="padding:5px 8px;text-align:right;font-variant-numeric:tabular-nums">'+cfGbp(s)+'</td>'
           +'<td style="padding:5px 8px;text-align:right;font-variant-numeric:tabular-nums">'+cfGbp(m)+'</td>'
           +'<td style="padding:5px 8px;text-align:right;font-variant-numeric:tabular-nums;color:'+(d>0.5?'#b91c1c':(d<-0.5?'#166534':'#94a3b8'))+';font-weight:600">'+(d>0.5?'+':'')+cfGbp(d)+'</td>'
           +'<td style="padding:5px 8px;text-align:right;font-variant-numeric:tabular-nums;color:#64748b">'+cfGbp(cumD)+'</td></tr>'; });
       var totD=totM-totS;
-      b.innerHTML='<div style="font-size:12px;color:#475569;margin-bottom:12px;line-height:1.5">Buy plan run under both models across every SKU × market. <b>Standard</b> = weeks-of-cover; <b>SSM</b> = service-level model on for all pools. Each buy is valued at unit cost and summed by <b>order (placement) month</b>. Complex Rules (incl. the SS27 up-front block) apply in both.</div>'
+      b.innerHTML='<div style="font-size:12px;color:#475569;margin-bottom:12px;line-height:1.5">Buy plan run under both models across every SKU × market, next <b>12 months</b> of orders. <b>Standard</b> = weeks-of-cover; <b>SSM</b> = service-level model on for all pools. Each buy is valued at unit cost and summed by <b>order (placement) month</b>. Complex Rules (incl. the SS27 up-front block) apply in both.'+(after20?' Past the 20th, this month&rsquo;s orders roll into next month (1b rule).':'')+'</div>'
         +'<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px">'
         +'<div style="flex:1 1 150px;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px"><div style="font-size:10px;text-transform:uppercase;color:#64748b;font-weight:700">Standard total</div><div style="font-size:18px;font-weight:800">'+cfGbp(totS)+'</div></div>'
         +'<div style="flex:1 1 150px;border:1px solid #e2e8f0;border-radius:8px;padding:10px 12px"><div style="font-size:10px;text-transform:uppercase;color:#64748b;font-weight:700">SSM total</div><div style="font-size:18px;font-weight:800">'+cfGbp(totM)+'</div></div>'

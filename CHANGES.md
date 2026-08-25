@@ -1,3 +1,8 @@
+## v27.271 Cashflow Compare: month labels, 12-month horizon, after-20th roll
+- Month labels now read **Aug 2026** (was `2026_08`).
+- Limited to the **next 12 months** of order placements.
+- Applies the **1b after-the-20th rule**: past the 20th, the current month's orders roll into next month, so the current month shows no orders (verified: Aug = £0 on the 25th, window Sep 2026 → Aug 2027). Derived from the date (PROJ is module-scoped and not reachable in this view).
+
 ## v27.270 Buy Plan config: Cashflow Compare (Standard vs SSM) popout
 - New **Cashflow Compare (Standard vs SSM)** button on DEMAND ▸ Buy Plan (config). Popout drawer runs the full buy plan under both models (SSM off vs on for every pool), values each buy at unit cost (`/api/supply/products-all`), and shows GBP committed per **order month**: Standard, SSM, Δ, cumulative Δ, + totals.
 - Basis: goods cost at the order/placement month (deposit/balance split is a noted TODO). Toggles `SSM_ENABLED` per run + clears `BUY_CACHE`, restores after; runs the plan twice on click.
