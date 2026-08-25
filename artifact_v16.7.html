@@ -1782,6 +1782,7 @@ function crCoverWeeks(i,base,matched){
   var parts=String(p.key).split('_'); var mDate=new Date(Number(parts[0]),Number(parts[1])-1,1);
   var best=base;
   for(var j=0;j<matched.length;j++){ var m=matched[j], r=m.r;
+    if(r.coverage_type==='range'&&(m.wf||m.wt))continue;   // windowed range = up-front block buy (handled in project()), NOT a per-month cover raise
     if(m.wf && mDate<m.wf)continue;         // before the rule's window
     if(m.wt && mDate>m.wt)continue;         // after the rule's window
     var wks;
@@ -1809,6 +1810,7 @@ function crWinRule(i,base,matched){
   var parts=String(p.key).split('_'); var mDate=new Date(Number(parts[0]),Number(parts[1])-1,1);
   var best=base, win=null;
   for(var j=0;j<matched.length;j++){ var m=matched[j], r=m.r;
+    if(r.coverage_type==='range'&&(m.wf||m.wt))continue;   // windowed range = up-front block buy (handled in project())
     if(m.wf && mDate<m.wf)continue;
     if(m.wt && mDate>m.wt)continue;
     var wks;
@@ -3233,6 +3235,37 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
   }
   const zalNetAt=fi=>{ if(fi<0||fi>=PROJ.length)return 0; return zalNet[PROJ[fi].key]||0; };
   const nextZalNeed=i=>{ let t=0; for(let m=1;m<=ZAL_COVER_MONTHS;m++)t+=zalNetAt(i+m); return t; };  // 2-month forward Zalando cover (added to the 3PL buy target)
+
+  // ── Complex Rules: a "range" rule WITH a window = buy the WHOLE range up front at the window start (Ben) ──
+  // "SS27 – 7 months up front" means: during the window (e.g. from Sep 1), place ONE block order for all
+  // demand across range_from→range_to, rather than holding extra cover in those months (which a long lead
+  // pushes into the past → skipped). The block's inbound lands at placement+lead and is injected into
+  // assumedArr so the normal pass below sees it and does NOT re-buy the range. crCoverWeeks/crWinRule ignore
+  // these rules (above), so the ONLY effect of a windowed range rule is this block buy.
+  (function(){
+    const rw=crMatched.filter(m=>m.r.coverage_type==='range'&&(m.wf||m.wt)&&m.rf&&m.rt);
+    if(!rw.length)return;
+    const _md=i=>{ const pr=String(PROJ[i].key).split('_'); return new Date(Number(pr[0]),Number(pr[1])-1,1); };
+    rw.forEach(m=>{
+      // placement = first actionable (non-actual/forecast) PROJ month inside [window_from, window_to], >= now
+      let ws=-1;
+      for(let i=1;i<PROJ.length;i++){ const p=PROJ[i]; if(p.isActual||p.isForecast)continue; const d=_md(i); if(m.wt&&d>m.wt)break; if(m.wf&&d<m.wf)continue; ws=i; break; }
+      if(ws<0)return;   // window entirely in the past → nothing to place
+      // full range demand (DTC+B2B, post-disc-zeroed) over [range_from, range_to]
+      let rangeQty=0;
+      for(let j=0;j<PROJ.length;j++){ const p=PROJ[j]; if(p.isActual)continue; const d=_md(j); if(d<m.rf||d>m.rt)continue; if(discCutoff&&p.key>=discCutoff)continue; rangeQty+=((dem.DTC&&dem.DTC[p.key])||0)+((dem.B2B&&dem.B2B[p.key])||0); }
+      if(rangeQty<=0)return;
+      // net off what we already have + confirmed on-order landing by the range end
+      let have=Math.max(md.i3||0,0);
+      for(let j=0;j<PROJ.length;j++){ const p=PROJ[j]; if(_md(j)>m.rt)break; have+=(ib3[p.key]||[]).reduce((s,x)=>s+(x.qty||0),0); }
+      let blockQty=rangeQty-have; if(blockQty<=0)return;
+      blockQty=Math.ceil(blockQty/cp)*cp;   // whole cartons
+      const arr=Math.min(ws+lm,PROJ.length-1);   // inbound lands placement + full 3PL lead
+      buyDisplay[ws]=(buyDisplay[ws]||0)+blockQty;
+      assumedArr[arr]=(assumedArr[arr]||0)+blockQty;
+      buyFromLbl[arr]=(buyFromLbl[arr]?buyFromLbl[arr]+', ':'')+PROJ[ws].lbl+' up-front ('+(m.r.name||'range rule')+')';
+    });
+  })();
 
   PROJ.forEach(({key,isActual,isForecast},i)=>{
     if(isActual)return;
