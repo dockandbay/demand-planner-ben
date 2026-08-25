@@ -1704,7 +1704,7 @@ function ssmSeasonEndWeeks(sku,co,md){
   if(end>=arr.length-1)return 0;                                                // block never stops in the horizon → year-round, not a finite season
   return (end+1)*4.33;                                                          // weeks from NOW through the end of the (upcoming/remaining) season
 }
-function ssmCoverWeeks(sku,co,pool,md,pd){             // → effective base cover-weeks (SS+cycle)/wk, or null to fall back
+function ssmCoverWeeks(sku,co,pool,md,pd,slOverride){  // → effective base cover-weeks (SS+cycle)/wk, or null to fall back. slOverride = force a service level % (launch ramp)
   try{
     if(!sku||!md)return null;
     var cm=(typeof CUR_MONTH!=='undefined')?CUR_MONTH:null; if(!cm)return null;
@@ -1728,7 +1728,7 @@ function ssmCoverWeeks(sku,co,pool,md,pd){             // → effective base cov
     var Lwk=md.l3||9; if(!(Lwk>0))Lwk=9; var Lmo=Lwk/4.33;
     var sigLwk=0; if(typeof LEADTIME_VAR!=='undefined'&&LEADTIME_VAR){ var sv=LEADTIME_VAR.bySupplier&&pd&&LEADTIME_VAR.bySupplier[pd.supp]; sigLwk=(sv&&sv.n>=5)?sv.sig:((LEADTIME_VAR.global&&LEADTIME_VAR.global.sig)||0); }
     var sigLmo=sigLwk/4.33;
-    var Z=ssmZ(ssmServiceLevel(sku,co,pool));
+    var Z=ssmZ((slOverride!=null&&slOverride>0)?slOverride:ssmServiceLevel(sku,co,pool));
     var ss=Z*Math.sqrt(Lmo*sig*sig + d*d*sigLmo*sigLmo);
     var _P=ssmParamsFor(co,pool);   // per market×pool params (cycle / FBA cap / season-max)
     // Seasonal PRE-BUY (P2): for a seasonal SKU's 3PL pool, cover the whole REMAINING SEASON up front (long China
@@ -1806,7 +1806,7 @@ function crCoverWeeks(i,base,matched){
   var parts=String(p.key).split('_'); var mDate=new Date(Number(parts[0]),Number(parts[1])-1,1);
   var best=base;
   for(var j=0;j<matched.length;j++){ var m=matched[j], r=m.r;
-    if(r.coverage_type==='range'&&(m.wf||m.wt))continue;   // windowed range = up-front block buy (handled in project()), NOT a per-month cover raise
+    if(r.coverage_type==='launch_ramp'||(r.coverage_type==='range'&&(m.wf||m.wt)))continue;   // windowed range = up-front block buy; launch_ramp = SL bump — both handled in project(), not per-month cover raises here
     if(m.wf && mDate<m.wf)continue;         // before the rule's window
     if(m.wt && mDate>m.wt)continue;         // after the rule's window
     var wks;
@@ -1834,7 +1834,7 @@ function crWinRule(i,base,matched){
   var parts=String(p.key).split('_'); var mDate=new Date(Number(parts[0]),Number(parts[1])-1,1);
   var best=base, win=null;
   for(var j=0;j<matched.length;j++){ var m=matched[j], r=m.r;
-    if(r.coverage_type==='range'&&(m.wf||m.wt))continue;   // windowed range = up-front block buy (handled in project())
+    if(r.coverage_type==='launch_ramp'||(r.coverage_type==='range'&&(m.wf||m.wt)))continue;   // windowed range + launch_ramp handled in project()
     if(m.wf && mDate<m.wf)continue;
     if(m.wt && mDate>m.wt)continue;
     var wks;
@@ -3159,6 +3159,22 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
   const lt=ltWks<=2?0:Math.round(ltWks/4.33);
   const t3=t3base+tierAExtra;                           // effective 3PL target cover (wks)
   const crMatched=crMatch(skuKey,mkt);                 // Complex Rules matching this SKU's scope in this market (per-month window applied in the loop)
+  // Launch/NPD ramp (Complex Rules, option B — SSM-native): for the first N months after a SKU's launch, hold the
+  // SSM cover computed at an ELEVATED service level, decaying linearly to the tier SL by month N. Applied as a
+  // per-month FLOOR (raise-only) over [launch, launch+N). Brand-new SKUs have no sales history (σ_d guessed), so
+  // this buffers launch uncertainty; it self-reverts to normal after the ramp.
+  let _lrFloor=null;
+  (function(){
+    const lr=crMatched&&crMatched.filter(function(m){return m.r.coverage_type==='launch_ramp';})[0];
+    if(!lr||!md.launch)return;
+    const N=Math.max(1,Number(lr.r.ramp_months)||3);
+    const rampSL=Number(lr.r.ramp_sl)||0; if(!(rampSL>0))return;
+    const covRamp=ssmCoverWeeks(skuKey,mkt,'3PL',md,pd,rampSL); if(!(covRamp>0))return;
+    const baseSL=(typeof ssmServiceLevel==='function')?ssmServiceLevel(skuKey,mkt,'3PL'):0;
+    const covBase=ssmCoverWeeks(skuKey,mkt,'3PL',md,pd,baseSL)||t3base;
+    const lp=String(md.launch).split('-'); const lIdx=Number(lp[0])*12+(Number(lp[1])-1);
+    _lrFloor=function(i){ const p=PROJ[i]; if(!p||!p.key)return 0; const pr=String(p.key).split('_'); const k=(Number(pr[0])*12+(Number(pr[1])-1))-lIdx; if(k<0||k>=N)return 0; return covBase+(covRamp-covBase)*(1-(k/N)); };
+  })();
   let tf=(tfOverride!==undefined&&tfOverride!==null)?tfOverride:(md.tf||4);
   if(_ssmOnF&&(tfOverride===undefined||tfOverride===null)){ const _scf=ssmCoverWeeks(skuKey||PSKU,mkt,'FBA',md,pd); if(_scf>0)tf=_scf; }   // SSM: safety-stock-derived FBA cover (FBA opted in)
   const fm=md.fm||24;
@@ -3417,7 +3433,8 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     // Zalando top-up: 2-month forward Zalando cover added straight to the 3PL target (Ben) so the Buy 3PL funds it.
     // Buy 3PL ONLY — never FBA. With no Zalando demand this is 0 → identical to before.
     const nextZalCover=isZalEU?nextZalNeed(i):0;   // skip the work entirely off the Zalando path
-    const t3eff=crMatched.length?crCoverWeeks(i,t3,crMatched):t3;   // Complex Rules override (raise-only, per-month window)
+    let t3eff=crMatched.length?crCoverWeeks(i,t3,crMatched):t3;   // Complex Rules override (raise-only, per-month window)
+    if(_lrFloor){var _lf=_lrFloor(i); if(_lf>t3eff)t3eff=_lf;}   // launch/NPD ramp floor (raise-only)
     const tg3=fwdDemand(t3eff,i,d3DemFn)+nextFbaNeed+nextZalCover;
 
     let bQ=0,bPi=-1;
@@ -3737,7 +3754,8 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     const _ngUsed=Math.min(fTx,ng3); const _ng3close=Math.max(ng3-_ngUsed,0); const _grsTx=fTx-_ngUsed; ng3=_ng3close;   // FBA transfer runs down non-GRS first
     const c3=Math.max(pAD-_grsTx,0),cF=fAD+trfIn;
     const nextFbaNeed=Math.max(tgFbuy-cF,0);
-    const t3eff=crMatched.length?crCoverWeeks(i,t3,crMatched):t3;   // Complex Rules override (raise-only, per-month window)
+    let t3eff=crMatched.length?crCoverWeeks(i,t3,crMatched):t3;   // Complex Rules override (raise-only, per-month window)
+    if(_lrFloor){var _lf=_lrFloor(i); if(_lf>t3eff)t3eff=_lf;}   // launch/NPD ramp floor (raise-only)
     const tg3=fwdDemand(t3eff,i,d3DemFn)+nextFbaNeed+(isZalEU?nextZalNeed(i):0);   // include forward Zalando cover so SOH-vs-target colour stays fair (mirrors buy pass)
     // Cover: forward-looking — count how many weeks of future demand SOH covers
     // cover-weeks (display): count REAL future demand including post-discontinue, so cover runs down
@@ -4011,6 +4029,7 @@ var CR=(function(){
   }
   function coverText(r){
     if(r.coverage_type==='range')return fmoYY(r.range_from)+' &rarr; '+fmoYY(r.range_to);
+    if(r.coverage_type==='launch_ramp')return 'ramp '+(r.ramp_months!=null?r.ramp_months:'?')+'mo @ '+(r.ramp_sl!=null?r.ramp_sl:'?')+'% SL';
     return (r.cover_months!=null?r.cover_months:'?')+' mo cover';
   }
   function windowText(r){
@@ -4052,6 +4071,7 @@ var CR=(function(){
   function formHTML(){
     var r=editing||{};
     var isRange=r.coverage_type==='range';
+    var isLaunch=r.coverage_type==='launch_ramp';
     var catList=(typeof window.CR_CATS!=='undefined'&&window.CR_CATS.length)?window.CR_CATS:[];
     var seasonList=(typeof window.CR_SEASONS!=='undefined'&&window.CR_SEASONS.length)?window.CR_SEASONS.slice():[];
     if(r.season&&seasonList.indexOf(r.season)<0)seasonList.unshift(r.season);   // keep an old rule's season even if no longer active
@@ -4067,10 +4087,12 @@ var CR=(function(){
       +'<span class="sl" style="border-top:1px solid #e9d5ff;padding-top:7px">Window from:</span><span style="border-top:1px solid #e9d5ff;padding-top:7px"><input id="cr-wfrom" type="date" value="'+esc(r.window_from||'')+'"> <span class="sl">(blank = always on)</span></span>'
       +'<span class="sl">Window to:</span><span><input id="cr-wto" type="date" value="'+esc(r.window_to||'')+'"> <span class="sl">(blank = open-ended)</span></span>'
       +'<span class="sl" style="border-top:1px solid #e9d5ff;padding-top:7px">Coverage:</span><span style="border-top:1px solid #e9d5ff;padding-top:7px">'
-        +'<label style="margin-right:12px"><input type="radio" name="cr-ctype" value="months"'+(isRange?'':' checked')+' onchange="CR.toggleCoverage()"> Months of cover</label>'
-        +'<label><input type="radio" name="cr-ctype" value="range"'+(isRange?' checked':'')+' onchange="CR.toggleCoverage()"> Fixed month range</label></span>'
-      +'<span class="sl" id="cr-months-lbl"'+(isRange?' style="display:none"':'')+'>Cover months:</span><span id="cr-months-wrap"'+(isRange?' style="display:none"':'')+'><input id="cr-cover-months" type="number" min="0" step="0.5" value="'+esc(r.cover_months!=null?r.cover_months:'')+'" style="width:80px"> <span class="sl">months</span></span>'
+        +'<label style="margin-right:12px"><input type="radio" name="cr-ctype" value="months"'+((isRange||isLaunch)?'':' checked')+' onchange="CR.toggleCoverage()"> Months of cover</label>'
+        +'<label style="margin-right:12px"><input type="radio" name="cr-ctype" value="range"'+(isRange?' checked':'')+' onchange="CR.toggleCoverage()"> Fixed month range</label>'
+        +'<label><input type="radio" name="cr-ctype" value="launch_ramp"'+(isLaunch?' checked':'')+' onchange="CR.toggleCoverage()"> Launch ramp (SSM)</label></span>'
+      +'<span class="sl" id="cr-months-lbl"'+((isRange||isLaunch)?' style="display:none"':'')+'>Cover months:</span><span id="cr-months-wrap"'+((isRange||isLaunch)?' style="display:none"':'')+'><input id="cr-cover-months" type="number" min="0" step="0.5" value="'+esc(r.cover_months!=null?r.cover_months:'')+'" style="width:80px"> <span class="sl">months</span></span>'
       +'<span class="sl" id="cr-range-lbl"'+(isRange?'':' style="display:none"')+'>Cover range:</span><span id="cr-range-wrap"'+(isRange?'':' style="display:none"')+'><input id="cr-range-from" type="date" value="'+esc(ymToDate(r.range_from))+'"> &rarr; <input id="cr-range-to" type="date" value="'+esc(ymToDate(r.range_to))+'"> <span class="sl">(pick any day — the month is used)</span></span>'
+      +'<span class="sl" id="cr-ramp-lbl"'+(isLaunch?'':' style="display:none"')+'>Launch ramp:</span><span id="cr-ramp-wrap"'+(isLaunch?'':' style="display:none"')+'><input id="cr-ramp-months" type="number" min="1" step="1" value="'+esc(r.ramp_months!=null?r.ramp_months:3)+'" style="width:56px"> <span class="sl">months at</span> <input id="cr-ramp-sl" type="number" min="80" max="99.9" step="0.5" value="'+esc(r.ramp_sl!=null?r.ramp_sl:99)+'" style="width:64px"> <span class="sl">% service level → decays to the tier SL (needs SSM)</span></span>'
       +'<span class="sl">Enabled:</span><span><label><input id="cr-enabled" type="checkbox"'+(r.enabled===false?'':' checked')+'> active</label></span>'
       +'</div>'
       +'<div style="margin-top:10px;display:flex;gap:8px"><button type="button" onclick="CR.save()" style="font-size:10px;padding:4px 14px;border:1px solid #7c3aed;border-radius:3px;background:#7c3aed;color:#fff;cursor:pointer;font-weight:700">Save rule</button>'
@@ -4122,9 +4144,10 @@ var CR=(function(){
   function edit(id){var r=rules.filter(function(x){return String(x.id)===String(id);})[0];editing=r?JSON.parse(JSON.stringify(r)):{};crSkuSel=skuList(editing);crCatVal=editing.category||'';render();}
   function cancel(){editing=null;render();}
   function toggleCoverage(){
-    var isRange=(document.querySelector('input[name="cr-ctype"]:checked')||{}).value==='range';
-    ['cr-months-lbl','cr-months-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.style.display=isRange?'none':'';});
-    ['cr-range-lbl','cr-range-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.style.display=isRange?'':'none';});
+    var ct=(document.querySelector('input[name="cr-ctype"]:checked')||{}).value||'months';
+    ['cr-months-lbl','cr-months-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.style.display=ct==='months'?'':'none';});
+    ['cr-range-lbl','cr-range-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.style.display=ct==='range'?'':'none';});
+    ['cr-ramp-lbl','cr-ramp-wrap'].forEach(function(id){var e=document.getElementById(id);if(e)e.style.display=ct==='launch_ramp'?'':'none';});
   }
   function val(id){var e=document.getElementById(id);return e?e.value.trim():'';}
   function save(){
@@ -4141,10 +4164,13 @@ var CR=(function(){
       coverage_type:ctype,
       cover_months:ctype==='months'?val('cr-cover-months'):null,
       range_from:rf, range_to:rt,
+      ramp_months:ctype==='launch_ramp'?val('cr-ramp-months'):null,
+      ramp_sl:ctype==='launch_ramp'?val('cr-ramp-sl'):null,
       enabled:!!document.getElementById('cr-enabled').checked
     };
     if(ctype==='months'&&!base.cover_months){if(msg)msg.textContent='Enter cover months.';return;}
     if(ctype==='range'&&(!rf||!rt)){if(msg)msg.textContent='Pick both range dates.';return;}
+    if(ctype==='launch_ramp'&&(!base.ramp_months||!base.ramp_sl)){if(msg)msg.textContent='Enter ramp months + service level.';return;}
     if(msg)msg.textContent='Saving…';
     // ONE rule that applies to all selected countries (stored comma-separated in `country`; the engine matches
     // membership and the list shows it under each of its countries). On edit it stays the same rule (same id).

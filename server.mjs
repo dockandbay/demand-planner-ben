@@ -11990,36 +11990,39 @@ async function buildComplexRules() {
   try {
     const r = await pool.query(`SELECT id, country, name, sku, category, tier, season,
       to_char(window_from,'YYYY-MM-DD') window_from, to_char(window_to,'YYYY-MM-DD') window_to,
-      coverage_type, cover_months, range_from, range_to, enabled, updated_by, to_char(updated_at,'YYYY-MM-DD') updated_at
+      coverage_type, cover_months, range_from, range_to, ramp_months, ramp_sl, enabled, updated_by, to_char(updated_at,'YYYY-MM-DD') updated_at
       FROM planner.buy_complex_rules ORDER BY country, id DESC`);
-    return r.rows.map(x => ({ ...x, cover_months: x.cover_months == null ? null : Number(x.cover_months) }));
+    return r.rows.map(x => ({ ...x, cover_months: x.cover_months == null ? null : Number(x.cover_months), ramp_months: x.ramp_months == null ? null : Number(x.ramp_months), ramp_sl: x.ramp_sl == null ? null : Number(x.ramp_sl) }));
   } catch (e) { return []; }
 }
 app.get('/api/buy-complex-rules', async (_req, res) => { res.json(await buildComplexRules()); });
 app.post('/api/buy-complex-rules', async (req, res) => {
   const b = req.body || {};
   if (!b.country) return res.status(400).json({ error: 'country is required' });
-  const ct = b.coverage_type === 'range' ? 'range' : 'months';
+  const ct = b.coverage_type === 'range' ? 'range' : (b.coverage_type === 'launch_ramp' ? 'launch_ramp' : 'months');
   const cm = (ct === 'months' && b.cover_months !== '' && b.cover_months != null) ? Number(b.cover_months) : null;
   const rf = ct === 'range' ? (b.range_from || null) : null;
   const rt = ct === 'range' ? (b.range_to || null) : null;
+  const rmo = (ct === 'launch_ramp' && b.ramp_months !== '' && b.ramp_months != null) ? Number(b.ramp_months) : null;
+  const rsl = (ct === 'launch_ramp' && b.ramp_sl !== '' && b.ramp_sl != null) ? Number(b.ramp_sl) : null;
   if (ct === 'months' && cm == null) return res.status(400).json({ error: 'cover_months is required for a months rule' });
   if (ct === 'range' && (!rf || !rt)) return res.status(400).json({ error: 'range_from and range_to are required for a range rule' });
+  if (ct === 'launch_ramp' && (rmo == null || rsl == null)) return res.status(400).json({ error: 'ramp_months and ramp_sl are required for a launch ramp rule' });
   const nn = (v) => (v === '' || v == null) ? null : v;
   try {
     if (b.id) {
       await pool.query(`UPDATE planner.buy_complex_rules SET country=$1, name=$2, sku=$3, category=$4, tier=$5, season=$6,
         window_from=$7, window_to=$8, coverage_type=$9, cover_months=$10, range_from=$11, range_to=$12,
-        enabled=$13, updated_by=$14, updated_at=now() WHERE id=$15`,
+        ramp_months=$13, ramp_sl=$14, enabled=$15, updated_by=$16, updated_at=now() WHERE id=$17`,
         [b.country, nn(b.name), nn(b.sku), nn(b.category), nn(b.tier), nn(b.season), nn(b.window_from), nn(b.window_to),
-         ct, cm, rf, rt, b.enabled !== false, authUser(req) || null, b.id]);
+         ct, cm, rf, rt, rmo, rsl, b.enabled !== false, authUser(req) || null, b.id]);
       return res.json({ id: b.id });
     }
     const r = await pool.query(`INSERT INTO planner.buy_complex_rules (country, name, sku, category, tier, season,
-      window_from, window_to, coverage_type, cover_months, range_from, range_to, enabled, updated_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14) RETURNING id`,
+      window_from, window_to, coverage_type, cover_months, range_from, range_to, ramp_months, ramp_sl, enabled, updated_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
       [b.country, nn(b.name), nn(b.sku), nn(b.category), nn(b.tier), nn(b.season), nn(b.window_from), nn(b.window_to),
-       ct, cm, rf, rt, b.enabled !== false, authUser(req) || null]);
+       ct, cm, rf, rt, rmo, rsl, b.enabled !== false, authUser(req) || null]);
     res.json({ id: r.rows[0].id });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });

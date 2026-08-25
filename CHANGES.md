@@ -1,3 +1,9 @@
+## v27.266 Buy plan: Launch/NPD ramp Complex Rule (option B — SSM service-level bump)
+- New `coverage_type='launch_ramp'`: for the first **N months after a SKU's launch**, hold the SSM cover computed at an **elevated service level** (e.g. 99%), decaying linearly to the tier SL by month N. Applied as a per-month **floor** (raise-only). The clean replacement for the old First Buy launch de-risk.
+- Rule editor: third coverage option **"Launch ramp (SSM)"** + ramp-months + service-level-% inputs. Server save/load + injection wired. **Migration 243** adds `buy_complex_rules.ramp_months, ramp_sl`.
+- **Regression-safe:** inert when no launch_ramp rule exists (sandbox baseline byte-identical, buying=515); round-trips save→inject→engine.
+- **KNOWN LIMITATION (next step):** the SSM maths (`ssmCoverWeeks`/`ssmSafetyUnits`) are anchored to the **current forward-6-month demand**, so for a SKU launching >~6 months out (e.g. the whole SS27 range) both the ramp *and* the block's SSM safety are **inert until the SKU is within ~6 months of selling**. To buffer the *pre-launch* buy, SSM must be **launch-anchored** (compute σ_d / demand around the launch window, not "now"). This is the crux of the "move to SSM + back-test mid-months" work.
+
 ## v27.265 Buy plan: windowed range Complex Rule now SSM-sized (safety stock + season-detected coverage)
 - The up-front block buy (v27.264) is now **sized by the SSM model**, not raw range demand:
   - **(#2) Coverage** = demand over the **SSM-detected season** for a seasonal SKU (`ssmSeasonEndWeeks` — captures the full sell-out incl the tail beyond `range_to`), else the rule's range.
