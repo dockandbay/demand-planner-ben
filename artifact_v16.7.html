@@ -10459,7 +10459,7 @@ function renderSsmBacktestView(body){
     upMsg.style.color='#64748b';upMsg.textContent='Uploading…'; var rd=new FileReader();
     rd.onload=function(){ var b64=String(rd.result).replace(/^data:[^;]+;base64,/,'');
       fetch('/api/demand/inventory-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({snapshot_date:dt,filename:f.name,data_base64:b64})})
-        .then(function(r){return r.json();}).then(function(j){ if(j&&j.ok){ upMsg.style.color='#16a34a'; upMsg.innerHTML='Saved '+esc(j.date)+' — '+fn(j.rows)+' rows / '+fn(j.units)+'u across '+j.warehouses.length+' warehouses.'; load(); } else { upMsg.style.color='#dc2626'; upMsg.textContent='Error: '+((j&&j.error)||'failed'); } })
+        .then(function(r){return r.json();}).then(function(j){ if(j&&j.ok){ upMsg.style.color='#16a34a'; upMsg.innerHTML='Saved '+esc(j.date)+' — '+fn(j.rows)+' rows / '+fn(j.units)+'u across '+j.warehouses.length+' warehouses.'; setFile(null); if(fileEl)fileEl.value=''; if(dateEl)dateEl.value=''; load(); } else { upMsg.style.color='#dc2626'; upMsg.textContent='Error: '+((j&&j.error)||'failed'); } })   // clear the upload details on success (Ben) — ready for the next month
         .catch(function(){ upMsg.style.color='#dc2626'; upMsg.textContent='Upload failed.'; }); };
     rd.readAsDataURL(f); };
   var _st={from:'',to:'',target:''};   // backtest window + target-service, driven by the controls
@@ -11206,6 +11206,17 @@ function renderInvStatus(){
   var sohCell=function(v,bad){ return '<span style="'+(bad?'color:#b91c1c;font-weight:700':'')+'">'+invNum(v)+'</span>'; };
   var wkCell=function(v,target,bad){ return '<span style="'+(bad?'color:#b45309;font-weight:700':'')+'">'+invWks(v)+'</span> <span class="mut" style="font-size:10px">/ '+target+'w</span>'; };
   var inbCell=function(r){ return r.inbUnits>0?(invNum(r.inbUnits)+' <span class="mut" style="font-size:10px">'+invFmtEta(r.nextEta)+'</span>'):'—'; };
+  // Location-aware inbound cell: for a 3PL row show 3PL inbound, for an FBA row show FBA inbound (SUG-0032), each
+  // with the NEXT shipment's PO/ref (SUG-0031). Units = sum of inbound to that warehouse type; ETA/PO = earliest.
+  var inbCellLoc=function(loc){ return function(r){ var isF=(loc==='fba'); var nx=isF?r.nxf:r.nx3;
+    var units=0; (r.inbList||[]).forEach(function(x){ var w=(x.wh||''); if(isF?(w.indexOf('fba')>=0):(w.indexOf('3pl')>=0))units+=(x.qty||0); });
+    if(units<=0&&nx)units=nx.qty||0;
+    if(units<=0)return '—';
+    var eta=nx?nx.eta:r.nextEta, ref=(nx&&nx.ref)?nx.ref:'';
+    var refHtml=''; if(ref){ refHtml=/^PO/i.test(ref)   // PO refs → hyperlink to the PO drawer (delegated .inb-po handler); non-PO refs (transfers) plain
+      ? ' <span class="inb-po" data-po="'+esc(ref)+'" title="Open '+esc(ref)+'" style="font-size:10px;color:#1d4ed8;font-weight:600;cursor:pointer;text-decoration:underline">'+esc(ref)+'</span>'
+      : ' <span style="font-size:10px;color:#64748b;font-weight:600">'+esc(ref)+'</span>'; }
+    return invNum(units)+' <span class="mut" style="font-size:10px">'+invFmtEta(eta)+'</span>'+refHtml; }; };
   var naCell='<span style="color:#cbd5e1">n/a</span>';   // light grey — this warehouse (shp/3PL or amz/FBA) isn't in scope for the SKU in this market
   var skuCol={h:'SKU',align:'left',f:function(r){return esc(r.sku);}};
   var relCol={h:'Release',align:'left',f:function(r){return r.rw?esc(r.rw):'<span class="mut">—</span>';}};   // release window (season)
@@ -11218,8 +11229,8 @@ function renderInvStatus(){
       {h:'Status',align:'left',f:function(r){ var s=invRowStatus(r); var col=s==='Discontinued'?'#b91c1c':(s==='Soon discontinued'?'#b45309':'#16a34a'); return '<span style="color:'+col+';font-weight:600;font-size:11px">'+s+'</span>'; }},
       {h:'SOH',f:function(r){var v=soh(r); return '<span style="'+((sohBad||v<0)?'color:#b91c1c;font-weight:700':'')+'">'+invNum(v)+'</span>';}},
       {h:(isF?'FBA cover':'3PL cover'),f:function(r){var v=cov(r),t=tgt(r); var c=covAmber?'color:#b45309;font-weight:700':(covHigh?'color:#1e40af;font-weight:700':''); return '<span style="'+c+'">'+invWks(v)+'</span> <span class="mut" style="font-size:10px">/ '+t+'w</span>';}},
-      {h:'On order',f:function(r){return invNum(r.oo);}},
-      {h:'Inbound qty / ETA',f:inbCell}];
+      {h:'On order',f:function(r){return invNum(isF?r.oof:r.oo3);}},
+      {h:'Inbound qty / ETA / PO',f:inbCellLoc(loc)}];
   }
   // Status order: out of stock → low stock → backorders → overstock (Ben: low stock is the higher weekly-review priority, before backorders).
   var STATUS_META=[['oos','Out of stock','#b91c1c','#fef2f2'],['low','Low stock','#b45309','#fffbeb'],['bo','Backorders','#7c3aed','#f5f3ff'],['over','Overstock','#1e40af','#eff6ff']];

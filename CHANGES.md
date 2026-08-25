@@ -1,3 +1,9 @@
+## v27.267 Inventory Status Report: next-shipment PO + FBA inbound + PO hyperlinks (SUG-0031/0032) + snapshot-upload clear
+- **SUG-0031:** the "Inbound qty / ETA / PO" column now shows the **next shipment's PO number** next to the qty/ETA, on the out-of-stock / low-stock / backorder rows.
+- **SUG-0032:** FBA out-of-stock / low-stock rows now show **FBA-specific inbound** (and FBA on-order), not the combined 3PL+FBA figure. New location-aware inbound cell (`inbCellLoc`): 3PL rows use `nx3`, FBA rows use `nxf`; "On order" column is now location-specific (`oof`/`oo3`).
+- **PO hyperlinks:** any PO ref in the cell is a link that opens the **PO drawer** (existing `.inb-po` delegated handler → `openPODrawer`, hash fallback); non-PO refs (transfers) shown plain.
+- **Buy Plan config — snapshot upload:** the "Upload inventory snapshot" form now **clears the file + date on a successful upload** (ready for the next month).
+
 ## v27.266 Buy plan: Launch/NPD ramp Complex Rule (option B — SSM service-level bump)
 - New `coverage_type='launch_ramp'`: for the first **N months after a SKU's launch**, hold the SSM cover computed at an **elevated service level** (e.g. 99%), decaying linearly to the tier SL by month N. Applied as a per-month **floor** (raise-only). The clean replacement for the old First Buy launch de-risk.
 - Rule editor: third coverage option **"Launch ramp (SSM)"** + ramp-months + service-level-% inputs. Server save/load + injection wired. **Migration 243** adds `buy_complex_rules.ramp_months, ramp_sl`.
