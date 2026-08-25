@@ -13588,7 +13588,7 @@ function render3plInvoice(body){
     b.innerHTML=_ilgGuide
       +'<div style="'+_card+'">'+_step('1','Upload file',e(_lbl)+' · '+e(TPL3_STATE.period))
         +'<div id="tpl-drop" style="border:2px dashed #cbd5e1;border-radius:8px;padding:12px 14px;margin-bottom:12px;background:#f8fafc;transition:background .12s,border-color .12s">'
-          +'<input type="file" id="tpl-file" style="font-size:12px"> <button id="tpl-up" class="save-btn" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Upload</button>'
+          +'<input type="file" id="tpl-file" multiple style="font-size:12px"> <button id="tpl-up" class="save-btn" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Upload</button>'
           +'<span style="font-size:11px;color:#94a3b8;margin-left:8px">or drag &amp; drop a file anywhere in this box</span>'
           +'<span id="tpl-upmsg" style="font-size:12px;margin-left:10px"></span></div>'
         +'<div class="tw"><table style="border-collapse:collapse;font-size:12px;width:100%;text-align:left"><thead><tr style="background:#e9eef5;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#475569">'
@@ -13616,29 +13616,33 @@ function render3plInvoice(body){
         +'<div id="tpl-map-out"></div><div id="tpl-parse"></div>'
       +'</div>';
     var fi=b.querySelector('#tpl-file'), up=b.querySelector('#tpl-up'), msg=b.querySelector('#tpl-upmsg'), drop=b.querySelector('#tpl-drop');
-    function doUpload(f){ if(!f){ msg.style.color='#dc2626'; msg.textContent='Choose a file first.'; return; }
-      up.disabled=true; msg.style.color='#64748b'; msg.textContent='Uploading '+f.name+'…';
+    // Upload ONE file → Promise. Gzips in the browser (CompressionStream) to stay under Vercel's ~4.5MB body cap; server gunzips.
+    function uploadOne(f){ return new Promise(function(resolve,reject){
       var base={tpl:TPL3_STATE.tpl,period:TPL3_STATE.period,filename:f.name,mime:f.type||'application/octet-stream',uploaded_by:(window.ME&&ME.email)||''};
       function send(payload){ fetch('/api/supply/tpl/upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)})
-        // Vercel caps request bodies at ~4.5MB. We gzip client-side first (gets CSV well under); an already-compressed
-        // .xlsx that is still too big returns a non-JSON 413 → show a clear message (suggest CSV / direct-to-storage).
-        .then(function(r){ if(!r.ok){ return r.text().then(function(t){ var big=(r.status===413)||/too large|request entity/i.test(t||''); throw new Error(big?('This file is '+(f.size/1048576).toFixed(1)+'MB and still too large after compression for the live server (~4.5MB cap). Export it as CSV, or ask Diviyaj to enable the direct-to-storage uploader.'):('Upload failed ('+r.status+')')); }); } return r.json(); })
-        .then(function(j){ if(j&&j.error)throw new Error(j.error); load(true); }).catch(function(err){ msg.style.color='#dc2626'; msg.textContent='Failed: '+(err.message||err); up.disabled=false; }); }   // silent reload (no Loading… flash)
-      function rawUpload(){ var rd=new FileReader(); rd.onload=function(){ base.data_base64=String(rd.result); base.gzip=false; send(base); }; rd.readAsDataURL(f); }
-      // Gzip in the browser (CompressionStream) so the base64 body stays under Vercel's ~4.5MB cap; server gunzips before storing.
+        .then(function(r){ if(!r.ok){ return r.text().then(function(t){ var big=(r.status===413)||/too large|request entity/i.test(t||''); throw new Error(big?(f.name+' is '+(f.size/1048576).toFixed(1)+'MB, still too large after compression (~4.5MB cap) — export as CSV'):('upload failed '+r.status)); }); } return r.json(); })
+        .then(function(j){ if(j&&j.error)throw new Error(j.error); resolve(); }).catch(reject); }
+      function rawUpload(){ var rd=new FileReader(); rd.onload=function(){ base.data_base64=String(rd.result); base.gzip=false; send(base); }; rd.onerror=reject; rd.readAsDataURL(f); }
       if(typeof CompressionStream!=='undefined' && f.arrayBuffer){
-        msg.textContent='Compressing '+f.name+'…';
         f.arrayBuffer().then(function(ab){ var stream=new Blob([ab]).stream().pipeThrough(new CompressionStream('gzip')); return new Response(stream).arrayBuffer(); })
-          .then(function(comp){ var bytes=new Uint8Array(comp), bin='', CH=0x8000; for(var i=0;i<bytes.length;i+=CH){ bin+=String.fromCharCode.apply(null, bytes.subarray(i,i+CH)); } base.data_base64=btoa(bin); base.gzip=true; msg.textContent='Uploading '+f.name+' ('+(comp.byteLength/1048576).toFixed(1)+'MB compressed)…'; send(base); })
+          .then(function(comp){ var bytes=new Uint8Array(comp), bin='', CH=0x8000; for(var i=0;i<bytes.length;i+=CH){ bin+=String.fromCharCode.apply(null, bytes.subarray(i,i+CH)); } base.data_base64=btoa(bin); base.gzip=true; send(base); })
           .catch(function(){ rawUpload(); }); }
       else rawUpload();
+    }); }
+    // Accepts one file, a FileList, or an array — uploads them SEQUENTIALLY, then reloads once (multi drag-and-drop, Ben).
+    function doUpload(files){ var list=(files&&files.length!=null)?Array.prototype.slice.call(files):(files?[files]:[]);
+      if(!list.length){ msg.style.color='#dc2626'; msg.textContent='Choose a file first.'; return; }
+      up.disabled=true; var ok=0, fail=[];
+      (function next(i){ if(i>=list.length){ up.disabled=false; if(fi)fi.value=''; load(true); msg.style.color=fail.length?'#b45309':'#166534'; msg.textContent=(ok?('Uploaded '+ok+' file'+(ok===1?'':'s')+'.'):'')+(fail.length?(' Failed: '+fail.join('; ')):''); return; }
+        var f=list[i]; msg.style.color='#64748b'; msg.textContent=(list.length>1?('Uploading '+(i+1)+' of '+list.length+': '):'Uploading ')+f.name+'…';
+        uploadOne(f).then(function(){ ok++; next(i+1); }).catch(function(err){ fail.push(f.name+' ('+(err&&err.message||err)+')'); next(i+1); }); })(0);
     }
-    up.onclick=function(){ doUpload(fi&&fi.files&&fi.files[0]); };
-    if(fi)fi.onchange=function(){ if(fi.files&&fi.files[0])doUpload(fi.files[0]); };   // auto-upload on select OR drop-onto-input (silent — no Upload click)
+    up.onclick=function(){ doUpload(fi&&fi.files); };
+    if(fi)fi.onchange=function(){ if(fi.files&&fi.files.length)doUpload(fi.files); };   // auto-upload on select (multiple ok)
     if(drop){ var hi=function(on){ drop.style.background=on?'#eff6ff':'#f8fafc'; drop.style.borderColor=on?'#2563eb':'#cbd5e1'; };
       ['dragenter','dragover'].forEach(function(ev){ drop.addEventListener(ev,function(e){ e.preventDefault(); e.stopPropagation(); hi(true); }); });
       ['dragleave','dragend'].forEach(function(ev){ drop.addEventListener(ev,function(e){ e.preventDefault(); e.stopPropagation(); if(ev==='dragleave'&&drop.contains(e.relatedTarget))return; hi(false); }); });
-      drop.addEventListener('drop',function(e){ e.preventDefault(); e.stopPropagation(); hi(false); var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]; if(f)doUpload(f); }); }
+      drop.addEventListener('drop',function(e){ e.preventDefault(); e.stopPropagation(); hi(false); var fs=e.dataTransfer&&e.dataTransfer.files; if(fs&&fs.length)doUpload(fs); }); }
     var ci=b.querySelector('#tpl-cin7imp'), sw=b.querySelector('#tpl-cin7sweep'), cim=b.querySelector('#tpl-cin7msg'), sumEl=b.querySelector('#tpl-cin7sum');
     function ddmy(x){ if(!x)return ''; var p=String(x).split('-'); return p[2]+'-'+['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+p[1]]+'-'+p[0].slice(2); }
     function showSum(sm){ if(!sumEl)return; if(!sm||!sm.orders){ sumEl.innerHTML='<span style="color:#b45309">No Cin7 orders imported for '+e(TPL3_STATE.period)+' yet — click Import.</span>'; return; } sumEl.innerHTML='Imported <b>'+Number(sm.orders).toLocaleString()+'</b> orders &middot; invoice dates '+ddmy(sm.min_date)+' &rarr; '+ddmy(sm.max_date)+' &middot; '+sm.runs+' run'+(sm.runs===1?'':'s')+(sm.covered_to?(' &middot; covered to '+ddmy(sm.covered_to)):''); }

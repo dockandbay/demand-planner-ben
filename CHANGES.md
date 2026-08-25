@@ -1,3 +1,7 @@
+## v27.274 3PL invoice upload: multi-file drag-and-drop
+- The 3PL invoice upload now accepts **multiple files at once** (drag several in, or multi-select). Input gets `multiple`; files upload **sequentially** with "Uploading N of M" progress, one reload at the end, and a per-file success/failure summary. Each file still gzips client-side to beat the ~4.5MB cap.
+- Pairs with UK ILG, which already **combines all uploaded sheets** in the allocation (all DI PDFs for fees + all invoice_0* sheets for freight) — so you can drop the whole month at once.
+
 ## v27.273 Forecast trend anomalies: rename + layout polish
 - Renamed the report/menu to **Forecast trend anomalies**.
 - All columns **centred** except **SKU** and **Subcat** (left-aligned); **SKU/Subcat widened ~50%**, the rest tightened ~20% (fixed table layout + colgroup).
