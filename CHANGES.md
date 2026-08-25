@@ -1,3 +1,6 @@
+## v27.269 SSM Backtest: widen Recommendation column, tighten metric columns
+- Fixed table layout + colgroup: Recommendation column doubled (~600px); Min · Wk demand · CV · Lead · Overstock mo tightened ~30%; headers wrap; compact padding. Horizontal scroll on narrow screens (min-width 1168px).
+
 ## v27.268 SSM Backtest: fix cut-off "Recommendation" column
 - The risk-options cell used `white-space:nowrap`, so each option ran wider than the screen and got clipped (you could only see "Low risk (safe) (99…"). Now wraps (`white-space:normal`, cell `min-width:300px;max-width:460px`), so the full cover · capital held · stockout risk line is visible.
 
