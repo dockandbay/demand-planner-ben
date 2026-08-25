@@ -1,3 +1,8 @@
+## v27.270 Buy Plan config: Cashflow Compare (Standard vs SSM) popout
+- New **Cashflow Compare (Standard vs SSM)** button on DEMAND ▸ Buy Plan (config). Popout drawer runs the full buy plan under both models (SSM off vs on for every pool), values each buy at unit cost (`/api/supply/products-all`), and shows GBP committed per **order month**: Standard, SSM, Δ, cumulative Δ, + totals.
+- Basis: goods cost at the order/placement month (deposit/balance split is a noted TODO). Toggles `SSM_ENABLED` per run + clears `BUY_CACHE`, restores after; runs the plan twice on click.
+- Sandbox check: SSM **front-loads** cash (+~£85k in month 1) and **releases** it later (−~£107k in a later month), net ~+£38k on ~£3M of buys.
+
 ## v27.269 SSM Backtest: widen Recommendation column, tighten metric columns
 - Fixed table layout + colgroup: Recommendation column doubled (~600px); Min · Wk demand · CV · Lead · Overstock mo tightened ~30%; headers wrap; compact padding. Horizontal scroll on narrow screens (min-width 1168px).
 
