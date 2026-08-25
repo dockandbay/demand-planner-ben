@@ -1,3 +1,7 @@
+## v27.272 DEMAND ▸ Analysis ▸ Forecast Anomalies (new report)
+- New report catching **sustained forecast misses**: SKU × country × channel where actuals have diverged from forecast in the **same direction for 2+ complete months**. 🔥 Hot (above forecast → stockout/missed-sales) · ❄ Cold (below → overstock). **Fwd caught up?** flags whether the forward forecast has moved to the new run-rate (⚠ no = still missed). Ranked by £ impact at cost; filter pills (direction, market, not-caught-up, SKU/subcat search).
+- Server `GET /api/demand/forecast-anomalies` (sales_actuals vs forecast_outputs, joined to cost). **Auto-guard** drops the newest month if it looks part-loaded (sales-import lag). Nav: DEMAND ▸ Analysis. No migration/env/deps.
+
 ## v27.271 Cashflow Compare: month labels, 12-month horizon, after-20th roll
 - Month labels now read **Aug 2026** (was `2026_08`).
 - Limited to the **next 12 months** of order placements.

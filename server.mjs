@@ -1304,6 +1304,65 @@ app.get('/api/demand/ssm-backtest', async (req, res) => {
     res.json({ ok: true, rows: out, snapshotDates: dates, cfg, window: { from, to }, target });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// ── DEMAND ▸ Analysis ▸ Forecast Anomalies — SUSTAINED (2+ complete months) actual-vs-forecast divergence, per SKU × country × channel.
+// Catches a volume trend the human missed: recent actuals consistently above (hot) or below (cold) the forecast, same
+// direction, for >1 complete month. "Forward caught up?" = whether the forward forecast has moved to the new run-rate.
+app.get('/api/demand/forecast-anomalies', async (req, res) => {
+  try {
+    const q = req.query || {};
+    const pct = Math.max(0.05, Number(q.pct) || 0.25);                 // min monthly % divergence
+    const minU = (q.units != null) ? Math.max(0, Number(q.units)) : 15; // min monthly unit gap (ignore tiny SKUs)
+    const minMo = Math.max(2, Number(q.months) || 2);                  // sustained months (>1 month → 2)
+    const now = new Date();
+    const curIdx = now.getUTCFullYear() * 12 + now.getUTCMonth();      // current (partial) month — excluded
+    const i2m = i => Math.floor(i / 12) + '-' + String(i % 12 + 1).padStart(2, '0');
+    // Sales actuals lag (manual Cin7 import) → the newest month may be only partly loaded, which would fake "cold"
+    // anomalies. Detect it: if the newest candidate month's total actuals are < 60% of the older months' average,
+    // treat it as incomplete and shift the window back one month.
+    const cand = []; for (let k = 1; k <= 4; k++) cand.push(i2m(curIdx - k));
+    const tot = {}; (await pool.query(`SELECT to_char(month,'YYYY-MM') m, sum(units)::float u FROM planner.sales_actuals WHERE to_char(month,'YYYY-MM') = ANY($1) GROUP BY 1`, [cand])).rows.forEach(r => { tot[r.m] = r.u; });
+    const older = [tot[cand[2]] || 0, tot[cand[3]] || 0].filter(x => x > 0);
+    const med = older.length ? older.reduce((a, b) => a + b, 0) / older.length : 0;
+    let startK = 1; if (med > 0 && (tot[cand[0]] || 0) < med * 0.6) startK = 2;   // newest looks incomplete → shift back a month
+    const lastComplete = []; for (let k = startK; k < startK + 3; k++) lastComplete.push(i2m(curIdx - k));   // 3 complete months (newest first)
+    const fwd = []; for (let k = 0; k < 3; k++) fwd.push(i2m(curIdx + k));                       // current + next 2 (forward forecast)
+    const allM = [...new Set([...lastComplete, ...fwd])];
+    const act = (await pool.query(`SELECT sku, upper(country) co, channel ch, to_char(month,'YYYY-MM') m, sum(units)::float u
+      FROM planner.sales_actuals WHERE to_char(month,'YYYY-MM') = ANY($1) GROUP BY 1,2,3,4`, [lastComplete])).rows;
+    const fc = (await pool.query(`SELECT sku, upper(split_part(warehouse,'_',1)) co, channel ch, to_char(month,'YYYY-MM') m, sum(units)::float u
+      FROM planner.forecast_outputs WHERE to_char(month,'YYYY-MM') = ANY($1) GROUP BY 1,2,3,4`, [allM])).rows;
+    const meta = {}; (await pool.query(`SELECT sku, coalesce(product_name_final,product_name,'') nm, coalesce(category,'') cat,
+      coalesce(subcategory,'') sub, coalesce(cost,cost_lx,cost_xr,0)::float cost FROM planner.products`)).rows
+      .forEach(r => { meta[r.sku] = { nm: r.nm, cat: r.cat, sub: r.sub, cost: Number(r.cost) || 0 }; });
+    const S = {}, key = (s, c, h) => s + '|' + c + '|' + h;
+    act.forEach(r => { const k = key(r.sku, r.co, r.ch); (S[k] || (S[k] = { a: {}, f: {} })).a[r.m] = r.u; });
+    fc.forEach(r => { const k = key(r.sku, r.co, r.ch); (S[k] || (S[k] = { a: {}, f: {} })).f[r.m] = r.u; });
+    const out = [];
+    Object.keys(S).forEach(k => { const [sku, co, ch] = k.split('|'); const s = S[k];
+      const rows = lastComplete.map(m => ({ m, a: s.a[m] || 0, f: s.f[m] || 0 }));   // newest first
+      let dir = 0, run = 0;   // count consecutive most-recent complete months that are same-direction + material
+      for (let i = 0; i < rows.length; i++) { const a = rows[i].a, f = rows[i].f; const d = (a - f) / Math.max(f, 1); const sign = d > 0 ? 1 : (d < 0 ? -1 : 0);
+        const material = Math.abs(a - f) >= minU && Math.abs(d) >= pct;
+        if (i === 0) { if (!material || sign === 0) break; dir = sign; run = 1; }
+        else { if (material && sign === dir) run++; else break; } }
+      if (run < minMo) return;   // not sustained
+      const runRows = rows.slice(0, run);
+      const avgPct = runRows.reduce((x, r) => x + (r.a - r.f) / Math.max(r.f, 1), 0) / run;
+      const impactU = runRows.reduce((x, r) => x + Math.abs(r.a - r.f), 0);
+      const cost = (meta[sku] && meta[sku].cost) || 0;
+      const recentAct = runRows.reduce((x, r) => x + r.a, 0) / run;
+      let fwdF = 0, fn = 0; fwd.forEach(m => { if (s.f[m] != null) { fwdF += s.f[m]; fn++; } }); const fwdAvg = fn ? fwdF / fn : 0;
+      const caughtUp = dir > 0 ? (fwdAvg >= recentAct * 0.85) : (fwdAvg <= recentAct * 1.15);
+      out.push({ sku, co, ch, name: (meta[sku] && meta[sku].nm) || '', cat: (meta[sku] && meta[sku].cat) || '', sub: (meta[sku] && meta[sku].sub) || '',
+        dir: dir > 0 ? 'hot' : 'cold', months: run, avgPct: Math.round(avgPct * 100),
+        m1: rows[0], m2: rows[1] || null, m3: rows[2] || null,
+        recentAct: Math.round(recentAct), fwdAvg: Math.round(fwdAvg), caughtUp: !!caughtUp,
+        impactUnits: Math.round(impactU), impactGbp: Math.round(impactU * cost) });
+    });
+    out.sort((a, b) => b.impactGbp - a.impactGbp || Math.abs(b.avgPct) - Math.abs(a.avgPct));
+    res.json({ ok: true, rows: out, completeMonths: lastComplete, forwardMonths: fwd, cfg: { pct, minU, minMo } });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // ── Forecast Snapshots (DEMAND ▸ Snapshots) — lock a copy of forecast_outputs; compare later + past-month locked-vs-actual ──
 app.get('/api/demand/snapshots', async (_req, res) => {
   try { res.json((await pool.query(`SELECT id, name, to_char(taken_at,'YYYY-MM-DD"T"HH24:MI:SS') taken_at, taken_by, row_count

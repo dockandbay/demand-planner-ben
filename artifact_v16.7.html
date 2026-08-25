@@ -9006,6 +9006,7 @@ function render(){
     else if(DEMAND_VIEW==='trends') renderTrendsView(body);   // DEMAND ▸ Trends — category trends analysis report (#/demand/trends)
     else if(DEMAND_VIEW==='exceptions') renderExceptionsView(body);   // DEMAND ▸ Exceptions — current-month forecast-vs-actual risk report (#/demand/exceptions)
     else if(DEMAND_VIEW==='accuracy') renderAccuracyView(body);   // DEMAND ▸ Accuracy — forecast accuracy & bias vs locked snapshots (#/demand/accuracy)
+    else if(DEMAND_VIEW==='fcanom') renderForecastAnomaliesView(body);   // DEMAND ▸ Analysis ▸ Forecast anomalies — sustained (2+ mo) actual-vs-forecast divergence per SKU×country×channel
     else if(DEMAND_VIEW==='safetystock') renderSafetyStockView(body);   // DEMAND ▸ Safety stock — service-level safety-stock recommendation (run alongside)
     // DEMAND ▸ Config group (#/demand/config/<item>): Buy plan logic (native), Contribution model + Discontinued sub-cats (rendered via the SUPPLY-side config panels, lifted to window.hzCfg*).
     else if(DEMAND_VIEW==='buyplan') renderBuyPlanView(body);
@@ -10370,6 +10371,51 @@ function renderExceptionsView(body){
 // DEMAND ▸ Buy Plan — choose the buy-plan logic (Cover-weeks ↔ Service-level SSM) with the setting at the top and a
 // plain-English explanation of each. Saves app_settings.buy_logic (injected as BUY_LOGIC); a reload applies it to the
 // whole buy plan. Default 'cover_weeks' leaves buys unchanged. See Claude Analyses/SPEC_SSM_Buy_Logic_and_Complex_Rules.md.
+function renderForecastAnomaliesView(body){
+  function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
+  function gbp(v){ v=Math.round(Number(v)||0); return v>=1000?('£'+(v/1000).toFixed(v>=100000?0:1)+'k'):('£'+v); }
+  var _MNA=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function fmo(k){ var m=String(k).match(/(\d{4})-(\d{2})/); return m?(_MNA[(+m[2])-1]+' '+m[1].slice(2)):String(k||''); }
+  body.innerHTML='<div style="padding:4px 2px 28px"><div style="font-weight:800;font-size:15px;margin:2px 0 4px">Forecast anomalies</div>'
+    +'<div style="font-size:12px;color:#64748b;max-width:920px;margin-bottom:12px">SKUs whose <b>actuals have diverged from forecast in the same direction for 2+ complete months</b> — a sustained trend the forecast may have missed — per country × channel. <b>🔥 Hot</b> = selling above forecast (stockout / missed-sales risk); <b>❄ Cold</b> = below (overstock risk). <b>Fwd caught up?</b> = has the forward forecast moved to the new run-rate (a <b>⚠ no</b> means it&rsquo;s still missed). Ranked by £ impact at cost. The newest complete month can lag (manual sales import) — an auto-guard drops it if it looks part-loaded.</div>'
+    +'<div id="fca-bar" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:10px"></div>'
+    +'<div id="fca-body"><div class="mut" style="font-size:12px;padding:10px 2px">Loading…</div></div></div>';
+  var state={dir:'all',co:'all',missedOnly:false,q:''};
+  fetch('/api/demand/forecast-anomalies').then(function(r){return r.json();}).then(function(d){
+    var bb=body.querySelector('#fca-body');
+    if(!d||!d.ok){ bb.innerHTML='<div style="color:#dc2626;font-size:12px">'+esc((d&&d.error)||'failed')+'</div>'; return; }
+    var all=d.rows||[], CM=d.completeMonths||[];
+    function pill(k,lbl,on){ return '<button class="fca-pill" data-k="'+k+'" style="font-size:11px;padding:3px 11px;border:1px solid '+(on?'#7c3aed':'#cbd5e1')+';border-radius:14px;background:'+(on?'#7c3aed':'#fff')+';color:'+(on?'#fff':'#334155')+';cursor:pointer;font-weight:600">'+lbl+'</button>'; }
+    function draw(){
+      var cos=Object.keys(all.reduce(function(a,r){a[r.co]=1;return a;},{})).sort();
+      body.querySelector('#fca-bar').innerHTML=pill('dir:all','All',state.dir==='all')+pill('dir:hot','🔥 Hot',state.dir==='hot')+pill('dir:cold','❄ Cold',state.dir==='cold')
+        +'<span style="width:1px;height:16px;background:#e2e8f0;margin:0 3px"></span>'+pill('co:all','All markets',state.co==='all')+cos.map(function(c){return pill('co:'+c,c,state.co===c);}).join('')
+        +'<span style="width:1px;height:16px;background:#e2e8f0;margin:0 3px"></span>'+pill('missed:1','⚠ Not caught up only',state.missedOnly)
+        +'<input id="fca-q" placeholder="filter SKU / subcat" value="'+esc(state.q)+'" style="font-size:12px;padding:3px 8px;border:1px solid #cbd5e1;border-radius:5px;margin-left:auto;width:180px">';
+      var rows=all.filter(function(r){ if(state.dir!=='all'&&r.dir!==state.dir)return false; if(state.co!=='all'&&r.co!==state.co)return false; if(state.missedOnly&&r.caughtUp)return false; if(state.q){var q=state.q.toLowerCase(); if((r.sku+' '+r.sub+' '+r.name).toLowerCase().indexOf(q)<0)return false;} return true; });
+      var TH='padding:6px 9px;text-align:left;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;font-size:10px;text-transform:uppercase;color:#475569;white-space:nowrap';
+      var head='<tr>'+['SKU','Subcat','Ctry','Ch','Trend','Mo',fmo(CM[2]),fmo(CM[1]),fmo(CM[0]),'Avg %','Fwd caught up?','£ impact'].map(function(h){return '<th style="'+TH+'">'+esc(h)+'</th>';}).join('')+'</tr>';
+      function cell(mm){ if(!mm)return '<span class="mut">—</span>'; return '<span class="mut" style="font-size:9px">F</span>'+fn(mm.f)+' <span class="mut" style="font-size:9px">A</span>'+fn(mm.a); }
+      var trs=rows.map(function(r){ var hot=r.dir==='hot', col=hot?'#b91c1c':'#1e40af';
+        var pctTxt=(Math.abs(r.avgPct)>=1000)?(hot?'≫ +':'≪ −'):((r.avgPct>0?'+':'')+r.avgPct+'%');
+        return '<tr style="border-bottom:1px solid #f1f5f9">'
+          +'<td style="padding:5px 9px;font-weight:600;white-space:nowrap">'+esc(r.sku)+'</td>'
+          +'<td style="padding:5px 9px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(r.sub||r.cat)+'">'+esc(r.sub||r.cat||'—')+'</td>'
+          +'<td style="padding:5px 9px">'+esc(r.co)+'</td><td style="padding:5px 9px">'+esc(r.ch)+'</td>'
+          +'<td style="padding:5px 9px;white-space:nowrap;color:'+col+';font-weight:700">'+(hot?'🔥 hot':'❄ cold')+'</td>'
+          +'<td style="padding:5px 9px;text-align:center">'+r.months+'</td>'
+          +'<td style="padding:5px 9px;white-space:nowrap">'+cell(r.m3)+'</td><td style="padding:5px 9px;white-space:nowrap">'+cell(r.m2)+'</td><td style="padding:5px 9px;white-space:nowrap">'+cell(r.m1)+'</td>'
+          +'<td style="padding:5px 9px;text-align:right;font-weight:700;color:'+col+'">'+pctTxt+'</td>'
+          +'<td style="padding:5px 9px;text-align:center">'+(r.caughtUp?'<span style="color:#166534">✓ yes</span>':'<span style="color:#b91c1c;font-weight:700">⚠ no</span>')+'</td>'
+          +'<td style="padding:5px 9px;text-align:right;font-weight:700">'+gbp(r.impactGbp)+'</td></tr>'; }).join('');
+      bb.innerHTML='<div style="font-size:12px;color:#64748b;margin-bottom:6px">'+rows.length+' anomal'+(rows.length===1?'y':'ies')+' (of '+all.length+') · complete months '+fmo(CM[2])+'–'+fmo(CM[0])+'</div>'
+        +'<div style="overflow:auto;max-height:70vh;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px">'+head+(trs||'<tr><td colspan="12" style="padding:14px;color:#94a3b8">No anomalies match.</td></tr>')+'</table></div>';
+      body.querySelectorAll('#fca-bar .fca-pill').forEach(function(b){ b.onclick=function(){ var kv=b.dataset.k.split(':'); if(kv[0]==='dir')state.dir=kv[1]; else if(kv[0]==='co')state.co=kv[1]; else if(kv[0]==='missed')state.missedOnly=!state.missedOnly; draw(); }; });
+      var qi=body.querySelector('#fca-q'); if(qi)qi.oninput=function(){ var cp=this.selectionStart; state.q=this.value; draw(); var n=body.querySelector('#fca-q'); if(n){n.focus(); try{n.setSelectionRange(cp,cp);}catch(e){}} };
+    }
+    draw();
+  }).catch(function(e){ var bb=body.querySelector('#fca-body'); if(bb)bb.innerHTML='<div style="color:#dc2626;font-size:12px">'+esc(String(e&&e.message||e))+'</div>'; });
+}
 function renderBuyPlanView(body){
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   var MP=[['UK','3PL'],['UK','FBA'],['US','3PL'],['US','FBA'],['EU','3PL'],['EU','FBA'],['AU','3PL'],['AU','FBA'],['CA','FBA']];   // market × pool rows (CA is FBA-only)
@@ -10974,7 +11020,7 @@ function renderShipBagView(body){
   Object.keys(mp).forEach(function(k){ var el=body.querySelector('.sb-'+k); if(el)el.onchange=function(){ window[mp[k]]=num(this,window[mp[k]]); renderShipBagView(body); }; });
   var lc=body.querySelector('.sb-lc'); if(lc)lc.onchange=function(){ SB_LC=this.value; renderShipBagView(body); };
 }
-var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['exceptions','Exceptions'],['accuracy','Accuracy'],['safetystock','Safety stock'],['stockcover','Stock cover'],['shipbags','Ship bags'],['calendar','Calendar'],['scenario','Scenario planner']];   // Sell-through targets decommissioned (Ben 17-Aug-26)
+var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['exceptions','Exceptions'],['accuracy','Accuracy'],['fcanom','Forecast anomalies'],['safetystock','Safety stock'],['stockcover','Stock cover'],['shipbags','Ship bags'],['calendar','Calendar'],['scenario','Scenario planner']];   // Sell-through targets decommissioned (Ben 17-Aug-26)
 function renderDemandTabs(){
   var bar=document.getElementById('demand-tabs');
   var _sb=document.getElementById('statusbar');
@@ -10991,7 +11037,7 @@ function renderDemandTabs(){
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   // Primary tabs inline; the reference/input views (Sell-through targets, Key accounts, Calendar, Revenue) are grouped under an "Inputs ▾" dropdown.
   var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['snapshots']='Snapshots'; _dlbl['contribmodel']='Contribution model'; _dlbl['buyplan']='Buy plan logic'; _dlbl['runoffsubs']='Discontinued sub-categories'; _dlbl['ssmbacktest']='Backtest';
-  var PRIMARY=['plan','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','snapshots','trends','safetystock','stockcover','shipbags'], CONFIGD=['contribmodel','buyplan','runoffsubs'], INPUTS=['keyaccounts','calendar','pricechanges','klaviyobis'];   // 'kpis' moved to REPORTS ▸ Performance ▸ Demand Metrics; 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
+  var PRIMARY=['plan','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','fcanom','snapshots','trends','safetystock','stockcover','shipbags'], CONFIGD=['contribmodel','buyplan','runoffsubs'], INPUTS=['keyaccounts','calendar','pricechanges','klaviyobis'];   // 'kpis' moved to REPORTS ▸ Performance ▸ Demand Metrics; 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
   var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0, _anlActive=ANALYSIS.indexOf(DEMAND_VIEW)>=0, _cfgActive=CONFIGD.indexOf(DEMAND_VIEW)>=0;
   var _isPlanV=(DEMAND_VIEW==='plan');
   // Release Window now lives in the More Filters panel; Undo + Download now sit on the right of the plan controls
