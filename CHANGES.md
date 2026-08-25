@@ -1,3 +1,10 @@
+## v27.265 Buy plan: windowed range Complex Rule now SSM-sized (safety stock + season-detected coverage)
+- The up-front block buy (v27.264) is now **sized by the SSM model**, not raw range demand:
+  - **(#2) Coverage** = demand over the **SSM-detected season** for a seasonal SKU (`ssmSeasonEndWeeks` — captures the full sell-out incl the tail beyond `range_to`), else the rule's range.
+  - **(#1) + tier-aware SSM safety stock** = `Z × √(lead·σ_d² + demand²·σ_lead²)` (A/B/C service level + seasonal floor), via new helper `ssmSafetyUnits()` (mirrors `ssmCoverWeeks`'s SS term; `ssmCoverWeeks` untouched).
+  - Net of stock + confirmed on-order, carton-rounded. The rule owns the **window**; SSM owns the **quantity**.
+- **Verified** before/after (sandbox harness): only SS27 SKUs changed (38, all `rw=SS27`), non-SS27 byte-identical, deterministic. Example `TOWLB-DES-LG-HBRTRS` UK: up-front **Sep block 440→680**, tail cut (Jan gone, Feb 200→120) — more bought up front, tier-buffered.
+
 ## v27.264 Buy plan: windowed "range" Complex Rule = up-front block buy at the window start
 - A Complex Rule with `coverage_type=range` **and** a window now places **one up-front order at the first actionable window month** (e.g. Sep 1) for the **full range_from→range_to demand** (net of stock + confirmed on-order), instead of raising per-month cover during the window. (The old behaviour raised *arrival* cover in the window months, but a long lead pushed those placements into the past → skipped → the buy fell back to lead-before-launch and landed a month late, e.g. October instead of September.)
 - The block's inbound lands at placement + full 3PL lead and is injected into `assumedArr`, so the normal pass doesn't re-buy the range. `crCoverWeeks`/`crWinRule` now ignore windowed range rules; range-only + months-cover rules are unchanged.

@@ -1750,6 +1750,30 @@ function ssmCoverWeeks(sku,co,pool,md,pd){             // → effective base cov
   }catch(e){ return null; }
 }
 try{ window.ssmCoverWeeks=ssmCoverWeeks; }catch(e){}   // expose for DEMAND ▸ Stock cover (SSM-aligned target rollup, outside the BP module)
+// SSM safety stock in UNITS = Z × √(Lead·σ_d² + demand²·σ_lead²) — the SAME maths as ssmCoverWeeks's SS term,
+// factored out so the seasonal up-front block buy (see project) can add a tier-aware buffer to its quantity.
+// Tier→service level (A/B/C + seasonal floor), σ_d from 18mo pooled sales, σ_lead from LEADTIME_VAR. 0 if no demand.
+function ssmSafetyUnits(sku,co,pool,md,pd){
+  try{
+    if(!sku||!md)return 0;
+    var cm=(typeof CUR_MONTH!=='undefined')?CUR_MONTH:null; if(!cm)return 0;
+    var chs=(pool==='FBA')?['FBA']:['DTC','B2B','ZAL'];
+    var dem=md.demand||{};
+    var fwd=[]; (function(){var y=+cm.slice(0,4),mo=+cm.slice(5,7); for(var i=0;i<6;i++){ fwd.push(y+'_'+(mo<10?'0':'')+mo); mo++; if(mo>12){mo=1;y++;} }})();
+    var dsum=0; fwd.forEach(function(m){ chs.forEach(function(ch){ var mm=dem[ch]; if(mm&&mm[m]!=null)dsum+=mm[m]; }); });
+    var d=dsum/6; if(!(d>0))return 0;
+    var tr=[]; (function(){var y=+cm.slice(0,4),mo=+cm.slice(5,7); for(var i=0;i<18;i++){ mo--; if(mo<1){mo=12;y--;} tr.push(y+'_'+(mo<10?'0':'')+mo); }})();
+    var salesByCh={}; chs.forEach(function(ch){ try{ salesByCh[ch]=skuSales(sku,co,ch)||{}; }catch(e){ salesByCh[ch]={}; } });
+    var hist=[]; tr.forEach(function(m){ var t=0,any=false; chs.forEach(function(ch){ var v=salesByCh[ch][m]; if(v!=null){t+=v;any=true;} }); if(any)hist.push(t); });
+    var sig; if(hist.length>=4){ var mn=0; hist.forEach(function(x){mn+=x;}); mn/=hist.length; var v2=0; hist.forEach(function(x){v2+=(x-mn)*(x-mn);}); sig=Math.sqrt(v2/(hist.length-1)); } else sig=d*0.5;
+    var Lwk=md.l3||9; if(!(Lwk>0))Lwk=9; var Lmo=Lwk/4.33;
+    var sigLwk=0; if(typeof LEADTIME_VAR!=='undefined'&&LEADTIME_VAR){ var sv=LEADTIME_VAR.bySupplier&&pd&&LEADTIME_VAR.bySupplier[pd.supp]; sigLwk=(sv&&sv.n>=5)?sv.sig:((LEADTIME_VAR.global&&LEADTIME_VAR.global.sig)||0); }
+    var sigLmo=sigLwk/4.33;
+    var Z=ssmZ(ssmServiceLevel(sku,co,pool));
+    var ss=Z*Math.sqrt(Lmo*sig*sig + d*d*sigLmo*sigLmo);
+    return (ss>0)?ss:0;
+  }catch(e){ return 0; }
+}
 // Complex Rules — return the enabled rules (with parsed dates) whose SCOPE matches this SKU in this market.
 // Scope filters (sku/category/tier/season) are optional and AND'd; a rule with no scope matches every SKU.
 function crMatch(sku,mkt){
@@ -3251,19 +3275,26 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
       let ws=-1;
       for(let i=1;i<PROJ.length;i++){ const p=PROJ[i]; if(p.isActual||p.isForecast)continue; const d=_md(i); if(m.wt&&d>m.wt)break; if(m.wf&&d<m.wf)continue; ws=i; break; }
       if(ws<0)return;   // window entirely in the past → nothing to place
-      // full range demand (DTC+B2B, post-disc-zeroed) over [range_from, range_to]
-      let rangeQty=0;
-      for(let j=0;j<PROJ.length;j++){ const p=PROJ[j]; if(p.isActual)continue; const d=_md(j); if(d<m.rf||d>m.rt)continue; if(discCutoff&&p.key>=discCutoff)continue; rangeQty+=((dem.DTC&&dem.DTC[p.key])||0)+((dem.B2B&&dem.B2B[p.key])||0); }
-      if(rangeQty<=0)return;
-      // net off what we already have + confirmed on-order landing by the range end
+      // (#2) SSM sizes the quantity: coverage END = the SSM-detected season end for a seasonal SKU (captures the
+      // FULL sell-out, e.g. Aug, so nothing dribbles into later top-ups), else the rule's range_to. The rule still
+      // owns the WINDOW (placement = ws above).
+      let covEnd=m.rt;
+      if(typeof SKUM!=='undefined'&&SKUM[skuKey]&&SKUM[skuKey].cs==='S'){ const wSea=ssmSeasonEndWeeks(skuKey,mkt,md); if(wSea>0){ const se=new Date(); se.setDate(se.getDate()+Math.round(wSea*7)); if(se>covEnd)covEnd=se; } }
+      // demand (DTC+B2B, post-disc-zeroed) over [range_from, covEnd]
+      let covQty=0;
+      for(let j=0;j<PROJ.length;j++){ const p=PROJ[j]; if(p.isActual)continue; const d=_md(j); if(d<m.rf||d>covEnd)continue; if(discCutoff&&p.key>=discCutoff)continue; covQty+=((dem.DTC&&dem.DTC[p.key])||0)+((dem.B2B&&dem.B2B[p.key])||0); }
+      if(covQty<=0)return;
+      // (#1) add SSM safety stock (tier service level + demand/lead variability), in units
+      let ssU=0; try{ ssU=ssmSafetyUnits(skuKey,mkt,'3PL',md,pd)||0; }catch(e){}
+      // net off what we already have + confirmed on-order landing by the coverage end
       let have=Math.max(md.i3||0,0);
-      for(let j=0;j<PROJ.length;j++){ const p=PROJ[j]; if(_md(j)>m.rt)break; have+=(ib3[p.key]||[]).reduce((s,x)=>s+(x.qty||0),0); }
-      let blockQty=rangeQty-have; if(blockQty<=0)return;
+      for(let j=0;j<PROJ.length;j++){ const p=PROJ[j]; if(_md(j)>covEnd)break; have+=(ib3[p.key]||[]).reduce((s,x)=>s+(x.qty||0),0); }
+      let blockQty=(covQty+ssU)-have; if(blockQty<=0)return;
       blockQty=Math.ceil(blockQty/cp)*cp;   // whole cartons
       const arr=Math.min(ws+lm,PROJ.length-1);   // inbound lands placement + full 3PL lead
       buyDisplay[ws]=(buyDisplay[ws]||0)+blockQty;
       assumedArr[arr]=(assumedArr[arr]||0)+blockQty;
-      buyFromLbl[arr]=(buyFromLbl[arr]?buyFromLbl[arr]+', ':'')+PROJ[ws].lbl+' up-front ('+(m.r.name||'range rule')+')';
+      buyFromLbl[arr]=(buyFromLbl[arr]?buyFromLbl[arr]+', ':'')+PROJ[ws].lbl+' up-front, SSM-sized ('+(m.r.name||'range rule')+')';
     });
   })();
 
