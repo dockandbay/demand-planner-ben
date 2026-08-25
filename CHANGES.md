@@ -1,3 +1,8 @@
+## v27.273 Forecast trend anomalies: rename + layout polish
+- Renamed the report/menu to **Forecast trend anomalies**.
+- All columns **centred** except **SKU** and **Subcat** (left-aligned); **SKU/Subcat widened ~50%**, the rest tightened ~20% (fixed table layout + colgroup).
+- Month cells now show **forecast (grey) over actual** on two lines — actual in **green if above** forecast, **red if below**.
+
 ## v27.272 DEMAND ▸ Analysis ▸ Forecast Anomalies (new report)
 - New report catching **sustained forecast misses**: SKU × country × channel where actuals have diverged from forecast in the **same direction for 2+ complete months**. 🔥 Hot (above forecast → stockout/missed-sales) · ❄ Cold (below → overstock). **Fwd caught up?** flags whether the forward forecast has moved to the new run-rate (⚠ no = still missed). Ranked by £ impact at cost; filter pills (direction, market, not-caught-up, SKU/subcat search).
 - Server `GET /api/demand/forecast-anomalies` (sales_actuals vs forecast_outputs, joined to cost). **Auto-guard** drops the newest month if it looks part-loaded (sales-import lag). Nav: DEMAND ▸ Analysis. No migration/env/deps.
