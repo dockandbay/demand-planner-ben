@@ -1,3 +1,7 @@
+## v27.277 Payments Due: "Outstanding +4 weeks" default pill + copy-email wording
+- **`#/supply/payments` new default pill "Outstanding +4 weeks":** shows only unpaid payments due on/before **today + 28 days**, which **includes anything overdue**. No-due-date rows are excluded (can't be dated into the window). The old "Outstanding" (all unpaid), Overdue, Paid and All pills stay; only the default landing filter changed.
+- **Payments Report ▸ Copy email:** first line reworded from *"See below payment detail for X of Y"* → **"Payment detail - X of Y"** (both the plain-text copy and the HTML body).
+
 ## v27.276 queryCapped idle-transaction guard (prod pool-exhaustion fix) + anomalies non-stock exclusion
 - **`queryCapped` (+ the two bulk-write transactions) now `SET LOCAL idle_in_transaction_session_timeout = '15s'`.** `statement_timeout` only caps the STATEMENT; Vercel freezes the instance after the response, so the `BEGIN` txn stays open and pins a pool connection → pool exhaustion (Diviyaj: the 22–24 Aug timeouts on `/api/supply/purchase-orders`). Capping the whole txn lets Postgres kill an idle-in-transaction and free the connection. Verified the PO endpoint still returns 200.
 - **Forecast trend anomalies:** `FAIRE-COMMISSION` added to `NON_SKUS` (a commission line, not a product), and the report now **skips any £0-impact row** (un-costed / non-stock) — was ranking FAIRE-COMMISSION as a hot anomaly at £0.

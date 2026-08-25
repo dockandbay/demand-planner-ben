@@ -8021,7 +8021,7 @@
   // report opens on recent activity (the register holds full history back to 2017); Clear to see everything.
   var PAY_FROM=(function(){ var d=new Date(); d.setDate(d.getDate()-60); return d.toISOString().slice(0,10); })(), PAY_TO='', PAY_Q='';
   var OTH_STATE={status:'unpaid',supplier:''};   // Other Payments filters (persist across re-renders); default to unpaid
-  var PDUE_STATE={status:'outstanding',supplier:''};   // Payments Due filters (persist across re-renders)
+  var PDUE_STATE={status:'outstanding4w',supplier:''};   // Payments Due filters (persist across re-renders); default = outstanding due within 4 weeks (incl. overdue)
   // ---- CASH FLOW: itemised payment lines, flat list, filterable by month ----
   var CF_TYPES=['Deposit','Completion','Balance','Other','Freight','Import duty','Import tax'];
   var CF_BG={Deposit:'bg-blue',Completion:'bg-amber',Balance:'bg-green',Other:'bg-neutral',Freight:'bg-neutral','Import duty':'bg-red','Import tax':'bg-red'};
@@ -8399,6 +8399,7 @@
   function buildPaymentsDue(b, pos, deps){
     pos=(Array.isArray(pos)?pos:[]).filter(function(p){return !p.master_po;});   // child POs: the master carries the money → don't list child payments
     var today=new Date().toISOString().slice(0,10);
+    var cutoff4w=(function(){var d=new Date();d.setDate(d.getDate()+28);return d.toISOString().slice(0,10);})();   // "Outstanding +4 weeks" horizon: due on/before today+28d (includes overdue)
     var rows=[];
     // PO payments only surface once the FINAL INVOICE AMOUNT is confirmed (is_final) AND the milestone has a due date.
     // Completed POs ARE included — an unpaid balance shouldn't hide behind a COMPLETE flag. Old payments are cut below.
@@ -8414,6 +8415,7 @@
     _navCounts.paydue=rows.filter(function(r){return r.overdue;}).length; updateNavBadges();   // keep the sub-menu overdue counter fresh
     var sups=Array.from(new Set(rows.map(function(r){return r.sup;}))).filter(Boolean).sort();
     function pass(r){ if(PDUE_STATE.status==='outstanding'&&r.paid)return false;
+      if(PDUE_STATE.status==='outstanding4w'&&(r.paid||!r.due||r.due>cutoff4w))return false;   // unpaid AND due on/before today+28d (overdue included; no-due-date excluded)
       if(PDUE_STATE.status==='overdue'&&!r.overdue)return false;
       if(PDUE_STATE.status==='paid'&&!r.paid)return false;
       if(PDUE_STATE.supplier&&r.sup!==PDUE_STATE.supplier)return false; return true; }
@@ -8440,7 +8442,7 @@
       var groups={}; f.forEach(function(r){ (groups[r.sup||'—']=groups[r.sup||'—']||[]).push(r); });
       var order=Object.keys(groups).sort(function(a,c){ var ea=groups[a].map(function(r){return r.due||'9999';}).sort()[0], ec=groups[c].map(function(r){return r.due||'9999';}).sort()[0]; return ea.localeCompare(ec)||a.localeCompare(c); });
       var grand=0;
-      var stP=[['outstanding','Outstanding'],['overdue','Overdue'],['paid','Paid'],['all','All']].map(function(o){return '<span class="pill'+(PDUE_STATE.status===o[0]?' active':'')+'" data-ps="'+o[0]+'">'+o[1]+'</span>';}).join('');
+      var stP=[['outstanding4w','Outstanding +4 weeks'],['outstanding','Outstanding'],['overdue','Overdue'],['paid','Paid'],['all','All']].map(function(o){return '<span class="pill'+(PDUE_STATE.status===o[0]?' active':'')+'" data-ps="'+o[0]+'">'+o[1]+'</span>';}).join('');
       var supOpts='<option value="">All suppliers</option>'+sups.map(function(s){return '<option value="'+esc(s)+'"'+(PDUE_STATE.supplier===s?' selected':'')+'>'+esc(s)+'</option>';}).join('');
       document.getElementById('pdue-bar').innerHTML='<span class="pill-lbl">Status</span>'+stP
         +' <span class="pill-lbl" style="margin-left:8px">Supplier</span><select class="flt" id="pdue-sup" style="width:auto">'+supOpts+'</select>'
@@ -9029,7 +9031,7 @@
     var payAmt=amtNum+' '+amtCcy;
     var inv='SUPPLIER-PAYMENT-'+(run.supplier_code?run.supplier_code+'-':'')+run.dt;
     var clean=function(c){return String(c==null?'':c).replace(/[\t\n\r]/g,' ');};
-    var out=['See below payment detail for '+run.supplier+' of '+payAmt,'',
+    var out=['Payment detail - '+run.supplier+' of '+payAmt,'',
       ['SUPPLIER',run.supplier].join('\t'),['Payment amount',payAmt].join('\t'),['Payment reference',inv].join('\t'),'',
       ['REFERENCE','AMOUNT','TYPE','PRODUCTION REF','DEPOSIT REF'].join('\t')];
     (run.lines||[]).forEach(function(l){ out.push([l.reference,l.amount,l.type,l.prod_no||'',l.deposit_ref||''].map(clean).join('\t')); });
@@ -9049,7 +9051,7 @@
         +'<td style="'+cell+'">'+esc(l.prod_no||'')+'</td>'
         +'<td style="'+cell+'">'+esc(l.deposit_ref||'')+'</td></tr>'; }).join('');
     return '<div style="font-family:Arial,Helvetica,sans-serif;font-size:13px;color:#111">'
-      +'<p style="margin:0 0 10px">See below payment detail for <b>'+esc(run.supplier)+'</b> of <b>'+esc(amtNum)+'</b> '+esc(amtCcy)+'</p>'
+      +'<p style="margin:0 0 10px">Payment detail - <b>'+esc(run.supplier)+'</b> of <b>'+esc(amtNum)+'</b> '+esc(amtCcy)+'</p>'
       +'<p style="margin:0 0 10px"><b>Supplier:</b> '+esc(run.supplier)+'<br><b>Payment amount:</b> '+esc(payAmt)+'<br><b>Payment reference:</b> '+esc(inv)+'</p>'
       +'<table style="border-collapse:collapse;font-size:13px"><thead><tr>'
       +'<th style="'+hcell+'">Reference</th><th style="'+hcell+';text-align:right">Amount</th><th style="'+hcell+'">Type</th><th style="'+hcell+'">Production ref</th><th style="'+hcell+'">Deposit ref</th>'
