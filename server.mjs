@@ -332,7 +332,7 @@ const UNDEF_SUBCAT = 'Undefined sub category';
 function _normCat(v) { const t = (v == null ? '' : String(v).trim()); return (t === '' || t === 'Unknown') ? UNDEF_SUBCAT : t; }
 // Non-SKUs / data artefacts that must never appear in the planner (Ben: GIFTWRAP-BOX is not a real SKU). Excluded at the
 // data-load queries below. The complete fix is removing them from the PIM; this is a hard guard so they can't leak through.
-const NON_SKUS = ['GIFTWRAP-BOX'];
+const NON_SKUS = ['GIFTWRAP-BOX', 'FAIRE-COMMISSION'];   // FAIRE-COMMISSION is a commission line, not a product (Ben, 26-Aug)
 const NON_SKU_LIST = NON_SKUS.map(s => `'${String(s).replace(/'/g, "''")}'`).join(',');
 async function buildDATA() {
   const [salesR, availR] = await Promise.all([
@@ -1339,6 +1339,7 @@ app.get('/api/demand/forecast-anomalies', async (req, res) => {
     fc.forEach(r => { const k = key(r.sku, r.co, r.ch); (S[k] || (S[k] = { a: {}, f: {} })).f[r.m] = r.u; });
     const out = [];
     Object.keys(S).forEach(k => { const [sku, co, ch] = k.split('|'); const s = S[k];
+      if (NON_SKUS.indexOf(sku) >= 0) return;   // commission / non-product lines
       const rows = lastComplete.map(m => ({ m, a: s.a[m] || 0, f: s.f[m] || 0 }));   // newest first
       let dir = 0, run = 0;   // count consecutive most-recent complete months that are same-direction + material
       for (let i = 0; i < rows.length; i++) { const a = rows[i].a, f = rows[i].f; const d = (a - f) / Math.max(f, 1); const sign = d > 0 ? 1 : (d < 0 ? -1 : 0);
@@ -1353,11 +1354,13 @@ app.get('/api/demand/forecast-anomalies', async (req, res) => {
       const recentAct = runRows.reduce((x, r) => x + r.a, 0) / run;
       let fwdF = 0, fn = 0; fwd.forEach(m => { if (s.f[m] != null) { fwdF += s.f[m]; fn++; } }); const fwdAvg = fn ? fwdF / fn : 0;
       const caughtUp = dir > 0 ? (fwdAvg >= recentAct * 0.85) : (fwdAvg <= recentAct * 1.15);
+      const impactGbp = Math.round(impactU * cost);
+      if (!(impactGbp > 0)) return;   // no £ to action (un-costed / non-stock line) → keep it out of the report
       out.push({ sku, co, ch, name: (meta[sku] && meta[sku].nm) || '', cat: (meta[sku] && meta[sku].cat) || '', sub: (meta[sku] && meta[sku].sub) || '',
         dir: dir > 0 ? 'hot' : 'cold', months: run, avgPct: Math.round(avgPct * 100),
         m1: rows[0], m2: rows[1] || null, m3: rows[2] || null,
         recentAct: Math.round(recentAct), fwdAvg: Math.round(fwdAvg), caughtUp: !!caughtUp,
-        impactUnits: Math.round(impactU), impactGbp: Math.round(impactU * cost) });
+        impactUnits: Math.round(impactU), impactGbp: impactGbp });
     });
     out.sort((a, b) => b.impactGbp - a.impactGbp || Math.abs(b.avgPct) - Math.abs(a.avgPct));
     res.json({ ok: true, rows: out, completeMonths: lastComplete, forwardMonths: fwd, cfg: { pct, minU, minMo } });
@@ -1610,6 +1613,7 @@ app.post('/api/save-forecasts', async (req, res) => {
   try {
     await client.query('BEGIN');
     await client.query("SET LOCAL statement_timeout = '120s'");
+    await client.query("SET LOCAL idle_in_transaction_session_timeout = '15s'");   // frozen-instance guard (Vercel): don't leave the txn open pinning a pool connection
     // Batched multi-row writes (was one query per row — a big smoothing sweep held the pool
     // connection open for thousands of round-trips and timed out). ~500 rows per query.
     const CH = 500; let upserts = 0, deletes = 0;
@@ -1664,6 +1668,7 @@ app.post('/api/save-sku-forecasts', async (req, res) => {
   try {
     await client.query('BEGIN');
     await client.query("SET LOCAL statement_timeout = '120s'");
+    await client.query("SET LOCAL idle_in_transaction_session_timeout = '15s'");   // frozen-instance guard (Vercel): don't leave the txn open pinning a pool connection
     // Batched multi-row upserts (was one query per row → thousands of round-trips held the pool
     // connection open long enough to time out on a big smoothing sweep). ~500 rows per query.
     const CH = 500; let n = 0;
@@ -3657,6 +3662,10 @@ async function queryCapped(sql, params, ms = 25000) {
   try {
     await client.query('BEGIN READ ONLY');
     await client.query(`SET LOCAL statement_timeout = ${parseInt(ms, 10) || 25000}`);
+    // SET LOCAL statement_timeout only caps the STATEMENT. Vercel freezes the instance after the response, so the
+    // BEGIN txn stays open and pins a pool connection → pool exhaustion (Diviyaj, 22-24 Aug). This caps the whole
+    // transaction: if it's left idle-in-transaction (frozen instance), Postgres kills it and frees the connection.
+    await client.query("SET LOCAL idle_in_transaction_session_timeout = '15s'");
     const r = await client.query(sql, params);
     await client.query('COMMIT');
     return r;

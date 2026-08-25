@@ -1,3 +1,7 @@
+## v27.276 queryCapped idle-transaction guard (prod pool-exhaustion fix) + anomalies non-stock exclusion
+- **`queryCapped` (+ the two bulk-write transactions) now `SET LOCAL idle_in_transaction_session_timeout = '15s'`.** `statement_timeout` only caps the STATEMENT; Vercel freezes the instance after the response, so the `BEGIN` txn stays open and pins a pool connection → pool exhaustion (Diviyaj: the 22–24 Aug timeouts on `/api/supply/purchase-orders`). Capping the whole txn lets Postgres kill an idle-in-transaction and free the connection. Verified the PO endpoint still returns 200.
+- **Forecast trend anomalies:** `FAIRE-COMMISSION` added to `NON_SKUS` (a commission line, not a product), and the report now **skips any £0-impact row** (un-costed / non-stock) — was ranking FAIRE-COMMISSION as a hot anomaly at £0.
+
 ## v27.275 3PL invoice: cross-month reclass journal now works for UK ILG
 - The journal endpoint used the generic order parser to get per-order refs, which can't read ILG's "Your reference"/"Gross" columns → **UK ILG produced no journal** (it bailed with "ILG shipping-detail dating is a follow-up"). Now ILG parses **all `invoice_0*` freight sheets** via the ship-detail parser, so the cross-month reclass journal generates for UK ILG too. Verified: UK ILG July → £10,617 of freight reclassed into Apr/May/Jun. EU/US/AU unchanged (already worked).
 
