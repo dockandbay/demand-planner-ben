@@ -1,3 +1,6 @@
+## v27.268 SSM Backtest: fix cut-off "Recommendation" column
+- The risk-options cell used `white-space:nowrap`, so each option ran wider than the screen and got clipped (you could only see "Low risk (safe) (99…"). Now wraps (`white-space:normal`, cell `min-width:300px;max-width:460px`), so the full cover · capital held · stockout risk line is visible.
+
 ## v27.267 Inventory Status Report: next-shipment PO + FBA inbound + PO hyperlinks (SUG-0031/0032) + snapshot-upload clear
 - **SUG-0031:** the "Inbound qty / ETA / PO" column now shows the **next shipment's PO number** next to the qty/ETA, on the out-of-stock / low-stock / backorder rows.
 - **SUG-0032:** FBA out-of-stock / low-stock rows now show **FBA-specific inbound** (and FBA on-order), not the combined 3PL+FBA figure. New location-aware inbound cell (`inbCellLoc`): 3PL rows use `nx3`, FBA rows use `nxf`; "On order" column is now location-specific (`oof`/`oo3`).

@@ -10476,7 +10476,7 @@ function renderSsmBacktestView(body){
       +['Market · Pool','Snapshots','Avg cover','Min','Wk demand','CV','Lead','Overstock mo','Status','Recommendation — risk options (cover · capital held · stockout risk)'].map(function(h){return '<th style="text-align:left;padding:5px 9px;border-bottom:1px solid #e5e7eb;white-space:nowrap">'+h+'</th>';}).join('')+'</tr>';
     var trs=rows.map(function(r){
       var risk=(r.riskOptions||[]).map(function(o){ var sug=o.sl===r.suggestedSl;
-        return '<div style="white-space:nowrap;margin:1px 0;line-height:1.5">'
+        return '<div style="white-space:normal;margin:3px 0;line-height:1.5">'
           +'<button class="bt-applyone" data-k="'+esc(r.co+'|'+r.pool)+'" data-sl="'+o.sl+'" title="Apply this risk level to '+esc(r.co+' · '+r.pool)+'" style="border:1px solid #16a34a;background:'+(sug?'#16a34a':'#dcfce7')+';color:'+(sug?'#fff':'#166534')+';font-weight:700;font-size:9px;padding:1px 7px;border-radius:4px;cursor:pointer;margin-right:6px">Apply</button>'
           +'<b style="color:'+(sug?'#6b21a8':'#334155')+'">'+esc(o.level)+' ('+o.sl+'%)</b>'+(sug?' <span style="font-size:9px;color:#6b21a8;font-weight:700">◄ suggested</span>':'')
           +'<span class="mut" style="font-size:10px"> · '+o.coverWks+'wk · '+gbp(o.estGbp)+' · ~'+o.stockoutPct+'% stockout · replay: '+(o.empStockoutMonths||0)+'/'+r.months+'mo short</span></div>'; }).join('');
@@ -10487,7 +10487,7 @@ function renderSsmBacktestView(body){
         +'<td style="padding:6px 9px;vertical-align:top">'+fn(r.weeklyDemand)+'</td><td style="padding:6px 9px;vertical-align:top">'+r.cv+'</td><td style="padding:6px 9px;vertical-align:top">'+r.leadWks+'wk</td>'
         +'<td style="padding:6px 9px;vertical-align:top">'+r.overstockMonths+'/'+r.months+'</td>'
         +'<td style="padding:6px 9px;vertical-align:top"><span style="font-weight:700;color:'+(fc[r.flag]||'#64748b')+'">'+esc(r.flag)+'</span></td>'
-        +'<td style="padding:6px 9px;vertical-align:top;min-width:340px">'+risk+'</td></tr>'; }).join('');
+        +'<td style="padding:6px 9px;vertical-align:top;min-width:300px;max-width:460px;white-space:normal">'+risk+'</td></tr>'; }).join('');
     var months=[]; (d.snapshotDates||[]).forEach(function(x){ var mm=String(x).slice(0,7); if(months.indexOf(mm)<0)months.push(mm); }); months.sort();
     var win=d.window||{}, cfg=d.cfg||{};
     var opt=function(v,sel,lbl){ return '<option value="'+v+'"'+(v===(sel||'')?' selected':'')+'>'+(lbl||v)+'</option>'; };
