@@ -1,5 +1,8 @@
+## v27.278 Payments Due: "Outstanding +4 weeks" now includes no-due-date rows
+- Per Ben: the **"Outstanding +4 weeks"** pill now also shows unpaid payments that have **no due date** (previously excluded). Filter is now: unpaid AND (due ≤ today+28d, overdue included) OR no due date.
+
 ## v27.277 Payments Due: "Outstanding +4 weeks" default pill + copy-email wording
-- **`#/supply/payments` new default pill "Outstanding +4 weeks":** shows only unpaid payments due on/before **today + 28 days**, which **includes anything overdue**. No-due-date rows are excluded (can't be dated into the window). The old "Outstanding" (all unpaid), Overdue, Paid and All pills stay; only the default landing filter changed.
+- **`#/supply/payments` new default pill "Outstanding +4 weeks":** shows only unpaid payments due on/before **today + 28 days**, which **includes anything overdue**. The old "Outstanding" (all unpaid), Overdue, Paid and All pills stay; only the default landing filter changed.
 - **Payments Report ▸ Copy email:** first line reworded from *"See below payment detail for X of Y"* → **"Payment detail - X of Y"** (both the plain-text copy and the HTML body).
 
 ## v27.276 queryCapped idle-transaction guard (prod pool-exhaustion fix) + anomalies non-stock exclusion

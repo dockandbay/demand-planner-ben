@@ -8415,7 +8415,7 @@
     _navCounts.paydue=rows.filter(function(r){return r.overdue;}).length; updateNavBadges();   // keep the sub-menu overdue counter fresh
     var sups=Array.from(new Set(rows.map(function(r){return r.sup;}))).filter(Boolean).sort();
     function pass(r){ if(PDUE_STATE.status==='outstanding'&&r.paid)return false;
-      if(PDUE_STATE.status==='outstanding4w'&&(r.paid||!r.due||r.due>cutoff4w))return false;   // unpaid AND due on/before today+28d (overdue included; no-due-date excluded)
+      if(PDUE_STATE.status==='outstanding4w'&&(r.paid||(r.due&&r.due>cutoff4w)))return false;   // unpaid AND (due on/before today+28d, overdue included) OR no due date
       if(PDUE_STATE.status==='overdue'&&!r.overdue)return false;
       if(PDUE_STATE.status==='paid'&&!r.paid)return false;
       if(PDUE_STATE.supplier&&r.sup!==PDUE_STATE.supplier)return false; return true; }
