@@ -1,3 +1,6 @@
+## v27.275 3PL invoice: cross-month reclass journal now works for UK ILG
+- The journal endpoint used the generic order parser to get per-order refs, which can't read ILG's "Your reference"/"Gross" columns → **UK ILG produced no journal** (it bailed with "ILG shipping-detail dating is a follow-up"). Now ILG parses **all `invoice_0*` freight sheets** via the ship-detail parser, so the cross-month reclass journal generates for UK ILG too. Verified: UK ILG July → £10,617 of freight reclassed into Apr/May/Jun. EU/US/AU unchanged (already worked).
+
 ## v27.274 3PL invoice upload: multi-file drag-and-drop
 - The 3PL invoice upload now accepts **multiple files at once** (drag several in, or multi-select). Input gets `multiple`; files upload **sequentially** with "Uploading N of M" progress, one reload at the end, and a per-file success/failure summary. Each file still gzips client-side to beat the ~4.5MB cap.
 - Pairs with UK ILG, which already **combines all uploaded sheets** in the allocation (all DI PDFs for fees + all invoice_0* sheets for freight) — so you can drop the whole month at once.

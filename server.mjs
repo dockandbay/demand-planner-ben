@@ -8942,8 +8942,16 @@ app.post('/api/supply/tpl/journal/:id', async (req, res) => {
     const tpl0 = row.tpl || null, period = row.period;
     if (!/^\d{4}-\d{2}$/.test(String(period || ''))) return res.json({ ok: false, error: 'Invoice period (month) is not set for this file.' });
     const isCsv = /\.csv$/i.test(row.filename || '') || /csv/i.test(row.content_type || '');
-    const orders = await _tplOrderRows(row.content, isCsv, tpl0, period);   // per-order {reference, shipping, fulfilment}
-    if (!orders.length) return res.json({ ok: false, error: 'No per-order cost lines to journal (ILG shipping-detail dating is a follow-up).' });
+    let orders;
+    if (tpl0 === 'uk_ilg') {   // ILG uses "Your reference"/"Gross" columns (not the generic parser) — combine ALL invoice_0* freight sheets; the per-order FREIGHT is what's datable (DI fees aren't per-order)
+      const shipFiles = (await pool.query(`SELECT filename, content_type, content FROM planner.tpl_invoice_files WHERE tpl='uk_ilg' AND period=$1 AND filename ~* 'invoice_0'`, [period])).rows;
+      let ship = [];
+      for (const sf of shipFiles) { const csv = /\.csv$/i.test(sf.filename || '') || /csv/i.test(sf.content_type || ''); try { ship = ship.concat(await _tplIlgShipDetail(sf.content, csv)); } catch (e) {} }
+      orders = ship.map(s => ({ reference: s.ref, shipping: s.gross || 0, fulfilment: 0 }));
+    } else {
+      orders = await _tplOrderRows(row.content, isCsv, tpl0, period);   // per-order {reference, shipping, fulfilment}
+    }
+    if (!orders.length) return res.json({ ok: false, error: 'No per-order cost lines to journal for this invoice.' });
     const refs = [...new Set(orders.map(o => o.reference).filter(Boolean))];
     const dbrows = refs.length ? (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc, to_char(invoice_date,'YYYY-MM') ym FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [refs])).rows : [];
     const byRef = {}, byCon = {}; dbrows.forEach(r => { const v = { cc: String(r.cc || '').trim(), ym: r.ym }; if (r.reference) byRef[r.reference] = v; if (r.customer_order_no) byCon[r.customer_order_no] = v; });
