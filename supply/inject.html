@@ -7953,7 +7953,7 @@
     function fileToB64(file){ return new Promise(function(res,rej){ var r=new FileReader(); r.onload=function(){ var s=String(r.result||''); var i=s.indexOf(','); res(i>=0?s.slice(i+1):s); }; r.onerror=rej; r.readAsDataURL(file); }); }
     c.innerHTML='<div style="max-width:940px">'
       +'<div style="font-weight:800;font-size:16px;margin:4px 0 2px">EDI Labels — Dillards via EZY COM</div>'
-      +'<div class="mut" style="font-size:12px;margin-bottom:12px">Upload the <b>wc-asn.csv</b> and the <b>SSCC label PDFs</b>. Each label page is matched by its SSCC to the CSV (PO + our SKU via EAN), split out, and filed under <b>Supplier / PO / SKU</b>. Anything unmatched goes to <b>_UNMATCHED</b>. Output = a ZIP + a manifest.csv.</div>'
+      +'<div class="mut" style="font-size:12px;margin-bottom:12px">Upload the <b>wc-asn.csv</b> and the <b>SSCC label PDFs</b> — <b>drag &amp; drop anywhere on this page</b> (CSV and PDFs route automatically) or use the pickers. Each label page is matched by its SSCC to the CSV (PO + our SKU via EAN), split out, and filed under <b>Supplier / PO / SKU</b>. Anything unmatched goes to <b>_UNMATCHED</b>. Output = a ZIP + a manifest.csv.</div>'
       +'<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px">'
         +'<label style="flex:1;min-width:240px;border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;background:#f8fafc;text-align:left"><div style="font-weight:700;font-size:12px;margin-bottom:4px">1 · ASN CSV</div><input type="file" id="edi-csv" accept=".csv" style="font-size:12px"><div class="mut" id="edi-csv-n" style="font-size:11px;margin-top:4px">wc-asn.csv</div></label>'
         +'<label id="edi-drop" style="flex:2;min-width:280px;border:1px dashed #94a3b8;border-radius:8px;padding:10px 12px;background:#f8fafc;text-align:left"><div style="font-weight:700;font-size:12px;margin-bottom:4px">2 · SSCC label PDFs</div><input type="file" id="edi-pdfs" accept="application/pdf,.pdf" multiple style="font-size:12px"><div class="mut" id="edi-pdf-n" style="font-size:11px;margin-top:4px">drag &amp; drop or choose multiple PDFs</div></label>'
@@ -7964,9 +7964,15 @@
     var csvIn=c.querySelector('#edi-csv'), pdfIn=c.querySelector('#edi-pdfs'), drop=c.querySelector('#edi-drop');
     csvIn.onchange=function(){ S.csv=csvIn.files[0]||null; c.querySelector('#edi-csv-n').textContent=S.csv?S.csv.name:'wc-asn.csv'; };
     pdfIn.onchange=function(){ S.pdfs=Array.prototype.slice.call(pdfIn.files||[]); c.querySelector('#edi-pdf-n').textContent=S.pdfs.length?(S.pdfs.length+' PDF'+(S.pdfs.length>1?'s':'')+' selected'):'drag & drop or choose multiple PDFs'; };
-    ['dragover','dragenter'].forEach(function(ev){ drop.addEventListener(ev,function(e){ e.preventDefault(); drop.style.background='#eff6ff'; }); });
-    ['dragleave','drop'].forEach(function(ev){ drop.addEventListener(ev,function(e){ e.preventDefault(); drop.style.background='#f8fafc'; }); });
-    drop.addEventListener('drop',function(e){ var fs=Array.prototype.slice.call((e.dataTransfer&&e.dataTransfer.files)||[]).filter(function(f){return /pdf$/i.test(f.name);}); if(fs.length){ S.pdfs=fs; c.querySelector('#edi-pdf-n').textContent=fs.length+' PDF'+(fs.length>1?'s':'')+' selected'; } });
+    function routeFiles(files){ var arr=Array.prototype.slice.call(files||[]);
+      var csv=arr.filter(function(f){return /\.csv$/i.test(f.name);}), pdf=arr.filter(function(f){return /\.pdf$/i.test(f.name);});
+      if(csv.length){ S.csv=csv[0]; c.querySelector('#edi-csv-n').textContent=S.csv.name; }
+      if(pdf.length){ S.pdfs=pdf; c.querySelector('#edi-pdf-n').textContent=pdf.length+' PDF'+(pdf.length>1?'s':'')+' selected'; }
+      var st=c.querySelector('#edi-status'); if(st&&(csv.length||pdf.length))st.textContent=''; }
+    // whole-page drag & drop — CSV routes to the CSV slot, PDFs to the label list, wherever you drop them
+    ['dragover','dragenter'].forEach(function(ev){ c.addEventListener(ev,function(e){ e.preventDefault(); c.style.outline='2px dashed #93c5fd'; c.style.outlineOffset='-6px'; }); });
+    ['dragleave','drop'].forEach(function(ev){ c.addEventListener(ev,function(e){ if(ev==='dragleave'&&e.relatedTarget&&c.contains(e.relatedTarget))return; c.style.outline=''; }); });
+    c.addEventListener('drop',function(e){ e.preventDefault(); c.style.outline=''; routeFiles(e.dataTransfer&&e.dataTransfer.files); });
     c.querySelector('#edi-parse').onclick=function(){ var st=c.querySelector('#edi-status');
       if(!S.csv){ st.textContent='Choose the ASN CSV first.'; return; }
       if(!S.pdfs.length){ st.textContent='Choose at least one PDF.'; return; }
@@ -9974,7 +9980,7 @@
     else writeHash([v]);
   }
   function syncHash(){ if(current==='reports') writeHash(['supply','reports',reportTab]);
-    else if(current==='purchase-orders') writeHash(['supply','purchase-orders'].concat(poSub&&PO_SUB_KEYS.indexOf(poSub)>=0?[poSub]:[]));   // include 'plan' so PLAN has its own deep link
+    else if(current==='purchase-orders') writeHash(['supply','purchase-orders'].concat(poSub&&(PO_SUB_KEYS.indexOf(poSub)>=0||poSub==='edi-labels')?[poSub]:[]));   // include 'plan' so PLAN has its own deep link; edi-labels = hidden page deep link
     else if(current==='payments') writeHash(['supply','payments'].concat(poSub&&PAY_SUB_KEYS.indexOf(poSub)>=0&&poSub!=='paydue'?[poSub]:[]));
     else if(current==='config'){
       if(CONFIG_CTX==='supply') writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['supply','config','portal',encodeURIComponent(PORTAL_SUP.toLowerCase())]:['supply','config',CONFIG_SUB]);   // SUPPLY ▸ CONFIG → #/supply/config/<item>
@@ -11922,7 +11928,7 @@
     var CTRS_ALL=['UK','US','EU','AU','CA'], colOf=function(c){ return (typeof MKT_COLORS!=='undefined'&&MKT_COLORS[c])||'#94a3b8'; };
     // recommended qty per mode: REC[mode][sku][ctry]
     var REC={'3pl':{},'fba':{}}; ['3pl','fba'].forEach(function(md){ var byc=itemsByMode[md]||{}; CTRS_ALL.forEach(function(c){ (byc[c]||[]).forEach(function(it){ var s=String(it.sku).toUpperCase(); (REC[md][s]=REC[md][s]||{})[c]=Math.round(Number(it.qty)||0); }); }); });
-    var OVR={}, TICK={}, SUP={}, META={};   // OVR/TICK keyed mode|sku|ctry; SUP[sku]=code; persist across redraws
+    var OVR={}, TICK={}, SUP={}, META={}, TIERTOP={};   // OVR/TICK keyed mode|sku|ctry; SUP[sku]=code; TIERTOP[sku]=order tier top-up as China stock; persist across redraws
     var shown=[];
     function modeCountries(){ var out=[]; CTRS_ALL.forEach(function(c){ for(var s in REC[MODE]){ if(REC[MODE][s][c]>0){ out.push(c); return; } } }); return out; }
     function keyC(s,c){ return MODE+'|'+s+'|'+c; }
@@ -11953,6 +11959,16 @@
       var pre=qty.toLocaleString()+' units cost '+f2(curUC)+' per unit. ';
       if(delta<=0){ return pre+'Increase to '+nextMin.toLocaleString()+' ('+f2(nextUC)+'/unit) — the extra '+extra.toLocaleString()+' units are FREE, '+f2(delta)+' cheaper overall.'; }
       return pre+'The extra '+extra.toLocaleString()+' units to reach '+nextMin.toLocaleString()+' ('+f2(nextUC)+'/unit) cost '+f2(delta)+' — '+f2(delta/extra)+' per unit.'; }
+    // A tier top-up is available when the ticked qty sits between two price tiers (at/above MOQ). The extra units to
+    // reach the next break can be ordered as China stock (Ben) — held un-allocated for later allocation to a market.
+    function tierAvail(s){ var t=plTiersOf(s); if(!t||t.length<2)return null; var qty=rowTotal(s); if(!(qty>0))return null;
+      var moq=moqOf(s); if(moq&&qty<moq)return null;   // below MOQ → handled by the MOQ top-up instead
+      var cur=null,next=null; t.forEach(function(x){ var mq=Number(x.min_qty)||1; if(mq<=qty&&(!cur||mq>(Number(cur.min_qty)||1)))cur=x; if(mq>qty&&(!next||mq<(Number(next.min_qty)||1)))next=x; });
+      if(!cur||!next)return null; var extra=(Number(next.min_qty)||1)-qty; return extra>0?{extra:extra,nextMin:Number(next.min_qty)||1}:null; }
+    function tierTopUps(){ var out=[]; Object.keys(REC[MODE]).forEach(function(s){ if(!hasCode(s)||!TIERTOP[s])return; var a=tierAvail(s); if(a)out.push({sku:s,qty:a.extra,supplier_code:supOf(s)||''}); }); return out; }
+    // Tier-box HTML = the hint text + (when a top-up is available) a checkbox to order the extra as China stock.
+    function tierBoxHtml(s){ var hint=tierHint(s); if(!hint)return ''; var a=tierAvail(s);
+      return esc(hint)+(a?('<label style="display:block;margin-top:3px;cursor:pointer;font-weight:700"><input type="checkbox" class="bpm-tiertop" data-s="'+esc(s)+'"'+(TIERTOP[s]?' checked':'')+' style="vertical-align:middle;margin-right:3px">＋ order extra '+a.extra.toLocaleString()+' as China stock</label>'):''); }
     var ov=document.createElement('div'); ov.id='bp-po-modal-multi';
     ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200000;display:flex;flex-direction:column;padding:16px 8px;overflow:hidden';
     ov.innerHTML='<div class="pomodal" style="width:100%;max-width:none;flex:1 1 auto;display:flex;flex-direction:column;overflow:hidden;opacity:0;transition:opacity .12s ease">'
@@ -12026,7 +12042,12 @@
     // China-stock MOQ top-up: for each ticked SKU whose combined-across-shown order is below its MOQ, the shortfall
     // (moq − combined) goes to a "China Stock" holding PO (one per production per supplier). supplier = the SKU's chosen supplier.
     function chinaShortfalls(){ var out=[]; Object.keys(REC[MODE]).forEach(function(s){ if(!hasCode(s))return; var moq=moqOf(s); if(!moq)return; var rt=rowTotal(s); if(rt>0&&rt<moq)out.push({sku:s,qty:(moq-rt),supplier_code:supOf(s)||''}); }); return out; }
-    function refreshChina(){ var lbl=document.getElementById('bpm-china-lbl'); if(!lbl)return; var sf=chinaShortfalls(); var u=sf.reduce(function(a,b){return a+b.qty;},0); lbl.textContent=sf.length?('China-stock top-up ('+sf.length+' SKU · '+u.toLocaleString()+'u)'):'China-stock top-up (none)'; }
+    function refreshChina(){ var lbl=document.getElementById('bpm-china-lbl'); if(!lbl)return;
+      var sf=chinaShortfalls(), tt=tierTopUps(); var u=sf.reduce(function(a,b){return a+b.qty;},0), tu=tt.reduce(function(a,b){return a+b.qty;},0);
+      var parts=[]; if(sf.length)parts.push(sf.length+' MOQ · '+u.toLocaleString()+'u'); if(tt.length)parts.push(tt.length+' tier · '+tu.toLocaleString()+'u');
+      lbl.textContent='China-stock top-up'+(parts.length?(' ('+parts.join(' + ')+')'):' (none)'); }
+    // China-stock holding-PO items = MOQ shortfalls (when the global top-up is on) + any per-SKU tier top-ups (opt-in), merged by SKU.
+    function chinaItems(){ var base=(chinaOn()?chinaShortfalls():[]).concat(tierTopUps()); var by={}; base.forEach(function(it){ if(by[it.sku])by[it.sku].qty+=it.qty; else by[it.sku]={sku:it.sku,qty:it.qty,supplier_code:it.supplier_code}; }); return Object.keys(by).map(function(k){return by[k];}); }
     function moqMsg(moq,t){ return 'Minimum order quantity (MOQ) for this product is '+moq.toLocaleString()+' units. This production totals '+t.toLocaleString()+' units across all shown markets — '+(moq-t).toLocaleString()+' short of the MOQ. Tick “China-stock top-up” to add the shortfall to a China holding PO.'; }
     // The app's native-title tooltip renders below this modal (modal z-index 200000), so the MOQ hint would be hidden.
     // Give the ⚑ its own tooltip that draws ABOVE the modal. Bound once, delegated (survives drawSkus re-renders).
@@ -12040,7 +12061,7 @@
       var td=tr.querySelector('.bpm-totcell'); if(td)td.style.background=short?'#FA5053':'';
       var ic=tr.querySelector('.bpm-moqicon'); if(ic){ ic.style.display=short?'':'none'; ic.setAttribute('data-moqtip',short?moqMsg(moq,t):''); ic.style.color=short?'#fff':'#b91c1c'; }
       var mv=tr.querySelector('.bpm-moqval'); if(mv){ mv.textContent=moq?('MOQ '+moq.toLocaleString()):''; mv.style.display=moq?'':'none'; mv.style.color=short?'#fff':'#94a3b8'; }
-      var hint=short?'':tierHint(s); var hi=tr.querySelector('.bpm-tierbox'); if(hi){ hi.style.display=hint?'block':'none'; hi.innerHTML=hint?esc(hint):''; } }
+      var hbx=short?'':tierBoxHtml(s); var hi=tr.querySelector('.bpm-tierbox'); if(hi){ hi.style.display=hbx?'block':'none'; hi.innerHTML=hbx; } }
     function drawSkus(){
       var box=document.getElementById('bpm-skus'); if(!box)return;
       var skus=Object.keys(REC[MODE]).filter(function(s){ return shown.some(function(c){ return rec(s,c)>0; }); });
@@ -12056,11 +12077,11 @@
         var rt=rowTotal(s.sku);
         var qtyCells=shown.map(function(c){ var v=qtyVal(s.sku,c), tk=isTicked(s.sku,c), dis=hc?'':' disabled'; var zero=!(v>0);
           return '<td style="'+tdB+';text-align:center'+(v?';background:'+colOf(c)+'18':'')+'"><span style="display:inline-flex;align-items:center;gap:4px;justify-content:center"><input type="checkbox" class="bpm-tick"'+(zero?' style="accent-color:#cbd5e1"':'')+' data-s="'+esc(s.sku)+'" data-c="'+c+'"'+(tk?' checked':'')+dis+'><input type="number" min="0" class="bpm-q" data-s="'+esc(s.sku)+'" data-c="'+c+'" value="'+v+'"'+dis+' style="width:58px;text-align:center;font-size:11px;padding:1px 3px;border:1px solid '+(zero?'#e5e7eb':'transparent')+';border-radius:4px;background:transparent;color:'+(zero?'#cbd5e1':'inherit')+'"></span></td>'; }).join('');
-        var moqShort=(s.moq&&rt>0&&rt<s.moq); var thint=(moqShort?'':tierHint(s.sku));
+        var moqShort=(s.moq&&rt>0&&rt<s.moq); var thint=(moqShort?'':tierBoxHtml(s.sku));
         rows+='<tr data-sku="'+esc(s.sku)+'" data-cat="'+esc(cat)+'" data-moq="'+(s.moq||0)+'">'
           +'<td style="'+tdB.replace('white-space:nowrap','')+';text-align:left;min-width:200px"><div style="display:flex;align-items:center;gap:6px"><button class="bpm-plan" data-sku="'+esc(s.sku)+'" style="font-size:8px;font-weight:700;padding:0 4px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer">PLAN</button><span>'+esc(s.sku)+'</span></div>'+(s.discontinue?'<div style="font-size:9px;color:#9ca3af;margin-top:1px">discontinue '+esc(fd(s.discontinue))+'</div>':'')+'</td>'
           +qtyCells
-          +'<td class="bpm-totcell" style="'+tdB+';text-align:center;font-weight:700;font-variant-numeric:tabular-nums'+(moqShort?';background:#FA5053':'')+'"><span class="bpm-moqicon" data-moqtip="'+(moqShort?esc(moqMsg(s.moq,rt)):'')+'" style="cursor:help;margin-right:3px;color:'+(moqShort?'#fff':'#b91c1c')+';display:'+(moqShort?'':'none')+'">⚑</span><span class="bpm-rowtot" style="'+(moqShort?'color:#fff':'')+'">'+(rt?rt.toLocaleString():'0')+'</span>'+(s.moq?'<div class="bpm-moqval" style="font-size:8px;font-weight:400;margin-top:1px;color:'+(moqShort?'#fff':'#94a3b8')+'">MOQ '+s.moq.toLocaleString()+'</div>':'')+'<div class="bpm-tierbox" style="display:'+(thint?'block':'none')+';margin-top:3px;background:#fde047;color:#713f12;font-size:8.5px;font-weight:600;line-height:1.25;border:1px solid #eab308;border-radius:4px;padding:3px 5px;white-space:normal;text-align:left">'+(thint?esc(thint):'')+'</div></td>'
+          +'<td class="bpm-totcell" style="'+tdB+';text-align:center;font-weight:700;font-variant-numeric:tabular-nums'+(moqShort?';background:#FA5053':'')+'"><span class="bpm-moqicon" data-moqtip="'+(moqShort?esc(moqMsg(s.moq,rt)):'')+'" style="cursor:help;margin-right:3px;color:'+(moqShort?'#fff':'#b91c1c')+';display:'+(moqShort?'':'none')+'">⚑</span><span class="bpm-rowtot" style="'+(moqShort?'color:#fff':'')+'">'+(rt?rt.toLocaleString():'0')+'</span>'+(s.moq?'<div class="bpm-moqval" style="font-size:8px;font-weight:400;margin-top:1px;color:'+(moqShort?'#fff':'#94a3b8')+'">MOQ '+s.moq.toLocaleString()+'</div>':'')+'<div class="bpm-tierbox" style="display:'+(thint?'block':'none')+';margin-top:3px;background:#fde047;color:#713f12;font-size:8.5px;font-weight:600;line-height:1.25;border:1px solid #eab308;border-radius:4px;padding:3px 5px;white-space:normal;text-align:left">'+(thint||'')+'</div></td>'
           +'<td style="'+tdB+';text-align:left;min-width:150px">'+supCell+'</td></tr>';
       });
       var thB='position:sticky;top:0;background:#f3f3f1;z-index:1;padding:5px 8px;border-bottom:1px solid #d5d5d5;font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#444;white-space:nowrap';
@@ -12071,6 +12092,7 @@
         +'<th style="'+thB+';text-align:center;min-width:70px">Total</th>'
         +'<th style="'+thB+';text-align:left;min-width:150px">Supplier</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
       var pb=document.getElementById('bpm-pills'); if(pb)pb.innerHTML=pillBar();
+      if(!box._tiertopBound){ box._tiertopBound=true; box.addEventListener('change',function(e){ var t=e.target; if(t&&t.classList&&t.classList.contains('bpm-tiertop')){ TIERTOP[t.dataset.s]=t.checked; refreshChina(); invalidatePreview(); } }); }   // per-SKU "order tier top-up as China stock"
       var _tickQ=function(t){ var q=t.parentNode&&t.parentNode.querySelector('.bpm-q'); return q?(Number(q.value)||0):0; };   // ticking never selects a 0-qty cell
       document.querySelectorAll('#bpm-pills .bpm-ctr').forEach(function(b){ b.onclick=function(){ var c=b.dataset.c,i=shown.indexOf(c); if(i>=0){ if(shown.length>1)shown.splice(i,1); } else shown=modeCountries().filter(function(x){return x===c||shown.indexOf(x)>=0;}); invalidatePreview(); drawSkus(); }; });
       box.querySelectorAll('.bpm-tick').forEach(function(t){ t.onchange=function(){ TICK[keyC(t.dataset.s,t.dataset.c)]=t.checked; updateRow(t.closest('tr')); refreshCount(); invalidatePreview(); }; });
@@ -12088,9 +12110,9 @@
     function prodVal(){ return document.getElementById('bpm-prod').value; }
     function payloadFor(ctry,commit){ var bb=document.getElementById('bpm-batch'); return {prod_no:prodVal(),batch_id:(bb&&bb.value)||null,country:ctry,mode:MODE,start_date:document.getElementById('bpm-start').value||null,items:gatherFor(ctry),commit:!!commit}; }
     function chinaOn(){ var c=document.getElementById('bpm-china'); return c&&c.checked; }
-    function chinaPayload(commit){ var bb=document.getElementById('bpm-batch'); return {prod_no:prodVal(),batch_id:(bb&&bb.value)||null,country:'CN',branch:'China Stock',mode:MODE,start_date:document.getElementById('bpm-start').value||null,items:chinaShortfalls(),commit:!!commit}; }
+    function chinaPayload(commit){ var bb=document.getElementById('bpm-batch'); return {prod_no:prodVal(),batch_id:(bb&&bb.value)||null,country:'CN',branch:'China Stock',mode:MODE,start_date:document.getElementById('bpm-start').value||null,items:chinaItems(),commit:!!commit}; }
     // Build the list of PO-create jobs: one per shown market with ticked lines + (if enabled & any shortfall) the China-stock top-up.
-    function jobs(commit){ var out=shown.filter(function(c){ return gatherFor(c).length; }).map(function(c){ return {label:c,china:false,payload:payloadFor(c,commit)}; }); if(chinaOn()&&chinaShortfalls().length)out.push({label:'China Stock',china:true,payload:chinaPayload(commit)}); return out; }
+    function jobs(commit){ var out=shown.filter(function(c){ return gatherFor(c).length; }).map(function(c){ return {label:c,china:false,payload:payloadFor(c,commit)}; }); if(chinaItems().length)out.push({label:'China Stock',china:true,payload:chinaPayload(commit)}); return out; }
     document.getElementById('bpm-preview').onclick=function(){ if(!prodVal()){alert('Choose or enter a production number');return;}
       var js=jobs(false); if(!js.length){alert('Tick at least one SKU with a quantity in a shown market');return;}
       var res=document.getElementById('bpm-result'); res.innerHTML='<div class="count">Working…</div>'; document.getElementById('bpm-create').style.display='none';

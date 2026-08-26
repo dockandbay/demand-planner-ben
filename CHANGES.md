@@ -1,3 +1,8 @@
+## v27.288 Create-PO tier top-up → China stock; EDI page whole-page drag-drop + deep link
+- **Create Production POs — price-break tier hint** now has a per-SKU checkbox **"＋ order extra N as China stock"**. When the ticked qty sits between two price tiers (at/above MOQ), you can order the top-up to the next break as China-stock holding stock (merged into the same China Stock PO as the MOQ top-up). Opt-in per SKU; default off = no change. The Step-2 label shows MOQ + tier counts.
+- **EDI Labels page:** drag & drop now works **anywhere on the page** — CSV routes to the CSV slot, PDFs to the label list (was PDF-drop-zone only).
+- **EDI Labels deep link** `#/supply/purchase-orders/edi-labels` now round-trips (syncHash writes it; applyRoute resolves it), so it's shareable / reload-safe.
+
 ## v27.287 EDI Labels (Dillards via EZY COM) — SSCC label splitter
 - **New hidden page `#/supply/purchase-orders/edi-labels`**, reached via a **🏷 EDI LABELS** button on the Direct-to-Client report (not in the menu).
 - Upload **wc-asn.csv** + the **SSCC label PDFs**. Server matches each label page's SSCC (last-18) → CSV row (col4 PO-store, col107 client SKU, col108 EAN, col129 SSCC) → **our SKU + supplier via EAN** (`products.product_ean`), splits each page to its own PDF, and files it under **Supplier / PO[ - Preorder ref] / SKU / <sscc>.pdf** in a downloadable ZIP + **manifest.csv**.
