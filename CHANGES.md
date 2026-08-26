@@ -1,3 +1,6 @@
+## v27.285 Buy plan popup: highlight "Total Demand" row
+- The **Total Demand** line in the SKU buy-plan popup now has a **#FFCE1B** (gold) background across the whole row.
+
 ## v27.284 FBA in-flight transfer refresh: 30-day window + real ETA
 - **Root cause of "won't refresh / doesn't show":** the Cin7 pull only looked back **48 hours** by `CreatedDate`. A branch transfer in transit is routinely older than that, so it dropped out of the refresh entirely (never re-imported, never updated). Widened to a **30-day window** (the prune still drops any that have landed in the inbound feed).
 - **ETA was stored as Cin7's `approvalDate`, not a delivery date.** Now pulls **`estimatedDeliveryDate`** (falling back to approvalDate), so the in-flight ETA reflects the actual expected arrival and updates on refresh. Buy-plan-adjacent: more complete in-flight data means FBA transfer recommendations count real incoming stock more accurately (fewer double-transfers).

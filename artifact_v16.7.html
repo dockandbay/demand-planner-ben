@@ -625,6 +625,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
 #buy-wrap table.pt td:not(.rl){user-select:none;-webkit-user-select:none}
 /* Demand source rows (DTC / B2B / FBA demand) highlighted light yellow across the whole row. */
 #buy-wrap table.pt tr.dmd-hl td,#buy-wrap table.pt tr.dmd-hl:hover td{background:#FFFF99 !important}
+#buy-wrap table.pt tr.dmd-total td,#buy-wrap table.pt tr.dmd-total:hover td{background:#FFCE1B !important}
 #buy-wrap .txb{margin-top:6px;background:#fef9c3;border:1px solid #fcd34d;border-radius:4px;padding:5px 10px;font-size:11px;color:#854d0e}
 /* Complex Rules list — flex rows: one line on desktop, stacks over ~2 lines on mobile */
 #cr-panel .cr-grp{font-weight:700;color:#0f172a;font-size:11px;margin:9px 0 2px}
@@ -3999,7 +4000,7 @@ function buildTable(proj,md,pd,is3,hasFBA){
   return `<div class="pw"><table class="pt"><thead>${hdr}</thead><tbody>${rows.join('')}</tbody></table></div>`;
 }
 function sec(l,n){return`<tr><td class="rl sec">${l}</td>${Array(n).fill('<td class="sx"></td>').join('')}</tr>`;}
-function dr(l,proj,fn,ind){var hl=(l==='DTC demand'||l==='B2B demand'||l==='FBA demand'||l==='TikTok demand');return`<tr${hl?' class="dmd-hl"':''}><td class="rl${ind?' ind':''}">${l}</td>${proj.map(p=>fn(p)).join('')}</tr>`;}
+function dr(l,proj,fn,ind){var hl=(l==='DTC demand'||l==='B2B demand'||l==='FBA demand'||l==='TikTok demand');var cls=(l==='Total Demand')?'dmd-total':(hl?'dmd-hl':'');return`<tr${cls?` class="${cls}"`:''}><td class="rl${ind?' ind':''}">${l}</td>${proj.map(p=>fn(p)).join('')}</tr>`;}
 function c(v,cls){return`<td class="${cls}">${v}</td>`;}
 function card(l,v,s,w){return`<div class="sc2 ${w}"><div class="l">${l}</div><div class="v">${v}</div><div class="s">${s}</div></div>`;}
 function fmt(n){if(n===null||n===undefined)return'\u2014';const r=Math.round(n);return Math.abs(r)>=1000?r.toLocaleString():String(r);}
