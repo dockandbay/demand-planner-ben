@@ -1,3 +1,7 @@
+## v27.296 Buy plan: surface the forecast model (Cover weeks vs SSM) per market
+- **SKU popup:** a new **"Forecast model"** card (after Supplier) shows whether this market's 3PL/FBA pool is on **Cover weeks** (default) or **SSM** — "Mixed" if the two pools differ.
+- **Buy plan Settings (⚙):** a **Forecast model** row summarises which markets×pools are on SSM (rest on Cover weeks) with a **⚙ change in Buy plan logic →** link to `#/demand/config/buyplan` where it's toggled.
+
 ## v27.295 Buy plan: show block-buy calculation on the Buy cell + fix cut-off inbound tooltip
 - Hovering a **Buy 3PL cell** that came from a windowed complex-rule block now shows the full **how-it-was-calculated** breakdown: the rule name, coverage-to-season-end demand (DTC+B2B+FBA), SSM safety, minus on-hand+inbound, minus carton rounding = the buy. e.g. `2,965 (cover to Sep 27) − 311 inbound → 2,700 (100/carton)`.
 - Fixed the **cut-off inbound-row tooltip** in the SKU popup (`.tip-box` was `white-space:nowrap`; now wraps to a 320px box) so long "Buy Plan Assumed · … up-front, SSM-sized (SS27 7 months)" lines are fully visible.

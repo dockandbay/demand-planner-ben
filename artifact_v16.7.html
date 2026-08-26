@@ -2526,6 +2526,12 @@ function render(){
   updateFbaSelBox();
   updateTrfHeaders();
   updateDlMenuLabels();
+  // Settings box: which markets×pools use SSM vs the default weeks-cover model
+  (function(){ var el=document.getElementById('bp-model-summary'); if(!el)return;
+    var MPX=[['UK','3PL'],['UK','FBA'],['US','3PL'],['US','FBA'],['EU','3PL'],['EU','FBA'],['AU','3PL'],['AU','FBA'],['CA','FBA']];
+    var on=MPX.filter(function(m){return ssmEnabled(m[0],m[1]);}).map(function(m){return m[0]+' '+m[1];});
+    if(!on.length){ el.textContent='Cover weeks — all markets & pools'; el.style.color='#0f172a'; }
+    else { el.innerHTML='SSM: <b>'+on.join(', ')+'</b> · rest on Cover weeks'; el.style.color='#1e40af'; } })();
   fillRwFilter();
   const q=(document.getElementById('qry')?.value||'').toLowerCase().trim();
   const vis=SL.filter(s=>{
@@ -3127,6 +3133,11 @@ function rpc(){
   }
   cards+=card('Case Pack',pd.cp||'?','MOQ: '+(pd.moq||'?'),'');
   if(pd.supp)cards+=card('Supplier',pd.supp,'','');
+  // Forecast model for this market×pool: weeks-cover (default) vs SSM (service-level safety stock). Set in DEMAND ▸ Buy plan logic.
+  (function(){ var _m3=ssmEnabled(PMKT,'3PL'), _mf=ssmEnabled(PMKT,'FBA'), l3='Cover weeks', ls='SSM'; var val,sub;
+    if(!is3){ val=_mf?ls:l3; sub='FBA'; } else if(!hasFBA){ val=_m3?ls:l3; sub='3PL'; }
+    else if(_m3===_mf){ val=_m3?ls:l3; sub='3PL & FBA'; } else { val='Mixed'; sub='3PL '+(_m3?ls:l3)+' · FBA '+(_mf?ls:l3); }
+    cards+=card('Forecast model',val,sub,(_m3||_mf)?'blue':''); })();
   cards+='</div>';
 
   // Transfer flags
@@ -4325,6 +4336,9 @@ var BUY_SCAFFOLD=`<div class="wrap">
 
       <span class="sl">3PL A-tier extra:</span>
       <span style="display:inline-flex;align-items:center;gap:6px"><span class="sl">add</span><input type="number" class="si" id="atr" value="0" min="0" max="20" step="1" onchange="BP.render()" style="width:60px"><span class="sl">wks to A-tier 3PL target cover (applies to every A SKU on top of the products-table value)</span></span>
+
+      <span class="sl">Forecast model:</span>
+      <span style="display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap"><span id="bp-model-summary" style="font-weight:600">Cover weeks (all markets)</span><a href="#/demand/config/buyplan" style="color:#1d4ed8;text-decoration:none;font-size:10px;font-weight:600">⚙ change in Buy plan logic &rarr;</a></span>
     </div>
     <div style="margin-top:8px;padding-top:8px;border-top:1px solid #e2e8f0;color:#64748b;font-size:10px;line-height:1.5">
       <b>A-tier extra</b> stacks on top of any per-SKU target cover from the products table. New-launch cover boosts are now set in <b>&#9819; Complex Rules</b> (per SKU / category / tier / season × window), which replaced the old First Buy settings.
