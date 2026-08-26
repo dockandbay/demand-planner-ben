@@ -3317,11 +3317,13 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
       // owns the WINDOW (placement = ws above).
       let covEnd=m.rt;
       if(typeof SKUM!=='undefined'&&SKUM[skuKey]&&SKUM[skuKey].cs==='S'){ const wSea=ssmSeasonEndWeeks(skuKey,mkt,md); if(wSea>0){ const se=new Date(); se.setDate(se.getDate()+Math.round(wSea*7)); if(se>covEnd)covEnd=se; } }
-      // TOTAL demand served from the 3PL pool over [range_from, covEnd], post-disc-zeroed: web (DTC+B2B+TIK) PLUS
-      // FBA (fed by transfers from 3PL) PLUS ZAL — a "Buy 3PL" block must cover FBA too, else an FBA-heavy seasonal
-      // SKU is under-bought up-front and dribbles into later per-month buys (Ben: BAGF-DES-MD-TOTE US).
+      // Demand served from the 3PL pool over [range_from, covEnd], post-disc-zeroed: web (DTC — TikTok is already
+      // folded into DTC) + B2B + FBA (fed by transfers FROM 3PL). A "Buy 3PL" block must cover FBA too, else an
+      // FBA-heavy seasonal SKU is under-bought up-front and dribbles into later per-month buys (Ben: BAGF-DES-MD-TOTE US).
+      // Zalando is deliberately NOT summed here — it has its own net-of-stock 2-month cover mechanism (zalNet), so
+      // adding raw dem.ZAL would double-count it.
       let covQty=0;
-      for(let j=0;j<PROJ.length;j++){ const p=PROJ[j]; if(p.isActual)continue; const d=_md(j); if(d<m.rf||d>covEnd)continue; if(discCutoff&&p.key>=discCutoff)continue; covQty+=((dem.DTC&&dem.DTC[p.key])||0)+((dem.B2B&&dem.B2B[p.key])||0)+((dem.TIK&&dem.TIK[p.key])||0)+((dem.FBA&&dem.FBA[p.key])||0)+((dem.ZAL&&dem.ZAL[p.key])||0); }
+      for(let j=0;j<PROJ.length;j++){ const p=PROJ[j]; if(p.isActual)continue; const d=_md(j); if(d<m.rf||d>covEnd)continue; if(discCutoff&&p.key>=discCutoff)continue; covQty+=((dem.DTC&&dem.DTC[p.key])||0)+((dem.B2B&&dem.B2B[p.key])||0)+((dem.FBA&&dem.FBA[p.key])||0); }
       if(covQty<=0)return;
       // (#1) add SSM safety stock (tier service level + demand/lead variability), in units
       let ssU=0; try{ ssU=ssmSafetyUnits(skuKey,mkt,'3PL',md,pd)||0; }catch(e){}

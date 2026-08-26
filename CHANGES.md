@@ -1,3 +1,6 @@
+## v27.294 Buy plan block buy: correct to DTC+B2B+FBA (avoid TIK/ZAL double-count)
+- Correction to v27.293: the block-buy `covQty` sums **DTC + B2B + FBA** only. **TikTok is already folded into DTC** upstream, and **Zalando has its own net-of-stock cover mechanism** (`zalNet`) — so summing `dem.TIK`/`dem.ZAL` here would double-count. `BAGF-DES-MD-TOTE` US result unchanged (Sep 1,700 + Mar 100 = 1,800); the change matters for EU Zalando SS27 SKUs.
+
 ## v27.293 Buy plan: windowed-range block buy now covers FBA (+TIK/ZAL) demand
 - **Fix (buy-plan-affecting):** the windowed "range" Complex Rule's up-front block buy sized `covQty` on **DTC+B2B only**, omitting **FBA** — so an FBA-heavy seasonal SKU was under-bought up-front and dribbled into later per-month buys. Since the 3PL pool feeds FBA via transfer, the block now sums **total pool demand (DTC+B2B+TIK+FBA+ZAL)** over the range. Verified `BAGF-DES-MD-TOTE` US: was Sep 500 / Nov 300 / Dec 300 / Feb 500 (1,600); now **Sep 1,700 + Mar 100 (1,800)** — the full season ordered up-front in the window month. Only affects SKUs matching a windowed range rule (SS27) that have FBA/TIK/ZAL demand; non-matching SKUs unchanged.
 
