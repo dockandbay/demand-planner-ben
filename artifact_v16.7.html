@@ -1946,18 +1946,26 @@ function getBuyQtys(sku,mkt){
   return BUY_CACHE[cacheKey]={b3,b3u,b3uSea,b3uAir,bf,tx,zx,futQty,futN,buyTip,urgTip};
 }
 
-// Split FBA-bound inbound into arriving within 14 days vs 15+ days out (by ETA).
+// Effective FBA arrival date: a missing or PAST ETA is assumed to land today+4 days (Ben) — an FBA-bound
+// shipment/transfer with a stale date is in-transit and imminent, not overdue-and-ignored.
+function _fbaPlus4(){ return new Date(Date.now()+4*864e5).toISOString().slice(0,10); }
+function _fbaEffEta(eta){ if(!eta)return _fbaPlus4(); var d=new Date(eta); var today=new Date(new Date().toISOString().slice(0,10));
+  return (isNaN(d.getTime())||d<today) ? _fbaPlus4() : String(eta).slice(0,10); }
+// Split FBA-bound inbound into arriving within 14 days vs 15+ days out (by effective ETA). Includes both the
+// real inbound feed (md.inb, fba warehouses) AND in-flight Cin7 branch transfers not yet in that feed
+// (FBA_PENDING_ROWS) so the "FBA inbound ≤14 days" column reflects everything on its way to FBA. Display only —
+// does NOT feed the transfer recommendation (that already counts the pending overlay via _fbaPendingOf).
 function fbaInbSplit(sku,mkt){
   const pd=PD[sku];const md=pd&&pd.mkts&&pd.mkts[mkt];
   let soon=0,later=0; const soonL=[],laterL=[];
-  if(md&&Array.isArray(md.inb)){
-    const cut=new Date(Date.now()+14*864e5);
-    md.inb.forEach(x=>{
-      if(!x.eta||!((x.wh||'').includes('fba')))return;
-      const qty=x.qty||0, line={qty:qty, eta:x.eta, ref:x.ref||x.reference||x.po||''};
-      if(new Date(x.eta)<=cut){ soon+=qty; soonL.push(line); } else { later+=qty; laterL.push(line); }
-    });
-  }
+  const cut=new Date(Date.now()+14*864e5);
+  const add=(qty,eta,ref)=>{ if(!(qty>0))return; const e=_fbaEffEta(eta); const line={qty:qty,eta:e,ref:ref||''};
+    if(new Date(e)<=cut){ soon+=qty; soonL.push(line); } else { later+=qty; laterL.push(line); } };
+  if(md&&Array.isArray(md.inb)) md.inb.forEach(x=>{ if(!((x.wh||'').includes('fba')))return; add(x.qty||0, x.eta, x.ref||x.reference||x.po||''); });
+  // in-flight branch transfers into this market's FBA not yet in the inbound feed
+  (typeof FBA_PENDING_ROWS!=='undefined'?FBA_PENDING_ROWS:[]).forEach(r=>{
+    if(String(r.sku)!==sku)return; if(String(r.warehouse||'').toLowerCase()!==(String(mkt).toLowerCase()+'_fba'))return;
+    add(Number(r.qty)||0, r.eta, r.reference||''); });
   const bySort=(a,b)=>String(a.eta||'9999').localeCompare(String(b.eta||'9999'));
   soonL.sort(bySort); laterL.sort(bySort);
   return {soon,later,soonL,laterL,soonFirst:(soonL[0]||{}).eta,laterFirst:(laterL[0]||{}).eta};

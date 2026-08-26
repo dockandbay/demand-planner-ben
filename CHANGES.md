@@ -1,3 +1,7 @@
+## v27.282 FBA inbound ≤14d now includes in-flight branch transfers; past ETA → today+4
+- The **"FBA inbound ≤14 days"** column now also surfaces **in-flight Cin7 branch transfers** into FBA that aren't yet in the inbound feed (previously only visible in the top `🚚 in-flight` box) — so when Transfer FBA shows 0 because stock is already on its way, you can see it on the row. e.g. `TOWLB-CAB-LG-KHAKI-R` UK: the 280u `FBA15M71419T` transfer now shows here.
+- **Past / missing FBA ETA → assumed today + 4 days** (Ben): a stale-dated FBA-bound shipment/transfer is treated as imminent, so it lands in the ≤14-day bucket rather than being mis-sorted. Display only — does **not** change the transfer recommendation (which already counts the pending overlay).
+
 ## v27.281 Fix double tooltip on FBA-view inbound cells
 - The global `__fastTip` fallback (plain-text tooltip for any `[data-tip]`) was firing **on top of** the dedicated rich-HTML tooltip handlers, so `.fba-inb` (FBA inbound ≤14 / 15+) and `.tip120` (3PL inbound) cells showed **two** tooltips. The fallback now skips any element owned by a dedicated handler (`.fba-inb, .tip120, .stk-inb, .crc-tip, .dp-sku-tip`).
 
