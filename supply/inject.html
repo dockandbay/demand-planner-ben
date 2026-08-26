@@ -7951,52 +7951,61 @@
   function renderEdiLabels(c){ if(!c)return;
     var S={ csv:null, pdfs:[], job:null };
     function fileToB64(file){ return new Promise(function(res,rej){ var r=new FileReader(); r.onload=function(){ var s=String(r.result||''); var i=s.indexOf(','); res(i>=0?s.slice(i+1):s); }; r.onerror=rej; r.readAsDataURL(file); }); }
-    c.innerHTML='<div style="max-width:940px">'
+    function box(n,title,inner,id){ return '<div'+(id?' id="'+id+'"':'')+' style="border:1px solid #dbe3ee;border-radius:8px;padding:10px 12px;background:#f8fbff;margin-bottom:12px"><div style="font-weight:800;color:#1e3a8a;margin-bottom:8px;display:flex;align-items:center;gap:8px"><span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#1e3a8a;color:#fff;font-size:13px;font-weight:800;flex-shrink:0">'+n+'</span><span style="font-size:12px;letter-spacing:.03em;text-transform:uppercase">'+title+'</span></div>'+inner+'</div>'; }
+    var wait='<div class="mut" style="font-size:12px">Run <b>Parse &amp; match</b> (step 3) first.</div>';
+    c.innerHTML='<div style="max-width:820px"><span id="edi-datalists"></span>'
       +'<div style="font-weight:800;font-size:16px;margin:4px 0 2px">EDI Labels — Dillards via EZY COM</div>'
-      +'<div class="mut" style="font-size:12px;margin-bottom:12px">Upload the <b>wc-asn.csv</b> and the <b>SSCC label PDFs</b> — <b>drag &amp; drop anywhere on this page</b> (CSV and PDFs route automatically) or use the pickers. Each label page is matched by its SSCC to the CSV (PO + our SKU via EAN), split out, and filed under <b>Supplier / PO / SKU</b>. Anything unmatched goes to <b>_UNMATCHED</b>. Output = a ZIP + a manifest.csv.</div>'
-      +'<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px">'
-        +'<label style="flex:1;min-width:240px;border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;background:#f8fafc;text-align:left"><div style="font-weight:700;font-size:12px;margin-bottom:4px">1 · ASN CSV</div><input type="file" id="edi-csv" accept=".csv" style="font-size:12px"><div class="mut" id="edi-csv-n" style="font-size:11px;margin-top:4px">wc-asn.csv</div></label>'
-        +'<label id="edi-drop" style="flex:2;min-width:280px;border:1px dashed #94a3b8;border-radius:8px;padding:10px 12px;background:#f8fafc;text-align:left"><div style="font-weight:700;font-size:12px;margin-bottom:4px">2 · SSCC label PDFs</div><input type="file" id="edi-pdfs" accept="application/pdf,.pdf" multiple style="font-size:12px"><div class="mut" id="edi-pdf-n" style="font-size:11px;margin-top:4px">drag &amp; drop or choose multiple PDFs</div></label>'
-      +'</div>'
-      +'<button class="save-btn" id="edi-parse" style="background:#2563eb;color:#fff;border-color:#1d4ed8;padding:6px 16px;font-weight:700">Parse &amp; match ▸</button>'
-      +'<span id="edi-status" class="mut" style="font-size:12px;margin-left:10px"></span>'
-      +'<div id="edi-preview" style="margin-top:16px"></div></div>';
-    var csvIn=c.querySelector('#edi-csv'), pdfIn=c.querySelector('#edi-pdfs'), drop=c.querySelector('#edi-drop');
+      +'<div class="mut" style="font-size:12px;margin-bottom:14px">Split the SSCC label PDFs into <b>Supplier / PO / SKU</b> folders. <b>Drag &amp; drop anywhere on this page</b> (CSV + PDFs route automatically) or use the pickers. Output = a ZIP + manifest.csv.</div>'
+      +box(1,'ASN CSV','<input type="file" id="edi-csv" accept=".csv" style="font-size:12px"><div class="mut" id="edi-csv-n" style="font-size:11px;margin-top:4px">wc-asn.csv</div>')
+      +box(2,'SSCC label PDFs','<input type="file" id="edi-pdfs" accept="application/pdf,.pdf" multiple style="font-size:12px"><div class="mut" id="edi-pdf-n" style="font-size:11px;margin-top:4px">choose or drag multiple PDFs</div>')
+      +box(3,'Parse &amp; match','<button class="save-btn" id="edi-parse" style="background:#2563eb;color:#fff;border-color:#1d4ed8;padding:6px 16px;font-weight:700">Parse &amp; match ▶</button><span id="edi-status" class="mut" style="font-size:12px;margin-left:10px"></span>')
+      +box(4,'Crossdock / Preorder ref per PO','<div id="edi-s4">'+wait+'</div>')
+      +box(5,'Supplier choice','<div id="edi-s5">'+wait+'</div>')
+      +box(6,'Unmatched labels','<div id="edi-s6">'+wait+'</div>')
+      +box(7,'Split SSCC labels by PO, Supplier &amp; SKU','<div class="mut" style="font-size:11px;margin-bottom:6px">One PDF per label, filed under Supplier / PO[ - Preorder ref] / SKU.</div><button class="save-btn" id="edi-gen" style="background:#16a34a;color:#fff;border-color:#15803d;padding:6px 16px;font-weight:700" disabled>⤓ Generate ZIP</button><span id="edi-gen-status" class="mut" style="font-size:12px;margin-left:10px"></span>')
+      +'</div>';
+    // load crossdock / preorder ref datalist (for step 4 search) — same source as the Client/FBA crossdock picker
+    try{ if(typeof fetchLookups==='function') fetchLookups(function(){ var dl=document.getElementById('edi-datalists'); if(dl&&typeof lookupDatalists==='function')dl.innerHTML=lookupDatalists(); }); }catch(e){}
+    var csvIn=c.querySelector('#edi-csv'), pdfIn=c.querySelector('#edi-pdfs');
     csvIn.onchange=function(){ S.csv=csvIn.files[0]||null; c.querySelector('#edi-csv-n').textContent=S.csv?S.csv.name:'wc-asn.csv'; };
-    pdfIn.onchange=function(){ S.pdfs=Array.prototype.slice.call(pdfIn.files||[]); c.querySelector('#edi-pdf-n').textContent=S.pdfs.length?(S.pdfs.length+' PDF'+(S.pdfs.length>1?'s':'')+' selected'):'drag & drop or choose multiple PDFs'; };
+    pdfIn.onchange=function(){ S.pdfs=Array.prototype.slice.call(pdfIn.files||[]); c.querySelector('#edi-pdf-n').textContent=S.pdfs.length?(S.pdfs.length+' PDF'+(S.pdfs.length>1?'s':'')+' selected'):'choose or drag multiple PDFs'; };
     function routeFiles(files){ var arr=Array.prototype.slice.call(files||[]);
       var csv=arr.filter(function(f){return /\.csv$/i.test(f.name);}), pdf=arr.filter(function(f){return /\.pdf$/i.test(f.name);});
       if(csv.length){ S.csv=csv[0]; c.querySelector('#edi-csv-n').textContent=S.csv.name; }
       if(pdf.length){ S.pdfs=pdf; c.querySelector('#edi-pdf-n').textContent=pdf.length+' PDF'+(pdf.length>1?'s':'')+' selected'; }
       var st=c.querySelector('#edi-status'); if(st&&(csv.length||pdf.length))st.textContent=''; }
-    // whole-page drag & drop — CSV routes to the CSV slot, PDFs to the label list, wherever you drop them
+    // whole-page drag & drop
     ['dragover','dragenter'].forEach(function(ev){ c.addEventListener(ev,function(e){ e.preventDefault(); c.style.outline='2px dashed #93c5fd'; c.style.outlineOffset='-6px'; }); });
     ['dragleave','drop'].forEach(function(ev){ c.addEventListener(ev,function(e){ if(ev==='dragleave'&&e.relatedTarget&&c.contains(e.relatedTarget))return; c.style.outline=''; }); });
     c.addEventListener('drop',function(e){ e.preventDefault(); c.style.outline=''; routeFiles(e.dataTransfer&&e.dataTransfer.files); });
     c.querySelector('#edi-parse').onclick=function(){ var st=c.querySelector('#edi-status');
-      if(!S.csv){ st.textContent='Choose the ASN CSV first.'; return; }
-      if(!S.pdfs.length){ st.textContent='Choose at least one PDF.'; return; }
+      if(!S.csv){ st.textContent='Choose the ASN CSV first (step 1).'; return; }
+      if(!S.pdfs.length){ st.textContent='Choose at least one PDF (step 2).'; return; }
       st.textContent='Reading files…';
       Promise.all([fileToB64(S.csv)].concat(S.pdfs.map(function(f){ return fileToB64(f).then(function(b){return {name:f.name,b64:b};}); }))).then(function(arr){
         st.textContent='Parsing '+(arr.length-1)+' PDF(s)…';
         return fetch('/api/supply/edi-labels/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csv_base64:arr[0],pdfs:arr.slice(1)})});
       }).then(function(r){ return r.json().then(function(j){ if(!r.ok)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
-        .then(function(j){ S.job=j; st.textContent=''; renderPrev(j); })
+        .then(function(j){ S.job=j; renderPrev(j); })
         .catch(function(e){ st.textContent='Failed: '+(e.message||e); }); };
-    function renderPrev(j){ var p=c.querySelector('#edi-preview'); var pos=Object.keys(j.byPo||{}).sort(); var multi=j.multiSuppliers||[];
-      var h='<div style="background:#f0fdf4;border:1px solid #86efac;border-radius:8px;padding:8px 12px;font-size:13px;margin-bottom:12px"><b>'+j.matched+'</b> of '+j.total+' labels matched across '+pos.length+' PO'+(pos.length!==1?'s':'')+(j.unmatched&&j.unmatched.length?(' · <b style="color:#b45309">'+j.unmatched.length+' unmatched</b> (→ _UNMATCHED)'):'')+'.</div>';
-      h+='<div style="font-weight:700;font-size:13px;margin:6px 0 4px">Preorder ref per PO <span class="mut" style="font-weight:400;font-size:11px">— optional; folder becomes "PO - REF"</span></div>';
-      h+='<div style="display:flex;flex-wrap:wrap;gap:8px 14px;margin-bottom:14px">'+pos.map(function(po){ return '<label style="font-size:12px">'+esc(po)+' <span class="mut">('+j.byPo[po]+')</span> <input class="edi-ref" data-po="'+esc(po)+'" placeholder="PREORDER-…" style="width:130px;border:1px solid #cbd5e1;border-radius:4px;padding:2px 6px;font-size:11px"></label>'; }).join('')+'</div>';
-      if(multi.length){ h+='<div style="font-weight:700;font-size:13px;margin:6px 0 4px">Supplier choice <span class="mut" style="font-weight:400;font-size:11px">— defaults to main (yellow); change per SKU if made elsewhere</span></div>';
-        h+='<table style="border-collapse:collapse;font-size:12px;margin-bottom:14px"><thead><tr style="color:#64748b"><th style="text-align:left;padding:2px 14px 2px 0">SKU</th><th style="text-align:left;padding:2px 14px 2px 0">Labels</th><th style="text-align:left">Supplier</th></tr></thead><tbody>'
-          +multi.map(function(s){ return '<tr><td style="padding:2px 14px 2px 0">'+esc(s.sku)+'</td><td style="padding:2px 14px 2px 0">'+s.count+'</td><td><select class="edi-sup" data-sku="'+esc(s.sku)+'" style="background:#fff9c4;border:1px solid #f59e0b;border-radius:4px;padding:2px 6px;font-size:11px">'+(s.options||[]).map(function(o){ return '<option value="'+esc(o)+'"'+(o===s.main?' selected':'')+'>'+esc(o)+(o===s.main?' (main)':'')+'</option>'; }).join('')+'</select></td></tr>'; }).join('')+'</tbody></table>';
-      } else { h+='<div class="mut" style="font-size:12px;margin-bottom:14px">Every matched SKU has a single supplier — nothing to choose.</div>'; }
-      if(j.unmatched&&j.unmatched.length){ h+='<details style="margin-bottom:14px"><summary style="cursor:pointer;font-weight:700;font-size:13px;color:#b45309">'+j.unmatched.length+' unmatched label(s) — will go to _UNMATCHED</summary>'
-        +'<table style="border-collapse:collapse;font-size:11px;margin-top:6px"><thead><tr style="color:#64748b"><th style="text-align:left;padding:2px 10px 2px 0">SSCC</th><th style="text-align:left;padding:2px 10px 2px 0">PO</th><th style="text-align:left;padding:2px 10px 2px 0">Reason</th><th style="text-align:left">File</th></tr></thead><tbody>'
-        +j.unmatched.map(function(u){ return '<tr><td style="padding:1px 10px 1px 0">'+esc(u.sscc)+'</td><td style="padding:1px 10px 1px 0">'+esc(u.po||'')+'</td><td style="padding:1px 10px 1px 0;color:#b45309">'+esc(u.reason)+'</td><td>'+esc(u.file||'')+'</td></tr>'; }).join('')+'</tbody></table></details>'; }
-      h+='<button class="save-btn" id="edi-gen" style="background:#16a34a;color:#fff;border-color:#15803d;padding:6px 16px;font-weight:700">⤓ Generate ZIP</button><span id="edi-gen-status" class="mut" style="font-size:12px;margin-left:10px"></span>';
-      p.innerHTML=h;
-      p.querySelector('#edi-gen').onclick=function(){ var gs=c.querySelector('#edi-gen-status'), btn=c.querySelector('#edi-gen');
+    function renderPrev(j){ var pos=Object.keys(j.byPo||{}).sort(); var multi=j.multiSuppliers||[];
+      c.querySelector('#edi-status').innerHTML='<b style="color:#166534">'+j.matched+'</b> of '+j.total+' labels matched · '+pos.length+' PO'+(pos.length!==1?'s':'')+(j.unmatched&&j.unmatched.length?(' · <b style="color:#b45309">'+j.unmatched.length+' unmatched</b>'):'');
+      // step 4 — vertical list, each ref a searchable crossdock/preorder picker (datalist)
+      c.querySelector('#edi-s4').innerHTML='<div class="mut" style="font-size:11px;margin-bottom:6px">Optional. Search a crossdock / preorder ref — the folder becomes "PO - REF".</div>'
+        +'<div style="display:flex;flex-direction:column;gap:6px">'+pos.map(function(po){ return '<div style="display:flex;align-items:center;gap:8px;font-size:12px"><span style="min-width:140px;font-weight:600">'+esc(po)+' <span class="mut" style="font-weight:400">('+j.byPo[po]+' labels)</span></span><input class="edi-ref" list="crossdocklist" data-po="'+esc(po)+'" placeholder="search CROSSDOCK / PREORDER…" style="flex:1;max-width:340px;border:1px solid #cbd5e1;border-radius:4px;padding:3px 8px;font-size:12px"></div>'; }).join('')+'</div>';
+      // step 5 — supplier choice (only for multi-supplier SKUs)
+      c.querySelector('#edi-s5').innerHTML=multi.length
+        ? '<div class="mut" style="font-size:11px;margin-bottom:6px">Defaults to main (yellow); change per SKU if made elsewhere.</div><table style="border-collapse:collapse;font-size:12px"><thead><tr style="color:#64748b"><th style="text-align:left;padding:2px 14px 2px 0">SKU</th><th style="text-align:left;padding:2px 14px 2px 0">Labels</th><th style="text-align:left">Supplier</th></tr></thead><tbody>'
+          +multi.map(function(s){ return '<tr><td style="padding:2px 14px 2px 0">'+esc(s.sku)+'</td><td style="padding:2px 14px 2px 0">'+s.count+'</td><td><select class="edi-sup" data-sku="'+esc(s.sku)+'" style="background:#fff9c4;border:1px solid #f59e0b;border-radius:4px;padding:2px 6px;font-size:11px">'+(s.options||[]).map(function(o){ return '<option value="'+esc(o)+'"'+(o===s.main?' selected':'')+'>'+esc(o)+(o===s.main?' (main)':'')+'</option>'; }).join('')+'</select></td></tr>'; }).join('')+'</tbody></table>'
+        : '<div class="mut" style="font-size:12px">Every matched SKU has a single supplier — nothing to choose.</div>';
+      // step 6 — unmatched
+      c.querySelector('#edi-s6').innerHTML=(j.unmatched&&j.unmatched.length)
+        ? '<div style="font-size:12px;color:#b45309;margin-bottom:6px">'+j.unmatched.length+' label(s) → <b>_UNMATCHED</b>.</div><div style="max-height:220px;overflow:auto"><table style="border-collapse:collapse;font-size:11px"><thead><tr style="color:#64748b"><th style="text-align:left;padding:2px 10px 2px 0">SSCC</th><th style="text-align:left;padding:2px 10px 2px 0">PO</th><th style="text-align:left;padding:2px 10px 2px 0">Reason</th><th style="text-align:left">File</th></tr></thead><tbody>'
+          +j.unmatched.map(function(u){ return '<tr><td style="padding:1px 10px 1px 0">'+esc(u.sscc)+'</td><td style="padding:1px 10px 1px 0">'+esc(u.po||'')+'</td><td style="padding:1px 10px 1px 0;color:#b45309">'+esc(u.reason)+'</td><td>'+esc(u.file||'')+'</td></tr>'; }).join('')+'</tbody></table></div>'
+        : '<div style="font-size:12px;color:#166534">All labels matched 🎉</div>';
+      // step 7 — enable generate
+      var btn=c.querySelector('#edi-gen'); btn.disabled=false;
+      btn.onclick=function(){ var gs=c.querySelector('#edi-gen-status');
         var choices={}; c.querySelectorAll('.edi-sup').forEach(function(s){ choices[s.dataset.sku]=s.value; });
         var preorderRefs={}; c.querySelectorAll('.edi-ref').forEach(function(i){ if(i.value.trim())preorderRefs[i.dataset.po]=i.value.trim(); });
         btn.disabled=true; gs.textContent='Building ZIP…';

@@ -1,3 +1,8 @@
+## v27.289 EDI Labels page → 7 numbered step boxes + searchable preorder-ref
+- Reorganised the page into **7 numbered step boxes**: 1 ASN CSV · 2 SSCC PDFs · 3 Parse & match · 4 Crossdock/Preorder ref per PO · 5 Supplier choice · 6 Unmatched labels · 7 Split & generate ZIP.
+- **Step 4** is now a **vertical list** (one row per PO) and each ref field is a **searchable crossdock/preorder picker** (datalist over the same crossdock/preorder refs as the Client/FBA crossdock adder).
+- Steps 4–6 fill in after parse; step 7's Generate button stays disabled until then. Summary (matched/unmatched) shows inline on step 3.
+
 ## v27.288 Create-PO tier top-up → China stock; EDI page whole-page drag-drop + deep link
 - **Create Production POs — price-break tier hint** now has a per-SKU checkbox **"＋ order extra N as China stock"**. When the ticked qty sits between two price tiers (at/above MOQ), you can order the top-up to the next break as China-stock holding stock (merged into the same China Stock PO as the MOQ top-up). Opt-in per SKU; default off = no change. The Step-2 label shows MOQ + tier counts.
 - **EDI Labels page:** drag & drop now works **anywhere on the page** — CSV routes to the CSV slot, PDFs to the label list (was PDF-drop-zone only).
