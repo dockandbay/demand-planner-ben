@@ -1,3 +1,7 @@
+## v27.280 Exclude erroneous POs from inbound + expose FBA-transfer diagnostics
+- **Hard-coded exclude of `PO-56UKXR2` / `PO-56UKXR2A` from the inbound feed** (Ben). `PO-56UKXR2A` carries ~10,710 phantom **unreceived** units into `uk_3pl` (29 lines) that were inflating on-order / inbound; `PO-56UKXR2` is COMPLETE. New `EXCLUDED_INBOUND_REFS` const applied to every inbound / on-order query in `buildSKURAW` **and** the Manage-FBA / inventory report subqueries. **Live buy-plan impact:** removes those phantom units, so the ~29 affected SKUs will show lower 3PL on-order (and may buy more — the intended correction). Inert in sandbox (refs not present).
+- Exposed `BP.fbaTransferRec / fbaTransferSized / fbaFwdDemand / webFwdDemand` for FBA-transfer diagnostics (read-only, no behaviour change).
+
 ## v27.279 Inventory Status Report — availability scoping, Core/Seasonal, transfer context, exports
 - **Availability scoping (fix):** a SKU now only shows under **FBA** if `available_<mkt>_fba` is true, and under **3PL** only if DTC **or** B2B (or TIK) is available — read from `v_product_availability` (SKUM.av), not the possibly-stale baked `md.ch`.
 - **Core/Seasonal column** (from `products.core_seasonal`) added to every table (colour-badged), next to Tier.

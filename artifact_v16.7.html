@@ -3995,6 +3995,7 @@ return {project:project, getBuyQtys:getBuyQtys, buyplanItems:buyplanItems, rende
   open_:open_, close_:close_, renderPanel:renderPanel, swM:swM, rpc:rpc,
   downloadReport:downloadReport, downloadReportCSV:downloadReportCSV, downloadViewCSV:downloadViewCSV, updateDlMenuLabels:updateDlMenuLabels,
   updateTrfHeaders:updateTrfHeaders, getFilteredVis:getFilteredVis, statusMetrics:statusMetrics, trfLane:trfLane,
+  fbaTransferRec:fbaTransferRec, fbaTransferSized:fbaTransferSized, fbaFwdDemand:fbaFwdDemand, webFwdDemand:webFwdDemand,   // exposed for FBA-transfer diagnostics
   seasons:function(){ var out={}; SL.forEach(function(s){ if(!s.rw)return; var ok=false; for(var m in (s.ms||{})){ if(s.ms[m]&&(s.ms[m].st==='ACTIVE'||s.ms[m].st==='FUTURE')){ok=true;break;} } if(ok)out[s.rw]=1; }); return Object.keys(out).sort(); },
   skuOptions:function(){ return SL.map(function(s){ return {s:s.s, sc:s.sc||s.c||''}; }).sort(function(a,b){ return a.s<b.s?-1:a.s>b.s?1:0; }); },   // for the Complex Rules SKU picker: {sku, subcat/cat}
 

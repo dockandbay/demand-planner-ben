@@ -334,6 +334,10 @@ function _normCat(v) { const t = (v == null ? '' : String(v).trim()); return (t 
 // data-load queries below. The complete fix is removing them from the PIM; this is a hard guard so they can't leak through.
 const NON_SKUS = ['GIFTWRAP-BOX', 'FAIRE-COMMISSION'];   // FAIRE-COMMISSION is a commission line, not a product (Ben, 26-Aug)
 const NON_SKU_LIST = NON_SKUS.map(s => `'${String(s).replace(/'/g, "''")}'`).join(',');
+// Erroneous POs that must never be treated as inbound / on-order (bad Cin7 data: PO-56UKXR2A carries ~10.7k phantom
+// unreceived units into uk_3pl; its sibling PO-56UKXR2 is COMPLETE). Hard-coded exclude at the data-load queries (Ben, 26-Aug).
+const EXCLUDED_INBOUND_REFS = ['PO-56UKXR2', 'PO-56UKXR2A'];
+const EXCL_REF_LIST = EXCLUDED_INBOUND_REFS.map(s => `'${String(s).replace(/'/g, "''")}'`).join(',');
 async function buildDATA() {
   const [salesR, availR] = await Promise.all([
     pool.query(`SELECT category c, subcategory s, country co, channel ch,
@@ -445,6 +449,7 @@ async function buildSKURAW() {
     pool.query(`SELECT sku, wh, sum(oo)::int oo FROM (
                   SELECT sku, destination_warehouse wh, (quantity - coalesce(received_quantity,0)) oo
                     FROM planner.inbound_shipments WHERE coalesce(received_quantity,0) < quantity
+                      AND reference NOT IN (${EXCL_REF_LIST})
                   UNION ALL
                   SELECT l.sku,
                     lower(coalesce(nullif(po.country_code,''), b.country_code)) || '_' ||
@@ -457,6 +462,7 @@ async function buildSKURAW() {
                       AND coalesce(po.status,'') NOT ILIKE '%complete%'
                       AND po.master_po IS NULL   -- child POs are consolidated into a master; the master (real on-order PO) carries the summed lines, so count it not them
                       AND coalesce(nullif(po.country_code,''), b.country_code) IN ('UK','US','EU','AU','CA')
+                      AND po.po NOT IN (${EXCL_REF_LIST})
                       AND NOT EXISTS (SELECT 1 FROM planner.inbound_shipments i WHERE i.reference = po.po)
                 ) z WHERE wh IS NOT NULL GROUP BY sku, wh`),
     pool.query(`SELECT sku, country co, channel ch, to_char(month,'YYYY_MM') ym, units::int u
@@ -478,6 +484,7 @@ async function buildSKURAW() {
                 LEFT JOIN planner.branches b ON b.name = po.branch
                 LEFT JOIN planner.shipments sh ON sh.shipment_ref = po.shipment_ref
                 WHERE coalesce(i.received_quantity,0) < i.quantity
+                  AND i.reference NOT IN (${EXCL_REF_LIST})
                 ORDER BY i.estimated_delivery_date`),
     // Open POs counted in on-order but NOT yet in the inbound feed — shown as "on order / not shipped" line items
     // so the PLAN inbound list reconciles with the on-order total. Same warehouse mapping + dedup as the oo query.
@@ -498,6 +505,7 @@ async function buildSKURAW() {
                 WHERE coalesce(l.qty,0) > 0
                   AND coalesce(po.status,'') NOT ILIKE '%complete%'
                   AND coalesce(nullif(po.country_code,''), b.country_code) IN ('UK','US','EU','AU','CA')
+                  AND po.po NOT IN (${EXCL_REF_LIST})
                   AND NOT EXISTS (SELECT 1 FROM planner.inbound_shipments i WHERE i.reference = po.po)`),
   ]);
   const p = {};
@@ -11196,6 +11204,7 @@ app.post('/api/scenario/sales-planning', async (req, res) => {
     const inbBefore = {}; (await pool.query(`SELECT sku, sum(qty)::int q FROM (
         SELECT sku, (quantity-coalesce(received_quantity,0)) qty FROM planner.inbound_shipments
           WHERE coalesce(received_quantity,0) < quantity AND destination_warehouse = ANY($1)
+            AND reference NOT IN (${EXCL_REF_LIST})
             AND estimated_delivery_date IS NOT NULL AND to_char(estimated_delivery_date,'YYYY-MM-DD') < $2
         UNION ALL
         SELECT l.sku, l.qty FROM planner.purchase_order_lines l
@@ -11318,17 +11327,17 @@ app.post('/api/scenario/b2b', async (req, res) => {
         (SELECT round(avg(cost_price),2) FROM planner.purchase_order_lines l WHERE l.sku=p.sku AND coalesce(cost_price,0) > 0) avg_cost,
         -- inbound for this market: landing on/before the order date (only when a date is given), plus the next inbound
         coalesce((SELECT sum(ib.quantity - coalesce(ib.received_quantity,0)) FROM planner.inbound_shipments ib
-           WHERE ib.sku=p.sku AND ib.destination_warehouse LIKE $2||'\\_%' AND ib.quantity > coalesce(ib.received_quantity,0)
+           WHERE ib.sku=p.sku AND ib.destination_warehouse LIKE $2||'\\_%' AND ib.quantity > coalesce(ib.received_quantity,0) AND ib.reference NOT IN (${EXCL_REF_LIST})
              AND $3::date IS NOT NULL AND ib.estimated_delivery_date <= $3::date),0)::int inbound_by_date,
         coalesce((SELECT sum(ib.quantity - coalesce(ib.received_quantity,0)) FROM planner.inbound_shipments ib
-           WHERE ib.sku=p.sku AND ib.destination_warehouse LIKE $2||'\\_%' AND ib.quantity > coalesce(ib.received_quantity,0)),0)::int inbound_total,
+           WHERE ib.sku=p.sku AND ib.destination_warehouse LIKE $2||'\\_%' AND ib.quantity > coalesce(ib.received_quantity,0) AND ib.reference NOT IN (${EXCL_REF_LIST})),0)::int inbound_total,
         to_char((SELECT min(ib.estimated_delivery_date) FROM planner.inbound_shipments ib
-           WHERE ib.sku=p.sku AND ib.destination_warehouse LIKE $2||'\\_%' AND ib.quantity > coalesce(ib.received_quantity,0)
+           WHERE ib.sku=p.sku AND ib.destination_warehouse LIKE $2||'\\_%' AND ib.quantity > coalesce(ib.received_quantity,0) AND ib.reference NOT IN (${EXCL_REF_LIST})
              AND ib.estimated_delivery_date >= CURRENT_DATE),'YYYY-MM-DD') next_inbound_date,
         coalesce((SELECT sum(ib.quantity - coalesce(ib.received_quantity,0)) FROM planner.inbound_shipments ib
-           WHERE ib.sku=p.sku AND ib.destination_warehouse LIKE $2||'\\_%' AND ib.quantity > coalesce(ib.received_quantity,0)
+           WHERE ib.sku=p.sku AND ib.destination_warehouse LIKE $2||'\\_%' AND ib.quantity > coalesce(ib.received_quantity,0) AND ib.reference NOT IN (${EXCL_REF_LIST})
              AND ib.estimated_delivery_date = (SELECT min(ib2.estimated_delivery_date) FROM planner.inbound_shipments ib2
-                WHERE ib2.sku=p.sku AND ib2.destination_warehouse LIKE $2||'\\_%' AND ib2.quantity > coalesce(ib2.received_quantity,0) AND ib2.estimated_delivery_date >= CURRENT_DATE)),0)::int next_inbound_qty,
+                WHERE ib2.sku=p.sku AND ib2.destination_warehouse LIKE $2||'\\_%' AND ib2.quantity > coalesce(ib2.received_quantity,0) AND ib2.reference NOT IN (${EXCL_REF_LIST}) AND ib2.estimated_delivery_date >= CURRENT_DATE)),0)::int next_inbound_qty,
         -- in-production stock that could be pulled/expedited: OPEN Production-status POs carrying this SKU, EXCLUDING
         -- Direct-to-Client POs (their units are already committed). Any market — branch shown so a redirect is visible.
         coalesce((SELECT json_agg(json_build_object('po',po2.po,'qty',l2.qty::int,'branch',coalesce(po2.branch,''),
