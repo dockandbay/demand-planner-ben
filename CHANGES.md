@@ -1,3 +1,6 @@
+## v27.281 Fix double tooltip on FBA-view inbound cells
+- The global `__fastTip` fallback (plain-text tooltip for any `[data-tip]`) was firing **on top of** the dedicated rich-HTML tooltip handlers, so `.fba-inb` (FBA inbound ≤14 / 15+) and `.tip120` (3PL inbound) cells showed **two** tooltips. The fallback now skips any element owned by a dedicated handler (`.fba-inb, .tip120, .stk-inb, .crc-tip, .dp-sku-tip`).
+
 ## v27.280 Exclude erroneous POs from inbound + expose FBA-transfer diagnostics
 - **Hard-coded exclude of `PO-56UKXR2` / `PO-56UKXR2A` from the inbound feed** (Ben). `PO-56UKXR2A` carries ~10,710 phantom **unreceived** units into `uk_3pl` (29 lines) that were inflating on-order / inbound; `PO-56UKXR2` is COMPLETE. New `EXCLUDED_INBOUND_REFS` const applied to every inbound / on-order query in `buildSKURAW` **and** the Manage-FBA / inventory report subqueries. **Live buy-plan impact:** removes those phantom units, so the ~29 affected SKUs will show lower 3PL on-order (and may buy more — the intended correction). Inert in sandbox (refs not present).
 - Exposed `BP.fbaTransferRec / fbaTransferSized / fbaFwdDemand / webFwdDemand` for FBA-transfer diagnostics (read-only, no behaviour change).
