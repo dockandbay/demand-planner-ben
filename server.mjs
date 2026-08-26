@@ -786,7 +786,7 @@ function requiredCap(method, p) {
   if (method === 'POST' && (p === '/api/supply/cache/invalidate' || p === '/api/supply/actions/invalidate')) return null;   // clears server caches only — harmless, no data write
   if (method === 'POST' && p === '/api/data-cache/invalidate') return null;   // n8n post-ETL data-cache rebuild trigger (webhook-secret gated in the handler)
   if (method === 'POST' && p === '/api/supply/inventory-status/export.xlsx') return null;   // read-only XLSX export (no DB write) — allowed with read-only permission
-  if (method === 'POST' && (p === '/api/supply/edi-labels/parse' || p === '/api/supply/edi-labels/generate')) return null;   // EDI label splitter — read-only (products read + PDF split), no DB write
+  if (method === 'POST' && p.startsWith('/api/supply/edi-labels/')) return null;   // EDI label splitter / sales-order builder — read-only (products read + PDF/CSV transform), no DB write
   if (p.startsWith('/api/supply/edi-projects')) return null;   // EDI project save/load/remove — self-contained tool tables (mig 244), allowed with read-only permission (like quality-doc)
   if (p.startsWith('/api/supply/')) return 'supply';          // everything else under supply = SUPPLY feature
   return null;   // unknown non-supply write → fail-open (don't block routes we haven't classified)
@@ -2774,6 +2774,54 @@ app.post('/api/supply/edi-labels/generate', async (req, res) => {
     });
     const out = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
     res.set('Content-Type', 'application/zip').set('Content-Disposition', 'attachment; filename="edi-labels.zip"').set('Cache-Control', 'no-store').send(out);
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+
+// EDI ▸ Step 7b — build the Cin7 sales-order upload CSV from the ASN alone (no PDFs). level 'po' = one order per PO
+// (DILLARDS-<PO>); level 'store' = one order per PO-store (DILLARDS-<PO>-<store>) with price. Item Code via EAN→SKU,
+// price = us_rt/2 (store level only), qty = summed units per line (SKUs summing to 0 are dropped). Read-only.
+app.post('/api/supply/edi-labels/sales-orders', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const csvText = b.csv_base64 ? Buffer.from(String(b.csv_base64), 'base64').toString('utf8') : String(b.csv || '');
+    const level = (b.level === 'po') ? 'po' : 'store';
+    if (!csvText.trim()) return res.status(400).json({ error: 'No CSV supplied' });
+    // 1) parse ASN rows: PO / store (col4), EAN (col108), qty (col111), ship-to DC block (cols 46/48/51/52/53/54)
+    const eans = new Set(); const rows = [];
+    csvText.split(/\r?\n/).filter(Boolean).forEach(line => {
+      const c = _ediCsvSplit(line);
+      const ps = c[3] || ''; const po = ps.split('-')[0]; const store = ps.split('-')[1] || '';
+      const ean = String(c[107] || '').replace(/\D/g, ''); const qty = parseInt(String(c[110] || '').replace(/\D/g, ''), 10) || 0;
+      if (!po || !ean) return;
+      const dc = { name: c[45] || '', addr: c[47] || '', city: c[50] || '', state: c[51] || '', zip: c[52] || '', country: c[53] || '' };
+      rows.push({ po, store, ean, qty, dc }); if (ean) eans.add(ean);
+    });
+    // 2) EAN → SKU + US retail (wholesale price = us_rt/2)
+    const byEan = {};
+    if (eans.size) (await pool.query(
+      `SELECT replace(coalesce(product_ean,''),chr(39),'') ean, sku, us_rt FROM planner.products WHERE replace(coalesce(product_ean,''),chr(39),'') = ANY($1)`, [[...eans]]
+    )).rows.forEach(r => { byEan[r.ean] = { sku: r.sku, us_rt: Number(r.us_rt) || 0 }; });
+    // 3) aggregate qty per (PO×SKU) or (PO×store×SKU)
+    const agg = {};
+    rows.forEach(r => { const prod = byEan[r.ean]; if (!prod || !prod.sku) return;
+      const key = level === 'po' ? (r.po + '|' + prod.sku) : (r.po + '|' + r.store + '|' + prod.sku);
+      if (!agg[key]) agg[key] = { po: r.po, store: r.store, sku: prod.sku, us_rt: prod.us_rt, qty: 0, dc: r.dc };
+      agg[key].qty += r.qty; });
+    const items = Object.values(agg).filter(x => x.qty > 0)   // qty 0 → don't add the SKU (Ben)
+      .sort((a, b) => a.po.localeCompare(b.po) || String(a.store).localeCompare(String(b.store)) || a.sku.localeCompare(b.sku));
+    const q = v => { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    const price = us_rt => (us_rt > 0 ? (Math.round(us_rt / 2 * 100) / 100).toFixed(2) : '');
+    let hdr, body;
+    if (level === 'po') {
+      hdr = ['Order Ref', 'Item Code', 'Company', 'First Name', 'Last Name', 'Phone', 'Delivery Address 1', 'Delivery Address 2', 'Delivery City', 'Delivery State', 'Delivery Postal Code', 'Country', 'Customer PO No', 'Item Qty', 'Item Price', 'Branch', 'Freight Description', 'Freight Cost', 'Project Name', 'Xero Status', 'Stage', 'Alternative GL Account', 'Delivery Instructions', 'Billing Company', 'Email', 'Billing First Name', 'Billing Last Name', 'Billing Address 1', 'Billing Address 2', 'Billing City', 'Billing State', 'Billing Postal Code', 'Billing Country'];
+      body = items.map(it => ['DILLARDS-' + it.po, it.sku, 'DILLARDS', it.dc.name, '', '', it.dc.addr, '', it.dc.city, it.dc.state, it.dc.zip, it.dc.country, it.po, it.qty, '', 'US Geneva', 'Labels', '0', 'Shopify USWS', 'Not Imported', 'New', 'COGS - US - Wholesale', 'Crossdock to Geneva then dispatch', '', '', '', '', '', '', '', '', '', '']);
+    } else {
+      hdr = ['Order Ref', 'Company', 'First Name', 'Last Name', 'Phone', 'Delivery Address 1', 'Delivery Address 2', 'Delivery City', 'Delivery State', 'Delivery Postal Code', 'Country', 'Branch', 'Freight Description', 'Freight Cost', 'Project Name', 'Xero Status', 'Stage', 'Alternative GL Account', 'Customer PO No', 'Delivery Instructions', 'Item Code', 'Item Qty', 'Item Price', 'Billing Company', 'Email', 'Billing First Name', 'Billing Last Name', 'Billing Address 1', 'Billing Address 2', 'Billing City', 'Billing State', 'Billing Postal Code', 'Billing Country'];
+      body = items.map(it => { const ref = 'DILLARDS-' + it.po + '-' + it.store;
+        return [ref, 'DILLARDS', it.dc.name, '', '', it.dc.addr, '', it.dc.city, it.dc.state, it.dc.zip, it.dc.country, 'US Geneva', 'Labels', '0', 'Shopify USWS', 'Not Imported', 'New', 'COGS - US - Wholesale', ref, 'Dillards Special Requirements to be provided', it.sku, it.qty, price(it.us_rt), 'DILLARDS', 'keyaccounts@dockandbay.com', 'Dillards', 'Dillards', '', '', '', '', '', '']; });
+    }
+    const csv = [hdr].concat(body).map(r => r.map(q).join(',')).join('\n') + '\n';
+    res.set('Content-Type', 'text/csv;charset=utf-8').set('Content-Disposition', 'attachment; filename="cin7-sales-orders-' + level + '.csv"').set('Cache-Control', 'no-store').send(csv);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 

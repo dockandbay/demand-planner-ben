@@ -7971,6 +7971,11 @@
       +box(5,'Supplier choice','<div id="edi-s5">'+wait+'</div>')
       +box(6,'Unmatched labels','<div id="edi-s6">'+wait+'</div>')
       +box(7,'Split SSCC labels by PO, Supplier &amp; SKU','<div class="mut" style="font-size:11px;margin-bottom:6px">One PDF per label, filed under Supplier / PO[ - Preorder ref] / SKU.</div><button class="save-btn" id="edi-gen" style="background:#16a34a;color:#fff;border-color:#15803d;padding:6px 16px;font-weight:700" disabled>⤓ Generate ZIP</button><span id="edi-gen-status" class="mut" style="font-size:12px;margin-left:10px"></span>')
+      +box('7b','Cin7 sales-order upload','<div class="mut" style="font-size:11px;margin-bottom:6px">Reads the <b>ASN CSV only</b> (steps 1 / project) and builds a Cin7 sales-order upload. Qty is summed from the ASN; a SKU with qty&nbsp;0 is left off that order. <i>(Future: Fulfil format + API push.)</i></div>'
+        +'<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">'
+        +'<button class="save-btn" id="edi-so-po" style="background:#7c3aed;color:#fff;border-color:#6d28d9;padding:6px 16px;font-weight:700">⤓ By PO (file 4)</button>'
+        +'<button class="save-btn" id="edi-so-store" style="background:#7c3aed;color:#fff;border-color:#6d28d9;padding:6px 16px;font-weight:700">⤓ By store (file 3)</button>'
+        +'<span id="edi-so-status" class="mut" style="font-size:12px"></span></div>')
       +'</div>';
     // load crossdock / preorder ref datalist (for step 4 search) — same source as the Client/FBA crossdock picker
     try{ if(typeof fetchLookups==='function') fetchLookups(function(){ var dl=document.getElementById('edi-datalists'); if(dl&&typeof lookupDatalists==='function')dl.innerHTML=lookupDatalists(); }); }catch(e){}
@@ -8021,6 +8026,20 @@
       S.pdfs.forEach(function(f){ chain=chain.then(function(){ return fileToB64(f).then(function(b){ out.pdfs.push({name:f.name,b64:b}); }); }); });
       (S.savedFiles||[]).forEach(function(sf){ chain=chain.then(function(){ return fetch('/api/supply/edi-projects/'+S.projectId+'/files/'+sf.id).then(function(r){return r.json();}).then(function(r){ if(r&&r.b64){ if(sf.kind==='csv'){ if(!out.csv)out.csv={name:sf.filename,b64:r.b64}; } else out.pdfs.push({name:sf.filename,b64:r.b64}); } }); }); });
       return chain.then(function(){ return out; }); }
+    // Cin7 sales-order CSV — needs the ASN CSV only (from step 1, or the loaded project)
+    function csvOnly(){ if(S.csv)return fileToB64(S.csv).then(function(b){ return {name:S.csv.name,b64:b}; });
+      var sf=(S.savedFiles||[]).filter(function(f){return f.kind==='csv';})[0];
+      if(sf&&S.projectId)return fetch('/api/supply/edi-projects/'+S.projectId+'/files/'+sf.id).then(function(r){return r.json();}).then(function(r){ return (r&&r.b64)?{name:sf.filename,b64:r.b64}:null; });
+      return Promise.resolve(null); }
+    function dlSalesOrders(level){ var st=c.querySelector('#edi-so-status'); st.textContent='Reading ASN…';
+      csvOnly().then(function(cf){ if(!cf){ st.textContent='No ASN CSV — add it in step 1 (or load a project).'; return null; }
+        st.textContent='Building '+(level==='po'?'by-PO':'by-store')+' upload…';
+        return fetch('/api/supply/edi-labels/sales-orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csv_base64:cf.b64,level:level})})
+          .then(function(r){ if(!r.ok)return r.json().then(function(x){throw new Error(x.error||('HTTP '+r.status));}); return r.blob(); })
+          .then(function(bl){ var u=URL.createObjectURL(bl),a=document.createElement('a'); a.href=u; a.download='cin7-sales-orders-'+level+'.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); st.textContent='Downloaded ✓'; }); })
+        .catch(function(e){ if(e)st.textContent='Failed: '+(e.message||e); }); }
+    c.querySelector('#edi-so-po').onclick=function(){ dlSalesOrders('po'); };
+    c.querySelector('#edi-so-store').onclick=function(){ dlSalesOrders('store'); };
     c.querySelector('#edi-proj').onchange=function(){ var v=this.value; if(v){ loadProject(v); } else { S.projectId=null; S.savedFiles=[]; S.projectName=''; c.querySelector('#edi-proj-name').value=''; c.querySelector('#edi-del').style.display='none'; renderSavedFiles(); } c.querySelector('#edi-proj-status').textContent=''; };
     c.querySelector('#edi-save').onclick=saveProject;
     c.querySelector('#edi-del').onclick=function(){ if(!S.projectId)return; if(!confirm('Delete project "'+(S.projectName||'')+'" and all its saved files?'))return; fetch('/api/supply/edi-projects/'+S.projectId,{method:'DELETE'}).then(function(r){return r.json();}).then(function(){ S.projectId=null; S.savedFiles=[]; S.projectName=''; c.querySelector('#edi-proj-name').value=''; c.querySelector('#edi-del').style.display='none'; renderSavedFiles(); loadProjectList(); c.querySelector('#edi-proj-status').textContent='Deleted.'; }); };

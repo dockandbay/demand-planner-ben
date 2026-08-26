@@ -1,3 +1,10 @@
+## v27.303 EDI Labels ▸ Step 7b: Cin7 sales-order upload from the ASN CSV
+- New **Step 7b** on the EDI Labels page builds a **Cin7 sales-order upload CSV** from the **ASN CSV only** (no PDFs needed). Two buttons:
+  - **⤓ By PO (file 4)** — one order per PO (`Order Ref = DILLARDS-<po>`), SKUs aggregated across all stores, qty summed, item price blank, `Delivery Instructions = "Crossdock to Geneva then dispatch"`. This is the "upload by PO" file.
+  - **⤓ By store (file 3)** — one order per PO × store (`Order Ref = DILLARDS-<po>-<store>`), ship-to = the store's DC address from the ASN, **item price = `us_rt / 2`** (from Horizon `products.us_rt`), billing = DILLARDS / keyaccounts@dockandbay.com, `Delivery Instructions = "Dillards Special Requirements to be provided"`.
+- EAN → SKU + `us_rt` resolved via `planner.products`. **Qty is summed from the ASN; a SKU with qty 0 is omitted** from that order (per Ben). Rows sorted by PO → store → SKU. Emits the exact Cin7 column order for each level; downloads `cin7-sales-orders-<po|store>.csv`.
+- Server: new stateless `POST /api/supply/edi-labels/sales-orders` (re-parses the re-sent CSV; serverless-safe, no job cache). Write-gate exemption widened to all `/api/supply/edi-labels/*`.
+
 ## v27.302 PO grid ▸ Client/FBA tab: delete uploaded attachments
 - Each uploaded **Client/FBA attachment** now has a **✕ delete** button (was download-only). Uses the existing `/api/supply/po-doc-delete` endpoint + the panel's existing `.podoc-del` handler (confirm → delete → refresh). Removes the row from `planner.portal_attachments`.
 
