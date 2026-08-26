@@ -1,3 +1,7 @@
+## v27.284 FBA in-flight transfer refresh: 30-day window + real ETA
+- **Root cause of "won't refresh / doesn't show":** the Cin7 pull only looked back **48 hours** by `CreatedDate`. A branch transfer in transit is routinely older than that, so it dropped out of the refresh entirely (never re-imported, never updated). Widened to a **30-day window** (the prune still drops any that have landed in the inbound feed).
+- **ETA was stored as Cin7's `approvalDate`, not a delivery date.** Now pulls **`estimatedDeliveryDate`** (falling back to approvalDate), so the in-flight ETA reflects the actual expected arrival and updates on refresh. Buy-plan-adjacent: more complete in-flight data means FBA transfer recommendations count real incoming stock more accurately (fewer double-transfers).
+
 ## v27.283 In-flight FBA transfers popup: click-away close, sticky header, market filter
 - Popup now **minimises on click-away** (anywhere outside it, not just the ✕).
 - **Top section (title + note) is sticky** as a non-scrolling header; the table scrolls beneath it with a sticky column-header row.

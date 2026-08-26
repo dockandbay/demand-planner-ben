@@ -9277,11 +9277,11 @@ const FBA_TRANSFER_BRANCH = { 5052: { market: 'uk', pool: 'fba' }, 5056: { marke
 app.post('/api/supply/fba-transfers/refresh', async (req, res) => {
   try {
     const auth = cin7Auth(); if (!auth) return res.json({ ok: false, error: 'Cin7 is not configured in this environment (no CIN7 credentials).' });
-    const since = new Date(Date.now() - 48 * 3600 * 1000).toISOString().slice(0, 19) + 'Z';   // Cin7 needs yyyy-MM-ddTHH:mm:ssZ
+    const since = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString().slice(0, 19) + 'Z';   // 30d window: a branch transfer can be in transit far longer than 48h; the prune drops any that have landed
     let page = 1, calls = 0, kept = 0, lines = 0;
     for (; ;) {
       const where = encodeURIComponent("CreatedDate>='" + since + "'");
-      const url = 'https://api.cin7.com/api/v1/BranchTransfers?rows=250&page=' + page + '&fields=id,reference,sourceBranchId,destinationBranchId,stage,approvalDate,createdDate,dispatchedDate,receivedDate,isApproved,lineItems&where=' + where;
+      const url = 'https://api.cin7.com/api/v1/BranchTransfers?rows=250&page=' + page + '&fields=id,reference,sourceBranchId,destinationBranchId,stage,approvalDate,createdDate,dispatchedDate,receivedDate,estimatedDeliveryDate,isApproved,lineItems&where=' + where;
       const r = await cin7Fetch(url, { method: 'GET', headers: { Authorization: auth, 'content-type': 'application/json' } }); calls++;
       if (r.status >= 400) return res.json({ ok: false, error: 'Cin7 HTTP ' + r.status });
       let arr = []; try { arr = await r.json(); } catch (e) { arr = []; }
@@ -9295,7 +9295,7 @@ app.post('/api/supply/fba-transfers/refresh', async (req, res) => {
           await pool.query(`INSERT INTO planner.fba_pending_transfers (cin7_id,sku,qty,reference,source_branch_id,dest_branch_id,market,pool,warehouse,stage,eta,created_date,dispatched_date,received_date,imported_at)
             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
             ON CONFLICT (cin7_id,sku) DO UPDATE SET qty=excluded.qty,reference=excluded.reference,stage=excluded.stage,eta=excluded.eta,dispatched_date=excluded.dispatched_date,received_date=excluded.received_date,imported_at=now()`,
-            [t.id, sku, bySku[sku], t.reference || null, t.sourceBranchId || null, t.destinationBranchId || null, meta.market, meta.pool, wh, t.stage || null, (t.approvalDate ? String(t.approvalDate).slice(0, 10) : null), t.createdDate || null, t.dispatchedDate || null, t.receivedDate || null]);
+            [t.id, sku, bySku[sku], t.reference || null, t.sourceBranchId || null, t.destinationBranchId || null, meta.market, meta.pool, wh, t.stage || null, ((d => d ? String(d).slice(0, 10) : null)(t.estimatedDeliveryDate || t.approvalDate)), t.createdDate || null, t.dispatchedDate || null, t.receivedDate || null]);
           lines++;
         }
       }
