@@ -1,3 +1,8 @@
+## v27.283 In-flight FBA transfers popup: click-away close, sticky header, market filter
+- Popup now **minimises on click-away** (anywhere outside it, not just the ✕).
+- **Top section (title + note) is sticky** as a non-scrolling header; the table scrolls beneath it with a sticky column-header row.
+- **Filtered to the current market pill** — UK shows `uk_fba` only; US shows `us_fba` + `us_awd`; etc. ETA shown uses the today+4 rule for stale dates.
+
 ## v27.282 FBA inbound ≤14d now includes in-flight branch transfers; past ETA → today+4
 - The **"FBA inbound ≤14 days"** column now also surfaces **in-flight Cin7 branch transfers** into FBA that aren't yet in the inbound feed (previously only visible in the top `🚚 in-flight` box) — so when Transfer FBA shows 0 because stock is already on its way, you can see it on the row. e.g. `TOWLB-CAB-LG-KHAKI-R` UK: the 280u `FBA15M71419T` transfer now shows here.
 - **Past / missing FBA ETA → assumed today + 4 days** (Ben): a stale-dated FBA-bound shipment/transfer is treated as imminent, so it lands in the ≤14-day bucket rather than being mis-sorted. Display only — does **not** change the transfer recommendation (which already counts the pending overlay).
