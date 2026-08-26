@@ -1,3 +1,6 @@
+## v27.293 Buy plan: windowed-range block buy now covers FBA (+TIK/ZAL) demand
+- **Fix (buy-plan-affecting):** the windowed "range" Complex Rule's up-front block buy sized `covQty` on **DTC+B2B only**, omitting **FBA** — so an FBA-heavy seasonal SKU was under-bought up-front and dribbled into later per-month buys. Since the 3PL pool feeds FBA via transfer, the block now sums **total pool demand (DTC+B2B+TIK+FBA+ZAL)** over the range. Verified `BAGF-DES-MD-TOTE` US: was Sep 500 / Nov 300 / Dec 300 / Feb 500 (1,600); now **Sep 1,700 + Mar 100 (1,800)** — the full season ordered up-front in the window month. Only affects SKUs matching a windowed range rule (SS27) that have FBA/TIK/ZAL demand; non-matching SKUs unchanged.
+
 ## v27.292 EDI Labels: save uploads as a persistent project (mig 244)
 - New **📁 Project** box on the EDI page: **Save project** (name it) persists the uploaded ASN CSV + label PDFs to the database (bytea) so you can **come back to them later**; a dropdown lists saved projects to reload.
 - Each saved file shows **upload date/time + who uploaded** and an **✕ to remove**; a **Clear all** link removes every file in the project; **🗑 Delete project** removes the whole thing.
