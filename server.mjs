@@ -786,6 +786,7 @@ function requiredCap(method, p) {
   if (method === 'POST' && (p === '/api/supply/cache/invalidate' || p === '/api/supply/actions/invalidate')) return null;   // clears server caches only — harmless, no data write
   if (method === 'POST' && p === '/api/data-cache/invalidate') return null;   // n8n post-ETL data-cache rebuild trigger (webhook-secret gated in the handler)
   if (method === 'POST' && p === '/api/supply/inventory-status/export.xlsx') return null;   // read-only XLSX export (no DB write) — allowed with read-only permission
+  if (method === 'POST' && (p === '/api/supply/edi-labels/parse' || p === '/api/supply/edi-labels/generate')) return null;   // EDI label splitter — read-only (products read + PDF split), no DB write
   if (p.startsWith('/api/supply/')) return 'supply';          // everything else under supply = SUPPLY feature
   return null;   // unknown non-supply write → fail-open (don't block routes we haven't classified)
 }
@@ -2644,6 +2645,117 @@ app.post('/api/supply/inventory-status/export.xlsx', async (req, res) => {
     res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
        .set('Content-Disposition', 'attachment; filename="inventory_' + (market || 'report') + '.xlsx"').set('Cache-Control', 'no-store').send(Buffer.from(buf));
   } catch (e) { log500(e); res.status(500).send('export error: ' + e.message); }
+});
+
+// ── EDI LABELS (Dillards via EZY COM) — split SSCC label PDFs into SUPPLIER/PO/SKU folders ──────────────
+// wc-asn.csv (no header): col4 = "<PO>-<store>", col107 (DC) = client SKU, col108 (DD) = our EAN, col129 = SSCC.
+// Each uploaded PDF = one PO, one SSCC label per page. Match a page's SSCC (last 18 digits) → CSV row → PO +
+// EAN → our SKU + supplier(s); split each page to its own PDF filed under SUPPLIER/PO/SKU. Read-only (no DB write).
+// In-memory job cache (persistent-server assumption — for serverless this needs a shared store; see deploy note).
+const EDI_JOBS = new Map(); let EDI_SEQ = 0;
+function _ediGc() { const now = Date.now(); for (const [k, v] of EDI_JOBS) if (now - v.created > 30 * 60 * 1000) EDI_JOBS.delete(k); }
+function _ediCsvSplit(line) { return line.split(',').map(s => s.replace(/^'|'$/g, '').trim()); }
+app.post('/api/supply/edi-labels/parse', async (req, res) => {
+  try {
+    _ediGc();
+    const b = req.body || {};
+    const csvText = b.csv_base64 ? Buffer.from(String(b.csv_base64), 'base64').toString('utf8') : String(b.csv || '');
+    const pdfs = Array.isArray(b.pdfs) ? b.pdfs : [];
+    if (!csvText.trim()) return res.status(400).json({ error: 'No CSV supplied' });
+    if (!pdfs.length) return res.status(400).json({ error: 'No PDF files supplied' });
+    // 1) CSV → SSCC(last 18) → { po, store, clientSku, ean }
+    const bySscc = {}; const eans = new Set();
+    csvText.split(/\r?\n/).filter(Boolean).forEach(line => {
+      const c = _ediCsvSplit(line);
+      const ps = c[3] || ''; const po = ps.split('-')[0]; const store = ps.split('-')[1] || '';
+      const clientSku = c[106] || ''; const ean = String(c[107] || '').replace(/\D/g, ''); const sscc = String(c[128] || '').replace(/\D/g, '');
+      if (!sscc) return; bySscc[sscc.slice(-18)] = { po, store, clientSku, ean, sscc };
+      if (ean) eans.add(ean);
+    });
+    // 2) EAN → our SKU + supplier(s)
+    const byEan = {};
+    if (eans.size) {
+      const { rows } = await pool.query(
+        `SELECT replace(coalesce(product_ean,''),chr(39),'') ean, sku,
+                coalesce(nullif(main_supplier_final,''),nullif(supplier,'')) main_supplier, supplier_multiple_all
+         FROM planner.products WHERE replace(coalesce(product_ean,''),chr(39),'') = ANY($1)`, [[...eans]]);
+      rows.forEach(r => {
+        const opts = [...new Set(String(r.supplier_multiple_all || '').split(',').map(s => s.trim()).filter(Boolean).concat(r.main_supplier ? [r.main_supplier] : []))];
+        byEan[r.ean] = { sku: r.sku, mainSupplier: r.main_supplier || opts[0] || '', suppliers: opts.length ? opts : (r.main_supplier ? [r.main_supplier] : []) };
+      });
+    }
+    // 3) each PDF → per-page SSCC (text) → split page into its own PDF (pdf-lib)
+    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    const { PDFDocument } = await import('pdf-lib');
+    const items = [];
+    for (const f of pdfs) {
+      const buf = Buffer.from(String(f.b64 || f.base64 || ''), 'base64'); if (!buf.length) continue;
+      let src, doc;
+      try { src = await PDFDocument.load(buf, { ignoreEncryption: true }); } catch (e) { continue; }
+      try { doc = await pdfjs.getDocument({ data: new Uint8Array(buf), useSystemFonts: true }).promise; } catch (e) { continue; }
+      for (let pg = 1; pg <= doc.numPages; pg++) {
+        const p = await doc.getPage(pg); const tc = await p.getTextContent();
+        const text = tc.items.map(i => i.str).join(' ');
+        let extracted = null, key = null; const m = text.match(/\(00\)\s*([\d\s]{18,30})/);
+        if (m) extracted = m[1].replace(/\D/g, '').slice(0, 18);
+        if (extracted && bySscc[extracted]) key = extracted;
+        else { const digits = text.replace(/\D/g, ''); for (const k in bySscc) { if (digits.includes(k)) { key = k; break; } } }
+        const sscc = key || extracted;
+        const row = key ? bySscc[key] : null;
+        const prod = row && row.ean ? byEan[row.ean] : null;
+        const out = await PDFDocument.create(); const [cp] = await out.copyPages(src, [pg - 1]); out.addPage(cp);
+        const pageBuf = Buffer.from(await out.save());
+        const matched = !!(row && prod);
+        const reason = matched ? '' : (!sscc ? 'no SSCC on page' : (!row ? 'SSCC not in CSV' : ('EAN ' + (row.ean || '?') + ' not matched to a product')));
+        items.push({ sscc: sscc || ('page-' + (items.length + 1)), po: row ? row.po : '', store: row ? row.store : '', clientSku: row ? row.clientSku : '',
+          ean: row ? row.ean : '', sku: prod ? prod.sku : '', suppliers: prod ? prod.suppliers : [], mainSupplier: prod ? prod.mainSupplier : '',
+          matched, reason, srcFile: f.name || '', buf: pageBuf });
+      }
+    }
+    const jobId = 'edi_' + Date.now().toString(36) + '_' + (++EDI_SEQ);
+    EDI_JOBS.set(jobId, { items, created: Date.now() });
+    // preview payload (no buffers)
+    const skuMap = {};
+    items.forEach(it => { if (!it.matched) return; (skuMap[it.sku] = skuMap[it.sku] || { sku: it.sku, options: it.suppliers, main: it.mainSupplier, count: 0 }).count++; });
+    const skus = Object.values(skuMap).sort((a, b) => a.sku.localeCompare(b.sku));
+    const byPo = {}; items.forEach(it => { if (it.matched) byPo[it.po] = (byPo[it.po] || 0) + 1; });
+    res.json({
+      ok: true, jobId, total: items.length, matched: items.filter(i => i.matched).length,
+      unmatched: items.filter(it => !it.matched).map(it => ({ sscc: it.sscc, po: it.po, clientSku: it.clientSku, ean: it.ean, reason: it.reason, file: it.srcFile })),
+      multiSuppliers: skus.filter(x => (x.options || []).length > 1),
+      skus, byPo,
+    });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/edi-labels/generate', async (req, res) => {
+  try {
+    const b = req.body || {}; const job = EDI_JOBS.get(String(b.jobId || ''));
+    if (!job) return res.status(410).json({ error: 'Job expired — please re-upload and parse again.' });
+    const choices = b.choices || {}, refs = b.preorderRefs || {};
+    const JSZip = (await import('jszip')).default; const zip = new JSZip();
+    const san = s => String(s == null ? '' : s).replace(/[\/\\:*?"<>|\x00-\x1f]+/g, '_').replace(/\s+/g, ' ').trim().replace(/[. ]+$/, '') || '_';
+    const manifest = [['sscc', 'po', 'preorder_ref', 'store', 'client_sku', 'ean', 'our_sku', 'supplier', 'matched', 'path']];
+    const seen = {};
+    job.items.forEach(it => {
+      let path, supplier = '', ref = '';
+      if (it.matched) {
+        supplier = choices[it.sku] || it.mainSupplier || 'UNKNOWN_SUPPLIER';
+        ref = String(refs[it.po] || '').trim();
+        const poFolder = ref ? san(it.po + ' - ' + ref) : san(it.po);   // matches the proven <PO> - <PREORDER REF> layout
+        path = san(supplier) + '/' + poFolder + '/' + san(it.sku) + '/' + san(it.sscc) + '.pdf';
+      } else {
+        const sub = it.reason === 'SSCC not in CSV' ? '_SSCC_NOT_IN_CSV' : (/EAN/.test(it.reason) ? '_EAN_NOT_MATCHED' : '_NO_SSCC_FOUND');
+        path = '_UNMATCHED/' + sub + '/' + san(it.sscc) + '.pdf';
+      }
+      if (seen[path]) { const n = ++seen[path]; path = path.replace(/\.pdf$/i, '_' + n + '.pdf'); } else seen[path] = 1;   // same SSCC on >1 page → don't overwrite
+      zip.file(path, it.buf);
+      manifest.push([it.sscc, it.po, ref, it.store, it.clientSku, it.ean, it.sku, supplier, it.matched ? 'yes' : ('no (' + it.reason + ')'), path]);
+    });
+    const q = v => { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
+    zip.file('manifest.csv', manifest.map(r => r.map(q).join(',')).join('\n') + '\n');
+    const out = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+    res.set('Content-Type', 'application/zip').set('Content-Disposition', 'attachment; filename="edi-labels.zip"').set('Cache-Control', 'no-store').send(out);
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Admin upsert of a price entry + its tiers (id present = update, else insert). Always active/admin-sourced.
 app.post('/api/supply/price-list', async (req, res) => {

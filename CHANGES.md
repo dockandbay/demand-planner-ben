@@ -1,3 +1,9 @@
+## v27.287 EDI Labels (Dillards via EZY COM) — SSCC label splitter
+- **New hidden page `#/supply/purchase-orders/edi-labels`**, reached via a **🏷 EDI LABELS** button on the Direct-to-Client report (not in the menu).
+- Upload **wc-asn.csv** + the **SSCC label PDFs**. Server matches each label page's SSCC (last-18) → CSV row (col4 PO-store, col107 client SKU, col108 EAN, col129 SSCC) → **our SKU + supplier via EAN** (`products.product_ean`), splits each page to its own PDF, and files it under **Supplier / PO[ - Preorder ref] / SKU / <sscc>.pdf** in a downloadable ZIP + **manifest.csv**.
+- Multi-supplier SKUs get a **yellow dropdown** (defaults to main) like Create-PO; **per-PO Preorder-ref** inputs feed the "PO - REF" folder; unmatched labels go to **_UNMATCHED/{_SSCC_NOT_IN_CSV,_EAN_NOT_MATCHED,_NO_SSCC_FOUND}**. Mirrors Ben's proven `split_and_organize.py`.
+- Endpoints `POST /api/supply/edi-labels/{parse,generate}` (read-only, exempt from the SUPPLY write-gate). **NEW DEPENDENCY: `pdf-lib`** (page splitting); pdfjs/pdf-parse/jszip already present.
+
 ## v27.286 Buy plan popup: demand-row colours
 - DTC / B2B / FBA (and TikTok) demand rows → **#FDFBD4**; **Total Demand** row → **#FFFFC5**.
 
