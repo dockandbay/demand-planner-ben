@@ -777,6 +777,7 @@ function requiredCap(method, p) {
   if (method === 'POST' && p === '/api/supply/quality-doc') return null;   // Quality Control file upload (+ its metafields) — allowed with read-only permission (Ben); delete stays gated
   if (method === 'POST' && (p === '/api/supply/cache/invalidate' || p === '/api/supply/actions/invalidate')) return null;   // clears server caches only — harmless, no data write
   if (method === 'POST' && p === '/api/data-cache/invalidate') return null;   // n8n post-ETL data-cache rebuild trigger (webhook-secret gated in the handler)
+  if (method === 'POST' && p === '/api/supply/inventory-status/export.xlsx') return null;   // read-only XLSX export (no DB write) — allowed with read-only permission
   if (p.startsWith('/api/supply/')) return 'supply';          // everything else under supply = SUPPLY feature
   return null;   // unknown non-supply write → fail-open (don't block routes we haven't classified)
 }
@@ -2601,6 +2602,39 @@ app.get('/api/supply/price-list/export.xlsx', async (_req, res) => {
   try { const buf = await plXlsxBuffer(await plAdminData());
     res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
        .set('Content-Disposition', 'attachment; filename="price-list.xlsx"').set('Cache-Control', 'no-store').send(Buffer.from(buf));
+  } catch (e) { log500(e); res.status(500).send('export error: ' + e.message); }
+});
+// Inventory Status Report — full-page XLSX. Client posts the already-computed blocks (title/colour/headers/rows,
+// all plain text) so the calc stays client-side (authoritative); the server just formats: coloured section-title
+// bars, bold header rows, everything left-aligned, and the Core/Seasonal cell tinted by its classification.
+app.post('/api/supply/inventory-status/export.xlsx', async (req, res) => {
+  try {
+    const ExcelJS = (await import('exceljs')).default;
+    const { market = '', blocks = [] } = req.body || {};
+    const wb = new ExcelJS.Workbook(); wb.creator = 'HORIZON';
+    const ws = wb.addWorksheet(('Inventory ' + market).slice(0, 31));
+    let maxCols = 1; blocks.forEach(b => { maxCols = Math.max(maxCols, (b.h || []).length); });
+    ws.columns = Array.from({ length: maxCols }, (_, i) => ({ width: i === 1 ? 26 : (i === 0 ? 9 : 15) }));
+    const left = { horizontal: 'left' };
+    const csFill = (txt) => { const t = String(txt || '').toLowerCase(); if (t.includes('season')) return 'FFDCFCE7'; if (t.includes('non')) return 'FFFFEDD5'; if (t.includes('core')) return 'FFDBEAFE'; return null; };
+    blocks.forEach(b => {
+      const nc = Math.max(1, (b.h || []).length);
+      const tr = ws.addRow([b.title || '']); tr.font = { bold: true, color: { argb: 'FF' + (b.fg || '0F172A') } };
+      tr.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF' + (b.bg || 'F1F5F9') } };
+      tr.getCell(1).alignment = left; ws.mergeCells(tr.number, 1, tr.number, nc);
+      const hr = ws.addRow(b.h || []); hr.font = { bold: true };
+      hr.eachCell(c => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } }; c.alignment = left; });
+      (b.rows || []).forEach(rw => { const r = ws.addRow(rw); r.eachCell((c, ci) => { c.alignment = left;
+        const hName = (b.h || [])[ci - 1] || '';
+        if (/core\/seasonal/i.test(hName)) { const f = csFill(c.value); if (f) c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: f } }; }
+        if (/^status$/i.test(hName) && /discontinu/i.test(String(c.value || ''))) c.font = { color: { argb: 'FFB91C1C' } };
+      }); });
+      ws.addRow([]);
+    });
+    ws.views = [{ state: 'frozen', ySplit: 0 }];
+    const buf = await wb.xlsx.writeBuffer();
+    res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+       .set('Content-Disposition', 'attachment; filename="inventory_' + (market || 'report') + '.xlsx"').set('Cache-Control', 'no-store').send(Buffer.from(buf));
   } catch (e) { log500(e); res.status(500).send('export error: ' + e.message); }
 });
 // Admin upsert of a price entry + its tiers (id present = update, else insert). Always active/admin-sourced.

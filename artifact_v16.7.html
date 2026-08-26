@@ -2097,7 +2097,13 @@ function statusMetrics(mkt){
   var out=[]; (SL||[]).forEach(function(s){
     if(!s.ms||!s.ms[mkt])return;
     var md=PD[s.s]&&PD[s.s].mkts&&PD[s.s].mkts[mkt]; if(!md)return;
-    var ch=md.ch||[]; var has3=ch.indexOf('DTC')>=0||ch.indexOf('B2B')>=0||ch.indexOf('TIK')>=0, hasf=ch.indexOf('FBA')>=0;
+    var _p=(typeof SKUM!=='undefined'&&SKUM[s.s])||{};
+    // Availability is the source of truth (v_product_availability → SKUM.av per country), NOT the (possibly stale)
+    // baked md.ch: only in scope under 3PL if DTC/B2B/TIK is available in this market, under FBA if FBA is available.
+    var _av=_p.av&&_p.av[mkt.toLowerCase()];
+    var has3,hasf;
+    if(_av!=null){ has3=_av.indexOf('d')>=0||_av.indexOf('b')>=0||_av.indexOf('t')>=0; hasf=_av.indexOf('f')>=0; }
+    else { var ch=md.ch||[]; has3=ch.indexOf('DTC')>=0||ch.indexOf('B2B')>=0||ch.indexOf('TIK')>=0; hasf=ch.indexOf('FBA')>=0; }
     var i3=md.i3||0, iff=md['if_']||0, oo3=md.oo3||0, oof=md.oof||0;
     var wk3=webFwdDemand(md,3)/13, wkf=fbaFwdDemand(md,3)/13;   // avg weekly demand over next 90 days
     var cov3=wk3>0?(i3+oo3)/wk3:((i3+oo3)>0?Infinity:0);
@@ -2116,7 +2122,7 @@ function statusMetrics(mkt){
     var bal=i3+iff, projOut=null, projDem=0, projInb=0, months=[];
     HK.forEach(function(p){ var d=(D[p.key]||0)+(B[p.key]||0)+(F[p.key]||0)+(Z[p.key]||0), ib=inbByKey[p.key]||0;
       bal+=ib; bal-=d; projDem+=d; projInb+=ib; if(bal<0&&!projOut)projOut=p.lbl; months.push({lbl:p.lbl,dem:d,inb:ib,close:bal}); });
-    out.push({sku:s.s, ti:s.ti||'C', cat:s.c||'', subcat:s.sc||'', rw:s.rw||'', st:s.ms[mkt].st||'ACTIVE', has3:has3, hasf:hasf,
+    out.push({sku:s.s, ti:s.ti||'C', cat:s.c||'', subcat:s.sc||'', rw:s.rw||'', cs:_p.cs||s.cs||'', csf:_p.csf||s.csf||'', st:s.ms[mkt].st||'ACTIVE', has3:has3, hasf:hasf,
       i3:i3, iff:iff, oo3:oo3, oof:oof, oo:oo3+oof, wk3:wk3, wkf:wkf, cov3:cov3, covf:covf,
       dtcWk:chWk(D), b2bWk:chWk(B), fbaWk:chWk(F),   // per-channel avg weekly demand (for lost-sales £ via each channel's ASP)
       t3:md.t3||12, tf:md.tf||(mkt==='CA'?4:8), inbUnits:inbUnits, nextEta:nextEta, nx3:nx3, nxf:nxf,
@@ -11218,6 +11224,35 @@ function _zalRender(wrap,d){
 // ── BUY & MOVE ▸ INVENTORY (scaffold) — Status Report | Manage 3PL (US/UK/AU/EU) | Manage FBA (US/UK/AU/EU/CA) ──
 var INV_SUB='status', INV_3PL='US', INV_FBA='US', INV_FBA_GAP='gaps', INV_FBA_Q='', _invFbaLast=null, INV_3PL_GAP='gaps', INV_3PL_Q='', _inv3plLast=null, INV_STATUS_MKT='US', FBA_AGED_F=null, _inv3plUnmOpen=false, _invFbaUnmOpen=false, INV_3PL_DEAD=false, INV_FBA_DEAD=false;   // *UnmOpen = show the "in 3PL/FBA but not in the product list (with stock)" list; *_DEAD = dead-stock pill filter (disc >24mo, not moving)
 var INV_STATUS_COLLAPSE={};   // Inventory Status Report: per "location|status" collapsed state (expand/hide the Out-of-stock / Low / Backorder / Overstock groups)
+var INV_TIER_COLLAPSE={};   // Inventory Status Report: per "prefix|tier" collapsed state (minimise a Tier A/B/C table)
+var INV_TIER_MORE={};   // Inventory Status Report: per "prefix|tier" "show all" state (Load more reveals rows beyond the first 5)
+var INV_EXPORT={};   // Inventory Status Report: per status-block export payload {h:headers, rows:[[...]], name} for CSV / clipboard
+// Export one status block (ck) to CSV download or clipboard (TSV). Called from the per-sub-header combo button.
+function _invClipFallback(txt){ var ta=document.createElement('textarea'); ta.value=txt; ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); try{document.execCommand('copy');}catch(e){} ta.remove(); }
+function _invExport(ck,mode,el){ var d=INV_EXPORT[ck]; if(!d)return;
+  var q=function(v){ v=(v==null?'':String(v)); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+  if(mode==='csv'){ var csv=[d.h].concat(d.rows).map(function(r){return r.map(q).join(',');}).join('\n')+'\n';
+    var bl=new Blob([csv],{type:'text/csv;charset=utf-8'}),u=URL.createObjectURL(bl),a=document.createElement('a'); a.href=u; a.download='inventory_'+d.name+'.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},800);
+  } else { var tsv=[d.h].concat(d.rows).map(function(r){return r.join('\t');}).join('\n');
+    var done=function(){ if(el){ var o=el.getAttribute('data-lbl')||el.textContent; el.textContent='✓ Copied'; setTimeout(function(){el.textContent=o;},1200);} };
+    if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(tsv).then(done,function(){_invClipFallback(tsv);done();}); } else { _invClipFallback(tsv); done(); }
+  }
+}
+// Full-page formatted XLSX: bundle every populated status block (built into INV_EXPORT during render) and POST to the
+// server, which formats + returns a coloured, left-aligned workbook. One sheet, all flagged SKUs/qty/tier for the market.
+function _invFullXlsxDownload(mkt,btn){
+  var order=[['3pl','3PL — web / wholesale'],['fba','FBA — Amazon']];
+  var st=[['oos','Out of stock','FEE2E2','B91C1C'],['low','Low stock','FEF3C7','B45309'],['bo','Backorders','F5F3FF','7C3AED'],['over','Overstock','EFF6FF','1E40AF']];
+  var blocks=[];
+  order.forEach(function(o){ st.forEach(function(s){ var d=INV_EXPORT[o[0]+'|'+s[0]]; if(d&&d.rows.length)blocks.push({title:o[1]+'  ·  '+s[1]+' ('+d.rows.length+')',bg:s[2],fg:s[3],h:d.h,rows:d.rows}); }); });
+  if(!blocks.length){ alert('No flagged inventory to export for '+mkt+'.'); return; }
+  if(btn){btn.disabled=true;btn.dataset.lbl=btn.textContent;btn.textContent='Building…';}
+  fetch('/api/supply/inventory-status/export.xlsx',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({market:mkt,blocks:blocks})})
+    .then(function(r){ if(!r.ok)throw new Error('HTTP '+r.status); return r.blob(); })
+    .then(function(bl){ var u=URL.createObjectURL(bl),a=document.createElement('a'); a.href=u; a.download='inventory_'+mkt+'.xlsx'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},800); })
+    .catch(function(e){ alert('Export failed: '+((e&&e.message)||e)); })
+    .finally(function(){ if(btn){btn.disabled=false;btn.textContent=btn.dataset.lbl||'⤓ Full XLSX report';} });
+}
 var INV_STATUS_SHOWDISC=false;   // Inventory Status Report: include already-discontinued SKUs (default hidden)
 function renderInventory(){
   var host=document.querySelector('.wrap'); if(!host)return;
@@ -11261,6 +11296,7 @@ function renderInvStatus(){
   if(typeof BP==='undefined'||!BP.statusMetrics){ panel.innerHTML='<div class="mut" style="font-size:12px">Open BUY & MOVE once to load stock data, then reopen this tab.</div>'; return; }
   try{ if(typeof buildLiveDemand==='function')buildLiveDemand(); }catch(e){}
   var rows=[]; try{ rows=BP.statusMetrics(mkt)||[]; }catch(e){ panel.innerHTML='<div style="color:#dc2626">'+esc((e&&e.message)||e)+'</div>'; return; }
+  INV_EXPORT={};   // rebuild the per-block export payloads for this market
   var TL={A:'Tier A',B:'Tier B',C:'Tier C'}, TC={A:'#b91c1c',B:'#b45309',C:'#64748b'};
   // Classify each sellable row per warehouse it uses, in urgency priority: backorder (neg 3PL) > out of stock (zero) > low.
   // In scope for the market = launched (launch date passed) AND not discontinued (disc date not in the past) AND sold via
@@ -11295,7 +11331,8 @@ function renderInvStatus(){
     +(sub?'<div class="mut" style="font-size:11px;margin-bottom:10px">'+sub+'</div>':''); }
   // Shared table renderer. `cols` = [{h,align,f}] where f(r)->cell html.
   var _invMob=!!(window.matchMedia&&window.matchMedia('(max-width:640px)').matches);
-  function tierTables(buckets, cols, emptyMsg, sortFn){
+  var INV_TIER_VISN=5;   // rows shown per tier before "Load more"
+  function tierTables(buckets, cols, emptyMsg, sortFn, keyPrefix){
     var any=buckets.A.length+buckets.B.length+buckets.C.length;
     if(!any)return '<div style="padding:12px 4px;color:#16a34a;font-size:12px">'+emptyMsg+'</div>';
     // mobile: a slimline card per SKU — title = SKU col, Status col (if any) as a badge, the rest as labelled fields.
@@ -11303,19 +11340,27 @@ function renderInvStatus(){
     var restC=cols.filter(function(c){ return c!==titleC && c!==statusC; });
     return ['A','B','C'].map(function(t){ var L=buckets[t]; if(!L.length)return '';
       L.sort(sortFn||function(a,b){ return a.sku.localeCompare(b.sku); });
-      var lbl='<div style="font-weight:700;font-size:12px;color:'+TC[t]+';margin-bottom:4px">'+TL[t]+' <span class="mut" style="font-weight:400">('+L.length+')</span></div>';
+      var tk=(keyPrefix||'t')+'|'+t;
+      var tcol=!!INV_TIER_COLLAPSE[tk], showAll=!!INV_TIER_MORE[tk];   // per-tier minimise + "show all" (Load more)
+      var hidden=L.length>INV_TIER_VISN&&!showAll;
+      // tier header — click to expand/minimise
+      var lbl='<div class="inv-tier-hd" data-tk="'+esc(tk)+'" style="font-weight:700;font-size:12px;color:'+TC[t]+';margin-bottom:4px;cursor:pointer;user-select:none"><span class="inv-tier-chev" style="display:inline-block;width:12px;font-size:9px">'+(tcol?'▸':'▾')+'</span>'+TL[t]+' <span class="mut" style="font-weight:400">('+L.length+')</span></div>';
+      var moreBtn=hidden?'<div class="inv-more-btn" data-tk="'+esc(tk)+'" style="font-size:11px;color:#1d4ed8;font-weight:600;cursor:pointer;padding:6px 4px;user-select:none">▾ Load more ('+(L.length-INV_TIER_VISN)+' more)</div>':'';
+      var body;
       if(_invMob){
-        return '<div style="margin-bottom:12px">'+lbl+L.map(function(r){
-          return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:7px 9px;margin-bottom:6px;background:#fff">'
+        body=L.map(function(r,idx){ var hide=(idx>=INV_TIER_VISN&&hidden);
+          return '<div'+(hide?' class="inv-more-row" data-tk="'+esc(tk)+'" style="display:none;':' style="')+'border:1px solid #e5e7eb;border-radius:8px;padding:7px 9px;margin-bottom:6px;background:#fff">'
             +'<div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;margin-bottom:5px"><div style="font-weight:700;font-size:11.5px;overflow-wrap:anywhere">'+titleC.f(r)+'</div>'+(statusC?'<div style="flex:0 0 auto">'+statusC.f(r)+'</div>':'')+'</div>'
             +'<div style="display:flex;flex-wrap:wrap;gap:7px 12px">'+restC.map(function(c){return '<div style="min-width:64px"><div style="font-size:8px;text-transform:uppercase;letter-spacing:.02em;color:#94a3b8">'+c.h+'</div><div style="font-size:11px;font-weight:600">'+c.f(r)+'</div></div>';}).join('')+'</div>'
-            +'</div>'; }).join('')+'</div>';
+            +'</div>'; }).join('')+moreBtn;
+      } else {
+        body='<div style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'
+          +cols.map(function(c){return '<th style="text-align:'+(c.align||'right')+';padding:5px 10px;border-bottom:1px solid #e5e7eb;background:#f8fafc;white-space:nowrap">'+c.h+'</th>';}).join('')+'</tr></thead><tbody>'
+          +L.map(function(r,idx){ var hide=(idx>=INV_TIER_VISN&&hidden);
+            return '<tr'+(hide?' class="inv-more-row" data-tk="'+esc(tk)+'" style="display:none"':'')+'>'+cols.map(function(c){return '<td style="padding:4px 10px;text-align:'+(c.align||'right')+';white-space:nowrap">'+c.f(r)+'</td>';}).join('')+'</tr>'; }).join('')
+          +'</tbody></table></div>'+moreBtn;
       }
-      return '<div style="margin-bottom:12px">'+lbl
-        +'<div style="max-height:300px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'
-        +cols.map(function(c){return '<th style="text-align:'+(c.align||'right')+';padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+c.h+'</th>';}).join('')+'</tr></thead><tbody>'
-        +L.map(function(r){ return '<tr>'+cols.map(function(c){return '<td style="padding:4px 10px;text-align:'+(c.align||'right')+';white-space:nowrap">'+c.f(r)+'</td>';}).join('')+'</tr>'; }).join('')
-        +'</tbody></table></div></div>'; }).join('');
+      return '<div style="margin-bottom:12px">'+lbl+'<div class="inv-tier-bd" data-tk="'+esc(tk)+'"'+(tcol?' style="display:none"':'')+'>'+body+'</div></div>'; }).join('');
   }
   var sohCell=function(v,bad){ return '<span style="'+(bad?'color:#b91c1c;font-weight:700':'')+'">'+invNum(v)+'</span>'; };
   var wkCell=function(v,target,bad){ return '<span style="'+(bad?'color:#b45309;font-weight:700':'')+'">'+invWks(v)+'</span> <span class="mut" style="font-size:10px">/ '+target+'w</span>'; };
@@ -11331,20 +11376,35 @@ function renderInvStatus(){
       ? ' <span class="inb-po" data-po="'+esc(ref)+'" title="Open '+esc(ref)+'" style="font-size:10px;color:#1d4ed8;font-weight:600;cursor:pointer;text-decoration:underline">'+esc(ref)+'</span>'
       : ' <span style="font-size:10px;color:#64748b;font-weight:600">'+esc(ref)+'</span>'; }
     return invNum(units)+' <span class="mut" style="font-size:10px">'+invFmtEta(eta)+'</span>'+refHtml; }; };
+  // Plain-text inbound parts (for CSV / clipboard export) — same units/ETA/ref logic as inbCellLoc.
+  var inbInfo=function(loc,r){ var isF=(loc==='fba'); var nx=isF?r.nxf:r.nx3;
+    var units=0; (r.inbList||[]).forEach(function(x){ var w=(x.wh||''); if(isF?(w.indexOf('fba')>=0):(w.indexOf('3pl')>=0))units+=(x.qty||0); });
+    if(units<=0&&nx)units=nx.qty||0;
+    return {units:units, eta:(nx?nx.eta:r.nextEta)||'', ref:(nx&&nx.ref)?nx.ref:''}; };
+  var csText=function(r){ return r.csf||(r.cs==='S'?'Seasonal':(r.cs==='C'?'Core':'')); };
   var naCell='<span style="color:#cbd5e1">n/a</span>';   // light grey — this warehouse (shp/3PL or amz/FBA) isn't in scope for the SKU in this market
   var skuCol={h:'SKU',align:'left',f:function(r){return esc(r.sku);}};
   var relCol={h:'Release',align:'left',f:function(r){return r.rw?esc(r.rw):'<span class="mut">—</span>';}};   // release window (season)
   var seasonCol={h:'Season',align:'left',f:function(r){return r.rw?esc(r.rw):'<span class="mut">—</span>';}};
+  // Core / Seasonal / Non-Core classification (planner.products.core_seasonal → SKUM.csf). Colour-badged.
+  var csCol={h:'Core/Seasonal',align:'left',f:function(r){ var v=r.csf||(r.cs==='S'?'Seasonal':(r.cs==='C'?'Core':'')); if(!v)return '<span class="mut">—</span>';
+    var isS=/season/i.test(v), isN=/non/i.test(v); var col=isS?'#166534':(isN?'#9a3412':'#1e40af'), bg=isS?'#dcfce7':(isN?'#ffedd5':'#dbeafe');
+    return '<span style="background:'+bg+';color:'+col+';padding:1px 6px;border-radius:3px;font-weight:600;font-size:10px;white-space:nowrap">'+esc(v)+'</span>'; }};
   // Per-location column set — the Low-Stock layout Ben likes: SKU · Season · SOH · Cover · On order · Inbound qty/ETA.
   function locCols(loc,status){ var isF=(loc==='fba');
     var soh=function(r){return isF?r.iff:r.i3;}, cov=function(r){return isF?r.covf:r.cov3;}, tgt=function(r){return isF?r.tf:r.t3;};
+    var wk=function(r){return isF?r.wkf:r.wk3;};   // avg weekly demand (cover basis) for this location
     var sohBad=(status==='oos'||status==='bo'), covAmber=(status==='low'), covHigh=(status==='over');
-    return [skuCol, seasonCol,
+    var cols=[skuCol, seasonCol, csCol,
       {h:'Status',align:'left',f:function(r){ var s=invRowStatus(r); var col=s==='Discontinued'?'#b91c1c':(s==='Soon discontinued'?'#b45309':'#16a34a'); return '<span style="color:'+col+';font-weight:600;font-size:11px">'+s+'</span>'; }},
-      {h:'SOH',f:function(r){var v=soh(r); return '<span style="'+((sohBad||v<0)?'color:#b91c1c;font-weight:700':'')+'">'+invNum(v)+'</span>';}},
-      {h:(isF?'FBA cover':'3PL cover'),f:function(r){var v=cov(r),t=tgt(r); var c=covAmber?'color:#b45309;font-weight:700':(covHigh?'color:#1e40af;font-weight:700':''); return '<span style="'+c+'">'+invWks(v)+'</span> <span class="mut" style="font-size:10px">/ '+t+'w</span>';}},
-      {h:'On order',f:function(r){return invNum(isF?r.oof:r.oo3);}},
-      {h:'Inbound qty / ETA / PO',f:inbCellLoc(loc)}];
+      {h:'SOH',f:function(r){var v=soh(r); return '<span style="'+((sohBad||v<0)?'color:#b91c1c;font-weight:700':'')+'">'+invNum(v)+'</span>';}}];
+    // For FBA out-of-stock / low, show 3PL on-hand alongside — the pool available to transfer into FBA now.
+    if(isF&&(status==='oos'||status==='low')) cols.push({h:'3PL SOH',f:function(r){ return '<span'+(r.i3>0?' style="color:#166534;font-weight:700"':' class="mut"')+'>'+invNum(r.i3)+'</span>'; }});
+    cols.push({h:(isF?'FBA cover':'3PL cover'),f:function(r){var v=cov(r),t=tgt(r); var c=covAmber?'color:#b45309;font-weight:700':(covHigh?'color:#1e40af;font-weight:700':''); return '<span style="'+c+'">'+invWks(v)+'</span> <span class="mut" style="font-size:10px">/ '+t+'w</span>';}});
+    cols.push({h:'4wk fcst',f:function(r){ return invNum(Math.round(wk(r)*4)); }});   // next 4 weeks forecast demand (avg weekly × 4)
+    cols.push({h:'On order',f:function(r){return invNum(isF?r.oof:r.oo3);}});
+    cols.push({h:'Inbound qty / ETA / PO',f:inbCellLoc(loc)});
+    return cols;
   }
   // Status order: out of stock → low stock → backorders → overstock (Ben: low stock is the higher weekly-review priority, before backorders).
   var STATUS_META=[['oos','Out of stock','#b91c1c','#fef2f2'],['low','Low stock','#b45309','#fffbeb'],['bo','Backorders','#7c3aed','#f5f3ff'],['over','Overstock','#1e40af','#eff6ff']];
@@ -11352,11 +11412,28 @@ function renderInvStatus(){
     var barBase='display:block;padding:6px 12px;border-radius:5px;margin:12px 0 4px;font-weight:700;font-size:12.5px';   // full-width coloured separator bar
     if(!n)return '<div style="'+barBase+';background:#f8fafc;color:#94a3b8;border-left:4px solid #e2e8f0"><span style="display:inline-block;width:14px"></span>'+label+' <span style="font-weight:400">(0)</span> · none</div>';
     var ck=loc+'|'+key, collapsed=!!INV_STATUS_COLLAPSE[ck];   // per location×status expand/collapse, remembered across market changes
-    var hdr='<div class="inv-status-hd" data-k="'+ck+'" style="'+barBase+';background:'+bg+';color:'+color+';border-left:4px solid '+color+';cursor:pointer;user-select:none"><span class="inv-status-chev" style="display:inline-block;width:14px;font-size:10px">'+(collapsed?'▸':'▾')+'</span>'+label+' <span style="font-weight:400;opacity:.7">('+n+')</span></div>';
+    var isF=(loc==='fba');
     var sortFn=(key==='over')
       ? function(a,b2){ var ca=(loc==='fba'?a.covf:a.cov3), cb=(loc==='fba'?b2.covf:b2.cov3); return (cb===Infinity?9e9:cb)-(ca===Infinity?9e9:ca)||a.sku.localeCompare(b2.sku); }   // most-overstocked first
       : function(a,b2){ return a.sku.localeCompare(b2.sku); };
-    return hdr+'<div class="inv-status-bd" data-k="'+ck+'"'+(collapsed?' style="display:none"':'')+'>'+tierTables(b,locCols(loc,key),'',sortFn)+'</div>';
+    // Build the plain-text export payload for this block (all tiers, display order) — used by the Copy / CSV buttons.
+    var exH=['Tier','SKU','Season','Core/Seasonal','Status',(isF?'FBA SOH':'3PL SOH')];
+    if(isF&&(key==='oos'||key==='low'))exH.push('3PL SOH');
+    exH.push((isF?'FBA cover (wks)':'3PL cover (wks)'),'Cover target (wks)','4wk fcst','On order','Inbound units','Inbound ETA','Inbound PO');
+    var exRows=[];
+    ['A','B','C'].forEach(function(t){ b[t].slice().sort(sortFn).forEach(function(r){
+      var cov=isF?r.covf:r.cov3;
+      var ii=inbInfo(loc,r);
+      var row=[TL[t],r.sku,r.rw||'',csText(r),invRowStatus(r),(isF?r.iff:r.i3)];
+      if(isF&&(key==='oos'||key==='low'))row.push(r.i3);
+      row.push((cov===Infinity?'∞':Math.round(cov*10)/10),(isF?r.tf:r.t3),Math.round((isF?r.wkf:r.wk3)*4),(isF?r.oof:r.oo3),ii.units,(ii.eta?invFmtEta(ii.eta):''),ii.ref||'');
+      exRows.push(row); }); });
+    INV_EXPORT[ck]={h:exH,rows:exRows,name:mkt+'_'+loc+'_'+key};
+    var expBtn='<span style="float:right;font-weight:600;font-size:10px;color:'+color+'">'
+      +'<span class="inv-exp-copy" data-k="'+ck+'" data-lbl="⧉ Copy" style="cursor:pointer;padding:2px 7px;border:1px solid '+color+';border-radius:4px 0 0 4px;background:rgba(255,255,255,.65)" title="Copy this table to clipboard (paste into Sheets/Excel)">⧉ Copy</span>'
+      +'<span class="inv-exp-csv" data-k="'+ck+'" data-lbl="⤓ CSV" style="cursor:pointer;padding:2px 7px;border:1px solid '+color+';border-left:none;border-radius:0 4px 4px 0;background:rgba(255,255,255,.65)" title="Download this table as CSV">⤓ CSV</span></span>';
+    var hdr='<div class="inv-status-hd" data-k="'+ck+'" style="'+barBase+';background:'+bg+';color:'+color+';border-left:4px solid '+color+';cursor:pointer;user-select:none"><span class="inv-status-chev" style="display:inline-block;width:14px;font-size:10px">'+(collapsed?'▸':'▾')+'</span>'+label+' <span style="font-weight:400;opacity:.7">('+n+')</span>'+expBtn+'</div>';
+    return hdr+'<div class="inv-status-bd" data-k="'+ck+'"'+(collapsed?' style="display:none"':'')+'>'+tierTables(b,locCols(loc,key),'',sortFn,ck)+'</div>';
   }
   function locGroup(title,sub,g,loc){
     var tot=['oos','low','bo','over'].reduce(function(t,k){return t+g[k].A.length+g[k].B.length+g[k].C.length;},0);
@@ -11401,7 +11478,8 @@ function renderInvStatus(){
       +'</tbody></table></div></div>';
   }
   var html='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:2px 0 4px"><div style="font-weight:800;font-size:15px">Inventory status — '+esc(mkt)+'</div>'
-    +'<button id="inv-showdisc" style="font-size:11px;font-weight:600;border:1px solid '+(INV_STATUS_SHOWDISC?'#7c3aed':'#e2e8f0')+';background:'+(INV_STATUS_SHOWDISC?'#f3e8ff':'#fff')+';color:'+(INV_STATUS_SHOWDISC?'#6b21a8':'#64748b')+';border-radius:5px;padding:3px 10px;cursor:pointer">'+(INV_STATUS_SHOWDISC?'☑':'☐')+' Show discontinued</button></div>'
+    +'<button id="inv-showdisc" style="font-size:11px;font-weight:600;border:1px solid '+(INV_STATUS_SHOWDISC?'#7c3aed':'#e2e8f0')+';background:'+(INV_STATUS_SHOWDISC?'#f3e8ff':'#fff')+';color:'+(INV_STATUS_SHOWDISC?'#6b21a8':'#64748b')+';border-radius:5px;padding:3px 10px;cursor:pointer">'+(INV_STATUS_SHOWDISC?'☑':'☐')+' Show discontinued</button>'
+    +'<button id="inv-xlsx" style="font-size:11px;font-weight:700;border:1px solid #15803d;background:#dcfce7;color:#166534;border-radius:5px;padding:3px 10px;cursor:pointer" title="Download the whole '+esc(mkt)+' page as one formatted Excel sheet (all flagged SKUs, quantities, tiers)">⤓ Full XLSX report</button></div>'
     +'<div class="mut" style="font-size:11px;margin-bottom:6px">Grouped by <b>stock location</b> then status. In scope = launched, sold on that channel'+(INV_STATUS_SHOWDISC?', <b>incl. discontinued</b>':', not discontinued')+'. Cover = (on hand + on order) ÷ avg weekly demand, vs the market target. <b>Overstock</b> = cover above 2× target. <b>Status</b>: Active · Soon discontinued (≤4wk) · Discontinued.</div>';
   html+=locGroup('3PL','web / wholesale',g3,'3pl');
   html+=locGroup('FBA','Amazon',gf,'fba');
@@ -11413,13 +11491,14 @@ function renderInvStatus(){
   var mtip=function(r){ return r.dl.months.map(function(m){ return m.lbl+': −'+invNum(m.dem)+(m.inb?' +'+invNum(m.inb):'')+' → '+invNum(Math.round(m.close)); }).join('  |  '); };
   var dlCols=[{h:'SKU',align:'left',f:function(r){return esc(r.sku);}},
     {h:'Release window',align:'left',f:function(r){return r.rw?esc(r.rw):'<span class="mut">—</span>';}},
+    csCol,
     {h:'SOH now',f:function(r){return invNum(r.dl.soh);}},
     {h:'+ Inbound (6mo)',f:function(r){return r.dl.inb>0?invNum(r.dl.inb):'<span class="mut">0</span>';}},
     {h:'− Forecast (6mo)',f:function(r){return invNum(r.dl.dem);}},
     {h:'Projected stock-out',f:function(r){return '<span style="color:#b91c1c;font-weight:700" title="'+esc(mtip(r))+'">'+esc(r.dl.out)+'</span>';}}];
   html+=sectHdr(4,'4 · Delivery — on hand + inbound vs forecast ('+nRisk+')','ACTIVE products projected to run <b>out of stock within 6 months</b> — current on hand plus timed inbound is below forecast demand. Sorted soonest-first; hover the stock-out month for the month-by-month runway.');
   html+=tierTables(risk,dlCols,'All active products are covered through the next 6 months in '+esc(mkt)+' 🎉',
-    function(a,b){ return (a._outIdx-b._outIdx)||a.sku.localeCompare(b.sku); });
+    function(a,b){ return (a._outIdx-b._outIdx)||a.sku.localeCompare(b.sku); },'delivery');
 
   // Section 5 · PO inbound delays + impacted products (loaded async from the server after the sync sections paint).
   // (The standalone flat inbound-shipments list was removed — inbound + PO now surface inside Out of Stock §1.)
@@ -11441,10 +11520,13 @@ function renderInvStatus(){
   else seasonKeys.forEach(function(sk){ var L=seasons[sk]; L.sort(function(a,b){ var la=a.launch||'9999',lb=b.launch||'9999'; return la<lb?-1:la>lb?1:a.sku.localeCompare(b.sku); });
     html+='<div style="margin-bottom:12px"><div style="font-weight:700;font-size:12px;color:#334155;margin-bottom:4px">'+esc(sk)+' <span class="mut" style="font-weight:400">('+L.length+')</span></div>'
       +'<div style="max-height:300px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'
-      +['SKU','Tier','Launch','On order','Inbound (next ETA)','Forecast (6mo)'].map(function(h){return '<th style="text-align:left;padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+      +['SKU','Tier','Core/Seasonal','Launch','On order','Inbound (next ETA)','Forecast (6mo)'].map(function(h){return '<th style="text-align:left;padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
       +L.map(function(r){ var none=r._none;
         var inb=r.inbUnits>0?(invNum(r.inbUnits)+' <span class="mut" style="font-size:10px">'+invFmtEta(r.nextEta)+'</span>'):'—';
+        var _csv=r.csf||(r.cs==='S'?'Seasonal':(r.cs==='C'?'Core':'')); var _csI={s:/season/i.test(_csv),n:/non/i.test(_csv)};
+        var csCell=_csv?('<span style="background:'+(_csI.s?'#dcfce7':(_csI.n?'#ffedd5':'#dbeafe'))+';color:'+(_csI.s?'#166534':(_csI.n?'#9a3412':'#1e40af'))+';padding:1px 6px;border-radius:3px;font-weight:600;font-size:10px;white-space:nowrap">'+esc(_csv)+'</span>'):'<span class="mut">—</span>';
         return '<tr'+(none?' style="background:#fef2f2"':'')+'><td style="padding:4px 10px;text-align:left">'+esc(r.sku)+'</td><td style="padding:4px 10px;text-align:left">'+esc(r.ti)+'</td>'
+          +'<td style="padding:4px 10px;text-align:left">'+csCell+'</td>'
           +'<td style="padding:4px 10px;text-align:left;white-space:nowrap">'+invFmtEta(r.launch)+'</td>'
           +'<td style="padding:4px 10px;text-align:left'+(none?';color:#b91c1c;font-weight:700':'')+'">'+invNum(r.oo)+'</td>'
           +'<td style="padding:4px 10px;text-align:left">'+inb+'</td>'
@@ -11453,9 +11535,17 @@ function renderInvStatus(){
 
   panel.innerHTML=html;
   var _sd=panel.querySelector('#inv-showdisc'); if(_sd)_sd.onclick=function(){ INV_STATUS_SHOWDISC=!INV_STATUS_SHOWDISC; renderInvStatus(); };   // show/hide discontinued → recompute
+  var _xl=panel.querySelector('#inv-xlsx'); if(_xl)_xl.onclick=function(){ _invFullXlsxDownload(mkt,_xl); };   // full-page formatted XLSX download
   panel.querySelectorAll('.inv-status-hd').forEach(function(h){ h.onclick=function(){ var k=h.dataset.k; INV_STATUS_COLLAPSE[k]=!INV_STATUS_COLLAPSE[k];
     var bd=panel.querySelector('.inv-status-bd[data-k="'+(k.replace(/"/g,''))+'"]'); if(bd)bd.style.display=INV_STATUS_COLLAPSE[k]?'none':'';
     var chev=h.querySelector('.inv-status-chev'); if(chev)chev.textContent=INV_STATUS_COLLAPSE[k]?'▸':'▾'; }; });   // expand/hide the status group
+  panel.querySelectorAll('.inv-tier-hd').forEach(function(h){ h.onclick=function(){ var k=h.dataset.tk; INV_TIER_COLLAPSE[k]=!INV_TIER_COLLAPSE[k];
+    var bd=panel.querySelector('.inv-tier-bd[data-tk="'+k+'"]'); if(bd)bd.style.display=INV_TIER_COLLAPSE[k]?'none':'';
+    var chev=h.querySelector('.inv-tier-chev'); if(chev)chev.textContent=INV_TIER_COLLAPSE[k]?'▸':'▾'; }; });   // minimise/expand a Tier A/B/C table
+  panel.querySelectorAll('.inv-more-btn').forEach(function(bn){ bn.onclick=function(){ var k=bn.dataset.tk; INV_TIER_MORE[k]=true;
+    panel.querySelectorAll('.inv-more-row[data-tk="'+k+'"]').forEach(function(x){ x.style.display=''; }); bn.style.display='none'; }; });   // Load more → reveal rows beyond the first 5
+  panel.querySelectorAll('.inv-exp-copy').forEach(function(el){ el.onclick=function(ev){ ev.stopPropagation(); _invExport(el.dataset.k,'copy',el); }; });   // per-sub-header copy-to-clipboard
+  panel.querySelectorAll('.inv-exp-csv').forEach(function(el){ el.onclick=function(ev){ ev.stopPropagation(); _invExport(el.dataset.k,'csv',el); }; });   // per-sub-header CSV download
   loadInvS6(mkt);   // fill section 6 async (server delay-detection + impact)
 }
 // Section 6 loader: fetch slipped POs impacting this market and render impacted-product tables. Re-guards on market.
@@ -11474,10 +11564,10 @@ function loadInvS6(mkt){
         +'<span style="font-size:12px;color:#b45309;font-weight:700">slipped '+g.slip_days+'d</span>'
         +'<span class="mut" style="font-size:11px">'+invFmtEta(g.baseline)+' → '+invFmtEta(g.current_date)+'</span>'
         +'<span class="mut" style="font-size:11px">'+invNum(g.units_at_risk)+'u'+(g.value_at_risk?' · £'+invNum(g.value_at_risk):'')+' at risk</span></div>';
-      var body='<div style="max-height:220px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'
-        +['SKU','On PO','On hand','Stock-out','Impact'].map(function(h,i){return '<th style="text-align:'+(i===0?'left':(i===4?'left':'right'))+';padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+      var body='<div style="max-height:220px;overflow:auto;border:1px solid #e5e7eb;border-radius:8px"><table style="width:100%;border-collapse:collapse;font-size:12px;text-align:left"><thead><tr>'
+        +['SKU','On PO','On hand','Stock-out','Impact'].map(function(h){return '<th style="text-align:left;padding:5px 10px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#f8fafc;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
         +g.lines.map(function(l){ var tag=l.oos?'<span style="color:#b91c1c;font-weight:700">Out of stock</span>':'<span style="color:#b45309;font-weight:700">Runs out before landing</span>';
-          return '<tr'+(l.oos?' style="background:#fef2f2"':'')+'><td style="padding:4px 10px">'+esc(l.sku)+'</td><td style="padding:4px 10px;text-align:right">'+invNum(l.qty)+'</td><td style="padding:4px 10px;text-align:right">'+invNum(l.on_hand)+'</td><td style="padding:4px 10px;text-align:right;white-space:nowrap">'+(l.stockout?invFmtEta(l.stockout):'—')+'</td><td style="padding:4px 10px">'+tag+'</td></tr>'; }).join('')
+          return '<tr'+(l.oos?' style="background:#fef2f2"':'')+'><td style="padding:4px 10px;text-align:left">'+esc(l.sku)+'</td><td style="padding:4px 10px;text-align:left">'+invNum(l.qty)+'</td><td style="padding:4px 10px;text-align:left">'+invNum(l.on_hand)+'</td><td style="padding:4px 10px;text-align:left;white-space:nowrap">'+(l.stockout?invFmtEta(l.stockout):'—')+'</td><td style="padding:4px 10px;text-align:left">'+tag+'</td></tr>'; }).join('')
         +'</tbody></table></div>';
       return '<div style="margin-bottom:14px">'+head+body+'</div>';
     }).join('');

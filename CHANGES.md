@@ -1,3 +1,12 @@
+## v27.279 Inventory Status Report — availability scoping, Core/Seasonal, transfer context, exports
+- **Availability scoping (fix):** a SKU now only shows under **FBA** if `available_<mkt>_fba` is true, and under **3PL** only if DTC **or** B2B (or TIK) is available — read from `v_product_availability` (SKUM.av), not the possibly-stale baked `md.ch`.
+- **Core/Seasonal column** (from `products.core_seasonal`) added to every table (colour-badged), next to Tier.
+- **FBA out-of-stock / low tables** gain a **3PL SOH** column (the pool available to transfer into FBA), and **all** location tables gain a **4wk fcst** column (next 4 weeks' forecast demand).
+- **Tiers:** each Tier A/B/C table is now **collapsible**, and shows the **first 5 rows with a "Load more"** instead of an inner scroll.
+- **Per-sub-header export:** every status sub-header (Out of stock / Low / Backorders / Overstock) has a **⧉ Copy / ⤓ CSV** combo button.
+- **Full XLSX report:** a top-of-page **⤓ Full XLSX report** button downloads the whole country page as one formatted Excel sheet (coloured section bars, Core/Seasonal tints, left-aligned) via new `POST /api/supply/inventory-status/export.xlsx`.
+- **§5 PO inbound delays** table: all fields left-aligned.
+
 ## v27.278 Payments Due: "Outstanding +4 weeks" now includes no-due-date rows
 - Per Ben: the **"Outstanding +4 weeks"** pill now also shows unpaid payments that have **no due date** (previously excluded). Filter is now: unpaid AND (due ≤ today+28d, overdue included) OR no due date.
 
