@@ -9909,6 +9909,39 @@ app.post('/api/supply/buyplan-pos/export.xlsx', async (req, res) => {
     for (let i = 0; i < countries.length; i++) S.getColumn(CC0 + i).alignment = { horizontal: 'center' };   // centre the country columns
     S.getColumn(sCols).alignment = { horizontal: 'center' };   // centre Total
     S.views = [{ state: 'frozen', ySplit: 3 }];
+    // ── Summary with Inbound tab: per country → On Hand (3PL+FBA), Inbound, Buy Qty (Ben) ──
+    const whList = []; countries.forEach(c => { const lc = String(c).toLowerCase(); whList.push(lc + '_3pl', lc + '_fba'); });
+    const oh = {}, inbd = {};   // oh[sku][COUNTRY], inbd[sku][COUNTRY]
+    if (skus.length && whList.length) {
+      (await pool.query(`SELECT upper(sku) sku, warehouse wh, available::int q FROM planner.v_product_inventory WHERE upper(sku)=ANY($1) AND warehouse=ANY($2)`, [skus, whList])).rows
+        .forEach(r => { const c = r.wh.replace(/_(3pl|fba)$/, '').toUpperCase(); (oh[r.sku] = oh[r.sku] || {}); oh[r.sku][c] = (oh[r.sku][c] || 0) + (r.q || 0); });
+      (await pool.query(`SELECT upper(sku) sku, destination_warehouse wh, sum(quantity-coalesce(received_quantity,0))::int q FROM planner.inbound_shipments WHERE upper(sku)=ANY($1) AND destination_warehouse=ANY($2) AND coalesce(received_quantity,0)<quantity AND reference NOT IN (${EXCL_REF_LIST}) GROUP BY 1,2`, [skus, whList])).rows
+        .forEach(r => { const c = r.wh.replace(/_(3pl|fba)$/, '').toUpperCase(); (inbd[r.sku] = inbd[r.sku] || {}); inbd[r.sku][c] = (inbd[r.sku][c] || 0) + (r.q || 0); });
+    }
+    const SI = wb.addWorksheet('Summary with Inbound');
+    const siCols = 3 + countries.length * 3;
+    SI.columns = [{ width: 26 }, { width: 42 }, { width: 7 }].concat(countries.reduce((a) => a.concat([{ width: 9 }, { width: 9 }, { width: 9 }]), []));
+    SI.addRow(['On hand · inbound · buy — ' + titleFor()]); SI.mergeCells(1, 1, 1, siCols); SI.getRow(1).font = { bold: true, size: 13 };
+    const r1 = SI.addRow(['', '', ''].concat(countries.reduce((a, c) => a.concat([c, '', '']), [])));
+    countries.forEach((c, i) => { const cc = 4 + i * 3; SI.mergeCells(r1.number, cc, r1.number, cc + 2); const cell = r1.getCell(cc); cell.alignment = { horizontal: 'center' }; cell.font = { bold: true, color: { argb: COL[c] ? 'FFFFFFFF' : 'FF000000' } }; if (COL[c]) cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: argb(COL[c]) } }; });
+    const r2 = SI.addRow(['SKU', 'Product', 'Tier'].concat(countries.reduce((a) => a.concat(['On hand', 'Inbound', 'Buy']), []))); r2.font = { bold: true }; r2.eachCell(cell => { cell.fill = HFILL; cell.alignment = { horizontal: 'center' }; }); r2.getCell(1).alignment = { horizontal: 'left' }; r2.getCell(2).alignment = { horizontal: 'left' };
+    const gTot = {}; countries.forEach(c => gTot[c] = { oh: 0, inb: 0, buy: 0 });
+    Object.keys(byCat).sort().forEach(cat => {
+      const cr = SI.addRow([cat]); SI.mergeCells(cr.number, 1, cr.number, siCols); cr.font = { bold: true }; cr.eachCell(cell => { cell.fill = CATFILL; }); cr.getCell(1).alignment = { horizontal: 'left' };
+      const sub = {}; countries.forEach(c => sub[c] = { oh: 0, inb: 0, buy: 0 });
+      byCat[cat].slice().sort((a, b2) => a.sku < b2.sku ? -1 : 1).forEach(r => {
+        const su = String(r.sku).toUpperCase(); const cells = [r.sku, nm(r.sku), tier(r.sku)];
+        countries.forEach(c => { const o = (oh[su] && oh[su][c]) || 0, ib = (inbd[su] && inbd[su][c]) || 0, bq = (r.byCountry || {})[c] || 0; cells.push(o || '', ib || '', bq || ''); sub[c].oh += o; sub[c].inb += ib; sub[c].buy += bq; gTot[c].oh += o; gTot[c].inb += ib; gTot[c].buy += bq; });
+        const rr = SI.addRow(cells); rr.getCell(3).alignment = { horizontal: 'center' };
+        countries.forEach((c, i) => { if (COL[c]) { const cc = 4 + i * 3; for (let k = 0; k < 3; k++) rr.getCell(cc + k).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: tintArgb(COL[c], 0.88) } }; } });
+      });
+      const sr = SI.addRow([cat + ' total', '', ''].concat(countries.reduce((a, c) => a.concat([sub[c].oh || '', sub[c].inb || '', sub[c].buy || '']), []))); sr.font = { bold: true };
+      SI.addRow([]);
+    });
+    const grR = SI.addRow(['TOTAL', '', ''].concat(countries.reduce((a, c) => a.concat([gTot[c].oh || '', gTot[c].inb || '', gTot[c].buy || '']), []))); grR.font = { bold: true }; grR.eachCell(cell => { cell.fill = HFILL; });
+    SI.getColumn(3).alignment = { horizontal: 'center' };
+    for (let i = 0; i < countries.length * 3; i++) SI.getColumn(4 + i).alignment = { horizontal: 'center' };
+    SI.views = [{ state: 'frozen', ySplit: 4 }];
     // ── Purchase Orders tab: grouped by supplier, each PO with its own SKU/qty list ──
     const P = wb.addWorksheet('Purchase Orders');
     P.columns = [{ width: 28 }, { width: 12 }, { width: 42 }];   // SKU · Qty · Product

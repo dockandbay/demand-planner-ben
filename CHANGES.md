@@ -1,3 +1,6 @@
+## v27.290 Create-PO XLSX: new "Summary with Inbound" tab
+- The buy-plan PO download now has a third tab **"Summary with Inbound"**: SKUs by category, and for **each country** three columns — **On hand** (3PL+FBA combined), **Inbound** (open inbound to 3PL+FBA, excludes the erroneous POs), and **Buy** (this run's qty). Country-tinted, category subtotals + grand total. On-hand/inbound fetched server-side for the summary SKUs; Buy comes from the plan (current mode).
+
 ## v27.289 EDI Labels page → 7 numbered step boxes + searchable preorder-ref
 - Reorganised the page into **7 numbered step boxes**: 1 ASN CSV · 2 SSCC PDFs · 3 Parse & match · 4 Crossdock/Preorder ref per PO · 5 Supplier choice · 6 Unmatched labels · 7 Split & generate ZIP.
 - **Step 4** is now a **vertical list** (one row per PO) and each ref field is a **searchable crossdock/preorder picker** (datalist over the same crossdock/preorder refs as the Client/FBA crossdock adder).
