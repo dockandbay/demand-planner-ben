@@ -3365,7 +3365,7 @@
           if(r.client_label_format==='paper_store') btns.push('<button class="save-btn po-dl-ps" data-po="'+esc(r.po)+'" style="background:#fee2e2;color:#991b1b;border:1px solid #fca5a5;font-weight:700" title="Paper Store carton labels — one label per carton (full + odd/mixed), client PO # / DC format">⤓ Paper Store carton labels</button>');   // only for a key account linked to the Paper Store label format (CONFIG ▸ Key Accounts)
           return (btns.length?btns.join(' '):'<span class="mut tiny">— none for this PO</span>')+' <span class="mut tiny">(Ships With Supplier labels are on the SHIPMENTS tab)</span>'; })())
       +cliRow('Attachments <span class="mut tiny">(client / FBA docs)</span>',
-          (function(){ var cd=(d&&d.client_docs)||[]; return (cd.length?cd.map(function(x){return '<a href="/api/supply/portal-attachment/'+x.id+'" target="_blank" rel="noopener">'+esc(x.filename||'view')+'</a>';}).join(' · ')+' &nbsp; ':'<span class="mut tiny">none yet — </span>')
+          (function(){ var cd=(d&&d.client_docs)||[]; return (cd.length?cd.map(function(x){return '<a href="/api/supply/portal-attachment/'+x.id+'" target="_blank" rel="noopener">'+esc(x.filename||'view')+'</a> <button class="lnk-btn podoc-del" data-id="'+esc(x.id)+'" data-po="'+esc(r.po)+'" data-name="'+esc(x.filename||'')+'" style="color:#b91c1c;cursor:pointer" title="delete this file">✕</button>';}).join(' &nbsp; ')+' &nbsp; ':'<span class="mut tiny">none yet — </span>')
             +'<input type="file" class="cli-attach" data-po="'+esc(r.po)+'" style="font-size:11px">'; })())
       +'</div></div><div style="flex:1 1 430px;min-width:360px">'+packH+'</div></div>';
     // ---- PAYMENTS chunk (order value + payment plan) ----

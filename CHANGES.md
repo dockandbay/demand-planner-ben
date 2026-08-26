@@ -1,3 +1,6 @@
+## v27.302 PO grid ▸ Client/FBA tab: delete uploaded attachments
+- Each uploaded **Client/FBA attachment** now has a **✕ delete** button (was download-only). Uses the existing `/api/supply/po-doc-delete` endpoint + the panel's existing `.podoc-del` handler (confirm → delete → refresh). Removes the row from `planner.portal_attachments`.
+
 ## v27.301 Auto Forecast: click a payments cell to see the orders behind it
 - Every value in the **"Payments plan — cash out by month"** table (USD + GBP) is now **clickable** → a popup lists the exact order legs (transactions) that make up that month × payment type: reference (`FC-<market>-<order-month>-<supplier>`), country, supplier, GBP amount, with a total. Answers "where is this £X coming from" for any cell (e.g. the October import duty). Reads the report's own transactions; no new data, report-only.
 
