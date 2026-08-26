@@ -11853,10 +11853,14 @@ async function computeAutoForecast(markets) {
           stock=Math.max(0, avail-demand);                                            // carry closing stock forward
           if(arrive<=0) continue;
           const om=afAddMonths(m,-lm);                       // order month = demand month − lead
+          // FORWARD-ONLY (Ben): an order whose PLACEMENT month is already in the past can't be placed now — it belongs
+          // to the real PO grid / actual cash flow, not this projection. Skip ALL its cash legs (duty/balance included);
+          // surface the unit count as "overdue" so a genuine near-term shortfall isn't lost. The first projected landing
+          // is now + lead (e.g. UK ≈ December), so near-term months carry no phantom forecast duty.
+          if(om<win[0]){ overdueUnits+=arrive; continue; }
           if(win.indexOf(om)>=0){
             const u=unitsBy[nm]||(unitsBy[nm]={t:0}); u[om]=(u[om]||0)+arrive; u.t+=arrive;   // 1 row per supplier (summed across subcats + markets)
-          } else if(om<win[0]) { overdueUnits+=arrive; /* order month already past the window start — order is overdue; its cash legs may still land in-window, so surface the unit count */ }
-          else truncated=true;
+          } else truncated=true;
           const val=arrive*c;
           const _dep=val*Number(t.start_deposit_pct||0)/100, _com=val*Number(t.completion_pct||0)/100,
                 _bal=val*Number(t.balance_pct||0)/100;

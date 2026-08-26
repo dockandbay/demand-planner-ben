@@ -1,3 +1,6 @@
+## v27.299 Auto Forecast: forward-only — skip orders whose placement month is already past
+- The rolling Auto-Forecast cash engine was posting **near-term duty/balance/completion for orders it can't actually place** (an order landing September needs a ~May placement for UK's 17wk lead — already past). It dropped the past deposit but kept the in-window legs → phantom near-term cash that overlaps the real PO grid / actual cash flow. Now any order with `order_month < window start` is **skipped entirely** (all legs) and surfaced as an **overdue unit count**. First projected landing = now + lead (UK ≈ December). Sept example (sandbox): duty 1,123→237, balance 5,358→1,460, completion 11→0; **deposit unchanged** (it's the order-month leg = genuinely forward Sept-placed orders). Report-only, no buy-plan/DB write. (Option B/feed engine already rolls overdue → order-now, so it's unaffected.)
+
 ## v27.298 EDI Labels: stateless parse+generate (serverless-safe)
 - Removed the in-memory job cache (`EDI_JOBS`) so the flow survives on Vercel (Diviyaj). **Generate now re-parses from the files re-sent in the same request** (client `collectFiles()` → `csv_base64`+`pdfs`+`choices`+`preorderRefs`); parse and generate share a stateless `_ediParse` helper. No jobId, no cross-request state. Verified: parse preview + generate produce the identical 1,316-file ZIP.
 
