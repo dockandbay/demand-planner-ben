@@ -8054,9 +8054,13 @@
       btn.onclick=function(){ var gs=c.querySelector('#edi-gen-status');
         var choices={}; c.querySelectorAll('.edi-sup').forEach(function(s){ choices[s.dataset.sku]=s.value; });
         var preorderRefs={}; c.querySelectorAll('.edi-ref').forEach(function(i){ if(i.value.trim())preorderRefs[i.dataset.po]=i.value.trim(); });
-        btn.disabled=true; gs.textContent='Building ZIP…';
-        fetch('/api/supply/edi-labels/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId:j.jobId,choices:choices,preorderRefs:preorderRefs})})
-          .then(function(r){ if(!r.ok)return r.json().then(function(x){throw new Error(x.error||('HTTP '+r.status));}); return r.blob(); })
+        btn.disabled=true; gs.textContent='Re-reading files…';
+        // stateless generate: re-send the files (works on serverless — no server-side job cache)
+        collectFiles().then(function(cf){
+          if(!cf.csv||!cf.pdfs.length){ throw new Error('Files missing — re-add in steps 1–2 (or reload the project) and parse again.'); }
+          gs.textContent='Building ZIP…';
+          return fetch('/api/supply/edi-labels/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csv_base64:cf.csv.b64,pdfs:cf.pdfs,choices:choices,preorderRefs:preorderRefs})});
+        }).then(function(r){ if(!r.ok)return r.json().then(function(x){throw new Error(x.error||('HTTP '+r.status));}); return r.blob(); })
           .then(function(bl){ var u=URL.createObjectURL(bl),a=document.createElement('a'); a.href=u; a.download='edi-labels.zip'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); gs.textContent='Downloaded ✓'; })
           .catch(function(e){ gs.textContent='Failed: '+(e.message||e); })
           .finally(function(){ btn.disabled=false; }); };

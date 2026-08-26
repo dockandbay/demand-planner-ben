@@ -1,3 +1,6 @@
+## v27.298 EDI Labels: stateless parse+generate (serverless-safe)
+- Removed the in-memory job cache (`EDI_JOBS`) so the flow survives on Vercel (Diviyaj). **Generate now re-parses from the files re-sent in the same request** (client `collectFiles()` → `csv_base64`+`pdfs`+`choices`+`preorderRefs`); parse and generate share a stateless `_ediParse` helper. No jobId, no cross-request state. Verified: parse preview + generate produce the identical 1,316-file ZIP.
+
 ## v27.297 Package for Diviyaj — pin jszip/pdfjs-dist as direct deps + consolidated deploy note
 - Declared **`jszip`** and **`pdfjs-dist`** as explicit dependencies (they were used directly but only present transitively) so a clean `npm install` is deterministic. Consolidated `deploy notes/DEPLOY_2026-08-26.md` (LIVE v27.275 → v27.296/7; migration 244 only; deps pdf-lib/jszip/pdfjs-dist).
 

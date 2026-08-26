@@ -2652,87 +2652,95 @@ app.post('/api/supply/inventory-status/export.xlsx', async (req, res) => {
 // wc-asn.csv (no header): col4 = "<PO>-<store>", col107 (DC) = client SKU, col108 (DD) = our EAN, col129 = SSCC.
 // Each uploaded PDF = one PO, one SSCC label per page. Match a page's SSCC (last 18 digits) → CSV row → PO +
 // EAN → our SKU + supplier(s); split each page to its own PDF filed under SUPPLIER/PO/SKU. Read-only (no DB write).
-// In-memory job cache (persistent-server assumption — for serverless this needs a shared store; see deploy note).
-const EDI_JOBS = new Map(); let EDI_SEQ = 0;
-function _ediGc() { const now = Date.now(); for (const [k, v] of EDI_JOBS) if (now - v.created > 30 * 60 * 1000) EDI_JOBS.delete(k); }
+// STATELESS: parse (preview) and generate (build) each re-parse from the request's own files — no cross-request
+// cache, so it works on serverless / Vercel (Diviyaj). The PDF re-parse is cheap enough for D&B's volumes.
 function _ediCsvSplit(line) { return line.split(',').map(s => s.replace(/^'|'$/g, '').trim()); }
+function _ediBody(b) {
+  const csvText = b.csv_base64 ? Buffer.from(String(b.csv_base64), 'base64').toString('utf8') : String(b.csv || '');
+  const pdfs = Array.isArray(b.pdfs) ? b.pdfs : [];
+  return { csvText, pdfs };
+}
+// Parse the ASN CSV + label PDFs into per-page items (each with its split single-page PDF buffer).
+async function _ediParse(csvText, pdfs) {
+  // 1) CSV → SSCC(last 18) → { po, store, clientSku, ean, qty }
+  const bySscc = {}; const eans = new Set();
+  csvText.split(/\r?\n/).filter(Boolean).forEach(line => {
+    const c = _ediCsvSplit(line);
+    const ps = c[3] || ''; const po = ps.split('-')[0]; const store = ps.split('-')[1] || '';
+    const clientSku = c[106] || ''; const ean = String(c[107] || '').replace(/\D/g, ''); const sscc = String(c[128] || '').replace(/\D/g, '');
+    const qty = parseInt(String(c[110] || '').replace(/\D/g, ''), 10) || 0;   // col 111 = carton qty per SSCC
+    if (!sscc) return; bySscc[sscc.slice(-18)] = { po, store, clientSku, ean, sscc, qty };
+    if (ean) eans.add(ean);
+  });
+  // 2) EAN → our SKU + supplier(s)
+  const byEan = {};
+  if (eans.size) {
+    const { rows } = await pool.query(
+      `SELECT replace(coalesce(product_ean,''),chr(39),'') ean, sku,
+              coalesce(nullif(main_supplier_final,''),nullif(supplier,'')) main_supplier, supplier_multiple_all
+       FROM planner.products WHERE replace(coalesce(product_ean,''),chr(39),'') = ANY($1)`, [[...eans]]);
+    rows.forEach(r => {
+      const opts = [...new Set(String(r.supplier_multiple_all || '').split(',').map(s => s.trim()).filter(Boolean).concat(r.main_supplier ? [r.main_supplier] : []))];
+      byEan[r.ean] = { sku: r.sku, mainSupplier: r.main_supplier || opts[0] || '', suppliers: opts.length ? opts : (r.main_supplier ? [r.main_supplier] : []) };
+    });
+  }
+  // 3) each PDF → per-page SSCC (text) → split page into its own PDF (pdf-lib)
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const { PDFDocument } = await import('pdf-lib');
+  const items = [];
+  for (const f of pdfs) {
+    const buf = Buffer.from(String(f.b64 || f.base64 || ''), 'base64'); if (!buf.length) continue;
+    let src, doc;
+    try { src = await PDFDocument.load(buf, { ignoreEncryption: true }); } catch (e) { continue; }
+    try { doc = await pdfjs.getDocument({ data: new Uint8Array(buf), useSystemFonts: true }).promise; } catch (e) { continue; }
+    for (let pg = 1; pg <= doc.numPages; pg++) {
+      const p = await doc.getPage(pg); const tc = await p.getTextContent();
+      const text = tc.items.map(i => i.str).join(' ');
+      let extracted = null, key = null; const m = text.match(/\(00\)\s*([\d\s]{18,30})/);
+      if (m) extracted = m[1].replace(/\D/g, '').slice(0, 18);
+      if (extracted && bySscc[extracted]) key = extracted;
+      else { const digits = text.replace(/\D/g, ''); for (const k in bySscc) { if (digits.includes(k)) { key = k; break; } } }
+      const sscc = key || extracted;
+      const row = key ? bySscc[key] : null;
+      const prod = row && row.ean ? byEan[row.ean] : null;
+      const out = await PDFDocument.create(); const [cp] = await out.copyPages(src, [pg - 1]); out.addPage(cp);
+      const pageBuf = Buffer.from(await out.save());
+      const matched = !!(row && prod);
+      const reason = matched ? '' : (!sscc ? 'no SSCC on page' : (!row ? 'SSCC not in CSV' : ('EAN ' + (row.ean || '?') + ' not matched to a product')));
+      items.push({ sscc: sscc || ('page-' + (items.length + 1)), po: row ? row.po : '', store: row ? row.store : '', clientSku: row ? row.clientSku : '',
+        ean: row ? row.ean : '', qty: row ? (row.qty || 0) : 0, sku: prod ? prod.sku : '', suppliers: prod ? prod.suppliers : [], mainSupplier: prod ? prod.mainSupplier : '',
+        matched, reason, srcFile: f.name || '', buf: pageBuf });
+    }
+  }
+  return items;
+}
+function _ediPreview(items) {
+  const skuMap = {};
+  items.forEach(it => { if (!it.matched) return; (skuMap[it.sku] = skuMap[it.sku] || { sku: it.sku, options: it.suppliers, main: it.mainSupplier, count: 0 }).count++; });
+  const skus = Object.values(skuMap).sort((a, b) => a.sku.localeCompare(b.sku));
+  const byPo = {}; items.forEach(it => { if (it.matched) byPo[it.po] = (byPo[it.po] || 0) + 1; });
+  return {
+    ok: true, total: items.length, matched: items.filter(i => i.matched).length,
+    unmatched: items.filter(it => !it.matched).map(it => ({ sscc: it.sscc, po: it.po, clientSku: it.clientSku, ean: it.ean, reason: it.reason, file: it.srcFile })),
+    multiSuppliers: skus.filter(x => (x.options || []).length > 1),
+    skus, byPo,
+  };
+}
 app.post('/api/supply/edi-labels/parse', async (req, res) => {
   try {
-    _ediGc();
-    const b = req.body || {};
-    const csvText = b.csv_base64 ? Buffer.from(String(b.csv_base64), 'base64').toString('utf8') : String(b.csv || '');
-    const pdfs = Array.isArray(b.pdfs) ? b.pdfs : [];
+    const { csvText, pdfs } = _ediBody(req.body || {});
     if (!csvText.trim()) return res.status(400).json({ error: 'No CSV supplied' });
     if (!pdfs.length) return res.status(400).json({ error: 'No PDF files supplied' });
-    // 1) CSV → SSCC(last 18) → { po, store, clientSku, ean }
-    const bySscc = {}; const eans = new Set();
-    csvText.split(/\r?\n/).filter(Boolean).forEach(line => {
-      const c = _ediCsvSplit(line);
-      const ps = c[3] || ''; const po = ps.split('-')[0]; const store = ps.split('-')[1] || '';
-      const clientSku = c[106] || ''; const ean = String(c[107] || '').replace(/\D/g, ''); const sscc = String(c[128] || '').replace(/\D/g, '');
-      const qty = parseInt(String(c[110] || '').replace(/\D/g, ''), 10) || 0;   // col 111 = carton qty per SSCC
-      if (!sscc) return; bySscc[sscc.slice(-18)] = { po, store, clientSku, ean, sscc, qty };
-      if (ean) eans.add(ean);
-    });
-    // 2) EAN → our SKU + supplier(s)
-    const byEan = {};
-    if (eans.size) {
-      const { rows } = await pool.query(
-        `SELECT replace(coalesce(product_ean,''),chr(39),'') ean, sku,
-                coalesce(nullif(main_supplier_final,''),nullif(supplier,'')) main_supplier, supplier_multiple_all
-         FROM planner.products WHERE replace(coalesce(product_ean,''),chr(39),'') = ANY($1)`, [[...eans]]);
-      rows.forEach(r => {
-        const opts = [...new Set(String(r.supplier_multiple_all || '').split(',').map(s => s.trim()).filter(Boolean).concat(r.main_supplier ? [r.main_supplier] : []))];
-        byEan[r.ean] = { sku: r.sku, mainSupplier: r.main_supplier || opts[0] || '', suppliers: opts.length ? opts : (r.main_supplier ? [r.main_supplier] : []) };
-      });
-    }
-    // 3) each PDF → per-page SSCC (text) → split page into its own PDF (pdf-lib)
-    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-    const { PDFDocument } = await import('pdf-lib');
-    const items = [];
-    for (const f of pdfs) {
-      const buf = Buffer.from(String(f.b64 || f.base64 || ''), 'base64'); if (!buf.length) continue;
-      let src, doc;
-      try { src = await PDFDocument.load(buf, { ignoreEncryption: true }); } catch (e) { continue; }
-      try { doc = await pdfjs.getDocument({ data: new Uint8Array(buf), useSystemFonts: true }).promise; } catch (e) { continue; }
-      for (let pg = 1; pg <= doc.numPages; pg++) {
-        const p = await doc.getPage(pg); const tc = await p.getTextContent();
-        const text = tc.items.map(i => i.str).join(' ');
-        let extracted = null, key = null; const m = text.match(/\(00\)\s*([\d\s]{18,30})/);
-        if (m) extracted = m[1].replace(/\D/g, '').slice(0, 18);
-        if (extracted && bySscc[extracted]) key = extracted;
-        else { const digits = text.replace(/\D/g, ''); for (const k in bySscc) { if (digits.includes(k)) { key = k; break; } } }
-        const sscc = key || extracted;
-        const row = key ? bySscc[key] : null;
-        const prod = row && row.ean ? byEan[row.ean] : null;
-        const out = await PDFDocument.create(); const [cp] = await out.copyPages(src, [pg - 1]); out.addPage(cp);
-        const pageBuf = Buffer.from(await out.save());
-        const matched = !!(row && prod);
-        const reason = matched ? '' : (!sscc ? 'no SSCC on page' : (!row ? 'SSCC not in CSV' : ('EAN ' + (row.ean || '?') + ' not matched to a product')));
-        items.push({ sscc: sscc || ('page-' + (items.length + 1)), po: row ? row.po : '', store: row ? row.store : '', clientSku: row ? row.clientSku : '',
-          ean: row ? row.ean : '', qty: row ? (row.qty || 0) : 0, sku: prod ? prod.sku : '', suppliers: prod ? prod.suppliers : [], mainSupplier: prod ? prod.mainSupplier : '',
-          matched, reason, srcFile: f.name || '', buf: pageBuf });
-      }
-    }
-    const jobId = 'edi_' + Date.now().toString(36) + '_' + (++EDI_SEQ);
-    EDI_JOBS.set(jobId, { items, created: Date.now() });
-    // preview payload (no buffers)
-    const skuMap = {};
-    items.forEach(it => { if (!it.matched) return; (skuMap[it.sku] = skuMap[it.sku] || { sku: it.sku, options: it.suppliers, main: it.mainSupplier, count: 0 }).count++; });
-    const skus = Object.values(skuMap).sort((a, b) => a.sku.localeCompare(b.sku));
-    const byPo = {}; items.forEach(it => { if (it.matched) byPo[it.po] = (byPo[it.po] || 0) + 1; });
-    res.json({
-      ok: true, jobId, total: items.length, matched: items.filter(i => i.matched).length,
-      unmatched: items.filter(it => !it.matched).map(it => ({ sscc: it.sscc, po: it.po, clientSku: it.clientSku, ean: it.ean, reason: it.reason, file: it.srcFile })),
-      multiSuppliers: skus.filter(x => (x.options || []).length > 1),
-      skus, byPo,
-    });
+    res.json(_ediPreview(await _ediParse(csvText, pdfs)));
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/edi-labels/generate', async (req, res) => {
   try {
-    const b = req.body || {}; const job = EDI_JOBS.get(String(b.jobId || ''));
-    if (!job) return res.status(410).json({ error: 'Job expired — please re-upload and parse again.' });
+    const b = req.body || {};
+    const { csvText, pdfs } = _ediBody(b);
+    if (!csvText.trim() || !pdfs.length) return res.status(400).json({ error: 'Re-send the CSV + PDFs to generate.' });
+    const items = await _ediParse(csvText, pdfs);
+    const job = { items };
     const choices = b.choices || {}, refs = b.preorderRefs || {};
     const JSZip = (await import('jszip')).default; const zip = new JSZip();
     const san = s => String(s == null ? '' : s).replace(/[\/\\:*?"<>|\x00-\x1f]+/g, '_').replace(/\s+/g, ' ').trim().replace(/[. ]+$/, '') || '_';
