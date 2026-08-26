@@ -2669,7 +2669,8 @@ app.post('/api/supply/edi-labels/parse', async (req, res) => {
       const c = _ediCsvSplit(line);
       const ps = c[3] || ''; const po = ps.split('-')[0]; const store = ps.split('-')[1] || '';
       const clientSku = c[106] || ''; const ean = String(c[107] || '').replace(/\D/g, ''); const sscc = String(c[128] || '').replace(/\D/g, '');
-      if (!sscc) return; bySscc[sscc.slice(-18)] = { po, store, clientSku, ean, sscc };
+      const qty = parseInt(String(c[110] || '').replace(/\D/g, ''), 10) || 0;   // col 111 = carton qty per SSCC
+      if (!sscc) return; bySscc[sscc.slice(-18)] = { po, store, clientSku, ean, sscc, qty };
       if (ean) eans.add(ean);
     });
     // 2) EAN → our SKU + supplier(s)
@@ -2708,7 +2709,7 @@ app.post('/api/supply/edi-labels/parse', async (req, res) => {
         const matched = !!(row && prod);
         const reason = matched ? '' : (!sscc ? 'no SSCC on page' : (!row ? 'SSCC not in CSV' : ('EAN ' + (row.ean || '?') + ' not matched to a product')));
         items.push({ sscc: sscc || ('page-' + (items.length + 1)), po: row ? row.po : '', store: row ? row.store : '', clientSku: row ? row.clientSku : '',
-          ean: row ? row.ean : '', sku: prod ? prod.sku : '', suppliers: prod ? prod.suppliers : [], mainSupplier: prod ? prod.mainSupplier : '',
+          ean: row ? row.ean : '', qty: row ? (row.qty || 0) : 0, sku: prod ? prod.sku : '', suppliers: prod ? prod.suppliers : [], mainSupplier: prod ? prod.mainSupplier : '',
           matched, reason, srcFile: f.name || '', buf: pageBuf });
       }
     }
@@ -2753,6 +2754,15 @@ app.post('/api/supply/edi-labels/generate', async (req, res) => {
     });
     const q = v => { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
     zip.file('manifest.csv', manifest.map(r => r.map(q).join(',')).join('\n') + '\n');
+    // per-supplier packing list CSV (Supplier · PO · Preorder ref · SKU · Quantity · SSCC) — one file in each supplier folder
+    const packBy = {};
+    job.items.forEach(it => { if (!it.matched) return; const supplier = choices[it.sku] || it.mainSupplier || 'UNKNOWN_SUPPLIER'; const ref = String(refs[it.po] || '').trim();
+      (packBy[supplier] = packBy[supplier] || []).push([supplier, it.po, ref, it.sku, it.qty || '', it.sscc]); });
+    Object.keys(packBy).forEach(sup => {
+      const rows = [['Supplier', 'Purchase Order', 'Preorder Ref', 'SKU', 'Quantity', 'SSCC Label']]
+        .concat(packBy[sup].sort((a, b) => String(a[1]).localeCompare(String(b[1])) || String(a[3]).localeCompare(String(b[3])) || String(a[5]).localeCompare(String(b[5]))));
+      zip.file(san(sup) + '/packing-list-' + san(sup) + '.csv', rows.map(r => r.map(q).join(',')).join('\n') + '\n');
+    });
     const out = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
     res.set('Content-Type', 'application/zip').set('Content-Disposition', 'attachment; filename="edi-labels.zip"').set('Cache-Control', 'no-store').send(out);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }

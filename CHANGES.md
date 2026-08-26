@@ -1,3 +1,7 @@
+## v27.291 EDI Labels: per-supplier packing list + per-step drop zones
+- The ZIP now includes a **per-supplier packing-list CSV** (`<Supplier>/packing-list-<Supplier>.csv`) with columns **Supplier · Purchase Order · Preorder Ref · SKU · Quantity · SSCC Label** (one row per label; qty from ASN col 111).
+- **Drag & drop is now scoped to each step's box** (step 1 CSV, step 2 PDFs) as clickable dashed drop zones with hover highlight — same pattern as the other upload sections (reverted the whole-page drop, which was inconsistent).
+
 ## v27.290 Create-PO XLSX: new "Summary with Inbound" tab
 - The buy-plan PO download now has a third tab **"Summary with Inbound"**: SKUs by category, and for **each country** three columns — **On hand** (3PL+FBA combined), **Inbound** (open inbound to 3PL+FBA, excludes the erroneous POs), and **Buy** (this run's qty). Country-tinted, category subtotals + grand total. On-hand/inbound fetched server-side for the summary SKUs; Buy comes from the plan (current mode).
 

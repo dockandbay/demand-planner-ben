@@ -7955,9 +7955,9 @@
     var wait='<div class="mut" style="font-size:12px">Run <b>Parse &amp; match</b> (step 3) first.</div>';
     c.innerHTML='<div style="max-width:820px"><span id="edi-datalists"></span>'
       +'<div style="font-weight:800;font-size:16px;margin:4px 0 2px">EDI Labels — Dillards via EZY COM</div>'
-      +'<div class="mut" style="font-size:12px;margin-bottom:14px">Split the SSCC label PDFs into <b>Supplier / PO / SKU</b> folders. <b>Drag &amp; drop anywhere on this page</b> (CSV + PDFs route automatically) or use the pickers. Output = a ZIP + manifest.csv.</div>'
-      +box(1,'ASN CSV','<input type="file" id="edi-csv" accept=".csv" style="font-size:12px"><div class="mut" id="edi-csv-n" style="font-size:11px;margin-top:4px">wc-asn.csv</div>')
-      +box(2,'SSCC label PDFs','<input type="file" id="edi-pdfs" accept="application/pdf,.pdf" multiple style="font-size:12px"><div class="mut" id="edi-pdf-n" style="font-size:11px;margin-top:4px">choose or drag multiple PDFs</div>')
+      +'<div class="mut" style="font-size:12px;margin-bottom:14px">Split the SSCC label PDFs into <b>Supplier / PO / SKU</b> folders. Drop files into each step below (or click to choose). Output = a ZIP with a <b>manifest</b> and a <b>per-supplier packing list</b>.</div>'
+      +box(1,'ASN CSV','<div id="edi-csv-dz" style="border:1.5px dashed #cbd5e1;border-radius:6px;padding:14px;background:#fff;cursor:pointer;text-align:center;font-size:12px;color:#475569">Drop the <b>wc-asn.csv</b> here, or click to choose<div class="mut" id="edi-csv-n" style="font-size:11px;margin-top:4px">no file chosen</div></div><input type="file" id="edi-csv" accept=".csv" style="display:none">')
+      +box(2,'SSCC label PDFs','<div id="edi-pdf-dz" style="border:1.5px dashed #cbd5e1;border-radius:6px;padding:14px;background:#fff;cursor:pointer;text-align:center;font-size:12px;color:#475569">Drop the <b>SSCC label PDFs</b> here, or click to choose (multiple)<div class="mut" id="edi-pdf-n" style="font-size:11px;margin-top:4px">no files chosen</div></div><input type="file" id="edi-pdfs" accept="application/pdf,.pdf" multiple style="display:none">')
       +box(3,'Parse &amp; match','<button class="save-btn" id="edi-parse" style="background:#2563eb;color:#fff;border-color:#1d4ed8;padding:6px 16px;font-weight:700">Parse &amp; match ▶</button><span id="edi-status" class="mut" style="font-size:12px;margin-left:10px"></span>')
       +box(4,'Crossdock / Preorder ref per PO','<div id="edi-s4">'+wait+'</div>')
       +box(5,'Supplier choice','<div id="edi-s5">'+wait+'</div>')
@@ -7967,17 +7967,20 @@
     // load crossdock / preorder ref datalist (for step 4 search) — same source as the Client/FBA crossdock picker
     try{ if(typeof fetchLookups==='function') fetchLookups(function(){ var dl=document.getElementById('edi-datalists'); if(dl&&typeof lookupDatalists==='function')dl.innerHTML=lookupDatalists(); }); }catch(e){}
     var csvIn=c.querySelector('#edi-csv'), pdfIn=c.querySelector('#edi-pdfs');
-    csvIn.onchange=function(){ S.csv=csvIn.files[0]||null; c.querySelector('#edi-csv-n').textContent=S.csv?S.csv.name:'wc-asn.csv'; };
-    pdfIn.onchange=function(){ S.pdfs=Array.prototype.slice.call(pdfIn.files||[]); c.querySelector('#edi-pdf-n').textContent=S.pdfs.length?(S.pdfs.length+' PDF'+(S.pdfs.length>1?'s':'')+' selected'):'choose or drag multiple PDFs'; };
+    csvIn.onchange=function(){ S.csv=csvIn.files[0]||null; c.querySelector('#edi-csv-n').textContent=S.csv?S.csv.name:'no file chosen'; };
+    pdfIn.onchange=function(){ S.pdfs=Array.prototype.slice.call(pdfIn.files||[]); c.querySelector('#edi-pdf-n').textContent=S.pdfs.length?(S.pdfs.length+' PDF'+(S.pdfs.length>1?'s':'')+' selected'):'no files chosen'; };
     function routeFiles(files){ var arr=Array.prototype.slice.call(files||[]);
       var csv=arr.filter(function(f){return /\.csv$/i.test(f.name);}), pdf=arr.filter(function(f){return /\.pdf$/i.test(f.name);});
       if(csv.length){ S.csv=csv[0]; c.querySelector('#edi-csv-n').textContent=S.csv.name; }
       if(pdf.length){ S.pdfs=pdf; c.querySelector('#edi-pdf-n').textContent=pdf.length+' PDF'+(pdf.length>1?'s':'')+' selected'; }
       var st=c.querySelector('#edi-status'); if(st&&(csv.length||pdf.length))st.textContent=''; }
-    // whole-page drag & drop
-    ['dragover','dragenter'].forEach(function(ev){ c.addEventListener(ev,function(e){ e.preventDefault(); c.style.outline='2px dashed #93c5fd'; c.style.outlineOffset='-6px'; }); });
-    ['dragleave','drop'].forEach(function(ev){ c.addEventListener(ev,function(e){ if(ev==='dragleave'&&e.relatedTarget&&c.contains(e.relatedTarget))return; c.style.outline=''; }); });
-    c.addEventListener('drop',function(e){ e.preventDefault(); c.style.outline=''; routeFiles(e.dataTransfer&&e.dataTransfer.files); });
+    // per-step drop zones (click to choose, or drop onto the box) — same pattern as other upload sections
+    function wireDrop(dzId,inputId){ var dz=c.querySelector('#'+dzId), inp=c.querySelector('#'+inputId); if(!dz||!inp)return;
+      dz.onclick=function(){ inp.click(); };
+      dz.ondragover=function(e){ e.preventDefault(); dz.style.borderColor='#60a5fa'; dz.style.background='#eff6ff'; };
+      dz.ondragleave=function(){ dz.style.borderColor='#cbd5e1'; dz.style.background='#fff'; };
+      dz.ondrop=function(e){ e.preventDefault(); dz.style.borderColor='#cbd5e1'; dz.style.background='#fff'; routeFiles(e.dataTransfer&&e.dataTransfer.files); }; }
+    wireDrop('edi-csv-dz','edi-csv'); wireDrop('edi-pdf-dz','edi-pdfs');
     c.querySelector('#edi-parse').onclick=function(){ var st=c.querySelector('#edi-status');
       if(!S.csv){ st.textContent='Choose the ASN CSV first (step 1).'; return; }
       if(!S.pdfs.length){ st.textContent='Choose at least one PDF (step 2).'; return; }
