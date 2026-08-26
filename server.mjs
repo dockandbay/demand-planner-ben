@@ -787,6 +787,7 @@ function requiredCap(method, p) {
   if (method === 'POST' && p === '/api/data-cache/invalidate') return null;   // n8n post-ETL data-cache rebuild trigger (webhook-secret gated in the handler)
   if (method === 'POST' && p === '/api/supply/inventory-status/export.xlsx') return null;   // read-only XLSX export (no DB write) — allowed with read-only permission
   if (method === 'POST' && (p === '/api/supply/edi-labels/parse' || p === '/api/supply/edi-labels/generate')) return null;   // EDI label splitter — read-only (products read + PDF split), no DB write
+  if (p.startsWith('/api/supply/edi-projects')) return null;   // EDI project save/load/remove — self-contained tool tables (mig 244), allowed with read-only permission (like quality-doc)
   if (p.startsWith('/api/supply/')) return 'supply';          // everything else under supply = SUPPLY feature
   return null;   // unknown non-supply write → fail-open (don't block routes we haven't classified)
 }
@@ -2766,6 +2767,68 @@ app.post('/api/supply/edi-labels/generate', async (req, res) => {
     const out = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
     res.set('Content-Type', 'application/zip').set('Content-Disposition', 'attachment; filename="edi-labels.zip"').set('Cache-Control', 'no-store').send(out);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+
+// ── EDI projects — persist a named upload (ASN CSV + label PDFs as bytea) so users can return to it (mig 244) ──
+app.get('/api/supply/edi-projects', async (_req, res) => {
+  try {
+    const r = await pool.query(`SELECT p.id, p.name, p.created_by, to_char(p.created_at,'YYYY-MM-DD HH24:MI') created_at,
+        to_char(p.updated_at,'YYYY-MM-DD HH24:MI') updated_at, count(f.id)::int files, coalesce(sum(f.byte_size),0)::bigint bytes
+      FROM planner.edi_projects p LEFT JOIN planner.edi_project_files f ON f.project_id=p.id
+      GROUP BY p.id ORDER BY p.updated_at DESC`);
+    res.set('Cache-Control', 'no-store').json({ ok: true, projects: r.rows });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/edi-projects', async (req, res) => {
+  try { const name = String((req.body && req.body.name) || '').trim(); if (!name) return res.status(400).json({ error: 'name required' });
+    const r = await pool.query(`INSERT INTO planner.edi_projects (name, created_by) VALUES ($1,$2) RETURNING id, name`, [name, authUser(req) || null]);
+    res.json({ ok: true, id: r.rows[0].id, name: r.rows[0].name });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/edi-projects/:id', async (req, res) => {
+  try {
+    const p = (await pool.query(`SELECT id, name, created_by, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at FROM planner.edi_projects WHERE id=$1`, [req.params.id])).rows[0];
+    if (!p) return res.status(404).json({ error: 'not found' });
+    const files = (await pool.query(`SELECT id, kind, filename, byte_size, uploaded_by, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at
+      FROM planner.edi_project_files WHERE project_id=$1 ORDER BY uploaded_at, id`, [req.params.id])).rows;
+    res.set('Cache-Control', 'no-store').json({ ok: true, project: p, files });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/edi-projects/:id/files', async (req, res) => {
+  try {
+    const files = Array.isArray(req.body && req.body.files) ? req.body.files : [];
+    if (!files.length) return res.status(400).json({ error: 'no files' });
+    const ex = (await pool.query(`SELECT 1 FROM planner.edi_projects WHERE id=$1`, [req.params.id])).rowCount;
+    if (!ex) return res.status(404).json({ error: 'project not found' });
+    const by = authUser(req) || null; const out = [];
+    for (const f of files) {
+      const buf = Buffer.from(String(f.b64 || '').replace(/^data:[^;]+;base64,/, ''), 'base64'); if (!buf.length) continue;
+      const kind = (String(f.kind || '').toLowerCase() === 'csv') ? 'csv' : 'pdf';
+      const r = await pool.query(`INSERT INTO planner.edi_project_files (project_id, kind, filename, mime, byte_size, data, uploaded_by)
+        VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, kind, filename, byte_size, uploaded_by, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at`,
+        [req.params.id, kind, f.filename || (kind + '-file'), kind === 'csv' ? 'text/csv' : 'application/pdf', buf.length, buf, by]);
+      out.push(r.rows[0]);
+    }
+    await pool.query(`UPDATE planner.edi_projects SET updated_at=now() WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true, files: out });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/edi-projects/:id/files/:fid', async (req, res) => {
+  try {
+    const r = (await pool.query(`SELECT kind, filename, encode(data,'base64') b64 FROM planner.edi_project_files WHERE id=$1 AND project_id=$2`, [req.params.fid, req.params.id])).rows[0];
+    if (!r) return res.status(404).json({ error: 'not found' });
+    res.set('Cache-Control', 'no-store').json({ ok: true, kind: r.kind, filename: r.filename, b64: r.b64 });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/supply/edi-projects/:id/files/:fid', async (req, res) => {
+  try { const r = await pool.query(`DELETE FROM planner.edi_project_files WHERE id=$1 AND project_id=$2`, [req.params.fid, req.params.id]);
+    await pool.query(`UPDATE planner.edi_projects SET updated_at=now() WHERE id=$1`, [req.params.id]);
+    res.json({ ok: true, deleted: r.rowCount });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/supply/edi-projects/:id', async (req, res) => {
+  try { const r = await pool.query(`DELETE FROM planner.edi_projects WHERE id=$1`, [req.params.id]); res.json({ ok: true, deleted: r.rowCount }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Admin upsert of a price entry + its tiers (id present = update, else insert). Always active/admin-sourced.
 app.post('/api/supply/price-list', async (req, res) => {

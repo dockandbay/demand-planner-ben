@@ -7949,13 +7949,21 @@
   // ── EDI LABELS (Dillards via EZY COM) — hidden page reached from the Direct-to-Client button. Upload wc-asn.csv +
   // SSCC label PDFs → server splits each label page (matched by SSCC → PO + our SKU via EAN) into Supplier/PO/SKU. ──
   function renderEdiLabels(c){ if(!c)return;
-    var S={ csv:null, pdfs:[], job:null };
+    var S={ csv:null, pdfs:[], job:null, projectId:null, projectName:'', savedFiles:[] };
     function fileToB64(file){ return new Promise(function(res,rej){ var r=new FileReader(); r.onload=function(){ var s=String(r.result||''); var i=s.indexOf(','); res(i>=0?s.slice(i+1):s); }; r.onerror=rej; r.readAsDataURL(file); }); }
     function box(n,title,inner,id){ return '<div'+(id?' id="'+id+'"':'')+' style="border:1px solid #dbe3ee;border-radius:8px;padding:10px 12px;background:#f8fbff;margin-bottom:12px"><div style="font-weight:800;color:#1e3a8a;margin-bottom:8px;display:flex;align-items:center;gap:8px"><span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#1e3a8a;color:#fff;font-size:13px;font-weight:800;flex-shrink:0">'+n+'</span><span style="font-size:12px;letter-spacing:.03em;text-transform:uppercase">'+title+'</span></div>'+inner+'</div>'; }
     var wait='<div class="mut" style="font-size:12px">Run <b>Parse &amp; match</b> (step 3) first.</div>';
     c.innerHTML='<div style="max-width:820px"><span id="edi-datalists"></span>'
       +'<div style="font-weight:800;font-size:16px;margin:4px 0 2px">EDI Labels — Dillards via EZY COM</div>'
       +'<div class="mut" style="font-size:12px;margin-bottom:14px">Split the SSCC label PDFs into <b>Supplier / PO / SKU</b> folders. Drop files into each step below (or click to choose). Output = a ZIP with a <b>manifest</b> and a <b>per-supplier packing list</b>.</div>'
+      +'<div style="border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;background:#fffef5;margin-bottom:12px"><div style="font-weight:800;color:#92400e;margin-bottom:8px;font-size:12px;letter-spacing:.03em;text-transform:uppercase">📁 Project</div>'
+        +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+          +'<select id="edi-proj" class="flt" style="min-width:240px;font-size:12px"><option value="">— New project —</option></select>'
+          +'<input id="edi-proj-name" placeholder="project name" style="border:1px solid #cbd5e1;border-radius:4px;padding:3px 8px;font-size:12px;width:190px">'
+          +'<button class="save-btn" id="edi-save" style="background:#0f172a;color:#fff;border-color:#0f172a;font-size:12px;font-weight:700">💾 Save project</button>'
+          +'<button class="save-btn light" id="edi-del" style="font-size:12px;display:none;color:#dc2626">🗑 Delete project</button>'
+          +'<span id="edi-proj-status" class="mut" style="font-size:11px"></span>'
+        +'</div><div id="edi-files" style="margin-top:8px"></div></div>'
       +box(1,'ASN CSV','<div id="edi-csv-dz" style="border:1.5px dashed #cbd5e1;border-radius:6px;padding:14px;background:#fff;cursor:pointer;text-align:center;font-size:12px;color:#475569">Drop the <b>wc-asn.csv</b> here, or click to choose<div class="mut" id="edi-csv-n" style="font-size:11px;margin-top:4px">no file chosen</div></div><input type="file" id="edi-csv" accept=".csv" style="display:none">')
       +box(2,'SSCC label PDFs','<div id="edi-pdf-dz" style="border:1.5px dashed #cbd5e1;border-radius:6px;padding:14px;background:#fff;cursor:pointer;text-align:center;font-size:12px;color:#475569">Drop the <b>SSCC label PDFs</b> here, or click to choose (multiple)<div class="mut" id="edi-pdf-n" style="font-size:11px;margin-top:4px">no files chosen</div></div><input type="file" id="edi-pdfs" accept="application/pdf,.pdf" multiple style="display:none">')
       +box(3,'Parse &amp; match','<button class="save-btn" id="edi-parse" style="background:#2563eb;color:#fff;border-color:#1d4ed8;padding:6px 16px;font-weight:700">Parse &amp; match ▶</button><span id="edi-status" class="mut" style="font-size:12px;margin-left:10px"></span>')
@@ -7981,16 +7989,51 @@
       dz.ondragleave=function(){ dz.style.borderColor='#cbd5e1'; dz.style.background='#fff'; };
       dz.ondrop=function(e){ e.preventDefault(); dz.style.borderColor='#cbd5e1'; dz.style.background='#fff'; routeFiles(e.dataTransfer&&e.dataTransfer.files); }; }
     wireDrop('edi-csv-dz','edi-csv'); wireDrop('edi-pdf-dz','edi-pdfs');
-    c.querySelector('#edi-parse').onclick=function(){ var st=c.querySelector('#edi-status');
-      if(!S.csv){ st.textContent='Choose the ASN CSV first (step 1).'; return; }
-      if(!S.pdfs.length){ st.textContent='Choose at least one PDF (step 2).'; return; }
-      st.textContent='Reading files…';
-      Promise.all([fileToB64(S.csv)].concat(S.pdfs.map(function(f){ return fileToB64(f).then(function(b){return {name:f.name,b64:b};}); }))).then(function(arr){
-        st.textContent='Parsing '+(arr.length-1)+' PDF(s)…';
-        return fetch('/api/supply/edi-labels/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csv_base64:arr[0],pdfs:arr.slice(1)})});
-      }).then(function(r){ return r.json().then(function(j){ if(!r.ok)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
-        .then(function(j){ S.job=j; renderPrev(j); })
-        .catch(function(e){ st.textContent='Failed: '+(e.message||e); }); };
+    // ── Projects: persist the uploaded files so the user can return to them ──
+    function loadProjectList(){ fetch('/api/supply/edi-projects').then(function(r){return r.json();}).then(function(j){ var sel=c.querySelector('#edi-proj'); if(!sel)return; var cur=S.projectId||'';
+      sel.innerHTML='<option value="">— New project —</option>'+((j&&j.projects)||[]).map(function(p){ return '<option value="'+p.id+'"'+(String(p.id)===String(cur)?' selected':'')+'>'+esc(p.name)+' ('+p.files+' file'+(p.files!==1?'s':'')+' · '+esc(p.updated_at)+')</option>'; }).join(''); }).catch(function(){}); }
+    function renderSavedFiles(){ var el=c.querySelector('#edi-files'); if(!el)return; var files=S.savedFiles||[];
+      if(!S.projectId){ el.innerHTML=''; return; }
+      if(!files.length){ el.innerHTML='<div class="mut" style="font-size:11px">No files saved yet — add the CSV/PDFs in steps 1–2 and click <b>Save project</b>.</div>'; return; }
+      el.innerHTML='<div style="font-weight:700;font-size:11px;margin-bottom:4px">Saved files ('+files.length+') <a id="edi-clear" style="cursor:pointer;color:#dc2626;font-weight:400;margin-left:8px">Clear all</a></div>'
+        +'<div style="display:flex;flex-direction:column;gap:3px">'+files.map(function(f){ return '<div style="display:flex;align-items:center;gap:8px;font-size:11px;border:1px solid #eef2f7;border-radius:4px;padding:3px 8px;background:#fff"><span style="font-weight:700;min-width:34px;color:'+(f.kind==='csv'?'#0369a1':'#7c3aed')+'">'+esc(String(f.kind).toUpperCase())+'</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(f.filename)+'">'+esc(f.filename)+'</span><span class="mut" style="white-space:nowrap">'+esc(f.uploaded_at||'')+' · '+esc(String(f.uploaded_by||'').replace(/@dockandbay\.com$/i,'@'))+'</span><span class="edi-frm" data-id="'+f.id+'" title="Remove" style="cursor:pointer;color:#dc2626;font-weight:700">✕</span></div>'; }).join('')+'</div>';
+      el.querySelectorAll('.edi-frm').forEach(function(x){ x.onclick=function(){ removeFile(x.dataset.id); }; });
+      var ca=el.querySelector('#edi-clear'); if(ca)ca.onclick=clearAllFiles; }
+    function loadProject(pid){ if(!pid){ S.projectId=null; S.savedFiles=[]; c.querySelector('#edi-del').style.display='none'; renderSavedFiles(); return; }
+      fetch('/api/supply/edi-projects/'+encodeURIComponent(pid)).then(function(r){return r.json();}).then(function(j){ if(!j||!j.project)return; S.projectId=j.project.id; S.projectName=j.project.name; S.savedFiles=j.files||[]; var ni=c.querySelector('#edi-proj-name'); if(ni)ni.value=j.project.name; c.querySelector('#edi-del').style.display=''; renderSavedFiles(); }).catch(function(){}); }
+    function removeFile(fid){ if(!S.projectId)return; fetch('/api/supply/edi-projects/'+S.projectId+'/files/'+fid,{method:'DELETE'}).then(function(r){return r.json();}).then(function(){ loadProject(S.projectId); loadProjectList(); }); }
+    function clearAllFiles(){ if(!S.projectId||!(S.savedFiles||[]).length)return; if(!confirm('Remove all '+S.savedFiles.length+' saved file(s) from this project?'))return;
+      Promise.all(S.savedFiles.map(function(f){ return fetch('/api/supply/edi-projects/'+S.projectId+'/files/'+f.id,{method:'DELETE'}); })).then(function(){ loadProject(S.projectId); loadProjectList(); }); }
+    function saveProject(){ var status=c.querySelector('#edi-proj-status');
+      var staged=[]; if(S.csv)staged.push({file:S.csv,kind:'csv'}); S.pdfs.forEach(function(f){ staged.push({file:f,kind:'pdf'}); });
+      if(!staged.length){ status.textContent=S.projectId?'Add new files (steps 1–2) to save.':'Add files first (steps 1–2).'; return; }
+      status.textContent='Saving…';
+      function doUpload(pid){ Promise.all(staged.map(function(s){ return fileToB64(s.file).then(function(b){return {kind:s.kind,filename:s.file.name,b64:b};}); })).then(function(fs){
+          return fetch('/api/supply/edi-projects/'+pid+'/files',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:fs})}); }).then(function(r){return r.json();})
+          .then(function(){ S.projectId=pid; S.csv=null; S.pdfs=[]; c.querySelector('#edi-csv-n').textContent='no file chosen'; c.querySelector('#edi-pdf-n').textContent='no files chosen'; status.textContent='Saved ✓'; loadProject(pid); loadProjectList(); })
+          .catch(function(e){ status.textContent='Failed: '+(e.message||e); }); }
+      if(S.projectId){ doUpload(S.projectId); }
+      else { var nm=(c.querySelector('#edi-proj-name').value||'').trim(); if(!nm){ status.textContent='Enter a project name.'; return; }
+        fetch('/api/supply/edi-projects',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:nm})}).then(function(r){return r.json();}).then(function(j){ if(!j.id)throw new Error(j.error||'save failed'); doUpload(j.id); }).catch(function(e){ status.textContent='Failed: '+(e.message||e); }); } }
+    // collect files for parse: staged (in memory) + any saved project files (fetched on demand)
+    function collectFiles(){ var out={csv:null,pdfs:[]}; var chain=Promise.resolve();
+      if(S.csv)chain=chain.then(function(){ return fileToB64(S.csv).then(function(b){ out.csv={name:S.csv.name,b64:b}; }); });
+      S.pdfs.forEach(function(f){ chain=chain.then(function(){ return fileToB64(f).then(function(b){ out.pdfs.push({name:f.name,b64:b}); }); }); });
+      (S.savedFiles||[]).forEach(function(sf){ chain=chain.then(function(){ return fetch('/api/supply/edi-projects/'+S.projectId+'/files/'+sf.id).then(function(r){return r.json();}).then(function(r){ if(r&&r.b64){ if(sf.kind==='csv'){ if(!out.csv)out.csv={name:sf.filename,b64:r.b64}; } else out.pdfs.push({name:sf.filename,b64:r.b64}); } }); }); });
+      return chain.then(function(){ return out; }); }
+    c.querySelector('#edi-proj').onchange=function(){ var v=this.value; if(v){ loadProject(v); } else { S.projectId=null; S.savedFiles=[]; S.projectName=''; c.querySelector('#edi-proj-name').value=''; c.querySelector('#edi-del').style.display='none'; renderSavedFiles(); } c.querySelector('#edi-proj-status').textContent=''; };
+    c.querySelector('#edi-save').onclick=saveProject;
+    c.querySelector('#edi-del').onclick=function(){ if(!S.projectId)return; if(!confirm('Delete project "'+(S.projectName||'')+'" and all its saved files?'))return; fetch('/api/supply/edi-projects/'+S.projectId,{method:'DELETE'}).then(function(r){return r.json();}).then(function(){ S.projectId=null; S.savedFiles=[]; S.projectName=''; c.querySelector('#edi-proj-name').value=''; c.querySelector('#edi-del').style.display='none'; renderSavedFiles(); loadProjectList(); c.querySelector('#edi-proj-status').textContent='Deleted.'; }); };
+    loadProjectList();
+    c.querySelector('#edi-parse').onclick=function(){ var st=c.querySelector('#edi-status'); st.textContent='Reading files…';
+      collectFiles().then(function(cf){
+        if(!cf.csv){ st.textContent='No ASN CSV — add it in step 1 (or load a project).'; return Promise.reject(new Error('__done')); }
+        if(!cf.pdfs.length){ st.textContent='No PDFs — add them in step 2 (or load a project).'; return Promise.reject(new Error('__done')); }
+        st.textContent='Parsing '+cf.pdfs.length+' PDF(s)…';
+        return fetch('/api/supply/edi-labels/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csv_base64:cf.csv.b64,pdfs:cf.pdfs})});
+      }).then(function(r){ if(!r)return null; return r.json().then(function(j){ if(!r.ok)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
+        .then(function(j){ if(j){ S.job=j; renderPrev(j); } })
+        .catch(function(e){ if(e&&e.message==='__done')return; st.textContent='Failed: '+(e.message||e); }); };
     function renderPrev(j){ var pos=Object.keys(j.byPo||{}).sort(); var multi=j.multiSuppliers||[];
       c.querySelector('#edi-status').innerHTML='<b style="color:#166534">'+j.matched+'</b> of '+j.total+' labels matched · '+pos.length+' PO'+(pos.length!==1?'s':'')+(j.unmatched&&j.unmatched.length?(' · <b style="color:#b45309">'+j.unmatched.length+' unmatched</b>'):'');
       // step 4 — vertical list, each ref a searchable crossdock/preorder picker (datalist)

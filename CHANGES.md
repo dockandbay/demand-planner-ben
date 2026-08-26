@@ -1,3 +1,8 @@
+## v27.292 EDI Labels: save uploads as a persistent project (mig 244)
+- New **📁 Project** box on the EDI page: **Save project** (name it) persists the uploaded ASN CSV + label PDFs to the database (bytea) so you can **come back to them later**; a dropdown lists saved projects to reload.
+- Each saved file shows **upload date/time + who uploaded** and an **✕ to remove**; a **Clear all** link removes every file in the project; **🗑 Delete project** removes the whole thing.
+- Parse now works from staged uploads **or** a loaded project's saved files (fetched on demand). New tables `planner.edi_projects` / `edi_project_files` (**migration 244**); endpoints under `/api/supply/edi-projects` (read-only-permission, like quality-doc).
+
 ## v27.291 EDI Labels: per-supplier packing list + per-step drop zones
 - The ZIP now includes a **per-supplier packing-list CSV** (`<Supplier>/packing-list-<Supplier>.csv`) with columns **Supplier · Purchase Order · Preorder Ref · SKU · Quantity · SSCC Label** (one row per label; qty from ASN col 111).
 - **Drag & drop is now scoped to each step's box** (step 1 CSV, step 2 PDFs) as clickable dashed drop zones with hover highlight — same pattern as the other upload sections (reverted the whole-page drop, which was inconsistent).
