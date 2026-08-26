@@ -11938,8 +11938,11 @@ async function computeAutoForecastFromFeed(feed, markets, includeGap=true){
     if(!(arrive>0))return;
     const lm=(leadM[mk]||{})[s]||2;
     let om=afAddMonths(m,-lm);
-    if(om<orderFloor){ if(om<winMin)overdueUnits+=arrive; om=orderFloor; }   // fold overdue + roll current month (past the 20th) into "order now"
-    const mm=(m<om)?om:m;   // arrival can't precede the (rolled) order month
+    // FORWARD-ONLY (Ben): a placement month already in the PAST can't be ordered now — it belongs to the real PO grid /
+    // actual cash flow, not this projection. Skip it (surface as overdue) so near-term months carry no phantom forecast cash.
+    if(om<winMin){ overdueUnits+=arrive; return; }
+    if(om<orderFloor)om=orderFloor;                 // current month but past the 20th → roll to next month (still forward)
+    const mm=afAddMonths(om,lm);   // arrival = placement + lead (on-time orders keep m; rolled orders push out — no phantom near-term legs)
     const nm=supName[s]||'—', c=unitCost[s]||0;
     const t=terms[nm]||{start_deposit_pct:30,completion_pct:0,balance_pct:70,production_days:60,credit_days:0};
     const u=unitsBy[nm]||(unitsBy[nm]={t:0}); u[om]=(u[om]||0)+arrive; u.t+=arrive;
@@ -11999,7 +12002,7 @@ async function computeAutoForecastFromFeed(feed, markets, includeGap=true){
 }
 app.get('/api/scenario/auto-forecast', async (req, res) => {
   const markets = (req.query.market||'all').toLowerCase()==='all' ? ['uk','us','eu','au'] : [(req.query.market||'uk').toLowerCase()];
-  try { res.json(await computeAutoForecast(markets)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.set('Cache-Control', 'no-store').json(await computeAutoForecast(markets)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Option B: client posts the buy plan's per-subcat×market×arrival-month buys; server phases into cash.
 app.post('/api/scenario/auto-forecast', async (req, res) => {
@@ -12007,7 +12010,7 @@ app.post('/api/scenario/auto-forecast', async (req, res) => {
   const markets = (b.market||'all').toLowerCase()==='all' ? ['uk','us','eu','au'] : [(b.market||'uk').toLowerCase()];
   const feed = Array.isArray(b.buyFeed) ? b.buyFeed : [];
   const includeGap = b.includeGap!==false;   // default on
-  try { res.json(await computeAutoForecastFromFeed(feed, markets, includeGap)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.set('Cache-Control', 'no-store').json(await computeAutoForecastFromFeed(feed, markets, includeGap)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Auto Forecast EMAIL — sends the payments plan + transactions CSV to the recipients configured in
 // CONFIG ▸ General settings (app_settings.af_email_recipients, comma-separated). Gated on RESEND_API_KEY (sandbox stubs).
