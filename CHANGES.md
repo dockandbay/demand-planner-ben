@@ -1,3 +1,6 @@
+## v27.297 Package for Diviyaj — pin jszip/pdfjs-dist as direct deps + consolidated deploy note
+- Declared **`jszip`** and **`pdfjs-dist`** as explicit dependencies (they were used directly but only present transitively) so a clean `npm install` is deterministic. Consolidated `deploy notes/DEPLOY_2026-08-26.md` (LIVE v27.275 → v27.296/7; migration 244 only; deps pdf-lib/jszip/pdfjs-dist).
+
 ## v27.296 Buy plan: surface the forecast model (Cover weeks vs SSM) per market
 - **SKU popup:** a new **"Forecast model"** card (after Supplier) shows whether this market's 3PL/FBA pool is on **Cover weeks** (default) or **SSM** — "Mixed" if the two pools differ.
 - **Buy plan Settings (⚙):** a **Forecast model** row summarises which markets×pools are on SSM (rest on Cover weeks) with a **⚙ change in Buy plan logic →** link to `#/demand/config/buyplan` where it's toggled.
