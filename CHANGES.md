@@ -1,3 +1,6 @@
+## v27.286 Buy plan popup: demand-row colours
+- DTC / B2B / FBA (and TikTok) demand rows → **#FDFBD4**; **Total Demand** row → **#FFFFC5**.
+
 ## v27.285 Buy plan popup: highlight "Total Demand" row
 - The **Total Demand** line in the SKU buy-plan popup now has a **#FFCE1B** (gold) background across the whole row.
 
