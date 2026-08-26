@@ -669,7 +669,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
 #buy-wrap .tip-wrap{position:relative;display:inline-block;width:100%;cursor:default}
 #buy-wrap .tip-wrap.inb-tip{cursor:pointer}
 #buy-wrap .tip-wrap.inb-tip > span{border-bottom:1px dotted currentColor}
-#buy-wrap .tip-wrap .tip-box{display:none;position:absolute;bottom:calc(100% + 4px);left:50%;transform:translateX(-50%);background:#1a1a1a;color:#f0f0f0;font-size:10px;padding:5px 8px;border-radius:4px;white-space:nowrap;z-index:999;pointer-events:none;line-height:1.6;text-align:left;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+#buy-wrap .tip-wrap .tip-box{display:none;position:absolute;bottom:calc(100% + 4px);left:50%;transform:translateX(-50%);background:#1a1a1a;color:#f0f0f0;font-size:10px;padding:5px 8px;border-radius:4px;white-space:normal;max-width:320px;width:max-content;word-break:break-word;z-index:999;pointer-events:none;line-height:1.6;text-align:left;box-shadow:0 2px 8px rgba(0,0,0,.25)}
 #buy-wrap .tip-wrap:hover .tip-box{display:block}
 #buy-wrap .tip-wrap.pinned .tip-box{display:block;background:#0a0a0a;border:1px solid #3b82f6;pointer-events:auto}
 #buy-wrap .status-bar{font-size:11px;color:#888}
@@ -3253,7 +3253,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
   // buyOverdue[pi]= true if placement is already overdue
   // buyFromLbl[i] = "from Jun 26 order" label for inbound tooltip at ARRIVAL month i
   const assumedArr={},tA1={},transferOut={};
-  const buyDisplay={},buyUrgent={},buyUrgentSea={},buyUrgentAir={},buyUrgentLead={},buyUrgentMonth={},buyUrgentArr={},buyOverdue={},buyFromLbl={},buyUrgentProd={},buyUrgentFreight={},buyUrgentMode={};
+  const buyDisplay={},buyUrgent={},buyUrgentSea={},buyUrgentAir={},buyUrgentLead={},buyUrgentMonth={},buyUrgentArr={},buyOverdue={},buyFromLbl={},buyUrgentProd={},buyUrgentFreight={},buyUrgentMode={},buyCalc={};
   const MAY_OFFSET=2; // legacy alias, retained for backward-compat; semantically the
                       // offset past PROJ[0]=Actuals + PROJ[1]=Remaining to the first
                       // future month, NOT a May-specific value
@@ -3266,7 +3266,7 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     var pd=(pj.key===ck)?td:new Date(pj.y,pj.m,1);
     var ar=new Date(pd.getTime()); ar.setDate(ar.getDate()+Math.round(l3*7));
     var _f=function(d){return ('0'+d.getDate()).slice(-2)+'-'+MN[d.getMonth()]+'-'+String(d.getFullYear()).slice(2);};
-    return 'place order '+_f(pd)+', arrives '+_f(ar); }
+    return 'place order '+_f(pd)+', arrives '+_f(ar)+(buyCalc[i]?('<br>———<br>'+buyCalc[i]):''); }
 
   // Buy FBA is NOT an independent buy. It is the FBA top-up portion of the 3PL buy made VISIBLE — the future
   // FBA cover that existing 3PL on-hand + inbound can't transfer-cover (nextFbaNeed), which the 3PL buy already
@@ -3332,6 +3332,12 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
       for(let j=0;j<PROJ.length;j++){ const p=PROJ[j]; if(_md(j)>covEnd)break; have+=(ib3[p.key]||[]).reduce((s,x)=>s+(x.qty||0),0); }
       let blockQty=(covQty+ssU)-have; if(blockQty<=0)return;
       blockQty=Math.ceil(blockQty/cp)*cp;   // whole cartons
+      // breakdown for the Buy-cell tooltip (how this up-front block was sized)
+      buyCalc[ws]='Complex rule: '+String(m.r.name||'range rule').replace(/"/g,'')+' — buy the whole season up-front.<br>'
+        +'Cover to '+MN[covEnd.getMonth()]+' '+String(covEnd.getFullYear()).slice(2)+' (season end): '+covQty.toLocaleString()+' units (DTC+B2B+FBA)<br>'
+        +(ssU>0?('+ SSM safety: '+ssU.toLocaleString()+'<br>'):'')
+        +'− on hand + inbound by then: '+have.toLocaleString()+'<br>'
+        +'= '+Math.max(covQty+ssU-have,0).toLocaleString()+' → '+blockQty.toLocaleString()+' (rounded up to '+cp+'/carton)';
       const arr=Math.min(ws+lm,PROJ.length-1);   // inbound lands placement + full 3PL lead
       buyDisplay[ws]=(buyDisplay[ws]||0)+blockQty;
       assumedArr[arr]=(assumedArr[arr]||0)+blockQty;

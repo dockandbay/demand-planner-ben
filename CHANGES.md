@@ -1,3 +1,7 @@
+## v27.295 Buy plan: show block-buy calculation on the Buy cell + fix cut-off inbound tooltip
+- Hovering a **Buy 3PL cell** that came from a windowed complex-rule block now shows the full **how-it-was-calculated** breakdown: the rule name, coverage-to-season-end demand (DTC+B2B+FBA), SSM safety, minus on-hand+inbound, minus carton rounding = the buy. e.g. `2,965 (cover to Sep 27) − 311 inbound → 2,700 (100/carton)`.
+- Fixed the **cut-off inbound-row tooltip** in the SKU popup (`.tip-box` was `white-space:nowrap`; now wraps to a 320px box) so long "Buy Plan Assumed · … up-front, SSM-sized (SS27 7 months)" lines are fully visible.
+
 ## v27.294 Buy plan block buy: correct to DTC+B2B+FBA (avoid TIK/ZAL double-count)
 - Correction to v27.293: the block-buy `covQty` sums **DTC + B2B + FBA** only. **TikTok is already folded into DTC** upstream, and **Zalando has its own net-of-stock cover mechanism** (`zalNet`) — so summing `dem.TIK`/`dem.ZAL` here would double-count. `BAGF-DES-MD-TOTE` US result unchanged (Sep 1,700 + Mar 100 = 1,800); the change matters for EU Zalando SS27 SKUs.
 
