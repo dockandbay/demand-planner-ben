@@ -14125,7 +14125,7 @@ function renderAutoForecastReport(body){
     var prow=function(lbl,arr,bold,div){ div=div||1; var t=arr.reduce(function(a,b){return a+b;},0);
       return '<tr'+(bold?' style="border-top:2px solid #999;font-weight:700;background:#fafafa"':'')+'>'
         +'<td style="padding:3px 6px'+(bold?'':';color:#444')+'">'+lbl+'</td>'
-        +arr.map(function(v){return '<td style="text-align:right;padding:3px 6px;color:'+(v?'#111':'#ddd')+'">'+afN(v/div)+'</td>';}).join('')
+        +arr.map(function(v,i){return '<td'+(v?' class="af-pcell" data-aft="'+lbl+'" data-afm="'+i+'" title="click to see the orders behind this"':'')+' style="text-align:right;padding:3px 6px;color:'+(v?'#111':'#ddd')+(v?';cursor:pointer;text-decoration:underline dotted #cbd5e1;text-underline-offset:2px':'')+'">'+afN(v/div)+'</td>';}).join('')
         +'<td style="text-align:right;padding:3px 6px;font-weight:700;border-left:2px solid #ccc">'+afN(t/div)+'</td></tr>'; };
     var payTbl=function(cur,div){ return '<div style="font-weight:700;font-size:13px;margin:18px 0 4px">Payments plan — cash out by month ('+cur+')</div>'
       +'<div style="overflow-x:auto"><table class="tw" style="font-size:11px;min-width:900px"><thead><tr><th style="text-align:left;padding:4px 6px">Payment</th>'
@@ -14172,6 +14172,20 @@ function renderAutoForecastReport(body){
         : ' <span style="color:#b45309">'+fn(a.overdue_units)+' units have an order date already in the past (overdue) — their cash still shows below, but they’re omitted from the units grid above.</span>')
        :'')+'</div>';
     content.innerHTML=u+pay+note;
+    // Click a payments-plan cell → the individual order legs (transactions) that make up that month × payment type.
+    var afTypeMap={'Starting deposits':'Starting deposit','Completion deposits':'Completion deposit','Balance payments':'Balance payment','Freight (containers)':'Freight (containers)','Import duty':'Import duty'};
+    var afDrill=function(lbl,mi){ var mk=mo[mi]; if(!mk)return; var want=afTypeMap[lbl], showType=!want;
+      var eh=function(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});};
+      var rows=(d.transactions||[]).filter(function(t){ return t.month===mk && (!want||t.type===want); }).sort(function(a,b){return b.amount_usd-a.amount_usd;});
+      var totG=rows.reduce(function(a,t){return a+(t.amount_usd||0)/AF_GBP;},0);
+      var ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:300050;display:flex;align-items:center;justify-content:center;padding:20px';
+      ov.innerHTML='<div style="background:#fff;border-radius:10px;max-width:720px;width:100%;max-height:80vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 40px rgba(0,0,0,.3)">'
+        +'<div style="padding:12px 16px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:10px"><b style="font-size:14px">'+eh(lbl)+' — '+eh(afMonthLabel(mk))+'</b><span class="mut" style="font-size:12px">'+rows.length+' order leg'+(rows.length!==1?'s':'')+' · £'+afN(totG)+'</span><span style="margin-left:auto;cursor:pointer;font-size:18px" id="afdrill-x">✕</span></div>'
+        +'<div style="overflow:auto;padding:6px 16px 14px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:#64748b;text-align:left"><th style="padding:4px 8px 4px 0">Reference</th>'+(showType?'<th style="padding:4px 8px 4px 0">Type</th>':'')+'<th style="padding:4px 8px 4px 0">Country</th><th style="padding:4px 8px 4px 0">Supplier</th><th style="padding:4px 0;text-align:right">GBP</th></tr></thead><tbody>'
+        +(rows.length?rows.map(function(t){ return '<tr><td style="padding:2px 8px 2px 0;font-family:monospace;font-size:11px">'+eh(t.reference)+'</td>'+(showType?'<td style="padding:2px 8px 2px 0">'+eh(t.type)+'</td>':'')+'<td style="padding:2px 8px 2px 0">'+eh(t.country||'')+'</td><td style="padding:2px 8px 2px 0">'+eh(t.supplier||'')+'</td><td style="padding:2px 0;text-align:right">'+afN((t.amount_usd||0)/AF_GBP)+'</td></tr>'; }).join(''):'<tr><td colspan="5" class="mut" style="padding:8px 0">No transactions.</td></tr>')
+        +'</tbody></table><div class="mut" style="font-size:10px;margin-top:8px">Reference = FC-&lt;market&gt;-&lt;order month&gt;-&lt;supplier code&gt;. Import duty is dated at the <b>landing</b> month; the order was placed ~lead-time earlier.</div></div></div>';
+      document.body.appendChild(ov); var close=function(){ov.remove();}; ov.onclick=function(e){ if(e.target===ov)close(); }; var xb=ov.querySelector('#afdrill-x'); if(xb)xb.onclick=close; };
+    content.querySelectorAll('.af-pcell').forEach(function(cel){ cel.onclick=function(){ afDrill(cel.dataset.aft, +cel.dataset.afm); }; });
     // Export dropdowns: one coloured button each (Summary USD / GBP / Transactions), Copy + CSV under a menu.
     function afCopyTsv(rows){ var tsv=rows.map(function(r){return r.join('\t');}).join('\n'); navigator.clipboard.writeText(tsv).then(function(){},function(){alert('Copy blocked by the browser.');}); }
     var afAct={ usd:{copy:function(){afCopyTsv(afPayCur(1));}, csv:function(){afDl(afToCsv(afPayCur(1)),'auto_forecast_summary_USD.csv');}},

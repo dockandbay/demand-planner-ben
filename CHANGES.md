@@ -1,3 +1,6 @@
+## v27.301 Auto Forecast: click a payments cell to see the orders behind it
+- Every value in the **"Payments plan — cash out by month"** table (USD + GBP) is now **clickable** → a popup lists the exact order legs (transactions) that make up that month × payment type: reference (`FC-<market>-<order-month>-<supplier>`), country, supplier, GBP amount, with a total. Answers "where is this £X coming from" for any cell (e.g. the October import duty). Reads the report's own transactions; no new data, report-only.
+
 ## v27.300 Auto Forecast: forward-only fix on the DEFAULT (Buy plan) engine too + no-store
 - v27.299 only fixed the legacy rolling engine; the **default view is the Buy-plan engine (Option B)**, which was rolling overdue orders to "order now" but keeping the original (too-early) arrival → September duty didn't change. Now Option B also **skips any order whose placement month is past** (surfaced as overdue), and a rolled current-month order's arrival = placement + lead (so no phantom near-term legs). Verified: a Sept-arrival UK buy (needs a past order) → £0 Sept duty + shown as overdue; a Jan-arrival buy (orderable now) → keeps its duty.
 - Both `/api/scenario/auto-forecast` GET+POST now send **`Cache-Control: no-store`** (the "cache issue" — a stale GET could mask changes). Reload once to clear the client-side `AF_CACHE`.
