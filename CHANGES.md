@@ -1,3 +1,10 @@
+## v27.305 DEMAND ▸ ASP for future months now seasonal (same month last year), not last-actual
+- **Problem:** projected-month ASP used the **most recent actual month's** price ÷ units. When the latest actual was a heavy-discount/sale month, that depressed ASP was applied flat to **every** future month, understating future revenue everywhere it flows (plan revenue lines, Summary, Targets).
+- **Fix (`getASP`):** for projected months the base ASP is now **the same calendar month last year** (walking back to earlier years if last year is missing), then × the existing compounded `priceUpliftFactor` (DEMAND ▸ Price changes). A future November projects off last November, a full-price June off last June — recurring promo months no longer poison full-price months. **Fallback:** if there is no prior-year same-month history at all (new SKUs/subcats), it falls back to the most recent actual month's run-rate (previous behaviour), so new products still get a sensible price.
+- Single central change — every consumer of `getASP` (plan revenue, Summary, Targets, revenue reports) inherits it automatically. Actual/past months are unchanged (they still return their own real ASP).
+- **Note:** this leans on **Price changes** being kept current — a real price increase in the last ~12 months that was never logged there won't be captured by a last-year base (per Ben: trust Price changes).
+- **Verified:** buy-plan output **byte-identical** before/after (sandbox total 104,747u; 3PL 119 SKUs / FBA 5), so no £-target units shifted. Projected ASPs now vary by season (e.g. US DTC Poncho-Adults: was 37.24 flat → Nov 24.43 / May 33.00).
+
 ## v27.304 EDI Labels ▸ Step 7b: button labels → "Sales Order by PO" / "Sales Order by Store"
 - Renamed the two Step 7b buttons from "By PO (file 4)" / "By store (file 3)" to **⤓ Sales Order by PO** / **⤓ Sales Order by Store**. Label-only; no behaviour change.
 

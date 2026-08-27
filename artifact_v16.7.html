@@ -4658,11 +4658,14 @@ function getASP(co,ch,s,year,mo){
   var thisK=ym(year,mo);
   // Actual month (past / partial current) → its own real ASP; no price-change uplift applied to real data.
   if(a[thisK]&&a[thisK][0]>0)return a[thisK][1]/a[thisK][0];
-  // Projected month: base ASP = most recent actual run-rate (else LY same month, then earlier), then apply any
-  // definitive price changes in effect for this month (compounded).
+  // Projected month: base ASP = SAME calendar month LAST YEAR (walking back to earlier years if last year is
+  // missing), then apply any definitive price-change uplifts (compounded). This is seasonally honest — it stops a
+  // recent heavy-discount month (e.g. a summer/BF promo) from dragging every future month's ASP down: a future
+  // November projects off last November, a full-price June off last June. Only when there is NO prior-year
+  // same-month history at all (genuinely new SKUs/subcats) do we fall back to the most recent actual run-rate.
   var base=0;
-  for(var i=ACTUAL_MONTHS.length-1;i>=0;i--){ var am=ACTUAL_MONTHS[i]; if(a[am]&&a[am][0]>0){ base=a[am][1]/a[am][0]; break; } }
-  if(!base){ for(var y=year-1;y>=2024;y--){ var k=ym(y,mo); if(a[k]&&a[k][0]>0){ base=a[k][1]/a[k][0]; break; } } }
+  for(var y=year-1;y>=2024;y--){ var k=ym(y,mo); if(a[k]&&a[k][0]>0){ base=a[k][1]/a[k][0]; break; } }
+  if(!base){ for(var i=ACTUAL_MONTHS.length-1;i>=0;i--){ var am=ACTUAL_MONTHS[i]; if(a[am]&&a[am][0]>0){ base=a[am][1]/a[am][0]; break; } } }
   if(!base)return 0;
   return base*priceUpliftFactor(co,ch,s,year,mo);
 }
