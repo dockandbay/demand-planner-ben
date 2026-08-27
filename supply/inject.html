@@ -7973,8 +7973,8 @@
       +box(7,'Split SSCC labels by PO, Supplier &amp; SKU','<div class="mut" style="font-size:11px;margin-bottom:6px">One PDF per label, filed under Supplier / PO[ - Preorder ref] / SKU.</div><button class="save-btn" id="edi-gen" style="background:#16a34a;color:#fff;border-color:#15803d;padding:6px 16px;font-weight:700" disabled>⤓ Generate ZIP</button><span id="edi-gen-status" class="mut" style="font-size:12px;margin-left:10px"></span>')
       +box('7b','Cin7 sales-order upload','<div class="mut" style="font-size:11px;margin-bottom:6px">Reads the <b>ASN CSV only</b> (steps 1 / project) and builds a Cin7 sales-order upload. Qty is summed from the ASN; a SKU with qty&nbsp;0 is left off that order. <i>(Future: Fulfil format + API push.)</i></div>'
         +'<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">'
-        +'<button class="save-btn" id="edi-so-po" style="background:#7c3aed;color:#fff;border-color:#6d28d9;padding:6px 16px;font-weight:700">⤓ By PO (file 4)</button>'
-        +'<button class="save-btn" id="edi-so-store" style="background:#7c3aed;color:#fff;border-color:#6d28d9;padding:6px 16px;font-weight:700">⤓ By store (file 3)</button>'
+        +'<button class="save-btn" id="edi-so-po" style="background:#7c3aed;color:#fff;border-color:#6d28d9;padding:6px 16px;font-weight:700">⤓ Sales Order by PO</button>'
+        +'<button class="save-btn" id="edi-so-store" style="background:#7c3aed;color:#fff;border-color:#6d28d9;padding:6px 16px;font-weight:700">⤓ Sales Order by Store</button>'
         +'<span id="edi-so-status" class="mut" style="font-size:12px"></span></div>')
       +'</div>';
     // load crossdock / preorder ref datalist (for step 4 search) — same source as the Client/FBA crossdock picker

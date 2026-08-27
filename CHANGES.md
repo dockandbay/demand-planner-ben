@@ -1,3 +1,6 @@
+## v27.304 EDI Labels ▸ Step 7b: button labels → "Sales Order by PO" / "Sales Order by Store"
+- Renamed the two Step 7b buttons from "By PO (file 4)" / "By store (file 3)" to **⤓ Sales Order by PO** / **⤓ Sales Order by Store**. Label-only; no behaviour change.
+
 ## v27.303 EDI Labels ▸ Step 7b: Cin7 sales-order upload from the ASN CSV
 - New **Step 7b** on the EDI Labels page builds a **Cin7 sales-order upload CSV** from the **ASN CSV only** (no PDFs needed). Two buttons:
   - **⤓ By PO (file 4)** — one order per PO (`Order Ref = DILLARDS-<po>`), SKUs aggregated across all stores, qty summed, item price blank, `Delivery Instructions = "Crossdock to Geneva then dispatch"`. This is the "upload by PO" file.
