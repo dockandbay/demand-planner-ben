@@ -1517,6 +1517,34 @@ DATA=(DATA||[]).filter(function(r){
 // and the static fields cp/moq/supp/t3/tf/fm/l3/lt (from PROD_CONST). Markets with no channels
 // available are removed entirely. New SKUs in SKUM are added; SKUs not in SKUM are dropped.
 // Demand and pka are left for buildLiveDemand() to refresh further down.
+// ── Committed Preorder + Key-Account demand (pka) ─────────────────────────
+// These are read from /api/preorders-ka and folded into B2B by buildLiveDemand() (step 3). We cache the
+// fetched map once (PKA_MAP), re-attach it to each market inside buildLiveBpOverlay() below (so every overlay
+// rebuild keeps it), and fetch once at init + on Refresh cache. (Historic bug: the old refreshBuyData() loader
+// was orphaned — never called — so md.pka stayed empty and KA/preorder demand never reached the buy plan.)
+var PKA_MAP=null, _PKA_INFLIGHT=null;
+function _pkaIngest(pk){
+  var map={};
+  function add(sku,co,ymk,q){ if(!sku||!co||!q)return; if(!ymk)ymk=LIVE_FC_MONTHS[0];
+    if(!map[sku])map[sku]={}; if(!map[sku][co])map[sku][co]={}; map[sku][co][ymk]=(map[sku][co][ymk]||0)+q; }
+  function ingest(recs){ (recs||[]).forEach(function(r){ var sku=r.sku, q=Number(r.qty||0), wh=r.wh,
+    co=wh?String(wh).split('_')[0].toUpperCase():null, ymk=r.date?String(r.date).slice(0,7).replace('-','_'):null; add(sku,co,ymk,q); }); }
+  ingest(pk&&pk.preorder); ingest(pk&&pk.ka);
+  return map;
+}
+function attachPKA(){ try{ if(!PKA_MAP||!BP_DATA||!BP_DATA.products)return;
+  Object.keys(BP_DATA.products).forEach(function(sku){ var mk=BP_DATA.products[sku].mkts; if(!mk)return;
+    Object.keys(mk).forEach(function(co){ if(mk[co].pka)delete mk[co].pka; }); });   // authoritative refresh
+  Object.keys(PKA_MAP).forEach(function(sku){ var prod=BP_DATA.products[sku]; if(!prod||!prod.mkts)return;
+    Object.keys(PKA_MAP[sku]).forEach(function(co){ if(prod.mkts[co])prod.mkts[co].pka=PKA_MAP[sku][co]; }); });
+}catch(e){ if(window.console)console.warn('attachPKA',e); } }
+function loadPreorderKA(){ if(_PKA_INFLIGHT)return _PKA_INFLIGHT;
+  _PKA_INFLIGHT=fetch('/api/preorders-ka').then(function(r){return r.json();})
+    .then(function(pk){ if(pk&&!pk.error)PKA_MAP=_pkaIngest(pk); attachPKA(); })
+    .catch(function(e){ if(window.console)console.warn('loadPreorderKA',e); })
+    .then(function(){ _PKA_INFLIGHT=null; });
+  return _PKA_INFLIGHT;
+}
 function buildLiveBpOverlay(){
   if(!BP_DATA||!BP_DATA.products)BP_DATA={products:{},sku_list:[],built:'',demand_source:''};
   var todayISO=new Date().toISOString().slice(0,10);
@@ -1604,8 +1632,14 @@ function buildLiveBpOverlay(){
   var _td=new Date(),_dy=_td.getDate(),_mo=_td.getMonth()+1,_yr=_td.getFullYear();
   BP_DATA.cur_days={elapsed:_dy,remaining:Math.max(new Date(_yr,_mo,0).getDate()-_dy,0),total:new Date(_yr,_mo,0).getDate()};
   BP_DATA.demand_source='live overlay (SKUM + PROD_CONST + SKUI)';
+  attachPKA();   // re-fold cached Preorder/KA map onto each market (buildLiveDemand() then adds it into B2B)
 }
 if(!LAZY_SKU)buildLiveBpOverlay();
+// Fetch committed Preorder + Key-Account demand once at startup; when it lands, re-attach + rebuild demand so
+// the buy plan includes it, and re-render the buy grid if it's already mounted. (Sourced from the same
+// planner.key_account_forecasts / planner.preorders tables edited in DEMAND ▸ Inputs ▸ Key accounts.)
+try{ loadPreorderKA().then(function(){ try{ if(typeof buildLiveDemand==='function')buildLiveDemand(); }catch(e){}
+  try{ if(document.getElementById('buy-wrap')&&typeof renderBuyView==='function')renderBuyView(); }catch(e){} }); }catch(e){}
 // SKU-data lazy-load: when ?lazysku=1, the server ships _SKU_RAW/FC_OUTPUTS EMPTY; after first paint we fetch them,
 // mutate the (const) maps in place, then run augmentSKUM + buildLiveBpOverlay for real and re-render. Opt-in only.
 function lazyLoadSkuData(){ if(SKU_DATA_READY)return;
@@ -14751,6 +14785,7 @@ window.refreshBuyCache = async function(btn){
     }
     try{augmentSKUM();}catch(e){}
     try{buildLiveBpOverlay();}catch(e){}
+    try{ await loadPreorderKA(); }catch(e){}   // re-pull committed Preorder/KA demand so the button refreshes it too
     try{buildLiveDemand();}catch(e){}
     try{ for(var c in BUY_CACHE)delete BUY_CACHE[c]; }catch(e){}
     try{ BUY_FC_STALE=false; }catch(e){}
