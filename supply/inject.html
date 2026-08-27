@@ -13251,10 +13251,10 @@
     }catch(e){}
     location.reload(); }
   function apply(){ if(!pendingCode && !pendingData)return;
-    if(document.hidden){ safeReload(); return; }                             // backgrounded → reload silently (invisible; saves first). Applies code OR data.
-    if(pendingCode && Date.now()-lastAct>IDLE_MS){ safeReload(); return; }   // NEW CODE + visible but idle → reload (new JS genuinely needs it)
-    /* DATA-only while the tab is visible: never interrupt — no banner, no reload. The user is reading/entering data.
-       It's applied on the next hashchange (navigation) below, or once the tab is backgrounded. — Ben */ }
+    if(document.hidden){ safeReload(); return; }   // backgrounded → reload silently (invisible; saves first). Applies code OR data.
+    /* Visible tab: NEVER force a reload — not code, not data, not even while idle (Ben: idle auto-refresh is
+       disruptive — you lose scroll/position mid-task). A newer deploy is applied at the NEXT navigation
+       (hashchange, below) or once the tab is backgrounded; DATA likewise. No banner, no surprise reload. — Ben */ }
   function check(){ fetch('/api/version',{cache:'no-store',credentials:'same-origin'}).then(function(r){return r.ok?r.json():null;}).then(function(j){
     if(!j)return;
     if(j.version&&j.version!==BOOT)pendingCode=true;                 // newer deploy
@@ -13267,8 +13267,9 @@
     if(pendingData){ try{ if(window.__hzBustSupplyCache)window.__hzBustSupplyCache(); }catch(e){} }   // DATA changed: silently drop cached section data so the destination view re-fetches fresh — NO full reload (nav must stay snappy). — Ben
   });
   setInterval(check,5*60*1000);                        // poll for new version / data every 5 minutes
-  setInterval(function(){ if(pendingCode||pendingData)apply(); },30*1000);   // retry at safe moments (won't reload a visible page for DATA — only when backgrounded or on navigation)
+  setInterval(function(){ if(pendingCode||pendingData)apply(); },30*1000);   // retry at safe moments (only reloads a backgrounded tab; a visible tab waits for the next navigation)
   setTimeout(check,15000);                             // and shortly after load
-  setTimeout(function(){ pendingCode=true; apply(); }, STALE_MS);   // hard 30-min staleness cap → treat as code-level (reload only when idle / backgrounded / on next navigation)
+  // (Removed the hard 30-min staleness cap that force-set pendingCode → it reloaded idle-but-visible tabs even with
+  //  NO new deploy. A real deploy still propagates via the /api/version poll → next navigation / backgrounding. — Ben)
 })();
 </script>
