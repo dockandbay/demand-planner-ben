@@ -7949,8 +7949,14 @@
   // ── EDI LABELS (Dillards via EZY COM) — hidden page reached from the Direct-to-Client button. Upload wc-asn.csv +
   // SSCC label PDFs → server splits each label page (matched by SSCC → PO + our SKU via EAN) into Supplier/PO/SKU. ──
   function renderEdiLabels(c){ if(!c)return;
-    var S={ csv:null, pdfs:[], job:null, projectId:null, projectName:'', savedFiles:[] };
+    var S={ csv:null, pdfs:[], prepack:null, job:null, projectId:null, projectName:'', savedFiles:[] };
     function fileToB64(file){ return new Promise(function(res,rej){ var r=new FileReader(); r.onload=function(){ var s=String(r.result||''); var i=s.indexOf(','); res(i>=0?s.slice(i+1):s); }; r.onerror=rej; r.readAsDataURL(file); }); }
+    // Turn a non-OK response into a clear Error. A 413 (or a non-JSON body like Vercel's "Request Entity Too Large")
+    // becomes a plain-English size message instead of the cryptic "Unexpected token 'R'… is not valid JSON".
+    function _ediErr(r){ if(r.status===413) return Promise.reject(new Error('Upload too large for the server in one request (~4.5 MB serverless limit). Add fewer / smaller label PDFs per run, or split into batches.'));
+      var ct=(r.headers&&r.headers.get&&r.headers.get('content-type'))||'';
+      if(ct.indexOf('json')<0) return r.text().then(function(t){ throw new Error('Server error '+r.status+(/entity too large/i.test(t)?' — upload too large (~4.5 MB serverless limit); split into smaller batches.':(t?': '+t.slice(0,140):''))); });
+      return r.json().then(function(x){ throw new Error(x.error||('HTTP '+r.status)); }); }
     function box(n,title,inner,id){ return '<div'+(id?' id="'+id+'"':'')+' style="border:1px solid #dbe3ee;border-radius:8px;padding:10px 12px;background:#f8fbff;margin-bottom:12px"><div style="font-weight:800;color:#1e3a8a;margin-bottom:8px;display:flex;align-items:center;gap:8px"><span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:#1e3a8a;color:#fff;font-size:13px;font-weight:800;flex-shrink:0">'+n+'</span><span style="font-size:12px;letter-spacing:.03em;text-transform:uppercase">'+title+'</span></div>'+inner+'</div>'; }
     var wait='<div class="mut" style="font-size:12px">Run <b>Parse &amp; match</b> (step 3) first.</div>';
     c.innerHTML='<div style="max-width:820px"><span id="edi-datalists"></span>'
@@ -7971,7 +7977,8 @@
       +box(5,'Supplier choice','<div id="edi-s5">'+wait+'</div>')
       +box(6,'Unmatched labels','<div id="edi-s6">'+wait+'</div>')
       +box(7,'Split SSCC labels by PO, Supplier &amp; SKU','<div class="mut" style="font-size:11px;margin-bottom:6px">One PDF per label, filed under Supplier / PO[ - Preorder ref] / SKU.</div><button class="save-btn" id="edi-gen" style="background:#16a34a;color:#fff;border-color:#15803d;padding:6px 16px;font-weight:700" disabled>⤓ Generate ZIP</button><span id="edi-gen-status" class="mut" style="font-size:12px;margin-left:10px"></span>')
-      +box('7b','Cin7 sales-order upload','<div class="mut" style="font-size:11px;margin-bottom:6px">Reads the <b>ASN CSV only</b> (steps 1 / project) and builds a Cin7 sales-order upload. Qty is summed from the ASN; a SKU with qty&nbsp;0 is left off that order. <i>(Future: Fulfil format + API push.)</i></div>'
+      +box('7b','Cin7 sales-order upload','<div class="mut" style="font-size:11px;margin-bottom:6px">Reads the <b>POST PACK</b> (ASN) CSV from steps 1 / project and builds a Cin7 sales-order upload. Qty is summed; a SKU with qty&nbsp;0 is left off that order. <b>By Store</b> item price = <b>PREPACK UnitPrice</b> (matched on UPC) when a PREPACK file is added below, else <code>us_rt/2</code>. <i>(Future: Fulfil format + API push.)</i></div>'
+        +'<div id="edi-pp-dz" style="border:1.5px dashed #cbd5e1;border-radius:6px;padding:10px;background:#fff;cursor:pointer;text-align:center;font-size:12px;color:#475569;margin-bottom:8px">Optional: drop the <b>PREPACK</b> price CSV here (per-SKU UnitPrice by UPC), or click to choose<div class="mut" id="edi-pp-n" style="font-size:11px;margin-top:3px">no PREPACK file — By Store falls back to us_rt/2</div></div><input type="file" id="edi-pp" accept=".csv" style="display:none">'
         +'<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">'
         +'<button class="save-btn" id="edi-so-po" style="background:#7c3aed;color:#fff;border-color:#6d28d9;padding:6px 16px;font-weight:700">⤓ Sales Order by PO</button>'
         +'<button class="save-btn" id="edi-so-store" style="background:#7c3aed;color:#fff;border-color:#6d28d9;padding:6px 16px;font-weight:700">⤓ Sales Order by Store</button>'
@@ -8031,12 +8038,23 @@
       var sf=(S.savedFiles||[]).filter(function(f){return f.kind==='csv';})[0];
       if(sf&&S.projectId)return fetch('/api/supply/edi-projects/'+S.projectId+'/files/'+sf.id).then(function(r){return r.json();}).then(function(r){ return (r&&r.b64)?{name:sf.filename,b64:r.b64}:null; });
       return Promise.resolve(null); }
-    function dlSalesOrders(level){ var st=c.querySelector('#edi-so-status'); st.textContent='Reading ASN…';
-      csvOnly().then(function(cf){ if(!cf){ st.textContent='No ASN CSV — add it in step 1 (or load a project).'; return null; }
-        st.textContent='Building '+(level==='po'?'by-PO':'by-store')+' upload…';
-        return fetch('/api/supply/edi-labels/sales-orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csv_base64:cf.b64,level:level})})
-          .then(function(r){ if(!r.ok)return r.json().then(function(x){throw new Error(x.error||('HTTP '+r.status));}); return r.blob(); })
-          .then(function(bl){ var u=URL.createObjectURL(bl),a=document.createElement('a'); a.href=u; a.download='cin7-sales-orders-'+level+'.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); st.textContent='Downloaded ✓'; }); })
+    // PREPACK price file (optional): its UnitPrice (by UPC) overrides us_rt/2 on the By-Store file.
+    var ppIn=c.querySelector('#edi-pp');
+    if(ppIn){ ppIn.onchange=function(){ S.prepack=ppIn.files[0]||null; c.querySelector('#edi-pp-n').textContent=S.prepack?('PREPACK: '+S.prepack.name):'no PREPACK file — By Store falls back to us_rt/2'; }; }
+    var ppDz=c.querySelector('#edi-pp-dz');
+    if(ppDz){ ppDz.onclick=function(){ ppIn.click(); };
+      ppDz.ondragover=function(e){ e.preventDefault(); ppDz.style.borderColor='#60a5fa'; ppDz.style.background='#eff6ff'; };
+      ppDz.ondragleave=function(){ ppDz.style.borderColor='#cbd5e1'; ppDz.style.background='#fff'; };
+      ppDz.ondrop=function(e){ e.preventDefault(); ppDz.style.borderColor='#cbd5e1'; ppDz.style.background='#fff'; var f=(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]); if(f){ S.prepack=f; c.querySelector('#edi-pp-n').textContent='PREPACK: '+f.name; } }; }
+    function dlSalesOrders(level){ var st=c.querySelector('#edi-so-status'); st.textContent='Reading POST PACK…';
+      csvOnly().then(function(cf){ if(!cf){ st.textContent='No POST PACK (ASN) CSV — add it in step 1 (or load a project).'; return null; }
+        var body={csv_base64:cf.b64,level:level};
+        var chain=Promise.resolve();
+        if(level==='store'&&S.prepack)chain=fileToB64(S.prepack).then(function(b){ body.prepack_base64=b; });
+        return chain.then(function(){ st.textContent='Building '+(level==='po'?'by-PO':'by-store')+' upload'+(body.prepack_base64?' (PREPACK pricing)':'')+'…';
+          return fetch('/api/supply/edi-labels/sales-orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
+            .then(function(r){ if(!r.ok)return _ediErr(r); var pp=r.headers.get('X-Prepack-Priced'); st.textContent='Downloaded ✓'+(pp&&level==='store'?(' · '+pp+' priced from PREPACK'):''); return r.blob(); })
+            .then(function(bl){ var u=URL.createObjectURL(bl),a=document.createElement('a'); a.href=u; a.download='cin7-sales-orders-'+level+'.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); }); }); })
         .catch(function(e){ if(e)st.textContent='Failed: '+(e.message||e); }); }
     c.querySelector('#edi-so-po').onclick=function(){ dlSalesOrders('po'); };
     c.querySelector('#edi-so-store').onclick=function(){ dlSalesOrders('store'); };
@@ -8050,7 +8068,7 @@
         if(!cf.pdfs.length){ st.textContent='No PDFs — add them in step 2 (or load a project).'; return Promise.reject(new Error('__done')); }
         st.textContent='Parsing '+cf.pdfs.length+' PDF(s)…';
         return fetch('/api/supply/edi-labels/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csv_base64:cf.csv.b64,pdfs:cf.pdfs})});
-      }).then(function(r){ if(!r)return null; return r.json().then(function(j){ if(!r.ok)throw new Error(j.error||('HTTP '+r.status)); return j; }); })
+      }).then(function(r){ if(!r)return null; if(!r.ok)return _ediErr(r); return r.json(); })
         .then(function(j){ if(j){ S.job=j; renderPrev(j); } })
         .catch(function(e){ if(e&&e.message==='__done')return; st.textContent='Failed: '+(e.message||e); }); };
     function renderPrev(j){ var pos=Object.keys(j.byPo||{}).sort(); var multi=j.multiSuppliers||[];
@@ -8079,7 +8097,7 @@
           if(!cf.csv||!cf.pdfs.length){ throw new Error('Files missing — re-add in steps 1–2 (or reload the project) and parse again.'); }
           gs.textContent='Building ZIP…';
           return fetch('/api/supply/edi-labels/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csv_base64:cf.csv.b64,pdfs:cf.pdfs,choices:choices,preorderRefs:preorderRefs})});
-        }).then(function(r){ if(!r.ok)return r.json().then(function(x){throw new Error(x.error||('HTTP '+r.status));}); return r.blob(); })
+        }).then(function(r){ if(!r.ok)return _ediErr(r); return r.blob(); })
           .then(function(bl){ var u=URL.createObjectURL(bl),a=document.createElement('a'); a.href=u; a.download='edi-labels.zip'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); gs.textContent='Downloaded ✓'; })
           .catch(function(e){ gs.textContent='Failed: '+(e.message||e); })
           .finally(function(){ btn.disabled=false; }); };

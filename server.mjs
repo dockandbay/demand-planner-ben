@@ -2783,9 +2783,26 @@ app.post('/api/supply/edi-labels/generate', async (req, res) => {
 app.post('/api/supply/edi-labels/sales-orders', async (req, res) => {
   try {
     const b = req.body || {};
+    // POST PACK document = the ASN (wc-asn) CSV. Optional PREPACK document = the EZCOM PO-detail CSV that carries a
+    // per-SKU UnitPrice keyed by UPCCode; when supplied, the by-store item price comes from it (matched on UPC),
+    // falling back to us_rt/2 for any UPC not in the PREPACK. (Ben)
     const csvText = b.csv_base64 ? Buffer.from(String(b.csv_base64), 'base64').toString('utf8') : String(b.csv || '');
+    const prepackText = b.prepack_base64 ? Buffer.from(String(b.prepack_base64), 'base64').toString('utf8') : String(b.prepack || '');
     const level = (b.level === 'po') ? 'po' : 'store';
-    if (!csvText.trim()) return res.status(400).json({ error: 'No CSV supplied' });
+    if (!csvText.trim()) return res.status(400).json({ error: 'No POST PACK (ASN) CSV supplied' });
+    // Build UPC → UnitPrice map from the PREPACK document (header-driven: UPCCode + UnitPrice columns).
+    const prepackByUpc = {};
+    if (prepackText.trim()) {
+      const plines = prepackText.split(/\r?\n/).filter(Boolean);
+      const phdr = _ediCsvSplit(plines[0] || []);
+      const iUpc = phdr.indexOf('UPCCode'), iPrice = phdr.indexOf('UnitPrice');
+      if (iUpc >= 0 && iPrice >= 0) plines.slice(1).forEach(line => {
+        const c = _ediCsvSplit(line);
+        const upc = String(c[iUpc] || '').replace(/\D/g, ''); const up = parseFloat(String(c[iPrice] || '').replace(/[^0-9.]/g, ''));
+        if (upc && up > 0) prepackByUpc[upc] = up;   // last row wins (all stores carry the same UnitPrice per UPC)
+      });
+    }
+    const havePrepack = Object.keys(prepackByUpc).length > 0;
     // 1) parse ASN rows: PO / store (col4), EAN (col108), qty (col111), ship-to DC block (cols 46/48/51/52/53/54)
     const eans = new Set(); const rows = [];
     csvText.split(/\r?\n/).filter(Boolean).forEach(line => {
@@ -2805,12 +2822,15 @@ app.post('/api/supply/edi-labels/sales-orders', async (req, res) => {
     const agg = {};
     rows.forEach(r => { const prod = byEan[r.ean]; if (!prod || !prod.sku) return;
       const key = level === 'po' ? (r.po + '|' + prod.sku) : (r.po + '|' + r.store + '|' + prod.sku);
-      if (!agg[key]) agg[key] = { po: r.po, store: r.store, sku: prod.sku, us_rt: prod.us_rt, qty: 0, dc: r.dc };
+      if (!agg[key]) agg[key] = { po: r.po, store: r.store, sku: prod.sku, us_rt: prod.us_rt, ean: r.ean, qty: 0, dc: r.dc };
       agg[key].qty += r.qty; });
     const items = Object.values(agg).filter(x => x.qty > 0)   // qty 0 → don't add the SKU (Ben)
       .sort((a, b) => a.po.localeCompare(b.po) || String(a.store).localeCompare(String(b.store)) || a.sku.localeCompare(b.sku));
     const q = v => { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
-    const price = us_rt => (us_rt > 0 ? (Math.round(us_rt / 2 * 100) / 100).toFixed(2) : '');
+    // Store-file item price: PREPACK UnitPrice (matched on UPC) when supplied, else us_rt/2 fallback.
+    const price = it => { const pp = prepackByUpc[it.ean];
+      if (pp != null && pp > 0) return pp.toFixed(2);
+      return it.us_rt > 0 ? (Math.round(it.us_rt / 2 * 100) / 100).toFixed(2) : ''; };
     let hdr, body;
     if (level === 'po') {
       hdr = ['Order Ref', 'Item Code', 'Company', 'First Name', 'Last Name', 'Phone', 'Delivery Address 1', 'Delivery Address 2', 'Delivery City', 'Delivery State', 'Delivery Postal Code', 'Country', 'Customer PO No', 'Item Qty', 'Item Price', 'Branch', 'Freight Description', 'Freight Cost', 'Project Name', 'Xero Status', 'Stage', 'Alternative GL Account', 'Delivery Instructions', 'Billing Company', 'Email', 'Billing First Name', 'Billing Last Name', 'Billing Address 1', 'Billing Address 2', 'Billing City', 'Billing State', 'Billing Postal Code', 'Billing Country'];
@@ -2818,10 +2838,12 @@ app.post('/api/supply/edi-labels/sales-orders', async (req, res) => {
     } else {
       hdr = ['Order Ref', 'Company', 'First Name', 'Last Name', 'Phone', 'Delivery Address 1', 'Delivery Address 2', 'Delivery City', 'Delivery State', 'Delivery Postal Code', 'Country', 'Branch', 'Freight Description', 'Freight Cost', 'Project Name', 'Xero Status', 'Stage', 'Alternative GL Account', 'Customer PO No', 'Delivery Instructions', 'Item Code', 'Item Qty', 'Item Price', 'Billing Company', 'Email', 'Billing First Name', 'Billing Last Name', 'Billing Address 1', 'Billing Address 2', 'Billing City', 'Billing State', 'Billing Postal Code', 'Billing Country'];
       body = items.map(it => { const ref = 'DILLARDS-' + it.po + '-' + it.store;
-        return [ref, 'DILLARDS', it.dc.name, '', '', it.dc.addr, '', it.dc.city, it.dc.state, it.dc.zip, it.dc.country, 'US Geneva', 'Labels', '0', 'Shopify USWS', 'Not Imported', 'New', 'COGS - US - Wholesale', ref, 'Dillards Special Requirements to be provided', it.sku, it.qty, price(it.us_rt), 'DILLARDS', 'keyaccounts@dockandbay.com', 'Dillards', 'Dillards', '', '', '', '', '', '']; });
+        return [ref, 'DILLARDS', it.dc.name, '', '', it.dc.addr, '', it.dc.city, it.dc.state, it.dc.zip, it.dc.country, 'US Geneva', 'Labels', '0', 'Shopify USWS', 'Not Imported', 'New', 'COGS - US - Wholesale', ref, 'Dillards Special Requirements to be provided', it.sku, it.qty, price(it), 'DILLARDS', 'keyaccounts@dockandbay.com', 'Dillards', 'Dillards', '', '', '', '', '', '']; });
     }
     const csv = [hdr].concat(body).map(r => r.map(q).join(',')).join('\n') + '\n';
-    res.set('Content-Type', 'text/csv;charset=utf-8').set('Content-Disposition', 'attachment; filename="cin7-sales-orders-' + level + '.csv"').set('Cache-Control', 'no-store').send(csv);
+    const nPre = (level === 'store' && havePrepack) ? items.filter(it => prepackByUpc[it.ean] > 0).length : 0;
+    res.set('Content-Type', 'text/csv;charset=utf-8').set('Content-Disposition', 'attachment; filename="cin7-sales-orders-' + level + '.csv"')
+      .set('X-Prepack-Priced', String(nPre) + '/' + items.length).set('Cache-Control', 'no-store').send(csv);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
