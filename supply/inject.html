@@ -7953,6 +7953,14 @@
     function fileToB64(file){ return new Promise(function(res,rej){ var r=new FileReader(); r.onload=function(){ var s=String(r.result||''); var i=s.indexOf(','); res(i>=0?s.slice(i+1):s); }; r.onerror=rej; r.readAsDataURL(file); }); }
     // Turn a non-OK response into a clear Error. A 413 (or a non-JSON body like Vercel's "Request Entity Too Large")
     // becomes a plain-English size message instead of the cryptic "Unexpected token 'R'… is not valid JSON".
+    // Pre-flight size guard: the whole request (CSV + all PDFs, base64-encoded ≈ +33%) goes in ONE body, and the
+    // server accepts ≤ 4.5 MB per request (Vercel serverless cap). This is the COMBINED total, not per-file — 20 × 300 KB
+    // PDFs (=6 MB together) trips it just as one 5 MB file would. Block before sending with the exact size + count.
+    var EDI_MAX_BYTES=4.5*1024*1024, EDI_SAFE_BYTES=4.4*1024*1024;   // 4.4 leaves headroom for headers/JSON overhead
+    function _ediBodyBytes(obj){ try{ return new Blob([JSON.stringify(obj)]).size; }catch(e){ return JSON.stringify(obj).length; } }
+    function _ediMB(n){ return (n/1048576).toFixed(1); }
+    function _ediOversize(obj,nFiles){ var sz=_ediBodyBytes(obj); if(sz<=EDI_SAFE_BYTES)return null;
+      return 'Upload is '+_ediMB(sz)+' MB — over the 4.5 MB limit for one request'+(nFiles?(' ('+nFiles+' PDFs, base64 ≈ +33%)'):'')+'. This is the combined total of all files, not per-file. Remove some PDFs and run in batches so each stays under 4.5 MB.'; }
     function _ediErr(r){ if(r.status===413) return Promise.reject(new Error('Upload too large for the server in one request (~4.5 MB serverless limit). Add fewer / smaller label PDFs per run, or split into batches.'));
       var ct=(r.headers&&r.headers.get&&r.headers.get('content-type'))||'';
       if(ct.indexOf('json')<0) return r.text().then(function(t){ throw new Error('Server error '+r.status+(/entity too large/i.test(t)?' — upload too large (~4.5 MB serverless limit); split into smaller batches.':(t?': '+t.slice(0,140):''))); });
@@ -8051,7 +8059,8 @@
         var body={csv_base64:cf.b64,level:level};
         var chain=Promise.resolve();
         if(level==='store'&&S.prepack)chain=fileToB64(S.prepack).then(function(b){ body.prepack_base64=b; });
-        return chain.then(function(){ st.textContent='Building '+(level==='po'?'by-PO':'by-store')+' upload'+(body.prepack_base64?' (PREPACK pricing)':'')+'…';
+        return chain.then(function(){ var over=_ediOversize(body,0); if(over){ st.textContent=over; return; }
+          st.textContent='Building '+(level==='po'?'by-PO':'by-store')+' upload'+(body.prepack_base64?' (PREPACK pricing)':'')+'…';
           return fetch('/api/supply/edi-labels/sales-orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})
             .then(function(r){ if(!r.ok)return _ediErr(r); var pp=r.headers.get('X-Prepack-Priced'); st.textContent='Downloaded ✓'+(pp&&level==='store'?(' · '+pp+' priced from PREPACK'):''); return r.blob(); })
             .then(function(bl){ var u=URL.createObjectURL(bl),a=document.createElement('a'); a.href=u; a.download='cin7-sales-orders-'+level+'.csv'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); }); }); })
@@ -8066,8 +8075,9 @@
       collectFiles().then(function(cf){
         if(!cf.csv){ st.textContent='No ASN CSV — add it in step 1 (or load a project).'; return Promise.reject(new Error('__done')); }
         if(!cf.pdfs.length){ st.textContent='No PDFs — add them in step 2 (or load a project).'; return Promise.reject(new Error('__done')); }
+        var pbody={csv_base64:cf.csv.b64,pdfs:cf.pdfs}; var over=_ediOversize(pbody,cf.pdfs.length); if(over){ st.textContent=over; return Promise.reject(new Error('__done')); }
         st.textContent='Parsing '+cf.pdfs.length+' PDF(s)…';
-        return fetch('/api/supply/edi-labels/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csv_base64:cf.csv.b64,pdfs:cf.pdfs})});
+        return fetch('/api/supply/edi-labels/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(pbody)});
       }).then(function(r){ if(!r)return null; if(!r.ok)return _ediErr(r); return r.json(); })
         .then(function(j){ if(j){ S.job=j; renderPrev(j); } })
         .catch(function(e){ if(e&&e.message==='__done')return; st.textContent='Failed: '+(e.message||e); }); };
@@ -8095,8 +8105,9 @@
         // stateless generate: re-send the files (works on serverless — no server-side job cache)
         collectFiles().then(function(cf){
           if(!cf.csv||!cf.pdfs.length){ throw new Error('Files missing — re-add in steps 1–2 (or reload the project) and parse again.'); }
+          var gbody={csv_base64:cf.csv.b64,pdfs:cf.pdfs,choices:choices,preorderRefs:preorderRefs}; var gover=_ediOversize(gbody,cf.pdfs.length); if(gover){ throw new Error(gover); }
           gs.textContent='Building ZIP…';
-          return fetch('/api/supply/edi-labels/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csv_base64:cf.csv.b64,pdfs:cf.pdfs,choices:choices,preorderRefs:preorderRefs})});
+          return fetch('/api/supply/edi-labels/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(gbody)});
         }).then(function(r){ if(!r.ok)return _ediErr(r); return r.blob(); })
           .then(function(bl){ var u=URL.createObjectURL(bl),a=document.createElement('a'); a.href=u; a.download='edi-labels.zip'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); gs.textContent='Downloaded ✓'; })
           .catch(function(e){ gs.textContent='Failed: '+(e.message||e); })
