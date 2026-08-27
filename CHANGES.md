@@ -1,3 +1,8 @@
+## v27.309 Targets ▸ recommendations: "Apply all" at the top + review modal (every change)
+- The **Apply all open** button now also sits **at the top** of Summary ▸ Targets ▸ recommendations (was bottom-only), per Ben.
+- Clicking it (top or bottom) now opens a **review modal listing every change** before anything is written: one row per open recommendation — Subcategory, current Forecast £, Target £, Gap (£ + %), and **Δ units** — plus a Total row. **Apply all N** writes the subcategory overrides (then Save Forecasts to persist; each row still individually undoable); **Cancel** / backdrop / ✕ makes no change. Replaces the old one-line `confirm()`.
+- No change to the recommendation maths or `applyTargetRecs`.
+
 ## v27.308 Smoothing: stop the record-of-change fan-out from exhausting the DB pooler (EMAXCONN)
 - **Problem (Diviyaj flagged, live EMAXCONN alert):** a mass smooth fanned out audit writes. `applySmoothAlloc` ended in a bare, un-awaited `logChangesBulk` fetch and was called **inside loops** — the auto-smooth sweep (subcats × months) and the FY smooth (12 months) — firing up to hundreds of parallel POSTs to `/api/forecast/changes/bulk`. On serverless each POST hits its own instance opening its own transaction-pooler connections → the 200-connection ceiling was hit (one user wrote 5,270 audit rows in a minute; 4,842 pooler rejections that hour; PO grid / portal / cache-rebuild 500'd alongside). Forecast data persisted; the **record-of-change was silently dropped** (the error was swallowed, never retried). First seen 20 Aug.
 - **Fix (same pattern as `saveForecasts`):**
