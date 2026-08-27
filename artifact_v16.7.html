@@ -1025,7 +1025,7 @@ function runAutoSmooth(){
   var th=(Number(SMOOTH_AUTO.threshold)||20)/100, leader=SMOOTH_AUTO.mode==='leader';
   var flags=SMOOTH_AUTO.flags||{}, keys=Object.keys(flags).filter(function(k){return flags[k];});
   if(!keys.length){ alert('No sub-categories are ticked for Auto. Tick "auto" on some sub-categories first.'); return; }
-  var applied=0, _rc=false, skipped=[];   // skipped = forecast month-cells left un-smoothed because the gap is >= the threshold (too big — flagged for manual review)
+  var applied=0, _rc=false, skipped=[], _allChg=[];   // skipped = forecast month-cells left un-smoothed because the gap is >= the threshold (too big — flagged for manual review); _allChg = every smooth change, logged ONCE after the sweep (no per-cell POST fan-out)
   keys.forEach(function(k){ var p=k.split('|'); var co=p[0],ch=p[1],s=p.slice(2).join('|');
     // Always re-cap discontinued SKUs to remaining stock first — spread on-hand+inbound across the post-discontinue
     // months (velocity × seasonality) and ZERO every month once stock is exhausted. Runs for every Auto sub-category
@@ -1037,9 +1037,10 @@ function runAutoSmooth(){
       if(target<=0)return; var sum=eff.totals[m]||0;
       var gap=Math.abs(sum-target)/target;
       if(gap<=1e-9)return;   // already within tolerance — nothing to do
-      if(gap<th){ var vals=computeSmoothAlloc(s,co,ch,m,{protectLeaders:leader}); if(vals){ applySmoothAlloc(co,ch,m,vals); applied++; } }
+      if(gap<th){ var vals=computeSmoothAlloc(s,co,ch,m,{protectLeaders:leader}); if(vals){ _allChg=_allChg.concat(applySmoothAlloc(co,ch,m,vals)||[]); applied++; } }
       else { skipped.push({co:co,ch:ch,subcat:s,month:m,sum:Math.round(sum),target:Math.round(target),gapPct:Math.round(gap*100)}); }   // over the limit → left for manual review
     }); });
+  try{ logChangesBulk(_allChg); }catch(e){}   // ONE batched/awaited/retried audit write for the whole sweep
   if(_rc)_markSmoothRun();
   try{renderMain();}catch(e){} try{markDirty();}catch(e){}
   _showAutoSmoothResult(applied,keys.length,skipped);
@@ -5885,9 +5886,17 @@ function logChange(level,item,co,ch,m,action,fromV,toV){ if(!item||!m)return;
   var nk=level+'|'+item+'|'+co+'|'+ch+'|'+m; FC_CHANGE_KEYS.add(nk);
   try{ fetch('/api/forecast/change',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({level:level,item:item,country:co,channel:ch,month:m,action:action,from:fromV,to:toV,actor:_meEmail()})}); }catch(e){}
   if(SHOW_CHANGES){ try{refreshCellRail(nk);}catch(e){} } }
+// Record-of-change audit writer. Routes through the SAME serialised/chunked/retried/circuit-broken sender as
+// saveForecasts (postChangesBatched) so a mass smooth can't fan out into parallel un-awaited POSTs that exhaust the
+// DB pooler (EMAXCONN). If the DB is already paused, or the send ultimately fails, the rows are BUFFERED and the
+// next autosave/tab-hide flush retries them — the record-of-change is never silently dropped. (v27.308)
 function logChangesBulk(rows){ if(!rows||!rows.length)return;
   rows.forEach(function(r){ FC_CHANGE_KEYS.add((r.level||'sku')+'|'+r.item+'|'+r.country+'|'+r.channel+'|'+r.month); });
-  try{ fetch('/api/forecast/changes/bulk',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({rows:rows,actor:_meEmail()})}); }catch(e){} }
+  if(typeof _savePausedUntil!=='undefined' && Date.now()<_savePausedUntil){ try{ Array.prototype.push.apply(_CHG_BUFFER,rows); }catch(e){} return; }   // DB busy → buffer, don't pile on; flushed on the next save
+  try{
+    postChangesBatched('/api/forecast/changes/bulk',rows,{actor:_meEmail()},'Recording changes')
+      .catch(function(){ try{ Array.prototype.push.apply(_CHG_BUFFER,rows); }catch(e){} });   // failed after retries → re-buffer for the next flush
+  }catch(e){ try{ Array.prototype.push.apply(_CHG_BUFFER,rows); }catch(_e){} } }
 // Manual cell edits accumulate here and flush with the 60s forecast autosave (not one POST per edit).
 var _CHG_BUFFER=[];
 function bufferChange(level,item,co,ch,m,action,fromV,toV){ if(!item||!m)return; var nk=level+'|'+item+'|'+co+'|'+ch+'|'+m; FC_CHANGE_KEYS.add(nk);
@@ -7647,11 +7656,15 @@ function computeSmoothAlloc(s,co,ch,m,opts){
   return out;
 }
 // Write a precomputed allocation map (sku -> units) as overrides for month m.
+// Writes the smoothed SKU overrides for one month and RETURNS the change rows (does not send them). The caller
+// aggregates across all months/subcats of a sweep and calls logChangesBulk ONCE — a per-month/per-subcat send here
+// fanned out into up to hundreds of parallel un-awaited POSTs that exhausted the DB pooler (EMAXCONN) and dropped
+// the record-of-change. (v27.308)
 function applySmoothAlloc(co,ch,m,vals){
   var _chg=[];
   Object.keys(vals||{}).forEach(function(sku){ var _old=skuOutFC(sku,co,ch,m); var nv=vals[sku]; skuOvSet(sku,co,ch,m,nv);
     if(_old==null||Math.round(_old)!==Math.round(nv)) _chg.push({level:'sku',item:sku,country:co,channel:ch,month:m,action:'smoothed',from:(_old!=null?Math.round(_old):null),to:Math.round(nv)}); });
-  try{ logChangesBulk(_chg); }catch(e){}
+  return _chg;
 }
 
 // Recalculate discontinued SKUs' sell-through of remaining stock: recent velocity × sub-category seasonality,
@@ -7815,7 +7828,9 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     // "Disregard disc." on a MANUAL smooth = leave discontinued SKUs completely untouched (Ben, v26.911): the active-SKU
     // rescale already excludes them (computeSmoothAlloc), so we no longer recalc their stock-rundown here — that would
     // re-forecast (and sometimes RAISE) discontinued cells, which isn't "disregard". The ⚙ Auto-smooth keeps its own recalc.
-    Object.keys(SMOOTH_PREVIEW.months).forEach(function(mo){ applySmoothAlloc(co,ch,mo,SMOOTH_PREVIEW.months[mo]); });
+    var _allChg=[];
+    Object.keys(SMOOTH_PREVIEW.months).forEach(function(mo){ _allChg=_allChg.concat(applySmoothAlloc(co,ch,mo,SMOOTH_PREVIEW.months[mo])||[]); });
+    try{ logChangesBulk(_allChg); }catch(e){}   // ONE batched/awaited/retried audit write for the whole FY smooth
     SMOOTH_PREVIEW=null; reExpand();
     try{ if(typeof saveForecasts==='function') saveForecasts(); }catch(e){}   // persist a smooth immediately — a bulk edit shouldn't wait on the 60s autosave (lost on refresh otherwise)
   }
@@ -8460,7 +8475,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       };
       var ok=document.createElement('button');ok.textContent='\u2713';ok.title='Apply this smooth to all SKUs in '+s+' for '+m.replace('_','-')+' — writes overrides (Save forecasts to persist)';
       ok.style.cssText='font-size:8px;line-height:1;padding:1px 5px;border:1px solid #16a34a;border-radius:3px;background:#dcfce7;color:#166534;cursor:pointer;font-weight:700';
-      ok.onclick=function(e){e.stopPropagation();applySmoothAlloc(co,ch,SMOOTH_PREVIEW.m,SMOOTH_PREVIEW.vals);SMOOTH_PREVIEW=null;reExpand();try{ if(typeof saveForecasts==='function') saveForecasts(); }catch(_e){}};
+      ok.onclick=function(e){e.stopPropagation();try{ logChangesBulk(applySmoothAlloc(co,ch,SMOOTH_PREVIEW.m,SMOOTH_PREVIEW.vals)); }catch(_e){}SMOOTH_PREVIEW=null;reExpand();try{ if(typeof saveForecasts==='function') saveForecasts(); }catch(_e){}};
       var no=document.createElement('button');no.textContent='\u2715';no.title='Discard preview';
       no.style.cssText='font-size:8px;line-height:1;padding:1px 5px;border:1px solid #cbd5e1;border-radius:3px;background:#f1f5f9;color:#64748b;cursor:pointer;font-weight:700';
       no.onclick=function(e){e.stopPropagation();SMOOTH_PREVIEW=null;reExpand();};

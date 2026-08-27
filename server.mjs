@@ -12746,7 +12746,9 @@ app.post('/api/forecast/change', async (req, res) => {
 });
 // Bulk-record changes (a smoothing sweep / target-rec apply touches many cells at once).
 app.post('/api/forecast/changes/bulk', async (req, res) => {
-  const b = req.body || {}, rows = Array.isArray(b.rows) ? b.rows : [];
+  // Accept either {rows} (legacy) or {changes} — the client now routes audit writes through the shared
+  // postChangesBatched() sender (same as saveForecasts), which posts under the `changes` key.
+  const b = req.body || {}, rows = Array.isArray(b.rows) ? b.rows : (Array.isArray(b.changes) ? b.changes : []);
   if (!rows.length) return res.json({ ok: true, saved: 0 });
   const num = (v) => (v === '' || v == null || isNaN(+v)) ? null : +v;
   try {
