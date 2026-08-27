@@ -8071,15 +8071,41 @@
     c.querySelector('#edi-save').onclick=saveProject;
     c.querySelector('#edi-del').onclick=function(){ if(!S.projectId)return; if(!confirm('Delete project "'+(S.projectName||'')+'" and all its saved files?'))return; fetch('/api/supply/edi-projects/'+S.projectId,{method:'DELETE'}).then(function(r){return r.json();}).then(function(){ S.projectId=null; S.savedFiles=[]; S.projectName=''; c.querySelector('#edi-proj-name').value=''; c.querySelector('#edi-del').style.display='none'; renderSavedFiles(); loadProjectList(); c.querySelector('#edi-proj-status').textContent='Deleted.'; }); };
     loadProjectList();
+    // Split the PDFs into batches that each stay under the 4.5 MB request cap (the CSV rides along in every batch, so
+    // the per-batch PDF budget = cap − CSV). A single PDF that alone busts the cap is REJECTED (reported), and the
+    // rest still upload — parse is stateless so each batch is independent and the results are merged client-side. (Ben)
+    function _b64len(s){ return s?s.length:0; }
+    function _ediBatchPdfs(csvB64,pdfs){ var csvBytes=_b64len(csvB64), budget=EDI_SAFE_BYTES-csvBytes-400;   // 400 = JSON key overhead
+      var batches=[], rejected=[], cur=[], curSize=0;
+      pdfs.forEach(function(p){ var sz=_b64len(p.b64)+(p.name?p.name.length:0)+40;
+        if(sz>budget){ rejected.push({name:p.name||'(unnamed)', mb:_ediMB(sz+csvBytes)}); return; }   // too big even alone with the CSV
+        if(curSize+sz>budget && cur.length){ batches.push(cur); cur=[]; curSize=0; }
+        cur.push(p); curSize+=sz; });
+      if(cur.length)batches.push(cur);
+      return {batches:batches, rejected:rejected}; }
+    function _ediMerge(dst,j){ if(!j)return;
+      dst.total+=(j.total||0); dst.matched+=(j.matched||0);
+      (j.unmatched||[]).forEach(function(u){ dst.unmatched.push(u); });
+      var bp=j.byPo||{}; Object.keys(bp).forEach(function(po){ dst.byPo[po]=(dst.byPo[po]||0)+bp[po]; });
+      (j.skus||[]).forEach(function(s){ var e=dst._skuMap[s.sku]; if(e){ e.count+=(s.count||0); } else { dst._skuMap[s.sku]={sku:s.sku,options:s.options,main:s.main,count:s.count||0}; } }); }
     c.querySelector('#edi-parse').onclick=function(){ var st=c.querySelector('#edi-status'); st.textContent='Reading files…';
       collectFiles().then(function(cf){
-        if(!cf.csv){ st.textContent='No ASN CSV — add it in step 1 (or load a project).'; return Promise.reject(new Error('__done')); }
+        if(!cf.csv){ st.textContent='No POST PACK (ASN) CSV — add it in step 1 (or load a project).'; return Promise.reject(new Error('__done')); }
         if(!cf.pdfs.length){ st.textContent='No PDFs — add them in step 2 (or load a project).'; return Promise.reject(new Error('__done')); }
-        var pbody={csv_base64:cf.csv.b64,pdfs:cf.pdfs}; var over=_ediOversize(pbody,cf.pdfs.length); if(over){ st.textContent=over; return Promise.reject(new Error('__done')); }
-        st.textContent='Parsing '+cf.pdfs.length+' PDF(s)…';
-        return fetch('/api/supply/edi-labels/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(pbody)});
-      }).then(function(r){ if(!r)return null; if(!r.ok)return _ediErr(r); return r.json(); })
-        .then(function(j){ if(j){ S.job=j; renderPrev(j); } })
+        var part=_ediBatchPdfs(cf.csv.b64,cf.pdfs), batches=part.batches, rejected=part.rejected;
+        if(!batches.length){ st.textContent=(rejected.length?('All '+rejected.length+' file(s) exceed the 4.5 MB per-file limit — none uploaded ('+rejected.map(function(x){return x.name;}).join(', ')+').'):'Nothing to parse.'); return Promise.reject(new Error('__done')); }
+        var merged={ok:true,total:0,matched:0,unmatched:[],byPo:{},_skuMap:{},_rejected:rejected,_batches:batches.length};
+        function run(i){ if(i>=batches.length)return Promise.resolve();
+          st.textContent='Parsing batch '+(i+1)+'/'+batches.length+' — '+batches[i].length+' PDF(s)'+(rejected.length?(' · '+rejected.length+' too large, skipped'):'')+'…';
+          return fetch('/api/supply/edi-labels/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csv_base64:cf.csv.b64,pdfs:batches[i]})})
+            .then(function(r){ if(!r.ok)return _ediErr(r); return r.json(); })
+            .then(function(j){ _ediMerge(merged,j); return run(i+1); }); }
+        return run(0).then(function(){ merged.skus=Object.keys(merged._skuMap).map(function(k){return merged._skuMap[k];}).sort(function(a,b){return a.sku<b.sku?-1:a.sku>b.sku?1:0;});
+          merged.multiSuppliers=merged.skus.filter(function(x){return (x.options||[]).length>1;}); return merged; });
+      }).then(function(j){ if(j){ S.job=j; renderPrev(j);
+          var extra=''; if(j._batches>1)extra+=' · '+j._batches+' batches';
+          if(j._rejected&&j._rejected.length)extra+=' · <b style="color:#b91c1c">'+j._rejected.length+' file(s) skipped (>4.5 MB): '+j._rejected.map(function(x){return esc(x.name)+' ('+x.mb+' MB)';}).join(', ')+'</b>';
+          if(extra){ var se=c.querySelector('#edi-status'); if(se)se.innerHTML+=extra; } } })
         .catch(function(e){ if(e&&e.message==='__done')return; st.textContent='Failed: '+(e.message||e); }); };
     function renderPrev(j){ var pos=Object.keys(j.byPo||{}).sort(); var multi=j.multiSuppliers||[];
       c.querySelector('#edi-status').innerHTML='<b style="color:#166534">'+j.matched+'</b> of '+j.total+' labels matched · '+pos.length+' PO'+(pos.length!==1?'s':'')+(j.unmatched&&j.unmatched.length?(' · <b style="color:#b45309">'+j.unmatched.length+' unmatched</b>'):'');
