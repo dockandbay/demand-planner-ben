@@ -5099,6 +5099,17 @@ app.post('/api/supply/likely-date', async (req, res) => {
     res.json({ saved: true });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// All manual likely-payment-date overrides, keyed by line_key (dep:/comp:/bal:/bal2:PO). Tiny table, read DIRECT and
+// UNCACHED (no epoch gate) so the Payments Due list always reflects a just-saved date — the big poRowsCache is epoch-
+// gated with a ≤5s cross-instance poll, so on serverless a quick refresh could otherwise serve a row with the old
+// (null) likely date even though the save persisted (the uncached PO drawer showed it, the cached list didn't). — Ben
+app.get('/api/supply/likely-dates/all', async (_req, res) => {   // 2-segment path so the /api/supply/:section catch-all doesn't swallow it
+  try { const m = {};
+    (await pool.query(`SELECT line_key, to_char(likely_date,'YYYY-MM-DD') d FROM planner.payment_likely_dates`))
+      .rows.forEach(r => { m[r.line_key] = r.d; });
+    res.set('Cache-Control', 'no-store').json(m);
+  } catch (e) { res.json({}); }
+});
 // Settings — landed-cost rate cards. Import tax keyed by country (upsert); freight rates by id.
 app.post('/api/supply/tax-rate/:country', async (req, res) => {
   const b = req.body || {}, allowed = { tax_pct: 'numeric', base: 'text', notes: 'text' };

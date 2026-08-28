@@ -8590,10 +8590,12 @@
     // straight after viewing the PO grid then skips a second big /api/supply/purchase-orders fetch. The data-refresh
     // poll busts this cache when the ETL changes, so it can't go stale across a real update. — Ben (nav lag)
     var _poP=cache['purchase-orders']?Promise.resolve(cache['purchase-orders']):fetch('/api/supply/purchase-orders').then(function(r){return r.json();}).then(function(d){cache['purchase-orders']=d;return d;});
-    Promise.all([_poP, fetch('/api/supply/deposits').then(function(r){return r.json();})])
-      .then(function(res){ buildPaymentsDue(b, res[0]||[], res[1]||[]); })
+    // likely-payment dates fetched FRESH (uncached) and overlaid, so a just-saved date always shows even if the
+    // epoch-gated poRowsCache is briefly stale on serverless (≤5s cross-instance epoch poll). — Ben
+    Promise.all([_poP, fetch('/api/supply/deposits').then(function(r){return r.json();}), fetch('/api/supply/likely-dates/all').then(function(r){return r.json();}).catch(function(){return {};})])
+      .then(function(res){ buildPaymentsDue(b, res[0]||[], res[1]||[], res[2]||{}); })
       .catch(function(e){b.innerHTML='<div style="color:#dc2626">'+esc(e.message||e)+'</div>';}); }); }
-  function buildPaymentsDue(b, pos, deps){
+  function buildPaymentsDue(b, pos, deps, lmap){ lmap=lmap||{};
     pos=(Array.isArray(pos)?pos:[]).filter(function(p){return !p.master_po;});   // child POs: the master carries the money → don't list child payments
     var today=new Date().toISOString().slice(0,10);
     var cutoff4w=(function(){var d=new Date();d.setDate(d.getDate()+28);return d.toISOString().slice(0,10);})();   // "Outstanding +4 weeks" horizon: due on/before today+28d (includes overdue)
@@ -8601,8 +8603,9 @@
     // PO payments only surface once the FINAL INVOICE AMOUNT is confirmed (is_final) AND the milestone has a due date.
     // Completed POs ARE included — an unpaid balance shouldn't hide behind a COMPLETE flag. Old payments are cut below.
     (Array.isArray(pos)?pos:[]).forEach(function(p){ if(!p.is_final)return; var ep='/api/supply/po/'+encodeURIComponent(p.po);
-      if(Number(p.completion_calc)>0.009 && p.completion_due) rows.push({sup:p.supplier_name||'',type:'Completion',ref:p.po,due_amt:Number(p.completion_calc),due:p.completion_due,likely:p.likely_completion,ep:ep,amt_field:'pay_completion_assigned',amt_val:p.completion_assigned,dt_field:'pay_completion_date',dt_val:p.completion_date,po:true});
-      if(Number(p.balance_owing)>0.009 && p.balance_due) rows.push({sup:p.supplier_name||'',type:'Balance',ref:p.po,due_amt:Number(p.balance_owing),due:p.balance_due,likely:(p.likely_balance_1||p.likely_balance_2),bal2:!p.likely_balance_1&&!!p.likely_balance_2,ep:ep,amt_field:'pay_balance_1_amount',amt_val:p.balance_1_amount,dt_field:'pay_balance_1_date',dt_val:p.balance_1_date,po:true}); });
+      var _lComp=lmap['comp:'+p.po]||p.likely_completion, _lb1=lmap['bal:'+p.po]||p.likely_balance_1, _lb2=lmap['bal2:'+p.po]||p.likely_balance_2;   // fresh likely-date overlay beats a briefly-stale poRowsCache
+      if(Number(p.completion_calc)>0.009 && p.completion_due) rows.push({sup:p.supplier_name||'',type:'Completion',ref:p.po,due_amt:Number(p.completion_calc),due:p.completion_due,likely:_lComp,ep:ep,amt_field:'pay_completion_assigned',amt_val:p.completion_assigned,dt_field:'pay_completion_date',dt_val:p.completion_date,po:true});
+      if(Number(p.balance_owing)>0.009 && p.balance_due) rows.push({sup:p.supplier_name||'',type:'Balance',ref:p.po,due_amt:Number(p.balance_owing),due:p.balance_due,likely:(_lb1||_lb2),bal2:!_lb1&&!!_lb2,ep:ep,amt_field:'pay_balance_1_amount',amt_val:p.balance_1_amount,dt_field:'pay_balance_1_date',dt_val:p.balance_1_date,po:true}); });
     (deps||[]).forEach(function(d){ if(d.status==='closed')return;
       if(!(Number(d.amount)>0.009) && !d.date_paid && !d.date_due) return;   // skip empty stubs
       rows.push({sup:d.supplier_name||'',type:d.is_deposit?'Deposit':'Other',ref:d.reference||d.description||('#'+d.id),due_amt:Number(d.amount)||0,due:d.date_due||'',likely:d.date_likely_pay,ep:'/api/supply/deposit/'+encodeURIComponent(d.id),amt_field:'amount',amt_val:d.amount,dt_field:'date_paid',dt_val:d.date_paid,po:false}); });
