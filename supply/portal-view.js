@@ -2612,10 +2612,11 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
               scope.querySelectorAll('.pp-doc-rm').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Remove this document?'))return; var id=btn.dataset.id, po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]');
                 postJSON(EP.docRemove,{id:id},function(){ if(po&&_ppData.docsByPo&&_ppData.docsByPo[po])_ppData.docsByPo[po]=_ppData.docsByPo[po].filter(function(d){return String(d.id)!==String(id);}); rerenderRow(row,po,'invoice'); }); }; });
               // submit a document for Dock & Bay approval
-              scope.querySelectorAll('.pp-doc-submit').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Submit this document to Dock & Bay for approval?'))return; var id=btn.dataset.id, po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); btn.disabled=true;
-                postJSON(EP.docSubmit,{att_id:id},function(j){ if(j&&j.error){alert(j.error);btn.disabled=false;return;}
+              scope.querySelectorAll('.pp-doc-submit').forEach(function(btn){ btn.onclick=function(){ if(btn.disabled)return; if(!confirm('Submit this document to Dock & Bay for approval?'))return; var id=btn.dataset.id, po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); var _t=btn.textContent; btn.disabled=true; btn.textContent='Submitting…';
+                postJSON(EP.docSubmit,{att_id:id},function(j){ if(j&&j.error){alert(j.error);btn.disabled=false;btn.textContent=_t;return;}
                   if(_ppData.docsByPo&&_ppData.docsByPo[po])_ppData.docsByPo[po].forEach(function(d){ if(String(d.id)===String(id)){ d.approval_status='submitted'; d.review_notes=''; } });
-                  rerenderRow(row,po,'invoice'); }); }; });
+                  rerenderRow(row,po,'invoice');   // row now shows the ⏳ "Submitted, awaiting approval" badge (no submit button)
+                  alert('✓ Submitted for approval.\n\nThe Dock & Bay team has been notified by email — no need to submit again. You\'ll see the status update here once it\'s reviewed.'); }); }; });
             } }
     function loadPreview(){ tabsEl.style.display=''; body.innerHTML='<div class="count">Loading…</div>';
       opts.getData().then(function(d){ if(d&&d.notesByPo){ Object.keys(d.notesByPo).forEach(function(k){ shortNotes(d.notesByPo[k]); }); } _ppData=d; if(!ppApplyHash())renderPP(); }).catch(function(e){ body.innerHTML='<div class="count" style="color:#dc2626">'+esc(e&&e.message||e)+'</div>'; }); }

@@ -5578,6 +5578,13 @@ async function poSupplierName(po) {
 }
 // Push email when a supplier submits a DOCUMENT for approval (same recipients as invoice submissions).
 async function emailDocSubmit(po, filename, by) {
+  // Dedupe: if a "document for approval" email for this PO already went out in the last 10 minutes, skip — a supplier
+  // re-submitting (often because the first submit gave no obvious confirmation) shouldn't spam the same notification. (Ben)
+  try { const dup = (await pool.query(`SELECT 1 FROM planner.email_log
+      WHERE ref=$1 AND kind='invoice-notify' AND subject ILIKE '%document for approval%' AND status IN ('sent','sandbox')
+        AND created_at > now() - interval '10 minutes' LIMIT 1`, [po])).rowCount;
+    if (dup) { console.log('[email] doc-approval for ' + po + ' deduped (sent within 10 min)'); return { deduped: true, sent: 0 }; }
+  } catch (e) { /* email_log absent → fall through and send */ }
   let emails;
   try { const s = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='invoice_submit_notify'`)).rows[0];
     emails = _emails(s ? s.value : ''); } catch (e) { emails = []; }
@@ -15483,14 +15490,18 @@ app.post('/api/portal/additional-cost-remove', portalAuth, async (req, res) => {
 app.post('/api/portal/doc-submit', portalAuth, async (req, res) => {
   const id = req.body && req.body.att_id; if (!id) return res.status(400).json({ error: 'att_id required' });
   try {
-    const doc = (await pool.query(`SELECT id, po, coalesce(filename,'document') filename FROM planner.portal_attachments WHERE id=$1`, [id])).rows[0];
+    // Read the PRE-update state so a quick re-submit (already 'submitted' < 10 min ago) doesn't drop a duplicate
+    // timeline note. The email is separately deduped inside emailDocSubmit. (Ben)
+    const doc = (await pool.query(`SELECT id, po, coalesce(filename,'document') filename,
+        (approval_status='submitted' AND submitted_at > now() - interval '10 minutes') AS recent
+      FROM planner.portal_attachments WHERE id=$1`, [id])).rows[0];
     if (!doc || !doc.po || !await portalOwnsPO(req, doc.po)) return portalDeny(res);
     await pool.query(`UPDATE planner.portal_attachments
         SET approval_status='submitted', submitted_by=$2, submitted_at=now(), review_notes=NULL, reviewed_by=NULL, reviewed_at=NULL
         WHERE id=$1`, [id, req.portal.email || 'supplier']);
     const sid = (req.portal.supplierIds || [])[0] || null;
-    try { await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body) VALUES ($1,$2,$3,'supplier',$4)`,
-      [doc.po, sid, req.portal.email || null, 'Submitted document “' + doc.filename + '” for approval']); } catch (e) { /* timeline best-effort */ }
+    if (!doc.recent) { try { await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body) VALUES ($1,$2,$3,'supplier',$4)`,
+      [doc.po, sid, req.portal.email || null, 'Submitted document “' + doc.filename + '” for approval']); } catch (e) { /* timeline best-effort */ } }
     emailDocSubmit(doc.po, doc.filename, req.portal.email).catch(() => {});
     res.json({ ok: true });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
