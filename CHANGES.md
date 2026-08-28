@@ -1,3 +1,7 @@
+## v27.323 FIX: smoothing record-of-change fix is now fully client-side (no server change; works against live)
+- Refined the v27.308 EMAXCONN fix per Diviyaj's review so it needs **no server change** and works against the **current live server** (which reads `b.rows`). `postChangesBatched()` gained an optional **`payloadKey`** parameter (defaults to `'changes'`); `logChangesBulk()` now passes **`'rows'`** for the `/api/forecast/changes/bulk` audit endpoint. Reverted the v27.308 server-side `{changes}` alias — the endpoint reads only `b.rows` again, exactly as at v27.307.
+- Behaviour is otherwise unchanged: an FY-wide smooth still accumulates every month into **one** array and makes **one** batched/awaited/retried/circuit-broken POST (not one un-awaited POST per month); a failure **buffers** into `_CHG_BUFFER` for the next autosave/tab-hide flush instead of vanishing. Existing save-forecasts / save-sku-forecasts callers are untouched (they use the default `'changes'` key). Smoothing maths, buy plan and forecast output are unchanged.
+
 ## v27.322 FIX: Returns % now shows on Config ▸ Branches (was added to the wrong function)
 - The v27.317 Returns % field was added to `brTbl()`, a **dead/unused** branches table — the live SUPPLY ▸ Config ▸ Branches tab is rendered by `SUBS['branches']` (a card + edit-form layout), which is why the field never appeared. Now added there: **Returns %** shows on each branch card and is **editable in the branch edit form** (saves via the existing `/api/supply/branch/:name`, which already accepts `returns_pct`).
 

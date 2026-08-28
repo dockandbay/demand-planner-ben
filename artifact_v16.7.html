@@ -5897,7 +5897,7 @@ function logChangesBulk(rows){ if(!rows||!rows.length)return;
   rows.forEach(function(r){ FC_CHANGE_KEYS.add((r.level||'sku')+'|'+r.item+'|'+r.country+'|'+r.channel+'|'+r.month); });
   if(typeof _savePausedUntil!=='undefined' && Date.now()<_savePausedUntil){ try{ Array.prototype.push.apply(_CHG_BUFFER,rows); }catch(e){} return; }   // DB busy → buffer, don't pile on; flushed on the next save
   try{
-    postChangesBatched('/api/forecast/changes/bulk',rows,{actor:_meEmail()},'Recording changes')
+    postChangesBatched('/api/forecast/changes/bulk',rows,{actor:_meEmail()},'Recording changes','rows')
       .catch(function(){ try{ Array.prototype.push.apply(_CHG_BUFFER,rows); }catch(e){} });   // failed after retries → re-buffer for the next flush
   }catch(e){ try{ Array.prototype.push.apply(_CHG_BUFFER,rows); }catch(_e){} } }
 // Manual cell edits accumulate here and flush with the 60s forecast autosave (not one POST per edit).
@@ -15270,12 +15270,17 @@ var SAVE_CHUNK=5000;                                   // rows per request; the 
 var SAVE_BACKOFF=[1000,2000,4000,8000,16000,30000];   // ms between retries, grows then caps at 30s
 var SAVE_MAX_FAILS=3;                                  // consecutive failures → pause (circuit breaker)
 var SAVE_COOLDOWN_MS=30000, _savePausedUntil=0;        // after a pause, block new save attempts for a cooldown so tab-focus / autosave can't hammer the DB during an outage
-async function postChangesBatched(url,items,extra,label){
+async function postChangesBatched(url,items,extra,label,payloadKey){
+  // payloadKey = the JSON key the server reads the row array under. Defaults to 'changes' (save-forecasts /
+  // save-sku-forecasts endpoints). The /api/forecast/changes/bulk audit endpoint reads `b.rows`, so its caller
+  // passes 'rows' — this keeps the EMAXCONN smoothing fix entirely client-side (no server change). (v27.323)
+  var _pk=payloadKey||'changes';
   var saved=0, total=items.length, fails=0, tries=0;
   for(var i=0;i<total;){
     var slice=items.slice(i,i+SAVE_CHUNK);
     try{
-      var resp=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign({changes:slice},extra||{}))});
+      var _body={}; _body[_pk]=slice;
+      var resp=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.assign(_body,extra||{}))});
       var data=await resp.json();
       if(!resp.ok||data.error)throw new Error((data&&data.error)||('HTTP '+resp.status));
       saved+=(data.saved!=null?data.saved:slice.length);

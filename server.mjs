@@ -12871,9 +12871,10 @@ app.post('/api/forecast/change', async (req, res) => {
 });
 // Bulk-record changes (a smoothing sweep / target-rec apply touches many cells at once).
 app.post('/api/forecast/changes/bulk', async (req, res) => {
-  // Accept either {rows} (legacy) or {changes} — the client now routes audit writes through the shared
-  // postChangesBatched() sender (same as saveForecasts), which posts under the `changes` key.
-  const b = req.body || {}, rows = Array.isArray(b.rows) ? b.rows : (Array.isArray(b.changes) ? b.changes : []);
+  // Reads {rows}. The client routes audit writes through postChangesBatched() (same serialised/chunked/retried
+  // sender as saveForecasts) and passes payloadKey 'rows' for this endpoint — so the EMAXCONN smoothing fix is
+  // entirely client-side and no server change is needed here. (v27.323)
+  const b = req.body || {}, rows = Array.isArray(b.rows) ? b.rows : [];
   if (!rows.length) return res.json({ ok: true, saved: 0 });
   const num = (v) => (v === '' || v == null || isNaN(+v)) ? null : +v;
   try {
