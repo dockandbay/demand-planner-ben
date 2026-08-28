@@ -4500,7 +4500,10 @@ var EXC_MKT='all', EXC_CH='all', EXC_GRAIN='sku', EXC_SUBTAB='fclt', EXC_SEV='al
 var EXC_SUBTABS=[['fclt','Forecast < Actual',1,1],['fgtr','Forecast > Run-rate',1,1],['sellnofc','Selling, no forecast',1,1],['anomaly','Forecast anomalies',1,1],['noavail','No availability',0,1],['nocover','Available, no cover',1,1],['disc','Discontinued, active',0,1],['recs','Recommendations',0,0],['dataconfig','Data & config',0,0]];   // [key,label,usesChannel,usesCountry] — DEMAND ▸ Exceptions L3 sub-tabs (deep-linked #/demand/exceptions/<key>)
 var ACC_MKT='all', ACC_CH='all', ACC_GRAIN='category', ACC_LOOKBACK=6, ACC_SORT='wmape';   // DEMAND ▸ Accuracy filters (forecast accuracy & bias vs locked snapshots)
 var SS_MKT='all', SS_CH='all', SS_GRAIN='category', SS_SL=95, SS_SORT='delta', SS_LEADCV=0.25, SS_UNCON=false;   // DEMAND ▸ Safety stock filters (SS_LEADCV = lead-time variability; SS_UNCON = unconstrain stockout-censored demand)
-var SB_MKT='UK', SB_P1=40, SB_P2=40, SB_P3=20, SB_A1=1, SB_A2=4, SB_A3=6, SB_LC='Picnic';   // DEMAND ▸ Ship bags — order-size split + always-large cats (Ben: set of 4u = Large, 6u+ = XL)
+var SB_MKT='UK', SB_P1=40, SB_P2=40, SB_P3=20, SB_A1=1, SB_A2=4, SB_A3=6, SB_LC='Picnic';   // DEMAND ▸ Ship bags — legacy order-size split (kept for the unused calcMkt helper)
+// Ship bags REGRESSION model: total bags = SB_RATIO × forecast DTC units, split by the size mix %. Defaults from a
+// 12-month regression on UK ILG actuals (Aug-25→Jul-26): 0.449 bags/DTC-unit (R²=0.95); size mix Med 33.5 / Lar 57.2 / XL 9.2.
+var SB_RATIO=0.449, SB_MMED=33.5, SB_MLAR=57.2, SB_MXLG=9.2;
 var TGT_CACHE=null;
 var _da={sec:'actions',mkt:'all',cat:'all',status:'open'}; // DEMAND ▸ Actions filters (sec: actions|insights|weather; status: open|snoozed|dismissed|done|all)
 // Which level-3 section a given action TYPE belongs to. ACTIONS = act-on-it now (sell-through, events,
@@ -11073,9 +11076,10 @@ function renderShipBagView(body){
   // recommended bag demand per month for a market (from the DTC units forecast → orders → bag sizes)
   // Exclude the ship bags themselves + non-core products from the order-unit count (they don't generate an order that needs a bag). — Ben
   function _sbExclude(sku){ if(/^SHIPBAG/i.test(sku))return true; var sm=(typeof SKUM!=='undefined')&&SKUM[sku]; if(sm){ var s=(sm.s||''), c=(sm.c||''); if(/^non[\s-]?core$/i.test(s)||/^non[\s-]?core$/i.test(c))return true; } return false; }
-  function recFor(mco){ return months.map(function(m){ var tu=0,lu=0;
-    Object.keys(BP_DATA.products||{}).forEach(function(sku){ if(_sbExclude(sku))return; var pd=BP_DATA.products[sku], md=pd&&pd.mkts&&pd.mkts[mco]; if(!md)return; var v=(md.demand&&md.demand.DTC&&md.demand.DTC[m])||0; if(v<=0)return; tu+=v; if(isLargeCat(sku))lu+=v; });
-    var orders=avgUPO>0?tu/avgUPO:0, med=orders*p1,lg=orders*p2,xl=orders*p3, lFrac=tu>0?lu/tu:0, picMed=med*lFrac; return {m:m, medium:med-picMed, large:lg+picMed, xl:xl}; }); }
+  // Regression model: total ship bags = SB_RATIO × forecast DTC units (bags-per-unit, empirical); split by the size mix % (auto-normalised).
+  function recFor(mco){ var mt=(SB_MMED+SB_MLAR+SB_MXLG)||1; return months.map(function(m){ var tu=0;
+    Object.keys(BP_DATA.products||{}).forEach(function(sku){ if(_sbExclude(sku))return; var pd=BP_DATA.products[sku], md=pd&&pd.mkts&&pd.mkts[mco]; if(!md)return; var v=(md.demand&&md.demand.DTC&&md.demand.DTC[m])||0; if(v>0)tu+=v; });
+    var bags=tu*SB_RATIO; return {m:m, medium:bags*SB_MMED/mt, large:bags*SB_MLAR/mt, xl:bags*SB_MXLG/mt}; }); }
   var recByM={}; recFor(co).forEach(function(r){ recByM[r.m]=r; });
   var BAGMAP=[['SHIPBAG-MED','medium','Medium'],['SHIPBAG-LAR','large','Large'],['SHIPBAG-XLG','xl','XL']];
   function curFcM(sku,m){ var pd=(BP_DATA.products||{})[sku], md=pd&&pd.mkts&&pd.mkts[co]; if(md&&md.demand&&md.demand.DTC&&md.demand.DTC[m]!=null)return md.demand.DTC[m]||0; var o=skuOvGetK(sku+'|'+co+'|DTC|'+m); return o!=null?o:0; }
@@ -11086,13 +11090,11 @@ function renderShipBagView(body){
   var bar='<div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin:2px 0 8px;font-size:12px">'
     +'<div><span style="'+LBL+'">Country / 3PL</span>'+MKTS4.map(function(x){return PILL('mkt',x,SB_MKT===x,x);}).join('')+'</div></div>';
   var cfg='<div style="display:flex;gap:18px;align-items:flex-end;flex-wrap:wrap;margin-bottom:12px;font-size:12px;border:1px solid #eef2f7;border-radius:8px;padding:10px 12px">'
-    +'<div style="font-size:11px;color:#64748b;font-weight:700;width:100%;margin-bottom:2px">Recommendation settings (drive the purple recommended figures)</div>'
-    +'<div><div style="'+LBL+';margin-bottom:4px">Order-size split (% of orders → avg units → bag)</div>'
-      +'<div style="display:flex;gap:10px;align-items:center"><span>'+IN('p1',SB_P1)+'% @ '+IN('a1',SB_A1)+'u → <b>Medium</b></span>'
-      +'<span>'+IN('p2',SB_P2)+'% @ '+IN('a2',SB_A2)+'u → <b>Large</b></span>'
-      +'<span>'+IN('p3',SB_P3)+'% @ '+IN('a3',SB_A3)+'u → <b>XL</b></span></div></div>'
-    +'<div><div style="'+LBL+';margin-bottom:4px">Always-large categories (comma-sep)</div>'+IN('lc',SB_LC,180)+'</div>'
-    +'<div style="color:#94a3b8">≈ '+(Math.round(avgUPO*100)/100)+' units / order · <b>Large = 4u, XL = 6u+</b></div></div>';
+    +'<div style="font-size:11px;color:#64748b;font-weight:700;width:100%;margin-bottom:2px">Regression model <span style="font-weight:400">— ship bags = <b>ratio × forecast DTC units</b>, split by size mix. Defaults calibrated from a 12-month regression on <b>UK ILG</b> actuals (R²=0.95); adjust per market.</span></div>'
+    +'<div><div style="'+LBL+';margin-bottom:4px">Bags per DTC unit</div>'+IN('ratio',SB_RATIO,60)+'</div>'
+    +'<div><div style="'+LBL+';margin-bottom:4px">Size mix (% of bags)</div>'
+      +'<div style="display:flex;gap:10px;align-items:center"><span>'+IN('mmed',SB_MMED)+' <b>Medium</b></span><span>'+IN('mlar',SB_MLAR)+' <b>Large</b></span><span>'+IN('mxlg',SB_MXLG)+' <b>XL</b></span></div></div>'
+    +'<div style="color:#94a3b8">≈ '+(SB_RATIO>0?(Math.round(100/SB_RATIO)/100):'–')+' units / order</div></div>';
   var TH='padding:4px 6px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:2px solid #e2e8f0;text-align:right;white-space:nowrap', TC='padding:4px 6px;border-bottom:1px solid #f1f5f9;text-align:right;font-variant-numeric:tabular-nums';
   var head='<tr><th style="'+TH+';text-align:left;position:sticky;left:0;background:#f8fafc">Ship-bag SKU</th>'
     +months.map(function(m,i){ return '<th style="'+TH+'">'+(i===0?'<span style="color:#7c3aed">this mo</span><br>':'')+mlab(m)+'</th>'; }).join('')+'</tr>';
@@ -11118,9 +11120,8 @@ function renderShipBagView(body){
     renderShipBagView(body);
     if(typeof saveForecasts==='function'){ Promise.resolve(saveForecasts()).catch(function(){}); } };
   function num(el,dflt){ var v=parseFloat(el.value); return isFinite(v)?v:dflt; }
-  var mp={p1:'SB_P1',p2:'SB_P2',p3:'SB_P3',a1:'SB_A1',a2:'SB_A2',a3:'SB_A3'};
+  var mp={ratio:'SB_RATIO',mmed:'SB_MMED',mlar:'SB_MLAR',mxlg:'SB_MXLG'};
   Object.keys(mp).forEach(function(k){ var el=body.querySelector('.sb-'+k); if(el)el.onchange=function(){ window[mp[k]]=num(this,window[mp[k]]); renderShipBagView(body); }; });
-  var lc=body.querySelector('.sb-lc'); if(lc)lc.onchange=function(){ SB_LC=this.value; renderShipBagView(body); };
 }
 var DEMAND_TABS=[['plan','Plan'],['summary','Summary'],['keyaccounts','Key Accounts Forecast'],['kpis','KPIs'],['pricechanges','Price changes'],['trends','Trends'],['actions','Actions'],['exceptions','Exceptions'],['accuracy','Accuracy'],['fcanom','Forecast trend anomalies'],['safetystock','Safety stock'],['stockcover','Stock cover'],['shipbags','Ship bags'],['calendar','Calendar'],['scenario','Scenario planner']];   // Sell-through targets decommissioned (Ben 17-Aug-26)
 function renderDemandTabs(){

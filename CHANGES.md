@@ -1,3 +1,9 @@
+## v27.321 DEMAND ▸ Ship bags — regression forecast model (calibrated on UK ILG actuals)
+- Replaced the Ship bags order-size-split heuristic with a **regression model**: **ship bags = ratio × forecast DTC units**, split by an editable **size mix %**. Defaults from a 12-month regression on **UK ILG actuals** (Aug-25→Jul-26): **0.449 bags per DTC unit (R²=0.945)**; size mix **Med 33.5 / Lar 57.2 / XL 9.2**. Settings (ratio + mix) editable per market; the grid + "Apply recommendations → forecast" flow is unchanged.
+- **DTC already includes TIK** (buildLiveDemand folds TikTok into DTC), and the actuals combine them — so the driver is effectively **DTC + TIK**, no double count. Non-Core products excluded (~0.3%, immaterial).
+- **Amazon-from-ILG** (Amazon Seller UK orders shipped from ILG, ~4% of DTC) is **already absorbed by the ratio** — the fitted bag actuals include those orders' bags, regressed against DTC. Covered implicitly without a separate driver.
+- vs the old heuristic (0.31 bags/unit, 40/40/20): the empirical model forecasts **more total bags** and a **Large-dominant** mix.
+
 ## v27.320 Polybag lines: pinned to the bottom of the PO order plan, light-orange, hidden from the main tab
 - On the **PO order-plan panel**, `POLYBAG <size>` lines now render **at the bottom** (after all product lines), **highlighted light orange** with a small "polybag" tag — clearly separated from the real product lines.
 - They **no longer appear on the main SUPPLY ▸ Order Plan tab** (or its export) — polybags are a per-PO concern only. (Filtered in `opBuild`.)
