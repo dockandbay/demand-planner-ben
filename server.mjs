@@ -10521,9 +10521,11 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
     memberId = poRow.cin7_member_id ? Number(poRow.cin7_member_id) : await cin7IdByCompany('Contacts', poRow.supplier_name);
     branchId = poRow.branch ? await cin7IdByCompany('Branches', poRow.branch) : null;
     // The fields that anchor an order as a PURCHASE order in Cin7 (supplier member + branch + company). Sent on
-    // BOTH create AND update — an update that omits company/branchId flips the order into a SALES ORDER. Always
-    // pushed as a draft (isApproved:false) so a person approves it in Cin7.
-    const poFields = { company: poRow.supplier_name || '', isApproved: false };
+    // BOTH create AND update — an update that omits company/branchId flips the order into a SALES ORDER.
+    // isApproved is set PER-PATH below: forced false on CREATE (a new PO → draft for a human to approve), but
+    // PRESERVED on UPDATE (echo the PO's current isApproved) — sending isApproved:false on an update reverted an
+    // already-approved / received PO back to DRAFT (Ben's PO-1731755, PO-56AULX1 after an "Uploaded to ERP" push).
+    const poFields = { company: poRow.supplier_name || '' };
     if (memberId) poFields.memberId = Number(memberId);
     if (branchId) poFields.branchId = Number(branchId);
     if (edd) poFields.estimatedDeliveryDate = edd;   // completion date — kept on create, update AND the corrective PUT
@@ -10565,7 +10567,9 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
     if (cin7Id) {
       // UPDATE existing Cin7 PO — re-assert the SAME PO-anchoring fields as create (memberId/company/branchId +
       // draft). Sending only id+lines (as before) let Cin7 reclassify the order as a sales order.
-      const upd = Object.assign({ id: Number(cin7Id) || cin7Id, lineItems }, poFields);
+      // UPDATE: preserve the PO's current approval — echo curApproved if we could read it, else OMIT isApproved so
+      // Cin7 leaves it unchanged (never force an approved/received PO back to draft on a line update). (Ben)
+      const upd = Object.assign({ id: Number(cin7Id) || cin7Id, lineItems }, poFields, (curApproved === undefined ? {} : { isApproved: curApproved }));
       const body = [upd];
       r = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=false',
         { method: 'PUT', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify(body) });
@@ -10579,8 +10583,8 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
       if (!memberId) return res.status(422).json({ error: 'Supplier "' + (poRow.supplier_name || '(none)') + '" was not found as a Cin7 contact — cannot create the PO. Set the supplier\'s Cin7 member id (or spell-match the name in Cin7), then retry.', lines: lines.length, mode });
       if (poRow.branch && !branchId) return res.status(422).json({ error: 'Branch "' + poRow.branch + '" was not found in Cin7 Branches — cannot create the PO. Make the planner branch name match the Cin7 branch exactly, then retry.', lines: lines.length, mode });
       // Do NOT send `stage` — let Cin7 apply the account's default PO stage. currencyCode = the supplier's
-      // default_currency (USD today); Cin7 looks up the rate. poFields carries memberId/company/branchId + draft.
-      const create = Object.assign({ reference: po, currencyCode: poRow.currency || 'USD', lineItems }, poFields);
+      // default_currency (USD today); Cin7 looks up the rate. CREATE → isApproved:false (new PO = draft for a human).
+      const create = Object.assign({ reference: po, currencyCode: poRow.currency || 'USD', lineItems }, poFields, { isApproved: false });
       r = await cin7Fetch('https://api.cin7.com/api/v1/PurchaseOrders?loadboms=false',
         { method: 'POST', headers: { Authorization: auth, 'content-type': 'application/json' }, body: JSON.stringify([create]) });
       txt = await r.text();

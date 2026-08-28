@@ -1,3 +1,8 @@
+## v27.319 FIX: an ERP line push no longer reverts an approved/received Cin7 PO to draft
+- **Bug (Ben):** received/complete POs were going back to **draft** in Cin7 after an "Uploaded to ERP" line push from Horizon (confirmed in the audit for PO-1731755 and PO-56AULX1). Cause: `POST /api/supply/po/:po/cin7-lines` sent **`isApproved: false` on every push** (poFields), which is right for a *new* PO (draft → human approves) but **wrong on an update** — it un-approved an already-approved order.
+- **Fix:** `isApproved` is now set **per path** — **CREATE** still forces `false` (new PO = draft for a human), but **UPDATE preserves the PO's current approval** (echoes the Cin7 `isApproved` we read, or omits it so Cin7 leaves it unchanged). Mirrors the already-correct `cin7-date` endpoint. So a line/price update to a live PO no longer flips its status.
+- ⚠ **Not live-tested** (writes to production Cin7); verified by code review + the `cin7-date` precedent (Cin7 accepts a PUT with `isApproved:true`). **POs already wrongly reverted (PO-1731755, PO-56AULX1, and any others pushed after approval) need re-approving in Cin7 manually** — the fix only prevents recurrence.
+
 ## v27.318 Polybags: round up, exclude AIR/FOB, Cin7 SKU "POLYBAG", + >10k units action reminder
 - **Round UP** to the nearest 50 (was nearest) — never under-provision (e.g. 3,920 × 1.5% = 58.8 → **100**).
 - **AIR and FOB orders excluded** — the "Add polybags" section is hidden for a PO shipping air, or FOB / on the Manufacturing branch (`skipReason`). Mode read from the linked shipment.
