@@ -1,3 +1,8 @@
+## v27.320 Polybag lines: pinned to the bottom of the PO order plan, light-orange, hidden from the main tab
+- On the **PO order-plan panel**, `POLYBAG <size>` lines now render **at the bottom** (after all product lines), **highlighted light orange** with a small "polybag" tag — clearly separated from the real product lines.
+- They **no longer appear on the main SUPPLY ▸ Order Plan tab** (or its export) — polybags are a per-PO concern only. (Filtered in `opBuild`.)
+- (Reminder: the **Returns %** column added to Config ▸ Branches in v27.317 needs a page **reload** to appear — an open tab keeps old JS since v27.307 stopped auto-reloading.)
+
 ## v27.319 FIX: an ERP line push no longer reverts an approved/received Cin7 PO to draft
 - **Bug (Ben):** received/complete POs were going back to **draft** in Cin7 after an "Uploaded to ERP" line push from Horizon (confirmed in the audit for PO-1731755 and PO-56AULX1). Cause: `POST /api/supply/po/:po/cin7-lines` sent **`isApproved: false` on every push** (poFields), which is right for a *new* PO (draft → human approves) but **wrong on an update** — it un-approved an already-approved order.
 - **Fix:** `isApproved` is now set **per path** — **CREATE** still forces `false` (new PO = draft for a human), but **UPDATE preserves the PO's current approval** (echoes the Cin7 `isApproved` we read, or omits it so Cin7 leaves it unchanged). Mirrors the already-correct `cin7-date` endpoint. So a line/price update to a live PO no longer flips its status.

@@ -3619,7 +3619,8 @@
       else { var qdiff=(aq!=null&&oq!=null&&aq!==oq); qtyCell=units(oq)+(qdiff?' <span style="background:#fef3c7;color:#92400e;font-weight:700;padding:0 4px;border-radius:3px" title="supplier amended the quantity">→ '+units(aq)+' ⚠</span>':''); }
       var confCell = lcr.unconfirmed ? '<button class="save-btn op-accept" data-po="'+esc(po)+'" data-sku="'+esc(sku)+'" title="confirm this supplier change">Accept</button> <button class="save-btn light op-reject" data-po="'+esc(po)+'" data-sku="'+esc(sku)+'" title="reject this supplier change — discards it; order plan unchanged">✕ Reject</button>'
         : (hasSub&&lcr.confirmed ? '<span class="tool-badge bg-green" title="confirmed">✓</span>' : '<span class="mut tiny">—</span>');
-      return '<tr'+(lcr.unconfirmed?' style="background:#fff7ed"':'')+'><td class="l"><button class="lnk-btn op-del-line" data-po="'+esc(po)+'" data-sku="'+esc(sku)+'" data-qty="'+(oq||0)+'" data-added="'+(added?1:0)+'" title="Delete this line from the order plan" style="color:#b91c1c;font-weight:700;margin-right:6px">✕</button>'+esc(sku)+'</td>'
+      var _isPb=/^POLYBAG /i.test(sku), _trBg=lcr.unconfirmed?'#fff7ed':(_isPb?'#ffedd5':'');   // polybag lines → light orange, sorted to the bottom
+      return '<tr'+(_trBg?' style="background:'+_trBg+'"':'')+'><td class="l"><button class="lnk-btn op-del-line" data-po="'+esc(po)+'" data-sku="'+esc(sku)+'" data-qty="'+(oq||0)+'" data-added="'+(added?1:0)+'" title="Delete this line from the order plan" style="color:#b91c1c;font-weight:700;margin-right:6px">✕</button>'+(_isPb?'<span class="tool-badge" style="background:#fed7aa;color:#9a3412;font-size:8px;margin-right:4px">polybag</span>':'')+esc(sku)+'</td>'
         +'<td class="l" style="white-space:nowrap">'+(riskBadges(lineObj)||'<span class="mut">—</span>')+'</td>'
         +'<td style="text-align:right">'+qtyCell+'</td>'
         +'<td style="text-align:right">'+(est!=null?'$'+money(est):'<span class="mut">—</span>')+'</td>'
@@ -3629,9 +3630,13 @@
         +'<td class="l" style="white-space:nowrap">'+confCell+'</td></tr>';
     }
     // Est. cost = the line's own cost_price, else the products default cost for the PO's supplier (sku_cost).
-    var rows=(lines||[]).map(function(l){ var ec=(l.cost_price!=null&&l.cost_price!=='')?Number(l.cost_price):((l.sku_cost!=null&&l.sku_cost!=='')?Number(l.sku_cost):null);
-      return row(l.sku, l.qty, ec, costs[l.sku], false, l); }).join('');
-    Object.keys(costs).forEach(function(sku){ var c=costs[sku]; if(c&&c.is_added&&!lineSkus[sku]) rows+=row(sku, null, null, c, true); });
+    // Product lines first; POLYBAG lines are pushed to the BOTTOM (rendered last, highlighted light orange). (Ben)
+    var _ecOf=function(l){ return (l.cost_price!=null&&l.cost_price!=='')?Number(l.cost_price):((l.sku_cost!=null&&l.sku_cost!=='')?Number(l.sku_cost):null); };
+    var _prodL=(lines||[]).filter(function(l){return !/^POLYBAG /i.test(l.sku||'');});
+    var _pbL=(lines||[]).filter(function(l){return /^POLYBAG /i.test(l.sku||'');});
+    var rows=_prodL.map(function(l){ return row(l.sku, l.qty, _ecOf(l), costs[l.sku], false, l); }).join('');
+    Object.keys(costs).forEach(function(sku){ var c=costs[sku]; if(c&&c.is_added&&!lineSkus[sku]&&!/^POLYBAG /i.test(sku)) rows+=row(sku, null, null, c, true); });
+    rows+=_pbL.map(function(l){ return row(l.sku, l.qty, _ecOf(l), costs[l.sku], false, l); }).join('');   // polybags at the bottom
     if(!rows) rows='<tr><td colspan="8" class="mut">no lines</td></tr>';
     var banner = unconf>0 ? '<div style="margin:4px 0 8px;padding:7px 11px;background:#fff7ed;border:1px solid #fdba74;border-radius:6px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">'
         +'<span style="font-weight:700;color:#92400e">⚠ '+unconf+' unconfirmed supplier change'+(unconf>1?'s':'')+'</span>'
@@ -4376,6 +4381,7 @@
       fetch('/api/supply/portal-line-costs').then(function(r){return r.json();}).catch(function(){return [];})])
       .then(function(res){ opBuild(lines,c,res[0]||[],res[1]||[]); }).catch(function(){opBuild(lines,c,[],[]);}); }
   function opBuild(lines,c,skuMaster,plc){ plc=plc||[];
+    lines=(lines||[]).filter(function(l){ return !/^POLYBAG /i.test(l.sku||''); });   // POLYBAG lines are shown only at PO level (order-plan panel), never on the main ORDER PLAN tab / export (Ben)
     var plcMap={}; plc.forEach(function(x){ plcMap[x.po+'|'+x.sku]=x; });   // (po|sku) → supplier change (for inline confirm in cells)
     function uniq(k){var s={};lines.forEach(function(l){if(l[k])s[l[k]]=1;});return Object.keys(s).sort();}
     var statuses=uniq('status'), countries=uniq('country'), prods=uniq('prod_no').reverse(), batches=uniq('batch_id').reverse();   // prod# / batch dropdowns: descending (newest first)
