@@ -2742,9 +2742,11 @@ app.post('/api/supply/edi-labels/generate', async (req, res) => {
     const items = await _ediParse(csvText, pdfs);
     const job = { items };
     const choices = b.choices || {}, refs = b.preorderRefs || {};
-    const JSZip = (await import('jszip')).default; const zip = new JSZip();
+    const asEntries = !!b.as_entries;   // batched large sets: return split PDFs as JSON so the client assembles ONE ZIP (beats Vercel's ~4.5MB body cap)
     const san = s => String(s == null ? '' : s).replace(/[\/\\:*?"<>|\x00-\x1f]+/g, '_').replace(/\s+/g, ' ').trim().replace(/[. ]+$/, '') || '_';
-    const manifest = [['sscc', 'po', 'preorder_ref', 'store', 'client_sku', 'ean', 'our_sku', 'supplier', 'matched', 'path']];
+    // Build the split entries + manifest rows + packing rows once, then either ZIP them (single request) or return
+    // them as JSON (batched — the caller passes as_entries=true, dedupes paths ACROSS batches, and builds the ZIP).
+    const fileEntries = [], manifestRows = [], packRows = [];
     const seen = {};
     job.items.forEach(it => {
       let path, supplier = '', ref = '';
@@ -2757,16 +2759,21 @@ app.post('/api/supply/edi-labels/generate', async (req, res) => {
         const sub = it.reason === 'SSCC not in CSV' ? '_SSCC_NOT_IN_CSV' : (/EAN/.test(it.reason) ? '_EAN_NOT_MATCHED' : '_NO_SSCC_FOUND');
         path = '_UNMATCHED/' + sub + '/' + san(it.sscc) + '.pdf';
       }
-      if (seen[path]) { const n = ++seen[path]; path = path.replace(/\.pdf$/i, '_' + n + '.pdf'); } else seen[path] = 1;   // same SSCC on >1 page → don't overwrite
-      zip.file(path, it.buf);
-      manifest.push([it.sscc, it.po, ref, it.store, it.clientSku, it.ean, it.sku, supplier, it.matched ? 'yes' : ('no (' + it.reason + ')'), path]);
+      if (!asEntries) { if (seen[path]) { const n = ++seen[path]; path = path.replace(/\.pdf$/i, '_' + n + '.pdf'); } else seen[path] = 1; }   // single-request: dedupe here. Batched: client dedupes across batches.
+      fileEntries.push({ path, buf: it.buf });
+      manifestRows.push([it.sscc, it.po, ref, it.store, it.clientSku, it.ean, it.sku, supplier, it.matched ? 'yes' : ('no (' + it.reason + ')'), path]);
+      if (it.matched) packRows.push([supplier, it.po, ref, it.sku, it.qty || '', it.sscc]);
     });
+    if (asEntries) {   // batched mode: hand back this batch's pieces; the client merges + zips
+      return res.set('Cache-Control', 'no-store').json({
+        entries: fileEntries.map(f => ({ path: f.path, b64: f.buf.toString('base64') })),
+        manifest: manifestRows, pack: packRows });
+    }
+    const JSZip = (await import('jszip')).default; const zip = new JSZip();
     const q = v => { v = String(v == null ? '' : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; };
-    zip.file('manifest.csv', manifest.map(r => r.map(q).join(',')).join('\n') + '\n');
-    // per-supplier packing list CSV (Supplier · PO · Preorder ref · SKU · Quantity · SSCC) — one file in each supplier folder
-    const packBy = {};
-    job.items.forEach(it => { if (!it.matched) return; const supplier = choices[it.sku] || it.mainSupplier || 'UNKNOWN_SUPPLIER'; const ref = String(refs[it.po] || '').trim();
-      (packBy[supplier] = packBy[supplier] || []).push([supplier, it.po, ref, it.sku, it.qty || '', it.sscc]); });
+    fileEntries.forEach(f => zip.file(f.path, f.buf));
+    zip.file('manifest.csv', [['sscc', 'po', 'preorder_ref', 'store', 'client_sku', 'ean', 'our_sku', 'supplier', 'matched', 'path']].concat(manifestRows).map(r => r.map(q).join(',')).join('\n') + '\n');
+    const packBy = {}; packRows.forEach(r => { (packBy[r[0]] = packBy[r[0]] || []).push(r); });
     Object.keys(packBy).forEach(sup => {
       const rows = [['Supplier', 'Purchase Order', 'Preorder Ref', 'SKU', 'Quantity', 'SSCC Label']]
         .concat(packBy[sup].sort((a, b) => String(a[1]).localeCompare(String(b[1])) || String(a[3]).localeCompare(String(b[3])) || String(a[5]).localeCompare(String(b[5]))));

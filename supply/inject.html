@@ -8088,6 +8088,29 @@
       (j.unmatched||[]).forEach(function(u){ dst.unmatched.push(u); });
       var bp=j.byPo||{}; Object.keys(bp).forEach(function(po){ dst.byPo[po]=(dst.byPo[po]||0)+bp[po]; });
       (j.skus||[]).forEach(function(s){ var e=dst._skuMap[s.sku]; if(e){ e.count+=(s.count||0); } else { dst._skuMap[s.sku]={sku:s.sku,options:s.options,main:s.main,count:s.count||0}; } }); }
+    // ── Client-side ZIP assembly (for batched GENERATE) ──────────────────────────────────────────────
+    // Generate splits SSCC label PDFs into a folder tree. For a big set (>4.5MB) we batch the request (like parse) and
+    // each batch returns its split PDFs as JSON {path,b64}; the client merges them into ONE ZIP here. STORE method (no
+    // compression) — PDFs barely compress, and it avoids needing a deflate library in the browser. (Ben)
+    var _crcTab=null;
+    function _crc32(u8){ if(!_crcTab){ _crcTab=new Uint32Array(256); for(var n=0;n<256;n++){ var c=n; for(var k=0;k<8;k++)c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1); _crcTab[n]=c>>>0; } }
+      var crc=0xFFFFFFFF; for(var i=0;i<u8.length;i++)crc=_crcTab[(crc^u8[i])&0xFF]^(crc>>>8); return (crc^0xFFFFFFFF)>>>0; }
+    function _b64ToBytes(b64){ var bin=atob(b64||''), n=bin.length, u=new Uint8Array(n); for(var i=0;i<n;i++)u[i]=bin.charCodeAt(i); return u; }
+    function _strBytes(s){ return new TextEncoder().encode(s); }
+    function _ediSan(s){ return String(s==null?'':s).replace(/[\/\\:*?"<>|\x00-\x1f]+/g,'_').replace(/\s+/g,' ').replace(/^\s+|\s+$/g,'').replace(/[. ]+$/,'')||'_'; }
+    function _ediZip(files){   // files=[{path, bytes:Uint8Array}] → application/zip Blob (store method)
+      var enc=new TextEncoder(), chunks=[], offset=0, central=[], n=files.length;
+      function u16(v){ return new Uint8Array([v&0xFF,(v>>>8)&0xFF]); }
+      function u32(v){ v=v>>>0; return new Uint8Array([v&0xFF,(v>>>8)&0xFF,(v>>>16)&0xFF,(v>>>24)&0xFF]); }
+      files.forEach(function(f){ var name=enc.encode(f.path), data=f.bytes, crc=_crc32(data);
+        [u32(0x04034b50),u16(20),u16(0x0800),u16(0),u16(0),u16(0),u32(crc),u32(data.length),u32(data.length),u16(name.length),u16(0),name].forEach(function(x){chunks.push(x);});
+        chunks.push(data);
+        central.push([u32(0x02014b50),u16(20),u16(20),u16(0x0800),u16(0),u16(0),u16(0),u32(crc),u32(data.length),u32(data.length),u16(name.length),u16(0),u16(0),u16(0),u16(0),u32(0),u32(offset),name]);
+        offset+=30+name.length+data.length; });
+      var cdStart=offset, cdSize=0;
+      central.forEach(function(cd){ cd.forEach(function(x){ chunks.push(x); cdSize+=x.length; }); });
+      [u32(0x06054b50),u16(0),u16(0),u16(n),u16(n),u32(cdSize),u32(cdStart),u16(0)].forEach(function(x){chunks.push(x);});
+      return new Blob(chunks,{type:'application/zip'}); }
     c.querySelector('#edi-parse').onclick=function(){ var st=c.querySelector('#edi-status'); st.textContent='Reading files…';
       collectFiles().then(function(cf){
         if(!cf.csv){ st.textContent='No POST PACK (ASN) CSV — add it in step 1 (or load a project).'; return Promise.reject(new Error('__done')); }
@@ -8128,14 +8151,33 @@
         var choices={}; c.querySelectorAll('.edi-sup').forEach(function(s){ choices[s.dataset.sku]=s.value; });
         var preorderRefs={}; c.querySelectorAll('.edi-ref').forEach(function(i){ if(i.value.trim())preorderRefs[i.dataset.po]=i.value.trim(); });
         btn.disabled=true; gs.textContent='Re-reading files…';
-        // stateless generate: re-send the files (works on serverless — no server-side job cache)
+        // stateless generate: re-send the files (no server-side job cache). Batched the same way as parse so a big set
+        // stays under the 4.5 MB request cap — each batch returns its split PDFs as JSON entries and we assemble ONE ZIP.
         collectFiles().then(function(cf){
           if(!cf.csv||!cf.pdfs.length){ throw new Error('Files missing — re-add in steps 1–2 (or reload the project) and parse again.'); }
-          var gbody={csv_base64:cf.csv.b64,pdfs:cf.pdfs,choices:choices,preorderRefs:preorderRefs}; var gover=_ediOversize(gbody,cf.pdfs.length); if(gover){ throw new Error(gover); }
-          gs.textContent='Building ZIP…';
-          return fetch('/api/supply/edi-labels/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(gbody)});
-        }).then(function(r){ if(!r.ok)return _ediErr(r); return r.blob(); })
-          .then(function(bl){ var u=URL.createObjectURL(bl),a=document.createElement('a'); a.href=u; a.download='edi-labels.zip'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000); gs.textContent='Downloaded ✓'; })
+          var part=_ediBatchPdfs(cf.csv.b64,cf.pdfs), batches=part.batches, rejected=part.rejected;
+          if(!batches.length){ throw new Error('All '+rejected.length+' file(s) exceed the 4.5 MB per-file limit — cannot generate.'); }
+          var allEntries=[], allManifest=[], allPack=[], seen={};
+          function run(i){ if(i>=batches.length)return Promise.resolve();
+            gs.textContent='Generating batch '+(i+1)+'/'+batches.length+' — '+batches[i].length+' PDF(s)'+(rejected.length?(' · '+rejected.length+' too large, skipped'):'')+'…';
+            return fetch('/api/supply/edi-labels/generate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csv_base64:cf.csv.b64,pdfs:batches[i],choices:choices,preorderRefs:preorderRefs,as_entries:true})})
+              .then(function(r){ if(!r.ok)return _ediErr(r); return r.json(); })
+              .then(function(j){ var ents=(j&&j.entries)||[], man=(j&&j.manifest)||[];
+                for(var k=0;k<ents.length;k++){ var p=ents[k].path; if(seen[p]){ var nn=++seen[p]; p=p.replace(/\.pdf$/i,'_'+nn+'.pdf'); } else seen[p]=1; ents[k].path=p; if(man[k])man[k][9]=p; allEntries.push(ents[k]); if(man[k])allManifest.push(man[k]); }
+                ((j&&j.pack)||[]).forEach(function(pr){ allPack.push(pr); }); return run(i+1); }); }
+          return run(0).then(function(){
+            gs.textContent='Building ZIP…';
+            var q=function(v){ v=String(v==null?'':v); return /[",\n]/.test(v)?'"'+v.replace(/"/g,'""')+'"':v; };
+            var files=allEntries.map(function(e){ return {path:e.path, bytes:_b64ToBytes(e.b64)}; });
+            var manCsv=[['sscc','po','preorder_ref','store','client_sku','ean','our_sku','supplier','matched','path']].concat(allManifest).map(function(r){ return r.map(q).join(','); }).join('\n')+'\n';
+            files.push({path:'manifest.csv', bytes:_strBytes(manCsv)});
+            var packBy={}; allPack.forEach(function(r){ (packBy[r[0]]=packBy[r[0]]||[]).push(r); });
+            Object.keys(packBy).forEach(function(sup){ var rows=[['Supplier','Purchase Order','Preorder Ref','SKU','Quantity','SSCC Label']].concat(packBy[sup].sort(function(a,b){ return String(a[1]).localeCompare(String(b[1]))||String(a[3]).localeCompare(String(b[3]))||String(a[5]).localeCompare(String(b[5])); }));
+              files.push({path:_ediSan(sup)+'/packing-list-'+_ediSan(sup)+'.csv', bytes:_strBytes(rows.map(function(r){return r.map(q).join(',');}).join('\n')+'\n')}); });
+            var bl=_ediZip(files); var u=URL.createObjectURL(bl),a=document.createElement('a'); a.href=u; a.download='edi-labels.zip'; document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(u);},1000);
+            gs.textContent='Downloaded ✓'+(batches.length>1?(' · '+batches.length+' batches'):'')+(rejected.length?(' · '+rejected.length+' skipped (>4.5 MB): '+rejected.map(function(x){return esc(x.name);}).join(', ')):'');
+          });
+        })
           .catch(function(e){ gs.textContent='Failed: '+(e.message||e); })
           .finally(function(){ btn.disabled=false; }); };
     }
