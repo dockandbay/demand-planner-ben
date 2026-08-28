@@ -1,3 +1,6 @@
+## v27.322 FIX: Returns % now shows on Config ▸ Branches (was added to the wrong function)
+- The v27.317 Returns % field was added to `brTbl()`, a **dead/unused** branches table — the live SUPPLY ▸ Config ▸ Branches tab is rendered by `SUBS['branches']` (a card + edit-form layout), which is why the field never appeared. Now added there: **Returns %** shows on each branch card and is **editable in the branch edit form** (saves via the existing `/api/supply/branch/:name`, which already accepts `returns_pct`).
+
 ## v27.321 DEMAND ▸ Ship bags — regression forecast model (calibrated on UK ILG actuals)
 - Replaced the Ship bags order-size-split heuristic with a **regression model**: **ship bags = ratio × forecast DTC units**, split by an editable **size mix %**. Defaults from a 12-month regression on **UK ILG actuals** (Aug-25→Jul-26): **0.449 bags per DTC unit (R²=0.945)**; size mix **Med 33.5 / Lar 57.2 / XL 9.2**. Settings (ratio + mix) editable per market; the grid + "Apply recommendations → forecast" flow is unchanged.
 - **DTC already includes TIK** (buildLiveDemand folds TikTok into DTC), and the actuals combine them — so the driver is effectively **DTC + TIK**, no double count. Non-Core products excluded (~0.3%, immaterial).
