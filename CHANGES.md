@@ -1,3 +1,9 @@
+## v27.317 PO order plan: "Add polybags to order" + per-branch returns % (Config ▸ Branches)
+- **New `branches.returns_pct`** (mig 246): a per-branch returns %, editable in **SUPPLY ▸ Config ▸ Branches** (new column). Seeded **1.5%** on the four 3PL branches only (UK ILG, US Geneva, AU Coghlans, EU iFulfillment); all others NULL.
+- **"Add polybags to order"** section on the PO **Order Plan** (below the line table). Shown only when the PO's branch has a returns % (>0). For each **polybag size** (`products.polybags`) on the PO it suggests a polybag quantity = **product units × returns %, rounded to the nearest 50** (one line per size). A button **adds those as order-plan lines** (SKU `POLYBAG <size>`, price $0) — via the existing `po-line` upsert; re-calc excludes already-added `POLYBAG %` lines so it won't double-count. New read-only `GET /api/supply/po-polybags/:po`.
+- **Config ▸ Branches ▸ Transfer lead times** — header labels and input boxes **centred** (were left/right, unclear). (Ben)
+- Applied mig 246 to sandbox + live. Verified: PO-53AUXR1 (AU Coghlans) → 2 sizes × 50 bags; add → lines land, re-calc excludes them. ⚠ rounding is **nearest** 50 (e.g. 58.8 → 50) per your wording — say if you'd prefer round-**up**.
+
 ## v27.316 EDI Labels: pages with no SSCC are silently skipped (no _UNMATCHED, no error)
 - Pages/files that have **no SSCC label at all** are now **skipped** during Parse & match — not counted in the total, not placed in `_UNMATCHED/_NO_SSCC_FOUND`, and never an error (Ben). Only labels that *have* an SSCC but don't match the ASN ("SSCC not in CSV" / "EAN not matched") still surface as unmatched for review.
 - The parse status shows a neutral note when any were skipped (e.g. "· 12 pages skipped (no SSCC)"); the count merges correctly across batches. Verified: the 12 no-SSCC PREORDER PDFs → status 200, total 0, 0 unmatched, **12 skipped**, no error.

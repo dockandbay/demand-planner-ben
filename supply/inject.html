@@ -3673,6 +3673,7 @@
       +addRowHtml
       +'<tr class="op-total" style="font-weight:700;border-top:2px solid #999"><td class="l">TOTAL</td><td></td><td style="text-align:right" class="op-totq">'+units(totQ)+'</td><td></td><td></td><td style="text-align:right">FINAL</td><td style="text-align:right" class="op-totc">$'+money(totC)+'</td><td></td></tr>'
       +'</tbody></table></div>'
+      +'<div class="op-polybags" data-po="'+esc(po)+'" style="margin-top:14px"></div>'   // "Add polybags to order" — populated after render for 3PL branches with a returns %
       +(function(){ if(!xdLines.length)return ''; var tot=xdLines.reduce(function(a,x){return a+(Number(x.qty)||0);},0);
         var shipped=/shipped|shipping|deliver|complete/i.test(((poBy[po]||{}).status)||'');
         var trs=xdLines.map(function(x){ return '<tr><td class="l"><b>'+esc(x.sku)+'</b> <span class="tool-badge bg-blue" style="font-size:8px">crossdock</span></td><td style="text-align:right">'+units(x.qty)+'</td><td style="text-align:right">$0.00</td><td class="l">'+esc(x.po||'')+'</td><td class="l">'+esc(x.client||x.supplier||'')+'</td></tr>'; }).join('');
@@ -3755,8 +3756,31 @@
     if(!d||!panel){ poRefetchPanel(po,i); return; }
     panel.innerHTML=orderPlanPanel(po,d.lines,d.line_costs,d.additional_costs,{complete:d.erp_complete},d.crossdock_lines);
     bindPay(po,i); }
+  // "Add polybags to order" section (PO order plan): for a PO whose BRANCH has a returns % (>0), suggest polybag
+  // quantities = product units × returns %, rounded to nearest 50, one line per polybag size. Button adds them as
+  // order-plan lines (sku 'POLYBAG <dim>', price 0). Hidden entirely for non-3PL branches / no returns %.
+  function wirePolybags(el, po, i){
+    el.innerHTML='<div class="mut tiny">Checking returns policy…</div>';
+    fetch('/api/supply/po-polybags/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(j){
+      if(!j||!j.enabled){ el.innerHTML=''; return; }   // branch has no returns % → no section at all
+      var head='<div class="sect-h" style="margin-top:6px">Add polybags to order <span class="mut tiny">('+esc(j.branch)+' branch · '+j.returns_pct+'% returns → polybag qty = units × '+j.returns_pct+'%, rounded to nearest 50 · price $0)</span></div>';
+      if(!(j.groups&&j.groups.length)){ el.innerHTML=head+'<div class="mut tiny">No SKUs on this PO have a polybag size set — nothing to add.</div>'; return; }
+      var existing={}; (j.existing||[]).forEach(function(e){ existing[e.sku]=Number(e.qty)||0; });
+      var rows=j.groups.map(function(g){ var have=existing[g.sku];
+        return '<tr><td class="l">'+esc(g.polybags)+'</td><td style="text-align:right">'+units(g.units)+'</td><td style="text-align:right"><b>'+units(g.bags)+'</b></td><td class="l">'+(have!=null?('<span class="tool-badge bg-green" title="already on this order plan">on order: '+units(have)+'</span>'):'<span class="mut tiny">—</span>')+'</td></tr>'; }).join('');
+      var totBags=j.groups.reduce(function(a,g){return a+(g.bags||0);},0);
+      el.innerHTML=head
+        +'<div class="tw" style="max-width:620px"><table style="width:max-content"><thead><tr><th class="l">Polybag size</th><th style="text-align:right">Product units</th><th style="text-align:right">Polybag qty</th><th class="l">Status</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+        +'<button class="save-btn op-pb-add" style="margin-top:8px;background:#dcfce7;border:1px solid #16a34a;color:#166534;font-weight:700">＋ Add '+j.groups.length+' polybag line'+(j.groups.length>1?'s':'')+' ('+units(totBags)+' bags) to order</button> <span class="op-pb-msg mut tiny"></span>';
+      var btn=el.querySelector('.op-pb-add'), msg=el.querySelector('.op-pb-msg');
+      btn.onclick=function(){ if(!confirm('Add '+j.groups.length+' polybag line(s) — '+units(totBags)+' bags — to this order plan?'))return; btn.disabled=true; if(msg)msg.textContent='Adding…';
+        Promise.all(j.groups.map(function(g){ return fetch('/api/supply/po-line/'+encodeURIComponent(po+'|'+g.sku),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,sku:g.sku,qty:g.bags,who:'polybags'})}).then(function(r){return r.json();}).then(function(x){ if(x&&x.error)throw new Error(x.error); }); }))
+          .then(function(){ invalidateDerived(); poRefetchPanel(po,i); })
+          .catch(function(e){ btn.disabled=false; if(msg)msg.textContent='Failed: '+(e&&e.message||e); }); };
+    }).catch(function(){ el.innerHTML=''; }); }
   function bindPay(po,i){
     // MASTER DATA + SHIPMENTS PLAN-panel controls (#2 / #10) — pickers + rename / delete / pallet labels for this PO
+    document.querySelectorAll('#podet-'+i+' .op-polybags').forEach(function(el){ if(el._pb)return; el._pb=1; wirePolybags(el, el.dataset.po, i); });
     bindCellPick(); bindShipPick(); bindShipOpen(); bindEdits(); bindPoShipMode();
     // Live dynamic tracking link under the carrier/tracking on the SHIPMENTS sub-tab (DHL/FedEx/UPS/SF Express).
     document.querySelectorAll('#podet-'+i+' .po-trk-wrap').forEach(function(w){ var car=w.querySelector('[data-field="carrier"]'), ref=w.querySelector('[data-field="carrier_ref"]'), lnk=w.querySelector('.po-trk-link');
@@ -6642,19 +6666,20 @@
     function brTbl(){ var rows=(d.branches||[]).map(function(r){var ep='/api/supply/branch/'+encodeURIComponent(r.name);
       return '<tr><td class="l"><b>'+esc(r.name)+'</b></td><td class="l">'+editCell(ep,'country_code',r.country_code,'txt')+'</td>'
         +'<td class="l">'+editCell(ep,'sea_lead_time_days',r.sea_lead_time_days)+'</td><td class="l">'+editCell(ep,'air_lead_time_days',r.air_lead_time_days)+'</td>'
+        +'<td class="l">'+editCell(ep,'returns_pct',r.returns_pct)+'</td>'
         +'<td class="l">'+editCell(ep,'shipping_notes',r.shipping_notes,'txt')+'</td>'
         +'<td class="l">'+editCell(ep,'delivery_notes',r.delivery_notes,'txt')+'</td></tr>';}).join('');
-      return '<div class="sect-h">Branches — shipping lead times <span class="mut tiny">(sea lead drives a PO\'s delivery date: ship + sea days · delivery notes flow onto a PO when its branch is set)</span></div>'
-        +'<div class="tw" style="max-width:900px"><table><thead><tr><th class="l">Branch</th><th class="l">Country</th><th class="l">Sea lead (days)</th><th class="l">Air lead (days)</th><th class="l">Notes</th><th class="l">Delivery notes</th></tr></thead><tbody>'+rows+'</tbody></table></div>'; }
+      return '<div class="sect-h">Branches — shipping lead times <span class="mut tiny">(sea lead drives a PO\'s delivery date: ship + sea days · delivery notes flow onto a PO when its branch is set · returns % drives the PO order-plan "Add polybags" tool — set on 3PL branches)</span></div>'
+        +'<div class="tw" style="max-width:960px"><table><thead><tr><th class="l">Branch</th><th class="l">Country</th><th class="l">Sea lead (days)</th><th class="l">Air lead (days)</th><th class="l" title="drives the Add-polybags tool on a PO order plan; set on 3PL branches only">Returns %</th><th class="l">Notes</th><th class="l">Delivery notes</th></tr></thead><tbody>'+rows+'</tbody></table></div>'; }
     // Inter-market transfer lead times, in WEEKS, as a from → to matrix. Each cell upserts a transfer_lead_times
     // lane (blank = delete the lane = "we don't transfer that way"). Drives the TRANSFER tab's Rebalance/Urgent plan.
     function tlTbl(){ var tl=d.transfer_leads||[], MK=['UK','US','EU','AU','CA'];
       var m={}; tl.forEach(function(r){ if(r.from_market&&r.to_market) m[r.from_market+'|'+r.to_market]=r.weeks; });
-      var head='<tr><th class="l">From \\ To</th>'+MK.map(function(c){return '<th class="l" style="min-width:50px;text-align:right">'+esc(c)+'</th>';}).join('')+'</tr>';
+      var head='<tr><th class="l">From \\ To</th>'+MK.map(function(c){return '<th style="min-width:56px;text-align:center">'+esc(c)+'</th>';}).join('')+'</tr>';
       var body=MK.map(function(fr){ return '<tr><td class="l"><b>'+esc(fr)+'</b></td>'+MK.map(function(to){
-        if(fr===to)return '<td class="l" style="background:#f3f4f6"></td>';
+        if(fr===to)return '<td style="background:#f3f4f6"></td>';
         var v=m[fr+'|'+to];
-        return '<td class="l"><input class="tl-cell" data-from="'+fr+'" data-to="'+to+'" value="'+esc(v==null?'':v)+'" placeholder="—" inputmode="decimal" style="width:44px;text-align:right;padding:2px 4px;border:1px solid #d0d0d0;border-radius:4px;font-size:11px"></td>';}).join('')+'</tr>';}).join('');
+        return '<td style="text-align:center"><input class="tl-cell" data-from="'+fr+'" data-to="'+to+'" value="'+esc(v==null?'':v)+'" placeholder="—" inputmode="decimal" style="width:44px;text-align:center;padding:2px 4px;border:1px solid #d0d0d0;border-radius:4px;font-size:11px"></td>';}).join('')+'</tr>';}).join('');
       return '<div class="sect-h">Transfer lead times — market &rarr; market <span class="mut tiny">(weeks for a 3PL&rarr;3PL stock transfer; drives the TRANSFER tab&rsquo;s Rebalance / Urgent plan)</span></div>'
         +'<div class="tw" style="max-width:520px"><table><thead>'+head+'</thead><tbody>'+body+'</tbody></table></div>'
         +'<div class="mut tiny" style="margin-top:6px;margin-bottom:16px">Row = origin market, column = destination. Enter the transit time in weeks; clear a cell to remove that lane (a missing lane = we don&rsquo;t transfer that way). Saves on change.</div>'; }

@@ -4975,7 +4975,7 @@ app.get('/api/supply/:section', async (req, res, next) => {
           q(`SELECT id, coalesce(category,'') category, coalesce(country,'') country, duty_pct, coalesce(notes,'') notes
              FROM planner.duty_rates ORDER BY category, country`),
           q(`SELECT name, coalesce(country_code,'') country_code, sea_lead_time_days, air_lead_time_days,
-             coalesce(shipping_notes,'') shipping_notes, coalesce(delivery_notes,'') delivery_notes, coalesce(fulfil_id,'') fulfil_id FROM planner.branches ORDER BY name`),
+             coalesce(shipping_notes,'') shipping_notes, coalesce(delivery_notes,'') delivery_notes, coalesce(fulfil_id,'') fulfil_id, returns_pct FROM planner.branches ORDER BY name`),
           q(`SELECT upper(from_market) from_market, upper(to_market) to_market, weeks
              FROM planner.transfer_lead_times ORDER BY from_market, to_market`).catch(() => []),
           q(`SELECT id, min_kg, max_kg, rate_per_kg FROM planner.air_freight_rates ORDER BY min_kg`).catch(() => []),   // folded into the parallel batch (was a 6th sequential round-trip)
@@ -5136,7 +5136,7 @@ app.post('/api/supply/tax-rate/:country', async (req, res) => {
 //  superseded by the pivot endpoints freight-upsert / freight-pallets / duty-upsert. v25.652)
 // Branches (lead-time table) — edit by name (upsert), and create. Drives PO ship/landing dates.
 app.post('/api/supply/branch/:name', async (req, res) => {
-  const b = req.body || {}, allowed = { country_code: 'text', sea_lead_time_days: 'int', air_lead_time_days: 'int', shipping_notes: 'text', delivery_notes: 'text', fulfil_id: 'text' };
+  const b = req.body || {}, allowed = { country_code: 'text', sea_lead_time_days: 'int', air_lead_time_days: 'int', shipping_notes: 'text', delivery_notes: 'text', fulfil_id: 'text', returns_pct: 'numeric' };
   const cols = ['name'], vals = [req.params.name], ph = ['$1::text']; let i = 2;
   for (const k of Object.keys(b)) { if (!allowed[k]) continue; cols.push(k); vals.push(b[k] === '' ? null : b[k]); ph.push(`$${i++}::${allowed[k]}`); }
   const upd = cols.slice(1).map(c => `${c}=excluded.${c}`).join(',') || 'name=excluded.name';
@@ -9770,6 +9770,28 @@ app.post('/api/supply/run-meta/:date', async (req, res) => {
 });
 // Order-plan line qty edit — sets our planned qty and stamps proposed_at/by while it differs from
 // the ERP source of truth (erp_qty). Clears the stamp if the edit returns it to the ERP value.
+// "Add polybags to order" (PO order plan): if the PO's BRANCH has a returns % (>0), suggest polybag quantities =
+// (product units on the PO) × returns% per polybag dimension, rounded to the nearest 50. One suggested line per
+// polybag size. Read-only compute; the client posts the chosen lines back via /api/supply/po-line (sku 'POLYBAG <dim>'). (Ben)
+app.get('/api/supply/po-polybags/:po', async (req, res) => {
+  try {
+    const po = req.params.po;
+    const poRow = (await pool.query(`SELECT branch FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0];
+    if (!poRow) return res.json({ enabled: false });
+    const br = (await pool.query(`SELECT returns_pct FROM planner.branches WHERE name=$1`, [poRow.branch])).rows[0];
+    const pct = br && br.returns_pct != null ? Number(br.returns_pct) : null;
+    if (!pct || pct <= 0) return res.set('Cache-Control', 'no-store').json({ enabled: false, branch: poRow.branch });
+    const round50 = n => Math.round(n / 50) * 50;
+    const rows = (await pool.query(
+      `SELECT p.polybags, sum(l.qty)::int units
+       FROM planner.purchase_order_lines l JOIN planner.products p ON p.sku=l.sku
+       WHERE l.po=$1 AND l.sku NOT LIKE 'POLYBAG %' AND coalesce(p.polybags,'')<>''
+       GROUP BY p.polybags ORDER BY p.polybags`, [po])).rows;
+    const groups = rows.map(r => ({ polybags: r.polybags, sku: 'POLYBAG ' + r.polybags, units: r.units, bags: round50(r.units * pct / 100) })).filter(g => g.bags > 0);
+    const existing = (await pool.query(`SELECT sku, qty FROM planner.purchase_order_lines WHERE po=$1 AND sku LIKE 'POLYBAG %' ORDER BY sku`, [po])).rows;
+    res.set('Cache-Control', 'no-store').json({ enabled: true, branch: poRow.branch, returns_pct: pct, groups, existing });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.post('/api/supply/po-line/:po_sku', async (req, res) => {
   const b = req.body || {};
   if (b.qty === undefined) return res.status(400).json({ error: 'qty required' });
