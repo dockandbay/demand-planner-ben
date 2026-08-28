@@ -8084,7 +8084,7 @@
       if(cur.length)batches.push(cur);
       return {batches:batches, rejected:rejected}; }
     function _ediMerge(dst,j){ if(!j)return;
-      dst.total+=(j.total||0); dst.matched+=(j.matched||0);
+      dst.total+=(j.total||0); dst.matched+=(j.matched||0); dst.skippedNoSscc=(dst.skippedNoSscc||0)+(j.skippedNoSscc||0);
       (j.unmatched||[]).forEach(function(u){ dst.unmatched.push(u); });
       var bp=j.byPo||{}; Object.keys(bp).forEach(function(po){ dst.byPo[po]=(dst.byPo[po]||0)+bp[po]; });
       (j.skus||[]).forEach(function(s){ var e=dst._skuMap[s.sku]; if(e){ e.count+=(s.count||0); } else { dst._skuMap[s.sku]={sku:s.sku,options:s.options,main:s.main,count:s.count||0}; } }); }
@@ -8117,7 +8117,7 @@
         if(!cf.pdfs.length){ st.textContent='No PDFs — add them in step 2 (or load a project).'; return Promise.reject(new Error('__done')); }
         var part=_ediBatchPdfs(cf.csv.b64,cf.pdfs), batches=part.batches, rejected=part.rejected;
         if(!batches.length){ st.textContent=(rejected.length?('All '+rejected.length+' file(s) exceed the 4.5 MB per-file limit — none uploaded ('+rejected.map(function(x){return x.name;}).join(', ')+').'):'Nothing to parse.'); return Promise.reject(new Error('__done')); }
-        var merged={ok:true,total:0,matched:0,unmatched:[],byPo:{},_skuMap:{},_rejected:rejected,_batches:batches.length};
+        var merged={ok:true,total:0,matched:0,skippedNoSscc:0,unmatched:[],byPo:{},_skuMap:{},_rejected:rejected,_batches:batches.length};
         function run(i){ if(i>=batches.length)return Promise.resolve();
           st.textContent='Parsing batch '+(i+1)+'/'+batches.length+' — '+batches[i].length+' PDF(s)'+(rejected.length?(' · '+rejected.length+' too large, skipped'):'')+'…';
           return fetch('/api/supply/edi-labels/parse',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csv_base64:cf.csv.b64,pdfs:batches[i]})})
@@ -8131,7 +8131,7 @@
           if(extra){ var se=c.querySelector('#edi-status'); if(se)se.innerHTML+=extra; } } })
         .catch(function(e){ if(e&&e.message==='__done')return; st.textContent='Failed: '+(e.message||e); }); };
     function renderPrev(j){ var pos=Object.keys(j.byPo||{}).sort(); var multi=j.multiSuppliers||[];
-      c.querySelector('#edi-status').innerHTML='<b style="color:#166534">'+j.matched+'</b> of '+j.total+' labels matched · '+pos.length+' PO'+(pos.length!==1?'s':'')+(j.unmatched&&j.unmatched.length?(' · <b style="color:#b45309">'+j.unmatched.length+' unmatched</b>'):'');
+      c.querySelector('#edi-status').innerHTML='<b style="color:#166534">'+j.matched+'</b> of '+j.total+' labels matched · '+pos.length+' PO'+(pos.length!==1?'s':'')+(j.unmatched&&j.unmatched.length?(' · <b style="color:#b45309">'+j.unmatched.length+' unmatched</b>'):'')+(j.skippedNoSscc?(' · <span class="mut">'+j.skippedNoSscc+' page'+(j.skippedNoSscc>1?'s':'')+' skipped (no SSCC)</span>'):'');
       // step 4 — vertical list, each ref a searchable crossdock/preorder picker (datalist)
       c.querySelector('#edi-s4').innerHTML='<div class="mut" style="font-size:11px;margin-bottom:6px">Optional. Search a crossdock / preorder ref — the folder becomes "PO - REF".</div>'
         +'<div style="display:flex;flex-direction:column;gap:6px">'+pos.map(function(po){ return '<div style="display:flex;align-items:center;gap:8px;font-size:12px"><span style="min-width:140px;font-weight:600">'+esc(po)+' <span class="mut" style="font-weight:400">('+j.byPo[po]+' labels)</span></span><input class="edi-ref" list="crossdocklist" data-po="'+esc(po)+'" placeholder="search CROSSDOCK / PREORDER…" style="flex:1;max-width:340px;border:1px solid #cbd5e1;border-radius:4px;padding:3px 8px;font-size:12px"></div>'; }).join('')+'</div>';

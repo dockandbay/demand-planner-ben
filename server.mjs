@@ -2687,7 +2687,7 @@ async function _ediParse(csvText, pdfs) {
   // 3) each PDF → per-page SSCC (text) → split page into its own PDF (pdf-lib)
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const { PDFDocument } = await import('pdf-lib');
-  const items = [];
+  const items = []; let skippedNoSscc = 0;
   for (const f of pdfs) {
     const buf = Buffer.from(String(f.b64 || f.base64 || ''), 'base64'); if (!buf.length) continue;
     let src, doc;
@@ -2701,17 +2701,19 @@ async function _ediParse(csvText, pdfs) {
       if (extracted && bySscc[extracted]) key = extracted;
       else { const digits = text.replace(/\D/g, ''); for (const k in bySscc) { if (digits.includes(k)) { key = k; break; } } }
       const sscc = key || extracted;
+      if (!sscc) { skippedNoSscc++; continue; }   // page has no SSCC label at all → skip it silently (not counted, not in the ZIP, never an error). (Ben)
       const row = key ? bySscc[key] : null;
       const prod = row && row.ean ? byEan[row.ean] : null;
       const out = await PDFDocument.create(); const [cp] = await out.copyPages(src, [pg - 1]); out.addPage(cp);
       const pageBuf = Buffer.from(await out.save());
       const matched = !!(row && prod);
-      const reason = matched ? '' : (!sscc ? 'no SSCC on page' : (!row ? 'SSCC not in CSV' : ('EAN ' + (row.ean || '?') + ' not matched to a product')));
-      items.push({ sscc: sscc || ('page-' + (items.length + 1)), po: row ? row.po : '', store: row ? row.store : '', clientSku: row ? row.clientSku : '',
+      const reason = matched ? '' : (!row ? 'SSCC not in CSV' : ('EAN ' + (row.ean || '?') + ' not matched to a product'));
+      items.push({ sscc: sscc, po: row ? row.po : '', store: row ? row.store : '', clientSku: row ? row.clientSku : '',
         ean: row ? row.ean : '', qty: row ? (row.qty || 0) : 0, sku: prod ? prod.sku : '', suppliers: prod ? prod.suppliers : [], mainSupplier: prod ? prod.mainSupplier : '',
         matched, reason, srcFile: f.name || '', buf: pageBuf });
     }
   }
+  items.skippedNoSscc = skippedNoSscc;   // pages with no SSCC label at all — silently skipped (info only, never an error)
   return items;
 }
 function _ediPreview(items) {
@@ -2723,6 +2725,7 @@ function _ediPreview(items) {
     ok: true, total: items.length, matched: items.filter(i => i.matched).length,
     unmatched: items.filter(it => !it.matched).map(it => ({ sscc: it.sscc, po: it.po, clientSku: it.clientSku, ean: it.ean, reason: it.reason, file: it.srcFile })),
     multiSuppliers: skus.filter(x => (x.options || []).length > 1),
+    skippedNoSscc: items.skippedNoSscc || 0,   // pages with no SSCC — skipped silently (surfaced as info, not an error)
     skus, byPo,
   };
 }
