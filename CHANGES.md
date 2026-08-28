@@ -1,3 +1,10 @@
+## v27.318 Polybags: round up, exclude AIR/FOB, Cin7 SKU "POLYBAG", + >10k units action reminder
+- **Round UP** to the nearest 50 (was nearest) — never under-provision (e.g. 3,920 × 1.5% = 58.8 → **100**).
+- **AIR and FOB orders excluded** — the "Add polybags" section is hidden for a PO shipping air, or FOB / on the Manufacturing branch (`skipReason`). Mode read from the linked shipment.
+- **Cin7 push:** the internal `POLYBAG <size>` lines upload to Cin7 as a single generic **`POLYBAG`** product code, with all sizes **summed** into one line (real product SKUs unchanged).
+- **New SUPPLY ▸ Actions reminder — "Add polybags to order":** a big order (**>10,000 polybag-eligible units**) into a 3PL branch (returns %) that **ships within ~2 weeks** and has **no polybag lines yet** raises a high-priority action (→ opens the PO order plan). So a large order doesn't reach shipment without its returns polybags. Excludes air/FOB. (Threshold = polybag-eligible units, i.e. product units with a polybag size.)
+- Verified: 215mm 58.8→100; air PO → hidden; Cin7 transform collapses 2 sizes → one `POLYBAG` line (qty summed); action query finds the qualifying POs.
+
 ## v27.317 PO order plan: "Add polybags to order" + per-branch returns % (Config ▸ Branches)
 - **New `branches.returns_pct`** (mig 246): a per-branch returns %, editable in **SUPPLY ▸ Config ▸ Branches** (new column). Seeded **1.5%** on the four 3PL branches only (UK ILG, US Geneva, AU Coghlans, EU iFulfillment); all others NULL.
 - **"Add polybags to order"** section on the PO **Order Plan** (below the line table). Shown only when the PO's branch has a returns % (>0). For each **polybag size** (`products.polybags`) on the PO it suggests a polybag quantity = **product units × returns %, rounded to the nearest 50** (one line per size). A button **adds those as order-plan lines** (SKU `POLYBAG <size>`, price $0) — via the existing `po-line` upsert; re-calc excludes already-added `POLYBAG %` lines so it won't double-count. New read-only `GET /api/supply/po-polybags/:po`.

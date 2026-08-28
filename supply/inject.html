@@ -3763,7 +3763,7 @@
     el.innerHTML='<div class="mut tiny">Checking returns policy…</div>';
     fetch('/api/supply/po-polybags/'+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(j){
       if(!j||!j.enabled){ el.innerHTML=''; return; }   // branch has no returns % → no section at all
-      var head='<div class="sect-h" style="margin-top:6px">Add polybags to order <span class="mut tiny">('+esc(j.branch)+' branch · '+j.returns_pct+'% returns → polybag qty = units × '+j.returns_pct+'%, rounded to nearest 50 · price $0)</span></div>';
+      var head='<div class="sect-h" style="margin-top:6px">Add polybags to order <span class="mut tiny">('+esc(j.branch)+' branch · '+j.returns_pct+'% returns → polybag qty = units × '+j.returns_pct+'%, rounded up to nearest 50 · price $0 · uploads to Cin7 as SKU POLYBAG)</span></div>';
       if(!(j.groups&&j.groups.length)){ el.innerHTML=head+'<div class="mut tiny">No SKUs on this PO have a polybag size set — nothing to add.</div>'; return; }
       var existing={}; (j.existing||[]).forEach(function(e){ existing[e.sku]=Number(e.qty)||0; });
       var rows=j.groups.map(function(g){ var have=existing[g.sku];

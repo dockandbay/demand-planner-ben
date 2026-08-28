@@ -2143,6 +2143,38 @@ async function expediteActions() {
   return out;
 }
 
+// SUPPLY ▸ Actions — "Add polybags to order": a big order (>10,000 polybag-eligible units) into a 3PL branch (returns %)
+// that ships within ~2 weeks and has NO polybag lines yet. So a large order doesn't reach shipment without its returns
+// polybags. Excludes AIR + FOB (no polybags there). Surfaces from 2 weeks before the ship date. (Ben)
+async function polybagActions() {
+  const rows = (await pool.query(`
+    WITH pod AS (
+      SELECT po.po, po.branch, b.returns_pct,
+        lower(coalesce(sh.mode, nullif(po.ship_type_overide,''), nullif(po.ship_type,''), '')) eff_mode,
+        coalesce(sh.departure_date,
+          (coalesce(po.end_production_overide, po.start_production + (coalesce(sup.production_days,0)||' days')::interval)::date + interval '7 days')::date) ship_d
+      FROM planner.purchase_orders po
+      JOIN planner.branches  b   ON b.name=po.branch AND coalesce(b.returns_pct,0) > 0
+      LEFT JOIN planner.suppliers sup ON sup.id=po.supplier_id
+      LEFT JOIN planner.shipments sh  ON sh.shipment_ref=po.shipment_ref
+      WHERE coalesce(po.status,'') NOT ILIKE '%complete%'
+        AND coalesce(po.production_status,'') <> 'shipped'
+        AND coalesce(po.branch,'') NOT ILIKE '%manufactur%')
+    SELECT pod.po, pod.branch, pod.returns_pct, to_char(pod.ship_d,'YYYY-MM-DD') ship_d,
+      sum(CASE WHEN coalesce(p.polybags,'')<>'' AND l.sku NOT LIKE 'POLYBAG %' THEN l.qty ELSE 0 END)::int pb_units
+    FROM pod
+    JOIN planner.purchase_order_lines l ON l.po=pod.po AND l.qty>0
+    LEFT JOIN planner.products p ON p.sku=l.sku
+    WHERE pod.eff_mode NOT LIKE 'air%' AND pod.eff_mode NOT LIKE 'fob%'
+      AND pod.ship_d IS NOT NULL AND pod.ship_d <= current_date + interval '14 days'
+    GROUP BY pod.po, pod.branch, pod.returns_pct, pod.ship_d
+    HAVING sum(CASE WHEN coalesce(p.polybags,'')<>'' AND l.sku NOT LIKE 'POLYBAG %' THEN l.qty ELSE 0 END) > 10000
+       AND bool_or(l.sku LIKE 'POLYBAG %') = false`)).rows;
+  return rows.map(r => ({ severity: 'high', type: 'Add polybags to order', ref: r.po,
+    detail: r.po + ' (' + r.branch + ') ships ~' + r.ship_d + ' with ' + Number(r.pb_units).toLocaleString() + ' polybag-eligible units (>10k) and no polybag lines yet — add polybags on the order plan (returns cover, ' + r.returns_pct + '%). Due ≥2 weeks before shipment.',
+    fix: 'gotopo', target: 'po', field: 'oplan', target_key: r.po }));
+}
+
 // Lightweight, always-fresh version probe — the client polls this to detect a new deploy while a tab is
 // left open (the app is a SPA, so an open tab keeps running its booted version until reloaded).
 app.get('/api/version', async (_req, res) => { res.set('Cache-Control', 'no-store').json({ version: APP_VERSION, data: await freshnessCached() }); });
@@ -3914,6 +3946,7 @@ async function buildActionsRows() {
         // The recommendation / submission / ERP layers each run their own (heavier) queries — skip them for the
         // fast priority preview (scope=priority); the full fetch that follows includes them.
         try { (await expediteActions()).forEach(a => arows.push(a)); } catch (e) { /* recommendation layer is best-effort */ }
+        try { (await polybagActions()).forEach(a => arows.push(a)); } catch (e) { /* polybags reminder is best-effort */ }
         try { (await submissionActions()).forEach(a => arows.push(a)); } catch (e) { /* portal-submission layer is best-effort */ }
         try { (await manufacturingActions()).forEach(a => arows.push(a)); } catch (e) { /* manufacturing-mismatch layer is best-effort */ }
         // ERP COMPARE — a single medium-priority action when there are open ERP POs missing from the planner
@@ -9776,12 +9809,20 @@ app.post('/api/supply/run-meta/:date', async (req, res) => {
 app.get('/api/supply/po-polybags/:po', async (req, res) => {
   try {
     const po = req.params.po;
-    const poRow = (await pool.query(`SELECT branch FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0];
+    const poRow = (await pool.query(
+      `SELECT po.branch, lower(coalesce(sh.mode, nullif(po.ship_type_overide,''), nullif(po.ship_type,''), '')) eff_mode
+       FROM planner.purchase_orders po LEFT JOIN planner.shipments sh ON sh.shipment_ref = po.shipment_ref
+       WHERE po.po=$1`, [po])).rows[0];
     if (!poRow) return res.json({ enabled: false });
+    const noStore = o => res.set('Cache-Control', 'no-store').json(o);
+    // AIR and FOB orders don't get polybags (Ben): air = expensive/urgent, FOB = collected at factory (no 3PL returns).
+    const isFob = /^fob/.test(poRow.eff_mode || '') || /manufactur/i.test(poRow.branch || '');
+    const isAir = /^air/.test(poRow.eff_mode || '');
+    if (isAir || isFob) return noStore({ enabled: false, branch: poRow.branch, skipReason: isAir ? 'air' : 'fob' });
     const br = (await pool.query(`SELECT returns_pct FROM planner.branches WHERE name=$1`, [poRow.branch])).rows[0];
     const pct = br && br.returns_pct != null ? Number(br.returns_pct) : null;
-    if (!pct || pct <= 0) return res.set('Cache-Control', 'no-store').json({ enabled: false, branch: poRow.branch });
-    const round50 = n => Math.round(n / 50) * 50;
+    if (!pct || pct <= 0) return noStore({ enabled: false, branch: poRow.branch });
+    const round50 = n => Math.ceil(n / 50) * 50;   // round UP to the nearest 50 (Ben: never under-provision polybags)
     const rows = (await pool.query(
       `SELECT p.polybags, sum(l.qty)::int units
        FROM planner.purchase_order_lines l JOIN planner.products p ON p.sku=l.sku
@@ -10512,7 +10553,15 @@ app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
       }
     }
     // Cin7 expects the line unitPrice in the ORDER currency (USD) on write and converts to base itself — send planUSD as-is.
-    const lineItems = lines.map(l => ({ code: l.sku, qty: Number(l.qty), unitPrice: Number(l.price) || 0 }));
+    // Polybag lines ('POLYBAG <size>') are internal — Cin7 has a single generic 'POLYBAG' product, so collapse all
+    // sizes into ONE Cin7 line code 'POLYBAG' with the summed qty (Ben). Real product SKUs pass through unchanged.
+    const lineItems = []; let _pbLine = null;
+    lines.forEach(l => {
+      if (/^POLYBAG\b/i.test(String(l.sku || ''))) {
+        if (!_pbLine) { _pbLine = { code: 'POLYBAG', qty: 0, unitPrice: Number(l.price) || 0 }; lineItems.push(_pbLine); }
+        _pbLine.qty += Number(l.qty) || 0;
+      } else lineItems.push({ code: l.sku, qty: Number(l.qty), unitPrice: Number(l.price) || 0 });
+    });
     if (cin7Id) {
       // UPDATE existing Cin7 PO — re-assert the SAME PO-anchoring fields as create (memberId/company/branchId +
       // draft). Sending only id+lines (as before) let Cin7 reclassify the order as a sales order.
