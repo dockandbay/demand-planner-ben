@@ -271,9 +271,7 @@ FROM (VALUES
   ('TOWLF-ESS-XL-LTPPL','210*350+50mm'),
   ('TOWLF-ESS-XL-PINK-R','210*350+50mm'),
   ('TOWLF-ESS-XL-PLIM','210*350+50mm'),
-  ('TOWLF-ESS-XL-VLYVIO','210*350+50mm'),
-  ('TOWLH-CLB-3SET-CHRYBMB','L'),
-  ('TOWLH-CLB-3SET-PEPPNCH','L'),
-  ('TOWLH-DES-3SET-TIGPALM','L')
+  ('TOWLF-ESS-XL-VLYVIO','210*350+50mm')
+  -- (3 TOWLH-*-3SET-* rows had polybags='L' in the source CSV — a data slip — removed per Ben; left NULL)
 ) AS v(sku, pb)
 WHERE p.sku = v.sku;
