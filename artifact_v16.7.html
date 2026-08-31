@@ -10420,7 +10420,7 @@ function filterMatch(sku,co,ch,rule,excMaps){
   var p=SKUM[sku]||{};
   function arr(v){ return Array.isArray(v)?v:(v==null||v===''?[]:[v]); }
   for(var i=0;i<conds.length;i++){ var c=conds[i], f=c.field;
-    if(f&&f.indexOf('metric.')===0){ var mk=f.slice(7); var st=(excMaps&&excMaps[mk]&&excMaps[mk][sku])||''; var sev=c.severity||'red'; if(!(sev==='red'?(st==='RED'):(st==='RED'||st==='AMBER')))return false; continue; }
+    if(f&&f.indexOf('metric.')===0){ var mk=f.slice(7); var st=(excMaps&&excMaps[mk]&&excMaps[mk][sku])||''; var sev=(mk==='fclt')?'red':(c.severity||'red'); if(!(sev==='red'?(st==='RED'):(st==='RED'||st==='AMBER')))return false; continue; }   // fclt is LITERAL only (actual>=forecast); the AMBER run-rate projection isn't "forecast < actual"
     if(f&&f.indexOf('trend.')===0){ var tk=f.slice(6); var bk=(excMaps&&excMaps[tk]&&excMaps[tk][sku])||''; var tl=arr(c.value); if(c.op==='not_in'){ if(tl.indexOf(bk)>=0)return false; } else { if(tl.length&&tl.indexOf(bk)<0)return false; } continue; }
     var v, list=arr(c.value);
     if(f==='from_replacement'){ var has=!!p.rep; if(list.indexOf('yes')>=0&&!has)return false; if(list.indexOf('no')>=0&&has)return false; continue; }
@@ -10484,10 +10484,12 @@ var FR=(function(){
   // ── FORM view ──────────────────────────────────────────────────────────────────────────────────────────────
   function valEditor(c,i){
     var d=_filterFieldDef(c.field)||FILTER_FIELDS[0];
-    if(d.type==='metric'){ var sev=c.severity||'red';
+    if(d.type==='metric'){
+      if(d.metric==='fclt')return '<span style="font-size:11px;color:#64748b">actual &ge; forecast</span>';   // literal only — no run-rate projection
+      var sev=c.severity||'red';
       return '<select class="fr-sev" data-i="'+i+'" style="font-size:11px">'
-        +'<option value="red_amber"'+(sev!=='red'?' selected':'')+'>Red + Amber</option>'
-        +'<option value="red"'+(sev==='red'?' selected':'')+'>Red only</option></select>'; }
+        +'<option value="red"'+(sev==='red'?' selected':'')+'>Red only</option>'
+        +'<option value="red_amber"'+(sev!=='red'?' selected':'')+'>Red + Amber</option></select>'; }
     if(d.type==='bool'){ var bv=(Array.isArray(c.value)?c.value[0]:c.value)||'yes';
       return '<select class="fr-val" data-i="'+i+'" style="font-size:11px"><option value="yes"'+(bv==='yes'?' selected':'')+'>yes</option><option value="no"'+(bv==='no'?' selected':'')+'>no</option></select>'; }
     var opts=[]; try{opts=d.opts?d.opts():[];}catch(e){opts=[];}

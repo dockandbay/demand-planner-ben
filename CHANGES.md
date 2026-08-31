@@ -1,3 +1,6 @@
+## v27.340 Filter Rules — "FC < Actual" is literal only (drop the AMBER run-rate case)
+- Per Ben: a filter named **Forecast < Actual** must only match SKUs where the forecast really is below the actual (**actual ≥ forecast**). The old AMBER state (`run-rate > forecast` = "actual below forecast now but projected to overtake it") is a run-rate *projection*, not "forecast < actual", so it no longer applies to this filter condition. The FC<Actual condition now shows a fixed **"actual ≥ forecast"** and has no severity toggle; even a previously-saved FC<Actual rule with Red+Amber is forced to the literal case. (The Exceptions **report** is unchanged — it still surfaces the AMBER projection as an early warning.) FC>Run-rate and Selling-no-forecast keep their Red / Red+Amber choice (there both severities are the same literal condition, just milder).
+
 ## v27.339 Demand plan — double-click a SKU code to copy it
 - Double-clicking a **SKU code** in the demand plan now **copies it to the clipboard** (with a "SKU copied — …" toast). Title hint added on the SKU cell; the double-click text-selection is suppressed. Clipboard API with a textarea fallback.
 
