@@ -8783,7 +8783,8 @@ function buildBody(){
     });
     return gtr;
   };
-  var _gtr0=_makeGrandTotRow(); if(_gtr0)frag.appendChild(_gtr0);
+  var _frTop=(typeof FR_ACTIVE!=='undefined'&&!!FR_ACTIVE);   // Filter Rules active → no grand-total summary row (it totals everything, not the filtered set)
+  var _gtr0=_makeGrandTotRow(); if(_gtr0&&!_frTop)frag.appendChild(_gtr0);
   const fu_cache={};
   Object.keys(cm).forEach(function(cat){
     var rows=cm[cat].sort(function(a,b){return a.s.localeCompare(b.s)||(a.ch.localeCompare(b.ch));});
@@ -8803,7 +8804,8 @@ function buildBody(){
     // Redundant when every subcategory (CORE/SEASONAL variant stripped) is the category name or a prefix of it —
     // the data rows already carry that label, so the grey header would just be a blank bar when scrolled right.
     var _redundantHdr=_subsArr.length>0 && _catN && _subsArr.every(function(s){var n=_stripVar(s);return n===_catN||n.indexOf(_catN)===0||_catN.indexOf(n)===0;});
-    if(!_redundantHdr){
+    // Under a Filter Rule with sub-categories hidden → flat matching-SKU list, so drop the category header too.
+    if(!_redundantHdr && !(_frOn && !frShowSubcats())){
       const htr=document.createElement('tr');htr.className='cat-hdr';
       const htd=document.createElement('td');htd.colSpan=200;
       const hsp=document.createElement('span');hsp.textContent=cat;hsp.style.cssText='position:sticky;left:0;display:inline-block';
