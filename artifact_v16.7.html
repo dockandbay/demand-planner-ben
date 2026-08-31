@@ -6517,6 +6517,20 @@ function inbDiv(inb, entries, color){
   document.addEventListener('click',function(e){ var n=e.target&&e.target.closest?e.target.closest(SEL):null; clearTimeout(t); if(n)show(n); else hide(); });   // clicking a cell also selects it → show its tooltip immediately; click elsewhere hides
   document.addEventListener('scroll',hide,true);
 })();
+// ── Double-click a SKU code in the demand plan → copy it to the clipboard (bound once) ─────────────────
+(function(){
+  document.addEventListener('dblclick',function(e){
+    var n=e.target&&e.target.closest?e.target.closest('.dp-sku-tip[data-sku]'):null; if(!n)return;
+    var sku=n.getAttribute('data-sku'); if(!sku)return;
+    e.preventDefault(); try{ window.getSelection().removeAllRanges(); }catch(_){}   // kill the double-click text selection
+    function ok(){ try{ if(typeof invStkToast==='function')invStkToast('SKU copied — '+sku); }catch(_){} }
+    try{
+      if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(sku).then(ok,function(){ _frCopyFallback(sku,ok); }); }
+      else { _frCopyFallback(sku,ok); }
+    }catch(_){ _frCopyFallback(sku,ok); }
+  });
+  function _frCopyFallback(txt,done){ var ta=document.createElement('textarea'); ta.value=txt; ta.style.cssText='position:fixed;left:-9999px'; document.body.appendChild(ta); ta.select(); try{ document.execCommand('copy'); if(done)done(); }catch(_){} ta.remove(); }
+})();
 // ── Spreadsheet-style cell selection + running sum in the SKU buy-plan popup ──────────────────────────
 // Drag across numeric cells (or Cmd/Ctrl-click individual ones) to select them; the header badge shows the
 // sum / count / average of the selection, like highlighting a range in a spreadsheet.
@@ -8019,7 +8033,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         var _dpTip=p.n?_te(p.n):'';
         if(_bom){ _dpTip+=(_dpTip?'<br><br>':'')+'<b>BOM Explosion:</b><br>'+_bom.map(function(c){return _te(c.sku)+' &times; '+_te(c.qty);}).join('<br>'); }
         td.innerHTML='<div style="padding:2px 4px;text-align:left">'
-          +'<div class="dp-sku-tip"'+(_dpTip?' data-tip="'+_dpTip.replace(/"/g,'&quot;')+'"':'')+' style="font-size:9px;font-weight:700;color:#1a1a1a;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left'+(_dpTip?';cursor:help':'')+'">'+sku+'</div>'
+          +'<div class="dp-sku-tip" data-sku="'+sku+'" title="Double-click to copy SKU"'+(_dpTip?' data-tip="'+_dpTip.replace(/"/g,'&quot;')+'"':'')+' style="font-size:9px;font-weight:700;color:#1a1a1a;font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left'+(_dpTip?';cursor:help':'')+'">'+sku+'</div>'
           +(p.rep?'<div style="font-size:7px;font-style:italic;color:#7c3aed;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="Forecast inherits the sales history of the replaced SKU '+String(p.rep).replace(/"/g,'&quot;')+'">&#8617; from '+String(p.rep).replace(/</g,'&lt;')+'</div>':'')
           +'<div style="display:flex;gap:2px;align-items:center;flex-wrap:wrap">'
           +'<span class="sku-tier '+tierCls+'" style="font-size:7px">'+(p.ti||'C')+'</span>'

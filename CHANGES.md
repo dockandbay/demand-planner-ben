@@ -1,3 +1,6 @@
+## v27.339 Demand plan — double-click a SKU code to copy it
+- Double-clicking a **SKU code** in the demand plan now **copies it to the clipboard** (with a "SKU copied — …" toast). Title hint added on the SKU cell; the double-click text-selection is suppressed. Clipboard API with a textarea fallback.
+
 ## v27.338 Filter Rules — metric conditions default to "Red only" (literal FC<Actual etc.)
 - The exception-metric conditions (FC < Actual, FC > Run-rate, Selling-no-forecast) now **default to "Red only"** instead of Red+Amber. A filter named "FC < Actual" now means the **genuine** case (actual has reached/passed forecast), not the AMBER "run-rate on pace to exceed" projection — which was surprising in a filter context (e.g. TOWLB-CAB-LG-LTBGE-R UK·DTC: actual 183 < forecast 238, flagged AMBER only because the partial month's run-rate projected ~270). **Red + Amber is still available** as an explicit per-condition opt-in. The Exceptions report is unchanged (still shows Red+Amber). Existing saved filters keep whatever severity they stored.
 
