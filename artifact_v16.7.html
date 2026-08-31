@@ -918,7 +918,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
       <span style="font-weight:700;font-size:12px;color:#1e3a8a">Auto-smooth</span>
       <label style="font-size:12px;color:#64748b" title="Only auto-smooth a month when the SKU-sum is within this % of the sub-category target — a bigger gap is left for manual review">Gap &lt;</label><input type="number" id="ss-th" min="1" max="100" style="width:52px;font-size:12px;padding:3px 5px;border:1px solid #cbd5e1;border-radius:4px"><span style="font-size:12px;color:#64748b">%</span>
       <label style="font-size:12px;color:#64748b;margin-left:6px">Mode</label><select id="ss-mode" style="font-size:12px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px"><option value="standard">Standard</option><option value="leader">Leader</option></select>
-      <button id="ss-run" style="margin-left:auto;font-size:12px;font-weight:600;padding:4px 12px;border:1px solid #16a34a;border-radius:6px;background:#16a34a;color:#fff;cursor:pointer">&#8623; Run auto-smooth now</button>
+      <button id="ss-run" title="Preview the sweep first — you review the before→after changes and Apply or Cancel; nothing is saved until you Apply" style="margin-left:auto;font-size:12px;font-weight:600;padding:4px 12px;border:1px solid #16a34a;border-radius:6px;background:#16a34a;color:#fff;cursor:pointer">&#8623; Auto-smooth (review &amp; apply)</button>
     </div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:#faf5ff;border:1px solid #e9d5ff;border-radius:8px;padding:8px 10px;margin-bottom:10px">
       <span style="font-weight:700;font-size:12px;color:#6b21a8">Category forecasts → %</span>
@@ -1026,6 +1026,9 @@ function runAutoSmooth(){
   var th=(Number(SMOOTH_AUTO.threshold)||20)/100, leader=SMOOTH_AUTO.mode==='leader';
   var flags=SMOOTH_AUTO.flags||{}, keys=Object.keys(flags).filter(function(k){return flags[k];});
   if(!keys.length){ alert('No sub-categories are ticked for Auto. Tick "auto" on some sub-categories first.'); return; }
+  // (v27.330) REVIEW-BEFORE-APPLY: snapshot the forecast so the sweep can be shown for review and Cancelled with no
+  // change. The compute below applies into FC_OUTPUTS in memory (not logged/saved) — committed only on Apply.
+  var _asSnap=null; try{ _asSnap=JSON.stringify({fc:FC_OUTPUTS, iv:IV, fd:FC_DIRTY}); }catch(e){}
   var applied=0, _rc=false, skipped=[], _allChg=[];   // skipped = forecast month-cells left un-smoothed because the gap is >= the threshold (too big — flagged for manual review); _allChg = every smooth change, logged ONCE after the sweep (no per-cell POST fan-out)
   keys.forEach(function(k){ var p=k.split('|'); var co=p[0],ch=p[1],s=p.slice(2).join('|');
     // Always re-cap discontinued SKUs to remaining stock first — spread on-hand+inbound across the post-discontinue
@@ -1041,10 +1044,58 @@ function runAutoSmooth(){
       if(gap<th){ var vals=computeSmoothAlloc(s,co,ch,m,{protectLeaders:leader}); if(vals){ _allChg=_allChg.concat(applySmoothAlloc(co,ch,m,vals)||[]); applied++; } }
       else { skipped.push({co:co,ch:ch,subcat:s,month:m,sum:Math.round(sum),target:Math.round(target),gapPct:Math.round(gap*100)}); }   // over the limit → left for manual review
     }); });
-  try{ logChangesBulk(_allChg); }catch(e){}   // ONE batched/awaited/retried audit write for the whole sweep
-  if(_rc)_markSmoothRun();
-  try{renderMain();}catch(e){} try{markDirty();}catch(e){}
-  _showAutoSmoothResult(applied,keys.length,skipped);
+  // (v27.330) show the PROPOSED numbers in the grid, then a Review (before→after) popup. Commit (audit + dirty +
+  // the skipped-detail result) only on Apply; on Cancel restore the snapshot so nothing changed.
+  try{renderMain();}catch(e){}
+  _showAutoSmoothReview(applied,keys.length,skipped,_allChg,_rc,_asSnap);
+}
+// Restore the pre-sweep forecast state (used when the auto-smooth review is Cancelled). (v27.330)
+function _restoreAutoSmoothSnap(snap){ if(!snap)return; var o; try{o=JSON.parse(snap);}catch(e){return;}
+  [['fc',(typeof FC_OUTPUTS!=='undefined'?FC_OUTPUTS:null)],['iv',(typeof IV!=='undefined'?IV:null)],['fd',(typeof FC_DIRTY!=='undefined'?FC_DIRTY:null)]].forEach(function(p){ var live=p[1], sv=o[p[0]]||{}; if(!live)return; try{ for(var k in live)delete live[k]; Object.assign(live,sv); }catch(e){} }); }
+// Auto-smooth REVIEW popup — shown BEFORE the sweep is committed. Pivots the proposed active-SKU changes to
+// sub-category · month (old → new · Δ) so you can sanity-check, then Apply (commit) or Cancel (revert). (v27.330)
+function _showAutoSmoothReview(applied,keyCount,skipped,allChg,rc,snap){
+  var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  function mlab(m){ m=String(m||''); return (MON[(+m.slice(5,7))-1]||'?')+'-'+m.slice(2,4); }
+  function he(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  var th=(SMOOTH_AUTO.threshold||20);
+  var months=[], seenM={}, rowMap={}, order=[];
+  (allChg||[]).forEach(function(c){ var sub=(typeof SKUM!=='undefined'&&SKUM[c.item]&&SKUM[c.item].s)||c.item; var rk=c.country+'|'+c.channel+'|'+sub, m=c.month;
+    if(!seenM[m]){seenM[m]=1;months.push(m);}
+    if(!rowMap[rk]){rowMap[rk]={co:c.country,ch:c.channel,sub:sub,cells:{}};order.push(rk);}
+    var cell=rowMap[rk].cells[m]||(rowMap[rk].cells[m]={from:0,to:0}); cell.from+=(+c.from||0); cell.to+=(+c.to||0); });
+  months.sort();
+  var oneCoch=(function(){ var s={}; order.forEach(function(rk){ s[rowMap[rk].co+' · '+rowMap[rk].ch]=1; }); return Object.keys(s).length<=1; })();
+  var head='<tr><th class="ar-cell ar-lbl">'+(oneCoch?'Sub-category':'Market · Sub-category')+'</th>'+months.map(function(m){return '<th class="ar-cell ar-mh">'+mlab(m)+'</th>';}).join('')+'</tr>';
+  var body=order.map(function(rk){ var r=rowMap[rk]; var lbl=oneCoch?he(r.sub):(he(r.co)+'·'+he(r.ch)+' · '+he(r.sub));
+    return '<tr><td class="ar-cell ar-lbl" title="'+he(r.co+' · '+r.ch+' · '+r.sub)+'">'+lbl+'</td>'+months.map(function(m){ var c=r.cells[m]; if(!c)return '<td class="ar-cell ar-empty"></td>';
+      var f=Math.round(c.from), t=Math.round(c.to), d=t-f;
+      return '<td class="ar-cell ar-data"><div class="ar-old">'+f.toLocaleString()+'</div><div class="ar-new">&rarr; '+t.toLocaleString()+'</div><div class="ar-d" style="color:'+(d>0?'#166534':(d<0?'#b91c1c':'#94a3b8'))+'">'+(d>0?'+':'')+d.toLocaleString()+'</div></td>'; }).join('')+'</tr>'; }).join('');
+  var sty='<style>#as-review-ov .ar-tbl{border-collapse:separate;border-spacing:0;font-size:11px;font-variant-numeric:tabular-nums}'
+    +'#as-review-ov .ar-cell{padding:4px 8px;border-bottom:1px solid #f1f5f9;border-right:1px solid #f6f7f9;white-space:nowrap;text-align:right}'
+    +'#as-review-ov thead .ar-cell{position:sticky;top:0;background:#f8fafc;z-index:2;color:#475569;font-weight:700;border-bottom:1px solid #e2e8f0}'
+    +'#as-review-ov .ar-lbl{position:sticky;left:0;background:#fff;z-index:1;text-align:left;font-weight:700;color:#0f172a;box-shadow:2px 0 3px -2px rgba(15,23,42,.15);min-width:150px;max-width:240px;overflow:hidden;text-overflow:ellipsis}'
+    +'#as-review-ov thead .ar-lbl{z-index:3;background:#f8fafc}#as-review-ov .ar-mh{min-width:86px}'
+    +'#as-review-ov td.ar-empty{background:#fcfcfd}#as-review-ov .ar-old{color:#94a3b8;line-height:1.1;text-decoration:line-through}#as-review-ov .ar-new{font-weight:700;color:#0f172a;line-height:1.15}#as-review-ov .ar-d{font-size:10px;font-weight:700;line-height:1.1}</style>';
+  var old=document.getElementById('as-review-ov'); if(old)old.parentNode.removeChild(old);
+  var ov=document.createElement('div'); ov.id='as-review-ov';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:100000;display:flex;align-items:center;justify-content:center;padding:16px';
+  var tbl=order.length? (sty+'<div style="font-size:12px;color:#334155;margin:10px 0 4px">Each cell = current SKU sum <s>old</s> &rarr; <b>proposed</b> (Δ), aggregated per sub-category · month:</div>'
+      +'<div style="max-height:52vh;overflow:auto;border:1px solid #e2e8f0;border-radius:6px"><table class="ar-tbl"><thead>'+head+'</thead><tbody>'+body+'</tbody></table></div>')
+    : '<div style="font-size:12px;color:#64748b;margin:10px 0 4px">No active-SKU rescales — the sweep only re-capped discontinued SKUs to remaining stock.</div>';
+  ov.innerHTML='<div style="background:#fff;border-radius:12px;box-shadow:0 12px 40px rgba(0,0,0,.25);max-width:'+(order.length?'960px':'560px')+';width:'+(order.length?'94vw':'100%')+';padding:18px 20px">'
+    +'<div style="font-weight:700;font-size:15px;color:#0f172a">Review auto-smooth — before applying</div>'
+    +'<div style="font-size:12px;color:#475569;margin-top:4px">About to rescale <b>'+applied+'</b> forecast month-cell'+(applied===1?'':'s')+' across '+keyCount+' sub-categor'+(keyCount===1?'y':'ies')+' (gap under '+th+'%)'+(rc?' · discontinued SKUs re-capped to remaining stock':'')+'.'+(skipped.length?(' <b>'+skipped.length+'</b> cell'+(skipped.length===1?'':'s')+' over '+th+'% will be left for manual review.'):'')+' <b>Nothing is saved until you Apply.</b></div>'
+    +tbl
+    +'<div style="display:flex;justify-content:flex-end;gap:8px;margin-top:14px">'
+      +'<button id="ar-cancel" style="font-size:12px;padding:6px 16px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#334155;cursor:pointer;font-weight:600">Cancel</button>'
+      +'<button id="ar-apply" style="font-size:12px;padding:6px 16px;border:1px solid #16a34a;border-radius:6px;background:#16a34a;color:#fff;cursor:pointer;font-weight:700">Apply auto-smooth</button></div></div>';
+  document.body.appendChild(ov);
+  function close(){ if(ov.parentNode)ov.parentNode.removeChild(ov); }
+  function cancel(){ _restoreAutoSmoothSnap(snap); try{renderMain();}catch(e){} close(); }
+  ov.onclick=function(e){ if(e.target===ov)cancel(); };   // backdrop click = safe Cancel (don't apply)
+  document.getElementById('ar-cancel').onclick=cancel;
+  document.getElementById('ar-apply').onclick=function(){ try{ logChangesBulk(allChg); }catch(e){} if(rc){ try{_markSmoothRun();}catch(e){} } try{markDirty();}catch(e){} close(); _showAutoSmoothResult(applied,keyCount,skipped); };
 }
 // Result popup for the one-click auto-smooth sweep: what was smoothed, plus a table of the month-cells LEFT
 // un-smoothed because their gap exceeded the threshold (for manual review) with copy-to-clipboard + CSV download.

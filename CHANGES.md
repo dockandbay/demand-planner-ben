@@ -1,3 +1,6 @@
+## v27.330 Auto-smooth — review the change BEFORE it applies
+- The one-click **Auto-smooth** ("⚙ Smoothing ▸ Auto-smooth") now shows a **Review popup before committing**: the sweep is computed and the proposed numbers appear in the grid, then a dialog pivots the **before→after (Δ) per sub-category · month** for the active-SKU rescales, notes how many cells are left for manual review, and gives **Apply** / **Cancel**. Nothing is logged or marked unsaved until you **Apply**; **Cancel** restores the exact pre-sweep forecast (incl. the discontinued re-cap). Button relabelled "⇟ Auto-smooth (review & apply)". Matches the manual smooth's ✓/✕ preview.
+
 ## v27.329 Removed the remaining per-view "↻ Refresh" buttons (Actions list + Shipment plan)
 - Per Ben, removed the view-local reload buttons too: **Actions** (`#act-refresh`) and **Shipment plan** (`#sp-refresh`). The unified top-nav ↻ (v27.327) refreshes whichever supply section you're on, so these are redundant. `#sp-undo` kept.
 
