@@ -988,7 +988,12 @@ function closeFcLogic(){ var e=document.getElementById('fclogic-ov'); if(e)e.sty
 // ⚙ Smoothing settings — per country/channel/subcat "disregard discontinued" flags (persisted in app_settings).
 var _ssCo='UK', _ssCh='DTC';
 function ssSubcatsFor(co,ch){ var ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':ch==='TIK'?'t':'b', byCat={};
-  Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||!p.s)return; var av=(p.av||{})[ctry]||''; if(av.indexOf(chKey)<0)return; var cat=p.c||p.s; (byCat[cat]=byCat[cat]||{})[p.s]=1; });
+  Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||!p.s)return; var av=(p.av||{})[ctry]||''; if(av.indexOf(chKey)<0)return; var cat=p.c||p.s;
+    // (v27.332) skip inactive / run-off categories + sub-categories (is_active=false) — they're excluded from the
+    // demand plan, so they must not appear in the smoothing list or the auto-smooth sweep (e.g. "Towel - Dog").
+    if(typeof CATS_META!=='undefined'&&CATS_META[cat]&&CATS_META[cat].a===false)return;
+    if(typeof SUBS_META!=='undefined'&&SUBS_META[p.s]&&SUBS_META[p.s].a===false)return;
+    (byCat[cat]=byCat[cat]||{})[p.s]=1; });
   return byCat; }
 var _ssSavedT=null;
 function _ssFlashSaved(){ var el=document.getElementById('ss-saved'); if(!el)return; el.style.opacity='1'; clearTimeout(_ssSavedT); _ssSavedT=setTimeout(function(){ el.style.opacity='0'; },1800); }
@@ -1031,6 +1036,10 @@ function runAutoSmooth(){
   var _asSnap=null; try{ _asSnap=JSON.stringify({fc:FC_OUTPUTS, iv:IV, fd:FC_DIRTY}); }catch(e){}
   var applied=0, _rc=false, skipped=[], _allChg=[];   // skipped = forecast month-cells left un-smoothed because the gap is >= the threshold (too big — flagged for manual review); _allChg = every smooth change, logged ONCE after the sweep (no per-cell POST fan-out)
   keys.forEach(function(k){ var p=k.split('|'); var co=p[0],ch=p[1],s=p.slice(2).join('|');
+    // (v27.332) never auto-smooth an inactive / run-off sub-category or one under an inactive category (guards stale
+    // Auto flags saved before the category was retired — e.g. "Towel - Dog") so they can't appear in the sweep/CSV.
+    if(typeof SUBS_META!=='undefined'&&SUBS_META[s]&&SUBS_META[s].a===false)return;
+    var _pc=(typeof SUBS_META!=='undefined'&&SUBS_META[s]&&SUBS_META[s].c)||''; if(_pc&&typeof CATS_META!=='undefined'&&CATS_META[_pc]&&CATS_META[_pc].a===false)return;
     // Always re-cap discontinued SKUs to remaining stock first — spread on-hand+inbound across the post-discontinue
     // months (velocity × seasonality) and ZERO every month once stock is exhausted. Runs for every Auto sub-category
     // regardless of the "Disregard disc." tick: a discontinued SKU should never be forecast beyond what it can ship.
