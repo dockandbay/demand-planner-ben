@@ -8773,7 +8773,7 @@ function buildBody(){
   const fu_cache={};
   Object.keys(cm).forEach(function(cat){
     var rows=cm[cat].sort(function(a,b){return a.s.localeCompare(b.s)||(a.ch.localeCompare(b.ch));});
-    var _frOn=(typeof FR_ACTIVE!=='undefined'&&!!FR_ACTIVE), _frHideSub=_frOn&&!frShowSubcats();   // Filter Rules: explode to matching SKUs; hide subcat aggregate rows unless "show sub-cats" is on
+    var _frOn=(typeof FR_ACTIVE!=='undefined'&&!!FR_ACTIVE);   // Filter Rules: explode to matching SKUs; the subcat summary-totals row is removed below (see the rows loop)
     if(PLAN_SKU_QRY||PLAN_RW!=='ALL'||PLAN_FROM_REP||_frOn){rows=rows.filter(function(row){return filteredSkus(row.s,CUR,row.ch).length>0;});if(!rows.length)return;}
     // Run-off (discontinued) CATEGORIES: hidden by default; revealed via Display Settings ▸ "Show run-off categories".
     if(!SHOW_RUNOFF_CATS){ rows=rows.filter(function(row){ return !RUNOFF_CATS.has(row.c); }); if(!rows.length)return; }
@@ -8801,9 +8801,14 @@ function buildBody(){
       // When the (redundant) category header is skipped, mark the first row so it carries a darker top divider —
       // a full-width horizontal line between one category and the next (e.g. Bag - Beach → Bag - Cooling).
       if(ri===0 && _redundantHdr) drow.classList.add('cat-start');
-      if(_frHideSub)drow.style.display='none';   // keep drow in the DOM as the anchor for inline SKU rows, but hide the subcat aggregate row
       frag.appendChild(drow);
       if(PLAN_SKU_QRY||PLAN_RW!=='ALL'||PLAN_FROM_REP||_frOn)insertInlineSkuRows(row.s,CUR,row.ch,drow);
+      // Filter Rules: the subcategory SUMMARY-TOTALS row isn't wanted under a filter. drow stays only long enough to
+      // anchor the inline SKU rows, then it's removed (SKUs-only) or swapped for a plain sub-category header label.
+      if(_frOn){
+        if(frShowSubcats()){ var shr=document.createElement('tr'); shr.className='cat-hdr fr-subhdr'; var shd=document.createElement('td'); shd.colSpan=200; var shsp=document.createElement('span'); shsp.textContent=row.s; shsp.style.cssText='position:sticky;left:0;display:inline-block;font-weight:600;color:#475569'; shd.appendChild(shsp); shr.appendChild(shd); frag.replaceChild(shr,drow); }
+        else if(drow.parentNode){ frag.removeChild(drow); }
+      }
     });
     if(PLAN_SKU_QRY||PLAN_RW!=='ALL'||PLAN_FROM_REP||_frOn)return; // filter mode: skip category totals
     if(!SHOW_CAT_TOT)return; // category-total rows hidden by default (toolbar toggle)

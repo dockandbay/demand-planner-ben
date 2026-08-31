@@ -1,3 +1,6 @@
+## v27.337 Filter Rules — remove sub-category summary-total rows under a filter
+- When a Filter Rule is applied, the demand plan no longer shows the **sub-category summary-totals row**. The row is kept just long enough to anchor the inline SKU rows, then removed (SKUs-only view) or swapped for a **plain sub-category header label** (grouping only, no totals) when **Show sub-categories** is on. Search/RW/from-replacement filter modes are unchanged.
+
 ## v27.336 Filter Rules button moved next to "More Filters"
 - Moved the **☰ Filter Rules** button to sit **immediately after the "⧉ More Filters" button** on the same row (was after the filter chips). Chips now follow it. No behaviour change.
 
