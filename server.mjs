@@ -10879,6 +10879,11 @@ app.post('/api/supply/po/:po', async (req, res) => {
   // notes) skip the ~0.4s row query entirely: the client just repaints the cell it already changed.
   ((Object.keys(body).some(k => !PO_COSMETIC_FIELDS.has(k)) || _trackKeys.length)
     ? async () => { if (_trackKeys.length) await logPoFieldChanges(req.params.po, _trackKeys, _trackOld, body, _trackBy);
+        // A status / branch / country change moves whether (and where) this PO's lines count as on-order in the
+        // demand plan's Stock Availability. That data lives in the 10-min _dataCache, which a PO edit did NOT bust —
+        // so a just-received/COMPLETE PO kept showing as inbound for up to 10 min. Invalidate now (fire-and-forget
+        // background rebuild) so the correction shows on the next demand-plan load. (v27.326)
+        if (['status', 'branch', 'country_code'].some(k => k in body)) invalidateDataCache();
         // return the recomputed grid row ONLY for non-cosmetic edits (drives the client repaint). A cosmetic-but-tracked
         // edit (e.g. the confirmed_in_3pl tickbox) logs the change but returns NO row → no panel re-render → the box stays ticked.
         return Object.keys(body).some(k => !PO_COSMETIC_FIELDS.has(k))

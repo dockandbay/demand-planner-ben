@@ -1,3 +1,8 @@
+## v27.326 FIX: a PO status/branch/country change now refreshes the demand on-order cache
+- Marking a PO `COMPLETE` (or changing its branch / country) is what removes/moves its lines in the demand plan's **Stock Availability / on-order**. That data lives in a **10-minute** server cache (`_dataCache`) which a PO edit **did not** previously invalidate — so a just-received PO could keep showing as **inbound for up to 10 minutes**.
+- The PO-patch route now calls `invalidateDataCache()` when the edit touches **`status`, `branch` or `country_code`**, so the correction shows on the **next demand-plan load** instead of waiting for the TTL. Fire-and-forget background rebuild (single-flight, so a burst of edits coalesces into one rebuild — no load spike). Other PO field edits are unaffected.
+- Server-only change (`/api/supply/po/:po` patch callback). (You can still force it instantly with the BUY tab's **↻ Refresh cache** button.)
+
 ## v27.325 Record-of-change: applying a staged supplier submission is now audited on the PO timeline
 - Applying a supplier's staged submission (**final invoice amount** → `supplier_invoice_total`, or **production-end date** → `end_production_overide`) via the PO-drawer "✓ Apply" button used to write the PO **silently** — no `po_change_log` entry, so the change never appeared in the record of change. It now writes a timeline row: e.g. **Final invoice amount: (none) → $943 (supplier submission by jenny.hu@romrol.com)**, with the old→new value and the submitting supplier noted.
 - The apply is now **attributed to the logged-in D&B user** (`authUser`) instead of the generic `'PO PLAN'` label — both in the `po_change_log` entry and in `supplier_submissions.applied_by` — so you can see who approved it.
