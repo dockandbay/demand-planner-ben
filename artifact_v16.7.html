@@ -10411,20 +10411,20 @@ function excComputeMaps(co,ch){
 // Field registry — drives BOTH the evaluator and (later) the builder UI. Add a field = one entry + one evaluator case.
 function _filterStatus(p,co){ var ctry=co.toLowerCase(); var lch=(p.lch&&p.lch[ctry]), disc=(p.disc&&p.disc[ctry]); var t=(typeof TODAY!=='undefined')?TODAY:new Date().toISOString().slice(0,10); if(lch&&lch>t)return 'FUTURE'; if(disc&&disc<t)return 'DISCONTINUED'; return 'ACTIVE'; }
 var FILTER_FIELDS=[
-  {key:'category',label:'Category',type:'enum',ops:['in','not_in'],opts:function(){var s={};Object.keys(SKUM).forEach(function(k){var c=SKUM[k]&&(SKUM[k].c||SKUM[k].s);if(c)s[c]=1;});return Object.keys(s).sort();}},
-  {key:'subcategory',label:'Sub-category',type:'enum',ops:['in','not_in'],opts:function(){var s={};Object.keys(SKUM).forEach(function(k){var c=SKUM[k]&&SKUM[k].s;if(c)s[c]=1;});return Object.keys(s).sort();}},
-  {key:'tier',label:'Market tier',type:'enum',ops:['in','not_in'],opts:function(){return ['A','B','C'];}},
-  {key:'status',label:'Status',type:'enum',ops:['in','not_in'],opts:function(){return ['ACTIVE','FUTURE','DISCONTINUED'];}},
-  {key:'core_seasonal',label:'Core/Seasonal',type:'enum',ops:['in','not_in'],opts:function(){return ['C','S'];}},
-  {key:'release_window',label:'Release window',type:'enum',ops:['in','not_in'],opts:function(){var s={};Object.keys(SKUM).forEach(function(k){var c=SKUM[k]&&SKUM[k].rw;if(c)s[c]=1;});return Object.keys(s).sort();}},
-  {key:'from_replacement',label:'From-replacement',type:'bool',ops:['is'],opts:function(){return ['yes','no'];}},
-  {key:'metric.fclt',label:'FC < Actual (this month)',type:'metric',ops:['is'],metric:'fclt'},
-  {key:'metric.fgtr',label:'FC > Run-rate (this month)',type:'metric',ops:['is'],metric:'fgtr'},
-  {key:'metric.sellnofc',label:'Selling, no forecast',type:'metric',ops:['is'],metric:'sellnofc'},
-  {key:'trend.momentum',label:'Sales momentum (3mo)',type:'trend',ops:['in','not_in'],metric:'momentum',opts:function(){return ['Rising','Flat','Falling'];}},
-  {key:'trend.yoy',label:'YoY trend (3mo vs LY)',type:'trend',ops:['in','not_in'],metric:'yoy',opts:function(){return ['Up','Flat','Down'];}},
-  {key:'trend.wmape',label:'Forecast accuracy (3mo WMAPE)',type:'trend',ops:['in','not_in'],metric:'wmape',opts:function(){return ['Good','OK','Poor'];}},
-  {key:'trend.bias',label:'Forecast bias (3mo over/under)',type:'trend',ops:['in','not_in'],metric:'bias',opts:function(){return ['Over','Neutral','Under'];}}
+  {key:'category',label:'Category',type:'enum',ops:['in','not_in'],desc:'The product category.',opts:function(){var s={};Object.keys(SKUM).forEach(function(k){var c=SKUM[k]&&(SKUM[k].c||SKUM[k].s);if(c)s[c]=1;});return Object.keys(s).sort();}},
+  {key:'subcategory',label:'Sub-category',type:'enum',ops:['in','not_in'],desc:'The sub-category.',opts:function(){var s={};Object.keys(SKUM).forEach(function(k){var c=SKUM[k]&&SKUM[k].s;if(c)s[c]=1;});return Object.keys(s).sort();}},
+  {key:'tier',label:'Market tier',type:'enum',ops:['in','not_in'],desc:'Market tier (A / B / C) for the selected country — drives cover targets and new-SKU share weighting.',opts:function(){return ['A','B','C'];}},
+  {key:'status',label:'Status',type:'enum',ops:['in','not_in'],desc:'ACTIVE, FUTURE (not yet launched) or DISCONTINUED, from the launch & discontinue dates for the selected country.',opts:function(){return ['ACTIVE','FUTURE','DISCONTINUED'];}},
+  {key:'core_seasonal',label:'Core/Seasonal',type:'enum',ops:['in','not_in'],desc:'Core vs Seasonal classification (C = Core, S = Seasonal).',opts:function(){return ['C','S'];}},
+  {key:'release_window',label:'Release window',type:'enum',ops:['in','not_in'],desc:'Release window / season (e.g. SS27).',opts:function(){var s={};Object.keys(SKUM).forEach(function(k){var c=SKUM[k]&&SKUM[k].rw;if(c)s[c]=1;});return Object.keys(s).sort();}},
+  {key:'from_replacement',label:'From-replacement',type:'bool',ops:['is'],desc:'SKU that inherits a predecessor SKU’s sales history (a replacement SKU).',opts:function(){return ['yes','no'];}},
+  {key:'metric.fclt',label:'FC < Actual (this month)',type:'metric',ops:['is'],metric:'fclt',desc:'Flags SKUs where the actual has already reached or passed the forecast this month (actual ≥ forecast). Current month, selected market × channel. Literal only — no run-rate projection.'},
+  {key:'metric.fgtr',label:'FC > Run-rate (this month)',type:'metric',ops:['is'],metric:'fgtr',desc:'Forecast sits above the run-rate (this month’s actuals-to-date projected to a full month), once ≥34% of the month has elapsed — i.e. over-forecast. RED = run-rate below 50% of forecast (badly over-forecast). AMBER = run-rate 50–75% of forecast (mildly over). Red+Amber = both.'},
+  {key:'metric.sellnofc',label:'Selling, no forecast',type:'metric',ops:['is'],metric:'sellnofc',desc:'Sold ≥10 units over the last 3 months but the next 4 months’ forecast is ≤10% of that — selling with little/no forward forecast. RED = ≥60 units sold (higher risk). AMBER = 10–59 units. Red+Amber = both.'},
+  {key:'trend.momentum',label:'Sales momentum (3mo vs prior 3mo)',type:'trend',ops:['in','not_in'],metric:'momentum',desc:'Last 3 completed months vs the 3 before them. RISING = ≥ +20%. FALLING = ≤ −20%. FLAT = in between. Needs ≥10 units across the window. Sequential — for seasonal SKUs this largely reflects the season (e.g. summer vs spring), NOT year-over-year growth. Use YoY trend for genuine growth.',opts:function(){return ['Rising','Flat','Falling'];}},
+  {key:'trend.yoy',label:'YoY trend (3mo vs LY)',type:'trend',ops:['in','not_in'],metric:'yoy',desc:'Last 3 completed months vs the SAME 3 months last year. UP = ≥ +20%. DOWN = ≤ −20%. FLAT = in between. Needs ≥10 units. De-seasonalised — the best read of genuine growth.',opts:function(){return ['Up','Flat','Down'];}},
+  {key:'trend.wmape',label:'Forecast accuracy (3mo WMAPE)',type:'trend',ops:['in','not_in'],metric:'wmape',desc:'Weighted absolute % error (WMAPE) of the locked forecast vs actual over the last 3 completed months. GOOD < 30%. OK = 30–60%. POOR ≥ 60%. Uses locked forecast snapshots (populated on live).',opts:function(){return ['Good','OK','Poor'];}},
+  {key:'trend.bias',label:'Forecast bias (3mo over/under)',type:'trend',ops:['in','not_in'],metric:'bias',desc:'Locked forecast vs actual over the last 3 completed months. OVER = forecast ≥20% above actual (over-forecasting). UNDER = forecast ≥20% below actual (under-forecasting). NEUTRAL = within ±20%. Live only.',opts:function(){return ['Over','Neutral','Under'];}}
 ];
 function _filterFieldDef(k){ for(var i=0;i<FILTER_FIELDS.length;i++)if(FILTER_FIELDS[i].key===k)return FILTER_FIELDS[i]; return null; }
 // Evaluate one rule against a SKU in (co,ch). excMaps = excComputeMaps(co,ch) (compute once per render, pass in).
@@ -10498,9 +10498,9 @@ var FR=(function(){
   function valEditor(c,i){
     var d=_filterFieldDef(c.field)||FILTER_FIELDS[0];
     if(d.type==='metric'){
-      if(d.metric==='fclt')return '<span style="font-size:11px;color:#64748b">actual &ge; forecast</span>';   // literal only — no run-rate projection
+      if(d.metric==='fclt')return '<span class="tip120" data-tip="'+esc(d.desc||'')+'" style="font-size:11px;color:#64748b;cursor:help">actual &ge; forecast</span>';   // literal only — no run-rate projection
       var sev=c.severity||'red';
-      return '<select class="fr-sev" data-i="'+i+'" style="font-size:11px">'
+      return '<select class="fr-sev tip120" data-i="'+i+'" data-tip="'+esc(d.desc||'')+'" title="Hover the ⓘ for what Red / Amber mean" style="font-size:11px">'
         +'<option value="red"'+(sev==='red'?' selected':'')+'>Red only</option>'
         +'<option value="red_amber"'+(sev!=='red'?' selected':'')+'>Red + Amber</option></select>'; }
     if(d.type==='bool'){ var bv=(Array.isArray(c.value)?c.value[0]:c.value)||'yes';
@@ -10516,9 +10516,11 @@ var FR=(function(){
     return '<span class="fr-op" data-i="'+i+'" data-op="is" style="color:#64748b">is flagged</span>';
   }
   function condRow(c,i){
+    var d=_filterFieldDef(c.field)||FILTER_FIELDS[0];
     return '<div class="fr-rule" data-i="'+i+'" style="display:flex;align-items:flex-start;gap:6px;padding:5px 0;border-bottom:1px solid #ede9fe;flex-wrap:wrap">'
       +'<select class="fr-field" data-i="'+i+'" onchange="FR.fieldChange('+i+')" style="font-size:11px;min-width:170px">'
       +FILTER_FIELDS.map(function(f){return '<option value="'+esc(f.key)+'"'+(f.key===c.field?' selected':'')+'>'+esc(f.label)+'</option>';}).join('')+'</select>'
+      +(d.desc?'<span class="tip120" data-tip="'+esc(d.desc)+'" style="cursor:help;color:#7c3aed;font-weight:700;font-size:12px;align-self:center;padding:0 1px">&#9432;</span>':'')
       +opEditor(c,i)+valEditor(c,i)
       +'<button type="button" onclick="FR.rmCond('+i+')" title="remove" style="margin-left:auto;font-size:12px;line-height:1;padding:2px 7px;border:1px solid #e2e8f0;border-radius:3px;background:#fff;color:#7c3aed;cursor:pointer">&times;</button>'
       +'</div>';

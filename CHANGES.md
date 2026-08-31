@@ -1,3 +1,14 @@
+## v27.344 Filter Rules — ⓘ tooltips quantifying each condition (120ms hover) + Red/Amber cut-offs
+- Every condition field now has an **ⓘ** next to it (120ms hover, reusing the app's `.tip120` tooltip) that **quantifies exactly what it means** — the thresholds, the window, and what **RED vs AMBER** mean where applicable:
+  - **FC < Actual** — actual ≥ forecast this month (literal, no run-rate).
+  - **FC > Run-rate** — over-forecast vs the full-month run-rate (≥34% of month elapsed). RED = run-rate < 50% of forecast; AMBER = 50–75%.
+  - **Selling, no forecast** — sold ≥10u in 3mo but next-4mo forecast ≤10% of that. RED = ≥60u sold; AMBER = 10–59u.
+  - **Sales momentum (3mo vs prior 3mo)** — Rising ≥ +20% / Falling ≤ −20% vs the prior 3 months; sequential, so reflects season, not YoY growth.
+  - **YoY trend (3mo vs LY)** — Up ≥ +20% / Down ≤ −20% vs the same 3 months last year (de-seasonalised = genuine growth).
+  - **Forecast accuracy (WMAPE)** — Good < 30% / OK 30–60% / Poor ≥ 60% over the last 3mo (live only).
+  - **Forecast bias** — Over / Under = forecast ±20% vs actual over 3mo (live only). Attributes (category, tier, status, …) get a one-line description too.
+- The Red/Amber severity dropdown is also hover-tagged with the same quantified meaning. Relabelled **Sales momentum → "Sales momentum (3mo vs prior 3mo)"** so it reads as sequential (not YoY), addressing the earlier momentum-vs-growth confusion.
+
 ## v27.343 Filter Rules — remove the grand-total summary row + category headers under a filter
 - Under an applied Filter Rule the demand plan no longer shows the **grand-total summary row** (it totals everything, not the filtered set). Category header rows now show **only when "Show sub-categories" is on** (grouping); with it off you get a clean flat list of matching SKUs — no grand total, no category headers, no sub-category totals. Verified in jsdom: filter+hide-subcats → 0 grand-total, 0 category headers, 184 SKU rows; filter+show-subcats → 0 grand-total, 21 category headers.
 
