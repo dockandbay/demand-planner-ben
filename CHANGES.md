@@ -1,3 +1,6 @@
+## v27.346 Filter Rules — a new condition defaults to "— please select —" (no auto Category)
+- Adding a condition (New filter / Add condition) now starts on a **"— please select —"** placeholder instead of defaulting to Category, so you actively choose the field. The operator/value controls only appear once a field is picked (a "choose a field…" hint shows until then). Unselected rows are ignored by the evaluator and stripped on save/apply.
+
 ## v27.345 Filter Rules — remove "Sales momentum" condition (not useful for a seasonal catalogue)
 - Removed the **Sales momentum (3mo vs prior 3mo)** trend condition. For a seasonal brand it mostly reflected the season (summer vs spring) rather than genuine trend, so it was more misleading than useful. Registry entry, the `momentum` computation in `excComputeMaps` (incl. the now-unused `prior3` window), and its map output are all removed. **Use `YoY trend (3mo vs LY)` for genuine, de-seasonalised growth.** The other trend/forecast conditions (YoY, WMAPE, Bias) and the exception metrics are unchanged.
 

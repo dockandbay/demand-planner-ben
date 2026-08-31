@@ -10512,12 +10512,14 @@ var FR=(function(){
     return '<span class="fr-op" data-i="'+i+'" data-op="is" style="color:#64748b">is flagged</span>';
   }
   function condRow(c,i){
-    var d=_filterFieldDef(c.field)||FILTER_FIELDS[0];
+    var picked=!!c.field;
+    var d=picked?(_filterFieldDef(c.field)||FILTER_FIELDS[0]):null;
     return '<div class="fr-rule" data-i="'+i+'" style="display:flex;align-items:flex-start;gap:6px;padding:5px 0;border-bottom:1px solid #ede9fe;flex-wrap:wrap">'
-      +'<select class="fr-field" data-i="'+i+'" onchange="FR.fieldChange('+i+')" style="font-size:11px;min-width:170px">'
+      +'<select class="fr-field" data-i="'+i+'" onchange="FR.fieldChange('+i+')" style="font-size:11px;min-width:170px'+(picked?'':';color:#94a3b8')+'">'
+      +'<option value=""'+(picked?'':' selected')+'>— please select —</option>'
       +FILTER_FIELDS.map(function(f){return '<option value="'+esc(f.key)+'"'+(f.key===c.field?' selected':'')+'>'+esc(f.label)+'</option>';}).join('')+'</select>'
-      +(d.desc?'<span class="tip120" data-tip="'+esc(d.desc)+'" style="cursor:help;color:#7c3aed;font-weight:700;font-size:12px;align-self:center;padding:0 1px">&#9432;</span>':'')
-      +opEditor(c,i)+valEditor(c,i)
+      +(picked&&d.desc?'<span class="tip120" data-tip="'+esc(d.desc)+'" style="cursor:help;color:#7c3aed;font-weight:700;font-size:12px;align-self:center;padding:0 1px">&#9432;</span>':'')
+      +(picked?(opEditor(c,i)+valEditor(c,i)):'<span style="color:#94a3b8;font-size:11px;align-self:center">choose a field…</span>')
       +'<button type="button" onclick="FR.rmCond('+i+')" title="remove" style="margin-left:auto;font-size:12px;line-height:1;padding:2px 7px;border:1px solid #e2e8f0;border-radius:3px;background:#fff;color:#7c3aed;cursor:pointer">&times;</button>'
       +'</div>';
   }
@@ -10547,7 +10549,8 @@ var FR=(function(){
     var en=document.getElementById('fr-enabled'); if(en)form.enabled=!!en.checked;
     var rows=document.querySelectorAll('#fr-conds .fr-rule'), out=[];
     Array.prototype.forEach.call(rows,function(row){
-      var field=(row.querySelector('.fr-field')||{}).value; var d=_filterFieldDef(field)||FILTER_FIELDS[0];
+      var field=(row.querySelector('.fr-field')||{}).value; if(!field){ out.push({field:''}); return; }   // unselected "please select" row — keep as-is (ignored by the evaluator, stripped on save)
+      var d=_filterFieldDef(field)||FILTER_FIELDS[0];
       var c={field:field};
       if(d.type==='metric'){ c.op='is'; var sv=row.querySelector('.fr-sev'); c.severity=(sv&&sv.value)||'red_amber'; c.value=null; }
       else if(d.type==='bool'){ c.op='is'; var bv=row.querySelector('.fr-val'); c.value=[(bv&&bv.value)||'yes']; }
@@ -10556,16 +10559,16 @@ var FR=(function(){
     });
     form.conds=out;
   }
-  function toDef(){ return {match_mode:'and',show_subcats:!!form.show_subcats,conditions:(form.conds||[]).slice()}; }
+  function toDef(){ return {match_mode:'and',show_subcats:!!form.show_subcats,conditions:(form.conds||[]).filter(function(c){return c&&c.field;})}; }   // drop unselected "please select" rows
   // ── actions ────────────────────────────────────────────────────────────────────────────────────────────────
   function render(){ var p=document.getElementById('fr-panel'); if(!p)return; p.innerHTML=editing?formHTML():listHTML(); updateBtn(); }
   function toggle(e){ if(e)e.stopPropagation(); var p=document.getElementById('fr-panel'); if(!p)return; var open=(p.style.display==='block'); p.style.display=open?'none':'block'; if(!open){ editing=null; render(); } }
-  function add(){ editing={}; form={name:'',show_subcats:false,enabled:true,conds:[{field:FILTER_FIELDS[0].key,op:defOpFor(FILTER_FIELDS[0]),value:[]}]}; render(); }
+  function add(){ editing={}; form={name:'',show_subcats:false,enabled:true,conds:[{field:''}]}; render(); }   // start on "please select", not a defaulted field
   function edit(id){ var r=rules().filter(function(x){return String(x.id)===String(id);})[0]; if(!r)return; editing=JSON.parse(JSON.stringify(r)); var d=editing.def||{}; form={name:editing.name||'',show_subcats:!!d.show_subcats,enabled:editing.enabled!==false,conds:(d.conditions||[]).map(function(c){return JSON.parse(JSON.stringify(c));})}; render(); }
   function cancel(){ editing=null; render(); }
-  function addCond(){ readForm(); var d=FILTER_FIELDS[0]; form.conds.push({field:d.key,op:defOpFor(d),value:[]}); render(); }
+  function addCond(){ readForm(); form.conds.push({field:''}); render(); }   // new row starts unselected
   function rmCond(i){ readForm(); form.conds.splice(i,1); render(); }
-  function fieldChange(i){ readForm(); var sel=document.querySelectorAll('#fr-conds .fr-rule')[i]; var field=sel&&sel.querySelector('.fr-field')?sel.querySelector('.fr-field').value:FILTER_FIELDS[0].key; var d=_filterFieldDef(field)||FILTER_FIELDS[0]; form.conds[i]={field:field,op:defOpFor(d),value:d.type==='metric'?null:[],severity:d.type==='metric'?'red':undefined}; render(); }
+  function fieldChange(i){ readForm(); var sel=document.querySelectorAll('#fr-conds .fr-rule')[i]; var field=(sel&&sel.querySelector('.fr-field'))?sel.querySelector('.fr-field').value:''; if(!field){ form.conds[i]={field:''}; render(); return; } var d=_filterFieldDef(field)||FILTER_FIELDS[0]; form.conds[i]={field:field,op:defOpFor(d),value:d.type==='metric'?null:[],severity:d.type==='metric'?'red':undefined}; render(); }
   function _applyDef(name,def){ FR_ACTIVE={id:(editing&&editing.id)||null,name:name||(def.conditions&&def.conditions.length?'ad-hoc filter':null),def:def}; _frMapsCache.key=''; try{renderMain();}catch(e){} editing=null; render(); var p=document.getElementById('fr-panel'); if(p)p.style.display='none'; }
   function apply(){ readForm(); _applyDef(form.name,toDef()); }
   function applySaved(id){ var r=rules().filter(function(x){return String(x.id)===String(id);})[0]; if(!r)return; FR_ACTIVE={id:r.id,name:r.name,def:r.def||{}}; _frMapsCache.key=''; try{renderMain();}catch(e){} render(); var p=document.getElementById('fr-panel'); if(p)p.style.display='none'; }
