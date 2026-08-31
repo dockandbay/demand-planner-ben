@@ -7855,11 +7855,27 @@ app.post('/api/supply/submission/:id/apply', async (req, res) => {
     // allow (re)apply on pending OR already-applied (e.g. the final was later edited and needs re-syncing);
     // only a rejected/dismissed submission can't be applied.
     if (s.status === 'dismissed') return res.status(400).json({ error: 'this submission was rejected' });
-    let applied;
-    if (s.kind === 'completion_date') { await pool.query(`UPDATE planner.purchase_orders SET end_production_overide=$1::date, updated_at=now() WHERE po=$2`, [s.value, s.po]); applied = 'production-end → ' + s.value; }
-    else if (s.kind === 'invoice_value') { const clean = sanitiseMoney(s.value); if (clean == null) return res.status(400).json({ error: 'Stored invoice value "' + s.value + '" is not a number — fix it on the PO before approving.' }); await pool.query(`UPDATE planner.purchase_orders SET supplier_invoice_total=$1::numeric, updated_at=now() WHERE po=$2`, [clean, s.po]); applied = 'invoice total → $' + clean; }
+    // Attribute the real approver (the logged-in D&B user) — was recorded as a generic 'PO PLAN' from the client.
+    const by = authUser(req) || (req.body && req.body.by) || 'internal';
+    const _origin = ' (supplier submission' + (s.submitted_by ? ' by ' + s.submitted_by : '') + ')';
+    let applied, logEvent, logDetail;
+    if (s.kind === 'completion_date') {
+      const _o = (await pool.query(`SELECT to_char(end_production_overide,'YYYY-MM-DD') v FROM planner.purchase_orders WHERE po=$1`, [s.po])).rows[0];
+      await pool.query(`UPDATE planner.purchase_orders SET end_production_overide=$1::date, updated_at=now() WHERE po=$2`, [s.value, s.po]);
+      applied = 'production-end → ' + s.value;
+      logEvent = 'Production end date'; logDetail = ((_o && _o.v) ? ddMonYy(_o.v) : '(none)') + ' → ' + ddMonYy(s.value) + _origin;
+    }
+    else if (s.kind === 'invoice_value') { const clean = sanitiseMoney(s.value); if (clean == null) return res.status(400).json({ error: 'Stored invoice value "' + s.value + '" is not a number — fix it on the PO before approving.' });
+      const _o = (await pool.query(`SELECT round(supplier_invoice_total,2)::text v FROM planner.purchase_orders WHERE po=$1`, [s.po])).rows[0];
+      await pool.query(`UPDATE planner.purchase_orders SET supplier_invoice_total=$1::numeric, updated_at=now() WHERE po=$2`, [clean, s.po]);
+      applied = 'invoice total → $' + clean;
+      logEvent = 'Final invoice amount'; logDetail = ((_o && _o.v != null) ? '$' + _o.v : '(none)') + ' → $' + clean + _origin;
+    }
     else return res.status(400).json({ error: 'kind ' + s.kind + ' is not applyable here' });
-    await pool.query(`UPDATE planner.supplier_submissions SET status='applied', applied_at=now(), applied_by=$1 WHERE id=$2`, [(req.body && req.body.by) || 'internal', req.params.id]);
+    await pool.query(`UPDATE planner.supplier_submissions SET status='applied', applied_at=now(), applied_by=$1 WHERE id=$2`, [by, req.params.id]);
+    // Record-of-change: applying a staged supplier submission was previously silent (no po_change_log row) —
+    // so the final-invoice / production-end update never showed on the PO timeline. Now it's audited. (v27.325)
+    logPoChange(s.po, logEvent, logDetail, by);
     res.json({ applied });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });

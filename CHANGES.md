@@ -1,3 +1,8 @@
+## v27.325 Record-of-change: applying a staged supplier submission is now audited on the PO timeline
+- Applying a supplier's staged submission (**final invoice amount** → `supplier_invoice_total`, or **production-end date** → `end_production_overide`) via the PO-drawer "✓ Apply" button used to write the PO **silently** — no `po_change_log` entry, so the change never appeared in the record of change. It now writes a timeline row: e.g. **Final invoice amount: (none) → $943 (supplier submission by jenny.hu@romrol.com)**, with the old→new value and the submitting supplier noted.
+- The apply is now **attributed to the logged-in D&B user** (`authUser`) instead of the generic `'PO PLAN'` label — both in the `po_change_log` entry and in `supplier_submissions.applied_by` — so you can see who approved it.
+- Server-only change (`/api/supply/submission/:id/apply`). The gating itself is unchanged and was already correct: suppliers submit into the staged `supplier_submissions` table, never into the final field, which is writable only admin-side.
+
 ## v27.324 FIX: Cash Flow — setting a likely payment date is now a silent save (no page-refresh)
 - On **SUPPLY ▸ Cash Flow**, editing a line's **likely payment date** no longer triggers a full re-render of the view (which read as a page refresh — scroll jump + list reshuffle). It now **saves silently**: the row stays in place showing its new date, the "saved" highlight fades, and the month-bucket cache is invalidated so the totals rebuild on the next open. Matches the existing silent pattern on the Payments-Due tab and the PO drawer.
 
