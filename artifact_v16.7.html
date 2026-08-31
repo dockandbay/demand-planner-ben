@@ -10406,7 +10406,7 @@ function filterMatch(sku,co,ch,rule,excMaps){
   var p=SKUM[sku]||{};
   function arr(v){ return Array.isArray(v)?v:(v==null||v===''?[]:[v]); }
   for(var i=0;i<conds.length;i++){ var c=conds[i], f=c.field;
-    if(f&&f.indexOf('metric.')===0){ var mk=f.slice(7); var st=(excMaps&&excMaps[mk]&&excMaps[mk][sku])||''; var sev=c.severity||'red_amber'; if(!(sev==='red'?(st==='RED'):(st==='RED'||st==='AMBER')))return false; continue; }
+    if(f&&f.indexOf('metric.')===0){ var mk=f.slice(7); var st=(excMaps&&excMaps[mk]&&excMaps[mk][sku])||''; var sev=c.severity||'red'; if(!(sev==='red'?(st==='RED'):(st==='RED'||st==='AMBER')))return false; continue; }
     if(f&&f.indexOf('trend.')===0){ var tk=f.slice(6); var bk=(excMaps&&excMaps[tk]&&excMaps[tk][sku])||''; var tl=arr(c.value); if(c.op==='not_in'){ if(tl.indexOf(bk)>=0)return false; } else { if(tl.length&&tl.indexOf(bk)<0)return false; } continue; }
     var v, list=arr(c.value);
     if(f==='from_replacement'){ var has=!!p.rep; if(list.indexOf('yes')>=0&&!has)return false; if(list.indexOf('no')>=0&&has)return false; continue; }
@@ -10470,7 +10470,7 @@ var FR=(function(){
   // ── FORM view ──────────────────────────────────────────────────────────────────────────────────────────────
   function valEditor(c,i){
     var d=_filterFieldDef(c.field)||FILTER_FIELDS[0];
-    if(d.type==='metric'){ var sev=c.severity||'red_amber';
+    if(d.type==='metric'){ var sev=c.severity||'red';
       return '<select class="fr-sev" data-i="'+i+'" style="font-size:11px">'
         +'<option value="red_amber"'+(sev!=='red'?' selected':'')+'>Red + Amber</option>'
         +'<option value="red"'+(sev==='red'?' selected':'')+'>Red only</option></select>'; }
@@ -10538,7 +10538,7 @@ var FR=(function(){
   function cancel(){ editing=null; render(); }
   function addCond(){ readForm(); var d=FILTER_FIELDS[0]; form.conds.push({field:d.key,op:defOpFor(d),value:[]}); render(); }
   function rmCond(i){ readForm(); form.conds.splice(i,1); render(); }
-  function fieldChange(i){ readForm(); var sel=document.querySelectorAll('#fr-conds .fr-rule')[i]; var field=sel&&sel.querySelector('.fr-field')?sel.querySelector('.fr-field').value:FILTER_FIELDS[0].key; var d=_filterFieldDef(field)||FILTER_FIELDS[0]; form.conds[i]={field:field,op:defOpFor(d),value:d.type==='metric'?null:[],severity:d.type==='metric'?'red_amber':undefined}; render(); }
+  function fieldChange(i){ readForm(); var sel=document.querySelectorAll('#fr-conds .fr-rule')[i]; var field=sel&&sel.querySelector('.fr-field')?sel.querySelector('.fr-field').value:FILTER_FIELDS[0].key; var d=_filterFieldDef(field)||FILTER_FIELDS[0]; form.conds[i]={field:field,op:defOpFor(d),value:d.type==='metric'?null:[],severity:d.type==='metric'?'red':undefined}; render(); }
   function _applyDef(name,def){ FR_ACTIVE={id:(editing&&editing.id)||null,name:name||(def.conditions&&def.conditions.length?'ad-hoc filter':null),def:def}; _frMapsCache.key=''; try{renderMain();}catch(e){} editing=null; render(); var p=document.getElementById('fr-panel'); if(p)p.style.display='none'; }
   function apply(){ readForm(); _applyDef(form.name,toDef()); }
   function applySaved(id){ var r=rules().filter(function(x){return String(x.id)===String(id);})[0]; if(!r)return; FR_ACTIVE={id:r.id,name:r.name,def:r.def||{}}; _frMapsCache.key=''; try{renderMain();}catch(e){} render(); var p=document.getElementById('fr-panel'); if(p)p.style.display='none'; }

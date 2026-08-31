@@ -1,3 +1,6 @@
+## v27.338 Filter Rules — metric conditions default to "Red only" (literal FC<Actual etc.)
+- The exception-metric conditions (FC < Actual, FC > Run-rate, Selling-no-forecast) now **default to "Red only"** instead of Red+Amber. A filter named "FC < Actual" now means the **genuine** case (actual has reached/passed forecast), not the AMBER "run-rate on pace to exceed" projection — which was surprising in a filter context (e.g. TOWLB-CAB-LG-LTBGE-R UK·DTC: actual 183 < forecast 238, flagged AMBER only because the partial month's run-rate projected ~270). **Red + Amber is still available** as an explicit per-condition opt-in. The Exceptions report is unchanged (still shows Red+Amber). Existing saved filters keep whatever severity they stored.
+
 ## v27.337 Filter Rules — remove sub-category summary-total rows under a filter
 - When a Filter Rule is applied, the demand plan no longer shows the **sub-category summary-totals row**. The row is kept just long enough to anchor the inline SKU rows, then removed (SKUs-only view) or swapped for a **plain sub-category header label** (grouping only, no totals) when **Show sub-categories** is on. Search/RW/from-replacement filter modes are unchanged.
 
