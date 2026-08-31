@@ -10342,10 +10342,13 @@ function excComputeMaps(co,ch){
   var _cm=(typeof CUR_MONTH!=='undefined')?CUR_MONTH:'';
   function monDec(m){ var y=+m.slice(0,4),mo=+m.slice(5,7); mo--; if(mo<1){mo=12;y--;} return y+'_'+(mo<10?'0':'')+mo; }
   var fwd=(typeof LIVE_FC_MONTHS!=='undefined')?LIVE_FC_MONTHS.slice(0,4):[_cm];
-  var prev3=[monDec(_cm)]; prev3.push(monDec(prev3[0])); prev3.push(monDec(prev3[1]));
+  var prev3=[monDec(_cm)]; prev3.push(monDec(prev3[0])); prev3.push(monDec(prev3[1]));   // 3 completed months = recent window
+  var prior3=[monDec(prev3[2])]; prior3.push(monDec(prior3[0])); prior3.push(monDec(prior3[1]));   // the 3 months before that (momentum baseline)
   var lym=(typeof lyYearMonths!=='undefined')?lyYearMonths:undefined;
   var ctry=co.toLowerCase(), chKey=(ch==='DTC'?'d':ch==='FBA'?'f':'b');
-  var fclt={}, fgtr={}, sellnofc={};
+  var _locked=(typeof LOCKED_FC!=='undefined'&&LOCKED_FC&&LOCKED_FC.sku)?LOCKED_FC.sku:{};   // locked forecast snapshots (fc-at-the-time) for accuracy/bias
+  var TVOL=10;   // trailing-window volume floor — below this, don't call a trend (too noisy)
+  var fclt={}, fgtr={}, sellnofc={}, momentum={}, yoy={}, wmape={}, bias={};
   var bySub={}; Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||p.vt==='SET')return; if((((p.av||{})[ctry])||'').indexOf(chKey)<0)return; (bySub[p.s]=bySub[p.s]||[]).push(sku); });
   Object.keys(bySub).forEach(function(sub){ var subSkus=bySub[sub];
     var subcatFU={}; try{subcatFU=(calc(sub,co,ch)||{}).fu||{};}catch(e){}
@@ -10360,8 +10363,18 @@ function excComputeMaps(co,ch){
         var sG=(fc>0&&act>0&&frac>=0.34)?(run<fc*0.5?'RED':(run<fc*0.75?'AMBER':'')):''; if(sG)fgtr[sku]=sG; }
       var recent=0; prev3.forEach(function(m){ recent+=(sales&&sales[m])||0; });
       if(recent>=10){ var fwdFc=0; fwd.forEach(function(m){ fwdFc+=fcMap[m]||0; }); if(fwdFc<=recent*0.1) sellnofc[sku]=(recent>=60)?'RED':'AMBER'; }
+      // ── trailing-3mo TREND + FORECAST-vs-ACTUAL buckets (share the same actuals + locked-FC source) ──
+      var r3=recent, p3=0, l3=0; prior3.forEach(function(m){ p3+=(sales&&sales[m])||0; });
+      prev3.forEach(function(m){ var lm=(+m.slice(0,4)-1)+m.slice(4); l3+=(sales&&sales[lm])||0; });
+      // Sales momentum — recent 3mo vs prior 3mo
+      if((r3+p3)>=TVOL){ if(p3<=0)momentum[sku]=r3>0?'Rising':'Flat'; else { var mp=(r3-p3)/p3; momentum[sku]=mp>=0.2?'Rising':(mp<=-0.2?'Falling':'Flat'); } } else momentum[sku]='Flat';
+      // YoY trend — recent 3mo vs same 3 months last year
+      if((r3+l3)>=TVOL){ if(l3<=0)yoy[sku]=r3>0?'Up':'Flat'; else { var yp=(r3-l3)/l3; yoy[sku]=yp>=0.2?'Up':(yp<=-0.2?'Down':'Flat'); } } else yoy[sku]='Flat';
+      // Forecast accuracy (WMAPE) + bias — locked FC vs actual over recent 3mo (needs locked snapshots; empty in sandbox)
+      var ae=0,ac=0,se=0; prev3.forEach(function(m){ var fcv=Number(_locked[sku+'|'+co+'|'+ch+'|'+m]||0), acv=(sales&&sales[m])||0; if(fcv<=0&&acv<=0)return; ae+=Math.abs(fcv-acv); ac+=acv; se+=(fcv-acv); });
+      if(ac>=TVOL){ var w=ae/ac; wmape[sku]=w<0.30?'Good':(w<0.60?'OK':'Poor'); var bp=se/ac; bias[sku]=bp>=0.2?'Over':(bp<=-0.2?'Under':'Neutral'); }
     }); });
-  return {fclt:fclt, fgtr:fgtr, sellnofc:sellnofc};
+  return {fclt:fclt, fgtr:fgtr, sellnofc:sellnofc, momentum:momentum, yoy:yoy, wmape:wmape, bias:bias};
 }
 // Field registry — drives BOTH the evaluator and (later) the builder UI. Add a field = one entry + one evaluator case.
 function _filterStatus(p,co){ var ctry=co.toLowerCase(); var lch=(p.lch&&p.lch[ctry]), disc=(p.disc&&p.disc[ctry]); var t=(typeof TODAY!=='undefined')?TODAY:new Date().toISOString().slice(0,10); if(lch&&lch>t)return 'FUTURE'; if(disc&&disc<t)return 'DISCONTINUED'; return 'ACTIVE'; }
@@ -10375,7 +10388,11 @@ var FILTER_FIELDS=[
   {key:'from_replacement',label:'From-replacement',type:'bool',ops:['is'],opts:function(){return ['yes','no'];}},
   {key:'metric.fclt',label:'FC < Actual (this month)',type:'metric',ops:['is'],metric:'fclt'},
   {key:'metric.fgtr',label:'FC > Run-rate (this month)',type:'metric',ops:['is'],metric:'fgtr'},
-  {key:'metric.sellnofc',label:'Selling, no forecast',type:'metric',ops:['is'],metric:'sellnofc'}
+  {key:'metric.sellnofc',label:'Selling, no forecast',type:'metric',ops:['is'],metric:'sellnofc'},
+  {key:'trend.momentum',label:'Sales momentum (3mo)',type:'trend',ops:['in','not_in'],metric:'momentum',opts:function(){return ['Rising','Flat','Falling'];}},
+  {key:'trend.yoy',label:'YoY trend (3mo vs LY)',type:'trend',ops:['in','not_in'],metric:'yoy',opts:function(){return ['Up','Flat','Down'];}},
+  {key:'trend.wmape',label:'Forecast accuracy (3mo WMAPE)',type:'trend',ops:['in','not_in'],metric:'wmape',opts:function(){return ['Good','OK','Poor'];}},
+  {key:'trend.bias',label:'Forecast bias (3mo over/under)',type:'trend',ops:['in','not_in'],metric:'bias',opts:function(){return ['Over','Neutral','Under'];}}
 ];
 function _filterFieldDef(k){ for(var i=0;i<FILTER_FIELDS.length;i++)if(FILTER_FIELDS[i].key===k)return FILTER_FIELDS[i]; return null; }
 // Evaluate one rule against a SKU in (co,ch). excMaps = excComputeMaps(co,ch) (compute once per render, pass in).
@@ -10385,6 +10402,7 @@ function filterMatch(sku,co,ch,rule,excMaps){
   function arr(v){ return Array.isArray(v)?v:(v==null||v===''?[]:[v]); }
   for(var i=0;i<conds.length;i++){ var c=conds[i], f=c.field;
     if(f&&f.indexOf('metric.')===0){ var mk=f.slice(7); var st=(excMaps&&excMaps[mk]&&excMaps[mk][sku])||''; var sev=c.severity||'red_amber'; if(!(sev==='red'?(st==='RED'):(st==='RED'||st==='AMBER')))return false; continue; }
+    if(f&&f.indexOf('trend.')===0){ var tk=f.slice(6); var bk=(excMaps&&excMaps[tk]&&excMaps[tk][sku])||''; var tl=arr(c.value); if(c.op==='not_in'){ if(tl.indexOf(bk)>=0)return false; } else { if(tl.length&&tl.indexOf(bk)<0)return false; } continue; }
     var v, list=arr(c.value);
     if(f==='from_replacement'){ var has=!!p.rep; if(list.indexOf('yes')>=0&&!has)return false; if(list.indexOf('no')>=0&&has)return false; continue; }
     if(f==='category')v=p.c||p.s||''; else if(f==='subcategory')v=p.s||''; else if(f==='tier')v=p.ti||'C';
@@ -10399,7 +10417,7 @@ var _frMapsCache={key:'',maps:null};
 function frExcMaps(co,ch){                   // lazy — only build the exceptions maps when the active rule uses a metric field
   if(!FR_ACTIVE)return null;
   var conds=(FR_ACTIVE.def&&FR_ACTIVE.def.conditions)||[];
-  if(!conds.some(function(c){return c.field&&c.field.indexOf('metric.')===0;}))return null;
+  if(!conds.some(function(c){return c.field&&(c.field.indexOf('metric.')===0||c.field.indexOf('trend.')===0);}))return null;
   var k=co+'|'+ch; if(_frMapsCache.key!==k||!_frMapsCache.maps){ try{_frMapsCache.maps=excComputeMaps(co,ch);}catch(e){_frMapsCache.maps={fclt:{},fgtr:{},sellnofc:{}};} _frMapsCache.key=k; }
   return _frMapsCache.maps;
 }
@@ -10410,7 +10428,7 @@ var FR=(function(){
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function rules(){ return (typeof FILTER_RULES!=='undefined'&&Array.isArray(FILTER_RULES))?FILTER_RULES:[]; }
   function count(){ return rules().filter(function(r){return r.enabled!==false;}).length; }
-  function defOpFor(d){ return d.type==='enum'?'in':'is'; }
+  function defOpFor(d){ return (d.type==='enum'||d.type==='trend')?'in':'is'; }
   function updateBtn(){ var b=document.getElementById('fr-btn'); if(!b)return;
     var on=!!FR_ACTIVE; b.innerHTML='&#9776; Filter Rules'+(on?' &bull; '+esc(FR_ACTIVE.name||'active'):' ('+count()+')')+' &#9662;';
     b.style.background=on?'#ecfccb':'#f5f3ff'; b.style.borderColor=on?'#65a30d':'#c4b5fd'; b.style.color=on?'#3f6212':'#5b21b6'; }
@@ -10460,7 +10478,7 @@ var FR=(function(){
   }
   function opEditor(c,i){
     var d=_filterFieldDef(c.field)||FILTER_FIELDS[0];
-    if(d.type==='enum')return '<select class="fr-op" data-i="'+i+'" style="font-size:11px"><option value="in"'+(c.op!=='not_in'?' selected':'')+'>is any of</option><option value="not_in"'+(c.op==='not_in'?' selected':'')+'>is none of</option></select>';
+    if(d.type==='enum'||d.type==='trend')return '<select class="fr-op" data-i="'+i+'" style="font-size:11px"><option value="in"'+(c.op!=='not_in'?' selected':'')+'>is any of</option><option value="not_in"'+(c.op==='not_in'?' selected':'')+'>is none of</option></select>';
     return '<span class="fr-op" data-i="'+i+'" data-op="is" style="color:#64748b">is flagged</span>';
   }
   function condRow(c,i){

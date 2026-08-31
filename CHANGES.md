@@ -1,3 +1,13 @@
+## v27.335 Filter Rules — trend & forecast-vs-actual conditions (3-month, bucketed)
+- Four new condition fields on the Filter Rules builder, all on a **trailing 3 completed-month window** with **simple buckets** (Ben's choices), and all computed in the **same shared per-market pass** as the exception metrics (`excComputeMaps`) so the report and the filter can't diverge:
+  - **Sales momentum (3mo)** — recent 3 mo vs the prior 3 mo of actuals → **Rising / Flat / Falling** (±20%).
+  - **YoY trend (3mo vs LY)** — recent 3 mo vs the same 3 months last year → **Up / Flat / Down** (±20%).
+  - **Forecast accuracy (3mo WMAPE)** — locked forecast vs actual → **Good** (<30%) / **OK** (<60%) / **Poor** (≥60%). Reuses the Accuracy engine's source (`LOCKED_FC` snapshots).
+  - **Forecast bias (3mo over/under)** — locked FC vs actual → **Over** (forecast too high, ties cash) / **Neutral** / **Under** (too low, stockout risk).
+- Each is an "is any of / is none of" multi-select, AND-able with everything else (e.g. *Tier A **and** momentum Rising **and** bias Under* = your growing under-forecast risk list).
+- A **volume floor (10 units)** over the window suppresses noise on tiny sellers. Accuracy/bias need locked snapshots, so they populate on **live** (empty in the sandbox until snapshots exist).
+- Verified with a 13-assertion jsdom test on the real `excComputeMaps` (bucket classification + evaluator) on top of the existing 27-assertion builder test.
+
 ## v27.334 Filter Rules Engine — pop-down builder + demand-plan apply (P1 complete)
 - **New "☰ Filter Rules" pop-down on the demand plan** (next to the filter chips), styled like the buy-plan Complex Rules panel. Build **reusable, named, saveable** SKU filters from a set of **AND'd conditions** and apply one to the plan — it then shows only the matching SKUs (exploded to SKU rows), with a per-filter **Show sub-categories** toggle (off = clean SKU-only list; on = keep the sub-cat aggregate rows). Applied state is shown on the button (green ● + name) with a one-click **Clear filter**.
 - **Condition fields** (registry-driven, so new fields are one entry): Category, Sub-category, Market tier (A/B/C), Status (Active/Future/Discontinued), Core/Seasonal, Release window, From-replacement — plus the three **exception metrics** as reusable conditions: **FC < Actual**, **FC > Run-rate**, **Selling, no forecast** (each with Red-only vs Red+Amber severity). Metric conditions use the **exact same math as the Exceptions report** (single source of truth — `excComputeMaps`), evaluated on the current month × current market/channel ("flagged now").
