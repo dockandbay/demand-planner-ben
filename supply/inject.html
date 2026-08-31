@@ -8405,7 +8405,11 @@
       document.querySelectorAll('#cf-body .cf-likely').forEach(function(inp){ inp.onchange=function(){
         var raw=(inp.value||'').trim(), iso=raw?parseDateLoose(raw):''; if(raw&&!iso){ inp.classList.add('err'); return; } inp.classList.remove('err'); inp.value=iso; inp.classList.add('saved');
         fetch('/api/supply/likely-date',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({line_key:inp.dataset.key,likely_date:inp.value})})
-          .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); delete cache['cashflow']; showPoSub('cashflow'); })
+          .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error);
+            // SILENT save: invalidate the cache so the month buckets rebuild on the NEXT open, but do NOT re-render
+            // the visible view — a full showPoSub('cashflow') read as a page refresh (scroll jump, list reshuffle).
+            // The row stays put showing its new date; the 'saved' highlight fades. Matches the Payments-Due handler. (v27.324)
+            delete cache['cashflow']; setTimeout(function(){inp.classList.remove('saved');},1200); })
           .catch(function(){ inp.classList.remove('saved'); inp.classList.add('err'); }); }; });
       bindDatePickers();   // wire the 📅 calendar picker on the likely-pay-date fields (was missing → picker did nothing)
     }
