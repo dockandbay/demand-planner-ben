@@ -1,3 +1,6 @@
+## v27.336 Filter Rules button moved next to "More Filters"
+- Moved the **☰ Filter Rules** button to sit **immediately after the "⧉ More Filters" button** on the same row (was after the filter chips). Chips now follow it. No behaviour change.
+
 ## v27.335 Filter Rules — trend & forecast-vs-actual conditions (3-month, bucketed)
 - Four new condition fields on the Filter Rules builder, all on a **trailing 3 completed-month window** with **simple buckets** (Ben's choices), and all computed in the **same shared per-market pass** as the exception metrics (`excComputeMaps`) so the report and the filter can't diverge:
   - **Sales momentum (3mo)** — recent 3 mo vs the prior 3 mo of actuals → **Rising / Flat / Falling** (±20%).
