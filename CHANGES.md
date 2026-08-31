@@ -1,3 +1,6 @@
+## v27.329 Removed the remaining per-view "↻ Refresh" buttons (Actions list + Shipment plan)
+- Per Ben, removed the view-local reload buttons too: **Actions** (`#act-refresh`) and **Shipment plan** (`#sp-refresh`). The unified top-nav ↻ (v27.327) refreshes whichever supply section you're on, so these are redundant. `#sp-undo` kept.
+
 ## v27.328 Removed the old per-tab "Refresh cache" buttons (superseded by the v27.327 top-nav ↻)
 - Deleted the redundant **BUY tab "↻ Refresh cache"** (`#bp-refresh-cache`) and **SUPPLY sub-nav "↻ Refresh cache"** (`#supply-refresh-cache`) buttons now that the unified context-sensitive top-nav ↻ covers all sections. Underlying functions kept (`refreshBuyCache` is reused by the new button; supply refresh handled in place by `hzSupplyRefresh`). The view-specific `↻ Refresh` buttons on the Actions list and Shipment plan are left (they reload a single view, not the cache).
 

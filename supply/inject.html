@@ -1237,8 +1237,8 @@
           +'<label style="display:block;padding:4px 4px 6px;font-weight:600;cursor:pointer;border-bottom:1px solid #eef0f2;margin-bottom:6px"><input type="checkbox" id="act-type-all"'+(st.types.length?'':' checked')+'> All types</label>'
           +'<div style="display:flex;gap:20px;align-items:flex-start">'+typeGroupsHtml+'</div>'
         +'</div></span>'
-        +'<button class="pill'+(st.hideNoise?' active':'')+'" id="act-hidenoise" title="hide low-signal payment actions: Deposit FX missing, Deposit not paid, Aged payment" style="margin-left:10px">'+(st.hideNoise?'🙈 Payment noise hidden':'🙈 Hide payment noise')+'</button>'
-        +'<button class="tool-badge bg-neutral" id="act-refresh" style="cursor:pointer;border:none;margin-left:auto">↻ Refresh</button>';
+        +'<button class="pill'+(st.hideNoise?' active':'')+'" id="act-hidenoise" title="hide low-signal payment actions: Deposit FX missing, Deposit not paid, Aged payment" style="margin-left:10px">'+(st.hideNoise?'🙈 Payment noise hidden':'🙈 Hide payment noise')+'</button>';
+        // (v27.329) per-view "↻ Refresh" removed — the unified top-nav ↻ (hzRefreshCache) refreshes this section
       document.querySelectorAll('#act-sevbar .spill').forEach(function(p){p.onclick=function(){st.sev=p.dataset.s;sevBar();view();};});
       var tb=document.getElementById('act-typebtn'),tp=document.getElementById('act-typepop');
       tb.onclick=function(e){ e.stopPropagation(); var open=tp.style.display!=='none'; tp.style.display=open?'none':'block';
@@ -1253,7 +1253,6 @@
         document.querySelectorAll('#act-sevbar .act-typechk[data-grp="'+g+'"]').forEach(function(cb){ cb.checked=on; var v=cb.value,i=st.types.indexOf(v);
           if(on){ if(i<0)st.types.push(v); } else if(i>=0)st.types.splice(i,1); });
         syncTypeBtn(); view(); }; });
-      document.getElementById('act-refresh').onclick=function(){ delete cache['actions']; selectSection('actions'); };
       var _hn=document.getElementById('act-hidenoise'); if(_hn)_hn.onclick=function(){ st.hideNoise=!st.hideNoise; sevBar(); view(); }; }
     // Column 1 = HIGH priority; column 2 = MEDIUM (amber) + LOW. If there are no highs, column 1 = MEDIUM,
     // column 2 = LOW. Recommendations are excluded (own sub-tab).
@@ -4916,12 +4915,12 @@
         +'<div style="display:flex;align-items:center;gap:8px"><span style="font-size:12px;font-weight:700;color:#334155">Ship to:</span><span id="sp-ctry" style="display:inline-flex;gap:5px"></span></div>'
         +'<label style="font-size:12px;color:#334155;display:inline-flex;align-items:center;gap:5px">Days to go &lt; <input id="sp-days" type="number" min="0" value="'+_spDays+'" style="width:56px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px"></label>'
         +'<label style="font-size:12px;color:#334155;display:inline-flex;align-items:center;gap:5px" title="Recommendations won\x27t combine Lixin and XR Textile POs in the same container"><input type="checkbox" id="sp-keepapart"'+(_spKeepApart?' checked':'')+'> Keep Lixin &amp; XR Textile apart</label>'
-        +'<button id="sp-undo" class="save-btn light" style="margin-left:auto" title="undo the last change">↶ Undo</button>'+'<button id="sp-refresh" class="save-btn light" title="reload the plan from the server">↻ Refresh</button>'
+        +'<button id="sp-undo" class="save-btn light" style="margin-left:auto" title="undo the last change">↶ Undo</button>'
         +'<button id="sp-close" class="save-btn light">✕ Close</button></div>'
       +'<div id="sp-body" style="flex:1;overflow:auto;padding:14px 16px"></div></div>';
     document.body.appendChild(ov); ov.onclick=function(e){ if(e.target===ov)ov.remove(); };
     ov.querySelector('#sp-close').onclick=function(){ ov.remove(); };
-    var _rf=ov.querySelector('#sp-refresh'); if(_rf)_rf.onclick=function(){ if(_spCtry)_spLoad(); else _spDrawPrompt(); };
+    // (v27.329) shipment-plan "↻ Refresh" removed — unified top-nav ↻ refreshes the section
     var _uu=ov.querySelector('#sp-undo'); if(_uu)_uu.onclick=function(){ _spDoUndo(); };
     var _dz=ov.querySelector('#sp-days'); if(_dz)_dz.onchange=function(){ _spDays=Math.max(0,parseInt(this.value,10)); if(isNaN(_spDays))_spDays=21; if(_spCtry)_spDraw(); };
     var _ka=ov.querySelector('#sp-keepapart'); if(_ka)_ka.onchange=function(){ _spKeepApart=this.checked; try{localStorage.setItem('hzSpKeepApart',_spKeepApart?'1':'0');}catch(e){} if(_spCtry)_spDraw(); };
