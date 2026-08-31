@@ -36,5 +36,8 @@ Add these to `DIM_MAP` (text, COALESCE-guarded, so blank Airtable values preserv
 ## Migrations 245 / 246 / 247 (already applied to live+sandbox by me, per Ben) — reconcile only
 - 245 `products.polybags` (+ seed) · 246 `branches.returns_pct` (+ seed) · 247 seed of `polybags`+`price_type` from Ben's CSV. All additive/idempotent.
 
+## Stopgap already applied to LIVE (Ben-authorised, 2026-08-31) — before you deploy
+To let Ben forecast/buy AW26/SS27 now, I set `variant_type` **directly on live** for **20 SKUs** (2 MASTER: `PONCHK-CAB-MD/SM-YELL`; 18 SET: the `TEATWL-MD-*SET-*` + `TOWLH-CLB/DES-*SET-*` multipacks). This is safe/durable because n8n doesn't sync `variant_type`, and it's consistent with the mig-248 rule (all whitelist status + available). **Nothing to undo** — when you enable the `variant_type` sync it will set the same values. (5 more AW26/SS27 SKUs — `BAGTOI-MD-CACTMNTN`, `BAGF-DES-MD-GYOW`, `PP-TEATWL-MD-3SET-TAPTIM`, `TOWLB-DES-LG/XL-CACTMNTN` — are `WHOLESALE`/`BOTH` but have availability=false in Airtable; Ben to fix availability there.)
+
 ## Order matters
 1. Run mig 248 on live. 2. Verify in-scope ≈ 868 (35 CLOSED dropped). 3. Add the n8n fields. 4. Run the sync. 5. Confirm scope stays ~868 (not ~2,462). If it floods, mig 248 didn't apply first.
