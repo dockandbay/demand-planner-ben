@@ -784,6 +784,7 @@ function requiredCap(method, p) {
   if (p.startsWith('/api/klaviyo-bis/')) return null;         // Klaviyo BIS upload — allowed with read-only permission (Ben)
   if (method === 'POST' && p === '/api/supply/quality-doc') return null;   // Quality Control file upload (+ its metafields) — allowed with read-only permission (Ben); delete stays gated
   if (method === 'POST' && (p === '/api/supply/cache/invalidate' || p === '/api/supply/actions/invalidate')) return null;   // clears server caches only — harmless, no data write
+  if (method === 'POST' && p === '/api/demand/cache/invalidate') return null;   // in-app "refresh" button — rebuild-only, harmless, no data write (ungated sibling of the secret-gated /api/data-cache/invalidate)
   if (method === 'POST' && p === '/api/data-cache/invalidate') return null;   // n8n post-ETL data-cache rebuild trigger (webhook-secret gated in the handler)
   if (method === 'POST' && p === '/api/supply/inventory-status/export.xlsx') return null;   // read-only XLSX export (no DB write) — allowed with read-only permission
   if (method === 'POST' && p.startsWith('/api/supply/edi-labels/')) return null;   // EDI label splitter / sales-order builder — read-only (products read + PDF/CSV transform), no DB write
@@ -9721,6 +9722,13 @@ app.post('/api/supply/actions/state', async (req, res) => {
 // Drop ALL user-independent SUPPLY read caches (Actions + po-rows + lookups + order-plan-exceptions) so the next
 // fetch reflects a just-made edit; each rebuilds in the background. The client fires this from invalidateDerived.
 app.post(['/api/supply/cache/invalidate', '/api/supply/actions/invalidate'], (req, res) => { invalidateSupplyCaches(); res.json({ ok: true }); });
+// Ungated demand data-cache rebuild for the in-app "↻ Refresh" button (busts _dataCache + rebuilds _SKU_RAW/
+// FC_OUTPUTS from Supabase). Harmless (rebuild only, no write) so it needs no webhook secret — unlike the
+// n8n /api/data-cache/invalidate. Lets a user pick up a product/scope change without waiting on the TTL. (v27.327)
+app.post('/api/demand/cache/invalidate', async (_req, res) => {
+  try { _dataCache = null; const vals = await refreshDataCache(); res.json({ ok: true, rebuilt: Array.isArray(vals) ? vals.length : 0, at: new Date().toISOString() }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // n8n post-ETL trigger: after a sales/inventory upload, rebuild the demand-data cache from Supabase ONCE and push it to
 // KV so every serverless instance converges — instead of each Vercel cold start re-pulling ~12MB from Supabase. Awaits
 // the rebuild so n8n gets a success confirmation (and KV is written) before responding. Webhook-secret gated (if set).

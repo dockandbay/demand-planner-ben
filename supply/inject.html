@@ -12360,6 +12360,9 @@
   }
   window.openBuyplanModalMulti=function(itemsByMode,mode){ try{ buyplanModalMulti(itemsByMode,mode); }catch(e){ if(window.console)console.log('[SUPPLY] buyplanModalMulti',e&&e.message); } };
   window.gotoSupplySection=function(k){ try{ showSupply(true); selectSection(k); }catch(e){ if(window.console)console.log('[SUPPLY] goto',e&&e.message); } };
+  // ↻ top-nav refresh (SUPPLY context): drop this module's client-side section cache + re-render the current
+  // section so a just-busted server cache is re-fetched fresh, in place (no full reload). (v27.327)
+  window.hzSupplyRefresh=function(){ try{ for(var k in cache)delete cache[k]; if(current&&typeof selectSection==='function')selectSection(current); }catch(e){ if(window.console)console.log('[SUPPLY] refresh',e&&e.message); } };
   // Context help for the current SUPPLY section (reuses the ANNOT descriptions). Returns {t,h}.
   window.supplyHelpText=function(){ var sec=current||'actions'; if(sec==='reports')sec=reportTab||'upcoming'; var raw=ANNOT[sec]||'';
     var t='SUPPLY', h=raw, m=raw.match(/^<b>([^<]*)<\/b>\s*([\s\S]*)$/);

@@ -730,6 +730,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
     <button class="view-toggle" data-view="exec">REPORTS</button>
     <div style="flex:1"></div>
     <button id="sa-drawer-btn" title="Stock Availability" onclick="openSADrawer()" style="margin-right:4px;height:24px;padding:0 9px;border-radius:12px;border:1px solid #2563eb;background:#1d4ed8;color:#fff;cursor:pointer;font-weight:700;font-size:11px;letter-spacing:.03em;line-height:1;flex:0 0 auto">SA</button>
+    <button id="hz-refresh-btn" class="tip120" data-tip="Refresh this tab's data from the database (rebuilds the server cache — DEMAND, SUPPLY or BUY, whichever you're on)" onclick="hzRefreshCache(this)" style="margin-right:2px;width:24px;height:24px;border-radius:50%;border:1px solid #6b7280;background:#4b5563;color:#fff;cursor:pointer;font-weight:700;font-size:14px;line-height:1;flex:0 0 auto">&#8635;</button>
     <button id="ctx-help-btn" title="Help for this page" onclick="openCtxHelp(event)" style="margin-right:2px;width:24px;height:24px;border-radius:50%;border:1px solid #6b7280;background:#4b5563;color:#fff;cursor:pointer;font-weight:700;font-size:13px;line-height:1;flex:0 0 auto">?</button>
   </div>
   <div id="ctabs-row" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
@@ -14846,6 +14847,38 @@ window.refreshBuyCache = async function(btn){
   }catch(e){ s('Refresh failed: '+(e&&e.message||e)); if(window.console)console.error('refreshBuyCache',e); }
   finally{ if(btn)btn.disabled=false; }
 };
+// ↻ top-nav refresh button — CONTEXT-SENSITIVE. Busts the server cache for whichever section you're on and
+// re-renders in place: DEMAND/REPORTS → rebuild _SKU_RAW (picks up scope/product changes), SUPPLY → supply
+// caches incl. the supplier-portal bootstrap, BUY & MOVE → the buy overlay. Fixes "I changed data but the app
+// still shows the old value" without a full reload. (v27.327)
+function hzRefreshCache(btn){
+  var h=(location.hash||'').toLowerCase();
+  // BUY & MOVE — reuse the existing buy-overlay refresher (manages its own button state)
+  if(h.indexOf('#/buy-move')===0){ if(window.refreshBuyCache){ try{ window.refreshBuyCache(btn); }catch(e){} } return; }
+  var orig=btn?btn.innerHTML:''; if(btn){ btn.disabled=true; btn.innerHTML='⋯'; }
+  function fin(){ if(btn){ btn.disabled=false; btn.innerHTML=orig; } }
+  // SUPPLY — bust supply caches (incl. supplier-portal bootstrap, cleared server-side by invalidateSupplyCaches)
+  if(h.indexOf('#/supply')===0){
+    fetch('/api/supply/cache/invalidate',{method:'POST'})
+      .then(function(){ try{ if(window.hzSupplyRefresh)window.hzSupplyRefresh(); }catch(e){} })
+      .then(fin,fin);
+    return;
+  }
+  // DEMAND / REPORTS / default — rebuild the demand data cache, re-pull SKU_RAW + FC_OUTPUTS, re-render
+  fetch('/api/demand/cache/invalidate',{method:'POST'})
+    .then(function(){ return fetch('/api/demand/sku-data'); })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(d){ var raw=d.sku_raw||{};
+        if(raw.p)Object.assign(SKUM,raw.p); if(raw.s)Object.assign(SKUS,raw.s);
+        if(raw.i||raw.inbound)Object.assign(SKUI,raw.i||raw.inbound||{}); if(raw.oi)Object.assign(SKUOI,raw.oi);
+        if(d.fc_outputs){ for(var k in FC_OUTPUTS)delete FC_OUTPUTS[k]; Object.assign(FC_OUTPUTS,d.fc_outputs); } }
+      try{ augmentSKUM(); }catch(e){}
+      try{ buildLiveBpOverlay(); }catch(e){}
+      try{ if(typeof renderMain==='function')renderMain(); }catch(e){}
+      fin();
+    }).catch(fin);
+}
 
 // ── Inbound detail popover (copyable, never clipped) ──────────────────────
 var _INB_POP=null;

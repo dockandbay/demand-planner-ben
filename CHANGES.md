@@ -1,3 +1,10 @@
+## v27.327 Top-nav ↻ Refresh button — context-sensitive server-cache bust (fixes "changed data still shows old")
+- New **↻ icon** in the top nav (between **SA** and **?**, 120ms hover tip). One button, **context-sensitive** to the tab you're on:
+  - **DEMAND / REPORTS** → rebuilds the demand data cache (`_SKU_RAW`/`FC_OUTPUTS`) from Supabase and re-renders in place — so a **product/scope change** (e.g. a SKU newly in `in_planning_scope`) shows **without waiting for the 10-min TTL** or a reload.
+  - **SUPPLY** → busts the supply caches **including the supplier-portal bootstrap** (via `invalidateSupplyCaches`) and re-renders the current section.
+  - **BUY & MOVE** → reuses the existing buy-overlay refresher.
+- New **ungated** `POST /api/demand/cache/invalidate` (rebuild-only, no data write — sibling of the webhook-secret-gated `/api/data-cache/invalidate`) so the in-app button can trigger a demand rebuild without the secret. Previously the BUY tab's "Refresh cache" only busted the *supply* cache, so demand SKU/scope changes never refreshed — that gap is now closed.
+
 ## v27.326 FIX: a PO status/branch/country change now refreshes the demand on-order cache
 - Marking a PO `COMPLETE` (or changing its branch / country) is what removes/moves its lines in the demand plan's **Stock Availability / on-order**. That data lives in a **10-minute** server cache (`_dataCache`) which a PO edit **did not** previously invalidate — so a just-received PO could keep showing as **inbound for up to 10 minutes**.
 - The PO-patch route now calls `invalidateDataCache()` when the edit touches **`status`, `branch` or `country_code`**, so the correction shows on the **next demand-plan load** instead of waiting for the TTL. Fire-and-forget background rebuild (single-flight, so a burst of edits coalesces into one rebuild — no load spike). Other PO field edits are unaffected.
