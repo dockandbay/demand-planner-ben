@@ -10316,6 +10316,74 @@ function renderAccuracyView(kb,body){
 // AMBER = actuals < forecast BUT the run-rate (actuals ÷ days elapsed × days in month) projects past forecast.
 // Read-only except the inline forecast override (SKU grain). Forecast = live buy-overlay demand (md.demand, the grid
 // number); actuals = sales_actuals current month (ga), the same figure shown green in the plan's current-month cell.
+// ══ FILTER RULES ENGINE (P1) ═══════════════════════════════════════════════════════════════════════════════════
+// Reusable, saveable SKU-selector filters (see Claude Analyses/SPEC_FILTER_RULES_ENGINE.md). jsonb-first; a rule =
+// {name,enabled,def:{match_mode:'and',show_subcats,conditions:[{field,op,value,severity?}]}}. Conditions are AND'd.
+// Metric conditions reuse the Exceptions math (single source of truth). Global FILTER_RULES, fetched at load.
+var FILTER_RULES=[];
+function loadFilterRules(cb){ fetch('/api/filter-rules').then(function(r){return r.json();}).then(function(list){
+  FILTER_RULES=(Array.isArray(list)?list:[]).map(function(x){ var d=x.definition; if(typeof d==='string'){try{d=JSON.parse(d);}catch(e){d={};}} return {id:x.id,name:x.name,enabled:x.enabled!==false,def:(d&&typeof d==='object')?d:{}}; });
+  if(cb)cb(); }).catch(function(){ if(cb)cb(); }); }
+try{ loadFilterRules(); }catch(e){}
+// Shared metric classifiers — the SAME math as the Exceptions report (buildFA fclt/fgtr, buildSellNoFc), computed
+// once per (co,ch) as {sku->'RED'|'AMBER'}. "Flagged now" = current month, current market×channel (Ben's decision).
+function excComputeMaps(co,ch){
+  var _cd=(typeof CUR_DAYS!=='undefined'&&CUR_DAYS)?CUR_DAYS:{elapsed:16,total:30};
+  var elapsed=Math.max(1,_cd.elapsed||1), total=_cd.total||30, frac=elapsed/total;
+  var _cm=(typeof CUR_MONTH!=='undefined')?CUR_MONTH:'';
+  function monDec(m){ var y=+m.slice(0,4),mo=+m.slice(5,7); mo--; if(mo<1){mo=12;y--;} return y+'_'+(mo<10?'0':'')+mo; }
+  var fwd=(typeof LIVE_FC_MONTHS!=='undefined')?LIVE_FC_MONTHS.slice(0,4):[_cm];
+  var prev3=[monDec(_cm)]; prev3.push(monDec(prev3[0])); prev3.push(monDec(prev3[1]));
+  var lym=(typeof lyYearMonths!=='undefined')?lyYearMonths:undefined;
+  var ctry=co.toLowerCase(), chKey=(ch==='DTC'?'d':ch==='FBA'?'f':'b');
+  var fclt={}, fgtr={}, sellnofc={};
+  var bySub={}; Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||p.vt==='SET')return; if((((p.av||{})[ctry])||'').indexOf(chKey)<0)return; (bySub[p.s]=bySub[p.s]||[]).push(sku); });
+  Object.keys(bySub).forEach(function(sub){ var subSkus=bySub[sub];
+    var subcatFU={}; try{subcatFU=(calc(sub,co,ch)||{}).fu||{};}catch(e){}
+    var shares={}; try{shares=buildSkuShares(subSkus,co,ch,lym)||{};}catch(e){}
+    subSkus.forEach(function(sku){ var invOH=(SKUM[sku].inv&&SKUM[sku].inv[skuWh(co,ch)])||0, fcMap={};
+      try{fcMap=skuMonthlyMap(sku,co,ch,fwd,subcatFU,shares[sku]||0,invOH)||{};}catch(e){}
+      try{ fwd.forEach(function(m){ var ov=skuOvGetK(sku+'|'+co+'|'+ch+'|'+m); if(ov!=null&&ov!=='')fcMap[m]=parseInt(ov,10)||0; }); }catch(e){}
+      var sales=null; try{sales=skuSales(sku,co,ch);}catch(e){}
+      var fc=fcMap[_cm]||0, act=(sales&&sales[_cm])||0;
+      if(fc>0||act>0){ var run=elapsed>0?(act/elapsed*total):act;
+        var sF=(fc>0&&act>=fc)?'RED':((fc>0&&run>fc&&act<fc)?'AMBER':''); if(sF)fclt[sku]=sF;
+        var sG=(fc>0&&act>0&&frac>=0.34)?(run<fc*0.5?'RED':(run<fc*0.75?'AMBER':'')):''; if(sG)fgtr[sku]=sG; }
+      var recent=0; prev3.forEach(function(m){ recent+=(sales&&sales[m])||0; });
+      if(recent>=10){ var fwdFc=0; fwd.forEach(function(m){ fwdFc+=fcMap[m]||0; }); if(fwdFc<=recent*0.1) sellnofc[sku]=(recent>=60)?'RED':'AMBER'; }
+    }); });
+  return {fclt:fclt, fgtr:fgtr, sellnofc:sellnofc};
+}
+// Field registry — drives BOTH the evaluator and (later) the builder UI. Add a field = one entry + one evaluator case.
+function _filterStatus(p,co){ var ctry=co.toLowerCase(); var lch=(p.lch&&p.lch[ctry]), disc=(p.disc&&p.disc[ctry]); var t=(typeof TODAY!=='undefined')?TODAY:new Date().toISOString().slice(0,10); if(lch&&lch>t)return 'FUTURE'; if(disc&&disc<t)return 'DISCONTINUED'; return 'ACTIVE'; }
+var FILTER_FIELDS=[
+  {key:'category',label:'Category',type:'enum',ops:['in','not_in'],opts:function(){var s={};Object.keys(SKUM).forEach(function(k){var c=SKUM[k]&&(SKUM[k].c||SKUM[k].s);if(c)s[c]=1;});return Object.keys(s).sort();}},
+  {key:'subcategory',label:'Sub-category',type:'enum',ops:['in','not_in'],opts:function(){var s={};Object.keys(SKUM).forEach(function(k){var c=SKUM[k]&&SKUM[k].s;if(c)s[c]=1;});return Object.keys(s).sort();}},
+  {key:'tier',label:'Market tier',type:'enum',ops:['in','not_in'],opts:function(){return ['A','B','C'];}},
+  {key:'status',label:'Status',type:'enum',ops:['in','not_in'],opts:function(){return ['ACTIVE','FUTURE','DISCONTINUED'];}},
+  {key:'core_seasonal',label:'Core/Seasonal',type:'enum',ops:['in','not_in'],opts:function(){return ['C','S'];}},
+  {key:'release_window',label:'Release window',type:'enum',ops:['in','not_in'],opts:function(){var s={};Object.keys(SKUM).forEach(function(k){var c=SKUM[k]&&SKUM[k].rw;if(c)s[c]=1;});return Object.keys(s).sort();}},
+  {key:'from_replacement',label:'From-replacement',type:'bool',ops:['is'],opts:function(){return ['yes','no'];}},
+  {key:'metric.fclt',label:'FC < Actual (this month)',type:'metric',ops:['is'],metric:'fclt'},
+  {key:'metric.fgtr',label:'FC > Run-rate (this month)',type:'metric',ops:['is'],metric:'fgtr'},
+  {key:'metric.sellnofc',label:'Selling, no forecast',type:'metric',ops:['is'],metric:'sellnofc'}
+];
+function _filterFieldDef(k){ for(var i=0;i<FILTER_FIELDS.length;i++)if(FILTER_FIELDS[i].key===k)return FILTER_FIELDS[i]; return null; }
+// Evaluate one rule against a SKU in (co,ch). excMaps = excComputeMaps(co,ch) (compute once per render, pass in).
+function filterMatch(sku,co,ch,rule,excMaps){
+  var def=(rule&&rule.def)||rule||{}; var conds=def.conditions||[]; if(!conds.length)return true;
+  var p=SKUM[sku]||{};
+  function arr(v){ return Array.isArray(v)?v:(v==null||v===''?[]:[v]); }
+  for(var i=0;i<conds.length;i++){ var c=conds[i], f=c.field;
+    if(f&&f.indexOf('metric.')===0){ var mk=f.slice(7); var st=(excMaps&&excMaps[mk]&&excMaps[mk][sku])||''; var sev=c.severity||'red_amber'; if(!(sev==='red'?(st==='RED'):(st==='RED'||st==='AMBER')))return false; continue; }
+    var v, list=arr(c.value);
+    if(f==='from_replacement'){ var has=!!p.rep; if(list.indexOf('yes')>=0&&!has)return false; if(list.indexOf('no')>=0&&has)return false; continue; }
+    if(f==='category')v=p.c||p.s||''; else if(f==='subcategory')v=p.s||''; else if(f==='tier')v=p.ti||'C';
+    else if(f==='status')v=_filterStatus(p,co); else if(f==='core_seasonal')v=p.cs||''; else if(f==='release_window')v=p.rw||''; else continue;
+    if(c.op==='not_in'){ if(list.indexOf(v)>=0)return false; } else { if(list.length&&list.indexOf(v)<0)return false; }
+  }
+  return true;
+}
 function renderExceptionsView(body){
   try{ if(typeof buildLiveDemand==='function')buildLiveDemand(); }catch(e){}
   try{ if(typeof buildLiveBpOverlay==='function')buildLiveBpOverlay(); }catch(e){}

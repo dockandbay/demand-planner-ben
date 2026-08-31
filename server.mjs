@@ -773,6 +773,7 @@ function requiredCap(method, p) {
       || p === '/api/demand-actions/state' || p.startsWith('/api/trading-calendar')
       || p.startsWith('/api/price-changes') || p.startsWith('/api/demand-revenue-targets')
       || p.startsWith('/api/buy-complex-rules')
+      || p.startsWith('/api/filter-rules')
       || p.startsWith('/api/auto-forecast/')
       || p.startsWith('/api/forecast/')) return 'demand';    // DEMAND / forecasting domain
   if (p === '/api/consignee' || p.startsWith('/api/consignee/')) return 'config'; // CONFIG ▸ Consignees
@@ -12582,6 +12583,34 @@ app.post('/api/buy-complex-rules', async (req, res) => {
 });
 app.post('/api/buy-complex-rules/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.buy_complex_rules WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// ── Filter Rules engine (mig 249) — reusable saveable SKU-selector filters (jsonb-first). See
+//    Claude Analyses/SPEC_FILTER_RULES_ENGINE.md. Mirrors buy-complex-rules; the whole rule body is `definition`.
+async function buildFilterRules() {
+  try { return (await pool.query(`SELECT id, name, enabled, definition, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at
+    FROM planner.filter_rules ORDER BY lower(name), id`)).rows; }
+  catch (e) { return []; }
+}
+app.get('/api/filter-rules', async (_req, res) => { res.json(await buildFilterRules()); });
+app.post('/api/filter-rules', async (req, res) => {
+  const b = req.body || {}; const name = (b.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'name is required' });
+  let def = b.definition; if (typeof def === 'string') { try { def = JSON.parse(def); } catch (e) { def = {}; } }
+  if (def == null || typeof def !== 'object') def = {};
+  try {
+    if (b.id) {
+      await pool.query(`UPDATE planner.filter_rules SET name=$1, enabled=$2, definition=$3::jsonb, updated_at=now() WHERE id=$4`,
+        [name, b.enabled !== false, JSON.stringify(def), b.id]);
+      return res.json({ id: b.id });
+    }
+    const r = await pool.query(`INSERT INTO planner.filter_rules (name, enabled, definition) VALUES ($1,$2,$3::jsonb) RETURNING id`,
+      [name, b.enabled !== false, JSON.stringify(def)]);
+    res.json({ id: r.rows[0].id });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/filter-rules/:id/delete', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.filter_rules WHERE id=$1`, [parseInt(req.params.id, 10)]); res.json({ ok: true }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Revenue-growth targets per country × channel × FY. GET returns all; POST upserts one cell (blank clears it).
