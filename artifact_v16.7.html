@@ -10356,7 +10356,7 @@ try{ loadFilterRules(); }catch(e){}
 // Shared metric classifiers — the SAME math as the Exceptions report (buildFA fclt/fgtr, buildSellNoFc), computed
 // once per (co,ch) as {sku->'RED'|'AMBER'}. "Flagged now" = current month, current market×channel (Ben's decision).
 function excComputeMaps(co,ch){
-  var _cd=(typeof CUR_DAYS!=='undefined'&&CUR_DAYS)?CUR_DAYS:{elapsed:16,total:30};
+  var _cd=(typeof CUR_DAYS!=='undefined'&&CUR_DAYS)?CUR_DAYS:(function(){var _n=new Date();return{elapsed:_n.getDate(),remaining:Math.max(new Date(_n.getFullYear(),_n.getMonth()+1,0).getDate()-_n.getDate(),0),total:new Date(_n.getFullYear(),_n.getMonth()+1,0).getDate()};})();   // CUR_DAYS is BP-IIFE-local (invisible top-level) — compute the REAL current-month day counts instead of a fake {16,30} that fabricated a mid-month run-rate
   var elapsed=Math.max(1,_cd.elapsed||1), total=_cd.total||30, frac=elapsed/total;
   var _cm=(typeof CUR_MONTH!=='undefined')?CUR_MONTH:'';
   function monDec(m){ var y=+m.slice(0,4),mo=+m.slice(5,7); mo--; if(mo<1){mo=12;y--;} return y+'_'+(mo<10?'0':'')+mo; }
@@ -10581,7 +10581,7 @@ function renderExceptionsView(body){
   try{ if(typeof buildLiveBpOverlay==='function')buildLiveBpOverlay(); }catch(e){}
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function fn(n){n=Math.round(Number(n)||0);return n?n.toLocaleString():'0';}
-  var _cd=(typeof CUR_DAYS!=='undefined'&&CUR_DAYS)?CUR_DAYS:{elapsed:16,total:30};
+  var _cd=(typeof CUR_DAYS!=='undefined'&&CUR_DAYS)?CUR_DAYS:(function(){var _n=new Date();return{elapsed:_n.getDate(),remaining:Math.max(new Date(_n.getFullYear(),_n.getMonth()+1,0).getDate()-_n.getDate(),0),total:new Date(_n.getFullYear(),_n.getMonth()+1,0).getDate()};})();   // CUR_DAYS is BP-IIFE-local (invisible top-level) — compute the REAL current-month day counts instead of a fake {16,30} that fabricated a mid-month run-rate
   var elapsed=Math.max(1,_cd.elapsed||1), total=_cd.total||30, frac=elapsed/total;
   var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var _cm=(typeof CUR_MONTH!=='undefined')?CUR_MONTH:'', curLbl=_cm?(MN[(+_cm.split('_')[1])-1]+" '"+_cm.slice(2,4)):'';
