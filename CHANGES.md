@@ -1,3 +1,6 @@
+## v27.328 Removed the old per-tab "Refresh cache" buttons (superseded by the v27.327 top-nav ↻)
+- Deleted the redundant **BUY tab "↻ Refresh cache"** (`#bp-refresh-cache`) and **SUPPLY sub-nav "↻ Refresh cache"** (`#supply-refresh-cache`) buttons now that the unified context-sensitive top-nav ↻ covers all sections. Underlying functions kept (`refreshBuyCache` is reused by the new button; supply refresh handled in place by `hzSupplyRefresh`). The view-specific `↻ Refresh` buttons on the Actions list and Shipment plan are left (they reload a single view, not the cache).
+
 ## v27.327 Top-nav ↻ Refresh button — context-sensitive server-cache bust (fixes "changed data still shows old")
 - New **↻ icon** in the top nav (between **SA** and **?**, 120ms hover tip). One button, **context-sensitive** to the tab you're on:
   - **DEMAND / REPORTS** → rebuilds the demand data cache (`_SKU_RAW`/`FC_OUTPUTS`) from Supabase and re-renders in place — so a **product/scope change** (e.g. a SKU newly in `in_planning_scope`) shows **without waiting for the 10-min TTL** or a reload.

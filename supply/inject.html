@@ -11369,16 +11369,13 @@
     var app=document.getElementById('app')||document.body; if(!app)return;
     var rootEl=document.createElement('div'); rootEl.id='supply-root';
     rootEl.innerHTML='<div id="supply-subnav">'+SECTIONS.map(function(s){return '<a class="stab" data-k="'+s[0]+'" href="#/supply/'+s[0]+'">'+s[1]+(s[0]==='reports'?' <span id="nav-actions-badge" class="ex-badge" title="items needing attention" style="display:none"></span>':'')+'</a>';}).join('')
-      +'<button id="supply-refresh-cache" title="Reload every report from the database fresh and reset all caches (client + server)" style="margin-left:auto;background:#fff;border:1px solid #cbd5e1;border-radius:5px;color:#2563eb;font-weight:600;font-size:11px;padding:2px 10px;cursor:pointer">↻ Refresh cache</button>'
-      +'<span class="ver">HORIZON __APP_VERSION__</span></div>'
+      +'<span class="ver" style="margin-left:auto">HORIZON __APP_VERSION__</span></div>'
       +'<select id="supply-nav-sel" aria-label="Section">'+SECTIONS.map(function(s){return '<option value="'+s[0]+'">'+s[1]+'</option>';}).join('')+'</select>'
       +'<div id="supply-content"></div>';
     app.appendChild(rootEl);
     rootEl.querySelectorAll('.stab').forEach(function(b){b.onclick=function(e){ if(e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return; e.preventDefault(); if(b.dataset.k==='config'){ enterSupplyConfig(); return; } selectSection(b.dataset.k); };});   // Cmd/Ctrl/Shift/Alt-click (or middle-click) opens the section in a new tab via its deep-link href
     var _navSel=rootEl.querySelector('#supply-nav-sel'); if(_navSel)_navSel.onchange=function(){ if(this.value==='config'){ enterSupplyConfig(); return; } selectSection(this.value); };
-    var _rc=rootEl.querySelector('#supply-refresh-cache'); if(_rc)_rc.onclick=function(){ var b=this; b.disabled=true; b.textContent='Refreshing…';
-      try{ for(var k in cache)delete cache[k]; }catch(e){}   // drop the client section cache
-      fetch('/api/supply/cache/invalidate',{method:'POST'}).catch(function(){}).then(function(){ location.reload(); }); };   // reset the server read-cache, then a full reload re-fetches all data + rebuilds the demand/buy overlays
+    // (v27.328) supply "Refresh cache" button removed — the unified top-nav ↻ (hzRefreshCache → hzSupplyRefresh) does this in place.
     fetch('/api/supply/samples').then(function(r){return r.json();}).then(function(d){ if(Array.isArray(d)){ cache['samples']=d; samplesNavBadge(d); } }).catch(function(){});
     refreshOpExc(); try{ prefetchNavCounts(); }catch(e){}   // compute the Payments Due count on mount so the PAYMENTS tab badge shows immediately
     // high-priority ACTIONS count for the ACTIONS tab badge (warms the actions cache too, so opening it is instant)
