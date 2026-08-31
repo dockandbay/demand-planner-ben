@@ -10353,10 +10353,21 @@ function loadFilterRules(cb){ fetch('/api/filter-rules').then(function(r){return
   FILTER_RULES=(Array.isArray(list)?list:[]).map(function(x){ var d=x.definition; if(typeof d==='string'){try{d=JSON.parse(d);}catch(e){d={};}} return {id:x.id,name:x.name,enabled:x.enabled!==false,def:(d&&typeof d==='object')?d:{}}; });
   if(cb)cb(); }).catch(function(){ if(cb)cb(); }); }
 try{ loadFilterRules(); }catch(e){}
+// Real current-month day counts for TOP-LEVEL code. `CUR_DAYS` is declared inside the BP engine IIFE, so it's
+// invisible here (typeof CUR_DAYS === 'undefined' at top level) — see [[artifact-global-country-list]]. Any
+// top-level run-rate MUST use this, never a bare `CUR_DAYS` guard (which silently used a fabricated {16,30}).
+// Prefers the BP_DATA.cur_days extract (kept fresh by buildLiveBpOverlay = exactly what BP's CUR_DAYS resolves to),
+// else computes live from today. Exposed as window.hzCurDays so every top-level caller shares one source of truth.
+function hzCurDays(){
+  try{ var b=(typeof BP_DATA!=='undefined'&&BP_DATA&&BP_DATA.cur_days); if(b&&b.total&&b.elapsed!=null)return b; }catch(e){}
+  var n=new Date(), t=new Date(n.getFullYear(),n.getMonth()+1,0).getDate();
+  return {elapsed:n.getDate(), remaining:Math.max(t-n.getDate(),0), total:t};
+}
+try{ if(typeof window!=='undefined')window.hzCurDays=hzCurDays; }catch(e){}
 // Shared metric classifiers — the SAME math as the Exceptions report (buildFA fclt/fgtr, buildSellNoFc), computed
 // once per (co,ch) as {sku->'RED'|'AMBER'}. "Flagged now" = current month, current market×channel (Ben's decision).
 function excComputeMaps(co,ch){
-  var _cd=(typeof CUR_DAYS!=='undefined'&&CUR_DAYS)?CUR_DAYS:(function(){var _n=new Date();return{elapsed:_n.getDate(),remaining:Math.max(new Date(_n.getFullYear(),_n.getMonth()+1,0).getDate()-_n.getDate(),0),total:new Date(_n.getFullYear(),_n.getMonth()+1,0).getDate()};})();   // CUR_DAYS is BP-IIFE-local (invisible top-level) — compute the REAL current-month day counts instead of a fake {16,30} that fabricated a mid-month run-rate
+  var _cd=hzCurDays();
   var elapsed=Math.max(1,_cd.elapsed||1), total=_cd.total||30, frac=elapsed/total;
   var _cm=(typeof CUR_MONTH!=='undefined')?CUR_MONTH:'';
   function monDec(m){ var y=+m.slice(0,4),mo=+m.slice(5,7); mo--; if(mo<1){mo=12;y--;} return y+'_'+(mo<10?'0':'')+mo; }
@@ -10581,7 +10592,7 @@ function renderExceptionsView(body){
   try{ if(typeof buildLiveBpOverlay==='function')buildLiveBpOverlay(); }catch(e){}
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function fn(n){n=Math.round(Number(n)||0);return n?n.toLocaleString():'0';}
-  var _cd=(typeof CUR_DAYS!=='undefined'&&CUR_DAYS)?CUR_DAYS:(function(){var _n=new Date();return{elapsed:_n.getDate(),remaining:Math.max(new Date(_n.getFullYear(),_n.getMonth()+1,0).getDate()-_n.getDate(),0),total:new Date(_n.getFullYear(),_n.getMonth()+1,0).getDate()};})();   // CUR_DAYS is BP-IIFE-local (invisible top-level) — compute the REAL current-month day counts instead of a fake {16,30} that fabricated a mid-month run-rate
+  var _cd=hzCurDays();   // real current-month day counts (CUR_DAYS is BP-IIFE-local; hzCurDays is the top-level single source) — see [[artifact-global-country-list]]
   var elapsed=Math.max(1,_cd.elapsed||1), total=_cd.total||30, frac=elapsed/total;
   var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var _cm=(typeof CUR_MONTH!=='undefined')?CUR_MONTH:'', curLbl=_cm?(MN[(+_cm.split('_')[1])-1]+" '"+_cm.slice(2,4)):'';
