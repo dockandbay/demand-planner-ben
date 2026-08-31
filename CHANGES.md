@@ -1,3 +1,14 @@
+## v27.347 Filter Rules — metric conditions are now bespoke numeric thresholds (operator + % + presets)
+- Replaced the fixed **Red / Amber** severity on all six metric/forecast conditions with a flexible **operator (≥ / ≤ / between) + your own value**, plus **quick-preset chips** that fill the standard bands. Each metric now exposes a raw number and you set the threshold:
+  - **FC > Run-rate** → run-rate is N% below forecast (over-forecast). Presets: Red >50%, Amber 25–50%, >25%.
+  - **FC < Actual** → actual is N% of forecast (100% = met). Presets: ≥100%, ≥90%, ≥120%.
+  - **Selling, no forecast** → units sold last 3mo ≥ N (with the no-forward-forecast gate). Presets: ≥60u, ≥10u, ≥100u.
+  - **YoY trend** → YoY growth %. Presets: Up ≥+20%, Down ≤−20%, Flat −20…+20%.
+  - **Forecast accuracy (WMAPE)** → error %. Presets: Poor ≥60%, Good ≤30%, OK 30–60%.
+  - **Forecast bias** → forecast N% over(+)/under(−) actual. Presets: Over ≥+20%, Under ≤−20%, Neutral.
+- `excComputeMaps` now returns raw numeric values (not RED/AMBER); `filterMatch` compares them with the operator; the builder renders operator+number(s)+unit+presets; each field keeps its ⓘ tooltip.
+- **Robustness:** the current-month metrics now include the current month in the forecast map and treat an already-complete `CUR_MONTH` as fully elapsed (run-rate = actual), so fclt/fgtr work correctly across a month boundary rather than going blank on the 1st. Verified end-to-end in jsdom (fclt/fgtr/yoy populated; fgtr≥25 → 198 rows) + 39 unit assertions.
+
 ## v27.346 Filter Rules — a new condition defaults to "— please select —" (no auto Category)
 - Adding a condition (New filter / Add condition) now starts on a **"— please select —"** placeholder instead of defaulting to Category, so you actively choose the field. The operator/value controls only appear once a field is picked (a "choose a field…" hint shows until then). Unselected rows are ignored by the evaluator and stripped on save/apply.
 

@@ -10370,8 +10370,11 @@ try{ if(typeof window!=='undefined')window.hzCurDays=hzCurDays; }catch(e){}
 // once per (co,ch) as {sku->'RED'|'AMBER'}. "Flagged now" = current month, current market×channel (Ben's decision).
 function excComputeMaps(co,ch){
   var _cd=hzCurDays();
-  var elapsed=Math.max(1,_cd.elapsed||1), total=_cd.total||30, frac=elapsed/total;
   var _cm=(typeof CUR_MONTH!=='undefined')?CUR_MONTH:'';
+  // If CUR_MONTH is already a COMPLETE month (earlier than this calendar month, e.g. at a month boundary), it's fully
+  // elapsed → run-rate = actual (no projection). Otherwise use the live day counts. Guards the run-rate at rollover.
+  (function(){ var n=new Date(), cy=n.getFullYear(), cm2=n.getMonth()+1, cal=cy+'_'+(cm2<10?'0':'')+cm2; if(_cm && _cm<cal){ _cd={elapsed:_cd.total||30, remaining:0, total:_cd.total||30}; } })();
+  var elapsed=Math.max(1,_cd.elapsed||1), total=_cd.total||30, frac=elapsed/total;
   function monDec(m){ var y=+m.slice(0,4),mo=+m.slice(5,7); mo--; if(mo<1){mo=12;y--;} return y+'_'+(mo<10?'0':'')+mo; }
   var fwd=(typeof LIVE_FC_MONTHS!=='undefined')?LIVE_FC_MONTHS.slice(0,4):[_cm];
   var prev3=[monDec(_cm)]; prev3.push(monDec(prev3[0])); prev3.push(monDec(prev3[1]));   // 3 completed months = recent window
@@ -10384,24 +10387,28 @@ function excComputeMaps(co,ch){
   Object.keys(bySub).forEach(function(sub){ var subSkus=bySub[sub];
     var subcatFU={}; try{subcatFU=(calc(sub,co,ch)||{}).fu||{};}catch(e){}
     var shares={}; try{shares=buildSkuShares(subSkus,co,ch,lym)||{};}catch(e){}
+    var _mset=(fwd.indexOf(_cm)>=0)?fwd:[_cm].concat(fwd);   // always include the current month so fclt/fgtr work at a month boundary (fwd can start next month)
     subSkus.forEach(function(sku){ var invOH=(SKUM[sku].inv&&SKUM[sku].inv[skuWh(co,ch)])||0, fcMap={};
-      try{fcMap=skuMonthlyMap(sku,co,ch,fwd,subcatFU,shares[sku]||0,invOH)||{};}catch(e){}
-      try{ fwd.forEach(function(m){ var ov=skuOvGetK(sku+'|'+co+'|'+ch+'|'+m); if(ov!=null&&ov!=='')fcMap[m]=parseInt(ov,10)||0; }); }catch(e){}
+      try{fcMap=skuMonthlyMap(sku,co,ch,_mset,subcatFU,shares[sku]||0,invOH)||{};}catch(e){}
+      try{ _mset.forEach(function(m){ var ov=skuOvGetK(sku+'|'+co+'|'+ch+'|'+m); if(ov!=null&&ov!=='')fcMap[m]=parseInt(ov,10)||0; }); }catch(e){}
       var sales=null; try{sales=skuSales(sku,co,ch);}catch(e){}
       var fc=fcMap[_cm]||0, act=(sales&&sales[_cm])||0;
-      if(fc>0||act>0){ var run=elapsed>0?(act/elapsed*total):act;
-        var sF=(fc>0&&act>=fc)?'RED':((fc>0&&run>fc&&act<fc)?'AMBER':''); if(sF)fclt[sku]=sF;
-        var sG=(fc>0&&act>0&&frac>=0.34)?(run<fc*0.5?'RED':(run<fc*0.75?'AMBER':'')):''; if(sG)fgtr[sku]=sG; }
+      var run=elapsed>0?(act/elapsed*total):act;
+      // fclt VALUE = actual as % of forecast this month (needs a forecast). 100% = actual has met the forecast.
+      if(fc>0) fclt[sku]=Math.round(act/fc*1000)/10;
+      // fgtr VALUE = run-rate is N% BELOW forecast (over-forecast), once ≥34% of the month has elapsed. Positive = over-forecast.
+      if(fc>0&&act>0&&frac>=0.34) fgtr[sku]=Math.round((fc-run)/fc*1000)/10;
+      // sellnofc VALUE = units sold in the last 3 months, ONLY for SKUs with little/no forward forecast (next 4mo ≤10% of recent).
       var recent=0; prev3.forEach(function(m){ recent+=(sales&&sales[m])||0; });
-      if(recent>=10){ var fwdFc=0; fwd.forEach(function(m){ fwdFc+=fcMap[m]||0; }); if(fwdFc<=recent*0.1) sellnofc[sku]=(recent>=60)?'RED':'AMBER'; }
-      // ── trailing-3mo TREND + FORECAST-vs-ACTUAL buckets (share the same actuals + locked-FC source) ──
+      if(recent>0){ var fwdFc=0; fwd.forEach(function(m){ fwdFc+=fcMap[m]||0; }); if(fwdFc<=recent*0.1) sellnofc[sku]=recent; }
+      // ── trailing-3mo TREND + FORECAST-vs-ACTUAL numeric values (share the same actuals + locked-FC source) ──
       var r3=recent, l3=0;
       prev3.forEach(function(m){ var lm=(+m.slice(0,4)-1)+m.slice(4); l3+=(sales&&sales[lm])||0; });
-      // YoY trend — recent 3mo vs same 3 months last year
-      if((r3+l3)>=TVOL){ if(l3<=0)yoy[sku]=r3>0?'Up':'Flat'; else { var yp=(r3-l3)/l3; yoy[sku]=yp>=0.2?'Up':(yp<=-0.2?'Down':'Flat'); } } else yoy[sku]='Flat';
-      // Forecast accuracy (WMAPE) + bias — locked FC vs actual over recent 3mo (needs locked snapshots; empty in sandbox)
+      // yoy VALUE = YoY growth % (recent 3mo vs the same 3mo last year). +999 caps "grew from ~zero".
+      if((r3+l3)>=TVOL){ yoy[sku]=(l3<=0)?(r3>0?999:0):Math.round((r3-l3)/l3*1000)/10; }
+      // wmape VALUE = weighted absolute % error; bias VALUE = signed % (positive = over-forecast). Locked FC vs actual, last 3mo.
       var ae=0,ac=0,se=0; prev3.forEach(function(m){ var fcv=Number(_locked[sku+'|'+co+'|'+ch+'|'+m]||0), acv=(sales&&sales[m])||0; if(fcv<=0&&acv<=0)return; ae+=Math.abs(fcv-acv); ac+=acv; se+=(fcv-acv); });
-      if(ac>=TVOL){ var w=ae/ac; wmape[sku]=w<0.30?'Good':(w<0.60?'OK':'Poor'); var bp=se/ac; bias[sku]=bp>=0.2?'Over':(bp<=-0.2?'Under':'Neutral'); }
+      if(ac>=TVOL){ wmape[sku]=Math.round(ae/ac*1000)/10; bias[sku]=Math.round(se/ac*1000)/10; }
     }); });
   return {fclt:fclt, fgtr:fgtr, sellnofc:sellnofc, yoy:yoy, wmape:wmape, bias:bias};
 }
@@ -10415,12 +10422,12 @@ var FILTER_FIELDS=[
   {key:'core_seasonal',label:'Core/Seasonal',type:'enum',ops:['in','not_in'],desc:'Core vs Seasonal classification (C = Core, S = Seasonal).',opts:function(){return ['C','S'];}},
   {key:'release_window',label:'Release window',type:'enum',ops:['in','not_in'],desc:'Release window / season (e.g. SS27).',opts:function(){var s={};Object.keys(SKUM).forEach(function(k){var c=SKUM[k]&&SKUM[k].rw;if(c)s[c]=1;});return Object.keys(s).sort();}},
   {key:'from_replacement',label:'From-replacement',type:'bool',ops:['is'],desc:'SKU that inherits a predecessor SKU’s sales history (a replacement SKU).',opts:function(){return ['yes','no'];}},
-  {key:'metric.fclt',label:'FC < Actual (this month)',type:'metric',ops:['is'],metric:'fclt',desc:'Flags SKUs where the actual has already reached or passed the forecast this month (actual ≥ forecast). Current month, selected market × channel. Literal only — no run-rate projection.'},
-  {key:'metric.fgtr',label:'FC > Run-rate (this month)',type:'metric',ops:['is'],metric:'fgtr',desc:'Forecast sits above the run-rate (this month’s actuals-to-date projected to a full month), once ≥34% of the month has elapsed — i.e. over-forecast. RED = run-rate below 50% of forecast (badly over-forecast). AMBER = run-rate 50–75% of forecast (mildly over). Red+Amber = both.'},
-  {key:'metric.sellnofc',label:'Selling, no forecast',type:'metric',ops:['is'],metric:'sellnofc',desc:'Sold ≥10 units over the last 3 months but the next 4 months’ forecast is ≤10% of that — selling with little/no forward forecast. RED = ≥60 units sold (higher risk). AMBER = 10–59 units. Red+Amber = both.'},
-  {key:'trend.yoy',label:'YoY trend (3mo vs LY)',type:'trend',ops:['in','not_in'],metric:'yoy',desc:'Last 3 completed months vs the SAME 3 months last year. UP = ≥ +20%. DOWN = ≤ −20%. FLAT = in between. Needs ≥10 units. De-seasonalised — the best read of genuine growth.',opts:function(){return ['Up','Flat','Down'];}},
-  {key:'trend.wmape',label:'Forecast accuracy (3mo WMAPE)',type:'trend',ops:['in','not_in'],metric:'wmape',desc:'Weighted absolute % error (WMAPE) of the locked forecast vs actual over the last 3 completed months. GOOD < 30%. OK = 30–60%. POOR ≥ 60%. Uses locked forecast snapshots (populated on live).',opts:function(){return ['Good','OK','Poor'];}},
-  {key:'trend.bias',label:'Forecast bias (3mo over/under)',type:'trend',ops:['in','not_in'],metric:'bias',desc:'Locked forecast vs actual over the last 3 completed months. OVER = forecast ≥20% above actual (over-forecasting). UNDER = forecast ≥20% below actual (under-forecasting). NEUTRAL = within ±20%. Live only.',opts:function(){return ['Over','Neutral','Under'];}}
+  {key:'metric.fclt',label:'FC < Actual (this month)',type:'num',metric:'fclt',unit:'%',phrase:'actual is',suffix:'% of forecast',defOp:'gte',defVal:100,presets:[{label:'≥100% (met/beaten)',op:'gte',v:100},{label:'≥90% (near)',op:'gte',v:90},{label:'≥120% (well over)',op:'gte',v:120}],desc:'Actual as a % of the forecast this month (current month, selected market × channel). 100% = the actual has reached the forecast; >100% = actual has beaten it. Needs a non-zero forecast.'},
+  {key:'metric.fgtr',label:'FC > Run-rate (over-forecast)',type:'num',metric:'fgtr',unit:'%',phrase:'run-rate is',suffix:'% below forecast',defOp:'gte',defVal:50,presets:[{label:'Red >50%',op:'gte',v:50},{label:'Amber 25–50%',op:'between',v:[25,50]},{label:'>25%',op:'gte',v:25}],desc:'How far the run-rate (this month’s actuals-to-date projected to a full month) sits BELOW the forecast, as a % of forecast — i.e. over-forecast. Only once ≥34% of the month has elapsed. e.g. 50% = run-rate is half the forecast. Higher = more over-forecast.'},
+  {key:'metric.sellnofc',label:'Selling, no forecast',type:'num',metric:'sellnofc',unit:'u',phrase:'sold',suffix:'units (last 3mo)',defOp:'gte',defVal:60,presets:[{label:'≥60u (Red)',op:'gte',v:60},{label:'≥10u',op:'gte',v:10},{label:'≥100u',op:'gte',v:100}],desc:'Units sold over the last 3 months for SKUs with little/no forward forecast (next 4 months ≤10% of recent sales). Set the minimum units sold to flag.'},
+  {key:'trend.yoy',label:'YoY trend (3mo vs LY)',type:'num',metric:'yoy',unit:'%',phrase:'YoY growth is',suffix:'%',defOp:'gte',defVal:20,presets:[{label:'Up ≥+20%',op:'gte',v:20},{label:'Down ≤−20%',op:'lte',v:-20},{label:'Flat −20…+20%',op:'between',v:[-20,20]}],desc:'YoY growth %: last 3 completed months vs the SAME 3 months last year. Positive = growing. Needs ≥10 units across the window. De-seasonalised — the best read of genuine growth. (≥+20 = up, ≤−20 = down.)'},
+  {key:'trend.wmape',label:'Forecast accuracy (3mo WMAPE)',type:'num',metric:'wmape',unit:'%',phrase:'WMAPE is',suffix:'%',defOp:'gte',defVal:60,presets:[{label:'Poor ≥60%',op:'gte',v:60},{label:'Good ≤30%',op:'lte',v:30},{label:'OK 30–60%',op:'between',v:[30,60]}],desc:'Weighted absolute % error (WMAPE) of the locked forecast vs actual over the last 3 completed months. Higher = worse. Uses locked forecast snapshots (populated on live). (<30 good, 30–60 ok, ≥60 poor.)'},
+  {key:'trend.bias',label:'Forecast bias (3mo over/under)',type:'num',metric:'bias',unit:'%',phrase:'forecast is',suffix:'% over(+)/under(−) actual',defOp:'gte',defVal:20,presets:[{label:'Over ≥+20%',op:'gte',v:20},{label:'Under ≤−20%',op:'lte',v:-20},{label:'Neutral −20…+20%',op:'between',v:[-20,20]}],desc:'Forecast bias % over the last 3 completed months: positive = over-forecasting (forecast above actual), negative = under-forecasting. Uses locked forecast snapshots (live only). (≥+20 over, ≤−20 under.)'}
 ];
 function _filterFieldDef(k){ for(var i=0;i<FILTER_FIELDS.length;i++)if(FILTER_FIELDS[i].key===k)return FILTER_FIELDS[i]; return null; }
 // Evaluate one rule against a SKU in (co,ch). excMaps = excComputeMaps(co,ch) (compute once per render, pass in).
@@ -10429,8 +10436,13 @@ function filterMatch(sku,co,ch,rule,excMaps){
   var p=SKUM[sku]||{};
   function arr(v){ return Array.isArray(v)?v:(v==null||v===''?[]:[v]); }
   for(var i=0;i<conds.length;i++){ var c=conds[i], f=c.field;
-    if(f&&f.indexOf('metric.')===0){ var mk=f.slice(7); var st=(excMaps&&excMaps[mk]&&excMaps[mk][sku])||''; var sev=(mk==='fclt')?'red':(c.severity||'red'); if(!(sev==='red'?(st==='RED'):(st==='RED'||st==='AMBER')))return false; continue; }   // fclt is LITERAL only (actual>=forecast); the AMBER run-rate projection isn't "forecast < actual"
-    if(f&&f.indexOf('trend.')===0){ var tk=f.slice(6); var bk=(excMaps&&excMaps[tk]&&excMaps[tk][sku])||''; var tl=arr(c.value); if(c.op==='not_in'){ if(tl.indexOf(bk)>=0)return false; } else { if(tl.length&&tl.indexOf(bk)<0)return false; } continue; }
+    // Numeric metric/trend conditions — compare the SKU's raw metric value against the user's operator + threshold(s).
+    if(f&&(f.indexOf('metric.')===0||f.indexOf('trend.')===0)){ var mk=f.slice(f.indexOf('.')+1); var mv=(excMaps&&excMaps[mk])?excMaps[mk][sku]:undefined; if(mv==null)return false;
+      var op=c.op||'gte', thr=c.value;
+      if(op==='between'){ if(!Array.isArray(thr)||thr[0]==null||thr[1]==null)return false; var lo=Math.min(thr[0],thr[1]),hi=Math.max(thr[0],thr[1]); if(!(mv>=lo&&mv<=hi))return false; }
+      else if(op==='lte'){ if(thr==null||!(mv<=thr))return false; }
+      else { if(thr==null||!(mv>=thr))return false; }   // gte (default)
+      continue; }
     var v, list=arr(c.value);
     if(f==='from_replacement'){ var has=!!p.rep; if(list.indexOf('yes')>=0&&!has)return false; if(list.indexOf('no')>=0&&has)return false; continue; }
     if(f==='category')v=p.c||p.s||''; else if(f==='subcategory')v=p.s||''; else if(f==='tier')v=p.ti||'C';
@@ -10461,7 +10473,9 @@ var FR=(function(){
     var on=!!FR_ACTIVE; b.innerHTML='&#9776; Filter Rules'+(on?' &bull; '+esc(FR_ACTIVE.name||'active'):' ('+count()+')')+' &#9662;';
     b.style.background=on?'#ecfccb':'#f5f3ff'; b.style.borderColor=on?'#65a30d':'#c4b5fd'; b.style.color=on?'#3f6212':'#5b21b6'; }
   function condText(c){ var d=_filterFieldDef(c.field); var lbl=d?d.label:c.field;
-    if(c.field&&c.field.indexOf('metric.')===0)return lbl+' ('+(c.severity==='red'?'Red only':'Red+Amber')+')';
+    if(d&&d.type==='num'){ var u=(d.unit==='%'?'%':(d.unit==='u'?'u':''));
+      if(c.op==='between'){ var vv=Array.isArray(c.value)?c.value:[]; return lbl+': '+(d.phrase||'')+' '+(vv[0]!=null?vv[0]:'?')+'–'+(vv[1]!=null?vv[1]:'?')+u; }
+      var opT=c.op==='lte'?'≤':'≥'; return lbl+': '+(d.phrase||'')+' '+opT+(c.value!=null?c.value:'?')+u; }
     var v=Array.isArray(c.value)?c.value.join(', '):(c.value||'');
     return lbl+' '+(c.op==='not_in'?'≠':'=')+' '+(v||'—'); }
   function scopeChips(def){ var cs=(def&&def.conditions)||[]; if(!cs.length)return '<span style="color:#94a3b8">All SKUs</span>';
@@ -10493,12 +10507,22 @@ var FR=(function(){
   // ── FORM view ──────────────────────────────────────────────────────────────────────────────────────────────
   function valEditor(c,i){
     var d=_filterFieldDef(c.field)||FILTER_FIELDS[0];
-    if(d.type==='metric'){
-      if(d.metric==='fclt')return '<span class="tip120" data-tip="'+esc(d.desc||'')+'" style="font-size:11px;color:#64748b;cursor:help">actual &ge; forecast</span>';   // literal only — no run-rate projection
-      var sev=c.severity||'red';
-      return '<select class="fr-sev tip120" data-i="'+i+'" data-tip="'+esc(d.desc||'')+'" title="Hover the ⓘ for what Red / Amber mean" style="font-size:11px">'
-        +'<option value="red"'+(sev==='red'?' selected':'')+'>Red only</option>'
-        +'<option value="red_amber"'+(sev!=='red'?' selected':'')+'>Red + Amber</option></select>'; }
+    if(d.type==='num'){
+      var op=c.op||d.defOp||'gte', isB=(op==='between');
+      var v1=isB?(Array.isArray(c.value)?c.value[0]:''):(Array.isArray(c.value)?c.value[0]:(c.value!=null?c.value:''));
+      var v2=(isB&&Array.isArray(c.value))?c.value[1]:'';
+      var h='<span style="align-self:center;color:#475569;font-size:11px">'+esc(d.phrase||'')+'</span>'
+        +'<select class="fr-op" data-i="'+i+'" onchange="FR.opChange('+i+')" style="font-size:11px">'
+          +'<option value="gte"'+(op==='gte'?' selected':'')+'>&ge;</option>'
+          +'<option value="lte"'+(op==='lte'?' selected':'')+'>&le;</option>'
+          +'<option value="between"'+(op==='between'?' selected':'')+'>between</option></select>'
+        +'<input class="fr-num1" data-i="'+i+'" type="number" step="1" value="'+esc(v1==null?'':v1)+'" style="width:58px;font-size:11px">'
+        +(isB?' <span style="align-self:center;color:#64748b">&ndash;</span> <input class="fr-num2" data-i="'+i+'" type="number" step="1" value="'+esc(v2==null?'':v2)+'" style="width:58px;font-size:11px">':'')
+        +'<span style="align-self:center;color:#64748b;font-size:11px">'+esc(d.suffix||d.unit||'')+'</span>';
+      if(d.presets&&d.presets.length){ h+='<span style="flex-basis:100%;height:1px"></span>'
+        +'<span style="align-self:center;color:#94a3b8;font-size:10px;margin-right:2px">presets:</span>'
+        +d.presets.map(function(p,pi){return '<button type="button" onclick="FR.preset('+i+','+pi+')" style="font-size:9px;padding:1px 8px;border:1px solid #c4b5fd;border-radius:10px;background:#f5f3ff;color:#5b21b6;cursor:pointer;margin:0 3px 0 0">'+esc(p.label)+'</button>';}).join(''); }
+      return h; }
     if(d.type==='bool'){ var bv=(Array.isArray(c.value)?c.value[0]:c.value)||'yes';
       return '<select class="fr-val" data-i="'+i+'" style="font-size:11px"><option value="yes"'+(bv==='yes'?' selected':'')+'>yes</option><option value="no"'+(bv==='no'?' selected':'')+'>no</option></select>'; }
     var opts=[]; try{opts=d.opts?d.opts():[];}catch(e){opts=[];}
@@ -10508,8 +10532,9 @@ var FR=(function(){
   }
   function opEditor(c,i){
     var d=_filterFieldDef(c.field)||FILTER_FIELDS[0];
-    if(d.type==='enum'||d.type==='trend')return '<select class="fr-op" data-i="'+i+'" style="font-size:11px"><option value="in"'+(c.op!=='not_in'?' selected':'')+'>is any of</option><option value="not_in"'+(c.op==='not_in'?' selected':'')+'>is none of</option></select>';
-    return '<span class="fr-op" data-i="'+i+'" data-op="is" style="color:#64748b">is flagged</span>';
+    if(d.type==='num')return '';   // the operator lives inside the numeric value editor
+    if(d.type==='enum')return '<select class="fr-op" data-i="'+i+'" style="font-size:11px"><option value="in"'+(c.op!=='not_in'?' selected':'')+'>is any of</option><option value="not_in"'+(c.op==='not_in'?' selected':'')+'>is none of</option></select>';
+    return '<span class="fr-op" data-i="'+i+'" data-op="is" style="color:#64748b">is</span>';
   }
   function condRow(c,i){
     var picked=!!c.field;
@@ -10552,9 +10577,11 @@ var FR=(function(){
       var field=(row.querySelector('.fr-field')||{}).value; if(!field){ out.push({field:''}); return; }   // unselected "please select" row — keep as-is (ignored by the evaluator, stripped on save)
       var d=_filterFieldDef(field)||FILTER_FIELDS[0];
       var c={field:field};
-      if(d.type==='metric'){ c.op='is'; var sv=row.querySelector('.fr-sev'); c.severity=(sv&&sv.value)||'red_amber'; c.value=null; }
+      if(d.type==='num'){ var opN=row.querySelector('.fr-op'); var op=(opN&&opN.value)||d.defOp||'gte'; var n1=row.querySelector('.fr-num1'), n2=row.querySelector('.fr-num2');
+        var a=(n1&&n1.value!=='')?parseFloat(n1.value):null;
+        if(op==='between'){ var b=(n2&&n2.value!=='')?parseFloat(n2.value):null; c.op='between'; c.value=[a,b]; } else { c.op=op; c.value=a; } }
       else if(d.type==='bool'){ c.op='is'; var bv=row.querySelector('.fr-val'); c.value=[(bv&&bv.value)||'yes']; }
-      else { var op=row.querySelector('.fr-op'); c.op=(op&&op.value)||'in'; var sel=row.querySelector('.fr-val'); c.value=sel?Array.prototype.slice.call(sel.selectedOptions).map(function(o){return o.value;}):[]; }
+      else { var opE=row.querySelector('.fr-op'); c.op=(opE&&opE.value)||'in'; var sel=row.querySelector('.fr-val'); c.value=sel?Array.prototype.slice.call(sel.selectedOptions).map(function(o){return o.value;}):[]; }
       out.push(c);
     });
     form.conds=out;
@@ -10568,7 +10595,12 @@ var FR=(function(){
   function cancel(){ editing=null; render(); }
   function addCond(){ readForm(); form.conds.push({field:''}); render(); }   // new row starts unselected
   function rmCond(i){ readForm(); form.conds.splice(i,1); render(); }
-  function fieldChange(i){ readForm(); var sel=document.querySelectorAll('#fr-conds .fr-rule')[i]; var field=(sel&&sel.querySelector('.fr-field'))?sel.querySelector('.fr-field').value:''; if(!field){ form.conds[i]={field:''}; render(); return; } var d=_filterFieldDef(field)||FILTER_FIELDS[0]; form.conds[i]={field:field,op:defOpFor(d),value:d.type==='metric'?null:[],severity:d.type==='metric'?'red':undefined}; render(); }
+  function fieldChange(i){ readForm(); var sel=document.querySelectorAll('#fr-conds .fr-rule')[i]; var field=(sel&&sel.querySelector('.fr-field'))?sel.querySelector('.fr-field').value:''; if(!field){ form.conds[i]={field:''}; render(); return; } var d=_filterFieldDef(field)||FILTER_FIELDS[0];
+    if(d.type==='num'){ form.conds[i]={field:field, op:d.defOp||'gte', value:(d.defOp==='between'?[0,0]:(d.defVal!=null?d.defVal:0))}; }
+    else { form.conds[i]={field:field, op:defOpFor(d), value:[]}; }
+    render(); }
+  function opChange(i){ readForm(); render(); }   // numeric operator changed (toggles the 'between' second box)
+  function preset(i,pi){ readForm(); var c=form.conds[i]; if(!c)return; var d=_filterFieldDef(c.field); if(!d||!d.presets||!d.presets[pi])return; var pp=d.presets[pi]; form.conds[i]={field:c.field, op:pp.op, value:(pp.op==='between'?pp.v.slice():pp.v)}; render(); }
   function _applyDef(name,def){ FR_ACTIVE={id:(editing&&editing.id)||null,name:name||(def.conditions&&def.conditions.length?'ad-hoc filter':null),def:def}; _frMapsCache.key=''; try{renderMain();}catch(e){} editing=null; render(); var p=document.getElementById('fr-panel'); if(p)p.style.display='none'; }
   function apply(){ readForm(); _applyDef(form.name,toDef()); }
   function applySaved(id){ var r=rules().filter(function(x){return String(x.id)===String(id);})[0]; if(!r)return; FR_ACTIVE={id:r.id,name:r.name,def:r.def||{}}; _frMapsCache.key=''; try{renderMain();}catch(e){} render(); var p=document.getElementById('fr-panel'); if(p)p.style.display='none'; }
@@ -10587,7 +10619,7 @@ var FR=(function(){
     fetch('/api/filter-rules/'+id+'/delete',{method:'POST'}).then(function(){ if(FR_ACTIVE&&String(FR_ACTIVE.id)===String(id))clear(); loadFilterRules(function(){ render(); }); }); }
   // close on outside click
   if(typeof document!=='undefined'){ document.addEventListener('mousedown',function(e){ var p=document.getElementById('fr-panel'); if(!p||p.style.display!=='block')return; var b=document.getElementById('fr-btn'); if(p.contains(e.target)||(b&&b.contains(e.target)))return; p.style.display='none'; }); }
-  return {toggle:toggle,add:add,edit:edit,cancel:cancel,addCond:addCond,rmCond:rmCond,fieldChange:fieldChange,apply:apply,applySaved:applySaved,clear:clear,save:save,del:del,updateBtn:updateBtn};
+  return {toggle:toggle,add:add,edit:edit,cancel:cancel,addCond:addCond,rmCond:rmCond,fieldChange:fieldChange,opChange:opChange,preset:preset,apply:apply,applySaved:applySaved,clear:clear,save:save,del:del,updateBtn:updateBtn};
 })();
 try{ if(typeof window!=='undefined'){ window.FR=FR; loadFilterRules(function(){ try{FR.updateBtn();}catch(e){} }); } }catch(e){}
 function renderExceptionsView(body){
