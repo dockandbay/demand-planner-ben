@@ -912,7 +912,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
 <div id="smoothset-ov" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:flex-start;justify-content:center" onclick="if(event.target===this)closeSmoothSettings()">
   <div style="background:#fff;max-width:640px;width:94%;margin-top:40px;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.25);padding:18px 22px;max-height:86vh;overflow:auto;font-size:13px;color:#222">
     <div style="display:flex;align-items:center;margin-bottom:6px"><div style="font-weight:700;font-size:15px">&#9881; Smoothing settings</div><span id="ss-saved" style="margin-left:12px;font-size:11px;color:#16a34a;font-weight:600;opacity:0;transition:opacity .25s">Saved &#10003; — persists per country/channel</span><button onclick="closeSmoothSettings()" style="margin-left:auto;border:none;background:none;font-size:20px;cursor:pointer;color:#888">&times;</button></div>
-    <div style="color:#555;font-size:12px;margin-bottom:10px">Per country / channel / sub-category — every choice is saved to the database and reloads next time. <b>Disregard disc.</b>: smoothing leaves discontinued SKUs at their stock rundown and boosts only active SKUs to sum to the category forecast. <b>Auto</b>: include in the one-click auto-smooth sweep. The sweep first <b>re-caps discontinued SKUs to remaining stock</b> (on-hand + inbound spread across the run-out months, then 0 once exhausted), then rescales only months whose SKU-sum is <b>within</b> the gap threshold (a bigger gap is left for manual review).</div>
+    <div style="color:#555;font-size:12px;margin-bottom:10px">Per country / channel / sub-category — every choice is saved to the database and reloads next time. <b>Disregard disc.</b>: smoothing leaves discontinued SKUs at their stock rundown and boosts only active SKUs to sum to the category forecast. <b>Auto</b>: include in the one-click auto-smooth sweep. The sweep first <b>re-caps discontinued SKUs to remaining stock</b> (on-hand + inbound spread across the run-out months, then 0 once exhausted), then rescales months whose SKU-sum is <b>within</b> the gap threshold (a bigger gap is left for manual review) — <b>except</b> a month whose SKU-sum is <b>0</b> while the sub-category has a target &ge; 1, which is <b>always</b> smoothed (distributed across the SKUs) regardless of the gap.</div>
     <div style="color:#555;font-size:12px;margin-bottom:10px;background:#f8fafc;border:1px solid #eef2f7;border-radius:6px;padding:7px 9px"><b>Mode</b> — how the rescale is shared out: <b>Standard</b> scales every SKU by the same factor so their sum hits the sub-category target. <b>Leader</b> protects historically-strong SKUs — it floors them at 80% of their historical share (× tier target) so top performers aren&rsquo;t diluted, and pushes the rest of the adjustment onto the smaller SKUs.</div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:#f5f8ff;border:1px solid #dbeafe;border-radius:8px;padding:8px 10px;margin-bottom:10px">
       <span style="font-weight:700;font-size:12px;color:#1e3a8a">Auto-smooth</span>
@@ -1041,7 +1041,11 @@ function runAutoSmooth(){
       if(target<=0)return; var sum=eff.totals[m]||0;
       var gap=Math.abs(sum-target)/target;
       if(gap<=1e-9)return;   // already within tolerance — nothing to do
-      if(gap<th){ var vals=computeSmoothAlloc(s,co,ch,m,{protectLeaders:leader}); if(vals){ _allChg=_allChg.concat(applySmoothAlloc(co,ch,m,vals)||[]); applied++; } }
+      // (v27.331) ALWAYS smooth an empty cell: if the SKU-sum is 0 but the sub-category has a target, distribute it
+      // across the SKUs regardless of the gap % — a subcat target with no SKU forecast is a gap you always want filled.
+      if(gap<th || (sum<=0 && target>=1)){ var vals=computeSmoothAlloc(s,co,ch,m,{protectLeaders:leader});
+        if(vals && Object.keys(vals).length){ _allChg=_allChg.concat(applySmoothAlloc(co,ch,m,vals)||[]); applied++; }
+        else { skipped.push({co:co,ch:ch,subcat:s,month:m,sum:Math.round(sum),target:Math.round(target),gapPct:Math.round(gap*100)}); } }   // wanted to smooth but no allocatable SKUs — leave for manual
       else { skipped.push({co:co,ch:ch,subcat:s,month:m,sum:Math.round(sum),target:Math.round(target),gapPct:Math.round(gap*100)}); }   // over the limit → left for manual review
     }); });
   // (v27.330) show the PROPOSED numbers in the grid, then a Review (before→after) popup. Commit (audit + dirty +
@@ -7538,6 +7542,16 @@ var COL_TOTAL     = 48; // total columns
 // within ±5% of the subcat forecast. Writes overrides into FC_OUTPUTS (display only;
 // "Save forecasts" persists to Airtable). Constraints: pre-launch months stay 0;
 // discontinued SKUs capped at ≤ last-year sales and ≤ remaining (on-hand+inbound) stock.
+// Leader-mode historical signal: for a non-DTC channel, COMBINE the channel's own sales with DTC so a SKU that was
+// a best-seller on DTC (e.g. stock was held back from FBA and sold via DTC) still ranks as a leader on FBA/B2B and
+// keeps its protective floor — the leader method no longer misses good cross-channel demand. Combined (unweighted),
+// Ben's choice (v27.331). DTC itself is unchanged; only the Leader floors use this (Standard mode is untouched).
+function _leaderSales(sku,co,ch){
+  var s=skuSales(sku,co,ch)||{};
+  if(ch==='DTC') return s;
+  var d=skuSales(sku,co,'DTC'); if(!d) return s;
+  var out={}; for(var k in s)out[k]=s[k]; for(var k in d)out[k]=(out[k]||0)+(d[k]||0); return out;
+}
 function computeSmoothAlloc(s,co,ch,m,opts){
   opts=opts||{};
   // protectLeaders: when true, apply tier-aware floors so historically-strong SKUs
@@ -7648,7 +7662,7 @@ function computeSmoothAlloc(s,co,ch,m,opts){
       var histByItem={}, sumHist=0;
       // Primary: L3mo (last 3 completed months) — the explicit "recent leaders" signal.
       tierItems.forEach(function(it){
-        var sales=skuSales(it.sku,co,ch); var h=0;
+        var sales=_leaderSales(it.sku,co,ch); var h=0;   // combined channel + DTC (leader signal) — v27.331
         L3.forEach(function(ym){ h+=(sales[ym]||0); });
         histByItem[it.sku]=h; sumHist+=h;
       });
@@ -7656,7 +7670,7 @@ function computeSmoothAlloc(s,co,ch,m,opts){
       // fall back to lifetime sum so SKUs with deep history still get a baseline floor.
       if(sumHist<=0){
         tierItems.forEach(function(it){
-          var sales=skuSales(it.sku,co,ch); var h=0;
+          var sales=_leaderSales(it.sku,co,ch); var h=0;   // combined channel + DTC (leader signal) — v27.331
           for(var ym in sales){ if(ym<CUR_MONTH) h+=(sales[ym]||0); }
           histByItem[it.sku]=h; sumHist+=h;
         });
