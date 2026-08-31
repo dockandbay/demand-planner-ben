@@ -1,3 +1,6 @@
+## v27.345 Filter Rules — remove "Sales momentum" condition (not useful for a seasonal catalogue)
+- Removed the **Sales momentum (3mo vs prior 3mo)** trend condition. For a seasonal brand it mostly reflected the season (summer vs spring) rather than genuine trend, so it was more misleading than useful. Registry entry, the `momentum` computation in `excComputeMaps` (incl. the now-unused `prior3` window), and its map output are all removed. **Use `YoY trend (3mo vs LY)` for genuine, de-seasonalised growth.** The other trend/forecast conditions (YoY, WMAPE, Bias) and the exception metrics are unchanged.
+
 ## v27.344 Filter Rules — ⓘ tooltips quantifying each condition (120ms hover) + Red/Amber cut-offs
 - Every condition field now has an **ⓘ** next to it (120ms hover, reusing the app's `.tip120` tooltip) that **quantifies exactly what it means** — the thresholds, the window, and what **RED vs AMBER** mean where applicable:
   - **FC < Actual** — actual ≥ forecast this month (literal, no run-rate).

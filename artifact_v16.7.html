@@ -10375,12 +10375,11 @@ function excComputeMaps(co,ch){
   function monDec(m){ var y=+m.slice(0,4),mo=+m.slice(5,7); mo--; if(mo<1){mo=12;y--;} return y+'_'+(mo<10?'0':'')+mo; }
   var fwd=(typeof LIVE_FC_MONTHS!=='undefined')?LIVE_FC_MONTHS.slice(0,4):[_cm];
   var prev3=[monDec(_cm)]; prev3.push(monDec(prev3[0])); prev3.push(monDec(prev3[1]));   // 3 completed months = recent window
-  var prior3=[monDec(prev3[2])]; prior3.push(monDec(prior3[0])); prior3.push(monDec(prior3[1]));   // the 3 months before that (momentum baseline)
   var lym=(typeof lyYearMonths!=='undefined')?lyYearMonths:undefined;
   var ctry=co.toLowerCase(), chKey=(ch==='DTC'?'d':ch==='FBA'?'f':'b');
   var _locked=(typeof LOCKED_FC!=='undefined'&&LOCKED_FC&&LOCKED_FC.sku)?LOCKED_FC.sku:{};   // locked forecast snapshots (fc-at-the-time) for accuracy/bias
   var TVOL=10;   // trailing-window volume floor — below this, don't call a trend (too noisy)
-  var fclt={}, fgtr={}, sellnofc={}, momentum={}, yoy={}, wmape={}, bias={};
+  var fclt={}, fgtr={}, sellnofc={}, yoy={}, wmape={}, bias={};
   var bySub={}; Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||p.vt==='SET')return; if((((p.av||{})[ctry])||'').indexOf(chKey)<0)return; (bySub[p.s]=bySub[p.s]||[]).push(sku); });
   Object.keys(bySub).forEach(function(sub){ var subSkus=bySub[sub];
     var subcatFU={}; try{subcatFU=(calc(sub,co,ch)||{}).fu||{};}catch(e){}
@@ -10396,17 +10395,15 @@ function excComputeMaps(co,ch){
       var recent=0; prev3.forEach(function(m){ recent+=(sales&&sales[m])||0; });
       if(recent>=10){ var fwdFc=0; fwd.forEach(function(m){ fwdFc+=fcMap[m]||0; }); if(fwdFc<=recent*0.1) sellnofc[sku]=(recent>=60)?'RED':'AMBER'; }
       // ── trailing-3mo TREND + FORECAST-vs-ACTUAL buckets (share the same actuals + locked-FC source) ──
-      var r3=recent, p3=0, l3=0; prior3.forEach(function(m){ p3+=(sales&&sales[m])||0; });
+      var r3=recent, l3=0;
       prev3.forEach(function(m){ var lm=(+m.slice(0,4)-1)+m.slice(4); l3+=(sales&&sales[lm])||0; });
-      // Sales momentum — recent 3mo vs prior 3mo
-      if((r3+p3)>=TVOL){ if(p3<=0)momentum[sku]=r3>0?'Rising':'Flat'; else { var mp=(r3-p3)/p3; momentum[sku]=mp>=0.2?'Rising':(mp<=-0.2?'Falling':'Flat'); } } else momentum[sku]='Flat';
       // YoY trend — recent 3mo vs same 3 months last year
       if((r3+l3)>=TVOL){ if(l3<=0)yoy[sku]=r3>0?'Up':'Flat'; else { var yp=(r3-l3)/l3; yoy[sku]=yp>=0.2?'Up':(yp<=-0.2?'Down':'Flat'); } } else yoy[sku]='Flat';
       // Forecast accuracy (WMAPE) + bias — locked FC vs actual over recent 3mo (needs locked snapshots; empty in sandbox)
       var ae=0,ac=0,se=0; prev3.forEach(function(m){ var fcv=Number(_locked[sku+'|'+co+'|'+ch+'|'+m]||0), acv=(sales&&sales[m])||0; if(fcv<=0&&acv<=0)return; ae+=Math.abs(fcv-acv); ac+=acv; se+=(fcv-acv); });
       if(ac>=TVOL){ var w=ae/ac; wmape[sku]=w<0.30?'Good':(w<0.60?'OK':'Poor'); var bp=se/ac; bias[sku]=bp>=0.2?'Over':(bp<=-0.2?'Under':'Neutral'); }
     }); });
-  return {fclt:fclt, fgtr:fgtr, sellnofc:sellnofc, momentum:momentum, yoy:yoy, wmape:wmape, bias:bias};
+  return {fclt:fclt, fgtr:fgtr, sellnofc:sellnofc, yoy:yoy, wmape:wmape, bias:bias};
 }
 // Field registry — drives BOTH the evaluator and (later) the builder UI. Add a field = one entry + one evaluator case.
 function _filterStatus(p,co){ var ctry=co.toLowerCase(); var lch=(p.lch&&p.lch[ctry]), disc=(p.disc&&p.disc[ctry]); var t=(typeof TODAY!=='undefined')?TODAY:new Date().toISOString().slice(0,10); if(lch&&lch>t)return 'FUTURE'; if(disc&&disc<t)return 'DISCONTINUED'; return 'ACTIVE'; }
@@ -10421,7 +10418,6 @@ var FILTER_FIELDS=[
   {key:'metric.fclt',label:'FC < Actual (this month)',type:'metric',ops:['is'],metric:'fclt',desc:'Flags SKUs where the actual has already reached or passed the forecast this month (actual ≥ forecast). Current month, selected market × channel. Literal only — no run-rate projection.'},
   {key:'metric.fgtr',label:'FC > Run-rate (this month)',type:'metric',ops:['is'],metric:'fgtr',desc:'Forecast sits above the run-rate (this month’s actuals-to-date projected to a full month), once ≥34% of the month has elapsed — i.e. over-forecast. RED = run-rate below 50% of forecast (badly over-forecast). AMBER = run-rate 50–75% of forecast (mildly over). Red+Amber = both.'},
   {key:'metric.sellnofc',label:'Selling, no forecast',type:'metric',ops:['is'],metric:'sellnofc',desc:'Sold ≥10 units over the last 3 months but the next 4 months’ forecast is ≤10% of that — selling with little/no forward forecast. RED = ≥60 units sold (higher risk). AMBER = 10–59 units. Red+Amber = both.'},
-  {key:'trend.momentum',label:'Sales momentum (3mo vs prior 3mo)',type:'trend',ops:['in','not_in'],metric:'momentum',desc:'Last 3 completed months vs the 3 before them. RISING = ≥ +20%. FALLING = ≤ −20%. FLAT = in between. Needs ≥10 units across the window. Sequential — for seasonal SKUs this largely reflects the season (e.g. summer vs spring), NOT year-over-year growth. Use YoY trend for genuine growth.',opts:function(){return ['Rising','Flat','Falling'];}},
   {key:'trend.yoy',label:'YoY trend (3mo vs LY)',type:'trend',ops:['in','not_in'],metric:'yoy',desc:'Last 3 completed months vs the SAME 3 months last year. UP = ≥ +20%. DOWN = ≤ −20%. FLAT = in between. Needs ≥10 units. De-seasonalised — the best read of genuine growth.',opts:function(){return ['Up','Flat','Down'];}},
   {key:'trend.wmape',label:'Forecast accuracy (3mo WMAPE)',type:'trend',ops:['in','not_in'],metric:'wmape',desc:'Weighted absolute % error (WMAPE) of the locked forecast vs actual over the last 3 completed months. GOOD < 30%. OK = 30–60%. POOR ≥ 60%. Uses locked forecast snapshots (populated on live).',opts:function(){return ['Good','OK','Poor'];}},
   {key:'trend.bias',label:'Forecast bias (3mo over/under)',type:'trend',ops:['in','not_in'],metric:'bias',desc:'Locked forecast vs actual over the last 3 completed months. OVER = forecast ≥20% above actual (over-forecasting). UNDER = forecast ≥20% below actual (under-forecasting). NEUTRAL = within ±20%. Live only.',opts:function(){return ['Over','Neutral','Under'];}}
