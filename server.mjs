@@ -2688,7 +2688,17 @@ app.post('/api/supply/inventory-status/export.xlsx', async (req, res) => {
 // EAN → our SKU + supplier(s); split each page to its own PDF filed under SUPPLIER/PO/SKU. Read-only (no DB write).
 // STATELESS: parse (preview) and generate (build) each re-parse from the request's own files — no cross-request
 // cache, so it works on serverless / Vercel (Diviyaj). The PDF re-parse is cheap enough for D&B's volumes.
-function _ediCsvSplit(line) { return line.split(',').map(s => s.replace(/^'|'$/g, '').trim()); }
+// Quote-aware CSV split (RFC4180): respects double-quoted fields that contain commas (Dillards ASNs have them in
+// routing/address columns), so column indices stay aligned. A naive line.split(',') shifted the SSCC column for
+// those rows → false "SSCC not in CSV". Also strips a leading/trailing apostrophe text-qualifier.
+function _ediCsvSplit(line) {
+  const out = []; let cur = '', q = false;
+  for (let i = 0; i < line.length; i++) { const ch = line[i];
+    if (q) { if (ch === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else q = false; } else cur += ch; }
+    else { if (ch === '"') q = true; else if (ch === ',') { out.push(cur); cur = ''; } else cur += ch; } }
+  out.push(cur);
+  return out.map(s => s.replace(/^'|'$/g, '').trim());
+}
 function _ediBody(b) {
   const csvText = b.csv_base64 ? Buffer.from(String(b.csv_base64), 'base64').toString('utf8') : String(b.csv || '');
   const pdfs = Array.isArray(b.pdfs) ? b.pdfs : [];

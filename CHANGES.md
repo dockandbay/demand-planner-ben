@@ -1,3 +1,6 @@
+## v27.348 FIX (EDI labels) — quote-aware CSV parsing (fixes false "SSCC not in CSV")
+- The Dillards/EZY-COM EDI-labels splitter parsed the ASN CSV with a naive `line.split(',')`. Dillards ASNs contain **quoted fields with embedded commas** (routing/address columns), which shifted every column after them — so the SSCC (column 129) was read from the wrong column for those rows and reported as **"SSCC not in CSV"** even though it was present. Replaced with a proper RFC4180 quote-aware split. Verified on a real `wc-asn.csv` (1316 rows): naive parse aligned only 1295 rows' SSCCs, quote-aware aligns all **1316** — matching the 21 labels that were failing. Server-side only (`server.mjs` `_ediCsvSplit`); **Diviyaj to deploy to live.**
+
 ## v27.347 Filter Rules — metric conditions are now bespoke numeric thresholds (operator + % + presets)
 - Replaced the fixed **Red / Amber** severity on all six metric/forecast conditions with a flexible **operator (≥ / ≤ / between) + your own value**, plus **quick-preset chips** that fill the standard bands. Each metric now exposes a raw number and you set the threshold:
   - **FC > Run-rate** → run-rate is N% below forecast (over-forecast). Presets: Red >50%, Amber 25–50%, >25%.
