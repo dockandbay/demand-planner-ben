@@ -1,3 +1,7 @@
+## v27.353 Exceptions deep-link slugs (readable) + demand-plan SKU copy matches the PO grid
+- **Readable deep-links** for the Exceptions sub-tabs: `#/demand/exceptions/fclt` → **`/forecast-less-actual`** and `.../fgtr` → **`/forecast-greater-run-rate`** (internal keys unchanged; old links still resolve). The sub-tab now also **syncs from the URL** on load (it didn't before), so these deep-links actually open the right report.
+- **SKU double-click copy** on the demand plan now matches the SUPPLY PO-grid UX exactly: a **light-green background flash** on the SKU (#dcfce7, 700ms) plus a floating **"Copied to clipboard ✓"** tooltip just above the clicked SKU (dark pill, fades, auto-hides). Replaces the old bottom toast.
+
 ## v27.352 FIX — Exceptions report blank at a month boundary (FC<Actual / FC>Run-rate showed nothing)
 - On the 1st of a month, `CUR_MONTH` is still the previous (now-complete) month, but the Exceptions report built its forecast map over `fwd` (which starts the new month), so `fcMap[CUR_MONTH]` was missing → `fc=0` → **no fclt/fgtr rows (blank report)**. Applied the same two fixes the Filter Rules metrics already had: (1) include the current month in the report's forecast month-set, and (2) treat an already-complete `CUR_MONTH` as fully elapsed so the run-rate = actual. Verified in jsdom: FC<Actual 238 rows, FC>Run-rate 757, Selling-no-forecast 99 (all were 0).
 

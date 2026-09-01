@@ -4566,7 +4566,10 @@ let KPI_SUB='instock', KPI_T3PL=5, KPI_TFBA=5, KPI_GRP='', KPI_COVER=6, KPI_WITH
 let KPI_ACC_LEVEL='cc', KPI_ACC_LAG=1; // Forecast-accuracy view: drill level (cc|category|sku) + lag (months forecast made before target)
 let DEMAND_VIEW='plan'; // DEMAND sub-tab: 'plan' (the demand plan) | 'targets' (sell-through targets) | 'actions'
 var EXC_MKT='all', EXC_CH='all', EXC_GRAIN='sku', EXC_SUBTAB='fclt', EXC_SEV='all', EXC_MINDELTA=0, EXC_COLLAPSED=new Set();   // DEMAND ▸ Exceptions filters (default show all, grouped tree by Country ▸ Channel ▸ Subcategory; EXC_COLLAPSED = minimised group keys)
-var EXC_SUBTABS=[['fclt','Forecast < Actual',1,1],['fgtr','Forecast > Run-rate',1,1],['sellnofc','Selling, no forecast',1,1],['anomaly','Forecast anomalies',1,1],['noavail','No availability',0,1],['nocover','Available, no cover',1,1],['disc','Discontinued, active',0,1],['recs','Recommendations',0,0],['dataconfig','Data & config',0,0]];   // [key,label,usesChannel,usesCountry] — DEMAND ▸ Exceptions L3 sub-tabs (deep-linked #/demand/exceptions/<key>)
+var EXC_SUBTABS=[['fclt','Forecast < Actual',1,1],['fgtr','Forecast > Run-rate',1,1],['sellnofc','Selling, no forecast',1,1],['anomaly','Forecast anomalies',1,1],['noavail','No availability',0,1],['nocover','Available, no cover',1,1],['disc','Discontinued, active',0,1],['recs','Recommendations',0,0],['dataconfig','Data & config',0,0]];   // [key,label,usesChannel,usesCountry] — DEMAND ▸ Exceptions L3 sub-tabs (deep-linked #/demand/exceptions/<slug>)
+var EXC_SLUG={fclt:'forecast-less-actual',fgtr:'forecast-greater-run-rate'};   // readable deep-link slugs ↔ internal sub-tab keys (others use the key as the slug)
+function excSlug(k){ return EXC_SLUG[k]||k; }
+function excKeyFromSlug(s){ if(!s)return null; for(var k in EXC_SLUG){ if(EXC_SLUG[k]===s)return k; } return s; }   // slug OR raw key → key (back-compat for old #/…/fclt links)
 var ACC_MKT='all', ACC_CH='all', ACC_GRAIN='category', ACC_LOOKBACK=6, ACC_SORT='wmape';   // DEMAND ▸ Accuracy filters (forecast accuracy & bias vs locked snapshots)
 var SS_MKT='all', SS_CH='all', SS_GRAIN='category', SS_SL=95, SS_SORT='delta', SS_LEADCV=0.25, SS_UNCON=false;   // DEMAND ▸ Safety stock filters (SS_LEADCV = lead-time variability; SS_UNCON = unconstrain stockout-censored demand)
 var SB_MKT='UK', SB_P1=40, SB_P2=40, SB_P3=20, SB_A1=1, SB_A2=4, SB_A3=6, SB_LC='Picnic';   // DEMAND ▸ Ship bags — legacy order-size split (kept for the unused calcMkt helper)
@@ -6517,13 +6520,27 @@ function inbDiv(inb, entries, color){
   document.addEventListener('click',function(e){ var n=e.target&&e.target.closest?e.target.closest(SEL):null; clearTimeout(t); if(n)show(n); else hide(); });   // clicking a cell also selects it → show its tooltip immediately; click elsewhere hides
   document.addEventListener('scroll',hide,true);
 })();
-// ── Double-click a SKU code in the demand plan → copy it to the clipboard (bound once) ─────────────────
+// ── Double-click a SKU code in the demand plan → copy it (bound once). Matches the SUPPLY PO-grid UX exactly:
+//    green background flash on the SKU + a "Copied to clipboard ✓" tooltip floated just above the clicked area.
 (function(){
+  try{ if(!document.getElementById('dp-copy-css')){ var st=document.createElement('style'); st.id='dp-copy-css';
+    st.textContent='.dp-sku-tip.dp-copied{background:#dcfce7!important;border-radius:3px;transition:background .15s}'
+      +'.dp-copy-tip{position:fixed;z-index:300020;transform:translate(-50%,-100%);background:#111827;color:#fff;font:600 11px/1.3 Arial,Helvetica,sans-serif;padding:5px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .12s}'
+      +'.dp-copy-tip.show{opacity:1}';
+    document.head.appendChild(st); } }catch(_){}
+  var _tip=null,_tipT=null;
+  function showTip(el){ if(!el)return; if(!_tip){ _tip=document.createElement('div'); _tip.className='dp-copy-tip'; document.body.appendChild(_tip); }
+    _tip.textContent='Copied to clipboard ✓';
+    var r=el.getBoundingClientRect();
+    _tip.style.left=Math.max(6,Math.round(r.left+r.width/2))+'px';
+    _tip.style.top=Math.max(4,Math.round(r.top-8))+'px';
+    _tip.classList.add('show');
+    clearTimeout(_tipT); _tipT=setTimeout(function(){ if(_tip)_tip.classList.remove('show'); },1100); }
   document.addEventListener('dblclick',function(e){
     var n=e.target&&e.target.closest?e.target.closest('.dp-sku-tip[data-sku]'):null; if(!n)return;
     var sku=n.getAttribute('data-sku'); if(!sku)return;
     e.preventDefault(); try{ window.getSelection().removeAllRanges(); }catch(_){}   // kill the double-click text selection
-    function ok(){ try{ if(typeof invStkToast==='function')invStkToast('SKU copied — '+sku); }catch(_){} }
+    function ok(){ n.classList.add('dp-copied'); setTimeout(function(){ n.classList.remove('dp-copied'); },700); showTip(n); }
     try{
       if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(sku).then(ok,function(){ _frCopyFallback(sku,ok); }); }
       else { _frCopyFallback(sku,ok); }
@@ -10630,6 +10647,8 @@ var FR=(function(){
 })();
 try{ if(typeof window!=='undefined'){ window.FR=FR; loadFilterRules(function(){ try{FR.updateBtn();}catch(e){} }); } }catch(e){}
 function renderExceptionsView(body){
+  // Deep-link: sync the sub-tab from #/demand/exceptions/<slug> (accepts the readable slug OR an old raw key).
+  try{ var _eh=(location.hash||'').replace(/^#\/?/,'').split('/').filter(Boolean); if(_eh[0]==='demand'&&_eh[1]==='exceptions'&&_eh[2]){ var _ek=excKeyFromSlug(_eh[2]); if(EXC_SUBTABS.some(function(t){return t[0]===_ek;}))EXC_SUBTAB=_ek; } }catch(e){}
   try{ if(typeof buildLiveDemand==='function')buildLiveDemand(); }catch(e){}
   try{ if(typeof buildLiveBpOverlay==='function')buildLiveBpOverlay(); }catch(e){}
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
@@ -11587,7 +11606,7 @@ function renderDemandTabs(){
     if(!_ex3){ _ex3=document.createElement('div'); _ex3.id='demand-exceptions-nav'; bar.parentNode.insertBefore(_ex3, bar.nextSibling); }
     _ex3.className='d3nav'; _ex3.style.display=''; _ex3.style.marginTop='6px';
     _ex3.innerHTML=(typeof EXC_SUBTABS!=='undefined'?EXC_SUBTABS:[]).map(function(s){return '<button class="d3tab'+(s[0]===EXC_SUBTAB?' active':'')+'" data-ex="'+s[0]+'">'+s[1]+'</button>';}).join('');
-    _ex3.querySelectorAll('[data-ex]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); EXC_SUBTAB=b.dataset.ex; VIEW_MODE='planning'; DEMAND_VIEW='exceptions'; if(window.writeHash)window.writeHash(['demand','exceptions',b.dataset.ex]); render(); }; });
+    _ex3.querySelectorAll('[data-ex]').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); EXC_SUBTAB=b.dataset.ex; VIEW_MODE='planning'; DEMAND_VIEW='exceptions'; if(window.writeHash)window.writeHash(['demand','exceptions',excSlug(b.dataset.ex)]); render(); }; });
   } else if(_ex3){ _ex3.style.display='none'; _ex3.innerHTML=''; }
   // relocate the demand-plan AI tool-bar into this secondary menu (moved back on teardown)
   var pt=document.getElementById('plan-tools'); if(pt)bar.appendChild(pt);
