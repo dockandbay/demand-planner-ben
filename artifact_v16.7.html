@@ -8866,6 +8866,12 @@ function buildBody(){
       if(_frOn){
         if(frShowSubcats()){ var shr=document.createElement('tr'); shr.className='cat-hdr fr-subhdr'; var shd=document.createElement('td'); shd.colSpan=200; var shsp=document.createElement('span'); shsp.textContent=row.s; shsp.style.cssText='position:sticky;left:0;display:inline-block;font-weight:600;color:#475569'; shd.appendChild(shsp); shr.appendChild(shd); frag.replaceChild(shr,drow); }
         else if(drow.parentNode){ frag.removeChild(drow); }
+      } else if(PLAN_SKU_QRY){
+        // SKU search: drop the sub-category grouping/summary row too (it only anchored the inline SKU rows),
+        // leaving a clean list of just the matching SKUs — UNLESS the query matches the category or the
+        // sub-category name (then keep the row as a label, same rule as the category header above).
+        var _grpQ=(function(){ var toks=String(PLAN_SKU_QRY).toLowerCase().split(/[\s,;]+/).filter(Boolean); var cl=String(cat).toLowerCase(), sl=String(row.s).toLowerCase(); return toks.some(function(t){return t&&(cl.indexOf(t)>=0||sl.indexOf(t)>=0);}); })();
+        if(!_grpQ && drow.parentNode){ frag.removeChild(drow); }
       }
     });
     if(PLAN_SKU_QRY||PLAN_RW!=='ALL'||PLAN_FROM_REP||_frOn)return; // filter mode: skip category totals

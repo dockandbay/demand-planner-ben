@@ -1,3 +1,7 @@
+## v27.359 Demand plan — SKU search hides the sub-category row too (not just the header)
+- Under a **SKU search** the plan now drops the **sub-category grouping row** (the "▸ Towel - Beach CORE · 3PL/FBA totals" line) as well as the category header, leaving a clean list of **only the matching SKUs**. v27.357 already hid the category header + the subtotal summary row; this extends it to the sub-category row that anchored the inline SKU rows.
+- **Kept when relevant:** if the search query matches the **category or sub-category name** (e.g. searching "Towel" or "Beach"), the grouping row stays as a label — same rule as the category header. Reuses the existing Filter-Rules drop-the-drow pattern.
+
 ## v27.358 Discontinued run-off SKUs — forecast their run-off, hidden by default, 0 buy (mig 250)
 - A **discontinued SKU that still has stock** (e.g. `PICNIC-DES-LG-SPRCLUB`) now stays **in the plan and buy plan** so its remaining stock is forecast down as it sells off — instead of vanishing the day it's discontinued. Per Ben: run-off SKUs **contribute to the category forecast and smoothing**, they're just **hidden from view by default**.
 - **How:** migration **250** adds `available_no_disc` to `planner.v_product_availability` (the channel availability flag, **ignoring the discontinue date**); `is_available` is left byte-identical so every other consumer (KPIs, exceptions, portal) is untouched. The demand-plan `av` string and the subcategory-row query (server.mjs) switch to `available_no_disc`.
