@@ -10638,6 +10638,9 @@ function renderExceptionsView(body){
   var elapsed=Math.max(1,_cd.elapsed||1), total=_cd.total||30, frac=elapsed/total;
   var MN=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   var _cm=(typeof CUR_MONTH!=='undefined')?CUR_MONTH:'', curLbl=_cm?(MN[(+_cm.split('_')[1])-1]+" '"+_cm.slice(2,4)):'';
+  // If CUR_MONTH is already a COMPLETE month (earlier than this calendar month, e.g. at a month boundary), treat it as
+  // fully elapsed → run-rate = actual. Keeps the run-rate honest on the 1st (matches excComputeMaps).
+  (function(){ var n=new Date(), cy=n.getFullYear(), cm2=n.getMonth()+1, cal=cy+'_'+(cm2<10?'0':'')+cm2; if(_cm && _cm<cal){ _cd={elapsed:_cd.total||30,remaining:0,total:_cd.total||30}; elapsed=Math.max(1,_cd.elapsed||1); total=_cd.total||30; frac=elapsed/total; } })();
   function monDec(m){ var y=+m.slice(0,4),mo=+m.slice(5,7); mo--; if(mo<1){mo=12;y--;} return y+'_'+(mo<10?'0':'')+mo; }
   var lym=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];   // LY months for buildSkuShares — MUST match the plan. (lyYearMonths is function-local elsewhere, so undefined here → buildSkuShares threw → shares came back empty → derived forecast was 0, i.e. only overrides counted.)
   var fwd=(typeof LIVE_FC_MONTHS!=='undefined')?LIVE_FC_MONTHS.slice(0,4):[_cm];   // next 4 months incl current (Selling-no-forecast shows these editable)
@@ -10657,7 +10660,7 @@ function renderExceptionsView(body){
     Object.keys(bySub).forEach(function(sub){ var subSkus=bySub[sub];
       var subcatFU={}; try{subcatFU=(calc(sub,co,ch)||{}).fu||{};}catch(e){}
       var shares={}; try{shares=buildSkuShares(subSkus,co,ch,lym)||{};}catch(e){}
-      subSkus.forEach(function(sku){ var invOH=(SKUM[sku].inv&&SKUM[sku].inv[skuWh(co,ch)])||0, fcMap={}, _mset=(EXC_SUBTAB==='anomaly'?fwd6:fwd);
+      subSkus.forEach(function(sku){ var invOH=(SKUM[sku].inv&&SKUM[sku].inv[skuWh(co,ch)])||0, fcMap={}, _mset=(function(a){return a.indexOf(_cm)>=0?a:[_cm].concat(a);})(EXC_SUBTAB==='anomaly'?fwd6:fwd);   // always include the current month so fclt/fgtr work at a month boundary
         try{fcMap=skuMonthlyMap(sku,co,ch,_mset,subcatFU,shares[sku]||0,invOH)||{};}catch(e){}
         // Overlay per-SKU manual overrides so the report matches the DEMAND grid: skuMonthlyMap drops the override for
         // POST-discontinue months (the grid keeps it), which is why a discontinued SKU showed 0 here vs 276 in the plan. — Ben
