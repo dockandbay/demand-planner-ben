@@ -276,6 +276,7 @@ thead tr.sub th.stk2{background:#f3f3f1}
 .bg26{background:#edf4ff !important}
 .bg26.actual-hdr{background:#F0FFF0 !important;color:#166534 !important}
 .bg26.sku-act-cell{background:#F0FFF0 !important;border-left-color:#86efac !important}
+td.fy-act{background:#F0FFF0 !important}   /* FY-24 / FY-25 total columns are complete actual years → light-green like the other actuals cells */
 .hl-blk,.hl-blk *{color:#000 !important}   /* highlighted cells (fc-vs-actual / growth-on-LY): force all text black for readability */
 .bg26.anom-hi-cell{background:#fef9c3 !important;border-left-color:#f59e0b !important}
 .bg26.anom-lo-cell{background:#fff !important;border-left-color:#e5e5e5 !important}
@@ -6302,8 +6303,8 @@ function buildDataRow(s,co,ch,x,fu_cache){
       +'</div>';
     addT(html,cls);
   }
-  addStack(fn(y24u),fr(y24r),'','sep2');                       // col2: 2024 (no YoY)
-  addStack(fn(y25u),fr(y25r),fp(y25u,y24u),'sep2');            // col3: 2025
+  addStack(fn(y24u),fr(y24r),'','sep2 fy-act');               // col2: 2024 (no YoY) — actuals green
+  addStack(fn(y25u),fr(y25r),fp(y25u,y24u),'sep2 fy-act');    // col3: 2025 — actuals green
   addStack(fn(yt26u),fr(yt26r),fp(yt26u,yt25u),'sep2');        // col4: YTD 2026
   // col5: trends stacked (1mo over 3mo)
   addT('<div style="padding:2px 2px 0;text-align:right;line-height:1.15;font-variant-numeric:tabular-nums">'
@@ -6491,9 +6492,9 @@ function stock2Line(oh3,ohF,color,bold){ var c=color||'#334155', fw=bold?'font-w
 function _skuSetForSubcat(s,co,ch){ var ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':ch==='TIK'?'t':'b', out=[];
   Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||p.s!==s)return; var av=(p.av||{})[ctry]||''; if(av.indexOf(chKey)>=0)out.push(sku); }); return out; }
 function inbEntries(skuList,co,ch){ var wh=skuWh(co,ch), out=[];
-  (skuList||[]).forEach(function(sku){ var v=SKUI[sku+'|'+wh]; if(!v)return; (Array.isArray(v)?v:[v]).forEach(function(x){ if((x.qty||0)>0) out.push({eta:x.eta||null, qty:x.qty||0, sku:sku}); }); });
+  (skuList||[]).forEach(function(sku){ var v=SKUI[sku+'|'+wh]; if(!v)return; (Array.isArray(v)?v:[v]).forEach(function(x){ if((x.qty||0)>0) out.push({eta:x.eta||null, qty:x.qty||0, sku:sku, ref:x.ref||''}); }); });
   // open POs not yet in the inbound feed — shown alongside the feed with their calculated landing date (on order)
-  (skuList||[]).forEach(function(sku){ var o=SKUOI[sku+'|'+wh]; if(!o)return; (Array.isArray(o)?o:[o]).forEach(function(x){ if((x.qty||0)>0) out.push({eta:x.eta||null, qty:x.qty||0, sku:sku, open:true}); }); });
+  (skuList||[]).forEach(function(sku){ var o=SKUOI[sku+'|'+wh]; if(!o)return; (Array.isArray(o)?o:[o]).forEach(function(x){ if((x.qty||0)>0) out.push({eta:x.eta||null, qty:x.qty||0, sku:sku, ref:x.ref||'', open:true}); }); });
   out.sort(function(a,b){ return String(a.eta||'9999-99-99').localeCompare(String(b.eta||'9999-99-99')); }); return out; }
 function _etaShort(d){ if(!d)return 'TBC'; var p=String(d).split('-'); if(p.length<3)return String(d);
   var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return (+p[2])+' '+(mn[(+p[1])-1]||'')+" '"+p[0].slice(2); }
@@ -6506,7 +6507,7 @@ function inbDiv(inb, entries, color){
   if(!entries||!entries.length) return '<div style="'+base+'">&gt;&gt;'+fn(inb)+'</div>';
   var CAP=14, shown=entries.slice(0,CAP);
   var tip=entries.length+' inbound shipment'+(entries.length>1?'s':'')+':<br>'
-    + shown.map(function(x){ return _etaShort(x.eta)+' &middot; '+fn(x.qty)+(x.sku?(' &middot; '+x.sku):'')+(x.open?' &middot; <i>on order</i>':''); }).join('<br>')
+    + shown.map(function(x){ return _etaShort(x.eta)+' &middot; '+fn(x.qty)+(x.ref?(' &middot; '+x.ref):'')+(x.open?' &middot; <i>on order</i>':''); }).join('<br>')
     + (entries.length>CAP?('<br>+ '+(entries.length-CAP)+' more'):'');
   var next=entries[0].eta;
   return '<div class="stk-inb" data-tip="'+tip.replace(/"/g,'&quot;')+'" style="'+base+';cursor:default">&gt;&gt;'+fn(inb)
@@ -8109,7 +8110,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       } else if(ci===2){
         // Fiscal FY (two back), units only — no revenue at SKU level
         var u24=fyMonths(CUR_FY_START-2).reduce(function(a,m){return a+(sales[m]||0);},0);
-        td.style.cssText='background:#fafafa;border-bottom:1px solid #f0f0ee;border-left:2px solid #b0b0ae;text-align:right;padding:2px 4px;font-size:9px;line-height:1.25;color:#94a3b8;font-weight:600;font-variant-numeric:tabular-nums';
+        td.style.cssText='background:#F0FFF0;border-bottom:1px solid #f0f0ee;border-left:2px solid #b0b0ae;text-align:right;padding:2px 4px;font-size:9px;line-height:1.25;color:#94a3b8;font-weight:600;font-variant-numeric:tabular-nums';   // FY-24 actuals → green
         td.textContent=u24?fn(u24):'—';
 
       } else if(ci===3){
@@ -8117,7 +8118,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         var u24b=fyMonths(CUR_FY_START-2).reduce(function(a,m){return a+(sales[m]||0);},0);
         var u25=fyMonths(CUR_FY_START-1).reduce(function(a,m){return a+(sales[m]||0);},0);
         var yoy2425=u24b>0?Math.round((u25-u24b)/u24b*100):null;
-        td.style.cssText='background:#fafafa;border-bottom:1px solid #f0f0ee;border-left:2px solid #b0b0ae;text-align:right;padding:2px 4px;font-size:9px;line-height:1.25;font-variant-numeric:tabular-nums';
+        td.style.cssText='background:#F0FFF0;border-bottom:1px solid #f0f0ee;border-left:2px solid #b0b0ae;text-align:right;padding:2px 4px;font-size:9px;line-height:1.25;font-variant-numeric:tabular-nums';   // FY-25 actuals → green
         if(launchDate&&launchDate>TODAY){td.innerHTML='<span style="color:#3b82f6;font-weight:600;font-size:8px">pre launch</span>';}
         else{td.innerHTML='<div style="color:#374151;font-weight:600">'+(u25?fn(u25):'—')+'</div>'
           +(yoy2425!=null?'<div class="'+(yoy2425>0?'gp':yoy2425<0?'rp':'fp')+'" style="font-size:8px;font-weight:600">'+(yoy2425>0?'+':'')+yoy2425+'%</div>':'');}
@@ -8694,7 +8695,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
   // sits next to the subcategory row for easy SKU-sum vs subcategory comparison.
   // Each month cell carries the gap vs subcat on its second line (see gapFill above).
   tbody.insertBefore(str,fbr.nextSibling);
-  if(typeof FR_ACTIVE!=='undefined'&&FR_ACTIVE)str.style.display='none';   // Filter Rules: hide the sub-category subtotal / gap-vs-subcat / active·disc summary row under an applied filter (kept in the DOM as an anchor)
+  if((typeof FR_ACTIVE!=='undefined'&&FR_ACTIVE)||(typeof PLAN_SKU_QRY!=='undefined'&&PLAN_SKU_QRY))str.style.display='none';   // hide the sub-category subtotal / gap-vs-subcat / active·disc summary row under an applied Filter Rule OR a SKU search (kept in the DOM as an anchor)
   // Restore focus to the Tab-target cell after a rebuild (issue 7)
   if(SKU_FOCUS_NEXT&&SKU_FOCUS_NEXT.pk===(s+'|'+co+'|'+ch)){
     var _tgt=document.querySelector('tr.sku-inline[data-parentkey="'+SKU_FOCUS_NEXT.pk+'"] input[data-ovkey="'+SKU_FOCUS_NEXT.ov+'"]');
@@ -8837,7 +8838,9 @@ function buildBody(){
     // the data rows already carry that label, so the grey header would just be a blank bar when scrolled right.
     var _redundantHdr=_subsArr.length>0 && _catN && _subsArr.every(function(s){var n=_stripVar(s);return n===_catN||n.indexOf(_catN)===0||_catN.indexOf(n)===0;});
     // Under a Filter Rule with sub-categories hidden → flat matching-SKU list, so drop the category header too.
-    if(!_redundantHdr && !(_frOn && !frShowSubcats())){
+    // Under a SKU search → only show the category header when the search query actually matches the CATEGORY name.
+    var _catQ=(!PLAN_SKU_QRY)||(function(){ var toks=String(PLAN_SKU_QRY).toLowerCase().split(/[\s,;]+/).filter(Boolean); var cl=String(cat).toLowerCase(); return toks.some(function(t){return t&&cl.indexOf(t)>=0;}); })();
+    if(!_redundantHdr && !(_frOn && !frShowSubcats()) && _catQ){
       const htr=document.createElement('tr');htr.className='cat-hdr';
       const htd=document.createElement('td');htd.colSpan=200;
       const hsp=document.createElement('span');hsp.textContent=cat;hsp.style.cssText='position:sticky;left:0;display:inline-block';

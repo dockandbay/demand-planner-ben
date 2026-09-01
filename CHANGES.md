@@ -1,3 +1,8 @@
+## v27.357 Demand plan — search cleanup, FY24/25 actuals green, inbound-hover ref
+- **Search:** when searching SKUs, category headers now only show if the **category name** matches the query (not for every category a matching SKU happens to sit in); and the sub-category **subtotal / gap-vs-subcat / active·disc** row is hidden under a search (as it already is under a Filter Rule).
+- **FY-24 / FY-25 columns** (complete actual years) now render **light-green** like the other actuals cells, on both sub-category and SKU rows.
+- **Inbound hover** for a SKU now shows the **inbound goods reference** on each line (ETA · qty · ref) instead of repeating the SKU. Ref carried through from SKUI/SKUOI.
+
 ## v27.356 Exceptions ▸ Data & config — link to the BOM upload
 - Added an **"↑ Upload BOM — CONFIG ▸ BOM"** link on the DEMAND ▸ Exceptions ▸ **Data & config** sub-tab (which flags sets without a BOM recipe + unmapped prepacks). It navigates to **#/supply/config/mfgbom** (CONFIG ▸ BOM), where the **Build on Fly Sets** tab has the ⬆ Upload (and **Prepack sets** for prepack mapping). Shown only on that sub-tab.
 
