@@ -8663,6 +8663,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
   // sits next to the subcategory row for easy SKU-sum vs subcategory comparison.
   // Each month cell carries the gap vs subcat on its second line (see gapFill above).
   tbody.insertBefore(str,fbr.nextSibling);
+  if(typeof FR_ACTIVE!=='undefined'&&FR_ACTIVE)str.style.display='none';   // Filter Rules: hide the sub-category subtotal / gap-vs-subcat / active·disc summary row under an applied filter (kept in the DOM as an anchor)
   // Restore focus to the Tab-target cell after a rebuild (issue 7)
   if(SKU_FOCUS_NEXT&&SKU_FOCUS_NEXT.pk===(s+'|'+co+'|'+ch)){
     var _tgt=document.querySelector('tr.sku-inline[data-parentkey="'+SKU_FOCUS_NEXT.pk+'"] input[data-ovkey="'+SKU_FOCUS_NEXT.ov+'"]');
