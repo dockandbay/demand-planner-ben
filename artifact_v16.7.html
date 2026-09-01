@@ -914,7 +914,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
   </div>
 </div>
 <div id="smoothset-ov" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:1000;align-items:flex-start;justify-content:center" onclick="if(event.target===this)closeSmoothSettings()">
-  <div style="background:#fff;max-width:640px;width:94%;margin-top:40px;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.25);padding:18px 22px;max-height:86vh;overflow:auto;font-size:13px;color:#222">
+  <div style="background:#fff;max-width:1120px;width:96%;margin-top:40px;border-radius:10px;box-shadow:0 12px 40px rgba(0,0,0,.25);padding:18px 22px;max-height:86vh;overflow:auto;font-size:13px;color:#222">
     <div style="display:flex;align-items:center;margin-bottom:6px"><div style="font-weight:700;font-size:15px">&#9881; Smoothing settings</div><span id="ss-saved" style="margin-left:12px;font-size:11px;color:#16a34a;font-weight:600;opacity:0;transition:opacity .25s">Saved &#10003; — persists per country/channel</span><button onclick="closeSmoothSettings()" style="margin-left:auto;border:none;background:none;font-size:20px;cursor:pointer;color:#888">&times;</button></div>
     <div style="color:#555;font-size:12px;margin-bottom:10px">Per country / channel / sub-category — every choice is saved to the database and reloads next time. <b>Disregard disc.</b>: smoothing leaves discontinued SKUs at their stock rundown and boosts only active SKUs to sum to the category forecast. <b>Auto</b>: include in the one-click auto-smooth sweep. The sweep first <b>re-caps discontinued SKUs to remaining stock</b> (on-hand + inbound spread across the run-out months, then 0 once exhausted), then rescales months whose SKU-sum is <b>within</b> the gap threshold (a bigger gap is left for manual review) — <b>except</b> a month whose SKU-sum is <b>0</b> while the sub-category has a target &ge; 1, which is <b>always</b> smoothed (distributed across the SKUs) regardless of the gap.</div>
     <div style="color:#555;font-size:12px;margin-bottom:10px;background:#f8fafc;border:1px solid #eef2f7;border-radius:6px;padding:7px 9px"><b>Mode</b> — how the rescale is shared out: <b>Standard</b> scales every SKU by the same factor so their sum hits the sub-category target. <b>Leader</b> protects historically-strong SKUs — it floors them at 80% of their historical share (× tier target) so top performers aren&rsquo;t diluted, and pushes the rest of the adjustment onto the smaller SKUs.</div>
@@ -930,7 +930,12 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
       <button id="ss-pct" style="margin-left:auto;font-size:12px;font-weight:600;padding:4px 12px;border:1px solid #7c3aed;border-radius:6px;background:#7c3aed;color:#fff;cursor:pointer">% Convert categories to %</button>
       <div id="ss-pct-msg" style="flex-basis:100%;font-size:11px;color:#6b21a8;margin-top:2px"></div>
     </div>
-    <div style="display:flex;gap:10px;align-items:center;margin-bottom:10px"><label style="font-size:12px;color:#64748b">Country</label><select id="ss-co" style="font-size:12px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px"></select><label style="font-size:12px;color:#64748b;margin-left:6px">Channel</label><select id="ss-ch" style="font-size:12px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px"></select><span style="margin-left:auto;font-size:11px;color:#64748b">Select all: <label style="cursor:pointer"><input type="checkbox" id="ss-all-dis"> disc</label> <label style="cursor:pointer;margin-left:6px"><input type="checkbox" id="ss-all-auto"> auto</label></span></div>
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">
+      <span style="font-size:12px;color:#64748b;font-weight:600;margin-right:2px">Matrix:</span>
+      <button id="ss-tab-disc" class="ss-tab" data-t="disc" style="font-size:12px;font-weight:600;padding:4px 12px;border:1px solid #bfdbfe;border-radius:6px;background:#eff6ff;color:#1e40af;cursor:pointer">Disregard disc.</button>
+      <button id="ss-tab-auto" class="ss-tab" data-t="auto" style="font-size:12px;font-weight:600;padding:4px 12px;border:1px solid #bfdbfe;border-radius:6px;background:#eff6ff;color:#1e40af;cursor:pointer">Auto-smooth</button>
+      <span style="margin-left:10px;font-size:11px;color:#94a3b8">All countries × channels in one grid. Tick a column header to select every sub-category in that country · channel. (· = not sold there.)</span>
+    </div>
     <div id="ss-list"></div>
   </div>
 </div>
@@ -1003,31 +1008,45 @@ var _ssSavedT=null;
 function _ssFlashSaved(){ var el=document.getElementById('ss-saved'); if(!el)return; el.style.opacity='1'; clearTimeout(_ssSavedT); _ssSavedT=setTimeout(function(){ el.style.opacity='0'; },1800); }
 function saveSmoothDisregard(){ fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'smooth_disregard_disc',value:JSON.stringify(SMOOTH_DISREGARD_DISC)})}).then(function(){ _ssFlashSaved(); }).catch(function(){}); }
 function saveSmoothAuto(){ fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'smooth_auto',value:JSON.stringify(SMOOTH_AUTO)})}).then(function(){ _ssFlashSaved(); }).catch(function(){}); }
+var _ssTab='disc';   // which flag the matrix edits: 'disc' (Disregard disc.) | 'auto' (Auto-smooth)
 function renderSmoothSettings(){
-  var coSel=document.getElementById('ss-co'), chSel=document.getElementById('ss-ch'), list=document.getElementById('ss-list');
-  if(!coSel||!chSel||!list)return;
-  if(!coSel.options.length){ coSel.innerHTML=CTRS.map(function(c){return '<option>'+c+'</option>';}).join(''); coSel.value=_ssCo; coSel.onchange=function(){_ssCo=this.value;renderSmoothSettings();}; }
-  if(!chSel.options.length){ chSel.innerHTML=['DTC','FBA','B2B','TIK'].map(function(c){return '<option>'+c+'</option>';}).join(''); chSel.value=_ssCh; chSel.onchange=function(){_ssCh=this.value;renderSmoothSettings();}; }
+  var list=document.getElementById('ss-list'); if(!list)return;
   var thI=document.getElementById('ss-th'); if(thI&&document.activeElement!==thI)thI.value=(SMOOTH_AUTO.threshold!=null?SMOOTH_AUTO.threshold:20);
   var mSel=document.getElementById('ss-mode'); if(mSel)mSel.value=SMOOTH_AUTO.mode||'standard';
-  var byCat=ssSubcatsFor(_ssCo,_ssCh); var cats=Object.keys(byCat).sort();
-  var allSubs=[]; cats.forEach(function(c){ Object.keys(byCat[c]).forEach(function(s){ allSubs.push(s); }); });
-  if(!allSubs.length){ list.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:8px 0">No sub-categories available for '+esc(_ssCo)+' / '+esc(_ssCh)+'.</div>'; return; }
-  var adis=document.getElementById('ss-all-dis'); if(adis)adis.checked=allSubs.every(function(s){return smoothDisregards(_ssCo,_ssCh,s);});
-  var aau=document.getElementById('ss-all-auto'); if(aau)aau.checked=allSubs.every(function(s){return smoothAuto(_ssCo,_ssCh,s);});
-  // Flat list — one row per sub-category (no category grouping): sub-category name first, then the two toggles.
-  var uniq={}; allSubs.forEach(function(s){ uniq[s]=1; }); var subsList=Object.keys(uniq).sort();
-  list.innerHTML='<table style="width:100%;border-collapse:collapse;font-size:12px">'
-    +'<thead><tr style="border-bottom:1px solid #e5e7eb;color:#64748b"><th style="padding:5px 6px;font-weight:600;text-align:left">Sub-category</th>'
-      +'<th style="padding:5px 6px;font-weight:600;text-align:center;width:120px" title="Disregard discontinued — when smoothing, leave discontinued SKUs at their stock rundown and push the sub-category target onto the ACTIVE SKUs only">Disregard&nbsp;disc.</th>'
-      +'<th style="padding:5px 6px;font-weight:600;text-align:center;width:70px" title="Include this sub-category in the one-click Run auto-smooth sweep at the top">Auto</th></tr></thead><tbody>'
-    +subsList.map(function(s){ var dis=smoothDisregards(_ssCo,_ssCh,s), au=smoothAuto(_ssCo,_ssCh,s);
-      return '<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:5px 6px;color:#334155;text-align:left">'+esc(s)+'</td>'
-        +'<td style="padding:5px 6px;text-align:center"><input type="checkbox" class="ss-dis" data-s="'+esc(s)+'"'+(dis?' checked':'')+'></td>'
-        +'<td style="padding:5px 6px;text-align:center"><input type="checkbox" class="ss-auto" data-s="'+esc(s)+'"'+(au?' checked':'')+'></td></tr>'; }).join('')
-    +'</tbody></table>';
-  list.querySelectorAll('.ss-dis').forEach(function(cb){ cb.onchange=function(){ var k=_ssCo+'|'+_ssCh+'|'+cb.dataset.s; if(cb.checked)SMOOTH_DISREGARD_DISC[k]=true; else delete SMOOTH_DISREGARD_DISC[k]; saveSmoothDisregard(); renderSmoothSettings(); try{renderMain();}catch(e){} }; });
-  list.querySelectorAll('.ss-auto').forEach(function(cb){ cb.onchange=function(){ var k=_ssCo+'|'+_ssCh+'|'+cb.dataset.s; SMOOTH_AUTO.flags=SMOOTH_AUTO.flags||{}; if(cb.checked)SMOOTH_AUTO.flags[k]=true; else delete SMOOTH_AUTO.flags[k]; saveSmoothAuto(); renderSmoothSettings(); }; });
+  ['disc','auto'].forEach(function(t){ var b=document.getElementById('ss-tab-'+t); if(b){ var on=(_ssTab===t); b.style.background=on?'#1e40af':'#eff6ff'; b.style.color=on?'#fff':'#1e40af'; b.style.borderColor=on?'#1e40af':'#bfdbfe'; } });
+  var CHS=['DTC','FBA','B2B','TIK'];
+  // Columns = every country×channel that actually has sub-categories in scope (auto-hide empty combos). Rows = the
+  // union of those sub-categories, grouped by category. A cell is a checkbox only where the sub-cat is sold in that combo.
+  var combos=[], subcatCat={};
+  CTRS.forEach(function(co){ CHS.forEach(function(ch){ var byCat=ssSubcatsFor(co,ch), subs={}; Object.keys(byCat).forEach(function(cat){ Object.keys(byCat[cat]).forEach(function(s){ subs[s]=1; if(!subcatCat[s])subcatCat[s]=cat; }); }); if(Object.keys(subs).length)combos.push({co:co,ch:ch,subs:subs}); }); });
+  if(!combos.length){ list.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:8px 0">No sub-categories in scope.</div>'; return; }
+  var byCatRows={}; Object.keys(subcatCat).forEach(function(s){ (byCatRows[subcatCat[s]]=byCatRows[subcatCat[s]]||[]).push(s); });
+  var cats=Object.keys(byCatRows).sort(); cats.forEach(function(c){ byCatRows[c].sort(); });
+  var getFlag=function(co,ch,s){ return _ssTab==='disc'?smoothDisregards(co,ch,s):smoothAuto(co,ch,s); };
+  var byCo=[]; CTRS.forEach(function(co){ var cc=combos.filter(function(x){return x.co===co;}); if(cc.length)byCo.push({co:co,cc:cc}); });
+  var CELL='padding:3px 7px;text-align:center', BL=';border-left:2px solid #cbd5e1';
+  var h='<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:11.5px;white-space:nowrap">';
+  h+='<thead><tr><th style="position:sticky;left:0;background:#fff;z-index:2"></th>';
+  byCo.forEach(function(g){ h+='<th colspan="'+g.cc.length+'" style="padding:4px 6px;text-align:center;font-weight:700;color:#0f172a;border-left:2px solid #cbd5e1">'+esc(g.co)+'</th>'; });
+  h+='</tr><tr><th style="position:sticky;left:0;background:#fff;z-index:2;text-align:left;padding:4px 8px;color:#64748b;font-weight:600">Sub-category</th>';
+  combos.forEach(function(x,ci){ var first=(ci===0)||combos[ci-1].co!==x.co; var colSubs=Object.keys(x.subs); var allOn=colSubs.length>0&&colSubs.every(function(s){return getFlag(x.co,x.ch,s);});
+    h+='<th style="'+CELL+';color:#475569;font-weight:600'+(first?BL:'')+'"><div>'+x.ch+'</div><input type="checkbox" class="ss-colall" data-co="'+x.co+'" data-ch="'+x.ch+'"'+(allOn?' checked':'')+' title="Select all in '+x.co+' · '+x.ch+'"></th>'; });
+  h+='</tr></thead><tbody>';
+  cats.forEach(function(cat){
+    h+='<tr><td colspan="'+(combos.length+1)+'" style="background:#f8fafc;padding:3px 8px;font-weight:700;color:#334155;position:sticky;left:0">'+esc(cat)+'</td></tr>';
+    byCatRows[cat].forEach(function(s){
+      h+='<tr style="border-bottom:1px solid #f1f5f9"><td style="position:sticky;left:0;background:#fff;padding:4px 8px;text-align:left;color:#334155">'+esc(s)+'</td>';
+      combos.forEach(function(x,ci){ var first=(ci===0)||combos[ci-1].co!==x.co; var inScope=!!x.subs[s];
+        h+='<td style="'+CELL+(first?BL:'')+'">'+(inScope?('<input type="checkbox" class="ss-cell" data-co="'+x.co+'" data-ch="'+x.ch+'" data-s="'+esc(s)+'"'+(getFlag(x.co,x.ch,s)?' checked':'')+'>'):'<span style="color:#e2e8f0">·</span>')+'</td>'; });
+      h+='</tr>';
+    });
+  });
+  h+='</tbody></table></div>';
+  list.innerHTML=h;
+  var setFlag=function(co,ch,s,on){ var k=co+'|'+ch+'|'+s; if(_ssTab==='disc'){ if(on)SMOOTH_DISREGARD_DISC[k]=true; else delete SMOOTH_DISREGARD_DISC[k]; } else { SMOOTH_AUTO.flags=SMOOTH_AUTO.flags||{}; if(on)SMOOTH_AUTO.flags[k]=true; else delete SMOOTH_AUTO.flags[k]; } };
+  var save=function(){ if(_ssTab==='disc')saveSmoothDisregard(); else saveSmoothAuto(); };
+  list.querySelectorAll('.ss-cell').forEach(function(cb){ cb.onchange=function(){ setFlag(cb.dataset.co,cb.dataset.ch,cb.dataset.s,cb.checked); save(); renderSmoothSettings(); if(_ssTab==='disc')try{renderMain();}catch(e){} }; });
+  list.querySelectorAll('.ss-colall').forEach(function(cb){ cb.onchange=function(){ var co=cb.dataset.co,ch=cb.dataset.ch,on=cb.checked; var byCat=ssSubcatsFor(co,ch); Object.keys(byCat).forEach(function(c){ Object.keys(byCat[c]).forEach(function(s){ setFlag(co,ch,s,on); }); }); save(); renderSmoothSettings(); if(_ssTab==='disc')try{renderMain();}catch(e){} }; });
 }
 // One-click sweep: smooth every flagged (co|ch|subcat) forecast month whose SKU-sum deviates from the subcat target
 // by LESS than the threshold (small gaps only — a big gap is left for manual review).
@@ -1167,8 +1186,7 @@ function openSmoothSettings(ev){ if(ev)ev.stopPropagation(); var e=document.getE
   var mSel=document.getElementById('ss-mode'); if(mSel)mSel.onchange=function(){ SMOOTH_AUTO.mode=(this.value==='leader')?'leader':'standard'; saveSmoothAuto(); };
   var run=document.getElementById('ss-run'); if(run)run.onclick=function(){ runAutoSmooth(); };
   var pct=document.getElementById('ss-pct'); if(pct)pct.onclick=function(){ smoothCatsToPct(); };
-  var adis=document.getElementById('ss-all-dis'); if(adis)adis.onchange=function(){ var byCat=ssSubcatsFor(_ssCo,_ssCh), on=this.checked; Object.keys(byCat).forEach(function(c){ Object.keys(byCat[c]).forEach(function(s){ var k=_ssCo+'|'+_ssCh+'|'+s; if(on)SMOOTH_DISREGARD_DISC[k]=true; else delete SMOOTH_DISREGARD_DISC[k]; }); }); saveSmoothDisregard(); renderSmoothSettings(); try{renderMain();}catch(e){} };
-  var aau=document.getElementById('ss-all-auto'); if(aau)aau.onchange=function(){ var byCat=ssSubcatsFor(_ssCo,_ssCh), on=this.checked; SMOOTH_AUTO.flags=SMOOTH_AUTO.flags||{}; Object.keys(byCat).forEach(function(c){ Object.keys(byCat[c]).forEach(function(s){ var k=_ssCo+'|'+_ssCh+'|'+s; if(on)SMOOTH_AUTO.flags[k]=true; else delete SMOOTH_AUTO.flags[k]; }); }); saveSmoothAuto(); renderSmoothSettings(); };
+  ['disc','auto'].forEach(function(t){ var b=document.getElementById('ss-tab-'+t); if(b)b.onclick=function(){ _ssTab=t; renderSmoothSettings(); }; });
   renderSmoothSettings(); }
 // Convert hard-coded (absolute) sub-category forecasts for the CURRENT country/channel, over the next 11 months,
 // into a growth % vs the same month LAST-YEAR ACTUAL, rounded to 1 dp — but only where that growth is <= 200%.

@@ -1,3 +1,8 @@
+## v27.354 Smoothing settings → full country×channel matrix (replaces the dropdown)
+- The ⚙ Smoothing settings sub-category list is now a **matrix**: rows = sub-categories (grouped by category), columns = **every country × channel** — no more Country/Channel dropdowns, everything is visible at once. Columns **auto-hide where no data exists** (only combos with sub-categories in scope show; e.g. no AU·B2B / no TIK). A cell is a checkbox only where the sub-cat is sold in that combo (· = not sold there).
+- **Two tabs** — **Disregard disc.** and **Auto-smooth** — flip the whole grid between the two flag types (one checkbox per cell, stays readable).
+- **Select-all per column**: the checkbox in each country·channel header ticks every sub-category in that column. First column (subcat) is frozen; the grid scrolls horizontally. Saving + Disregard-disc plan re-render unchanged. Modal widened to fit.
+
 ## v27.353 Exceptions deep-link slugs (readable) + demand-plan SKU copy matches the PO grid
 - **Readable deep-links** for the Exceptions sub-tabs: `#/demand/exceptions/fclt` → **`/forecast-less-actual`** and `.../fgtr` → **`/forecast-greater-run-rate`** (internal keys unchanged; old links still resolve). The sub-tab now also **syncs from the URL** on load (it didn't before), so these deep-links actually open the right report.
 - **SKU double-click copy** on the demand plan now matches the SUPPLY PO-grid UX exactly: a **light-green background flash** on the SKU (#dcfce7, 700ms) plus a floating **"Copied to clipboard ✓"** tooltip just above the clicked SKU (dark pill, fades, auto-hides). Replaces the old bottom toast.
