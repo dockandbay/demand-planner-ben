@@ -932,8 +932,8 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
     </div>
     <div style="display:flex;gap:6px;align-items:center;margin-bottom:8px">
       <span style="font-size:12px;color:#64748b;font-weight:600;margin-right:2px">Matrix:</span>
-      <button id="ss-tab-disc" class="ss-tab" data-t="disc" style="font-size:12px;font-weight:600;padding:4px 12px;border:1px solid #bfdbfe;border-radius:6px;background:#eff6ff;color:#1e40af;cursor:pointer">Disregard disc.</button>
       <button id="ss-tab-auto" class="ss-tab" data-t="auto" style="font-size:12px;font-weight:600;padding:4px 12px;border:1px solid #bfdbfe;border-radius:6px;background:#eff6ff;color:#1e40af;cursor:pointer">Auto-smooth</button>
+      <button id="ss-tab-disc" class="ss-tab" data-t="disc" style="font-size:12px;font-weight:600;padding:4px 12px;border:1px solid #bfdbfe;border-radius:6px;background:#eff6ff;color:#1e40af;cursor:pointer">Disregard discontinued</button>
       <span style="margin-left:10px;font-size:11px;color:#94a3b8">All countries × channels in one grid. Tick a column header to select every sub-category in that country · channel. (· = not sold there.)</span>
     </div>
     <div id="ss-list"></div>
@@ -1008,7 +1008,7 @@ var _ssSavedT=null;
 function _ssFlashSaved(){ var el=document.getElementById('ss-saved'); if(!el)return; el.style.opacity='1'; clearTimeout(_ssSavedT); _ssSavedT=setTimeout(function(){ el.style.opacity='0'; },1800); }
 function saveSmoothDisregard(){ fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'smooth_disregard_disc',value:JSON.stringify(SMOOTH_DISREGARD_DISC)})}).then(function(){ _ssFlashSaved(); }).catch(function(){}); }
 function saveSmoothAuto(){ fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'smooth_auto',value:JSON.stringify(SMOOTH_AUTO)})}).then(function(){ _ssFlashSaved(); }).catch(function(){}); }
-var _ssTab='disc';   // which flag the matrix edits: 'disc' (Disregard disc.) | 'auto' (Auto-smooth)
+var _ssTab='auto';   // which flag the matrix edits: 'auto' (Auto-smooth, default) | 'disc' (Disregard discontinued)
 function renderSmoothSettings(){
   var list=document.getElementById('ss-list'); if(!list)return;
   var thI=document.getElementById('ss-th'); if(thI&&document.activeElement!==thI)thI.value=(SMOOTH_AUTO.threshold!=null?SMOOTH_AUTO.threshold:20);
@@ -1020,8 +1020,7 @@ function renderSmoothSettings(){
   var combos=[], subcatCat={};
   CTRS.forEach(function(co){ CHS.forEach(function(ch){ var byCat=ssSubcatsFor(co,ch), subs={}; Object.keys(byCat).forEach(function(cat){ Object.keys(byCat[cat]).forEach(function(s){ subs[s]=1; if(!subcatCat[s])subcatCat[s]=cat; }); }); if(Object.keys(subs).length)combos.push({co:co,ch:ch,subs:subs}); }); });
   if(!combos.length){ list.innerHTML='<div style="color:#94a3b8;font-size:12px;padding:8px 0">No sub-categories in scope.</div>'; return; }
-  var byCatRows={}; Object.keys(subcatCat).forEach(function(s){ (byCatRows[subcatCat[s]]=byCatRows[subcatCat[s]]||[]).push(s); });
-  var cats=Object.keys(byCatRows).sort(); cats.forEach(function(c){ byCatRows[c].sort(); });
+  var allSubs=Object.keys(subcatCat).sort();   // flat, alphabetical — no category header rows (Ben)
   var getFlag=function(co,ch,s){ return _ssTab==='disc'?smoothDisregards(co,ch,s):smoothAuto(co,ch,s); };
   var byCo=[]; CTRS.forEach(function(co){ var cc=combos.filter(function(x){return x.co===co;}); if(cc.length)byCo.push({co:co,cc:cc}); });
   var CELL='padding:3px 7px;text-align:center', BL=';border-left:2px solid #cbd5e1';
@@ -1032,14 +1031,11 @@ function renderSmoothSettings(){
   combos.forEach(function(x,ci){ var first=(ci===0)||combos[ci-1].co!==x.co; var colSubs=Object.keys(x.subs); var allOn=colSubs.length>0&&colSubs.every(function(s){return getFlag(x.co,x.ch,s);});
     h+='<th style="'+CELL+';color:#475569;font-weight:600'+(first?BL:'')+'"><div>'+x.ch+'</div><input type="checkbox" class="ss-colall" data-co="'+x.co+'" data-ch="'+x.ch+'"'+(allOn?' checked':'')+' title="Select all in '+x.co+' · '+x.ch+'"></th>'; });
   h+='</tr></thead><tbody>';
-  cats.forEach(function(cat){
-    h+='<tr><td colspan="'+(combos.length+1)+'" style="background:#f8fafc;padding:3px 8px;font-weight:700;color:#334155;position:sticky;left:0">'+esc(cat)+'</td></tr>';
-    byCatRows[cat].forEach(function(s){
-      h+='<tr style="border-bottom:1px solid #f1f5f9"><td style="position:sticky;left:0;background:#fff;padding:4px 8px;text-align:left;color:#334155">'+esc(s)+'</td>';
-      combos.forEach(function(x,ci){ var first=(ci===0)||combos[ci-1].co!==x.co; var inScope=!!x.subs[s];
-        h+='<td style="'+CELL+(first?BL:'')+'">'+(inScope?('<input type="checkbox" class="ss-cell" data-co="'+x.co+'" data-ch="'+x.ch+'" data-s="'+esc(s)+'"'+(getFlag(x.co,x.ch,s)?' checked':'')+'>'):'<span style="color:#e2e8f0">·</span>')+'</td>'; });
-      h+='</tr>';
-    });
+  allSubs.forEach(function(s){
+    h+='<tr style="border-bottom:1px solid #f1f5f9"><td style="position:sticky;left:0;background:#fff;padding:4px 8px;text-align:left;color:#334155">'+esc(s)+'</td>';
+    combos.forEach(function(x,ci){ var first=(ci===0)||combos[ci-1].co!==x.co; var inScope=!!x.subs[s];
+      h+='<td style="'+CELL+(first?BL:'')+'">'+(inScope?('<input type="checkbox" class="ss-cell" data-co="'+x.co+'" data-ch="'+x.ch+'" data-s="'+esc(s)+'"'+(getFlag(x.co,x.ch,s)?' checked':'')+'>'):'<span style="color:#e2e8f0">·</span>')+'</td>'; });
+    h+='</tr>';
   });
   h+='</tbody></table></div>';
   list.innerHTML=h;

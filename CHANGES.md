@@ -1,3 +1,6 @@
+## v27.355 Smoothing matrix — Auto-smooth tab first, "Disregard discontinued", drop category header rows
+- Reordered the tabs so **Auto-smooth is first** (and the default view); **Disregard discontinued** is second (relabelled from "Disregard disc."). Removed the per-category header rows in the matrix — it's now a flat, alphabetical list of sub-categories (the category grouping headers were redundant).
+
 ## v27.354 Smoothing settings → full country×channel matrix (replaces the dropdown)
 - The ⚙ Smoothing settings sub-category list is now a **matrix**: rows = sub-categories (grouped by category), columns = **every country × channel** — no more Country/Channel dropdowns, everything is visible at once. Columns **auto-hide where no data exists** (only combos with sub-categories in scope show; e.g. no AU·B2B / no TIK). A cell is a checkbox only where the sub-cat is sold in that combo (· = not sold there).
 - **Two tabs** — **Disregard disc.** and **Auto-smooth** — flip the whole grid between the two flag types (one checkbox per cell, stays readable).
