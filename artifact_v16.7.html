@@ -4778,6 +4778,19 @@ function priceUpliftFactor(co,ch,s,year,mo){
   }
   return f;
 }
+// Retail-derived ASP fallback (GBP) for a subcategory with NO sales history (future SKUs / brand-new subcats) —
+// so their forecast units still book revenue. Base = CAT_ASP_GBP (avg <co>_rt ÷ fx, already GBP, VAT/GST-inclusive)
+// ÷ the tax divisor (UK/EU 1.2, AU 1.1, US/CA 1.0) → ex-tax, then × channel factor (B2B ×0.5 = wholesale; every other
+// channel ×0.95 = 5% price-discount). Mirrors the Set-targets £→units net-price formula (_tgtNet) so a future SKU's
+// revenue and its target-implied units use the SAME price. (Ben, 02-Sep)
+var ASP_TAX_DIV={UK:1.2,EU:1.2,AU:1.1,US:1.0,CA:1.0};
+function retailAspGBP(co,ch,s){
+  var COU=String(co||'').toUpperCase();
+  var g=(typeof CAT_ASP_GBP!=='undefined'&&CAT_ASP_GBP[s]&&CAT_ASP_GBP[s][COU])||0;   // GBP, VAT/GST-inclusive retail
+  if(!(g>0))return 0;
+  var ex=g/(ASP_TAX_DIV[COU]||1);                     // strip VAT (UK/EU) / GST (AU); US/CA already ex-tax
+  return ex*(ch==='B2B'?0.5:0.95);                    // B2B = retail/2; all consumer channels = 5% off
+}
 function getASP(co,ch,s,year,mo){
   var a=ga(co,ch,s);
   var thisK=ym(year,mo);
@@ -4791,6 +4804,7 @@ function getASP(co,ch,s,year,mo){
   var base=0;
   for(var y=year-1;y>=2024;y--){ var k=ym(y,mo); if(a[k]&&a[k][0]>0){ base=a[k][1]/a[k][0]; break; } }
   if(!base){ for(var i=ACTUAL_MONTHS.length-1;i>=0;i--){ var am=ACTUAL_MONTHS[i]; if(a[am]&&a[am][0]>0){ base=a[am][1]/a[am][0]; break; } } }
+  if(!base){ base=retailAspGBP(co,ch,s); }   // NO sales history at all (future SKU / new subcat) → retail-list-derived ASP so units still book revenue
   if(!base)return 0;
   return base*priceUpliftFactor(co,ch,s,year,mo);
 }
