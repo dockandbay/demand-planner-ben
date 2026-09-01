@@ -1,6 +1,6 @@
 # DEPLOY 2026-09-01 — Filter Rules + discontinued run-off + refresh rework (for Diviyaj)
 
-**From Ben.** Covers **code v27.327 → v27.359** and **migrations 249 + 250**. Reviewed pre-handoff
+**From Ben.** Covers **code v27.327 → v27.360** and **migrations 249 + 250**. Reviewed pre-handoff
 (two-pass debugging review + live migration-safety check). **No blockers.** One buy-plan behaviour
 change to expect (see ⚠ below). No new env vars, no new npm dependencies.
 
@@ -71,6 +71,10 @@ should still be run (its own note has the detail + the n8n step 2).
   row and the subtotal summary unless the query matches the category/sub-category name); FY24/25 actuals
   columns rendered light-green; inbound hover shows the goods reference, not the SKU.
 - **Discontinued run-off SKUs (v27.358):** see mig 250 above.
+- **Order Plan country-risk FIX (v27.360):** the `not_avail_market` (Country risk) check now uses
+  `available_no_disc` instead of `is_available`, so a discontinued-but-previously-released SKU (e.g.
+  `PICNIC-DES-LG-SPRCLUB` on a US PO) is no longer mis-flagged as "not released in market" — it trips the
+  separate **Discontinued** exception instead. Also requires mig 250 (same column as v27.358).
 
 ## Data already applied to LIVE this session (FYI — reconcile only, Ben-authorised)
 - `planner.set_bom` BOM/bundle + prepack recipes loaded (live now has 1,763 rows). No action needed.

@@ -11144,13 +11144,16 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
                     el.qty erp_qty, el.cost erp_cost,
                     (coalesce(l.qty,0) IS DISTINCT FROM coalesce(el.qty,0)) qty_pending,   -- 0 plan == absent from ERP → not a deviation
                     (l.cost_price IS DISTINCT FROM el.cost) cost_pending,
-                    -- EXCEPTION: SKU not RELEASED in this PO's market (availability authoritative; launch ignored).
-                    -- Direct-to-Client POs are excluded — a bespoke client order doesn't depend on retail-market availability.
+                    -- EXCEPTION: SKU not RELEASED in this PO's market. Uses available_no_disc (the raw channel
+                    -- availability flag, IGNORING the discontinue date) — so a SKU that WAS released in the market
+                    -- but is now discontinued is NOT flagged as "country risk" (it gets the separate DISCONTINUED
+                    -- flag instead). Launch dates are always populated so they're ignored. Direct-to-Client POs
+                    -- are excluded — a bespoke client order doesn't depend on retail-market availability.
                     (EXISTS (SELECT 1 FROM planner.purchase_orders pp LEFT JOIN planner.branches bb ON bb.name=pp.branch
                        WHERE pp.po=l.po AND coalesce(pp.branch,'') NOT ILIKE '%direct to client%'
                          AND upper(coalesce(nullif(pp.country_code,''), bb.country_code,'')) IN ('UK','US','EU','AU','CA')
                          AND NOT EXISTS (SELECT 1 FROM planner.v_product_availability va
-                            WHERE va.sku=l.sku AND upper(va.country)=upper(coalesce(nullif(pp.country_code,''), bb.country_code,'')) AND va.is_available))) not_avail_market,
+                            WHERE va.sku=l.sku AND upper(va.country)=upper(coalesce(nullif(pp.country_code,''), bb.country_code,'')) AND va.available_no_disc))) not_avail_market,
                     coalesce(pol.partial_carton_approved,false) partial_carton_approved,
                     coalesce(pol.supplier_risk_approved,false) supplier_risk_approved,
                     coalesce(pol.discontinue_approved,false) discontinue_approved,
@@ -14013,12 +14016,13 @@ const ORDER_PLAN_SELECT = `SELECT l.po, l.sku, l.qty, el.qty erp_qty,
           coalesce(p.batch_id,'') batch_id,
           coalesce(p.supplier_name,'') supplier_name, coalesce(p.shipment_ref,'') shipment_ref,
           coalesce(nullif(p.country_code,''), b.country_code, '') country,
-          -- EXCEPTION: producing a SKU for a market where it isn't RELEASED. Availability (v_product_availability,
-          -- is_available) is authoritative — launch dates are always populated so they're ignored. Blank market → no flag.
+          -- EXCEPTION: producing a SKU for a market where it isn't RELEASED. Uses available_no_disc (raw channel
+          -- availability flag, IGNORING discontinue) so a released-but-now-discontinued SKU is NOT flagged as
+          -- country risk (it gets the DISCONTINUED flag instead). Launch dates ignored. Blank market → no flag.
           (coalesce(p.branch,'') NOT ILIKE '%direct to client%'
              AND upper(coalesce(nullif(p.country_code,''), b.country_code,'')) IN ('UK','US','EU','AU','CA') AND NOT EXISTS (
              SELECT 1 FROM planner.v_product_availability va
-             WHERE va.sku=l.sku AND upper(va.country)=upper(coalesce(nullif(p.country_code,''), b.country_code,'')) AND va.is_available)) not_avail_market,
+             WHERE va.sku=l.sku AND upper(va.country)=upper(coalesce(nullif(p.country_code,''), b.country_code,'')) AND va.available_no_disc)) not_avail_market,
           coalesce(p.client,'') client, coalesce(p.sales_order_ref,'') sales_order_ref, coalesce(p.branch,'') branch,
           coalesce(sl.category,'') category, coalesce(sl.release_window,'') release_window, sl.pallet_qty,
           to_char(p.start_production,'YYYY-MM-DD') prod_start,
