@@ -60,6 +60,16 @@ const FAVICON_SBX_SVG = (() => {
 const pool = new pg.Pool({
   connectionString: CONN,
   ssl: { rejectUnauthorized: false },
+  // Runaway-query cap at the POOL level (startup option). This is a BELT to the real fix, which is removing the
+  // BEGIN…COMMIT transaction from queryCapped (below): the transaction — not the timeout — was what stranded pooled
+  // connections on frozen Vercel containers (~1,128 idle-in-transaction reaps/day, Diviyaj 01-Sep). Autocommit single
+  // statements can't strand a connection, so the reap fix holds regardless of whether this cap applies.
+  // ⚠ Pooler caveat (verified on the sandbox session pooler 01-Sep): `options` is SILENTLY IGNORED there
+  // (SHOW statement_timeout stays at the 2min default). Supavisor (live) forwards startup options, so it should apply
+  // there — Diviyaj to confirm `SHOW statement_timeout` = 30s on a live pooled connection; the bulletproof fallback is
+  // role-level `ALTER ROLE … SET statement_timeout='30s'` (pooler-agnostic). A DB-level 60s
+  // idle_in_transaction_session_timeout backstop also still exists — leave it alone.
+  options: '-c statement_timeout=30000',
   // Session-mode Supabase pooler caps the whole session at ~15 server connections. Keep `max` well under
   // that so a stranded generation (after a restart/crash) plus the live process can't blow the cap.
   // Sandbox (non-Vercel) uses 8 so multi-query endpoints (e.g. po-detail's ~13 parallel queries) run in fewer
@@ -3979,8 +3989,12 @@ function refreshActionsCache() {   // single-flight — coalesces concurrent ref
     .catch((e) => { _actionsRefresh = null; throw e; });
   return _actionsRefresh;
 }
-refreshActionsCache().catch(() => {});           // warm on boot
-setInterval(() => { refreshActionsCache().catch(() => {}); }, ACTIONS_TTL_MS).unref?.();   // refresh every 10 min in the background
+// Long-lived (sandbox) server only — on Vercel this cache builds lazily on the first Actions request (see makeCache
+// note); boot-warming + a 10-min timer on a frozen container strands pooled connections (Diviyaj 01-Sep).
+if (!process.env.VERCEL) {
+  refreshActionsCache().catch(() => {});           // warm on boot
+  setInterval(() => { refreshActionsCache().catch(() => {}); }, ACTIONS_TTL_MS).unref?.();   // refresh every 10 min in the background
+}
 
 // ---- Shared SUPPLY read-cache framework (Phase 1 of the load-time work) --------------------------------------
 // Same shape as _dataCache/_actionsCache: boot-warm + single-flight refresh + stale-while-revalidate. A real
@@ -4017,20 +4031,13 @@ async function bumpSupplyEpoch() {
 // pooled connection open for a minute. SET LOCAL scopes the cap to this one read-only transaction/connection; on
 // timeout the query throws and SWR keeps serving the last good cached value. (ORDER_PLAN_SELECT hit 57s worst-case
 // during the outage — this caps such a rebuild instead of letting it starve the pool.)
-async function queryCapped(sql, params, ms = 25000) {
-  const client = await pool.connect();
-  try {
-    await client.query('BEGIN READ ONLY');
-    await client.query(`SET LOCAL statement_timeout = ${parseInt(ms, 10) || 25000}`);
-    // SET LOCAL statement_timeout only caps the STATEMENT. Vercel freezes the instance after the response, so the
-    // BEGIN txn stays open and pins a pool connection → pool exhaustion (Diviyaj, 22-24 Aug). This caps the whole
-    // transaction: if it's left idle-in-transaction (frozen instance), Postgres kills it and frees the connection.
-    await client.query("SET LOCAL idle_in_transaction_session_timeout = '15s'");
-    const r = await client.query(sql, params);
-    await client.query('COMMIT');
-    return r;
-  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} throw e; }
-  finally { client.release(); }
+// Read helper. Now a THIN autocommit wrapper: a single pool.query() with NO explicit transaction, so a frozen Vercel
+// container can never leave a BEGIN…COMMIT open and strand a pooled backend (the ~1,128/day idle-in-transaction reaps,
+// Diviyaj 01-Sep). The 30s runaway cap is carried at the pool level (options: '-c statement_timeout=30000') instead of
+// per-call SET LOCAL. Signature kept (3rd `ms` arg accepted but no longer used) so all ~14 call sites stay unchanged.
+// If a call ever genuinely needs a longer cap, run it on a second pool with a longer default — do NOT reintroduce BEGIN.
+async function queryCapped(sql, params, _ms) {
+  return pool.query(sql, params);
 }
 // opts.proactive=false → no 10-min re-warm timer; the cache refreshes lazily (on the first request after it goes
 // stale, serving stale meanwhile). Use for EXPENSIVE builds so an idle app doesn't re-run a 6s query 144×/day and
@@ -4051,8 +4058,13 @@ function makeCache(name, builder, ttlMs = SUPPLY_CACHE_TTL_MS, opts = {}) {
   }
   const c = { name, get, refresh, invalidate() { entry = null; refresh().catch(() => {}); } };
   _supplyCaches.push(c);
-  refresh().catch(() => {});                       // warm on boot
-  if (opts.proactive !== false) setInterval(() => { refresh().catch(() => {}); }, ttlMs).unref?.();   // proactive re-warm (heavy builds opt out → lazy SWR)
+  // On Vercel, DON'T boot-warm or install a re-warm timer: an idle/frozen container fires the builder (opening a pooled
+  // backend) with no request in flight → stranded connections + overnight reap spikes (Diviyaj 01-Sep). get() builds
+  // lazily on the first request instead (cold miss → refresh). Long-lived (sandbox) server keeps warm + proactive SWR.
+  if (!process.env.VERCEL) {
+    refresh().catch(() => {});                       // warm on boot
+    if (opts.proactive !== false) setInterval(() => { refresh().catch(() => {}); }, ttlMs).unref?.();   // proactive re-warm (heavy builds opt out → lazy SWR)
+  }
   return c;
 }
 // Section response-cache (Phase 2). For a whitelist of EXPENSIVE, param-free, user-independent GET sections we cache
@@ -9579,8 +9591,12 @@ function _oaRefresh() { if (_oaInflight) return _oaInflight;
 async function getOpenActionsCached() {
   if (_oaEntry) { if (Date.now() - _oaEntry.at >= _OA_TTL && !_oaInflight) _oaRefresh().catch(() => {}); return _oaEntry.v; }
   return _oaRefresh(); }
-_oaRefresh().catch(() => {});                              // warm on boot
-setInterval(() => { _oaRefresh().catch(() => {}); }, _OA_TTL).unref?.();
+// Long-lived (sandbox) server only — on Vercel the getter above builds this lazily on first request; boot-warming +
+// a 5-min timer on a frozen container just churns pooled connections with no user in flight (Diviyaj 01-Sep).
+if (!process.env.VERCEL) {
+  _oaRefresh().catch(() => {});                              // warm on boot
+  setInterval(() => { _oaRefresh().catch(() => {}); }, _OA_TTL).unref?.();
+}
 app.get('/api/supply/action-metrics/data', async (_req, res) => {   // 2-segment path so the generic /api/supply/:section dispatcher doesn't swallow it
   try {
     const history = (await pool.query(`SELECT to_char(week_ending,'YYYY-MM-DD') week_ending, to_char(captured_at,'YYYY-MM-DD HH24:MI') captured_at,
