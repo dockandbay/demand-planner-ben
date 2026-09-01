@@ -7152,7 +7152,14 @@ function filteredSkus(s,co,ch,all){
       var _lch=p.lch&&p.lch[ctry]?p.lch[ctry]:null;
       var _dsc=p.disc&&p.disc[ctry]?p.disc[ctry]:null;
       if(SKU_FILTER.endDate&&_lch&&_lch>SKU_FILTER.endDate)return false;       // goes live after window end (future) -> hide
-      if(SKU_FILTER.startDate&&_dsc&&_dsc<SKU_FILTER.startDate)return false;   // discontinued before window start -> hide
+      if(SKU_FILTER.startDate&&_dsc&&_dsc<SKU_FILTER.startDate){
+        // Discontinued before the window start — but if it still has run-off stock/inbound it's selling
+        // down INTO the window, so keep it visible (it surfaces under "All"; the Active-only pill above
+        // still hides it by default). Only a genuinely-gone disc SKU (no stock, no inbound) is hidden here.
+        var _inv=p.inv||{}, _w3=ctry+'_3pl', _wf=ctry+'_fba';
+        var _hasRunoff=((_inv[_w3]||0)>0)||((_inv[_wf]||0)>0)||!!(SKUI[sku+'|'+_w3]||SKUI[sku+'|'+_wf]);
+        if(!_hasRunoff)return false;
+      }
     }
     // Weeks remaining bucket filter (3PL stock vs forward demand)
     if(SKU_FILTER.weeks!=='ALL'){

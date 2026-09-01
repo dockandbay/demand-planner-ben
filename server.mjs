@@ -346,7 +346,7 @@ async function buildDATA() {
     // one row per (category, subcategory, country, channel) that has ≥1 AVAILABLE SKU in planning scope
     pool.query(`SELECT DISTINCT p.category c, p.subcategory s, upper(a.country) co, a.channel ch
                 FROM planner.v_product_availability a JOIN planner.products p ON p.sku = a.sku
-                WHERE a.is_available AND p.in_planning_scope AND p.sku NOT IN (${NON_SKU_LIST})`),
+                WHERE a.available_no_disc AND p.in_planning_scope AND p.sku NOT IN (${NON_SKU_LIST})`),
   ]);
   const byKey = {};
   for (const row of salesR.rows) {
@@ -441,7 +441,7 @@ async function buildSKURAW() {
     pool.query(`SELECT sku, lower(country) co,
                        string_agg(CASE channel WHEN 'DTC' THEN 'd' WHEN 'FBA' THEN 'f' WHEN 'B2B' THEN 'b' WHEN 'TIK' THEN 't' END,
                                   '' ORDER BY CASE channel WHEN 'DTC' THEN 1 WHEN 'FBA' THEN 2 ELSE 3 END)
-                         FILTER (WHERE is_available) av
+                         FILTER (WHERE available_no_disc) av
                 FROM planner.v_product_availability GROUP BY sku, country`),
     // On-order = confirmed inbound (inbound_shipments) + open/planning POs not yet in that feed, deduped by PO
     // reference so a PO isn't double-counted once it syncs through to inbound. PO → warehouse: country_code (or
