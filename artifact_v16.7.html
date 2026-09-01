@@ -10428,9 +10428,18 @@ var FILTER_FIELDS=[
   {key:'metric.sellnofc',label:'Selling, no forecast',type:'num',metric:'sellnofc',unit:'u',phrase:'sold',suffix:'units (last 3mo)',defOp:'gte',defVal:60,presets:[{label:'≥60u (Red)',op:'gte',v:60},{label:'≥10u',op:'gte',v:10},{label:'≥100u',op:'gte',v:100}],desc:'Units sold over the last 3 months for SKUs with little/no forward forecast (next 4 months ≤10% of recent sales). Set the minimum units sold to flag.'},
   {key:'trend.yoy',label:'YoY trend (3mo vs LY)',type:'num',metric:'yoy',unit:'%',phrase:'YoY growth is',suffix:'%',defOp:'gte',defVal:20,presets:[{label:'Up ≥+20%',op:'gte',v:20},{label:'Down ≤−20%',op:'lte',v:-20},{label:'Flat −20…+20%',op:'between',v:[-20,20]}],desc:'YoY growth %: last 3 completed months vs the SAME 3 months last year. Positive = growing. Needs ≥10 units across the window. De-seasonalised — the best read of genuine growth. (≥+20 = up, ≤−20 = down.)'},
   {key:'trend.wmape',label:'Forecast accuracy (3mo WMAPE)',type:'num',metric:'wmape',unit:'%',phrase:'WMAPE is',suffix:'%',defOp:'gte',defVal:60,presets:[{label:'Poor ≥60%',op:'gte',v:60},{label:'Good ≤30%',op:'lte',v:30},{label:'OK 30–60%',op:'between',v:[30,60]}],desc:'Weighted absolute % error (WMAPE) of the locked forecast vs actual over the last 3 completed months. Higher = worse. Uses locked forecast snapshots (populated on live). (<30 good, 30–60 ok, ≥60 poor.)'},
-  {key:'trend.bias',label:'Forecast bias (3mo over/under)',type:'num',metric:'bias',unit:'%',phrase:'forecast is',suffix:'% over(+)/under(−) actual',defOp:'gte',defVal:20,presets:[{label:'Over ≥+20%',op:'gte',v:20},{label:'Under ≤−20%',op:'lte',v:-20},{label:'Neutral −20…+20%',op:'between',v:[-20,20]}],desc:'Forecast bias % over the last 3 completed months: positive = over-forecasting (forecast above actual), negative = under-forecasting. Uses locked forecast snapshots (live only). (≥+20 over, ≤−20 under.)'}
+  {key:'trend.bias',label:'Forecast bias (3mo over/under)',type:'num',metric:'bias',unit:'%',phrase:'forecast is',suffix:'% over(+)/under(−) actual',defOp:'gte',defVal:20,presets:[{label:'Over ≥+20%',op:'gte',v:20},{label:'Under ≤−20%',op:'lte',v:-20},{label:'Neutral −20…+20%',op:'between',v:[-20,20]}],desc:'Forecast bias % over the last 3 completed months: positive = over-forecasting (forecast above actual), negative = under-forecasting. Uses locked forecast snapshots (live only). (≥+20 over, ≤−20 under.)'},
+  {key:'inv.3pl',label:'3PL inventory (on hand)',type:'num',src:'3pl',unit:'u',phrase:'3PL on-hand',suffix:'units',defOp:'gte',defVal:10,presets:[{label:'>10u',op:'gte',v:10},{label:'=0 (out)',op:'lte',v:0},{label:'≥100u',op:'gte',v:100}],desc:'Live on-hand units at the 3PL warehouse for the selected country (the DTC/B2B pool). 0 = out of stock at 3PL.'},
+  {key:'inv.fba',label:'FBA inventory (on hand)',type:'num',src:'fba',unit:'u',phrase:'FBA on-hand',suffix:'units',defOp:'lte',defVal:10,presets:[{label:'<10u (low)',op:'lte',v:10},{label:'=0 (out)',op:'lte',v:0},{label:'≥50u',op:'gte',v:50}],desc:'Live on-hand units at the Amazon FBA warehouse for the selected country. 0 = out of stock at FBA.'}
 ];
 function _filterFieldDef(k){ for(var i=0;i<FILTER_FIELDS.length;i++)if(FILTER_FIELDS[i].key===k)return FILTER_FIELDS[i]; return null; }
+// Numeric comparison for a num-type condition (operator + threshold(s)). Missing value (null) never matches.
+function _numOk(mv,c){ if(mv==null)return false; var op=c.op||'gte', thr=c.value;
+  if(op==='between'){ if(!Array.isArray(thr)||thr[0]==null||thr[1]==null)return false; var lo=Math.min(thr[0],thr[1]),hi=Math.max(thr[0],thr[1]); return mv>=lo&&mv<=hi; }
+  if(op==='lte'){ return thr!=null&&mv<=thr; }
+  return thr!=null&&mv>=thr; }
+// Live on-hand units for a SKU at the 3PL or FBA warehouse of the selected country (0 when out of stock / unknown).
+function _filterInvVal(sku,co,which){ var p=SKUM[sku]; if(!p||!p.inv)return 0; try{ var wh=(which==='fba')?skuWh(co,'FBA'):skuWh(co,'DTC'); return Number(p.inv[wh]||0)||0; }catch(e){ return 0; } }
 // Evaluate one rule against a SKU in (co,ch). excMaps = excComputeMaps(co,ch) (compute once per render, pass in).
 function filterMatch(sku,co,ch,rule,excMaps){
   var def=(rule&&rule.def)||rule||{}; var conds=def.conditions||[]; if(!conds.length)return true;
@@ -10438,12 +10447,9 @@ function filterMatch(sku,co,ch,rule,excMaps){
   function arr(v){ return Array.isArray(v)?v:(v==null||v===''?[]:[v]); }
   for(var i=0;i<conds.length;i++){ var c=conds[i], f=c.field;
     // Numeric metric/trend conditions — compare the SKU's raw metric value against the user's operator + threshold(s).
-    if(f&&(f.indexOf('metric.')===0||f.indexOf('trend.')===0)){ var mk=f.slice(f.indexOf('.')+1); var mv=(excMaps&&excMaps[mk])?excMaps[mk][sku]:undefined; if(mv==null)return false;
-      var op=c.op||'gte', thr=c.value;
-      if(op==='between'){ if(!Array.isArray(thr)||thr[0]==null||thr[1]==null)return false; var lo=Math.min(thr[0],thr[1]),hi=Math.max(thr[0],thr[1]); if(!(mv>=lo&&mv<=hi))return false; }
-      else if(op==='lte'){ if(thr==null||!(mv<=thr))return false; }
-      else { if(thr==null||!(mv>=thr))return false; }   // gte (default)
-      continue; }
+    if(f&&(f.indexOf('metric.')===0||f.indexOf('trend.')===0)){ var mk=f.slice(f.indexOf('.')+1); var mv=(excMaps&&excMaps[mk])?excMaps[mk][sku]:undefined; if(!_numOk(mv,c))return false; continue; }
+    // Inventory conditions — live on-hand units at the 3PL / FBA warehouse for the selected country.
+    if(f&&f.indexOf('inv.')===0){ if(!_numOk(_filterInvVal(sku,co,f.slice(4)),c))return false; continue; }
     var v, list=arr(c.value);
     if(f==='from_replacement'){ var has=!!p.rep; if(list.indexOf('yes')>=0&&!has)return false; if(list.indexOf('no')>=0&&has)return false; continue; }
     if(f==='category')v=p.c||p.s||''; else if(f==='subcategory')v=p.s||''; else if(f==='tier')v=p.ti||'C';

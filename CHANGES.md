@@ -1,3 +1,6 @@
+## v27.350 Filter Rules — inventory conditions (3PL / FBA on-hand)
+- Two new numeric conditions: **3PL inventory (on hand)** and **FBA inventory (on hand)** — live on-hand units at the selected country's 3PL / FBA warehouse. Same operator + threshold + presets model as the metrics, so you can build e.g. *3PL on-hand ≥ 10 AND FBA on-hand ≤ 10* (overstocked at 3PL, low at FBA — transfer candidates). Values read live from the SKU inventory snapshot (0 = out of stock); no server maps needed. Presets: 3PL >10 / =0 / ≥100; FBA <10 / =0 / ≥50. Verified 9 evaluator assertions.
+
 ## v27.349 Filter Rules — also hide the sub-category subtotal/gap row under a filter
 - Follow-up to v27.337/343: the sub-category **subtotal row** (the "↳ N total · gap vs subcat · N active / N discontinued · units/mth" line that `insertInlineSkuRows` places under the SKU rows) is now hidden under an applied Filter Rule too. It stays in the DOM as an anchor (so smoothing/refresh logic is unaffected) but isn't shown — so a filtered view is a clean SKU list with no summary rows (grand-total, category header, subcat aggregate, and now subcat subtotal all suppressed). Verified in jsdom: 0 visible subtotal rows under a filter (both show/hide sub-cats), 133 SKU rows.
 
