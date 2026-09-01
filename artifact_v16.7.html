@@ -10872,7 +10872,10 @@ function renderExceptionsView(body){
   }); }
   emit(tree,'',0);
   var headHtml='<tr>'+COLS.map(function(h,i){return '<th style="'+TH+(i===0?';min-width:260px;padding-right:28px':';text-align:center')+'">'+esc(h)+'</th>';}).join('')+'</tr>';
-  body.innerHTML='<div style="padding:2px 2px 20px">'+subtab+bar+legend
+  var dcBanner=(EXC_SUBTAB==='dataconfig')?('<div style="margin:2px 0 10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">'
+    +'<a href="#/supply/config/mfgbom" style="display:inline-flex;align-items:center;gap:6px;font-size:12px;font-weight:600;color:#5b21b6;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:6px 12px;text-decoration:none">&#8593; Upload BOM &mdash; CONFIG &#9656; BOM</a>'
+    +'<span style="font-size:11px;color:#94a3b8">Map set SKUs to their components on the <b>Build on Fly Sets</b> tab (and prepacks on <b>Prepack sets</b>).</span></div>'):'';
+  body.innerHTML='<div style="padding:2px 2px 20px">'+subtab+bar+legend+dcBanner
     +(rows.length?('<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12.5px">'+headHtml+treeHtml+'</table></div>')
       :'<div style="color:#94a3b8;font-size:13px;padding:24px;text-align:center">'+(built.loadingData?'Loading…':'No exceptions for this selection.')+'</div>')
     +'</div>';

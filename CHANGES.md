@@ -1,3 +1,6 @@
+## v27.356 Exceptions ▸ Data & config — link to the BOM upload
+- Added an **"↑ Upload BOM — CONFIG ▸ BOM"** link on the DEMAND ▸ Exceptions ▸ **Data & config** sub-tab (which flags sets without a BOM recipe + unmapped prepacks). It navigates to **#/supply/config/mfgbom** (CONFIG ▸ BOM), where the **Build on Fly Sets** tab has the ⬆ Upload (and **Prepack sets** for prepack mapping). Shown only on that sub-tab.
+
 ## v27.355 Smoothing matrix — Auto-smooth tab first, "Disregard discontinued", drop category header rows
 - Reordered the tabs so **Auto-smooth is first** (and the default view); **Disregard discontinued** is second (relabelled from "Disregard disc."). Removed the per-category header rows in the matrix — it's now a flat, alphabetical list of sub-categories (the category grouping headers were redundant).
 
