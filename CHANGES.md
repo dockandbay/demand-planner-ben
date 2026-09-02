@@ -1,3 +1,7 @@
+## v27.368 Filter Rules — "Forecast accuracy (WMAPE)" window is now user-set (1–6 months, default 3)
+- The WMAPE accuracy field had a hardcoded 3-month window. It now carries an **"over last N mo"** input on the condition (**default 3, range 1–6**). Bias stays on the fixed 3-month window; only WMAPE uses the chosen N.
+- Threaded through: `winSel` field flag → builder months input (`.fr-win`) → `readForm` stores `c.months` → `frExcMaps` passes it (and includes it in the map cache key) → `excComputeMaps(co,ch,N)` computes WMAPE over `prevW` (last N completed months). Verified N=1–6 compute cleanly (273→313 SKUs as the window widens).
+
 ## v27.365 Filter Rules — "Drift - Category vs Forecast" (highlight-only rule, bright-yellow cells)
 - New filter field **"Drift - Category vs Forecast"**. Applying it paints the **sub-category × month cells BRIGHT YELLOW** (next 12 months) where the **sum of SKU forecasts drifts from the sub-category target by ≥ the threshold** (default **20%** — the over/under gaps auto-smooth leaves alone). These are the ones needing a manual smooth.
 - **Highlight-only:** unlike other filters it does **NOT** explode to / filter SKUs — the plan renders normally (all sub-cats + totals), just with the drifting cells highlighted (verified: 936 cells both with/without → no explosion; 190 cells painted). Reuses the plan's existing SKU-vs-subcat variance + rolling-12-month window.
