@@ -1047,7 +1047,8 @@
       var _credit=Number(p.credit_amount)||0;   // additional charge added to the invoice — increases the amount due
       var dueTot=(_invAmt!=null?_invAmt-paidTot:0)+_credit;   // a D&B-added credit/charge is always due, even before the supplier submits a final invoice
       var _prow=function(lbl,amt,dt,ref){ return '<tr><td class="l" style="padding:4px 16px 4px 0;white-space:nowrap">'+lbl+'</td><td class="l" style="padding:4px 16px 4px 0"><b>'+_pm(amt)+'</b></td><td class="l" style="padding:4px 16px 4px 0">'+_pd(dt)+'</td><td class="l" style="padding:4px 0">'+(ref?esc(ref):'<span class="mut">—</span>')+'</td></tr>'; };
-      var payments='<div class="sect-h">Payments</div>'
+      var payments='<div style="margin:0 0 12px"><button class="save-btn" onclick="window.open(\'/api/portal/po/'+encodeURIComponent(p.po)+'/pdf\',\'_blank\')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd;font-weight:700">&#10515; Download PO details (PDF)</button> <span class="mut" style="font-size:11px">all PO details &mdash; client/FBA, packing &amp; order plan</span></div>'
+        +'<div class="sect-h">Payments</div>'
         +'<table style="font-size:12px;border-collapse:collapse;text-align:left;table-layout:fixed;width:600px;max-width:100%">'
           +'<colgroup><col style="width:190px"><col style="width:120px"><col style="width:130px"><col style="width:160px"></colgroup>'
           +'<thead><tr>'
@@ -1073,9 +1074,7 @@
       function badge(n){ return n>0?' <span class="ex-badge">'+n+'</span>':''; }
       var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab pptab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'">'+t[1]+badge(t[3])+'</button>';}).join('')+'</div>';
       var panels=tabs.map(function(t,ti){return '<div class="pptab-panel" data-pt="'+t[0]+'"'+(ti===0?'':' style="display:none"')+'>'+t[2]+'</div>';}).join('');
-      return '<div class="ppx" style="padding:4px 2px;max-width:none;text-align:left">'
-        +'<div style="margin:0 0 8px"><button class="save-btn" onclick="window.open(\'/api/portal/po/'+encodeURIComponent(p.po)+'/pdf\',\'_blank\')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd;font-weight:700">&#10515; Download PO details (PDF)</button></div>'
-        +bar+panels+'</div>'; }
+      return '<div class="ppx" style="padding:4px 2px;max-width:none;text-align:left">'+bar+panels+'</div>'; }
     // Shared per-PO open-action count (row badge + top PO badge + "show all exceptions" filter all use this).
     // Productions 54 and earlier raise nothing. Mirrors the SHIPMENTS-tab rules (no "no shipment yet" term).
     function poActionCount(p){ if(!prodActionable(p))return 0; var po=p.po, D=_ppData||{};
