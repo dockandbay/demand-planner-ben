@@ -10319,7 +10319,7 @@
   function biBody(){ return document.getElementById('rep-body')||document.getElementById('supply-content'); }
   // SUG-0020 DTC MISMATCH — open Direct-to-Client sales orders vs their POs (mapped by sales_order_ref)
   var _dtcHideAcc=(function(){try{return localStorage.getItem('dtcHideAcc')==='1';}catch(e){return false;}})();   // DTC mismatch: hide accepted discrepancy rows
-  var _dtcSearch='', _dtcData=null;   // DTC mismatch: PO/SO search-filter text + last-fetched data (re-filter in memory, no re-fetch)
+  var _dtcSearch='', _dtcData=null, _dtcGroupedOnly=false;   // DTC mismatch: PO/SO search-filter text + last-fetched data + "grouped only" (POs spanning >1 sales order) toggle
   function _dtcPill(lbl,n,color){ return '<span style="font-size:11px;color:#64748b">'+lbl+' <b data-dtcpill="'+lbl+'" style="color:'+color+'">'+n+'</b></span>'; }
   function _dtcBumpPill(lbl,d){ var el=document.querySelector('b[data-dtcpill="'+lbl+'"]'); if(el){ var v=(parseInt(el.textContent,10)||0)+d; el.textContent=(v<0?0:v); } }
   function _dtcBadge(o){ return o.accepted?'<span class="tool-badge bg-blue">accepted</span>':o.issue==='no_po'?'<span class="tool-badge bg-red">no PO mapped</span>':o.issue==='qty_mismatch'?'<span class="tool-badge bg-amber">SKU / qty mismatch</span>':'<span class="tool-badge bg-green">OK</span>'; }
@@ -10340,7 +10340,7 @@
     b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:#0f172a">DTC mismatch</div>'
       +'<div class="mut tiny" style="margin-bottom:10px;max-width:840px">Open Direct-to-Client sales orders (not void, not dispatched) reconciled against their purchase orders (mapped by sales order ref). Flags orders with <b>no PO</b> or a <b>SKU / quantity mismatch</b>. Add a note or <b>accept</b> a discrepancy to clear it from the count.</div>'
       +'<div class="bar" style="gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><button class="save-btn" id="dtc-import" style="background:#dbeafe;color:#1e40af;border:1px solid #60a5fa;font-weight:700">&#8635; Import sales orders</button><span id="dtc-impmsg" class="mut tiny"></span>'
-        +'<span style="margin-left:auto;display:inline-flex;gap:12px;align-items:center">'+_dtcPill('Issues',counts.issues||0,'#dc2626')+_dtcPill('Accepted',counts.accepted||0,'#64748b')+_dtcPill('OK',counts.ok||0,'#166534')+_dtcPill('Unmapped POs',counts.unmapped_pos||0,'#b45309')+'<button id="dtc-hide-acc" style="font-size:11px;padding:2px 10px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;color:#475569;cursor:pointer;white-space:nowrap">Hide accepted</button></span></div>'
+        +'<span style="margin-left:auto;display:inline-flex;gap:12px;align-items:center">'+_dtcPill('Issues',counts.issues||0,'#dc2626')+_dtcPill('Accepted',counts.accepted||0,'#64748b')+_dtcPill('OK',counts.ok||0,'#166534')+_dtcPill('Unmapped POs',counts.unmapped_pos||0,'#b45309')+'<button id="dtc-grouped-only" title="Show only order groups where one or more POs span multiple sales orders" style="font-size:11px;padding:2px 10px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;color:#5b21b6;cursor:pointer;white-space:nowrap">&#8862; Grouped SOs <b data-dtcpill="Grouped" style="color:#5b21b6">'+((d.groups||[]).filter(function(g){return g.grouped;}).length)+'</b></button><button id="dtc-hide-acc" style="font-size:11px;padding:2px 10px;border:1px solid #cbd5e1;border-radius:10px;background:#fff;color:#475569;cursor:pointer;white-space:nowrap">Hide accepted</button></span></div>'
       +'<div style="margin-bottom:10px"><input id="dtc-search" placeholder="Filter by PO or sales-order number — comma-separate for multiple…" style="width:100%;max-width:540px;box-sizing:border-box;font-size:12px;padding:6px 9px;border:1px solid #cbd5e1;border-radius:6px"><span id="dtc-search-msg" class="mut tiny" style="margin-left:8px"></span></div>'
       +'<div id="dtc-list"></div><div id="dtc-unmapped"></div>';
     fetch('/api/supply/dtc/status').then(function(r){return r.json();}).then(function(s){ var m=document.getElementById('dtc-impmsg'); if(!m)return;
@@ -10363,6 +10363,7 @@
       step({}); };
     _dtcData=d;
     var _si=document.getElementById('dtc-search'); if(_si){ _si.value=_dtcSearch||''; _si.oninput=function(){ _dtcSearch=this.value; _dtcApplyFilter(); }; }
+    var _go=document.getElementById('dtc-grouped-only'); if(_go){ var _gs=function(){ _go.style.background=_dtcGroupedOnly?'#ede9fe':'#fff'; _go.style.borderColor=_dtcGroupedOnly?'#8b5cf6':'#cbd5e1'; }; _gs(); _go.onclick=function(){ _dtcGroupedOnly=!_dtcGroupedOnly; _gs(); _dtcApplyFilter(); }; }
     _dtcApplyFilter();
     var _hb=document.getElementById('dtc-hide-acc'); if(_hb)_hb.onclick=function(){ _dtcHideAcc=!_dtcHideAcc; try{localStorage.setItem('dtcHideAcc',_dtcHideAcc?'1':'0');}catch(e){} _dtcApplyHideAcc(); };
     try{ _dtcApplyHideAcc(); }catch(e){}
@@ -10433,9 +10434,11 @@
     function gMatch(g){ if(!terms.length)return true; var hay=[]; (g.sos||[]).forEach(function(s){hay.push(String(s.reference||'').toLowerCase());}); (g.po_refs||[]).forEach(function(p){hay.push(String(p.po||'').toLowerCase());}); return terms.some(function(t){return hay.some(function(h){return h.indexOf(t)>=0;});}); }
     function uMatch(u){ if(!terms.length)return true; var h=String(u.po||'').toLowerCase(); return terms.some(function(t){return h.indexOf(t)>=0;}); }
     var fg=groups.filter(gMatch), fu=unmapped.filter(uMatch);
+    if(_dtcGroupedOnly){ fg=fg.filter(function(g){return g.grouped;}); fu=[]; }   // grouped-only = POs spanning >1 sales order (unmapped POs aren't grouped)
     _drawDtcList(fg.slice(), unmapped, d.all_pos||[]);
     _drawDtcUnmapped(fu, groups);
-    var msg=document.getElementById('dtc-search-msg'); if(msg)msg.textContent=terms.length?(fg.length+' order group'+(fg.length===1?'':'s')+' · '+fu.length+' unmapped PO'+(fu.length===1?'':'s')):'';
+    _dtcSetPill('Grouped', groups.filter(function(g){return g.grouped;}).length);
+    var msg=document.getElementById('dtc-search-msg'); if(msg)msg.textContent=(terms.length||_dtcGroupedOnly)?(fg.length+' order group'+(fg.length===1?'':'s')+' · '+fu.length+' unmapped PO'+(fu.length===1?'':'s')):'';
     try{ _dtcApplyHideAcc(); }catch(e){}
   }
   // Silent refresh of the DTC mismatch report (list + unmapped + pills only) — no full report reload / page flash.

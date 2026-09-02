@@ -1,3 +1,6 @@
+## v27.380 DTC mismatch — "Grouped SOs" pill
+- New **⧉ Grouped SOs (N)** pill in the report header: N = number of order groups where one or more POs **span multiple sales orders**. Click to **filter to just those** (unmapped POs hidden while active); click again to clear. Combines with the search box. Count updates live on map/unmap.
+
 ## v27.379 DTC mismatch — PO / sales-order search filter
 - New search box at the top of the DTC mismatch report: filter the displayed order groups **and** unmapped POs by **PO number or sales-order number**. **Comma-separate** for multiple (OR); substring match (type the full ref to narrow). Shows a "N groups · M unmapped POs" match count.
 - Filters **in memory** (no re-fetch) so it's instant, and it **survives map/unmap** (silent reload re-applies the current filter). The map-PO / map-SO pickers keep their full option lists so mapping is unaffected by the filter.
