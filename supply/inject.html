@@ -262,6 +262,10 @@
 #supply-root .cli-row{display:flex;align-items:flex-start;gap:10px;padding:5px 0;border-bottom:1px solid #f1f1f1}
 #supply-root .cli-lbl{flex:0 0 170px;font-size:11px;color:#444;font-weight:600;padding-top:4px}
 #supply-root .cli-val{flex:1 1 auto;min-width:0}
+/* Cap fixed-width inputs (client name 360px, etc.) to their column so they never overflow into the neighbouring
+   column's labels (e.g. the client-name input crossing over the "Polybags" label on the Client/FBA tab). boolsel stays its own width. */
+#supply-root .cli-val input,#supply-root .cli-val textarea,#supply-root .cli-val select{max-width:100%;box-sizing:border-box}
+#supply-root .cli-val select.boolsel{max-width:120px}
 #supply-root .xd-pick{display:flex;flex-wrap:wrap;align-items:center;gap:3px}
 #supply-root .rtab{background:transparent;border:none;padding:6px 14px;font-size:12px;font-weight:500;cursor:pointer;color:#7c93b8;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit}
 #supply-root .rtab:hover{color:#2563eb}
