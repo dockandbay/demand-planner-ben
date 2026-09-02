@@ -14419,8 +14419,20 @@ function render3plInvoice(body){
     var ginK={}; mkeys.forEach(function(m){ginK[m]=0;});
     function _addInb(v){ if(!v)return; (Array.isArray(v)?v:[v]).forEach(function(x){ var q=x.qty||0; if(!(q>0)||!x.eta)return; var mk=String(x.eta).slice(0,7).replace('-','_'); if(ginK[mk]!=null)ginK[mk]+=q; }); }
     Object.keys(SKUM).forEach(function(sku){ _addInb(SKUI[sku+'|'+wh]); _addInb(SKUOI[sku+'|'+wh]); });
-    // rows for render + export. (b) series (auto-forecast inbound, Amazon transfers) = next phase → null.
-    var rows=mkeys.map(function(m,ix){ return {mo:labels[ix], ginKnown:Math.round(ginK[m]), ginFcst:null, ginTot:Math.round(ginK[m]), orders:_r3plRound(orders[m]), transfers:null}; });
+    // ── GOODS OUT (b): Amazon/FBA transfer units — the buy-plan's per-SKU 3PL→FBA transfer, summed per month. project()
+    // returns proj[1+j].tx = the recommended transfer for month M+j (proj[1] = current month = mkeys[0]). Read-only:
+    // project() is the same pure fn the buy render calls, so this doesn't change any buy output. ──
+    var trans={}; mkeys.forEach(function(m){trans[m]=0;});
+    try{ if(window.BP&&typeof BP.project==='function'&&BP_DATA&&BP_DATA.products){
+      Object.keys(BP_DATA.products).forEach(function(sku){
+        var pd=BP_DATA.products[sku]; var md=pd&&pd.mkts&&pd.mkts[MKT]; if(!md)return;
+        var proj; try{ proj=BP.project(md,pd,0,MKT,null,sku); }catch(e2){ return; }
+        if(!proj)return;
+        for(var j=0;j<6;j++){ var p=proj[1+j]; if(p&&p.tx>0)trans[mkeys[j]]+=p.tx; }
+      });
+    } }catch(e3){ if(window.console)console.warn('[3pl forecast] transfers',e3&&e3.message); }
+    // rows for render + export. GOODS IN · auto-forecast (b) = next item → null.
+    var rows=mkeys.map(function(m,ix){ return {mo:labels[ix], ginKnown:Math.round(ginK[m]), ginFcst:null, ginTot:Math.round(ginK[m]), orders:_r3plRound(orders[m]), transfers:_r3plRound(trans[m])}; });
     // ── render ──
     var TH='padding:6px 10px;text-align:right;font-size:10px;color:#64748b;text-transform:uppercase;border-bottom:2px solid #cbd5e1;white-space:nowrap';
     var TD='padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums;border-bottom:1px solid #f1f5f9';
@@ -14434,12 +14446,13 @@ function render3plInvoice(body){
         +'<th style="'+TH+'">Goods out · orders</th><th style="'+TH+'">Goods out · Amazon transfers</th></tr></thead><tbody>';
     rows.forEach(function(r){ html+='<tr><td style="'+TD+';text-align:left;font-weight:600">'+e(r.mo)+'</td>'
       +cell(r.ginKnown)+cell(r.ginFcst,true)+'<td style="'+TD+';border-right:1px solid #e2e8f0;font-weight:600">'+fmt(r.ginTot)+'</td>'
-      +cell(r.orders)+cell(r.transfers,true)+'</tr>'; });
+      +cell(r.orders)+cell(r.transfers)+'</tr>'; });
     html+='</tbody></table>'
       +'<div style="font-size:10px;color:#94a3b8;margin-top:8px;max-width:680px;line-height:1.5">'
       +'<b>Goods out · orders</b> = (DTC + TikTok units × 0.449 ship-bags/unit) + (B2B units ÷ 25 units/order), rounded to the nearest 500 (nearest 100 under 500). '
+      +'<b>Goods out · Amazon transfers</b> = the buy-plan 3PL→FBA transfer per SKU, summed per month (same rounding). '
       +'<b>Goods in · known POs</b> = confirmed inbound + open POs landing that month, to '+e(MKT)+' 3PL. '
-      +'<b>Auto-forecast inbound</b> (grouped under master shipment) and <b>Amazon transfers</b> are the next build phase (they come from the buy-plan / auto-forecast engine).</div>';
+      +'<b>Goods in · auto-forecast</b> (future replenishment, grouped under master shipment) + shipment IDs / container counts on known POs are the next build step.</div>';
     b.innerHTML=html;
     var _dl=b.querySelector('#f3-dl'); if(_dl)_dl.onclick=function(){ _f3Download(tplName,rows); };
     var _cp=b.querySelector('#f3-cp'); if(_cp)_cp.onclick=function(){ _f3CopyEmail(tplName,rows,this); };
@@ -14455,9 +14468,9 @@ function render3plInvoice(body){
     var THs='padding:5px 10px;border:1px solid #d0d7de;background:#f0f6ff;text-align:right;font-family:Arial,sans-serif;font-size:12px;color:#334155';
     var h='<div style="font-family:Arial,sans-serif"><p style="font-size:14px;font-weight:bold;margin:0 0 6px">'+e(tplName)+' — 6-month goods in / goods out (estimate)</p>'
       +'<table style="border-collapse:collapse"><thead><tr>'
-      +'<th style="'+THs+';text-align:left">Month</th><th style="'+THs+'">Goods in (known POs)</th><th style="'+THs+'">Goods in (total)</th><th style="'+THs+'">Goods out (orders)</th></tr></thead><tbody>'
-      +rows.map(function(r){ return '<tr><td style="'+TDs+';text-align:left"><b>'+e(r.mo)+'</b></td><td style="'+TDs+'">'+fmt(r.ginKnown)+'</td><td style="'+TDs+'">'+fmt(r.ginTot)+'</td><td style="'+TDs+'">'+fmt(r.orders)+'</td></tr>'; }).join('')
-      +'</tbody></table><p style="font-size:11px;color:#666;margin:6px 0 0">Orders = DTC+TikTok × 0.449 + B2B ÷ 25, rounded. Auto-forecast inbound & Amazon transfers to follow.</p></div>';
+      +'<th style="'+THs+';text-align:left">Month</th><th style="'+THs+'">Goods in (known POs)</th><th style="'+THs+'">Goods in (total)</th><th style="'+THs+'">Goods out (orders)</th><th style="'+THs+'">Goods out (Amazon transfers)</th></tr></thead><tbody>'
+      +rows.map(function(r){ return '<tr><td style="'+TDs+';text-align:left"><b>'+e(r.mo)+'</b></td><td style="'+TDs+'">'+fmt(r.ginKnown)+'</td><td style="'+TDs+'">'+fmt(r.ginTot)+'</td><td style="'+TDs+'">'+fmt(r.orders)+'</td><td style="'+TDs+'">'+(r.transfers==null?'—':fmt(r.transfers))+'</td></tr>'; }).join('')
+      +'</tbody></table><p style="font-size:11px;color:#666;margin:6px 0 0">Orders = DTC+TikTok × 0.449 + B2B ÷ 25, rounded. Amazon transfers = buy-plan 3PL→FBA per SKU. Auto-forecast inbound to follow.</p></div>';
     var div=document.createElement('div'); div.contentEditable='true'; div.style.cssText='position:fixed;left:-9999px;top:0;opacity:0'; div.innerHTML=h; document.body.appendChild(div);
     var rng=document.createRange(); rng.selectNodeContents(div); var sel=window.getSelection(); sel.removeAllRanges(); sel.addRange(rng);
     var ok=false; try{ ok=document.execCommand('copy'); }catch(e){}
