@@ -6332,6 +6332,10 @@
     bk.innerHTML='<span>← Back</span><span class="mob-back-ref">'+esc(po)+'</span>';
     bk.onclick=function(e){ e.stopPropagation(); closePODrawer(); };
     ov.appendChild(bk);
+    var pdfB=document.createElement('button'); pdfB.textContent='⤓ PDF';   // download all PO details as a PDF
+    pdfB.style.cssText='position:absolute;top:7px;right:10px;z-index:6;font-size:13px;padding:5px 12px;border:1px solid #93c5fd;border-radius:8px;background:#eff6ff;color:#1d4ed8;font-weight:700';
+    pdfB.onclick=function(e){ e.stopPropagation(); window.open('/api/supply/po/'+encodeURIComponent(po)+'/pdf','_blank'); };
+    ov.appendChild(pdfB);
     var holder=document.createElement('div'); holder.className='mob-sheet-body';
     holder.innerHTML='<div id="podet-DRAWER" class="count">Loading…</div>';
     ov.appendChild(holder);
@@ -6349,7 +6353,7 @@
     if(_overlay){ root.classList.add('hz-drawer-overlay'); root.style.display='block'; }
     var bg=document.createElement('div'); bg.id='podrawer-bg'; bg.style.zIndex=nextDrawerZ();   // stack above whatever's already open (e.g. a shipment drawer)
     bg.innerHTML='<div id="podrawer"><div class="shipdrawer-head"><div class="shipdrawer-title">'+esc(po)+'</div>'
-      +'<div><button class="lnk-btn shipdrawer-full" title="open the full PO page for this PO">Full page ↗</button>'
+      +'<div><button class="lnk-btn shipdrawer-pdf" title="download all PO details as a PDF (client/FBA, packing &amp; labelling, order plan)">⤓ PDF</button> <button class="lnk-btn shipdrawer-full" title="open the full PO page for this PO">Full page ↗</button>'
       +'<button class="shipdrawer-x" title="close">✕</button></div></div>'
       +'<div class="shipdrawer-body"><div id="podet-DRAWER" class="count">Loading…</div></div></div>';
     root.appendChild(bg);
@@ -6357,6 +6361,7 @@
     bg.addEventListener('mousedown',function(e){ if(e.target===bg)closePODrawer(); });
     bg.querySelector('.shipdrawer-x').onclick=function(){ closePODrawer(); };
     bg.querySelector('.shipdrawer-full').onclick=function(){ closePODrawer(); gotoPO(po,tab); };
+    bg.querySelector('.shipdrawer-pdf').onclick=function(){ window.open('/api/supply/po/'+encodeURIComponent(po)+'/pdf','_blank'); };
     }
     // while the drawer is open, in-place refreshes (after an edit/assign) target the drawer, not a grid row that
     // may not exist on this page (e.g. the What's Next report).
