@@ -6916,6 +6916,17 @@ function buildSkuShares(skus,co,ch,lyMonths){
   skus.forEach(function(sku){
     shares[sku]=grand>0?annualisedTotals[sku]/grand:1/skus.length;
   });
+  // WIRE the Sets % (Ben) — reserve Sets%/100 of the sub-category forecast for the SET pool and (1−Sets%/100) for the
+  // non-SET (master) pool, by rescaling the raw shares WITHIN each pool (sets keep their relative weighting; masters
+  // keep theirs). ONLY applies when a Sets % is configured (_setsPct>0). Default/unset = 0 → NO rescale → byte-identical
+  // (existing sets keep their history share, masters unchanged); nothing moves in the demand plan or buy plan until a
+  // Sets % is set in the Contribution model. When set, forecast shifts from masters to sets (sets explode to components).
+  if(_setsPct>0&&_setsPct<100){
+    var _setT=_setsPct/100, _mastT=1-_setT, _setSk=[], _mastSk=[], _setSum=0, _mastSum=0;
+    skus.forEach(function(sku){ if(SKUM[sku]&&SKUM[sku].vt==='SET'){ _setSk.push(sku); _setSum+=shares[sku]||0; } else { _mastSk.push(sku); _mastSum+=shares[sku]||0; } });
+    if(_setSk.length){ if(_setSum>0)_setSk.forEach(function(sku){ shares[sku]=shares[sku]/_setSum*_setT; }); else _setSk.forEach(function(sku){ shares[sku]=_setT/_setSk.length; }); }   // no set history → spread the reserve evenly
+    if(_mastSum>0)_mastSk.forEach(function(sku){ shares[sku]=shares[sku]/_mastSum*_mastT; });
+  }
   return shares;
 }
 // SINGLE SOURCE for a SKU's monthly forecast BASE (pre in-session override) — used by the plan grid

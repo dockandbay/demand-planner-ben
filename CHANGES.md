@@ -1,3 +1,8 @@
+## v27.374 Contribution model — Sets % now WIRED into the forecast cascade
+- The **Sets vs SKUs %** split now actually reserves its share of the sub-category forecast: in `buildSkuShares` the raw shares are rescaled so the SET pool sums to **Sets%/100** and the non-SET (master) pool to **(1−Sets%/100)**, each keeping its internal weighting. Previously the value only sized brand-new sets.
+- **Guarded:** only applies when a Sets % is configured (`sets>0`); default/unset = 0 → no rescale → byte-identical. Verified: Towel-Beach CORE (cfg 45%) → sets get exactly 45.0%, masters 55.0%; Tea Towel (43%) → 43/57; un-configured sub-cats (Picnic Blanket) unchanged 0/100.
+- **⚠ Impact (18 sub-cats have a Sets % set in the sandbox):** forecast redistributes from direct-master SKUs to SET SKUs (which then explode into their component/master SKUs). **Sub-category demand total is conserved** (2,827,504 unchanged); the buy plan net-changes only slightly (UK +40, AU +64, CA +110 — per-SKU cover/rounding on the redistribution), since set demand flows back into the same components. Buy-plan before/after captured.
+
 ## v27.373 3PL & Invoicing — "what to upload each month" box on every 3PL, under the L3 nav
 - The blue **"what to upload each month"** guide (previously UK ILG only, buried in the Invoices body) now renders **under the level-3 3PL nav for every 3PL** (Invoices mode): UK ILG keeps its detailed file list; US Geneva / EU iFulfilment / AU Coghlans get a generic upload note (per-3PL specifics to be filled in). The old standalone "3PL Invoice / Upload each…" description is folded into the box. Hidden on the Forecast tab.
 
