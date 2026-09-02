@@ -10359,8 +10359,8 @@
             _done(); if(m){m.style.color='#166534';m.textContent='Imported '+(j.imported||0)+' orders.';} selectReport('dtc-mismatch'); })
           .catch(function(err){ _done(); var to=String(err&&err.message)==='__TIMEOUT__'; if(m){ m.style.color='#b45309'; m.textContent=to?'The server timed out mid-import — click Import again to continue.':'Import error: '+(err&&err.message||err); } selectReport('dtc-mismatch'); }); }
       step({}); };
-    _drawDtcList((d.orders||[]).slice());
-    _drawDtcUnmapped(d.unmapped_pos||[]);
+    _drawDtcList((d.groups||[]).slice(), d.unmapped_pos||[]);
+    _drawDtcUnmapped(d.unmapped_pos||[], d.groups||[]);
     var _hb=document.getElementById('dtc-hide-acc'); if(_hb)_hb.onclick=function(){ _dtcHideAcc=!_dtcHideAcc; try{localStorage.setItem('dtcHideAcc',_dtcHideAcc?'1':'0');}catch(e){} _dtcApplyHideAcc(); };
     try{ _dtcApplyHideAcc(); }catch(e){}
     try{ refreshDtcBadge(); }catch(e){}
@@ -10389,95 +10389,115 @@
         load(); }).catch(function(e){ pb.disabled=false; if(m){m.style.color='#b91c1c';m.textContent='Failed: '+(e.message||e);} }); };
   }
   // #1 reverse view — open, not-received DTC-branch POs with no sales-order mapping
-  function _drawDtcUnmapped(list){ var el=document.getElementById('dtc-unmapped'); if(!el)return;
+  function _drawDtcUnmapped(list, groups){ var el=document.getElementById('dtc-unmapped'); if(!el)return; groups=groups||[];
     if(!list.length){ el.innerHTML=''; return; }
     var openN=list.filter(function(p){return !p.accepted;}).length, mob=actMob();
+    var soOpts=(function(){ var seen={}, out=[]; groups.forEach(function(g){ (g.sos||[]).forEach(function(s){ var r=s.reference||''; if(r&&!seen[r]){ seen[r]=1; out.push({val:r,label:r+(s.company?(' · '+s.company):'')}); } }); }); return out; })();
     var hdr='<div style="font-weight:700;font-size:13px;margin:18px 0 3px;color:#0f172a">Open purchase orders, not mapped to a sales order <span class="mut">('+openN+')</span></div>'
-      +'<div class="mut tiny" style="margin-bottom:6px;max-width:840px">Open (not received) POs in the Direct-to-Client branches with no sales-order reference. Accept a row to clear it from the count.</div>';
+      +'<div class="mut tiny" style="margin-bottom:6px;max-width:840px">Open (not received) POs in the Direct-to-Client branches with no matching open sales order. <b>Map</b> one to a sales order (in HORIZON, not Cin7), or accept a row to clear it from the count.</div>';
     function poBtn(p){ return '<button class="lnk-btn dtc-po" data-po="'+esc(p.po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer">'+esc(p.po)+'</button>'; }
+    function mapBtn(p){ return '<button class="dtc-mapso" data-po="'+esc(p.po)+'" style="font-size:10px;margin-left:6px;padding:1px 8px;border:1px solid #93c5fd;border-radius:8px;background:#eff6ff;color:#1d4ed8;cursor:pointer">🔗 Map SO</button>'; }
     function noteTa(p){ return '<textarea class="dtcpo-note" data-po="'+esc(p.po)+'" rows="1" placeholder="note…" style="width:'+(mob?'100%':'180px')+';min-height:22px;resize:vertical;overflow:hidden;font-family:inherit;font-size:12px;padding:3px 5px;border:1px solid #cbd5e1;border-radius:4px;box-sizing:border-box" oninput="this.style.height=\'auto\';this.style.height=this.scrollHeight+\'px\'">'+esc(p.note||'')+'</textarea>'; }
     function accCb(p){ return '<label style="font-size:11px;white-space:nowrap"><input type="checkbox" class="dtcpo-acc" data-po="'+esc(p.po)+'"'+(p.accepted?' checked':'')+'> accept</label>'; }
     if(mob){ var fld=function(l,v){ return v?'<div style="display:flex;gap:8px;font-size:12px;line-height:1.5"><span style="color:#64748b;flex:0 0 72px">'+l+'</span><span style="color:#0f172a;font-weight:500;word-break:break-word">'+v+'</span></div>':''; };
       el.innerHTML=hdr+'<div style="display:flex;flex-direction:column;gap:8px">'+list.map(function(p){ var acc=!!p.accepted;
         return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;background:'+(acc?'#eff6ff':'#fff')+'">'
-          +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">'+(acc?'<span class="tool-badge bg-blue">accepted</span> ':'')+poBtn(p)+(p.supplier?' <span class="mut">('+esc(p.supplier)+')</span>':'')+'</div>'
+          +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">'+(acc?'<span class="tool-badge bg-blue">accepted</span> ':'')+poBtn(p)+(p.supplier?' <span class="mut">('+esc(p.supplier)+')</span>':'')+mapBtn(p)+'</div>'
           +fld('Branch',esc(p.branch||''))+fld('Country',esc(p.country_code||''))+fld('Status',esc(p.status||''))
           +'<div style="margin-top:6px">'+noteTa(p)+'</div><div style="margin-top:6px">'+accCb(p)+'</div></div>'; }).join('')+'</div>';
     } else { var rows=list.map(function(p){ var acc=!!p.accepted;
-        return '<tr'+(acc?' style="opacity:.6"':'')+'><td class="l">'+(acc?'<span class="tool-badge bg-blue">accepted</span> ':'')+poBtn(p)+(p.supplier?' <span class="mut">('+esc(p.supplier)+')</span>':'')+'</td>'
+        return '<tr'+(acc?' style="opacity:.6"':'')+'><td class="l">'+(acc?'<span class="tool-badge bg-blue">accepted</span> ':'')+poBtn(p)+(p.supplier?' <span class="mut">('+esc(p.supplier)+')</span>':'')+mapBtn(p)+'</td>'
           +'<td class="l">'+esc(p.branch||'')+'</td><td class="l">'+esc(p.country_code||'')+'</td><td class="l">'+esc(p.status||'')+'</td>'
           +'<td class="l">'+noteTa(p)+'</td><td class="l">'+accCb(p)+'</td></tr>'; }).join('');
       el.innerHTML=hdr+'<div style="overflow-x:auto;max-width:100%"><table style="width:max-content;min-width:100%;border-collapse:collapse"><thead><tr><th class="l">PO (supplier)</th><th class="l">Branch</th><th class="l">Country</th><th class="l">Status</th><th class="l">Note</th><th class="l">Accept</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
     }
     el.querySelectorAll('.dtc-po').forEach(function(x){ x.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(x.dataset.po,'oplan'); else if(typeof gotoPO==='function')gotoPO(x.dataset.po,'oplan'); }; });
+    el.querySelectorAll('.dtc-mapso').forEach(function(b){ b.onclick=function(){ _dtcPicker(b,{title:'Map '+b.dataset.po+' to a sales order', placeholder:'search open sales orders or type a ref…', options:soOpts, onPick:function(ref){ _dtcMap(b.dataset.po,ref,true,function(){ selectReport('dtc-mismatch'); }); }}); }; });
     function savePo(po,accepted,note){ fetch('/api/supply/dtc/po-review',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,accepted:accepted,note:note})}).then(function(r){return r.json();}).then(function(){ selectReport('dtc-mismatch'); }).catch(function(){}); }
     function persistPo(po,accepted,note){ fetch('/api/supply/dtc/po-review',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,accepted:accepted,note:note})}).catch(function(){}); }   // silent (for note edits) — no re-render so the green flash shows
     el.querySelectorAll('.dtcpo-acc').forEach(function(cb){ cb.onclick=function(){ var po=cb.dataset.po, ne=el.querySelector('.dtcpo-note[data-po="'+(window.CSS&&CSS.escape?CSS.escape(po):po)+'"]'); savePo(po,cb.checked,ne?ne.value:''); }; });
     el.querySelectorAll('.dtcpo-note').forEach(function(inp){ inp.onchange=function(){ var po=inp.dataset.po, ce=el.querySelector('.dtcpo-acc[data-po="'+(window.CSS&&CSS.escape?CSS.escape(po):po)+'"]'); persistPo(po,ce?ce.checked:false,inp.value); _dtcFlash(inp); };
       inp.style.height='auto'; inp.style.height=inp.scrollHeight+'px'; });   // same auto-grow + flash as the sales-order notes
   }
-  function _drawDtcList(orders){ var el=document.getElementById('dtc-list'); if(!el)return;
-    if(!orders.length){ el.innerHTML='<div class="mut tiny" style="padding:8px 0">No open DTC sales orders imported yet. Click <b>Import sales orders</b> to pull them from Cin7.</div>'; return; }
-    orders.sort(function(a,b){ var ra=(a.issue&&!a.accepted)?0:(a.accepted?2:1), rb=(b.issue&&!b.accepted)?0:(b.accepted?2:1); return ra-rb; });
-    var mob=actMob(), DCAP=5;   // per-SKU/qty table: show first 5 lines, "expand" reveals the rest (Ben)
-    function tlCell(o){ if(!o.tl_po)return '<span class="mut">—</span>';   // per-PO timeline: last message + open the full thread
-      var last=o.tl_last;
-      if(!last)return '<button class="lnk-btn dtc-tl" data-po="'+esc(o.tl_po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer;font-size:11px">+ add note</button>';
+  // ── In-app PO ↔ Sales-Order mapping (mig 254) — add/remove edges in HORIZON, never Cin7 ──
+  function _dtcMap(po,ref,link,done){ fetch('/api/supply/dtc/map',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,sales_order_ref:ref,link:link})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} done&&done(); }).catch(function(e){alert('Map failed: '+(e.message||e));}); }
+  function _dtcUnmap(po,ref,done){ fetch('/api/supply/dtc/unmap',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,sales_order_ref:ref})}).then(function(r){return r.json();}).then(function(){ done&&done(); }).catch(function(e){alert('Unmap failed: '+(e.message||e));}); }
+  // Small floating picker: filter a list of options (or type a free value), then onPick(val).
+  function _dtcPicker(anchor,cfg){ var old=document.getElementById('dtc-picker'); if(old)old.remove();
+    var box=document.createElement('div'); box.id='dtc-picker'; box.style.cssText='position:fixed;z-index:300020;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.22);width:320px;max-height:360px;display:flex;flex-direction:column;overflow:hidden;font-size:12px;text-align:left';
+    box.innerHTML='<div style="padding:8px 10px;border-bottom:1px solid #eef2f7"><div style="font-weight:700;margin-bottom:5px;color:#0f172a">'+esc(cfg.title||'Map')+'</div><input id="dtc-pick-q" placeholder="'+esc(cfg.placeholder||'search or type…')+'" style="width:100%;box-sizing:border-box;font-size:12px;padding:5px 7px;border:1px solid #cbd5e1;border-radius:5px"></div><div id="dtc-pick-list" style="overflow:auto;flex:1 1 auto"></div><div style="padding:6px 10px;border-top:1px solid #eef2f7;display:flex;gap:6px"><button id="dtc-pick-use" style="flex:1;font-size:11px;padding:5px;border:1px solid #1d4ed8;background:#1d4ed8;color:#fff;border-radius:5px;cursor:pointer">Use typed value</button><button id="dtc-pick-x" style="font-size:11px;padding:5px 10px;border:1px solid #cbd5e1;background:#fff;border-radius:5px;cursor:pointer">Cancel</button></div>';
+    document.body.appendChild(box);
+    var r=anchor.getBoundingClientRect(); box.style.left=Math.max(6,Math.min(r.left,window.innerWidth-326))+'px'; box.style.top=Math.min(r.bottom+4,window.innerHeight-370)+'px';
+    var q=box.querySelector('#dtc-pick-q'), list=box.querySelector('#dtc-pick-list');
+    function draw(){ var s=(q.value||'').trim().toLowerCase(); var opts=(cfg.options||[]).filter(function(o){return !s||o.label.toLowerCase().indexOf(s)>=0;}).slice(0,80);
+      list.innerHTML=opts.length?opts.map(function(o){return '<div class="dtc-pick-row" data-v="'+esc(o.val)+'" style="padding:6px 10px;cursor:pointer;border-bottom:1px solid #f4f6f9">'+esc(o.label)+'</div>';}).join(''):'<div style="padding:8px 10px;color:#94a3b8">No matches — type a value + Use.</div>';
+      list.querySelectorAll('.dtc-pick-row').forEach(function(x){ x.onmouseover=function(){x.style.background='#eff6ff';}; x.onmouseout=function(){x.style.background='';}; x.onclick=function(){ box.remove(); cfg.onPick(x.dataset.v); }; }); }
+    q.oninput=draw; draw(); setTimeout(function(){try{q.focus();}catch(e){}},20);
+    box.querySelector('#dtc-pick-use').onclick=function(){ var v=(q.value||'').trim(); if(!v)return; box.remove(); cfg.onPick(v); };
+    box.querySelector('#dtc-pick-x').onclick=function(){ box.remove(); };
+    setTimeout(function(){ document.addEventListener('mousedown',function h(e){ if(!box.contains(e.target)){box.remove();document.removeEventListener('mousedown',h,true);} },true); },0);
+  }
+  // Group-centric list (mig 254): each row is a connected component (a set of SOs + POs). Multi-SO groups render
+  // together with ONE grouped SKU/qty discrepancy. Map/unmap PO↔SO edges in-app. `unmapped` seeds the "Map PO" picker.
+  function _drawDtcList(groups, unmapped){ var el=document.getElementById('dtc-list'); if(!el)return; unmapped=unmapped||[];
+    if(!groups.length){ el.innerHTML='<div class="mut tiny" style="padding:8px 0">No open DTC sales orders imported yet. Click <b>Import sales orders</b> to pull them from Cin7.</div>'; return; }
+    var mob=actMob(), DCAP=6;
+    var unmapOpts=unmapped.map(function(u){ return {val:u.po,label:u.po+(u.supplier?(' · '+u.supplier):'')}; });
+    function ids(g){ return g.sos.map(function(s){return s.cin7_id;}).join(','); }
+    function badgeFor(g){ return g.accepted?'<span class="tool-badge bg-blue">accepted</span>':g.issue==='no_po'?'<span class="tool-badge bg-red">no PO mapped</span>':g.issue==='qty_mismatch'?'<span class="tool-badge bg-amber">SKU / qty mismatch</span>':'<span class="tool-badge bg-green">OK</span>'; }
+    function diffTable(g){ if(!g.diffs||!g.diffs.length)return ''; var shown=g.diffs.slice(0,DCAP);
+      var rows=shown.map(function(x){ var po='<span style="color:#b91c1c">'+units(x.poQty)+'</span>'; return '<tr><td style="padding:1px 8px 1px 0;white-space:normal;word-break:break-word">'+esc(x.sku)+'</td><td style="text-align:right;padding:1px 4px">'+units(x.soQty)+'</td><td style="text-align:right;padding:1px 4px">'+po+'</td></tr>'; }).join('');
+      var more=(g.diffs.length>DCAP)?'<div class="mut tiny" style="margin-top:2px">+ '+(g.diffs.length-DCAP)+' more SKU(s)</div>':'';
+      return '<div style="max-width:460px;overflow-x:auto;margin-top:4px"><table class="tiny" style="border-collapse:collapse;width:100%;table-layout:fixed"><colgroup><col><col style="width:44px"><col style="width:44px"></colgroup><thead><tr style="color:#94a3b8"><th style="text-align:left;padding:1px 8px 1px 0">SKU</th><th style="text-align:right;padding:1px 4px">SO</th><th style="text-align:right;padding:1px 4px">PO</th></tr></thead><tbody>'+rows+'</tbody></table>'+more+'</div>'; }
+    function soCell(g){ var refs=g.sos.map(function(s){return '<b>'+esc(s.reference||'')+'</b>';}).join('<br>');
+      var chip=g.grouped?' <span class="tool-badge" style="background:#ede9fe;color:#5b21b6" title="one or more POs span these sales orders — discrepancy is summed across the group">grouped ×'+g.sos.length+'</span>':'';
+      var s0=g.sos[0]||{}, meta=esc(s0.company||'')+' · '+esc(s0.branch_name||'')+(s0.created_date?' · '+esc(s0.created_date):'');
+      return refs+chip+'<div class="mut tiny">'+meta+'</div>'; }
+    function poCell(g){ var soref=(g.sos[0]||{}).reference||'';
+      var parts=(g.po_refs||[]).map(function(p){ var chip=p.app?' <span class="tool-badge" style="background:#dcfce7;color:#166534" title="mapped in HORIZON (not Cin7)">app</span>':'';
+        var x='<span class="dtc-pounmap" data-po="'+esc(p.po)+'" data-ref="'+esc(soref)+'" data-app="'+(p.app?'1':'0')+'" title="'+(p.app?'remove this in-app mapping':'detach this Cin7 link (HORIZON only)')+'" style="color:#b91c1c;cursor:pointer;margin-left:5px;font-weight:700">✕</span>';
+        return '<span style="white-space:nowrap"><button class="lnk-btn dtc-po" data-po="'+esc(p.po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer">'+esc(p.po)+'</button>'+(p.supplier?' <span class="mut">('+esc(p.supplier)+')</span>':'')+chip+x+'</span>'; }).join('<br>');
+      var mapBtn='<button class="dtc-mappo" data-ref="'+esc(soref)+'" style="font-size:10px;margin-top:3px;padding:1px 8px;border:1px solid #93c5fd;border-radius:8px;background:#eff6ff;color:#1d4ed8;cursor:pointer">🔗 Map PO</button>';
+      return (parts||'<span class="mut">—</span>')+'<div>'+mapBtn+'</div>'; }
+    function tlCell(g){ if(!g.tl_po)return '<span class="mut">—</span>'; var last=g.tl_last;
+      if(!last)return '<button class="lnk-btn dtc-tl" data-po="'+esc(g.tl_po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer;font-size:11px">+ add note</button>';
       var who=shortUser(last.author||'')||(last.kind==='supplier'?'Supplier':'—'), body=String(last.body||''), shortB=esc(body.length>64?body.slice(0,64)+'…':body);
-      return '<div style="font-size:11px;max-width:230px"><div class="mut" style="font-size:10px">'+esc(who)+' · '+esc(last.at||'')+'</div><div style="white-space:pre-wrap;word-break:break-word;margin:1px 0">'+shortB+'</div><button class="lnk-btn dtc-tl" data-po="'+esc(o.tl_po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer;font-size:11px">'+(o.tl_count>1?('view all '+o.tl_count+' →'):'open timeline →')+'</button></div>'; }
-    var rows=orders.map(function(o){
-      var badge=_dtcBadge(o);
-      var mism=(o.diffs||[]).filter(function(x){return (x.soQty||0)!==(x.poQty||0);});
-      var match=(o.diffs||[]).filter(function(x){return (x.soQty||0)===(x.poQty||0);});   // matching lines (SO qty === PO qty)
-      function drow(x,matched,cls,hidden){ var po=matched?'<span style="color:#166534;font-weight:600">&#10003; '+units(x.poQty)+'</span>':'<span style="color:#b91c1c">'+units(x.poQty)+'</span>';
-        return '<tr'+(cls?' class="'+cls+'"':'')+(hidden?' style="display:none"':'')+'><td style="padding:1px 8px 1px 0;white-space:normal;word-break:break-word">'+esc(x.sku)+'</td><td style="text-align:right;padding:1px 4px">'+units(x.soQty)+'</td><td style="text-align:right;padding:1px 4px">'+po+'</td></tr>'; }
-      // SKU column wraps; SO/PO narrow. Mismatch lines past the first 5 hidden behind a per-row "show all N SKUs" toggle; matching lines behind their own toggle.
-      var mismRows=mism.map(function(x,i){ return drow(x,false,(i>=DCAP?'dtc-xline':''),i>=DCAP); }).join('');
-      var matchRows=match.map(function(x){ return drow(x,true,'dtc-match-line',true); }).join('');
-      var moreBtn=(mism.length>DCAP)?'<button class="dtc-morelines" data-id="'+o.cin7_id+'" data-n="'+mism.length+'" style="font-size:10px;margin-top:3px;margin-right:6px;padding:1px 7px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;color:#334155;cursor:pointer">&#9662; show all '+mism.length+' SKUs</button>':'';
-      var showMatchBtn=(match.length?'<button class="dtc-showmatch" data-id="'+o.cin7_id+'" style="font-size:10px;margin-top:3px;padding:1px 7px;border:1px solid #bbf7d0;border-radius:8px;background:#f0fdf4;color:#166534;cursor:pointer">&#10003; show matching ('+match.length+')</button>':'');
-      var diffs=(o.diffs&&o.diffs.length)?('<div class="dtc-diff" data-diffid="'+o.cin7_id+'" style="max-width:460px;overflow-x:auto;margin-top:4px">'
-        +'<table class="tiny" style="border-collapse:collapse;width:100%;table-layout:fixed"><colgroup><col><col style="width:44px"><col style="width:44px"></colgroup>'
-        +'<thead><tr style="color:#94a3b8"><th style="text-align:left;padding:1px 8px 1px 0">SKU</th><th style="text-align:right;padding:1px 4px">SO</th><th style="text-align:right;padding:1px 4px">PO</th></tr></thead><tbody>'
-        +mismRows+matchRows+'</tbody></table>'+moreBtn+showMatchBtn+'</div>'):'';
-      var pos=(o.po_refs&&o.po_refs.length)?o.po_refs.map(function(p){var po=(p&&p.po!=null)?p.po:p,sup=(p&&p.supplier)?(' <span class="mut">('+esc(p.supplier)+')</span>'):'';return '<button class="lnk-btn dtc-po" data-po="'+esc(po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer">'+esc(po)+'</button>'+sup;}).join('<br>'):'<span class="mut">—</span>';
-      var noteTa='<textarea class="dtc-note" data-id="'+o.cin7_id+'" rows="1" placeholder="note…" style="width:'+(mob?'100%':'180px')+';min-height:22px;resize:vertical;overflow:hidden;font-family:inherit;font-size:12px;padding:3px 5px;border:1px solid #cbd5e1;border-radius:4px;box-sizing:border-box" oninput="this.style.height=\'auto\';this.style.height=this.scrollHeight+\'px\'">'+esc(o.note||'')+'</textarea>';
-      var accCb='<label style="font-size:11px;white-space:nowrap"><input type="checkbox" class="dtc-acc" data-id="'+o.cin7_id+'"'+(o.accepted?' checked':'')+'> accept</label>';
-      var meta=esc(o.company||'')+' · '+esc(o.branch_name||'')+(o.created_date?' · '+esc(o.created_date):'');
-      if(mob){ return '<div class="dtc-order-row" data-id="'+o.cin7_id+'" data-acc="'+(o.accepted?'1':'0')+'" style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;background:'+(o.accepted?'#dcfce7':'#fff')+'">'
-        +'<div style="display:flex;align-items:center;gap:8px;margin-bottom:3px;flex-wrap:wrap"><div style="font-weight:700;font-size:13px">'+esc(o.reference||'')+'</div><span style="flex:1"></span>'+badge+'</div>'
-        +'<div class="mut tiny" style="margin-bottom:5px">'+meta+'</div>'+diffs
-        +'<div style="margin-top:6px;font-size:12px"><span style="color:#64748b">PO(s): </span>'+pos+'</div>'
+      return '<div style="font-size:11px;max-width:230px"><div class="mut" style="font-size:10px">'+esc(who)+' · '+esc(last.at||'')+'</div><div style="white-space:pre-wrap;word-break:break-word;margin:1px 0">'+shortB+'</div><button class="lnk-btn dtc-tl" data-po="'+esc(g.tl_po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer;font-size:11px">'+(g.tl_count>1?('view all '+g.tl_count+' →'):'open timeline →')+'</button></div>'; }
+    var rows=groups.map(function(g){ var acc=!!g.accepted, ntext=(g.sos[0]||{}).note||'', idstr=ids(g);
+      var noteTa='<textarea class="dtc-note" data-ids="'+idstr+'" rows="1" placeholder="note…" style="width:'+(mob?'100%':'180px')+';min-height:22px;resize:vertical;overflow:hidden;font-family:inherit;font-size:12px;padding:3px 5px;border:1px solid #cbd5e1;border-radius:4px;box-sizing:border-box" oninput="this.style.height=\'auto\';this.style.height=this.scrollHeight+\'px\'">'+esc(ntext)+'</textarea>';
+      var accCb='<label style="font-size:11px;white-space:nowrap"><input type="checkbox" class="dtc-acc" data-ids="'+idstr+'"'+(acc?' checked':'')+'> accept</label>';
+      if(mob){ return '<div class="dtc-order-row" data-ids="'+idstr+'" data-acc="'+(acc?'1':'0')+'" style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;background:'+(acc?'#dcfce7':'#fff')+'">'
+        +'<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:3px;flex-wrap:wrap"><div style="font-weight:700;font-size:13px">'+soCell(g)+'</div><span style="flex:1"></span>'+badgeFor(g)+'</div>'+diffTable(g)
+        +'<div style="margin-top:6px;font-size:12px"><span style="color:#64748b">PO(s): </span>'+poCell(g)+'</div>'
         +'<div style="margin-top:6px">'+noteTa+'</div>'
-        +'<div style="margin-top:6px"><div style="color:#64748b;font-size:11px;margin-bottom:2px">Timeline</div>'+tlCell(o)+'</div>'
+        +'<div style="margin-top:6px"><div style="color:#64748b;font-size:11px;margin-bottom:2px">Timeline</div>'+tlCell(g)+'</div>'
         +'<div style="margin-top:6px">'+accCb+'</div></div>'; }
-      return '<tr class="dtc-order-row" data-id="'+o.cin7_id+'" data-acc="'+(o.accepted?'1':'0')+'"'+(o.accepted?' style="background:#dcfce7"':'')+'><td class="l" style="vertical-align:top"><b>'+esc(o.reference||'')+'</b><div class="mut tiny">'+meta+'</div></td>'
-        +'<td class="l" style="vertical-align:top">'+badge+diffs+'</td>'
-        +'<td class="l" style="vertical-align:top">'+pos+'</td>'
+      return '<tr class="dtc-order-row" data-ids="'+idstr+'" data-acc="'+(acc?'1':'0')+'"'+(acc?' style="background:#dcfce7"':'')+'><td class="l" style="vertical-align:top">'+soCell(g)+'</td>'
+        +'<td class="l" style="vertical-align:top">'+badgeFor(g)+diffTable(g)+'</td>'
+        +'<td class="l" style="vertical-align:top">'+poCell(g)+'</td>'
         +'<td class="l" style="vertical-align:top">'+noteTa+'</td>'
-        +'<td class="l" style="vertical-align:top">'+tlCell(o)+'</td>'
+        +'<td class="l" style="vertical-align:top">'+tlCell(g)+'</td>'
         +'<td class="l" style="vertical-align:top">'+accCb+'</td></tr>';
     }).join('');
     el.innerHTML=mob?('<div style="display:flex;flex-direction:column;gap:8px">'+rows+'</div>')
-      :('<div style="overflow-x:auto;max-width:100%"><table style="width:max-content;min-width:100%;border-collapse:collapse"><thead><tr><th class="l">Sales order</th><th class="l">Status</th><th class="l">PO(s)</th><th class="l">Note</th><th class="l">Timeline</th><th class="l">Accept</th></tr></thead><tbody>'+rows+'</tbody></table></div>');
+      :('<div style="overflow-x:auto;max-width:100%"><table style="width:max-content;min-width:100%;border-collapse:collapse"><thead><tr><th class="l">Sales order</th><th class="l">Discrepancy (SO vs PO)</th><th class="l">PO(s)</th><th class="l">Note</th><th class="l">Timeline</th><th class="l">Accept</th></tr></thead><tbody>'+rows+'</tbody></table></div>');
     el.querySelectorAll('.dtc-po').forEach(function(x){ x.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(x.dataset.po,'oplan'); else if(typeof gotoPO==='function')gotoPO(x.dataset.po,'oplan'); }; });
-    el.querySelectorAll('.dtc-showmatch').forEach(function(btn){ btn.onclick=function(){ var id=btn.dataset.id, blk=el.querySelector('.dtc-diff[data-diffid="'+id+'"]'); if(!blk)return; var lines=blk.querySelectorAll('.dtc-match-line'), show=btn.dataset.shown!=='1'; btn.dataset.shown=show?'1':'0'; lines.forEach(function(l){l.style.display=show?'':'none';}); btn.innerHTML=(show?'&#9662; hide matching (':'&#10003; show matching (')+lines.length+')'; }; });
-    el.querySelectorAll('.dtc-morelines').forEach(function(btn){ btn.onclick=function(){ var blk=el.querySelector('.dtc-diff[data-diffid="'+btn.dataset.id+'"]'); if(!blk)return; var lines=blk.querySelectorAll('.dtc-xline'), show=btn.dataset.shown!=='1'; btn.dataset.shown=show?'1':'0'; lines.forEach(function(l){l.style.display=show?'':'none';}); btn.innerHTML=show?'&#9652; show fewer':('&#9662; show all '+(btn.dataset.n||'')+' SKUs'); }; });
     el.querySelectorAll('.dtc-tl').forEach(function(b){ b.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(b.dataset.po,'timeline'); else if(typeof gotoPO==='function')gotoPO(b.dataset.po,'timeline'); }; });
-    function persist(id,accepted,note){ fetch('/api/supply/dtc/review',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({so_cin7_id:Number(id),accepted:accepted,note:note})}).catch(function(){}); }
-    // ACCEPT: persist silently, move the row/card to the bottom, highlight light-green, update counters live — no page refresh (I1).
-    el.querySelectorAll('.dtc-acc').forEach(function(cb){ cb.onclick=function(){
-      var id=cb.dataset.id, o=orders.filter(function(x){return String(x.cin7_id)===String(id);})[0]||{}, ne=el.querySelector('.dtc-note[data-id="'+id+'"]'), note=ne?ne.value:'', acc=cb.checked, cont=cb.closest('.dtc-order-row');
-      o.accepted=acc; persist(id,acc,note);
-      if(cont){ cont.dataset.acc=acc?'1':'0'; var bd=cont.querySelector('.tool-badge');
-        if(bd){ if(acc){bd.className='tool-badge bg-blue';bd.textContent='accepted';} else { var tmp=document.createElement('span'); tmp.innerHTML=_dtcBadge(o); if(tmp.firstChild){bd.className=tmp.firstChild.className;bd.textContent=tmp.firstChild.textContent;} } }
-        if(acc){ cont.style.background='#dcfce7'; cont.parentNode.appendChild(cont); _dtcBumpPill('Accepted',1); _dtcBumpPill(o.issue?'Issues':'OK',-1); }
-        else { cont.style.background=(mob?'#fff':''); _dtcBumpPill('Accepted',-1); _dtcBumpPill(o.issue?'Issues':'OK',1); }
-      }
-      _dtcApplyHideAcc();   // recompute hide-accepted visibility after the change (row/card may have moved to the bottom)
+    el.querySelectorAll('.dtc-mappo').forEach(function(b){ b.onclick=function(){ var ref=b.dataset.ref; if(!ref){alert('This group has no sales-order reference to map to.');return;}
+      _dtcPicker(b,{title:'Map a PO to '+ref, placeholder:'search unmapped POs or type a PO number…', options:unmapOpts, onPick:function(po){ _dtcMap(po,ref,true,function(){ selectReport('dtc-mismatch'); }); }}); }; });
+    el.querySelectorAll('.dtc-pounmap').forEach(function(x){ x.onclick=function(){ var po=x.dataset.po, ref=x.dataset.ref, app=x.dataset.app==='1';
+      if(app){ _dtcUnmap(po,ref,function(){ selectReport('dtc-mismatch'); }); }
+      else { if(!confirm('Detach the Cin7 link '+po+' ↔ '+ref+'?\nThis hides it in HORIZON only — Cin7 is not changed.'))return; _dtcMap(po,ref,false,function(){ selectReport('dtc-mismatch'); }); } }; });
+    // Accept / note apply to EVERY sales order in the group (a grouped discrepancy is cleared as a whole).
+    function persistG(idstr,accepted,note){ (idstr||'').split(',').filter(Boolean).forEach(function(id){ fetch('/api/supply/dtc/review',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({so_cin7_id:Number(id),accepted:accepted,note:note})}).catch(function(){}); }); }
+    el.querySelectorAll('.dtc-acc').forEach(function(cb){ cb.onclick=function(){ var idstr=cb.dataset.ids, ne=el.querySelector('.dtc-note[data-ids="'+idstr+'"]'), note=ne?ne.value:'', acc=cb.checked, cont=cb.closest('.dtc-order-row');
+      persistG(idstr,acc,note);
+      if(cont){ cont.dataset.acc=acc?'1':'0'; var bd=cont.querySelector('.tool-badge'); if(bd&&acc){bd.className='tool-badge bg-blue';bd.textContent='accepted';}
+        if(acc){ cont.style.background='#dcfce7'; cont.parentNode.appendChild(cont); _dtcBumpPill('Accepted',1); _dtcBumpPill('Issues',-1); } else { cont.style.background=(mob?'#fff':''); _dtcBumpPill('Accepted',-1); _dtcBumpPill('Issues',1); } }
+      _dtcApplyHideAcc();
     }; });
-    el.querySelectorAll('.dtc-note').forEach(function(inp){ inp.onchange=function(){ var id=inp.dataset.id, ce=el.querySelector('.dtc-acc[data-id="'+id+'"]'); persist(id,ce?ce.checked:false,inp.value); _dtcFlash(inp); };
-      inp.style.height='auto'; inp.style.height=inp.scrollHeight+'px'; });   // auto-size notes on load (J)
+    el.querySelectorAll('.dtc-note').forEach(function(inp){ inp.onchange=function(){ var idstr=inp.dataset.ids, ce=el.querySelector('.dtc-acc[data-ids="'+idstr+'"]'); persistG(idstr,ce?ce.checked:false,inp.value); _dtcFlash(inp); };
+      inp.style.height='auto'; inp.style.height=inp.scrollHeight+'px'; });
     try{ _dtcApplyHideAcc(); }catch(e){}
   }
   function biTile(label,val,sub,accent){ return '<div style="flex:1 1 160px;min-width:160px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px">'

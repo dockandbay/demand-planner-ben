@@ -9256,8 +9256,16 @@ app.post('/api/supply/dtc/review', async (req, res) => {   // per-order note / a
       [id, (b.note != null ? String(b.note) : null), !!b.accepted, !!b.accepted ? authUser(req) : null]);
     res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-// The mismatch report: OPEN DTC sales orders (not void, not dispatched) vs the POs mapped by sales_order_ref.
-// Issue 1 = no PO mapped; Issue 2 = SKU/qty on the SO ≠ summed across its POs. Accepted orders drop out of the count.
+// Normalise a sales-order ref for matching: trim, collapse inner whitespace, uppercase.
+function _dtcNorm(s) { return String(s == null ? '' : s).trim().replace(/\s+/g, ' ').toUpperCase(); }
+// Parse a (possibly packed) Cin7 sales_order_ref into individual normalised refs. Cin7 packs several SO refs into one
+// field, e.g. "JLEW11511-59, JLEW11511-63", "A and B", or "A / B". Split on comma/semicolon/slash, the word "and"
+// (space-delimited), and runs of 2+ spaces; single spaces inside a ref are preserved ("Smiley - Galleria Order").
+function _dtcParseRefs(s) { return String(s == null ? '' : s).split(/\s*[,;\/]\s*|\s+and\s+|\s{2,}/i).map(_dtcNorm).filter(Boolean); }
+// The mismatch report: OPEN DTC sales orders (not void, not dispatched) reconciled against their POs. Links come from
+// the PO's (possibly packed) sales_order_ref PLUS the in-app planner.dtc_po_so_map (mig 254). Because a PO can serve
+// several SOs and an SO several POs, we build the SO<->PO graph and reconcile by CONNECTED COMPONENT (group): grouped
+// SO SKU/qty vs grouped PO SKU/qty. Issue 1 = a group with SOs but no PO; Issue 2 = grouped SKU/qty mismatch.
 app.get('/api/supply/dtc/mismatch', async (req, res) => {
   const countOnly = !!(req.query && req.query.count);
   try {
@@ -9265,18 +9273,53 @@ app.get('/api/supply/dtc/mismatch', async (req, res) => {
         coalesce(r.note,'') note, coalesce(r.accepted,false) accepted, coalesce(r.accepted_by,'') accepted_by
       FROM planner.dtc_sales_orders s LEFT JOIN planner.dtc_mismatch_review r ON r.so_cin7_id=s.cin7_id
       WHERE NOT s.is_void AND s.dispatched_date IS NULL ORDER BY s.created_date DESC NULLS LAST`)).rows;
-    if (!sos.length) return res.json({ orders: [], counts: { issues: 0, accepted: 0, ok: 0 } });
-    const ids = sos.map(s => s.cin7_id), refs = sos.map(s => s.reference).filter(Boolean);
+    if (!sos.length) return res.json({ groups: [], unmapped_pos: [], counts: { issues: 0, accepted: 0, ok: 0, unmapped_pos: 0 } });
+    const soByRef = {};   // normalised SO ref -> the open SO row
+    sos.forEach(s => { const k = _dtcNorm(s.reference); if (k) soByRef[k] = s; });
+    const ids = sos.map(s => s.cin7_id);
     const soLineMap = {};
     (await pool.query(`SELECT so_cin7_id, code, sum(qty) qty FROM planner.dtc_sales_order_lines WHERE so_cin7_id = ANY($1) GROUP BY so_cin7_id, code`, [ids])).rows
       .forEach(l => { (soLineMap[l.so_cin7_id] = soLineMap[l.so_cin7_id] || {})[l.code] = Number(l.qty) || 0; });
-    const posByRef = {};
-    const pos = refs.length ? (await pool.query(`SELECT po, sales_order_ref, coalesce(supplier_name,'') supplier FROM planner.purchase_orders WHERE sales_order_ref = ANY($1)`, [refs])).rows : [];
-    pos.forEach(p => { (posByRef[p.sales_order_ref] = posByRef[p.sales_order_ref] || []).push({ po: p.po, supplier: p.supplier }); });
-    const allPos = pos.map(p => p.po), poLineByPo = {};
+
+    // Candidate POs: open DTC-branch POs, plus any PO named in the app map. Parse their refs into SO edges.
+    const DTC_BRANCH_NAMES = Object.values(DTC_BRANCHES);
+    const candPos = (await pool.query(`
+      SELECT p.po, coalesce(p.sales_order_ref,'') sales_order_ref, coalesce(p.supplier_name,'') supplier,
+             coalesce(p.branch,'') branch, coalesce(p.country_code,'') country_code, coalesce(p.status,'') status
+      FROM planner.purchase_orders p
+      WHERE (p.branch = ANY($1) OR p.po IN (SELECT po FROM planner.dtc_po_so_map))
+        AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%cancel%' AND coalesce(p.status,'') NOT ILIKE '%void%'`,
+      [DTC_BRANCH_NAMES])).rows;
+    const poMeta = {};
+    candPos.forEach(p => { poMeta[p.po] = { supplier: p.supplier, branch: p.branch, country_code: p.country_code, status: p.status }; });
+    // App map: link=true adds an edge, link=false suppresses one (lets you correct a wrong Cin7 ref in-app).
+    const appRows = (await pool.query(`SELECT po, sales_order_ref, link FROM planner.dtc_po_so_map`)).rows;
+    const suppress = new Set(); const appAdd = {};
+    appRows.forEach(a => { const k = _dtcNorm(a.sales_order_ref); if (!k) return; if (a.link === false) suppress.add(a.po + '|' + k); else (appAdd[a.po] = appAdd[a.po] || []).push(k); });
+    const poToSo = {};   // po -> Set(normalised open-SO ref)
+    function addEdge(po, k) { if (!k || !soByRef[k] || suppress.has(po + '|' + k)) return; (poToSo[po] = poToSo[po] || new Set()).add(k); }
+    const cin7EdgeSet = new Set();   // "po|ref" edges that came from Cin7's sales_order_ref (vs the app map) — for the "app-mapped" badge
+    candPos.forEach(p => { _dtcParseRefs(p.sales_order_ref).forEach(k => { if (soByRef[k] && !suppress.has(p.po + '|' + k)) cin7EdgeSet.add(p.po + '|' + k); addEdge(p.po, k); }); });
+    Object.keys(appAdd).forEach(po => { appAdd[po].forEach(k => addEdge(po, k)); });
+    // App-mapped POs that weren't candidates (e.g. non-DTC branch) still need metadata for display.
+    const missMeta = Object.keys(appAdd).filter(po => !poMeta[po] && poToSo[po]);
+    if (missMeta.length) (await pool.query(`SELECT po, coalesce(supplier_name,'') supplier, coalesce(branch,'') branch, coalesce(country_code,'') country_code, coalesce(status,'') status FROM planner.purchase_orders WHERE po = ANY($1)`, [missMeta])).rows
+      .forEach(p => { poMeta[p.po] = { supplier: p.supplier, branch: p.branch, country_code: p.country_code, status: p.status }; });
+
+    // Connected components over the bipartite SO<->PO graph. Nodes: 'S:'+ref, 'P:'+po. Every open SO is a node.
+    const adj = {};
+    function link(a, b) { (adj[a] = adj[a] || new Set()).add(b); (adj[b] = adj[b] || new Set()).add(a); }
+    Object.keys(soByRef).forEach(k => { adj['S:' + k] = adj['S:' + k] || new Set(); });
+    Object.keys(poToSo).forEach(po => { poToSo[po].forEach(k => link('P:' + po, 'S:' + k)); });
+    const seen = new Set(); const comps = [];
+    Object.keys(adj).forEach(n => { if (seen.has(n)) return; const stack = [n], comp = []; seen.add(n);
+      while (stack.length) { const x = stack.pop(); comp.push(x); adj[x].forEach(y => { if (!seen.has(y)) { seen.add(y); stack.push(y); } }); }
+      comps.push(comp); });
+
+    const compPos = new Set(); comps.forEach(c => c.forEach(n => { if (n[0] === 'P') compPos.add(n.slice(2)); }));
+    const allPos = Array.from(compPos), poLineByPo = {};
     if (allPos.length) (await pool.query(`SELECT po, sku, sum(qty) qty FROM planner.purchase_order_lines WHERE po = ANY($1) GROUP BY po, sku`, [allPos])).rows
       .forEach(l => { (poLineByPo[l.po] = poLineByPo[l.po] || {})[l.sku] = (poLineByPo[l.po][l.sku] || 0) + (Number(l.qty) || 0); });
-    // Per-PO timeline: latest note + total count for each mapped PO (the report's Timeline column). Skip on count polls.
     const lastNoteByPo = {}, noteCountByPo = {};
     if (!countOnly && allPos.length) {
       (await pool.query(`SELECT DISTINCT ON (po) po, body, coalesce(author_email,'') author_email, coalesce(author_kind,'') author_kind,
@@ -9285,36 +9328,70 @@ app.get('/api/supply/dtc/mismatch', async (req, res) => {
       (await pool.query(`SELECT po, count(*)::int n FROM planner.supplier_notes WHERE po = ANY($1) GROUP BY po`, [allPos])).rows
         .forEach(r => { noteCountByPo[r.po] = r.n; });
     }
+
     let issues = 0, accepted = 0, ok = 0;
-    const orders = sos.map(s => {
-      const poRefs = posByRef[s.reference] || [], soL = soLineMap[s.cin7_id] || {}, poAgg = {};
-      poRefs.forEach(pr => { const m = poLineByPo[pr.po] || {}; Object.keys(m).forEach(sku => { poAgg[sku] = (poAgg[sku] || 0) + m[sku]; }); });
-      let issue = null; const diffs = [];
-      if (!poRefs.length) issue = 'no_po';
-      else { const skus = {}; Object.keys(soL).forEach(k => skus[k] = 1); Object.keys(poAgg).forEach(k => skus[k] = 1);
-        Object.keys(skus).forEach(sku => { const sq = soL[sku] || 0, pq = poAgg[sku] || 0; if (sq !== pq) diffs.push({ sku, soQty: sq, poQty: pq }); });
-        if (diffs.length) issue = 'qty_mismatch'; }
-      const isIssue = !!issue && !s.accepted;
-      if (s.accepted) accepted++; else if (isIssue) issues++; else ok++;
+    const groups = comps.map(comp => {
+      const soKeys = comp.filter(n => n[0] === 'S').map(n => n.slice(2));
+      const poIds = comp.filter(n => n[0] === 'P').map(n => n.slice(2));
+      const groupSos = soKeys.map(k => soByRef[k]).filter(Boolean);
+      const soAgg = {}, poAgg = {};
+      groupSos.forEach(s => { const m = soLineMap[s.cin7_id] || {}; Object.keys(m).forEach(sku => { soAgg[sku] = (soAgg[sku] || 0) + m[sku]; }); });
+      poIds.forEach(po => { const m = poLineByPo[po] || {}; Object.keys(m).forEach(sku => { poAgg[sku] = (poAgg[sku] || 0) + m[sku]; }); });
+      const diffs = []; const skuSet = {}; Object.keys(soAgg).forEach(k => skuSet[k] = 1); Object.keys(poAgg).forEach(k => skuSet[k] = 1);
+      Object.keys(skuSet).forEach(sku => { const sq = soAgg[sku] || 0, pq = poAgg[sku] || 0; if (sq !== pq) diffs.push({ sku, soQty: sq, poQty: pq }); });
+      let issue = null; if (!poIds.length) issue = 'no_po'; else if (diffs.length) issue = 'qty_mismatch';
+      const allAccepted = groupSos.length > 0 && groupSos.every(s => s.accepted);
+      if (allAccepted) accepted++; else if (issue) issues++; else ok++;
       let _ln = null, _lnPo = null, _tlc = 0;
-      poRefs.forEach(pr => { _tlc += (noteCountByPo[pr.po] || 0); const c = lastNoteByPo[pr.po]; if (c && (!_ln || c.created_at > _ln.created_at)) { _ln = c; _lnPo = pr.po; } });
-      return { cin7_id: s.cin7_id, reference: s.reference, branch_name: s.branch_name, company: s.company, created_date: s.created_date, po_refs: poRefs, issue, diffs: diffs.slice(0, 60), note: s.note, accepted: s.accepted,
-        tl_po: _lnPo || (poRefs[0] && poRefs[0].po) || null, tl_last: _ln ? { body: _ln.body, author: _ln.author_email, kind: _ln.author_kind, at: _ln.at } : null, tl_count: _tlc };
-    });
-    // #1 reverse view — open, not-received POs in the DTC branches (Direct to Client / JLEW / NEXT) with NO sales-order
-    // mapping → "open purchase order, not mapped to a sales order". Accept/note via dtc_po_review (mig 222) clears it
-    // from the open count. Read-only from planner.purchase_orders.
-    const DTC_BRANCH_NAMES = Object.values(DTC_BRANCHES);
+      poIds.forEach(po => { _tlc += (noteCountByPo[po] || 0); const c = lastNoteByPo[po]; if (c && (!_ln || c.created_at > _ln.created_at)) { _ln = c; _lnPo = po; } });
+      const po_refs = poIds.map(po => ({ po, supplier: (poMeta[po] && poMeta[po].supplier) || '', app: !soKeys.some(k => cin7EdgeSet.has(po + '|' + k)) }));
+      const newest = groupSos.map(s => s.created_date).sort().slice(-1)[0] || '';
+      return {
+        group_id: (soKeys.slice().sort()[0] || ('P:' + (poIds.slice().sort()[0] || ''))),
+        grouped: groupSos.length > 1, newest,
+        sos: groupSos.map(s => ({ cin7_id: s.cin7_id, reference: s.reference, branch_name: s.branch_name, company: s.company, created_date: s.created_date, note: s.note, accepted: s.accepted })),
+        po_refs, issue, diffs: diffs.slice(0, 80), accepted: allAccepted,
+        tl_po: _lnPo || (po_refs[0] && po_refs[0].po) || null,
+        tl_last: _ln ? { body: _ln.body, author: _ln.author_email, kind: _ln.author_kind, at: _ln.at } : null, tl_count: _tlc
+      };
+    }).filter(g => g.sos.length);
+    const rank = g => (g.issue && !g.accepted) ? 0 : (g.accepted ? 2 : 1);
+    groups.sort((a, b) => (rank(a) - rank(b)) || String(b.newest).localeCompare(String(a.newest)));
+
+    // Reverse view — open DTC POs that resolved to NO open sales order (no parsed Cin7 edge + no app link=true edge).
+    const mappedPoSet = new Set(Object.keys(poToSo));
     const unmapped = (await pool.query(`SELECT p.po, coalesce(p.supplier_name,'') supplier, coalesce(p.branch,'') branch, coalesce(p.country_code,'') country_code, coalesce(p.status,'') status,
-        coalesce(r.accepted,false) accepted, coalesce(r.note,'') note, coalesce(r.accepted_by,'') accepted_by
+        coalesce(p.sales_order_ref,'') sales_order_ref, coalesce(r.accepted,false) accepted, coalesce(r.note,'') note, coalesce(r.accepted_by,'') accepted_by
       FROM planner.purchase_orders p LEFT JOIN planner.dtc_po_review r ON r.po=p.po
       WHERE p.branch = ANY($1)
         AND coalesce(p.status,'') NOT ILIKE '%complete%' AND coalesce(p.status,'') NOT ILIKE '%cancel%' AND coalesce(p.status,'') NOT ILIKE '%void%'
-        AND coalesce(p.sales_order_ref,'') = '' ORDER BY coalesce(r.accepted,false), p.po`, [DTC_BRANCH_NAMES])).rows;
-    const unmappedOpen = unmapped.filter(u => !u.accepted).length;   // badge/count = non-accepted only
-    if (countOnly) return res.json({ orders: [], counts: { issues, accepted, ok, unmapped_pos: unmappedOpen } });
-    res.json({ orders, unmapped_pos: unmapped, counts: { issues, accepted, ok, unmapped_pos: unmappedOpen } });
+      ORDER BY coalesce(r.accepted,false), p.po`, [DTC_BRANCH_NAMES])).rows
+      .filter(u => !mappedPoSet.has(u.po));
+    const unmappedOpen = unmapped.filter(u => !u.accepted).length;
+    if (countOnly) return res.json({ groups: [], counts: { issues, accepted, ok, unmapped_pos: unmappedOpen } });
+    res.json({ groups, unmapped_pos: unmapped, counts: { issues, accepted, ok, unmapped_pos: unmappedOpen } });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// In-app PO<->SO mapping (mig 254). link=true adds an edge, link=false suppresses a wrong Cin7 edge. Both persist in
+// HORIZON only (never written to Cin7) and survive n8n resyncs. Reconciliation reads them in /api/supply/dtc/mismatch.
+app.post('/api/supply/dtc/map', async (req, res) => {
+  const b = req.body || {}; const po = String(b.po || '').trim(); const ref = _dtcNorm(b.sales_order_ref);
+  const link = (b.link === false) ? false : true;
+  if (!po || !ref) return res.status(400).json({ error: 'po and sales_order_ref required' });
+  try {
+    await pool.query(`INSERT INTO planner.dtc_po_so_map (po, sales_order_ref, link, created_by, created_at)
+        VALUES ($1,$2,$3,$4,now())
+        ON CONFLICT (po, sales_order_ref) DO UPDATE SET link=excluded.link, created_by=excluded.created_by, created_at=now()`,
+      [po, ref, link, authUser(req)]);
+    res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Remove an in-app mapping row (reverts that PO<->SO edge to the Cin7 default — undoes an add OR a suppress).
+app.post('/api/supply/dtc/unmap', async (req, res) => {
+  const b = req.body || {}; const po = String(b.po || '').trim(); const ref = _dtcNorm(b.sales_order_ref);
+  if (!po || !ref) return res.status(400).json({ error: 'po and sales_order_ref required' });
+  try { await pool.query(`DELETE FROM planner.dtc_po_so_map WHERE po=$1 AND sales_order_ref=$2`, [po, ref]); res.json({ ok: true }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Accept / note an unmapped-PO row (the reverse DTC view) — mig 222
 app.post('/api/supply/dtc/po-review', async (req, res) => {
