@@ -1,3 +1,7 @@
+## v27.383 SUG-0034 — server-rendered PO details PDF (engine + endpoint)
+- New `GET /api/supply/po/:po/pdf` renders the full PO to a PDF (pdf-lib, no template, no new dependency): title band + two-column summary grid (supplier/production/batch/branch/dates/deposit) → **Client / FBA** → **Packing & Labelling** (Yes/No + notes + supplier approval) → **Shipment details** (supplier-entered cartons/CBM/weight/dimensions) → **Order Plan table last** (SKU · description · qty · unit cost · line total + totals), auto-paginating with a repeating table header + page footer. Dates as dd-mmm-yy.
+- **Not yet wired to any surface** — this is the engine for review. Next: add the Download-PDF button on the admin PO drawer / MASTER DATA & DOCS and the supplier portal (portal needs supplier-scoping). `server.mjs` only, no migration.
+
 ## v27.382 PO drawer — Client/FBA tab inputs no longer overflow their column
 - On the PO drawer's **Client / FBA** tab (2-column layout), the fixed-width inputs (client name 360px, requirements/address 440px, etc.) overflowed their column and crossed over the neighbouring column's labels (e.g. the client-name box over the **"Polybags"** label). Added a desktop CSS cap — `#supply-root .cli-val input/textarea/select { max-width:100%; box-sizing:border-box }` — so inputs shrink to their cell (mobile already had this). No JS change. `supply/inject.html`.
 

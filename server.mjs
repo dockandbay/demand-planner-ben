@@ -11274,6 +11274,121 @@ async function poShipObj(po) {
     ) c ON true
     WHERE p.po=$1`, [po])).rows[0] || null;
 }
+// SUG-0034 — full PO details → PDF (header + Client/FBA + Packing & Labelling + Shipment + Order Plan table last).
+// Server-rendered with pdf-lib (no template). Reused on the admin PO drawer / MASTER DATA & DOCS and (later) the portal.
+async function buildPoPdf(p, lines, ship) {
+  const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib');
+  const doc = await PDFDocument.create();
+  const F = await doc.embedFont(StandardFonts.Helvetica);
+  const B = await doc.embedFont(StandardFonts.HelveticaBold);
+  const PW = 595.28, PH = 841.89, M = 42, W = PW - 2 * M;
+  const C = { ink: rgb(0.09, 0.11, 0.16), mut: rgb(0.42, 0.46, 0.52), line: rgb(0.84, 0.86, 0.9), head: rgb(0.12, 0.22, 0.53), band: rgb(0.93, 0.95, 1), band2: rgb(0.965, 0.975, 1), white: rgb(1, 1, 1) };
+  const san = (s) => String(s == null ? '' : s).replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, '-').replace(/→/g, '->').replace(/³/g, '3').replace(/²/g, '2').replace(/×/g, 'x').replace(/✓/g, 'Y').replace(/[\r\n\t]+/g, ' ').replace(/[^\x20-\x7E -ÿ]/g, '');
+  const tw = (s, f, sz) => f.widthOfTextAtSize(san(s), sz);
+  const _MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const fmtd = (d) => { if (!d) return '-'; let Y, Mo, D;
+    if (d instanceof Date) { if (isNaN(d)) return '-'; Y = d.getFullYear(); Mo = d.getMonth(); D = d.getDate(); }
+    else { const m = /(\d{4})-(\d{2})-(\d{2})/.exec(String(d)); if (m) { Y = +m[1]; Mo = +m[2] - 1; D = +m[3]; } else { const p = new Date(String(d)); if (isNaN(p)) return san(String(d).slice(0, 11)); Y = p.getFullYear(); Mo = p.getMonth(); D = p.getDate(); } }
+    return String(D).padStart(2, '0') + '-' + _MON[Mo] + '-' + String(Y).slice(2); };
+  const yn = (v) => v === true ? 'Yes' : (v === false ? 'No' : '-');
+  let page = doc.addPage([PW, PH]); let y = PH - M;
+  const newpage = () => { page = doc.addPage([PW, PH]); y = PH - M; };
+  const need = (h) => { if (y - h < M + 6) newpage(); };
+  const wrap = (s, f, sz, mw) => { s = san(s); if (!s) return ['']; const words = s.split(' '); const out = []; let cur = ''; words.forEach(w => { const t = cur ? cur + ' ' + w : w; if (f.widthOfTextAtSize(t, sz) > mw && cur) { out.push(cur); cur = w; } else cur = t; }); if (cur) out.push(cur); return out; };
+  // Title band
+  page.drawRectangle({ x: 0, y: PH - 92, width: PW, height: 92, color: C.head });
+  page.drawText('PURCHASE ORDER', { x: M, y: PH - 44, size: 19, font: B, color: C.white });
+  page.drawText(san(p.po || ''), { x: M, y: PH - 68, size: 13, font: F, color: rgb(0.85, 0.9, 1) });
+  { const t = 'Dock & Bay'; page.drawText(t, { x: PW - M - tw(t, B, 13), y: PH - 44, size: 13, font: B, color: C.white });
+    const st = String(p.status || '').toUpperCase(); if (st) page.drawText(san(st), { x: PW - M - tw(st, F, 10), y: PH - 68, size: 10, font: F, color: rgb(0.85, 0.9, 1) }); }
+  y = PH - 92 - 24;
+  // Summary grid (two columns)
+  const grid = [
+    ['Supplier', p.supplier_name || '-'], ['Production', p.prod_no || '-'],
+    ['Batch', p.batch_id || '-'], ['Branch', p.branch || '-'],
+    ['Country', p.country_code || '-'], ['Ship type', p.ship_type_overide || p.ship_type || '-'],
+    ['Start production', fmtd(p.start_production)], ['Production end', fmtd(p.end_production_overide)],
+    ['Delivery date', fmtd(p.delivery_date_overide)], ['Supplier ship date', fmtd(p.supplier_ship_date)],
+    ['Deposit ref', p.deposit_ref || '-'], ['ERP PO', p.erp_po || '-'],
+  ];
+  const colW = W / 2, lblW = 96;
+  for (let i = 0; i < grid.length; i += 2) { need(15);
+    for (let j = 0; j < 2; j++) { const cell = grid[i + j]; if (!cell) continue; const x = M + j * colW;
+      page.drawText(san(cell[0]), { x, y, size: 8.5, font: F, color: C.mut }); page.drawText(san(cell[1]), { x: x + lblW, y, size: 9.5, font: B, color: C.ink }); }
+    y -= 15;
+  }
+  const section = (title) => { need(30); y -= 8; page.drawRectangle({ x: M, y: y - 4, width: W, height: 18, color: C.band }); page.drawText(san(title), { x: M + 6, y, size: 10, font: B, color: C.head }); y -= 24; };
+  const lv = (label, value, b) => { const vlines = wrap(value, b ? B : F, 9.5, W - 152); need(11.5 * vlines.length + 3);
+    page.drawText(san(label), { x: M, y, size: 8.5, font: F, color: C.mut });
+    vlines.forEach((ln, i) => { page.drawText(ln, { x: M + 152, y, size: 9.5, font: b ? B : F, color: C.ink }); if (i < vlines.length - 1) y -= 11.5; }); y -= 14; };
+  // Client / FBA
+  section('Client / FBA');
+  const types = []; if (p.dtc_key_account) types.push('Key account'); if (p.dtc_custom) types.push('Custom');
+  lv('Client', p.client || '-', true);
+  if (types.length) lv('Type', types.join(', '));
+  if (p.custom_dev_ref) lv('Custom order product(s)', p.custom_dev_ref);
+  lv('Sales / Amazon ref', p.sales_order_ref || '-');
+  lv('Client PO ref', p.client_po_ref || '-');
+  lv('Dispatch order ref', p.dispatch_order_ref || '-');
+  lv('Client deadline', fmtd(p.client_deadline_date));
+  lv('Client requirements', p.client_requirements || '-');
+  lv('Final delivery address', p.final_delivery_address || '-');
+  if (p.branch_delivery_notes) lv('Delivery notes', p.branch_delivery_notes);
+  // Packing & Labelling
+  section('Packing and Labelling');
+  const packLine = (label, bool, notes) => lv(label, yn(bool) + (notes ? ('   -   ' + notes) : ''));
+  packLine('Polybags', p.pack_polybags, p.pack_polybags_notes);
+  packLine('Dock & Bay product barcodes', p.pack_dnb_barcodes, p.pack_dnb_barcodes_notes);
+  packLine('RFID product barcodes', p.pack_rfid_barcodes, p.pack_rfid_barcodes_notes);
+  packLine('Dock & Bay carton labels', p.pack_dnb_carton, p.pack_dnb_carton_notes);
+  packLine('Client-specific carton labels', p.pack_client_carton, p.pack_client_carton_notes);
+  if (p.pack_pallet_notes) lv('Pallet packing requirements', p.pack_pallet_notes);
+  if (p.pack_other_notes) lv('Other packing / labelling', p.pack_other_notes);
+  lv('Supplier approval', p.dtc_accepted_at ? ('Approved ' + san(p.dtc_accepted_at) + (p.dtc_accepted_by ? (' by ' + san(p.dtc_accepted_by)) : '')) : 'Not approved');
+  // Shipment details
+  if (ship) { section('Shipment details (entered by supplier)');
+    lv('Carton count', ship.cartons != null ? String(ship.cartons) : '-');
+    lv('Cargo volume (CBM)', ship.cbm != null ? (ship.cbm + ' m3') : '-');
+    lv('Gross weight', ship.gross_weight_kg != null ? (ship.gross_weight_kg + ' kg') : '-');
+    lv('Total dimensions', ship.dimensions || '-'); }
+  // Order Plan table (last)
+  section('Order Plan');
+  const cur = p.cur || 'USD';
+  const cols = [{ t: 'SKU', w: 148, a: 'l' }, { t: 'Description', w: 196, a: 'l' }, { t: 'Qty', w: 48, a: 'r' }, { t: 'Unit (' + cur + ')', w: 56, a: 'r' }, { t: 'Line total', w: W - 148 - 196 - 48 - 56, a: 'r' }];
+  const tableHeader = () => { need(20); page.drawRectangle({ x: M, y: y - 4, width: W, height: 15, color: C.head }); let x = M + 4; cols.forEach(c => { const s = san(c.t); const tx = c.a === 'r' ? (x + c.w - 6 - tw(s, B, 8)) : x; page.drawText(s, { x: tx, y, size: 8, font: B, color: C.white }); x += c.w; }); y -= 17; };
+  tableHeader();
+  let totQty = 0, totVal = 0, alt = false;
+  (lines || []).forEach(l => { const qty = Number(l.qty) || 0, uc = Number(l.cost_price) || 0, lt = qty * uc; totQty += qty; totVal += lt;
+    const nameLines = wrap(l.name || '', F, 8, cols[1].w - 8); const rh = Math.max(12, nameLines.length * 9.5 + 2.5);
+    if (y - rh < M + 4) { newpage(); tableHeader(); alt = false; }
+    if (alt) page.drawRectangle({ x: M, y: y - 3, width: W, height: rh, color: C.band2 }); alt = !alt;
+    const vals = [l.sku || '', null, String(qty), uc ? uc.toFixed(2) : '-', lt ? lt.toFixed(2) : '-']; let x = M + 4;
+    cols.forEach((c, ci) => { if (ci === 1) { nameLines.forEach((ln, k) => page.drawText(ln, { x, y: y - k * 9.5, size: 8, font: F, color: C.ink })); }
+      else if (vals[ci] != null) { const s = san(vals[ci]); const tx = c.a === 'r' ? (x + c.w - 6 - tw(s, F, 8.5)) : x; page.drawText(s, { x: tx, y, size: 8.5, font: F, color: C.ink }); } x += c.w; });
+    y -= rh; });
+  if (y - 20 < M + 4) newpage();
+  page.drawLine({ start: { x: M, y: y + 3 }, end: { x: M + W, y: y + 3 }, thickness: 0.7, color: C.line }); y -= 3;
+  let bx = M + 4 + cols[0].w + cols[1].w; page.drawText('Total', { x: bx - 6 - tw('Total', B, 9), y, size: 9, font: B, color: C.ink });
+  const qx = bx + cols[2].w; page.drawText(san(String(totQty)), { x: qx - 6 - tw(String(totQty), B, 9), y, size: 9, font: B, color: C.ink });
+  const vs = cur + ' ' + totVal.toFixed(2); page.drawText(san(vs), { x: M + W - 6 - tw(vs, B, 9), y, size: 9, font: B, color: C.ink });
+  // Footer on every page
+  const all = doc.getPages(); const stamp = san((p.po || '') + '   Generated ' + new Date().toISOString().slice(0, 10));
+  all.forEach((pg, i) => { pg.drawText(stamp, { x: M, y: 24, size: 7.5, font: F, color: C.mut }); const pn = 'Page ' + (i + 1) + ' of ' + all.length; pg.drawText(pn, { x: PW - M - F.widthOfTextAtSize(pn, 7.5), y: 24, size: 7.5, font: F, color: C.mut }); });
+  return Buffer.from(await doc.save());
+}
+app.get('/api/supply/po/:po/pdf', async (req, res) => {
+  const po = req.params.po;
+  try {
+    const [poR, linesR, shipR] = await Promise.all([
+      pool.query(`SELECT p.*, (SELECT default_currency FROM planner.suppliers s WHERE s.id=p.supplier_id OR s.name=p.supplier_name LIMIT 1) cur FROM planner.purchase_orders p WHERE p.po=$1`, [po]),
+      pool.query(`SELECT l.sku, l.qty, l.cost_price, coalesce(pr.product_name_final, pr.product_name, '') name FROM planner.purchase_order_lines l LEFT JOIN planner.products pr ON pr.sku=l.sku WHERE l.po=$1 ORDER BY l.sku`, [po]),
+      pool.query(`SELECT cartons, cbm, gross_weight_kg, dimensions FROM planner.dtc_shipment_details WHERE po=$1`, [po]),
+    ]);
+    if (!poR.rows.length) return res.status(404).json({ error: 'PO not found' });
+    const pdf = await buildPoPdf(poR.rows[0], linesR.rows, shipR.rows[0] || null);
+    res.set('Content-Type', 'application/pdf').set('Content-Disposition', `inline; filename="${po.replace(/[^A-Za-z0-9._-]/g, '_')}.pdf"`).send(pdf);
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/supply/po-detail/:po', async (req, res) => {
   const po = req.params.po;
   try {
