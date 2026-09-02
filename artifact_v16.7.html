@@ -1457,6 +1457,11 @@ var BRANCH_FREIGHT={};   // {uk:{air,sea days},…} — expedite freight leads f
 var TRANSFER_LEADS={};   // {UK:{US:6,EU:2,AU:8},…} — inter-market 3PL→3PL transfer lead times (weeks); missing lane = we don't transfer that way. Server-injected (migration 171).
 var KLAVIYO_BIS={};      // Klaviyo back-in-stock: {sku:{UK:n,US:n,…}, _at:'YYYY-MM-DD'} — server-injected (SUG-0018). DEMAND plan 🔔 badge.
 var SET_BOM={};          // Build-on-fly SETS BOM: {output_set_sku:[{sku:input_sku,qty:input_quantity}]} — server-injected from planner.set_bom. Buy plan explodes set demand into these components (SETS feature P2).
+// Set size = total component units in one box (Σ qty over its BOM). The demand plan shows a set's forecast in
+// ITEM-EQUIVALENTS (subcatFU × the set's share, same basis as every other SKU line). The buy-plan explosion turns that
+// into COMPONENT demand, so the item-equiv figure must be divided by setSize to get the number of BOXES before it is
+// multiplied back out by each component qty — otherwise a size-N set over-explodes by N. Fallback 1 (no BOM).
+function _setSize(sku){ try{ var b=(typeof SET_BOM!=='undefined')&&SET_BOM[String(sku).toUpperCase()]; if(!b||!b.length)return 1; var t=0; for(var i=0;i<b.length;i++)t+=Number(b[i].qty)||0; return t>0?t:1; }catch(e){ return 1; } }
 var PREPACK_MAP={};      // Prepack set mapping: {prepack_sku:set_sku} — server-injected from planner.prepack_map. Prepack (PP-) on-hand offsets the mapped set's demand (drawn down monthly); PP- SKUs excluded from demand lines + buy; a demand search for a PP- SKU resolves to its set. See PREPACK_BY_SET / prepackSetOf().
 var PREPACK_BY_SET={};   // reverse of PREPACK_MAP, built at init: {set_sku:[prepack_sku,…]} (a set may be fulfilled by >1 prepack colour/variant).
 try{ Object.keys(PREPACK_MAP).forEach(function(pp){ var s=PREPACK_MAP[pp]; if(s)(PREPACK_BY_SET[s]=PREPACK_BY_SET[s]||[]).push(pp); }); }catch(e){}
@@ -15357,6 +15362,7 @@ function buildLiveDemand(){
     setSkus.forEach(function(setSku){
       var comps=SET_BOM[setSku]; if(!Array.isArray(comps)||!comps.length)return;
       var sp=SKUM[setSku]; if(!sp||sp.vt!=='SET')return;   // only true sets explode
+      var _sz=Math.max(1,_setSize(setSku));   // component units per box — the new-set cascade forecast is item-equivalent, so ÷setSize → BOXES before exploding (× component qty gives back the item volume; no double-count)
       MK.forEach(function(co){
         var ctry=co.toLowerCase(), av=(sp.av||{})[ctry]||'';
         var chans=[]; if(av.indexOf('d')>=0)chans.push('DTC'); if(av.indexOf('f')>=0)chans.push('FBA');   // DTC + FBA (decision 3)
@@ -15374,7 +15380,7 @@ function buildLiveDemand(){
             var ms=fym.slice(0,4)+'-'+fym.slice(5,7)+'-01', raw;
             if(ovMap[fym]!=null){ raw=ovMap[fym]; }                                          // saved override wins
             else if(s2HasLY){ var lyM=(parseInt(fym.slice(0,4),10)-1)+'_'+fym.slice(5,7); raw=(lyM<=CUR_YTD_END)?(s2sales[lyM]||0):(chFC[lyM]||0); }   // continuing set → last-year chain
-            else { raw=(subcatFU[fym]||0)*share; }                                           // new set → subcat cascade × share (Sets%-sized)
+            else { raw=(subcatFU[fym]||0)*share/_sz; }                                       // new set → subcat cascade × share (item-equiv, Sets%-sized) ÷ setSize = BOXES
             var fc;
             if(launchDate&&ms<launchDate)fc=0;
             else if(discDate&&ms>discDate){fc=Math.max(0,Math.min(Math.round(raw),rem));rem=Math.max(0,rem-fc);}
