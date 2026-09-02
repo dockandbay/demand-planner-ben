@@ -1,3 +1,10 @@
+## v27.378 DTC mismatch — expandable discrepancy, show no-PO SKUs, map any PO (multi-SO), silent refresh
+- **"+ N more SKUs" now expands** the discrepancy table in place (click ▾ show all / ▲ show fewer) instead of a dead "+N more" label. Matched lines render neutral-grey, mismatched red.
+- **No-PO sales orders now list their SKUs** even when every line is qty 0 (e.g. `DILLARDS-3235567801` — 7 zero-qty lines, confirmed the same in live). Previously nothing showed because 0≠0 produced no diff rows.
+- **"Map PO" now offers every open DTC PO, not just unmapped ones** (server adds `all_pos`; unmapped listed first, already-mapped tagged). This is what enables **one PO across multiple sales orders** → the SOs group together (verified: mapping PO-1845586 onto a 2nd GOLD SO produced a `grouped ×2`).
+- **Map / unmap now refresh silently** (`_dtcReload` re-draws just the list + unmapped + pills) — no full report reload / page flash.
+- `server.mjs` + `supply/inject.html` only. No migration (still on 254).
+
 ## v27.377 DTC mismatch — in-app PO↔SO mapping + grouped (many-to-many) reconciliation  ·  mig 254
 - **New: map POs to sales orders (and vice-versa) inside HORIZON, never in Cin7.** New table `planner.dtc_po_so_map` (**migration 254**) holds PO↔SO edges that survive n8n resyncs. `link=true` adds an edge; `link=false` suppresses a wrong Cin7 edge. Two new endpoints: `POST /api/supply/dtc/map` and `/unmap`.
   - **🔗 Map PO** on any sales-order group (picks from the unmapped-PO list, or type any PO number).

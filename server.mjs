@@ -9338,8 +9338,9 @@ app.get('/api/supply/dtc/mismatch', async (req, res) => {
       groupSos.forEach(s => { const m = soLineMap[s.cin7_id] || {}; Object.keys(m).forEach(sku => { soAgg[sku] = (soAgg[sku] || 0) + m[sku]; }); });
       poIds.forEach(po => { const m = poLineByPo[po] || {}; Object.keys(m).forEach(sku => { poAgg[sku] = (poAgg[sku] || 0) + m[sku]; }); });
       const diffs = []; const skuSet = {}; Object.keys(soAgg).forEach(k => skuSet[k] = 1); Object.keys(poAgg).forEach(k => skuSet[k] = 1);
-      Object.keys(skuSet).forEach(sku => { const sq = soAgg[sku] || 0, pq = poAgg[sku] || 0; if (sq !== pq) diffs.push({ sku, soQty: sq, poQty: pq }); });
-      let issue = null; if (!poIds.length) issue = 'no_po'; else if (diffs.length) issue = 'qty_mismatch';
+      const noPo = !poIds.length;   // no-PO group: list ALL the SO's SKUs (even qty 0) so a zero-qty order's contents still show
+      Object.keys(skuSet).forEach(sku => { const sq = soAgg[sku] || 0, pq = poAgg[sku] || 0; if (sq !== pq || noPo) diffs.push({ sku, soQty: sq, poQty: pq }); });
+      let issue = null; if (noPo) issue = 'no_po'; else if (diffs.length) issue = 'qty_mismatch';
       const allAccepted = groupSos.length > 0 && groupSos.every(s => s.accepted);
       if (allAccepted) accepted++; else if (issue) issues++; else ok++;
       let _ln = null, _lnPo = null, _tlc = 0;
@@ -9369,7 +9370,9 @@ app.get('/api/supply/dtc/mismatch', async (req, res) => {
       .filter(u => !mappedPoSet.has(u.po));
     const unmappedOpen = unmapped.filter(u => !u.accepted).length;
     if (countOnly) return res.json({ groups: [], counts: { issues, accepted, ok, unmapped_pos: unmappedOpen } });
-    res.json({ groups, unmapped_pos: unmapped, counts: { issues, accepted, ok, unmapped_pos: unmappedOpen } });
+    const unmappedSet = new Set(unmapped.map(u => u.po));
+    const all_pos = candPos.map(p => ({ po: p.po, supplier: p.supplier, unmapped: unmappedSet.has(p.po) }));   // every open DTC PO — lets "Map PO" attach an already-mapped PO to another SO (multi-SO grouping)
+    res.json({ groups, unmapped_pos: unmapped, counts: { issues, accepted, ok, unmapped_pos: unmappedOpen }, all_pos });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // In-app PO<->SO mapping (mig 254). link=true adds an edge, link=false suppresses a wrong Cin7 edge. Both persist in

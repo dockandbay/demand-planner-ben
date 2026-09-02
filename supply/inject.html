@@ -10359,7 +10359,7 @@
             _done(); if(m){m.style.color='#166534';m.textContent='Imported '+(j.imported||0)+' orders.';} selectReport('dtc-mismatch'); })
           .catch(function(err){ _done(); var to=String(err&&err.message)==='__TIMEOUT__'; if(m){ m.style.color='#b45309'; m.textContent=to?'The server timed out mid-import — click Import again to continue.':'Import error: '+(err&&err.message||err); } selectReport('dtc-mismatch'); }); }
       step({}); };
-    _drawDtcList((d.groups||[]).slice(), d.unmapped_pos||[]);
+    _drawDtcList((d.groups||[]).slice(), d.unmapped_pos||[], d.all_pos||[]);
     _drawDtcUnmapped(d.unmapped_pos||[], d.groups||[]);
     var _hb=document.getElementById('dtc-hide-acc'); if(_hb)_hb.onclick=function(){ _dtcHideAcc=!_dtcHideAcc; try{localStorage.setItem('dtcHideAcc',_dtcHideAcc?'1':'0');}catch(e){} _dtcApplyHideAcc(); };
     try{ _dtcApplyHideAcc(); }catch(e){}
@@ -10412,7 +10412,7 @@
       el.innerHTML=hdr+'<div style="overflow-x:auto;max-width:100%"><table style="width:max-content;min-width:100%;border-collapse:collapse"><thead><tr><th class="l">PO (supplier)</th><th class="l">Branch</th><th class="l">Country</th><th class="l">Status</th><th class="l">Note</th><th class="l">Accept</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
     }
     el.querySelectorAll('.dtc-po').forEach(function(x){ x.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(x.dataset.po,'oplan'); else if(typeof gotoPO==='function')gotoPO(x.dataset.po,'oplan'); }; });
-    el.querySelectorAll('.dtc-mapso').forEach(function(b){ b.onclick=function(){ _dtcPicker(b,{title:'Map '+b.dataset.po+' to a sales order', placeholder:'search open sales orders or type a ref…', options:soOpts, onPick:function(ref){ _dtcMap(b.dataset.po,ref,true,function(){ selectReport('dtc-mismatch'); }); }}); }; });
+    el.querySelectorAll('.dtc-mapso').forEach(function(b){ b.onclick=function(){ _dtcPicker(b,{title:'Map '+b.dataset.po+' to a sales order', placeholder:'search open sales orders or type a ref…', options:soOpts, onPick:function(ref){ _dtcMap(b.dataset.po,ref,true,function(){ _dtcReload(); }); }}); }; });
     function savePo(po,accepted,note){ fetch('/api/supply/dtc/po-review',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,accepted:accepted,note:note})}).then(function(r){return r.json();}).then(function(){ selectReport('dtc-mismatch'); }).catch(function(){}); }
     function persistPo(po,accepted,note){ fetch('/api/supply/dtc/po-review',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,accepted:accepted,note:note})}).catch(function(){}); }   // silent (for note edits) — no re-render so the green flash shows
     el.querySelectorAll('.dtcpo-acc').forEach(function(cb){ cb.onclick=function(){ var po=cb.dataset.po, ne=el.querySelector('.dtcpo-note[data-po="'+(window.CSS&&CSS.escape?CSS.escape(po):po)+'"]'); savePo(po,cb.checked,ne?ne.value:''); }; });
@@ -10422,6 +10422,14 @@
   // ── In-app PO ↔ Sales-Order mapping (mig 254) — add/remove edges in HORIZON, never Cin7 ──
   function _dtcMap(po,ref,link,done){ fetch('/api/supply/dtc/map',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,sales_order_ref:ref,link:link})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} done&&done(); }).catch(function(e){alert('Map failed: '+(e.message||e));}); }
   function _dtcUnmap(po,ref,done){ fetch('/api/supply/dtc/unmap',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,sales_order_ref:ref})}).then(function(r){return r.json();}).then(function(){ done&&done(); }).catch(function(e){alert('Unmap failed: '+(e.message||e));}); }
+  function _dtcSetPill(lbl,n){ var el=document.querySelector('b[data-dtcpill="'+lbl+'"]'); if(el)el.textContent=(n==null?0:n); }
+  // Silent refresh of the DTC mismatch report (list + unmapped + pills only) — no full report reload / page flash.
+  function _dtcReload(){ fetch('/api/supply/dtc/mismatch').then(function(r){return r.json();}).then(function(d){ d=d||{}; var c=d.counts||{};
+    _dtcSetPill('Issues',c.issues); _dtcSetPill('Accepted',c.accepted); _dtcSetPill('OK',c.ok); _dtcSetPill('Unmapped POs',c.unmapped_pos);
+    _drawDtcList((d.groups||[]).slice(), d.unmapped_pos||[], d.all_pos||[]);
+    _drawDtcUnmapped(d.unmapped_pos||[], d.groups||[]);
+    try{ refreshDtcBadge(); }catch(e){} try{ _dtcApplyHideAcc(); }catch(e){}
+  }).catch(function(){}); }
   // Small floating picker: filter a list of options (or type a free value), then onPick(val).
   function _dtcPicker(anchor,cfg){ var old=document.getElementById('dtc-picker'); if(old)old.remove();
     var box=document.createElement('div'); box.id='dtc-picker'; box.style.cssText='position:fixed;z-index:300020;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.22);width:320px;max-height:360px;display:flex;flex-direction:column;overflow:hidden;font-size:12px;text-align:left';
@@ -10439,16 +10447,19 @@
   }
   // Group-centric list (mig 254): each row is a connected component (a set of SOs + POs). Multi-SO groups render
   // together with ONE grouped SKU/qty discrepancy. Map/unmap PO↔SO edges in-app. `unmapped` seeds the "Map PO" picker.
-  function _drawDtcList(groups, unmapped){ var el=document.getElementById('dtc-list'); if(!el)return; unmapped=unmapped||[];
+  function _drawDtcList(groups, unmapped, allPos){ var el=document.getElementById('dtc-list'); if(!el)return; unmapped=unmapped||[]; allPos=allPos||[];
     if(!groups.length){ el.innerHTML='<div class="mut tiny" style="padding:8px 0">No open DTC sales orders imported yet. Click <b>Import sales orders</b> to pull them from Cin7.</div>'; return; }
     var mob=actMob(), DCAP=6;
-    var unmapOpts=unmapped.map(function(u){ return {val:u.po,label:u.po+(u.supplier?(' · '+u.supplier):'')}; });
+    // Map-PO picker offers EVERY open DTC PO (unmapped first) so an already-mapped PO can be attached to another SO → multi-SO grouping.
+    var poOpts=(allPos.length?allPos:unmapped).slice().sort(function(a,b){ return (!!a.unmapped===!!b.unmapped)?0:(a.unmapped===false?1:-1); }).map(function(p){ return {val:p.po,label:p.po+(p.supplier?(' · '+p.supplier):'')+(p.unmapped===false?' · already mapped':'')}; });
     function ids(g){ return g.sos.map(function(s){return s.cin7_id;}).join(','); }
     function badgeFor(g){ return g.accepted?'<span class="tool-badge bg-blue">accepted</span>':g.issue==='no_po'?'<span class="tool-badge bg-red">no PO mapped</span>':g.issue==='qty_mismatch'?'<span class="tool-badge bg-amber">SKU / qty mismatch</span>':'<span class="tool-badge bg-green">OK</span>'; }
-    function diffTable(g){ if(!g.diffs||!g.diffs.length)return ''; var shown=g.diffs.slice(0,DCAP);
-      var rows=shown.map(function(x){ var po='<span style="color:#b91c1c">'+units(x.poQty)+'</span>'; return '<tr><td style="padding:1px 8px 1px 0;white-space:normal;word-break:break-word">'+esc(x.sku)+'</td><td style="text-align:right;padding:1px 4px">'+units(x.soQty)+'</td><td style="text-align:right;padding:1px 4px">'+po+'</td></tr>'; }).join('');
-      var more=(g.diffs.length>DCAP)?'<div class="mut tiny" style="margin-top:2px">+ '+(g.diffs.length-DCAP)+' more SKU(s)</div>':'';
-      return '<div style="max-width:460px;overflow-x:auto;margin-top:4px"><table class="tiny" style="border-collapse:collapse;width:100%;table-layout:fixed"><colgroup><col><col style="width:44px"><col style="width:44px"></colgroup><thead><tr style="color:#94a3b8"><th style="text-align:left;padding:1px 8px 1px 0">SKU</th><th style="text-align:right;padding:1px 4px">SO</th><th style="text-align:right;padding:1px 4px">PO</th></tr></thead><tbody>'+rows+'</tbody></table>'+more+'</div>'; }
+    function diffTable(g){ if(!g.diffs||!g.diffs.length)return ''; var gid=(g.sos[0]||{}).cin7_id||'';
+      var rows=g.diffs.map(function(x,i){ var hidden=i>=DCAP, eq=(x.soQty===x.poQty);
+        var po='<span style="color:'+(eq?'#94a3b8':'#b91c1c')+(eq?'':';font-weight:600')+'">'+units(x.poQty)+'</span>';
+        return '<tr'+(hidden?' class="dtc-xline" style="display:none"':'')+'><td style="padding:1px 8px 1px 0;white-space:normal;word-break:break-word">'+esc(x.sku)+'</td><td style="text-align:right;padding:1px 4px">'+units(x.soQty)+'</td><td style="text-align:right;padding:1px 4px">'+po+'</td></tr>'; }).join('');
+      var more=(g.diffs.length>DCAP)?'<button class="dtc-morelines" data-gid="'+esc(gid)+'" data-n="'+g.diffs.length+'" style="font-size:10px;margin-top:3px;padding:1px 8px;border:1px solid #cbd5e1;border-radius:8px;background:#f8fafc;color:#334155;cursor:pointer">&#9662; show all '+g.diffs.length+' SKUs</button>':'';
+      return '<div class="dtc-diff" data-diffid="'+esc(gid)+'" style="max-width:460px;overflow-x:auto;margin-top:4px"><table class="tiny" style="border-collapse:collapse;width:100%;table-layout:fixed"><colgroup><col><col style="width:44px"><col style="width:44px"></colgroup><thead><tr style="color:#94a3b8"><th style="text-align:left;padding:1px 8px 1px 0">SKU</th><th style="text-align:right;padding:1px 4px">SO</th><th style="text-align:right;padding:1px 4px">PO</th></tr></thead><tbody>'+rows+'</tbody></table>'+more+'</div>'; }
     function soCell(g){ var refs=g.sos.map(function(s){return '<b>'+esc(s.reference||'')+'</b>';}).join('<br>');
       var chip=g.grouped?' <span class="tool-badge" style="background:#ede9fe;color:#5b21b6" title="one or more POs span these sales orders — discrepancy is summed across the group">grouped ×'+g.sos.length+'</span>':'';
       var s0=g.sos[0]||{}, meta=esc(s0.company||'')+' · '+esc(s0.branch_name||'')+(s0.created_date?' · '+esc(s0.created_date):'');
@@ -10484,10 +10495,11 @@
     el.querySelectorAll('.dtc-po').forEach(function(x){ x.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(x.dataset.po,'oplan'); else if(typeof gotoPO==='function')gotoPO(x.dataset.po,'oplan'); }; });
     el.querySelectorAll('.dtc-tl').forEach(function(b){ b.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(b.dataset.po,'timeline'); else if(typeof gotoPO==='function')gotoPO(b.dataset.po,'timeline'); }; });
     el.querySelectorAll('.dtc-mappo').forEach(function(b){ b.onclick=function(){ var ref=b.dataset.ref; if(!ref){alert('This group has no sales-order reference to map to.');return;}
-      _dtcPicker(b,{title:'Map a PO to '+ref, placeholder:'search unmapped POs or type a PO number…', options:unmapOpts, onPick:function(po){ _dtcMap(po,ref,true,function(){ selectReport('dtc-mismatch'); }); }}); }; });
+      _dtcPicker(b,{title:'Map a PO to '+ref, placeholder:'search POs or type a PO number…', options:poOpts, onPick:function(po){ _dtcMap(po,ref,true,function(){ _dtcReload(); }); }}); }; });
     el.querySelectorAll('.dtc-pounmap').forEach(function(x){ x.onclick=function(){ var po=x.dataset.po, ref=x.dataset.ref, app=x.dataset.app==='1';
-      if(app){ _dtcUnmap(po,ref,function(){ selectReport('dtc-mismatch'); }); }
-      else { if(!confirm('Detach the Cin7 link '+po+' ↔ '+ref+'?\nThis hides it in HORIZON only — Cin7 is not changed.'))return; _dtcMap(po,ref,false,function(){ selectReport('dtc-mismatch'); }); } }; });
+      if(app){ _dtcUnmap(po,ref,function(){ _dtcReload(); }); }
+      else { if(!confirm('Detach the Cin7 link '+po+' ↔ '+ref+'?\nThis hides it in HORIZON only — Cin7 is not changed.'))return; _dtcMap(po,ref,false,function(){ _dtcReload(); }); } }; });
+    el.querySelectorAll('.dtc-morelines').forEach(function(btn){ btn.onclick=function(){ var gid=btn.dataset.gid, blk=el.querySelector('.dtc-diff[data-diffid="'+(window.CSS&&CSS.escape?CSS.escape(gid):gid)+'"]'); if(!blk)return; var lines=blk.querySelectorAll('.dtc-xline'), show=btn.dataset.shown!=='1'; btn.dataset.shown=show?'1':'0'; lines.forEach(function(l){l.style.display=show?'':'none';}); btn.innerHTML=show?'&#9652; show fewer':('&#9662; show all '+(btn.dataset.n||'')+' SKUs'); }; });
     // Accept / note apply to EVERY sales order in the group (a grouped discrepancy is cleared as a whole).
     function persistG(idstr,accepted,note){ (idstr||'').split(',').filter(Boolean).forEach(function(id){ fetch('/api/supply/dtc/review',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({so_cin7_id:Number(id),accepted:accepted,note:note})}).catch(function(){}); }); }
     el.querySelectorAll('.dtc-acc').forEach(function(cb){ cb.onclick=function(){ var idstr=cb.dataset.ids, ne=el.querySelector('.dtc-note[data-ids="'+idstr+'"]'), note=ne?ne.value:'', acc=cb.checked, cont=cb.closest('.dtc-order-row');
