@@ -1,3 +1,7 @@
+## v27.389 Sets two-totals — subcatSkuEffTotals now returns the master/set split (additive foundation)
+- `subcatSkuEffTotals` additionally returns **masterUnits** (master SKUs, units), **setUnits** (sets, item-equivalent), **setBoxes** (sets ÷ set size = box count) and **hasSets**, derived from the same values it already summed. `masterUnits + setUnits == totals` (verified), so buy/demand are byte-identical — this just exposes the breakdown for the upcoming master/set displays (e.g. Beach CORE 1,419 / 241). Foundation for the two-totals sets model (category-forecast + gap-vs-subcat split, per-pool smoothing).
+- `artifact_v16.7.html` only. No migration.
+
 ## v27.387 SUG-0034 — supplier-portal PO PDF download (all 3 surfaces now wired)
 - New `GET /api/portal/po/:po/pdf` — **ownership-guarded** (`portalAuth` + `portalOwnsPO`, so a supplier only gets their own POs: no-auth → 401, another supplier's PO → 403) and rendered in **portal mode** which **hides internal fields** (deposit ref, ERP PO, and the master-shipment supplier — don't reveal other suppliers). Shipment ref, Flexport ref, Client/FBA, Packing, and the Order Plan are kept.
 - Portal UI: **⤓ Download PO details (PDF)** button at the top of each PO's detail panel (`supply/portal-view.js`).

@@ -7902,8 +7902,13 @@ function subcatSkuEffTotals(s,co,ch){
   var shares=buildSkuShares(all,co,ch,lyYM);
   var DIS=smoothDisregards(co,ch,s);   // disregard discontinued → they run to 0 (active SKUs carry the subcat)
   var tot={}, actTot={}, discTot={}, discN=0, anyD=false;
+  // Two-totals split (Ben): master SKUs in UNITS, SET SKUs in BOXES (÷ set size) + their exploded item-equivalent.
+  // Additive/derived from the same v as `totals` (item-equiv), so this changes nothing in buy/demand — it just
+  // exposes the master-vs-set breakdown the demand grid displays ("7,000 / 545"). setUnits ÷ box = setBoxes.
+  var mastU={}, setBox={}, setUnit={}, anySet=false;
   all.forEach(function(sku){
     var p=SKUM[sku];
+    var isSet=(p.vt==='SET'), sz=isSet?Math.max(1,_setSize(sku)):1; if(isSet)anySet=true;
     var disc=p.disc&&p.disc[ctry]?p.disc[ctry]:null;
     if(disc)anyD=true;
     if(disc&&disc<TODAY)discN++;
@@ -7917,11 +7922,13 @@ function subcatSkuEffTotals(s,co,ch){
       if(lch&&ms<lch){v=0;}
       else if(isDisc){ if(rem<=0){v=0;} else {v=Math.max(0,Math.min(raw,rem));rem=Math.max(0,rem-v);} }   // discontinued always keep their stock rundown (not zeroed)
       else{v=raw;}
-      if(!(isDisc&&DIS)) tot[m]=(tot[m]||0)+v;   // when disregarding, the gap basis is ACTIVE-only vs the subcat target (discontinued excluded)
+      if(!(isDisc&&DIS)){ tot[m]=(tot[m]||0)+v;   // when disregarding, the gap basis is ACTIVE-only vs the subcat target (discontinued excluded)
+        if(isSet){ setUnit[m]=(setUnit[m]||0)+v; setBox[m]=(setBox[m]||0)+Math.round(v/sz); } else { mastU[m]=(mastU[m]||0)+v; } }
       if(isDisc){ discTot[m]=(discTot[m]||0)+v; } else { actTot[m]=(actTot[m]||0)+v; }
     });
   });
-  return {totals:tot,activeTotals:actTot,discTotals:discTot,count:all.length,disc:discN,active:all.length-discN,anyDisc:anyD};
+  return {totals:tot,activeTotals:actTot,discTotals:discTot,count:all.length,disc:discN,active:all.length-discN,anyDisc:anyD,
+    masterUnits:mastU,setBoxes:setBox,setUnits:setUnit,hasSets:anySet};
 }
 
 function insertInlineSkuRows(s,co,ch,afterTr){
