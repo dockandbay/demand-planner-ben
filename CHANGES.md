@@ -1,3 +1,8 @@
+## v27.387 SUG-0034 — supplier-portal PO PDF download (all 3 surfaces now wired)
+- New `GET /api/portal/po/:po/pdf` — **ownership-guarded** (`portalAuth` + `portalOwnsPO`, so a supplier only gets their own POs: no-auth → 401, another supplier's PO → 403) and rendered in **portal mode** which **hides internal fields** (deposit ref, ERP PO, and the master-shipment supplier — don't reveal other suppliers). Shipment ref, Flexport ref, Client/FBA, Packing, and the Order Plan are kept.
+- Portal UI: **⤓ Download PO details (PDF)** button at the top of each PO's detail panel (`supply/portal-view.js`).
+- Refactored the PDF data fetch into a shared `poPdfData(po)` helper used by both the admin and portal endpoints; `buildPoPdf` gains a `{portal}` option. Verified admin vs portal output (internal fields present vs hidden). Completes the 3 surfaces: PO drawer / MASTER DATA & DOCS (v27.386) + supplier portal.
+
 ## v27.383 SUG-0034 — server-rendered PO details PDF (engine + endpoint)
 - New `GET /api/supply/po/:po/pdf` renders the full PO to a PDF (pdf-lib, no template, no new dependency): title band + two-column summary grid (supplier/production/batch/branch/dates/deposit) → **Client / FBA** → **Packing & Labelling** (Yes/No + notes + supplier approval) → **Shipment details** (supplier-entered cartons/CBM/weight/dimensions) → **Order Plan table last** (SKU · description · qty · unit cost · line total + totals), auto-paginating with a repeating table header + page footer. Dates as dd-mmm-yy.
 - **Not yet wired to any surface** — this is the engine for review. Next: add the Download-PDF button on the admin PO drawer / MASTER DATA & DOCS and the supplier portal (portal needs supplier-scoping). `server.mjs` only, no migration.

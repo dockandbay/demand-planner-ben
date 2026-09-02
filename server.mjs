@@ -11276,7 +11276,8 @@ async function poShipObj(po) {
 }
 // SUG-0034 — full PO details → PDF (header + Client/FBA + Packing & Labelling + Shipment + Order Plan table last).
 // Server-rendered with pdf-lib (no template). Reused on the admin PO drawer / MASTER DATA & DOCS and (later) the portal.
-async function buildPoPdf(p, lines, ship) {
+async function buildPoPdf(p, lines, ship, opts) {
+  const portal = !!(opts && opts.portal);   // supplier-portal render: hide internal-only fields (deposit ref, ERP PO, other suppliers)
   const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib');
   const doc = await PDFDocument.create();
   const F = await doc.embedFont(StandardFonts.Helvetica);
@@ -11307,13 +11308,14 @@ async function buildPoPdf(p, lines, ship) {
     ['Supplier', p.supplier_name || '-'], ['Production', p.prod_no || '-'],
     ['Batch', p.batch_id || '-'], ['Branch', p.branch || '-'],
     ['Ship type', p.ship_type_overide || p.ship_type || '-'], ['Shipment ref', p.shipment_ref || '-'],
-    ['Flexport ref', p.flex_ref || '-'], ['Deposit ref', p.deposit_ref || '-'],
-    ['Start production', fmtd(p.start_production)], ['Production end', fmtd(p.end_production_overide)],
-    ['Delivery date', fmtd(p.delivery_date_overide)], ['Supplier ship date', fmtd(p.supplier_ship_date)],
-    ['ERP PO', p.erp_po || '-'],
+    ['Flexport ref', p.flex_ref || '-'],
   ];
-  // Only when the shipment is consolidated under another supplier's master PO
-  if (p.master_supplier && String(p.master_supplier).trim() && p.master_supplier !== p.supplier_name) grid.push(['Master shipment supplier', p.master_supplier]);
+  if (!portal) grid.push(['Deposit ref', p.deposit_ref || '-']);
+  grid.push(['Start production', fmtd(p.start_production)], ['Production end', fmtd(p.end_production_overide)],
+    ['Delivery date', fmtd(p.delivery_date_overide)], ['Supplier ship date', fmtd(p.supplier_ship_date)]);
+  if (!portal) grid.push(['ERP PO', p.erp_po || '-']);
+  // Only when the shipment is consolidated under another supplier's master PO (admin only — don't reveal other suppliers on the portal)
+  if (!portal && p.master_supplier && String(p.master_supplier).trim() && p.master_supplier !== p.supplier_name) grid.push(['Master shipment supplier', p.master_supplier]);
   const colW = W / 2, lblW = 96;
   for (let i = 0; i < grid.length; i += 2) { need(15);
     for (let j = 0; j < 2; j++) { const cell = grid[i + j]; if (!cell) continue; const x = M + j * colW;
@@ -11379,21 +11381,34 @@ async function buildPoPdf(p, lines, ship) {
   all.forEach((pg, i) => { pg.drawText(stamp, { x: M, y: 24, size: 7.5, font: F, color: C.mut }); const pn = 'Page ' + (i + 1) + ' of ' + all.length; pg.drawText(pn, { x: PW - M - F.widthOfTextAtSize(pn, 7.5), y: 24, size: 7.5, font: F, color: C.mut }); });
   return Buffer.from(await doc.save());
 }
+async function poPdfData(po) {
+  const [poR, linesR, shipR] = await Promise.all([
+    pool.query(`SELECT p.*,
+        (SELECT default_currency FROM planner.suppliers s WHERE s.id=p.supplier_id OR s.name=p.supplier_name LIMIT 1) cur,
+        (SELECT f.flex_id FROM planner.flexport_shipments f WHERE f.shipment_name=p.po OR f.shipment_name=nullif(p.shipment_ref,'') LIMIT 1) flex_ref,
+        (SELECT mp.supplier_name FROM planner.purchase_orders mp WHERE mp.po=coalesce(nullif(p.master_po,''), nullif(p.shipment_ref,'')) AND mp.po<>p.po LIMIT 1) master_supplier
+      FROM planner.purchase_orders p WHERE p.po=$1`, [po]),
+    pool.query(`SELECT l.sku, l.qty, l.cost_price, coalesce(pr.product_name_final, pr.product_name, '') name FROM planner.purchase_order_lines l LEFT JOIN planner.products pr ON pr.sku=l.sku WHERE l.po=$1 ORDER BY l.sku`, [po]),
+    pool.query(`SELECT cartons, cbm, gross_weight_kg, dimensions FROM planner.dtc_shipment_details WHERE po=$1`, [po]),
+  ]);
+  return { p: poR.rows[0] || null, lines: linesR.rows, ship: shipR.rows[0] || null };
+}
+const _pdfName = (po) => String(po).replace(/[^A-Za-z0-9._-]/g, '_') + '.pdf';
 app.get('/api/supply/po/:po/pdf', async (req, res) => {
+  try {
+    const d = await poPdfData(req.params.po);
+    if (!d.p) return res.status(404).json({ error: 'PO not found' });
+    res.set('Content-Type', 'application/pdf').set('Content-Disposition', `inline; filename="${_pdfName(req.params.po)}"`).send(await buildPoPdf(d.p, d.lines, d.ship));
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Supplier-portal PO PDF — ownership-guarded + internal fields hidden (deposit ref / ERP PO / other suppliers).
+app.get('/api/portal/po/:po/pdf', portalAuth, async (req, res) => {
   const po = req.params.po;
   try {
-    const [poR, linesR, shipR] = await Promise.all([
-      pool.query(`SELECT p.*,
-          (SELECT default_currency FROM planner.suppliers s WHERE s.id=p.supplier_id OR s.name=p.supplier_name LIMIT 1) cur,
-          (SELECT f.flex_id FROM planner.flexport_shipments f WHERE f.shipment_name=p.po OR f.shipment_name=nullif(p.shipment_ref,'') LIMIT 1) flex_ref,
-          (SELECT mp.supplier_name FROM planner.purchase_orders mp WHERE mp.po=coalesce(nullif(p.master_po,''), nullif(p.shipment_ref,'')) AND mp.po<>p.po LIMIT 1) master_supplier
-        FROM planner.purchase_orders p WHERE p.po=$1`, [po]),
-      pool.query(`SELECT l.sku, l.qty, l.cost_price, coalesce(pr.product_name_final, pr.product_name, '') name FROM planner.purchase_order_lines l LEFT JOIN planner.products pr ON pr.sku=l.sku WHERE l.po=$1 ORDER BY l.sku`, [po]),
-      pool.query(`SELECT cartons, cbm, gross_weight_kg, dimensions FROM planner.dtc_shipment_details WHERE po=$1`, [po]),
-    ]);
-    if (!poR.rows.length) return res.status(404).json({ error: 'PO not found' });
-    const pdf = await buildPoPdf(poR.rows[0], linesR.rows, shipR.rows[0] || null);
-    res.set('Content-Type', 'application/pdf').set('Content-Disposition', `inline; filename="${po.replace(/[^A-Za-z0-9._-]/g, '_')}.pdf"`).send(pdf);
+    if (!(await portalOwnsPO(req, po))) return res.status(403).json({ error: 'not your PO' });
+    const d = await poPdfData(po);
+    if (!d.p) return res.status(404).json({ error: 'PO not found' });
+    res.set('Content-Type', 'application/pdf').set('Content-Disposition', `inline; filename="${_pdfName(po)}"`).send(await buildPoPdf(d.p, d.lines, d.ship, { portal: true }));
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/po-detail/:po', async (req, res) => {

@@ -1073,7 +1073,9 @@
       function badge(n){ return n>0?' <span class="ex-badge">'+n+'</span>':''; }
       var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab pptab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'">'+t[1]+badge(t[3])+'</button>';}).join('')+'</div>';
       var panels=tabs.map(function(t,ti){return '<div class="pptab-panel" data-pt="'+t[0]+'"'+(ti===0?'':' style="display:none"')+'>'+t[2]+'</div>';}).join('');
-      return '<div class="ppx" style="padding:4px 2px;max-width:none;text-align:left">'+bar+panels+'</div>'; }
+      return '<div class="ppx" style="padding:4px 2px;max-width:none;text-align:left">'
+        +'<div style="margin:0 0 8px"><button class="save-btn" onclick="window.open(\'/api/portal/po/'+encodeURIComponent(p.po)+'/pdf\',\'_blank\')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd;font-weight:700">&#10515; Download PO details (PDF)</button></div>'
+        +bar+panels+'</div>'; }
     // Shared per-PO open-action count (row badge + top PO badge + "show all exceptions" filter all use this).
     // Productions 54 and earlier raise nothing. Mirrors the SHIPMENTS-tab rules (no "no shipment yet" term).
     function poActionCount(p){ if(!prodActionable(p))return 0; var po=p.po, D=_ppData||{};

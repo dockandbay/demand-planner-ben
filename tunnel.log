@@ -41,3 +41,13 @@
 2026-09-02T06:18:55Z INF precheck component="TCP Connectivity" details="HTTP/2 connection successful" run_id=8d0fec12-fe92-4ab8-93b1-2ce369b8ad43 status=pass target=region2.v2.argotunnel.com
 2026-09-02T06:18:55Z INF precheck component="Cloudflare API" details="API is reachable" run_id=8d0fec12-fe92-4ab8-93b1-2ce369b8ad43 status=pass target=api.cloudflare.com:443
 2026-09-02T06:18:55Z INF precheck complete hard_fail=false run_id=8d0fec12-fe92-4ab8-93b1-2ce369b8ad43 suggested_protocol=quic
+2026-09-02T06:33:38Z ERR  error="Incoming request ended abruptly: context canceled" connIndex=0 event=1 ingressRule=0 originService=http://localhost:8124
+2026-09-02T06:33:38Z ERR  error="Incoming request ended abruptly: context canceled" connIndex=0 event=1 ingressRule=0 originService=http://localhost:8124
+2026-09-02T06:33:38Z ERR Request failed error="Incoming request ended abruptly: context canceled" connIndex=0 dest=https://stephanie-alexandria-rim-lifetime.trycloudflare.com/api/supply/timeline-notifications event=0 ip=198.41.200.63 type=http
+2026-09-02T06:33:38Z ERR  error="Incoming request ended abruptly: context canceled" connIndex=0 event=1 ingressRule=0 originService=http://localhost:8124
+2026-09-02T06:33:38Z ERR Request failed error="Incoming request ended abruptly: context canceled" connIndex=0 dest=https://stephanie-alexandria-rim-lifetime.trycloudflare.com/api/product/unread event=0 ip=198.41.200.63 type=http
+2026-09-02T06:33:38Z ERR Request failed error="Incoming request ended abruptly: context canceled" connIndex=0 dest=https://stephanie-alexandria-rim-lifetime.trycloudflare.com/api/version event=0 ip=198.41.200.63 type=http
+2026-09-02T06:33:38Z ERR  error="Incoming request ended abruptly: context canceled" connIndex=0 event=1 ingressRule=0 originService=http://localhost:8124
+2026-09-02T06:33:38Z ERR Request failed error="Incoming request ended abruptly: context canceled" connIndex=0 dest=https://stephanie-alexandria-rim-lifetime.trycloudflare.com/api/supply/actions event=0 ip=198.41.200.63 type=http
+2026-09-02T06:33:38Z ERR  error="Incoming request ended abruptly: context canceled" connIndex=0 event=1 ingressRule=0 originService=http://localhost:8124
+2026-09-02T06:33:38Z ERR Request failed error="Incoming request ended abruptly: context canceled" connIndex=0 dest=https://stephanie-alexandria-rim-lifetime.trycloudflare.com/api/version event=0 ip=198.41.200.63 type=http
