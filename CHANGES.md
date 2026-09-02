@@ -1,3 +1,9 @@
+## v27.372 3PL Forecast — grouped headers, lead-shifted Est Forecast, air shipments, richer exports
+- **Grouped header row** GOODS IN / GOODS OUT so the prefix isn't repeated per column. Columns renamed: **Known PO's (units)**, **Known PO's (containers)**, **Est Forecast (units)**, **Est Forecast (containers)**, **Total** · **Orders**, **Amazon transfers (units)**.
+- **Est Forecast now shifts to the LANDING month** (order month + lead = md.l3 wk ÷ 4.33), so near months correctly show no forecast landings (auto-forecast only *orders* now; it arrives later). Est-Forecast containers estimated from the known units-per-container.
+- **Air / LCL shipments** (an -AIR ref or a sub-pallet 0<pallets<1 consignment, e.g. PO-55UKLX-AW26-1) show **0 containers + an "air" tag** instead of rounding a pallet fraction up to a full container.
+- **Copy-for-email + CSV** now include the **known inbound shipment detail** (shipment · delivery · units · containers · air) under the monthly summary.
+
 ## v27.371 "Non Core" category always excluded from all smoothing
 - The **Non Core** category is now excluded from every smoothing feature: the ⚙ Smoothing settings matrix + the auto-smooth sweep (`ssSubcatsFor`/`runAutoSmooth`), the Disregard-discontinued effect and the Auto flag (`smoothDisregards`/`smoothAuto` return false for it), and the category smooth-to-% (`smoothCatsToPct`). Guarded via `_scNonCore(s)` (sub-cat whose parent category is "Non Core"). Verified: getters return false even with a stale flag set; other categories unaffected.
 

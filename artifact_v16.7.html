@@ -14441,20 +14441,30 @@ function render3plInvoice(body){
     // ── GOODS OUT (b): Amazon/FBA transfer units — the buy-plan's per-SKU 3PL→FBA transfer, summed per month. project()
     // returns proj[1+j].tx = the recommended transfer for month M+j (proj[1] = current month = mkeys[0]). Read-only:
     // project() is the same pure fn the buy render calls, so this doesn't change any buy output. ──
-    // Same buy-plan projection pass also yields GOODS IN (b): auto-forecast REPLENISHMENT — the future 3PL buys the
-    // engine recommends (proj[1+j].bQ). project() nets out known on-order/inbound, so bQ is incremental (no overlap
-    // with the known-PO series above). fdQ (Buy FBA) is excluded — that lands at Amazon, not this 3PL.
+    // Same buy-plan projection pass yields GOODS IN (b): auto-forecast REPLENISHMENT + GOODS OUT (b): transfers.
+    // project() nets out known on-order/inbound, so bQ is incremental (no overlap with the known-PO series). fdQ
+    // (Buy FBA) is excluded — that lands at Amazon. ⚠ bQ is the ORDER placed in that month; it LANDS ~lead-time later
+    // (md.l3 weeks ÷ 4.33), so we shift each buy to its arrival month — near months correctly show no forecast landings.
     var trans={}, ginF={}; mkeys.forEach(function(m){trans[m]=0;ginF[m]=0;});
     try{ if(window.BP&&typeof BP.project==='function'&&BP_DATA&&BP_DATA.products){
       Object.keys(BP_DATA.products).forEach(function(sku){
         var pd=BP_DATA.products[sku]; var md=pd&&pd.mkts&&pd.mkts[MKT]; if(!md)return;
         var proj; try{ proj=BP.project(md,pd,0,MKT,null,sku); }catch(e2){ return; }
         if(!proj)return;
-        for(var j=0;j<6;j++){ var p=proj[1+j]; if(!p)continue; if(p.tx>0)trans[mkeys[j]]+=p.tx; if(p.bQ>0)ginF[mkeys[j]]+=p.bQ; }
+        var Lwk=md.l3||9; if(!(Lwk>0))Lwk=9; var Lmo=Math.round(Lwk/4.33);   // order→arrival lead in whole months
+        for(var j=0;j<6;j++){ var p=proj[1+j]; if(!p)continue;
+          if(p.tx>0)trans[mkeys[j]]+=p.tx;                                    // transfers happen in-month (no lead)
+          if(p.bQ>0){ var li=j+Lmo; if(li<6)ginF[mkeys[li]]+=p.bQ; }          // buy ORDERED month j → LANDS month j+lead
+        }
       });
     } }catch(e3){ if(window.console)console.warn('[3pl forecast] transfers/auto-fcst',e3&&e3.message); }
+    // Est-Forecast container estimate: units per container from the known shipments (market-specific), applied to the
+    // forecast landings. Null when there are no known containers to calibrate from → shown as "—".
+    var _kU=0,_kC=0; (shipments||[]).forEach(function(sh){ _kU+=sh.units||0; _kC+=sh.containers||0; });
+    var _upc=(_kC>0)?(_kU/_kC):0;
+    var ginFcont={}; mkeys.forEach(function(m){ ginFcont[m]=(_upc>0&&ginF[m]>0)?Math.max(1,Math.ceil(ginF[m]/_upc)):0; });
     // rows for render + export. Goods-in total = known POs + auto-forecast replenishment.
-    var rows=mkeys.map(function(m,ix){ return {mo:labels[ix], m:m, ginKnown:Math.round(ginK[m]), ginCont:ginCont[m], ships:ginShips[m], ginFcst:Math.round(ginF[m]), ginTot:Math.round(ginK[m]+ginF[m]), orders:_r3plRound(orders[m]), transfers:_r3plRound(trans[m])}; });
+    var rows=mkeys.map(function(m,ix){ return {mo:labels[ix], m:m, ginKnown:Math.round(ginK[m]), ginCont:ginCont[m], ships:ginShips[m], ginFcst:Math.round(ginF[m]), ginFcstCont:ginFcont[m], ginTot:Math.round(ginK[m]+ginF[m]), orders:_r3plRound(orders[m]), transfers:_r3plRound(trans[m])}; });
     // ── render ──
     var TH='padding:6px 10px;text-align:right;font-size:10px;color:#64748b;text-transform:uppercase;border-bottom:2px solid #cbd5e1;white-space:nowrap';
     var TD='padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums;border-bottom:1px solid #f1f5f9';
@@ -14462,44 +14472,68 @@ function render3plInvoice(body){
     var html='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">'
       +'<div style="font-weight:700;font-size:14px">'+e(tplName)+' — next 6 months <span style="font-weight:400;color:#94a3b8;font-size:12px">estimated goods in / goods out</span></div>'
       +'<div style="display:flex;gap:6px"><button id="f3-dl" class="pill catpill" style="font-size:11px">⬇ Download CSV</button><button id="f3-cp" class="pill catpill" style="font-size:11px">⧉ Copy for email</button></div></div>'
-      +'<table style="border-collapse:collapse;font-size:12px;min-width:640px">'
-      +'<thead><tr><th style="'+TH+';text-align:left">Month</th>'
-        +'<th style="'+TH+'">Goods in · known POs</th><th style="'+TH+'">Containers</th><th style="'+TH+'">Goods in · auto-forecast</th><th style="'+TH+';border-right:1px solid #e2e8f0">Goods in · total</th>'
-        +'<th style="'+TH+'">Goods out · orders</th><th style="'+TH+'">Goods out · Amazon transfers</th></tr></thead><tbody>';
+      +'<table style="border-collapse:collapse;font-size:12px;min-width:760px">'
+      +'<thead>'
+        +'<tr><th style="'+TH+';text-align:left" rowspan="2">Month</th>'
+          +'<th style="'+TH+';text-align:center;border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;color:#1e40af;letter-spacing:.06em" colspan="5">GOODS IN</th>'
+          +'<th style="'+TH+';text-align:center;color:#9a3412;letter-spacing:.06em" colspan="2">GOODS OUT</th></tr>'
+        +'<tr><th style="'+TH+';border-left:1px solid #e2e8f0">Known PO\'s (units)</th><th style="'+TH+'">Known PO\'s (containers)</th>'
+          +'<th style="'+TH+'">Est Forecast (units)</th><th style="'+TH+'">Est Forecast (containers)</th>'
+          +'<th style="'+TH+';border-right:1px solid #e2e8f0">Total</th>'
+          +'<th style="'+TH+'">Orders</th><th style="'+TH+'">Amazon transfers (units)</th></tr>'
+      +'</thead><tbody>';
+    function _contCell(v){ return '<td style="'+TD+'">'+(v?fmt(v):'<span style="color:#cbd5e1">—</span>')+'</td>'; }
     rows.forEach(function(r,ri){ var hasS=r.ships&&r.ships.length;
       html+='<tr><td style="'+TD+';text-align:left;font-weight:600">'+(hasS?'<span class="f3-exp" data-r="'+ri+'" title="show shipments" style="cursor:pointer;color:#2563eb;margin-right:5px;display:inline-block;width:9px">&#9656;</span>':'<span style="display:inline-block;width:14px"></span>')+e(r.mo)+'</td>'
-        +cell(r.ginKnown)+'<td style="'+TD+'">'+(r.ginCont?fmt(r.ginCont):'<span style="color:#cbd5e1">—</span>')+'</td>'+cell(r.ginFcst)+'<td style="'+TD+';border-right:1px solid #e2e8f0;font-weight:600">'+fmt(r.ginTot)+'</td>'
+        +'<td style="'+TD+';border-left:1px solid #e2e8f0">'+fmt(r.ginKnown)+'</td>'+_contCell(r.ginCont)
+        +cell(r.ginFcst)+_contCell(r.ginFcstCont)
+        +'<td style="'+TD+';border-right:1px solid #e2e8f0;font-weight:600">'+fmt(r.ginTot)+'</td>'
         +cell(r.orders)+cell(r.transfers)+'</tr>';
       if(hasS){ r.ships.forEach(function(sh){ html+='<tr class="f3-det f3-det-'+ri+'" style="display:none;background:#f8fafc">'
-        +'<td style="'+TD+';text-align:left;padding-left:26px;color:#475569;font-weight:600"><span class="inb-po" data-po="'+e(sh.ship_id)+'" style="color:#2563eb;cursor:pointer">'+e(sh.ship_id)+'</span>'+(sh.po_count>1?' <span style="color:#94a3b8;font-weight:400">('+sh.po_count+' POs)</span>':'')+'</td>'
-        +'<td style="'+TD+';color:#475569">'+fmt(sh.units||0)+'</td><td style="'+TD+';color:#475569">'+(sh.containers||'<span style="color:#cbd5e1">—</span>')+'</td>'
-        +'<td style="'+TD+';text-align:left;color:#64748b" colspan="4">delivery '+(sh.deliv?e(_fD(sh.deliv)):'&mdash;')+'</td></tr>'; }); }
+        +'<td style="'+TD+';text-align:left;padding-left:26px;color:#475569;font-weight:600">'+e(sh.ship_id)+(sh.air?' <span style="color:#9a3412;font-weight:700;font-size:9px;background:#ffedd5;padding:0 4px;border-radius:3px">air</span>':'')+(sh.po_count>1?' <span style="color:#94a3b8;font-weight:400">('+sh.po_count+' POs)</span>':'')+'</td>'
+        +'<td style="'+TD+';color:#475569">'+fmt(sh.units||0)+'</td><td style="'+TD+';color:#475569">'+(sh.air?'0':(sh.containers||'<span style="color:#cbd5e1">—</span>'))+'</td>'
+        +'<td style="'+TD+';text-align:left;color:#64748b" colspan="5">delivery '+(sh.deliv?e(_fD(sh.deliv)):'&mdash;')+'</td></tr>'; }); }
     });
     html+='</tbody></table>'
       +'<div style="font-size:10px;color:#94a3b8;margin-top:8px;max-width:680px;line-height:1.5">'
       +'<b>Goods out · orders</b> = (DTC + TikTok units × 0.449 ship-bags/unit) + (B2B units ÷ 25 units/order), rounded to the nearest 500 (nearest 100 under 500). '
       +'<b>Goods out · Amazon transfers</b> = the buy-plan 3PL→FBA transfer per SKU, summed per month (same rounding). '
-      +'<b>Goods in · known POs / Containers</b> = open POs landing that month, grouped under their master shipment (click ▸ for shipment IDs + delivery dates); containers = pallets ÷ 20 (40ft-equiv). Overdue past-dated inbound counts in the current month. '
-      +'<b>Goods in · auto-forecast</b> = the buy plan\'s recommended future 3PL replenishment (incremental to the known POs). <b>Goods in · total</b> = known + auto-forecast.</div>';
+      +'<b>Known PO\'s</b> = open POs landing that month, grouped under their master shipment (click ▸ for shipment IDs + delivery dates). Containers = pallets ÷ 20 (40ft-equiv); a sub-pallet or -AIR consignment shows 0 + an <b>air</b> tag. Overdue past-dated inbound counts in the current month. '
+      +'<b>Est Forecast</b> = the buy plan\'s recommended future 3PL replenishment, shown in the month it LANDS (order month + the ~lead time), incremental to the known POs; containers estimated from the known units-per-container. <b>Total</b> = known + Est Forecast.</div>';
     b.innerHTML=html;
     b.querySelectorAll('.f3-exp').forEach(function(x){ x.onclick=function(){ var ri=this.dataset.r, op=this.getAttribute('data-open')==='1'; b.querySelectorAll('.f3-det-'+ri).forEach(function(row){ row.style.display=op?'none':''; }); this.innerHTML=op?'&#9656;':'&#9662;'; this.setAttribute('data-open',op?'0':'1'); }; });
     var _dl=b.querySelector('#f3-dl'); if(_dl)_dl.onclick=function(){ _f3Download(tplName,rows); };
     var _cp=b.querySelector('#f3-cp'); if(_cp)_cp.onclick=function(){ _f3CopyEmail(tplName,rows,this); };
   }
   function _f3Download(tplName,rows){
-    var head=['Month','Goods in - known POs','Goods in - auto-forecast','Goods in - total','Goods out - orders','Goods out - Amazon transfers'];
-    var lines=[head.join(',')].concat(rows.map(function(r){ return [r.mo,r.ginKnown,(r.ginFcst==null?'':r.ginFcst),r.ginTot,r.orders,(r.transfers==null?'':r.transfers)].join(','); }));
+    var head=['Month','Known POs (units)','Known POs (containers)','Est Forecast (units)','Est Forecast (containers)','Goods in total','Orders','Amazon transfers (units)'];
+    var lines=[head.join(',')].concat(rows.map(function(r){ return [r.mo,r.ginKnown,(r.ginCont||0),(r.ginFcst==null?'':r.ginFcst),(r.ginFcstCont||0),r.ginTot,r.orders,(r.transfers==null?'':r.transfers)].join(','); }));
+    // known-shipment detail after the summary
+    var _M2=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    function _cD2(s){ var p=String(s||'').slice(0,10).split('-'); return p.length<3?String(s||''):(p[2]+'-'+(_M2[+p[1]-1]||p[1])+'-'+p[0].slice(2)); }
+    var _sh=[]; rows.forEach(function(r){ (r.ships||[]).forEach(function(sh){ _sh.push(sh); }); });
+    if(_sh.length){ lines.push(''); lines.push('Known inbound shipments'); lines.push(['Shipment','Delivery','Units','Containers','Air'].join(','));
+      _sh.forEach(function(sh){ lines.push([String(sh.ship_id).replace(/,/g,' '),(sh.deliv?_cD2(sh.deliv):''),(sh.units||0),(sh.air?0:(sh.containers||0)),(sh.air?'air':'')].join(',')); }); }
     var blob=new Blob([lines.join('\n')],{type:'text/csv'}), url=URL.createObjectURL(blob), a=document.createElement('a');
     a.href=url; a.download=(tplName.replace(/[^a-z0-9]+/ig,'_')+'_forecast_6mo.csv'); document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(url);},1000);
   }
   function _f3CopyEmail(tplName,rows,btn){
     var TDs='padding:5px 10px;border:1px solid #d0d7de;text-align:right;font-family:Arial,sans-serif;font-size:13px';
     var THs='padding:5px 10px;border:1px solid #d0d7de;background:#f0f6ff;text-align:right;font-family:Arial,sans-serif;font-size:12px;color:#334155';
+    var _M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    function _cD(s){ var p=String(s||'').slice(0,10).split('-'); return p.length<3?String(s||''):(p[2]+'-'+(_M[+p[1]-1]||p[1])+'-'+p[0].slice(2)); }
+    var allShips=[]; rows.forEach(function(r){ (r.ships||[]).forEach(function(sh){ allShips.push(sh); }); });
+    var shipSec=allShips.length?('<p style="font-size:13px;font-weight:bold;margin:12px 0 6px">Known inbound shipments</p>'
+      +'<table style="border-collapse:collapse"><thead><tr>'
+      +'<th style="'+THs+';text-align:left">Shipment</th><th style="'+THs+';text-align:left">Delivery</th><th style="'+THs+'">Units</th><th style="'+THs+'">Containers</th></tr></thead><tbody>'
+      +allShips.map(function(sh){ return '<tr><td style="'+TDs+';text-align:left">'+e(sh.ship_id)+(sh.air?' (air)':'')+(sh.po_count>1?' ('+sh.po_count+' POs)':'')+'</td><td style="'+TDs+';text-align:left">'+(sh.deliv?e(_cD(sh.deliv)):'—')+'</td><td style="'+TDs+'">'+fmt(sh.units||0)+'</td><td style="'+TDs+'">'+(sh.air?'0':(sh.containers||'—'))+'</td></tr>'; }).join('')
+      +'</tbody></table>'):'';
     var h='<div style="font-family:Arial,sans-serif"><p style="font-size:14px;font-weight:bold;margin:0 0 6px">'+e(tplName)+' — 6-month goods in / goods out (estimate)</p>'
       +'<table style="border-collapse:collapse"><thead><tr>'
-      +'<th style="'+THs+';text-align:left">Month</th><th style="'+THs+'">Goods in (known POs)</th><th style="'+THs+'">Goods in (total)</th><th style="'+THs+'">Goods out (orders)</th><th style="'+THs+'">Goods out (Amazon transfers)</th></tr></thead><tbody>'
-      +rows.map(function(r){ return '<tr><td style="'+TDs+';text-align:left"><b>'+e(r.mo)+'</b></td><td style="'+TDs+'">'+fmt(r.ginKnown)+'</td><td style="'+TDs+'">'+fmt(r.ginTot)+'</td><td style="'+TDs+'">'+fmt(r.orders)+'</td><td style="'+TDs+'">'+(r.transfers==null?'—':fmt(r.transfers))+'</td></tr>'; }).join('')
-      +'</tbody></table><p style="font-size:11px;color:#666;margin:6px 0 0">Orders = DTC+TikTok × 0.449 + B2B ÷ 25, rounded. Amazon transfers = buy-plan 3PL→FBA per SKU. Auto-forecast inbound to follow.</p></div>';
+      +'<th style="'+THs+';text-align:left">Month</th><th style="'+THs+'">Known PO\'s (units)</th><th style="'+THs+'">Est Forecast (units)</th><th style="'+THs+'">Goods in total</th><th style="'+THs+'">Orders</th><th style="'+THs+'">Amazon transfers (units)</th></tr></thead><tbody>'
+      +rows.map(function(r){ return '<tr><td style="'+TDs+';text-align:left"><b>'+e(r.mo)+'</b></td><td style="'+TDs+'">'+fmt(r.ginKnown)+'</td><td style="'+TDs+'">'+fmt(r.ginFcst)+'</td><td style="'+TDs+'">'+fmt(r.ginTot)+'</td><td style="'+TDs+'">'+fmt(r.orders)+'</td><td style="'+TDs+'">'+(r.transfers==null?'—':fmt(r.transfers))+'</td></tr>'; }).join('')
+      +'</tbody></table>'+shipSec
+      +'<p style="font-size:11px;color:#666;margin:6px 0 0">Orders = DTC+TikTok × 0.449 + B2B ÷ 25, rounded. Amazon transfers = buy-plan 3PL→FBA per SKU. Est Forecast = buy-plan future replenishment, shown in its landing month.</p></div>';
     var div=document.createElement('div'); div.contentEditable='true'; div.style.cssText='position:fixed;left:-9999px;top:0;opacity:0'; div.innerHTML=h; document.body.appendChild(div);
     var rng=document.createRange(); rng.selectNodeContents(div); var sel=window.getSelection(); sel.removeAllRanges(); sel.addRange(rng);
     var ok=false; try{ ok=document.execCommand('copy'); }catch(e){}
