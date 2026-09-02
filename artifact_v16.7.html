@@ -13869,7 +13869,7 @@ var EXPANDED_CHANNELS=new Set(); // which channel rows are expanded
 // ─── REPORTS area: sub-tab shell ──────────────────────────────────────────
 // REPORT view hosts several reports under a sub-tab bar. Exec Summary is the existing report;
 // Slow Moving and Auto Forecast are the new ones.
-var REPORT_TABS=[['ex','Exec Summary'],['performance','Performance'],['slow','Slow Moving'],['ka','Key Arrivals'],['me','Markdown & EOS'],['otb','Open-to-Buy'],['sa','Stock Availability'],['3pl-invoicing','3PL Invoicing']];   // Performance (L2) holds Supply metrics + Inventory metrics (L3). Auto Forecast moved to SUPPLY ▸ Payments ▸ Auto Forecast
+var REPORT_TABS=[['ex','Exec Summary'],['performance','Performance'],['slow','Slow Moving'],['ka','Key Arrivals'],['me','Markdown & EOS'],['otb','Open-to-Buy'],['sa','Stock Availability'],['3pl-invoicing','3PL & Invoicing']];   // Performance (L2) holds Supply metrics + Inventory metrics (L3). Auto Forecast moved to SUPPLY ▸ Payments ▸ Auto Forecast
 var PERF_SUBS=[['demand-metrics','Demand Metrics'],['supply-metrics','Supply metrics'],['inventory-metrics','Inventory metrics']];   // Demand Metrics = the ex-DEMAND ▸ KPIs pages (In Stock / Slow moving / Inventory cover / Stockout risk / Discontinued)
 var PERF_SUB='supply-metrics';   // REPORTS ▸ Performance sub-tab; deep-linked #/reports/performance/<sub>
 // Mobile: collapse a view's leading filter bar(s) behind a consistent "⚙ Filters" button. Generic + idempotent —
@@ -14112,7 +14112,7 @@ function renderInventoryMetrics(host){
 // account config. Upload/list/delete invoice files for a chosen month; edit per-3PL storage/other cost accounts;
 // view the region×channel account map. Parse + Cin7 order matching land in a later phase.
 var TPL3=[['uk_ilg','UK ILG'],['us_geneva','US Geneva'],['eu_ifulfilment','EU iFulfilment'],['au_coghlans','AU Coghlans']];
-var TPL3_STATE={tpl:'eu_ifulfilment',period:'',mode:'invoices'};
+var TPL3_STATE={tpl:'uk_ilg',period:'',mode:'invoices'};
 function render3plInvoice(body){
   try{ var _h3=(location.hash||'').replace(/^#\/?/,'').split('/'); if(_h3[0]==='reports'&&_h3[1]==='3pl-invoicing'&&_h3[2]){ var _sub=_h3[2].replace(/-/g,'_'); if(TPL3.some(function(t){return t[0]===_sub;}))TPL3_STATE.tpl=_sub; } }catch(e){}   // deep-link: #/reports/3pl-invoicing/<tpl>
   function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
@@ -14226,22 +14226,23 @@ function render3plInvoice(body){
   }
   var host=body;
   function shell(){
-    var tabs=TPL3.map(function(t){return '<button class="view-toggle rtab'+(t[0]===TPL3_STATE.tpl?' active':'')+'" data-tpl="'+t[0]+'" style="font-size:11px">'+e(t[1])+'</button>';}).join('');
-    var modes=[['invoices','Invoices'],['config','Config / Accounts'],['log','Import log']].map(function(m){return '<button class="pill catpill'+(m[0]===TPL3_STATE.mode?' active':'')+'" data-mode="'+m[0]+'">'+m[1]+'</button>';}).join('');
+    var tabs=TPL3.map(function(t){var on=(t[0]===TPL3_STATE.tpl);return '<button class="dnav3'+(on?' active':'')+'" data-tpl="'+t[0]+'" style="font-size:12px;padding:4px 12px;border:1px solid '+(on?'#1d4ed8':'transparent')+';background:'+(on?'#1d4ed8':'transparent')+';color:'+(on?'#fff':'#334155')+';border-radius:13px;cursor:pointer;font-weight:600">'+e(t[1])+'</button>';}).join('');
+    var modes=[['invoices','Invoices'],['config','Config / Accounts'],['log','Import log'],['forecast','Forecast']].map(function(m){return '<button class="pill catpill'+(m[0]===TPL3_STATE.mode?' active':'')+'" data-mode="'+m[0]+'">'+m[1]+'</button>';}).join('');
     host.innerHTML='<div style="padding:4px 2px 10px;text-align:left">'
       +'<div style="font-weight:700;font-size:15px;margin-bottom:2px">3PL Invoice</div>'
       +'<div style="font-size:12px;color:#666;margin-bottom:10px">Upload each 3PL’s monthly invoice, then <b>Summary</b> to parse it and sum every field (freight vs fulfilment + all cost types). <span style="color:#94a3b8">Cin7 order-matching &amp; Xero mapping come in later phases.</span></div>'
-      +'<div style="display:flex;gap:2px;flex-wrap:wrap;border-bottom:1px solid #e0e0e0;margin-bottom:10px">'+tabs+'</div>'
+      +'<div style="display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:3px 5px;margin-bottom:10px">'+tabs+'</div>'
       +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'+modes
         +'<span style="width:1px;height:16px;background:#e0e0e0;margin:0 4px"></span>'
         +'<label style="font-size:12px;color:#475569">Month <input type="month" id="tpl-period" value="'+e(TPL3_STATE.period)+'" style="font-size:12px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;margin-left:4px"></label>'
       +'</div><div id="tpl-body"><div style="color:#94a3b8;font-size:12px">Loading…</div></div></div>';
-    host.querySelectorAll('.rtab[data-tpl]').forEach(function(b){ b.onclick=function(){ TPL3_STATE.tpl=b.dataset.tpl; if(window.writeHash)window.writeHash(['reports','3pl-invoicing',TPL3_STATE.tpl.replace(/_/g,'-')]); shell(); load(); }; });
+    host.querySelectorAll('.dnav3[data-tpl]').forEach(function(b){ b.onclick=function(){ TPL3_STATE.tpl=b.dataset.tpl; if(window.writeHash)window.writeHash(['reports','3pl-invoicing',TPL3_STATE.tpl.replace(/_/g,'-')]); shell(); load(); }; });
     host.querySelectorAll('.catpill[data-mode]').forEach(function(b){ b.onclick=function(){ TPL3_STATE.mode=b.dataset.mode; shell(); load(); }; });
     var pe=host.querySelector('#tpl-period'); if(pe)pe.onchange=function(){ TPL3_STATE.period=pe.value; load(); };
   }
   function load(silent){ var b=host.querySelector('#tpl-body'); if(!b)return; if(!silent)b.innerHTML='<div style="color:#94a3b8;font-size:12px">Loading…</div>';
     if(TPL3_STATE.mode==='log'){ drawImportLog(b); return; }
+    if(TPL3_STATE.mode==='forecast'){ draw3plForecast(b); return; }
     fetch('/api/supply/tpl/data?tpl='+encodeURIComponent(TPL3_STATE.tpl)+'&period='+encodeURIComponent(TPL3_STATE.mode==='invoices'?TPL3_STATE.period:''))
       .then(function(r){return r.json();}).then(function(d){ if(!d||!d.ok)throw new Error((d&&d.error)||'load failed');
         if(TPL3_STATE.mode==='config')drawConfig(b,d); else drawInvoices(b,d); })
@@ -14374,6 +14375,80 @@ function render3plInvoice(body){
     b.querySelectorAll('.tpl-am').forEach(function(inp){ inp.onchange=function(){ inp.style.borderColor='#94a3b8';
       fetch('/api/supply/tpl/account-map',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({label:inp.dataset.label,field:inp.dataset.f,value:inp.value})})
         .then(function(r){return r.json();}).then(function(j){ inp.style.borderColor=(j&&j.error)?'#dc2626':'#16a34a'; setTimeout(function(){inp.style.borderColor='#cbd5e1';},900); }).catch(function(){ inp.style.borderColor='#dc2626'; }); }; });
+  }
+  function draw3plForecast(b){ b.innerHTML='<div style="color:#94a3b8;font-size:12px">Building 6-month forecast…</div>'; try{ _draw3plForecastImpl(b); }catch(err){ b.innerHTML='<div style="color:#b91c1c;font-size:12px">Forecast error: '+e(String(err&&err.message||err))+'</div>'; if(window.console)console.error('[3pl forecast]',err); } }
+  // 3PL → its 3PL-warehouse market + label. Amazon (FBA) is handled as the separate "transfers" series, not here.
+  var TPL3_MKT={uk_ilg:'UK',us_geneva:'US',eu_ifulfilment:'EU',au_coghlans:'AU'};
+  function _r3plRound(n){ n=Math.max(0,Math.round(n||0)); return n<500?Math.round(n/100)*100:Math.round(n/500)*500; }   // nearest 500; nearest 100 if <500 (Ben)
+  function _draw3plForecastImpl(b){
+    var MKT=TPL3_MKT[TPL3_STATE.tpl]||'UK', wh=MKT.toLowerCase()+'_3pl';
+    var tplName=(TPL3.filter(function(t){return t[0]===TPL3_STATE.tpl;})[0]||[,'3PL'])[1];
+    // next 6 calendar months (from the current month), keyed YYYY_MM to match calc().fu / eta slicing
+    var now=new Date(), mkeys=[], labels=[], MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    for(var i=0;i<6;i++){ var d=new Date(now.getFullYear(),now.getMonth()+i,1), y=d.getFullYear(), mo=d.getMonth()+1; mkeys.push(y+'_'+(mo<10?'0':'')+mo); labels.push(MON[mo-1]+'-'+String(y).slice(2)); }
+    var curKey=mkeys[0];
+    // ── GOODS OUT (a): forecast ORDERS = DTC+TIK units × ship-bag ratio (0.449) + B2B units ÷ 25 avg-units/order ──
+    var orders={}; mkeys.forEach(function(m){orders[m]=0;});
+    var subs={}; Object.keys(SKUM).forEach(function(k){ var p=SKUM[k]; if(p&&p.s)subs[p.s]=1; });
+    Object.keys(subs).forEach(function(sub){
+      ['DTC','TIK','B2B'].forEach(function(ch){
+        var fu; try{ fu=(calc(sub,MKT,ch)||{}).fu||{}; }catch(e2){ fu={}; }
+        mkeys.forEach(function(m){
+          var u=fu[m]||0;
+          if(m===curKey){ try{ u=curMonthForecast(sub,MKT,ch)||0; }catch(e3){} }   // current month = full-month forecast (matches the plan)
+          if(!u)return;
+          orders[m]+=(ch==='B2B')?(u/25):(u*SB_RATIO);
+        });
+      });
+    });
+    // ── GOODS IN (a): KNOWN inbound to this 3PL's warehouse — confirmed shipments (SKUI) + open POs (SKUOI), by landing month ──
+    var ginK={}; mkeys.forEach(function(m){ginK[m]=0;});
+    function _addInb(v){ if(!v)return; (Array.isArray(v)?v:[v]).forEach(function(x){ var q=x.qty||0; if(!(q>0)||!x.eta)return; var mk=String(x.eta).slice(0,7).replace('-','_'); if(ginK[mk]!=null)ginK[mk]+=q; }); }
+    Object.keys(SKUM).forEach(function(sku){ _addInb(SKUI[sku+'|'+wh]); _addInb(SKUOI[sku+'|'+wh]); });
+    // rows for render + export. (b) series (auto-forecast inbound, Amazon transfers) = next phase → null.
+    var rows=mkeys.map(function(m,ix){ return {mo:labels[ix], ginKnown:Math.round(ginK[m]), ginFcst:null, ginTot:Math.round(ginK[m]), orders:_r3plRound(orders[m]), transfers:null}; });
+    // ── render ──
+    var TH='padding:6px 10px;text-align:right;font-size:10px;color:#64748b;text-transform:uppercase;border-bottom:2px solid #cbd5e1;white-space:nowrap';
+    var TD='padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums;border-bottom:1px solid #f1f5f9';
+    function cell(v,ph){ return '<td style="'+TD+(ph?';color:#cbd5e1':'')+'">'+(v==null?'<span title="next phase">—</span>':fmt(v))+'</td>'; }
+    var html='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">'
+      +'<div style="font-weight:700;font-size:14px">'+e(tplName)+' — next 6 months <span style="font-weight:400;color:#94a3b8;font-size:12px">estimated goods in / goods out</span></div>'
+      +'<div style="display:flex;gap:6px"><button id="f3-dl" class="pill catpill" style="font-size:11px">⬇ Download CSV</button><button id="f3-cp" class="pill catpill" style="font-size:11px">⧉ Copy for email</button></div></div>'
+      +'<table style="border-collapse:collapse;font-size:12px;min-width:640px">'
+      +'<thead><tr><th style="'+TH+';text-align:left">Month</th>'
+        +'<th style="'+TH+'">Goods in · known POs</th><th style="'+TH+'">Goods in · auto-forecast</th><th style="'+TH+';border-right:1px solid #e2e8f0">Goods in · total</th>'
+        +'<th style="'+TH+'">Goods out · orders</th><th style="'+TH+'">Goods out · Amazon transfers</th></tr></thead><tbody>';
+    rows.forEach(function(r){ html+='<tr><td style="'+TD+';text-align:left;font-weight:600">'+e(r.mo)+'</td>'
+      +cell(r.ginKnown)+cell(r.ginFcst,true)+'<td style="'+TD+';border-right:1px solid #e2e8f0;font-weight:600">'+fmt(r.ginTot)+'</td>'
+      +cell(r.orders)+cell(r.transfers,true)+'</tr>'; });
+    html+='</tbody></table>'
+      +'<div style="font-size:10px;color:#94a3b8;margin-top:8px;max-width:680px;line-height:1.5">'
+      +'<b>Goods out · orders</b> = (DTC + TikTok units × 0.449 ship-bags/unit) + (B2B units ÷ 25 units/order), rounded to the nearest 500 (nearest 100 under 500). '
+      +'<b>Goods in · known POs</b> = confirmed inbound + open POs landing that month, to '+e(MKT)+' 3PL. '
+      +'<b>Auto-forecast inbound</b> (grouped under master shipment) and <b>Amazon transfers</b> are the next build phase (they come from the buy-plan / auto-forecast engine).</div>';
+    b.innerHTML=html;
+    var _dl=b.querySelector('#f3-dl'); if(_dl)_dl.onclick=function(){ _f3Download(tplName,rows); };
+    var _cp=b.querySelector('#f3-cp'); if(_cp)_cp.onclick=function(){ _f3CopyEmail(tplName,rows,this); };
+  }
+  function _f3Download(tplName,rows){
+    var head=['Month','Goods in - known POs','Goods in - auto-forecast','Goods in - total','Goods out - orders','Goods out - Amazon transfers'];
+    var lines=[head.join(',')].concat(rows.map(function(r){ return [r.mo,r.ginKnown,(r.ginFcst==null?'':r.ginFcst),r.ginTot,r.orders,(r.transfers==null?'':r.transfers)].join(','); }));
+    var blob=new Blob([lines.join('\n')],{type:'text/csv'}), url=URL.createObjectURL(blob), a=document.createElement('a');
+    a.href=url; a.download=(tplName.replace(/[^a-z0-9]+/ig,'_')+'_forecast_6mo.csv'); document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(url);},1000);
+  }
+  function _f3CopyEmail(tplName,rows,btn){
+    var TDs='padding:5px 10px;border:1px solid #d0d7de;text-align:right;font-family:Arial,sans-serif;font-size:13px';
+    var THs='padding:5px 10px;border:1px solid #d0d7de;background:#f0f6ff;text-align:right;font-family:Arial,sans-serif;font-size:12px;color:#334155';
+    var h='<div style="font-family:Arial,sans-serif"><p style="font-size:14px;font-weight:bold;margin:0 0 6px">'+e(tplName)+' — 6-month goods in / goods out (estimate)</p>'
+      +'<table style="border-collapse:collapse"><thead><tr>'
+      +'<th style="'+THs+';text-align:left">Month</th><th style="'+THs+'">Goods in (known POs)</th><th style="'+THs+'">Goods in (total)</th><th style="'+THs+'">Goods out (orders)</th></tr></thead><tbody>'
+      +rows.map(function(r){ return '<tr><td style="'+TDs+';text-align:left"><b>'+e(r.mo)+'</b></td><td style="'+TDs+'">'+fmt(r.ginKnown)+'</td><td style="'+TDs+'">'+fmt(r.ginTot)+'</td><td style="'+TDs+'">'+fmt(r.orders)+'</td></tr>'; }).join('')
+      +'</tbody></table><p style="font-size:11px;color:#666;margin:6px 0 0">Orders = DTC+TikTok × 0.449 + B2B ÷ 25, rounded. Auto-forecast inbound & Amazon transfers to follow.</p></div>';
+    var div=document.createElement('div'); div.contentEditable='true'; div.style.cssText='position:fixed;left:-9999px;top:0;opacity:0'; div.innerHTML=h; document.body.appendChild(div);
+    var rng=document.createRange(); rng.selectNodeContents(div); var sel=window.getSelection(); sel.removeAllRanges(); sel.addRange(rng);
+    var ok=false; try{ ok=document.execCommand('copy'); }catch(e){}
+    sel.removeAllRanges(); div.remove();
+    if(btn){ var o=btn.textContent; btn.textContent=ok?'✓ Copied':'copy failed'; setTimeout(function(){btn.textContent=o;},1200); }
   }
   function drawImportLog(b){ b.innerHTML='<div style="color:#94a3b8;font-size:12px">Loading…</div>';
     fetch('/api/supply/tpl/cin7-log?limit=200').then(function(r){return r.json();}).then(function(d){

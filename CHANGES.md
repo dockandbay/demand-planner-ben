@@ -1,3 +1,11 @@
+## v27.363 REPORTS ▸ 3PL & Invoicing — Forecast tab (Phase 1) + light-blue L3 nav
+- Renamed the report tab **"3PL Invoicing" → "3PL & Invoicing"** (deep link unchanged).
+- The 3PL selector (UK ILG / US Geneva / EU iFulfilment / AU Coghlans) is now a **light-blue level-3 nav** (`.dnav3` pills), **default UK ILG**, deep-linked at `#/reports/3pl-invoicing/<tpl>`.
+- New **Forecast** mini-tab (next to Import log): a **6-month goods-in / goods-out** estimate per 3PL, with **⬇ Download CSV** and **⧉ Copy for email** (formatted HTML).
+  - **Goods out · orders** = (DTC + TikTok units × **0.449** ship-bags/unit) + (B2B units **÷ 25** units/order), rounded to nearest 500 (nearest 100 under 500). Uses `calc()` forecast units + `curMonthForecast` for the current month.
+  - **Goods in · known POs** = confirmed inbound (`SKUI`) + open POs (`SKUOI`) landing that month, to the 3PL's market warehouse.
+  - **Phase 2 (TODO):** Goods-in **auto-forecast inbound** (grouped under master shipment) + Goods-out **Amazon/FBA transfers** — both come from the buy-plan / auto-forecast engine, so they'll be wired with a buy-plan before/after snapshot.
+
 ## v27.362 Future SKUs get a retail-derived ASP (so they book revenue) — client-only
 - Future SKUs / brand-new sub-categories had **no ASP → no revenue** in the demand plan, because `getASP` only derives a price from sales history. Added a **retail-list fallback** that fires **only when there's no history at all**: ASP = `CAT_ASP_GBP` (avg `<co>_rt` ÷ fx, GBP) **÷ tax divisor** (UK/EU 1.2 VAT, AU 1.1 GST, US/CA 1.0) **× channel factor** (**B2B ×0.5** = retail/2 wholesale; **every other channel ×0.95** = 5% price discount). Mirrors the existing Set-targets £→units net-price formula so revenue and target-units stay consistent.
 - **Existing SKUs untouched** — the fallback only triggers when `base=0` (no actuals), so subcats with any history keep their real ASP (verified: Picnic Blanket UK DTC still uses actuals £56.48, not the retail £55.24). Sub-cats with no retail price stay at 0 (no phantom revenue). Verified in jsdom: no-history subcats now price (Gift Box Home £40.26, Lanyard £12.67, both were 0); UK B2B = £29.08 (÷2), AU DTC uses ÷1.1, US DTC uses ÷1.0.
