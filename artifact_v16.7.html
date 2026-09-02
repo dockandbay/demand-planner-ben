@@ -6241,6 +6241,9 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   if(!isActual&&fcv>0&&skuEff&&skuEff.active>0&&varWin&&varWin.has(fym)){
     var _skuSum=(skuEff.totals&&skuEff.totals[fym])||0;
     var _varPct=Math.round(((_skuSum-fcv)/fcv)*100);
+    // "Drift - Category vs Forecast" filter active → paint the whole cell BRIGHT YELLOW where the SKU-sum drifts from
+    // the sub-category target by ≥ the rule's threshold (this block already runs only inside the next-12-month window).
+    if(typeof _frIsDrift==='function'&&_frIsDrift()&&Math.abs(_varPct)>=_frDriftThresh()){ td.style.background='#fde047'; td.title='Drift: SKU forecasts sum to '+fn(_skuSum)+' vs sub-category target '+fn(fcv)+' ('+(_varPct>0?'+':'')+_varPct+'%). Auto-smooth won’t close this — expand the subcat and smooth this month.'; }
     if(Math.abs(_varPct)>20){
       var _txt='sku '+(_varPct>0?'+':'\u2212')+Math.abs(_varPct)+'%';
       var varDiv=document.createElement('div');
@@ -7142,7 +7145,7 @@ function filteredSkus(s,co,ch,all){
     if(!ctryAvail.includes(chKey))return false;
     // Filter Rules engine — an applied saved/ad-hoc filter ANDs on top of availability (before the pills/search), so
     // it composes with everything. Metric conditions read the shared exceptions maps (computed once per co×ch).
-    if(typeof FR_ACTIVE!=='undefined'&&FR_ACTIVE&&typeof filterMatch==='function'){ if(!filterMatch(sku,co,ch,FR_ACTIVE,frExcMaps(co,ch)))return false; }
+    if(typeof FR_ACTIVE!=='undefined'&&FR_ACTIVE&&!(typeof _frIsDrift==='function'&&_frIsDrift())&&typeof filterMatch==='function'){ if(!filterMatch(sku,co,ch,FR_ACTIVE,frExcMaps(co,ch)))return false; }   // Drift rule = highlight-only → don't filter SKUs
     // SKU text filter — when active it OVERRIDES all pills (RW / tier / core-seasonal / status): match by code or name only.
     if(PLAN_SKU_QRY){return skuMatchQ(sku,PLAN_SKU_QRY);}   // multi-SKU OR search (comma/space/newline separated), code or name
     if(PLAN_RW!=='ALL'&&(p.rw||'')!==PLAN_RW)return false;   // Release Window filter (DEMAND plan)
@@ -8837,12 +8840,12 @@ function buildBody(){
     });
     return gtr;
   };
-  var _frTop=(typeof FR_ACTIVE!=='undefined'&&!!FR_ACTIVE);   // Filter Rules active → no grand-total summary row (it totals everything, not the filtered set)
+  var _frTop=(typeof FR_ACTIVE!=='undefined'&&!!FR_ACTIVE&&!(typeof _frIsDrift==='function'&&_frIsDrift()));   // Filter Rules active → no grand-total summary row. Drift rule renders the full plan, so keep the totals.
   var _gtr0=_makeGrandTotRow(); if(_gtr0&&!_frTop)frag.appendChild(_gtr0);
   const fu_cache={};
   Object.keys(cm).forEach(function(cat){
     var rows=cm[cat].sort(function(a,b){return a.s.localeCompare(b.s)||(a.ch.localeCompare(b.ch));});
-    var _frOn=(typeof FR_ACTIVE!=='undefined'&&!!FR_ACTIVE);   // Filter Rules: explode to matching SKUs; the subcat summary-totals row is removed below (see the rows loop)
+    var _frOn=(typeof FR_ACTIVE!=='undefined'&&!!FR_ACTIVE&&!(typeof _frIsDrift==='function'&&_frIsDrift()));   // Filter Rules: explode to matching SKUs; the subcat summary-totals row is removed below (see the rows loop). Drift rule = highlight-only → render the plan NORMALLY (subcat cells stay so they can be painted yellow).
     if(PLAN_SKU_QRY||PLAN_RW!=='ALL'||PLAN_FROM_REP||_frOn){rows=rows.filter(function(row){return filteredSkus(row.s,CUR,row.ch).length>0;});if(!rows.length)return;}
     // Run-off (discontinued) CATEGORIES: hidden by default; revealed via Display Settings ▸ "Show run-off categories".
     if(!SHOW_RUNOFF_CATS){ rows=rows.filter(function(row){ return !RUNOFF_CATS.has(row.c); }); if(!rows.length)return; }
@@ -10491,7 +10494,8 @@ var FILTER_FIELDS=[
   {key:'trend.wmape',label:'Forecast accuracy (3mo WMAPE)',type:'num',metric:'wmape',unit:'%',phrase:'WMAPE is',suffix:'%',defOp:'gte',defVal:60,presets:[{label:'Poor ≥60%',op:'gte',v:60},{label:'Good ≤30%',op:'lte',v:30},{label:'OK 30–60%',op:'between',v:[30,60]}],desc:'Weighted absolute % error (WMAPE) of the locked forecast vs actual over the last 3 completed months. Higher = worse. Uses locked forecast snapshots (populated on live). (<30 good, 30–60 ok, ≥60 poor.)'},
   {key:'trend.bias',label:'Forecast bias (3mo over/under)',type:'num',metric:'bias',unit:'%',phrase:'forecast is',suffix:'% over(+)/under(−) actual',defOp:'gte',defVal:20,presets:[{label:'Over ≥+20%',op:'gte',v:20},{label:'Under ≤−20%',op:'lte',v:-20},{label:'Neutral −20…+20%',op:'between',v:[-20,20]}],desc:'Forecast bias % over the last 3 completed months: positive = over-forecasting (forecast above actual), negative = under-forecasting. Uses locked forecast snapshots (live only). (≥+20 over, ≤−20 under.)'},
   {key:'inv.3pl',label:'3PL inventory (on hand)',type:'num',src:'3pl',unit:'u',phrase:'3PL on-hand',suffix:'units',defOp:'gte',defVal:10,presets:[{label:'>10u',op:'gte',v:10},{label:'=0 (out)',op:'lte',v:0},{label:'≥100u',op:'gte',v:100}],desc:'Live on-hand units at the 3PL warehouse for the selected country (the DTC/B2B pool). 0 = out of stock at 3PL.'},
-  {key:'inv.fba',label:'FBA inventory (on hand)',type:'num',src:'fba',unit:'u',phrase:'FBA on-hand',suffix:'units',defOp:'lte',defVal:10,presets:[{label:'<10u (low)',op:'lte',v:10},{label:'=0 (out)',op:'lte',v:0},{label:'≥50u',op:'gte',v:50}],desc:'Live on-hand units at the Amazon FBA warehouse for the selected country. 0 = out of stock at FBA.'}
+  {key:'inv.fba',label:'FBA inventory (on hand)',type:'num',src:'fba',unit:'u',phrase:'FBA on-hand',suffix:'units',defOp:'lte',defVal:10,presets:[{label:'<10u (low)',op:'lte',v:10},{label:'=0 (out)',op:'lte',v:0},{label:'≥50u',op:'gte',v:50}],desc:'Live on-hand units at the Amazon FBA warehouse for the selected country. 0 = out of stock at FBA.'},
+  {key:'catdrift',label:'Drift - Category vs Forecast',type:'num',unit:'%',phrase:'SKU-sum drifts from the target by',suffix:'% or more (next 12 mo)',defOp:'gte',defVal:20,presets:[{label:'≥20% (auto-smooth won’t fix)',op:'gte',v:20},{label:'≥50% (large)',op:'gte',v:50},{label:'≥100% (2×+)',op:'gte',v:100}],desc:'Paints sub-category month-cells (next 12 months) BRIGHT YELLOW where the SUM of SKU forecasts drifts from the sub-category target by ≥ this %. These are the over/under gaps auto-smooth leaves alone (bigger than the ~20% smoothing threshold) — they need a manual smooth. Highlight only: it does NOT hide or explode SKUs.'}
 ];
 function _filterFieldDef(k){ for(var i=0;i<FILTER_FIELDS.length;i++)if(FILTER_FIELDS[i].key===k)return FILTER_FIELDS[i]; return null; }
 // Numeric comparison for a num-type condition (operator + threshold(s)). Missing value (null) never matches.
@@ -10507,6 +10511,7 @@ function filterMatch(sku,co,ch,rule,excMaps){
   var p=SKUM[sku]||{};
   function arr(v){ return Array.isArray(v)?v:(v==null||v===''?[]:[v]); }
   for(var i=0;i<conds.length;i++){ var c=conds[i], f=c.field;
+    if(f==='catdrift')continue;   // highlight-only field (drift is a sub-category × month property, painted at render) — never filters a SKU out
     // Numeric metric/trend conditions — compare the SKU's raw metric value against the user's operator + threshold(s).
     if(f&&(f.indexOf('metric.')===0||f.indexOf('trend.')===0)){ var mk=f.slice(f.indexOf('.')+1); var mv=(excMaps&&excMaps[mk])?excMaps[mk][sku]:undefined; if(!_numOk(mv,c))return false; continue; }
     // Inventory conditions — live on-hand units at the 3PL / FBA warehouse for the selected country.
@@ -10530,6 +10535,11 @@ function frExcMaps(co,ch){                   // lazy — only build the exceptio
   return _frMapsCache.maps;
 }
 function frShowSubcats(){ return !!(FR_ACTIVE&&FR_ACTIVE.def&&FR_ACTIVE.def.show_subcats); }
+// "Drift - Category vs Forecast" is a HIGHLIGHT-only rule: when applied it does NOT filter/explode SKUs (the plan
+// renders normally); instead the drifting sub-category × month cells are painted bright yellow (buildBody, next-12mo).
+function _frIsDrift(){ try{ var c=FR_ACTIVE&&FR_ACTIVE.def&&FR_ACTIVE.def.conditions; return !!(c&&c.some(function(x){return x&&x.field==='catdrift';})); }catch(e){ return false; } }
+function _frDriftThresh(){ try{ var c=(FR_ACTIVE.def.conditions)||[]; for(var i=0;i<c.length;i++){ if(c[i].field==='catdrift'){ var v=c[i].value; if(Array.isArray(v))v=Math.min.apply(null,v.filter(function(n){return n!=null;})); if(v!=null&&isFinite(v))return Math.abs(Number(v)); } } }catch(e){} return 20; }
+window._frIsDrift=_frIsDrift; window._frDriftThresh=_frDriftThresh;
 var FR=(function(){
   var editing=null;   // rule object being edited (deep copy), {} for new, or null = list view
   var form=null;      // working form state: {name,show_subcats,enabled,conds:[{field,op,value,severity}]}

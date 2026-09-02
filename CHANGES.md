@@ -1,3 +1,12 @@
+## v27.365 Filter Rules — "Drift - Category vs Forecast" (highlight-only rule, bright-yellow cells)
+- New filter field **"Drift - Category vs Forecast"**. Applying it paints the **sub-category × month cells BRIGHT YELLOW** (next 12 months) where the **sum of SKU forecasts drifts from the sub-category target by ≥ the threshold** (default **20%** — the over/under gaps auto-smooth leaves alone). These are the ones needing a manual smooth.
+- **Highlight-only:** unlike other filters it does **NOT** explode to / filter SKUs — the plan renders normally (all sub-cats + totals), just with the drifting cells highlighted (verified: 936 cells both with/without → no explosion; 190 cells painted). Reuses the plan's existing SKU-vs-subcat variance + rolling-12-month window.
+- Seeded the saved rule **"Drift - Category vs Forecast"** (sandbox); on live the field ships in code so it can be created via ☰ Filter Rules ▸ New (or seeded).
+
+## v27.364 Filter Rules pop-down — drop the (count), fixed Apply/Edit position + wrapping description
+- "☰ Filter Rules (N) ▾" → "☰ Filter Rules ▾" (count removed; the active-filter name still shows when one is applied).
+- Saved-filter rows restructured: name + scope-chip description in a left column that **wraps** (min-width:0); Apply/Edit/Delete pinned in a **fixed right column** (top-aligned) so a long description no longer shoves the buttons around.
+
 ## v27.363 REPORTS ▸ 3PL & Invoicing — Forecast tab (Phase 1) + light-blue L3 nav
 - Renamed the report tab **"3PL Invoicing" → "3PL & Invoicing"** (deep link unchanged).
 - The 3PL selector (UK ILG / US Geneva / EU iFulfilment / AU Coghlans) is now a **light-blue level-3 nav** (`.dnav3` pills), **default UK ILG**, deep-linked at `#/reports/3pl-invoicing/<tpl>`.
