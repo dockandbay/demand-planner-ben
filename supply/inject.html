@@ -4205,6 +4205,7 @@
     document.querySelectorAll('#podet-'+i+' .po-dl-ps').forEach(function(b){ b.onclick=function(){ paperStoreLabels(po,b); }; });   // Paper Store carton labels
     document.querySelectorAll('#podet-'+i+' .po-dl-sw').forEach(function(b){ b.onclick=function(){ dlShipsWith(po,b); }; });
     document.querySelectorAll('#podet-'+i+' .po-dl-air').forEach(function(b){ b.onclick=function(){ dlShipsWith(po,b,true); }; });
+    document.querySelectorAll('#podet-'+i+' .po-pdf-dl').forEach(function(b){ b.onclick=function(){ window.open('/api/supply/po/'+encodeURIComponent(po)+'/pdf','_blank'); }; });   // SUG-0034 full-PO PDF
     // PLAN sub-tabs (PAYMENTS / DATES / CLIENT / ORDER PLAN / LANDED COSTS / TIMELINE) — toggle panels
     var root=document.getElementById('podet-'+i);
     if(root) root.querySelectorAll('.potab').forEach(function(b){ b.onclick=function(){ var pt=b.dataset.pt;
@@ -4275,7 +4276,8 @@
     // LANDED COSTS now lives under PAYMENTS, DOCUMENTS under MASTER DATA — no standalone tabs.
     var _sep='<div style="margin-top:20px;border-top:1px solid #e6ebf2;padding-top:12px"></div>';
     var payH2=p.pay+_sep+p.landed;                 // PAYMENTS + landed costs; landed exceptions fold into the PAYMENTS badge
-    var masterH2=masterH+_sep+docsH;               // MASTER DATA + documents
+    var masterH2='<div style="margin:2px 0 14px"><button class="save-btn po-pdf-dl" data-po="'+esc(po)+'" style="background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd;font-weight:700;font-size:13px;padding:6px 14px">⤓ Download PO details (PDF)</button> <span class="mut tiny">all PO details — header, client/FBA, packing &amp; labelling, order plan (SUG-0034)</span></div>'
+      +masterH+_sep+docsH;               // MASTER DATA + documents + full-PO PDF download (SUG-0034)
     var _docsAwaiting=((d&&d.all_docs)||[]).filter(function(x){return (x.approval_status||'')==='submitted';}).length;   // supplier docs awaiting approval → flag the tab
     var tabs=[['pay','PAYMENTS',payH2,(p.ex.pay||0)+(p.ex.landed||0)],['dates','DATES',p.dates,p.ex.dates],['client','CLIENT/FBA',p.client,p.ex.client],['oplan','ORDER PLAN',oplanH,(p.ex.oplan||0)],['shipments','SHIPMENTS',shipH,(p.ex.ship||0)],['masterdata','MASTER DATA & DOCS',masterH2,(p.ex.master||0)+_docsAwaiting],['timeline','TIMELINE',timelineH,p.ex.timeline]];
     if(poBy[po]&&poBy[po].is_master){ tabs.push(['childpo','CHILD PO',childPoPanel(po,d),0]); }   // masters only — final tab after Timeline (no count badge)
@@ -6332,10 +6334,6 @@
     bk.innerHTML='<span>← Back</span><span class="mob-back-ref">'+esc(po)+'</span>';
     bk.onclick=function(e){ e.stopPropagation(); closePODrawer(); };
     ov.appendChild(bk);
-    var pdfB=document.createElement('button'); pdfB.textContent='⤓ PDF';   // download all PO details as a PDF
-    pdfB.style.cssText='position:absolute;top:7px;right:10px;z-index:6;font-size:13px;padding:5px 12px;border:1px solid #93c5fd;border-radius:8px;background:#eff6ff;color:#1d4ed8;font-weight:700';
-    pdfB.onclick=function(e){ e.stopPropagation(); window.open('/api/supply/po/'+encodeURIComponent(po)+'/pdf','_blank'); };
-    ov.appendChild(pdfB);
     var holder=document.createElement('div'); holder.className='mob-sheet-body';
     holder.innerHTML='<div id="podet-DRAWER" class="count">Loading…</div>';
     ov.appendChild(holder);
@@ -6353,7 +6351,7 @@
     if(_overlay){ root.classList.add('hz-drawer-overlay'); root.style.display='block'; }
     var bg=document.createElement('div'); bg.id='podrawer-bg'; bg.style.zIndex=nextDrawerZ();   // stack above whatever's already open (e.g. a shipment drawer)
     bg.innerHTML='<div id="podrawer"><div class="shipdrawer-head"><div class="shipdrawer-title">'+esc(po)+'</div>'
-      +'<div><button class="lnk-btn shipdrawer-pdf" title="download all PO details as a PDF (client/FBA, packing &amp; labelling, order plan)">⤓ PDF</button> <button class="lnk-btn shipdrawer-full" title="open the full PO page for this PO">Full page ↗</button>'
+      +'<div><button class="lnk-btn shipdrawer-full" title="open the full PO page for this PO">Full page ↗</button>'
       +'<button class="shipdrawer-x" title="close">✕</button></div></div>'
       +'<div class="shipdrawer-body"><div id="podet-DRAWER" class="count">Loading…</div></div></div>';
     root.appendChild(bg);
@@ -6361,7 +6359,6 @@
     bg.addEventListener('mousedown',function(e){ if(e.target===bg)closePODrawer(); });
     bg.querySelector('.shipdrawer-x').onclick=function(){ closePODrawer(); };
     bg.querySelector('.shipdrawer-full').onclick=function(){ closePODrawer(); gotoPO(po,tab); };
-    bg.querySelector('.shipdrawer-pdf').onclick=function(){ window.open('/api/supply/po/'+encodeURIComponent(po)+'/pdf','_blank'); };
     }
     // while the drawer is open, in-place refreshes (after an edit/assign) target the drawer, not a grid row that
     // may not exist on this page (e.g. the What's Next report).
