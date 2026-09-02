@@ -1,3 +1,8 @@
+## v27.390 Sets master/set split displays — LY actuals + gap-vs-subcat (#1, #2)
+- **#1 Category LY-actuals split:** the last-year-actuals reference on a sub-category cell now shows **master units / set boxes** (e.g. Beach CORE `11,384 / 973`) instead of one mixed number; hover explains the split + the exploded item-equivalent total (15,643). SKU rows and set-less sub-categories are unchanged (single number). New cached `subcatLySplit(s,co,ch)` from per-SKU sales (a set sale = 1 box).
+- **#2 Gap-vs-subcat split:** the SKU-sum-vs-subcat variance pill tooltip now breaks the SKU-sum into `N master units + M set boxes` (only when the sub-category has a set forecast that month).
+- Both read the additive foundation (v27.389); no buy/demand change. `artifact_v16.7.html` only.
+
 ## v27.389 Sets two-totals — subcatSkuEffTotals now returns the master/set split (additive foundation)
 - `subcatSkuEffTotals` additionally returns **masterUnits** (master SKUs, units), **setUnits** (sets, item-equivalent), **setBoxes** (sets ÷ set size = box count) and **hasSets**, derived from the same values it already summed. `masterUnits + setUnits == totals` (verified), so buy/demand are byte-identical — this just exposes the breakdown for the upcoming master/set displays (e.g. Beach CORE 1,419 / 241). Foundation for the two-totals sets model (category-forecast + gap-vs-subcat split, per-pool smoothing).
 - `artifact_v16.7.html` only. No migration.

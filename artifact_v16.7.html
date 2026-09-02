@@ -6082,6 +6082,18 @@ function openChangeRecord(el){ var nk=el.dataset.nk; if(!nk)return; var p=nk.spl
        +(rows.length?rows.map(function(row){return '<div style="padding:2px 0;border-top:1px solid #1f2937">'+esc(_chgLine(row))+'</div>';}).join(''):'<div style="color:#94a3b8">No change history for this cell.</div>');
      var rr=el.getBoundingClientRect(),t2=rr.bottom+6; if(t2+pop.offsetHeight>window.innerHeight-8)t2=Math.max(6,rr.top-pop.offsetHeight-6); pop.style.top=t2+'px';
    }).catch(function(){ pop.innerHTML='<div style="color:#fca5a5">Could not load.</div>'; }); }
+// Last-year-actuals split for a sub-category: master SKUs in UNITS vs SET SKUs in BOXES (a set sale = 1 box), + the
+// set boxes exploded to individual units (box × BOM). Cached per s|co|ch (LY actuals are static in a session).
+var _lySplitCache={};
+function subcatLySplit(s,co,ch){
+  var k=s+'|'+co+'|'+ch; if(_lySplitCache[k])return _lySplitCache[k];
+  var ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':ch==='TIK'?'t':'b', out={};
+  Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||p.s!==s)return; var av=(p.av||{})[ctry]||''; if(av.indexOf(chKey)<0)return;
+    var isSet=(p.vt==='SET'), sz=isSet?Math.max(1,_setSize(sku)):1, sales=skuSales(sku,co,ch)||{};
+    for(var m in sales){ var u=sales[m]||0; if(!u)continue; var o=out[m]||(out[m]={master:0,setBoxes:0,setUnits:0});
+      if(isSet){ o.setBoxes+=u; o.setUnits+=u*sz; } else { o.master+=u; } } });
+  _lySplitCache[k]=out; return out;
+}
 function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   const{y,mo}=pa(fym);
   const ik=s+'|'+co+'|'+ch+'|'+fym;
@@ -6103,7 +6115,12 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
     var _rh0=cellRailForKey(_nk0); if(_rh0){ td.classList.add('has-rail'); td.style.position='relative'; td.insertAdjacentHTML('afterbegin',_rh0); }
     applyCellNote(td,_nk0);
     const d=document.createElement('div');d.className='fcin';
-    const lyD=document.createElement('div');lyD.className='fcly';lyD.textContent=ly_u?fn(ly_u):'--';d.appendChild(lyD);
+    const lyD=document.createElement('div');lyD.className='fcly';
+    (function(){ var _sp=(typeof SKUM==='undefined'||!SKUM[s])?(subcatLySplit(s,co,ch)[ym(y-1,mo)]):null;   // sub-category rows only; SKU rows keep their single LY number
+      if(_sp&&_sp.setBoxes>0){ lyD.textContent=fn(_sp.master)+' / '+fn(_sp.setBoxes); lyD.style.cursor='help';
+        lyD.title='Last-year actuals: '+fn(_sp.master)+' master units + '+fn(_sp.setBoxes)+' set boxes. Exploded (set BOMs → individual units): '+fn(_sp.master+_sp.setUnits)+' total.'; }
+      else { lyD.textContent=ly_u?fn(ly_u):'--'; } })();
+    d.appendChild(lyD);
     const inp=document.createElement('input');inp.type='text';inp.readOnly=true;
     inp.className='fci actual-pct'+(isNeg?' neg':'');inp.value=yoyStr;
     d.appendChild(inp);
@@ -6256,11 +6273,13 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
     // the sub-category target by ≥ the rule's threshold (this block already runs only inside the next-12-month window).
     if(typeof _frIsDrift==='function'&&_frIsDrift()&&Math.abs(_varPct)>=_frDriftThresh()){ td.style.background='#fde047'; td.title='Drift: SKU forecasts sum to '+fn(_skuSum)+' vs sub-category target '+fn(fcv)+' ('+(_varPct>0?'+':'')+_varPct+'%). Auto-smooth won’t close this — expand the subcat and smooth this month.'; }
     if(Math.abs(_varPct)>20){
+      var _mu=(skuEff.masterUnits&&skuEff.masterUnits[fym])||0, _sb=(skuEff.setBoxes&&skuEff.setBoxes[fym])||0;   // master/set split (Ben)
+      var _splitTip=(skuEff.hasSets&&_sb>0)?('  ['+fn(_mu)+' master units + '+fn(_sb)+' set boxes]'):'';
       var _txt='sku '+(_varPct>0?'+':'\u2212')+Math.abs(_varPct)+'%';
       var varDiv=document.createElement('div');
       varDiv.className='skuvar-pill';
       varDiv.style.cssText='font-size:7px;padding:1px 3px;margin-top:1px;background:#FFFFC5;color:#854d0e;border:1px solid #facc15;border-radius:2px;font-weight:600;text-align:right;line-height:1.2;font-variant-numeric:tabular-nums';
-      varDiv.title='SKU forecasts sum to '+fn(_skuSum)+' vs subcategory forecast '+fn(fcv)+' ('+(_varPct>0?'+':'')+_varPct+'%). Expand the subcat and click "smooth" on this month to rescale SKUs to within ±5% of the subcat.';
+      varDiv.title='SKU forecasts sum to '+fn(_skuSum)+_splitTip+' vs subcategory forecast '+fn(fcv)+' ('+(_varPct>0?'+':'')+_varPct+'%). Expand the subcat and click "smooth" on this month to rescale SKUs to within ±5% of the subcat.';
       varDiv.textContent=_txt;
       d.appendChild(varDiv);
     }
