@@ -6938,9 +6938,16 @@ function buildSkuShares(skus,co,ch,lyMonths){
   // (existing sets keep their history share, masters unchanged); nothing moves in the demand plan or buy plan until a
   // Sets % is set in the Contribution model. When set, forecast shifts from masters to sets (sets explode to components).
   if(_setsPct>0&&_setsPct<100){
-    var _setT=_setsPct/100, _mastT=1-_setT, _setSk=[], _mastSk=[], _setSum=0, _mastSum=0;
-    skus.forEach(function(sku){ if(SKUM[sku]&&SKUM[sku].vt==='SET'){ _setSk.push(sku); _setSum+=shares[sku]||0; } else { _mastSk.push(sku); _mastSum+=shares[sku]||0; } });
+    var _setT=_setsPct/100, _mastT=1-_setT, _setSk=[], _mastSk=[], _setSum=0, _mastSum=0, _ctry2=co.toLowerCase();
+    // Reserve the Sets% pool for ACTIVE sets only. A DISCONTINUED set (build-on-fly, no stock) would otherwise take a
+    // slice of the reservation and then run off to ~0 — stranding that volume (neither sets nor masters deliver it, so
+    // the sub-category under-forecasts). So a discontinued set gets 0 share here; if a sub-category has NO active set,
+    // the pool collapses and the masters carry the whole sub-category (effectively Sets%=0 there).
+    skus.forEach(function(sku){ var p=SKUM[sku];
+      if(p&&p.vt==='SET'){ var _d=(p.disc&&p.disc[_ctry2])||null; if(_d&&_d<TODAY){ shares[sku]=0; return; } _setSk.push(sku); _setSum+=shares[sku]||0; }
+      else { _mastSk.push(sku); _mastSum+=shares[sku]||0; } });
     if(_setSk.length){ if(_setSum>0)_setSk.forEach(function(sku){ shares[sku]=shares[sku]/_setSum*_setT; }); else _setSk.forEach(function(sku){ shares[sku]=_setT/_setSk.length; }); }   // no set history → spread the reserve evenly
+    else { _setT=0; _mastT=1; }   // no ACTIVE set → collapse the set reservation; masters take the whole sub-category
     if(_mastSum>0)_mastSk.forEach(function(sku){ shares[sku]=shares[sku]/_mastSum*_mastT; });
   }
   return shares;

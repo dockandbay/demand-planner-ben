@@ -1,3 +1,9 @@
+## v27.381 Sets % — reservation goes to ACTIVE sets only (discontinued sets no longer strand it)
+- **Bug:** `buildSkuShares` handed the Sets% pool to **all** sets, including **discontinued** ones. Build-on-fly sets have no stock, so a discontinued set that received a slice of the reservation then ran off to ~0 — that volume was **stranded** (neither the sets nor the masters delivered it), so the sub-category **under-forecast**. Worst cases were sub-categories where *every* set is discontinued: Tea Towel (43% → all on 24 disc sets) and Towel-Beach SEASONAL (41% → all on 30 disc sets, actual set demand collapsed to 32).
+- **Fix:** the Sets% pool is now reserved for **active sets only**; a discontinued set gets 0 share (it still runs off its own stock via the normal disc path). If a sub-category has **no active set**, the pool **collapses to the masters** (effectively Sets%=0 there), so the masters carry the whole sub-category.
+- **Verified (UK/DTC, before→after):** Tea Towel set 1,610→0 / masters 2,139→**3,746** (= sub-cat total); Beach SEASONAL set 572→0 / masters 831→**1,390**; **Beach CORE unchanged** (958/1,181 — active sets, byte-identical). Buy **34,629→35,229 (+600)** — recovering the previously-stranded (under-bought) volume into active masters. Sub-categories with active sets are unaffected.
+- `artifact_v16.7.html` (`buildSkuShares`) only. No migration.
+
 ## v27.380 DTC mismatch — "Grouped SOs" pill
 - New **⧉ Grouped SOs (N)** pill in the report header: N = number of order groups where one or more POs **span multiple sales orders**. Click to **filter to just those** (unmapped POs hidden while active); click again to clear. Combines with the search box. Count updates live on map/unmap.
 
