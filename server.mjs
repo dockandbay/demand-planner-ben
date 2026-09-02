@@ -7936,6 +7936,44 @@ app.get('/api/supply/tpl/data', async (req, res) => {
     res.json({ ok: true, files, cost_accounts: cost, account_map: map, cin7_summary });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// 3PL Forecast tab — known inbound to this 3PL, grouped under the master SHIPMENT: shipment id, effective delivery
+// date, units (Σ line qty), and a container COUNT (pallets ÷ 20 → 40ft-equivalent, rounded up). Open POs only. The
+// client buckets these by delivery month for the "Goods in" column (expandable to the shipment list). Read-only.
+const TPL3_BRANCH = { uk_ilg: 'UK ILG', us_geneva: 'US Geneva', eu_ifulfilment: 'EU iFulfillment', au_coghlans: 'AU Coghlans' };
+app.get('/api/supply/tpl/goods-in', async (req, res) => {
+  const branch = TPL3_BRANCH[String(req.query.tpl || '')] || null;
+  if (!branch) return res.json({ ok: true, shipments: [] });
+  try {
+    const rows = (await pool.query(`
+      WITH poa AS (
+        SELECT p.po,
+               coalesce(nullif(p.shipment_ref,''), p.po) ship_id,
+               coalesce((SELECT sum(l.qty)::int FROM planner.purchase_order_lines l WHERE l.po=p.po),0) units,
+               ${PO_PALLETS_EFF_SQL} pallets,
+               coalesce(sh.delivery_date, sh.arrival_date, sh.landing_date, p.delivery_date_overide,
+                        (SELECT min(i.estimated_delivery_date) FROM planner.inbound_shipments i WHERE i.reference=p.po)) deliv
+        FROM planner.purchase_orders p
+        LEFT JOIN planner.shipments sh ON sh.shipment_ref = nullif(p.shipment_ref,'')
+        WHERE p.branch = $1 AND coalesce(p.status,'') NOT ILIKE '%complete%'
+      )
+      SELECT ship_id,
+             -- overdue inbound (past date) lands NOW → clamp to the current month for bucketing. to_char so the
+             -- client gets a clean 'YYYY-MM-DD' (a raw pg Date stringifies to "Tue Sep 01" and breaks month bucketing).
+             to_char(greatest(min(deliv), date_trunc('month', current_date)::date), 'YYYY-MM-DD') deliv,
+             sum(units)::int units, round(sum(pallets)::numeric,1) pallets,
+             string_agg(distinct po, ', ' ORDER BY po) pos, count(distinct po)::int po_count
+      FROM poa
+      WHERE deliv IS NOT NULL
+      GROUP BY ship_id
+      HAVING greatest(min(deliv), date_trunc('month', current_date)::date) < (date_trunc('month', current_date) + interval '6 months')
+         AND sum(units) > 0
+      ORDER BY deliv`, [branch])).rows;
+    const out = rows.map(r => { const pal = Number(r.pallets) || 0; return {
+      ship_id: r.ship_id, deliv: r.deliv || null, units: r.units || 0,
+      pallets: pal, containers: pal > 0 ? Math.max(1, Math.ceil(pal / 20)) : 0, pos: r.pos || '', po_count: r.po_count || 0 }; });
+    res.json({ ok: true, shipments: out });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.post('/api/supply/tpl/upload', async (req, res) => {
   const b = req.body || {};
   if (!TPL_KEYS.includes(b.tpl) || !b.period || !b.data_base64) return res.status(400).json({ error: 'tpl, period and data_base64 required' });

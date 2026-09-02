@@ -14397,17 +14397,23 @@ function render3plInvoice(body){
       fetch('/api/supply/tpl/account-map',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({label:inp.dataset.label,field:inp.dataset.f,value:inp.value})})
         .then(function(r){return r.json();}).then(function(j){ inp.style.borderColor=(j&&j.error)?'#dc2626':'#16a34a'; setTimeout(function(){inp.style.borderColor='#cbd5e1';},900); }).catch(function(){ inp.style.borderColor='#dc2626'; }); }; });
   }
-  function draw3plForecast(b){ b.innerHTML='<div style="color:#94a3b8;font-size:12px">Building 6-month forecast…</div>'; try{ _draw3plForecastImpl(b); }catch(err){ b.innerHTML='<div style="color:#b91c1c;font-size:12px">Forecast error: '+e(String(err&&err.message||err))+'</div>'; if(window.console)console.error('[3pl forecast]',err); } }
+  function draw3plForecast(b){ b.innerHTML='<div style="color:#94a3b8;font-size:12px">Building 6-month forecast…</div>';
+    var _tpl=TPL3_STATE.tpl;
+    fetch('/api/supply/tpl/goods-in?tpl='+encodeURIComponent(_tpl)).then(function(r){return r.json();}).then(function(d){
+      if(TPL3_STATE.tpl!==_tpl||TPL3_STATE.mode!=='forecast')return;   // user moved on
+      try{ _draw3plForecastImpl(b,(d&&d.shipments)||[]); }catch(err){ b.innerHTML='<div style="color:#b91c1c;font-size:12px">Forecast error: '+e(String(err&&err.message||err))+'</div>'; if(window.console)console.error('[3pl forecast]',err); }
+    }).catch(function(){ try{ _draw3plForecastImpl(b,[]); }catch(err){ b.innerHTML='<div style="color:#b91c1c;font-size:12px">Forecast error: '+e(String(err&&err.message||err))+'</div>'; } }); }
   // 3PL → its 3PL-warehouse market + label. Amazon (FBA) is handled as the separate "transfers" series, not here.
   var TPL3_MKT={uk_ilg:'UK',us_geneva:'US',eu_ifulfilment:'EU',au_coghlans:'AU'};
   function _r3plRound(n){ n=Math.max(0,Math.round(n||0)); return n<500?Math.round(n/100)*100:Math.round(n/500)*500; }   // nearest 500; nearest 100 if <500 (Ben)
-  function _draw3plForecastImpl(b){
+  function _draw3plForecastImpl(b,shipments){
     var MKT=TPL3_MKT[TPL3_STATE.tpl]||'UK', wh=MKT.toLowerCase()+'_3pl';
     var tplName=(TPL3.filter(function(t){return t[0]===TPL3_STATE.tpl;})[0]||[,'3PL'])[1];
     // next 6 calendar months (from the current month), keyed YYYY_MM to match calc().fu / eta slicing
     var now=new Date(), mkeys=[], labels=[], MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     for(var i=0;i<6;i++){ var d=new Date(now.getFullYear(),now.getMonth()+i,1), y=d.getFullYear(), mo=d.getMonth()+1; mkeys.push(y+'_'+(mo<10?'0':'')+mo); labels.push(MON[mo-1]+'-'+String(y).slice(2)); }
     var curKey=mkeys[0];
+    function _fD(s){ var p=String(s||'').slice(0,10).split('-'); return p.length<3?String(s||''):(p[2]+'-'+(MON[+p[1]-1]||p[1])+'-'+p[0].slice(2)); }   // 'YYYY-MM-DD' → dd-Mmm-yy (dateDMY is BP-IIFE-local)
     // ── GOODS OUT (a): forecast ORDERS = DTC+TIK units × ship-bag ratio (0.449) + B2B units ÷ 25 avg-units/order ──
     var orders={}; mkeys.forEach(function(m){orders[m]=0;});
     var subs={}; Object.keys(SKUM).forEach(function(k){ var p=SKUM[k]; if(p&&p.s)subs[p.s]=1; });
@@ -14422,10 +14428,10 @@ function render3plInvoice(body){
         });
       });
     });
-    // ── GOODS IN (a): KNOWN inbound to this 3PL's warehouse — confirmed shipments (SKUI) + open POs (SKUOI), by landing month ──
-    var ginK={}; mkeys.forEach(function(m){ginK[m]=0;});
-    function _addInb(v){ if(!v)return; (Array.isArray(v)?v:[v]).forEach(function(x){ var q=x.qty||0; if(!(q>0)||!x.eta)return; var mk=String(x.eta).slice(0,7).replace('-','_'); if(ginK[mk]!=null)ginK[mk]+=q; }); }
-    Object.keys(SKUM).forEach(function(sku){ _addInb(SKUI[sku+'|'+wh]); _addInb(SKUOI[sku+'|'+wh]); });
+    // ── GOODS IN (a): KNOWN inbound — server shipments (open POs grouped under their master SHIPMENT: units, container
+    // count, effective delivery date; overdue past-dated inbound is clamped to the current month). Bucketed by month. ──
+    var ginK={},ginCont={},ginShips={}; mkeys.forEach(function(m){ginK[m]=0;ginCont[m]=0;ginShips[m]=[];});
+    (shipments||[]).forEach(function(sh){ if(!sh.deliv)return; var mk=String(sh.deliv).slice(0,7).replace('-','_'); if(ginK[mk]==null)return; ginK[mk]+=sh.units||0; ginCont[mk]+=sh.containers||0; ginShips[mk].push(sh); });
     // ── GOODS OUT (b): Amazon/FBA transfer units — the buy-plan's per-SKU 3PL→FBA transfer, summed per month. project()
     // returns proj[1+j].tx = the recommended transfer for month M+j (proj[1] = current month = mkeys[0]). Read-only:
     // project() is the same pure fn the buy render calls, so this doesn't change any buy output. ──
@@ -14439,7 +14445,7 @@ function render3plInvoice(body){
       });
     } }catch(e3){ if(window.console)console.warn('[3pl forecast] transfers',e3&&e3.message); }
     // rows for render + export. GOODS IN · auto-forecast (b) = next item → null.
-    var rows=mkeys.map(function(m,ix){ return {mo:labels[ix], ginKnown:Math.round(ginK[m]), ginFcst:null, ginTot:Math.round(ginK[m]), orders:_r3plRound(orders[m]), transfers:_r3plRound(trans[m])}; });
+    var rows=mkeys.map(function(m,ix){ return {mo:labels[ix], m:m, ginKnown:Math.round(ginK[m]), ginCont:ginCont[m], ships:ginShips[m], ginFcst:null, ginTot:Math.round(ginK[m]), orders:_r3plRound(orders[m]), transfers:_r3plRound(trans[m])}; });
     // ── render ──
     var TH='padding:6px 10px;text-align:right;font-size:10px;color:#64748b;text-transform:uppercase;border-bottom:2px solid #cbd5e1;white-space:nowrap';
     var TD='padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums;border-bottom:1px solid #f1f5f9';
@@ -14449,18 +14455,25 @@ function render3plInvoice(body){
       +'<div style="display:flex;gap:6px"><button id="f3-dl" class="pill catpill" style="font-size:11px">⬇ Download CSV</button><button id="f3-cp" class="pill catpill" style="font-size:11px">⧉ Copy for email</button></div></div>'
       +'<table style="border-collapse:collapse;font-size:12px;min-width:640px">'
       +'<thead><tr><th style="'+TH+';text-align:left">Month</th>'
-        +'<th style="'+TH+'">Goods in · known POs</th><th style="'+TH+'">Goods in · auto-forecast</th><th style="'+TH+';border-right:1px solid #e2e8f0">Goods in · total</th>'
+        +'<th style="'+TH+'">Goods in · known POs</th><th style="'+TH+'">Containers</th><th style="'+TH+'">Goods in · auto-forecast</th><th style="'+TH+';border-right:1px solid #e2e8f0">Goods in · total</th>'
         +'<th style="'+TH+'">Goods out · orders</th><th style="'+TH+'">Goods out · Amazon transfers</th></tr></thead><tbody>';
-    rows.forEach(function(r){ html+='<tr><td style="'+TD+';text-align:left;font-weight:600">'+e(r.mo)+'</td>'
-      +cell(r.ginKnown)+cell(r.ginFcst,true)+'<td style="'+TD+';border-right:1px solid #e2e8f0;font-weight:600">'+fmt(r.ginTot)+'</td>'
-      +cell(r.orders)+cell(r.transfers)+'</tr>'; });
+    rows.forEach(function(r,ri){ var hasS=r.ships&&r.ships.length;
+      html+='<tr><td style="'+TD+';text-align:left;font-weight:600">'+(hasS?'<span class="f3-exp" data-r="'+ri+'" title="show shipments" style="cursor:pointer;color:#2563eb;margin-right:5px;display:inline-block;width:9px">&#9656;</span>':'<span style="display:inline-block;width:14px"></span>')+e(r.mo)+'</td>'
+        +cell(r.ginKnown)+'<td style="'+TD+'">'+(r.ginCont?fmt(r.ginCont):'<span style="color:#cbd5e1">—</span>')+'</td>'+cell(r.ginFcst,true)+'<td style="'+TD+';border-right:1px solid #e2e8f0;font-weight:600">'+fmt(r.ginTot)+'</td>'
+        +cell(r.orders)+cell(r.transfers)+'</tr>';
+      if(hasS){ r.ships.forEach(function(sh){ html+='<tr class="f3-det f3-det-'+ri+'" style="display:none;background:#f8fafc">'
+        +'<td style="'+TD+';text-align:left;padding-left:26px;color:#475569;font-weight:600"><span class="inb-po" data-po="'+e(sh.ship_id)+'" style="color:#2563eb;cursor:pointer">'+e(sh.ship_id)+'</span>'+(sh.po_count>1?' <span style="color:#94a3b8;font-weight:400">('+sh.po_count+' POs)</span>':'')+'</td>'
+        +'<td style="'+TD+';color:#475569">'+fmt(sh.units||0)+'</td><td style="'+TD+';color:#475569">'+(sh.containers||'<span style="color:#cbd5e1">—</span>')+'</td>'
+        +'<td style="'+TD+';text-align:left;color:#64748b" colspan="4">delivery '+(sh.deliv?e(_fD(sh.deliv)):'&mdash;')+'</td></tr>'; }); }
+    });
     html+='</tbody></table>'
       +'<div style="font-size:10px;color:#94a3b8;margin-top:8px;max-width:680px;line-height:1.5">'
       +'<b>Goods out · orders</b> = (DTC + TikTok units × 0.449 ship-bags/unit) + (B2B units ÷ 25 units/order), rounded to the nearest 500 (nearest 100 under 500). '
       +'<b>Goods out · Amazon transfers</b> = the buy-plan 3PL→FBA transfer per SKU, summed per month (same rounding). '
-      +'<b>Goods in · known POs</b> = confirmed inbound + open POs landing that month, to '+e(MKT)+' 3PL. '
-      +'<b>Goods in · auto-forecast</b> (future replenishment, grouped under master shipment) + shipment IDs / container counts on known POs are the next build step.</div>';
+      +'<b>Goods in · known POs / Containers</b> = open POs landing that month, grouped under their master shipment (click ▸ for shipment IDs + delivery dates); containers = pallets ÷ 20 (40ft-equiv). Overdue past-dated inbound counts in the current month. '
+      +'<b>Goods in · auto-forecast</b> (future replenishment) is the next build step.</div>';
     b.innerHTML=html;
+    b.querySelectorAll('.f3-exp').forEach(function(x){ x.onclick=function(){ var ri=this.dataset.r, op=this.getAttribute('data-open')==='1'; b.querySelectorAll('.f3-det-'+ri).forEach(function(row){ row.style.display=op?'none':''; }); this.innerHTML=op?'&#9656;':'&#9662;'; this.setAttribute('data-open',op?'0':'1'); }; });
     var _dl=b.querySelector('#f3-dl'); if(_dl)_dl.onclick=function(){ _f3Download(tplName,rows); };
     var _cp=b.querySelector('#f3-cp'); if(_cp)_cp.onclick=function(){ _f3CopyEmail(tplName,rows,this); };
   }
