@@ -1,3 +1,6 @@
+## v27.373 3PL & Invoicing — "what to upload each month" box on every 3PL, under the L3 nav
+- The blue **"what to upload each month"** guide (previously UK ILG only, buried in the Invoices body) now renders **under the level-3 3PL nav for every 3PL** (Invoices mode): UK ILG keeps its detailed file list; US Geneva / EU iFulfilment / AU Coghlans get a generic upload note (per-3PL specifics to be filled in). The old standalone "3PL Invoice / Upload each…" description is folded into the box. Hidden on the Forecast tab.
+
 ## v27.372 3PL Forecast — grouped headers, lead-shifted Est Forecast, air shipments, richer exports
 - **Grouped header row** GOODS IN / GOODS OUT so the prefix isn't repeated per column. Columns renamed: **Known PO's (units)**, **Known PO's (containers)**, **Est Forecast (units)**, **Est Forecast (containers)**, **Total** · **Orders**, **Amazon transfers (units)**.
 - **Est Forecast now shifts to the LANDING month** (order month + lead = md.l3 wk ÷ 4.33), so near months correctly show no forecast landings (auto-forecast only *orders* now; it arrives later). Est-Forecast containers estimated from the known units-per-container.
