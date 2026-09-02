@@ -6535,20 +6535,31 @@ function inbDiv(inb, entries, color){
   if(!entries||!entries.length) return '<div style="'+base+'">&gt;&gt;'+fn(inb)+'</div>';
   var CAP=14, shown=entries.slice(0,CAP);
   var tip=entries.length+' inbound shipment'+(entries.length>1?'s':'')+':<br>'
-    + shown.map(function(x){ return _etaShort(x.eta)+' &middot; '+fn(x.qty)+(x.ref?(' &middot; '+x.ref):'')+(x.open?' &middot; <i>on order</i>':''); }).join('<br>')
+    + shown.map(function(x){ var refH=x.ref?(' &middot; <a class="inb-po" data-po="'+x.ref+'" style="color:#93c5fd;font-weight:600;text-decoration:underline;cursor:pointer">'+x.ref+'</a><span class="inb-copy" data-po="'+x.ref+'" title="Copy PO ref" style="cursor:pointer;margin-left:3px;opacity:.75">&#128203;</span>'):''; return _etaShort(x.eta)+' &middot; '+fn(x.qty)+refH+(x.open?' &middot; <i>on order</i>':''); }).join('<br>')
     + (entries.length>CAP?('<br>+ '+(entries.length-CAP)+' more'):'');
   var next=entries[0].eta;
   return '<div class="stk-inb" data-tip="'+tip.replace(/"/g,'&quot;')+'" style="'+base+';cursor:default">&gt;&gt;'+fn(inb)
     +'<span style="display:block;font-size:8px;opacity:.9">&#8601; '+(next?_etaShort(next):'TBC')+'</span></div>';
 }
-// One delegated 120ms hover tooltip for any .stk-inb[data-tip] (bound once).
-(function(){ var el=null,t=null;
-  function hide(){ if(el)el.style.display='none'; }
+// One delegated 120ms hover tooltip for any .stk-inb[data-tip] (bound once). Interactive: the tooltip has
+// pointer-events + user-select so the PO ref (a .inb-po link → drawer) and its 📋 copy icon are reachable — moving
+// the mouse from the cell into the tooltip cancels the hide (short grace delay), and text is selectable to copy.
+(function(){ var el=null,showT=null,hideT=null;
+  function build(){ if(el)return el; el=document.createElement('div');
+    el.style.cssText='position:fixed;z-index:300010;max-width:280px;background:#111827;color:#fff;font-size:11px;line-height:1.6;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);user-select:text';
+    el.addEventListener('mouseenter',function(){ clearTimeout(hideT); });
+    el.addEventListener('mouseleave',hide);
+    document.body.appendChild(el); return el; }
+  function hide(){ clearTimeout(showT); if(el)el.style.display='none'; }
   document.addEventListener('mouseover',function(e){ var n=e.target&&e.target.closest?e.target.closest('.stk-inb[data-tip]'):null; if(!n)return;
-    clearTimeout(t); t=setTimeout(function(){ if(!el){el=document.createElement('div'); el.style.cssText='position:fixed;z-index:300010;max-width:260px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none'; document.body.appendChild(el);} el.innerHTML=n.getAttribute('data-tip'); el.style.display='block'; var r=n.getBoundingClientRect(); el.style.left=Math.max(6,Math.min(r.left,window.innerWidth-266))+'px'; el.style.top=(r.bottom+5)+'px'; },120); });
-  document.addEventListener('mouseout',function(e){ var n=e.target&&e.target.closest?e.target.closest('.stk-inb[data-tip]'):null; if(n){clearTimeout(t); hide();} });
+    clearTimeout(hideT); clearTimeout(showT);
+    showT=setTimeout(function(){ build(); el.innerHTML=n.getAttribute('data-tip'); el.style.display='block'; var r=n.getBoundingClientRect(); el.style.left=Math.max(6,Math.min(r.left,window.innerWidth-286))+'px'; el.style.top=(r.bottom+5)+'px'; },120); });
+  document.addEventListener('mouseout',function(e){ var n=e.target&&e.target.closest?e.target.closest('.stk-inb[data-tip]'):null; if(!n)return;
+    clearTimeout(showT); hideT=setTimeout(hide,240); });   // grace period to move into the tooltip
   document.addEventListener('scroll',hide,true);
 })();
+// Copy a PO ref from any inbound tooltip (📋 icon) to the clipboard. Delegated so it works on tooltip-rendered spans.
+document.addEventListener('click',function(e){ var c=e.target&&e.target.closest?e.target.closest('.inb-copy[data-po]'):null; if(!c)return; e.preventDefault(); e.stopPropagation(); var po=c.getAttribute('data-po'); if(!po)return; try{ navigator.clipboard.writeText(po); var o=c.innerHTML; c.innerHTML='&#10003;'; setTimeout(function(){ c.innerHTML=o; },900); }catch(_){} });
 // 120ms hover tooltip for complex-rule cover cells (.crc-tip) in the SKU popup AND the demand-plan SKU name
 // (.dp-sku-tip → product title). Bound once, renders the element's data-tip HTML.
 (function(){ var el=null,t=null; var SEL='.crc-tip[data-tip], .dp-sku-tip[data-tip], .crc-tip[data-antip], .tip120[data-tip]';

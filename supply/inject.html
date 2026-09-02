@@ -12274,6 +12274,7 @@
       var hbx=short?'':tierBoxHtml(s); var hi=tr.querySelector('.bpm-tierbox'); if(hi){ hi.style.display=hbx?'block':'none'; hi.innerHTML=hbx; } }
     function drawSkus(){
       var box=document.getElementById('bpm-skus'); if(!box)return;
+      if(box._clrSum)box._clrSum();   // reset any ⌘-hover sum selection before the table is rebuilt
       var skus=Object.keys(REC[MODE]).filter(function(s){ return shown.some(function(c){ return rec(s,c)>0; }); });
       var list=skus.map(function(s){ var m=META[s]||{options:[]}; return {sku:s,cat:m.category||'',moq:moqOf(s)||null,pallet_qty:m.pallet_qty||0,discontinue:m.discontinue||''}; });
       list.sort(function(a,b){ var ca=a.cat||'~~~',cb=b.cat||'~~~'; return ca<cb?-1:ca>cb?1:(a.sku<b.sku?-1:a.sku>b.sku?1:0); });
@@ -12296,13 +12297,26 @@
       });
       var thB='position:sticky;top:0;background:#f3f3f1;z-index:1;padding:5px 8px;border-bottom:1px solid #d5d5d5;font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:#444;white-space:nowrap';
       var ctryTh=shown.map(function(c){return '<th style="'+thB+';text-align:center;border-bottom:3px solid '+colOf(c)+';color:#111;min-width:104px">'+c+'<div style="font-weight:400;text-transform:none;letter-spacing:0;margin-top:2px"><a class="bpm-col-sel" data-c="'+c+'" data-on="1" style="cursor:pointer;color:#1d4ed8;font-size:9px">tick all</a> <span style="color:#cbd5e1">·</span> <a class="bpm-col-sel" data-c="'+c+'" data-on="0" style="cursor:pointer;color:#64748b;font-size:9px">none</a></div></th>';}).join('');
-      box.innerHTML='<div style="flex:0 0 auto;display:flex;align-items:center;gap:10px;margin-bottom:4px"><label style="font-size:11px;cursor:pointer"><input type="checkbox" id="bpm-tickall" checked> tick all shown</label><span class="count" id="bpm-skucount" style="margin-left:auto"></span></div>'
+      box.innerHTML='<div style="flex:0 0 auto;display:flex;align-items:center;gap:10px;margin-bottom:4px"><label style="font-size:11px;cursor:pointer"><input type="checkbox" id="bpm-tickall" checked> tick all shown</label><span style="font-size:10px;color:#94a3b8">⌘ / Ctrl + hover cells = live sum</span><span class="count" id="bpm-skucount" style="margin-left:auto"></span></div>'
         +'<div style="flex:1 1 auto;overflow:auto;border:1px solid #e0e0e0;border-radius:6px"><table style="border-collapse:separate;border-spacing:0;font-size:11px;width:100%">'
         +'<thead><tr><th style="'+thB+';text-align:left;min-width:200px">SKU</th>'+ctryTh
         +'<th style="'+thB+';text-align:center;min-width:70px">Total</th>'
         +'<th style="'+thB+';text-align:left;min-width:150px">Supplier</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
       var pb=document.getElementById('bpm-pills'); if(pb)pb.innerHTML=pillBar();
       if(!box._tiertopBound){ box._tiertopBound=true; box.addEventListener('change',function(e){ var t=e.target; if(t&&t.classList&&t.classList.contains('bpm-tiertop')){ TIERTOP[t.dataset.s]=t.checked; refreshChina(); invalidatePreview(); } }); }   // per-SKU "order tier top-up as China stock"
+      // ⌘ / Ctrl + hover to sum: hold the modifier and scrub the mouse over qty cells (e.g. down a market column) to
+      // build a live running total in a floating badge — a spreadsheet-style "select range, see the sum". A plain
+      // click, Esc, or a redraw clears it. Uses the qty cell's current value (.bpm-q), so overrides are reflected.
+      if(!box._sumScrubBound){ box._sumScrubBound=true; var _selMap={}, _badge=null;
+        function _mkBadge(){ if(_badge)return _badge; _badge=document.createElement('div'); _badge.style.cssText='position:fixed;z-index:200010;background:#4f46e5;color:#fff;font-size:12px;font-weight:700;padding:5px 10px;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.35);pointer-events:none;display:none;white-space:nowrap'; (typeof ov!=='undefined'?ov:document.body).appendChild(_badge); return _badge; }
+        function _clr(){ for(var k in _selMap){ if(_selMap[k].td)try{_selMap[k].td.style.boxShadow='';}catch(_){} } _selMap={}; if(_badge)_badge.style.display='none'; }
+        box._clrSum=_clr;
+        function _paint(e){ var n=0,sum=0; for(var k in _selMap){ n++; sum+=_selMap[k].v; } if(!n){ if(_badge)_badge.style.display='none'; return; } var b=_mkBadge(); b.innerHTML='Σ&nbsp;'+sum.toLocaleString()+'&nbsp;&nbsp;<span style="opacity:.75;font-weight:400">'+n+' cell'+(n>1?'s':'')+'</span>'; b.style.display='block'; if(e){ b.style.left=Math.min(e.clientX+15,window.innerWidth-160)+'px'; b.style.top=(e.clientY+18)+'px'; } }
+        box.addEventListener('mouseover',function(e){ if(!(e.metaKey||e.ctrlKey))return; var inp=e.target&&e.target.closest?e.target.closest('.bpm-q'):null; if(!inp)return; var k=inp.dataset.s+'|'+inp.dataset.c; if(!_selMap[k]){ var td=inp.closest('td'); if(td)td.style.boxShadow='inset 0 0 0 2px #4f46e5'; _selMap[k]={v:Number(inp.value)||0,td:td}; } _paint(e); });
+        box.addEventListener('mousemove',function(e){ if((e.metaKey||e.ctrlKey)){ for(var _k in _selMap){ _paint(e); break; } } });
+        box.addEventListener('mousedown',function(e){ if(!(e.metaKey||e.ctrlKey))_clr(); });
+        document.addEventListener('keydown',function(e){ if(e.key==='Escape')_clr(); });
+      }
       var _tickQ=function(t){ var q=t.parentNode&&t.parentNode.querySelector('.bpm-q'); return q?(Number(q.value)||0):0; };   // ticking never selects a 0-qty cell
       document.querySelectorAll('#bpm-pills .bpm-ctr').forEach(function(b){ b.onclick=function(){ var c=b.dataset.c,i=shown.indexOf(c); if(i>=0){ if(shown.length>1)shown.splice(i,1); } else shown=modeCountries().filter(function(x){return x===c||shown.indexOf(x)>=0;}); invalidatePreview(); drawSkus(); }; });
       box.querySelectorAll('.bpm-tick').forEach(function(t){ t.onchange=function(){ TICK[keyC(t.dataset.s,t.dataset.c)]=t.checked; updateRow(t.closest('tr')); refreshCount(); invalidatePreview(); }; });
