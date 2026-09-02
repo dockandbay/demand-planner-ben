@@ -11306,11 +11306,14 @@ async function buildPoPdf(p, lines, ship) {
   const grid = [
     ['Supplier', p.supplier_name || '-'], ['Production', p.prod_no || '-'],
     ['Batch', p.batch_id || '-'], ['Branch', p.branch || '-'],
-    ['Country', p.country_code || '-'], ['Ship type', p.ship_type_overide || p.ship_type || '-'],
+    ['Ship type', p.ship_type_overide || p.ship_type || '-'], ['Shipment ref', p.shipment_ref || '-'],
+    ['Flexport ref', p.flex_ref || '-'], ['Deposit ref', p.deposit_ref || '-'],
     ['Start production', fmtd(p.start_production)], ['Production end', fmtd(p.end_production_overide)],
     ['Delivery date', fmtd(p.delivery_date_overide)], ['Supplier ship date', fmtd(p.supplier_ship_date)],
-    ['Deposit ref', p.deposit_ref || '-'], ['ERP PO', p.erp_po || '-'],
+    ['ERP PO', p.erp_po || '-'],
   ];
+  // Only when the shipment is consolidated under another supplier's master PO
+  if (p.master_supplier && String(p.master_supplier).trim() && p.master_supplier !== p.supplier_name) grid.push(['Master shipment supplier', p.master_supplier]);
   const colW = W / 2, lblW = 96;
   for (let i = 0; i < grid.length; i += 2) { need(15);
     for (let j = 0; j < 2; j++) { const cell = grid[i + j]; if (!cell) continue; const x = M + j * colW;
@@ -11380,7 +11383,11 @@ app.get('/api/supply/po/:po/pdf', async (req, res) => {
   const po = req.params.po;
   try {
     const [poR, linesR, shipR] = await Promise.all([
-      pool.query(`SELECT p.*, (SELECT default_currency FROM planner.suppliers s WHERE s.id=p.supplier_id OR s.name=p.supplier_name LIMIT 1) cur FROM planner.purchase_orders p WHERE p.po=$1`, [po]),
+      pool.query(`SELECT p.*,
+          (SELECT default_currency FROM planner.suppliers s WHERE s.id=p.supplier_id OR s.name=p.supplier_name LIMIT 1) cur,
+          (SELECT f.flex_id FROM planner.flexport_shipments f WHERE f.shipment_name=p.po OR f.shipment_name=nullif(p.shipment_ref,'') LIMIT 1) flex_ref,
+          (SELECT mp.supplier_name FROM planner.purchase_orders mp WHERE mp.po=coalesce(nullif(p.master_po,''), nullif(p.shipment_ref,'')) AND mp.po<>p.po LIMIT 1) master_supplier
+        FROM planner.purchase_orders p WHERE p.po=$1`, [po]),
       pool.query(`SELECT l.sku, l.qty, l.cost_price, coalesce(pr.product_name_final, pr.product_name, '') name FROM planner.purchase_order_lines l LEFT JOIN planner.products pr ON pr.sku=l.sku WHERE l.po=$1 ORDER BY l.sku`, [po]),
       pool.query(`SELECT cartons, cbm, gross_weight_kg, dimensions FROM planner.dtc_shipment_details WHERE po=$1`, [po]),
     ]);
