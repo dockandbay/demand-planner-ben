@@ -1,6 +1,6 @@
 {
   "name": "dock-bay-demand-planner",
-  "version": "27.363",
+  "version": "27.364",
   "private": true,
   "type": "module",
   "scripts": {

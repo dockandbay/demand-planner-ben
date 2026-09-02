@@ -789,7 +789,7 @@ tr.grand-tot td.stk{background:#1a1a1a;color:#fff}
       </div>
     </span>
     <span style="position:relative;display:inline-flex;align-items:center">
-      <button id="fr-btn" onclick="FR.toggle(event)" title="Filter Rules — reusable, saveable SKU filters (attributes + exception metrics). Apply one to show only the matching SKUs." style="font-size:11px;padding:4px 11px;border:1px solid #c4b5fd;border-radius:5px;background:#f5f3ff;color:#5b21b6;cursor:pointer;flex-shrink:0;font-weight:600">&#9776; Filter Rules (0) &#9662;</button>
+      <button id="fr-btn" onclick="FR.toggle(event)" title="Filter Rules — reusable, saveable SKU filters (attributes + exception metrics). Apply one to show only the matching SKUs." style="font-size:11px;padding:4px 11px;border:1px solid #c4b5fd;border-radius:5px;background:#f5f3ff;color:#5b21b6;cursor:pointer;flex-shrink:0;font-weight:600">&#9776; Filter Rules &#9662;</button>
       <div id="fr-panel" style="display:none;position:absolute;top:100%;left:0;margin-top:4px;z-index:320;background:#faf5ff;border:1px solid #e9d5ff;border-left:3px solid #7c3aed;border-radius:8px;box-shadow:0 10px 30px rgba(0,0,0,.2);width:660px;max-width:94vw;padding:12px 14px;font-size:11px;color:#334155"></div>
     </span>
     <div id="plan-chips" style="display:flex;gap:5px;flex-wrap:wrap;align-items:center"></div>
@@ -10538,7 +10538,7 @@ var FR=(function(){
   function count(){ return rules().filter(function(r){return r.enabled!==false;}).length; }
   function defOpFor(d){ return (d.type==='enum'||d.type==='trend')?'in':'is'; }
   function updateBtn(){ var b=document.getElementById('fr-btn'); if(!b)return;
-    var on=!!FR_ACTIVE; b.innerHTML='&#9776; Filter Rules'+(on?' &bull; '+esc(FR_ACTIVE.name||'active'):' ('+count()+')')+' &#9662;';
+    var on=!!FR_ACTIVE; b.innerHTML='&#9776; Filter Rules'+(on?' &bull; '+esc(FR_ACTIVE.name||'active'):'')+' &#9662;';
     b.style.background=on?'#ecfccb':'#f5f3ff'; b.style.borderColor=on?'#65a30d':'#c4b5fd'; b.style.color=on?'#3f6212':'#5b21b6'; }
   function condText(c){ var d=_filterFieldDef(c.field); var lbl=d?d.label:c.field;
     if(d&&d.type==='num'){ var u=(d.unit==='%'?'%':(d.unit==='u'?'u':''));
@@ -10561,14 +10561,18 @@ var FR=(function(){
     if(!rs.length){ h+='<div style="color:#94a3b8;padding:6px 0">No saved filters yet. Create one to reuse it here and (later) inside Complex Rules.</div>'; return h; }
     rs.forEach(function(r){
       var isOn=FR_ACTIVE&&String(FR_ACTIVE.id)===String(r.id);
-      h+='<div style="display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;padding:6px 0;border-bottom:1px solid #ede9fe">'
-        +'<span style="font-weight:600;min-width:120px">'+esc(r.name||'(filter)')+(r.enabled===false?' <span style="color:#94a3b8;font-weight:400">(off)</span>':'')+'</span>'
-        +'<span style="flex:1 1 auto;min-width:120px">'+scopeChips(r.def)+'</span>'
-        +'<span style="white-space:nowrap">'
+      // Row: name + wrapping description on the LEFT (flexes/wraps), action buttons FIXED on the right (always same
+      // place, top-aligned) so a long description reflows within its own column instead of shoving the buttons around.
+      h+='<div style="display:flex;align-items:flex-start;gap:10px;padding:6px 0;border-bottom:1px solid #ede9fe">'
+        +'<div style="flex:1 1 auto;min-width:0">'
+          +'<div style="font-weight:600">'+esc(r.name||'(filter)')+(r.enabled===false?' <span style="color:#94a3b8;font-weight:400">(off)</span>':'')+'</div>'
+          +'<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:3px;line-height:1.5">'+scopeChips(r.def)+'</div>'
+        +'</div>'
+        +'<div style="flex:0 0 auto;white-space:nowrap;align-self:flex-start">'
           +'<button type="button" onclick="FR.applySaved('+r.id+')" style="font-size:10px;padding:2px 10px;border:1px solid '+(isOn?'#65a30d':'#7c3aed')+';border-radius:3px;background:'+(isOn?'#ecfccb':'#7c3aed')+';color:'+(isOn?'#3f6212':'#fff')+';cursor:pointer;font-weight:700">'+(isOn?'Applied':'Apply')+'</button> '
           +'<button type="button" onclick="FR.edit('+r.id+')" style="font-size:10px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:3px;background:#fff;cursor:pointer">Edit</button> '
           +'<button type="button" onclick="FR.del('+r.id+')" style="font-size:10px;padding:2px 9px;border:1px solid #fecaca;border-radius:3px;background:#fef2f2;color:#b91c1c;cursor:pointer">Delete</button>'
-        +'</span></div>';
+        +'</div></div>';
     });
     return h;
   }
