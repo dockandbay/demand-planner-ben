@@ -14435,17 +14435,20 @@ function render3plInvoice(body){
     // ── GOODS OUT (b): Amazon/FBA transfer units — the buy-plan's per-SKU 3PL→FBA transfer, summed per month. project()
     // returns proj[1+j].tx = the recommended transfer for month M+j (proj[1] = current month = mkeys[0]). Read-only:
     // project() is the same pure fn the buy render calls, so this doesn't change any buy output. ──
-    var trans={}; mkeys.forEach(function(m){trans[m]=0;});
+    // Same buy-plan projection pass also yields GOODS IN (b): auto-forecast REPLENISHMENT — the future 3PL buys the
+    // engine recommends (proj[1+j].bQ). project() nets out known on-order/inbound, so bQ is incremental (no overlap
+    // with the known-PO series above). fdQ (Buy FBA) is excluded — that lands at Amazon, not this 3PL.
+    var trans={}, ginF={}; mkeys.forEach(function(m){trans[m]=0;ginF[m]=0;});
     try{ if(window.BP&&typeof BP.project==='function'&&BP_DATA&&BP_DATA.products){
       Object.keys(BP_DATA.products).forEach(function(sku){
         var pd=BP_DATA.products[sku]; var md=pd&&pd.mkts&&pd.mkts[MKT]; if(!md)return;
         var proj; try{ proj=BP.project(md,pd,0,MKT,null,sku); }catch(e2){ return; }
         if(!proj)return;
-        for(var j=0;j<6;j++){ var p=proj[1+j]; if(p&&p.tx>0)trans[mkeys[j]]+=p.tx; }
+        for(var j=0;j<6;j++){ var p=proj[1+j]; if(!p)continue; if(p.tx>0)trans[mkeys[j]]+=p.tx; if(p.bQ>0)ginF[mkeys[j]]+=p.bQ; }
       });
-    } }catch(e3){ if(window.console)console.warn('[3pl forecast] transfers',e3&&e3.message); }
-    // rows for render + export. GOODS IN · auto-forecast (b) = next item → null.
-    var rows=mkeys.map(function(m,ix){ return {mo:labels[ix], m:m, ginKnown:Math.round(ginK[m]), ginCont:ginCont[m], ships:ginShips[m], ginFcst:null, ginTot:Math.round(ginK[m]), orders:_r3plRound(orders[m]), transfers:_r3plRound(trans[m])}; });
+    } }catch(e3){ if(window.console)console.warn('[3pl forecast] transfers/auto-fcst',e3&&e3.message); }
+    // rows for render + export. Goods-in total = known POs + auto-forecast replenishment.
+    var rows=mkeys.map(function(m,ix){ return {mo:labels[ix], m:m, ginKnown:Math.round(ginK[m]), ginCont:ginCont[m], ships:ginShips[m], ginFcst:Math.round(ginF[m]), ginTot:Math.round(ginK[m]+ginF[m]), orders:_r3plRound(orders[m]), transfers:_r3plRound(trans[m])}; });
     // ── render ──
     var TH='padding:6px 10px;text-align:right;font-size:10px;color:#64748b;text-transform:uppercase;border-bottom:2px solid #cbd5e1;white-space:nowrap';
     var TD='padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums;border-bottom:1px solid #f1f5f9';
@@ -14459,7 +14462,7 @@ function render3plInvoice(body){
         +'<th style="'+TH+'">Goods out · orders</th><th style="'+TH+'">Goods out · Amazon transfers</th></tr></thead><tbody>';
     rows.forEach(function(r,ri){ var hasS=r.ships&&r.ships.length;
       html+='<tr><td style="'+TD+';text-align:left;font-weight:600">'+(hasS?'<span class="f3-exp" data-r="'+ri+'" title="show shipments" style="cursor:pointer;color:#2563eb;margin-right:5px;display:inline-block;width:9px">&#9656;</span>':'<span style="display:inline-block;width:14px"></span>')+e(r.mo)+'</td>'
-        +cell(r.ginKnown)+'<td style="'+TD+'">'+(r.ginCont?fmt(r.ginCont):'<span style="color:#cbd5e1">—</span>')+'</td>'+cell(r.ginFcst,true)+'<td style="'+TD+';border-right:1px solid #e2e8f0;font-weight:600">'+fmt(r.ginTot)+'</td>'
+        +cell(r.ginKnown)+'<td style="'+TD+'">'+(r.ginCont?fmt(r.ginCont):'<span style="color:#cbd5e1">—</span>')+'</td>'+cell(r.ginFcst)+'<td style="'+TD+';border-right:1px solid #e2e8f0;font-weight:600">'+fmt(r.ginTot)+'</td>'
         +cell(r.orders)+cell(r.transfers)+'</tr>';
       if(hasS){ r.ships.forEach(function(sh){ html+='<tr class="f3-det f3-det-'+ri+'" style="display:none;background:#f8fafc">'
         +'<td style="'+TD+';text-align:left;padding-left:26px;color:#475569;font-weight:600"><span class="inb-po" data-po="'+e(sh.ship_id)+'" style="color:#2563eb;cursor:pointer">'+e(sh.ship_id)+'</span>'+(sh.po_count>1?' <span style="color:#94a3b8;font-weight:400">('+sh.po_count+' POs)</span>':'')+'</td>'
@@ -14471,7 +14474,7 @@ function render3plInvoice(body){
       +'<b>Goods out · orders</b> = (DTC + TikTok units × 0.449 ship-bags/unit) + (B2B units ÷ 25 units/order), rounded to the nearest 500 (nearest 100 under 500). '
       +'<b>Goods out · Amazon transfers</b> = the buy-plan 3PL→FBA transfer per SKU, summed per month (same rounding). '
       +'<b>Goods in · known POs / Containers</b> = open POs landing that month, grouped under their master shipment (click ▸ for shipment IDs + delivery dates); containers = pallets ÷ 20 (40ft-equiv). Overdue past-dated inbound counts in the current month. '
-      +'<b>Goods in · auto-forecast</b> (future replenishment) is the next build step.</div>';
+      +'<b>Goods in · auto-forecast</b> = the buy plan\'s recommended future 3PL replenishment (incremental to the known POs). <b>Goods in · total</b> = known + auto-forecast.</div>';
     b.innerHTML=html;
     b.querySelectorAll('.f3-exp').forEach(function(x){ x.onclick=function(){ var ri=this.dataset.r, op=this.getAttribute('data-open')==='1'; b.querySelectorAll('.f3-det-'+ri).forEach(function(row){ row.style.display=op?'none':''; }); this.innerHTML=op?'&#9656;':'&#9662;'; this.setAttribute('data-open',op?'0':'1'); }; });
     var _dl=b.querySelector('#f3-dl'); if(_dl)_dl.onclick=function(){ _f3Download(tplName,rows); };

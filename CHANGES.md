@@ -1,3 +1,7 @@
+## v27.370 3PL Forecast — auto-forecast inbound column (completes the tab)
+- **Goods in · auto-forecast** now filled = the buy plan's recommended future 3PL replenishment (Σ `BP.project(...)[1+j].bQ` per month). `project()` nets out known on-order/inbound so it's incremental to the known-PO series (no double-count); Buy-FBA (`fdQ`) is excluded (lands at Amazon). **Goods in · total** = known + auto-forecast. Computed in the same read-only project() pass as the transfers — buy plan verified unchanged (25,122 before/after).
+- The 3PL Forecast tab is now complete: goods-in (known POs + shipments/containers/dates + auto-forecast) and goods-out (orders + Amazon transfers), with CSV + copy-for-email.
+
 ## v27.368 Filter Rules — "Forecast accuracy (WMAPE)" window is now user-set (1–6 months, default 3)
 - The WMAPE accuracy field had a hardcoded 3-month window. It now carries an **"over last N mo"** input on the condition (**default 3, range 1–6**). Bias stays on the fixed 3-month window; only WMAPE uses the chosen N.
 - Threaded through: `winSel` field flag → builder months input (`.fr-win`) → `readForm` stores `c.months` → `frExcMaps` passes it (and includes it in the map cache key) → `excComputeMaps(co,ch,N)` computes WMAPE over `prevW` (last N completed months). Verified N=1–6 compute cleanly (273→313 SKUs as the window widens).
