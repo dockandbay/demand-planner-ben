@@ -1,3 +1,6 @@
+## v27.371 "Non Core" category always excluded from all smoothing
+- The **Non Core** category is now excluded from every smoothing feature: the ⚙ Smoothing settings matrix + the auto-smooth sweep (`ssSubcatsFor`/`runAutoSmooth`), the Disregard-discontinued effect and the Auto flag (`smoothDisregards`/`smoothAuto` return false for it), and the category smooth-to-% (`smoothCatsToPct`). Guarded via `_scNonCore(s)` (sub-cat whose parent category is "Non Core"). Verified: getters return false even with a stale flag set; other categories unaffected.
+
 ## v27.370 3PL Forecast — auto-forecast inbound column (completes the tab)
 - **Goods in · auto-forecast** now filled = the buy plan's recommended future 3PL replenishment (Σ `BP.project(...)[1+j].bQ` per month). `project()` nets out known on-order/inbound so it's incremental to the known-PO series (no double-count); Buy-FBA (`fdQ`) is excluded (lands at Amazon). **Goods in · total** = known + auto-forecast. Computed in the same read-only project() pass as the transfers — buy plan verified unchanged (25,122 before/after).
 - The 3PL Forecast tab is now complete: goods-in (known POs + shipments/containers/dates + auto-forecast) and goods-out (orders + Amazon transfers), with CSV + copy-for-email.

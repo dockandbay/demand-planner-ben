@@ -1003,6 +1003,7 @@ function ssSubcatsFor(co,ch){ var ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch
     // demand plan, so they must not appear in the smoothing list or the auto-smooth sweep (e.g. "Towel - Dog").
     if(typeof CATS_META!=='undefined'&&CATS_META[cat]&&CATS_META[cat].a===false)return;
     if(typeof SUBS_META!=='undefined'&&SUBS_META[p.s]&&SUBS_META[p.s].a===false)return;
+    if(cat==='Non Core')return;   // "Non Core" is ALWAYS excluded from every smoothing feature (Ben) — never in the settings matrix or the auto-smooth sweep
     (byCat[cat]=byCat[cat]||{})[p.s]=1; });
   return byCat; }
 var _ssSavedT=null;
@@ -1060,6 +1061,7 @@ function runAutoSmooth(){
     // Auto flags saved before the category was retired — e.g. "Towel - Dog") so they can't appear in the sweep/CSV.
     if(typeof SUBS_META!=='undefined'&&SUBS_META[s]&&SUBS_META[s].a===false)return;
     var _pc=(typeof SUBS_META!=='undefined'&&SUBS_META[s]&&SUBS_META[s].c)||''; if(_pc&&typeof CATS_META!=='undefined'&&CATS_META[_pc]&&CATS_META[_pc].a===false)return;
+    if(_pc==='Non Core')return;   // "Non Core" is ALWAYS excluded from smoothing (Ben) — guards a stale Auto flag saved before this rule
     // Always re-cap discontinued SKUs to remaining stock first — spread on-hand+inbound across the post-discontinue
     // months (velocity × seasonality) and ZERO every month once stock is exhausted. Runs for every Auto sub-category
     // regardless of the "Disregard disc." tick: a discontinued SKU should never be forecast beyond what it can ship.
@@ -1194,7 +1196,8 @@ function smoothCatsToPct(){
   var win=[]; (function(){ var p=pa(CUR_MONTH), y=p.y, mo=p.mo; for(var i=0;i<11;i++){ win.push(ym(y,mo)); mo++; if(mo>12){mo=1;y++;} } })();   // next 11 months from the current month
   var subs=[]; DATA.forEach(function(d){ if(d.co===co&&d.ch===ch&&d.s&&subs.indexOf(d.s)<0)subs.push(d.s); });
   var changed=0, keptBig=0, noLy=0;
-  subs.forEach(function(s){ var a=ga(co,ch,s)||{};
+  subs.forEach(function(s){ if(_scNonCore(s))return;   // "Non Core" always excluded from smoothing (Ben)
+    var a=ga(co,ch,s)||{};
     win.forEach(function(m){ if(isActualMonth(m))return;                              // forecast months only
       var key=s+'|'+co+'|'+ch+'|'+m, ps=parseStored(IV[key]);
       if(!ps||!ps.lit)return;                                                          // only hard-coded absolutes (leave %/blank)
@@ -4709,7 +4712,10 @@ function _smoothSearchTip(x,y){ var t=document.getElementById('_smooth-tip'); if
   clearTimeout(t._h); t._h=setTimeout(function(){ t.style.display='none'; },3200); }
 var SMOOTH_LEADER=false;  // false = Standard (pure proportional), true = Leader (protect historically-strong SKUs). Set via the FY-total dropdown; applies to ALL smoothing.
 var SMOOTH_DISREGARD_DISC={};  // {'CO|CH|subcat':true} — when set, smoothing leaves discontinued SKUs untouched so active SKUs absorb the full subcat forecast (toolbar ⚙ Smoothing). Server-injected from app_settings.
-function smoothDisregards(co,ch,s){ return !!SMOOTH_DISREGARD_DISC[co+'|'+ch+'|'+s]; }
+// "Non Core" category is ALWAYS excluded from every smoothing feature (Ben). A sub-category is Non Core when its
+// parent category is "Non Core" (or the sub-cat itself is "Non Core" for that single-subcat category).
+function _scNonCore(s){ try{ return s==='Non Core' || ((typeof SUBS_META!=='undefined'&&SUBS_META[s]&&SUBS_META[s].c)==='Non Core'); }catch(e){ return false; } }
+function smoothDisregards(co,ch,s){ if(_scNonCore(s))return false; return !!SMOOTH_DISREGARD_DISC[co+'|'+ch+'|'+s]; }
 var SUBCAT_RT={};   // avg EX-TAX retail £/unit per market × subcategory (server-injected from planner.products); Set-targets £→units
 var FX_RATES={};   // blended GBP→local rate per FY start year: {"2026":{USD:1.27,EUR:1.17,AUD:1.92}} (CONFIG▸Admin▸Exchange rates); local = GBP × rate
 var CAT_ASP_GBP={};   // GBP avg selling price per subcategory × market {subcat:{UK,US,EU,AU,CA}} — from SKU retail prices ÷ fx; feeds new-category target smoothing (revenue÷ASP→units)
@@ -4717,7 +4723,7 @@ var LOCKED_FC={sub:{},sku:{}};   // #4 locked-forecast-vs-actual: most-recent sn
 var SMOOTH_AUTO={flags:{},threshold:20,mode:'standard',lastRun:null};  // one-click auto-smooth: flagged co|ch|subcat over `threshold`% gap are smoothed (standard|leader). lastRun = ISO of last discontinued smooth/recalc. Server-injected.
 var SMOOTH_LOCKS={};  // do-not-smooth locks keyed 'sku|CO|CH|YYYY_MM' → true. A locked SKU-cell is held FIXED by smoothing (excluded from the pool; its value subtracted from the subcat target so others fill the rest). SKU-level only. Server-injected from app_settings.smooth_locks.
 function saveSmoothLocks(){ fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'smooth_locks',value:JSON.stringify(SMOOTH_LOCKS)})}).catch(function(){}); }
-function smoothAuto(co,ch,s){ return !!(SMOOTH_AUTO.flags&&SMOOTH_AUTO.flags[co+'|'+ch+'|'+s]); }
+function smoothAuto(co,ch,s){ if(_scNonCore(s))return false; return !!(SMOOTH_AUTO.flags&&SMOOTH_AUTO.flags[co+'|'+ch+'|'+s]); }
 // >48h staleness badge on the ⚙ Smoothing button: when the last discontinued smooth/recalc was >48h ago AND a
 // re-run would change numbers (a flagged subcat is back over the auto-smooth threshold), show a count.
 var _smoothStale=null;   // cached {count}; computed once per plan render, reset on a run
