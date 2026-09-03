@@ -393,7 +393,8 @@ td.fctd.anomaly-lo{background:#fff !important;border-left-color:#e5e5e5 !importa
 .sku-filters{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
 .sku-flt-lbl{font-size:10px;color:#888;white-space:nowrap}
 /* Google-Sheets-style group outline: faint vertical rail down the left of grouped SKU rows (masters / sets). */
-tr.sku-inline[data-skugroup] td:first-child{box-shadow:inset 3px 0 0 #94a3b8}
+tr.sku-inline[data-skugroup] td:first-child{box-shadow:inset 3px 0 0 #94a3b8;padding-left:16px}
+tr.sku-inline[data-skugroup] td:first-child:hover{box-shadow:inset 5px 0 0 #64748b}
 tr.sku-inline.grp-hdr td:first-child{box-shadow:inset 3px 0 0 #94a3b8}
 tr.sku-inline.grp-hdr:hover .grp-tgl{border-color:#64748b;color:#111827;background:#f1f5f9}
 tr.sku-inline.grp-hdr:hover td{background:#f8fafc}
@@ -8250,16 +8251,19 @@ function insertInlineSkuRows(s,co,ch,afterTr){
   // Google-Sheets-style group outline: a slim header line with a −/+ minimise box on the LEFT, and a faint vertical
   // rail down the group's SKU rows (see the .sku-inline[data-skugroup] CSS). Clicking minimises just this group; the
   // state persists per subcat×group. Replaces the old full-width grey header bar.
+  // Toggle a MASTER/SET group minimised, update its header box, and persist. Reused by the header click AND the
+  // left-gutter click on any grouped row (Ben: clicking the left rail/padding should minimise).
+  function _toggleGrp(gkey){ var nowCollapsed=!GRP_COLLAPSED.has(gkey); if(nowCollapsed)GRP_COLLAPSED.add(gkey); else GRP_COLLAPSED.delete(gkey); saveGrpCollapsed();
+    var box=tbody.querySelector('tr.grp-hdr[data-grpkey="'+gkey+'"] .grp-tgl'); if(box)box.textContent=nowCollapsed?'+':'−';
+    Array.prototype.forEach.call(tbody.querySelectorAll('tr.sku-inline'),function(r){ if(r.dataset.skugroup===gkey)r.style.display=nowCollapsed?'none':''; }); }
   function _insGrpHdr(grp,label,count){
-    var gkey=grp+'|'+parentKey, collapsed=GRP_COLLAPSED.has(gkey), htr=document.createElement('tr'); htr.className='sku-inline grp-hdr'; htr.dataset.parentkey=parentKey;
+    var gkey=grp+'|'+parentKey, collapsed=GRP_COLLAPSED.has(gkey), htr=document.createElement('tr'); htr.className='sku-inline grp-hdr'; htr.dataset.parentkey=parentKey; htr.dataset.grpkey=gkey;
     var htd=document.createElement('td'); htd.colSpan=999;
     htd.style.cssText='background:#fff;border-top:1px solid #eef2f7;padding:0;cursor:pointer;position:relative;z-index:2;text-align:left';
     htd.innerHTML='<span style="position:sticky;left:0;display:inline-flex;align-items:center;gap:6px;padding:2px 8px 2px 4px;background:#fff">'
       +'<span class="grp-tgl" title="minimise / expand this group" style="display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;border:1px solid #cbd5e1;border-radius:3px;font-size:12px;line-height:1;color:#64748b;font-weight:700;background:#fff">'+(collapsed?'+':'−')+'</span>'
       +'<span style="font-size:9px;font-weight:700;color:#64748b;letter-spacing:.04em">'+label+' <span style="opacity:.6;font-weight:600">· '+count+'</span></span></span>';
-    htd.onclick=function(){ var nowCollapsed=!GRP_COLLAPSED.has(gkey); if(nowCollapsed)GRP_COLLAPSED.add(gkey); else GRP_COLLAPSED.delete(gkey); saveGrpCollapsed();
-      var box=htd.querySelector('.grp-tgl'); if(box)box.textContent=nowCollapsed?'+':'−';
-      Array.prototype.forEach.call(tbody.querySelectorAll('tr.sku-inline'),function(r){ if(r.dataset.skugroup===gkey)r.style.display=nowCollapsed?'none':''; }); };
+    htd.onclick=function(){ _toggleGrp(gkey); };
     htr.appendChild(htd); tbody.insertBefore(htr,insertRef);
   }
   skus.forEach(function(sku,_gidx){
@@ -8815,7 +8819,8 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       else if(tc.t==='q'||tc.t==='h')tr.appendChild(skuPeriodCell(tc.months,tc.t));
       else tr.appendChild(skuMonthCell(tc.m));
     });
-    if(_grpOn){ if(_gidx===0)_insGrpHdr('m','MASTERS',_grpMs.length); if(_gidx===_grpMs.length)_insGrpHdr('s','SETS',_grpSs.length); tr.dataset.skugroup=(SKUM[sku]&&SKUM[sku].vt==='SET'?'s':'m')+'|'+parentKey; if(GRP_COLLAPSED.has(tr.dataset.skugroup))tr.style.display='none'; }   // MASTER/SET group headers + row tag + honour minimised state
+    if(_grpOn){ if(_gidx===0)_insGrpHdr('m','MASTERS',_grpMs.length); if(_gidx===_grpMs.length)_insGrpHdr('s','SETS',_grpSs.length); tr.dataset.skugroup=(SKUM[sku]&&SKUM[sku].vt==='SET'?'s':'m')+'|'+parentKey; if(GRP_COLLAPSED.has(tr.dataset.skugroup))tr.style.display='none';   // MASTER/SET group headers + row tag + honour minimised state
+      (function(_gk){ var c0=tr.cells&&tr.cells[0]; if(c0){ c0.title='click the left edge to minimise this group'; c0.addEventListener('click',function(e){ var r=c0.getBoundingClientRect(); if((e.clientX-r.left)<22){ e.stopPropagation(); _toggleGrp(_gk); } }); } })(tr.dataset.skugroup); }   // click the left rail/padding to minimise the group
     tbody.insertBefore(tr,insertRef);
   });
 
