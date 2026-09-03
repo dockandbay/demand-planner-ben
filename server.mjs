@@ -6843,14 +6843,16 @@ app.post('/api/product/sample/:id/aspect', async (req, res) => {
       ON CONFLICT (sample_id, aspect) DO UPDATE SET feedback=excluded.feedback, decision=excluded.decision, updated_by=excluded.updated_by, updated_at=now()`,
       [id, aspect, feedback, decision, by]);
     let flowed = 0;
-    if (decision === 'approved' || decision === 'rejected') {
+    { // Every decision (approved / rejected / pending) flows to the Variants tab so the component stays in sync.
       const s = (await pool.query(`SELECT item_ref, coalesce(sample_sizes,'{}') sizes FROM planner.product_dev_samples WHERE id=$1`, [id])).rows[0];
       if (s) {
-        const r = await pool.query(`UPDATE planner.product_dev_size_dimensions sd SET approval_status=$3
+        // On approve, default the component's APPROVED VERSION to this sample (the one being signed off); still
+        // manually changeable on the Variants tab. On reject / back-to-pending, clear it.
+        const r = await pool.query(`UPDATE planner.product_dev_size_dimensions sd SET approval_status=$3, approved_sample_id=$5
           FROM planner.product_dev_sizes sz JOIN planner.product_dev_items i ON i.id=sz.item_id
           WHERE sd.size_id=sz.id AND sd.dimension=$2 AND i.ref=$1
             AND (coalesce(array_length($4::text[],1),0)=0 OR sz.size_label = ANY($4::text[]))`,
-          [s.item_ref, aspect, decision, s.sizes || []]);
+          [s.item_ref, aspect, decision, s.sizes || [], decision === 'approved' ? Number(id) : null]);
         flowed = r.rowCount || 0;
       }
     }
