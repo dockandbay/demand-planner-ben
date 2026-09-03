@@ -1,3 +1,8 @@
+## v27.395 Sets #3a — target recommendations recommend the EXPLODED target (additive)
+- Target recommendations now compute a per-sub-category **explode ratio** (`_explodeRatio` = last-year exploded ÷ mixed; 1.0 with no sets) and recommend/apply the target in **exploded units** (reqU × ratio). Set sub-categories show an **exploded ×N.NN** badge; the ly/fc/target unit figures are shown at the exploded level so the % stays correct. Revenue columns unchanged (revenue is per sale). Applying a set-subcat rec writes the exploded number as an absolute override (the % encoding would use the mixed LY base, wrong for exploded).
+- **Additive/safe:** nothing changes until you Apply a rec — buy verified byte-identical (35,229). Beach CORE ratio 1.42, Towel-Home 1.06. `artifact_v16.7.html` only.
+- NEXT (buy-affecting): buy explosion ÷setSize consistency + normalise the ~83 set-SKU overrides, so applied exploded targets flow cleanly to the buy.
+
 ## v27.390 Sets master/set split displays — LY actuals + gap-vs-subcat (#1, #2)
 - **#1 Category LY-actuals split:** the last-year-actuals reference on a sub-category cell now shows **master units / set boxes** (e.g. Beach CORE `11,384 / 973`) instead of one mixed number; hover explains the split + the exploded item-equivalent total (15,643). SKU rows and set-less sub-categories are unchanged (single number). New cached `subcatLySplit(s,co,ch)` from per-SKU sales (a set sale = 1 box).
 - **#2 Gap-vs-subcat split:** the SKU-sum-vs-subcat variance pill tooltip now breaks the SKU-sum into `N master units + M set boxes` (only when the sub-category has a set forecast that month).
