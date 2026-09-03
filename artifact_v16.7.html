@@ -7732,6 +7732,10 @@ function _leaderSales(sku,co,ch){
   var d=skuSales(sku,co,'DTC'); if(!d) return s;
   var out={}; for(var k in s)out[k]=s[k]; for(var k in d)out[k]=(out[k]||0)+(d[k]||0); return out;
 }
+// A-player set cap (Ben): records which SETS a smooth run held down to the single-A-player-unit ceiling
+// (the excess was pushed onto the master SKUs). Keyed co|ch|subcat|month → {maxA, sets:[{sku,cap,sz}]}.
+// Read by the gap-analysis tooltip / smooth review to explain the cap. Overwritten per computeSmoothAlloc call.
+var SET_CAP_NOTES={};
 function computeSmoothAlloc(s,co,ch,m,opts){
   opts=opts||{};
   // protectLeaders: when true, apply tier-aware floors so historically-strong SKUs
@@ -7794,6 +7798,20 @@ function computeSmoothAlloc(s,co,ch,m,opts){
   var _lockSum=0;
   items.forEach(function(it){ if(typeof SMOOTH_LOCKS!=='undefined' && SMOOTH_LOCKS['sku|'+it.sku+'|'+co+'|'+ch+'|'+m] && !it.frozen){ it.frozen=true; it.locked=true; it.cap=0; _lockSum+=Math.max(0,it.cur); } });
   if(_lockSum>0) target=Math.max(0, target-_lockSum);
+
+  // === A-player unit cap on SETS (Ben) ===
+  // A build-on-fly set can't be forecast above a single A-tier MASTER SKU's units in the same sub-category.
+  // Set allocations are in BOXES (a set = 1 box) but explode to boxes × set-size garments, so the ceiling in
+  // box terms is floor(maxA / setSize). Applying it as a per-set cap means the capped-water-fill below flows
+  // the trimmed excess straight onto the (uncapped) master SKUs — no separate re-distribution needed. Only bites
+  // when the sub-category actually has an A-tier master with a positive forecast this month; otherwise no cap.
+  var _maxAUnits=0;
+  items.forEach(function(it){ var p=SKUM[it.sku]; if(p&&p.vt!=='SET'&&(p.ti||'C')==='A'&&it.cur>_maxAUnits)_maxAUnits=it.cur; });
+  if(_maxAUnits>0){
+    items.forEach(function(it){ var p=SKUM[it.sku]; if(!p||p.vt!=='SET'||it.frozen)return;
+      var _sz=Math.max(1,_setSize(it.sku)), _boxCap=Math.floor(_maxAUnits/_sz);
+      it.aPlayerCap=_boxCap; if(_boxCap<it.cap)it.cap=_boxCap; });
+  }
 
   // === Rank-aware floors (only when protectLeaders=true) ===
   // Each SKU's "historical signal" is the sum of units sold in the LAST 3 COMPLETED
@@ -7898,8 +7916,16 @@ function computeSmoothAlloc(s,co,ch,m,opts){
   var sumA=items.reduce(function(a,it){return a+it.alloc;},0), diff=target-sumA;
   if(diff!==0){
     var cand=items.filter(function(it){return !it.frozen&&it.cap===Infinity&&it.alloc+diff>=it.floor;}).sort(function(a,b){return b.alloc-a.alloc;})[0];
+    // Fallback (A-player set cap): if no uncapped (Infinity) SKU can take the rounding remainder — e.g. a sub-category
+    // whose only active lines are A-capped sets — place it on any non-frozen SKU that still has headroom within its
+    // cap/floor. Preserves sum==target. Never triggers when an uncapped master exists, so the no-set path is unchanged.
+    if(!cand)cand=items.filter(function(it){return !it.frozen&&it.alloc+diff>=it.floor&&it.alloc+diff<=it.cap;}).sort(function(a,b){return b.alloc-a.alloc;})[0];
     if(cand)cand.alloc+=diff;
   }
+  // Record any SETS the A-player cap actually held down this month (final alloc sits at the box ceiling), so the
+  // gap-analysis tooltip / smooth review can explain "capped to A-player X units → excess moved to masters".
+  var _capNote=(function(){ var arr=items.filter(function(it){ return it.aPlayerCap!=null && SKUM[it.sku]&&SKUM[it.sku].vt==='SET' && it.alloc>=it.aPlayerCap && it.aPlayerCap<Infinity; }); return arr.length?{maxA:_maxAUnits, sets:arr.map(function(it){return {sku:it.sku, cap:it.alloc, sz:Math.max(1,_setSize(it.sku))};})}:null; })();
+  if(_capNote)SET_CAP_NOTES[co+'|'+ch+'|'+s+'|'+m]=_capNote; else delete SET_CAP_NOTES[co+'|'+ch+'|'+s+'|'+m];
   var out={};
   items.forEach(function(it){ if(it.frozen)return; out[it.sku]=it.alloc; });
   return out;
