@@ -13346,7 +13346,9 @@
         return '<div style="margin-bottom:6px">'
           +'<a class="pm-samp-open pm-samp-open-'+esc(dim)+'" data-ref="'+esc(it.ref)+'" title="open the Samples tab" style="font-family:ui-monospace,Menlo,monospace;font-size:10px;font-weight:700;color:#1d4ed8;text-decoration:underline;cursor:pointer">'+esc(sm.ref)+'</a>'
           +(shs?'<div style="margin-top:2px">'+shs+'</div>':'<div class="mut tiny" style="margin-top:1px">not shipped</div>')
-          +(sm.admin_feedback?'<div style="margin-top:3px;font-size:10px;color:#78350f;background:#fffbeb;border:1px solid #fde68a;border-radius:5px;padding:2px 6px;white-space:normal;max-width:230px" title="feedback to supplier">💬 '+esc(sm.admin_feedback)+'</div>':'')
+          +(function(){ var _af=((sm.aspect_feedback||[]).filter(function(x){return x.aspect===dim;})[0])||null; var _txt=(_af&&_af.feedback)||sm.admin_feedback;   // per-aspect feedback for this component (falls back to the legacy whole-sample note)
+            if(!_txt)return ''; var _d=_af&&_af.decision, _dc=_d==='approved'?['#166534','#dcfce7']:_d==='rejected'?['#991b1b','#fee2e2']:null;
+            return '<div style="margin-top:3px;font-size:10px;color:#78350f;background:#fffbeb;border:1px solid #fde68a;border-radius:5px;padding:2px 6px;white-space:normal;max-width:230px" title="feedback on this component from the Samples tab">💬 '+esc(_txt)+(_dc?' <span style="font-weight:700;color:'+_dc[0]+';background:'+_dc[1]+';border-radius:3px;padding:0 4px">'+(_d==='approved'?'✓':'✗')+'</span>':'')+'</div>'; })()
           +'</div>'; }).join(''); }
     function compRow(s,dim){ var sd=sizeDim(s,dim), req=!!sd.required, appr=sd.approval_status||'pending';
       var reqCell='<input type="checkbox" class="pm-comp-req" data-id="'+s.id+'" data-dim="'+dim+'"'+(req?' checked':'')+'>';

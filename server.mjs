@@ -6118,7 +6118,9 @@ app.get('/api/product/item/:ref', async (req, res) => {
         CASE WHEN coalesce(ps.dimension,'product')='product' THEN ps.item_ref||'_v'||ps.version ELSE ps.item_ref||'_'||ps.dimension||'_v'||ps.version END ref,
         coalesce(ps.sample_sizes,'{}') sample_sizes, coalesce(ps.sampled_aspects,'{}') sampled_aspects, coalesce(ps.admin_feedback,'') admin_feedback,
         coalesce((SELECT json_agg(jsonb_build_object('ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,'')) ORDER BY sr.ref)
-          FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id WHERE l.dev_sample_id=ps.id),'[]'::json) shipments
+          FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id WHERE l.dev_sample_id=ps.id),'[]'::json) shipments,
+        coalesce((SELECT json_agg(json_build_object('aspect',af.aspect,'feedback',af.feedback,'decision',af.decision) ORDER BY af.aspect)
+          FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id),'[]'::json) aspect_feedback
         FROM planner.product_dev_samples ps WHERE ps.item_ref=$1 ORDER BY ps.dimension, ps.version`, [ref]),
       pool.query(`SELECT count(*)::int n FROM planner.supplier_notes WHERE po=$1 AND author_kind='supplier' AND read_at IS NULL`, [ref]),
     ]);
@@ -6187,7 +6189,9 @@ app.get('/api/product/item/:ref/sizes', async (req, res) => {
         CASE WHEN coalesce(ps.dimension,'product')='product' THEN ps.item_ref||'_v'||ps.version ELSE ps.item_ref||'_'||ps.dimension||'_v'||ps.version END ref,
         coalesce(ps.sample_sizes,'{}') sample_sizes, coalesce(ps.sampled_aspects,'{}') sampled_aspects, coalesce(ps.admin_feedback,'') admin_feedback,
         coalesce((SELECT json_agg(jsonb_build_object('ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,'')) ORDER BY sr.ref)
-          FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id WHERE l.dev_sample_id=ps.id),'[]'::json) shipments
+          FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id WHERE l.dev_sample_id=ps.id),'[]'::json) shipments,
+        coalesce((SELECT json_agg(json_build_object('aspect',af.aspect,'feedback',af.feedback,'decision',af.decision) ORDER BY af.aspect)
+          FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id),'[]'::json) aspect_feedback
         FROM planner.product_dev_samples ps WHERE ps.item_ref=$1 ORDER BY ps.dimension, ps.version`, [ref]),
     ]);
     const sizes = sizesR.rows, samples = samplesR.rows;
