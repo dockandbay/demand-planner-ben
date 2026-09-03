@@ -1,3 +1,8 @@
+## v27.420 PRODUCT samples redesign (2/n) — server: per-aspect feedback + approve/reject with flow-through
+- Samples GET (`productSampleList`) now returns **aspect_feedback** per sample (aspect · feedback · decision) alongside the existing shipments (with carrier + tracking).
+- **New `POST /api/product/sample/:id/aspect`** {aspect, feedback, decision} — upserts the per-aspect row; on approve/reject it **flows through to the Variants tab**, writing that component approval on `product_dev_size_dimensions` for the sizes the sample covers (aspect name == dimension name). Verified end-to-end on the sandbox: save appears in the GET, and approving the product aspect flipped the covered size’s product dimension to approved (flowed:1). server.mjs only.
+- NEXT: the 2-column Samples-tab UI (per-aspect feedback rows + approve/reject + shipment-tracking column, new stages).
+
 ## v27.419 DEMAND plan — click the group left rail/gutter to minimise (not just the −/+ box)
 - The MASTER/SET group left rail is now clickable: clicking the **left edge / gutter** (≤22px) of the group header OR any of its SKU rows minimises/expands that group — not only the small −/+ box. The rail thickens on hover for feedback. Toggle logic factored into `_toggleGrp`; the header carries `data-grpkey` so a row-gutter click updates the header box. jsdom-verified: left-edge click collapses 26 rows → 0 and back. `artifact_v16.7.html` only.
 

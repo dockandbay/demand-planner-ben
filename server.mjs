@@ -6733,7 +6733,9 @@ async function productSampleList(itemRef) {
     to_char(ps.created_at,'YYYY-MM-DD HH24:MI') created_at,
     coalesce((SELECT json_agg(json_build_object('id',sr.id,'ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,'')) ORDER BY sr.created_at)
       FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id
-      WHERE l.dev_sample_id=ps.id),'[]'::json) shipments
+      WHERE l.dev_sample_id=ps.id),'[]'::json) shipments,
+    coalesce((SELECT json_agg(json_build_object('aspect',af.aspect,'feedback',af.feedback,'decision',af.decision) ORDER BY af.aspect)
+      FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id),'[]'::json) aspect_feedback
     FROM planner.product_dev_samples ps
     WHERE ps.item_ref=$1 AND coalesce(ps.dimension,'product')='product' ORDER BY ps.version`, [itemRef])).rows;
   if (rows.length) {
@@ -6819,6 +6821,37 @@ app.post('/api/product/sample/:id/feedback', async (req, res) => {   // admin-au
     }
     res.json({ ok: true }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Per-aspect feedback + approve/reject on a sample version (Product / Packaging / Labels-wraps / Polybag / Other).
+// The decision FLOWS THROUGH to the Variants tab: approving/rejecting an aspect writes that component's approval on
+// planner.product_dev_size_dimensions for the sizes this sample covers (aspect name == dimension name).
+app.post('/api/product/sample/:id/aspect', async (req, res) => {
+  try {
+    const id = req.params.id, b = req.body || {};
+    const ALLOWED = ['product', 'packaging', 'labels', 'polybag', 'other'];
+    const aspect = String(b.aspect || '').trim();
+    if (!ALLOWED.includes(aspect)) return res.status(400).json({ error: 'bad aspect' });
+    const feedback = String(b.feedback || '');
+    const decision = ['pending', 'approved', 'rejected'].includes(b.decision) ? b.decision : 'pending';
+    const by = shortUser(authUser(req)) || null;
+    await pool.query(`INSERT INTO planner.product_sample_aspect_feedback (sample_id, aspect, feedback, decision, updated_by, updated_at)
+      VALUES ($1,$2,$3,$4,$5,now())
+      ON CONFLICT (sample_id, aspect) DO UPDATE SET feedback=excluded.feedback, decision=excluded.decision, updated_by=excluded.updated_by, updated_at=now()`,
+      [id, aspect, feedback, decision, by]);
+    let flowed = 0;
+    if (decision === 'approved' || decision === 'rejected') {
+      const s = (await pool.query(`SELECT item_ref, coalesce(sample_sizes,'{}') sizes FROM planner.product_dev_samples WHERE id=$1`, [id])).rows[0];
+      if (s) {
+        const r = await pool.query(`UPDATE planner.product_dev_size_dimensions sd SET approval_status=$3
+          FROM planner.product_dev_sizes sz JOIN planner.product_dev_items i ON i.id=sz.item_id
+          WHERE sd.size_id=sz.id AND sd.dimension=$2 AND i.ref=$1
+            AND (coalesce(array_length($4::text[],1),0)=0 OR sz.size_label = ANY($4::text[]))`,
+          [s.item_ref, aspect, decision, s.sizes || []]);
+        flowed = r.rowCount || 0;
+      }
+    }
+    res.json({ ok: true, flowed });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/sample/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.product_dev_samples WHERE id=$1`, [req.params.id]);
