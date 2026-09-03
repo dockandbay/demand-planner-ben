@@ -1,3 +1,7 @@
+## v27.416 PRODUCT — drag & drop file uploads on Documents + Sizes tabs
+- **Documents tab:** the upload box is now a dropzone — drag one or many files onto it to attach (highlights on drag-over); the picker + button still work. Same ≤10MB / multiple handling, factored into one `uploadDocFiles`.
+- **Sizes tab:** each required component’s **Files cell** is a dropzone — drop files onto it to attach to that size×component (same as the “+ file” picker), highlights on drag-over. Factored into `_uploadCompFiles`. jsdom-verified: a simulated drop posts the file to the upload endpoint. `supply/inject.html` only.
+
 ## v27.415 PRODUCT — remove duplicated header strip on the grid-inline detail (Ben)
 - Opening a row inline no longer repeats the swatch / colour / ref / meta (e.g. "Lovely Hair · SS27-HAIRW-LX-01 · Hair Wrap · SS27 · Lixin") — that block sits right above it in the grid row, so it was pure duplication. Removes the grid-inline header strip added in v27.410; the **underline tabs stay**, the pop-out drawer keeps its own head, and the full-page detail keeps its header. jsdom-verified: no duplicate inline, full-page header intact. `supply/inject.html` only.
 
