@@ -1,3 +1,6 @@
+## v27.412 PRODUCT Direction A #13 — proper empty states on the PLAN grid
+- The two bare grey empty lines are now centred blocks: **no items yet** → icon + "No product developments yet" + a working **+ New product** button; **filtered to nothing** → icon + message + a **Reset filters** link that clears every filter. Curly quotes fixed to straight. jsdom-verified. Rollback = revert this single commit. `supply/inject.html` only.
+
 ## v27.411 PRODUCT Direction A #8 — Master data grouped into labelled sections
 - The Master-data form is now organised into labelled sections — **Details · Colour & swatch · Workflow · Description · Reference** — instead of one undifferentiated 12-field column, so it reads at a glance. Fields were already in that order, so this is heading inserts + a slightly wider column (720px); every field id/class and its auto-save wiring is unchanged. jsdom-verified: all 5 headings render, all fields + rename still present. (Full field-level 2-column grid deferred — the fields vary too much in width to grid cleanly; grouping delivers most of the scannability win.) Rollback = revert this single commit. `supply/inject.html` only.
 
