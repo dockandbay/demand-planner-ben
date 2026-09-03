@@ -6161,7 +6161,10 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   const lyD=document.createElement('div');lyD.className='fcly';
   // Forecast-on-forecast years: LY is the prior-year forecast (not an actual) — keep neutral colour
   if(isFcLy){lyD.textContent=ly_u?fn(ly_u):'--';lyD.style.color='#94a3b8';lyD.title=(y-1)+' forecast';}
-  else{lyD.textContent=ly_u?fn(ly_u):'--';}
+  else{ var _spF=(typeof SKUM==='undefined'||!SKUM[s])?(subcatLySplit(s,co,ch)[ym(y-1,mo)]):null;   // forecast-month LY reference: master/set split too (LY = prior-year actuals here)
+    if(_spF&&_spF.setBoxes>0){ lyD.textContent=fn(_spF.master)+' / '+fn(_spF.setBoxes); lyD.style.cursor='help'; lyD.style.fontSize='8.5px';
+      lyD.title='Last-year actuals: '+fn(_spF.master)+' master units + '+fn(_spF.setBoxes)+' set boxes. Exploded (set BOMs → individual units): '+fn(_spF.master+_spF.setUnits)+' total.'; }
+    else { lyD.textContent=ly_u?fn(ly_u):'--'; } }
   d.appendChild(lyD);
   const inp=document.createElement('input');inp.type='text';
   inp.className='fci'+(isOvr?' ovr':isPct||gv?' pct':'')+((isPct&&_ps0.n<0)?' neg':'');
