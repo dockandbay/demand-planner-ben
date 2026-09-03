@@ -1,3 +1,6 @@
+## v27.413 DEMAND plan — Google-Sheets-style minimise on MASTER/SET groups
+- Under an expanded sub-category, the MASTERS / SETS groups now use a **left-outline** instead of the full-width grey header bar: a slim header line with a **−/+ minimise box on the left** and a **faint vertical rail** down the group’s SKU rows. Click the box (or the line) to minimise just that group; the state **persists** per sub-category×group (localStorage `db_grp_collapsed_v1`). Reuses the existing group logic (`_insGrpHdr`), so demand/buy are unaffected. Demand app parses clean, 0 errors. `artifact_v16.7.html` only.
+
 ## v27.412 PRODUCT Direction A #13 — proper empty states on the PLAN grid
 - The two bare grey empty lines are now centred blocks: **no items yet** → icon + "No product developments yet" + a working **+ New product** button; **filtered to nothing** → icon + message + a **Reset filters** link that clears every filter. Curly quotes fixed to straight. jsdom-verified. Rollback = revert this single commit. `supply/inject.html` only.
 
