@@ -13616,6 +13616,7 @@
       var ACTTAGS=CFGTAGS.filter(function(t){return t.active!==false;}), TAGMAP={}; CFGTAGS.forEach(function(t){TAGMAP[t.id]=t;});
       var FILT=renderProdTimeline._filt[ref]=renderProdTimeline._filt[ref]||{};
       function tagBadge(id){ var t=TAGMAP[id]; if(!t)return ''; return '<span style="display:inline-block;font-size:9px;font-weight:700;color:#fff;background:'+esc(t.colour||'#64748b')+';border-radius:4px;padding:1px 7px;margin:0 4px 0 0">'+esc(t.name||'')+'</span>'; }
+      function panCard(p){ return '<div style="display:flex;align-items:center;gap:9px;max-width:320px;border:1px solid #e5e7eb;border-radius:7px;padding:5px 9px;background:#fff;margin:4px 0 0"><span style="width:34px;height:34px;border-radius:5px;border:1px solid rgba(0,0,0,.12);background:'+esc(p.hex||'#e2e8f0')+';flex:0 0 auto"></span><div style="line-height:1.3"><div style="font-size:11px;font-weight:700;color:#0f172a">PANTONE '+esc(p.code||'')+'</div><div style="font-size:10px;color:#64748b">'+esc(p.name||'')+(p.hex?' · ≈'+esc(p.hex):'')+(p.book?' · '+esc(p.book):'')+'</div></div></div>'; }
       var unreadSup=notes.filter(function(n){return n.author_kind==='supplier'&&!n.read;}).length;
       var _ownNotes=notes.filter(function(n){return n.author_kind==='internal';});
       var recentOwnId=_ownNotes.length?tlDesc(_ownNotes)[0].id:null;
@@ -13625,9 +13626,10 @@
         var ctrl=(!sup && n.id===recentOwnId)?'<button class="save-btn light prod-esc" data-msg="'+esc(n.body||'')+'" title="Escalate this message to the supplier (emails their portal user)" style="color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'';
         var dl=n.attachment_id?'<div style="margin-top:4px"><a href="/api/supply/portal-attachment/'+encodeURIComponent(n.attachment_id)+'" target="_blank" rel="noopener" style="font-size:12px;color:#1d4ed8;text-decoration:none;font-weight:600">⬇ '+esc(n.attachment_name||'Download file')+'</a></div>':'';
         var tg=(n.tags||[]).map(tagBadge).join(''); tg=tg?'<div style="margin-top:4px">'+tg+'</div>':'';
+        var pc=(n.pantone||[]).map(panCard).join(''); pc=pc?pc+'<div class="mut" style="font-size:9px;margin-top:2px">On-screen approximation, not a colour proof.</div>':'';
         return '<div style="font-size:11px;margin:3px 0;max-width:640px;padding:5px 8px;background:'+(sup?(n.read?'#f1f5f9':'#fff7ed'):'#eef2ff')+';border:1px solid '+(isNew?'#fdba74':'#e5e7eb')+';border-radius:5px;display:flex;gap:10px;align-items:flex-start">'
           +(ctrl?'<div style="flex:0 0 auto;display:flex;flex-direction:column;gap:3px;align-items:flex-start;min-width:78px">'+ctrl+'</div>':'')
-          +'<div style="flex:1"><span class="mut tiny">'+esc(_fmt(n.created_at))+' · '+who+'</span>'+(isNew?' <span class="ex-badge">new</span>':'')+'<br><span style="color:#1a1a1a;white-space:pre-wrap">'+esc(n.body||'')+'</span>'+dl+tg+'</div>'
+          +'<div style="flex:1"><span class="mut tiny">'+esc(_fmt(n.created_at))+' · '+who+'</span>'+(isNew?' <span class="ex-badge">new</span>':'')+'<br><span style="color:#1a1a1a;white-space:pre-wrap">'+esc(n.body||'')+'</span>'+dl+tg+pc+'</div>'
           +'</div>'; }
       function _changeRow(c){ return '<div class="tl-change" style="font-size:11px;margin:3px 0;max-width:640px;padding:5px 8px;background:#f8fafc;border:1px solid #e5e7eb;border-left:3px solid #94a3b8;border-radius:5px'+(_hid?';display:none':'')+'"><span class="ex-badge" style="background:#e2e8f0;color:#475569;margin-right:6px">record of change</span><span class="mut tiny">'+esc(_fmt(c.changed_at))+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span><br><span style="color:#334155"><b>'+esc(c.event)+'</b>'+(c.detail?': '+esc(c.detail):'')+'</span></div>'; }
       // used-tag filter bar (Phase 3): chips for the tags actually applied on THIS product; multi-select
@@ -13642,8 +13644,9 @@
       var list=_items.length?_items.map(function(x){return x.h;}).join(''):'<div class="mut tiny" style="padding:6px 0">'+(anyFilt?'No messages with the selected tag'+(usedIds.filter(function(id){return FILT[id];}).length>1?'s':'')+'.':'No timeline entries yet.')+'</div>';
       var _compChips=ACTTAGS.map(function(t){ return '<span class="pt-tagchip" data-id="'+t.id+'" style="cursor:pointer;display:inline-block;font-size:10px;font-weight:700;border-radius:5px;padding:2px 9px;margin:0 4px 4px 0;border:1px solid '+esc(t.colour||'#64748b')+';color:'+esc(t.colour||'#64748b')+';background:#fff">'+esc(t.name||'')+'</span>'; }).join('');
       var compose='<div style="margin-top:6px;max-width:640px">'
-        +'<div style="position:relative"><textarea class="fci" id="pt-in" rows="2" placeholder="Add a note…'+(SNIPS.length?'  (type / for a saved phrase)':'')+'" style="width:100%;box-sizing:border-box;min-height:38px;text-align:left"></textarea>'
-          +'<div id="pt-picker" style="display:none;position:absolute;left:6px;right:6px;top:calc(100% - 2px);z-index:60;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 6px 20px rgba(15,23,42,.14);max-height:180px;overflow:auto"></div></div>'
+        +'<div style="position:relative"><textarea class="fci" id="pt-in" rows="2" placeholder="Add a note…  ('+(SNIPS.length?'/ phrase · ':'')+'/p Pantone)" style="width:100%;box-sizing:border-box;min-height:38px;text-align:left"></textarea>'
+          +'<div id="pt-picker" style="display:none;position:absolute;left:6px;right:6px;top:calc(100% - 2px);z-index:60;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 6px 20px rgba(15,23,42,.14);max-height:200px;overflow:auto"></div></div>'
+        +'<div id="pt-pan-tray" style="margin:5px 0 2px;display:none"></div>'
         +(ACTTAGS.length?'<div style="margin:5px 0 2px"><span class="mut tiny" style="margin-right:4px">Tags:</span>'+_compChips+'</div>':'')
         +'<div style="margin-top:5px"><button class="save-btn" id="pt-post" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Post</button></div></div>'
         +'<div class="mut tiny" style="margin:4px 2px 12px">To escalate to the supplier, post the message then use ⚑ Escalate on it.</div>';
@@ -13652,23 +13655,39 @@
       // compose tag selection
       var _sel={};
       body.querySelectorAll('.pt-tagchip').forEach(function(ch){ ch.onclick=function(){ var id=ch.dataset.id, t=TAGMAP[id]; _sel[id]=!_sel[id]; if(_sel[id]){ ch.style.background=t.colour||'#64748b'; ch.style.color='#fff'; } else { ch.style.background='#fff'; ch.style.color=t.colour||'#64748b'; } }; });
-      // "/" quick-phrase picker
-      (function(){ var ta=body.querySelector('#pt-in'), pick=body.querySelector('#pt-picker'); if(!ta||!pick||!SNIPS.length)return; var pIdx=-1, pItems=[];
+      // pending Pantone reference cards for the message being composed
+      var _pan=[];
+      function renderPanTray(){ var tray=body.querySelector('#pt-pan-tray'); if(!tray)return; if(!_pan.length){ tray.innerHTML=''; tray.style.display='none'; return; } tray.style.display='';
+        tray.innerHTML='<span class="mut tiny" style="margin-right:4px">Pantone:</span>'+_pan.map(function(p,i){ return '<span style="display:inline-flex;align-items:center;gap:5px;font-size:10px;font-weight:700;border:1px solid #e5e7eb;border-radius:5px;padding:2px 7px;margin:0 4px 4px 0;background:#fff"><span style="width:12px;height:12px;border-radius:3px;border:1px solid rgba(0,0,0,.15);background:'+esc(p.hex||'#e2e8f0')+'"></span>'+esc(p.code)+' <a class="pt-pan-rm" data-i="'+i+'" style="cursor:pointer;color:#94a3b8;font-weight:400">✕</a></span>'; }).join('');
+        tray.querySelectorAll('.pt-pan-rm').forEach(function(a){ a.onclick=function(){ _pan.splice(parseInt(a.dataset.i,10),1); renderPanTray(); }; }); }
+      // slash-command picker: "/" = saved phrase, "/p <query>" = Pantone colour search
+      (function(){ var ta=body.querySelector('#pt-in'), pick=body.querySelector('#pt-picker'); if(!ta||!pick)return; var pIdx=-1, pItems=[], mode='snip', seq=0;
         function closeP(){ pick.style.display='none'; pIdx=-1; pItems=[]; }
         function tokenAt(){ var pos=ta.selectionStart, up=ta.value.slice(0,pos), m=up.match(/(?:^|\s)\/([^\n]*)$/); if(!m)return null; return {q:m[1]||'',start:pos-(m[1]||'').length-1,end:pos}; }
         function hl(){ pick.querySelectorAll('.pt-pi').forEach(function(el,i){ el.style.background=(i===pIdx?'#eff6ff':''); }); }
-        function draw(){ var tk=tokenAt(); if(!tk){ closeP(); return; } var q=tk.q.toLowerCase(); pItems=SNIPS.filter(function(s){ return !q||String(s.body).toLowerCase().indexOf(q)>=0; }); if(!pItems.length){ closeP(); return; } if(pIdx<0||pIdx>=pItems.length)pIdx=0;
+        function wire(){ pick.querySelectorAll('.pt-pi').forEach(function(el){ el.onmousedown=function(e){ e.preventDefault(); ins(parseInt(el.dataset.i,10)); }; el.onmouseenter=function(){ pIdx=parseInt(el.dataset.i,10); hl(); }; }); }
+        function draw(){ var tk=tokenAt(); if(!tk){ closeP(); return; }
+          var pm=tk.q.match(/^p(?:antone)?\s+(.*)$/i);
+          if(pm){ mode='pan'; var q=pm[1]||'', my=++seq;
+            fetch('/api/product/pantone/search?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(rows){ if(my!==seq||!tokenAt())return; rows=Array.isArray(rows)?rows:[]; pItems=rows;
+              if(!rows.length){ pick.innerHTML='<div style="padding:7px 10px;font-size:11px;color:#94a3b8">No Pantone match'+(q?' for &ldquo;'+esc(q)+'&rdquo;':'')+' — seed from your Connect export.</div>'; pick.style.display=''; pIdx=-1; return; }
+              if(pIdx<0||pIdx>=rows.length)pIdx=0;
+              pick.innerHTML=rows.map(function(p,i){ return '<div class="pt-pi" data-i="'+i+'" style="padding:5px 9px;font-size:12px;cursor:pointer;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;gap:8px;'+(i===pIdx?'background:#eff6ff':'')+'"><span style="width:16px;height:16px;border-radius:3px;border:1px solid rgba(0,0,0,.14);background:'+esc(p.hex||'#e2e8f0')+';flex:0 0 auto"></span><span style="font-weight:700">'+esc(p.code)+'</span> <span style="color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(p.name||'')+'</span></div>'; }).join('');
+              pick.style.display=''; wire(); }).catch(function(){});
+            return; }
+          mode='snip'; if(!SNIPS.length){ closeP(); return; } var q2=tk.q.toLowerCase(); pItems=SNIPS.filter(function(s){ return !q2||String(s.body).toLowerCase().indexOf(q2)>=0; }); if(!pItems.length){ closeP(); return; } if(pIdx<0||pIdx>=pItems.length)pIdx=0;
           pick.innerHTML=pItems.map(function(s,i){ return '<div class="pt-pi" data-i="'+i+'" style="padding:6px 9px;font-size:12px;cursor:pointer;border-bottom:1px solid #f1f5f9;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'+(i===pIdx?'background:#eff6ff':'')+'">'+esc(s.body)+'</div>'; }).join('');
-          pick.style.display='';
-          pick.querySelectorAll('.pt-pi').forEach(function(el){ el.onmousedown=function(e){ e.preventDefault(); ins(parseInt(el.dataset.i,10)); }; el.onmouseenter=function(){ pIdx=parseInt(el.dataset.i,10); hl(); }; }); }
-        function ins(i){ var tk=tokenAt(), s=pItems[i]; if(!tk||!s)return; var v=ta.value, nv=v.slice(0,tk.start)+s.body+v.slice(tk.end); ta.value=nv; var cp=tk.start+String(s.body).length; ta.focus(); ta.setSelectionRange(cp,cp); closeP(); }
+          pick.style.display=''; wire(); }
+        function ins(i){ var tk=tokenAt(), it=pItems[i]; if(!tk||!it)return; var v=ta.value;
+          if(mode==='pan'){ ta.value=v.slice(0,tk.start)+v.slice(tk.end); ta.focus(); ta.setSelectionRange(tk.start,tk.start); closeP(); if(!_pan.some(function(x){return x.code===it.code&&x.book===it.book;}))_pan.push({code:it.code,name:it.name,hex:it.hex,book:it.book}); renderPanTray(); }
+          else { var nv=v.slice(0,tk.start)+it.body+v.slice(tk.end); ta.value=nv; var cp=tk.start+String(it.body).length; ta.focus(); ta.setSelectionRange(cp,cp); closeP(); } }
         ta.addEventListener('input',draw);
-        ta.addEventListener('keydown',function(e){ if(pick.style.display==='none')return; if(e.key==='ArrowDown'){ e.preventDefault(); pIdx=Math.min(pItems.length-1,pIdx+1); hl(); } else if(e.key==='ArrowUp'){ e.preventDefault(); pIdx=Math.max(0,pIdx-1); hl(); } else if(e.key==='Enter'){ e.preventDefault(); ins(pIdx); } else if(e.key==='Escape'){ e.preventDefault(); closeP(); } });
+        ta.addEventListener('keydown',function(e){ if(pick.style.display==='none')return; if(e.key==='ArrowDown'){ e.preventDefault(); pIdx=Math.min(pItems.length-1,pIdx+1); hl(); } else if(e.key==='ArrowUp'){ e.preventDefault(); pIdx=Math.max(0,pIdx-1); hl(); } else if(e.key==='Enter'&&pItems.length){ e.preventDefault(); ins(pIdx); } else if(e.key==='Escape'){ e.preventDefault(); closeP(); } });
         ta.addEventListener('blur',function(){ setTimeout(closeP,140); }); })();
       // filter chip handlers
       body.querySelectorAll('.pt-filt').forEach(function(ch){ ch.onclick=function(){ var id=ch.dataset.id; FILT[id]=!FILT[id]; if(!FILT[id])delete FILT[id]; renderProdTimeline(body,ref); }; });
       var _fclr=body.querySelector('.pt-filt-clear'); if(_fclr)_fclr.onclick=function(){ Object.keys(FILT).forEach(function(k){delete FILT[k];}); renderProdTimeline(body,ref); };
-      body.querySelector('#pt-post').onclick=function(){ var t=body.querySelector('#pt-in').value.trim(); if(!t)return; var tags=Object.keys(_sel).filter(function(id){return _sel[id];}).map(Number); shipPost('/api/product/note',{ref:ref,body:t,author_email:(window.ME&&ME.email)||'',tags:tags},function(){ _prodJsonBust(ref); renderProdTimeline(body,ref); }); };
+      body.querySelector('#pt-post').onclick=function(){ var t=body.querySelector('#pt-in').value.trim(); if(!t&&!_pan.length)return; if(!t&&_pan.length)t='(Pantone reference)'; var tags=Object.keys(_sel).filter(function(id){return _sel[id];}).map(Number); shipPost('/api/product/note',{ref:ref,body:t,author_email:(window.ME&&ME.email)||'',tags:tags,pantone:_pan},function(){ _prodJsonBust(ref); renderProdTimeline(body,ref); }); };
       var eb=body.querySelector('.prod-esc'); if(eb)eb.onclick=function(){ var msg=eb.dataset.msg||''; if(!msg){alert('No message to escalate.');return;} if(!confirm('Escalate this message for '+ref+' to the supplier (emails their portal user)?'))return; eb.disabled=true; var t=eb.textContent; eb.textContent='Sending…'; shipPost('/api/product/escalate',{ref:ref,message:msg},function(j){ if(j&&j.error){alert(j.error);eb.disabled=false;eb.textContent=t;return;} alert(j&&j.sent?('Escalated — emailed '+j.emails.join(', ')):(j&&j.note)||'Escalated (no recipients configured).'); renderProdTimeline(body,ref); }); };
       var _hc=body.querySelector('.prod-hide-chg'); if(_hc)_hc.onchange=function(){ rocSetHidden(ref,_hc.checked); body.querySelectorAll('.tl-change').forEach(function(el){ el.style.display=_hc.checked?'none':''; }); };
     }).catch(function(e){ body.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }

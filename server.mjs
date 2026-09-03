@@ -6579,19 +6579,40 @@ app.get('/api/product/spec-file/:id', async (req, res) => {
 app.get('/api/product/notes/:ref', async (req, res) => {
   try { const r = await pool.query(`SELECT n.id, n.author_kind, coalesce(n.author_email,'') author_email, n.body,
     to_char(n.created_at,'DD-Mon-YY HH24:MI') created_at, n.read_at IS NOT NULL read,
-    n.attachment_id, coalesce(a.filename,'') attachment_name, coalesce(n.tags,'[]'::jsonb) tags
+    n.attachment_id, coalesce(a.filename,'') attachment_name, coalesce(n.tags,'[]'::jsonb) tags, coalesce(n.pantone,'[]'::jsonb) pantone
     FROM planner.supplier_notes n LEFT JOIN planner.portal_attachments a ON a.id=n.attachment_id
     WHERE n.po=$1 ORDER BY n.created_at`, [req.params.ref]);
     res.json(r.rows); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// Sanitise Pantone reference cards attached to a message → array of {code,name,hex,book}
+function cleanPantone(arr) {
+  return Array.isArray(arr) ? arr.filter(p => p && p.code).slice(0, 12).map(p => ({
+    code: String(p.code).slice(0, 40), name: String(p.name || '').slice(0, 80),
+    hex: (/^#?[0-9a-fA-F]{3,8}$/.test(String(p.hex || '')) ? (String(p.hex)[0] === '#' ? String(p.hex) : '#' + p.hex) : ''),
+    book: String(p.book || '').slice(0, 20)
+  })) : [];
+}
 app.post('/api/product/note', async (req, res) => {
   const b = req.body || {}, ref = (b.ref || '').trim();
   if (!ref || !String(b.body || '').trim()) return res.status(400).json({ error: 'ref and body required' });
-  // tags = array of product_timeline_tags ids attached to this message (optional)
+  // tags = array of product_timeline_tags ids; pantone = array of Pantone reference cards (optional)
   const tags = Array.isArray(b.tags) ? b.tags.map(x => Number(x)).filter(x => Number.isFinite(x)) : [];
-  try { const r = await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, tags) VALUES ($1,$2,'internal',$3,$4::jsonb) RETURNING id`,
-    [ref, internalAuthor(req, b.author_email), String(b.body).trim(), JSON.stringify(tags)]);
+  const pantone = cleanPantone(b.pantone);
+  try { const r = await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, tags, pantone) VALUES ($1,$2,'internal',$3,$4::jsonb,$5::jsonb) RETURNING id`,
+    [ref, internalAuthor(req, b.author_email), String(b.body).trim(), JSON.stringify(tags), JSON.stringify(pantone)]);
     res.json({ ok: true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// In-app Pantone search (seeded from Dock & Bay's Connect export; approximate on-screen swatch). Powers the
+// "/p" picker in the product-timeline compose box. Filter by book (TCX / Coated / Uncoated) optional.
+app.get('/api/product/pantone/search', async (req, res) => {
+  const q = String(req.query.q || '').trim(), book = String(req.query.book || '').trim();
+  try {
+    const params = []; let where = 'active';
+    if (q) { params.push('%' + q + '%'); where += ` AND (code ILIKE $${params.length} OR name ILIKE $${params.length})`; }
+    if (book) { params.push(book); where += ` AND book=$${params.length}`; }
+    const rows = (await pool.query(`SELECT code, name, hex, book FROM planner.pantone_colors WHERE ${where} ORDER BY sort, code LIMIT 24`, params)).rows;
+    res.json(rows);
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Re-tag an existing product timeline message (D&B side). tags = full replacement array of tag ids.
 app.post('/api/product/note/:id/tags', async (req, res) => {
