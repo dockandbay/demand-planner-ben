@@ -92,6 +92,11 @@
 #product-root .pg-stage-wrap{display:flex;flex-direction:column;gap:2px;align-items:flex-start}
 #product-root .pg-stage-owner{font-size:9px;color:#94a3b8;letter-spacing:.02em;padding-left:2px;text-transform:uppercase}
 #product-root .pg-stage-sel{max-width:190px}
+/* Merged STAGE cell (Direction A #2): a coloured chip + owner that swaps to the select on click; the Approval column is gone (it is derived from stage — approval shows in the detail header + is implied by the chip colour). */
+#product-root .pg-stagechip{display:inline-flex;align-items:center;gap:6px;cursor:pointer;border-radius:5px;padding:2px 4px;margin:-2px -4px;max-width:100%}
+#product-root .pg-stagechip:hover{background:#f1f5f9}
+#product-root .pg-stagechip:focus{outline:2px solid #bfdbfe;outline-offset:0}
+#product-root .pg-stage-own2{font-size:9px;color:#94a3b8;letter-spacing:.02em;text-transform:uppercase;white-space:nowrap}
 /* Product pop-out drawer (RANGE PLAN / Dashboard → click a product = right-side slide-in of its detail; scoped to #product-root so the product-detail CSS applies). */
 #product-root #proddrawer-bg{position:fixed;inset:0;z-index:100002;background:rgba(15,23,42,0);transition:background .18s ease}
 #product-root #proddrawer-bg.open{background:rgba(15,23,42,.34)}
@@ -12467,7 +12472,8 @@
     if(field==='stage'){ if(_prodRows){ var ro3=_prodRows.filter(function(x){return x.ref===ref;})[0]; if(ro3)ro3.status=prodStatusFromStage(val); }
       var ssel=g.querySelector('.pg-stage-sel[data-ref="'+esr+'"]'); if(ssel){ ssel.value=val; ssel.setAttribute('style',prodStageStyle(val)); }
       var sown=g.querySelector('.pg-stage-owner[data-ref="'+esr+'"]'); if(sown){ var o=prodStageOwner(val); sown.textContent=(o==='Supplier'||o==='D&B')?('with '+o):o; }
-      var apc=g.querySelector('.pg-approval-cell[data-ref="'+esr+'"]'); if(apc)apc.innerHTML=prodApprovalPill(val);
+      var schip=g.querySelector('.pg-stagechip[data-ref="'+esr+'"]'); if(schip)schip.innerHTML=prodStageChipHtml(val);   // merged stage cell: keep the grid chip in sync when stage changes from the detail
+      var apc=g.querySelector('.pg-approval-cell[data-ref="'+esr+'"]'); if(apc)apc.innerHTML=prodApprovalPill(val);   // (approval column removed; null-guarded no-op unless legacy)
       var mchip=g.querySelector('.pgm-card[data-ref="'+esr+'"] .pgm-stage-chip'); if(mchip)mchip.innerHTML=prodStageChip(val);
       var pmd=document.getElementById('pm-appr-derived'); if(pmd)pmd.innerHTML=prodStatusChip(prodStatusFromStage(val));
       var pms=document.getElementById('pm-stage'); if(pms&&pms.value!==val){ pms.value=val; } if(pms)pms.setAttribute('style',prodStageStyle(val)); return; }
@@ -12870,6 +12876,8 @@
   function prodStageStyle(v){ var m=stageMeta(v); return 'background:'+m[3]+';color:'+m[4]+';font-weight:700'; }
   function prodStatusFromStage(v){ return (v==='approved'||v==='approved_with_comments')?'approved':(v==='stop_development'?'dropped':'in_development'); }
   function prodStageChip(v){ var m=stageMeta(v); return hzChip(m[3],m[4],m[1]); }
+  // Grid STAGE chip content: coloured stage chip + the owner ("with Supplier" / "with D&B" / "Done" / "Stopped") inline.
+  function prodStageChipHtml(v){ var own=stageMeta(v)[2]; var ownTxt=(own==='Supplier'||own==='D&B')?('with '+own):own; return prodStageChip(v)+'<span class="pg-stage-own2">'+esc(ownTxt)+'</span>'; }
   function prodStageOwner(v){ return stageMeta(v)[2]; }
   function prodStageRag(v){ return stageMeta(v)[5]; }   // green | amber | pending | red — for the category/season report tallies
   // Grid STAGE cell: coloured dropdown + a tiny owner sub-label ("with Supplier" / "with D&B" / "Done" / "Stopped").
@@ -13067,12 +13075,12 @@
         var seasonCount={}, catCount={}; f.forEach(function(r){ var sk=r.season||'', ck=(r.season||'')+'|'+(r.category||''); seasonCount[sk]=(seasonCount[sk]||0)+1; catCount[ck]=(catCount[ck]||0)+1; });
         var _pgSeason=null, _pgCat=null;
         var _tbl='<div class="pg-desktop"><div class="tw"><table class="pg-tbl"><thead><tr>'
-          +['','Ref','Category','Season','Supplier','Sizes','Stage','Approval','Sample shipment'].map(function(h){return '<th>'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+          +['','Ref','Category','Season','Supplier','Sizes','Stage','Sample shipment'].map(function(h){return '<th>'+h+'</th>';}).join('')+'</tr></thead><tbody>'
           +f.map(function(r,i){
             var sw=r.has_swatch?'<img class="pg-swatch2 pg-swatch-zoom" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at)+'" title="click to enlarge" style="cursor:zoom-in">':'<span class="pg-swatch2 none">n/a</span>';
             var sKey=r.season||'', cKey=r.category||'', hdr='';
-            if(sKey!==_pgSeason){ _pgSeason=sKey; _pgCat=null; hdr+='<tr class="pg-seasonhdr" data-season="'+esc(sKey)+'"><td colspan="9" style="cursor:pointer;background:#cbd5e1;border-top:2px solid #94a3b8;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#1f2937;padding:5px 10px"><span class="pg-caret" style="display:inline-block;width:13px">▾</span>'+esc(sKey||'— no season —')+' <span style="font-weight:400;color:#475569">('+seasonCount[sKey]+')</span></td></tr>'; }
-            if(cKey!==_pgCat){ _pgCat=cKey; hdr+='<tr class="pg-cathdr" data-season="'+esc(sKey)+'" data-cat="'+esc(cKey)+'"><td colspan="9" style="cursor:pointer;background:#eef2f7;font-weight:600;font-size:12px;letter-spacing:.02em;color:#475569;padding:4px 10px 4px 28px"><span class="pg-caret" style="display:inline-block;width:13px">▾</span>'+esc(cKey||'— no category —')+' <span style="font-weight:400;color:#94a3b8">('+catCount[sKey+'|'+cKey]+')</span></td></tr>'; }
+            if(sKey!==_pgSeason){ _pgSeason=sKey; _pgCat=null; hdr+='<tr class="pg-seasonhdr" data-season="'+esc(sKey)+'"><td colspan="8" style="cursor:pointer;background:#cbd5e1;border-top:2px solid #94a3b8;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#1f2937;padding:5px 10px"><span class="pg-caret" style="display:inline-block;width:13px">▾</span>'+esc(sKey||'— no season —')+' <span style="font-weight:400;color:#475569">('+seasonCount[sKey]+')</span></td></tr>'; }
+            if(cKey!==_pgCat){ _pgCat=cKey; hdr+='<tr class="pg-cathdr" data-season="'+esc(sKey)+'" data-cat="'+esc(cKey)+'"><td colspan="8" style="cursor:pointer;background:#eef2f7;font-weight:600;font-size:12px;letter-spacing:.02em;color:#475569;padding:4px 10px 4px 28px"><span class="pg-caret" style="display:inline-block;width:13px">▾</span>'+esc(cKey||'— no category —')+' <span style="font-weight:400;color:#94a3b8">('+catCount[sKey+'|'+cKey]+')</span></td></tr>'; }
             return hdr+'<tr class="pg-datarow" data-season="'+esc(sKey)+'" data-cat="'+esc(cKey)+'">'
               +'<td><span style="display:inline-flex;align-items:center;gap:7px">'+sw+'<button class="planbtn pg-open" data-ref="'+esc(r.ref)+'" data-i="'+i+'">PLAN</button></span></td>'
               +'<td><div class="pg-colour" data-ref="'+esc(r.ref)+'">'+prodColourDisplay(r)+'</div><div class="pg-ref" data-ref="'+esc(r.ref)+'">'+esc(r.ref)+prodComboBadge(r)+'</div></td>'
@@ -13080,10 +13088,9 @@
               +'<td>'+prodPickBtn(r.ref,'season',r.season,'season')+'</td>'
               +'<td>'+prodPickBtn(r.ref,'supplier',r.supplier,'supplier')+'</td>'
               +'<td>'+r.sizes_approved+'/'+r.sizes+'</td>'
-              +'<td>'+prodStageSelHtml(r.ref,r.stage)+'</td>'
-              +'<td class="pg-approval-cell" data-ref="'+esc(r.ref)+'">'+prodApprovalPill(r.stage)+'</td>'
+              +'<td class="pg-stage-cell" data-ref="'+esc(r.ref)+'"><span class="pg-stagechip" data-ref="'+esc(r.ref)+'" tabindex="0" title="Approval: '+esc(prodStatusFromStage(r.stage)==='approved'?'Approved':prodStatusFromStage(r.stage)==='dropped'?'Rejected':'In development')+' — click to change stage">'+prodStageChipHtml(r.stage)+'</span><span class="pg-stageedit" data-ref="'+esc(r.ref)+'" style="display:none">'+prodStageSelHtml(r.ref,r.stage)+'</span></td>'
               +'<td class="l">'+(r.latest_shipment?('<div style="white-space:nowrap;font-size:11px">📦 <a class="samp-open" data-ref="'+esc(r.latest_shipment.ref)+'" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;font-weight:600" title="open this sample shipment">'+esc(r.latest_shipment.ref)+'</a>'+(r.latest_shipment.carrier?' <span class="mut tiny">'+esc(r.latest_shipment.carrier)+'</span>':'')+(r.latest_shipment.tracking?' · '+carrierTrackLinkInj(r.latest_shipment.carrier,r.latest_shipment.tracking):'')+'</div>'):'<span class="mut tiny">—</span>')+'</td></tr>'
-              +'<tr class="pg-detrow" id="pgdet-'+i+'" data-season="'+esc(r.season||'')+'" data-cat="'+esc(r.category||'')+'" style="display:none"><td colspan="9"><div class="pg-det"></div></td></tr>';
+              +'<tr class="pg-detrow" id="pgdet-'+i+'" data-season="'+esc(r.season||'')+'" data-cat="'+esc(r.category||'')+'" style="display:none"><td colspan="8"><div class="pg-det"></div></td></tr>';
           }).join('')+'</tbody></table></div></div>';
         // MOBILE: a card per product, grouped by season → category; tap a card to open its detail inline.
         var _mS=null,_mC=null;
@@ -13137,6 +13144,14 @@
               var rc=g.querySelector('.pg-ref[data-ref="'+esk+'"]'); if(rc){ rc.innerHTML=esc(ro.ref)+prodComboBadge(ro);
                 var nb=rc.querySelector('.pg-actbadge'); if(nb)nb.onclick=function(e){ e.stopPropagation(); var pb=g.querySelector('.pg-open[data-ref="'+esk+'"]'); if(pb)pb.click(); }; }
             }).catch(function(){}); }); }; });
+        // Merged STAGE cell: click the chip to reveal the (already-wired) select; its change/blur reverts to the chip.
+        g.querySelectorAll('.pg-stagechip').forEach(function(chip){
+          var open=function(e){ if(e)e.stopPropagation(); var cell=chip.closest('.pg-stage-cell'); if(!cell)return; var ed=cell.querySelector('.pg-stageedit'); if(!ed)return; chip.style.display='none'; ed.style.display=''; var sel=ed.querySelector('.pg-stage-sel'); if(sel){ try{sel.focus();}catch(_){} try{ if(typeof sel.showPicker==='function')sel.showPicker(); }catch(_){} } };
+          chip.onclick=open; chip.onkeydown=function(e){ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); open(e); } }; });
+        g.querySelectorAll('.pg-stageedit .pg-stage-sel').forEach(function(sel){
+          var revert=function(){ var cell=sel.closest('.pg-stage-cell'); if(!cell)return; var chip=cell.querySelector('.pg-stagechip'), ed=cell.querySelector('.pg-stageedit'); if(chip){ chip.innerHTML=prodStageChipHtml(sel.value); chip.style.display=''; } if(ed)ed.style.display='none'; };
+          sel.addEventListener('change',function(){ setTimeout(revert,0); });   // after the save handler above
+          sel.addEventListener('blur',function(){ setTimeout(revert,120); }); });   // clicked away without changing → collapse back to the chip
         if(_pendingProdRef){ var _pr=_pendingProdRef; _pendingProdRef=null; _prodDetailTab=_pendingProdTab||'master'; _pendingProdTab=null; var _pb=g.querySelector('.pg-open[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(_pr):_pr)+'"]'); if(_pb)_pb.click(); }
       }
       _prodDraw=draw;
