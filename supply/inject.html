@@ -35,10 +35,11 @@
 #product-root .save-btn{border:1px solid #cbd5e1;background:#f8fafc;padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit;color:#1a1a1a}
 #product-root .save-btn.light{background:#fff}
 #product-root .save-btn:hover{background:#eef2f7}
-#product-root .pd-tabs{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 12px}
-#product-root .pd-tab{background:transparent;border:none;padding:6px 14px;font-size:12px;font-weight:500;cursor:pointer;color:#7c93b8;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit}
+/* Detail tabs — app-standard underline row (was a blue pill container). */
+#product-root .pd-tabs{display:flex;gap:6px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--p-line);margin:0 0 14px}
+#product-root .pd-tab{background:transparent;border:none;padding:8px 12px;margin-bottom:-1px;font-size:12px;font-weight:500;cursor:pointer;color:#64748b;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit}
 #product-root .pd-tab:hover{color:#2563eb}
-#product-root .pd-tab.active{color:#2563eb;border-bottom-color:#3b82f6;font-weight:600}
+#product-root .pd-tab.active{color:#2563eb;border-bottom-color:#3b82f6;font-weight:700}
 #product-root .pd-skel{max-width:660px}
 #product-root .pd-skel-row{height:34px;margin-bottom:8px;border-radius:6px;background:linear-gradient(90deg,#f1f5f9 25%,#e2e8f0 37%,#f1f5f9 63%);background-size:400% 100%;animation:pdShimmer 1.2s ease-in-out infinite}
 #product-root .pd-skel-row:first-child{height:22px;width:40%}
@@ -13243,15 +13244,23 @@
         if(_prodDetailTab==='master'){ var _b=box.querySelector('.pd-body'); if(_b)renderProdMaster(_b,_prodDetail); } else renderProdDetailShell(box,_prodDetail,seed); }).catch(function(){});
     }).catch(function(e){ box.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
   function renderProdDetailShell(c,d,seed){ var it=d.item; var inline=(c!==document.getElementById('product-content'));
+    var isDrawer=!!(c.closest&&c.closest('#proddrawer-bg'));   // the drawer already has its own header strip (colour + ref + close)
     var _u=Number(d.unread_supplier)||0;
     var _mAct=d._sizesLoaded?prodDetailActs(d):(seed?prodOpenActs(seed).n:0);   // seed's action count until the real sizes land
     var tabs=[['master','Master data'],['sizes','Size &amp; variants'+(_mAct?' <span class="ex-badge">'+_mAct+'</span>':'')],['samples','Samples'],['timeline','Timeline'+(_u?' <span class="ex-badge">'+_u+'</span>':'')],['documents','Documents']];
-    // inline (expanded under the grid row) shows just the sub-tabs — no header; the grid row above already shows ref/colour/etc.
+    // Full-page mode → the full header with Back. Full header vs the compact strip below.
     var header=inline?'':('<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px"><button class="save-btn light" id="pd-back">← Back</button>'
       +(it.has_swatch?'<img src="/api/product/swatch/'+encodeURIComponent(it.ref)+'?t='+encodeURIComponent(it.updated_at)+'" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">':'')
-      +'<div><div style="font-weight:700;font-family:ui-monospace,Menlo,monospace">'+esc(it.ref)+'</div><div style="color:#94a3b8;font-size:11px">'+prodColourDisplay(it)+' · '+esc(it.category||'')+(it.season?' · '+esc(it.season):'')+(it.supplier?' · '+esc(it.supplier):'')+'</div></div>'
+      +'<div><div style="font-weight:700;font-size:15px;color:#0f172a">'+prodColourDisplay(it)+'</div><div style="color:#94a3b8;font-size:11px;font-family:ui-monospace,Menlo,monospace">'+esc(it.ref)+'</div></div>'
       +'<span style="margin-left:auto;display:flex;gap:6px;align-items:center">'+prodStageChip(it.stage||'sample_development')+prodStatusChip(prodStatusFromStage(it.stage||'sample_development'))+'</span></div>');
-    c.innerHTML=header+'<div class="pd-tabs">'+tabs.map(function(t){return '<button class="pd-tab'+(t[0]===_prodDetailTab?' active':'')+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div><div class="pd-body"></div>';
+    // Grid-inline mode → a compact self-describing header strip (swatch · colour + ref · meta · stage) so the open panel
+    // stands on its own; the drawer supplies its own head, so skip it there.
+    var stripInline=(inline&&!isDrawer)?('<div style="display:flex;align-items:center;gap:11px;margin:0 0 12px;padding-bottom:10px;border-bottom:1px solid var(--p-line)">'
+      +(it.has_swatch?'<img src="/api/product/swatch/'+encodeURIComponent(it.ref)+'?t='+encodeURIComponent(it.updated_at||'')+'" style="width:44px;height:44px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb;flex:0 0 auto">':'')
+      +'<div style="min-width:0"><div style="font-weight:700;font-size:14px;color:#0f172a">'+prodColourDisplay(it)+'</div><div style="color:#94a3b8;font-size:11px;font-family:ui-monospace,Menlo,monospace">'+esc(it.ref)+'</div></div>'
+      +([esc(it.category||''),esc(it.season||''),esc(it.supplier||'')].filter(Boolean).length?'<div style="color:#64748b;font-size:11px;margin-left:2px">'+[esc(it.category||''),esc(it.season||''),esc(it.supplier||'')].filter(Boolean).join(' · ')+'</div>':'')
+      +'<span style="margin-left:auto;display:flex;gap:6px;align-items:center">'+prodStageChip(it.stage||'sample_development')+prodStatusChip(prodStatusFromStage(it.stage||'sample_development'))+'</span></div>'):'';
+    c.innerHTML=header+stripInline+'<div class="pd-tabs">'+tabs.map(function(t){return '<button class="pd-tab'+(t[0]===_prodDetailTab?' active':'')+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div><div class="pd-body"></div>';
     if(!inline){ var bk=c.querySelector('#pd-back'); if(bk)bk.onclick=function(){ selectProductSub('plan'); }; }
     c.querySelectorAll('.pd-tab').forEach(function(b){ b.onclick=function(){ _prodDetailTab=b.dataset.t; try{ if(it&&it.ref)writeHash(_prodDetailTab==='master'?['product',it.ref]:['product',it.ref,_prodDetailTab]); }catch(e){} renderProdDetailShell(c,_prodDetail,_prodSeed); }; });
     var body=c.querySelector('.pd-body');
