@@ -1,3 +1,6 @@
+## v27.411 PRODUCT Direction A #8 — Master data grouped into labelled sections
+- The Master-data form is now organised into labelled sections — **Details · Colour & swatch · Workflow · Description · Reference** — instead of one undifferentiated 12-field column, so it reads at a glance. Fields were already in that order, so this is heading inserts + a slightly wider column (720px); every field id/class and its auto-save wiring is unchanged. jsdom-verified: all 5 headings render, all fields + rename still present. (Full field-level 2-column grid deferred — the fields vary too much in width to grid cleanly; grouping delivers most of the scannability win.) Rollback = revert this single commit. `supply/inject.html` only.
+
 ## v27.410 PRODUCT Direction A #7 — detail header strip + underline tabs
 - Detail sub-tabs restyled to the app-standard **underline** row (dropped the blue pill container). The **grid-inline** detail panel now opens with a compact **header strip** (swatch · colour name + mono ref · category/season/supplier · stage + approval chips) so it is self-describing; the full-page header leads with the colour name too. The pop-out drawer keeps its own head (strip suppressed there — no double header). jsdom-verified: underline tabs, strip present inline, no duplicate in drawer. Rollback = revert this single commit. `supply/inject.html` only.
 
