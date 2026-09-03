@@ -2185,7 +2185,7 @@
     return true; }); }
   // ── SAMPLE exceptions (mirror the PO action model; reuse _poActState + _poShowSnoozed + the actions/state API) ──
   var SAMP_ACT_LABEL={supplier_shipped:'Supplier signalled shipped (marked shipped OR entered a tracking number) — set our status to SHIPPED',date_overdue:'Date overdue — completion/expected date has passed',charge_review:'Charge to review',unread:'Unread supplier note'};
-  function sampActionsAll(s){ var out=[]; var us=String(s.status_calc||s.status||'').toUpperCase(); var active=(us!=='SHIPPED'&&us!=='CANCELLED');
+  function sampActionsAll(s){ var out=[]; var us=String(s.status_calc||s.status||'').toUpperCase(); var active=(us!=='SHIPPED'&&us!=='COMPLETED'&&us!=='CANCELLED');
     if(active && (s.production_status==='shipped' || String(s.tracking_code||'').trim())) out.push('supplier_shipped');   // supplier shipped (marked shipped or entered tracking) but we haven't set SHIPPED
     if(active && s.overdue) out.push('date_overdue');
     if(Number(s.pending_charges)>0) out.push('charge_review');
@@ -10945,8 +10945,8 @@
   var SAMPLE_PURPOSES=['sales','product','photography','marketing','operations'];
   // shared status-chip renderer — one consistent look (size/radius/weight) across Samples + Product
   function hzChip(bg,fg,t){ return '<span style="display:inline-block;font-size:10px;font-weight:700;color:'+fg+';background:'+bg+';border-radius:4px;padding:1px 7px;white-space:nowrap">'+t+'</span>'; }
-  function _sampNormStatus(v){ v=String(v||'').toLowerCase(); return /cancel/.test(v)?'CANCELLED':(/complete|shipped|^ship/.test(v)?'COMPLETED':(/production|planned/.test(v)?'PRODUCTION':'FUTURE')); }   // D&B status → FUTURE/PRODUCTION/COMPLETED/CANCELLED (planned/open legacy → their new equivalent)
-  function sampleStatusChip(s){ var m={'FUTURE':['#D3D3FF','#2a2a55'],'PRODUCTION':['#ffedd5','#9a3412'],'COMPLETED':['#dcfce7','#166534'],'PLANNED':['#dbeafe','#1d4ed8'],'SHIPPED':['#dcfce7','#166534'],'CANCELLED':['#f1f5f9','#94a3b8'],'Awaiting supplier':['#fef3c7','#92710a'],'Change requested':['#fee2e2','#b91c1c'],'In production':['#dbeafe','#1d4ed8'],'Charge to review':['#fee2e2','#b91c1c'],'Shipped':['#dcfce7','#166534'],'Complete':['#e2e8f0','#475569'],'Cancelled':['#f1f5f9','#94a3b8']};
+  function _sampNormStatus(v){ v=String(v||'').toLowerCase(); return /cancel/.test(v)?'CANCELLED':(/complete|receiv/.test(v)?'COMPLETED':(/^ship|shipped/.test(v)?'SHIPPED':(/production|planned/.test(v)?'PRODUCTION':'FUTURE'))); }   // D&B status → FUTURE/PRODUCTION/SHIPPED/COMPLETED/CANCELLED (SHIPPED = in transit; COMPLETED = received; planned/open legacy → their new equivalent)
+  function sampleStatusChip(s){ var m={'FUTURE':['#D3D3FF','#2a2a55'],'PRODUCTION':['#ffedd5','#9a3412'],'COMPLETED':['#dcfce7','#166534'],'PLANNED':['#dbeafe','#1d4ed8'],'SHIPPED':['#dbeafe','#1e40af'],'CANCELLED':['#f1f5f9','#94a3b8'],'Awaiting supplier':['#fef3c7','#92710a'],'Change requested':['#fee2e2','#b91c1c'],'In production':['#dbeafe','#1d4ed8'],'Charge to review':['#fee2e2','#b91c1c'],'Shipped':['#dcfce7','#166534'],'Complete':['#e2e8f0','#475569'],'Cancelled':['#f1f5f9','#94a3b8']};
     var col=m[s]||['#e2e8f0','#475569']; return hzChip(col[0],col[1],esc(s||'')); }
   function sampleChargeChip(s){ var m={pending:['#fef3c7','#92710a'],accepted:['#dcfce7','#166534'],rejected:['#f1f5f9','#94a3b8']}; var c=m[s]||['#e2e8f0','#475569']; return '<span class="tool-badge" style="background:'+c[0]+';color:'+c[1]+'">'+esc(s)+'</span>'; }
   // ── SUPPLY ▸ QUALITY CONTROL ──────────────────────────────────────────────────
@@ -11159,7 +11159,7 @@
       function _sampNorm(st){ return _sampNormStatus(st); }   // our-status normalise → FUTURE / PRODUCTION / COMPLETED / CANCELLED
       function _sampFlash(el){ if(!el)return; try{ el.style.transition='background .2s'; el.style.background='#bbf7d0'; setTimeout(function(){ el.style.background=''; el.style.transition=''; },900); }catch(e){} }   // green "saved" flash
       function _sampGridSync(newStatus){ if(i==='DRAWER')return; try{ var exp=document.getElementById('sampexp-'+i), gtr=exp&&exp.previousElementSibling; if(!gtr)return; var tds=gtr.querySelectorAll('td'), td=tds&&tds[2]; if(!td)return; td.innerHTML=sampleStatusChip(_sampNorm(newStatus))+(s.production_status?'<div class="mut tiny" style="margin-top:2px">supplier: '+esc(prodStatusLabel(s.production_status))+'</div>':''); _sampFlash(td); }catch(e){} }   // update the grid row's status chip in place (no full reload → keeps the card open)
-      var _SAMP_SBG={FUTURE:['#D3D3FF','#2a2a55'],PRODUCTION:['#ffedd5','#9a3412'],COMPLETED:['#bbf7d0','#166534'],CANCELLED:['#fecaca','#991b1b']};   // colour-coded Our-status dropdown (FUTURE = light purple, matches PO grid)
+      var _SAMP_SBG={FUTURE:['#D3D3FF','#2a2a55'],PRODUCTION:['#ffedd5','#9a3412'],SHIPPED:['#dbeafe','#1e40af'],COMPLETED:['#bbf7d0','#166534'],CANCELLED:['#fecaca','#991b1b']};   // colour-coded Our-status dropdown (FUTURE = light purple; SHIPPED = blue/in-transit; COMPLETED = received/green)
       function _sampColorSel(sel){ if(!sel)return; var c=_SAMP_SBG[_sampNorm(sel.value)]||_SAMP_SBG.FUTURE; sel.style.background=c[0];sel.style.color=c[1];sel.style.borderColor=c[0];sel.style.fontWeight='700'; }
       var slines=(d.lines||[]).map(function(l){return {sku:l.sku,qty:l.qty,dev:!!l.dev};});
       // auto-save the SKU lines (debounced) — was previously only persisted by the removed "✓ Done" button
@@ -11212,7 +11212,7 @@
         function _sMk(code){ return _sActsAll.indexOf(code)>=0?sampActMark(s.ref,code):''; }
         var _scc=_SAMP_SBG[_us]||_SAMP_SBG.FUTURE;
         var statusCtl = editing
-          ? '<select class="fci samp-fld samp-status-sel" data-field="status" style="background:'+_scc[0]+';color:'+_scc[1]+';border-color:'+_scc[0]+';font-weight:700">'+['FUTURE','PRODUCTION','COMPLETED','CANCELLED'].map(function(o){return '<option value="'+o+'"'+(o===_us?' selected':'')+'>'+o+'</option>';}).join('')+'</select>'
+          ? '<select class="fci samp-fld samp-status-sel" data-field="status" style="background:'+_scc[0]+';color:'+_scc[1]+';border-color:'+_scc[0]+';font-weight:700">'+['FUTURE','PRODUCTION','SHIPPED','COMPLETED','CANCELLED'].map(function(o){return '<option value="'+o+'"'+(o===_us?' selected':'')+'>'+o+'</option>';}).join('')+'</select>'
           : sampleStatusChip(_us);
         // supplier signalled shipped (marked shipped OR entered tracking) but we haven't set SHIPPED → offer "Set shipping" (mirrors the PO grid)
         var _supShipped=(s.production_status==='shipped' || String(s.tracking_code||'').trim());

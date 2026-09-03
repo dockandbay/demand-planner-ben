@@ -4255,13 +4255,15 @@ app.get('/api/supply/:section', async (req, res, next) => {
           coalesce(s.change_requested,false) change_requested,
           coalesce(s.approved_lines,'{}'::jsonb) approved_lines,   -- snapshot at last accept → portal diffs vs current
           (SELECT coalesce(jsonb_object_agg(sku,qty),'{}'::jsonb) FROM (SELECT sku, sum(qty) qty FROM planner.sample_request_lines WHERE sample_id=s.id GROUP BY sku) z) cur_lines,
-          (upper(coalesce(s.status,'')) NOT IN ('SHIPPED','COMPLETED','COMPLETE','CANCELLED')) is_open,
-          (s.completion_date_required IS NOT NULL AND upper(coalesce(s.status,'')) NOT IN ('SHIPPED','CANCELLED')
+          -- OPEN = not yet received: FUTURE / PRODUCTION / SHIPPED (in transit). COMPLETED = received. CANCELLED closed.
+          (upper(coalesce(s.status,'')) NOT IN ('COMPLETED','COMPLETE','CANCELLED')) is_open,
+          (s.completion_date_required IS NOT NULL AND upper(coalesce(s.status,'')) NOT IN ('SHIPPED','COMPLETED','COMPLETE','CANCELLED')
              AND (current_date > s.completion_date_required
                   OR (s.supplier_expected_completion IS NOT NULL AND s.supplier_expected_completion > s.completion_date_required))) overdue,
-          -- OUR status (normalised): PLANNED / SHIPPED / CANCELLED. Supplier's own state is production_status.
+          -- OUR status (normalised): FUTURE / PRODUCTION / SHIPPED (in transit) / COMPLETED (received) / CANCELLED. Supplier's own state is production_status.
           CASE WHEN s.status ILIKE 'cancel%' THEN 'CANCELLED'
-               WHEN s.status ILIKE 'ship%' OR s.status ILIKE 'complete%' THEN 'SHIPPED'
+               WHEN s.status ILIKE 'complete%' OR s.status ILIKE 'receiv%' THEN 'COMPLETED'
+               WHEN s.status ILIKE 'ship%' THEN 'SHIPPED'
                ELSE 'PLANNED' END status_calc
           FROM planner.sample_requests s ORDER BY s.created_at DESC`));
       case 'suppliers': {
@@ -15410,7 +15412,7 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
         coalesce(s.address_line1_2,'') address_line1_2, coalesce(s.address_line2_2,'') address_line2_2, coalesce(s.city_2,'') city_2,
         coalesce(s.region_2,'') region_2, coalesce(s.postcode_2,'') postcode_2, coalesce(s.country_2,'') country_2, coalesce(s.phone_2,'') phone_2,
         coalesce(s.tracking_code_2,'') tracking_code_2, coalesce(s.carrier_2,'') carrier_2,
-        (upper(coalesce(s.status,'')) NOT IN ('COMPLETED','COMPLETE','SHIPPED','CANCELLED')   -- FUTURE / PRODUCTION (+ legacy) = open
+        (upper(coalesce(s.status,'')) NOT IN ('COMPLETED','COMPLETE','SHIPPED','CANCELLED')   -- portal (supplier view): once they've shipped it's done on their side
            OR coalesce(s.change_requested,false)                                              -- …or anything with an outstanding action
            OR EXISTS (SELECT 1 FROM planner.supplier_charges c WHERE c.source_type='sample' AND c.source_ref=s.ref AND c.status='pending')
            OR EXISTS (SELECT 1 FROM planner.sample_notes n WHERE n.sample_id=s.id AND n.author_kind='internal' AND n.read_at IS NULL)) is_open,
