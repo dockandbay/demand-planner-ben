@@ -6579,7 +6579,7 @@ app.get('/api/product/spec-file/:id', async (req, res) => {
 app.get('/api/product/notes/:ref', async (req, res) => {
   try { const r = await pool.query(`SELECT n.id, n.author_kind, coalesce(n.author_email,'') author_email, n.body,
     to_char(n.created_at,'DD-Mon-YY HH24:MI') created_at, n.read_at IS NOT NULL read,
-    n.attachment_id, coalesce(a.filename,'') attachment_name
+    n.attachment_id, coalesce(a.filename,'') attachment_name, coalesce(n.tags,'[]'::jsonb) tags
     FROM planner.supplier_notes n LEFT JOIN planner.portal_attachments a ON a.id=n.attachment_id
     WHERE n.po=$1 ORDER BY n.created_at`, [req.params.ref]);
     res.json(r.rows); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -6587,8 +6587,17 @@ app.get('/api/product/notes/:ref', async (req, res) => {
 app.post('/api/product/note', async (req, res) => {
   const b = req.body || {}, ref = (b.ref || '').trim();
   if (!ref || !String(b.body || '').trim()) return res.status(400).json({ error: 'ref and body required' });
-  try { await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`, [ref, internalAuthor(req, b.author_email), String(b.body).trim()]);
-    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  // tags = array of product_timeline_tags ids attached to this message (optional)
+  const tags = Array.isArray(b.tags) ? b.tags.map(x => Number(x)).filter(x => Number.isFinite(x)) : [];
+  try { const r = await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, tags) VALUES ($1,$2,'internal',$3,$4::jsonb) RETURNING id`,
+    [ref, internalAuthor(req, b.author_email), String(b.body).trim(), JSON.stringify(tags)]);
+    res.json({ ok: true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Re-tag an existing product timeline message (D&B side). tags = full replacement array of tag ids.
+app.post('/api/product/note/:id/tags', async (req, res) => {
+  const tags = Array.isArray((req.body || {}).tags) ? req.body.tags.map(x => Number(x)).filter(x => Number.isFinite(x)) : [];
+  try { await pool.query(`UPDATE planner.supplier_notes SET tags=$2::jsonb WHERE id=$1::bigint AND author_kind='internal'`, [req.params.id, JSON.stringify(tags)]);
+    res.json({ ok: true, tags }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/notes-read', async (req, res) => {   // mark this product's internal (D&B) timeline notes read
   const ref = ((req.body || {}).ref || '').trim();

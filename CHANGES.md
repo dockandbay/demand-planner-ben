@@ -1,3 +1,8 @@
+## v27.431 PRODUCT timeline tags + quick phrases — Phases 2 & 3 (compose, badges, filter)
+- **Compose box** (PRODUCT ▸ Timeline): type **/** to raise a **quick-phrase picker** (filter-as-you-type, ↑↓ to move, Enter to insert, Esc to close, click to pick) that replaces the "/token" with the phrase; plus a **tag-chip selector** under the box — click chips to attach one or more tags to the message.
+- **Badges on messages:** each message shows its tags as coloured badges. **Filter bar:** chips for the tags actually used on this product (with counts) — click to filter the thread (multi-select; record-of-change hidden while filtering; "clear" to reset). Filter persists across posting.
+- Server: `/api/product/note` accepts `tags` (id array) and `/api/product/notes/:ref` returns them; new `POST /api/product/note/:id/tags` to re-tag an existing message. Verified end-to-end on sandbox (post with tags → saved + read back; retag; client renders). No new migration (uses 258). server.mjs + supply/inject.html.
+
 ## v27.430 PRODUCT timeline tags + quick phrases — Phase 1 (Config + schema)
 - New **PRODUCT ▸ Config ▸ Product** sections: **Timeline tags & badges** (name + colour picker + sort + active; live badge preview) and **Timeline quick phrases** (reusable message snippets). Both global libraries, CRUD saves on edit.
 - Migration **258**: `planner.product_timeline_tags`, `planner.product_timeline_snippets`, plus a `tags jsonb` column on `planner.supplier_notes` (per-message tag ids — used only by the product timeline). Applied to sandbox; Diviyaj to run on live.
