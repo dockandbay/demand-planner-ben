@@ -6681,6 +6681,28 @@ async function sampleContents(id) {   // one sample shipment's contents — ligh
 }
 app.get('/api/supply/sample/:id/contents', async (req, res) => {
   try { res.json(await sampleContents(req.params.id)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+// Product team marks a shipped sample request RECEIVED → every product linked to it (SKU lines used as a product
+// ref, SKU lines mapping to a product size, or dev-samples on the request) auto-advances to "sample_in_review"
+// (forward-only). Pass {received:false} to un-mark (does not walk stages back).
+app.post('/api/supply/sample/:id/received', async (req, res) => {
+  try {
+    const id = req.params.id, receive = (req.body || {}).received !== false;
+    await pool.query(`UPDATE planner.sample_requests SET received_at=${receive ? 'now()' : 'NULL'}, updated_at=now() WHERE id=$1::bigint`, [id]);
+    const advanced = [];
+    if (receive) {
+      const refs = (await pool.query(`
+        SELECT DISTINCT ref FROM (
+          SELECT l.sku ref FROM planner.sample_request_lines l WHERE l.sample_id=$1::bigint AND EXISTS (SELECT 1 FROM planner.product_dev_items i WHERE i.ref=l.sku)
+          UNION
+          SELECT i.ref FROM planner.sample_request_lines l JOIN planner.product_dev_sizes sz ON sz.mapped_sku=l.sku JOIN planner.product_dev_items i ON i.id=sz.item_id WHERE l.sample_id=$1::bigint
+          UNION
+          SELECT ds.item_ref ref FROM planner.sample_request_dev_samples ls JOIN planner.product_dev_samples ds ON ds.id=ls.dev_sample_id WHERE ls.sample_request_id=$1::bigint
+        ) x WHERE coalesce(ref,'') <> ''`, [id])).rows.map(r => r.ref);
+      for (const ref of refs) { try { await prodStageAdvance(ref, 'sample_in_review'); advanced.push(ref); } catch (e) { /* best-effort */ } }
+    }
+    res.json({ ok: true, received: receive, advanced });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.post('/api/product/notes-read-supplier', async (req, res) => {   // D&B side: mark SUPPLIER notes read (clears the main-app unread badge + ✉ bell)
   const ref = ((req.body || {}).ref || '').trim();
   if (!ref) return res.status(400).json({ error: 'ref required' });
@@ -6789,6 +6811,7 @@ app.get('/api/product/:ref/sample-requests', async (req, res) => {
   try {
     const rows = (await pool.query(`
       SELECT s.id, s.ref, coalesce(s.status,'') status, s.accepted_at IS NOT NULL accepted,
+        s.received_at IS NOT NULL received, to_char(s.received_at,'YYYY-MM-DD') received_at,
         coalesce(s.tracking_code,'') tracking, coalesce(s.recipient_company,'') company,
         trim(coalesce(s.first_name,'')||' '||coalesce(s.last_name,'')) recipient,
         coalesce(s.supplier_name,'') supplier_name, to_char(s.created_at,'YYYY-MM-DD') created_at,
