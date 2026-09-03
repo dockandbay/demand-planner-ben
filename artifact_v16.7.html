@@ -6117,15 +6117,18 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
     const d=document.createElement('div');d.className='fcin';
     const lyD=document.createElement('div');lyD.className='fcly';
     (function(){ var _sp=(typeof SKUM==='undefined'||!SKUM[s])?(subcatLySplit(s,co,ch)[ym(y-1,mo)]):null;   // sub-category rows only; SKU rows keep their single LY number
-      if(_sp&&_sp.setBoxes>0){ lyD.textContent=fn(_sp.master)+' / '+fn(_sp.setBoxes); lyD.style.cursor='help';
+      if(_sp&&_sp.setBoxes>0){ lyD.textContent=fn(_sp.master)+' / '+fn(_sp.setBoxes); lyD.style.cursor='help'; lyD.style.fontSize='8.5px';   // smaller so master/set fits the column
         lyD.title='Last-year actuals: '+fn(_sp.master)+' master units + '+fn(_sp.setBoxes)+' set boxes. Exploded (set BOMs → individual units): '+fn(_sp.master+_sp.setUnits)+' total.'; }
       else { lyD.textContent=ly_u?fn(ly_u):'--'; } })();
     d.appendChild(lyD);
     const inp=document.createElement('input');inp.type='text';inp.readOnly=true;
     inp.className='fci actual-pct'+(isNeg?' neg':'');inp.value=yoyStr;
     d.appendChild(inp);
-    const res=document.createElement('div');res.className='fcr actual'+(isNeg?' neg':'');
-    res.textContent=fn(actualUnits);res.dataset.rk=ik;
+    const res=document.createElement('div');res.className='fcr actual'+(isNeg?' neg':'');res.dataset.rk=ik;
+    (function(){ var _sa=(typeof SKUM==='undefined'||!SKUM[s])?(subcatLySplit(s,co,ch)[fym]):null;   // this-year actuals master/set split (sub-category rows only)
+      if(_sa&&_sa.setBoxes>0){ res.textContent=fn(_sa.master)+' / '+fn(_sa.setBoxes); res.style.fontSize='9.5px'; res.style.cursor='help';
+        res.title='This-year actuals: '+fn(_sa.master)+' master units + '+fn(_sa.setBoxes)+' set boxes. Exploded (set BOMs → individual units): '+fn(_sa.master+_sa.setUnits)+' total.'; }
+      else { res.textContent=fn(actualUnits); } })();
     d.appendChild(res);
     // Revenue line: actual revenue + YoY% (hover shows ASP)
     var actualRev=a[fym]?(a[fym][1]||0):0;
