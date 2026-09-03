@@ -13314,7 +13314,13 @@
             +'</div>'; }).join(''):'<div style="color:#94a3b8;padding:6px 2px">No sample versions submitted yet.</div>');
       body.querySelectorAll('.ps-adm-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this sample version?'))return; shipPost('/api/product/sample/'+a.dataset.id+'/delete',{},function(){ _prodJsonBust(ref); renderProdSamplesTab(body,ref); }); }; });
       function _saveAspect(id,aspect,feedback,decision,msg,flow){ if(msg){msg.style.color='#94a3b8';msg.textContent='saving…';}
-        shipPost('/api/product/sample/'+id+'/aspect',{aspect:aspect,feedback:feedback,decision:decision},function(j){ if(msg){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;} else {msg.style.color='#16a34a';msg.textContent=(flow&&j&&j.flowed)?('✓ → '+j.flowed):'✓ saved';setTimeout(function(){msg.textContent='';},2200);} } try{prodItemInvalidate(ref);}catch(e){} }); }
+        shipPost('/api/product/sample/'+id+'/aspect',{aspect:aspect,feedback:feedback,decision:decision},function(j){ if(msg){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;} else {msg.style.color='#16a34a';msg.textContent=(flow&&j&&j.flowed)?('✓ → '+j.flowed+' size'+(j.flowed===1?'':'s')):'✓ saved';setTimeout(function(){msg.textContent='';},2400);} }
+          try{prodItemInvalidate(ref);}catch(e){}
+          // Refresh the IN-MEMORY detail so switching to the Size & variants tab shows the flowed approval right away
+          // (prodItemInvalidate only clears the cache; the live _prodDetail.sizes the tab renders from was still stale).
+          if(flow){ fetch('/api/product/item/'+encodeURIComponent(ref)+'/sizes').then(function(r){return r.json();}).then(function(sd){ if(_prodDetail&&sd&&!sd.error){ _prodDetail.sizes=sd.sizes||[]; _prodDetail.samples=sd.samples||[]; _prodDetail._sizesLoaded=true; try{_prodItemCache[ref]={t:Date.now(),d:_prodDetail};}catch(e){}
+            var _b=body.querySelector('.pd-body'); var _tb=document.querySelector('.pd-tab[data-t="sizes"]'); if(_tb&&_tb.classList.contains('active')&&_b&&typeof renderProdMaster==='function')renderProdMaster(_b,_prodDetail,'sizes'); } }).catch(function(){}); }
+        }); }
       function _aspDec(id,aspect){ var b=body.querySelector('.ps-aspect-dec.on[data-id="'+id+'"][data-aspect="'+aspect+'"]'); return b?b.dataset.dec:'pending'; }
       function _styleDec(btn,on){ var v=btn.dataset.dec, c=v==='approved'?['#16a34a','#166534','#dcfce7']:['#dc2626','#991b1b','#fee2e2']; btn.style.border='1px solid '+(on?c[0]:'#e2e8f0'); btn.style.background=on?c[2]:'#fff'; btn.style.color=on?c[1]:'#94a3b8'; btn.classList.toggle('on',on); }
       body.querySelectorAll('.ps-aspect-fb').forEach(function(t){ t.onchange=function(){ var id=t.dataset.id, asp=t.dataset.aspect, msg=body.querySelector('.ps-aspect-msg[data-id="'+id+'"][data-aspect="'+asp+'"]'); _saveAspect(id,asp,t.value,_aspDec(id,asp),msg,false); }; });
