@@ -13082,7 +13082,7 @@
             if(sKey!==_pgSeason){ _pgSeason=sKey; _pgCat=null; hdr+='<tr class="pg-seasonhdr" data-season="'+esc(sKey)+'"><td colspan="8" style="cursor:pointer;background:#cbd5e1;border-top:2px solid #94a3b8;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#1f2937;padding:5px 10px"><span class="pg-caret" style="display:inline-block;width:13px">▾</span>'+esc(sKey||'— no season —')+' <span style="font-weight:400;color:#475569">('+seasonCount[sKey]+')</span></td></tr>'; }
             if(cKey!==_pgCat){ _pgCat=cKey; hdr+='<tr class="pg-cathdr" data-season="'+esc(sKey)+'" data-cat="'+esc(cKey)+'"><td colspan="8" style="cursor:pointer;background:#eef2f7;font-weight:600;font-size:12px;letter-spacing:.02em;color:#475569;padding:4px 10px 4px 28px"><span class="pg-caret" style="display:inline-block;width:13px">▾</span>'+esc(cKey||'— no category —')+' <span style="font-weight:400;color:#94a3b8">('+catCount[sKey+'|'+cKey]+')</span></td></tr>'; }
             return hdr+'<tr class="pg-datarow" data-season="'+esc(sKey)+'" data-cat="'+esc(cKey)+'">'
-              +'<td><span style="display:inline-flex;align-items:center;gap:7px">'+sw+'<button class="planbtn pg-open" data-ref="'+esc(r.ref)+'" data-i="'+i+'">PLAN</button></span></td>'
+              +'<td><span style="display:inline-flex;align-items:center;gap:7px">'+sw+'<button class="planbtn pg-open" data-ref="'+esc(r.ref)+'" data-i="'+i+'">OPEN</button></span></td>'
               +'<td><div class="pg-colour" data-ref="'+esc(r.ref)+'">'+prodColourDisplay(r)+'</div><div class="pg-ref" data-ref="'+esc(r.ref)+'">'+esc(r.ref)+prodComboBadge(r)+'</div></td>'
               +'<td>'+prodPickBtn(r.ref,'category',r.category,'category')+'</td>'
               +'<td>'+prodPickBtn(r.ref,'season',r.season,'season')+'</td>'
@@ -13126,6 +13126,10 @@
           g.querySelectorAll('tr.pg-openrow').forEach(function(tr){ if(tr!==datarow)tr.classList.remove('pg-openrow'); });
           if(open){ row.style.display='none'; row.querySelector('.pg-det').innerHTML=''; datarow.classList.remove('pg-openrow'); _prodDetailBox=null; try{writeHash(['product','plan']);}catch(_){} return; }
           row.style.display=''; datarow.classList.add('pg-openrow'); _prodDetailTab='master'; renderProductDetail(ref, row.querySelector('.pg-det'), rows.filter(function(x){return x.ref===ref;})[0]); }; });
+        // Direction A #3: the whole product row opens/toggles its detail. Interactive cells (pickers, stage chip,
+        // sample link, OPEN button, swatch) stopPropagation, so a click on them does its own thing; the guard below
+        // is a belt-and-braces so a click that lands on any control never toggles the row.
+        g.querySelectorAll('tr.pg-datarow').forEach(function(dr){ dr.style.cursor='pointer'; dr.onclick=function(e){ if(e.target&&e.target.closest&&e.target.closest('button,select,input,a,.pg-stagechip,.prod-cell-pick,.pg-stageedit'))return; var b=dr.querySelector('.pg-open'); if(b)b.click(); }; });
         g.querySelectorAll('.prod-cell-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openProdCellPick(b); }; });
         g.querySelectorAll('.samp-open').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); (typeof openSampleDrawer==="function"?openSampleDrawer(a.dataset.ref):gotoSample(a.dataset.ref)); }; });   // sample-shipment ref -> editable drawer (was: navigate to SUPPLY Samples)
         // Single count badge (like the PO grid): fast 120ms tooltip explains the actions; click opens the product (snooze lives inside).
