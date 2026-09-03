@@ -13052,7 +13052,7 @@
           if(cKey!==_mC){ _mC=cKey; hdr+='<div class="pgm-chdr">'+esc(cKey||'— no category —')+' · '+catCount[sKey+'|'+cKey]+'</div>'; }
           var sw=r.has_swatch?'<img class="pgm-sw" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at||'')+'">':'<span class="pgm-sw none"></span>';
           return hdr+'<div class="pgm-card" data-ref="'+esc(r.ref)+'" data-i="'+i+'">'
-            +'<div class="pgm-top">'+sw+'<div class="pgm-meta"><div class="pgm-colour">'+prodColourDisplay(r)+'</div><div class="pgm-ref">'+esc(r.ref)+prodComboBadge(r)+'</div></div>'<span class="pgm-stage-chip">'+prodStageChip(r.stage)+'</span></div>'
+            +'<div class="pgm-top">'+sw+'<div class="pgm-meta"><div class="pgm-colour">'+prodColourDisplay(r)+'</div><div class="pgm-ref">'+esc(r.ref)+prodComboBadge(r)+'</div></div>'+'<span class="pgm-stage-chip">'+prodStageChip(r.stage)+'</span></div>'
             +'<div class="pgm-sub"><span>Sizes '+r.sizes_approved+'/'+r.sizes+'</span><span>'+esc(prodStageOwner(r.stage))+'</span>'+(r.latest_shipment?'<span>📦 '+esc(r.latest_shipment.ref)+'</span>':'')+'</div>'
             +'</div><div class="pg-mdet" id="pgmdet-'+i+'" style="display:none"></div>';
         }).join('');
