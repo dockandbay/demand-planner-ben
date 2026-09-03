@@ -1,3 +1,7 @@
+## v27.409 PRODUCT Direction A #5 — stage-count filter pills + visible Reset
+- A row of **stage pills** now sits under the PLAN filter bar: one coloured pill per stage with a live count (scoped to the current type/season/category/search, so counts always show the true stage distribution). Clicking a pill filters to that stage and clears the Status dropdown, so a click on "Approved for bulk" actually reveals approved items - fixing the old invisible default (Status = "In development + open actions") that silently hid them. A **Reset filters** link appears whenever any filter is off-default and clears everything. Choosing a Status from the dropdown deselects any active pill.
+- No change to default behaviour until you click a pill (default Status filter unchanged). jsdom-verified: pills + counts render, Approved pill reveals the hidden approved item, Reset restores all. Rollback = revert this single commit. `supply/inject.html` only.
+
 ## v27.408 PRODUCT Direction A #4 — AGE column (days since last update, amber past 14d)
 - New left-aligned **Age** column on the PLAN grid showing days since the item was last updated ("6d", turns amber + ⚠ past 14 days) — the exception-spotting axis for stale samples. Uses updated_at (falls back to created_at). Grid back to 9 columns (colspans updated). jsdom-verified: Age header + cell render, amber styling past threshold. Rollback = revert this single commit. `supply/inject.html` only.
 

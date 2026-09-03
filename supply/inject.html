@@ -13040,10 +13040,10 @@
         +'<div class="mut tiny" style="margin-top:6px">“Avg samples/days to approve” are measured over <b>approved</b> products only. Time-to-approve runs from the product’s development-start date (the <i>Development started</i> override on Master data, else its creation date) to approval.</div>'
         +tbl('By season','Season',d.bySeason)+tbl('By category','Category',d.byCategory)+tbl('By supplier','Supplier',d.bySupplier);
     }).catch(function(e){ c.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
-  var _prodFilt={type:'Product Development',season:'',status:'dev_actions',q:'',category:''};   // Type defaults to Product Development
+  var _prodFilt={type:'Product Development',season:'',status:'dev_actions',q:'',category:'',stage:''};   // Type defaults to Product Development; stage = active stage-pill filter (overrides status when set)
   var _pgSeasonCollapsed={}, _pgCatCollapsed={};   // PRODUCT grid group collapse state — persists across redraws
   function renderProductPlan(c){
-    c.innerHTML='<div id="pg-filters" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px"></div><div id="pg-grid"><div style="color:#94a3b8">Loading…</div></div>';
+    c.innerHTML='<div id="pg-filters" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"></div><div id="pg-stagepills" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 12px"></div><div id="pg-grid"><div style="color:#94a3b8">Loading…</div></div>';
     if(!_poActStateLoaded){ loadPoActState(function(){ renderProductPlan(c); }); return; }   // need snooze state for the SKU-mapping reminder
     fetch('/api/product/items').then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
       _prodRows=rows;
@@ -13061,16 +13061,35 @@
         +'<span id="pg-count" style="color:#94a3b8;font-size:11px"></span>';
       document.getElementById('pg-new').onclick=openProductNew;
       wireProdTopSearch();
+      // Direction A #5: stage-count pills below the filter bar. Counts reflect the current type/season/category/search
+      // scope (not the active pill/status), so they always show the true stage distribution. Clicking a pill filters to
+      // that stage and clears the (hidden-by-default) Status filter, so a click on "Approved for bulk" actually shows it.
+      function renderStagePills(counts){ var box=document.getElementById('pg-stagepills'); if(!box)return;
+        var pills=STAGE_META.map(function(m){ var st=m[0], n=counts[st]||0, active=(_prodFilt.stage===st);
+          return '<button class="pg-stpill" data-stage="'+st+'" title="show only '+esc(m[1])+'" style="display:inline-flex;align-items:center;gap:5px;border:1px solid '+(active?m[4]:'transparent')+';background:'+m[3]+';color:'+m[4]+';border-radius:8px;padding:3px 9px;font-size:11px;font-weight:700;cursor:pointer;'+(active?'box-shadow:0 0 0 2px '+m[3]:(n?'':'opacity:.45'))+'">'+esc(m[1])+' <span style="font-weight:800">'+n+'</span></button>'; }).join('');
+        var dirty=(_prodFilt.stage||_prodFilt.season||_prodFilt.category||_prodFilt.q||(_prodFilt.status&&_prodFilt.status!=='dev_actions')||_prodFilt.type!=='Product Development');
+        box.innerHTML=pills+(dirty?' <a class="pg-reset" title="clear all filters" style="font-size:11px;color:#b45309;cursor:pointer;font-weight:600;margin-left:8px;text-decoration:underline">Reset filters</a>':'');
+        box.querySelectorAll('.pg-stpill').forEach(function(b){ b.onclick=function(){ var st=b.dataset.stage; _prodFilt.stage=(_prodFilt.stage===st?'':st); if(_prodFilt.stage)_prodFilt.status=''; var ss=document.getElementById('pg-status'); if(ss){ ss.value=_prodFilt.status; ss.setAttribute('style',selDark(_prodFilt.status)); } draw(); }; });
+        var rb=box.querySelector('.pg-reset'); if(rb)rb.onclick=function(){ _prodFilt={type:'Product Development',season:'',status:'',q:'',category:'',stage:''};
+          var setSel=function(id,val){ var s=document.getElementById(id); if(s){ s.value=val; s.setAttribute('style',selDark(val)); } };
+          setSel('pg-type','Product Development'); setSel('pg-season',''); setSel('pg-cat',''); setSel('pg-status',''); var qi=document.getElementById('pg-q'); if(qi)qi.value=''; draw(); }; }
       function draw(){
         var q=_prodFilt.q.trim().toLowerCase();
-        var expandAll=!!(_prodFilt.category || q);   // a category filter / search forces groups open so results are visible (doesn't wipe manual collapse state)
-        var f=rows.filter(function(r){
+        var expandAll=!!(_prodFilt.category || q || _prodFilt.stage);   // a category / search / stage filter forces groups open so results are visible (doesn't wipe manual collapse state)
+        var _passBase=function(r){
           if(_prodFilt.type && (r.type||'Product Development')!==_prodFilt.type)return false;
           if(_prodFilt.season && r.season!==_prodFilt.season)return false;
           if(_prodFilt.category && r.category!==_prodFilt.category)return false;
-          if(_prodFilt.status==='dev_actions'){ if(!(r.status==='in_development' || prodOpenActs(r).n>0))return false; }
-          else if(_prodFilt.status==='unapproved'){ if(r.status==='approved')return false; } else if(_prodFilt.status){ if(r.status!==_prodFilt.status)return false; }
           if(q){ var hay=((r.ref||'')+' '+(r.colour_name||'')+' '+(r.supplier||'')+' '+(r.description||'')).toLowerCase(); if(hay.indexOf(q)<0)return false; }
+          return true; };
+        var base=rows.filter(_passBase);
+        var stageCounts={}; STAGE_META.forEach(function(m){stageCounts[m[0]]=0;}); base.forEach(function(r){ if(stageCounts[r.stage]!=null)stageCounts[r.stage]++; });
+        renderStagePills(stageCounts);
+        var f=base.filter(function(r){
+          if(_prodFilt.stage){ return r.stage===_prodFilt.stage; }   // active stage pill overrides the status filter
+          if(_prodFilt.status==='dev_actions'){ return (r.status==='in_development' || prodOpenActs(r).n>0); }
+          if(_prodFilt.status==='unapproved'){ return r.status!=='approved'; }
+          if(_prodFilt.status){ return r.status===_prodFilt.status; }
           return true; });
         document.getElementById('pg-count').textContent=f.length+' of '+rows.length;
         prodPlanBadge(rows.filter(function(r){return (r.sizes_unmapped||0)>0 && !snzActive(_poActState['prodsku|'+r.ref]);}).reduce(function(a,r){return a+(r.sizes_unmapped||0);},0));   // PLAN counter = approved sizes still needing a SKU (excl. snoozed)
@@ -13170,7 +13189,7 @@
       document.getElementById('pg-type').onchange=function(){ _prodFilt.type=this.value; _pgDark(this); draw(); };
       document.getElementById('pg-season').onchange=function(){ _prodFilt.season=this.value; _pgDark(this); draw(); };
       document.getElementById('pg-cat').onchange=function(){ _prodFilt.category=this.value; _pgDark(this); draw(); };
-      document.getElementById('pg-status').onchange=function(){ _prodFilt.status=this.value; _pgDark(this); draw(); };
+      document.getElementById('pg-status').onchange=function(){ _prodFilt.status=this.value; _prodFilt.stage=''; _pgDark(this); draw(); };   // choosing a Status clears any active stage pill
       document.getElementById('pg-q').oninput=debounce(function(){ _prodFilt.q=this.value; draw(); },250);   // debounce: don't re-filter+re-render the whole grid on every keystroke
       draw();
     }).catch(function(e){ document.getElementById('pg-grid').innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
