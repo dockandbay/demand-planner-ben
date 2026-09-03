@@ -6746,15 +6746,45 @@ document.addEventListener('click',function(e){ var c=e.target&&e.target.closest?
     if(n<1){ b.style.display='none'; b.innerHTML=''; return; }
     var f=function(x){return Math.round(x).toLocaleString();};
     var sym=(typeof dispSym==='function'?dispSym():'£'), m=function(x){return sym+Math.round(x).toLocaleString();};
+    // Bulk-action buttons: "Do not smooth" (SKU cells only) + "Add note" (any cell). Highlight cells → act on all.
+    var _cells=selCells(), _skuCells=_cells.filter(function(c){return c.nk.indexOf('sku|')===0;}), _skuN=_skuCells.length;
+    var _allLocked=_skuN>0 && _skuCells.every(function(c){return typeof SMOOTH_LOCKS!=='undefined' && !!SMOOTH_LOCKS[c.nk];});
+    var _btnCss='font-size:11px;line-height:1;padding:2px 7px;border-radius:5px;cursor:pointer;font-weight:700;margin-left:6px';
+    var lockBtn=_skuN>0 ? ('<button class="ps-lock" title="'+(_allLocked?'Un-lock':'Lock')+' the '+_skuN+' selected SKU cell'+(_skuN>1?'s':'')+' so smoothing '+(_allLocked?'can rebalance '+(_skuN>1?'them':'it')+' again':'leaves '+(_skuN>1?'them':'it')+' fixed and other SKUs absorb the difference')+'." style="border:1px solid #fdba74;background:#fff7ed;color:#7c2d12;'+_btnCss+'">'+(_allLocked?'🔓 Un-lock':'🔒 Do not smooth')+' ('+_skuN+')</button>') : '';
+    var noteBtn=_cells.length ? ('<button class="ps-note" title="Add the same note to all '+_cells.length+' selected cell'+(_cells.length>1?'s':'')+'" style="border:1px solid #93c5fd;background:#eff6ff;color:#1e3a8a;'+_btnCss+'">📝 Add note ('+_cells.length+')</button>') : '';
     b.innerHTML='<b>Sum FC</b> '+f(sumFC)+' <span style="opacity:.6">(avg '+f(sumFC/n)+')</span>'
       +' &nbsp;·&nbsp; <b>Sum LY</b> '+f(sumLY)+' <span style="opacity:.6">(avg '+f(sumLY/n)+')</span>'
       +' &nbsp;·&nbsp; <b>Sum REV FC</b> '+m(sumRev)+' <span style="opacity:.6">(avg '+m(sumRev/n)+')</span>'
       +' <span style="opacity:.5;font-weight:500">· n='+n+'</span>'
-      +' <span class="ps-x" title="clear (Esc)" style="cursor:pointer;color:#b45309;font-weight:800;margin-left:4px">✕</span>';
+      +lockBtn+noteBtn
+      +' <span class="ps-x" title="clear (Esc)" style="cursor:pointer;color:#b45309;font-weight:800;margin-left:6px">✕</span>';
     b.style.display='inline-flex'; b.style.alignItems='center'; b.style.background='#fef9c3'; b.style.border='1px solid #fde047'; b.style.borderRadius='6px'; b.style.padding='3px 10px'; b.style.color='#334155';
-    var x=b.querySelector('.ps-x'); if(x)x.onclick=clearSel; }
+    var x=b.querySelector('.ps-x'); if(x)x.onclick=clearSel;
+    var lb=b.querySelector('.ps-lock'); if(lb)lb.onclick=function(e){e.stopPropagation();bulkLock();};
+    var nb=b.querySelector('.ps-note'); if(nb)nb.onclick=function(e){e.stopPropagation();bulkNote();}; }
   function clearSel(){ Array.prototype.forEach.call(sel(),function(el){el.classList.remove('plansel');}); update(); }
   function add(el){ if(el && !el.classList.contains('plansel')){ el.classList.add('plansel'); update(); } }
+  // Selected cells resolved to their note/lock keys (nk = level|item|co|ch|month), de-duped.
+  function selCells(){ var out=[],seen={}; Array.prototype.forEach.call(sel(),function(el){ var td=el.closest&&el.closest('td'); var nk=td&&td.dataset&&td.dataset.nk; if(nk&&!seen[nk]){ seen[nk]=1; out.push({nk:nk,td:td}); } }); return out; }
+  // Bulk "Do not smooth": lock (or unlock) every selected SKU cell. SKU-level only — smoothing rebalances a
+  // sub-category, so a locked SKU cell is held fixed and the others absorb the difference. Toggles: if every
+  // selected SKU cell is already locked, this unlocks them; otherwise it locks them all.
+  function bulkLock(){ var cells=selCells().filter(function(c){return c.nk.indexOf('sku|')===0;}); if(!cells.length)return;
+    if(typeof SMOOTH_LOCKS==='undefined')window.SMOOTH_LOCKS={};
+    var allLocked=cells.every(function(c){return !!SMOOTH_LOCKS[c.nk];}), lock=!allLocked;
+    cells.forEach(function(c){ if(lock)SMOOTH_LOCKS[c.nk]=true; else delete SMOOTH_LOCKS[c.nk];
+      try{ var p=_fcNk(c.nk); logChange(p.level,p.item,p.co,p.ch,p.month, lock?'locked':'unlocked', null, null); }catch(e){}
+      try{ refreshCellRail(c.nk); }catch(e){} });
+    try{ saveSmoothLocks(); }catch(e){}
+    update(); }
+  // Bulk "Add note": one note text applied to every selected cell (any level). Written sequentially (not a
+  // parallel fan-out) so a large selection can't saturate the DB pooler — see [[bulk-write-batching]].
+  function bulkNote(){ var cells=selCells(); if(!cells.length)return;
+    var v=window.prompt('Add this note to '+cells.length+' selected cell'+(cells.length>1?'s':'')+':',''); if(v==null)return; v=String(v).trim(); if(!v)return;
+    (function nxt(i){ if(i>=cells.length){ update(); return; } var c=cells[i], p=_fcNk(c.nk);
+      fetch('/api/forecast/notes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({level:p.level,item:p.item,country:p.co,channel:p.ch,month:p.month,note:v})})
+        .then(function(r){return r.json();}).then(function(j){ if(j&&j.id){ if(typeof FC_NOTES!=='undefined'){ (FC_NOTES[c.nk]||(FC_NOTES[c.nk]=[])).push({id:j.id,note:v,created_by:j.created_by||'',created_at:j.created_at||''}); } try{refreshCellRail(c.nk);}catch(e){} } nxt(i+1); })
+        .catch(function(){ nxt(i+1); }); })(0); }
   document.addEventListener('mousedown',function(e){
     if(!isMod(e)){ if(sel().length && !(e.target&&e.target.closest&&e.target.closest('#plan-sum-inline'))) clearSel(); return; }   // a plain click (no ⌘/Ctrl) clears the selection
     var el=valEl(e); if(!el)return; e.preventDefault();

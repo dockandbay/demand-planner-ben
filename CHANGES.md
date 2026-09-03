@@ -1,3 +1,9 @@
+## v27.399 Sets #4 — bulk “Do not smooth” + “Add note” from the demand sum box
+- The DEMAND plan cell-selection sum bar (⌘/Ctrl-select forecast cells) now has two bulk-action buttons:
+  - **🔒 Do not smooth (N)** — locks every selected SKU cell so smoothing holds it fixed (others absorb the difference). SKU-level only (subcat cells are ignored); toggles off if all selected SKU cells are already locked. Writes `SMOOTH_LOCKS` + record-of-change, same as the single-cell popup.
+  - **📝 Add note (N)** — prompts once and applies the same note to every selected cell (any level). Written **sequentially**, not a parallel fan-out, so a large selection can’t saturate the DB pooler.
+- Lets you flag a whole block of set/master cells in one go instead of cell-by-cell. Verified on a synthetic 3-SKU + 1-subcat selection: lock hits SKU cells only + saves + toggles; note posts to all 4 with the right payload. `artifact_v16.7.html` only.
+
 ## v27.398 Sets #3c — visible explainer for the A-player set cap
 - While a smooth preview is live on a set sub-category cell, a purple **⚛ N sets capped** badge now appears on the gap-vs-subcat row. Its tooltip lists each capped set — box count × set-size = exploded units — and explains the ceiling (top A-tier master SKU’s units) and that the excess moved onto the master SKUs. Reads the `SET_CAP_NOTES` captured in v27.397; list truncates to 8 with “+N more”. Display-only; `artifact_v16.7.html`.
 
