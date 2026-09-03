@@ -6094,9 +6094,9 @@ function subcatLySplit(s,co,ch){
       if(isSet){ o.setBoxes+=u; o.setUnits+=u*sz; } else { o.master+=u; } } });
   _lySplitCache[k]=out; return out;
 }
-// Master/set breakdown on 3 tight lines: M = master units, S = set boxes, E = fully exploded (master + set BOMs).
-function _msSplitHtml(o){ return 'M: '+fn(o.master)+'<br>S: '+fn(o.setBoxes)+'<br><span style="opacity:.7">E: '+fn(o.master+o.setUnits)+'</span>'; }
-var _MS_TIP='M = master SKU units · S = set count (boxes) · E = fully exploded to individual units (master + each set × its BOM).';
+// The cell shows the EXPLODED total E (master units + each set × its BOM); the master/set breakdown is on hover.
+function _msE(o){ return o.master+o.setUnits; }
+function _msTip(o,label){ return (label||'')+'E ' + fn(o.master+o.setUnits) + ' exploded units = M ' + fn(o.master) + ' master units + S ' + fn(o.setBoxes) + ' set boxes (each set explodes to its BOM).'; }
 function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   const{y,mo}=pa(fym);
   const ik=s+'|'+co+'|'+ch+'|'+fym;
@@ -6120,7 +6120,7 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
     const d=document.createElement('div');d.className='fcin';
     const lyD=document.createElement('div');lyD.className='fcly';
     (function(){ var _sp=(typeof SKUM==='undefined'||!SKUM[s])?(subcatLySplit(s,co,ch)[ym(y-1,mo)]):null;   // sub-category rows only; SKU rows keep their single LY number
-      if(_sp&&_sp.setBoxes>0){ lyD.innerHTML=_msSplitHtml(_sp); lyD.style.cursor='help'; lyD.style.fontSize='8px'; lyD.style.lineHeight='1.15'; lyD.title='Last-year actuals — '+_MS_TIP; }
+      if(_sp&&_sp.setBoxes>0){ lyD.textContent=fn(_msE(_sp)); lyD.style.cursor='help'; lyD.title=_msTip(_sp,'Last-year actuals — '); }
       else { lyD.textContent=ly_u?fn(ly_u):'--'; } })();
     d.appendChild(lyD);
     const inp=document.createElement('input');inp.type='text';inp.readOnly=true;
@@ -6128,7 +6128,7 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
     d.appendChild(inp);
     const res=document.createElement('div');res.className='fcr actual'+(isNeg?' neg':'');res.dataset.rk=ik;
     (function(){ var _sa=(typeof SKUM==='undefined'||!SKUM[s])?(subcatLySplit(s,co,ch)[fym]):null;   // this-year actuals master/set split (sub-category rows only)
-      if(_sa&&_sa.setBoxes>0){ res.innerHTML=_msSplitHtml(_sa); res.style.fontSize='8.5px'; res.style.lineHeight='1.15'; res.style.cursor='help'; res.title='This-year actuals — '+_MS_TIP; }
+      if(_sa&&_sa.setBoxes>0){ res.textContent=fn(_msE(_sa)); res.style.cursor='help'; res.title=_msTip(_sa,'This-year actuals — '); }
       else { res.textContent=fn(actualUnits); } })();
     d.appendChild(res);
     // Revenue line: actual revenue + YoY% (hover shows ASP)
@@ -6164,7 +6164,7 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   // LY reference for a forecast month: if the prior-year month has ACTUALS with sets, show the M/S/E split (this covers
   // 2027 cells whose LY is a 2026 actual month, e.g. Apr-27 → Apr-26 actuals). Else fall back to the plain LY number.
   (function(){ var _spF=(typeof SKUM==='undefined'||!SKUM[s])?(subcatLySplit(s,co,ch)[ym(y-1,mo)]):null;
-    if(_spF&&_spF.setBoxes>0){ lyD.innerHTML=_msSplitHtml(_spF); lyD.style.cursor='help'; lyD.style.fontSize='8px'; lyD.style.lineHeight='1.15'; lyD.title='Last-year actuals — '+_MS_TIP; }
+    if(_spF&&_spF.setBoxes>0){ lyD.textContent=fn(_msE(_spF)); lyD.style.cursor='help'; lyD.title=_msTip(_spF,'Last-year actuals — '); }
     else if(isFcLy){ lyD.textContent=ly_u?fn(ly_u):'--'; lyD.style.color='#94a3b8'; lyD.title=(y-1)+' forecast'; }
     else { lyD.textContent=ly_u?fn(ly_u):'--'; } })();
   d.appendChild(lyD);
