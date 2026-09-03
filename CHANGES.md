@@ -1,3 +1,8 @@
+## v27.400 Sets — styled grey tooltip on the exploded actuals number
+- The hover over a sub-category’s exploded actuals figure (LY + this-year) is now a **styled grey tooltip** instead of the plain native title, laid out clearly:
+  MASTER — n · SETS (boxes) — n · TOTAL EXPLODED SKUS — n, then a short explainer (a set sells as one box; exploded, each box becomes its component garments; total exploded = master units + exploded set units = the true garment volume).
+- New `_msTipAttrs()` tags the cell with the raw split (data attrs + `.ms-exp`); a single hover handler formats the grey box. Replaces the three `title=_msTip(...)` attachments. Display-only; `artifact_v16.7.html`.
+
 ## v27.399 Sets #4 — bulk “Do not smooth” + “Add note” from the demand sum box
 - The DEMAND plan cell-selection sum bar (⌘/Ctrl-select forecast cells) now has two bulk-action buttons:
   - **🔒 Do not smooth (N)** — locks every selected SKU cell so smoothing holds it fixed (others absorb the difference). SKU-level only (subcat cells are ignored); toggles off if all selected SKU cells are already locked. Writes `SMOOTH_LOCKS` + record-of-change, same as the single-cell popup.

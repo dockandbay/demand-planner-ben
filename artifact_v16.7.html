@@ -6118,6 +6118,10 @@ function subcatLySplit(s,co,ch){
 // The cell shows the EXPLODED total E (master units + each set × its BOM); the master/set breakdown is on hover.
 function _msE(o){ return o.master+o.setUnits; }
 function _msTip(o,label){ return (label||'')+'E ' + fn(o.master+o.setUnits) + ' exploded units = M ' + fn(o.master) + ' master units + S ' + fn(o.setBoxes) + ' set boxes (each set explodes to its BOM).'; }
+// Tag an exploded-actuals cell for the styled grey hover tooltip (MASTER / SETS / TOTAL EXPLODED + explainer).
+// Carries the raw split on the element so the tooltip handler can format it (no HTML stuffed into an attribute).
+function _msTipAttrs(el,o,label){ if(!el||!o)return; el.classList.add('ms-exp'); el.style.cursor='help';
+  el.dataset.msm=Math.round(o.master||0); el.dataset.msb=Math.round(o.setBoxes||0); el.dataset.msu=Math.round(o.setUnits||0); el.dataset.msl=label||''; el.removeAttribute('title'); }
 // Exploded uplift ratio for a sub-category from its last-year actuals: exploded (master + set×BOM) ÷ mixed (master +
 // set boxes). 1.0 when there are no sets. Used to convert a revenue-driven (sale-unit) target into the EXPLODED target.
 var _erCache={};
@@ -6147,7 +6151,7 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
     const d=document.createElement('div');d.className='fcin';
     const lyD=document.createElement('div');lyD.className='fcly';
     (function(){ var _sp=(typeof SKUM==='undefined'||!SKUM[s])?(subcatLySplit(s,co,ch)[ym(y-1,mo)]):null;   // sub-category rows only; SKU rows keep their single LY number
-      if(_sp&&_sp.setBoxes>0){ lyD.textContent=fn(_msE(_sp)); lyD.style.cursor='help'; lyD.title=_msTip(_sp,'Last-year actuals — '); }
+      if(_sp&&_sp.setBoxes>0){ lyD.textContent=fn(_msE(_sp)); _msTipAttrs(lyD,_sp,'Last-year actuals'); }
       else { lyD.textContent=ly_u?fn(ly_u):'--'; } })();
     d.appendChild(lyD);
     const inp=document.createElement('input');inp.type='text';inp.readOnly=true;
@@ -6155,7 +6159,7 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
     d.appendChild(inp);
     const res=document.createElement('div');res.className='fcr actual'+(isNeg?' neg':'');res.dataset.rk=ik;
     (function(){ var _sa=(typeof SKUM==='undefined'||!SKUM[s])?(subcatLySplit(s,co,ch)[fym]):null;   // this-year actuals master/set split (sub-category rows only)
-      if(_sa&&_sa.setBoxes>0){ res.textContent=fn(_msE(_sa)); res.style.cursor='help'; res.title=_msTip(_sa,'This-year actuals — '); }
+      if(_sa&&_sa.setBoxes>0){ res.textContent=fn(_msE(_sa)); _msTipAttrs(res,_sa,'This-year actuals'); }
       else { res.textContent=fn(actualUnits); } })();
     d.appendChild(res);
     // Revenue line: actual revenue + YoY% (hover shows ASP)
@@ -6191,7 +6195,7 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   // LY reference for a forecast month: if the prior-year month has ACTUALS with sets, show the M/S/E split (this covers
   // 2027 cells whose LY is a 2026 actual month, e.g. Apr-27 → Apr-26 actuals). Else fall back to the plain LY number.
   (function(){ var _spF=(typeof SKUM==='undefined'||!SKUM[s])?(subcatLySplit(s,co,ch)[ym(y-1,mo)]):null;
-    if(_spF&&_spF.setBoxes>0){ lyD.textContent=fn(_msE(_spF)); lyD.style.cursor='help'; lyD.title=_msTip(_spF,'Last-year actuals — '); }
+    if(_spF&&_spF.setBoxes>0){ lyD.textContent=fn(_msE(_spF)); _msTipAttrs(lyD,_spF,'Last-year actuals'); }
     else if(isFcLy){ lyD.textContent=ly_u?fn(ly_u):'--'; lyD.style.color='#94a3b8'; lyD.title=(y-1)+' forecast'; }
     else { lyD.textContent=ly_u?fn(ly_u):'--'; } })();
   d.appendChild(lyD);
@@ -6808,6 +6812,28 @@ document.addEventListener('click',function(e){ var c=e.target&&e.target.closest?
   document.addEventListener('mouseover',function(ev){ var n=ev.target&&ev.target.closest?ev.target.closest('.fba-inb[data-tip]'):null; if(!n)return; cur=n; clearTimeout(hideT); clearTimeout(t);
     t=setTimeout(function(){ var e=build(); e.innerHTML=n.getAttribute('data-tip')||''; e.dataset.copy=n.getAttribute('data-copy')||''; e.style.display='block'; var r=n.getBoundingClientRect(); e.style.left=Math.max(6,Math.min(r.left,window.innerWidth-346))+'px'; e.style.top=(r.bottom+5)+'px'; },120); });
   document.addEventListener('mouseout',function(ev){ var n=ev.target&&ev.target.closest?ev.target.closest('.fba-inb[data-tip]'):null; if(n){ clearTimeout(t); scheduleHide(); } });
+  document.addEventListener('scroll',function(){ if(el)el.style.display='none'; },true);
+})();
+// Styled grey tooltip for the EXPLODED actuals cells (.ms-exp) — MASTER / SETS / TOTAL EXPLODED SKUS + explainer.
+// Replaces the old native title so the master/set/exploded breakdown reads clearly.
+(function(){ var el=null,t=null;
+  function build(){ if(el)return el; el=document.createElement('div'); el.id='ms-exp-tip';
+    el.style.cssText='position:fixed;z-index:100003;min-width:210px;max-width:280px;background:#3f3f46;color:#f4f4f5;font-size:12px;line-height:1.4;padding:10px 12px;border-radius:7px;box-shadow:0 6px 20px rgba(0,0,0,.4);display:none;pointer-events:none';
+    document.body.appendChild(el); return el; }
+  function html(n){ var m=+n.dataset.msm||0,b=+n.dataset.msb||0,u=+n.dataset.msu||0,lbl=n.dataset.msl||'',tot=m+u;
+    var row=function(k,v,strong){ return '<tr><td style="padding:2px 0;color:'+(strong?'#fff':'#d4d4d8')+';'+(strong?'font-weight:700':'')+'">'+k+'</td><td style="padding:2px 0 2px 16px;text-align:right;font-variant-numeric:tabular-nums;font-weight:'+(strong?'800':'700')+'">'+fn(v)+'</td></tr>'; };
+    return (lbl?'<div style="font-weight:700;margin-bottom:7px;color:#fafafa;letter-spacing:.02em">'+esc(lbl)+'</div>':'')
+      +'<table style="border-collapse:collapse;width:100%">'
+      +row('MASTER',m,false)
+      +'<tr><td style="padding:2px 0;color:#d4d4d8">SETS <span style="opacity:.65">(boxes)</span></td><td style="padding:2px 0 2px 16px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700">'+fn(b)+'</td></tr>'
+      +'<tr><td colspan="2" style="border-top:1px solid #71717a;height:1px;padding:0"></td></tr>'
+      +row('TOTAL EXPLODED SKUS',tot,true)
+      +'</table>'
+      +'<div style="margin-top:8px;font-size:10.5px;line-height:1.5;color:#c4c4cd">A set sells as one box; exploded, each box becomes its component garments (boxes × its BOM). Total exploded = master units + exploded set units — the true garment volume.</div>'; }
+  document.addEventListener('mouseover',function(ev){ var n=ev.target&&ev.target.closest?ev.target.closest('.ms-exp'):null; if(!n)return; clearTimeout(t);
+    t=setTimeout(function(){ var e=build(); e.innerHTML=html(n); e.style.display='block'; var r=n.getBoundingClientRect();
+      e.style.left=Math.max(6,Math.min(r.left,window.innerWidth-286))+'px'; e.style.top=(r.bottom+6<window.innerHeight-140?r.bottom+6:Math.max(6,r.top-140))+'px'; },90); });
+  document.addEventListener('mouseout',function(ev){ var n=ev.target&&ev.target.closest?ev.target.closest('.ms-exp'):null; if(n){ clearTimeout(t); if(el)el.style.display='none'; } });
   document.addEventListener('scroll',function(){ if(el)el.style.display='none'; },true);
 })();
 
