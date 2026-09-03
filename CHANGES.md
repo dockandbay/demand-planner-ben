@@ -1,3 +1,7 @@
+## v27.414 DEMAND plan — set sub-category forecast now displays EXPLODED (matches the LY actuals)
+- On a set sub-category, the LY-actuals cell shows the exploded number but the forecast cell was showing the sale/box-basis number, so a 0% growth read wrong (Ben: UK/DTC Tea Towel Mar-27 → LY 1,282 / forecast 939 / 0%). The forecast cell now displays **exploded** too, scaled from the exploded LY split by the growth (fcv ÷ ly_u), so LY / forecast / growth all sit on one basis (0% → forecast = 1,282). Gets the purple exploded dot + the MASTER/SETS/TOTAL tooltip like the actuals.
+- **Display only** — the underlying sub-category forecast fu (sale basis) is untouched, so the buy and smoothing are unchanged (fu is read from calc(), never the DOM). Applies to forecast months whose last year is an actual (e.g. 2027 off 2026); months whose LY is itself a forecast were already on one basis. Demand app loads with 0 errors. `artifact_v16.7.html` only.
+
 ## v27.413 DEMAND plan — Google-Sheets-style minimise on MASTER/SET groups
 - Under an expanded sub-category, the MASTERS / SETS groups now use a **left-outline** instead of the full-width grey header bar: a slim header line with a **−/+ minimise box on the left** and a **faint vertical rail** down the group’s SKU rows. Click the box (or the line) to minimise just that group; the state **persists** per sub-category×group (localStorage `db_grp_collapsed_v1`). Reuses the existing group logic (`_insGrpHdr`), so demand/buy are unaffected. Demand app parses clean, 0 errors. `artifact_v16.7.html` only.
 

@@ -6202,7 +6202,8 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   // Forecast-on-forecast years: LY is the prior-year forecast (not an actual) — keep neutral colour
   // LY reference for a forecast month: if the prior-year month has ACTUALS with sets, show the M/S/E split (this covers
   // 2027 cells whose LY is a 2026 actual month, e.g. Apr-27 → Apr-26 actuals). Else fall back to the plain LY number.
-  (function(){ var _spF=(typeof SKUM==='undefined'||!SKUM[s])?(subcatLySplit(s,co,ch)[ym(y-1,mo)]):null;
+  var _spF=(typeof SKUM==='undefined'||!SKUM[s])?(subcatLySplit(s,co,ch)[ym(y-1,mo)]):null;   // LY (prior-year) master/set split — reused by the forecast value below so it displays on the same EXPLODED basis
+  (function(){
     if(_spF&&_spF.setBoxes>0){ lyD.textContent=fn(_msE(_spF)); _msTipAttrs(lyD,_spF,'Last-year actuals'); }
     else if(isFcLy){ lyD.textContent=ly_u?fn(ly_u):'--'; lyD.style.color='#94a3b8'; lyD.title=(y-1)+' forecast'; }
     else { lyD.textContent=ly_u?fn(ly_u):'--'; } })();
@@ -6230,7 +6231,12 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   });
   d.appendChild(inp);
   const res=document.createElement('div');res.className='fcr'+(is27?' y27':'')+(isOvr?' ovc':!stored&&!gv?' flat':'');
-  res.textContent=fn(fcv);res.dataset.rk=ik;
+  // Set sub-category: show the FORECAST exploded too, so it sits on the same basis as the exploded LY actuals above
+  // (otherwise a 0% growth reads e.g. LY 1,282 / FC 939). Scale the LY exploded split by the growth (fcv ÷ ly_u); the
+  // underlying fu/fcv (sale basis, used by the buy) is unchanged — this is display only.
+  var _fcDisp=fcv;
+  if(_spF&&_spF.setBoxes>0&&ly_u>0){ var _r=fcv/ly_u, _fcSp={master:Math.round(_spF.master*_r),setUnits:Math.round(_spF.setUnits*_r),setBoxes:Math.round(_spF.setBoxes*_r)}; _fcDisp=_fcSp.master+_fcSp.setUnits; _msTipAttrs(res,_fcSp,'This-year forecast'); }
+  res.textContent=fn(_fcDisp);res.dataset.rk=ik;
   if(reasons&&reasons[fym])res.title=reasons[fym];
   d.appendChild(res);
   // (growth-vs-LY is NOT applied to forecast/future months — actual months only; see the actual branch above)
