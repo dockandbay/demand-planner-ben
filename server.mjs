@@ -6056,11 +6056,11 @@ app.get('/api/product/items', async (_req, res) => {
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved')::int sizes_approved,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved' AND coalesce(s.mapped_sku,'')='')::int sizes_unmapped,
       -- required components with approval still pending/rejected (per size × component)
-      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='product'   AND sd.required AND coalesce(sd.approval_status,'pending')<>'approved')::int comp_product,
-      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='packaging' AND sd.required AND coalesce(sd.approval_status,'pending')<>'approved')::int comp_packaging,
-      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='labels'    AND sd.required AND coalesce(sd.approval_status,'pending')<>'approved')::int comp_labels,
-      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='polybag'   AND sd.required AND coalesce(sd.approval_status,'pending')<>'approved')::int comp_polybag,
-      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='other'     AND sd.required AND coalesce(sd.approval_status,'pending')<>'approved')::int comp_other,
+      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='product'   AND sd.required AND coalesce(sd.approval_status,'pending') NOT IN ('approved','approved_with_comments'))::int comp_product,
+      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='packaging' AND sd.required AND coalesce(sd.approval_status,'pending') NOT IN ('approved','approved_with_comments'))::int comp_packaging,
+      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='labels'    AND sd.required AND coalesce(sd.approval_status,'pending') NOT IN ('approved','approved_with_comments'))::int comp_labels,
+      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='polybag'   AND sd.required AND coalesce(sd.approval_status,'pending') NOT IN ('approved','approved_with_comments'))::int comp_polybag,
+      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='other'     AND sd.required AND coalesce(sd.approval_status,'pending') NOT IN ('approved','approved_with_comments'))::int comp_other,
       -- status misaligned: every size is approved but the item status isn't 'approved' (still in development / rejected)
       (CASE WHEN i.status<>'approved'
               AND (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id)>0
@@ -6836,7 +6836,12 @@ app.post('/api/product/sample/:id/aspect', async (req, res) => {
     const aspect = String(b.aspect || '').trim();
     if (!ALLOWED.includes(aspect)) return res.status(400).json({ error: 'bad aspect' });
     const feedback = String(b.feedback || '');
-    const decision = ['pending', 'approved', 'rejected'].includes(b.decision) ? b.decision : 'pending';
+    // Sign-off stage vocabulary (shared with the Variants tab), excludes the shipment stage. Legacy pending/rejected mapped.
+    const STAGES = ['sample_development', 'sample_in_review', 'approved', 'approved_with_comments', 'rejected_new_sample', 'stop_development'];
+    let decision = String(b.decision || '');
+    decision = decision === 'pending' ? 'sample_development' : decision === 'rejected' ? 'rejected_new_sample' : decision;
+    if (!STAGES.includes(decision)) decision = 'sample_development';
+    const isApproved = decision === 'approved' || decision === 'approved_with_comments';
     const by = shortUser(authUser(req)) || null;
     await pool.query(`INSERT INTO planner.product_sample_aspect_feedback (sample_id, aspect, feedback, decision, updated_by, updated_at)
       VALUES ($1,$2,$3,$4,$5,now())
@@ -6852,7 +6857,7 @@ app.post('/api/product/sample/:id/aspect', async (req, res) => {
           FROM planner.product_dev_sizes sz JOIN planner.product_dev_items i ON i.id=sz.item_id
           WHERE sd.size_id=sz.id AND sd.dimension=$2 AND i.ref=$1
             AND (coalesce(array_length($4::text[],1),0)=0 OR sz.size_label = ANY($4::text[]))`,
-          [s.item_ref, aspect, decision, s.sizes || [], decision === 'approved' ? Number(id) : null]);
+          [s.item_ref, aspect, decision, s.sizes || [], isApproved ? Number(id) : null]);
         flowed = r.rowCount || 0;
       }
     }
