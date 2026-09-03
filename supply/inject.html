@@ -92,6 +92,18 @@
 #product-root .pg-stage-wrap{display:flex;flex-direction:column;gap:2px;align-items:flex-start}
 #product-root .pg-stage-owner{font-size:9px;color:#94a3b8;letter-spacing:.02em;padding-left:2px;text-transform:uppercase}
 #product-root .pg-stage-sel{max-width:190px}
+/* Product pop-out drawer (RANGE PLAN / Dashboard → click a product = right-side slide-in of its detail; scoped to #product-root so the product-detail CSS applies). */
+#product-root #proddrawer-bg{position:fixed;inset:0;z-index:100002;background:rgba(15,23,42,0);transition:background .18s ease}
+#product-root #proddrawer-bg.open{background:rgba(15,23,42,.34)}
+#product-root #proddrawer{position:absolute;top:0;right:0;height:100%;width:clamp(min(900px,94vw),58vw,94vw);background:#fff;box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1)}
+#product-root #proddrawer-bg.open #proddrawer{transform:translateX(0)}
+#product-root .pd-drawhead{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 18px;border-bottom:1px solid var(--p-line);flex:0 0 auto}
+#product-root .pd-drawtitle{font-size:15px;font-weight:700;color:#0f172a;line-height:1.25}
+#product-root .pd-drawref{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#94a3b8;font-weight:500;margin-left:7px}
+#product-root .pd-drawbody{flex:1 1 auto;overflow:auto;padding:6px 14px 22px}
+#product-root .pddraw-x{border:none;background:#f1f5f9;color:#475569;border-radius:6px;width:28px;height:28px;cursor:pointer;font-size:15px;line-height:1}
+#product-root .pddraw-x:hover{background:#e2e8f0}
+@media(max-width:820px){#product-root #proddrawer{width:100vw;height:100dvh;transform:translateY(100%)}#product-root #proddrawer-bg.open #proddrawer{transform:translateY(0)}}
 /* hybrid toggle */
 #product-root .pg-mobile{display:none}
 /* mobile cards */
@@ -12697,6 +12709,33 @@
       })();
       syncScope();
     }).catch(function(e){ c.innerHTML='<div style="color:#dc2626;padding:10px 2px">Failed: '+esc(e.message||e)+'</div>'; }); }
+  // ── Product pop-out DRAWER — click a product in RANGE PLAN (or Dashboard) to open its detail as a right-side
+  // slide-in, instead of navigating away to the PLAN tab. Lives inside #product-root so the product-detail CSS +
+  // edit wiring apply; renderProductDetail(ref, box, seed) paints into the drawer body (inline mode). Esc / backdrop
+  // / ✕ close; "Full page ↗" jumps to the PLAN detail as before.
+  var _prodDrawerOpen=false;
+  function _prodDrawerEsc(e){ if(e.key==='Escape')closeProductDrawer(); }
+  function openProductDrawer(ref, seed){ if(!ref)return;
+    closeProductDrawer(true);
+    var root=document.getElementById('product-root'); if(!root)return;
+    var title=(seed&&(seed.colour_name||seed.bulk_colour_name))?prodColourDisplay(seed):esc(ref);
+    var bg=document.createElement('div'); bg.id='proddrawer-bg';
+    bg.innerHTML='<div id="proddrawer"><div class="pd-drawhead"><div class="pd-drawtitle">'+title+'<span class="pd-drawref">'+esc(ref)+'</span></div>'
+      +'<div style="display:flex;align-items:center;gap:8px;flex:0 0 auto"><button class="lnk-btn pddraw-full" title="open the full product page for this item">Full page ↗</button>'
+      +'<button class="pddraw-x" title="close (Esc)">✕</button></div></div>'
+      +'<div class="pd-drawbody"><div class="pd-drawdet"></div></div></div>';
+    root.appendChild(bg);
+    requestAnimationFrame(function(){ bg.classList.add('open'); });
+    bg.addEventListener('mousedown',function(e){ if(e.target===bg)closeProductDrawer(); });
+    bg.querySelector('.pddraw-x').onclick=function(){ closeProductDrawer(); };
+    bg.querySelector('.pddraw-full').onclick=function(){ closeProductDrawer(true); _prodDetailTab='master'; selectProductSub('plan'); setTimeout(function(){ renderProductDetail(ref); },0); };
+    document.addEventListener('keydown',_prodDrawerEsc);
+    _prodDrawerOpen=true; _prodDetailTab='master';
+    renderProductDetail(ref, bg.querySelector('.pd-drawdet'), seed||null); }
+  function closeProductDrawer(silent){ var bg=document.getElementById('proddrawer-bg'); _prodDrawerOpen=false; document.removeEventListener('keydown',_prodDrawerEsc);
+    if(bg){ bg.classList.remove('open'); setTimeout(function(){ if(bg&&bg.parentNode)bg.parentNode.removeChild(bg); },220); }
+    _prodDetailBox=null; }
+  try{ window.openProductDrawer=openProductDrawer; }catch(e){}
   // RANGE PLAN — a season's products laid out by category: swatch + colour way + a tiny status pill. Toggle all vs approved-only.
   var _rangeSeason=null, _rangeApprovedOnly=false;
   function renderProductRange(c){
@@ -12725,7 +12764,7 @@
         var ss=document.getElementById('pr-season'); if(ss)ss.onchange=function(){ _rangeSeason=this.value; draw(); };
         var ap=document.getElementById('pr-appr'); if(ap)ap.onchange=function(){ _rangeApprovedOnly=this.checked; draw(); };
         var pb=document.getElementById('pr-pdf'); if(pb)pb.onclick=function(){ rangePDF(_rangeSeason, groupsHtml(catKeys,cats,true)); };
-        c.querySelectorAll('.pr-card').forEach(function(el){ el.onclick=function(){ _prodDetailTab='master'; selectProductSub('plan'); setTimeout(function(){ renderProductDetail(el.dataset.ref); },0); }; });
+        c.querySelectorAll('.pr-card').forEach(function(el){ el.onclick=function(){ var _r=rows.filter(function(x){return x.ref===el.dataset.ref;})[0]; openProductDrawer(el.dataset.ref, _r); }; });
       }
       draw();
     }).catch(function(e){ c.innerHTML='<div style="color:#dc2626;padding:10px 2px">Failed: '+esc(e.message||e)+'</div>'; }); }
@@ -12797,7 +12836,7 @@
         var mob='<div class="db-mobile">'+cards+'</div>';
         c.innerHTML=bar+legend+deskTable+mob;
         var s=document.getElementById('db-season'); if(s)s.onchange=function(){ _dashSeason=this.value; draw(); };
-        c.querySelectorAll('.db-open').forEach(function(el){ el.onclick=function(){ _prodDetailTab='master'; selectProductSub('plan'); setTimeout(function(){ renderProductDetail(el.dataset.ref); },0); }; });
+        c.querySelectorAll('.db-open').forEach(function(el){ el.onclick=function(){ var _r=rows.filter(function(x){return x.ref===el.dataset.ref;})[0]; openProductDrawer(el.dataset.ref, _r); }; });
       }
       draw();
     }).catch(function(e){ c.innerHTML='<div style="color:#dc2626;padding:10px 2px">Failed: '+esc(e.message||e)+'</div>'; }); }
@@ -13143,7 +13182,7 @@
           if(j&&j.ref)created.push(j.ref); i++; msg.textContent='Created '+created.length+' of '+colours.length+'…'; next(); });
       })(); }; }); }); }
   function renderProductDetail(ref, box, seed){ box=box||_prodDetailBox||document.getElementById('product-content'); _prodDetailBox=box; _prodSeed=seed||null;
-    try{ writeHash(_prodDetailTab&&_prodDetailTab!=='master'?['product',ref,_prodDetailTab]:['product',ref]); }catch(e){}
+    try{ if(!_prodDrawerOpen) writeHash(_prodDetailTab&&_prodDetailTab!=='master'?['product',ref,_prodDetailTab]:['product',ref]); }catch(e){}   // drawer keeps the current (range/dashboard) hash
     try{ ensureSuppliers(function(){}); loadProdCfg(function(){}); }catch(e){}   // warm suppliers + config
     var cached=prodItemCached(ref);
     if(cached&&cached.item){ _prodDetail=cached; renderProdDetailShell(box,cached,seed); return; }   // instant re-open from cache

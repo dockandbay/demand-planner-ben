@@ -1,3 +1,7 @@
+## v27.405 PRODUCT — RANGE PLAN (roadmap) pop-out product drawer on click
+- Clicking a product in **RANGE PLAN** (and the Dashboard, same pattern) now opens its detail in a **right-side slide-in drawer** instead of navigating away to the PLAN tab, so you stay on the roadmap. New `openProductDrawer(ref, seed)` / `closeProductDrawer` scoped to `#product-root` (so the product-detail CSS + edit wiring apply); paints via `renderProductDetail(ref, box, seed)` in inline mode. Head shows colour name + mono ref, “Full page ↗” jumps to the PLAN detail as before; Esc / backdrop / ✕ close. `renderProductDetail` skips its hash write while the drawer is open so closing returns you to RANGE PLAN, not a product hash.
+- Verified in jsdom: drawer opens + paints the detail (tabs render), Esc / ✕ / backdrop all close, double-open de-dupes to one drawer. Rollback = revert this single commit. `supply/inject.html` only.
+
 ## v27.404 PRODUCT redesign (Direction A) #1 — identity flip on the PLAN grid
 - The product grid identity cell now leads with the **colour name** (12.5px, 600, dark) and demotes the mono **ref** to a muted subline (11px, #94a3b8), matching the mobile card. Planners scan by colour name ("Cabana Coral"), not the SKU-style ref. CSS + cell order only; the combo badge stays on the ref line; no behaviour/data change. Rollback = revert this single commit. `supply/inject.html` only.
 
