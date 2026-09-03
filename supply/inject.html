@@ -12872,6 +12872,7 @@
     ['sample_in_review','Sample in review','D&B','#fef3c7','#92400e','amber'],
     ['approved','Approved for bulk','Done','#dcfce7','#166534','green'],
     ['approved_with_comments','Approved w/ comments','Done','#dcfce7','#166534','green'],
+    ['rejected_new_sample','Rejected — new sample','Supplier','#ffedd5','#9a3412','red'],
     ['stop_development','Stop development','Stopped','#fee2e2','#991b1b','red']];
   function stageMeta(v){ for(var i=0;i<STAGE_META.length;i++)if(STAGE_META[i][0]===v)return STAGE_META[i]; return STAGE_META[0]; }
   function prodStageStyle(v){ var m=stageMeta(v); return 'background:'+m[3]+';color:'+m[4]+';font-weight:700'; }

@@ -1,3 +1,8 @@
+## v27.417 PRODUCT samples redesign (1/n) — foundation: per-aspect table + "Rejected — new sample" stage
+- **Migration 256** (sandbox applied; **Diviyaj to run on live**): `planner.product_sample_aspect_feedback (sample_id, aspect, feedback, decision, updated_by, updated_at, UNIQUE(sample_id,aspect))` — per-aspect feedback + approve/reject decision on a sample version (Product / Packaging / Labels-wraps / Polybag / Other). No live data yet, so the old whole-sample admin_feedback is just superseded.
+- **New stage `rejected_new_sample`** ("Rejected — new sample", owner = Supplier): a D&B decision that sends the item back to the supplier for a fresh sample. Added to server PROD_STAGES + PROD_STAGE_DECIDED (not auto-clobbered) and client STAGE_META; derived approval status = in_development (via the existing default). server.mjs + supply/inject.html.
+- NEXT: server endpoints for per-aspect feedback/decision, then the 2-column Samples-tab redesign (feedback + approve/reject per aspect, shipment-tracking column) with the decision flowing to the Variants tab per component.
+
 ## v27.416 PRODUCT — drag & drop file uploads on Documents + Sizes tabs
 - **Documents tab:** the upload box is now a dropzone — drag one or many files onto it to attach (highlights on drag-over); the picker + button still work. Same ≤10MB / multiple handling, factored into one `uploadDocFiles`.
 - **Sizes tab:** each required component’s **Files cell** is a dropzone — drop files onto it to attach to that size×component (same as the “+ file” picker), highlights on drag-over. Factored into `_uploadCompFiles`. jsdom-verified: a simulated drop posts the file to the upload endpoint. `supply/inject.html` only.

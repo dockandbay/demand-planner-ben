@@ -6033,8 +6033,8 @@ app.get('/api/product/unread', async (_req, res) => {   // total unread supplier
 });
 // PRODUCT ▸ STAGE state machine (v27.395). One stored field on product_dev_items drives everything;
 // APPROVAL (.status, read by PIM/Buy Plan/POs) derives from the terminal stage.
-const PROD_STAGES = ['sample_development', 'sample_shipped', 'sample_in_review', 'approved', 'approved_with_comments', 'stop_development'];
-const PROD_STAGE_DECIDED = new Set(['approved', 'approved_with_comments', 'stop_development']);   // D&B decisions — auto-advance never clobbers these
+const PROD_STAGES = ['sample_development', 'sample_shipped', 'sample_in_review', 'approved', 'approved_with_comments', 'rejected_new_sample', 'stop_development'];
+const PROD_STAGE_DECIDED = new Set(['approved', 'approved_with_comments', 'rejected_new_sample', 'stop_development']);   // D&B decisions — auto-advance never clobbers these (rejected_new_sample = sent back to the supplier for a fresh sample; D&B moves it back to sampling when the resample comes in)
 const prodStageRank = (s) => { const i = PROD_STAGES.indexOf(s); return i < 0 ? 0 : i; };
 const prodStatusFromStage = (stage) => (stage === 'approved' || stage === 'approved_with_comments') ? 'approved' : (stage === 'stop_development' ? 'dropped' : 'in_development');
 // Forward-only auto-advance off a supplier event: never moves backwards, never overrides a D&B decision.
