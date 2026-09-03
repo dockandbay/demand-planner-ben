@@ -12879,6 +12879,12 @@
   // Grid STAGE chip content: coloured stage chip + the owner ("with Supplier" / "with D&B" / "Done" / "Stopped") inline.
   function prodStageChipHtml(v){ var own=stageMeta(v)[2]; var ownTxt=(own==='Supplier'||own==='D&B')?('with '+own):own; return prodStageChip(v)+'<span class="pg-stage-own2">'+esc(ownTxt)+'</span>'; }
   function prodStageOwner(v){ return stageMeta(v)[2]; }
+  // Grid AGE cell (Direction A #4): days since the item was last updated — the exception-spotting axis ("which sample
+  // has sat untouched?"). Amber past 14 days. Uses updated_at (falls back to created_at); left-aligned like new columns.
+  function prodAgeCell(r){ var u=r.updated_at||r.created_at, t=u?new Date(u).getTime():0;
+    if(!(t>0))return '<td class="l"><span class="mut tiny">—</span></td>';
+    var d=Math.max(0,Math.floor((Date.now()-t)/86400000)), amber=d>14;
+    return '<td class="l" style="white-space:nowrap;font-size:11px;font-variant-numeric:tabular-nums;'+(amber?'color:#b45309;font-weight:700':'color:#64748b')+'" title="'+d+' day'+(d===1?'':'s')+' since last update">'+d+'d'+(amber?' ⚠':'')+'</td>'; }
   function prodStageRag(v){ return stageMeta(v)[5]; }   // green | amber | pending | red — for the category/season report tallies
   // Grid STAGE cell: coloured dropdown + a tiny owner sub-label ("with Supplier" / "with D&B" / "Done" / "Stopped").
   function prodStageSelHtml(ref,val){ var m=stageMeta(val), own=m[2];
@@ -13075,12 +13081,12 @@
         var seasonCount={}, catCount={}; f.forEach(function(r){ var sk=r.season||'', ck=(r.season||'')+'|'+(r.category||''); seasonCount[sk]=(seasonCount[sk]||0)+1; catCount[ck]=(catCount[ck]||0)+1; });
         var _pgSeason=null, _pgCat=null;
         var _tbl='<div class="pg-desktop"><div class="tw"><table class="pg-tbl"><thead><tr>'
-          +['','Ref','Category','Season','Supplier','Sizes','Stage','Sample shipment'].map(function(h){return '<th>'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+          +['','Ref','Category','Season','Supplier','Sizes','Stage','Age','Sample shipment'].map(function(h){return '<th>'+h+'</th>';}).join('')+'</tr></thead><tbody>'
           +f.map(function(r,i){
             var sw=r.has_swatch?'<img class="pg-swatch2 pg-swatch-zoom" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at)+'" title="click to enlarge" style="cursor:zoom-in">':'<span class="pg-swatch2 none">n/a</span>';
             var sKey=r.season||'', cKey=r.category||'', hdr='';
-            if(sKey!==_pgSeason){ _pgSeason=sKey; _pgCat=null; hdr+='<tr class="pg-seasonhdr" data-season="'+esc(sKey)+'"><td colspan="8" style="cursor:pointer;background:#cbd5e1;border-top:2px solid #94a3b8;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#1f2937;padding:5px 10px"><span class="pg-caret" style="display:inline-block;width:13px">▾</span>'+esc(sKey||'— no season —')+' <span style="font-weight:400;color:#475569">('+seasonCount[sKey]+')</span></td></tr>'; }
-            if(cKey!==_pgCat){ _pgCat=cKey; hdr+='<tr class="pg-cathdr" data-season="'+esc(sKey)+'" data-cat="'+esc(cKey)+'"><td colspan="8" style="cursor:pointer;background:#eef2f7;font-weight:600;font-size:12px;letter-spacing:.02em;color:#475569;padding:4px 10px 4px 28px"><span class="pg-caret" style="display:inline-block;width:13px">▾</span>'+esc(cKey||'— no category —')+' <span style="font-weight:400;color:#94a3b8">('+catCount[sKey+'|'+cKey]+')</span></td></tr>'; }
+            if(sKey!==_pgSeason){ _pgSeason=sKey; _pgCat=null; hdr+='<tr class="pg-seasonhdr" data-season="'+esc(sKey)+'"><td colspan="9" style="cursor:pointer;background:#cbd5e1;border-top:2px solid #94a3b8;font-weight:700;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:#1f2937;padding:5px 10px"><span class="pg-caret" style="display:inline-block;width:13px">▾</span>'+esc(sKey||'— no season —')+' <span style="font-weight:400;color:#475569">('+seasonCount[sKey]+')</span></td></tr>'; }
+            if(cKey!==_pgCat){ _pgCat=cKey; hdr+='<tr class="pg-cathdr" data-season="'+esc(sKey)+'" data-cat="'+esc(cKey)+'"><td colspan="9" style="cursor:pointer;background:#eef2f7;font-weight:600;font-size:12px;letter-spacing:.02em;color:#475569;padding:4px 10px 4px 28px"><span class="pg-caret" style="display:inline-block;width:13px">▾</span>'+esc(cKey||'— no category —')+' <span style="font-weight:400;color:#94a3b8">('+catCount[sKey+'|'+cKey]+')</span></td></tr>'; }
             return hdr+'<tr class="pg-datarow" data-season="'+esc(sKey)+'" data-cat="'+esc(cKey)+'">'
               +'<td><span style="display:inline-flex;align-items:center;gap:7px">'+sw+'<button class="planbtn pg-open" data-ref="'+esc(r.ref)+'" data-i="'+i+'">OPEN</button></span></td>'
               +'<td><div class="pg-colour" data-ref="'+esc(r.ref)+'">'+prodColourDisplay(r)+'</div><div class="pg-ref" data-ref="'+esc(r.ref)+'">'+esc(r.ref)+prodComboBadge(r)+'</div></td>'
@@ -13089,8 +13095,9 @@
               +'<td>'+prodPickBtn(r.ref,'supplier',r.supplier,'supplier')+'</td>'
               +'<td>'+r.sizes_approved+'/'+r.sizes+'</td>'
               +'<td class="pg-stage-cell" data-ref="'+esc(r.ref)+'"><span class="pg-stagechip" data-ref="'+esc(r.ref)+'" tabindex="0" title="Approval: '+esc(prodStatusFromStage(r.stage)==='approved'?'Approved':prodStatusFromStage(r.stage)==='dropped'?'Rejected':'In development')+' — click to change stage">'+prodStageChipHtml(r.stage)+'</span><span class="pg-stageedit" data-ref="'+esc(r.ref)+'" style="display:none">'+prodStageSelHtml(r.ref,r.stage)+'</span></td>'
+              +prodAgeCell(r)
               +'<td class="l">'+(r.latest_shipment?('<div style="white-space:nowrap;font-size:11px">📦 <a class="samp-open" data-ref="'+esc(r.latest_shipment.ref)+'" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;font-weight:600" title="open this sample shipment">'+esc(r.latest_shipment.ref)+'</a>'+(r.latest_shipment.carrier?' <span class="mut tiny">'+esc(r.latest_shipment.carrier)+'</span>':'')+(r.latest_shipment.tracking?' · '+carrierTrackLinkInj(r.latest_shipment.carrier,r.latest_shipment.tracking):'')+'</div>'):'<span class="mut tiny">—</span>')+'</td></tr>'
-              +'<tr class="pg-detrow" id="pgdet-'+i+'" data-season="'+esc(r.season||'')+'" data-cat="'+esc(r.category||'')+'" style="display:none"><td colspan="8"><div class="pg-det"></div></td></tr>';
+              +'<tr class="pg-detrow" id="pgdet-'+i+'" data-season="'+esc(r.season||'')+'" data-cat="'+esc(r.category||'')+'" style="display:none"><td colspan="9"><div class="pg-det"></div></td></tr>';
           }).join('')+'</tbody></table></div></div>';
         // MOBILE: a card per product, grouped by season → category; tap a card to open its detail inline.
         var _mS=null,_mC=null;

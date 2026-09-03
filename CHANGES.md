@@ -1,3 +1,6 @@
+## v27.408 PRODUCT Direction A #4 — AGE column (days since last update, amber past 14d)
+- New left-aligned **Age** column on the PLAN grid showing days since the item was last updated ("6d", turns amber + ⚠ past 14 days) — the exception-spotting axis for stale samples. Uses updated_at (falls back to created_at). Grid back to 9 columns (colspans updated). jsdom-verified: Age header + cell render, amber styling past threshold. Rollback = revert this single commit. `supply/inject.html` only.
+
 ## v27.407 PRODUCT Direction A #3 — whole-row click to open + rename PLAN button to OPEN
 - The tiny black "PLAN" button (borrowed from the PO grid) is renamed **OPEN**, and the whole product row is now clickable to open/toggle its detail (cursor:pointer). Interactive cells (category/season/supplier pickers, the stage chip, the sample-shipment link, the OPEN button, the swatch) stopPropagation and keep doing their own thing; a guard also skips the row-toggle for any click that lands on a control. jsdom-verified: clicking a non-interactive cell opens the detail. Rollback = revert this single commit. `supply/inject.html` only.
 
