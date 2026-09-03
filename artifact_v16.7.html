@@ -467,6 +467,8 @@ td.totu{background:#c4c4c4!important}     /* full-year total columns (Ben) */
 th.bgt26u,th.bgt27u,th.bgt28u,th.bgtH1u,th.bgtH2u{background:#c4c4c4!important}   /* FY total column headers */
 /* Cmd/Ctrl-click (or drag) forecast cells → running sum badge (quick reference on category + SKU rows) */
 #t .plansel{background:#dbeafe !important;box-shadow:inset 0 0 0 1px #60a5fa;border-radius:2px;cursor:cell}
+/* Exploded number marker: a small purple dot to the LEFT of any figure that includes a set-explosion calc (.ms-exp). */
+.ms-exp::before{content:'';display:inline-block;width:4px;height:4px;border-radius:50%;background:#7c3aed;vertical-align:middle;margin-right:3px;margin-bottom:1px}
 #plan-sumbadge{position:fixed;right:16px;bottom:16px;z-index:100050;display:none;align-items:center;gap:10px;background:#0f172a;color:#fff;font-size:13px;font-weight:700;padding:8px 12px;border-radius:9px;box-shadow:0 8px 24px rgba(0,0,0,.32);font-family:inherit}
 #plan-sumbadge .pb-x{cursor:pointer;color:#94a3b8;font-weight:800;font-size:14px;line-height:1;padding:0 2px}
 #plan-sumbadge .pb-x:hover{color:#fff}
@@ -6818,16 +6820,16 @@ document.addEventListener('click',function(e){ var c=e.target&&e.target.closest?
 // Replaces the old native title so the master/set/exploded breakdown reads clearly.
 (function(){ var el=null,t=null;
   function build(){ if(el)return el; el=document.createElement('div'); el.id='ms-exp-tip';
-    el.style.cssText='position:fixed;z-index:100003;min-width:210px;max-width:280px;background:#3f3f46;color:#f4f4f5;font-size:12px;line-height:1.4;padding:10px 12px;border-radius:7px;box-shadow:0 6px 20px rgba(0,0,0,.4);display:none;pointer-events:none';
+    el.style.cssText='position:fixed;z-index:100003;width:250px;background:#3f3f46;color:#f4f4f5;font-size:12px;line-height:1.4;padding:10px 12px;border-radius:7px;box-shadow:0 6px 20px rgba(0,0,0,.4);display:none;pointer-events:none;text-align:left';
     document.body.appendChild(el); return el; }
   function html(n){ var m=+n.dataset.msm||0,b=+n.dataset.msb||0,u=+n.dataset.msu||0,lbl=n.dataset.msl||'',tot=m+u;
-    var row=function(k,v,strong){ return '<tr><td style="padding:2px 0;color:'+(strong?'#fff':'#d4d4d8')+';'+(strong?'font-weight:700':'')+'">'+k+'</td><td style="padding:2px 0 2px 16px;text-align:right;font-variant-numeric:tabular-nums;font-weight:'+(strong?'800':'700')+'">'+fn(v)+'</td></tr>'; };
-    return (lbl?'<div style="font-weight:700;margin-bottom:7px;color:#fafafa;letter-spacing:.02em">'+esc(lbl)+'</div>':'')
+    var row=function(k,v,strong){ return '<tr><td style="padding:2px 0;text-align:left;white-space:nowrap;color:'+(strong?'#fff':'#d4d4d8')+';'+(strong?'font-weight:700':'')+'">'+k+'</td><td style="padding:2px 0 2px 16px;text-align:right;font-variant-numeric:tabular-nums;font-weight:'+(strong?'800':'700')+'">'+fn(v)+'</td></tr>'; };
+    return (lbl?'<div style="font-weight:700;margin-bottom:7px;color:#fafafa;letter-spacing:.02em;text-align:left">'+esc(lbl)+'</div>':'')
       +'<table style="border-collapse:collapse;width:100%">'
       +row('MASTER',m,false)
-      +'<tr><td style="padding:2px 0;color:#d4d4d8">SETS <span style="opacity:.65">(boxes)</span></td><td style="padding:2px 0 2px 16px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700">'+fn(b)+'</td></tr>'
+      +'<tr><td style="padding:2px 0;text-align:left;white-space:nowrap;color:#d4d4d8">SETS <span style="opacity:.65">(boxes)</span></td><td style="padding:2px 0 2px 16px;text-align:right;font-variant-numeric:tabular-nums;font-weight:700">'+fn(b)+'</td></tr>'
       +'<tr><td colspan="2" style="border-top:1px solid #71717a;height:1px;padding:0"></td></tr>'
-      +row('TOTAL EXPLODED SKUS',tot,true)
+      +row('TOTAL UNITS (exploded)',tot,true)
       +'</table>'
       +'<div style="margin-top:8px;font-size:10.5px;line-height:1.5;color:#c4c4cd">A set sells as one box; exploded, each box becomes its component garments (boxes × its BOM). Total exploded = master units + exploded set units — the true garment volume.</div>'; }
   document.addEventListener('mouseover',function(ev){ var n=ev.target&&ev.target.closest?ev.target.closest('.ms-exp'):null; if(!n)return; clearTimeout(t);

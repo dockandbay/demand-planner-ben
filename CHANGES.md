@@ -1,3 +1,7 @@
+## v27.401 Sets — exploded-number dot marker + tooltip polish
+- **Explosion dot:** any figure that includes a set-explosion calc (the `.ms-exp` exploded actuals numbers) now carries a small purple dot to its left, so it is visually obvious the number includes an explosion.
+- **Tooltip:** the grey exploded-actuals tooltip is now left-aligned and fixed-width (250px) so the total row fits on one line; the total is relabelled **TOTAL UNITS (exploded)**. Display-only; `artifact_v16.7.html`.
+
 ## v27.400 Sets — styled grey tooltip on the exploded actuals number
 - The hover over a sub-category’s exploded actuals figure (LY + this-year) is now a **styled grey tooltip** instead of the plain native title, laid out clearly:
   MASTER — n · SETS (boxes) — n · TOTAL EXPLODED SKUS — n, then a short explainer (a set sells as one box; exploded, each box becomes its component garments; total exploded = master units + exploded set units = the true garment volume).
