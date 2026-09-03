@@ -3446,10 +3446,31 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
     if(!rw.length)return;
     const _md=i=>{ const pr=String(PROJ[i].key).split('_'); return new Date(Number(pr[0]),Number(pr[1])-1,1); };
     rw.forEach(m=>{
-      // placement = first actionable (non-actual/forecast) PROJ month inside [window_from, window_to], >= now
-      let ws=-1;
-      for(let i=1;i<PROJ.length;i++){ const p=PROJ[i]; if(p.isActual||p.isForecast)continue; const d=_md(i); if(m.wt&&d>m.wt)break; if(m.wf&&d<m.wf)continue; ws=i; break; }
-      if(ws<0)return;   // window entirely in the past → nothing to place
+      // placement = first ACTIONABLE PROJ month inside [window_from, window_to], >= now.
+      // "Actionable" = a month we can still raise a PO in. The CURRENT month counts while we're on/before the
+      // 20th (still time to order this month — it lives in the projection as the "Remaining"/isForecast slot);
+      // past the 20th the current month is closed and the first actionable month is next month. This is what lets
+      // a "buy up-front THIS month" rule (window = the current month only) actually place — previously the current
+      // month's only slot was the isForecast one, which was skipped, so the block silently fell through to
+      // dribbled monthly cover buys (Ben: COOL-DES-GLDGRN SS27).
+      const _curPlaceable=TODAY.getDate()<=20;   // can we still order in the current month?
+      const _curMonStart=_md(1);                  // first of the current month (PROJ[1] = current-month Remaining)
+      let ws=-1, firstPlaceable=-1;
+      for(let i=1;i<PROJ.length;i++){ const p=PROJ[i];
+        if(p.isActual)continue;
+        if(p.isForecast && !_curPlaceable)continue;   // current month but past the 20th → can't place here
+        if(firstPlaceable<0)firstPlaceable=i;          // earliest month we could act in (ignoring the window)
+        const d=_md(i);
+        if(m.wf&&d<m.wf)continue;   // window not open yet → keep looking forward
+        if(m.wt&&d>m.wt)break;      // window closed → stop
+        ws=i; break;
+      }
+      // Window is open now (or only just closed this month) but every in-window slot is already behind us — e.g. a
+      // "this month" window and we're mid-month. Don't dribble: place the block in the earliest slot we can still
+      // act on (clamp forward). Only for a window whose END is still in the current month or later — a genuinely
+      // past window (closed in an earlier month) is left alone.
+      if(ws<0 && firstPlaceable>=0 && m.wt && m.wt>=_curMonStart) ws=firstPlaceable;
+      if(ws<0)return;   // window still in the future beyond our horizon, or truly nothing to place
       // (#2) SSM sizes the quantity: coverage END = the SSM-detected season end for a seasonal SKU (captures the
       // FULL sell-out, e.g. Aug, so nothing dribbles into later top-ups), else the rule's range_to. The rule still
       // owns the WINDOW (placement = ws above).

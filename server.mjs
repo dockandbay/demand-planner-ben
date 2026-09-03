@@ -6031,10 +6031,26 @@ app.get('/api/product/unread', async (_req, res) => {   // total unread supplier
     WHERE n.author_kind='supplier' AND n.read_at IS NULL AND EXISTS (SELECT 1 FROM planner.product_dev_items i WHERE i.ref=n.po)`);
     res.json({ count: r.rows[0].n }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// PRODUCT ▸ STAGE state machine (v27.395). One stored field on product_dev_items drives everything;
+// APPROVAL (.status, read by PIM/Buy Plan/POs) derives from the terminal stage.
+const PROD_STAGES = ['sample_development', 'sample_shipped', 'sample_in_review', 'approved', 'approved_with_comments', 'stop_development'];
+const PROD_STAGE_DECIDED = new Set(['approved', 'approved_with_comments', 'stop_development']);   // D&B decisions — auto-advance never clobbers these
+const prodStageRank = (s) => { const i = PROD_STAGES.indexOf(s); return i < 0 ? 0 : i; };
+const prodStatusFromStage = (stage) => (stage === 'approved' || stage === 'approved_with_comments') ? 'approved' : (stage === 'stop_development' ? 'dropped' : 'in_development');
+// Forward-only auto-advance off a supplier event: never moves backwards, never overrides a D&B decision.
+async function prodStageAdvance(itemRef, target) {
+  try {
+    const cur = (await pool.query(`SELECT coalesce(stage,'sample_development') stage FROM planner.product_dev_items WHERE ref=$1`, [itemRef])).rows[0];
+    if (!cur || PROD_STAGE_DECIDED.has(cur.stage)) return;
+    if (prodStageRank(target) <= prodStageRank(cur.stage)) return;
+    await pool.query(`UPDATE planner.product_dev_items SET stage=$2, status=$3, updated_at=now() WHERE ref=$1`, [itemRef, target, prodStatusFromStage(target)]);
+  } catch (e) { /* best-effort — never block the sample event */ }
+}
 app.get('/api/product/items', async (_req, res) => {
   try {
     const r = await pool.query(`SELECT i.id, i.ref, coalesce(i.type,'Product Development') type, coalesce(i.season,'') season, coalesce(i.category,'') category,
-      coalesce(i.colour_name,'') colour_name, coalesce(i.supplier,'') supplier, coalesce(i.description,'') description, i.status, (i.swatch IS NOT NULL) has_swatch,
+      coalesce(i.colour_name,'') colour_name, coalesce(i.bulk_colour_name,'') bulk_colour_name, coalesce(i.stage,'sample_development') stage,
+      coalesce(i.supplier,'') supplier, coalesce(i.description,'') description, i.status, (i.swatch IS NOT NULL) has_swatch,
       to_char(i.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id)::int sizes,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved')::int sizes_approved,
@@ -6069,7 +6085,7 @@ app.get('/api/product/items', async (_req, res) => {
 app.get('/api/product/dashboard', async (req, res) => {
   try {
     const r = await pool.query(`SELECT i.ref, coalesce(i.season,'') season, coalesce(i.category,'') category,
-      coalesce(i.colour_name,'') colour_name, i.status, (i.swatch IS NOT NULL) has_swatch,
+      coalesce(i.colour_name,'') colour_name, coalesce(i.bulk_colour_name,'') bulk_colour_name, coalesce(i.stage,'sample_development') stage, i.status, (i.swatch IS NOT NULL) has_swatch,
       to_char(i.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id)::int sizes,
       coalesce((SELECT json_object_agg(dimension, json_build_object('req',req,'appr',appr)) FROM (
@@ -6088,7 +6104,7 @@ app.get('/api/product/item/:ref', async (req, res) => {
     // Round 1 — item + sizes + docs + samples + unread all in parallel (sizes uses a subquery so it needn't wait on item)
     const [itemR, sizesR, docsR, samplesR, unreadR] = await Promise.all([
       pool.query(`SELECT id, ref, coalesce(type,'Product Development') type, coalesce(season,'') season, coalesce(category,'') category,
-        coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(description,'') description, coalesce(recipient_countries,'UK') recipient_countries,
+        coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(bulk_colour_name,'') bulk_colour_name, coalesce(stage,'sample_development') stage, coalesce(description,'') description, coalesce(recipient_countries,'UK') recipient_countries,
         coalesce(supplier,'') supplier, coalesce(supplier_code,'') supplier_code,
         status, (swatch IS NOT NULL) has_swatch, coalesce(created_by,'') created_by,
         to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at,
@@ -6132,7 +6148,7 @@ app.get('/api/product/item/:ref/core', async (req, res) => {
   try {
     const [itemR, unreadR] = await Promise.all([
       pool.query(`SELECT id, ref, coalesce(type,'Product Development') type, coalesce(season,'') season, coalesce(category,'') category,
-        coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(description,'') description, coalesce(recipient_countries,'UK') recipient_countries,
+        coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(bulk_colour_name,'') bulk_colour_name, coalesce(stage,'sample_development') stage, coalesce(description,'') description, coalesce(recipient_countries,'UK') recipient_countries,
         coalesce(supplier,'') supplier, coalesce(supplier_code,'') supplier_code,
         status, (swatch IS NOT NULL) has_swatch, coalesce(created_by,'') created_by,
         to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at,
@@ -6213,8 +6229,8 @@ app.post('/api/product/item', async (req, res) => {
     await client.query('BEGIN');
     const seq = (await client.query(`SELECT coalesce(max(seq_in_group),0)+1 n FROM planner.product_dev_items WHERE coalesce(season,'')=$1 AND category_code=$2`, [season, code])).rows[0].n;
     const ref = (isCustom ? 'CUST' : season) + '-' + code + (supCode ? '-' + supCode : '') + '-' + String(seq).padStart(2, '0');
-    const ins = await client.query(`INSERT INTO planner.product_dev_items (ref, type, season, category, category_code, seq_in_group, colour_name, description, supplier, supplier_code, created_by, approval_method)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING id`, [ref, type, season || null, category, code, seq, (b.colour_name || '').trim() || null, (b.description || '').trim() || null, supplier || null, supCode, (b.created_by || '').trim() || null, (b.approval_method || '').trim() || null]);
+    const ins = await client.query(`INSERT INTO planner.product_dev_items (ref, type, season, category, category_code, seq_in_group, colour_name, bulk_colour_name, description, supplier, supplier_code, created_by, approval_method)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`, [ref, type, season || null, category, code, seq, (b.colour_name || '').trim() || null, (b.bulk_colour_name || '').trim() || null, (b.description || '').trim() || null, supplier || null, supCode, (b.created_by || '').trim() || null, (b.approval_method || '').trim() || null]);
     const id = ins.rows[0].id, sizes = Array.isArray(b.sizes) ? b.sizes : [];
     const _szRows = sizes.map((s, k) => ({ sl: String(s || '').trim(), k })).filter(r => r.sl);   // keep raw index as sort (blanks leave gaps, as before)
     if (_szRows.length) {   // single multi-row insert (was N+1 per size)
@@ -6234,7 +6250,13 @@ app.post('/api/product/item', async (req, res) => {
 });
 app.post('/api/product/item/:ref', async (req, res) => {
   const b = req.body || {}, ref = req.params.ref, sets = [], vals = []; let i = 1;
-  const allow = { type: 'text', colour_name: 'text', description: 'text', status: 'text', season: 'text', category: 'text', dev_start_override: 'date', recipient_countries: 'text', approval_method: 'text' };
+  const allow = { type: 'text', colour_name: 'text', bulk_colour_name: 'text', description: 'text', status: 'text', season: 'text', category: 'text', dev_start_override: 'date', recipient_countries: 'text', approval_method: 'text' };
+  // STAGE is the driver — normalise it, then derive APPROVAL (.status) from the terminal stage so the two never diverge.
+  if ('stage' in b) {
+    const st = PROD_STAGES.includes(b.stage) ? b.stage : 'sample_development';
+    sets.push(`stage=$${i}`); vals.push(st); i++;
+    if (!('status' in b)) b.status = prodStatusFromStage(st);   // let the shared status handling below run
+  }
   for (const k of Object.keys(allow)) { if (k in b) { sets.push(`${k}=$${i}${allow[k] === 'date' ? '::date' : ''}`); vals.push(b[k] === '' ? null : b[k]); i++; } }
   // stamp / clear the approval time when status changes (drives Reports' time-to-approve)
   if ('status' in b) sets.push(b.status === 'approved' ? 'approved_at=coalesce(approved_at, now())' : 'approved_at=NULL');
@@ -6254,7 +6276,9 @@ app.post('/api/product/item/:ref', async (req, res) => {
     vals.push(ref);
     await pool.query(`UPDATE planner.product_dev_items SET ${sets.join(',')}, updated_at=now() WHERE ref=$${i}`, vals);
     // Record of change (PRODUCT ▸ Timeline) — one entry per field the D&B user just changed.
-    { const _plbl = { type: 'Type', colour_name: 'Colour way', description: 'Description', status: 'Status', season: 'Season', category: 'Category', dev_start_override: 'Development start', recipient_countries: 'Recipient country', approval_method: 'Approval method', supplier: 'Supplier' };
+    { const _stageLbl = { sample_development: 'Sample development', sample_shipped: 'Sample shipped', sample_in_review: 'Sample in review', approved: 'Approved for bulk', approved_with_comments: 'Approved for bulk (with comments)', stop_development: 'Stop development' };
+      const _plbl = { type: 'Type', colour_name: 'Development colour name', bulk_colour_name: 'Bulk colour name', stage: 'Stage', description: 'Description', season: 'Season', category: 'Category', dev_start_override: 'Development start', recipient_countries: 'Recipient country', approval_method: 'Approval method', supplier: 'Supplier' };
+      if ('stage' in b) b.stage = _stageLbl[b.stage] || b.stage;   // log the stage by its friendly label
       const _pby = authUser(req) || 'Dock & Bay';
       for (const k of Object.keys(_plbl)) { if (k in b) { const v = String(b[k] == null ? '' : b[k]).trim(); await logProductChange(ref, _plbl[k] + (v ? (' → ' + (v.length > 80 ? v.slice(0, 80) + '…' : v)) : ' cleared'), null, _pby); } } }
     if (_recNote) { const label = _recNote.split(',').map(x => x.trim()).filter(Boolean).join(' and ') || 'UK';
@@ -6611,6 +6635,8 @@ async function linkSampleToShipment(devSampleId, srId, by) {
   await pool.query(`INSERT INTO planner.sample_request_dev_samples (sample_request_id, dev_sample_id, qty, created_by)
     VALUES ($1::bigint,$2,1,$3) ON CONFLICT (sample_request_id, dev_sample_id) DO NOTHING`, [srId, devSampleId, by || null]);
   await pool.query(`UPDATE planner.product_dev_samples SET not_shipped=false WHERE id=$1`, [devSampleId]);
+  // sample attached to a shipment → the product's stage advances to "sample shipped" (forward-only)
+  try { const it = (await pool.query(`SELECT item_ref FROM planner.product_dev_samples WHERE id=$1`, [devSampleId])).rows[0]; if (it) await prodStageAdvance(it.item_ref, 'sample_shipped'); } catch (e) { /* best-effort */ }
 }
 async function unlinkSampleFromShipment(devSampleId, srId) {
   if (!srId) return;
@@ -6737,6 +6763,7 @@ async function createProductSample(b, by) {
   if (b.sample_request_id || b.not_shipped) await assignSampleToShipment(r.rows[0].id, b.sample_request_id || null, !!b.not_shipped, by);
   // supplier note → shows on the product timeline + the admin ✉ bell
   await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'supplier',$3)`, [itemRef, by || null, 'Sample v' + v + ' submitted (colour + quality verified)']);
+  await prodStageAdvance(itemRef, 'sample_in_review');   // supplier submitted a sample → ball is now with D&B
   return { id: r.rows[0].id, version: v, ref: itemRef + '_v' + v };
 }
 async function insertProductSamplePhoto(sampleId, b, by, kind) {
