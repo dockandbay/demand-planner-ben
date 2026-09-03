@@ -393,11 +393,10 @@ td.fctd.anomaly-lo{background:#fff !important;border-left-color:#e5e5e5 !importa
 .sku-filters{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
 .sku-flt-lbl{font-size:10px;color:#888;white-space:nowrap}
 /* Google-Sheets-style group outline: faint vertical rail down the left of grouped SKU rows (masters / sets). */
-tr.sku-inline[data-skugroup] td:first-child{box-shadow:inset 3px 0 0 #94a3b8;padding-left:16px}
-tr.sku-inline[data-skugroup] td:first-child:hover{box-shadow:inset 5px 0 0 #64748b}
-tr.sku-inline.grp-hdr td:first-child{box-shadow:inset 3px 0 0 #94a3b8}
+/* Group outline: a thin 1px left border (like the rest of the table) + a clickable left gutter (its padding). */
+tr.sku-inline[data-skugroup] td:first-child{box-shadow:inset 1px 0 0 #d5d9e0;padding-left:18px}
+tr.sku-inline.grp-hdr td:first-child{box-shadow:inset 1px 0 0 #d5d9e0}
 tr.sku-inline.grp-hdr:hover .grp-tgl{border-color:#64748b;color:#111827;background:#f1f5f9}
-tr.sku-inline.grp-hdr:hover td{background:#f8fafc}
 tr.sku-row:hover td{background:#fafaf8}
 tr.sku-row:hover td.stk{background:#fafaf8}
 tr.sku-row:hover td.stk2{background:#fafaf8}
@@ -6769,7 +6768,7 @@ document.addEventListener('click',function(e){ var c=e.target&&e.target.closest?
     var sym=(typeof dispSym==='function'?dispSym():'£'), m=function(x){return sym+Math.round(x).toLocaleString();};
     // Bulk-action buttons: "Do not smooth" (SKU cells lock directly; a SUB-CATEGORY cell locks every SKU under it for
     // that month) + "Add note" (any cell). Highlight cells → act on all.
-    var _cells=selCells(), _lockable=_cells.filter(function(c){return c.nk.indexOf('sku|')===0||c.nk.indexOf('subcat|')===0;}), _skuN=_lockable.length;
+    var _cells=selCells(), _lockable=_cells.filter(_lockableCell), _skuN=_lockable.length;
     var _lockKeys=_lockable.length?_lockKeysFor(_lockable):[];
     var _allLocked=_lockKeys.length>0 && _lockKeys.every(function(k){return typeof SMOOTH_LOCKS!=='undefined' && !!SMOOTH_LOCKS[k];});
     var _hasSub=_lockable.some(function(c){return c.nk.indexOf('subcat|')===0;});
@@ -6790,6 +6789,10 @@ document.addEventListener('click',function(e){ var c=e.target&&e.target.closest?
   function add(el){ if(el && !el.classList.contains('plansel')){ el.classList.add('plansel'); update(); } }
   // Selected cells resolved to their note/lock keys (nk = level|item|co|ch|month), de-duped.
   function selCells(){ var out=[],seen={}; Array.prototype.forEach.call(sel(),function(el){ var td=el.closest&&el.closest('td'); var nk=td&&td.dataset&&td.dataset.nk; if(nk&&!seen[nk]){ seen[nk]=1; out.push({nk:nk,td:td}); } }); return out; }
+  // A cell is lockable ("do not smooth") only if it's a SKU or sub-category cell AND its month is NOT a completed
+  // past month (smoothing only touches the current + future forecast; a past actual can't be smoothed). CUR_MONTH is
+  // partial, so it stays eligible.
+  function _lockableCell(c){ if(c.nk.indexOf('sku|')!==0 && c.nk.indexOf('subcat|')!==0)return false; var m=(c.nk.split('|'))[4]; return !m || m>=CUR_MONTH; }
   // Expand selected cells → the SKU-level lock keys the smoother reads. A 'sku|' cell locks itself; a 'subcat|' cell
   // locks every SKU under that sub-category (available on this channel) for that month.
   function _lockKeysFor(cells){ var keys={};
@@ -6802,7 +6805,7 @@ document.addEventListener('click',function(e){ var c=e.target&&e.target.closest?
   // Bulk "Do not smooth": lock (or unlock) every SKU under the selection, so smoothing leaves those forecasts fixed
   // and the other SKUs absorb the difference. Works on SKU cells AND sub-category cells (which lock all their SKUs).
   // Toggles: if every resolved SKU-cell is already locked, this unlocks them; otherwise it locks them all.
-  function bulkLock(){ var cells=selCells().filter(function(c){return c.nk.indexOf('sku|')===0||c.nk.indexOf('subcat|')===0;}); if(!cells.length)return;
+  function bulkLock(){ var cells=selCells().filter(_lockableCell); if(!cells.length)return;
     if(typeof SMOOTH_LOCKS==='undefined')window.SMOOTH_LOCKS={};
     var keys=_lockKeysFor(cells); if(!keys.length)return;
     var allLocked=keys.every(function(k){return !!SMOOTH_LOCKS[k];}), lock=!allLocked;
@@ -8820,7 +8823,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       else tr.appendChild(skuMonthCell(tc.m));
     });
     if(_grpOn){ if(_gidx===0)_insGrpHdr('m','MASTERS',_grpMs.length); if(_gidx===_grpMs.length)_insGrpHdr('s','SETS',_grpSs.length); tr.dataset.skugroup=(SKUM[sku]&&SKUM[sku].vt==='SET'?'s':'m')+'|'+parentKey; if(GRP_COLLAPSED.has(tr.dataset.skugroup))tr.style.display='none';   // MASTER/SET group headers + row tag + honour minimised state
-      (function(_gk){ var c0=tr.cells&&tr.cells[0]; if(c0){ c0.title='click the left edge to minimise this group'; c0.addEventListener('click',function(e){ var r=c0.getBoundingClientRect(); if((e.clientX-r.left)<22){ e.stopPropagation(); _toggleGrp(_gk); } }); } })(tr.dataset.skugroup); }   // click the left rail/padding to minimise the group
+      (function(_gk){ var c0=tr.cells&&tr.cells[0]; if(c0){ c0.addEventListener('click',function(e){ var r=c0.getBoundingClientRect(); if((e.clientX-r.left)<20){ e.stopPropagation(); _toggleGrp(_gk); } }); } })(tr.dataset.skugroup); }   // click the left gutter (padding / border) to minimise the group — no tooltip
     tbody.insertBefore(tr,insertRef);
   });
 

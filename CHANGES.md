@@ -1,3 +1,7 @@
+## v27.424 DEMAND plan — group-gutter click polish + Do-not-smooth excludes completed months
+- **Group minimise gutter:** the MASTER/SET left rail is back to a thin **1px** border matching the rest of the table (was a thick 3px slate line); clicking anywhere in the left **gutter (its padding / the border line)** of the header or a grouped row minimises the group. Tooltip removed.
+- **Do not smooth** is no longer offered for **completed past months** (month < current month — a past actual can’t be smoothed). SKU/subcat cells in the current (partial) month and future months stay eligible; the button count + lock both skip past-month cells. jsdom-verified: a 2026-01 cell is not lockable and locks nothing; 2027-02 is. `artifact_v16.7.html` only.
+
 ## v27.423 PRODUCT — "Generate report" PDF per SEASON and SEASON/CATEGORY grouping
 - Each season and category group header on the PLAN grid now has a **⤓ Report** link on the right. Clicking it opens a **printable PDF** for that grouping: a swatch board (swatch · colour name · ref · stage chip) grouped by category, titled "Product report · <season>[ · <category>]", with a product count + generated date. Season link = the whole season; category link = just that category in that season. Uses the grid’s product data (all non-dropped items in the grouping, ignoring the current filters). jsdom-verified: season report = 3 products across 2 categories; Poncho category report = 1. `supply/inject.html` only.
 
