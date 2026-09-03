@@ -393,8 +393,10 @@ td.fctd.anomaly-lo{background:#fff !important;border-left-color:#e5e5e5 !importa
 .sku-filters{display:flex;gap:4px;flex-wrap:wrap;align-items:center}
 .sku-flt-lbl{font-size:10px;color:#888;white-space:nowrap}
 /* Google-Sheets-style group outline: faint vertical rail down the left of grouped SKU rows (masters / sets). */
-tr.sku-inline[data-skugroup] td:first-child{box-shadow:inset 2px 0 0 #d8e0ea}
-tr.sku-inline.grp-hdr:hover .grp-tgl{border-color:#94a3b8;color:#334155}
+tr.sku-inline[data-skugroup] td:first-child{box-shadow:inset 3px 0 0 #94a3b8}
+tr.sku-inline.grp-hdr td:first-child{box-shadow:inset 3px 0 0 #94a3b8}
+tr.sku-inline.grp-hdr:hover .grp-tgl{border-color:#64748b;color:#111827;background:#f1f5f9}
+tr.sku-inline.grp-hdr:hover td{background:#f8fafc}
 tr.sku-row:hover td{background:#fafaf8}
 tr.sku-row:hover td.stk{background:#fafaf8}
 tr.sku-row:hover td.stk2{background:#fafaf8}
@@ -6764,11 +6766,14 @@ document.addEventListener('click',function(e){ var c=e.target&&e.target.closest?
     if(n<1){ b.style.display='none'; b.innerHTML=''; return; }
     var f=function(x){return Math.round(x).toLocaleString();};
     var sym=(typeof dispSym==='function'?dispSym():'£'), m=function(x){return sym+Math.round(x).toLocaleString();};
-    // Bulk-action buttons: "Do not smooth" (SKU cells only) + "Add note" (any cell). Highlight cells → act on all.
-    var _cells=selCells(), _skuCells=_cells.filter(function(c){return c.nk.indexOf('sku|')===0;}), _skuN=_skuCells.length;
-    var _allLocked=_skuN>0 && _skuCells.every(function(c){return typeof SMOOTH_LOCKS!=='undefined' && !!SMOOTH_LOCKS[c.nk];});
+    // Bulk-action buttons: "Do not smooth" (SKU cells lock directly; a SUB-CATEGORY cell locks every SKU under it for
+    // that month) + "Add note" (any cell). Highlight cells → act on all.
+    var _cells=selCells(), _lockable=_cells.filter(function(c){return c.nk.indexOf('sku|')===0||c.nk.indexOf('subcat|')===0;}), _skuN=_lockable.length;
+    var _lockKeys=_lockable.length?_lockKeysFor(_lockable):[];
+    var _allLocked=_lockKeys.length>0 && _lockKeys.every(function(k){return typeof SMOOTH_LOCKS!=='undefined' && !!SMOOTH_LOCKS[k];});
+    var _hasSub=_lockable.some(function(c){return c.nk.indexOf('subcat|')===0;});
     var _btnCss='font-size:11px;line-height:1;padding:2px 7px;border-radius:5px;cursor:pointer;font-weight:700;margin-left:6px';
-    var lockBtn=_skuN>0 ? ('<button class="ps-lock" title="'+(_allLocked?'Un-lock':'Lock')+' the '+_skuN+' selected SKU cell'+(_skuN>1?'s':'')+' so smoothing '+(_allLocked?'can rebalance '+(_skuN>1?'them':'it')+' again':'leaves '+(_skuN>1?'them':'it')+' fixed and other SKUs absorb the difference')+'." style="border:1px solid #fdba74;background:#fff7ed;color:#7c2d12;'+_btnCss+'">'+(_allLocked?'🔓 Un-lock':'🔒 Do not smooth')+' ('+_skuN+')</button>') : '';
+    var lockBtn=_skuN>0 ? ('<button class="ps-lock" title="'+(_allLocked?'Un-lock':'Lock')+' the '+_skuN+' selected cell'+(_skuN>1?'s':'')+' so smoothing leaves '+(_skuN>1?'them':'it')+' fixed'+(_hasSub?' — a sub-category cell locks EVERY SKU under it for that month':'')+' ('+_lockKeys.length+' SKU-cell'+(_lockKeys.length===1?'':'s')+')." style="border:1px solid #fdba74;background:#fff7ed;color:#7c2d12;'+_btnCss+'">'+(_allLocked?'🔓 Un-lock':'🔒 Do not smooth')+' ('+_skuN+')</button>') : '';
     var noteBtn=_cells.length ? ('<button class="ps-note" title="Add the same note to all '+_cells.length+' selected cell'+(_cells.length>1?'s':'')+'" style="border:1px solid #93c5fd;background:#eff6ff;color:#1e3a8a;'+_btnCss+'">📝 Add note ('+_cells.length+')</button>') : '';
     b.innerHTML='<b>Sum FC</b> '+f(sumFC)+' <span style="opacity:.6">(avg '+f(sumFC/n)+')</span>'
       +' &nbsp;·&nbsp; <b>Sum LY</b> '+f(sumLY)+' <span style="opacity:.6">(avg '+f(sumLY/n)+')</span>'
@@ -6784,15 +6789,25 @@ document.addEventListener('click',function(e){ var c=e.target&&e.target.closest?
   function add(el){ if(el && !el.classList.contains('plansel')){ el.classList.add('plansel'); update(); } }
   // Selected cells resolved to their note/lock keys (nk = level|item|co|ch|month), de-duped.
   function selCells(){ var out=[],seen={}; Array.prototype.forEach.call(sel(),function(el){ var td=el.closest&&el.closest('td'); var nk=td&&td.dataset&&td.dataset.nk; if(nk&&!seen[nk]){ seen[nk]=1; out.push({nk:nk,td:td}); } }); return out; }
-  // Bulk "Do not smooth": lock (or unlock) every selected SKU cell. SKU-level only — smoothing rebalances a
-  // sub-category, so a locked SKU cell is held fixed and the others absorb the difference. Toggles: if every
-  // selected SKU cell is already locked, this unlocks them; otherwise it locks them all.
-  function bulkLock(){ var cells=selCells().filter(function(c){return c.nk.indexOf('sku|')===0;}); if(!cells.length)return;
+  // Expand selected cells → the SKU-level lock keys the smoother reads. A 'sku|' cell locks itself; a 'subcat|' cell
+  // locks every SKU under that sub-category (available on this channel) for that month.
+  function _lockKeysFor(cells){ var keys={};
+    cells.forEach(function(c){ var p=_fcNk(c.nk);
+      if(c.nk.indexOf('sku|')===0){ keys['sku|'+p.item+'|'+p.co+'|'+p.ch+'|'+p.month]=1; }
+      else if(c.nk.indexOf('subcat|')===0 && typeof SKUM!=='undefined'){ var chKey=p.ch==='DTC'?'d':p.ch==='FBA'?'f':p.ch==='ZAL'?'z':p.ch==='TIK'?'t':'b', ctry=String(p.co).toLowerCase();
+        Object.keys(SKUM).forEach(function(sku){ var q=SKUM[sku]; if(!q||q.s!==p.item)return; if((((q.av||{})[ctry])||'').indexOf(chKey)<0)return; keys['sku|'+sku+'|'+p.co+'|'+p.ch+'|'+p.month]=1; }); }
+    });
+    return Object.keys(keys); }
+  // Bulk "Do not smooth": lock (or unlock) every SKU under the selection, so smoothing leaves those forecasts fixed
+  // and the other SKUs absorb the difference. Works on SKU cells AND sub-category cells (which lock all their SKUs).
+  // Toggles: if every resolved SKU-cell is already locked, this unlocks them; otherwise it locks them all.
+  function bulkLock(){ var cells=selCells().filter(function(c){return c.nk.indexOf('sku|')===0||c.nk.indexOf('subcat|')===0;}); if(!cells.length)return;
     if(typeof SMOOTH_LOCKS==='undefined')window.SMOOTH_LOCKS={};
-    var allLocked=cells.every(function(c){return !!SMOOTH_LOCKS[c.nk];}), lock=!allLocked;
-    cells.forEach(function(c){ if(lock)SMOOTH_LOCKS[c.nk]=true; else delete SMOOTH_LOCKS[c.nk];
-      try{ var p=_fcNk(c.nk); logChange(p.level,p.item,p.co,p.ch,p.month, lock?'locked':'unlocked', null, null); }catch(e){}
-      try{ refreshCellRail(c.nk); }catch(e){} });
+    var keys=_lockKeysFor(cells); if(!keys.length)return;
+    var allLocked=keys.every(function(k){return !!SMOOTH_LOCKS[k];}), lock=!allLocked;
+    keys.forEach(function(k){ if(lock)SMOOTH_LOCKS[k]=true; else delete SMOOTH_LOCKS[k];
+      try{ var p=_fcNk(k); logChange(p.level,p.item,p.co,p.ch,p.month, lock?'locked':'unlocked', null, null); }catch(e){}
+      try{ refreshCellRail(k); }catch(e){} });
     try{ saveSmoothLocks(); }catch(e){}
     update(); }
   // Bulk "Add note": one note text applied to every selected cell (any level). Written sequentially (not a
