@@ -7736,6 +7736,16 @@ function _leaderSales(sku,co,ch){
 // (the excess was pushed onto the master SKUs). Keyed co|ch|subcat|month → {maxA, sets:[{sku,cap,sz}]}.
 // Read by the gap-analysis tooltip / smooth review to explain the cap. Overwritten per computeSmoothAlloc call.
 var SET_CAP_NOTES={};
+// Human-readable explainer for a SET_CAP_NOTES entry — used as the title on the "⚛ N sets capped" badge that
+// appears on a sub-category cell while a smooth preview is active.
+function _setCapTip(cn){
+  if(!cn||!cn.sets||!cn.sets.length)return '';
+  var head='A-player cap — a set can’t be forecast above the top A-tier master SKU in this sub-category ('+fn(cn.maxA)+' units). '+cn.sets.length+' set'+(cn.sets.length>1?'s were':' was')+' held to that ceiling; the excess moved onto the master SKUs:';
+  var show=cn.sets.slice(0,8);
+  var lines=show.map(function(x){ var ex=x.cap*x.sz; return '• '+x.sku+' — '+fn(x.cap)+' box'+(x.cap===1?'':'es')+(x.sz>1?(' ×'+x.sz+' = '+fn(ex)+' units'):''); });
+  if(cn.sets.length>show.length)lines.push('…+'+(cn.sets.length-show.length)+' more');
+  return head+'\n'+lines.join('\n');
+}
 function computeSmoothAlloc(s,co,ch,m,opts){
   opts=opts||{};
   // protectLeaders: when true, apply tier-aware floors so historically-strong SKUs
@@ -8740,6 +8750,12 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       if(_av||_dv){ var splitDiv=document.createElement('div'); splitDiv.style.cssText='font-size:7px;font-weight:600;line-height:1.1';
         splitDiv.innerHTML='<span style="color:#475569" title="active SKUs">'+fn(_av)+'</span> <span style="color:#c4c4c2">\u00b7</span> <span style="color:#9ca3af;font-style:italic" title="discontinued SKUs">'+fn(_dv)+'</span>';
         std.appendChild(splitDiv); } }
+    // A-player cap explainer: while a smooth preview is live for this cell, flag any SETS the cap held down.
+    if(prevActive){ var _cn=SET_CAP_NOTES[co+'|'+ch+'|'+s+'|'+m];
+      if(_cn&&_cn.sets&&_cn.sets.length){ var capDiv=document.createElement('div');
+        capDiv.style.cssText='margin-top:1px;font-size:7px;font-weight:700;color:#7c3aed;cursor:help;line-height:1.1';
+        capDiv.textContent='⚛ '+_cn.sets.length+' set'+(_cn.sets.length>1?'s':'')+' capped';
+        capDiv.title=_setCapTip(_cn); std.appendChild(capDiv); } }
     if(prevActive && SMOOTH_PREVIEW.fy==null){
       var bar=document.createElement('div');bar.style.cssText='margin-top:1px;display:flex;gap:2px;justify-content:flex-end;align-items:center;flex-wrap:wrap';
       smoothReviewBar(bar);std.appendChild(bar);

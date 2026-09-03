@@ -1,3 +1,6 @@
+## v27.398 Sets #3c — visible explainer for the A-player set cap
+- While a smooth preview is live on a set sub-category cell, a purple **⚛ N sets capped** badge now appears on the gap-vs-subcat row. Its tooltip lists each capped set — box count × set-size = exploded units — and explains the ceiling (top A-tier master SKU’s units) and that the excess moved onto the master SKUs. Reads the `SET_CAP_NOTES` captured in v27.397; list truncates to 8 with “+N more”. Display-only; `artifact_v16.7.html`.
+
 ## v27.397 Sets #3c — A-player unit cap on set smoothing (excess flows to masters)
 - When smoothing a sub-category, a build-on-fly SET can no longer be forecast above a single **A-tier master SKU's units** in that same sub-category. Sets are allocated in BOXES but explode to boxes x set-size garments, so the ceiling in box terms is **floor(maxA / set-size)**. Implemented as a per-set cap in `computeSmoothAlloc`; the existing capped water-fill then flows the trimmed excess straight onto the (uncapped) master SKUs. Only bites when the sub-category actually has an A-tier master with a positive forecast that month.
 - Benchmark = the A-player's **pre-smoothing** forecast (a stable reference; a master can rise above it after absorbing the redistributed excess). Captured per co|ch|subcat|month in `SET_CAP_NOTES` for an upcoming explainer tooltip.
