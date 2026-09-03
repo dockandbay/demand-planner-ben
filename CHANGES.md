@@ -1,3 +1,9 @@
+## v27.430 PRODUCT timeline tags + quick phrases — Phase 1 (Config + schema)
+- New **PRODUCT ▸ Config ▸ Product** sections: **Timeline tags & badges** (name + colour picker + sort + active; live badge preview) and **Timeline quick phrases** (reusable message snippets). Both global libraries, CRUD saves on edit.
+- Migration **258**: `planner.product_timeline_tags`, `planner.product_timeline_snippets`, plus a `tags jsonb` column on `planner.supplier_notes` (per-message tag ids — used only by the product timeline). Applied to sandbox; Diviyaj to run on live.
+- Endpoints: `GET /api/product/timeline-config`, upsert/delete `POST /api/product/timeline-tag(/:id/delete)` and `/api/product/timeline-snippet(/:id/delete)`. Verified CRUD end-to-end on sandbox.
+- Phase 2 (compose "/" phrase picker + tag chips on the post box) and Phase 3 (badges on messages + used-tag filter bar) to follow. Trigger key = "/"; phrases are plain text (no variables) per Ben.
+
 ## v27.429 SUPPLY Samples — SHIPPED status between PRODUCTION and COMPLETED (COMPLETED = received)
 - The Our-status dropdown gains **SHIPPED** (order: FUTURE → PRODUCTION → **SHIPPED** → COMPLETED → CANCELLED). SHIPPED = sample in transit; **COMPLETED now means received**. Previously "shipped" was folded into COMPLETED — the two are now distinct: SHIPPED is blue/in-transit, COMPLETED stays green.
 - `_sampNormStatus` and the server `status_calc` split SHIPPED vs COMPLETED (complete/received → COMPLETED; ship → SHIPPED). The internal **Open** filter now keeps SHIPPED open (in transit = not yet received); **Completed** filter = received only. The "🚢 Set shipping" quick action now correctly hides once our status is SHIPPED. Actions (supplier-shipped / date-overdue) no longer fire on COMPLETED. Supplier **portal** view unchanged (shipped = done on their side). No migration. server.mjs + supply/inject.html.

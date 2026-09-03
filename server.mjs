@@ -6751,6 +6751,40 @@ app.post('/api/product/category-code', async (req, res) => {
   if (!category) return res.status(400).json({ error: 'category required' });
   try { await pool.query(`UPDATE planner.categories SET code=$2 WHERE category=$1`, [category, (b.code || '').trim().toUpperCase() || null]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// ── PRODUCT timeline config — tags/badges + quick phrases (migration 258). Shared by the CONFIG ▸ Product
+// panel and the timeline compose box (the "/" phrase picker + tag chips). Includes inactive rows so config
+// can toggle them; the compose box filters to active client-side.
+app.get('/api/product/timeline-config', async (_req, res) => {
+  try {
+    const tags = (await pool.query(`SELECT id, name, coalesce(colour,'#64748b') colour, sort, active FROM planner.product_timeline_tags ORDER BY sort, id`)).rows;
+    const snippets = (await pool.query(`SELECT id, body, sort, active FROM planner.product_timeline_snippets ORDER BY sort, id`)).rows;
+    res.json({ tags, snippets });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/timeline-tag', async (req, res) => {
+  const b = req.body || {}, name = (b.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'name required' });
+  const colour = (b.colour || '').trim() || '#64748b', sort = b.sort == null ? 0 : parseInt(b.sort, 10) || 0, active = b.active == null ? true : !!b.active;
+  try {
+    if (b.id) { await pool.query(`UPDATE planner.product_timeline_tags SET name=$2, colour=$3, sort=$4, active=$5 WHERE id=$1::bigint`, [b.id, name, colour, sort, active]); res.json({ ok: true, id: Number(b.id) }); }
+    else { const r = await pool.query(`INSERT INTO planner.product_timeline_tags (name, colour, sort, active) VALUES ($1,$2,$3,$4) RETURNING id`, [name, colour, sort, active]); res.json({ ok: true, id: r.rows[0].id }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/timeline-tag/:id/delete', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.product_timeline_tags WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/timeline-snippet', async (req, res) => {
+  const b = req.body || {}, body = (b.body || '').trim();
+  if (!body) return res.status(400).json({ error: 'body required' });
+  const sort = b.sort == null ? 0 : parseInt(b.sort, 10) || 0, active = b.active == null ? true : !!b.active;
+  try {
+    if (b.id) { await pool.query(`UPDATE planner.product_timeline_snippets SET body=$2, sort=$3, active=$4 WHERE id=$1::bigint`, [b.id, body, sort, active]); res.json({ ok: true, id: Number(b.id) }); }
+    else { const r = await pool.query(`INSERT INTO planner.product_timeline_snippets (body, sort, active) VALUES ($1,$2,$3) RETURNING id`, [body, sort, active]); res.json({ ok: true, id: r.rows[0].id }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/timeline-snippet/:id/delete', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.product_timeline_snippets WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // ── Product SAMPLE VERSIONS (v1/v2…) — supplier-created in the portal; visible in the main app (migration 130) ──
 async function productSampleList(itemRef) {
   const rows = (await pool.query(`SELECT ps.id, ps.version, (ps.item_ref||'_v'||ps.version) ref, to_char(ps.sample_date,'YYYY-MM-DD') sample_date,
