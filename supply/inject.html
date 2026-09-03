@@ -13245,7 +13245,6 @@
         if(_prodDetailTab==='master'){ var _b=box.querySelector('.pd-body'); if(_b)renderProdMaster(_b,_prodDetail); } else renderProdDetailShell(box,_prodDetail,seed); }).catch(function(){});
     }).catch(function(e){ box.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
   function renderProdDetailShell(c,d,seed){ var it=d.item; var inline=(c!==document.getElementById('product-content'));
-    var isDrawer=!!(c.closest&&c.closest('#proddrawer-bg'));   // the drawer already has its own header strip (colour + ref + close)
     var _u=Number(d.unread_supplier)||0;
     var _mAct=d._sizesLoaded?prodDetailActs(d):(seed?prodOpenActs(seed).n:0);   // seed's action count until the real sizes land
     var tabs=[['master','Master data'],['sizes','Size &amp; variants'+(_mAct?' <span class="ex-badge">'+_mAct+'</span>':'')],['samples','Samples'],['timeline','Timeline'+(_u?' <span class="ex-badge">'+_u+'</span>':'')],['documents','Documents']];
@@ -13254,14 +13253,9 @@
       +(it.has_swatch?'<img src="/api/product/swatch/'+encodeURIComponent(it.ref)+'?t='+encodeURIComponent(it.updated_at)+'" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">':'')
       +'<div><div style="font-weight:700;font-size:15px;color:#0f172a">'+prodColourDisplay(it)+'</div><div style="color:#94a3b8;font-size:11px;font-family:ui-monospace,Menlo,monospace">'+esc(it.ref)+'</div></div>'
       +'<span style="margin-left:auto;display:flex;gap:6px;align-items:center">'+prodStageChip(it.stage||'sample_development')+prodStatusChip(prodStatusFromStage(it.stage||'sample_development'))+'</span></div>');
-    // Grid-inline mode → a compact self-describing header strip (swatch · colour + ref · meta · stage) so the open panel
-    // stands on its own; the drawer supplies its own head, so skip it there.
-    var stripInline=(inline&&!isDrawer)?('<div style="display:flex;align-items:center;gap:11px;margin:0 0 12px;padding-bottom:10px;border-bottom:1px solid var(--p-line)">'
-      +(it.has_swatch?'<img src="/api/product/swatch/'+encodeURIComponent(it.ref)+'?t='+encodeURIComponent(it.updated_at||'')+'" style="width:44px;height:44px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb;flex:0 0 auto">':'')
-      +'<div style="min-width:0"><div style="font-weight:700;font-size:14px;color:#0f172a">'+prodColourDisplay(it)+'</div><div style="color:#94a3b8;font-size:11px;font-family:ui-monospace,Menlo,monospace">'+esc(it.ref)+'</div></div>'
-      +([esc(it.category||''),esc(it.season||''),esc(it.supplier||'')].filter(Boolean).length?'<div style="color:#64748b;font-size:11px;margin-left:2px">'+[esc(it.category||''),esc(it.season||''),esc(it.supplier||'')].filter(Boolean).join(' · ')+'</div>':'')
-      +'<span style="margin-left:auto;display:flex;gap:6px;align-items:center">'+prodStageChip(it.stage||'sample_development')+prodStatusChip(prodStatusFromStage(it.stage||'sample_development'))+'</span></div>'):'';
-    c.innerHTML=header+stripInline+'<div class="pd-tabs">'+tabs.map(function(t){return '<button class="pd-tab'+(t[0]===_prodDetailTab?' active':'')+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div><div class="pd-body"></div>';
+    // Grid-inline mode → NO header strip: the grid row directly above already shows swatch / colour / ref / meta, so
+    // repeating it here is pure duplication (Ben). The drawer supplies its own head; the full page keeps its header.
+    c.innerHTML=header+'<div class="pd-tabs">'+tabs.map(function(t){return '<button class="pd-tab'+(t[0]===_prodDetailTab?' active':'')+'" data-t="'+t[0]+'">'+t[1]+'</button>';}).join('')+'</div><div class="pd-body"></div>';
     if(!inline){ var bk=c.querySelector('#pd-back'); if(bk)bk.onclick=function(){ selectProductSub('plan'); }; }
     c.querySelectorAll('.pd-tab').forEach(function(b){ b.onclick=function(){ _prodDetailTab=b.dataset.t; try{ if(it&&it.ref)writeHash(_prodDetailTab==='master'?['product',it.ref]:['product',it.ref,_prodDetailTab]); }catch(e){} renderProdDetailShell(c,_prodDetail,_prodSeed); }; });
     var body=c.querySelector('.pd-body');
