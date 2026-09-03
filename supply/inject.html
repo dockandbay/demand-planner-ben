@@ -86,8 +86,9 @@
 #product-root table.pg-tbl th{padding:9px 12px;background:#fbfcfe;color:#8a93a3;border-bottom:1px solid var(--p-line)}
 #product-root table.pg-tbl tr:hover td{background:#f8faff}
 #product-root .pg-swatch2{width:44px;height:44px;border-radius:9px;box-shadow:0 1px 2px rgba(15,23,42,.10)}
-#product-root .pg-ref{font-weight:700;font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:#0f172a}
-#product-root .pg-colour{font-size:12px;color:#475569;font-weight:600;margin-top:2px}
+/* Identity hierarchy (Direction A #1): colour name leads, mono ref is the secondary subline (matches the mobile card). */
+#product-root .pg-colour{font-size:12.5px;color:#0f172a;font-weight:600;line-height:1.2}
+#product-root .pg-ref{font-weight:600;font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#94a3b8;margin-top:1px}
 #product-root .pg-stage-wrap{display:flex;flex-direction:column;gap:2px;align-items:flex-start}
 #product-root .pg-stage-owner{font-size:9px;color:#94a3b8;letter-spacing:.02em;padding-left:2px;text-transform:uppercase}
 #product-root .pg-stage-sel{max-width:190px}
@@ -13035,7 +13036,7 @@
             if(cKey!==_pgCat){ _pgCat=cKey; hdr+='<tr class="pg-cathdr" data-season="'+esc(sKey)+'" data-cat="'+esc(cKey)+'"><td colspan="9" style="cursor:pointer;background:#eef2f7;font-weight:600;font-size:12px;letter-spacing:.02em;color:#475569;padding:4px 10px 4px 28px"><span class="pg-caret" style="display:inline-block;width:13px">▾</span>'+esc(cKey||'— no category —')+' <span style="font-weight:400;color:#94a3b8">('+catCount[sKey+'|'+cKey]+')</span></td></tr>'; }
             return hdr+'<tr class="pg-datarow" data-season="'+esc(sKey)+'" data-cat="'+esc(cKey)+'">'
               +'<td><span style="display:inline-flex;align-items:center;gap:7px">'+sw+'<button class="planbtn pg-open" data-ref="'+esc(r.ref)+'" data-i="'+i+'">PLAN</button></span></td>'
-              +'<td><div class="pg-ref" data-ref="'+esc(r.ref)+'">'+esc(r.ref)+prodComboBadge(r)+'</div><div class="pg-colour" data-ref="'+esc(r.ref)+'">'+prodColourDisplay(r)+'</div></td>'
+              +'<td><div class="pg-colour" data-ref="'+esc(r.ref)+'">'+prodColourDisplay(r)+'</div><div class="pg-ref" data-ref="'+esc(r.ref)+'">'+esc(r.ref)+prodComboBadge(r)+'</div></td>'
               +'<td>'+prodPickBtn(r.ref,'category',r.category,'category')+'</td>'
               +'<td>'+prodPickBtn(r.ref,'season',r.season,'season')+'</td>'
               +'<td>'+prodPickBtn(r.ref,'supplier',r.supplier,'supplier')+'</td>'
