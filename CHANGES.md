@@ -1,3 +1,6 @@
+## v27.449 PRODUCT ▸ Config — Component catalogue (redesign P1)
+- New **Components** sub-tab in PRODUCT ▸ Config: an editable catalogue of component types, each with a **default supplier** (a specific supplier or "= product supplier", overridable per product later) and a **sampling mode** (Sampled / Spec-linked). + Add component, per-row edit + delete. Migration **261** (planner.component_types) + endpoints (list w/ suppliers, upsert, delete). Sandbox seeded with a starter set (Product body · Pouch · Box → MQ Print · Hang tag → MQ Print · Care label → MQ Print · Polybag → spec-linked). Catalogue only — per-product wiring (P2) next. server.mjs + supply/inject.html.
+
 ## v27.448 PRODUCT timeline + samples — polish
 - **Samples ▸ sample-requests table:** the Tracking cell now shows the **carrier** next to the tracking, and the tracking number is a **dynamic carrier link** (carrierTrackLinkInj). Server returns carrier on /sample-requests.
 - **Product timeline sorted newest-first properly** — was sorting the dd-Mmm-yy note dates by day-of-month; now uses the sortable tlTs key (both timelines).

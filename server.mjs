@@ -6800,6 +6800,30 @@ app.post('/api/product/category', async (req, res) => {   // add (or re-activate
 app.post('/api/product/category/:category/delete', async (req, res) => {   // soft-delete (n8n may re-add from products; is_active=false hides it)
   try { await pool.query(`UPDATE planner.categories SET is_active=false WHERE category=$1`, [req.params.category]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// PRODUCT component catalogue (mig 261) — component types + their default supplier + sampling mode. Managed in
+// PRODUCT ▸ Config. Returns the supplier list too (for the default-supplier dropdown).
+app.get('/api/product/component-types', async (_req, res) => {
+  try {
+    const types = (await pool.query(`SELECT id, name, coalesce(default_supplier,'') default_supplier, coalesce(sampling_mode,'sampled') sampling_mode, sort, active FROM planner.component_types ORDER BY sort, id`)).rows;
+    const suppliers = (await pool.query(`SELECT name FROM planner.suppliers WHERE coalesce(kind,'supplier')='supplier' ORDER BY name`)).rows.map(r => r.name);
+    res.json({ types, suppliers });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/component-type', async (req, res) => {
+  const b = req.body || {}, name = (b.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'name required' });
+  const sup = (b.default_supplier == null ? '' : String(b.default_supplier)).trim() || null;
+  const mode = ['sampled', 'spec_linked'].indexOf(b.sampling_mode) >= 0 ? b.sampling_mode : 'sampled';
+  const sort = b.sort == null ? 0 : parseInt(b.sort, 10) || 0, active = b.active == null ? true : !!b.active;
+  try {
+    if (b.id) { await pool.query(`UPDATE planner.component_types SET name=$2, default_supplier=$3, sampling_mode=$4, sort=$5, active=$6 WHERE id=$1::bigint`, [b.id, name, sup, mode, sort, active]); res.json({ ok: true, id: Number(b.id) }); }
+    else { const r = await pool.query(`INSERT INTO planner.component_types (name, default_supplier, sampling_mode, sort, active) VALUES ($1,$2,$3,$4,$5)
+      ON CONFLICT (name) DO UPDATE SET default_supplier=excluded.default_supplier, sampling_mode=excluded.sampling_mode, sort=excluded.sort, active=true RETURNING id`, [name, sup, mode, sort, active]); res.json({ ok: true, id: r.rows[0].id }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/component-type/:id/delete', async (req, res) => {
+  try { await pool.query(`UPDATE planner.component_types SET active=false WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // ── PRODUCT timeline config — tags/badges + quick phrases (migration 258). Shared by the CONFIG ▸ Product
 // panel and the timeline compose box (the "/" phrase picker + tag chips). Includes inactive rows so config
 // can toggle them; the compose box filters to active client-side.
