@@ -6824,6 +6824,37 @@ app.post('/api/product/component-type', async (req, res) => {
 app.post('/api/product/component-type/:id/delete', async (req, res) => {
   try { await pool.query(`UPDATE planner.component_types SET active=false WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// PRODUCT per-product COMPONENTS (mig 262) — the component set for one product development, each with its supplier
+// + sampling mode. Returns the product's main supplier (to resolve "= product supplier"), the catalogue + suppliers.
+app.get('/api/product/item/:ref/components', async (req, res) => {
+  const ref = req.params.ref;
+  try {
+    const [comps, item, cat, sups] = await Promise.all([
+      pool.query(`SELECT c.id, c.component_type_id, c.name, coalesce(c.supplier,'') supplier, coalesce(c.sampling_mode,'sampled') sampling_mode, c.spec_id, c.sort FROM planner.product_dev_components c WHERE c.item_ref=$1 ORDER BY c.sort, c.id`, [ref]),
+      pool.query(`SELECT coalesce(supplier,'') supplier FROM planner.product_dev_items WHERE ref=$1`, [ref]),
+      pool.query(`SELECT id, name, coalesce(default_supplier,'') default_supplier, coalesce(sampling_mode,'sampled') sampling_mode FROM planner.component_types WHERE active ORDER BY sort, id`),
+      pool.query(`SELECT name FROM planner.suppliers WHERE coalesce(kind,'supplier')='supplier' ORDER BY name`),
+    ]);
+    res.json({ components: comps.rows, product_supplier: (item.rows[0] || {}).supplier || '', catalogue: cat.rows, suppliers: sups.rows.map(r => r.name) });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/item/:ref/component', async (req, res) => {
+  const ref = req.params.ref, b = req.body || {}, name = (b.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'name required' });
+  const sup = (b.supplier == null ? '' : String(b.supplier)).trim() || null;
+  const mode = ['sampled', 'spec_linked'].indexOf(b.sampling_mode) >= 0 ? b.sampling_mode : 'sampled';
+  const ctid = b.component_type_id ? Number(b.component_type_id) : null;
+  const specId = b.spec_id ? Number(b.spec_id) : null;
+  const sort = b.sort == null ? 0 : parseInt(b.sort, 10) || 0;
+  try {
+    if (b.id) { await pool.query(`UPDATE planner.product_dev_components SET name=$2, supplier=$3, sampling_mode=$4, spec_id=$5, sort=$6, component_type_id=coalesce($7, component_type_id) WHERE id=$1::bigint`, [b.id, name, sup, mode, specId, sort, ctid]); res.json({ ok: true, id: Number(b.id) }); }
+    else { const r = await pool.query(`INSERT INTO planner.product_dev_components (item_ref, component_type_id, name, supplier, sampling_mode, spec_id, sort) VALUES ($1,$2,$3,$4,$5,$6,$7)
+      ON CONFLICT (item_ref, name) DO UPDATE SET supplier=excluded.supplier, sampling_mode=excluded.sampling_mode, spec_id=excluded.spec_id, sort=excluded.sort RETURNING id`, [ref, ctid, name, sup, mode, specId, sort]); res.json({ ok: true, id: r.rows[0].id }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/component/:id/delete', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.product_dev_components WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // ── PRODUCT timeline config — tags/badges + quick phrases (migration 258). Shared by the CONFIG ▸ Product
 // panel and the timeline compose box (the "/" phrase picker + tag chips). Includes inactive rows so config
 // can toggle them; the compose box filters to active client-side.
