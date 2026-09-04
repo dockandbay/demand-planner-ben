@@ -1,3 +1,9 @@
+## v27.455 PRODUCT — Components folded into Sizes & Variants (size × component matrix)
+- The standalone **Components** tab is removed; its content moves to the **top of Sizes & Variants** as a compact chooser (Component · Supplier · Sampling · Spec · remove + add-from-catalogue).
+- The per-size grid lines are now driven by the **product's chosen components** (not the 5 fixed aspects): each size shows one line per component. New components default **on for every size**. Spec-linked components (e.g. Polybag) render **no sampling** with a link to the Specification.
+- Existing approval/files carry over unchanged (migrated components keep their aspect link, mig 263). Net-new components store per-size data under a `comp:<id>` key; their sample-version cell stays blank until the sample-creation UI offers component selection (follow-on).
+- server.mjs: `/api/product/item/:ref` and `/sizes` now return `components`. supply/inject.html: dynamic matrix + chooser + tab removal. No new migration.
+
 ## v27.454 PRODUCT grid — swatch size S / M / L
 - A **Swatch S / M / L** toggle on the PRODUCT grid toolbar (right side). Medium is the current size (44px); Large is ~2× (88px); Small is ~30% smaller (31px). Choice persists (localStorage) across redraws and sessions. supply/inject.html (CSS + toolbar toggle).
 

@@ -13505,13 +13505,14 @@
       _prodDetail.item=cd.item; _prodDetail.unread_supplier=cd.unread_supplier; _prodDetail._coreLoaded=true;
       renderProdDetailShell(box, _prodDetail, seed);
       // (3) HEAVY: sizes + components load in the background → the size table fills in; then cache the full thing.
-      fetch('/api/product/item/'+encodeURIComponent(ref)+'/sizes').then(function(r){return r.json();}).then(function(sd){ if(box!==_prodDetailBox)return; _prodDetail.sizes=(sd&&sd.sizes)||[]; _prodDetail.samples=(sd&&sd.samples)||[]; _prodDetail._sizesLoaded=true; _prodItemCache[ref]={t:Date.now(),d:_prodDetail};
+      fetch('/api/product/item/'+encodeURIComponent(ref)+'/sizes').then(function(r){return r.json();}).then(function(sd){ if(box!==_prodDetailBox)return; _prodDetail.sizes=(sd&&sd.sizes)||[]; _prodDetail.samples=(sd&&sd.samples)||[]; _prodDetail.components=(sd&&sd.components)||[]; _prodDetail._sizesLoaded=true; _prodItemCache[ref]={t:Date.now(),d:_prodDetail};
         if(_prodDetailTab==='master'){ var _b=box.querySelector('.pd-body'); if(_b)renderProdMaster(_b,_prodDetail); } else renderProdDetailShell(box,_prodDetail,seed); }).catch(function(){});
     }).catch(function(e){ box.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
   function renderProdDetailShell(c,d,seed){ var it=d.item; var inline=(c!==document.getElementById('product-content'));
+    if(_prodDetailTab==='components')_prodDetailTab='sizes';   // Components folded into Sizes & Variants (v27.455) — redirect old link/hash before the tab bar renders
     var _u=Number(d.unread_supplier)||0;
     var _mAct=d._sizesLoaded?prodDetailActs(d):(seed?prodOpenActs(seed).n:0);   // seed's action count until the real sizes land
-    var tabs=[['master','Master data'],['components','Components'],['sizes','Size &amp; variants'+(_mAct?' <span class="ex-badge">'+_mAct+'</span>':'')],['samples','Samples'],['timeline','Timeline'+(_u?' <span class="ex-badge">'+_u+'</span>':'')],['documents','Documents']];
+    var tabs=[['master','Master data'],['sizes','Size &amp; variants'+(_mAct?' <span class="ex-badge">'+_mAct+'</span>':'')],['samples','Samples'],['timeline','Timeline'+(_u?' <span class="ex-badge">'+_u+'</span>':'')],['documents','Documents']];
     // Full-page mode → the full header with Back. Full header vs the compact strip below.
     var header=inline?'':('<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px"><button class="save-btn light" id="pd-back">← Back</button>'
       +(it.has_swatch?'<img src="/api/product/swatch/'+encodeURIComponent(it.ref)+'?t='+encodeURIComponent(it.updated_at)+'" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">':'')
@@ -13525,19 +13526,23 @@
     var body=c.querySelector('.pd-body');
     if(_prodDetailTab==='timeline')return renderProdTimeline(body,it.ref);
     if(_prodDetailTab==='documents')return renderProdDocs(body,it.ref);
-    if(_prodDetailTab==='components')return renderProdComponents(body,it.ref);
+    if(_prodDetailTab==='components'){ _prodDetailTab='sizes'; }   // Components folded into Sizes & Variants (v27.455) — redirect any old link/hash
     if(_prodDetailTab==='samples')return renderProdSamplesTab(body,it.ref);
     if(_prodDetailTab==='sizes')return renderProdMaster(body,d,'sizes');
     if(!d._coreLoaded && d._partial){ body.innerHTML='<div class="pd-skel">'+Array(5).join('x').split('x').map(function(){return '<div class="pd-skel-row"></div>';}).join('')+'</div>'; return; }   // master fields wait on the tiny core call
     renderProdMaster(body,d); }
   // PRODUCT ▸ Components (redesign P2) — the component set for this product, each aligned to a supplier + sampling mode.
-  function renderProdComponents(body,ref){ body.innerHTML='<div style="color:#94a3b8">Loading…</div>';
+  function renderProdComponents(body,ref,opts){ opts=opts||{}; var compact=!!opts.compact; body.innerHTML='<div style="color:#94a3b8">Loading…</div>';
+    var _self=function(){ renderProdComponents(body,ref,opts); };
+    var _reload=opts.reload||_self;   // structural changes (add/remove/mode) refresh this chooser; in the merged Sizes tab they reload the whole tab so the grid rebuilds
     fetch('/api/product/item/'+encodeURIComponent(ref)+'/components').then(function(r){return r.json();}).then(function(d){ d=d||{};
       var comps=d.components||[], cat=d.catalogue||[], sups=d.suppliers||[], psup=d.product_supplier||'';
       function byId(id){ return comps.filter(function(x){return String(x.id)===String(id);})[0]||{}; }
       function supSel(id,cur){ return '<select class="pc2-sup" data-id="'+id+'" style="font-size:11px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;background:#fff"><option value=""'+(!cur?' selected':'')+'>= product supplier'+(psup?' ('+esc(psup)+')':'')+'</option>'+sups.map(function(s){return '<option'+(s===cur?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select>'; }
       function modeSel(id,cur){ return '<select class="pc2-mode" data-id="'+id+'" style="font-size:11px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;background:#fff"><option value="sampled"'+(cur!=='spec_linked'?' selected':'')+'>Sampled</option><option value="spec_linked"'+(cur==='spec_linked'?' selected':'')+'>Spec-linked</option></select>'; }
+      function specLink(c){ var spec=c.sampling_mode==='spec_linked'; if(!spec)return '<span class="mut tiny">—</span>'; return c.spec_id?'<a href="#/product/'+encodeURIComponent(ref)+'/specifications" style="color:#1d4ed8;text-decoration:underline;font-weight:600">→ Spec #'+esc(c.spec_id)+' ↗</a>':'<a class="pc2-spec" data-id="'+c.id+'" style="color:#1d4ed8;cursor:pointer;text-decoration:underline">link a spec</a>'; }
       var rows=comps.map(function(c){ var spec=c.sampling_mode==='spec_linked';
+        if(compact){ return '<tr><td class="l" style="padding:5px 8px;font-weight:600">'+esc(c.name)+'</td><td class="l" style="padding:5px 8px">'+supSel(c.id,c.supplier)+'</td><td class="l" style="padding:5px 8px">'+modeSel(c.id,c.sampling_mode)+'</td><td class="l" style="padding:5px 8px">'+specLink(c)+'</td><td class="l" style="padding:5px 8px"><a class="pc2-del" data-id="'+c.id+'" style="color:#dc2626;cursor:pointer">✕</a></td></tr>'; }
         var status;
         if(spec){ status='<span style="color:#64748b">no sampling</span>'; }
         else if(!c.total){ status='<span class="mut tiny" title="No sample review recorded yet">not started</span>'; }
@@ -13545,22 +13550,24 @@
         else if(c.approved>=c.total){ status='<span style="color:#15803d;font-weight:700">✓ Approved'+(c.total>1?' ('+c.total+')':'')+'</span>'; }
         else { status='<span style="color:#b45309;font-weight:600" title="approved sizes / total">'+c.approved+'/'+c.total+' approved</span>'; }
         var files;
-        if(spec){ files=c.spec_id?'<a href="#/product/'+encodeURIComponent(ref)+'/specifications" style="color:#1d4ed8;text-decoration:underline;font-weight:600">→ Spec #'+esc(c.spec_id)+' ↗</a>':'<a class="pc2-spec" data-id="'+c.id+'" style="color:#1d4ed8;cursor:pointer;text-decoration:underline">link a spec</a>'; }
+        if(spec){ files=specLink(c); }
         else if(c.files){ files='<a class="pc2-tosizes" style="color:#1d4ed8;cursor:pointer;text-decoration:underline">'+c.files+' file'+(c.files>1?'s':'')+' →</a>'; }
         else { files='<span class="mut tiny">—</span>'; }
         return '<tr><td class="l" style="padding:5px 8px;font-weight:600">'+esc(c.name)+'</td><td class="l" style="padding:5px 8px">'+supSel(c.id,c.supplier)+'</td><td class="l" style="padding:5px 8px">'+modeSel(c.id,c.sampling_mode)+'</td><td class="l" style="padding:5px 8px">'+status+'</td><td class="l" style="padding:5px 8px">'+files+'</td><td class="l" style="padding:5px 8px"><a class="pc2-del" data-id="'+c.id+'" style="color:#dc2626;cursor:pointer">✕</a></td></tr>'; }).join('');
       var have={}; comps.forEach(function(c){ have[c.name]=1; }); var addable=cat.filter(function(t){ return !have[t.name]; });
-      var addBar=addable.length?('<div class="bar" style="margin-top:12px;gap:6px"><span class="pill-lbl">Add component</span><select id="pc2-add" style="width:auto;padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px;background:#fff">'+addable.map(function(t){return '<option value="'+t.id+'" data-name="'+esc(t.name)+'" data-sup="'+esc(t.default_supplier||'')+'" data-mode="'+esc(t.sampling_mode||'sampled')+'">'+esc(t.name)+'</option>';}).join('')+'</select><button class="save-btn" id="pc2-addbtn">+ Add</button>'+(!comps.length?'<button class="save-btn" id="pc2-addall" style="background:#16a34a;color:#fff;border-color:#15803d;font-weight:700;margin-left:6px">⚡ Set up from catalogue</button>':'<button class="save-btn light" id="pc2-addall" style="margin-left:6px">+ Add all</button>')+'</div>'):'<div class="mut tiny" style="margin-top:12px">All catalogue components are on this product. Manage the catalogue in CONFIG ▸ Components.</div>';
-      body.innerHTML='<div class="sect-h">Components <span class="mut tiny" style="font-weight:400">— the parts of this product, each aligned to a supplier. Supplier defaults to the catalogue; override per component.</span></div>'
-        +'<div class="tw"><table class="samp-tbl" style="font-size:12px;max-width:860px"><thead><tr><th class="l">Component</th><th class="l">Supplier</th><th class="l">Sampling</th><th class="l">Status</th><th class="l">Files</th><th></th></tr></thead><tbody>'+(rows||'<tr><td colspan="6" class="count">No components yet — add from the catalogue below.</td></tr>')+'</tbody></table></div>'+addBar;
+      var addBar=addable.length?('<div class="bar" style="margin-top:10px;gap:6px"><span class="pill-lbl">Add component</span><select id="pc2-add" style="width:auto;padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px;background:#fff">'+addable.map(function(t){return '<option value="'+t.id+'" data-name="'+esc(t.name)+'" data-sup="'+esc(t.default_supplier||'')+'" data-mode="'+esc(t.sampling_mode||'sampled')+'">'+esc(t.name)+'</option>';}).join('')+'</select><button class="save-btn" id="pc2-addbtn">+ Add</button>'+(!comps.length?'<button class="save-btn" id="pc2-addall" style="background:#16a34a;color:#fff;border-color:#15803d;font-weight:700;margin-left:6px">⚡ Set up from catalogue</button>':'<button class="save-btn light" id="pc2-addall" style="margin-left:6px">+ Add all</button>')+'</div>'):'<div class="mut tiny" style="margin-top:10px">All catalogue components are on this product. Manage the catalogue in PRODUCT ▸ Config ▸ Components.</div>';
+      if(compact){ body.innerHTML='<div style="font-weight:700;font-size:13px;margin:0 0 6px">Components <span class="mut" style="font-weight:400;font-size:11px">— the parts of this product, each aligned to a supplier. Per-size sign-off is in the grid below.</span></div>'
+        +'<div class="tw"><table class="samp-tbl" style="font-size:12px;max-width:720px"><thead><tr><th class="l">Component</th><th class="l">Supplier</th><th class="l">Sampling</th><th class="l">Spec</th><th></th></tr></thead><tbody>'+(rows||'<tr><td colspan="5" class="count">No components yet — add from the catalogue below.</td></tr>')+'</tbody></table></div>'+addBar; }
+      else { body.innerHTML='<div class="sect-h">Components <span class="mut tiny" style="font-weight:400">— the parts of this product, each aligned to a supplier. Supplier defaults to the catalogue; override per component.</span></div>'
+        +'<div class="tw"><table class="samp-tbl" style="font-size:12px;max-width:860px"><thead><tr><th class="l">Component</th><th class="l">Supplier</th><th class="l">Sampling</th><th class="l">Status</th><th class="l">Files</th><th></th></tr></thead><tbody>'+(rows||'<tr><td colspan="6" class="count">No components yet — add from the catalogue below.</td></tr>')+'</tbody></table></div>'+addBar; }
       body.querySelectorAll('.pc2-sup').forEach(function(el){ el.onchange=function(){ var c=byId(el.dataset.id); c.supplier=el.value; shipPost('/api/product/item/'+encodeURIComponent(ref)+'/component',{id:el.dataset.id,name:c.name,supplier:el.value,sampling_mode:c.sampling_mode,spec_id:c.spec_id},function(){}); }; });
-      body.querySelectorAll('.pc2-mode').forEach(function(el){ el.onchange=function(){ var c=byId(el.dataset.id); shipPost('/api/product/item/'+encodeURIComponent(ref)+'/component',{id:el.dataset.id,name:c.name,supplier:c.supplier,sampling_mode:el.value,spec_id:c.spec_id},function(){ renderProdComponents(body,ref); }); }; });
-      body.querySelectorAll('.pc2-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Remove this component from the product?'))return; shipPost('/api/product/component/'+a.dataset.id+'/delete',{},function(){ renderProdComponents(body,ref); }); }; });
-      body.querySelectorAll('.pc2-spec').forEach(function(a){ a.onclick=function(){ var sid=(prompt('Specification id to link (see the Specifications tab):')||'').trim(); if(!sid)return; var c=byId(a.dataset.id); shipPost('/api/product/item/'+encodeURIComponent(ref)+'/component',{id:a.dataset.id,name:c.name,supplier:c.supplier,sampling_mode:'spec_linked',spec_id:sid},function(){ renderProdComponents(body,ref); }); }; });
+      body.querySelectorAll('.pc2-mode').forEach(function(el){ el.onchange=function(){ var c=byId(el.dataset.id); shipPost('/api/product/item/'+encodeURIComponent(ref)+'/component',{id:el.dataset.id,name:c.name,supplier:c.supplier,sampling_mode:el.value,spec_id:c.spec_id},function(){ _reload(); }); }; });
+      body.querySelectorAll('.pc2-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Remove this component from the product?'))return; shipPost('/api/product/component/'+a.dataset.id+'/delete',{},function(){ _reload(); }); }; });
+      body.querySelectorAll('.pc2-spec').forEach(function(a){ a.onclick=function(){ var sid=(prompt('Specification id to link (see the Specifications tab):')||'').trim(); if(!sid)return; var c=byId(a.dataset.id); shipPost('/api/product/item/'+encodeURIComponent(ref)+'/component',{id:a.dataset.id,name:c.name,supplier:c.supplier,sampling_mode:'spec_linked',spec_id:sid},function(){ _reload(); }); }; });
       body.querySelectorAll('.pc2-tosizes').forEach(function(a){ a.onclick=function(){ var host=body.parentElement||body; var b=host.querySelector('.pd-tab[data-t="sizes"]'); if(b)b.click(); }; });
-      var _ab=body.querySelector('#pc2-addbtn'); if(_ab)_ab.onclick=function(){ var sel=body.querySelector('#pc2-add'); if(!sel||!sel.options.length)return; var o=sel.options[sel.selectedIndex]; shipPost('/api/product/item/'+encodeURIComponent(ref)+'/component',{component_type_id:o.value,name:o.dataset.name,supplier:o.dataset.sup,sampling_mode:o.dataset.mode,sort:comps.length},function(j){ if(j&&j.error){alert(j.error);return;} renderProdComponents(body,ref); }); };
+      var _ab=body.querySelector('#pc2-addbtn'); if(_ab)_ab.onclick=function(){ var sel=body.querySelector('#pc2-add'); if(!sel||!sel.options.length)return; var o=sel.options[sel.selectedIndex]; shipPost('/api/product/item/'+encodeURIComponent(ref)+'/component',{component_type_id:o.value,name:o.dataset.name,supplier:o.dataset.sup,sampling_mode:o.dataset.mode,sort:comps.length},function(j){ if(j&&j.error){alert(j.error);return;} _reload(); }); };
       var _aa=body.querySelector('#pc2-addall'); if(_aa)_aa.onclick=function(){ _aa.disabled=true; _aa.textContent='Adding…'; var base=comps.length, i=0;
-        (function next(){ if(i>=addable.length){ renderProdComponents(body,ref); return; } var t=addable[i++]; shipPost('/api/product/item/'+encodeURIComponent(ref)+'/component',{component_type_id:t.id,name:t.name,supplier:t.default_supplier||'',sampling_mode:t.sampling_mode||'sampled',sort:base+i},function(){ next(); }); })(); };
+        (function next(){ if(i>=addable.length){ _reload(); return; } var t=addable[i++]; shipPost('/api/product/item/'+encodeURIComponent(ref)+'/component',{component_type_id:t.id,name:t.name,supplier:t.default_supplier||'',sampling_mode:t.sampling_mode||'sampled',sort:base+i},function(){ next(); }); })(); };
     }).catch(function(e){ body.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
   function renderProdSamplesTab(body,ref){ body.innerHTML='<div style="color:#94a3b8">Loading…</div>';
     _prodCachedJson('/api/product/samples/'+encodeURIComponent(ref)).then(function(list){ list=Array.isArray(list)?list:[];
@@ -13637,7 +13644,16 @@
     function selOf(id,val,opts,valKey,lblFn){ return '<select class="fci" id="'+id+'">'+opts.map(function(o){ var v=valKey?o[valKey]:o; return '<option value="'+esc(v)+'"'+(String(v)===String(val)?' selected':'')+'>'+esc(lblFn?lblFn(o):v)+'</option>'; }).join('')+'</select>'; }
     // ── Component matrix: each size = a header row + one sub-row per component (Product / Packaging / Labels /
     //    Polybags / Other). Each component: description · required (+ type) · versioned files · approval · action.
-    var COMPS=[['product','Product'],['packaging','Packaging'],['labels','Labels/wraps'],['polybag','Polybags'],['other','Other components']];
+    // Component lines are now driven by the product's chosen components (mig 261/262). Each component's per-size data is
+    // keyed by its `dimension` (migrated aspects: product/packaging/…) or 'comp:<id>' (net-new). Fixed fallback only if the
+    // server didn't send components (older payloads).
+    var COMPS=(d.components!=null)
+      ? (d.components||[]).map(function(c){ return [c.dimension||('comp:'+c.id), c.name, c]; })
+      : [['product','Product'],['packaging','Packaging'],['labels','Labels/wraps'],['polybag','Polybags'],['other','Other components']];
+    var COMP_META={}; COMPS.forEach(function(c){ COMP_META[c[0]]={label:c[1],comp:c[2]||null}; });
+    function compLbl(dim){ return (COMP_META[dim]&&COMP_META[dim].label)||COMP_LBL[dim]||dim; }
+    function compIsSpec(dim){ var m=COMP_META[dim]; return !!(m&&m.comp&&m.comp.sampling_mode==='spec_linked'); }
+    function compSpecId(dim){ var m=COMP_META[dim]; return (m&&m.comp&&m.comp.spec_id)||null; }
     function sizeDim(s,dim){ return ((s.dimensions||[]).filter(function(x){return x.dimension===dim;})[0])||{}; }
     function compApprStyle(v){ return v==='approved'?'background:#dcfce7;color:#166534;font-weight:700':v==='rejected'?'background:#fee2e2;color:#991b1b;font-weight:700':'background:#fef3c7;color:#92400e;font-weight:600'; }
     function compFiles(s,dim,sd){ return (sd.files||[]).map(function(f){ var url='/api/supply/portal-attachment/'+f.id, img=/^image\//i.test(f.mime), fn=f.filename||'file';
@@ -13659,7 +13675,18 @@
             if(!_txt&&!_m)return ''; var _chip=_m?' <span style="font-weight:700;color:'+_m[4]+';background:'+_m[3]+';border-radius:3px;padding:0 5px">'+esc(_m[1])+'</span>':'';
             return '<div style="margin-top:3px;font-size:10px;color:#78350f;background:#fffbeb;border:1px solid #fde68a;border-radius:5px;padding:2px 6px;white-space:normal;max-width:230px" title="sign-off on this component from the Samples tab">💬 '+esc(_txt||'—')+_chip+'</div>'; })()
           +'</div>'; }).join(''); }
-    function compRow(s,dim){ var sd=sizeDim(s,dim), req=!!sd.required, appr=_stageVal(sd.approval_status);
+    function compRow(s,dim){ var sd=sizeDim(s,dim), isSpec=compIsSpec(dim), req=(sd.required==null)?(isSpec?false:true):!!sd.required, appr=_stageVal(sd.approval_status);
+      if(isSpec){   // spec-linked component: no sampling/approval — description + a link to the Specification, in the Files column
+        var _sid=compSpecId(dim);
+        var _specCell=_sid?'<a href="#/product/'+encodeURIComponent(it.ref)+'/specifications" style="color:#1d4ed8;text-decoration:underline;font-weight:600">→ Spec #'+esc(_sid)+' ↗</a>':'<span class="mut tiny" style="color:#b45309">no spec linked — set on the component above</span>';
+        return '<tr class="pm-comprow" style="background:#fff">'
+          +'<td style="padding:4px 8px 4px 16px;font-size:12px;font-weight:700;color:#334155;white-space:nowrap"><span style="font-size:11px;color:#64748b;margin-right:5px" title="spec-linked, no sampling">◈</span>'+compLbl(dim)+'</td>'
+          +'<td style="padding:2px 8px 2px 28px"><input class="fci pm-comp-desc" data-id="'+s.id+'" data-dim="'+dim+'" value="'+esc(sd.description||'')+'" placeholder="description…" style="width:100%;font-size:11px;box-sizing:border-box"></td>'
+          +'<td style="padding:2px 8px;text-align:left;white-space:nowrap"><span class="mut tiny">—</span></td>'
+          +'<td style="padding:2px 8px;text-align:left"><span style="color:#64748b;font-size:11px">no sampling</span></td>'
+          +'<td style="padding:2px 8px;text-align:left;white-space:nowrap"><span class="mut tiny">—</span></td>'
+          +'<td style="padding:2px 8px">'+_specCell+'</td>'
+          +'<td style="padding:2px 8px"><span class="mut tiny">—</span></td></tr>'; }
       var reqCell='<input type="checkbox" class="pm-comp-req" data-id="'+s.id+'" data-dim="'+dim+'"'+(req?' checked':'')+'>';
       var relSamples=(d.samples||[]).filter(function(sm){ return (sm.sampled_aspects||[]).indexOf(dim)>=0 && (sm.sample_sizes||[]).indexOf(s.size_label)>=0; });   // supplier samples covering this size + component
       var apprCell='<select class="fci pm-comp-appr" data-id="'+s.id+'" data-dim="'+dim+'" style="font-size:11px;'+prodStageStyle(appr)+'">'+_compStageOpts(appr)+'</select>';
@@ -13674,7 +13701,7 @@
       else if(req&&(appr==='rejected_new_sample'||appr==='stop_development')){ _lblIcon='<span style="font-size:15px;font-weight:900;color:#dc2626;margin-right:5px">✗</span>'; _lblBg='background:#fee2e2;'; _lblFg='#991b1b'; }
       else if(req){ _lblIcon='<span style="font-size:12px;color:#f59e0b;margin-right:5px" title="'+esc(stageMeta(appr)[1])+'">●</span>'; }
       return '<tr class="pm-comprow" style="background:#fff;'+(req?'':'opacity:.6')+'">'
-        +'<td style="padding:4px 8px 4px 16px;font-size:12px;font-weight:700;color:'+_lblFg+';white-space:nowrap">'+_lblIcon+COMP_LBL[dim]+'</td>'
+        +'<td style="padding:4px 8px 4px 16px;font-size:12px;font-weight:700;color:'+_lblFg+';white-space:nowrap">'+_lblIcon+compLbl(dim)+'</td>'
         +'<td style="padding:2px 8px 2px 28px"><input class="fci pm-comp-desc" data-id="'+s.id+'" data-dim="'+dim+'" value="'+esc(sd.description||'')+'" placeholder="description…" style="width:100%;font-size:11px;box-sizing:border-box"></td>'
         +'<td style="padding:2px 8px;text-align:left;white-space:nowrap">'+reqCell+'</td>'
         +'<td style="padding:2px 8px;text-align:left">'+(req?apprCell:'<span class="mut tiny">—</span>')+'</td>'
@@ -13718,11 +13745,13 @@
       +_mhd('Reference')+pRow('Reference','<input class="fci" id="pm-ref" value="'+esc(it.ref)+'" style="width:220px;font-family:ui-monospace,monospace"> <button class="save-btn" id="pm-ref-save">Rename</button> <span id="pm-ref-msg" style="font-size:11px;margin-left:4px"></span><div style="font-size:11px;color:#94a3b8;margin-top:3px">Renaming updates this product everywhere (samples, timeline, documents). Must be unique.</div>')
       +'<div style="font-size:11px;color:#94a3b8;margin:2px 0 12px">Changes save automatically. <span id="pm-msg" style="margin-left:6px"></span></div>'
       +'</div>';
-    var _sizesHtml='<div style="font-weight:700;font-size:13px;margin:0 0 6px">Size variants &amp; components <span style="color:#94a3b8;font-weight:400;font-size:11px">(approval = internal D&amp;B sign-off)</span></div>'
+    var _sizesHtml='<div id="pm-comp-chooser" style="margin:0 0 18px;padding:0 0 16px;border-bottom:1px solid #e2e8f0"></div>'
+      +'<div style="font-weight:700;font-size:13px;margin:0 0 6px">Size variants &amp; components <span style="color:#94a3b8;font-weight:400;font-size:11px">(approval = internal D&amp;B sign-off)</span></div>'
       +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;min-width:1460px;table-layout:fixed"><colgroup><col style="width:230px"><col style="width:22%"><col style="width:48px"><col style="width:180px"><col style="width:110px"><col><col style="width:16%"></colgroup><thead><tr>'+[['Component',''],['Description',''],['Req',''],['Status',''],['Actions',''],['Files',''],['Samples','']].map(function(h){return '<th style="text-align:left;padding:2px 8px 4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7;white-space:nowrap;'+h[1]+'">'+h[0]+'</th>';}).join('')+'</tr></thead><tbody id="pm-sztbody">'+(sizeRows||(_szLoading?'<tr><td colspan="7" style="color:#94a3b8;padding:8px 4px">Loading size variants &amp; components…</td></tr>':'<tr><td colspan="7" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>'))+'</tbody></table></div>'
       +'<div style="margin-top:8px"><input class="fci" id="pm-newsz" placeholder="add size…" style="width:130px"> <button class="save-btn" id="pm-addsz">+ Add size</button></div>';
     var _delHtml='<div style="margin-top:16px;padding-top:12px;border-top:1px solid #eef2f7;max-width:660px"><button class="save-btn" id="pm-newsamp" style="background:#16a34a;color:#fff;border-color:#15803d;font-weight:700;margin-right:8px">+ Add to new sample request</button><button class="save-btn light" id="pm-del" style="color:#dc2626">Delete product</button></div>';
     body.innerHTML=(mode==='sizes')?_sizesHtml:(_masterHtml+_delHtml);
+    if(mode==='sizes'){ var _cc=body.querySelector('#pm-comp-chooser'); if(_cc)renderProdComponents(_cc,it.ref,{compact:true,reload:function(){ renderProductDetail(it.ref); }}); }   // component chooser at the top of Sizes & Variants; add/remove/mode reloads so the grid rebuilds
     (function(){ var _pmType=body.querySelector('#pm-type'), _pmSeasonRow=body.querySelector('#pm-season-row');   // Custom Order → hide the Season field (in addition to the generic .pm-fld save below)
       if(_pmType&&_pmSeasonRow)_pmType.addEventListener('change',function(){ _pmSeasonRow.style.display=(this.value==='Custom Order')?'none':''; }); })();
     body.querySelectorAll('.pm-fld').forEach(function(el){ el.onchange=function(){ var msg=body.querySelector('#pm-msg'); if(msg){msg.style.color='#64748b';msg.textContent='Saving…';}

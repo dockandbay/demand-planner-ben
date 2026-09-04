@@ -6113,7 +6113,7 @@ app.get('/api/product/item/:ref', async (req, res) => {
   const ref = req.params.ref;
   try {
     // Round 1 — item + sizes + docs + samples + unread all in parallel (sizes uses a subquery so it needn't wait on item)
-    const [itemR, sizesR, docsR, samplesR, unreadR] = await Promise.all([
+    const [itemR, sizesR, docsR, samplesR, unreadR, compsR] = await Promise.all([
       pool.query(`SELECT id, ref, coalesce(type,'Product Development') type, coalesce(season,'') season, coalesce(category,'') category,
         coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(bulk_colour_name,'') bulk_colour_name, coalesce(stage,'sample_development') stage, coalesce(description,'') description, coalesce(recipient_countries,'UK') recipient_countries,
         coalesce(supplier,'') supplier, coalesce(supplier_code,'') supplier_code,
@@ -6134,10 +6134,11 @@ app.get('/api/product/item/:ref', async (req, res) => {
           FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id),'[]'::json) aspect_feedback
         FROM planner.product_dev_samples ps WHERE ps.item_ref=$1 ORDER BY ps.dimension, ps.version`, [ref]),
       pool.query(`SELECT count(*)::int n FROM planner.supplier_notes WHERE po=$1 AND author_kind='supplier' AND read_at IS NULL`, [ref]),
+      pool.query(`SELECT id, component_type_id, name, coalesce(supplier,'') supplier, coalesce(sampling_mode,'sampled') sampling_mode, spec_id, dimension, sort FROM planner.product_dev_components WHERE item_ref=$1 ORDER BY sort, id`, [ref]),
     ]);
     const item = itemR.rows[0];
     if (!item) return res.status(404).json({ error: 'not found' });
-    const sizes = sizesR.rows, docs = docsR.rows, samples = samplesR.rows, unread_supplier = unreadR.rows[0].n;
+    const sizes = sizesR.rows, docs = docsR.rows, samples = samplesR.rows, unread_supplier = unreadR.rows[0].n, components = compsR.rows;
     // Round 2 — sample files + component rows in parallel (each depends on round 1 ids)
     const [sfR, dimsR] = await Promise.all([
       samples.length ? pool.query(`SELECT po, id, filename, coalesce(mime,'') mime FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_sample' ORDER BY uploaded_at`, [samples.map(s => 'PSAMPLE-' + s.id)]) : Promise.resolve({ rows: [] }),
@@ -6152,7 +6153,7 @@ app.get('/api/product/item/:ref', async (req, res) => {
     }
     const byS = {}; dims.forEach(d => { (byS[d.size_id] = byS[d.size_id] || []).push(d); });
     sizes.forEach(s => { s.dimensions = byS[s.id] || []; });
-    res.json({ item, sizes, docs, samples, unread_supplier });
+    res.json({ item, sizes, docs, samples, unread_supplier, components });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Fast first paint: just the item row + unread count (no sizes/components). Master-data fields render instantly off this.
@@ -6193,9 +6194,10 @@ app.get('/api/product/item/:ref/changes', async (req, res) => {
 app.get('/api/product/item/:ref/sizes', async (req, res) => {
   const ref = req.params.ref;
   try {
-    const [sizesR, samplesR] = await Promise.all([
+    const [sizesR, compsR, samplesR] = await Promise.all([
       pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort, coalesce(mapped_sku,'') mapped_sku, approved_sample_id
         FROM planner.product_dev_sizes WHERE item_id=(SELECT id FROM planner.product_dev_items WHERE ref=$1) ORDER BY sort, id`, [ref]),
+      pool.query(`SELECT id, component_type_id, name, coalesce(supplier,'') supplier, coalesce(sampling_mode,'sampled') sampling_mode, spec_id, dimension, sort FROM planner.product_dev_components WHERE item_ref=$1 ORDER BY sort, id`, [ref]),
       pool.query(`SELECT ps.id, ps.version, coalesce(ps.dimension,'product') dimension,
         CASE WHEN coalesce(ps.dimension,'product')='product' THEN ps.item_ref||'_v'||ps.version ELSE ps.item_ref||'_'||ps.dimension||'_v'||ps.version END ref,
         coalesce(ps.sample_sizes,'{}') sample_sizes, coalesce(ps.sampled_aspects,'{}') sampled_aspects, coalesce(ps.admin_feedback,'') admin_feedback,
@@ -6215,7 +6217,7 @@ app.get('/api/product/item/:ref/sizes', async (req, res) => {
     }
     const byS = {}; dims.forEach(d => { (byS[d.size_id] = byS[d.size_id] || []).push(d); });
     sizes.forEach(s => { s.dimensions = byS[s.id] || []; });
-    res.json({ sizes, samples });
+    res.json({ sizes, samples, components: compsR.rows });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/product/swatch/:ref', async (req, res) => {
