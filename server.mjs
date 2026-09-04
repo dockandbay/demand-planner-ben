@@ -13466,6 +13466,10 @@ async function maybeShippedNote(sampleId, body, authorKind, email){
 }
 app.post('/api/supply/sample-create', async (req, res) => {
   const b = req.body || {};
+  // Who created it: prefer a real supplied user, else the authenticated session user. NEVER the literal 'planner'
+  // (the old default/ client-fallback, which surfaced as "planner created this sample request" on the timeline).
+  const _cbIn = (b.created_by || '').trim();
+  const createdByUser = (_cbIn && _cbIn.toLowerCase() !== 'planner') ? _cbIn : (authUser(req) || '');
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
@@ -13476,7 +13480,7 @@ app.post('/api/supply/sample-create', async (req, res) => {
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'FUTURE') RETURNING id`,
       [b.supplier_id||null, b.supplier_name||null, b.recipient_company||null, b.first_name||null, b.last_name||null,
        b.address_line1||null, b.address_line2||null, b.city||null, b.region||null, b.postcode||null, b.country||null, b.phone||null,
-       b.completion_date_required||null, Array.isArray(b.purpose)?b.purpose:null, b.notes||null, b.created_by||'planner', b.notify_emails||null]);   // new samples start FUTURE — D&B-only until moved to PRODUCTION
+       b.completion_date_required||null, Array.isArray(b.purpose)?b.purpose:null, b.notes||null, createdByUser||null, b.notify_emails||null]);   // new samples start FUTURE — D&B-only until moved to PRODUCTION
     const id = ins.rows[0].id, ref = 'SR-' + id;
     await client.query(`UPDATE planner.sample_requests SET ref=$1 WHERE id=$2`, [ref, id]);
     for (const l of (Array.isArray(b.lines)?b.lines:[])) { if (!l || !l.sku) continue;
@@ -13484,7 +13488,7 @@ app.post('/api/supply/sample-create', async (req, res) => {
         [id, String(l.sku).trim(), Math.round(Number(l.qty)||0)]); }
     // timeline entry: created by Dock & Bay → author_kind 'internal' = shows as an UNREAD note for the supplier in the portal
     await client.query(`INSERT INTO planner.sample_notes (sample_id, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`,
-      [id, (b.created_by||'').trim()||null, (shortUser((b.created_by||'').trim())||'Dock & Bay')+' created this sample request']);
+      [id, createdByUser||null, (shortUser(createdByUser)||'Dock & Bay')+' created this sample request']);
     await client.query('COMMIT');
     invalidateSupplyCaches();   // new sample → drop the per-supplier portal bootstrap cache + admin samples cache so it appears immediately (not after the TTL)
     res.json({ ok:true, id, ref });
