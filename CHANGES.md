@@ -1,3 +1,9 @@
+## v27.456 Sample reject reasons — mandatory capture + metrics (mig 264)
+- **Rejecting a sample aspect now requires a reason.** In the Samples tab, setting an aspect to Reject / Stop development reveals a mandatory reason-chip picker; the decision won't save until at least one reason is tagged. Reasons can be multiple.
+- **Config list:** new **PRODUCT ▸ Config ▸ Reject reasons** sub-tab (inline add/edit, active toggle), seeded with **Colour issue · Finishing · Packing**.
+- **Report:** new **Sample rejections** section in PRODUCT ▸ Reports — why samples are rejected, by reason (with top suppliers + seasons) and split **by supplier / season / product type**.
+- Reasons stored per (sample version × aspect), so re-samples build history; cleared if an aspect moves off a rejected stage. server.mjs (reason CRUD + capture/validation on the aspect endpoint + reports rollup + feed carries reason ids), supply/inject.html, mig 264.
+
 ## v27.455 PRODUCT — Components folded into Sizes & Variants (size × component matrix)
 - The standalone **Components** tab is removed; its content moves to the **top of Sizes & Variants** as a compact chooser (Component · Supplier · Sampling · Spec · remove + add-from-catalogue).
 - The per-size grid lines are now driven by the **product's chosen components** (not the 5 fixed aspects): each size shows one line per component. New components default **on for every size**. Spec-linked components (e.g. Polybag) render **no sampling** with a link to the Specification.

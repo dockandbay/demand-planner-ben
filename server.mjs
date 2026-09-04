@@ -6349,7 +6349,20 @@ app.get('/api/product/reports', async (_req, res) => {
     const groupBy = (keyFn) => { const m = {}; for (const r of rows) { const k = keyFn(r); (m[k] || (m[k] = Object.assign(mk(), { key: k }))); roll(m[k], r); }
       return Object.values(m).map(fin).sort((a, b) => String(a.key).localeCompare(String(b.key))); };
     const o = Object.assign(mk(), { key: 'overall' }); rows.forEach(r => roll(o, r));
-    res.json({ overall: fin(o), bySeason: groupBy(r => r.season), byCategory: groupBy(r => r.category), bySupplier: groupBy(r => r.supplier) });
+    // Sample-rejection metrics: why samples are rejected, sliced by supplier / season / product type.
+    const rj = (await pool.query(`SELECT sr.name reason,
+        coalesce(nullif(i.supplier,''),'—') supplier, coalesce(nullif(i.season,''),'—') season, coalesce(nullif(i.category,''),'—') category
+      FROM planner.product_sample_reject_reasons rr
+      JOIN planner.sample_reject_reasons sr ON sr.id=rr.reason_id
+      JOIN planner.product_dev_samples ps ON ps.id=rr.sample_id
+      JOIN planner.product_dev_items i ON i.ref=ps.item_ref`)).rows;
+    const tally = (keyFn) => { const m = {}; rj.forEach(r => { const k = keyFn(r); m[k] = (m[k] || 0) + 1; });
+      return Object.keys(m).map(k => ({ key: k, count: m[k] })).sort((a, b) => b.count - a.count || String(a.key).localeCompare(String(b.key))); };
+    const splitStr = (reason, dimFn) => { const m = {}; rj.filter(r => r.reason === reason).forEach(r => { const k = dimFn(r); m[k] = (m[k] || 0) + 1; });
+      return Object.keys(m).map(k => [k, m[k]]).sort((a, b) => b[1] - a[1]).slice(0, 4).map(x => x[0] + ' ' + x[1]).join(' · '); };
+    const byReason = tally(r => r.reason).map(x => ({ key: x.key, count: x.count, suppliers: splitStr(x.key, r => r.supplier), seasons: splitStr(x.key, r => r.season) }));
+    const reject = { total: rj.length, byReason, bySupplier: tally(r => r.supplier), bySeason: tally(r => r.season), byCategory: tally(r => r.category) };
+    res.json({ overall: fin(o), bySeason: groupBy(r => r.season), byCategory: groupBy(r => r.category), bySupplier: groupBy(r => r.supplier), reject });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/size', async (req, res) => {
@@ -6826,6 +6839,28 @@ app.post('/api/product/component-type', async (req, res) => {
 app.post('/api/product/component-type/:id/delete', async (req, res) => {
   try { await pool.query(`UPDATE planner.component_types SET active=false WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// Sample reject reasons (mig 264) — the defined, editable list tagged when a sample aspect is rejected. Powers the
+// mandatory reason picker in the Samples tab + the rejection metrics report.
+app.get('/api/product/reject-reasons', async (req, res) => {
+  try {
+    const all = String(req.query.all || '') === '1';
+    const rows = (await pool.query(`SELECT id, name, sort, active FROM planner.sample_reject_reasons ${all ? '' : 'WHERE active'} ORDER BY sort, id`)).rows;
+    res.json({ reasons: rows });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/reject-reason', async (req, res) => {
+  const b = req.body || {}, name = (b.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'name required' });
+  const sort = b.sort == null ? 0 : parseInt(b.sort, 10) || 0, active = b.active == null ? true : !!b.active;
+  try {
+    if (b.id) { await pool.query(`UPDATE planner.sample_reject_reasons SET name=$2, sort=$3, active=$4 WHERE id=$1::bigint`, [b.id, name, sort, active]); res.json({ ok: true, id: Number(b.id) }); }
+    else { const r = await pool.query(`INSERT INTO planner.sample_reject_reasons (name, sort, active) VALUES ($1,$2,$3)
+      ON CONFLICT (name) DO UPDATE SET sort=excluded.sort, active=true RETURNING id`, [name, sort, active]); res.json({ ok: true, id: r.rows[0].id }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/reject-reason/:id/delete', async (req, res) => {
+  try { await pool.query(`UPDATE planner.sample_reject_reasons SET active=false WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // PRODUCT per-product COMPONENTS (mig 262) — the component set for one product development, each with its supplier
 // + sampling mode. Returns the product's main supplier (to resolve "= product supplier"), the catalogue + suppliers.
 app.get('/api/product/item/:ref/components', async (req, res) => {
@@ -6918,7 +6953,9 @@ async function productSampleList(itemRef) {
       FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id
       WHERE l.dev_sample_id=ps.id),'[]'::json) shipments,
     coalesce((SELECT json_agg(json_build_object('aspect',af.aspect,'feedback',af.feedback,'decision',af.decision) ORDER BY af.aspect)
-      FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id),'[]'::json) aspect_feedback
+      FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id),'[]'::json) aspect_feedback,
+    coalesce((SELECT json_agg(json_build_object('aspect',rr.aspect,'reason_id',rr.reason_id) ORDER BY rr.aspect)
+      FROM planner.product_sample_reject_reasons rr WHERE rr.sample_id=ps.id),'[]'::json) reject_reasons
     FROM planner.product_dev_samples ps
     WHERE ps.item_ref=$1 AND coalesce(ps.dimension,'product')='product' ORDER BY ps.version`, [itemRef])).rows;
   if (rows.length) {
@@ -7022,11 +7059,22 @@ app.post('/api/product/sample/:id/aspect', async (req, res) => {
     decision = decision === 'pending' ? 'sample_development' : decision === 'rejected' ? 'rejected_new_sample' : decision;
     if (!STAGES.includes(decision)) decision = 'sample_development';
     const isApproved = decision === 'approved' || decision === 'approved_with_comments';
+    const isRejected = decision === 'rejected_new_sample' || decision === 'stop_development';
     const by = shortUser(authUser(req)) || null;
+    // Reject-reason capture (mandatory when rejecting): tag ≥1 reason so we can report on why samples are rejected.
+    const reasonIds = Array.isArray(b.reject_reasons) ? b.reject_reasons.map(Number).filter(n => Number.isFinite(n) && n > 0) : [];
+    if (isRejected && reasonIds.length === 0) return res.status(400).json({ error: 'Select at least one reject reason.' });
     await pool.query(`INSERT INTO planner.product_sample_aspect_feedback (sample_id, aspect, feedback, decision, updated_by, updated_at)
       VALUES ($1,$2,$3,$4,$5,now())
       ON CONFLICT (sample_id, aspect) DO UPDATE SET feedback=excluded.feedback, decision=excluded.decision, updated_by=excluded.updated_by, updated_at=now()`,
       [id, aspect, feedback, decision, by]);
+    // Reasons describe the CURRENT rejected state of this (sample × aspect): replace on reject, clear when not rejected.
+    await pool.query(`DELETE FROM planner.product_sample_reject_reasons WHERE sample_id=$1 AND aspect=$2`, [id, aspect]);
+    if (isRejected && reasonIds.length) {
+      await pool.query(`INSERT INTO planner.product_sample_reject_reasons (sample_id, aspect, reason_id, created_by)
+        SELECT $1, $2, r, $3 FROM unnest($4::bigint[]) r
+        ON CONFLICT (sample_id, aspect, reason_id) DO NOTHING`, [id, aspect, by, reasonIds]);
+    }
     let flowed = 0;
     { // Every decision (approved / rejected / pending) flows to the Variants tab so the component stays in sync.
       const s = (await pool.query(`SELECT item_ref, coalesce(sample_sizes,'{}') sizes FROM planner.product_dev_samples WHERE id=$1`, [id])).rows[0];

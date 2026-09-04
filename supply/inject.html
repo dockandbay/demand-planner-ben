@@ -13193,11 +13193,28 @@
           +((rows&&rows.length)?rows.map(function(g){return '<tr><td style="padding:4px 14px 4px 0;border-bottom:1px solid #f1f5f9">'+esc(g.key)+'</td>'
             +[g.products,g.samples,g.approved,num(g.avg_samples),(g.avg_days==null?'—':g.avg_days+'d')].map(function(v){return '<td style="text-align:left;padding:4px 14px;border-bottom:1px solid #f1f5f9">'+v+'</td>';}).join('')+'</tr>';}).join(''):'<tr><td colspan="6" style="padding:6px 0;color:#94a3b8">No data.</td></tr>')
           +'</tbody></table></div>'; }
+      function miniTbl(title,dimLabel,rows){ return '<div style="min-width:220px"><div style="font-weight:600;font-size:12px;margin-bottom:5px">'+title+'</div>'
+          +'<table style="border-collapse:collapse;font-size:12px;width:100%"><thead><tr><th style="text-align:left;padding:4px 12px 4px 0;border-bottom:2px solid #e5e7eb">'+dimLabel+'</th><th style="text-align:right;padding:4px 0;border-bottom:2px solid #e5e7eb">Rejections</th></tr></thead><tbody>'
+          +((rows&&rows.length)?rows.map(function(g){return '<tr><td style="padding:3px 12px 3px 0;border-bottom:1px solid #f1f5f9">'+esc(g.key)+'</td><td style="text-align:right;padding:3px 0;border-bottom:1px solid #f1f5f9;font-weight:600">'+g.count+'</td></tr>';}).join(''):'<tr><td colspan="2" style="padding:5px 0;color:#94a3b8">None.</td></tr>')
+          +'</tbody></table></div>'; }
+      function rejectSection(rj){ var total=rj.total||0;
+        var reasonTbl='<div style="margin-top:8px"><table style="border-collapse:collapse;font-size:12px"><thead><tr>'
+          +['Reason','Count','Top suppliers','Seasons'].map(function(h){return '<th style="text-align:left;padding:5px 14px 5px 0;border-bottom:2px solid #e5e7eb;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+          +((rj.byReason&&rj.byReason.length)?rj.byReason.map(function(g){return '<tr><td style="padding:4px 14px 4px 0;border-bottom:1px solid #f1f5f9;font-weight:600">'+esc(g.key)+'</td>'
+            +'<td style="padding:4px 14px 4px 0;border-bottom:1px solid #f1f5f9;font-weight:700">'+g.count+'</td>'
+            +'<td style="padding:4px 14px 4px 0;border-bottom:1px solid #f1f5f9;color:#475569">'+esc(g.suppliers||'—')+'</td>'
+            +'<td style="padding:4px 14px 4px 0;border-bottom:1px solid #f1f5f9;color:#475569">'+esc(g.seasons||'—')+'</td></tr>';}).join(''):'<tr><td colspan="4" style="padding:6px 0;color:#94a3b8">No sample rejections tagged yet.</td></tr>')
+          +'</tbody></table></div>';
+        return '<div style="margin-top:24px;padding-top:14px;border-top:2px solid #e5e7eb"><div style="font-weight:700;font-size:14px;margin-bottom:2px">Sample rejections <span style="color:#94a3b8;font-weight:400;font-size:12px">('+total+' reason tag'+(total===1?'':'s')+')</span></div>'
+          +'<div class="mut tiny" style="margin-bottom:8px">Why sample aspects were rejected. Tagged at rejection in the Samples tab; a rejection can carry more than one reason.</div>'
+          +reasonTbl
+          +'<div style="display:flex;gap:26px;flex-wrap:wrap;margin-top:16px">'+miniTbl('By supplier','Supplier',rj.bySupplier)+miniTbl('By season','Season',rj.bySeason)+miniTbl('By product type','Category',rj.byCategory)+'</div></div>'; }
       c.innerHTML='<div style="font-weight:700;font-size:13px;margin-bottom:8px">Overview</div><div style="display:flex;gap:10px;flex-wrap:wrap">'
           +card('Products',o.products||0)+card('Sample versions',o.samples||0)+card('Approved',o.approved||0)
           +card('Avg samples to approve',num(o.avg_samples))+card('Avg days to approve',o.avg_days==null?'—':o.avg_days+'d')+'</div>'
         +'<div class="mut tiny" style="margin-top:6px">“Avg samples/days to approve” are measured over <b>approved</b> products only. Time-to-approve runs from the product’s development-start date (the <i>Development started</i> override on Master data, else its creation date) to approval.</div>'
-        +tbl('By season','Season',d.bySeason)+tbl('By category','Category',d.byCategory)+tbl('By supplier','Supplier',d.bySupplier);
+        +tbl('By season','Season',d.bySeason)+tbl('By category','Category',d.byCategory)+tbl('By supplier','Supplier',d.bySupplier)
+        +rejectSection(d.reject||{});
     }).catch(function(e){ c.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
   var _prodFilt={type:'Product Development',season:'',status:'dev_actions',q:'',category:'',stage:''};   // Type defaults to Product Development; stage = active stage-pill filter (overrides status when set)
   var _pgSeasonCollapsed={}, _pgCatCollapsed={};   // PRODUCT grid group collapse state — persists across redraws
@@ -13205,7 +13222,7 @@
   // PRODUCT ▸ CONFIG — seasons, category codes, timeline tags/badges, timeline quick phrases. Lives in the PRODUCT
   // module (moved here from the ⚙ CONFIG ▸ Product panel). `b` = the container to render into.
   function renderProductConfig(b){ b.innerHTML='<div class="count" style="padding:10px 2px;color:#94a3b8">Loading…</div>';
-    Promise.all([fetch('/api/product/config').then(function(r){return r.json();}),fetch('/api/product/timeline-config').then(function(r){return r.json();}).catch(function(){return {tags:[],snippets:[]};}),fetch('/api/product/component-types').then(function(r){return r.json();}).catch(function(){return {types:[],suppliers:[]};})]).then(function(_cfg){ var d=_cfg[0]||{seasons:[],categories:[]}; var _tl=_cfg[1]||{tags:[],snippets:[]}; d.tags=_tl.tags||[]; d.snippets=_tl.snippets||[]; var _ct=_cfg[2]||{types:[],suppliers:[]}; d.componentTypes=_ct.types||[]; d.suppliers=_ct.suppliers||[];
+    Promise.all([fetch('/api/product/config').then(function(r){return r.json();}),fetch('/api/product/timeline-config').then(function(r){return r.json();}).catch(function(){return {tags:[],snippets:[]};}),fetch('/api/product/component-types').then(function(r){return r.json();}).catch(function(){return {types:[],suppliers:[]};}),fetch('/api/product/reject-reasons?all=1').then(function(r){return r.json();}).catch(function(){return {reasons:[]};})]).then(function(_cfg){ var d=_cfg[0]||{seasons:[],categories:[]}; var _tl=_cfg[1]||{tags:[],snippets:[]}; d.tags=_tl.tags||[]; d.snippets=_tl.snippets||[]; var _ct=_cfg[2]||{types:[],suppliers:[]}; d.componentTypes=_ct.types||[]; d.suppliers=_ct.suppliers||[]; d.rejectReasons=(_cfg[3]&&_cfg[3].reasons)||[];
       function autoCat(name){ return String(name||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,5)||'PROD'; }   // mirrors server _prodCatCode
       function draw(){
         var seasonRows=(d.seasons||[]).map(function(s){ return '<tr data-code="'+esc(s.code)+'"><td class="l" style="padding:4px 8px;font-weight:700;font-family:ui-monospace,Menlo,monospace">'+esc(s.code)+'</td>'
@@ -13237,6 +13254,14 @@
           +'<td class="l" style="padding:4px 8px"><select id="pcnew-mode" style="padding:4px 6px;border:1px solid #93c5fd;border-radius:5px;font-size:12px"><option value="sampled">Sampled</option><option value="spec_linked">Spec-linked (no sampling)</option></select></td>'
           +'<td class="l" style="padding:4px 8px"><input id="pcnew-sort" placeholder="'+((d.componentTypes||[]).length+1)+'" style="width:50px;padding:4px 6px;border:1px solid #93c5fd;border-radius:5px;font-size:12px;text-align:right"></td>'
           +'<td class="l" style="padding:4px 8px"><button class="save-btn" id="pccomp-addbtn" style="font-size:11px;padding:3px 10px">+ Add</button></td></tr>';
+        var rrRows=(d.rejectReasons||[]).map(function(rz){ return '<tr data-id="'+rz.id+'"><td class="l" style="padding:4px 8px"><input class="fci pcrr" data-id="'+rz.id+'" data-f="name" value="'+esc(rz.name||'')+'" style="width:200px;padding:4px 7px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px"></td>'
+          +'<td class="l" style="padding:4px 8px"><input class="fci pcrr" data-id="'+rz.id+'" data-f="sort" value="'+esc(rz.sort==null?'':rz.sort)+'" style="width:50px;padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px;text-align:right"></td>'
+          +'<td class="l" style="padding:4px 8px"><select class="fci pcrr" data-id="'+rz.id+'" data-f="active" style="padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px"><option value="true"'+(rz.active!==false?' selected':'')+'>Active</option><option value="false"'+(rz.active===false?' selected':'')+'>Inactive</option></select></td>'
+          +'<td class="l" style="padding:4px 8px"><a class="pcrr-del" data-id="'+rz.id+'" style="color:#dc2626;cursor:pointer">✕</a></td></tr>'; }).join('');
+        var rrAddRow='<tr style="background:#f2f8ff"><td class="l" style="padding:4px 8px"><input id="pcrr-name" placeholder="New reason…" style="width:200px;padding:4px 7px;border:1px solid #93c5fd;border-radius:5px;font-size:12px"></td>'
+          +'<td class="l" style="padding:4px 8px"><input id="pcrr-sort" placeholder="'+((d.rejectReasons||[]).length+1)+'" style="width:50px;padding:4px 6px;border:1px solid #93c5fd;border-radius:5px;font-size:12px;text-align:right"></td>'
+          +'<td class="l" style="padding:4px 8px"><span class="mut tiny">Active</span></td>'
+          +'<td class="l" style="padding:4px 8px"><button class="save-btn" id="pcrr-addbtn" style="font-size:11px;padding:3px 10px">+ Add</button></td></tr>';
         var SEC={};
         SEC.season='<div class="sect-h">Season / release <button class="save-btn" id="pcfg-snew" style="margin-left:8px;font-size:11px;padding:3px 10px">+ Add season</button> <span class="mut tiny" style="font-weight:400">— the code prefixes each product reference, e.g. <b>SS27</b>-TOWLB-01</span></div>'
           +'<div class="tw"><table class="samp-tbl" style="font-size:12px"><thead><tr><th class="l">Code</th><th class="l">Label</th><th class="l">Sort</th><th class="l">Active</th><th></th></tr></thead><tbody>'+(seasonRows||'<tr><td colspan="5" class="count">no seasons</td></tr>')+'</tbody></table></div>';
@@ -13247,9 +13272,12 @@
         SEC.components='<div class="annot" style="margin-bottom:10px">The parts a product development is made of. Each has a <b>default supplier</b> (or "= product supplier", overridable per product) and a <b>sampling mode</b>: <b>Sampled</b> = full sample + approval cycle; <b>Spec-linked</b> = points at a Specification, no sampling unless it changes (e.g. polybag). <span class="mut">Catalogue only for now — per-product wiring is the next phase.</span></div>'
           +'<div class="sect-h">Components</div>'
           +'<div class="tw"><table class="samp-tbl" style="font-size:12px"><thead><tr><th class="l">Component</th><th class="l">Default supplier</th><th class="l">Sampling</th><th class="l">Sort</th><th></th></tr></thead><tbody>'+compRows+compAddRow+'</tbody></table></div>';
+        SEC.rejectreasons='<div class="annot" style="margin-bottom:10px">Reasons a sample can be <b>rejected</b>. When a reviewer rejects a sample aspect in the Samples tab they must tag ≥1 of these, so we can report on <b>why samples are rejected</b> by supplier / season / product type (PRODUCT ▸ Reports).</div>'
+          +'<div class="sect-h">Reject reasons</div>'
+          +'<div class="tw"><table class="samp-tbl" style="font-size:12px"><thead><tr><th class="l">Reason</th><th class="l">Sort</th><th class="l">Active</th><th></th></tr></thead><tbody>'+rrRows+rrAddRow+'</tbody></table></div>';
         SEC.phrases='<div class="sect-h">Timeline quick phrases <button class="save-btn" id="pcsnip-new" style="margin-left:8px;font-size:11px;padding:3px 10px">+ Add phrase</button> <span class="mut tiny" style="font-weight:400">— type <b>/</b> in a product timeline box to insert one</span></div>'
           +'<div class="tw"><table class="samp-tbl" style="font-size:12px"><thead><tr><th class="l">Phrase</th><th class="l">Sort</th><th class="l">Active</th><th></th></tr></thead><tbody>'+(snipRows||'<tr><td colspan="4" class="count">no phrases yet</td></tr>')+'</tbody></table></div>';
-        var TABS=[['season','Season / release'],['cats','Categories'],['components','Components'],['tags','Timeline tags & badges'],['phrases','Timeline quick phrases']];
+        var TABS=[['season','Season / release'],['cats','Categories'],['components','Components'],['rejectreasons','Reject reasons'],['tags','Timeline tags & badges'],['phrases','Timeline quick phrases']];
         if(!SEC[_prodCfgTab])_prodCfgTab='season';
         var nav='<div id="pcfg-subs-l3">'+TABS.map(function(t){ return '<span class="rtab pcfg-tab'+(t[0]===_prodCfgTab?' active':'')+'" data-k="'+t[0]+'">'+esc(t[1])+'</span>'; }).join('')+'</div>';
         b.innerHTML=nav+SEC[_prodCfgTab];
@@ -13272,6 +13300,17 @@
           var f=el.dataset.f; row[f]=(f==='sort')?(el.value===''?0:parseInt(el.value,10)||0):el.value;
           shipPost('/api/product/component-type',{id:id,name:row.name,default_supplier:row.default_supplier,sampling_mode:row.sampling_mode,sort:row.sort},function(j){ if(j&&j.error)alert(j.error); }); }; });
         b.querySelectorAll('.pccomp-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Remove this component type?'))return; shipPost('/api/product/component-type/'+encodeURIComponent(a.dataset.id)+'/delete',{},function(){ d.componentTypes=(d.componentTypes||[]).filter(function(x){return String(x.id)!==String(a.dataset.id);}); draw(); }); }; });
+        // Reject reasons CRUD (inline edit + add, no popup)
+        var _addRR=function(){ var nEl=b.querySelector('#pcrr-name'); if(!nEl)return; var name=(nEl.value||'').trim(); if(!name){ nEl.focus(); return; }
+          var sEl=b.querySelector('#pcrr-sort'); var sort=(sEl&&sEl.value!=='')?(parseInt(sEl.value,10)||0):(d.rejectReasons||[]).length+1;
+          _rejReasons=null;   // bust the Samples-tab cache so the new reason shows there
+          shipPost('/api/product/reject-reason',{name:name,sort:sort,active:true},function(j){ if(j&&j.error){alert(j.error);return;} d.rejectReasons.push({id:j.id,name:name,sort:sort,active:true}); draw(); setTimeout(function(){ var n2=b.querySelector('#pcrr-name'); if(n2)n2.focus(); },0); }); };
+        var _rrbtn=b.querySelector('#pcrr-addbtn'); if(_rrbtn)_rrbtn.onclick=_addRR;
+        var _rrnm=b.querySelector('#pcrr-name'); if(_rrnm)_rrnm.onkeydown=function(e){ if(e.key==='Enter'){ e.preventDefault(); _addRR(); } };
+        b.querySelectorAll('.pcrr').forEach(function(el){ el.onchange=function(){ var id=el.dataset.id, row=(d.rejectReasons||[]).filter(function(x){return String(x.id)===String(id);})[0]||{id:id};
+          var f=el.dataset.f; row[f]=(f==='sort')?(el.value===''?0:parseInt(el.value,10)||0):(f==='active'?(el.value==='true'):el.value); _rejReasons=null;
+          shipPost('/api/product/reject-reason',{id:id,name:row.name,sort:row.sort,active:row.active},function(j){ if(j&&j.error)alert(j.error); }); }; });
+        b.querySelectorAll('.pcrr-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Remove this reject reason? (existing tagged rejections keep it for reporting)'))return; _rejReasons=null; shipPost('/api/product/reject-reason/'+encodeURIComponent(a.dataset.id)+'/delete',{},function(){ d.rejectReasons=(d.rejectReasons||[]).filter(function(x){return String(x.id)!==String(a.dataset.id);}); draw(); }); }; });
         var _tnew=b.querySelector('#pctag-new'); if(_tnew)_tnew.onclick=function(){ var name=(prompt('New tag name (e.g. Quality):')||'').trim(); if(!name)return; shipPost('/api/product/timeline-tag',{name:name,colour:'#64748b',sort:(d.tags||[]).length},function(j){ if(j&&j.error){alert(j.error);return;} d.tags.push({id:j.id,name:name,colour:'#64748b',sort:(d.tags||[]).length,active:true}); draw(); }); };
         b.querySelectorAll('.pctag').forEach(function(el){ el.onchange=function(){ var id=el.dataset.id, row=(d.tags||[]).filter(function(x){return String(x.id)===String(id);})[0]||{id:id};
           var f=el.dataset.f; if(f==='colour'||f==='colour2'){ row.colour=el.value; } else if(f==='active'){ row.active=(el.value==='true'); } else if(f==='sort'){ row.sort=(el.value===''?0:parseInt(el.value,10)||0); } else { row[f]=el.value; }
@@ -13569,8 +13608,10 @@
       var _aa=body.querySelector('#pc2-addall'); if(_aa)_aa.onclick=function(){ _aa.disabled=true; _aa.textContent='Adding…'; var base=comps.length, i=0;
         (function next(){ if(i>=addable.length){ _reload(); return; } var t=addable[i++]; shipPost('/api/product/item/'+encodeURIComponent(ref)+'/component',{component_type_id:t.id,name:t.name,supplier:t.default_supplier||'',sampling_mode:t.sampling_mode||'sampled',sort:base+i},function(){ next(); }); })(); };
     }).catch(function(e){ body.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
+  var _rejReasons=null;   // cached active reject-reason list (PRODUCT ▸ Config)
+  function loadRejectReasons(cb){ if(_rejReasons)return cb(_rejReasons); fetch('/api/product/reject-reasons').then(function(r){return r.json();}).then(function(d){ _rejReasons=(d&&d.reasons)||[]; cb(_rejReasons); }).catch(function(){ cb([]); }); }
   function renderProdSamplesTab(body,ref){ body.innerHTML='<div style="color:#94a3b8">Loading…</div>';
-    _prodCachedJson('/api/product/samples/'+encodeURIComponent(ref)).then(function(list){ list=Array.isArray(list)?list:[];
+    Promise.all([_prodCachedJson('/api/product/samples/'+encodeURIComponent(ref)), new Promise(function(res){ loadRejectReasons(res); })]).then(function(_arr){ var list=Array.isArray(_arr[0])?_arr[0]:[]; var reasons=_arr[1]||[];
       list.sort(function(a,b){ var d=String(b.sample_date||'').localeCompare(String(a.sample_date||'')); return d||((b.version||0)-(a.version||0)); });   // newest first
       body.innerHTML='<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><button class="prod-newsamp save-btn" style="background:#16a34a;color:#fff;border-color:#15803d;font-weight:700">+ Add to new sample request</button><span class="mut tiny">creates a sample request pre-linked to this product</span></div>'
         +'<div id="prod-sr-list" style="margin-bottom:16px"></div>'
@@ -13584,9 +13625,15 @@
           var _estC=_est==='shipped'?['#dbeafe','#1e40af']:_est==='completed'?['#dcfce7','#166534']:_est==='cancelled'?['#fee2e2','#991b1b']:['#fef3c7','#92400e'];
           var afMap={}; (s.aspect_feedback||[]).forEach(function(x){ afMap[x.aspect]=x; });
           var _aspRows=(s.sampled_aspects||[]).map(function(asp){ var af=afMap[asp]||{}, dec=af.decision||'pending';
+            var _rz=(s.reject_reasons||[]).filter(function(x){return x.aspect===asp;}).map(function(x){return String(x.reason_id);});
+            var _isRej=(dec==='rejected_new_sample'||dec==='stop_development'||dec==='rejected');
+            var _reasonBox='<div class="ps-reason-box" data-id="'+s.id+'" data-aspect="'+esc(asp)+'" style="margin-top:4px;text-align:left;'+(_isRej?'':'display:none')+'">'
+              +'<div style="font-size:10px;color:#b45309;font-weight:700;margin-bottom:2px">⚠ Reject reason (required)</div>'
+              +(reasons.length?reasons.map(function(rz){ var on=_rz.indexOf(String(rz.id))>=0; return '<button type="button" class="ps-reason-chip" data-id="'+s.id+'" data-aspect="'+esc(asp)+'" data-rid="'+rz.id+'" aria-pressed="'+(on?'true':'false')+'" style="font-size:10px;margin:1px 3px 1px 0;padding:2px 8px;border-radius:10px;cursor:pointer;border:1px solid '+(on?'#b91c1c':'#cbd5e1')+';background:'+(on?'#fee2e2':'#fff')+';color:'+(on?'#991b1b':'#475569')+';font-weight:'+(on?'700':'500')+'">'+esc(rz.name)+'</button>'; }).join(''):'<span class="mut tiny">No reasons defined — add them in PRODUCT ▸ Config ▸ Reject reasons.</span>')
+              +'</div>';
             return '<tr><td style="padding:5px 8px 5px 0;font-size:11px;font-weight:700;color:#334155;white-space:nowrap;vertical-align:top">'+esc(COMP_LBL[asp]||asp)+'</td>'
               +'<td style="padding:5px 0"><textarea class="ps-aspect-fb fci" data-id="'+s.id+'" data-aspect="'+esc(asp)+'" rows="2" placeholder="feedback on '+esc(COMP_LBL[asp]||asp)+'…" style="width:100%;box-sizing:border-box;font-size:12px;resize:vertical">'+esc(af.feedback||'')+'</textarea></td>'
-              +'<td style="padding:5px 0 5px 8px;white-space:nowrap;vertical-align:top"><select class="ps-aspect-dec fci" data-id="'+s.id+'" data-aspect="'+esc(asp)+'" title="sign-off stage for this aspect — flows to the Variants tab" style="font-size:11px;'+prodStageStyle(_stageVal(dec))+'">'+_compStageOpts(dec)+'</select><div class="ps-aspect-msg" data-id="'+s.id+'" data-aspect="'+esc(asp)+'" style="font-size:10px;color:#16a34a;margin-top:2px;text-align:right"></div></td></tr>'; }).join('');
+              +'<td style="padding:5px 0 5px 8px;white-space:nowrap;vertical-align:top"><select class="ps-aspect-dec fci" data-id="'+s.id+'" data-aspect="'+esc(asp)+'" title="sign-off stage for this aspect — flows to the Variants tab" style="font-size:11px;'+prodStageStyle(_stageVal(dec))+'">'+_compStageOpts(dec)+'</select><div class="ps-aspect-msg" data-id="'+s.id+'" data-aspect="'+esc(asp)+'" style="font-size:10px;color:#16a34a;margin-top:2px;text-align:right"></div>'+_reasonBox+'</td></tr>'; }).join('');
           var _track=(s.shipments&&s.shipments.length)?s.shipments.map(function(sh){return '<div style="padding:6px 9px;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;font-size:12px;margin-bottom:5px">📦 <a class="samp-open" data-ref="'+esc(sh.ref)+'" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;font-weight:600" title="open this sample shipment">'+esc(sh.ref)+'</a>'+(sh.carrier?'<div class="mut tiny" style="margin-top:2px">'+esc(sh.carrier)+'</div>':'')+(sh.tracking?'<div style="margin-top:2px">'+carrierTrackLinkInj(sh.carrier,sh.tracking)+'</div>':'<div class="mut tiny" style="margin-top:2px">no tracking yet</div>')+'</div>';}).join(''):'<div class="mut tiny">Not shipped yet.</div>';
           return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:8px;max-width:840px"><div style="display:flex;align-items:center;gap:10px"><b style="font-family:ui-monospace,Menlo,monospace;font-size:13px">'+esc(s.ref)+'</b><span style="font-size:11px;padding:1px 8px;border-radius:10px;background:'+_estC[0]+';color:'+_estC[1]+';font-weight:700">'+_estL+'</span><span style="color:#94a3b8;font-size:11px">'+(s.sample_date?esc(fd(s.sample_date)):'')+(s.created_by?' · submitted by '+esc(shortUser(s.created_by)):'')+'</span>'
             +'<span style="margin-left:auto;font-size:11px">'+(s.colour_verified?'<span style="color:#16a34a;font-weight:700">✓ colour</span>':'<span style="color:#dc2626">✗ colour</span>')+' &nbsp; '+(s.quality_verified?'<span style="color:#16a34a;font-weight:700">✓ quality</span>':'<span style="color:#dc2626">✗ quality</span>')+'</span>'
@@ -13601,8 +13648,11 @@
             +'</div>'; }).join(''):'<div style="color:#94a3b8;padding:6px 2px">No sample versions submitted yet.</div>');
       body.querySelectorAll('.ps-adm-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this sample version?'))return; shipPost('/api/product/sample/'+a.dataset.id+'/delete',{},function(){ _prodJsonBust(ref); renderProdSamplesTab(body,ref); }); }; });
       body.querySelectorAll('.ps-card').forEach(function(a){ a.onclick=function(){ var lk=document.createElement('a'); lk.href='/api/product/sample/'+a.dataset.id+'/card.pdf'; lk.download=''; document.body.appendChild(lk); lk.click(); lk.remove(); }; });   // downloads the PDF (attachment) — no rendered tab
-      function _saveAspect(id,aspect,feedback,decision,msg,flow){ if(msg){msg.style.color='#94a3b8';msg.textContent='saving…';}
-        shipPost('/api/product/sample/'+id+'/aspect',{aspect:aspect,feedback:feedback,decision:decision},function(j){ if(msg){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;} else {msg.style.color='#16a34a';msg.textContent=(flow&&j&&j.flowed)?('✓ → '+j.flowed+' size'+(j.flowed===1?'':'s')):'✓ saved';setTimeout(function(){msg.textContent='';},2400);} }
+      function _isRejDec(v){ return v==='rejected_new_sample'||v==='stop_development'||v==='rejected'; }
+      function _reasonBox(id,aspect){ return body.querySelector('.ps-reason-box[data-id="'+id+'"][data-aspect="'+aspect+'"]'); }
+      function _aspReasons(id,aspect){ var out=[]; body.querySelectorAll('.ps-reason-chip[data-id="'+id+'"][data-aspect="'+aspect+'"]').forEach(function(ch){ if(ch.getAttribute('aria-pressed')==='true')out.push(Number(ch.dataset.rid)); }); return out; }
+      function _saveAspect(id,aspect,feedback,decision,msg,flow,reasons){ if(msg){msg.style.color='#94a3b8';msg.textContent='saving…';}
+        shipPost('/api/product/sample/'+id+'/aspect',{aspect:aspect,feedback:feedback,decision:decision,reject_reasons:reasons||[]},function(j){ if(msg){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;} else {msg.style.color='#16a34a';msg.textContent=(flow&&j&&j.flowed)?('✓ → '+j.flowed+' size'+(j.flowed===1?'':'s')):'✓ saved';setTimeout(function(){msg.textContent='';},2400);} }
           try{prodItemInvalidate(ref);}catch(e){}
           // Refresh the IN-MEMORY detail so switching to the Size & variants tab shows the flowed approval right away
           // (prodItemInvalidate only clears the cache; the live _prodDetail.sizes the tab renders from was still stale).
@@ -13610,10 +13660,19 @@
             var _b=body.querySelector('.pd-body'); var _tb=document.querySelector('.pd-tab[data-t="sizes"]'); if(_tb&&_tb.classList.contains('active')&&_b&&typeof renderProdMaster==='function')renderProdMaster(_b,_prodDetail,'sizes'); } }).catch(function(){}); }
         }); }
       function _aspDec(id,aspect){ var sel=body.querySelector('select.ps-aspect-dec[data-id="'+id+'"][data-aspect="'+aspect+'"]'); return sel?sel.value:'pending'; }
-      body.querySelectorAll('.ps-aspect-fb').forEach(function(t){ t.onchange=function(){ var id=t.dataset.id, asp=t.dataset.aspect, msg=body.querySelector('.ps-aspect-msg[data-id="'+id+'"][data-aspect="'+asp+'"]'); _saveAspect(id,asp,t.value,_aspDec(id,asp),msg,false); }; });
+      body.querySelectorAll('.ps-aspect-fb').forEach(function(t){ t.onchange=function(){ var id=t.dataset.id, asp=t.dataset.aspect, msg=body.querySelector('.ps-aspect-msg[data-id="'+id+'"][data-aspect="'+asp+'"]');
+        var dec=_aspDec(id,asp); if(_isRejDec(dec)&&!_aspReasons(id,asp).length){ if(msg){msg.style.color='#b45309';msg.textContent='⚠ pick a reason';} return; }   // don't persist a rejected aspect (feedback edit) until a reason is tagged
+        _saveAspect(id,asp,t.value,dec,msg,false,_aspReasons(id,asp)); }; });
       body.querySelectorAll('select.ps-aspect-dec').forEach(function(sel){ sel.onchange=function(){ var id=sel.dataset.id, asp=sel.dataset.aspect, msg=body.querySelector('.ps-aspect-msg[data-id="'+id+'"][data-aspect="'+asp+'"]');
         sel.setAttribute('style','font-size:11px;'+prodStageStyle(sel.value));   // recolour like the stage dropdown
-        var fb=body.querySelector('.ps-aspect-fb[data-id="'+id+'"][data-aspect="'+asp+'"]'); _saveAspect(id,asp,fb?fb.value:'',sel.value,msg,true); }; });
+        var fb=body.querySelector('.ps-aspect-fb[data-id="'+id+'"][data-aspect="'+asp+'"]'), box=_reasonBox(id,asp), rej=_isRejDec(sel.value);
+        if(box)box.style.display=rej?'':'none';   // reveal the mandatory reason picker when rejecting
+        if(rej){ var rs=_aspReasons(id,asp); if(!rs.length){ if(msg){msg.style.color='#b45309';msg.textContent='⚠ pick a reason';} var _c=box&&box.querySelector('.ps-reason-chip'); if(_c)_c.focus(); return; } _saveAspect(id,asp,fb?fb.value:'',sel.value,msg,true,rs); }
+        else { _saveAspect(id,asp,fb?fb.value:'',sel.value,msg,true,[]); } }; });
+      body.querySelectorAll('.ps-reason-chip').forEach(function(ch){ ch.onclick=function(){ var on=ch.getAttribute('aria-pressed')!=='true'; ch.setAttribute('aria-pressed',on?'true':'false');
+        ch.style.border='1px solid '+(on?'#b91c1c':'#cbd5e1'); ch.style.background=on?'#fee2e2':'#fff'; ch.style.color=on?'#991b1b':'#475569'; ch.style.fontWeight=on?'700':'500';
+        var id=ch.dataset.id, asp=ch.dataset.aspect, dec=_aspDec(id,asp), msg=body.querySelector('.ps-aspect-msg[data-id="'+id+'"][data-aspect="'+asp+'"]');
+        if(_isRejDec(dec)){ var rs=_aspReasons(id,asp); if(rs.length){ var fb=body.querySelector('.ps-aspect-fb[data-id="'+id+'"][data-aspect="'+asp+'"]'); _saveAspect(id,asp,fb?fb.value:'',dec,msg,true,rs); } else if(msg){ msg.style.color='#b45309'; msg.textContent='⚠ pick a reason'; } } }; });
       body.querySelectorAll('.psamp-img').forEach(function(im){ im.onclick=function(){ openImgZoom(im.dataset.src); }; });
       body.querySelectorAll('.samp-open').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); (typeof openSampleDrawer==="function"?openSampleDrawer(a.dataset.ref):gotoSample(a.dataset.ref)); }; });   // sample-shipment ref -> editable drawer (was: navigate to SUPPLY Samples)
       var _pns=body.querySelector('.prod-newsamp'); if(_pns)_pns.onclick=function(){ var _d=_prodDetail; _newSampleForProduct((_d&&_d.item&&_d.item.supplier)||'', _prodSeedSku(_d, ref)); };
