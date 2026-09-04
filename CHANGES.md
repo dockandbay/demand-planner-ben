@@ -1,3 +1,6 @@
+## v27.442 PRODUCT — remove the per-file version input on component files
+- Dropped the little "v" version box next to each component file in the Sizes & variants tab (Ben). File up/download/remove unchanged.
+
 ## v27.441 PRODUCT ▸ Config — L3 sub-tabs + category add/delete + real auto-code
 - **PRODUCT ▸ Config now has L3 sub-tabs:** Season / release · Categories · Timeline tags & badges · Timeline quick phrases (one section at a time instead of one long page).
 - **Categories:** the blank-code placeholder now shows the **real auto-derived code** (first 5 letters of the name, e.g. Tea Towel → `TEATO (auto)`) instead of "(auto)"; plus **+ Add category** and per-row **✕ delete** (soft delete — hidden from the planner; n8n may re-add from products). New endpoints `POST /api/product/category` and `/api/product/category/:name/delete`. server.mjs + supply/inject.html.
