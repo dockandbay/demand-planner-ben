@@ -10104,7 +10104,7 @@ app.post('/api/supply/freight-pallets', async (req, res) => {
 // ── SUPPLY ▸ Barcodes — "customise" projects (mig 260): per-SKU barcode-number overrides for a download ──
 // (the LIST route is registered earlier, before the /api/supply/:section catch-all)
 app.get('/api/supply/barcode-project/:id', async (req, res) => {
-  try { const r = await pool.query(`SELECT id, name, coalesce(target,'product') target, coalesce(overrides,'{}'::jsonb) overrides FROM planner.barcode_projects WHERE id=$1::bigint`, [req.params.id]);
+  try { const r = await pool.query(`SELECT id, name, coalesce(target,'product') target, coalesce(batch,'') batch, coalesce(overrides,'{}'::jsonb) overrides FROM planner.barcode_projects WHERE id=$1::bigint`, [req.params.id]);
     if (!r.rowCount) return res.status(404).json({ error: 'not found' }); res.json(r.rows[0]); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/barcode-project', async (req, res) => {
@@ -10119,9 +10119,10 @@ app.post('/api/supply/barcode-project', async (req, res) => {
     else { num = String(v).trim(); types = { product: true, carton: false, inner: false }; }
     if (!num) return; if (!types.product && !types.carton && !types.inner) types.product = true;
     ov[sku] = { num: num.slice(0, 48), types }; });
+  const batch = (b.batch == null ? '' : String(b.batch)).trim() || null;
   try {
-    if (b.id) { await pool.query(`UPDATE planner.barcode_projects SET name=$2, target=$3, overrides=$4::jsonb, updated_at=now() WHERE id=$1::bigint`, [b.id, name, target, JSON.stringify(ov)]); res.json({ ok: true, id: Number(b.id) }); }
-    else { const r = await pool.query(`INSERT INTO planner.barcode_projects (name, target, overrides, created_by) VALUES ($1,$2,$3::jsonb,$4) RETURNING id`, [name, target, JSON.stringify(ov), authUser(req) || null]); res.json({ ok: true, id: r.rows[0].id }); }
+    if (b.id) { await pool.query(`UPDATE planner.barcode_projects SET name=$2, target=$3, batch=$4, overrides=$5::jsonb, updated_at=now() WHERE id=$1::bigint`, [b.id, name, target, batch, JSON.stringify(ov)]); res.json({ ok: true, id: Number(b.id) }); }
+    else { const r = await pool.query(`INSERT INTO planner.barcode_projects (name, target, batch, overrides, created_by) VALUES ($1,$2,$3,$4::jsonb,$5) RETURNING id`, [name, target, batch, JSON.stringify(ov), authUser(req) || null]); res.json({ ok: true, id: r.rows[0].id }); }
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/barcode-project/:id/delete', async (req, res) => {

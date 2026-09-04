@@ -1,3 +1,7 @@
+## v27.440 SUPPLY ▸ Barcodes Customise — wider drawer + project batch
+- **Fixed the squashed table:** drawer widened to 720px and the SKU column no longer wraps, so long SKUs (e.g. `TOWLB-SUM-LG-MIAMI`) show in full.
+- **Project-level Batch selector** (saved with the project): pick the batch in the drawer and it's stored on the project + used for the download, so the labels carry the BATCH + production date and you no longer hit the "No BATCH selected" prompt. Migration **260** gains a `batch` column (sandbox-applied; still Diviyaj for live). server.mjs + supply/inject.html.
+
 ## v27.439 SUPPLY ▸ Barcodes Customise — drawer rework (per-SKU ticks, in-drawer download, polish)
 - **Per-SKU barcode ticks** replace the project-level target dropdown: each override row has an editable custom number + **P / C / I** checkboxes (product / carton / inner) and a per-row **⤓** download; import defaults to Product. Overrides model is now `{sku:{num,types}}` (legacy `{sku:barcode}` still loads).
 - **Download happens in the drawer, not the main grid:** **⤓ Download all** or per-row ⤓ generate a ZIP of just the ticked barcodes with the custom numbers (only ticked kinds render — blank fields are skipped). Removed the "apply to main downloads" override + banner.

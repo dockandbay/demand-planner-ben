@@ -10212,13 +10212,13 @@
     function openBcCustomise(){
       var bg=document.createElement('div'); bg.id='bc-cust-bg';
       bg.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.4);z-index:9000;display:flex;justify-content:flex-end';
-      var dr=document.createElement('div'); dr.style.cssText='width:560px;max-width:95vw;height:100%;background:#fff;box-shadow:-8px 0 30px rgba(0,0,0,.2);overflow:auto;padding:16px 18px;box-sizing:border-box';
+      var dr=document.createElement('div'); dr.style.cssText='width:720px;max-width:96vw;height:100%;background:#fff;box-shadow:-8px 0 30px rgba(0,0,0,.2);overflow:auto;padding:16px 18px;box-sizing:border-box';
       bg.appendChild(dr); (document.getElementById('supply-root')||document.body).appendChild(bg);
       function _bcNorm(m){ var o={}; Object.keys(m||{}).forEach(function(s){ var v=m[s]; if(v==null)return;
         if(typeof v==='object'){ var t=v.types||{}; o[s]={num:String(v.num||''),types:{product:!!t.product,carton:!!t.carton,inner:!!t.inner}}; if(!o[s].types.product&&!o[s].types.carton&&!o[s].types.inner)o[s].types.product=true; }
         else { o[s]={num:String(v),types:{product:true,carton:false,inner:false}}; } }); return o; }
-      var state={id:_bcOv.id, name:_bcOv.name, map:_bcNorm(_bcOv.map||{})};
-      function snap(){ return JSON.stringify({n:state.name||'',m:state.map}); }
+      var state={id:_bcOv.id, name:_bcOv.name, batch:_bcOv.batch||'', map:_bcNorm(_bcOv.map||{})};
+      function snap(){ return JSON.stringify({n:state.name||'',b:state.batch||'',m:state.map}); }
       var _saved=snap();
       function dirty(){ return Object.keys(state.map).length>0 && snap()!==_saved; }
       function parseBox(){ var ta=dr.querySelector('#bcx-paste'); if(!ta)return 0; var n=0;
@@ -10228,7 +10228,7 @@
       function doSave(cb){ var msg=dr.querySelector('#bcx-msg'), nmEl=dr.querySelector('#bcx-name'), nm=(nmEl&&nmEl.value.trim())||state.name;
         offerParseFirst();
         if(!nm){ if(msg){msg.style.color='#dc2626';msg.textContent='name required to save';} if(nmEl)nmEl.focus(); return; }
-        state.name=nm; shipPost('/api/supply/barcode-project',{id:state.id||undefined,name:nm,overrides:state.map},function(j){ if(j&&j.error){ if(msg){msg.style.color='#dc2626';msg.textContent=j.error;} return; } state.id=j.id; _saved=snap(); if(msg){msg.style.color='#16a34a';msg.textContent='saved ✓';} if(cb){cb();}else{ loadProjects(); } }); }
+        state.name=nm; shipPost('/api/supply/barcode-project',{id:state.id||undefined,name:nm,batch:state.batch||null,overrides:state.map},function(j){ if(j&&j.error){ if(msg){msg.style.color='#dc2626';msg.textContent=j.error;} return; } state.id=j.id; _saved=snap(); if(msg){msg.style.color='#16a34a';msg.textContent='saved ✓';} if(cb){cb();}else{ loadProjects(); } }); }
       function close(force){ if(!force && dirty()){ if(confirm('You have unsaved changes to this barcode project. Save before closing?')){ doSave(function(){ bg.remove(); }); return; } } bg.remove(); }
       bg.onclick=function(e){ if(e.target===bg)close(); };
       var _bd='border:1px solid #cbd5e1;border-radius:5px;padding:4px 7px;background:#fff';   // explicit border (drawer is outside #supply-root, so scoped .fci styling doesn't reach it)
@@ -10240,7 +10240,7 @@
           if(cl.product_barcode||cl.carton_barcode||cl.inner_barcode)out.push(cl); }); return out; }
       function bcDownload(skus,btn){ offerParseFirst(); var items=bcItems(skus); var msg=dr.querySelector('#bcx-msg');
         if(!items.length){ if(msg){msg.style.color='#b45309';msg.textContent='nothing to download — check the SKU is in view and a barcode is ticked';} return; }
-        try{ bcDownloadAll(items, st.batch?batchBy[st.batch]:null, st.rrp, btn, ['product','carton','inner'], ((state.name||'custom').replace(/[^\w\-]+/g,'_'))+'_barcodes', {fmt:st.dlfmt, codes:CODES}); }
+        try{ bcDownloadAll(items, state.batch?batchBy[state.batch]:null, st.rrp, btn, ['product','carton','inner'], ((state.name||'custom').replace(/[^\w\-]+/g,'_'))+'_barcodes', {fmt:st.dlfmt, codes:CODES}); }
         catch(e){ if(msg){msg.style.color='#dc2626';msg.textContent='download failed: '+(e&&e.message||e);} } }
       function draw(projects){
         var sk={}; rows.forEach(function(r){ sk[r.sku]=r; });
@@ -10248,7 +10248,7 @@
         function th(t,w){ return '<th style="text-align:left;padding:3px 6px;color:#64748b;font-weight:700;border-bottom:1px solid #eef2f7'+(w?';width:'+w:'')+'">'+t+'</th>'; }
         function ck(s,t){ var o=state.map[s]; return '<label style="margin-right:7px;cursor:pointer;white-space:nowrap;font-weight:600"><input type="checkbox" class="bcx-tick" data-sku="'+esc(s)+'" data-t="'+t+'"'+(o.types[t]?' checked':'')+' style="vertical-align:middle;margin-right:2px">'+t.charAt(0).toUpperCase()+'</label>'; }
         var rowsH=keys.map(function(s){ var o=state.map[s], match=!!sk[s];
-          return '<tr><td style="text-align:left;padding:3px 6px" class="bc-mono">'+esc(s)+(match?'':' <span style="color:#b45309" title="not in the current view">⚠</span>')+'</td>'
+          return '<tr><td style="text-align:left;padding:3px 6px;white-space:nowrap" class="bc-mono">'+esc(s)+(match?'':' <span style="color:#b45309" title="not in the current view">⚠</span>')+'</td>'
             +'<td style="text-align:left;padding:3px 6px"><input class="bcx-num" data-sku="'+esc(s)+'" value="'+esc(o.num)+'" style="width:135px;font:12px ui-monospace,Menlo,monospace;'+_bd+'"></td>'
             +'<td style="text-align:left;padding:3px 6px;white-space:nowrap">'+ck(s,'product')+ck(s,'carton')+ck(s,'inner')+'</td>'
             +'<td style="text-align:left;padding:3px 6px;white-space:nowrap"><a class="bcx-dl1" data-sku="'+esc(s)+'" title="download this SKU only" style="cursor:pointer;color:#6b21a8;font-weight:700">⤓</a> <a class="bcx-rm" data-sku="'+esc(s)+'" title="remove" style="cursor:pointer;color:#94a3b8;margin-left:8px">✕</a></td></tr>'; }).join('');
@@ -10259,6 +10259,9 @@
             +'<select id="bcx-proj" style="width:auto;min-width:160px;'+_bd+'"><option value="">— new / none —</option>'+(projects||[]).map(function(p){return '<option value="'+p.id+'"'+(String(p.id)===String(state.id)?' selected':'')+'>'+esc(p.name)+' ('+p.n_overrides+')</option>';}).join('')+'</select>'
             +'<input id="bcx-name" placeholder="project name" value="'+esc(state.name||'')+'" style="width:180px;text-align:left;'+_bd+'">'
             +'<button type="button" class="save-btn" id="bcx-save">Save</button>'+(state.id?'<button type="button" class="save-btn" id="bcx-del" style="color:#b91c1c;border-color:#fca5a5">Delete</button>':'')+'<span class="mut tiny" id="bcx-msg"></span></div>'
+          +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px"><span class="pill-lbl">Batch</span>'
+            +'<select id="bcx-batch" style="width:auto;'+_bd+'"><option value="">— none —</option>'+batches.slice().sort(function(a,b){var da=a.batch_date||'',db=b.batch_date||''; if(da!==db)return da<db?1:-1; return String(a.batch)<String(b.batch)?1:-1;}).map(function(b2){return '<option value="'+esc(b2.batch)+'"'+(b2.batch===state.batch?' selected':'')+'>'+esc(b2.batch)+(b2.batch_date?' · '+esc(b2.batch_date):'')+'</option>';}).join('')+'</select>'
+            +'<span class="mut tiny">saved with the project — prints BATCH + production date on the labels</span></div>'
           +'<textarea id="bcx-paste" placeholder="TOWEL-LG-NAVY, 5061011699999&#10;TOWEL-LG-CORAL, 0123456789012" style="width:100%;height:80px;box-sizing:border-box;font:12px ui-monospace,Menlo,monospace;border:1px solid #cbd5e1;border-radius:6px;padding:7px;text-align:left"></textarea>'
           +'<div style="margin:6px 0"><button type="button" class="save-btn" id="bcx-parse">Parse / add</button> <button type="button" class="save-btn light" id="bcx-clearmap" style="margin-left:4px">Clear list</button> <span class="mut tiny" style="margin-left:6px">'+keys.length+' override'+(keys.length===1?'':'s')+' · '+matched+' matched</span></div>'
           +'<div class="tw" style="max-height:300px;overflow:auto;border:1px solid #eef2f7;border-radius:6px"><table style="font-size:12px;width:100%;border-collapse:collapse"><thead><tr>'+th('SKU')+th('Custom number')+th('Barcodes')+th('',56)+'</tr></thead><tbody>'+(rowsH||'<tr><td colspan="4" style="text-align:left;padding:6px;color:#94a3b8">No overrides yet — paste above and Parse / add.</td></tr>')+'</tbody></table></div>'
@@ -10267,15 +10270,16 @@
         dr.querySelector('#bcx-clearmap').onclick=function(){ state.map={}; draw(projects); };
         dr.querySelector('#bcx-parse').onclick=function(){ parseBox(); draw(projects); };
         dr.querySelector('#bcx-name').oninput=function(){ state.name=this.value; };
+        dr.querySelector('#bcx-batch').onchange=function(){ state.batch=this.value; };
         dr.querySelectorAll('.bcx-num').forEach(function(el){ el.oninput=function(){ if(state.map[el.dataset.sku])state.map[el.dataset.sku].num=el.value.trim(); }; });
         dr.querySelectorAll('.bcx-tick').forEach(function(el){ el.onchange=function(){ var o=state.map[el.dataset.sku]; if(o)o.types[el.dataset.t]=el.checked; }; });
         dr.querySelectorAll('.bcx-rm').forEach(function(a){ a.onclick=function(){ delete state.map[a.dataset.sku]; draw(projects); }; });
         dr.querySelectorAll('.bcx-dl1').forEach(function(a){ a.onclick=function(){ bcDownload([a.dataset.sku], a); }; });
         dr.querySelector('#bcx-dlall').onclick=function(){ bcDownload(Object.keys(state.map), this); };
-        dr.querySelector('#bcx-proj').onchange=function(){ var id=this.value; if(!id){ state.id=null; state.name=''; state.map={}; _saved=snap(); draw(projects); return; }
-          fetch('/api/supply/barcode-project/'+id).then(function(r){return r.json();}).then(function(j){ if(j&&!j.error){ state.id=j.id; state.name=j.name; state.map=_bcNorm(j.overrides||{}); _saved=snap(); } draw(projects); }); };
+        dr.querySelector('#bcx-proj').onchange=function(){ var id=this.value; if(!id){ state.id=null; state.name=''; state.batch=''; state.map={}; _saved=snap(); draw(projects); return; }
+          fetch('/api/supply/barcode-project/'+id).then(function(r){return r.json();}).then(function(j){ if(j&&!j.error){ state.id=j.id; state.name=j.name; state.batch=j.batch||''; state.map=_bcNorm(j.overrides||{}); _saved=snap(); } draw(projects); }); };
         dr.querySelector('#bcx-save').onclick=function(){ doSave(); };
-        var _del=dr.querySelector('#bcx-del'); if(_del)_del.onclick=function(){ if(!confirm('Delete project "'+state.name+'"?'))return; shipPost('/api/supply/barcode-project/'+state.id+'/delete',{},function(){ state.id=null; state.name=''; state.map={}; _saved=snap(); loadProjects(); }); };
+        var _del=dr.querySelector('#bcx-del'); if(_del)_del.onclick=function(){ if(!confirm('Delete project "'+state.name+'"?'))return; shipPost('/api/supply/barcode-project/'+state.id+'/delete',{},function(){ state.id=null; state.name=''; state.batch=''; state.map={}; _saved=snap(); loadProjects(); }); };
       }
       function loadProjects(){ fetch('/api/supply/barcode-projects').then(function(r){return r.json();}).then(function(ps){ draw(Array.isArray(ps)?ps:[]); }).catch(function(){ draw([]); }); }
       loadProjects();

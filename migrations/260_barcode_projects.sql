@@ -8,9 +8,11 @@
 CREATE TABLE IF NOT EXISTS planner.barcode_projects (
   id         bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   name       text    NOT NULL,
-  target     text    NOT NULL DEFAULT 'product',   -- product | carton | inner
-  overrides  jsonb   NOT NULL DEFAULT '{}'::jsonb,  -- { "<sku>": "<custom barcode>" }
+  target     text    NOT NULL DEFAULT 'product',   -- legacy; per-SKU barcode types now live in overrides
+  batch      text,                                  -- the batch whose BATCH + production date print on the labels
+  overrides  jsonb   NOT NULL DEFAULT '{}'::jsonb,  -- { "<sku>": { "num": "<custom barcode>", "types": {product,carton,inner} } }
   created_by text,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
+ALTER TABLE planner.barcode_projects ADD COLUMN IF NOT EXISTS batch text;   -- for tables created before this column existed
