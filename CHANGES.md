@@ -1,3 +1,6 @@
+## v27.464 Sizes & Variants — simpler component add
+- Removed the **+ Add all / ⚡ Set up from catalogue** button and the **Add component** label from the component chooser; the add button now reads **Add component** (dropdown + one button). supply/inject.html only.
+
 ## v27.463 Reject reasons — create a new one inline from the tag dropdown
 - The reject-reason **+ add reason…** dropdown now has **✎ Create new reason…**: type a name and it is saved to **Config** (sample_reject_reasons), tagged on the current rejection, and immediately available everywhere + in the **metrics report** — no trip to Config needed. supply/inject.html only.
 
