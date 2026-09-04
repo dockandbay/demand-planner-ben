@@ -1,3 +1,6 @@
+## v27.465 Components — link a spec via a searchable dropdown
+- **Link a spec** (on a spec-linked component in Sizes & Variants) is now a **searchable dropdown** of the Specifications table instead of a type-the-id prompt. Type to filter by spec type / category / SKU / filename; pick to link. Reuses the app's standard search-popup pattern. supply/inject.html only.
+
 ## v27.464 Sizes & Variants — simpler component add
 - Removed the **+ Add all / ⚡ Set up from catalogue** button and the **Add component** label from the component chooser; the add button now reads **Add component** (dropdown + one button). supply/inject.html only.
 

@@ -13141,6 +13141,22 @@
       l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ set(o.dataset.clear?'':o.dataset.v); }; }); }
     render(''); var qi=pop.querySelector('.shpop-q'); if(qi){ qi.oninput=function(){render(this.value);}; qi.focus(); }
   }); }
+  // Searchable Specification picker — links a spec-linked component to a doc from PRODUCT ▸ Specifications.
+  var _specList=null, _specPickBtn=null;
+  function loadSpecList(cb){ if(_specList)return cb(_specList); fetch('/api/product/specs').then(function(r){return r.json();}).then(function(l){ _specList=Array.isArray(l)?l:[]; cb(_specList); }).catch(function(){ cb([]); }); }
+  function specLabel(s){ var scope=s.scope_type==='category'?('Cat: '+(s.scope_category||'')):s.scope_type==='size'?((s.scope_category||'')+' / '+(s.scope_size||'')):s.scope_type==='sku'?('SKU: '+(s.scope_skus||'')):'All products'; return { main:(s.spec_type||'Spec')+' — '+scope, sub:(s.filename||'') }; }
+  function openSpecPick(btn,onPick){ var wasOpen=(document.getElementById('shpop') && _specPickBtn===btn); closeShPop(); _specPickBtn=null; if(wasOpen)return; _specPickBtn=btn;
+    loadSpecList(function(list){
+      var pop=document.createElement('div'); pop.id='shpop'; pop.className='shpop';
+      pop.innerHTML='<div class="shpop-h">Link a specification</div><input class="shpop-q" placeholder="search type / category / SKU / filename…"><div id="shpop-list"></div>';
+      placePop(pop, btn.getBoundingClientRect()); setTimeout(function(){document.addEventListener('mousedown',shPopOutside,true);},0);
+      function render(q){ q=(q||'').trim().toLowerCase(); var html='';
+        if(!list.length)html='<div class="mut" style="padding:6px 10px">No specifications yet — add them in PRODUCT ▸ Specifications.</div>';
+        list.filter(function(s){ if(!q)return true; var lb=specLabel(s); return (lb.main+' '+lb.sub+' '+(s.spec_type||'')+' '+(s.scope_category||'')+' '+(s.scope_skus||'')+' #'+s.id).toLowerCase().indexOf(q)>=0; }).slice(0,q?150:30).forEach(function(s){ var lb=specLabel(s); html+='<div class="shpop-opt" data-v="'+s.id+'"><b>'+esc(lb.main)+'</b>'+(lb.sub?' <span class="mut">'+esc(lb.sub)+'</span>':'')+' <span class="mut tiny">#'+s.id+'</span></div>'; });
+        var l=document.getElementById('shpop-list'); l.innerHTML=html||'<div class="mut" style="padding:6px 10px">no match</div>';
+        l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ closeShPop(); onPick(o.dataset.v); }; }); }
+      render(''); var qi=pop.querySelector('.shpop-q'); if(qi){ qi.oninput=function(){render(this.value);}; qi.focus(); }
+    }); }
   function ensureSuppliers(cb){ if(supplierList&&supplierList.length)return cb(); if(typeof fetchLookups==='function')fetchLookups(cb); else cb(); }
   function prodSupList(){ return '<datalist id="prod-suplist">'+(supplierList||[]).slice().sort().map(function(s){return '<option value="'+esc(s)+'">';}).join('')+'</datalist>'; }
   function prodFormLists(cfg){ cfg=cfg||{seasons:[],categories:[]};
@@ -13636,7 +13652,7 @@
       body.querySelectorAll('.pc2-sup').forEach(function(el){ el.onchange=function(){ var c=byId(el.dataset.id); c.supplier=el.value; shipPost('/api/product/item/'+encodeURIComponent(ref)+'/component',{id:el.dataset.id,name:c.name,supplier:el.value,sampling_mode:c.sampling_mode,spec_id:c.spec_id},function(){}); }; });
       body.querySelectorAll('.pc2-mode').forEach(function(el){ el.onchange=function(){ var c=byId(el.dataset.id); shipPost('/api/product/item/'+encodeURIComponent(ref)+'/component',{id:el.dataset.id,name:c.name,supplier:c.supplier,sampling_mode:el.value,spec_id:c.spec_id},function(){ _reload(); }); }; });
       body.querySelectorAll('.pc2-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Remove this component from the product?'))return; shipPost('/api/product/component/'+a.dataset.id+'/delete',{},function(){ _reload(); }); }; });
-      body.querySelectorAll('.pc2-spec').forEach(function(a){ a.onclick=function(){ var sid=(prompt('Specification id to link (see the Specifications tab):')||'').trim(); if(!sid)return; var c=byId(a.dataset.id); shipPost('/api/product/item/'+encodeURIComponent(ref)+'/component',{id:a.dataset.id,name:c.name,supplier:c.supplier,sampling_mode:'spec_linked',spec_id:sid},function(){ _reload(); }); }; });
+      body.querySelectorAll('.pc2-spec').forEach(function(a){ a.onclick=function(){ openSpecPick(a,function(sid){ if(!sid)return; var c=byId(a.dataset.id); shipPost('/api/product/item/'+encodeURIComponent(ref)+'/component',{id:a.dataset.id,name:c.name,supplier:c.supplier,sampling_mode:'spec_linked',spec_id:sid},function(){ _reload(); }); }); }; });
       body.querySelectorAll('.pc2-tosizes').forEach(function(a){ a.onclick=function(){ var host=body.parentElement||body; var b=host.querySelector('.pd-tab[data-t="sizes"]'); if(b)b.click(); }; });
       var _ab=body.querySelector('#pc2-addbtn'); if(_ab)_ab.onclick=function(){ var sel=body.querySelector('#pc2-add'); if(!sel||!sel.options.length)return; var o=sel.options[sel.selectedIndex]; shipPost('/api/product/item/'+encodeURIComponent(ref)+'/component',{component_type_id:o.value,name:o.dataset.name,supplier:o.dataset.sup,sampling_mode:o.dataset.mode,sort:comps.length},function(j){ if(j&&j.error){alert(j.error);return;} _reload(); }); };
     }).catch(function(e){ body.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
