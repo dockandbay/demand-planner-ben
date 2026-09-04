@@ -6618,7 +6618,7 @@
     // L2 groups are scoped by CONFIG_CTX: 'supply' (SUPPLY ▸ CONFIG) vs 'admin' (the ⚙ cog CONFIG section).
     var L2;
     if(CONFIG_CTX==='supply'){ L2=[['suppliers','Suppliers'],['batches','Batches'],['productions','Productions'],['keyaccounts','Key accounts'],['portal','Portal'],['portalusers','Portal users'],['mfgbom','BOM'],['branches','Branches'],['freight','Freight rates'],['tax','Import tax'],['products','Products'],['barcodegen','Barcodes'],['duty','Import duty'],['consignees','Consignees']]; }   // flat (Supply chain group removed); Ben's order + duty/consignees appended
-    else { L2=[['export-uploads','Exports & uploads'],['productcfg','Product'],['suggestions','Suggestions']]; if(ME&&ME.is_admin)L2.unshift(['admin','Admin']); }   // 'demand' group moved to DEMAND ▸ Config
+    else { L2=[['export-uploads','Exports & uploads'],['suggestions','Suggestions']]; if(ME&&ME.is_admin)L2.unshift(['admin','Admin']); }   // 'demand' group moved to DEMAND ▸ Config; 'Product' moved to PRODUCT ▸ Config
     if(CONFIG_SUB==='forecast-export')CONFIG_SUB='export-uploads';   // legacy slug redirect
     if((CONFIG_SUB==='email-notifications'||CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log'||CONFIG_SUB==='admin-general'||CONFIG_SUB==='exchange-rates'||CONFIG_SUB==='channels')&&!(ME&&ME.is_admin))CONFIG_SUB='export-uploads';   // guard: non-admins can't land on admin-only tabs (General/email-notifications now admin-only)
     function reload(){ delete cache['config']; selectSection('config'); }   // refresh after a rate add (keeps sub-tab)
@@ -6941,7 +6941,8 @@
             el.innerHTML='Fulfil API keys in server env — Sandbox: '+dot(st&&st.fulfil&&st.fulfil.sandbox)+' &nbsp;·&nbsp; Live: '+dot(st&&st.fulfil&&st.fulfil.live); }).catch(function(){});
         }).catch(function(e){ b.innerHTML='<div class="count" style="color:#dc2626">'+esc(String(e))+'</div>'; }); };
       SUBS['email-notifications']=SUBS['general'];   // 'General settings' page re-homed under Admin ▸ Email notifications (same renderer)
-      SUBS['productcfg']=function(){ b.innerHTML='<div class="count">Loading…</div>';
+      SUBS['productcfg']=function(){ renderProductConfig(b); };
+      var _pcfgLegacyUnused=function(){ b.innerHTML='<div class="count">Loading…</div>';
         Promise.all([fetch('/api/product/config').then(function(r){return r.json();}),fetch('/api/product/timeline-config').then(function(r){return r.json();}).catch(function(){return {tags:[],snippets:[]};})]).then(function(_cfg){ var d=_cfg[0]||{seasons:[],categories:[]}; var _tl=_cfg[1]||{tags:[],snippets:[]}; d.tags=_tl.tags||[]; d.snippets=_tl.snippets||[];
           function draw(){
             var seasonRows=(d.seasons||[]).map(function(s){ return '<tr data-code="'+esc(s.code)+'"><td class="l" style="padding:4px 8px;font-weight:700;font-family:ui-monospace,Menlo,monospace">'+esc(s.code)+'</td>'
@@ -10292,8 +10293,9 @@
     else if(seg[0]==='demand'){ if(typeof DEMAND_VIEW!=='undefined'){ if(seg[1]==='scenario'){ DEMAND_VIEW='scenario'; if(seg[2])scenCurrent=seg[2]; } else if((seg[1]==='inputs'||seg[1]==='analysis'||seg[1]==='config')&&seg[2])DEMAND_VIEW=seg[2]; else if(seg[1]==='exceptions'){ DEMAND_VIEW='exceptions'; if(seg[2]&&typeof EXC_SUBTAB!=='undefined')window.EXC_SUBTAB=seg[2]; } else if(seg[1])DEMAND_VIEW=seg[1]; } var _db=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]'); if(_db)_db.click(); }   // #/demand/scenario/<key> + #/demand/inputs|analysis/<slug> + #/demand/exceptions/<slug> deep-links (legacy #/demand/<slug> still resolves)
     else if(seg[0]==='reports'){ if(seg[1]&&typeof REPORT_VIEW!=='undefined')REPORT_VIEW=seg[1]; var _rb=document.querySelector('#view-tabs-row .view-toggle[data-view="exec"]'); if(_rb)_rb.click(); }
     else if(seg[0]==='product'){ if(typeof showProduct==='function'){ showProduct();
-      if(seg[1]&&seg[1]!=='plan'&&seg[1]!=='reports'){ _pendingProdRef=decodeURIComponent(seg[1]); if(seg[2])_pendingProdTab=decodeURIComponent(seg[2]); selectProductSub('plan'); }   // #/product/<ref>[/<tab>]
-      else { if(seg[2])_pendingProdRef=decodeURIComponent(seg[2]); selectProductSub(seg[1]||'plan'); } } }   // #/product/<plan|reports>[/<ref>] (legacy)
+      var _prodSubs={plan:1,dashboard:1,range:1,specs:1,reports:1,config:1};
+      if(seg[1]&&!_prodSubs[seg[1]]){ _pendingProdRef=decodeURIComponent(seg[1]); if(seg[2])_pendingProdTab=decodeURIComponent(seg[2]); selectProductSub('plan'); }   // #/product/<ref>[/<tab>]
+      else { if(seg[2])_pendingProdRef=decodeURIComponent(seg[2]); selectProductSub(seg[1]||'plan'); } } }   // #/product/<plan|dashboard|range|specs|reports|config>[/<ref>]
     else if(seg[0]==='buy-move'||seg[0]==='buy'||seg[0]==='fba'){
       // BUY & MOVE group. New URLs: #/buy-move/<buy|fba|transfer>. Legacy #/buy/<ctry>, #/fba/<ctry> still work.
       var sub, ctry=null;
@@ -12526,7 +12528,7 @@
   function ensureProductRoot(){ if(document.getElementById('product-root'))return;
     var app=document.getElementById('app')||document.body; if(!app)return;
     var el=document.createElement('div'); el.id='product-root';
-    el.innerHTML='<div id="product-subnav"><button class="stab" data-k="plan">PLAN</button><button class="stab" data-k="dashboard">DASHBOARD</button><button class="stab" data-k="range">RANGE PLAN</button><button class="stab" data-k="specs">SPECIFICATIONS</button><button class="stab" data-k="reports">REPORTS</button><span class="ver">HORIZON __APP_VERSION__</span></div><div id="product-content"></div>';
+    el.innerHTML='<div id="product-subnav"><button class="stab" data-k="plan">PLAN</button><button class="stab" data-k="dashboard">DASHBOARD</button><button class="stab" data-k="range">RANGE PLAN</button><button class="stab" data-k="specs">SPECIFICATIONS</button><button class="stab" data-k="reports">REPORTS</button><button class="stab" data-k="config">CONFIG</button><span class="ver">HORIZON __APP_VERSION__</span></div><div id="product-content"></div>';
     app.appendChild(el);
     el.querySelectorAll('.stab').forEach(function(b){ b.onclick=function(){ selectProductSub(b.dataset.k); }; }); }
   function showProduct(){ ensureProductRoot(); if(typeof hideSupply==='function')hideSupply(); if(typeof hideScenario==='function')hideScenario();
@@ -12546,6 +12548,7 @@
     if(k==='reports') return renderProductReports(c);
     if(k==='range') return renderProductRange(c);
     if(k==='specs') return renderProductSpecs(c);
+    if(k==='config') return renderProductConfig(c);
     if(k==='dashboard') return renderProductDashboard(c);
     renderProductPlan(c); }
   // SPECIFICATIONS (SUG-0019) — source-of-truth packaging/labelling docs. P1: managed types + upload with scope + effective-from.
@@ -13081,6 +13084,60 @@
     }).catch(function(e){ c.innerHTML='<div style="color:#dc2626">Failed: '+esc(e.message||e)+'</div>'; }); }
   var _prodFilt={type:'Product Development',season:'',status:'dev_actions',q:'',category:'',stage:''};   // Type defaults to Product Development; stage = active stage-pill filter (overrides status when set)
   var _pgSeasonCollapsed={}, _pgCatCollapsed={};   // PRODUCT grid group collapse state — persists across redraws
+  // PRODUCT ▸ CONFIG — seasons, category codes, timeline tags/badges, timeline quick phrases. Lives in the PRODUCT
+  // module (moved here from the ⚙ CONFIG ▸ Product panel). `b` = the container to render into.
+  function renderProductConfig(b){ b.innerHTML='<div class="count" style="padding:10px 2px;color:#94a3b8">Loading…</div>';
+    Promise.all([fetch('/api/product/config').then(function(r){return r.json();}),fetch('/api/product/timeline-config').then(function(r){return r.json();}).catch(function(){return {tags:[],snippets:[]};})]).then(function(_cfg){ var d=_cfg[0]||{seasons:[],categories:[]}; var _tl=_cfg[1]||{tags:[],snippets:[]}; d.tags=_tl.tags||[]; d.snippets=_tl.snippets||[];
+      function draw(){
+        var seasonRows=(d.seasons||[]).map(function(s){ return '<tr data-code="'+esc(s.code)+'"><td class="l" style="padding:4px 8px;font-weight:700;font-family:ui-monospace,Menlo,monospace">'+esc(s.code)+'</td>'
+          +'<td class="l" style="padding:4px 8px"><input class="fci pcfg-s" data-code="'+esc(s.code)+'" data-f="label" value="'+esc(s.label)+'" style="width:220px;padding:4px 7px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px"></td>'
+          +'<td class="l" style="padding:4px 8px"><input class="fci pcfg-s" data-code="'+esc(s.code)+'" data-f="sort" value="'+esc(s.sort==null?'':s.sort)+'" style="width:50px;padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px;text-align:right"></td>'
+          +'<td class="l" style="padding:4px 8px"><select class="fci pcfg-s" data-code="'+esc(s.code)+'" data-f="active" style="padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px"><option value="true"'+(s.active!==false?' selected':'')+'>Active</option><option value="false"'+(s.active===false?' selected':'')+'>Inactive</option></select></td>'
+          +'<td class="l" style="padding:4px 8px"><a class="pcfg-sdel" data-code="'+esc(s.code)+'" style="color:#dc2626;cursor:pointer">✕</a></td></tr>'; }).join('');
+        var catRows=(d.categories||[]).map(function(c2){ return '<tr><td class="l" style="padding:4px 8px">'+esc(c2.category)+'</td>'
+          +'<td class="l" style="padding:4px 8px"><input class="fci pcfg-c" data-cat="'+esc(c2.category)+'" value="'+esc(c2.code)+'" placeholder="(auto)" style="width:110px;padding:4px 7px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px;text-transform:uppercase"></td></tr>'; }).join('');
+        var tagRows=(d.tags||[]).map(function(t){ return '<tr data-id="'+t.id+'"><td class="l" style="padding:4px 8px"><span class="pctag-badge" data-id="'+t.id+'" style="display:inline-block;font-size:11px;font-weight:700;color:#fff;background:'+esc(t.colour||'#64748b')+';border-radius:5px;padding:1px 9px">'+esc(t.name||'')+'</span></td>'
+          +'<td class="l" style="padding:4px 8px"><input class="fci pctag" data-id="'+t.id+'" data-f="name" value="'+esc(t.name||'')+'" style="width:150px;padding:4px 7px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px"></td>'
+          +'<td class="l" style="padding:4px 8px"><input type="color" class="pctag" data-id="'+t.id+'" data-f="colour" value="'+esc(t.colour||'#64748b')+'" style="width:40px;height:26px;padding:0;border:1px solid #cbd5e1;border-radius:5px;vertical-align:middle"> <input class="fci pctag" data-id="'+t.id+'" data-f="colour2" value="'+esc(t.colour||'#64748b')+'" style="width:80px;padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:11px;font-family:ui-monospace,Menlo,monospace"></td>'
+          +'<td class="l" style="padding:4px 8px"><input class="fci pctag" data-id="'+t.id+'" data-f="sort" value="'+esc(t.sort==null?'':t.sort)+'" style="width:50px;padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px;text-align:right"></td>'
+          +'<td class="l" style="padding:4px 8px"><select class="fci pctag" data-id="'+t.id+'" data-f="active" style="padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px"><option value="true"'+(t.active!==false?' selected':'')+'>Active</option><option value="false"'+(t.active===false?' selected':'')+'>Inactive</option></select></td>'
+          +'<td class="l" style="padding:4px 8px"><a class="pctag-del" data-id="'+t.id+'" style="color:#dc2626;cursor:pointer">✕</a></td></tr>'; }).join('');
+        var snipRows=(d.snippets||[]).map(function(s){ return '<tr data-id="'+s.id+'"><td class="l" style="padding:4px 8px"><textarea class="fci pcsnip" data-id="'+s.id+'" data-f="body" rows="2" style="width:100%;min-width:360px;box-sizing:border-box;padding:5px 7px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px;font-family:inherit;text-align:left;resize:vertical">'+esc(s.body||'')+'</textarea></td>'
+          +'<td class="l" style="padding:4px 8px;vertical-align:top"><input class="fci pcsnip" data-id="'+s.id+'" data-f="sort" value="'+esc(s.sort==null?'':s.sort)+'" style="width:50px;padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px;text-align:right"></td>'
+          +'<td class="l" style="padding:4px 8px;vertical-align:top"><select class="fci pcsnip" data-id="'+s.id+'" data-f="active" style="padding:4px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px"><option value="true"'+(s.active!==false?' selected':'')+'>Active</option><option value="false"'+(s.active===false?' selected':'')+'>Inactive</option></select></td>'
+          +'<td class="l" style="padding:4px 8px;vertical-align:top"><a class="pcsnip-del" data-id="'+s.id+'" style="color:#dc2626;cursor:pointer">✕</a></td></tr>'; }).join('');
+        b.innerHTML='<div class="annot"><b>PRODUCT ▸ Config.</b> Manage <b>Seasons</b> (the code is used in each product reference, e.g. <b>SS27</b>-TOWLB-01), the short <b>category codes</b>, and the product <b>timeline</b> tags &amp; quick phrases. Blank category code → auto-derived from the name. Changes save on edit.</div>'
+          +'<div class="sect-h">Seasons <button class="save-btn" id="pcfg-snew" style="margin-left:8px;font-size:11px;padding:3px 10px">+ Add season</button></div>'
+          +'<div class="tw" style="margin-bottom:20px"><table class="samp-tbl" style="font-size:12px"><thead><tr><th class="l">Code</th><th class="l">Label</th><th class="l">Sort</th><th class="l">Active</th><th></th></tr></thead><tbody>'+(seasonRows||'<tr><td colspan="5" class="count">no seasons</td></tr>')+'</tbody></table></div>'
+          +'<div class="sect-h">Category codes</div>'
+          +'<div class="tw" style="margin-bottom:22px"><table class="samp-tbl" style="font-size:12px"><thead><tr><th class="l">Category</th><th class="l">Code</th></tr></thead><tbody>'+catRows+'</tbody></table></div>'
+          +'<div class="sect-h">Timeline tags &amp; badges <button class="save-btn" id="pctag-new" style="margin-left:8px;font-size:11px;padding:3px 10px">+ Add tag</button> <span class="mut tiny" style="font-weight:400">— colour-coded labels for product timeline messages; filter the timeline by these</span></div>'
+          +'<div class="tw" style="margin-bottom:22px"><table class="samp-tbl" style="font-size:12px"><thead><tr><th class="l">Badge</th><th class="l">Name</th><th class="l">Colour</th><th class="l">Sort</th><th class="l">Active</th><th></th></tr></thead><tbody>'+(tagRows||'<tr><td colspan="6" class="count">no tags yet</td></tr>')+'</tbody></table></div>'
+          +'<div class="sect-h">Timeline quick phrases <button class="save-btn" id="pcsnip-new" style="margin-left:8px;font-size:11px;padding:3px 10px">+ Add phrase</button> <span class="mut tiny" style="font-weight:400">— type <b>/</b> in a product timeline box to insert one</span></div>'
+          +'<div class="tw"><table class="samp-tbl" style="font-size:12px"><thead><tr><th class="l">Phrase</th><th class="l">Sort</th><th class="l">Active</th><th></th></tr></thead><tbody>'+(snipRows||'<tr><td colspan="4" class="count">no phrases yet</td></tr>')+'</tbody></table></div>';
+        b.querySelector('#pcfg-snew').onclick=function(){ var code=(prompt('New season code (e.g. SS29):')||'').trim().toUpperCase(); if(!code)return; shipPost('/api/product/season',{code:code,active:true},function(){ d.seasons.push({code:code,label:'',active:true,sort:null}); draw(); }); };
+        b.querySelectorAll('.pcfg-s').forEach(function(el){ el.onchange=function(){ var code=el.dataset.code, row=(d.seasons||[]).filter(function(x){return x.code===code;})[0]||{code:code};
+          row[el.dataset.f]= el.dataset.f==='active'?(el.value==='true'):(el.dataset.f==='sort'?(el.value===''?null:parseInt(el.value,10)):el.value);
+          shipPost('/api/product/season',{code:code,label:row.label,active:row.active,sort:row.sort},function(){}); }; });
+        b.querySelectorAll('.pcfg-sdel').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete season '+a.dataset.code+'?'))return; shipPost('/api/product/season/'+encodeURIComponent(a.dataset.code)+'/delete',{},function(){ d.seasons=(d.seasons||[]).filter(function(x){return x.code!==a.dataset.code;}); draw(); }); }; });
+        b.querySelectorAll('.pcfg-c').forEach(function(el){ el.onchange=function(){ shipPost('/api/product/category-code',{category:el.dataset.cat,code:el.value},function(){}); }; });
+        b.querySelector('#pctag-new').onclick=function(){ var name=(prompt('New tag name (e.g. Quality):')||'').trim(); if(!name)return; shipPost('/api/product/timeline-tag',{name:name,colour:'#64748b',sort:(d.tags||[]).length},function(j){ if(j&&j.error){alert(j.error);return;} d.tags.push({id:j.id,name:name,colour:'#64748b',sort:(d.tags||[]).length,active:true}); draw(); }); };
+        b.querySelectorAll('.pctag').forEach(function(el){ el.onchange=function(){ var id=el.dataset.id, row=(d.tags||[]).filter(function(x){return String(x.id)===String(id);})[0]||{id:id};
+          var f=el.dataset.f; if(f==='colour'||f==='colour2'){ row.colour=el.value; } else if(f==='active'){ row.active=(el.value==='true'); } else if(f==='sort'){ row.sort=(el.value===''?0:parseInt(el.value,10)||0); } else { row[f]=el.value; }
+          shipPost('/api/product/timeline-tag',{id:id,name:row.name,colour:row.colour,sort:row.sort,active:row.active},function(j){ if(j&&j.error){alert(j.error);return;}
+            var bd=b.querySelector('.pctag-badge[data-id="'+id+'"]'); if(bd){ bd.style.background=row.colour||'#64748b'; bd.textContent=row.name||''; }
+            if(f==='colour'){ var t2=b.querySelector('.pctag[data-id="'+id+'"][data-f="colour2"]'); if(t2)t2.value=row.colour; }
+            if(f==='colour2'){ var t1=b.querySelector('.pctag[data-id="'+id+'"][data-f="colour"]'); if(t1)t1.value=row.colour; }
+          }); }; });
+        b.querySelectorAll('.pctag-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this tag? Messages already tagged with it will lose the badge.'))return; shipPost('/api/product/timeline-tag/'+encodeURIComponent(a.dataset.id)+'/delete',{},function(){ d.tags=(d.tags||[]).filter(function(x){return String(x.id)!==String(a.dataset.id);}); draw(); }); }; });
+        b.querySelector('#pcsnip-new').onclick=function(){ var body=(prompt('New quick phrase:')||'').trim(); if(!body)return; shipPost('/api/product/timeline-snippet',{body:body,sort:(d.snippets||[]).length},function(j){ if(j&&j.error){alert(j.error);return;} d.snippets.push({id:j.id,body:body,sort:(d.snippets||[]).length,active:true}); draw(); }); };
+        b.querySelectorAll('.pcsnip').forEach(function(el){ el.onchange=function(){ var id=el.dataset.id, row=(d.snippets||[]).filter(function(x){return String(x.id)===String(id);})[0]||{id:id};
+          var f=el.dataset.f; if(f==='active'){ row.active=(el.value==='true'); } else if(f==='sort'){ row.sort=(el.value===''?0:parseInt(el.value,10)||0); } else { row[f]=el.value; }
+          shipPost('/api/product/timeline-snippet',{id:id,body:row.body,sort:row.sort,active:row.active},function(j){ if(j&&j.error)alert(j.error); }); }; });
+        b.querySelectorAll('.pcsnip-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this phrase?'))return; shipPost('/api/product/timeline-snippet/'+encodeURIComponent(a.dataset.id)+'/delete',{},function(){ d.snippets=(d.snippets||[]).filter(function(x){return String(x.id)!==String(a.dataset.id);}); draw(); }); }; });
+      }
+      draw();
+    }).catch(function(e){ b.innerHTML='<div class="count" style="color:#dc2626">'+esc(String(e))+'</div>'; }); }
   function renderProductPlan(c){
     c.innerHTML='<div id="pg-filters" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"></div><div id="pg-stagepills" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 12px"></div><div id="pg-grid"><div style="color:#94a3b8">Loading…</div></div>';
     if(!_poActStateLoaded){ loadPoActState(function(){ renderProductPlan(c); }); return; }   // need snooze state for the SKU-mapping reminder
@@ -13626,7 +13683,7 @@
         var ctrl=(!sup && n.id===recentOwnId)?'<button class="save-btn light prod-esc" data-msg="'+esc(n.body||'')+'" title="Escalate this message to the supplier (emails their portal user)" style="color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'';
         var dl=n.attachment_id?'<div style="margin-top:4px"><a href="/api/supply/portal-attachment/'+encodeURIComponent(n.attachment_id)+'" target="_blank" rel="noopener" style="font-size:12px;color:#1d4ed8;text-decoration:none;font-weight:600">⬇ '+esc(n.attachment_name||'Download file')+'</a></div>':'';
         var tg=(n.tags||[]).map(tagBadge).join(''); tg=tg?'<div style="margin-top:4px">'+tg+'</div>':'';
-        var pc=(n.pantone||[]).map(panCard).join(''); pc=pc?pc+'<div class="mut" style="font-size:9px;margin-top:2px">On-screen approximation, not a colour proof.</div>':'';
+        var pc=(n.pantone||[]).map(panCard).join('');
         return '<div style="font-size:11px;margin:3px 0;max-width:640px;padding:5px 8px;background:'+(sup?(n.read?'#f1f5f9':'#fff7ed'):'#eef2ff')+';border:1px solid '+(isNew?'#fdba74':'#e5e7eb')+';border-radius:5px;display:flex;gap:10px;align-items:flex-start">'
           +(ctrl?'<div style="flex:0 0 auto;display:flex;flex-direction:column;gap:3px;align-items:flex-start;min-width:78px">'+ctrl+'</div>':'')
           +'<div style="flex:1"><span class="mut tiny">'+esc(_fmt(n.created_at))+' · '+who+'</span>'+(isNew?' <span class="ex-badge">new</span>':'')+'<br><span style="color:#1a1a1a;white-space:pre-wrap">'+esc(n.body||'')+'</span>'+dl+tg+pc+'</div>'
