@@ -1,3 +1,6 @@
+## v27.459 PRODUCT ▸ Samples — expand recent, collapse past
+- The Samples sub-tab now shows only the **most recent sample version expanded**; older versions collapse to a one-line summary bar (ref · status · 📸 photo badge · date · colour/quality). Click the bar (▸) to expand any past version. Keeps a long history tidy while the current sample stays open. supply/inject.html only.
+
 ## v27.458 PRODUCT ▸ Dashboard — Photography view
 - New **📸 Photography** view toggle on the PRODUCT Dashboard (next to Components). Lists every product with a clear **photo status tag** (📸 Approved / — not yet), **which sample version** is approved for photography (ref + date) and its **comments**. Season filter + click-through to the product both work. Header count shows how many are photo-approved.
 - Dashboard endpoint now returns each product's photo-approved sample versions. server.mjs + supply/inject.html. No migration (reads mig 265 fields).
