@@ -1,3 +1,6 @@
+## v27.444 PRODUCT timeline — native real-time spellcheck on the compose box + seeded phrases
+- Enabled the browser native spellcheck on the timeline compose box (spellcheck=true, lang=en-GB) so misspellings get the real-time red underline as you type (right-click for suggestions). Seeded 5 pre-written quick phrases (Ben) — sandbox + live seed migrations/seed_timeline_phrases_2026-09-04.sql. supply/inject.html.
+
 ## v27.443 PRODUCT ▸ Config — L3 menu now uses the standard light-blue pill style
 - Reworked the Config sub-tabs to the app-standard L3 menu (the same light-blue #..-subs-l3 pill bar + .rtab underline tabs as REPORTS / SUPPLY / PO detail), instead of the bespoke bar. Each tab deep-links (#/product/config/<season|cats|tags|phrases>). Added the product-root-scoped CSS (the standard L3 styles were scoped to #supply-root). supply/inject.html.
 
