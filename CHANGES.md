@@ -1,3 +1,7 @@
+## v27.457 Sample: Approved for photography flag + comments (mig 265)
+- Each sample version in the PRODUCT ▸ Samples tab now has an **📸 Approved for photography** checkbox (independent of the bulk-approval decision). Ticking it reveals an optional **comments** box (e.g. hero colourway, retouch notes); the card highlights green when approved. Saves on toggle / blur.
+- Fields `approved_for_photography` + `photography_notes` on planner.product_dev_samples (mig 265); samples feed carries them; new `POST /api/product/sample/:id/photography`. server.mjs + supply/inject.html.
+
 ## v27.456 Sample reject reasons — mandatory capture + metrics (mig 264)
 - **Rejecting a sample aspect now requires a reason.** In the Samples tab, setting an aspect to Reject / Stop development reveals a mandatory reason-chip picker; the decision won't save until at least one reason is tagged. Reasons can be multiple.
 - **Config list:** new **PRODUCT ▸ Config ▸ Reject reasons** sub-tab (inline add/edit, active toggle), seeded with **Colour issue · Finishing · Packing**.

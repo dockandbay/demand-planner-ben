@@ -6947,6 +6947,7 @@ async function productSampleList(itemRef) {
     ps.colour_verified, ps.quality_verified, coalesce(ps.description,'') description, coalesce(ps.created_by,'') created_by,
     coalesce(ps.sampled_aspects,'{}') sampled_aspects, coalesce(ps.sample_sizes,'{}') sample_sizes,
     coalesce(ps.supplier_status,'in_development') supplier_status, coalesce(ps.not_shipped,false) not_shipped,
+    coalesce(ps.approved_for_photography,false) approved_for_photography, coalesce(ps.photography_notes,'') photography_notes,
     coalesce(ps.admin_feedback,'') admin_feedback,
     to_char(ps.created_at,'YYYY-MM-DD HH24:MI') created_at,
     coalesce((SELECT json_agg(json_build_object('id',sr.id,'ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,'')) ORDER BY sr.created_at)
@@ -7042,6 +7043,16 @@ app.post('/api/product/sample/:id/feedback', async (req, res) => {   // admin-au
     }
     res.json({ ok: true }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// "Approved for photography" flag + optional comments on a sample version (mig 265). Independent of the bulk decision.
+app.post('/api/product/sample/:id/photography', async (req, res) => {
+  try {
+    const b = req.body || {};
+    const approved = !!b.approved_for_photography;
+    const notes = approved ? String(b.photography_notes || '').trim() : '';   // notes only meaningful when ticked
+    await pool.query(`UPDATE planner.product_dev_samples SET approved_for_photography=$2, photography_notes=$3 WHERE id=$1`, [req.params.id, approved, notes || null]);
+    res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Per-aspect feedback + approve/reject on a sample version (Product / Packaging / Labels-wraps / Polybag / Other).
 // The decision FLOWS THROUGH to the Variants tab: approving/rejecting an aspect writes that component's approval on
