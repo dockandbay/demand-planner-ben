@@ -1,3 +1,7 @@
+## v27.461 Samples tab — wider feedback panel + reason tag input
+- The **Feedback & sign-off** panel is ~30% wider (card 840→1090px, panel basis 420→560px) so aspect / feedback / decision columns have room.
+- **Reject reasons** are now a proper tag input: a **+ add reason…** dropdown (multi-select) plus selected reasons shown as **wrapping pills** with an ✕ to remove. Pills wrap in the cell instead of being cut off; the dropdown only lists reasons not already added. Still mandatory when rejecting. supply/inject.html only.
+
 ## v27.460 Sizes & Variants — matrix polish
 - **Samples cell:** shows only the **most recent sample version** per size+component; older versions collapse behind a **+ N older** expander.
 - **Files:** now **stacked vertically** (one per line) instead of side-by-side, so long filenames read cleanly.
