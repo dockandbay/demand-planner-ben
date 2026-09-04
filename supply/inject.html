@@ -13654,7 +13654,7 @@
         var avail=reasons.filter(function(rz){ return sel.indexOf(String(rz.id))<0; });
         return '<div style="font-size:10px;color:#b45309;font-weight:700;margin-bottom:3px">⚠ Reject reason (required)</div>'
           +'<div class="ps-reason-pills" data-id="'+id+'" data-aspect="'+esc(aspect)+'" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px">'+sel.map(pill).join('')+'</div>'
-          +(avail.length?'<select class="ps-reason-add fci" data-id="'+id+'" data-aspect="'+esc(aspect)+'" style="font-size:11px;max-width:200px"><option value="">+ add reason…</option>'+avail.map(function(rz){return '<option value="'+rz.id+'">'+esc(rz.name)+'</option>';}).join('')+'</select>':'<span class="mut tiny">all reasons added</span>'); }
+          +'<select class="ps-reason-add fci" data-id="'+id+'" data-aspect="'+esc(aspect)+'" style="font-size:11px;max-width:220px"><option value="">+ add reason…</option>'+avail.map(function(rz){return '<option value="'+rz.id+'">'+esc(rz.name)+'</option>';}).join('')+'<option value="__new">✎ Create new reason…</option></select>'; }
       body.innerHTML='<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><button class="prod-newsamp save-btn" style="background:#16a34a;color:#fff;border-color:#15803d;font-weight:700">+ Add to new sample request</button><span class="mut tiny">creates a sample request pre-linked to this product</span></div>'
         +'<div id="prod-sr-list" style="margin-bottom:16px"></div>'
         +'<div style="font-size:12px;color:#94a3b8;margin-bottom:10px">Sample versions submitted by the supplier in the portal — each colour + quality verified before submission.</div>'
@@ -13729,7 +13729,12 @@
         if(!_isRejDec(dec))return; var rs=_aspReasons(id,asp); var fb=body.querySelector('.ps-aspect-fb[data-id="'+id+'"][data-aspect="'+asp+'"]');
         if(rs.length){ _saveAspect(id,asp,fb?fb.value:'',dec,msg,true,rs); } else if(msg){ msg.style.color='#b45309'; msg.textContent='⚠ pick a reason'; } }
       function bindReasonBox(box){ var id=box.dataset.id, asp=box.dataset.aspect;
-        var add=box.querySelector('.ps-reason-add'); if(add)add.onchange=function(){ var rid=add.value; if(!rid)return; var sel=_aspReasons(id,asp).map(String); if(sel.indexOf(rid)<0)sel.push(rid); box.innerHTML=reasonInner(id,asp,sel); bindReasonBox(box); _afterReasonChange(id,asp); };
+        var add=box.querySelector('.ps-reason-add'); if(add)add.onchange=function(){ var rid=add.value; add.value='';
+          if(rid==='__new'){ var nm=(prompt('New reject reason (added to Config + the metrics report):')||'').trim(); if(!nm)return;
+            shipPost('/api/product/reject-reason',{name:nm,sort:(reasons.length+1),active:true},function(j){ if(j&&j.error){alert(j.error);return;}
+              reasons.push({id:j.id,name:nm,sort:reasons.length+1,active:true}); _rejReasons=null;   // update the shared list + bust the cache so every box + Config sees it
+              var sel=_aspReasons(id,asp).map(String); if(sel.indexOf(String(j.id))<0)sel.push(String(j.id)); box.innerHTML=reasonInner(id,asp,sel); bindReasonBox(box); _afterReasonChange(id,asp); }); return; }
+          if(!rid)return; var sel=_aspReasons(id,asp).map(String); if(sel.indexOf(rid)<0)sel.push(rid); box.innerHTML=reasonInner(id,asp,sel); bindReasonBox(box); _afterReasonChange(id,asp); };
         box.querySelectorAll('.ps-reason-pdel').forEach(function(a){ a.onclick=function(){ var sel=_aspReasons(id,asp).map(String).filter(function(x){return x!==a.dataset.rid;}); box.innerHTML=reasonInner(id,asp,sel); bindReasonBox(box); _afterReasonChange(id,asp); }; }); }
       body.querySelectorAll('.ps-reason-box').forEach(bindReasonBox);
       body.querySelectorAll('.psamp-img').forEach(function(im){ im.onclick=function(){ openImgZoom(im.dataset.src); }; });

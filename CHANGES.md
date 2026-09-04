@@ -1,3 +1,6 @@
+## v27.463 Reject reasons — create a new one inline from the tag dropdown
+- The reject-reason **+ add reason…** dropdown now has **✎ Create new reason…**: type a name and it is saved to **Config** (sample_reject_reasons), tagged on the current rejection, and immediately available everywhere + in the **metrics report** — no trip to Config needed. supply/inject.html only.
+
 ## v27.462 PRODUCT ▸ Range plan — Photography view
 - **Normal / 📸 Photography** view toggle on the Range plan. Photography view shows each product's **photo status** (📸 Approved / — not yet) and any **photography comments** under the swatch (in place of the dev-status pill). Season filter + PDF export both respect the view. Range endpoint now returns photo-approved sample data. server.mjs + supply/inject.html.
 
