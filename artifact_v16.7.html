@@ -16290,7 +16290,10 @@ try{ document.addEventListener('keydown',function(e){ if((e.metaKey||e.ctrlKey)&
 // Build the SKU-level (FC_OUTPUTS) change list — shared by saveSkuForecasts + the unload beacon flush.
 function buildSkuChanges(){ var changes=[]; Object.keys(FC_DIRTY).forEach(function(k){ var parts=k.split('|'); if(parts.length<3)return;
     var sku=parts[0],wh=parts[1],ch=parts[2], months=FC_DIRTY[k]||{}, mo=FC_OUTPUTS[k]||{};
-    Object.keys(months).forEach(function(ym){ changes.push({sku:sku,warehouse:wh,channel:ch,month:ym,units:Math.round(mo[ym]!=null?mo[ym]:0)}); }); });
+    // Only persist a month that has a genuine computed/edited value. A null (no computed forecast — e.g. a new
+    // SKU dirtied by a subcat smoothing before it had a share) must NOT be written as 0: a saved 0 then wins over
+    // the auto-forecast in skuMonthlyMap (skuOutFC!=null ⇒ used verbatim), permanently suppressing it. Skip nulls.
+    Object.keys(months).forEach(function(ym){ if(mo[ym]==null)return; changes.push({sku:sku,warehouse:wh,channel:ch,month:ym,units:Math.round(mo[ym])}); }); });
   return changes; }
 // Reliable flush when the tab is closing: sendBeacon survives unload (a normal fetch may be cancelled).
 // Same-origin cookie (pk) rides along so it passes the auth gate in production.
