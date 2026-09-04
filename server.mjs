@@ -6790,6 +6790,16 @@ app.post('/api/product/category-code', async (req, res) => {
   if (!category) return res.status(400).json({ error: 'category required' });
   try { await pool.query(`UPDATE planner.categories SET code=$2 WHERE category=$1`, [category, (b.code || '').trim().toUpperCase() || null]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+app.post('/api/product/category', async (req, res) => {   // add (or re-activate) a category
+  const b = req.body || {}, category = (b.category || '').trim();
+  if (!category) return res.status(400).json({ error: 'category required' });
+  try { await pool.query(`INSERT INTO planner.categories (category, code, is_active) VALUES ($1,$2,true)
+    ON CONFLICT (category) DO UPDATE SET code=coalesce(excluded.code, planner.categories.code), is_active=true`,
+    [category, (b.code || '').trim().toUpperCase() || null]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/category/:category/delete', async (req, res) => {   // soft-delete (n8n may re-add from products; is_active=false hides it)
+  try { await pool.query(`UPDATE planner.categories SET is_active=false WHERE category=$1`, [req.params.category]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // ── PRODUCT timeline config — tags/badges + quick phrases (migration 258). Shared by the CONFIG ▸ Product
 // panel and the timeline compose box (the "/" phrase picker + tag chips). Includes inactive rows so config
 // can toggle them; the compose box filters to active client-side.

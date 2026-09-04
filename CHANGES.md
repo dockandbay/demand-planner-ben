@@ -1,3 +1,7 @@
+## v27.441 PRODUCT ▸ Config — L3 sub-tabs + category add/delete + real auto-code
+- **PRODUCT ▸ Config now has L3 sub-tabs:** Season / release · Categories · Timeline tags & badges · Timeline quick phrases (one section at a time instead of one long page).
+- **Categories:** the blank-code placeholder now shows the **real auto-derived code** (first 5 letters of the name, e.g. Tea Towel → `TEATO (auto)`) instead of "(auto)"; plus **+ Add category** and per-row **✕ delete** (soft delete — hidden from the planner; n8n may re-add from products). New endpoints `POST /api/product/category` and `/api/product/category/:name/delete`. server.mjs + supply/inject.html.
+
 ## v27.440 SUPPLY ▸ Barcodes Customise — wider drawer + project batch
 - **Fixed the squashed table:** drawer widened to 720px and the SKU column no longer wraps, so long SKUs (e.g. `TOWLB-SUM-LG-MIAMI`) show in full.
 - **Project-level Batch selector** (saved with the project): pick the batch in the drawer and it's stored on the project + used for the download, so the labels carry the BATCH + production date and you no longer hit the "No BATCH selected" prompt. Migration **260** gains a `batch` column (sandbox-applied; still Diviyaj for live). server.mjs + supply/inject.html.
