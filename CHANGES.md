@@ -1,3 +1,6 @@
+## v27.438 SUPPLY ▸ Barcodes Customise — clarify these are distinct from EDI/retailer labels
+- Added a note in the Customise drawer: "These are barcode-number override projects, separate from EDI / retailer label projects." (Ben.) Removed the confusing "Dillards SS27" demo project from sandbox. supply/inject.html.
+
 ## v27.437 FIX — phantom saved zeros suppressed new-set auto-forecast
 - **Root cause:** `buildSkuChanges` (SKU-forecast save) wrote a dirty SKU×month with a null computed value as **units=0**. A new set dirtied by a subcategory smoothing (before it had a share) got an all-zero `forecast_outputs` baked in; that saved 0 then beats the auto-forecast in `skuMonthlyMap` (`skuOutFC()!=null` ⇒ used verbatim), permanently suppressing it. Fixed: **skip a month whose computed value is null** — never persist a phantom 0 (a genuinely edited 0 still saves).
 - **Cleanup:** one-off data fix `migrations/fix_phantom_zero_forecasts_2026-09-04.sql` clears the all-zero `review_ui` `forecast_outputs` for in-scope SET SKUs with no sales history whose rows are entirely zero (never touches a set with any real forecast). **Live scope: ~25 new sets, 1,966 rows** — ⚠ buy-affecting (those sets' components enter the buy). Applied to sandbox (96 rows); Diviyaj to run on live. artifact_v16.7.html.
