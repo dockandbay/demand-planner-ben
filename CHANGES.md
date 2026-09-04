@@ -1,3 +1,6 @@
+## v27.445 PRODUCT ▸ Samples — printable sample card (admin, per version)
+- New ⤓ Card link on each sample version in the admin Samples tab → a printable SAMPLE CARD: Supplier · Season · Product type · Colour name · Reference · Sample version · Date of sample; STATUS tick-boxes (Approved / Approved with comments / Not approved — ticked from the per-aspect sign-off, blank if not yet reviewed); Comments (the D&B feedback, or blank lines if printed before review); Date of approval (dd-mmm-yy if approved, else a blank line). Fields per Ben. Client-side print window; no migration. supply/inject.html.
+
 ## v27.444 PRODUCT timeline — native real-time spellcheck on the compose box + seeded phrases
 - Enabled the browser native spellcheck on the timeline compose box (spellcheck=true, lang=en-GB) so misspellings get the real-time red underline as you type (right-click for suggestions). Seeded 5 pre-written quick phrases (Ben) — sandbox + live seed migrations/seed_timeline_phrases_2026-09-04.sql. supply/inject.html.
 
