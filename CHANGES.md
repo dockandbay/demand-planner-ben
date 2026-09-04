@@ -1,3 +1,9 @@
+## v27.448 PRODUCT timeline + samples — polish
+- **Samples ▸ sample-requests table:** the Tracking cell now shows the **carrier** next to the tracking, and the tracking number is a **dynamic carrier link** (carrierTrackLinkInj). Server returns carrier on /sample-requests.
+- **Product timeline sorted newest-first properly** — was sorting the dd-Mmm-yy note dates by day-of-month; now uses the sortable tlTs key (both timelines).
+- **Tag an already-sent message:** each D&B message has a 🏷 to open an inline tag picker and add/remove tags (saves via /note/:id/tags).
+- **Pantone inline chip:** hover shows the **large swatch card** (was just a title tooltip). server.mjs + supply/inject.html.
+
 ## v27.447 REPORTS ▸ 3PL Forecast — sub-pallet consignments labelled LCL (not "air")
 - The 3PL Forecast (goods-in) used to tag any consignment under one pallet (0<pallets<1) as "air", which read as air-freight. It now shows **LCL** (blue) for the sub-pallet case and keeps **air** only when the ship id / PO ref actually says air. Server returns a `fill` field (air | lcl | ''); client badge + CSV export use it. Fixes e.g. PO-57EUBE1 (900u, sub-pallet, no shipment) reading AIR. server.mjs + artifact_v16.7.html.
 

@@ -6897,7 +6897,7 @@ app.get('/api/product/:ref/sample-requests', async (req, res) => {
     const rows = (await pool.query(`
       SELECT s.id, s.ref, coalesce(s.status,'') status, s.accepted_at IS NOT NULL accepted,
         s.received_at IS NOT NULL received, to_char(s.received_at,'YYYY-MM-DD') received_at,
-        coalesce(s.tracking_code,'') tracking, coalesce(s.recipient_company,'') company,
+        coalesce(s.tracking_code,'') tracking, coalesce(s.carrier,'') carrier, coalesce(s.recipient_company,'') company,
         trim(coalesce(s.first_name,'')||' '||coalesce(s.last_name,'')) recipient,
         coalesce(s.supplier_name,'') supplier_name, to_char(s.created_at,'YYYY-MM-DD') created_at,
         (SELECT count(*) FROM planner.sample_request_lines l WHERE l.sample_id=s.id)::int line_count,
