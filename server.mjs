@@ -10110,10 +10110,15 @@ app.get('/api/supply/barcode-project/:id', async (req, res) => {
 app.post('/api/supply/barcode-project', async (req, res) => {
   const b = req.body || {}, name = (b.name || '').trim();
   if (!name) return res.status(400).json({ error: 'name required' });
-  const target = ['product', 'carton', 'inner'].indexOf(b.target) >= 0 ? b.target : 'product';
-  // overrides: { sku: barcode } — keep only non-empty string→string pairs
+  const target = ['product', 'carton', 'inner'].indexOf(b.target) >= 0 ? b.target : 'product';   // legacy column; per-SKU types now live in overrides
+  // overrides: { sku: {num, types:{product,carton,inner}} }. Legacy { sku: barcode } is accepted (→ product).
   const ov = {}; const src = (b.overrides && typeof b.overrides === 'object') ? b.overrides : {};
-  Object.keys(src).forEach(k => { const sku = String(k).trim(), bc = String(src[k] == null ? '' : src[k]).trim(); if (sku && bc) ov[sku] = bc.slice(0, 48); });
+  Object.keys(src).forEach(k => { const sku = String(k).trim(), v = src[k]; if (!sku || v == null) return;
+    let num, types;
+    if (typeof v === 'object') { num = String(v.num || '').trim(); const t = v.types || {}; types = { product: !!t.product, carton: !!t.carton, inner: !!t.inner }; }
+    else { num = String(v).trim(); types = { product: true, carton: false, inner: false }; }
+    if (!num) return; if (!types.product && !types.carton && !types.inner) types.product = true;
+    ov[sku] = { num: num.slice(0, 48), types }; });
   try {
     if (b.id) { await pool.query(`UPDATE planner.barcode_projects SET name=$2, target=$3, overrides=$4::jsonb, updated_at=now() WHERE id=$1::bigint`, [b.id, name, target, JSON.stringify(ov)]); res.json({ ok: true, id: Number(b.id) }); }
     else { const r = await pool.query(`INSERT INTO planner.barcode_projects (name, target, overrides, created_by) VALUES ($1,$2,$3::jsonb,$4) RETURNING id`, [name, target, JSON.stringify(ov), authUser(req) || null]); res.json({ ok: true, id: r.rows[0].id }); }

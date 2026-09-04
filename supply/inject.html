@@ -10177,7 +10177,6 @@
         +'<button id="bc-dlall-all" class="bc-dlall-btn" style="cursor:pointer;background:#dcfce7;color:#166534;border:1px solid #86efac;border-radius:5px;padding:4px 10px;font-size:11px;white-space:nowrap" title="download every PRODUCT + CARTON + INNER barcode in view as a ZIP, foldered by supplier — A4 print-mould PDFs or individual PNGs per the File Download setting">⤓ All (product + carton + inner)</button>'
         +'<button id="bc-customise" style="cursor:pointer;background:#f3e8ff;color:#6b21a8;border:1px solid #d8b4fe;border-radius:5px;padding:4px 10px;font-size:11px;font-weight:700;white-space:nowrap" title="Override the barcode number for specific SKUs (import SKU,barcode), save as a reusable project, download with the custom numbers">🎨 Customise</button>'
       +'</div>'
-      +'<div id="bc-ov-banner"></div>'
       +'<div id="sup-grid">'+bcTable(rows,opts())+'</div>';
     var cur=rows;   // rows currently in view (after filters) — what "Download all" operates on
     function opts(){ return { batch: st.batch?batchBy[st.batch]:null, rrp: st.rrp, rmkt: st.rmkt }; }
@@ -10214,41 +10213,69 @@
       var bg=document.createElement('div'); bg.id='bc-cust-bg';
       bg.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.4);z-index:9000;display:flex;justify-content:flex-end';
       var dr=document.createElement('div'); dr.style.cssText='width:560px;max-width:95vw;height:100%;background:#fff;box-shadow:-8px 0 30px rgba(0,0,0,.2);overflow:auto;padding:16px 18px;box-sizing:border-box';
-      bg.appendChild(dr); document.body.appendChild(bg);
+      bg.appendChild(dr); (document.getElementById('supply-root')||document.body).appendChild(bg);
+      function _bcNorm(m){ var o={}; Object.keys(m||{}).forEach(function(s){ var v=m[s]; if(v==null)return;
+        if(typeof v==='object'){ var t=v.types||{}; o[s]={num:String(v.num||''),types:{product:!!t.product,carton:!!t.carton,inner:!!t.inner}}; if(!o[s].types.product&&!o[s].types.carton&&!o[s].types.inner)o[s].types.product=true; }
+        else { o[s]={num:String(v),types:{product:true,carton:false,inner:false}}; } }); return o; }
+      var state={id:_bcOv.id, name:_bcOv.name, map:_bcNorm(_bcOv.map||{})};
+      function snap(){ return JSON.stringify({n:state.name||'',m:state.map}); }
+      var _saved=snap();
+      function dirty(){ return Object.keys(state.map).length>0 && snap()!==_saved; }
+      function parseBox(){ var ta=dr.querySelector('#bcx-paste'); if(!ta)return 0; var n=0;
+        ta.value.split(/\r?\n/).forEach(function(ln){ var p=ln.split(/[,\t;]/); if(p.length<2)return; var s=(p[0]||'').trim(), b=(p[1]||'').trim().replace(/\s+/g,''); if(s&&b){ if(state.map[s])state.map[s].num=b; else state.map[s]={num:b,types:{product:true,carton:false,inner:false}}; n++; } });
+        ta.value=''; return n; }
+      function offerParseFirst(){ if(Object.keys(state.map).length)return; var pv=(dr.querySelector('#bcx-paste')||{}).value||''; if(pv.trim() && confirm('You have text in the import box that has not been added to the list. Parse it first?')){ parseBox(); } }
+      function doSave(cb){ var msg=dr.querySelector('#bcx-msg'), nmEl=dr.querySelector('#bcx-name'), nm=(nmEl&&nmEl.value.trim())||state.name;
+        offerParseFirst();
+        if(!nm){ if(msg){msg.style.color='#dc2626';msg.textContent='name required to save';} if(nmEl)nmEl.focus(); return; }
+        state.name=nm; shipPost('/api/supply/barcode-project',{id:state.id||undefined,name:nm,overrides:state.map},function(j){ if(j&&j.error){ if(msg){msg.style.color='#dc2626';msg.textContent=j.error;} return; } state.id=j.id; _saved=snap(); if(msg){msg.style.color='#16a34a';msg.textContent='saved ✓';} if(cb){cb();}else{ loadProjects(); } }); }
+      function close(force){ if(!force && dirty()){ if(confirm('You have unsaved changes to this barcode project. Save before closing?')){ doSave(function(){ bg.remove(); }); return; } } bg.remove(); }
       bg.onclick=function(e){ if(e.target===bg)close(); };
-      function close(){ bg.remove(); }
-      var state={id:_bcOv.id, name:_bcOv.name, target:_bcOv.target||'product', map:Object.assign({},_bcOv.map||{})};
+      var _bd='border:1px solid #cbd5e1;border-radius:5px;padding:4px 7px;background:#fff';   // explicit border (drawer is outside #supply-root, so scoped .fci styling doesn't reach it)
+      // clone the matched rows for `skus`, putting the custom number only on the ticked barcode field(s); the
+      // untouched fields are blanked so bcDownloadAll (per-kind) generates ONLY the ticked barcode(s).
+      function bcItems(skus){ var sk={}; rows.forEach(function(r){ sk[r.sku]=r; }); var out=[];
+        skus.forEach(function(s){ var r=sk[s], o=state.map[s]; if(!r||!o)return; var cl=Object.assign({},r);
+          cl.product_barcode=o.types.product?String(o.num):''; cl.carton_barcode=o.types.carton?String(o.num):''; cl.inner_barcode=o.types.inner?String(o.num):'';
+          if(cl.product_barcode||cl.carton_barcode||cl.inner_barcode)out.push(cl); }); return out; }
+      function bcDownload(skus,btn){ offerParseFirst(); var items=bcItems(skus); var msg=dr.querySelector('#bcx-msg');
+        if(!items.length){ if(msg){msg.style.color='#b45309';msg.textContent='nothing to download — check the SKU is in view and a barcode is ticked';} return; }
+        try{ bcDownloadAll(items, st.batch?batchBy[st.batch]:null, st.rrp, btn, ['product','carton','inner'], ((state.name||'custom').replace(/[^\w\-]+/g,'_'))+'_barcodes', {fmt:st.dlfmt, codes:CODES}); }
+        catch(e){ if(msg){msg.style.color='#dc2626';msg.textContent='download failed: '+(e&&e.message||e);} } }
       function draw(projects){
         var sk={}; rows.forEach(function(r){ sk[r.sku]=r; });
         var keys=Object.keys(state.map);
-        var rowsH=keys.map(function(s){ var r=sk[s], std=r?(r[_bcField(state.target)]||''):'', match=!!r;
-          return '<tr><td class="l bc-mono" style="padding:2px 6px">'+esc(s)+'</td><td class="l bc-mono" style="padding:2px 6px;color:#94a3b8">'+esc(std||'—')+'</td><td class="l bc-mono" style="padding:2px 6px;font-weight:700">'+esc(state.map[s])+'</td><td class="l" style="padding:2px 6px">'+(match?'<span style="color:#16a34a">✓</span>':'<span style="color:#b45309" title="SKU not in the current view">⚠ not in view</span>')+'</td></tr>'; }).join('');
+        function th(t,w){ return '<th style="text-align:left;padding:3px 6px;color:#64748b;font-weight:700;border-bottom:1px solid #eef2f7'+(w?';width:'+w:'')+'">'+t+'</th>'; }
+        function ck(s,t){ var o=state.map[s]; return '<label style="margin-right:7px;cursor:pointer;white-space:nowrap;font-weight:600"><input type="checkbox" class="bcx-tick" data-sku="'+esc(s)+'" data-t="'+t+'"'+(o.types[t]?' checked':'')+' style="vertical-align:middle;margin-right:2px">'+t.charAt(0).toUpperCase()+'</label>'; }
+        var rowsH=keys.map(function(s){ var o=state.map[s], match=!!sk[s];
+          return '<tr><td style="text-align:left;padding:3px 6px" class="bc-mono">'+esc(s)+(match?'':' <span style="color:#b45309" title="not in the current view">⚠</span>')+'</td>'
+            +'<td style="text-align:left;padding:3px 6px"><input class="bcx-num" data-sku="'+esc(s)+'" value="'+esc(o.num)+'" style="width:135px;font:12px ui-monospace,Menlo,monospace;'+_bd+'"></td>'
+            +'<td style="text-align:left;padding:3px 6px;white-space:nowrap">'+ck(s,'product')+ck(s,'carton')+ck(s,'inner')+'</td>'
+            +'<td style="text-align:left;padding:3px 6px;white-space:nowrap"><a class="bcx-dl1" data-sku="'+esc(s)+'" title="download this SKU only" style="cursor:pointer;color:#6b21a8;font-weight:700">⤓</a> <a class="bcx-rm" data-sku="'+esc(s)+'" title="remove" style="cursor:pointer;color:#94a3b8;margin-left:8px">✕</a></td></tr>'; }).join('');
         var matched=keys.filter(function(s){return sk[s];}).length;
         dr.innerHTML='<div style="display:flex;align-items:center;margin-bottom:10px"><div style="font-size:15px;font-weight:800">🎨 Customise barcodes</div><a id="bcx-close" style="margin-left:auto;cursor:pointer;color:#64748b;font-size:20px;line-height:1">✕</a></div>'
-          +'<div class="mut tiny" style="margin-bottom:12px">Override the barcode <b>number</b> for specific SKUs on a download. Import <b>SKU,barcode</b> (one per line). Any number is allowed — valid 12/13-digit numbers render as EAN-13, everything else as Code128. <span style="color:#6b21a8">These are barcode-number override projects, separate from EDI / retailer label projects.</span></div>'
+          +'<div class="mut tiny" style="margin-bottom:12px">Override the barcode <b>number</b> for specific SKUs, tick which barcode(s) it applies to (P = product · C = carton · I = inner), then download here. Import <b>SKU,barcode</b> (one per line; defaults to Product). Any number is allowed — valid 12/13-digit numbers render as EAN-13, everything else as Code128. <span style="color:#6b21a8">These are barcode-number override projects, separate from EDI / retailer label projects.</span></div>'
           +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap"><span class="pill-lbl">Project</span>'
-            +'<select class="fci" id="bcx-proj" style="width:auto;min-width:160px"><option value="">— new / none —</option>'+(projects||[]).map(function(p){return '<option value="'+p.id+'"'+(String(p.id)===String(state.id)?' selected':'')+'>'+esc(p.name)+' ('+p.n_overrides+')</option>';}).join('')+'</select>'
-            +'<input class="fci" id="bcx-name" placeholder="project name" value="'+esc(state.name||'')+'" style="width:180px">'
-            +'<button class="save-btn" id="bcx-save">Save</button>'+(state.id?'<button class="save-btn" id="bcx-del" style="color:#b91c1c;border-color:#fca5a5">Delete</button>':'')+'<span class="mut tiny" id="bcx-msg"></span></div>'
-          +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px"><span class="pill-lbl">Overrides the</span>'
-            +'<select class="fci" id="bcx-target" style="width:auto"><option value="product"'+(state.target==='product'?' selected':'')+'>Product barcode</option><option value="carton"'+(state.target==='carton'?' selected':'')+'>Carton barcode</option><option value="inner"'+(state.target==='inner'?' selected':'')+'>Inner barcode</option></select><span class="mut tiny">barcode</span></div>'
-          +'<textarea id="bcx-paste" placeholder="TOWEL-LG-NAVY, 5061011699999&#10;TOWEL-LG-CORAL, 0123456789012" style="width:100%;height:90px;box-sizing:border-box;font:12px ui-monospace,Menlo,monospace;border:1px solid #cbd5e1;border-radius:6px;padding:7px;text-align:left"></textarea>'
-          +'<div style="margin:6px 0"><button class="save-btn" id="bcx-parse">Parse / add</button> <button class="save-btn light" id="bcx-clearmap" style="margin-left:4px">Clear list</button> <span class="mut tiny" style="margin-left:6px">'+keys.length+' override'+(keys.length===1?'':'s')+' · '+matched+' matched</span></div>'
-          +'<div class="tw" style="max-height:280px;overflow:auto;border:1px solid #eef2f7;border-radius:6px"><table class="samp-tbl" style="font-size:12px;width:100%"><thead><tr><th class="l">SKU</th><th class="l">Standard</th><th class="l">Custom</th><th class="l"></th></tr></thead><tbody>'+(rowsH||'<tr><td colspan="4" class="count">No overrides yet — paste above.</td></tr>')+'</tbody></table></div>'
-          +'<div style="margin-top:14px;display:flex;gap:8px"><button class="save-btn" id="bcx-apply" style="background:#7c3aed;color:#fff;border-color:#6d28d9;font-weight:700">Apply to downloads</button><button class="save-btn" id="bcx-clearov" style="margin-left:auto">Clear override</button></div>';
-        dr.querySelector('#bcx-close').onclick=close;
-        dr.querySelector('#bcx-target').onchange=function(){ state.target=this.value; draw(projects); };
+            +'<select id="bcx-proj" style="width:auto;min-width:160px;'+_bd+'"><option value="">— new / none —</option>'+(projects||[]).map(function(p){return '<option value="'+p.id+'"'+(String(p.id)===String(state.id)?' selected':'')+'>'+esc(p.name)+' ('+p.n_overrides+')</option>';}).join('')+'</select>'
+            +'<input id="bcx-name" placeholder="project name" value="'+esc(state.name||'')+'" style="width:180px;text-align:left;'+_bd+'">'
+            +'<button type="button" class="save-btn" id="bcx-save">Save</button>'+(state.id?'<button type="button" class="save-btn" id="bcx-del" style="color:#b91c1c;border-color:#fca5a5">Delete</button>':'')+'<span class="mut tiny" id="bcx-msg"></span></div>'
+          +'<textarea id="bcx-paste" placeholder="TOWEL-LG-NAVY, 5061011699999&#10;TOWEL-LG-CORAL, 0123456789012" style="width:100%;height:80px;box-sizing:border-box;font:12px ui-monospace,Menlo,monospace;border:1px solid #cbd5e1;border-radius:6px;padding:7px;text-align:left"></textarea>'
+          +'<div style="margin:6px 0"><button type="button" class="save-btn" id="bcx-parse">Parse / add</button> <button type="button" class="save-btn light" id="bcx-clearmap" style="margin-left:4px">Clear list</button> <span class="mut tiny" style="margin-left:6px">'+keys.length+' override'+(keys.length===1?'':'s')+' · '+matched+' matched</span></div>'
+          +'<div class="tw" style="max-height:300px;overflow:auto;border:1px solid #eef2f7;border-radius:6px"><table style="font-size:12px;width:100%;border-collapse:collapse"><thead><tr>'+th('SKU')+th('Custom number')+th('Barcodes')+th('',56)+'</tr></thead><tbody>'+(rowsH||'<tr><td colspan="4" style="text-align:left;padding:6px;color:#94a3b8">No overrides yet — paste above and Parse / add.</td></tr>')+'</tbody></table></div>'
+          +'<div style="margin-top:14px;display:flex;gap:8px;align-items:center"><button type="button" class="save-btn" id="bcx-dlall" style="background:#7c3aed;color:#fff;border-color:#6d28d9;font-weight:700">⤓ Download all ('+matched+')</button><span class="mut tiny">or ⤓ per row · '+esc(st.dlfmt==='png'?'Individual PNG':'A4 print mould')+' (toolbar setting)</span></div>';
+        dr.querySelector('#bcx-close').onclick=function(){ close(); };
         dr.querySelector('#bcx-clearmap').onclick=function(){ state.map={}; draw(projects); };
-        dr.querySelector('#bcx-parse').onclick=function(){ var txt=dr.querySelector('#bcx-paste').value;
-          txt.split(/\r?\n/).forEach(function(ln){ var p=ln.split(/[,\t;]/); if(p.length<2)return; var s=(p[0]||'').trim(), b=(p[1]||'').trim().replace(/\s+/g,''); if(s&&b)state.map[s]=b; });
-          dr.querySelector('#bcx-paste').value=''; draw(projects); };
-        dr.querySelector('#bcx-proj').onchange=function(){ var id=this.value; if(!id){ state.id=null; state.name=''; state.map={}; state.target='product'; draw(projects); return; }
-          fetch('/api/supply/barcode-project/'+id).then(function(r){return r.json();}).then(function(j){ if(j&&!j.error){ state.id=j.id; state.name=j.name; state.target=j.target||'product'; state.map=j.overrides||{}; } draw(projects); }); };
-        dr.querySelector('#bcx-save').onclick=function(){ var nm=dr.querySelector('#bcx-name').value.trim(), msg=dr.querySelector('#bcx-msg'); if(!nm){ msg.textContent='name required'; return; }
-          shipPost('/api/supply/barcode-project',{id:state.id||undefined,name:nm,target:state.target,overrides:state.map},function(j){ if(j&&j.error){ msg.style.color='#dc2626'; msg.textContent=j.error; return; } state.id=j.id; state.name=nm; msg.style.color='#16a34a'; msg.textContent='saved ✓'; loadProjects(); }); };
-        var _del=dr.querySelector('#bcx-del'); if(_del)_del.onclick=function(){ if(!confirm('Delete project "'+state.name+'"?'))return; shipPost('/api/supply/barcode-project/'+state.id+'/delete',{},function(){ state.id=null; state.name=''; loadProjects(); }); };
-        dr.querySelector('#bcx-apply').onclick=function(){ _bcClear(); _bcOv={id:state.id,name:state.name,target:state.target,map:Object.assign({},state.map)}; var n=_bcApply(); _bcBanner(); apply(); close(); if(!n)alert('None of the imported SKUs are in the current view.'); };
-        dr.querySelector('#bcx-clearov').onclick=function(){ _bcClear(); _bcBanner(); apply(); close(); };
+        dr.querySelector('#bcx-parse').onclick=function(){ parseBox(); draw(projects); };
+        dr.querySelector('#bcx-name').oninput=function(){ state.name=this.value; };
+        dr.querySelectorAll('.bcx-num').forEach(function(el){ el.oninput=function(){ if(state.map[el.dataset.sku])state.map[el.dataset.sku].num=el.value.trim(); }; });
+        dr.querySelectorAll('.bcx-tick').forEach(function(el){ el.onchange=function(){ var o=state.map[el.dataset.sku]; if(o)o.types[el.dataset.t]=el.checked; }; });
+        dr.querySelectorAll('.bcx-rm').forEach(function(a){ a.onclick=function(){ delete state.map[a.dataset.sku]; draw(projects); }; });
+        dr.querySelectorAll('.bcx-dl1').forEach(function(a){ a.onclick=function(){ bcDownload([a.dataset.sku], a); }; });
+        dr.querySelector('#bcx-dlall').onclick=function(){ bcDownload(Object.keys(state.map), this); };
+        dr.querySelector('#bcx-proj').onchange=function(){ var id=this.value; if(!id){ state.id=null; state.name=''; state.map={}; _saved=snap(); draw(projects); return; }
+          fetch('/api/supply/barcode-project/'+id).then(function(r){return r.json();}).then(function(j){ if(j&&!j.error){ state.id=j.id; state.name=j.name; state.map=_bcNorm(j.overrides||{}); _saved=snap(); } draw(projects); }); };
+        dr.querySelector('#bcx-save').onclick=function(){ doSave(); };
+        var _del=dr.querySelector('#bcx-del'); if(_del)_del.onclick=function(){ if(!confirm('Delete project "'+state.name+'"?'))return; shipPost('/api/supply/barcode-project/'+state.id+'/delete',{},function(){ state.id=null; state.name=''; state.map={}; _saved=snap(); loadProjects(); }); };
       }
       function loadProjects(){ fetch('/api/supply/barcode-projects').then(function(r){return r.json();}).then(function(ps){ draw(Array.isArray(ps)?ps:[]); }).catch(function(){ draw([]); }); }
       loadProjects();

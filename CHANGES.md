@@ -1,3 +1,8 @@
+## v27.439 SUPPLY ▸ Barcodes Customise — drawer rework (per-SKU ticks, in-drawer download, polish)
+- **Per-SKU barcode ticks** replace the project-level target dropdown: each override row has an editable custom number + **P / C / I** checkboxes (product / carton / inner) and a per-row **⤓** download; import defaults to Product. Overrides model is now `{sku:{num,types}}` (legacy `{sku:barcode}` still loads).
+- **Download happens in the drawer, not the main grid:** **⤓ Download all** or per-row ⤓ generate a ZIP of just the ticked barcodes with the custom numbers (only ticked kinds render — blank fields are skipped). Removed the "apply to main downloads" override + banner.
+- **Polish (Ben):** drawer re-parented under `#supply-root` + explicit borders on the project/name controls and the preview table (was borderless/centred because the drawer sat outside the scoped styles); project name left-aligned; **all buttons `type="button"`** so a click never reloads the page; **save-before-close** prompt on unsaved changes; **parse-first** warning when saving/downloading with text still in the import box. server.mjs + supply/inject.html (uses mig 260).
+
 ## v27.438 SUPPLY ▸ Barcodes Customise — clarify these are distinct from EDI/retailer labels
 - Added a note in the Customise drawer: "These are barcode-number override projects, separate from EDI / retailer label projects." (Ben.) Removed the confusing "Dillards SS27" demo project from sandbox. supply/inject.html.
 
