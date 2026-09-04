@@ -245,6 +245,11 @@
 #supply-root #rep-subnav .rtab,#supply-root #prod-subtabs .rtab,#supply-root .po-subnav .rtab{white-space:nowrap;flex:0 0 auto}
 #supply-root #prod-subtabs .rtab .ex-badge,#supply-root .po-subnav .rtab .ex-badge{display:inline-block;vertical-align:middle}
 #supply-root .rtab-count{display:inline-block;margin-left:5px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;line-height:1;padding:2px 5px;border-radius:8px;vertical-align:middle}
+/* PRODUCT ▸ Config L3 menu — same light-blue pill style as the SUPPLY/REPORTS L3 navs (which are scoped to #supply-root) */
+#product-root #pcfg-subs-l3{display:flex;gap:2px;align-items:center;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 14px}
+#product-root #pcfg-subs-l3 .rtab{background:transparent;border:none;padding:6px 14px;font-size:12px;font-weight:500;cursor:pointer;color:#7c93b8;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit;white-space:nowrap;flex:0 0 auto}
+#product-root #pcfg-subs-l3 .rtab:hover{color:#2563eb}
+#product-root #pcfg-subs-l3 .rtab.active{color:#2563eb;border-bottom-color:#3b82f6;font-weight:600}
 /* Opened PO detail lives inside the wide, horizontally-scrolling PO grid — pin its sub-tab strip to the left
    so PAYMENTS/DATES/etc stay fixed while the grid scrolls sideways (desktop). */
 /* The expanded PO detail panel (.po-detail-wrap) is pinned to the left of the horizontally-scrolling grid via
@@ -10396,6 +10401,7 @@
     else if(seg[0]==='product'){ if(typeof showProduct==='function'){ showProduct();
       var _prodSubs={plan:1,dashboard:1,range:1,specs:1,reports:1,config:1};
       if(seg[1]&&!_prodSubs[seg[1]]){ _pendingProdRef=decodeURIComponent(seg[1]); if(seg[2])_pendingProdTab=decodeURIComponent(seg[2]); selectProductSub('plan'); }   // #/product/<ref>[/<tab>]
+      else if(seg[1]==='config'&&seg[2]){ try{_prodCfgTab=decodeURIComponent(seg[2]);}catch(e){} selectProductSub('config'); }   // #/product/config/<season|cats|tags|phrases>
       else { if(seg[2])_pendingProdRef=decodeURIComponent(seg[2]); selectProductSub(seg[1]||'plan'); } } }   // #/product/<plan|dashboard|range|specs|reports|config>[/<ref>]
     else if(seg[0]==='buy-move'||seg[0]==='buy'||seg[0]==='fba'){
       // BUY & MOVE group. New URLs: #/buy-move/<buy|fba|transfer>. Legacy #/buy/<ctry>, #/fba/<ctry> still work.
@@ -13221,9 +13227,9 @@
           +'<div class="tw"><table class="samp-tbl" style="font-size:12px"><thead><tr><th class="l">Phrase</th><th class="l">Sort</th><th class="l">Active</th><th></th></tr></thead><tbody>'+(snipRows||'<tr><td colspan="4" class="count">no phrases yet</td></tr>')+'</tbody></table></div>';
         var TABS=[['season','Season / release'],['cats','Categories'],['tags','Timeline tags & badges'],['phrases','Timeline quick phrases']];
         if(!SEC[_prodCfgTab])_prodCfgTab='season';
-        var nav='<div class="bar" style="gap:6px;margin-bottom:14px;flex-wrap:wrap">'+TABS.map(function(t){ return '<button class="rtab pcfg-tab'+(t[0]===_prodCfgTab?' active':'')+'" data-k="'+t[0]+'">'+esc(t[1])+'</button>'; }).join('')+'</div>';
-        b.innerHTML='<div class="annot"><b>PRODUCT ▸ Config.</b> Season/release codes, category codes and the product timeline tags &amp; quick phrases. Changes save on edit.</div>'+nav+SEC[_prodCfgTab];
-        b.querySelectorAll('.pcfg-tab').forEach(function(t){ t.onclick=function(){ _prodCfgTab=t.dataset.k; draw(); }; });
+        var nav='<div id="pcfg-subs-l3">'+TABS.map(function(t){ return '<span class="rtab pcfg-tab'+(t[0]===_prodCfgTab?' active':'')+'" data-k="'+t[0]+'">'+esc(t[1])+'</span>'; }).join('')+'</div>';
+        b.innerHTML=nav+SEC[_prodCfgTab];
+        b.querySelectorAll('.pcfg-tab').forEach(function(t){ t.onclick=function(){ _prodCfgTab=t.dataset.k; try{writeHash(['product','config',t.dataset.k]);}catch(e){} draw(); }; });
         var _snew=b.querySelector('#pcfg-snew'); if(_snew)_snew.onclick=function(){ var code=(prompt('New season code (e.g. SS29):')||'').trim().toUpperCase(); if(!code)return; shipPost('/api/product/season',{code:code,active:true},function(){ d.seasons.push({code:code,label:'',active:true,sort:null}); draw(); }); };
         b.querySelectorAll('.pcfg-s').forEach(function(el){ el.onchange=function(){ var code=el.dataset.code, row=(d.seasons||[]).filter(function(x){return x.code===code;})[0]||{code:code};
           row[el.dataset.f]= el.dataset.f==='active'?(el.value==='true'):(el.dataset.f==='sort'?(el.value===''?null:parseInt(el.value,10)):el.value);

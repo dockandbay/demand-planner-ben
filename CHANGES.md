@@ -1,3 +1,6 @@
+## v27.443 PRODUCT ▸ Config — L3 menu now uses the standard light-blue pill style
+- Reworked the Config sub-tabs to the app-standard L3 menu (the same light-blue #..-subs-l3 pill bar + .rtab underline tabs as REPORTS / SUPPLY / PO detail), instead of the bespoke bar. Each tab deep-links (#/product/config/<season|cats|tags|phrases>). Added the product-root-scoped CSS (the standard L3 styles were scoped to #supply-root). supply/inject.html.
+
 ## v27.442 PRODUCT — remove the per-file version input on component files
 - Dropped the little "v" version box next to each component file in the Sizes & variants tab (Ben). File up/download/remove unchanged.
 
