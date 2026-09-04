@@ -6087,7 +6087,11 @@ app.get('/api/product/items', async (_req, res) => {
         FROM planner.product_dev_samples ps
         JOIN planner.sample_request_dev_samples l ON l.dev_sample_id=ps.id
         JOIN planner.sample_requests sr ON sr.id=l.sample_request_id
-        WHERE ps.item_ref=i.ref ORDER BY sr.created_at DESC LIMIT 1) latest_shipment
+        WHERE ps.item_ref=i.ref ORDER BY sr.created_at DESC LIMIT 1) latest_shipment,
+      coalesce((SELECT json_agg(json_build_object(
+          'ref', CASE WHEN coalesce(ps.dimension,'product')='product' THEN ps.item_ref||'_v'||ps.version ELSE ps.item_ref||'_'||ps.dimension||'_v'||ps.version END,
+          'version', ps.version, 'date', to_char(ps.sample_date,'YYYY-MM-DD'), 'notes', coalesce(ps.photography_notes,'')) ORDER BY ps.version)
+        FROM planner.product_dev_samples ps WHERE ps.item_ref=i.ref AND ps.approved_for_photography),'[]'::json) photo
       FROM planner.product_dev_items i ORDER BY i.created_at DESC`);
     res.json(r.rows);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }

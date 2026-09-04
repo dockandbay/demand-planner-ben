@@ -1,3 +1,6 @@
+## v27.462 PRODUCT ▸ Range plan — Photography view
+- **Normal / 📸 Photography** view toggle on the Range plan. Photography view shows each product's **photo status** (📸 Approved / — not yet) and any **photography comments** under the swatch (in place of the dev-status pill). Season filter + PDF export both respect the view. Range endpoint now returns photo-approved sample data. server.mjs + supply/inject.html.
+
 ## v27.461 Samples tab — wider feedback panel + reason tag input
 - The **Feedback & sign-off** panel is ~30% wider (card 840→1090px, panel basis 420→560px) so aspect / feedback / decision columns have room.
 - **Reject reasons** are now a proper tag input: a **+ add reason…** dropdown (multi-select) plus selected reasons shown as **wrapping pills** with an ✕ to remove. Pills wrap in the cell instead of being cut off; the dropdown only lists reasons not already added. Still mandatory when rejecting. supply/inject.html only.
