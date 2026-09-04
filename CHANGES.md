@@ -1,3 +1,7 @@
+## v27.435 PRODUCT timeline — Pantone reference now inline in the message text
+- Picking a Pantone via `/p` now inserts a **`🎨 <code>` token inline in the message** (the chat box) at the cursor, instead of a detached chip tray. In the posted note that token renders **inline as a swatch chip** (mini colour block + PANTONE code) right where it sits in the sentence — the reference lives in the actual note. Removed the separate pending-Pantone tray.
+- On post, only the cards whose token survives in the text are attached. Any Pantone card without a matching token (legacy/back-compat) falls back to a swatch card below. Also dropped the "On-screen approximation" caption per Ben. Verified inline render. supply/inject.html only (uses mig 259).
+
 ## v27.434 PRODUCT ▸ Config — new sub-tab; Seasons/Categories/Timeline config moved here
 - New **CONFIG** tab in the PRODUCT module sub-nav (`#/product/config`). Hosts **Seasons**, **Category codes**, **Timeline tags & badges** and **Timeline quick phrases** — all the product config in one place inside PRODUCT.
 - **Moved out of the ⚙ CONFIG section:** the old ⚙ CONFIG ▸ "Product" menu entry is removed; its panel now lives at PRODUCT ▸ Config (shared `renderProductConfig`). Hash router updated to recognise the product sub-tabs (plan/dashboard/range/specs/reports/config) so `#/product/config` opens the tab (not a product named "config"). Verified render. (Legacy ⚙ panel body left as unused `_pcfgLegacyUnused` — harmless dead code, to remove in a cleanup pass.) supply/inject.html only.
