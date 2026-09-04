@@ -13492,35 +13492,6 @@
     if(_prodDetailTab==='sizes')return renderProdMaster(body,d,'sizes');
     if(!d._coreLoaded && d._partial){ body.innerHTML='<div class="pd-skel">'+Array(5).join('x').split('x').map(function(){return '<div class="pd-skel-row"></div>';}).join('')+'</div>'; return; }   // master fields wait on the tiny core call
     renderProdMaster(body,d); }
-  // Printable SAMPLE CARD (admin) — one per sample version. Fields per Ben; STATUS ticks reflect the per-aspect
-  // sign-off (blank if not yet reviewed); COMMENTS/approval date print blank lines when reviewed after printing.
-  function _sampleCard(s){
-    var it=(_prodDetail&&_prodDetail.item)||{};
-    var ver=(s.version!=null&&s.version!=='')?s.version:(String(s.ref||'').split('_v')[1]||'');
-    var decs=(s.aspect_feedback||[]).map(function(x){return x.decision||'';});
-    var hasReject=decs.some(function(d){return d==='rejected_new_sample'||d==='stop_development'||d==='rejected';});
-    var hasAwc=decs.some(function(d){return d==='approved_with_comments';});
-    var hasApproved=decs.some(function(d){return d==='approved';});
-    var st={approved:false,awc:false,no:false};
-    if(hasReject)st.no=true; else if(hasAwc)st.awc=true; else if(hasApproved)st.approved=true;   // else: not yet reviewed → all blank
-    var reviewed=hasReject||hasAwc||hasApproved;
-    var comments=(s.aspect_feedback||[]).filter(function(x){return (x.feedback||'').trim();}).map(function(x){ return (COMP_LBL[x.aspect]||x.aspect)+': '+x.feedback; }).join('\n');
-    var apprDate=(st.approved||st.awc)&&it.approved_at?fd(String(it.approved_at).slice(0,10)):'';
-    var w=window.open('','_blank'); if(!w){ alert('Allow pop-ups to download the sample card.'); return; }
-    function tk(on){ return '<span class="tk">'+(on?'☑':'☐')+'</span>'; }
-    function row(k,v){ return '<tr><td class="k">'+k+'</td><td class="v">'+esc(v==null||v===''?'—':v)+'</td></tr>'; }
-    var kv=row('SUPPLIER',it.supplier)+row('SEASON',it.season)+row('PRODUCT TYPE',it.category)+row('COLOUR NAME',it.colour_name||it.bulk_colour_name)+row('REFERENCE',it.ref)+row('SAMPLE VERSION',ver?('v'+ver):'')+row('DATE OF SAMPLE',s.sample_date?fd(s.sample_date):'');
-    var cmt=comments?('<div class="cbody">'+esc(comments).replace(/\n/g,'<br>')+'</div>'):'<div class="bl"></div><div class="bl"></div>';
-    var appr=apprDate?('<b>'+esc(apprDate)+'</b>'):'<span class="ul"></span>';
-    var css='body{font-family:system-ui,Arial,sans-serif;color:#0f172a;margin:0;padding:24px}.card{max-width:520px;border:1.5px solid #0f172a;border-radius:10px;padding:20px 22px}h1{font-size:15px;letter-spacing:.08em;margin:0 0 14px;text-align:center}table.kv{width:100%;border-collapse:collapse;font-size:13px}table.kv td{padding:5px 0;vertical-align:top}td.k{width:150px;font-weight:700;letter-spacing:.03em;color:#334155;white-space:nowrap}td.v{border-bottom:1px dotted #cbd5e1}.sec{margin-top:16px}.lbl{font-size:11px;font-weight:700;letter-spacing:.05em;color:#334155;margin-bottom:6px}.ticks{font-size:12px;font-weight:600}.tk{font-size:15px;margin-right:3px}.cbody{font-size:12px;white-space:pre-wrap;border:1px solid #e5e7eb;border-radius:6px;padding:7px 9px;min-height:38px}.bl{border-bottom:1px solid #94a3b8;height:22px}.ul{display:inline-block;border-bottom:1px solid #0f172a;width:150px;height:14px;vertical-align:middle}';
-    w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Sample card '+esc(it.ref||'')+(ver?(' v'+esc(ver)):'')+'</title><style>'+css+'</style></head><body><div class="card"><h1>SAMPLE CARD</h1>'
-      +'<table class="kv">'+kv+'</table>'
-      +'<div class="sec"><div class="lbl">STATUS'+(reviewed?'':' <span style="font-weight:400;color:#94a3b8">(not yet reviewed)</span>')+'</div><div class="ticks">'+tk(st.approved)+' APPROVED &nbsp;&nbsp;&nbsp; '+tk(st.awc)+' APPROVED WITH COMMENTS &nbsp;&nbsp;&nbsp; '+tk(st.no)+' NOT APPROVED</div></div>'
-      +'<div class="sec"><div class="lbl">COMMENTS</div>'+cmt+'</div>'
-      +'<div class="sec"><span class="lbl" style="display:inline">DATE OF APPROVAL:</span> &nbsp;'+appr+'</div>'
-      +'</div><scr'+'ipt>window.onload=function(){setTimeout(function(){try{window.print();}catch(e){}},400);};</scr'+'ipt></body></html>');
-    w.document.close();
-  }
   function renderProdSamplesTab(body,ref){ body.innerHTML='<div style="color:#94a3b8">Loading…</div>';
     _prodCachedJson('/api/product/samples/'+encodeURIComponent(ref)).then(function(list){ list=Array.isArray(list)?list:[];
       list.sort(function(a,b){ var d=String(b.sample_date||'').localeCompare(String(a.sample_date||'')); return d||((b.version||0)-(a.version||0)); });   // newest first
@@ -13552,7 +13523,7 @@
             +(ph?'<div style="margin-top:8px">'+ph+'</div>':'')
             +'</div>'; }).join(''):'<div style="color:#94a3b8;padding:6px 2px">No sample versions submitted yet.</div>');
       body.querySelectorAll('.ps-adm-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this sample version?'))return; shipPost('/api/product/sample/'+a.dataset.id+'/delete',{},function(){ _prodJsonBust(ref); renderProdSamplesTab(body,ref); }); }; });
-      body.querySelectorAll('.ps-card').forEach(function(a){ a.onclick=function(){ var s=list.filter(function(x){return String(x.id)===String(a.dataset.id);})[0]; if(s)_sampleCard(s); }; });
+      body.querySelectorAll('.ps-card').forEach(function(a){ a.onclick=function(){ var lk=document.createElement('a'); lk.href='/api/product/sample/'+a.dataset.id+'/card.pdf'; lk.download=''; document.body.appendChild(lk); lk.click(); lk.remove(); }; });   // downloads the PDF (attachment) — no rendered tab
       function _saveAspect(id,aspect,feedback,decision,msg,flow){ if(msg){msg.style.color='#94a3b8';msg.textContent='saving…';}
         shipPost('/api/product/sample/'+id+'/aspect',{aspect:aspect,feedback:feedback,decision:decision},function(j){ if(msg){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;} else {msg.style.color='#16a34a';msg.textContent=(flow&&j&&j.flowed)?('✓ → '+j.flowed+' size'+(j.flowed===1?'':'s')):'✓ saved';setTimeout(function(){msg.textContent='';},2400);} }
           try{prodItemInvalidate(ref);}catch(e){}

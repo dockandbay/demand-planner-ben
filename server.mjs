@@ -6977,6 +6977,54 @@ app.post('/api/product/sample/:id/delete', async (req, res) => {
     await pool.query(`DELETE FROM planner.portal_attachments WHERE po=$1 AND category='product_sample'`, ['PSAMPLE-' + req.params.id]); res.json({ ok: true }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// Printable SAMPLE card as a downloadable PDF (Content-Disposition: attachment → downloads, doesn't render a tab).
+app.get('/api/product/sample/:id/card.pdf', async (req, res) => {
+  try {
+    const sr = (await pool.query(`SELECT ps.id, ps.version, to_char(ps.sample_date,'YYYY-MM-DD') sample_date, ps.item_ref,
+      coalesce((SELECT json_agg(json_build_object('aspect',af.aspect,'feedback',af.feedback,'decision',af.decision) ORDER BY af.aspect)
+        FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id),'[]'::json) aspect_feedback
+      FROM planner.product_dev_samples ps WHERE ps.id=$1::bigint`, [req.params.id])).rows[0];
+    if (!sr) return res.status(404).json({ error: 'sample not found' });
+    const it = (await pool.query(`SELECT ref, coalesce(supplier,'') supplier, coalesce(season,'') season, coalesce(category,'') category,
+      coalesce(colour_name,'') colour_name, coalesce(bulk_colour_name,'') bulk_colour_name, to_char(approved_at,'YYYY-MM-DD') approved_at
+      FROM planner.product_dev_items WHERE ref=$1`, [sr.item_ref])).rows[0] || {};
+    const CL = { product: 'Product', packaging: 'Packaging', labels: 'Labels/wraps', polybag: 'Polybags', other: 'Other components' };
+    const decs = (sr.aspect_feedback || []).map(x => x.decision || '');
+    const hasReject = decs.some(d => d === 'rejected_new_sample' || d === 'stop_development' || d === 'rejected');
+    const hasAwc = decs.some(d => d === 'approved_with_comments');
+    const hasApproved = decs.some(d => d === 'approved');
+    const st = { approved: false, awc: false, no: false };
+    if (hasReject) st.no = true; else if (hasAwc) st.awc = true; else if (hasApproved) st.approved = true;
+    const reviewed = hasReject || hasAwc || hasApproved;
+    const comments = (sr.aspect_feedback || []).filter(x => (x.feedback || '').trim()).map(x => (CL[x.aspect] || x.aspect) + ': ' + x.feedback);
+    const apprDate = (st.approved || st.awc) && it.approved_at ? it.approved_at : '';
+    const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib');
+    const doc = await PDFDocument.create(); const F = await doc.embedFont(StandardFonts.Helvetica), B = await doc.embedFont(StandardFonts.HelveticaBold);
+    const PW = 595.28, PH = 841.89, M = 48; const page = doc.addPage([PW, PH]);
+    const ink = rgb(0.09, 0.11, 0.16), mut = rgb(0.42, 0.46, 0.52), line = rgb(0.7, 0.74, 0.8);
+    const san = s => String(s == null ? '' : s).replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[–—]/g, '-').replace(/[^\x20-\x7E]/g, '');
+    const _MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const fmtd = d => { const m = /(\d{4})-(\d{2})-(\d{2})/.exec(String(d || '')); return m ? (m[3] + '-' + _MON[+m[2] - 1] + '-' + m[1].slice(2)) : ''; };
+    const T = (s, x, yy, sz, f, c) => page.drawText(san(s), { x, y: yy, size: sz, font: f || F, color: c || ink });
+    let y = PH - M - 8;
+    T('SAMPLE - ' + (it.ref || ''), M, y, 17, B); y -= 30;   // left-aligned header, ref in the title (removed from the body)
+    const rows = [['SUPPLIER', it.supplier], ['SEASON', it.season], ['PRODUCT TYPE', it.category], ['COLOUR NAME', it.colour_name || it.bulk_colour_name], ['SAMPLE VERSION', sr.version != null ? ('v' + sr.version) : ''], ['DATE OF SAMPLE', fmtd(sr.sample_date)]];
+    rows.forEach(r => { T(r[0], M, y, 11, B, rgb(0.2, 0.25, 0.32)); T(r[1] || '-', M + 150, y, 12, F); page.drawLine({ start: { x: M + 150, y: y - 4 }, end: { x: PW - M, y: y - 4 }, thickness: 0.5, color: line }); y -= 24; });
+    y -= 12;
+    T('STATUS' + (reviewed ? '' : '  (not yet reviewed)'), M, y, 11, B, rgb(0.2, 0.25, 0.32)); y -= 20;
+    const box = (x, on, label) => { page.drawRectangle({ x, y: y - 2, width: 12, height: 12, borderColor: ink, borderWidth: 1 }); if (on) T('X', x + 2.6, y, 11, B); T(label, x + 18, y, 11, F); return x + 18 + F.widthOfTextAtSize(san(label), 11) + 22; };
+    let bx = M; bx = box(bx, st.approved, 'APPROVED'); bx = box(bx, st.awc, 'APPROVED WITH COMMENTS'); box(bx, st.no, 'NOT APPROVED'); y -= 30;
+    T('COMMENTS', M, y, 11, B, rgb(0.2, 0.25, 0.32)); y -= 8;
+    if (comments.length) { comments.forEach(c => { const words = san(c).split(' '); let cur = ''; const push = t => { y -= 15; T(t, M, y, 10.5, F); }; words.forEach(w => { const t = cur ? cur + ' ' + w : w; if (F.widthOfTextAtSize(t, 10.5) > PW - 2 * M && cur) { push(cur); cur = w; } else cur = t; }); if (cur) push(cur); }); }
+    else { for (let i = 0; i < 3; i++) { y -= 22; page.drawLine({ start: { x: M, y }, end: { x: PW - M, y }, thickness: 0.5, color: line }); } }
+    y -= 34;
+    T('DATE OF APPROVAL:', M, y, 11, B, rgb(0.2, 0.25, 0.32)); if (apprDate) T(fmtd(apprDate), M + 150, y, 12, B); else page.drawLine({ start: { x: M + 150, y: y - 3 }, end: { x: M + 300, y: y - 3 }, thickness: 0.6, color: ink });
+    const bytes = await doc.save();
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', 'attachment; filename="SAMPLE ' + san(it.ref || 'card') + (sr.version != null ? (' v' + sr.version) : '') + '.pdf"');
+    res.end(Buffer.from(bytes));
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.post('/api/product/sample-photo', async (req, res) => {   // body-based (sample_id in body) — matches the portal shape; used by the admin "preview as supplier"
   const b = req.body || {}, id = b.sample_id;
   if (!id || !b.data_base64) return res.status(400).json({ error: 'sample_id + data_base64 required' });
