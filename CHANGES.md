@@ -1,3 +1,7 @@
+## v27.458 PRODUCT ▸ Dashboard — Photography view
+- New **📸 Photography** view toggle on the PRODUCT Dashboard (next to Components). Lists every product with a clear **photo status tag** (📸 Approved / — not yet), **which sample version** is approved for photography (ref + date) and its **comments**. Season filter + click-through to the product both work. Header count shows how many are photo-approved.
+- Dashboard endpoint now returns each product's photo-approved sample versions. server.mjs + supply/inject.html. No migration (reads mig 265 fields).
+
 ## v27.457 Sample: Approved for photography flag + comments (mig 265)
 - Each sample version in the PRODUCT ▸ Samples tab now has an **📸 Approved for photography** checkbox (independent of the bulk-approval decision). Ticking it reveals an optional **comments** box (e.g. hero colourway, retouch notes); the card highlights green when approved. Saves on toggle / blur.
 - Fields `approved_for_photography` + `photography_notes` on planner.product_dev_samples (mig 265); samples feed carries them; new `POST /api/product/sample/:id/photography`. server.mjs + supply/inject.html.

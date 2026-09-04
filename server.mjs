@@ -6104,7 +6104,12 @@ app.get('/api/product/dashboard', async (req, res) => {
                count(*) FILTER (WHERE sd.required)::int req,
                count(*) FILTER (WHERE sd.required AND coalesce(sd.approval_status,'pending')='approved')::int appr
         FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id
-        WHERE s.item_id=i.id GROUP BY sd.dimension) t),'{}'::json) comps
+        WHERE s.item_id=i.id GROUP BY sd.dimension) t),'{}'::json) comps,
+      coalesce((SELECT json_agg(json_build_object(
+          'ref', CASE WHEN coalesce(ps.dimension,'product')='product' THEN ps.item_ref||'_v'||ps.version ELSE ps.item_ref||'_'||ps.dimension||'_v'||ps.version END,
+          'version', ps.version, 'date', to_char(ps.sample_date,'YYYY-MM-DD'), 'notes', coalesce(ps.photography_notes,'')) ORDER BY ps.version)
+        FROM planner.product_dev_samples ps WHERE ps.item_ref=i.ref AND ps.approved_for_photography),'[]'::json) photo,
+      (SELECT count(*) FROM planner.product_dev_samples ps WHERE ps.item_ref=i.ref)::int sample_count
       FROM planner.product_dev_items i ORDER BY i.category, i.ref`);
     res.json(r.rows);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
