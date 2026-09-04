@@ -2132,7 +2132,7 @@ const FBA_TICK={};
 // Client OVERLAY: a just-processed transfer counts as FBA cover (so it isn't re-recommended) and the grid updates
 // silently after a background refresh — without a page reload. Keyed sku|<mkt>_fba (AWD-dest pools into FBA cover).
 // Only read by the FBA transfer calc → the 3PL/FBA buy plan is unaffected.
-var FBA_PENDING={}, FBA_PENDING_ROWS=[], FBA_PENDING_LR=null, _fbaTrfLoaded=false, _fbaTrfBusy=false, _fbaDlTimer=null;
+var FBA_PENDING={}, FBA_PENDING_ROWS=[], FBA_PENDING_LR=null, _fbaTrfLoaded=false, _fbaTrfBusy=false, _fbaDlTimer=null, _fbaTrfBlocked=null;   // _fbaTrfBlocked: null=ok, else the reason the refresh was refused (latches to stop the auto-retry loop)
 function _fbaPendingOf(sku,mkt){ return FBA_PENDING[sku+'|'+String(mkt).toLowerCase()+'_fba']||0; }
 function fbaTrfLoad(cb){ fetch('/api/supply/fba-transfers/list').then(function(r){return r.json();}).then(function(d){
     FBA_PENDING={}; FBA_PENDING_ROWS=(d&&d.rows)||[]; FBA_PENDING_LR=(d&&d.last_run)||null; _fbaTrfLoaded=true;
@@ -2140,14 +2140,21 @@ function fbaTrfLoad(cb){ fetch('/api/supply/fba-transfers/list').then(function(r
     if(cb)cb();
   }).catch(function(){ _fbaTrfLoaded=true; if(cb)cb(); }); }
 function fbaTrfRefresh(silent,cb){ if(_fbaTrfBusy)return; if(_fbaDlTimer){clearTimeout(_fbaDlTimer);_fbaDlTimer=null;}   // any refresh (esp. manual) supersedes a scheduled post-download run
+  if(!silent)_fbaTrfBlocked=null;   // a manual ⟳ clears the latch and retries
   _fbaTrfBusy=true; _fbaTrfRenderBox();
-  fetch('/api/supply/fba-transfers/refresh',{method:'POST'}).then(function(r){return r.json();}).then(function(){ fbaTrfLoad(function(){ _fbaTrfBusy=false; if(typeof render==='function')render(); if(cb)cb(); }); }).catch(function(){ _fbaTrfBusy=false; _fbaTrfRenderBox(); }); }
+  fetch('/api/supply/fba-transfers/refresh',{method:'POST'}).then(function(r){ return r.json().then(function(j){return {ok:r.ok,j:j||{}};},function(){return {ok:r.ok,j:{}};}); }).then(function(res){
+    if(!res.ok || res.j.ok===false){   // refusal (403 read-only) OR 200-with-ok:false (Cin7 not configured): latch and DO NOT run the success path — that's what closed the render()→maybeRefresh loop
+      _fbaTrfBlocked=(res.j&&(res.j.error||res.j.message))||(res.ok?'source not available':'no permission to refresh');
+      _fbaTrfBusy=false; _fbaTrfRenderBox(); if(cb)cb(); return; }
+    _fbaTrfBlocked=null;
+    fbaTrfLoad(function(){ _fbaTrfBusy=false; if(typeof render==='function')render(); if(cb)cb(); });
+  }).catch(function(){ _fbaTrfBusy=false; _fbaTrfRenderBox(); if(cb)cb(); }); }
 function _fbaTrfAgo(iso){ var t=Date.parse(iso); if(!t)return ''; var m=Math.round((Date.now()-t)/60000); return m<1?'just now':(m<60?(m+'m ago'):(Math.round(m/60)+'h ago')); }
-function _fbaTrfMaybeRefresh(){ if(_fbaTrfBusy)return; var lr=FBA_PENDING_LR?Date.parse(FBA_PENDING_LR):0; if(!lr||(Date.now()-lr)>3600000)fbaTrfRefresh(true); }   // auto-refresh on FBA visit if last run > 1h
+function _fbaTrfMaybeRefresh(){ if(_fbaTrfBusy||_fbaTrfBlocked)return; var lr=FBA_PENDING_LR?Date.parse(FBA_PENDING_LR):0; if(!lr||(Date.now()-lr)>3600000)fbaTrfRefresh(true); }   // auto-refresh on FBA visit if last run > 1h; a latched refusal stops the retry loop until a manual ⟳
 function _fbaTrfOnView(){ if(!_fbaTrfLoaded){ fbaTrfLoad(function(){ if(typeof render==='function')render(); _fbaTrfMaybeRefresh(); }); } else { _fbaTrfMaybeRefresh(); } _fbaTrfRenderBox(); }
 function _fbaTrfRenderBox(){ var el=document.getElementById('fba-trf-box'); if(!el)return;
   var n=FBA_PENDING_ROWS.length, u=FBA_PENDING_ROWS.reduce(function(a,r){return a+(Number(r.qty)||0);},0), lr=FBA_PENDING_LR?(' · '+_fbaTrfAgo(FBA_PENDING_LR)):'';
-  el.innerHTML=(_fbaTrfBusy?'<span style="color:#b45309;font-weight:700">⟳ inbound data updating…</span>':'')
+  el.innerHTML=(_fbaTrfBusy?'<span style="color:#b45309;font-weight:700">⟳ inbound data updating…</span>':(_fbaTrfBlocked?'<span style="color:#b91c1c;font-weight:700" title="'+String(_fbaTrfBlocked).replace(/[<>&"]/g,' ')+' — click ⟳ to retry">⚠ not updating</span>':''))
     +'<span id="fba-trf-sum" title="Recent Cin7 branch transfers into FBA/AWD not yet in the inbound feed — counted as FBA cover" style="cursor:pointer;color:#0369a1;font-weight:600;border:1px solid #bae6fd;background:#f0f9ff;border-radius:4px;padding:2px 8px">🚚 '+n+' in-flight'+(u?(' · '+u.toLocaleString()+'u'):'')+lr+'</span>'
     +'<button id="fba-trf-refresh" title="Refresh in-flight transfers from Cin7 now" style="font-size:10px;padding:2px 7px;border:1px solid #cbd5e1;border-radius:4px;background:#fff;cursor:pointer">⟳</button>';
   var s=document.getElementById('fba-trf-sum'); if(s)s.onclick=_fbaTrfShowList;

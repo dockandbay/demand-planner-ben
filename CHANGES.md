@@ -1,3 +1,6 @@
+## v27.466 FIX (CRITICAL) — FBA-transfer refusal latch (was an infinite refresh loop)
+- A read-only user (email without supply_edit) hitting the FBA view could spin an **infinite refresh loop**: the 403 from `/api/supply/fba-transfers/refresh` was parsed as JSON and treated as success → `render()` → `_fbaTrfMaybeRefresh()` re-fired because `last_run` was never stamped. Now `fbaTrfRefresh` checks `r.ok` (and 200-with-ok:false, e.g. Cin7 not configured): a refusal **latches `_fbaTrfBlocked`** and never runs the success path, so `render()` is not called and the loop cannot close. `_fbaTrfMaybeRefresh` no-ops while latched; a manual ⟳ clears it and retries; the box shows **⚠ not updating** with the reason instead of stale-as-fresh. artifact_v16.7.html (FBA-transfer block only).
+
 ## v27.465 Components — link a spec via a searchable dropdown
 - **Link a spec** (on a spec-linked component in Sizes & Variants) is now a **searchable dropdown** of the Specifications table instead of a type-the-id prompt. Type to filter by spec type / category / SKU / filename; pick to link. Reuses the app's standard search-popup pattern. supply/inject.html only.
 
