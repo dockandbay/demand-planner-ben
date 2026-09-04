@@ -14736,7 +14736,7 @@ function render3plInvoice(body){
         +'<td style="'+TD+';border-right:1px solid #e2e8f0;font-weight:600">'+fmt(r.ginTot)+'</td>'
         +cell(r.orders)+cell(r.transfers)+'</tr>';
       if(hasS){ r.ships.forEach(function(sh){ html+='<tr class="f3-det f3-det-'+ri+'" style="display:none;background:#f8fafc">'
-        +'<td style="'+TD+';text-align:left;padding-left:26px;color:#475569;font-weight:600">'+e(sh.ship_id)+(sh.air?' <span style="color:#9a3412;font-weight:700;font-size:9px;background:#ffedd5;padding:0 4px;border-radius:3px">air</span>':'')+(sh.po_count>1?' <span style="color:#94a3b8;font-weight:400">('+sh.po_count+' POs)</span>':'')+'</td>'
+        +'<td style="'+TD+';text-align:left;padding-left:26px;color:#475569;font-weight:600">'+e(sh.ship_id)+(sh.fill==='lcl'?' <span style="color:#1e40af;font-weight:700;font-size:9px;background:#dbeafe;padding:0 4px;border-radius:3px" title="sub-pallet consignment (under one pallet) — ships as LCL, not a full sea container">LCL</span>':sh.air?' <span style="color:#9a3412;font-weight:700;font-size:9px;background:#ffedd5;padding:0 4px;border-radius:3px">air</span>':'')+(sh.po_count>1?' <span style="color:#94a3b8;font-weight:400">('+sh.po_count+' POs)</span>':'')+'</td>'
         +'<td style="'+TD+';color:#475569">'+fmt(sh.units||0)+'</td><td style="'+TD+';color:#475569">'+(sh.air?'0':(sh.containers||'<span style="color:#cbd5e1">—</span>'))+'</td>'
         +'<td style="'+TD+';text-align:left;color:#64748b" colspan="5">delivery '+(sh.deliv?e(_fD(sh.deliv)):'&mdash;')+'</td></tr>'; }); }
     });
@@ -14759,7 +14759,7 @@ function render3plInvoice(body){
     function _cD2(s){ var p=String(s||'').slice(0,10).split('-'); return p.length<3?String(s||''):(p[2]+'-'+(_M2[+p[1]-1]||p[1])+'-'+p[0].slice(2)); }
     var _sh=[]; rows.forEach(function(r){ (r.ships||[]).forEach(function(sh){ _sh.push(sh); }); });
     if(_sh.length){ lines.push(''); lines.push('Known inbound shipments'); lines.push(['Shipment','Delivery','Units','Containers','Air'].join(','));
-      _sh.forEach(function(sh){ lines.push([String(sh.ship_id).replace(/,/g,' '),(sh.deliv?_cD2(sh.deliv):''),(sh.units||0),(sh.air?0:(sh.containers||0)),(sh.air?'air':'')].join(',')); }); }
+      _sh.forEach(function(sh){ lines.push([String(sh.ship_id).replace(/,/g,' '),(sh.deliv?_cD2(sh.deliv):''),(sh.units||0),(sh.air?0:(sh.containers||0)),(sh.fill||'')].join(',')); }); }
     var blob=new Blob([lines.join('\n')],{type:'text/csv'}), url=URL.createObjectURL(blob), a=document.createElement('a');
     a.href=url; a.download=(tplName.replace(/[^a-z0-9]+/ig,'_')+'_forecast_6mo.csv'); document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(url);},1000);
   }
@@ -14772,7 +14772,7 @@ function render3plInvoice(body){
     var shipSec=allShips.length?('<p style="font-size:13px;font-weight:bold;margin:12px 0 6px">Known inbound shipments</p>'
       +'<table style="border-collapse:collapse"><thead><tr>'
       +'<th style="'+THs+';text-align:left">Shipment</th><th style="'+THs+';text-align:left">Delivery</th><th style="'+THs+'">Units</th><th style="'+THs+'">Containers</th></tr></thead><tbody>'
-      +allShips.map(function(sh){ return '<tr><td style="'+TDs+';text-align:left">'+e(sh.ship_id)+(sh.air?' (air)':'')+(sh.po_count>1?' ('+sh.po_count+' POs)':'')+'</td><td style="'+TDs+';text-align:left">'+(sh.deliv?e(_cD(sh.deliv)):'—')+'</td><td style="'+TDs+'">'+fmt(sh.units||0)+'</td><td style="'+TDs+'">'+(sh.air?'0':(sh.containers||'—'))+'</td></tr>'; }).join('')
+      +allShips.map(function(sh){ return '<tr><td style="'+TDs+';text-align:left">'+e(sh.ship_id)+(sh.fill?' ('+sh.fill.toUpperCase()+')':'')+(sh.po_count>1?' ('+sh.po_count+' POs)':'')+'</td><td style="'+TDs+';text-align:left">'+(sh.deliv?e(_cD(sh.deliv)):'—')+'</td><td style="'+TDs+'">'+fmt(sh.units||0)+'</td><td style="'+TDs+'">'+(sh.air?'0':(sh.containers||'—'))+'</td></tr>'; }).join('')
       +'</tbody></table>'):'';
     var h='<div style="font-family:Arial,sans-serif"><p style="font-size:14px;font-weight:bold;margin:0 0 6px">'+e(tplName)+' — 6-month goods in / goods out (estimate)</p>'
       +'<table style="border-collapse:collapse"><thead><tr>'

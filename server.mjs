@@ -8196,12 +8196,15 @@ app.get('/api/supply/tpl/goods-in', async (req, res) => {
          AND sum(units) > 0
       ORDER BY deliv`, [branch])).rows;
     const out = rows.map(r => { const pal = Number(r.pallets) || 0;
-      // AIR / LCL — not a sea container: an -AIR reference, or a sub-pallet consignment (0<pallets<1, e.g. a 170-unit
-      // top-up). Show 0 containers + an "air" note rather than rounding a fraction of a pallet up to a full container.
-      const air = /air/i.test(r.ship_id || '') || /air/i.test(r.pos || '') || (pal > 0 && pal < 1);
+      // Not a sea container: a real AIR reference (-AIR in the ship id / PO), or a sub-pallet consignment that goes as
+      // LCL (0<pallets<1, e.g. a 170-unit top-up) — show 0 containers rather than rounding a fraction up to a full one.
+      const realAir = /air/i.test(r.ship_id || '') || /air/i.test(r.pos || '');
+      const subPallet = !realAir && (pal > 0 && pal < 1);
+      const air = realAir || subPallet;   // "not a full sea container" — drives containers:0
       return {
       ship_id: r.ship_id, deliv: r.deliv || null, units: r.units || 0,
-      pallets: pal, containers: air ? 0 : (pal > 0 ? Math.ceil(pal / 20) : 0), air: air, pos: r.pos || '', po_count: r.po_count || 0 }; });
+      pallets: pal, containers: air ? 0 : (pal > 0 ? Math.ceil(pal / 20) : 0), air: air,
+      fill: realAir ? 'air' : (subPallet ? 'lcl' : ''), pos: r.pos || '', po_count: r.po_count || 0 }; });
     res.json({ ok: true, shipments: out });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });

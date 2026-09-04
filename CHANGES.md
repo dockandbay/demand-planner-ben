@@ -1,3 +1,6 @@
+## v27.447 REPORTS ▸ 3PL Forecast — sub-pallet consignments labelled LCL (not "air")
+- The 3PL Forecast (goods-in) used to tag any consignment under one pallet (0<pallets<1) as "air", which read as air-freight. It now shows **LCL** (blue) for the sub-pallet case and keeps **air** only when the ship id / PO ref actually says air. Server returns a `fill` field (air | lcl | ''); client badge + CSV export use it. Fixes e.g. PO-57EUBE1 (900u, sub-pallet, no shipment) reading AIR. server.mjs + artifact_v16.7.html.
+
 ## v27.446 PRODUCT ▸ Samples — sample card = left-aligned title + downloads as PDF
 - Header now left-aligned and reads "SAMPLE - <reference>"; the Reference row is removed from the body (it is in the title). The ⤓ Card now **downloads a PDF** (server-rendered, Content-Disposition: attachment) instead of opening a rendered print tab. New GET /api/product/sample/:id/card.pdf (pdf-lib). Replaces the client print-window version. server.mjs + supply/inject.html.
 
