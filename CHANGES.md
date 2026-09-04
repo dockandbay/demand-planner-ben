@@ -1,3 +1,8 @@
+## v27.453 PRODUCT ▸ Config ▸ Components — render fix + inline add + seed
+- **Fix:** the Components catalogue never showed its rows — `compRows` was referenced before it was assigned, so the tab always fell back to "no components yet". Row builders now run before the section HTML, so the catalogue renders.
+- **Inline add** replaces the popup: a highlighted **New component…** row at the bottom (name · default supplier · sampling · sort) with **+ Add** and Enter-to-add; focus returns to the name field so you can add several in a row.
+- **Seed** a sensible starter catalogue (Product body / Pouch / Box / Hang tag / Care label / Woven label / Belly band / Sticker-seal / Insert card / Polybag) + removed a stray "Hang Tag" duplicate. seed_component_types (idempotent, optional on live). supply/inject.html.
+
 ## v27.452 PRODUCT ▸ Components — faithful migration of the legacy aspects (mig 263)
 - Every product that had the old per-size aspects (Product / Packaging / Labels / Polybag / Other) now has matching **components**, each linked back to its aspect via a new `dimension` column (mig 262 ALTER). The component surfaces that aspect's **real approval status** (✓ Approved / n/N approved / ✕ rejected / not started) and **file count** — Files links jump to Sizes & Variants where the files live; Polybags default to **Spec-linked (no sampling)**. Supplier stays "= product supplier" until retargeted (e.g. Packaging → MQ Print). Backfill = mig 263, idempotent, safe on live. server.mjs (dim rollup on the components endpoint) + supply/inject.html.
 
