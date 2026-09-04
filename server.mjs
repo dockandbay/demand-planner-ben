@@ -3506,6 +3506,15 @@ app.get('/api/supply/paperstore-labels/:po', async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
+// Barcode-customise project LIST — single-segment path, so it must be registered BEFORE the /api/supply/:section
+// catch-all (which would otherwise treat "barcode-projects" as an unknown section). Save/get/delete are 2-segment.
+app.get('/api/supply/barcode-projects', async (_req, res) => {
+  try { const rows = (await pool.query(`SELECT id, name, coalesce(target,'product') target,
+      (SELECT count(*) FROM jsonb_object_keys(coalesce(overrides,'{}'::jsonb)))::int n_overrides,
+      coalesce(created_by,'') created_by, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at
+    FROM planner.barcode_projects ORDER BY updated_at DESC, id DESC`)).rows;
+    res.json(rows); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // ── SAMPLES — detail / address autocomplete / timeline (specific routes BEFORE the :section catch-all)
 app.get('/api/supply/sample-detail/:id', async (req, res) => {
   try {
@@ -10092,6 +10101,27 @@ app.post('/api/supply/freight-pallets', async (req, res) => {
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Freight-rate pivot (CONFIG ▸ Freight rates): set the USD rate for a container size × destination. Upserts.
+// ── SUPPLY ▸ Barcodes — "customise" projects (mig 260): per-SKU barcode-number overrides for a download ──
+// (the LIST route is registered earlier, before the /api/supply/:section catch-all)
+app.get('/api/supply/barcode-project/:id', async (req, res) => {
+  try { const r = await pool.query(`SELECT id, name, coalesce(target,'product') target, coalesce(overrides,'{}'::jsonb) overrides FROM planner.barcode_projects WHERE id=$1::bigint`, [req.params.id]);
+    if (!r.rowCount) return res.status(404).json({ error: 'not found' }); res.json(r.rows[0]); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/barcode-project', async (req, res) => {
+  const b = req.body || {}, name = (b.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'name required' });
+  const target = ['product', 'carton', 'inner'].indexOf(b.target) >= 0 ? b.target : 'product';
+  // overrides: { sku: barcode } — keep only non-empty string→string pairs
+  const ov = {}; const src = (b.overrides && typeof b.overrides === 'object') ? b.overrides : {};
+  Object.keys(src).forEach(k => { const sku = String(k).trim(), bc = String(src[k] == null ? '' : src[k]).trim(); if (sku && bc) ov[sku] = bc.slice(0, 48); });
+  try {
+    if (b.id) { await pool.query(`UPDATE planner.barcode_projects SET name=$2, target=$3, overrides=$4::jsonb, updated_at=now() WHERE id=$1::bigint`, [b.id, name, target, JSON.stringify(ov)]); res.json({ ok: true, id: Number(b.id) }); }
+    else { const r = await pool.query(`INSERT INTO planner.barcode_projects (name, target, overrides, created_by) VALUES ($1,$2,$3::jsonb,$4) RETURNING id`, [name, target, JSON.stringify(ov), authUser(req) || null]); res.json({ ok: true, id: r.rows[0].id }); }
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/barcode-project/:id/delete', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.barcode_projects WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.post('/api/supply/freight-upsert', async (req, res) => {
   const b = req.body || {}, dest = (b.destination || '').trim(), sz = (b.container_size || '').trim();
   if (!dest || !sz) return res.status(400).json({ error: 'destination + container_size required' });
