@@ -1,3 +1,6 @@
+## v27.454 PRODUCT grid — swatch size S / M / L
+- A **Swatch S / M / L** toggle on the PRODUCT grid toolbar (right side). Medium is the current size (44px); Large is ~2× (88px); Small is ~30% smaller (31px). Choice persists (localStorage) across redraws and sessions. supply/inject.html (CSS + toolbar toggle).
+
 ## v27.453 PRODUCT ▸ Config ▸ Components — render fix + inline add + seed
 - **Fix:** the Components catalogue never showed its rows — `compRows` was referenced before it was assigned, so the tab always fell back to "no components yet". Row builders now run before the section HTML, so the catalogue renders.
 - **Inline add** replaces the popup: a highlighted **New component…** row at the bottom (name · default supplier · sampling · sort) with **+ Add** and Enter-to-add; focus returns to the name field so you can add several in a row.
