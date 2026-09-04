@@ -1,3 +1,6 @@
+## v27.451 PRODUCT ▸ Components — one-click "Set up from catalogue"
+- A product with no components yet shows a **⚡ Set up from catalogue** button that adds the whole active catalogue at once (each with its default supplier + sampling mode); once populated it becomes a **+ Add all** for any catalogue types still missing. Makes the Components tab usable across products without adding each by hand. supply/inject.html (uses migs 261/262).
+
 ## v27.450 PRODUCT ▸ Components tab (redesign P2, slice 1)
 - New **Components** tab on each product development: lists the products component set (Component · Supplier · Sampling · Status · Files). **Supplier** per component (dropdown: "= product supplier" default, or a specific supplier — e.g. Box → MQ Print). **Sampling mode** Sampled / Spec-linked; a **Spec-linked** component shows **status "no sampling"** and a **spec link in the Files column** (Ben). + Add component from the catalogue; per-row edit + delete. Migration **262** (planner.product_dev_components) + endpoints (list w/ product supplier + catalogue + suppliers, upsert, delete). Sandbox demo added to SS27-TOWEL-BL-01. Next slices: portal edit-gating (own = edit, others read-only), per-component sampling + migrating the existing size-dimension files. server.mjs + supply/inject.html.
 
