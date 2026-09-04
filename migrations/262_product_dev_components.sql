@@ -20,8 +20,13 @@ CREATE TABLE IF NOT EXISTS planner.product_dev_components (
   supplier          text,                                  -- NULL = the product's main supplier
   sampling_mode     text    NOT NULL DEFAULT 'sampled',    -- sampled | spec_linked
   spec_id           bigint,
+  dimension         text,                                  -- link to a legacy aspect (product/packaging/labels/polybag/
+                                                           -- other) for components faithfully migrated from the old model;
+                                                           -- NULL for net-new catalogue components. Its files/approval read
+                                                           -- from product_dev_size_dimensions until per-component sampling lands.
   sort              int     NOT NULL DEFAULT 0,
   created_at        timestamptz NOT NULL DEFAULT now(),
   UNIQUE (item_ref, name)
 );
 CREATE INDEX IF NOT EXISTS product_dev_components_item ON planner.product_dev_components (item_ref);
+ALTER TABLE planner.product_dev_components ADD COLUMN IF NOT EXISTS dimension text;   -- for tables created before this column

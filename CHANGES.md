@@ -1,3 +1,6 @@
+## v27.452 PRODUCT ▸ Components — faithful migration of the legacy aspects (mig 263)
+- Every product that had the old per-size aspects (Product / Packaging / Labels / Polybag / Other) now has matching **components**, each linked back to its aspect via a new `dimension` column (mig 262 ALTER). The component surfaces that aspect's **real approval status** (✓ Approved / n/N approved / ✕ rejected / not started) and **file count** — Files links jump to Sizes & Variants where the files live; Polybags default to **Spec-linked (no sampling)**. Supplier stays "= product supplier" until retargeted (e.g. Packaging → MQ Print). Backfill = mig 263, idempotent, safe on live. server.mjs (dim rollup on the components endpoint) + supply/inject.html.
+
 ## v27.451 PRODUCT ▸ Components — one-click "Set up from catalogue"
 - A product with no components yet shows a **⚡ Set up from catalogue** button that adds the whole active catalogue at once (each with its default supplier + sampling mode); once populated it becomes a **+ Add all** for any catalogue types still missing. Makes the Components tab usable across products without adding each by hand. supply/inject.html (uses migs 261/262).
 

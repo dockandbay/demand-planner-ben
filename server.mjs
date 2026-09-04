@@ -6829,13 +6829,28 @@ app.post('/api/product/component-type/:id/delete', async (req, res) => {
 app.get('/api/product/item/:ref/components', async (req, res) => {
   const ref = req.params.ref;
   try {
-    const [comps, item, cat, sups] = await Promise.all([
-      pool.query(`SELECT c.id, c.component_type_id, c.name, coalesce(c.supplier,'') supplier, coalesce(c.sampling_mode,'sampled') sampling_mode, c.spec_id, c.sort FROM planner.product_dev_components c WHERE c.item_ref=$1 ORDER BY c.sort, c.id`, [ref]),
+    const [comps, item, cat, sups, dstat] = await Promise.all([
+      pool.query(`SELECT c.id, c.component_type_id, c.name, coalesce(c.supplier,'') supplier, coalesce(c.sampling_mode,'sampled') sampling_mode, c.spec_id, c.dimension, c.sort FROM planner.product_dev_components c WHERE c.item_ref=$1 ORDER BY c.sort, c.id`, [ref]),
       pool.query(`SELECT coalesce(supplier,'') supplier FROM planner.product_dev_items WHERE ref=$1`, [ref]),
       pool.query(`SELECT id, name, coalesce(default_supplier,'') default_supplier, coalesce(sampling_mode,'sampled') sampling_mode FROM planner.component_types WHERE active ORDER BY sort, id`),
       pool.query(`SELECT name FROM planner.suppliers WHERE coalesce(kind,'supplier')='supplier' ORDER BY name`),
+      // per-aspect (legacy) approval + file rollup for this product, so a migrated component shows its real status/files
+      pool.query(`SELECT sd.dimension,
+                    count(*)::int AS total,
+                    sum((sd.approval_status='approved')::int)::int AS approved,
+                    sum((sd.approval_status='rejected')::int)::int AS rejected,
+                    coalesce(sum((SELECT count(*) FROM planner.portal_attachments a WHERE a.category='product_dim' AND a.po='PDIM-'||sd.id)),0)::int AS files
+                  FROM planner.product_dev_size_dimensions sd
+                  JOIN planner.product_dev_sizes s ON s.id=sd.size_id
+                  JOIN planner.product_dev_items i ON i.id=s.item_id
+                  WHERE i.ref=$1 GROUP BY sd.dimension`, [ref]),
     ]);
-    res.json({ components: comps.rows, product_supplier: (item.rows[0] || {}).supplier || '', catalogue: cat.rows, suppliers: sups.rows.map(r => r.name) });
+    const dm = {}; dstat.rows.forEach(r => { dm[r.dimension] = r; });
+    const components = comps.rows.map(c => {
+      const st = c.dimension ? dm[c.dimension] : null;
+      return Object.assign({}, c, st ? { total: st.total, approved: st.approved, rejected: st.rejected, files: st.files } : { total: 0, approved: 0, rejected: 0, files: 0 });
+    });
+    res.json({ components, product_supplier: (item.rows[0] || {}).supplier || '', catalogue: cat.rows, suppliers: sups.rows.map(r => r.name) });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/item/:ref/component', async (req, res) => {
