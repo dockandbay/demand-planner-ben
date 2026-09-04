@@ -13757,15 +13757,16 @@
     function sizeDim(s,dim){ return ((s.dimensions||[]).filter(function(x){return x.dimension===dim;})[0])||{}; }
     function compApprStyle(v){ return v==='approved'?'background:#dcfce7;color:#166534;font-weight:700':v==='rejected'?'background:#fee2e2;color:#991b1b;font-weight:700':'background:#fef3c7;color:#92400e;font-weight:600'; }
     function compFiles(s,dim,sd){ return (sd.files||[]).map(function(f){ var url='/api/supply/portal-attachment/'+f.id, img=/^image\//i.test(f.mime), fn=f.filename||'file';
-        return '<span style="display:inline-flex;align-items:center;gap:3px;border:1px solid #eef2f7;border-radius:5px;padding:1px 5px;margin:1px;max-width:100%">'
+        return '<span style="display:flex;align-items:center;gap:3px;border:1px solid #eef2f7;border-radius:5px;padding:1px 5px;margin:0 0 3px;max-width:100%">'
           +(img?'<img class="pm-dimimg" data-src="'+url+'" src="'+url+'" style="width:20px;height:20px;object-fit:cover;border-radius:3px;cursor:zoom-in;flex:none" title="'+esc(fn)+'">':'<span style="font-size:11px;flex:none">📄</span>')
-          +'<a href="'+url+'" target="_blank" rel="noopener" title="'+esc(fn)+'" style="font-size:10px;color:#1d4ed8;text-decoration:none;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(fn)+'</a>'
-          +'<a class="pm-comp-fdel" data-fid="'+f.id+'" title="remove file" style="color:#dc2626;cursor:pointer;font-size:10px;flex:none">✕</a></span>'; }).join(' ')
-        +' <label style="font-size:10px;color:#1d4ed8;cursor:pointer;white-space:nowrap">+ file<input type="file" class="pm-comp-file" data-id="'+s.id+'" data-dim="'+dim+'" style="display:none" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx" multiple></label>'; }
+          +'<a href="'+url+'" target="_blank" rel="noopener" title="'+esc(fn)+'" style="font-size:10px;color:#1d4ed8;text-decoration:none;flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(fn)+'</a>'
+          +'<a class="pm-comp-fdel" data-fid="'+f.id+'" title="remove file" style="color:#dc2626;cursor:pointer;font-size:10px;flex:none">✕</a></span>'; }).join('')
+        +'<label style="display:inline-block;font-size:10px;color:#1d4ed8;cursor:pointer;white-space:nowrap">+ file<input type="file" class="pm-comp-file" data-id="'+s.id+'" data-dim="'+dim+'" style="display:none" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx" multiple></label>'; }
     function compSampleCell(s,dim){   // sample VERSIONS covering this size + this component: version (→ Samples tab) + shipment + carrier/tracking badge + feedback
       var rel=(d.samples||[]).filter(function(sm){ return (sm.sampled_aspects||[]).indexOf(dim)>=0 && (sm.sample_sizes||[]).indexOf(s.size_label)>=0; });
       if(!rel.length)return '<span class="mut tiny">—</span>';
-      return rel.map(function(sm){
+      rel=rel.slice().sort(function(a,b){ return (b.version||0)-(a.version||0) || String(b.sample_date||'').localeCompare(String(a.sample_date||'')); });   // newest first
+      function renderSm(sm){
         var shs=(sm.shipments||[]).map(function(sh){ return '<span style="display:inline-flex;align-items:center;gap:3px;margin:1px 4px 1px 0"><a class="samp-open" data-ref="'+esc(sh.ref)+'" title="open this sample shipment" style="font-family:ui-monospace,Menlo,monospace;font-size:10px;color:#1d4ed8;text-decoration:underline;cursor:pointer">📦'+esc(sh.ref)+'</a>'+(sh.tracking?' '+carrierTrackLinkInj(sh.carrier,sh.tracking):(sh.carrier?'<span class="mut tiny">'+esc(sh.carrier)+'</span>':''))+'</span>'; }).join('');
         return '<div style="margin-bottom:6px">'
           +'<a class="pm-samp-open pm-samp-open-'+esc(dim)+'" data-ref="'+esc(it.ref)+'" title="open the Samples tab" style="font-family:ui-monospace,Menlo,monospace;font-size:10px;font-weight:700;color:#1d4ed8;text-decoration:underline;cursor:pointer">'+esc(sm.ref)+'</a>'
@@ -13774,14 +13775,19 @@
             var _d=_af&&_stageVal(_af.decision), _m=(_d&&_d!=='sample_development')?stageMeta(_d):null;
             if(!_txt&&!_m)return ''; var _chip=_m?' <span style="font-weight:700;color:'+_m[4]+';background:'+_m[3]+';border-radius:3px;padding:0 5px">'+esc(_m[1])+'</span>':'';
             return '<div style="margin-top:3px;font-size:10px;color:#78350f;background:#fffbeb;border:1px solid #fde68a;border-radius:5px;padding:2px 6px;white-space:normal;max-width:230px" title="sign-off on this component from the Samples tab">💬 '+esc(_txt||'—')+_chip+'</div>'; })()
-          +'</div>'; }).join(''); }
+          +'</div>'; }
+      if(rel.length===1)return renderSm(rel[0]);
+      var _k=s.id+'|'+dim;   // show only the most recent; older versions behind an expand toggle
+      return renderSm(rel[0])
+        +'<a class="pm-samp-more" data-key="'+esc(_k)+'" style="font-size:10px;color:#1d4ed8;cursor:pointer;text-decoration:underline">+ '+(rel.length-1)+' older ▾</a>'
+        +'<div class="pm-samp-older" data-key="'+esc(_k)+'" style="display:none;margin-top:4px">'+rel.slice(1).map(renderSm).join('')+'</div>'; }
     function compRow(s,dim){ var sd=sizeDim(s,dim), isSpec=compIsSpec(dim), req=(sd.required==null)?(isSpec?false:true):!!sd.required, appr=_stageVal(sd.approval_status);
       if(isSpec){   // spec-linked component: no sampling/approval — description + a link to the Specification, in the Files column
         var _sid=compSpecId(dim);
         var _specCell=_sid?'<a href="#/product/'+encodeURIComponent(it.ref)+'/specifications" style="color:#1d4ed8;text-decoration:underline;font-weight:600">→ Spec #'+esc(_sid)+' ↗</a>':'<span class="mut tiny" style="color:#b45309">no spec linked — set on the component above</span>';
         return '<tr class="pm-comprow" style="background:#fff">'
           +'<td style="padding:4px 8px 4px 16px;font-size:12px;font-weight:700;color:#334155;white-space:nowrap"><span style="font-size:11px;color:#64748b;margin-right:5px" title="spec-linked, no sampling">◈</span>'+compLbl(dim)+'</td>'
-          +'<td style="padding:2px 8px 2px 28px"><input class="fci pm-comp-desc" data-id="'+s.id+'" data-dim="'+dim+'" value="'+esc(sd.description||'')+'" placeholder="description…" style="width:100%;font-size:11px;box-sizing:border-box"></td>'
+          +'<td style="padding:2px 8px 2px 28px"><textarea class="fci pm-comp-desc" data-id="'+s.id+'" data-dim="'+dim+'" rows="2" placeholder="description…" style="width:50%;min-width:120px;font-size:11px;box-sizing:border-box;resize:vertical;font-family:inherit;vertical-align:top">'+esc(sd.description||'')+'</textarea></td>'
           +'<td style="padding:2px 8px;text-align:left;white-space:nowrap"><span class="mut tiny">—</span></td>'
           +'<td style="padding:2px 8px;text-align:left"><span style="color:#64748b;font-size:11px">no sampling</span></td>'
           +'<td style="padding:2px 8px;text-align:left;white-space:nowrap"><span class="mut tiny">—</span></td>'
@@ -13802,7 +13808,7 @@
       else if(req){ _lblIcon='<span style="font-size:12px;color:#f59e0b;margin-right:5px" title="'+esc(stageMeta(appr)[1])+'">●</span>'; }
       return '<tr class="pm-comprow" style="background:#fff;'+(req?'':'opacity:.6')+'">'
         +'<td style="padding:4px 8px 4px 16px;font-size:12px;font-weight:700;color:'+_lblFg+';white-space:nowrap">'+_lblIcon+compLbl(dim)+'</td>'
-        +'<td style="padding:2px 8px 2px 28px"><input class="fci pm-comp-desc" data-id="'+s.id+'" data-dim="'+dim+'" value="'+esc(sd.description||'')+'" placeholder="description…" style="width:100%;font-size:11px;box-sizing:border-box"></td>'
+        +'<td style="padding:2px 8px 2px 28px"><textarea class="fci pm-comp-desc" data-id="'+s.id+'" data-dim="'+dim+'" rows="2" placeholder="description…" style="width:50%;min-width:120px;font-size:11px;box-sizing:border-box;resize:vertical;font-family:inherit;vertical-align:top">'+esc(sd.description||'')+'</textarea></td>'
         +'<td style="padding:2px 8px;text-align:left;white-space:nowrap">'+reqCell+'</td>'
         +'<td style="padding:2px 8px;text-align:left">'+(req?apprCell:'<span class="mut tiny">—</span>')+'</td>'
         +'<td style="padding:2px 8px;text-align:left;white-space:nowrap">'+actCell+'</td>'
@@ -13847,7 +13853,7 @@
       +'</div>';
     var _sizesHtml='<div id="pm-comp-chooser" style="margin:0 0 18px;padding:0 0 16px;border-bottom:1px solid #e2e8f0"></div>'
       +'<div style="font-weight:700;font-size:13px;margin:0 0 6px">Size variants &amp; components <span style="color:#94a3b8;font-weight:400;font-size:11px">(approval = internal D&amp;B sign-off)</span></div>'
-      +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;min-width:1460px;table-layout:fixed"><colgroup><col style="width:230px"><col style="width:22%"><col style="width:48px"><col style="width:180px"><col style="width:110px"><col><col style="width:16%"></colgroup><thead><tr>'+[['Component',''],['Description',''],['Req',''],['Status',''],['Actions',''],['Files',''],['Samples','']].map(function(h){return '<th style="text-align:left;padding:2px 8px 4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7;white-space:nowrap;'+h[1]+'">'+h[0]+'</th>';}).join('')+'</tr></thead><tbody id="pm-sztbody">'+(sizeRows||(_szLoading?'<tr><td colspan="7" style="color:#94a3b8;padding:8px 4px">Loading size variants &amp; components…</td></tr>':'<tr><td colspan="7" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>'))+'</tbody></table></div>'
+      +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;min-width:1575px;table-layout:fixed"><colgroup><col style="width:345px"><col style="width:22%"><col style="width:48px"><col style="width:180px"><col style="width:110px"><col><col style="width:16%"></colgroup><thead><tr>'+[['Component',''],['Description',''],['Req',''],['Status',''],['Actions',''],['Files',''],['Samples','']].map(function(h){return '<th style="text-align:left;padding:2px 8px 4px 16px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;border-bottom:1px solid #eef2f7;white-space:nowrap;'+h[1]+'">'+h[0]+'</th>';}).join('')+'</tr></thead><tbody id="pm-sztbody">'+(sizeRows||(_szLoading?'<tr><td colspan="7" style="color:#94a3b8;padding:8px 4px">Loading size variants &amp; components…</td></tr>':'<tr><td colspan="7" style="color:#94a3b8;padding:4px 0">no sizes</td></tr>'))+'</tbody></table></div>'
       +'<div style="margin-top:8px"><input class="fci" id="pm-newsz" placeholder="add size…" style="width:130px"> <button class="save-btn" id="pm-addsz">+ Add size</button></div>';
     var _delHtml='<div style="margin-top:16px;padding-top:12px;border-top:1px solid #eef2f7;max-width:660px"><button class="save-btn" id="pm-newsamp" style="background:#16a34a;color:#fff;border-color:#15803d;font-weight:700;margin-right:8px">+ Add to new sample request</button><button class="save-btn light" id="pm-del" style="color:#dc2626">Delete product</button></div>';
     body.innerHTML=(mode==='sizes')?_sizesHtml:(_masterHtml+_delHtml);
@@ -13903,6 +13909,7 @@
       scope.querySelectorAll('.pm-comp-fdel').forEach(function(a){ if(a._b)return; a._b=1; a.onclick=function(){ if(!confirm('Remove this file?'))return; shipPost('/api/product/component-file/'+a.dataset.fid+'/delete',{},function(){ reloadSizes(); }); }; });
       scope.querySelectorAll('.pm-dimimg').forEach(function(im){ if(im._b)return; im._b=1; im.onclick=function(){ openImgZoom(im.dataset.src); }; });
       scope.querySelectorAll('.pm-samp-open').forEach(function(a){ if(a._b)return; a._b=1; a.onclick=function(e){ e.stopPropagation(); var tb=document.querySelector('.pd-tab[data-t="samples"]'); if(tb)tb.click(); }; });   // sample version → the product's Samples tab
+      scope.querySelectorAll('.pm-samp-more').forEach(function(a){ if(a._b)return; a._b=1; a.onclick=function(e){ e.stopPropagation(); var box=scope.querySelector('.pm-samp-older[data-key="'+a.dataset.key.replace(/"/g,'\\"')+'"]'); if(!box)return; var show=(box.style.display==='none'); box.style.display=show?'':'none'; a.textContent=show?'– hide older ▴':('+ '+box.children.length+' older ▾'); }; });   // expand/collapse older sample versions
       scope.querySelectorAll('.samp-open').forEach(function(a){ if(a._b)return; a._b=1; a.onclick=function(e){ e.stopPropagation(); (typeof openSampleDrawer==="function"?openSampleDrawer(a.dataset.ref):gotoSample(a.dataset.ref)); }; });   // sample-shipment ref -> editable drawer (was: navigate to SUPPLY Samples)
       bindProdActMark(scope, function(){ renderProductDetail(it.ref); });   // PO-style A marker: 120ms tooltip + SNOOZE ▾ / wake
     }

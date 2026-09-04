@@ -1,3 +1,9 @@
+## v27.460 Sizes & Variants — matrix polish
+- **Samples cell:** shows only the **most recent sample version** per size+component; older versions collapse behind a **+ N older** expander.
+- **Files:** now **stacked vertically** (one per line) instead of side-by-side, so long filenames read cleanly.
+- **Description:** now a **multi-line textarea**, **50% narrower**.
+- **Component column** made ~50% wider (230→345px) so names like “Other components” / “Labels-wraps” no longer clip. supply/inject.html only.
+
 ## v27.459 PRODUCT ▸ Samples — expand recent, collapse past
 - The Samples sub-tab now shows only the **most recent sample version expanded**; older versions collapse to a one-line summary bar (ref · status · 📸 photo badge · date · colour/quality). Click the bar (▸) to expand any past version. Keeps a long history tidy while the current sample stays open. supply/inject.html only.
 
