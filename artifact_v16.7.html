@@ -6157,7 +6157,13 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
 
   if(isActual){
     const actualUnits=a[fym]?a[fym][0]:0;
-    const yoyPct=ly_u>0?Math.round((actualUnits-ly_u)/ly_u*100):null;
+    // Growth % must use the SAME basis as the two numbers shown in the cell. Sub-category rows display EXPLODED units
+    // (master units + set boxes × BOM); the raw a[] values are sale-basis boxes. Mixing them showed e.g. 5,905 → 9,947
+    // with "+26%" (the raw-box growth) instead of +68%. SKU rows have no split → fall through to the raw numbers. v27.468
+    var _isSubRow=(typeof SKUM==='undefined'||!SKUM[s]);
+    var _spLY=_isSubRow?(subcatLySplit(s,co,ch)[ym(y-1,mo)]):null, _spTY=_isSubRow?(subcatLySplit(s,co,ch)[fym]):null;
+    var lyDisp=(_spLY&&_spLY.setBoxes>0)?_msE(_spLY):ly_u, tyDisp=(_spTY&&_spTY.setBoxes>0)?_msE(_spTY):actualUnits;
+    const yoyPct=lyDisp>0?Math.round((tyDisp-lyDisp)/lyDisp*100):null;
     const yoyStr=yoyPct!=null?(gPct(yoyPct)):'';
     const isNeg=yoyPct!=null&&yoyPct<0;
     const isCurMo=fym===ACTUAL_MONTHS[ACTUAL_MONTHS.length-1]; // current month = last actual
@@ -6192,7 +6198,7 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
       var lfDiv=document.createElement('div'); lfDiv.style.cssText='font-size:8px;color:#6366f1;text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap';
       lfDiv.title='Locked forecast — most recent snapshot taken before this month'+(_dl!=null?' ('+gPct(_dl)+' vs actual)':''); lfDiv.textContent='fc '+fn(_lf)+(_dl!=null?'  '+gPct(_dl):''); d.appendChild(lfDiv); } }
     if(!isCurMo&&_last4Has(fym)){ var _dh=hlDiscColor(actualUnits,(LOCKED_FC.sub&&LOCKED_FC.sub[ik])); if(_dh)td.dataset.hld=_dh; }   // fc-vs-actual colour (past 4 mo) — painted per toggle
-    if(!isCurMo){ var _gh=hlGrowthColor(actualUnits,ly_u); if(_gh)td.dataset.hlg=_gh; }   // growth-vs-LY colour (completed actual months; LY=0 excluded)
+    if(!isCurMo){ var _gh=hlGrowthColor(tyDisp,lyDisp); if(_gh)td.dataset.hlg=_gh; }   // growth-vs-LY colour on the displayed (exploded) basis (completed actual months; LY=0 excluded)
     td.appendChild(d);return td;
   }
 
@@ -14342,7 +14348,7 @@ function renderReportView(){
 function renderPerformanceReport(body){
   try{ var _h=(location.hash||'').replace(/^#\/?/,'').split('/'); if(_h[0]==='reports'&&_h[1]==='performance'&&_h[2]&&PERF_SUBS.some(function(t){return t[0]===_h[2];}))PERF_SUB=_h[2]; }catch(e){}
   // Level-3 menu (light-blue pill row, its own #perf-subnav; .dnav3 tabs carry an `active` class so it's favourite-able)
-  var nav='<div id="perf-subnav" style="display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 12px">'+PERF_SUBS.map(function(t){ var on=t[0]===PERF_SUB;
+  var nav='<div id="perf-subnav" class="d3nav">'+PERF_SUBS.map(function(t){ var on=t[0]===PERF_SUB;
     return '<button class="dnav3'+(on?' active':'')+'" data-perf="'+t[0]+'" style="font-size:12px;padding:4px 12px;border:1px solid '+(on?'#1d4ed8':'transparent')+';background:'+(on?'#1d4ed8':'transparent')+';color:'+(on?'#fff':'#334155')+';border-radius:13px;cursor:pointer;font-weight:600">'+t[1]+'</button>'; }).join('')+'</div>';
   body.innerHTML=nav+'<div id="perf-body"><div class="mut" style="font-size:12px;padding:10px">Loading…</div></div>';
   body.querySelectorAll('#perf-subnav .dnav3').forEach(function(b){ b.onclick=function(){ PERF_SUB=b.dataset.perf; if(window.writeHash)window.writeHash(['reports','performance',PERF_SUB]); renderPerformanceReport(document.getElementById('report-body')); }; });
