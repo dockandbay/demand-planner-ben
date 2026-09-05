@@ -1,3 +1,8 @@
+## v27.481 UI uplift U3 slice 2: SUPPLY Purchase Orders grid to the "Horizon Purchase Orders" design
+- **Toolbar:** search boxes are plain white 10px-radius inputs with a blue focus ring; **Import/Export** is a blue outline button and **Plan Shipments** the solid blue primary; **ACTION ITEMS** (red) and **NEEDS ERP** (amber) are proper buttons with the design shadow and a navy ring when active; Last 12m navy when on, Focus amber.
+- **Grid:** white card table, rows 8px taller with hairline separators and a hover tint, sticky PLAN + PO columns stay white; PO reference in blue 12.5px bold; PLAN chip navy 9.5px; ERP state as a 999px pill; status select as an uppercase 8px-radius chip (colours per status unchanged); shipment link bolder; shipping-mode tags (SEA / AIR / FOB) as uppercase mini tags in token colours; production and status group rows as a grey band with caret; load-more footer white.
+- Behaviour, columns, inline editing, expand rows and filters unchanged. supply/hz-theme.css + 6 small markup edits in supply/inject.html (no inline colours on the toolbar buttons / mode tags).
+
 ## v27.480 Ben review fixes: L3 text smaller, PRODUCT on white, New Product prefix hint
 - **Level-3 tabs** (SUPPLY PO sub-tabs, Reports, Config L3, DEMAND inputs / analysis, Performance, 3PL & Invoicing, PRODUCT config) are two points smaller (10px). supply/hz-theme.css.
 - **PRODUCT module** page background is white (the off-white ground stays elsewhere). supply/hz-theme.css.

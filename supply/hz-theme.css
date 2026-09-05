@@ -208,3 +208,40 @@ body header.pv-top{background:var(--nav)}
 
 /* PRODUCT module sits on a white page (Ben, v27.480): its forms and cards read better without the off-white ground */
 html body:has(#app.product-active){background:var(--card)}
+
+/* ═══ U3 SUPPLY, slice 2 (v27.481): Purchase Orders grid to the "Horizon Purchase Orders" design ══════════════ */
+/* toolbar */
+#app #supply-root .bar .flt{font-family:inherit;font-size:12.5px;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:var(--r-md);padding:6px 12px;outline:none;transition:border-color .12s,box-shadow .12s}
+#app #supply-root .bar .flt:focus{border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-soft)}
+#app #supply-root .bar select.flt{cursor:pointer;font-weight:700;font-size:12px;padding:6px 10px}
+#app #supply-root .save-btn.primary{background:var(--blue);border-color:var(--blue);color:#fff;font-weight:800;box-shadow:0 6px 16px -6px rgba(35,97,216,.6)}
+#app #supply-root .save-btn.primary:hover{background:var(--blue-ink);border-color:var(--blue-ink)}
+#app #supply-root .save-btn.outline-blue{color:var(--blue);border:1.5px solid var(--blue);background:var(--card)}
+#app #supply-root .save-btn.outline-blue:hover{background:var(--blue-soft)}
+#app #supply-root .pill.pill-danger{background:var(--neg);border-color:var(--neg);color:#fff;font-weight:800;letter-spacing:.04em;box-shadow:0 4px 12px -4px rgba(210,50,39,.5)}
+#app #supply-root .pill.pill-warn{background:#c26a1b;border-color:#c26a1b;color:#fff;font-weight:800;letter-spacing:.04em;box-shadow:0 4px 12px -4px rgba(194,106,27,.5)}
+#app #supply-root .pill.pill-danger.active,#app #supply-root .pill.pill-warn.active{box-shadow:0 0 0 2px var(--card),0 0 0 4px var(--nav)}
+#app #supply-root .pill.po-recent.active{background:var(--nav);border-color:var(--nav)}
+#app #supply-root .pill.po-focus{color:var(--amber);border-color:#f0d896}
+#app #supply-root .pill.po-focus.active{background:var(--amber-bg);color:var(--amber);border-color:#f0d896}
+/* table */
+#app #supply-root table.po-tbl{border-collapse:separate;border-spacing:0}
+#app #supply-root table.po-tbl thead th{padding:10px 10px;font-size:10.5px}
+#app #supply-root table.po-tbl thead th:first-child,#app #supply-root table.po-tbl thead th:nth-child(2),#app #supply-root table.sh-tbl thead th:first-child,#app #supply-root table.sh-tbl thead th:nth-child(2){background:var(--card)}
+#app #supply-root table.po-tbl tbody tr:not(.exp-row):not(.grp-row) td{padding:8px 10px;border-top:1px solid var(--line2);font-size:12px;vertical-align:middle;font-variant-numeric:tabular-nums}
+#app #supply-root table.po-tbl tbody tr:not(.exp-row):not(.grp-row):hover td{background:var(--hover)}
+#app #supply-root table.po-tbl tbody tr:not(.exp-row):not(.grp-row) td:first-child,#app #supply-root table.po-tbl tbody tr:not(.exp-row):not(.grp-row) td:nth-child(2){background:var(--card)}
+#app #supply-root table.po-tbl tbody tr:not(.exp-row):not(.grp-row):hover td:first-child,#app #supply-root table.po-tbl tbody tr:not(.exp-row):not(.grp-row):hover td:nth-child(2){background:var(--hover)}
+#app #supply-root table.po-tbl td.po-numcell b{font-size:12.5px;font-weight:700;color:var(--blue)}
+#app #supply-root .planbtn{background:var(--nav);border-radius:6px;padding:3px 8px;font-size:9.5px;font-weight:800;letter-spacing:.06em}
+#app #supply-root .planbtn:hover,#app #supply-root .planbtn.open{background:var(--blue)}
+#app #supply-root table.po-tbl .tool-badge{font-size:10.5px;font-weight:800;padding:3px 10px;border-radius:999px;white-space:nowrap}
+#app #supply-root table.po-tbl select.fci[data-field="status"]{border-radius:var(--r-sm);font-weight:800;font-size:11px;letter-spacing:.05em;padding:4px 8px;font-family:inherit;text-transform:uppercase}
+#app #supply-root table.po-tbl .ship-open{font-size:12px;font-weight:700}
+#app #supply-root table.po-tbl .ship-pick{font-size:12px;font-weight:700}
+#app #supply-root table.po-tbl .po-set-shipping{font-size:10.5px;font-weight:700;color:var(--blue);border:1px solid var(--blue);border-radius:6px;padding:1px 8px;background:var(--card);cursor:pointer;font-family:inherit}
+/* production / status group header rows */
+#app #supply-root tr.cat-hdr td{background:var(--hover);border-top:1px solid var(--line);border-bottom:1px solid var(--line2);font-size:11.5px;font-weight:800;letter-spacing:.05em;color:var(--muted);padding:8px 16px;text-transform:none}
+#app #supply-root tr.cat-hdr td .po-grp-car{font-size:9px;color:var(--faint);margin-right:4px}
+/* load-more footer row */
+#app #supply-root tr.po-loadmore-row td{background:var(--card)!important;border-top:1px solid var(--line2)!important;padding:14px 16px!important}
