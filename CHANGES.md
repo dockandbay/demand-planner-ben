@@ -1,3 +1,6 @@
+## v27.495 DEMAND plan: ALL CATEGORIES row shows revenue growth % in its FY / H1 / H2 / Quarter cells
+- The grand-total row now accumulates a last-year revenue series per month (actual revenue for actual years; prior-year forecast × ASP for forecast-on-forecast years), so its period cells show revenue growth vs last year like the category and sub-category rows. Display only. artifact_v16.7.html.
+
 ## v27.494 Portal navigation fix: four sections (no empty MESSAGES), ordered sub-tabs
 - The portal has no top-level Timeline tab (messages are behind the header Inbox button), so the MESSAGES section is dropped: **ORDERS · MONEY · SAMPLES · PRODUCT**. Sub-tabs now follow a fixed order within each section (Purchase Orders · Shipment Plan · Productions / Payments · Deposits · Price List / Sample shipments / Product · Specs · Quality Control). supply/portal-view.js.
 
