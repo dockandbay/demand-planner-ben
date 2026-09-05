@@ -642,6 +642,21 @@
         +'<div id="pp-recent-drop" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;z-index:120;background:#fff;color:#0f172a;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:300px;max-width:380px;max-height:60vh;overflow:auto;text-align:left"></div>'
       +'</span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
     var tabsEl=document.getElementById('pp-tabs'), body=document.getElementById('pp-body');
+    // ── Grouped navigation (Ben, v27.493): five sections over the existing tabs. The original .rtab[data-pt] tabs and their
+    //    handlers are untouched; each is tagged with data-sec and the tab row shows only the active section's tabs (CSS). ──
+    var PP_SEC={pos:'orders',shipmentplan:'orders',productions:'orders',payments:'money',deposits:'money',pricelist:'money',samples:'samples',product:'product',specs:'product',quality:'product',timeline:'messages'};
+    var PP_SECS=[['orders','ORDERS'],['money','MONEY'],['samples','SAMPLES'],['product','PRODUCT'],['messages','MESSAGES']];
+    try{
+      var _secRow=document.createElement('div'); _secRow.id='pp-secs';
+      _secRow.innerHTML=PP_SECS.map(function(s){ return '<span class="pp-sec" data-sec="'+s[0]+'">'+s[1]+'</span>'; }).join('');
+      tabsEl.parentNode.insertBefore(_secRow, tabsEl);
+      // tag + reorder the tabs so each section's tabs sit together in section order
+      var _order=[]; PP_SECS.forEach(function(s){ tabsEl.querySelectorAll('.rtab[data-pt]').forEach(function(t){ var sec=PP_SEC[t.dataset.pt]||'orders'; t.dataset.sec=sec; if(sec===s[0])_order.push(t); }); });
+      _order.forEach(function(t){ tabsEl.appendChild(t); });
+      _secRow.querySelectorAll('.pp-sec').forEach(function(sb){ sb.onclick=function(){ var first=tabsEl.querySelector('.rtab[data-sec="'+sb.dataset.sec+'"]'); if(first)first.click(); }; });
+    }catch(e){}
+    function ppSyncSec(){ try{ var act=tabsEl.querySelector('.rtab.active'), sec=act?(act.dataset.sec||PP_SEC[act.dataset.pt]||'orders'):'orders';
+      tabsEl.dataset.sec=sec; document.querySelectorAll('#pp-secs .pp-sec').forEach(function(sb){ sb.classList.toggle('active',sb.dataset.sec===sec); }); }catch(e){} }
     // Move the Inbox + Recent controls up into the persistent top bar (out of the content bar) — tidier on mobile.
     try{ var _top=document.querySelector('.pv-top'), _notif=document.getElementById('pp-notif'); if(_top&&_notif){ _notif.style.marginLeft='0'; _top.appendChild(_notif); } }catch(e){}
     // download a generated invoice as a real file (fetch -> blob) rather than opening a tab — works on the
@@ -2114,7 +2129,7 @@
           function setSpecBadge(){ var specs=(_ppData&&_ppData.specs)||[]; var t=document.getElementById('pp-spec-tab'); if(t)t.style.display='';   // always visible (like Deposits/Payments) — shows an empty state when there are none
             var n=specs.filter(function(s){return s.needs_approval;}).length; var bg=document.getElementById('pp-spec-badge'); if(bg)bg.innerHTML=n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
           function renderPP(){ if(!_ppData)return; var body=document.getElementById('pp-body');
-            tabsEl.querySelectorAll('.rtab').forEach(function(t){t.classList.toggle('active',t.dataset.pt===PORTAL_TAB);});
+            tabsEl.querySelectorAll('.rtab').forEach(function(t){t.classList.toggle('active',t.dataset.pt===PORTAL_TAB);}); ppSyncSec();
             setSampBadge(); setPosBadge(); setShipBadge(); setProdBadge(); setSpecBadge(); try{ renderPortalNotif(); }catch(e){}
             if(PORTAL_TAB==='specs'){ body.innerHTML=ppSpecs(); wireSpecs(); return; }
             if(PORTAL_TAB==='quality'){ body.innerHTML=ppQuality(); wireQuality(); return; }
@@ -2622,7 +2637,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
     function loadPreview(){ tabsEl.style.display=''; body.innerHTML='<div class="count">Loading…</div>';
       opts.getData().then(function(d){ if(d&&d.notesByPo){ Object.keys(d.notesByPo).forEach(function(k){ shortNotes(d.notesByPo[k]); }); } _ppData=d; if(!ppApplyHash())renderPP(); }).catch(function(e){ body.innerHTML='<div class="count" style="color:#dc2626">'+esc(e&&e.message||e)+'</div>'; }); }
     function reload(){ if(typeof opts.onChange==='function')try{opts.onChange();}catch(e){} loadPreview(); }
-    tabsEl.querySelectorAll('.rtab').forEach(function(t){ t.onclick=function(){ PORTAL_TAB=t.dataset.pt; _ppOpenPO=null; _ppOpenProd=null; ppSetHash(t.dataset.pt); renderPP(); }; });
+    tabsEl.querySelectorAll('.rtab').forEach(function(t){ t.onclick=function(){ PORTAL_TAB=t.dataset.pt; _ppOpenPO=null; _ppOpenProd=null; ppSetHash(t.dataset.pt); renderPP(); }; }); ppSyncSec();
     loadPreview();
   }
   window.DBPortalView={ mount: mount };
