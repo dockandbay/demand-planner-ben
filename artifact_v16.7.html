@@ -7351,7 +7351,12 @@ function skuHasAnyActivity(sku,co){
   return false;
 }
 // Last-year-only (closed) SKU visibility: it sold in a DISPLAYED month, or in that month's last-year month. (v27.473)
-function lyoVisible(sku,co,ch){ var ss=skuSales(sku,co,ch)||{}; for(var i=0;i<TIME_COLS.length;i++){ var tc=TIME_COLS[i]; if(tc.t!=='m'&&tc.t!=='fc')continue; var q=pa(tc.m); if((ss[tc.m]||0)>0||(ss[ym(q.y-1,q.mo)]||0)>0)return true; } return false; }
+function lyoVisible(sku,co,ch){ var ss=skuSales(sku,co,ch)||{};
+  // Show pills decide the window (Ben, v27.478): Active = today..+180d (a closed SKU never sold there → hidden); 18m = sold in the
+  // last 18 months; All = sold in any displayed month or that month's last-year month.
+  var sd=SKU_FILTER.startDate?SKU_FILTER.startDate.slice(0,7).replace('-','_'):'', ed=SKU_FILTER.endDate?SKU_FILTER.endDate.slice(0,7).replace('-','_'):'';
+  if(sd||ed){ for(var k in ss){ if((ss[k]||0)>0&&(!sd||k>=sd)&&(!ed||k<=ed))return true; } return false; }
+  for(var i=0;i<TIME_COLS.length;i++){ var tc=TIME_COLS[i]; if(tc.t!=='m'&&tc.t!=='fc')continue; var q=pa(tc.m); if((ss[tc.m]||0)>0||(ss[ym(q.y-1,q.mo)]||0)>0)return true; } return false; }
 function filteredSkus(s,co,ch,all,inclLyo){
   var wh=skuWh(co,ch);
   var avKey=co.toLowerCase()+'_'+ch.toLowerCase();

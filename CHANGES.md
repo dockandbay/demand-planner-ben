@@ -1,3 +1,6 @@
+## v27.478 FIX: closed (last-year-only) SKU rows follow the Show pills (Ben)
+- Under **Active** (today to today+180 days) closed SKUs never sold inside the window, so they are hidden. Under **18m** they show if they sold in the last 18 months; under **All** if they sold in any displayed month or that month's last-year month. v27.473 had used the displayed months regardless of the pill. artifact_v16.7.html (`lyoVisible`).
+
 ## v27.477 UI uplift U3 slice 1: SUPPLY Actions board to the "Horizon Supply" design
 - **KPI tiles** beside the Status / Severity filters: Open actions · High priority · Payment issues · Done (counts from the loaded action set; refresh with every lifecycle change). Icon circles + 19px figures as designed.
 - **Two boards as cards** (HIGH PRIORITY / MEDIUM & LOW, or MEDIUM / LOW when there are no highs): 14px-radius white cards with a coloured dot, uppercase title and count in the header; emoji headings gone.
