@@ -1,3 +1,10 @@
+## v27.470 DEMAND plan: EXPLODE EVERYWHERE (Ben's decision) - one display basis for every unit figure, with tooltips
+- **Rule:** stored and aggregated units stay SALE BASIS (a set sale = 1 box); every DISPLAYED unit figure is EXPLODED = raw boxes + set boxes x (BOM size - 1). Applies now to: sub-category month cells (LY, this-year actual, forecast, current-month cell incl. its (mtd) figure), **category roll-ups**, **market grand total**, **FY / H1 / H2 / Quarter totals** (sub-cat, category, grand total) and the **selection-sum bar** ("Sum LY"). A category no longer reads lower than the sum of its exploded sub-categories.
+- **Base = the full sub-category actual** (`category_sales_summary`, incl. discontinued masters); the set uplift comes from the in-scope set SKUs' sales. Previously sub-cat cells summed only in-scope SKUs when sets were present, so LY could be understated; displayed sub-cat numbers may shift up slightly where discontinued SKUs sold (this is the direction of the open "LY excludes discontinued" fix, not the full fix).
+- **Forecast months** scale the most recent actual same-month split (up to 3 years back) by forecast / that year's raw; no actual history = shown raw. Forecast-on-forecast LY (2027+) is scaled the same way.
+- **Tooltips (Ben):** every exploded summary figure (LY, actuals-to-date, period total, category and grand-total month cells) carries the same MASTER / SETS (boxes) / TOTAL EXPLODED hover as the month cells (purple dot marker).
+- **Unchanged:** SKU rows (a set SKU row is its own box unit), revenue lines (boxes x ASP), forecasts, saves and the buy plan. New helpers `expAct / expFc / periodTotX / periodMtdX / _msAdd / _msData`; `fyTot / periodTot` now return the exploded total (their one non-plan caller passes no sub-category and so still gets raw). artifact_v16.7.html.
+
 ## v27.469 DEMAND plan: FY / H1 / H2 / Quarter total cells now stack LY, actuals-to-date, total, units growth, revenue growth (Ben)
 - Every period total cell (sub-category rows, SKU rows, category roll-ups, market grand total) uses ONE layout via the new `periodStackHTML()`:
   1. **Last year** units for the same months (faint)

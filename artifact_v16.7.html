@@ -4916,8 +4916,10 @@ function periodStackHTML(o){
   var cls=g!=null?(g>0?'gp':g<0?'rp':'fp'):'fp', rc=rg==null?'':(rg>=2?'var(--pos)':rg<=-2?'var(--neg)':'var(--muted)');
   var fz=o.small?[7,9,7,8]:[9,11,9,9];
   return '<div style="padding:2px 4px;text-align:right;font-variant-numeric:tabular-nums;line-height:1.25">'
-    +'<div style="font-size:'+fz[0]+'px;color:var(--faint)" title="Last year, same months (units)">'+(o.ly>0?fn(o.ly):'--')+'</div>'
-    +'<div style="font-size:'+fz[1]+'px;font-weight:700'+(o.dark?';color:var(--ink)':'')+'">'+(o.mtd>0?'<span style="color:var(--pos)" title="Actuals to date within this period">('+fn(o.mtd)+')</span> ':'')+fn(Math.round(o.cur))+'</div>'
+    +'<div class="'+_msCls(o.lyX).trim()+'" style="font-size:'+fz[0]+'px;color:var(--faint)'+(o.lyX&&o.lyX.setBoxes>0?';cursor:help':'')+'"'+(o.lyX&&o.lyX.setBoxes>0?_msData(o.lyX,'Last year (same months)'):' title="Last year, same months (units)"')+'>'+(o.ly>0?fn(o.ly):'--')+'</div>'
+    +'<div style="font-size:'+fz[1]+'px;font-weight:700'+(o.dark?';color:var(--ink)':'')+'">'
+      +(o.mtd>0?'<span class="'+_msCls(o.mtdX).trim()+'" style="color:var(--pos)'+(o.mtdX&&o.mtdX.setBoxes>0?';cursor:help':'')+'"'+(o.mtdX&&o.mtdX.setBoxes>0?_msData(o.mtdX,'Actuals to date'):' title="Actuals to date within this period"')+'>('+fn(o.mtd)+')</span> ':'')
+      +'<span class="'+_msCls(o.curX).trim()+'"'+(o.curX&&o.curX.setBoxes>0?' style="cursor:help"'+_msData(o.curX,'Period total (actuals + forecast)'):'')+'>'+fn(Math.round(o.cur))+'</span></div>'
     +'<div style="font-size:'+fz[2]+'px" class="'+cls+'" title="Units growth: period total (actuals + forecast) vs last year">'+(g!=null?gPct(g):'--')+'</div>'
     +(o.rev!=null?'<div style="font-size:'+fz[3]+'px;color:var(--muted)" title="Revenue'+(rg!=null?', growth vs last-year revenue':'')+'">'+(o.fy!=null?frFY(o.rev,o.fy):fr(Math.round(o.rev)))+(rg!=null?' <span style="color:'+rc+'">'+(rg>=0?'+':'')+rg+'%</span>':'')+'</div>':'')
     +'</div>';
@@ -4938,10 +4940,12 @@ function fyToDateR(a,startY,endKey){return fyMonthsTo(startY,endKey).reduce(func
 function fyFC(fu,startY,s,co,ch){return fyMonths(startY).reduce(function(t,k){return t+((s&&k===CUR_MONTH)?curMonthForecast(s,co,ch):(fu[k]||0));},0);}
 // Unified fiscal-year total across the whole strip: actual months from `a`, forecast months from `fu`.
 // When s/co/ch supplied, the partial current month contributes its full-month projection.
-function fyTot(a,fu,startY,s,co,ch){return fyMonths(startY).reduce(function(t,k){if(isActualMonth(k)){if(s&&k===CUR_MONTH)return t+curMonthForecast(s,co,ch);return t+(a[k]?a[k][0]:0);}return t+(fu[k]||0);},0);}
+function fyTot(a,fu,startY,s,co,ch){return fyTotX(a,fu,startY,s,co,ch).E;}   // EXPLODED display total (v27.470); no s → raw
+function fyTotX(a,fu,startY,s,co,ch){return periodTotX(a,fu,fyMonths(startY),s,co,ch);}
 // #5 period (quarter/half) helpers — sum units over an arbitrary month list, same actual-vs-forecast basis as fyTot.
 function prevYearMonths(months){return months.map(function(m){var p=pa(m);return ym(p.y-1,p.mo);});}
-function periodTot(a,fu,months,s,co,ch){return months.reduce(function(t,k){if(isActualMonth(k)){if(s&&k===CUR_MONTH)return t+curMonthForecast(s,co,ch);return t+(a[k]?a[k][0]:0);}return t+(fu[k]||0);},0);}
+function periodTot(a,fu,months,s,co,ch){return periodTotX(a,fu,months,s,co,ch).E;}
+function periodTotX(a,fu,months,s,co,ch){ return months.reduce(function(t,k){ var x; if(isActualMonth(k)){ x=(s&&k===CUR_MONTH)?expFc(s,co,ch,k,curMonthForecast(s,co,ch),a):expAct(s,co,ch,k,a[k]?a[k][0]:0); } else { x=expFc(s,co,ch,k,fu[k]||0,a); } return _msAdd(t,x); },_msZero()); }
 function fn(n){if(n==null)return'--';return Math.round(n).toLocaleString()}
 // Shared display-currency helpers (DEMAND plan + Summary). SUMM_CCY mode GBP|LOCAL; local = the current market's
 // currency (US=USD/EU=EUR/AU=AUD) converted by the FY blended rate. UK/CA stay GBP.
@@ -5105,7 +5109,7 @@ function refreshRow(s,co,ch){
   const f27u=F27.reduce(function(a,m){return a+(fu[m]||0);},0);
   const rk=s+'|'+co+'|'+ch;
   // Current-month forecast cell (Jun FC) — driven by its input box, refreshed separately from the actual cell.
-  try{var _ce=document.querySelector('[data-curfc="'+esc(rk)+'"]');if(_ce)_ce.textContent=fn(curMonthForecast(s,co,ch));}catch(e){}
+  try{var _ce=document.querySelector('[data-curfc="'+esc(rk)+'"]');if(_ce){ var _cx=expFc(s,co,ch,CUR_MONTH,curMonthForecast(s,co,ch),_a); _ce.textContent=fn(_cx.E); if(_cx.setBoxes>0)_msTipAttrs(_ce,_cx,'This-year forecast'); }}catch(e){}
   DISP_MONTHS.forEach(function(fym){
     if(isActualMonth(fym))return; // read-only actual cells never change
     const ik=s+'|'+co+'|'+ch+'|'+fym;
@@ -5120,13 +5124,15 @@ function refreshRow(s,co,ch){
   document.querySelectorAll('[data-fytot="'+esc(rk)+'"]').forEach(function(e){
     var Y=+e.dataset.fyy;
     var cur=fyTot(_a,fu,Y,s,co,ch),prev=fyTot(_a,fu,Y-1,s,co,ch);
-    e.innerHTML=periodStackHTML({ly:prev,cur:cur,mtd:periodMtd(fyMonths(Y),function(m){return _a[m]?_a[m][0]:0;}),rev:cur*sp,lyRev:periodLyRev(_a,fyMonths(Y))});
+    var _cx=fyTotX(_a,fu,Y,s,co,ch),_px=fyTotX(_a,fu,Y-1,s,co,ch),_mx=periodMtdX(_a,fyMonths(Y),s,co,ch);
+    e.innerHTML=periodStackHTML({ly:_px.E,lyX:_px,cur:_cx.E,curX:_cx,mtd:_mx.E,mtdX:_mx,rev:cur*sp,lyRev:periodLyRev(_a,fyMonths(Y))});
   });
   // Quarter/half total cells (#5) — recompute in place on edit, same as the FY total above
   document.querySelectorAll('[data-ptot="'+esc(rk)+'"]').forEach(function(e){
     var months=(e.dataset.pmonths||'').split(',').filter(Boolean);
     var cur=periodTot(_a,fu,months,s,co,ch),prev=periodTot(_a,fu,prevYearMonths(months),s,co,ch);
-    e.innerHTML=periodStackHTML({ly:prev,cur:cur,mtd:periodMtd(months,function(m){return _a[m]?_a[m][0]:0;}),rev:cur*sp,lyRev:periodLyRev(_a,months)});
+    var _cx=periodTotX(_a,fu,months,s,co,ch),_px=periodTotX(_a,fu,prevYearMonths(months),s,co,ch),_mx=periodMtdX(_a,months,s,co,ch);
+    e.innerHTML=periodStackHTML({ly:_px.E,lyX:_px,cur:_cx.E,curX:_cx,mtd:_mx.E,mtdX:_mx,rev:cur*sp,lyRev:periodLyRev(_a,months)});
   });
   // If this subcategory's SKU rows are expanded, rebuild them so the SKU subtotal/gap
   // recomputes against the updated subcategory forecast (otherwise the gap goes stale).
@@ -6148,6 +6154,30 @@ function _msTip(o,label){ return (label||'')+'E ' + fn(o.master+o.setUnits) + ' 
 // Carries the raw split on the element so the tooltip handler can format it (no HTML stuffed into an attribute).
 function _msTipAttrs(el,o,label){ if(!el||!o)return; el.classList.add('ms-exp'); el.style.cursor='help';
   el.dataset.msm=Math.round(o.master||0); el.dataset.msb=Math.round(o.setBoxes||0); el.dataset.msu=Math.round(o.setUnits||0); el.dataset.msl=label||''; el.removeAttribute('title'); }
+// ── EXPLODE-EVERYWHERE display basis (Ben's decision, 05-Sep-26, v27.470) ─────────────────────────────────────
+// Stored + aggregated units are SALE BASIS (a set sale = 1 box). Every DISPLAYED unit figure — sub-category cells,
+// category roll-ups, market grand total, FY/H1/H2/Q totals, the selection sum — shows EXPLODED units:
+//   E = raw boxes + Σ set boxes × (BOM size − 1).
+// The base is the FULL sub-category actual (`a` = category_sales_summary, incl. discontinued masters); the set uplift comes
+// from the in-scope set SKUs' sales (subcatLySplit). Forecast months scale the last actual year's uplift by
+// (forecast ÷ that year's raw). SKU rows and the buy plan are untouched (a set SKU row is its own box unit).
+function _msZero(){ return {master:0,setBoxes:0,setUnits:0,E:0}; }
+function _msAdd(x,y){ x=x||_msZero(); y=y||_msZero(); return {master:x.master+y.master,setBoxes:x.setBoxes+y.setBoxes,setUnits:x.setUnits+y.setUnits,E:x.E+y.E}; }
+function _msRaw(v){ v=v||0; return {master:v,setBoxes:0,setUnits:0,E:v}; }
+// data-* attributes (no class) for an HTML-string cell; pair with class "ms-exp" when o.setBoxes>0.
+function _msData(o,label){ if(!o||!(o.setBoxes>0))return ''; return ' data-msm="'+Math.round(o.master)+'" data-msb="'+Math.round(o.setBoxes)+'" data-msu="'+Math.round(o.setUnits)+'" data-msl="'+esc(label||'')+'"'; }
+function _msCls(o){ return (o&&o.setBoxes>0)?' ms-exp':''; }
+// Actual month → exploded split. s = sub-category (SKU rows / no s → raw).
+function expAct(s,co,ch,m,raw){ raw=raw||0; if(!s||(typeof SKUM!=='undefined'&&SKUM[s]))return _msRaw(raw);
+  var sp; try{ sp=subcatLySplit(s,co,ch)[m]; }catch(e){ sp=null; } if(!sp||!(sp.setBoxes>0))return _msRaw(raw);
+  var b=Math.min(sp.setBoxes,raw), u=sp.setUnits*(b/sp.setBoxes); return {master:raw-b,setBoxes:b,setUnits:u,E:raw-b+u}; }
+// Forecast month → exploded split: scale the most recent ACTUAL same-month split (up to 3 years back) by fcv ÷ its raw.
+function expFc(s,co,ch,m,fcv,a){ fcv=fcv||0; if(!fcv||!s||(typeof SKUM!=='undefined'&&SKUM[s]))return _msRaw(fcv);
+  var p=pa(m); for(var back=1;back<=3;back++){ var lm=ym(p.y-back,p.mo), raw=a&&a[lm]?(a[lm][0]||0):0; if(!(raw>0))continue;
+    var ls=expAct(s,co,ch,lm,raw); if(!(ls.setBoxes>0))return _msRaw(fcv); var r=fcv/raw; return {master:ls.master*r,setBoxes:ls.setBoxes*r,setUnits:ls.setUnits*r,E:ls.E*r}; }
+  return _msRaw(fcv); }
+// Actuals-to-date over a month list (actual months incl. current MTD), exploded, with split.
+function periodMtdX(a,months,s,co,ch){ return months.reduce(function(t,m){ return isActualMonth(m)?_msAdd(t,expAct(s,co,ch,m,a[m]?a[m][0]:0)):t; },_msZero()); }
 // Exploded uplift ratio for a sub-category from its last-year actuals: exploded (master + set×BOM) ÷ mixed (master +
 // set boxes). 1.0 when there are no sets. Used to convert a revenue-driven (sale-unit) target into the EXPLODED target.
 var _erCache={};
@@ -6168,9 +6198,8 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
     // Growth % must use the SAME basis as the two numbers shown in the cell. Sub-category rows display EXPLODED units
     // (master units + set boxes × BOM); the raw a[] values are sale-basis boxes. Mixing them showed e.g. 5,905 → 9,947
     // with "+26%" (the raw-box growth) instead of +68%. SKU rows have no split → fall through to the raw numbers. v27.468
-    var _isSubRow=(typeof SKUM==='undefined'||!SKUM[s]);
-    var _spLY=_isSubRow?(subcatLySplit(s,co,ch)[ym(y-1,mo)]):null, _spTY=_isSubRow?(subcatLySplit(s,co,ch)[fym]):null;
-    var lyDisp=(_spLY&&_spLY.setBoxes>0)?_msE(_spLY):ly_u, tyDisp=(_spTY&&_spTY.setBoxes>0)?_msE(_spTY):actualUnits;
+    var _lx=expAct(s,co,ch,ym(y-1,mo),ly_u), _tx=expAct(s,co,ch,fym,actualUnits);   // EXPLODED display basis (v27.470): full sub-cat raw + set uplift
+    var lyDisp=_lx.E, tyDisp=_tx.E;
     const yoyPct=lyDisp>0?Math.round((tyDisp-lyDisp)/lyDisp*100):null;
     const yoyStr=yoyPct!=null?(gPct(yoyPct)):'';
     const isNeg=yoyPct!=null&&yoyPct<0;
@@ -6182,17 +6211,13 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
     applyCellNote(td,_nk0);
     const d=document.createElement('div');d.className='fcin';
     const lyD=document.createElement('div');lyD.className='fcly';
-    (function(){ var _sp=(typeof SKUM==='undefined'||!SKUM[s])?(subcatLySplit(s,co,ch)[ym(y-1,mo)]):null;   // sub-category rows only; SKU rows keep their single LY number
-      if(_sp&&_sp.setBoxes>0){ lyD.textContent=fn(_msE(_sp)); _msTipAttrs(lyD,_sp,'Last-year actuals'); }
-      else { lyD.textContent=ly_u?fn(ly_u):'--'; } })();
+    lyD.textContent=lyDisp?fn(lyDisp):'--'; if(_lx.setBoxes>0)_msTipAttrs(lyD,_lx,'Last-year actuals');
     d.appendChild(lyD);
     const inp=document.createElement('input');inp.type='text';inp.readOnly=true;
     inp.className='fci actual-pct'+(isNeg?' neg':'');inp.value=yoyStr;
     d.appendChild(inp);
     const res=document.createElement('div');res.className='fcr actual'+(isNeg?' neg':'');res.dataset.rk=ik;
-    (function(){ var _sa=(typeof SKUM==='undefined'||!SKUM[s])?(subcatLySplit(s,co,ch)[fym]):null;   // this-year actuals master/set split (sub-category rows only)
-      if(_sa&&_sa.setBoxes>0){ res.textContent=fn(_msE(_sa)); _msTipAttrs(res,_sa,'This-year actuals'); }
-      else { res.textContent=fn(actualUnits); } })();
+    res.textContent=fn(tyDisp); if(_tx.setBoxes>0)_msTipAttrs(res,_tx,'This-year actuals');
     d.appendChild(res);
     // Revenue line: actual revenue + YoY% (hover shows ASP)
     var actualRev=a[fym]?(a[fym][1]||0):0;
@@ -6226,11 +6251,10 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   // Forecast-on-forecast years: LY is the prior-year forecast (not an actual) — keep neutral colour
   // LY reference for a forecast month: if the prior-year month has ACTUALS with sets, show the M/S/E split (this covers
   // 2027 cells whose LY is a 2026 actual month, e.g. Apr-27 → Apr-26 actuals). Else fall back to the plain LY number.
-  var _spF=(typeof SKUM==='undefined'||!SKUM[s])?(subcatLySplit(s,co,ch)[ym(y-1,mo)]):null;   // LY (prior-year) master/set split — reused by the forecast value below so it displays on the same EXPLODED basis
-  (function(){
-    if(_spF&&_spF.setBoxes>0){ lyD.textContent=fn(_msE(_spF)); _msTipAttrs(lyD,_spF,'Last-year actuals'); }
-    else if(isFcLy){ lyD.textContent=ly_u?fn(ly_u):'--'; lyD.style.color='#94a3b8'; lyD.title=(y-1)+' forecast'; }
-    else { lyD.textContent=ly_u?fn(ly_u):'--'; } })();
+  var _lxF=isFcLy?expFc(s,co,ch,ym(y-1,mo),ly_u,a):expAct(s,co,ch,ym(y-1,mo),ly_u);   // EXPLODED LY (v27.470): an actual LY explodes from its set sales; a forecast-on-forecast LY scales like a forecast
+  (function(){ lyD.textContent=_lxF.E?fn(_lxF.E):'--';
+    if(_lxF.setBoxes>0)_msTipAttrs(lyD,_lxF,isFcLy?'Last-year forecast':'Last-year actuals');
+    if(isFcLy){ lyD.style.color='#94a3b8'; if(!(_lxF.setBoxes>0))lyD.title=(y-1)+' forecast'; } })();
   d.appendChild(lyD);
   const inp=document.createElement('input');inp.type='text';
   inp.className='fci'+(isOvr?' ovr':isPct||gv?' pct':'')+((isPct&&_ps0.n<0)?' neg':'');
@@ -6258,8 +6282,8 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   // Set sub-category: show the FORECAST exploded too, so it sits on the same basis as the exploded LY actuals above
   // (otherwise a 0% growth reads e.g. LY 1,282 / FC 939). Scale the LY exploded split by the growth (fcv ÷ ly_u); the
   // underlying fu/fcv (sale basis, used by the buy) is unchanged — this is display only.
-  var _fcDisp=fcv;
-  if(_spF&&_spF.setBoxes>0&&ly_u>0){ var _r=fcv/ly_u, _fcSp={master:Math.round(_spF.master*_r),setUnits:Math.round(_spF.setUnits*_r),setBoxes:Math.round(_spF.setBoxes*_r)}; _fcDisp=_fcSp.master+_fcSp.setUnits; _msTipAttrs(res,_fcSp,'This-year forecast'); }
+  var _fx=expFc(s,co,ch,fym,fcv,a), _fcDisp=_fx.E;   // EXPLODED forecast (v27.470)
+  if(_fx.setBoxes>0)_msTipAttrs(res,_fx,'This-year forecast');
   res.textContent=fn(_fcDisp);res.dataset.rk=ik;
   if(reasons&&reasons[fym])res.title=reasons[fym];
   d.appendChild(res);
@@ -6451,7 +6475,8 @@ function buildDataRow(s,co,ch,x,fu_cache){
       const stored=IV[ik];
       const fcv=curMonthForecast(s,co,ch);
       const ly_u=a[ym(y-1,mo)]?a[ym(y-1,mo)][0]:0;
-      const yoyPct=ly_u>0?Math.round((fcv-ly_u)/ly_u*100):null;
+      var _lxC=expAct(s,co,ch,ym(y-1,mo),ly_u), _fxC=expFc(s,co,ch,fym,fcv,a);   // EXPLODED display (v27.470)
+      const yoyPct=_lxC.E>0?Math.round((_fxC.E-_lxC.E)/_lxC.E*100):null;
       const yoyStr=yoyPct!=null?(gPct(yoyPct)):'';
       const fcTd=document.createElement('td');fcTd.className='fctd bg26';
       // current month is now a single column — carry the cell rail (PP / N / BI / C / R) here (was on the removed actuals cell)
@@ -6459,7 +6484,7 @@ function buildDataRow(s,co,ch,x,fu_cache){
       var _rhC=cellRailForKey(_nkC); if(_rhC){ fcTd.classList.add('has-rail'); fcTd.style.position='relative'; fcTd.insertAdjacentHTML('afterbegin',_rhC); }
       try{applyCellNote(fcTd,_nkC);}catch(e){}
       const d2=document.createElement('div');d2.className='fcin';
-      const lyD2=document.createElement('div');lyD2.className='fcly';lyD2.textContent=ly_u?fn(ly_u):'--';d2.appendChild(lyD2);
+      const lyD2=document.createElement('div');lyD2.className='fcly';lyD2.textContent=_lxC.E?fn(_lxC.E):'--';if(_lxC.setBoxes>0)_msTipAttrs(lyD2,_lxC,'Last-year actuals');d2.appendChild(lyD2);
       const inp2=document.createElement('input');inp2.type='text';
       inp2.className='fci'+(stored&&parseFloat(stored)>=4?' ovr':stored?' pct':'')+((stored&&parseFloat(stored)<0)?' neg':'');
       inp2.value=stored?disp(stored):'';inp2.placeholder='+0%';
@@ -6477,8 +6502,8 @@ function buildDataRow(s,co,ch,x,fu_cache){
       d2.appendChild(inp2);
       const res2=document.createElement('div');res2.className='fcr'+(stored?' ovc':' flat');
       var _mtd=(a[fym]&&a[fym][0])||0;   // actuals month-to-date → shown in green BEFORE the forecast number: "(34) 120"
-      if(_mtd>0){ var _actS=document.createElement('span'); _actS.style.cssText='color:#16a34a;font-weight:700;display:block;line-height:1.05'; _actS.textContent='('+fn(_mtd)+')'; _actS.title='Actuals month-to-date'; res2.appendChild(_actS); }   // category rows: actuals on its own line (bigger numbers → keep the column narrow)
-      var _fcS=document.createElement('span');_fcS.textContent=fn(fcv);_fcS.dataset.curfc=rk;res2.appendChild(_fcS);
+      if(_mtd>0){ var _actS=document.createElement('span'); _actS.style.cssText='color:#16a34a;font-weight:700;display:block;line-height:1.05'; var _mx=expAct(s,co,ch,fym,_mtd); _actS.textContent='('+fn(_mx.E)+')'; _actS.title='Actuals month-to-date'; if(_mx.setBoxes>0)_msTipAttrs(_actS,_mx,'Actuals month-to-date'); res2.appendChild(_actS); }   // category rows: actuals on its own line (bigger numbers → keep the column narrow)
+      var _fcS=document.createElement('span');_fcS.textContent=fn(_fxC.E);_fcS.dataset.curfc=rk;if(_fxC.setBoxes>0)_msTipAttrs(_fcS,_fxC,'This-year forecast');res2.appendChild(_fcS);
       d2.appendChild(res2);
       // Revenue line for current-month forecast: forecast_units × LY_ASP
       var aspCur=getASP(co,ch,s,y,mo);
@@ -6509,14 +6534,16 @@ function buildDataRow(s,co,ch,x,fu_cache){
     var yoy=prev>0?Math.round((cur-prev)/prev*100):null;
     var td=document.createElement('td');td.className=fyTotCls(Y)+' sep2';
     td.dataset.fytot=rk;td.dataset.fyy=Y; // so refreshRow can update this total in place on edit
-    td.innerHTML=periodStackHTML({ly:prev,cur:cur,mtd:periodMtd(fyMonths(Y),function(m){return a[m]?a[m][0]:0;}),rev:cur*sp,lyRev:periodLyRev(a,fyMonths(Y))});
+    var _cx=fyTotX(a,fu,Y,s,co,ch),_px=fyTotX(a,fu,Y-1,s,co,ch),_mx=periodMtdX(a,fyMonths(Y),s,co,ch);   // exploded (v27.470); rev stays boxes × ASP
+    td.innerHTML=periodStackHTML({ly:_px.E,lyX:_px,cur:_cx.E,curX:_cx,mtd:_mx.E,mtdX:_mx,rev:cur*sp,lyRev:periodLyRev(a,fyMonths(Y))});
     return td;
   }
   function periodTotCell(months,ptype){   // #5 quarter/half total for a subcategory — same stack as the FY total, over its own months
     var cur=periodTot(a,fu,months,s,co,ch),prev=periodTot(a,fu,prevYearMonths(months),s,co,ch);
     var yoy=prev>0?Math.round((cur-prev)/prev*100):null;
     var td=document.createElement('td');td.className='sep2 '+(ptype==='h'?'ptot-h':'ptot-q');td.dataset.ptot=rk;td.dataset.pmonths=months.join(',');   // data-* → refreshRow recomputes in place on edit
-    td.innerHTML=periodStackHTML({ly:prev,cur:cur,mtd:periodMtd(months,function(m){return a[m]?a[m][0]:0;}),rev:cur*sp,lyRev:periodLyRev(a,months)});
+    var _cx=periodTotX(a,fu,months,s,co,ch),_px=periodTotX(a,fu,prevYearMonths(months),s,co,ch),_mx=periodMtdX(a,months,s,co,ch);
+    td.innerHTML=periodStackHTML({ly:_px.E,lyX:_px,cur:_cx.E,curX:_cx,mtd:_mx.E,mtdX:_mx,rev:cur*sp,lyRev:periodLyRev(a,months)});
     return td;
   }
   TIME_COLS.forEach(function(tc){
@@ -6769,7 +6796,7 @@ document.addEventListener('click',function(e){ var c=e.target&&e.target.closest?
         var rk=idEl.dataset.rk||idEl.dataset.k; var p=(rk||'').split('|'); if(p.length<4)return;
         var name=p[0],co=p[1],ch=p[2],fym=p[3], pm=pa(fym), lyKey=(pm.y-1)+'_'+fym.slice(5,7);
         var a=ga(co,ch,name), isSub=a&&Object.keys(a).length>0, sub=name;
-        if(isSub){ sumLY+=(a[lyKey]?(a[lyKey][0]||0):0); }
+        if(isSub){ sumLY+=expAct(name,co,ch,lyKey,a[lyKey]?(a[lyKey][0]||0):0).E; }   // exploded, full sub-cat base (v27.470)
         else { var ss=skuSales(name,co,ch)||{}; sumLY+=(ss[lyKey]||0);   // SKU cell → SKU-level actuals + parent-subcat ASP
           var tr=el.closest&&el.closest('tr'), pk=tr&&(tr.getAttribute('data-parentkey')||''); if(pk)sub=pk.split('|')[0]; }
         var asp=getASP(co,ch,sub,pm.y,pm.mo)||0, fyS=(pm.mo>=3?pm.y:pm.y-1), rt=(typeof dispRate==='function'?(dispRate(fyS)||1):1);
@@ -8989,11 +9016,11 @@ function buildBody(){
     var allRows=DATA.filter(function(r){return r.co===CUR&&(!CF||r.ch===CF);});
     var gt24u=0,gt25u=0,gty25u=0,gty26u=0,gty26r=0,gtf26u=0,gtf27u=0,gtf28u=0,gt24r=0,gt25r=0,gtf26r=0,gtf27r=0,gtf28r=0;
     var gtm1_25=0,gtm1_26=0,gtm3_25=0,gtm3_26=0;
-    var gtMonthLY={},gtMonthFC={},gtMonthFCRev={},gtCurFC=0; // YYYY_MM -> total LY units, TY units, TY revenue; gtCurFC = current-month full forecast
+    var gtMonthLY={},gtMonthFC={},gtMonthFCRev={},gtCurFC=0,gtSplitLY={},gtSplitTY={},gtCurX=null; // YYYY_MM -> total LY units, TY units, TY revenue; gtCurFC = current-month full forecast; *Split = exploded breakdown
     DISP_MONTHS.forEach(function(fym){gtMonthLY[fym]=0;gtMonthFC[fym]=0;gtMonthFCRev[fym]=0;});
     allRows.forEach(function(r){
       var a=ga(CUR,r.ch,r.s);
-      gtCurFC+=curMonthForecast(r.s,CUR,r.ch);   // full-month forecast (not the partial MTD actual) for the current-month 'fc' column
+      var _gcx=expFc(r.s,CUR,r.ch,CUR_MONTH,curMonthForecast(r.s,CUR,r.ch),a); gtCurFC+=_gcx.E; gtCurX=_msAdd(gtCurX,_gcx);   // full-month forecast (not the partial MTD actual) for the current-month 'fc' column — exploded (v27.470)
       gt24u+=fyU(a,CUR_FY_START-2);gt25u+=fyU(a,CUR_FY_START-1);gt24r+=fyR(a,CUR_FY_START-2);gt25r+=fyR(a,CUR_FY_START-1);
       var _gtPrevEnd=ym(pa(CUR_YTD_END).y-1,pa(CUR_YTD_END).mo);
       gty25u+=fyToDateU(a,CUR_FY_START-1,_gtPrevEnd);gty26u+=fyToDateU(a,CUR_FY_START,CUR_YTD_END);gty26r+=fyToDateR(a,CUR_FY_START,CUR_YTD_END);
@@ -9010,16 +9037,18 @@ function buildBody(){
       DISP_MONTHS.forEach(function(fym){
         var{y,mo}=pa(fym);
         // LY: forecast-on-forecast years anchor on prior-year forecast; else prior-year actual
-        if(y>=2027){ gtMonthLY[fym]+=(fu2[ym(y-1,mo)]||0); }
-        else { gtMonthLY[fym]+=(a[ym(y-1,mo)]?a[ym(y-1,mo)][0]:0); }
-        // TY units + revenue: actual months from `a`, forecast months from fu2
+        var _glx=(y>=2027)?expFc(r.s,CUR,r.ch,ym(y-1,mo),fu2[ym(y-1,mo)]||0,a):expAct(r.s,CUR,r.ch,ym(y-1,mo),a[ym(y-1,mo)]?a[ym(y-1,mo)][0]:0);   // EXPLODED (v27.470)
+        gtMonthLY[fym]+=_glx.E; gtSplitLY[fym]=_msAdd(gtSplitLY[fym],_glx);
+        // TY units + revenue: actual months from `a`, forecast months from fu2 — units exploded, revenue as-is
+        var _gtx;
         if(isActualMonth(fym)){
-          gtMonthFC[fym]+=(a[fym]?a[fym][0]:0);
+          _gtx=expAct(r.s,CUR,r.ch,fym,a[fym]?a[fym][0]:0);
           gtMonthFCRev[fym]+=(a[fym]?(a[fym][1]||0):0);
         } else {
-          gtMonthFC[fym]+=(fu2[fym]||0);
+          _gtx=expFc(r.s,CUR,r.ch,fym,fu2[fym]||0,a);
           gtMonthFCRev[fym]+=(fu2[fym]||0)*getASP(CUR,r.ch,r.s,y,mo);
         }
+        gtMonthFC[fym]+=_gtx.E; gtSplitTY[fym]=_msAdd(gtSplitTY[fym],_gtx);
       });
     });
     var gtr=document.createElement('tr');gtr.className='grand-tot';
@@ -9054,9 +9083,10 @@ function buildBody(){
       var yoy=ly>0?Math.round((fc-ly)/ly*100):null;
       var yoyStr=yoy!=null?(gPct(yoy)):'';
       var yoyCls=yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp';
+      var _glS=gtSplitLY[m], _gtS=isFcCol?gtCurX:gtSplitTY[m];   // exploded tooltips (v27.470)
       gtadd('<div style="padding:1px 2px;display:flex;flex-direction:column">'
-        +'<div style="font-size:8px;color:#cbd5e1;text-align:right;font-variant-numeric:tabular-nums">'+fn(ly)+'</div>'
-        +'<div style="font-size:10px;color:#fff;font-weight:700;text-align:right;font-variant-numeric:tabular-nums">'+fn(fc)+'</div>'
+        +'<div class="'+_msCls(_glS).trim()+'" style="font-size:8px;color:#cbd5e1;text-align:right;font-variant-numeric:tabular-nums'+(_glS&&_glS.setBoxes>0?';cursor:help':'')+'"'+_msData(_glS,'Last-year actuals')+'>'+fn(ly)+'</div>'
+        +'<div class="'+_msCls(_gtS).trim()+'" style="font-size:10px;color:#fff;font-weight:700;text-align:right;font-variant-numeric:tabular-nums'+(_gtS&&_gtS.setBoxes>0?';cursor:help':'')+'"'+_msData(_gtS,isActualMonth(m)&&!isFcCol?'This-year actuals':'This-year forecast')+'>'+fn(fc)+'</div>'
         +'<div style="font-size:8px;text-align:right;font-variant-numeric:tabular-nums" class="'+yoyCls+'">'+yoyStr+'</div></div>',fyBg(fyStartOf(m))+(first?' sep2':''));
     }
     function gtFyCell(Y){
@@ -9065,7 +9095,8 @@ function buildBody(){
       var rev=fyMonths(Y).reduce(function(t,m){return t+(gtMonthFCRev[m]||0);},0);
       var yoy=prev>0?Math.round((u-prev)/prev*100):null;
       var td=document.createElement('td');td.className=fyTotCls(Y)+' sep2';
-      td.innerHTML=periodStackHTML({dark:true,ly:fyMonths(Y).reduce(function(t,m){return t+(gtMonthLY[m]||0);},0),cur:u,mtd:periodMtd(fyMonths(Y),function(m){return gtMonthFC[m]||0;}),rev:rev,lyRev:0,fy:Y});
+      var _lx=fyMonths(Y).reduce(function(t,m){return _msAdd(t,gtSplitLY[m]);},_msZero()), _cx=fyMonths(Y).reduce(function(t,m){return _msAdd(t,gtSplitTY[m]);},_msZero()), _mx=fyMonths(Y).reduce(function(t,m){return isActualMonth(m)?_msAdd(t,gtSplitTY[m]):t;},_msZero());
+      td.innerHTML=periodStackHTML({dark:true,ly:_lx.E,lyX:_lx,cur:u,curX:_cx,mtd:_mx.E,mtdX:_mx,rev:rev,lyRev:0,fy:Y});
       gtr.appendChild(td);
     }
     var gtPeriodCell=function(months,ptype){   // #5 quarter/half total for the market grand-total row (light bg → dark text)
@@ -9074,7 +9105,8 @@ function buildBody(){
       var rev=months.reduce(function(t,m){return t+(gtMonthFCRev[m]||0);},0);
       var yoy=prev>0?Math.round((u-prev)/prev*100):null;
       var td=document.createElement('td');td.className='sep2 '+(ptype==='h'?'ptot-h':'ptot-q');
-      td.innerHTML=periodStackHTML({dark:true,ly:months.reduce(function(t,m){return t+(gtMonthLY[m]||0);},0),cur:u,mtd:periodMtd(months,function(m){return gtMonthFC[m]||0;}),rev:rev,lyRev:0,fy:fyStartOf(months[0])});
+      var _lx=months.reduce(function(t,m){return _msAdd(t,gtSplitLY[m]);},_msZero()), _cx=months.reduce(function(t,m){return _msAdd(t,gtSplitTY[m]);},_msZero()), _mx=months.reduce(function(t,m){return isActualMonth(m)?_msAdd(t,gtSplitTY[m]):t;},_msZero());
+      td.innerHTML=periodStackHTML({dark:true,ly:_lx.E,lyX:_lx,cur:u,curX:_cx,mtd:_mx.E,mtdX:_mx,rev:rev,lyRev:0,fy:fyStartOf(months[0])});
       gtr.appendChild(td);
     };
     TIME_COLS.forEach(function(tc){
@@ -9192,22 +9224,23 @@ function _makeCatTotRow(cat){
       +'<div class="'+fpc(t3t)+'" style="font-size:8px">'+(t3t||'--')+'</div></div>','sc sep1');
     tadd('','lbltd sep2');tadd('','rectd');
     // Per-month: sum LY actuals + forecast across all subcategories
-    var cMonthLY={},cMonthFC={},cMonthLYRev={},cMonthFCRev={},cCurFC=0,cCurFCRev=0;
+    var cMonthLY={},cMonthFC={},cMonthLYRev={},cMonthFCRev={},cCurFC=0,cCurFCRev=0,cSplitLY={},cSplitTY={},cCurX=null;   // *Split = exploded master/set breakdown per month (tooltips)
     DISP_MONTHS.forEach(function(fym){cMonthLY[fym]=0;cMonthFC[fym]=0;cMonthLYRev[fym]=0;cMonthFCRev[fym]=0;});
     allR.forEach(function(r){
       var a=ga(CUR,r.ch,r.s);
       var rk2=r.s+'|'+CUR+'|'+r.ch;
       var fu2=fu_cache[rk2]||(calc(r.s,CUR,r.ch).fu);
       // current-month FULL forecast (not the partial MTD actual) — for the current-month 'fc' rollup column
-      var _cmf=curMonthForecast(r.s,CUR,r.ch); cCurFC+=_cmf;
+      var _cmf=curMonthForecast(r.s,CUR,r.ch), _cmx=expFc(r.s,CUR,r.ch,CUR_MONTH,_cmf,a); cCurFC+=_cmx.E; cCurX=_msAdd(cCurX,_cmx);   // exploded (v27.470)
       var _cm=pa(CUR_MONTH); cCurFCRev+=_cmf*getASP(CUR,r.ch,r.s,_cm.y,_cm.mo);
       DISP_MONTHS.forEach(function(fym){
         var mo=pa(fym).mo,y=pa(fym).y,isAct=isActualMonth(fym);
         // LY units: forecast-on-forecast years anchor on prior-year forecast; else prior-year actual
-        if(y>=2027){ cMonthLY[fym]+=(fu2[ym(y-1,mo)]||0); }
-        else { cMonthLY[fym]+=(a[ym(y-1,mo)]?a[ym(y-1,mo)][0]:0); }
-        // TY units: actual months from `a`, forecast from fu2
-        cMonthFC[fym]+=(isAct?(a[fym]?a[fym][0]:0):(fu2[fym]||0));
+        var _lyx=(y>=2027)?expFc(r.s,CUR,r.ch,ym(y-1,mo),fu2[ym(y-1,mo)]||0,a):expAct(r.s,CUR,r.ch,ym(y-1,mo),a[ym(y-1,mo)]?a[ym(y-1,mo)][0]:0);   // EXPLODED (v27.470)
+        cMonthLY[fym]+=_lyx.E; cSplitLY[fym]=_msAdd(cSplitLY[fym],_lyx);
+        // TY units: actual months from `a`, forecast from fu2 — exploded
+        var _tyx=isAct?expAct(r.s,CUR,r.ch,fym,a[fym]?a[fym][0]:0):expFc(r.s,CUR,r.ch,fym,fu2[fym]||0,a);
+        cMonthFC[fym]+=_tyx.E; cSplitTY[fym]=_msAdd(cSplitTY[fym],_tyx);
         // LY revenue
         if(y>=2027){ cMonthLYRev[fym]+=(fu2[ym(y-1,mo)]||0)*getASP(CUR,r.ch,r.s,y-1,mo); }
         else { cMonthLYRev[fym]+=(a[ym(y-1,mo)]?(a[ym(y-1,mo)][1]||0):0); }
@@ -9228,9 +9261,10 @@ function _makeCatTotRow(cat){
       var revYoyHtml='';
       if(revYoY!=null){var rClr=revYoY>=2?'#15803d':revYoY<=-2?'#A32D2D':'#666';revYoyHtml=' <span style="color:'+rClr+'">'+(revYoY>=0?'+':'')+revYoY+'%</span>';}
       var revLineHtml=fcR>0?'<div style="font-size:8px;text-align:right;padding-right:3px;color:#475569;font-variant-numeric:tabular-nums;line-height:1.3">'+frFY(fcR,fyOfMonth(m))+revYoyHtml+'</div>':'';
-      tadd('<div class="fcin"><div class="fcly" style="font-weight:600">'+fn(ly)+'</div>'
+      var _lyS=cSplitLY[m], _tyS=isFcCol?cCurX:cSplitTY[m];   // exploded tooltips (v27.470)
+      tadd('<div class="fcin"><div class="fcly'+_msCls(_lyS)+'" style="font-weight:600'+(_lyS&&_lyS.setBoxes>0?';cursor:help':'')+'"'+_msData(_lyS,'Last-year actuals')+'>'+fn(ly)+'</div>'
         +'<div style="font-size:10px;text-align:right;padding-right:3px;font-variant-numeric:tabular-nums" class="'+yoyCls.trim()+'">'+yoyStr+'</div>'
-        +'<div class="fcr'+(isAct?' actual':'')+'">'+fn(fc)+'</div>'+revLineHtml+'</div>',bgCls);
+        +'<div class="fcr'+(isAct?' actual':'')+_msCls(_tyS)+'"'+(_tyS&&_tyS.setBoxes>0?' style="cursor:help"':'')+_msData(_tyS,isAct?'This-year actuals':'This-year forecast')+'>'+fn(fc)+'</div>'+revLineHtml+'</div>',bgCls);
     }
     function cFyCell(Y){
       var u=fyMonths(Y).reduce(function(t,m){return t+(cMonthFC[m]||0);},0);
@@ -9238,7 +9272,8 @@ function _makeCatTotRow(cat){
       var rev=fyMonths(Y).reduce(function(t,m){return t+(cMonthFCRev[m]||0);},0);
       var yoy=prev>0?Math.round((u-prev)/prev*100):null;
       var td=document.createElement('td');td.className=fyTotCls(Y)+' sep2';
-      td.innerHTML=periodStackHTML({ly:fyMonths(Y).reduce(function(t,m){return t+(cMonthLY[m]||0);},0),cur:u,mtd:periodMtd(fyMonths(Y),function(m){return cMonthFC[m]||0;}),rev:rev,lyRev:fyMonths(Y).reduce(function(t,m){return t+(cMonthLYRev[m]||0);},0),fy:Y});
+      var _lx=fyMonths(Y).reduce(function(t,m){return _msAdd(t,cSplitLY[m]);},_msZero()), _cx=fyMonths(Y).reduce(function(t,m){return _msAdd(t,cSplitTY[m]);},_msZero()), _mx=fyMonths(Y).reduce(function(t,m){return isActualMonth(m)?_msAdd(t,cSplitTY[m]):t;},_msZero());
+      td.innerHTML=periodStackHTML({ly:_lx.E,lyX:_lx,cur:u,curX:_cx,mtd:_mx.E,mtdX:_mx,rev:rev,lyRev:fyMonths(Y).reduce(function(t,m){return t+(cMonthLYRev[m]||0);},0),fy:Y});
       totr.appendChild(td);
     }
     function cPeriodCell(months,ptype){   // #5 quarter/half total for the company total row
@@ -9247,7 +9282,8 @@ function _makeCatTotRow(cat){
       var rev=months.reduce(function(t,m){return t+(cMonthFCRev[m]||0);},0);
       var yoy=prev>0?Math.round((u-prev)/prev*100):null;
       var td=document.createElement('td');td.className='sep2 '+(ptype==='h'?'ptot-h':'ptot-q');
-      td.innerHTML=periodStackHTML({ly:months.reduce(function(t,m){return t+(cMonthLY[m]||0);},0),cur:u,mtd:periodMtd(months,function(m){return cMonthFC[m]||0;}),rev:rev,lyRev:months.reduce(function(t,m){return t+(cMonthLYRev[m]||0);},0),fy:fyStartOf(months[0])});
+      var _lx=months.reduce(function(t,m){return _msAdd(t,cSplitLY[m]);},_msZero()), _cx=months.reduce(function(t,m){return _msAdd(t,cSplitTY[m]);},_msZero()), _mx=months.reduce(function(t,m){return isActualMonth(m)?_msAdd(t,cSplitTY[m]):t;},_msZero());
+      td.innerHTML=periodStackHTML({ly:_lx.E,lyX:_lx,cur:u,curX:_cx,mtd:_mx.E,mtdX:_mx,rev:rev,lyRev:months.reduce(function(t,m){return t+(cMonthLYRev[m]||0);},0),fy:fyStartOf(months[0])});
       totr.appendChild(td);
     }
     TIME_COLS.forEach(function(tc){
