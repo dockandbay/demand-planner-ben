@@ -3231,7 +3231,7 @@
   // crossdock SKU multi-picker — chips (remove ×) + add input backed by #crossdocklist; saves comma list to crossdock_skus
   // Custom-order product-development multi-picker (chips + add dropdown) → saves purchase_orders.custom_dev_ref (CSV).
   var _cdevList=null;
-  function loadCdevList(cb){ if(_cdevList){cb(_cdevList);return;} fetch('/api/product/items').then(function(r){return r.json();}).then(function(d){ var l=(d&&(d.items||d.rows))||d||[]; _cdevList=Array.isArray(l)?l:[]; cb(_cdevList); }).catch(function(){ _cdevList=[]; cb([]); }); }
+  function loadCdevList(cb){ if(_cdevList){cb(_cdevList);return;} pget('/api/product/items').then(function(d){ var l=(d&&(d.items||d.rows))||d||[]; _cdevList=Array.isArray(l)?l:[]; cb(_cdevList); }).catch(function(){ _cdevList=[]; cb([]); }); }
   function wireCdevPicker(box){ if(!box||box._wired)return; box._wired=1; var po=box.dataset.po;
     function cur(){ return (box.dataset.cur||'').split(',').map(function(x){return x.trim();}).filter(Boolean); }
     loadCdevList(function(list){
@@ -5779,7 +5779,7 @@
   var CARRIERS=['DHL','FedEx','UPS','Flexport','SF Express','Genfreight','Other'];   // consistent carrier set across shipments, samples & portal (legacy values preserved by the select builder)
   function shipReload(){ delete cache['shipments']; showPoSub('shipments'); }
   function shipPost(ep,body,cb){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
-    .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); if(ep.indexOf('/api/product/')>=0){ try{ _prodItemCache={}; }catch(e){} } cb&&cb(j); })
+    .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); if(ep.indexOf('/api/product/')>=0){ try{ _prodItemCache={}; pgetClear(); }catch(e){} } cb&&cb(j); })
     .catch(function(e){ alert('Failed: '+(e.message||e)); }); }
   // Shared config card-editor. Collapses the identical list/search/edit/save plumbing behind the config editors
   // (Key accounts, Consignees, …): a searchable CARD LIST + a one-at-a-time grouped EDIT FORM. Only the bespoke
@@ -6964,7 +6964,7 @@
       SUBS['email-notifications']=SUBS['general'];   // 'General settings' page re-homed under Admin ▸ Email notifications (same renderer)
       SUBS['productcfg']=function(){ renderProductConfig(b); };
       var _pcfgLegacyUnused=function(){ b.innerHTML='<div class="count">Loading…</div>';
-        Promise.all([fetch('/api/product/config').then(function(r){return r.json();}),fetch('/api/product/timeline-config').then(function(r){return r.json();}).catch(function(){return {tags:[],snippets:[]};})]).then(function(_cfg){ var d=_cfg[0]||{seasons:[],categories:[]}; var _tl=_cfg[1]||{tags:[],snippets:[]}; d.tags=_tl.tags||[]; d.snippets=_tl.snippets||[];
+        Promise.all([pget('/api/product/config'),fetch('/api/product/timeline-config').then(function(r){return r.json();}).catch(function(){return {tags:[],snippets:[]};})]).then(function(_cfg){ var d=_cfg[0]||{seasons:[],categories:[]}; var _tl=_cfg[1]||{tags:[],snippets:[]}; d.tags=_tl.tags||[]; d.snippets=_tl.snippets||[];
           function draw(){
             var seasonRows=(d.seasons||[]).map(function(s){ return '<tr data-code="'+esc(s.code)+'"><td class="l" style="padding:4px 8px;font-weight:700;font-family:ui-monospace,Menlo,monospace">'+esc(s.code)+'</td>'
               +'<td class="l" style="padding:4px 8px"><input class="fci pcfg-s" data-code="'+esc(s.code)+'" data-f="label" value="'+esc(s.label)+'" style="width:220px;padding:4px 7px;border:1px solid var(--line);border-radius:5px;font-size:12px"></td>'
@@ -7668,7 +7668,7 @@
           function loadPortalData(name){ var sid=supById[name];
             var nf=sid?fetch('/api/supply/portal-notes/'+sid).then(function(r){return r.json();}):Promise.resolve([]);
             var sf=sid?fetch('/api/supply/portal-submissions/'+sid).then(function(r){return r.json();}):Promise.resolve([]);
-            return Promise.all([fetch('/api/supply/purchase-orders?supplier='+encodeURIComponent(name)).then(function(r){return r.json();}), fetch('/api/supply/order-plan?supplier='+encodeURIComponent(name)).then(function(r){return r.json();}), fetch('/api/supply/deposits').then(function(r){return r.json();}), nf, sf, fetch('/api/supply/portal-line-costs').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/supplier-skus/'+encodeURIComponent(name)).then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/crossdock-shipments').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/additional-costs').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/client-attachments').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/shipment-plan').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/portal-docs').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/samples').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/supplier-payments/'+encodeURIComponent(name)).then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/suppliers').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/product/items').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/po-suppliers').then(function(r){return r.json();}).catch(function(){return [];})])
+            return Promise.all([fetch('/api/supply/purchase-orders?supplier='+encodeURIComponent(name)).then(function(r){return r.json();}), fetch('/api/supply/order-plan?supplier='+encodeURIComponent(name)).then(function(r){return r.json();}), fetch('/api/supply/deposits').then(function(r){return r.json();}), nf, sf, fetch('/api/supply/portal-line-costs').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/supplier-skus/'+encodeURIComponent(name)).then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/crossdock-shipments').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/additional-costs').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/client-attachments').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/shipment-plan').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/portal-docs').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/samples').then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/supplier-payments/'+encodeURIComponent(name)).then(function(r){return r.json();}).catch(function(){return [];}), fetch('/api/supply/suppliers').then(function(r){return r.json();}).catch(function(){return [];}), pget('/api/product/items').catch(function(){return [];}), fetch('/api/supply/po-suppliers').then(function(r){return r.json();}).catch(function(){return [];})])
               .then(function(res){ var allpos=res[0],lines=res[1],deps=res[2],notes=res[3]||[],subs=res[4]||[],lc=res[5]||[],supSkus=res[6]||[],xd=res[7]||[],ac=res[8]||[],cdocs=res[9]||[],docs=res[11]||[],allsamp=res[12]||[],payments=res[13]||[],sups=res[14]||[],pitems=res[15]||[],poSup=res[16]||[];
                 var _srow=(sups||[]).filter(function(x){return (x.name||'')===name;})[0]; var productEnabled=!!(_srow&&_srow.include_product_dev); var products=(pitems||[]).filter(function(p){return (p.supplier||'')===name;});
                 var pos=allpos.filter(function(p){return (p.supplier_name||'')===name;});
@@ -12641,7 +12641,14 @@
   function prodSyncDetailField(ref,field,val){ if(_prodDetail&&_prodDetail.item&&_prodDetail.item.ref===ref){ _prodDetail.item[field]=val; var fld=document.querySelector('.pm-fld[data-f="'+field+'"]'); if(fld&&fld.value!==val){ fld.value=val; if(field==='status')fld.setAttribute('style',prodStatusStyle(val)); } } if(_prodSeed&&_prodSeed.ref===ref)_prodSeed[field]=val; }
   // Product item cache (A) — expand re-open is instant; entries expire after TTL and are cleared on any save to that ref.
   var _prodItemCache={}, _PROD_ITEM_TTL=60000;
-  function prodItemInvalidate(ref){ if(ref){ delete _prodItemCache[ref]; _prodJsonBust(ref); } }
+  function prodItemInvalidate(ref){ if(ref){ delete _prodItemCache[ref]; _prodJsonBust(ref); } pgetClear(); }
+  // PRODUCT list GETs (items / dashboard / specs / reports / config lists): 45s client cache so switching sub-tabs is instant;
+  // cleared by any product write (shipPost → /api/product/*, prodItemInvalidate). Same promise is shared by concurrent callers. v27.492
+  var _pget={}, _PGET_TTL=45000;
+  function pget(url){ var e=_pget[url]; if(e&&(Date.now()-e.t)<_PGET_TTL)return e.p;
+    var p=fetch(url).then(function(r){return r.json();}); _pget[url]={t:Date.now(),p:p}; p.catch(function(){ delete _pget[url]; }); return p; }
+  function pgetClear(){ _pget={}; }
+  function pgetWarm(){ try{ ['/api/product/items','/api/product/dashboard','/api/product/specs','/api/product/specs/past','/api/product/spec-types','/api/product/spec-scope-options','/api/product/reports'].forEach(function(u){ pget(u).catch(function(){}); }); }catch(e){} }
   function prodItemCached(ref){ var e=_prodItemCache[ref]; return (e && (Date.now()-e.t)<_PROD_ITEM_TTL) ? e.d : null; }
   function loadProdItem(ref,cb,force){ var c=force?null:prodItemCached(ref);   // returns cached data synchronously via cb when fresh
     if(c)return cb(c,true);
@@ -12655,7 +12662,7 @@
     el.innerHTML='<div id="product-subnav"><button class="stab" data-k="plan">PLAN</button><button class="stab" data-k="dashboard">DASHBOARD</button><button class="stab" data-k="range">RANGE PLAN</button><button class="stab" data-k="specs">SPECIFICATIONS</button><button class="stab" data-k="reports">REPORTS</button><button class="stab" data-k="config">CONFIG</button><span class="ver">HORIZON __APP_VERSION__</span></div><div id="product-content"></div>';
     app.appendChild(el);
     el.querySelectorAll('.stab').forEach(function(b){ b.onclick=function(){ selectProductSub(b.dataset.k); }; }); }
-  function showProduct(){ ensureProductRoot(); if(typeof hideSupply==='function')hideSupply(); if(typeof hideScenario==='function')hideScenario();
+  function showProduct(){ ensureProductRoot(); pgetWarm(); if(typeof hideSupply==='function')hideSupply(); if(typeof hideScenario==='function')hideScenario();
     var app=document.getElementById('app'); if(app){ app.classList.add('product-active'); app.classList.remove('supply-active'); app.classList.remove('config-mode'); }
     document.body.classList.add('supply-on');   // reveal the mobile top-bar search (used for product search on phone)
     var r=document.getElementById('product-root'); if(r)r.style.display='block';
@@ -12680,10 +12687,10 @@
   function renderProductSpecs(c){
     c.innerHTML='<div class="count" style="padding:10px 2px;color:var(--faint)">Loading specifications…</div>';
     Promise.all([
-      fetch('/api/product/spec-types').then(function(r){return r.json();}),
-      fetch('/api/product/spec-scope-options').then(function(r){return r.json();}),
-      fetch('/api/product/specs').then(function(r){return r.json();}),
-      fetch('/api/product/specs/past').then(function(r){return r.json();})
+      pget('/api/product/spec-types'),
+      pget('/api/product/spec-scope-options'),
+      pget('/api/product/specs'),
+      pget('/api/product/specs/past')
     ]).then(function(res){
       var types=Array.isArray(res[0])?res[0]:[], opts=res[1]||{}, specs=Array.isArray(res[2])?res[2]:[], past=Array.isArray(res[3])?res[3]:[];
       var cats=opts.categories||[], catSizes=opts.catSizes||{}, prods=opts.productions||[];
@@ -12905,7 +12912,7 @@
   var _rangeSeason=null, _rangeApprovedOnly=false, _rangeView='normal';   // range plan view: normal | photography
   function renderProductRange(c){
     c.innerHTML='<div class="count" style="padding:10px 2px;color:var(--faint)">Loading range…</div>';
-    fetch('/api/product/items').then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
+    pget('/api/product/items').then(function(rows){ rows=Array.isArray(rows)?rows:[];
       var seasons=[]; rows.forEach(function(r){ if(r.season&&seasons.indexOf(r.season)<0)seasons.push(r.season); }); seasons.sort();
       if(!_rangeSeason||seasons.indexOf(_rangeSeason)<0)_rangeSeason=seasons[seasons.length-1]||'';
       function stPill(s){ var ap=s==='approved'; return '<span style="display:inline-block;font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;'+(ap?'background:var(--pos-bg);color:var(--pos)':'background:var(--amber-bg);color:var(--amber)')+'">'+(ap?'approved':'in development')+'</span>'; }
@@ -12948,7 +12955,7 @@
   function renderProductDashboard(c){
     c.innerHTML='<div class="count" style="padding:10px 2px">Loading dashboard…</div>';
     var DIMS=[['product','Product'],['packaging','Packaging'],['labels','Labels/wraps'],['polybag','Polybags'],['other','Other']];
-    fetch('/api/product/dashboard').then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
+    pget('/api/product/dashboard').then(function(rows){ rows=Array.isArray(rows)?rows:[];
       var seasons=[]; rows.forEach(function(r){ if(r.season&&seasons.indexOf(r.season)<0)seasons.push(r.season); }); seasons.sort();
       if(!_dashSeason||(_dashSeason!=='__all'&&seasons.indexOf(_dashSeason)<0))_dashSeason=seasons[seasons.length-1]||'__all';
       function ovPill(s){ var m={approved:['Approved','var(--pos)','var(--pos-bg)'],dropped:['Rejected','var(--neg)','var(--neg-bg)']}, x=m[s]||['In development','var(--amber)','var(--amber-bg)']; return '<span class="db-ov" style="background:'+x[2]+';color:'+x[1]+'">'+x[0]+'</span>'; }
@@ -13133,7 +13140,7 @@
       l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ set(o.dataset.clear?'':o.dataset.v); }; }); }
     render(''); var qi=pop.querySelector('.shpop-q'); if(qi){ qi.oninput=function(){render(this.value);}; qi.focus(); }
   }); }); }
-  function loadProdCfg(cb){ if(_prodCfg)return cb(_prodCfg); fetch('/api/product/config').then(function(r){return r.json();}).then(function(d){ _prodCfg=d||{seasons:[],categories:[]}; cb(_prodCfg); }).catch(function(){ cb({seasons:[],categories:[]}); }); }
+  function loadProdCfg(cb){ if(_prodCfg)return cb(_prodCfg); pget('/api/product/config').then(function(d){ _prodCfg=d||{seasons:[],categories:[]}; cb(_prodCfg); }).catch(function(){ cb({seasons:[],categories:[]}); }); }
   var _skuList=null;
   function loadSkuList(cb){ if(_skuList)return cb(_skuList); fetch('/api/product/skus').then(function(r){return r.json();}).then(function(d){ _skuList=Array.isArray(d)?d:[]; cb(_skuList); }).catch(function(){ cb([]); }); }
   // Searchable SKU picker (reuses the shpop popover) — maps an approved size to a planner SKU.
@@ -13153,7 +13160,7 @@
   }); }
   // Searchable Specification picker — links a spec-linked component to a doc from PRODUCT ▸ Specifications.
   var _specList=null, _specPickBtn=null;
-  function loadSpecList(cb){ if(_specList)return cb(_specList); fetch('/api/product/specs').then(function(r){return r.json();}).then(function(l){ _specList=Array.isArray(l)?l:[]; cb(_specList); }).catch(function(){ cb([]); }); }
+  function loadSpecList(cb){ if(_specList)return cb(_specList); pget('/api/product/specs').then(function(l){ _specList=Array.isArray(l)?l:[]; cb(_specList); }).catch(function(){ cb([]); }); }
   function specLabel(s){ var scope=s.scope_type==='category'?('Cat: '+(s.scope_category||'')):s.scope_type==='size'?((s.scope_category||'')+' / '+(s.scope_size||'')):s.scope_type==='sku'?('SKU: '+(s.scope_skus||'')):'All products'; return { main:(s.spec_type||'Spec')+' — '+scope, sub:(s.filename||'') }; }
   function openSpecPick(btn,onPick){ var wasOpen=(document.getElementById('shpop') && _specPickBtn===btn); closeShPop(); _specPickBtn=null; if(wasOpen)return; _specPickBtn=btn;
     loadSpecList(function(list){
@@ -13242,7 +13249,7 @@
     root.querySelectorAll('.pact-snz-btn').forEach(function(x){ if(x._b)return; x._b=1; x.onclick=function(e){ e.stopPropagation(); openProdSnzMenu(x, after); }; });
     root.querySelectorAll('.pact-snz').forEach(function(x){ if(x._b)return; x._b=1; x.onclick=function(e){ e.stopPropagation(); snoozeKeySet(x.dataset.key,0,after); }; }); }
   function renderProductReports(c){ c.innerHTML='<div style="color:var(--faint)">Loading…</div>';
-    fetch('/api/product/reports').then(function(r){return r.json();}).then(function(d){ if(!d||d.error){ c.innerHTML='<div style="color:var(--neg)">Failed: '+esc((d&&d.error)||'error')+'</div>'; return; }
+    pget('/api/product/reports').then(function(d){ if(!d||d.error){ c.innerHTML='<div style="color:var(--neg)">Failed: '+esc((d&&d.error)||'error')+'</div>'; return; }
       var o=d.overall||{};
       function card(lbl,val){ return '<div style="border:1px solid var(--line);border-radius:8px;padding:9px 14px;min-width:120px"><div style="font-size:11px;color:var(--muted)">'+lbl+'</div><div style="font-size:20px;font-weight:700">'+val+'</div></div>'; }
       function num(v){ return v==null?'—':v; }
@@ -13282,7 +13289,7 @@
   // PRODUCT ▸ CONFIG — seasons, category codes, timeline tags/badges, timeline quick phrases. Lives in the PRODUCT
   // module (moved here from the ⚙ CONFIG ▸ Product panel). `b` = the container to render into.
   function renderProductConfig(b){ b.innerHTML='<div class="count" style="padding:10px 2px;color:var(--faint)">Loading…</div>';
-    Promise.all([fetch('/api/product/config').then(function(r){return r.json();}),fetch('/api/product/timeline-config').then(function(r){return r.json();}).catch(function(){return {tags:[],snippets:[]};}),fetch('/api/product/component-types').then(function(r){return r.json();}).catch(function(){return {types:[],suppliers:[]};}),fetch('/api/product/reject-reasons?all=1').then(function(r){return r.json();}).catch(function(){return {reasons:[]};})]).then(function(_cfg){ var d=_cfg[0]||{seasons:[],categories:[]}; var _tl=_cfg[1]||{tags:[],snippets:[]}; d.tags=_tl.tags||[]; d.snippets=_tl.snippets||[]; var _ct=_cfg[2]||{types:[],suppliers:[]}; d.componentTypes=_ct.types||[]; d.suppliers=_ct.suppliers||[]; d.rejectReasons=(_cfg[3]&&_cfg[3].reasons)||[];
+    Promise.all([pget('/api/product/config'),fetch('/api/product/timeline-config').then(function(r){return r.json();}).catch(function(){return {tags:[],snippets:[]};}),pget('/api/product/component-types').catch(function(){return {types:[],suppliers:[]};}),fetch('/api/product/reject-reasons?all=1').then(function(r){return r.json();}).catch(function(){return {reasons:[]};})]).then(function(_cfg){ var d=_cfg[0]||{seasons:[],categories:[]}; var _tl=_cfg[1]||{tags:[],snippets:[]}; d.tags=_tl.tags||[]; d.snippets=_tl.snippets||[]; var _ct=_cfg[2]||{types:[],suppliers:[]}; d.componentTypes=_ct.types||[]; d.suppliers=_ct.suppliers||[]; d.rejectReasons=(_cfg[3]&&_cfg[3].reasons)||[];
       function autoCat(name){ return String(name||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,5)||'PROD'; }   // mirrors server _prodCatCode
       function draw(){
         var seasonRows=(d.seasons||[]).map(function(s){ return '<tr data-code="'+esc(s.code)+'"><td class="l" style="padding:4px 8px;font-weight:700;font-family:ui-monospace,Menlo,monospace">'+esc(s.code)+'</td>'
@@ -13391,7 +13398,7 @@
   function renderProductPlan(c){
     c.innerHTML='<div id="pg-filters" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"></div><div id="pg-stagepills" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0 0 12px"></div><div id="pg-grid"><div style="color:var(--faint)">Loading…</div></div>';
     if(!_poActStateLoaded){ loadPoActState(function(){ renderProductPlan(c); }); return; }   // need snooze state for the SKU-mapping reminder
-    fetch('/api/product/items').then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
+    pget('/api/product/items').then(function(rows){ rows=Array.isArray(rows)?rows:[];
       _prodRows=rows;
       var seasons=[]; rows.forEach(function(r){ if(r.season&&seasons.indexOf(r.season)<0)seasons.push(r.season); }); seasons.sort();
       var cats=[]; rows.forEach(function(r){ if(r.category&&cats.indexOf(r.category)<0)cats.push(r.category); }); cats.sort();
@@ -13671,7 +13678,7 @@
       var _ab=body.querySelector('#pc2-addbtn'); if(_ab)_ab.onclick=function(){ var sel=body.querySelector('#pc2-add'); if(!sel||!sel.options.length)return; var o=sel.options[sel.selectedIndex]; shipPost('/api/product/item/'+encodeURIComponent(ref)+'/component',{component_type_id:o.value,name:o.dataset.name,supplier:o.dataset.sup,sampling_mode:o.dataset.mode,sort:comps.length},function(j){ if(j&&j.error){alert(j.error);return;} _reload(); }); };
     }).catch(function(e){ body.innerHTML='<div style="color:var(--neg)">Failed: '+esc(e.message||e)+'</div>'; }); }
   var _rejReasons=null;   // cached active reject-reason list (PRODUCT ▸ Config)
-  function loadRejectReasons(cb){ if(_rejReasons)return cb(_rejReasons); fetch('/api/product/reject-reasons').then(function(r){return r.json();}).then(function(d){ _rejReasons=(d&&d.reasons)||[]; cb(_rejReasons); }).catch(function(){ cb([]); }); }
+  function loadRejectReasons(cb){ if(_rejReasons)return cb(_rejReasons); pget('/api/product/reject-reasons').then(function(d){ _rejReasons=(d&&d.reasons)||[]; cb(_rejReasons); }).catch(function(){ cb([]); }); }
   function renderProdSamplesTab(body,ref){ body.innerHTML='<div style="color:var(--faint)">Loading…</div>';
     Promise.all([_prodCachedJson('/api/product/samples/'+encodeURIComponent(ref)), new Promise(function(res){ loadRejectReasons(res); })]).then(function(_arr){ var list=Array.isArray(_arr[0])?_arr[0]:[]; var reasons=_arr[1]||[];
       list.sort(function(a,b){ var d=String(b.sample_date||'').localeCompare(String(a.sample_date||'')); return d||((b.version||0)-(a.version||0)); });   // newest first

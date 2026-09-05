@@ -1,3 +1,7 @@
+## v27.492 PRODUCT sub-tabs load instantly on re-visit (Ben): 45-second client cache + prefetch on entering PRODUCT
+- Every PRODUCT sub-tab (Plan, Dashboard, Specifications, Reports, Config lists) re-fetched its data on each click; on the sandbox each call costs 0.4 to 0.9 s (remote pooler, ~300 ms per query). GET /api/product/* list calls now go through a small cache (`pget`, 45 s TTL): a re-visit renders from cache immediately. Any product write (shipPost to /api/product/*, prodItemInvalidate) clears it, so edits still show at once.
+- Entering PRODUCT prefetches items, dashboard, specs (+ types, scope options, past) and reports in parallel, so the first click on each sub-tab is already warm. supply/inject.html. No server change.
+
 ## v27.491 Whole app on the design tokens: token codemod across every remaining renderer (Ben: bring all sections into line)
 - scripts/token_codemod.cjs (kept in the repo) replaced inline hex colours with design tokens in every renderer function carrying 8+ colours, in both supply/inject.html (SUPPLY, CONFIG, PRODUCT, samples, shipments, invoices…) and artifact_v16.7.html (DEMAND plan, BUY & MOVE, REPORTS, Complex Rules, weather panel, popups…). Functions that draw to canvas / PDF / SVG and colour-configuration helpers were skipped; SVG fill/stroke attributes are never rewritten.
 - Colours only: no layout, logic, forecast or buy-plan change. Remaining hex are either without a token (a few light-blue borders and tints) or in the skipped drawing code.
