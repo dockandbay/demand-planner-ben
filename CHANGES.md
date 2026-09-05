@@ -1,3 +1,8 @@
+## v27.489 PRODUCT Dashboard on the design (Ben): KPI tiles, card table, token colours, shared classes
+- **KPI tiles** across the top (Products for the season · Approved · Exceptions · Photo-approved), same tile style as the SUPPLY Actions board.
+- **Components matrix / Photography table** now a white card table with the design header caps, grey category bands, hairline rows and hover; the approved / pending / not-required / exception cells and the status pills use the token colours (exception keeps its red ring); legend matches. Components / Photography view toggle uses the standard pills. Swatches, product names and the phone cards keep their layout with token colours.
+- Every inline colour in the renderer moved to classes (db-th, db-grp, db-row, db-c, db-ov, db-sw, db-name, db-legend) styled in supply/hz-theme.css, so future tweaks are one-line CSS. Behaviour unchanged (season filter, view toggle, open-product links). supply/inject.html + supply/hz-theme.css.
+
 ## v27.488 PRODUCT grid filters: Stage dropdown; phone condenses to search + a Filters pop-down (Ben)
 - The row of stage pills under the filter bar is now a **Stage** dropdown (counts in the option labels, "All stages" default); picking a stage still clears the Status filter, and Reset filters remains.
 - **Phone:** the filter bar shows just the search box and a **⚙ Filters** button; Type / Season / Category / Status / Stage, New product, the count and the swatch-size toggle sit in a pop-down card. Desktop layout unchanged (search first, then New product and the selects). supply/inject.html + supply/hz-theme.css.
