@@ -1359,6 +1359,7 @@ function augmentSKUM(){
   var TOD=TODAY;
   Object.keys(SKUM).forEach(function(sku){
     var p=SKUM[sku];if(!p)return;
+    if(p.lyo)return;   // last-year-only CLOSED SKUs (v27.473): never fabricate availability for them
     // (a) subcat fallback to category
     if((!p.s||p.s==='')&&p.c)p.s=p.c;
     // (b) channel availability fallback when av is empty
@@ -1658,6 +1659,7 @@ function buildLiveBpOverlay(){
   // Refresh / add each SKU that's in SKUM
   ksku.forEach(function(sku){
     var p=SKUM[sku];if(!p)return;
+    if(p.lyo){ if(BP_DATA.products[sku])delete BP_DATA.products[sku]; return; }   // last-year-only CLOSED SKUs never enter the buy plan (v27.473)
     if(p.vt==='SET'){ if(BP_DATA.products[sku])delete BP_DATA.products[sku]; return; }   // SETS never buy directly — they explode into component demand (SETS feature P2). Keeps sets out of the buy plan even when in planning scope.
     var pc=PROD_CONST[sku]||{};
     var pd=BP_DATA.products[sku];
@@ -6141,7 +6143,7 @@ var _lySplitCache={};
 function subcatLySplit(s,co,ch){
   var k=s+'|'+co+'|'+ch; if(_lySplitCache[k])return _lySplitCache[k];
   var ctry=co.toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':ch==='TIK'?'t':'b', out={};
-  Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||p.s!==s)return; var av=(p.av||{})[ctry]||''; if(av.indexOf(chKey)<0)return;
+  Object.keys(SKUM).forEach(function(sku){ var p=SKUM[sku]; if(!p||p.s!==s)return; var av=(p.av||{})[ctry]||''; if(av.indexOf(chKey)<0&&!p.lyo)return;   // lyo (closed) SKUs count via their sales (v27.473)
     var isSet=(p.vt==='SET'), sz=isSet?Math.max(1,_setSize(sku)):1, sales=skuSales(sku,co,ch)||{};
     for(var m in sales){ var u=sales[m]||0; if(!u)continue; var o=out[m]||(out[m]={master:0,setBoxes:0,setUnits:0});
       if(isSet){ o.setBoxes+=u; o.setUnits+=u*sz; } else { o.master+=u; } } });
@@ -7348,13 +7350,20 @@ function skuHasAnyActivity(sku,co){
   }
   return false;
 }
-function filteredSkus(s,co,ch,all){
+// Last-year-only (closed) SKU visibility: it sold in a DISPLAYED month, or in that month's last-year month. (v27.473)
+function lyoVisible(sku,co,ch){ var ss=skuSales(sku,co,ch)||{}; for(var i=0;i<TIME_COLS.length;i++){ var tc=TIME_COLS[i]; if(tc.t!=='m'&&tc.t!=='fc')continue; var q=pa(tc.m); if((ss[tc.m]||0)>0||(ss[ym(q.y-1,q.mo)]||0)>0)return true; } return false; }
+function filteredSkus(s,co,ch,all,inclLyo){
   var wh=skuWh(co,ch);
   var avKey=co.toLowerCase()+'_'+ch.toLowerCase();
   return Object.keys(SKUM).filter(function(sku){
     var p=SKUM[sku];
     if(!p)return false;
     if(p.s!==s)return false; // must match subcat
+    if(p.lyo){   // CLOSED last-year-only SKU (v27.473): only the plan's SKU rows ask for it (inclLyo), only when it sold in the displayed window
+      if(!inclLyo)return false;
+      if(typeof FR_ACTIVE!=='undefined'&&FR_ACTIVE)return false;
+      if(PLAN_SKU_QRY&&!skuMatchQ(sku,PLAN_SKU_QRY))return false;
+      return lyoVisible(sku,co,ch); }
     // PERMANENT-INACTIVE filter (always on, independent of Active/All toggle):
     // hide SKUs that are discontinued (for this country) AND have no SOH on either
     // warehouse AND no inbound shipments AND no nonzero forecast_outputs entry for
@@ -8155,7 +8164,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
   var wh=skuWh(co,ch);
   var ctry=co.toLowerCase();
   var _skuSp=aspF(s,co,ch);   // subcat avg selling price — used to show revenue on SKU FY/period totals (SKU units × subcat ASP)
-  var skus=filteredSkus(s,co,ch); // rows respect the SKU filters; subtotal/gap (eff) covers ALL subcat SKUs
+  var skus=filteredSkus(s,co,ch,false,true); // rows respect the SKU filters + CLOSED last-year-only SKUs that sold in the displayed window (v27.473); subtotal/gap (eff) covers ALL subcat SKUs
   if(typeof SETS_VIEW!=='undefined'&&SETS_VIEW!=='show'){ skus=skus.filter(function(sk){ var isS=SKUM[sk]&&SKUM[sk].vt==='SET'; return SETS_VIEW==='only'?isS:!isS; }); }   // Display settings ▸ Sets show/hide/only (also applied here, not just renderSkuView)
   // Share basis = the WHOLE subcat (activity + channel available), NOT the filtered rows — otherwise a search or
   // pill that narrows to one SKU gives it share 1.0, so its cell shows the entire subcat forecast (was a bug).
@@ -8315,7 +8324,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     var sales=skuSales(sku,co,ch);
     var share=shares[sku]||0;
     var _hasLY=skuHasLY(sales);   // continuing SKU? drives the chained last-year rule below (keeps the plan in step with buildLiveDemand)
-    var discDate=p.disc&&p.disc[ctry]?p.disc[ctry]:null;
+    var discDate=(p.disc&&p.disc[ctry])?p.disc[ctry]:((p.lyo&&p.dsc)?p.dsc:null);   // lyo rows: the product's global discontinue date
     var launchDate=p.lch&&p.lch[ctry]?p.lch[ctry]:null;
     var preLaunchM=function(mo){return launchDate&&(mo.slice(0,4)+'-'+mo.slice(5,7)+'-01')<launchDate;}; // pre-launch only for months before the launch date
     var invOH=p.inv&&p.inv[wh]||0;
@@ -8328,6 +8337,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     var rem=invOH+invOO; // available pool = on-hand + inbound
     FM_CALC.forEach(function(m){ // incl. Jan/Feb 2029 spill so the FY28/29 SKU total is complete
       var ms=m.slice(0,4)+'-'+m.slice(5,7)+'-01';
+      if(p.lyo){skuFC[m]=0;return;}   // closed last-year-only SKU: no forecast, ever
       var _fo=skuOutFC(sku,co,ch,m);
       var raw;
       if(_fo!=null){ raw=_fo; }                                                   // saved override wins
@@ -8369,6 +8379,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
           +'<div style="display:flex;gap:2px;align-items:center;flex-wrap:wrap">'
           +'<span class="sku-tier '+tierCls+'" style="font-size:7px">'+(p.ti||'C')+'</span>'
           +skuStatusBadge(launchDate,discDate)
+          +(p.lyo?'<span style="font-size:7px;font-weight:700;color:#fff;background:#64748b;border-radius:3px;padding:0 4px;margin-left:2px" title="Closed SKU: shown for its last-year sales in the displayed period so the sub-category reconciles. Not planned, not bought.">CLOSED</span>':'')
           +((launchDate||discDate)?'<span style="font-size:7px;color:#aaa;margin-left:2px">'
             +(launchDate?'<span style="color:'+(launchDate>TODAY?'#3b82f6':'#888')+'">'+dateShort(launchDate)+'</span>':'')
             +(launchDate&&discDate?' — ':'')
@@ -8786,6 +8797,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       if(preLaunchM(m)){lyD.textContent='pre launch';lyD.title='Not launched yet';lyD.style.cssText='font-size:7px;color:#3b82f6;text-align:right;font-style:italic;white-space:nowrap';}
       else{lyD.style.cssText='font-size:8px;color:#94a3b8;text-align:right;font-variant-numeric:tabular-nums';lyD.title=isActualMonth(lyM)?'last year':((pa(m).y-1)+' forecast');lyD.textContent=fn(lyVal);}
       wrap.appendChild(lyD);
+      if(p.lyo){ var _nf=document.createElement('div'); _nf.style.cssText='font-size:9px;text-align:right;color:#94a3b8'; _nf.textContent='--'; _nf.title='Closed SKU: no forecast'; wrap.appendChild(_nf); td.appendChild(wrap); return td; }   // v27.473
       var inp=document.createElement('input');inp.type='text';inp.placeholder='+0%';
       inp.value=stored!=null?String(stored):'';
       inp.style.cssText='width:50%;margin-left:auto;border:none;background:transparent;font-size:9px;text-align:right;color:'+(stored!=null?'#7c3aed':'#3b82f6')+';outline:none;font-variant-numeric:tabular-nums;padding:0;font-weight:'+(stored!=null?'700':'500');
@@ -8824,6 +8836,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       var w=document.createElement('div');w.style.cssText='display:flex;flex-direction:column;padding:1px 2px';
       var ly=document.createElement('div');ly.style.cssText='font-size:8px;color:#94a3b8;text-align:right;font-variant-numeric:tabular-nums';if(preLaunchM(mCur)){ly.textContent='pre launch';ly.style.cssText='font-size:7px;color:#3b82f6;text-align:right;font-style:italic;white-space:nowrap';}else{ly.textContent=fn(lyCur);}
       w.appendChild(ly);
+      if(p.lyo){ var _nfC=document.createElement('div'); _nfC.style.cssText='font-size:9px;text-align:right;color:#94a3b8'; _nfC.textContent=(sales[mCur]||0)>0?'('+fn(sales[mCur])+') --':'--'; _nfC.title='Closed SKU: no forecast'; w.appendChild(_nfC); td.appendChild(w); return td; }   // v27.473
       var inp=document.createElement('input');inp.type='text';inp.placeholder='+0%';inp.value=storedCur!=null?String(storedCur):'';
       inp.style.cssText='width:50%;margin-left:auto;border:none;background:transparent;font-size:9px;text-align:right;color:'+(storedCur!=null?'#7c3aed':'#3b82f6')+';outline:none;font-variant-numeric:tabular-nums;padding:0';
       inp.dataset.ovkey=sku+'|'+co+'|'+ch+'|'+mCur;inp.dataset.ly=fcCur;skuNav(inp,parentKey);

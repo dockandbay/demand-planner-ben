@@ -423,7 +423,7 @@ async function buildFC_OUTPUTS() {
 // av (channel-availability string e.g. "dfb") derived from v_product_availability;
 // oo (on-order) derived from outstanding inbound — both fill gaps the baked snapshot lacked.
 async function buildSKURAW() {
-  const [prods, pcs, inv, avail, oo, sales, inbound, openpo] = await Promise.all([
+  const [prods, pcs, inv, avail, oo, sales, inbound, openpo, lyo] = await Promise.all([
     pool.query(`SELECT p.sku, p.product_name n,
                        coalesce(nullif(btrim(p.subcategory),''),'Undefined sub category') s,
                        coalesce(nullif(btrim(p.category),''),'Undefined sub category') c,
@@ -517,6 +517,19 @@ async function buildSKURAW() {
                   AND coalesce(nullif(po.country_code,''), b.country_code) IN ('UK','US','EU','AU','CA')
                   AND po.po NOT IN (${EXCL_REF_LIST})
                   AND NOT EXISTS (SELECT 1 FROM planner.inbound_shipments i WHERE i.reference = po.po)`),
+    // LAST-YEAR-ONLY rows (Ben, v27.473): CLOSED / out-of-scope SKUs that still sold in the last 36 months. The plan shows them
+    // under their sub-category for context (sub-cat numbers = ALL sales, open or closed) and counts their set explosion.
+    // Tagged lyo:true with NO availability, so buy / smoothing / transfer / availability logic never sees them.
+    pool.query(`SELECT p.sku, p.product_name n,
+                       coalesce(nullif(btrim(p.subcategory),''),'Undefined sub category') s,
+                       coalesce(nullif(btrim(p.category),''),'Undefined sub category') c,
+                       p.market_tier ti, p.core_seasonal cs, upper(coalesce(nullif(btrim(p.status),''),'')) st,
+                       upper(coalesce(nullif(btrim(p.variant_type),''),'MASTER')) vt,
+                       nullif(trim(p.discontinue_date_final),'') dsc,
+                       coalesce(nullif(trim(p.variant_image_url_final),''), nullif(trim(p.colour_swatch_url),'')) img, nullif(trim(p.colour_swatch_url),'') sw
+                FROM planner.products p
+                WHERE NOT coalesce(p.in_planning_scope,false) AND p.sku NOT IN (${NON_SKU_LIST})
+                  AND EXISTS (SELECT 1 FROM planner.sales_actuals sa WHERE sa.sku = p.sku AND sa.month >= (current_date - interval '36 months'))`),
   ]);
   const p = {};
   for (const r of prods.rows)
@@ -533,6 +546,9 @@ async function buildSKURAW() {
   for (const r of pcs.rows) if (p[r.sku]) { if (r.lch) p[r.sku].lch[r.co] = r.lch; if (r.disc) p[r.sku].disc[r.co] = r.disc; }
   for (const r of inv.rows) if (p[r.sku]) p[r.sku].inv[r.wh] = r.qty;
   for (const r of oo.rows) if (p[r.sku] && r.oo > 0) p[r.sku].oo[r.wh] = r.oo;
+  for (const r of lyo.rows) if (!p[r.sku])   // last-year-only closed SKUs (never overwrite an in-scope entry)
+    p[r.sku] = { n: r.n, s: r.s, c: r.c, ti: r.ti, cs: r.cs === 'Seasonal' ? 'S' : 'C', csf: r.cs || '', rw: '', rep: '', img: r.img || '', sw: r.sw || '',
+                 st: r.st || '', vt: r.vt || 'MASTER', lyo: true, dsc: r.dsc || '', av: {}, disc: {}, lch: {}, inv: {}, oo: {} };
 
   const s = {};
   for (const r of sales.rows) {
