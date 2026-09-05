@@ -1,3 +1,11 @@
+## v27.475 UI uplift U2 slice 1: pills, buttons, inputs and badges on the design tokens
+- **Pills / filters** (`.pill`, SUPPLY `.pill`): 8px radius, 11px semibold, white with a hairline border, navy fill when active (design segmented style, one size below the design so the DEMAND filter rows still fit). `.catpill` stays a step smaller; `.fpill` is a full 999px pill.
+- **Buttons** (`.save-btn` everywhere, 300+ uses): 28px tall, 12px bold, 10px radius, white / hover tint; SUPPLY `.dark` = navy; disabled at 50%.
+- **Toolbar + download menu**: 10px radius, design shadow, rounded menu items.
+- **Inputs and selects in filter bars** (DEMAND header rows, SUPPLY `.bar`): 8px radius, hairline border, blue focus ring. Grid cells keep their compact inline styling.
+- **Editable cells** (SUPPLY `.fci`): softer 6px corners, blue tint kept as the "editable" signal, design focus ring; PRODUCT `.fci` 8px radius.
+- **Badges / tags**: `.tool-badge` as a 999px pill, `.src` (FLEX / M) as an uppercase 5px tag. supply/hz-theme.css only. Drawers and popups follow in slice 2 after Ben's review.
+
 ## v27.474 DEMAND plan: "18m" pill next to Show Active / All (Ben)
 - New **18m** mode on the Show pills: same as Active (today to today+180 days) but the SKU window START is set to 18 months ago, so SKUs discontinued within the last 18 months stay visible alongside active ones. The date box reflects the start. artifact_v16.7.html.
 
