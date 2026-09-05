@@ -1,3 +1,7 @@
+## v27.482 FIX (phone): PO grid PLAN button read "Pplan"; PO detail tab strip squished and wrapping (Ben)
+- The theme's PLAN chip rule out-ranked the phone rule that collapses it to a "P" glyph, so both showed. The phone collapse is restored.
+- The level-3 row treatment (full-width white band, wrapping, 20px side padding) was hitting every `.po-subnav`, including the scrollable tab strip inside an expanded PO and the sample drawer. It now applies only to the page-level Actions sub-nav (`#act-subnav`); the PO detail strip is back to its single-line scroll. supply/hz-theme.css.
+
 ## v27.481 UI uplift U3 slice 2: SUPPLY Purchase Orders grid to the "Horizon Purchase Orders" design
 - **Toolbar:** search boxes are plain white 10px-radius inputs with a blue focus ring; **Import/Export** is a blue outline button and **Plan Shipments** the solid blue primary; **ACTION ITEMS** (red) and **NEEDS ERP** (amber) are proper buttons with the design shadow and a navy ring when active; Last 12m navy when on, Focus amber.
 - **Grid:** white card table, rows 8px taller with hairline separators and a hover tint, sticky PLAN + PO columns stay white; PO reference in blue 12.5px bold; PLAN chip navy 9.5px; ERP state as a 999px pill; status select as an uppercase 8px-radius chip (colours per status unchanged); shipment link bolder; shipping-mode tags (SEA / AIR / FOB) as uppercase mini tags in token colours; production and status group rows as a grey band with caret; load-more footer white.
