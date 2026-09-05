@@ -61,7 +61,7 @@ const q = sel => doc.querySelector(sel);
   const badgeBefore = manage.querySelector('.ex-badge') ? parseInt(manage.querySelector('.ex-badge').textContent, 10) : 0;
 
   // lazy: the expanded card must NOT be built until the row is expanded
-  chk('Expanded card is lazy (not built before expand)', !q('.pptab[data-pt="dtc"]') && /Loading…/.test(q('tr[id^="pp-"]').innerHTML));
+  chk('Expanded card is lazy (not built before expand)', !q('.pptab[data-pt="dtc"]') && /Loading…|pp-skel/.test(q('tr[id^="pp-"]').innerHTML));   // v27.506: placeholder is a skeleton
 
   manage.click(); await tick();
   const dtcTab = q('.pptab[data-pt="dtc"]');
