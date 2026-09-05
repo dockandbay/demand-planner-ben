@@ -1,3 +1,9 @@
+## v27.477 UI uplift U3 slice 1: SUPPLY Actions board to the "Horizon Supply" design
+- **KPI tiles** beside the Status / Severity filters: Open actions · High priority · Payment issues · Done (counts from the loaded action set; refresh with every lifecycle change). Icon circles + 19px figures as designed.
+- **Two boards as cards** (HIGH PRIORITY / MEDIUM & LOW, or MEDIUM / LOW when there are no highs): 14px-radius white cards with a coloured dot, uppercase title and count in the header; emoji headings gone.
+- **Rows**: white (tinted fills removed) with a 3px severity edge and coloured type label (red high, amber medium), 12px detail text, blue underlined refs, design-sized Fix / Manage buttons; "Upload to ERP" uses the token green.
+- Filters, type dropdown, snooze / dismiss / done lifecycle, ERP compare and Recommendations tabs are unchanged in behaviour. supply/inject.html (shell + boards markup, KPI function) + supply/hz-theme.css.
+
 ## v27.476 UI uplift U2 slice 2: table headers, popups, drawers and cards on the design tokens
 - **Table headers** (DEMAND plan, every SUPPLY grid, PRODUCT grid): white with small uppercase grey caps and a hairline rule (was a grey fill). FY-total tint headers unchanged.
 - **Popups / modals** (buy-plan SKU popup, PO modals): 14px corners, deep design shadow, navy-tinted scrim; exploded tooltip 10px corners.

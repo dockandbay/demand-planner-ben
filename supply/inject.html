@@ -1239,7 +1239,7 @@
       if(actSub==='recommendations'){ renderRecsTab(sb); return; }
       if(actSub==='erp-compare'){ renderErpTab(sb); return; }
       sb.innerHTML='<button class="save-btn act-filt-toggle" id="act-filt-toggle">⚙ Filters</button>'
-        +'<div class="act-filters" id="act-filters"><div class="bar" id="act-statbar"></div><div class="bar" id="act-sevbar"></div></div><div id="act-grid"></div>';
+        +'<div class="act-top"><div class="act-filters" id="act-filters"><div class="bar" id="act-statbar"></div><div class="bar" id="act-sevbar"></div></div><div class="act-kpis" id="act-kpis"></div></div><div id="act-grid"></div>';   // v27.477: KPI tiles beside the filters (design)
       var _aft=document.getElementById('act-filt-toggle'); if(_aft)_aft.onclick=function(){ var fp=document.getElementById('act-filters'); if(!fp)return; var on=fp.classList.toggle('open'); this.textContent=on?'⚙ Filters ▴':'⚙ Filters'; };   // phone: hide the Status/Severity/Type filters behind a Filters button (like the PO grid)
       statBar(); sevBar(); view(); }
     function renderRecsTab(sb){ var open=_recs.filter(function(r){return !r.status||r.status==='open';});
@@ -1252,7 +1252,13 @@
       fetch('/api/supply/bi/erp-compare').then(function(r){return r.json();}).then(function(d){ _actErpCount=(d&&typeof d.count==='number')?d.count:((d&&d.rows||[]).filter(function(x){return !x.ignored;}).length);
         var badge=document.querySelector('#act-subnav .act-subtab[data-as="erp-compare"]'); if(badge)badge.innerHTML='⬆ ERP COMPARE'+(_actErpCount>0?' <span class="ex-badge">'+_actErpCount+'</span>':'');
         renderErpCompare(d, sb, function(){ renderErpTab(sb); }); }).catch(function(){ sb.innerHTML='<div style="color:#dc2626">Could not load ERP compare.</div>'; }); }
-    function statBar(){ document.getElementById('act-statbar').innerHTML='<span class="pill-lbl">Status</span>'
+    // KPI tiles (design "Horizon Supply"): open actions · high priority · payment issues · done. Counts come from the loaded set.
+    function kpiBar(){ var k=document.getElementById('act-kpis'); if(!k)return;
+      var open=_acts.filter(function(r){return stOf(r)==='open';}), hi=open.filter(function(r){return r.severity==='high';}).length,
+          pay=open.filter(function(r){return actGroup(r.type)==='PAYMENTS';}).length, done=_acts.filter(function(r){return stOf(r)==='done';}).length;
+      function tile(ic,cls,v,l){ return '<div class="act-kpi"><span class="act-kpi-ic '+cls+'">'+ic+'</span><div><div class="act-kpi-v">'+v.toLocaleString()+'</div><div class="act-kpi-l">'+l+'</div></div></div>'; }
+      k.innerHTML=tile('!','neg',open.length,'Open actions')+tile('⚠','amber',hi,'High priority')+tile('£','blue',pay,'Payment issues')+tile('✓','pos',done,'Done'); }
+    function statBar(){ kpiBar(); document.getElementById('act-statbar').innerHTML='<span class="pill-lbl">Status</span>'
       +STAT.map(function(s){return '<span class="pill stpill'+(st.status===s[0]?' active':'')+'" data-st="'+s[0]+'">'+s[1]+' ('+statCount(s[0])+')</span>';}).join('')
       +'<label style="margin-left:12px;font-size:12px;cursor:pointer;'+(st.status==='open'?'':'opacity:.4')+'"><input type="checkbox" id="act-showsnz"'+(st.showSnoozed?' checked':'')+(st.status==='open'?'':' disabled')+'> show snoozed as active</label>';
       document.querySelectorAll('#act-statbar .stpill').forEach(function(p){p.onclick=function(){st.status=p.dataset.st;st.sev='All';statBar();sevBar();view();};});
@@ -1305,10 +1311,11 @@
       var med=f.filter(function(r){return r.severity==='amber';}).sort(byType);
       var low=f.filter(function(r){return r.severity==='low';}).sort(byType);
       var col1,col2,l1,l2;
-      if(high.length){ col1=high; l1='🔴 High priority'; col2=med.concat(low); l2='🟡 Medium &amp; ⚪ Low'; }
-      else { col1=med; l1='🟡 Medium'; col2=low; l2='⚪ Low'; }
-      var c1='<div style="flex:1 1 460px;min-width:0"><div class="act-colhdr">'+l1+' <span class="mut tiny">('+col1.length+')</span></div>'+tbl(col1)+'</div>';
-      var c2='<div style="flex:1 1 460px;min-width:0"><div class="act-colhdr">'+l2+' <span class="mut tiny">('+col2.length+')</span></div>'+tbl(col2)+'</div>';
+      var k1;
+      if(high.length){ col1=high; l1='High priority'; k1='high'; col2=med.concat(low); l2='Medium &amp; Low'; }
+      else { col1=med; l1='Medium'; k1='amber'; col2=low; l2='Low'; }
+      function board(kind,lbl,rows){ return '<div class="act-board act-board-'+kind+'"><div class="act-board-hd"><span class="act-dot"></span><span class="act-board-title">'+lbl+'</span><span class="act-board-n">('+rows.length+')</span></div>'+tbl(rows)+'</div>'; }   // v27.477 design boards
+      var c1=board(k1,l1,col1), c2=board(k1==='high'?'amber':'low',l2,col2);
       g.innerHTML='<div class="act-colwrap">'+c1+c2+'</div>'; bindActFix(); bindLifecycle(statBar,sevBar,view); }
     renderActSub(); }
   // Reformat any ISO date (YYYY-MM-DD) embedded in an action's text to dd-mmm-yy (Ben's preferred display).
@@ -1337,7 +1344,7 @@
     if(r.fix==='date'){ fix='<span class="tiny mut">fix date</span> <input class="fci dt act-in" type="date" data-id="'+r._id+'"> '+applyBtn(r._id); }
     else if(r.fix==='shipment'){ fix='<span class="tiny mut">assign shipment</span> <input class="fci txt act-in" list="shiplist" placeholder="pick / type…" data-id="'+r._id+'"> '+applyBtn(r._id); }
     else if(r.fix==='supplier'){ fix='<span class="tiny mut">set supplier</span> <input class="fci txt act-in" list="supplierlist" placeholder="pick supplier…" data-id="'+r._id+'"> '+applyBtn(r._id); }
-    else if(r.fix==='upload'){ fix='<button class="save-btn act-up" data-id="'+r._id+'" data-po="'+esc(r.ref||r.target_key||'')+'" style="background:#16a34a;color:#fff;border-color:#16a34a">⬆ Upload to ERP</button>'; }
+    else if(r.fix==='upload'){ fix='<button class="save-btn act-up" data-id="'+r._id+'" data-po="'+esc(r.ref||r.target_key||'')+'" style="background:var(--pos);color:#fff;border-color:var(--pos)">⬆ Upload to ERP</button>'; }
     else if(r.fix==='arrived'){ fix='<button class="save-btn act-arrived" data-id="'+r._id+'">✓ Mark arrived</button>'; }
     else if(r.fix==='setstm'){ fix='<button class="save-btn act-setstm" data-po="'+esc(r.target_key||r.ref)+'" data-id="'+r._id+'">→ set shipped to master</button>'; }
     else if(r.fix==='remindconfirm'){ fix='<button class="save-btn po-remind-confirm" data-po="'+esc(r.target_key||r.ref)+'" style="background:#7c3aed;color:#fff;border-color:#6d28d9">✉ Send timeline message to supplier</button>'; }
