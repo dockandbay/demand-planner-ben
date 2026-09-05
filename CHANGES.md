@@ -1,3 +1,7 @@
+## v27.488 PRODUCT grid filters: Stage dropdown; phone condenses to search + a Filters pop-down (Ben)
+- The row of stage pills under the filter bar is now a **Stage** dropdown (counts in the option labels, "All stages" default); picking a stage still clears the Status filter, and Reset filters remains.
+- **Phone:** the filter bar shows just the search box and a **⚙ Filters** button; Type / Season / Category / Status / Stage, New product, the count and the swatch-size toggle sit in a pop-down card. Desktop layout unchanged (search first, then New product and the selects). supply/inject.html + supply/hz-theme.css.
+
 ## v27.487 UI uplift U5 slice 1: supplier portal on the same tokens and primitives as the app
 - The theme's SUPPLY rules now match both the app (`#app`) and the portal (`#pv-wrap`) via `:is()`, so pills, buttons, inputs, editable cells, table headers, cards, drawers, badges and section headings look the same for suppliers. App-shell rows (sub-nav, content padding, Actions sub-nav) stay app-only.
 - **Portal shell:** 52px navy header with the supplier name bold, ghost header buttons; main tabs (POs · Productions · Shipment plan · Payments · Deposits · Samples · Product · Quality · Specs · Timeline) as the design's level-2 row (uppercase, navy underline, scrolls sideways on phones).

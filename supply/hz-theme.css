@@ -334,3 +334,21 @@ body .pv-btn.ghost{color:var(--nav-dim);border-color:rgba(255,255,255,.18)} body
   #pv-wrap #supply-root #pp-tabs{margin:0 -10px 10px;padding:0 10px}
   #pv-wrap #supply-root .pp-exp{padding:0 4px;border-radius:5px}   /* phone keeps the compact "M" (portal rule) */
 }
+
+/* ═══ PRODUCT grid filters (v27.488, Ben): Stage dropdown; phone = search + "Filters" pop-down ═══════════════════ */
+#app #product-root .save-btn.outline-blue{color:var(--blue);border:1.5px solid var(--blue);background:var(--card)}
+#app #product-root .save-btn.outline-blue:hover{background:var(--blue-soft)}
+#app #product-root .pg-filt-toggle{display:none}
+#app #product-root .pg-filt-panel{display:contents}
+#app #product-root #pg-stagepills{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:-4px 0 12px}
+@media (max-width:640px){
+  #app #product-root #pg-filters{gap:8px}
+  #app #product-root #pg-filters #pg-q{width:100%!important;flex:1 1 100%;font-size:15px;padding:9px 12px}
+  #app #product-root .pg-filt-toggle{display:inline-flex;align-items:center;font-size:12px;font-weight:700}
+  #app #product-root .pg-filt-panel{display:none;flex:1 1 100%;flex-direction:column;align-items:stretch;gap:8px;padding:10px;background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow)}
+  #app #product-root #pg-filters.open .pg-filt-panel{display:flex}
+  #app #product-root .pg-filt-panel > span{display:flex!important;justify-content:space-between;width:100%}
+  #app #product-root .pg-filt-panel select.fci{flex:1 1 auto;max-width:70%}
+  #app #product-root #pg-stagepills{display:none}
+  #app #product-root #pg-stagepills.open{display:flex}
+}
