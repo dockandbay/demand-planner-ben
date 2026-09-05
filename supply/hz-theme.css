@@ -147,3 +147,27 @@ body header.pv-top{background:var(--nav)}
 /* Badges and tags */
 #app .tool-badge{border-radius:999px;font-size:10px;font-weight:800;padding:1px 7px;letter-spacing:.02em}
 #app #supply-root .src{border-radius:5px;font-size:9px;font-weight:800;letter-spacing:.05em;padding:2px 6px;text-transform:uppercase}
+
+/* ═══ U2 primitives, slice 2 (v27.476): table headers, popups, drawers, cards ══════════════════════════════════ */
+/* Table headers: design = small uppercase grey caps on white (was grey #f3f3f1 fill). Year-tint header classes (!important) still win. */
+#app thead th,#app #supply-root thead th{background:var(--card);color:var(--faint);font-weight:800;font-size:10px;letter-spacing:.05em;text-transform:uppercase;border-bottom:1px solid var(--line)}
+#app thead th.stk,#app thead th.stk2{background:var(--card)}
+#app #product-root table.pg-tbl th{background:var(--card);color:var(--faint);font-weight:800;letter-spacing:.05em;border-bottom:1px solid var(--line)}
+#app #supply-root .act-tbl th{color:var(--faint);font-weight:800;letter-spacing:.05em}
+/* Popups / modals: 14px corners, design shadow, navy-tinted scrim */
+#app #buy-wrap .ov{background:rgba(16,24,40,.35)}
+#app #buy-wrap .pn{border-radius:var(--r-xl);border-color:var(--line);box-shadow:0 1px 2px rgba(16,24,40,.06),0 24px 60px -20px rgba(16,24,40,.45)}
+.pomodal-bg{background:rgba(16,24,40,.45)}
+.pomodal{border-radius:var(--r-xl);font-family:var(--font);box-shadow:0 24px 60px -20px rgba(16,24,40,.45);padding:18px 20px}
+#ms-exp-tip{border-radius:var(--r-md)}
+/* Drawers (PO / shipment / sample / product): rounded leading edge, deeper design shadow, white head with a hairline rule */
+#app #supply-root #shipdrawer,#app #supply-root #podrawer,#app #supply-root #sampdrawer,#app #product-root #proddrawer{border-radius:var(--r-xl) 0 0 var(--r-xl);box-shadow:-16px 0 48px -16px rgba(16,24,40,.45)}
+#app #supply-root .shipdrawer-head{background:var(--card);border-bottom:1px solid var(--line);padding:14px 20px}
+#app #supply-root .shipdrawer-title{font-size:15px;font-weight:800;color:var(--ink);letter-spacing:.01em}
+#app #supply-root .shipdrawer-x{border-radius:var(--r-sm)}
+#app #supply-root .shipdrawer-x:hover{background:var(--hover);color:var(--ink)}
+#app #supply-root .shipdrawer-body{padding:16px 20px}
+/* Cards */
+#app #supply-root .card{border-radius:var(--r-lg);box-shadow:var(--shadow);background:var(--card);padding:10px 14px}
+#app #product-root .pg-card{border-radius:var(--r-lg);box-shadow:var(--shadow)}
+#app #product-root .pg-card:hover{box-shadow:0 1px 2px rgba(16,24,40,.06),0 12px 30px -12px rgba(16,24,40,.28)}

@@ -1,3 +1,9 @@
+## v27.476 UI uplift U2 slice 2: table headers, popups, drawers and cards on the design tokens
+- **Table headers** (DEMAND plan, every SUPPLY grid, PRODUCT grid): white with small uppercase grey caps and a hairline rule (was a grey fill). FY-total tint headers unchanged.
+- **Popups / modals** (buy-plan SKU popup, PO modals): 14px corners, deep design shadow, navy-tinted scrim; exploded tooltip 10px corners.
+- **Drawers** (PO / shipment / sample / product): rounded leading edge, deeper shadow, white head with a hairline rule, bolder title, hover state on the close button.
+- **Cards** (SUPPLY action cards, PRODUCT grid cards): 12px corners with the design shadow. supply/hz-theme.css only.
+
 ## v27.475 UI uplift U2 slice 1: pills, buttons, inputs and badges on the design tokens
 - **Pills / filters** (`.pill`, SUPPLY `.pill`): 8px radius, 11px semibold, white with a hairline border, navy fill when active (design segmented style, one size below the design so the DEMAND filter rows still fit). `.catpill` stays a step smaller; `.fpill` is a full 999px pill.
 - **Buttons** (`.save-btn` everywhere, 300+ uses): 28px tall, 12px bold, 10px radius, white / hover tint; SUPPLY `.dark` = navy; disabled at 50%.
