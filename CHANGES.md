@@ -1,3 +1,9 @@
+## v27.487 UI uplift U5 slice 1: supplier portal on the same tokens and primitives as the app
+- The theme's SUPPLY rules now match both the app (`#app`) and the portal (`#pv-wrap`) via `:is()`, so pills, buttons, inputs, editable cells, table headers, cards, drawers, badges and section headings look the same for suppliers. App-shell rows (sub-nav, content padding, Actions sub-nav) stay app-only.
+- **Portal shell:** 52px navy header with the supplier name bold, ghost header buttons; main tabs (POs · Productions · Shipment plan · Payments · Deposits · Samples · Product · Quality · Specs · Timeline) as the design's level-2 row (uppercase, navy underline, scrolls sideways on phones).
+- **Portal PO grid:** taller rows with hairline separators and hover, white sticky columns, grey production bands, MANAGE as a navy chip (phone keeps the compact "M"), amber open-row highlight in token colours.
+- No navigation, data or behaviour change; regression test `npm test` (portal in-place actions) passes. Grouping the ten tabs into sections and an inbox-style home are proposed separately (mockup first). supply/hz-theme.css only.
+
 ## v27.486 UI uplift U4 slice 2: PRODUCT / SUPPLY section headings, Samples grid, Inbox dropdown
 - Section headings (`.sect-h`, used across PRODUCT and SUPPLY panels) as design caps; Samples grid rows with hairline separators and hover, sample links bold blue; the header Inbox dropdown gets 12px corners, design shadow and row hover. supply/hz-theme.css only.
 - Note: PRODUCT Dashboard tiles, Specifications and the Timeline compose area are inline-styled in the renderers; restyling them needs renderer edits (proposed as a targeted slice once Ben picks priorities).
