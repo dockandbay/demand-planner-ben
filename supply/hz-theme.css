@@ -255,7 +255,7 @@ html body:has(#app.product-active){background:var(--card)}
 #app #supply-root table.po-tbl td .fci.dt{border-radius:6px}
 
 /* ═══ U4 PRODUCT, slice 1 (v27.484): module tokens, detail tabs, filters, grid, drawer, forms, mobile cards ═════ */
-#app #product-root{--p-ink:var(--ink);--p-mut:var(--muted);--p-line:var(--line);--p-bg:var(--hover);--p-acc:var(--blue)}   /* indigo accent → design blue */
+#app #product-root{--p-ink:var(--ink);--p-mut:var(--muted);--p-line:var(--line);--p-bg:var(--card);--p-acc:var(--blue)}   /* indigo accent → design blue; panels white (Ben) */
 /* product detail tabs (Master data · Size & variants · Samples · Timeline · Documents) = design underline tabs */
 #app #product-root .pd-tabs{gap:2px;border-bottom:1px solid var(--line);margin:0 0 14px}
 #app #product-root .pd-tab{padding:11px 13px 9px;margin-bottom:0;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);border-bottom:0;box-shadow:none;border-radius:0;transition:color .15s}
@@ -290,3 +290,9 @@ html body:has(#app.product-active){background:var(--card)}
 #app #supply-root .samp-panel,#app #supply-root #samp-form{border-radius:var(--r-lg)}
 #app #supply-root .samp-fld,#app #supply-root .samp-panel .fci,#app #supply-root #samp-form .fci{border-radius:var(--r-sm);padding:6px 10px;font-size:12px}
 #app #supply-root .samp-fld:focus,#app #supply-root .samp-panel .fci:focus,#app #supply-root #samp-form .fci:focus{border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-soft)}
+
+/* ── v27.485 (Ben): PRODUCT is white throughout (page + panels); sample drawer DETAILS = 2 columns ── */
+#app.product-active{background:var(--card)}
+#app #product-root .pg-card,#app #product-root .pgm-card{background:var(--card)}
+#app #supply-root .samp-details-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media (max-width:700px){ #app #supply-root .samp-details-grid{grid-template-columns:1fr} }

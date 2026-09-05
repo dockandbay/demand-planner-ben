@@ -1,3 +1,7 @@
+## v27.485 PRODUCT white throughout; sample drawer DETAILS in 2 columns (Ben)
+- PRODUCT panels and cards use the white card token (the module's background token was the grey tint); the module surface itself is white too.
+- Sample drawer > DETAILS: the four boxes lay out in two columns (one on phones) instead of auto-fitting to three in a wide drawer. supply/inject.html (class on the grid) + supply/hz-theme.css.
+
 ## v27.484 UI uplift U4 slice 1: PRODUCT module on the design tokens
 - **Module tokens:** the PRODUCT accent moves from indigo to the design blue; its line / muted / background tokens now alias the app tokens.
 - **Detail tabs** (Master data · Size & variants · Samples · Timeline · Documents): design underline tabs, uppercase 11px bold, blue 2.5px underline when active.

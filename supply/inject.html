@@ -11383,7 +11383,7 @@
         function tb(k,label){ return '<button class="rtab samp-tab'+(curTab===k?' active':'')+'" data-st="'+k+'">'+label+'</button>'; }
         function panel(k,html){ return '<div class="samp-panel" data-st="'+k+'"'+(curTab===k?'':' style="display:none"')+'>'+html+'</div>'; }
         var _scard='border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;background:#fff';
-        var detailsPanel='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;align-items:start">'
+        var detailsPanel='<div class="samp-details-grid" style="display:grid;gap:14px;align-items:start">'
           +'<div style="'+_scard+'"><div class="sect-h">Recipient &amp; address</div>'+recip+'</div>'
           +'<div style="'+_scard+'"><div class="sect-h">Other details</div>'+L('Purpose')+purpose+L('Notes')+notes+'</div>'   // sits right after Recipient so the two are together (Ben)
           +((s.recipient_company_2||s.tracking_code_2||s.address_line1_2)?'<div style="'+_scard+'"><div class="sect-h">Second recipient &amp; tracking <span class="mut tiny" style="font-weight:400">(supplier-added)</span></div>'
