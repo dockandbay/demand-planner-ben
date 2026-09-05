@@ -4918,7 +4918,7 @@ function periodStackHTML(o){
   return '<div style="padding:2px 4px;text-align:right;font-variant-numeric:tabular-nums;line-height:1.25">'
     +'<div class="'+_msCls(o.lyX).trim()+'" style="font-size:'+fz[0]+'px;color:var(--faint)'+(o.lyX&&o.lyX.setBoxes>0?';cursor:help':'')+'"'+(o.lyX&&o.lyX.setBoxes>0?_msData(o.lyX,'Last year (same months)'):' title="Last year, same months (units)"')+'>'+(o.ly>0?fn(o.ly):'--')+'</div>'
     +'<div style="font-size:'+fz[1]+'px;font-weight:700'+(o.dark?';color:var(--ink)':'')+'">'
-      +(o.mtd>0?'<span class="'+_msCls(o.mtdX).trim()+'" style="color:var(--pos)'+(o.mtdX&&o.mtdX.setBoxes>0?';cursor:help':'')+'"'+(o.mtdX&&o.mtdX.setBoxes>0?_msData(o.mtdX,'Actuals to date'):' title="Actuals to date within this period"')+'>('+fn(o.mtd)+')</span> ':'')
+      +((o.mtd>0&&Math.abs(o.mtd-o.cur)>=0.5)?'<span class="'+_msCls(o.mtdX).trim()+'" style="color:var(--pos)'+(o.mtdX&&o.mtdX.setBoxes>0?';cursor:help':'')+'"'+(o.mtdX&&o.mtdX.setBoxes>0?_msData(o.mtdX,'Actuals to date'):' title="Actuals to date within this period"')+'>('+fn(o.mtd)+')</span> ':'')
       +'<span class="'+_msCls(o.curX).trim()+'"'+(o.curX&&o.curX.setBoxes>0?' style="cursor:help"'+_msData(o.curX,'Period total (actuals + forecast)'):'')+'>'+fn(Math.round(o.cur))+'</span></div>'
     +'<div style="font-size:'+fz[2]+'px" class="'+cls+'" title="Units growth: period total (actuals + forecast) vs last year">'+(g!=null?gPct(g):'--')+'</div>'
     +(o.rev!=null?'<div style="font-size:'+fz[3]+'px;color:var(--muted)" title="Revenue'+(rg!=null?', growth vs last-year revenue':'')+'">'+(o.fy!=null?frFY(o.rev,o.fy):fr(Math.round(o.rev)))+(rg!=null?' <span style="color:'+rc+'">'+(rg>=0?'+':'')+rg+'%</span>':'')+'</div>':'')

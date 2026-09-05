@@ -1,3 +1,6 @@
+## v27.472 Period totals: completed periods show one number (Ben)
+- In the FY / H1 / H2 / Quarter cells the green "(actuals to date)" bracket now appears only while the period still contains forecast months. A fully completed period (every month actual) shows just the actual total instead of "(38,570) 38,570". artifact_v16.7.html.
+
 ## v27.471 Nav consistency (Ben): light-blue level-3 rows, standard L3 on REPORTS, no header gap on filter-less views
 - **Level-3 rows are light blue** (new token `--l3-bg`) so they read differently from the white level-2 row: DEMAND (inputs / analysis / exceptions / scenario), SUPPLY (PO sub-tabs, Reports, Config L3), PRODUCT config, REPORTS.
 - **REPORTS > Performance** and **REPORTS > 3PL & Invoicing**: their level-3 buttons lose the blue-pill inline styling and use the standard L3 look (blue underline); the 3PL page header "3PL & Invoicing" is removed and its L3 row now sits flush under the REPORTS tabs (was a boxed row below a heading).
