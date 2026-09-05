@@ -94,11 +94,11 @@
         anon: ANON_NAME ? {name:ANON_NAME, realNames:(me.suppliers||[])} : null,
         getData: function(){ return fetch('/api/portal/bootstrap'+(window.__ppInclArch?'?includeArchived=1':'')).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); return j; }); }
       });
+      // Price List = a real FINANCE tab: register AFTER the portal script has loaded and mounted (v27.504; v27.503 ran too early).
+      if(me.price_list_enabled&&window.DBPortalView&&window.DBPortalView.addTab){ window.DBPortalView.addTab({pt:'pricelist',label:'Price List',sec:'finance',render:function(host){ ppPriceList(me,host); }}); }
     };
     s.onerror=function(){ document.getElementById('pv').innerHTML='<div class="pv-empty">Could not load the portal view.</div>'; };
     document.body.appendChild(s);
-    // Price List = a real FINANCE tab (v27.503): registered through the portal's addTab hook, rendered into the tab body.
-    if(me.price_list_enabled&&window.DBPortalView&&window.DBPortalView.addTab){ window.DBPortalView.addTab({pt:'pricelist',label:'Price List',sec:'finance',render:function(host){ ppPriceList(me,host); }}); }
   }
 
   // ── Supplier Price List (gated: only shown when the server enables it) ──

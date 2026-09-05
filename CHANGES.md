@@ -1,3 +1,6 @@
+## v27.504 Portal FIX: Price List tab was not appearing (registered before the portal script had loaded) (Ben)
+- The v27.503 registration ran synchronously while portal-view.js was still downloading, so the addTab hook did not exist yet and the tab was never created. Registration now happens inside the script's load handler, right after mount. supply/portal.html.
+
 ## v27.503 Portal: Price List renders as a normal FINANCE tab (was a full-page overlay) (Ben)
 - New `DBPortalView.addTab({pt,label,sec,render})` hook lets the host page register a tab that behaves like the built-in ones (section placement, active state, #/finance/pricelist deep link, standard click). portal.html registers Price List with it and renders the existing price-list UI into the tab body; the overlay, its Back header and the polling tab-insertion are gone. supply/portal-view.js + supply/portal.html.
 
