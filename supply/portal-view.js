@@ -655,7 +655,9 @@
       var _order=[]; tabsEl.querySelectorAll('.rtab[data-pt]').forEach(function(t){ t.dataset.sec=PP_SEC[t.dataset.pt]||'orders'; _order.push(t); });
       _order.sort(function(a,b){ var ia=PP_TAB_ORDER.indexOf(a.dataset.pt), ib=PP_TAB_ORDER.indexOf(b.dataset.pt); return (ia<0?99:ia)-(ib<0?99:ib); });
       _order.forEach(function(t){ tabsEl.appendChild(t); });
-      _secRow.querySelectorAll('.pp-sec').forEach(function(sb){ sb.onclick=function(){ var first=tabsEl.querySelector('.rtab[data-sec="'+sb.dataset.sec+'"]'); if(first)first.click(); }; });
+      _secRow.querySelectorAll('.pp-sec').forEach(function(sb){ sb.onclick=function(){ var sec=sb.dataset.sec, first=null;   // preferred first tab per section (MONEY → Payments, never the Price List overlay) — v27.499
+        PP_TAB_ORDER.forEach(function(pt){ if(first||PP_SEC[pt]!==sec)return; first=tabsEl.querySelector('.rtab[data-pt="'+pt+'"]'); });
+        if(!first)first=tabsEl.querySelector('.rtab[data-sec="'+sec+'"][data-pt]'); if(first)first.click(); }; });
     }catch(e){}
     function ppSyncSec(){ try{ var act=tabsEl.querySelector('.rtab.active'), sec=act?(act.dataset.sec||PP_SEC[act.dataset.pt]||'orders'):'orders';
       tabsEl.dataset.sec=sec; document.querySelectorAll('#pp-secs .pp-sec').forEach(function(sb){ sb.classList.toggle('active',sb.dataset.sec===sec); }); }catch(e){} }

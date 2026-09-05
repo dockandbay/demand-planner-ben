@@ -99,7 +99,7 @@
     document.body.appendChild(s);
     // Add a "Price List" tab to the portal nav (next to Productions), gated by the server — instead of a header button.
     if(me.price_list_enabled){ var _tries=0, _iv=setInterval(function(){ _tries++;
-      var tabs=document.getElementById('pp-tabs'), prod=tabs&&tabs.querySelector('.rtab[data-pt="productions"]');
+      var tabs=document.getElementById('pp-tabs'), prod=tabs&&(tabs.querySelector('.rtab[data-pt="deposits"]')||tabs.querySelector('.rtab[data-pt="payments"]')||tabs.querySelector('.rtab[data-pt="productions"]'));   // Price List sits LAST under MONEY (after Deposits) — v27.499
       if(tabs&&prod&&!document.getElementById('pp-pricelist-tab')){ var t=document.createElement('span'); t.className='rtab'; t.id='pp-pricelist-tab'; t.dataset.sec='money'; t.textContent='Price List'; t.style.cursor='pointer';
         t.onclick=function(e){ e.stopPropagation(); ppPriceList(me); }; prod.parentNode.insertBefore(t, prod.nextSibling); clearInterval(_iv); }
       if(_tries>40)clearInterval(_iv); }, 250); }
