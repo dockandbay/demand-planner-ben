@@ -41,3 +41,6 @@ mockups/
 # All scratch/throwaway files live in temp/ (harness probes, logs, one-off scripts). Keep the folder, ignore its contents.
 temp/*
 !temp/.gitkeep
+
+# runtime logs (cloudflared tunnel, dev server) — never track
+*.log

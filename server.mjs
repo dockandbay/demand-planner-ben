@@ -123,7 +123,7 @@ function loadHTML() {
 const HTML = loadHTML();
 // SUPPLY tab (Production Planner) UI — injected before </body>. Optional; empty if file absent.
 function loadInject() { try { return readFileSync(new URL('./supply/inject.html', import.meta.url), 'utf8'); } catch { return ''; } }
-// Zalando forecast is no longer baked — it lives in Supabase (forecast_inputs/outputs, channel ZAL). `zalando_data.json`
+// Zalando forecast is no longer baked — it lives in Supabase (forecast_inputs/outputs, channel ZAL). `temp files/zalando_data.json`
 // remains only as the source for migration 203 (the one-time seed). The old baked `ZAL_DATA` reader was removed (v26.751).
 // USD→GBP rate for the report GBP columns (CF_GBP/AF_GBP defaults). Legacy app_settings.usd_gbp_rate takes
 // precedence if still set; otherwise the current financial-year GBP→USD blended rate from CONFIG ▸ Admin ▸
@@ -743,7 +743,8 @@ function cookieVal(req, name) {
 }
 app.use((req, res, next) => {
   // Supplier portal has its own magic-link/session auth — it must NOT require the planner key.
-  if (req.path === '/portal' || req.path === '/portal-view.js' || req.path === '/api/version' || req.path.startsWith('/api/portal/')) return next();   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
+  if (req.path === '/portal' || req.path === '/portal-view.js' || req.path === '/api/version' || req.path.startsWith('/api/portal/')
+      || req.path === '/hz-theme.css' || req.path.startsWith('/fonts/')) return next();   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
   if (!GATE) return next();                       // open locally
   if (req.path.startsWith('/api/')) {             // APIs: header or cookie
     if (req.get('x-planner-key') === GATE || cookieVal(req, 'pk') === GATE) return next();
@@ -1150,7 +1151,7 @@ app.get('/api/demand/trends/type-mix', async (req, res) => {
 });
 // Cin7 branch → warehouse-code map (branches mapping to null are unmanaged and excluded). The in-app snapshot
 // uploader was removed (Ben 17-Aug-26); this map is kept as the single source of truth for the n8n inventory-snapshot
-// flow (1st/10th/20th → planner.inventory_snapshots) — see Claude Analyses/SPEC_N8N_FLOWS_FOR_DIVIYAJ.md.
+// flow (1st/10th/20th → planner.inventory_snapshots) — see docs/specs/SPEC_N8N_FLOWS_FOR_DIVIYAJ.md.
 const _INV_BRANCH_MAP = {
   'UK ILG': 'uk_3pl', 'US Geneva': 'us_3pl', 'AU Coghlans': 'au_3pl', 'US AWD': 'us_awd', 'US FBA': 'us_fba',
   'EU iFulfillment': 'eu_3pl', 'UK FBA': 'uk_fba', 'UK ILG non grs': 'uk_nongrs', 'US Geneva non GRS': 'us_nongrs',
@@ -1561,6 +1562,7 @@ app.get('/', async (req, res) => {
     if (ts) html = html.replace(/EXTRACT_TS\s*=\s*'[^']*'/, `EXTRACT_TS='${ts}'`);
     // Show the real app version (the artefact bakes its filename version 'v16.7'); only the VERSION const, not data.
     html = html.replace(/const VERSION\s*=\s*'[^']*'/, `const VERSION='${APP_VERSION}'`);
+    html = html.replace('</title>', () => '</title>\n' + HZ_THEME_LINK());   // HORIZON theme (tokens + shell) — __HZ_THEME__
     // Route the artefact's Claude calls through our key-attached proxy (same-origin, no CORS).
     html = html.split('https://api.anthropic.com/v1/messages').join('/api/ai');
     // The artefact hardcodes a retired Sonnet model (claude-sonnet-4-20250514) -> 404.
@@ -2241,6 +2243,26 @@ app.get('/api/supply/img', async (req, res) => {
     res.end(Buffer.from(await r.arrayBuffer()));
   } catch (e) { log500(e); res.status(500).end(); }
 });
+
+// ── HORIZON theme (design tokens + app shell) and self-hosted Hanken Grotesk ─────────────────────────────────
+// supply/hz-theme.css is the single source of truth for colour/type/radius; linked into the <head> of the app and the
+// supplier portal at serve time (see the two `__HZ_THEME__` injections). Fonts are served from supply/assets because
+// Google Fonts is blocked in mainland China (suppliers use the portal from there). v27.467
+function loadTheme() { try { return readFileSync(new URL('./supply/hz-theme.css', import.meta.url), 'utf8'); } catch { return ''; } }
+const HZ_THEME = DEV ? null : loadTheme();
+app.get('/hz-theme.css', (req, res) => {
+  res.setHeader('content-type', 'text/css; charset=utf-8');
+  res.setHeader('cache-control', DEV ? 'no-cache' : 'public, max-age=86400');   // URL carries ?v=<APP_VERSION>, so a day is safe
+  res.end(DEV ? loadTheme() : HZ_THEME);
+});
+app.get('/fonts/:name', (req, res) => {
+  const files = { 'hanken-grotesk-latin.woff2': 1, 'hanken-grotesk-latin-ext.woff2': 1 };
+  if (!files[req.params.name]) return res.status(404).end();
+  try { res.setHeader('content-type', 'font/woff2'); res.setHeader('cache-control', 'public, max-age=31536000, immutable');
+    res.end(readFileSync(new URL('./supply/assets/' + req.params.name, import.meta.url))); }
+  catch (e) { res.status(404).end(); }
+});
+const HZ_THEME_LINK = () => '<link rel="stylesheet" href="/hz-theme.css?v=' + APP_VERSION + '">';
 
 // Static brand asset for the carton/inner labels — the Global Recycled Standard logo (same-origin so it can be
 // embedded into the rasterised label PNG without tainting the canvas).
@@ -15411,6 +15433,7 @@ app.get('/portal', async (req, res) => {
       return res.redirect('/portal?e=expired');
     }
     var _pp = (DEV ? loadPortalPage() : PORTAL_PAGE).split('__APP_VERSION__').join(APP_VERSION);   // stamp version for the auto-update poll
+    _pp = _pp.replace('</title>', () => '</title>\n' + HZ_THEME_LINK());   // HORIZON theme (tokens + font) — __HZ_THEME__
     if (IS_SANDBOX) _pp = _pp.replace(/<body[^>]*>/, m => m + SANDBOX_BANNER);
     res.set('content-type', 'text/html').set('Cache-Control', 'no-store').send(_pp);
   } catch (e) { log500(e); res.status(500).send('portal error'); }

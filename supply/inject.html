@@ -3,7 +3,7 @@
      editable cells · src FLEX/M badges), scoped under #supply-root. PURCHASE ORDERS is an
      inline-editable engine (saves to /api/supply/po/:po); expand a PO for its linked records. -->
 <style>
-#supply-root{display:none;font-size:12px;color:#1a1a1a;padding-top:4px}
+#supply-root{display:none;font-size:12px;color:var(--ink);padding-top:4px}
 #app.supply-active > *:not(#dab-navwrap):not(#supply-root){display:none!important}
 /* while a SKU buy-plan popup is opened from SUPPLY (e.g. ORDER PLAN "PLAN" button), reveal #buy-wrap so its
    #ov overlay can render — the overlay (z300000) covers it; hidden again on close. The :not(#supply-root)
@@ -16,122 +16,122 @@
 /* CONFIG is now a top-level view: it reuses the SUPPLY render surface but hides the SUPPLY section sub-nav */
 #app.config-mode #supply-subnav,#app.config-mode #supply-nav-sel{display:none!important}
 /* PRODUCT — its own top-level surface, mirrors SUPPLY (migration 128 / v26.013) */
-#product-root{display:none;font-size:12px;color:#1a1a1a;padding-top:4px}
+#product-root{display:none;font-size:12px;color:var(--ink);padding-top:4px}
 /* Left-align everything in the Product module (Ben's standing default). */
 #product-root,#product-root th,#product-root td,#product-root input,#product-root select,#product-root textarea,#product-root .prow,#product-root .pg-card{text-align:left}
 #app.product-active > *:not(#dab-navwrap):not(#product-root):not(.hz-drawer-overlay){display:none!important}   /* spare a drawer-overlay supply-root so a sample drawer can float over the PRODUCT view */
 #app.product-active #dab-navwrap > *:not(#view-tabs-row){display:none!important}
 #app.product-active #view-tabs-row .tool-bar{display:none!important}
 /* product top sub-nav (Plan / Reports) — matches the PO-detail subnav (.po-subnav / .rtab) */
-#product-root #product-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #e0e0e0;margin:2px 0 10px}   /* level-2 underline tabs — match SUPPLY/SCENARIO (was a pill container) */
-#product-root #product-subnav .stab{background:transparent;border:none;padding:6px 14px;font-size:12px;font-weight:500;color:#7c93b8;cursor:pointer;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit}
-#product-root #product-subnav .stab:hover{color:#2563eb}
-#product-root #product-subnav .stab.active{color:#2563eb;border-bottom-color:#3b82f6;font-weight:600}
-#product-root .pg-card{border:1px solid #e5e7eb;border-radius:10px;background:#fff;overflow:hidden;cursor:pointer;transition:box-shadow .12s}
+#product-root #product-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:2px 0 10px}   /* level-2 underline tabs — match SUPPLY/SCENARIO (was a pill container) */
+#product-root #product-subnav .stab{background:transparent;border:none;padding:6px 14px;font-size:12px;font-weight:500;color:var(--faint);cursor:pointer;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit}
+#product-root #product-subnav .stab:hover{color:var(--blue)}
+#product-root #product-subnav .stab.active{color:var(--blue);border-bottom-color:var(--blue);font-weight:600}
+#product-root .pg-card{border:1px solid var(--line);border-radius:10px;background:#fff;overflow:hidden;cursor:pointer;transition:box-shadow .12s}
 #product-root .pg-card:hover{box-shadow:0 6px 18px rgba(15,23,42,.12)}
-#product-root .pg-swatch{width:100%;height:120px;object-fit:cover;background:#f1f5f9;display:block}
-#product-root .pg-swatch.none{display:flex;align-items:center;justify-content:center;color:#cbd5e1;font-size:11px}
-#product-root .fci{padding:5px 8px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px;font-family:inherit;box-sizing:border-box}
-#product-root .save-btn{border:1px solid #cbd5e1;background:#f8fafc;padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit;color:#1a1a1a}
+#product-root .pg-swatch{width:100%;height:120px;object-fit:cover;background:var(--hover);display:block}
+#product-root .pg-swatch.none{display:flex;align-items:center;justify-content:center;color:var(--line);font-size:11px}
+#product-root .fci{padding:5px 8px;border:1px solid var(--line);border-radius:5px;font-size:12px;font-family:inherit;box-sizing:border-box}
+#product-root .save-btn{border:1px solid var(--line);background:var(--hover);padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit;color:var(--ink)}
 #product-root .save-btn.light{background:#fff}
-#product-root .save-btn:hover{background:#eef2f7}
+#product-root .save-btn:hover{background:var(--hover)}
 /* Detail tabs — app-standard underline row (was a blue pill container). */
 #product-root .pd-tabs{display:flex;gap:6px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--p-line);margin:0 0 14px}
-#product-root .pd-tab{background:transparent;border:none;padding:8px 12px;margin-bottom:-1px;font-size:12px;font-weight:500;cursor:pointer;color:#64748b;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit}
-#product-root .pd-tab:hover{color:#2563eb}
-#product-root .pd-tab.active{color:#2563eb;border-bottom-color:#3b82f6;font-weight:700}
+#product-root .pd-tab{background:transparent;border:none;padding:8px 12px;margin-bottom:-1px;font-size:12px;font-weight:500;cursor:pointer;color:var(--muted);border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit}
+#product-root .pd-tab:hover{color:var(--blue)}
+#product-root .pd-tab.active{color:var(--blue);border-bottom-color:var(--blue);font-weight:700}
 #product-root .pd-skel{max-width:660px}
-#product-root .pd-skel-row{height:34px;margin-bottom:8px;border-radius:6px;background:linear-gradient(90deg,#f1f5f9 25%,#e2e8f0 37%,#f1f5f9 63%);background-size:400% 100%;animation:pdShimmer 1.2s ease-in-out infinite}
+#product-root .pd-skel-row{height:34px;margin-bottom:8px;border-radius:6px;background:linear-gradient(90deg,var(--hover) 25%,var(--line) 37%,var(--hover) 63%);background-size:400% 100%;animation:pdShimmer 1.2s ease-in-out infinite}
 #product-root .pd-skel-row:first-child{height:22px;width:40%}
 @keyframes pdShimmer{0%{background-position:100% 0}100%{background-position:0 0}}
-#product-root table.pg-tbl tr.pg-detrow > td{background:#fff;border-bottom:3px solid #94a3b8;padding:12px 10px}
+#product-root table.pg-tbl tr.pg-detrow > td{background:#fff;border-bottom:3px solid var(--faint);padding:12px 10px}
 /* highlight the expanded row light yellow (like the PO grid) — beats the sticky/hover bg */
-#product-root table.pg-tbl tr.pg-openrow > td{background:#fffbeb}
+#product-root table.pg-tbl tr.pg-openrow > td{background:var(--amber-bg)}
 #product-root .pm-field{width:280px;max-width:100%}
 @media(max-width:640px){ #product-root #pg-q{display:none} }
 #product-root .prow{display:flex;gap:10px;align-items:flex-start;padding:6px 0;border-bottom:1px solid #f4f4f5}
-#product-root .prow .pl{flex:0 0 160px;color:#555;font-size:12px;padding-top:4px}
+#product-root .prow .pl{flex:0 0 160px;color:var(--muted);font-size:12px;padding-top:4px}
 #product-root .tw{overflow-x:auto;-webkit-overflow-scrolling:touch}
 /* Product grid — PO-grid style table; sizes to content and scrolls sideways (the .tw wrapper is overflow-x:auto) */
 #product-root table.pg-tbl{border-collapse:separate;border-spacing:0;font-size:12px;width:max-content;min-width:100%}
-#product-root table.pg-tbl th{text-align:left;padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#64748b;background:#e9eef5;white-space:nowrap;position:sticky;top:0;z-index:1}
-#product-root table.pg-tbl td{text-align:left;padding:5px 10px;border-bottom:1px solid #f1f1f1;white-space:nowrap;background:#fff}
+#product-root table.pg-tbl th{text-align:left;padding:6px 10px;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);background:#e9eef5;white-space:nowrap;position:sticky;top:0;z-index:1}
+#product-root table.pg-tbl td{text-align:left;padding:5px 10px;border-bottom:1px solid var(--line2);white-space:nowrap;background:#fff}
 #product-root table.pg-tbl tr:hover td{background:#f8fbff}
 /* freeze the first two columns (swatch+P, and Ref/colour) while the rest scrolls */
 #product-root table.pg-tbl td:nth-child(1),#product-root table.pg-tbl th:nth-child(1){position:sticky;left:0;z-index:2;min-width:82px;max-width:82px}
 #product-root table.pg-tbl th:nth-child(1){z-index:3}
 #product-root table.pg-tbl td:nth-child(2),#product-root table.pg-tbl th:nth-child(2){position:sticky;left:82px;z-index:2;box-shadow:2px 0 4px -2px rgba(15,23,42,.15)}
 #product-root table.pg-tbl th:nth-child(2){z-index:3}
-#product-root .pg-swatch2{width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;vertical-align:middle}
-#product-root .pg-swatch2.none{display:inline-flex;align-items:center;justify-content:center;color:#cbd5e1;font-size:8px;background:#f1f5f9}
+#product-root .pg-swatch2{width:40px;height:40px;object-fit:cover;border-radius:6px;border:1px solid var(--line);vertical-align:middle}
+#product-root .pg-swatch2.none{display:inline-flex;align-items:center;justify-content:center;color:var(--line);font-size:8px;background:var(--hover)}
 /* PLAN button — mirror the #supply-root .planbtn look so the PRODUCT grid matches the PO grid */
-#product-root .planbtn{background:#1a1a1a;color:#fff;border:none;border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;letter-spacing:.05em;cursor:pointer;font-family:inherit}
+#product-root .planbtn{background:var(--ink);color:#fff;border:none;border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;letter-spacing:.05em;cursor:pointer;font-family:inherit}
 #product-root .planbtn:hover{background:#3730a3}#product-root .planbtn.open{background:#3730a3}
-#product-root .cell-pick{background:none;border:none;cursor:pointer;font:inherit;color:#1a1a1a;padding:0;text-align:left}
-#product-root .cell-pick:hover{color:#1d4ed8}
+#product-root .cell-pick{background:none;border:none;cursor:pointer;font:inherit;color:var(--ink);padding:0;text-align:left}
+#product-root .cell-pick:hover{color:var(--blue)}
 #product-root .pg-ref{font-weight:700;font-family:ui-monospace,Menlo,monospace}
-#product-root .pg-colour{font-weight:400;font-size:10px;color:#94a3b8;margin-top:1px}
+#product-root .pg-colour{font-weight:400;font-size:10px;color:var(--faint);margin-top:1px}
 /* ═══ PRODUCT facelift (v26.221) — design system + hybrid list⇄cards ═══ */
-#product-root{--p-ink:#0f172a;--p-mut:#64748b;--p-line:#e6e9ef;--p-bg:#f7f8fb;--p-acc:#4f46e5}
+#product-root{--p-ink:var(--nav);--p-mut:var(--muted);--p-line:#e6e9ef;--p-bg:var(--hover);--p-acc:#4f46e5}
 /* sub-nav: keep HORIZON's standard .stab style (consistent with SUPPLY / SCENARIO) — no bespoke restyle */
 /* filter bar */
 #product-root #pg-filters{gap:8px;align-items:center;margin-bottom:14px}
-#product-root #pg-filters .fci{border:1px solid #d5dae3;border-radius:9px;padding:7px 11px;font-size:12px;background:#fff;color:#0f172a}
+#product-root #pg-filters .fci{border:1px solid #d5dae3;border-radius:9px;padding:7px 11px;font-size:12px;background:#fff;color:var(--nav)}
 #product-root #pg-filters .fci:focus{outline:none;border-color:var(--p-acc);box-shadow:0 0 0 3px rgba(79,70,229,.12)}
 #product-root #pg-count{margin-left:auto}
 /* desktop list refinements */
 #product-root .pg-desktop .tw{border:1px solid var(--p-line);border-radius:12px;background:#fff}
 #product-root table.pg-tbl td{padding:9px 12px;border-bottom:1px solid #d8dde7}
 /* an expanded product row gets a strong top rule so the whole product block (row + its detail panel) reads as one unit, clearly bracketed from neighbours */
-#product-root table.pg-tbl tr.pg-openrow > td{border-top:2px solid #94a3b8}
+#product-root table.pg-tbl tr.pg-openrow > td{border-top:2px solid var(--faint)}
 #product-root table.pg-tbl th{padding:9px 12px;background:#fbfcfe;color:#8a93a3;border-bottom:1px solid var(--p-line)}
 #product-root table.pg-tbl tr:hover td{background:#f8faff}
 #product-root .pg-swatch2{width:44px;height:44px;border-radius:9px;box-shadow:0 1px 2px rgba(15,23,42,.10)}
 #product-root #pg-grid.pg-sw-sm .pg-swatch2{width:31px;height:31px}
 #product-root #pg-grid.pg-sw-lg .pg-swatch2{width:88px;height:88px;border-radius:12px}
-#product-root .pg-swsize{background:#fff;border:1px solid #cbd5e1;color:#64748b;font-size:11px;font-weight:600;padding:3px 8px;cursor:pointer;line-height:1}
+#product-root .pg-swsize{background:#fff;border:1px solid var(--line);color:var(--muted);font-size:11px;font-weight:600;padding:3px 8px;cursor:pointer;line-height:1}
 #product-root .pg-swsize:first-child{border-radius:6px 0 0 6px}
 #product-root .pg-swsize:last-child{border-radius:0 6px 6px 0;border-left:none}
 #product-root .pg-swsize:nth-child(2){border-left:none}
-#product-root .pg-swsize.active{background:#0f172a;color:#fff;border-color:#0f172a}
+#product-root .pg-swsize.active{background:var(--nav);color:#fff;border-color:var(--nav)}
 /* Identity hierarchy (Direction A #1): colour name leads, mono ref is the secondary subline (matches the mobile card). */
-#product-root .pg-colour{font-size:12.5px;color:#0f172a;font-weight:600;line-height:1.2}
-#product-root .pg-ref{font-weight:600;font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#94a3b8;margin-top:1px}
+#product-root .pg-colour{font-size:12.5px;color:var(--nav);font-weight:600;line-height:1.2}
+#product-root .pg-ref{font-weight:600;font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--faint);margin-top:1px}
 #product-root .pg-stage-wrap{display:flex;flex-direction:column;gap:2px;align-items:flex-start}
-#product-root .pg-stage-owner{font-size:9px;color:#94a3b8;letter-spacing:.02em;padding-left:2px;text-transform:uppercase}
+#product-root .pg-stage-owner{font-size:9px;color:var(--faint);letter-spacing:.02em;padding-left:2px;text-transform:uppercase}
 #product-root .pg-stage-sel{max-width:190px}
 /* Merged STAGE cell (Direction A #2): a coloured chip + owner that swaps to the select on click; the Approval column is gone (it is derived from stage — approval shows in the detail header + is implied by the chip colour). */
 #product-root .pg-stagechip{display:inline-flex;align-items:center;gap:6px;cursor:pointer;border-radius:5px;padding:2px 4px;margin:-2px -4px;max-width:100%}
-#product-root .pg-stagechip:hover{background:#f1f5f9}
+#product-root .pg-stagechip:hover{background:var(--hover)}
 #product-root .pg-stagechip:focus{outline:2px solid #bfdbfe;outline-offset:0}
-#product-root .pg-stage-own2{font-size:9px;color:#94a3b8;letter-spacing:.02em;text-transform:uppercase;white-space:nowrap}
+#product-root .pg-stage-own2{font-size:9px;color:var(--faint);letter-spacing:.02em;text-transform:uppercase;white-space:nowrap}
 /* Product pop-out drawer (RANGE PLAN / Dashboard → click a product = right-side slide-in of its detail; scoped to #product-root so the product-detail CSS applies). */
 #product-root #proddrawer-bg{position:fixed;inset:0;z-index:100002;background:rgba(15,23,42,0);transition:background .18s ease}
 #product-root #proddrawer-bg.open{background:rgba(15,23,42,.34)}
 #product-root #proddrawer{position:absolute;top:0;right:0;height:100%;width:clamp(min(900px,94vw),58vw,94vw);background:#fff;box-shadow:-8px 0 28px rgba(15,23,42,.18);display:flex;flex-direction:column;transform:translateX(100%);transition:transform .22s cubic-bezier(.4,0,.2,1)}
 #product-root #proddrawer-bg.open #proddrawer{transform:translateX(0)}
 #product-root .pd-drawhead{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 18px;border-bottom:1px solid var(--p-line);flex:0 0 auto}
-#product-root .pd-drawtitle{font-size:15px;font-weight:700;color:#0f172a;line-height:1.25}
-#product-root .pd-drawref{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#94a3b8;font-weight:500;margin-left:7px}
+#product-root .pd-drawtitle{font-size:15px;font-weight:700;color:var(--nav);line-height:1.25}
+#product-root .pd-drawref{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:var(--faint);font-weight:500;margin-left:7px}
 #product-root .pd-drawbody{flex:1 1 auto;overflow:auto;padding:6px 14px 22px}
-#product-root .pddraw-x{border:none;background:#f1f5f9;color:#475569;border-radius:6px;width:28px;height:28px;cursor:pointer;font-size:15px;line-height:1}
-#product-root .pddraw-x:hover{background:#e2e8f0}
+#product-root .pddraw-x{border:none;background:var(--hover);color:var(--muted);border-radius:6px;width:28px;height:28px;cursor:pointer;font-size:15px;line-height:1}
+#product-root .pddraw-x:hover{background:var(--line)}
 @media(max-width:820px){#product-root #proddrawer{width:100vw;height:100dvh;transform:translateY(100%)}#product-root #proddrawer-bg.open #proddrawer{transform:translateY(0)}}
 /* hybrid toggle */
 #product-root .pg-mobile{display:none}
 /* mobile cards */
-#product-root .pgm-shdr{font-weight:800;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:#334155;background:#e7ebf2;border-radius:8px;padding:6px 11px;margin:14px 0 8px}
-#product-root .pgm-chdr{font-weight:700;font-size:11px;letter-spacing:.02em;color:#64748b;margin:10px 2px 7px}
+#product-root .pgm-shdr{font-weight:800;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--ink-soft);background:#e7ebf2;border-radius:8px;padding:6px 11px;margin:14px 0 8px}
+#product-root .pgm-chdr{font-weight:700;font-size:11px;letter-spacing:.02em;color:var(--muted);margin:10px 2px 7px}
 #product-root .pgm-card{border:1px solid var(--p-line);border-radius:14px;background:#fff;padding:12px 13px;margin-bottom:10px;box-shadow:0 1px 2px rgba(15,23,42,.05);cursor:pointer;transition:box-shadow .12s,border-color .12s}
 #product-root .pgm-card:active{box-shadow:0 2px 8px rgba(15,23,42,.10)}
 #product-root .pgm-card.open{border-color:#c7d2fe;box-shadow:0 4px 14px rgba(79,70,229,.12)}
 #product-root .pgm-top{display:flex;gap:12px;align-items:center}
-#product-root .pgm-sw{width:52px;height:52px;object-fit:cover;border-radius:11px;border:1px solid #e5e7eb;flex:0 0 auto;box-shadow:0 1px 2px rgba(15,23,42,.10)}
-#product-root .pgm-sw.none{display:inline-block;background:#f1f5f9}
+#product-root .pgm-sw{width:52px;height:52px;object-fit:cover;border-radius:11px;border:1px solid var(--line);flex:0 0 auto;box-shadow:0 1px 2px rgba(15,23,42,.10)}
+#product-root .pgm-sw.none{display:inline-block;background:var(--hover)}
 #product-root .pgm-meta{flex:1;min-width:0}
-#product-root .pgm-colour{font-weight:700;font-size:15px;color:#0f172a;line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#product-root .pgm-ref{font-size:11px;color:#94a3b8;font-family:ui-monospace,Menlo,monospace;margin-top:2px;display:flex;align-items:center;gap:6px}
-#product-root .pgm-sub{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:10px;padding-top:10px;border-top:1px solid #f1f3f7;font-size:12px;color:#64748b}
+#product-root .pgm-colour{font-weight:700;font-size:15px;color:var(--nav);line-height:1.2;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#product-root .pgm-ref{font-size:11px;color:var(--faint);font-family:ui-monospace,Menlo,monospace;margin-top:2px;display:flex;align-items:center;gap:6px}
+#product-root .pgm-sub{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:10px;padding-top:10px;border-top:1px solid #f1f3f7;font-size:12px;color:var(--muted)}
 #product-root .pg-mdet{background:#fff}
 @media(max-width:640px){
   #product-root .pg-desktop{display:none}
@@ -143,18 +143,18 @@
   #product-root table.pg-tbl td:nth-child(1),#product-root table.pg-tbl th:nth-child(1){min-width:64px;max-width:64px}
   #product-root table.pg-tbl td:nth-child(2),#product-root table.pg-tbl th:nth-child(2){left:64px}
 }
-#supply-subnav{display:flex;gap:2px;border-bottom:1px solid #e0e0e0;margin:2px 0 4px;align-items:center;flex-wrap:wrap}
-#supply-root .stab{background:transparent;border:none;padding:6px 13px;font-size:12px;font-weight:500;cursor:pointer;color:#888;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit;text-decoration:none;display:inline-block}
-#supply-root .stab:hover{color:#1a1a1a}
-#supply-root .stab.active{color:#1a1a1a;border-bottom-color:#1a1a1a;font-weight:600}
+#supply-subnav{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:2px 0 4px;align-items:center;flex-wrap:wrap}
+#supply-root .stab{background:transparent;border:none;padding:6px 13px;font-size:12px;font-weight:500;cursor:pointer;color:var(--faint);border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit;text-decoration:none;display:inline-block}
+#supply-root .stab:hover{color:var(--ink)}
+#supply-root .stab.active{color:var(--ink);border-bottom-color:var(--ink);font-weight:600}
 /* Desktop version badge — the amber box (matches mobile's #hz-ver). This is the version that actually persists on
    SUPPLY/SCENARIO/PRODUCT (the artifact's #ver is a separate DEMAND-side element). position:relative for the load spinner. */
-#supply-root .ver,#scenario-root .ver,#product-root .ver{margin-left:auto;color:#0f172a;background:#fbbf24;border-radius:6px;padding:2px 8px;font-size:10px;font-weight:800;line-height:1.2;letter-spacing:.02em;position:relative;flex:0 0 auto}
+#supply-root .ver,#scenario-root .ver,#product-root .ver{margin-left:auto;color:var(--nav);background:var(--prod);border-radius:6px;padding:2px 8px;font-size:10px;font-weight:800;line-height:1.2;letter-spacing:.02em;position:relative;flex:0 0 auto}
 /* Global "loading" spinner — a subtle overlay ON the version badge (desktop .ver / #ver, mobile #hz-ver), driven by
    in-flight fetch activity. One consistent indicator instead of per-container "Loading…" rows that flash on swap. */
 #hz-ver,#ver{position:relative}
-.hz-verspin{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:4px;border-radius:6px;background:rgba(251,191,36,.96);z-index:6;pointer-events:none;font-size:8.5px;font-weight:800;color:#0f172a;letter-spacing:.02em;overflow:hidden}
-.hz-verspin::before{content:'';width:9px;height:9px;border:2px solid rgba(15,23,42,.3);border-top-color:#0f172a;border-radius:50%;animation:hzspin .7s linear infinite;flex:0 0 auto}
+.hz-verspin{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:4px;border-radius:6px;background:rgba(251,191,36,.96);z-index:6;pointer-events:none;font-size:8.5px;font-weight:800;color:var(--nav);letter-spacing:.02em;overflow:hidden}
+.hz-verspin::before{content:'';width:9px;height:9px;border:2px solid rgba(15,23,42,.3);border-top-color:var(--nav);border-radius:50%;animation:hzspin .7s linear infinite;flex:0 0 auto}
 @keyframes hzspin{to{transform:rotate(360deg)}}
 /* PRODUCT ▸ DASHBOARD: matrix table on desktop, card layout on mobile (toggled at 640px). */
 .db-mobile{display:none}
@@ -167,96 +167,96 @@
 /* Timeline notifications — top-bar messages bell + unread counter + pop-down drawer */
 #supply-root #supply-subnav{position:relative}
 /* Timeline messages bell — lives in the top bar (#view-tabs-row) next to SA, visible on every view. v26.006 */
-#view-tabs-row .tl-bell{position:relative;background:none;border:none;cursor:pointer;font-size:15px;color:#cbd5e1;padding:2px 7px;line-height:1;flex:0 0 auto;margin-right:2px}
+#view-tabs-row .tl-bell{position:relative;background:none;border:none;cursor:pointer;font-size:15px;color:var(--line);padding:2px 7px;line-height:1;flex:0 0 auto;margin-right:2px}
 #view-tabs-row .tl-bell:hover{color:#fff}
 #supply-root #supply-subnav .ver{margin-left:auto}
-#tl-count{margin-left:3px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;border-radius:8px;min-width:15px;height:15px;line-height:15px;text-align:center;padding:0 3px;display:none;vertical-align:middle}
+#tl-count{margin-left:3px;background:var(--neg);color:#fff;font-size:9px;font-weight:700;border-radius:8px;min-width:15px;height:15px;line-height:15px;text-align:center;padding:0 3px;display:none;vertical-align:middle}
 #tl-count.on{display:inline-block}
-#tl-drop{position:fixed;top:52px;right:12px;width:370px;max-width:94vw;max-height:72vh;overflow-y:auto;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 12px 34px rgba(15,23,42,.24);z-index:100050;display:none}
+#tl-drop{position:fixed;top:52px;right:12px;width:370px;max-width:94vw;max-height:72vh;overflow-y:auto;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 34px rgba(15,23,42,.24);z-index:100050;display:none}
 #tl-drop.open{display:block}
-#act-drop{position:fixed;top:52px;right:12px;width:390px;max-width:94vw;max-height:72vh;overflow-y:auto;background:#fff;border:1px solid #cbd5e1;border-radius:10px;box-shadow:0 12px 34px rgba(15,23,42,.24);z-index:100050;display:none;font-size:12px;color:#1a1a1a;line-height:1.4}
+#act-drop{position:fixed;top:52px;right:12px;width:390px;max-width:94vw;max-height:72vh;overflow-y:auto;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:0 12px 34px rgba(15,23,42,.24);z-index:100050;display:none;font-size:12px;color:var(--ink);line-height:1.4}
 #act-drop.open{display:block}
-#act-drop .act-item{padding:8px 12px;border-bottom:1px solid #f1f5f9;display:flex;gap:9px;align-items:flex-start}
+#act-drop .act-item{padding:8px 12px;border-bottom:1px solid var(--hover);display:flex;gap:9px;align-items:flex-start}
 #act-drop .act-item:last-child{border-bottom:none}
-#act-drop .act-ref{font-weight:700;color:#1d4ed8;cursor:pointer}
-#act-drop .act-when{color:#94a3b8;font-size:10px;white-space:nowrap;margin-left:auto;padding-left:8px}
+#act-drop .act-ref{font-weight:700;color:var(--blue);cursor:pointer}
+#act-drop .act-when{color:var(--faint);font-size:10px;white-space:nowrap;margin-left:auto;padding-left:8px}
 /* dropdown content — scoped to #tl-drop (it now lives on <body>, not under #supply-root). v26.007 */
-#tl-drop{font-size:12px;color:#1a1a1a;line-height:1.4}
-#tl-drop .mut{color:#888}
+#tl-drop{font-size:12px;color:var(--ink);line-height:1.4}
+#tl-drop .mut{color:var(--faint)}
 #tl-drop .tiny{font-size:9.5px}
-#tl-drop .count{color:#999;font-size:11px}
-#tl-drop .tl-item{padding:9px 12px;border-bottom:1px solid #f1f5f9}
+#tl-drop .count{color:var(--faint);font-size:11px}
+#tl-drop .tl-item{padding:9px 12px;border-bottom:1px solid var(--hover)}
 #tl-drop .tl-item:last-child{border-bottom:none}
-#tl-drop .tl-po{font-weight:700;color:#1d4ed8;cursor:pointer}
+#tl-drop .tl-po{font-weight:700;color:var(--blue);cursor:pointer}
 #tl-drop .tl-po:hover{text-decoration:underline}
-#tl-drop .tl-body{color:#334155;margin:3px 0;white-space:pre-wrap;word-break:break-word;font-size:12px}
+#tl-drop .tl-body{color:var(--ink-soft);margin:3px 0;white-space:pre-wrap;word-break:break-word;font-size:12px}
 #tl-drop .tl-acts{display:flex;gap:6px;margin-top:5px;flex-wrap:wrap;align-items:center}
-#tl-drop .tl-acts button{font-size:11px;padding:2px 9px;border:1px solid #cbd5e1;background:#f8fafc;border-radius:5px;cursor:pointer;font-family:inherit;color:#1a1a1a}
-#tl-drop .tl-acts button:hover{background:#eef2f7}
+#tl-drop .tl-acts button{font-size:11px;padding:2px 9px;border:1px solid var(--line);background:var(--hover);border-radius:5px;cursor:pointer;font-family:inherit;color:var(--ink)}
+#tl-drop .tl-acts button:hover{background:var(--hover)}
 #tl-drop .tl-acts .tl-snooze{padding:2px 8px;min-width:30px;text-align:center}
-#tl-drop .tl-snz-lbl{font-size:11px;color:#94a3b8;margin-left:4px}
-#supply-root .annot{background:#0f172a;color:#cbd5e1;font-size:11px;border-radius:6px;padding:8px 12px;margin:0 0 10px;line-height:1.5}
+#tl-drop .tl-snz-lbl{font-size:11px;color:var(--faint);margin-left:4px}
+#supply-root .annot{background:var(--nav);color:var(--line);font-size:11px;border-radius:6px;padding:8px 12px;margin:0 0 10px;line-height:1.5}
 #supply-root .annot b{color:#7dd3fc}
 #supply-root .bar{display:flex;align-items:center;margin-bottom:8px;flex-wrap:wrap}
 #supply-root .bar>*{margin:2px 5px 2px 0;flex:0 0 auto}   /* explicit spacing + no shrink (some webviews drop flex gap → overlap, or shrink items → clip); wrap instead */
 #supply-root .bar-grp{display:inline-flex;align-items:center}
 #supply-root .bar-grp>*{margin-right:5px}
 #supply-root .bar-grp>*:last-child{margin-right:0}
-#supply-root .bar-sep{flex:0 0 1px;width:1px;height:16px;background:#c3d4ee;display:inline-block}
+#supply-root .bar-sep{flex:0 0 1px;width:1px;height:16px;background:var(--line);display:inline-block}
 /* label-settings bar uses normal inline-block flow (not flex) — robust against this webview's flex-wrap height/gap quirks; the block container always grows to fit wrapped rows */
 #supply-root #bc-settings{display:flow-root}   /* flow-root contains the floated Download-all button so the box still grows */
 #supply-root #bc-settings>*{display:inline-block;vertical-align:middle}
 #supply-root .bc-dlall-btn{float:right;margin-left:8px}   /* all three Download-all buttons sit top-right, grouped together, above the grid's "labels" column */
 #supply-root .bc-dlall-btn:hover{background:#bfdbfe}
-#supply-root .pill{padding:3px 9px;font-size:10px;cursor:pointer;border:1px solid #d0d0d0;background:#fff;color:#666;border-radius:4px;white-space:nowrap;font-weight:600}
-#supply-root .pill:hover{background:#f5f5f5;color:#333}
-#supply-root .pill.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
+#supply-root .pill{padding:3px 9px;font-size:10px;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:4px;white-space:nowrap;font-weight:600}
+#supply-root .pill:hover{background:var(--hover);color:var(--ink-soft)}
+#supply-root .pill.active{background:var(--ink);color:#fff;border-color:var(--ink)}
 /* "Last 12m" toggle pills — forest green so the default-on filter is easy to spot */
-#supply-root .pill.po-recent,#supply-root .pill.ship-recent{background:#f0fdf4;color:#166534;border-color:#86efac}
-#supply-root .pill.po-recent:hover,#supply-root .pill.ship-recent:hover{background:#dcfce7;color:#166534}
-#supply-root .pill.po-recent.active,#supply-root .pill.ship-recent.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
+#supply-root .pill.po-recent,#supply-root .pill.ship-recent{background:var(--pos-bg);color:var(--pos);border-color:#86efac}
+#supply-root .pill.po-recent:hover,#supply-root .pill.ship-recent:hover{background:var(--pos-bg);color:var(--pos)}
+#supply-root .pill.po-recent.active,#supply-root .pill.ship-recent.active{background:var(--ink);color:#fff;border-color:var(--ink)}
 #supply-root .pill.po-recent.active:hover,#supply-root .pill.ship-recent.active:hover{background:#000;color:#fff}
 /* ⭐ Focus / favourite — star icon next to PLAN + the amber Focus filter pill */
-#supply-root .fav-star{background:none;border:none;cursor:pointer;font-size:15px;line-height:1;padding:0 1px;margin-left:4px;color:#94a3b8;vertical-align:middle}
+#supply-root .fav-star{background:none;border:none;cursor:pointer;font-size:15px;line-height:1;padding:0 1px;margin-left:4px;color:var(--faint);vertical-align:middle}
 #supply-root .fav-star:hover{color:#f59e0b}
 #supply-root .fav-star.on{color:#f59e0b}
-#supply-root .fav-star.esc{color:#dc2626}   /* escalated shipment → red focus star */
-#supply-root .pill.po-focus,#supply-root .pill.ship-focus{background:#fffbeb;color:#b45309;border-color:#fcd34d}
-#supply-root .pill.po-focus:hover,#supply-root .pill.ship-focus:hover{background:#fef3c7;color:#b45309}
-#supply-root .pill.po-focus.active,#supply-root .pill.ship-focus.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
+#supply-root .fav-star.esc{color:var(--neg)}   /* escalated shipment → red focus star */
+#supply-root .pill.po-focus,#supply-root .pill.ship-focus{background:var(--amber-bg);color:var(--amber);border-color:#fcd34d}
+#supply-root .pill.po-focus:hover,#supply-root .pill.ship-focus:hover{background:var(--amber-bg);color:var(--amber)}
+#supply-root .pill.po-focus.active,#supply-root .pill.ship-focus.active{background:var(--ink);color:#fff;border-color:var(--ink)}
 #supply-root .pill.po-focus.active:hover,#supply-root .pill.ship-focus.active:hover{background:#000;color:#fff}
-#supply-root .pill-lbl{font-size:11px;color:#444;font-weight:600}
+#supply-root .pill-lbl{font-size:11px;color:var(--muted);font-weight:600}
 /* compact PO filter bars — tighter spacing between pills and their labels */
 #supply-root #po-prog>*,#supply-root #po-act>*,#supply-root #po-ctry>*{margin:2px 3px 2px 0}
 #supply-root #po-prog .pill,#supply-root #po-act .pill,#supply-root #po-ctry .pill{padding:2px 7px}
 /* level-3 sub-navs (REPORTS, CONFIG): underline tabs like the level-1/2 menus, in light blue */
-#supply-root #rep-subnav,#supply-root #prod-subtabs,#supply-root .po-subnav{display:flex;gap:2px;align-items:center;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 12px}
-#supply-root #config-subs{display:flex;gap:2px;align-items:center;flex-wrap:wrap;border-bottom:1px solid #e0e0e0;margin:2px 0 10px}   /* CONFIG level-2 = underline tabs, match other views (level-3 #config-subs-l3 stays a pill) */
-#supply-root #config-subs .rtab{color:#888;padding:6px 13px;font-weight:500}   /* match SUPPLY .stab colours (was blue .rtab) */
-#supply-root #config-subs .rtab:hover{color:#1a1a1a}
-#supply-root #config-subs .rtab.active{color:#1a1a1a;border-bottom-color:#1a1a1a;font-weight:600}
+#supply-root #rep-subnav,#supply-root #prod-subtabs,#supply-root .po-subnav{display:flex;gap:2px;align-items:center;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;background:#f0f6ff;border:1px solid var(--blue-soft);border-radius:6px;padding:2px 5px;margin:0 0 12px}
+#supply-root #config-subs{display:flex;gap:2px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line);margin:2px 0 10px}   /* CONFIG level-2 = underline tabs, match other views (level-3 #config-subs-l3 stays a pill) */
+#supply-root #config-subs .rtab{color:var(--faint);padding:6px 13px;font-weight:500}   /* match SUPPLY .stab colours (was blue .rtab) */
+#supply-root #config-subs .rtab:hover{color:var(--ink)}
+#supply-root #config-subs .rtab.active{color:var(--ink);border-bottom-color:var(--ink);font-weight:600}
 /* SUPPLY ▸ CONFIG is a flat one-level menu (Ben): style it as a light-blue L3 pill row like rep-subnav / prod-subtabs, not the grey underline L2 */
-#supply-root #config-subs.cfg-flat{background:#f0f6ff;border:1px solid #dbeafe;border-bottom:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:2px 0 12px;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}
-#supply-root #config-subs.cfg-flat .rtab{color:#7c93b8;padding:6px 14px;font-weight:500;border-bottom:2px solid transparent;flex:0 0 auto;white-space:nowrap}
-#supply-root #config-subs.cfg-flat .rtab:hover{color:#2563eb}
-#supply-root #config-subs.cfg-flat .rtab.active{color:#2563eb;border-bottom-color:#3b82f6;font-weight:600}
+#supply-root #config-subs.cfg-flat{background:#f0f6ff;border:1px solid var(--blue-soft);border-bottom:1px solid var(--blue-soft);border-radius:6px;padding:2px 5px;margin:2px 0 12px;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch}
+#supply-root #config-subs.cfg-flat .rtab{color:var(--faint);padding:6px 14px;font-weight:500;border-bottom:2px solid transparent;flex:0 0 auto;white-space:nowrap}
+#supply-root #config-subs.cfg-flat .rtab:hover{color:var(--blue)}
+#supply-root #config-subs.cfg-flat .rtab.active{color:var(--blue);border-bottom-color:var(--blue);font-weight:600}
 /* CONFIG level-3 nav (members of the "Supply chain" tab): a lighter, indented strip under the level-2 row */
-#supply-root #config-subs-l3{display:flex;gap:2px;align-items:center;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 12px}   /* match the other L3 menus (rep-subnav / prod-subtabs) — light blue, not indented */
+#supply-root #config-subs-l3{display:flex;gap:2px;align-items:center;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;background:#f0f6ff;border:1px solid var(--blue-soft);border-radius:6px;padding:2px 5px;margin:0 0 12px}   /* match the other L3 menus (rep-subnav / prod-subtabs) — light blue, not indented */
 /* Searchable SKU dropdown (Manufacturing BOM): input + filtering popover, picks from the product list */
-#supply-root .skusel-drop{display:none;position:absolute;z-index:60;left:0;top:100%;min-width:260px;max-width:380px;max-height:240px;overflow:auto;background:#fff;border:1px solid #cbd5e1;border-radius:6px;box-shadow:0 6px 18px rgba(15,23,42,.14);margin-top:2px}
+#supply-root .skusel-drop{display:none;position:absolute;z-index:60;left:0;top:100%;min-width:260px;max-width:380px;max-height:240px;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:6px;box-shadow:0 6px 18px rgba(15,23,42,.14);margin-top:2px}
 #supply-root .skusel-drop.open{display:block}
 #supply-root .skusel-opt{padding:5px 9px;font-size:12px;cursor:pointer;white-space:nowrap}
-#supply-root .skusel-opt:hover{background:#eff6ff}
-#supply-root .skusel-opt .mut{color:#94a3b8}
+#supply-root .skusel-opt:hover{background:var(--blue-soft)}
+#supply-root .skusel-opt .mut{color:var(--faint)}
 /* keep each tab's label + its action-count badge on one line (never wrap the badge below the header) */
 #supply-root #rep-subnav .rtab,#supply-root #prod-subtabs .rtab,#supply-root .po-subnav .rtab{white-space:nowrap;flex:0 0 auto}
 #supply-root #prod-subtabs .rtab .ex-badge,#supply-root .po-subnav .rtab .ex-badge{display:inline-block;vertical-align:middle}
-#supply-root .rtab-count{display:inline-block;margin-left:5px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;line-height:1;padding:2px 5px;border-radius:8px;vertical-align:middle}
+#supply-root .rtab-count{display:inline-block;margin-left:5px;background:var(--neg);color:#fff;font-size:9px;font-weight:700;line-height:1;padding:2px 5px;border-radius:8px;vertical-align:middle}
 /* PRODUCT ▸ Config L3 menu — same light-blue pill style as the SUPPLY/REPORTS L3 navs (which are scoped to #supply-root) */
-#product-root #pcfg-subs-l3{display:flex;gap:2px;align-items:center;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 14px}
-#product-root #pcfg-subs-l3 .rtab{background:transparent;border:none;padding:6px 14px;font-size:12px;font-weight:500;cursor:pointer;color:#7c93b8;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit;white-space:nowrap;flex:0 0 auto}
-#product-root #pcfg-subs-l3 .rtab:hover{color:#2563eb}
-#product-root #pcfg-subs-l3 .rtab.active{color:#2563eb;border-bottom-color:#3b82f6;font-weight:600}
+#product-root #pcfg-subs-l3{display:flex;gap:2px;align-items:center;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;background:#f0f6ff;border:1px solid var(--blue-soft);border-radius:6px;padding:2px 5px;margin:0 0 14px}
+#product-root #pcfg-subs-l3 .rtab{background:transparent;border:none;padding:6px 14px;font-size:12px;font-weight:500;cursor:pointer;color:var(--faint);border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit;white-space:nowrap;flex:0 0 auto}
+#product-root #pcfg-subs-l3 .rtab:hover{color:var(--blue)}
+#product-root #pcfg-subs-l3 .rtab.active{color:var(--blue);border-bottom-color:var(--blue);font-weight:600}
 /* inline Pantone chip → reveal the large swatch card on hover */
 .pan-hover:hover .pan-hovercard{display:block!important}
 /* Opened PO detail lives inside the wide, horizontally-scrolling PO grid — pin its sub-tab strip to the left
@@ -264,16 +264,16 @@
 /* The expanded PO detail panel (.po-detail-wrap) is pinned to the left of the horizontally-scrolling grid via
    JS (bindPoScrollPin): a passive scroll listener translateX()es it by the grid's scrollLeft. CSS sticky can't
    do it — the colspan cell fills the full table width, so sticky has no containing-block slack to slide in. */
-#supply-root .ex-badge{display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px}
+#supply-root .ex-badge{display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:var(--neg);color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px}
 /* PRODUCT module lives under #product-root (not #supply-root) — mirror the red notification badge so grid-row + timeline-tab counts render as a badge, not a bare "1" */
-#product-root .ex-badge{display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px}
+#product-root .ex-badge{display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:var(--neg);color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px}
 #product-root .pd-tabs .pd-tab .ex-badge{vertical-align:middle}
-#supply-root .po-set-shipping{font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:#dbeafe;border:1px solid #60a5fa;color:#1d4ed8;cursor:pointer;white-space:nowrap}
+#supply-root .po-set-shipping{font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:var(--blue-soft);border:1px solid #60a5fa;color:var(--blue);cursor:pointer;white-space:nowrap}
 #supply-root .po-set-stm{font-size:9px;font-weight:700;padding:2px 6px;border-radius:4px;background:#e0f0fb;border:1px solid #4C9BE0;color:#06283d;cursor:pointer;white-space:nowrap}
 #supply-root .po-set-stm:hover{background:#c9e5f7}
 #supply-root .datewrap{display:inline-flex;align-items:center;gap:2px;position:relative}
-#supply-root .datepick{border:1px solid #cbd5e1;background:#f8fafc;border-radius:4px;cursor:pointer;font-size:11px;line-height:1;padding:3px 4px}
-#supply-root .datepick:hover{background:#eef2f7}
+#supply-root .datepick{border:1px solid var(--line);background:var(--hover);border-radius:4px;cursor:pointer;font-size:11px;line-height:1;padding:3px 4px}
+#supply-root .datepick:hover{background:var(--hover)}
 #supply-root .datepick[disabled]{opacity:.4;cursor:not-allowed}
 #supply-root .datepicknative{position:absolute;right:0;bottom:0;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0;margin:0}
 /* DATES tab: the "Date" column is narrow — make the date field fluid so the text box shrinks and the 📅 picker
@@ -281,31 +281,31 @@
 #supply-root .dates-tbl .datewrap{display:flex;width:100%;max-width:100%}
 #supply-root .dates-tbl .datewrap .dateinp{flex:1 1 auto;min-width:0;width:auto!important}
 #supply-root .dates-tbl .datewrap .datepick{flex:0 0 auto}
-#supply-root .dateinp.err{border-color:#dc2626 !important;background:#fef2f2}
+#supply-root .dateinp.err{border-color:var(--neg) !important;background:var(--neg-bg)}
 /* subtle inline grid date editor — looks like plain read-only text until hovered/focused (no blue box) */
-#supply-root .fci.dinline{border:1px solid transparent;background:transparent;color:#1a1a1a;text-align:left;padding:1px 3px;min-width:0;border-radius:3px;cursor:text}
+#supply-root .fci.dinline{border:1px solid transparent;background:transparent;color:var(--ink);text-align:left;padding:1px 3px;min-width:0;border-radius:3px;cursor:text}
 #supply-root .fci.dinline:hover{border-color:#d8dee7;background:#fff}
-#supply-root .fci.dinline:focus{border-color:#94a3b8;background:#fff;outline:none}
-#supply-root .fci.dinline.err{border-color:#dc2626 !important;background:#fef2f2}
+#supply-root .fci.dinline:focus{border-color:var(--faint);background:#fff;outline:none}
+#supply-root .fci.dinline.err{border-color:var(--neg) !important;background:var(--neg-bg)}
 /* breathing room below the PO / shipments grids so a bottom-row popover (assign shipment/deposit) has space to open */
 #supply-root .grid-tailspace{height:100px}
 #supply-root .po-set-shipping:hover{background:#bfdbfe}
-#supply-root .po-note-badge{display:inline-block;min-width:13px;height:13px;line-height:12px;border-radius:3px;background:#ede9fe;color:#6d28d9;border:1px solid #c4b5fd;font-size:8px;font-weight:800;text-align:center;padding:0 3px;margin-left:4px;vertical-align:1px;cursor:pointer;font-family:inherit}
+#supply-root .po-note-badge{display:inline-block;min-width:13px;height:13px;line-height:12px;border-radius:3px;background:var(--violet-bg);color:var(--violet);border:1px solid #c4b5fd;font-size:8px;font-weight:800;text-align:center;padding:0 3px;margin-left:4px;vertical-align:1px;cursor:pointer;font-family:inherit}
 #supply-root .po-note-badge:hover{background:#ddd6fe}
-#po-note-tip{position:fixed;z-index:9000;display:none;max-width:340px;background:#1f2937;color:#fff;font-size:11px;line-height:1.35;padding:6px 9px;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.25);white-space:pre-wrap;pointer-events:none}
+#po-note-tip{position:fixed;z-index:9000;display:none;max-width:340px;background:var(--ink-soft);color:#fff;font-size:11px;line-height:1.35;padding:6px 9px;border-radius:6px;box-shadow:0 4px 14px rgba(0,0,0,.25);white-space:pre-wrap;pointer-events:none}
 #supply-root tr.row-open>td{background:#FDFBD4 !important}   /* the currently-open PO / shipment row (overrides sticky-column white) */
 #supply-root .cli-form{max-width:660px;margin-bottom:10px}
-#supply-root .cli-row{display:flex;align-items:flex-start;gap:10px;padding:5px 0;border-bottom:1px solid #f1f1f1}
-#supply-root .cli-lbl{flex:0 0 170px;font-size:11px;color:#444;font-weight:600;padding-top:4px}
+#supply-root .cli-row{display:flex;align-items:flex-start;gap:10px;padding:5px 0;border-bottom:1px solid var(--line2)}
+#supply-root .cli-lbl{flex:0 0 170px;font-size:11px;color:var(--muted);font-weight:600;padding-top:4px}
 #supply-root .cli-val{flex:1 1 auto;min-width:0}
 /* Cap fixed-width inputs (client name 360px, etc.) to their column so they never overflow into the neighbouring
    column's labels (e.g. the client-name input crossing over the "Polybags" label on the Client/FBA tab). boolsel stays its own width. */
 #supply-root .cli-val input,#supply-root .cli-val textarea,#supply-root .cli-val select{max-width:100%;box-sizing:border-box}
 #supply-root .cli-val select.boolsel{max-width:120px}
 #supply-root .xd-pick{display:flex;flex-wrap:wrap;align-items:center;gap:3px}
-#supply-root .rtab{background:transparent;border:none;padding:6px 14px;font-size:12px;font-weight:500;cursor:pointer;color:#7c93b8;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit}
-#supply-root .rtab:hover{color:#2563eb}
-#supply-root .rtab.active{color:#2563eb;border-bottom-color:#3b82f6;font-weight:600}
+#supply-root .rtab{background:transparent;border:none;padding:6px 14px;font-size:12px;font-weight:500;cursor:pointer;color:var(--faint);border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit}
+#supply-root .rtab:hover{color:var(--blue)}
+#supply-root .rtab.active{color:var(--blue);border-bottom-color:var(--blue);font-weight:600}
 /* Shipment / PO drawer — right-side slide-in popout (open a shipment or PO without leaving the current page) */
 #supply-root #shipdrawer-bg,#supply-root #podrawer-bg,#supply-root #sampdrawer-bg{position:fixed;inset:0;z-index:6100;background:rgba(15,23,42,0);transition:background .18s ease}   /* above the mobile PO sheet (#mob-sheet-ov, z6000) so the drawer opens on top of it */
 #supply-root #shipdrawer-bg.open,#supply-root #podrawer-bg.open,#supply-root #sampdrawer-bg.open{background:rgba(15,23,42,.32)}
@@ -318,10 +318,10 @@
    z-index (100002) still beats the plan popup (z9000). */
 #supply-root.hz-drawer-overlay{display:block!important;padding:0!important}
 #supply-root.hz-drawer-overlay > *:not(#podrawer-bg):not(#shipdrawer-bg):not(#sampdrawer-bg):not(#mob-sheet-ov){display:none!important}
-#supply-root .shipdrawer-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 18px;border-bottom:1px solid #e6ebf2;background:#f8fafc;flex:0 0 auto}
-#supply-root .shipdrawer-title{font-size:15px;font-weight:700;color:#0f172a}
-#supply-root .shipdrawer-x{background:transparent;border:none;font-size:18px;line-height:1;cursor:pointer;color:#64748b;padding:4px 8px;font-family:inherit}
-#supply-root .shipdrawer-x:hover{color:#0f172a}
+#supply-root .shipdrawer-head{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 18px;border-bottom:1px solid #e6ebf2;background:var(--hover);flex:0 0 auto}
+#supply-root .shipdrawer-title{font-size:15px;font-weight:700;color:var(--nav)}
+#supply-root .shipdrawer-x{background:transparent;border:none;font-size:18px;line-height:1;cursor:pointer;color:var(--muted);padding:4px 8px;font-family:inherit}
+#supply-root .shipdrawer-x:hover{color:var(--nav)}
 #supply-root .shipdrawer-full{margin-right:6px}
 #supply-root .shipdrawer-body{padding:16px 18px;overflow:auto;flex:1 1 auto}
 /* Mobile: the drawer becomes a full-screen takeover (slides up from the bottom, dark app header) — a distinct
@@ -332,24 +332,24 @@
   #supply-root #shipdrawer-bg,#supply-root #podrawer-bg,#supply-root #sampdrawer-bg{background:transparent!important}
   #supply-root #shipdrawer,#supply-root #podrawer,#supply-root #sampdrawer{top:0;right:0;left:0;width:100vw;height:100vh;height:100dvh;box-shadow:none;transform:translateY(100%);transition:transform .24s cubic-bezier(.4,0,.2,1)}
   #supply-root #shipdrawer-bg.open #shipdrawer,#supply-root #podrawer-bg.open #podrawer,#supply-root #sampdrawer-bg.open #sampdrawer{transform:translateY(0)}
-  #supply-root .shipdrawer-head{padding:13px 14px;background:#0f172a;border-bottom:none;position:sticky;top:0;z-index:3}
+  #supply-root .shipdrawer-head{padding:13px 14px;background:var(--nav);border-bottom:none;position:sticky;top:0;z-index:3}
   #supply-root .shipdrawer-title{color:#fff;font-size:15px}
   #supply-root .shipdrawer-x{color:#fff;font-size:22px;padding:6px 10px}
   #supply-root .shipdrawer-full{color:#93c5fd;font-size:13px;padding:6px 4px}
   #supply-root .shipdrawer-body{padding:12px 12px 56px}
 }
 #supply-root #op-status,#supply-root #op-country{display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center}
-#supply-root .flt{border:1px solid #d0d0d0;border-radius:4px;padding:4px 9px;font-size:11px;font-family:inherit;width:230px}
-#supply-root select.flt.sel-on{background:#1a1a1a;color:#fff;border-color:#1a1a1a;font-weight:600}   /* a chosen (non-All) filter dropdown shows black */
-#supply-root .save-btn{font-size:11px;padding:4px 12px;cursor:pointer;border:1px solid #ccc;border-radius:4px;background:#fff;font-weight:600;font-family:inherit}
-#supply-root .save-btn:hover{background:#f5f5f5}
-#supply-root .save-btn.dark{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
-#supply-root .tw{overflow:auto;border:1px solid #e0e0e0;border-radius:6px;background:#fff;margin-bottom:10px;max-height:calc(100vh - 210px)}
+#supply-root .flt{border:1px solid var(--line);border-radius:4px;padding:4px 9px;font-size:11px;font-family:inherit;width:230px}
+#supply-root select.flt.sel-on{background:var(--ink);color:#fff;border-color:var(--ink);font-weight:600}   /* a chosen (non-All) filter dropdown shows black */
+#supply-root .save-btn{font-size:11px;padding:4px 12px;cursor:pointer;border:1px solid var(--line);border-radius:4px;background:#fff;font-weight:600;font-family:inherit}
+#supply-root .save-btn:hover{background:var(--hover)}
+#supply-root .save-btn.dark{background:var(--ink);color:#fff;border-color:var(--ink)}
+#supply-root .tw{overflow:auto;border:1px solid var(--line);border-radius:6px;background:#fff;margin-bottom:10px;max-height:calc(100vh - 210px)}
 #supply-root table{border-collapse:collapse;font-size:11px;width:100%}
 /* All grid cells left-align by default (Ben's preference: number columns left, not right). .l is now a no-op but kept for existing markup. */
-#supply-root thead th{background:#f3f3f1;padding:5px 8px;font-weight:600;font-size:9.5px;color:#444;border-bottom:1px solid #d5d5d5;text-align:left;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;position:sticky;top:0;z-index:1}
+#supply-root thead th{background:#f3f3f1;padding:5px 8px;font-weight:600;font-size:9.5px;color:var(--muted);border-bottom:1px solid #d5d5d5;text-align:left;letter-spacing:.04em;text-transform:uppercase;white-space:nowrap;position:sticky;top:0;z-index:1}
 #supply-root thead th.l{text-align:left}
-#supply-root tbody td{padding:4px 8px;text-align:left;border-bottom:1px solid #f1f1f1;font-variant-numeric:tabular-nums;white-space:nowrap}
+#supply-root tbody td{padding:4px 8px;text-align:left;border-bottom:1px solid var(--line2);font-variant-numeric:tabular-nums;white-space:nowrap}
 #supply-root tbody td.l{text-align:left}
 /* DATES tab: fixed layout so the table can never exceed its wrapper (no horizontal scroll); all cells wrap
    so the long production-status alert flows onto multiple lines instead of stretching the table. */
@@ -367,40 +367,40 @@
 #supply-root table.samp-grid tr.exp-row td{position:static!important;white-space:normal}   /* the expanded detail spans full width — never pin it */
 #supply-root tbody tr:hover td{background:#fafaf8}
 #supply-root tbody tr.pay-hit td,#supply-root tbody tr.pay-hit:hover td{background:#fef08a!important}   /* searched PO/ref line stays yellow (the cell-level hover bg would otherwise flash over it) */
-#supply-root tr.exp-row>td{background:#f8fafc;text-align:left;white-space:normal}
+#supply-root tr.exp-row>td{background:var(--hover);text-align:left;white-space:normal}
 #supply-root .tool-badge,#scenario-root .tool-badge{font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;letter-spacing:.2px;display:inline-block}
 #supply-root .chip{display:inline-block;background:#e0f2fe;color:#075985;font-size:11px;padding:2px 6px;border-radius:10px;margin:2px 2px;white-space:nowrap}
 #supply-root .chip .xd-rm{border:none;background:none;color:#0369a1;cursor:pointer;font-weight:700;padding:0 0 0 2px;font-size:12px;line-height:1}
-#supply-root .bg-amber,#scenario-root .bg-amber{background:#fef3c7;color:#92400e}#supply-root .bg-red,#scenario-root .bg-red{background:#fee2e2;color:#991b1b}#supply-root .bg-neutral,#scenario-root .bg-neutral{background:#f3f4f6;color:#4b5563}
-#supply-root .bg-green,#scenario-root .bg-green{background:#dcfce7;color:#166534}#supply-root .bg-blue,#scenario-root .bg-blue{background:#dbeafe;color:#1e40af}#supply-root .bg-purple,#scenario-root .bg-purple{background:#ede9fe;color:#5b21b6}
+#supply-root .bg-amber,#scenario-root .bg-amber{background:var(--amber-bg);color:var(--amber)}#supply-root .bg-red,#scenario-root .bg-red{background:var(--neg-bg);color:var(--neg)}#supply-root .bg-neutral,#scenario-root .bg-neutral{background:var(--hover);color:var(--muted)}
+#supply-root .bg-green,#scenario-root .bg-green{background:var(--pos-bg);color:var(--pos)}#supply-root .bg-blue,#scenario-root .bg-blue{background:var(--blue-soft);color:var(--blue-ink)}#supply-root .bg-purple,#scenario-root .bg-purple{background:var(--violet-bg);color:var(--violet)}
 #supply-root .src{font-size:8.5px;font-weight:700;border-radius:3px;padding:1px 4px;margin-left:4px}
-#supply-root .src.fx{background:#dbeafe;color:#1e40af}#supply-root .src.m{background:#ede9fe;color:#5b21b6}
-#supply-root .fci{min-width:46px;padding:2px 5px;font-size:11px;text-align:right;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;font-family:inherit}
+#supply-root .src.fx{background:var(--blue-soft);color:var(--blue-ink)}#supply-root .src.m{background:var(--violet-bg);color:var(--violet)}
+#supply-root .fci{min-width:46px;padding:2px 5px;font-size:11px;text-align:right;border:1px solid #93c5fd;border-radius:3px;background:var(--blue-soft);color:var(--blue);font-family:inherit}
 #supply-root .fci:focus{outline:2px solid #93c5fd}
 #supply-root .fci.txt{text-align:left;width:120px}#supply-root .fci.dt{text-align:left;width:104px}
 /* Sample detail/form inputs: plain white (like the PRODUCT module), not the supply blue editable-cell look (Ben). Scoped to the samples UI so PO/payments cells keep their blue. */
-#supply-root .samp-fld,#supply-root .samp-panel .fci,#supply-root #samp-form .fci{background:#fff;border:1px solid #cbd5e1;color:#1a1a1a}
-#supply-root .samp-fld:focus,#supply-root .samp-panel .fci:focus,#supply-root #samp-form .fci:focus{outline:none;border-color:#94a3b8}
-#supply-root .fci.saved{border-color:#16a34a!important;background:#f0fdf4!important;color:#166534!important}
-#supply-root .fci.err{border-color:#dc2626!important;background:#fef2f2!important;color:#991b1b!important}
+#supply-root .samp-fld,#supply-root .samp-panel .fci,#supply-root #samp-form .fci{background:#fff;border:1px solid var(--line);color:var(--ink)}
+#supply-root .samp-fld:focus,#supply-root .samp-panel .fci:focus,#supply-root #samp-form .fci:focus{outline:none;border-color:var(--faint)}
+#supply-root .fci.saved{border-color:var(--pos)!important;background:var(--pos-bg)!important;color:var(--pos)!important}
+#supply-root .fci.err{border-color:var(--neg)!important;background:var(--neg-bg)!important;color:var(--neg)!important}
 #supply-root select.fci{cursor:pointer;font-weight:700;text-align:left}
 /* Supplier cell: narrow column — wrap long names, 1pt smaller, no L/R padding */
 #supply-root .po-supcell{padding-left:1px!important;padding-right:1px!important}
 #supply-root .cell-pick[data-kind="supplier"]{white-space:normal;font-size:10px;line-height:1.1;max-width:82px;padding-left:0;padding-right:0}
-#supply-root .fci.needdep{background:#fee2e2;border-color:#fca5a5;color:#991b1b}
-#supply-root .qtycell{width:54px;text-align:center;font-size:11px;border:1px solid transparent;background:transparent;border-radius:3px;color:#1a1a1a;font-family:inherit;padding:2px 4px}
+#supply-root .fci.needdep{background:var(--neg-bg);border-color:#fca5a5;color:var(--neg)}
+#supply-root .qtycell{width:54px;text-align:center;font-size:11px;border:1px solid transparent;background:transparent;border-radius:3px;color:var(--ink);font-family:inherit;padding:2px 4px}
 #supply-root .qtycell:hover,#supply-root .qtycell:focus{border-color:#93c5fd;background:#fff;outline:none}
-#supply-root .qtycell.z{color:#cbd5e1}
-#supply-root .qtycell.mm{border-color:#dc2626!important;background:#fef2f2!important;color:#991b1b!important;font-weight:700}
-#supply-root .qtycell.saved{border-color:#16a34a;background:#f0fdf4}
-#supply-root td.pcell{background:#fef3c7}#supply-root td.pcellok{background:#dcfce7}#supply-root td.chgcell{background:#fff7ed}
-#supply-root .pbtn{font-size:9px;padding:1px 5px;border:1px solid #16a34a;background:#16a34a;color:#fff;border-radius:3px;cursor:pointer;font-weight:700;margin-left:3px}
-#supply-root .pbtn:hover{background:#15803d}
-#supply-root .fci.mm{border-color:#dc2626!important;background:#fef2f2!important;color:#991b1b!important;font-weight:700}
-#supply-root .opup{font-size:9px;padding:1px 6px;border:1px solid #1d4ed8;background:#eff6ff;color:#1d4ed8;border-radius:4px;cursor:pointer;margin-top:3px;font-weight:700}
-#supply-root .opup.has{border-color:#dc2626;background:#fef2f2;color:#991b1b}
-#supply-root .po-exp{cursor:pointer;color:#1d4ed8;font-weight:700;text-align:center}
-#supply-root .planbtn{background:#1a1a1a;color:#fff;border:none;border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;letter-spacing:.05em;cursor:pointer;font-family:inherit}
+#supply-root .qtycell.z{color:var(--line)}
+#supply-root .qtycell.mm{border-color:var(--neg)!important;background:var(--neg-bg)!important;color:var(--neg)!important;font-weight:700}
+#supply-root .qtycell.saved{border-color:var(--pos);background:var(--pos-bg)}
+#supply-root td.pcell{background:var(--amber-bg)}#supply-root td.pcellok{background:var(--pos-bg)}#supply-root td.chgcell{background:#fff7ed}
+#supply-root .pbtn{font-size:9px;padding:1px 5px;border:1px solid var(--pos);background:var(--pos);color:#fff;border-radius:3px;cursor:pointer;font-weight:700;margin-left:3px}
+#supply-root .pbtn:hover{background:var(--pos)}
+#supply-root .fci.mm{border-color:var(--neg)!important;background:var(--neg-bg)!important;color:var(--neg)!important;font-weight:700}
+#supply-root .opup{font-size:9px;padding:1px 6px;border:1px solid var(--blue);background:var(--blue-soft);color:var(--blue);border-radius:4px;cursor:pointer;margin-top:3px;font-weight:700}
+#supply-root .opup.has{border-color:var(--neg);background:var(--neg-bg);color:var(--neg)}
+#supply-root .po-exp{cursor:pointer;color:var(--blue);font-weight:700;text-align:center}
+#supply-root .planbtn{background:var(--ink);color:#fff;border:none;border-radius:4px;padding:2px 7px;font-size:9px;font-weight:700;letter-spacing:.05em;cursor:pointer;font-family:inherit}
 #supply-root .planbtn:hover{background:#3730a3}#supply-root .planbtn.open{background:#3730a3}
 /* size the PO table to its content so columns stop fighting for width (scrolls instead of squishing) */
 #supply-root table.po-tbl{width:max-content;min-width:100%}
@@ -410,22 +410,22 @@
 #supply-root table.po-tbl thead th:first-child,
 #supply-root table.po-tbl tbody tr:not(.exp-row):not(.grp-row) td:first-child{position:sticky;left:0;z-index:2;background:#fff;box-sizing:border-box;width:78px;min-width:78px;max-width:78px;white-space:nowrap}
 #supply-root table.po-tbl thead th:nth-child(2),
-#supply-root table.po-tbl tbody tr:not(.exp-row):not(.grp-row) td:nth-child(2){position:sticky;left:78px;z-index:2;background:#fff;box-shadow:1px 0 0 #e0e0e0}
+#supply-root table.po-tbl tbody tr:not(.exp-row):not(.grp-row) td:nth-child(2){position:sticky;left:78px;z-index:2;background:#fff;box-shadow:1px 0 0 var(--line)}
 #supply-root table.po-tbl td.po-child b{font-weight:600}
-#supply-root table.po-tbl td.po-child .ind{color:#9ca3af}
+#supply-root table.po-tbl td.po-child .ind{color:var(--faint)}
 #supply-root table.po-tbl td.po-child .ind::before{content:"└ ";user-select:none;-webkit-user-select:none}   /* indent marker via ::before → not included when copying the row/PO */
 #supply-root .po-numcell{cursor:default}
 /* narrow PO column: wrap the reference onto a second line past ~15 chars */
 #supply-root .po-numcell b{display:inline-block;max-width:15ch;white-space:normal;word-break:break-all;vertical-align:middle;line-height:1.1}
-#supply-root .po-numcell.po-copied{background:#dcfce7!important;transition:background .15s}   /* brief flash on double-click copy */
-.po-copy-tip{position:fixed;z-index:100002;transform:translate(-50%,-100%);background:#111827;color:#fff;font:600 11px/1.3 Arial,Helvetica,sans-serif;padding:5px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .12s}
+#supply-root .po-numcell.po-copied{background:var(--pos-bg)!important;transition:background .15s}   /* brief flash on double-click copy */
+.po-copy-tip{position:fixed;z-index:100002;transform:translate(-50%,-100%);background:var(--ink);color:#fff;font:600 11px/1.3 Arial,Helvetica,sans-serif;padding:5px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .12s}
 .po-copy-tip.show{opacity:1}
 #supply-root table.po-tbl thead th:first-child,#supply-root table.po-tbl thead th:nth-child(2){z-index:3;background:#f3f3f1}
 /* freeze column 1 (PLAN) + column 2 (shipment ref) on the shipments grid too */
 #supply-root table.sh-tbl thead th:first-child,
 #supply-root table.sh-tbl tbody tr:not(.exp-row):not(.grp-row) td:first-child{position:sticky;left:0;z-index:2;background:#fff;box-sizing:border-box;width:78px;min-width:78px;max-width:78px;white-space:nowrap}
 #supply-root table.sh-tbl thead th:nth-child(2),
-#supply-root table.sh-tbl tbody tr:not(.exp-row):not(.grp-row) td:nth-child(2){position:sticky;left:78px;z-index:2;background:#fff;box-shadow:1px 0 0 #e0e0e0}
+#supply-root table.sh-tbl tbody tr:not(.exp-row):not(.grp-row) td:nth-child(2){position:sticky;left:78px;z-index:2;background:#fff;box-shadow:1px 0 0 var(--line)}
 #supply-root table.sh-tbl thead th:first-child,#supply-root table.sh-tbl thead th:nth-child(2){z-index:3;background:#f3f3f1}
 /* What's Next: shipping-method chip + collapsible section headers */
 #supply-root .up-mode{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:9px;white-space:nowrap;margin-left:5px;vertical-align:middle}
@@ -434,9 +434,9 @@
 /* What's Next report: size tables to content (scroll horizontally instead of squishing) + freeze column 1 (PO / shipment) */
 #supply-root table.up-tbl{width:max-content;min-width:100%}
 #supply-root table.up-tbl > thead > tr > th:first-child,
-#supply-root table.up-tbl > tbody > tr:not(.exp-row) > td:first-child{position:sticky;left:0;z-index:2;background:#fff;white-space:nowrap;box-shadow:1px 0 0 #e0e0e0}
+#supply-root table.up-tbl > tbody > tr:not(.exp-row) > td:first-child{position:sticky;left:0;z-index:2;background:#fff;white-space:nowrap;box-shadow:1px 0 0 var(--line)}
 #supply-root table.up-tbl > thead > tr > th:first-child{z-index:3;background:#f3f3f1}
-#supply-root table.up-tbl > tbody > tr.up-shiprow > td:first-child{background:#f8fafc}
+#supply-root table.up-tbl > tbody > tr.up-shiprow > td:first-child{background:var(--hover)}
 #supply-root .sh-filt-row{display:contents}   /* transparent on desktop; becomes a flex row on mobile */
 #supply-root .pay-tbl .fci.dt{width:96px}#supply-root .pay-tbl .pctin{width:38px;text-align:right}
 /* PLAN expand panel: never clip the column-1 labels (Production start, Start deposit, …) — give them room.
@@ -447,22 +447,22 @@
 #supply-root .pay-tbl td:first-child,#supply-root .pay-tbl th:first-child{white-space:nowrap;min-width:330px}
 /* Mobile (full-screen PO sheet): the 330px column-1 floor above is far too wide on a phone — let it wrap and shrink. */
 #mob-sheet-ov .pay-tbl td:first-child,#mob-sheet-ov .pay-tbl th:first-child{min-width:150px;white-space:normal}
-#supply-root .payin.pdis,#supply-root .payin:disabled{background:#f1f1f1;color:#bbb;cursor:not-allowed;border-color:#eee}
+#supply-root .payin.pdis,#supply-root .payin:disabled{background:var(--line2);color:var(--faint);cursor:not-allowed;border-color:var(--line2)}
 #supply-root .payin{text-align:left}   /* PAYMENTS panel: left-align the amount inputs */
-#supply-root .mut{color:#888}#supply-root .tiny{font-size:9.5px}
-#supply-root .todo{color:#16a34a;font-weight:700}  /* "to proceed / needs input" prompts — bright green */
-#supply-root .lnk-btn{background:none;border:none;color:#1d4ed8;cursor:pointer;font-size:11px;font-family:inherit;text-decoration:underline;padding:0}#supply-root .lnk-btn:hover{color:#dc2626}
-#supply-root .ship-pick{background:none;border:none;color:#1d4ed8;cursor:pointer;font:inherit;font-size:11px;padding:0;white-space:nowrap}#supply-root .ship-pick:hover{text-decoration:underline}
-#supply-root .ship-open{background:none;border:none;color:#1d4ed8;cursor:pointer;font:inherit;font-size:11px;padding:0;white-space:nowrap;text-decoration:underline;font-weight:600}#supply-root .ship-open:hover{color:#dc2626}
-#supply-root .dep-pick{background:none;border:none;color:#1d4ed8;cursor:pointer;font:inherit;font-size:11px;padding:1px 4px;white-space:nowrap;border-radius:3px}#supply-root .dep-pick:hover{text-decoration:underline}
-#supply-root .cell-pick{background:none;border:1px solid transparent;color:#1a1a1a;cursor:pointer;font:inherit;font-size:11px;padding:2px 5px;white-space:nowrap;border-radius:4px;text-align:left;max-width:150px;overflow:hidden;text-overflow:ellipsis}#supply-root .cell-pick:hover{border-color:#cbd5e1;background:#f8fafc}
-#supply-root .dep-pick.needdep{background:#fee2e2;color:#991b1b;font-weight:600;text-decoration:none}
-#supply-root .dep-pick.nodep{color:#9ca3af}#supply-root .dep-pick.nodep:hover{text-decoration:none}
-.shpop{background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.18);font:12px system-ui;width:300px;max-height:340px;overflow:auto;color:#1a1a1a;z-index:200060}
-.shpop-h{padding:8px 10px;border-bottom:1px solid #eee;font-size:11px;color:#444}
-.shpop input.shpop-q{width:calc(100% - 16px);margin:6px 8px;padding:4px 6px;border:1px solid #d0d0d0;border-radius:4px;font:inherit}
-.shpop-opt{padding:6px 10px;cursor:pointer;border-bottom:1px solid #f3f3f1}.shpop-opt:hover{background:#eff6ff}
-.shpop-opt.master{color:#3730a3;font-weight:600}.shpop-opt.unassign{color:#dc2626}
+#supply-root .mut{color:var(--faint)}#supply-root .tiny{font-size:9.5px}
+#supply-root .todo{color:var(--pos);font-weight:700}  /* "to proceed / needs input" prompts — bright green */
+#supply-root .lnk-btn{background:none;border:none;color:var(--blue);cursor:pointer;font-size:11px;font-family:inherit;text-decoration:underline;padding:0}#supply-root .lnk-btn:hover{color:var(--neg)}
+#supply-root .ship-pick{background:none;border:none;color:var(--blue);cursor:pointer;font:inherit;font-size:11px;padding:0;white-space:nowrap}#supply-root .ship-pick:hover{text-decoration:underline}
+#supply-root .ship-open{background:none;border:none;color:var(--blue);cursor:pointer;font:inherit;font-size:11px;padding:0;white-space:nowrap;text-decoration:underline;font-weight:600}#supply-root .ship-open:hover{color:var(--neg)}
+#supply-root .dep-pick{background:none;border:none;color:var(--blue);cursor:pointer;font:inherit;font-size:11px;padding:1px 4px;white-space:nowrap;border-radius:3px}#supply-root .dep-pick:hover{text-decoration:underline}
+#supply-root .cell-pick{background:none;border:1px solid transparent;color:var(--ink);cursor:pointer;font:inherit;font-size:11px;padding:2px 5px;white-space:nowrap;border-radius:4px;text-align:left;max-width:150px;overflow:hidden;text-overflow:ellipsis}#supply-root .cell-pick:hover{border-color:var(--line);background:var(--hover)}
+#supply-root .dep-pick.needdep{background:var(--neg-bg);color:var(--neg);font-weight:600;text-decoration:none}
+#supply-root .dep-pick.nodep{color:var(--faint)}#supply-root .dep-pick.nodep:hover{text-decoration:none}
+.shpop{background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 28px rgba(0,0,0,.18);font:12px system-ui;width:300px;max-height:340px;overflow:auto;color:var(--ink);z-index:200060}
+.shpop-h{padding:8px 10px;border-bottom:1px solid var(--line2);font-size:11px;color:var(--muted)}
+.shpop input.shpop-q{width:calc(100% - 16px);margin:6px 8px;padding:4px 6px;border:1px solid var(--line);border-radius:4px;font:inherit}
+.shpop-opt{padding:6px 10px;cursor:pointer;border-bottom:1px solid #f3f3f1}.shpop-opt:hover{background:var(--blue-soft)}
+.shpop-opt.master{color:#3730a3;font-weight:600}.shpop-opt.unassign{color:var(--neg)}
 /* Mobile: render pickers as a bottom sheet (positioned dropdowns clip / glitch behind the grid on iOS). */
 .shpop-bd{position:fixed;inset:0;background:rgba(15,23,42,.35);z-index:100000}
 .shpop.shpop-sheet{position:fixed !important;left:0 !important;right:0 !important;bottom:0 !important;top:auto !important;width:100% !important;max-width:100% !important;max-height:80vh;max-height:80dvh;border-radius:16px 16px 0 0;box-shadow:0 -8px 28px rgba(0,0,0,.28);z-index:100001 !important;padding-bottom:env(safe-area-inset-bottom)}
@@ -471,19 +471,19 @@
 .shpop.shpop-sheet .shpop-opt{padding:12px 14px;font-size:15px}
 .shpop.shpop-sheet #shpop-list{padding-bottom:8px}
 .pomodal-bg{position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100001;display:flex;align-items:center;justify-content:center}
-.pomodal{background:#fff;border-radius:10px;width:580px;max-width:92vw;max-height:88vh;overflow:auto;padding:16px;font:13px system-ui;color:#1a1a1a}
+.pomodal{background:#fff;border-radius:10px;width:580px;max-width:92vw;max-height:88vh;overflow:auto;padding:16px;font:13px system-ui;color:var(--ink)}
 /* Analyse-consolidation table: pin the Select + PO columns while the rest scrolls horizontally on mobile */
 .consol-tbl th,.consol-tbl td{background:#fff;text-align:left}
-.consol-tbl tr.anchor td{background:#f8fafc}
+.consol-tbl tr.anchor td{background:var(--hover)}
 .consol-tbl input[type=checkbox]{margin:0;vertical-align:middle}
 .consol-tbl th:nth-child(1),.consol-tbl td:nth-child(1){position:sticky;left:0;width:24px;min-width:24px;max-width:24px;padding:3px 3px!important;text-align:center;z-index:2}
-.consol-tbl th:nth-child(2),.consol-tbl td:nth-child(2){position:sticky;left:24px;z-index:2;box-shadow:1px 0 0 #e2e8f0}
+.consol-tbl th:nth-child(2),.consol-tbl td:nth-child(2){position:sticky;left:24px;z-index:2;box-shadow:1px 0 0 var(--line)}
 .consol-tbl thead th:nth-child(1),.consol-tbl thead th:nth-child(2){z-index:4}
 .consol-tbl thead th{position:sticky;top:0;z-index:3}
 @media (max-width:640px){ .consol-tbl th,.consol-tbl td{padding:3px 5px!important} .consol-tbl th:nth-child(1),.consol-tbl td:nth-child(1){padding:3px 2px!important} }
-#supply-root .card{border:1px solid #e0e0e0;border-left:4px solid #ccc;border-radius:6px;padding:8px 12px;margin-bottom:7px}
-#supply-root .card.high{border-left-color:#dc2626}#supply-root .card.amber{border-left-color:#f59e0b}#supply-root .card.low{border-left-color:#16a34a}
-#supply-root .card .t{font-weight:700}#supply-root .card .d{color:#666;font-size:11px;margin-top:2px}
+#supply-root .card{border:1px solid var(--line);border-left:4px solid var(--line);border-radius:6px;padding:8px 12px;margin-bottom:7px}
+#supply-root .card.high{border-left-color:var(--neg)}#supply-root .card.amber{border-left-color:#f59e0b}#supply-root .card.low{border-left-color:var(--pos)}
+#supply-root .card .t{font-weight:700}#supply-root .card .d{color:var(--muted);font-size:11px;margin-top:2px}
 #supply-root .act-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(330px,1fr));gap:8px;align-items:start}#supply-root .act-cards .card{margin-bottom:0}
 /* Actions triage TABLE — severity-sorted, one line per action, tinted by urgency */
 #supply-root .act-tbl{width:100%;border-collapse:collapse;font-size:12px}
@@ -531,11 +531,11 @@
 #supply-root .act-filt-toggle{display:none}   /* "Filters" toggle: phone only (desktop shows the filter bars inline) */
 #supply-root .act-colwrap{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start}
 #supply-root .act-col-main{flex:2 1 520px;min-width:0}#supply-root .act-col-rec{flex:1 1 330px;min-width:0}
-#supply-root .act-colhdr{font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:#334155;margin:10px 0 4px}
-#supply-root .act-col-rec .act-colhdr{color:#6d28d9}
-#supply-root .act-tbl th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#94a3b8;font-weight:700;padding:5px 8px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#fff;z-index:1}
-#supply-root .act-tbl td{padding:7px 8px;border-bottom:1px solid #f1f5f9;vertical-align:top}
-#supply-root .act-tbl tr.actrow:hover td{background:#f8fafc}
+#supply-root .act-colhdr{font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-soft);margin:10px 0 4px}
+#supply-root .act-col-rec .act-colhdr{color:var(--violet)}
+#supply-root .act-tbl th{text-align:left;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);font-weight:700;padding:5px 8px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#fff;z-index:1}
+#supply-root .act-tbl td{padding:7px 8px;border-bottom:1px solid var(--hover);vertical-align:top}
+#supply-root .act-tbl tr.actrow:hover td{background:var(--hover)}
 #supply-root .act-tbl tr.sev-high td{background:#fef4f4}#supply-root .act-tbl tr.sev-high:hover td{background:#fdeaea}
 #supply-root .act-tbl tr.sev-amber td{background:#fffbf1}#supply-root .act-tbl tr.sev-amber:hover td{background:#fdf3e0}
 #supply-root .act-tbl td.sev-cell{border-left:3px solid transparent;text-align:left;font-size:12px;line-height:1;padding-left:5px;padding-right:0}
@@ -551,70 +551,70 @@
 #supply-root .act-tbl td.act-lifecell{white-space:normal;line-height:1.6}
 #supply-root .act-tbl td.act-lifecell .save-btn{margin:1px 0 1px 4px;font-size:10px;padding:2px 7px}
 #supply-root .act-tbl td.act-lifecell .act-lifebtns{white-space:nowrap;display:inline-block}
-#supply-root .act-tbl tr.sev-high td.sev-cell{border-left-color:#dc2626}#supply-root .act-tbl tr.sev-amber td.sev-cell{border-left-color:#f59e0b}#supply-root .act-tbl tr.sev-low td.sev-cell{border-left-color:#cbd5e1}
+#supply-root .act-tbl tr.sev-high td.sev-cell{border-left-color:var(--neg)}#supply-root .act-tbl tr.sev-amber td.sev-cell{border-left-color:#f59e0b}#supply-root .act-tbl tr.sev-low td.sev-cell{border-left-color:var(--line)}
 #supply-root .act-tbl .act-type{font-weight:700;font-size:12px;line-height:1.15;white-space:normal;overflow-wrap:break-word}
-#supply-root .act-tbl .act-chip{font-size:8.5px;text-transform:uppercase;letter-spacing:.03em;color:#94a3b8;font-weight:600}
-#supply-root .act-tbl .act-detail{color:#475569;font-size:11px;line-height:1.35;white-space:normal;word-break:break-word}
+#supply-root .act-tbl .act-chip{font-size:8.5px;text-transform:uppercase;letter-spacing:.03em;color:var(--faint);font-weight:600}
+#supply-root .act-tbl .act-detail{color:var(--muted);font-size:11px;line-height:1.35;white-space:normal;word-break:break-word}
 #supply-root .act-tbl .act-fixcell,#supply-root .act-tbl .act-lifecell{white-space:normal}
-#supply-root .sect-h{font-weight:700;margin:12px 0 5px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:#555}
+#supply-root .sect-h{font-weight:700;margin:12px 0 5px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
 /* ── SCENARIO panel (parallel top tab, same visual language) ── */
-#scenario-root{display:none;font-size:12px;color:#1a1a1a;padding-top:4px}
+#scenario-root{display:none;font-size:12px;color:var(--ink);padding-top:4px}
 #app.scenario-active > *:not(#dab-navwrap):not(#scenario-root){display:none!important}
 #app.scenario-active #dab-navwrap > *:not(#view-tabs-row){display:none!important}
 #app.scenario-active #view-tabs-row .tool-bar{display:none!important}
-#scenario-subnav{display:flex;gap:2px;border-bottom:1px solid #e0e0e0;margin:2px 0 10px;align-items:center;flex-wrap:wrap}
-#scenario-root .stab{background:transparent;border:none;padding:6px 13px;font-size:12px;font-weight:500;cursor:pointer;color:#888;border-bottom:2px solid transparent;font-family:inherit}
-#scenario-root .stab:hover{color:#1a1a1a}#scenario-root .stab.active{color:#1a1a1a;border-bottom-color:#1a1a1a;font-weight:600}
+#scenario-subnav{display:flex;gap:2px;border-bottom:1px solid var(--line);margin:2px 0 10px;align-items:center;flex-wrap:wrap}
+#scenario-root .stab{background:transparent;border:none;padding:6px 13px;font-size:12px;font-weight:500;cursor:pointer;color:var(--faint);border-bottom:2px solid transparent;font-family:inherit}
+#scenario-root .stab:hover{color:var(--ink)}#scenario-root .stab.active{color:var(--ink);border-bottom-color:var(--ink);font-weight:600}
 /* scenario .ver amber handled by the shared rule above (grouped with #supply-root/.#product-root) */
-#scenario-root .annot{background:#0f172a;color:#cbd5e1;font-size:11px;border-radius:6px;padding:8px 12px;margin:0 0 10px;line-height:1.5}#scenario-root .annot b{color:#7dd3fc}
+#scenario-root .annot{background:var(--nav);color:var(--line);font-size:11px;border-radius:6px;padding:8px 12px;margin:0 0 10px;line-height:1.5}#scenario-root .annot b{color:#7dd3fc}
 #scenario-root .bar{display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:wrap}
-#scenario-root .pill{padding:3px 9px;font-size:10px;cursor:pointer;border:1px solid #d0d0d0;background:#fff;color:#666;border-radius:4px;white-space:nowrap;font-weight:600}#scenario-root .pill:hover{background:#f5f5f5}#scenario-root .pill.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
-#scenario-root .pill-lbl{font-size:11px;color:#444;font-weight:600}
-#scenario-root .tw{overflow:auto;border:1px solid #e0e0e0;border-radius:6px;background:#fff;margin-bottom:10px;max-height:calc(100vh - 250px)}
+#scenario-root .pill{padding:3px 9px;font-size:10px;cursor:pointer;border:1px solid var(--line);background:#fff;color:var(--muted);border-radius:4px;white-space:nowrap;font-weight:600}#scenario-root .pill:hover{background:var(--hover)}#scenario-root .pill.active{background:var(--ink);color:#fff;border-color:var(--ink)}
+#scenario-root .pill-lbl{font-size:11px;color:var(--muted);font-weight:600}
+#scenario-root .tw{overflow:auto;border:1px solid var(--line);border-radius:6px;background:#fff;margin-bottom:10px;max-height:calc(100vh - 250px)}
 #scenario-root table{border-collapse:collapse;font-size:11px;width:100%}
-#scenario-root thead th{background:#f3f3f1;padding:5px 8px;font-weight:600;font-size:9.5px;color:#444;border-bottom:1px solid #d5d5d5;text-align:right;text-transform:uppercase;white-space:nowrap;position:sticky;top:0}
+#scenario-root thead th{background:#f3f3f1;padding:5px 8px;font-weight:600;font-size:9.5px;color:var(--muted);border-bottom:1px solid #d5d5d5;text-align:right;text-transform:uppercase;white-space:nowrap;position:sticky;top:0}
 #scenario-root thead th.l{text-align:left}
 #scenario-root tbody td{padding:4px 8px;border-bottom:1px solid #f0f0f0;text-align:right;white-space:nowrap}#scenario-root tbody td.l{text-align:left}
 /* financial model: keep the label (channel/country/sub-cat) column left-aligned + frozen while scrolling */
 #scenario-root .exec-tw td.lbl-col,#scenario-root .exec-tw th.lbl-col{position:sticky;left:0;text-align:left!important;z-index:3}
 #scenario-root .exec-tw tbody td.lbl-col{background:#fff}#scenario-root .exec-tw thead th.lbl-col{background:#f3f3f1;z-index:6}
-#scenario-root tr.total-row td{background:#1a1a1a;color:#fff;font-weight:700}
-#scenario-root .count{color:#999;font-size:11px}
-#scenario-root .mut{color:#888}#scenario-root .tiny{font-size:9.5px}
-#scenario-root .fci{min-width:46px;padding:2px 5px;font-size:11px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;font-family:inherit}
+#scenario-root tr.total-row td{background:var(--ink);color:#fff;font-weight:700}
+#scenario-root .count{color:var(--faint);font-size:11px}
+#scenario-root .mut{color:var(--faint)}#scenario-root .tiny{font-size:9.5px}
+#scenario-root .fci{min-width:46px;padding:2px 5px;font-size:11px;border:1px solid #93c5fd;border-radius:3px;background:var(--blue-soft);color:var(--blue);font-family:inherit}
 #scenario-root .kpibar{display:flex;gap:10px;flex-wrap:wrap;margin:8px 0 12px}
 #scenario-root .kpi{background:#fff;border:1px solid #e5e5e5;border-radius:8px;padding:8px 14px;min-width:110px}
-#scenario-root .kpi .l{font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;color:#888}
-#scenario-root .kpi .v{font-size:18px;font-weight:700;color:#1a1a1a}
-#scenario-root .fm-in{width:42px;text-align:right;border:none;border-bottom:1px dashed #cbd5e1;background:transparent;color:#555;font:inherit;font-size:11px;padding:1px 2px}
+#scenario-root .kpi .l{font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint)}
+#scenario-root .kpi .v{font-size:18px;font-weight:700;color:var(--ink)}
+#scenario-root .fm-in{width:42px;text-align:right;border:none;border-bottom:1px dashed var(--line);background:transparent;color:var(--muted);font:inherit;font-size:11px;padding:1px 2px}
 #scenario-root .fm-ov{display:flex;gap:1px;align-items:center;justify-content:flex-end;margin-top:3px}
 #scenario-root .fm-ov .fm-ovl{font-size:8px;color:#9aa3af;font-weight:700;margin:0 1px}
 #scenario-root .fm-ov .fm-in{width:28px;min-width:28px}
-#scenario-root .fm-in:focus{outline:none;border-bottom-color:#1d4ed8;color:#1d4ed8;background:#f8fafc}
-#scenario-root .fm-in::placeholder{color:#cbd5e1}
-#supply-root .count{color:#999;font-size:11px}
-#supply-root .swatch{width:24px;height:24px;border-radius:4px;object-fit:cover;border:1px solid #eee;vertical-align:middle}
-#supply-root .bc-lbl{font-size:10px;font-weight:700;border:1px solid #93c5fd;background:#eff6ff;color:#1d4ed8;border-radius:3px;cursor:pointer;padding:1px 6px;margin-right:3px;font-family:inherit}
-#supply-root .bc-lbl:hover{background:#dbeafe}
+#scenario-root .fm-in:focus{outline:none;border-bottom-color:var(--blue);color:var(--blue);background:var(--hover)}
+#scenario-root .fm-in::placeholder{color:var(--line)}
+#supply-root .count{color:var(--faint);font-size:11px}
+#supply-root .swatch{width:24px;height:24px;border-radius:4px;object-fit:cover;border:1px solid var(--line2);vertical-align:middle}
+#supply-root .bc-lbl{font-size:10px;font-weight:700;border:1px solid #93c5fd;background:var(--blue-soft);color:var(--blue);border-radius:3px;cursor:pointer;padding:1px 6px;margin-right:3px;font-family:inherit}
+#supply-root .bc-lbl:hover{background:var(--blue-soft)}
 #supply-root .bc-mono{font-family:ui-monospace,Menlo,monospace}
 #supply-root tr.batchrow td{background:#eef2ff!important;font-weight:600;border-top:1px solid #c7d2fe;text-align:left;white-space:normal}
-#supply-root tr.cat-hdr td{background:#e8e8e6;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:#333;padding:3px 8px;text-align:left;border-top:2px solid #bbb}
+#supply-root tr.cat-hdr td{background:#e8e8e6;font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--ink-soft);padding:3px 8px;text-align:left;border-top:2px solid var(--faint)}
 /* Unapproved risk badge (partial / supplier / discontinued / country) — one shared look: RED "letter ⚠" alert
    by default; on hover it previews the approved state (GREEN "letter ✓") so it's obviously clickable-to-approve. */
-#supply-root .oprisk-badge{display:inline-block;background:#fee2e2;border:1px solid #fca5a5;color:#991b1b;border-radius:3px;font-size:9px;font-weight:700;line-height:1.4;padding:1px 5px;margin-left:2px;white-space:nowrap;cursor:pointer;font-family:inherit;transition:background .1s,color .1s,border-color .1s}
+#supply-root .oprisk-badge{display:inline-block;background:var(--neg-bg);border:1px solid #fca5a5;color:var(--neg);border-radius:3px;font-size:9px;font-weight:700;line-height:1.4;padding:1px 5px;margin-left:2px;white-space:nowrap;cursor:pointer;font-family:inherit;transition:background .1s,color .1s,border-color .1s}
 #supply-root .oprisk-badge::after{content:" ⚠"}
-#supply-root .oprisk-badge:hover{background:#16a34a;border-color:#16a34a;color:#fff}
+#supply-root .oprisk-badge:hover{background:var(--pos);border-color:var(--pos);color:#fff}
 #supply-root .oprisk-badge:hover::after{content:" ✓"}
 /* supplier-submitted change badge (amber "qty ✓") — same interaction language: AMBER by default, GREEN on hover
    to preview the confirmed state; fast data-tip tooltip like the risk badges. */
-#supply-root .opconfirm{display:inline-block;cursor:pointer;border:1px solid #f59e0b;background:#fef3c7;color:#92400e;border-radius:3px;font-size:9px;font-weight:700;line-height:1.4;padding:1px 4px;margin-left:2px;white-space:nowrap;font-family:inherit;transition:background .1s,color .1s,border-color .1s}
-#supply-root .opconfirm:hover{background:#16a34a;border-color:#16a34a;color:#fff}
+#supply-root .opconfirm{display:inline-block;cursor:pointer;border:1px solid #f59e0b;background:var(--amber-bg);color:var(--amber);border-radius:3px;font-size:9px;font-weight:700;line-height:1.4;padding:1px 4px;margin-left:2px;white-space:nowrap;font-family:inherit;transition:background .1s,color .1s,border-color .1s}
+#supply-root .opconfirm:hover{background:var(--pos);border-color:var(--pos);color:#fff}
 /* undo-approval ✕ overlays the ✓ badge on hover (no layout shift) */
 #supply-root .opappr .opundo,#supply-root .opappr .oprisk-undo{display:none}
 #supply-root .opappr:hover .opundo,#supply-root .opappr:hover .oprisk-undo{display:flex}
 /* mobile full-screen sheet for an opened PO / shipment (applied via JS only on phones) */
 #mob-sheet-ov{display:none;position:fixed;inset:0;z-index:6000;background:#fff;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;box-sizing:border-box}
-#mob-sheet-ov .mob-back{position:sticky;top:0;z-index:3;display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;box-sizing:border-box;padding:13px 14px;border:none;border-bottom:1px solid #e5e7eb;background:#0f172a;color:#fff;font-weight:700;font-size:14px;text-align:left;cursor:pointer;font-family:inherit}
+#mob-sheet-ov .mob-back{position:sticky;top:0;z-index:3;display:flex;align-items:center;justify-content:space-between;gap:12px;width:100%;box-sizing:border-box;padding:13px 14px;border:none;border-bottom:1px solid var(--line);background:var(--nav);color:#fff;font-weight:700;font-size:14px;text-align:left;cursor:pointer;font-family:inherit}
 #mob-sheet-ov .mob-back .mob-back-ref{font-size:13px;font-weight:700;color:#93c5fd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%}
 #mob-sheet-ov .mob-sheet-body{padding:10px 12px 48px;box-sizing:border-box;max-width:100vw}
 /* inside the full-screen sheet the PO/shipment sub-tab strip (nav-3) WRAPS so every tab is visible, and it
@@ -622,10 +622,10 @@
 #mob-sheet-ov .po-subnav{position:sticky;top:44px;z-index:2;flex-wrap:wrap!important;overflow:visible!important;margin:0 0 12px;gap:1px;padding:4px 3px;box-shadow:0 3px 6px rgba(15,23,42,.07)}
 #mob-sheet-ov .po-subnav .rtab{padding:6px 6px;font-size:11px;letter-spacing:0}
 #mob-sheet-ov .po-more-btn{font-weight:600;margin-left:auto;padding-left:7px;padding-right:5px}
-#mob-sheet-ov .po-more-btn.active{color:#2563eb;border-bottom-color:#3b82f6;font-weight:700}
-#mob-sheet-ov .po-more-menu{position:absolute;right:0;top:100%;margin-top:3px;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 22px rgba(0,0,0,.2);z-index:10;min-width:200px;max-height:62vh;overflow:auto;padding:4px}
-#mob-sheet-ov .po-more-item{display:block;width:100%;text-align:left;background:transparent;border:none;padding:11px 12px;font-size:13px;font-family:inherit;color:#334155;cursor:pointer;border-radius:6px}
-#mob-sheet-ov .po-more-item:hover{background:#f1f5f9}
+#mob-sheet-ov .po-more-btn.active{color:var(--blue);border-bottom-color:var(--blue);font-weight:700}
+#mob-sheet-ov .po-more-menu{position:absolute;right:0;top:100%;margin-top:3px;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 22px rgba(0,0,0,.2);z-index:10;min-width:200px;max-height:62vh;overflow:auto;padding:4px}
+#mob-sheet-ov .po-more-item{display:block;width:100%;text-align:left;background:transparent;border:none;padding:11px 12px;font-size:13px;font-family:inherit;color:var(--ink-soft);cursor:pointer;border-radius:6px}
+#mob-sheet-ov .po-more-item:hover{background:var(--hover)}
 #mob-sheet-ov .po-more-item .ex-badge{margin-left:6px}
 #mob-sheet-ov .cli-row{flex-direction:column;gap:3px;align-items:stretch}
 #mob-sheet-ov .cli-lbl{flex:0 0 auto;width:auto;padding-top:0}
@@ -640,7 +640,7 @@
 #supply-root #supply-nav-sel{display:none}   /* section dropdown: phone only */
 #supply-root .po-filt-toggle{display:none}   /* "Filters" toggle: phone only */
 #supply-root .op-filt-toggle{display:none}   /* ORDER PLAN "Filters" toggle button: phone only (desktop shows filters inline) */
-#supply-root .pay-filt-toggle{display:none;margin:0 0 8px;background:#f8fafc;border:1px solid #cbd5e1;color:#475569;border-radius:6px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer}   /* PAYMENTS pages Filters toggle: phone only */
+#supply-root .pay-filt-toggle{display:none;margin:0 0 8px;background:var(--hover);border:1px solid var(--line);color:var(--muted);border-radius:6px;padding:5px 12px;font-size:12px;font-weight:600;cursor:pointer}   /* PAYMENTS pages Filters toggle: phone only */
 #supply-root .op-dl-top{display:none}        /* ORDER PLAN header Download button: phone only (desktop keeps it in the filter bar) */
 #supply-root .op-po-grp{display:inline-flex;align-items:center;gap:4px}   /* keep the PO(s) label + search box together */
 /* PO filter items: desktop = inline (as before); mobile = 2 per row (50/50), Ship-to on its own row */
@@ -664,7 +664,7 @@
   #supply-root{padding-top:2px}
   /* section nav → a single dropdown (no more sideways tab-hunting) */
   #supply-subnav{display:none}
-  #supply-root #supply-nav-sel{display:block;width:100%;font-size:14px;font-weight:700;padding:9px 10px;border:1px solid #0f172a;border-radius:8px;background:#0f172a;color:#fff;margin:2px 0 10px}
+  #supply-root #supply-nav-sel{display:block;width:100%;font-size:14px;font-weight:700;padding:9px 10px;border:1px solid var(--nav);border-radius:8px;background:var(--nav);color:#fff;margin:2px 0 10px}
   /* SEARCH lives in the fixed top bar on mobile — hide the in-content box (its count stays) */
   #supply-root #sup-search{display:none!important}
   #supply-root .bar{gap:5px 6px}
@@ -4482,22 +4482,22 @@
     function sel(id,label,opts,val){return '<span class="pill-lbl">'+label+'</span><select class="flt'+(val&&val!=='All'?' sel-on':'')+'" id="'+id+'" style="width:auto;padding:3px 6px"><option>All</option>'+opts.map(function(o){return '<option'+(o===val?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>';}
     function markSel(el){ if(el)el.classList.toggle('sel-on', el.value && el.value!=='All'); }   // black-highlight a dropdown when a non-All option is chosen
     c.innerHTML=poSubNav()+annot('order-plan')   // Order plan is a PURCHASE ORDERS sub-tab — show the PO sub-nav above it
-      +'<div class="bar op-filt-head"><button class="save-btn op-filt-toggle" id="op-filt-toggle">⚙ Filters</button><button class="save-btn op-dl-top" id="op-dl-top" style="background:#2563eb;color:#fff;border-color:#2563eb" title="Download XLSX report">⤓ Download report</button></div>'
+      +'<div class="bar op-filt-head"><button class="save-btn op-filt-toggle" id="op-filt-toggle">⚙ Filters</button><button class="save-btn op-dl-top" id="op-dl-top" style="background:var(--blue);color:#fff;border-color:#2563eb" title="Download XLSX report">⤓ Download report</button></div>'
       +'<div id="op-filters">'
       +'<div class="bar"><span class="pill-lbl">Status</span><span id="op-status">'+opStatusPills(st.statuses)+'</span><span class="mut tiny op-hint" style="margin-left:6px">completed POs: search a PO number below</span>'
-        +'<span class="op-po-grp" style="margin-left:12px"><span class="pill-lbl">PO(s)</span><input class="flt" id="op-po" placeholder="PO number(s) — space / comma…" title="one or more PO numbers, separated by space, comma or line break — overrides the status &amp; country filters" style="width:240px;background:#eff6ff;border:1px solid #93c5fd;color:#1d4ed8" value="'+esc(st.poq||'')+'"></span></div>'
+        +'<span class="op-po-grp" style="margin-left:12px"><span class="pill-lbl">PO(s)</span><input class="flt" id="op-po" placeholder="PO number(s) — space / comma…" title="one or more PO numbers, separated by space, comma or line break — overrides the status &amp; country filters" style="width:240px;background:var(--blue-soft);border:1px solid #93c5fd;color:#1d4ed8" value="'+esc(st.poq||'')+'"></span></div>'
       +'<div class="bar"><span class="pill-lbl">Country</span><span id="op-country">'+pillsHTML(countries,st.countries,true)+'</span>'
         +'<span style="margin-left:12px"></span>'+sel('op-prod','PROD#',prods,st.prod)+sel('op-batch','Batch',batches,st.batch)+sel('op-supplier','Supplier',suppliers,st.supplier)+'</div>'
       +'<div class="bar"><span class="pill-lbl">SKUs</span><span class="pill active" data-sc="ordered">Ordered</span><span class="pill" data-sc="allskus">All SKUs</span><span class="pill" data-sc="all">All in category</span>'
         +'<span class="pill-lbl" style="margin-left:14px" title="View quantities as units or whole cartons (qty ÷ carton qty). Cartons view is read-only — switch to Units to edit.">View</span><span class="pill'+(st.disp!=='cartons'?' active':'')+'" data-disp="units">Units</span><span class="pill'+(st.disp==='cartons'?' active':'')+'" data-disp="cartons">Cartons</span>'
         +sel('op-cat','Category',cats,st.cat)+sel('op-rw','Release',rws,st.rw)
-        +'<input class="flt" id="op-q" placeholder="filter SKU / colour…" style="width:140px;background:#f0fdf4;border-color:#86efac">'
-        +'<button class="save-btn" id="op-dl" style="margin-left:auto;background:#2563eb;color:#fff;border-color:#2563eb" title="Download XLSX — SKUs (rows) × purchase orders (columns) × quantities, for the current view">⤓ Download report</button></div>'
+        +'<input class="flt" id="op-q" placeholder="filter SKU / colour…" style="width:140px;background:var(--pos-bg);border-color:#86efac">'
+        +'<button class="save-btn" id="op-dl" style="margin-left:auto;background:var(--blue);color:#fff;border-color:#2563eb" title="Download XLSX — SKUs (rows) × purchase orders (columns) × quantities, for the current view">⤓ Download report</button></div>'
       +'<div class="bar"><span class="pill-lbl">Action items</span>'
-        +'<span class="pill'+(st.partials?' active':'')+'" id="op-partials">⚠ Unapproved partials <span id="op-partials-n" style="color:#dc2626;font-weight:700"></span></span>'
-        +'<span class="pill'+(st.suprisk?' active':'')+'" id="op-suprisk" title="lines ordered against a supplier not in the SKU\'s allowed multi-supplier list">⚠ Supplier risk <span id="op-suprisk-n" style="color:#dc2626;font-weight:700"></span></span>'
-        +'<span class="pill'+(st.disc?' active':'')+'" id="op-disc" title="lines forecast to arrive after the product\'s discontinue date">⚠ Discontinued <span id="op-disc-n" style="color:#dc2626;font-weight:700"></span></span>'
-        +'<span class="pill'+(st.notmkt?' active':'')+'" id="op-notmkt" title="Country risk — SKU not released in the PO\'s destination market (no availability there; launch date ignored). Review &amp; approve like supplier risk.">⚠ Country risk <span id="op-notmkt-n" style="color:#dc2626;font-weight:700"></span></span>'
+        +'<span class="pill'+(st.partials?' active':'')+'" id="op-partials">⚠ Unapproved partials <span id="op-partials-n" style="color:var(--neg);font-weight:700"></span></span>'
+        +'<span class="pill'+(st.suprisk?' active':'')+'" id="op-suprisk" title="lines ordered against a supplier not in the SKU\'s allowed multi-supplier list">⚠ Supplier risk <span id="op-suprisk-n" style="color:var(--neg);font-weight:700"></span></span>'
+        +'<span class="pill'+(st.disc?' active':'')+'" id="op-disc" title="lines forecast to arrive after the product\'s discontinue date">⚠ Discontinued <span id="op-disc-n" style="color:var(--neg);font-weight:700"></span></span>'
+        +'<span class="pill'+(st.notmkt?' active':'')+'" id="op-notmkt" title="Country risk — SKU not released in the PO\'s destination market (no availability there; launch date ignored). Review &amp; approve like supplier risk.">⚠ Country risk <span id="op-notmkt-n" style="color:var(--neg);font-weight:700"></span></span>'
         +'<span class="pill po-focus'+(st.focus?' active':'')+'" id="op-focus" style="margin-left:14px" title="show only starred (Focus) POs that are still active / in progress">★ Focus</span>'
         +'<span style="margin-left:14px;font-size:9px;line-height:1.2;color:#64748b" title="In a quantity cell you can type shortcuts instead of a plain number:\n• 4c = 4 cartons = 4 × the SKU\'s carton qty (e.g. carton 12 → 48)\n• 150r = round 150 UP to the nearest full carton (e.g. carton 12 → 156)">💡 in a cell: <b>4c</b> = 4 cartons · <b>150r</b> = round up to carton</span></div>'
       +'</div>'   // /#op-filters
@@ -4511,10 +4511,10 @@
         var CAP=4, expanded=false;
         function poBtn(r){ return '<button class="lnk-btn op-empty-po" data-po="'+esc(r.po)+'" style="border:1px solid #fcd34d;background:#fff;border-radius:5px;padding:3px 8px;cursor:pointer">'+esc(r.po)+' <span class="mut tiny">'+esc(r.supplier_name||'')+(r.status?' · '+esc(r.status):'')+'</span></button>'; }
         function draw(){ var shown=expanded?rows:rows.slice(0,CAP);
-          el.innerHTML='<div style="margin:2px 0 10px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:9px 12px;font-size:12px">'
+          el.innerHTML='<div style="margin:2px 0 10px;background:var(--amber-bg);border:1px solid #fde68a;border-radius:8px;padding:9px 12px;font-size:12px">'
             +'<b>⚠ '+rows.length+' PO'+(rows.length===1?'':'s')+' with no SKU lines yet</b> <span class="mut tiny">— not shown in the grid below (no SKUs). Click to open and add lines.</span><div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">'
             +shown.map(poBtn).join('')
-            +(rows.length>CAP?'<button class="lnk-btn op-empty-more" style="border:1px solid #fcd34d;background:#fef3c7;border-radius:5px;padding:3px 10px;cursor:pointer;font-weight:600;color:#92400e">'+(expanded?'Show less':'See '+(rows.length-CAP)+' more')+'</button>':'')
+            +(rows.length>CAP?'<button class="lnk-btn op-empty-more" style="border:1px solid #fcd34d;background:var(--amber-bg);border-radius:5px;padding:3px 10px;cursor:pointer;font-weight:600;color:#92400e">'+(expanded?'Show less':'See '+(rows.length-CAP)+' more')+'</button>':'')
             +'</div></div>';
           el.querySelectorAll('.op-empty-po').forEach(function(b){ b.onclick=function(){ if(typeof gotoPO==='function')gotoPO(b.dataset.po,'oplan'); else if(typeof openPODrawer==='function')openPODrawer(b.dataset.po,'oplan'); }; });
           var mb=el.querySelector('.op-empty-more'); if(mb)mb.onclick=function(){ expanded=!expanded; draw(); }; }
@@ -4749,7 +4749,7 @@
       var upos=Array.from(new Set(unconf.map(function(x){return x.po;}))).sort();
       box.innerHTML='<div style="margin:0;padding:7px 11px;background:#fff7ed;border:1px solid #fdba74;border-radius:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
         +'<span style="font-weight:700;color:#92400e">⚠ '+unconf.length+' supplier change'+(unconf.length>1?'s':'')+' awaiting approval</span>'
-        +'<span class="mut tiny">on:</span>'+upos.map(function(p){return ' <button class="lnk-btn op-chg-po" data-po="'+esc(p)+'" title="filter the order plan to '+esc(p)+'" style="color:#1d4ed8;text-decoration:underline;font-weight:600;background:none;border:none;padding:0;cursor:pointer">'+esc(p)+'</button>';}).join(',')
+        +'<span class="mut tiny">on:</span>'+upos.map(function(p){return ' <button class="lnk-btn op-chg-po" data-po="'+esc(p)+'" title="filter the order plan to '+esc(p)+'" style="color:var(--blue);text-decoration:underline;font-weight:600;background:none;border:none;padding:0;cursor:pointer">'+esc(p)+'</button>';}).join(',')
         +'</div>';
       box.querySelectorAll('.op-chg-po').forEach(function(b){ b.onclick=function(){
         ['partials','erpdiff','suprisk','disc','notmkt'].forEach(function(k){ st[k]=false; });   // PO search overrides the pills — clear them so the highlighted state matches the (unfiltered) view
@@ -4771,7 +4771,7 @@
         _opSig=plcSig(np); plc.length=0; np.forEach(function(x){plc.push(x);}); plcMap={}; plc.forEach(function(x){plcMap[x.po+'|'+x.sku]=x;});
         delete cache['order-plan']; renderChanges(); view(); }).catch(function(){});
     }, 12000); }
-  function plt(pl){ return pl>20 ? '<span style="color:#dc2626;font-weight:700">'+pl.toFixed(1)+' plt ⚠</span>' : pl.toFixed(1)+' plt'; }
+  function plt(pl){ return pl>20 ? '<span style="color:var(--neg);font-weight:700">'+pl.toFixed(1)+' plt ⚠</span>' : pl.toFixed(1)+' plt'; }
   // pick the discontinue date for a destination: AU/CA have their own, else the global final.
   function pickDisc(co,a){ co=(co||'').toUpperCase(); a=a||{}; if(co==='AU'&&a.disAu)return a.disAu; if(co==='CA'&&a.disCa)return a.disCa; return a.dis||''; }
   var OP_POCAP=20;   // initial PO columns rendered (wide pivots are the main slowdown); "Load more" adds OP_POCAP, "Show all" reveals the rest
@@ -4792,7 +4792,7 @@
     if(poCapped)pos=pos.slice(0,_lim);   // render only the first _lim PO columns; "Load more" raises the limit
     if(cn){ var _more=Math.min(OP_POCAP,poTotal-pos.length);
       cn.innerHTML=(poCapped?pos.length+' of ':'')+poTotal+' POs'
-        +(poCapped?' &nbsp;<button class="save-btn op-loadmore" style="padding:1px 9px;font-size:11px;background:#2563eb;color:#fff;border-color:#2563eb">Load '+_more+' more &darr;</button> <button class="save-btn light op-showall-pos" style="padding:1px 9px;font-size:11px">Show all '+poTotal+'</button>':(poTotal>25?' · narrow with filters':'')); }
+        +(poCapped?' &nbsp;<button class="save-btn op-loadmore" style="padding:1px 9px;font-size:11px;background:var(--blue);color:#fff;border-color:#2563eb">Load '+_more+' more &darr;</button> <button class="save-btn light op-showall-pos" style="padding:1px 9px;font-size:11px">Show all '+poTotal+'</button>':(poTotal>25?' · narrow with filters':'')); }
     var pstat={}; pos.forEach(function(po){var u=0,pl=0,ct=0; skuList.forEach(function(sku){var cc=cell[po+'|'+sku]; if(cc){u+=cc.q; if(cc.pq>0)pl+=cc.q/cc.pq; var _cq=Number((skuAttr[sku]||{}).cq)||0; if(_cq>0)ct+=cc.q/_cq;}}); pstat[po]={u:u,pl:pl,ct:ct};});
     var POW='112px';
     // frozen label columns after SKU (cumulative left offsets): SKU · Release · Carton · Supplier · Discontinue
@@ -4828,7 +4828,7 @@
             (e.disc||[]).forEach(function(s){items.push('• '+s+' — discontinued');});
             if(!items.length)return '';
             var tip='Accept all '+items.length+' exception'+(items.length>1?'s':'')+' on '+po+' — approves each and adopts supplier changes:\n'+items.join('\n');
-            return '<br><button class="save-btn op-accept-po" data-po="'+esc(po)+'" data-tip="'+esc(tip)+'" style="font-size:9px;padding:2px 6px;background:#dcfce7;border:1px solid #86efac;color:#166534;margin-top:3px;white-space:nowrap">✓ Accept all ('+items.length+')</button>'; })()
+            return '<br><button class="save-btn op-accept-po" data-po="'+esc(po)+'" data-tip="'+esc(tip)+'" style="font-size:9px;padding:2px 6px;background:var(--pos-bg);border:1px solid #86efac;color:var(--pos);margin-top:3px;white-space:nowrap">✓ Accept all ('+items.length+')</button>'; })()
         +'<br><button class="opup" data-up="'+esc(po)+'" title="open this PO in PURCHASE ORDERS ▸ ORDER PLAN to review &amp; push changes to the ERP" style="display:none">⬆ Upload</button></th>';});
     h+='<th>SKU TOTAL</th></tr></thead><tbody>';
     var sorted=skuList.slice().sort(function(a,b){var ca=skuCat[a]||'~~',cb=skuCat[b]||'~~'; return ca<cb?-1:ca>cb?1:(a<b?-1:1);});
@@ -4863,11 +4863,11 @@
           ? (function(){ var cv=_cartonsOf(q,a.cq); return '<span class="tiny" title="'+(q?units(q)+' units':'')+'">'+(cv!=null?cv:(q?('<span class="mut">'+units(q)+'u</span>'):''))+'</span>'; })()
           : '<input class="qtycell'+(q?'':' z')+'" data-po="'+esc(po)+'" data-sku="'+esc(sku)+'" data-erp="'+eq+'" value="'+(q||'')+'">';
         tds+='<td'+tdc+' style="min-width:'+POW+';width:'+POW+';text-align:center'+(discPast&&!tdc?';background:'+rowBg:'')+'">'+_cellInner+badge+'</td>';});
-      h+='<tr><td class="l" style="'+fzc('sku',rowBg,2)+'"><button class="op-plan" data-sku="'+esc(sku)+'" title="show the buy plan for this SKU (pick country in the popup)" style="font-size:8px;font-weight:700;padding:0 4px;margin-right:5px;border:1px solid #93c5fd;border-radius:3px;background:#eff6ff;color:#1d4ed8;cursor:pointer;vertical-align:middle">PLAN</button>'+esc(sku)+'</td>'
+      h+='<tr><td class="l" style="'+fzc('sku',rowBg,2)+'"><button class="op-plan" data-sku="'+esc(sku)+'" title="show the buy plan for this SKU (pick country in the popup)" style="font-size:8px;font-weight:700;padding:0 4px;margin-right:5px;border:1px solid #93c5fd;border-radius:3px;background:var(--blue-soft);color:var(--blue);cursor:pointer;vertical-align:middle">PLAN</button>'+esc(sku)+'</td>'
         +'<td style="'+fzc('cq',rowBg,2)+';text-align:right"><span class="tiny">'+(a.cq?esc(a.cq):'')+'</span></td>'
         +'<td class="l" style="'+fzc('rw',rowBg,2)+'"><span class="tiny">'+esc(skuRW[sku]||'')+'</span></td>'
         +'<td class="l" style="'+fzc('sup',rowBg,2)+';overflow:hidden;text-overflow:ellipsis" title="allowed suppliers (supplier_multiple_all): '+esc(a.sm||'—')+(a.sup?' · main: '+esc(a.sup):'')+'"><span class="tiny">'+esc(a.sm||a.sup||'')+'</span></td>'
-        +'<td class="l" style="'+fzc('dis',discPast?'#fecaca':rowBg,2)+(discPast?';color:#991b1b;font-weight:700':'')+'" title="'+(discPast?'discontinue date is in the past':'')+'"><span class="tiny'+(discPast?'':' mut')+'">'+(a.dis?fd(a.dis):'')+'</span></td>'
+        +'<td class="l" style="'+fzc('dis',discPast?'#fecaca':rowBg,2)+(discPast?';color:var(--neg);font-weight:700':'')+'" title="'+(discPast?'discontinue date is in the past':'')+'"><span class="tiny'+(discPast?'':' mut')+'">'+(a.dis?fd(a.dis):'')+'</span></td>'
         +tds+'<td style="text-align:center'+(discPast?';background:'+rowBg:'')+'"><b>'+(cartons?(function(){var cv=_cartonsOf(tot,a.cq);return cv!=null?cv:units(tot)+'u';})():units(tot))+'</b></td></tr>'; });
     var gu=0,gv=0,gpl=0,gct=0,ptd=''; pos.forEach(function(po){var u=pstat[po].u,pl=pstat[po].pl,ct=pstat[po].ct,v=0; skuList.forEach(function(sku){var cc=cell[po+'|'+sku]; if(cc)v+=cc.q*cc.c;}); gu+=u;gv+=v;gpl+=pl;gct+=ct; ptd+='<td style="text-align:center"><b>'+(cartons?_fC(ct):units(u))+'</b><br><span class="tiny mut">$'+money(v)+' · '+plt(pl)+'</span></td>';});
     h+='<tr class="batchrow"><td class="l" colspan="5" style="position:sticky;left:0;background:#eef2ff;z-index:2;min-width:'+FROZEN+'px;white-space:nowrap">PO TOTALS · '+(cartons?'cartons':'units')+' / value / pallets'+(poCapped?' (first '+OP_POCAP+' POs)':'')+'</td>'+ptd+'<td style="text-align:center"><b>'+(cartons?_fC(gct):units(gu))+'</b><br><span class="tiny mut">$'+money(gv)+' · '+plt(gpl)+'</span></td></tr>';
@@ -4889,11 +4889,11 @@
   // section's data renders (_navCounts.plan / .shipments / .manufacturing) + a background prefetch on entry.
   var _navCounts={}, _allShips=[], _NAVLBL={plan:'PLAN',shipments:'Shipments',manufacturing:'Manufacturing',paydue:'Payments Due',pricelists:'Price Lists'}, _NAVNOUN={paydue:'overdue payment'};
   function navBadge(n,noun){ n=Number(n)||0; return n>0?' <span class="ex-badge" title="'+n+' '+(noun?esc(noun)+(n>1?'s':''):('item'+(n>1?'s':'')+' needing action'))+'">'+n+'</span>':''; }
-  function plNavBadge(n){ n=Number(n)||0; return n>0?' <span class="ex-badge" style="background:#dc2626;color:#fff" title="'+n+' price approval'+(n>1?'s':'')+' required">'+n+'</span>':''; }   // red = unapproved price changes
+  function plNavBadge(n){ n=Number(n)||0; return n>0?' <span class="ex-badge" style="background:var(--neg);color:#fff" title="'+n+' price approval'+(n>1?'s':'')+' required">'+n+'</span>':''; }   // red = unapproved price changes
   function _navBd(k){ return k==='pricelists'?plNavBadge(_navCounts.pricelists):navBadge(_navCounts[k],_NAVNOUN[k]); }
   function updateNavBadges(){ document.querySelectorAll('#supply-content #prod-subtabs .rtab[data-posub]').forEach(function(sp){ var k=sp.dataset.posub; if(_NAVLBL[k]!==undefined) sp.innerHTML=_NAVLBL[k]+_navBd(k); }); paymentsNavBadge(_navCounts.paydue); poSectionNavBadge(_navCounts.plan); }
   // Roll the PLAN action-item count up to the top-level PURCHASE ORDERS section tab (mirrors the PLAN sub-tab badge).
-  function poSectionNavBadge(n){ n=Number(n)||0; var btn=document.querySelector('#supply-subnav .stab[data-k="purchase-orders"]'); if(btn)btn.innerHTML='PURCHASE ORDERS'+(n>0?' <span class="ex-badge" style="background:#dc2626;color:#fff" title="'+n+' open action item'+(n>1?'s':'')+' across purchase orders">'+n+'</span>':'');
+  function poSectionNavBadge(n){ n=Number(n)||0; var btn=document.querySelector('#supply-subnav .stab[data-k="purchase-orders"]'); if(btn)btn.innerHTML='PURCHASE ORDERS'+(n>0?' <span class="ex-badge" style="background:var(--neg);color:#fff" title="'+n+' open action item'+(n>1?'s':'')+' across purchase orders">'+n+'</span>':'');
     var opt=document.querySelector('#supply-nav-sel option[value="purchase-orders"]'); if(opt)opt.textContent='PURCHASE ORDERS'+(n>0?' ('+n+')':''); }
   // PAYMENTS top-level tab inherits the Payments Due overdue count (same number as the Payments Due sub-tab)
   function paymentsNavBadge(n){ n=Number(n)||0; var btn=document.querySelector('#supply-subnav .stab[data-k="payments"]'); if(btn)btn.innerHTML='PAYMENTS'+(n>0?' <span class="ex-badge" title="'+n+' payment'+(n>1?'s':'')+' overdue">'+n+'</span>':'');
@@ -4952,11 +4952,11 @@
     ov=document.createElement('div'); ov.id='shipplan-ov'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);display:flex;padding:8px';
     ov.style.zIndex=6105;   // #1 just below the drawer base+10 (6110) so EVERY PO/shipment drawer (nextDrawerZ ≥ 6110, even after a reset) opens ABOVE this popup; still above supply content
     ov.innerHTML='<div style="background:#fff;border-radius:10px;width:99vw;margin:auto;display:flex;flex-direction:column;max-height:98vh;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.4)">'
-      +'<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid #e5e7eb;flex-wrap:wrap">'
+      +'<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap">'
         +'<div style="font-weight:700;font-size:16px;color:#0f172a">🚢 Plan Shipments</div>'
         +'<div style="display:flex;align-items:center;gap:8px"><span style="font-size:12px;font-weight:700;color:#334155">Ship to:</span><span id="sp-ctry" style="display:inline-flex;gap:5px"></span></div>'
-        +'<label style="font-size:12px;color:#334155;display:inline-flex;align-items:center;gap:5px">Days to go &lt; <input id="sp-days" type="number" min="0" value="'+_spDays+'" style="width:56px;padding:3px 6px;border:1px solid #cbd5e1;border-radius:5px;font-size:12px"></label>'
-        +'<label style="font-size:12px;color:#334155;display:inline-flex;align-items:center;gap:5px" title="Recommendations won\x27t combine Lixin and XR Textile POs in the same container"><input type="checkbox" id="sp-keepapart"'+(_spKeepApart?' checked':'')+'> Keep Lixin &amp; XR Textile apart</label>'
+        +'<label style="font-size:12px;color:var(--ink-soft);display:inline-flex;align-items:center;gap:5px">Days to go &lt; <input id="sp-days" type="number" min="0" value="'+_spDays+'" style="width:56px;padding:3px 6px;border:1px solid var(--line);border-radius:5px;font-size:12px"></label>'
+        +'<label style="font-size:12px;color:var(--ink-soft);display:inline-flex;align-items:center;gap:5px" title="Recommendations won\x27t combine Lixin and XR Textile POs in the same container"><input type="checkbox" id="sp-keepapart"'+(_spKeepApart?' checked':'')+'> Keep Lixin &amp; XR Textile apart</label>'
         +'<button id="sp-undo" class="save-btn light" style="margin-left:auto" title="undo the last change">↶ Undo</button>'
         +'<button id="sp-close" class="save-btn light">✕ Close</button></div>'
       +'<div id="sp-body" style="flex:1;overflow:auto;padding:14px 16px"></div></div>';
@@ -4968,29 +4968,29 @@
     var _ka=ov.querySelector('#sp-keepapart'); if(_ka)_ka.onchange=function(){ _spKeepApart=this.checked; try{localStorage.setItem('hzSpKeepApart',_spKeepApart?'1':'0');}catch(e){} if(_spCtry)_spDraw(); };
     _spPills(); if(_spCtry)_spLoad(); else _spDrawPrompt(); }   // reopen: keep the last-selected market and refresh it; else prompt
   function _spDaysToGo(pe){ if(!pe)return null; var t=new Date(pe+'T00:00:00'), n=new Date(); n.setHours(0,0,0,0); return Math.round((t-n)/86400000); }
-  function _spDaysLabel(d){ if(d==null)return '<span class="mut" style="font-size:10px">no prod date</span>'; if(d<0)return '<span style="color:#166534;font-weight:700;font-size:10px">ready (end date past)</span>'; if(d===0)return '<span style="color:#b45309;font-weight:700;font-size:10px">due today</span>'; return '<span style="font-size:10px;color:'+(d<=7?'#b45309':'#475569')+';font-weight:'+(d<=7?'700':'600')+'">'+d+' days to go</span>'; }
+  function _spDaysLabel(d){ if(d==null)return '<span class="mut" style="font-size:10px">no prod date</span>'; if(d<0)return '<span style="color:var(--pos);font-weight:700;font-size:10px">ready (end date past)</span>'; if(d===0)return '<span style="color:var(--amber);font-weight:700;font-size:10px">due today</span>'; return '<span style="font-size:10px;color:'+(d<=7?'#b45309':'#475569')+';font-weight:'+(d<=7?'700':'600')+'">'+d+' days to go</span>'; }
   function _spPack(items){ var arr=items.slice().sort(function(a,b){return b.pallets-a.pallets;}), bins=[];   // FFD favouring the fullest ≤20-pallet bin (20 priority; 15+ good; beats 10ft+LCL)
     arr.forEach(function(p){ if(!(p.pallets>0))return; var best=-1; for(var i=0;i<bins.length;i++){ if(bins[i].pal+p.pallets<=20 && !_spMixBlocked(bins[i].pos,p) && (best<0||bins[i].pal>bins[best].pal))best=i; } if(best>=0){ bins[best].pos.push(p); bins[best].pal+=p.pallets; } else bins.push({pos:[p],pal:p.pallets}); });   // keep-apart: never place a Lixin PO into an XR bin (or vice-versa) when the toggle is on
     return bins; }
   function _spPills(){ var cp=document.getElementById('sp-ctry'); if(!cp)return;
     cp.innerHTML=SP_MKTS.map(function(c){ return '<span class="pill'+((_spCtry===c)?' active':'')+'" data-spc="'+c+'" style="font-weight:700;padding:4px 13px;font-size:12px">'+c+'</span>'; }).join('');
     cp.querySelectorAll('[data-spc]').forEach(function(x){ x.onclick=function(){ _spCtry=x.dataset.spc; _spPills(); _spLoad(); }; }); }
-  function _spDrawPrompt(){ var b=document.getElementById('sp-body'); if(b)b.innerHTML='<div style="text-align:center;color:#64748b;padding:52px 0;font-size:14px">Choose a ship-to country above to plan its shipments.</div>'; }
+  function _spDrawPrompt(){ var b=document.getElementById('sp-body'); if(b)b.innerHTML='<div style="text-align:center;color:var(--muted);padding:52px 0;font-size:14px">Choose a ship-to country above to plan its shipments.</div>'; }
   function _spLoad(){ _spDismissed={}; _spUndo=[]; var b=document.getElementById('sp-body'); if(b)b.innerHTML='<div class="count">Loading '+esc(_spCtry)+'…</div>';
     fetch('/api/supply/ship-plan?country='+encodeURIComponent(_spCtry)).then(function(r){return r.json();}).then(function(j){ _spData=(j&&j.pos)||[]; _spDraw(); }).catch(function(){ if(b)b.innerHTML='<div style="color:#dc2626">Failed to load.</div>'; }); }
   function _spDraw(){ var body=document.getElementById('sp-body'); if(!body||!_spData)return;
     var vis=_spData.filter(function(p){ var d=_spDaysToGo(p.prod_end); return d==null || d<=_spDays; });
     var contMap={}; vis.forEach(function(p){ if(p.container){ (contMap[p.container]=contMap[p.container]||[]).push(p); } });
     var unassigned=vis.filter(function(p){ return !p.container && p.pallets>0; });
-    function badge(p){ var s=String(p.status||'').toUpperCase(); if(/READY TO SHIP/.test(s))return '<span style="font-size:8px;background:#dbeafe;color:#1e40af;border-radius:3px;padding:1px 5px;font-weight:700">READY TO SHIP</span>'; if(/PRODUCTION/.test(s))return '<span style="font-size:8px;background:#ffedd5;color:#9a3412;border-radius:3px;padding:1px 5px;font-weight:700">PRODUCTION</span>'; return '<span style="font-size:8px;background:#eef2f7;color:#64748b;border-radius:3px;padding:1px 5px">'+esc(s)+'</span>'; }
+    function badge(p){ var s=String(p.status||'').toUpperCase(); if(/READY TO SHIP/.test(s))return '<span style="font-size:8px;background:var(--blue-soft);color:var(--blue-ink);border-radius:3px;padding:1px 5px;font-weight:700">READY TO SHIP</span>'; if(/PRODUCTION/.test(s))return '<span style="font-size:8px;background:#ffedd5;color:#9a3412;border-radius:3px;padding:1px 5px;font-weight:700">PRODUCTION</span>'; return '<span style="font-size:8px;background:var(--hover);color:var(--muted);border-radius:3px;padding:1px 5px">'+esc(s)+'</span>'; }
     function poCard(p){ var assigned=!!p.container, locked=!!p.confirmed, d=_spDaysToGo(p.prod_end); return '<div class="sp-po" draggable="'+(locked?'false':'true')+'" data-po="'+esc(p.po)+'" style="border:1px solid '+(locked?'#fdba74':assigned?'#86efac':'#cbd5e1')+';border-radius:6px;padding:4px 7px;margin:0 0 5px;background:'+(locked?'#fff7ed':assigned?'#f0fdf4':'#fff')+';cursor:'+(locked?'default':'grab')+'">'
-      +'<div style="display:flex;justify-content:space-between;gap:5px;align-items:center"><button class="sp-poref" data-po="'+esc(p.po)+'" title="open PO" style="font-weight:700;color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer;text-decoration:underline;font-size:11px">'+esc(p.po)+'</button>'+badge(p)+'</div>'
-      +'<div style="color:#64748b;font-size:10px">'+esc(p.supplier||'')+' · <b style="color:#334155">'+p.pallets+'</b> pal'+(assigned?' · <span style="color:#166534">on '+esc(p.container)+'</span>':'')+'</div>'
+      +'<div style="display:flex;justify-content:space-between;gap:5px;align-items:center"><button class="sp-poref" data-po="'+esc(p.po)+'" title="open PO" style="font-weight:700;color:var(--blue);background:none;border:none;padding:0;cursor:pointer;text-decoration:underline;font-size:11px">'+esc(p.po)+'</button>'+badge(p)+'</div>'
+      +'<div style="color:var(--muted);font-size:10px">'+esc(p.supplier||'')+' · <b style="color:#334155">'+p.pallets+'</b> pal'+(assigned?' · <span style="color:#166534">on '+esc(p.container)+'</span>':'')+'</div>'
       +'<div style="font-size:9px">'+(p.prod_end?fd(p.prod_end)+' · ':'')+_spDaysLabel(d)+'</div></div>'; }
-    function fillBar(pal){ var pct=Math.min(100,Math.round(pal/20*100)),col=pal>20?'#dc2626':pal>=15?'#16a34a':pal>=10?'#3b82f6':'#93c5fd'; return '<div style="position:relative;height:8px;background:#eef2f7;border-radius:4px;overflow:hidden;margin-top:2px"><div style="height:100%;width:'+pct+'%;background:'+col+'"></div><div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:#b0b7c3" title="10 pallets (20ft)"></div></div>'; }
+    function fillBar(pal){ var pct=Math.min(100,Math.round(pal/20*100)),col=pal>20?'#dc2626':pal>=15?'#16a34a':pal>=10?'#3b82f6':'#93c5fd'; return '<div style="position:relative;height:8px;background:var(--hover);border-radius:4px;overflow:hidden;margin-top:2px"><div style="height:100%;width:'+pct+'%;background:'+col+'"></div><div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:#b0b7c3" title="10 pallets (20ft)"></div></div>'; }
     function contBox(ref,ps){ var tot=ps.reduce(function(a,p){return a+p.pallets;},0), conf=!!(ps.length&&ps[0].confirmed); return '<div class="'+(conf?'sp-confbox':'sp-drop')+'" data-ref="'+esc(ref)+'" style="break-inside:avoid;-webkit-column-break-inside:avoid;margin:0 0 8px;border:2px '+(conf?'solid #fdba74':'dashed #cbd5e1')+';border-radius:8px;padding:7px 9px;background:'+(conf?'#fff7ed':'#f8fafc')+'">'
-      +'<div style="display:flex;justify-content:space-between;align-items:baseline"><button class="sp-shipref" data-ref="'+esc(ref)+'" title="open shipment" style="font-size:11px;font-weight:700;color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer;text-decoration:underline;max-width:58%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(ref)+'</button><span style="font-size:17px;font-weight:800;color:'+(tot>20?'#dc2626':'#0f172a')+'">'+(Math.round(tot*10)/10)+'<span style="font-size:11px;color:#94a3b8">/20</span></span></div>'
-      +fillBar(tot)+'<div style="color:#94a3b8;font-size:9px;margin-top:1px">'+(tot>10?'40ft':'20ft')+' · 10 or 20 pallets both ship</div><label style="display:flex;align-items:center;gap:4px;font-size:9px;color:'+(conf?'#9a3412':'#64748b')+';margin-top:3px;cursor:pointer"><input type="checkbox" class="sp-conf" data-ref="'+esc(ref)+'"'+(conf?' checked':'')+'> Confirmed - do not change</label><div style="margin-top:6px">'+ps.map(poCard).join('')+'</div></div>'; }
+      +'<div style="display:flex;justify-content:space-between;align-items:baseline"><button class="sp-shipref" data-ref="'+esc(ref)+'" title="open shipment" style="font-size:11px;font-weight:700;color:var(--blue);background:none;border:none;padding:0;cursor:pointer;text-decoration:underline;max-width:58%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(ref)+'</button><span style="font-size:17px;font-weight:800;color:'+(tot>20?'#dc2626':'#0f172a')+'">'+(Math.round(tot*10)/10)+'<span style="font-size:11px;color:#94a3b8">/20</span></span></div>'
+      +fillBar(tot)+'<div style="color:var(--faint);font-size:9px;margin-top:1px">'+(tot>10?'40ft':'20ft')+' · 10 or 20 pallets both ship</div><label style="display:flex;align-items:center;gap:4px;font-size:9px;color:'+(conf?'#9a3412':'#64748b')+';margin-top:3px;cursor:pointer"><input type="checkbox" class="sp-conf" data-ref="'+esc(ref)+'"'+(conf?' checked':'')+'> Confirmed - do not change</label><div style="margin-top:6px">'+ps.map(poCard).join('')+'</div></div>'; }
     var candidates=vis.filter(function(p){ return !p.confirmed && p.pallets>0; }); var bins=_spPack(candidates); var _contSigs={}; Object.keys(contMap).forEach(function(rf){ _contSigs[contMap[rf].map(function(p){return p.po;}).sort().join('|')]=1; });
     // #1 TOP-UP recs (MERGED per container): pack loose (unassigned) POs into each non-confirmed container's spare capacity → ONE card per container listing all the POs to add (keeps the existing master ref, no reshuffle). Largest-first, best-fit into the fullest container that still has room.
     var addGroups=(function(){ var byRef={};
@@ -5001,17 +5001,17 @@
       return Object.keys(byRef).map(function(k){return byRef[k];}).filter(function(g){return g.pos.length;})
         .map(function(g){ g.after=Math.round((g.cur+g.pos.reduce(function(a,x){return a+x.pallets;},0))*10)/10; return g; }); })();
     var addHtml=addGroups.map(function(g){ var sig='ADDG|'+g.ref; if(_spDismissed[sig])return ''; var good=g.after>=15;
-      return '<div style="border:1px solid #bae6fd;background:#f0f9ff;border-radius:7px;padding:6px 8px;margin-bottom:6px"><div style="font-weight:700;color:#0369a1;font-size:11px">➕ Top up '+esc(g.ref)+' <span style="color:#64748b;font-weight:500">('+g.cur+' → '+g.after+'/20'+(good?', good fill':'')+')</span></div>'
-        +'<div style="color:#475569;font-size:10px;margin:2px 0">add '+g.pos.map(function(p){return '<button class="sp-poref" data-po="'+esc(p.po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer;text-decoration:underline;font-size:10px">'+esc(p.po)+'</button> ('+p.pallets+')';}).join(' + ')+'</div>'
-        +'<button class="sp-add-group save-btn" data-pos="'+esc(g.pos.map(function(p){return p.po;}).join(','))+'" data-ref="'+esc(g.ref)+'" style="font-size:10px;padding:2px 8px;background:#dcfce7;color:#166534;border:1px solid #16a34a">✓ Apply</button> <button class="sp-dismiss lnk-btn" data-sig="'+esc(sig)+'" style="font-size:10px;color:#94a3b8;background:none;border:none;cursor:pointer;text-decoration:underline">dismiss</button></div>'; }).join('');
+      return '<div style="border:1px solid #bae6fd;background:#f0f9ff;border-radius:7px;padding:6px 8px;margin-bottom:6px"><div style="font-weight:700;color:#0369a1;font-size:11px">➕ Top up '+esc(g.ref)+' <span style="color:var(--muted);font-weight:500">('+g.cur+' → '+g.after+'/20'+(good?', good fill':'')+')</span></div>'
+        +'<div style="color:var(--muted);font-size:10px;margin:2px 0">add '+g.pos.map(function(p){return '<button class="sp-poref" data-po="'+esc(p.po)+'" style="color:var(--blue);background:none;border:none;padding:0;cursor:pointer;text-decoration:underline;font-size:10px">'+esc(p.po)+'</button> ('+p.pallets+')';}).join(' + ')+'</div>'
+        +'<button class="sp-add-group save-btn" data-pos="'+esc(g.pos.map(function(p){return p.po;}).join(','))+'" data-ref="'+esc(g.ref)+'" style="font-size:10px;padding:2px 8px;background:var(--pos-bg);color:var(--pos);border:1px solid #16a34a">✓ Apply</button> <button class="sp-dismiss lnk-btn" data-sig="'+esc(sig)+'" style="font-size:10px;color:var(--faint);background:none;border:none;cursor:pointer;text-decoration:underline">dismiss</button></div>'; }).join('');
     var recHtml=bins.map(function(b){ if(!b.pos.length)return ''; var _sig=b.pos.map(function(p){return p.po;}).sort().join('|'); if(_contSigs[_sig]||_spDismissed[_sig])return ''; var over=b.pal>20, cap=b.pal>10?20:10, good=b.pal>=15&&!over, ok=b.pal>=10&&!over, col=over?'#dc2626':good?'#166534':ok?'#b45309':'#b91c1c', note=over?'over filled - consider split':good?'good fill':ok?'ok · a 20ft at '+(Math.round(b.pal*10)/10)+' beats 10ft + LCL':'small · combine if you can';
-      return '<div style="border:1px solid #e5e7eb;border-radius:7px;padding:6px 8px;margin-bottom:6px"><div style="font-weight:700;color:'+col+';font-size:11px">'+(cap===20?'40ft':'20ft')+' · '+(Math.round(b.pal*10)/10)+'/'+cap+' pal</div><div style="color:#94a3b8;font-size:9px">'+note+'</div><div style="color:#475569;font-size:10px;margin:2px 0">'+b.pos.map(function(p){return '<button class="sp-poref" data-po="'+esc(p.po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer;text-decoration:underline;font-size:10px">'+esc(p.po)+'</button> ('+p.pallets+')';}).join(' + ')+'</div>'+'<button class="sp-apply-bin save-btn" data-pos="'+esc(b.pos.map(function(p){return p.po;}).join(','))+'" style="font-size:10px;padding:2px 8px;background:#dcfce7;color:#166534;border:1px solid #16a34a">'+(b.pos.length>1?'✓ Apply':'✓ Own container')+'</button> <button class="sp-dismiss lnk-btn" data-sig="'+esc(_sig)+'" style="font-size:10px;color:#94a3b8;background:none;border:none;cursor:pointer;text-decoration:underline">dismiss</button></div>'; }).join('');
+      return '<div style="border:1px solid var(--line);border-radius:7px;padding:6px 8px;margin-bottom:6px"><div style="font-weight:700;color:'+col+';font-size:11px">'+(cap===20?'40ft':'20ft')+' · '+(Math.round(b.pal*10)/10)+'/'+cap+' pal</div><div style="color:var(--faint);font-size:9px">'+note+'</div><div style="color:var(--muted);font-size:10px;margin:2px 0">'+b.pos.map(function(p){return '<button class="sp-poref" data-po="'+esc(p.po)+'" style="color:var(--blue);background:none;border:none;padding:0;cursor:pointer;text-decoration:underline;font-size:10px">'+esc(p.po)+'</button> ('+p.pallets+')';}).join(' + ')+'</div>'+'<button class="sp-apply-bin save-btn" data-pos="'+esc(b.pos.map(function(p){return p.po;}).join(','))+'" style="font-size:10px;padding:2px 8px;background:var(--pos-bg);color:var(--pos);border:1px solid #16a34a">'+(b.pos.length>1?'✓ Apply':'✓ Own container')+'</button> <button class="sp-dismiss lnk-btn" data-sig="'+esc(_sig)+'" style="font-size:10px;color:var(--faint);background:none;border:none;cursor:pointer;text-decoration:underline">dismiss</button></div>'; }).join('');
     if(!recHtml.trim())recHtml='<div class="mut" style="font-size:10px">Nothing to consolidate right now.</div>';
     var conts=Object.keys(contMap);
     body.innerHTML='<div style="display:flex;gap:12px;align-items:flex-start">'
-      +'<div style="flex:0 0 258px"><div style="font-weight:700;font-size:12px;margin-bottom:5px">All '+esc(_spCtry)+' POs <span class="mut">('+vis.length+')</span></div><div class="sp-drop" data-ref="" style="min-height:60px;border:2px dashed #e5e7eb;border-radius:8px;padding:6px;max-height:76vh;overflow:auto">'+(vis.length?vis.map(poCard).join(''):'<div class="mut tiny">no production / ready POs within '+_spDays+' days.</div>')+'</div></div>'
+      +'<div style="flex:0 0 258px"><div style="font-weight:700;font-size:12px;margin-bottom:5px">All '+esc(_spCtry)+' POs <span class="mut">('+vis.length+')</span></div><div class="sp-drop" data-ref="" style="min-height:60px;border:2px dashed var(--line);border-radius:8px;padding:6px;max-height:76vh;overflow:auto">'+(vis.length?vis.map(poCard).join(''):'<div class="mut tiny">no production / ready POs within '+_spDays+' days.</div>')+'</div></div>'
       +'<div style="flex:1;min-width:0"><div style="font-weight:700;font-size:12px;margin-bottom:5px">Containers <span class="mut">('+conts.length+' planned)</span></div><div style="columns:230px;column-gap:8px">'+conts.map(function(ref){ return contBox(ref,contMap[ref]); }).join('')+'<div class="sp-drop" data-ref="__new__" style="break-inside:avoid;-webkit-column-break-inside:avoid;margin:0 0 8px;border:2px dashed #7dd3fc;border-radius:8px;padding:14px;text-align:center;color:#0369a1;background:#f0f9ff;font-size:11px">+ drop a PO here<br>to create a new shipment</div></div></div>'
-      +'<div style="flex:0 0 226px"><div style="font-weight:700;font-size:12px;margin-bottom:5px">⚡ Recommendations</div><div style="color:#94a3b8;font-size:9px;margin-bottom:5px">Maximise 20-pallet containers (15+ good).</div><div style="max-height:76vh;overflow:auto">'+(addHtml.trim()?'<div style="font-weight:700;font-size:10px;color:#0369a1;margin-bottom:4px">Top up existing containers</div>'+addHtml+'<div style="font-weight:700;font-size:10px;color:#475569;margin:9px 0 4px">New containers</div>':'')+recHtml+'</div></div>'
+      +'<div style="flex:0 0 226px"><div style="font-weight:700;font-size:12px;margin-bottom:5px">⚡ Recommendations</div><div style="color:var(--faint);font-size:9px;margin-bottom:5px">Maximise 20-pallet containers (15+ good).</div><div style="max-height:76vh;overflow:auto">'+(addHtml.trim()?'<div style="font-weight:700;font-size:10px;color:#0369a1;margin-bottom:4px">Top up existing containers</div>'+addHtml+'<div style="font-weight:700;font-size:10px;color:var(--muted);margin:9px 0 4px">New containers</div>':'')+recHtml+'</div></div>'
       +'</div>';
     body.querySelectorAll('.sp-poref').forEach(function(bb){ bb.onclick=function(e){ e.stopPropagation(); if(typeof openPODrawer==='function')openPODrawer(bb.dataset.po,'oplan'); }; });
     body.querySelectorAll('.sp-shipref').forEach(function(bb){ bb.onclick=function(e){ e.stopPropagation(); if(typeof gotoShipment==='function')gotoShipment(bb.dataset.ref); else if(typeof openShipDrawer==='function')openShipDrawer(bb.dataset.ref); }; });
@@ -5081,7 +5081,7 @@
     fetch('/api/supply/productions').then(function(r){return r.json();}).then(function(d){cache['productions']=d; if(_tk!==_navToken)return; renderProductions(d);}).catch(function(e){ if(_tk!==_navToken)return; c.innerHTML='<div style="color:#dc2626">Failed to load: '+esc(e.message||e)+'</div>';}); }
   // ── MASTER PO: consolidate child POs (one supplier) into a REAL master PO (in the grid, is_master), children hidden ──
   function mpMoney(x){ return Number(x||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
-  var MP_BADGE='display:inline-block;background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;border-radius:3px;font-size:9px;font-weight:700;padding:0 5px;line-height:15px;margin-top:2px;letter-spacing:.3px';   // medium-blue master/child badge
+  var MP_BADGE='display:inline-block;background:var(--blue-soft);color:var(--blue-ink);border:1px solid #93c5fd;border-radius:3px;font-size:9px;font-weight:700;padding:0 5px;line-height:15px;margin-top:2px;letter-spacing:.3px';   // medium-blue master/child badge
   // Create-master modal (opened from Import/Export ▸ Create master PO)
   function openMasterCreate(){
     var bg=document.createElement('div'); bg.id='mpc-bg';
@@ -5090,15 +5090,15 @@
       +'<div class="bar" style="align-items:center;margin-bottom:6px"><div class="sect-h" style="margin:0">⛃ Create master PO</div><span style="margin-left:auto"></span><button class="mpc-x" style="border:none;background:none;font-size:18px;cursor:pointer;color:#64748b">✕</button></div>'
       +'<div class="mut tiny" style="margin-bottom:10px">Consolidate 2+ POs from one supplier into a single master PO. The master carries the summed lines + invoice and is the ERP order; the children move to the Child PO tab and leave the grid/buy plan/cash flow. Only not-yet-shipped POs can be consolidated.</div>'
       +'<div class="bar" style="gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><label class="mut tiny">Supplier</label><select id="mpc-sup" class="flt"><option value="">— choose supplier —</option></select>'
-      +'<input id="mpc-search" class="flt" placeholder="🔍 filter PO / client / branch…" style="width:220px;background:#eff6ff;border-color:#93c5fd" disabled></div>'
-      +'<div class="bar" style="gap:12px;align-items:center;flex-wrap:wrap;padding:8px 10px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;margin-bottom:8px">'   // action bar at the TOP, above the table
+      +'<input id="mpc-search" class="flt" placeholder="🔍 filter PO / client / branch…" style="width:220px;background:var(--blue-soft);border-color:#93c5fd" disabled></div>'
+      +'<div class="bar" style="gap:12px;align-items:center;flex-wrap:wrap;padding:8px 10px;background:var(--hover);border:1px solid var(--line);border-radius:8px;margin-bottom:8px">'   // action bar at the TOP, above the table
       +'<span id="mpc-seltot" class="mut tiny">0 selected · Σ 0.00</span>'
       +'<label class="mut tiny">PO reference</label><input id="mpc-po" class="flt" style="width:200px" placeholder="(auto)" title="Master PO number — defaults to the biggest child + -MASTER; edit to override">'
       +'<label class="mut tiny">Invoice total</label><input id="mpc-inv" class="flt" style="width:110px" placeholder="optional">'
       +'<span style="margin-left:auto"></span><button class="save-btn light mpc-x">Cancel</button>'
-      +'<button class="save-btn" id="mpc-go" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;margin-left:6px">Create master</button>'
-      +'<span id="mpc-msg" style="color:#b91c1c;flex-basis:100%;text-align:right"></span></div>'
-      +'<div id="mpc-warn" style="display:none;color:#b45309;background:#fffbeb;border:1px solid #fcd34d;border-radius:6px;padding:6px 9px;font-size:11px;margin-bottom:8px"></div>'
+      +'<button class="save-btn" id="mpc-go" style="background:var(--blue-soft);color:var(--blue-ink);border:1px solid #93c5fd;margin-left:6px">Create master</button>'
+      +'<span id="mpc-msg" style="color:var(--neg);flex-basis:100%;text-align:right"></span></div>'
+      +'<div id="mpc-warn" style="display:none;color:var(--amber);background:var(--amber-bg);border:1px solid #fcd34d;border-radius:6px;padding:6px 9px;font-size:11px;margin-bottom:8px"></div>'
       +'<div id="mpc-elig"><div class="mut tiny">Choose a supplier to list its consolidatable POs.</div></div></div>';
     (document.getElementById('supply-root')||document.body).appendChild(bg);
     function close(){ if(bg.parentNode)bg.parentNode.removeChild(bg); }
@@ -5151,14 +5151,14 @@
       var html='<div class="mut tiny" style="margin-bottom:10px">Child POs are consolidated under a master PO. They stay for planning traceability but are hidden from the grid, buy plan, cash flow and ERP — the master represents them.</div>';
       Object.keys(groups).sort().forEach(function(mp){ var kids=groups[mp], st=kids[0].master_status||'';
         html+='<div style="margin-bottom:14px"><div class="bar" style="gap:10px;align-items:center;margin-bottom:4px">'
-          +'<span class="mut tiny">Master</span><button class="lnk-btn cp-master" data-po="'+esc(mp)+'" style="color:#1d4ed8;cursor:pointer;font-weight:700">'+esc(mp)+'</button>'
+          +'<span class="mut tiny">Master</span><button class="lnk-btn cp-master" data-po="'+esc(mp)+'" style="color:var(--blue);cursor:pointer;font-weight:700">'+esc(mp)+'</button>'
           +'<span style="'+MP_BADGE+'">master</span>'+(st?' <span class="tool-badge" style="background:#e0e7ff;color:#3730a3">'+esc(st)+'</span>':'')
           +'<span class="mut tiny" style="margin-left:auto">'+kids.length+' child PO'+(kids.length>1?'s':'')+' · remove all to delete the master from its PO page</span></div>'
           +'<div class="tw"><table class="pay-tbl"><thead><tr><th class="l">Child PO</th><th></th><th class="l">Branch</th><th class="l">Client</th><th>Value</th><th class="l">Status</th><th></th></tr></thead><tbody>'
-          +kids.map(function(c){ return '<tr><td class="l"><button class="lnk-btn cp-child" data-po="'+esc(c.po)+'" style="color:#1d4ed8;cursor:pointer">'+esc(c.po)+'</button></td>'
+          +kids.map(function(c){ return '<tr><td class="l"><button class="lnk-btn cp-child" data-po="'+esc(c.po)+'" style="color:var(--blue);cursor:pointer">'+esc(c.po)+'</button></td>'
             +'<td><span style="'+MP_BADGE+'">child</span></td><td class="l">'+esc(c.branch||'')+'</td><td class="l">'+esc(c.client||'')+'</td><td>'+mpMoney(c.value_est)+'</td>'
             +'<td class="l"><span class="mut tiny">inherits master</span></td>'
-            +'<td class="l"><button class="cp-remove" data-mp="'+esc(mp)+'" data-po="'+esc(c.po)+'" title="remove from master — converts back to a normal PO" style="border:none;background:none;color:#dc2626;font-weight:800;cursor:pointer;font-size:13px">✕</button></td></tr>'; }).join('')
+            +'<td class="l"><button class="cp-remove" data-mp="'+esc(mp)+'" data-po="'+esc(c.po)+'" title="remove from master — converts back to a normal PO" style="border:none;background:none;color:var(--neg);font-weight:800;cursor:pointer;font-size:13px">✕</button></td></tr>'; }).join('')
           +'</tbody></table></div></div>';
       });
       body.innerHTML=html;
@@ -5171,7 +5171,7 @@
   // and the crossdock assigned to open POs that isn't showing inbound yet.
   function renderCrossdock(d, body){ if(!body)return; d=d||{}; var rows=d.rows||[], expected=d.expected||[];
     var WHL={uk_3pl:'UK 3PL',us_3pl:'US 3PL',eu_3pl:'EU 3PL',au_3pl:'AU 3PL'};
-    function poLink(po){ po=String(po||''); return (po&&po!=='?')?'<b class="xd-po" data-po="'+esc(po)+'" style="color:#1d4ed8;cursor:pointer" title="open '+esc(po)+' in a popout">'+esc(po)+'</b>':esc(po); }
+    function poLink(po){ po=String(po||''); return (po&&po!=='?')?'<b class="xd-po" data-po="'+esc(po)+'" style="color:var(--blue);cursor:pointer" title="open '+esc(po)+' in a popout">'+esc(po)+'</b>':esc(po); }
     function srcLabel(s){
       if(s.type==='inbound')return 'Inbound '+units(s.qty)+' · '+(s.po?poLink(s.po):esc(s.ref||'?'))+(s.client?' ('+esc(s.client)+')':'')+(s.date?' · '+esc(s.date):'');
       if(s.type==='preorder')return 'Preorder '+units(s.qty)+' · '+esc(s.ref||'?')+(s.date?' ships '+esc(s.date):'');
@@ -5237,23 +5237,23 @@
       e.comps.push({sku:c.component_sku,qty:m.qty}); }); }); });
     var mfgPos=Object.keys(mfgMap).map(function(k){return mfgMap[k];});
     // shared badge styles so the two PO types read at a glance
-    var badgeMfg='<span style="display:inline-block;padding:1px 7px;border-radius:10px;background:#fef3c7;color:#92400e;font-weight:700;font-size:10px;letter-spacing:.03em">🏭 MFG</span>';
-    var badgeFin='<span style="display:inline-block;padding:1px 7px;border-radius:10px;background:#dbeafe;color:#1e40af;font-weight:700;font-size:10px;letter-spacing:.03em">📦 FINISHED</span>';
+    var badgeMfg='<span style="display:inline-block;padding:1px 7px;border-radius:10px;background:var(--amber-bg);color:var(--amber);font-weight:700;font-size:10px;letter-spacing:.03em">🏭 MFG</span>';
+    var badgeFin='<span style="display:inline-block;padding:1px 7px;border-radius:10px;background:var(--blue-soft);color:var(--blue-ink);font-weight:700;font-size:10px;letter-spacing:.03em">📦 FINISHED</span>';
     function kpi(label,val,bg,fg){ return '<div style="flex:0 0 auto;min-width:96px;padding:8px 12px;border-radius:8px;background:'+bg+';color:'+fg+'"><div style="font-size:19px;font-weight:800;line-height:1">'+val+'</div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.04em;opacity:.85;margin-top:2px">'+label+'</div></div>'; }
     var shortN=allComps.filter(function(c){return c.diff<0;}).length, overN=allComps.filter(function(c){return c.diff>0;}).length;
     function wireMfgNotes(){ var ta=document.getElementById('mfg-notes-body'); if(!ta)return;
       fetch('/api/supply/manufacturing-notes').then(function(r){return r.json();}).then(function(j){ if(document.activeElement!==ta)ta.value=(j&&j.body)||''; var m=document.getElementById('mfg-notes-meta'); if(m&&j&&j.updated_by)m.textContent='last edited by '+shortUser(j.updated_by)+(j.updated_at?' · '+j.updated_at:''); }).catch(function(){});
       var sv=document.getElementById('mfg-notes-save'); if(sv)sv.onclick=function(){ sv.disabled=true; var st=document.getElementById('mfg-notes-status'); if(st)st.textContent='Saving…';
         fetch('/api/supply/manufacturing-notes',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({body:ta.value})}).then(function(r){return r.json();}).then(function(j){ sv.disabled=false; if(j&&j.error){ if(st)st.textContent='Error: '+j.error; return; } if(st)st.textContent='Saved ✓'; var m=document.getElementById('mfg-notes-meta'); if(m&&window.ME&&ME.email)m.textContent='last edited by '+shortUser(ME.email)+' · just now'; setTimeout(function(){ if(st)st.textContent=''; },1600); }).catch(function(){ sv.disabled=false; if(st)st.textContent='Save failed'; }); }; }
-    var mfgNotesHtml='<div id="mfg-notes-wrap" style="margin:2px 0 12px;border:1px solid #e5e7eb;border-radius:8px;background:#fffef7;padding:9px 11px">'
+    var mfgNotesHtml='<div id="mfg-notes-wrap" style="margin:2px 0 12px;border:1px solid var(--line);border-radius:8px;background:#fffef7;padding:9px 11px">'
       +'<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px"><b style="font-size:12px">📝 Manufacturing notes</b><span class="mut tiny" id="mfg-notes-meta"></span></div>'
       +'<textarea id="mfg-notes-body" placeholder="Detailed notes — e.g. SKUs remaining somewhere…" style="width:100%;min-height:60px;box-sizing:border-box;border:1px solid #e5d9a8;border-radius:5px;padding:6px;font:12px inherit;resize:vertical"></textarea>'
-      +'<div style="margin-top:5px"><button class="save-btn" id="mfg-notes-save" style="background:#2563eb;color:#fff;border-color:#2563eb">Save notes</button> <span class="mut tiny" id="mfg-notes-status"></span></div></div>';
+      +'<div style="margin-top:5px"><button class="save-btn" id="mfg-notes-save" style="background:var(--blue);color:#fff;border-color:#2563eb">Save notes</button> <span class="mut tiny" id="mfg-notes-status"></span></div></div>';
     var rc=(d.recentClosed||[]);
-    var rcHtml=rc.length?('<div style="margin:2px 0 14px;border:1px solid #e5e7eb;border-radius:8px;background:#f8fafc;padding:9px 11px">'
+    var rcHtml=rc.length?('<div style="margin:2px 0 14px;border:1px solid var(--line);border-radius:8px;background:var(--hover);padding:9px 11px">'
       +'<b style="font-size:12px">✅ Recently closed manufacturing orders <span class="mut tiny">— completed in the last 30 days ('+rc.length+')</span></b>'
       +'<div class="tw" style="margin-top:6px;max-width:660px"><table style="width:max-content;min-width:100%;font-size:11px"><thead><tr><th class="l">Order</th><th class="l">PROD#</th><th class="l">Supplier</th><th class="l">Closed</th><th class="l">SKU × qty</th></tr></thead><tbody>'
-      +rc.map(function(o){ return '<tr><td class="l"><button class="lnk-btn mfg-po-go" data-po="'+esc(o.po)+'" title="open '+esc(o.po)+' in a drawer" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer">'+esc(o.po)+'</button></td><td class="l">'+(o.prod_no?'P'+esc(o.prod_no):'')+'</td><td class="l">'+esc(o.supplier||'')+'</td><td class="l" style="white-space:nowrap">'+(o.closed_date?fd(o.closed_date):'')+'</td><td class="l">'+(o.lines||[]).map(function(x){return esc(x.sku)+' <span class="mut">×'+units(x.qty)+'</span>';}).join('<br>')+'</td></tr>'; }).join('')
+      +rc.map(function(o){ return '<tr><td class="l"><button class="lnk-btn mfg-po-go" data-po="'+esc(o.po)+'" title="open '+esc(o.po)+' in a drawer" style="color:var(--blue);background:none;border:none;padding:0;cursor:pointer">'+esc(o.po)+'</button></td><td class="l">'+(o.prod_no?'P'+esc(o.prod_no):'')+'</td><td class="l">'+esc(o.supplier||'')+'</td><td class="l" style="white-space:nowrap">'+(o.closed_date?fd(o.closed_date):'')+'</td><td class="l">'+(o.lines||[]).map(function(x){return esc(x.sku)+' <span class="mut">×'+units(x.qty)+'</span>';}).join('<br>')+'</td></tr>'; }).join('')
       +'</tbody></table></div></div>'):'';
     var h='<div class="sect-h">Manufacturing — bundle assembly coverage</div>'+mfgNotesHtml+rcHtml
       +'<div class="mut tiny" style="margin-bottom:8px">Grouped by production. '+badgeFin+' = finished-product demand (FUTURE / PRODUCTION / READY TO SHIP); '+badgeMfg+' component supply is split into <b>In production</b> (still at factory) and <b>Completed</b> (already made) — both count toward coverage. Demand × BOM must be covered. Tick <b>Accept</b> to sign off a shortage/overage.</div>'
@@ -5283,9 +5283,9 @@
         var compRows=(bn.components||[]).map(function(c,ci){
           var rowid=bid+'r'+ci;
           var st=c.diff<0?'short':c.diff>0?'over':'ok';
-          var diffTxt=st==='ok'?'<span class="tool-badge bg-green">match</span>':(st==='short'?'<span style="color:#b91c1c;font-weight:700">short '+units(-c.diff)+'</span>':'<span style="color:#92710a;font-weight:700">over '+units(c.diff)+'</span>');
+          var diffTxt=st==='ok'?'<span class="tool-badge bg-green">match</span>':(st==='short'?'<span style="color:var(--neg);font-weight:700">short '+units(-c.diff)+'</span>':'<span style="color:#92710a;font-weight:700">over '+units(c.diff)+'</span>');
           var acc=(st!=='ok')?'<label class="mut tiny" style="cursor:pointer;white-space:nowrap"><input type="checkbox" class="mfg-acc" data-comp="'+esc(c.component_sku)+'"'+(c.accepted?' checked':'')+'> accept</label>':'';
-          var stkIn='<input class="mfg-stock" data-rid="'+rowid+'" data-bid="'+bid+'" data-cidx="'+ci+'" data-prod="'+esc(prodKey)+'" data-comp="'+esc(c.component_sku)+'" data-req="'+c.required+'" data-fixed="'+(c.inProd+c.completed)+'" value="'+(c.stock||0)+'" title="Qty already covered by existing on-hand stock — added to total supply" style="width:64px;padding:2px 5px;font-size:11px;text-align:right;border:1px solid #cbd5e1;border-radius:4px">';
+          var stkIn='<input class="mfg-stock" data-rid="'+rowid+'" data-bid="'+bid+'" data-cidx="'+ci+'" data-prod="'+esc(prodKey)+'" data-comp="'+esc(c.component_sku)+'" data-req="'+c.required+'" data-fixed="'+(c.inProd+c.completed)+'" value="'+(c.stock||0)+'" title="Qty already covered by existing on-hand stock — added to total supply" style="width:64px;padding:2px 5px;font-size:11px;text-align:right;border:1px solid var(--line);border-radius:4px">';
           return '<tr id="'+rowid+'"'+(st!=='ok'&&!c.accepted?' style="background:#fff7ed"':'')+'>'
             +'<td class="l">'+esc(c.component_sku)+'</td>'
             +'<td>'+units(c.required)+'</td>'
@@ -5296,10 +5296,10 @@
             +'<td class="mfg-cov">'+diffTxt+'</td>'
             +'<td class="l mfg-acc-cell">'+acc+'</td></tr>';
         }).join('');
-        return '<div style="margin:6px 0 12px"><div style="font-weight:700;font-size:12px;margin-bottom:3px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+badgeFin+' <span>'+esc(bn.parent_sku)+'</span> <span style="font-size:12px;font-weight:700;background:#1e3a8a;color:#fff;border-radius:5px;padding:1px 8px">demand '+units(bn.demand)+'</span>'+(finPos.length?('<span class="mut tiny">'+finPos.length+' production order'+(finPos.length===1?'':'s')+'</span>'):'')+' <button class="lnk-btn mfg-bun-btn" data-bid="'+bid+'" title="open the full detail for this BOM SKU — production orders + every component" style="background:none;border:none;cursor:pointer;color:#1d4ed8;padding:0;font-size:11px;font-weight:600">detail ↗</button></div>'
+        return '<div style="margin:6px 0 12px"><div style="font-weight:700;font-size:12px;margin-bottom:3px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+badgeFin+' <span>'+esc(bn.parent_sku)+'</span> <span style="font-size:12px;font-weight:700;background:#1e3a8a;color:#fff;border-radius:5px;padding:1px 8px">demand '+units(bn.demand)+'</span>'+(finPos.length?('<span class="mut tiny">'+finPos.length+' production order'+(finPos.length===1?'':'s')+'</span>'):'')+' <button class="lnk-btn mfg-bun-btn" data-bid="'+bid+'" title="open the full detail for this BOM SKU — production orders + every component" style="background:none;border:none;cursor:pointer;color:var(--blue);padding:0;font-size:11px;font-weight:600">detail ↗</button></div>'
           +'<div class="tw" style="max-width:900px"><table style="width:max-content;min-width:100%"><thead><tr><th class="l">'+badgeMfg+' Component SKU</th><th>Required</th><th title="FUTURE / PRODUCTION / READY TO SHIP — still at the factory">In production</th><th title="COMPLETE / DELIVERED / SHIPPING — already made">Completed</th><th title="Manual entry — qty already covered by existing on-hand stock">Existing stock</th><th>Total supply</th><th>Coverage</th><th class="l">Sign-off</th></tr></thead><tbody>'+compRows+'</tbody></table></div></div>';
       }).join('');
-      return '<div style="margin-bottom:16px;max-width:1000px;border:1px solid #e2e8f0;border-radius:8px;padding:12px 14px">'
+      return '<div style="margin-bottom:16px;max-width:1000px;border:1px solid var(--line);border-radius:8px;padding:12px 14px">'
         +'<div style="font-weight:800;font-size:14px;margin-bottom:6px">'+plabel+'</div>'+body+'</div>';
     }).join('');
     b.innerHTML=h; wireMfgNotes();
@@ -5310,7 +5310,7 @@
       var save=function(){ var q=Math.max(0,Math.round(Number(inp.value)||0)); inp.value=q;
         var req=Number(inp.dataset.req)||0, fixed=Number(inp.dataset.fixed)||0, supplied=fixed+q, diff=supplied-req, rid=inp.dataset.rid;
         var tr=document.getElementById(rid); if(tr){ var tot=tr.querySelector('.mfg-total'); if(tot)tot.textContent=units(supplied);
-          var cov=tr.querySelector('.mfg-cov'); if(cov)cov.innerHTML=(diff===0?'<span class="tool-badge bg-green">match</span>':(diff<0?'<span style="color:#b91c1c;font-weight:700">short '+units(-diff)+'</span>':'<span style="color:#92710a;font-weight:700">over '+units(diff)+'</span>'));
+          var cov=tr.querySelector('.mfg-cov'); if(cov)cov.innerHTML=(diff===0?'<span class="tool-badge bg-green">match</span>':(diff<0?'<span style="color:var(--neg);font-weight:700">short '+units(-diff)+'</span>':'<span style="color:#92710a;font-weight:700">over '+units(diff)+'</span>'));
           var accCell=tr.querySelector('.mfg-acc-cell'), comp=inp.dataset.comp;
           if(accCell){ if(diff===0)accCell.innerHTML=''; else if(!accCell.querySelector('.mfg-acc'))accCell.innerHTML='<label class="mut tiny" style="cursor:pointer;white-space:nowrap"><input type="checkbox" class="mfg-acc" data-comp="'+esc(comp)+'"> accept</label>'; }
           tr.style.background=(diff!==0 && !(accCell&&accCell.querySelector('.mfg-acc:checked')))?'#fff7ed':''; }
@@ -5332,7 +5332,7 @@
   // Pop-out drawer: ONE per BOM (parent) SKU. Shows the production orders carrying this SKU (qty + end dates),
   // then, for every component SKU, its coverage + the Manufacturing-branch POs behind it (mfgPos are already
   // scoped server-side to branch 'Manufacturing'). Rendered from the stashed payload (_mfgBun) — no refetch.
-  function _mfgCovHtml(diff){ return diff===0?'<span class="tool-badge bg-green">match</span>':(diff<0?'<span style="color:#b91c1c;font-weight:700">short '+units(-diff)+'</span>':'<span style="color:#92710a;font-weight:700">over '+units(diff)+'</span>'); }
+  function _mfgCovHtml(diff){ return diff===0?'<span class="tool-badge bg-green">match</span>':(diff<0?'<span style="color:var(--neg);font-weight:700">short '+units(-diff)+'</span>':'<span style="color:#92710a;font-weight:700">over '+units(diff)+'</span>'); }
   // Patch a main-table Manufacturing row from _mfgBun (used when the drawer edits stock) — keeps the two views bound.
   function _mfgPatchGridRow(bid,ci){ var bun=_mfgBun[bid]; if(!bun)return; var cc=bun.components[ci]; if(!cc)return; var tr=document.getElementById(bid+'r'+ci); if(!tr)return;
     var si=tr.querySelector('.mfg-stock'); if(si&&document.activeElement!==si)si.value=(cc.stock||0);
@@ -5347,22 +5347,22 @@
     function prodOrders(list){ if(!list||!list.length)return '<div class="mut tiny" style="margin-bottom:12px">No open production orders for this SKU.</div>';
       var tot=list.reduce(function(s,x){return s+Number(x.qty||0);},0);
       return '<div class="tw" style="margin:0 0 14px"><table style="width:100%;font-size:11px"><thead><tr><th class="l">Production order</th><th class="l">Prod</th><th class="l">Status</th><th class="l">Production end</th><th>Qty</th></tr></thead><tbody>'
-        +list.map(function(x){ return '<tr><td class="l"><button class="lnk-btn mfg-drw-po" data-po="'+esc(x.po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer;font:inherit">'+esc(x.po)+'</button></td><td class="l">'+(x.prod_no?'P'+esc(x.prod_no):'')+'</td><td class="l">'+esc(x.status||'')+'</td><td class="l" style="white-space:nowrap">'+(x.prod_end?fd(x.prod_end):'—')+'</td><td>'+units(x.qty)+'</td></tr>'; }).join('')
+        +list.map(function(x){ return '<tr><td class="l"><button class="lnk-btn mfg-drw-po" data-po="'+esc(x.po)+'" style="color:var(--blue);background:none;border:none;padding:0;cursor:pointer;font:inherit">'+esc(x.po)+'</button></td><td class="l">'+(x.prod_no?'P'+esc(x.prod_no):'')+'</td><td class="l">'+esc(x.status||'')+'</td><td class="l" style="white-space:nowrap">'+(x.prod_end?fd(x.prod_end):'—')+'</td><td>'+units(x.qty)+'</td></tr>'; }).join('')
         +'<tr style="font-weight:700;background:#f8fafc"><td class="l" colspan="4">Total demand</td><td>'+units(tot)+'</td></tr></tbody></table></div>'; }
     // one Manufacturing-PO table per component SKU
     function compBlock(c,ci){ var st=c.diff<0?'short':c.diff>0?'over':'ok';
-      var covTxt=st==='ok'?'<span class="tool-badge bg-green">match</span>':(st==='short'?'<span style="color:#b91c1c;font-weight:800">short '+units(-c.diff)+'</span>':'<span style="color:#92710a;font-weight:800">over '+units(c.diff)+'</span>');
+      var covTxt=st==='ok'?'<span class="tool-badge bg-green">match</span>':(st==='short'?'<span style="color:var(--neg);font-weight:800">short '+units(-c.diff)+'</span>':'<span style="color:#92710a;font-weight:800">over '+units(c.diff)+'</span>');
       var pos=(c.mfgPos||[]);
       var poTbl=pos.length?('<div class="tw" style="margin:6px 0 0"><table style="width:100%;font-size:11px"><thead><tr><th class="l">'+badgeMfgInline()+' Manufacturing PO</th><th class="l">Prod</th><th class="l">Stage</th><th class="l">Status</th><th>Qty</th></tr></thead><tbody>'
-        +pos.map(function(x){ return '<tr><td class="l"><button class="lnk-btn mfg-drw-po" data-po="'+esc(x.po)+'" style="color:#1d4ed8;background:none;border:none;padding:0;cursor:pointer;font:inherit">'+esc(x.po)+'</button></td><td class="l">'+(x.prod_no?'P'+esc(x.prod_no):'')+'</td><td class="l">'+(x.bucket==='completed'?'✅ Completed':'🏭 In production')+'</td><td class="l">'+esc(x.status||'')+'</td><td>'+units(x.qty)+'</td></tr>'; }).join('')
+        +pos.map(function(x){ return '<tr><td class="l"><button class="lnk-btn mfg-drw-po" data-po="'+esc(x.po)+'" style="color:var(--blue);background:none;border:none;padding:0;cursor:pointer;font:inherit">'+esc(x.po)+'</button></td><td class="l">'+(x.prod_no?'P'+esc(x.prod_no):'')+'</td><td class="l">'+(x.bucket==='completed'?'✅ Completed':'🏭 In production')+'</td><td class="l">'+esc(x.status||'')+'</td><td>'+units(x.qty)+'</td></tr>'; }).join('')
         +'</tbody></table></div>'):'<div class="mut tiny" style="margin:4px 0 0">No Manufacturing-branch POs for this component in this production.</div>';
       // Carry-back hint: when this production is short/has no MFG supply, point to the last production that made it.
       var carryHtml='';
       if((st==='short'||!pos.length) && c.carry && c.carry.made>0){ var cy=c.carry;
-        carryHtml='<div style="margin:6px 0 0;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:6px 9px;font-size:11px;color:#1e40af">↩ Refer to <b>P'+esc(cy.prod)+'</b> where <b>'+units(cy.made)+'</b> units were manufactured'+(cy.surplus>0?(' — <b>'+units(cy.surplus)+' over</b> its own demand (available to pull from)'):(cy.required>0?(' (met its own demand of '+units(cy.required)+')'):''))+'.</div>'; }
+        carryHtml='<div style="margin:6px 0 0;background:var(--blue-soft);border:1px solid #bfdbfe;border-radius:6px;padding:6px 9px;font-size:11px;color:#1e40af">↩ Refer to <b>P'+esc(cy.prod)+'</b> where <b>'+units(cy.made)+'</b> units were manufactured'+(cy.surplus>0?(' — <b>'+units(cy.surplus)+' over</b> its own demand (available to pull from)'):(cy.required>0?(' (met its own demand of '+units(cy.required)+')'):''))+'.</div>'; }
       var stkTile='<div style="flex:0 0 auto;min-width:84px;padding:7px 11px;border-radius:8px;background:#e0f2fe;color:#075985"><input class="mfg-drw-stock" data-ci="'+ci+'" value="'+(c.stock||0)+'" inputmode="numeric" title="Existing on-hand stock covering this component — added to total supply (bound to the main table)" style="width:58px;font-size:15px;font-weight:800;line-height:1.1;border:1px solid #7dd3fc;border-radius:4px;padding:0 4px;background:#fff;color:#075985;text-align:right"><div style="font-size:9px;text-transform:uppercase;letter-spacing:.04em;opacity:.85;margin-top:2px">Existing stock</div></div>';
-      var acc=(st!=='ok')?('<label style="display:inline-flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;color:#334155;white-space:nowrap" title="Accept this '+st+' component">'+'<input type="checkbox" class="mfg-drw-acc" data-ci="'+ci+'" data-comp="'+esc(c.comp)+'"'+(c.accepted?' checked':'')+'> Sign-off</label>'):'';
-      return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 12px;margin-bottom:10px">'
+      var acc=(st!=='ok')?('<label style="display:inline-flex;align-items:center;gap:5px;font-size:11px;cursor:pointer;color:var(--ink-soft);white-space:nowrap" title="Accept this '+st+' component">'+'<input type="checkbox" class="mfg-drw-acc" data-ci="'+ci+'" data-comp="'+esc(c.comp)+'"'+(c.accepted?' checked':'')+'> Sign-off</label>'):'';
+      return '<div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-bottom:10px">'
         +'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px"><b style="font-size:12px">'+esc(c.comp)+'</b><span class="mut tiny">'+units(c.per)+'/unit</span><span style="margin-left:auto">'+covTxt+'</span>'+(acc?'<span style="padding-left:10px;margin-left:10px;border-left:1px solid #e5e7eb">'+acc+'</span>':'')+'</div>'
         +'<div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end">'
           +mfgKpi('Required',units(c.required),'#f1f5f9','#334155')
@@ -5376,9 +5376,9 @@
     bg.innerHTML='<div id="podrawer"><div class="shipdrawer-head"><div class="shipdrawer-title">'+badgeFinInline()+' '+esc(m.parent)+' <span style="font-weight:400;opacity:.7">· '+esc(m.prodLabel)+'</span></div>'
       +'<div><button class="shipdrawer-x" title="close">✕</button></div></div>'
       +'<div class="shipdrawer-body">'
-      +'<div style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:#64748b;margin-bottom:5px">Production orders — demand '+units(m.demand)+'</div>'
+      +'<div style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);margin-bottom:5px">Production orders — demand '+units(m.demand)+'</div>'
       +prodOrders(m.finishedPos)
-      +'<div style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:#64748b;margin-bottom:6px">Components — Manufacturing-branch supply</div>'
+      +'<div style="font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);margin-bottom:6px">Components — Manufacturing-branch supply</div>'
       +(m.components||[]).map(function(c,ci){ return compBlock(c,ci); }).join('')
       +'<div class="mut tiny" style="margin-top:6px">Component POs are limited to the <b>Manufacturing</b> branch. Existing stock &amp; sign-off here are bound to the main table.</div>'
       +'</div></div>';
@@ -5401,8 +5401,8 @@
       var sel=(window.CSS&&CSS.escape)?CSS.escape(comp):comp; document.querySelectorAll('#supply-root .mfg-acc[data-comp="'+sel+'"]').forEach(function(x){ x.checked=on; var tr=x.closest('tr'); if(tr)tr.style.background=on?'':'#fff7ed'; }); }; });
   }
   function mfgKpi(label,val,bg,fg){ return '<div style="flex:0 0 auto;min-width:84px;padding:7px 11px;border-radius:8px;background:'+bg+';color:'+fg+'"><div style="font-size:16px;font-weight:800;line-height:1.1">'+val+'</div><div style="font-size:9px;text-transform:uppercase;letter-spacing:.04em;opacity:.85;margin-top:2px">'+label+'</div></div>'; }
-  function badgeFinInline(){ return '<span style="display:inline-block;padding:1px 7px;border-radius:10px;background:#dbeafe;color:#1e40af;font-weight:700;font-size:10px">📦 FINISHED</span>'; }
-  function badgeMfgInline(){ return '<span style="display:inline-block;padding:1px 7px;border-radius:10px;background:#fef3c7;color:#92400e;font-weight:700;font-size:10px">🏭 MFG</span>'; }
+  function badgeFinInline(){ return '<span style="display:inline-block;padding:1px 7px;border-radius:10px;background:var(--blue-soft);color:var(--blue-ink);font-weight:700;font-size:10px">📦 FINISHED</span>'; }
+  function badgeMfgInline(){ return '<span style="display:inline-block;padding:1px 7px;border-radius:10px;background:var(--amber-bg);color:var(--amber);font-weight:700;font-size:10px">🏭 MFG</span>'; }
   function renderProductions(rows){ var c=document.getElementById('supply-content');
     c.innerHTML=annot(subUmbrella(poSub)==='payments'?'payments':'productions')+poSubNav()
       +'<div id="prod-body"><div class="count">Loading…</div></div>';
@@ -5448,7 +5448,7 @@
     var FILT=[['remaining','Remaining · open'],['open','To assign'],['closed','Closed'],['all','All']];
     b.innerHTML=lookupDatalists()+'<div class="bar">'+FILT.map(function(f){return '<span class="pill'+(f[0]===st.f?' active':'')+'" data-f="'+f[0]+'"'+(f[0]==='remaining'?' title="open (not closed) deposits that still have money remaining"':'')+'>'+f[1]+'</span>';}).join('')
       +'<button class="save-btn" id="dep-new">+ Deposit</button>'
-      +'<label style="font-size:12px;margin-left:6px;color:#475569">POs: <select id="dep-poview" style="font-size:12px;padding:2px 5px;border:1px solid #cbd5e1;border-radius:5px;background:#fff" title="Which linked purchase orders to list in the deposit&rsquo;s POs column"><option value="unalloc">Unallocated</option><option value="open">Open</option><option value="all">All linked</option></select></label>'
+      +'<label style="font-size:12px;margin-left:6px;color:#475569">POs: <select id="dep-poview" style="font-size:12px;padding:2px 5px;border:1px solid var(--line);border-radius:5px;background:#fff" title="Which linked purchase orders to list in the deposit&rsquo;s POs column"><option value="unalloc">Unallocated</option><option value="open">Open</option><option value="all">All linked</option></select></label>'
       +'<span class="pill-lbl" style="margin-left:6px">Supplier</span><select class="flt" id="dep-sup" style="width:auto;max-width:190px" title="filter by supplier"><option value="">All suppliers</option>'+depSups.map(function(s){return '<option value="'+esc(s)+'"'+(st.sup===s?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select>'
       +'<input class="flt" id="dep-q" placeholder="Filter reference / supplier…" style="margin-left:6px"><span class="count" id="dep-cnt"></span></div>'
       +'<style>#deptbl{table-layout:fixed;width:100%}#deptbl td,#deptbl th{white-space:normal;overflow-wrap:break-word;vertical-align:top}#deptbl .fci{width:100%;box-sizing:border-box;min-width:0;text-align:left}'
@@ -6749,8 +6749,8 @@
     var PU_CSS='<style>'
       +'#supply-root .pu-tw{overflow-x:auto;-webkit-overflow-scrolling:touch;max-width:100%}'
       +'#supply-root table.pu-tbl{border-collapse:separate;border-spacing:0;width:max-content;min-width:100%;font-size:12px}'
-      +'#supply-root table.pu-tbl th,#supply-root table.pu-tbl td{padding:6px 10px;border-bottom:1px solid #f1f1f1;text-align:left;vertical-align:top;white-space:nowrap}'
-      +'#supply-root table.pu-tbl thead th{background:#f3f3f1;font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;color:#555}'
+      +'#supply-root table.pu-tbl th,#supply-root table.pu-tbl td{padding:6px 10px;border-bottom:1px solid var(--line2);text-align:left;vertical-align:top;white-space:nowrap}'
+      +'#supply-root table.pu-tbl thead th{background:#f3f3f1;font-size:9.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}'
       +'#supply-root table.pu-tbl td:nth-child(2),#supply-root table.pu-tbl th:nth-child(2){min-width:170px}'   /* Supplier */
       +'#supply-root table.pu-tbl td:nth-child(3),#supply-root table.pu-tbl th:nth-child(3){min-width:150px}'   /* Contact */
       +'#supply-root table.pu-tbl td:nth-child(4),#supply-root table.pu-tbl th:nth-child(4){min-width:100px}'   /* Access */
@@ -8596,7 +8596,7 @@
           shipPost('/api/supply/deposit/'+btn.dataset.id+'/delete',{},function(){ renderOtherPayments(b); }); };});
         document.querySelectorAll('#oth-wrap .oth-samp').forEach(function(btn){btn.onclick=function(){ location.hash='#/supply/samples/'+encodeURIComponent(btn.dataset.ref); };});   // open the sample in the SAMPLES tab
       }
-      b.innerHTML=lookupDatalists()+'<style>#supply-root #oth-wrap .fci{background:#fff!important;border-color:#cbd5e1!important;color:#1a1a1a!important}#supply-root #oth-wrap .fci:focus{outline:2px solid #cbd5e1}#supply-root #oth-wrap .fci.saved{background:#dcfce7!important;border-color:#86efac!important}</style><div class="bar"><button class="save-btn" id="oth-new">+ Other payment</button><button class="pay-filt-toggle">⚙ Filters</button><span class="count">sundry costs (freight, fees, write-offs) — edits save automatically</span></div><div id="oth-wrap"></div>';
+      b.innerHTML=lookupDatalists()+'<style>#supply-root #oth-wrap .fci{background:#fff!important;border-color:var(--line)!important;color:var(--ink)!important}#supply-root #oth-wrap .fci:focus{outline:2px solid var(--line)}#supply-root #oth-wrap .fci.saved{background:var(--pos-bg)!important;border-color:#86efac!important}</style><div class="bar"><button class="save-btn" id="oth-new">+ Other payment</button><button class="pay-filt-toggle">⚙ Filters</button><span class="count">sundry costs (freight, fees, write-offs) — edits save automatically</span></div><div id="oth-wrap"></div>';
       ensurePayFilt();
       document.getElementById('oth-new').onclick=function(){ shipPost('/api/supply/deposit-create',{is_deposit:false},function(){ renderOtherPayments(b); }); };
       draw(); })
@@ -11582,7 +11582,7 @@
   function ensureConfigButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('config-btn'))return;
     // CONFIG is no longer a top-bar text button — it's a ⚙ cog icon sitting just left of the ? help icon (top-right).
     var btn=document.createElement('button'); btn.id='config-btn'; btn.className='config-toggle'; btn.title='Settings (CONFIG)'; btn.setAttribute('aria-label','Settings'); btn.innerHTML='⚙';   // NOT .view-toggle → no border-bottom underline
-    btn.style.cssText='margin-right:2px;width:24px;height:24px;border-radius:50%;border:1px solid #6b7280;background:#4b5563;color:#fff;cursor:pointer;font-weight:700;font-size:20px;line-height:1;flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;overflow:hidden';   // match the ? help icon; cog glyph fills ~90% of the circle
+    btn.classList.add('hz-ico');   // match the ? help icon; cog glyph fills ~90% of the circle
     var help=document.getElementById('ctx-help-btn');
     if(help&&help.parentNode===row){ row.insertBefore(btn, help); }   // sit immediately LEFT of the ? help icon
     else { var spacer=row.querySelector('div[style*="flex:1"]'); if(spacer)row.appendChild(btn); else row.appendChild(btn); }
@@ -11622,7 +11622,7 @@
   // Timeline messages bell → top bar (#view-tabs-row) next to SA. Lives outside #supply-root so it's visible on
   // every view; the dropdown is a fixed-position element on <body>. Polls unread supplier notes every 60s.
   function ensureBellButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('tl-bell'))return;
-    var bell=document.createElement('button'); bell.id='tl-bell'; bell.className='tl-bell'; bell.title='Inbox — unread supplier messages'; bell.innerHTML='✉ Inbox <span id="tl-count"></span>'; bell.style.fontSize='12px'; bell.style.fontWeight='600';
+    var bell=document.createElement('button'); bell.id='tl-bell'; bell.className='tl-bell'; bell.title='Inbox — unread supplier messages'; bell.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><rect x="2" y="4" width="20" height="16" rx="2"></rect><path d="m2 7 10 6L22 7"></path></svg>'+'<span id="tl-count"></span>'; bell.setAttribute('aria-label','Inbox');
     var sa=document.getElementById('sa-drawer-btn'); if(sa)row.insertBefore(bell,sa); else { var sp=row.querySelector('div[style*="flex:1"]'); if(sp&&sp.nextSibling)row.insertBefore(bell,sp.nextSibling); else row.appendChild(bell); }
     bell.onclick=function(e){ e.stopPropagation(); toggleTlDropdown(); };
     if(!document.getElementById('tl-drop')){ var d=document.createElement('div'); d.id='tl-drop'; document.body.appendChild(d); }
@@ -11650,7 +11650,7 @@
   function actOutside(e){ var d=document.getElementById('act-drop'), b=document.getElementById('act-btn'); if(d&&!d.contains(e.target)&&!(b&&b.contains(e.target)))closeActDrop(); }
   function closeActDrop(){ var d=document.getElementById('act-drop'); if(d)d.classList.remove('open'); document.removeEventListener('mousedown', actOutside); }
   function ensureActivityButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('act-btn'))return;
-    var b=document.createElement('button'); b.id='act-btn'; b.className='tl-bell'; b.title='Recent changes — last 10 major supply changes'; b.innerHTML='🕘 Recent'; b.style.fontSize='12px'; b.style.fontWeight='600';
+    var b=document.createElement('button'); b.id='act-btn'; b.className='tl-bell'; b.title='Recent changes — last 10 major supply changes'; b.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>'+'Recent';
     var bell=document.getElementById('tl-bell'); if(bell)row.insertBefore(b,bell); else row.appendChild(b);
     b.onclick=function(e){ e.stopPropagation(); toggleActDrop(); };
     if(!document.getElementById('act-drop')){ var d=document.createElement('div'); d.id='act-drop'; document.body.appendChild(d); } }
@@ -11678,12 +11678,12 @@
     _favSave(); renderFaves(); }
   function _favRename(slug){ var i=_favIdx(slug); if(i<0)return; var nn=prompt('Rename this favourite (shown only to you):',HZ_FAVES[i].label||''); if(nn==null)return; nn=String(nn).trim().slice(0,40); if(!nn)return; HZ_FAVES[i].label=nn; _favSave(); renderFaves(); }
   function ensureFaves(){ var row=document.getElementById('view-tabs-row'); if(!row)return;
-    var chips=document.getElementById('hz-fav-chips'); if(!chips){ chips=document.createElement('span'); chips.id='hz-fav-chips'; chips.style.cssText='display:inline-flex;align-items:center;gap:4px;margin-right:4px';
+    var chips=document.getElementById('hz-fav-chips'); if(!chips){ chips=document.createElement('span'); chips.id='hz-fav-chips'; 
       var act=document.getElementById('act-btn'); if(act)row.insertBefore(chips,act); else row.appendChild(chips); }
-    var star=document.getElementById('hz-fav-star'); if(!star){ star=document.createElement('button'); star.id='hz-fav-star'; star.style.cssText='margin-left:4px;width:24px;height:24px;border-radius:50%;border:1px solid #6b7280;background:#4b5563;cursor:pointer;font-size:14px;line-height:1;flex:0 0 auto'; star.onclick=function(e){ e.stopPropagation(); if(!star.disabled)_favToggle(); }; row.appendChild(star); }
+    var star=document.getElementById('hz-fav-star'); if(!star){ star=document.createElement('button'); star.id='hz-fav-star'; star.className='hz-ico'; star.onclick=function(e){ e.stopPropagation(); if(!star.disabled)_favToggle(); }; row.appendChild(star); }
     renderFaves(); }
   function renderFaves(){ var chips=document.getElementById('hz-fav-chips'), star=document.getElementById('hz-fav-star'); if(!chips||!star)return;
-    chips.innerHTML=HZ_FAVES.map(function(f){ return '<span class="hz-fav-chip" data-slug="'+esc(f.slug)+'" title="'+esc(f.slug)+' — click to open · double-click to rename" style="cursor:pointer;font-size:12px;font-weight:600;color:#cbd5e1;white-space:nowrap;padding:5px 6px;letter-spacing:.01em">★ '+esc(f.label||f.slug)+'</span>'; }).join('');   // plain link like the other top-bar items (no badge/✕/truncation) — remove via un-starring the page
+    chips.innerHTML=HZ_FAVES.map(function(f){ return '<span class="hz-fav-chip" data-slug="'+esc(f.slug)+'" title="'+esc(f.slug)+' — click to open · double-click to rename"">★ '+esc(f.label||f.slug)+'</span>'; }).join('');   // plain link like the other top-bar items (no badge/✕/truncation) — remove via un-starring the page
     chips.querySelectorAll('.hz-fav-chip').forEach(function(c){ c.onclick=function(){ _favGo(c.dataset.slug); }; c.ondblclick=function(e){ e.stopPropagation(); _favRename(c.dataset.slug); }; });
     var s=_favSlug(); if(!s){ star.style.display='none'; return; } star.style.display='';
     var isFav=_favIdx(s)>=0, atMax=HZ_FAVES.length>=5;
@@ -11728,7 +11728,7 @@
         .catch(function(e){ msg.style.color='#dc2626'; msg.textContent='Failed: '+(e.message||e); btn.disabled=false; }); }; }
   try{ window.HZ_SUGGEST={ open:openSuggestBox }; }catch(e){}
   function ensureSuggestButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('sug-btn'))return;
-    var b=document.createElement('button'); b.id='sug-btn'; b.className='tl-bell'; b.title='Suggestion box — drop an idea'; b.innerHTML='💡 Suggestions'; b.style.fontSize='12px'; b.style.fontWeight='600';
+    var b=document.createElement('button'); b.id='sug-btn'; b.className='tl-bell'; b.title='Suggestion box — drop an idea'; b.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M9 18h6M10 22h4M12 2a7 7 0 0 0-4 12.7c.6.5 1 1.4 1 2.3h6c0-.9.4-1.8 1-2.3A7 7 0 0 0 12 2z"></path></svg>'; b.setAttribute('aria-label','Suggestion box');
     var bell=document.getElementById('tl-bell'); if(bell&&bell.nextSibling)row.insertBefore(b,bell.nextSibling); else { var sa=document.getElementById('sa-drawer-btn'); if(sa)row.insertBefore(b,sa); else row.appendChild(b); }
     b.onclick=function(e){ e.stopPropagation(); openSuggestBox(); }; }
   function ensureNavButton(){ var row=document.getElementById('view-tabs-row'); if(!row||document.getElementById('supply-btn'))return;
@@ -12914,7 +12914,7 @@
           +'<div style="font-size:11px;font-weight:600;color:#334155;margin:4px 0 3px;line-height:1.2;word-break:break-word">'+esc(r.colour_name||'—')+'</div>'+(photo?photoBelow(r):stPill(r.status))+'</div>'; }
       function groupsHtml(catKeys,cats,abs){ return catKeys.length?catKeys.map(function(cat){ return '<div style="margin:6px 0 16px;break-inside:avoid"><div style="font-weight:700;font-size:13px;color:#0f172a;border-bottom:2px solid #eef2f7;padding-bottom:4px;margin-bottom:8px">'+esc(cat)+' <span style="font-weight:400;color:#94a3b8;font-size:11px">('+cats[cat].length+')</span></div><div style="display:flex;gap:14px;flex-wrap:wrap">'+cats[cat].map(function(r){return card(r,abs);}).join('')+'</div></div>'; }).join('') : '<div style="padding:14px 2px;color:#94a3b8">No products for this filter.</div>'; }
       function rangePDF(season,inner){ var w=window.open('','_blank'); if(!w){ alert('Allow popups to download the PDF.'); return; }
-        w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Range Plan '+esc(season)+'</title><style>body{font-family:system-ui,Arial,sans-serif;margin:22px;color:#0f172a}h1{font-size:18px;margin:0 0 12px}</style></head><body><h1>Range Plan &middot; '+esc(season)+(_rangeApprovedOnly?' &middot; Approved only':'')+'</h1>'+inner+'<scr'+'ipt>window.onload=function(){setTimeout(function(){try{window.print();}catch(e){}},500);};</scr'+'ipt></body></html>');
+        w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>Range Plan '+esc(season)+'</title><style>body{font-family:system-ui,Arial,sans-serif;margin:22px;color:var(--nav)}h1{font-size:18px;margin:0 0 12px}</style></head><body><h1>Range Plan &middot; '+esc(season)+(_rangeApprovedOnly?' &middot; Approved only':'')+'</h1>'+inner+'<scr'+'ipt>window.onload=function(){setTimeout(function(){try{window.print();}catch(e){}},500);};</scr'+'ipt></body></html>');
         w.document.close(); }
       function draw(){
         var f=rows.filter(function(r){ return r.season===_rangeSeason && r.status!=='dropped' && (_rangeApprovedOnly?r.status==='approved':true); });
@@ -13491,7 +13491,7 @@
             return '<div class="pcard">'+(r.has_swatch?'<img src="'+sw+'">':'<div class="nosw">no swatch</div>')+'<div class="pn">'+esc(prodColourDisplay(r))+'</div><div class="pr">'+esc(r.ref)+'</div><div class="pst" style="background:'+st[3]+';color:'+st[4]+'">'+esc(st[1])+'</div></div>'; }
           var inner=catKeys.map(function(cat){ return '<h2>'+esc(cat)+' <span class="c">('+byCat[cat].length+')</span></h2><div class="grid">'+byCat[cat].map(card).join('')+'</div>'; }).join('');
           var title='Product report · '+esc(season)+(category?(' · '+esc(category)):'');
-          w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>'+title+'</title><style>body{font-family:system-ui,Arial,sans-serif;margin:22px;color:#0f172a}h1{font-size:18px;margin:0 0 3px}h2{font-size:14px;margin:16px 0 8px;border-bottom:1px solid #e5e7eb;padding-bottom:3px;break-after:avoid}.c{color:#94a3b8;font-weight:400;font-size:12px}.grid{display:flex;gap:12px;flex-wrap:wrap}.pcard{width:120px;text-align:center;break-inside:avoid}.pcard img,.pcard .nosw{width:110px;height:110px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb}.pcard .nosw{display:flex;align-items:center;justify-content:center;color:#cbd5e1;font-size:11px;background:#f8fafc;border-style:dashed}.pn{font-size:11px;font-weight:600;margin:4px 0 2px;line-height:1.2;word-break:break-word}.pr{font-size:9px;color:#94a3b8;font-family:ui-monospace,Menlo,monospace}.pst{font-size:9px;font-weight:700;border-radius:4px;padding:1px 5px;display:inline-block;margin-top:3px}</style></head><body><h1>'+title+'</h1><div style="font-size:11px;color:#94a3b8;margin-bottom:8px">'+items.length+' product'+(items.length===1?'':'s')+' · generated '+esc(fd(new Date().toISOString().slice(0,10)))+'</div>'+inner+'<scr'+'ipt>window.onload=function(){setTimeout(function(){try{window.print();}catch(e){}},450);};</scr'+'ipt></body></html>');
+          w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>'+title+'</title><style>body{font-family:system-ui,Arial,sans-serif;margin:22px;color:var(--nav)}h1{font-size:18px;margin:0 0 3px}h2{font-size:14px;margin:16px 0 8px;border-bottom:1px solid var(--line);padding-bottom:3px;break-after:avoid}.c{color:var(--faint);font-weight:400;font-size:12px}.grid{display:flex;gap:12px;flex-wrap:wrap}.pcard{width:120px;text-align:center;break-inside:avoid}.pcard img,.pcard .nosw{width:110px;height:110px;object-fit:cover;border-radius:8px;border:1px solid var(--line)}.pcard .nosw{display:flex;align-items:center;justify-content:center;color:var(--line);font-size:11px;background:var(--hover);border-style:dashed}.pn{font-size:11px;font-weight:600;margin:4px 0 2px;line-height:1.2;word-break:break-word}.pr{font-size:9px;color:var(--faint);font-family:ui-monospace,Menlo,monospace}.pst{font-size:9px;font-weight:700;border-radius:4px;padding:1px 5px;display:inline-block;margin-top:3px}</style></head><body><h1>'+title+'</h1><div style="font-size:11px;color:#94a3b8;margin-bottom:8px">'+items.length+' product'+(items.length===1?'':'s')+' · generated '+esc(fd(new Date().toISOString().slice(0,10)))+'</div>'+inner+'<scr'+'ipt>window.onload=function(){setTimeout(function(){try{window.print();}catch(e){}},450);};</scr'+'ipt></body></html>');
           w.document.close();
         }
         g.querySelectorAll('.pg-genreport').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); _prodGroupPDF(b.dataset.season, b.dataset.cat||''); }; });

@@ -1,0 +1,84 @@
+/* ═══════════════════════════════════════════════════════════════════════════════════════════════════════
+   HORIZON theme — design tokens + app shell. Single source of truth for colour, type, radius and shadow.
+   Served at /hz-theme.css (server.mjs) and linked in the <head> of the app (artifact) and the supplier portal.
+   Tokens come from Ben's Claude Design project ("Horizon Supply/Purchase Orders" screens, 2026-09-05).
+   Rules below use an #app prefix so they beat the artifact's own single-id rules regardless of load order.
+   ═══════════════════════════════════════════════════════════════════════════════════════════════════════ */
+
+/* Self-hosted Hanken Grotesk (OFL). Google Fonts is blocked in mainland China (suppliers use the portal there). */
+@font-face{font-family:"Hanken Grotesk";font-style:normal;font-weight:400 800;font-display:swap;src:url(/fonts/hanken-grotesk-latin-ext.woff2) format("woff2");unicode-range:U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB}
+@font-face{font-family:"Hanken Grotesk";font-style:normal;font-weight:400 800;font-display:swap;src:url(/fonts/hanken-grotesk-latin.woff2) format("woff2");unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF}
+
+:root{
+  /* surfaces */
+  --nav:#0d1626; --nav-2:#16213a; --nav-ink:#e7edf7; --nav-dim:#93a1b8;
+  --bg:#f4f6f9; --card:#ffffff; --hover:#f7f9fc;
+  --line:#e5e9f0; --line2:#eef1f6;
+  /* text */
+  --ink:#101828; --ink-soft:#344054; --muted:#5b6b83; --faint:#8b98ad;
+  /* semantic */
+  --blue:#2361d8; --blue-soft:#eaf1fd; --blue-ink:#1a4fb5;
+  --pos:#118a4e; --pos-bg:#e8f6ee;
+  --neg:#d23227; --neg-bg:#fdeeec; --neg-cell:#fbdcd8;
+  --amber:#b45309; --amber-bg:#fdf3d7;
+  --prod:#f5b83d; --prod-bg:#fdeec8;
+  --violet:#7048c9; --violet-bg:#f1ebfc;
+  /* shape */
+  --r-sm:8px; --r-md:10px; --r-lg:12px; --r-xl:14px;
+  --shadow:0 1px 2px rgba(16,24,40,.04), 0 6px 22px -12px rgba(16,24,40,.10);
+  --font:"Hanken Grotesk",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+}
+
+html body{font-family:var(--font);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
+
+/* ── App shell: 52px navy header (was a grey rounded bar) ─────────────────────────────────────────────── */
+#app #view-tabs-row{display:flex;align-items:center;gap:2px;height:52px;padding:0 20px;background:var(--nav);border-radius:0;margin:-8px -10px 6px}
+#app #view-tabs-row .hz-brand{display:flex;align-items:center;gap:9px;margin-right:14px;color:#fff;font-weight:700;font-size:17px;letter-spacing:.03em;font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Arial,sans-serif;user-select:none}
+#app #view-tabs-row .hz-brand svg{display:block}
+#app #view-tabs-row .view-toggle{display:inline-flex;align-items:center;height:36px;padding:0 13px;font-size:12px;font-weight:700;letter-spacing:.09em;color:var(--nav-dim);background:transparent;border:0;border-radius:var(--r-sm);transition:color .15s,background .15s}
+#app #view-tabs-row .view-toggle:hover{color:#fff}
+#app #view-tabs-row .view-toggle.active{color:#fff;background:rgba(255,255,255,.09);border-bottom-color:transparent}
+/* right-hand utilities */
+#app #view-tabs-row .tl-bell{display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 8px;margin:0;border:0;border-radius:var(--r-sm);background:transparent;color:var(--nav-dim);font-size:12.5px;font-weight:600;cursor:pointer;transition:color .15s}
+#app #view-tabs-row .tl-bell:hover{color:#fff}
+#app #view-tabs-row .tl-bell svg{width:15px;height:15px;flex:none}
+#app #view-tabs-row #tl-count{margin-left:0;background:#e5484d;color:#fff;font-size:10px;font-weight:800;line-height:1.4;height:auto;min-width:0;padding:1px 6px;border-radius:999px}
+#app #view-tabs-row .hz-ico{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;margin:0 0 0 2px;padding:0;border:0;border-radius:50%;background:rgba(255,255,255,.08);color:var(--nav-dim);font-weight:700;font-size:13px;line-height:1;cursor:pointer;flex:0 0 auto;overflow:hidden;transition:color .15s,background .15s}
+#app #view-tabs-row .hz-ico:hover{color:#fff;background:rgba(255,255,255,.16)}
+#app #view-tabs-row #config-btn{font-size:17px}
+#app #view-tabs-row #sa-drawer-btn{height:28px;padding:0 11px;margin:0 4px 0 6px;border:0;border-radius:var(--r-sm);background:var(--blue);color:#fff;font-weight:800;font-size:11px;letter-spacing:.06em;cursor:pointer;flex:0 0 auto;line-height:1}
+#app #view-tabs-row #sa-drawer-btn:hover{background:var(--blue-ink)}
+#app #view-tabs-row #hz-fav-chips{display:inline-flex;align-items:center;gap:2px;margin-right:6px}
+#app #view-tabs-row .hz-fav-chip{cursor:pointer;font-size:12px;font-weight:600;color:var(--nav-dim);white-space:nowrap;padding:5px 8px;border-radius:var(--r-sm);letter-spacing:.01em;transition:color .15s,background .15s}
+#app #view-tabs-row .hz-fav-chip:hover{color:#fff;background:rgba(255,255,255,.09)}
+
+/* ── Level-2 sub-tabs: white row, underline in navy, count pills ──────────────────────────────────────── */
+#app .hz-l2,
+#app #supply-root #supply-subnav,
+#app #scenario-root #scenario-subnav,
+#app #product-root #product-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:var(--card);border-bottom:1px solid var(--line);margin:0 -10px 10px;padding:0 20px;position:relative}
+#app .hz-l2 .dnav,
+#app #supply-root #supply-subnav .stab,
+#app #scenario-root #scenario-subnav .stab,
+#app #product-root #product-subnav .stab{background:transparent;border:0;border-bottom:0;padding:13px 13px 11px;font-size:12px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);cursor:pointer;font-family:inherit;text-decoration:none;transition:color .15s;box-shadow:none}
+#app .hz-l2 .dnav:hover,
+#app #supply-root #supply-subnav .stab:hover,
+#app #scenario-root #scenario-subnav .stab:hover,
+#app #product-root #product-subnav .stab:hover{color:var(--ink)}
+#app .hz-l2 .dnav.active,
+#app #supply-root #supply-subnav .stab.active,
+#app #scenario-root #scenario-subnav .stab.active,
+#app #product-root #product-subnav .stab.active{color:var(--ink);box-shadow:inset 0 -2.5px 0 var(--nav);font-weight:700}
+#app #supply-root .ex-badge,#app #supply-root .rtab-count{background:var(--neg);color:#fff;font-size:10px;font-weight:800;line-height:1.4;height:auto;min-width:0;padding:1px 7px;border-radius:999px;vertical-align:baseline;margin-left:6px}
+/* version badge (amber pill, right of the L2 row) */
+#app #supply-root .ver,#app #scenario-root .ver,#app #product-root .ver{margin-left:auto;background:var(--amber-bg);color:var(--amber);border-radius:var(--r-sm);padding:5px 12px;font-size:11px;font-weight:800;letter-spacing:.05em;line-height:1.2}
+/* Level-3 tabs (PO sub-sections etc.): blue underline, bolder */
+#app #supply-root .rtab,#app #product-root .rtab,#app .d3tab{font-weight:700;letter-spacing:.04em;color:var(--faint);border-bottom-color:transparent;box-shadow:none}
+#app #supply-root .rtab:hover,#app #product-root .rtab:hover,#app .d3tab:hover{color:var(--blue)}
+#app #supply-root .rtab.active,#app #product-root .rtab.active,#app .d3tab.active{color:var(--blue);box-shadow:inset 0 -2.5px 0 var(--blue);border-bottom-color:transparent}
+
+/* ── Cards: main data tables sit on white cards over the off-white page ──────────────────────────────── */
+#app .tw,#app #supply-root .tw,#app #product-root .tw{background:var(--card);border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow)}
+
+/* ── Supplier portal shell (portal.html) ───────────────────────────────────────────────────────────────── */
+body header.pv-top{background:var(--nav)}
