@@ -97,6 +97,13 @@
       });
       // Price List = a real FINANCE tab: register AFTER the portal script has loaded and mounted (v27.504; v27.503 ran too early).
       if(me.price_list_enabled&&window.DBPortalView&&window.DBPortalView.addTab){ window.DBPortalView.addTab({pt:'pricelist',label:'Price List',sec:'finance',render:function(host){ ppPriceList(me,host); }}); }
+      // EN / 中文 toggle — only for suppliers based in China (server flag). Glossary is a draft until reviewed by a native reader. v27.508
+      if(me.zh_enabled&&window.DBPortalView&&window.DBPortalView.setLang){ var top=document.querySelector('.pv-top'); if(top&&!document.querySelector('.pv-lang')){
+        var lg=document.createElement('span'); lg.className='pv-lang'; lg.title='Language / 语言 — 中文（草稿）';
+        lg.innerHTML='<button type="button" data-lang="en">EN</button><button type="button" data-lang="zh">中文</button>';
+        var sp=top.querySelector('.sp'); if(sp&&sp.nextSibling)top.insertBefore(lg,sp.nextSibling); else top.appendChild(lg);
+        lg.querySelectorAll('button').forEach(function(b){ b.onclick=function(){ window.DBPortalView.setLang(b.dataset.lang); }; });
+        var cur=(window.ppGetLang&&window.ppGetLang())||'en'; if(cur==='zh')window.DBPortalView.setLang('zh'); else lg.querySelector('[data-lang="en"]').classList.add('on'); } }
     };
     s.onerror=function(){ document.getElementById('pv').innerHTML='<div class="pv-empty">Could not load the portal view.</div>'; };
     document.body.appendChild(s);

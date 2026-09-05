@@ -494,3 +494,9 @@ body .pv-btn.ghost{color:var(--nav-dim);border-color:rgba(255,255,255,.18)} body
 #pv-toast.err::before{content:"!";display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:rgba(255,255,255,.22);font-weight:800;font-size:12px;margin-right:9px;vertical-align:-3px}
 #pv-toast.ok::before{content:"✓";display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:rgba(255,255,255,.18);font-weight:800;font-size:12px;margin-right:9px;vertical-align:-3px}
 @media (prefers-reduced-motion:reduce){ #pv-toast{transition:none} }
+
+/* ═══ Portal EN / 中文 toggle (v27.508) ═══════════════════════════════════════════════════════════════════════════ */
+body header.pv-top .pv-lang{display:inline-flex;border:1px solid rgba(255,255,255,.18);border-radius:8px;padding:2px;gap:2px;margin-right:8px}
+body header.pv-top .pv-lang button{border:0;background:transparent;color:var(--nav-dim);font:inherit;font-size:12px;font-weight:700;padding:4px 10px;border-radius:6px;cursor:pointer;line-height:1.2}
+body header.pv-top .pv-lang button.on{background:rgba(255,255,255,.14);color:#fff}
+body header.pv-top .pv-lang button:hover{color:#fff}

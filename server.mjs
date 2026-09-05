@@ -15477,7 +15477,12 @@ app.post('/api/portal/logout', portalAuth, async (req, res) => {
   res.json({ ok: true });
 });
 
-app.get('/api/portal/me', portalAuth, (req, res) => res.json({ email: req.portal.email, suppliers: req.portal.suppliers, price_list_enabled: IS_SANDBOX }));
+app.get('/api/portal/me', portalAuth, async (req, res) => {
+  // zh_enabled (v27.508): the EN/中文 toggle is offered only when one of the user's suppliers is based in China (planner.suppliers.country).
+  let zh = false;
+  try { const r = await pool.query(`SELECT bool_or(coalesce(country,'') ILIKE '%china%' OR upper(coalesce(country,''))='CN' OR country LIKE '%中国%') z FROM planner.suppliers WHERE name = ANY($1)`, [req.portal.suppliers || []]); zh = !!(r.rows[0] && r.rows[0].z); } catch (e) { zh = false; }
+  res.json({ email: req.portal.email, suppliers: req.portal.suppliers, price_list_enabled: IS_SANDBOX, zh_enabled: zh });
+});
 // ── Supplier portal ▸ Price List (Phase 3 — GATED: only wired in when IS_SANDBOX until Ben confirms) ──
 // The supplier sees their OWN active prices + any changes they've submitted (pending), and can propose changes
 // (new tiers / from a future production) which land as status='pending' for admin approval.
