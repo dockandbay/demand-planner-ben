@@ -23,6 +23,7 @@
   --amber:#b45309; --amber-bg:#fdf3d7;
   --prod:#f5b83d; --prod-bg:#fdeec8;
   --violet:#7048c9; --violet-bg:#f1ebfc;
+  --l3-bg:#f0f6ff;   /* level-3 tab row tint (Ben: light blue to tell L3 from the white L2 row) */
   /* shape */
   --r-sm:8px; --r-md:10px; --r-lg:12px; --r-xl:14px;
   --shadow:0 1px 2px rgba(16,24,40,.04), 0 6px 22px -12px rgba(16,24,40,.10);
@@ -97,7 +98,14 @@ body header.pv-top{background:var(--nav)}
 /* L3 rows: second white row, blue underline, flush under L2 (was a light-blue rounded pill box with a 12px gap) */
 #app .d3nav,#app #perf-subnav,
 #app #supply-root .po-subnav,#app #supply-root #rep-subnav,#app #supply-root #prod-subtabs,#app #supply-root #config-subs-l3,#app #supply-root #config-subs.cfg-flat,
-#app #product-root #pcfg-subs-l3{background:var(--card);border:0;border-bottom:1px solid var(--line);border-radius:0;padding:0 20px;margin:0 -10px 10px}
+#app #product-root #pcfg-subs-l3{background:var(--l3-bg);border:0;border-bottom:1px solid var(--line);border-radius:0;padding:0 20px;margin:0 -10px 10px}
+#app #report-body > .d3nav:first-child{margin-top:-10px}   /* REPORTS L3 (Performance, 3PL & Invoicing) flush under the L2 row */
+/* .dnav3 (REPORTS level-3 buttons) = same look as .d3tab */
+#app .d3nav .dnav3{background:transparent;border:0;border-radius:0;padding:11px 13px 9px;font-size:12px;font-weight:700;letter-spacing:.04em;color:var(--faint);cursor:pointer;font-family:inherit;box-shadow:none;transition:color .15s}
+#app .d3nav .dnav3:hover{color:var(--blue)}
+#app .d3nav .dnav3.active{color:var(--blue);box-shadow:inset 0 -2.5px 0 var(--blue)}
+/* views with no DEMAND filter rows (REPORTS, BUY & MOVE…): the header wrapper keeps no padding / rule / margin */
+#app.filters-hidden #dab-navwrap{padding-bottom:0!important;border-bottom:0!important;margin-bottom:0!important}
 #app #supply-root #supply-content > .po-subnav:first-child,#app #supply-root #supply-content > #rep-subnav:first-child,#app #supply-root #supply-content > #prod-subtabs:first-child,#app #supply-root #supply-content > #config-subs:first-child{margin-top:-10px}
 #app .d3nav .d3tab,#app #supply-root .po-subnav .rtab,#app #supply-root #rep-subnav .rtab,#app #supply-root #prod-subtabs .rtab,#app #supply-root #config-subs-l3 .rtab,#app #supply-root #config-subs.cfg-flat .rtab,#app #product-root #pcfg-subs-l3 .rtab{padding:11px 13px 9px;font-size:12px;letter-spacing:.04em}
 /* CONFIG level-2 (#config-subs, cog context) = same treatment as the other L2 rows */

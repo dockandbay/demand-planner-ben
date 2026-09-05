@@ -9494,6 +9494,7 @@ function render(){
     var el=document.getElementById(id);
     if(el)el.style.display=filtersHide?'none':'';
   });
+  try{ document.getElementById('app').classList.toggle('filters-hidden',!!filtersHide); }catch(e){}   // theme: no gap/rule under the header when no filter rows show (v27.471)
   // Update view toggle button states
   document.querySelectorAll('.view-toggle').forEach(function(b){
     b.classList.toggle('active',b.dataset.view===VIEW_MODE||(b.dataset.group==='buymove'&&(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='zalando'||VIEW_MODE==='inventory')));
@@ -14369,7 +14370,7 @@ function renderPerformanceReport(body){
   try{ var _h=(location.hash||'').replace(/^#\/?/,'').split('/'); if(_h[0]==='reports'&&_h[1]==='performance'&&_h[2]&&PERF_SUBS.some(function(t){return t[0]===_h[2];}))PERF_SUB=_h[2]; }catch(e){}
   // Level-3 menu (light-blue pill row, its own #perf-subnav; .dnav3 tabs carry an `active` class so it's favourite-able)
   var nav='<div id="perf-subnav" class="d3nav">'+PERF_SUBS.map(function(t){ var on=t[0]===PERF_SUB;
-    return '<button class="dnav3'+(on?' active':'')+'" data-perf="'+t[0]+'" style="font-size:12px;padding:4px 12px;border:1px solid '+(on?'#1d4ed8':'transparent')+';background:'+(on?'#1d4ed8':'transparent')+';color:'+(on?'#fff':'#334155')+';border-radius:13px;cursor:pointer;font-weight:600">'+t[1]+'</button>'; }).join('')+'</div>';
+    return '<button class="dnav3'+(on?' active':'')+'" data-perf="'+t[0]+'"">'+t[1]+'</button>'; }).join('')+'</div>';
   body.innerHTML=nav+'<div id="perf-body"><div class="mut" style="font-size:12px;padding:10px">Loading…</div></div>';
   body.querySelectorAll('#perf-subnav .dnav3').forEach(function(b){ b.onclick=function(){ PERF_SUB=b.dataset.perf; if(window.writeHash)window.writeHash(['reports','performance',PERF_SUB]); renderPerformanceReport(document.getElementById('report-body')); }; });
   var host=document.getElementById('perf-body');
@@ -14533,11 +14534,10 @@ function render3plInvoice(body){
       +'<div style="color:#475569;margin-top:6px;font-size:11px">Per-3PL upload specifics (which files, how freight splits) can be added here — send me the details for '+e(name)+'.</div></div>';
   }
   function shell(){
-    var tabs=TPL3.map(function(t){var on=(t[0]===TPL3_STATE.tpl);return '<button class="dnav3'+(on?' active':'')+'" data-tpl="'+t[0]+'" style="font-size:12px;padding:4px 12px;border:1px solid '+(on?'#1d4ed8':'transparent')+';background:'+(on?'#1d4ed8':'transparent')+';color:'+(on?'#fff':'#334155')+';border-radius:13px;cursor:pointer;font-weight:600">'+e(t[1])+'</button>';}).join('');
+    var tabs=TPL3.map(function(t){var on=(t[0]===TPL3_STATE.tpl);return '<button class="dnav3'+(on?' active':'')+'" data-tpl="'+t[0]+'"">'+e(t[1])+'</button>';}).join('');
     var modes=[['invoices','Invoices'],['config','Config / Accounts'],['log','Import log'],['forecast','Forecast']].map(function(m){return '<button class="pill catpill'+(m[0]===TPL3_STATE.mode?' active':'')+'" data-mode="'+m[0]+'">'+m[1]+'</button>';}).join('');
-    host.innerHTML='<div style="padding:4px 2px 10px;text-align:left">'
-      +'<div style="font-weight:700;font-size:15px;margin-bottom:8px">3PL & Invoicing</div>'
-      +'<div style="display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:3px 5px;margin-bottom:10px">'+tabs+'</div>'
+    host.innerHTML='<div id="tpl-subnav" class="d3nav">'+tabs+'</div>'   // standard level-3 row, flush under the REPORTS tabs; page header removed (Ben, v27.471)
+      +'<div style="padding:4px 2px 10px;text-align:left">'
       +((TPL3_STATE.mode==='invoices')?_tplGuide(TPL3_STATE.tpl):'')
       +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'+modes
         +'<span style="width:1px;height:16px;background:#e0e0e0;margin:0 4px"></span>'
