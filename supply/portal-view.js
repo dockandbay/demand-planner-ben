@@ -646,7 +646,7 @@
         +'<button id="pp-recent-btn" class="save-btn light" title="Recent changes"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>Recent</button>'
         +'<div id="pp-unread-drop" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;z-index:120;background:#fff;color:var(--nav);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:280px;max-width:360px;max-height:60vh;overflow:auto;text-align:left"></div>'
         +'<div id="pp-recent-drop" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;z-index:120;background:#fff;color:var(--nav);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:300px;max-width:380px;max-height:60vh;overflow:auto;text-align:left"></div>'
-      +'</span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
+      +'</span></div><div id="pp-banner"></div><div id="pp-body"><div class="pp-skel" aria-label="Loading"><i></i><i></i><i></i><i></i><i></i></div></div>';
     var tabsEl=document.getElementById('pp-tabs'), body=document.getElementById('pp-body');
     // ── Grouped navigation (Ben, v27.493): five sections over the existing tabs. The original .rtab[data-pt] tabs and their
     //    handlers are untouched; each is tagged with data-sec and the tab row shows only the active section's tabs (CSS). ──
@@ -676,7 +676,9 @@
       try{ if(new RegExp('(^|/)'+def.pt+'(/|$)').test((location.hash||'').replace(/^#\/?/,''))){ PORTAL_TAB=def.pt; if(_ppData)renderPP(); } }catch(e){} }   // deep link that landed before the tab existed
     try{ window.DBPortalView.addTab=ppAddTab; }catch(e){}
     function ppSyncSec(){ try{ var act=tabsEl.querySelector('.rtab.active'), sec=act?(act.dataset.sec||PP_SEC[act.dataset.pt]||'orders'):'orders';
-      tabsEl.dataset.sec=sec; document.querySelectorAll('#pp-secs .pp-sec').forEach(function(sb){ sb.classList.toggle('active',sb.dataset.sec===sec); }); }catch(e){} }
+      tabsEl.dataset.sec=sec; document.querySelectorAll('#pp-secs .pp-sec').forEach(function(sb){ sb.classList.toggle('active',sb.dataset.sec===sec);
+        var n=0; tabsEl.querySelectorAll('.rtab[data-sec="'+sb.dataset.sec+'"] .ex-badge').forEach(function(b){ if(b.classList.contains('done'))return; var v=parseInt(b.textContent,10); if(v>0)n+=v; });   // action count per section (v27.506)
+        var nb=sb.querySelector('.pp-sec-n'); if(n>0){ if(!nb){ nb=document.createElement('span'); nb.className='pp-sec-n'; sb.appendChild(nb); } nb.textContent=n; } else if(nb){ nb.remove(); } }); }catch(e){} }
     // Move the Inbox + Recent controls up into the persistent top bar (out of the content bar) — tidier on mobile.
     try{ var _top=document.querySelector('.pv-top'), _notif=document.getElementById('pp-notif'); if(_top&&_notif){ _notif.style.marginLeft='0'; _top.appendChild(_notif); } }catch(e){}
     // download a generated invoice as a real file (fetch -> blob) rather than opening a tab — works on the
@@ -1177,7 +1179,7 @@
             ? '<tr class="pp-grp" data-grp="'+esc(_gkey)+'"><td colspan="20" style="cursor:pointer;user-select:none" title="click to expand / collapse this production"><span class="pp-grp-car">▾</span> '+(_gk?('P# '+esc(_gk)):'No production number')+'<span class="pp-grp-cnt"> — '+_gcnt+" PO"+(_gcnt>1?"'s":"")+'</span></td></tr>'
             : '';
           // lazy: the heavy expanded card (all sub-tabs) is built on first expand, not upfront (see .pp-exp handler)
-          var det='<tr id="pp-'+i+'" data-po="'+esc(p.po)+'" data-grp="'+esc(_gkey)+'" style="display:none"><td colspan="20"><div class="count">Loading…</div></td></tr>';   // single flush cell (no leading empty td) so the detail panel isn't indented by the MANAGE column
+          var det='<tr id="pp-'+i+'" data-po="'+esc(p.po)+'" data-grp="'+esc(_gkey)+'" style="display:none"><td colspan="20"><div class="pp-skel" aria-label="Loading"><i></i><i></i><i></i><i></i><i></i></div></td></tr>';   // single flush cell (no leading empty td) so the detail panel isn't indented by the MANAGE column
           var sb=subsByPo[p.po]||[]; var nts=notesByPo[p.po]||[]; var unreadInt=nts.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
           var cdS=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean), xdm=xdByPo[p.po]||{};
           var xdReq=cdS.length>0&&(/shipping/i.test(p.status||'')||(p.prod_end&&p.prod_end<today)), xdMiss=cdS.filter(function(s){var q=xdm[s];return q==null||q==='';}).length;
@@ -2150,7 +2152,7 @@
             var n=specs.filter(function(s){return s.needs_approval;}).length; var bg=document.getElementById('pp-spec-badge'); if(bg)bg.innerHTML=n?'<span style="background:var(--neg);color:#fff;border-radius:8px;font-size:10.5px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
           function renderPP(){ if(!_ppData)return; var body=document.getElementById('pp-body');
             tabsEl.querySelectorAll('.rtab').forEach(function(t){t.classList.toggle('active',t.dataset.pt===PORTAL_TAB);}); ppSyncSec();
-            setSampBadge(); setPosBadge(); setShipBadge(); setProdBadge(); setSpecBadge(); try{ renderPortalNotif(); }catch(e){}
+            setSampBadge(); setPosBadge(); setShipBadge(); setProdBadge(); setSpecBadge(); try{ renderPortalNotif(); }catch(e){} ppSyncSec();   // re-sync after the badges are set (section counts, v27.506)
             if(PP_EXTRA[PORTAL_TAB]){ body.innerHTML=''; try{ PP_EXTRA[PORTAL_TAB].render(body); }catch(e){ body.innerHTML='<div class="count">Could not load this page.</div>'; } return; }   // host-registered tab (Price List)
             if(PORTAL_TAB==='specs'){ body.innerHTML=ppSpecs(); wireSpecs(); return; }
             if(PORTAL_TAB==='quality'){ body.innerHTML=ppQuality(); wireQuality(); return; }
@@ -2293,7 +2295,7 @@
               var listBlock = picked
                 ? '<div class="bar" style="gap:8px;margin:10px 0 4px;align-items:center"><span class="pill-lbl">Filter</span>'
                   +'<input class="fci pp-bc-q" placeholder="search SKU / name…" value="'+esc(PORTAL_BC_Q)+'" style="width:240px;text-align:left"></div>'
-                  +'<div id="pp-bc-list"><div class="count">Loading…</div></div>'
+                  +'<div id="pp-bc-list"><div class="pp-skel" aria-label="Loading"><i></i><i></i><i></i><i></i><i></i></div></div>'
                 : '';
               body.innerHTML=note+picker+help+listBlock;
               var bsel=body.querySelector('.pp-bc-batch'); if(bsel)bsel.onchange=function(){ PORTAL_BC_BATCH=this.value; PORTAL_BC_Q=''; renderPP(); };
@@ -2655,7 +2657,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                   rerenderRow(row,po,'invoice');   // row now shows the ⏳ "Submitted, awaiting approval" badge (no submit button)
                   alert('✓ Submitted for approval.\n\nThe Dock & Bay team has been notified by email — no need to submit again. You\'ll see the status update here once it\'s reviewed.'); }); }; });
             } }
-    function loadPreview(){ tabsEl.style.display=''; body.innerHTML='<div class="count">Loading…</div>';
+    function loadPreview(){ tabsEl.style.display=''; body.innerHTML='<div class="pp-skel" aria-label="Loading"><i></i><i></i><i></i><i></i><i></i></div>';
       opts.getData().then(function(d){ if(d&&d.notesByPo){ Object.keys(d.notesByPo).forEach(function(k){ shortNotes(d.notesByPo[k]); }); } _ppData=d; if(!ppApplyHash())renderPP(); }).catch(function(e){ body.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e&&e.message||e)+'</div>'; }); }
     function reload(){ if(typeof opts.onChange==='function')try{opts.onChange();}catch(e){} loadPreview(); }
     tabsEl.querySelectorAll('.rtab').forEach(function(t){ t.onclick=function(){ PORTAL_TAB=t.dataset.pt; _ppOpenPO=null; _ppOpenProd=null; ppSetHash(t.dataset.pt); renderPP(); }; }); ppSyncSec();

@@ -1,3 +1,8 @@
+## v27.506 Portal: skeleton loading, phone hit-targets, action counts on the section row (review items 5-7)
+- **Skeletons:** the PO grid and the card panels show shimmer rows while data loads instead of the word Loading…
+- **Phone:** section and sub-tab text 11px+, MANAGE / status chips / pills at least 36px tall, more padding on the expanded card's tab strip.
+- **Section counts:** ORDERS, FINANCE, SAMPLES and PRODUCT show the sum of their tabs' action badges (red pill), refreshed on every render, so a supplier sees where the work is before clicking. supply/portal-view.js + supply/hz-theme.css.
+
 ## v27.505 Portal Price List: left-aligned columns and cached (Ben)
 - **Left-aligned:** every header and cell in the price-list table, the empty state and the proposal form buttons follow the portal's left-align rule. supply/hz-theme.css + supply/portal.html.
 - **Server cache:** the price-list payload (4 to 5 queries per supplier) is cached per supplier set for 2 minutes (`plPortalDataCached`), shared by the JSON and Excel routes; any price-list write (supplier submit, admin approve / reject / seed / exclude / delete) clears it.
