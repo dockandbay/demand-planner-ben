@@ -757,7 +757,7 @@ tr.grand-tot td.stk{background:var(--ink);color:#fff}
   </div>
   <div id="filters-row2" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
     <span class="pill-lbl" title="Active: today &rarr; today+180 days. All: everything not permanently inactive.">Show</span>
-    <span style="display:inline-flex;gap:3px"><button id="plan-active-btn" class="pill catpill active" onclick="setPlanActiveMode('active')">Active</button><button id="plan-all-btn" class="pill catpill" onclick="setPlanActiveMode('all')">All</button></span>
+    <span style="display:inline-flex;gap:3px"><button id="plan-active-btn" class="pill catpill active" onclick="setPlanActiveMode('active')">Active</button><button id="plan-18m-btn" class="pill catpill" onclick="setPlanActiveMode('18m')" title="Active window starting 18 months ago: keeps SKUs discontinued in the last 18 months visible (today &rarr; today+180 days otherwise as Active)">18m</button><button id="plan-all-btn" class="pill catpill" onclick="setPlanActiveMode('all')">All</button></span>
     <input type="date" id="plan-start-date" title="Window start" style="font-size:10px;padding:2px 5px;border:1px solid #d0d0d0;border-radius:4px;color:#444" onchange="setPlanActiveStart(this.value)">
     <span style="font-size:10px;color:#999">&rarr;</span>
     <input type="date" id="plan-end-date" title="Window end" style="font-size:10px;padding:2px 5px;border:1px solid #d0d0d0;border-radius:4px;color:#444" onchange="setPlanActiveEnd(this.value)">
@@ -9416,6 +9416,7 @@ function syncPlanActiveDates(){
   var b=document.getElementById('plan-end-date');if(b)b.value=SKU_FILTER.endDate||'';
 }
 // Compute YYYY-MM-DD for today+N days (used by the Active default window)
+function _ymdMonthsAgo(n){var d=new Date();d.setMonth(d.getMonth()-(n||0));var y=d.getFullYear(),m=d.getMonth()+1,da=d.getDate();return y+'-'+(m<10?'0':'')+m+'-'+(da<10?'0':'')+da;}
 function _ymdPlus(days){var d=new Date();d.setDate(d.getDate()+(days||0));var y=d.getFullYear(),m=d.getMonth()+1,da=d.getDate();return y+'-'+(m<10?'0':'')+m+'-'+(da<10?'0':'')+da;}
 // Active = today → today+180 days, hides discontinued-before-today.
 // All    = blank date range, no active gating (but the permanent-inactive filter still applies).
@@ -9423,6 +9424,10 @@ function setPlanActiveMode(mode){
   if(mode==='active'){
     SKU_FILTER.active=true;
     SKU_FILTER.startDate=TODAY;
+    SKU_FILTER.endDate=_ymdPlus(180);
+  } else if(mode==='18m'){   // Ben (v27.474): Active window that starts 18 months ago, so recently discontinued SKUs stay in view
+    SKU_FILTER.active=true;
+    SKU_FILTER.startDate=_ymdMonthsAgo(18);
     SKU_FILTER.endDate=_ymdPlus(180);
   } else {
     SKU_FILTER.active=false;
@@ -9432,6 +9437,7 @@ function setPlanActiveMode(mode){
   syncPlanActiveDates();
   var ba=document.getElementById('plan-active-btn');if(ba)ba.className='pill catpill'+(mode==='active'?' active':'');
   var bl=document.getElementById('plan-all-btn');   if(bl)bl.className='pill catpill'+(mode==='all'?' active':'');
+  var b18=document.getElementById('plan-18m-btn');  if(b18)b18.className='pill catpill'+(mode==='18m'?' active':'');
   renderMain();
 }
 // Back-compat wrapper for any old call sites that still toggle the legacy single button.
