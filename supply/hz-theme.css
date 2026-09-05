@@ -97,7 +97,7 @@ body header.pv-top{background:var(--nav)}
 #app #supply-root #supply-content,#app #product-root #product-content,#app #scenario-root #scenario-content{padding-top:10px}
 /* L3 rows: second white row, blue underline, flush under L2 (was a light-blue rounded pill box with a 12px gap) */
 #app .d3nav,#app #perf-subnav,
-#app #supply-root .po-subnav,#app #supply-root #rep-subnav,#app #supply-root #prod-subtabs,#app #supply-root #config-subs-l3,#app #supply-root #config-subs.cfg-flat,
+#app #supply-root #act-subnav,#app #supply-root #rep-subnav,#app #supply-root #prod-subtabs,#app #supply-root #config-subs-l3,#app #supply-root #config-subs.cfg-flat,
 #app #product-root #pcfg-subs-l3{background:var(--l3-bg);border:0;border-bottom:1px solid var(--line);border-radius:0;padding:0 20px;margin:0 -10px 10px}
 #app #report-body > .d3nav:first-child{margin-top:-10px}   /* REPORTS L3 (Performance, 3PL & Invoicing) flush under the L2 row */
 /* .dnav3 (REPORTS level-3 buttons) = same look as .d3tab */
@@ -106,8 +106,8 @@ body header.pv-top{background:var(--nav)}
 #app .d3nav .dnav3.active{color:var(--blue);box-shadow:inset 0 -2.5px 0 var(--blue)}
 /* views with no DEMAND filter rows (REPORTS, BUY & MOVE…): the header wrapper keeps no padding / rule / margin */
 #app.filters-hidden #dab-navwrap{padding-bottom:0!important;border-bottom:0!important;margin-bottom:0!important}
-#app #supply-root #supply-content > .po-subnav:first-child,#app #supply-root #supply-content > #rep-subnav:first-child,#app #supply-root #supply-content > #prod-subtabs:first-child,#app #supply-root #supply-content > #config-subs:first-child{margin-top:-10px}
-#app .d3nav .d3tab,#app #supply-root .po-subnav .rtab,#app #supply-root #rep-subnav .rtab,#app #supply-root #prod-subtabs .rtab,#app #supply-root #config-subs-l3 .rtab,#app #supply-root #config-subs.cfg-flat .rtab,#app #product-root #pcfg-subs-l3 .rtab{padding:11px 13px 9px;font-size:10px;letter-spacing:.05em}   /* L3 text two points smaller (Ben, v27.480) */
+#app #supply-root #supply-content > #act-subnav:first-child,#app #supply-root #supply-content > #rep-subnav:first-child,#app #supply-root #supply-content > #prod-subtabs:first-child,#app #supply-root #supply-content > #config-subs:first-child{margin-top:-10px}
+#app .d3nav .d3tab,#app #supply-root #act-subnav .rtab,#app #supply-root #rep-subnav .rtab,#app #supply-root #prod-subtabs .rtab,#app #supply-root #config-subs-l3 .rtab,#app #supply-root #config-subs.cfg-flat .rtab,#app #product-root #pcfg-subs-l3 .rtab{padding:11px 13px 9px;font-size:10px;letter-spacing:.05em}   /* L3 text two points smaller (Ben, v27.480) */
 /* CONFIG level-2 (#config-subs, cog context) = same treatment as the other L2 rows */
 #app #supply-root #config-subs{background:var(--card);border-bottom:1px solid var(--line);margin:0 -10px 0;padding:0 20px;position:relative}
 #app #supply-root #config-subs .rtab{padding:13px 13px 11px;font-size:12px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);border-bottom-color:transparent;box-shadow:none}
@@ -245,3 +245,6 @@ html body:has(#app.product-active){background:var(--card)}
 #app #supply-root tr.cat-hdr td .po-grp-car{font-size:9px;color:var(--faint);margin-right:4px}
 /* load-more footer row */
 #app #supply-root tr.po-loadmore-row td{background:var(--card)!important;border-top:1px solid var(--line2)!important;padding:14px 16px!important}
+
+/* ── phone fixes (v27.482) ── the PO grid's PLAN button collapses to a "P" glyph on phones (inject rule) — keep it that way */
+@media (max-width:640px){ #app #supply-root .planbtn.po-exp[data-po]{font-size:0;padding:5px 6px} }
