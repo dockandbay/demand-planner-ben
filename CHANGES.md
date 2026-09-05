@@ -1,3 +1,6 @@
+## v27.503 Portal: Price List renders as a normal FINANCE tab (was a full-page overlay) (Ben)
+- New `DBPortalView.addTab({pt,label,sec,render})` hook lets the host page register a tab that behaves like the built-in ones (section placement, active state, #/finance/pricelist deep link, standard click). portal.html registers Price List with it and renders the existing price-list UI into the tab body; the overlay, its Back header and the polling tab-insertion are gone. supply/portal-view.js + supply/portal.html.
+
 ## v27.502 Portal FIX: section row and sub-tab row now stack (they were sharing one flex row) (Ben)
 - The new section row was inserted inside the portal's top flex bar next to the tab row, so both rendered on one line. Both rows now sit as stacked blocks above that bar (which hides when empty). supply/portal-view.js + supply/hz-theme.css.
 

@@ -97,21 +97,13 @@
     };
     s.onerror=function(){ document.getElementById('pv').innerHTML='<div class="pv-empty">Could not load the portal view.</div>'; };
     document.body.appendChild(s);
-    // Add a "Price List" tab to the portal nav (next to Productions), gated by the server — instead of a header button.
-    if(me.price_list_enabled){ var _tries=0, _iv=setInterval(function(){ _tries++;
-      var tabs=document.getElementById('pp-tabs'), prod=tabs&&(tabs.querySelector('.rtab[data-pt="deposits"]')||tabs.querySelector('.rtab[data-pt="payments"]')||tabs.querySelector('.rtab[data-pt="productions"]'));   // Price List sits LAST under MONEY (after Deposits) — v27.499
-      if(tabs&&prod&&!document.getElementById('pp-pricelist-tab')){ var t=document.createElement('span'); t.className='rtab'; t.id='pp-pricelist-tab'; t.dataset.sec='finance'; t.textContent='Price List'; t.style.cursor='pointer';
-        t.onclick=function(e){ e.stopPropagation(); ppPriceList(me); }; prod.parentNode.insertBefore(t, prod.nextSibling); clearInterval(_iv); }
-      if(_tries>40)clearInterval(_iv); }, 250); }
-    // Deep link: /portal#pricelist opens the Price List directly; hash cleared when closed.
-    if(me.price_list_enabled){ function _plHash(){ return /pricelist/i.test(location.hash||''); }
-      function _syncPL(){ var open=!!document.getElementById('pv-pl-ov'); if(_plHash()&&!open)ppPriceList(me); else if(!_plHash()&&open){ var o=document.getElementById('pv-pl-ov'); if(o)o.remove(); } }
-      if(_plHash())ppPriceList(me); window.addEventListener('hashchange',_syncPL); }
+    // Price List = a real FINANCE tab (v27.503): registered through the portal's addTab hook, rendered into the tab body.
+    if(me.price_list_enabled&&window.DBPortalView&&window.DBPortalView.addTab){ window.DBPortalView.addTab({pt:'pricelist',label:'Price List',sec:'finance',render:function(host){ ppPriceList(me,host); }}); }
   }
 
   // ── Supplier Price List (gated: only shown when the server enables it) ──
   // ── Supplier Price List (gated) — grid mirroring the admin Price Lists UI, scoped to this supplier ──
-  function ppPriceList(me){ var ex=document.getElementById('pv-pl-ov'); if(ex)ex.remove();
+  function ppPriceList(me,host){
     var _prods=[], _cur=0, OPEN={};
     function CCY(c){ return ({USD:'$',GBP:'£',EUR:'€',AUD:'A$',CAD:'C$'})[String(c||'').toUpperCase()]||''; }
     function applicable(list){ if(!list||!list.length)return {cur:null,pending:false}; var act=list.filter(function(e){return e.status==='active';}),pend=list.filter(function(e){return e.status==='pending';}),pick=null;
@@ -132,11 +124,7 @@
     function plNotif(){ var host=document.getElementById('pl-notif'); if(!host)return;
       get('/api/portal/price-list/log').then(function(rows){ rows=(Array.isArray(rows)?rows:[]).filter(function(r){return r.status==='active'||r.status==='rejected';}).slice(0,6); if(!rows.length){host.innerHTML='';return;}
         host.innerHTML='<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 13px;margin:6px 0 14px;max-width:860px"><div style="font-weight:700;font-size:12px;color:#075985;margin-bottom:5px">📣 Recent decisions on your proposals</div>'+rows.map(function(r){ var lbl=r.scope==='sku'?r.sku:r.price_type; return '<div style="font-size:12px;display:flex;gap:9px;align-items:baseline;padding:2px 0"><span style="width:82px;flex:0 0 auto">'+outcome(r.status)+'</span><b style="flex:0 0 auto">'+esc(lbl||'')+'</b><span style="color:#64748b;flex:1">'+tierStr(r)+'</span><span style="color:#94a3b8;font-size:11px;flex:0 0 auto">'+esc(fd2(r.decided_at))+'</span></div>'; }).join('')+'</div>'; }).catch(function(){ host.innerHTML=''; }); }
-    var ov=document.createElement('div'); ov.id='pv-pl-ov'; ov.style.cssText='position:fixed;inset:0;z-index:9000;background:#fff;overflow:auto';
-    ov.innerHTML='<header class="pv-top"><h1>Dock &amp; Bay</h1><span class="sup">Price List</span><span class="sp"></span><button class="pv-btn ghost" id="pl-back">← Back</button></header><div id="pv-wrap"><div id="pl-body"><div class="pv-empty">Loading…</div></div></div>';
-    document.body.appendChild(ov);
-    try{ if(!/pricelist/i.test(location.hash||''))location.hash='#/finance/pricelist'; }catch(e){}   // deep link
-    document.getElementById('pl-back').onclick=function(){ ov.remove(); try{ if(/pricelist/i.test(location.hash))location.hash=''; }catch(e){} };
+    host.innerHTML='<div id="pl-body"><div class="pv-empty">Loading…</div></div>';   // v27.503: inline under FINANCE (the router owns the hash)
     function load(){ get('/api/portal/price-list').then(render).catch(function(e){ document.getElementById('pl-body').innerHTML='<div class="pv-empty">Could not load price list.</div>'; }); }
     function render(d){ var b=document.getElementById('pl-body'); var ents=d.entries||[], pts=d.priceTypes||[], man=d.manualSkus||[], sups=(d.suppliers&&d.suppliers.length?d.suppliers:['']); _prods=d.productions||[]; _cur=d.currentProduction||0;
       var byKey={}, supCcy={}; ents.forEach(function(e){ var k=e.supplier+'|'+e.scope+'|'+(e.scope==='sku'?e.sku:e.price_type); (byKey[k]=byKey[k]||[]).push(e); if(e.currency)supCcy[e.supplier]=e.currency; });

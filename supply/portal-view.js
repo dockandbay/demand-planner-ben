@@ -666,6 +666,15 @@
         PP_TAB_ORDER.forEach(function(pt){ if(first||PP_SEC[pt]!==sec)return; first=tabsEl.querySelector('.rtab[data-pt="'+pt+'"]'); });
         if(!first)first=tabsEl.querySelector('.rtab[data-sec="'+sec+'"][data-pt]'); if(first)first.click(); }; });
     }catch(e){}
+    // Host-registered tabs (e.g. Price List from portal.html): pt → {label, sec, render(bodyEl)}. Placed last in their section,
+    // routable (#/<sec>/<pt>), standard click + active handling. v27.503
+    var PP_EXTRA={};
+    function ppAddTab(def){ if(!def||!def.pt||PP_EXTRA[def.pt])return; PP_EXTRA[def.pt]=def; if(PP_TABS.indexOf(def.pt)<0)PP_TABS.push(def.pt); var sec=def.sec||PP_SEC[def.pt]||'orders'; PP_SEC[def.pt]=sec;
+      var t=document.createElement('span'); t.className='rtab'; t.dataset.pt=def.pt; t.dataset.sec=sec; t.textContent=def.label||def.pt;
+      var same=tabsEl.querySelectorAll('.rtab[data-sec="'+sec+'"]'), last=same.length?same[same.length-1]:null; if(last&&last.nextSibling)tabsEl.insertBefore(t,last.nextSibling); else tabsEl.appendChild(t);
+      t.onclick=function(){ PORTAL_TAB=def.pt; _ppOpenPO=null; _ppOpenProd=null; ppSetHash(def.pt); renderPP(); }; ppSyncSec();
+      try{ if(new RegExp('(^|/)'+def.pt+'(/|$)').test((location.hash||'').replace(/^#\/?/,''))){ PORTAL_TAB=def.pt; if(_ppData)renderPP(); } }catch(e){} }   // deep link that landed before the tab existed
+    try{ window.DBPortalView.addTab=ppAddTab; }catch(e){}
     function ppSyncSec(){ try{ var act=tabsEl.querySelector('.rtab.active'), sec=act?(act.dataset.sec||PP_SEC[act.dataset.pt]||'orders'):'orders';
       tabsEl.dataset.sec=sec; document.querySelectorAll('#pp-secs .pp-sec').forEach(function(sb){ sb.classList.toggle('active',sb.dataset.sec===sec); }); }catch(e){} }
     // Move the Inbox + Recent controls up into the persistent top bar (out of the content bar) — tidier on mobile.
@@ -2142,6 +2151,7 @@
           function renderPP(){ if(!_ppData)return; var body=document.getElementById('pp-body');
             tabsEl.querySelectorAll('.rtab').forEach(function(t){t.classList.toggle('active',t.dataset.pt===PORTAL_TAB);}); ppSyncSec();
             setSampBadge(); setPosBadge(); setShipBadge(); setProdBadge(); setSpecBadge(); try{ renderPortalNotif(); }catch(e){}
+            if(PP_EXTRA[PORTAL_TAB]){ body.innerHTML=''; try{ PP_EXTRA[PORTAL_TAB].render(body); }catch(e){ body.innerHTML='<div class="count">Could not load this page.</div>'; } return; }   // host-registered tab (Price List)
             if(PORTAL_TAB==='specs'){ body.innerHTML=ppSpecs(); wireSpecs(); return; }
             if(PORTAL_TAB==='quality'){ body.innerHTML=ppQuality(); wireQuality(); return; }
             if(PORTAL_TAB==='product'){ body.innerHTML=ppProducts(_ppData.products||[]); wireProducts(); return; }
