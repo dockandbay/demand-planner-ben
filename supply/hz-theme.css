@@ -253,3 +253,40 @@ html body:has(#app.product-active){background:var(--card)}
 #app #supply-root .days-chip{display:inline-block;font-size:10px;font-weight:800;padding:2px 7px;border-radius:6px;line-height:1.3;vertical-align:middle;margin-left:3px;font-variant-numeric:tabular-nums}
 #app #supply-root .cell-pick[data-kind="country"]{border-radius:7px;padding:3px 9px;font-size:11px;font-weight:800;letter-spacing:.02em;white-space:nowrap}
 #app #supply-root table.po-tbl td .fci.dt{border-radius:6px}
+
+/* ═══ U4 PRODUCT, slice 1 (v27.484): module tokens, detail tabs, filters, grid, drawer, forms, mobile cards ═════ */
+#app #product-root{--p-ink:var(--ink);--p-mut:var(--muted);--p-line:var(--line);--p-bg:var(--hover);--p-acc:var(--blue)}   /* indigo accent → design blue */
+/* product detail tabs (Master data · Size & variants · Samples · Timeline · Documents) = design underline tabs */
+#app #product-root .pd-tabs{gap:2px;border-bottom:1px solid var(--line);margin:0 0 14px}
+#app #product-root .pd-tab{padding:11px 13px 9px;margin-bottom:0;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--faint);border-bottom:0;box-shadow:none;border-radius:0;transition:color .15s}
+#app #product-root .pd-tab:hover{color:var(--ink)}
+#app #product-root .pd-tab.active{color:var(--blue);box-shadow:inset 0 -2.5px 0 var(--blue);font-weight:800}
+/* grid filters + count */
+#app #product-root #pg-filters .fci{border:1px solid var(--line);border-radius:var(--r-md);padding:7px 12px;font-size:12.5px;background:var(--card);color:var(--ink)}
+#app #product-root #pg-filters .fci:focus{border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-soft)}
+#app #product-root #pg-count{font-size:11.5px;color:var(--muted);font-weight:600}
+#app #product-root .pg-swsize{padding:5px 10px;font-size:11px;font-weight:700}
+#app #product-root .pg-swsize:first-child{border-radius:var(--r-sm) 0 0 var(--r-sm)} #app #product-root .pg-swsize:last-child{border-radius:0 var(--r-sm) var(--r-sm) 0}
+/* grid table + cards */
+#app #product-root table.pg-tbl td{font-size:12px;padding:8px 12px;border-bottom:1px solid var(--line2)}
+#app #product-root table.pg-tbl tbody tr:hover td{background:var(--hover)}
+#app #product-root .pg-colour{font-size:12.5px;font-weight:700;color:var(--ink)}
+#app #product-root .pg-ref{font-size:10.5px;font-weight:600;color:var(--faint);font-family:ui-monospace,Menlo,monospace}
+#app #product-root .pg-stagechip{border-radius:var(--r-sm);padding:3px 8px;margin:-3px -8px;font-weight:700;font-size:11px}
+#app #product-root .pg-stagechip:focus{outline:2px solid var(--blue-soft)}
+#app #product-root .pgm-card{border-radius:var(--r-lg);border:1px solid var(--line);box-shadow:var(--shadow);background:var(--card)}
+/* product drawer: same head as the SUPPLY drawers */
+#app #product-root .pd-drawhead{background:var(--card);border-bottom:1px solid var(--line);padding:14px 20px}
+#app #product-root .pd-drawtitle{font-size:15px;font-weight:800;color:var(--ink);letter-spacing:.01em}
+#app #product-root .pd-drawref{font-size:11px;font-weight:600;color:var(--faint);font-family:ui-monospace,Menlo,monospace}
+#app #product-root .pddraw-x{border-radius:var(--r-sm);color:var(--muted)}
+#app #product-root .pddraw-x:hover{background:var(--hover);color:var(--ink)}
+#app #product-root .pd-drawbody{padding:16px 20px}
+/* forms */
+#app #product-root .prow{border-bottom:1px solid var(--line2);padding:8px 0}
+#app #product-root .prow .pl{font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);padding-top:8px}
+#app #product-root .pd-skel-row{border-radius:var(--r-sm)}
+/* samples (live under #supply-root) */
+#app #supply-root .samp-panel,#app #supply-root #samp-form{border-radius:var(--r-lg)}
+#app #supply-root .samp-fld,#app #supply-root .samp-panel .fci,#app #supply-root #samp-form .fci{border-radius:var(--r-sm);padding:6px 10px;font-size:12px}
+#app #supply-root .samp-fld:focus,#app #supply-root .samp-panel .fci:focus,#app #supply-root #samp-form .fci:focus{border-color:var(--blue);box-shadow:0 0 0 3px var(--blue-soft)}

@@ -1,3 +1,10 @@
+## v27.484 UI uplift U4 slice 1: PRODUCT module on the design tokens
+- **Module tokens:** the PRODUCT accent moves from indigo to the design blue; its line / muted / background tokens now alias the app tokens.
+- **Detail tabs** (Master data · Size & variants · Samples · Timeline · Documents): design underline tabs, uppercase 11px bold, blue 2.5px underline when active.
+- **Grid:** filter inputs 10px radius with the blue focus ring; S/M/L swatch toggle rounded; table rows 12px with hairline separators and hover; colour name bold, ref in small mono grey; stage chip rounded; phone product cards 12px radius with the design shadow.
+- **Drawer:** same head as the SUPPLY drawers (white, hairline, 15px title, mono ref, rounded close button).
+- **Forms:** row labels as small uppercase grey caps, hairline row separators; Samples form fields 8px radius with the blue focus ring. supply/hz-theme.css only.
+
 ## v27.483 UI uplift U3 slice 3: PO grid date chips and ship-to chips (design)
 - **Days-to-date chip** (END and Completion columns): design chip, 10px bold, 6px radius; overdue = solid red with white text, 7 days or less = solid amber, 14 days = soft amber, 30 days = soft blue, later = soft green (same thresholds as before).
 - **Passed-milestone cells** use the token tints (soft red / pink) instead of the old hex fills.
