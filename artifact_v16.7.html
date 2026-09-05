@@ -4908,6 +4908,24 @@ function buildTimeCols(){var out=[];DISP_FY_STARTS.forEach(function(Y){
 function fyBg(startY){var d=startY-CUR_FY_START;return d<=-2?'bgH2':d===-1?'bgH1':d===0?'bg26':d===1?'bg27':'bg28';}
 function fyTotBg(startY){var d=startY-CUR_FY_START;return d<=-2?'bgtH2u':d===-1?'bgtH1u':d===0?'bgt26u':d===1?'bgt27u':'bgt28u';}
 function fyTotCls(startY){var d=startY-CUR_FY_START;return d<=-2?'totu yH2':d===-1?'totu yH1':d===0?'totu y26':d===1?'totu y27':'totu y28';}
+// ── Period total stack (FY / H1 / H2 / Qn columns) — ONE layout for sub-category, SKU, category and grand-total rows (Ben, v27.469):
+//    last-year units (faint) · (actuals-to-date, green) TOTAL · units growth % = total vs last-year units · revenue + growth vs last-year revenue.
+//    o = {ly, cur, mtd, rev, lyRev, fy (display-currency FY; null → GBP fr()), small (SKU rows), dark (grand-total row)}
+function periodStackHTML(o){
+  var g=(o.ly>0)?Math.round((o.cur-o.ly)/o.ly*100):null, rg=(o.lyRev>0&&o.rev!=null)?Math.round((o.rev-o.lyRev)/o.lyRev*100):null;
+  var cls=g!=null?(g>0?'gp':g<0?'rp':'fp'):'fp', rc=rg==null?'':(rg>=2?'var(--pos)':rg<=-2?'var(--neg)':'var(--muted)');
+  var fz=o.small?[7,9,7,8]:[9,11,9,9];
+  return '<div style="padding:2px 4px;text-align:right;font-variant-numeric:tabular-nums;line-height:1.25">'
+    +'<div style="font-size:'+fz[0]+'px;color:var(--faint)" title="Last year, same months (units)">'+(o.ly>0?fn(o.ly):'--')+'</div>'
+    +'<div style="font-size:'+fz[1]+'px;font-weight:700'+(o.dark?';color:var(--ink)':'')+'">'+(o.mtd>0?'<span style="color:var(--pos)" title="Actuals to date within this period">('+fn(o.mtd)+')</span> ':'')+fn(Math.round(o.cur))+'</div>'
+    +'<div style="font-size:'+fz[2]+'px" class="'+cls+'" title="Units growth: period total (actuals + forecast) vs last year">'+(g!=null?gPct(g):'--')+'</div>'
+    +(o.rev!=null?'<div style="font-size:'+fz[3]+'px;color:var(--muted)" title="Revenue'+(rg!=null?', growth vs last-year revenue':'')+'">'+(o.fy!=null?frFY(o.rev,o.fy):fr(Math.round(o.rev)))+(rg!=null?' <span style="color:'+rc+'">'+(rg>=0?'+':'')+rg+'%</span>':'')+'</div>':'')
+    +'</div>';
+}
+// Actuals-to-date over a month list: every actual month incl. the current month-to-date. get(m) → that month's actual units.
+function periodMtd(months,get){ return months.reduce(function(t,m){ return t+(isActualMonth(m)?(get(m)||0):0); },0); }
+// Last-year revenue over a month list (raw actuals: a[m]=[units,revenue]).
+function periodLyRev(a,months){ return prevYearMonths(months).reduce(function(t,m){ return t+((a[m]&&a[m][1])||0); },0); }
 // Actuals-based fiscal sums (lookback columns)
 function fyU(a,startY){return fyMonths(startY).reduce(function(t,k){return t+(a[k]?a[k][0]:0);},0);}
 function fyR(a,startY){return fyMonths(startY).reduce(function(t,k){return t+(a[k]?a[k][1]:0);},0);}
@@ -5102,23 +5120,13 @@ function refreshRow(s,co,ch){
   document.querySelectorAll('[data-fytot="'+esc(rk)+'"]').forEach(function(e){
     var Y=+e.dataset.fyy;
     var cur=fyTot(_a,fu,Y,s,co,ch),prev=fyTot(_a,fu,Y-1,s,co,ch);
-    var yoy=prev>0?Math.round((cur-prev)/prev*100):null;
-    e.innerHTML='<div style="padding:2px 4px;text-align:right">'
-      +'<div style="font-size:11px;font-weight:700;font-variant-numeric:tabular-nums">'+fn(Math.round(cur))+'</div>'
-      +'<div style="font-size:9px;font-variant-numeric:tabular-nums;color:#475569">'+fr(Math.round(cur*sp))+'</div>'
-      +'<div style="font-size:9px;font-variant-numeric:tabular-nums" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?gPct(yoy):'--')+'</div>'
-      +'</div>';
+    e.innerHTML=periodStackHTML({ly:prev,cur:cur,mtd:periodMtd(fyMonths(Y),function(m){return _a[m]?_a[m][0]:0;}),rev:cur*sp,lyRev:periodLyRev(_a,fyMonths(Y))});
   });
   // Quarter/half total cells (#5) — recompute in place on edit, same as the FY total above
   document.querySelectorAll('[data-ptot="'+esc(rk)+'"]').forEach(function(e){
     var months=(e.dataset.pmonths||'').split(',').filter(Boolean);
     var cur=periodTot(_a,fu,months,s,co,ch),prev=periodTot(_a,fu,prevYearMonths(months),s,co,ch);
-    var yoy=prev>0?Math.round((cur-prev)/prev*100):null;
-    e.innerHTML='<div style="padding:2px 4px;text-align:right">'
-      +'<div style="font-size:11px;font-weight:700;font-variant-numeric:tabular-nums">'+fn(Math.round(cur))+'</div>'
-      +'<div style="font-size:9px;font-variant-numeric:tabular-nums;color:#475569">'+fr(Math.round(cur*sp))+'</div>'
-      +'<div style="font-size:9px;font-variant-numeric:tabular-nums" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?gPct(yoy):'--')+'</div>'
-      +'</div>';
+    e.innerHTML=periodStackHTML({ly:prev,cur:cur,mtd:periodMtd(months,function(m){return _a[m]?_a[m][0]:0;}),rev:cur*sp,lyRev:periodLyRev(_a,months)});
   });
   // If this subcategory's SKU rows are expanded, rebuild them so the SKU subtotal/gap
   // recomputes against the updated subcategory forecast (otherwise the gap goes stale).
@@ -6501,22 +6509,14 @@ function buildDataRow(s,co,ch,x,fu_cache){
     var yoy=prev>0?Math.round((cur-prev)/prev*100):null;
     var td=document.createElement('td');td.className=fyTotCls(Y)+' sep2';
     td.dataset.fytot=rk;td.dataset.fyy=Y; // so refreshRow can update this total in place on edit
-    td.innerHTML='<div style="padding:2px 4px;text-align:right">'
-      +'<div style="font-size:11px;font-weight:700;font-variant-numeric:tabular-nums">'+fn(Math.round(cur))+'</div>'
-      +'<div style="font-size:9px;font-variant-numeric:tabular-nums;color:#475569">'+fr(Math.round(cur*sp))+'</div>'
-      +'<div style="font-size:9px;font-variant-numeric:tabular-nums" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?gPct(yoy):'--')+'</div>'
-      +'</div>';
+    td.innerHTML=periodStackHTML({ly:prev,cur:cur,mtd:periodMtd(fyMonths(Y),function(m){return a[m]?a[m][0]:0;}),rev:cur*sp,lyRev:periodLyRev(a,fyMonths(Y))});
     return td;
   }
   function periodTotCell(months,ptype){   // #5 quarter/half total for a subcategory — same stack as the FY total, over its own months
     var cur=periodTot(a,fu,months,s,co,ch),prev=periodTot(a,fu,prevYearMonths(months),s,co,ch);
     var yoy=prev>0?Math.round((cur-prev)/prev*100):null;
     var td=document.createElement('td');td.className='sep2 '+(ptype==='h'?'ptot-h':'ptot-q');td.dataset.ptot=rk;td.dataset.pmonths=months.join(',');   // data-* → refreshRow recomputes in place on edit
-    td.innerHTML='<div style="padding:2px 4px;text-align:right">'
-      +'<div style="font-size:11px;font-weight:700;font-variant-numeric:tabular-nums">'+fn(Math.round(cur))+'</div>'
-      +'<div style="font-size:9px;font-variant-numeric:tabular-nums;color:#475569">'+fr(Math.round(cur*sp))+'</div>'
-      +'<div style="font-size:9px;font-variant-numeric:tabular-nums" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?gPct(yoy):'--')+'</div>'
-      +'</div>';
+    td.innerHTML=periodStackHTML({ly:prev,cur:cur,mtd:periodMtd(months,function(m){return a[m]?a[m][0]:0;}),rev:cur*sp,lyRev:periodLyRev(a,months)});
     return td;
   }
   TIME_COLS.forEach(function(tc){
@@ -8815,9 +8815,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       var yoy=prev>0?Math.round((cur-prev)/prev*100):null;
       td.className=fyTotCls(Y)+' sep2';
       td.style.cssText='padding:2px 4px;border-bottom:1px solid #f0f0ee';
-      td.innerHTML='<div style="text-align:right"><div style="font-size:9px;font-weight:700;font-variant-numeric:tabular-nums">'+fn(cur)+'</div>'
-        +'<div style="font-size:8px;font-variant-numeric:tabular-nums;color:#475569">'+fr(Math.round(cur*_skuSp))+'</div>'   // revenue (SKU units × subcat ASP) — matches the subcat FY total's rev line
-        +(yoy!=null?'<div style="font-size:7px" class="'+(yoy>0?'gp':yoy<0?'rp':'fp')+'">'+(yoy>0?'+':'')+yoy+'%</div>':'')+'</div>';
+      td.innerHTML=periodStackHTML({small:true,ly:prev,cur:cur,mtd:periodMtd(fyMonths(Y),function(m){return sales[m]||0;}),rev:cur*_skuSp,lyRev:prev*_skuSp});   // revenue = SKU units × subcat ASP (matches the subcat total's rev line)
       return td;
     }
     function skuPeriodCell(months,ptype){   // #5 quarter/half total for a SKU — same stack as the SKU FY total, over its own months
@@ -8825,9 +8823,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       var prev=prevYearMonths(months).reduce(function(t,m){return t+(isActualMonth(m)?(sales[m]||0):(skuFC[m]||0));},0);
       var yoy=prev>0?Math.round((cur-prev)/prev*100):null;
       var td=document.createElement('td');td.className='sep2 '+(ptype==='h'?'ptot-h':'ptot-q');td.style.cssText='padding:2px 4px;border-bottom:1px solid #f0f0ee';
-      td.innerHTML='<div style="text-align:right"><div style="font-size:9px;font-weight:700;font-variant-numeric:tabular-nums">'+fn(cur)+'</div>'
-        +'<div style="font-size:8px;font-variant-numeric:tabular-nums;color:#475569">'+fr(Math.round(cur*_skuSp))+'</div>'
-        +(yoy!=null?'<div style="font-size:7px" class="'+(yoy>0?'gp':yoy<0?'rp':'fp')+'">'+(yoy>0?'+':'')+yoy+'%</div>':'')+'</div>';
+      td.innerHTML=periodStackHTML({small:true,ly:prev,cur:cur,mtd:periodMtd(months,function(m){return sales[m]||0;}),rev:cur*_skuSp,lyRev:prev*_skuSp});
       return td;
     }
     TIME_COLS.forEach(function(tc){
@@ -9069,10 +9065,7 @@ function buildBody(){
       var rev=fyMonths(Y).reduce(function(t,m){return t+(gtMonthFCRev[m]||0);},0);
       var yoy=prev>0?Math.round((u-prev)/prev*100):null;
       var td=document.createElement('td');td.className=fyTotCls(Y)+' sep2';
-      td.innerHTML='<div style="padding:2px 4px;text-align:right">'
-        +'<div style="font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;color:#0f172a">'+fn(Math.round(u))+'</div>'
-        +'<div style="font-size:9px;color:#334155;font-variant-numeric:tabular-nums">'+frFY(rev,Y)+'</div>'
-        +'<div style="font-size:9px;font-variant-numeric:tabular-nums;color:#0f172a" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?gPct(yoy):'--')+'</div></div>';
+      td.innerHTML=periodStackHTML({dark:true,ly:fyMonths(Y).reduce(function(t,m){return t+(gtMonthLY[m]||0);},0),cur:u,mtd:periodMtd(fyMonths(Y),function(m){return gtMonthFC[m]||0;}),rev:rev,lyRev:0,fy:Y});
       gtr.appendChild(td);
     }
     var gtPeriodCell=function(months,ptype){   // #5 quarter/half total for the market grand-total row (light bg → dark text)
@@ -9081,10 +9074,7 @@ function buildBody(){
       var rev=months.reduce(function(t,m){return t+(gtMonthFCRev[m]||0);},0);
       var yoy=prev>0?Math.round((u-prev)/prev*100):null;
       var td=document.createElement('td');td.className='sep2 '+(ptype==='h'?'ptot-h':'ptot-q');
-      td.innerHTML='<div style="padding:2px 4px;text-align:right">'
-        +'<div style="font-size:11px;font-weight:700;font-variant-numeric:tabular-nums;color:#0f172a">'+fn(Math.round(u))+'</div>'
-        +'<div style="font-size:9px;color:#334155;font-variant-numeric:tabular-nums">'+frFY(rev,fyStartOf(months[0]))+'</div>'
-        +'<div style="font-size:9px;font-variant-numeric:tabular-nums;color:#0f172a" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?gPct(yoy):'--')+'</div></div>';
+      td.innerHTML=periodStackHTML({dark:true,ly:months.reduce(function(t,m){return t+(gtMonthLY[m]||0);},0),cur:u,mtd:periodMtd(months,function(m){return gtMonthFC[m]||0;}),rev:rev,lyRev:0,fy:fyStartOf(months[0])});
       gtr.appendChild(td);
     };
     TIME_COLS.forEach(function(tc){
@@ -9248,10 +9238,7 @@ function _makeCatTotRow(cat){
       var rev=fyMonths(Y).reduce(function(t,m){return t+(cMonthFCRev[m]||0);},0);
       var yoy=prev>0?Math.round((u-prev)/prev*100):null;
       var td=document.createElement('td');td.className=fyTotCls(Y)+' sep2';
-      td.innerHTML='<div style="padding:2px 4px;text-align:right">'
-        +'<div style="font-size:11px;font-weight:700;font-variant-numeric:tabular-nums">'+fn(Math.round(u))+'</div>'
-        +'<div style="font-size:9px;color:#475569;font-variant-numeric:tabular-nums">'+frFY(rev,Y)+'</div>'
-        +'<div style="font-size:9px;font-variant-numeric:tabular-nums" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?gPct(yoy):'--')+'</div></div>';
+      td.innerHTML=periodStackHTML({ly:fyMonths(Y).reduce(function(t,m){return t+(cMonthLY[m]||0);},0),cur:u,mtd:periodMtd(fyMonths(Y),function(m){return cMonthFC[m]||0;}),rev:rev,lyRev:fyMonths(Y).reduce(function(t,m){return t+(cMonthLYRev[m]||0);},0),fy:Y});
       totr.appendChild(td);
     }
     function cPeriodCell(months,ptype){   // #5 quarter/half total for the company total row
@@ -9260,10 +9247,7 @@ function _makeCatTotRow(cat){
       var rev=months.reduce(function(t,m){return t+(cMonthFCRev[m]||0);},0);
       var yoy=prev>0?Math.round((u-prev)/prev*100):null;
       var td=document.createElement('td');td.className='sep2 '+(ptype==='h'?'ptot-h':'ptot-q');
-      td.innerHTML='<div style="padding:2px 4px;text-align:right">'
-        +'<div style="font-size:11px;font-weight:700;font-variant-numeric:tabular-nums">'+fn(Math.round(u))+'</div>'
-        +'<div style="font-size:9px;color:#475569;font-variant-numeric:tabular-nums">'+frFY(rev,fyStartOf(months[0]))+'</div>'
-        +'<div style="font-size:9px;font-variant-numeric:tabular-nums" class="'+(yoy!=null?(yoy>0?'gp':yoy<0?'rp':'fp'):'fp')+'">'+(yoy!=null?gPct(yoy):'--')+'</div></div>';
+      td.innerHTML=periodStackHTML({ly:months.reduce(function(t,m){return t+(cMonthLY[m]||0);},0),cur:u,mtd:periodMtd(months,function(m){return cMonthFC[m]||0;}),rev:rev,lyRev:months.reduce(function(t,m){return t+(cMonthLYRev[m]||0);},0),fy:fyStartOf(months[0])});
       totr.appendChild(td);
     }
     TIME_COLS.forEach(function(tc){

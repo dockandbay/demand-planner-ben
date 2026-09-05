@@ -1,3 +1,12 @@
+## v27.469 DEMAND plan: FY / H1 / H2 / Quarter total cells now stack LY, actuals-to-date, total, units growth, revenue growth (Ben)
+- Every period total cell (sub-category rows, SKU rows, category roll-ups, market grand total) uses ONE layout via the new `periodStackHTML()`:
+  1. **Last year** units for the same months (faint)
+  2. **(actuals to date)** in green brackets, then the **period total** (actuals + forecast) in bold
+  3. **Units growth %** = period total vs last-year units (green / red)
+  4. **Revenue** for the period + **revenue growth %** vs last-year revenue
+- Category and grand-total rows take LY from their per-month LY series, so the first FY column now shows LY and growth too (it read "--" before because the prior FY was not on screen). Grand total shows revenue without a growth % (no LY revenue series exists for that row yet).
+- In-place refresh after a cell edit (`refreshRow`) renders the same stack. Display only; no forecast, save or buy-plan change. artifact_v16.7.html.
+
 ## v27.468 FIX: sub-category growth % on the displayed (exploded) basis + flush L1/L2/L3 nav stack
 - **FIX (DEMAND plan, sub-category rows, completed months):** the LY and this-year figures in a sub-category cell are shown **exploded** (master units + set boxes x BOM) but the **growth %** between them (and the growth heat colour) was computed on the **raw sale-basis** units. Example Ben spotted: UK DTC Towel - Beach SEASONAL Aug-26 showed 5,905 -> 9,947 with "+26%" (the box-basis growth) where the two numbers imply +68%. The % and the heat colour now use the same exploded values as the two numbers. SKU rows (no set split) unchanged. Display only: no forecast, save or buy-plan change. artifact_v16.7.html.
 - **Nav stack (Ben):** L1 header, L2 sub-tabs and L3 sub-tabs now sit flush, no page-background gap or stray rule between them. L3 rows (PO sub-tabs, Reports, Config L3, Demand inputs/analysis, Performance) are a second white full-width row with a blue underline instead of the light-blue rounded pill box; CONFIG L2 (cog context) gets the L2 treatment. The DEMAND filter rows keep their spacing below the nav. supply/hz-theme.css (+ one inline style -> class on #perf-subnav).
