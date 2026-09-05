@@ -1,3 +1,7 @@
+## v27.500 Portal: MONEY renamed FINANCE; two-level deep-link slugs (Ben)
+- Section **FINANCE** (was MONEY): Payments · Deposits · Price List.
+- **Deep links** now carry section and tab: `#/orders/pos`, `#/orders/pos/PO-1234`, `#/finance/payments`, `#/finance/pricelist`, `#/samples/samples/SR-45`, `#/product/specs`. A section-only link (`#/finance`) opens that section's default tab. The old one-level links (`#/pos/PO-1234`, `#pricelist`) still resolve, so nothing bookmarked or emailed breaks. Quality Control added to the routable tabs. supply/portal-view.js + supply/portal.html + supply/hz-theme.css.
+
 ## v27.499 Portal FIX: MONEY opened the Price List overlay instead of Payments (Ben)
 - The Price List tab (added by portal.html after Productions) landed first in the MONEY group, so clicking MONEY opened the price-list overlay and the section's sub-tab row never showed. A section click now opens its preferred first tab (MONEY → Payments, ORDERS → Purchase Orders, SAMPLES → Sample shipments, PRODUCT → Product), and the Price List tab is inserted after Deposits so it sits last under MONEY. supply/portal-view.js + supply/portal.html.
 

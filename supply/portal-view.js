@@ -607,9 +607,15 @@
     // ── Hash router: shareable deep links. #/<tab> for menus; #/<tab>/<ref> for a specific PO / product / sample /
     // shipment (e.g. #/pos/PO-123, #/product/SS27-TOWEL-BL-02, #/samples/SR-45). Applied on load + hashchange.
     var _ppRouting=false;
-    var PP_TABS=['pos','shipmentplan','deposits','payments','productions','samples','product','specs'];
-    function ppSetHash(tab, ref){ _ppRouting=true; try{ location.hash='#/'+tab+(ref?('/'+encodeURIComponent(ref)):''); }catch(e){} setTimeout(function(){ _ppRouting=false; },30); }
-    function ppApplyHash(){ var h=(location.hash||'').replace(/^#\/?/,''); if(!h)return false; var parts=h.split('/'); var tab=parts[0], ref=parts[1]?decodeURIComponent(parts[1]):'';
+    var PP_TABS=['pos','shipmentplan','deposits','payments','productions','samples','product','specs','quality'];
+    var PP_SEC_KEYS=['orders','finance','samples','product'];
+    function ppSetHash(tab, ref){ _ppRouting=true; try{ var sec=(typeof PP_SEC!=='undefined'&&PP_SEC[tab])||'orders'; location.hash='#/'+sec+'/'+tab+(ref?('/'+encodeURIComponent(ref)):''); }catch(e){} setTimeout(function(){ _ppRouting=false; },30); }   // v27.500: section/tab slugs
+    function ppApplyHash(){ var h=(location.hash||'').replace(/^#\/?/,''); if(!h)return false; var parts=h.split('/'); var tab, ref;
+      if(PP_SEC_KEYS.indexOf(parts[0])>=0){   // #/<section>[/<tab>[/<ref>]] — section-only → that section's default tab (v27.500)
+        var sec=parts[0]; tab=parts[1]||''; ref=parts[2]?decodeURIComponent(parts[2]):'';
+        if(!tab||PP_TABS.indexOf(tab)<0){ tab=''; (typeof PP_TAB_ORDER!=='undefined'?PP_TAB_ORDER:PP_TABS).forEach(function(pt){ if(!tab&&PP_TABS.indexOf(pt)>=0&&(typeof PP_SEC!=='undefined')&&PP_SEC[pt]===sec)tab=pt; }); }
+        if(!tab)return false;
+      } else { tab=parts[0]; ref=parts[1]?decodeURIComponent(parts[1]):''; }   // legacy #/<tab>[/<ref>]
       if(PP_TABS.indexOf(tab)<0)return false;
       PORTAL_TAB=tab; _ppOpenPO=null; _ppOpenProd=null;
       if(ref){ if(tab==='pos'){ _ppOpenPO=ref; PORTAL_PO_Q=ref; } else if(tab==='shipmentplan'){ PORTAL_SP_PO=ref; } else if(tab==='product'){ _ppOpenProd=ref; } else if(tab==='samples'){ PORTAL_SAMP_Q=ref; } }
@@ -644,8 +650,8 @@
     var tabsEl=document.getElementById('pp-tabs'), body=document.getElementById('pp-body');
     // ── Grouped navigation (Ben, v27.493): five sections over the existing tabs. The original .rtab[data-pt] tabs and their
     //    handlers are untouched; each is tagged with data-sec and the tab row shows only the active section's tabs (CSS). ──
-    var PP_SEC={pos:'orders',shipmentplan:'orders',productions:'orders',payments:'money',deposits:'money',pricelist:'money',samples:'samples',product:'product',specs:'product',quality:'product',timeline:'messages'};
-    var PP_SECS=[['orders','ORDERS'],['money','MONEY'],['samples','SAMPLES'],['product','PRODUCT']];   // messages live behind the header Inbox button (no top-level tab)
+    var PP_SEC={pos:'orders',shipmentplan:'orders',productions:'orders',payments:'finance',deposits:'finance',pricelist:'finance',samples:'samples',product:'product',specs:'product',quality:'product'};
+    var PP_SECS=[['orders','ORDERS'],['finance','FINANCE'],['samples','SAMPLES'],['product','PRODUCT']];   // messages live behind the header Inbox button (no top-level tab)
     var PP_TAB_ORDER=['pos','shipmentplan','productions','payments','deposits','pricelist','samples','product','specs','quality'];
     try{
       var _secRow=document.createElement('div'); _secRow.id='pp-secs';

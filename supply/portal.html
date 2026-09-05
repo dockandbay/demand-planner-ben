@@ -100,7 +100,7 @@
     // Add a "Price List" tab to the portal nav (next to Productions), gated by the server — instead of a header button.
     if(me.price_list_enabled){ var _tries=0, _iv=setInterval(function(){ _tries++;
       var tabs=document.getElementById('pp-tabs'), prod=tabs&&(tabs.querySelector('.rtab[data-pt="deposits"]')||tabs.querySelector('.rtab[data-pt="payments"]')||tabs.querySelector('.rtab[data-pt="productions"]'));   // Price List sits LAST under MONEY (after Deposits) — v27.499
-      if(tabs&&prod&&!document.getElementById('pp-pricelist-tab')){ var t=document.createElement('span'); t.className='rtab'; t.id='pp-pricelist-tab'; t.dataset.sec='money'; t.textContent='Price List'; t.style.cursor='pointer';
+      if(tabs&&prod&&!document.getElementById('pp-pricelist-tab')){ var t=document.createElement('span'); t.className='rtab'; t.id='pp-pricelist-tab'; t.dataset.sec='finance'; t.textContent='Price List'; t.style.cursor='pointer';
         t.onclick=function(e){ e.stopPropagation(); ppPriceList(me); }; prod.parentNode.insertBefore(t, prod.nextSibling); clearInterval(_iv); }
       if(_tries>40)clearInterval(_iv); }, 250); }
     // Deep link: /portal#pricelist opens the Price List directly; hash cleared when closed.
@@ -135,7 +135,7 @@
     var ov=document.createElement('div'); ov.id='pv-pl-ov'; ov.style.cssText='position:fixed;inset:0;z-index:9000;background:#fff;overflow:auto';
     ov.innerHTML='<header class="pv-top"><h1>Dock &amp; Bay</h1><span class="sup">Price List</span><span class="sp"></span><button class="pv-btn ghost" id="pl-back">← Back</button></header><div id="pv-wrap"><div id="pl-body"><div class="pv-empty">Loading…</div></div></div>';
     document.body.appendChild(ov);
-    try{ if((location.hash||'').replace(/^#\/?/,'')!=='pricelist')location.hash='pricelist'; }catch(e){}   // deep link
+    try{ if(!/pricelist/i.test(location.hash||''))location.hash='#/finance/pricelist'; }catch(e){}   // deep link
     document.getElementById('pl-back').onclick=function(){ ov.remove(); try{ if(/pricelist/i.test(location.hash))location.hash=''; }catch(e){} };
     function load(){ get('/api/portal/price-list').then(render).catch(function(e){ document.getElementById('pl-body').innerHTML='<div class="pv-empty">Could not load price list.</div>'; }); }
     function render(d){ var b=document.getElementById('pl-body'); var ents=d.entries||[], pts=d.priceTypes||[], man=d.manualSkus||[], sups=(d.suppliers&&d.suppliers.length?d.suppliers:['']); _prods=d.productions||[]; _cur=d.currentProduction||0;
