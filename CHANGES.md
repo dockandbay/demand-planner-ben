@@ -1,3 +1,8 @@
+## v27.483 UI uplift U3 slice 3: PO grid date chips and ship-to chips (design)
+- **Days-to-date chip** (END and Completion columns): design chip, 10px bold, 6px radius; overdue = solid red with white text, 7 days or less = solid amber, 14 days = soft amber, 30 days = soft blue, later = soft green (same thresholds as before).
+- **Passed-milestone cells** use the token tints (soft red / pink) instead of the old hex fills.
+- **Ship to** keeps Ben's per-market colour palette (CONFIG ▸ Admin ▸ General) but is shaped like the design chip: 7px radius, 11px bold. Date inputs in the grid get 6px corners. supply/inject.html (days badge, tints, country chip inline style) + supply/hz-theme.css.
+
 ## v27.482 FIX (phone): PO grid PLAN button read "Pplan"; PO detail tab strip squished and wrapping (Ben)
 - The theme's PLAN chip rule out-ranked the phone rule that collapses it to a "P" glyph, so both showed. The phone collapse is restored.
 - The level-3 row treatment (full-width white band, wrapping, 20px side padding) was hitting every `.po-subnav`, including the scrollable tab strip inside an expanded PO and the sample drawer. It now applies only to the page-level Actions sub-nav (`#act-subnav`); the PO detail strip is back to its single-line scroll. supply/hz-theme.css.

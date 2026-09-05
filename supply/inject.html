@@ -898,7 +898,7 @@
       ? dateField(dispIso,{inline:true, attrs:'data-ep="/api/supply/po/'+encodeURIComponent(r.po)+'" data-field="'+field+'"', width:'74px'})+(src||'')
       : dcell(dispIso)+(src||'');
     return '<td class="l"'+(hot?' style="'+hot+'"':'')+'>'+cell+'</td>'; }
-  var DTD_LRED='background:#fee2e2', DTD_RED='background:#fca5a5;color:#7f1d1d;font-weight:700';
+  var DTD_LRED='background:var(--neg-bg)', DTD_RED='background:var(--neg-cell);color:var(--neg);font-weight:700';   // passed-milestone cell tints (design tokens, v27.483)
   function srctag(s){return s?'<span class="src '+(s==='FLEX'||s==='calc'?'fx':'m')+'">'+esc(s)+'</span>':'';}
   // END DATE cell: days until the (effective) production-end date — negative = overdue. Colour-coded:
   // <=0 red · <=7 dark orange · <=14 light orange · <=30 light blue · >30 light green.
@@ -908,12 +908,12 @@
   function endDaysBadge(iso,label){ if(!iso)return ''; var m=/^(\d{4}-\d{2}-\d{2})/.exec(String(iso)); if(!m)return '';
     var t=new Date(); t.setHours(0,0,0,0); var days=Math.round((new Date(m[1]+'T00:00:00')-t)/86400000);
     var bg,fg;
-    if(days<=0){ bg='#fca5a5'; fg='#7f1d1d'; }
-    else if(days<=7){ bg='#fb923c'; fg='#7c2d12'; }
-    else if(days<=14){ bg='#fed7aa'; fg='#9a3412'; }
-    else if(days<=30){ bg='#bfdbfe'; fg='#1e40af'; }
-    else { bg='#bbf7d0'; fg='#166534'; }
-    return ' <span style="display:inline-block;font-size:9px;font-weight:700;padding:0 4px;border-radius:6px;background:'+bg+';color:'+fg+'" title="days until '+(label||'production end')+' ('+m[1]+')">'+days+'d</span>'; }
+    if(days<=0){ bg='var(--neg)'; fg='#fff'; }
+    else if(days<=7){ bg='#f0a04b'; fg='#fff'; }
+    else if(days<=14){ bg='var(--amber-bg)'; fg='var(--amber)'; }
+    else if(days<=30){ bg='var(--blue-soft)'; fg='var(--blue-ink)'; }
+    else { bg='var(--pos-bg)'; fg='var(--pos)'; }
+    return ' <span class="days-chip" style="background:'+bg+';color:'+fg+'" title="days until '+(label||'production end')+' ('+m[1]+')">'+days+'d</span>'; }   // v27.483 design chip
   function flexNum(fid){ var m=String(fid||'').match(/\d+/); return m?m[0]:''; }   // Flexport shipment id → numeric part for the URL
   function flexUrl(fid){ var n=flexNum(fid); return n?'https://app.flexport.com/shipments/'+n:''; }
   // Tracking URL for a shipment's carrier + reference. Flexport → Flexport; DHL/UPS/FedEx → their trackers;
@@ -1853,7 +1853,7 @@
   // Not a link to a table; just the dropdown/search to set the value. data-list: 'supplier' | 'branch'.
   var CELL_LBL={supplier:'supplier',branch:'branch',prod:'production',batch:'batch',country:'ship-to'};
   function cellPickBtn(po,ep,field,val,kind){
-    var bg=''; if(kind==='country'&&val){ var cc=String(val).toUpperCase(); var col=(typeof MKT_COLORS!=='undefined'&&MKT_COLORS[cc]); if(col)bg='background:'+col+';color:#111;font-weight:700;border-radius:4px;'; }   // SHIP TO: colour the badge by market (black text)
+    var bg=''; if(kind==='country'&&val){ var cc=String(val).toUpperCase(); var col=(typeof MKT_COLORS!=='undefined'&&MKT_COLORS[cc]); if(col)bg='background:'+col+';color:#111;'; }   // SHIP TO: colour the badge by market (black text); shape from hz-theme.css (v27.483)
     return '<button class="cell-pick" data-po="'+esc(po)+'" data-ep="'+esc(ep)+'" data-field="'+esc(field)+'" data-kind="'+kind+'"'+(bg?' style="'+bg+'"':'')+' title="'+esc(val||'')+'">'+(val?esc(val):'<span class="mut">— <span style="background:#fee2e2;color:#991b1b;font-weight:700;border-radius:3px;padding:0 3px">assign</span></span>')+' ▾</button>'; }
   function bindCellPick(){ document.querySelectorAll('#supply-root .cell-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openCellPick(b); }; }); }
   function openCellPick(btn){ closeShPop();
