@@ -1,3 +1,10 @@
+## v27.501 DEMAND plan elevated (Ben approved mockup): column states, one cell type scale, editable affordance, token tints, bands, name cells, SKU rows, hover
+- **Columns:** actual months on white, every forecast month on a faint blue wash (FY 27/28 blue tint, FY 28/29 violet tint), the current month with a dashed blue left rule; month headers carry an Actual / Current / Forecast tag (the old * prefix is gone).
+- **Cells:** last year 10px grey · growth 11px bold green/red (was blue) · forecast 12.5px bold · revenue 10px muted with growth in colour (new fcrev class replaces inline styling). Literal overrides read as a violet chip. Hover a row and the input shows a hairline box; focus gets the blue ring; placeholder is faint.
+- **Bands and tints:** H1 / H2 / Quarter / FY totals on a light grey band, category header rows a grey uppercase band, category roll-up rows a band with hairlines (beige / grey fills and heavy dark rules retired), ALL CATEGORIES unchanged navy. Sub-category rows separated by hairlines.
+- **Name cells:** sub-category 12.5px bold, rounded expand toggle, sticky column hairline shadow; SKU rows on an off-white ground with an 11px mono code, closed last-year-only rows dimmed. Whole-row hover tint. Anomaly, heat-map, selection and disc highlights keep priority.
+- Display only: forecasts, saves and the buy plan unchanged (snapshot identical). artifact_v16.7.html (7 small hooks) + supply/hz-theme.css.
+
 ## v27.500 Portal: MONEY renamed FINANCE; two-level deep-link slugs (Ben)
 - Section **FINANCE** (was MONEY): Payments · Deposits · Price List.
 - **Deep links** now carry section and tab: `#/orders/pos`, `#/orders/pos/PO-1234`, `#/finance/payments`, `#/finance/pricelist`, `#/samples/samples/SR-45`, `#/product/specs`. A section-only link (`#/finance`) opens that section's default tab. The old one-level links (`#/pos/PO-1234`, `#pricelist`) still resolve, so nothing bookmarked or emailed breaks. Quality Control added to the routable tabs. supply/portal-view.js + supply/portal.html + supply/hz-theme.css.

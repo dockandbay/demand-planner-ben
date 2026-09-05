@@ -403,3 +403,64 @@ body .pv-btn.ghost{color:var(--nav-dim);border-color:rgba(255,255,255,.18)} body
   #pv-wrap #supply-root #pp-tabs{margin:0 -10px 10px;padding:0 10px}
   #pv-wrap #supply-root .pp-sec{padding:12px 11px 10px;font-size:11.5px}
 }
+
+/* ═══ U3b DEMAND plan (v27.501, Ben-approved mockup): column states, cell scale, tints, bands, names, SKU rows, hover ═══ */
+:root{--blue-wash:#f6f9fe;--fy27:#eef3fd;--fy28:#f3effc;--band:#f2f4f8}
+/* 1 · columns: actuals white, forecast wash, current dashed rule; header tags */
+#app td.fctd{background:var(--card);border-left:1px solid var(--line2);padding:3px 3px 1px}
+#app td.fctd.actual{background:var(--card);border-left-color:var(--line2)}
+#app td.fctd.actual.fs26,#app td.fctd.fs26,#app td.fctd.fs27{border-left:2px solid var(--line)}
+#app td.fctd.hz-fc:not(.anomaly-hi):not(.anomaly-lo):not(.plansel){background:var(--blue-wash)}
+#app td.fctd.hz-fc.y27:not(.anomaly-hi):not(.anomaly-lo):not(.plansel){background:var(--fy27)}
+#app td.fctd.hz-fc.y28:not(.anomaly-hi):not(.anomaly-lo):not(.plansel){background:var(--fy28)}
+#app td.fctd.hz-cur{background:var(--card)!important;border-left:2px dashed var(--blue)!important}
+#app tr.sub th{background:var(--card)!important;color:var(--faint);font-size:10.5px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;padding:8px 6px 6px;border-bottom:1px solid var(--line);white-space:nowrap}
+#app tr.sub th.actual-hdr{background:var(--card)!important;color:var(--ink)}
+#app tr.sub th .hz-htag{display:block;font-size:9px;font-weight:700;letter-spacing:.08em;color:var(--faint);margin-top:2px}
+#app tr.sub th.hz-fc-hdr .hz-htag{color:var(--blue)}
+#app tr.sub th.hz-cur-hdr{border-left:2px dashed var(--blue)}
+#app tr.sub th.hz-cur-hdr .hz-htag{color:var(--blue)}
+#app tr.sub th.hz-cur-hdr .hz-htag::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--blue);margin-right:4px;vertical-align:middle}
+#app tr.sub th.stk,#app tr.sub th.stk2{text-align:left}
+/* 2 · one type scale inside the cell */
+#app .fcly{font-size:10px;color:var(--faint)}
+#app .fci{font-size:11px;font-weight:700;border-radius:5px;padding:0 4px;color:var(--muted)}
+#app .fci.pct{color:var(--pos)} #app .fci.pct.neg{color:var(--neg)}
+#app .fci.actual-pct{color:var(--pos);font-weight:700} #app .fci.actual-pct.neg{color:var(--neg)}
+#app .fci.ovr{background:var(--violet-bg);color:var(--violet);border-color:transparent}
+#app .fcr{font-size:12.5px;font-weight:700;color:var(--ink)}
+#app .fcr.actual{color:var(--ink)} #app .fcr.actual.neg{color:var(--neg)}
+#app .fcrev{font-size:10px;text-align:right;padding-right:3px;color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;line-height:1.3}
+#app .gp{color:var(--pos)} #app .rp{color:var(--neg)} #app .fp{color:var(--faint)}
+/* 3 · editing looks editable */
+#app .fci::placeholder{color:var(--faint);opacity:.55;font-weight:500}
+#app tr.sub-row:hover .fcin>.fci:not(.actual-pct){border-color:var(--line);background:var(--card)}
+#app .fci:focus{border-color:var(--blue)!important;box-shadow:0 0 0 3px var(--blue-soft);background:var(--card)!important;outline:none}
+/* 4 · totals as bands, years as tints */
+#app td.totu,#app th.bgt26u,#app th.bgt27u,#app th.bgt28u,#app th.bgtH1u,#app th.bgtH2u{background:var(--band)!important;color:var(--ink);border-left:1px solid var(--line)!important}
+#app td.totu.y27,#app th.bgt27u{background:var(--fy27)!important} #app td.totu.y28,#app th.bgt28u{background:var(--fy28)!important}
+#app td.totu.yH1,#app td.totu.yH2{background:var(--band)!important;color:var(--muted)}
+#app td.ptot,#app td.ptot-q,#app td.ptot-h,#app th.ptot-q,#app th.ptot-h{background:var(--band)!important;border-left:1px solid var(--line)}
+#app td.totr,#app td.totr.y26,#app td.totr.y27,#app .totr.y28{background:var(--band)!important;color:var(--muted)}
+/* 5 · quieter chrome: category header + roll-up bands, hairline sub-rows, navy grand total unchanged */
+#app tr.cat-hdr td{background:var(--band)!important;border-top:1px solid var(--line)!important;border-bottom:1px solid var(--line2)!important;font-size:11.5px;font-weight:800;letter-spacing:.06em;color:var(--muted);padding:8px 10px}
+#app tr.cat-tot td{background:var(--band)!important;border-top:1px solid var(--line)!important;border-bottom:1px solid var(--line)!important;font-weight:700}
+#app tr.cat-tot td.fctd,#app tr.cat-tot td.totu,#app tr.cat-tot td.totr{background:var(--band)!important}
+#app tr.sub-row td{border-top:1px solid var(--line2)!important;border-bottom:1px solid var(--line2)!important}
+#app tr.sub-row.cat-start td{border-top:1px solid var(--line)!important}
+#app tr.grand-tot td.fctd.hz-fc,#app tr.grand-tot td.fctd.hz-cur,#app tr.grand-tot td.totu,#app tr.grand-tot td.ptot-h,#app tr.grand-tot td.ptot-q{background:#16213a!important;border-left-color:#2a3550!important}
+#app tr.grand-tot .fcrev,#app tr.grand-tot .fcly{color:var(--nav-dim)}
+/* 6 · sub-category name cell */
+#app td.stk{box-shadow:1px 0 0 var(--line2)} #app td.stk2{border-right:1px solid var(--line)}
+#app td.stk .hz-subname{font-size:12.5px;font-weight:700;color:var(--ink)}
+#app .sku-toggle{font-size:10px;padding:0 5px;border:1px solid var(--line);border-radius:5px;background:var(--card);color:var(--muted);cursor:pointer;line-height:1.6;font-family:inherit}
+#app .sku-toggle:hover{border-color:var(--faint);color:var(--ink)}
+#app .sku-tier{border-radius:4px;padding:0 4px;font-size:8.5px}
+/* 7 · SKU rows read as children */
+#app tr.sku-inline:not(.subtot-row) td:not(.anom-hi-cell):not(.anom-lo-cell):not(.plansel){background:#fbfcfd!important;border-bottom-color:var(--line2)!important}
+#app tr.sku-inline:not(.subtot-row) td.stk,#app tr.sku-inline:not(.subtot-row) td:first-child{background:#fbfcfd!important}
+#app tr.sku-inline.hz-lyo td{opacity:.72}
+/* 8 · whole-row hover (overlay works over any tint; inline heat / disc paints stay visible underneath) */
+#app tr.sub-row:hover td:not(.stk):not(.stk2){box-shadow:inset 0 0 0 999px rgba(16,24,40,.035)}
+#app tr.sub-row:hover td.stk,#app tr.sub-row:hover td.stk2,#app tr.sku-inline:hover td.stk,#app tr.sku-inline:hover td:first-child{background:var(--hover)!important}
+#app tr.sku-inline:hover td:not(:first-child):not(.stk){box-shadow:inset 0 0 0 999px rgba(16,24,40,.035)}

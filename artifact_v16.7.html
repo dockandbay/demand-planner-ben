@@ -4867,8 +4867,7 @@ function renderRevLine(revVal,lyRev,asp,fy){
   var revYoY=lyRev>0?Math.round((revVal-lyRev)/lyRev*100):null;   // YoY ratio is currency-invariant
   var yoyHtml='';
   if(revYoY!=null){
-    var clr=revYoY>=2?'#15803d':revYoY<=-2?'#A32D2D':'#666';
-    yoyHtml=' <span style="color:'+clr+'">'+(revYoY>=0?'+':'')+revYoY+'%</span>';
+    yoyHtml=' <span class="'+(revYoY>=2?'gp':revYoY<=-2?'rp':'fp')+'">'+(revYoY>=0?'+':'')+revYoY+'%</span>';
   }
   var rt=dispRate(fy), sym=dispSym();   // convert to the display currency (per-FY blended rate)
   var aspAttr='';
@@ -4877,7 +4876,7 @@ function renderRevLine(revVal,lyRev,asp,fy){
     aspAttr=' data-asp-tip="'+aspTipHtml.replace(/"/g,'&quot;')+'" style-cursor="help"';
   }
   var cursorStyle=asp>0?'cursor:help;':'';
-  return '<div style="font-size:8px;text-align:right;padding-right:3px;color:#475569;font-variant-numeric:tabular-nums;white-space:nowrap;line-height:1.3;'+cursorStyle+'"'+aspAttr+'>'
+  return '<div class="fcrev" style="'+cursorStyle+'"'+aspAttr+'>'
     +frFY(revVal,fy)+yoyHtml+'</div>';
 }
 function sumU(a,y){let u=0;for(let m=1;m<=12;m++){const k=ym(y,m);if(a[k])u+=a[k][0];}return u}
@@ -5336,7 +5335,7 @@ function buildHdr(){
   }})();
 
   const r2=document.createElement('tr');r2.className='sub';
-  function s2(txt,cls,data){const e=document.createElement('th');e.textContent=txt;if(cls)e.className=cls;if(data)for(var dk in data)e.dataset[dk]=data[dk];r2.appendChild(e);}
+  function s2(txt,cls,data,tag){const e=document.createElement('th');e.textContent=txt;if(cls)e.className=cls;if(data)for(var dk in data)e.dataset[dk]=data[dk];if(tag){var tg=document.createElement('span');tg.className='hz-htag';tg.textContent=tag;e.appendChild(tg);}r2.appendChild(e);}   // tag = Actual / Current / Forecast (v27.501)
   s2('Subcategory / Channel','stk lft');
   s2('3PL / FBA','stk2');
   s2('U · R','sep2');
@@ -5347,9 +5346,9 @@ function buildHdr(){
   TIME_COLS.forEach(function(tc){
     if(tc.t==='m'){
       var p=pa(tc.m),Y=fyStartOf(tc.m),isAct=isActualMonth(tc.m),first=(tc.m===fyMonths(Y)[0]);
-      s2((isAct?'* ':'')+MN[p.mo-1]+' '+String(p.y).slice(2),(first?'sep2 ':'')+fyBg(Y)+(isAct?' actual-hdr':''));
+      s2(MN[p.mo-1]+' '+String(p.y).slice(2),(first?'sep2 ':'')+fyBg(Y)+(isAct?' actual-hdr':' hz-fc-hdr'),null,isAct?'Actual':'Forecast');
     } else if(tc.t==='fc'){
-      var pf=pa(tc.m);s2(MN[pf.mo-1]+' '+String(pf.y).slice(2),fyBg(fyStartOf(tc.m)));   // current month (holds actuals-to-date + forecast)
+      var pf=pa(tc.m);s2(MN[pf.mo-1]+' '+String(pf.y).slice(2),fyBg(fyStartOf(tc.m))+' hz-cur-hdr',null,'Current');   // current month (holds actuals-to-date + forecast)
     } else {
       // FY total column header — plain label; the expand/minimise control lives in the group bar above (r1).
       var th=document.createElement('th');th.className='sep2 '+((tc.t==='q')?'ptot-q':(tc.t==='h')?'ptot-h':fyTotBg(tc.startY));
@@ -6243,7 +6242,7 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   const gv=IV[gk(s,co,ch)];
   const is27=fym.startsWith('2027');
   const isFcLy=y>=2027; // forecast month whose LY ref is itself a forecast
-  var anom=aflags&&aflags[fym]?(' anomaly-'+aflags[fym].type):'';  const td=document.createElement('td');td.className='fctd'+extraCls+(is27?' y27':y>=2028?' y28':'')+anom;
+  var anom=aflags&&aflags[fym]?(' anomaly-'+aflags[fym].type):'';  const td=document.createElement('td');td.className='fctd hz-fc'+extraCls+(is27?' y27':y>=2028?' y28':'')+anom;
   // per-cell forecast note key + "N" badge (dbl-click the cell to add/view notes)
   var _nk=((typeof SKUM!=='undefined'&&SKUM[s])?'sku':'subcat')+'|'+s+'|'+co+'|'+ch+'|'+fym; td.dataset.nk=_nk;
   var _rhF=cellRailForKey(_nk); if(_rhF){ td.classList.add('has-rail'); td.style.position='relative'; td.insertAdjacentHTML('afterbegin',_rhF); }
@@ -6429,9 +6428,9 @@ function buildDataRow(s,co,ch,x,fu_cache){
   var biIconHtmlSub=renderBIIcon(biSubcat);
   ntd.innerHTML='<div class="nm" style="display:flex;align-items:flex-start;gap:4px">'
     +'<span style="display:flex;align-items:flex-start;gap:4px;min-width:0;flex:1">'
-    +'<button class="sku-toggle" data-s="'+s+'" data-co="'+co+'" data-ch="'+ch+'" style="font-size:9px;padding:0 4px;border:1px solid #d0d0d0;border-radius:3px;background:#f8f8f8;color:#666;cursor:pointer;flex-shrink:0;line-height:1.6;transition:transform 0.1s">'+(isExp?'▾':'▸')+'</button>'
+    +'<button class="sku-toggle" data-s="'+s+'" data-co="'+co+'" data-ch="'+ch+'" style="flex-shrink:0;transition:transform 0.1s">'+(isExp?'▾':'▸')+'</button>'
     +(biIconHtmlSub||'')
-    +'<span style="min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word;line-height:1.2">'+s+'</span>'
+    +'<span class="hz-subname" style="min-width:0;white-space:normal;overflow-wrap:anywhere;word-break:break-word;line-height:1.2">'+s+'</span>'
     +((typeof RUNOFF_SUBS!=='undefined'&&RUNOFF_SUBS.has(s))?'<span title="Discontinued sub-category — selling down remaining stock, then auto-hidden once under 50 units (on-hand + inbound). Turn Active only off to always see it." style="flex-shrink:0;font-size:8px;font-weight:700;letter-spacing:.03em;color:#92400e;background:#fef3c7;border:1px solid #fcd34d;border-radius:3px;padding:0 4px;line-height:1.6;white-space:nowrap">&#8709; RUN-OFF</span>':'')
     +(CF?'':'<span class="chbg" style="flex-shrink:0">'+ch+'</span>')
     +'</span>'
@@ -6480,7 +6479,7 @@ function buildDataRow(s,co,ch,x,fu_cache){
       var _lxC=expAct(s,co,ch,ym(y-1,mo),ly_u), _fxC=expFc(s,co,ch,fym,fcv,a);   // EXPLODED display (v27.470)
       const yoyPct=_lxC.E>0?Math.round((_fxC.E-_lxC.E)/_lxC.E*100):null;
       const yoyStr=yoyPct!=null?(gPct(yoyPct)):'';
-      const fcTd=document.createElement('td');fcTd.className='fctd bg26';
+      const fcTd=document.createElement('td');fcTd.className='fctd bg26 hz-cur';
       // current month is now a single column — carry the cell rail (PP / N / BI / C / R) here (was on the removed actuals cell)
       var _nkC=((typeof SKUM!=='undefined'&&SKUM[s])?'sku':'subcat')+'|'+s+'|'+co+'|'+ch+'|'+fym; fcTd.dataset.nk=_nkC;
       var _rhC=cellRailForKey(_nkC); if(_rhC){ fcTd.classList.add('has-rail'); fcTd.style.position='relative'; fcTd.insertAdjacentHTML('afterbegin',_rhC); }
@@ -8360,8 +8359,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     var skuAF=anomalyFlags(skuFC,s,co,ch);
 
     var tr=document.createElement('tr');
-    tr.className='sku-inline';tr.dataset.parentkey=parentKey;
-    tr.style.cssText='background:#fafafa';
+    tr.className='sku-inline'+(p.lyo?' hz-lyo':'');tr.dataset.parentkey=parentKey;   // ground + dim from hz-theme.css (v27.501)
 
     // Leading cells only (0-7): label | stock | FY(-2) | FY(-1) | YTD | trends | blank | blank.
     // The time region (months + FY totals) is rendered data-driven from TIME_COLS just below.
@@ -8379,7 +8377,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         var _dpTip=p.n?_te(p.n):'';
         if(_bom){ _dpTip+=(_dpTip?'<br><br>':'')+'<b>BOM Explosion:</b><br>'+_bom.map(function(c){return _te(c.sku)+' &times; '+_te(c.qty);}).join('<br>'); }
         td.innerHTML='<div style="padding:2px 4px;text-align:left">'
-          +'<div class="dp-sku-tip" data-sku="'+sku+'" title="Double-click to copy SKU"'+(_dpTip?' data-tip="'+_dpTip.replace(/"/g,'&quot;')+'"':'')+' style="font-size:9px;font-weight:700;color:var(--ink);font-family:monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left'+(_dpTip?';cursor:help':'')+'">'+sku+'</div>'
+          +'<div class="dp-sku-tip" data-sku="'+sku+'" title="Double-click to copy SKU"'+(_dpTip?' data-tip="'+_dpTip.replace(/"/g,'&quot;')+'"':'')+' style="font-size:11px;font-weight:700;color:var(--ink);font-family:ui-monospace,Menlo,monospace;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:left'+(_dpTip?';cursor:help':'')+'">'+sku+'</div>'
           +(p.rep?'<div style="font-size:7px;font-style:italic;color:var(--violet);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="Forecast inherits the sales history of the replaced SKU '+String(p.rep).replace(/"/g,'&quot;')+'">&#8617; from '+String(p.rep).replace(/</g,'&lt;')+'</div>':'')
           +'<div style="display:flex;gap:2px;align-items:center;flex-wrap:wrap">'
           +'<span class="sku-tier '+tierCls+'" style="font-size:7px">'+(p.ti||'C')+'</span>'
@@ -9278,8 +9276,8 @@ function _makeCatTotRow(cat){
       var lyR=cMonthLYRev[m]||0,fcR=isFcCol?cCurFCRev:(cMonthFCRev[m]||0);
       var revYoY=lyR>0?Math.round((fcR-lyR)/lyR*100):null;
       var revYoyHtml='';
-      if(revYoY!=null){var rClr=revYoY>=2?'#15803d':revYoY<=-2?'#A32D2D':'#666';revYoyHtml=' <span style="color:'+rClr+'">'+(revYoY>=0?'+':'')+revYoY+'%</span>';}
-      var revLineHtml=fcR>0?'<div style="font-size:8px;text-align:right;padding-right:3px;color:#475569;font-variant-numeric:tabular-nums;line-height:1.3">'+frFY(fcR,fyOfMonth(m))+revYoyHtml+'</div>':'';
+      if(revYoY!=null){revYoyHtml=' <span class="'+(revYoY>=2?'gp':revYoY<=-2?'rp':'fp')+'">'+(revYoY>=0?'+':'')+revYoY+'%</span>';}
+      var revLineHtml=fcR>0?'<div class="fcrev">'+frFY(fcR,fyOfMonth(m))+revYoyHtml+'</div>':'';
       var _lyS=cSplitLY[m], _tyS=isFcCol?cCurX:cSplitTY[m];   // exploded tooltips (v27.470)
       tadd('<div class="fcin"><div class="fcly'+_msCls(_lyS)+'" style="font-weight:600'+(_lyS&&_lyS.setBoxes>0?';cursor:help':'')+'"'+_msData(_lyS,'Last-year actuals')+'>'+fn(ly)+'</div>'
         +'<div style="font-size:10px;text-align:right;padding-right:3px;font-variant-numeric:tabular-nums" class="'+yoyCls.trim()+'">'+yoyStr+'</div>'
