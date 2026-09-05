@@ -645,13 +645,15 @@
     // ── Grouped navigation (Ben, v27.493): five sections over the existing tabs. The original .rtab[data-pt] tabs and their
     //    handlers are untouched; each is tagged with data-sec and the tab row shows only the active section's tabs (CSS). ──
     var PP_SEC={pos:'orders',shipmentplan:'orders',productions:'orders',payments:'money',deposits:'money',pricelist:'money',samples:'samples',product:'product',specs:'product',quality:'product',timeline:'messages'};
-    var PP_SECS=[['orders','ORDERS'],['money','MONEY'],['samples','SAMPLES'],['product','PRODUCT'],['messages','MESSAGES']];
+    var PP_SECS=[['orders','ORDERS'],['money','MONEY'],['samples','SAMPLES'],['product','PRODUCT']];   // messages live behind the header Inbox button (no top-level tab)
+    var PP_TAB_ORDER=['pos','shipmentplan','productions','payments','deposits','pricelist','samples','product','specs','quality'];
     try{
       var _secRow=document.createElement('div'); _secRow.id='pp-secs';
       _secRow.innerHTML=PP_SECS.map(function(s){ return '<span class="pp-sec" data-sec="'+s[0]+'">'+s[1]+'</span>'; }).join('');
       tabsEl.parentNode.insertBefore(_secRow, tabsEl);
       // tag + reorder the tabs so each section's tabs sit together in section order
-      var _order=[]; PP_SECS.forEach(function(s){ tabsEl.querySelectorAll('.rtab[data-pt]').forEach(function(t){ var sec=PP_SEC[t.dataset.pt]||'orders'; t.dataset.sec=sec; if(sec===s[0])_order.push(t); }); });
+      var _order=[]; tabsEl.querySelectorAll('.rtab[data-pt]').forEach(function(t){ t.dataset.sec=PP_SEC[t.dataset.pt]||'orders'; _order.push(t); });
+      _order.sort(function(a,b){ var ia=PP_TAB_ORDER.indexOf(a.dataset.pt), ib=PP_TAB_ORDER.indexOf(b.dataset.pt); return (ia<0?99:ia)-(ib<0?99:ib); });
       _order.forEach(function(t){ tabsEl.appendChild(t); });
       _secRow.querySelectorAll('.pp-sec').forEach(function(sb){ sb.onclick=function(){ var first=tabsEl.querySelector('.rtab[data-sec="'+sb.dataset.sec+'"]'); if(first)first.click(); }; });
     }catch(e){}
