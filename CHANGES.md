@@ -1,3 +1,8 @@
+## v27.505 Portal Price List: left-aligned columns and cached (Ben)
+- **Left-aligned:** every header and cell in the price-list table, the empty state and the proposal form buttons follow the portal's left-align rule. supply/hz-theme.css + supply/portal.html.
+- **Server cache:** the price-list payload (4 to 5 queries per supplier) is cached per supplier set for 2 minutes (`plPortalDataCached`), shared by the JSON and Excel routes; any price-list write (supplier submit, admin approve / reject / seed / exclude / delete) clears it.
+- **Client cache:** the portal page keeps the last payload for 2 minutes so re-opening the tab renders instantly; cleared on submit. supply/portal.html + server.mjs.
+
 ## v27.504 Portal FIX: Price List tab was not appearing (registered before the portal script had loaded) (Ben)
 - The v27.503 registration ran synchronously while portal-view.js was still downloading, so the addTab hook did not exist yet and the tab was never created. Registration now happens inside the script's load handler, right after mount. supply/portal.html.
 

@@ -467,3 +467,7 @@ body .pv-btn.ghost{color:var(--nav-dim);border-color:rgba(255,255,255,.18)} body
 
 /* v27.502: the old top bar is empty once the nav rows moved out of it */
 #pv-wrap #supply-root .bar:empty{display:none;margin:0}
+
+/* v27.505 (Ben): supplier price list — every column left-aligned */
+#pv-wrap #pl-body table th,#pv-wrap #pl-body table td{text-align:left}
+#pv-wrap #pl-body .pv-empty{text-align:left;padding:14px 0}

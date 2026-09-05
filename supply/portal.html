@@ -36,7 +36,8 @@
 (function(){
   var root=document.getElementById('root');
   function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
-  function api(p,b){ return fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(function(r){return r.json();}); }
+  function api(p,b){ if(p.indexOf('/price-list/')>=0)window.__plData=null;   // a price-list write invalidates the client cache (v27.505)
+    return fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b||{})}).then(function(r){return r.json();}); }
   function get(p){ return fetch(p).then(function(r){ if(r.status===401) throw {auth:true}; return r.json(); }); }
 
   function showLogin(){
@@ -125,7 +126,8 @@
       get('/api/portal/price-list/log').then(function(rows){ rows=(Array.isArray(rows)?rows:[]).filter(function(r){return r.status==='active'||r.status==='rejected';}).slice(0,6); if(!rows.length){host.innerHTML='';return;}
         host.innerHTML='<div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:8px;padding:10px 13px;margin:6px 0 14px;max-width:860px"><div style="font-weight:700;font-size:12px;color:#075985;margin-bottom:5px">📣 Recent decisions on your proposals</div>'+rows.map(function(r){ var lbl=r.scope==='sku'?r.sku:r.price_type; return '<div style="font-size:12px;display:flex;gap:9px;align-items:baseline;padding:2px 0"><span style="width:82px;flex:0 0 auto">'+outcome(r.status)+'</span><b style="flex:0 0 auto">'+esc(lbl||'')+'</b><span style="color:#64748b;flex:1">'+tierStr(r)+'</span><span style="color:#94a3b8;font-size:11px;flex:0 0 auto">'+esc(fd2(r.decided_at))+'</span></div>'; }).join('')+'</div>'; }).catch(function(){ host.innerHTML=''; }); }
     host.innerHTML='<div id="pl-body"><div class="pv-empty">Loading…</div></div>';   // v27.503: inline under FINANCE (the router owns the hash)
-    function load(){ get('/api/portal/price-list').then(render).catch(function(e){ document.getElementById('pl-body').innerHTML='<div class="pv-empty">Could not load price list.</div>'; }); }
+    function load(){ var c=window.__plData; if(c&&(Date.now()-c.t)<120000){ render(c.d); return; }   // client cache: re-opening the tab is instant (v27.505)
+      get('/api/portal/price-list').then(function(d){ window.__plData={t:Date.now(),d:d}; render(d); }).catch(function(e){ document.getElementById('pl-body').innerHTML='<div class="pv-empty">Could not load price list.</div>'; }); }
     function render(d){ var b=document.getElementById('pl-body'); var ents=d.entries||[], pts=d.priceTypes||[], man=d.manualSkus||[], sups=(d.suppliers&&d.suppliers.length?d.suppliers:['']); _prods=d.productions||[]; _cur=d.currentProduction||0;
       var byKey={}, supCcy={}; ents.forEach(function(e){ var k=e.supplier+'|'+e.scope+'|'+(e.scope==='sku'?e.sku:e.price_type); (byKey[k]=byKey[k]||[]).push(e); if(e.currency)supCcy[e.supplier]=e.currency; });
       var typeSkus={}, ptInfo={}; pts.forEach(function(t){ typeSkus[t.price_type]=t.skus||[]; ptInfo[t.price_type]=t; });
@@ -175,7 +177,7 @@
         +'<button class="pl-addtier" style="font-size:12px;padding:2px 9px;border:1px solid #cbd5e1;border-radius:5px;background:#fff;cursor:pointer">+ tier</button>'
         +'<div style="font-size:12px;color:#475569;margin:8px 0 3px">Note to reviewer <span style="color:#94a3b8">(optional)</span></div><textarea class="pl-note" rows="3" placeholder="Any details about this price change request…" style="width:100%;box-sizing:border-box;font-family:inherit;font-size:12px;padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px">'+esc((src&&src.note)||'')+'</textarea>'
         +'<div class="pl-err" style="color:#b91c1c;font-size:12px;font-weight:600;min-height:14px;margin-top:6px"></div>'
-        +'<div style="text-align:right;margin-top:2px"><button class="pl-cancel pv-btn ghost" style="color:#334155;border-color:#cbd5e1;margin-right:6px">Cancel</button><button class="pl-submit pv-btn" style="padding:6px 14px">'+subLbl+'</button></div>';
+        +'<div style="text-align:left;margin-top:2px"><button class="pl-cancel pv-btn ghost" style="color:#334155;border-color:#cbd5e1;margin-right:6px">Cancel</button><button class="pl-submit pv-btn" style="padding:6px 14px">'+subLbl+'</button></div>';
         host.querySelectorAll('.pl-trx').forEach(function(x){x.onclick=function(){readT();tiers.splice(+x.dataset.ti,1);if(!tiers.length)tiers=[{min_qty:1,unit_cost:''}];draw();};});
         host.querySelector('.pl-addtier').onclick=function(){readT();tiers.push({min_qty:'',unit_cost:''});draw();};
         host.querySelectorAll('.pl-mq,.pl-uc').forEach(function(inp){ inp.oninput=validate; });

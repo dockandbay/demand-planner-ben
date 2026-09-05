@@ -838,8 +838,8 @@ app.use(async (req, res, next) => {
 // After any supplier-portal WRITE, drop the cached portal bootstraps so the supplier's next load reflects their edit
 // (tracking, notes, completion, invoice, cost submit…). Cheap — the map holds one entry per active supplier set.
 app.use((req, res, next) => {
-  if (req.method === 'POST' && req.path.startsWith('/api/portal/')) {
-    res.on('finish', () => { try { if (res.statusCode < 400) { _portalCache.clear(); _portalInflight.clear(); } } catch (e) { /* ignore */ } });
+  if (req.method === 'POST' && (req.path.startsWith('/api/portal/') || req.path.startsWith('/api/supply/price-list'))) {
+    res.on('finish', () => { try { if (res.statusCode < 400) { _portalCache.clear(); _portalInflight.clear(); _plCache.clear(); } } catch (e) { /* ignore */ } });   // + price-list cache (v27.505)
   }
   next();
 });
@@ -15481,6 +15481,14 @@ app.get('/api/portal/me', portalAuth, (req, res) => res.json({ email: req.portal
 // ── Supplier portal ▸ Price List (Phase 3 — GATED: only wired in when IS_SANDBOX until Ben confirms) ──
 // The supplier sees their OWN active prices + any changes they've submitted (pending), and can propose changes
 // (new tiers / from a future production) which land as status='pending' for admin approval.
+// Price-list payload cache (v27.505): per supplier set, 2-minute TTL; cleared by the portal/admin write middleware below the
+// POST handlers (any /api/portal/* or /api/supply/price-list* write). The build is 4-5 sequential queries per supplier.
+const _plCache = new Map();
+async function plPortalDataCached(sups) {
+  const key = (sups || []).slice().sort().join('|');
+  const hit = _plCache.get(key); if (hit && Date.now() - hit.t < 120000) return hit.d;
+  const d = await plPortalData(sups); _plCache.set(key, { t: Date.now(), d }); return d;
+}
 async function plPortalData(sups) {
     if (!sups.length) return { entries: [], suppliers: [], priceTypes: [], manualSkus: [], productions: [], currentProduction: 0 };
     const entries = (await pool.query(`
@@ -15526,11 +15534,11 @@ async function plPortalData(sups) {
 }
 app.get('/api/portal/price-list', portalAuth, async (req, res) => {
   if (!IS_SANDBOX) return res.status(404).json({ error: 'not enabled' });
-  try { res.json(await plPortalData(req.portal.suppliers || [])); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { res.json(await plPortalDataCached(req.portal.suppliers || [])); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/portal/price-list/export.xlsx', portalAuth, async (req, res) => {
   if (!IS_SANDBOX) return res.status(404).send('not enabled');
-  try { const buf = await plXlsxBuffer(await plPortalData(req.portal.suppliers || []));
+  try { const buf = await plXlsxBuffer(await plPortalDataCached(req.portal.suppliers || []));
     res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
        .set('Content-Disposition', 'attachment; filename="price-list.xlsx"').set('Cache-Control', 'no-store').send(Buffer.from(buf));
   } catch (e) { log500(e); res.status(500).send('export error: ' + e.message); }
