@@ -20,7 +20,7 @@ window.fetch = (url, opt) => {
   const method = (opt && opt.method) || 'GET';
   calls.push(method + ' ' + url);
   const body = (method === 'POST') ? { ok: true } : [];
-  return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body) });
+  return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(body), text: () => Promise.resolve(JSON.stringify(body)) });   // postJSON reads text() since v27.388 (tolerant parse)
 };
 
 const s = doc.createElement('script'); s.textContent = pv; doc.body.appendChild(s);

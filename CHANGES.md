@@ -1,3 +1,6 @@
+## v27.496 Portal regression test repaired (3 stale checks)
+- tests/portal-inplace.cjs stubbed fetch with json() only; the portal post helper has read text() since v27.388 (tolerant parsing), so the approve callback never ran in the test and 3 checks failed (Approve button removed / approved state / MANAGE badge −1). The stub now provides text() too; all checks pass. No app change.
+
 ## v27.495 DEMAND plan: ALL CATEGORIES row shows revenue growth % in its FY / H1 / H2 / Quarter cells
 - The grand-total row now accumulates a last-year revenue series per month (actual revenue for actual years; prior-year forecast × ASP for forecast-on-forecast years), so its period cells show revenue growth vs last year like the category and sub-category rows. Display only. artifact_v16.7.html.
 
