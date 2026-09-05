@@ -5,6 +5,12 @@
 // PDF subsystem; the live host's default bc renders via the /api/portal asset + label-data endpoints.
 (function(){
   var esc=function(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});};
+  // In-page notice (replaces window.alert, v27.507): a toast pill at the bottom of the screen. kind = 'err' (default, red) | 'ok' (navy).
+  var _toastT=null;
+  function ppNotice(msg,kind){ try{ var el=document.getElementById('pv-toast'); if(!el){ el=document.createElement('div'); el.id='pv-toast'; el.setAttribute('role','status'); document.body.appendChild(el); }
+      el.className=(kind==='ok')?'ok':'err'; el.textContent=String(msg==null?'':msg); el.classList.add('on'); clearTimeout(_toastT); _toastT=setTimeout(function(){ el.classList.remove('on'); }, kind==='ok'?2600:4200); }
+    catch(e){ try{ window.alert(msg); }catch(_){} } }
+  try{ window.ppNotice=ppNotice; }catch(e){}
   var shortUser=function(s){return String(s==null?'':s).replace(/@dockandbay\.com\b/gi,'@');};  // ben@dockandbay.com → ben@ (display only)
   var shortNotes=function(arr){ (arr||[]).forEach(function(n){ if(n){ if(n.body)n.body=shortUser(n.body); if(n.author_email)n.author_email=shortUser(n.author_email); } }); return arr; };
   function money(v){return v==null||v===''?'':Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});}
@@ -207,13 +213,13 @@
   // SHIPS-WITH label → A4 print mould (4-up, carton size), one PDF
   function dlShipsWith(po,btn,base,air){ var orig=btn?btn.textContent:''; if(btn)btn.disabled=true;
     fetch((base||'/api/supply/ships-with/')+encodeURIComponent(po)).then(function(r){return r.json();}).then(function(d){
-      if(!d||d.error){ if(btn){btn.textContent=orig;btn.disabled=false;} alert((d&&d.error)||'Could not load ships-with data'); return; }
+      if(!d||d.error){ if(btn){btn.textContent=orig;btn.disabled=false;} ppNotice((d&&d.error)||'Could not load ships-with data'); return; }
       Promise.all([fetchImgDataUri('/api/portal/asset/gotham-book'),fetchImgDataUri('/api/portal/asset/gotham-bold')]).then(function(a){
         var opts={fontBook:a[0],fontBold:a[1],air:!!air};
-        preloadFonts(opts).then(function(){ rasterizeSVGCanvas(buildShipsWithSVG(d,opts),2.5,function(cv){ if(btn){btn.textContent=orig;btn.disabled=false;} if(!cv){alert('Could not render label');return;}
-          cv.toBlob(function(jb){ if(!jb){alert('Could not encode label');return;} jb.arrayBuffer().then(function(ab){ bcDownloadBlob((air?'AIRFREIGHT-':'SHIPSWITH-')+zipSafe(po)+'_A4.pdf', new Blob([pdfA4(new Uint8Array(ab),cv.width,cv.height,MOLD_4)],{type:'application/pdf'})); }); },'image/jpeg',0.92); }); });
+        preloadFonts(opts).then(function(){ rasterizeSVGCanvas(buildShipsWithSVG(d,opts),2.5,function(cv){ if(btn){btn.textContent=orig;btn.disabled=false;} if(!cv){ppNotice('Could not render label');return;}
+          cv.toBlob(function(jb){ if(!jb){ppNotice('Could not encode label');return;} jb.arrayBuffer().then(function(ab){ bcDownloadBlob((air?'AIRFREIGHT-':'SHIPSWITH-')+zipSafe(po)+'_A4.pdf', new Blob([pdfA4(new Uint8Array(ab),cv.width,cv.height,MOLD_4)],{type:'application/pdf'})); }); },'image/jpeg',0.92); }); });
       });
-    }).catch(function(){ if(btn){btn.textContent=orig;btn.disabled=false;} alert('Could not load ships-with data'); }); }
+    }).catch(function(){ if(btn){btn.textContent=orig;btn.disabled=false;} ppNotice('Could not load ships-with data'); }); }
   // v2 barcode label — product (landscape) matches the OUTPUT artwork; carton/inner go to buildCartonSVG
   function buildLabelSVG(kind,r,opts){ opts=opts||{};
     if(kind==='crossdock') return buildCrossdockSVG(r,opts);
@@ -262,7 +268,7 @@
   // warn if no batch is selected (label's BATCH / DATE OF PRODUCTION will be blank) — proceed/cancel
   function confirmNoBatch(batch){ return batch ? true : window.confirm('No BATCH selected — the label’s BATCH and DATE OF PRODUCTION will be blank. Download anyway?'); }
   function bcMakeLabel(kind,r,batch,rrp){ if(!r||!confirmNoBatch(batch))return; bcGatherAssets(kind,r,batch,rrp,function(opts){
-    rasterizeSVG(buildLabelSVG(kind,r,opts),2,function(blob){ if(!blob){ alert('Could not render label PNG'); return; } bcDownloadBlob(kindPrefix(kind)+r.sku+'_label.png',blob); }); }); }
+    rasterizeSVG(buildLabelSVG(kind,r,opts),2,function(blob){ if(!blob){ ppNotice('Could not render label PNG'); return; } bcDownloadBlob(kindPrefix(kind)+r.sku+'_label.png',blob); }); }); }
   // ---- A4 merge sheet (PDF) — exact cell rects from the PSD molds (px @ 300 DPI, page 2480×3505) ----
   var MOLD_4=[[1256,59,1178,1652],[49,60,1178,1652],[1251,1738,1178,1652],[44,1739,1178,1652]];
   var MOLD_36=[[76,89,564,370],[663,89,564,370],[1253,89,564,370],[1840,89,564,370],[76,461,564,370],[663,461,564,370],[1253,461,564,370],[1840,461,564,370],[76,830,564,370],[663,830,564,370],[1253,830,564,370],[1840,830,564,370],[76,1200,564,370],[663,1200,564,370],[1253,1200,564,370],[1840,1200,564,370],[76,1569,564,370],[663,1569,564,370],[1253,1569,564,370],[1840,1569,564,370],[76,1941,564,370],[663,1941,564,370],[1253,1941,564,370],[1840,1941,564,370],[76,2310,564,370],[663,2310,564,370],[1253,2310,564,370],[1840,2310,564,370],[76,2680,564,370],[663,2680,564,370],[1253,2680,564,370],[1840,2680,564,370],[76,3049,564,370],[663,3049,564,370],[1253,3049,564,370],[1840,3049,564,370]];
@@ -322,8 +328,8 @@
     push(xref); push('trailer\n<< /Size '+(total+1)+' /Root 1 0 R >>\nstartxref\n'+xo+'\n%%EOF');
     var out=new Uint8Array(len),o=0; parts.forEach(function(u){ out.set(u,o); o+=u.length; }); return out; }
   function bcMakeSheet(kind,r,batch,rrp){ if(!r||!confirmNoBatch(batch))return; var cells=kind==='product'?MOLD_36:MOLD_4;
-    bcGatherAssets(kind,r,batch,rrp,function(opts){ rasterizeSVGCanvas(buildLabelSVG(kind,r,opts),2.5,function(cv){ if(!cv){ alert('Could not render label'); return; }
-      cv.toBlob(function(jb){ if(!jb){ alert('Could not encode label'); return; } jb.arrayBuffer().then(function(ab){
+    bcGatherAssets(kind,r,batch,rrp,function(opts){ rasterizeSVGCanvas(buildLabelSVG(kind,r,opts),2.5,function(cv){ if(!cv){ ppNotice('Could not render label'); return; }
+      cv.toBlob(function(jb){ if(!jb){ ppNotice('Could not encode label'); return; } jb.arrayBuffer().then(function(ab){
         var pdf=pdfA4(new Uint8Array(ab),cv.width,cv.height,cells); bcDownloadBlob(kindPrefix(kind)+r.sku+'_A4.pdf', new Blob([pdf],{type:'application/pdf'})); }); },'image/jpeg',0.92); }); }); }
   // ---- ZIP (STORE / no compression — CSP-safe, no lib) for the "download all" batch ----
   function crc32(buf){ var t=crc32._t; if(!t){ t=crc32._t=[]; for(var n=0;n<256;n++){ var c=n; for(var k=0;k<8;k++) c=(c&1)?(0xEDB88320^(c>>>1)):(c>>>1); t[n]=c>>>0; } }
@@ -343,7 +349,7 @@
   // crossdock labels: A4 4-up box label per crossdock SKU, PO# / sales-order# / client overlaid → ZIP of PDFs
   function bcDownloadCrossdock(rows,po,dispatchOrder,client,address,btn,zipname){
     var items=rows.filter(function(r){ return r.carton_barcode||r.product_barcode||r.inner_barcode; });
-    if(!items.length){ alert('No crossdock SKUs with a barcode on this PO'); return; }
+    if(!items.length){ ppNotice('No crossdock SKUs with a barcode on this PO'); return; }
     var orig=btn?btn.textContent:''; if(btn)btn.disabled=true;
     Promise.all([fetchImgDataUri('/api/portal/asset/gotham-book'),fetchImgDataUri('/api/portal/asset/gotham-bold'),fetchImgDataUri('/api/portal/asset/db')]).then(function(a){
       var base={po:po,dispatchOrder:dispatchOrder,client:client,address:address,fontBook:a[0],fontBold:a[1],dbUri:a[2]};
@@ -352,7 +358,7 @@
           var r=items[i++]; if(btn)btn.textContent='Rendering '+i+'/'+items.length+'…';
           rasterizeSVGCanvas(buildLabelSVG('crossdock',r,base),2.5,function(cv){ if(!cv)return next();
             cv.toBlob(function(jb){ if(!jb)return next(); jb.arrayBuffer().then(function(ab){ pages.push({jpeg:new Uint8Array(ab),imgW:cv.width,imgH:cv.height}); next(); }); },'image/jpeg',0.92); }); }
-        function finish(){ if(btn){btn.textContent=orig;btn.disabled=false;} if(!pages.length){alert('Nothing rendered');return;}
+        function finish(){ if(btn){btn.textContent=orig;btn.disabled=false;} if(!pages.length){ppNotice('Nothing rendered');return;}
           var name=String(zipname||'crossdock_labels').replace(/\.zip$/i,'')+'.pdf';   // one consolidated PDF (no zip)
           bcDownloadBlob(name,new Blob([pdfA4Multi(pages,MOLD_4)],{type:'application/pdf'})); }
         next();
@@ -363,7 +369,7 @@
   // download A4 print-mould PDFs (one per SKU per kind: product 36-up, carton/inner 4-up) → ZIP. Used by the portal.
   function bcDownloadSheets(rows,kinds,zipname,btn){
     var items=rows.filter(function(r){ return kinds.some(function(k){ return rowHasKind(r,k); }); });
-    if(!items.length){ alert('No barcodes here'); return; }
+    if(!items.length){ ppNotice('No barcodes here'); return; }
     // batch + production date ride on the rows (server stamps them from ?batch / PO) → print on the label
     var _b=items[0]||{}; var batch=_b.batch?{batch:_b.batch, batch_date:_b.batch_date}:null;
     var orig=btn?btn.textContent:''; if(btn)btn.disabled=true;
@@ -379,7 +385,7 @@
             function nk(){ if(ki>=kp.length) return next(); var kind=kp[ki++]; var opts={}; for(var x in base)opts[x]=base[x]; opts.swatchUri=sw; var cells=kind==='product'?MOLD_36:MOLD_4;
               rasterizeSVGCanvas(buildLabelSVG(kind,r,opts),2.5,function(cv){ if(!cv)return nk(); cv.toBlob(function(jb){ if(!jb)return nk(); jb.arrayBuffer().then(function(ab){ files.push({name:kindPrefix(kind)+zipSafe(r.sku)+'_A4.pdf',data:pdfA4(new Uint8Array(ab),cv.width,cv.height,cells)}); nk(); }); },'image/jpeg',0.92); }); }
             nk(); }); }
-        function finish(){ if(btn){btn.textContent=orig;btn.disabled=false;} if(!files.length){alert('Nothing rendered');return;} bcDownloadBlob(zipname,new Blob([zipStore(files)],{type:'application/zip'})); }
+        function finish(){ if(btn){btn.textContent=orig;btn.disabled=false;} if(!files.length){ppNotice('Nothing rendered');return;} bcDownloadBlob(zipname,new Blob([zipStore(files)],{type:'application/zip'})); }
         next();
       });
     }); }
@@ -602,7 +608,7 @@
         var nv=anonText(v); if(nv!==v)ch.push([n,nv]); }
       ch.forEach(function(c){ c[0].nodeValue=c[1]; }); }
     var by=STATE.by, sid=STATE.sid;
-    var BC=opts.bc||(typeof bcDownloadSheets==='function'?{sheets:bcDownloadSheets,crossdock:bcDownloadCrossdock}:{placeholder:true,note:function(){alert('Labels unavailable.');}});
+    var BC=opts.bc||(typeof bcDownloadSheets==='function'?{sheets:bcDownloadSheets,crossdock:bcDownloadCrossdock}:{placeholder:true,note:function(){ppNotice('Labels unavailable.');}});
     var _ppData=null, PORTAL_TAB='pos', PORTAL_PO_ST=null, _ppOpenPO=null, _ppOpenProd=null;   // _ppOpenPO / _ppOpenProd: item to auto-open after switching to its tab
     // ── Hash router: shareable deep links. #/<tab> for menus; #/<tab>/<ref> for a specific PO / product / sample /
     // shipment (e.g. #/pos/PO-123, #/product/SS27-TOWEL-BL-02, #/samples/SR-45). Applied on load + hashchange.
@@ -689,17 +695,17 @@
           var cd=r.headers.get('content-disposition')||''; var fm=/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(cd); var fn=fm?decodeURIComponent(fm[1]):'invoice.xlsx';
           return r.blob().then(function(b){ var u=URL.createObjectURL(b); var a=document.createElement('a'); a.href=u; a.download=fn; document.body.appendChild(a); a.click(); setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(u); },120); }); })
         .then(function(){ if(btn){ btn.disabled=false; btn.textContent=t; } })
-        .catch(function(e){ if(btn){ btn.disabled=false; btn.textContent=t; } alert('Could not generate the invoice: '+(e&&e.message||e)); }); }
+        .catch(function(e){ if(btn){ btn.disabled=false; btn.textContent=t; } ppNotice('Could not generate the invoice: '+(e&&e.message||e)); }); }
     if(!rootEl._invBound){ rootEl._invBound=1; rootEl.addEventListener('click', function(e){
       var fb=e.target.closest('.sp-fob-flag');   // FOB timeline "Flag" — delegated so it survives the note-list re-render
       if(fb){ e.preventDefault(); if(!EP.escalate)return; var msg=fb.dataset.msg||''; if(!msg)return; if(!confirm('Email this note to the supply planner?'))return; fb.disabled=true; fb.textContent='Sending…';
-        postJSON(EP.escalate,{kind:'po',ref:fb.dataset.po,message:msg,initiator:'supplier'},function(j){ fb.textContent='✓ Escalated'; if(j&&j.sandbox)alert('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); return; }
+        postJSON(EP.escalate,{kind:'po',ref:fb.dataset.po,message:msg,initiator:'supplier'},function(j){ fb.textContent='✓ Escalated'; if(j&&j.sandbox)ppNotice('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); return; }
       var b=e.target.closest('.pp-ship-inv,.pp-po-inv'); if(!b)return; e.preventDefault();
       if(b.classList.contains('pp-ship-inv')) dlInvoice((EP.shipmentInvoice||'/api/invoice/shipment/')+encodeURIComponent(b.dataset.ref), b);
       else dlInvoice((EP.poInvoice||'/api/invoice/po/')+encodeURIComponent(b.dataset.po), b); }); }
     function postJSON(ep,b2,cb){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b2)})
       .then(function(r){ return r.text().then(function(t){ try{ return t?JSON.parse(t):{}; }catch(_){ return r.ok?{}:{error:'Server error ('+r.status+')'}; } }); })   // tolerate empty / non-JSON (e.g. a 404 HTML page) — don't throw the cryptic Safari parse error
-      .then(function(j){ if(j&&j.error){alert(j.error);return;} cb&&cb(j); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }
+      .then(function(j){ if(j&&j.error){ppNotice(j.error);return;} cb&&cb(j); }).catch(function(e){ ppNotice('Failed: '+(e&&e.message||e)); }); }
     // GET that tolerates empty / non-JSON (404 HTML etc.) — returns [] instead of throwing Safari's "did not match the expected pattern"
     function getJSON(url){ return fetch(url).then(function(r){ return r.text().then(function(t){ try{ return t?JSON.parse(t):[]; }catch(_){ return []; } }); }); }
     // Should the INVOICE action fire for this PO? Rules (Ben): never on FUTURE POs; never once an invoice value is
@@ -1151,8 +1157,8 @@
           if(j&&j.date_note&&typeof ppShipTimeline==='function')ppShipTimeline(ref); }); }
       scope.querySelectorAll('.sp-e-carrier, .sp-e-trk, .sp-e-date').forEach(function(inp){ inp.onchange=function(){ saveShipD(inp.dataset.ref); }; });
       scope.querySelectorAll('.sp-e-status').forEach(function(sel){ sel.onchange=function(){ var sh=sel.value==='Shipping'; sel.style.background=sh?'#dcfce7':'#ffedd5'; sel.style.color=sh?'#15803d':'#9a3412'; sel.style.borderColor=sh?'#86efac':'#fdba74'; saveShipD(sel.dataset.ref); }; });
-      scope.querySelectorAll('.sp-chg-go').forEach(function(btn){ btn.onclick=function(){ var ref=btn.dataset.ref, cEl=scope.querySelector('.sp-chg-cost[data-ref="'+esq(ref)+'"]'), dEl=scope.querySelector('.sp-chg-desc[data-ref="'+esq(ref)+'"]'); var fc=Number(cEl&&cEl.value)||0; if(fc<=0){ alert('Enter a freight cost greater than 0.'); return; }
-        btn.disabled=true; postJSON(EP.shipmentCharge,{shipment_ref:ref,freight_cost:fc,description:(dEl&&dEl.value)||null},function(j){ btn.disabled=false; if(j&&j.error){ alert('Failed: '+j.error); return; } if(cEl)cEl.value=''; if(dEl)dEl.value='';
+      scope.querySelectorAll('.sp-chg-go').forEach(function(btn){ btn.onclick=function(){ var ref=btn.dataset.ref, cEl=scope.querySelector('.sp-chg-cost[data-ref="'+esq(ref)+'"]'), dEl=scope.querySelector('.sp-chg-desc[data-ref="'+esq(ref)+'"]'); var fc=Number(cEl&&cEl.value)||0; if(fc<=0){ ppNotice('Enter a freight cost greater than 0.'); return; }
+        btn.disabled=true; postJSON(EP.shipmentCharge,{shipment_ref:ref,freight_cost:fc,description:(dEl&&dEl.value)||null},function(j){ btn.disabled=false; if(j&&j.error){ ppNotice('Failed: '+j.error); return; } if(cEl)cEl.value=''; if(dEl)dEl.value='';
           var list=scope.querySelector('.sp-chg-list[data-ref="'+esq(ref)+'"]'); if(list){ fetch(EP.shipmentChargesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(cs){ list.innerHTML=(Array.isArray(cs)&&cs.length)?cs.map(function(c){var t=(Number(c.freight_cost)||0)+(Number(c.product_cost)||0);return '<div class="tiny" style="margin:2px 0">'+money(t)+(c.description?' · '+esc(c.description):'')+'</div>';}).join(''):'<span class="mut tiny">No charges yet.</span>'; }); } }); }; });
       scope.querySelectorAll('.pp-go-po').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); close(); PORTAL_TAB='pos'; PORTAL_PO_Q=b.dataset.po; _ppOpenPO=b.dataset.po; ppSetHash('pos',b.dataset.po); renderPP(); }; });
       scope.querySelectorAll('.sp-shiplabel').forEach(function(btn){ btn.onclick=function(){ dlShipsWith(btn.dataset.po, btn, EP.shipsWith); }; });
@@ -1279,11 +1285,11 @@
         +'<div class="tw" style="max-height:calc(100vh - 220px)"><table class="pp-tbl"><thead><tr>'+th+'</tr></thead><tbody>'+body+'</tbody></table></div>'; }
     function prodBatchBarcodeDl(kind,btn){ if(!PORTAL_PROD_BATCH)return; if(BC.placeholder){BC.note();return;} var orig=btn.textContent; btn.disabled=true; btn.textContent='Preparing…';
       fetch(EP.labelData+'?batch='+encodeURIComponent(PORTAL_PROD_BATCH)+'&supplier='+encodeURIComponent(STATE.supplierName)).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false; btn.textContent=orig;
-        if(rows&&rows.error){alert(rows.error);return;} if(!rows||!rows.length){alert('No '+kind+' barcodes found for batch '+PORTAL_PROD_BATCH);return;}
-        BC.sheets(rows,[kind],'batch_'+PORTAL_PROD_BATCH+'_'+kind+'_barcodes.zip',btn); }).catch(function(){alert('Could not load barcodes');btn.disabled=false;btn.textContent=orig;}); }
+        if(rows&&rows.error){ppNotice(rows.error);return;} if(!rows||!rows.length){ppNotice('No '+kind+' barcodes found for batch '+PORTAL_PROD_BATCH);return;}
+        BC.sheets(rows,[kind],'batch_'+PORTAL_PROD_BATCH+'_'+kind+'_barcodes.zip',btn); }).catch(function(){ppNotice('Could not load barcodes');btn.disabled=false;btn.textContent=orig;}); }
     function downloadProductionPlan(){
-      var bp=prodBatchPOs(); if(!bp.length){ alert('No POs in that batch.'); return; }
-      var d=prodPivotData(bp), poList=d.poList; if(!d.skus.length){ alert('No SKUs ordered in that batch.'); return; }
+      var bp=prodBatchPOs(); if(!bp.length){ ppNotice('No POs in that batch.'); return; }
+      var d=prodPivotData(bp), poList=d.poList; if(!d.skus.length){ ppNotice('No SKUs ordered in that batch.'); return; }
       var pmeta={}; bp.forEach(function(p){ pmeta[p.po]={co:p.country||'',branch:p.branch||'',sw:(p.ships_with?p.ships_with+(p.ships_with_supplier?' — '+p.ships_with_supplier:''):''),pe:p.prod_end||'',client:p.client||'',so:p.sales_order_ref||''}; });
       var CO_STYLE={UK:1,US:2,AU:3,EU:4};
       var LEFT=7, pad=function(v){ var a=new Array(LEFT-1); for(var i=0;i<a.length;i++)a[i]=''; return [v].concat(a); };
@@ -1456,9 +1462,9 @@
                 postJSON(EP.escalate,{kind:'shipment',ref:ref,message:'Escalation requested for shipment '+ref,initiator:'supplier',set_escalated:true,post_note:true},function(j){ _se.textContent='✓ Escalated';
                   var ent=(_ppData.shipmentPlan||[]).filter(function(x){return x.shipment_ref===ref;})[0]; if(ent)ent.escalated=true; setShipBadge&&setShipBadge();   // reflect the new escalated status (filterable)
                   ppShipTimeline(ref);   // re-render so the "<user> escalated this shipment" note appears on the timeline
-                  if(j&&j.sandbox)alert('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); };
+                  if(j&&j.sandbox)ppNotice('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); };
               var _fn=box.querySelector('.sp-flag-note'); if(_fn)_fn.onclick=function(){ var msg=_fn.dataset.msg||''; if(!msg)return; if(!confirm('Email this note to the supply planner?'))return; _fn.disabled=true; _fn.textContent='Sending…';
-                postJSON(EP.escalate,{kind:'shipment',ref:_fn.dataset.ref,message:msg,initiator:'supplier'},function(j){ _fn.textContent='✓ Escalated'; if(j&&j.sandbox)alert('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); };
+                postJSON(EP.escalate,{kind:'shipment',ref:_fn.dataset.ref,message:msg,initiator:'supplier'},function(j){ _fn.textContent='✓ Escalated'; if(j&&j.sandbox)ppNotice('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); };
               // opening the timeline marks Dock&Bay notes read → clears this shipment's notification
               var ent=(_ppData.shipmentPlan||[]).filter(function(x){return x.shipment_ref===ref;})[0];
               if(EP.shipmentNotesRead&&ent&&(ent.unread_dnb||0)>0){ postJSON(EP.shipmentNotesRead,{shipment_ref:ref},function(){ ent.unread_dnb=0; setShipBadge(); var bd=rootEl.querySelector('.sp-shipbadge[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(bd)bd.innerHTML=''; }); }
@@ -1557,7 +1563,7 @@
               det.innerHTML=ppSampleCard(s); wireSampleCard(det, id); }
             var rb=body.querySelector('.ps-rowbadge[data-id="'+id+'"]'); if(rb)rb.innerHTML=sampRowBadgeHtml(s);
             setSampBadge(); }
-          function ppBadgeHtml(n){ return n?'<span style="background:var(--neg);color:#fff;border-radius:8px;font-size:10.5px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
+          function ppBadgeHtml(n){ return n?'<span class="ex-badge">'+n+'</span>':''; }   // standard badge class (theme-styled; the section-row counter reads it) v27.507
           // Purchase Orders top-menu badge = open supplier ACTIONS across all POs. Deliberately EXCLUDES the
           // per-PO "no shipment yet" term (a passive state, not an action — it would show ~1 per in-production PO).
           function setPosBadge(){
@@ -1600,8 +1606,8 @@
             // Contents (bulk SKUs + product-development samples) — replace-all writes, then a light contents-only
             // refresh (no full bootstrap reload) so the card updates silently.
             function loadContents(cb){ getJSON(EP.sampleContentsBase+id+'/contents').then(function(c){ var s=sampById(id); if(s&&c&&!c.error){ s.lines=c.lines||[]; s.dev_samples=c.dev_samples||[]; } refreshSampleCard(id); cb&&cb(); }); }
-            function saveLines(lines,cb){ postJSON(EP.sampleContentsBase+id+'/lines',{lines:lines},function(j){ if(j&&j.error){alert(j.error);return;} loadContents(cb); }); }
-            function saveDev(devs,cb){ postJSON(EP.sampleContentsBase+id+'/dev-samples',{dev_samples:devs},function(j){ if(j&&j.error){alert(j.error);return;} loadContents(cb); }); }
+            function saveLines(lines,cb){ postJSON(EP.sampleContentsBase+id+'/lines',{lines:lines},function(j){ if(j&&j.error){ppNotice(j.error);return;} loadContents(cb); }); }
+            function saveDev(devs,cb){ postJSON(EP.sampleContentsBase+id+'/dev-samples',{dev_samples:devs},function(j){ if(j&&j.error){ppNotice(j.error);return;} loadContents(cb); }); }
             scope.querySelectorAll('.samp-lqty').forEach(function(inp){ inp.onchange=function(){ var s=sampById(id); var lines=(s.lines||[]).map(function(l){return {sku:l.sku,qty:l.sku===inp.dataset.sku?(Number(inp.value)||1):l.qty};}); saveLines(lines); }; });
             scope.querySelectorAll('.samp-lrm').forEach(function(a){ a.onclick=function(){ var s=sampById(id); var lines=(s.lines||[]).filter(function(l){return l.sku!==a.dataset.sku;}).map(function(l){return {sku:l.sku,qty:l.qty};}); saveLines(lines); }; });
             scope.querySelectorAll('.samp-dqty').forEach(function(inp){ inp.onchange=function(){ var s=sampById(id); var devs=(s.dev_samples||[]).map(function(d){return {id:d.id,qty:String(d.id)===inp.dataset.id?(Number(inp.value)||1):d.qty};}); saveDev(devs); }; });
@@ -1612,23 +1618,23 @@
                   var newDevs=(s2.dev_samples||[]).map(function(d){return {id:d.id,qty:d.qty};}).concat(devs);
                   var newLines=(s2.lines||[]).map(function(l){return {sku:l.sku,qty:l.qty};}).concat(skus);
                   function afterDev(){ if(!skus.length){ loadContents(); return; } saveLines(newLines); }
-                  if(devs.length){ postJSON(EP.sampleContentsBase+id+'/dev-samples',{dev_samples:newDevs},function(j){ if(j&&j.error){alert(j.error);return;} afterDev(); }); } else afterDev(); });
+                  if(devs.length){ postJSON(EP.sampleContentsBase+id+'/dev-samples',{dev_samples:newDevs},function(j){ if(j&&j.error){ppNotice(j.error);return;} afterDev(); }); } else afterDev(); });
               } else { pk.style.display='none'; pk.innerHTML=''; } };
-            var ac=scope.querySelector('.samp-accept'); if(ac)ac.onclick=function(){ ac.disabled=true; postJSON(EP.sampleAccept,{id:id},function(j){ if(j&&j.error){alert(j.error);ac.disabled=false;return;} var s=sampById(id); if(s){ s.accepted=true; s.change_requested=false; if(!s.tracking_code && s.status_calc!=='Shipped' && s.status_calc!=='Charge to review') s.status_calc='In production'; } refreshSampleCard(id); }); };
+            var ac=scope.querySelector('.samp-accept'); if(ac)ac.onclick=function(){ ac.disabled=true; postJSON(EP.sampleAccept,{id:id},function(j){ if(j&&j.error){ppNotice(j.error);ac.disabled=false;return;} var s=sampById(id); if(s){ s.accepted=true; s.change_requested=false; if(!s.tracking_code && s.status_calc!=='Shipped' && s.status_calc!=='Charge to review') s.status_calc='In production'; } refreshSampleCard(id); }); };
             var save=scope.querySelector('.samp-save'); if(save)save.onclick=function(){ var ps=scope.querySelector('.samp-prod'),ex=scope.querySelector('.samp-exp'),tk=scope.querySelector('.samp-trk'),cr=scope.querySelector('.samp-car');
               var ev=(ex&&ex.value)||null,pv=(ps&&ps.value)||null,tv=(tk&&tk.value)||null,cv=(cr&&cr.value)||null;
               postJSON(EP.sampleUpdate,{id:id,supplier_expected_completion:ev,tracking_code:tv,carrier:cv,production_status:pv},function(){ var s=sampById(id); if(s){s.supplier_expected=ev||'';s.production_status=pv||'';s.tracking_code=tv||'';s.carrier=cv||'';} refreshSampleCard(id); }); };
             var save2=scope.querySelector('.samp-save-2'); if(save2)save2.onclick=function(){ var b={id:id}, F=['recipient_company','first_name','last_name','address_line1','address_line2','city','region','postcode','country','phone','tracking_code','carrier'];
               F.forEach(function(f){ var el=scope.querySelector('.s2-'+f); b[f+'_2']=(el&&el.value)||null; });
               save2.disabled=true; var o=save2.textContent; save2.textContent='Saving…';
-              postJSON(EP.sampleUpdate,b,function(j){ if(j&&j.error){ save2.disabled=false; save2.textContent=o; alert(j.error); return; } var s=sampById(id); if(s){ F.forEach(function(f){ s[f+'_2']=b[f+'_2']||''; }); } save2.textContent='✓ Saved'; setTimeout(function(){ refreshSampleCard(id); },700); }); };
+              postJSON(EP.sampleUpdate,b,function(j){ if(j&&j.error){ save2.disabled=false; save2.textContent=o; ppNotice(j.error); return; } var s=sampById(id); if(s){ F.forEach(function(f){ s[f+'_2']=b[f+'_2']||''; }); } save2.textContent='✓ Saved'; setTimeout(function(){ refreshSampleCard(id); },700); }); };
             // completion date + status auto-save silently on change (no reload / no screen refresh)
             var sexp=scope.querySelector('.samp-exp'); if(sexp)sexp.onchange=function(){ var v=sexp.value||null; postJSON(EP.sampleUpdate,{id:id,supplier_expected_completion:v},function(){ var s=sampById(id); if(s)s.supplier_expected=v||''; refreshSampleCard(id); }); };
             var sprod=scope.querySelector('.samp-prod'); if(sprod)sprod.onchange=function(){ var v=sprod.value||null; postJSON(EP.sampleUpdate,{id:id,production_status:v},function(){ var s=sampById(id); if(s)s.production_status=v||''; refreshSampleCard(id); }); };
-            var ch=scope.querySelector('.samp-charge'); if(ch)ch.onclick=function(){ var f=scope.querySelector('.samp-cf').value,p=scope.querySelector('.samp-cp').value,d=scope.querySelector('.samp-cd').value; if(!f&&!p){alert('Enter a freight and/or product cost.');return;} ch.disabled=true; postJSON(EP.sampleCharge,{id:id,freight_cost:Number(f)||0,product_cost:Number(p)||0,description:d||null},function(j){ if(j&&j.error){alert(j.error);ch.disabled=false;return;} var s=sampById(id); if(s)s.charges=(s.charges||[]).concat([{status:'pending',freight_cost:Number(f)||0,product_cost:Number(p)||0,description:d||null}]); refreshSampleCard(id); }); };   // silent: add the charge in place, no full reload
+            var ch=scope.querySelector('.samp-charge'); if(ch)ch.onclick=function(){ var f=scope.querySelector('.samp-cf').value,p=scope.querySelector('.samp-cp').value,d=scope.querySelector('.samp-cd').value; if(!f&&!p){ppNotice('Enter a freight and/or product cost.');return;} ch.disabled=true; postJSON(EP.sampleCharge,{id:id,freight_cost:Number(f)||0,product_cost:Number(p)||0,description:d||null},function(j){ if(j&&j.error){ppNotice(j.error);ch.disabled=false;return;} var s=sampById(id); if(s)s.charges=(s.charges||[]).concat([{status:'pending',freight_cost:Number(f)||0,product_cost:Number(p)||0,description:d||null}]); refreshSampleCard(id); }); };   // silent: add the charge in place, no full reload
             var np=scope.querySelector('.samp-note-post'); if(np)np.onclick=function(){ var inp=scope.querySelector('.samp-note-in'); var v=(inp.value||'').trim(); if(!v)return; postJSON(EP.sampleNote,{id:id,body:v,author_kind:EP.sampleNoteAuthorKind,author_email:EP.sampleNoteAuthorEmail},function(){ inp.value=''; ppSampleTimeline(id); }); };
             var af=scope.querySelector('.ps-att-file'), au=scope.querySelector('.ps-att-up');
-            if(au)au.onclick=function(){ var f=af&&af.files&&af.files[0]; if(!f){alert('Choose a file to upload.');return;} au.disabled=true; var rd=new FileReader(); rd.onload=function(){ postJSON(EP.sampleAttachment,{id:id,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result)},function(){ reload(); }); }; rd.readAsDataURL(f); };
+            if(au)au.onclick=function(){ var f=af&&af.files&&af.files[0]; if(!f){ppNotice('Choose a file to upload.');return;} au.disabled=true; var rd=new FileReader(); rd.onload=function(){ postJSON(EP.sampleAttachment,{id:id,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result)},function(){ reload(); }); }; rd.readAsDataURL(f); };
             scope.querySelectorAll('.ps-att-rm').forEach(function(b){ b.onclick=function(){ if(!confirm('Remove this attachment?'))return; postJSON(EP.sampleAttachmentRemove,{att_id:b.dataset.aid},function(){ reload(); }); }; });
             ppSampleTimeline(id); }
           function ppSampleTimeline(id){ var box=body.querySelector('.samp-tl[data-id="'+id+'"]'); if(!box)return;
@@ -1643,7 +1649,7 @@
                 return '<div style="font-size:12.5px;line-height:1.5;text-align:left;margin:4px 0;max-width:640px;display:flex;gap:10px;align-items:flex-start'+(nu?';background:#fff7ed;border:1px solid #fdba74;border-radius:6px;padding:6px 9px':'')+'">'+(ctrl?'<div style="flex:0 0 auto;min-width:74px">'+ctrl+'</div>':'')+'<div style="flex:1"><span class="mut" style="font-size:12px">'+esc(n.created_at)+' · '+who+'</span>'+(nu?' <span style="background:var(--neg);color:#fff;border-radius:8px;font-size:10.5px;font-weight:700;padding:0 5px">new</span>':'')+'<br>'+esc(n.body)+'</div></div>'; }).join(''):'<div class="mut" style="font-size:12px">No timeline entries yet.</div>';
               box.querySelectorAll('.ps-note-read').forEach(function(b){ b.onclick=function(){ postJSON(EP.sampleNoteReadBase+b.dataset.id,{read:true},function(){ var s=(_ppData.samples||[]).filter(function(x){return String(x.id)===String(id);})[0]; if(s&&s.unread_dnb>0)s.unread_dnb--; setSampBadge(); ppSampleTimeline(id); }); }; });
               var _se=box.querySelector('.samp-esc-note'); if(_se)_se.onclick=function(){ var msg=_se.dataset.msg||''; if(!msg)return; if(!confirm('Email this note to the supply planner?'))return; _se.disabled=true; _se.textContent='Sending…';
-                postJSON(EP.escalate,{kind:'sample',ref:_se.dataset.ref,message:msg,initiator:'supplier'},function(j){ _se.textContent='✓ Escalated'; if(j&&j.sandbox)alert('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); };
+                postJSON(EP.escalate,{kind:'sample',ref:_se.dataset.ref,message:msg,initiator:'supplier'},function(j){ _se.textContent='✓ Escalated'; if(j&&j.sandbox)ppNotice('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); };
             }).catch(function(){}); }
           function ppSampleNewForm(){ var box=document.getElementById('samp-newform'); if(box.dataset.open==='1'){box.dataset.open='';box.innerHTML='';return;} box.dataset.open='1';
             var purp=['sales','product','photography','marketing','operations'].map(function(p){return '<label style="margin-right:10px;font-size:12px"><input type="checkbox" class="snf-purpose" value="'+p+'"> '+p+'</label>';}).join('');
@@ -1808,11 +1814,11 @@
             function line(l,v){ if(v==null||v==='')return; x.fillStyle='#64748b'; x.fillText(l,28,y); x.fillStyle='#0f172a'; x.fillText(String(v),160,y); y+=30; }
             line('Colourway',opts.colour); line('Supplier',opts.supplier); line('Date',opts.date);
             x.fillStyle='#94a3b8'; x.font='400 13px system-ui,Arial'; x.fillText('Dock & Bay — product sample',28,H-22);
-            c.toBlob(function(b){ if(!b){alert('Could not create label');return;} b.arrayBuffer().then(function(ab){
+            c.toBlob(function(b){ if(!b){ppNotice('Could not create label');return;} b.arrayBuffer().then(function(ab){
               var ptW=283, ptH=ptW*(H/W);   // ~100mm wide small label, aspect-preserved (~64mm tall)
               var pdf=pdfSingleImg(new Uint8Array(ab), c.width, c.height, ptW, ptH);
               bcDownloadBlob('sample_'+ref.replace(/[^A-Za-z0-9_-]/g,'_')+'.pdf', new Blob([pdf],{type:'application/pdf'})); }); },'image/jpeg',0.92);
-          }catch(e){ alert('Could not create label'); } }
+          }catch(e){ ppNotice('Could not create label'); } }
           function ppProdSamples(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
             var _it=((_ppData&&_ppData.products)||[]).filter(function(x){return x.ref===ref;})[0]||{};   // colour/supplier for the sample label
             Promise.all([getJSON(EP.productSamplesBase+encodeURIComponent(ref)), fetch((EP.productItemBase||'/api/product/item/')+encodeURIComponent(ref)).then(function(r){return r.json();}).catch(function(){return {};})]).then(function(_res){ var list=Array.isArray(_res[0])?_res[0]:[];
@@ -1840,10 +1846,10 @@
                 return html; }
               function needsShip(s){ return s.supplier_status==='completed' && !s.not_shipped && !(s.shipments||[]).length; }
               function assignShip(id,val){ var body=val==='not_shipped'?{mode:'not_shipped'}:(val?{mode:'shipment',sample_request_id:val}:{mode:'unassigned'});
-                postJSON(EP.productSample+'/'+id+'/assign',body,function(j){ if(j&&j.error){alert(j.error);return;} var s=list.filter(function(x){return String(x.id)===String(id);})[0]; if(s){ if(val==='not_shipped'){ s.shipments=[]; s.not_shipped=true; } else if(val){ var sr=SRS.filter(function(x){return String(x.id)===String(val);})[0]; s.shipments=sr?[{id:sr.id,ref:sr.ref,carrier:sr.carrier,tracking:sr.tracking}]:[]; s.not_shipped=false; } else { s.shipments=[]; s.not_shipped=false; } } paint(); }); }
-              function linkShip(id,srId){ if(!srId)return; postJSON(EP.productSample+'/'+id+'/assign',{mode:'link',sample_request_id:srId},function(j){ if(j&&j.error){alert(j.error);return;} var s=list.filter(function(x){return String(x.id)===String(id);})[0]; if(s){ var sr=SRS.filter(function(x){return String(x.id)===String(srId);})[0]; s.shipments=s.shipments||[]; if(sr&&!s.shipments.some(function(sh){return String(sh.id)===String(sr.id);})) s.shipments.push({id:sr.id,ref:sr.ref,carrier:sr.carrier,tracking:sr.tracking}); s.not_shipped=false; } paint(); }); }
-              function unlinkShip(id,srId){ postJSON(EP.productSample+'/'+id+'/assign',{mode:'unlink',sample_request_id:srId},function(j){ if(j&&j.error){alert(j.error);return;} var s=list.filter(function(x){return String(x.id)===String(id);})[0]; if(s){ s.shipments=(s.shipments||[]).filter(function(sh){return String(sh.id)!==String(srId);}); } paint(); }); }
-              function newShipmentFor(id){ if(!confirm('Create a new sample shipment with this sample on it? It will appear in the Shipments box for this sample — add the address & tracking later in the Samples tab.'))return; postJSON(EP.sampleCreate,{dev_samples:[{id:id,qty:1}]},function(j){ if(j&&j.error){alert(j.error);return;} ppProdSamples(box, ref); }); }   // stay on the product page; refresh so the new shipment shows in this sample's Shipments box
+                postJSON(EP.productSample+'/'+id+'/assign',body,function(j){ if(j&&j.error){ppNotice(j.error);return;} var s=list.filter(function(x){return String(x.id)===String(id);})[0]; if(s){ if(val==='not_shipped'){ s.shipments=[]; s.not_shipped=true; } else if(val){ var sr=SRS.filter(function(x){return String(x.id)===String(val);})[0]; s.shipments=sr?[{id:sr.id,ref:sr.ref,carrier:sr.carrier,tracking:sr.tracking}]:[]; s.not_shipped=false; } else { s.shipments=[]; s.not_shipped=false; } } paint(); }); }
+              function linkShip(id,srId){ if(!srId)return; postJSON(EP.productSample+'/'+id+'/assign',{mode:'link',sample_request_id:srId},function(j){ if(j&&j.error){ppNotice(j.error);return;} var s=list.filter(function(x){return String(x.id)===String(id);})[0]; if(s){ var sr=SRS.filter(function(x){return String(x.id)===String(srId);})[0]; s.shipments=s.shipments||[]; if(sr&&!s.shipments.some(function(sh){return String(sh.id)===String(sr.id);})) s.shipments.push({id:sr.id,ref:sr.ref,carrier:sr.carrier,tracking:sr.tracking}); s.not_shipped=false; } paint(); }); }
+              function unlinkShip(id,srId){ postJSON(EP.productSample+'/'+id+'/assign',{mode:'unlink',sample_request_id:srId},function(j){ if(j&&j.error){ppNotice(j.error);return;} var s=list.filter(function(x){return String(x.id)===String(id);})[0]; if(s){ s.shipments=(s.shipments||[]).filter(function(sh){return String(sh.id)!==String(srId);}); } paint(); }); }
+              function newShipmentFor(id){ if(!confirm('Create a new sample shipment with this sample on it? It will appear in the Shipments box for this sample — add the address & tracking later in the Samples tab.'))return; postJSON(EP.sampleCreate,{dev_samples:[{id:id,qty:1}]},function(j){ if(j&&j.error){ppNotice(j.error);return;} ppProdSamples(box, ref); }); }   // stay on the product page; refresh so the new shipment shows in this sample's Shipments box
               function paint(){
               var nextV=list.reduce(function(m,s){return Math.max(m,s.version||0);},0)+1, nextRef=ref+'_v'+nextV;   // shown read-only on the add form
               var rows=list.slice().reverse().map(function(s){ var ph=(s.photos||[]).map(function(p){ var url=(EP.attachImgBase||'/api/supply/portal-attachment/')+p.id, canDel=p.uploader_kind==='supplier';
@@ -1890,7 +1896,7 @@
                 +'<div style="margin-top:7px"><label style="font-size:12px">Photos <input type="file" class="ps2-photos" accept="image/*" multiple style="font-size:12px"></label></div>'
                 +'<div style="margin-top:9px"><button class="save-btn ps2-save" data-ref="'+esc(ref)+'">Submit sample version</button> <span class="ps2-msg" style="font-size:12px;margin-left:6px"></span></div></div>'+rows+'</div>';
               box.querySelectorAll('.pp-samp-label').forEach(function(lb){ lb.onclick=function(){ dlSampleLabel({ref:lb.dataset.ref, date:lb.dataset.date, colour:_it.colour_name||'', supplier:_it.supplier||STATE.supplierName||''}); }; });
-              box.querySelectorAll('.pp-samp-status').forEach(function(sel){ sel.onchange=function(){ var id=sel.dataset.id, v=sel.value; postJSON(EP.productSample+'/'+id+'/status',{supplier_status:v},function(j){ if(j&&j.error){alert(j.error);return;} var s=list.filter(function(x){return String(x.id)===String(id);})[0]; if(s)s.supplier_status=v; paint(); }); }; });   // silent
+              box.querySelectorAll('.pp-samp-status').forEach(function(sel){ sel.onchange=function(){ var id=sel.dataset.id, v=sel.value; postJSON(EP.productSample+'/'+id+'/status',{supplier_status:v},function(j){ if(j&&j.error){ppNotice(j.error);return;} var s=list.filter(function(x){return String(x.id)===String(id);})[0]; if(s)s.supplier_status=v; paint(); }); }; });   // silent
               box.querySelectorAll('.pp-ship-inp').forEach(function(inp){ var menu=box.querySelector('.pp-ship-menu[data-id="'+inp.dataset.id+'"]'); if(!menu)return;
                 var s=list.filter(function(x){return String(x.id)===String(inp.dataset.id);})[0];
                 function openMenu(){ menu.innerHTML=shipMenu(s,inp.value); menu.style.display=''; }
@@ -1900,12 +1906,12 @@
                 menu.onmousedown=function(e){ var opt=e.target.closest&&e.target.closest('.pp-ship-opt'); if(!opt)return; e.preventDefault(); menu.style.display='none'; inp.value=''; var v=opt.getAttribute('data-val'); if(v==='__new__') newShipmentFor(inp.dataset.id); else if(v==='not_shipped') assignShip(inp.dataset.id,'not_shipped'); else linkShip(inp.dataset.id, v); }; });
               box.querySelectorAll('.pp-ship-unlink').forEach(function(a){ a.onclick=function(){ unlinkShip(a.dataset.id, a.dataset.sr); }; });
               box.querySelectorAll('.pp-samp-img').forEach(function(im){ im.onclick=function(){ ppImgZoom(im.dataset.src); }; });
-              box.querySelectorAll('.pp-samp-fdel').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this file?'))return; postJSON(EP.productSamplePhoto+'/'+a.dataset.id+'/delete',{},function(j){ if(j&&j.error){alert(j.error);return;} var s=list.filter(function(x){return String(x.id)===String(a.dataset.sid);})[0]; if(s)s.photos=(s.photos||[]).filter(function(p){return String(p.id)!==String(a.dataset.id);}); paint(); }); }; });   // silent delete
+              box.querySelectorAll('.pp-samp-fdel').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this file?'))return; postJSON(EP.productSamplePhoto+'/'+a.dataset.id+'/delete',{},function(j){ if(j&&j.error){ppNotice(j.error);return;} var s=list.filter(function(x){return String(x.id)===String(a.dataset.sid);})[0]; if(s)s.photos=(s.photos||[]).filter(function(p){return String(p.id)!==String(a.dataset.id);}); paint(); }); }; });   // silent delete
               box.querySelectorAll('.pp-samp-meta-edit').forEach(function(a){ a.onclick=function(){ var pnl=box.querySelector('.pp-samp-meta[data-id="'+a.dataset.id+'"]'); if(pnl)pnl.style.display=(pnl.style.display==='none'?'':'none'); }; });
               box.querySelectorAll('.pp-meta-save').forEach(function(btn){ btn.onclick=function(){ var id=btn.dataset.id, pnl=box.querySelector('.pp-samp-meta[data-id="'+id+'"]'); if(!pnl)return;
                 var sizes=Array.prototype.slice.call(pnl.querySelectorAll('.pp-meta-size:checked')).map(function(c){return c.value;});
                 var aspects=Array.prototype.slice.call(pnl.querySelectorAll('.pp-meta-aspect:checked')).map(function(c){return c.value;});
-                postJSON(EP.productSample+'/'+id+'/meta',{sample_sizes:sizes,sampled_aspects:aspects},function(j){ if(j&&j.error){alert(j.error);return;} var s=list.filter(function(x){return String(x.id)===String(id);})[0]; if(s){ s.sample_sizes=sizes; s.sampled_aspects=aspects; } paint(); }); }; });   // silent
+                postJSON(EP.productSample+'/'+id+'/meta',{sample_sizes:sizes,sampled_aspects:aspects},function(j){ if(j&&j.error){ppNotice(j.error);return;} var s=list.filter(function(x){return String(x.id)===String(id);})[0]; if(s){ s.sample_sizes=sizes; s.sampled_aspects=aspects; } paint(); }); }; });   // silent
               box.querySelectorAll('.pp-samp-file').forEach(function(fi){ fi.onchange=function(){ var id=fi.dataset.id, all=Array.prototype.slice.call(fi.files); if(!all.length)return; var msg=box.querySelector('.pp-samp-msg[data-id="'+id+'"]'); var skipped=all.filter(function(f){return f.size>10*1024*1024;}).length, ok=all.filter(function(f){return f.size<=10*1024*1024;});
                 if(!ok.length){ if(msg){msg.style.color='#dc2626';msg.textContent='over 10MB — skipped';} return; }
                 if(msg){msg.style.color='#64748b';msg.textContent='Uploading…';} var i=0;
@@ -1976,7 +1982,7 @@
               var it=((_ppData&&_ppData.products)||[]).filter(function(x){return x.ref===ref;})[0];
               if(unread>0){ postJSON(EP.productNotesRead,{ref:ref},function(){ if(it)it.unread_dnb=0; setProdBadge();
                 var tb=box.parentNode&&box.parentNode.querySelector('.pd2-tab[data-t="timeline"] .ex-badge'); if(tb&&tb.parentNode)tb.parentNode.removeChild(tb); }); }
-              var pb=box.querySelector('.pp-prod-post'); if(pb)pb.onclick=function(){ var v=box.querySelector('.pp-prod-note').value.trim(); if(!v)return; postJSON(EP.productNote,{ref:ref,body:v},function(j){ if(j&&j.error){alert(j.error);return;} ppProdTimeline(box,ref); }); };
+              var pb=box.querySelector('.pp-prod-post'); if(pb)pb.onclick=function(){ var v=box.querySelector('.pp-prod-note').value.trim(); if(!v)return; postJSON(EP.productNote,{ref:ref,body:v},function(j){ if(j&&j.error){ppNotice(j.error);return;} ppProdTimeline(box,ref); }); };
             }).catch(function(e){ box.innerHTML='<div style="color:var(--neg);text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
           function setProdBadge(){ var t=document.getElementById('pp-prod-tab'); if(t)t.style.display=_ppData&&_ppData.productEnabled?'':'none';
             var n=((_ppData&&_ppData.products)||[]).reduce(function(a,p){return a+(Number(p.unread_dnb)||0);},0);
@@ -2146,7 +2152,7 @@
               return '<div class="sect-h" style="margin-top:14px">'+esc(t)+'</div><div class="tw"><table style="width:max-content;min-width:100%"><thead><tr><th class="l">File</th><th class="l">Applies to</th><th class="l">Use from</th><th class="l">Status</th></tr></thead><tbody>'+rows+'</tbody></table></div>'; }).join('');
             return '<div style="max-width:920px;text-align:left"><div class="sect-h">Specifications</div><div class="mut tiny" style="margin-bottom:6px">Packaging &amp; labelling documents from Dock &amp; Bay. Items marked for confirmation need your acknowledgement.</div>'+groups+'</div>'; }
           function wireSpecs(){ document.querySelectorAll('.sp-confirm').forEach(function(b){ b.onclick=function(){ var id=b.dataset.id; b.disabled=true; b.textContent='…';
-            fetch(EP.specApprove,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({spec_id:id})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ b.disabled=false; b.textContent='Confirm'; alert(j.error); return; }
+            fetch(EP.specApprove,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({spec_id:id})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ b.disabled=false; b.textContent='Confirm'; ppNotice(j.error); return; }
               var sp=((_ppData&&_ppData.specs)||[]).filter(function(x){return String(x.id)===String(id);})[0]; if(sp){ sp.approved=true; sp.needs_approval=false; } setSpecBadge(); renderPP(); }).catch(function(){ b.disabled=false; b.textContent='Confirm'; }); }; }); }
           function setSpecBadge(){ var specs=(_ppData&&_ppData.specs)||[]; var t=document.getElementById('pp-spec-tab'); if(t)t.style.display='';   // always visible (like Deposits/Payments) — shows an empty state when there are none
             var n=specs.filter(function(s){return s.needs_approval;}).length; var bg=document.getElementById('pp-spec-badge'); if(bg)bg.innerHTML=n?'<span style="background:var(--neg);color:#fff;border-radius:8px;font-size:10.5px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
@@ -2211,7 +2217,7 @@
                   var noteBody=(by||'The supplier')+' escalated this shipment';   // mirror the note the server posted so the timeline shows it
                   (_ppData.notesByPo=_ppData.notesByPo||{}); (_ppData.notesByPo[po]=_ppData.notesByPo[po]||[]).push({po:po,author_kind:'supplier',body:noteBody,created_at:new Date().toISOString().slice(0,16).replace('T',' ')});
                   var box=body.querySelector('.sp-fob-tl[data-po="'+(window.CSS&&CSS.escape?CSS.escape(po):po)+'"]'); if(box)box.innerHTML=fobTLHtml(po);
-                  if(j&&j.sandbox)alert('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); }; });
+                  if(j&&j.sandbox)ppNotice('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); }; });
               // FOB cards: timeline note → PO note (author supplier)
               body.querySelectorAll('.sp-fob-note-post').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po, ta=body.querySelector('.sp-fob-note-body[data-po="'+(window.CSS&&CSS.escape?CSS.escape(po):po)+'"]'); var v=ta?(ta.value||'').trim():''; if(!v)return; btn.disabled=true;
                 postJSON(EP.note,{po:po,supplier_id:_sid,body:v,author_kind:'supplier',author_email:by},function(){ btn.disabled=false;
@@ -2245,9 +2251,9 @@
               body.querySelectorAll('.sp-e-carrier, .sp-e-trk, .sp-e-date').forEach(function(inp){ inp.onchange=function(){ saveShip(inp.dataset.ref); }; });
               body.querySelectorAll('.sp-chg-go').forEach(function(btn){ btn.onclick=function(){ var ref=btn.dataset.ref;
                 var cEl=body.querySelector('.sp-chg-cost[data-ref="'+_rfEsc(ref)+'"]'), dEl=body.querySelector('.sp-chg-desc[data-ref="'+_rfEsc(ref)+'"]');
-                var fc=Number(cEl&&cEl.value)||0; if(fc<=0){ alert('Enter a freight cost greater than 0.'); return; }
+                var fc=Number(cEl&&cEl.value)||0; if(fc<=0){ ppNotice('Enter a freight cost greater than 0.'); return; }
                 btn.disabled=true; postJSON(EP.shipmentCharge,{shipment_ref:ref,freight_cost:fc,description:(dEl&&dEl.value)||null},function(j){ btn.disabled=false;
-                  if(j&&j.error){ alert('Failed: '+j.error); return; }
+                  if(j&&j.error){ ppNotice('Failed: '+j.error); return; }
                   if(cEl)cEl.value=''; if(dEl)dEl.value='';
                   var list=body.querySelector('.sp-chg-list[data-ref="'+_rfEsc(ref)+'"]'); if(list){ list.dataset.loaded=''; loadShipCharges(list); } }); }; });
               // lazy-load a card's freight charges the first time it is expanded
@@ -2256,8 +2262,8 @@
               // Direct-to-Client label downloads on shipment-plan cards (Ships-With shipment labels + crossdock)
               body.querySelectorAll('.sp-shiplabel').forEach(function(btn){ btn.onclick=function(){ dlShipsWith(btn.dataset.po, btn, EP.shipsWith); }; });
               body.querySelectorAll('.sp-cd').forEach(function(btn){ btn.onclick=function(){ if(BC.placeholder){BC.note();return;} btn.disabled=true;
-                fetch(EP.labelData+'?skus='+encodeURIComponent(btn.dataset.skus)).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false; if(!rows||!rows.length||rows.error){alert('No crossdock barcodes found');return;}
-                  BC.crossdock(rows,btn.dataset.po,btn.dataset.do,btn.dataset.client,btn.dataset.address,btn,btn.dataset.po+'_crossdock_labels.zip'); }).catch(function(){alert('Could not load crossdock labels');btn.disabled=false;}); }; });
+                fetch(EP.labelData+'?skus='+encodeURIComponent(btn.dataset.skus)).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false; if(!rows||!rows.length||rows.error){ppNotice('No crossdock barcodes found');return;}
+                  BC.crossdock(rows,btn.dataset.po,btn.dataset.do,btn.dataset.client,btn.dataset.address,btn,btn.dataset.po+'_crossdock_labels.zip'); }).catch(function(){ppNotice('Could not load crossdock labels');btn.disabled=false;}); }; });
               spRender.forEach(function(s){ if(!s.is_fob) ppShipTimeline(s.shipment_ref); }); return; }
             if(PORTAL_TAB==='deposits'){ body.innerHTML=ppDeposits(_ppData.sdep);
               body.querySelectorAll('.pp-dep-exp').forEach(function(a){ a.onclick=function(){ var k=a.dataset.k, det=body.querySelector('.pp-dep-det[data-k="'+k+'"]'); if(!det)return; var open=det.style.display!=='none'; det.style.display=open?'none':''; a.textContent=open?'▸':'▾'; }; });   // expand each deposit → POs that drew it down
@@ -2301,8 +2307,8 @@
               var bsel=body.querySelector('.pp-bc-batch'); if(bsel)bsel.onchange=function(){ PORTAL_BC_BATCH=this.value; PORTAL_BC_Q=''; renderPP(); };
               function bcBatchDl(kinds,name,btn){ if(!PORTAL_BC_BATCH)return; if(BC.placeholder){BC.note();return;} btn.disabled=true;
                 fetch(EP.labelData+'?batch='+encodeURIComponent(PORTAL_BC_BATCH)+'&supplier='+encodeURIComponent(STATE.supplierName)).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false;
-                  if(rows&&rows.error){alert(rows.error);return;} if(!rows||!rows.length){alert('No barcodes found for batch '+PORTAL_BC_BATCH);return;}
-                  BC.sheets(rows,kinds,'batch_'+PORTAL_BC_BATCH+'_'+name+'_barcodes.zip',btn); }).catch(function(){alert('Could not load barcodes');btn.disabled=false;}); }
+                  if(rows&&rows.error){ppNotice(rows.error);return;} if(!rows||!rows.length){ppNotice('No barcodes found for batch '+PORTAL_BC_BATCH);return;}
+                  BC.sheets(rows,kinds,'batch_'+PORTAL_BC_BATCH+'_'+name+'_barcodes.zip',btn); }).catch(function(){ppNotice('Could not load barcodes');btn.disabled=false;}); }
               var bp=body.querySelector('.pp-bc-dl-prod'); if(bp)bp.onclick=function(){ bcBatchDl(['product'],'product',bp); };
               var bc=body.querySelector('.pp-bc-dl-carton'); if(bc)bc.onclick=function(){ bcBatchDl(['carton','inner'],'carton_inner',bc); };   // SUG-0002: carton download now includes inners
               if(picked){
@@ -2428,10 +2434,10 @@
               scope.querySelectorAll('.pptab').forEach(function(t){ t.onclick=function(){ var box=t.closest('.ppx'); if(!box)return; var pt=t.dataset.pt;
                 box.querySelectorAll('.pptab').forEach(function(x){x.classList.toggle('active',x===t);});
                 box.querySelectorAll('.pptab-panel').forEach(function(pl){pl.style.display=(pl.dataset.pt===pt)?'':'none';}); }; });
-              function ppDl(url,zipname,btn){ if(BC.placeholder){BC.note();return;} btn.disabled=true; fetch(url).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false; if(rows&&rows.error){alert(rows.error);return;} if(!rows||!rows.length){alert('No barcodes found for this');return;} BC.sheets(rows,['product','carton'],zipname,btn); }).catch(function(){alert('Could not load barcodes');btn.disabled=false;}); }
+              function ppDl(url,zipname,btn){ if(BC.placeholder){BC.note();return;} btn.disabled=true; fetch(url).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false; if(rows&&rows.error){ppNotice(rows.error);return;} if(!rows||!rows.length){ppNotice('No barcodes found for this');return;} BC.sheets(rows,['product','carton'],zipname,btn); }).catch(function(){ppNotice('Could not load barcodes');btn.disabled=false;}); }
 scope.querySelectorAll('.pp-dl-po').forEach(function(btn){ btn.onclick=function(){ ppDl(EP.labelData+'?po='+encodeURIComponent(btn.dataset.po), btn.dataset.po+'_barcodes.zip', btn); }; });
 scope.querySelectorAll('.pp-dl-prod').forEach(function(btn){ btn.onclick=function(){ ppDl(EP.labelData+'?prod='+encodeURIComponent(btn.dataset.prod)+'&supplier='+encodeURIComponent(STATE.supplierName), btn.dataset.prod+'_barcodes.zip', btn); }; });
-scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(){ if(BC.placeholder){BC.note();return;} btn.disabled=true; fetch(EP.labelData+'?skus='+encodeURIComponent(btn.dataset.skus)).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false; if(!rows||!rows.length||rows.error){alert('No crossdock barcodes found');return;} BC.crossdock(rows,btn.dataset.po,btn.dataset.do,btn.dataset.client,btn.dataset.address,btn,btn.dataset.po+'_crossdock_labels.zip'); }).catch(function(){alert('Could not load crossdock labels');btn.disabled=false;}); }; });
+scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(){ if(BC.placeholder){BC.note();return;} btn.disabled=true; fetch(EP.labelData+'?skus='+encodeURIComponent(btn.dataset.skus)).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false; if(!rows||!rows.length||rows.error){ppNotice('No crossdock barcodes found');return;} BC.crossdock(rows,btn.dataset.po,btn.dataset.do,btn.dataset.client,btn.dataset.address,btn,btn.dataset.po+'_crossdock_labels.zip'); }).catch(function(){ppNotice('Could not load crossdock labels');btn.disabled=false;}); }; });
               scope.querySelectorAll('.pp-shiplabel').forEach(function(btn){ btn.onclick=function(){ dlShipsWith(btn.dataset.po, btn, EP.shipsWith); }; });   // SHIPS WITH shipment label (per-PO, barcodes & labels tab)
               scope.querySelectorAll('.pp-airlabel').forEach(function(btn){ btn.onclick=function(){ dlShipsWith(btn.dataset.po, btn, EP.shipsWith, true); }; });   // AIR FREIGHT label (master of an air shipment)
               // PO confirmation: supplier confirms (or withdraws) acceptance of the order's SKUs / qty / dates
@@ -2465,7 +2471,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
               scope.querySelectorAll('.pp-esc-note').forEach(function(btn){ btn.onclick=function(){ var msg=btn.dataset.msg||''; if(!msg)return;
                 if(!confirm('Email this note to the supply planner?'))return; btn.disabled=true; var t=btn.textContent; btn.textContent='Sending…';
                 postJSON(EP.escalate,{kind:'po',ref:btn.dataset.po,message:msg,initiator:'supplier'},function(j){ btn.textContent='✓ Escalated';
-                  if(j&&j.sandbox)alert('Sandbox: no email key configured, so nothing was sent. On live this routes to the internal recipients set in CONFIG ▸ General settings.'); }); }; });
+                  if(j&&j.sandbox)ppNotice('Sandbox: no email key configured, so nothing was sent. On live this routes to the internal recipients set in CONFIG ▸ General settings.'); }); }; });
               scope.querySelectorAll('.pp-cd-grid').forEach(function(inp){ var t;
                 inp.onclick=function(){ try{ if(inp.showPicker)inp.showPicker(); }catch(e){} };
                 inp.onchange=function(){ var v=inp.value; if(!/^\d{4}-\d{2}-\d{2}$/.test(v))return;
@@ -2558,9 +2564,9 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                         :'<span class="mut tiny">Everything matches your order plan — nothing to change.</span>');
                     var ab=out.querySelector('.pp-inv-apply'); if(ab)ab.onclick=function(){ ab.disabled=true; ab.textContent='Applying…';
                       postJSON(EP.invoiceApply,{po:po,data_base64:_invFiles[po],submitted_by:by},function(r){
-                        if(!r||r.error){ alert('Apply failed: '+((r&&r.error)||'')); ab.disabled=false; ab.textContent='Apply'; return; }
+                        if(!r||r.error){ ppNotice('Apply failed: '+((r&&r.error)||'')); ab.disabled=false; ab.textContent='Apply'; return; }
                         diff.forEach(function(l){ (_ppData.costsByPo[po]=_ppData.costsByPo[po]||{})[l.sku]={amended_qty:l.inv_qty,actual_cost:l.inv_price,is_added:(l.status==='new')}; });
-                        alert('Applied to your order plan: '+r.applied+' line(s)'+(r.added?' ('+r.added+' new)':'')+'. Review the qty & cost below, then confirm the order — Dock & Bay will approve the change.');
+                        ppNotice('Applied to your order plan: '+r.applied+' line(s)'+(r.added?' ('+r.added+' new)':'')+'. Review the qty & cost below, then confirm the order — Dock & Bay will approve the change.');
                         rerenderRow(row,po,'orderplan'); }); }; }); };
                 rd.readAsDataURL(f); }; });
               // Paste-from-spreadsheet (SKU · Qty · Price) → apply each row via lineCost (→ Dock & Bay to approve).
@@ -2595,7 +2601,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                   var r=(_ppData.addByPo[po]||[]).filter(function(x){return String(x.id)===String(id);})[0]; if(r){r.description=desc;r.qty=q===''?null:Number(q);r.price=pr===''?null:Number(pr);} rerenderRow(row,po,'orderplan'); }); }; });
               scope.querySelectorAll('.pp-ac-add').forEach(function(btn){ btn.onclick=function(){ var box=btn.closest('.ppx'), po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]');
                 var desc=(box.querySelector('.pp-ac-ndesc')||{}).value||'', q=(box.querySelector('.pp-ac-nqty')||{}).value||'', pr=(box.querySelector('.pp-ac-nprice')||{}).value||'';
-                if(!desc.trim()&&!q&&!pr){ alert('Enter a description, quantity or price for the additional cost.'); return; } btn.disabled=true;
+                if(!desc.trim()&&!q&&!pr){ ppNotice('Enter a description, quantity or price for the additional cost.'); return; } btn.disabled=true;
                 postJSON(EP.addlCost,{po:po,description:desc,qty:q,price:pr,submitted_by:by},function(j){ 
                   (_ppData.addByPo[po]=_ppData.addByPo[po]||[]).push({id:j.id,description:desc,qty:q===''?null:Number(q),price:pr===''?null:Number(pr)}); rerenderRow(row,po,'orderplan'); }); }; });
               scope.querySelectorAll('.pp-ac-rm').forEach(function(b){ b.onclick=function(){ var box=b.closest('.ppx'), po=(box.querySelector('.pp-ac-add')||{}).dataset.po, row=b.closest('tr[id^="pp-"]'), id=b.dataset.id;
@@ -2608,7 +2614,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                   if(val==='shipped'){ opts.getData().then(function(d){ if(d){ if(d.notesByPo)Object.keys(d.notesByPo).forEach(function(k){ shortNotes(d.notesByPo[k]); }); _ppData=d; } }).catch(function(){}); }
                 }); }; });
               scope.querySelectorAll('.pp-ownship').forEach(function(cb){ cb.onchange=function(){ var bx=scope.querySelector('.pp-ownship-box[data-po="'+cb.dataset.po+'"]'); if(bx)bx.style.display=cb.checked?'':'none'; }; });
-              scope.querySelectorAll('.pp-trk-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po; var t=pick('pp-trk',po).value, cc=pick('pp-car',po).value; if(!t&&!cc){ alert('Pick a carrier and/or enter a tracking ref.'); return; } var fcEl=pick('pp-fcost-new',po); var fc=fcEl?Number(fcEl.value)||0:0; btn.disabled=true;
+              scope.querySelectorAll('.pp-trk-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po; var t=pick('pp-trk',po).value, cc=pick('pp-car',po).value; if(!t&&!cc){ ppNotice('Pick a carrier and/or enter a tracking ref.'); return; } var fcEl=pick('pp-fcost-new',po); var fc=fcEl?Number(fcEl.value)||0:0; btn.disabled=true;
                 var row=btn.closest('tr[id^="pp-"]');
                 postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,tracking:t,carrier:cc},function(j){
                   // update the PO card in place (shipment now linked); the new master shipment ref = the PO number
@@ -2618,17 +2624,17 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                 function v(f){ var el=scope.querySelector('.pp-dtc[data-po="'+CSS.escape(po)+'"][data-f="'+f+'"]'); return el?el.value.trim():''; }
                 var payload={po:po,cartons:v('cartons'),cbm:v('cbm'),gross_weight_kg:v('gross_weight_kg'),dimensions:v('dimensions'),entered_by:by};
                 btn.disabled=true; var row=btn.closest('tr[id^="pp-"]');
-                postJSON('/api/supply/dtc-shipment',payload,function(j){ if(j&&j.error){alert(j.error);btn.disabled=false;return;}
+                postJSON('/api/supply/dtc-shipment',payload,function(j){ if(j&&j.error){ppNotice(j.error);btn.disabled=false;return;}
                   var p=_ppData.pos.filter(function(x){return x.po===po;})[0];
                   if(p){ p.dtc_cartons=payload.cartons===''?null:parseInt(payload.cartons,10); p.dtc_cbm=payload.cbm===''?null:Number(payload.cbm); p.dtc_weight=payload.gross_weight_kg===''?null:Number(payload.gross_weight_kg); p.dtc_dimensions=payload.dimensions; if(!p.dtc_entered_at)p.dtc_entered_at='just now'; }
                   refreshRow(row,po); }); }; });
               scope.querySelectorAll('.pp-fchg-go').forEach(function(btn){ btn.onclick=function(){ var ref=btn.dataset.ref;
                 var ci=scope.querySelector('.pp-fcost[data-ref="'+CSS.escape(ref)+'"]'), ni=scope.querySelector('.pp-fnote[data-ref="'+CSS.escape(ref)+'"]');
-                var fc=ci?Number(ci.value)||0:0; if(fc<=0){ alert('Enter a freight amount.'); return; } btn.disabled=true;
-                postJSON(EP.shipmentCharge,{shipment_ref:ref,freight_cost:fc,description:(ni&&ni.value)||null},function(j){ if(j&&j.error){alert(j.error);btn.disabled=false;return;} if(ci)ci.value=''; if(ni)ni.value=''; btn.disabled=false; loadFreightCharges(scope); }); }; });
+                var fc=ci?Number(ci.value)||0:0; if(fc<=0){ ppNotice('Enter a freight amount.'); return; } btn.disabled=true;
+                postJSON(EP.shipmentCharge,{shipment_ref:ref,freight_cost:fc,description:(ni&&ni.value)||null},function(j){ if(j&&j.error){ppNotice(j.error);btn.disabled=false;return;} if(ci)ci.value=''; if(ni)ni.value=''; btn.disabled=false; loadFreightCharges(scope); }); }; });
               // approve the Direct to Client details (packing & labelling)
               scope.querySelectorAll('.pp-dtc-accept').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); btn.disabled=true;
-                postJSON(EP.dtcAccept,{po:po},function(j){ if(j&&j.error){alert(j.error);btn.disabled=false;return;}
+                postJSON(EP.dtcAccept,{po:po},function(j){ if(j&&j.error){ppNotice(j.error);btn.disabled=false;return;}
                   var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(p){ p.dtc_accepted_at=new Date().toISOString().slice(0,16).replace('T',' '); p.dtc_accepted_by=STATE.by;
                     // re-snapshot the approved DtC details locally (server does the same) so the change highlights clear
                     p.dtc_approved_snapshot={pack_polybags:!!p.pack_polybags,pack_polybags_notes:p.pack_polybags_notes||'',pack_dnb_barcodes:!!p.pack_dnb_barcodes,pack_dnb_barcodes_notes:p.pack_dnb_barcodes_notes||'',pack_rfid_barcodes:!!p.pack_rfid_barcodes,pack_rfid_barcodes_notes:p.pack_rfid_barcodes_notes||'',pack_dnb_carton:!!p.pack_dnb_carton,pack_dnb_carton_notes:p.pack_dnb_carton_notes||'',pack_client_carton:!!p.pack_client_carton,pack_client_carton_notes:p.pack_client_carton_notes||'',pack_pallet_notes:p.pack_pallet_notes||'',pack_other_notes:p.pack_other_notes||'',client_requirements:p.client_requirements||'',sales_order_ref:p.sales_order_ref||'',client_po_ref:p.client_po_ref||'',client:p.client||'',final_delivery_address:p.final_delivery_address||''}; } refreshRow(row,po); }); }; });
@@ -2637,13 +2643,13 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
               // live: warn when the invoice amount differs from the Step-1 calculated total
               scope.querySelectorAll('.pp-inv').forEach(function(inp){ inp.oninput=function(){ var w=inp.closest('.ppx').querySelector('.pp-inv-warn'); if(!w)return;
                 var calc=Number(inp.dataset.calc)||0, v=Number(String(inp.value||'').replace(/,/g,''))||0; w.style.display=(inp.value!==''&&Math.abs(v-calc)>0.01)?'':'none'; }; });
-              scope.querySelectorAll('.pp-inv-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); var _rawv=(pick('pp-inv',po).value||'').trim(); var val=_rawv.replace(/[^0-9.\-]/g,''); if(_rawv!==''&&!/^-?[0-9]+(\.[0-9]+)?$/.test(val)){ alert('Invoice amount must be a number (no currency symbols or letters).'); return; } var fin=pick('pp-inv-file',po); var f=fin&&fin.files[0]; if(!val&&!f)return; btn.disabled=true;
+              scope.querySelectorAll('.pp-inv-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); var _rawv=(pick('pp-inv',po).value||'').trim(); var val=_rawv.replace(/[^0-9.\-]/g,''); if(_rawv!==''&&!/^-?[0-9]+(\.[0-9]+)?$/.test(val)){ ppNotice('Invoice amount must be a number (no currency symbols or letters).'); return; } var fin=pick('pp-inv-file',po); var f=fin&&fin.files[0]; if(!val&&!f)return; btn.disabled=true;
                 var go=function(attId){ postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,invoice_value:val||null,invoice_attachment_id:attId||null},function(){ (_ppData.subsByPo[po]=_ppData.subsByPo[po]||[]).push({kind:'invoice_value',value:val,status:'pending',submitted_at:new Date().toISOString().slice(0,10)}); refreshRow(row,po); }); };
                 if(f){ var rd=new FileReader(); rd.onload=function(){ postJSON(EP.upload,{po:po,supplier_id:sid,filename:f.name,mime:f.type,data_base64:rd.result,uploaded_by:by},function(j){ go(j.id); }); }; rd.readAsDataURL(f); } else go(null); }; });
               // upload a typed document (Commercial Invoice / Packing List / …) → store + show in the Documents list
               scope.querySelectorAll('.pp-doc-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po;
                 var typeEl=pick('pp-doc-type',po), fin=pick('pp-doc-file',po), f=fin&&fin.files&&fin.files[0];
-                if(!f){ alert('Choose a file to upload.'); return; } var cat=typeEl?typeEl.value:'Other'; var row=btn.closest('tr[id^="pp-"]'); btn.disabled=true;
+                if(!f){ ppNotice('Choose a file to upload.'); return; } var cat=typeEl?typeEl.value:'Other'; var row=btn.closest('tr[id^="pp-"]'); btn.disabled=true;
                 var rd=new FileReader(); rd.onload=function(){ postJSON(EP.upload,{po:po,supplier_id:sid,filename:f.name,mime:f.type,data_base64:rd.result,uploaded_by:by,category:cat},function(j){
                   (_ppData.docsByPo=_ppData.docsByPo||{}); (_ppData.docsByPo[po]=_ppData.docsByPo[po]||[]).unshift({id:j.id,filename:f.name,category:cat,uploaded_at:'',approval_status:'draft'});
                   rerenderRow(row,po,'invoice'); }); }; rd.readAsDataURL(f); }; });
@@ -2652,10 +2658,10 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                 postJSON(EP.docRemove,{id:id},function(){ if(po&&_ppData.docsByPo&&_ppData.docsByPo[po])_ppData.docsByPo[po]=_ppData.docsByPo[po].filter(function(d){return String(d.id)!==String(id);}); rerenderRow(row,po,'invoice'); }); }; });
               // submit a document for Dock & Bay approval
               scope.querySelectorAll('.pp-doc-submit').forEach(function(btn){ btn.onclick=function(){ if(btn.disabled)return; if(!confirm('Submit this document to Dock & Bay for approval?'))return; var id=btn.dataset.id, po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); var _t=btn.textContent; btn.disabled=true; btn.textContent='Submitting…';
-                postJSON(EP.docSubmit,{att_id:id},function(j){ if(j&&j.error){alert(j.error);btn.disabled=false;btn.textContent=_t;return;}
+                postJSON(EP.docSubmit,{att_id:id},function(j){ if(j&&j.error){ppNotice(j.error);btn.disabled=false;btn.textContent=_t;return;}
                   if(_ppData.docsByPo&&_ppData.docsByPo[po])_ppData.docsByPo[po].forEach(function(d){ if(String(d.id)===String(id)){ d.approval_status='submitted'; d.review_notes=''; } });
                   rerenderRow(row,po,'invoice');   // row now shows the ⏳ "Submitted, awaiting approval" badge (no submit button)
-                  alert('✓ Submitted for approval.\n\nThe Dock & Bay team has been notified by email — no need to submit again. You\'ll see the status update here once it\'s reviewed.'); }); }; });
+                  ppNotice('✓ Submitted for approval.\n\nThe Dock & Bay team has been notified by email — no need to submit again. You\'ll see the status update here once it\'s reviewed.'); }); }; });
             } }
     function loadPreview(){ tabsEl.style.display=''; body.innerHTML='<div class="pp-skel" aria-label="Loading"><i></i><i></i><i></i><i></i><i></i></div>';
       opts.getData().then(function(d){ if(d&&d.notesByPo){ Object.keys(d.notesByPo).forEach(function(k){ shortNotes(d.notesByPo[k]); }); } _ppData=d; if(!ppApplyHash())renderPP(); }).catch(function(e){ body.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e&&e.message||e)+'</div>'; }); }

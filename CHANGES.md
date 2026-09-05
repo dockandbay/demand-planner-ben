@@ -1,3 +1,8 @@
+## v27.507 Portal: in-page toasts replace browser alerts (review item 4, part 1); section counts fixed
+- **Toasts:** all 72 `alert()` calls in the portal script now show a non-blocking toast pill at the bottom of the screen (red for errors and validation, navy for confirmations) that fades after a few seconds, instead of the browser dialog. `ppNotice(msg, kind)` is the one helper; nothing else in the flows changed.
+- **Confirms:** the 16 `confirm()` dialogs (delete / remove / escalate / withdraw / email) stay native for now: they are genuine decisions and their call sites are synchronous; converting them to an in-page sheet needs an async refactor per site, proposed as a separate slice.
+- **Section counts:** the tab badges had no class, so the section-row counter found nothing; badges now use the standard badge class and ORDERS / FINANCE / SAMPLES / PRODUCT show their totals. supply/portal-view.js + supply/hz-theme.css.
+
 ## v27.506 Portal: skeleton loading, phone hit-targets, action counts on the section row (review items 5-7)
 - **Skeletons:** the PO grid and the card panels show shimmer rows while data loads instead of the word Loading…
 - **Phone:** section and sub-tab text 11px+, MANAGE / status chips / pills at least 36px tall, more padding on the expanded card's tab strip.
