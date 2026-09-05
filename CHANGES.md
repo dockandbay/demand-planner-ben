@@ -1,3 +1,6 @@
+## v27.479 FIX: grand-total row period cells (H1 / H2 / Q) had dark text on the navy row (Ben)
+- The shared period stack painted the total in ink and the LY / revenue lines in grey even on the ALL CATEGORIES row, whose cells are navy. On that row the total is now white and the LY / revenue lines light grey; growth colours unchanged. artifact_v16.7.html (`periodStackHTML`, dark flag).
+
 ## v27.478 FIX: closed (last-year-only) SKU rows follow the Show pills (Ben)
 - Under **Active** (today to today+180 days) closed SKUs never sold inside the window, so they are hidden. Under **18m** they show if they sold in the last 18 months; under **All** if they sold in any displayed month or that month's last-year month. v27.473 had used the displayed months regardless of the pill. artifact_v16.7.html (`lyoVisible`).
 
