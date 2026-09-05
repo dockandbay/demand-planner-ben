@@ -1,3 +1,8 @@
+## v27.497 Supplier portal: colours on the design tokens, one type scale in the PO card, no emoji buttons (Ben items 1-3)
+- **Tokens:** every inline colour in the portal script that sits in a style string or the portal CSS now uses var(--token) (the app codemod run in CSS-context mode, so canvas / SVG label code and quoted JS colour values are untouched; the barcode/label generator is excluded entirely).
+- **Type scale (PO card and grids):** font sizes inside the PO card, order plan, documents, deposits, productions and Direct-to-Client rows are mapped to the app scale (10.5 caps · 12 body · 12.5 values · 15 titles); the previous 8 sizes from 9 to 20px collapse to four.
+- **Buttons:** Upload, Download Excel and Add contents lose their emoji; the header Inbox and Recent buttons use the app line icons (mail, clock). ✓ / ✕ typographic glyphs stay. supply/portal-view.js + supply/portal.html. Portal regression test passes.
+
 ## v27.496 Portal regression test repaired (3 stale checks)
 - tests/portal-inplace.cjs stubbed fetch with json() only; the portal post helper has read text() since v27.388 (tolerant parsing), so the approve callback never ran in the test and 3 checks failed (Approve button removed / approved state / MANAGE badge −1). The stub now provides text() too; all checks pass. No app change.
 

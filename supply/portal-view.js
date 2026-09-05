@@ -20,7 +20,7 @@
     if(/sf ?express|sf-express|shunfeng|顺丰|順豐/.test(c)) return 'https://www.sf-international.com/us/en/dynamic_function/waybill/#search/bill-number/'+e;
     if(/flex/.test(c)){ var n=(r.match(/\d{6,}/)||[])[0]; return n?'https://app.flexport.com/shipments/'+n:''; }
     return ''; }
-  function carrierTrackLink(carrier,code){ var u=carrierTrackUrl(carrier,code); return u?'<a href="'+u+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;font-weight:700" title="track with '+esc(carrier||'carrier')+' ↗">'+esc(code)+' ↗</a>':esc(code); }
+  function carrierTrackLink(carrier,code){ var u=carrierTrackUrl(carrier,code); return u?'<a href="'+u+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:700" title="track with '+esc(carrier||'carrier')+' ↗">'+esc(code)+' ↗</a>':esc(code); }
   // Direct-to-Client details apply when the PO branch is Direct to Client (incl. B2B JLEW/NEXT) OR a
   // client sales ref is set — otherwise the DtC tab + approval workflow do not show.
   function ppIsDtc(p){ var b=(p&&p.branch||'').toLowerCase();
@@ -636,10 +636,10 @@
       _anonObs.observe(rootEl,{childList:true,subtree:true}); setTimeout(anonSweep,80); }catch(e){} }
     rootEl.innerHTML='<div class="bar" style="align-items:center"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders <span id="pp-pos-badge"></span></span><span class="rtab" data-pt="shipmentplan">Shipment Plan <span id="pp-ship-badge"></span></span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="productions">Productions</span><span class="rtab" data-pt="samples">Sample shipments <span id="pp-samp-badge"></span></span><span class="rtab" data-pt="quality">Quality Control</span><span class="rtab" data-pt="product" id="pp-prod-tab" style="display:none">Product <span id="pp-prod-badge"></span></span><span class="rtab" data-pt="specs" id="pp-spec-tab" style="display:none">Specifications <span id="pp-spec-badge"></span></span></span>'
       +'<span id="pp-notif" style="margin-left:auto;display:none;gap:6px;align-items:center;position:relative;white-space:nowrap">'
-        +'<button id="pp-unread-btn" class="save-btn light" title="Unread messages from Dock &amp; Bay" style="position:relative">✉ <span class="pp-inbox-lbl">Inbox </span><span id="pp-unread-n">0</span></button>'
-        +'<button id="pp-recent-btn" class="save-btn light" title="Recent changes">🕘 Recent</button>'
-        +'<div id="pp-unread-drop" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;z-index:120;background:#fff;color:#0f172a;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:280px;max-width:360px;max-height:60vh;overflow:auto;text-align:left"></div>'
-        +'<div id="pp-recent-drop" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;z-index:120;background:#fff;color:#0f172a;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:300px;max-width:380px;max-height:60vh;overflow:auto;text-align:left"></div>'
+        +'<button id="pp-unread-btn" class="save-btn light" title="Unread messages from Dock &amp; Bay" style="position:relative"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><rect x="2" y="4" width="20" height="16" rx="2"></rect><path d="m2 7 10 6L22 7"></path></svg><span class="pp-inbox-lbl">Inbox </span><span id="pp-unread-n">0</span></button>'
+        +'<button id="pp-recent-btn" class="save-btn light" title="Recent changes"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>Recent</button>'
+        +'<div id="pp-unread-drop" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;z-index:120;background:#fff;color:var(--nav);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:280px;max-width:360px;max-height:60vh;overflow:auto;text-align:left"></div>'
+        +'<div id="pp-recent-drop" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;z-index:120;background:#fff;color:var(--nav);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:300px;max-width:380px;max-height:60vh;overflow:auto;text-align:left"></div>'
       +'</span></div><div id="pp-banner"></div><div id="pp-body"><div class="count">Loading…</div></div>';
     var tabsEl=document.getElementById('pp-tabs'), body=document.getElementById('pp-body');
     // ── Grouped navigation (Ben, v27.493): five sections over the existing tabs. The original .rtab[data-pt] tabs and their
@@ -751,7 +751,7 @@
         {name:'xl/worksheets/sheet1.xml', str:_xlsxSheet(grid, freeze, cols)}
       ];
       return _zipStore(files.map(function(f){ return {name:f.name, data:enc.encode(f.str)}; })); }
-    function ppCard(l,v){ return '<div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px 14px;min-width:120px"><div class="tiny mut">'+l+'</div><div style="font-weight:700;font-size:16px">'+v+'</div></div>'; }
+    function ppCard(l,v){ return '<div style="border:1px solid var(--line);border-radius:8px;padding:8px 14px;min-width:120px"><div class="tiny mut">'+l+'</div><div style="font-weight:700;font-size:16px">'+v+'</div></div>'; }
     // portal payment cell: only show a payment once it's been MADE (a paid date exists), with that date
     function ppPay(amt,dt){ return dt ? '$'+units(amt||0)+'<br><span class="mut tiny">'+esc(fd(dt))+'</span>' : '<span class="mut">—</span>'; }
     // Pin an expanded PO's detail panel (its sub-tabs + content) to the left while the wide portal grid scrolls
@@ -775,12 +775,12 @@
         var aq=(c&&c.amended_qty!=null&&c.amended_qty!=='')?Number(c.amended_qty):null;
         var qn=(aq!=null?aq:(Number(orderQty)||0)), price=(act!=null?act:(est!=null?est:0)), lt=qn*price; totQ+=qn; totP+=lt;
         var qVal=(aq!=null?aq:(orderQty!=null?orderQty:''));
-        return '<tr><td class="l" style="white-space:nowrap;min-width:30ch">'+esc(sku)+(added?' <span class="tool-badge bg-blue" style="font-size:8px">added</span>':'')+'</td>'
+        return '<tr><td class="l" style="white-space:nowrap;min-width:30ch">'+esc(sku)+(added?' <span class="tool-badge bg-blue" style="font-size:10px">added</span>':'')+'</td>'
           +'<td style="text-align:right"><input class="fci pp-qty" data-po="'+po+'" data-sku="'+esc(sku)+'" value="'+esc(qVal)+'" style="width:62px;text-align:right" inputmode="numeric"></td>'
           +'<td style="text-align:right">'+(est!=null?'$'+money(est):'<span class="mut">—</span>')+'</td>'
           +'<td style="text-align:right"><input class="fci pp-cost" data-po="'+po+'" data-sku="'+esc(sku)+'" data-est="'+(est!=null?est:0)+'" value="'+(act!=null?esc(act):'')+'" placeholder="'+(est!=null?money(est):'0.00')+'" style="width:80px;text-align:right" inputmode="decimal"></td>'
           +'<td style="text-align:right" class="pp-lt" data-sku="'+esc(sku)+'">$'+money(lt)+'</td>'
-          +'<td class="l">'+(added?'<button class="lnk-btn pp-rm" data-po="'+po+'" data-sku="'+esc(sku)+'" title="remove this added SKU" style="color:#b91c1c">✕</button>':'')+'</td></tr>';
+          +'<td class="l">'+(added?'<button class="lnk-btn pp-rm" data-po="'+po+'" data-sku="'+esc(sku)+'" title="remove this added SKU" style="color:var(--neg)">✕</button>':'')+'</td></tr>';
       }
       var rws=lines.map(function(l){ return planRow(l.sku, l.qty, (l.cost_price!=null&&l.cost_price!=='')?Number(l.cost_price):((l.sku_cost!=null&&l.sku_cost!=='')?Number(l.sku_cost):null), costs[l.sku], false); }).join('');
       Object.keys(costs).forEach(function(sku){ var c=costs[sku]; if(c&&c.is_added&&!lineSkus[sku]) rws+=planRow(sku, null, null, c, true); });
@@ -788,16 +788,16 @@
       var dlId='ppsku-'+i;
       var addOpts=supSkus.filter(function(s){ return !lineSkus[s.sku] && !(costs[s.sku]&&costs[s.sku].is_added); }).map(function(s){ return '<option value="'+esc(s.sku)+'">'+esc(s.product_name||'')+'</option>'; }).join('');
       // upload a commercial invoice / packing (.xlsx) to auto-fill qty + price overrides from the file
-      var invUpload='<div style="margin:0 0 10px;padding:8px 11px;border:1px solid #cdd9ea;border-radius:7px;background:#f8fafc">'
+      var invUpload='<div style="margin:0 0 10px;padding:8px 11px;border:1px solid #cdd9ea;border-radius:7px;background:var(--hover)">'
         +'<div class="ppx-h" style="font-weight:600;font-size:12px;margin-bottom:4px">📄 Upload invoice / packing list (Excel) to auto-fill qty &amp; price</div>'
-        +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input type="file" class="pp-inv-parse-file" data-po="'+po+'" accept=".xlsx" style="font-size:11px;max-width:280px"><button class="save-btn pp-inv-parse-go" data-po="'+po+'">Parse file</button></div>'
+        +'<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input type="file" class="pp-inv-parse-file" data-po="'+po+'" accept=".xlsx" style="font-size:12px;max-width:280px"><button class="save-btn pp-inv-parse-go" data-po="'+po+'">Parse file</button></div>'
         +'<div class="pp-inv-parse-out" data-po="'+po+'" style="margin-top:6px"></div>'
         +'<div class="tiny mut" style="margin-top:3px">Reads the SKU / Q’TY (PCS) / Unit Price columns and proposes qty + price overrides. You review, then apply — it then goes to Dock &amp; Bay to approve.</div></div>';
       // Paste-from-spreadsheet: paste SKU / Qty / Price rows straight from Excel or Google Sheets → updates qty +
       // your cost per matching SKU (added as a new line if not on the order); changes go to Dock & Bay to approve.
-      var pasteBox='<div style="margin:0 0 10px;padding:8px 11px;border:1px solid #cdd9ea;border-radius:7px;background:#f8fafc">'
+      var pasteBox='<div style="margin:0 0 10px;padding:8px 11px;border:1px solid #cdd9ea;border-radius:7px;background:var(--hover)">'
         +'<div class="ppx-h" style="font-weight:600;font-size:12px;margin-bottom:4px">📋 Paste from spreadsheet (SKU, Qty, Price)</div>'
-        +'<textarea class="pp-paste-op" data-po="'+po+'" placeholder="Paste rows from Excel / Google Sheets — one per line:\nSKU&#9;Qty&#9;Price" style="width:100%;max-width:420px;height:66px;font-size:11px;font-family:ui-monospace,Menlo,monospace;border:1px solid #cbd5e1;border-radius:6px;padding:6px;box-sizing:border-box;text-align:left"></textarea>'
+        +'<textarea class="pp-paste-op" data-po="'+po+'" placeholder="Paste rows from Excel / Google Sheets — one per line:\nSKU&#9;Qty&#9;Price" style="width:100%;max-width:420px;height:66px;font-size:12px;font-family:ui-monospace,Menlo,monospace;border:1px solid var(--line);border-radius:6px;padding:6px;box-sizing:border-box;text-align:left"></textarea>'
         +'<div style="display:flex;gap:8px;align-items:center;margin-top:5px"><button class="save-btn pp-paste-op-go" data-po="'+po+'">Apply pasted rows</button><span class="pp-paste-op-msg tiny mut" data-po="'+po+'"></span></div>'
         +'<div class="tiny mut" style="margin-top:3px">Three columns — SKU, Qty, your unit Price (tab or comma separated; a header row is ignored). Updates qty &amp; your cost per SKU; changes go to Dock &amp; Bay to approve.</div></div>';
       // "What changed since you approved" — compare the current SKUs/qtys against the snapshot taken when the
@@ -807,16 +807,16 @@
       var _chgs=[]; if(_appr){ var _cur={}; lines.forEach(function(l){ _cur[l.sku]=Number(l.qty)||0; });
         Object.keys(_appr).forEach(function(sku){ var old=Number(_appr[sku])||0, nw=(_cur[sku]!=null?_cur[sku]:0); if(nw!==old)_chgs.push({sku:sku,old:old,nw:nw,kind:(nw===0?'removed':(nw>old?'up':'down'))}); });
         lines.forEach(function(l){ var nw=Number(l.qty)||0; if(nw>0 && !(l.sku in _appr))_chgs.push({sku:l.sku,old:0,nw:nw,kind:'new'}); }); }
-      var chgHtml=_chgs.length ? '<div style="background:#fef3c7;border:1px solid #fcd34d;border-radius:6px;padding:8px 11px;margin:0 0 8px;max-width:540px">'
+      var chgHtml=_chgs.length ? '<div style="background:var(--amber-bg);border:1px solid #fcd34d;border-radius:6px;padding:8px 11px;margin:0 0 8px;max-width:540px">'
         +'<div style="font-weight:700;font-size:12px;margin-bottom:4px">⚠ Changes since you approved — please review &amp; re-confirm</div>'
-        +'<div style="overflow-x:auto"><table style="font-size:11px;border-collapse:collapse;width:auto"><thead><tr><th class="l" style="padding:2px 12px 3px 0;min-width:30ch;white-space:nowrap">SKU</th><th style="text-align:right;padding:2px 12px 3px">Was</th><th style="text-align:right;padding:2px 12px 3px">Now</th><th class="l" style="padding:2px 0 3px">Change</th></tr></thead><tbody>'
+        +'<div style="overflow-x:auto"><table style="font-size:12px;border-collapse:collapse;width:auto"><thead><tr><th class="l" style="padding:2px 12px 3px 0;min-width:30ch;white-space:nowrap">SKU</th><th style="text-align:right;padding:2px 12px 3px">Was</th><th style="text-align:right;padding:2px 12px 3px">Now</th><th class="l" style="padding:2px 0 3px">Change</th></tr></thead><tbody>'
         +_chgs.map(function(c){ var d=c.nw-c.old; return '<tr><td class="l" style="padding:1px 12px 1px 0;min-width:30ch;white-space:nowrap">'+esc(c.sku)+'</td><td style="text-align:right;padding:1px 12px">'+(c.kind==='new'?'<span class="mut">—</span>':c.old)+'</td><td style="text-align:right;padding:1px 12px">'+c.nw+'</td><td class="l" style="font-weight:600;color:'+(c.kind==='removed'?'#b91c1c':d>0?'#166534':'#b45309')+'">'+(c.kind==='new'?'added':c.kind==='removed'?'removed':(d>0?'+':'')+d)+'</td></tr>'; }).join('')
         +'</tbody></table></div></div>' : '';
       var skus=chgHtml+invUpload+pasteBox
-        +'<div style="margin:3px 0 4px"><button class="lnk-btn pp-op-csv" data-po="'+po+'" style="font-size:11px">⤓ Download to CSV</button></div>'
-        +'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table style="font-size:11px;margin:3px 0 6px;width:auto"><thead><tr><th class="l" style="white-space:nowrap;min-width:30ch">SKU</th><th style="text-align:right">Qty</th><th style="text-align:right">Est. cost</th><th style="text-align:right">Your cost</th><th style="text-align:right">Line total</th><th></th></tr></thead><tbody>'
+        +'<div style="margin:3px 0 4px"><button class="lnk-btn pp-op-csv" data-po="'+po+'" style="font-size:12px">⤓ Download to CSV</button></div>'
+        +'<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table style="font-size:12px;margin:3px 0 6px;width:auto"><thead><tr><th class="l" style="white-space:nowrap;min-width:30ch">SKU</th><th style="text-align:right">Qty</th><th style="text-align:right">Est. cost</th><th style="text-align:right">Your cost</th><th style="text-align:right">Line total</th><th></th></tr></thead><tbody>'
         +rws
-        +'<tr style="font-weight:700;border-top:2px solid #999"><td class="l">TOTAL</td><td style="text-align:right" class="pp-totq">'+units(totQ)+'</td><td></td><td style="text-align:right">FINAL</td><td style="text-align:right" class="pp-totp">$'+money(totP)+'</td><td></td></tr>'
+        +'<tr style="font-weight:700;border-top:2px solid var(--faint)"><td class="l">TOTAL</td><td style="text-align:right" class="pp-totq">'+units(totQ)+'</td><td></td><td style="text-align:right">FINAL</td><td style="text-align:right" class="pp-totp">$'+money(totP)+'</td><td></td></tr>'
         +'</tbody></table></div>'
         +'<div style="margin:6px 0"><button class="save-btn pp-op-addline" data-po="'+po+'">+ Add new line</button></div>'
         +'<div class="pp-op-picker" data-po="'+po+'" style="display:none"></div>'
@@ -827,15 +827,15 @@
           +'<td style="text-align:right"><input class="fci pp-ac-qty" data-id="'+a.id+'" value="'+(a.qty!=null?esc(a.qty):'')+'" style="width:56px;text-align:right" inputmode="numeric"></td>'
           +'<td style="text-align:right"><input class="fci pp-ac-price" data-id="'+a.id+'" value="'+(a.price!=null?esc(a.price):'')+'" style="width:74px;text-align:right" inputmode="decimal"></td>'
           +'<td style="text-align:right">$'+money(lt)+'</td>'
-          +'<td class="l"><button class="lnk-btn pp-ac-rm" data-id="'+a.id+'" title="remove" style="color:#b91c1c">✕</button></td></tr>'; }).join('');
+          +'<td class="l"><button class="lnk-btn pp-ac-rm" data-id="'+a.id+'" title="remove" style="color:var(--neg)">✕</button></td></tr>'; }).join('');
       var invTot=totP+addTot;
       skus+='<div class="sect-h" style="margin-top:12px">Additional costs <span class="mut tiny">(freight, tooling, surcharges… — added to the invoice)</span></div>'
-        +'<table style="font-size:11px;border-collapse:collapse;text-align:left;table-layout:fixed;width:540px;max-width:100%"><colgroup><col style="width:200px"><col style="width:72px"><col style="width:90px"><col style="width:88px"><col style="width:70px"></colgroup><thead><tr><th class="l">Description</th><th class="l">Qty</th><th class="l">Price</th><th class="l">Total</th><th></th></tr></thead><tbody>'
+        +'<table style="font-size:12px;border-collapse:collapse;text-align:left;table-layout:fixed;width:540px;max-width:100%"><colgroup><col style="width:200px"><col style="width:72px"><col style="width:90px"><col style="width:88px"><col style="width:70px"></colgroup><thead><tr><th class="l">Description</th><th class="l">Qty</th><th class="l">Price</th><th class="l">Total</th><th></th></tr></thead><tbody>'
         +acRows
         +'<tr><td class="l"><input class="fci pp-ac-ndesc" data-po="'+po+'" placeholder="+ add a cost…" style="width:190px;text-align:left"></td><td style="text-align:right"><input class="fci pp-ac-nqty" data-po="'+po+'" placeholder="qty" style="width:56px;text-align:right" inputmode="numeric"></td><td style="text-align:right"><input class="fci pp-ac-nprice" data-po="'+po+'" placeholder="price" style="width:74px;text-align:right" inputmode="decimal"></td><td></td><td class="l"><button class="save-btn pp-ac-add" data-po="'+po+'">Add</button></td></tr>'
-        +(add.length?'<tr style="font-weight:700;border-top:1px solid #ccc"><td class="l">Additional total</td><td></td><td></td><td style="text-align:right">$'+money(addTot)+'</td><td></td></tr>':'')
+        +(add.length?'<tr style="font-weight:700;border-top:1px solid var(--line)"><td class="l">Additional total</td><td></td><td></td><td style="text-align:right">$'+money(addTot)+'</td><td></td></tr>':'')
         +'</tbody></table>'
-        +'<div style="margin:12px 0 4px;padding:10px 12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-weight:800;font-size:18px">Total invoice amount: <span class="pp-inv-tot" data-add="'+addTot+'">$'+money(invTot)+'</span> <span class="mut" style="font-weight:400;font-size:12px">(line items $'+money(totP)+' + additional $'+money(addTot)+')</span></div>';
+        +'<div style="margin:12px 0 4px;padding:10px 12px;background:var(--blue-soft);border:1px solid #bfdbfe;border-radius:8px;font-weight:800;font-size:15px">Total invoice amount: <span class="pp-inv-tot" data-add="'+addTot+'">$'+money(invTot)+'</span> <span class="mut" style="font-weight:400;font-size:12px">(line items $'+money(totP)+' + additional $'+money(addTot)+')</span></div>';
       // ---- crossdock SKUs → shipped-qty entry lives in the SHIPMENT tab (becomes an open action once shipping) ----
       var cdSkus=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
       var today=new Date().toISOString().slice(0,10);
@@ -847,39 +847,39 @@
       //      Lives at the top of the TIMELINE tab; an unconfirmed order is then an open action item. ----
       var needConfirm=!!p.require_confirmation;
       var confirmed=!!p.supplier_confirmed;
-      var confirmBar=needConfirm?('<div style="margin:0 0 10px;padding:8px 11px;border-radius:6px;font-size:12px;box-sizing:border-box;'+(confirmed?'background:#dcfce7;border:1px solid #86efac':'background:#fef3c7;border:1px solid #fcd34d')+'">'
+      var confirmBar=needConfirm?('<div style="margin:0 0 10px;padding:8px 11px;border-radius:6px;font-size:12px;box-sizing:border-box;'+(confirmed?'background:var(--pos-bg);border:1px solid var(--pos-bg)':'background:var(--amber-bg);border:1px solid #fcd34d')+'">'
         +(confirmed
           ? '<div style="margin-bottom:8px">✓ <b>Order confirmed</b> on '+esc(p.supplier_confirmed)+(p.supplier_confirmed_by?' · '+esc(p.supplier_confirmed_by):'')+'</div><button class="save-btn light pp-confirm" data-po="'+po+'" data-v="0">Withdraw confirmation</button>'
-          : '<div style="margin-bottom:8px">⏳ <b>'+(_chgs.length?'A change has been made. Please re-confirm this order.':'Please confirm this order.')+'</b> Review the SKUs &amp; quantities (ORDER PLAN tab) and the dates, amend anything that\'s wrong, then confirm.</div><button class="save-btn pp-confirm" data-po="'+po+'" data-v="1" style="background:#16a34a;color:#fff;border-color:#16a34a">✓ Confirm order</button>')
+          : '<div style="margin-bottom:8px">⏳ <b>'+(_chgs.length?'A change has been made. Please re-confirm this order.':'Please confirm this order.')+'</b> Review the SKUs &amp; quantities (ORDER PLAN tab) and the dates, amend anything that\'s wrong, then confirm.</div><button class="save-btn pp-confirm" data-po="'+po+'" data-v="1" style="background:var(--pos);color:#fff;border-color:var(--pos)">✓ Confirm order</button>')
         +'</div>'):'';
       // The same confirm / re-confirm prompt + button also sits at the top of the ORDER PLAN tab (Ben). Yellow
       // prompt only — once confirmed it disappears from BOTH tabs (the card re-renders on confirm). Withdraw
       // stays on the TIMELINE banner only.
-      var confirmOP=(needConfirm && !confirmed)?('<div style="margin:0 0 10px;padding:8px 11px;border-radius:6px;font-size:12px;box-sizing:border-box;background:#fef3c7;border:1px solid #fcd34d">'
+      var confirmOP=(needConfirm && !confirmed)?('<div style="margin:0 0 10px;padding:8px 11px;border-radius:6px;font-size:12px;box-sizing:border-box;background:var(--amber-bg);border:1px solid #fcd34d">'
         +'<div style="margin-bottom:8px">⏳ <b>'+(_chgs.length?'A change has been made. Please re-confirm this order.':'Please confirm this order.')+'</b> Review the SKUs &amp; quantities and the dates below, amend anything that\'s wrong, then confirm.</div>'
-        +'<button class="save-btn pp-confirm" data-po="'+po+'" data-v="1" style="background:#16a34a;color:#fff;border-color:#16a34a">✓ Confirm order</button></div>'):'';
-      skus=confirmOP+'<div class="sect-h" style="font-size:14px;margin:0 0 8px">Step 1 — Confirm order plan <span class="mut tiny" style="font-weight:400">(SKU · qty · your cost)</span></div>'+skus;
+        +'<button class="save-btn pp-confirm" data-po="'+po+'" data-v="1" style="background:var(--pos);color:#fff;border-color:var(--pos)">✓ Confirm order</button></div>'):'';
+      skus=confirmOP+'<div class="sect-h" style="font-size:15px;margin:0 0 8px">Step 1 — Confirm order plan <span class="mut tiny" style="font-weight:400">(SKU · qty · your cost)</span></div>'+skus;
       // ---- TIMELINE: production status + status + notes (Dock & Bay notes show as 'new' until you mark them read) ----
       var unreadInt=notes.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
       var prodExc=needConfirm?prodAttention(p.production_status, p.prod_start, p.prod_end, subs):'';
       var cdVal=poCdVal(p, subs), cdMiss=poCdMissing(p, subs);
-      var prodBlock='<div style="margin-bottom:10px;padding:8px 11px;border-radius:6px;font-size:12px;box-sizing:border-box;'+((prodExc||cdMiss)?'background:#fef3c7;border:1px solid #fcd34d':'background:#f1f5f9;border:1px solid #e5e7eb')+'">'
+      var prodBlock='<div style="margin-bottom:10px;padding:8px 11px;border-radius:6px;font-size:12px;box-sizing:border-box;'+((prodExc||cdMiss)?'background:var(--amber-bg);border:1px solid #fcd34d':'background:var(--hover);border:1px solid var(--line)')+'">'
         +'<b>Production status</b> &nbsp; '+prodStatusSel(p.po, p.production_status||'')
-        +'<div style="margin-top:8px"><b>Completion date</b> &nbsp; <input type="date" class="pp-cd-grid" data-po="'+esc(p.po)+'" value="'+esc(cdVal)+'" title="your production completion date — submitted for Dock &amp; Bay approval; kept in sync with the purchase order grid" style="width:150px;cursor:pointer;text-align:left;font:inherit;font-size:12px;padding:4px 6px;border:1px solid '+(cdMiss?'#dc2626':'#93c5fd')+';border-radius:4px;background:'+(cdMiss?'#fef2f2':'#eff6ff')+';color:#1d4ed8">'
-        +(cdMiss?' <span style="background:#dc2626;color:#fff;border-radius:4px;font-size:10px;font-weight:700;padding:2px 7px">⚠ Must enter completion date</span>':'')+'</div>'
-        +(prodExc?'<div class="tiny" style="color:#b45309;margin-top:4px">⚠ '+esc(prodExc)+'</div>':'')+'</div>';
+        +'<div style="margin-top:8px"><b>Completion date</b> &nbsp; <input type="date" class="pp-cd-grid" data-po="'+esc(p.po)+'" value="'+esc(cdVal)+'" title="your production completion date — submitted for Dock &amp; Bay approval; kept in sync with the purchase order grid" style="width:150px;cursor:pointer;text-align:left;font:inherit;font-size:12px;padding:4px 6px;border:1px solid '+(cdMiss?'#dc2626':'#93c5fd')+';border-radius:4px;background:'+(cdMiss?'#fef2f2':'#eff6ff')+';color:var(--blue)">'
+        +(cdMiss?' <span style="background:var(--neg);color:#fff;border-radius:4px;font-size:10.5px;font-weight:700;padding:2px 7px">⚠ Must enter completion date</span>':'')+'</div>'
+        +(prodExc?'<div class="tiny" style="color:var(--amber);margin-top:4px">⚠ '+esc(prodExc)+'</div>':'')+'</div>';
       // escalate is only offered on the supplier's OWN latest message (it emails Dock & Bay) — never on a D&B note
       var _supNotes=(notes||[]).filter(function(n){return n.author_kind!=='internal';});
       var _recentSupNoteId=_supNotes.length?_supNotes.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0].id:null;
       var timeline=confirmBar+prodBlock
-        +(pend.length?'<div class="tiny" style="color:#92400e;margin-bottom:3px">⏳ Submitted, awaiting approval: '+pend.map(function(s){return esc(subFmt(s));}).join(' · ')+'</div>':'')
-        +(appl.length?'<div class="tiny" style="color:#166534;margin-bottom:6px">✓ Applied: '+appl.map(function(s){return esc(subFmt(s))+(s.attachment_id?' <a href="/api/portal/attachment/'+s.attachment_id+'" target="_blank">doc</a>':'');}).join(' · ')+'</div>':'')
+        +(pend.length?'<div class="tiny" style="color:var(--amber);margin-bottom:3px">⏳ Submitted, awaiting approval: '+pend.map(function(s){return esc(subFmt(s));}).join(' · ')+'</div>':'')
+        +(appl.length?'<div class="tiny" style="color:var(--pos);margin-bottom:6px">✓ Applied: '+appl.map(function(s){return esc(subFmt(s))+(s.attachment_id?' <a href="/api/portal/attachment/'+s.attachment_id+'" target="_blank">doc</a>':'');}).join(' · ')+'</div>':'')
         +'<div style="margin:0 0 8px;display:flex;gap:5px"><textarea class="pp-note-body fci" data-po="'+po+'" rows="1" placeholder="Reply to Dock &amp; Bay…" style="flex:1;min-height:26px;max-width:420px;text-align:left"></textarea><button class="save-btn pp-note-post" data-po="'+po+'">Post</button></div>'
         +(notes.length?tlDesc(notes).map(function(n){ var internal=(n.author_kind==='internal');
           var ctrl = internal
-            ? (n.read?'<button class="pp-note-read" data-id="'+n.id+'" data-read="1" style="font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline;white-space:nowrap;background:none;border:none;padding:0">mark unread</button>':'<button class="save-btn light pp-note-read" data-id="'+n.id+'" data-read="0">Mark read</button>')
-            : ((EP.escalate&&n.id===_recentSupNoteId)?'<button class="save-btn light pp-esc-note" data-po="'+po+'" data-msg="'+esc(n.body)+'" title="email this note to the supply planner" style="color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'');
-          return '<div style="font-size:11px;margin:3px 0;max-width:640px;padding:5px 8px;background:'+(internal?(n.read?'#eef2ff':'#fff7ed'):'#f1f5f9')+';border:1px solid '+(internal&&!n.read?'#fdba74':'#e5e7eb')+';border-radius:5px;display:flex;gap:10px;align-items:flex-start">'
+            ? (n.read?'<button class="pp-note-read" data-id="'+n.id+'" data-read="1" style="font-size:10.5px;color:var(--muted);cursor:pointer;text-decoration:underline;white-space:nowrap;background:none;border:none;padding:0">mark unread</button>':'<button class="save-btn light pp-note-read" data-id="'+n.id+'" data-read="0">Mark read</button>')
+            : ((EP.escalate&&n.id===_recentSupNoteId)?'<button class="save-btn light pp-esc-note" data-po="'+po+'" data-msg="'+esc(n.body)+'" title="email this note to the supply planner" style="color:var(--neg);border-color:var(--neg-cell);white-space:nowrap">⚑ Escalate</button>':'');
+          return '<div style="font-size:12px;margin:3px 0;max-width:640px;padding:5px 8px;background:'+(internal?(n.read?'#eef2ff':'#fff7ed'):'#f1f5f9')+';border:1px solid '+(internal&&!n.read?'#fdba74':'#e5e7eb')+';border-radius:5px;display:flex;gap:10px;align-items:flex-start">'
             +(ctrl?'<div style="flex:0 0 auto;display:flex;flex-direction:column;gap:3px;align-items:flex-start;min-width:78px">'+ctrl+'</div>':'')
             +'<div style="flex:1"><span class="mut tiny">'+esc(n.created_at)+' · '+(internal?'Dock &amp; Bay':'You')+'</span>'+(internal&&!n.read?' <span class="ex-badge">new</span>':'')+'<br>'+esc(n.body)+'</div>'
             +'</div>'; }).join(''):'<div class="mut tiny">No notes yet.</div>');
@@ -892,15 +892,15 @@
       var _invCalc=(Number(invTot)||0).toFixed(2);   // Step-1 calculated total; the amount is compared LIVE against this
       var _invNow=(Number(String(invDefault).replace(/,/g,''))||0);
       var invMismatch=(Math.abs(_invNow-(Number(invTot)||0))>0.01);   // current field value ≠ calculated
-      var invStep2='<div class="sect-h" style="font-size:14px;margin:18px 0 8px;padding-top:12px;border-top:2px solid #e5e7eb">Step 2 — Confirm invoice amount</div>'
-        +'<div class="pp-inv-warn" data-po="'+po+'" data-calc="'+_invCalc+'" style="'+(invMismatch?'':'display:none;')+'margin:0 0 10px;padding:8px 11px;border-radius:6px;font-size:12px;background:#fef2f2;border:1px solid #fca5a5;color:#991b1b"><b>⚠ Invoice amount doesn\'t match the order plan.</b> Your invoice amount differs from the calculated total <b>$'+money(invTot)+'</b>. Please update the order plan in Step 1 above (SKUs / quantities / costs) so they match.</div>'
-        +(invoiceDue(p,subs)?'<div style="margin:0 0 12px;padding:8px 11px;border-radius:6px;font-size:12px;background:#fef3c7;border:1px solid #fcd34d">⏳ <b>Please submit your invoice.</b> This order\'s production is complete, so Dock &amp; Bay need your commercial invoice to proceed with payment.</div>':'')
+      var invStep2='<div class="sect-h" style="font-size:15px;margin:18px 0 8px;padding-top:12px;border-top:2px solid var(--line)">Step 2 — Confirm invoice amount</div>'
+        +'<div class="pp-inv-warn" data-po="'+po+'" data-calc="'+_invCalc+'" style="'+(invMismatch?'':'display:none;')+'margin:0 0 10px;padding:8px 11px;border-radius:6px;font-size:12px;background:var(--neg-bg);border:1px solid var(--neg-cell);color:var(--neg)"><b>⚠ Invoice amount doesn\'t match the order plan.</b> Your invoice amount differs from the calculated total <b>$'+money(invTot)+'</b>. Please update the order plan in Step 1 above (SKUs / quantities / costs) so they match.</div>'
+        +(invoiceDue(p,subs)?'<div style="margin:0 0 12px;padding:8px 11px;border-radius:6px;font-size:12px;background:var(--amber-bg);border:1px solid #fcd34d">⏳ <b>Please submit your invoice.</b> This order\'s production is complete, so Dock &amp; Bay need your commercial invoice to proceed with payment.</div>':'')
         +'<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end">'
         +'<label class="tiny">Invoice amount (USD) <span class="mut">— defaults to the calculated total above</span><br><input class="fci pp-inv" data-po="'+po+'" data-calc="'+_invCalc+'" placeholder="0.00" value="'+invDefault+'" style="width:150px;font-size:15px;font-weight:700"></label>'
-        +'<label class="tiny">Invoice doc <span class="mut">(optional)</span><br><input type="file" class="pp-inv-file" data-po="'+po+'" style="font-size:11px;width:200px"></label>'
-        +'<button class="save-btn pp-inv-go" data-po="'+po+'" style="background:#16a34a;color:#fff;border-color:#15803d;font-weight:700">SUBMIT TO DOCK &amp; BAY FOR APPROVAL</button></div>'
-        +(invSub?'<div class="tiny" style="margin-top:8px;padding:6px 9px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:6px">Submitted: <b>$'+esc(invSub.value)+'</b> · '+esc(invSub.submitted_at||'')+' · '+invStatus+(invSub.attachment_id?' · <a href="/api/portal/attachment/'+invSub.attachment_id+'" target="_blank">doc</a>':'')+'</div>':'')
-        +'<div style="margin-top:12px"><button class="save-btn pp-po-inv" data-po="'+esc(po)+'" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd;font-weight:600">⤓ DOWNLOAD GENERATED TAX INVOICE FOR THIS PO</button></div>';
+        +'<label class="tiny">Invoice doc <span class="mut">(optional)</span><br><input type="file" class="pp-inv-file" data-po="'+po+'" style="font-size:12px;width:200px"></label>'
+        +'<button class="save-btn pp-inv-go" data-po="'+po+'" style="background:var(--pos);color:#fff;border-color:var(--pos);font-weight:700">SUBMIT TO DOCK &amp; BAY FOR APPROVAL</button></div>'
+        +(invSub?'<div class="tiny" style="margin-top:8px;padding:6px 9px;background:var(--hover);border:1px solid var(--line);border-radius:6px">Submitted: <b>$'+esc(invSub.value)+'</b> · '+esc(invSub.submitted_at||'')+' · '+invStatus+(invSub.attachment_id?' · <a href="/api/portal/attachment/'+invSub.attachment_id+'" target="_blank">doc</a>':'')+'</div>':'')
+        +'<div style="margin-top:12px"><button class="save-btn pp-po-inv" data-po="'+esc(po)+'" style="background:var(--blue-soft);color:var(--blue-ink);border:1px solid #93c5fd;font-weight:600">⤓ DOWNLOAD GENERATED TAX INVOICE FOR THIS PO</button></div>';
       // DOCUMENTS — moved to the PAYMENTS & DOCUMENTS tab
       var pdocs=(_ppData&&_ppData.docsByPo&&_ppData.docsByPo[po])||[];
       var attBase=(EP.attachmentBase||'/api/portal/attachment/');
@@ -909,22 +909,22 @@
       function docStatusCell(d){ var s=d.approval_status||'draft';
         if(s==='submitted') return '<span class="tool-badge bg-amber">⏳ Awaiting Dock &amp; Bay approval</span>';
         if(s==='approved') return '<span class="tool-badge bg-green">✓ Approved</span>'+(d.reviewed_at?' <span class="mut tiny">'+esc(d.reviewed_at)+'</span>':'');
-        if(s==='rejected') return '<span class="tool-badge" style="background:#fee2e2;color:#b91c1c">✗ Rejected</span>'+(d.review_notes?' <span class="mut tiny">'+esc(d.review_notes)+'</span>':'');
+        if(s==='rejected') return '<span class="tool-badge" style="background:var(--neg-bg);color:var(--neg)">✗ Rejected</span>'+(d.review_notes?' <span class="mut tiny">'+esc(d.review_notes)+'</span>':'');
         return '<span class="mut tiny">Draft</span>'; }
       function docActionCell(d){ var s=d.approval_status||'draft', canSubmit=(s==='draft'||s==='rejected')&&EP.docSubmit;
         return (canSubmit?'<button class="save-btn pp-doc-submit" data-id="'+d.id+'" data-po="'+po+'" title="send this document to Dock &amp; Bay for approval">'+(s==='rejected'?'Re-submit':'Submit for approval')+'</button> ':'')
-          +'<button class="lnk-btn pp-doc-rm" data-id="'+d.id+'" data-po="'+po+'" style="color:#b91c1c">remove</button>'; }
+          +'<button class="lnk-btn pp-doc-rm" data-id="'+d.id+'" data-po="'+po+'" style="color:var(--neg)">remove</button>'; }
       var docRows=pdocs.length?pdocs.map(function(d){ return '<tr><td class="l">'+esc(d.category||'Other')+'</td><td class="l"><a href="'+attBase+d.id+'" target="_blank" rel="noopener">'+esc(d.filename||'file')+'</a></td><td class="l mut tiny">'+esc(d.uploaded_at||'')+'</td><td class="l">'+docStatusCell(d)+'</td><td class="l">'+docActionCell(d)+'</td></tr>'; }).join('')
         :'<tr><td colspan="5" class="mut tiny">No documents uploaded yet.</td></tr>';
       var docsBlock='<div class="sect-h" style="margin-top:16px">Documents <span class="mut tiny">— attach your commercial invoice, packing list, certificates, photos… then submit for Dock &amp; Bay approval</span></div>'
         +'<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:6px">'
         +'<label class="tiny">Type<br><select class="fci pp-doc-type" data-po="'+po+'" style="text-align:left;min-width:160px">'+DOC_TYPES.map(function(t){return '<option>'+esc(t)+'</option>';}).join('')+'</select></label>'
-        +'<label class="tiny">File<br><input type="file" class="pp-doc-file" data-po="'+po+'" style="font-size:11px;width:210px"></label>'
+        +'<label class="tiny">File<br><input type="file" class="pp-doc-file" data-po="'+po+'" style="font-size:12px;width:210px"></label>'
         +'<button class="save-btn pp-doc-go" data-po="'+po+'">Upload document</button></div>'
-        +'<table style="font-size:11px;width:auto"><thead><tr><th class="l">Type</th><th class="l">File</th><th class="l">Uploaded</th><th class="l">Approval</th><th></th></tr></thead><tbody>'+docRows+'</tbody></table>'
+        +'<table style="font-size:12px;width:auto"><thead><tr><th class="l">Type</th><th class="l">File</th><th class="l">Uploaded</th><th class="l">Approval</th><th></th></tr></thead><tbody>'+docRows+'</tbody></table>'
         +(/coghlans/i.test(p.branch||'')?'<div style="margin-top:8px"><button class="save-btn" onclick="window.open(\'/api/portal/asn-labels/\'+encodeURIComponent(\''+po+'\'))" title="download your A4 ASN pallet labels — one page per pallet">⤓ ASN Pallet Labels</button> <span class="mut tiny">one A4 page per pallet</span></div>':'');
       var _cdevRefs=(p.custom_dev_ref||'').split(',').map(function(x){return x.trim();}).filter(Boolean);
-      var _cdevBanner=p.dtc_custom?('<div style="margin:0 0 10px;padding:9px 12px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;font-size:12px;text-align:left"><b>🧵 Custom order</b>'+(_cdevRefs.length?(' — product development(s): '+_cdevRefs.map(function(r){return '<b style="font-family:ui-monospace,Menlo,monospace">'+esc(r)+'</b>';}).join(', ')):'')+'</div>'):'';
+      var _cdevBanner=p.dtc_custom?('<div style="margin:0 0 10px;padding:9px 12px;background:var(--blue-soft);border:1px solid #bfdbfe;border-radius:8px;font-size:12px;text-align:left"><b>🧵 Custom order</b>'+(_cdevRefs.length?(' — product development(s): '+_cdevRefs.map(function(r){return '<b style="font-family:ui-monospace,Menlo,monospace">'+esc(r)+'</b>';}).join(', ')):'')+'</div>'):'';
       var orderInvoice=_cdevBanner+skus+invStep2;   // merged ORDER PLAN & INVOICE tab (Step 1 order plan + Step 2 invoice)
       // ---- SHIPMENT: flexport details, else submit tracking/carrier + completion ----
       var shipLabelBtn=(p.ship_other_supplier?'<div style="margin:6px 0"><button class="save-btn pp-shiplabel" data-po="'+po+'" title="this shipment consolidates under another supplier’s master — download the SHIPS WITH labels for your cartons">⤓ Shipment Labels</button> <span class="mut tiny">consolidated under another supplier — label your cartons</span></div>':'');
@@ -941,9 +941,9 @@
             +(p.ship_mode?'<br>Freight Mode: <b>'+esc(String(p.ship_mode).toUpperCase())+'</b>':'')
             +(p.ships_with_supplier?'<br>ships with supplier: <b>'+esc(p.ships_with_supplier)+'</b>':'')
             +'<br>Ship date: '+(p.ship?esc(fd(p.ship)):'<span class="mut">—</span>')+' · Est. completion: '+(p.prod_end?esc(fd(p.prod_end)):'<span class="mut">—</span>')
-            +' &nbsp; <button class="lnk-btn pp-go-shipplan" data-ref="'+esc(p.shipment)+'" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;background:none;border:none;padding:0;font:inherit">View in Shipment Plan →</button></div>'
-        : '<div style="font-size:13px;color:#334155;margin-bottom:8px">No shipment assigned yet — enter the carrier &amp; tracking below and we’ll create the shipment for this PO.</div>';
-      if(p.branch_delivery_notes) shipHead += '<div style="margin:0 0 10px;padding:8px 11px;border-radius:6px;font-size:12px;background:#eff6ff;border:1px solid #bfdbfe;white-space:pre-wrap"><b>Delivery notes'+(p.branch?' for '+esc(p.branch):'')+'</b><br>'+esc(p.branch_delivery_notes)+'</div>';   // branch delivery notes (from the PO's branch)
+            +' &nbsp; <button class="lnk-btn pp-go-shipplan" data-ref="'+esc(p.shipment)+'" style="color:var(--blue);text-decoration:underline;cursor:pointer;background:none;border:none;padding:0;font:inherit">View in Shipment Plan →</button></div>'
+        : '<div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:8px">No shipment assigned yet — enter the carrier &amp; tracking below and we’ll create the shipment for this PO.</div>';
+      if(p.branch_delivery_notes) shipHead += '<div style="margin:0 0 10px;padding:8px 11px;border-radius:6px;font-size:12px;background:var(--blue-soft);border:1px solid #bfdbfe;white-space:pre-wrap"><b>Delivery notes'+(p.branch?' for '+esc(p.branch):'')+'</b><br>'+esc(p.branch_delivery_notes)+'</div>';   // branch delivery notes (from the PO's branch)
       var flexRef=p.flexport_reference||p.flex_id||((carVal==='Flexport')?trkVal:'');
       var shipment=hasShip
         // shipment already linked → carrier / tracking / Flexport ref are READ-ONLY (managed on the shipment centrally)
@@ -979,9 +979,9 @@
       // Shipment details — PALLETS shows for ALL POs; carton count / CBM / weight / dimensions are Direct-to-Client only.
       { var _isDtcSd=ppIsDtc(p), _dtcToday=new Date().toISOString().slice(0,10), _dtcOverdue=(_isDtcSd&&p.prod_end&&p.prod_end<_dtcToday&&!p.dtc_entered_at);
         shipment += '<div class="sect-h" style="margin-top:16px">Shipment details'+(_dtcOverdue?' <span class="ex-badge" title="production has ended — please enter your shipment details">!</span>':'')+'</div>'
-          +'<div class="tiny'+(_dtcOverdue?'':' mut')+'" style="margin-bottom:6px'+(_dtcOverdue?';color:#92400e':'')+'">'+(_dtcOverdue?'⚠ Production has ended — please enter the shipment details for this direct-to-client order.':(_isDtcSd?'Enter the pallet count, cartons, cargo volume, gross weight and dimensions for this shipment.':'Enter the number of pallets for this shipment.'))+'</div>'
+          +'<div class="tiny'+(_dtcOverdue?'':' mut')+'" style="margin-bottom:6px'+(_dtcOverdue?';color:var(--amber)':'')+'">'+(_dtcOverdue?'⚠ Production has ended — please enter the shipment details for this direct-to-client order.':(_isDtcSd?'Enter the pallet count, cartons, cargo volume, gross weight and dimensions for this shipment.':'Enter the number of pallets for this shipment.'))+'</div>'
           +'<div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end">'
-          +'<label class="tiny">Pallets <span class="pp-pal-est" data-po="'+po+'" style="color:#64748b"></span><br><input class="fci pp-pallets" data-po="'+po+'" placeholder="(estimate)" inputmode="decimal" style="width:100px;text-align:left"></label>'
+          +'<label class="tiny">Pallets <span class="pp-pal-est" data-po="'+po+'" style="color:var(--muted)"></span><br><input class="fci pp-pallets" data-po="'+po+'" placeholder="(estimate)" inputmode="decimal" style="width:100px;text-align:left"></label>'
           +(_isDtcSd?(
             '<label class="tiny">Carton count<br><input class="fci pp-dtc" data-po="'+po+'" data-f="cartons" value="'+esc(p.dtc_cartons!=null?p.dtc_cartons:'')+'" inputmode="numeric" style="width:100px;text-align:left"></label>'
             +'<label class="tiny">Cargo volume (CBM)<br><input class="fci pp-dtc" data-po="'+po+'" data-f="cbm" value="'+esc(p.dtc_cbm!=null?p.dtc_cbm:'')+'" inputmode="decimal" style="width:120px;text-align:left"></label>'
@@ -993,13 +993,13 @@
       if(cdSkus.length){ var xrows=cdSkus.map(function(s){ var q=xd[s];
           return '<tr><td class="l">'+esc(s)+'</td><td style="text-align:right"><input class="fci pp-xqty" data-po="'+po+'" data-sku="'+esc(s)+'" value="'+(q!=null&&q!==''?esc(q):'')+'" placeholder="qty shipped" style="width:96px;text-align:right" inputmode="numeric"></td></tr>'; }).join('');
         shipment += '<div class="sect-h" style="margin-top:14px">Crossdock SKUs on this shipment'+(xdAction?' <span class="ex-badge" title="enter the quantity shipped for each crossdock SKU">'+xdMissing+'</span>':'')+'</div>'
-          +(xdReq?'<div class="tiny" style="color:#92400e;margin-bottom:4px">⚠ This order is shipping — enter the quantity shipped for each crossdock SKU.</div>':'<div class="tiny mut" style="margin-bottom:4px">Enter the quantity shipped for each crossdock SKU (required once the order is shipping).</div>')
-          +'<table style="font-size:11px;width:auto"><thead><tr><th class="l">Crossdock SKU</th><th style="text-align:right">Qty shipped</th></tr></thead><tbody>'+xrows+'</tbody></table>'
+          +(xdReq?'<div class="tiny" style="color:var(--amber);margin-bottom:4px">⚠ This order is shipping — enter the quantity shipped for each crossdock SKU.</div>':'<div class="tiny mut" style="margin-bottom:4px">Enter the quantity shipped for each crossdock SKU (required once the order is shipping).</div>')
+          +'<table style="font-size:12px;width:auto"><thead><tr><th class="l">Crossdock SKU</th><th style="text-align:right">Qty shipped</th></tr></thead><tbody>'+xrows+'</tbody></table>'
           +'<div class="tiny mut" style="margin-top:3px">Download the crossdock box labels from the grid (⤓ Crossdock).</div>'; }
       // ---- BARCODES & LABELS tab: PO + production barcodes (always); Ship-To pallet labels (only when this PO
       //      ships under another supplier's PO); Direct-to-Client / FBA attachments (only when there are any) ----
       var clientDocs=p.client_docs||[];
-      function blRow(lbl,val){ return '<div style="display:flex;gap:14px;align-items:baseline;padding:7px 0;border-bottom:1px solid #f1f1f1"><div style="flex:0 0 220px;color:#555">'+lbl+'</div><div>'+val+'</div></div>'; }
+      function blRow(lbl,val){ return '<div style="display:flex;gap:14px;align-items:baseline;padding:7px 0;border-bottom:1px solid var(--line2)"><div style="flex:0 0 220px;color:var(--muted)">'+lbl+'</div><div>'+val+'</div></div>'; }
       var barcodesLabels='<div class="sect-h">Barcodes &amp; Labels</div><div style="max-width:640px;font-size:12px">'
         +blRow('Barcodes for this PO','<button class="save-btn pp-dl-po" data-po="'+po+'">⤓ Download barcodes for PO</button>')
         +(p.prod_no?blRow('Barcodes for production '+esc(p.prod_no),'<button class="save-btn pp-dl-prod" data-prod="'+esc(p.prod_no)+'">⤓ Download barcodes for '+esc(p.prod_no)+'</button>'):'')
@@ -1022,10 +1022,10 @@
         return String(a==null?'':a).trim()!==String(b==null?'':b).trim(); }
       var dtcChangedKeys=dtcSnap?Object.keys(dtcSnap).filter(dtcChg):[];
       var dtcHasChange=!dtcAccepted && !!dtcSnap && dtcChangedKeys.length>0;   // previously approved, now differs → re-approve
-      var _dtcChgTag=' <span style="background:#f59e0b;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:1px 6px;vertical-align:1px">changed</span>';
-      var dtcReqRow=function(lbl,yes,notes,changed){ return '<tr'+(changed?' style="background:#fef9c3"':'')+'><td class="mut" style="padding:3px 14px 3px 0;text-align:left;white-space:nowrap">'+esc(lbl)+(changed?_dtcChgTag:'')+'</td><td style="text-align:left;padding:3px 14px 3px 0">'+(yes?'<span style="color:#166534;font-weight:700">Yes</span>':'<span class="mut">No</span>')+'</td><td style="text-align:left;padding:3px 0">'+(notes?esc(notes):'<span class="mut">—</span>')+'</td></tr>'; };
-      var dtcNoteRow=function(lbl,notes,changed){ return '<tr'+(changed?' style="background:#fef9c3"':'')+'><td class="mut" style="padding:3px 14px 3px 0;text-align:left;white-space:nowrap">'+esc(lbl)+(changed?_dtcChgTag:'')+'</td><td colspan="2" style="text-align:left;padding:3px 0">'+(notes?esc(notes):'<span class="mut">—</span>')+'</td></tr>'; };
-      var dtcInfoRow=function(lbl,val,pre,changed){ return '<tr'+(changed?' style="background:#fef9c3"':'')+'><td class="mut" style="padding:3px 16px 3px 0;text-align:left;white-space:nowrap;vertical-align:top">'+esc(lbl)+(changed?_dtcChgTag:'')+'</td><td style="text-align:left;padding:3px 0'+(pre?';white-space:pre-wrap':'')+'">'+(val?'<b>'+esc(val)+'</b>':'<span class="mut">—</span>')+'</td></tr>'; };
+      var _dtcChgTag=' <span style="background:var(--prod);color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:1px 6px;vertical-align:1px">changed</span>';
+      var dtcReqRow=function(lbl,yes,notes,changed){ return '<tr'+(changed?' style="background:var(--amber-bg)"':'')+'><td class="mut" style="padding:3px 14px 3px 0;text-align:left;white-space:nowrap">'+esc(lbl)+(changed?_dtcChgTag:'')+'</td><td style="text-align:left;padding:3px 14px 3px 0">'+(yes?'<span style="color:var(--pos);font-weight:700">Yes</span>':'<span class="mut">No</span>')+'</td><td style="text-align:left;padding:3px 0">'+(notes?esc(notes):'<span class="mut">—</span>')+'</td></tr>'; };
+      var dtcNoteRow=function(lbl,notes,changed){ return '<tr'+(changed?' style="background:var(--amber-bg)"':'')+'><td class="mut" style="padding:3px 14px 3px 0;text-align:left;white-space:nowrap">'+esc(lbl)+(changed?_dtcChgTag:'')+'</td><td colspan="2" style="text-align:left;padding:3px 0">'+(notes?esc(notes):'<span class="mut">—</span>')+'</td></tr>'; };
+      var dtcInfoRow=function(lbl,val,pre,changed){ return '<tr'+(changed?' style="background:var(--amber-bg)"':'')+'><td class="mut" style="padding:3px 16px 3px 0;text-align:left;white-space:nowrap;vertical-align:top">'+esc(lbl)+(changed?_dtcChgTag:'')+'</td><td style="text-align:left;padding:3px 0'+(pre?';white-space:pre-wrap':'')+'">'+(val?'<b>'+esc(val)+'</b>':'<span class="mut">—</span>')+'</td></tr>'; };
       var dtcInfo='<table style="font-size:12px;border-collapse:collapse;text-align:left;margin-bottom:12px"><tbody>'
         +dtcInfoRow('Direct to Client Name',p.client,false,dtcChg('client'))
         +dtcInfoRow('Direct to Client sales ref',p.sales_order_ref,false,dtcChg('sales_order_ref'))
@@ -1038,10 +1038,10 @@
             : '')
         +'</tbody></table>';
       // approve bar — same format as the Confirm-order banner (green button, yellow box), at the TOP of the tab
-      var dtcApproveBar='<div style="margin:0 0 12px;padding:8px 11px;border-radius:6px;font-size:12px;'+(dtcAccepted?'background:#dcfce7;border:1px solid #86efac':'background:#fef3c7;border:1px solid #fcd34d')+'">'
+      var dtcApproveBar='<div style="margin:0 0 12px;padding:8px 11px;border-radius:6px;font-size:12px;'+(dtcAccepted?'background:var(--pos-bg);border:1px solid var(--pos-bg)':'background:var(--amber-bg);border:1px solid #fcd34d')+'">'
         +(dtcAccepted
            ? '✓ <b>Direct to Client details approved</b>'+(p.dtc_accepted_at?' on '+esc(p.dtc_accepted_at):'')+(p.dtc_accepted_by?' · '+esc(p.dtc_accepted_by):'')
-           : (dtcHasChange?'<b>A change has been made.</b> ':'')+'⏳ <b>Please approve these Direct to Client details.</b> Review the packing &amp; labelling below'+(dtcHasChange?' (changes highlighted)':'')+', then approve. &nbsp; <button class="save-btn pp-dtc-accept" data-po="'+po+'" data-v="1" style="background:#16a34a;color:#fff;border-color:#16a34a">✓ Approve Direct to Client details</button>')
+           : (dtcHasChange?'<b>A change has been made.</b> ':'')+'⏳ <b>Please approve these Direct to Client details.</b> Review the packing &amp; labelling below'+(dtcHasChange?' (changes highlighted)':'')+', then approve. &nbsp; <button class="save-btn pp-dtc-accept" data-po="'+po+'" data-v="1" style="background:var(--pos);color:#fff;border-color:var(--pos)">✓ Approve Direct to Client details</button>')
         +'</div>';
       var dtcPackTbl='<div style="font-size:12px;margin-bottom:8px">Packing &amp; labelling requirements set by Dock &amp; Bay:</div>'
           +'<table style="font-size:12px;border-collapse:collapse;text-align:left"><thead><tr><th class="l" style="padding:2px 14px 2px 0">Requirement</th><th class="l" style="padding:2px 14px 2px 0">Required</th><th class="l">Notes</th></tr></thead><tbody>'
@@ -1064,7 +1064,7 @@
       var _credit=Number(p.credit_amount)||0;   // additional charge added to the invoice — increases the amount due
       var dueTot=(_invAmt!=null?_invAmt-paidTot:0)+_credit;   // a D&B-added credit/charge is always due, even before the supplier submits a final invoice
       var _prow=function(lbl,amt,dt,ref){ return '<tr><td class="l" style="padding:4px 16px 4px 0;white-space:nowrap">'+lbl+'</td><td class="l" style="padding:4px 16px 4px 0"><b>'+_pm(amt)+'</b></td><td class="l" style="padding:4px 16px 4px 0">'+_pd(dt)+'</td><td class="l" style="padding:4px 0">'+(ref?esc(ref):'<span class="mut">—</span>')+'</td></tr>'; };
-      var payments='<div style="margin:0 0 12px"><button class="save-btn" onclick="window.open(\'/api/portal/po/'+encodeURIComponent(p.po)+'/pdf\',\'_blank\')" style="background:#eff6ff;color:#1d4ed8;border:1px solid #93c5fd;font-weight:700">&#10515; Download PO details (PDF)</button> <span class="mut" style="font-size:11px">all PO details &mdash; client/FBA, packing &amp; order plan</span></div>'
+      var payments='<div style="margin:0 0 12px"><button class="save-btn" onclick="window.open(\'/api/portal/po/'+encodeURIComponent(p.po)+'/pdf\',\'_blank\')" style="background:var(--blue-soft);color:var(--blue);border:1px solid #93c5fd;font-weight:700">&#10515; Download PO details (PDF)</button> <span class="mut" style="font-size:12px">all PO details &mdash; client/FBA, packing &amp; order plan</span></div>'
         +'<div class="sect-h">Payments</div>'
         +'<table style="font-size:12px;border-collapse:collapse;text-align:left;table-layout:fixed;width:600px;max-width:100%">'
           +'<colgroup><col style="width:190px"><col style="width:120px"><col style="width:130px"><col style="width:160px"></colgroup>'
@@ -1110,7 +1110,7 @@
       if(!s)return;
       var ov=document.createElement('div'); ov.className='pp-drawer-ov'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.4);z-index:100000;display:flex;align-items:flex-start;justify-content:center;padding:30px 16px;overflow:auto';
       var panel=document.createElement('div'); panel.style.cssText='background:#fff;border-radius:10px;max-width:860px;width:100%;box-shadow:0 20px 60px rgba(15,23,42,.4);padding:12px 16px;text-align:left';
-      panel.innerHTML='<div style="display:flex;align-items:center;margin-bottom:4px"><div style="font-weight:700;font-size:15px">Shipment '+esc(masterPo)+'</div><button class="pp-drawer-x" title="close" style="margin-left:auto;background:none;border:none;font-size:22px;line-height:1;cursor:pointer;color:#64748b">×</button></div><div class="pp-drawer-body">'+ppShipmentPlan([s])+'</div>';
+      panel.innerHTML='<div style="display:flex;align-items:center;margin-bottom:4px"><div style="font-weight:700;font-size:15px">Shipment '+esc(masterPo)+'</div><button class="pp-drawer-x" title="close" style="margin-left:auto;background:none;border:none;font-size:22px;line-height:1;cursor:pointer;color:var(--muted)">×</button></div><div class="pp-drawer-body">'+ppShipmentPlan([s])+'</div>';
       ov.appendChild(panel); document.body.appendChild(ov);
       var scope=panel.querySelector('.pp-drawer-body');
       function close(){ if(ov.parentNode)ov.parentNode.removeChild(ov); document.removeEventListener('keydown',esckey,true); }
@@ -1169,7 +1169,7 @@
           // Completion overdue: the PO is still in PRODUCTION but the completion date (entered, else est. completion) is past.
           var _effEnd=cdVal||p.prod_end||'';
           var _cdOverdue=/production/i.test(p.status||'')&&_effEnd&&_effEnd<today;
-          var _cdSty=_cdOverdue?'border:1px solid #ef4444;background:#fef2f2;color:#b91c1c':'border:1px solid #93c5fd;background:#eff6ff;color:#1d4ed8';
+          var _cdSty=_cdOverdue?'border:1px solid var(--neg);background:var(--neg-bg);color:var(--neg)':'border:1px solid #93c5fd;background:var(--blue-soft);color:var(--blue)';
           var cdGrid=(p.crossdock_skus||'').split(',').map(function(s){return s.trim();}).filter(Boolean);
           // Amount due (outstanding) = order value − amounts actually PAID (milestone with a recorded paid date),
           // so paid + due = the full order value. A scheduled-but-unpaid deposit/completion stays owed (mirrors the
@@ -1181,16 +1181,16 @@
           return _grpHdr+'<tr class="pp-row" data-grp="'+esc(_gkey)+'"><td class="l"><button class="save-btn pp-exp" data-i="'+i+'" data-po="'+esc(p.po)+'"><span class="mng-txt">MANAGE</span>'+(act>0?' <span class="ex-badge" title="'+act+' action'+(act>1?'s':'')+' needed">'+act+'</span>':'')+'</button></td>'
             +'<td class="l"'+(_isChild?' style="padding-left:22px"':'')+'>'+(_isChild?'<span class="mut" title="ships with '+esc(p.ships_with_master_po)+'">└ </span>':'')+'<b>'+esc(p.po)+'</b></td>'
             +'<td class="l" style="width:38px;min-width:38px;white-space:nowrap">'+(p.prod_no?esc(p.prod_no):'<span class="mut">—</span>')+'</td>'
-            +'<td class="l"><span class="tool-badge '+statusBg(p.status)+'">'+esc(p.status||'')+'</span>'+(ppIsFOB(p)?' <span style="background:#ede9fe;color:#6d28d9;border-radius:10px;font-size:9px;font-weight:700;padding:1px 6px;white-space:nowrap" title="FOB — collected at your factory, no import shipment">📦 FOB</span>':'')+'</td>'
+            +'<td class="l"><span class="tool-badge '+statusBg(p.status)+'">'+esc(p.status||'')+'</span>'+(ppIsFOB(p)?' <span style="background:var(--violet-bg);color:var(--violet);border-radius:10px;font-size:10.5px;font-weight:700;padding:1px 6px;white-space:nowrap" title="FOB — collected at your factory, no import shipment">📦 FOB</span>':'')+'</td>'
             +'<td class="l">'+(p.country?esc(p.country):'<span class="mut">—</span>')+'</td>'
             +'<td class="l">'+(p.branch?esc(p.branch):'<span class="mut">—</span>')+'</td>'
-            +'<td class="l" style="font-size:10px;line-height:1.05;max-width:130px;white-space:normal">'+(p.client?esc(p.client):'<span class="mut">—</span>')+'<br>'+(p.sales_order_ref?'<span class="mut">'+esc(p.sales_order_ref)+'</span>':'<span class="mut">—</span>')+'</td>'
-            +'<td class="l" style="min-width:150px">'+prodStatusSel(p.po, p.production_status||'')+(prodExc?'<div class="tiny" style="color:#b91c1c;font-weight:600;margin-top:2px" title="'+esc(prodExc)+'">⚠ check status</div>':'')+'</td>'
+            +'<td class="l" style="font-size:10.5px;line-height:1.05;max-width:130px;white-space:normal">'+(p.client?esc(p.client):'<span class="mut">—</span>')+'<br>'+(p.sales_order_ref?'<span class="mut">'+esc(p.sales_order_ref)+'</span>':'<span class="mut">—</span>')+'</td>'
+            +'<td class="l" style="min-width:150px">'+prodStatusSel(p.po, p.production_status||'')+(prodExc?'<div class="tiny" style="color:var(--neg);font-weight:600;margin-top:2px" title="'+esc(prodExc)+'">⚠ check status</div>':'')+'</td>'
             +'<td class="l">'+dcell(p.prod_start)+'</td><td class="l">'+dcell(p.prod_end)+'</td>'
             +'<td class="l" style="min-width:140px"><input type="date" class="pp-cd-grid" data-po="'+esc(p.po)+'" value="'+esc(cdVal)+'" title="'+(_cdOverdue?'completion date is in the past but the PO is still in production — update your production status or completion date':'click to pick your completion date — it saves automatically')+'" style="width:128px;cursor:pointer;text-align:left;font:inherit;font-size:12px;padding:4px 6px;'+_cdSty+';border-radius:4px;box-sizing:content-box"></td>'
             +'<td class="l">'+dcell(p.ship)+'</td>'
             +'<td class="l">'+((p.flexport_reference||p.flex_id)?esc(p.flexport_reference||p.flex_id):'<span class="mut">—</span>')+'</td>'
-            +'<td class="l">'+(p.ships_with?((p.ships_with_master_po&&_spMasters[p.ships_with_master_po])?'<button class="lnk-btn pp-sw-drawer" data-master="'+esc(p.ships_with_master_po)+'" title="open this shipment" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;background:none;border:none;padding:0;font:inherit">'+esc(p.ships_with)+' ↗</button>':esc(p.ships_with))+(p.ships_with_supplier?' <span class="mut">('+esc(p.ships_with_supplier)+')</span>':''):'<span class="mut">—</span>')+'</td>'
+            +'<td class="l">'+(p.ships_with?((p.ships_with_master_po&&_spMasters[p.ships_with_master_po])?'<button class="lnk-btn pp-sw-drawer" data-master="'+esc(p.ships_with_master_po)+'" title="open this shipment" style="color:var(--blue);text-decoration:underline;cursor:pointer;background:none;border:none;padding:0;font:inherit">'+esc(p.ships_with)+' ↗</button>':esc(p.ships_with))+(p.ships_with_supplier?' <span class="mut">('+esc(p.ships_with_supplier)+')</span>':''):'<span class="mut">—</span>')+'</td>'
             +'<td style="text-align:right">'+ppPay(p.start_assigned!=null?p.start_assigned:p.start_dep, p.start_date)+'</td>'
             +'<td style="text-align:right">'+ppPay(p.completion_assigned!=null?p.completion_assigned:p.completion, p.completion_date)+'</td>'
             +'<td style="text-align:right">'+ppPay(p.balance_1_amount, p.balance_1_date)+'</td>'
@@ -1206,9 +1206,9 @@
         out.sort(function(a,b){return a.po<b.po?-1:a.po>b.po?1:0;}); return out; }
       var rows=deps.filter(function(d){return d.is_deposit;}).map(function(d,i){
         var dd=drawdownsFor(d.reference), rk='dep'+i;
-        var caret=dd.length?'<a class="pp-dep-exp" data-k="'+rk+'" style="cursor:pointer;color:#1d4ed8;margin-right:6px;user-select:none;font-weight:700" title="show the purchase orders that drew down this deposit">▸</a>':'<span style="display:inline-block;width:14px"></span>';
+        var caret=dd.length?'<a class="pp-dep-exp" data-k="'+rk+'" style="cursor:pointer;color:var(--blue);margin-right:6px;user-select:none;font-weight:700" title="show the purchase orders that drew down this deposit">▸</a>':'<span style="display:inline-block;width:14px"></span>';
         var main='<tr><td class="l">'+caret+esc(d.reference||'—')+'</td><td style="text-align:right">$'+money(d.amount)+'</td><td class="l">'+(d.date_paid?esc(fd(d.date_paid)):'<span class="mut">unpaid</span>')+'</td><td style="text-align:right">$'+money(d.deposit_used||0)+'</td><td style="text-align:right">$'+money(d.deposit_remaining||0)+'</td></tr>';
-        var det=dd.length?'<tr class="pp-dep-det" data-k="'+rk+'" style="display:none"><td colspan="5" style="padding:0"><div style="padding:6px 10px 8px 26px;background:#f8fafc;border-bottom:1px solid #eef2f7"><div class="mut tiny" style="margin-bottom:3px">Drawn down by '+dd.length+' purchase order'+(dd.length===1?'':'s')+'</div><table style="font-size:12px;border-collapse:collapse">'+dd.map(function(x){return '<tr><td class="l" style="padding:2px 22px 2px 0;font-family:ui-monospace,Menlo,monospace">'+esc(x.po)+'</td><td style="text-align:right;padding:2px 0"><b>$'+money(x.amt)+'</b></td></tr>';}).join('')+'</table></div></td></tr>':'';
+        var det=dd.length?'<tr class="pp-dep-det" data-k="'+rk+'" style="display:none"><td colspan="5" style="padding:0"><div style="padding:6px 10px 8px 26px;background:var(--hover);border-bottom:1px solid var(--line2)"><div class="mut tiny" style="margin-bottom:3px">Drawn down by '+dd.length+' purchase order'+(dd.length===1?'':'s')+'</div><table style="font-size:12px;border-collapse:collapse">'+dd.map(function(x){return '<tr><td class="l" style="padding:2px 22px 2px 0;font-family:ui-monospace,Menlo,monospace">'+esc(x.po)+'</td><td style="text-align:right;padding:2px 0"><b>$'+money(x.amt)+'</b></td></tr>';}).join('')+'</table></div></td></tr>':'';
         return main+det; }).join('');
       return cards+'<div class="tw" style="max-width:720px"><table style="width:auto;min-width:0"><thead><tr><th class="l">Deposit reference</th><th style="text-align:right">Amount</th><th class="l">Paid</th><th style="text-align:right">Drawn down</th><th style="text-align:right">Remaining</th></tr></thead><tbody>'+(rows||'<tr><td colspan="5" class="l mut">No deposits for this supplier.</td></tr>')+'</tbody></table></div>'; }
     // Master PAYMENTS tab: payments MADE to this supplier (the ledger), grouped by payment run and expandable to
@@ -1221,9 +1221,9 @@
       var head='<div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">'+ppCard('Total paid','$'+money(total))+ppCard('Payments',String(rows.length))+'</div>';
       var cards=order.map(function(k){ var items=groups[k]; var gtot=items.reduce(function(a,r){return a+(Number(r.amount)||0);},0); var dt=items[0].payment_date;
         var body=items.map(function(r){ return '<tr><td class="l" style="white-space:normal;overflow-wrap:anywhere;word-break:break-word">'+esc(poRef(r)||'—')+'</td><td class="l">'+(r.type?esc(r.type):'<span class="mut">—</span>')+'</td><td style="text-align:right">$'+money(r.amount||0)+'</td><td class="l">'+(r.deposit_ref?esc(r.deposit_ref):'<span class="mut">—</span>')+'</td></tr>'; }).join('');
-        return '<div class="sp-card" style="border:1px solid #e0e0e0;border-radius:8px;margin-bottom:8px;background:#fff">'
+        return '<div class="sp-card" style="border:1px solid var(--line);border-radius:8px;margin-bottom:8px;background:#fff">'
           +'<div class="pay-head" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:9px 12px;cursor:pointer">'
-            +'<span class="pay-toggle" style="font-size:12px;color:#475569">▸</span>'
+            +'<span class="pay-toggle" style="font-size:12px;color:var(--muted)">▸</span>'
             +'<div style="font-weight:700">'+esc(dt?fd(dt):k)+'</div>'
             +'<span class="mut tiny">'+items.length+' payment'+(items.length>1?'s':'')+'</span>'
             +'<div style="margin-left:auto;font-weight:700">$'+money(gtot)+'</div></div>'
@@ -1243,15 +1243,15 @@
         +batches.map(function(b){return '<option value="'+esc(b)+'"'+(PORTAL_PROD_BATCH===b?' selected':'')+'>'+esc(b)+'</option>';}).join('')+'</select>'
         +(PORTAL_PROD_BATCH?'<span style="display:inline-flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="save-btn pv-prod-dl">⤓ Download order plan (XLSX)</button>'
           +'<span style="position:relative;display:inline-block"><button class="save-btn pv-bc-dl">⤓ Download barcodes ▾</button>'
-          +'<span class="pv-bc-menu" style="display:none;position:absolute;right:0;top:100%;z-index:50;background:#fff;border:1px solid #cbd5e1;border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:190px;text-align:left">'
-          +[['product','Product barcodes'],['carton','Carton barcodes'],['inner','Inner barcodes']].map(function(o,i){return '<div class="pv-bc-opt" data-k="'+o[0]+'" style="padding:9px 13px;cursor:pointer;font-size:12px'+(i?';border-top:1px solid #f1f1f1':'')+'">'+o[1]+'</div>';}).join('')
+          +'<span class="pv-bc-menu" style="display:none;position:absolute;right:0;top:100%;z-index:50;background:#fff;border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:190px;text-align:left">'
+          +[['product','Product barcodes'],['carton','Carton barcodes'],['inner','Inner barcodes']].map(function(o,i){return '<div class="pv-bc-opt" data-k="'+o[0]+'" style="padding:9px 13px;cursor:pointer;font-size:12px'+(i?';border-top:1px solid var(--line2)':'')+'">'+o[1]+'</div>';}).join('')
           +'</span></span></span>':'')+'</div>';
       if(!batches.length) return sel+'<div class="count">No batches on your purchase orders yet.</div>';
       if(!PORTAL_PROD_BATCH) return sel+'<div class="count">Choose a batch to see its order plan.</div>';
       var bp=prodBatchPOs(); if(!bp.length) return sel+'<div class="count">No purchase orders in that batch.</div>';
       var d=prodPivotData(bp);
       if(!d.skus.length) return sel+'<div class="count">No SKUs ordered in that batch.</div>';
-      var th='<th class="l" style="position:sticky;left:0;background:#f3f3f1;z-index:3;min-width:190px">SKU</th><th class="l">EAN</th><th class="l">Size</th>'+d.poList.map(function(po){return '<th style="text-align:right;min-width:70px">'+esc(po)+'</th>';}).join('');
+      var th='<th class="l" style="position:sticky;left:0;background:var(--hover);z-index:3;min-width:190px">SKU</th><th class="l">EAN</th><th class="l">Size</th>'+d.poList.map(function(po){return '<th style="text-align:right;min-width:70px">'+esc(po)+'</th>';}).join('');
       var body=d.skus.map(function(sku){ var a=d.attr[sku]||{};
         return '<tr><td class="l" style="position:sticky;left:0;background:#fff;z-index:1;font-weight:600;white-space:nowrap;min-width:190px">'+esc(sku)+'</td><td class="l" style="white-space:nowrap"><span class="mut">'+esc(a.ean||'')+'</span></td><td class="l" style="white-space:nowrap"><span class="mut">'+esc(a.size_long||'')+'</span></td>'
           +d.poList.map(function(po){ var q=d.qmap[sku+'|'+po]; return '<td style="text-align:right">'+(q?units(q):'<span class="mut">—</span>')+'</td>'; }).join('')+'</tr>'; }).join('');
@@ -1290,17 +1290,17 @@
           // FOB card timeline = notes on the PO itself (FOB has no shipment). Reuses the PO-notes store.
           function fobTLHtml(po){ var nts=(_ppData.notesByPo&&_ppData.notesByPo[po])||[];
             var sup=nts.filter(function(n){return n.author_kind==='supplier';}); var recent=sup.length?sup.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0]:null;
-            return nts.length?nts.map(function(n){ var flag=(EP.escalate&&recent&&n===recent)?' <button class="save-btn light sp-fob-flag" data-po="'+esc(po)+'" data-msg="'+esc(n.body)+'" title="email this note to the supply planner" style="color:#b91c1c;border-color:#fca5a5;white-space:nowrap;font-size:10px;padding:0 5px">⚑ Escalate</button>':'';
-              return '<div style="margin:6px 0"><span class="mut" style="font-size:10px">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span> '+flag+'<div class="tl-msg">'+esc(n.body)+'</div></div>'; }).join(''):'<div class="mut tiny">No timeline entries yet.</div>'; }
+            return nts.length?nts.map(function(n){ var flag=(EP.escalate&&recent&&n===recent)?' <button class="save-btn light sp-fob-flag" data-po="'+esc(po)+'" data-msg="'+esc(n.body)+'" title="email this note to the supply planner" style="color:var(--neg);border-color:var(--neg-cell);white-space:nowrap;font-size:10.5px;padding:0 5px">⚑ Escalate</button>':'';
+              return '<div style="margin:6px 0"><span class="mut" style="font-size:10.5px">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span> '+flag+'<div class="tl-msg">'+esc(n.body)+'</div></div>'; }).join(''):'<div class="mut tiny">No timeline entries yet.</div>'; }
           function ppShipmentPlan(rows){ rows=rows||[];
             if(!rows.length)return '<div class="count">No shipments for your orders yet.</div>';
             // a prominent "label / big value" cell for the dates & Flexport strip
-            function spCell(lbl,val,strong){ return '<div style="min-width:96px"><div class="mut" style="font-size:10px;text-transform:uppercase;letter-spacing:.04em">'+lbl+'</div><div style="font-weight:700;font-size:15px;margin-top:1px">'+(val?val:'<span class="mut" style="font-weight:400">—</span>')+'</div></div>'; }
+            function spCell(lbl,val,strong){ return '<div style="min-width:96px"><div class="mut" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.04em">'+lbl+'</div><div style="font-weight:700;font-size:15px;margin-top:1px">'+(val?val:'<span class="mut" style="font-weight:400">—</span>')+'</div></div>'; }
             // Direct-to-Client details + label downloads for a PO on this card (client name / requirements /
             // delivery address, Ships-With shipment labels, crossdock labels if the PO has crossdock SKUs).
             var posByPo={}; (_ppData.pos||[]).forEach(function(p){ posByPo[p.po]=p; });
             // a PO reference that links back to the Purchase Orders tab with that PO opened
-            function poLink(po){ return '<button class="lnk-btn pp-go-po" data-po="'+esc(po)+'" title="open '+esc(po)+' in Purchase Orders" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;background:none;border:none;padding:0;font:inherit">'+esc(po)+'</button>'; }
+            function poLink(po){ return '<button class="lnk-btn pp-go-po" data-po="'+esc(po)+'" title="open '+esc(po)+' in Purchase Orders" style="color:var(--blue);text-decoration:underline;cursor:pointer;background:none;border:none;padding:0;font:inherit">'+esc(po)+'</button>'; }
             // per-shipment action counter shown BEFORE the PO number in the card header
             function spBadge(s){ var n=shipActCount(s); return n?'<span class="sp-shipbadge" data-ref="'+esc(s.shipment_ref||'')+'" title="needs your attention">'+ppBadgeHtml(n)+'</span> ':''; }
             function dtcBlock(po){ var p=posByPo[po]; if(!p||!ppIsDtc(p))return '';
@@ -1322,16 +1322,16 @@
             var _BKT=[{t:'DUE NOW',d:'Production End Date &lt; 1 week',bg:'#fee2e2',bd:'#fca5a5',c:'#991b1b'},{t:'DUE SOON',d:'Production End Date 1–3 weeks',bg:'#ffedd5',bd:'#fdba74',c:'#9a3412'},{t:'UPCOMING',d:'Production End Date 3–6 weeks',bg:'#fef9c3',bd:'#facc15',c:'#854d0e'},{t:'',d:'Production End Date 6+ weeks',bg:'#e5e7eb',bd:'#cbd5e1',c:'#374151'},{t:'',d:'No production end date yet',bg:'#e5e7eb',bd:'#cbd5e1',c:'#374151'}];
             function cardHtml(s){
               var _dep=s.departure||'';   // shipment departure/ETD — an on-board PO whose production ends on/after this is a risk
-              var members=s.members.length?'<div style="font-weight:700;font-size:12px;color:#334155;margin-top:8px;margin-bottom:3px">Purchase Orders on Board this shipment</div>'
-                +'<table style="font-size:11px;width:auto;margin-top:2px"><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th class="l">Est. completion</th><th>Est. pallets</th><th class="l">Client</th></tr></thead><tbody>'
+              var members=s.members.length?'<div style="font-weight:700;font-size:12px;color:var(--ink-soft);margin-top:8px;margin-bottom:3px">Purchase Orders on Board this shipment</div>'
+                +'<table style="font-size:12px;width:auto;margin-top:2px"><thead><tr><th class="l">PO</th><th class="l">Supplier</th><th class="l">Est. completion</th><th>Est. pallets</th><th class="l">Client</th></tr></thead><tbody>'
                 +s.members.map(function(m){
                     var mine=!!posByPo[m.po];   // only THIS supplier's POs are hyperlinked (they can't open another supplier's PO)
                     var poCell=mine?poLink(m.po):esc(m.po);
                     var pe=m.prod_end||''; var late=pe&&_dep&&pe>=_dep;   // red if production ends on/after departure
-                    return '<tr><td class="l">'+poCell+(m.is_master?' <span class="tool-badge bg-green" style="font-size:9px">★ master</span>':'')+'</td><td class="l">'+esc(m.supplier||'')+'</td>'
-                      +'<td class="l"'+(late?' style="color:#b91c1c;font-weight:700" title="production ends on or after the shipment departure date"':'')+'>'+(pe?esc(fd(pe)):'<span class="mut">—</span>')+'</td>'
+                    return '<tr><td class="l">'+poCell+(m.is_master?' <span class="tool-badge bg-green" style="font-size:10.5px">★ master</span>':'')+'</td><td class="l">'+esc(m.supplier||'')+'</td>'
+                      +'<td class="l"'+(late?' style="color:var(--neg);font-weight:700" title="production ends on or after the shipment departure date"':'')+'>'+(pe?esc(fd(pe)):'<span class="mut">—</span>')+'</td>'
                       +'<td style="text-align:right">'+esc(m.pallets)+'</td><td class="l">'+(m.client?esc(m.client):'<span class="mut">—</span>')+'</td></tr>';}).join('')
-                +'<tr style="font-weight:700;border-top:1px solid #ccc"><td class="l">Total</td><td></td><td></td><td style="text-align:right">'+esc(s.total_pallets)+'</td><td></td></tr></tbody></table>':'<span class="mut tiny">no POs on this shipment</span>';
+                +'<tr style="font-weight:700;border-top:1px solid var(--line)"><td class="l">Total</td><td></td><td></td><td style="text-align:right">'+esc(s.total_pallets)+'</td><td></td></tr></tbody></table>':'<span class="mut tiny">no POs on this shipment</span>';
               // FOB orders — no shipment to us (collected at factory / delivered to a forwarder). Editable:
               // production end date (submitted for D&B approval, like elsewhere) + a timeline of PO notes.
               if(s.is_fob){
@@ -1340,7 +1340,7 @@
                 var cdq=subs.filter(function(x){return x.kind==='completion_date';}), cd=cdq.length?cdq[cdq.length-1]:null;
                 var cdStatus=cd?(cd.status==='applied'?'<span class="tool-badge bg-green">approved</span>':cd.status==='dismissed'?'<span class="tool-badge bg-neutral">rejected — please resubmit</span>':'<span class="tool-badge bg-amber">awaiting Dock &amp; Bay approval</span>'):'';
                 var cdVal=(cd&&cd.status!=='dismissed')?cd.value:'';
-                var fobStrip='<div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:8px;padding:9px 12px;background:#f5f3ff;border:1px solid #ddd6fe;border-radius:7px">'
+                var fobStrip='<div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:8px;padding:9px 12px;background:var(--violet-bg);border:1px solid #ddd6fe;border-radius:7px">'
                   +spCell('Type','FOB — collection')
                   +spCell('Status', esc(s.status||''))
                   +spCell('Current prod. end', s.prod_end?esc(fd(s.prod_end)):'')
@@ -1349,53 +1349,53 @@
                   +'</div>';
                 var prodEndEdit='<div style="margin-top:10px;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">'
                   +'<label class="tiny">Ship Date <span class="mut">(submit for Dock &amp; Bay approval)</span><br>'
-                  +'<input type="date" class="sp-fob-cd" data-po="'+esc(po)+'" value="'+esc(cdVal)+'" title="pick your production end date — submitted for Dock &amp; Bay to approve" style="width:150px;text-align:left;font:inherit;font-size:12px;padding:4px 6px;border:1px solid #93c5fd;border-radius:4px;background:#eff6ff;color:#1d4ed8"></label>'
+                  +'<input type="date" class="sp-fob-cd" data-po="'+esc(po)+'" value="'+esc(cdVal)+'" title="pick your production end date — submitted for Dock &amp; Bay to approve" style="width:150px;text-align:left;font:inherit;font-size:12px;padding:4px 6px;border:1px solid #93c5fd;border-radius:4px;background:var(--blue-soft);color:var(--blue)"></label>'
                   +(cdStatus?'<div class="tiny">'+cdStatus+(cd&&cd.status==='pending'?' — '+esc(fd(cd.value)):'')+'</div>':'')+'</div>';
-                var timeline='<div style="margin-top:10px;border-top:1px solid #f1f1f1;padding-top:8px">'
-                  +(EP.escalate?'<div style="margin-bottom:8px"><button class="save-btn sp-esc-fob" data-po="'+esc(po)+'" style="color:#b91c1c;border-color:#fca5a5;font-weight:600" title="escalate this shipment to Dock &amp; Bay by email">⚑ Escalate shipment</button></div>':'')
+                var timeline='<div style="margin-top:10px;border-top:1px solid var(--line2);padding-top:8px">'
+                  +(EP.escalate?'<div style="margin-bottom:8px"><button class="save-btn sp-esc-fob" data-po="'+esc(po)+'" style="color:var(--neg);border-color:var(--neg-cell);font-weight:600" title="escalate this shipment to Dock &amp; Bay by email">⚑ Escalate shipment</button></div>':'')
                   +'<div style="font-weight:600;font-size:12px;margin-bottom:4px">Timeline <span class="mut tiny">(notes on this purchase order)</span></div>'
                   +'<div class="sp-fob-tl" data-po="'+esc(po)+'">'+fobTLHtml(po)+'</div>'
                   +'<div style="display:flex;gap:6px;align-items:flex-start;margin-top:6px"><textarea class="fci sp-fob-note-body" data-po="'+esc(po)+'" rows="2" placeholder="Add a note to the timeline… (multiple lines OK)" style="flex:1;max-width:560px;min-height:44px;text-align:left;resize:vertical;line-height:1.4"></textarea><button class="save-btn sp-fob-note-post" data-po="'+esc(po)+'">Post</button></div></div>';
                 return '<div class="sp-card" style="border:1px solid #ddd6fe;border-radius:8px;margin-bottom:10px;background:#fff">'
                   +'<div class="sp-head" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;padding:10px 12px;cursor:pointer">'
-                  +'<span class="sp-toggle" style="font-size:12px;color:#6d28d9">▸</span>'
+                  +'<span class="sp-toggle" style="font-size:12px;color:var(--violet)">▸</span>'
                   +spBadge(s)+'<div style="font-weight:700;font-size:15px">'+esc(po)+'</div>'
-                  +'<span style="background:#ede9fe;color:#6d28d9;border-radius:10px;font-size:10px;font-weight:700;padding:2px 8px">📦 FOB — no shipment</span>'
+                  +'<span style="background:var(--violet-bg);color:var(--violet);border-radius:10px;font-size:10.5px;font-weight:700;padding:2px 8px">📦 FOB — no shipment</span>'
                   +'<span class="mut tiny">'+esc(s.status||'')+(s.prod_end?' · prod end '+esc(fd(s.prod_end)):'')+'</span>'
                   +'</div>'
                   +'<div class="sp-body" style="display:none;padding:0 12px 12px">'+fobStrip+'<div style="margin-top:8px">'+members+'</div>'+dtcBlock(po)+prodEndEdit+timeline
                   +'<div class="mut tiny" style="margin-top:6px">No shipment to Dock &amp; Bay — collected at your factory or delivered to a nominated forwarder.</div></div></div>';
               }
               // prominent shipment dates + Flexport details
-              var flex=s.flex_id?('<a href="https://app.flexport.com/shipments/'+((String(s.carrier_ref||s.flex_id).match(/\d+/)||[''])[0])+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline">'+esc(s.flex_id)+' ↗</a>'):'';
-              var datesStrip='<div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:8px;padding:9px 12px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:7px">'
+              var flex=s.flex_id?('<a href="https://app.flexport.com/shipments/'+((String(s.carrier_ref||s.flex_id).match(/\d+/)||[''])[0])+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline">'+esc(s.flex_id)+' ↗</a>'):'';
+              var datesStrip='<div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:8px;padding:9px 12px;background:var(--hover);border:1px solid var(--line);border-radius:7px">'
                 +spCell('Mode / Carrier', esc((s.mode||'—')+(s.carrier?' · '+s.carrier:'')))
                 +spCell('Tracking', s.carrier_ref?esc(s.carrier_ref):'')
                 +spCell('Flexport', flex)
-                +spCell('Departure', s.departure?(esc(fd(s.departure))+(s.departure_est?' <span class="mut" style="font-size:9px;font-weight:400">est</span>':'')):'')
-                +spCell('Landing', s.landing?(esc(fd(s.landing))+(s.landing_est?' <span class="mut" style="font-size:9px;font-weight:400">est</span>':'')):'')
-                +spCell('Arrival', s.arrival?(esc(fd(s.arrival))+(s.arrival_est?' <span class="mut" style="font-size:9px;font-weight:400">est</span>':'')):'')
+                +spCell('Departure', s.departure?(esc(fd(s.departure))+(s.departure_est?' <span class="mut" style="font-size:10.5px;font-weight:400">est</span>':'')):'')
+                +spCell('Landing', s.landing?(esc(fd(s.landing))+(s.landing_est?' <span class="mut" style="font-size:10.5px;font-weight:400">est</span>':'')):'')
+                +spCell('Arrival', s.arrival?(esc(fd(s.arrival))+(s.arrival_est?' <span class="mut" style="font-size:10.5px;font-weight:400">est</span>':'')):'')
                 +(s.master_client?spCell('Client', esc(s.master_client)):'')
                 +(s.master_deadline?spCell('Client deadline', esc(fd(s.master_deadline))):'')
                 +'</div>';
               // supplier-editable panel — carrier / tracking / ship date / status (writes straight to the shipment)
               var _u=String(s.status||'').toLowerCase(), stNorm=(_u==='active'?'Shipping':(_u==='complete'||_u==='completed')?'Completed':(s.status||'Planned'));
               var STO=['Planned','Shipping'];   // supplier-settable stages only; 'Completed' stays Dock & Bay-controlled
-              function eLbl(t){ return '<div class="mut" style="font-size:10px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px">'+t+'</div>'; }
+              function eLbl(t){ return '<div class="mut" style="font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:2px">'+t+'</div>'; }
               var rf=esc(s.shipment_ref);
-              var editPanel='<div style="margin-top:10px;padding:10px 12px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:7px">'
-                +'<div style="font-weight:700;font-size:12px;color:#166534;margin-bottom:8px">📝 Update this shipment</div>'
+              var editPanel='<div style="margin-top:10px;padding:10px 12px;background:var(--pos-bg);border:1px solid var(--pos-bg);border-radius:7px">'
+                +'<div style="font-weight:700;font-size:12px;color:var(--pos);margin-bottom:8px">📝 Update this shipment</div>'
                 +'<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end">'
                   +'<div>'+eLbl('Carrier')+'<input class="fci txt sp-e-carrier" data-ref="'+rf+'" value="'+esc(s.carrier||'')+'" placeholder="carrier…" style="width:140px;text-align:left"></div>'
                   +'<div>'+eLbl('Tracking code')+'<input class="fci txt sp-e-trk" data-ref="'+rf+'" value="'+esc(s.carrier_ref||'')+'" placeholder="tracking…" style="width:170px;text-align:left"></div>'
                   +'<div>'+eLbl('Ship date')+'<input type="date" class="fci sp-e-date" data-ref="'+rf+'" value="'+esc(s.departure_est?'':(s.departure||''))+'"'+(s.departure_est?' title="estimated '+esc(s.departure)+' — enter the actual ship date"':'')+' style="width:150px;text-align:left"></div>'
                   +'<div>'+eLbl('Status')+(stNorm==='Completed'
-                    ? '<div style="font-weight:700;color:#1d4ed8;font-size:13px;padding:4px 0">Completed</div><div class="tiny mut">set by Dock &amp; Bay</div>'
-                    : '<select class="fci sp-e-status" data-ref="'+rf+'" style="width:130px;font-weight:600;'+(stNorm==='Shipping'?'background:#dcfce7;color:#15803d;border:1px solid #86efac':'background:#ffedd5;color:#9a3412;border:1px solid #fdba74')+'">'+STO.map(function(o){return '<option'+(o===stNorm?' selected':'')+'>'+o+'</option>';}).join('')+'</select>')+'</div>'
-                  +'<span class="sp-ship-msg" data-ref="'+rf+'" style="font-size:11px;color:#16a34a;align-self:center;white-space:nowrap"></span>'
+                    ? '<div style="font-weight:700;color:var(--blue);font-size:12.5px;padding:4px 0">Completed</div><div class="tiny mut">set by Dock &amp; Bay</div>'
+                    : '<select class="fci sp-e-status" data-ref="'+rf+'" style="width:130px;font-weight:600;'+(stNorm==='Shipping'?'background:var(--pos-bg);color:var(--pos);border:1px solid var(--pos-bg)':'background:#ffedd5;color:var(--amber);border:1px solid #fdba74')+'">'+STO.map(function(o){return '<option'+(o===stNorm?' selected':'')+'>'+o+'</option>';}).join('')+'</select>')+'</div>'
+                  +'<span class="sp-ship-msg" data-ref="'+rf+'" style="font-size:12px;color:var(--pos);align-self:center;white-space:nowrap"></span>'
                 +'</div><div class="tiny mut" style="margin-top:4px">Changes save automatically.</div></div>';
-              var chgPanel='<div style="margin-top:10px;padding:10px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:7px">'
-                +'<div style="font-weight:700;font-size:12px;color:#92400e;margin-bottom:6px">💰 Freight charges</div>'
+              var chgPanel='<div style="margin-top:10px;padding:10px 12px;background:var(--amber-bg);border:1px solid var(--amber-bg);border-radius:7px">'
+                +'<div style="font-weight:700;font-size:12px;color:var(--amber);margin-bottom:6px">💰 Freight charges</div>'
                 +'<div class="sp-chg-list" data-ref="'+rf+'"><span class="mut tiny">Loading…</span></div>'
                 +'<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:flex-end;margin-top:8px">'
                   +'<div>'+eLbl('Freight cost')+'<input class="fci sp-chg-cost" data-ref="'+rf+'" placeholder="0.00" style="width:100px;text-align:right"></div>'
@@ -1404,19 +1404,19 @@
                 +'</div><div class="tiny mut" style="margin-top:4px">Charges go to Dock &amp; Bay to review.</div></div>';
               return '<div class="sp-card" style="border:1px solid '+(s.escalated?'#fca5a5':'#e0e0e0')+';border-radius:8px;margin-bottom:10px;background:'+(s.escalated?'#fef2f2':'#fff')+'">'
                 +'<div class="sp-head" style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;padding:10px 12px;cursor:pointer">'
-                +'<span class="sp-toggle" style="font-size:12px;color:#475569">▸</span>'
+                +'<span class="sp-toggle" style="font-size:12px;color:var(--muted)">▸</span>'
                 +spBadge(s)+'<div style="font-weight:700;font-size:15px">'+esc(s.master_po)+'</div>'
-                +(/^fob$/i.test(s.mode||'')?'<span style="background:#ede9fe;color:#6d28d9;border-radius:10px;font-size:10px;font-weight:700;padding:2px 8px">📦 FOB</span>':'')
+                +(/^fob$/i.test(s.mode||'')?'<span style="background:var(--violet-bg);color:var(--violet);border-radius:10px;font-size:10.5px;font-weight:700;padding:2px 8px">📦 FOB</span>':'')
                 +'<span class="mut tiny">'+esc((s.mode||'—')+(s.carrier?' · '+s.carrier:''))+(s.departure?' · dep '+esc(fd(s.departure)):'')+(s.arrival?' · arr '+esc(fd(s.arrival)):'')+'</span>'
                 +(s.escalated?'<span class="tool-badge bg-red" style="margin-left:auto">⚑ ESCALATED</span>':'')
                 +'</div>'
                 +'<div class="sp-body" style="display:none;padding:0 12px 12px">'
-                +((s.branch||s.delivery_notes)?'<div style="margin:8px 0;padding:8px 11px;border-radius:6px;font-size:12px;background:#eff6ff;border:1px solid #bfdbfe;white-space:pre-wrap;text-align:left"><b>Delivery notes'+(s.branch?' for '+esc(s.branch):'')+'</b>'+(s.delivery_notes?'<br>'+esc(s.delivery_notes):'')+'</div>':'')
+                +((s.branch||s.delivery_notes)?'<div style="margin:8px 0;padding:8px 11px;border-radius:6px;font-size:12px;background:var(--blue-soft);border:1px solid #bfdbfe;white-space:pre-wrap;text-align:left"><b>Delivery notes'+(s.branch?' for '+esc(s.branch):'')+'</b>'+(s.delivery_notes?'<br>'+esc(s.delivery_notes):'')+'</div>':'')
                 +editPanel+datesStrip+'<div style="margin-top:8px">'+members+'</div>'
                 +(s.members||[]).map(function(m){return dtcBlock(m.po);}).join('')
                 +chgPanel
-                +'<div style="margin-top:10px"><div class="mut tiny" style="margin-bottom:3px">Download a consolidated shipment tax invoice</div><button class="save-btn pp-ship-inv" data-ref="'+esc(s.shipment_ref)+'" style="background:#dbeafe;color:#1e40af;border:1px solid #93c5fd" title="download the consolidated Tax Invoice + Packing List for this shipment">📄 Tax Invoice</button></div>'
-                +'<div class="sp-timeline" data-ref="'+esc(s.shipment_ref)+'" style="margin-top:8px;border-top:1px solid #f1f1f1;padding-top:6px"></div></div></div>'; }
+                +'<div style="margin-top:10px"><div class="mut tiny" style="margin-bottom:3px">Download a consolidated shipment tax invoice</div><button class="save-btn pp-ship-inv" data-ref="'+esc(s.shipment_ref)+'" style="background:var(--blue-soft);color:var(--blue-ink);border:1px solid #93c5fd" title="download the consolidated Tax Invoice + Packing List for this shipment">📄 Tax Invoice</button></div>'
+                +'<div class="sp-timeline" data-ref="'+esc(s.shipment_ref)+'" style="margin-top:8px;border-top:1px solid var(--line2);padding-top:6px"></div></div></div>'; }
             var _sorted=rows.slice().map(function(s){return {s:s,b:_bucketOf(s)};}).sort(function(a,b){ if(a.b!==b.b)return a.b-b.b; var pa=a.s.prod_end||'~', pb=b.s.prod_end||'~'; return pa<pb?-1:pa>pb?1:0; });
             var _out='', _cur=-1;
             _sorted.forEach(function(o){ if(o.b!==_cur){ _cur=o.b; var g=_BKT[o.b]; _out+='<div class="sp-grp" style="margin:14px 0 8px;padding:7px 12px;background:'+g.bg+';border:1px solid '+g.bd+';border-radius:6px;font-weight:700;font-size:12px;color:'+g.c+'">'+(g.t?g.t+'. ':'')+g.d+'</div>'; } _out+=cardHtml(o.s); });
@@ -1425,12 +1425,12 @@
             fetch(EP.shipmentNotesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){ shortNotes(notes);
               var _supN=(notes||[]).filter(function(n){return n.author_kind==='supplier';});   // escalate only on the supplier's OWN latest note
               var recentSupId=_supN.length?_supN.slice().sort(function(a,b){return String(b.created_at||'').localeCompare(String(a.created_at||''));})[0].id:null;
-              box.innerHTML=(EP.escalate?'<div style="margin-bottom:10px"><button class="save-btn sp-esc-ship" data-ref="'+esc(ref)+'" style="color:#b91c1c;border-color:#fca5a5;font-weight:600" title="escalate this shipment to Dock &amp; Bay by email">⚑ Escalate shipment</button></div>':'')
+              box.innerHTML=(EP.escalate?'<div style="margin-bottom:10px"><button class="save-btn sp-esc-ship" data-ref="'+esc(ref)+'" style="color:var(--neg);border-color:var(--neg-cell);font-weight:600" title="escalate this shipment to Dock &amp; Bay by email">⚑ Escalate shipment</button></div>':'')
                 +'<div style="font-weight:600;font-size:12px;margin-bottom:4px">Add timeline note</div>'
                 +'<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci sp-note-in" rows="3" placeholder="Add a note to the timeline… (multiple lines OK)" style="flex:1;max-width:560px;min-height:58px;text-align:left;resize:vertical;line-height:1.4"></textarea><button class="save-btn sp-note-post" style="flex:0 0 auto">Post</button></div>'
                 +'<div class="tiny" style="font-weight:600;margin-bottom:3px">Timeline</div>'
-                +((notes&&notes.length)?tlDesc(notes).map(function(n){ var flag=(EP.escalate&&n.id===recentSupId)?'<button class="save-btn light sp-flag-note" data-ref="'+esc(ref)+'" data-msg="'+esc(n.body)+'" title="email this note to the supply planner" style="flex:0 0 auto;color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'';
-                  return '<div style="margin:6px 0;max-width:640px;display:flex;gap:8px;align-items:flex-start">'+(flag?'<div style="flex:0 0 auto;min-width:60px">'+flag+'</div>':'')+'<div style="flex:1"><span class="mut" style="font-size:10px">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span><div class="tl-msg">'+esc(n.body)+'</div></div></div>';}).join(''):'<div class="mut tiny">No timeline entries yet.</div>');
+                +((notes&&notes.length)?tlDesc(notes).map(function(n){ var flag=(EP.escalate&&n.id===recentSupId)?'<button class="save-btn light sp-flag-note" data-ref="'+esc(ref)+'" data-msg="'+esc(n.body)+'" title="email this note to the supply planner" style="flex:0 0 auto;color:var(--neg);border-color:var(--neg-cell);white-space:nowrap">⚑ Escalate</button>':'';
+                  return '<div style="margin:6px 0;max-width:640px;display:flex;gap:8px;align-items:flex-start">'+(flag?'<div style="flex:0 0 auto;min-width:60px">'+flag+'</div>':'')+'<div style="flex:1"><span class="mut" style="font-size:10.5px">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span><div class="tl-msg">'+esc(n.body)+'</div></div></div>';}).join(''):'<div class="mut tiny">No timeline entries yet.</div>');
               var _se=box.querySelector('.sp-esc-ship'); if(_se)_se.onclick=function(){ if(!confirm('Escalate this shipment to Dock & Bay by email?'))return;
                 _se.disabled=true; _se.textContent='Sending…';
                 postJSON(EP.escalate,{kind:'shipment',ref:ref,message:'Escalation requested for shipment '+ref,initiator:'supplier',set_escalated:true,post_note:true},function(j){ _se.textContent='✓ Escalated';
@@ -1444,8 +1444,8 @@
               if(EP.shipmentNotesRead&&ent&&(ent.unread_dnb||0)>0){ postJSON(EP.shipmentNotesRead,{shipment_ref:ref},function(){ ent.unread_dnb=0; setShipBadge(); var bd=rootEl.querySelector('.sp-shipbadge[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(bd)bd.innerHTML=''; }); }
               box.querySelector('.sp-note-post').onclick=function(){ var inp=box.querySelector('.sp-note-in'); var v=(inp.value||'').trim(); if(!v)return;
                 postJSON(EP.shipmentNote,{shipment_ref:ref,author_kind:'supplier',author_email:STATE.by,body:v},function(){ ppShipTimeline(ref); }); }; }).catch(function(){}); }
-          function sampChip(st){ var m={'PLANNED':['#dbeafe','#1d4ed8'],'SHIPPED':['#dcfce7','#166534'],'CANCELLED':['#f1f5f9','#94a3b8'],'Awaiting supplier':['#fef3c7','#92710a'],'Change requested':['#fee2e2','#b91c1c'],'In production':['#dbeafe','#1d4ed8'],'Charge to review':['#fee2e2','#b91c1c'],'Shipped':['#dcfce7','#166534'],'Complete':['#e2e8f0','#475569'],'Cancelled':['#f1f5f9','#94a3b8']}; var c=m[st]||['#e2e8f0','#475569']; return '<span style="background:'+c[0]+';color:'+c[1]+';border-radius:4px;font-size:10px;font-weight:700;padding:1px 6px">'+esc(st||'')+'</span>'; }
-          function chgChip(st){ var m={pending:['#fef3c7','#92710a'],accepted:['#dcfce7','#166534'],rejected:['#f1f5f9','#94a3b8']}; var c=m[st]||['#e2e8f0','#475569']; return '<span style="background:'+c[0]+';color:'+c[1]+';border-radius:4px;font-size:10px;padding:1px 6px">'+esc(st)+'</span>'; }
+          function sampChip(st){ var m={'PLANNED':['#dbeafe','#1d4ed8'],'SHIPPED':['#dcfce7','#166534'],'CANCELLED':['#f1f5f9','#94a3b8'],'Awaiting supplier':['#fef3c7','#92710a'],'Change requested':['#fee2e2','#b91c1c'],'In production':['#dbeafe','#1d4ed8'],'Charge to review':['#fee2e2','#b91c1c'],'Shipped':['#dcfce7','#166534'],'Complete':['#e2e8f0','#475569'],'Cancelled':['#f1f5f9','#94a3b8']}; var c=m[st]||['#e2e8f0','#475569']; return '<span style="background:'+c[0]+';color:'+c[1]+';border-radius:4px;font-size:10.5px;font-weight:700;padding:1px 6px">'+esc(st||'')+'</span>'; }
+          function chgChip(st){ var m={pending:['#fef3c7','#92710a'],accepted:['#dcfce7','#166534'],rejected:['#f1f5f9','#94a3b8']}; var c=m[st]||['#e2e8f0','#475569']; return '<span style="background:'+c[0]+';color:'+c[1]+';border-radius:4px;font-size:10.5px;padding:1px 6px">'+esc(st)+'</span>'; }
           // freight charges on a PO's shipment (lazy-loaded into .pp-fchg-list when a PO row is expanded)
           function loadFreightCharges(container){ if(!container||!container.querySelectorAll)return;
             Array.prototype.forEach.call(container.querySelectorAll('.pp-fchg-list'),function(el){ var ref=el.dataset.ref; if(!ref)return;
@@ -1454,44 +1454,44 @@
                 el.innerHTML=cs.map(function(c){ var t=(Number(c.freight_cost)||0)+(Number(c.product_cost)||0); return '<div class="tiny" style="margin:2px 0">'+chgChip(c.status)+' &nbsp;'+money(t)+(c.description?' · '+esc(c.description):'')+'</div>'; }).join('');
               }).catch(function(){ el.innerHTML='<span class="mut tiny">—</span>'; }); }); }
           function ppSampleCard(s){
-            function lbl(t){ return '<div style="font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:#94a3b8;font-weight:700;margin-bottom:3px">'+t+'</div>'; }
+            function lbl(t){ return '<div style="font-size:12px;letter-spacing:.04em;text-transform:uppercase;color:var(--faint);font-weight:700;margin-bottom:3px">'+t+'</div>'; }
             // "changes since you approved" — diff current lines vs the approved snapshot (only meaningful when a re-confirm is needed)
             var _appr=s.approved_lines||{}, _cur=s.cur_lines||{}, _sampChg={}, _sampChgList=[];
             if(s.change_requested && _appr && Object.keys(_appr).length){
               Object.keys(_appr).forEach(function(sk){ var o=Number(_appr[sk])||0, n=(_cur[sk]!=null?Number(_cur[sk]):0); if(n!==o){ _sampChg[sk]=1; _sampChgList.push({sku:sk,old:o,nw:n,kind:(n===0?'removed':(n>o?'up':'down'))}); } });
               Object.keys(_cur).forEach(function(sk){ if(!(sk in _appr) && (Number(_cur[sk])||0)>0){ _sampChg[sk]=1; _sampChgList.push({sku:sk,old:0,nw:Number(_cur[sk])||0,kind:'new'}); } });
             }
-            var skuList=(s.lines||[]).map(function(l){var ch=_sampChg[l.sku]; return '<div class="samp-lrow" style="display:flex;gap:6px;align-items:center;padding:1px 0;text-align:left'+(ch?';background:#fef9c3;border-radius:4px':'')+'"><input class="fci samp-lqty" data-sku="'+esc(l.sku)+'" value="'+(l.qty==null?'':l.qty)+'" style="width:50px;text-align:left" inputmode="numeric" title="qty"><span style="flex:1;min-width:0">'+esc(l.sku)+(ch?' <span style="background:#f59e0b;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:1px 5px">changed</span>':'')+'</span><a class="samp-lrm" data-sku="'+esc(l.sku)+'" title="remove" style="color:#dc2626;cursor:pointer">✕</a></div>';}).join('')||'<div class="mut tiny">no SKUs</div>';
-            var devList=(s.dev_samples||[]).map(function(d){return '<div style="display:flex;gap:6px;align-items:center;padding:1px 0;text-align:left"><input class="fci samp-dqty" data-id="'+d.id+'" value="'+(d.qty==null?'':d.qty)+'" style="width:50px;text-align:left" inputmode="numeric" title="qty"><b style="font-family:ui-monospace,Menlo,monospace;font-size:11px">'+esc(d.ref)+'</b>'+(d.colour_name?'<span class="mut tiny" style="flex:1;min-width:0">'+esc(d.colour_name)+'</span>':'<span style="flex:1"></span>')+'<a class="samp-drm" data-id="'+d.id+'" title="remove" style="color:#dc2626;cursor:pointer">✕</a></div>';}).join('')||'<div class="mut tiny">none</div>';
+            var skuList=(s.lines||[]).map(function(l){var ch=_sampChg[l.sku]; return '<div class="samp-lrow" style="display:flex;gap:6px;align-items:center;padding:1px 0;text-align:left'+(ch?';background:var(--amber-bg);border-radius:4px':'')+'"><input class="fci samp-lqty" data-sku="'+esc(l.sku)+'" value="'+(l.qty==null?'':l.qty)+'" style="width:50px;text-align:left" inputmode="numeric" title="qty"><span style="flex:1;min-width:0">'+esc(l.sku)+(ch?' <span style="background:var(--prod);color:#fff;border-radius:8px;font-size:10.5px;font-weight:700;padding:1px 5px">changed</span>':'')+'</span><a class="samp-lrm" data-sku="'+esc(l.sku)+'" title="remove" style="color:var(--neg);cursor:pointer">✕</a></div>';}).join('')||'<div class="mut tiny">no SKUs</div>';
+            var devList=(s.dev_samples||[]).map(function(d){return '<div style="display:flex;gap:6px;align-items:center;padding:1px 0;text-align:left"><input class="fci samp-dqty" data-id="'+d.id+'" value="'+(d.qty==null?'':d.qty)+'" style="width:50px;text-align:left" inputmode="numeric" title="qty"><b style="font-family:ui-monospace,Menlo,monospace;font-size:12px">'+esc(d.ref)+'</b>'+(d.colour_name?'<span class="mut tiny" style="flex:1;min-width:0">'+esc(d.colour_name)+'</span>':'<span style="flex:1"></span>')+'<a class="samp-drm" data-id="'+d.id+'" title="remove" style="color:var(--neg);cursor:pointer">✕</a></div>';}).join('')||'<div class="mut tiny">none</div>';
             var addr=[s.address_line1,s.address_line2,[s.city,s.region,s.postcode].filter(Boolean).join(' '),s.country].filter(Boolean);
             var charges=(s.charges||[]).map(function(c){ var t=(Number(c.freight_cost)||0)+(Number(c.product_cost)||0); return '<div class="tiny" style="margin:2px 0">'+chgChip(c.status)+' &nbsp;freight '+money(c.freight_cost)+' + product '+money(c.product_cost)+' = <b>'+money(t)+'</b>'+(c.description?' · '+esc(c.description):'')+'</div>'; }).join('')||'<div class="mut tiny">none yet</div>';
-            return '<div class="samp-card" data-id="'+s.id+'" data-ref="'+esc(s.ref)+'" style="border:1px solid #e5e7eb;border-radius:10px;padding:14px;margin-bottom:12px;background:#fff;text-align:left">'
+            return '<div class="samp-card" data-id="'+s.id+'" data-ref="'+esc(s.ref)+'" style="border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:12px;background:#fff;text-align:left">'
               +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px"><b style="font-size:15px">'+esc(s.ref)+'</b>'+sampChip(s.status_calc)+' <span class="mut tiny">Dock &amp; Bay status</span>'
                 +(function(){ var cr=s.completion_required; if(!cr)return '<span class="mut tiny">No completion date set</span>';
                     var past=cr<new Date().toISOString().slice(0,10);
-                    return '<span style="display:inline-block;background:'+(past?'#fee2e2':'#fef3c7')+';color:'+(past?'#991b1b':'#92400e')+';border:1px solid '+(past?'#fca5a5':'#fcd34d')+';border-radius:8px;font-size:13px;font-weight:700;padding:4px 12px">📅 Completion required '+fd(cr)+(past?' — overdue':'')+'</span>'; })()+'</div>'
-              +(sampNeedsAccept(s)?('<div style="margin:0 0 12px;padding:9px 12px;border-radius:8px;font-size:12px;background:#fef3c7;border:1px solid #fcd34d">'
+                    return '<span style="display:inline-block;background:'+(past?'#fee2e2':'#fef3c7')+';color:'+(past?'#991b1b':'#92400e')+';border:1px solid '+(past?'#fca5a5':'#fcd34d')+';border-radius:8px;font-size:12.5px;font-weight:700;padding:4px 12px">📅 Completion required '+fd(cr)+(past?' — overdue':'')+'</span>'; })()+'</div>'
+              +(sampNeedsAccept(s)?('<div style="margin:0 0 12px;padding:9px 12px;border-radius:8px;font-size:12px;background:var(--amber-bg);border:1px solid #fcd34d">'
                 +'<div style="margin-bottom:8px">⏳ <b>'+(s.change_requested?'A change has been made. Please re-confirm this sample request.':'Please confirm this sample request.')+'</b> Review the SKUs &amp; quantities'+(_sampChgList.length?' (changes highlighted below)':'')+', then confirm.</div>'
-                +(_sampChgList.length?'<div style="overflow-x:auto;margin-bottom:8px"><table style="font-size:11px;border-collapse:collapse"><thead><tr><th class="l" style="padding:2px 12px 3px 0;min-width:24ch">SKU</th><th style="text-align:right;padding:2px 12px 3px">Was</th><th style="text-align:right;padding:2px 12px 3px">Now</th><th class="l">Change</th></tr></thead><tbody>'+_sampChgList.map(function(c){var d=c.nw-c.old;return '<tr><td class="l" style="padding:1px 12px 1px 0">'+esc(c.sku)+'</td><td style="text-align:right;padding:1px 12px">'+(c.kind==='new'?'—':c.old)+'</td><td style="text-align:right;padding:1px 12px">'+c.nw+'</td><td class="l" style="font-weight:600;color:'+(c.kind==='removed'?'#b91c1c':d>0?'#166534':'#b45309')+'">'+(c.kind==='new'?'added':c.kind==='removed'?'removed':(d>0?'+':'')+d)+'</td></tr>';}).join('')+'</tbody></table></div>':'')
-                +'<button class="save-btn samp-accept" style="background:#16a34a;color:#fff;border-color:#15803d">✓ Confirm sample request</button></div>')
-                :(s.accepted?'<div style="margin:0 0 10px;font-size:12px;color:#166534">✓ Sample request confirmed</div>':''))
+                +(_sampChgList.length?'<div style="overflow-x:auto;margin-bottom:8px"><table style="font-size:12px;border-collapse:collapse"><thead><tr><th class="l" style="padding:2px 12px 3px 0;min-width:24ch">SKU</th><th style="text-align:right;padding:2px 12px 3px">Was</th><th style="text-align:right;padding:2px 12px 3px">Now</th><th class="l">Change</th></tr></thead><tbody>'+_sampChgList.map(function(c){var d=c.nw-c.old;return '<tr><td class="l" style="padding:1px 12px 1px 0">'+esc(c.sku)+'</td><td style="text-align:right;padding:1px 12px">'+(c.kind==='new'?'—':c.old)+'</td><td style="text-align:right;padding:1px 12px">'+c.nw+'</td><td class="l" style="font-weight:600;color:'+(c.kind==='removed'?'#b91c1c':d>0?'#166534':'#b45309')+'">'+(c.kind==='new'?'added':c.kind==='removed'?'removed':(d>0?'+':'')+d)+'</td></tr>';}).join('')+'</tbody></table></div>':'')
+                +'<button class="save-btn samp-accept" style="background:var(--pos);color:#fff;border-color:var(--pos)">✓ Confirm sample request</button></div>')
+                :(s.accepted?'<div style="margin:0 0 10px;font-size:12px;color:var(--pos)">✓ Sample request confirmed</div>':''))
               +'<div style="display:flex;gap:32px;flex-wrap:wrap">'
                 +'<div style="min-width:190px">'+lbl('Ship to')+'<div class="tiny" style="line-height:1.65"><b>'+esc(s.recipient_company||'—')+'</b>'+(s.recipient_name?'<br>'+esc(s.recipient_name):'')+(addr.length?'<br>'+addr.map(esc).join('<br>'):'')+(s.phone?'<br>☏ '+esc(s.phone):'')+'</div></div>'
                 +'<div style="min-width:220px">'+lbl('Contents')
-                  +'<div class="tiny" style="line-height:1.7"><div style="font-weight:600;color:#64748b;margin-bottom:2px">Bulk SKUs</div>'+skuList
-                  +'<div style="font-weight:600;color:#64748b;margin:6px 0 2px">Product development</div>'+devList
-                  +'<button class="save-btn samp-add-contents" style="margin-top:7px;font-size:11px;background:#2563eb;color:#fff;border-color:#1d4ed8">＋ Add contents</button></div>'
+                  +'<div class="tiny" style="line-height:1.7"><div style="font-weight:600;color:var(--muted);margin-bottom:2px">Bulk SKUs</div>'+skuList
+                  +'<div style="font-weight:600;color:var(--muted);margin:6px 0 2px">Product development</div>'+devList
+                  +'<button class="save-btn samp-add-contents" style="margin-top:7px;font-size:12px;background:var(--blue);color:#fff;border-color:var(--blue)">+ Add contents</button></div>'
                   +'<div class="samp-picker" style="margin-top:7px"></div></div>'
-                +'<div style="min-width:190px">'+lbl('Purpose')+'<div class="tiny" style="margin-bottom:10px">'+esc((s.purpose||[]).join(', ')||'—')+'</div>'+lbl('Notes')+'<div class="tiny" style="white-space:pre-wrap;background:#f8fafc;border:1px solid #eef2f7;border-radius:6px;padding:7px 9px;min-width:170px;max-width:300px">'+(s.notes?esc(s.notes):'<span class="mut">—</span>')+'</div></div>'
+                +'<div style="min-width:190px">'+lbl('Purpose')+'<div class="tiny" style="margin-bottom:10px">'+esc((s.purpose||[]).join(', ')||'—')+'</div>'+lbl('Notes')+'<div class="tiny" style="white-space:pre-wrap;background:var(--hover);border:1px solid var(--line2);border-radius:6px;padding:7px 9px;min-width:170px;max-width:300px">'+(s.notes?esc(s.notes):'<span class="mut">—</span>')+'</div></div>'
               +'</div>'
-              +'<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px">'
-                +'<div>'+lbl('Your production status')+'<select class="fci samp-prod" data-id="'+s.id+'" style="width:150px;font-size:12px'+((sampStMissing(s)||sampDateConflict(s))?';border:1px solid #dc2626;background:#fef2f2':'')+'"><option value="">—</option>'+PROD_STATUS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===(s.production_status||'')?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'+(sampStMissing(s)?'<div style="margin-top:3px"><span style="background:#dc2626;color:#fff;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px">⚠ Must set status</span></div>':'')+'</div>'
-                +'<div>'+lbl('Expected completion')+'<input type="date" class="fci samp-exp" value="'+esc(s.supplier_expected||'')+'" style="width:150px'+((sampCdMissing(s)||sampDateConflict(s))?';border:1px solid #dc2626;background:#fef2f2':'')+'">'+(sampCdMissing(s)?'<div style="margin-top:3px"><span style="background:#dc2626;color:#fff;border-radius:4px;font-size:10px;font-weight:700;padding:2px 6px">⚠ Must enter completion date</span></div>':'')+'</div>'
-                +(sampDateConflict(s)?'<div style="flex-basis:100%"><span style="background:#dc2626;color:#fff;border-radius:4px;font-size:10px;font-weight:700;padding:2px 7px">⚠ Expected completion date has passed but status is still "In production" — please update</span></div>':'')
-                +'<div>'+lbl('Tracking code')+'<input class="fci txt samp-trk" value="'+esc(s.tracking_code||'')+'" style="width:170px" placeholder="tracking…">'+(carrierTrackUrl(s.carrier,s.tracking_code)?'<div class="tiny" style="margin-top:3px"><a href="'+carrierTrackUrl(s.carrier,s.tracking_code)+'" target="_blank" rel="noopener" style="color:#1d4ed8;text-decoration:underline;font-weight:700" title="track with '+esc(s.carrier||'carrier')+'">track here ↗</a></div>':'')+'</div>'
+              +'<div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-end;margin-top:12px;border-top:1px solid var(--hover);padding-top:10px">'
+                +'<div>'+lbl('Your production status')+'<select class="fci samp-prod" data-id="'+s.id+'" style="width:150px;font-size:12px'+((sampStMissing(s)||sampDateConflict(s))?';border:1px solid var(--neg);background:var(--neg-bg)':'')+'"><option value="">—</option>'+PROD_STATUS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===(s.production_status||'')?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select>'+(sampStMissing(s)?'<div style="margin-top:3px"><span style="background:var(--neg);color:#fff;border-radius:4px;font-size:10.5px;font-weight:700;padding:2px 6px">⚠ Must set status</span></div>':'')+'</div>'
+                +'<div>'+lbl('Expected completion')+'<input type="date" class="fci samp-exp" value="'+esc(s.supplier_expected||'')+'" style="width:150px'+((sampCdMissing(s)||sampDateConflict(s))?';border:1px solid var(--neg);background:var(--neg-bg)':'')+'">'+(sampCdMissing(s)?'<div style="margin-top:3px"><span style="background:var(--neg);color:#fff;border-radius:4px;font-size:10.5px;font-weight:700;padding:2px 6px">⚠ Must enter completion date</span></div>':'')+'</div>'
+                +(sampDateConflict(s)?'<div style="flex-basis:100%"><span style="background:var(--neg);color:#fff;border-radius:4px;font-size:10.5px;font-weight:700;padding:2px 7px">⚠ Expected completion date has passed but status is still "In production" — please update</span></div>':'')
+                +'<div>'+lbl('Tracking code')+'<input class="fci txt samp-trk" value="'+esc(s.tracking_code||'')+'" style="width:170px" placeholder="tracking…">'+(carrierTrackUrl(s.carrier,s.tracking_code)?'<div class="tiny" style="margin-top:3px"><a href="'+carrierTrackUrl(s.carrier,s.tracking_code)+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:700" title="track with '+esc(s.carrier||'carrier')+'">track here ↗</a></div>':'')+'</div>'
                 +'<div>'+lbl('Carrier')+(function(){var CARR=['DHL','FedEx','UPS','Flexport','SF Express','Other'],cur=s.carrier||'';return '<select class="fci samp-car" style="width:130px"><option value="">—</option>'+CARR.map(function(o){return '<option'+(o===cur?' selected':'')+'>'+o+'</option>';}).join('')+((cur&&CARR.indexOf(cur)<0)?'<option selected>'+esc(cur)+'</option>':'')+'</select>';})()+'</div>'
                 +'<button class="save-btn samp-save">Save</button></div>'
-              +'<details class="samp-2nd" style="margin-top:8px;border-top:1px solid #f1f5f9;padding-top:8px"'+((s.recipient_company_2||s.tracking_code_2||s.address_line1_2)?' open':'')+'><summary style="cursor:pointer;font-size:12px;font-weight:700;color:#1d4ed8">＋ Second recipient &amp; tracking <span class="mut tiny" style="font-weight:400">(optional — e.g. a second parcel to another country)</span></summary>'
+              +'<details class="samp-2nd" style="margin-top:8px;border-top:1px solid var(--hover);padding-top:8px"'+((s.recipient_company_2||s.tracking_code_2||s.address_line1_2)?' open':'')+'><summary style="cursor:pointer;font-size:12px;font-weight:700;color:var(--blue)">＋ Second recipient &amp; tracking <span class="mut tiny" style="font-weight:400">(optional — e.g. a second parcel to another country)</span></summary>'
                 +'<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:8px">'
                   +'<div>'+lbl('Recipient company')+'<input class="fci txt s2-recipient_company" value="'+esc(s.recipient_company_2||'')+'" style="width:180px"></div>'
                   +'<div>'+lbl('Name')+'<input class="fci txt s2-first_name" value="'+esc(s.first_name_2||'')+'" placeholder="first" style="width:90px"> <input class="fci txt s2-last_name" value="'+esc(s.last_name_2||'')+'" placeholder="last" style="width:90px"></div>'
@@ -1506,12 +1506,12 @@
                   +'<div>'+lbl('Carrier')+(function(){var CARR=['DHL','FedEx','UPS','Flexport','SF Express','Other'],cur=s.carrier_2||'';return '<select class="fci s2-carrier" style="width:120px"><option value="">—</option>'+CARR.map(function(o){return '<option'+(o===cur?' selected':'')+'>'+o+'</option>';}).join('')+((cur&&CARR.indexOf(cur)<0)?'<option selected>'+esc(cur)+'</option>':'')+'</select>';})()+'</div>'
                   +'<button class="save-btn samp-save-2">Save 2nd recipient</button>'
                 +'</div></details>'
-              +'<div style="margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px">'+lbl('Charges')+charges
+              +'<div style="margin-top:12px;border-top:1px solid var(--hover);padding-top:10px">'+lbl('Charges')+charges
                 +'<div style="display:flex;gap:8px;align-items:flex-end;margin-top:6px;flex-wrap:wrap"><div><div class="mut tiny">Freight</div><input class="fci samp-cf" style="width:80px" placeholder="0.00"></div><div><div class="mut tiny">Product</div><input class="fci samp-cp" style="width:80px" placeholder="0.00"></div><div><div class="mut tiny">Note</div><input class="fci txt samp-cd" style="width:180px" placeholder="optional"></div><button class="save-btn samp-charge">Create charge</button></div></div>'
-              +'<div style="margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px;text-align:left">'+lbl('Attachments')
-                +'<div style="font-size:12px;margin-bottom:4px;text-align:left">'+((s.attachments||[]).map(function(a){return '<span style="display:inline-block;margin:0 12px 4px 0"><a href="'+EP.attachmentBase+a.id+'" target="_blank" rel="noopener">'+esc(a.filename||'file')+'</a> <a class="ps-att-rm" data-aid="'+a.id+'" title="remove" style="color:#dc2626;cursor:pointer">×</a></span>';}).join('')||'<span class="mut">none</span>')+'</div>'
-                +'<div style="text-align:left"><input type="file" class="ps-att-file" style="font-size:11px"> <button class="save-btn ps-att-up">Upload attachment</button></div></div>'
-              +'<div style="margin-top:12px;border-top:1px solid #f1f5f9;padding-top:10px">'+lbl('Timeline')
+              +'<div style="margin-top:12px;border-top:1px solid var(--hover);padding-top:10px;text-align:left">'+lbl('Attachments')
+                +'<div style="font-size:12px;margin-bottom:4px;text-align:left">'+((s.attachments||[]).map(function(a){return '<span style="display:inline-block;margin:0 12px 4px 0"><a href="'+EP.attachmentBase+a.id+'" target="_blank" rel="noopener">'+esc(a.filename||'file')+'</a> <a class="ps-att-rm" data-aid="'+a.id+'" title="remove" style="color:var(--neg);cursor:pointer">×</a></span>';}).join('')||'<span class="mut">none</span>')+'</div>'
+                +'<div style="text-align:left"><input type="file" class="ps-att-file" style="font-size:12px"> <button class="save-btn ps-att-up">Upload attachment</button></div></div>'
+              +'<div style="margin-top:12px;border-top:1px solid var(--hover);padding-top:10px">'+lbl('Timeline')
                 +'<div style="display:flex;gap:6px;align-items:flex-start;margin:4px 0 6px"><textarea class="fci samp-note-in" rows="2" placeholder="Add a note…" style="flex:1;max-width:480px;text-align:left"></textarea><button class="save-btn samp-note-post">Post</button></div>'
                 +'<div class="samp-tl" data-id="'+s.id+'"></div></div>'
               +'</div>'; }
@@ -1526,8 +1526,8 @@
           // past-expected-date-while-in-production conflict. (Accept step removed.)
           function sampActions(s){ return ((s.unread_dnb)||0)+(sampCdMissing(s)?1:0)+(sampStMissing(s)?1:0)+(sampDateConflict(s)?1:0); }
           function setSampBadge(){ var n=((_ppData&&_ppData.samples)||[]).reduce(function(a,s){return a+sampActions(s);},0);   // supplier actions: needs-(re)accept + unread D&B notes
-            var sbg=document.getElementById('pp-samp-badge'); if(sbg)sbg.innerHTML=n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
-          function sampRowBadgeHtml(s){ var n=sampActions(s); return n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px;margin-left:4px" title="needs your attention">'+n+'</span>':''; }   // single red badge (sampActions already includes unread D&B notes); the separate orange badge was removed per Ben
+            var sbg=document.getElementById('pp-samp-badge'); if(sbg)sbg.innerHTML=n?'<span style="background:var(--neg);color:#fff;border-radius:8px;font-size:10.5px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
+          function sampRowBadgeHtml(s){ var n=sampActions(s); return n?'<span style="background:var(--neg);color:#fff;border-radius:8px;font-size:10.5px;font-weight:700;padding:0 5px;margin-left:4px" title="needs your attention">'+n+'</span>':''; }   // single red badge (sampActions already includes unread D&B notes); the separate orange badge was removed per Ben
           function sampById(id){ return ((_ppData&&_ppData.samples)||[]).filter(function(x){return String(x.id)===String(id);})[0]; }
           // Silent in-place refresh of one sample card + its row/top badges (no full reload / no screen refresh).
           function refreshSampleCard(id){ var s=sampById(id); if(!s)return;
@@ -1537,7 +1537,7 @@
               det.innerHTML=ppSampleCard(s); wireSampleCard(det, id); }
             var rb=body.querySelector('.ps-rowbadge[data-id="'+id+'"]'); if(rb)rb.innerHTML=sampRowBadgeHtml(s);
             setSampBadge(); }
-          function ppBadgeHtml(n){ return n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
+          function ppBadgeHtml(n){ return n?'<span style="background:var(--neg);color:#fff;border-radius:8px;font-size:10.5px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
           // Purchase Orders top-menu badge = open supplier ACTIONS across all POs. Deliberately EXCLUDES the
           // per-PO "no shipment yet" term (a passive state, not an action — it would show ~1 per in-production PO).
           function setPosBadge(){
@@ -1556,9 +1556,9 @@
           function ppSampleRow(s,i){
             var units=(s.lines||[]).reduce(function(a,l){return a+(Number(l.qty)||0);},0), nsku=(s.lines||[]).length;
             var _ps=s.production_status||'', _pso=PROD_STATUS.filter(function(x){return x[0]===_ps;})[0], _psc=PROD_STATUS_COL[_ps]||PROD_STATUS_COL[''];
-            var yourStatus='<span style="display:inline-block;font-size:10px;font-weight:700;padding:1px 8px;border-radius:8px;background:'+_psc[0]+';color:'+_psc[1]+'">'+esc(_pso?_pso[1]:'—')+'</span>';
+            var yourStatus='<span style="display:inline-block;font-size:10.5px;font-weight:700;padding:1px 8px;border-radius:8px;background:'+_psc[0]+';color:'+_psc[1]+'">'+esc(_pso?_pso[1]:'—')+'</span>';
             return '<tr><td class="l"><button class="planbtn ps-manage" data-id="'+s.id+'" data-i="'+i+'">PLAN</button><span class="ps-rowbadge" data-id="'+s.id+'">'+sampRowBadgeHtml(s)+'</span></td>'
-              +'<td class="l"><a class="ps-reflink" data-i="'+i+'" title="open this sample shipment" style="color:#1d4ed8;text-decoration:underline;cursor:pointer;font-weight:700">'+esc(s.ref)+'</a></td>'
+              +'<td class="l"><a class="ps-reflink" data-i="'+i+'" title="open this sample shipment" style="color:var(--blue);text-decoration:underline;cursor:pointer;font-weight:700">'+esc(s.ref)+'</a></td>'
               +'<td class="l">'+sampChip(s.status_calc)+'</td>'
               +'<td class="l">'+yourStatus+'</td>'
               +'<td class="l">'+esc(s.recipient_company||'')+(s.recipient_name?' <span class="mut tiny">'+esc(s.recipient_name)+'</span>':'')+'</td>'
@@ -1570,7 +1570,7 @@
             var F=[['open','Open'],['closed','Closed'],['all','All']];
             var q=(PORTAL_SAMP_Q||'').toLowerCase();
             var rows=samples.filter(function(s){ if(!sampInFilt(s,PORTAL_SAMP_F))return false; if(q){ var hay=((s.ref||'')+' '+(s.recipient_company||'')+' '+(s.recipient_name||'')+' '+(s.lines||[]).map(function(l){return l.sku;}).join(' ')+' '+Object.keys(s.cur_lines||{}).join(' ')).toLowerCase(); if(hay.indexOf(q)<0)return false; } return true; });   // cur_lines: SKUs are searchable even before the row is expanded
-            var newTop='<div style="margin-bottom:8px"><button class="save-btn" id="samp-new-btn" style="background:#16a34a;color:#fff;border-color:#15803d">+ New Sample Shipment</button></div>';   // moved to the very top (Ben)
+            var newTop='<div style="margin-bottom:8px"><button class="save-btn" id="samp-new-btn" style="background:var(--pos);color:#fff;border-color:var(--pos)">+ New Sample Shipment</button></div>';   // moved to the very top (Ben)
             var bar='<div class="bar" style="margin-bottom:8px;flex-wrap:wrap;gap:6px;align-items:center">'
               +F.map(function(f){return '<span class="rtab ps-filt'+(PORTAL_SAMP_F===f[0]?' active':'')+'" data-f="'+f[0]+'" style="cursor:pointer">'+f[1]+' ('+samples.filter(function(s){return sampInFilt(s,f[0]);}).length+')</span>';}).join('')
               +'<input class="fci txt ps-q" placeholder="search ref / recipient / SKU…" value="'+esc(PORTAL_SAMP_Q||'')+'" style="width:220px"></div>';
@@ -1619,31 +1619,31 @@
               box.innerHTML=(notes&&notes.length)?tlDesc(notes).map(function(n){ var onBehalf=(n.author_kind==='supplier'&&n.author_email==='D&B'); var dnb=(n.author_kind!=='supplier'), nu=dnb&&!n.read;
                 var who=onBehalf?('D&amp;B as '+esc(STATE.supplierName||'supplier')):(dnb?'Dock &amp; Bay':'You');
                 var ctrl = nu ? '<button class="save-btn light ps-note-read" data-id="'+n.id+'" style="flex:0 0 auto">Mark read</button>'
-                              : ((EP.escalate&&sref&&!dnb&&n.id===recentSupId)?'<button class="save-btn light samp-esc-note" data-ref="'+esc(sref)+'" data-msg="'+esc(n.body)+'" title="email this note to the supply planner" style="flex:0 0 auto;color:#b91c1c;border-color:#fca5a5;white-space:nowrap">⚑ Escalate</button>':'');
-                return '<div style="font-size:13px;line-height:1.5;text-align:left;margin:4px 0;max-width:640px;display:flex;gap:10px;align-items:flex-start'+(nu?';background:#fff7ed;border:1px solid #fdba74;border-radius:6px;padding:6px 9px':'')+'">'+(ctrl?'<div style="flex:0 0 auto;min-width:74px">'+ctrl+'</div>':'')+'<div style="flex:1"><span class="mut" style="font-size:11px">'+esc(n.created_at)+' · '+who+'</span>'+(nu?' <span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">new</span>':'')+'<br>'+esc(n.body)+'</div></div>'; }).join(''):'<div class="mut" style="font-size:12px">No timeline entries yet.</div>';
+                              : ((EP.escalate&&sref&&!dnb&&n.id===recentSupId)?'<button class="save-btn light samp-esc-note" data-ref="'+esc(sref)+'" data-msg="'+esc(n.body)+'" title="email this note to the supply planner" style="flex:0 0 auto;color:var(--neg);border-color:var(--neg-cell);white-space:nowrap">⚑ Escalate</button>':'');
+                return '<div style="font-size:12.5px;line-height:1.5;text-align:left;margin:4px 0;max-width:640px;display:flex;gap:10px;align-items:flex-start'+(nu?';background:#fff7ed;border:1px solid #fdba74;border-radius:6px;padding:6px 9px':'')+'">'+(ctrl?'<div style="flex:0 0 auto;min-width:74px">'+ctrl+'</div>':'')+'<div style="flex:1"><span class="mut" style="font-size:12px">'+esc(n.created_at)+' · '+who+'</span>'+(nu?' <span style="background:var(--neg);color:#fff;border-radius:8px;font-size:10.5px;font-weight:700;padding:0 5px">new</span>':'')+'<br>'+esc(n.body)+'</div></div>'; }).join(''):'<div class="mut" style="font-size:12px">No timeline entries yet.</div>';
               box.querySelectorAll('.ps-note-read').forEach(function(b){ b.onclick=function(){ postJSON(EP.sampleNoteReadBase+b.dataset.id,{read:true},function(){ var s=(_ppData.samples||[]).filter(function(x){return String(x.id)===String(id);})[0]; if(s&&s.unread_dnb>0)s.unread_dnb--; setSampBadge(); ppSampleTimeline(id); }); }; });
               var _se=box.querySelector('.samp-esc-note'); if(_se)_se.onclick=function(){ var msg=_se.dataset.msg||''; if(!msg)return; if(!confirm('Email this note to the supply planner?'))return; _se.disabled=true; _se.textContent='Sending…';
                 postJSON(EP.escalate,{kind:'sample',ref:_se.dataset.ref,message:msg,initiator:'supplier'},function(j){ _se.textContent='✓ Escalated'; if(j&&j.sandbox)alert('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); };
             }).catch(function(){}); }
           function ppSampleNewForm(){ var box=document.getElementById('samp-newform'); if(box.dataset.open==='1'){box.dataset.open='';box.innerHTML='';return;} box.dataset.open='1';
-            var purp=['sales','product','photography','marketing','operations'].map(function(p){return '<label style="margin-right:10px;font-size:11px"><input type="checkbox" class="snf-purpose" value="'+p+'"> '+p+'</label>';}).join('');
+            var purp=['sales','product','photography','marketing','operations'].map(function(p){return '<label style="margin-right:10px;font-size:12px"><input type="checkbox" class="snf-purpose" value="'+p+'"> '+p+'</label>';}).join('');
             var col={lines:[], dev_samples:[]};   // contents collected before the shipment exists
-            box.innerHTML='<div style="border:1px solid #cbd5e1;border-radius:10px;padding:12px;margin-bottom:12px;background:#f8fafc"><div class="tiny" style="font-weight:700;margin-bottom:6px">New sample shipment</div>'
+            box.innerHTML='<div style="border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:12px;background:var(--hover)"><div class="tiny" style="font-weight:700;margin-bottom:6px">New sample shipment</div>'
               +'<div style="display:flex;gap:8px;flex-wrap:wrap"><input class="fci txt snf-recipient_company" placeholder="Recipient company" style="width:200px"><input class="fci txt snf-first_name" placeholder="First name" style="width:120px"><input class="fci txt snf-last_name" placeholder="Last name" style="width:120px"><input class="fci txt snf-phone" placeholder="Phone" style="width:140px"></div>'
               +'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:4px"><input class="fci txt snf-address_line1" placeholder="Address line 1" style="width:260px"><input class="fci txt snf-address_line2" placeholder="Line 2" style="width:160px"><input class="fci txt snf-city" placeholder="City" style="width:120px"><input class="fci txt snf-region" placeholder="Region" style="width:100px"><input class="fci txt snf-postcode" placeholder="Postcode" style="width:100px"><input class="fci txt snf-country" placeholder="Country" style="width:80px"></div>'
               +'<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;margin-top:6px">'
-                +'<label style="font-size:11px">Status<br><select class="fci snf-status" style="width:150px;text-align:left">'+PROD_STATUS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]==='not_started'?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></label>'
-                +'<label style="font-size:11px">Expected completion<br><input type="date" class="fci snf-expected" style="width:150px;text-align:left"></label>'
-                +'<label style="font-size:11px">Completion required<br><input type="date" class="fci snf-completion" style="width:150px;text-align:left"></label></div>'
+                +'<label style="font-size:12px">Status<br><select class="fci snf-status" style="width:150px;text-align:left">'+PROD_STATUS.map(function(o){return '<option value="'+o[0]+'"'+(o[0]==='not_started'?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></label>'
+                +'<label style="font-size:12px">Expected completion<br><input type="date" class="fci snf-expected" style="width:150px;text-align:left"></label>'
+                +'<label style="font-size:12px">Completion required<br><input type="date" class="fci snf-completion" style="width:150px;text-align:left"></label></div>'
               +'<div style="margin-top:6px">'+purp+'</div>'
               +'<div style="margin-top:6px"><textarea class="fci snf-notes" rows="2" placeholder="Notes" style="width:320px;text-align:left"></textarea></div>'
-              +'<div style="margin-top:8px;font-weight:700;font-size:12px;color:#64748b">Contents</div><div class="snf-contents" style="margin:3px 0"></div>'
-              +'<button class="save-btn snf-addc" style="font-size:11px;background:#2563eb;color:#fff;border-color:#1d4ed8">＋ Add contents</button><div class="snf-picker" style="margin-top:7px"></div>'
-              +'<div style="margin-top:10px"><button class="save-btn snf-save" style="background:#16a34a;color:#fff;border-color:#15803d">Create</button> <button class="save-btn snf-cancel">Cancel</button> <span class="snf-msg mut tiny"></span></div></div>';
+              +'<div style="margin-top:8px;font-weight:700;font-size:12px;color:var(--muted)">Contents</div><div class="snf-contents" style="margin:3px 0"></div>'
+              +'<button class="save-btn snf-addc" style="font-size:12px;background:var(--blue);color:#fff;border-color:var(--blue)">+ Add contents</button><div class="snf-picker" style="margin-top:7px"></div>'
+              +'<div style="margin-top:10px"><button class="save-btn snf-save" style="background:var(--pos);color:#fff;border-color:var(--pos)">Create</button> <button class="save-btn snf-cancel">Cancel</button> <span class="snf-msg mut tiny"></span></div></div>';
             function drawContents(){ var el=box.querySelector('.snf-contents');
-              var sk=col.lines.map(function(l,ix){return '<div style="display:flex;gap:6px;align-items:center;font-size:12px;padding:1px 0"><b>'+units(l.qty)+'</b> × '+esc(l.sku)+'<a class="snf-rmk" data-i="'+ix+'" style="color:#dc2626;cursor:pointer;margin-left:6px">✕</a></div>';}).join('');
-              var dv=col.dev_samples.map(function(d,ix){return '<div style="display:flex;gap:6px;align-items:center;font-size:12px;padding:1px 0"><b>'+units(d.qty)+'</b> × <b style="font-family:ui-monospace,Menlo,monospace">'+esc(d.ref||('#'+d.id))+'</b>'+(d.colour_name?' <span class="mut tiny">'+esc(d.colour_name)+'</span>':'')+'<a class="snf-rmd" data-i="'+ix+'" style="color:#dc2626;cursor:pointer;margin-left:6px">✕</a></div>';}).join('');
-              el.innerHTML=(sk||dv)?(sk+dv):'<span class="mut tiny">none yet — use ＋ Add contents</span>';
+              var sk=col.lines.map(function(l,ix){return '<div style="display:flex;gap:6px;align-items:center;font-size:12px;padding:1px 0"><b>'+units(l.qty)+'</b> × '+esc(l.sku)+'<a class="snf-rmk" data-i="'+ix+'" style="color:var(--neg);cursor:pointer;margin-left:6px">✕</a></div>';}).join('');
+              var dv=col.dev_samples.map(function(d,ix){return '<div style="display:flex;gap:6px;align-items:center;font-size:12px;padding:1px 0"><b>'+units(d.qty)+'</b> × <b style="font-family:ui-monospace,Menlo,monospace">'+esc(d.ref||('#'+d.id))+'</b>'+(d.colour_name?' <span class="mut tiny">'+esc(d.colour_name)+'</span>':'')+'<a class="snf-rmd" data-i="'+ix+'" style="color:var(--neg);cursor:pointer;margin-left:6px">✕</a></div>';}).join('');
+              el.innerHTML=(sk||dv)?(sk+dv):'<span class="mut tiny">none yet — use + Add contents</span>';
               el.querySelectorAll('.snf-rmk').forEach(function(a){ a.onclick=function(){ col.lines.splice(+a.dataset.i,1); drawContents(); }; });
               el.querySelectorAll('.snf-rmd').forEach(function(a){ a.onclick=function(){ col.dev_samples.splice(+a.dataset.i,1); drawContents(); }; }); }
             drawContents();
@@ -1672,12 +1672,12 @@
             if(!items.length) return '<div class="count" style="padding:16px 2px;text-align:left">No product development items assigned to you yet.</div>';
             var seasons=[]; items.forEach(function(p){ if(p.season&&seasons.indexOf(p.season)<0)seasons.push(p.season); }); seasons.sort();
             var STAT=[['dev_actions','In development + actions'],['','All'],['in_development','In development'],['approved','Approved'],['dropped','Dropped']];
-            return '<div style="font-size:13px;color:#334155;margin-bottom:8px;text-align:left">Product development items Dock &amp; Bay is working on with you — open one to view its details, samples and timeline.</div>'
+            return '<div style="font-size:12.5px;color:var(--ink-soft);margin-bottom:8px;text-align:left">Product development items Dock &amp; Bay is working on with you — open one to view its details, samples and timeline.</div>'
               +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px;text-align:left">'
-              +'<span style="display:flex;align-items:center;gap:5px"><span style="color:#64748b;font-size:11px">Season</span><select class="fci pp-prod-season" style="text-align:left"><option value="">All</option>'+seasons.map(function(s){return '<option value="'+esc(s)+'"'+(s===PORTAL_PROD_SEASON?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>'
-              +'<span style="display:flex;align-items:center;gap:5px"><span style="color:#64748b;font-size:11px">Status</span><select class="fci pp-prod-status" style="text-align:left">'+STAT.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===PORTAL_PROD_STATUS?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></span>'
+              +'<span style="display:flex;align-items:center;gap:5px"><span style="color:var(--muted);font-size:12px">Season</span><select class="fci pp-prod-season" style="text-align:left"><option value="">All</option>'+seasons.map(function(s){return '<option value="'+esc(s)+'"'+(s===PORTAL_PROD_SEASON?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>'
+              +'<span style="display:flex;align-items:center;gap:5px"><span style="color:var(--muted);font-size:12px">Status</span><select class="fci pp-prod-status" style="text-align:left">'+STAT.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===PORTAL_PROD_STATUS?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></span>'
               +'<input class="fci txt pp-prod-q" placeholder="search ref / colour / category / supplier…" value="'+esc(PORTAL_PROD_Q||'')+'" style="width:260px;text-align:left">'
-              +'<span class="pp-prod-count" style="color:#94a3b8;font-size:11px"></span></div>'
+              +'<span class="pp-prod-count" style="color:var(--faint);font-size:12px"></span></div>'
               +'<div id="pp-prod-grid"></div>'; }
           function drawProdGrid(){ var host=document.getElementById('pp-prod-grid'); if(!host)return;
             var items=(_ppData&&_ppData.products)||[]; var q=(PORTAL_PROD_Q||'').toLowerCase();
@@ -1692,15 +1692,15 @@
             var seasonCount={}, catCount={}; f.forEach(function(p){ var sk=p.season||'', ck=(p.season||'')+'|'+(p.category||''); seasonCount[sk]=(seasonCount[sk]||0)+1; catCount[ck]=(catCount[ck]||0)+1; });
             var _ppS=null, _ppC=null;
             host.innerHTML='<div class="tw"><table class="ppp-tbl"><thead><tr>'+['Product','Category','Season','Sizes','Status'].map(function(h){return '<th>'+h+'</th>';}).join('')+'</tr></thead><tbody>'
-              +f.map(function(p,i){ var badge=p.unread_dnb?' <span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+p.unread_dnb+'</span>':'';
+              +f.map(function(p,i){ var badge=p.unread_dnb?' <span style="background:var(--neg);color:#fff;border-radius:8px;font-size:10.5px;font-weight:700;padding:0 5px">'+p.unread_dnb+'</span>':'';
                 var _swU=(EP.productSwatchBase||'/api/product/swatch/')+encodeURIComponent(p.ref)+'?t='+encodeURIComponent(p.updated_at||'');
-                var sw=p.has_swatch?'<img class="pp-dimimg" data-src="'+_swU+'" src="'+_swU+'" title="click to enlarge" style="width:34px;height:34px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;flex:0 0 auto;cursor:zoom-in">':'<span style="width:34px;height:34px;border-radius:6px;border:1px dashed #cbd5e1;flex:0 0 auto"></span>';
+                var sw=p.has_swatch?'<img class="pp-dimimg" data-src="'+_swU+'" src="'+_swU+'" title="click to enlarge" style="width:34px;height:34px;object-fit:cover;border-radius:6px;border:1px solid var(--line);flex:0 0 auto;cursor:zoom-in">':'<span style="width:34px;height:34px;border-radius:6px;border:1px dashed var(--line);flex:0 0 auto"></span>';
                 var sKey=p.season||'', cKey=p.category||'', hdr='';
-                if(sKey!==_ppS){ _ppS=sKey; _ppC=null; hdr+='<tr class="ppp-grp"><td colspan="5">'+esc(sKey||'— no season —')+' <span style="font-weight:400;color:#475569">('+seasonCount[sKey]+')</span></td></tr>'; }
-                if(cKey!==_ppC){ _ppC=cKey; hdr+='<tr class="ppp-cathdr"><td colspan="5">'+esc(cKey||'— no category —')+' <span style="font-weight:400;color:#94a3b8">('+catCount[sKey+'|'+cKey]+')</span></td></tr>'; }
+                if(sKey!==_ppS){ _ppS=sKey; _ppC=null; hdr+='<tr class="ppp-grp"><td colspan="5">'+esc(sKey||'— no season —')+' <span style="font-weight:400;color:var(--muted)">('+seasonCount[sKey]+')</span></td></tr>'; }
+                if(cKey!==_ppC){ _ppC=cKey; hdr+='<tr class="ppp-cathdr"><td colspan="5">'+esc(cKey||'— no category —')+' <span style="font-weight:400;color:var(--faint)">('+catCount[sKey+'|'+cKey]+')</span></td></tr>'; }
                 return hdr+'<tr id="ppprow-'+i+'"><td><div style="display:flex;align-items:center;gap:8px">'+sw
                     +'<button class="planbtn pp-prod-open" data-ref="'+esc(p.ref)+'" data-i="'+i+'" style="flex:0 0 auto">PLAN</button>'
-                    +'<div style="min-width:0"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(p.ref)+'</b>'+badge+(p.colour_name?'<div style="font-size:10px;color:#94a3b8">'+esc(p.colour_name)+'</div>':'')+'</div></div></td>'
+                    +'<div style="min-width:0"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(p.ref)+'</b>'+badge+(p.colour_name?'<div style="font-size:10.5px;color:var(--faint)">'+esc(p.colour_name)+'</div>':'')+'</div></div></td>'
                   +'<td>'+esc(p.category||'')+'</td><td>'+esc(p.season||'')+'</td><td>'+p.sizes+'</td><td>'+esc(prodStatusLabel(p.status))+'</td></tr>'
                   // detail renders in a row directly UNDER this product; pinned to the left edge + capped to the viewport so it stays usable while the table scrolls sideways on a phone
                   +'<tr class="ppp-detrow" id="ppdet-'+i+'" style="display:none"><td colspan="5" style="position:sticky;left:0;padding:0;background:#fff;box-shadow:none"><div class="pp-prod-det" style="text-align:left;max-width:96vw;box-sizing:border-box;padding:10px 6px 14px"></div></td></tr>'; }).join('')
@@ -1726,57 +1726,57 @@
             box.querySelectorAll('.pd2-tab').forEach(function(b){ b.onclick=function(){ sel(b.dataset.t); }; }); sel('master'); }
           function ppProdMaster(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
             fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ if(!d||!d.item){ box.innerHTML='<div class="mut" style="text-align:left">Not found.</div>'; return; } var it=d.item;
-              function row(l,v){ return '<div style="display:flex;gap:10px;padding:5px 0;border-bottom:1px solid #f4f4f5;text-align:left"><div style="flex:0 0 130px;color:#64748b">'+l+'</div><div style="flex:1;min-width:0">'+v+'</div></div>'; }
+              function row(l,v){ return '<div style="display:flex;gap:10px;padding:5px 0;border-bottom:1px solid #f4f4f5;text-align:left"><div style="flex:0 0 130px;color:var(--muted)">'+l+'</div><div style="flex:1;min-width:0">'+v+'</div></div>'; }
               function pFiles(files){ return (files||[]).map(function(f){ var url=(EP.attachImgBase||'/api/supply/portal-attachment/')+f.id, vt=(f.version!=null?'v'+f.version+' ':'');
-                return /^image\//i.test(String(f.mime||''))?'<img class="pp-dimimg" data-src="'+url+'" src="'+url+'" style="width:24px;height:24px;object-fit:cover;border-radius:4px;border:1px solid #e5e7eb;margin:1px;cursor:zoom-in;vertical-align:middle" title="'+esc(vt+(f.filename||''))+'">':'<a href="'+url+'" download rel="noopener" style="font-size:10px;color:#1d4ed8;margin:0 4px;text-decoration:underline" title="'+esc(f.filename||'')+'">📄 '+esc(vt)+esc(f.filename||'file')+'</a>'; }).join(''); }
+                return /^image\//i.test(String(f.mime||''))?'<img class="pp-dimimg" data-src="'+url+'" src="'+url+'" style="width:24px;height:24px;object-fit:cover;border-radius:4px;border:1px solid var(--line);margin:1px;cursor:zoom-in;vertical-align:middle" title="'+esc(vt+(f.filename||''))+'">':'<a href="'+url+'" download rel="noopener" style="font-size:10.5px;color:var(--blue);margin:0 4px;text-decoration:underline" title="'+esc(f.filename||'')+'">📄 '+esc(vt)+esc(f.filename||'file')+'</a>'; }).join(''); }
               function apprGlyph(a){ return a==='approved'?'✓':a==='rejected'?'✕':'⚠'; }
               function statusCell(appr){ var col=appr==='approved'?'#16a34a':appr==='rejected'?'#dc2626':'#b45309'; return '<b style="color:'+col+';white-space:nowrap">'+apprGlyph(appr)+' '+esc(appr||'pending')+'</b>'; }
               // sample VERSIONS covering this size + component, each with its shipment + Dock & Bay feedback
               function pSampleCell(s, dim){ var rel=(d.samples||[]).filter(function(sm){ return (sm.sampled_aspects||[]).indexOf(dim)>=0 && (sm.sample_sizes||[]).indexOf(s.size_label)>=0; });
                 if(!rel.length)return '<span class="mut tiny">—</span>';
                 return rel.map(function(sm){ var shs=(sm.shipments||[]).map(function(sh){ return '📦'+esc(sh.ref)+(sh.tracking?' '+carrierTrackLink(sh.carrier,sh.tracking):''); }).join(' ');
-                  return '<div style="margin-bottom:5px"><b style="font-family:ui-monospace,Menlo,monospace;font-size:10px">'+esc(sm.ref)+'</b>'+(shs?' <span class="mut tiny">'+shs+'</span>':'')
-                    +(sm.admin_feedback?'<div style="margin-top:2px;font-size:10px;color:#78350f;background:#fffbeb;border:1px solid #fde68a;border-radius:5px;padding:2px 6px;white-space:normal">💬 '+esc(sm.admin_feedback)+'</div>':'')+'</div>'; }).join(''); }
-              function pDimRow(label, sd, s, dim){ if(!sd.required)return '<tr style="border-top:1px solid #f4f4f5;color:#cbd5e1"><td style="padding:5px 8px 5px 0;text-align:left">'+label+'</td><td colspan="3" style="padding:5px 0;text-align:left">not required</td></tr>';
-                return '<tr style="border-top:1px solid #f4f4f5;vertical-align:top"><td style="padding:6px 10px 6px 0;text-align:left"><div style="font-weight:600;color:#334155">'+label+'</div>'+(sd.description?'<div class="mut tiny" style="margin-top:1px;white-space:normal">'+esc(sd.description)+'</div>':'')+'</td><td style="padding:6px 10px 6px 0;white-space:nowrap;text-align:left">'+statusCell(sd.approval_status)+'</td><td style="padding:6px 10px 6px 0;text-align:left">'+pSampleCell(s,dim)+'</td><td style="padding:6px 0;text-align:left">'+(pFiles(sd.files)||'<span class="mut tiny">—</span>')+'</td></tr>'; }
+                  return '<div style="margin-bottom:5px"><b style="font-family:ui-monospace,Menlo,monospace;font-size:10.5px">'+esc(sm.ref)+'</b>'+(shs?' <span class="mut tiny">'+shs+'</span>':'')
+                    +(sm.admin_feedback?'<div style="margin-top:2px;font-size:10.5px;color:#78350f;background:var(--amber-bg);border:1px solid var(--amber-bg);border-radius:5px;padding:2px 6px;white-space:normal">💬 '+esc(sm.admin_feedback)+'</div>':'')+'</div>'; }).join(''); }
+              function pDimRow(label, sd, s, dim){ if(!sd.required)return '<tr style="border-top:1px solid #f4f4f5;color:var(--line)"><td style="padding:5px 8px 5px 0;text-align:left">'+label+'</td><td colspan="3" style="padding:5px 0;text-align:left">not required</td></tr>';
+                return '<tr style="border-top:1px solid #f4f4f5;vertical-align:top"><td style="padding:6px 10px 6px 0;text-align:left"><div style="font-weight:600;color:var(--ink-soft)">'+label+'</div>'+(sd.description?'<div class="mut tiny" style="margin-top:1px;white-space:normal">'+esc(sd.description)+'</div>':'')+'</td><td style="padding:6px 10px 6px 0;white-space:nowrap;text-align:left">'+statusCell(sd.approval_status)+'</td><td style="padding:6px 10px 6px 0;text-align:left">'+pSampleCell(s,dim)+'</td><td style="padding:6px 0;text-align:left">'+(pFiles(sd.files)||'<span class="mut tiny">—</span>')+'</td></tr>'; }
               var sizes=(d.sizes||[]).map(function(s){ function sd(dm){ return ((s.dimensions||[]).filter(function(x){return x.dimension===dm;})[0])||{}; } var pk=sd('packaging'), ok=s.approval_status==='approved';
-                var head='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:7px"><span style="font-weight:700;font-size:14px">'+esc(s.size_label)+'</span><span style="font-size:11px;padding:1px 8px;border-radius:10px;background:'+(ok?'#ecfdf5':s.approval_status==='rejected'?'#fef2f2':'#fffbeb')+';color:'+(ok?'#065f46':s.approval_status==='rejected'?'#991b1b':'#92400e')+';font-weight:700">'+apprGlyph(s.approval_status)+' '+esc(s.approval_status||'pending')+'</span>'+(s.mapped_sku?'<span style="font-size:11px;color:#64748b">SKU <b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.mapped_sku)+'</b></span>':'')+'</div>';
-                var body='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:#94a3b8;font-size:10px;text-transform:uppercase;letter-spacing:.04em"><th style="text-align:left;padding:0 10px 4px 0;font-weight:600">Component</th><th style="text-align:left;padding:0 10px 4px 0;font-weight:600">Status</th><th style="text-align:left;padding:0 10px 4px 0;font-weight:600">Sample versions</th><th style="text-align:left;padding:0 0 4px;font-weight:600">Files</th></tr></thead><tbody>'
+                var head='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:7px"><span style="font-weight:700;font-size:15px">'+esc(s.size_label)+'</span><span style="font-size:12px;padding:1px 8px;border-radius:10px;background:'+(ok?'#ecfdf5':s.approval_status==='rejected'?'#fef2f2':'#fffbeb')+';color:'+(ok?'#065f46':s.approval_status==='rejected'?'#991b1b':'#92400e')+';font-weight:700">'+apprGlyph(s.approval_status)+' '+esc(s.approval_status||'pending')+'</span>'+(s.mapped_sku?'<span style="font-size:12px;color:var(--muted)">SKU <b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.mapped_sku)+'</b></span>':'')+'</div>';
+                var body='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--faint);font-size:10.5px;text-transform:uppercase;letter-spacing:.04em"><th style="text-align:left;padding:0 10px 4px 0;font-weight:600">Component</th><th style="text-align:left;padding:0 10px 4px 0;font-weight:600">Status</th><th style="text-align:left;padding:0 10px 4px 0;font-weight:600">Sample versions</th><th style="text-align:left;padding:0 0 4px;font-weight:600">Files</th></tr></thead><tbody>'
                   +pDimRow('Product', sd('product'), s, 'product')+pDimRow('Packaging'+(pk.packaging_type?' ('+esc(pk.packaging_type)+')':''), pk, s, 'packaging')+pDimRow('Labels/wraps', sd('labels'), s, 'labels')+pDimRow('Polybags', sd('polybag'), s, 'polybag')+pDimRow('Other components', sd('other'), s, 'other')+'</tbody></table>';
-                return '<div style="border:1px solid #e5e7eb;border-radius:9px;padding:10px 13px;margin-bottom:9px;background:#fff">'+head+body+'</div>'; }).join('')||'<span class="mut">no sizes</span>';
+                return '<div style="border:1px solid var(--line);border-radius:9px;padding:10px 13px;margin-bottom:9px;background:#fff">'+head+body+'</div>'; }).join('')||'<span class="mut">no sizes</span>';
               var _mswU=(EP.productSwatchBase||'/api/product/swatch/')+encodeURIComponent(ref)+'?t='+encodeURIComponent(it.updated_at||'');
-              var sw=it.has_swatch?'<img class="pp-dimimg" data-src="'+_mswU+'" src="'+_mswU+'" title="click to enlarge" style="width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb;cursor:zoom-in">':'';
+              var sw=it.has_swatch?'<img class="pp-dimimg" data-src="'+_mswU+'" src="'+_mswU+'" title="click to enlarge" style="width:84px;height:84px;object-fit:cover;border-radius:8px;border:1px solid var(--line);cursor:zoom-in">':'';
               box.innerHTML='<div style="max-width:660px;text-align:left">'+(sw?'<div style="margin-bottom:8px">'+sw+'</div>':'')
-                +row('Reference','<b style="font-family:ui-monospace,Menlo,monospace">'+esc(it.ref)+'</b>')+row('Season',esc(it.season||'—'))+row('Category',esc(it.category||'—'))+row('Supplier',esc(it.supplier||'—'))+row('Recipient','<b style="color:#1d4ed8">'+esc(String(it.recipient_countries||'UK').split(',').map(function(x){return x.trim();}).filter(Boolean).join(' and ')||'UK')+'</b>')+row('Colour way',esc(it.colour_name||'—'))+row('Status',esc(prodStatusLabel(it.status)))
+                +row('Reference','<b style="font-family:ui-monospace,Menlo,monospace">'+esc(it.ref)+'</b>')+row('Season',esc(it.season||'—'))+row('Category',esc(it.category||'—'))+row('Supplier',esc(it.supplier||'—'))+row('Recipient','<b style="color:var(--blue)">'+esc(String(it.recipient_countries||'UK').split(',').map(function(x){return x.trim();}).filter(Boolean).join(' and ')||'UK')+'</b>')+row('Colour way',esc(it.colour_name||'—'))+row('Status',esc(prodStatusLabel(it.status)))
                 +row('Approval', it.approval_method==='photo'?'<b style="color:#0369a1">📷 Approval by photo</b> <span class="mut tiny">no physical sample needed — approve from photos</span>':it.approval_method==='samples'?'<b>📦 Send samples</b> <span class="mut tiny">to '+esc(String(it.recipient_countries||'UK').split(',').map(function(x){return x.trim();}).filter(Boolean).join(' and ')||'UK')+'</span>':'<span class="mut">— not set</span>')
                 +row('Description','<span style="white-space:pre-wrap">'+esc(it.description||'—')+'</span>')
-                +'<div style="padding:10px 0 4px"><div style="color:#334155;font-weight:700;font-size:13px;margin-bottom:7px">Size variants &amp; components</div>'+sizes+'</div></div>';
+                +'<div style="padding:10px 0 4px"><div style="color:var(--ink-soft);font-weight:700;font-size:12.5px;margin-bottom:7px">Size variants &amp; components</div>'+sizes+'</div></div>';
               box.querySelectorAll('.pp-dimimg').forEach(function(im){ im.onclick=function(){ ppImgZoom(im.dataset.src); }; });
-            }).catch(function(e){ box.innerHTML='<div style="color:#dc2626;text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
+            }).catch(function(e){ box.innerHTML='<div style="color:var(--neg);text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
           // Click-to-view image modal (portal). Images pop up; click anywhere to close.
           function ppImgZoom(src){ if(!src)return; var ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:200060;display:flex;align-items:center;justify-content:center;padding:20px;cursor:zoom-out';
-            ov.innerHTML='<div style="position:absolute;top:14px;right:18px;width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.9);color:#0f172a;font-size:20px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer" title="close">✕</div><img src="'+src+'" style="max-width:92vw;max-height:92vh;border-radius:10px;box-shadow:0 12px 46px rgba(0,0,0,.55)">'; ov.onclick=function(){ ov.remove(); }; document.body.appendChild(ov); }
+            ov.innerHTML='<div style="position:absolute;top:14px;right:18px;width:34px;height:34px;border-radius:50%;background:rgba(255,255,255,.9);color:var(--nav);font-size:15px;font-weight:700;display:flex;align-items:center;justify-content:center;cursor:pointer" title="close">✕</div><img src="'+src+'" style="max-width:92vw;max-height:92vh;border-radius:10px;box-shadow:0 12px 46px rgba(0,0,0,.55)">'; ov.onclick=function(){ ov.remove(); }; document.body.appendChild(ov); }
           function isImgMime(m){ return /^image\//i.test(String(m||'')); }
           // One document/photo row: image → thumbnail (click to enlarge) + download; other → download link.
           function docRow(x){ var att=(EP.attachImgBase||'/api/supply/portal-attachment/')+x.id, dl='/api/product/doc/'+x.id, kb=Math.max(1,Math.round((x.byte_size||0)/1024));
-            var gutter=isImgMime(x.mime)?'<img class="pp-doc-img" data-src="'+att+'" src="'+att+'" style="width:46px;height:46px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;cursor:zoom-in;flex:none" title="click to enlarge">':'<div style="width:46px;height:46px;border-radius:6px;border:1px solid #eef2f7;background:#fafbfc;display:flex;align-items:center;justify-content:center;font-size:20px;color:#cbd5e1;flex:none">📄</div>';
-            return '<div style="display:flex;align-items:center;gap:9px;padding:6px 0;border-bottom:1px solid #f4f4f5">'+gutter+'<div style="min-width:0"><a href="'+dl+'" download style="color:#1d4ed8;text-decoration:underline;word-break:break-word">'+esc(x.filename)+'</a> <span style="color:#94a3b8" title="download">⤓</span><div class="mut tiny">'+kb+' KB · '+esc(x.uploaded_at||'')+'</div></div></div>'; }
+            var gutter=isImgMime(x.mime)?'<img class="pp-doc-img" data-src="'+att+'" src="'+att+'" style="width:46px;height:46px;object-fit:cover;border-radius:6px;border:1px solid var(--line);cursor:zoom-in;flex:none" title="click to enlarge">':'<div style="width:46px;height:46px;border-radius:6px;border:1px solid var(--line2);background:#fafbfc;display:flex;align-items:center;justify-content:center;font-size:15px;color:var(--line);flex:none">📄</div>';
+            return '<div style="display:flex;align-items:center;gap:9px;padding:6px 0;border-bottom:1px solid #f4f4f5">'+gutter+'<div style="min-width:0"><a href="'+dl+'" download style="color:var(--blue);text-decoration:underline;word-break:break-word">'+esc(x.filename)+'</a> <span style="color:var(--faint)" title="download">⤓</span><div class="mut tiny">'+kb+' KB · '+esc(x.uploaded_at||'')+'</div></div></div>'; }
           function ppProdDocs(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
             fetch((EP.productItemBase||'/api/product/item/')+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(d){ var docs=(d&&d.docs)||[];
               var dnb=docs.filter(function(x){return (x.uploader_kind||'internal')!=='supplier';}), sup=docs.filter(function(x){return x.uploader_kind==='supplier';});
-              function sect(title,list,empty){ return '<div style="font-weight:700;font-size:12px;margin:0 0 4px;color:#334155">'+title+'</div>'+(list.length?list.map(docRow).join(''):'<div class="mut tiny" style="padding:4px 0">'+empty+'</div>'); }
+              function sect(title,list,empty){ return '<div style="font-weight:700;font-size:12px;margin:0 0 4px;color:var(--ink-soft)">'+title+'</div>'+(list.length?list.map(docRow).join(''):'<div class="mut tiny" style="padding:4px 0">'+empty+'</div>'); }
               box.innerHTML='<div style="max-width:620px;text-align:left">'
                 +sect('Uploaded by Dock &amp; Bay',dnb,'Dock &amp; Bay hasn\'t shared any documents yet.')
                 +'<div style="height:14px"></div>'
                 +sect('Uploaded by you',sup,'You haven\'t uploaded anything yet — use the box below.')
-                +'<div style="margin-top:14px;padding-top:10px;border-top:1px dashed #cbd5e1"><label style="font-size:12px;font-weight:600">Upload a document or photo <span style="font-weight:400;color:#94a3b8">(≤10MB each · multiple allowed)</span><input type="file" class="pp-doc-file" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv" multiple style="font-size:12px;display:block;margin-top:5px"></label><span class="pp-doc-msg" style="font-size:12px;margin-left:2px"></span></div>'
+                +'<div style="margin-top:14px;padding-top:10px;border-top:1px dashed var(--line)"><label style="font-size:12px;font-weight:600">Upload a document or photo <span style="font-weight:400;color:var(--faint)">(≤10MB each · multiple allowed)</span><input type="file" class="pp-doc-file" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv" multiple style="font-size:12px;display:block;margin-top:5px"></label><span class="pp-doc-msg" style="font-size:12px;margin-left:2px"></span></div>'
                 +'</div>';
               box.querySelectorAll('.pp-doc-img').forEach(function(im){ im.onclick=function(){ ppImgZoom(im.dataset.src); }; });
               var fi=box.querySelector('.pp-doc-file'), msg=box.querySelector('.pp-doc-msg'); if(fi)fi.onchange=function(){ var all=Array.prototype.slice.call(fi.files); if(!all.length)return; var skipped=all.filter(function(f){return f.size>10*1024*1024;}).length, ok=all.filter(function(f){return f.size<=10*1024*1024;});
                 if(!ok.length){ msg.style.color='#dc2626'; msg.textContent='all files over 10MB — skipped'; return; }
                 msg.style.color='#64748b'; msg.textContent='Uploading '+ok.length+' file'+(ok.length>1?'s':'')+'…'; var i=0;
                 (function up(){ if(i>=ok.length){ if(skipped){ msg.style.color='#b45309'; msg.textContent=skipped+' file'+(skipped>1?'s':'')+' skipped — over 10MB'; setTimeout(function(){ ppProdDocs(box,ref); },900); } else ppProdDocs(box,ref); return; } var f=ok[i++]; var rd=new FileReader(); rd.onload=function(){ postJSON(EP.productDoc,{ref:ref,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result)},function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;return;} up(); }); }; rd.readAsDataURL(f); })(); };
-            }).catch(function(e){ box.innerHTML='<div style="color:#dc2626;text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
+            }).catch(function(e){ box.innerHTML='<div style="color:var(--neg);text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
           // Compact single-label PDF for one sample version: ref (incl _vN), colourway, supplier, date.
           function dlSampleLabel(opts){ try{ opts=opts||{}; var ref=String(opts.ref||''), S=2, W=500, H=320;
             var c=document.createElement('canvas'); c.width=W*S; c.height=H*S; var x=c.getContext('2d'); x.scale(S,S);
@@ -1800,23 +1800,23 @@
               var today=new Date().toISOString().slice(0,10);
               var ASPECTS=[['product','Product'],['packaging','Packaging'],['labels','Labels/wraps'],['polybag','Polybags'],['other','Other components']];
               var ASP_LBL={product:'Product',packaging:'Packaging',labels:'Labels/wraps',polybag:'Polybags',other:'Other components'};
-              function aspChips(keys){ return (keys||[]).map(function(k){return '<span style="display:inline-block;font-size:10px;background:#eef2ff;color:#3730a3;border:1px solid #dbeafe;border-radius:10px;padding:1px 7px;margin:1px 4px 1px 0">'+esc(ASP_LBL[k]||k)+'</span>';}).join(''); }
-              function sizeChips(arr){ return (arr||[]).map(function(k){return '<span style="display:inline-block;font-size:10px;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;border-radius:10px;padding:1px 7px;margin:1px 4px 1px 0">'+esc(k)+'</span>';}).join(''); }
+              function aspChips(keys){ return (keys||[]).map(function(k){return '<span style="display:inline-block;font-size:10.5px;background:var(--violet-bg);color:#3730a3;border:1px solid var(--blue-soft);border-radius:10px;padding:1px 7px;margin:1px 4px 1px 0">'+esc(ASP_LBL[k]||k)+'</span>';}).join(''); }
+              function sizeChips(arr){ return (arr||[]).map(function(k){return '<span style="display:inline-block;font-size:10.5px;background:var(--pos-bg);color:#065f46;border:1px solid #a7f3d0;border-radius:10px;padding:1px 7px;margin:1px 4px 1px 0">'+esc(k)+'</span>';}).join(''); }
               var SRS=(((typeof _ppData!=='undefined'&&_ppData&&_ppData.samples)||[])).map(function(sr){return {id:sr.id,ref:sr.ref,carrier:sr.carrier||'',tracking:sr.tracking_code||''};});
               function srSub(x){ return [x.carrier,x.tracking].filter(Boolean).join(' · '); }
               var SST=[['in_development','In development'],['completed','Completed'],['cancelled','Cancelled']];
               var SST_LBL={in_development:'In development',completed:'Completed',shipped:'Shipped',cancelled:'Cancelled'};
               function effStatus(s){ if(s.supplier_status==='cancelled')return 'cancelled'; if((s.shipments||[]).some(function(sh){return sh.tracking;}))return 'shipped'; return s.supplier_status||'in_development'; }
               function stColor(k){ return k==='shipped'?['#dbeafe','#1e40af']:k==='completed'?['#dcfce7','#166534']:k==='cancelled'?['#fee2e2','#991b1b']:['#fef3c7','#92400e']; }
-              function stBadge(s){ var k=effStatus(s),c=stColor(k); return '<span style="font-size:11px;padding:1px 8px;border-radius:10px;background:'+c[0]+';color:'+c[1]+';font-weight:700">'+esc(SST_LBL[k]||k)+'</span>'; }
+              function stBadge(s){ var k=effStatus(s),c=stColor(k); return '<span style="font-size:12px;padding:1px 8px;border-radius:10px;background:'+c[0]+';color:'+c[1]+';font-weight:700">'+esc(SST_LBL[k]||k)+'</span>'; }
               function curShipLabel(s){ if((s.shipments||[]).length){ var sh=s.shipments[0]; return sh.ref+(srSub(sh)?' · '+srSub(sh):''); } if(s.not_shipped)return 'Not shipped'; return ''; }
               // A sample can be linked to MANY shipments. Menu = existing shipments not yet linked (searchable) + "＋ New shipment"; "Not shipped" only when nothing is linked.
               function shipMenu(s,q){ q=(q||'').toLowerCase().trim();
                 var linked={}; (s.shipments||[]).forEach(function(sh){ linked[String(sh.id)]=1; });
                 var opts=SRS.filter(function(sr){ return !linked[String(sr.id)] && (!q || (sr.ref+' '+sr.carrier+' '+sr.tracking).toLowerCase().indexOf(q)>=0); });
-                var html=opts.map(function(sr){ return '<div class="pp-ship-opt" data-val="'+sr.id+'" style="padding:6px 9px;cursor:pointer;font-size:12px;border-bottom:1px solid #f1f5f9"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(sr.ref)+'</b>'+(srSub(sr)?'<div class="mut tiny" style="margin-top:1px">'+esc(srSub(sr))+'</div>':'')+'</div>'; }).join('');
-                html+='<div class="pp-ship-opt" data-val="__new__" style="padding:7px 9px;cursor:pointer;font-size:12px;border-top:1px solid #e2e8f0;color:#16a34a;font-weight:700">＋ New shipment</div>';
-                if(!(s.shipments||[]).length) html+='<div class="pp-ship-opt" data-val="not_shipped" style="padding:6px 9px;cursor:pointer;font-size:12px;color:#92400e">Not shipped</div>';
+                var html=opts.map(function(sr){ return '<div class="pp-ship-opt" data-val="'+sr.id+'" style="padding:6px 9px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--hover)"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(sr.ref)+'</b>'+(srSub(sr)?'<div class="mut tiny" style="margin-top:1px">'+esc(srSub(sr))+'</div>':'')+'</div>'; }).join('');
+                html+='<div class="pp-ship-opt" data-val="__new__" style="padding:7px 9px;cursor:pointer;font-size:12px;border-top:1px solid var(--line);color:var(--pos);font-weight:700">＋ New shipment</div>';
+                if(!(s.shipments||[]).length) html+='<div class="pp-ship-opt" data-val="not_shipped" style="padding:6px 9px;cursor:pointer;font-size:12px;color:var(--amber)">Not shipped</div>';
                 return html; }
               function needsShip(s){ return s.supplier_status==='completed' && !s.not_shipped && !(s.shipments||[]).length; }
               function assignShip(id,val){ var body=val==='not_shipped'?{mode:'not_shipped'}:(val?{mode:'shipment',sample_request_id:val}:{mode:'unassigned'});
@@ -1827,42 +1827,42 @@
               function paint(){
               var nextV=list.reduce(function(m,s){return Math.max(m,s.version||0);},0)+1, nextRef=ref+'_v'+nextV;   // shown read-only on the add form
               var rows=list.slice().reverse().map(function(s){ var ph=(s.photos||[]).map(function(p){ var url=(EP.attachImgBase||'/api/supply/portal-attachment/')+p.id, canDel=p.uploader_kind==='supplier';
-                  var del=canDel?'<a class="pp-samp-fdel" data-id="'+p.id+'" data-sid="'+s.id+'" title="delete file" style="color:#dc2626;cursor:pointer;font-size:12px">✕</a>':'';
-                  var dl='<a href="'+url+'" download title="download" style="color:#1d4ed8;text-decoration:none;font-size:13px">⤓</a>';
+                  var del=canDel?'<a class="pp-samp-fdel" data-id="'+p.id+'" data-sid="'+s.id+'" title="delete file" style="color:var(--neg);cursor:pointer;font-size:12px">✕</a>':'';
+                  var dl='<a href="'+url+'" download title="download" style="color:var(--blue);text-decoration:none;font-size:12.5px">⤓</a>';
                   return isImgMime(p.mime)
-                    ? '<span style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;margin:2px;vertical-align:top"><img class="pp-samp-img" data-src="'+url+'" src="'+url+'" style="width:52px;height:52px;object-fit:cover;border-radius:5px;border:1px solid #e5e7eb;cursor:zoom-in" title="click to enlarge"><span style="display:flex;gap:8px;align-items:center">'+dl+del+'</span></span>'
-                    : '<span style="display:inline-flex;align-items:center;gap:6px;margin:2px;padding:4px 8px;border:1px solid #e5e7eb;border-radius:5px;font-size:11px"><a href="'+url+'" download style="color:#1d4ed8;text-decoration:underline">'+esc(p.filename||'file')+'</a>'+del+'</span>'; }).join('');
-                return '<div style="border:1px solid #cbd5e1;border-radius:8px;padding:11px 13px;margin-bottom:14px;text-align:left"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.ref)+'</b>'+stBadge(s)+'<span class="mut tiny">'+esc(s.sample_date||'')+'</span>'
-                  +'<span style="font-size:10px">'+(s.colour_verified?'<span style="color:#16a34a">✓ colour</span>':'<span class="mut">colour?</span>')+' &nbsp; '+(s.quality_verified?'<span style="color:#16a34a">✓ quality</span>':'<span class="mut">quality?</span>')+'</span>'
-                  +'<button class="save-btn pp-samp-label" data-ref="'+esc(s.ref)+'" data-date="'+esc(s.sample_date||'')+'" style="font-size:11px">⤓ Download label</button></div>'
+                    ? '<span style="display:inline-flex;flex-direction:column;align-items:center;gap:2px;margin:2px;vertical-align:top"><img class="pp-samp-img" data-src="'+url+'" src="'+url+'" style="width:52px;height:52px;object-fit:cover;border-radius:5px;border:1px solid var(--line);cursor:zoom-in" title="click to enlarge"><span style="display:flex;gap:8px;align-items:center">'+dl+del+'</span></span>'
+                    : '<span style="display:inline-flex;align-items:center;gap:6px;margin:2px;padding:4px 8px;border:1px solid var(--line);border-radius:5px;font-size:12px"><a href="'+url+'" download style="color:var(--blue);text-decoration:underline">'+esc(p.filename||'file')+'</a>'+del+'</span>'; }).join('');
+                return '<div style="border:1px solid var(--line);border-radius:8px;padding:11px 13px;margin-bottom:14px;text-align:left"><div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.ref)+'</b>'+stBadge(s)+'<span class="mut tiny">'+esc(s.sample_date||'')+'</span>'
+                  +'<span style="font-size:10.5px">'+(s.colour_verified?'<span style="color:var(--pos)">✓ colour</span>':'<span class="mut">colour?</span>')+' &nbsp; '+(s.quality_verified?'<span style="color:var(--pos)">✓ quality</span>':'<span class="mut">quality?</span>')+'</span>'
+                  +'<button class="save-btn pp-samp-label" data-ref="'+esc(s.ref)+'" data-date="'+esc(s.sample_date||'')+'" style="font-size:12px">⤓ Download label</button></div>'
                   +'<div class="pp-samp-cols" style="display:flex;gap:14px;flex-wrap:wrap;margin-top:8px"><div style="flex:1 1 340px;min-width:0">'
-                  +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="mut tiny">Status</span><select class="pp-samp-status fci" data-id="'+s.id+'" style="font-size:11px">'+SST.map(function(o){return '<option value="'+o[0]+'"'+(s.supplier_status===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></div>'
-                  +'<div style="margin-top:4px"><span class="mut tiny" style="margin-right:4px">Sizes:</span>'+((s.sample_sizes&&s.sample_sizes.length)?sizeChips(s.sample_sizes):'<span class="mut tiny">none</span>')+'<span class="mut tiny" style="margin:0 4px 0 12px">Item types:</span>'+((s.sampled_aspects&&s.sampled_aspects.length)?aspChips(s.sampled_aspects):'<span class="mut tiny">none</span>')+' <a class="pp-samp-meta-edit" data-id="'+s.id+'" style="font-size:11px;color:#1d4ed8;cursor:pointer">✎ edit</a></div>'
-                  +'<div class="pp-samp-meta" data-id="'+s.id+'" style="display:none;margin-top:5px;padding:7px 9px;border:1px dashed #cbd5e1;border-radius:6px;background:#f8fafc">'
-                    +'<div style="font-size:11px;font-weight:600;margin-bottom:2px">Sizes in this sample</div>'+(sizesList.length?sizesList.map(function(sz){return '<label style="display:inline-block;font-size:11px;margin:0 12px 3px 0;cursor:pointer"><input type="checkbox" class="pp-meta-size" value="'+esc(sz)+'"'+((s.sample_sizes||[]).indexOf(sz)>=0?' checked':'')+' style="vertical-align:middle;margin-right:4px">'+esc(sz)+'</label>';}).join(''):'<span class="mut tiny">no sizes defined</span>')
-                    +'<div style="font-size:11px;font-weight:600;margin:4px 0 2px">Item types in this sample</div>'+ASPECTS.map(function(a){return '<label style="display:inline-block;font-size:11px;margin:0 12px 3px 0;cursor:pointer"><input type="checkbox" class="pp-meta-aspect" value="'+a[0]+'"'+((s.sampled_aspects||[]).indexOf(a[0])>=0?' checked':'')+' style="vertical-align:middle;margin-right:4px">'+a[1]+'</label>';}).join('')
-                    +'<div style="margin-top:6px"><button class="save-btn pp-meta-save" data-id="'+s.id+'" style="font-size:11px">Save</button></div></div>'
+                  +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span class="mut tiny">Status</span><select class="pp-samp-status fci" data-id="'+s.id+'" style="font-size:12px">'+SST.map(function(o){return '<option value="'+o[0]+'"'+(s.supplier_status===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></div>'
+                  +'<div style="margin-top:4px"><span class="mut tiny" style="margin-right:4px">Sizes:</span>'+((s.sample_sizes&&s.sample_sizes.length)?sizeChips(s.sample_sizes):'<span class="mut tiny">none</span>')+'<span class="mut tiny" style="margin:0 4px 0 12px">Item types:</span>'+((s.sampled_aspects&&s.sampled_aspects.length)?aspChips(s.sampled_aspects):'<span class="mut tiny">none</span>')+' <a class="pp-samp-meta-edit" data-id="'+s.id+'" style="font-size:12px;color:var(--blue);cursor:pointer">✎ edit</a></div>'
+                  +'<div class="pp-samp-meta" data-id="'+s.id+'" style="display:none;margin-top:5px;padding:7px 9px;border:1px dashed var(--line);border-radius:6px;background:var(--hover)">'
+                    +'<div style="font-size:12px;font-weight:600;margin-bottom:2px">Sizes in this sample</div>'+(sizesList.length?sizesList.map(function(sz){return '<label style="display:inline-block;font-size:12px;margin:0 12px 3px 0;cursor:pointer"><input type="checkbox" class="pp-meta-size" value="'+esc(sz)+'"'+((s.sample_sizes||[]).indexOf(sz)>=0?' checked':'')+' style="vertical-align:middle;margin-right:4px">'+esc(sz)+'</label>';}).join(''):'<span class="mut tiny">no sizes defined</span>')
+                    +'<div style="font-size:12px;font-weight:600;margin:4px 0 2px">Item types in this sample</div>'+ASPECTS.map(function(a){return '<label style="display:inline-block;font-size:12px;margin:0 12px 3px 0;cursor:pointer"><input type="checkbox" class="pp-meta-aspect" value="'+a[0]+'"'+((s.sampled_aspects||[]).indexOf(a[0])>=0?' checked':'')+' style="vertical-align:middle;margin-right:4px">'+a[1]+'</label>';}).join('')
+                    +'<div style="margin-top:6px"><button class="save-btn pp-meta-save" data-id="'+s.id+'" style="font-size:12px">Save</button></div></div>'
                   +(s.description?'<div style="margin:4px 0;white-space:pre-wrap">'+esc(s.description)+'</div>':'')
-                  +(s.admin_feedback?'<div style="margin:6px 0;padding:8px 11px;background:#fffbeb;border:1px solid #fde68a;border-radius:7px"><div style="font-size:11px;font-weight:700;color:#92400e;margin-bottom:2px">💬 Feedback from Dock &amp; Bay</div><div style="font-size:12px;color:#78350f;white-space:pre-wrap">'+esc(s.admin_feedback)+'</div></div>':'')
+                  +(s.admin_feedback?'<div style="margin:6px 0;padding:8px 11px;background:var(--amber-bg);border:1px solid var(--amber-bg);border-radius:7px"><div style="font-size:12px;font-weight:700;color:var(--amber);margin-bottom:2px">💬 Feedback from Dock &amp; Bay</div><div style="font-size:12px;color:#78350f;white-space:pre-wrap">'+esc(s.admin_feedback)+'</div></div>':'')
                   +(ph?'<div style="margin-top:4px">'+ph+'</div>':'')
-                  +'<div style="margin-top:6px"><label style="font-size:11px;color:#64748b">📎 Upload photo / document <span style="color:#94a3b8">(≤10MB each)</span><input type="file" class="pp-samp-file" data-id="'+s.id+'" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv" multiple style="font-size:11px;display:block;margin-top:4px"></label> <span class="pp-samp-msg" data-id="'+s.id+'" style="font-size:11px"></span></div>'
+                  +'<div style="margin-top:6px"><label style="font-size:12px;color:var(--muted)">📎 Upload photo / document <span style="color:var(--faint)">(≤10MB each)</span><input type="file" class="pp-samp-file" data-id="'+s.id+'" accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv" multiple style="font-size:12px;display:block;margin-top:4px"></label> <span class="pp-samp-msg" data-id="'+s.id+'" style="font-size:12px"></span></div>'
                   +'</div>'   // close LEFT column (sample details)
-                  +'<div style="flex:1 1 260px;min-width:230px"><div style="border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;background:#f8fafc">'
-                    +'<div style="font-weight:700;font-size:12px;margin-bottom:8px;color:#0f172a">📦 Shipments</div>'
+                  +'<div style="flex:1 1 260px;min-width:230px"><div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--hover)">'
+                    +'<div style="font-weight:700;font-size:12px;margin-bottom:8px;color:var(--nav)">📦 Shipments</div>'
                     +'<span class="mut tiny" style="display:block;margin-bottom:3px">Link to shipment</span>'
-                    +'<span class="pp-ship-wrap" data-id="'+s.id+'" style="position:relative;display:block"><input class="pp-ship-inp fci" data-id="'+s.id+'" value="" placeholder="search shipment / tracking, or add new…" autocomplete="off" style="width:100%;box-sizing:border-box;font-size:11px;text-align:left"><div class="pp-ship-menu" data-id="'+s.id+'" style="display:none;position:absolute;top:100%;left:0;z-index:60;background:#fff;border:1px solid #cbd5e1;border-radius:6px;max-height:240px;overflow:auto;width:100%;box-shadow:0 8px 22px rgba(0,0,0,.16)"></div></span>'
-                    +(needsShip(s)?'<div style="margin-top:8px;font-size:11px;color:#b45309;background:#fffbeb;border:1px solid #fde68a;border-radius:6px;padding:4px 8px">⚠ Completed but not on a shipment — link one above, or choose <b>Not shipped</b>.</div>':'')
-                    +((s.shipments||[]).length?'<div style="margin-top:9px;display:flex;flex-direction:column;gap:5px">'+(s.shipments||[]).map(function(sh){return '<div style="padding:6px 9px;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">📦 <b>'+esc(sh.ref)+'</b>'+(sh.carrier?'<span class="mut tiny">'+esc(sh.carrier)+'</span>':'')+(sh.tracking?'<span style="font-size:12px">'+carrierTrackLink(sh.carrier,sh.tracking)+'</span>':'')+'<a class="pp-ship-unlink" data-id="'+s.id+'" data-sr="'+sh.id+'" title="unlink from this shipment" style="margin-left:auto;color:#dc2626;cursor:pointer;font-size:12px;white-space:nowrap">✕ unlink</a></div>';}).join('')+'</div>':'<div class="mut tiny" style="margin-top:9px">Not linked to any shipment yet.</div>')
+                    +'<span class="pp-ship-wrap" data-id="'+s.id+'" style="position:relative;display:block"><input class="pp-ship-inp fci" data-id="'+s.id+'" value="" placeholder="search shipment / tracking, or add new…" autocomplete="off" style="width:100%;box-sizing:border-box;font-size:12px;text-align:left"><div class="pp-ship-menu" data-id="'+s.id+'" style="display:none;position:absolute;top:100%;left:0;z-index:60;background:#fff;border:1px solid var(--line);border-radius:6px;max-height:240px;overflow:auto;width:100%;box-shadow:0 8px 22px rgba(0,0,0,.16)"></div></span>'
+                    +(needsShip(s)?'<div style="margin-top:8px;font-size:12px;color:var(--amber);background:var(--amber-bg);border:1px solid var(--amber-bg);border-radius:6px;padding:4px 8px">⚠ Completed but not on a shipment — link one above, or choose <b>Not shipped</b>.</div>':'')
+                    +((s.shipments||[]).length?'<div style="margin-top:9px;display:flex;flex-direction:column;gap:5px">'+(s.shipments||[]).map(function(sh){return '<div style="padding:6px 9px;background:#f0f6ff;border:1px solid var(--blue-soft);border-radius:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">📦 <b>'+esc(sh.ref)+'</b>'+(sh.carrier?'<span class="mut tiny">'+esc(sh.carrier)+'</span>':'')+(sh.tracking?'<span style="font-size:12px">'+carrierTrackLink(sh.carrier,sh.tracking)+'</span>':'')+'<a class="pp-ship-unlink" data-id="'+s.id+'" data-sr="'+sh.id+'" title="unlink from this shipment" style="margin-left:auto;color:var(--neg);cursor:pointer;font-size:12px;white-space:nowrap">✕ unlink</a></div>';}).join('')+'</div>':'<div class="mut tiny" style="margin-top:9px">Not linked to any shipment yet.</div>')
                   +'</div></div>'   // close shipments box + RIGHT column
                   +'</div>'   // close the two-column wrapper
                   +'</div>'; }).join('')||'<div class="mut" style="padding:4px 0;text-align:left">No sample versions yet.</div>';
-              box.innerHTML='<div style="text-align:left"><div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><div style="font-weight:700;font-size:13px">Sample versions</div><button class="save-btn pp-add-sample" style="background:#16a34a;color:#fff;border-color:#15803d;font-size:12px">+ Add sample</button></div>'
-                +'<div class="pp-sample-form" style="display:none;border:1px dashed #cbd5e1;border-radius:8px;padding:11px 13px;margin:0 0 12px;background:#f8fafc">'
+              box.innerHTML='<div style="text-align:left"><div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><div style="font-weight:700;font-size:12.5px">Sample versions</div><button class="save-btn pp-add-sample" style="background:var(--pos);color:#fff;border-color:var(--pos);font-size:12px">+ Add sample</button></div>'
+                +'<div class="pp-sample-form" style="display:none;border:1px dashed var(--line);border-radius:8px;padding:11px 13px;margin:0 0 12px;background:var(--hover)">'
                 +'<div style="font-weight:700;font-size:12px;margin-bottom:8px">Add a new sample version</div>'
-                +'<div style="margin-bottom:8px"><label style="font-size:12px">Sample version <input class="fci" value="'+esc(nextRef)+'" readonly style="width:220px;text-align:left;background:#eef2f7;margin-left:4px;font-family:ui-monospace,Menlo,monospace" title="auto-generated — this is version '+nextV+'"></label> <span class="mut tiny">v'+nextV+'</span></div>'
+                +'<div style="margin-bottom:8px"><label style="font-size:12px">Sample version <input class="fci" value="'+esc(nextRef)+'" readonly style="width:220px;text-align:left;background:var(--line2);margin-left:4px;font-family:ui-monospace,Menlo,monospace" title="auto-generated — this is version '+nextV+'"></label> <span class="mut tiny">v'+nextV+'</span></div>'
                 +'<div style="margin-bottom:7px"><label style="font-size:12px">Sample date <input type="date" class="fci ps2-date" value="'+today+'" style="width:150px;text-align:left;margin-left:4px"></label></div>'
-                +'<div style="margin-bottom:8px"><div style="font-size:12px;font-weight:600;margin-bottom:3px">Size variant(s) sampled <span style="color:#94a3b8;font-weight:400">— tick every size in this sample</span></div>'+(sizesList.length?sizesList.map(function(sz){return '<label style="display:inline-block;font-size:12px;margin:0 14px 4px 0;cursor:pointer"><input type="checkbox" class="ps2-size" value="'+esc(sz)+'" style="vertical-align:middle;margin-right:5px">'+esc(sz)+'</label>';}).join(''):'<span class="mut tiny">no size variants defined for this product</span>')+'</div>'
-                +'<div style="margin-bottom:8px"><div style="font-size:12px;font-weight:600;margin-bottom:3px">Aspects sampled <span style="color:#94a3b8;font-weight:400">— tick every part this sample covers</span></div>'+ASPECTS.map(function(a){return '<label style="display:inline-block;font-size:12px;margin:0 14px 4px 0;cursor:pointer"><input type="checkbox" class="ps2-aspect" value="'+a[0]+'" style="vertical-align:middle;margin-right:5px">'+a[1]+'</label>';}).join('')+'</div>'
+                +'<div style="margin-bottom:8px"><div style="font-size:12px;font-weight:600;margin-bottom:3px">Size variant(s) sampled <span style="color:var(--faint);font-weight:400">— tick every size in this sample</span></div>'+(sizesList.length?sizesList.map(function(sz){return '<label style="display:inline-block;font-size:12px;margin:0 14px 4px 0;cursor:pointer"><input type="checkbox" class="ps2-size" value="'+esc(sz)+'" style="vertical-align:middle;margin-right:5px">'+esc(sz)+'</label>';}).join(''):'<span class="mut tiny">no size variants defined for this product</span>')+'</div>'
+                +'<div style="margin-bottom:8px"><div style="font-size:12px;font-weight:600;margin-bottom:3px">Aspects sampled <span style="color:var(--faint);font-weight:400">— tick every part this sample covers</span></div>'+ASPECTS.map(function(a){return '<label style="display:inline-block;font-size:12px;margin:0 14px 4px 0;cursor:pointer"><input type="checkbox" class="ps2-aspect" value="'+a[0]+'" style="vertical-align:middle;margin-right:5px">'+a[1]+'</label>';}).join('')+'</div>'
                 +'<div style="margin-bottom:8px"><label style="font-size:12px">Sample shipment <select class="fci ps2-ship" style="font-size:12px;margin-left:4px"><option value="">— assign later —</option>'+SRS.map(function(sr){return '<option value="'+sr.id+'">'+esc(sr.ref)+'</option>';}).join('')+'<option value="not_shipped">Not shipped</option></select></label> <span class="mut tiny">optional now — can set later per sample</span></div>'
                 +'<label style="display:block;font-size:12px;margin-bottom:5px;cursor:pointer"><input type="checkbox" class="ps2-col" style="vertical-align:middle;margin-right:6px">I verify that I have colour checked every colour to match Pantone in design</label>'
                 +'<label style="display:block;font-size:12px;margin-bottom:7px;cursor:pointer"><input type="checkbox" class="ps2-qual" style="vertical-align:middle;margin-right:6px">I verify I have quality checked sample matches design and quality standards</label>'
@@ -1905,7 +1905,7 @@
                   (function up(){ if(i>=files.length){ ppProdSamples(box,ref); return; } var f=files[i++]; if(f.size>10*1024*1024){ up(); return; } var rd=new FileReader(); rd.onload=function(){ postJSON(EP.productSamplePhoto,{sample_id:j.id,filename:f.name,mime:f.type||'image/jpeg',data_base64:String(rd.result)},function(){ up(); }); }; rd.readAsDataURL(f); })(); }); };
               }
               paint();
-            }).catch(function(e){ box.innerHTML='<div style="color:#dc2626;text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
+            }).catch(function(e){ box.innerHTML='<div style="color:var(--neg);text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
           // ── SAMPLE SHIPMENT CONTENTS picker — add product-development samples and/or bulk SKUs ──
           // Renders a rich multi-select (dev samples + SKUs, both with a qty). Calls onAdd(devs, skus) with the
           // NEW selections — devs=[{id,qty}], skus=[{sku,qty}] (qty defaults to 1). The caller persists/merges.
@@ -1917,18 +1917,18 @@
             var qcell='style="width:52px;text-align:left" inputmode="numeric" placeholder="qty"';
             getJSON(EP.productOpenSamples+(supQ?'?'+supQ.slice(1):'')).then(function(samples){
               var DEV=(Array.isArray(samples)?samples:[]).filter(function(s){return !haveDev[String(s.id)];});
-              host.innerHTML='<div style="border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;background:#f8fafc;text-align:left;max-width:560px">'
+              host.innerHTML='<div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--hover);text-align:left;max-width:560px">'
                 +'<div style="font-weight:700;font-size:12px;margin-bottom:3px">Add contents</div>'
-                +'<div style="font-size:11px;color:#64748b;margin-bottom:6px">Search your assigned SKUs and product-development samples — or type any code and add it as free text.</div>'
+                +'<div style="font-size:12px;color:var(--muted);margin-bottom:6px">Search your assigned SKUs and product-development samples — or type any code and add it as free text.</div>'
                 +'<input class="fci ssh-pk-q" placeholder="search SKU / product / colour / season / dev sample…" style="width:100%;text-align:left;margin-bottom:6px">'
-                +'<div class="ssh-pk-list" style="max-height:240px;overflow:auto;border:1px solid #eef2f7;border-radius:6px;padding:4px 6px;background:#fff"><div class="mut tiny" style="padding:4px">type to search…</div></div>'
-                +'<div style="margin-top:10px;display:flex;gap:8px;align-items:center"><button class="save-btn ssh-pk-add" style="background:#16a34a;color:#fff;border-color:#15803d">Add selected</button><button class="save-btn ssh-pk-cancel light">Cancel</button><span class="ssh-pk-msg mut tiny"></span></div></div>';
+                +'<div class="ssh-pk-list" style="max-height:240px;overflow:auto;border:1px solid var(--line2);border-radius:6px;padding:4px 6px;background:#fff"><div class="mut tiny" style="padding:4px">type to search…</div></div>'
+                +'<div style="margin-top:10px;display:flex;gap:8px;align-items:center"><button class="save-btn ssh-pk-add" style="background:var(--pos);color:#fff;border-color:var(--pos)">Add selected</button><button class="save-btn ssh-pk-cancel light">Cancel</button><span class="ssh-pk-msg mut tiny"></span></div></div>';
               var q=host.querySelector('.ssh-pk-q'), list=host.querySelector('.ssh-pk-list'), kt=null;
-              function devRow(s){ return '<div class="ssh-pk-row" style="display:flex;gap:7px;align-items:center;padding:3px 2px;font-size:12px"><input type="checkbox" class="ssh-pk-cb" data-type="dev" value="'+s.id+'" data-ref="'+esc(s.ref)+'" data-colour="'+esc(s.colour_name||'')+'"><span class="tool-badge bg-blue" style="font-size:9px">dev</span><b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.ref)+'</b>'+(s.colour_name?'<span class="mut tiny" style="flex:1;min-width:0">'+esc(s.colour_name)+'</span>':'<span style="flex:1"></span>')+'<input class="fci ssh-pk-qty" '+qcell+'></div>'; }
+              function devRow(s){ return '<div class="ssh-pk-row" style="display:flex;gap:7px;align-items:center;padding:3px 2px;font-size:12px"><input type="checkbox" class="ssh-pk-cb" data-type="dev" value="'+s.id+'" data-ref="'+esc(s.ref)+'" data-colour="'+esc(s.colour_name||'')+'"><span class="tool-badge bg-blue" style="font-size:10.5px">dev</span><b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.ref)+'</b>'+(s.colour_name?'<span class="mut tiny" style="flex:1;min-width:0">'+esc(s.colour_name)+'</span>':'<span style="flex:1"></span>')+'<input class="fci ssh-pk-qty" '+qcell+'></div>'; }
               function skuRow(k){ return '<div class="ssh-pk-row" style="display:flex;gap:7px;align-items:center;padding:3px 2px;font-size:12px"><input type="checkbox" class="ssh-pk-cb" data-type="sku" value="'+esc(k.sku)+'" data-desc="'+esc(k.description||'')+'"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(k.sku)+'</b><span class="mut tiny" style="flex:1;min-width:0">'+esc(k.description||'')+(k.release_window?' · '+esc(k.release_window):'')+'</span><input class="fci ssh-pk-qty" '+qcell+'></div>'; }
               function render(term){ term=(term||'').trim(); var lo=term.toLowerCase();
                 var dm=DEV.filter(function(s){ return !lo || (((s.ref||'')+' '+(s.colour_name||'')).toLowerCase().indexOf(lo)>=0); });
-                var freeHtml = term ? '<div class="ssh-pk-row" style="display:flex;gap:7px;align-items:center;padding:3px 2px;font-size:12px;border-top:1px dashed #e5e7eb;margin-top:3px;padding-top:5px"><input type="checkbox" class="ssh-pk-cb" data-type="free" value="'+esc(term)+'"><span class="mut tiny">add as SKU:</span> <b style="font-family:ui-monospace,Menlo,monospace">'+esc(term)+'</b><span style="flex:1"></span><input class="fci ssh-pk-qty" '+qcell+'></div>' : '';
+                var freeHtml = term ? '<div class="ssh-pk-row" style="display:flex;gap:7px;align-items:center;padding:3px 2px;font-size:12px;border-top:1px dashed var(--line);margin-top:3px;padding-top:5px"><input type="checkbox" class="ssh-pk-cb" data-type="free" value="'+esc(term)+'"><span class="mut tiny">add as SKU:</span> <b style="font-family:ui-monospace,Menlo,monospace">'+esc(term)+'</b><span style="flex:1"></span><input class="fci ssh-pk-qty" '+qcell+'></div>' : '';
                 list.innerHTML=dm.map(devRow).join('')+'<div class="ssh-pk-skus"><div class="mut tiny" style="padding:4px">searching your SKUs…</div></div>'+freeHtml;
                 getJSON(EP.productSkus+"?q="+encodeURIComponent(term)+supQ).then(function(rows){ rows=(Array.isArray(rows)?rows:[]).filter(function(k){return !haveSku[k.sku];});
                   var boxk=list.querySelector('.ssh-pk-skus'); if(!boxk)return;
@@ -1943,24 +1943,24 @@
                   else if(t==='free'&&c.value.trim()) skus.push({sku:c.value.trim(),qty:qty,description:''}); });
                 if(!devs.length&&!skus.length){ msg.style.color='#dc2626'; msg.textContent='Select or type at least one item.'; return; }
                 host.style.display='none'; host.innerHTML=''; onAdd&&onAdd(devs, skus); };
-            }).catch(function(e){ host.innerHTML='<div style="color:#dc2626">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
+            }).catch(function(e){ host.innerHTML='<div style="color:var(--neg)">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
           function ppProdTimeline(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
             fetch(EP.productNotesBase+encodeURIComponent(ref)).then(function(r){return r.json();}).then(function(notes){ shortNotes(notes); notes=Array.isArray(notes)?notes:[];
               var unread=notes.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;
               var list=(notes.length?tlDesc(notes).map(function(n){ var sup=(n.author_kind!=='internal'); var isNew=(!sup&&!n.read);
-                return '<div style="padding:7px 0;border-bottom:1px solid #f1f1f1;text-align:left'+(isNew?';background:#fffbeb':'')+'"><div class="mut tiny">'+esc(n.created_at||'')+' · '+(sup?'you':'Dock &amp; Bay')+(isNew?' <span class="ex-badge">NEW</span>':(!sup?' <span style="color:#94a3b8">· read</span>':''))+'</div><div style="white-space:pre-wrap">'+esc(n.body||'')+'</div></div>'; }).join(''):'<div class="mut" style="padding:6px 0;text-align:left">No messages yet.</div>');
+                return '<div style="padding:7px 0;border-bottom:1px solid var(--line2);text-align:left'+(isNew?';background:var(--amber-bg)':'')+'"><div class="mut tiny">'+esc(n.created_at||'')+' · '+(sup?'you':'Dock &amp; Bay')+(isNew?' <span class="ex-badge">NEW</span>':(!sup?' <span style="color:var(--faint)">· read</span>':''))+'</div><div style="white-space:pre-wrap">'+esc(n.body||'')+'</div></div>'; }).join(''):'<div class="mut" style="padding:6px 0;text-align:left">No messages yet.</div>');
               box.innerHTML='<div style="max-width:640px;text-align:left">'
                 +'<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:10px"><textarea class="fci pp-prod-note" rows="2" placeholder="Add a comment…" style="flex:1;text-align:left"></textarea><button class="save-btn pp-prod-post" data-ref="'+esc(ref)+'">Post</button></div>'
-                +'<div style="font-weight:700;font-size:13px;margin-bottom:8px">Messages'+(unread?' <span class="ex-badge" title="unread messages from Dock &amp; Bay">'+unread+' unread</span>':' <span class="mut tiny">(all read)</span>')+'</div>'
+                +'<div style="font-weight:700;font-size:12.5px;margin-bottom:8px">Messages'+(unread?' <span class="ex-badge" title="unread messages from Dock &amp; Bay">'+unread+' unread</span>':' <span class="mut tiny">(all read)</span>')+'</div>'
                 +'<div>'+list+'</div></div>';
               var it=((_ppData&&_ppData.products)||[]).filter(function(x){return x.ref===ref;})[0];
               if(unread>0){ postJSON(EP.productNotesRead,{ref:ref},function(){ if(it)it.unread_dnb=0; setProdBadge();
                 var tb=box.parentNode&&box.parentNode.querySelector('.pd2-tab[data-t="timeline"] .ex-badge'); if(tb&&tb.parentNode)tb.parentNode.removeChild(tb); }); }
               var pb=box.querySelector('.pp-prod-post'); if(pb)pb.onclick=function(){ var v=box.querySelector('.pp-prod-note').value.trim(); if(!v)return; postJSON(EP.productNote,{ref:ref,body:v},function(j){ if(j&&j.error){alert(j.error);return;} ppProdTimeline(box,ref); }); };
-            }).catch(function(e){ box.innerHTML='<div style="color:#dc2626;text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
+            }).catch(function(e){ box.innerHTML='<div style="color:var(--neg);text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
           function setProdBadge(){ var t=document.getElementById('pp-prod-tab'); if(t)t.style.display=_ppData&&_ppData.productEnabled?'':'none';
             var n=((_ppData&&_ppData.products)||[]).reduce(function(a,p){return a+(Number(p.unread_dnb)||0);},0);
-            var bg=document.getElementById('pp-prod-badge'); if(bg)bg.innerHTML=n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
+            var bg=document.getElementById('pp-prod-badge'); if(bg)bg.innerHTML=n?'<span style="background:var(--neg);color:#fff;border-radius:8px;font-size:10.5px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
           // ---- top-right: unread D&B messages + recent changes -----------------------------------------
           function closeNotif(){ var a=document.getElementById('pp-unread-drop'),b=document.getElementById('pp-recent-drop'); if(a)a.style.display='none'; if(b)b.style.display='none'; }
           function computeUnread(){ var items=[];
@@ -1981,16 +1981,16 @@
             else if(kind==='product'){ PORTAL_TAB='product'; _ppOpenProd=ref; ppSetHash('product',ref||''); }
             else if(kind==='payments'){ PORTAL_TAB='payments'; ppSetHash('payments',''); }
             renderPP(); }
-          function loadRecent(d){ if(!EP.recentActivity){ d.innerHTML='<div style="padding:10px 12px;color:#888;font-size:12px">Not available in preview.</div>'; return; }
-            d.innerHTML='<div style="padding:8px 12px;font-weight:700;border-bottom:1px solid #eef2f7;font-size:12px">Recent changes</div><div style="padding:10px 12px;color:#888;font-size:12px">Loading…</div>';
+          function loadRecent(d){ if(!EP.recentActivity){ d.innerHTML='<div style="padding:10px 12px;color:var(--faint);font-size:12px">Not available in preview.</div>'; return; }
+            d.innerHTML='<div style="padding:8px 12px;font-weight:700;border-bottom:1px solid var(--line2);font-size:12px">Recent changes</div><div style="padding:10px 12px;color:var(--faint);font-size:12px">Loading…</div>';
             fetch(EP.recentActivity).then(function(r){return r.json();}).then(function(rows){
-              if(!Array.isArray(rows)||!rows.length){ d.innerHTML='<div style="padding:8px 12px;font-weight:700;border-bottom:1px solid #eef2f7;font-size:12px">Recent changes</div><div style="padding:10px 12px;color:#888;font-size:12px">Nothing recent.</div>'; return; }
+              if(!Array.isArray(rows)||!rows.length){ d.innerHTML='<div style="padding:8px 12px;font-weight:700;border-bottom:1px solid var(--line2);font-size:12px">Recent changes</div><div style="padding:10px 12px;color:var(--faint);font-size:12px">Nothing recent.</div>'; return; }
               var ICO={po_created:'🆕',po_confirmed:'✅',shipment_created:'🚢',payment:'💰',sample_created:'🧪'};
-              d.innerHTML='<div style="padding:8px 12px;font-weight:700;border-bottom:1px solid #eef2f7;font-size:12px">Recent changes</div>'
+              d.innerHTML='<div style="padding:8px 12px;font-weight:700;border-bottom:1px solid var(--line2);font-size:12px">Recent changes</div>'
                 +rows.map(function(r){ var kind=(r.typ==='payment')?'payments':(r.typ==='sample_created')?'sample':(r.typ==='shipment_created')?'shipment':'po';
-                  return '<div class="pp-recent-row" data-kind="'+kind+'" data-ref="'+esc(r.ref||'')+'" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #f5f5f5;font-size:12px"><div>'+(ICO[r.typ]||'•')+' '+esc(r.label)+'</div><div style="color:#94a3b8;font-size:10px;margin-top:1px">'+esc(r.at||'')+'</div></div>'; }).join('');
+                  return '<div class="pp-recent-row" data-kind="'+kind+'" data-ref="'+esc(r.ref||'')+'" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--hover);font-size:12px"><div>'+(ICO[r.typ]||'•')+' '+esc(r.label)+'</div><div style="color:var(--faint);font-size:10.5px;margin-top:1px">'+esc(r.at||'')+'</div></div>'; }).join('');
               d.querySelectorAll('.pp-recent-row').forEach(function(row){ row.onclick=function(e){ e.stopPropagation(); notifGo(row.dataset.kind, row.dataset.ref); }; });
-            }).catch(function(){ d.innerHTML='<div style="padding:10px 12px;color:#dc2626;font-size:12px">Could not load recent changes.</div>'; }); }
+            }).catch(function(){ d.innerHTML='<div style="padding:10px 12px;color:var(--neg);font-size:12px">Could not load recent changes.</div>'; }); }
           // Inbox drawer: fetch the actual UNREAD Dock & Bay messages (body, sender, date/time, clickable ref +
           // Mark as read). fmtDT: 'YYYY-MM-DD HH:MI' → 'dd-mmm-yy HH:MM'. shortAuthor: ben@dockandbay.com → ben@.
           function fmtDT(at){ if(!at)return ''; var t=String(at).slice(11,16); return fd(at)+(t?(' '+t):''); }
@@ -2010,24 +2010,24 @@
               try{ setSampBadge();setPosBadge();setShipBadge();setProdBadge(); }catch(e){}
               if(cb)cb(); }); }
           function loadUnread(d){ if(!d)return;
-            var hdr='<div style="padding:8px 12px;font-weight:700;border-bottom:1px solid #eef2f7;font-size:12px">Unread messages from Dock &amp; Bay</div>';
-            if(!EP.unreadMessages){ d.innerHTML=hdr+'<div style="padding:10px 12px;color:#888;font-size:12px">Not available in preview.</div>'; return; }
-            d.innerHTML=hdr+'<div style="padding:10px 12px;color:#888;font-size:12px">Loading…</div>';
+            var hdr='<div style="padding:8px 12px;font-weight:700;border-bottom:1px solid var(--line2);font-size:12px">Unread messages from Dock &amp; Bay</div>';
+            if(!EP.unreadMessages){ d.innerHTML=hdr+'<div style="padding:10px 12px;color:var(--faint);font-size:12px">Not available in preview.</div>'; return; }
+            d.innerHTML=hdr+'<div style="padding:10px 12px;color:var(--faint);font-size:12px">Loading…</div>';
             fetch(EP.unreadMessages).then(function(r){return r.json();}).then(function(rows){
-              if(!Array.isArray(rows)||!rows.length){ d.innerHTML=hdr+'<div style="padding:10px 12px;color:#888;font-size:12px">No unread messages.</div>'; return; }
+              if(!Array.isArray(rows)||!rows.length){ d.innerHTML=hdr+'<div style="padding:10px 12px;color:var(--faint);font-size:12px">No unread messages.</div>'; return; }
               d.innerHTML=hdr+rows.map(function(m){ var body=String(m.body||''); if(body.length>240)body=body.slice(0,240)+'…';
-                return '<div style="padding:8px 12px;border-bottom:1px solid #f5f5f5;font-size:12px">'
+                return '<div style="padding:8px 12px;border-bottom:1px solid var(--hover);font-size:12px">'
                   +'<div style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">'
-                    +'<a class="pp-un-go" data-kind="'+esc(m.type)+'" data-ref="'+esc(m.ref||'')+'" style="color:#2563eb;text-decoration:underline;cursor:pointer;font-weight:600">'+esc((UNREAD_LBL[m.type]||'')+' '+(m.ref||''))+'</a>'
-                    +'<span style="color:#94a3b8;font-size:10px;white-space:nowrap">'+esc(fmtDT(m.at))+'</span></div>'
-                  +'<div style="color:#475569;font-size:10px;margin:1px 0 2px">from '+esc(shortAuthor(m.author))+'</div>'
-                  +'<div style="color:#1f2937;white-space:pre-wrap;word-break:break-word">'+esc(body)+'</div>'
-                  +'<div style="margin-top:4px"><button class="pp-un-read save-btn light" data-type="'+esc(m.type)+'" data-ref="'+esc(m.ref||'')+'" data-id="'+esc(String(m.note_id))+'" style="font-size:10px">Mark as read</button></div>'
+                    +'<a class="pp-un-go" data-kind="'+esc(m.type)+'" data-ref="'+esc(m.ref||'')+'" style="color:var(--blue);text-decoration:underline;cursor:pointer;font-weight:600">'+esc((UNREAD_LBL[m.type]||'')+' '+(m.ref||''))+'</a>'
+                    +'<span style="color:var(--faint);font-size:10.5px;white-space:nowrap">'+esc(fmtDT(m.at))+'</span></div>'
+                  +'<div style="color:var(--muted);font-size:10.5px;margin:1px 0 2px">from '+esc(shortAuthor(m.author))+'</div>'
+                  +'<div style="color:var(--ink-soft);white-space:pre-wrap;word-break:break-word">'+esc(body)+'</div>'
+                  +'<div style="margin-top:4px"><button class="pp-un-read save-btn light" data-type="'+esc(m.type)+'" data-ref="'+esc(m.ref||'')+'" data-id="'+esc(String(m.note_id))+'" style="font-size:10.5px">Mark as read</button></div>'
                   +'</div>'; }).join('');
               d.querySelectorAll('.pp-un-go').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); notifGo(a.dataset.kind, a.dataset.ref); }; });
               d.querySelectorAll('.pp-un-read').forEach(function(bn){ bn.onclick=function(e){ e.stopPropagation(); bn.disabled=true; bn.textContent='…';
                 unreadMarkRead(bn.dataset.type, bn.dataset.ref, bn.dataset.id, function(){ renderPortalNotif(); loadUnread(d); }); }; });
-            }).catch(function(){ d.innerHTML=hdr+'<div style="padding:10px 12px;color:#dc2626;font-size:12px">Could not load messages.</div>'; }); }
+            }).catch(function(){ d.innerHTML=hdr+'<div style="padding:10px 12px;color:var(--neg);font-size:12px">Could not load messages.</div>'; }); }
           function renderPortalNotif(){ var wrap=document.getElementById('pp-notif'); if(!wrap)return; wrap.style.display='inline-flex';
             var items=computeUnread(), total=items.reduce(function(t,x){return t+x.n;},0);
             var nEl=document.getElementById('pp-unread-n'); if(nEl)nEl.textContent=total;
@@ -2050,16 +2050,16 @@
             function numDesc(a,b){ var na=parseFloat(a),nb=parseFloat(b); if(isFinite(na)&&isFinite(nb))return nb-na; return a<b?1:(a>b?-1:0); }
             var prods=distinct('prod_no').sort(numDesc), batches=distinct('batch_id').sort(numDesc), poList=distinct('po').sort().reverse();
             function sel(id,ph,arr,w){ return '<select class="fci" id="'+id+'" style="width:'+w+';text-align:left"><option value="">'+ph+'</option>'+arr.map(function(o){return '<option value="'+esc(o)+'">'+esc(o)+'</option>';}).join('')+'</select>'; }
-            var stepCss='border:1px solid #e5e7eb;border-radius:10px;padding:12px 14px;margin-bottom:12px;background:#fff;text-align:left';
-            var numCss='display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#1a1a1a;color:#fff;font-size:11px;font-weight:700;margin-right:8px;vertical-align:middle';
+            var stepCss='border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:12px;background:#fff;text-align:left';
+            var numCss='display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--ink);color:#fff;font-size:12px;font-weight:700;margin-right:8px;vertical-align:middle';
             return '<div style="max-width:920px;text-align:left">'
               +'<div class="sect-h">Upload a document</div>'
               +'<div class="mut tiny" style="margin-bottom:12px">Test reports, GRS certificates, inspection &amp; compliance docs. GRS transaction certificates usually map to a <b>batch</b> (they span POs).</div>'
               // Step 1 — attach file (drag & drop / browse)
               +'<div style="'+stepCss+'"><div style="font-weight:600;margin-bottom:8px"><span style="'+numCss+'">1</span>Attach file</div>'
-                +'<div id="pq-drop" style="border:2px dashed #cbd5e1;border-radius:8px;padding:22px 14px;text-align:center;cursor:pointer;color:#64748b;font-size:13px;transition:border-color .15s,background .15s">Drag &amp; drop a file here, or <span style="text-decoration:underline">click to browse</span></div>'
+                +'<div id="pq-drop" style="border:2px dashed var(--line);border-radius:8px;padding:22px 14px;text-align:center;cursor:pointer;color:var(--muted);font-size:12.5px;transition:border-color .15s,background .15s">Drag &amp; drop a file here, or <span style="text-decoration:underline">click to browse</span></div>'
                 +'<input type="file" id="pq-file" style="display:none">'
-                +'<div id="pq-fname" class="tiny" style="margin-top:8px;color:#166534;font-weight:600;text-align:left"></div></div>'
+                +'<div id="pq-fname" class="tiny" style="margin-top:8px;color:var(--pos);font-weight:600;text-align:left"></div></div>'
               // Step 2 — file type (NO default) + assignment (dropdown-only)
               +'<div style="'+stepCss+'"><div style="font-weight:600;margin-bottom:8px"><span style="'+numCss+'">2</span>Specify the file type</div>'
                 +'<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px"><label class="tiny mut" style="min-width:62px">File type</label>'
@@ -2069,7 +2069,7 @@
                 +'<div class="tiny mut" style="margin-top:6px">Choose a <b>production</b> or <b>batch</b> (required). PO is optional.</div></div>'
               // Step 3 — upload (greyed until steps 1 & 2 done)
               +'<div style="'+stepCss+'"><div style="font-weight:600;margin-bottom:8px"><span style="'+numCss+'">3</span>Upload</div>'
-                +'<button class="save-btn" id="pq-up" disabled style="background:#cbd5e1;color:#fff;cursor:not-allowed">⬆ Upload</button>'
+                +'<button class="save-btn" id="pq-up" disabled style="background:var(--line);color:#fff;cursor:not-allowed">Upload</button>'
                 +'<span class="tiny mut" id="pq-msg" style="margin-left:10px"></span>'
                 +'<div class="tiny mut" id="pq-hint" style="margin-top:6px">Attach a file and choose a file type to enable upload.</div></div>'
               +'<div class="sect-h" style="margin-top:16px">Your uploaded documents</div><div id="pq-list"><div class="mut tiny">Loading…</div></div></div>';
@@ -2097,7 +2097,7 @@
             function flashReq(){ var els=[prodEl,batchEl].filter(Boolean), n=0; var iv=setInterval(function(){ n++; var on=(n%2===1); els.forEach(function(e){ e.style.borderColor=on?'#dc2626':'#cbd5e1'; e.style.boxShadow=on?'0 0 0 2px rgba(220,38,38,.25)':'none'; }); if(n>=5){ clearInterval(iv); els.forEach(function(e){ e.style.borderColor='#dc2626'; e.style.boxShadow='none'; }); } },150); }
             function load(){ fetch('/api/portal/quality-docs').then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
               var body=rows.map(function(d){
-                var del=d.deletable?('<button class="pq-del" data-id="'+d.id+'" style="border:1px solid #fecaca;background:#fff;color:#dc2626;border-radius:6px;padding:2px 8px;font-size:11px;cursor:pointer">Delete</button>'):'';
+                var del=d.deletable?('<button class="pq-del" data-id="'+d.id+'" style="border:1px solid var(--neg-cell);background:#fff;color:var(--neg);border-radius:6px;padding:2px 8px;font-size:12px;cursor:pointer">Delete</button>'):'';
                 return '<tr><td class="l">'+esc(d.doc_type||'')+'</td><td class="l"><a href="/api/portal/quality-doc/'+d.id+'" target="_blank" rel="noopener">'+esc(d.filename||'file')+'</a></td><td class="l">'+esc(d.po||'')+'</td><td class="l">'+(d.prod_no?'P'+esc(d.prod_no):'')+'</td><td class="l">'+esc(d.batch_id||'')+'</td><td class="l mut tiny">'+esc(d.created_at||'')+'</td><td class="l">'+del+'</td></tr>'; }).join('');
               var el=document.getElementById('pq-list'); if(!el)return;
               el.innerHTML='<div class="tw"><table style="width:max-content;min-width:100%"><thead><tr><th class="l">Type</th><th class="l">File</th><th class="l">PO</th><th class="l">Prod</th><th class="l">Batch</th><th class="l">Uploaded</th><th class="l"></th></tr></thead><tbody>'+(body||'<tr><td colspan="7" class="mut tiny">No documents uploaded yet.</td></tr>')+'</tbody></table></div>';
@@ -2120,8 +2120,8 @@
             var groups=Object.keys(byType).sort().map(function(t){
               var rows=byType[t].map(function(s){ var status;
                 if(!s.confirm_with_supplier) status='<span class="mut tiny">reference</span>';
-                else if(s.approved) status='<span style="color:#166534;font-weight:700">✓ Confirmed</span>';
-                else status='<button class="save-btn sp-confirm" data-id="'+s.id+'" style="background:#1a1a1a;color:#fff">Confirm</button>';
+                else if(s.approved) status='<span style="color:var(--pos);font-weight:700">✓ Confirmed</span>';
+                else status='<button class="save-btn sp-confirm" data-id="'+s.id+'" style="background:var(--ink);color:#fff">Confirm</button>';
                 return '<tr><td class="l"><a href="'+EP.specFileBase+s.id+'" target="_blank" rel="noopener">'+esc(s.filename||'file')+'</a></td><td class="l">'+esc(s.scope)+'</td><td class="l">'+esc(s.effective)+'</td><td class="l">'+status+'</td></tr>'; }).join('');
               return '<div class="sect-h" style="margin-top:14px">'+esc(t)+'</div><div class="tw"><table style="width:max-content;min-width:100%"><thead><tr><th class="l">File</th><th class="l">Applies to</th><th class="l">Use from</th><th class="l">Status</th></tr></thead><tbody>'+rows+'</tbody></table></div>'; }).join('');
             return '<div style="max-width:920px;text-align:left"><div class="sect-h">Specifications</div><div class="mut tiny" style="margin-bottom:6px">Packaging &amp; labelling documents from Dock &amp; Bay. Items marked for confirmation need your acknowledgement.</div>'+groups+'</div>'; }
@@ -2129,7 +2129,7 @@
             fetch(EP.specApprove,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({spec_id:id})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ b.disabled=false; b.textContent='Confirm'; alert(j.error); return; }
               var sp=((_ppData&&_ppData.specs)||[]).filter(function(x){return String(x.id)===String(id);})[0]; if(sp){ sp.approved=true; sp.needs_approval=false; } setSpecBadge(); renderPP(); }).catch(function(){ b.disabled=false; b.textContent='Confirm'; }); }; }); }
           function setSpecBadge(){ var specs=(_ppData&&_ppData.specs)||[]; var t=document.getElementById('pp-spec-tab'); if(t)t.style.display='';   // always visible (like Deposits/Payments) — shows an empty state when there are none
-            var n=specs.filter(function(s){return s.needs_approval;}).length; var bg=document.getElementById('pp-spec-badge'); if(bg)bg.innerHTML=n?'<span style="background:#dc2626;color:#fff;border-radius:8px;font-size:9px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
+            var n=specs.filter(function(s){return s.needs_approval;}).length; var bg=document.getElementById('pp-spec-badge'); if(bg)bg.innerHTML=n?'<span style="background:var(--neg);color:#fff;border-radius:8px;font-size:10.5px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
           function renderPP(){ if(!_ppData)return; var body=document.getElementById('pp-body');
             tabsEl.querySelectorAll('.rtab').forEach(function(t){t.classList.toggle('active',t.dataset.pt===PORTAL_TAB);}); ppSyncSec();
             setSampBadge(); setPosBadge(); setShipBadge(); setProdBadge(); setSpecBadge(); try{ renderPortalNotif(); }catch(e){}
@@ -2158,7 +2158,7 @@
                 +'<input class="fci sp-po-q" placeholder="search PO…" value="'+esc(PORTAL_SP_PO)+'" style="width:150px;text-align:left">'
                 +'<span class="pill'+(PORTAL_SP_ACTIVE?' active':'')+'" data-spf="active">Still to ship</span>'
                 +'<span class="pill'+(PORTAL_SP_SHIPPED?' active':'')+'" data-spf="shipped">Shipped</span>'
-                +'<span class="pill'+(PORTAL_SP_ESC?' active':'')+'" data-spf="esc" style="'+(PORTAL_SP_ESC?'background:#dc2626;color:#fff;border-color:#dc2626':'color:#dc2626')+'">⚑ Escalated only</span>'
+                +'<span class="pill'+(PORTAL_SP_ESC?' active':'')+'" data-spf="esc" style="'+(PORTAL_SP_ESC?'background:var(--neg);color:#fff;border-color:var(--neg)':'color:var(--neg)')+'">⚑ Escalated only</span>'
                 +'<span class="pill'+(PORTAL_SP_FOB?' active':'')+'" data-spf="fob">📦 FOB</span>'
                 +(_allCtrys.length?'<span class="mut tiny" style="margin-left:6px">Destination</span>'+_allCtrys.map(function(c){return '<span class="pill'+(PORTAL_SP_CTRY[c]?' active':'')+'" data-spctry="'+esc(c)+'">'+esc(c)+'</span>';}).join(''):'')
                 +'<span class="mut tiny" style="margin-left:auto">'+(spCapped?spRender.length+' of ':'')+shownSp.length+' of '+allSp.length+' shipments &amp; FOB collections</span></div>';
@@ -2258,7 +2258,7 @@
               batches.sort();
               if(PORTAL_BC_BATCH && batches.indexOf(PORTAL_BC_BATCH)<0)PORTAL_BC_BATCH='';   // batch no longer present
               var picked=!!PORTAL_BC_BATCH, dis=picked?'':' disabled';
-              var note='<div style="margin:0 0 12px;padding:9px 12px;border-radius:6px;font-size:12px;background:#fef3c7;border:1px solid #fcd34d">'
+              var note='<div style="margin:0 0 12px;padding:9px 12px;border-radius:6px;font-size:12px;background:var(--amber-bg);border:1px solid #fcd34d">'
                 +'⚠ <b>If a product is missing from a batch, amend the relevant purchase orders&rsquo; &ldquo;Order Plan&rdquo;.</b> Once approved, the product barcode can be downloaded in this batch.</div>';
               var picker='<div class="bar" style="gap:8px;flex-wrap:wrap;align-items:center">'
                 +'<span class="pill-lbl">Batch</span>'
@@ -2294,7 +2294,7 @@
                   if(!f.length){ listEl.innerHTML='<div class="count">No SKUs match &ldquo;'+esc(PORTAL_BC_Q)+'&rdquo;.</div>'; return; }
                   var mono='font-family:ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap';
                   listEl.innerHTML='<div class="count" style="margin:0 0 4px">'+f.length+' of '+rows.length+' SKUs</div>'
-                    +'<div class="tw"><table style="font-size:11px;width:auto"><thead><tr><th class="l"></th><th class="l">SKU</th><th class="l">Product barcode</th><th class="l">Carton barcode</th><th class="l">Inner barcode</th><th class="l">Download</th></tr></thead><tbody>'
+                    +'<div class="tw"><table style="font-size:12px;width:auto"><thead><tr><th class="l"></th><th class="l">SKU</th><th class="l">Product barcode</th><th class="l">Carton barcode</th><th class="l">Inner barcode</th><th class="l">Download</th></tr></thead><tbody>'
                     +f.map(function(r){ return '<tr><td class="l">'+(r.swatch_url?'<img src="'+esc(r.swatch_url)+'" loading="lazy" style="width:36px;height:36px;object-fit:cover;border-radius:4px;vertical-align:middle">':'')+'</td>'
                       +'<td class="l" style="white-space:nowrap"><b>'+esc(r.sku||'')+'</b>'+((r.barcode_sku_name||r.product_name)?'<div class="mut tiny" style="white-space:normal;max-width:220px">'+esc(r.barcode_sku_name||r.product_name)+'</div>':'')+'</td>'
                       +'<td class="l" style="'+mono+'">'+(r.product_barcode?esc(r.product_barcode):'<span class="mut">—</span>')+'</td>'
@@ -2330,8 +2330,8 @@
               +_fSel('pp-po-prod',PORTAL_PO_PROD,'All productions',_prods)
               +_fSel('pp-po-ctry',PORTAL_PO_CTRY,'All countries',_ctrys)
               +_fSel('pp-po-br',PORTAL_PO_BR,'All branches',_brs)
-              +'<span class="pill'+(PORTAL_PO_EXC?' active':'')+'" data-poexc="1" style="'+(PORTAL_PO_EXC?'background:#dc2626;color:#fff;border-color:#dc2626':'color:#dc2626')+'" title="show every PO with an open action, across all statuses">⚠ Show all exceptions</span>'
-              +'<span class="pill pp-arch'+(window.__ppInclArch?' active':'')+'" data-pparch="1" title="Archived = completed POs before the production cutoff, hidden by default to keep the portal fast. Toggle to include them." style="'+(window.__ppInclArch?'background:#334155;color:#fff;border-color:#334155':'')+'">🗄 '+(window.__ppInclArch?'Hide archived':'Show archived')+'</span>'
+              +'<span class="pill'+(PORTAL_PO_EXC?' active':'')+'" data-poexc="1" style="'+(PORTAL_PO_EXC?'background:var(--neg);color:#fff;border-color:var(--neg)':'color:var(--neg)')+'" title="show every PO with an open action, across all statuses">⚠ Show all exceptions</span>'
+              +'<span class="pill pp-arch'+(window.__ppInclArch?' active':'')+'" data-pparch="1" title="Archived = completed POs before the production cutoff, hidden by default to keep the portal fast. Toggle to include them." style="'+(window.__ppInclArch?'background:var(--ink-soft);color:#fff;border-color:var(--ink-soft)':'')+'">🗄 '+(window.__ppInclArch?'Hide archived':'Show archived')+'</span>'
               +(ordered.length?ordered.map(function(s){var dim=(pq||PORTAL_PO_EXC);return '<span class="pill'+(PORTAL_PO_ST[s]?' active':'')+(dim?' ':'')+'" data-st="'+esc(s)+'"'+(dim?' style="opacity:.4"':'')+'>'+esc(s)+'</span>';}).join(''):'<span class="mut tiny">no orders</span>')
               +(PORTAL_PO_EXC?'<span class="mut tiny">showing exceptions — all statuses</span>':'')+'</div>';
             // a PO/client search OVERRIDES the status pills; the dropdown filters (production / country / branch) always AND on top
@@ -2431,7 +2431,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
               scope.querySelectorAll('.pp-note-read').forEach(function(btn){ btn.onclick=function(){ var read=btn.dataset.read!=='1';
                 postJSON(EP.noteReadBase+btn.dataset.id,{read:read},function(){
                   btn.dataset.read=read?'1':'0'; btn.textContent=read?'mark unread':'Mark read';
-                  if(read){ btn.className='pp-note-read'; btn.setAttribute('style','font-size:10px;color:#64748b;cursor:pointer;text-decoration:underline;white-space:nowrap;background:none;border:none;padding:0'); }   // read → small text button
+                  if(read){ btn.className='pp-note-read'; btn.setAttribute('style','font-size:10.5px;color:var(--muted);cursor:pointer;text-decoration:underline;white-space:nowrap;background:none;border:none;padding:0'); }   // read → small text button
                   else { btn.className='save-btn light pp-note-read'; btn.removeAttribute('style'); }   // unread → Mark read button
                   var wrap=btn.parentNode; wrap.style.background=read?'#eef2ff':'#fff7ed'; wrap.style.borderColor=read?'#e5e7eb':'#fdba74';
                   var info=wrap.firstChild, nb=info&&info.querySelector('.ex-badge');
@@ -2489,11 +2489,11 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                 host.style.display='';
                 function cands(){ var on={}; (_ppData.lb[po]||[]).forEach(function(l){on[l.sku]=1;}); var cb=_ppData.costsByPo[po]||{}; Object.keys(cb).forEach(function(s){ if(cb[s]&&cb[s].is_added)on[s]=1; }); return (_ppData.supSkus||[]).filter(function(s){return !on[s.sku];}); }
                 function draw(q){ q=(q||'').trim().toLowerCase(); var list=cands().filter(function(s){return !q||((s.sku+' '+(s.product_name||'')).toLowerCase().indexOf(q)>=0);});
-                  host.querySelector('.pp-pk-list').innerHTML=list.length?list.slice(0,200).map(function(s){return '<div style="display:flex;gap:7px;align-items:center;padding:3px 6px;border-bottom:1px solid #f1f5f9;font-size:12px"><input type="checkbox" class="pp-pk-cb" value="'+esc(s.sku)+'"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.sku)+'</b><span class="mut tiny" style="flex:1;min-width:0">'+esc(s.product_name||'')+'</span><input class="fci pp-pk-qty" data-sku="'+esc(s.sku)+'" placeholder="qty" style="width:52px;text-align:left" inputmode="numeric"></div>';}).join(''):'<div class="mut tiny" style="padding:6px">no matching SKU</div>'; }
-                host.innerHTML='<div style="border:1px solid #cbd5e1;border-radius:8px;padding:10px 12px;background:#f8fafc;text-align:left;max-width:560px">'
+                  host.querySelector('.pp-pk-list').innerHTML=list.length?list.slice(0,200).map(function(s){return '<div style="display:flex;gap:7px;align-items:center;padding:3px 6px;border-bottom:1px solid var(--hover);font-size:12px"><input type="checkbox" class="pp-pk-cb" value="'+esc(s.sku)+'"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.sku)+'</b><span class="mut tiny" style="flex:1;min-width:0">'+esc(s.product_name||'')+'</span><input class="fci pp-pk-qty" data-sku="'+esc(s.sku)+'" placeholder="qty" style="width:52px;text-align:left" inputmode="numeric"></div>';}).join(''):'<div class="mut tiny" style="padding:6px">no matching SKU</div>'; }
+                host.innerHTML='<div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--hover);text-align:left;max-width:560px">'
                   +'<input class="fci pp-pk-q" placeholder="search a SKU you supply…" style="width:100%;text-align:left;margin-bottom:5px" autocomplete="off">'
-                  +'<div class="pp-pk-list" style="max-height:230px;overflow:auto;border:1px solid #eef2f7;border-radius:6px;background:#fff"></div>'
-                  +'<div style="margin-top:8px;display:flex;gap:8px;align-items:center"><button class="save-btn pp-pk-add" style="background:#16a34a;color:#fff;border-color:#15803d">+ Add selected</button><button class="save-btn light pp-pk-cancel">Cancel</button><span class="pp-pk-msg mut tiny"></span></div>'
+                  +'<div class="pp-pk-list" style="max-height:230px;overflow:auto;border:1px solid var(--line2);border-radius:6px;background:#fff"></div>'
+                  +'<div style="margin-top:8px;display:flex;gap:8px;align-items:center"><button class="save-btn pp-pk-add" style="background:var(--pos);color:#fff;border-color:var(--pos)">+ Add selected</button><button class="save-btn light pp-pk-cancel">Cancel</button><span class="pp-pk-msg mut tiny"></span></div>'
                   +'<div class="tiny mut" style="margin-top:4px">Tick SKUs, set qty, then Add selected. Enter your cost per line in the table above.</div></div>';
                 draw(''); var qi=host.querySelector('.pp-pk-q'); qi.oninput=function(){ draw(this.value); }; qi.focus();
                 host.querySelector('.pp-pk-cancel').onclick=function(){ host.style.display='none'; host.innerHTML=''; };
@@ -2526,13 +2526,13 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                 btn.disabled=true; out.innerHTML='<span class="mut tiny">Parsing…</span>';
                 var rd=new FileReader(); rd.onload=function(){ var b64=rd.result;
                   postJSON(EP.parseInvoice,{po:po,data_base64:b64},function(j){ btn.disabled=false;
-                    if(!j||j.error||j.ok===false){ out.innerHTML='<span style="color:#b91c1c;font-size:11px">'+esc((j&&j.error)||'Could not parse the file.')+'</span>'; return; }
+                    if(!j||j.error||j.ok===false){ out.innerHTML='<span style="color:var(--neg);font-size:12px">'+esc((j&&j.error)||'Could not parse the file.')+'</span>'; return; }
                     _invFiles[po]=b64; var t=j.totals, diff=j.lines.filter(function(l){return l.status!=='match';});
-                    var rows=diff.map(function(l){ return '<tr><td class="l">'+esc(l.sku)+'</td><td class="l">'+(l.status==='new'?'<span class="tool-badge bg-amber" style="font-size:9px">NEW</span>':'<span class="mut tiny">changed</span>')+'</td>'
+                    var rows=diff.map(function(l){ return '<tr><td class="l">'+esc(l.sku)+'</td><td class="l">'+(l.status==='new'?'<span class="tool-badge bg-amber" style="font-size:10.5px">NEW</span>':'<span class="mut tiny">changed</span>')+'</td>'
                       +'<td style="text-align:right">'+(l.cur_qty==null?'—':units(l.cur_qty))+' → <b>'+units(l.inv_qty)+'</b></td>'
                       +'<td style="text-align:right">'+(l.cur_cost==null?'—':'$'+money(l.cur_cost))+' → <b>'+(l.inv_price==null?'—':'$'+money(l.inv_price))+'</b></td></tr>'; }).join('');
                     out.innerHTML='<div class="tiny" style="margin-bottom:4px">'+(j.po_detected?'<b>'+esc(j.po_detected)+'</b> · ':'')+t.count+' lines · $'+money(t.value)+' — <b>'+t.changed+'</b> changed, <b>'+t.neu+'</b> new, '+(t.matched-t.changed)+' already match.</div>'
-                      +(diff.length?'<div class="tw" style="max-height:240px;overflow:auto"><table style="font-size:11px;width:auto"><thead><tr><th class="l">SKU</th><th class="l"></th><th style="text-align:right">Qty</th><th style="text-align:right">Price</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+                      +(diff.length?'<div class="tw" style="max-height:240px;overflow:auto"><table style="font-size:12px;width:auto"><thead><tr><th class="l">SKU</th><th class="l"></th><th style="text-align:right">Qty</th><th style="text-align:right">Price</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
                         +'<button class="save-btn pp-inv-apply" data-po="'+esc(po)+'" style="margin-top:6px">Apply '+(t.changed+t.neu)+' change(s) to my order plan</button>'
                         :'<span class="mut tiny">Everything matches your order plan — nothing to change.</span>');
                     var ab=out.querySelector('.pp-inv-apply'); if(ab)ab.onclick=function(){ ab.disabled=true; ab.textContent='Applying…';
@@ -2637,7 +2637,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                   alert('✓ Submitted for approval.\n\nThe Dock & Bay team has been notified by email — no need to submit again. You\'ll see the status update here once it\'s reviewed.'); }); }; });
             } }
     function loadPreview(){ tabsEl.style.display=''; body.innerHTML='<div class="count">Loading…</div>';
-      opts.getData().then(function(d){ if(d&&d.notesByPo){ Object.keys(d.notesByPo).forEach(function(k){ shortNotes(d.notesByPo[k]); }); } _ppData=d; if(!ppApplyHash())renderPP(); }).catch(function(e){ body.innerHTML='<div class="count" style="color:#dc2626">'+esc(e&&e.message||e)+'</div>'; }); }
+      opts.getData().then(function(d){ if(d&&d.notesByPo){ Object.keys(d.notesByPo).forEach(function(k){ shortNotes(d.notesByPo[k]); }); } _ppData=d; if(!ppApplyHash())renderPP(); }).catch(function(e){ body.innerHTML='<div class="count" style="color:var(--neg)">'+esc(e&&e.message||e)+'</div>'; }); }
     function reload(){ if(typeof opts.onChange==='function')try{opts.onChange();}catch(e){} loadPreview(); }
     tabsEl.querySelectorAll('.rtab').forEach(function(t){ t.onclick=function(){ PORTAL_TAB=t.dataset.pt; _ppOpenPO=null; _ppOpenProd=null; ppSetHash(t.dataset.pt); renderPP(); }; }); ppSyncSec();
     loadPreview();
