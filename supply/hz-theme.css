@@ -500,3 +500,11 @@ body header.pv-top .pv-lang{display:inline-flex;border:1px solid rgba(255,255,25
 body header.pv-top .pv-lang button{border:0;background:transparent;color:var(--nav-dim);font:inherit;font-size:12px;font-weight:700;padding:4px 10px;border-radius:6px;cursor:pointer;line-height:1.2}
 body header.pv-top .pv-lang button.on{background:rgba(255,255,255,.14);color:#fff}
 body header.pv-top .pv-lang button:hover{color:#fff}
+
+/* ═══ Bilingual top menus (v27.509) ══════════════════════════════════════════════════════════════════════════════ */
+#pv-wrap #supply-root .pp-bi{display:inline-flex;flex-direction:column;align-items:flex-start;line-height:1.15}
+#pv-wrap #supply-root .pp-bi .pp-zh{font-size:10px;font-weight:600;letter-spacing:0;text-transform:none;color:var(--faint);margin-top:2px}
+#pv-wrap #supply-root .pp-sec.active .pp-zh,#pv-wrap #supply-root #pp-tabs .rtab.active .pp-zh{color:inherit;opacity:.75}
+#pv-wrap #supply-root #pp-secs .pp-sec{padding:10px 13px 8px}
+#pv-wrap #supply-root #pp-tabs .rtab{padding:9px 13px 7px}
+#pv-wrap #supply-root #pp-tabs .rtab .pp-bi .pp-zh{font-size:9.5px}

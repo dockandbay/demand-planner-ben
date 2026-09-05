@@ -1,3 +1,6 @@
+## v27.509 Portal: bilingual top menus for China-based suppliers (Ben)
+- For suppliers with the China flag, the section row (ORDERS 订单 · FINANCE 财务 · SAMPLES 样品 · PRODUCT 产品) and the sub-tab row (Purchase Orders 采购订单 …, incl. Price List 价目表) show English with the Chinese underneath at all times. The EN / 中文 toggle still controls the rest of the page. Badges and counts unchanged. supply/portal-view.js (setBilingualNav; translator skips the bilingual labels so nothing doubles up) + supply/portal.html + supply/hz-theme.css.
+
 ## v27.508 Supplier portal: EN / 中文 toggle for China-based suppliers (Ben approved item 8, draft glossary)
 - **Who sees it:** /api/portal/me now returns zh_enabled = true when any of the signed-in user's suppliers has country China (planner.suppliers.country). Only then does the header show an **EN | 中文** toggle (remembered per device). Everyone else sees no change.
 - **How it works:** a curated glossary (~280 UI strings: navigation, headings, buttons, chips, empty states, toasts, placeholders, tooltips) is applied to the rendered page after every render via a text-node / attribute sweep. Renderers are untouched; SKU names, notes, supplier text, references, numbers and dd-Mmm-yy dates stay as they are. Switching back restores the English instantly.

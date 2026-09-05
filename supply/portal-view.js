@@ -20,7 +20,7 @@
   function _i18nKey(t){ return String(t==null?'':t).replace(/\s+/g,' ').trim(); }
   function ppTranslate(root){ root=root||document.body; if(!root)return;
     var walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT,null,false), n, todo=[];
-    while((n=walker.nextNode())){ var pe=n.parentNode; if(!pe||/^(SCRIPT|STYLE|TEXTAREA|INPUT|CODE|PRE)$/.test(pe.nodeName))continue; todo.push(n); }
+    while((n=walker.nextNode())){ var pe=n.parentNode; if(!pe||/^(SCRIPT|STYLE|TEXTAREA|INPUT|CODE|PRE)$/.test(pe.nodeName))continue; if(pe.closest&&pe.closest('[data-i18n-skip]'))continue; todo.push(n); }   // bilingual nav labels are already both languages
     todo.forEach(function(t){ var raw=t.nodeValue, k=_i18nKey(raw); if(!k)return;
       if(PP_LANG==='zh'){ var zh=PP_ZH[k]; if(zh&&raw.indexOf(zh)<0){ if(!_i18nOrig.has(t))_i18nOrig.set(t,raw); t.nodeValue=raw.replace(k.split(' ').join(String.fromCharCode(32)),zh).replace(/^(\s*)[^\s].*?(\s*)$/s,function(m,a,b){return a+zh+b;}); } }
       else if(_i18nOrig.has(t)){ t.nodeValue=_i18nOrig.get(t); _i18nOrig.delete(t); } });
@@ -34,6 +34,16 @@
     else if(_i18nObs){ _i18nObs.disconnect(); _i18nObs=null; }
     document.querySelectorAll('.pv-lang button').forEach(function(b){ b.classList.toggle('on',b.dataset.lang===PP_LANG); }); }
   try{ window.ppSetLang=ppSetLang; window.ppGetLang=function(){ return PP_LANG; }; }catch(e){}
+  // Bilingual top menus (v27.509, China-based suppliers): each section / tab label becomes <span.pp-en>English</span><span.pp-zh>中文</span>,
+  // regardless of the EN/中文 toggle. Idempotent; badges inside the tab are left alone.
+  var PP_BILINGUAL=false;
+  function ppBilingualApply(root){ if(!PP_BILINGUAL)return; (root||document).querySelectorAll('#pp-secs .pp-sec, #pp-tabs .rtab').forEach(function(el){ if(el.querySelector('.pp-en'))return;
+      var tn=null; for(var i=0;i<el.childNodes.length;i++){ var c=el.childNodes[i]; if(c.nodeType===3&&c.nodeValue.trim()){ tn=c; break; } } if(!tn)return;
+      var en=tn.nodeValue.trim(), zh=PP_ZH[en]; if(!zh)return;
+      var wrap=document.createElement('span'); wrap.className='pp-bi'; wrap.setAttribute('data-i18n-skip','1'); wrap.innerHTML='<span class="pp-en">'+esc(en)+'</span><span class="pp-zh">'+esc(zh)+'</span>';
+      el.replaceChild(wrap,tn); }); }
+  function ppSetBilingualNav(on){ PP_BILINGUAL=!!on; ppBilingualApply(document); }
+  try{ window.ppSetBilingualNav=ppSetBilingualNav; }catch(e){}
   var shortUser=function(s){return String(s==null?'':s).replace(/@dockandbay\.com\b/gi,'@');};  // ben@dockandbay.com → ben@ (display only)
   var shortNotes=function(arr){ (arr||[]).forEach(function(n){ if(n){ if(n.body)n.body=shortUser(n.body); if(n.author_email)n.author_email=shortUser(n.author_email); } }); return arr; };
   function money(v){return v==null||v===''?'':Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});}
@@ -701,9 +711,9 @@
     function ppAddTab(def){ if(!def||!def.pt||PP_EXTRA[def.pt])return; PP_EXTRA[def.pt]=def; if(PP_TABS.indexOf(def.pt)<0)PP_TABS.push(def.pt); var sec=def.sec||PP_SEC[def.pt]||'orders'; PP_SEC[def.pt]=sec;
       var t=document.createElement('span'); t.className='rtab'; t.dataset.pt=def.pt; t.dataset.sec=sec; t.textContent=def.label||def.pt;
       var same=tabsEl.querySelectorAll('.rtab[data-sec="'+sec+'"]'), last=same.length?same[same.length-1]:null; if(last&&last.nextSibling)tabsEl.insertBefore(t,last.nextSibling); else tabsEl.appendChild(t);
-      t.onclick=function(){ PORTAL_TAB=def.pt; _ppOpenPO=null; _ppOpenProd=null; ppSetHash(def.pt); renderPP(); }; ppSyncSec();
+      t.onclick=function(){ PORTAL_TAB=def.pt; _ppOpenPO=null; _ppOpenProd=null; ppSetHash(def.pt); renderPP(); }; ppSyncSec(); ppBilingualApply(document);
       try{ if(new RegExp('(^|/)'+def.pt+'(/|$)').test((location.hash||'').replace(/^#\/?/,''))){ PORTAL_TAB=def.pt; if(_ppData)renderPP(); } }catch(e){} }   // deep link that landed before the tab existed
-    try{ window.DBPortalView.addTab=ppAddTab; window.DBPortalView.setLang=ppSetLang; }catch(e){}
+    try{ window.DBPortalView.addTab=ppAddTab; window.DBPortalView.setLang=ppSetLang; window.DBPortalView.setBilingualNav=ppSetBilingualNav; }catch(e){}
     function ppSyncSec(){ try{ var act=tabsEl.querySelector('.rtab.active'), sec=act?(act.dataset.sec||PP_SEC[act.dataset.pt]||'orders'):'orders';
       tabsEl.dataset.sec=sec; document.querySelectorAll('#pp-secs .pp-sec').forEach(function(sb){ sb.classList.toggle('active',sb.dataset.sec===sec);
         var n=0; tabsEl.querySelectorAll('.rtab[data-sec="'+sb.dataset.sec+'"] .ex-badge').forEach(function(b){ if(b.classList.contains('done'))return; var v=parseInt(b.textContent,10); if(v>0)n+=v; });   // action count per section (v27.506)

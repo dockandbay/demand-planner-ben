@@ -98,6 +98,7 @@
       // Price List = a real FINANCE tab: register AFTER the portal script has loaded and mounted (v27.504; v27.503 ran too early).
       if(me.price_list_enabled&&window.DBPortalView&&window.DBPortalView.addTab){ window.DBPortalView.addTab({pt:'pricelist',label:'Price List',sec:'finance',render:function(host){ ppPriceList(me,host); }}); }
       // EN / 中文 toggle — only for suppliers based in China (server flag). Glossary is a draft until reviewed by a native reader. v27.508
+      if(me.zh_enabled&&window.DBPortalView&&window.DBPortalView.setBilingualNav)window.DBPortalView.setBilingualNav(true);   // menus show EN + 中文 for China-based suppliers (v27.509)
       if(me.zh_enabled&&window.DBPortalView&&window.DBPortalView.setLang){ var top=document.querySelector('.pv-top'); if(top&&!document.querySelector('.pv-lang')){
         var lg=document.createElement('span'); lg.className='pv-lang'; lg.title='Language / 语言 — 中文（草稿）';
         lg.innerHTML='<button type="button" data-lang="en">EN</button><button type="button" data-lang="zh">中文</button>';
