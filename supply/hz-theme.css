@@ -464,3 +464,6 @@ body .pv-btn.ghost{color:var(--nav-dim);border-color:rgba(255,255,255,.18)} body
 #app tr.sub-row:hover td:not(.stk):not(.stk2){box-shadow:inset 0 0 0 999px rgba(16,24,40,.035)}
 #app tr.sub-row:hover td.stk,#app tr.sub-row:hover td.stk2,#app tr.sku-inline:hover td.stk,#app tr.sku-inline:hover td:first-child{background:var(--hover)!important}
 #app tr.sku-inline:hover td:not(:first-child):not(.stk){box-shadow:inset 0 0 0 999px rgba(16,24,40,.035)}
+
+/* v27.502: the old top bar is empty once the nav rows moved out of it */
+#pv-wrap #supply-root .bar:empty{display:none;margin:0}

@@ -1,3 +1,6 @@
+## v27.502 Portal FIX: section row and sub-tab row now stack (they were sharing one flex row) (Ben)
+- The new section row was inserted inside the portal's top flex bar next to the tab row, so both rendered on one line. Both rows now sit as stacked blocks above that bar (which hides when empty). supply/portal-view.js + supply/hz-theme.css.
+
 ## v27.501 DEMAND plan elevated (Ben approved mockup): column states, one cell type scale, editable affordance, token tints, bands, name cells, SKU rows, hover
 - **Columns:** actual months on white, every forecast month on a faint blue wash (FY 27/28 blue tint, FY 28/29 violet tint), the current month with a dashed blue left rule; month headers carry an Actual / Current / Forecast tag (the old * prefix is gone).
 - **Cells:** last year 10px grey · growth 11px bold green/red (was blue) · forecast 12.5px bold · revenue 10px muted with growth in colour (new fcrev class replaces inline styling). Literal overrides read as a violet chip. Hover a row and the input shows a hairline box; focus gets the blue ring; placeholder is faint.
