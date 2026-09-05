@@ -296,3 +296,12 @@ html body:has(#app.product-active){background:var(--card)}
 #app #product-root .pg-card,#app #product-root .pgm-card{background:var(--card)}
 #app #supply-root .samp-details-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 @media (max-width:700px){ #app #supply-root .samp-details-grid{grid-template-columns:1fr} }
+
+/* ═══ U4 PRODUCT, slice 2 (v27.486): section headings, samples grid, timeline inbox — the CSS-reachable parts ═══ */
+#app #supply-root .sect-h{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin:14px 0 6px}
+#app #supply-root table.samp-tbl tbody td{padding:8px 10px;border-bottom:1px solid var(--line2);font-size:12px}
+#app #supply-root table.samp-tbl tbody tr:hover td{background:var(--hover)}
+#app #supply-root .samp-open{font-weight:700;color:var(--blue)}
+#tl-drop{border-radius:var(--r-lg);box-shadow:0 1px 2px rgba(16,24,40,.06),0 18px 44px -16px rgba(16,24,40,.35);border:1px solid var(--line)}
+#tl-drop .tl-item{padding:10px 14px;border-bottom:1px solid var(--line2)}
+#tl-drop .tl-item:hover{background:var(--hover)}

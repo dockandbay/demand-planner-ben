@@ -1,3 +1,7 @@
+## v27.486 UI uplift U4 slice 2: PRODUCT / SUPPLY section headings, Samples grid, Inbox dropdown
+- Section headings (`.sect-h`, used across PRODUCT and SUPPLY panels) as design caps; Samples grid rows with hairline separators and hover, sample links bold blue; the header Inbox dropdown gets 12px corners, design shadow and row hover. supply/hz-theme.css only.
+- Note: PRODUCT Dashboard tiles, Specifications and the Timeline compose area are inline-styled in the renderers; restyling them needs renderer edits (proposed as a targeted slice once Ben picks priorities).
+
 ## v27.485 PRODUCT white throughout; sample drawer DETAILS in 2 columns (Ben)
 - PRODUCT panels and cards use the white card token (the module's background token was the grey tint); the module surface itself is white too.
 - Sample drawer > DETAILS: the four boxes lay out in two columns (one on phones) instead of auto-fitting to three in a wide drawer. supply/inject.html (class on the grid) + supply/hz-theme.css.
