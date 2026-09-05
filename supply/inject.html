@@ -13558,7 +13558,7 @@
   function openProductNew(){ ensureSuppliers(function(){ loadProdCfg(function(cfg){ var c=document.getElementById('product-content');
     var seasons=(cfg.seasons||[]).filter(function(s){return s.active!==false;});
     c.innerHTML='<div style="max-width:560px">'+prodFormLists(cfg)+'<div style="font-size:15px;font-weight:700;margin-bottom:12px">New product development</div>'
-      +pRow('Type','<select class="fci" id="pn-type" style="width:210px"><option value="Product Development">Product Development</option><option value="Custom Order">Custom Order</option></select> <span style="color:#94a3b8;font-size:11px;margin-left:6px">Custom Order → no season, reference prefix is <b>CUST-</b></span>')
+      +pRow('Type','<select class="fci" id="pn-type" style="width:210px"><option value="Product Development">Product Development</option><option value="Custom Order">Custom Order</option></select> <span id="pn-type-hint" style="color:#94a3b8;font-size:11px;margin-left:6px">Reference prefix is the <b>season code</b></span>')
       +'<div id="pn-season-row">'+pRow('Season','<input class="fci" id="pn-season" list="pn-seasonlist" style="width:200px" placeholder="search season… (e.g. SS27)">')+'</div>'
       +pRow('Category','<input class="fci" id="pn-cat" list="pn-catlist" style="width:280px" placeholder="search category…">')
       +pRow('Supplier','<span class="pn-sup-box" style="display:inline-block;min-width:220px;border:1px solid #cbd5e1;border-radius:5px;padding:4px 8px">'+prodPickBtn('','supplier','','supplier')+'</span> <span style="color:#94a3b8;font-size:11px;margin-left:6px">code goes in the reference</span>')
@@ -13569,7 +13569,8 @@
       +'<div style="margin-top:12px"><button class="save-btn" id="pn-save" style="background:#2563eb;color:#fff;border-color:#1d4ed8">Create</button> <button class="save-btn light" id="pn-cancel">Cancel</button> <span id="pn-msg" style="font-size:12px;margin-left:8px"></span></div></div>';
     document.getElementById('pn-cancel').onclick=function(){ selectProductSub('plan'); };
     var _pnType=document.getElementById('pn-type'), _pnSeasonRow=document.getElementById('pn-season-row');
-    if(_pnType)_pnType.onchange=function(){ if(_pnSeasonRow)_pnSeasonRow.style.display=(this.value==='Custom Order')?'none':''; };   // custom orders have no season
+    if(_pnType)_pnType.onchange=function(){ var _cu=(this.value==='Custom Order'); if(_pnSeasonRow)_pnSeasonRow.style.display=_cu?'none':'';
+      var _h=document.getElementById('pn-type-hint'); if(_h)_h.innerHTML=_cu?'Custom Order → no season, reference prefix is <b>CUST-</b>':'Reference prefix is the <b>season code</b>'; };   // custom orders have no season; hint follows the type (Ben, v27.480)
     var pnSupplier=''; var _pns=c.querySelector('.pn-sup-box .prod-cell-pick'); if(_pns)_pns.onclick=function(e){ e.stopPropagation(); openProdCellPick(_pns,null,function(val){ pnSupplier=val||''; _pns.innerHTML = pnSupplier?esc(pnSupplier)+' ▾':'<span class="mut">— <span style="background:#fee2e2;color:#991b1b;font-weight:700;border-radius:3px;padding:0 3px">set</span></span> ▾'; }); };
     document.getElementById('pn-save').onclick=function(){ var btn=this, msg=document.getElementById('pn-msg');
       var type=(document.getElementById('pn-type')||{}).value||'Product Development', isCustom=(type==='Custom Order');

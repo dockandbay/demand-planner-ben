@@ -1,3 +1,8 @@
+## v27.480 Ben review fixes: L3 text smaller, PRODUCT on white, New Product prefix hint
+- **Level-3 tabs** (SUPPLY PO sub-tabs, Reports, Config L3, DEMAND inputs / analysis, Performance, 3PL & Invoicing, PRODUCT config) are two points smaller (10px). supply/hz-theme.css.
+- **PRODUCT module** page background is white (the off-white ground stays elsewhere). supply/hz-theme.css.
+- **New Product form:** the Type hint now follows the selection: Product Development shows "Reference prefix is the season code"; Custom Order shows "no season, reference prefix is CUST-" (the CUST- note used to show for every type). supply/inject.html.
+
 ## v27.479 FIX: grand-total row period cells (H1 / H2 / Q) had dark text on the navy row (Ben)
 - The shared period stack painted the total in ink and the LY / revenue lines in grey even on the ALL CATEGORIES row, whose cells are navy. On that row the total is now white and the LY / revenue lines light grey; growth colours unchanged. artifact_v16.7.html (`periodStackHTML`, dark flag).
 
