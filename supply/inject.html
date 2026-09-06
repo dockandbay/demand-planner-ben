@@ -7168,7 +7168,7 @@
         };
         document.getElementById('bg-dl').onclick=function(){ if(!_bg.length)return; var blob=makeZipStore(_bg); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='ean_barcodes.zip'; document.body.appendChild(a); a.click(); setTimeout(function(){ try{URL.revokeObjectURL(a.href);}catch(e){} a.remove(); },1200); };
       };
-      SUBS['suppliers']=function(){ b.innerHTML='<div class="count">Loading…</div>';
+      SUBS['suppliers']=function(){ b.innerHTML='<div class="count">Loading…</div>'; var _supShowArch=false;   // v27.522 archive toggle (per visit)
         Promise.all([fetch('/api/supply/suppliers').then(function(r){return r.json();}),fetch('/api/supply/portal-users').then(function(r){return r.json();}).catch(function(){return [];})]).then(function(_sr){ var rows=_sr[0], PUSERS=_sr[1]||[];
           function puFor(r){ return (PUSERS||[]).filter(function(u){ return String(u.supplier_id||'')===String(r.id) || (u.supplier_name&&r.name&&String(u.supplier_name).toLowerCase().trim()===String(r.name).toLowerCase().trim()); }); }
           // Suppliers have ~13 fields (identity + payment terms + contact) — a scannable CARD LIST + a grouped
@@ -7182,18 +7182,22 @@
           function cardHtml(r){ var id=esc(String(r.id));
             var terms='Deposit '+pct(r.start_deposit_pct)+' · Completion '+pct(r.completion_pct)+' · Balance '+pct(r.balance_pct);
             var lead='Production '+days(r.production_days)+' · Credit '+days(r.credit_days)+(r.credit_type?' ('+esc(r.credit_type)+')':'');
-            return '<div style="border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:#fff;box-shadow:0 1px 2px rgba(15,23,42,.04)">'
-              +'<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px"><div style="flex:1;min-width:0"><span style="font-weight:700;font-size:14px;word-break:break-word">'+esc(r.name||'—')+'</span>'+(r.code?' <span class="mut tiny" style="font-weight:700">'+esc(r.code)+'</span>':'')+'</div>'
+            var arch=r.active===false;   // v27.522
+            return '<div style="border:1px solid var(--line);border-radius:8px;padding:12px 14px;background:#fff;box-shadow:0 1px 2px rgba(15,23,42,.04)'+(arch?';opacity:.62;background:var(--hover)':'')+'">'
+              +'<div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:6px"><div style="flex:1;min-width:0"><span style="font-weight:700;font-size:14px;word-break:break-word">'+esc(r.name||'—')+'</span>'+(r.code?' <span class="mut tiny" style="font-weight:700">'+esc(r.code)+'</span>':'')+(arch?' <span class="tool-badge bg-neutral" style="font-size:9px;vertical-align:2px">ARCHIVED</span>':'')+'</div>'
               +'<button class="sup-edit" data-k="'+id+'" style="cursor:pointer;border:1px solid var(--line);background:var(--hover);padding:3px 12px;border-radius:5px;font-size:11px;white-space:nowrap">Edit</button></div>'
               +'<div style="margin-bottom:4px">'+kindBadge(r.kind)+' <span class="mut tiny">'+esc(fieldOf(r,'default_currency')||'USD')+(r.country?' · '+esc(r.country):'')+'</span></div>'
               +metaRow('Terms', terms)+metaRow('Lead', lead)+metaRow('Contact', [r.contact_name,r.email].filter(Boolean).join(' · '))
               +(r.export_port?metaRow('Export port', r.export_port):'')
               +(function(){ var ids=[]; if(r.cin7_member_id)ids.push('Cin7 '+r.cin7_member_id); if(r.fulfil_id)ids.push('Fulfil '+r.fulfil_id); return ids.length?metaRow('IDs', ids.join(' · ')):''; })()
               +'</div>'; }
-          function listHtml(sq){ var f=sq?rows.filter(function(x){return String(JSON.stringify(x)||'').toLowerCase().indexOf(sq)>=0;}):rows;
+          function listHtml(sq){ var nArch=rows.filter(function(x){return x.active===false;}).length;   // v27.522 archive: hidden unless the pill is on
+            var vis=_supShowArch?rows:rows.filter(function(x){return x.active!==false;});
+            var f=sq?vis.filter(function(x){return String(JSON.stringify(x)||'').toLowerCase().indexOf(sq)>=0;}):vis;
             var cards=f.length?('<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-top:12px">'+f.map(cardHtml).join('')+'</div>'):'<div class="count" style="padding:10px 2px">No suppliers'+(sq?' match your search':' yet')+'.</div>';
             return '<div class="sect-h">Suppliers — payment terms drive every payment calc <span class="mut tiny">(<b>Prod</b> = production lead time; a PO&rsquo;s production-end date = start + this, unless overridden)</span> <button class="save-btn" id="sup-new" style="margin-left:10px;background:var(--pos-bg);color:var(--pos);border:1px solid var(--pos);font-weight:600">+ Supplier</button></div>'
-              +'<div class="bar"><input class="flt" id="sup-q" placeholder="Search name / code / contact / country…" value="'+esc(sq)+'" style="width:300px;background:var(--blue-soft);border-color:#93c5fd"><span class="count" style="margin-left:8px">'+f.length+(sq?' / '+rows.length:'')+' supplier'+(f.length===1?'':'s')+'</span></div>'
+              +'<div class="bar"><input class="flt" id="sup-q" placeholder="Search name / code / contact / country…" value="'+esc(sq)+'" style="width:300px;background:var(--blue-soft);border-color:#93c5fd"><span class="count" style="margin-left:8px">'+f.length+(sq?' / '+vis.length:'')+' supplier'+(f.length===1?'':'s')+'</span>'
+              +(nArch?'<span class="pill'+(_supShowArch?' active':'')+'" id="sup-arch-toggle" title="Archived = suppliers you no longer work with. Hidden from this list and from every supplier picker; history (POs, payments, price lists) is untouched.">🗄 '+(_supShowArch?'Hide archived':'Show archived')+' ('+nArch+')</span>':'')+'</div>'
               +cards; }
           function inp(f,val,w,ph){ return '<input class="sup-in" data-f="'+f+'" value="'+esc(val==null?'':val)+'" placeholder="'+esc(ph||'')+'" style="width:'+(w||'100%')+';box-sizing:border-box;padding:6px 9px;border:1px solid var(--line);border-radius:6px;font-size:12px">'; }
           function seln(f,val,opts){ var ov=String(val==null?'':val); return '<select class="sup-in" data-f="'+f+'" style="padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:12px">'+opts.map(function(o){return '<option'+(ov.toLowerCase()===String(o).toLowerCase()?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>'; }
@@ -7226,8 +7230,9 @@
                 var emp=list.querySelector('.sup-pu-empty'); if(emp)emp.remove();
                 var tmp=document.createElement('div'); tmp.innerHTML=supPuRow({id:j.id,email:em,contact_name:ct,active:true}); var row=tmp.firstChild; list.appendChild(row); wireSupPuRow(row);
                 emEl.value=''; ctEl.value=''; msg.style.color='var(--pos)'; msg.textContent='Added.'; }).catch(function(e){ addBtn.disabled=false; msg.style.color='var(--neg)'; msg.textContent=(e.message||e); }); }; }
-          function editHtml(r){ var id=esc(String(r.id));
-            return '<div class="sect-h" style="display:flex;align-items:center;gap:10px"><button id="sup-back" style="cursor:pointer;border:1px solid var(--line);background:var(--hover);padding:3px 11px;border-radius:5px;font-size:11px">← Back</button> Edit supplier</div>'
+          function editHtml(r){ var id=esc(String(r.id)); var arch=r.active===false;
+            return '<div class="sect-h" style="display:flex;align-items:center;gap:10px"><button id="sup-back" style="cursor:pointer;border:1px solid var(--line);background:var(--hover);padding:3px 11px;border-radius:5px;font-size:11px">← Back</button> Edit supplier'+(arch?' <span class="tool-badge bg-neutral" style="font-size:9px">ARCHIVED</span>':'')
+              +'<button id="sup-arch-btn" data-id="'+id+'" data-arch="'+(arch?'1':'0')+'" style="margin-left:auto;cursor:pointer;border:1px solid '+(arch?'var(--pos)':'var(--line)')+';background:'+(arch?'var(--pos-bg)':'var(--hover)')+';color:'+(arch?'var(--pos)':'var(--muted)')+';padding:3px 11px;border-radius:5px;font-size:11px;font-weight:600" title="'+(arch?'Restore this supplier to the active list and pickers':'Archive: hide from the supplier list and every picker. Nothing is deleted; POs, payments and price lists keep their history. Restore any time.')+'">'+(arch?'↩ Restore supplier':'🗄 Archive supplier')+'</button></div>'
               +'<div style="max-width:860px;border:1px solid var(--line);border-radius:10px;background:#fff;padding:16px 18px">'
               +'<div style="font-weight:700;font-size:13px;color:var(--ink-soft);margin-bottom:10px">Identity</div>'
               +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px">'
@@ -7288,14 +7293,20 @@
               +'<span id="sup-msg" class="mut tiny" style="align-self:center;margin-left:6px"></span></div></div>'; }
           function updPctSum(){ var el=document.getElementById('sup-pctsum'); if(!el)return; var s=0; ['start_deposit_pct','completion_pct','balance_pct'].forEach(function(f){ var i=b.querySelector('.sup-in[data-f="'+f+'"]'); if(i)s+=parseFloat(i.value)||0; });
             s=Math.round(s*100)/100; el.innerHTML='Deposit + Completion + Balance = <b style="color:'+(s===100?'var(--pos)':'var(--amber)')+'">'+s+'%</b>'+(s===100?'':' — should total 100%'); }
-          cardEditor({ mount:b, rows:rows, idOf:function(r){return r.id;}, inClass:'sup-in', searchId:'sup-q',
+          var supEd=cardEditor({ mount:b, rows:rows, idOf:function(r){return r.id;}, inClass:'sup-in', searchId:'sup-q',
             listHtml:listHtml, editHtml:editHtml, editSel:'.sup-edit', idAttr:'k',
             ids:{save:'sup-save',back:'sup-back',cancel:'sup-cancel',msg:'sup-msg'},
             saveUrl:function(id){ return '/api/supply/supplier/'+encodeURIComponent(id); },
             wireEdit:function(){ updPctSum();
               b.querySelectorAll('.sup-in[data-f="start_deposit_pct"],.sup-in[data-f="completion_pct"],.sup-in[data-f="balance_pct"]').forEach(function(i){ i.oninput=updPctSum; });
-              wireSupPu(b); },
-            wireList:function(){ var nb=document.getElementById('sup-new'); if(!nb)return;
+              wireSupPu(b);
+              var ab=document.getElementById('sup-arch-btn'); if(ab)ab.onclick=function(){ var id=ab.dataset.id, toArch=ab.dataset.arch!=='1', row=null; rows.forEach(function(x){ if(String(x.id)===String(id))row=x; });
+                if(toArch&&!confirm('Archive '+((row&&row.name)||'this supplier')+'?\n\nIt disappears from the supplier list and from every supplier picker. POs, payments and price lists keep their history. You can restore it any time from Show archived.'))return;
+                ab.disabled=true; fetch('/api/supply/supplier/'+encodeURIComponent(id),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({active:!toArch})}).then(function(r){return r.json();}).then(function(jr){ if(jr&&jr.error)throw new Error(jr.error);
+                  if(row)row.active=!toArch; _lookupsAt=0;   // pickers refetch lookups (archived suppliers leave them)
+                  if(toArch)_supShowArch=false; if(supEd)supEd.list(); }).catch(function(e){ ab.disabled=false; alert('Could not update: '+(e.message||e)); }); }; },
+            wireList:function(){ var at=document.getElementById('sup-arch-toggle'); if(at)at.onclick=function(){ _supShowArch=!_supShowArch; if(supEd)supEd.draw(); };   // v27.522
+              var nb=document.getElementById('sup-new'); if(!nb)return;
               nb.onclick=function(){ if(document.getElementById('sup-newform'))return;   // inline form (not 2 prompts)
                 var host=nb.closest('.sect-h')||nb.parentNode;
                 var form=document.createElement('div'); form.id='sup-newform';

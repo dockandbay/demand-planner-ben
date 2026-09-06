@@ -1,3 +1,8 @@
+## v27.522 Supplier archive (SUPPLY ▸ CONFIG ▸ Suppliers)
+- **Archive / Restore** button on the supplier edit form. Archived suppliers drop out of the card list by default; a **Show archived (n)** pill on the list toolbar reveals them (dimmed, ARCHIVED badge). Search still finds them when the pill is on.
+- **Pickers exclude archived suppliers:** PO grid supplier picker + every lookups-driven supplier list, PRODUCT spec supplier lists. Existing POs, payments, price lists and portal logins that reference an archived supplier are untouched (names still resolve; currency lookups keep all suppliers).
+- **No migration:** reuses planner.suppliers.active (already honoured by the price-list and spec-supplier queries). server.mjs (list returns active; patch accepts active; lookups + spec-suppliers filter) + supply/inject.html.
+
 ## v27.521 FBA-transfer refusal latch: port back the network latch + 403 message (parity with live)
 - Diviyaj's live build latches on a network failure and shows a read-only 403 message; the v27.466 rebuild dropped both. Restored: a failed fetch now latches ("network error, press refresh to retry") instead of leaving the hourly auto-refresh free to retry on every render; a 403 reads "no permission to refresh (read-only)". Manual refresh still clears the latch. artifact_v16.7.html only; no buy impact.
 

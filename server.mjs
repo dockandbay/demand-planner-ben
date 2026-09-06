@@ -4314,7 +4314,7 @@ app.get('/api/supply/:section', async (req, res, next) => {
                ELSE 'PLANNED' END status_calc
           FROM planner.sample_requests s ORDER BY s.created_at DESC`));
       case 'suppliers': {
-        const suppliers = await q(`SELECT id,code,name,kind,default_currency,
+        const suppliers = await q(`SELECT id,code,name,kind,default_currency, coalesce(active,true) active,
           start_deposit_pct,completion_pct,balance_pct,credit_days,credit_type,
           credit_fee_on_balance_pct,production_days,country,contact_name,email,
           business_name,address_1,address_2,city,state,postcode,phone,
@@ -5302,7 +5302,7 @@ app.post('/api/supply/supplier/:id', (req, res) =>
       // company / address / phone (tax-invoice), compliance IDs + ERP linkage
       business_name: 'text', address_1: 'text', address_2: 'text', city: 'text', state: 'text', postcode: 'text', phone: 'text',
       te_id: 'text', incoterm: 'text', cin7_member_id: 'bigint', fulfil_id: 'text', export_port: 'text',
-      include_product_dev: 'boolean' }, req.body, 'bigint'));
+      include_product_dev: 'boolean', active: 'boolean' }, req.body, 'bigint'));   // active=false → archived (v27.522)
 app.post('/api/supply/supplier-create', async (req, res) => {
   const b = req.body || {}, name = (b.name || '').trim();
   if (!name) return res.status(400).json({ error: 'supplier name required' });
@@ -6867,7 +6867,7 @@ app.post('/api/product/category/:category/delete', async (req, res) => {   // so
 app.get('/api/product/component-types', async (_req, res) => {
   try {
     const types = (await pool.query(`SELECT id, name, coalesce(default_supplier,'') default_supplier, coalesce(sampling_mode,'sampled') sampling_mode, sort, active FROM planner.component_types ORDER BY sort, id`)).rows;
-    const suppliers = (await pool.query(`SELECT name FROM planner.suppliers WHERE coalesce(kind,'supplier')='supplier' ORDER BY name`)).rows.map(r => r.name);
+    const suppliers = (await pool.query(`SELECT name FROM planner.suppliers WHERE coalesce(kind,'supplier')='supplier' AND coalesce(active,true) ORDER BY name`)).rows.map(r => r.name);
     res.json({ types, suppliers });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -6917,7 +6917,7 @@ app.get('/api/product/item/:ref/components', async (req, res) => {
       pool.query(`SELECT c.id, c.component_type_id, c.name, coalesce(c.supplier,'') supplier, coalesce(c.sampling_mode,'sampled') sampling_mode, c.spec_id, c.dimension, c.sort FROM planner.product_dev_components c WHERE c.item_ref=$1 ORDER BY c.sort, c.id`, [ref]),
       pool.query(`SELECT coalesce(supplier,'') supplier FROM planner.product_dev_items WHERE ref=$1`, [ref]),
       pool.query(`SELECT id, name, coalesce(default_supplier,'') default_supplier, coalesce(sampling_mode,'sampled') sampling_mode FROM planner.component_types WHERE active ORDER BY sort, id`),
-      pool.query(`SELECT name FROM planner.suppliers WHERE coalesce(kind,'supplier')='supplier' ORDER BY name`),
+      pool.query(`SELECT name FROM planner.suppliers WHERE coalesce(kind,'supplier')='supplier' AND coalesce(active,true) ORDER BY name`),
       // per-aspect (legacy) approval + file rollup for this product, so a migrated component shows its real status/files
       pool.query(`SELECT sd.dimension,
                     count(*)::int AS total,
@@ -15065,7 +15065,7 @@ const lookupsCache = makeCache('lookups', async () => {
     q(`SELECT batch FROM planner.batches ORDER BY batch DESC`),
     q(`SELECT prod_no FROM planner.prod_numbers WHERE prod_no IS NOT NULL AND status='ACTIVE' ORDER BY prod_no DESC`),
     q(`SELECT shipment_ref FROM planner.shipments ORDER BY shipment_ref`),
-    q(`SELECT name, upper(coalesce(nullif(default_currency,''),'USD')) ccy FROM planner.suppliers WHERE name IS NOT NULL ORDER BY name`),
+    q(`SELECT name, upper(coalesce(nullif(default_currency,''),'USD')) ccy, coalesce(active,true) active FROM planner.suppliers WHERE name IS NOT NULL ORDER BY name`),
     q(`SELECT name FROM planner.branches ORDER BY name`),
     q(`SELECT sku FROM (
          SELECT sku FROM planner.products WHERE sku ILIKE 'CROSSDOCK%' OR sku ILIKE 'PREORDER%'
@@ -15075,7 +15075,7 @@ const lookupsCache = makeCache('lookups', async () => {
   ]).catch(() => [[], [], [], [], [], [], [], []]);
   return {
     deposits: dep.map((x) => x.reference), batches: bat.map((x) => x.batch), prods: pr.map((x) => x.prod_no),
-    shipments: sh.map((x) => x.shipment_ref), suppliers: su.map((x) => x.name),
+    shipments: sh.map((x) => x.shipment_ref), suppliers: su.filter((x) => x.active !== false).map((x) => x.name),   // archived suppliers leave the pickers (v27.522); supplier_ccy keeps ALL so old POs still resolve currency
     supplier_ccy: Object.fromEntries(su.map((x) => [x.name, x.ccy])),
     branches: br.map((x) => x.name), crossdock: xd.map((x) => x.sku), pos: po.map((x) => x.po),
   };
