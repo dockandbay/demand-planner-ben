@@ -517,3 +517,20 @@ body header.pv-top .pv-lang button:hover{color:#fff}
   #app .mob-filt-panel{display:flex;flex-direction:column;gap:8px}
   #app #dab-navwrap .mob-filt-toggle{margin:8px 0 0}
 }
+
+/* ═══ Mobile M3 (v27.512): SUPPLY tables tagged .hz-stack stack into labelled cards on phones (hzStackTables) ═══════ */
+@media (max-width:640px){
+  #app #supply-root .tw:has(> table.hz-stack[data-stack]){overflow:visible;max-width:none!important;max-height:none!important;border:0;background:transparent}
+  #app #supply-root table.hz-stack[data-stack]{display:block;width:100%!important;min-width:0!important;max-width:none!important;table-layout:auto;border-collapse:separate}
+  #app #supply-root table.hz-stack[data-stack] thead,#app #supply-root table.hz-stack[data-stack] colgroup{display:none}
+  #app #supply-root table.hz-stack[data-stack] tbody,#app #supply-root table.hz-stack[data-stack] tfoot{display:block}
+  #app #supply-root table.hz-stack[data-stack] tr{display:block;border:1px solid var(--line);border-radius:10px;padding:6px 10px;margin:0 0 8px;background:#fff;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+  #app #supply-root table.hz-stack[data-stack] td{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:4px 0!important;border:0!important;text-align:left!important;width:auto!important;min-width:0!important;max-width:none!important;white-space:normal!important;position:static!important;background:transparent!important;overflow-wrap:anywhere}
+  #app #supply-root table.hz-stack[data-stack] td[data-l]::before{content:attr(data-l);flex:0 0 40%;color:var(--faint);font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;line-height:1.5}
+  #app #supply-root table.hz-stack[data-stack] td[data-l=""]::before{display:none}
+  #app #supply-root table.hz-stack[data-stack] td[data-l]:empty{display:none}
+  #app #supply-root table.hz-stack[data-stack] tr[data-full] td{display:block}
+  #app #supply-root table.hz-stack[data-stack] tr[data-full]:not(.batchrow){padding:0;border:0;background:transparent;box-shadow:none}
+  #app #supply-root table.hz-stack[data-stack] tr.batchrow{background:var(--hover)}
+  #app #supply-root table.hz-stack[data-stack] td .fci,#app #supply-root table.hz-stack[data-stack] td input,#app #supply-root table.hz-stack[data-stack] td select{max-width:60%}
+}

@@ -1,3 +1,7 @@
+## v27.512 Mobile M3: SUPPLY Cash Flow, Deposits, Other Payments, Manufacturing and Quality tables read as cards on phones
+- **Stacked cards under 640px:** the Cash Flow payment list, the Deposits register, Other Payments, both Manufacturing tables (closed orders, component supply) and the Quality documents list turn each row into a card with a header label beside every value; totals rows and expansion rows render full width.
+- **Opt-in:** tables carry class hz-stack; hzStackTables() labels them after each render through a MutationObserver that is only armed on phones. Same mechanism as the portal (v27.511). Desktop unchanged. supply/inject.html + supply/hz-theme.css.
+
 ## v27.511 Mobile M2: supplier portal tables read as cards on phones
 - **Stacked cards under 640px:** Deposits, Payments, Shipment plan (nested PO table), Samples list, Quality documents, Specifications, Products and the Price List turn each table row into a card with a small label beside every value (labels come from the column header, so new columns need no extra work). Empty cells are dropped, expand chevrons and price cells still tap as before.
 - **Kept as scrolling grids:** the PO grid and the Productions SKU matrix (sticky first column), plus small tables nested inside a PO expansion.

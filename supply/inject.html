@@ -1323,6 +1323,22 @@
   // On mobile the Actions/Recommendations/ERP tables scroll horizontally with the first two columns pinned, and
   // Type + Ref are merged into one cell to save width. actHead() returns the matching <thead> for either layout.
   function actMob(){ return !!(window.matchMedia && window.matchMedia('(max-width:640px)').matches); }   // one phone breakpoint everywhere (v27.510)
+  // v27.512 Mobile M3: tables tagged class="hz-stack" stack into labelled cards on phones (CSS in hz-theme.css keys off
+  // table.hz-stack[data-stack]). Labels come from the header row; rows with a colspan (totals, expansions) render full width.
+  function hzStackTables(root){ root=root||document; var tbls=root.querySelectorAll?root.querySelectorAll('table.hz-stack:not([data-stack])'):[];
+    tbls.forEach(function(t){ try{ var hr=t.tHead?t.tHead.rows[t.tHead.rows.length-1]:null, labels=[];
+      if(hr){ Array.prototype.forEach.call(hr.cells,function(th){ var txt=(th.textContent||'').replace(/\s+/g,' ').trim(), n=Math.max(1,th.colSpan||1); for(var i=0;i<n;i++)labels.push(txt); }); }
+      var secs=Array.prototype.slice.call(t.tBodies); if(t.tFoot)secs.push(t.tFoot);
+      secs.forEach(function(tb){ Array.prototype.forEach.call(tb.rows,function(tr){ var full=false, cells=tr.cells;
+        for(var i=0;i<cells.length;i++){ if((cells[i].colSpan||1)>1){full=true;break;} }
+        if(full||!labels.length){ tr.dataset.full='1'; return; }
+        for(var j=0;j<cells.length;j++)cells[j].setAttribute('data-l',labels[j]||''); }); });
+      t.dataset.stack='1'; }catch(e){} }); }
+  try{ (function(){ var mq=window.matchMedia&&window.matchMedia('(max-width:640px)'), obs=null, tm=0;
+    function arm(){ if(!mq||!mq.matches){ if(obs){obs.disconnect();obs=null;} return; } if(obs)return;
+      obs=new MutationObserver(function(){ clearTimeout(tm); tm=setTimeout(function(){ try{ hzStackTables(document); }catch(e){} },30); });
+      obs.observe(document.body,{childList:true,subtree:true}); hzStackTables(document); }
+    arm(); if(mq&&mq.addEventListener)mq.addEventListener('change',arm); else if(mq&&mq.addListener)mq.addListener(arm); })(); }catch(e){}
   // ── Mobile card helpers — render register/report rows as stacked cards (like the Flexport report) instead of a wide table.
   // The value passed to mobFld can be interactive HTML (editCell/supSel/buttons); bindings still attach by class after render.
   function mobFld(l,v){ return (v==null||v==='')?'':'<div style="display:flex;gap:10px;font-size:12px;line-height:1.55;align-items:baseline;margin-top:2px"><span style="color:#64748b;flex:0 0 92px">'+l+'</span><span style="color:#0f172a;font-weight:500;word-break:break-word;flex:1 1 auto;min-width:0">'+v+'</span></div>'; }
@@ -5259,7 +5275,7 @@
     var rc=(d.recentClosed||[]);
     var rcHtml=rc.length?('<div style="margin:2px 0 14px;border:1px solid var(--line);border-radius:8px;background:var(--hover);padding:9px 11px">'
       +'<b style="font-size:12px">✅ Recently closed manufacturing orders <span class="mut tiny">— completed in the last 30 days ('+rc.length+')</span></b>'
-      +'<div class="tw" style="margin-top:6px;max-width:660px"><table style="width:max-content;min-width:100%;font-size:11px"><thead><tr><th class="l">Order</th><th class="l">PROD#</th><th class="l">Supplier</th><th class="l">Closed</th><th class="l">SKU × qty</th></tr></thead><tbody>'
+      +'<div class="tw" style="margin-top:6px;max-width:660px"><table class="hz-stack" style="width:max-content;min-width:100%;font-size:11px"><thead><tr><th class="l">Order</th><th class="l">PROD#</th><th class="l">Supplier</th><th class="l">Closed</th><th class="l">SKU × qty</th></tr></thead><tbody>'
       +rc.map(function(o){ return '<tr><td class="l"><button class="lnk-btn mfg-po-go" data-po="'+esc(o.po)+'" title="open '+esc(o.po)+' in a drawer" style="color:var(--blue);background:none;border:none;padding:0;cursor:pointer">'+esc(o.po)+'</button></td><td class="l">'+(o.prod_no?'P'+esc(o.prod_no):'')+'</td><td class="l">'+esc(o.supplier||'')+'</td><td class="l" style="white-space:nowrap">'+(o.closed_date?fd(o.closed_date):'')+'</td><td class="l">'+(o.lines||[]).map(function(x){return esc(x.sku)+' <span class="mut">×'+units(x.qty)+'</span>';}).join('<br>')+'</td></tr>'; }).join('')
       +'</tbody></table></div></div>'):'';
     var h='<div class="sect-h">Manufacturing — bundle assembly coverage</div>'+mfgNotesHtml+rcHtml
@@ -5304,7 +5320,7 @@
             +'<td class="l mfg-acc-cell">'+acc+'</td></tr>';
         }).join('');
         return '<div style="margin:6px 0 12px"><div style="font-weight:700;font-size:12px;margin-bottom:3px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+badgeFin+' <span>'+esc(bn.parent_sku)+'</span> <span style="font-size:12px;font-weight:700;background:#1e3a8a;color:#fff;border-radius:5px;padding:1px 8px">demand '+units(bn.demand)+'</span>'+(finPos.length?('<span class="mut tiny">'+finPos.length+' production order'+(finPos.length===1?'':'s')+'</span>'):'')+' <button class="lnk-btn mfg-bun-btn" data-bid="'+bid+'" title="open the full detail for this BOM SKU — production orders + every component" style="background:none;border:none;cursor:pointer;color:var(--blue);padding:0;font-size:11px;font-weight:600">detail ↗</button></div>'
-          +'<div class="tw" style="max-width:900px"><table style="width:max-content;min-width:100%"><thead><tr><th class="l">'+badgeMfg+' Component SKU</th><th>Required</th><th title="FUTURE / PRODUCTION / READY TO SHIP — still at the factory">In production</th><th title="COMPLETE / DELIVERED / SHIPPING — already made">Completed</th><th title="Manual entry — qty already covered by existing on-hand stock">Existing stock</th><th>Total supply</th><th>Coverage</th><th class="l">Sign-off</th></tr></thead><tbody>'+compRows+'</tbody></table></div></div>';
+          +'<div class="tw" style="max-width:900px"><table class="hz-stack" style="width:max-content;min-width:100%"><thead><tr><th class="l">'+badgeMfg+' Component SKU</th><th>Required</th><th title="FUTURE / PRODUCTION / READY TO SHIP — still at the factory">In production</th><th title="COMPLETE / DELIVERED / SHIPPING — already made">Completed</th><th title="Manual entry — qty already covered by existing on-hand stock">Existing stock</th><th>Total supply</th><th>Coverage</th><th class="l">Sign-off</th></tr></thead><tbody>'+compRows+'</tbody></table></div></div>';
       }).join('');
       return '<div style="margin-bottom:16px;max-width:1000px;border:1px solid var(--line);border-radius:8px;padding:12px 14px">'
         +'<div style="font-weight:800;font-size:14px;margin-bottom:6px">'+plabel+'</div>'+body+'</div>';
@@ -8474,7 +8490,7 @@
       document.getElementById('cf-body').innerHTML=
         (strip?'<div class="tiny mut" style="margin-bottom:3px">Next months — click a card to filter (committed + estimate)</div><div style="display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px">'+strip+'</div>':'')
         +'<div class="bar"><span class="count">'+summary+'</span></div>'
-        +'<div class="tw"><table class="pay-tbl"><thead><tr><th class="l">Due</th><th class="l">Likely pay date</th><th class="l">Paid</th><th class="l">Status</th><th class="l">Type</th><th class="l">Reference</th><th style="text-align:right">Amount (USD)</th><th class="l">Month</th><th class="l">Supplier</th><th class="l">Mkt</th></tr></thead>'
+        +'<div class="tw"><table class="pay-tbl hz-stack"><thead><tr><th class="l">Due</th><th class="l">Likely pay date</th><th class="l">Paid</th><th class="l">Status</th><th class="l">Type</th><th class="l">Reference</th><th style="text-align:right">Amount (USD)</th><th class="l">Month</th><th class="l">Supplier</th><th class="l">Mkt</th></tr></thead>'
         +'<tbody>'+(rows||'<tr><td colspan="10" class="l mut">No payments match.</td></tr>')+'</tbody>'
         +'<tfoot><tr class="batchrow"><td class="l" colspan="6"><b>TOTAL</b></td><td style="text-align:right"><b>$'+units(gT)+'</b></td><td colspan="3"></td></tr></tfoot></table></div>';
       // reference → open the PO (PLAN expanded) or the shipment (detail expanded) for payment review
@@ -9672,7 +9688,7 @@
     var allOther=rows.every(function(d){return !d.is_deposit;});
     if(allOther){
       var today=new Date().toISOString().slice(0,10);
-      var ho='<div class="tw"><table><thead><tr><th class="l">Reference</th><th class="l">Supplier</th><th class="l">Description</th><th>Amount</th><th class="l">Due date</th><th class="l">Date paid</th><th class="l">Status</th></tr></thead><tbody>';
+      var ho='<div class="tw"><table class="hz-stack"><thead><tr><th class="l">Reference</th><th class="l">Supplier</th><th class="l">Description</th><th>Amount</th><th class="l">Due date</th><th class="l">Date paid</th><th class="l">Status</th></tr></thead><tbody>';
       ho+=rows.map(function(d){var ep='/api/supply/deposit/'+encodeURIComponent(d.id);
         var status = d.date_paid ? '<span class="tool-badge bg-green">Paid</span>'
           : (d.date_due && d.date_due < today) ? '<span class="tool-badge bg-red">Overdue</span>'
@@ -9681,7 +9697,7 @@
           +'<td>'+editCell(ep,'amount',d.amount)+'</td><td class="l">'+editCell(ep,'date_due',d.date_due,'date')+'</td><td class="l">'+editCell(ep,'date_paid',d.date_paid,'date')+'</td><td class="l">'+status+'</td></tr>';}).join('');
       return ho+'</tbody></table></div>'; }
     // Deposits (or mixed All view): full layout with calculated pool used/remaining + assigned POs.
-    var h='<div class="tw"><table><thead><tr><th class="l">Reference</th><th class="l">Type</th><th class="l">Supplier</th><th class="l">PROD#</th><th class="l">Description</th><th>Amount</th><th>FX (Xero)</th><th class="l">Date paid</th><th>Used</th><th>Remaining</th><th class="l">POs assigned</th></tr></thead><tbody>';
+    var h='<div class="tw"><table class="hz-stack"><thead><tr><th class="l">Reference</th><th class="l">Type</th><th class="l">Supplier</th><th class="l">PROD#</th><th class="l">Description</th><th>Amount</th><th>FX (Xero)</th><th class="l">Date paid</th><th>Used</th><th>Remaining</th><th class="l">POs assigned</th></tr></thead><tbody>';
     h+=rows.map(function(d){var ep='/api/supply/deposit/'+encodeURIComponent(d.id); var oth=!d.is_deposit;
       return '<tr><td class="l">'+editCell(ep,'reference',d.reference,'txt')+'</td><td class="l"><span class="tool-badge '+(d.is_deposit?'bg-blue':'bg-neutral')+'">'+(d.is_deposit?'Deposit':'Other')+'</span></td><td class="l">'+supSel(ep,d.supplier_name)+'</td><td class="l">'+editCell(ep,'prod_no',d.prod_no,'txt')+'</td><td class="l">'+editCell(ep,'description',d.description,'txt')+'</td>'
         +'<td>'+editCell(ep,'amount',d.amount)+'</td><td>'+(oth?'<span class="mut">—</span>':editCell(ep,'xero_fx',d.xero_fx))+'</td><td class="l">'+editCell(ep,'date_paid',d.date_paid,'date')+'</td>'
@@ -11129,7 +11145,7 @@
           +'<td class="l" style="'+_wrap+'">'+esc(d.supplier_name||'')+'</td><td class="l">'+(d.prod_no?'P'+esc(d.prod_no):'')+'</td><td class="l">'+esc(d.batch_id||'')+'</td>'
           +'<td class="l"><span class="mut tiny">'+esc(fd(String(d.created_at||'').slice(0,10)))+(d.uploaded_by?' · '+esc(shortUser(d.uploaded_by||'')||''):'')+(d.uploader_kind==='supplier'?' (supplier)':'')+'</span></td>'
           +'<td class="l" style="text-align:center"><button class="lnk-btn qc-del" data-id="'+d.id+'" style="color:var(--neg);background:none;border:none;cursor:pointer;font-size:11px;text-decoration:underline">delete</button></td></tr>'; }).join('');
-        document.getElementById('qc-results').innerHTML='<div><table style="width:100%;table-layout:fixed;border-collapse:collapse"><thead><tr>'
+        document.getElementById('qc-results').innerHTML='<div><table class="hz-stack" style="width:100%;table-layout:fixed;border-collapse:collapse"><thead><tr>'
           +'<th class="l" style="width:9%">Type</th><th class="l">File</th><th class="l" style="width:11%">PO</th><th class="l" style="width:13%">Supplier</th><th class="l" style="width:7%">PROD#</th><th class="l" style="width:8%">Batch</th><th class="l" style="width:14%">Uploaded</th><th class="l" style="width:64px;text-align:center">&nbsp;</th>'
           +'</tr></thead><tbody>'+(body||'<tr><td colspan="8" class="l mut">No documents.</td></tr>')+'</tbody></table></div>';
         document.querySelectorAll('#qc-results .qc-po').forEach(function(b){ b.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(b.dataset.po,'documents'); else gotoPO(b.dataset.po,'documents'); }; });
