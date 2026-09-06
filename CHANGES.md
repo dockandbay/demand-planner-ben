@@ -1,3 +1,7 @@
+## v27.517 Mobile: main SUPPLY PO grid becomes PO cards on phones (Ben's layout)
+- **Card:** PO ref as the title (no label) with the PLAN button top right; one unlabelled chip row = Status · Ship to · Branch · Shipment; Direct to client as an unlabelled line only when a client is set; then labelled dates Start, End, Arrival/Delivery, Completion. ERP, Supplier, Deposit ref, Ship, Value est, Pallets, PROD# and Batch are hidden on the phone (all in the PLAN drawer). Production (P#) group captions and the expanded PLAN row render full width under their card.
+- **Mechanism:** po-tbl carries hz-stack + po-cards; hzStackTables() now also stamps td[data-ci] and td[data-empty] (dash / blank cells) so the CSS can key off header labels and skip empty chips. Desktop unchanged. supply/inject.html + supply/hz-theme.css.
+
 ## v27.516 Portal PO cards: labels restored (v27.515 reverted)
 - Ben's label request was for the main SUPPLY PO grid, not the portal. The supplier portal card keeps a label on every line (v27.514 layout). supply/portal-view.js only.
 

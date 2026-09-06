@@ -534,3 +534,32 @@ body header.pv-top .pv-lang button:hover{color:#fff}
   #app #supply-root table.hz-stack[data-stack] tr.batchrow{background:var(--hover)}
   #app #supply-root table.hz-stack[data-stack] td .fci,#app #supply-root table.hz-stack[data-stack] td input,#app #supply-root table.hz-stack[data-stack] td select{max-width:60%}
 }
+
+/* ═══ v27.517: main PO grid as PO cards on phones (Ben: PO title, unlabelled chips, labelled dates only) ═══════════ */
+@media (max-width:640px){
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]){display:flex;flex-wrap:wrap;align-items:baseline;gap:0 8px;position:relative;padding:10px 12px 8px}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td{flex:1 1 100%;padding:3px 0!important}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td::before{display:none}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-ci="0"]{position:absolute!important;top:8px;right:10px;flex:none;display:block;width:auto!important;padding:0!important;overflow:visible}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-ci="0"] .planbtn{min-height:34px;padding:6px 12px;font-size:11px}
+  #app #supply-root table.po-cards[data-stack] tbody td[data-l="PO"]{order:0;display:block;font-size:14px;font-weight:800;padding:0 96px 6px 0!important;border-bottom:1px solid var(--line)!important;margin-bottom:4px}
+  #app #supply-root table.po-cards[data-stack] tbody td[data-l="PO"] .ind{display:none}
+  #app #supply-root table.po-cards[data-stack] tbody td[data-l="Status"]{order:1;flex:0 0 auto}
+  #app #supply-root table.po-cards[data-stack] tbody td[data-l="Ship to"]{order:2;flex:0 0 auto}
+  #app #supply-root table.po-cards[data-stack] tbody td[data-l="Branch"]{order:3;flex:0 0 auto}
+  #app #supply-root table.po-cards[data-stack] tbody td[data-l="Shipment"]{order:4;flex:0 0 auto}
+  #app #supply-root table.po-cards[data-stack] tbody td[data-l="Ship to"]::before,#app #supply-root table.po-cards[data-stack] tbody td[data-l="Branch"]::before,#app #supply-root table.po-cards[data-stack] tbody td[data-l="Shipment"]::before{display:inline;content:"·";color:var(--faint);margin-right:6px;font-weight:400}
+  #app #supply-root table.po-cards[data-stack] tbody td[data-l="Status"] .fci,#app #supply-root table.po-cards[data-stack] tbody td[data-l="Ship to"] .fci,#app #supply-root table.po-cards[data-stack] tbody td[data-l="Branch"] .fci{max-width:none}
+  #app #supply-root table.po-cards[data-stack] tbody td[data-l="Direct"]{order:5;font-size:12px!important;line-height:1.3!important;padding:4px 0 6px!important;border-bottom:1px dashed var(--line)!important;margin-bottom:2px}
+  #app #supply-root table.po-cards[data-stack] tbody td[data-l="Direct"][data-empty]{display:none}
+  #app #supply-root table.po-cards[data-stack] tbody td[data-l="Start"]{order:6;margin-top:4px}
+  #app #supply-root table.po-cards[data-stack] tbody td[data-l="End"]{order:7}
+  #app #supply-root table.po-cards[data-stack] tbody td[data-l="Arrival/Delivery"]{order:8}
+  #app #supply-root table.po-cards[data-stack] tbody td[data-l="Completion"]{order:9}
+  #app #supply-root table.po-cards[data-stack] tbody td[data-l="Start"],#app #supply-root table.po-cards[data-stack] tbody td[data-l="End"],#app #supply-root table.po-cards[data-stack] tbody td[data-l="Arrival/Delivery"],#app #supply-root table.po-cards[data-stack] tbody td[data-l="Completion"]{display:flex}
+  #app #supply-root table.po-cards[data-stack] tbody td[data-l="Start"]::before,#app #supply-root table.po-cards[data-stack] tbody td[data-l="End"]::before,#app #supply-root table.po-cards[data-stack] tbody td[data-l="Arrival/Delivery"]::before,#app #supply-root table.po-cards[data-stack] tbody td[data-l="Completion"]::before{display:block}
+  #app #supply-root table.po-cards[data-stack] tbody td[data-l="ERP"],#app #supply-root table.po-cards[data-stack] tbody td[data-l="Supplier"],#app #supply-root table.po-cards[data-stack] tbody td[data-l="Deposit ref"],#app #supply-root table.po-cards[data-stack] tbody td[data-l="Ship"],#app #supply-root table.po-cards[data-stack] tbody td[data-l="Value est"],#app #supply-root table.po-cards[data-stack] tbody td[data-l="Pallets"],#app #supply-root table.po-cards[data-stack] tbody td[data-l="PROD#"],#app #supply-root table.po-cards[data-stack] tbody td[data-l="Batch"]{display:none}
+  #app #supply-root table.po-cards[data-stack] tbody tr.grp-row[data-full]{background:transparent;border:0;box-shadow:none;padding:10px 0 4px;margin:0}
+  #app #supply-root table.po-cards[data-stack] tbody tr.grp-row[data-full] td{display:block;background:transparent!important;padding:0 2px 4px!important;border:0!important;border-bottom:1px solid var(--line)!important}
+  #app #supply-root table.po-cards[data-stack] tbody tr.exp-row[data-full]{border:1px solid var(--faint);border-top:0;border-radius:0 0 10px 10px;margin:-9px 0 10px;padding:10px 8px 8px;background:#fff}
+}

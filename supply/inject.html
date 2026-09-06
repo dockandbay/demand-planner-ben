@@ -1332,7 +1332,8 @@
       secs.forEach(function(tb){ Array.prototype.forEach.call(tb.rows,function(tr){ var full=false, cells=tr.cells;
         for(var i=0;i<cells.length;i++){ if((cells[i].colSpan||1)>1){full=true;break;} }
         if(full||!labels.length){ tr.dataset.full='1'; return; }
-        for(var j=0;j<cells.length;j++)cells[j].setAttribute('data-l',labels[j]||''); }); });
+        for(var j=0;j<cells.length;j++){ var c=cells[j]; c.setAttribute('data-l',labels[j]||''); c.setAttribute('data-ci',String(j));
+          var tx=(c.textContent||'').replace(/\s+/g,' ').trim(); if((tx===''||tx==='—'||tx==='-')&&!c.querySelector('input,select,button,a,img'))c.setAttribute('data-empty','1'); else c.removeAttribute('data-empty'); } }); });
       t.dataset.stack='1'; }catch(e){} }); }
   try{ (function(){ var mq=window.matchMedia&&window.matchMedia('(max-width:640px)'), obs=null, tm=0;
     function arm(){ if(!mq||!mq.matches){ if(obs){obs.disconnect();obs=null;} return; } if(obs)return;
@@ -2992,7 +2993,7 @@
     var _visPo={}; rows.forEach(function(r){ _visPo[String(r.po)]=1; });
     var _isMasterRow=function(r){ return !r.shipment || r.is_master || r.po===r.shipment; };
     var indentFor=function(r){ return !_isMasterRow(r) && !!_visPo[String(r.shipment||'')]; };   // indent a shipment member ONLY when its master PO is also visible in the current (filtered) grid — otherwise the └ dangles
-    var head=lookupDatalists()+'<div class="tw"><table class="po-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">ERP</th><th class="l">Supplier</th><th class="l">Ship to</th><th class="l">Branch</th><th class="l">Direct</th><th class="l">Status</th><th class="l">Shipment</th><th class="l">Deposit ref</th><th class="l">Start</th><th class="l">End</th><th class="l">Ship</th><th class="l">Arrival/Delivery</th><th class="l">Completion</th><th>Value est</th><th>Pallets</th><th class="l">PROD#</th><th class="l">Batch</th></tr></thead><tbody>';
+    var head=lookupDatalists()+'<div class="tw"><table class="po-tbl hz-stack po-cards"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">ERP</th><th class="l">Supplier</th><th class="l">Ship to</th><th class="l">Branch</th><th class="l">Direct</th><th class="l">Status</th><th class="l">Shipment</th><th class="l">Deposit ref</th><th class="l">Start</th><th class="l">End</th><th class="l">Ship</th><th class="l">Arrival/Delivery</th><th class="l">Completion</th><th>Value est</th><th>Pallets</th><th class="l">PROD#</th><th class="l">Batch</th></tr></thead><tbody>';
     var body='';
     if(!groupBy||groupBy==='none'){ rows.forEach(function(r,i){ body+=poRowHtml(r,i,false,null); }); }
     else if(groupBy==='status'){
