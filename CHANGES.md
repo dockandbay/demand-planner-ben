@@ -1,3 +1,8 @@
+## v27.511 Mobile M2: supplier portal tables read as cards on phones
+- **Stacked cards under 640px:** Deposits, Payments, Shipment plan (nested PO table), Samples list, Quality documents, Specifications, Products and the Price List turn each table row into a card with a small label beside every value (labels come from the column header, so new columns need no extra work). Empty cells are dropped, expand chevrons and price cells still tap as before.
+- **Kept as scrolling grids:** the PO grid and the Productions SKU matrix (sticky first column), plus small tables nested inside a PO expansion.
+- **Mechanism:** ppStackTables() runs after every render via a MutationObserver that is only armed on phones (and re-armed on rotation); labels follow the EN / 中文 toggle. supply/portal-view.js only.
+
 ## v27.510 Mobile M1: global quick wins (phone input cap, 36px toolbar targets, one breakpoint, DEMAND filters collapse)
 - **Inputs never overflow a phone:** every input / select / textarea in the app and the portal is capped at 100% width under 640px (58 fixed-width fields were forcing sideways scroll).
 - **Tap targets:** toolbar and card buttons, pills and filter toggles are at least 36px tall on phones; in-cell controls untouched.

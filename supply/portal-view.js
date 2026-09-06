@@ -29,7 +29,7 @@
       else if(el.dataset['i18n'+a]){ el.setAttribute(a,el.dataset['i18n'+a]); delete el.dataset['i18n'+a]; } }); });
     try{ document.documentElement.lang=(PP_LANG==='zh')?'zh-CN':'en'; }catch(e){} }
   function ppSetLang(lang){ PP_LANG=(lang==='zh')?'zh':'en'; try{ localStorage.setItem('pp_lang',PP_LANG); }catch(e){}
-    ppTranslate(document.body);
+    ppTranslate(document.body); try{ ppStackTables(document,true); }catch(e){}
     if(PP_LANG==='zh'){ if(!_i18nObs){ _i18nObs=new MutationObserver(function(){ if(_i18nObs._busy)return; clearTimeout(_i18nT); _i18nT=setTimeout(function(){ _i18nObs._busy=1; try{ ppTranslate(document.body); }catch(e){} _i18nObs._busy=0; },40); }); _i18nObs.observe(document.body,{childList:true,subtree:true,characterData:true}); } }
     else if(_i18nObs){ _i18nObs.disconnect(); _i18nObs=null; }
     document.querySelectorAll('.pv-lang button').forEach(function(b){ b.classList.toggle('on',b.dataset.lang===PP_LANG); }); }
@@ -43,6 +43,20 @@
       var wrap=document.createElement('span'); wrap.className='pp-bi'; wrap.setAttribute('data-i18n-skip','1'); wrap.innerHTML='<span class="pp-en">'+esc(en)+'</span><span class="pp-zh">'+esc(zh)+'</span>';
       el.replaceChild(wrap,tn); }); }
   function ppSetBilingualNav(on){ PP_BILINGUAL=!!on; ppBilingualApply(document); }
+  // v27.511 Mobile M2: on phones, plain data tables stack into labelled cards (CSS below keys off table[data-stack]).
+  // Labels come from the column headers so every table gets it for free; the PO grid / Productions matrix (.pp-tbl)
+  // and tables nested inside another table are left as scrolling grids. force=true relabels (language toggle).
+  function ppStackTables(root,force){ root=root||document; var tbls=root.querySelectorAll?root.querySelectorAll('#supply-root table'):[];
+    tbls.forEach(function(t){ try{ if(t.classList.contains('pp-tbl')||t.hasAttribute('data-nostack'))return; if(t.parentNode&&t.parentNode.closest&&t.parentNode.closest('td,th'))return;
+      if(t.dataset.stack&&!force)return;
+      var hr=t.tHead?t.tHead.rows[t.tHead.rows.length-1]:null, labels=[];
+      if(hr){ Array.prototype.forEach.call(hr.cells,function(th){ var txt=(th.textContent||'').replace(/\s+/g,' ').trim(), n=Math.max(1,th.colSpan||1); for(var i=0;i<n;i++)labels.push(txt); }); }
+      Array.prototype.forEach.call(t.tBodies,function(tb){ Array.prototype.forEach.call(tb.rows,function(tr){ var full=false, cells=tr.cells;
+        for(var i=0;i<cells.length;i++){ if((cells[i].colSpan||1)>1){full=true;break;} }
+        if(full||!labels.length){ tr.dataset.full='1'; return; } delete tr.dataset.full;
+        for(var j=0;j<cells.length;j++){ var l=labels[j]||''; if(l&&PP_LANG==='zh'&&PP_ZH[l])l=PP_ZH[l]; cells[j].setAttribute('data-l',l); } }); });
+      t.dataset.stack='1'; }catch(e){} }); }
+  try{ window.ppStackTables=ppStackTables; }catch(e){}
   try{ window.ppSetBilingualNav=ppSetBilingualNav; }catch(e){}
   var shortUser=function(s){return String(s==null?'':s).replace(/@dockandbay\.com\b/gi,'@');};  // ben@dockandbay.com → ben@ (display only)
   var shortNotes=function(arr){ (arr||[]).forEach(function(n){ if(n){ if(n.body)n.body=shortUser(n.body); if(n.author_email)n.author_email=shortUser(n.author_email); } }); return arr; };
@@ -572,6 +586,23 @@
 #supply-root table.pp-tbl tr.pp-grp td{background:#e5e7eb;color:#374151;font-weight:700;font-size:11px;padding:6px 10px;text-align:left;letter-spacing:.03em;text-transform:uppercase;border-top:2px solid #cbd5e1;border-bottom:1px solid #cbd5e1}
 #supply-root table.pp-tbl tr.pp-row.row-open>td{background:#FDFBD4!important;border-top:2px solid #475569!important}   /* expanded PO row highlight + darker top rule */
 #supply-root table.pp-tbl tr[id^="pp-"]>td{border-bottom:2px solid #475569}   /* expanded PO detail: darker bottom rule (detail row is display:none when collapsed, so only shows while open) */
+/* Mobile M2 (v27.511): data tables stack into labelled cards on phones; see ppStackTables(). */
+@media (max-width:640px){
+  #supply-root .tw:has(> table[data-stack]){overflow:visible;max-width:none!important;max-height:none!important;border:0;background:transparent}
+  #supply-root table[data-stack]{display:block;width:100%!important;min-width:0!important;max-width:none!important;table-layout:auto;border-collapse:separate}
+  #supply-root table[data-stack] thead,#supply-root table[data-stack] colgroup{display:none}
+  #supply-root table[data-stack] tbody{display:block}
+  #supply-root table[data-stack] tbody tr{display:block;border:1px solid var(--line);border-radius:10px;padding:6px 10px;margin:0 0 8px;background:#fff;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+  #supply-root table[data-stack] tbody tr.plt{background:var(--hover)}
+  #supply-root table[data-stack] tbody td{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:4px 0!important;border:0!important;text-align:left!important;width:auto!important;min-width:0!important;max-width:none!important;white-space:normal!important;position:static!important;background:transparent!important;overflow-wrap:anywhere}
+  #supply-root table[data-stack] tbody td[data-l]::before{content:attr(data-l);flex:0 0 40%;color:var(--faint);font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;line-height:1.5}
+  #supply-root table[data-stack] tbody td[data-l=""]::before{display:none}
+  #supply-root table[data-stack] tbody td[data-l]:empty{display:none}
+  #supply-root table[data-stack] tbody td > *{text-align:left}
+  #supply-root table[data-stack] tbody tr[data-full] td{display:block}
+  #supply-root table[data-stack] tbody tr[data-full]{padding:0;border:0;background:transparent;box-shadow:none}
+  #supply-root table[data-stack] tbody td .fci,#supply-root table[data-stack] tbody td input,#supply-root table[data-stack] tbody td select{max-width:60%}
+}
 /* Mobile: turn the portal sub-menu (tab strip) into a full-width horizontally-scrollable row so all tabs
    stay reachable instead of wrapping/overlapping. */
 @media (max-width:640px){
@@ -677,6 +708,11 @@
     var PORTAL_PROD_Q='', PORTAL_PROD_SEASON='', PORTAL_PROD_STATUS='dev_actions';   // Product grid: search + season + status (default: in development + items with open D&B actions)
     var _invFiles={};     // base64 of the last parsed invoice file, per PO (for the Apply step)
     var rootEl=opts.root; if(!rootEl.closest('#supply-root')){rootEl.id='supply-root';} rootEl.style.display='block';
+    try{ var _stkMq=window.matchMedia&&window.matchMedia('(max-width:640px)'), _stkObs=null, _stkT=0;   // v27.511: stack tables into cards on phones only
+      var _stkArm=function(){ if(!_stkMq||!_stkMq.matches){ if(_stkObs){_stkObs.disconnect();_stkObs=null;} return; }
+        if(_stkObs)return; _stkObs=new MutationObserver(function(){ clearTimeout(_stkT); _stkT=setTimeout(function(){ try{ ppStackTables(rootEl); }catch(e){} },30); });
+        _stkObs.observe(rootEl,{childList:true,subtree:true}); ppStackTables(rootEl); };
+      _stkArm(); if(_stkMq&&_stkMq.addEventListener)_stkMq.addEventListener('change',_stkArm); else if(_stkMq&&_stkMq.addListener)_stkMq.addListener(_stkArm); }catch(e){}
     if(PP_ANON){ try{ var _anonObs=new MutationObserver(function(){ if(_anonObs._busy)return; _anonObs._busy=1; _anonObs.disconnect(); try{anonSweep();}catch(e){} _anonObs.observe(rootEl,{childList:true,subtree:true}); _anonObs._busy=0; });
       _anonObs.observe(rootEl,{childList:true,subtree:true}); setTimeout(anonSweep,80); }catch(e){} }
     rootEl.innerHTML='<div class="bar" style="align-items:center"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders <span id="pp-pos-badge"></span></span><span class="rtab" data-pt="shipmentplan">Shipment Plan <span id="pp-ship-badge"></span></span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="productions">Productions</span><span class="rtab" data-pt="samples">Sample shipments <span id="pp-samp-badge"></span></span><span class="rtab" data-pt="quality">Quality Control</span><span class="rtab" data-pt="product" id="pp-prod-tab" style="display:none">Product <span id="pp-prod-badge"></span></span><span class="rtab" data-pt="specs" id="pp-spec-tab" style="display:none">Specifications <span id="pp-spec-badge"></span></span></span>'
