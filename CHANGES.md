@@ -1,3 +1,6 @@
+## v27.520 Mobile PO grid: Show archived moves under Filters
+- On phones the Show / Hide archived pill sits inside the collapsed filter area (with ACTION ITEMS / NEEDS ERP), so it appears only when Filters is open; desktop toolbar unchanged. The pill is re-parented after render so its click handler is untouched. supply/inject.html only.
+
 ## v27.519 Mobile PO cards (main grid): PLAN label, Shipment row, blank Direct rows removed
 - Button reads PLAN (the phone P-collapse pseudo-element is switched off inside the card, which showed PPLAN).
 - Shipment is a labelled row (SHIPMENT · assign / ref) under the chips instead of an unlabelled chip.
