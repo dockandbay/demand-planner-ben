@@ -47,14 +47,14 @@
   // Labels come from the column headers so every table gets it for free; the PO grid / Productions matrix (.pp-tbl)
   // and tables nested inside another table are left as scrolling grids. force=true relabels (language toggle).
   function ppStackTables(root,force){ root=root||document; var tbls=root.querySelectorAll?root.querySelectorAll('#supply-root table'):[];
-    tbls.forEach(function(t){ try{ if(t.classList.contains('pp-tbl')||t.hasAttribute('data-nostack'))return; if(t.parentNode&&t.parentNode.closest&&t.parentNode.closest('td,th'))return;
+    tbls.forEach(function(t){ try{ if((t.classList.contains('pp-tbl')&&!t.classList.contains('pp-pos'))||t.hasAttribute('data-nostack'))return;   // v27.513: the PO grid (.pp-pos) stacks too; the Productions matrix stays a grid if(t.parentNode&&t.parentNode.closest&&t.parentNode.closest('td,th'))return;
       if(t.dataset.stack&&!force)return;
       var hr=t.tHead?t.tHead.rows[t.tHead.rows.length-1]:null, labels=[];
       if(hr){ Array.prototype.forEach.call(hr.cells,function(th){ var txt=(th.textContent||'').replace(/\s+/g,' ').trim(), n=Math.max(1,th.colSpan||1); for(var i=0;i<n;i++)labels.push(txt); }); }
       Array.prototype.forEach.call(t.tBodies,function(tb){ Array.prototype.forEach.call(tb.rows,function(tr){ var full=false, cells=tr.cells;
         for(var i=0;i<cells.length;i++){ if((cells[i].colSpan||1)>1){full=true;break;} }
         if(full||!labels.length){ tr.dataset.full='1'; return; } delete tr.dataset.full;
-        for(var j=0;j<cells.length;j++){ var l=labels[j]||''; if(l&&PP_LANG==='zh'&&PP_ZH[l])l=PP_ZH[l]; cells[j].setAttribute('data-l',l); } }); });
+        for(var j=0;j<cells.length;j++){ var l=labels[j]||''; if(l&&PP_LANG==='zh'&&PP_ZH[l])l=PP_ZH[l]; cells[j].setAttribute('data-l',l); cells[j].setAttribute('data-ci',String(j)); } }); });
       t.dataset.stack='1'; }catch(e){} }); }
   try{ window.ppStackTables=ppStackTables; }catch(e){}
   try{ window.ppSetBilingualNav=ppSetBilingualNav; }catch(e){}
@@ -602,6 +602,22 @@
   #supply-root table[data-stack] tbody tr[data-full] td{display:block}
   #supply-root table[data-stack] tbody tr[data-full]{padding:0;border:0;background:transparent;box-shadow:none}
   #supply-root table[data-stack] tbody td .fci,#supply-root table[data-stack] tbody td input,#supply-root table[data-stack] tbody td select{max-width:60%}
+  /* v27.513: the PO grid as PO cards. Title = PO ref, MANAGE top right, curated field list; finance / ships-with columns hidden (they live in MANAGE). */
+  #supply-root table.pp-pos[data-stack] tbody tr.pp-row{position:relative;padding:10px 12px 8px}
+  #supply-root table.pp-pos[data-stack] tbody tr.pp-row.row-open{background:#FDFBD4;border-color:#475569;border-radius:10px 10px 0 0;margin-bottom:0}
+  #supply-root table.pp-pos[data-stack] tbody tr.pp-row.row-open>td{background:transparent!important;border-top:0!important}
+  #supply-root table.pp-pos[data-stack] tbody tr:not([id]):not(.pp-grp) td:first-child{position:absolute!important;top:8px;right:10px;display:block;width:auto!important;min-width:0!important;max-width:none!important;padding:0!important;overflow:visible}
+  #supply-root table.pp-pos[data-stack] tbody td:first-child::before{display:none}
+  #supply-root table.pp-pos[data-stack] .pp-exp{font-size:11px;padding:7px 11px;min-height:34px;line-height:1.2}
+  #supply-root table.pp-pos[data-stack] .pp-exp .ex-badge{min-width:16px;height:16px;line-height:16px;font-size:9px;padding:0 4px;margin-left:4px}
+  #supply-root table.pp-pos[data-stack] tbody td[data-ci="1"]{display:block;font-weight:800;font-size:14px;padding:2px 110px 6px 0!important;border-bottom:1px solid var(--line)!important;margin-bottom:4px}
+  #supply-root table.pp-pos[data-stack] tbody td[data-ci="1"]::before{display:none}
+  #supply-root table.pp-pos[data-stack] tbody td[data-ci="6"],#supply-root table.pp-pos[data-stack] tbody td[data-ci="8"],#supply-root table.pp-pos[data-stack] tbody td[data-ci="12"],#supply-root table.pp-pos[data-stack] tbody td[data-ci="13"],#supply-root table.pp-pos[data-stack] tbody td[data-ci="14"],#supply-root table.pp-pos[data-stack] tbody td[data-ci="15"],#supply-root table.pp-pos[data-stack] tbody td[data-ci="16"],#supply-root table.pp-pos[data-stack] tbody td[data-ci="19"]{display:none}
+  #supply-root table.pp-pos[data-stack] tbody td[data-ci="10"] input{width:auto!important;max-width:60%;box-sizing:border-box!important}
+  #supply-root table.pp-pos[data-stack] tbody tr.pp-grp[data-full]{background:transparent;border:0;padding:10px 0 4px;box-shadow:none;margin:0}
+  #supply-root table.pp-pos[data-stack] tbody tr.pp-grp[data-full] td{display:block;background:transparent!important;padding:0 2px!important;border:0!important;border-bottom:1px solid #cbd5e1!important}
+  #supply-root table.pp-pos[data-stack] tbody tr[id^="pp-"][data-full]{border:1px solid #475569;border-top:0;border-radius:0 0 10px 10px;margin:-9px 0 10px;padding:10px 8px 8px;background:#fff}
+  #supply-root table.pp-pos[data-stack] tbody tr[id^="pp-"][data-full]>td{border-bottom:0!important}
 }
 /* Mobile: turn the portal sub-menu (tab strip) into a full-width horizontally-scrollable row so all tabs
    stay reachable instead of wrapping/overlapping. */
@@ -1240,7 +1256,7 @@
       if(!pos.length)return '<div class="count">No purchase orders for this supplier.</div>';
       var today=new Date().toISOString().slice(0,10);
       var _spMasters={}; ((_ppData&&_ppData.shipmentPlan)||[]).forEach(function(s){ if(s.master_po)_spMasters[s.master_po]=1; });   // shipments in THIS supplier's plan → ships-with can open them
-      return '<div class="tw"><table class="pp-tbl"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l" style="width:38px;min-width:38px" title="Production number">P#</th><th class="l">Status</th><th class="l" title="Ship to country">CTRY</th><th class="l">Ship to branch</th><th class="l">Direct</th><th class="l">Production status</th><th class="l">Start</th><th class="l">Est. completion</th><th class="l">Completion date</th><th class="l">Ship</th><th class="l">Flexport</th><th class="l">Ships With</th><th style="text-align:right">Start deposit</th><th style="text-align:right">Completion</th><th style="text-align:right">Balance</th><th style="text-align:right">Amount due</th><th class="l">Due</th><th class="l">Deposit ref</th></tr></thead><tbody>'
+      return '<div class="tw"><table class="pp-tbl pp-pos"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l" style="width:38px;min-width:38px" title="Production number">P#</th><th class="l">Status</th><th class="l" title="Ship to country">CTRY</th><th class="l">Ship to branch</th><th class="l">Direct</th><th class="l">Production status</th><th class="l">Start</th><th class="l">Est. completion</th><th class="l">Completion date</th><th class="l">Ship</th><th class="l">Flexport</th><th class="l">Ships With</th><th style="text-align:right">Start deposit</th><th style="text-align:right">Completion</th><th style="text-align:right">Balance</th><th style="text-align:right">Amount due</th><th class="l">Due</th><th class="l">Deposit ref</th></tr></thead><tbody>'
         +pos.slice().sort(function(a,b){ var pa=((a.prod_no==null?'':String(a.prod_no)).trim())||'~~~', pb=((b.prod_no==null?'':String(b.prod_no)).trim())||'~~~';
             if(pa!==pb)return pa<pb?-1:1;
             // Keep a shipment's POs together: order by the master PO (alphabetical), master first, then its ships-with children.

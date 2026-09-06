@@ -1,3 +1,7 @@
+## v27.513 Mobile: supplier portal PO grid becomes cards on phones
+- **PO cards under 640px:** each purchase order is a card titled with the PO ref, MANAGE (with its action count) top right, then P#, Status, Ship to country / branch, Production status (select), Est. completion, Completion date (picker), Ship, Amount due and Due as label / value lines. Direct, Start, Flexport, Ships With, Start deposit, Completion, Balance and Deposit ref are hidden on the phone (all live in the MANAGE expansion). Production group headers stay as section captions; the expanded MANAGE panel attaches under its card.
+- **Mechanism:** the PO table carries class pp-pos so ppStackTables() labels it (td[data-l] + td[data-ci] column index); the Productions SKU matrix keeps its scroll. supply/portal-view.js only.
+
 ## v27.512 Mobile M3: SUPPLY Cash Flow, Deposits, Other Payments, Manufacturing and Quality tables read as cards on phones
 - **Stacked cards under 640px:** the Cash Flow payment list, the Deposits register, Other Payments, both Manufacturing tables (closed orders, component supply) and the Quality documents list turn each row into a card with a header label beside every value; totals rows and expansion rows render full width.
 - **Opt-in:** tables carry class hz-stack; hzStackTables() labels them after each render through a MutationObserver that is only armed on phones. Same mechanism as the portal (v27.511). Desktop unchanged. supply/inject.html + supply/hz-theme.css.
