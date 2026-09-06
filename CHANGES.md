@@ -1,3 +1,6 @@
+## v27.518 Mobile PO cards (main grid): overlap fix
+- PLAN button now sits inline at the right of the PO title line (no absolute positioning), so it cannot cover the PO ref or the chips. Chip row (Status · Ship to · Branch · Shipment) wraps with even gaps and no dot separators; each chip is a light pill so a wrapped chip still reads as one item. Date lines are full-width label / value rows with a fixed 38% label column; labels never render on non-date cells. Expanded PLAN row and P# captions keep their full-width treatment. supply/hz-theme.css only.
+
 ## v27.517 Mobile: main SUPPLY PO grid becomes PO cards on phones (Ben's layout)
 - **Card:** PO ref as the title (no label) with the PLAN button top right; one unlabelled chip row = Status · Ship to · Branch · Shipment; Direct to client as an unlabelled line only when a client is set; then labelled dates Start, End, Arrival/Delivery, Completion. ERP, Supplier, Deposit ref, Ship, Value est, Pallets, PROD# and Batch are hidden on the phone (all in the PLAN drawer). Production (P#) group captions and the expanded PLAN row render full width under their card.
 - **Mechanism:** po-tbl carries hz-stack + po-cards; hzStackTables() now also stamps td[data-ci] and td[data-empty] (dash / blank cells) so the CSS can key off header labels and skip empty chips. Desktop unchanged. supply/inject.html + supply/hz-theme.css.
