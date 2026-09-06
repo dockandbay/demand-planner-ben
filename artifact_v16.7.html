@@ -9517,7 +9517,8 @@ function render(){
     var el=document.getElementById(id);
     if(el)el.style.display=filtersHide?'none':'';
   });
-  try{ document.getElementById('app').classList.toggle('filters-hidden',!!filtersHide); }catch(e){}   // theme: no gap/rule under the header when no filter rows show (v27.471)
+  try{ document.getElementById('app').classList.toggle('filters-hidden',!!filtersHide); }catch(e){}
+  if(!filtersHide){ try{ mobileFilterCollapse(document.getElementById('dab-navwrap')); }catch(e){} }   // phone: DEMAND filter rows behind the shared Filters button (v27.510)   // theme: no gap/rule under the header when no filter rows show (v27.471)
   // Update view toggle button states
   document.querySelectorAll('.view-toggle').forEach(function(b){
     b.classList.toggle('active',b.dataset.view===VIEW_MODE||(b.dataset.group==='buymove'&&(VIEW_MODE==='buy'||VIEW_MODE==='fba'||VIEW_MODE==='transfer'||VIEW_MODE==='actions'||VIEW_MODE==='zalando'||VIEW_MODE==='inventory')));

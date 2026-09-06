@@ -1,3 +1,9 @@
+## v27.510 Mobile M1: global quick wins (phone input cap, 36px toolbar targets, one breakpoint, DEMAND filters collapse)
+- **Inputs never overflow a phone:** every input / select / textarea in the app and the portal is capped at 100% width under 640px (58 fixed-width fields were forcing sideways scroll).
+- **Tap targets:** toolbar and card buttons, pills and filter toggles are at least 36px tall on phones; in-cell controls untouched.
+- **One breakpoint:** the SUPPLY phone check (actMob) and its three media blocks move from 700px to the 640px used everywhere else, so layout and behaviour flip together.
+- **DEMAND filters:** the country / channel / show / date rows sit behind the same Filters button the reports already use on phones. supply/hz-theme.css + supply/inject.html + artifact_v16.7.html.
+
 ## v27.509 Portal: bilingual top menus for China-based suppliers (Ben)
 - For suppliers with the China flag, the section row (ORDERS 订单 · FINANCE 财务 · SAMPLES 样品 · PRODUCT 产品) and the sub-tab row (Purchase Orders 采购订单 …, incl. Price List 价目表) show English with the Chinese underneath at all times. The EN / 中文 toggle still controls the rest of the page. Badges and counts unchanged. supply/portal-view.js (setBilingualNav; translator skips the bilingual labels so nothing doubles up) + supply/portal.html + supply/hz-theme.css.
 

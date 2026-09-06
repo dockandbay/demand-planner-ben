@@ -326,7 +326,7 @@
 #supply-root .shipdrawer-body{padding:16px 18px;overflow:auto;flex:1 1 auto}
 /* Mobile: the drawer becomes a full-screen takeover (slides up from the bottom, dark app header) — a distinct
    experience from the desktop side-drawer. */
-@media (max-width:700px){
+@media (max-width:640px){
   #supply-root #sup-count{display:none}            /* PO count line — hide on mobile */
   #supply-root .po-erp-match{display:none}         /* ERP-match summary — hide on mobile */
   #supply-root #shipdrawer-bg,#supply-root #podrawer-bg,#supply-root #sampdrawer-bg{background:transparent!important}
@@ -500,7 +500,7 @@
 }
 /* MOBILE: let the Actions / Recommendations / ERP tables grow past the screen and scroll horizontally inside
    their .tw wrapper, with the first two columns pinned (sticky). Type + Ref are merged into col 2 (see actRow). */
-@media (max-width:700px){
+@media (max-width:640px){
   #supply-root .act-tbl,#supply-root .erpc-tbl{table-layout:auto;width:auto;min-width:100%}
   #supply-root .act-tbl th,#supply-root .act-tbl td,#supply-root .erpc-tbl th,#supply-root .erpc-tbl td{white-space:nowrap}
   #supply-root .act-tbl td.act-detail{white-space:normal;min-width:190px;max-width:250px}
@@ -648,7 +648,7 @@
 #supply-root .po-filt-ship .pill-lbl{margin-right:2px}
 #supply-root .po-filt-item{display:inline-flex;align-items:center;gap:5px;margin-left:14px}
 #supply-root .op-pivot th,#supply-root .op-pivot td{vertical-align:top}   /* ORDER PLAN grid: data sits at the TOP of each cell (was baseline/bottom) */
-@media (max-width:700px){
+@media (max-width:640px){
   #supply-root #po-ctry, #supply-root #po-act{flex-wrap:wrap;row-gap:4px;column-gap:0!important}
   /* Ship-to: own full-width row; tight so all country pills fit one line */
   #supply-root .po-filt-ship{flex:0 0 100%!important;max-width:100%!important;margin:3px 0!important;gap:2px}
@@ -1322,7 +1322,7 @@
   function actDates(s){ return String(s==null?'':s).replace(/\d{4}-\d{2}-\d{2}/g, function(m){ return fd(m); }); }
   // On mobile the Actions/Recommendations/ERP tables scroll horizontally with the first two columns pinned, and
   // Type + Ref are merged into one cell to save width. actHead() returns the matching <thead> for either layout.
-  function actMob(){ return !!(window.matchMedia && window.matchMedia('(max-width:700px)').matches); }
+  function actMob(){ return !!(window.matchMedia && window.matchMedia('(max-width:640px)').matches); }   // one phone breakpoint everywhere (v27.510)
   // ── Mobile card helpers — render register/report rows as stacked cards (like the Flexport report) instead of a wide table.
   // The value passed to mobFld can be interactive HTML (editCell/supSel/buttons); bindings still attach by class after render.
   function mobFld(l,v){ return (v==null||v==='')?'':'<div style="display:flex;gap:10px;font-size:12px;line-height:1.55;align-items:baseline;margin-top:2px"><span style="color:#64748b;flex:0 0 92px">'+l+'</span><span style="color:#0f172a;font-weight:500;word-break:break-word;flex:1 1 auto;min-width:0">'+v+'</span></div>'; }

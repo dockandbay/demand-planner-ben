@@ -295,7 +295,7 @@ html body:has(#app.product-active){background:var(--card)}
 #app.product-active{background:var(--card)}
 #app #product-root .pg-card,#app #product-root .pgm-card{background:var(--card)}
 :is(#app,#pv-wrap) #supply-root .samp-details-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
-@media (max-width:700px){ :is(#app,#pv-wrap) #supply-root .samp-details-grid{grid-template-columns:1fr} }
+@media (max-width:640px){ :is(#app,#pv-wrap) #supply-root .samp-details-grid{grid-template-columns:1fr} }
 
 /* ═══ U4 PRODUCT, slice 2 (v27.486): section headings, samples grid, timeline inbox — the CSS-reachable parts ═══ */
 :is(#app,#pv-wrap) #supply-root .sect-h{font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin:14px 0 6px}
@@ -508,3 +508,12 @@ body header.pv-top .pv-lang button:hover{color:#fff}
 #pv-wrap #supply-root #pp-secs .pp-sec{padding:10px 13px 8px}
 #pv-wrap #supply-root #pp-tabs .rtab{padding:9px 13px 7px}
 #pv-wrap #supply-root #pp-tabs .rtab .pp-bi .pp-zh{font-size:9.5px}
+
+/* ═══ Mobile M1 (v27.510): phone input cap, tap targets ═══════════════════════════════════════════════════════════ */
+@media (max-width:640px){
+  #app input,#app select,#app textarea,#pv-wrap input,#pv-wrap select,#pv-wrap textarea{max-width:100%!important;box-sizing:border-box}
+  #app .bar .save-btn,#app .bar .pill,#app #dab-navwrap .pill,#app .mob-filt-toggle,#app .act-filt-toggle,#app .po-filt-toggle,#app #buy-wrap #bp-filt-toggle,#app #product-root #pg-filters .save-btn,#app #product-root #pg-filters .fci{min-height:36px}
+  #app .bar .pill,#app #dab-navwrap .pill{display:inline-flex;align-items:center}
+  #app .mob-filt-panel{display:flex;flex-direction:column;gap:8px}
+  #app #dab-navwrap .mob-filt-toggle{margin:8px 0 0}
+}
