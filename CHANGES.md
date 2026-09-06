@@ -1,3 +1,6 @@
+## v27.526 DEMAND smoothing: "no smooth" month label readable
+- The per-month "no smooth" label used the hairline colour and vanished on the grey band; now muted grey, bold italic (the FY button was already legible). artifact_v16.7.html only.
+
 ## v27.525 DEMAND smoothing: "no smooth" under a filter + strike-through preview
 - While a SKU search, a Release window or a Filter Rule is on, the per-month link reads **no smooth** and the FY control reads **no smooth** (disabled), both with hover "Cannot smooth on filter" (smoothing rebalances the whole subcategory so it needs every SKU visible). Tier / core-seasonal / active pills do not block (they are bypassed by the smooth calc).
 - Smooth preview cells now show the previous forecast struck through in grey beside the proposed number in amber; the tooltip carries the old value too. Apply / discard unchanged. artifact_v16.7.html only; display + guard only, no buy impact.

@@ -8940,7 +8940,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         std.title='Cannot smooth on filter';
         std.style.cursor='help';
         var lnkS=document.createElement('div');lnkS.textContent='no smooth';
-        lnkS.style.cssText='margin-top:1px;font-size:7px;line-height:1.2;font-weight:500;font-style:italic;color:var(--line)';
+        lnkS.style.cssText='margin-top:1px;font-size:7px;line-height:1.2;font-weight:700;font-style:italic;color:var(--muted)';   // v27.526: was var(--line) (invisible on the grey band, Ben)
         std.appendChild(lnkS);
         std.onclick=function(e){e.stopPropagation();_smoothSearchTip(e.clientX,e.clientY);};
       } else {
