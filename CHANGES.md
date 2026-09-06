@@ -1,3 +1,6 @@
+## v27.516 Portal PO cards: labels restored (v27.515 reverted)
+- Ben's label request was for the main SUPPLY PO grid, not the portal. The supplier portal card keeps a label on every line (v27.514 layout). supply/portal-view.js only.
+
 ## v27.515 Portal PO cards (phone): labels only on dates
 - Status badge, Country, Branch and Ship method sit on one unlabelled chip row under the PO ref; Direct to client (when set) is an unlabelled line; Production status select shows without a label. Only Start / End / Arrive / Completion and the Completion date picker keep labels. supply/portal-view.js only.
 
