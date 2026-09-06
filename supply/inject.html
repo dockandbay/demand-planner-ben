@@ -667,6 +667,7 @@
   #supply-root #supply-nav-sel{display:block;width:100%;font-size:14px;font-weight:700;padding:9px 10px;border:1px solid var(--nav);border-radius:8px;background:var(--nav);color:#fff;margin:2px 0 10px}
   /* SEARCH lives in the fixed top bar on mobile — hide the in-content box (its count stays) */
   #supply-root #sup-search{display:none!important}
+  #supply-root #po-prog #sup-search{display:inline-block!important;width:100%!important}   /* v27.523: the PO grid keeps its PO / supplier search on phones (Ben) */
   #supply-root .bar{gap:5px 6px}
   #supply-root input.flt{width:100%!important;max-width:none!important}
   /* dropdown filters take ~half the row (2-up) instead of a full-width row each — saves screen space */
@@ -2598,7 +2599,8 @@
     var pbatch=document.getElementById('po-batch'); if(pbatch)pbatch.onchange=function(){state.batch=this.value;selHi(this,!!this.value);view();};
     document.getElementById('sup-search').oninput=debounce(function(){state.q=this.value;_poShowAll=false;view();},350);
     (function(){ var _pat=document.getElementById('po-arch-toggle'); if(_pat)_pat.onclick=function(){ _poInclArch=!_poInclArch; delete cache['purchase-orders']; showPoSub('plan'); }; })();
-    if(actMob()){ try{ var _pat2=document.getElementById('po-arch-toggle'), _pact=document.getElementById('po-act'); if(_pat2&&_pact){ var _w=document.createElement('span'); _w.className='po-filt-item'; _w.appendChild(_pat2); _pact.appendChild(_w); } }catch(e){} }   // v27.520 phone: Show archived lives under Filters (handler already bound on the node)
+    if(actMob()){ try{ var _pat2=document.getElementById('po-arch-toggle'), _pact=document.getElementById('po-act'); if(_pat2&&_pact){ var _w=document.createElement('span'); _w.className='po-filt-item'; _w.appendChild(_pat2); _pact.appendChild(_w); }
+      ['po-impexp-toggle','po-shipplan-btn'].forEach(function(bid){ var el=document.getElementById(bid); if(el&&_pact){ var w2=document.createElement('span'); w2.className='po-filt-item'; w2.appendChild(el); _pact.appendChild(w2); } }); }catch(e){} }   // v27.520/523 phone: Show archived + Import/Export + Plan Shipments live under Filters (handlers already bound on the nodes)
     (function(){ var _psp=document.getElementById('po-shipplan-btn'); if(_psp)_psp.onclick=function(){ openShipPlan(); }; })();
     // SUG-0012 — SKU filter box (+ expand popover). Fetches the matching PO set, then view() intersects it.
     function runSku(){ var v=String(state.sku||'').trim();

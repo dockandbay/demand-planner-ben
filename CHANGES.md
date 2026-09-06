@@ -1,3 +1,7 @@
+## v27.523 Mobile PO grid: PO / supplier search back; Import/Export + Plan Shipments move under Filters
+- The phone rule that hides the shared SUPPLY search field now exempts the Purchase Orders toolbar, so the PO / supplier search shows (full width) on phones.
+- On phones Import/Export and Plan Shipments sit inside the Filters area with Show archived (DOM move after render, handlers intact). Desktop unchanged. supply/inject.html only.
+
 ## v27.522 Supplier archive (SUPPLY ▸ CONFIG ▸ Suppliers)
 - **Archive / Restore** button on the supplier edit form. Archived suppliers drop out of the card list by default; a **Show archived (n)** pill on the list toolbar reveals them (dimmed, ARCHIVED badge). Search still finds them when the pill is on.
 - **Pickers exclude archived suppliers:** PO grid supplier picker + every lookups-driven supplier list, PRODUCT spec supplier lists. Existing POs, payments, price lists and portal logins that reference an archived supplier are untouched (names still resolve; currency lookups keep all suppliers).
