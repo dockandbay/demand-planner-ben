@@ -1,3 +1,8 @@
+## v27.519 Mobile PO cards (main grid): PLAN label, Shipment row, blank Direct rows removed
+- Button reads PLAN (the phone P-collapse pseudo-element is switched off inside the card, which showed PPLAN).
+- Shipment is a labelled row (SHIPMENT · assign / ref) under the chips instead of an unlabelled chip.
+- Direct to client rows that are only dashes (client + sales-order ref both blank) are dropped: the blank test now treats dash-only text as empty. supply/hz-theme.css + supply/inject.html.
+
 ## v27.518 Mobile PO cards (main grid): overlap fix
 - PLAN button now sits inline at the right of the PO title line (no absolute positioning), so it cannot cover the PO ref or the chips. Chip row (Status · Ship to · Branch · Shipment) wraps with even gaps and no dot separators; each chip is a light pill so a wrapped chip still reads as one item. Date lines are full-width label / value rows with a fixed 38% label column; labels never render on non-date cells. Expanded PLAN row and P# captions keep their full-width treatment. supply/hz-theme.css only.
 

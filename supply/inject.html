@@ -1333,7 +1333,7 @@
         for(var i=0;i<cells.length;i++){ if((cells[i].colSpan||1)>1){full=true;break;} }
         if(full||!labels.length){ tr.dataset.full='1'; return; }
         for(var j=0;j<cells.length;j++){ var c=cells[j]; c.setAttribute('data-l',labels[j]||''); c.setAttribute('data-ci',String(j));
-          var tx=(c.textContent||'').replace(/\s+/g,' ').trim(); if((tx===''||tx==='—'||tx==='-')&&!c.querySelector('input,select,button,a,img'))c.setAttribute('data-empty','1'); else c.removeAttribute('data-empty'); } }); });
+          var tx=(c.textContent||'').replace(/\s+/g,' ').trim(); if(/^[\s—–-]*$/.test(tx)&&!c.querySelector('input,select,button,a,img'))c.setAttribute('data-empty','1'); else c.removeAttribute('data-empty'); } }); });
       t.dataset.stack='1'; }catch(e){} }); }
   try{ (function(){ var mq=window.matchMedia&&window.matchMedia('(max-width:640px)'), obs=null, tm=0;
     function arm(){ if(!mq||!mq.matches){ if(obs){obs.disconnect();obs=null;} return; } if(obs)return;

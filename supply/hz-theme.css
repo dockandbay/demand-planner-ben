@@ -545,37 +545,37 @@ body header.pv-top .pv-lang button:hover{color:#fff}
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="PO"]{order:0;flex:1 1 0;min-width:0!important;font-size:14px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="PO"] .ind{display:none}
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-ci="0"]{order:0;flex:0 0 auto;width:auto!important;margin-left:auto;text-align:right}
-  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-ci="0"] .planbtn{min-height:34px;padding:6px 12px;font-size:11px;white-space:nowrap}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-ci="0"] .planbtn{min-height:34px;padding:6px 12px;font-size:11px!important;white-space:nowrap}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-ci="0"] .planbtn.po-exp::before{content:none!important}   /* v27.519: the phone "P" collapse showed PPLAN inside the card */
   /* a full-width hairline after the title line */
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full])::after{content:"";order:0;flex:1 1 100%;height:1px;background:var(--line);margin:0 0 2px}
   /* line 2+: unlabelled chips, wrap freely, no separators */
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Status"],
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Ship to"],
-  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Branch"],
-  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Shipment"]{flex:0 0 auto;max-width:100%!important;display:inline-flex;align-items:center;background:var(--hover);border:1px solid var(--line);border-radius:999px;padding:3px 9px!important;font-size:12px;font-weight:600}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Branch"]{flex:0 0 auto;max-width:100%!important;display:inline-flex;align-items:center;background:var(--hover);border:1px solid var(--line);border-radius:999px;padding:3px 9px!important;font-size:12px;font-weight:600}
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Status"]{order:1;background:transparent;border:0;padding:0!important}
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Ship to"]{order:2}
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Branch"]{order:3}
-  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Shipment"]{order:4}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Shipment"]{order:5;display:flex;align-items:baseline;gap:10px;font-size:12px;margin-top:4px;padding-top:6px!important;border-top:1px dashed var(--line)!important}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Shipment"]::before{content:attr(data-l);display:block;flex:0 0 38%;color:var(--faint);font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;line-height:1.5}
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Status"] .fci,
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Ship to"] .fci,
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Branch"] .fci,
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Shipment"] .fci{max-width:none;width:auto}
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Ship to"][data-empty],
-  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Branch"][data-empty],
-  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Shipment"][data-empty]{display:none}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Branch"][data-empty]{display:none}
   /* direct to client: own line, only when set */
-  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Direct"]{order:5;font-size:12px!important;line-height:1.35!important;max-width:none!important;white-space:normal!important}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Direct"]{order:6;font-size:12px!important;line-height:1.35!important;max-width:none!important;white-space:normal!important}
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Direct"][data-empty]{display:none}
   /* labelled dates: label column 38%, value column the rest */
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Start"],
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="End"],
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Arrival/Delivery"],
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Completion"]{display:flex;align-items:baseline;gap:10px;font-size:12px}
-  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Start"]{order:6;margin-top:4px;padding-top:6px!important;border-top:1px dashed var(--line)!important}
-  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="End"]{order:7}
-  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Arrival/Delivery"]{order:8}
-  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Completion"]{order:9}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Start"]{order:7}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="End"]{order:8}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Arrival/Delivery"]{order:9}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Completion"]{order:10}
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Start"]::before,
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="End"]::before,
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Arrival/Delivery"]::before,
