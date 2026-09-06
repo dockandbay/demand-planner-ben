@@ -1,3 +1,7 @@
+## v27.525 DEMAND smoothing: "no smooth" under a filter + strike-through preview
+- While a SKU search, a Release window or a Filter Rule is on, the per-month link reads **no smooth** and the FY control reads **no smooth** (disabled), both with hover "Cannot smooth on filter" (smoothing rebalances the whole subcategory so it needs every SKU visible). Tier / core-seasonal / active pills do not block (they are bypassed by the smooth calc).
+- Smooth preview cells now show the previous forecast struck through in grey beside the proposed number in amber; the tooltip carries the old value too. Apply / discard unchanged. artifact_v16.7.html only; display + guard only, no buy impact.
+
 ## v27.524 DEMAND plan: Release filter shows in the dropdown, not as a chip
 - The "Release: SS26" chip on its own line under the plan controls is gone (the filter already lives in More filters). Instead the Release dropdown inside More filters turns black with white bold text whenever a season other than All is selected, and the More filters button keeps its blue "filters on" tint. artifact_v16.7.html only; display-only.
 

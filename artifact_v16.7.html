@@ -4752,8 +4752,10 @@ function subcatInvFor(s,co,ch){ var k=s+'|'+co+'|'+ch; if(_subInvMemo[k]!=null)r
 })();
 var SMOOTH_PREVIEW=null; // {pk:'subcat|co|ch', fy:startY|null, months:{'YYYY_MM':{sku:units}}} — one pending smooth preview at a time (fy set = whole-FY smooth)
 // Transient tooltip shown when a user clicks a smooth cell while a SKU search is active (smoothing needs all SKUs visible).
+// v27.525: smoothing needs EVERY SKU of the subcat visible. Search, Release window and Filter Rules all hide SKUs (they sit above the all=true bypass in filteredSkus), so smoothing is blocked while any of them is on. Tier / core-seasonal / active pills are bypassed by all=true and do not block.
+function planSmoothBlocked(){ try{ if((PLAN_SKU_QRY||'').trim())return true; if(typeof PLAN_RW!=='undefined'&&PLAN_RW!=='ALL')return true; if(typeof FR_ACTIVE!=='undefined'&&FR_ACTIVE&&!(typeof _frIsDrift==='function'&&_frIsDrift()))return true; }catch(e){} return false; }
 function _smoothSearchTip(x,y){ var t=document.getElementById('_smooth-tip'); if(!t){ t=document.createElement('div'); t.id='_smooth-tip'; t.style.cssText='position:fixed;z-index:300020;max-width:280px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:8px 10px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none'; document.body.appendChild(t); }
-  t.textContent='Smoothing is disabled while searching — it rebalances the whole subcategory, so clear the SKU search box to smooth.';
+  t.textContent='Cannot smooth on filter: smoothing rebalances the whole subcategory, so it needs every SKU visible. Clear the SKU search, the Release filter or the filter rule to smooth.';
   t.style.left=Math.min((x||40)+8,window.innerWidth-290)+'px'; t.style.top=((y||40)+12)+'px'; t.style.display='block';
   clearTimeout(t._h); t._h=setTimeout(function(){ t.style.display='none'; },3200); }
 var SMOOTH_LEADER=false;  // false = Standard (pure proportional), true = Leader (protect historically-strong SKUs). Set via the FY-total dropdown; applies to ALL smoothing.
@@ -8251,7 +8253,9 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     if(!Object.prototype.hasOwnProperty.call(SMOOTH_PREVIEW.months[mo],sku))return;
     var pv=SMOOTH_PREVIEW.months[mo][sku];
     if(inp){inp.value=String(pv);inp.disabled=true;inp.style.color='#b45309';inp.style.fontWeight='700';inp.title='Smooth preview — not yet applied';}
-    if(fcDiv){fcDiv.textContent=fn(pv);fcDiv.style.color='#b45309';fcDiv.style.fontWeight='700';fcDiv.style.fontStyle='normal';fcDiv.title='Proposed by Smooth — click \u2713 apply to commit';}
+    if(fcDiv){ var oldTxt=(fcDiv.textContent||'').trim(), newTxt=fn(pv);   // v27.525: show the previous number struck through beside the proposed one
+      fcDiv.innerHTML=(oldTxt&&oldTxt!==newTxt?'<s style="color:var(--faint);font-weight:400;margin-right:3px">'+esc(oldTxt)+'</s>':'')+esc(newTxt);
+      fcDiv.style.color='#b45309';fcDiv.style.fontWeight='700';fcDiv.style.fontStyle='normal';fcDiv.title='Proposed by Smooth (was '+oldTxt+') — click \u2713 apply to commit';}
   }
   // Re-render this subcategory's expanded SKU rows in place (after a preview/apply/cancel).
   function reExpand(){
@@ -8932,10 +8936,10 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     } else if(!prevActive&&isFc&&target>0&&Math.abs(g)/target>0.05){
       var isF27=(std.className||'').indexOf('bg27')>=0;
       std.classList.add('smoothable');
-      if((PLAN_SKU_QRY||'').trim()){   // SEARCH mode: smoothing rebalances the WHOLE subcategory, so it needs every SKU visible \u2014 disabled while a SKU search is active
-        std.title='Smoothing is disabled while a SKU search is active \u2014 it rebalances the whole subcategory, so it needs every SKU visible. Clear the search box to smooth.';
+      if(planSmoothBlocked()){   // FILTER mode (search / Release / filter rule): smoothing rebalances the WHOLE subcategory, so it needs every SKU visible (v27.525 wording per Ben)
+        std.title='Cannot smooth on filter';
         std.style.cursor='help';
-        var lnkS=document.createElement('div');lnkS.textContent='smooth (n/a in search)';
+        var lnkS=document.createElement('div');lnkS.textContent='no smooth';
         lnkS.style.cssText='margin-top:1px;font-size:7px;line-height:1.2;font-weight:500;font-style:italic;color:var(--line)';
         std.appendChild(lnkS);
         std.onclick=function(e){e.stopPropagation();_smoothSearchTip(e.clientX,e.clientY);};
@@ -8984,6 +8988,11 @@ function insertInlineSkuRows(s,co,ch,afterTr){
           var rb=document.createElement('div'); rb.style.cssText='display:flex;gap:2px;justify-content:center';
           smoothReviewBar(rb);
           wrap.appendChild(lbl); wrap.appendChild(rb);
+        } else if(planSmoothBlocked()){   // v27.525: filter on → no smooth
+          var nb=document.createElement('button'); nb.textContent='no smooth'; nb.title='Cannot smooth on filter'; nb.disabled=true;
+          nb.style.cssText='font-size:7px;line-height:1.1;padding:2px 4px;border:1px solid var(--line);border-radius:3px;background:var(--hover);color:var(--faint);cursor:help;font-weight:700;font-style:italic';
+          nb.onclick=function(e){e.stopPropagation();};
+          wrap.appendChild(nb);
         } else {
           var sa=document.createElement('button'); sa.textContent='⤳ Smooth All';
           sa.title='Preview a smooth of EVERY forecast month in this financial year to the subcategory forecast — review before applying.';
