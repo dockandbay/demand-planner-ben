@@ -2145,13 +2145,13 @@ function fbaTrfLoad(cb){ fetch('/api/supply/fba-transfers/list').then(function(r
 function fbaTrfRefresh(silent,cb){ if(_fbaTrfBusy)return; if(_fbaDlTimer){clearTimeout(_fbaDlTimer);_fbaDlTimer=null;}   // any refresh (esp. manual) supersedes a scheduled post-download run
   if(!silent)_fbaTrfBlocked=null;   // a manual ⟳ clears the latch and retries
   _fbaTrfBusy=true; _fbaTrfRenderBox();
-  fetch('/api/supply/fba-transfers/refresh',{method:'POST'}).then(function(r){ return r.json().then(function(j){return {ok:r.ok,j:j||{}};},function(){return {ok:r.ok,j:{}};}); }).then(function(res){
+  fetch('/api/supply/fba-transfers/refresh',{method:'POST'}).then(function(r){ return r.json().then(function(j){return {ok:r.ok,status:r.status,j:j||{}};},function(){return {ok:r.ok,status:r.status,j:{}};}); }).then(function(res){
     if(!res.ok || res.j.ok===false){   // refusal (403 read-only) OR 200-with-ok:false (Cin7 not configured): latch and DO NOT run the success path — that's what closed the render()→maybeRefresh loop
-      _fbaTrfBlocked=(res.j&&(res.j.error||res.j.message))||(res.ok?'source not available':'no permission to refresh');
+      _fbaTrfBlocked=(res.j&&(res.j.error||res.j.message))||(res.ok?'source not available':(res.status===403?'no permission to refresh (read-only)':'no permission to refresh'));   // v27.521: explicit 403 wording (parity with live)
       _fbaTrfBusy=false; _fbaTrfRenderBox(); if(cb)cb(); return; }
     _fbaTrfBlocked=null;
     fbaTrfLoad(function(){ _fbaTrfBusy=false; if(typeof render==='function')render(); if(cb)cb(); });
-  }).catch(function(){ _fbaTrfBusy=false; _fbaTrfRenderBox(); if(cb)cb(); }); }
+  }).catch(function(){ _fbaTrfBlocked='network error, press refresh to retry'; _fbaTrfBusy=false; _fbaTrfRenderBox(); if(cb)cb(); }); }   // v27.521: network failure LATCHES too (live parity) so the hourly auto-refresh cannot loop on a dead connection
 function _fbaTrfAgo(iso){ var t=Date.parse(iso); if(!t)return ''; var m=Math.round((Date.now()-t)/60000); return m<1?'just now':(m<60?(m+'m ago'):(Math.round(m/60)+'h ago')); }
 function _fbaTrfMaybeRefresh(){ if(_fbaTrfBusy||_fbaTrfBlocked)return; var lr=FBA_PENDING_LR?Date.parse(FBA_PENDING_LR):0; if(!lr||(Date.now()-lr)>3600000)fbaTrfRefresh(true); }   // auto-refresh on FBA visit if last run > 1h; a latched refusal stops the retry loop until a manual ⟳
 function _fbaTrfOnView(){ if(!_fbaTrfLoaded){ fbaTrfLoad(function(){ if(typeof render==='function')render(); _fbaTrfMaybeRefresh(); }); } else { _fbaTrfMaybeRefresh(); } _fbaTrfRenderBox(); }

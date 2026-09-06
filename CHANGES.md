@@ -1,3 +1,6 @@
+## v27.521 FBA-transfer refusal latch: port back the network latch + 403 message (parity with live)
+- Diviyaj's live build latches on a network failure and shows a read-only 403 message; the v27.466 rebuild dropped both. Restored: a failed fetch now latches ("network error, press refresh to retry") instead of leaving the hourly auto-refresh free to retry on every render; a 403 reads "no permission to refresh (read-only)". Manual refresh still clears the latch. artifact_v16.7.html only; no buy impact.
+
 ## v27.520 Mobile PO grid: Show archived moves under Filters
 - On phones the Show / Hide archived pill sits inside the collapsed filter area (with ACTION ITEMS / NEEDS ERP), so it appears only when Filters is open; desktop toolbar unchanged. The pill is re-parented after render so its click handler is untouched. supply/inject.html only.
 
