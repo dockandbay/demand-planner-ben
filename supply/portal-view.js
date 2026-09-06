@@ -620,6 +620,12 @@
   #supply-root table.pp-pos[data-stack] tbody td[data-ci="1"] .pp-ml>span:first-child{flex:0 0 40%;color:var(--faint);font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;line-height:1.5}
   #supply-root table.pp-pos[data-stack] tbody td[data-ci="1"]{border-bottom:0!important;padding-bottom:0!important;margin-bottom:0}
   #supply-root table.pp-pos[data-stack] tbody td[data-ci="7"]{border-top:1px solid var(--line)!important;margin-top:4px;padding-top:8px!important}
+  #supply-root table.pp-pos[data-stack] tbody td[data-ci="7"]::before{display:none}   /* v27.515: production status select needs no label */
+  #supply-root table.pp-pos[data-stack] tbody td[data-ci="7"] select{max-width:100%}
+  #supply-root table.pp-pos[data-stack] .pp-mchips{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;margin:4px 0 6px}
+  #supply-root table.pp-pos[data-stack] .pp-mchip{display:inline-flex;align-items:center;gap:4px;font-size:12px;font-weight:600;color:var(--ink)}
+  #supply-root table.pp-pos[data-stack] .pp-mchip+.pp-mchip::before{content:"·";color:var(--faint);margin-right:6px;font-weight:400}
+  #supply-root table.pp-pos[data-stack] .pp-mdir{font-size:12px;margin:0 0 6px;padding-bottom:6px;border-bottom:1px dashed var(--line)}
   #supply-root table.pp-pos[data-stack] tbody td[data-ci="10"] input{width:auto!important;max-width:60%;box-sizing:border-box!important}
   #supply-root table.pp-pos[data-stack] tbody tr.pp-grp[data-full]{background:transparent;border:0;padding:10px 0 4px;box-shadow:none;margin:0}
   #supply-root table.pp-pos[data-stack] tbody tr.pp-grp[data-full] td{display:block;background:transparent!important;padding:0 2px!important;border:0!important;border-bottom:1px solid #cbd5e1!important}
@@ -1298,9 +1304,10 @@
           var _isChild=!!(p.ships_with_master_po&&p.ships_with_master_po!==p.po);   // this PO ships under another (master) PO → indent it
           return _grpHdr+'<tr class="pp-row" data-grp="'+esc(_gkey)+'"><td class="l"><button class="save-btn pp-exp" data-i="'+i+'" data-po="'+esc(p.po)+'"><span class="mng-txt">MANAGE</span>'+(act>0?' <span class="ex-badge" title="'+act+' action'+(act>1?'s':'')+' needed">'+act+'</span>':'')+'</button></td>'
             +'<td class="l"'+(_isChild?' style="padding-left:22px"':'')+'>'+(_isChild?'<span class="mut" title="ships with '+esc(p.ships_with_master_po)+'">└ </span>':'')+'<b>'+esc(p.po)+'</b>'+(function(){ var _m=p.ships_with_master_po||p.po, _ar=_spArr[_m]; function ml(l,v){ return '<div class="pp-ml"><span>'+l+'</span><span>'+(v||'<span class="mut">—</span>')+'</span></div>'; }
-              return '<div class="pp-mcard">'+ml('Status','<span class="tool-badge '+statusBg(p.status)+'">'+esc(p.status||'')+'</span>'+(ppIsFOB(p)?' <span style="background:var(--violet-bg);color:var(--violet);border-radius:10px;font-size:10.5px;font-weight:700;padding:1px 6px;white-space:nowrap">📦 FOB</span>':''))
-                +ml('Country',p.country?esc(p.country):'')+ml('Branch',p.branch?esc(p.branch):'')+ml('Ship method',p.ship_mode?esc(String(p.ship_mode).toUpperCase()):'')
-                +(p.client?ml('Direct to client',esc(p.client)+(p.sales_order_ref?' <span class="mut">'+esc(p.sales_order_ref)+'</span>':'')):'')
+              function chip(v){ return v?'<span class="pp-mchip">'+v+'</span>':''; }
+              return '<div class="pp-mcard"><div class="pp-mchips">'+chip('<span class="tool-badge '+statusBg(p.status)+'">'+esc(p.status||'')+'</span>'+(ppIsFOB(p)?' <span style="background:var(--violet-bg);color:var(--violet);border-radius:10px;font-size:10.5px;font-weight:700;padding:1px 6px;white-space:nowrap">📦 FOB</span>':''))
+                +chip(p.country?esc(p.country):'')+chip(p.branch?esc(p.branch):'')+chip(p.ship_mode?esc(String(p.ship_mode).toUpperCase()):'')+'</div>'
+                +(p.client?'<div class="pp-mdir">'+esc(p.client)+(p.sales_order_ref?' <span class="mut">'+esc(p.sales_order_ref)+'</span>':'')+'</div>':'')
                 +ml('Start',p.prod_start?esc(fd(p.prod_start)):'')+ml('End',p.prod_end?esc(fd(p.prod_end)):'')+ml('Arrive',_ar?(esc(fd(_ar.d))+(_ar.est?' <span class="mut" style="font-size:10.5px">est</span>':'')):'')
                 +ml('Completion',(p.completion_date||p.prod_completion_date)?esc(fd(p.completion_date||p.prod_completion_date)):'')+'</div>'; })()+'</td>'
             +'<td class="l" style="width:38px;min-width:38px;white-space:nowrap">'+(p.prod_no?esc(p.prod_no):'<span class="mut">—</span>')+'</td>'

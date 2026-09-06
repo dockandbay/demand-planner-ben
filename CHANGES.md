@@ -1,3 +1,6 @@
+## v27.515 Portal PO cards (phone): labels only on dates
+- Status badge, Country, Branch and Ship method sit on one unlabelled chip row under the PO ref; Direct to client (when set) is an unlabelled line; Production status select shows without a label. Only Start / End / Arrive / Completion and the Completion date picker keep labels. supply/portal-view.js only.
+
 ## v27.514 Portal PO cards (phone): Ben's field list
 - Card = PO ref (no label) then Status, Country, Branch, Ship method, Direct to client (only when a client is set), Start, End (production), Arrive (shipment plan arrival, est-flagged) and Completion date; then the two supplier inputs, Production status and the Completion date picker. Amount due / Due dropped from the card (still in MANAGE ▸ PAYMENTS).
 - Rendered as a phone-only block inside the PO cell (.pp-mcard, desktop hides it); all other grid cells are hidden on the phone. supply/portal-view.js only.
