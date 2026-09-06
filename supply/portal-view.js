@@ -457,6 +457,7 @@
 #supply-root .pill.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
 #supply-root .pill-lbl{font-size:11px;color:#444;font-weight:600}
 #supply-root #rep-subnav,#supply-root #config-subs,#supply-root #prod-subtabs,#supply-root .po-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:#f0f6ff;border:1px solid #dbeafe;border-radius:6px;padding:2px 5px;margin:0 0 12px}
+#supply-root .pp-mcard{display:none}   /* phone-only PO card body (v27.514) */
 #supply-root .ex-badge{display:inline-block;min-width:16px;height:16px;line-height:16px;border-radius:8px;background:#dc2626;color:#fff;font-size:9px;font-weight:700;text-align:center;padding:0 4px;margin-left:4px;vertical-align:1px}
 #supply-root .cli-form{max-width:660px;margin-bottom:10px}
 #supply-root .cli-row{display:flex;align-items:flex-start;gap:10px;padding:5px 0;border-bottom:1px solid #f1f1f1}
@@ -612,7 +613,13 @@
   #supply-root table.pp-pos[data-stack] .pp-exp .ex-badge{min-width:16px;height:16px;line-height:16px;font-size:9px;padding:0 4px;margin-left:4px}
   #supply-root table.pp-pos[data-stack] tbody td[data-ci="1"]{display:block;font-weight:800;font-size:14px;padding:2px 110px 6px 0!important;border-bottom:1px solid var(--line)!important;margin-bottom:4px}
   #supply-root table.pp-pos[data-stack] tbody td[data-ci="1"]::before{display:none}
-  #supply-root table.pp-pos[data-stack] tbody td[data-ci="6"],#supply-root table.pp-pos[data-stack] tbody td[data-ci="8"],#supply-root table.pp-pos[data-stack] tbody td[data-ci="12"],#supply-root table.pp-pos[data-stack] tbody td[data-ci="13"],#supply-root table.pp-pos[data-stack] tbody td[data-ci="14"],#supply-root table.pp-pos[data-stack] tbody td[data-ci="15"],#supply-root table.pp-pos[data-stack] tbody td[data-ci="16"],#supply-root table.pp-pos[data-stack] tbody td[data-ci="19"]{display:none}
+  /* v27.514: only the PO cell (title + .pp-mcard lines), Production status (7) and Completion date picker (10) show on the phone */
+  #supply-root table.pp-pos[data-stack] tbody tr.pp-row td:not([data-ci="0"]):not([data-ci="1"]):not([data-ci="7"]):not([data-ci="10"]){display:none}
+  #supply-root table.pp-pos[data-stack] tbody td[data-ci="1"] .pp-mcard{display:block;font-weight:400;font-size:12px;margin-top:6px}
+  #supply-root table.pp-pos[data-stack] tbody td[data-ci="1"] .pp-ml{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:4px 0}
+  #supply-root table.pp-pos[data-stack] tbody td[data-ci="1"] .pp-ml>span:first-child{flex:0 0 40%;color:var(--faint);font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;line-height:1.5}
+  #supply-root table.pp-pos[data-stack] tbody td[data-ci="1"]{border-bottom:0!important;padding-bottom:0!important;margin-bottom:0}
+  #supply-root table.pp-pos[data-stack] tbody td[data-ci="7"]{border-top:1px solid var(--line)!important;margin-top:4px;padding-top:8px!important}
   #supply-root table.pp-pos[data-stack] tbody td[data-ci="10"] input{width:auto!important;max-width:60%;box-sizing:border-box!important}
   #supply-root table.pp-pos[data-stack] tbody tr.pp-grp[data-full]{background:transparent;border:0;padding:10px 0 4px;box-shadow:none;margin:0}
   #supply-root table.pp-pos[data-stack] tbody tr.pp-grp[data-full] td{display:block;background:transparent!important;padding:0 2px!important;border:0!important;border-bottom:1px solid #cbd5e1!important}
@@ -1255,7 +1262,7 @@
     function ppPOs(pos, data){ var lb=data.lb||{}, notesByPo=data.notesByPo||{}, subsByPo=data.subsByPo||{}, costsByPo=data.costsByPo||{}, supSkus=data.supSkus||[], xdByPo=data.xdByPo||{}, addByPo=data.addByPo||{};
       if(!pos.length)return '<div class="count">No purchase orders for this supplier.</div>';
       var today=new Date().toISOString().slice(0,10);
-      var _spMasters={}; ((_ppData&&_ppData.shipmentPlan)||[]).forEach(function(s){ if(s.master_po)_spMasters[s.master_po]=1; });   // shipments in THIS supplier's plan → ships-with can open them
+      var _spMasters={}, _spArr={}; ((_ppData&&_ppData.shipmentPlan)||[]).forEach(function(s){ if(s.master_po){ _spMasters[s.master_po]=1; if(s.arrival)_spArr[s.master_po]={d:s.arrival,est:!!s.arrival_est}; } });   // v27.514: arrival per master PO for the phone card   // shipments in THIS supplier's plan → ships-with can open them
       return '<div class="tw"><table class="pp-tbl pp-pos"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l" style="width:38px;min-width:38px" title="Production number">P#</th><th class="l">Status</th><th class="l" title="Ship to country">CTRY</th><th class="l">Ship to branch</th><th class="l">Direct</th><th class="l">Production status</th><th class="l">Start</th><th class="l">Est. completion</th><th class="l">Completion date</th><th class="l">Ship</th><th class="l">Flexport</th><th class="l">Ships With</th><th style="text-align:right">Start deposit</th><th style="text-align:right">Completion</th><th style="text-align:right">Balance</th><th style="text-align:right">Amount due</th><th class="l">Due</th><th class="l">Deposit ref</th></tr></thead><tbody>'
         +pos.slice().sort(function(a,b){ var pa=((a.prod_no==null?'':String(a.prod_no)).trim())||'~~~', pb=((b.prod_no==null?'':String(b.prod_no)).trim())||'~~~';
             if(pa!==pb)return pa<pb?-1:1;
@@ -1290,7 +1297,12 @@
           var _gDue=(p.value_used!=null?Number(p.value_used)-_gPaid:null);
           var _isChild=!!(p.ships_with_master_po&&p.ships_with_master_po!==p.po);   // this PO ships under another (master) PO → indent it
           return _grpHdr+'<tr class="pp-row" data-grp="'+esc(_gkey)+'"><td class="l"><button class="save-btn pp-exp" data-i="'+i+'" data-po="'+esc(p.po)+'"><span class="mng-txt">MANAGE</span>'+(act>0?' <span class="ex-badge" title="'+act+' action'+(act>1?'s':'')+' needed">'+act+'</span>':'')+'</button></td>'
-            +'<td class="l"'+(_isChild?' style="padding-left:22px"':'')+'>'+(_isChild?'<span class="mut" title="ships with '+esc(p.ships_with_master_po)+'">└ </span>':'')+'<b>'+esc(p.po)+'</b></td>'
+            +'<td class="l"'+(_isChild?' style="padding-left:22px"':'')+'>'+(_isChild?'<span class="mut" title="ships with '+esc(p.ships_with_master_po)+'">└ </span>':'')+'<b>'+esc(p.po)+'</b>'+(function(){ var _m=p.ships_with_master_po||p.po, _ar=_spArr[_m]; function ml(l,v){ return '<div class="pp-ml"><span>'+l+'</span><span>'+(v||'<span class="mut">—</span>')+'</span></div>'; }
+              return '<div class="pp-mcard">'+ml('Status','<span class="tool-badge '+statusBg(p.status)+'">'+esc(p.status||'')+'</span>'+(ppIsFOB(p)?' <span style="background:var(--violet-bg);color:var(--violet);border-radius:10px;font-size:10.5px;font-weight:700;padding:1px 6px;white-space:nowrap">📦 FOB</span>':''))
+                +ml('Country',p.country?esc(p.country):'')+ml('Branch',p.branch?esc(p.branch):'')+ml('Ship method',p.ship_mode?esc(String(p.ship_mode).toUpperCase()):'')
+                +(p.client?ml('Direct to client',esc(p.client)+(p.sales_order_ref?' <span class="mut">'+esc(p.sales_order_ref)+'</span>':'')):'')
+                +ml('Start',p.prod_start?esc(fd(p.prod_start)):'')+ml('End',p.prod_end?esc(fd(p.prod_end)):'')+ml('Arrive',_ar?(esc(fd(_ar.d))+(_ar.est?' <span class="mut" style="font-size:10.5px">est</span>':'')):'')
+                +ml('Completion',(p.completion_date||p.prod_completion_date)?esc(fd(p.completion_date||p.prod_completion_date)):'')+'</div>'; })()+'</td>'
             +'<td class="l" style="width:38px;min-width:38px;white-space:nowrap">'+(p.prod_no?esc(p.prod_no):'<span class="mut">—</span>')+'</td>'
             +'<td class="l"><span class="tool-badge '+statusBg(p.status)+'">'+esc(p.status||'')+'</span>'+(ppIsFOB(p)?' <span style="background:var(--violet-bg);color:var(--violet);border-radius:10px;font-size:10.5px;font-weight:700;padding:1px 6px;white-space:nowrap" title="FOB — collected at your factory, no import shipment">📦 FOB</span>':'')+'</td>'
             +'<td class="l">'+(p.country?esc(p.country):'<span class="mut">—</span>')+'</td>'

@@ -1,3 +1,7 @@
+## v27.514 Portal PO cards (phone): Ben's field list
+- Card = PO ref (no label) then Status, Country, Branch, Ship method, Direct to client (only when a client is set), Start, End (production), Arrive (shipment plan arrival, est-flagged) and Completion date; then the two supplier inputs, Production status and the Completion date picker. Amount due / Due dropped from the card (still in MANAGE ▸ PAYMENTS).
+- Rendered as a phone-only block inside the PO cell (.pp-mcard, desktop hides it); all other grid cells are hidden on the phone. supply/portal-view.js only.
+
 ## v27.513 Mobile: supplier portal PO grid becomes cards on phones
 - **PO cards under 640px:** each purchase order is a card titled with the PO ref, MANAGE (with its action count) top right, then P#, Status, Ship to country / branch, Production status (select), Est. completion, Completion date (picker), Ship, Amount due and Due as label / value lines. Direct, Start, Flexport, Ships With, Start deposit, Completion, Balance and Deposit ref are hidden on the phone (all live in the MANAGE expansion). Production group headers stay as section captions; the expanded MANAGE panel attaches under its card.
 - **Mechanism:** the PO table carries class pp-pos so ppStackTables() labels it (td[data-l] + td[data-ci] column index); the Productions SKU matrix keeps its scroll. supply/portal-view.js only.
