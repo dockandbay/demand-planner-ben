@@ -1,3 +1,6 @@
+## v27.524 DEMAND plan: Release filter shows in the dropdown, not as a chip
+- The "Release: SS26" chip on its own line under the plan controls is gone (the filter already lives in More filters). Instead the Release dropdown inside More filters turns black with white bold text whenever a season other than All is selected, and the More filters button keeps its blue "filters on" tint. artifact_v16.7.html only; display-only.
+
 ## v27.523 Mobile PO grid: PO / supplier search back; Import/Export + Plan Shipments move under Filters
 - The phone rule that hides the shared SUPPLY search field now exempts the Purchase Orders toolbar, so the PO / supplier search shows (full width) on phones.
 - On phones Import/Export and Plan Shipments sit inside the Filters area with Show archived (DOM move after render, handlers intact). Desktop unchanged. supply/inject.html only.
