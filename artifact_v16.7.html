@@ -8337,6 +8337,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     var preLaunchM=function(mo){return launchDate&&(mo.slice(0,4)+'-'+mo.slice(5,7)+'-01')<launchDate;}; // pre-launch only for months before the launch date
     var invOH=p.inv&&p.inv[wh]||0;
     var invOO=p.oo&&p.oo[wh]||0; // on-order / inbound
+    if(ch==='FBA'&&discDate){ try{ var _wh3=skuWh(co,'DTC'); if(_wh3&&_wh3!==wh){ invOH+=(p.inv&&p.inv[_wh3])||0; invOO+=(p.oo&&p.oo[_wh3])||0; } }catch(e){} }   // v27.527 (Ben): FBA run-off pool counts the country's 3PL stock too — transfers replenish FBA, so a discontinued SKU keeps forecasting on FBA while the 3PL still holds units
 
     // Compute per-month forecast
     var skuFC={};

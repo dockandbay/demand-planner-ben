@@ -1,3 +1,7 @@
+## v27.527 DEMAND plan: FBA run-off pool counts the country's 3PL stock (Ben)
+- A discontinued SKU's FBA row used only FBA on-hand + inbound as its run-off pool, so it locked as "disc" while the 3PL still held units (e.g. TOWLB-COLLAB-LG-UNO UK FBA: 16 in FBA, 1,474 in the 3PL). FBA rows now add the country's 3PL on-hand + inbound to the pool, since transfers replenish FBA. DTC / other channels unchanged (3PL pool). Applies only when the SKU has a discontinue date.
+- **Buy plan verified identical** before and after (snapshot diff = 0 across UK/US/EU/AU/CA); discontinued SKUs buy 0 via the EOL cap. FBA transfer suggestions follow the restored FBA forecast. artifact_v16.7.html only.
+
 ## v27.526 DEMAND smoothing: "no smooth" month label readable
 - The per-month "no smooth" label used the hairline colour and vanished on the grey band; now muted grey, bold italic (the FY button was already legible). artifact_v16.7.html only.
 
