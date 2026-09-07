@@ -1,3 +1,12 @@
+## v27.569 Samples: uploaded files stay listed, Samples tab = batch page, Batch Review button, received ⇒ COMPLETED (Ben)
+- mig 267: planner.portal_attachments.aspect (nullable) — a product-sample upload can belong to one sampled component.
+- Batch review + Samples tab: files uploaded under a component feedback box stay visible as chips (thumbnail or 📎 + file name, click opens the file); listed from the sample data on every render and appended at once on upload.
+- PRODUCT ▸ Samples tab now matches the batch page: same placeholder, dashed "Choose files or drag & drop" box per component (click or drop), files attach to the sample + the component timeline note.
+- Samples tab layout: narrower component label column (wraps), wider feedback column, all three columns top-aligned.
+- Samples tab "Sample requests" table: clicking an SR ref opens the SR drawer instead of leaving for SUPPLY ▸ Samples.
+- SUPPLY ▸ Samples editor (drawer + page): "Sample Batch Review ↗" button next to Save ref, shown only when the shipment carries development samples; opens #/product/batch/<id> with that shipment selected.
+- Mark received (batch page, Samples tab, SR editor) now also sets the shipment status to COMPLETED (cancelled stays cancelled); un-marking leaves status alone.
+
 ## v27.568 PRODUCT ▸ SAMPLE BATCH REVIEW: filter box, blue shipment box, picker position, Samples drawer + two-way refresh (Ben)
 - New Filter box after the shipment picker: matches product type, reference, name, colour way, category, season, supplier (all words must match); shows "n of m products"; client-side over the loaded shipment.
 - Sample shipment box is tinted light blue (label, fill, border) so it reads as the primary control.

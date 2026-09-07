@@ -6842,7 +6842,9 @@ app.get('/api/supply/sample/:id/contents', async (req, res) => {
 app.post('/api/supply/sample/:id/received', async (req, res) => {
   try {
     const id = req.params.id, receive = (req.body || {}).received !== false;
-    await pool.query(`UPDATE planner.sample_requests SET received_at=${receive ? 'now()' : 'NULL'}, updated_at=now() WHERE id=$1::bigint`, [id]);
+    await pool.query(receive
+      ? `UPDATE planner.sample_requests SET received_at=now(), status=CASE WHEN upper(coalesce(status,''))='CANCELLED' THEN status ELSE 'COMPLETED' END, updated_at=now() WHERE id=$1::bigint`   // v27.569: received ⇒ COMPLETED (Ben); cancelled stays cancelled
+      : `UPDATE planner.sample_requests SET received_at=NULL, updated_at=now() WHERE id=$1::bigint`, [id]);
     const advanced = [];
     if (receive) {
       const refs = (await pool.query(`
@@ -7062,8 +7064,8 @@ async function productSampleList(itemRef) {
     WHERE ps.item_ref=$1 AND coalesce(ps.dimension,'product')='product' ORDER BY ps.version`, [itemRef])).rows;
   if (rows.length) {
     const keys = rows.map(r => 'PSAMPLE-' + r.id);
-    const ph = (await pool.query(`SELECT po, id, filename, coalesce(mime,'') mime, coalesce(uploader_kind,'internal') uploader_kind FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_sample' ORDER BY uploaded_at`, [keys])).rows;
-    const byKey = {}; ph.forEach(p => { (byKey[p.po] = byKey[p.po] || []).push({ id: p.id, filename: p.filename, mime: p.mime, uploader_kind: p.uploader_kind }); });
+    const ph = (await pool.query(`SELECT po, id, filename, coalesce(mime,'') mime, coalesce(uploader_kind,'internal') uploader_kind, aspect FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_sample' ORDER BY uploaded_at`, [keys])).rows;
+    const byKey = {}; ph.forEach(p => { (byKey[p.po] = byKey[p.po] || []).push({ id: p.id, filename: p.filename, mime: p.mime, uploader_kind: p.uploader_kind, aspect: p.aspect || null }); });
     rows.forEach(r => { r.photos = byKey['PSAMPLE-' + r.id] || []; });
   }
   return rows;
@@ -7098,8 +7100,8 @@ async function createProductSample(b, by) {
 async function insertProductSamplePhoto(sampleId, b, by, kind) {
   const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
   if (buf.length > 10 * 1024 * 1024) throw new Error('file exceeds 10MB');
-  const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, uploaded_by, category, uploader_kind)
-    VALUES ($1,$2,$3,$4,$5,$6,'product_sample',$7) RETURNING id`, ['PSAMPLE-' + sampleId, b.filename || 'photo', b.mime || 'image/jpeg', buf.length, buf, by || null, kind || 'internal']);
+  const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, uploaded_by, category, uploader_kind, aspect)
+    VALUES ($1,$2,$3,$4,$5,$6,'product_sample',$7,$8) RETURNING id`, ['PSAMPLE-' + sampleId, b.filename || 'photo', b.mime || 'image/jpeg', buf.length, buf, by || null, kind || 'internal', (b.aspect ? String(b.aspect).slice(0, 80) : null)]);   // v27.569: aspect = sampled component the file belongs to (mig 267)
   return r.rows[0].id;
 }
 // v27.551 PRODUCT ▸ Sample batch review: one sample shipment (SR) → every development sample on it, grouped by product, with the
