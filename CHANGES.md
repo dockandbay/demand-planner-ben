@@ -1,3 +1,6 @@
+## v27.543 PO PLAN panel: no "loading" text in the sub-menu (Ben)
+- The sub-tabs render instantly as before, but the "⏳ loading full detail…" note no longer sits inside the tab bar: a thin shimmer line under the menu shows while the full detail loads in the background and disappears when it lands. The initial placeholder before the fast paint is a shimmer block instead of the word Loading. supply/inject.html + supply/hz-theme.css.
+
 ## v27.542 Mobile PO card: smaller PLAN button (Ben)
 - PLAN button on the phone card drops to a 22px pill with 9px text (was 28px / 10px); star icon tightened. supply/hz-theme.css only.
 

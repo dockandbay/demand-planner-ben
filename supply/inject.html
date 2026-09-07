@@ -2997,7 +2997,7 @@
       +'<td class="l">'+cellPickBtn(r.po,ep,'prod_no',r.prod_no,'prod')+'</td>'
       +'<td class="l">'+cellPickBtn(r.po,ep,'batch_id',r.batch_id,'batch')+'</td>'
       +'</tr>'
-      +'<tr class="exp-row"'+ga+' id="poexp-'+i+'" style="display:none"><td colspan="19"><div id="podet-'+i+'" class="count">Loading…</div></td></tr>'; }
+      +'<tr class="exp-row"'+ga+' id="poexp-'+i+'" style="display:none"><td colspan="19"><div id="podet-'+i+'" class="count"><div class="hz-skel" aria-label="Loading"><i></i><i></i><i></i></div></div></td></tr>'; }   // v27.543: shimmer, no Loading text
   function poTable(rows,groupBy,footerHtml){ if(!rows.length)return '<div class="count">No POs in this filter.</div>';
     var _visPo={}; rows.forEach(function(r){ _visPo[String(r.po)]=1; });
     var _isMasterRow=function(r){ return !r.shipment || r.is_master || r.po===r.shipment; };
@@ -4352,7 +4352,7 @@
     if(poBy[po]&&poBy[po].is_master){ tabs.push(['childpo','CHILD PO',childPoPanel(po,d),0]); }   // masters only — final tab after Timeline (no count badge)
     function badge(n){ return n>0?' <span class="ex-badge" title="'+n+' exception'+(n>1?'s':'')+' / action'+(n>1?'s':'')+'">'+n+'</span>':''; }
     var bar='<div class="po-subnav">'+tabs.map(function(t,ti){return '<button class="rtab potab'+(ti===0?' active':'')+'" data-pt="'+t[0]+'" data-po="'+esc(po)+'">'+t[1]+badge(t[3])+'</button>';}).join('')
-      +((d&&d.__fast)?'<span class="mut tiny po-fastnote" style="margin-left:auto;align-self:center;white-space:nowrap;color:#94a3b8;padding:0 4px">⏳ loading full detail…</span>':'')+'</div>';
+      +'</div>'+((d&&d.__fast)?'<div class="po-fastbar" role="progressbar" aria-label="loading full detail" title="loading full detail…"></div>':'');   // v27.543: progress shimmer UNDER the menu, not inside it (Ben)
     var panels=tabs.map(function(t,ti){return '<div class="potab-panel" data-pt="'+t[0]+'"'+(ti===0?'':' style="display:none"')+'>'+t[2]+'</div>';}).join('');
     return '<div class="po-detail-wrap" style="padding:4px 4px;max-width:1340px">'+bar+panels+'</div>'; }
 
