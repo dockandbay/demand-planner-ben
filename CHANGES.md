@@ -1,3 +1,6 @@
+## v27.575 Sign out button (Ben)
+- Top-right icon cluster gains a Sign out icon (after ?); the phone drawer gets a "⎋ Sign out" quick action. Uses the proxy sign-out path from app_settings.auth_logout_url (already served on /api/me); confirms first and shows who is signed in. Where no path is configured (sandbox) it explains instead of doing nothing. artifact only.
+
 ## v27.574 Summary & targets: past periods labelled act, not fc (Ben)
 - In the target-edit cells the middle line was always labelled "fc". For a month / quarter / half / FY made entirely of actual months it now reads "act"; a period with some actual months (the current FY) reads "act+fc"; future periods keep "fc". Numbers unchanged. The plan grid month headers already said Actual / Current / Forecast.
 

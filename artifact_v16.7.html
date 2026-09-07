@@ -743,6 +743,7 @@ tr.grand-tot td.stk{background:var(--ink);color:#fff}
     <button id="sa-drawer-btn" title="Stock Availability" onclick="openSADrawer()">SA</button>
     <button id="hz-refresh-btn" class="tip120 hz-ico" data-tip="Refresh this tab's data from the database (rebuilds the server cache — DEMAND, SUPPLY or BUY, whichever you're on)" onclick="hzRefreshCache(this)">&#8635;</button>
     <button id="ctx-help-btn" class="hz-ico" title="Help for this page" onclick="openCtxHelp(event)">?</button>
+    <button id="hz-logout-btn" class="hz-ico" title="Sign out" onclick="hzLogout()" aria-label="Sign out"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></button>
   </div>
   <div id="ctabs-row" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
     <span class="pill-lbl">Country</span>
@@ -18012,6 +18013,12 @@ function attachSkuMultiExpand(inputId,onApply){
   if(/^#\/?planning(\/|$)/.test(location.hash||'') || /^#\/?demand(\/(plan)?)?$/.test(location.hash||'')) render();
 })();
 
+/* v27.575: Sign out (top-right icon + phone drawer). Sign-in is the hosting proxy (Google); the proxy's sign-out path lives in
+   app_settings.auth_logout_url (served on /api/me as logout_url). Sandbox has no proxy → explains instead of doing nothing. */
+function hzLogout(){ var me=window.ME||{}, url=me.logout_url||''; var who=me.email?(' ('+String(me.email).replace(/@dockandbay\.com$/i,'@')+')'):'';
+  if(!url){ alert('No sign-out address is configured for this environment'+who+'.\nOn live, Diviyaj sets app_settings.auth_logout_url to the sign-in proxy\'s logout path; the sandbox has no sign-in.'); return; }
+  if(!confirm('Sign out of HORIZON'+who+'?'))return; try{ window._hzLoggedOut=1; }catch(e){} location.href=url; }
+try{ window.hzLogout=hzLogout; }catch(e){}
 /* ── Mobile drawer navigation (phone only; CSS gates visibility) ────────────
    Mirrors the top-nav view buttons (DEMAND / SUPPLY / BUY / FBA / REPORTS) and,
    when SUPPLY is active, lists its sections via the window.__supplyNav bridge
@@ -18085,6 +18092,7 @@ function attachSkuMultiExpand(inputId,onApply){
     if(msgN>0){ var bdg=document.createElement('span'); bdg.className='hz-badge'; bdg.textContent=msgN>99?'99+':String(msgN); msg.appendChild(bdg); }
     drawer.appendChild(msg);
     if(window.HZ_SUGGEST&&window.HZ_SUGGEST.open) drawer.appendChild(item('💡  Suggestion box', false, function(){ close(); window.HZ_SUGGEST.open(); }));
+    drawer.appendChild(item('⎋  Sign out', false, function(){ close(); hzLogout(); }));   // v27.575
   }
   // keep the drawer's Messages count fresh: when the bell's poll updates the count and the drawer is open, rebuild.
   window.__tlOnCount=function(){ if(drawer.classList.contains('open'))build(); };
