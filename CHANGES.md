@@ -1,3 +1,6 @@
+## v27.547 PRODUCT Samples: feedback quick-phrase / Pantone picker on top (Ben)
+- The picker under each feedback box was rendered inside the table cell, so the next rows painted over it. It is now detached to the page body, fixed-positioned under the textarea (follows scroll / resize) and above drawers; closes as before. The Pantone hover card also sits above everything. supply/inject.html only.
+
 ## v27.546 DEMAND smoothing: months with no active SKU now smooth across run-off stock (Ben)
 - **Bug:** with "Disregard discontinued" on for a sub-category, a month where every SKU is discontinued or pre-launch (e.g. Towel - Beach SEASONAL UK DTC from Dec-26: SS26 lines past their discontinue dates, SS27 not launched) had nobody to carry the target, so smooth returned nothing and the click looked dead.
 - **Fix:** when no active SKU can take the month, smoothing falls back to the discontinued SKUs that still have run-off stock, each capped by the shared country pool (runoffAlloc cap); the preview tooltip says "across run-off stock (no active SKU this month)". If even that is impossible (target 0 / no stock), a tip explains why instead of silence. Applying is unchanged (overrides written only on ✓). artifact_v16.7.html only; no buy impact until applied.
