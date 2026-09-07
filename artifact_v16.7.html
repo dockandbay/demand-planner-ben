@@ -1073,7 +1073,8 @@ function runAutoSmooth(){
     // Always re-cap discontinued SKUs to remaining stock first — spread on-hand+inbound across the post-discontinue
     // months (velocity × seasonality) and ZERO every month once stock is exhausted. Runs for every Auto sub-category
     // regardless of the "Disregard disc." tick: a discontinued SKU should never be forecast beyond what it can ship.
-    try{ recalcDiscontinued(s,co,ch); _rc=true; }catch(e){}
+    // v27.554: recalcDiscontinued() is NOT run any more — it wrote per-channel, stock-capped overrides (FBA rows → FBA stock only → the phantom zeros).
+    // Run-off is applied live by runoffAlloc() (shared country pool, sets follow components) on every render and buy-plan build.
     var eff; try{ eff=subcatSkuEffTotals(s,co,ch); }catch(e){ return; } if(!eff)return;
     FM.forEach(function(m){ if(isActualMonth(m)&&m!==CUR_MONTH)return;   // forecast months only
       var target=(m===CUR_MONTH)?curMonthForecast(s,co,ch):(((calc(s,co,ch)||{}).fu||{})[m]||0);
@@ -8232,6 +8233,7 @@ function subcatSkuEffTotals(s,co,ch){
       if(lch&&ms<lch){v=0;}
       else if(isDisc){ var _RA2=runoffAlloc(sku,co); if(_RA2.alloc[ch]&&_RA2.alloc[ch][m]!=null){ v=_RA2.alloc[ch][m]; } else if(rem<=0){v=0;} else {v=Math.max(0,Math.min(raw,rem));rem=Math.max(0,rem-v);} }   // v27.534 shared pool; discontinued always keep their stock rundown (not zeroed)
       else{v=raw;}
+      if(isSet&&m>=CUR_MONTH&&!isDisc&&setHasConstrainedComps(sku,co)){ var _RS=runoffAlloc(sku,co); if(_RS.alloc[ch]&&_RS.alloc[ch][m]!=null)v=_RS.alloc[ch][m]; }   // v27.554: sets follow their components here too (matches the rows)
       if(!(isDisc&&DIS)){ tot[m]=(tot[m]||0)+v;   // when disregarding, the gap basis is ACTIVE-only vs the subcat target (discontinued excluded)
         if(isSet){ setUnit[m]=(setUnit[m]||0)+v; setBox[m]=(setBox[m]||0)+Math.round(v/sz); } else { mastU[m]=(mastU[m]||0)+v; } }
       if(isDisc){ discTot[m]=(discTot[m]||0)+v; } else { actTot[m]=(actTot[m]||0)+v; }
