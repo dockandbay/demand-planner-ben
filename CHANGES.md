@@ -1,3 +1,6 @@
+## v27.566 Sample batch review: feedback box placeholder + drop zone (Ben)
+- Placeholder reads "Feedback here. Type / for a reusable phrase · /p for a Pantone colour"; the hint line is gone; "add files" is a dashed drag-and-drop box: "📎 Choose files or drag & drop" (click to pick, drop anywhere on the box or the feedback cell). supply/inject.html only.
+
 ## v27.565 Target recommendations: Apply everywhere (Ben)
 - New **Apply everywhere** button beside Apply all: gathers every open recommendation (gap ≥ 2%, not dismissed, not already applied, ASP available) across all markets × channels × the three planning years, shows a confirmation table (market · channel · year · sub-categories · current £ → target £) and applies them in one pass with a single record-of-change log. Then Save Forecasts as usual. applyTargetRecs accepts an explicit market / channel / year (quiet mode) so the sweep does not re-render per set. artifact_v16.7.html only.
 
