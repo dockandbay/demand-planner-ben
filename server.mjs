@@ -6684,12 +6684,12 @@ app.post('/api/product/note/upsert-feedback', async (req, res) => {
   try {
     const like = prefix.replace(/[\\%_]/g, m => '\\' + m) + '%';
     const up = await pool.query(`UPDATE planner.supplier_notes SET body=$3, tags=$4::jsonb, pantone=$5::jsonb, author_email=$6
-      WHERE id=(SELECT id FROM planner.supplier_notes WHERE po=$1 AND author_kind='internal' AND body LIKE $2 ORDER BY created_at DESC LIMIT 1) RETURNING id`,
+      WHERE id=(SELECT id FROM planner.supplier_notes WHERE po=$1 AND author_kind='internal' AND body LIKE $2 ORDER BY created_at DESC LIMIT 1) RETURNING id, to_char(now(),'DD-Mon-YY HH24:MI') at`,
       [ref, like, String(b.body).trim(), JSON.stringify(tags), JSON.stringify(pantone), internalAuthor(req, b.author_email)]);
-    if (up.rows.length) return res.json({ ok: true, id: up.rows[0].id, updated: true });
-    const r = await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, tags, pantone) VALUES ($1,$2,'internal',$3,$4::jsonb,$5::jsonb) RETURNING id`,
+    if (up.rows.length) return res.json({ ok: true, id: up.rows[0].id, updated: true, at: up.rows[0].at });
+    const r = await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, tags, pantone) VALUES ($1,$2,'internal',$3,$4::jsonb,$5::jsonb) RETURNING id, to_char(created_at,'DD-Mon-YY HH24:MI') at`,
       [ref, internalAuthor(req, b.author_email), String(b.body).trim(), JSON.stringify(tags), JSON.stringify(pantone)]);
-    res.json({ ok: true, id: r.rows[0].id, updated: false });
+    res.json({ ok: true, id: r.rows[0].id, updated: false, at: r.rows[0].at });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // In-app Pantone search (seeded from Dock & Bay's Connect export; approximate on-screen swatch). Powers the
@@ -7019,10 +7019,12 @@ async function productSampleList(itemRef) {
     coalesce((SELECT json_agg(json_build_object('id',sr.id,'ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,'')) ORDER BY sr.created_at)
       FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id
       WHERE l.dev_sample_id=ps.id),'[]'::json) shipments,
-    coalesce((SELECT json_agg(json_build_object('aspect',af.aspect,'feedback',af.feedback,'decision',af.decision) ORDER BY af.aspect)
+    coalesce((SELECT json_agg(json_build_object('aspect',af.aspect,'feedback',af.feedback,'decision',af.decision,'updated_at',to_char(af.updated_at,'DD-Mon-YY HH24:MI'),'updated_by',coalesce(af.updated_by,'')) ORDER BY af.aspect)
       FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id),'[]'::json) aspect_feedback,
     coalesce((SELECT json_agg(json_build_object('aspect',rr.aspect,'reason_id',rr.reason_id) ORDER BY rr.aspect)
-      FROM planner.product_sample_reject_reasons rr WHERE rr.sample_id=ps.id),'[]'::json) reject_reasons
+      FROM planner.product_sample_reject_reasons rr WHERE rr.sample_id=ps.id),'[]'::json) reject_reasons,
+    coalesce((SELECT json_agg(json_build_object('body',n.body,'at',to_char(n.created_at,'DD-Mon-YY HH24:MI')) ORDER BY n.created_at DESC)
+      FROM planner.supplier_notes n WHERE n.po=ps.item_ref AND n.author_kind='internal' AND n.body LIKE 'Feedback on '||ps.item_ref||'\_v'||ps.version||' %'),'[]'::json) feedback_notes
     FROM planner.product_dev_samples ps
     WHERE ps.item_ref=$1 AND coalesce(ps.dimension,'product')='product' ORDER BY ps.version`, [itemRef])).rows;
   if (rows.length) {
