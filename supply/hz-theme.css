@@ -514,7 +514,12 @@ body header.pv-top .pv-lang button:hover{color:#fff}
   #app input,#app select,#app textarea,#pv-wrap input,#pv-wrap select,#pv-wrap textarea{max-width:100%!important;box-sizing:border-box}
   #app .bar .save-btn,#app .bar .pill,#app #dab-navwrap .pill,#app .mob-filt-toggle,#app .act-filt-toggle,#app .po-filt-toggle,#app #buy-wrap #bp-filt-toggle,#app #product-root #pg-filters .save-btn,#app #product-root #pg-filters .fci{min-height:36px}
   #app .bar .pill,#app #dab-navwrap .pill{display:inline-flex;align-items:center}
-  #app .mob-filt-panel{display:flex;flex-direction:column;gap:8px}
+  #app .mob-filt-panel.open{display:flex;flex-direction:column;gap:8px}
+  #app .mob-filt-panel:not(.open){display:none!important}   /* v27.573 FIX: this block used to force display:flex on the panel regardless of .open, so the Filters button did nothing */
+  /* v27.573: DEMAND plan on a phone — narrower, wrapping sticky name column (was 320px of a 390px screen), taller scroll area */
+  #app #tw thead th.stk,#app #tw td.stk{width:150px!important;min-width:150px!important;max-width:150px!important;white-space:normal!important;overflow-wrap:anywhere;word-break:break-word}
+  #app #tw td.stk .hz-subname{font-size:12px}
+  #app #tw{max-height:calc(100dvh - 128px)!important;-webkit-overflow-scrolling:touch}
   #app #dab-navwrap .mob-filt-toggle{margin:8px 0 0}
 }
 

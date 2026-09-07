@@ -1,3 +1,9 @@
+## v27.573 DEMAND on phones: Filters button fixed, drawer lists every section, narrower plan name column (Ben)
+- FIX: the phone Filters button on DEMAND (and every mobileFilterCollapse view) did nothing because a theme rule forced the panel to display:flex regardless of .open; the panel now starts collapsed and toggles.
+- Phone hamburger drawer, DEMAND section: lists Plan / Actions / Exceptions / Scenario planner and then the Analysis, Config and Inputs groups with each of their pages as nested items (Summary, Accuracy, Forecast trend anomalies, Snapshots, Trends, Safety stock, Stock cover, Ship bags; Contribution model, Buy plan logic, Discontinued sub-categories; Key accounts, Calendar, Price changes, Klaviyo BIS…), each deep-linked. Previously the drawer only mirrored the 7 L2 buttons, so the group pages were only reachable via the L3 row after landing on the group.
+- DEMAND plan table on phones: sticky name column 150px and wrapping (was 320px on a 390px screen), scroll area uses the dynamic viewport height.
+- Analysis + plan for the fuller phone treatment: Claude Analyses/MOBILE_DEMAND_plan_2026-09-08.md (awaiting Ben pick).
+
 ## v27.572 Portal custom barcodes: download the project’s SKUs (Ben)
 - ⤓ Download custom barcodes on a linked PO prints the project’s custom numbers for every SKU the supplier owns (still requires the project to be linked to that PO and the PO to be the supplier’s), instead of only SKUs on that PO’s lines, which made a linked project look empty when its SKUs sat on a sibling PO. Hint text + empty-state message updated.
 - FIX v27.571: restored the $1 placeholder in the portal bootstrap barcode_projects query (row was silently empty).

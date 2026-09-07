@@ -76,6 +76,8 @@ body{font-family:var(--font,system-ui,-apple-system,sans-serif);font-size:12px;c
 /* sub-nav items nested under their active parent (Supply sections / Demand tabs / Scenario / Config) */
 #hz-drawer .hz-item.hz-sub{padding-left:34px;font-size:13px;color:var(--line);margin-left:14px;border-left:2px solid var(--ink-soft)}
 #hz-drawer .hz-item.hz-sub.active{border-left-color:#38bdf8;color:#fff}
+#hz-drawer .hz-grp-lbl{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);padding:9px 18px 3px 34px;font-weight:700;margin-left:14px}   /* v27.573: DEMAND group heading inside the drawer */
+#hz-drawer .hz-item.hz-sub2{padding-left:46px;font-size:12.5px}
 #hz-drawer .hz-close{float:right;background:transparent;border:none;color:var(--faint);font-size:20px;cursor:pointer;padding:0 16px}
 #hz-drawer .hz-badge{display:inline-block;margin-left:8px;background:var(--neg);color:#fff;font-size:10px;font-weight:700;border-radius:9px;min-width:16px;height:16px;line-height:16px;text-align:center;padding:0 4px;vertical-align:middle}
 .catpill{font-size:9px !important;padding:2px 6px !important}
@@ -12022,6 +12024,11 @@ function renderDemandTabs(){
   var PRIMARY=['plan','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','fcanom','snapshots','trends','safetystock','stockcover','shipbags'], CONFIGD=['contribmodel','buyplan','runoffsubs'], INPUTS=['keyaccounts','calendar','pricechanges','klaviyobis'];   // 'kpis' moved to REPORTS ▸ Performance ▸ Demand Metrics; 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
   var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0, _anlActive=ANALYSIS.indexOf(DEMAND_VIEW)>=0, _cfgActive=CONFIGD.indexOf(DEMAND_VIEW)>=0;
   var _isPlanV=(DEMAND_VIEW==='plan');
+  // v27.573: phone drawer reads this to list EVERY demand section (primary + the Analysis / Config / Inputs groups' items)
+  try{ window.__demandNav={ primary:PRIMARY.filter(function(k){return !!_dlbl[k];}).map(function(k){ return [k,_dlbl[k]]; }),
+    groups:[['analysis','Analysis',ANALYSIS],['config','Config',CONFIGD],['inputs','Inputs',INPUTS]].map(function(g){ return {slug:g[0],label:g[1],items:g[2].filter(function(k){return !!_dlbl[k];}).map(function(k){ return [k,_dlbl[k]]; })}; }),
+    current:function(){ return DEMAND_VIEW; },
+    go:function(grp,k){ VIEW_MODE='planning'; DEMAND_VIEW=k; if(window.writeHash)window.writeHash(grp?['demand',grp,k]:['demand',k]); render(); } }; }catch(e){}
   // Release Window now lives in the More Filters panel; Undo + Download now sit on the right of the plan controls
   // row (#filters-row2), not on this tab menu row. (Ben: keep the tab menu clean.)
   bar.innerHTML=PRIMARY.map(function(k){ if(!_dlbl[k])return ''; return '<button class="dnav'+(k===DEMAND_VIEW?' active':'')+'" data-d="'+k+'">'+_dlbl[k]+'</button>'; }).join('')
@@ -18048,8 +18055,13 @@ function attachSkuMultiExpand(inputId,onApply){
       if(active && isSup){ var nav=window.__supplyNav;
         if(nav && nav.sections){ var cur=nav.current&&nav.current();
           nav.sections.forEach(function(s){ drawer.appendChild(subItem(s[1], s[0]===cur, function(){ clearSearch(); nav.select(s[0]); close(); })); }); }
-      } else if(active && vb.dataset.view==='planning'){   // DEMAND: Plan / KPIs / Targets / Actions / Calendar
-        Array.prototype.slice.call(document.querySelectorAll('#demand-tabs .dnav')).forEach(function(db){ drawer.appendChild(subItem(db.textContent.trim(), db.classList.contains('active'), function(){ db.click(); close(); })); });
+      } else if(active && vb.dataset.view==='planning'){   // DEMAND: every section, groups nested (v27.573); falls back to mirroring the L2 buttons
+        var dn=window.__demandNav;
+        if(dn&&dn.primary){ var curV=dn.current?dn.current():null;
+          dn.primary.forEach(function(p){ drawer.appendChild(subItem(p[1], p[0]===curV, function(){ clearSearch(); dn.go(null,p[0]); close(); })); });
+          dn.groups.forEach(function(g){ var gl=document.createElement('div'); gl.className='hz-grp-lbl'; gl.textContent=g.label; drawer.appendChild(gl);
+            g.items.forEach(function(it){ var b=subItem(it[1], it[0]===curV, function(){ clearSearch(); dn.go(g.slug,it[0]); close(); }); b.className+=' hz-sub2'; drawer.appendChild(b); }); }); }
+        else Array.prototype.slice.call(document.querySelectorAll('#demand-tabs .dnav')).forEach(function(db){ drawer.appendChild(subItem(db.textContent.trim(), db.classList.contains('active'), function(){ db.click(); close(); })); });
       } else if(active && vb.dataset.group==='buymove'){   // BUY & MOVE sub-nav — Actions / Buy / FBA / Transfer
         Array.prototype.slice.call(document.querySelectorAll('#buymove-tabs .dnav')).forEach(function(bb){ drawer.appendChild(subItem(bb.textContent.trim(), bb.classList.contains('active'), function(){ bb.click(); close(); })); });
       } else if(active && isScen){   // SCENARIO sub-nav
