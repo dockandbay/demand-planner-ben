@@ -1,3 +1,6 @@
+## v27.574 Summary & targets: past periods labelled act, not fc (Ben)
+- In the target-edit cells the middle line was always labelled "fc". For a month / quarter / half / FY made entirely of actual months it now reads "act"; a period with some actual months (the current FY) reads "act+fc"; future periods keep "fc". Numbers unchanged. The plan grid month headers already said Actual / Current / Forecast.
+
 ## v27.573 DEMAND on phones: Filters button fixed, drawer lists every section, narrower plan name column (Ben)
 - FIX: the phone Filters button on DEMAND (and every mobileFilterCollapse view) did nothing because a theme rule forced the panel to display:flex regardless of .open; the panel now starts collapsed and toggles.
 - Phone hamburger drawer, DEMAND section: lists Plan / Actions / Exceptions / Scenario planner and then the Analysis, Config and Inputs groups with each of their pages as nested items (Summary, Accuracy, Forecast trend anomalies, Snapshots, Trends, Safety stock, Stock cover, Ship bags; Contribution model, Buy plan logic, Discontinued sub-categories; Key accounts, Calendar, Price changes, Klaviyo BIS…), each deep-linked. Previously the drawer only mirrored the 7 L2 buttons, so the group pages were only reachable via the L3 row after landing on the group.

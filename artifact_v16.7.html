@@ -10274,14 +10274,14 @@ function renderSummaryView(body){
     function c3(ly,val,shade){ var g=ly>0?Math.round((val/ly-1)*100):null, tot=(shade==='tot');
       var gc=g==null?'#cbd5e1':g>0?(tot?'#86efac':'#15803d'):g<0?(tot?'#fca5a5':'#b91c1c'):(tot?'#c7d2fe':'#64748b');
       return '<td class="'+shade+'"><div class="c3ly">'+mf(ly)+'</div><div class="c3f">'+(val?mf(val):'<span style="color:#cbd5e1">–</span>')+'</div><div class="c3g" style="color:'+gc+'">'+(g==null?'':(g>0?'+':'')+g+'%')+'</div></td>'; }
-    function tcell(fc,ly,has,tgt,shade){ var tot=(shade==='tot');
+    function tcell(fc,ly,has,tgt,shade,actState){ var tot=(shade==='tot'); var vLbl=actState==='all'?'act':actState==='some'?'act+fc':'fc';   // v27.574: past periods are actuals, label them so (Ben)
       var col=function(g){return g==null?(tot?'#c7d2fe':'#94a3b8'):g>0?(tot?'#86efac':'#15803d'):g<0?(tot?'#fca5a5':'#b91c1c'):(tot?'#c7d2fe':'#64748b');};
       var lab=function(g){return g==null?'':(g>0?'+':'')+g+'%';};
       var vtxt=tot?'#ffffff':'#0f172a', L='font-style:italic;font-size:8px;color:'+(tot?'#c7d2fe':'#94a3b8');
       var fg=ly>0?Math.round((fc/ly-1)*100):null, tg=(ly>0)?Math.round((tgt/ly-1)*100):null, vv=(fc-tgt);
       var vc=vv>=0?(tot?'#86efac':'#15803d'):(tot?'#fca5a5':'#b91c1c');
       return '<td class="'+shade+' tgcell"><div class="c3t"><span style="'+L+'">ly</span> <b style="color:'+(tot?'#e2e8f0':'#475569')+'">'+mf(ly)+'</b></div>'
-        +'<div class="c3t"><span style="'+L+'">fc</span> <b style="color:'+vtxt+'">'+mf(fc)+'</b> <span style="color:'+col(fg)+'">'+lab(fg)+'</span></div>'
+        +'<div class="c3t"><span style="'+L+'">'+vLbl+'</span> <b style="color:'+vtxt+'">'+mf(fc)+'</b> <span style="color:'+col(fg)+'">'+lab(fg)+'</span></div>'
         +'<div class="c3t"><span style="'+L+'">tgt</span> <b style="color:'+vtxt+'">'+mf(tgt)+'</b> <span style="color:'+col(tg)+'">'+lab(tg)+'</span></div>'
         +'<div class="c3t"><span style="'+L+'">&Delta;</span> <span style="color:'+vc+';font-weight:600">'+(vv>=0?'+':'')+mf(vv)+'</span></div></td>'; }
     function cells(val,ly,lch,disc,sub){ return cols.map(function(c){
@@ -10298,7 +10298,7 @@ function renderSummaryView(body){
               if(mg!=null){ tgt+=(ly[m]||0)*(1+mg/100)*cvR(fi.Y); }
               else { subs.forEach(function(_s){ var _sd=subData(_s), g=resolveG(fi.Y,_s,fi.idx); if(g==null)g=0; tgt+=(((_sd.ly&&_sd.ly[m])||0))*(1+g/100)*cvR(fi.Y); }); } }); }
           else { months.forEach(function(m){ var fi=monFyIdx(m); var g=resolveG(fi.Y,sub,fi.idx); if(g==null)g=0; tgt+=(ly[m]||0)*(1+g/100)*cvR(fi.Y); }); }
-          return tcell(vT,lT,true,tgt,shade); }
+          var _na=months.filter(isActualMonth).length; return tcell(vT,lT,true,tgt,shade,_na===months.length&&months.length?'all':(_na?'some':'none')); }
         return c3(lT,vT,shade); }).join(''); }
     // Net £/unit for £→units: ex-tax retail (SUBCAT_RT) × channel factor (B2B ×0.5, else ×0.95). 0 if no price.
     function _tgtNet(sub){ var rt=(SUBCAT_RT[co]&&SUBCAT_RT[co][sub])||0; return rt>0?(rt*(ch==='B2B'?0.5:0.95)):0; }
