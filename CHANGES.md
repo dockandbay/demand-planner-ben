@@ -1,3 +1,10 @@
+## v27.571 Timelines: photos / documents on PO, shipment and sample timelines, admin + supplier portal (Ben)
+- mig 269: attachment_id on planner.shipment_notes and planner.sample_notes (supplier_notes already had it).
+- Every timeline composer (PO, shipment, sample; admin and portal) gets a dashed "📎 Choose files or drag & drop · max 4MB per file" box under the message; drop onto the message box or the dashed box; multiple files allowed; each uploads on its own (4MB cap per file, client pre-check + server 413), the first rides on the message note, the rest post as their own "📎 name" notes. Attachments render on the timeline (image thumbnail or 📎 link).
+- New POST /api/supply/timeline-attachment and POST /api/portal/timeline-attachment (kind po|shipment|sample, ref or sample_id; ownership-checked on the portal); files stored in portal_attachments with category timeline; portal attachment GET now also allows shipment-ref-keyed files.
+- Note posts accept attachment_id (6 routes); note lists return attachment_id / attachment_name / attachment_mime (6 routes).
+- FIX v27.570: the portal builds PO rows from the portal payload route, not po-detail, so barcode_projects (⤓ Download custom barcodes) never reached the page; now attached per PO in that payload.
+
 ## v27.570 Barcodes ▸ Customise: link projects to purchase orders; portal "Download custom barcodes" (Ben)
 - mig 268: planner.barcode_projects.pos text[] (linked PO refs) + GIN index.
 - Customise drawer: new "Purchase orders" row with a searchable picker (PO / supplier / production / batch / direct client via GET /api/supply/po-search) and purple chips (click opens the PO drawer, × unlinks); saved with the project; project dropdown shows the PO count; unsaved-changes guard covers links.

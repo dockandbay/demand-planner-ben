@@ -3587,7 +3587,7 @@ app.get('/api/supply/sample-detail/:id', async (req, res) => {
       EXISTS (SELECT 1 FROM planner.product_dev_items i WHERE i.ref = l.sku) dev
       FROM planner.sample_request_lines l WHERE l.sample_id=$1::bigint ORDER BY l.id`, [id])).rows;
     const notes = (await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
-      to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read FROM planner.sample_notes WHERE sample_id=$1::bigint ORDER BY created_at`, [id])).rows;
+      to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read, attachment_id, (SELECT a.filename FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_name, (SELECT a.mime FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_mime FROM planner.sample_notes WHERE sample_id=$1::bigint ORDER BY created_at`, [id])).rows;
     const charges = (await pool.query(`SELECT id, coalesce(supplier_name,'') supplier_name, freight_cost, product_cost,
       coalesce(description,'') description, status, to_char(created_at,'YYYY-MM-DD') created_at, other_payment_id
       FROM planner.supplier_charges WHERE source_type='sample' AND source_ref=$1 ORDER BY created_at`, [s.ref])).rows;
@@ -3617,7 +3617,7 @@ app.get('/api/supply/sample-addresses', async (req, res) => {
 });
 app.get('/api/supply/sample-notes', async (req, res) => {
   try { res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
-    to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read
+    to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read, attachment_id, (SELECT a.filename FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_name, (SELECT a.mime FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_mime
     FROM planner.sample_notes WHERE sample_id=$1::bigint ORDER BY created_at`, [req.query.id || '0'])).rows); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -4492,7 +4492,7 @@ app.get('/api/supply/:section', async (req, res, next) => {
       case 'shipment-plan':   // master shipments + the POs aboard each (Shipment Plan — admin sub-tab + supplier portal tab)
         return res.json(await buildShipmentPlan());
       case 'shipment-notes':   // ?ref=… → timeline notes for a master shipment
-        return res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read
+        return res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read, attachment_id, (SELECT a.filename FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_name, (SELECT a.mime FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_mime
           FROM planner.shipment_notes WHERE shipment_ref=$1 ORDER BY created_at`, [req.query.ref || ''])).rows);
       case 'shipment-changes': {   // ?ref=… → record-of-change entries for a shipment (admin timeline only; migration 165)
         const chg = await pool.query(`SELECT id, coalesce(event,'') event, coalesce(detail,'') detail, coalesce(changed_by,'') changed_by,
@@ -7706,8 +7706,8 @@ app.post('/api/supply/portal-note', async (req, res) => {
     const mentions = priv && Array.isArray(b.mentions)
       ? Array.from(new Set(b.mentions.map(m => String(m || '').trim().toLowerCase()).filter(m => m.indexOf('@') > 0))) : [];
     const body = String(b.body).trim();
-    await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body, private, mentions) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
-      [b.po, sid, email, kind, body, priv, mentions.length ? mentions : null]);
+    await pool.query(`INSERT INTO planner.supplier_notes (po, supplier_id, author_email, author_kind, body, private, mentions, attachment_id) VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      [b.po, sid, email, kind, body, priv, mentions.length ? mentions : null, Number(b.attachment_id) || null]);
     // Notify tagged teammates — one email each, immediately. Best-effort; never breaks the post.
     // `email` is returned so the UI can preview exactly what the teammate receives (essential for sandbox testing,
     // where no key means nothing is actually sent). `sandbox=true` → composed but not delivered.
@@ -7790,6 +7790,30 @@ app.post('/api/supply/report-note/:id/delete', async (req, res) => {
     const r = await pool.query(`DELETE FROM planner.report_notes WHERE id=$1 AND lower(coalesce(author_email,''))=lower($2)`, [parseInt(req.params.id, 10), me || '']);
     res.json({ ok: true, deleted: r.rowCount });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// ── v27.571: timeline attachments (PO / shipment / sample timelines; admin here, portal route next to /api/portal/note).
+// One file per call, 4MB cap (413 above it), stored in portal_attachments with po = the timeline's ref (PO ref /
+// shipment ref / sample SR ref) and category 'timeline'; the note carrying it points at attachment_id (mig 269).
+const TL_ATT_MAX = 4 * 1024 * 1024;
+async function tlAttachInsert(ref, b, by, uploaderKind) {
+  const buf = Buffer.from(String(b.data_base64 || '').replace(/^data:[^;]+;base64,/, ''), 'base64');
+  if (!buf.length) throw Object.assign(new Error('data_base64 required'), { status: 400 });
+  if (buf.length > TL_ATT_MAX) throw Object.assign(new Error('file exceeds 4MB'), { status: 413 });
+  const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, uploaded_by, category, uploader_kind) VALUES ($1,$2,$3,$4,$5,$6,'timeline',$7) RETURNING id`,
+    [ref, String(b.filename || 'file').slice(0, 200), b.mime || 'application/octet-stream', buf.length, buf, by || null, uploaderKind]);
+  return { id: r.rows[0].id, filename: b.filename || 'file', mime: b.mime || '', byte_size: buf.length };
+}
+async function tlAttachRef(b) {   // kind + ref (or sample_id for the sample timeline) → the ref the file is keyed on
+  const kind = ['po', 'shipment', 'sample'].includes(b.kind) ? b.kind : 'po';
+  let ref = String(b.ref || '').trim();
+  if (kind === 'sample' && !ref && b.sample_id) ref = ((await pool.query(`SELECT ref FROM planner.sample_requests WHERE id=$1::bigint`, [b.sample_id])).rows[0] || {}).ref || '';
+  return { kind, ref };
+}
+app.post('/api/supply/timeline-attachment', async (req, res) => {
+  const b = req.body || {};
+  try { const { ref } = await tlAttachRef(b); if (!ref) return res.status(400).json({ error: 'ref required' });
+    res.json(await tlAttachInsert(ref, b, internalAuthor(req, b.uploaded_by), 'internal')); }
+  catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/portal-upload', async (req, res) => {
   const b = req.body || {};
@@ -8342,8 +8366,8 @@ app.post('/api/supply/shipment-note', async (req, res) => {
   try {
     const kind = b.author_kind || 'internal';
     const email = kind === 'internal' ? internalAuthor(req, b.author_email) : (b.author_email || null);
-    const r = await pool.query(`INSERT INTO planner.shipment_notes (shipment_ref, author_kind, author_email, body)
-      VALUES ($1,$2,$3,$4) RETURNING id`, [b.shipment_ref, kind, email, String(b.body)]);
+    const r = await pool.query(`INSERT INTO planner.shipment_notes (shipment_ref, author_kind, author_email, body, attachment_id)
+      VALUES ($1,$2,$3,$4,$5) RETURNING id`, [b.shipment_ref, kind, email, String(b.body), Number(b.attachment_id) || null]);
     res.json({ id: r.rows[0].id });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -12031,7 +12055,7 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
       pool.query(`SELECT n.id, n.author_kind, coalesce(n.author_email,'') author_email, n.body,
                     to_char(n.created_at,'DD-Mon-YY HH24:MI') created_at, n.read_at IS NOT NULL read,
                     coalesce(n.private,false) private, coalesce(n.mentions,'{}') mentions,
-                    coalesce(s.name,'') supplier_name
+                    coalesce(s.name,'') supplier_name, n.attachment_id, (SELECT a.filename FROM planner.portal_attachments a WHERE a.id=n.attachment_id) attachment_name, (SELECT a.mime FROM planner.portal_attachments a WHERE a.id=n.attachment_id) attachment_mime
                   FROM planner.supplier_notes n LEFT JOIN planner.suppliers s ON s.id=n.supplier_id
                   WHERE n.po=$1 ORDER BY n.created_at`, [po]).catch(() => ({ rows: [] })),
       pool.query(`SELECT kind, value, status, coalesce(submitted_by,'') submitted_by, to_char(submitted_at,'YYYY-MM-DD') submitted_at, attachment_id
@@ -13964,8 +13988,8 @@ app.post('/api/supply/sample-note', async (req, res) => {
   if (!sid || !b.body) return res.status(400).json({ error: 'sample_id and body required' });
   try { const kind = b.author_kind || 'internal';
     const email = kind === 'internal' ? internalAuthor(req, b.author_email) : (b.author_email || null);
-    const r = await pool.query(`INSERT INTO planner.sample_notes (sample_id, author_kind, author_email, body)
-    VALUES ($1::bigint,$2,$3,$4) RETURNING id`, [sid, kind, email, String(b.body)]);
+    const r = await pool.query(`INSERT INTO planner.sample_notes (sample_id, author_kind, author_email, body, attachment_id)
+    VALUES ($1::bigint,$2,$3,$4,$5) RETURNING id`, [sid, kind, email, String(b.body), Number(b.attachment_id) || null]);
     res.json({ id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Admin-gated sample actions matching the portal-view body shapes ({id} in body) — used by the
@@ -15775,7 +15799,7 @@ app.get('/api/portal/notes/:sid', portalAuth, async (req, res) => {
   try {
     if (!req.portal.supplierIds.length) return res.json([]);
     res.json((await pool.query(`SELECT id, po, author_kind, coalesce(author_email,'') author_email, body,
-      to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read
+      to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read, attachment_id, (SELECT a.filename FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_name, (SELECT a.mime FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_mime
       FROM planner.supplier_notes WHERE supplier_id = ANY($1) AND NOT coalesce(private,false) ORDER BY created_at`, [req.portal.supplierIds])).rows);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -15800,7 +15824,7 @@ app.post('/api/portal/sample-note-delete/:id', portalAuth, (req, res) =>
 app.get('/api/portal/attachment/:id', portalAuth, async (req, res) => {
   try {
     const r = (await pool.query(`SELECT po, filename, mime, data FROM planner.portal_attachments WHERE id=$1`, [req.params.id])).rows[0];
-    if (!r || !(await portalOwnsPO(req, r.po) || await portalOwnsSampleRef(req, r.po))) return res.status(403).send('forbidden');
+    if (!r || !(await portalOwnsPO(req, r.po) || await portalOwnsSampleRef(req, r.po) || await portalOwnsShipmentRef(req, r.po))) return res.status(403).send('forbidden');   // v27.571: shipment-timeline files are keyed by shipment ref
     res.setHeader('Content-Type', r.mime || 'application/octet-stream');
     res.setHeader('Content-Disposition', 'inline; filename="' + (r.filename || 'file').replace(/"/g, '') + '"');
     res.send(r.data);
@@ -15991,6 +16015,9 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
           confirm_with_supplier: !!s.confirm_with_supplier, directed, approved, needs_approval: directed && !approved });
       }
     } catch (e) { console.log('[portal-specs] ' + e.message); }
+    try { const bps = poList.length ? await q(`SELECT bp.id, bp.name, coalesce(bp.batch,'') batch, x.po, (SELECT count(*) FROM jsonb_object_keys(coalesce(bp.overrides,'{}'::jsonb)))::int n FROM planner.barcode_projects bp, unnest(bp.pos) x(po) WHERE bp.pos && ::text[]`, [poList]) : [];   // v27.570 fix: the portal reads this payload, not po-detail
+      const byPo = {}; bps.forEach(b => { (byPo[b.po] = byPo[b.po] || []).push({ id: b.id, name: b.name, batch: b.batch, n: b.n }); }); pos.forEach(p => { p.barcode_projects = byPo[p.po] || []; }); }
+    catch (e) { pos.forEach(p => { p.barcode_projects = []; }); }   // mig 268 not applied → no buttons
     res.json({ pos, lb, sdep: deps, sid: ids[0] || null, supplierName: names.join(', '),
       notesByPo, subsByPo, costsByPo, supSkus, xdByPo, addByPo, approvedByPo, docsByPo, samples, payments, shipmentPlan, productEnabled, products, specs });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -16223,7 +16250,7 @@ app.post('/api/portal/sample-attachment-remove', portalAuth, async (req, res) =>
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.get('/api/portal/sample-notes/:id', portalAuth, async (req, res) => {
   try { const s = await portalOwnsSample(req, req.params.id); if(!s) return res.status(403).json({ error: 'not your sample' });
-    res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read FROM planner.sample_notes WHERE sample_id=$1::bigint ORDER BY created_at`, [s.id])).rows); }
+    res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body, to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, read_at IS NOT NULL read, attachment_id, (SELECT a.filename FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_name, (SELECT a.mime FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_mime FROM planner.sample_notes WHERE sample_id=$1::bigint ORDER BY created_at`, [s.id])).rows); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample-note-read/:id', portalAuth, async (req, res) => {   // supplier marks a D&B (internal) note read/unread
   try { const n = (await pool.query(`SELECT sr.supplier_name, sr.supplier_id, n.author_kind FROM planner.sample_notes n JOIN planner.sample_requests sr ON sr.id=n.sample_id WHERE n.id=$1::bigint`, [req.params.id])).rows[0];
@@ -16251,7 +16278,7 @@ app.post('/api/portal/sample-update', portalAuth, async (req, res) => {   // sup
 app.post('/api/portal/sample-note', portalAuth, async (req, res) => {
   const b = req.body || {};
   try { const s = await portalOwnsSample(req, b.id); if(!s) return res.status(403).json({ error: 'not your sample' }); if(!b.body) return res.status(400).json({ error: 'body required' });
-    const r = await pool.query(`INSERT INTO planner.sample_notes (sample_id, author_kind, author_email, body) VALUES ($1::bigint,'supplier',$2,$3) RETURNING id`, [s.id, req.portal.email||null, String(b.body)]); res.json({ id: r.rows[0].id }); }
+    const r = await pool.query(`INSERT INTO planner.sample_notes (sample_id, author_kind, author_email, body, attachment_id) VALUES ($1::bigint,'supplier',$2,$3,$4) RETURNING id`, [s.id, req.portal.email||null, String(b.body), Number(b.attachment_id) || null]); res.json({ id: r.rows[0].id }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample-charge', portalAuth, async (req, res) => {   // supplier creates a charge → admin accepts → Other Payment
   const b = req.body || {};
@@ -16298,7 +16325,7 @@ app.get('/api/portal/shipment-notes/:ref', portalAuth, async (req, res) => {   /
   try {
     if (!await portalOwnsShipmentRef(req, req.params.ref)) return res.status(403).json({ error: 'not your shipment' });
     res.json(await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
-      to_char(created_at,'YYYY-MM-DD HH24:MI') created_at FROM planner.shipment_notes WHERE shipment_ref=$1 ORDER BY created_at`, [req.params.ref]).then(r => r.rows));
+      to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, attachment_id, (SELECT a.filename FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_name, (SELECT a.mime FROM planner.portal_attachments a WHERE a.id=attachment_id) attachment_mime FROM planner.shipment_notes WHERE shipment_ref=$1 ORDER BY created_at`, [req.params.ref]).then(r => r.rows));
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/portal/shipment-note', portalAuth, async (req, res) => {   // supplier posts a shipment timeline note
@@ -16306,8 +16333,8 @@ app.post('/api/portal/shipment-note', portalAuth, async (req, res) => {   // sup
   if (!ref || !b.body) return res.status(400).json({ error: 'shipment_ref and body required' });
   try {
     if (!await portalOwnsShipmentRef(req, ref)) return res.status(403).json({ error: 'not your shipment' });
-    const r = await pool.query(`INSERT INTO planner.shipment_notes (shipment_ref, author_kind, author_email, body)
-      VALUES ($1,'supplier',$2,$3) RETURNING id`, [ref, req.portal.email || null, String(b.body)]);
+    const r = await pool.query(`INSERT INTO planner.shipment_notes (shipment_ref, author_kind, author_email, body, attachment_id)
+      VALUES ($1,'supplier',$2,$3,$4) RETURNING id`, [ref, req.portal.email || null, String(b.body), Number(b.attachment_id) || null]);
     res.json({ id: r.rows[0].id });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -16536,13 +16563,21 @@ app.post('/api/portal/doc-submit', portalAuth, async (req, res) => {
     res.json({ ok: true });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+app.post('/api/portal/timeline-attachment', portalAuth, async (req, res) => {   // v27.571: supplier-side twin of /api/supply/timeline-attachment
+  const b = req.body || {};
+  try { const { kind, ref } = await tlAttachRef(b); if (!ref) return res.status(400).json({ error: 'ref required' });
+    const ok = kind === 'po' ? await portalOwnsPO(req, ref) : kind === 'shipment' ? await portalOwnsShipmentRef(req, ref) : await portalOwnsSampleRef(req, ref);
+    if (!ok) return res.status(403).json({ error: 'not on your account' });
+    res.json(await tlAttachInsert(ref, b, req.portal.email || 'supplier', 'supplier')); }
+  catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); }
+});
 app.post('/api/portal/note', portalAuth, async (req, res) => {
   const b = req.body || {}; if (!b.po || !String(b.body || '').trim()) return res.status(400).json({ error: 'po and body required' });
   if (!await portalOwnsPO(req, b.po)) return portalDeny(res);
   try {
     const sid = req.portal.supplierIds[0] || null;
-    await pool.query(`INSERT INTO planner.supplier_notes (po,supplier_id,author_email,author_kind,body) VALUES ($1,$2,$3,'supplier',$4)`,
-      [b.po, sid, req.portal.email, String(b.body).trim()]);
+    await pool.query(`INSERT INTO planner.supplier_notes (po,supplier_id,author_email,author_kind,body,attachment_id) VALUES ($1,$2,$3,'supplier',$4,$5)`,
+      [b.po, sid, req.portal.email, String(b.body).trim(), Number(b.attachment_id) || null]);
     res.json({ ok: true });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
