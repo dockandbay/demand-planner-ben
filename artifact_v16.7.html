@@ -10310,7 +10310,7 @@ function renderSummaryView(body){
       var imp=(sub!==''&&!stored)?_pImp:null;   // implied growth shown only on untyped subcats
       var lockConflict=stored&&periodConflict;   // ⚠ goes on the LOCKED entries that together exceed the budget — not the implied cells
       if(imp!=null)inh=imp;   // treat the implied growth as this cell's effective inherited value (display + live edit baseline)
-      var mths=c.single?[c.single]:(c.m?[c.m]:(c.months||[])), ly=0; mths.forEach(function(m){ ly+=((_lyRev[sub]&&_lyRev[sub][m])||0); });   // month cols carry .m (not .months) → guard so MONTH group doesn't blank
+      var mths=c.single?[c.single]:(c.m?[c.m]:(c.months||[])), ly=0, lyU=0; mths.forEach(function(m){ ly+=((_lyRev[sub]&&_lyRev[sub][m])||0); lyU+=((_lyUnits[sub]&&_lyUnits[sub][m])||0); });   // month cols carry .m (not .months) → guard so MONTH group doesn't blank
       var ph=(inh!=null)?('↳'+(inh>=0?'+':'')+inh+'%'):'0%';
       var isGbp=(gbpStored!=null), v='', bg='', ttxt='', cellTgt=0;
       if(isGbp){ v='£'+Math.round(gbpStored).toLocaleString(); bg='background:#B3EBF2';   // £ absolute → light blue
@@ -10328,7 +10328,7 @@ function renderSummaryView(body){
         ttxt=(ly>0?('£'+Math.round(cellTgt).toLocaleString()):'')+((_effNet>0)?(' · '+Math.round(cellTgt/_effNet).toLocaleString()+'u'):'');
         if(_roCapped)ttxt='<span title="Discontinued sub-category — target capped to '+Math.round(_capC).toLocaleString()+' units this period ('+Math.round(_roStockU[sub]).toLocaleString()+' units of stock left in total). Last-year basis would be higher; can\'t sell more than is left." style="color:var(--amber);cursor:help;font-weight:800">&#9888;</span> '+ttxt; }
       if(lockConflict)ttxt='<span title="Target conflict: the locked category targets for this period together exceed what the market-total budget allows — the remaining (untyped) categories get floored at −100% / forced negative even though the market total is a positive or flat growth. Lower a locked category’s growth (this one or another), or raise the market total." style="color:var(--neg);cursor:help;font-weight:800">⚠</span> '+ttxt;
-      return '<td class="ecell" style="padding:2px 4px;border:1px solid var(--line);text-align:right'+(lockConflict?';background:#fff1f1':((_roStockU&&_roStockU[sub]>0)?';background:#FFF3E6':''))+'"><input class="tgin" data-sub="'+encodeURIComponent(sub)+'" data-fy="'+Y+'" data-lvl="'+lvl+'" data-idx="'+idx+'" data-ly="'+Math.round(ly)+'" data-inh="'+(inh!=null?inh:'')+'" data-net="'+_tgtNet(sub)+'" value="'+v+'" placeholder="'+ph+'" title="Type a % growth vs last year (e.g. 40) OR a revenue target in the SELECTED currency (e.g. 120000 or €120000 — the currency picker wins over any symbol you type; stored in GBP at the FY rate) OR a units target (e.g. 100u → converted at this subcategory’s price; units beat everything). Blank = inherit." style="'+bg+'"><div class="ttgt tgt-hov" data-sub="'+encodeURIComponent(sub)+'" data-mths="'+mths.join(',')+'" data-tgt="'+Math.round(cellTgt)+'" data-ly="'+Math.round(ly)+'" data-net="'+_tgtNet(sub)+'" style="font-size:9px;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums;margin-top:1px;cursor:help">'+ttxt+'</div></td>'; }
+      return '<td class="ecell" style="padding:2px 4px;border:1px solid var(--line);text-align:right'+(lockConflict?';background:#fff1f1':((_roStockU&&_roStockU[sub]>0)?';background:#FFF3E6':''))+'"><input class="tgin" data-sub="'+encodeURIComponent(sub)+'" data-fy="'+Y+'" data-lvl="'+lvl+'" data-idx="'+idx+'" data-ly="'+Math.round(ly)+'" data-lyu="'+Math.round(lyU)+'" data-inh="'+(inh!=null?inh:'')+'" data-net="'+_tgtNet(sub)+'" value="'+v+'" placeholder="'+ph+'" title="Type a % growth vs last year (e.g. 40) OR a revenue target in the SELECTED currency (e.g. 120000 or €120000 — the currency picker wins over any symbol you type; stored in GBP at the FY rate) OR a units target (e.g. 100u → converted at this subcategory’s price; units beat everything). Blank = inherit." style="'+bg+'"><div class="ttgt tgt-hov" data-sub="'+encodeURIComponent(sub)+'" data-mths="'+mths.join(',')+'" data-tgt="'+Math.round(cellTgt)+'" data-ly="'+Math.round(ly)+'" data-net="'+_tgtNet(sub)+'" style="font-size:9px;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums;margin-top:1px;cursor:help">'+ttxt+'</div></td>'; }
     // ── Category totals (Ben): group subcats under their parent CATEGORY and roll up LY→target for BOTH units and
     //    revenue, from each subcat's set target growth. Metric-independent (reads raw actuals a[m]=[units,£]); revenue
     //    converted to display currency per FY. Untyped subcats: read tab holds flat (matches the summary target cells);
@@ -10355,7 +10355,7 @@ function renderSummaryView(body){
       // Target £ baseline = prior-year revenue per month. If the prior-year month is itself still a FORECAST
       // (e.g. FY27/28 H2 → FY26/27 H2 not complete), inherit the forecast revenue (subData.val, which is
       // actual-or-forecast for revtgt) instead of showing 0 → so the £ target appears for future halves too.
-      var _lyRev={}; subs.forEach(function(_s){ var _sd=subData(_s), _a=_sd.a||{}, _mm={}; DISP_MONTHS.forEach(function(m){ var py=prevY(m); _mm[m]=(py in _sd.val)?_sd.val[py]:((_a[py]&&_a[py][1])||0); }); _lyRev[_s]=_mm; });
+      var _lyRev={}, _lyUnits={}; subs.forEach(function(_s){ var _sd=subData(_s), _a=_sd.a||{}, _mm={}, _mu={}; DISP_MONTHS.forEach(function(m){ var py=prevY(m); _mm[m]=(py in _sd.val)?_sd.val[py]:((_a[py]&&_a[py][1])||0); _mu[m]=(_a[py]&&_a[py][0])||0; }); _lyRev[_s]=_mm; _lyUnits[_s]=_mu; });   // v27.563: LY UNITS too (a units target sets growth vs last year's units, not its £)
       var _mmT={}; DISP_MONTHS.forEach(function(m){ var _t=0; subs.forEach(function(_s){ _t+=_lyRev[_s][m]||0; }); _mmT[m]=_t; }); _lyRev['']=_mmT;
       // Part A — run-off (discontinued) subcats with stock: cap the target at remaining sellable stock (on-hand+inbound),
       // run down over FUTURE months following last-year's unit shape. _roCapU[sub][m] = units the stock allows that month;
@@ -10438,23 +10438,23 @@ function renderSummaryView(body){
       function _tgSym(){ return (typeof _symC!=='undefined'&&_symC)?_symC:'£'; }
       function _tgMoney(p,inp){ if(p&&p.money!=null){ return {gbp:p.money/_tgRate(inp)}; } return p; }   // selected-currency amount → GBP for storage / maths
       host.querySelectorAll('input.tgin').forEach(function(inp){
-        inp.oninput=function(){ var lyv=Number(inp.dataset.ly)||0, net=Number(inp.dataset.net)||0, ih=inp.dataset.inh, p=_tgMoney(_parseTgt(inp.value),inp), sib=inp.parentNode.querySelector('.ttgt'), _rt=_tgRate(inp), _sy=_tgSym(); if(!sib)return;
+        inp.oninput=function(){ var lyv=Number(inp.dataset.ly)||0, lyU=Number(inp.dataset.lyu)||0, net=Number(inp.dataset.net)||0, ih=inp.dataset.inh, p0=_parseTgt(inp.value), p=_tgMoney(p0,inp), sib=inp.parentNode.querySelector('.ttgt'), _rt=_tgRate(inp), _sy=_tgSym(); if(!sib)return;
           if(p.units!=null){ if(net>0){ p={gbp:p.units*net}; } else { sib.innerHTML='<span style="color:#b45309">no £/unit price for this subcategory — can\'t convert units</span>'; sib.dataset.tgt=0; return; } }   // "100u" → £ via the cell's net £/unit
           var u=function(gbp){ return (net>0&&gbp>0)?(' · '+Math.round(gbp/net).toLocaleString()+'u'):''; };
-          if(p.gbp!=null){ var imp=lyv>0?Math.round((p.gbp/lyv-1)*100):null; sib.innerHTML=(imp==null?'new':((imp>=0?'+':'')+imp+'%'))+(_sy!=='£'?' · £'+Math.round(p.gbp).toLocaleString():'')+u(p.gbp); sib.dataset.tgt=Math.round(p.gbp); }
+          if(p.gbp!=null){ var imp=(p0.units!=null&&lyU>0)?Math.round((p0.units/lyU-1)*100):(lyv>0?Math.round((p.gbp/lyv-1)*100):null); sib.innerHTML=(imp==null?'new':((imp>=0?'+':'')+imp+'%'))+(p0.units!=null&&lyU>0?' vs '+lyU.toLocaleString()+'u LY':'')+(_sy!=='£'?' · £'+Math.round(p.gbp).toLocaleString():'')+u(p.gbp); sib.dataset.tgt=Math.round(p.gbp); }   // v27.563: units entry → growth vs LY UNITS
           else { var g=(p.pct!=null)?p.pct:((ih!==''&&ih!=null)?parseFloat(ih):0); if(isNaN(g))g=0; var tgt=lyv*(1+g/100); sib.innerHTML=(lyv>0?(_sy+Math.round(tgt*_rt).toLocaleString()):'')+u(tgt); sib.dataset.tgt=Math.round(tgt); } };   // sibling shows the selected currency (GBP kept in data-tgt)   // keep data-tgt live so the hover tooltip reflects edits without a refresh
-        inp.onchange=function(){ var sub=decodeURIComponent(inp.dataset.sub), lyv=Number(inp.dataset.ly)||0, net=Number(inp.dataset.net)||0, p=_tgMoney(_parseTgt(inp.value),inp), _rt=_tgRate(inp), _sy=_tgSym();
+        inp.onchange=function(){ var sub=decodeURIComponent(inp.dataset.sub), lyv=Number(inp.dataset.ly)||0, lyU=Number(inp.dataset.lyu)||0, net=Number(inp.dataset.net)||0, p0=_parseTgt(inp.value), p=_tgMoney(p0,inp), _rt=_tgRate(inp), _sy=_tgSym(), _unitG=(p0.units!=null&&lyU>0)?Math.round((p0.units/lyU-1)*1000)/10:null;
           if(p.units!=null)p=(net>0)?{gbp:p.units*net}:{};   // units entry → £ target via net £/unit; no price → ignore (leave cell unchanged on next redraw)
           // Instant in-place reformat (no full refresh needed): £ → light-blue "£1,000", % → light-green "+30%", blank → clear.
-          if(p.gbp!=null){ inp.value=_sy+Math.round(p.gbp*_rt).toLocaleString(); inp.style.background='#B3EBF2'; }   // echo in the selected currency
+          if(p.gbp!=null){ inp.value=(p0.units!=null)?(Math.round(p0.units).toLocaleString()+'u'):(_sy+Math.round(p.gbp*_rt).toLocaleString()); inp.style.background='#B3EBF2'; }   // units entries stay as units in the cell   // echo in the selected currency
           else if(p.pct!=null){ inp.value=(p.pct>=0?'+':'')+p.pct+'%'; inp.style.background='#F0FFF0'; }
           else { inp.value=''; inp.style.background=''; }
           var body={country:co,channel:ch,fy:+inp.dataset.fy,subcategory:sub,level:inp.dataset.lvl,idx:+inp.dataset.idx};
-          if(p.gbp!=null){ body.target_gbp=p.gbp; body.growth_pct=(lyv>0?Math.round((p.gbp/lyv-1)*1000)/10:''); }   // store £ + (for existing cats) the equivalent % so the summary math keeps working
+          if(p.gbp!=null){ body.target_gbp=p.gbp; body.growth_pct=(_unitG!=null)?_unitG:(lyv>0?Math.round((p.gbp/lyv-1)*1000)/10:''); }   // v27.563: units target → growth vs LY units (the £ is kept for display)   // store £ + (for existing cats) the equivalent % so the summary math keeps working
           else { body.growth_pct=(p.pct!=null?p.pct:''); body.target_gbp=''; }
           fetch('/api/demand-revenue-targets/periods',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})
             .then(function(r){return r.json();}).then(function(){ var k=tgKey(+inp.dataset.fy,sub,inp.dataset.lvl,+inp.dataset.idx);
-              if(p.gbp!=null){ SUMM_TGT_GBP[k]=p.gbp; if(lyv>0)SUMM_TGT[k]=Math.round((p.gbp/lyv-1)*1000)/10; else delete SUMM_TGT[k]; }
+              if(p.gbp!=null){ SUMM_TGT_GBP[k]=p.gbp; if(_unitG!=null)SUMM_TGT[k]=_unitG; else if(lyv>0)SUMM_TGT[k]=Math.round((p.gbp/lyv-1)*1000)/10; else delete SUMM_TGT[k]; }
               else { delete SUMM_TGT_GBP[k]; if(p.pct!=null)SUMM_TGT[k]=p.pct; else delete SUMM_TGT[k]; }
               // Capture where the user CURRENTLY is BEFORE the redraw — the async save may resolve after they've
               // tabbed to another target cell. Restore focus there (preserving in-progress text + caret); never yank
@@ -13198,7 +13198,7 @@ function computeTargetRecs(fy,coA,chA){ var co=coA||CUR,ch=chA||CF;
         lyU=curMonthForecast(s,co,ch)||0; var _pp=pa(_pk); lyRev=lyU*getASP(co,ch,s,_pp.y,_pp.mo);
       } else { lyRev=a[_pk]?a[_pk][1]:0; lyU=a[_pk]?a[_pk][0]:0; }
       if(!(lyRev>0))return;
-      var tgtRev=lyRev*(1+g/100), reqU=Math.max(0,Math.round(tgtRev/asp));
+      var reqU=(lyU>0)?Math.max(0,Math.round(lyU*(1+g/100))):Math.max(0,Math.round(lyRev*(1+g/100)/asp)), tgtRev=reqU*asp;   // v27.563: growth applies to last year's UNITS (a £ target's growth was already derived vs LY £); revenue = units × current ASP
       var curU=(cr.fu[m]||0), curRev=curU*asp;
       rows.push({m:m, curU:curU, lyU:lyU, curRev:curRev, tgtRev:tgtRev, reqU:reqU, g:g, pctCur:(curU>0?(reqU/curU-1):null), pctLY:(lyU>0?(reqU/lyU-1):null)});
       fyCur+=curRev; fyTgt+=tgtRev; });

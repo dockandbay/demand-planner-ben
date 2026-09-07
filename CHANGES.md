@@ -1,3 +1,7 @@
+## v27.563 Summary & targets: units targets grow UNITS (fixes +989% recommendations) (Ben)
+- **Bug:** a units target ("1500u") was converted to £ at today's net price and its growth % was then taken against last year's REVENUE (realised at a much lower £/unit), e.g. EU DTC H1 2027/28: 1,500u vs 258u LY should be +481% but read +989%; Target recommendations then applied that revenue growth and divided by today's ASP, so June and July alone exceeded the target.
+- **Fix:** a units entry sets the period growth against last year's UNITS (the cell keeps showing "1,500u"; the £ equivalent is still stored for revenue views), and Target recommendations apply the growth to last year's units per month (revenue = units × current ASP). £ and % entries behave as before. Existing units-entered targets need re-typing to pick up the unit basis. artifact_v16.7.html only.
+
 ## v27.562 Barcode scanner: lookup route registered ahead of the generic SUPPLY lookup (fix)
 - /api/supply/barcode-lookup was answered by the generic /api/supply/:section handler ("unknown section"). Route now registered before it. server.mjs only.
 
