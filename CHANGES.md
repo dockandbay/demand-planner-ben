@@ -1,3 +1,6 @@
+## v27.541 Mobile PO card dates: top-aligned columns (Ben)
+- The four date columns align at the top: label row, then the date (or picker) at a fixed height, then any badge ("-58d", CALC, "set to 04-Aug") stacked underneath, each on its own line. supply/hz-theme.css only.
+
 ## v27.540 Mobile PO card: Direct to client on one line (client · order ref)
 - The client name and sales-order ref share a single line on the phone card (the desktop grid keeps its two-line cell). supply/hz-theme.css only.
 

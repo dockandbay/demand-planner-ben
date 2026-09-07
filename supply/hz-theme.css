@@ -693,3 +693,27 @@ body header.pv-top .pv-lang button:hover{color:#fff}
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Direct"] span.mut{margin-left:6px}
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Direct"] span.mut::before{content:"· ";color:var(--faint)}
 }
+
+/* ═══ v27.541: phone PO card dates — top-aligned columns: label row, then the date, then badges / "set to" / CALC tags underneath ═══ */
+@media (max-width:640px){
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Start"],
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="End"],
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Arrival/Delivery"],
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Completion"]{align-self:flex-start;align-items:stretch;white-space:normal!important;overflow:visible}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Start"]::before,
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="End"]::before,
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Arrival/Delivery"]::before,
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Completion"]::before{margin-bottom:1px;height:12px}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Start"] > .datewrap,
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="End"] > .datewrap,
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Arrival/Delivery"] > .datewrap,
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Completion"] > .datewrap{display:block;width:100%}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Start"] .datewrap .fci,
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="End"] .datewrap .fci,
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Arrival/Delivery"] .datewrap .fci,
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Completion"] .datewrap .fci{display:block;width:100%!important;min-height:22px}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Start"] > :not(.datewrap),
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="End"] > :not(.datewrap),
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Arrival/Delivery"] > :not(.datewrap),
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Completion"] > :not(.datewrap){display:block;width:max-content;max-width:100%;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:9.5px}
+}
