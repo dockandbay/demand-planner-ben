@@ -10196,6 +10196,60 @@
       });
     }); }
   var RRP_MKTS=[['UK','uk_rt','£'],['US','us_rt','$'],['EU','eu_rt','€']];   // markets we hold RRP for (migration 023)
+  // ── v27.561 Barcode scanner (Ben): camera (BarcodeDetector where supported) + typed / USB-scanner input → SKU card ──
+  var _bscState={stream:null,timer:null,last:'',lastAt:0,hist:[]};
+  function closeBarcodeScanner(){ try{ if(_bscState.timer)clearInterval(_bscState.timer); }catch(e){} _bscState.timer=null; try{ if(_bscState.stream)_bscState.stream.getTracks().forEach(function(t){t.stop();}); }catch(e){} _bscState.stream=null; var ov=document.getElementById('bsc-ov'); if(ov&&ov.parentNode)ov.parentNode.removeChild(ov); document.body.style.overflow=''; }
+  function openBarcodeScanner(){ closeBarcodeScanner(); var ph=isPhone();
+    var ov=document.createElement('div'); ov.id='bsc-ov'; ov.style.cssText='position:fixed;inset:0;z-index:200080;background:rgba(15,23,42,.55);display:flex;align-items:'+(ph?'stretch':'flex-start')+';justify-content:center;padding:'+(ph?'0':'40px 16px');
+    ov.innerHTML='<div id="bsc-box" style="background:#fff;border-radius:'+(ph?'0':'12px')+';width:'+(ph?'100%':'min(920px,100%)')+';max-height:'+(ph?'100%':'calc(100vh - 80px)')+';overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.35);display:flex;flex-direction:column">'
+      +'<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);position:sticky;top:0;background:#fff;z-index:2"><b style="font-size:14px">📷 Barcode scanner</b><span id="bsc-status" class="mut tiny"></span><button id="bsc-x" aria-label="Close" style="margin-left:auto;width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:#fff;font-size:15px;cursor:pointer">✕</button></div>'
+      +'<div style="display:flex;gap:14px;padding:12px 14px;flex-wrap:wrap;align-items:flex-start">'
+        +'<div style="flex:0 1 360px;min-width:260px"><div id="bsc-cam" style="position:relative;background:#111;border-radius:10px;overflow:hidden;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;color:#cbd5e1;font-size:12px;text-align:center;padding:10px">Starting camera…</div>'
+          +'<div style="margin-top:8px;display:flex;gap:6px;align-items:center"><input id="bsc-in" class="fci" autocomplete="off" placeholder="scan with a USB / Bluetooth scanner or type a barcode, then Enter" style="flex:1;font-size:13px;padding:8px 10px"><button id="bsc-go" class="save-btn" style="font-size:12px">Look up</button></div>'
+          +'<div id="bsc-hist" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px"></div></div>'
+        +'<div id="bsc-res" style="flex:1 1 380px;min-width:280px"><div class="mut" style="font-size:12px;padding:10px 0">Point the camera at a product, carton or inner barcode, or type one. Numbers saved in a Customise project resolve to their SKU too.</div></div>'
+      +'</div></div>';
+    document.body.appendChild(ov); document.body.style.overflow='hidden';
+    ov.querySelector('#bsc-x').onclick=closeBarcodeScanner; ov.addEventListener('click',function(e){ if(e.target===ov)closeBarcodeScanner(); });
+    var inp=ov.querySelector('#bsc-in'), res=ov.querySelector('#bsc-res'), status=ov.querySelector('#bsc-status'), cam=ov.querySelector('#bsc-cam'), hist=ov.querySelector('#bsc-hist');
+    function drawHist(){ hist.innerHTML=_bscState.hist.slice(0,8).map(function(h){ return '<span class="bsc-h" data-c="'+esc(h.code)+'" style="cursor:pointer;font-size:10.5px;border:1px solid var(--line);border-radius:10px;padding:2px 8px;background:var(--hover)">'+esc(h.sku||h.code)+'</span>'; }).join(''); hist.querySelectorAll('.bsc-h').forEach(function(x){ x.onclick=function(){ lookup(x.dataset.c,true); }; }); }
+    function money(ccy,v){ if(v==null||isNaN(v))return '<span class="mut">—</span>'; var sym={GBP:'£',USD:'$',EUR:'€',AUD:'A$',CAD:'C$'}[ccy]||''; return sym+Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
+    function num(v){ return (v==null||isNaN(v))?'<span class="mut">—</span>':Number(v).toLocaleString(); }
+    function card(d){ var img=d.image||d.swatch; var matched={product:'Product barcode',carton:'Carton barcode',inner:'Inner barcode',custom:'Customise project'}[d.matched]||d.matched;
+      var mk=['UK','US','EU','AU','CA'];
+      var prices='<table style="border-collapse:collapse;font-size:12px;width:100%"><thead><tr><th class="l" style="font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em;padding:3px 6px">Market</th><th style="font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em;padding:3px 6px;text-align:right">Retail</th></tr></thead><tbody>'
+        +mk.map(function(m){ var p=(d.prices||{})[m]||{}; return '<tr><td style="padding:3px 6px;border-top:1px solid var(--line2)"><b>'+m+'</b> <span class="mut tiny">'+esc(p.ccy||'')+'</span></td><td style="padding:3px 6px;border-top:1px solid var(--line2);text-align:right;font-variant-numeric:tabular-nums">'+money(p.ccy,p.retail)+'</td></tr>'; }).join('')
+        +(d.cost_usd!=null?'<tr><td style="padding:3px 6px;border-top:1px solid var(--line)" class="mut tiny">Cost (USD)</td><td style="padding:3px 6px;border-top:1px solid var(--line);text-align:right" class="mut">'+money('USD',d.cost_usd)+'</td></tr>':'')+'</tbody></table>';
+      var inv='<table style="border-collapse:collapse;font-size:12px;width:100%"><thead><tr>'+['Market','3PL','FBA','AWD','Non-GRS'].map(function(h,i){return '<th style="font-size:10px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em;padding:3px 6px;text-align:'+(i?'right':'left')+'">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+        +mk.map(function(m){ var v=(d.inventory||{})[m]||{}; return '<tr><td style="padding:3px 6px;border-top:1px solid var(--line2)"><b>'+m+'</b></td>'+[v['3pl'],v.fba,v.awd,v.nongrs].map(function(x){return '<td style="padding:3px 6px;border-top:1px solid var(--line2);text-align:right;font-variant-numeric:tabular-nums">'+num(x)+'</td>';}).join('')+'</tr>'; }).join('')+'</tbody></table>';
+      var bc=d.barcodes||{};
+      return '<div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">'
+        +(img?'<img src="'+esc(img)+'" class="bsc-img" data-src="'+esc(img)+'" style="width:110px;height:110px;object-fit:cover;border-radius:10px;border:1px solid var(--line);cursor:zoom-in;flex:0 0 auto">':'<div style="width:110px;height:110px;border-radius:10px;background:var(--hover);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:11px">no image</div>')
+        +'<div style="flex:1;min-width:200px"><div style="font-family:ui-monospace,Menlo,monospace;font-weight:800;font-size:15px;color:var(--blue)">'+esc(d.sku)+'</div><div style="font-size:13px;margin-top:2px">'+esc(d.product_name||'')+'</div>'
+          +'<div class="mut" style="font-size:12px;margin-top:3px">'+esc([d.colour,d.size,d.category,d.subcategory].filter(Boolean).join(' · '))+'</div>'
+          +'<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span style="font-size:10px;font-weight:800;background:var(--violet-bg);color:var(--violet);border-radius:8px;padding:1px 8px">'+esc(matched)+(d.project?' · '+esc(d.project.name):'')+'</span>'+(d.tier?'<span style="font-size:10px;font-weight:800;border:1px solid var(--muted);color:var(--muted);border-radius:8px;padding:1px 8px">Tier '+esc(d.tier)+'</span>':'')+(d.release_window?'<span style="font-size:10px;font-weight:700;background:var(--hover);border:1px solid var(--line);border-radius:8px;padding:1px 8px">'+esc(d.release_window)+'</span>':'')+(d.status?'<span class="tool-badge '+statusBg(d.status)+'" style="font-size:10px">'+esc(d.status)+'</span>':'')+'</div>'
+          +'<div class="mut tiny" style="margin-top:6px;line-height:1.6">'+(d.supplier?'Supplier <b>'+esc(d.supplier)+'</b><br>':'')+'Product <b>'+esc(bc.product||'—')+'</b> · Carton <b>'+esc(bc.carton||'—')+'</b>'+(bc.carton_qty?' (×'+esc(String(bc.carton_qty))+')':'')+' · Inner <b>'+esc(bc.inner||'—')+'</b></div></div></div>'
+        +'<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:12px"><div style="flex:1 1 220px"><div style="font-size:11px;font-weight:700;color:var(--ink-soft);margin-bottom:3px">Prices</div>'+prices+'</div><div style="flex:2 1 300px"><div style="font-size:11px;font-weight:700;color:var(--ink-soft);margin-bottom:3px">Inventory</div>'+inv+'</div></div>'; }
+    function lookup(code,quiet){ code=String(code||'').trim(); if(!code)return; var now=Date.now(); if(!quiet&&code===_bscState.last&&now-_bscState.lastAt<2500)return; _bscState.last=code; _bscState.lastAt=now;
+      status.textContent='looking up '+code+'…'; res.innerHTML='<div class="hz-skel"><i></i><i></i><i></i></div>';
+      fetch('/api/supply/barcode-lookup?code='+encodeURIComponent(code)).then(function(r){return r.json();}).then(function(d){
+        if(!d||!d.found){ status.textContent=''; res.innerHTML='<div style="padding:10px;border:1px solid var(--amber);background:var(--amber-bg);border-radius:8px;font-size:12px"><b>'+esc(code)+'</b> is not a known product, carton or inner barcode, and no Customise project uses it.</div>'; try{ navigator.vibrate&&navigator.vibrate([60,60,60]); }catch(e){} return; }
+        status.textContent='✓ '+d.sku; res.innerHTML=card(d); res.querySelectorAll('.bsc-img').forEach(function(im){ im.onclick=function(){ openImgZoom(im.dataset.src); }; });
+        _bscState.hist=[{code:code,sku:d.sku}].concat(_bscState.hist.filter(function(h){return h.code!==code;})).slice(0,8); drawHist(); try{ navigator.vibrate&&navigator.vibrate(40); }catch(e){}
+      }).catch(function(e){ status.textContent=''; res.innerHTML='<div style="color:var(--neg);font-size:12px">Lookup failed: '+esc(e&&e.message||e)+'</div>'; }); }
+    inp.onkeydown=function(e){ if(e.key==='Enter'){ e.preventDefault(); lookup(inp.value,true); inp.select(); } }; ov.querySelector('#bsc-go').onclick=function(){ lookup(inp.value,true); inp.select(); };
+    setTimeout(function(){ try{ inp.focus(); }catch(e){} },50);
+    // camera
+    var hasDet=('BarcodeDetector' in window), hasCam=!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia);
+    if(!hasCam){ cam.textContent='No camera access in this browser — use a USB scanner or type the barcode below.'; return; }
+    if(!hasDet){ cam.innerHTML='This browser cannot decode barcodes from the camera (Safari / Firefox). Use Chrome or Edge for live scanning, or a USB / Bluetooth scanner or type the barcode below.'; return; }
+    navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false}).then(function(stream){ _bscState.stream=stream;
+      cam.innerHTML='<video id="bsc-video" autoplay muted playsinline style="width:100%;height:100%;object-fit:cover"></video><div style="position:absolute;left:12%;right:12%;top:38%;height:24%;border:2px solid rgba(255,255,255,.85);border-radius:8px;box-shadow:0 0 0 2000px rgba(0,0,0,.25);pointer-events:none"></div>';
+      var v=cam.querySelector('#bsc-video'); v.srcObject=stream; status.textContent='camera on — hold a barcode in the frame';
+      var det; try{ det=new window.BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf','qr_code']}); }catch(e){ det=new window.BarcodeDetector(); }
+      var busy=false; _bscState.timer=setInterval(function(){ if(busy||!v.videoWidth)return; busy=true; det.detect(v).then(function(codes){ busy=false; if(codes&&codes.length){ var c=(codes[0].rawValue||'').trim(); if(c)lookup(c,false); } }).catch(function(){ busy=false; }); },320);
+    }).catch(function(e){ cam.innerHTML='Camera not available ('+esc(e&&e.message||e)+'). Use a USB scanner or type the barcode below.'; });
+  }
   function renderBarcodes(payload, tgt){ var c=tgt||document.getElementById('supply-content');
     var rows=(payload&&payload.rows)||[], batches=(payload&&payload.batches)||[];
     var CODES=(payload&&payload.codes)||{};   // supplier NAME → short code (LX/XR/…) for multi-supplier barcode filenames
@@ -10234,8 +10288,10 @@
         +'<button id="bc-dlall-prod" class="bc-dlall-btn" style="cursor:pointer;background:var(--blue-soft);color:var(--blue-ink);border:1px solid #93c5fd;border-radius:5px;padding:4px 10px;font-size:11px;white-space:nowrap" title="download every PRODUCT barcode in view as a ZIP, foldered by supplier — A4 print-mould PDFs or individual PNGs per the File Download setting">⤓ All Products</button>'
         +'<button id="bc-dlall-all" class="bc-dlall-btn" style="cursor:pointer;background:var(--pos-bg);color:var(--pos);border:1px solid var(--pos-bg);border-radius:5px;padding:4px 10px;font-size:11px;white-space:nowrap" title="download every PRODUCT + CARTON + INNER barcode in view as a ZIP, foldered by supplier — A4 print-mould PDFs or individual PNGs per the File Download setting">⤓ All (product + carton + inner)</button>'
         +'<button id="bc-customise" style="cursor:pointer;background:#f3e8ff;color:#6b21a8;border:1px solid #d8b4fe;border-radius:5px;padding:4px 10px;font-size:11px;font-weight:700;white-space:nowrap" title="Override the barcode number for specific SKUs (import SKU,barcode), save as a reusable project, download with the custom numbers">🎨 Customise</button>'
+        +'<button id="bc-scan" style="cursor:pointer;background:var(--nav);color:#fff;border:1px solid var(--nav);border-radius:5px;padding:4px 10px;font-size:11px;font-weight:700;white-space:nowrap" title="Scan a product, carton or inner barcode (camera, USB scanner or type it) and see the SKU, swatch, prices and stock per market">📷 Barcode scanner</button>'
       +'</div>'
       +'<div id="sup-grid">'+bcTable(rows,opts())+'</div>';
+    var _bsc=document.getElementById('bc-scan'); if(_bsc)_bsc.onclick=function(){ openBarcodeScanner(); };   // v27.561
     var cur=rows;   // rows currently in view (after filters) — what "Download all" operates on
     function opts(){ return { batch: st.batch?batchBy[st.batch]:null, rrp: st.rrp, rmkt: st.rmkt }; }
     function apply(){ var toks=st.q.toLowerCase().split(/[\s,]+/).filter(Boolean);

@@ -10416,6 +10416,37 @@ app.post('/api/supply/freight-pallets', async (req, res) => {
 // Freight-rate pivot (CONFIG ▸ Freight rates): set the USD rate for a container size × destination. Upserts.
 // ── SUPPLY ▸ Barcodes — "customise" projects (mig 260): per-SKU barcode-number overrides for a download ──
 // (the LIST route is registered earlier, before the /api/supply/:section catch-all)
+// v27.561 Barcode scanner: resolve a scanned / typed code to a SKU card. Digits-only compare (EAN exports carry a leading apostrophe).
+// Order: product barcode → carton → inner → any saved Customise project override (custom number → SKU).
+app.get('/api/supply/barcode-lookup', async (req, res) => {
+  const raw = String(req.query.code || '').trim(); const code = raw.replace(/[^0-9A-Za-z]/g, '');
+  if (!code) return res.status(400).json({ error: 'code required' });
+  const FIELDS = `p.sku, coalesce(p.product_name,'') product_name, coalesce(p.colour_long,'') colour, coalesce(p.size_long,'') size, coalesce(p.category,'') category, coalesce(p.subcategory,'') subcategory,
+      coalesce(p.supplier,'') supplier, coalesce(p.status,'') status, coalesce(p.release_window,'') release_window, coalesce(p.market_tier,'') tier,
+      coalesce(p.colour_swatch_url,'') swatch, coalesce(p.variant_image_url_final,'') image,
+      p.sku_barcode, p.product_ean, p.carton_barcode, p.inner_barcode, p.carton_qty,
+      p.uk_rt, p.us_rt, p.eu_rt, p.au_rt, p.ca_rt, p.cost,
+      p.inventory_uk_3pl, p.inventory_uk_fba, p.inventory_uk_nongrs, p.inventory_us_3pl, p.inventory_us_fba, p.inventory_us_awd, p.inventory_us_nongrs,
+      p.inventory_eu_3pl, p.inventory_eu_fba, p.inventory_au_3pl, p.inventory_au_fba, p.inventory_ca_fba`;
+  const norm = c => `regexp_replace(coalesce(${c},''),'[^0-9A-Za-z]','','g')`;
+  try {
+    let r = (await pool.query(`SELECT ${FIELDS}, CASE WHEN ${norm('p.sku_barcode')}=$1 OR ${norm('p.product_ean')}=$1 THEN 'product' WHEN ${norm('p.carton_barcode')}=$1 THEN 'carton' ELSE 'inner' END matched
+      FROM planner.products p WHERE ${norm('p.sku_barcode')}=$1 OR ${norm('p.product_ean')}=$1 OR ${norm('p.carton_barcode')}=$1 OR ${norm('p.inner_barcode')}=$1 LIMIT 1`, [code])).rows[0];
+    let project = null;
+    if (!r) {   // saved Customise project override? overrides = { sku: {num, types} } (legacy { sku: "num" })
+      const pj = (await pool.query(`SELECT bp.id, bp.name, e.key sku, e.value FROM planner.barcode_projects bp, jsonb_each(coalesce(bp.overrides,'{}'::jsonb)) e
+        WHERE regexp_replace(coalesce(CASE WHEN jsonb_typeof(e.value)='object' THEN e.value->>'num' ELSE trim(both '"' from e.value::text) END,''),'[^0-9A-Za-z]','','g')=$1 ORDER BY bp.updated_at DESC NULLS LAST, bp.id DESC LIMIT 1`, [code])).rows[0];
+      if (pj) { project = { id: pj.id, name: pj.name, types: (pj.value && typeof pj.value === 'object' && pj.value.types) || { product: true } };
+        r = (await pool.query(`SELECT ${FIELDS}, 'custom' matched FROM planner.products p WHERE p.sku=$1`, [pj.sku])).rows[0]; }
+    }
+    if (!r) return res.json({ found: false, code: raw });
+    const n = v => (v == null || v === '' ? null : Number(v));
+    res.json({ found: true, code: raw, matched: r.matched, project, sku: r.sku, product_name: r.product_name, colour: r.colour, size: r.size, category: r.category, subcategory: r.subcategory, supplier: r.supplier, status: r.status, release_window: r.release_window, tier: r.tier,
+      swatch: r.swatch, image: r.image, barcodes: { product: r.sku_barcode || r.product_ean || '', carton: r.carton_barcode || '', inner: r.inner_barcode || '', carton_qty: r.carton_qty || '' },
+      prices: { UK: { ccy: 'GBP', retail: n(r.uk_rt) }, US: { ccy: 'USD', retail: n(r.us_rt) }, EU: { ccy: 'EUR', retail: n(r.eu_rt) }, AU: { ccy: 'AUD', retail: n(r.au_rt) }, CA: { ccy: 'CAD', retail: n(r.ca_rt) } }, cost_usd: n(r.cost),
+      inventory: { UK: { '3pl': n(r.inventory_uk_3pl), fba: n(r.inventory_uk_fba), nongrs: n(r.inventory_uk_nongrs) }, US: { '3pl': n(r.inventory_us_3pl), fba: n(r.inventory_us_fba), awd: n(r.inventory_us_awd), nongrs: n(r.inventory_us_nongrs) }, EU: { '3pl': n(r.inventory_eu_3pl), fba: n(r.inventory_eu_fba) }, AU: { '3pl': n(r.inventory_au_3pl), fba: n(r.inventory_au_fba) }, CA: { fba: n(r.inventory_ca_fba) } } });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/supply/barcode-project/:id', async (req, res) => {
   try { const r = await pool.query(`SELECT id, name, coalesce(target,'product') target, coalesce(batch,'') batch, coalesce(overrides,'{}'::jsonb) overrides FROM planner.barcode_projects WHERE id=$1::bigint`, [req.params.id]);
     if (!r.rowCount) return res.status(404).json({ error: 'not found' }); res.json(r.rows[0]); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
