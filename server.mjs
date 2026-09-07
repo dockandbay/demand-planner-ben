@@ -4204,7 +4204,7 @@ app.get('/api/supply/barcode-lookup', async (req, res) => {
   const raw = String(req.query.code || '').trim(); const code = raw.replace(/[^0-9A-Za-z]/g, '');
   if (!code) return res.status(400).json({ error: 'code required' });
   const FIELDS = `p.sku, coalesce(p.product_name,'') product_name, coalesce(p.colour_long,'') colour, coalesce(p.size_long,'') size, coalesce(p.category,'') category, coalesce(p.subcategory,'') subcategory,
-      coalesce(p.supplier,'') supplier, coalesce(p.status,'') status, coalesce(p.release_window,'') release_window, coalesce(p.market_tier,'') tier,
+      coalesce(p.supplier,'') supplier, coalesce(p.supplier_multiple_all,'') suppliers, coalesce(p.status,'') status, coalesce(p.release_window,'') release_window, coalesce(p.market_tier,'') tier,
       coalesce(p.colour_swatch_url,'') swatch, coalesce(p.variant_image_url_final,'') image,
       p.sku_barcode, p.product_ean, p.carton_barcode, p.inner_barcode, p.carton_qty,
       p.uk_rt, p.us_rt, p.eu_rt, p.au_rt, p.ca_rt, p.cost,
@@ -4223,7 +4223,7 @@ app.get('/api/supply/barcode-lookup', async (req, res) => {
     }
     if (!r) return res.json({ found: false, code: raw });
     const n = v => (v == null || v === '' ? null : Number(v));
-    res.json({ found: true, code: raw, matched: r.matched, project, sku: r.sku, product_name: r.product_name, colour: r.colour, size: r.size, category: r.category, subcategory: r.subcategory, supplier: r.supplier, status: r.status, release_window: r.release_window, tier: r.tier,
+    res.json({ found: true, code: raw, matched: r.matched, project, sku: r.sku, product_name: r.product_name, colour: r.colour, size: r.size, category: r.category, subcategory: r.subcategory, supplier: r.supplier, suppliers: r.suppliers || r.supplier, status: r.status, release_window: r.release_window, tier: r.tier,
       swatch: r.swatch, image: r.image, barcodes: { product: r.sku_barcode || r.product_ean || '', carton: r.carton_barcode || '', inner: r.inner_barcode || '', carton_qty: r.carton_qty || '' },
       prices: { UK: { ccy: 'GBP', retail: n(r.uk_rt) }, US: { ccy: 'USD', retail: n(r.us_rt) }, EU: { ccy: 'EUR', retail: n(r.eu_rt) }, AU: { ccy: 'AUD', retail: n(r.au_rt) }, CA: { ccy: 'CAD', retail: n(r.ca_rt) } }, cost_usd: n(r.cost),
       inventory: { UK: { '3pl': n(r.inventory_uk_3pl), fba: n(r.inventory_uk_fba), nongrs: n(r.inventory_uk_nongrs) }, US: { '3pl': n(r.inventory_us_3pl), fba: n(r.inventory_us_fba), awd: n(r.inventory_us_awd), nongrs: n(r.inventory_us_nongrs) }, EU: { '3pl': n(r.inventory_eu_3pl), fba: n(r.inventory_eu_fba) }, AU: { '3pl': n(r.inventory_au_3pl), fba: n(r.inventory_au_fba) }, CA: { fba: n(r.inventory_ca_fba) } } });
