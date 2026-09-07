@@ -13795,7 +13795,8 @@
               +'<div style="flex:1 1 560px;min-width:0"><div style="font-size:11px;font-weight:700;color:var(--ink-soft);margin-bottom:4px">Feedback &amp; sign-off <span class="mut tiny" style="font-weight:400">— per aspect; ✓/✗ flows to the Variants tab; feedback also posts to the timeline</span></div>'+_fbTagRow(s.id)+(_aspRows?'<table style="border-collapse:collapse;width:100%">'+_aspRows+'</table>':'<div class="mut tiny">No aspects on this sample.</div>')+'</div>'
               +'<div style="flex:0 0 220px"><div style="font-size:11px;font-weight:700;color:var(--ink-soft);margin-bottom:4px">Shipment / tracking</div>'+_track+'</div>'
             +'</div>'
-            +(ph?'<div style="margin-top:8px">'+ph+'</div>':'')
+            +'<div class="ps-photos" data-id="'+s.id+'" style="margin-top:8px">'+ph+'</div>'   // v27.532: always present so uploads can append in place
+            +'<div style="margin-top:6px;display:flex;align-items:center;gap:8px"><label style="font-size:11px;font-weight:600;color:var(--blue);cursor:pointer;border:1px dashed var(--blue-soft);border-radius:6px;padding:3px 9px">📎 Add photos / documents<input type="file" class="ps-up" data-id="'+s.id+'" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ai,.zip" style="display:none"></label><span class="ps-up-msg mut tiny" data-id="'+s.id+'"></span></div>'
             +'</div>'   // close .ps-body
             +'</div>'; }).join(''):'<div style="color:var(--faint);padding:6px 2px">No sample versions submitted yet.</div>');
       body.querySelectorAll('.ps-toggle').forEach(function(h){ h.onclick=function(e){ if(e.target.closest('.ps-card,.ps-adm-del'))return;   // clicks on Card/✕ act normally, not toggle
@@ -13851,6 +13852,15 @@
         box.querySelectorAll('.ps-reason-pdel').forEach(function(a){ a.onclick=function(){ var sel=_aspReasons(id,asp).map(String).filter(function(x){return x!==a.dataset.rid;}); box.innerHTML=reasonInner(id,asp,sel); bindReasonBox(box); _afterReasonChange(id,asp); }; }); }
       body.querySelectorAll('.ps-reason-box').forEach(bindReasonBox);
       body.querySelectorAll('.psamp-img').forEach(function(im){ im.onclick=function(){ openImgZoom(im.dataset.src); }; });
+      // v27.532: admin uploads (photos + documents) on a sample version — appended to the card's strip, no re-render
+      body.querySelectorAll('.ps-up').forEach(function(inp){ inp.onchange=function(){ var id=inp.dataset.id, files=Array.prototype.slice.call(inp.files||[]), strip=body.querySelector('.ps-photos[data-id="'+id+'"]'), msg=body.querySelector('.ps-up-msg[data-id="'+id+'"]'); if(!files.length)return; var i=0, done=0;
+        function one(){ if(i>=files.length){ if(msg){ msg.textContent=done+' file'+(done===1?'':'s')+' added'; setTimeout(function(){ msg.textContent=''; },2600); } inp.value=''; _prodJsonBust(ref); return; }
+          var f=files[i++]; if(f.size>10*1024*1024){ if(msg)msg.textContent=f.name+' skipped (over 10MB)'; one(); return; } if(msg)msg.textContent='uploading '+f.name+'…';
+          var rd=new FileReader(); rd.onload=function(){ shipPost('/api/product/sample/'+id+'/photo',{filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:(window.ME&&ME.email)||''},function(j){ done++; if(strip&&j&&j.id){ var url='/api/supply/portal-attachment/'+j.id;
+              if(/^image\//i.test(f.type||'')){ var im=document.createElement('img'); im.className='psamp-img'; im.dataset.src=url; im.src=url; im.title=f.name; im.style.cssText='width:60px;height:60px;object-fit:cover;border-radius:6px;border:1px solid var(--line);margin:2px;cursor:zoom-in'; im.onclick=function(){ openImgZoom(url); }; strip.appendChild(im); }
+              else { var a=document.createElement('a'); a.href=url; a.target='_blank'; a.rel='noopener'; a.style.cssText='display:inline-block;margin:2px;padding:5px 9px;border:1px solid var(--line);border-radius:6px;font-size:11px;color:var(--blue);text-decoration:underline'; a.textContent='📄 '+f.name; strip.appendChild(a); } }
+            one(); }); }; rd.readAsDataURL(f); }
+        one(); }; });
       body.querySelectorAll('.samp-open').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); (typeof openSampleDrawer==="function"?openSampleDrawer(a.dataset.ref):gotoSample(a.dataset.ref)); }; });   // sample-shipment ref -> editable drawer (was: navigate to SUPPLY Samples)
       var _pns=body.querySelector('.prod-newsamp'); if(_pns)_pns.onclick=function(){ var _d=_prodDetail; _newSampleForProduct((_d&&_d.item&&_d.item.supplier)||'', _prodSeedSku(_d, ref)); };
       // Sample REQUESTS (SR-nn) linked to this product — admin-created, may include this product's SKUs / dev samples.

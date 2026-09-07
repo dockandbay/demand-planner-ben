@@ -1,3 +1,6 @@
+## v27.532 PRODUCT ▸ Samples (admin): add photos / documents to a sample version
+- Each sample card has **📎 Add photos / documents** (multi-select; images, PDF, Office, AI, ZIP; 10MB each). Files upload to the existing sample attachment store tagged as internal uploads and appear in the card's file strip immediately (images as zoomable thumbnails, documents as links) with no re-render. Suppliers see them in the portal alongside their own. supply/inject.html only (endpoint existed).
+
 ## v27.531 Portal add-sample form: searchable Sample shipment picker (Ben)
 - The Sample shipment control on Submit sample version is now the same searchable menu used on saved samples: type to filter by ref, recipient, carrier or tracking. Order: **Assign later** (default, top), **+ New shipment (create now)** second, then the supplier's shipments, Not shipped last. Every shipment line now shows recipient as well as carrier and tracking (also in the per-sample menu). supply/portal-view.js only.
 
