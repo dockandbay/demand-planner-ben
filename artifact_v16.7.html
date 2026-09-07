@@ -7155,10 +7155,10 @@ function buildSkuShares(skus,co,ch,lyMonths){
 // Memoised per render / per demand build (RUNOFF_MEMO). Returns {alloc:{ch:{m:units}}, out:{ch:{m:true}}, cap:{ch:{m:units}}}.
 var RUNOFF_MEMO={}, RUNOFF_LYYM=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
 function runoffChannels(p,ctry){ var av=(p.av&&p.av[ctry])||'', chs=[]; if(av.indexOf('d')>=0)chs.push('DTC'); if(av.indexOf('b')>=0)chs.push('B2B'); if(av.indexOf('t')>=0&&typeof TIK_COUNTRIES!=='undefined'&&TIK_COUNTRIES.indexOf(ctry.toUpperCase())>=0)chs.push('TIK'); if(av.indexOf('f')>=0)chs.push('FBA'); return chs; }
-function runoffAlloc(sku,co){ var key=sku+'|'+co; if(RUNOFF_MEMO[key])return RUNOFF_MEMO[key];
+function runoffAlloc(sku,co,extra){ var key=sku+'|'+co+(extra?'|X':''); if(RUNOFF_MEMO[key])return RUNOFF_MEMO[key];   // extra = {month: units} set-exploded demand landing on this component (buildLiveDemand pass 2)
   var p=SKUM[sku]||{}, ctry=String(co).toLowerCase(), inv=p.inv||{}, oo=p.oo||{};
   var discDate=(p.disc&&p.disc[ctry])?p.disc[ctry]:((p.lyo&&p.dsc)?p.dsc:null), launchDate=(p.lch&&p.lch[ctry])||null;
-  var res={alloc:{},out:{},cap:{},disc:discDate}, chs=runoffChannels(p,ctry);
+  var res={alloc:{},out:{},cap:{},left3:{},leftF:{},disc:discDate}, chs=runoffChannels(p,ctry); if(extra)res.alloc.SET={};
   var pool3=(inv[ctry+'_3pl']||0)+(inv[ctry+'_nongrs']||0)+(oo[ctry+'_3pl']||0), poolF=(inv[ctry+'_fba']||0)+(ctry==='us'?(inv['us_awd']||0):0)+(oo[ctry+'_fba']||0);
   var st={}; chs.forEach(function(ch){ var sales=skuSales(sku,co,ch), fu={}, sh=0;
     try{ fu=(calc(p.s,co,ch)||{}).fu||{}; }catch(e){}
@@ -7167,16 +7167,20 @@ function runoffAlloc(sku,co){ var key=sku+'|'+co; if(RUNOFF_MEMO[key])return RUN
   function raw(ch,m){ var x=st[ch]; var fo=skuOutFC(sku,co,ch,m); if(fo!=null)return fo; if(x.hasLY){ var lyM=(parseInt(m.slice(0,4),10)-1)+'_'+m.slice(5,7); return (lyM<=CUR_YTD_END)?(x.sales[lyM]||0):(x.fc[lyM]||0); } return Math.round((x.fu[m]||0)*x.sh); }
   FM_CALC.forEach(function(m){ var ms=m.slice(0,4)+'-'+m.slice(5,7)+'-01', live=(m>=CUR_MONTH);
     var rw={}; chs.forEach(function(ch){ var r=raw(ch,m); if(p.lyo||(launchDate&&ms<launchDate))r=0; rw[ch]=Math.max(0,Math.round(r)); });
-    if(!(discDate&&ms>discDate)||!live){ chs.forEach(function(ch){ st[ch].fc[m]=rw[ch]; res.alloc[ch][m]=rw[ch]; res.cap[ch][m]=Infinity; }); return; }
+    if(!(discDate&&ms>discDate)||!live){ chs.forEach(function(ch){ st[ch].fc[m]=rw[ch]; res.alloc[ch][m]=rw[ch]; res.cap[ch][m]=Infinity; });
+      if(live){ var _fr=rw.FBA||0, _fo=Math.min(_fr,poolF); poolF-=_fo; var _d3=_fr-_fo+((extra&&extra[m])||0); chs.forEach(function(ch){ if(ch!=='FBA')_d3+=rw[ch]; }); pool3=Math.max(0,pool3-_d3); if(extra)res.alloc.SET[m]=(extra[m]||0); }   // v27.544: months from NOW up to the discontinue date sell from the same stock → deplete the pools (uncapped; run-off months get what is left)
+      res.left3[m]=pool3; res.leftF[m]=poolF; return; }
     var fOwn=0, needF=0; if(rw.FBA!=null){ fOwn=Math.min(rw.FBA,poolF); poolF-=fOwn; needF=rw.FBA-fOwn; }
-    var tot3=needF; chs.forEach(function(ch){ if(ch!=='FBA')tot3+=rw[ch]; });
+    var exS=(extra&&extra[m])||0, drawers=chs.slice(); if(extra)drawers.push('SET');   // SET = exploded set demand competing for the 3PL pool
+    var tot3=needF; drawers.forEach(function(ch){ if(ch==='SET')tot3+=exS; else if(ch!=='FBA')tot3+=rw[ch]; });
     var take={};
-    if(tot3<=pool3){ chs.forEach(function(ch){ take[ch]=(ch==='FBA')?needF:rw[ch]; }); pool3-=tot3; }
-    else { var ratio=(pool3>0&&tot3>0)?pool3/tot3:0, used=0, fr=[]; chs.forEach(function(ch){ var want=(ch==='FBA')?needF:rw[ch], ex=want*ratio, fl=Math.floor(ex); take[ch]=fl; used+=fl; fr.push([ex-fl,ch]); });
+    if(tot3<=pool3){ drawers.forEach(function(ch){ take[ch]=(ch==='FBA')?needF:(ch==='SET'?exS:rw[ch]); }); pool3-=tot3; }
+    else { var ratio=(pool3>0&&tot3>0)?pool3/tot3:0, used=0, fr=[]; drawers.forEach(function(ch){ var want=(ch==='FBA')?needF:(ch==='SET'?exS:rw[ch]), ex=want*ratio, fl=Math.floor(ex); take[ch]=fl; used+=fl; fr.push([ex-fl,ch]); });
       fr.sort(function(a,b){return b[0]-a[0];}); var left=Math.max(0,pool3-used); for(var i=0;i<fr.length&&left>0;i++){ take[fr[i][1]]++; left--; } pool3=0; }
+    if(extra)res.alloc.SET[m]=take.SET||0;
     chs.forEach(function(ch){ var v=(ch==='FBA')?(fOwn+(take.FBA||0)):(take[ch]||0); res.alloc[ch][m]=v; st[ch].fc[m]=v;
       var exhausted=(ch==='FBA')?(poolF<=0&&pool3<=0):(pool3<=0); if(v<=0&&exhausted)res.out[ch][m]=true;
-      res.cap[ch][m]=v+pool3+((ch==='FBA')?poolF:0); }); });   // cap = what this channel could take in m if only IT were raised (others unchanged)
+      res.cap[ch][m]=v+pool3+((ch==='FBA')?poolF:0); }); res.left3[m]=pool3; res.leftF[m]=poolF; });   // cap = what this channel could take in m if only IT were raised (others unchanged); left3/leftF = pool remaining after this month (set explosion reads them)
   RUNOFF_MEMO[key]=res; return res; }
 function skuMonthlyMap(sku,co,ch,months,subcatFU,share,invOH){
   var p=SKUM[sku]||{}, ctry=co.toLowerCase();
@@ -15750,6 +15754,17 @@ function buildLiveDemand(){ RUNOFF_MEMO={};   // v27.534: allocations must refle
       });
     });
     BP_DATA.set_explosion_skips=skips;
+    // ── v27.544 pass 2: DISCONTINUED components that also feed sets — the set demand competes for the SAME 3PL pool as the
+    //    component's own DTC / B2B / FBA run-off. Re-allocate with the exploded demand as a pseudo-channel (pro rata when short)
+    //    and rewrite this component's feed: own channels = new allocation, DTC += allocated set units, demand_sets trimmed.
+    try{ Object.keys(BP_DATA.products||{}).forEach(function(cs){ var cprod=BP_DATA.products[cs]; if(!cprod||!cprod.mkts)return; var spc=SKUM[cs]||{};
+      Object.keys(cprod.mkts).forEach(function(co){ var cmd=cprod.mkts[co]; if(!cmd||!cmd.demand_sets||!cmd.demand)return; var ctry2=co.toLowerCase(), disc=(spc.disc||{})[ctry2]||null; if(!disc)return;
+        var extra={}, any=false; Object.keys(cmd.demand_sets).forEach(function(m){ var ms=m.slice(0,4)+'-'+m.slice(5,7)+'-01'; if(m>=CUR_MONTH&&cmd.demand_sets[m]>0){ extra[m]=cmd.demand_sets[m]; if(ms>disc)any=true; } });
+        if(!any)return; var A=runoffAlloc(cs,co,extra);
+        var _mset={}; Object.keys(A.alloc).forEach(function(ch){ Object.keys(A.alloc[ch]||{}).forEach(function(m){ _mset[m]=1; }); });   // EVERY run-off month (own allocations shift even where no set demand lands)
+        Object.keys(_mset).forEach(function(m){ var ms=m.slice(0,4)+'-'+m.slice(5,7)+'-01'; if(!(ms>disc)||m<CUR_MONTH)return; var setAl=(A.alloc.SET&&A.alloc.SET[m])||0; extra[m]=extra[m]||0;
+          Object.keys(A.alloc).forEach(function(ch){ if(ch==='SET')return; if(!cmd.demand[ch])cmd.demand[ch]={}; var own=(A.alloc[ch]&&A.alloc[ch][m])||0, v=own+(ch==='DTC'?setAl:0); if(v>0)cmd.demand[ch][m]=v; else delete cmd.demand[ch][m]; });
+          if(setAl<extra[m]){ var f=extra[m]>0?setAl/extra[m]:0; cmd.demand_sets[m]=setAl; if(cmd.demand_sets_src&&cmd.demand_sets_src[m])cmd.demand_sets_src[m].forEach(function(x){ x.units=x.units*f; x.dtcU=x.dtcU*f; x.fbaU=x.fbaU*f; x.capped=true; }); } }); }); }); }catch(e){}
   })();
   BP_DATA.demand_source='Live: forecast_outputs (SKU) + PLAN cascade';
 }

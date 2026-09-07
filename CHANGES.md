@@ -1,3 +1,8 @@
+## v27.544 DEMAND run-off: the pool is drawn from NOW, and set demand competes for it (Ben, OCETRES UK)
+- **Bug:** the shared pool (v27.534) only started depleting in the first month after the discontinue date, so demand between now and that date (e.g. Sep to Nov for TOWLB-DES-XL-OCETRES) was never taken out of the stock the run-off later drew on; the buy plan's stock projection hit zero months before the forecast stopped. Fixed: every forecast month from the current month depletes the 3PL / FBA pools; run-off months are capped by what is left.
+- **Sets:** exploded set demand landing on a discontinued component now competes for that component's 3PL pool (pro rata with its own DTC / B2B / FBA run-off) in a second pass of the buy-plan demand build; demand_sets is trimmed accordingly (src rows flagged capped).
+- **Verified:** OCETRES UK now runs off to 0 on DTC + B2B in Jul-27 (pool exhausted), FBA continues from its own stock only. Buy-plan net vs the pre-v27.534 baseline: UK -40, US -90, AU -40, CA -60 units (v27.534's -1.5k UK swing reverses because the SS27 SKUs' pools are now consumed before their Sep-27 discontinue date). artifact_v16.7.html only.
+
 ## v27.543 PO PLAN panel: no "loading" text in the sub-menu (Ben)
 - The sub-tabs render instantly as before, but the "⏳ loading full detail…" note no longer sits inside the tab bar: a thin shimmer line under the menu shows while the full detail loads in the background and disappears when it lands. The initial placeholder before the fast paint is a shimmer block instead of the word Loading. supply/inject.html + supply/hz-theme.css.
 
