@@ -1,3 +1,7 @@
+## v27.572 Portal custom barcodes: download the project’s SKUs (Ben)
+- ⤓ Download custom barcodes on a linked PO prints the project’s custom numbers for every SKU the supplier owns (still requires the project to be linked to that PO and the PO to be the supplier’s), instead of only SKUs on that PO’s lines, which made a linked project look empty when its SKUs sat on a sibling PO. Hint text + empty-state message updated.
+- FIX v27.571: restored the $1 placeholder in the portal bootstrap barcode_projects query (row was silently empty).
+
 ## v27.571 Timelines: photos / documents on PO, shipment and sample timelines, admin + supplier portal (Ben)
 - mig 269: attachment_id on planner.shipment_notes and planner.sample_notes (supplier_notes already had it).
 - Every timeline composer (PO, shipment, sample; admin and portal) gets a dashed "📎 Choose files or drag & drop · max 4MB per file" box under the message; drop onto the message box or the dashed box; multiple files allowed; each uploads on its own (4MB cap per file, client pre-check + server 413), the first rides on the message note, the rest post as their own "📎 name" notes. Attachments render on the timeline (image thumbnail or 📎 link).

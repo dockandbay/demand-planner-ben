@@ -16444,8 +16444,11 @@ app.get('/api/portal/label-data', portalAuth, async (req, res) => {
       if (!po) return res.status(400).json({ error: 'po required with project' });
       proj = (await pool.query(`SELECT id, name, coalesce(batch,'') batch, coalesce(overrides,'{}'::jsonb) overrides, coalesce(pos,'{}'::text[]) pos FROM planner.barcode_projects WHERE id=$1::bigint`, [project])).rows[0];
       if (!proj || !proj.pos.includes(String(po))) return res.status(403).json({ error: 'that barcode project is not linked to this PO' });
+      if (!await portalOwnsPO(req, po)) return res.status(403).json({ error: 'not your PO' });
+      requested = Object.keys(proj.overrides || {});   // v27.572: the project's SKUs (owned-supplier filter below still applies), not only this PO's lines
     }
-    if (skus) requested = String(skus).split(',').map(s => s.trim()).filter(Boolean);
+    if (proj) { /* requested already set from the project */ }
+    else if (skus) requested = String(skus).split(',').map(s => s.trim()).filter(Boolean);
     else if (po) { if (!await portalOwnsPO(req, po)) return res.status(403).json({ error: 'not your PO' });
       requested = (await pool.query(`SELECT sku FROM planner.purchase_order_lines WHERE po=$1`, [po])).rows.map(r => r.sku); }
     else if (prod) requested = (await pool.query(`SELECT DISTINCT l.sku FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po=l.po WHERE p.prod_no=$1 AND p.supplier_name = ANY($2)`, [prod, names])).rows.map(r => r.sku);
