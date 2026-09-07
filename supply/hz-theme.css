@@ -730,3 +730,7 @@ body header.pv-top .pv-lang button:hover{color:#fff}
 #app #supply-root .hz-skel{display:flex;flex-direction:column;gap:8px;padding:10px 4px}
 #app #supply-root .hz-skel i{display:block;height:12px;border-radius:6px;background:linear-gradient(90deg,var(--hover) 0%,var(--line) 50%,var(--hover) 100%);background-size:200% 100%;animation:hzShimmer 1.2s linear infinite}
 #app #supply-root .hz-skel i:nth-child(1){width:38%}#app #supply-root .hz-skel i:nth-child(2){width:72%}#app #supply-root .hz-skel i:nth-child(3){width:55%}
+
+/* ═══ v27.567: DEMAND plan — both header rows (column titles + period/month row) on a very light grey instead of white (Ben) ═══ */
+#app #main-hdr th,#app #main-hdr tr.sub th,#app #main-hdr th.stk,#app #main-hdr th.stk2,#app #main-hdr tr.sub th.stk,#app #main-hdr tr.sub th.stk2{background:#f3f4f6!important}
+#app #main-hdr th.hz-cur-hdr{background:#eef2f9!important}

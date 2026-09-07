@@ -1,3 +1,6 @@
+## v27.567 DEMAND plan: header rows on light grey (Ben)
+- The two header rows of the plan table (column titles and the period / month row, including the sticky SKU corner cells) sit on a very light grey (#f3f4f6) instead of white; the dashed current-month header keeps a faint blue wash. supply/hz-theme.css only.
+
 ## v27.566 Sample batch review: feedback box placeholder + drop zone (Ben)
 - Placeholder reads "Feedback here. Type / for a reusable phrase · /p for a Pantone colour"; the hint line is gone; "add files" is a dashed drag-and-drop box: "📎 Choose files or drag & drop" (click to pick, drop anywhere on the box or the feedback cell). supply/inject.html only.
 
