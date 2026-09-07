@@ -1,3 +1,9 @@
+## v27.584 Dark mode — foundation + header toggle (Ben) [design update P1a]
+- New light/dark theme from Diviyaj's canvas. A moon toggle in the top-nav (`#hz-theme-btn`, right of Refresh) flips the whole app; choice persists in `localStorage['hz-theme']`.
+- Mechanism: `supply/hz-theme.css` gains a `:root.om-dark{…}` block with Diviyaj's dark palette (every token redefined). Because the app already runs on tokens (v27.490-491 codemod), redefining them flips all token-driven surfaces at once. No-flash bootstrap added to the app's `HEAD_NOFLASH` (`<head>`, before paint); `hzToggleTheme()` defined there too. **App only — the supplier portal stays light** (portal serve path gets the theme link but not the bootstrap).
+- Tokenised a few hardcoded lights so the shell/tables read correctly in dark: SKU child-row tint, phone stack-card bg, DEMAND plan header rows (new `--row-alt` / `--hdr-tint` / `--hdr-cur` tokens, light values unchanged).
+- Known: per-page inline-style stragglers (e.g. DEMAND filter-row inputs, some plan-cell inline colours) are cleaned up in each page's phase; buy plan / forecasts / APIs untouched. No migration.
+
 ## v27.583 Housekeeping: design-canvas attribution wording (Ben)
 - Per Diviyaj's 07-Sep design brief: `supply/hz-theme.css` header and the v27.467 CHANGES entry said the tokens come from "Ben's Claude Design project". The canvas is Diviyaj's ("Demand Planner Premium Polish"); wording corrected in both places. No code or token values changed.
 - First bump of the design-update package (canvas re-imported 08-Sep from project `93ea3747`, now 21 pages).

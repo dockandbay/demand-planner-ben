@@ -28,6 +28,29 @@
   --r-sm:8px; --r-md:10px; --r-lg:12px; --r-xl:14px;
   --shadow:0 1px 2px rgba(16,24,40,.04), 0 6px 22px -12px rgba(16,24,40,.10);
   --font:"Hanken Grotesk",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  /* row + header tints (also set in dark below) */
+  --row-alt:var(--row-alt); --hdr-tint:#f3f4f6; --hdr-cur:#eef2f9;
+}
+
+/* ── Dark mode (v27.584): Diviyaj's canvas dark palette ("Demand Planner Premium Polish"). The header theme toggle adds
+   .om-dark to <html> (no-flash bootstrap in HEAD_NOFLASH, app only — the portal stays light). Every app rule uses var(),
+   so redefining the tokens here flips the whole app. Per-page inline-style stragglers are cleaned up in each page's phase. ── */
+:root.om-dark{
+  color-scheme:dark;
+  --nav:#0a101d; --nav-2:#1b2942; --nav-ink:#e7edf7; --nav-dim:#8fa0b8;
+  --bg:#0a0f1b; --card:#121b2e; --hover:#1a2539;
+  --line:#25334e; --line2:#1d2a41;
+  --ink:#e8eef8; --ink-soft:#c4d0e4; --muted:#a3b2c9; --faint:#76889f;
+  --blue:#4d8bf5; --blue-soft:#1a2c4f; --blue-ink:#8ab4ff;
+  --pos:#3ecb80; --pos-bg:#123322;
+  --neg:#f0645a; --neg-bg:#3a1512; --neg-cell:#4a1a15;
+  --amber:#e8a83f; --amber-bg:#332507;
+  --prod:#f5b83d; --prod-bg:#33280a;
+  --violet:#a78bfa; --violet-bg:#261c40;
+  --l3-bg:#14203a;
+  --shadow:0 1px 2px rgba(0,0,0,.30), 0 8px 24px -12px rgba(0,0,0,.60);
+  --row-alt:#16223c; --hdr-tint:#101a2c; --hdr-cur:#16233c;
+  --blue-wash:#0f1b30; --fy27:#13233f; --fy28:#1c1836; --band:#16202f;
 }
 
 html body{font-family:var(--font);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
@@ -457,8 +480,8 @@ body .pv-btn.ghost{color:var(--nav-dim);border-color:rgba(255,255,255,.18)} body
 #app .sku-toggle:hover{border-color:var(--faint);color:var(--ink)}
 #app .sku-tier{border-radius:4px;padding:0 4px;font-size:8.5px}
 /* 7 · SKU rows read as children */
-#app tr.sku-inline:not(.subtot-row) td:not(.anom-hi-cell):not(.anom-lo-cell):not(.plansel){background:#fbfcfd!important;border-bottom-color:var(--line2)!important}
-#app tr.sku-inline:not(.subtot-row) td.stk,#app tr.sku-inline:not(.subtot-row) td:first-child{background:#fbfcfd!important}
+#app tr.sku-inline:not(.subtot-row) td:not(.anom-hi-cell):not(.anom-lo-cell):not(.plansel){background:var(--row-alt)!important;border-bottom-color:var(--line2)!important}
+#app tr.sku-inline:not(.subtot-row) td.stk,#app tr.sku-inline:not(.subtot-row) td:first-child{background:var(--row-alt)!important}
 #app tr.sku-inline.hz-lyo td{opacity:.72}
 /* 8 · whole-row hover (overlay works over any tint; inline heat / disc paints stay visible underneath) */
 #app tr.sub-row:hover td:not(.stk):not(.stk2){box-shadow:inset 0 0 0 999px rgba(16,24,40,.035)}
@@ -529,7 +552,7 @@ body header.pv-top .pv-lang button:hover{color:#fff}
   #app #supply-root table.hz-stack[data-stack]{display:block;width:100%!important;min-width:0!important;max-width:none!important;table-layout:auto;border-collapse:separate}
   #app #supply-root table.hz-stack[data-stack] thead,#app #supply-root table.hz-stack[data-stack] colgroup{display:none}
   #app #supply-root table.hz-stack[data-stack] tbody,#app #supply-root table.hz-stack[data-stack] tfoot{display:block}
-  #app #supply-root table.hz-stack[data-stack] tr{display:block;border:1px solid var(--line);border-radius:10px;padding:6px 10px;margin:0 0 8px;background:#fff;box-shadow:0 1px 2px rgba(15,23,42,.04)}
+  #app #supply-root table.hz-stack[data-stack] tr{display:block;border:1px solid var(--line);border-radius:10px;padding:6px 10px;margin:0 0 8px;background:var(--card);box-shadow:0 1px 2px rgba(15,23,42,.04)}
   #app #supply-root table.hz-stack[data-stack] td{display:flex;justify-content:space-between;align-items:baseline;gap:10px;padding:4px 0!important;border:0!important;text-align:left!important;width:auto!important;min-width:0!important;max-width:none!important;white-space:normal!important;position:static!important;background:transparent!important;overflow-wrap:anywhere}
   #app #supply-root table.hz-stack[data-stack] td[data-l]::before{content:attr(data-l);flex:0 0 40%;color:var(--faint);font-size:10.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;line-height:1.5}
   #app #supply-root table.hz-stack[data-stack] td[data-l=""]::before{display:none}
@@ -737,5 +760,5 @@ body header.pv-top .pv-lang button:hover{color:#fff}
 #app #supply-root .hz-skel i:nth-child(1){width:38%}#app #supply-root .hz-skel i:nth-child(2){width:72%}#app #supply-root .hz-skel i:nth-child(3){width:55%}
 
 /* ═══ v27.567: DEMAND plan — both header rows (column titles + period/month row) on a very light grey instead of white (Ben) ═══ */
-#app #main-hdr th,#app #main-hdr tr.sub th,#app #main-hdr th.stk,#app #main-hdr th.stk2,#app #main-hdr tr.sub th.stk,#app #main-hdr tr.sub th.stk2{background:#f3f4f6!important}
-#app #main-hdr th.hz-cur-hdr{background:#eef2f9!important}
+#app #main-hdr th,#app #main-hdr tr.sub th,#app #main-hdr th.stk,#app #main-hdr th.stk2,#app #main-hdr tr.sub th.stk,#app #main-hdr tr.sub th.stk2{background:var(--hdr-tint)!important}
+#app #main-hdr th.hz-cur-hdr{background:var(--hdr-cur)!important}
