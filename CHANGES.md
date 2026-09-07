@@ -1,3 +1,6 @@
+## v27.531 Portal add-sample form: searchable Sample shipment picker (Ben)
+- The Sample shipment control on Submit sample version is now the same searchable menu used on saved samples: type to filter by ref, recipient, carrier or tracking. Order: **Assign later** (default, top), **+ New shipment (create now)** second, then the supplier's shipments, Not shipped last. Every shipment line now shows recipient as well as carrier and tracking (also in the per-sample menu). supply/portal-view.js only.
+
 ## v27.530 PRODUCT: sample feedback joins the timeline (phrases, tags, Pantone) + live Pantone preview
 - **Feedback boxes** on PRODUCT ▸ Samples now have the timeline composer's slash commands: "/" inserts a saved quick phrase, "/p <query>" searches Pantone and drops the reference in. Each sample card has a Tags row; saving changed feedback also posts a timeline note ("Feedback on REF_vN · Component: …") carrying the selected tags and any Pantone colours picked. Unchanged text does not repost.
 - **Live Pantone preview:** under the timeline compose box and every feedback box, as soon as a Pantone token is in the text a preview line renders the message with the real colour swatch chips (hover for the card) instead of the 🎨 token. The stored token format is unchanged.
