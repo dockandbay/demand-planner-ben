@@ -16015,7 +16015,7 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
           confirm_with_supplier: !!s.confirm_with_supplier, directed, approved, needs_approval: directed && !approved });
       }
     } catch (e) { console.log('[portal-specs] ' + e.message); }
-    try { const bps = poList.length ? await q(`SELECT bp.id, bp.name, coalesce(bp.batch,'') batch, x.po, (SELECT count(*) FROM jsonb_object_keys(coalesce(bp.overrides,'{}'::jsonb)))::int n FROM planner.barcode_projects bp, unnest(bp.pos) x(po) WHERE bp.pos && ::text[]`, [poList]) : [];   // v27.570 fix: the portal reads this payload, not po-detail
+    try { const bps = poList.length ? await q(`SELECT bp.id, bp.name, coalesce(bp.batch,'') batch, x.po, (SELECT count(*) FROM jsonb_object_keys(coalesce(bp.overrides,'{}'::jsonb)))::int n FROM planner.barcode_projects bp, unnest(bp.pos) x(po) WHERE bp.pos && $1::text[]`, [poList]) : [];   // v27.570 fix: the portal reads this payload, not po-detail
       const byPo = {}; bps.forEach(b => { (byPo[b.po] = byPo[b.po] || []).push({ id: b.id, name: b.name, batch: b.batch, n: b.n }); }); pos.forEach(p => { p.barcode_projects = byPo[p.po] || []; }); }
     catch (e) { pos.forEach(p => { p.barcode_projects = []; }); }   // mig 268 not applied → no buttons
     res.json({ pos, lb, sdep: deps, sid: ids[0] || null, supplierName: names.join(', '),
