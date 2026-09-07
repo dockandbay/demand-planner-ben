@@ -7067,6 +7067,31 @@ async function insertProductSamplePhoto(sampleId, b, by, kind) {
     VALUES ($1,$2,$3,$4,$5,$6,'product_sample',$7) RETURNING id`, ['PSAMPLE-' + sampleId, b.filename || 'photo', b.mime || 'image/jpeg', buf.length, buf, by || null, kind || 'internal']);
   return r.rows[0].id;
 }
+// v27.551 PRODUCT ▸ Sample batch review: one sample shipment (SR) → every development sample on it, grouped by product, with the
+// same per-component feedback / decision / reject-reason data the Samples tab uses (productSampleList), plus the product's
+// components so aspect keys read as names. Read-only; edits go through the existing /api/product/sample/:id/aspect etc.
+app.get('/api/product/batch-review/:id', async (req, res) => {
+  const id = req.params.id;
+  try {
+    const sr = (await pool.query(`SELECT id, ref, coalesce(supplier_name,'') supplier_name, coalesce(recipient_company,'') recipient_company,
+        trim(coalesce(first_name,'')||' '||coalesce(last_name,'')) recipient_name, coalesce(status,'') status, received_at,
+        to_char(created_at,'YYYY-MM-DD') created_at, coalesce(carrier,'') carrier, coalesce(tracking_code,'') tracking
+      FROM planner.sample_requests WHERE id=$1::bigint`, [id])).rows[0];
+    if (!sr) return res.status(404).json({ error: 'sample shipment not found' });
+    const links = (await pool.query(`SELECT ls.dev_sample_id, ds.item_ref FROM planner.sample_request_dev_samples ls JOIN planner.product_dev_samples ds ON ds.id=ls.dev_sample_id WHERE ls.sample_request_id=$1::bigint`, [id])).rows;
+    const ids = new Set(links.map(l => String(l.dev_sample_id))), refs = [...new Set(links.map(l => l.item_ref))].sort();
+    const items = [];
+    for (const ref of refs) {
+      const it = (await pool.query(`SELECT to_jsonb(i) j FROM planner.product_dev_items i WHERE i.ref=$1`, [ref])).rows[0];
+      const comps = (await pool.query(`SELECT id, name, dimension FROM planner.product_dev_components WHERE item_ref=$1 ORDER BY sort, id`, [ref])).rows;
+      const samples = (await productSampleList(ref)).filter(x => ids.has(String(x.id)));
+      const j = (it && it.j) || {};
+      items.push({ ref, name: j.description || '', colour_name: j.colour_name || '', supplier: j.supplier || '', stage: j.stage || '', season: j.season || '', category: j.category || '', status: j.status || '',
+        components: comps.map(c => ({ key: c.dimension || ('c' + c.id), name: c.name })), samples });
+    }
+    res.json({ sr, items });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/product/samples/:ref', async (req, res) => {
   try { res.json(await productSampleList(decodeURIComponent(req.params.ref))); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });

@@ -1,3 +1,7 @@
+## v27.551 PRODUCT ▸ SAMPLE BATCH REVIEW (new page, after PLAN)
+- Pick a **sample shipment** (SR list, newest first; remembered per browser). The page lists every development sample on it grouped by product: product (ref → opens the product's Samples tab, description, colour · supplier · season, stage), sample (version, date, sizes, status, verification ticks, photo thumbnails, timeline Tags row), then one row per sampled component with the **feedback box** ("/" phrases, "/p" Pantone, live swatch preview) and **sign-off** (decision select + mandatory reject reasons). Same endpoints and rules as the product Samples tab: decisions flow to Sizes & variants, changed feedback upserts the product timeline note with tags + Pantone. Mark received / un-mark for the shipment at the top.
+- Server: GET /api/product/batch-review/:id (read-only; reuses productSampleList + components). URL #/product/batch. server.mjs + supply/inject.html. Desktop-first (the table uses row spans; phones scroll it).
+
 ## v27.550 PRODUCT Samples: feedback edits UPDATE the timeline note instead of adding another (Ben)
 - New POST /api/product/note/upsert-feedback: finds the latest internal note on the product whose text starts with "Feedback on REF_vN · Component:" and rewrites its text, tags and Pantone in place (keeps its position / time); only when none exists is a new note created. The Samples tab and the batch review use it. server.mjs + supply/inject.html. No migration.
 

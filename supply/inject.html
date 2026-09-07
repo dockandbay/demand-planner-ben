@@ -10452,7 +10452,7 @@
     else if(seg[0]==='demand'){ if(typeof DEMAND_VIEW!=='undefined'){ if(seg[1]==='scenario'){ DEMAND_VIEW='scenario'; if(seg[2])scenCurrent=seg[2]; } else if((seg[1]==='inputs'||seg[1]==='analysis'||seg[1]==='config')&&seg[2])DEMAND_VIEW=seg[2]; else if(seg[1]==='exceptions'){ DEMAND_VIEW='exceptions'; if(seg[2]&&typeof EXC_SUBTAB!=='undefined')window.EXC_SUBTAB=seg[2]; } else if(seg[1])DEMAND_VIEW=seg[1]; } var _db=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]'); if(_db)_db.click(); }   // #/demand/scenario/<key> + #/demand/inputs|analysis/<slug> + #/demand/exceptions/<slug> deep-links (legacy #/demand/<slug> still resolves)
     else if(seg[0]==='reports'){ if(seg[1]&&typeof REPORT_VIEW!=='undefined')REPORT_VIEW=seg[1]; var _rb=document.querySelector('#view-tabs-row .view-toggle[data-view="exec"]'); if(_rb)_rb.click(); }
     else if(seg[0]==='product'){ if(typeof showProduct==='function'){ showProduct();
-      var _prodSubs={plan:1,dashboard:1,range:1,specs:1,reports:1,config:1};
+      var _prodSubs={plan:1,batch:1,dashboard:1,range:1,specs:1,reports:1,config:1};
       if(seg[1]&&!_prodSubs[seg[1]]){ _pendingProdRef=decodeURIComponent(seg[1]); if(seg[2])_pendingProdTab=decodeURIComponent(seg[2]); selectProductSub('plan'); }   // #/product/<ref>[/<tab>]
       else if(seg[1]==='config'&&seg[2]){ try{_prodCfgTab=decodeURIComponent(seg[2]);}catch(e){} selectProductSub('config'); }   // #/product/config/<season|cats|tags|phrases>
       else { if(seg[2])_pendingProdRef=decodeURIComponent(seg[2]); selectProductSub(seg[1]||'plan'); } } }   // #/product/<plan|dashboard|range|specs|reports|config>[/<ref>]
@@ -12696,7 +12696,7 @@
   function ensureProductRoot(){ if(document.getElementById('product-root'))return;
     var app=document.getElementById('app')||document.body; if(!app)return;
     var el=document.createElement('div'); el.id='product-root';
-    el.innerHTML='<div id="product-subnav"><button class="stab" data-k="plan">PLAN</button><button class="stab" data-k="dashboard">DASHBOARD</button><button class="stab" data-k="range">RANGE PLAN</button><button class="stab" data-k="specs">SPECIFICATIONS</button><button class="stab" data-k="reports">REPORTS</button><button class="stab" data-k="config">CONFIG</button><span class="ver">HORIZON __APP_VERSION__</span></div><div id="product-content"></div>';
+    el.innerHTML='<div id="product-subnav"><button class="stab" data-k="plan">PLAN</button><button class="stab" data-k="batch">SAMPLE BATCH REVIEW</button><button class="stab" data-k="dashboard">DASHBOARD</button><button class="stab" data-k="range">RANGE PLAN</button><button class="stab" data-k="specs">SPECIFICATIONS</button><button class="stab" data-k="reports">REPORTS</button><button class="stab" data-k="config">CONFIG</button><span class="ver">HORIZON __APP_VERSION__</span></div><div id="product-content"></div>';
     app.appendChild(el);
     el.querySelectorAll('.stab').forEach(function(b){ b.onclick=function(){ selectProductSub(b.dataset.k); }; }); }
   function showProduct(){ ensureProductRoot(); pgetWarm(); if(typeof hideSupply==='function')hideSupply(); if(typeof hideScenario==='function')hideScenario();
@@ -12718,7 +12718,84 @@
     if(k==='specs') return renderProductSpecs(c);
     if(k==='config') return renderProductConfig(c);
     if(k==='dashboard') return renderProductDashboard(c);
+    if(k==='batch') return renderProductBatchReview(c);   // v27.551
     renderProductPlan(c); }
+  // ── v27.551 SAMPLE BATCH REVIEW (Ben): pick a sample shipment → every development sample on it in one table; feedback,
+  //    tags, reject reasons and sign-off per component exactly as the product's Samples tab (same endpoints), in one place.
+  var _batchSR=null;
+  function renderProductBatchReview(c){
+    c.innerHTML='<div class="sect-h">Sample batch review <span class="mut tiny">— pick a sample shipment; every development sample on it with feedback, tags, reasons and sign-off in one place</span></div>'
+      +'<div class="bar" style="gap:8px;align-items:center;flex-wrap:wrap"><label class="tiny mut">Sample shipment</label><select class="fci" id="pbr-sr" style="min-width:320px;max-width:100%;text-align:left"><option value="">Loading…</option></select><span id="pbr-meta" style="font-size:12px"></span></div><div id="pbr-body"></div>';
+    var sel=c.querySelector('#pbr-sr'), body=c.querySelector('#pbr-body'), meta=c.querySelector('#pbr-meta');
+    fetch('/api/supply/samples').then(function(r){return r.json();}).then(function(list){ list=Array.isArray(list)?list:[]; list.sort(function(a,b){ return (Number(b.id)||0)-(Number(a.id)||0); });
+      sel.innerHTML='<option value="">— choose a sample shipment —</option>'+list.map(function(x){ return '<option value="'+x.id+'">'+esc(x.ref)+(x.supplier_name?' · '+esc(x.supplier_name):'')+(x.recipient_company?' → '+esc(x.recipient_company):'')+(x.status_calc?' · '+esc(x.status_calc):'')+'</option>'; }).join('');
+      var want=_batchSR||(function(){ try{ return localStorage.getItem('hzBatchSR'); }catch(e){ return null; } })();
+      if(want&&list.some(function(x){ return String(x.id)===String(want); })){ sel.value=String(want); load(want); }
+    }).catch(function(){ sel.innerHTML='<option value="">could not load shipments</option>'; });
+    sel.onchange=function(){ _batchSR=sel.value||null; try{ if(_batchSR)localStorage.setItem('hzBatchSR',_batchSR); }catch(e){} if(_batchSR)load(_batchSR); else { body.innerHTML=''; meta.innerHTML=''; } };
+    function load(id){ body.innerHTML='<div class="hz-skel" aria-label="Loading"><i></i><i></i><i></i></div>'; meta.innerHTML='';
+      Promise.all([fetch('/api/product/batch-review/'+encodeURIComponent(id)).then(function(r){return r.json();}), new Promise(function(res){ loadRejectReasons(res); }), fetch('/api/product/timeline-config').then(function(r){return r.json();}).catch(function(){return {tags:[],snippets:[]};})])
+        .then(function(_r){ var d=_r[0]||{}; if(d.error){ body.innerHTML='<div style="color:var(--neg)">'+esc(d.error)+'</div>'; return; } paint(d,_r[1]||[],_r[2]||{}); })
+        .catch(function(e){ body.innerHTML='<div style="color:var(--neg)">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
+    function paint(d,reasons,tlc){ var sr=d.sr||{}, items=d.items||[];
+      var SNIPS=(tlc.snippets||[]).filter(function(x){return x.active!==false;}), ACTTAGS=(tlc.tags||[]).filter(function(t){return t.active!==false;});
+      var _pan={}, _tags={}, _lbl={}; items.forEach(function(it){ (it.components||[]).forEach(function(cp){ _lbl[cp.key]=cp.name; }); }); function lbl(k){ return _lbl[k]||COMP_LBL[k]||k; }
+      var nS=items.reduce(function(a,it){return a+(it.samples||[]).length;},0);
+      meta.innerHTML=(sr.received_at?'<span style="color:var(--pos);font-weight:700">✓ received '+esc(fd(sr.received_at))+'</span> <a class="pbr-unrcv" style="color:var(--faint);cursor:pointer;font-size:10px" title="un-mark received">✕</a>':'<button class="save-btn pbr-rcv" style="font-size:11px">Mark received</button>')
+        +' <span class="mut tiny" style="margin-left:8px">'+items.length+' product'+(items.length===1?'':'s')+' · '+nS+' sample'+(nS===1?'':'s')+(sr.carrier||sr.tracking?' · '+esc([sr.carrier,sr.tracking].filter(Boolean).join(' ')):'')+'</span>';
+      function reasonInner(id,aspect,selIds){ selIds=(selIds||[]).map(String); if(!reasons.length)return '<span class="mut tiny">No reasons defined — PRODUCT ▸ Config ▸ Reject reasons.</span>';
+        var pills=selIds.map(function(rid){ var rz=reasons.filter(function(x){return String(x.id)===rid;})[0]; if(!rz)return ''; return '<span class="pbr-rpill" data-id="'+id+'" data-aspect="'+esc(aspect)+'" data-rid="'+rz.id+'" style="display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:700;background:var(--neg-bg);color:var(--neg);border:1px solid var(--neg-cell);border-radius:10px;padding:1px 7px">'+esc(rz.name)+'<span class="pbr-rdel" data-id="'+id+'" data-aspect="'+esc(aspect)+'" data-rid="'+rz.id+'" style="cursor:pointer;font-weight:900">×</span></span>'; }).join('');
+        var avail=reasons.filter(function(rz){ return selIds.indexOf(String(rz.id))<0; });
+        return '<div style="font-size:10px;color:var(--amber);font-weight:700;margin-bottom:3px">⚠ Reject reason (required)</div><div class="pbr-rpills" data-id="'+id+'" data-aspect="'+esc(aspect)+'" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:4px">'+pills+'</div>'
+          +'<select class="pbr-radd fci" data-id="'+id+'" data-aspect="'+esc(aspect)+'" style="font-size:11px;max-width:220px"><option value="">+ add reason…</option>'+avail.map(function(rz){return '<option value="'+rz.id+'">'+esc(rz.name)+'</option>';}).join('')+'</select>'; }
+      function isRej(v){ return v==='rejected_new_sample'||v==='stop_development'||v==='rejected'; }
+      var TH='text-align:left;padding:6px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);border-bottom:1px solid var(--line);white-space:nowrap';
+      var rows='';
+      items.forEach(function(it){ var samples=(it.samples||[]).slice().sort(function(a,b){return (b.version||0)-(a.version||0);});
+        var nRows=samples.reduce(function(a,sm){ return a+Math.max(1,(sm.sampled_aspects||[]).length); },0)||1;
+        var prodCell='<td rowspan="'+nRows+'" style="vertical-align:top;padding:8px;border-bottom:2px solid var(--line);min-width:180px"><a class="pbr-open" data-ref="'+esc(it.ref)+'" style="font-weight:800;color:var(--blue);cursor:pointer;font-family:ui-monospace,Menlo,monospace;font-size:12.5px">'+esc(it.ref)+'</a>'+(it.name?'<div style="font-size:12px;margin-top:2px">'+esc(it.name)+'</div>':'')+'<div class="mut tiny" style="margin-top:3px">'+esc([it.colour_name,it.supplier,it.season].filter(Boolean).join(' · '))+'</div>'+(it.stage?'<div style="margin-top:4px"><span style="font-size:10px;padding:1px 7px;border-radius:8px;'+prodStageStyle(_stageVal(it.stage))+'">'+esc(String(it.stage).replace(/_/g,' '))+'</span></div>':'')+'</td>';
+        if(!samples.length){ rows+='<tr>'+prodCell+'<td colspan="4" class="mut tiny" style="padding:8px;border-bottom:2px solid var(--line)">No development samples from this product on the shipment.</td></tr>'; return; }
+        samples.forEach(function(sm,si){ var asps=(sm.sampled_aspects||[]).length?sm.sampled_aspects:['product']; var afMap={}; (sm.aspect_feedback||[]).forEach(function(x){ afMap[x.aspect]=x; }); var sid=String(sm.id); _pan[sid]={}; _tags[sid]={};
+          var ph=(sm.photos||[]).filter(function(p){return /^image\//i.test(String(p.mime||''));}).slice(0,4).map(function(p){ var url='/api/supply/portal-attachment/'+p.id; return '<img class="pbr-img" data-src="'+url+'" src="'+url+'" style="width:34px;height:34px;object-fit:cover;border-radius:4px;border:1px solid var(--line);margin:2px 2px 0 0;cursor:zoom-in">'; }).join('');
+          var tagRow=ACTTAGS.length?'<div style="margin-top:6px">'+ACTTAGS.map(function(t){ var col=esc(t.colour||'var(--muted)'); return '<span class="pbr-tag" data-sid="'+sid+'" data-id="'+t.id+'" data-col="'+col+'" style="cursor:pointer;display:inline-block;font-size:9.5px;font-weight:700;border-radius:5px;padding:1px 7px;margin:0 3px 3px 0;border:1px solid '+col+';color:'+col+';background:#fff">'+esc(t.name||'')+'</span>'; }).join('')+'</div>':'';
+          var last=si===samples.length-1, sampBorder=last?'border-bottom:2px solid var(--line)':'border-bottom:1px solid var(--line2)';
+          var sampCell='<td rowspan="'+asps.length+'" style="vertical-align:top;padding:8px;'+sampBorder+';min-width:170px"><div style="font-weight:700;font-size:12px">v'+(sm.version||'?')+' <span class="mut" style="font-weight:400">'+esc(sm.sample_date?fd(sm.sample_date):'')+'</span></div>'
+            +((sm.sample_sizes&&sm.sample_sizes.length)?'<div style="margin-top:3px">'+sm.sample_sizes.map(function(k){return '<span style="display:inline-block;font-size:9.5px;background:var(--pos-bg);color:#065f46;border:1px solid #a7f3d0;border-radius:10px;padding:0 6px;margin:1px 3px 1px 0">'+esc(k)+'</span>';}).join('')+'</div>':'')
+            +'<div class="mut tiny" style="margin-top:3px">'+esc({in_development:'In development',completed:'Completed',cancelled:'Cancelled'}[sm.supplier_status]||sm.supplier_status||'')+(sm.colour_verified?' · ✓ colour':'')+(sm.quality_verified?' · ✓ quality':'')+'</div>'
+            +(ph?'<div style="margin-top:4px">'+ph+'</div>':'')+tagRow+'</td>';
+          asps.forEach(function(asp,ai){ var af=afMap[asp]||{}, dec=af.decision||'pending', rz=(sm.reject_reasons||[]).filter(function(x){return x.aspect===asp;}).map(function(x){return String(x.reason_id);}), rej=isRej(dec);
+            var lastAsp=ai===asps.length-1, cellB=(last&&lastAsp)?'border-bottom:2px solid var(--line)':'border-bottom:1px solid var(--line2)';
+            rows+='<tr>'+(si===0&&ai===0?prodCell:'')+(ai===0?sampCell:'')
+              +'<td style="vertical-align:top;padding:8px;font-size:11px;font-weight:700;color:var(--ink-soft);white-space:nowrap;'+cellB+'">'+esc(lbl(asp))+'</td>'
+              +'<td style="vertical-align:top;padding:6px 8px;min-width:280px;'+cellB+'"><div style="position:relative"><textarea class="pbr-fb fci" data-id="'+sid+'" data-aspect="'+esc(asp)+'" data-ref="'+esc(it.ref)+'" data-ver="'+(sm.version||'')+'" rows="2" placeholder="feedback on '+esc(lbl(asp))+'…  ('+(SNIPS.length?'/ phrase · ':'')+'/p Pantone)" style="width:100%;box-sizing:border-box;font-size:12px;resize:vertical">'+esc(af.feedback||'')+'</textarea><div class="pbr-pick" data-id="'+sid+'" data-aspect="'+esc(asp)+'" style="display:none"></div></div><div class="pbr-prev" data-id="'+sid+'" data-aspect="'+esc(asp)+'" style="display:none;margin:3px 0 0;font-size:12px;line-height:1.5"></div></td>'
+              +'<td style="vertical-align:top;padding:6px 8px;white-space:nowrap;'+cellB+'"><select class="pbr-dec fci" data-id="'+sid+'" data-aspect="'+esc(asp)+'" style="font-size:11px;'+prodStageStyle(_stageVal(dec))+'">'+_compStageOpts(dec)+'</select><div class="pbr-msg" data-id="'+sid+'" data-aspect="'+esc(asp)+'" style="font-size:10px;color:var(--pos);margin-top:2px"></div><div class="pbr-rbox" data-id="'+sid+'" data-aspect="'+esc(asp)+'" style="margin-top:4px;white-space:normal;max-width:260px;'+(rej?'':'display:none')+'">'+reasonInner(sid,asp,rz)+'</div></td></tr>'; }); }); });
+      body.innerHTML=items.length?'<div class="tw"><table style="border-collapse:collapse;width:100%;font-size:12px"><thead><tr><th style="'+TH+'">Product</th><th style="'+TH+'">Sample</th><th style="'+TH+'">Component</th><th style="'+TH+'">Feedback</th><th style="'+TH+'">Sign-off</th></tr></thead><tbody>'+rows+'</tbody></table></div>'
+        :'<div class="count" style="padding:10px 2px">No development samples are linked to this shipment. Suppliers link them in the portal (PRODUCT ▸ Samples ▸ Sample shipment) or via SUPPLY ▸ Samples ▸ contents.</div>';
+      // ── wiring (mirrors the Samples tab; same endpoints) ──
+      body.querySelectorAll('.pbr-open').forEach(function(a){ a.onclick=function(){ location.hash='#/product/'+encodeURIComponent(a.dataset.ref)+'/samples'; }; });
+      body.querySelectorAll('.pbr-img').forEach(function(im){ im.onclick=function(){ openImgZoom(im.dataset.src); }; });
+      body.querySelectorAll('.pbr-tag').forEach(function(ch){ ch.onclick=function(){ var sid=ch.dataset.sid, id=ch.dataset.id; _tags[sid][id]=!_tags[sid][id]; var on=_tags[sid][id], col=ch.dataset.col||'var(--muted)'; ch.style.background=on?col:'#fff'; ch.style.color=on?'#fff':col; }; });
+      body.querySelectorAll('.pbr-fb').forEach(function(t){ t.dataset.last=t.value; var sid=t.dataset.id, asp=t.dataset.aspect, pk=body.querySelector('.pbr-pick[data-id="'+sid+'"][data-aspect="'+asp+'"]'), pv=body.querySelector('.pbr-prev[data-id="'+sid+'"][data-aspect="'+asp+'"]'); if(pk)hzSlashPicker(t,pk,{snips:SNIPS,picked:_pan[sid],fixed:true,onChange:function(){ hzPanPreview(t,pv,_pan[sid]); }}); });
+      function q(cls,sid,asp){ return body.querySelector(cls+'[data-id="'+sid+'"][data-aspect="'+asp+'"]'); }
+      function reasonsOf(sid,asp){ var out=[]; body.querySelectorAll('.pbr-rpill[data-id="'+sid+'"][data-aspect="'+asp+'"]').forEach(function(p){ out.push(Number(p.dataset.rid)); }); return out; }
+      function decOf(sid,asp){ var s=q('select.pbr-dec',sid,asp); return s?s.value:'pending'; }
+      function save(sid,asp,flow){ var t=q('.pbr-fb',sid,asp), msg=q('.pbr-msg',sid,asp), dec=decOf(sid,asp), rs=reasonsOf(sid,asp), fb=t?t.value:'';
+        if(isRej(dec)&&!rs.length){ if(msg){ msg.style.color='var(--amber)'; msg.textContent='⚠ pick a reason'; } var ad=q('.pbr-radd',sid,asp); if(ad)ad.focus(); return; }
+        if(msg){ msg.style.color='var(--faint)'; msg.textContent='saving…'; }
+        shipPost('/api/product/sample/'+sid+'/aspect',{aspect:asp,feedback:fb,decision:dec,reject_reasons:rs},function(jr){ if(msg){ if(jr&&jr.error){ msg.style.color='var(--neg)'; msg.textContent=jr.error; } else { msg.style.color='var(--pos)'; msg.textContent=(flow&&jr&&jr.flowed)?('✓ → '+jr.flowed+' size'+(jr.flowed===1?'':'s')):'✓ saved'; setTimeout(function(){ msg.textContent=''; },2400); } }
+          var ref=t?t.dataset.ref:''; try{ prodItemInvalidate(ref); _prodJsonBust(ref); }catch(e){}
+          try{ var _txt=String(fb||'').trim(); if(t&&_txt&&_txt!==String(t.dataset.last||'').trim()){ t.dataset.last=fb; var _pk=_pan[sid]||{}, _pn=Object.keys(_pk).filter(function(code){ return _txt.indexOf('🎨 '+code)>=0; }).map(function(code){ return _pk[code]; }); var _tg=Object.keys(_tags[sid]||{}).filter(function(k){return _tags[sid][k];}).map(Number);
+            var _pfx='Feedback on '+ref+'_v'+(t.dataset.ver||'?')+' · '+lbl(asp)+':'; shipPost('/api/product/note/upsert-feedback',{ref:ref,prefix:_pfx,body:_pfx+' '+_txt,author_email:(window.ME&&ME.email)||'',tags:_tg,pantone:_pn},function(){ _prodJsonBust(ref); }); } }catch(e){} }); }
+      body.querySelectorAll('.pbr-fb').forEach(function(t){ t.onchange=function(){ save(t.dataset.id,t.dataset.aspect,false); }; });
+      body.querySelectorAll('select.pbr-dec').forEach(function(sl){ sl.onchange=function(){ var sid=sl.dataset.id, asp=sl.dataset.aspect, box=q('.pbr-rbox',sid,asp); sl.style.cssText='font-size:11px;'+prodStageStyle(_stageVal(sl.value)); if(box)box.style.display=isRej(sl.value)?'':'none'; save(sid,asp,true); }; });
+      body.querySelectorAll('.pbr-radd').forEach(function(ad){ ad.onchange=function(){ var sid=ad.dataset.id, asp=ad.dataset.aspect, rid=ad.value; if(!rid)return; var box=q('.pbr-rbox',sid,asp); var cur=reasonsOf(sid,asp); cur.push(Number(rid)); box.innerHTML=reasonInner(sid,asp,cur); wireReasons(box); save(sid,asp,true); }; });
+      function wireReasons(scope){ scope.querySelectorAll('.pbr-radd').forEach(function(ad){ ad.onchange=function(){ var sid=ad.dataset.id, asp=ad.dataset.aspect, rid=ad.value; if(!rid)return; var box=q('.pbr-rbox',sid,asp); var cur=reasonsOf(sid,asp); cur.push(Number(rid)); box.innerHTML=reasonInner(sid,asp,cur); wireReasons(box); save(sid,asp,true); }; });
+        scope.querySelectorAll('.pbr-rdel').forEach(function(x){ x.onclick=function(){ var sid=x.dataset.id, asp=x.dataset.aspect, rid=x.dataset.rid, box=q('.pbr-rbox',sid,asp); var cur=reasonsOf(sid,asp).filter(function(r){return String(r)!==String(rid);}); box.innerHTML=reasonInner(sid,asp,cur); wireReasons(box); if(cur.length)save(sid,asp,true); else { var msg=q('.pbr-msg',sid,asp); if(msg){ msg.style.color='var(--amber)'; msg.textContent='⚠ pick a reason'; } } }; }); }
+      body.querySelectorAll('.pbr-rbox').forEach(wireReasons);
+      var rcv=meta.querySelector('.pbr-rcv'); if(rcv)rcv.onclick=function(){ rcv.disabled=true; rcv.textContent='…'; shipPost('/api/supply/sample/'+sr.id+'/received',{received:true},function(){ items.forEach(function(it){ try{ prodItemInvalidate(it.ref); _prodJsonBust(it.ref); }catch(e){} }); load(sr.id); }); };
+      var unr=meta.querySelector('.pbr-unrcv'); if(unr)unr.onclick=function(){ shipPost('/api/supply/sample/'+sr.id+'/received',{received:false},function(){ load(sr.id); }); };
+    }
+  }
   // SPECIFICATIONS (SUG-0019) — source-of-truth packaging/labelling docs. P1: managed types + upload with scope + effective-from.
   var _specView='list', _specQ='', _specTypeFilter={};   // list = grouped by category; matrix = category × type. Persist across redraws.
   function renderProductSpecs(c){
