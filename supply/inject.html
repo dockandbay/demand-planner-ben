@@ -10338,10 +10338,10 @@
       function _bcNorm(m){ var o={}; Object.keys(m||{}).forEach(function(s){ var v=m[s]; if(v==null)return;
         if(typeof v==='object'){ var t=v.types||{}; o[s]={num:String(v.num||''),types:{product:!!t.product,carton:!!t.carton,inner:!!t.inner}}; if(!o[s].types.product&&!o[s].types.carton&&!o[s].types.inner)o[s].types.product=true; }
         else { o[s]={num:String(v),types:{product:true,carton:false,inner:false}}; } }); return o; }
-      var state={id:_bcOv.id, name:_bcOv.name, batch:_bcOv.batch||'', map:_bcNorm(_bcOv.map||{})};
-      function snap(){ return JSON.stringify({n:state.name||'',b:state.batch||'',m:state.map}); }
+      var state={id:_bcOv.id, name:_bcOv.name, batch:_bcOv.batch||'', map:_bcNorm(_bcOv.map||{}), pos:(_bcOv.pos||[]).slice()};   // v27.570: pos = linked purchase orders
+      function snap(){ return JSON.stringify({n:state.name||'',b:state.batch||'',m:state.map,p:state.pos}); }
       var _saved=snap();
-      function dirty(){ return Object.keys(state.map).length>0 && snap()!==_saved; }
+      function dirty(){ return (Object.keys(state.map).length>0||state.pos.length>0) && snap()!==_saved; }
       function parseBox(){ var ta=dr.querySelector('#bcx-paste'); if(!ta)return 0; var n=0;
         ta.value.split(/\r?\n/).forEach(function(ln){ var p=ln.split(/[,\t;]/); if(p.length<2)return; var s=(p[0]||'').trim(), b=(p[1]||'').trim().replace(/\s+/g,''); if(s&&b){ if(state.map[s])state.map[s].num=b; else state.map[s]={num:b,types:{product:true,carton:false,inner:false}}; n++; } });
         ta.value=''; return n; }
@@ -10349,7 +10349,7 @@
       function doSave(cb){ var msg=dr.querySelector('#bcx-msg'), nmEl=dr.querySelector('#bcx-name'), nm=(nmEl&&nmEl.value.trim())||state.name;
         offerParseFirst();
         if(!nm){ if(msg){msg.style.color='var(--neg)';msg.textContent='name required to save';} if(nmEl)nmEl.focus(); return; }
-        state.name=nm; shipPost('/api/supply/barcode-project',{id:state.id||undefined,name:nm,batch:state.batch||null,overrides:state.map},function(j){ if(j&&j.error){ if(msg){msg.style.color='var(--neg)';msg.textContent=j.error;} return; } state.id=j.id; _saved=snap(); if(msg){msg.style.color='var(--pos)';msg.textContent='saved ✓';} if(cb){cb();}else{ loadProjects(); } }); }
+        state.name=nm; shipPost('/api/supply/barcode-project',{id:state.id||undefined,name:nm,batch:state.batch||null,overrides:state.map,pos:state.pos},function(j){ if(j&&j.error){ if(msg){msg.style.color='var(--neg)';msg.textContent=j.error;} return; } state.id=j.id; _saved=snap(); if(msg){msg.style.color='var(--pos)';msg.textContent='saved ✓';} if(cb){cb();}else{ loadProjects(); } }); }
       function close(force){ if(!force && dirty()){ if(confirm('You have unsaved changes to this barcode project. Save before closing?')){ doSave(function(){ bg.remove(); }); return; } } bg.remove(); }
       bg.onclick=function(e){ if(e.target===bg)close(); };
       var _bd='border:1px solid var(--line);border-radius:5px;padding:4px 7px;background:#fff';   // explicit border (drawer is outside #supply-root, so scoped .fci styling doesn't reach it)
@@ -10377,12 +10377,16 @@
         dr.innerHTML='<div style="display:flex;align-items:center;margin-bottom:10px"><div style="font-size:15px;font-weight:800">🎨 Customise barcodes</div><a id="bcx-close" style="margin-left:auto;cursor:pointer;color:var(--muted);font-size:20px;line-height:1">✕</a></div>'
           +'<div class="mut tiny" style="margin-bottom:12px">Override the barcode <b>number</b> for specific SKUs, tick which barcode(s) it applies to (P = product · C = carton · I = inner), then download here. Import <b>SKU,barcode</b> (one per line; defaults to Product). Any number is allowed — valid 12/13-digit numbers render as EAN-13, everything else as Code128. <span style="color:#6b21a8">These are barcode-number override projects, separate from EDI / retailer label projects.</span></div>'
           +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap"><span class="pill-lbl">Project</span>'
-            +'<select id="bcx-proj" style="width:auto;min-width:160px;'+_bd+'"><option value="">— new / none —</option>'+(projects||[]).map(function(p){return '<option value="'+p.id+'"'+(String(p.id)===String(state.id)?' selected':'')+'>'+esc(p.name)+' ('+p.n_overrides+')</option>';}).join('')+'</select>'
+            +'<select id="bcx-proj" style="width:auto;min-width:160px;'+_bd+'"><option value="">— new / none —</option>'+(projects||[]).map(function(p){return '<option value="'+p.id+'"'+(String(p.id)===String(state.id)?' selected':'')+'>'+esc(p.name)+' ('+p.n_overrides+(p.pos&&p.pos.length?' · '+p.pos.length+' PO'+(p.pos.length===1?'':'s'):'')+')</option>';}).join('')+'</select>'
             +'<input id="bcx-name" placeholder="project name" value="'+esc(state.name||'')+'" style="width:180px;text-align:left;'+_bd+'">'
             +'<button type="button" class="save-btn" id="bcx-save">Save</button>'+(state.id?'<button type="button" class="save-btn" id="bcx-del" style="color:var(--neg);border-color:var(--neg-cell)">Delete</button>':'')+'<span class="mut tiny" id="bcx-msg"></span></div>'
           +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px"><span class="pill-lbl">Batch</span>'
             +'<select id="bcx-batch" style="width:auto;'+_bd+'"><option value="">— none —</option>'+batches.slice().sort(function(a,b){var da=a.batch_date||'',db=b.batch_date||''; if(da!==db)return da<db?1:-1; return String(a.batch)<String(b.batch)?1:-1;}).map(function(b2){return '<option value="'+esc(b2.batch)+'"'+(b2.batch===state.batch?' selected':'')+'>'+esc(b2.batch)+(b2.batch_date?' · '+esc(b2.batch_date):'')+'</option>';}).join('')+'</select>'
             +'<span class="mut tiny">saved with the project — prints BATCH + production date on the labels</span></div>'
+          +'<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap"><span class="pill-lbl" style="margin-top:5px">Purchase orders</span><div style="flex:1 1 320px;min-width:240px">'
+            +'<div id="bcx-pos" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:'+(state.pos.length?'6px':'0')+'">'+state.pos.map(function(p){ return '<span class="bcx-pochip" style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;background:#f3e8ff;color:#6b21a8;border:1px solid #d8b4fe;border-radius:10px;padding:1px 8px"><a class="inb-po" data-po="'+esc(p)+'" style="color:inherit;cursor:pointer">'+esc(p)+'</a><a class="bcx-porm" data-po="'+esc(p)+'" title="unlink" style="cursor:pointer;font-weight:900">×</a></span>'; }).join('')+'</div>'
+            +'<span style="position:relative;display:block"><input id="bcx-poq" placeholder="search PO / supplier / production / batch to link…" autocomplete="off" style="width:100%;box-sizing:border-box;text-align:left;'+_bd+'"><div id="bcx-pomenu" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;background:#fff;border:1px solid var(--line);border-radius:6px;max-height:240px;overflow:auto;box-shadow:0 8px 22px rgba(15,23,42,.14)"></div></span>'
+            +'<div class="mut tiny" style="margin-top:3px">Suppliers of a linked PO get <b>⤓ Download custom barcodes</b> on that PO in the portal (only these custom numbers, for the PO\'s SKUs).</div></div></div>'
           +'<textarea id="bcx-paste" placeholder="TOWEL-LG-NAVY, 5061011699999&#10;TOWEL-LG-CORAL, 0123456789012" style="width:100%;height:80px;box-sizing:border-box;font:12px ui-monospace,Menlo,monospace;border:1px solid var(--line);border-radius:6px;padding:7px;text-align:left"></textarea>'
           +'<div style="margin:6px 0"><button type="button" class="save-btn" id="bcx-parse">Parse / add</button> <button type="button" class="save-btn light" id="bcx-clearmap" style="margin-left:4px">Clear list</button> <span class="mut tiny" style="margin-left:6px">'+keys.length+' override'+(keys.length===1?'':'s')+' · '+matched+' matched</span></div>'
           +'<div class="tw" style="max-height:300px;overflow:auto;border:1px solid var(--line2);border-radius:6px"><table style="font-size:12px;width:100%;border-collapse:collapse"><thead><tr>'+th('SKU')+th('Custom number')+th('Barcodes')+th('',56)+'</tr></thead><tbody>'+(rowsH||'<tr><td colspan="4" style="text-align:left;padding:6px;color:var(--faint)">No overrides yet — paste above and Parse / add.</td></tr>')+'</tbody></table></div>'
@@ -10392,15 +10396,28 @@
         dr.querySelector('#bcx-parse').onclick=function(){ parseBox(); draw(projects); };
         dr.querySelector('#bcx-name').oninput=function(){ state.name=this.value; };
         dr.querySelector('#bcx-batch').onchange=function(){ state.batch=this.value; };
+        // v27.570: linked purchase orders — searchable picker (server /api/supply/po-search), chips with unlink
+        (function(){ var q=dr.querySelector('#bcx-poq'), menu=dr.querySelector('#bcx-pomenu'), _t=null; if(!q)return;
+          function hide(){ menu.style.display='none'; }
+          function show(list){ var have={}; state.pos.forEach(function(p){have[p]=1;}); list=list.filter(function(x){return !have[x.po];}).slice(0,25);
+            if(!list.length){ menu.innerHTML='<div class="mut tiny" style="padding:7px 10px">No purchase order matches</div>'; menu.style.display=''; return; }
+            menu.innerHTML=list.map(function(x){ return '<div class="bcx-poopt" data-po="'+esc(x.po)+'" style="padding:6px 10px;cursor:pointer;border-bottom:1px solid var(--hover);font-size:12px"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(x.po)+'</b> <span class="mut">· '+esc([x.supplier_name,x.country+(x.branch?' '+x.branch:''),x.status,x.prod_no,x.batch_id].filter(Boolean).join(' · '))+'</span></div>'; }).join(''); menu.style.display='';
+            menu.querySelectorAll('.bcx-poopt').forEach(function(o){ o.onmousedown=function(e){ e.preventDefault(); if(state.pos.indexOf(o.dataset.po)<0)state.pos.push(o.dataset.po); hide(); draw(projects); setTimeout(function(){ var nq=dr.querySelector('#bcx-poq'); if(nq)nq.focus(); },0); }; o.onmouseenter=function(){ o.style.background='var(--blue-soft)'; }; o.onmouseleave=function(){ o.style.background=''; }; }); }
+          function search(){ var v=q.value.trim(); fetch('/api/supply/po-search?q='+encodeURIComponent(v)).then(function(r){return r.json();}).then(function(l){ if(document.activeElement!==q)return; show(Array.isArray(l)?l:[]); }).catch(function(){}); }
+          q.oninput=function(){ clearTimeout(_t); _t=setTimeout(search,180); }; q.onfocus=function(){ search(); }; q.onblur=function(){ setTimeout(hide,150); };
+          q.onkeydown=function(e){ if(e.key==='Escape'){ hide(); } else if(e.key==='Enter'){ e.preventDefault(); var f=menu.querySelector('.bcx-poopt'); if(f&&menu.style.display!=='none'){ if(state.pos.indexOf(f.dataset.po)<0)state.pos.push(f.dataset.po); hide(); draw(projects); setTimeout(function(){ var nq=dr.querySelector('#bcx-poq'); if(nq)nq.focus(); },0); } } };
+          dr.querySelectorAll('.bcx-porm').forEach(function(a){ a.onclick=function(){ state.pos=state.pos.filter(function(p){return p!==a.dataset.po;}); draw(projects); }; });
+          dr.querySelectorAll('.bcx-pochip .inb-po').forEach(function(a){ a.onclick=function(e){ e.preventDefault(); if(typeof openPODrawer==='function')openPODrawer(a.dataset.po); }; });
+        })();
         dr.querySelectorAll('.bcx-num').forEach(function(el){ el.oninput=function(){ if(state.map[el.dataset.sku])state.map[el.dataset.sku].num=el.value.trim(); }; });
         dr.querySelectorAll('.bcx-tick').forEach(function(el){ el.onchange=function(){ var o=state.map[el.dataset.sku]; if(o)o.types[el.dataset.t]=el.checked; }; });
         dr.querySelectorAll('.bcx-rm').forEach(function(a){ a.onclick=function(){ delete state.map[a.dataset.sku]; draw(projects); }; });
         dr.querySelectorAll('.bcx-dl1').forEach(function(a){ a.onclick=function(){ bcDownload([a.dataset.sku], a); }; });
         dr.querySelector('#bcx-dlall').onclick=function(){ bcDownload(Object.keys(state.map), this); };
-        dr.querySelector('#bcx-proj').onchange=function(){ var id=this.value; if(!id){ state.id=null; state.name=''; state.batch=''; state.map={}; _saved=snap(); draw(projects); return; }
-          fetch('/api/supply/barcode-project/'+id).then(function(r){return r.json();}).then(function(j){ if(j&&!j.error){ state.id=j.id; state.name=j.name; state.batch=j.batch||''; state.map=_bcNorm(j.overrides||{}); _saved=snap(); } draw(projects); }); };
+        dr.querySelector('#bcx-proj').onchange=function(){ var id=this.value; if(!id){ state.id=null; state.name=''; state.batch=''; state.map={}; state.pos=[]; _saved=snap(); draw(projects); return; }
+          fetch('/api/supply/barcode-project/'+id).then(function(r){return r.json();}).then(function(j){ if(j&&!j.error){ state.id=j.id; state.name=j.name; state.batch=j.batch||''; state.map=_bcNorm(j.overrides||{}); state.pos=Array.isArray(j.pos)?j.pos.slice():[]; _saved=snap(); } draw(projects); }); };
         dr.querySelector('#bcx-save').onclick=function(){ doSave(); };
-        var _del=dr.querySelector('#bcx-del'); if(_del)_del.onclick=function(){ if(!confirm('Delete project "'+state.name+'"?'))return; shipPost('/api/supply/barcode-project/'+state.id+'/delete',{},function(){ state.id=null; state.name=''; state.batch=''; state.map={}; _saved=snap(); loadProjects(); }); };
+        var _del=dr.querySelector('#bcx-del'); if(_del)_del.onclick=function(){ if(!confirm('Delete project "'+state.name+'"?'))return; shipPost('/api/supply/barcode-project/'+state.id+'/delete',{},function(){ state.id=null; state.name=''; state.batch=''; state.map={}; state.pos=[]; _saved=snap(); loadProjects(); }); };
       }
       function loadProjects(){ fetch('/api/supply/barcode-projects').then(function(r){return r.json();}).then(function(ps){ draw(Array.isArray(ps)?ps:[]); }).catch(function(){ draw([]); }); }
       loadProjects();

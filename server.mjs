@@ -3546,8 +3546,18 @@ app.get('/api/supply/paperstore-labels/:po', async (req, res) => {
 
 // Barcode-customise project LIST — single-segment path, so it must be registered BEFORE the /api/supply/:section
 // catch-all (which would otherwise treat "barcode-projects" as an unknown section). Save/get/delete are 2-segment.
+// v27.570: PO search for the Customise drawer's "linked purchase orders" picker (specific route, before the :section catch-all)
+app.get('/api/supply/po-search', async (req, res) => {
+  const q = String(req.query.q || '').trim();
+  try { const rows = (await pool.query(`SELECT po, coalesce(supplier_name,'') supplier_name, coalesce(country,'') country, coalesce(branch,'') branch, coalesce(status,'') status,
+        coalesce(batch_id,'') batch_id, coalesce(prod_no,'') prod_no, to_char(order_date,'YYYY-MM-DD') order_date
+      FROM planner.purchase_orders
+      WHERE $1 = '' OR po ILIKE '%'||$1||'%' OR supplier_name ILIKE '%'||$1||'%' OR coalesce(prod_no,'') ILIKE '%'||$1||'%' OR coalesce(batch_id,'') ILIKE '%'||$1||'%' OR coalesce(direct_client,'') ILIKE '%'||$1||'%'
+      ORDER BY order_date DESC NULLS LAST, po DESC LIMIT 40`, [q])).rows;
+    res.json(rows); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/supply/barcode-projects', async (_req, res) => {
-  try { const rows = (await pool.query(`SELECT id, name, coalesce(target,'product') target,
+  try { const rows = (await pool.query(`SELECT id, name, coalesce(target,'product') target, coalesce(pos,'{}'::text[]) pos,
       (SELECT count(*) FROM jsonb_object_keys(coalesce(overrides,'{}'::jsonb)))::int n_overrides,
       coalesce(created_by,'') created_by, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at
     FROM planner.barcode_projects ORDER BY updated_at DESC, id DESC`)).rows;
@@ -10450,7 +10460,7 @@ app.post('/api/supply/freight-pallets', async (req, res) => {
 // ── SUPPLY ▸ Barcodes — "customise" projects (mig 260): per-SKU barcode-number overrides for a download ──
 // (the LIST route is registered earlier, before the /api/supply/:section catch-all)
 app.get('/api/supply/barcode-project/:id', async (req, res) => {
-  try { const r = await pool.query(`SELECT id, name, coalesce(target,'product') target, coalesce(batch,'') batch, coalesce(overrides,'{}'::jsonb) overrides FROM planner.barcode_projects WHERE id=$1::bigint`, [req.params.id]);
+  try { const r = await pool.query(`SELECT id, name, coalesce(target,'product') target, coalesce(batch,'') batch, coalesce(overrides,'{}'::jsonb) overrides, coalesce(pos,'{}'::text[]) pos FROM planner.barcode_projects WHERE id=$1::bigint`, [req.params.id]);
     if (!r.rowCount) return res.status(404).json({ error: 'not found' }); res.json(r.rows[0]); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/barcode-project', async (req, res) => {
@@ -10466,9 +10476,10 @@ app.post('/api/supply/barcode-project', async (req, res) => {
     if (!num) return; if (!types.product && !types.carton && !types.inner) types.product = true;
     ov[sku] = { num: num.slice(0, 48), types }; });
   const batch = (b.batch == null ? '' : String(b.batch)).trim() || null;
+  const pos = [...new Set((Array.isArray(b.pos) ? b.pos : []).map(x => String(x || '').trim().slice(0, 40)).filter(Boolean))];   // v27.570: linked POs (mig 268)
   try {
-    if (b.id) { await pool.query(`UPDATE planner.barcode_projects SET name=$2, target=$3, batch=$4, overrides=$5::jsonb, updated_at=now() WHERE id=$1::bigint`, [b.id, name, target, batch, JSON.stringify(ov)]); res.json({ ok: true, id: Number(b.id) }); }
-    else { const r = await pool.query(`INSERT INTO planner.barcode_projects (name, target, batch, overrides, created_by) VALUES ($1,$2,$3,$4::jsonb,$5) RETURNING id`, [name, target, batch, JSON.stringify(ov), authUser(req) || null]); res.json({ ok: true, id: r.rows[0].id }); }
+    if (b.id) { await pool.query(`UPDATE planner.barcode_projects SET name=$2, target=$3, batch=$4, overrides=$5::jsonb, pos=$6::text[], updated_at=now() WHERE id=$1::bigint`, [b.id, name, target, batch, JSON.stringify(ov), pos]); res.json({ ok: true, id: Number(b.id) }); }
+    else { const r = await pool.query(`INSERT INTO planner.barcode_projects (name, target, batch, overrides, created_by, pos) VALUES ($1,$2,$3,$4::jsonb,$5,$6::text[]) RETURNING id`, [name, target, batch, JSON.stringify(ov), authUser(req) || null, pos]); res.json({ ok: true, id: r.rows[0].id }); }
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/barcode-project/:id/delete', async (req, res) => {
@@ -12078,7 +12089,9 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
       WHERE p.master_po=$1 ORDER BY p.po`, [po]).catch(() => ({ rows: [] }));
     // Price-list estimate → override each line's Est. cost (sku_cost) for this PO's supplier / production / qty
     try { const pl = await priceListEstIndex(); const _pm = (await pool.query(`SELECT coalesce(supplier_name,'') supplier_name, coalesce(prod_no,'') prod_no FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0] || {}; const _pn = plProdNum(_pm.prod_no); lines.rows.forEach((l) => { const est = plEstimate(pl, _pm.supplier_name, l.sku, l.qty, _pn); if (est != null) l.sku_cost = est; }); } catch (e) { /* price list optional */ }
-    res.json({ ship, lines: lines.rows, deposit: deposit.rows, payments: payments.rows, flexport: flexport.rows, dtc,
+    let bcProjs = [];   // v27.570: Customise-barcode projects linked to this PO → portal "Download custom barcodes"
+    try { bcProjs = (await pool.query(`SELECT id, name, coalesce(batch,'') batch, (SELECT count(*) FROM jsonb_object_keys(coalesce(overrides,'{}'::jsonb)))::int n FROM planner.barcode_projects WHERE pos @> ARRAY[$1]::text[] ORDER BY name`, [po])).rows; } catch (e) { /* mig 268 not applied yet → none */ }
+    res.json({ ship, lines: lines.rows, deposit: deposit.rows, barcode_projects: bcProjs, payments: payments.rows, flexport: flexport.rows, dtc,
       children: children.rows,
       changes: changes.rows, quality_docs: qdocs.rows,
       crossdock_lines: xdMaster.rows,
@@ -16398,8 +16411,13 @@ app.get('/api/portal/ships-with/:po', portalAuth, async (req, res) => {
 });
 app.get('/api/portal/label-data', portalAuth, async (req, res) => {
   try {
-    const { po, prod, skus, batch } = req.query, names = req.portal.suppliers;
-    let requested = [];
+    const { po, prod, skus, batch, project } = req.query, names = req.portal.suppliers;
+    let requested = [], proj = null;
+    if (project) {   // v27.570: custom-barcode project download — only with its linked PO, only that PO's SKUs, only the custom numbers
+      if (!po) return res.status(400).json({ error: 'po required with project' });
+      proj = (await pool.query(`SELECT id, name, coalesce(batch,'') batch, coalesce(overrides,'{}'::jsonb) overrides, coalesce(pos,'{}'::text[]) pos FROM planner.barcode_projects WHERE id=$1::bigint`, [project])).rows[0];
+      if (!proj || !proj.pos.includes(String(po))) return res.status(403).json({ error: 'that barcode project is not linked to this PO' });
+    }
     if (skus) requested = String(skus).split(',').map(s => s.trim()).filter(Boolean);
     else if (po) { if (!await portalOwnsPO(req, po)) return res.status(403).json({ error: 'not your PO' });
       requested = (await pool.query(`SELECT sku FROM planner.purchase_order_lines WHERE po=$1`, [po])).rows.map(r => r.sku); }
@@ -16422,12 +16440,21 @@ app.get('/api/portal/label-data', portalAuth, async (req, res) => {
       ORDER BY sl.sku`, [finalSkus])).rows;
     // Stamp the batch + its production date on each row so the label can print BATCH / DATE OF PRODUCTION.
     // Resolve the batch from the explicit ?batch, else from the single PO's batch_id.
-    let batchCode = batch || null;
+    let batchCode = batch || (proj && proj.batch) || null;
     if (!batchCode && po) { try { batchCode = (await pool.query(`SELECT batch_id FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0]?.batch_id || null; } catch (e) {} }
     if (batchCode) {
       let bd = null;
       try { bd = (await pool.query(`SELECT to_char(batch_date,'YYYY-MM-DD') d FROM planner.batches WHERE batch=$1`, [batchCode])).rows[0]?.d || null; } catch (e) {}
       rows.forEach(r => { r.batch = batchCode; r.batch_date = bd; });
+    }
+    if (proj) {   // same rule as the admin Customise drawer (bcItems): custom number on the ticked type(s), other types blanked, unmatched SKUs dropped
+      const out = [];
+      rows.forEach(r => { const v = proj.overrides[r.sku]; if (v == null) return;
+        let num, t; if (typeof v === 'object') { num = String(v.num || ''); t = v.types || {}; } else { num = String(v); t = { product: true }; }
+        if (!num) return; if (!t.product && !t.carton && !t.inner) t = { product: true };
+        const cl = Object.assign({}, r, { product_barcode: t.product ? num : '', carton_barcode: t.carton ? num : '', inner_barcode: t.inner ? num : '', custom_project: proj.name });
+        out.push(cl); });
+      return res.json(out);
     }
     res.json(rows);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }

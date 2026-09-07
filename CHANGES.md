@@ -1,3 +1,9 @@
+## v27.570 Barcodes ▸ Customise: link projects to purchase orders; portal "Download custom barcodes" (Ben)
+- mig 268: planner.barcode_projects.pos text[] (linked PO refs) + GIN index.
+- Customise drawer: new "Purchase orders" row with a searchable picker (PO / supplier / production / batch / direct client via GET /api/supply/po-search) and purple chips (click opens the PO drawer, × unlinks); saved with the project; project dropdown shows the PO count; unsaved-changes guard covers links.
+- Supplier portal ▸ PO ▸ Barcodes & Labels: one "Custom barcodes · <project>" row per linked project with ⤓ Download custom barcodes (product / carton / inner as ticked). GET /api/portal/label-data?po=&project= returns ONLY the project’s custom numbers for that PO’s SKUs (same rule as the admin drawer), 403 unless the project is linked to that PO and the PO is the supplier’s; project batch stamps the label when set.
+- Portal PO detail payload carries barcode_projects; 中文 glossary entry added.
+
 ## v27.569 Samples: uploaded files stay listed, Samples tab = batch page, Batch Review button, received ⇒ COMPLETED (Ben)
 - mig 267: planner.portal_attachments.aspect (nullable) — a product-sample upload can belong to one sampled component.
 - Batch review + Samples tab: files uploaded under a component feedback box stay visible as chips (thumbnail or 📎 + file name, click opens the file); listed from the sample data on every render and appended at once on upload.
