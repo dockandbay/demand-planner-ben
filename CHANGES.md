@@ -1,3 +1,9 @@
+## v27.585 Dark mode — data-grid tint pass; toggle live (Ben) [design update P1a cont.]
+- The dense data grids (DEMAND plan, Buy, Actions, PO, Reports…) now theme correctly in dark. Ran a context-anchored codemod (`scripts/dark_tint_codemod.cjs`) that mapped **~875 inline `background:`** and **~766 `color:`** hex values across `artifact_v16.7.html` + `supply/inject.html` onto the design tokens (which carry dark values). Only CSS `background:`/`color:` prefixes are matched, so canvas/SVG/PDF drawing code is never touched.
+- Fixed row-hover overlays to **lighten** (not darken) in dark; sticky first columns pick up `--card`. Light-coloured text on dark popups (e.g. `#7dd3fc` links) deliberately left as-is so light theme is unaffected.
+- Toggle re-exposed (it was parked during the pass). Light theme visually unchanged — straggler tints consolidated onto the app's existing tokens, same approach as the rest of the app.
+- Known: a ~40-occurrence tail of edge tints may still read light in dark; flag any that jar and I'll map them. Buy plan / forecasts / APIs untouched; no migration.
+
 ## v27.584 Dark mode — foundation + header toggle (Ben) [design update P1a]
 - New light/dark theme from Diviyaj's canvas. A moon toggle in the top-nav (`#hz-theme-btn`, right of Refresh) flips the whole app; choice persists in `localStorage['hz-theme']`.
 - Mechanism: `supply/hz-theme.css` gains a `:root.om-dark{…}` block with Diviyaj's dark palette (every token redefined). Because the app already runs on tokens (v27.490-491 codemod), redefining them flips all token-driven surfaces at once. No-flash bootstrap added to the app's `HEAD_NOFLASH` (`<head>`, before paint); `hzToggleTheme()` defined there too. **App only — the supplier portal stays light** (portal serve path gets the theme link but not the bootstrap).
