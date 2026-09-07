@@ -1,3 +1,6 @@
+## v27.539 Mobile PO card: dates no longer crammed on cards without a Direct line (Ben)
+- A full-width break now sits between the Status / Ship row and the dates, and each date column has a 20% minimum width, so the four dates always form their own row. Before, only the Direct-to-client line forced that break, so cards without one squeezed the dates into the corner. supply/hz-theme.css only.
+
 ## v27.538 Mobile PO toolbar: Focus · SKU filter · Filters on one row (Ben)
 - On phones the Focus pill, the Filter by SKU box (stretching to fill) and the Filters button share one line; the PO / supplier search sits full width on the line below; status pills and Last 12m stay above. supply/hz-theme.css only.
 

@@ -671,3 +671,17 @@ body header.pv-top .pv-lang button:hover{color:#fff}
   #app #supply-root #po-prog .po-filt-toggle{order:1;flex:0 0 auto}
   #app #supply-root #po-prog #sup-search{order:2;flex:1 1 100%;width:100%!important}
 }
+
+/* ═══ v27.539: phone PO card — hard line break before the dates (cards WITHOUT a Direct line let the four dates squeeze onto the Status row) ═══ */
+@media (max-width:640px){
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full])::before{content:"";display:block;order:3;flex:1 1 100%;height:0;margin:0;padding:0}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Direct"]{order:4}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Start"]{order:5}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="End"]{order:6}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Arrival/Delivery"]{order:7}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Completion"]{order:8}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Start"],
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="End"],
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Arrival/Delivery"],
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Completion"]{flex:1 1 20%;min-width:20%!important;max-width:25%}
+}
