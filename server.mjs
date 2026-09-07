@@ -7207,13 +7207,13 @@ app.post('/api/product/sample/:id/delete', async (req, res) => {
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Printable SAMPLE card as a downloadable PDF (Content-Disposition: attachment → downloads, doesn't render a tab).
-app.get('/api/product/sample/:id/card.pdf', async (req, res) => {
-  try {
+// v27.553: ONE sample-card generator for admin and supplier portal (same layout, boxed). Returns {bytes, filename} or null.
+async function sampleCardPdf(sampleId) {
     const sr = (await pool.query(`SELECT ps.id, ps.version, to_char(ps.sample_date,'YYYY-MM-DD') sample_date, ps.item_ref,
       coalesce((SELECT json_agg(json_build_object('aspect',af.aspect,'feedback',af.feedback,'decision',af.decision) ORDER BY af.aspect)
         FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id),'[]'::json) aspect_feedback
-      FROM planner.product_dev_samples ps WHERE ps.id=$1::bigint`, [req.params.id])).rows[0];
-    if (!sr) return res.status(404).json({ error: 'sample not found' });
+      FROM planner.product_dev_samples ps WHERE ps.id=$1::bigint`, [sampleId])).rows[0];
+    if (!sr) return null;
     const it = (await pool.query(`SELECT ref, coalesce(supplier,'') supplier, coalesce(season,'') season, coalesce(category,'') category,
       coalesce(colour_name,'') colour_name, coalesce(bulk_colour_name,'') bulk_colour_name, to_char(approved_at,'YYYY-MM-DD') approved_at
       FROM planner.product_dev_items WHERE ref=$1`, [sr.item_ref])).rows[0] || {};
@@ -7248,11 +7248,21 @@ app.get('/api/product/sample/:id/card.pdf', async (req, res) => {
     else { for (let i = 0; i < 3; i++) { y -= 22; page.drawLine({ start: { x: M, y }, end: { x: PW - M, y }, thickness: 0.5, color: line }); } }
     y -= 34;
     T('DATE OF APPROVAL:', M, y, 11, B, rgb(0.2, 0.25, 0.32)); if (apprDate) T(fmtd(apprDate), M + 150, y, 12, B); else page.drawLine({ start: { x: M + 150, y: y - 3 }, end: { x: M + 300, y: y - 3 }, thickness: 0.6, color: ink });
+    // v27.553 (Ben): box around the whole card
+    page.drawRectangle({ x: M - 18, y: y - 26, width: PW - 2 * (M - 18), height: (PH - M + 16) - (y - 26), borderColor: ink, borderWidth: 1.2 });
     const bytes = await doc.save();
-    res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', 'attachment; filename="SAMPLE ' + san(it.ref || 'card') + (sr.version != null ? (' v' + sr.version) : '') + '.pdf"');
-    res.end(Buffer.from(bytes));
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    return { bytes: Buffer.from(bytes), filename: 'SAMPLE ' + san(it.ref || 'card') + (sr.version != null ? (' v' + sr.version) : '') + '.pdf' };
+}
+function sendSampleCard(res, out) { res.setHeader('Content-Type', 'application/pdf'); res.setHeader('Content-Disposition', 'attachment; filename="' + out.filename + '"'); res.end(out.bytes); }
+app.get('/api/product/sample/:id/card.pdf', async (req, res) => {
+  try { const out = await sampleCardPdf(req.params.id); if (!out) return res.status(404).json({ error: 'sample not found' }); sendSampleCard(res, out); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Supplier portal: the SAME card (ownership-guarded) — replaces the portal's old canvas label.
+app.get('/api/portal/product-sample/:id/card.pdf', portalAuth, async (req, res) => {
+  if (!(await portalOwnsProductSample(req, req.params.id))) return res.status(403).json({ error: 'not your sample' });
+  try { const out = await sampleCardPdf(req.params.id); if (!out) return res.status(404).json({ error: 'sample not found' }); sendSampleCard(res, out); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/sample-photo', async (req, res) => {   // body-based (sample_id in body) — matches the portal shape; used by the admin "preview as supplier"
   const b = req.body || {}, id = b.sample_id;

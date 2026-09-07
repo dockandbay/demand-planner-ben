@@ -1,3 +1,7 @@
+## v27.553 Sample card PDF: boxed, and the SAME card from the supplier portal (Ben)
+- The admin sample card (PRODUCT ▸ Samples ▸ ⤓ Card) is now drawn inside a border box.
+- The generator is shared (sampleCardPdf). New GET /api/portal/product-sample/:id/card.pdf (ownership-guarded) serves the identical PDF to the supplier; the portal's per-sample "Download label" button becomes **⤓ Sample card** and opens it (the old canvas label is retired). server.mjs + supply/portal-view.js.
+
 ## v27.552 PRODUCT Samples + Batch review: "added to / updated on timeline" indicator (Ben)
 - Under each component's sign-off cell a small line shows the feedback's timeline state: on load "on timeline dd-Mmm-yy hh:mm" when a matching note exists (plus "saved dd-Mmm-yy hh:mm" from the feedback record); after an edit it reads "added to timeline …" or "updated on timeline …" with the time of the write. productSampleList now returns feedback timestamps and the sample's feedback notes; the upsert endpoint returns the write time. server.mjs + supply/inject.html.
 
