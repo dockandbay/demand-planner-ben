@@ -32,6 +32,9 @@
   --row-alt:var(--row-alt); --hdr-tint:#f3f4f6; --hdr-cur:#eef2f9;
 }
 
+/* DARK-WIP v27.585 (temporary): toggle hidden while the grid-tint pass lands; remove these two selectors to re-expose. */
+#app #view-tabs-row #hz-theme-btn,#hz-theme-mob{display:none!important}
+
 /* ── Dark mode (v27.584): Diviyaj's canvas dark palette ("Demand Planner Premium Polish"). The header theme toggle adds
    .om-dark to <html> (no-flash bootstrap in HEAD_NOFLASH, app only — the portal stays light). Every app rule uses var(),
    so redefining the tokens here flips the whole app. Per-page inline-style stragglers are cleaned up in each page's phase. ── */
