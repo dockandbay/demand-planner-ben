@@ -10595,7 +10595,7 @@ function renderKeyAccountsView(body){
     +'<div style="margin:0 0 6px"><button id="kaf-import" style="border:1px solid #93c5fd;background:var(--blue-soft);color:var(--blue-ink);padding:5px 12px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600">⬆ Import / paste</button></div>'
     +'<div style="font-size:12px;color:var(--muted);margin:0 0 10px">Forecast qty per month — edit inline (saves straight to the database). Current month → 18 months forward; past hidden by default.</div>'
     +'<div id="kaf-imp"></div>'
-    +'<div id="kafc" style="overflow-x:auto"><div style="color:var(--faint);font-size:12px">Loading…</div></div></div>';
+    +'<div id="kafc" style="overflow:auto;max-height:calc(100dvh - 250px)"><div style="color:var(--faint);font-size:12px">Loading…</div></div></div>';
   var host=body.querySelector('#kafc');
   body.querySelectorAll('.kaf-pill').forEach(function(b){ b.onclick=function(){ KAF_CTRY=b.dataset.w; pendClients=[]; pendSkus={}; renderKeyAccountsView(body); }; });
   var qIn=body.querySelector('#kaf-q'); qIn.oninput=function(){ KAF_Q=qIn.value; draw(); };
@@ -10623,7 +10623,7 @@ function renderKeyAccountsView(body){
       +'#kafc .kaf-cell{width:58px;text-align:right;padding:3px 5px;border:1px solid transparent;border-radius:4px;font-size:12px;font-family:inherit;background:transparent}#kafc .kaf-cell:focus{border-color:#93c5fd;background:#fff;outline:none}#kafc td.past .kaf-cell{color:var(--amber)}'
       +'#kafc .kaf-skunm{font-size:10px;color:var(--faint);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#kafc .kaf-del{border:none;background:transparent;color:var(--neg);cursor:pointer;font-size:12px}'
       +'.kaf-pill{border:1px solid var(--line);background:#fff;color:var(--ink-soft);font-size:12px;padding:4px 14px;border-radius:14px;cursor:pointer;font-weight:600}.kaf-pill.on{background:var(--nav);color:#fff;border-color:var(--nav)}'
-      +'#kafc .kaf-addsku{position:relative}#kafc .kaf-skuin{width:180px;padding:4px 6px;border:1px solid var(--line);border-radius:4px;font-size:11px}#kafc .kaf-drop{position:fixed;z-index:100000;width:300px;max-height:220px;overflow-y:auto;background:#fff;border:1px solid var(--line);border-radius:6px;box-shadow:0 8px 22px rgba(15,23,42,.18);display:none}#kafc .kaf-drop.open{display:block}#kafc .kaf-opt{padding:5px 8px;font-size:11px;cursor:pointer}#kafc .kaf-opt:hover{background:var(--blue-soft)}</style>';
+      +'#kafc .kaf-addsku{position:relative}#kafc .kaf-skuin{width:180px;padding:4px 6px;border:1px solid var(--line);border-radius:4px;font-size:11px}#kafc .kaf-drop{position:fixed;z-index:100000;width:300px;max-height:220px;overflow-y:auto;background:#fff;border:1px solid var(--line);border-radius:6px;box-shadow:0 8px 22px rgba(15,23,42,.18);display:none}#kafc .kaf-drop.open{display:block}#kafc .kaf-opt{padding:5px 8px;font-size:11px;cursor:pointer}#kafc .kaf-opt:hover{background:var(--blue-soft)}#kafc th.lbl{position:sticky;left:0;z-index:3}#kafc .kaf-cdl,#kafc .kaf-cup{border:1px solid var(--line);background:#fff;border-radius:4px;font-size:10px;padding:0 5px;cursor:pointer;line-height:1.6;color:var(--ink-soft)}#kafc .kaf-cdl:hover,#kafc .kaf-cup:hover{border-color:var(--blue);color:var(--blue)}#kafc .kaf-colx{border:none;background:transparent;color:var(--faint);cursor:pointer;font-size:10px;padding:0 3px;line-height:1}#kafc .kaf-colx:hover{color:var(--neg)}</style>';
     var head='<tr><th class="lbl">Client / SKU</th>'+m.map(function(x){return '<th class="'+(x.cur?'mcur':x.past?'mpast':'')+'">'+x.label+'</th>';}).join('')+'<th></th></tr>';
     var bodyH='';
     d.clients.forEach(function(cl){
@@ -10631,7 +10631,8 @@ function renderKeyAccountsView(body){
       var allSks=d.skusBy[cl]||[];
       var sks=cliMatch?allSks:allSks.filter(function(sk){ return sk.toLowerCase().indexOf(q)>=0 || skuName(sk).toLowerCase().indexOf(q)>=0; });
       if(q && !cliMatch && !sks.length) return;   // filtering + nothing in this client matches → skip the group
-      bodyH+='<tr class="clihdr"><td class="lbl">'+e(cl)+'</td><td colspan="'+(m.length+1)+'"></td></tr>';
+      bodyH+='<tr class="clihdr"><td class="lbl"><span style="display:inline-flex;align-items:center;gap:6px">'+e(cl)+' <button class="kaf-cdl" data-cl="'+e(cl)+'" title="Download this client\'s forecast (SKU × future months) as CSV">⬇</button><button class="kaf-cup" data-cl="'+e(cl)+'" title="Upload a CSV for this client (same layout as the download; blank cells clear)">⬆</button></span></td>'
+        +m.map(function(x){ return '<td style="text-align:center">'+(x.past?'':'<button class="kaf-colx" data-cl="'+e(cl)+'" data-m="'+x.key+'" title="Clear '+e(x.label)+' for every SKU of '+e(cl)+'">✕</button>')+'</td>'; }).join('')+'<td></td></tr>';   // v27.578
       sks.forEach(function(sk){
         bodyH+='<tr data-cl="'+e(cl)+'" data-sku="'+e(sk)+'"><td class="lbl"><div style="font-family:ui-monospace,Menlo,monospace;font-weight:600">'+e(sk)+'</div></td>'
           +m.map(function(x){ var v=(d.C[cl]&&d.C[cl][sk]&&d.C[cl][sk][x.key]!=null)?d.C[cl][sk][x.key]:''; return '<td class="'+(x.past?'past':'')+'"><input class="kaf-cell" data-cl="'+e(cl)+'" data-sku="'+e(sk)+'" data-m="'+x.key+'" inputmode="numeric" value="'+e(v)+'"></td>'; }).join('')
@@ -10645,6 +10646,14 @@ function renderKeyAccountsView(body){
     wire();
   }
   function wire(){
+    // v27.578: per-client column clear, per-client download + upload
+    host.querySelectorAll('.kaf-colx').forEach(function(b){ b.onclick=function(){ var cl=b.dataset.cl, mo=b.dataset.m, d=build(), cm=d.C[cl]||{}, sks=Object.keys(cm).filter(function(sk){ var v=cm[sk][mo]; return v!=null&&v!==''; });
+      if(!sks.length){ flash('Nothing to clear in '+mo); return; } if(!confirm('Clear '+mo+' for '+sks.length+' SKU'+(sks.length===1?'':'s')+' of '+cl+'? (sets them to blank)'))return;
+      var clv=cl==='(no client)'?'':cl; sks.forEach(function(sk){ saveCell(clv,sk,mo,''); }); setTimeout(reload,400+sks.length*25); }; });
+    host.querySelectorAll('.kaf-cdl').forEach(function(b){ b.onclick=function(){ var cl=b.dataset.cl, d=build(), fut=monthList().filter(function(x){return !x.past;}), cm=d.C[cl]||{};
+      var out=[['SKU'].concat(fut.map(function(x){return x.key;}))]; Object.keys(cm).sort().forEach(function(sk){ out.push([sk].concat(fut.map(function(x){ var v=cm[sk][x.key]; return (v==null||v==='')?'':v; }))); });
+      var mk=({uk_3pl:'UK',us_3pl:'US',eu_3pl:'EU'})[KAF_CTRY]; dlCsv('ka_'+mk+'_'+String(cl).replace(/[^a-z0-9]+/gi,'_')+'_forecast.csv',out); }; });
+    host.querySelectorAll('.kaf-cup').forEach(function(b){ b.onclick=function(){ var box=body.querySelector('#kaf-imp'); if(!box.innerHTML)toggleImport(); var ci=box.querySelector('#kaf-icli'); if(ci)ci.value=(b.dataset.cl==='(no client)'?'':b.dataset.cl); try{ box.scrollIntoView({behavior:'smooth',block:'start'}); }catch(e){} var fi=box.querySelector('#kaf-ifile'); if(fi)fi.click(); }; });
     host.querySelectorAll('.kaf-cell').forEach(function(inp){ inp.onchange=function(){ var v=inp.value.trim(); var qty=v===''?'':parseInt(v,10); if(v!==''&&isNaN(qty)){ inp.value=''; return; }
       saveCell(inp.dataset.cl==='(no client)'?'':inp.dataset.cl, inp.dataset.sku, inp.dataset.m, v===''?'':qty); }; });
     host.querySelectorAll('.kaf-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Clear '+b.dataset.sku+' across all shown months for this client?'))return;
@@ -10679,7 +10688,7 @@ function renderKeyAccountsView(body){
       +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px"><span style="font-size:12px;color:var(--muted)">Template:</span>'
       +'<button id="kaf-tblank" style="border:1px solid var(--line);background:#fff;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer">&#8595; Blank template</button>'
       +'<button id="kaf-tcur" style="border:1px solid var(--line);background:#fff;padding:4px 10px;border-radius:6px;font-size:11px;cursor:pointer">&#8595; With current data</button>'
-      +'<span style="font-size:11px;color:var(--faint)">SKU,Qty — fill in &amp; re-import. &ldquo;With current data&rdquo; uses the client + month above.</span></div>'
+      +'<span style="font-size:11px;color:var(--faint)">SKU,Qty — fill in &amp; re-import. &ldquo;With current data&rdquo; uses the client + month above. Or a <b>SKU × month grid</b> (YYYY-MM column headers, as a client\'s ⬇ download gives) — every cell in the file is written, blank = cleared; the Month picker is ignored.</span></div>'
       +'<div style="font-size:12px;margin-bottom:3px">Paste from Excel / Google Sheets — <b>SKU</b> and <b>qty</b> per line (tab or comma separated):</div>'
       +'<textarea id="kaf-ipaste" rows="6" placeholder="ACTIVE-XLG-GREY\t500&#10;TOWEL-BL-02, 250" style="width:100%;box-sizing:border-box;font-family:ui-monospace,Menlo,monospace;font-size:12px;padding:6px 8px;border:1px solid var(--line);border-radius:6px"></textarea>'
       +'<div style="margin-top:8px"><button id="kaf-ido" style="border:1px solid var(--pos);background:var(--pos);color:#fff;padding:6px 14px;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600">Import</button> <button id="kaf-icancel" style="border:1px solid var(--line);background:#fff;padding:6px 12px;border-radius:6px;font-size:12px;cursor:pointer">Cancel</button> <span id="kaf-ires" style="font-size:12px;margin-left:6px"></span></div>'
@@ -10694,6 +10703,18 @@ function renderKeyAccountsView(body){
   }
   function doImport(box){ var client=(box.querySelector('#kaf-icli').value||'').trim(), month=box.querySelector('#kaf-imo').value, txt=box.querySelector('#kaf-ipaste').value||'';
     var lines=txt.split(/\r?\n/).map(function(l){return l.trim();}).filter(Boolean);
+    // v27.578 grid mode: header row carries YYYY-MM month columns (a client's ⬇ download) → write every cell; blank clears
+    var _hp=(lines[0]||'').split(/\t|,|;/).map(function(p){return p.trim();}), _mc=[]; _hp.forEach(function(h,i){ if(/^\d{4}-\d{2}$/.test(h))_mc.push({i:i,m:h}); });
+    if(_mc.length){ var ops=[], unres=[], res2=box.querySelector('#kaf-ires'), warn2=box.querySelector('#kaf-iwarn');
+      lines.slice(1).forEach(function(l){ var parts=l.split(/\t|,|;/).map(function(p){return p.trim();}); var rawSku=parts[0]; if(!rawSku||rawSku.toLowerCase()==='sku')return; var sku=resolveSku(rawSku); if(!sku){ unres.push(rawSku); return; }
+        _mc.forEach(function(c){ var v=String(parts[c.i]||'').replace(/[^0-9-]/g,''); ops.push({sku:sku,m:c.m,q:v===''?'':parseInt(v,10)}); }); });
+      warn2.innerHTML=unres.length?'<div style="background:var(--amber-bg);border:1px solid var(--amber-bg);border-radius:6px;padding:7px 10px;font-size:12px;color:var(--amber)"><b>⚠ '+unres.length+' SKU'+(unres.length>1?'s':'')+' didn’t resolve</b> (skipped): '+unres.map(e).join(', ')+'</div>':'';
+      if(!ops.length){ res2.style.color='var(--neg)'; res2.textContent='Nothing to import from the grid'; return; }
+      var nSku=Object.keys(ops.reduce(function(o,x){o[x.sku]=1;return o;},{})).length; if(!confirm('Write '+ops.length+' cells ('+nSku+' SKUs × '+_mc.length+' months) for '+(client||'(no client)')+'? Blank cells in the file clear the forecast.'))return;
+      res2.style.color='var(--muted)'; res2.textContent='Importing '+ops.length+' cells…'; var j=0;
+      (function nx2(){ if(j>=ops.length){ res2.style.color='var(--pos)'; res2.textContent='✓ Imported '+ops.length+' cells · '+nSku+' SKUs × '+_mc.length+' months'+(unres.length?' · '+unres.length+' skipped':''); reload(); return; }
+        var op=ops[j++]; if(j%10===0){ res2.textContent='Importing '+j+'/'+ops.length+'…'; } fetch('/api/supply/ka-forecast-cell',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({client:client,sku:op.sku,warehouse:KAF_CTRY,month:op.m,quantity:op.q})}).then(function(){ nx2(); }).catch(function(){ nx2(); }); })();
+      return; }
     var agg={}, unresolved=[];
     lines.forEach(function(l){ var parts=l.split(/[\t,;]+/).map(function(p){return p.trim();}).filter(function(p){return p!=='';});
       if(!parts.length)return; var rawSku=parts[0]; if(rawSku.toLowerCase()==='sku')return; var qty=null;

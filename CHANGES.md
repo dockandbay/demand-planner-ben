@@ -1,3 +1,8 @@
+## v27.578 Key Accounts Forecast: per-client download / upload, clear a month per client, sticky headers (Ben)
+- Client header row: ⬇ downloads that client’s forecast as SKU × future-month CSV (YYYY-MM headers); ⬆ opens the import panel with the client preselected and the file picker; an ✕ under every future month clears that month for all of the client’s SKUs (confirm, then per-cell save).
+- Import / paste understands the grid layout: when the header row has YYYY-MM columns, every cell in the file is written (blank = cleared), with a confirmation of cells × SKUs × months; the single-month SKU,Qty format still works.
+- The grid scrolls inside its own box (max-height to the viewport), so the month header row and the Client / SKU column stay pinned.
+
 ## v27.577 DEMAND ▸ Config ▸ More settings: ASP reduction + discontinued ASP discount per country × channel (Ben)
 - New Config page "More settings" (#/demand/config/aspadj): a country × channel grid with two percentages, ASP reduction (off every forecast-month ASP, e.g. UK DTC 9%) and Discontinued ASP discount (extra markdown on the discontinued-SKU share of a sub-category’s forecast units, e.g. 10%). Save writes app_settings.asp_adjust (existing generic endpoint); server injects it as ASP_ADJ.
 - getASP() is now a wrapper: raw seasonal ASP × (1 − reduction) × (1 − discount × discontinued unit share for that sub-category and month, from subcatSkuEffTotals). Actual months keep their real ASP. Revenue-only: Summary & targets, plan revenue line, money targets, downloads. The buy plan never reads ASP, so it is unchanged. Memo reset with the run-off memos.
