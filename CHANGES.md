@@ -1,3 +1,6 @@
+## v27.548 PRODUCT Timeline: quick-phrase / Pantone picker on top too
+- The compose box's "/" phrase and "/p" Pantone menu uses the same detached, fixed-position menu as the feedback boxes (v27.547), so the notes below can no longer cover it. supply/inject.html only.
+
 ## v27.547 PRODUCT Samples: feedback quick-phrase / Pantone picker on top (Ben)
 - The picker under each feedback box was rendered inside the table cell, so the next rows painted over it. It is now detached to the page body, fixed-positioned under the textarea (follows scroll / resize) and above drawers; closes as before. The Pantone hover card also sits above everything. supply/inject.html only.
 

@@ -14213,7 +14213,7 @@
       var _panPicked={};
       // slash-command picker: "/" = saved phrase, "/p <query>" = Pantone colour search
       (function(){ var ta=body.querySelector('#pt-in'), pick=body.querySelector('#pt-picker'), prev=body.querySelector('#pt-prev'); if(!ta||!pick)return;   // v27.530: shared picker + live Pantone preview
-        hzSlashPicker(ta,pick,{snips:SNIPS,picked:_panPicked,onChange:function(){ hzPanPreview(ta,prev,_panPicked); }}); })();
+        hzSlashPicker(ta,pick,{snips:SNIPS,picked:_panPicked,fixed:true,onChange:function(){ hzPanPreview(ta,prev,_panPicked); }}); })();   // fixed (v27.548): the phrase / Pantone list must sit above the notes below the compose box
       // filter chip handlers
       body.querySelectorAll('.pt-filt').forEach(function(ch){ ch.onclick=function(){ var id=ch.dataset.id; FILT[id]=!FILT[id]; if(!FILT[id])delete FILT[id]; renderProdTimeline(body,ref); }; });
       var _fclr=body.querySelector('.pt-filt-clear'); if(_fclr)_fclr.onclick=function(){ Object.keys(FILT).forEach(function(k){delete FILT[k];}); renderProdTimeline(body,ref); };
