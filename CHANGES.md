@@ -1,3 +1,11 @@
+## v27.568 PRODUCT ▸ SAMPLE BATCH REVIEW: filter box, blue shipment box, picker position, Samples drawer + two-way refresh (Ben)
+- New Filter box after the shipment picker: matches product type, reference, name, colour way, category, season, supplier (all words must match); shows "n of m products"; client-side over the loaded shipment.
+- Sample shipment box is tinted light blue (label, fill, border) so it reads as the primary control.
+- FIX: the / phrase and /p Pantone menu on feedback boxes sat at the page left edge (a trailing comment in hzSlashPicker.place had swallowed the left/width/z-index assignments). Also fixes the same menu on the Samples tab and the timeline composer.
+- Product reference now opens the drawer straight on the Samples tab (openProductDrawer gained a tab argument).
+- Two-way binding: batch saves (feedback, sign-off, reasons, photography) invalidate the product cache so the drawer Samples tab reloads fresh; closing the drawer re-pulls the shipment quietly so drawer edits show on the batch page.
+- server: batch-review payload carries product_type.
+
 ## v27.567 DEMAND plan: header rows on light grey (Ben)
 - The two header rows of the plan table (column titles and the period / month row, including the sticky SKU corner cells) sit on a very light grey (#f3f4f6) instead of white; the dashed current-month header keeps a faint blue wash. supply/hz-theme.css only.
 

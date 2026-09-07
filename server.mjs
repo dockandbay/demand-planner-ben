@@ -7130,7 +7130,7 @@ app.get('/api/product/batch-review/:id', async (req, res) => {
       const comps = (await pool.query(`SELECT id, name, dimension FROM planner.product_dev_components WHERE item_ref=$1 ORDER BY sort, id`, [ref])).rows;
       const samples = (await productSampleList(ref)).filter(x => ids.has(String(x.id)));
       const j = (it && it.j) || {};
-      items.push({ ref, name: j.description || '', colour_name: j.colour_name || '', supplier: j.supplier || '', stage: j.stage || '', season: j.season || '', category: j.category || '', status: j.status || '',
+      items.push({ ref, name: j.description || '', colour_name: j.colour_name || '', supplier: j.supplier || '', stage: j.stage || '', season: j.season || '', category: j.category || '', status: j.status || '', product_type: j.type || '',
         components: comps.map(c => ({ key: c.dimension || ('c' + c.id), name: c.name })), samples });
     }
     res.json({ sr, items });
