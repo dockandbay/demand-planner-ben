@@ -4754,8 +4754,8 @@ var SMOOTH_PREVIEW=null; // {pk:'subcat|co|ch', fy:startY|null, months:{'YYYY_MM
 // Transient tooltip shown when a user clicks a smooth cell while a SKU search is active (smoothing needs all SKUs visible).
 // v27.525: smoothing needs EVERY SKU of the subcat visible. Search, Release window and Filter Rules all hide SKUs (they sit above the all=true bypass in filteredSkus), so smoothing is blocked while any of them is on. Tier / core-seasonal / active pills are bypassed by all=true and do not block.
 function planSmoothBlocked(){ try{ if((PLAN_SKU_QRY||'').trim())return true; if(typeof PLAN_RW!=='undefined'&&PLAN_RW!=='ALL')return true; if(typeof FR_ACTIVE!=='undefined'&&FR_ACTIVE&&!(typeof _frIsDrift==='function'&&_frIsDrift()))return true; }catch(e){} return false; }
-function _smoothSearchTip(x,y){ var t=document.getElementById('_smooth-tip'); if(!t){ t=document.createElement('div'); t.id='_smooth-tip'; t.style.cssText='position:fixed;z-index:300020;max-width:280px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:8px 10px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none'; document.body.appendChild(t); }
-  t.textContent='Cannot smooth on filter: smoothing rebalances the whole subcategory, so it needs every SKU visible. Clear the SKU search, the Release filter or the filter rule to smooth.';
+function _smoothSearchTip(x,y,msg){ var t=document.getElementById('_smooth-tip'); if(!t){ t=document.createElement('div'); t.id='_smooth-tip'; t.style.cssText='position:fixed;z-index:300020;max-width:280px;background:#111827;color:#fff;font-size:11px;line-height:1.5;padding:8px 10px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none'; document.body.appendChild(t); }
+  t.textContent=msg||'Cannot smooth on filter: smoothing rebalances the whole subcategory, so it needs every SKU visible. Clear the SKU search, the Release filter or the filter rule to smooth.';
   t.style.left=Math.min((x||40)+8,window.innerWidth-290)+'px'; t.style.top=((y||40)+12)+'px'; t.style.display='block';
   clearTimeout(t._h); t._h=setTimeout(function(){ t.style.display='none'; },3200); }
 var SMOOTH_LEADER=false;  // false = Standard (pure proportional), true = Leader (protect historically-strong SKUs). Set via the FY-total dropdown; applies to ALL smoothing.
@@ -7967,6 +7967,7 @@ function _setCapTip(cn){
   if(cn.sets.length>show.length)lines.push('…+'+(cn.sets.length-show.length)+' more');
   return head+'\n'+lines.join('\n');
 }
+var SMOOTH_FALLBACK={};   // v27.546: months where smoothing had to use run-off SKUs because no active SKU exists (key co|ch|subcat|month)
 function computeSmoothAlloc(s,co,ch,m,opts){
   opts=opts||{};
   // protectLeaders: when true, apply tier-aware floors so historically-strong SKUs
@@ -7976,7 +7977,7 @@ function computeSmoothAlloc(s,co,ch,m,opts){
   // Without this option, the algorithm reduces to pure capped proportional smoothing.
   var protectLeaders=!!opts.protectLeaders;
   var floorFactor=(opts.floorFactor!=null)?opts.floorFactor:0.80;
-  var DISREGARD_DISC=smoothDisregards(co,ch,s);   // when set: zero discontinued SKUs, active SKUs carry the full subcat target
+  var DISREGARD_DISC=opts._forceDisc?false:smoothDisregards(co,ch,s);   // when set: zero discontinued SKUs, active SKUs carry the full subcat target (v27.546: _forceDisc = fallback pass that lets run-off SKUs carry it when no active SKU exists)
   var wh=skuWh(co,ch), ctry=co.toLowerCase();
   var chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':ch==='TIK'?'t':'b';
   var FU=(calc(s,co,ch).fu)||{};
@@ -8117,6 +8118,12 @@ function computeSmoothAlloc(s,co,ch,m,opts){
   // scaling would push them above cap or below floor, then re-scale the remainder.
   items.forEach(function(it){if(it.cap<=0)it.alloc=0;});
   var pool=items.filter(function(it){return it.cap>0;});
+  // v27.546 (Ben: "smooth not working on each month"): with Disregard-discontinued ON and every SKU either discontinued or
+  // pre-launch (typical once the season's lines hit their discontinue dates and next season has not launched), there was
+  // nobody to carry the target → empty result → the click looked dead. Fall back to smoothing across the run-off SKUs
+  // that still have stock (capped by their shared country pool) and flag it for the preview.
+  if(!pool.length&&DISREGARD_DISC&&!opts._retry){ var _fb=computeSmoothAlloc(s,co,ch,m,Object.assign({},opts,{_forceDisc:true,_retry:true})); if(_fb&&Object.keys(_fb).length){ SMOOTH_FALLBACK[co+'|'+ch+'|'+s+'|'+m]=true; return _fb; } }
+  if(!opts._retry)delete SMOOTH_FALLBACK[co+'|'+ch+'|'+s+'|'+m];
   var T=target, guard=0;
   while(pool.length&&guard++<60){
     var sumW=pool.reduce(function(a,it){return a+(it.cur>0?it.cur:0);},0);
@@ -8322,6 +8329,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     var pv=SMOOTH_PREVIEW.months[mo][sku];
     if(inp){inp.value=String(pv);inp.disabled=true;inp.style.color='#b45309';inp.style.fontWeight='700';inp.title='Smooth preview — not yet applied';}
     if(fcDiv){ var oldTxt=(fcDiv.textContent||'').trim(), newTxt=fn(pv);   // v27.525: show the previous number struck through beside the proposed one
+      if(SMOOTH_FALLBACK[co+'|'+ch+'|'+s+'|'+mo])fcDiv.title='Proposed by Smooth across run-off stock (no active SKU this month) — click ✓ apply to commit';
       fcDiv.innerHTML=(oldTxt&&oldTxt!==newTxt?'<s style="color:var(--faint);font-weight:400;margin-right:3px">'+esc(oldTxt)+'</s>':'')+esc(newTxt);
       fcDiv.style.color='#b45309';fcDiv.style.fontWeight='700';fcDiv.style.fontStyle='normal';fcDiv.title='Proposed by Smooth (was '+oldTxt+') — click \u2713 apply to commit';}
   }
@@ -9018,7 +9026,9 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         var lnk=document.createElement('div');lnk.textContent='smooth';
         lnk.style.cssText='margin-top:1px;font-size:7px;line-height:1.2;font-weight:500;font-style:italic;color:var(--faint)';
         std.appendChild(lnk);
-        std.onclick=function(e){e.stopPropagation();var o={};o[m]=computeSmoothAlloc(s,co,ch,m,{protectLeaders:SMOOTH_LEADER});SMOOTH_PREVIEW={pk:parentKey,fy:null,months:o};reExpand();};
+        std.onclick=function(e){e.stopPropagation();var o={};o[m]=computeSmoothAlloc(s,co,ch,m,{protectLeaders:SMOOTH_LEADER});
+          if(!o[m]||!Object.keys(o[m]).length){ _smoothSearchTip(e.clientX,e.clientY,'Nothing to smooth for '+m.replace('_','-')+': every SKU here is pre-launch or has no run-off stock left, so no line can carry the sub-category forecast.'); return; }   // v27.546
+          SMOOTH_PREVIEW={pk:parentKey,fy:null,months:o};reExpand();};
       }
     }
   }
