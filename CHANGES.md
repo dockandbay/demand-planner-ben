@@ -1,3 +1,6 @@
+## v27.565 Target recommendations: Apply everywhere (Ben)
+- New **Apply everywhere** button beside Apply all: gathers every open recommendation (gap ≥ 2%, not dismissed, not already applied, ASP available) across all markets × channels × the three planning years, shows a confirmation table (market · channel · year · sub-categories · current £ → target £) and applies them in one pass with a single record-of-change log. Then Save Forecasts as usual. applyTargetRecs accepts an explicit market / channel / year (quiet mode) so the sweep does not re-render per set. artifact_v16.7.html only.
+
 ## v27.564 Barcode scanner card: layout (Ben)
 - Header: SKU, name, then "Sub-category (Category)" on its own line, colour · size · tier · season beneath; **Suppliers** from the multi-supplier field; Product / Carton (× qty) / Inner barcodes each on their own line.
 - Prices and Inventory tables left-aligned (headers and data). server.mjs (suppliers field) + supply/inject.html.

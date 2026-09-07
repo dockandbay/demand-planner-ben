@@ -13205,7 +13205,7 @@ function computeTargetRecs(fy,coA,chA){ var co=coA||CUR,ch=chA||CF;
     if(rows.length)out.push({s:s, rows:rows, fyCur:fyCur, fyTgt:fyTgt, er:_explodeRatio(s,co,ch)});   // er = set-explosion uplift; the applied target is reqU × er (EXPLODED)
     else if(noAsp)out.push({s:s, rows:[], fyCur:0, fyTgt:0, noAsp:true}); });   // GBP target set but no ASP → surface a "set a price" flag
   return out; }
-function applyTargetRecs(recs){ var co=CUR,ch=CF; var _chg=[]; var _fyForDk=(typeof TREC_FY!=='undefined'&&TREC_FY!=null)?TREC_FY:CUR_FY_START;
+function applyTargetRecs(recs,opts){ opts=opts||{}; var co=opts.co||CUR,ch=opts.ch||CF; var _chg=[]; var _fyForDk=(opts.fy!=null)?opts.fy:((typeof TREC_FY!=='undefined'&&TREC_FY!=null)?TREC_FY:CUR_FY_START);   // v27.565: explicit co/ch/fy + quiet mode for the everywhere sweep
   recs.forEach(function(rc){ var _fu=(calc(rc.s,co,ch).fu)||{}; var _prior={}; rc.rows.forEach(function(r){ var ik=rc.s+'|'+co+'|'+ch+'|'+r.m; _prior[ik]=(IV[ik]!==undefined?IV[ik]:''); var u=Math.max(0,Math.round(r.reqU));   // SALE-BASIS target (reqU = target£ ÷ sale-ASP). The sub-category forecast, ASP, ga and the buy are ALL sale-basis (a set = 1 box), so we store sale units — writing the EXPLODED number here would inflate this sub-category's revenue AND buy by the explode ratio. The exploded figure is DISPLAY-only (see the target-rec table + the ·dot actuals).
     var _old=Math.round(_fu[r.m]||0); if(_old!==u)_chg.push({level:'subcat',item:rc.s,country:co,channel:ch,month:r.m,action:'applied target recommendation',from:_old,to:u});
     // Store as a % growth vs LY (instead of an absolute) when the growth is ≤200% AND last year's month is a COMPLETED actual —
@@ -13217,9 +13217,30 @@ function applyTargetRecs(recs){ var co=CUR,ch=CF; var _chg=[]; var _fyForDk=(typ
     else { IV[ik]=(u>=4?String(u):("'"+u)); } });   // absolute (growth >200%, or no completed LY actual to grow from)
     TREC_APPLIED[trecDKey(co,ch,_fyForDk,rc.s)]={prior:_prior};   // keep visible as applied + enable undo
   });
+  if(opts.quiet)return _chg;   // sweep: caller logs / marks dirty / renders once
   try{ logChangesBulk(_chg); }catch(e){}
   if(typeof markDirty==='function')markDirty();
   render(); }
+// v27.565 (Ben): Apply EVERYWHERE — every open recommendation across all markets × channels × planning years, one confirmation, one pass.
+function trecApplyEverywhere(onDone){
+  var COS=(typeof CTRS!=='undefined'?CTRS:['UK','US','EU','AU','CA']), CHS=['DTC','FBA','B2B','TIK'], FYS=[CUR_FY_START,CUR_FY_START+1,CUR_FY_START+2];
+  var sets=[]; _trecRecCache={};
+  COS.forEach(function(co){ CHS.forEach(function(ch){ FYS.forEach(function(fy){ var recs; try{ recs=computeTargetRecs(fy,co,ch)||[]; }catch(e){ recs=[]; }
+    var open=recs.filter(function(rc){ return trecOpen(rc,co,ch,fy)&&!TREC_APPLIED[trecDKey(co,ch,fy,rc.s)]; }); if(open.length)sets.push({co:co,ch:ch,fy:fy,recs:open}); }); }); });
+  var money=function(v){ return '£'+Math.round(v||0).toLocaleString(); };
+  var total=sets.reduce(function(a,x){return a+x.recs.length;},0);
+  var ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;z-index:200090;background:rgba(15,23,42,.5);display:flex;align-items:center;justify-content:center;padding:20px';
+  var rows=sets.map(function(x){ var cur=x.recs.reduce(function(a,r){return a+(r.fyCur||0);},0), tgt=x.recs.reduce(function(a,r){return a+(r.fyTgt||0);},0); return '<tr style="border-top:1px solid var(--line2)"><td style="padding:4px 10px"><b>'+esc(x.co)+'</b></td><td style="padding:4px 10px">'+esc(x.ch)+'</td><td style="padding:4px 10px">'+esc(fyLbl(x.fy))+'</td><td style="padding:4px 10px;text-align:right">'+x.recs.length+'</td><td style="padding:4px 10px;text-align:right;font-variant-numeric:tabular-nums">'+money(cur)+' → <b>'+money(tgt)+'</b></td></tr>'; }).join('');
+  ov.innerHTML='<div style="background:#fff;border-radius:12px;width:min(760px,100%);max-height:calc(100vh - 40px);display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.35)">'
+    +'<div style="padding:14px 18px 10px;border-bottom:1px solid var(--line2);display:flex;justify-content:space-between;align-items:center;gap:10px"><b style="font-size:15px">Apply target recommendations everywhere</b><button id="tae-x" style="border:1px solid var(--line);background:#fff;border-radius:50%;width:30px;height:30px;cursor:pointer">✕</button></div>'
+    +'<div style="padding:8px 18px;color:var(--muted);font-size:12px">'+(total?('<b>'+total+'</b> open recommendation'+(total===1?'':'s')+' across '+sets.length+' market · channel · year set'+(sets.length===1?'':'s')+'. Sub-category forecasts are rewritten to meet the targets (same rule as Apply all on each tab). Dismissed, already-applied and no-price items are skipped.'):'Nothing open to apply — every set with a target is within 2% of it, dismissed, already applied, or has no price.')+'</div>'
+    +'<div style="flex:1 1 auto;overflow:auto;padding:0 6px">'+(total?'<table style="border-collapse:collapse;font-size:12px;width:100%"><thead><tr style="background:var(--hover);font-size:10px;text-transform:uppercase;color:var(--muted)"><th style="padding:5px 10px;text-align:left">Market</th><th style="padding:5px 10px;text-align:left">Channel</th><th style="padding:5px 10px;text-align:left">Year</th><th style="padding:5px 10px;text-align:right">Sub-cats</th><th style="padding:5px 10px;text-align:right">Current → target (FY £)</th></tr></thead><tbody>'+rows+'</tbody></table>':'')+'</div>'
+    +'<div style="padding:12px 18px;border-top:1px solid var(--line2);display:flex;gap:8px;justify-content:flex-end"><button id="tae-cancel" class="save-btn light">Cancel</button>'+(total?'<button id="tae-apply" style="border:1px solid var(--amber);background:var(--amber);color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer">Apply '+total+' everywhere</button>':'')+'</div></div>';
+  document.body.appendChild(ov); var close=function(){ if(ov.parentNode)ov.parentNode.removeChild(ov); };
+  ov.querySelector('#tae-x').onclick=close; ov.querySelector('#tae-cancel').onclick=close; ov.addEventListener('mousedown',function(e){ if(e.target===ov)close(); });
+  var ap=ov.querySelector('#tae-apply'); if(ap)ap.onclick=function(){ ap.disabled=true; ap.textContent='Applying…'; var all=[];
+    sets.forEach(function(x){ try{ var ch=applyTargetRecs(x.recs,{co:x.co,ch:x.ch,fy:x.fy,quiet:true}); if(Array.isArray(ch))all=all.concat(ch); }catch(e){} });
+    try{ logChangesBulk(all); }catch(e){} if(typeof markDirty==='function')markDirty(); close(); render(); if(typeof onDone==='function')onDone(total,sets.length); }; }
 function renderTargetRecs(body){ if(TREC_FY==null)TREC_FY=CUR_FY_START;
   var co=CUR,ch=CF, fys=[CUR_FY_START,CUR_FY_START+1,CUR_FY_START+2];
   var fyLbl=function(y){return 'FY'+String(y).slice(2)+'/'+String(y+1).slice(2);};
@@ -13274,6 +13295,10 @@ function renderTargetRecs(body){ if(TREC_FY==null)TREC_FY=CUR_FY_START;
     body.querySelectorAll('.trec-restore').forEach(function(b){ b.onclick=function(){ delete TREC_DISM[trecDKey(co,ch,TREC_FY,b.dataset.s)]; trecSaveDism(); renderTargetRecs(body); }; });
     body.querySelectorAll('.trec-undo').forEach(function(b){ b.onclick=function(){ trecUndo(co,ch,TREC_FY,b.dataset.s); renderTargetRecs(body); }; });
     function _trecOpenApplyAll(){ trecApplyAllModal(openRecs,co,ch,TREC_FY,function(){ renderTargetRecs(body); var m=document.getElementById('trec-msg'); if(m){ m.style.color='#166534'; m.textContent='Applied — now Save Forecasts to persist.'; } }); }
+    (function(){ var top=body.querySelector('#trec-apply-top'); if(!top)return; var b=document.createElement('button'); b.id='trec-apply-everywhere'; b.textContent='Apply everywhere'; b.title='Apply every open recommendation across ALL markets, channels and the three planning years (confirmation first)';
+      b.style.cssText='border:1px solid var(--nav);background:var(--nav);color:#fff;border-radius:6px;padding:6px 14px;font-size:12px;font-weight:700;cursor:pointer;margin-left:6px';
+      b.onclick=function(){ trecApplyEverywhere(function(n,sets){ renderTargetRecs(body); var m=document.getElementById('trec-msg'); if(m){ m.style.color='#166534'; m.textContent='Applied '+n+' recommendation'+(n===1?'':'s')+' across '+sets+' market · channel · year set'+(sets===1?'':'s')+' — now Save Forecasts to persist.'; } }); };
+      top.parentNode.insertBefore(b, top.nextSibling); })();   // v27.565
     var ab=document.getElementById('trec-apply'); if(ab&&openRecs.length)ab.onclick=_trecOpenApplyAll;             // bottom button
     var abt=document.getElementById('trec-apply-top'); if(abt&&openRecs.length)abt.onclick=_trecOpenApplyAll;      // top button (Ben)
   }); }
