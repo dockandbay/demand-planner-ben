@@ -10612,6 +10612,11 @@ function renderKeyAccountsView(body){
     clients.sort(function(a,b){ return a.toLowerCase()<b.toLowerCase()?-1:1; }); clients.forEach(function(cl){ skusBy[cl].sort(); });
     return {C:C,clients:clients,skusBy:skusBy}; }
   function flash(m,bad){ var el=host.querySelector('#kaf-msg'); if(el){ el.style.color=bad?'#dc2626':'#16a34a'; el.textContent=m; clearTimeout(el._t); el._t=setTimeout(function(){el.textContent='';},1600); } }
+  // v27.579: batched writes (one request per ≤800 cells) for imports / column clears / SKU clears — the per-cell route stays for inline edits
+  function saveCells(client,cells,cb,prog){ var i=0, done=0, out={deleted:0,inserted:0};
+    (function nx(){ if(i>=cells.length){ if(cb)cb(null,out); return; } var chunk=cells.slice(i,i+800); i+=chunk.length; if(prog)prog(i,cells.length);
+      fetch('/api/supply/ka-forecast-cells',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({client:client,warehouse:KAF_CTRY,cells:chunk})}).then(function(r){return r.json();})
+        .then(function(j){ if(j&&j.error)throw new Error(j.error); out.deleted+=j.deleted||0; out.inserted+=j.inserted||0; done+=chunk.length; nx(); }).catch(function(err){ if(cb)cb(err,out); }); })(); }
   function saveCell(client,sku,month,qty){ fetch('/api/supply/ka-forecast-cell',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({client:client,sku:sku,warehouse:KAF_CTRY,month:month,quantity:qty})})
       .then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); flash('Saved ✓'); }).catch(function(){ flash('Save failed',1); }); }
   function draw(){ var m=monthList(), d=build(), q=KAF_Q.trim().toLowerCase();
@@ -10649,7 +10654,7 @@ function renderKeyAccountsView(body){
     // v27.578: per-client column clear, per-client download + upload
     host.querySelectorAll('.kaf-colx').forEach(function(b){ b.onclick=function(){ var cl=b.dataset.cl, mo=b.dataset.m, d=build(), cm=d.C[cl]||{}, sks=Object.keys(cm).filter(function(sk){ var v=cm[sk][mo]; return v!=null&&v!==''; });
       if(!sks.length){ flash('Nothing to clear in '+mo); return; } if(!confirm('Clear '+mo+' for '+sks.length+' SKU'+(sks.length===1?'':'s')+' of '+cl+'? (sets them to blank)'))return;
-      var clv=cl==='(no client)'?'':cl; sks.forEach(function(sk){ saveCell(clv,sk,mo,''); }); setTimeout(reload,400+sks.length*25); }; });
+      var clv=cl==='(no client)'?'':cl; flash('Clearing '+sks.length+'…'); saveCells(clv, sks.map(function(sk){ return {sku:sk,month:mo,quantity:''}; }), function(err){ if(err){ flash('Clear failed',1); return; } flash('Cleared '+sks.length+' ✓'); reload(); }); }; });
     host.querySelectorAll('.kaf-cdl').forEach(function(b){ b.onclick=function(){ var cl=b.dataset.cl, d=build(), fut=monthList().filter(function(x){return !x.past;}), cm=d.C[cl]||{};
       var out=[['SKU'].concat(fut.map(function(x){return x.key;}))]; Object.keys(cm).sort().forEach(function(sk){ out.push([sk].concat(fut.map(function(x){ var v=cm[sk][x.key]; return (v==null||v==='')?'':v; }))); });
       var mk=({uk_3pl:'UK',us_3pl:'US',eu_3pl:'EU'})[KAF_CTRY]; dlCsv('ka_'+mk+'_'+String(cl).replace(/[^a-z0-9]+/gi,'_')+'_forecast.csv',out); }; });
@@ -10657,7 +10662,7 @@ function renderKeyAccountsView(body){
     host.querySelectorAll('.kaf-cell').forEach(function(inp){ inp.onchange=function(){ var v=inp.value.trim(); var qty=v===''?'':parseInt(v,10); if(v!==''&&isNaN(qty)){ inp.value=''; return; }
       saveCell(inp.dataset.cl==='(no client)'?'':inp.dataset.cl, inp.dataset.sku, inp.dataset.m, v===''?'':qty); }; });
     host.querySelectorAll('.kaf-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Clear '+b.dataset.sku+' across all shown months for this client?'))return;
-      var cl=b.dataset.cl==='(no client)'?'':b.dataset.cl; monthList().forEach(function(x){ saveCell(cl,b.dataset.sku,x.key,''); }); setTimeout(reload,300); }; });
+      var cl=b.dataset.cl==='(no client)'?'':b.dataset.cl; saveCells(cl, monthList().map(function(x){ return {sku:b.dataset.sku,month:x.key,quantity:''}; }), function(err){ if(err){ flash('Clear failed',1); return; } flash('Cleared ✓'); reload(); }); }; });   // v27.579: one batched write
     host.querySelectorAll('.kaf-skuin').forEach(function(inp){ var td=inp.closest('td'), drop=td.querySelector('.kaf-drop'); var cl=inp.dataset.cl;
       function show(){ var qq=inp.value.trim().toLowerCase(); var pend=(pendSkus[cl]||[]);
         // Source from SKUM (keyed by plain SKU, carries products.status as .st). NB: SKUS is the piped "SKU|CO|CH"
@@ -10711,9 +10716,10 @@ function renderKeyAccountsView(body){
       warn2.innerHTML=unres.length?'<div style="background:var(--amber-bg);border:1px solid var(--amber-bg);border-radius:6px;padding:7px 10px;font-size:12px;color:var(--amber)"><b>⚠ '+unres.length+' SKU'+(unres.length>1?'s':'')+' didn’t resolve</b> (skipped): '+unres.map(e).join(', ')+'</div>':'';
       if(!ops.length){ res2.style.color='var(--neg)'; res2.textContent='Nothing to import from the grid'; return; }
       var nSku=Object.keys(ops.reduce(function(o,x){o[x.sku]=1;return o;},{})).length; if(!confirm('Write '+ops.length+' cells ('+nSku+' SKUs × '+_mc.length+' months) for '+(client||'(no client)')+'? Blank cells in the file clear the forecast.'))return;
-      res2.style.color='var(--muted)'; res2.textContent='Importing '+ops.length+' cells…'; var j=0;
-      (function nx2(){ if(j>=ops.length){ res2.style.color='var(--pos)'; res2.textContent='✓ Imported '+ops.length+' cells · '+nSku+' SKUs × '+_mc.length+' months'+(unres.length?' · '+unres.length+' skipped':''); reload(); return; }
-        var op=ops[j++]; if(j%10===0){ res2.textContent='Importing '+j+'/'+ops.length+'…'; } fetch('/api/supply/ka-forecast-cell',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({client:client,sku:op.sku,warehouse:KAF_CTRY,month:op.m,quantity:op.q})}).then(function(){ nx2(); }).catch(function(){ nx2(); }); })();
+      res2.style.color='var(--muted)'; res2.textContent='Importing '+ops.length+' cells…'; var _t0=Date.now();
+      saveCells(client, ops.map(function(op){ return {sku:op.sku,month:op.m,quantity:op.q}; }), function(err,out){ if(err){ res2.style.color='var(--neg)'; res2.textContent='Import failed: '+(err.message||err); return; }
+        res2.style.color='var(--pos)'; res2.textContent='✓ Imported '+ops.length+' cells · '+nSku+' SKUs × '+_mc.length+' months · '+(out.inserted||0)+' set, '+Math.max(0,ops.length-(out.inserted||0))+' cleared'+(unres.length?' · '+unres.length+' skipped':'')+' · '+((Date.now()-_t0)/1000).toFixed(1)+'s'; reload(); },
+        function(i,nn){ res2.textContent='Importing '+i+'/'+nn+' cells…'; });
       return; }
     var agg={}, unresolved=[];
     lines.forEach(function(l){ var parts=l.split(/[\t,;]+/).map(function(p){return p.trim();}).filter(function(p){return p!=='';});
@@ -10724,9 +10730,9 @@ function renderKeyAccountsView(body){
     if(!skus.length){ res.style.color='var(--neg)'; res.textContent='Nothing to import'+(unresolved.length?' — '+unresolved.length+' unresolved':''); }
     if(unresolved.length){ warn.innerHTML='<div style="background:var(--amber-bg);border:1px solid var(--amber-bg);border-radius:6px;padding:7px 10px;font-size:12px;color:var(--amber)"><b>⚠ '+unresolved.length+' SKU'+(unresolved.length>1?'s':'')+' didn’t resolve</b> (skipped): '+unresolved.map(e).join(', ')+'</div>'; } else warn.innerHTML='';
     if(!skus.length)return;
-    res.style.color='var(--muted)'; res.textContent='Importing '+skus.length+'…'; var i=0;
-    (function nx(){ if(i>=skus.length){ res.style.color='var(--pos)'; res.textContent='✓ Imported '+skus.length+' SKU'+(skus.length>1?'s':'')+' into '+month+(unresolved.length?' · '+unresolved.length+' skipped':''); reload(); return; }
-      var sk=skus[i++]; fetch('/api/supply/ka-forecast-cell',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({client:client,sku:sk,warehouse:KAF_CTRY,month:month,quantity:agg[sk]})}).then(function(){ nx(); }).catch(function(){ nx(); }); })();
+    res.style.color='var(--muted)'; res.textContent='Importing '+skus.length+'…';
+    saveCells(client, skus.map(function(sk){ return {sku:sk,month:month,quantity:agg[sk]}; }), function(err){ if(err){ res.style.color='var(--neg)'; res.textContent='Import failed: '+(err.message||err); return; }
+      res.style.color='var(--pos)'; res.textContent='✓ Imported '+skus.length+' SKU'+(skus.length>1?'s':'')+' into '+month+(unresolved.length?' · '+unresolved.length+' skipped':''); reload(); });   // v27.579: one batched write
   }
 }
 function renderKpisView(body,hashBase){

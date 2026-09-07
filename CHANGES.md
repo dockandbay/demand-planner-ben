@@ -1,3 +1,8 @@
+## v27.579 Key Accounts import: one batched write instead of one request per cell (Ben: "incredibly slow")
+- Cause: every cell was its own HTTP request + transaction (~1.6s each through the pooler); a 45 SKU × 18 month file = 810 requests ≈ 20 minutes.
+- New POST /api/supply/ka-forecast-cells {client, warehouse, cells:[{sku, month, quantity}]}: one transaction, set-based delete + multi-row insert (max 5,000 cells/request; blank/0 = clear). Client batches 800 cells per request and shows progress + elapsed time. Used by the grid import, the single-month import, the per-month ✕ and the SKU ✕. Inline cell edits keep the per-cell route.
+- Sandbox timing for the same 810-cell file: 2.5s first run, 2.0s re-run, 1.6s clear.
+
 ## v27.578 Key Accounts Forecast: per-client download / upload, clear a month per client, sticky headers (Ben)
 - Client header row: ⬇ downloads that client’s forecast as SKU × future-month CSV (YYYY-MM headers); ⬆ opens the import panel with the client preselected and the file picker; an ✕ under every future month clears that month for all of the client’s SKUs (confirm, then per-cell save).
 - Import / paste understands the grid layout: when the header row has YYYY-MM columns, every cell in the file is written (blank = cleared), with a confirmation of cells × SKUs × months; the single-month SKU,Qty format still works.

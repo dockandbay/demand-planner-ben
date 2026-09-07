@@ -6002,6 +6002,39 @@ app.post('/api/supply/ka-forecast/:id/delete', async (req, res) => {
 // Month-cell upsert for the pivoted Key Accounts grid: (client, sku, warehouse, month) is authoritative.
 // Deletes any existing forecast rows for that client/sku/warehouse within the month, then inserts one row at
 // month-01 with the given quantity (qty 0 / blank just clears the month). Keeps the grid's one-cell-per-month model.
+// v27.579: bulk twin of ka-forecast-cell — one transaction for a whole import / column clear (the per-cell route cost ~1.6s a cell
+// through the pooler, so a 45 SKU × 18 month file took ~20 minutes). Body: {client, warehouse, cells:[{sku, month:'YYYY-MM', quantity}]};
+// quantity '' / null / 0 = clear that month. Same semantics as the per-cell route: delete the month's rows, insert the new qty.
+app.post('/api/supply/ka-forecast-cells', async (req, res) => {
+  const b = req.body || {};
+  const client = (b.client || '').trim(), warehouse = (b.warehouse || '').trim();
+  const cells = Array.isArray(b.cells) ? b.cells : [];
+  if (!warehouse) return res.status(400).json({ error: 'warehouse required' });
+  if (!cells.length) return res.json({ ok: true, deleted: 0, inserted: 0 });
+  if (cells.length > 5000) return res.status(413).json({ error: 'max 5000 cells per request' });
+  const skus = [], firsts = [], iSku = [], iFirst = [], iQty = [];
+  for (const c of cells) {
+    const sku = String(c.sku || '').trim(), month = String(c.month || '').trim();
+    if (!sku || !/^\d{4}-\d{2}$/.test(month)) return res.status(400).json({ error: 'each cell needs sku + month YYYY-MM' });
+    const first = month + '-01'; skus.push(sku); firsts.push(first);
+    const qty = (c.quantity === '' || c.quantity == null) ? null : parseInt(c.quantity, 10);
+    if (qty != null && !isNaN(qty) && qty !== 0) { iSku.push(sku); iFirst.push(first); iQty.push(qty); }
+  }
+  const client2 = await pool.connect();
+  try {
+    await client2.query('BEGIN');
+    const d = await client2.query(`DELETE FROM planner.key_account_forecasts k
+      USING unnest($1::text[], $2::date[]) AS u(sku, first)
+      WHERE coalesce(k.client,'')=$3 AND k.warehouse=$4 AND k.sku=u.sku
+        AND k.ship_date >= u.first AND k.ship_date < (u.first + interval '1 month')`, [skus, firsts, client, warehouse]);
+    let ins = 0;
+    if (iSku.length) { const r = await client2.query(`INSERT INTO planner.key_account_forecasts (client, sku, warehouse, ship_date, quantity, source, loaded_at)
+      SELECT $1, u.sku, $2, u.first, u.qty, 'manual', now() FROM unnest($3::text[], $4::date[], $5::int[]) AS u(sku, first, qty)`, [client, warehouse, iSku, iFirst, iQty]); ins = r.rowCount; }
+    await client2.query('COMMIT');
+    res.json({ ok: true, deleted: d.rowCount, inserted: ins, cells: cells.length });
+  } catch (e) { try { await client2.query('ROLLBACK'); } catch (_) {} log500(e); res.status(500).json({ error: e.message }); }
+  finally { client2.release(); }
+});
 app.post('/api/supply/ka-forecast-cell', async (req, res) => {
   const b = req.body || {};
   const client = (b.client || '').trim(), sku = (b.sku || '').trim(), warehouse = (b.warehouse || '').trim();
