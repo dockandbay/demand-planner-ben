@@ -10630,7 +10630,7 @@ function renderKeyAccountsView(body){
       +'#kafc .kaf-cell{width:58px;text-align:right;padding:3px 5px;border:1px solid transparent;border-radius:4px;font-size:12px;font-family:inherit;background:transparent}#kafc .kaf-cell:focus{border-color:#93c5fd;background:#fff;outline:none}#kafc td.past .kaf-cell{color:var(--amber)}'
       +'#kafc .kaf-skunm{font-size:10px;color:var(--faint);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}#kafc .kaf-del{border:none;background:transparent;color:var(--neg);cursor:pointer;font-size:12px}'
       +'.kaf-pill{border:1px solid var(--line);background:#fff;color:var(--ink-soft);font-size:12px;padding:4px 14px;border-radius:14px;cursor:pointer;font-weight:600}.kaf-pill.on{background:var(--nav);color:#fff;border-color:var(--nav)}'
-      +'#kafc .kaf-addsku{position:relative}#kafc .kaf-skuin{width:180px;padding:4px 6px;border:1px solid var(--line);border-radius:4px;font-size:11px}#kafc .kaf-drop{position:fixed;z-index:100000;width:300px;max-height:220px;overflow-y:auto;background:#fff;border:1px solid var(--line);border-radius:6px;box-shadow:0 8px 22px rgba(15,23,42,.18);display:none}#kafc .kaf-drop.open{display:block}#kafc .kaf-opt{padding:5px 8px;font-size:11px;cursor:pointer}#kafc .kaf-opt:hover{background:var(--blue-soft)}#kafc th.lbl{position:sticky;left:0;z-index:3}#kafc .kaf-cdl,#kafc .kaf-cup{border:1px solid var(--line);background:#fff;border-radius:4px;font-size:10px;padding:0 5px;cursor:pointer;line-height:1.6;color:var(--ink-soft)}#kafc .kaf-cdl:hover,#kafc .kaf-cup:hover{border-color:var(--blue);color:var(--blue)}#kafc .kaf-colx{border:none;background:transparent;color:var(--faint);cursor:pointer;font-size:10px;padding:0 3px;line-height:1}#kafc .kaf-colx:hover{color:var(--neg)}</style>';
+      +'#kafc .kaf-addsku{position:relative}#kafc .kaf-skuin{width:180px;padding:4px 6px;border:1px solid var(--line);border-radius:4px;font-size:11px}#kafc .kaf-drop{position:fixed;z-index:100000;width:300px;max-height:220px;overflow-y:auto;background:#fff;border:1px solid var(--line);border-radius:6px;box-shadow:0 8px 22px rgba(15,23,42,.18);display:none}#kafc .kaf-drop.open{display:block}#kafc .kaf-opt{padding:5px 8px;font-size:11px;cursor:pointer}#kafc .kaf-opt:hover{background:var(--blue-soft)}#kafc th.lbl{position:sticky;left:0;z-index:3}#kafc .kaf-cdl,#kafc .kaf-cup{border:1px solid var(--line);background:#fff;border-radius:4px;font-size:10px;padding:0 5px;cursor:pointer;line-height:1.6;color:var(--ink-soft)}#kafc .kaf-cdl:hover,#kafc .kaf-cup:hover{border-color:var(--blue);color:var(--blue)}#kafc .kaf-colx{border:none;background:transparent;color:var(--faint);cursor:pointer;font-size:10px;padding:0 3px;line-height:1}#kafc .kaf-colx:hover{color:var(--neg)}#kafc .kaf-cell.kaf-flash{animation:kafFlash 2.6s ease-out}@keyframes kafFlash{0%{background:#86efac}60%{background:#dcfce7}100%{background:transparent}}</style>';
     var head='<tr><th class="lbl">Client / SKU</th>'+m.map(function(x){return '<th class="'+(x.cur?'mcur':x.past?'mpast':'')+'">'+x.label+'</th>';}).join('')+'<th></th></tr>';
     var bodyH='';
     d.clients.forEach(function(cl){
@@ -10656,7 +10656,7 @@ function renderKeyAccountsView(body){
     // v27.578: per-client column clear, per-client download + upload
     host.querySelectorAll('.kaf-colx').forEach(function(b){ b.onclick=function(){ var cl=b.dataset.cl, mo=b.dataset.m, d=build(), cm=d.C[cl]||{}, sks=Object.keys(cm).filter(function(sk){ var v=cm[sk][mo]; return v!=null&&v!==''; });
       if(!sks.length){ flash('Nothing to clear in '+mo); return; } if(!confirm('Clear '+mo+' for '+sks.length+' SKU'+(sks.length===1?'':'s')+' of '+cl+'? (sets them to blank)'))return;
-      var clv=cl==='(no client)'?'':cl; flash('Clearing '+sks.length+'…'); saveCells(clv, sks.map(function(sk){ return {sku:sk,month:mo,quantity:''}; }), function(err){ if(err){ flash('Clear failed',1); return; } flash('Cleared '+sks.length+' ✓'); reload(); }); }; });
+      var clv=cl==='(no client)'?'':cl; flash('Clearing '+sks.length+'…'); saveCells(clv, sks.map(function(sk){ return {sku:sk,month:mo,quantity:''}; }), function(err){ if(err){ flash('Clear failed',1); return; } flashKeys(clv, sks.map(function(sk){ return {sku:sk,month:mo}; })); flash('Cleared '+sks.length+' ✓'); reload(); }); }; });
     host.querySelectorAll('.kaf-cdl').forEach(function(b){ b.onclick=function(){ var cl=b.dataset.cl, d=build(), fut=monthList().filter(function(x){return !x.past;}), cm=d.C[cl]||{};
       var out=[['SKU'].concat(fut.map(function(x){return x.key;}))]; Object.keys(cm).sort().forEach(function(sk){ out.push([sk].concat(fut.map(function(x){ var v=cm[sk][x.key]; return (v==null||v==='')?'':v; }))); });
       var mk=({uk_3pl:'UK',us_3pl:'US',eu_3pl:'EU'})[KAF_CTRY]; dlCsv('ka_'+mk+'_'+String(cl).replace(/[^a-z0-9]+/gi,'_')+'_forecast.csv',out); }; });
@@ -10664,7 +10664,7 @@ function renderKeyAccountsView(body){
     host.querySelectorAll('.kaf-cell').forEach(function(inp){ inp.onchange=function(){ var v=inp.value.trim(); var qty=v===''?'':parseInt(v,10); if(v!==''&&isNaN(qty)){ inp.value=''; return; }
       saveCell(inp.dataset.cl==='(no client)'?'':inp.dataset.cl, inp.dataset.sku, inp.dataset.m, v===''?'':qty); }; });
     host.querySelectorAll('.kaf-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Clear '+b.dataset.sku+' across all shown months for this client?'))return;
-      var cl=b.dataset.cl==='(no client)'?'':b.dataset.cl; saveCells(cl, monthList().map(function(x){ return {sku:b.dataset.sku,month:x.key,quantity:''}; }), function(err){ if(err){ flash('Clear failed',1); return; } flash('Cleared ✓'); reload(); }); }; });   // v27.579: one batched write
+      var cl=b.dataset.cl==='(no client)'?'':b.dataset.cl; saveCells(cl, monthList().map(function(x){ return {sku:b.dataset.sku,month:x.key,quantity:''}; }), function(err){ if(err){ flash('Clear failed',1); return; } flashKeys(cl, monthList().map(function(x){ return {sku:b.dataset.sku,month:x.key}; })); flash('Cleared ✓'); reload(); }); }; });   // v27.579: one batched write
     host.querySelectorAll('.kaf-skuin').forEach(function(inp){ var td=inp.closest('td'), drop=td.querySelector('.kaf-drop'); var cl=inp.dataset.cl;
       function show(){ var qq=inp.value.trim().toLowerCase(); var pend=(pendSkus[cl]||[]);
         // Source from SKUM (keyed by plain SKU, carries products.status as .st). NB: SKUS is the piped "SKU|CO|CH"
@@ -10682,7 +10682,11 @@ function renderKeyAccountsView(body){
       inp.oninput=show; inp.onfocus=show; inp.onblur=function(){ setTimeout(function(){drop.classList.remove('open');},200); }; });
     var addCli=host.querySelector('#kaf-addcli'); if(addCli)addCli.onclick=function(){ var i=host.querySelector('#kaf-newcli'); var v=(i.value||'').trim(); if(!v)return; if(pendClients.indexOf(v)<0)pendClients.push(v); i.value=''; draw(); };
   }
-  function reload(){ fetch('/api/supply/ka-forecasts').then(function(r){return r.json();}).then(function(d){ rows=Array.isArray(d)?d:[]; draw(); }); }
+  // v27.581: cells written by the last import / clear flash light green after the redraw (Ben)
+  var _flash=null; function flashKeys(client,list){ _flash=_flash||{}; var cl=client||'(no client)'; list.forEach(function(x){ _flash[cl+'|'+x.sku+'|'+x.month]=1; }); }
+  function applyFlash(){ if(!_flash)return; var ks=_flash; _flash=null; var first=null; host.querySelectorAll('.kaf-cell').forEach(function(i){ if(ks[i.dataset.cl+'|'+i.dataset.sku+'|'+i.dataset.m]){ i.classList.add('kaf-flash'); if(!first)first=i; } });
+    if(first){ try{ first.scrollIntoView({block:'nearest',inline:'nearest'}); }catch(e){} } setTimeout(function(){ host.querySelectorAll('.kaf-cell.kaf-flash').forEach(function(i){ i.classList.remove('kaf-flash'); }); },2700); }
+  function reload(){ fetch('/api/supply/ka-forecasts').then(function(r){return r.json();}).then(function(d){ rows=Array.isArray(d)?d:[]; draw(); applyFlash(); }); }
   // ── Import / paste panel ──
   function toggleImport(){ var box=body.querySelector('#kaf-imp'); if(box.innerHTML){ box.innerHTML=''; return; }
     var mo=monthList(); var moOpts=mo.map(function(x){return '<option value="'+x.key+'"'+(x.cur?' selected':'')+'>'+x.label+'</option>';}).join('');
@@ -10719,7 +10723,7 @@ function renderKeyAccountsView(body){
       if(!ops.length){ res2.style.color='var(--neg)'; res2.textContent='Nothing to import from the grid'; return; }
       var nSku=Object.keys(ops.reduce(function(o,x){o[x.sku]=1;return o;},{})).length; if(!confirm('Write '+ops.length+' cells ('+nSku+' SKUs × '+_mc.length+' months) for '+(client||'(no client)')+'? Blank cells in the file clear the forecast.'))return;
       res2.style.color='var(--muted)'; res2.textContent='Importing '+ops.length+' cells…'; var _t0=Date.now();
-      saveCells(client, ops.map(function(op){ return {sku:op.sku,month:op.m,quantity:op.q}; }), function(err,out){ if(err){ res2.style.color='var(--neg)'; res2.textContent='Import failed: '+(err.message||err); return; }
+      saveCells(client, ops.map(function(op){ return {sku:op.sku,month:op.m,quantity:op.q}; }), function(err,out){ if(err){ res2.style.color='var(--neg)'; res2.textContent='Import failed: '+(err.message||err); return; } flashKeys(client, ops.map(function(op){ return {sku:op.sku,month:op.m}; }));
         res2.style.color='var(--pos)'; res2.textContent='✓ Imported '+ops.length+' cells · '+nSku+' SKUs × '+_mc.length+' months · '+(out.inserted||0)+' set, '+Math.max(0,ops.length-(out.inserted||0))+' cleared'+(unres.length?' · '+unres.length+' skipped':'')+' · '+((Date.now()-_t0)/1000).toFixed(1)+'s'; reload(); },
         function(i,nn){ res2.textContent='Importing '+i+'/'+nn+' cells…'; });
       return; }
@@ -10733,7 +10737,7 @@ function renderKeyAccountsView(body){
     if(unresolved.length){ warn.innerHTML='<div style="background:var(--amber-bg);border:1px solid var(--amber-bg);border-radius:6px;padding:7px 10px;font-size:12px;color:var(--amber)"><b>⚠ '+unresolved.length+' SKU'+(unresolved.length>1?'s':'')+' didn’t resolve</b> (skipped): '+unresolved.map(e).join(', ')+'</div>'; } else warn.innerHTML='';
     if(!skus.length)return;
     res.style.color='var(--muted)'; res.textContent='Importing '+skus.length+'…';
-    saveCells(client, skus.map(function(sk){ return {sku:sk,month:month,quantity:agg[sk]}; }), function(err){ if(err){ res.style.color='var(--neg)'; res.textContent='Import failed: '+(err.message||err); return; }
+    saveCells(client, skus.map(function(sk){ return {sku:sk,month:month,quantity:agg[sk]}; }), function(err){ if(err){ res.style.color='var(--neg)'; res.textContent='Import failed: '+(err.message||err); return; } flashKeys(client, skus.map(function(sk){ return {sku:sk,month:month}; }));
       res.style.color='var(--pos)'; res.textContent='✓ Imported '+skus.length+' SKU'+(skus.length>1?'s':'')+' into '+month+(unresolved.length?' · '+unresolved.length+' skipped':''); reload(); });   // v27.579: one batched write
   }
 }

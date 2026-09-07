@@ -1,3 +1,6 @@
+## v27.581 Key Accounts: imported / cleared cells flash light green (Ben)
+- After a grid or single-month import, a month ✕ or a SKU ✕, the grid redraws and every cell that was written flashes green for ~2.5s (first one scrolled into view).
+
 ## v27.580 Summary & targets: Units tick shows units BESIDE the money (Ben)
 - Changes the v27.576 behaviour: in Revenue and Rev + targets the "Units" tick box (off by default, remembered) now adds a small unit figure next to each money figure — last year, forecast and, in Rev + targets, the target (LY units × the target growth) — for every category, sub-category, SKU row and the ALL SUBCATEGORIES total. Money stays; nothing is replaced.
 
