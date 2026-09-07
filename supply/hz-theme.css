@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════════════════════════════════════════
    HORIZON theme — design tokens + app shell. Single source of truth for colour, type, radius and shadow.
    Served at /hz-theme.css (server.mjs) and linked in the <head> of the app (artifact) and the supplier portal.
-   Tokens come from Ben's Claude Design project ("Horizon Supply/Purchase Orders" screens, 2026-09-05).
+   Tokens come from Diviyaj's Claude Design canvas ("Demand Planner Premium Polish"), the design owner.
    Rules below use an #app prefix so they beat the artifact's own single-id rules regardless of load order.
    ═══════════════════════════════════════════════════════════════════════════════════════════════════════ */
 
