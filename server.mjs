@@ -6650,7 +6650,7 @@ app.get('/api/product/spec-file/:id', async (req, res) => {
 app.get('/api/product/notes/:ref', async (req, res) => {
   try { const r = await pool.query(`SELECT n.id, n.author_kind, coalesce(n.author_email,'') author_email, n.body,
     to_char(n.created_at,'DD-Mon-YY HH24:MI') created_at, n.read_at IS NOT NULL read,
-    n.attachment_id, coalesce(a.filename,'') attachment_name, coalesce(n.tags,'[]'::jsonb) tags, coalesce(n.pantone,'[]'::jsonb) pantone
+    n.attachment_id, coalesce(a.filename,'') attachment_name, coalesce(a.mime,'') attachment_mime, coalesce(n.tags,'[]'::jsonb) tags, coalesce(n.pantone,'[]'::jsonb) pantone
     FROM planner.supplier_notes n LEFT JOIN planner.portal_attachments a ON a.id=n.attachment_id
     WHERE n.po=$1 ORDER BY n.created_at`, [req.params.ref]);
     res.json(r.rows); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -6669,8 +6669,9 @@ app.post('/api/product/note', async (req, res) => {
   // tags = array of product_timeline_tags ids; pantone = array of Pantone reference cards (optional)
   const tags = Array.isArray(b.tags) ? b.tags.map(x => Number(x)).filter(x => Number.isFinite(x)) : [];
   const pantone = cleanPantone(b.pantone);
-  try { const r = await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, tags, pantone) VALUES ($1,$2,'internal',$3,$4::jsonb,$5::jsonb) RETURNING id`,
-    [ref, internalAuthor(req, b.author_email), String(b.body).trim(), JSON.stringify(tags), JSON.stringify(pantone)]);
+  const att = (b.attachment_id != null && String(b.attachment_id).trim() !== '') ? Number(b.attachment_id) : null;   // v27.558: optional file on the message (portal_attachments id, uploaded via /api/product/doc)
+  try { const r = await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, tags, pantone, attachment_id) VALUES ($1,$2,'internal',$3,$4::jsonb,$5::jsonb,$6) RETURNING id`,
+    [ref, internalAuthor(req, b.author_email), String(b.body).trim(), JSON.stringify(tags), JSON.stringify(pantone), att]);
     res.json({ ok: true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // v27.550: sample FEEDBACK notes are one-per-(sample × component) on the timeline. Re-saving feedback rewrites that note

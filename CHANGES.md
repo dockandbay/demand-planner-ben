@@ -1,3 +1,6 @@
+## v27.558 PRODUCT Timeline: photos / documents on messages (Ben)
+- Compose box accepts files by drag-and-drop or 📎 (images, PDF, Office, AI, ZIP; 10MB each). On Post the files upload as product documents (so they also appear under PRODUCT ▸ Documents) and the message carries the first as its attachment; extra files post as their own "📎 name" entries. Image attachments render as a thumbnail on the message (click to zoom); others as a download link. /api/product/note accepts attachment_id; notes return attachment_mime. server.mjs + supply/inject.html.
+
 ## v27.557 Sample batch review: approved-with-comments box, photography tick, dev-only shipment picker with dates, silent Mark received, drawer open (Ben)
 - **Approved with comments** now has its own comment box under the decision (batch page and Samples tab); stored in a new column (migration 266, additive) and printed on the sample card under COMMENTS as "(approved with comments)".
 - **📸 Approved for photography** tick + optional notes under each sample's sign-off (batch page), same endpoint as the Samples tab.
