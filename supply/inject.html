@@ -13809,12 +13809,13 @@
       // Sample REQUESTS (SR-nn) linked to this product — admin-created, may include this product's SKUs / dev samples.
       var _srBox=body.querySelector('#prod-sr-list'); if(_srBox){ fetch('/api/product/'+encodeURIComponent(ref)+'/sample-requests').then(function(r){return r.json();}).then(function(sr){ sr=Array.isArray(sr)?sr:[];
         if(!sr.length){ _srBox.innerHTML='<div class="mut tiny" style="padding:2px 0">No sample requests linked to this product yet.</div>'; return; }
+        function _rcvHtml(x){ return x.received   // v27.528: shared so the cell can be repainted in place (silent) after Mark received / un-mark
+              ? '<span style="font-size:11px;color:var(--pos);font-weight:600">✓ '+(x.received_at?fd(x.received_at):'received')+'</span> <a class="prod-sr-unrcv" data-id="'+x.id+'" style="color:var(--faint);cursor:pointer;font-size:10px" title="Un-mark received">✕</a>'
+              : '<button class="prod-sr-rcv" data-id="'+x.id+'" style="font-size:11px;padding:2px 9px;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer;font-weight:600">Mark received</button>'; }
         _srBox.innerHTML='<div style="font-weight:700;font-size:13px;margin:0 0 6px">Sample requests <span class="mut" style="font-weight:400;font-size:11px">— admin-created, including this product</span></div>'
           +'<table style="border-collapse:collapse;font-size:12px;max-width:720px;width:100%"><thead><tr>'+['Ref','Status','Recipient','Units','Tracking','Received'].map(function(h){return '<th style="text-align:left;padding:2px 8px 4px 0;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);border-bottom:1px solid var(--line2)">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
           +sr.map(function(x){ var stC=/ship/i.test(x.status)?['var(--blue-soft)','var(--blue-ink)']:(x.accepted?['var(--amber-bg)','var(--amber)']:['var(--line2)','var(--muted)']);
-            var _rcv = x.received
-              ? '<span style="font-size:11px;color:var(--pos);font-weight:600">✓ '+(x.received_at?fd(x.received_at):'received')+'</span> <a class="prod-sr-unrcv" data-id="'+x.id+'" style="color:var(--faint);cursor:pointer;font-size:10px" title="Un-mark received">✕</a>'
-              : '<button class="prod-sr-rcv" data-id="'+x.id+'" style="font-size:11px;padding:2px 9px;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer;font-weight:600">Mark received</button>';
+            var _rcv = _rcvHtml(x);
             return '<tr><td style="padding:3px 8px 3px 0"><a class="prod-sr-open" data-ref="'+esc(x.ref)+'" style="color:var(--blue);text-decoration:underline;cursor:pointer;font-weight:600;font-family:ui-monospace,Menlo,monospace">'+esc(x.ref)+'</a></td>'
               +'<td style="padding:3px 8px 3px 0"><span style="font-size:11px;padding:1px 8px;border-radius:10px;background:'+stC[0]+';color:'+stC[1]+';font-weight:700">'+esc(x.status||'—')+'</span></td>'
               +'<td style="padding:3px 8px 3px 0">'+esc(x.recipient||x.company||'—')+'</td>'
@@ -13823,9 +13824,13 @@
               +'<td style="padding:3px 8px 3px 0">'+_rcv+'</td></tr>'; }).join('')+'</tbody></table>'
           +'<div class="mut tiny" style="margin-top:5px">Marking a sample request received moves every linked product to <b>Sample in review</b> (forward-only).</div>';
         _srBox.querySelectorAll('.prod-sr-open').forEach(function(a){ a.onclick=function(){ if(typeof gotoSample==='function')gotoSample(a.dataset.ref); }; });
-        function _srReceived(id, receive){ shipPost('/api/supply/sample/'+id+'/received',{received:receive},function(){ _prodJsonBust(ref); prodItemInvalidate(ref); renderProdSamplesTab(body,ref); }); }
-        _srBox.querySelectorAll('.prod-sr-rcv').forEach(function(b){ b.onclick=function(){ _srReceived(b.dataset.id,true); }; });
-        _srBox.querySelectorAll('.prod-sr-unrcv').forEach(function(a){ a.onclick=function(){ _srReceived(a.dataset.id,false); }; });
+        // v27.528 (Ben): Mark received updates SILENTLY — repaint just that cell, no tab re-render / Loading flash. Caches still busted so other views pick it up.
+        function _wireRcv(scope){ scope.querySelectorAll('.prod-sr-rcv').forEach(function(b){ b.onclick=function(){ b.disabled=true; b.textContent='…'; _srReceived(b.dataset.id,true,b); }; });
+          scope.querySelectorAll('.prod-sr-unrcv').forEach(function(a){ a.onclick=function(){ _srReceived(a.dataset.id,false,a); }; }); }
+        function _srReceived(id, receive, el){ shipPost('/api/supply/sample/'+id+'/received',{received:receive},function(){ _prodJsonBust(ref); prodItemInvalidate(ref);
+          var x=sr.filter(function(r){return String(r.id)===String(id);})[0]||{id:id}; x.received=receive; x.received_at=receive?new Date().toISOString().slice(0,10):null;
+          var cell=el&&el.closest?el.closest('td'):null; if(cell){ cell.innerHTML=_rcvHtml(x); _wireRcv(cell); } }); }
+        _wireRcv(_srBox);
       }).catch(function(){ _srBox.innerHTML='<div class="mut tiny" style="color:var(--neg)">Could not load linked sample requests.</div>'; }); }
     }).catch(function(e){ body.innerHTML='<div style="color:var(--neg)">Failed: '+esc(e.message||e)+'</div>'; }); }
   function renderProdMaster(body,d,mode){ mode=mode||'master'; var it=d.item; ensureSuppliers(function(){ loadProdCfg(function(cfg){

@@ -598,3 +598,10 @@ body header.pv-top .pv-lang button:hover{color:#fff}
   #app #supply-root table.po-cards[data-stack] tbody tr.grp-row[data-full] td{display:block;background:transparent!important;padding:0 2px 4px!important;border:0!important;border-bottom:1px solid var(--line)!important}
   #app #supply-root table.po-cards[data-stack] tbody tr.exp-row[data-full]{border:1px solid var(--faint);border-top:0;border-radius:0 0 10px 10px;margin:-9px 0 10px;padding:10px 8px 8px;background:#fff}
 }
+
+/* ═══ v27.528: PRODUCT plan grid — header row sticks while scrolling DOWN (Ben: only Ref looked sticky). The .tw is the
+   scroll container (it already scrolls sideways), so it needs a height for top:0 to bite; every th already has sticky top. */
+#app #product-root .pg-desktop .tw{max-height:calc(100vh - 210px);overflow:auto}
+#app #product-root table.pg-tbl thead th{position:sticky;top:0;z-index:4;background:var(--card)}
+#app #product-root table.pg-tbl thead th:nth-child(1),#app #product-root table.pg-tbl thead th:nth-child(2){z-index:5}
+#app #product-root table.pg-tbl tbody td:nth-child(1),#app #product-root table.pg-tbl tbody td:nth-child(2){z-index:2}

@@ -1,3 +1,7 @@
+## v27.528 PRODUCT: plan grid header sticks on scroll + silent Mark received
+- **Plan grid (#/product/plan):** the whole header row now stays put while scrolling down (the table wrapper gets a viewport-bound height so its sticky headers can bite; before, only the frozen Ref / swatch columns looked sticky because they were pinned sideways).
+- **Samples tab:** Mark received / un-mark repaints just that cell (no Loading flash, no tab re-render); caches still refreshed so other views agree. supply/inject.html + supply/hz-theme.css.
+
 ## v27.527 DEMAND plan: FBA run-off pool counts the country's 3PL stock (Ben)
 - A discontinued SKU's FBA row used only FBA on-hand + inbound as its run-off pool, so it locked as "disc" while the 3PL still held units (e.g. TOWLB-COLLAB-LG-UNO UK FBA: 16 in FBA, 1,474 in the 3PL). FBA rows now add the country's 3PL on-hand + inbound to the pool, since transfers replenish FBA. DTC / other channels unchanged (3PL pool). Applies only when the SKU has a discontinue date.
 - **Buy plan verified identical** before and after (snapshot diff = 0 across UK/US/EU/AU/CA); discontinued SKUs buy 0 via the EOL cap. FBA transfer suggestions follow the restored FBA forecast. artifact_v16.7.html only.
