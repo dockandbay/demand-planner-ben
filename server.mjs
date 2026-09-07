@@ -6681,14 +6681,15 @@ app.post('/api/product/note/upsert-feedback', async (req, res) => {
   if (!ref || !prefix || !String(b.body || '').trim()) return res.status(400).json({ error: 'ref, prefix and body required' });
   const tags = Array.isArray(b.tags) ? b.tags.map(x => Number(x)).filter(x => Number.isFinite(x)) : [];
   const pantone = cleanPantone(b.pantone);
+  const att = (b.attachment_id != null && String(b.attachment_id).trim() !== '') ? Number(b.attachment_id) : null;   // v27.556: optional file on the note (portal_attachments id)
   try {
     const like = prefix.replace(/[\\%_]/g, m => '\\' + m) + '%';
-    const up = await pool.query(`UPDATE planner.supplier_notes SET body=$3, tags=$4::jsonb, pantone=$5::jsonb, author_email=$6
+    const up = await pool.query(`UPDATE planner.supplier_notes SET body=$3, tags=$4::jsonb, pantone=$5::jsonb, author_email=$6, attachment_id=coalesce($7::bigint, attachment_id)
       WHERE id=(SELECT id FROM planner.supplier_notes WHERE po=$1 AND author_kind='internal' AND body LIKE $2 ORDER BY created_at DESC LIMIT 1) RETURNING id, to_char(now(),'DD-Mon-YY HH24:MI') at`,
-      [ref, like, String(b.body).trim(), JSON.stringify(tags), JSON.stringify(pantone), internalAuthor(req, b.author_email)]);
+      [ref, like, String(b.body).trim(), JSON.stringify(tags), JSON.stringify(pantone), internalAuthor(req, b.author_email), att]);
     if (up.rows.length) return res.json({ ok: true, id: up.rows[0].id, updated: true, at: up.rows[0].at });
-    const r = await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, tags, pantone) VALUES ($1,$2,'internal',$3,$4::jsonb,$5::jsonb) RETURNING id, to_char(created_at,'DD-Mon-YY HH24:MI') at`,
-      [ref, internalAuthor(req, b.author_email), String(b.body).trim(), JSON.stringify(tags), JSON.stringify(pantone)]);
+    const r = await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, tags, pantone, attachment_id) VALUES ($1,$2,'internal',$3,$4::jsonb,$5::jsonb,$6) RETURNING id, to_char(created_at,'DD-Mon-YY HH24:MI') at`,
+      [ref, internalAuthor(req, b.author_email), String(b.body).trim(), JSON.stringify(tags), JSON.stringify(pantone), att]);
     res.json({ ok: true, id: r.rows[0].id, updated: false, at: r.rows[0].at });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });

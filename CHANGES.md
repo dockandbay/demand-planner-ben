@@ -1,3 +1,9 @@
+## v27.556 Sample batch review: picker panel, hint text, column widths, files on the feedback note (Ben)
+- The "/" phrase and "/p" Pantone menu now draws as a white panel with border and shadow wherever it floats (was transparent on the batch page).
+- Under every feedback box: "Type / for a reusable phrase · /p for a Pantone colour · drop photos / documents here or 📎" (batch page and Samples tab).
+- Batch table: Feedback column widened (min 420px, ~46%), Component column narrowed and wrapping.
+- **Files into the feedback note:** drop files on a feedback box or use its 📎. Each file is stored against the sample (shows on the sample card strip and in the portal) and the component's timeline note is written / updated with the file attached (download link on the message). Upsert endpoint accepts attachment_id. server.mjs + supply/inject.html.
+
 ## v27.555 Sample batch review: compact searchable shipment picker (Ben)
 - The long dropdown is replaced by a 340px search box: type any part of the SR ref, supplier, recipient, status, carrier or tracking number; the list shows ref · supplier → recipient with status / carrier / tracking beneath; ↑↓ Enter Esc work; the chosen shipment is shown in the box and remembered. supply/inject.html only.
 
