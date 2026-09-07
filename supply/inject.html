@@ -466,7 +466,9 @@
 /* Mobile: render pickers as a bottom sheet (positioned dropdowns clip / glitch behind the grid on iOS). */
 .shpop-bd{position:fixed;inset:0;background:rgba(15,23,42,.35);z-index:100000}
 .shpop.shpop-sheet{position:fixed !important;left:0 !important;right:0 !important;bottom:0 !important;top:auto !important;width:100% !important;max-width:100% !important;max-height:80vh;max-height:80dvh;border-radius:16px 16px 0 0;box-shadow:0 -8px 28px rgba(0,0,0,.28);z-index:100001 !important;padding-bottom:env(safe-area-inset-bottom)}
-.shpop.shpop-sheet .shpop-h{position:sticky;top:0;background:#fff;font-size:14px;padding:13px 14px;z-index:1}
+.shpop.shpop-sheet .shpop-h{position:sticky;top:0;background:#fff;font-size:14px;padding:13px 52px 13px 14px;z-index:1}
+.shpop-x{display:none}
+.shpop.shpop-sheet .shpop-x{display:flex;align-items:center;justify-content:center;position:sticky;top:8px;float:right;margin:8px 10px 0 0;width:36px;height:36px;border-radius:50%;border:1px solid var(--line);background:#fff;color:var(--ink);font-size:16px;line-height:1;cursor:pointer;z-index:3;box-shadow:0 1px 3px rgba(15,23,42,.12)}   /* v27.536 phone sheet close */
 .shpop.shpop-sheet input.shpop-q{font-size:16px;padding:9px 10px;margin:8px}
 .shpop.shpop-sheet .shpop-opt{padding:12px 14px;font-size:15px}
 .shpop.shpop-sheet #shpop-list{padding-bottom:8px}
@@ -1764,6 +1766,10 @@
       .catch(function(e){ t.fail('✗ '+label+': '+(e.message||e)); }); }
   // append a popover near its anchor, flipping it ABOVE the anchor when it would overflow the bottom of the
   // viewport (so a row near the bottom of the screen still gets a usable, fully-visible popup).
+  // v27.536 (Ben): every phone bottom-sheet picker (assign shipment / deposit / status / country / branch …) gets an ✕ in the top
+  // right. Body observer = covers all 14 shpop creators (3 do not go through placePop) and any future one.
+  function shPopAddX(p){ if(!p||p.querySelector('.shpop-x'))return; var x=document.createElement('button'); x.type='button'; x.className='shpop-x'; x.setAttribute('aria-label','Close'); x.title='Close'; x.textContent='✕'; x.onclick=function(e){ e.preventDefault(); e.stopPropagation(); closeShPop(); }; p.insertBefore(x,p.firstChild); }
+  try{ if(window.MutationObserver){ var _shpX=new MutationObserver(function(){ var p=document.getElementById('shpop'); if(p&&isPhone())shPopAddX(p); }); _shpX.observe(document.body,{childList:true}); } }catch(e){}
   function placePop(pop, rc){
     // Phone: a positioned dropdown clips / glitches behind the grid on iOS momentum scroll. Render a
     // bottom sheet with a tap-to-close backdrop instead — full width, tall, always fully on-screen.

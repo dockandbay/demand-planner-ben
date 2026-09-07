@@ -1931,7 +1931,7 @@
               function srSub(x){ return [x.recipient,x.carrier,x.tracking].filter(Boolean).join(' · '); }
               // v27.531 add-form shipment picker: same searchable menu as saved samples. Order: Assign later (default) · + New shipment · shipments · Not shipped.
               function ps2ShipMenu(q){ q=(q||'').toLowerCase().trim();
-                var html='<div class="pp-ship-opt" data-val="" style="padding:7px 9px;cursor:pointer;font-size:12px;color:var(--muted);border-bottom:1px solid var(--hover)">— Assign later —</div>'
+                var html=ppMenuX()+'<div class="pp-ship-opt" data-val="" style="padding:7px 9px;cursor:pointer;font-size:12px;color:var(--muted);border-bottom:1px solid var(--hover)">— Assign later —</div>'
                   +'<div class="pp-ship-opt" data-val="__new__" style="padding:7px 9px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--line);color:var(--pos);font-weight:700">+ New shipment (create now)</div>';
                 html+=SRS.filter(function(sr){ return !q || (sr.ref+' '+sr.recipient+' '+sr.carrier+' '+sr.tracking).toLowerCase().indexOf(q)>=0; }).map(function(sr){ return '<div class="pp-ship-opt" data-val="'+sr.id+'" style="padding:6px 9px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--hover)"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(sr.ref)+'</b>'+(srSub(sr)?'<div class="mut tiny" style="margin-top:1px">'+esc(srSub(sr))+'</div>':'')+'</div>'; }).join('');
                 html+='<div class="pp-ship-opt" data-val="not_shipped" style="padding:6px 9px;cursor:pointer;font-size:12px;color:var(--amber);border-top:1px solid var(--line)">Not shipped</div>';
@@ -1944,10 +1944,12 @@
               function stBadge(s){ var k=effStatus(s),c=stColor(k); return '<span style="font-size:12px;padding:1px 8px;border-radius:10px;background:'+c[0]+';color:'+c[1]+';font-weight:700">'+esc(SST_LBL[k]||k)+'</span>'; }
               function curShipLabel(s){ if((s.shipments||[]).length){ var sh=s.shipments[0]; return sh.ref+(srSub(sh)?' · '+srSub(sh):''); } if(s.not_shipped)return 'Not shipped'; return ''; }
               // A sample can be linked to MANY shipments. Menu = existing shipments not yet linked (searchable) + "＋ New shipment"; "Not shipped" only when nothing is linked.
+              function ppPhone(){ try{ return window.matchMedia&&window.matchMedia('(max-width:640px)').matches; }catch(e){ return false; } }
+              function ppMenuX(){ return ppPhone()?'<div class="pp-ship-opt pp-ship-x" data-val="__close__" style="padding:8px 10px;cursor:pointer;font-size:12px;text-align:right;color:var(--muted);border-bottom:1px solid var(--line)">✕ Close</div>':''; }   // v27.536 phone: explicit close on dropdown menus
               function shipMenu(s,q){ q=(q||'').toLowerCase().trim();
                 var linked={}; (s.shipments||[]).forEach(function(sh){ linked[String(sh.id)]=1; });
                 var opts=SRS.filter(function(sr){ return !linked[String(sr.id)] && (!q || (sr.ref+' '+sr.carrier+' '+sr.tracking).toLowerCase().indexOf(q)>=0); });
-                var html=opts.map(function(sr){ return '<div class="pp-ship-opt" data-val="'+sr.id+'" style="padding:6px 9px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--hover)"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(sr.ref)+'</b>'+(srSub(sr)?'<div class="mut tiny" style="margin-top:1px">'+esc(srSub(sr))+'</div>':'')+'</div>'; }).join('');
+                var html=ppMenuX()+opts.map(function(sr){ return '<div class="pp-ship-opt" data-val="'+sr.id+'" style="padding:6px 9px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--hover)"><b style="font-family:ui-monospace,Menlo,monospace">'+esc(sr.ref)+'</b>'+(srSub(sr)?'<div class="mut tiny" style="margin-top:1px">'+esc(srSub(sr))+'</div>':'')+'</div>'; }).join('');
                 html+='<div class="pp-ship-opt" data-val="__new__" style="padding:7px 9px;cursor:pointer;font-size:12px;border-top:1px solid var(--line);color:var(--pos);font-weight:700">+ New shipment</div>';
                 if(!(s.shipments||[]).length) html+='<div class="pp-ship-opt" data-val="not_shipped" style="padding:6px 9px;cursor:pointer;font-size:12px;color:var(--amber)">Not shipped</div>';
                 return html; }
@@ -2010,14 +2012,14 @@
                 inp.onfocus=function(){ inp.value=''; openMenu(); };
                 inp.oninput=openMenu;
                 inp.onblur=function(){ setTimeout(function(){ menu.style.display='none'; inp.value=''; },200); };
-                menu.onmousedown=function(e){ var opt=e.target.closest&&e.target.closest('.pp-ship-opt'); if(!opt)return; e.preventDefault(); menu.style.display='none'; inp.value=''; var v=opt.getAttribute('data-val'); if(v==='__new__') newShipmentFor(inp.dataset.id); else if(v==='not_shipped') assignShip(inp.dataset.id,'not_shipped'); else linkShip(inp.dataset.id, v); }; });
+                menu.onmousedown=function(e){ var opt=e.target.closest&&e.target.closest('.pp-ship-opt'); if(!opt)return; e.preventDefault(); menu.style.display='none'; inp.value=''; var v=opt.getAttribute('data-val'); if(v==='__close__')return; if(v==='__new__') newShipmentFor(inp.dataset.id); else if(v==='not_shipped') assignShip(inp.dataset.id,'not_shipped'); else linkShip(inp.dataset.id, v); }; });
               box.querySelectorAll('.pp-ship-unlink').forEach(function(a){ a.onclick=function(){ unlinkShip(a.dataset.id, a.dataset.sr); }; });
               (function(){ var inp=box.querySelector('.ps2-ship-inp'), menu=box.querySelector('.ps2-ship-menu'); if(!inp||!menu)return;   // v27.531 add-form picker wiring
                 function openMenu(){ menu.innerHTML=ps2ShipMenu(inp.value===ps2ShipLabel(inp.dataset.val)?'':inp.value); menu.style.display=''; }
                 inp.onfocus=function(){ inp.select(); openMenu(); };
                 inp.oninput=openMenu;
                 inp.onblur=function(){ setTimeout(function(){ menu.style.display='none'; inp.value=ps2ShipLabel(inp.dataset.val); },200); };
-                menu.onmousedown=function(e){ var opt=e.target.closest&&e.target.closest('.pp-ship-opt'); if(!opt)return; e.preventDefault(); var v=opt.getAttribute('data-val')||''; inp.dataset.val=v; inp.value=ps2ShipLabel(v); menu.style.display='none'; }; })();
+                menu.onmousedown=function(e){ var opt=e.target.closest&&e.target.closest('.pp-ship-opt'); if(!opt)return; e.preventDefault(); var v=opt.getAttribute('data-val')||''; if(v==='__close__'){ menu.style.display='none'; inp.value=ps2ShipLabel(inp.dataset.val); return; } inp.dataset.val=v; inp.value=ps2ShipLabel(v); menu.style.display='none'; }; })();
               box.querySelectorAll('.pp-samp-img').forEach(function(im){ im.onclick=function(){ ppImgZoom(im.dataset.src); }; });
               box.querySelectorAll('.pp-samp-fdel').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this file?'))return; postJSON(EP.productSamplePhoto+'/'+a.dataset.id+'/delete',{},function(j){ if(j&&j.error){ppNotice(j.error);return;} var s=list.filter(function(x){return String(x.id)===String(a.dataset.sid);})[0]; if(s)s.photos=(s.photos||[]).filter(function(p){return String(p.id)!==String(a.dataset.id);}); paint(); }); }; });   // silent delete
               box.querySelectorAll('.pp-samp-meta-edit').forEach(function(a){ a.onclick=function(){ var pnl=box.querySelector('.pp-samp-meta[data-id="'+a.dataset.id+'"]'); if(pnl)pnl.style.display=(pnl.style.display==='none'?'':'none'); }; });

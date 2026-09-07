@@ -1,3 +1,7 @@
+## v27.536 Mobile: ✕ close on every picker sheet and dropdown menu (Ben)
+- **App:** every phone bottom-sheet picker (assign shipment, assign deposit, status, country, branch, batch, production and the rest of the shared pop-up family, 14 in all) gets a round ✕ in its top-right corner; tap it or the backdrop to close. Added by a body observer so any future picker gets it too. Desktop pop-overs unchanged.
+- **Portal:** the shipment search menus (per-sample and add-sample form) get a "✕ Close" row at the top on phones. supply/inject.html + supply/portal-view.js.
+
 ## v27.535 Mobile PO card (main grid): slimmer (Ben)
 - Tighter card padding and line spacing; smaller PLAN button.
 - Status · Ship to · Branch sit on one row with compact pickers; the Status dropdown loses its wide padding and letter-spacing; the "(branch)" hint under the country is hidden on phones.
