@@ -1,3 +1,6 @@
+## v27.580 Summary & targets: Units tick shows units BESIDE the money (Ben)
+- Changes the v27.576 behaviour: in Revenue and Rev + targets the "Units" tick box (off by default, remembered) now adds a small unit figure next to each money figure — last year, forecast and, in Rev + targets, the target (LY units × the target growth) — for every category, sub-category, SKU row and the ALL SUBCATEGORIES total. Money stays; nothing is replaced.
+
 ## v27.579 Key Accounts import: one batched write instead of one request per cell (Ben: "incredibly slow")
 - Cause: every cell was its own HTTP request + transaction (~1.6s each through the pooler); a 45 SKU × 18 month file = 810 requests ≈ 20 minutes.
 - New POST /api/supply/ka-forecast-cells {client, warehouse, cells:[{sku, month, quantity}]}: one transaction, set-based delete + multi-row insert (max 5,000 cells/request; blank/0 = clear). Client batches 800 cells per request and shows progress + elapsed time. Used by the grid import, the single-month import, the per-month ✕ and the SKU ✕. Inline cell edits keep the per-cell route.
