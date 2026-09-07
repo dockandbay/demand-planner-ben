@@ -1,3 +1,6 @@
+## v27.550 PRODUCT Samples: feedback edits UPDATE the timeline note instead of adding another (Ben)
+- New POST /api/product/note/upsert-feedback: finds the latest internal note on the product whose text starts with "Feedback on REF_vN · Component:" and rewrites its text, tags and Pantone in place (keeps its position / time); only when none exists is a new note created. The Samples tab and the batch review use it. server.mjs + supply/inject.html. No migration.
+
 ## v27.549 PRODUCT Timeline: tag changes and tag filters update silently (Ben)
 - Retagging a message, toggling a tag filter, clearing filters and posting a note no longer blank the timeline with Loading…: the list redraws in place from the cached notes (the tag change is applied in memory first) and the cache refreshes in the background. supply/inject.html only.
 

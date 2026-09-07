@@ -6673,6 +6673,25 @@ app.post('/api/product/note', async (req, res) => {
     [ref, internalAuthor(req, b.author_email), String(b.body).trim(), JSON.stringify(tags), JSON.stringify(pantone)]);
     res.json({ ok: true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v27.550: sample FEEDBACK notes are one-per-(sample × component) on the timeline. Re-saving feedback rewrites that note
+// (text, tags, Pantone) instead of adding another. Matched by the stable prefix "Feedback on REF_vN · Component:" on the
+// latest internal note for the product; falls back to a normal insert when none exists yet.
+app.post('/api/product/note/upsert-feedback', async (req, res) => {
+  const b = req.body || {}, ref = (b.ref || '').trim(), prefix = String(b.prefix || '').trim();
+  if (!ref || !prefix || !String(b.body || '').trim()) return res.status(400).json({ error: 'ref, prefix and body required' });
+  const tags = Array.isArray(b.tags) ? b.tags.map(x => Number(x)).filter(x => Number.isFinite(x)) : [];
+  const pantone = cleanPantone(b.pantone);
+  try {
+    const like = prefix.replace(/[\\%_]/g, m => '\\' + m) + '%';
+    const up = await pool.query(`UPDATE planner.supplier_notes SET body=$3, tags=$4::jsonb, pantone=$5::jsonb, author_email=$6
+      WHERE id=(SELECT id FROM planner.supplier_notes WHERE po=$1 AND author_kind='internal' AND body LIKE $2 ORDER BY created_at DESC LIMIT 1) RETURNING id`,
+      [ref, like, String(b.body).trim(), JSON.stringify(tags), JSON.stringify(pantone), internalAuthor(req, b.author_email)]);
+    if (up.rows.length) return res.json({ ok: true, id: up.rows[0].id, updated: true });
+    const r = await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, tags, pantone) VALUES ($1,$2,'internal',$3,$4::jsonb,$5::jsonb) RETURNING id`,
+      [ref, internalAuthor(req, b.author_email), String(b.body).trim(), JSON.stringify(tags), JSON.stringify(pantone)]);
+    res.json({ ok: true, id: r.rows[0].id, updated: false });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // In-app Pantone search (seeded from Dock & Bay's Connect export; approximate on-screen swatch). Powers the
 // "/p" picker in the product-timeline compose box. Filter by book (TCX / Coated / Uncoated) optional.
 app.get('/api/product/pantone/search', async (req, res) => {

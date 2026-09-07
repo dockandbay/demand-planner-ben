@@ -13833,7 +13833,8 @@
             if(_fbEl&&_txt&&_txt!==String(_fbEl.dataset.last||'').trim()){ _fbEl.dataset.last=feedback; var _s=list.filter(function(x){return String(x.id)===String(id);})[0]||{}; var _pk=_fbPan[String(id)]||{};
               var _pan=Object.keys(_pk).filter(function(code){ return _txt.indexOf('🎨 '+code)>=0; }).map(function(code){ return _pk[code]; });
               var _tgs=_fbTags[String(id)]||{}, _tg=Object.keys(_tgs).filter(function(k){return _tgs[k];}).map(Number);
-              shipPost('/api/product/note',{ref:ref,body:'Feedback on '+ref+'_v'+(_s.version||'?')+' · '+_aspLbl(aspect)+': '+_txt,author_email:(window.ME&&ME.email)||'',tags:_tg,pantone:_pan},function(){ _prodJsonBust(ref); }); } }catch(e){}
+              var _pfx='Feedback on '+ref+'_v'+(_s.version||'?')+' · '+_aspLbl(aspect)+':';   // v27.550: one note per sample × component, rewritten on each edit
+              shipPost('/api/product/note/upsert-feedback',{ref:ref,prefix:_pfx,body:_pfx+' '+_txt,author_email:(window.ME&&ME.email)||'',tags:_tg,pantone:_pan},function(){ _prodJsonBust(ref); }); } }catch(e){}
           // Refresh the IN-MEMORY detail so switching to the Size & variants tab shows the flowed approval right away
           // (prodItemInvalidate only clears the cache; the live _prodDetail.sizes the tab renders from was still stale).
           if(flow){ fetch('/api/product/item/'+encodeURIComponent(ref)+'/sizes').then(function(r){return r.json();}).then(function(sd){ if(_prodDetail&&sd&&!sd.error){ _prodDetail.sizes=sd.sizes||[]; _prodDetail.samples=sd.samples||[]; _prodDetail._sizesLoaded=true; try{_prodItemCache[ref]={t:Date.now(),d:_prodDetail};}catch(e){}
