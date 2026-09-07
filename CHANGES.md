@@ -1,3 +1,8 @@
+## v27.530 PRODUCT: sample feedback joins the timeline (phrases, tags, Pantone) + live Pantone preview
+- **Feedback boxes** on PRODUCT ▸ Samples now have the timeline composer's slash commands: "/" inserts a saved quick phrase, "/p <query>" searches Pantone and drops the reference in. Each sample card has a Tags row; saving changed feedback also posts a timeline note ("Feedback on REF_vN · Component: …") carrying the selected tags and any Pantone colours picked. Unchanged text does not repost.
+- **Live Pantone preview:** under the timeline compose box and every feedback box, as soon as a Pantone token is in the text a preview line renders the message with the real colour swatch chips (hover for the card) instead of the 🎨 token. The stored token format is unchanged.
+- Shared helpers hzSlashPicker / hzPanChip / hzPanBodyHtml / hzPanPreview replace the composer-local copies. supply/inject.html only.
+
 ## v27.529 Portal: new sample version can create its sample shipment in one go
 - PRODUCT ▸ Samples (supplier portal): the Sample shipment dropdown on the Submit sample version form gains **+ New shipment (create now)**. On submit the sample version is created, a new SR is opened for this supplier with the sample on it, photos upload, and the list refreshes showing the new shipment; address and tracking are completed later in SAMPLES as today. supply/portal-view.js only.
 
