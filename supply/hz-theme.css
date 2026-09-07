@@ -641,3 +641,23 @@ body header.pv-top .pv-lang button:hover{color:#fff}
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Start"] .tool-badge,
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="End"] .tool-badge{font-size:9px;padding:1px 5px}
 }
+
+/* ═══ v27.537: phone PO card layout (Ben) — row 1: PLAN · PO ref … Country · Branch (right); row 2: Status · Ship ═══ */
+@media (max-width:640px){
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]){gap:3px 5px}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-ci="0"]{order:0;margin-left:0;flex:0 0 auto}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="PO"]{order:0;flex:1 1 0;min-width:0!important;font-size:12.5px;padding-right:2px!important}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Ship to"]{order:0;flex:0 0 auto;margin-left:auto}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Branch"]{order:0;flex:0 0 auto}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Ship to"] .cell-pick,
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Branch"] .cell-pick{padding:2px 5px;font-size:10.5px;max-width:34vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  /* row 2: Status chip + "SHIP — assign ▾" side by side */
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Status"]{order:1;flex:0 0 auto}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Shipment"]{order:2;flex:1 1 auto;display:inline-flex;align-items:center;gap:6px;margin:0;padding:0 0 0 4px!important;border:0!important;font-size:11px;min-width:0!important;white-space:nowrap!important;overflow:hidden}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Shipment"]::before{content:"Ship";display:inline;flex:0 0 auto;color:var(--faint);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;line-height:1.3}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Direct"]{order:3}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Start"],
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="End"],
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Arrival/Delivery"],
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Completion"]{margin-top:4px}
+}

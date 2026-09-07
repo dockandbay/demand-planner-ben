@@ -1,3 +1,6 @@
+## v27.537 Mobile PO card layout (Ben)
+- Row 1: PLAN, PO ref, then Country and Branch pickers pushed to the right (compact, truncating if long). Row 2: Status chip with a **Ship** item (label + assign / ref) beside it. Then Direct to client (when set) and the Start · End · Arrive · Complete mini table. supply/hz-theme.css only.
+
 ## v27.536 Mobile: ✕ close on every picker sheet and dropdown menu (Ben)
 - **App:** every phone bottom-sheet picker (assign shipment, assign deposit, status, country, branch, batch, production and the rest of the shared pop-up family, 14 in all) gets a round ✕ in its top-right corner; tap it or the backdrop to close. Added by a body observer so any future picker gets it too. Desktop pop-overs unchanged.
 - **Portal:** the shipment search menus (per-sample and add-sample form) get a "✕ Close" row at the top on phones. supply/inject.html + supply/portal-view.js.
