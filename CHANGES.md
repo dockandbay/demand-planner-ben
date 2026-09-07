@@ -1,3 +1,6 @@
+## v27.540 Mobile PO card: Direct to client on one line (client · order ref)
+- The client name and sales-order ref share a single line on the phone card (the desktop grid keeps its two-line cell). supply/hz-theme.css only.
+
 ## v27.539 Mobile PO card: dates no longer crammed on cards without a Direct line (Ben)
 - A full-width break now sits between the Status / Ship row and the dates, and each date column has a 20% minimum width, so the four dates always form their own row. Before, only the Direct-to-client line forced that break, so cards without one squeezed the dates into the corner. supply/hz-theme.css only.
 

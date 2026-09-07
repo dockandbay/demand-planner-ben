@@ -685,3 +685,11 @@ body header.pv-top .pv-lang button:hover{color:#fff}
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Arrival/Delivery"],
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Completion"]{flex:1 1 20%;min-width:20%!important;max-width:25%}
 }
+
+/* ═══ v27.540: phone PO card — Direct to client on ONE line: client · order ref ═══ */
+@media (max-width:640px){
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Direct"]{display:block;white-space:nowrap!important;overflow:hidden;text-overflow:ellipsis;font-size:11px!important;line-height:1.35!important;padding:1px 0!important}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Direct"] br{display:none}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Direct"] span.mut{margin-left:6px}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Direct"] span.mut::before{content:"· ";color:var(--faint)}
+}
