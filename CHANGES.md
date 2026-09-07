@@ -1,3 +1,6 @@
+## v27.562 Barcode scanner: lookup route registered ahead of the generic SUPPLY lookup (fix)
+- /api/supply/barcode-lookup was answered by the generic /api/supply/:section handler ("unknown section"). Route now registered before it. server.mjs only.
+
 ## v27.561 SUPPLY ▸ Purchase Orders ▸ Barcodes: Barcode scanner (Ben)
 - New **📷 Barcode scanner** button. Opens a scanner sheet: live camera scanning where the browser supports BarcodeDetector (Chrome / Edge / Android; EAN-13, EAN-8, UPC-A/E, Code 128, QR), plus a text field for USB/Bluetooth scanners or manual entry (Enter). Each scan shows the SKU card: swatch / variant image (click to zoom), SKU, name, colour, size, category, supplier, status, what matched (product, carton, inner, or a saved Customise project by name), retail price per market and inventory per market (3PL, FBA, AWD, non-GRS). Recent scans listed for quick re-open.
 - Server: GET /api/supply/barcode-lookup?code= resolves product / carton / inner barcodes (digits-only compare, tolerant of the leading apostrophe in EAN exports) and falls back to planner.barcode_projects overrides (custom numbers → SKU). server.mjs + supply/inject.html.
