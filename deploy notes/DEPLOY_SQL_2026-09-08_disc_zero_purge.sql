@@ -1,3 +1,8 @@
+-- *** EXECUTED ON LIVE 08-Sep-26 by Claude on Ben's explicit authorisation ("You can proceed to make these changes to live"). ***
+-- Result: backup 90,968 rows / 688 SKUs (FBA 31,193 · DTC 38,511 · B2B 21,264); deleted 90,968; live now 88,851 rows,
+-- 7,336 zero rows remain (not candidates), 207 smoothing rows intact, remaining candidates 0. Rollback: rollbacks/ROLLBACK_2026-09-08_disc_zero_purge.sql
+-- DIVIYAJ: do NOT run this again (the CREATE TABLE would fail on the existing backup table anyway).
+
 -- Purge of sweep-written ZERO forecast overrides on discontinued SKUs (live). FOR DIVIYAJ, ONLY AFTER BEN'S EXPLICIT GO.
 -- Background: until v27.554 the DEMAND Auto sweep (recalcDiscontinued) wrote units=0 overrides for every month after a
 -- SKU's discontinue date. Under the run-off allocator (v27.534+) those zeros suppress the stock-driven run-off forecast
