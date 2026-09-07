@@ -1,3 +1,6 @@
+## v27.538 Mobile PO toolbar: Focus · SKU filter · Filters on one row (Ben)
+- On phones the Focus pill, the Filter by SKU box (stretching to fill) and the Filters button share one line; the PO / supplier search sits full width on the line below; status pills and Last 12m stay above. supply/hz-theme.css only.
+
 ## v27.537 Mobile PO card layout (Ben)
 - Row 1: PLAN, PO ref, then Country and Branch pickers pushed to the right (compact, truncating if long). Row 2: Status chip with a **Ship** item (label + assign / ref) beside it. Then Direct to client (when set) and the Start · End · Arrive · Complete mini table. supply/hz-theme.css only.
 

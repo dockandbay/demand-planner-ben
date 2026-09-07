@@ -661,3 +661,13 @@ body header.pv-top .pv-lang button:hover{color:#fff}
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Arrival/Delivery"],
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Completion"]{margin-top:4px}
 }
+
+/* ═══ v27.538: phone PO toolbar — Focus · SKU filter · Filters on ONE row; PO / supplier search full width beneath (Ben) ═══ */
+@media (max-width:640px){
+  #app #supply-root #po-prog{display:flex;flex-wrap:wrap;align-items:center}
+  #app #supply-root #po-prog .po-focus{order:1;flex:0 0 auto}
+  #app #supply-root #po-prog #po-sku-wrap{order:1;flex:1 1 110px;min-width:0;margin-left:0!important}
+  #app #supply-root #po-prog #po-sku-wrap #po-sku-search{width:100%!important;min-width:0;flex:1 1 auto}
+  #app #supply-root #po-prog .po-filt-toggle{order:1;flex:0 0 auto}
+  #app #supply-root #po-prog #sup-search{order:2;flex:1 1 100%;width:100%!important}
+}
