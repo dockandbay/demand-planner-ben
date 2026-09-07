@@ -1918,11 +1918,13 @@
           }catch(e){ ppNotice('Could not create label'); } }
           function ppProdSamples(box, ref){ box.innerHTML='<div class="count" style="text-align:left">Loading…</div>';
             var _it=((_ppData&&_ppData.products)||[]).filter(function(x){return x.ref===ref;})[0]||{};   // colour/supplier for the sample label
-            Promise.all([getJSON(EP.productSamplesBase+encodeURIComponent(ref)), fetch((EP.productItemBase||'/api/product/item/')+encodeURIComponent(ref)).then(function(r){return r.json();}).catch(function(){return {};})]).then(function(_res){ var list=Array.isArray(_res[0])?_res[0]:[];
+            Promise.all([getJSON(EP.productSamplesBase+encodeURIComponent(ref)), fetch((EP.productItemBase||'/api/product/item/')+encodeURIComponent(ref)).then(function(r){return r.json();}).catch(function(){return {};}), fetch('/api/portal/product-components/'+encodeURIComponent(ref)).then(function(r){return r.json();}).catch(function(){return {};})]).then(function(_res){ var list=Array.isArray(_res[0])?_res[0]:[];
               var sizesList=(((_res[1]||{}).sizes)||[]).map(function(s){return s.size_label;}).filter(Boolean);
               var today=new Date().toISOString().slice(0,10);
-              var ASPECTS=[['product','Product'],['packaging','Packaging'],['labels','Labels/wraps'],['polybag','Polybags'],['other','Other components']];
-              var ASP_LBL={product:'Product',packaging:'Packaging',labels:'Labels/wraps',polybag:'Polybags',other:'Other components'};
+              // v27.533 (Ben): "Aspects sampled" = the components assigned to THIS supplier on this product (falls back to the fixed list when none are configured)
+              var _COMPS=(((_res[2]||{}).components)||[]);
+              var ASPECTS=_COMPS.length?_COMPS.map(function(c){return [c.key,c.name];}):[['product','Product'],['packaging','Packaging'],['labels','Labels/wraps'],['polybag','Polybags'],['other','Other components']];
+              var ASP_LBL={product:'Product',packaging:'Packaging',labels:'Labels/wraps',polybag:'Polybags',other:'Other components'}; ASPECTS.forEach(function(a){ ASP_LBL[a[0]]=a[1]; });
               function aspChips(keys){ return (keys||[]).map(function(k){return '<span style="display:inline-block;font-size:10.5px;background:var(--violet-bg);color:#3730a3;border:1px solid var(--blue-soft);border-radius:10px;padding:1px 7px;margin:1px 4px 1px 0">'+esc(ASP_LBL[k]||k)+'</span>';}).join(''); }
               function sizeChips(arr){ return (arr||[]).map(function(k){return '<span style="display:inline-block;font-size:10.5px;background:var(--pos-bg);color:#065f46;border:1px solid #a7f3d0;border-radius:10px;padding:1px 7px;margin:1px 4px 1px 0">'+esc(k)+'</span>';}).join(''); }
               var SRS=(((typeof _ppData!=='undefined'&&_ppData&&_ppData.samples)||[])).map(function(sr){return {id:sr.id,ref:sr.ref,carrier:sr.carrier||'',tracking:sr.tracking_code||'',recipient:[sr.recipient_company,sr.recipient_name].filter(Boolean).join(' · ')};});   // v27.531: recipient shown in the pickers

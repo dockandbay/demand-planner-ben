@@ -7014,12 +7014,17 @@ async function productSampleList(itemRef) {
   }
   return rows;
 }
+// v27.533: a sample "aspect" is a legacy fixed key OR a component key 'c<id>' (planner.product_dev_components, per supplier).
+// Legacy keys double as a migrated component's dimension, which is what the Variants-tab approval flow keys on.
+const LEGACY_ASPECTS = ['product', 'packaging', 'labels', 'polybag', 'other'];
+function aspectKeyOk(a) { a = String(a || '').trim(); return LEGACY_ASPECTS.includes(a) || /^c\d+$/.test(a); }
+async function aspectFlowDimension(a) { a = String(a || '').trim(); if (LEGACY_ASPECTS.includes(a)) return a; const m = a.match(/^c(\d+)$/); if (!m) return null;
+  const r = (await pool.query(`SELECT dimension FROM planner.product_dev_components WHERE id=$1`, [m[1]])).rows[0]; return (r && r.dimension) ? r.dimension : null; }
 async function createProductSample(b, by) {
   const itemRef = (b.item_ref || '').trim();
   if (!itemRef) throw new Error('item_ref required');
   if (!(b.colour_verified && b.quality_verified)) throw new Error('both verification checkboxes are required');
-  const ALLOWED = ['product', 'packaging', 'labels', 'polybag', 'other'];
-  const aspects = (Array.isArray(b.sampled_aspects) ? b.sampled_aspects : []).filter(a => ALLOWED.includes(a));
+  const aspects = (Array.isArray(b.sampled_aspects) ? b.sampled_aspects : []).map(a => String(a).trim()).filter(aspectKeyOk);   // v27.533: component keys allowed
   if (!aspects.length) throw new Error('select at least one sampled aspect');
   // Which size variants this sample represents (one or more). Validated against the item's real size labels.
   const validSizes = (await pool.query(`SELECT coalesce(size_label,'') l FROM planner.product_dev_sizes s JOIN planner.product_dev_items i ON i.id=s.item_id WHERE i.ref=$1`, [itemRef])).rows.map(x => x.l);
@@ -7107,9 +7112,8 @@ app.post('/api/product/sample/:id/photography', async (req, res) => {
 app.post('/api/product/sample/:id/aspect', async (req, res) => {
   try {
     const id = req.params.id, b = req.body || {};
-    const ALLOWED = ['product', 'packaging', 'labels', 'polybag', 'other'];
     const aspect = String(b.aspect || '').trim();
-    if (!ALLOWED.includes(aspect)) return res.status(400).json({ error: 'bad aspect' });
+    if (!aspectKeyOk(aspect)) return res.status(400).json({ error: 'bad aspect' });   // v27.533: legacy key or component key c<id>
     const feedback = String(b.feedback || '');
     // Sign-off stage vocabulary (shared with the Variants tab), excludes the shipment stage. Legacy pending/rejected mapped.
     const STAGES = ['sample_development', 'sample_in_review', 'approved', 'approved_with_comments', 'rejected_new_sample', 'stop_development'];
@@ -7136,14 +7140,15 @@ app.post('/api/product/sample/:id/aspect', async (req, res) => {
     let flowed = 0;
     { // Every decision (approved / rejected / pending) flows to the Variants tab so the component stays in sync.
       const s = (await pool.query(`SELECT item_ref, coalesce(sample_sizes,'{}') sizes FROM planner.product_dev_samples WHERE id=$1`, [id])).rows[0];
-      if (s) {
+      const flowDim = await aspectFlowDimension(aspect);   // v27.533: a component without a legacy dimension has nothing to flow to
+      if (s && flowDim) {
         // On approve, default the component's APPROVED VERSION to this sample (the one being signed off); still
         // manually changeable on the Variants tab. On reject / back-to-pending, clear it.
         const r = await pool.query(`UPDATE planner.product_dev_size_dimensions sd SET approval_status=$3, approved_sample_id=$5
           FROM planner.product_dev_sizes sz JOIN planner.product_dev_items i ON i.id=sz.item_id
           WHERE sd.size_id=sz.id AND sd.dimension=$2 AND i.ref=$1
             AND (coalesce(array_length($4::text[],1),0)=0 OR sz.size_label = ANY($4::text[]))`,
-          [s.item_ref, aspect, decision, s.sizes || [], isApproved ? Number(id) : null]);
+          [s.item_ref, flowDim, decision, s.sizes || [], isApproved ? Number(id) : null]);
         flowed = r.rowCount || 0;
       }
     }
@@ -15985,6 +15990,17 @@ app.post('/api/portal/product-notes-read', portalAuth, async (req, res) => { con
 app.get('/api/portal/product-samples/:ref', portalAuth, async (req, res) => { const ref = decodeURIComponent(req.params.ref || '');
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
   try { res.json(await productSampleList(ref)); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+// v27.533: the components THIS supplier is responsible for on a product → the portal's "Aspects sampled" list. A component with
+// no supplier of its own belongs to the product's main supplier. Spec-linked components are not sampled, so they are left out.
+app.get('/api/portal/product-components/:ref', portalAuth, async (req, res) => { const ref = decodeURIComponent(req.params.ref || '');
+  if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
+  try { const sups = (req.portal.suppliers || []).map(x => String(x).toLowerCase().trim());
+    const item = (await pool.query(`SELECT coalesce(supplier,'') supplier FROM planner.product_dev_items WHERE ref=$1`, [ref])).rows[0] || {};
+    const prodMine = sups.includes(String(item.supplier || '').toLowerCase().trim());
+    const comps = (await pool.query(`SELECT id, name, coalesce(supplier,'') supplier, dimension, coalesce(sampling_mode,'sampled') sampling_mode FROM planner.product_dev_components WHERE item_ref=$1 ORDER BY sort, id`, [ref])).rows;
+    const mine = comps.filter(c => c.sampling_mode !== 'spec_linked' && (c.supplier ? sups.includes(c.supplier.toLowerCase().trim()) : prodMine));
+    res.json({ components: mine.map(c => ({ key: c.dimension || ('c' + c.id), name: c.name, dimension: c.dimension || null })), total: comps.length });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/product-sample', portalAuth, async (req, res) => { const b = req.body || {}, ref = (b.item_ref || '').trim();
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
   try { res.json({ ok: true, ...(await createProductSample(b, req.portal.email || null)) }); } catch (e) { res.status(400).json({ error: e.message }); } });
@@ -15997,8 +16013,7 @@ app.post('/api/portal/product-sample/:id/status', portalAuth, async (req, res) =
 // Supplier edits which sizes + item types (aspects) a sample covers — so older/shipped samples can be backfilled.
 app.post('/api/portal/product-sample/:id/meta', portalAuth, async (req, res) => { const id = req.params.id, b = req.body || {};
   if (!(await portalOwnsProductSample(req, id))) return res.status(403).json({ error: 'not your sample' });
-  try { const ALLOWED = ['product', 'packaging', 'labels', 'polybag', 'other'];
-    const aspects = (Array.isArray(b.sampled_aspects) ? b.sampled_aspects : []).filter(a => ALLOWED.includes(a));
+  try { const aspects = (Array.isArray(b.sampled_aspects) ? b.sampled_aspects : []).map(a => String(a).trim()).filter(aspectKeyOk);   // v27.533
     const sr = (await pool.query(`SELECT item_ref FROM planner.product_dev_samples WHERE id=$1`, [id])).rows[0];
     const valid = (await pool.query(`SELECT coalesce(size_label,'') l FROM planner.product_dev_sizes s JOIN planner.product_dev_items i ON i.id=s.item_id WHERE i.ref=$1`, [sr ? sr.item_ref : ''])).rows.map(x => x.l);
     const sizes = (Array.isArray(b.sample_sizes) ? b.sample_sizes : []).map(String).filter(s => valid.includes(s));

@@ -1,3 +1,8 @@
+## v27.533 Samples: "Aspects sampled" = the supplier's components on that product (Ben)
+- **Portal:** the Aspects sampled checklist (new sample form + the per-sample edit panel) lists the components assigned to this supplier on this product (a component with no supplier of its own belongs to the product's main supplier; spec-linked components are excluded). Falls back to the fixed five when a product has no components configured.
+- **Keys:** a component with a legacy dimension keeps that key (so existing approvals and the Variants-tab flow are untouched); a new component is keyed c<id>. Admin feedback rows, placeholders and timeline notes show the component name.
+- **Server:** new GET /api/portal/product-components/:ref (ownership-guarded); sample create / meta / aspect endpoints accept component keys; the Variants flow uses the component's dimension when it has one and otherwise records feedback only. No migration. server.mjs + supply/portal-view.js + supply/inject.html.
+
 ## v27.532 PRODUCT ▸ Samples (admin): add photos / documents to a sample version
 - Each sample card has **📎 Add photos / documents** (multi-select; images, PDF, Office, AI, ZIP; 10MB each). Files upload to the existing sample attachment store tagged as internal uploads and appear in the card's file strip immediately (images as zoomable thumbnails, documents as links) with no re-render. Suppliers see them in the portal alongside their own. supply/inject.html only (endpoint existed).
 
