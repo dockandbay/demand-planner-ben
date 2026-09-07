@@ -1,3 +1,6 @@
+## v27.582 Currency picker visible on GBP markets (Ben)
+- DEMAND nav (and the Summary toolbar) on UK now show the Currency picker as a single GBP option instead of hiding it. Other markets unchanged (GBP / local).
+
 ## v27.581 Key Accounts: imported / cleared cells flash light green (Ben)
 - After a grid or single-month import, a month ✕ or a SKU ✕, the grid redraws and every cell that was written flashes green for ~2.5s (first one scrolled into view).
 
