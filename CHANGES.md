@@ -1,3 +1,6 @@
+## v27.576 Summary & targets: Units tick box in Rev + targets (Ben)
+- Next to the Units / Revenue / Rev + targets pills, in Rev + targets a "Units" tick box shows last year, forecast and targets as units instead of money (target units = LY units × the target growth; no currency symbol, no FX conversion). Remembered per browser. Target entry is unchanged (units u, % or money).
+
 ## v27.575 Sign out button (Ben)
 - Top-right icon cluster gains a Sign out icon (after ?); the phone drawer gets a "⎋ Sign out" quick action. Uses the proxy sign-out path from app_settings.auth_logout_url (already served on /api/me); confirms first and shows who is signed in. Where no path is configured (sandbox) it explains instead of doing nothing. artifact only.
 

@@ -9697,7 +9697,7 @@ function render(){
 // to planner.key_account_forecasts (replaces the old n8n Airtable flow). SKU is a type-to-search dropdown from SKUM.
 // ── DEMAND ▸ SUMMARY — clean read-only rollup of the PLAN forecast, by country/channel, grouped by
 //    subcategory (expand → SKU), across financial years (past FYs minimised) or a custom month range.
-var SUMM_FROM='', SUMM_TO='', SUMM_OPEN={}, SUMM_FYOPEN={}, SUMM_METRIC=(function(){try{return localStorage.getItem('summ_metric')||'units';}catch(e){return 'units';}})(), SUMM_GROUP=(function(){try{return localStorage.getItem('summ_group')||'month';}catch(e){return 'month';}})(), SUMM_TGT_EDIT=false, SUMM_TGT={}, SUMM_TGT_GBP={}, SUMM_TGT_KEY='', _SUMM_RANGE_STASH=null, SUMM_TAB='summary', SUMM_CAT_TOT=(function(){try{return localStorage.getItem('summ_cattot')==='1';}catch(e){return false;}})();   // Category totals: bold per-category (subcat-parent) roll-up rows showing LY→target for units + revenue
+var SUMM_FROM='', SUMM_TO='', SUMM_OPEN={}, SUMM_FYOPEN={}, SUMM_METRIC=(function(){try{return localStorage.getItem('summ_metric')||'units';}catch(e){return 'units';}})(), SUMM_TGT_UNITS=(function(){try{return localStorage.getItem('summ_tgt_units')==='1';}catch(e){return false;}})(), SUMM_GROUP=(function(){try{return localStorage.getItem('summ_group')||'month';}catch(e){return 'month';}})(), SUMM_TGT_EDIT=false, SUMM_TGT={}, SUMM_TGT_GBP={}, SUMM_TGT_KEY='', _SUMM_RANGE_STASH=null, SUMM_TAB='summary', SUMM_CAT_TOT=(function(){try{return localStorage.getItem('summ_cattot')==='1';}catch(e){return false;}})();   // Category totals: bold per-category (subcat-parent) roll-up rows showing LY→target for units + revenue
 var SUMM_B2B_H1FEB=(function(){try{return localStorage.getItem('summ_b2b_h1feb')==='1';}catch(e){return false;}})();   // B2B only: treat H1 as Feb→Aug (7mo) instead of Mar→Aug — the FY view shifts to Feb→Jan for B2B in this report
 function setSummB2BH1Feb(on){ SUMM_B2B_H1FEB=!!on; try{localStorage.setItem('summ_b2b_h1feb',SUMM_B2B_H1FEB?'1':'0');}catch(e){} }
 // Target-edit mode ignores the month-range filter (targets are per-FY/half, not per arbitrary range).
@@ -10133,7 +10133,8 @@ function renderSummaryView(body){
   function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function fn2(n){ n=Math.round(Number(n)||0); return n?n.toLocaleString():''; }
   var _curCcy='GBP', _symC='£';   // display currency (set once co is known); mf() uses the resolved symbol
-  function mf(n){ var t=fn2(n); return t?(((SUMM_METRIC==='rev'||SUMM_METRIC==='revtgt')?_symC:'')+t):''; }
+  function _isRevM(){ return SUMM_METRIC==='rev'||(SUMM_METRIC==='revtgt'&&!SUMM_TGT_UNITS); }   // v27.576: money view unless the Units tick is on in Rev + targets
+  function mf(n){ var t=fn2(n); return t?((_isRevM()?_symC:'')+t):''; }
   var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   function mlab(m){ return MON[(+m.slice(5,7))-1]+" '"+m.slice(2,4); }
   function bucketize(ms,g){ if(g==='quarter'){ var o=[]; for(var i=0;i<ms.length;i+=3)o.push({label:'Q'+(i/3+1),months:ms.slice(i,i+3),idx:i/3+1,level:'quarter'}); return o; }
@@ -10157,13 +10158,14 @@ function renderSummaryView(body){
   // Resolve display currency: SUMM_CCY is a mode (GBP|LOCAL); local = the market's currency if there's a rate.
   var _localC=mktCcy(co); _curCcy=(SUMM_CCY==='LOCAL'&&_localC&&fxRate(_localC,0)!=null)?_localC:'GBP'; _symC=CCY_SYM[_curCcy]||'£';
   function cvR(Y){ return fxRate(_curCcy,Y)||1; }   // GBP→display rate for a given FY start year (1 when GBP)
+  function _tr(Y){ return _isRevM()?cvR(Y):1; }   // v27.576: target roll-ups convert only when showing money
   var DATAr=(typeof DATA!=='undefined')?DATA:[];
   var subs=[]; DATAr.forEach(function(d){ if(d.co===co&&d.ch===ch&&d.s&&subs.indexOf(d.s)<0)subs.push(d.s); }); subs.sort();
   var LYYM=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
   // per-subcat: actuals map (a), forecast (fu) → unified value per month (actual months = actuals, else forecast) + LY (prior-year same month, from actuals)
   var sdCache={}; function subData(s){ if(!(s in sdCache)){ var a=ga(co,ch,s)||{}, fu=(calc(s,co,ch).fu)||{}, val={}, ly={};
       DISP_MONTHS.forEach(function(m){ var u=isActualMonth(m)?((a[m]&&a[m][0])||0):(fu[m]||0), lu=(a[prevY(m)]&&a[prevY(m)][0])||0;
-        if(SUMM_METRIC==='rev'||SUMM_METRIC==='revtgt'){ val[m]=isActualMonth(m)?((a[m]&&a[m][1])||0):(u*getASP(co,ch,s,pa(m).y,pa(m).mo)); ly[m]=(a[prevY(m)]&&a[prevY(m)][1])||0; }
+        if(_isRevM()){ val[m]=isActualMonth(m)?((a[m]&&a[m][1])||0):(u*getASP(co,ch,s,pa(m).y,pa(m).mo)); ly[m]=(a[prevY(m)]&&a[prevY(m)][1])||0; }
         else { val[m]=u; ly[m]=lu; } });
       sdCache[s]={a:a,fu:fu,val:val,ly:ly}; } return sdCache[s]; }
   // ── Target balancing: a market-total (sub='') growth is a FIXED revenue budget; a subcat you type into LOCKS;
@@ -10200,7 +10202,7 @@ function renderSummaryView(body){
         var raw=(fo!=null)?fo:Math.round(base*sh), v;
         if(lch&&ms<lch)v=0; else if(disc&&ms>disc){ if(rem<=0)v=0; else {v=Math.max(0,Math.min(raw,rem));rem=Math.max(0,rem-v);} } else v=raw;
         var luU=Math.round(((a[prevY(m)]&&a[prevY(m)][0])||0)*sh);
-        if(SUMM_METRIC==='rev'||SUMM_METRIC==='revtgt'){ val[m]=Math.round(v*getASP(co,ch,s,pa(m).y,pa(m).mo)); ly[m]=Math.round(luU*getASP(co,ch,s,pa(m).y-1,pa(m).mo)); }
+        if(_isRevM()){ val[m]=Math.round(v*getASP(co,ch,s,pa(m).y,pa(m).mo)); ly[m]=Math.round(luU*getASP(co,ch,s,pa(m).y-1,pa(m).mo)); }
         else { val[m]=v; ly[m]=luU; } });
       return {sku:sku,tier:(p.ti||''),lch:lch,disc:disc,val:val,ly:ly}; }).sort(function(a,b){return a.sku<b.sku?-1:1;}); }
   // column model
@@ -10217,6 +10219,7 @@ function renderSummaryView(body){
     +'<span style="display:flex;gap:3px">'+CO_PILLS.map(function(c){return '<button class="sm-co'+(c===co?' on':'')+'" data-c="'+c+'">'+c+'</button>';}).join('')+'</span>'
     +'<span style="display:flex;gap:3px">'+CH_PILLS.map(function(c){return '<button class="sm-ch'+(c===ch?' on':'')+'" data-c="'+c+'">'+c+'</button>';}).join('')+'</span>'
     +'<span style="display:flex;gap:3px;margin-left:8px">'+[['units','Units'],['rev','Revenue'],['revtgt','Rev + targets']].map(function(x){return '<button class="sm-metric'+(x[0]===SUMM_METRIC?' on':'')+'" data-m="'+x[0]+'">'+x[1]+'</button>';}).join('')+'</span>'
+    +(SUMM_METRIC==='revtgt'?'<label style="margin-left:6px;font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:5px;cursor:pointer" title="Show last year, forecast and targets as UNITS instead of money (target units = LY units × the target growth). Entry still accepts units (u), % or money."><input type="checkbox" id="sm-tgtunits"'+(SUMM_TGT_UNITS?' checked':'')+'> Units</label>':'')   // v27.576
     +(function(){ var lc=mktCcy(co); if(!(lc&&fxRate(lc,0)!=null))return ''; return '<span style="display:flex;gap:3px;margin-left:8px" title="Display currency for revenue and target entry — the same setting as the DEMAND currency pill">'+[['GBP','GBP'],['LOCAL',lc]].map(function(x){return '<button class="sm-ccy'+(x[0]===SUMM_CCY?' on':'')+'" data-m="'+x[0]+'">'+x[1]+'</button>';}).join('')+'</span>'; })()   // v27.560 currency picker on the report
     +'<span style="display:flex;gap:3px">'+[['month','Month'],['quarter','Quarter'],['half','Half']].map(function(x){return '<button class="sm-group'+(x[0]===SUMM_GROUP?' on':'')+'" data-g="'+x[0]+'">'+x[1]+'</button>';}).join('')+'</span>'
     +'<label style="margin-left:8px;font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:5px;cursor:pointer" title="Group by category and show a bold roll-up per category: last-year → target for units AND revenue, from the subcategory target growths"><input type="checkbox" id="sm-cattot"'+(SUMM_CAT_TOT?' checked':'')+'> Category totals</label>'
@@ -10232,6 +10235,7 @@ function renderSummaryView(body){
   body.querySelectorAll('.sm-metric').forEach(function(b){ b.onclick=function(){ SUMM_METRIC=b.dataset.m; try{localStorage.setItem('summ_metric',SUMM_METRIC);}catch(e){} renderSummaryView(body); }; });
   body.querySelectorAll('.sm-ccy').forEach(function(b){ b.onclick=function(){ setDispCcy(b.dataset.m); }; });   // v27.560: bound to the global GBP/LOCAL setting (re-renders DEMAND incl. this report + the main pill)
   body.querySelectorAll('.sm-group').forEach(function(b){ b.onclick=function(){ SUMM_GROUP=b.dataset.g; try{localStorage.setItem('summ_group',SUMM_GROUP);}catch(e){} renderSummaryView(body); }; });
+  var _tu=body.querySelector('#sm-tgtunits'); if(_tu)_tu.onchange=function(){ SUMM_TGT_UNITS=this.checked; try{localStorage.setItem('summ_tgt_units',SUMM_TGT_UNITS?'1':'');}catch(e){} renderSummaryView(body); };   // v27.576
   var _ct=body.querySelector('#sm-cattot'); if(_ct)_ct.onchange=function(){ SUMM_CAT_TOT=this.checked; try{localStorage.setItem('summ_cattot',SUMM_CAT_TOT?'1':'');}catch(e){} renderSummaryView(body); };
   var fSel=body.querySelector('#sm-from'), tSel=body.querySelector('#sm-to');
   function applyRange(){ SUMM_FROM=fSel.value; SUMM_TO=tSel.value; renderSummaryView(body); }   // full silent re-render so the month range + header/clear update immediately
@@ -10287,7 +10291,7 @@ function renderSummaryView(body){
         +'<div class="c3t"><span style="'+L+'">&Delta;</span> <span style="color:'+vc+';font-weight:600">'+(vv>=0?'+':'')+mf(vv)+'</span></div></td>'; }
     function cells(val,ly,lch,disc,sub){ return cols.map(function(c){
         var months=(c.type==='m')?[c.m]:(c.type==='grp')?c.months:(c.type==='ptot'?rangeMonths:fyMs(c.Y));
-        var vT=0,lT=0,_fx=(SUMM_METRIC==='rev'||SUMM_METRIC==='revtgt'); months.forEach(function(m){ var rt=_fx?cvR(monFyIdx(m).Y):1; vT+=(val[m]||0)*rt; lT+=(ly[m]||0)*rt; });   // convert £→display currency per month by its FY rate (revenue metrics only)
+        var vT=0,lT=0,_fx=_isRevM(); months.forEach(function(m){ var rt=_fx?cvR(monFyIdx(m).Y):1; vT+=(val[m]||0)*rt; lT+=(ly[m]||0)*rt; });   // convert £→display currency per month by its FY rate (revenue metrics only)
         var shade;
         if(c.type==='tot'||c.type==='ptot')shade='tot';
         else if(c.type==='m')shade=shadeOf(c.m,lch,disc);
@@ -10296,9 +10300,9 @@ function renderSummaryView(body){
           if(sub===''){ // TOTAL row: per period, honour an explicit market-total growth if one is set; otherwise SUM each
             // subcategory's own target so the growth% reflects the blend of the set targets rather than echoing LY at 0%. — Ben
             months.forEach(function(m){ var fi=monFyIdx(m), mg=resolveG(fi.Y,'',fi.idx);
-              if(mg!=null){ tgt+=(ly[m]||0)*(1+mg/100)*cvR(fi.Y); }
-              else { subs.forEach(function(_s){ var _sd=subData(_s), g=resolveG(fi.Y,_s,fi.idx); if(g==null)g=0; tgt+=(((_sd.ly&&_sd.ly[m])||0))*(1+g/100)*cvR(fi.Y); }); } }); }
-          else { months.forEach(function(m){ var fi=monFyIdx(m); var g=resolveG(fi.Y,sub,fi.idx); if(g==null)g=0; tgt+=(ly[m]||0)*(1+g/100)*cvR(fi.Y); }); }
+              if(mg!=null){ tgt+=(ly[m]||0)*(1+mg/100)*_tr(fi.Y); }
+              else { subs.forEach(function(_s){ var _sd=subData(_s), g=resolveG(fi.Y,_s,fi.idx); if(g==null)g=0; tgt+=(((_sd.ly&&_sd.ly[m])||0))*(1+g/100)*_tr(fi.Y); }); } }); }
+          else { months.forEach(function(m){ var fi=monFyIdx(m); var g=resolveG(fi.Y,sub,fi.idx); if(g==null)g=0; tgt+=(ly[m]||0)*(1+g/100)*_tr(fi.Y); }); }
           var _na=months.filter(isActualMonth).length; return tcell(vT,lT,true,tgt,shade,_na===months.length&&months.length?'all':(_na?'some':'none')); }
         return c3(lT,vT,shade); }).join(''); }
     // Net £/unit for £→units: ex-tax retail (SUBCAT_RT) × channel factor (B2B ×0.5, else ×0.95). 0 if no price.
