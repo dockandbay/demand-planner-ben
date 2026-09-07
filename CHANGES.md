@@ -1,3 +1,8 @@
+## v27.535 Mobile PO card (main grid): slimmer (Ben)
+- Tighter card padding and line spacing; smaller PLAN button.
+- Status · Ship to · Branch sit on one row with compact pickers; the Status dropdown loses its wide padding and letter-spacing; the "(branch)" hint under the country is hidden on phones.
+- Dates render as a 2-row mini table across the bottom: labels Start · End · Arrive · Complete over their values (date pickers and the days badge shrink to fit). Shipment and Direct rows tightened. supply/hz-theme.css only; desktop unchanged.
+
 ## v27.534 DEMAND run-off: one sellable pool per country, shared across channels (Ben)
 - **Rule:** for a discontinued SKU the country has two pools: the 3PL pool (3PL on-hand + non-GRS + 3PL inbound) and the FBA pool (FBA on-hand + US AWD + FBA inbound). Month by month, FBA draws its own pool first; what FBA still needs joins DTC / B2B / TIK demand against the 3PL pool; when that combined demand exceeds what is left, the remainder is shared pro rata. FBA stock never flows back to the 3PL. Example: 100 units in the 3PL, Sep DTC 30 + FBA 30 leaves 40 for October. Consumption starts at the current month (stock is as-of-now).
 - **One allocator everywhere:** runoffAlloc(sku, country) now feeds the row display, the plan download map, both smoothing caps and the buy-plan demand feed, replacing five separate per-channel copies (which each drew the whole warehouse pool, so DTC + B2B + FBA could sell the same units twice or three times). Raw demand per channel is unchanged (override → last-year chain → cascade × share).
