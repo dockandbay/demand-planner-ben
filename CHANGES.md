@@ -1,3 +1,7 @@
+## v27.560 Summary & targets: currency picker on the report + currency-aware target entry (Ben)
+- The Summary report toolbar gets the same GBP / local-currency toggle as the main DEMAND pill (one setting, bound both ways), shown when the market has a blended FY rate.
+- **Entry rules in Edit targets:** "150%" = growth; "5000u" = units (wins over everything, converted at the sub-category price); any money entry ("€5000", "$5000", "£5000" or "5000") is read in the SELECTED currency regardless of the symbol typed, converted to GBP at the FY blended rate for storage, and shown back in the selected currency. Hint/tooltips updated. artifact_v16.7.html only; targets table unchanged (still GBP).
+
 ## v27.559 Create production POs: tier badge + season + lifecycle line (Ben)
 - In both Create-PO dialogs (one country, all countries) each SKU line shows its A / B / C market-tier badge after the SKU, then a second line with the season badge (e.g. SS27) and the lifecycle: "01-Feb-27 to 01-Sep-27", "01-Feb-27 to ongoing" when there is no discontinue date, or "discontinue 01-Sep-27" when there is no launch date. Launch = earliest country launch date. supply/inject.html only.
 
