@@ -1,3 +1,6 @@
+## v27.555 Sample batch review: compact searchable shipment picker (Ben)
+- The long dropdown is replaced by a 340px search box: type any part of the SR ref, supplier, recipient, status, carrier or tracking number; the list shows ref · supplier → recipient with status / carrier / tracking beneath; ↑↓ Enter Esc work; the chosen shipment is shown in the box and remembered. supply/inject.html only.
+
 ## v27.554 DEMAND Auto smoothing sweep: no more stock-capped overrides on discontinued SKUs (Ben)
 - The sweep used to start with a legacy "recalculate discontinued" pass that WROTE velocity-based, per-channel stock-capped overrides for every discontinued SKU (FBA rows capped at FBA stock only → the zeros that hid run-off). Run-off is now applied live by the shared allocator on every render and buy-plan build, so that pass is skipped: smoothing writes raw SKU numbers and the pool caps them at calc time; sets follow their components.
 - The sweep's gap basis (subcatSkuEffTotals) now also caps sets by component build capacity, matching the rows. Existing saved zeros from earlier sweeps stay until re-smoothed (a one-off cleanup can be scripted). artifact_v16.7.html only.
