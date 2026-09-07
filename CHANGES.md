@@ -1,3 +1,7 @@
+## v27.577 DEMAND ▸ Config ▸ More settings: ASP reduction + discontinued ASP discount per country × channel (Ben)
+- New Config page "More settings" (#/demand/config/aspadj): a country × channel grid with two percentages, ASP reduction (off every forecast-month ASP, e.g. UK DTC 9%) and Discontinued ASP discount (extra markdown on the discontinued-SKU share of a sub-category’s forecast units, e.g. 10%). Save writes app_settings.asp_adjust (existing generic endpoint); server injects it as ASP_ADJ.
+- getASP() is now a wrapper: raw seasonal ASP × (1 − reduction) × (1 − discount × discontinued unit share for that sub-category and month, from subcatSkuEffTotals). Actual months keep their real ASP. Revenue-only: Summary & targets, plan revenue line, money targets, downloads. The buy plan never reads ASP, so it is unchanged. Memo reset with the run-off memos.
+
 ## v27.576 Summary & targets: Units tick box in Rev + targets (Ben)
 - Next to the Units / Revenue / Rev + targets pills, in Rev + targets a "Units" tick box shows last year, forecast and targets as units instead of money (target units = LY units × the target growth; no currency symbol, no FX conversion). Remembered per browser. Target entry is unchanged (units u, % or money).
 

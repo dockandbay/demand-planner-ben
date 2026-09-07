@@ -4763,6 +4763,7 @@ function _smoothSearchTip(x,y,msg){ var t=document.getElementById('_smooth-tip')
   t.style.left=Math.min((x||40)+8,window.innerWidth-290)+'px'; t.style.top=((y||40)+12)+'px'; t.style.display='block';
   clearTimeout(t._h); t._h=setTimeout(function(){ t.style.display='none'; },3200); }
 var SMOOTH_LEADER=false;  // false = Standard (pure proportional), true = Leader (protect historically-strong SKUs). Set via the FY-total dropdown; applies to ALL smoothing.
+var ASP_ADJ={};   // v27.577 {'CO|CH':{red:<% off every forecast-month ASP>, disc:<% off the discontinued-SKU share of a sub-category's units>}} — server-injected from app_settings.asp_adjust (DEMAND ▸ Config ▸ More settings)
 var SMOOTH_DISREGARD_DISC={};  // {'CO|CH|subcat':true} — when set, smoothing leaves discontinued SKUs untouched so active SKUs absorb the full subcat forecast (toolbar ⚙ Smoothing). Server-injected from app_settings.
 // "Non Core" category is ALWAYS excluded from every smoothing feature (Ben). A sub-category is Non Core when its
 // parent category is "Non Core" (or the sub-cat itself is "Non Core" for that single-subcat category).
@@ -4849,7 +4850,7 @@ function retailAspGBP(co,ch,s){
   var ex=g/(ASP_TAX_DIV[COU]||1);                     // strip VAT (UK/EU) / GST (AU); US/CA already ex-tax
   return ex*(ch==='B2B'?0.5:0.95);                    // B2B = retail/2; all consumer channels = 5% off
 }
-function getASP(co,ch,s,year,mo){
+function getASPraw(co,ch,s,year,mo){
   var a=ga(co,ch,s);
   var thisK=ym(year,mo);
   // Actual month (past / partial current) → its own real ASP; no price-change uplift applied to real data.
@@ -4865,6 +4866,37 @@ function getASP(co,ch,s,year,mo){
   if(!base){ base=retailAspGBP(co,ch,s); }   // NO sales history at all (future SKU / new subcat) → retail-list-derived ASP so units still book revenue
   if(!base)return 0;
   return base*priceUpliftFactor(co,ch,s,year,mo);
+}
+// v27.577 DEMAND ▸ Config ▸ More settings. getASP() = the raw seasonal ASP above × (1 − ASP reduction%) × (1 − discontinued discount% × the
+// share of this sub-category's forecast units that come from discontinued SKUs in that month). Actual months keep their real ASP.
+// Revenue-only (Summary, plan revenue line, money targets, downloads); the buy plan never reads ASP.
+var ASPADJ_MEMO={};
+function aspAdjOf(co,ch){ var o=(ASP_ADJ&&ASP_ADJ[co+'|'+ch])||{}; var c=function(v){ v=Number(v)||0; return Math.max(0,Math.min(95,v)); }; return {red:c(o.red),disc:c(o.disc)}; }
+function aspDiscShare(co,ch,s,k){ var mk=co+'|'+ch+'|'+s, e=ASPADJ_MEMO[mk];
+  if(!e){ try{ var t=subcatSkuEffTotals(s,co,ch); e={tot:(t&&t.totals)||{},disc:(t&&t.discTotals)||{}}; }catch(err){ e={tot:{},disc:{}}; } ASPADJ_MEMO[mk]=e; }
+  var T=e.tot[k]||0; if(!(T>0))return 0; return Math.max(0,Math.min(1,(e.disc[k]||0)/T)); }
+function aspAdjFactor(co,ch,s,year,mo){ var adj=aspAdjOf(co,ch); if(!adj.red&&!adj.disc)return 1; var f=1-adj.red/100; if(adj.disc){ var sh=aspDiscShare(co,ch,s,ym(year,mo)); if(sh>0)f*=(1-(adj.disc/100)*sh); } return f; }
+function getASP(co,ch,s,year,mo){ var v=getASPraw(co,ch,s,year,mo); if(!(v>0))return v; var a=ga(co,ch,s), k=ym(year,mo); if(a[k]&&a[k][0]>0)return v; return v*aspAdjFactor(co,ch,s,year,mo); }
+
+// DEMAND ▸ Config ▸ More settings — grid of country × channel with the two ASP percentages; saves app_settings.asp_adjust.
+function renderAspAdjView(body){ var CHS=['DTC','FBA','B2B','TIK','ZAL']; var e=function(x){ return String(x==null?'':x).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); };
+  var cur=JSON.parse(JSON.stringify(ASP_ADJ||{}));
+  var TH='padding:6px 10px;border-bottom:2px solid var(--line);font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);text-align:left;white-space:nowrap';
+  var TD='padding:5px 10px;border-bottom:1px solid var(--line2);vertical-align:middle;text-align:left';
+  var inp=function(co,ch,f){ var v=(cur[co+'|'+ch]||{})[f]; return '<span style="display:inline-flex;align-items:center;gap:3px"><input type="number" class="aa-in" data-co="'+co+'" data-ch="'+ch+'" data-f="'+f+'" min="0" max="95" step="0.5" value="'+(v!=null&&v!==''?e(v):'')+'" placeholder="0" style="width:58px;text-align:right;padding:3px 5px;border:1px solid var(--line);border-radius:5px;font-size:12px;font-family:inherit"><span class="mut" style="font-size:11px">%</span></span>'; };
+  var rows=CTRS.map(function(co){ return '<tr><td style="'+TD+';font-weight:700">'+co+'</td>'+CHS.map(function(ch){ return '<td style="'+TD+'">'+inp(co,ch,'red')+'</td><td style="'+TD+';border-right:1px solid var(--line)">'+inp(co,ch,'disc')+'</td>'; }).join('')+'</tr>'; }).join('');
+  body.innerHTML='<div style="padding:2px 2px 24px;max-width:1180px">'
+    +'<div class="annot" style="margin-bottom:10px"><b>DEMAND ▸ Config ▸ More settings.</b> Two percentages per country × channel that shape <b>forecast revenue</b> (units × ASP). '
+      +'<b>ASP reduction</b> takes that much off every forecast month\'s ASP (e.g. UK DTC 9% = discounting and promotions). <b>Discontinued ASP discount</b> is an extra markdown on the share of a sub-category\'s forecast units that come from discontinued SKUs in that month (e.g. 10% with 40% of the units discontinued = ASP × (1 − 0.10 × 0.40)). '
+      +'Actual months keep their real ASP. Affects Summary &amp; targets revenue, the plan\'s revenue line and money targets; <b>never the buy plan</b>.</div>'
+    +'<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px"><button class="save-btn" id="aa-save" style="background:var(--blue);color:#fff;border-color:var(--blue)">Save</button><button class="save-btn light" id="aa-clear">Clear all</button><span id="aa-msg" class="mut" style="font-size:12px"></span></div>'
+    +'<div class="tw" style="overflow:auto;max-height:none;padding-bottom:6px"><table style="border-collapse:collapse;font-size:12.5px;min-width:900px"><thead><tr><th style="'+TH+'" rowspan="2">Country</th>'+CHS.map(function(ch){ return '<th style="'+TH+';text-align:center;border-right:1px solid var(--line)" colspan="2">'+ch+'</th>'; }).join('')+'</tr>'
+    +'<tr>'+CHS.map(function(){ return '<th style="'+TH+';font-size:9.5px" title="% off every forecast-month ASP">ASP reduction</th><th style="'+TH+';font-size:9.5px;border-right:1px solid var(--line)" title="extra % off the discontinued-SKU share of the units">Disc. discount</th>'; }).join('')+'</tr></thead><tbody>'+rows+'</tbody></table></div></div>';
+  function collect(){ var o={}; body.querySelectorAll('.aa-in').forEach(function(i){ var v=i.value.trim(); if(v==='')return; var n=Math.max(0,Math.min(95,Number(v)||0)); var k=i.dataset.co+'|'+i.dataset.ch; (o[k]=o[k]||{})[i.dataset.f]=n; }); return o; }
+  var msg=body.querySelector('#aa-msg');
+  body.querySelector('#aa-save').onclick=function(){ var o=collect(); msg.style.color='var(--muted)'; msg.textContent='Saving…';
+    fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'asp_adjust',value:JSON.stringify(o)})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ msg.style.color='var(--neg)'; msg.textContent='Save failed: '+j.error; return; } ASP_ADJ=o; ASPADJ_MEMO={}; CALC_MEMO={}; msg.style.color='var(--pos)'; msg.textContent='Saved ✓ — revenue figures use the new percentages from the next render (open the plan or Summary).'; }).catch(function(){ msg.style.color='var(--neg)'; msg.textContent='Save failed'; }); };
+  body.querySelector('#aa-clear').onclick=function(){ if(!confirm('Clear every percentage (not saved until you press Save)?'))return; body.querySelectorAll('.aa-in').forEach(function(i){ i.value=''; }); };
 }
 
 // Render a revenue line showing rev + YoY% with ASP in hover tooltip
@@ -5108,7 +5140,7 @@ function filteredCats(){
   const out={};ks.forEach(function(k){out[k]=m[k];});return out;
 }
 
-function refreshRow(s,co,ch){ RUNOFF_MEMO={}; SETDEM_MEMO={};   // v27.534: an override changed → re-allocate the country pool
+function refreshRow(s,co,ch){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={};   // v27.534: an override changed → re-allocate the country pool
   try{ delete CALC_MEMO[s+'|'+co+'|'+ch]; }catch(e){}   // this row's IV just changed → drop its cached calc so the edit reflects (the per-render memo is otherwise only cleared in render()/renderMain())
   try{ BUY_FC_STALE=true; }catch(e){}                   // forecast changed → the buy plan's demand overlay is now stale (rebuilt on the next BP.render)
   const _cr0=calc(s,co,ch);const fu=_cr0.fu;const reasons=_cr0.reasons;const sp=aspF(s,co,ch);
@@ -9420,7 +9452,7 @@ function remapExpanded(dim,newVal){
 }
 function renderMain(){
   try{ zalInit(); }catch(e){} try{ tikInit(); }catch(e){}   // wire the EU Zalando channel (av 'z' + synth DATA rows) — idempotent, runs once data is ready
-  CALC_MEMO={}; _subInvMemo={}; RUNOFF_MEMO={}; SETDEM_MEMO={};   // fresh per-render forecast memo (+ run-off allocations, v27.534/545) — covers direct renderMain() calls (filters/toggles) too
+  CALC_MEMO={}; _subInvMemo={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={};   // fresh per-render forecast memo (+ run-off allocations, v27.534/545) — covers direct renderMain() calls (filters/toggles) too
   _undoReady=true; try{ updateUndoBtn(); }catch(e){} try{ renderPlanChips(); }catch(e){} try{ refreshDispCcy(); }catch(e){}   // arm undo + refresh active-filter chips + the GBP/local currency pill once the plan has rendered
   try{ var _vb=document.getElementById('var-img-toggle'); if(_vb)_vb.classList.toggle('active',SHOW_VARIANT_IMG); var _cb=document.getElementById('cat-tot-toggle'); if(_cb)_cb.classList.toggle('active',SHOW_CAT_TOT); var _qb=document.getElementById('qtr-tot-toggle'); if(_qb){_qb.classList.toggle('active',SHOW_Q);_qb.setAttribute('aria-pressed',SHOW_Q?'true':'false');} var _hb=document.getElementById('half-tot-toggle'); if(_hb){_hb.classList.toggle('active',SHOW_H);_hb.setAttribute('aria-pressed',SHOW_H?'true':'false');} }catch(e){}   // sync the More-Filters toggle highlights with persisted state
   if(_smoothStale===null){ try{ _smoothStale=computeSmoothStale(); }catch(e){ _smoothStale={count:0}; } }   // >48h discontinued-smoothing impact check — once per session
@@ -9603,7 +9635,7 @@ function syncTabs(){
 function st(msg){var e=document.getElementById('st');if(e)e.textContent=msg;}
 (function(){document.getElementById('ver').innerHTML='HORIZON <b>'+VERSION+'</b>';var _hv=document.getElementById('hz-ver');if(_hv)_hv.innerHTML='HORIZON<br>'+VERSION;})();
 function render(){
-  CALC_MEMO={}; _subInvMemo={}; RUNOFF_MEMO={}; SETDEM_MEMO={};   // fresh per-render forecast memo (+ run-off allocations, v27.534/545) (see decl) — cleared here so it never survives an edit
+  CALC_MEMO={}; _subInvMemo={}; RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={};   // fresh per-render forecast memo (+ run-off allocations, v27.534/545) (see decl) — cleared here so it never survives an edit
   // Build prepack cover once so the demand rail "PP" badge shows on the plan without first opening the buy plan.
   try{ if(!_PP_COVER_INIT && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length && typeof buildLiveDemand==='function'){ buildLiveDemand(); _PP_COVER_INIT=true; } }catch(e){}
   // load trading-calendar events once (for the PLAN month-cell "C" markers); re-render when they arrive
@@ -9681,6 +9713,7 @@ function render(){
     else if(DEMAND_VIEW==='buyplan') renderBuyPlanView(body);
     else if(DEMAND_VIEW==='contribmodel'){ if(window.hzCfgContribModel)window.hzCfgContribModel(body); else body.innerHTML='<div style="padding:22px;color:var(--faint);font-size:13px">Config panel not loaded yet — open the SUPPLY tab once, then retry.</div>'; }
     else if(DEMAND_VIEW==='runoffsubs'){ if(window.hzCfgRunoffSubs)window.hzCfgRunoffSubs(body); else body.innerHTML='<div style="padding:22px;color:var(--faint);font-size:13px">Config panel not loaded yet — open the SUPPLY tab once, then retry.</div>'; }
+    else if(DEMAND_VIEW==='aspadj') renderAspAdjView(body);   // v27.577 DEMAND ▸ Config ▸ More settings (ASP reduction / discontinued discount per country × channel)
     else if(DEMAND_VIEW==='shipbags') renderShipBagView(body);   // DEMAND ▸ Ship bags — packaging forecast from units→orders
     else if(DEMAND_VIEW==='stockcover') renderStockCoverView(body);   // DEMAND ▸ Stock cover — weeks-of-cover trend per warehouse vs target (cash flow)
     else renderDemandActionsView(body);
@@ -12025,8 +12058,8 @@ function renderDemandTabs(){
     // sit directly below the main tabs but ABOVE the filters (same header column, right after the tab row)
     _vtr.parentNode.insertBefore(bar, _vtr.nextSibling); }
   // Primary tabs inline; the reference/input views (Sell-through targets, Key accounts, Calendar, Revenue) are grouped under an "Inputs ▾" dropdown.
-  var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['snapshots']='Snapshots'; _dlbl['contribmodel']='Contribution model'; _dlbl['buyplan']='Buy plan logic'; _dlbl['runoffsubs']='Discontinued sub-categories'; _dlbl['ssmbacktest']='Backtest';
-  var PRIMARY=['plan','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','fcanom','snapshots','trends','safetystock','stockcover','shipbags'], CONFIGD=['contribmodel','buyplan','runoffsubs'], INPUTS=['keyaccounts','calendar','pricechanges','klaviyobis'];   // 'kpis' moved to REPORTS ▸ Performance ▸ Demand Metrics; 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
+  var _dlbl={}; DEMAND_TABS.forEach(function(t){_dlbl[t[0]]=t[1];}); _dlbl['klaviyobis']='Klaviyo BIS'; _dlbl['snapshots']='Snapshots'; _dlbl['contribmodel']='Contribution model'; _dlbl['buyplan']='Buy plan logic'; _dlbl['runoffsubs']='Discontinued sub-categories'; _dlbl['aspadj']='More settings'; _dlbl['ssmbacktest']='Backtest';
+  var PRIMARY=['plan','actions','exceptions','scenario'], ANALYSIS=['summary','accuracy','fcanom','snapshots','trends','safetystock','stockcover','shipbags'], CONFIGD=['contribmodel','buyplan','runoffsubs','aspadj'], INPUTS=['keyaccounts','calendar','pricechanges','klaviyobis'];   // 'kpis' moved to REPORTS ▸ Performance ▸ Demand Metrics; 'ssmbacktest' merged into DEMAND ▸ Buy Plan (bottom of that page)
   var _inpActive=INPUTS.indexOf(DEMAND_VIEW)>=0, _anlActive=ANALYSIS.indexOf(DEMAND_VIEW)>=0, _cfgActive=CONFIGD.indexOf(DEMAND_VIEW)>=0;
   var _isPlanV=(DEMAND_VIEW==='plan');
   // v27.573: phone drawer reads this to list EVERY demand section (primary + the Analysis / Config / Inputs groups' items)
@@ -15656,7 +15689,7 @@ var LIVE_FC_MONTHS=(function(){
   for(var i=0;i<18;i++){var mm=m+i,yy=y;while(mm>12){mm-=12;yy++;}o.push(yy+'_'+(mm<10?'0':'')+mm);}
   return o;
 })();
-function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={};   // v27.534: allocations must reflect the latest overrides / stock
+function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={};   // v27.534: allocations must reflect the latest overrides / stock
   if(typeof BP_DATA==='undefined'||!BP_DATA.products)return;
   var lyYearMonths=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
   var MK=['UK','US','EU','AU','CA'];

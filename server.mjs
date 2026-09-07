@@ -1530,6 +1530,8 @@ app.get('/', async (req, res) => {
       const _inj = (i, name) => { if (_R[i].status === 'fulfilled') html = replaceGlobal(html, name, JSON.stringify(_R[i].value)); };
       _inj(0, 'PRICE_CHANGES'); _inj(1, 'CHINA_STOCK'); _inj(2, 'ZAL_STOCK'); _inj(3, 'ZAL_SKUS'); _inj(4, 'CHANNELS'); _inj(5, 'COUNTRIES'); _inj(6, 'COMPLEX_RULES');
     }
+    // v27.577 DEMAND ▸ Config ▸ More settings: per country|channel ASP reduction % + discontinued-items ASP discount % (app_settings.asp_adjust, JSON {"UK|DTC":{"red":9,"disc":10}}).
+    try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='asp_adjust'`)).rows[0]; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'ASP_ADJ', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { html = replaceGlobal(html, 'ASP_ADJ', '{}'); }
     // DEMAND ▸ smoothing "disregard discontinued" flags per co|ch|subcat (app_settings.smooth_disregard_disc, JSON). Fresh so a toggle shows next load.
     try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='smooth_disregard_disc'`)).rows[0]; const o = (r && r.value) ? JSON.parse(r.value) : {}; html = replaceGlobal(html, 'SMOOTH_DISREGARD_DISC', JSON.stringify(o && typeof o === 'object' ? o : {})); } catch (e) { /* leave the {} default */ }
     // DEMAND ▸ auto-smooth config (app_settings.smooth_auto = {flags:{'CO|CH|subcat':true}, threshold, mode}). One-click sweep smooths flagged subcats over the threshold.
