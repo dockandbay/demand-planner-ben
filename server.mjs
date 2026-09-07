@@ -3549,11 +3549,11 @@ app.get('/api/supply/paperstore-labels/:po', async (req, res) => {
 // v27.570: PO search for the Customise drawer's "linked purchase orders" picker (specific route, before the :section catch-all)
 app.get('/api/supply/po-search', async (req, res) => {
   const q = String(req.query.q || '').trim();
-  try { const rows = (await pool.query(`SELECT po, coalesce(supplier_name,'') supplier_name, coalesce(country,'') country, coalesce(branch,'') branch, coalesce(status,'') status,
-        coalesce(batch_id,'') batch_id, coalesce(prod_no,'') prod_no, to_char(order_date,'YYYY-MM-DD') order_date
+  try { const rows = (await pool.query(`SELECT po, coalesce(supplier_name,'') supplier_name, coalesce(country_code,'') country, coalesce(branch,'') branch, coalesce(status,'') status,
+        coalesce(batch_id,'') batch_id, coalesce(prod_no,'') prod_no, to_char(start_production,'YYYY-MM-DD') order_date
       FROM planner.purchase_orders
-      WHERE $1 = '' OR po ILIKE '%'||$1||'%' OR supplier_name ILIKE '%'||$1||'%' OR coalesce(prod_no,'') ILIKE '%'||$1||'%' OR coalesce(batch_id,'') ILIKE '%'||$1||'%' OR coalesce(direct_client,'') ILIKE '%'||$1||'%'
-      ORDER BY order_date DESC NULLS LAST, po DESC LIMIT 40`, [q])).rows;
+      WHERE $1 = '' OR po ILIKE '%'||$1||'%' OR supplier_name ILIKE '%'||$1||'%' OR coalesce(prod_no,'') ILIKE '%'||$1||'%' OR coalesce(batch_id,'') ILIKE '%'||$1||'%' OR coalesce(client,'') ILIKE '%'||$1||'%'
+      ORDER BY created_at DESC NULLS LAST, po DESC LIMIT 40`, [q])).rows;
     res.json(rows); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/barcode-projects', async (_req, res) => {
