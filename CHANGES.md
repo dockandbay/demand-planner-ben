@@ -1,3 +1,6 @@
+## v27.529 Portal: new sample version can create its sample shipment in one go
+- PRODUCT ▸ Samples (supplier portal): the Sample shipment dropdown on the Submit sample version form gains **+ New shipment (create now)**. On submit the sample version is created, a new SR is opened for this supplier with the sample on it, photos upload, and the list refreshes showing the new shipment; address and tracking are completed later in SAMPLES as today. supply/portal-view.js only.
+
 ## v27.528 PRODUCT: plan grid header sticks on scroll + silent Mark received
 - **Plan grid (#/product/plan):** the whole header row now stays put while scrolling down (the table wrapper gets a viewport-bound height so its sticky headers can bite; before, only the frozen Ref / swatch columns looked sticky because they were pinned sideways).
 - **Samples tab:** Mark received / un-mark repaints just that cell (no Loading flash, no tab re-render); caches still refreshed so other views agree. supply/inject.html + supply/hz-theme.css.
