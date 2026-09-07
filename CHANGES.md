@@ -1,3 +1,6 @@
+## v27.559 Create production POs: tier badge + season + lifecycle line (Ben)
+- In both Create-PO dialogs (one country, all countries) each SKU line shows its A / B / C market-tier badge after the SKU, then a second line with the season badge (e.g. SS27) and the lifecycle: "01-Feb-27 to 01-Sep-27", "01-Feb-27 to ongoing" when there is no discontinue date, or "discontinue 01-Sep-27" when there is no launch date. Launch = earliest country launch date. supply/inject.html only.
+
 ## v27.558 PRODUCT Timeline: photos / documents on messages (Ben)
 - Compose box accepts files by drag-and-drop or 📎 (images, PDF, Office, AI, ZIP; 10MB each). On Post the files upload as product documents (so they also appear under PRODUCT ▸ Documents) and the message carries the first as its attachment; extra files post as their own "📎 name" entries. Image attachments render as a thumbnail on the message (click to zoom); others as a download link. /api/product/note accepts attachment_id; notes return attachment_mime. server.mjs + supply/inject.html.
 
