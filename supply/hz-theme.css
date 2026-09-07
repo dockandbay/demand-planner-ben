@@ -717,3 +717,9 @@ body header.pv-top .pv-lang button:hover{color:#fff}
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Arrival/Delivery"] > :not(.datewrap),
   #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-l="Completion"] > :not(.datewrap){display:block;width:max-content;max-width:100%;margin-top:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:9.5px}
 }
+
+/* ═══ v27.542: phone PO card — smaller PLAN button + text ═══ */
+@media (max-width:640px){
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-ci="0"] .planbtn{min-height:22px;padding:2px 7px;font-size:9px!important;letter-spacing:.04em;border-radius:4px;line-height:1.2}
+  #app #supply-root table.po-cards[data-stack] tbody tr:not([data-full]) td[data-ci="0"] .fav-star{font-size:12px;margin-left:2px}
+}

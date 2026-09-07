@@ -1,3 +1,6 @@
+## v27.542 Mobile PO card: smaller PLAN button (Ben)
+- PLAN button on the phone card drops to a 22px pill with 9px text (was 28px / 10px); star icon tightened. supply/hz-theme.css only.
+
 ## v27.541 Mobile PO card dates: top-aligned columns (Ben)
 - The four date columns align at the top: label row, then the date (or picker) at a fixed height, then any badge ("-58d", CALC, "set to 04-Aug") stacked underneath, each on its own line. supply/hz-theme.css only.
 
