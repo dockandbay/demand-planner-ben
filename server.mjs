@@ -7020,7 +7020,7 @@ async function productSampleList(itemRef) {
     coalesce((SELECT json_agg(json_build_object('id',sr.id,'ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,'')) ORDER BY sr.created_at)
       FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id
       WHERE l.dev_sample_id=ps.id),'[]'::json) shipments,
-    coalesce((SELECT json_agg(json_build_object('aspect',af.aspect,'feedback',af.feedback,'decision',af.decision,'updated_at',to_char(af.updated_at,'DD-Mon-YY HH24:MI'),'updated_by',coalesce(af.updated_by,'')) ORDER BY af.aspect)
+    coalesce((SELECT json_agg(json_build_object('aspect',af.aspect,'feedback',af.feedback,'decision',af.decision,'awc_comment',coalesce(af.awc_comment,''),'updated_at',to_char(af.updated_at,'DD-Mon-YY HH24:MI'),'updated_by',coalesce(af.updated_by,'')) ORDER BY af.aspect)
       FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id),'[]'::json) aspect_feedback,
     coalesce((SELECT json_agg(json_build_object('aspect',rr.aspect,'reason_id',rr.reason_id) ORDER BY rr.aspect)
       FROM planner.product_sample_reject_reasons rr WHERE rr.sample_id=ps.id),'[]'::json) reject_reasons,
@@ -7073,6 +7073,15 @@ async function insertProductSamplePhoto(sampleId, b, by, kind) {
 // v27.551 PRODUCT ▸ Sample batch review: one sample shipment (SR) → every development sample on it, grouped by product, with the
 // same per-component feedback / decision / reject-reason data the Samples tab uses (productSampleList), plus the product's
 // components so aspect keys read as names. Read-only; edits go through the existing /api/product/sample/:id/aspect etc.
+// v27.557: shipments that carry product-development samples (the batch-review picker), newest first, with dates + dev count
+app.get('/api/product/batch-review-list', async (_req, res) => {
+  try { res.json((await pool.query(`SELECT s.id, s.ref, coalesce(s.supplier_name,'') supplier_name, coalesce(s.recipient_company,'') recipient_company,
+      trim(coalesce(s.first_name,'')||' '||coalesce(s.last_name,'')) recipient_name, coalesce(s.status,'') status, coalesce(s.carrier,'') carrier, coalesce(s.tracking_code,'') tracking,
+      to_char(s.created_at,'YYYY-MM-DD') created, to_char(s.supplier_expected_completion,'YYYY-MM-DD') expected, to_char(s.received_at,'YYYY-MM-DD') received, count(ls.dev_sample_id)::int n_dev
+    FROM planner.sample_requests s JOIN planner.sample_request_dev_samples ls ON ls.sample_request_id=s.id
+    GROUP BY s.id ORDER BY s.id DESC`)).rows); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/product/batch-review/:id', async (req, res) => {
   const id = req.params.id;
   try {
@@ -7162,6 +7171,7 @@ app.post('/api/product/sample/:id/aspect', async (req, res) => {
     const aspect = String(b.aspect || '').trim();
     if (!aspectKeyOk(aspect)) return res.status(400).json({ error: 'bad aspect' });   // v27.533: legacy key or component key c<id>
     const feedback = String(b.feedback || '');
+    const awcIn = (b.awc_comment == null) ? null : String(b.awc_comment);   // v27.557 (mig 266): comments specific to an approved_with_comments decision
     // Sign-off stage vocabulary (shared with the Variants tab), excludes the shipment stage. Legacy pending/rejected mapped.
     const STAGES = ['sample_development', 'sample_in_review', 'approved', 'approved_with_comments', 'rejected_new_sample', 'stop_development'];
     let decision = String(b.decision || '');
@@ -7173,10 +7183,11 @@ app.post('/api/product/sample/:id/aspect', async (req, res) => {
     // Reject-reason capture (mandatory when rejecting): tag ≥1 reason so we can report on why samples are rejected.
     const reasonIds = Array.isArray(b.reject_reasons) ? b.reject_reasons.map(Number).filter(n => Number.isFinite(n) && n > 0) : [];
     if (isRejected && reasonIds.length === 0) return res.status(400).json({ error: 'Select at least one reject reason.' });
-    await pool.query(`INSERT INTO planner.product_sample_aspect_feedback (sample_id, aspect, feedback, decision, updated_by, updated_at)
-      VALUES ($1,$2,$3,$4,$5,now())
-      ON CONFLICT (sample_id, aspect) DO UPDATE SET feedback=excluded.feedback, decision=excluded.decision, updated_by=excluded.updated_by, updated_at=now()`,
-      [id, aspect, feedback, decision, by]);
+    const awc = (decision === 'approved_with_comments') ? awcIn : (awcIn == null ? null : '');
+    await pool.query(`INSERT INTO planner.product_sample_aspect_feedback (sample_id, aspect, feedback, decision, updated_by, updated_at, awc_comment)
+      VALUES ($1,$2,$3,$4,$5,now(),$6)
+      ON CONFLICT (sample_id, aspect) DO UPDATE SET feedback=excluded.feedback, decision=excluded.decision, updated_by=excluded.updated_by, updated_at=now(), awc_comment=coalesce(excluded.awc_comment, planner.product_sample_aspect_feedback.awc_comment)`,
+      [id, aspect, feedback, decision, by, awc]);
     // Reasons describe the CURRENT rejected state of this (sample × aspect): replace on reject, clear when not rejected.
     await pool.query(`DELETE FROM planner.product_sample_reject_reasons WHERE sample_id=$1 AND aspect=$2`, [id, aspect]);
     if (isRejected && reasonIds.length) {
@@ -7211,7 +7222,7 @@ app.post('/api/product/sample/:id/delete', async (req, res) => {
 // v27.553: ONE sample-card generator for admin and supplier portal (same layout, boxed). Returns {bytes, filename} or null.
 async function sampleCardPdf(sampleId) {
     const sr = (await pool.query(`SELECT ps.id, ps.version, to_char(ps.sample_date,'YYYY-MM-DD') sample_date, ps.item_ref,
-      coalesce((SELECT json_agg(json_build_object('aspect',af.aspect,'feedback',af.feedback,'decision',af.decision) ORDER BY af.aspect)
+      coalesce((SELECT json_agg(json_build_object('aspect',af.aspect,'feedback',af.feedback,'decision',af.decision,'awc',coalesce(af.awc_comment,'')) ORDER BY af.aspect)
         FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id),'[]'::json) aspect_feedback
       FROM planner.product_dev_samples ps WHERE ps.id=$1::bigint`, [sampleId])).rows[0];
     if (!sr) return null;
@@ -7226,7 +7237,7 @@ async function sampleCardPdf(sampleId) {
     const st = { approved: false, awc: false, no: false };
     if (hasReject) st.no = true; else if (hasAwc) st.awc = true; else if (hasApproved) st.approved = true;
     const reviewed = hasReject || hasAwc || hasApproved;
-    const comments = (sr.aspect_feedback || []).filter(x => (x.feedback || '').trim()).map(x => (CL[x.aspect] || x.aspect) + ': ' + x.feedback);
+    const comments = []; (sr.aspect_feedback || []).forEach(x => { if ((x.feedback || '').trim()) comments.push((CL[x.aspect] || x.aspect) + ': ' + x.feedback); if ((x.awc || '').trim()) comments.push((CL[x.aspect] || x.aspect) + ' (approved with comments): ' + x.awc); });   // v27.557
     const apprDate = (st.approved || st.awc) && it.approved_at ? it.approved_at : '';
     const { PDFDocument, StandardFonts, rgb } = await import('pdf-lib');
     const doc = await PDFDocument.create(); const F = await doc.embedFont(StandardFonts.Helvetica), B = await doc.embedFont(StandardFonts.HelveticaBold);

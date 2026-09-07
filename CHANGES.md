@@ -1,3 +1,10 @@
+## v27.557 Sample batch review: approved-with-comments box, photography tick, dev-only shipment picker with dates, silent Mark received, drawer open (Ben)
+- **Approved with comments** now has its own comment box under the decision (batch page and Samples tab); stored in a new column (migration 266, additive) and printed on the sample card under COMMENTS as "(approved with comments)".
+- **📸 Approved for photography** tick + optional notes under each sample's sign-off (batch page), same endpoint as the Samples tab.
+- **Shipment picker** lists only shipments that carry product-development samples (new GET /api/product/batch-review-list), with created / expected completion / received dates and dev-sample count; search matches dates too. (A sample request has no separate ship-date field; expected completion + received are shown.)
+- **Mark received / un-mark** repaints only the header line.
+- Product ref opens the product **drawer** on its Samples tab instead of jumping to the Plan grid. server.mjs + supply/inject.html + migrations/266_sample_aspect_awc_comment.sql (sandbox applied; Diviyaj to apply live).
+
 ## v27.556 Sample batch review: picker panel, hint text, column widths, files on the feedback note (Ben)
 - The "/" phrase and "/p" Pantone menu now draws as a white panel with border and shadow wherever it floats (was transparent on the batch page).
 - Under every feedback box: "Type / for a reusable phrase · /p for a Pantone colour · drop photos / documents here or 📎" (batch page and Samples tab).
