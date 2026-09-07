@@ -14152,7 +14152,7 @@
     body.querySelectorAll('.pdoc-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this document?'))return; shipPost('/api/product/doc/'+a.dataset.id+'/delete',{},function(){ refreshDocs(); }); }; });
     }).catch(function(e){ body.innerHTML='<div style="color:var(--neg)">Failed: '+esc(e.message||e)+'</div>'; }); }
   // Mirrors the PO timeline (timelinePanel): newest-first cards, Escalate sits on YOUR latest message (not the compose box), compose posts at the bottom.
-  function renderProdTimeline(body,ref){ body.innerHTML='<div style="color:var(--faint)">Loading…</div>';
+  function renderProdTimeline(body,ref,opts){ opts=opts||{}; if(!opts.quiet)body.innerHTML='<div style="color:var(--faint)">Loading…</div>';   // v27.549: quiet = redraw in place (retag / filter / post), no Loading flash
     renderProdTimeline._filt=renderProdTimeline._filt||{};   // per-ref tag filter, persists across the re-render on post
     Promise.all([_prodCachedJson('/api/product/notes/'+encodeURIComponent(ref)),_prodCachedJson('/api/product/item/'+encodeURIComponent(ref)+'/changes'),_prodCachedJson('/api/product/timeline-config')]).then(function(_r){
       var notes=Array.isArray(_r[0])?_r[0]:[], changes=(_r[1]&&_r[1].change_log)||[], _hid=rocIsHidden(ref);
@@ -14215,17 +14215,17 @@
       (function(){ var ta=body.querySelector('#pt-in'), pick=body.querySelector('#pt-picker'), prev=body.querySelector('#pt-prev'); if(!ta||!pick)return;   // v27.530: shared picker + live Pantone preview
         hzSlashPicker(ta,pick,{snips:SNIPS,picked:_panPicked,fixed:true,onChange:function(){ hzPanPreview(ta,prev,_panPicked); }}); })();   // fixed (v27.548): the phrase / Pantone list must sit above the notes below the compose box
       // filter chip handlers
-      body.querySelectorAll('.pt-filt').forEach(function(ch){ ch.onclick=function(){ var id=ch.dataset.id; FILT[id]=!FILT[id]; if(!FILT[id])delete FILT[id]; renderProdTimeline(body,ref); }; });
-      var _fclr=body.querySelector('.pt-filt-clear'); if(_fclr)_fclr.onclick=function(){ Object.keys(FILT).forEach(function(k){delete FILT[k];}); renderProdTimeline(body,ref); };
+      body.querySelectorAll('.pt-filt').forEach(function(ch){ ch.onclick=function(){ var id=ch.dataset.id; FILT[id]=!FILT[id]; if(!FILT[id])delete FILT[id]; renderProdTimeline(body,ref,{quiet:true}); }; });
+      var _fclr=body.querySelector('.pt-filt-clear'); if(_fclr)_fclr.onclick=function(){ Object.keys(FILT).forEach(function(k){delete FILT[k];}); renderProdTimeline(body,ref,{quiet:true}); };
       // retag an already-sent message: 🏷 toggles the inline chip picker; a chip click saves the new tag set
       body.querySelectorAll('.pt-retag').forEach(function(a){ a.onclick=function(){ var bx=body.querySelector('.pt-retag-box[data-id="'+a.dataset.id+'"]'); if(bx)bx.style.display=(bx.style.display==='none'?'':'none'); }; });
       body.querySelectorAll('.pt-retag-chip').forEach(function(ch){ ch.onclick=function(){ var nid=ch.dataset.noteid, tid=Number(ch.dataset.id);
         var n=notes.filter(function(x){return String(x.id)===String(nid);})[0]; if(!n)return; n.tags=(n.tags||[]).map(Number);
         var i=n.tags.indexOf(tid); if(i>=0)n.tags.splice(i,1); else n.tags.push(tid);
-        shipPost('/api/product/note/'+nid+'/tags',{tags:n.tags},function(j){ if(j&&j.error){alert(j.error);return;} _prodJsonBust(ref); renderProdTimeline(body,ref); }); }; });
+        shipPost('/api/product/note/'+nid+'/tags',{tags:n.tags},function(j){ if(j&&j.error){alert(j.error);return;} renderProdTimeline(body,ref,{quiet:true}); setTimeout(function(){ try{_prodJsonBust(ref);}catch(e){} },400); }); }; });   // v27.549: tags already changed in memory → quiet redraw, refresh cache after
       body.querySelector('#pt-post').onclick=function(){ var t=body.querySelector('#pt-in').value.trim(); if(!t)return; var tags=Object.keys(_sel).filter(function(id){return _sel[id];}).map(Number);
         var pantone=Object.keys(_panPicked).filter(function(code){ return t.indexOf('🎨 '+code)>=0; }).map(function(code){ return _panPicked[code]; });   // only cards whose token survives in the text
-        shipPost('/api/product/note',{ref:ref,body:t,author_email:(window.ME&&ME.email)||'',tags:tags,pantone:pantone},function(){ _prodJsonBust(ref); renderProdTimeline(body,ref); }); };
+        shipPost('/api/product/note',{ref:ref,body:t,author_email:(window.ME&&ME.email)||'',tags:tags,pantone:pantone},function(){ _prodJsonBust(ref); renderProdTimeline(body,ref,{quiet:true}); }); };
       var eb=body.querySelector('.prod-esc'); if(eb)eb.onclick=function(){ var msg=eb.dataset.msg||''; if(!msg){alert('No message to escalate.');return;} if(!confirm('Escalate this message for '+ref+' to the supplier (emails their portal user)?'))return; eb.disabled=true; var t=eb.textContent; eb.textContent='Sending…'; shipPost('/api/product/escalate',{ref:ref,message:msg},function(j){ if(j&&j.error){alert(j.error);eb.disabled=false;eb.textContent=t;return;} alert(j&&j.sent?('Escalated — emailed '+j.emails.join(', ')):(j&&j.note)||'Escalated (no recipients configured).'); renderProdTimeline(body,ref); }); };
       var _hc=body.querySelector('.prod-hide-chg'); if(_hc)_hc.onchange=function(){ rocSetHidden(ref,_hc.checked); body.querySelectorAll('.tl-change').forEach(function(el){ el.style.display=_hc.checked?'none':''; }); };
     }).catch(function(e){ body.innerHTML='<div style="color:var(--neg)">Failed: '+esc(e.message||e)+'</div>'; }); }

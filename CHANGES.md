@@ -1,3 +1,6 @@
+## v27.549 PRODUCT Timeline: tag changes and tag filters update silently (Ben)
+- Retagging a message, toggling a tag filter, clearing filters and posting a note no longer blank the timeline with Loading…: the list redraws in place from the cached notes (the tag change is applied in memory first) and the cache refreshes in the background. supply/inject.html only.
+
 ## v27.548 PRODUCT Timeline: quick-phrase / Pantone picker on top too
 - The compose box's "/" phrase and "/p" Pantone menu uses the same detached, fixed-position menu as the feedback boxes (v27.547), so the notes below can no longer cover it. supply/inject.html only.
 
