@@ -5104,7 +5104,7 @@ function filteredCats(){
   const out={};ks.forEach(function(k){out[k]=m[k];});return out;
 }
 
-function refreshRow(s,co,ch){
+function refreshRow(s,co,ch){ RUNOFF_MEMO={};   // v27.534: an override changed → re-allocate the country pool
   try{ delete CALC_MEMO[s+'|'+co+'|'+ch]; }catch(e){}   // this row's IV just changed → drop its cached calc so the edit reflects (the per-render memo is otherwise only cleared in render()/renderMain())
   try{ BUY_FC_STALE=true; }catch(e){}                   // forecast changed → the buy plan's demand overlay is now stale (rebuilt on the next BP.render)
   const _cr0=calc(s,co,ch);const fu=_cr0.fu;const reasons=_cr0.reasons;const sp=aspF(s,co,ch);
@@ -7143,6 +7143,41 @@ function buildSkuShares(skus,co,ch,lyMonths){
 // (renderSkuView) AND the DEMAND download so the numbers always agree. Reproduces exactly: 0 before launch;
 // discontinued run-down capped by remaining stock (in month order); else the saved forecast output (skuOutFC)
 // or subcatFU × tier-weighted share. `months` MUST be chronological (the run-down cap accumulates).
+// ═══ v27.534 shared run-off allocator (Ben, 07-Sep-26) ═══════════════════════════════════════════════════════════
+// Discontinued SKU: ONE sellable pool per country, drawn down month by month by EVERY channel together.
+//   • 3PL pool = 3PL on-hand (+ non-GRS) + 3PL inbound → DTC / B2B / TIK, AND FBA once FBA's own pool is gone.
+//   • FBA pool = FBA on-hand (+ US AWD) + FBA inbound → FBA only (FBA stock never comes back to the 3PL).
+//   • Each month: FBA draws its own pool first; what FBA still needs joins the 3PL channels' demand against the 3PL pool;
+//     if that combined demand exceeds what is left, the remainder is shared pro rata. Consumption starts at the current
+//     month (stock is as-of-now; earlier months are actuals). Example: 100 in the 3PL, Sep DTC 30 + FBA 30 → 40 left for Oct.
+//   • Raw demand per channel = the plan's own rule: saved override → LY same month (chained) → sub-cat cascade × share.
+// Used by the row display, skuMonthlyMap (download), both smoothing caps and buildLiveDemand (buy feed) so all agree.
+// Memoised per render / per demand build (RUNOFF_MEMO). Returns {alloc:{ch:{m:units}}, out:{ch:{m:true}}, cap:{ch:{m:units}}}.
+var RUNOFF_MEMO={}, RUNOFF_LYYM=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
+function runoffChannels(p,ctry){ var av=(p.av&&p.av[ctry])||'', chs=[]; if(av.indexOf('d')>=0)chs.push('DTC'); if(av.indexOf('b')>=0)chs.push('B2B'); if(av.indexOf('t')>=0&&typeof TIK_COUNTRIES!=='undefined'&&TIK_COUNTRIES.indexOf(ctry.toUpperCase())>=0)chs.push('TIK'); if(av.indexOf('f')>=0)chs.push('FBA'); return chs; }
+function runoffAlloc(sku,co){ var key=sku+'|'+co; if(RUNOFF_MEMO[key])return RUNOFF_MEMO[key];
+  var p=SKUM[sku]||{}, ctry=String(co).toLowerCase(), inv=p.inv||{}, oo=p.oo||{};
+  var discDate=(p.disc&&p.disc[ctry])?p.disc[ctry]:((p.lyo&&p.dsc)?p.dsc:null), launchDate=(p.lch&&p.lch[ctry])||null;
+  var res={alloc:{},out:{},cap:{},disc:discDate}, chs=runoffChannels(p,ctry);
+  var pool3=(inv[ctry+'_3pl']||0)+(inv[ctry+'_nongrs']||0)+(oo[ctry+'_3pl']||0), poolF=(inv[ctry+'_fba']||0)+(ctry==='us'?(inv['us_awd']||0):0)+(oo[ctry+'_fba']||0);
+  var st={}; chs.forEach(function(ch){ var sales=skuSales(sku,co,ch), fu={}, sh=0;
+    try{ fu=(calc(p.s,co,ch)||{}).fu||{}; }catch(e){}
+    try{ var all=filteredSkus(p.s,co,ch,true)||[]; if(all.indexOf(sku)<0)all=all.concat([sku]); sh=(buildSkuShares(all,co,ch,RUNOFF_LYYM)||{})[sku]||0; }catch(e){}
+    st[ch]={sales:sales,hasLY:skuHasLY(sales),fu:fu,sh:sh,fc:{}}; res.alloc[ch]={}; res.out[ch]={}; res.cap[ch]={}; });
+  function raw(ch,m){ var x=st[ch]; var fo=skuOutFC(sku,co,ch,m); if(fo!=null)return fo; if(x.hasLY){ var lyM=(parseInt(m.slice(0,4),10)-1)+'_'+m.slice(5,7); return (lyM<=CUR_YTD_END)?(x.sales[lyM]||0):(x.fc[lyM]||0); } return Math.round((x.fu[m]||0)*x.sh); }
+  FM_CALC.forEach(function(m){ var ms=m.slice(0,4)+'-'+m.slice(5,7)+'-01', live=(m>=CUR_MONTH);
+    var rw={}; chs.forEach(function(ch){ var r=raw(ch,m); if(p.lyo||(launchDate&&ms<launchDate))r=0; rw[ch]=Math.max(0,Math.round(r)); });
+    if(!(discDate&&ms>discDate)||!live){ chs.forEach(function(ch){ st[ch].fc[m]=rw[ch]; res.alloc[ch][m]=rw[ch]; res.cap[ch][m]=Infinity; }); return; }
+    var fOwn=0, needF=0; if(rw.FBA!=null){ fOwn=Math.min(rw.FBA,poolF); poolF-=fOwn; needF=rw.FBA-fOwn; }
+    var tot3=needF; chs.forEach(function(ch){ if(ch!=='FBA')tot3+=rw[ch]; });
+    var take={};
+    if(tot3<=pool3){ chs.forEach(function(ch){ take[ch]=(ch==='FBA')?needF:rw[ch]; }); pool3-=tot3; }
+    else { var ratio=(pool3>0&&tot3>0)?pool3/tot3:0, used=0, fr=[]; chs.forEach(function(ch){ var want=(ch==='FBA')?needF:rw[ch], ex=want*ratio, fl=Math.floor(ex); take[ch]=fl; used+=fl; fr.push([ex-fl,ch]); });
+      fr.sort(function(a,b){return b[0]-a[0];}); var left=Math.max(0,pool3-used); for(var i=0;i<fr.length&&left>0;i++){ take[fr[i][1]]++; left--; } pool3=0; }
+    chs.forEach(function(ch){ var v=(ch==='FBA')?(fOwn+(take.FBA||0)):(take[ch]||0); res.alloc[ch][m]=v; st[ch].fc[m]=v;
+      var exhausted=(ch==='FBA')?(poolF<=0&&pool3<=0):(pool3<=0); if(v<=0&&exhausted)res.out[ch][m]=true;
+      res.cap[ch][m]=v+pool3+((ch==='FBA')?poolF:0); }); });   // cap = what this channel could take in m if only IT were raised (others unchanged)
+  RUNOFF_MEMO[key]=res; return res; }
 function skuMonthlyMap(sku,co,ch,months,subcatFU,share,invOH){
   var p=SKUM[sku]||{}, ctry=co.toLowerCase();
   var discDate=(p.disc&&p.disc[ctry])||null, launchDate=(p.lch&&p.lch[ctry])||null;
@@ -7152,7 +7187,7 @@ function skuMonthlyMap(sku,co,ch,months,subcatFU,share,invOH){
     if(discDate||launchDate){
       var monthStart=m.slice(0,4)+'-'+m.slice(5,7)+'-01';
       if(launchDate&&monthStart<launchDate){ base=0; }
-      else if(discDate&&monthStart>discDate){ var raw=Math.round((subcatFU[m]||0)*share); base=Math.max(0,Math.min(raw,rem)); rem=Math.max(0,rem-base); }
+      else if(discDate&&monthStart>discDate){ var raw=Math.round((subcatFU[m]||0)*share); var _RA=runoffAlloc(sku,co); if(_RA.alloc[ch]&&_RA.alloc[ch][m]!=null){ base=_RA.alloc[ch][m]; } else { base=Math.max(0,Math.min(raw,rem)); rem=Math.max(0,rem-base); } }   // v27.534 shared country pool
       else { var fo3=skuOutFC(sku,co,ch,m); base=(fo3!=null)?fo3:Math.round((subcatFU[m]||0)*share); }
     } else { var foB=skuOutFC(sku,co,ch,m); base=(foB!=null)?foB:Math.round((subcatFU[m]||0)*share); }
     out[m]=base;
@@ -7926,16 +7961,8 @@ function computeSmoothAlloc(s,co,ch,m,opts){
     if(lch&&ms<lch){cap=0;frozen=true;}                 // pre-launch — leave on cascade 0
     else if(disc&&ms>disc&&DISREGARD_DISC){ frozen=true; cap=0; }   // disregard discontinued: leave it UNTOUCHED (no override, keeps its stock rundown) and exclude from the pool so only ACTIVE SKUs are boosted to the subcat target
     else if(disc&&ms>disc){                              // discontinued — cap by remaining stock (matches row display rundown)
-      var rem=(p.inv&&p.inv[wh]||0)+(p.oo&&p.oo[wh]||0);
-      for(var i=0;i<FM.length&&FM[i]<m;i++){
-        var mm=FM[i], mms=mm.slice(0,4)+'-'+mm.slice(5,7)+'-01';
-        if(disc&&mms>disc){
-          var _f=skuOutFC(sku,co,ch,mm);
-          var v=Math.max(0,(_f!=null)?_f:Math.round((FU[mm]||0)*(shares[sku]||0)));
-          rem=Math.max(0,rem-Math.min(v,rem));
-        }
-      }
-      cap=Math.max(0,rem);
+      var _RA=runoffAlloc(sku,co), _cp=(_RA.cap[ch]&&_RA.cap[ch][m]!=null)?_RA.cap[ch][m]:0;   // v27.534: cap = shared country pool left for this channel in m
+      cap=(_cp===Infinity)?Infinity:Math.max(0,_cp);
       // Black Friday: in November, a discontinued SKU that still has stock is pushed to
       // clear inventory — its smoothing weight = last November's actuals + 50% (capped by stock).
       if(m.slice(5)==='11' && cap>0){
@@ -8155,7 +8182,7 @@ function subcatSkuEffTotals(s,co,ch){
       var raw=(_fo!=null)?_fo:Math.round((FU[m]||0)*(shares[sku]||0));
       var v, isDisc=(disc&&ms>disc);
       if(lch&&ms<lch){v=0;}
-      else if(isDisc){ if(rem<=0){v=0;} else {v=Math.max(0,Math.min(raw,rem));rem=Math.max(0,rem-v);} }   // discontinued always keep their stock rundown (not zeroed)
+      else if(isDisc){ var _RA2=runoffAlloc(sku,co); if(_RA2.alloc[ch]&&_RA2.alloc[ch][m]!=null){ v=_RA2.alloc[ch][m]; } else if(rem<=0){v=0;} else {v=Math.max(0,Math.min(raw,rem));rem=Math.max(0,rem-v);} }   // v27.534 shared pool; discontinued always keep their stock rundown (not zeroed)
       else{v=raw;}
       if(!(isDisc&&DIS)){ tot[m]=(tot[m]||0)+v;   // when disregarding, the gap basis is ACTIVE-only vs the subcat target (discontinued excluded)
         if(isSet){ setUnit[m]=(setUnit[m]||0)+v; setBox[m]=(setBox[m]||0)+Math.round(v/sz); } else { mastU[m]=(mastU[m]||0)+v; } }
@@ -8337,7 +8364,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     var preLaunchM=function(mo){return launchDate&&(mo.slice(0,4)+'-'+mo.slice(5,7)+'-01')<launchDate;}; // pre-launch only for months before the launch date
     var invOH=p.inv&&p.inv[wh]||0;
     var invOO=p.oo&&p.oo[wh]||0; // on-order / inbound
-    if(ch==='FBA'&&discDate){ try{ var _wh3=skuWh(co,'DTC'); if(_wh3&&_wh3!==wh){ invOH+=(p.inv&&p.inv[_wh3])||0; invOO+=(p.oo&&p.oo[_wh3])||0; } }catch(e){} }   // v27.527 (Ben): FBA run-off pool counts the country's 3PL stock too — transfers replenish FBA, so a discontinued SKU keeps forecasting on FBA while the 3PL still holds units
+    // (v27.527 FBA+3PL pool hack superseded by the shared allocator runoffAlloc(), v27.534)
 
     // Compute per-month forecast
     var skuFC={};
@@ -8354,9 +8381,9 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         raw=(lyM<=CUR_YTD_END)?(sales[lyM]||0):(skuFC[lyM]||0); }                 // complete → last-year ACTUAL; incomplete → last-year FORECAST (chained)
       else { raw=Math.round((subcatFU[m]||0)*share); }                           // new SKU → subcat cascade × share
       if(launchDate&&ms<launchDate){skuFC[m]=0;}
-      else if(discDate&&ms>discDate){
-        if(rem<=0){skuFC[m]=0;skuRundown[m]=true;skuDiscOut[m]=true;return;} // no stock left -> disc
-        var c=Math.max(0,Math.min(raw,rem));skuFC[m]=c;rem=Math.max(0,rem-c);skuRundown[m]=true;
+      else if(discDate&&ms>discDate){ var _RA=runoffAlloc(sku,co);   // v27.534: shared country pool across channels
+        if(_RA.alloc[ch]&&_RA.alloc[ch][m]!=null){ skuFC[m]=_RA.alloc[ch][m]; skuRundown[m]=true; if(_RA.out[ch]&&_RA.out[ch][m])skuDiscOut[m]=true; }
+        else { if(rem<=0){skuFC[m]=0;skuRundown[m]=true;skuDiscOut[m]=true;return;} var c=Math.max(0,Math.min(raw,rem));skuFC[m]=c;rem=Math.max(0,rem-c);skuRundown[m]=true; }
       }
       else{skuFC[m]=raw;}
     });
@@ -9336,7 +9363,7 @@ function remapExpanded(dim,newVal){
 }
 function renderMain(){
   try{ zalInit(); }catch(e){} try{ tikInit(); }catch(e){}   // wire the EU Zalando channel (av 'z' + synth DATA rows) — idempotent, runs once data is ready
-  CALC_MEMO={}; _subInvMemo={};   // fresh per-render forecast memo — covers direct renderMain() calls (filters/toggles) too
+  CALC_MEMO={}; _subInvMemo={}; RUNOFF_MEMO={};   // fresh per-render forecast memo (+ run-off allocations, v27.534) — covers direct renderMain() calls (filters/toggles) too
   _undoReady=true; try{ updateUndoBtn(); }catch(e){} try{ renderPlanChips(); }catch(e){} try{ refreshDispCcy(); }catch(e){}   // arm undo + refresh active-filter chips + the GBP/local currency pill once the plan has rendered
   try{ var _vb=document.getElementById('var-img-toggle'); if(_vb)_vb.classList.toggle('active',SHOW_VARIANT_IMG); var _cb=document.getElementById('cat-tot-toggle'); if(_cb)_cb.classList.toggle('active',SHOW_CAT_TOT); var _qb=document.getElementById('qtr-tot-toggle'); if(_qb){_qb.classList.toggle('active',SHOW_Q);_qb.setAttribute('aria-pressed',SHOW_Q?'true':'false');} var _hb=document.getElementById('half-tot-toggle'); if(_hb){_hb.classList.toggle('active',SHOW_H);_hb.setAttribute('aria-pressed',SHOW_H?'true':'false');} }catch(e){}   // sync the More-Filters toggle highlights with persisted state
   if(_smoothStale===null){ try{ _smoothStale=computeSmoothStale(); }catch(e){ _smoothStale={count:0}; } }   // >48h discontinued-smoothing impact check — once per session
@@ -9519,7 +9546,7 @@ function syncTabs(){
 function st(msg){var e=document.getElementById('st');if(e)e.textContent=msg;}
 (function(){document.getElementById('ver').innerHTML='HORIZON <b>'+VERSION+'</b>';var _hv=document.getElementById('hz-ver');if(_hv)_hv.innerHTML='HORIZON<br>'+VERSION;})();
 function render(){
-  CALC_MEMO={}; _subInvMemo={};   // fresh per-render forecast memo (see decl) — cleared here so it never survives an edit
+  CALC_MEMO={}; _subInvMemo={}; RUNOFF_MEMO={};   // fresh per-render forecast memo (+ run-off allocations, v27.534) (see decl) — cleared here so it never survives an edit
   // Build prepack cover once so the demand rail "PP" badge shows on the plan without first opening the buy plan.
   try{ if(!_PP_COVER_INIT && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length && typeof buildLiveDemand==='function'){ buildLiveDemand(); _PP_COVER_INIT=true; } }catch(e){}
   // load trading-calendar events once (for the PLAN month-cell "C" markers); re-render when they arrive
@@ -15532,7 +15559,7 @@ var LIVE_FC_MONTHS=(function(){
   for(var i=0;i<18;i++){var mm=m+i,yy=y;while(mm>12){mm-=12;yy++;}o.push(yy+'_'+(mm<10?'0':'')+mm);}
   return o;
 })();
-function buildLiveDemand(){
+function buildLiveDemand(){ RUNOFF_MEMO={};   // v27.534: allocations must reflect the latest overrides / stock
   if(typeof BP_DATA==='undefined'||!BP_DATA.products)return;
   var lyYearMonths=['2025_01','2025_02','2025_03','2025_04','2025_05','2025_06','2025_07','2025_08','2025_09','2025_10','2025_11','2025_12'];
   var MK=['UK','US','EU','AU','CA'];
@@ -15580,7 +15607,7 @@ function buildLiveDemand(){
             else { raw=(fu[fym]||0)*sh; }                                                  // new SKU → subcat cascade × share
             var fc;
             if(launchDate&&ms<launchDate){fc=0;}
-            else if(discDate&&ms>discDate){fc=Math.max(0,Math.min(Math.round(raw),rem));rem=Math.max(0,rem-fc);}
+            else if(discDate&&ms>discDate){ var _RA=runoffAlloc(s2,co); if(_RA.alloc[ch]&&_RA.alloc[ch][fym]!=null){ fc=_RA.alloc[ch][fym]; } else { fc=Math.max(0,Math.min(Math.round(raw),rem));rem=Math.max(0,rem-fc);} }   // v27.534 shared country pool (ZAL: allocator has no ZAL channel → legacy path)
             else{fc=Math.round(raw);}
             if(fc>0)md.demand[ch][fym]=fc;else delete md.demand[ch][fym];
           });
@@ -15675,7 +15702,7 @@ function buildLiveDemand(){
             else { raw=(subcatFU[fym]||0)*share/_sz; }                                       // new set → subcat cascade × share (item-equiv, Sets%-sized) ÷ setSize = BOXES
             var fc;
             if(launchDate&&ms<launchDate)fc=0;
-            else if(discDate&&ms>discDate){fc=Math.max(0,Math.min(Math.round(raw),rem));rem=Math.max(0,rem-fc);}
+            else if(discDate&&ms>discDate){ var _RA=runoffAlloc(setSku,co); if(_RA.alloc[ch]&&_RA.alloc[ch][fym]!=null){ fc=_RA.alloc[ch][fym]; } else { fc=Math.max(0,Math.min(Math.round(raw),rem));rem=Math.max(0,rem-fc);} }   // v27.534 shared country pool (build-on-fly SETS block: setSku)
             else fc=Math.round(raw);
             if(fc>0){ chFC[fym]=fc; setFC[fym]=(setFC[fym]||0)+fc; }
           });
