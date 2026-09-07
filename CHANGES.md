@@ -1,3 +1,8 @@
+## v27.586 Contribution model: stop the clobber + channel-scope guard (Ben)
+- **Fixed data loss.** The editor saved the *whole* model on every edit, and if the initial load failed it defaulted to empty (`catch → _cmModel={}`) — so one subsequent edit overwrote live `app_settings.contrib_model` with a near-empty object, wiping every saved value. Saving is now gated on a successful load (`_cmLoaded`); a load failure shows a **Retry** and refuses to open an empty, save-capable editor.
+- **Fixed the accidental cross-channel apply (DTC → FBA/B2B).** The Channel scope defaulted to **"All"**, so an edit cascaded to every channel. It now defaults to a **specific channel** (the current plan channel), and an "All channels" scope shows a loud amber warning naming the affected channels.
+- Client-side only (`supply/inject.html`); no schema or data change.
+
 ## v27.585 Dark mode — data-grid tint pass; toggle live (Ben) [design update P1a cont.]
 - The dense data grids (DEMAND plan, Buy, Actions, PO, Reports…) now theme correctly in dark. Ran a context-anchored codemod (`scripts/dark_tint_codemod.cjs`) that mapped **~875 inline `background:`** and **~766 `color:`** hex values across `artifact_v16.7.html` + `supply/inject.html` onto the design tokens (which carry dark values). Only CSS `background:`/`color:` prefixes are matched, so canvas/SVG/PDF drawing code is never touched.
 - Fixed row-hover overlays to **lighten** (not darken) in dark; sticky first columns pick up `--card`. Light-coloured text on dark popups (e.g. `#7dd3fc` links) deliberately left as-is so light theme is unaffected.

@@ -6540,7 +6540,7 @@
     if(!el){ el=document.createElement('div'); el.id='perm-banner'; el.style.cssText='background:var(--neg-bg);border:1px solid var(--neg-cell);color:var(--neg);padding:7px 12px;border-radius:6px;margin:0 0 10px;font-size:12px;font-weight:700'; var content=document.getElementById('supply-content'); root.insertBefore(el, content||root.firstChild); }
     el.style.display='block'; el.textContent='👁 Read-only access — you don’t have '+(inConfig?'CONFIG':'SUPPLY')+' edit rights here. Edits are rejected; ask an admin (CONFIG ▸ Permissions).'; }
   var _cfgBomInner='mfg';   // CONFIG ▸ BOM inner sub-tab: 'mfg' (Manufacturing) | 'set' (Build on Fly Sets)
-  var _cmCo='ALL',_cmCh='ALL',_cmModel={};   // CONFIG ▸ Demand ▸ Contribution model: scope selection + saved/edited overrides (SETS feature P3)
+  var _cmCo='ALL',_cmCh=((typeof CF!=='undefined'&&['DTC','FBA','B2B'].indexOf(CF)>=0)?CF:'DTC'),_cmModel={},_cmLoaded=false;   // CONFIG ▸ Demand ▸ Contribution model: scope selection + saved/edited overrides. _cmCh defaults to a specific channel (v27.586) so an edit can't silently cascade to every channel; _cmLoaded gates saving so a failed/empty load can't clobber live (whole-object save).
   // Lifted from the config SUBS closure so DEMAND ▸ Config renders them natively (target element param).
       function hzCfgContribModel(b){
         b.innerHTML='<div class="count">Loading…</div>';
@@ -6564,6 +6564,7 @@
         function flashGreen(el){ if(!el)return; el.style.transition='background-color .12s'; var _revert=el.style.backgroundColor; el.style.backgroundColor='var(--pos-bg)';
           setTimeout(function(){ el.style.backgroundColor=_revert||''; setTimeout(function(){ try{el.style.transition='';}catch(e){} },200); },480); }
         function cmSave(flashEl){
+          if(!_cmLoaded){ var mg=document.getElementById('cm-msg'); if(mg){ mg.textContent='Not saved — the saved model didn’t load; reopen the tab.'; mg.style.color='var(--neg)'; } return; }   // v27.586: never write a whole-object save from an unloaded/empty state (would clobber live)
           var msg=document.getElementById('cm-msg'); if(msg){ msg.textContent='Saving…'; msg.style.color='var(--muted)'; }
           clearTimeout(_cmSaveT);
           _cmSaveT=setTimeout(function(){
@@ -6586,7 +6587,9 @@
             +'<span style="font-weight:600;font-size:13px;color:var(--ink-soft)">Scope</span>'
             +'<label style="font-size:12px;color:var(--muted)">Country '+sel('cm-co',COS,curCo)+'</label>'
             +'<label style="font-size:12px;color:var(--muted)">Channel '+sel('cm-ch',CHS,curCh)+'</label>'
-            +'<span class="mut tiny" style="font-style:italic">'+(curCo==='ALL'&&curCh==='ALL'?'editing the DEFAULT — cascades everywhere':'editing '+scopeLabel(curCo,curCh)+' — blank inherits from above')+'</span>'
+            +(curCh==='ALL'
+               ? '<span class="tiny" style="font-weight:700;color:var(--amber);background:var(--amber-bg);border-radius:4px;padding:2px 8px">⚠ '+(curCo==='ALL'?'editing the DEFAULT':'editing '+scopeLabel(curCo,curCh))+' — applies to EVERY channel (DTC · FBA · B2B). Pick a channel above to target just one.</span>'
+               : '<span class="mut tiny" style="font-style:italic">editing '+scopeLabel(curCo,curCh)+' — blank inherits from above</span>')
             +'<span class="mut tiny" style="margin-left:auto;font-style:italic">Changes auto-save</span>'
             +'<span id="cm-msg" class="mut tiny" style="min-width:70px"></span></div>';
           var head='<tr><th style="text-align:left;padding:4px 8px">Sub-category</th><th style="padding:4px 6px">A %</th><th style="padding:4px 6px">B %</th><th style="padding:4px 6px">C %</th><th style="padding:4px 6px;border-left:1px dashed var(--line);color:var(--violet)">Sets %</th><th style="padding:4px 6px">SKUs %</th><th style="text-align:left;padding:4px 8px">Status</th></tr>';
@@ -6625,10 +6628,13 @@
             _cmModel[k][f]=v; patchRow(sub); cmSave(el); }; });   // auto-save + green flash on commit
           b.querySelectorAll('.cm-clr').forEach(wireClr);
         }
-        fetch('/api/app-settings').then(function(r){return r.json();}).then(function(s){ s=s||{};
+        fetch('/api/app-settings').then(function(r){ if(!r.ok)throw new Error('load '+r.status); return r.json(); }).then(function(s){ s=s||{};
           try{ _cmModel=s.contrib_model?JSON.parse(s.contrib_model):{}; }catch(e){ _cmModel={}; }
-          draw();
-        }).catch(function(){ _cmModel={}; draw(); });
+          _cmLoaded=true; draw();
+        }).catch(function(){ _cmLoaded=false;   // v27.586: do NOT open an empty editor on a load failure — a save would overwrite live with {} and wipe every saved value
+          b.innerHTML='<div class="count" style="color:var(--neg)">Couldn’t load the saved Contribution model — <b>not opening the editor</b> so a save can’t overwrite your live settings. <button class="save-btn" id="cm-retry">Retry</button></div>';
+          var rb=document.getElementById('cm-retry'); if(rb)rb.onclick=function(){ hzCfgContribModel(b); };
+        });
       };
       // ── CONFIG ▸ Demand ▸ Discontinued sub-categories ──
       // Per-inactive-subcat toggle: show as ⌀ run-off (wind down remaining stock, auto-hide <50u) vs HIDE TOTALLY
