@@ -1,3 +1,8 @@
+## v27.607 Create POs: China-stock column, CA excluded by default, carton as a note (Ben, slice 3)
+- ② New editable **🏭 CN stock column** (after the country columns): auto-fills each SKU with its China-stock holding qty (MOQ shortfall + any opted-in tier top-up), and you can type to override (bold = manual, amber = auto). Feeds the China Stock holding PO. Auto figure refreshes live as order qtys change.
+- **CA is now excluded by default** from the Create-PO grid (out of scope) — a new **Include CA** checkbox opts it back in.
+- ④ Carton moved from its own column to a **small note under Total** (e.g. "MOQ:500 · Carton:20"), per Ben. The non-carton-multiple red-outline warning (⑤) stays on the qty cells.
+
 ## v27.606 Create Purchase Orders: season badges + carton column + non-multiple warning (Ben, slice 2)
 - ⑦ Each SKU row now shows a **release-window season badge** with a distinct colour per window (deterministic hue → AW26 ≠ SS27, no more same-colour badges). In both the grid and detail views.
 - ④ New **Carton** column (units per carton, from products.carton_qty with v_sku_attrs fallback), after Total.

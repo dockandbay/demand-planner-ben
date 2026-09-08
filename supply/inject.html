@@ -12581,9 +12581,10 @@
     function _cartonOf(s){ return (META[s]&&Number(META[s].carton_qty))||0; }   // ④/⑤ carton pack size
     // recommended qty per mode: REC[mode][sku][ctry]
     var REC={'3pl':{},'fba':{}}; ['3pl','fba'].forEach(function(md){ var byc=itemsByMode[md]||{}; CTRS_ALL.forEach(function(c){ (byc[c]||[]).forEach(function(it){ var s=String(it.sku).toUpperCase(); (REC[md][s]=REC[md][s]||{})[c]=Math.round(Number(it.qty)||0); }); }); });
-    var OVR={}, TICK={}, SUP={}, META={}, TIERTOP={};   // OVR/TICK keyed mode|sku|ctry; SUP[sku]=code; TIERTOP[sku]=order tier top-up as China stock; persist across redraws
+    var OVR={}, TICK={}, SUP={}, META={}, TIERTOP={}, CN={}, _incCA=false;   // OVR/TICK keyed mode|sku|ctry; SUP[sku]=code; TIERTOP[sku]=order tier top-up as China stock; CN[sku]=manual China-stock qty override (② column); _incCA = opt-in to include CA (out of scope, excluded by default — Ben); persist across redraws
     var shown=[];
-    function modeCountries(){ var out=[]; CTRS_ALL.forEach(function(c){ for(var s in REC[MODE]){ if(REC[MODE][s][c]>0){ out.push(c); return; } } }); return out; }
+    function modeCountries(){ var out=[]; CTRS_ALL.forEach(function(c){ if(c==='CA'&&!_incCA)return;   // CA out of scope → excluded unless opted in (Ben)
+      for(var s in REC[MODE]){ if(REC[MODE][s][c]>0){ out.push(c); return; } } }); return out; }
     function keyC(s,c){ return MODE+'|'+s+'|'+c; }
     function rec(s,c){ return (REC[MODE][s]&&REC[MODE][s][c])||0; }
     function qtyVal(s,c){ var k=keyC(s,c); return (k in OVR)?OVR[k]:rec(s,c); }
@@ -12642,6 +12643,7 @@
           +'<div style="display:flex;flex-direction:column;gap:9px;font-size:11px">'
             +'<div><span class="pill-lbl">Markets</span> <span id="bpm-pills"></span></div>'
             +'<label style="cursor:pointer;color:var(--amber)" title="Top up SKUs below their MOQ by adding the shortfall to a China Stock holding PO (one per production per supplier). Allocate to a market later."><input type="checkbox" id="bpm-china" checked> <span id="bpm-china-lbl">China-stock top-up</span></label>'
+            +'<label style="cursor:pointer;color:var(--muted);margin-left:10px" title="CA (Canada) is out of scope for production POs — excluded by default. Tick to include the CA column."><input type="checkbox" id="bpm-inca"> Include CA</label>'
             +'<div><button id="bpm-preview" class="tool-badge bg-blue" style="border:none;cursor:pointer;padding:7px 15px;font-size:13px;font-weight:700">Preview PO plan ▶</button></div>'
           +'</div></div>'
         +'<div style="flex:2 1 320px;min-width:280px;border:1px solid #cfe8d6;border-radius:8px;padding:8px 10px;background:#f6fdf8;display:flex;flex-direction:column">'
@@ -12660,6 +12662,8 @@
     requestAnimationFrame(function(){ var _pm=ov.querySelector('.pomodal'); if(_pm)_pm.style.opacity='1'; });   // reveal once styles have applied (no unstyled flash)
     var close=function(){ try{ window.__hzNoAutoReload=false; }catch(e){} ov.remove(); };   // clear the no-auto-reload guard on close
     document.getElementById('bpm-x').onclick=close;
+    (function(){ var _ca=document.getElementById('bpm-inca'); if(_ca)_ca.onchange=function(){ _incCA=this.checked; shown=modeCountries(); drawMode(); drawSkus(); invalidatePreview(); };   // CA opt-in (Ben)
+      var _cn=document.getElementById('bpm-china'); if(_cn)_cn.onchange=function(){ try{refreshChina();}catch(e){} try{drawSkus();}catch(e){} try{invalidatePreview();}catch(e){} }; })();   // China top-up toggle → recompute the China column + label
     var _lastPreview=null;   // stashed preview PO split for the XLSX download (cleared whenever the preview is invalidated)
     function invalidatePreview(){ var r=document.getElementById('bpm-result'); if(r){ r.style.color='#94a3b8'; r.innerHTML='Preview to see the PO plan here.'; } var cb=document.getElementById('bpm-create'); if(cb)cb.style.display='none'; var xb=document.getElementById('bpm-xlsx'); if(xb)xb.style.display='none'; _lastPreview=null; }
     try{ var _sd=document.getElementById('bpm-start'); if(_sd)_sd.value=new Date().toISOString().slice(0,10); }catch(e){}   // start date defaults to today
@@ -12701,7 +12705,10 @@
       var parts=[]; if(sf.length)parts.push(sf.length+' MOQ · '+u.toLocaleString()+'u'); if(tt.length)parts.push(tt.length+' tier · '+tu.toLocaleString()+'u');
       lbl.textContent='China-stock top-up'+(parts.length?(' ('+parts.join(' + ')+')'):' (none)'); }
     // China-stock holding-PO items = MOQ shortfalls (when the global top-up is on) + any per-SKU tier top-ups (opt-in), merged by SKU.
-    function chinaItems(){ var base=(chinaOn()?chinaShortfalls():[]).concat(tierTopUps()); var by={}; base.forEach(function(it){ if(by[it.sku])by[it.sku].qty+=it.qty; else by[it.sku]={sku:it.sku,qty:it.qty,supplier_code:it.supplier_code}; }); return Object.keys(by).map(function(k){return by[k];}); }
+    // ② China-stock per-SKU: auto = MOQ shortfall (when the global top-up is on) + any opted-in tier top-up; CN[sku] is a manual override (the editable column). Manual wins.
+    function chinaAutoQty(s){ if(!hasCode(s))return 0; var q=0; if(chinaOn()){ var moq=moqOf(s), rt=rowTotal(s); if(moq&&rt>0&&rt<moq)q+=(moq-rt); } if(TIERTOP[s]){ var a=tierAvail(s); if(a)q+=a.extra; } return q; }
+    function chinaQtyFor(s){ return (s in CN)?Math.max(0,Number(CN[s])||0):chinaAutoQty(s); }
+    function chinaItems(){ var out=[]; Object.keys(REC[MODE]).forEach(function(s){ if(!hasCode(s))return; var q=chinaQtyFor(s); if(q>0)out.push({sku:s,qty:Math.round(q),supplier_code:supOf(s)||''}); }); return out; }
     function moqMsg(moq,t){ return 'Minimum order quantity (MOQ) for this product is '+moq.toLocaleString()+' units. This production totals '+t.toLocaleString()+' units across all shown markets — '+(moq-t).toLocaleString()+' short of the MOQ. Tick “China-stock top-up” to add the shortfall to a China holding PO.'; }
     // The app's native-title tooltip renders below this modal (modal z-index 200000), so the MOQ hint would be hidden.
     // Give the ⚑ its own tooltip that draws ABOVE the modal. Bound once, delegated (survives drawSkus re-renders).
@@ -12738,8 +12745,8 @@
         rows+='<tr data-sku="'+esc(s.sku)+'" data-cat="'+esc(cat)+'" data-moq="'+(s.moq||0)+'">'
           +'<td style="'+tdB.replace('white-space:nowrap','')+';text-align:left;min-width:200px"><div style="display:flex;align-items:center;gap:6px"><button class="bpm-plan" data-sku="'+esc(s.sku)+'" style="font-size:8px;font-weight:700;padding:0 4px;border:1px solid #93c5fd;border-radius:3px;background:var(--blue-soft);color:var(--blue);cursor:pointer">PLAN</button><span>'+esc(s.sku)+'</span>'+_bpmTier(s.sku)+_rwBadge(s.sku)+'</div>'+_bpmLife(s)+'</td>'
           +qtyCells
-          +'<td class="bpm-totcell" style="'+tdB+';text-align:center;font-weight:700;font-variant-numeric:tabular-nums'+(moqShort?';background:#FA5053':'')+'"><span class="bpm-moqicon" data-moqtip="'+(moqShort?esc(moqMsg(s.moq,rt)):'')+'" style="cursor:help;margin-right:3px;color:'+(moqShort?'#fff':'var(--neg)')+';display:'+(moqShort?'':'none')+'">⚑</span><span class="bpm-rowtot" style="'+(moqShort?'color:#fff':'')+'">'+(rt?rt.toLocaleString():'0')+'</span>'+(s.moq?'<div class="bpm-moqval" style="font-size:8px;font-weight:400;margin-top:1px;color:'+(moqShort?'#fff':'var(--faint)')+'">MOQ '+s.moq.toLocaleString()+'</div>':'')+'<div class="bpm-tierbox" style="display:'+(thint?'block':'none')+';margin-top:3px;background:#fde047;color:var(--amber);font-size:8.5px;font-weight:600;line-height:1.25;border:1px solid #eab308;border-radius:4px;padding:3px 5px;white-space:normal;text-align:left">'+(thint||'')+'</div></td>'
-          +'<td style="'+tdB+';text-align:center;color:var(--muted);font-variant-numeric:tabular-nums" title="Units per carton (products.carton_qty)">'+(cq?cq.toLocaleString():'<span class="mut tiny">—</span>')+'</td>'
+          +(function(){ var v=chinaQtyFor(s.sku), auto=!(s.sku in CN), zero=!(v>0); return '<td style="'+tdB+';text-align:center;background:#b4530910"><input type="number" min="0" class="bpm-cn" data-s="'+esc(s.sku)+'" value="'+Math.round(v)+'" title="China-stock holding qty (auto = MOQ shortfall + tier top-up; type to override — held in a China Stock PO, allocate to a market later)" style="width:56px;text-align:center;font-size:11px;padding:1px 3px;border:1px solid '+(zero?'var(--line)':'transparent')+';border-radius:4px;background:transparent;font-weight:'+(auto?'400':'700')+';color:'+(auto?(zero?'var(--line)':'var(--amber)'):'var(--ink)')+'"></td>'; })()
+          +'<td class="bpm-totcell" style="'+tdB+';text-align:center;font-weight:700;font-variant-numeric:tabular-nums'+(moqShort?';background:#FA5053':'')+'"><span class="bpm-moqicon" data-moqtip="'+(moqShort?esc(moqMsg(s.moq,rt)):'')+'" style="cursor:help;margin-right:3px;color:'+(moqShort?'#fff':'var(--neg)')+';display:'+(moqShort?'':'none')+'">⚑</span><span class="bpm-rowtot" style="'+(moqShort?'color:#fff':'')+'">'+(rt?rt.toLocaleString():'0')+'</span>'+((s.moq||cq)?'<div class="bpm-moqval" style="font-size:8px;font-weight:400;margin-top:1px;color:'+(moqShort?'#fff':'var(--faint)')+'">'+[s.moq?('MOQ:'+s.moq.toLocaleString()):'',cq?('Carton:'+cq.toLocaleString()):''].filter(Boolean).join(' · ')+'</div>':'')+'<div class="bpm-tierbox" style="display:'+(thint?'block':'none')+';margin-top:3px;background:#fde047;color:var(--amber);font-size:8.5px;font-weight:600;line-height:1.25;border:1px solid #eab308;border-radius:4px;padding:3px 5px;white-space:normal;text-align:left">'+(thint||'')+'</div></td>'
           +'<td style="'+tdB+';text-align:left;min-width:150px">'+supCell+'</td></tr>';
       });
       var thB='position:sticky;top:0;background:var(--band);z-index:1;padding:5px 8px;border-bottom:1px solid #d5d5d5;font-size:9.5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);white-space:nowrap';
@@ -12747,8 +12754,8 @@
       box.innerHTML='<div style="flex:0 0 auto;display:flex;align-items:center;gap:10px;margin-bottom:4px"><label style="font-size:11px;cursor:pointer"><input type="checkbox" id="bpm-tickall" checked> tick all shown</label><span style="font-size:10px;color:var(--faint)">⌘ / Ctrl + hover cells = live sum</span><span class="count" id="bpm-skucount" style="margin-left:auto"></span></div>'
         +'<div style="flex:1 1 auto;overflow:auto;border:1px solid var(--line);border-radius:6px"><table style="border-collapse:separate;border-spacing:0;font-size:11px;width:100%">'
         +'<thead><tr><th style="'+thB+';text-align:left;min-width:200px">SKU</th>'+ctryTh
+        +'<th style="'+thB+';text-align:center;min-width:64px;border-bottom:3px solid #b45309;color:var(--ink)" title="China-stock holding qty — MOQ shortfall + tier top-up, editable">🏭 CN stock</th>'
         +'<th style="'+thB+';text-align:center;min-width:70px">Total</th>'
-        +'<th style="'+thB+';text-align:center;min-width:56px" title="Units per carton">Carton</th>'
         +'<th style="'+thB+';text-align:left;min-width:150px">Supplier</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
       var pb=document.getElementById('bpm-pills'); if(pb)pb.innerHTML=pillBar();
       if(!box._tiertopBound){ box._tiertopBound=true; box.addEventListener('change',function(e){ var t=e.target; if(t&&t.classList&&t.classList.contains('bpm-tiertop')){ TIERTOP[t.dataset.s]=t.checked; refreshChina(); invalidatePreview(); } }); }   // per-SKU "order tier top-up as China stock"
@@ -12768,7 +12775,11 @@
       var _tickQ=function(t){ var q=t.parentNode&&t.parentNode.querySelector('.bpm-q'); return q?(Number(q.value)||0):0; };   // ticking never selects a 0-qty cell
       document.querySelectorAll('#bpm-pills .bpm-ctr').forEach(function(b){ b.onclick=function(){ var c=b.dataset.c,i=shown.indexOf(c); if(i>=0){ if(shown.length>1)shown.splice(i,1); } else shown=modeCountries().filter(function(x){return x===c||shown.indexOf(x)>=0;}); invalidatePreview(); drawSkus(); }; });
       box.querySelectorAll('.bpm-tick').forEach(function(t){ t.onchange=function(){ TICK[keyC(t.dataset.s,t.dataset.c)]=t.checked; updateRow(t.closest('tr')); refreshCount(); invalidatePreview(); }; });
-      box.querySelectorAll('.bpm-q').forEach(function(inp){ inp.onchange=function(){ var v=Math.max(0,Math.round(Number(inp.value)||0)); inp.value=v; OVR[keyC(inp.dataset.s,inp.dataset.c)]=v; var z=!(v>0); inp.style.color=z?'var(--line)':'inherit'; inp.style.border='1px solid '+(z?'var(--line)':'transparent'); updateRow(inp.closest('tr')); invalidatePreview(); }; });
+      box.querySelectorAll('.bpm-q').forEach(function(inp){ inp.onchange=function(){ var v=Math.max(0,Math.round(Number(inp.value)||0)); inp.value=v; OVR[keyC(inp.dataset.s,inp.dataset.c)]=v; var z=!(v>0); inp.style.color=z?'var(--line)':'inherit'; inp.style.border='1px solid '+(z?'var(--line)':'transparent'); var _tr=inp.closest('tr'); updateRow(_tr);
+        var _cn=_tr&&_tr.querySelector('.bpm-cn'); if(_cn && !(_cn.dataset.s in CN)){ var _av=chinaAutoQty(_cn.dataset.s); _cn.value=Math.round(_av); _cn.style.color=(_av>0?'var(--amber)':'var(--line)'); _cn.style.border='1px solid '+(_av>0?'transparent':'var(--line)'); }   // refresh the AUTO China figure as the order qty (MOQ shortfall) changes
+        refreshChina(); invalidatePreview(); }; });
+      // ② manual China-stock override (bpm-cn): typing a value pins CN[sku] (bold ink); it wins over the auto MOQ/tier figure.
+      box.querySelectorAll('.bpm-cn').forEach(function(inp){ inp.onchange=function(){ var v=Math.max(0,Math.round(Number(inp.value)||0)); inp.value=v; CN[inp.dataset.s]=v; inp.style.fontWeight='700'; inp.style.color=(v>0?'var(--ink)':'var(--line)'); inp.style.border='1px solid '+(v>0?'transparent':'var(--line)'); refreshChina(); invalidatePreview(); }; });
       box.querySelectorAll('.bpm-skusup').forEach(function(sel){ var tr=sel.closest('tr'); sel.onchange=function(){ SUP[tr.dataset.sku]=sel.value; updateRow(tr); refreshChina(); invalidatePreview(); }; });
       var ta=document.getElementById('bpm-tickall'); if(ta)ta.onchange=function(){ box.querySelectorAll('.bpm-tick:not([disabled])').forEach(function(t){ t.checked=ta.checked&&_tickQ(t)>0; TICK[keyC(t.dataset.s,t.dataset.c)]=t.checked; }); box.querySelectorAll('tr[data-sku]').forEach(updateRow); refreshCount(); invalidatePreview(); };
       box.querySelectorAll('.bpm-cat-sel').forEach(function(a){ a.onclick=function(){ var cat=a.dataset.cat,on=a.dataset.on==='1'; box.querySelectorAll('tr[data-cat="'+cat.replace(/"/g,'')+'"][data-sku] .bpm-tick:not([disabled])').forEach(function(t){ t.checked=on&&_tickQ(t)>0; TICK[keyC(t.dataset.s,t.dataset.c)]=t.checked; }); box.querySelectorAll('tr[data-sku]').forEach(updateRow); refreshCount(); invalidatePreview(); }; });
