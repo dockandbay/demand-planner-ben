@@ -10759,6 +10759,8 @@ async function buyplanSkuMeta(skus) {
   const codeOf = (name) => { if (!name) return null; const n = String(name).trim().toLowerCase(); return byName[n] || byFirst[n.split(/\s+/)[0]] || null; };
   const rows = (await pool.query(`SELECT upper(p.sku) sku, coalesce(p.main_supplier_final, p.supplier) main_name,
       p.supplier_multiple_all multi, coalesce(p.category,'') category, sl.pallet_qty, p.moq,
+      coalesce(p.release_window,'') rw,
+      coalesce(nullif(p.carton_qty::text,''), sl.carton_qty::text)::numeric carton_qty,
       nullif(p.discontinue_date_final,'') disc, nullif(p.discontinue_date_au_final,'') disc_au, nullif(p.discontinue_date_ca,'') disc_ca
     FROM planner.products p LEFT JOIN planner.v_sku_attrs sl ON upper(sl.sku)=upper(p.sku)
     WHERE upper(p.sku) = ANY($1)`, [skus])).rows;
@@ -10769,7 +10771,7 @@ async function buyplanSkuMeta(skus) {
     const seen = {}, options = [];
     names.forEach(nm => { const c = codeOf(nm); const k = c || nm.toLowerCase(); if (!seen[k]) { seen[k] = 1; options.push({ code: c, name: nm }); } });
     map[r.sku] = { pallet_qty: Number(r.pallet_qty) || 0, category: r.category || '', main_code: codeOf(r.main_name), main_name: r.main_name || '', options,
-      moq: (Number(r.moq) > 0 ? Number(r.moq) : null), disc: r.disc || '', disc_au: r.disc_au || '', disc_ca: r.disc_ca || '' };
+      moq: (Number(r.moq) > 0 ? Number(r.moq) : null), rw: r.rw || '', carton_qty: Number(r.carton_qty) || 0, disc: r.disc || '', disc_au: r.disc_au || '', disc_ca: r.disc_ca || '' };
   });
   // Price-list tiers per SKU × supplier NAME (SKU-scope override else the SKU's price_type). The Create-PO modal
   // derives MOQ (= lowest tier min_qty) + a tier-savings hint from these. Prefer sku-scope + current version.
@@ -10891,7 +10893,8 @@ app.post('/api/supply/buyplan-skus', async (req, res) => {
     res.json({ skus: items.map(it => { const sku = String(it.sku).toUpperCase(), m = map[sku] || { options: [] };
       const pl = m.pl || {};   // { supplierName: [{efp, scope, currency, tiers}] }  (client resolves by chosen production)
       return { sku, qty: Math.round(Number(it.qty)), pallet_qty: m.pallet_qty || 0, category: m.category || '', main_code: m.main_code || null,
-        main_name: m.main_name || '', options: (m.options || []).map(o => ({ code: o.code, name: o.name })), moq: (m.moq || null), pl, discontinue: discFor(m) }; }) });
+        main_name: m.main_name || '', options: (m.options || []).map(o => ({ code: o.code, name: o.name })), moq: (m.moq || null), pl,
+        release_window: m.rw || '', carton_qty: m.carton_qty || 0, discontinue: discFor(m) }; }) });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Formatted XLSX of the Create-PO preview: "Summary" tab (SKUs by category × country) + "Purchase Orders" tab

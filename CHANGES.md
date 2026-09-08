@@ -1,3 +1,9 @@
+## v27.606 Create Purchase Orders: season badges + carton column + non-multiple warning (Ben, slice 2)
+- ⑦ Each SKU row now shows a **release-window season badge** with a distinct colour per window (deterministic hue → AW26 ≠ SS27, no more same-colour badges). In both the grid and detail views.
+- ④ New **Carton** column (units per carton, from products.carton_qty with v_sku_attrs fallback), after Total.
+- ⑤ A per-country qty that is **not a whole carton multiple** gets a **red outline + tooltip** suggesting the nearest carton-round quantities.
+- Server: /api/supply/buyplan-skus (buyplanSkuMeta) now returns release_window + carton_qty. No schema change.
+
 ## v27.605 Create Purchase Orders: full-screen + never auto-reload (Ben, slice 1)
 - First slice of the Create-PO redesign (mockup approved). The multi-country Create-PO screen (buyplanModalMulti, opened by the 🏭 Create Purchase Orders button on #/buy-move/buy) is now a **full-screen opaque page** (edge-to-edge, no dimmed modal backdrop) instead of a floating modal.
 - **Auto-refresh is now fully blocked while it is open**: sets window.__hzNoAutoReload on open / clears on close, and safeReload() honours it — so an in-progress PO can never be lost to a background data refresh OR a new deploy (the reload is deferred until the screen closes, then the poll re-applies).
