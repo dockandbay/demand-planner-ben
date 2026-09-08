@@ -12581,7 +12581,7 @@
     function _cartonOf(s){ return (META[s]&&Number(META[s].carton_qty))||0; }   // ④/⑤ carton pack size
     // recommended qty per mode: REC[mode][sku][ctry]
     var REC={'3pl':{},'fba':{}}; ['3pl','fba'].forEach(function(md){ var byc=itemsByMode[md]||{}; CTRS_ALL.forEach(function(c){ (byc[c]||[]).forEach(function(it){ var s=String(it.sku).toUpperCase(); (REC[md][s]=REC[md][s]||{})[c]=Math.round(Number(it.qty)||0); }); }); });
-    var OVR={}, TICK={}, SUP={}, META={}, TIERTOP={}, CN={}, _incCA=false, _savedRec=null, _projId=null, _movedOnly=false;   // OVR/TICK keyed mode|sku|ctry; SUP[sku]=code; TIERTOP[sku]=order tier top-up as China stock; CN[sku]=manual China-stock qty override (② column); _incCA = opt-in to include CA; _savedRec = rec snapshot from a loaded project (for the "moved since save" flag ①); _projId = loaded project id; _movedOnly = filter to only moved SKUs; persist across redraws
+    var OVR={}, TICK={}, SUP={}, META={}, TIERTOP={}, CN={}, _incCA=false, _savedRec=null, _projId=null, _movedOnly=false, _addToPO=null;   // OVR/TICK keyed mode|sku|ctry; SUP[sku]=code; TIERTOP[sku]=order tier top-up as China stock; CN[sku]=manual China-stock qty override (② column); _incCA = opt-in to include CA; _savedRec = rec snapshot from a loaded project (for the "moved since save" flag ①); _projId = loaded project id; _movedOnly = filter to only moved SKUs; persist across redraws
     var shown=[];
     function modeCountries(){ var out=[]; CTRS_ALL.forEach(function(c){ if(c==='CA'&&!_incCA)return;   // CA out of scope → excluded unless opted in (Ben)
       for(var s in REC[MODE]){ if(REC[MODE][s][c]>0){ out.push(c); return; } } }); return out; }
@@ -12645,6 +12645,7 @@
             +'<div><span class="pill-lbl">Markets</span> <span id="bpm-pills"></span></div>'
             +'<label style="cursor:pointer;color:var(--amber)" title="Top up SKUs below their MOQ by adding the shortfall to a China Stock holding PO (one per production per supplier). Allocate to a market later."><input type="checkbox" id="bpm-china" checked> <span id="bpm-china-lbl">China-stock top-up</span></label>'
             +'<label style="cursor:pointer;color:var(--muted);margin-left:10px" title="CA (Canada) is out of scope for production POs — excluded by default. Tick to include the CA column."><input type="checkbox" id="bpm-inca"> Include CA</label>'
+            +'<div style="border-top:1px dashed #cbd5e1;margin-top:2px;padding-top:5px"><span class="pill-lbl">Destination</span> <label style="cursor:pointer"><input type="radio" name="bpm-dest" id="bpm-dest-new" checked> New PO(s)</label> <label style="cursor:pointer;margin-left:6px" title="Add the ticked lines to an existing FUTURE / PRODUCTION PO instead of creating new ones"><input type="radio" name="bpm-dest" id="bpm-dest-add"> Add to existing</label><div id="bpm-addpo-wrap" style="display:none;margin-top:3px"><select id="bpm-addpo" class="flt" style="width:auto;max-width:240px"><option value="">— choose PO —</option></select></div></div>'
             +'<div><button id="bpm-preview" class="tool-badge bg-blue" style="border:none;cursor:pointer;padding:7px 15px;font-size:13px;font-weight:700">Preview PO plan ▶</button></div>'
           +'</div></div>'
         +'<div style="flex:2 1 320px;min-width:280px;border:1px solid #cfe8d6;border-radius:8px;padding:8px 10px;background:#f6fdf8;display:flex;flex-direction:column">'
@@ -12679,6 +12680,13 @@
     (function(){ var _sv=document.getElementById('bpm-proj-save'); if(_sv)_sv.onclick=function(){ var cur=document.getElementById('bpm-proj'); var nm=(cur&&cur.value&&cur.selectedOptions&&cur.selectedOptions[0])?cur.selectedOptions[0].textContent:null; if(!nm)nm=prompt('Save this build as a project — name:'); if(nm)saveProject(nm); };
       var _sa=document.getElementById('bpm-proj-saveas'); if(_sa)_sa.onclick=function(){ var nm=prompt('Save as a NEW project — name:'); if(nm)saveProject(nm); };
       var _pk=document.getElementById('bpm-proj'); if(_pk)_pk.onchange=function(){ openProject(this.value); }; })();
+    // ③ Add-to-existing-PO destination toggle + open-PO picker.
+    function loadOpenPOs(){ fetch('/api/supply/open-pos').then(function(r){return r.json();}).then(function(rows){ var el=document.getElementById('bpm-addpo'); if(!el)return; el.innerHTML='<option value="">— choose PO —</option>'+((rows||[]).map(function(p){return '<option value="'+esc(p.po)+'">'+esc(p.po)+' · '+esc(p.supplier||'?')+' · '+esc(p.status)+(p.prod_no?(' · P'+esc(p.prod_no)):'')+'</option>';}).join('')); }).catch(function(){}); }
+    (function(){ var _dn=document.getElementById('bpm-dest-new'), _da=document.getElementById('bpm-dest-add'), _wrap=document.getElementById('bpm-addpo-wrap'), _sel=document.getElementById('bpm-addpo');
+      function _crBtn(){ var cr=document.getElementById('bpm-create'); if(!cr)return; if(_da&&_da.checked){ cr.style.display=_addToPO?'':'none'; cr.textContent='Add to '+(_addToPO||'PO'); } else { cr.textContent='Create POs'; } }
+      function _upd(){ var add=!!(_da&&_da.checked); if(_wrap)_wrap.style.display=add?'block':'none'; var cb=document.getElementById('bpm-china'); if(cb)cb.disabled=add; var pv=document.getElementById('bpm-preview'); if(pv)pv.style.display=add?'none':''; if(add){ if(!(_sel&&_sel.options.length>1))loadOpenPOs(); } else { _addToPO=null; } _crBtn(); }
+      if(_dn)_dn.onchange=_upd; if(_da)_da.onchange=_upd;
+      if(_sel)_sel.onchange=function(){ _addToPO=this.value||null; _crBtn(); }; })();
     var _lastPreview=null;   // stashed preview PO split for the XLSX download (cleared whenever the preview is invalidated)
     function invalidatePreview(){ var r=document.getElementById('bpm-result'); if(r){ r.style.color='#94a3b8'; r.innerHTML='Preview to see the PO plan here.'; } var cb=document.getElementById('bpm-create'); if(cb)cb.style.display='none'; var xb=document.getElementById('bpm-xlsx'); if(xb)xb.style.display='none'; _lastPreview=null; }
     try{ var _sd=document.getElementById('bpm-start'); if(_sd)_sd.value=new Date().toISOString().slice(0,10); }catch(e){}   // start date defaults to today
@@ -12831,7 +12839,18 @@
         });
         res.style.color='#0f172a';
         res.innerHTML=h?('<div style="column-width:260px;column-gap:18px">'+h+'</div>'):'<div style="color:var(--muted)">Nothing to place.</div>'; var cb=document.getElementById('bpm-create'); cb.style.display=totPos?'':'none'; var xb=document.getElementById('bpm-xlsx'); if(xb)xb.style.display=totPos?'':'none'; }); };
-    document.getElementById('bpm-create').onclick=function(){ var btn=this; if(!prodVal())return; var _prod=prodVal(), _bb=document.getElementById('bpm-batch'), _batch=(_bb&&_bb.value)||''; if(!_batch||_batch==='__addbatch__'){ alert('Choose a batch — it is required. Pick one from the Batch dropdown in Step 1 (or add a new batch number).'); if(_bb)_bb.focus(); return; } var js=jobs(true); if(!js.length)return; btn.disabled=true; btn.textContent='Creating…';
+    document.getElementById('bpm-create').onclick=function(){ var btn=this;
+      if(_addToPO){   // ③ Add-to-existing PO: add the ticked SKU lines to the chosen PO (reuses /api/supply/po-line) instead of creating new POs.
+        var _lines={}; Object.keys(REC[MODE]).forEach(function(s){ var q=0; shown.forEach(function(c){ if(isTicked(s,c))q+=(qtyVal(s,c)||0); }); if(q>0)_lines[s]=Math.round(q); });
+        var _sk=Object.keys(_lines); if(!_sk.length){ alert('Tick at least one SKU line to add.'); return; }
+        if(!confirm('Add '+_sk.length+' SKU line(s) to '+_addToPO+'?  (An existing line for the same SKU on that PO is set to the new quantity.)'))return;
+        btn.disabled=true; btn.textContent='Adding…';
+        Promise.all(_sk.map(function(s){ return fetch('/api/supply/po-line/'+encodeURIComponent(_addToPO+'|'+s),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:_addToPO,sku:s,qty:_lines[s],who:'create-po'})}).then(function(r){return r.json();}).then(function(d){ if(d&&d.error)throw new Error(d.error); }); }))
+          .then(function(){ invalidateDerived(); close(); _pendingOP={status:'future'}; if(window.gotoSupplySection)window.gotoSupplySection('order-plan'); setTimeout(function(){ alert('Added '+_sk.length+' line(s) to '+_addToPO+'. Review them in Order Plan.'); },250); })
+          .catch(function(e){ btn.disabled=false; btn.textContent='Create POs'; alert('Add failed: '+(e.message||e)); });
+        return;
+      }
+      if(!prodVal())return; var _prod=prodVal(), _bb=document.getElementById('bpm-batch'), _batch=(_bb&&_bb.value)||''; if(!_batch||_batch==='__addbatch__'){ alert('Choose a batch — it is required. Pick one from the Batch dropdown in Step 1 (or add a new batch number).'); if(_bb)_bb.focus(); return; } var js=jobs(true); if(!js.length)return; btn.disabled=true; btn.textContent='Creating…';
       Promise.all(js.map(function(j){ return fetch('/api/supply/buyplan-pos',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(j.payload)}).then(function(r){return r.json();}).then(function(d){ if(d&&d.error)throw new Error(j.label+': '+d.error); return (d&&d.created)||0; }); })).then(function(counts){
         var tot=counts.reduce(function(a,b){return a+b;},0); invalidateDerived(); close();
         _pendingOP={status:'future'}; if(_prod)_pendingOP.prod=_prod; if(_batch)_pendingOP.batch=_batch;   // Order Plan opens filtered to Future + this production + batch

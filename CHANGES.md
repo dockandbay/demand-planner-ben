@@ -1,3 +1,8 @@
+## v27.610 Create POs: add-to-existing-PO (Ben, slice 5 — redesign complete)
+- ③ **Destination toggle** in STEP 2: "New PO(s)" (default) or **Add to existing**. Choosing Add-to-existing shows a picker of open **FUTURE / PRODUCTION / READY-TO-SHIP** POs (masters excluded); the create button becomes "Add to PO-…" and adds the ticked SKU lines to that PO (reuses /api/supply/po-line; China top-up + per-market split are disabled in this mode).
+- New endpoint GET /api/supply/open-pos. FIX: registered it + the Save-Project list GET **before the /api/supply/:section catch-all** (single-segment GETs were being swallowed as "unknown section" — this also fixes the Save Project list).
+- **Create-PO redesign now complete** (v27.605–610): full-screen + no-auto-refresh, season badges, China-stock column, CA excluded, carton note + non-multiple warning, in-production note, Save Project (mig 270), SKU-cell 3-row layout, add-to-existing.
+
 ## v27.609 Create POs: Save Project + SKU-cell 3-row layout (Ben, slice 4)
 - ① **Save Project**: STEP 1 now has a Project picker + 💾 Save / Save as…. Saves the whole build (mode, prod#, batch, start date, qty overrides, ticks, supplier choices, tier top-ups, China overrides, CA opt-in) plus a **snapshot of the recommended numbers**. Reselect a project from the picker to restore it. On reload, any SKU whose recommended number has **moved since save** gets an amber ● and counts into a **"● moved since save (N)" filter** (toggle to show only moved SKUs). Saved numbers are never overwritten.
   - New table **planner.buy_projects** (MIGRATION 270 — applied to sandbox; **Diviyaj runs 270 on live**). Endpoints: GET/POST/GET:id/DELETE /api/supply/buy-projects.

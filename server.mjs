@@ -4242,6 +4242,19 @@ app.get('/api/supply/barcode-lookup', async (req, res) => {
       inventory: { UK: { '3pl': n(r.inventory_uk_3pl), fba: n(r.inventory_uk_fba), nongrs: n(r.inventory_uk_nongrs) }, US: { '3pl': n(r.inventory_us_3pl), fba: n(r.inventory_us_fba), awd: n(r.inventory_us_awd), nongrs: n(r.inventory_us_nongrs) }, EU: { '3pl': n(r.inventory_eu_3pl), fba: n(r.inventory_eu_fba) }, AU: { '3pl': n(r.inventory_au_3pl), fba: n(r.inventory_au_fba) }, CA: { fba: n(r.inventory_ca_fba) } } });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// Single-segment GETs for the Create-PO redesign — MUST be before the /api/supply/:section catch-all (else swallowed as "unknown section").
+app.get('/api/supply/buy-projects', async (_req, res) => {   // ① Save Project — list
+  try { const r = await pool.query(`SELECT id, name, mode, coalesce(created_by,'') created_by, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at FROM planner.buy_projects ORDER BY updated_at DESC`); res.json(r.rows); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/open-pos', async (_req, res) => {   // ③ Add-to-existing — open FUTURE/PRODUCTION/READY-TO-SHIP POs (masters excluded)
+  try { const r = await pool.query(`SELECT po, coalesce(supplier_name,'') supplier, coalesce(status,'') status,
+        coalesce(prod_no::text,'') prod_no, coalesce(branch,'') branch
+      FROM planner.purchase_orders
+      WHERE upper(coalesce(status,'')) IN ('FUTURE','PRODUCTION','READY TO SHIP') AND master_po IS NULL
+      ORDER BY prod_no DESC NULLS LAST, po`); res.json(r.rows); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/supply/:section', async (req, res, next) => {
   if (req.params.section === 'po-delays') return next();   // handled by its own route below (has bespoke logic)
   const q = (sql) => pool.query(sql).then(r => r.rows);
@@ -10907,11 +10920,7 @@ app.post('/api/supply/buyplan-skus', async (req, res) => {
         release_window: m.rw || '', carton_qty: m.carton_qty || 0, inprod: inprod[sku] || { qty: 0, china: false }, discontinue: discFor(m) }; }) });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
-// ── Create-PO "Save Project" (Ben, mig 270): save/reselect a production-PO build (selection + a rec snapshot). ──
-app.get('/api/supply/buy-projects', async (_req, res) => {
-  try { const r = await pool.query(`SELECT id, name, mode, coalesce(created_by,'') created_by, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at FROM planner.buy_projects ORDER BY updated_at DESC`); res.json(r.rows); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
-});
+// ── Create-PO "Save Project" (Ben, mig 270). The list GET is registered earlier (before the /api/supply/:section catch-all). ──
 app.get('/api/supply/buy-projects/:id', async (req, res) => {
   try { const r = await pool.query(`SELECT id, name, mode, data, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at FROM planner.buy_projects WHERE id=$1`, [req.params.id]);
     if (!r.rows[0]) return res.status(404).json({ error: 'project not found' }); res.json(r.rows[0]); }
@@ -10932,6 +10941,7 @@ app.delete('/api/supply/buy-projects/:id', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.buy_projects WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// (③ open-pos list GET is registered earlier, before the /api/supply/:section catch-all.)
 // Formatted XLSX of the Create-PO preview: "Summary" tab (SKUs by category × country) + "Purchase Orders" tab
 // (POs grouped by supplier, each with its SKU/qty list). Pure formatting — the client posts the previewed numbers;
 // the server just enriches SKU→product name + supplier code→name and lays it out with exceljs.
