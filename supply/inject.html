@@ -11019,19 +11019,33 @@
   // METRICS — live operational counts
   function renderBIMetrics(d,_host){ var b=_host||biBody(); d=d||{}; var op=d.open_pos||{};
     var cont=Math.round(((Number(d.containers_shipping)||0)+(Number(d.containers_in_production)||0))*10)/10;
-    b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:var(--ink)">Metrics summary</div>'
-      +'<div class="mut tiny" style="margin-bottom:12px">Live operational snapshot · counts derived from POs + shipments</div>'
-      +'<div style="display:flex;flex-wrap:wrap;gap:10px">'
-        +biTile('Open POs', op.total||0, 'future '+(op.future||0)+' · production '+(op.production||0)+' · shipping '+(op.shipping||0))
-        +biTile('Units in production', units(d.units_in_production||0))
-        +biTile('Active shipments', d.active_shipments||0)
-        +biTile('40ft containers', cont, 'shipping '+(d.containers_shipping||0)+' · in production '+(d.containers_in_production||0))
-        +biTile('Units inbound', units(d.units_inbound||0))
-        +biTile('Value in production', '$'+units(d.value_in_production||0))
-        +biTile('Value in transit', '$'+units(d.value_in_transit||0))
-        +biTile('POs awaiting confirmation', d.awaiting_confirmation||0, '', (Number(d.awaiting_confirmation)>0?'#b45309':null))
-        +biTile('Deposits outstanding', '$'+units(d.deposits_outstanding||0), (d.deposit_pools||0)+' active pool'+(Number(d.deposit_pools)===1?'':'s'))
-      +'</div>'
+    // Canvas (Performance v2): Supply pipeline flow — In Production → In Transit → Committed Cash + cash-committed bar.
+    // All figures come straight from /api/supply/bi (units_in_production, value_in_*, containers_*, deposits_*, open_pos).
+    var _maxU=Math.max(Number(d.units_in_production)||0, Number(d.units_inbound)||0, 1);
+    function _k(n){ n=Number(n)||0; return '$'+(n>=1000?Math.round(n/1000)+'K':Math.round(n)); }
+    function _stat(num,label,warn){ return '<div><div style="font-size:12.5px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1'+(warn?';color:var(--amber)':'')+'">'+num+'</div><div style="font-size:9.5px;font-weight:800;letter-spacing:.06em;color:var(--faint);margin-top:2px">'+label+'</div></div>'; }
+    function _stage(dot,title,chip,big,unit,pct,barCol,stats){ return '<div style="display:flex;flex-direction:column;gap:8px;padding:12px 16px;background:var(--hover);border:1px solid var(--line2);border-radius:14px;min-width:0">'
+      +'<div style="display:flex;align-items:center;gap:7px"><span style="width:8px;height:8px;border-radius:99px;background:'+dot+'"></span><span style="font-size:10.5px;font-weight:800;letter-spacing:.08em;color:var(--muted)">'+title+'</span><div style="flex:1"></div><span style="font-size:10.5px;font-weight:800;padding:2px 9px;border-radius:999px;background:var(--card);border:1px solid var(--line);color:var(--muted);font-variant-numeric:tabular-nums">'+chip+'</span></div>'
+      +'<div style="display:flex;align-items:baseline;gap:8px"><span style="font-size:27px;font-weight:800;font-variant-numeric:tabular-nums;letter-spacing:-.01em;line-height:1">'+big+'</span>'+(unit?'<span style="font-size:11px;font-weight:700;color:var(--faint)">'+unit+'</span>':'')+'</div>'
+      +'<div style="height:7px;border-radius:99px;background:var(--line2);overflow:hidden"><div style="height:100%;width:'+pct+'%;max-width:100%;border-radius:99px;background:'+barCol+'"></div></div>'
+      +'<div style="display:flex;gap:16px;flex-wrap:wrap">'+stats+'</div></div>'; }
+    var _arrow='<div style="display:flex;align-items:center;justify-content:center;color:var(--dim)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M5 12h14m0 0-6-6m6 6-6 6"></path></svg></div>';
+    var _cashSegs=[['Production',Number(d.value_in_production)||0,'var(--amber)'],['Transit',Number(d.value_in_transit)||0,'#5aa6ea'],['Deposits',Number(d.deposits_outstanding)||0,'#7c3aed']];
+    var _cashT=_cashSegs.reduce(function(a,c){return a+c[1];},0)||1;
+    var pipe='<div style="background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden;margin-bottom:16px">'
+      +'<div style="display:flex;align-items:baseline;gap:10px;padding:16px 22px 2px;flex-wrap:wrap"><span style="font-size:13.5px;font-weight:800">Supply pipeline</span><span style="font-size:11px;font-weight:600;color:var(--faint)">where units and cash sit right now · POs → shipments → inbound</span><div style="flex:1"></div><span style="font-size:11.5px;font-weight:700;color:var(--muted)">'+_k(_cashT)+' committed across the pipeline</span></div>'
+      +'<div style="overflow-x:auto"><div style="display:grid;grid-template-columns:1fr 34px 1fr 34px 1fr;gap:0;align-items:stretch;padding:12px 22px 6px;min-width:680px">'
+        +_stage('var(--amber)','IN PRODUCTION','$'+units(d.value_in_production||0),units(d.units_in_production||0),'units',Math.round((Number(d.units_in_production)||0)/_maxU*100),'var(--amber)',_stat(op.total||0,'OPEN POS')+_stat(op.production||0,'IN PRODUCTION')+_stat(d.awaiting_confirmation||0,'AWAITING CONF',Number(d.awaiting_confirmation)>0)+_stat(d.containers_in_production||0,'40FT EQUIV'))
+        +_arrow
+        +_stage('var(--blue)','IN TRANSIT','$'+units(d.value_in_transit||0),units(d.units_inbound||0),'units',Math.round((Number(d.units_inbound)||0)/_maxU*100),'var(--blue)',_stat(d.active_shipments||0,'ACTIVE SHIPMENTS')+_stat(d.containers_shipping||0,'40FT CONTAINERS')+_stat(op.shipping||0,'POS SHIPPING'))
+        +_arrow
+        +_stage('#7c3aed','COMMITTED CASH','deposits','$'+units(d.deposits_outstanding||0),'',100,'#7c3aed',_stat(d.deposit_pools||0,'ACTIVE POOLS')+_stat(_k(d.value_in_production),'PRODUCTION VALUE')+_stat(_k(d.value_in_transit),'TRANSIT VALUE'))
+      +'</div></div>'
+      +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 22px 18px"><span style="font-size:10.5px;font-weight:800;letter-spacing:.07em;color:var(--faint)">CASH COMMITTED</span>'
+        +'<div style="flex:1;display:flex;height:14px;border-radius:99px;overflow:hidden;min-width:240px">'+_cashSegs.map(function(c){return '<div title="'+c[0]+' $'+units(c[1])+'" style="width:'+(c[1]/_cashT*100).toFixed(1)+'%;background:'+c[2]+'"></div>';}).join('')+'</div>'
+        +_cashSegs.map(function(c){return '<span style="display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;color:var(--muted)"><span style="width:8px;height:8px;border-radius:99px;background:'+c[2]+'"></span>'+c[0]+' '+_k(c[1])+'</span>';}).join('')
+      +'</div></div>';
+    b.innerHTML=pipe
       +'<div id="oa-board" style="margin-top:22px;border-top:1px solid #e5e7eb;padding-top:14px"><div class="mut tiny">Loading open actions…</div></div>';
     (function(){ var el=b.querySelector('#oa-board'); if(!el)return;
       function loadBoard(){ el.innerHTML='<div class="mut tiny">Loading open actions…</div>';
