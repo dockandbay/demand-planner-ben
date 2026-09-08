@@ -1,3 +1,6 @@
+## v27.593 Xero Compare: flag the invoice-TOTAL mismatch, not just the due (Ben)
+- The report compared **outstanding due** amounts, so PO-1712945 (Horizon total £2,208.80 vs Xero total £2,288.80, Δ £80) surfaced only an FX/due variance. It now also compares **Horizon's invoice total** (`supplier_invoice_total`) against **Xero's total** (paid + unpaid = `net_gbp`) and **headlines "⚠ Totals differ — Horizon X vs Xero Y (Δ Z)"** in the Issue column — flagged **even when the outstanding due is within 5%** (a payment/credit can mask a real total mismatch).
+
 ## v27.592 3PL Invoicing ▸ Forecast: weekly EU-iFulfilment view + savable B2B units/order (Ben)
 - Added a **Monthly ⇆ Weekly** toggle to the 3PL & Invoicing ▸ Forecast view (all 4 3PLs). **Weekly** renders the EU-iFulfilment format — **Year · ISO Week · Week Commencing · DTC · B2B**, order-based: the monthly forecast **day-prorated across ISO weeks**, with **DTC = (DTC+TikTok units) × 0.449** ship-bags/unit and **B2B = B2B units ÷ units-per-order**. Exports: **CSV · copy-to-clipboard · copy-to-email**.
 - **B2B units/order** is now a **savable inline field** (localStorage), **default 30** (was a hardcoded 25); editable in the weekly view and applied to the monthly Orders column too. No data/schema change.

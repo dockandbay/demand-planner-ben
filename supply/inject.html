@@ -8776,6 +8776,13 @@
         var xero=(Number(r.balance_gbp)||0)*(isGbp?1:(Number(r.rate)||0));   // Xero outstanding → USD at the report rate
         var fx=isGbp?0:(Number(r.unrealised_gain)||0);   // unrealised FX gain = revaluation of the outstanding balance vs Horizon's booked USD
         var xadj=xero-fx;   // FX-neutralised → comparable to Horizon (booked rate)
+        // v27.593 (Ben): the REAL issue is often that the invoice TOTAL differs, not just the due. Compare Horizon's
+        // invoice total (supplier_invoice_total) against Xero's net invoice total, and headline it in the Issue.
+        var xNet=(Number(r.net_gbp)||0)*(isGbp?1:(Number(r.rate)||0));   // Xero invoice TOTAL (net) → USD at report rate
+        var hzTot=(r.po && invTot[r.po]!=null)?invTot[r.po]:null;         // Horizon invoice TOTAL (supplier currency)
+        var tD=(hzTot!=null&&xNet>0)?Math.round((xNet-hzTot)*100)/100:null;   // TOTALS delta (distinct from the due variance)
+        var totMis=(tD!=null && Math.abs(tD)>=1 && (hzTot>0? Math.abs(tD/hzTot*100)>=1 : true));   // flag totals that differ by ≥$1 and ≥1%
+        var totMsg=totMis?('⚠ Totals differ — Horizon '+(isGbp?'£':'$')+money(hzTot)+' vs Xero '+(isGbp?'£':'$')+money(xNet)+' (Δ '+(isGbp?'£':'$')+money(Math.abs(tD))+')'):'';
         var hd;   // Horizon due at report date
         if(r.po && invTot[r.po]!=null) hd=Math.round((invTot[r.po]-(paidBefore[r.po]||0))*100)/100;   // final invoice − on/before-report payments
         else if(r.po && due[r.po]!==undefined) hd=due[r.po];                                          // fallback: open-payment sum (Other Payments etc.)
@@ -8787,7 +8794,8 @@
         else if(hd===undefined){ issue='PO not found in Horizon'; flag=true; }
         else if(hd<=0.5){ issue='No open payments found in Horizon'+asOf+' — but Xero still shows '+(isGbp?'£':'$')+money(xero)+' owed'; flag=true; pct=100; }
         else { var d=xadj-hd; pct=d/hd*100;   // variance AFTER removing FX; ≥5% = flagged
-          if(Math.abs(pct)>=5){ issue='Differs — Xero '+(isGbp?'£':'$')+money(xero)+(fx?' (−$'+money(fx)+' FX = $'+money(xadj)+')':'')+' vs Horizon $'+money(hd)+' (Δ '+money(Math.abs(d))+')'; flag=true; }
+          if(Math.abs(pct)>=5){ issue=(totMsg?totMsg+' · ':'')+'Xero '+(isGbp?'£':'$')+money(xero)+(fx?' (−$'+money(fx)+' FX = $'+money(xadj)+')':'')+' vs Horizon $'+money(hd)+' due (Δ '+money(Math.abs(d))+')'; flag=true; }
+          else if(totMis){ issue=totMsg+' · due is within 5% (a payment/credit likely offsets it)'; flag=true; }   // totals differ even though the outstanding due matches — still a real issue to reconcile
           else issue='OK (within 5%'+(fx?', after FX':'')+')'; }
         return { po:r.po, reference:r.reference, supplier:r.supplier, status:r.status, gbp:Number(r.balance_gbp)||0, rate:Number(r.rate)||0, ccy:ccy, xero:xero, fx:fx, xadj:xadj, hd:hd, pct:pct, flag:flag, issue:issue }; });
       var nIssue=out.filter(function(x){return x.flag;}).length, view=showAll?out:out.filter(function(x){return x.flag;});
