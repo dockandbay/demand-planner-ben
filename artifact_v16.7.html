@@ -1450,6 +1450,7 @@ var CALC_MEMO={};
 // makes that overlay stale; this flag (set on edit) tells BP.render() to rebuild the demand before recomputing,
 // instead of only refreshing on BUY-tab entry.
 var BUY_FC_STALE=false;
+var DEMAND_BUILT=false;   // set true once buildLiveDemand() has completed a full pass. The buy overlay builds synchronously at load (buildLiveBpOverlay) while buildLiveDemand() runs async afterwards, so the buy render must not compute set shares / read demand_sets before the first demand build has settled (else a new set can grab an oversized subcat share and over-explode into components — self-heals on the next build). render() gates on this.
 // Dynamic month anchor: current/partial month = latest 2026 month that has actuals in the data.
 // Advances automatically when fresh data is embedded — no hardcoded month to edit each cycle.
 (function(){
@@ -2606,6 +2607,12 @@ function render(){
   for(const k in BUY_CACHE)delete BUY_CACHE[k];
   // Rebuild the demand overlay if a forecast edit made it stale, so buy quantities reflect the latest forecast
   // (was only refreshed on BUY-tab entry). Gated on the flag so settings/filter re-renders stay cheap.
+  // Hardening (Ben): the buy overlay builds synchronously at load, but buildLiveDemand() (which computes set
+  // shares and writes demand_sets onto components) runs async afterwards. If the buy is rendered before that
+  // first pass settles, a new in-scope set (no forecast/no LY) can take an oversized subcat share and
+  // over-explode into its components — the "COOL-CAB-3SET flashes huge, clears when you visit DEMAND" symptom.
+  // Force one demand build up front so shares are always settled before any buy quantity is computed.
+  try{ if((typeof DEMAND_BUILT==='undefined'||!DEMAND_BUILT) && typeof buildLiveDemand==='function'){ buildLiveDemand(); } }catch(e){}
   try{ if(typeof BUY_FC_STALE!=='undefined' && BUY_FC_STALE && typeof buildLiveDemand==='function'){ buildLiveDemand(); BUY_FC_STALE=false; } }catch(e){}
   // First demand-plan render: build the prepack cover once so the rail "PP" badge shows without opening the buy plan.
   try{ if(!_PP_COVER_INIT && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length && typeof buildLiveDemand==='function'){ buildLiveDemand(); _PP_COVER_INIT=true; } }catch(e){}
@@ -15966,6 +15973,7 @@ function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={};   //
     // (v27.544 pass 2 retired in v27.545: runoffAlloc() now folds set demand into a discontinued component's pool itself, and the explosion loop above takes only the allowed share)
   })();
   BP_DATA.demand_source='Live: forecast_outputs (SKU) + PLAN cascade';
+  DEMAND_BUILT=true;   // shares + set explosion have settled at least once (buy render gates on this)
 }
 
 // ===== LIVE PREORDER / KEY-ACCOUNT REFRESH (Airtable MCP) =====
