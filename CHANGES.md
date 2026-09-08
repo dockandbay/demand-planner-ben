@@ -1,3 +1,8 @@
+## v27.609 Create POs: Save Project + SKU-cell 3-row layout (Ben, slice 4)
+- ① **Save Project**: STEP 1 now has a Project picker + 💾 Save / Save as…. Saves the whole build (mode, prod#, batch, start date, qty overrides, ticks, supplier choices, tier top-ups, China overrides, CA opt-in) plus a **snapshot of the recommended numbers**. Reselect a project from the picker to restore it. On reload, any SKU whose recommended number has **moved since save** gets an amber ● and counts into a **"● moved since save (N)" filter** (toggle to show only moved SKUs). Saved numbers are never overwritten.
+  - New table **planner.buy_projects** (MIGRATION 270 — applied to sandbox; **Diviyaj runs 270 on live**). Endpoints: GET/POST/GET:id/DELETE /api/supply/buy-projects.
+- **SKU cell (column 1) restacked into 3 rows** (Ben): row 1 = SKU full-width (+ moved ●), row 2 = PLAN button · release-window badge · tier badge, row 3 = launch→discontinue dates.
+
 ## v27.608 Create POs: in-production visibility in Total (Ben, slice 6)
 - ⑥ Each SKU row now flags what is **already on open POs** so you do not over-order: a red ⚑ note under the Total ("⚑ 3,000 in prod", + "· CN" when any is a China-stock PO). Counts open FUTURE / PRODUCTION / READY-TO-SHIP PO lines (not yet inbound).
 - Server: /api/supply/buyplan-skus returns an inprod {qty, china} per SKU (open PO lines by status; China identified by branch). Visibility only — never blocks PO creation.

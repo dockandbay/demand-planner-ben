@@ -10907,6 +10907,31 @@ app.post('/api/supply/buyplan-skus', async (req, res) => {
         release_window: m.rw || '', carton_qty: m.carton_qty || 0, inprod: inprod[sku] || { qty: 0, china: false }, discontinue: discFor(m) }; }) });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// ── Create-PO "Save Project" (Ben, mig 270): save/reselect a production-PO build (selection + a rec snapshot). ──
+app.get('/api/supply/buy-projects', async (_req, res) => {
+  try { const r = await pool.query(`SELECT id, name, mode, coalesce(created_by,'') created_by, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at FROM planner.buy_projects ORDER BY updated_at DESC`); res.json(r.rows); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/supply/buy-projects/:id', async (req, res) => {
+  try { const r = await pool.query(`SELECT id, name, mode, data, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at FROM planner.buy_projects WHERE id=$1`, [req.params.id]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'project not found' }); res.json(r.rows[0]); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/buy-projects', async (req, res) => {
+  const b = req.body || {}; const name = String(b.name || '').trim();
+  if (!name) return res.status(400).json({ error: 'A project name is required.' });
+  try { const me = await permsFor(req);
+    const r = await pool.query(`INSERT INTO planner.buy_projects (name, mode, data, created_by, updated_at)
+        VALUES ($1,$2,$3,$4, now())
+        ON CONFLICT (lower(name)) DO UPDATE SET mode=EXCLUDED.mode, data=EXCLUDED.data, updated_at=now()
+        RETURNING id, name`, [name, String(b.mode || '3pl'), b.data || {}, (me && me.email) || null]);
+    res.json({ ok: true, ...r.rows[0] }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.delete('/api/supply/buy-projects/:id', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.buy_projects WHERE id=$1`, [req.params.id]); res.json({ ok: true }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // Formatted XLSX of the Create-PO preview: "Summary" tab (SKUs by category × country) + "Purchase Orders" tab
 // (POs grouped by supplier, each with its SKU/qty list). Pure formatting — the client posts the previewed numbers;
 // the server just enriches SKU→product name + supplier code→name and lays it out with exceljs.
