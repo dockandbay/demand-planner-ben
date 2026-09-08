@@ -1,3 +1,6 @@
+## v27.615 Demand Metrics: As-of picker is now a MONTH picker (1st-of-month snapshot) (Ben)
+- The historical As-of control is a month picker; choosing a month uses that month's snapshot (the nearest inventory snapshot on/before the 1st). The header still shows the exact resolved snapshot date.
+
 ## v27.614 DEMAND plan: sticky SKU/Stock columns no longer transparent in light mode (Ben)
 - The light-theme --row-alt token was defined as a circular var(--row-alt) → it resolved to TRANSPARENT, so the sticky SKU (col 1) cells on expanded SKU rows went see-through and the scrolling data showed under them. Set it to a real light tint (#f6f8fb). Also extended the inline-row rule to the Stock column (td.stk2) so both frozen columns stay solid. Dark mode was already fine.
 
