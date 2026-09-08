@@ -1,3 +1,6 @@
+## v27.618 P2 DEMAND plan: canvas grid-card frame (Ben)
+- Plan v2, visual-polish-only per Ben (layout + toggles kept as-is). The DEMAND plan grid wrapper (.tw) already carried a 1px border + 6px radius; brought it up to the canvas card treatment (12px radius + soft --shadow). Overflow / sticky-column / sticky-header behaviour untouched (no repeat of the v27.614 sticky work). Cosmetic only.
+
 ## v27.617 P2 DEMAND polish: Demand Actions cards + DTC Mismatch stat chips (Ben)
 - P2 of Diviyaj's design brief, DEMAND lane. **Demand Actions** (DEMAND ▸ Actions) already matched the canvas workflow (Open/Snoozed/Dismissed/Done/All status tabs, market tabs, category select, £-at-risk count line, ✓Done / Snooze 30d / Snooze ∞ / Dismiss / Restore, backed by planner.demand_action_state — no migration needed); brought the cards up to the canvas look: white card, soft shadow, 3px severity accent, fadeUp entrance. **DTC Mismatch** (REPORTS/BI ▸ DTC MISMATCH): the four header counters (Issues / Accepted / OK / Unmapped POs) are now coloured stat boxes matching the canvas, and the Import button is the canvas primary blue with shadow. Added --pos-bd / --neg-bd border tokens (light + dark) + a shared fadeUp keyframe to hz-theme.css. Cosmetic only; all workflow/logic unchanged.
 

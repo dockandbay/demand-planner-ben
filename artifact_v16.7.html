@@ -261,7 +261,7 @@ body{font-family:var(--font,system-ui,-apple-system,sans-serif);font-size:12px;c
 .yr-arrow.dn .yr-arrow-r{color:var(--neg);opacity:.75}
 .yr-arrow-r-lbl{font-size:8.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.04em;font-weight:600}
 .status{font-size:11px;color:var(--faint);flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-.tw{overflow-x:auto;max-height:calc(100vh - 184px);overflow-y:auto;border:1px solid var(--line);border-radius:6px;padding-bottom:16px}   /* bottom gap so the horizontal scrollbar sits below the data and never clips the last row (esp. when filtered to few SKUs) */
+.tw{overflow-x:auto;max-height:calc(100vh - 184px);overflow-y:auto;border:1px solid var(--line);border-radius:12px;box-shadow:var(--shadow);padding-bottom:16px}   /* bottom gap so the horizontal scrollbar sits below the data and never clips the last row (esp. when filtered to few SKUs). v27.618: canvas grid-card frame (radius 12 + soft shadow) */
 table{border-collapse:collapse;font-size:11px;table-layout:fixed}
 thead th{position:sticky;top:0;z-index:20;background:var(--band);padding:3px 4px;font-weight:500;font-size:10px;color:var(--muted);border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden;text-align:right;vertical-align:bottom}   /* v27.601 sticky header underline = standard grey 1pt (was 2px #d5d5d5); tokenised for dark mode */
 thead th.lft{text-align:left}
