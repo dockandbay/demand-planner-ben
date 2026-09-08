@@ -9052,6 +9052,11 @@
   var PL_ST={q:'',sup:'',prod:'',open:{},active:true}, PL_DATA=null;
   function renderPriceLists(b){ b.innerHTML='<div class="count">Loading…</div>';
     fetch('/api/supply/price-list').then(function(r){return r.json();}).then(function(d){ if(d&&d.error){ b.innerHTML='<div style="color:var(--neg)">'+esc(d.error)+'</div>'; return; } PL_DATA=d; plDraw(b,d); }).catch(function(e){ b.innerHTML='<div style="color:var(--neg)">'+esc(e.message||e)+'</div>'; }); }
+  // Silent refresh (Ben): after a tier/price edit, refetch and swap in the new panel WITHOUT the "Loading…" flash —
+  // keep the current content on screen until the new data lands, replace atomically (plDraw), preserve scroll. On a
+  // failed refetch, leave what's there (the save already succeeded). Mirrors the pending-panel's silent redraw.
+  function renderPriceListsSilent(b){ if(!b)return; var sc=0; try{ sc=b.scrollTop||0; }catch(e){}
+    fetch('/api/supply/price-list').then(function(r){return r.json();}).then(function(d){ if(d&&d.error)return; PL_DATA=d; plDraw(b,d); try{ b.scrollTop=sc; }catch(e){} }).catch(function(){}); }
   function plLog(filter){ var ex=document.getElementById('pl-log-ov'); if(ex)ex.remove();
     var pointed=!!(filter&&filter.scope&&filter.key);
     var title=pointed?('Change log — '+esc(filter.label||filter.key)):'Price change log';
@@ -9243,7 +9248,7 @@
         sdb.textContent='Seeding…';
         fetch('/api/supply/price-list/seed-missing',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({})}).then(function(r){return r.json();}).then(function(j2){
           if(j2&&j2.error){ sdb.disabled=false; sdb.textContent=o; alert(j2.error); return; }
-          alert('Seeded '+((j2&&j2.created)||0)+' price point(s) from product cost. You can now edit any of them.'); renderPriceLists(b);
+          alert('Seeded '+((j2&&j2.created)||0)+' price point(s) from product cost. You can now edit any of them.'); renderPriceListsSilent(b);
         }).catch(function(e){ sdb.disabled=false; sdb.textContent=o; alert('Seed failed: '+(e.message||e)); });
       }).catch(function(e){ sdb.disabled=false; sdb.textContent=o; alert('Seed check failed: '+(e.message||e)); }); };
     b.querySelectorAll('.pl-rowlog').forEach(function(s){ s.onclick=function(e){ e.stopPropagation(); plLog({scope:s.dataset.scope,key:s.dataset.key,label:s.dataset.key}); }; });
@@ -9354,7 +9359,7 @@
       var jobs=deleted.map(function(id){ return fetch('/api/supply/price-list/'+id+'/delete',{method:'POST'}); })
         .concat(versions.map(function(v){ return fetch('/api/supply/price-list',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:v.id||undefined, supplier:supplier, scope:scope, price_type:pt||null, sku:(scope==='sku'?sku:null), currency:(supCcy[supplier]||'USD'), effective_from_production:(isCurV(v)?null:v.efp), tiers:v._ts})}).then(function(r){return r.json();}); }));
       var sb=ov.querySelector('#pl-save'); sb.disabled=true; sb.textContent='Saving…';
-      Promise.all(jobs).then(function(res){ var err=res.filter(function(x){return x&&x.error;})[0]; if(err){ sb.disabled=false;sb.textContent='Save'; alert(err.error); return; } ov.remove(); if(pt)PL_ST.open[pt]=true; renderPriceLists(b); }).catch(function(e){ sb.disabled=false;sb.textContent='Save'; alert('Save failed: '+(e.message||e)); }); }
+      Promise.all(jobs).then(function(res){ var err=res.filter(function(x){return x&&x.error;})[0]; if(err){ sb.disabled=false;sb.textContent='Save'; alert(err.error); return; } ov.remove(); if(pt)PL_ST.open[pt]=true; renderPriceListsSilent(b); }).catch(function(e){ sb.disabled=false;sb.textContent='Save'; alert('Save failed: '+(e.message||e)); }); }
     document.body.appendChild(ov); paint();
   }
   function renderPaymentsReport(b){ b.innerHTML='<div class="count">Loading…</div>';
