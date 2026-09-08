@@ -12619,7 +12619,7 @@
     function tierBoxHtml(s){ var hint=tierHint(s); if(!hint)return ''; var a=tierAvail(s);
       return esc(hint)+(a?('<label style="display:block;margin-top:3px;cursor:pointer;font-weight:700"><input type="checkbox" class="bpm-tiertop" data-s="'+esc(s)+'"'+(TIERTOP[s]?' checked':'')+' style="vertical-align:middle;margin-right:3px">＋ order extra '+a.extra.toLocaleString()+' as China stock</label>'):''); }
     var ov=document.createElement('div'); ov.id='bp-po-modal-multi';
-    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200000;display:flex;flex-direction:column;padding:16px 8px;overflow:hidden';
+    ov.style.cssText='position:fixed;inset:0;background:var(--card);z-index:200000;display:flex;flex-direction:column;padding:10px 14px;overflow:hidden';   // full-SCREEN feature (Ben), not a dimmed modal — opaque page surface, edge-to-edge
     ov.innerHTML='<div class="pomodal" style="width:100%;max-width:none;flex:1 1 auto;display:flex;flex-direction:column;overflow:hidden;opacity:0;transition:opacity .12s ease">'
       +'<div style="flex:0 0 auto">'
       +'<div style="display:flex;align-items:center;margin-bottom:8px"><b style="font-size:15px">Create production POs — all countries</b>'
@@ -12652,8 +12652,9 @@
       +'<div id="bpm-skus" style="flex:1 1 auto;overflow:hidden;display:flex;flex-direction:column;min-height:140px">Loading SKUs…</div>'
       +'</div>';
     document.body.appendChild(ov);
+    try{ window.__hzNoAutoReload=true; }catch(e){}   // Ben: NEVER auto-refresh/reload while the Create-PO screen is open — an in-progress PO must never be lost (safeReload() honours this flag).
     requestAnimationFrame(function(){ var _pm=ov.querySelector('.pomodal'); if(_pm)_pm.style.opacity='1'; });   // reveal once styles have applied (no unstyled flash)
-    var close=function(){ ov.remove(); };
+    var close=function(){ try{ window.__hzNoAutoReload=false; }catch(e){} ov.remove(); };   // clear the no-auto-reload guard on close
     document.getElementById('bpm-x').onclick=close;
     var _lastPreview=null;   // stashed preview PO split for the XLSX download (cleared whenever the preview is invalidated)
     function invalidatePreview(){ var r=document.getElementById('bpm-result'); if(r){ r.style.color='#94a3b8'; r.innerHTML='Preview to see the PO plan here.'; } var cb=document.getElementById('bpm-create'); if(cb)cb.style.display='none'; var xb=document.getElementById('bpm-xlsx'); if(xb)xb.style.display='none'; _lastPreview=null; }
@@ -14580,7 +14581,8 @@
   // debounced autosave; a reload inside that window would discard them (lost-smooth bug). saveForecasts() is a
   // real awaited write (the sendBeacon on unload is only best-effort). 4s safety so a hung save can't block the reload.
   var _reloading=false;
-  function safeReload(){ if(_reloading)return; _reloading=true;
+  function safeReload(){ if(_reloading)return; if(window.__hzNoAutoReload){ return; }   // Ben: never reload while a Create-PO (or other guarded) screen is open — deferred until it closes, then the poll re-applies
+    _reloading=true;
     try{
       if(typeof _dirty!=='undefined' && _dirty && typeof saveForecasts==='function'){
         var done=false, go=function(){ if(done)return; done=true; location.reload(); };

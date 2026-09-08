@@ -1,3 +1,8 @@
+## v27.605 Create Purchase Orders: full-screen + never auto-reload (Ben, slice 1)
+- First slice of the Create-PO redesign (mockup approved). The multi-country Create-PO screen (buyplanModalMulti, opened by the 🏭 Create Purchase Orders button on #/buy-move/buy) is now a **full-screen opaque page** (edge-to-edge, no dimmed modal backdrop) instead of a floating modal.
+- **Auto-refresh is now fully blocked while it is open**: sets window.__hzNoAutoReload on open / clears on close, and safeReload() honours it — so an in-progress PO can never be lost to a background data refresh OR a new deploy (the reload is deferred until the screen closes, then the poll re-applies).
+- Next slices: season badge colours, carton-qty column + non-multiple warning, China-stock column, Save Project, Add-to-existing.
+
 ## v27.604 CONFIG ▸ Coghlans SFTP browser (Ben)
 - New ⚙ CONFIG header "Coghlans SFTP" (#/config/coghlans-sftp): a read-only folder/file browser for the Coghlans SFTP server. Breadcrumb + Up + path bar + folder click-through; files show size + modified date.
 - Server: GET /api/config/coghlans-sftp/list?path=… (config-level auth). SFTP-over-SSH is tunnelled through the Webshare static-IP HTTP proxy via HTTP CONNECT, socket handed to ssh2-sftp-client (new dep). Helper in coghlans_sftp.mjs; all connection params from env (never committed). Read-only (list only). Graceful "not configured" state when the password/env is unset.
