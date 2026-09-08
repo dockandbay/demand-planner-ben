@@ -1,3 +1,7 @@
+## v27.602 Payments Due: PAY optimistically drops the row from Outstanding (Ben)
+- Clicking PAY only painted the amount/date input cells; it never updated the row data model (r.paid) or re-filtered, so paid items lingered in the Outstanding list until a slow ~10s cache refresh — and a mid-flight redraw could repaint them as unpaid (no date). Rapid clicks made it worse.
+- Now PAY marks the row paid in the data (amt_val/dt_val/paid/overdue) and re-draws immediately, so it drops out of Outstanding at once and the nav badge updates. The write still runs in the background; on failure the row data is reverted and re-drawn. Same single-request POST as before.
+
 ## v27.601 DEMAND plan: sticky column & header borders = standard grey 1pt (Ben)
 - The frozen SKU (col 1) and Stock (col 2) columns and the sticky header rows used hardcoded 2px off-greys (#b0b0ae / #d5d5d5). Set them all to 1px var(--line) (the standard grey token): the two sticky columns get a clean 1pt right edge, the header underline drops to 1pt, and the FY-grouping row gains a 1pt underline. Tokenised so they also read correctly in dark mode.
 

@@ -8934,21 +8934,21 @@
       document.getElementById('pdue-sup').onchange=function(){PDUE_STATE.supplier=this.value;draw();};
       // green "pay" → fill the row's amount (= due) + payment date (today, local tz) and save via the same path as
       // typing, so the row STAYS on screen (no re-filter) until the next manual refresh — matching manual entry.
-      document.querySelectorAll('#pdue-wrap .pdue-pay').forEach(function(b){ b.onclick=function(){ var tr=b.closest('tr,.mob-card'); if(!tr)return;
+      document.querySelectorAll('#pdue-wrap .pdue-pay').forEach(function(b){ b.onclick=function(){
         // Save amount + date in ONE request (was two racing change events → the PO could end up with only one field).
-        // OPTIMISTIC: paint the amount+date and flip to ✓ IMMEDIATELY so the click feels instant — the write runs in
-        // the background (the PO POST recomputes a grid row + can pay a cold-DB stall on live, up to a few seconds).
-        // On failure we revert the cells + button and alert, so nothing is silently lost.
+        // OPTIMISTIC (Ben): mark the row PAID in the data model and re-draw immediately, so it drops out of Outstanding
+        // at once and rapid clicks don't leave paid items lingering (with no date) until the slow ~10s cache refresh.
+        // The write runs in the background; on failure we revert the row's data and re-draw, so nothing is silently lost.
         var iso=localToday(); var body={}; body[b.dataset.af]=b.dataset.amt; body[b.dataset.df]=iso;
-        var amtInp=tr.querySelector('.fci[data-field="'+b.dataset.af+'"]'), dtInp=tr.querySelector('.fci[data-field="'+b.dataset.df+'"]');
-        var prevAmt=amtInp?amtInp.value:null, prevDt=dtInp?dtInp.value:null;
-        if(amtInp)amtInp.value=b.dataset.amt; if(dtInp)dtInp.value=fd(iso);   // show the payment date as dd-mmm-yy (server holds the ISO)
-        b.disabled=true; b.textContent='✓';
-        fetch(b.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){return r.json();})
+        var r=rows.filter(function(x){ return x.ep===b.dataset.ep && x.amt_field===b.dataset.af; })[0];
+        var prev=r?{amt_val:r.amt_val,dt_val:r.dt_val,paid:r.paid,overdue:r.overdue}:null;
+        if(r){ r.amt_val=b.dataset.amt; r.dt_val=iso; r.paid=true; r.overdue=false;   // flip to paid in the data → pass()/draw() re-filter instantly
+          _navCounts.paydue=rows.filter(function(x){return x.overdue;}).length; updateNavBadges(); draw(); }
+        fetch(b.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r2){return r2.json();})
           .then(function(j){ if(j&&j.error)throw new Error(j.error);
             if(j&&j.row&&j.row.po){ poBy[j.row.po]=j.row; }   // keep the PO row fresh so opening the PO shows the payment
             invalidateDerived();
-          }).catch(function(e){ b.disabled=false; b.textContent='pay'; if(amtInp)amtInp.value=prevAmt; if(dtInp)dtInp.value=prevDt; alert('Save failed: '+(e.message||e)); }); }; }); }
+          }).catch(function(e){ if(r&&prev){ r.amt_val=prev.amt_val; r.dt_val=prev.dt_val; r.paid=prev.paid; r.overdue=prev.overdue; _navCounts.paydue=rows.filter(function(x){return x.overdue;}).length; updateNavBadges(); draw(); } alert('Save failed: '+(e.message||e)); }); }; }); }
     draw(); }
   // PAYMENTS ▸ By Supplier — one row per supplier PO: invoice total + starting / completion / balance (summed).
   // Filter by supplier / production / batch; PO opens the drawer; a totals footer sums the current view.
