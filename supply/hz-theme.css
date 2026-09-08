@@ -67,8 +67,18 @@ html body{font-family:var(--font);background:var(--bg);color:var(--ink);-webkit-
 #app #view-tabs-row .tl-bell:hover{color:#fff}
 #app #view-tabs-row .tl-bell svg{width:15px;height:15px;flex:none}
 #app #view-tabs-row #tl-count{margin-left:0;background:#e5484d;color:#fff;font-size:10px;font-weight:800;line-height:1.4;height:auto;min-width:0;padding:1px 6px;border-radius:999px}
-#app #view-tabs-row .hz-ico{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;margin:0 0 0 2px;padding:0;border:0;border-radius:50%;background:rgba(255,255,255,.08);color:var(--nav-dim);font-weight:700;font-size:13px;line-height:1;cursor:pointer;flex:0 0 auto;overflow:hidden;transition:color .15s,background .15s}
-#app #view-tabs-row .hz-ico:hover{color:#fff;background:rgba(255,255,255,.16)}
+#app #view-tabs-row .hz-ico{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;margin:0;padding:0;border:0;border-radius:99px;background:transparent;color:var(--nav-dim);font-weight:600;font-size:13px;line-height:1;cursor:pointer;flex:0 0 auto;overflow:hidden;transition:color .15s,background .15s}   /* P1b (Diviyaj): clean 32px icon buttons — no resting pill, subtle hover only */
+#app #view-tabs-row .hz-ico:hover{color:#fff;background:rgba(255,255,255,.09)}
+#app #view-tabs-row .hz-ico svg{width:15px;height:15px}
+/* P1b account avatar: gradient badge + initials, replaces the standalone Sign-out icon (chevron gone) */
+#app #view-tabs-row .hz-divider{width:1px;height:20px;background:rgba(255,255,255,.12);margin:0 6px;flex:0 0 auto}
+#app #view-tabs-row .hz-avatar{display:inline-flex;align-items:center;gap:8px;padding:4px 6px 4px 4px;border-radius:99px;cursor:pointer;transition:background .15s;flex:0 0 auto;border:0;background:transparent}
+#app #view-tabs-row .hz-avatar:hover{background:rgba(255,255,255,.07)}
+#app #view-tabs-row .hz-avatar .hz-av-badge{width:29px;height:29px;border-radius:99px;background:linear-gradient(135deg,#2361d8,#5aa6ea);display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:11px;letter-spacing:.02em;flex:0 0 auto}
+#hz-account-menu{position:fixed;z-index:100080;background:var(--card);border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);min-width:180px;padding:5px;font-size:13px}
+#hz-account-menu .hz-am-hd{padding:7px 10px 6px;color:var(--muted);font-size:11px;border-bottom:1px solid var(--line2);margin-bottom:4px;word-break:break-all}
+#hz-account-menu button{display:flex;width:100%;align-items:center;gap:8px;padding:7px 10px;border:0;background:transparent;color:var(--ink);border-radius:6px;cursor:pointer;font:inherit;text-align:left}
+#hz-account-menu button:hover{background:var(--hover)}
 #app #view-tabs-row #config-btn{font-size:17px}
 #app #view-tabs-row #sa-drawer-btn{height:28px;padding:0 11px;margin:0 4px 0 6px;border:0;border-radius:var(--r-sm);background:var(--blue);color:#fff;font-weight:800;font-size:11px;letter-spacing:.06em;cursor:pointer;flex:0 0 auto;line-height:1}
 #app #view-tabs-row #sa-drawer-btn:hover{background:var(--blue-ink)}

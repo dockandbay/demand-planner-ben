@@ -6498,7 +6498,7 @@
   var PORTAL_SUP='', PORTAL_TAB='pos', PORTAL_PO_ST=null, _pendingPortalSup=null;   // CONFIG ▸ Portal preview: chosen supplier + inner tab + PO status filter (+ pending supplier slug from #/config/portal/<name>)
   var ROW_EDIT={};   // per-sub-tab: which row key is currently in Edit mode (Edit/Save rows for suppliers + productions)
   var ME=null;   // caller's app permissions (/api/me): {email,live,supply_edit,demand_edit,is_admin}. null until loaded; sandbox = full access.
-  function fetchMe(cb){ fetch('/api/me').then(function(r){return r.json();}).then(function(j){ ME=j||null; try{window.ME=ME;}catch(e){} try{updatePermBanner();}catch(e){} try{startSessionGuard();}catch(e){}
+  function fetchMe(cb){ fetch('/api/me').then(function(r){return r.json();}).then(function(j){ ME=j||null; try{window.ME=ME;}catch(e){} try{updatePermBanner();}catch(e){} try{startSessionGuard();}catch(e){} try{window.hzSetAvatar&&window.hzSetAvatar();}catch(e){}   /* v27.616 P1b: fill header avatar initials once the signed-in user is known */
     try{ if(ME&&ME.email&&Array.isArray(ME.favourites)){ HZ_FAVES=ME.favourites.slice(); try{localStorage.setItem('hzFaves',JSON.stringify(HZ_FAVES));}catch(e){} } }catch(e){}   // server is source of truth once ME loads
     try{ if(typeof renderFaves==='function')renderFaves(); }catch(e){}
     if(cb)cb(); }).catch(function(){ if(cb)cb(); }); }

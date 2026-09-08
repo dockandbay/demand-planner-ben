@@ -742,10 +742,11 @@ tr.grand-tot td.stk{background:var(--nav);color:#fff}
     <button class="view-toggle" data-view="exec">REPORTS</button>
     <div style="flex:1"></div>
     <button id="sa-drawer-btn" title="Stock Availability" onclick="openSADrawer()">SA</button>
-    <button id="hz-refresh-btn" class="tip120 hz-ico" data-tip="Refresh this tab's data from the database (rebuilds the server cache — DEMAND, SUPPLY or BUY, whichever you're on)" onclick="hzRefreshCache(this)">&#8635;</button>
-    <button id="hz-theme-btn" class="hz-ico" title="Toggle dark mode" onclick="hzToggleTheme()" aria-label="Toggle dark mode" aria-pressed="false"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"></path></svg></button>
-    <button id="ctx-help-btn" class="hz-ico" title="Help for this page" onclick="openCtxHelp(event)">?</button>
-    <button id="hz-logout-btn" class="hz-ico" title="Sign out" onclick="hzLogout()" aria-label="Sign out"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg></button>
+    <button id="hz-refresh-btn" class="tip120 hz-ico" data-tip="Refresh this tab's data from the database (rebuilds the server cache — DEMAND, SUPPLY or BUY, whichever you're on)" onclick="hzRefreshCache(this)" aria-label="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><polyline points="1 20 1 14 7 14"></polyline><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path></svg></button>
+    <button id="hz-theme-btn" class="hz-ico" title="Toggle dark mode" onclick="hzToggleTheme()" aria-label="Toggle dark mode" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"></path></svg></button>
+    <button id="ctx-help-btn" class="hz-ico" title="Help for this page" onclick="openCtxHelp(event)" aria-label="Help"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg></button>
+    <div class="hz-divider" aria-hidden="true"></div>
+    <button id="hz-avatar-btn" class="hz-avatar" title="Account" onclick="hzAccountMenu(event)" aria-label="Account"><span class="hz-av-badge" id="hz-av-badge">&bull;</span></button>
   </div>
   <div id="ctabs-row" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
     <span class="pill-lbl">Country</span>
@@ -18151,6 +18152,29 @@ function hzLogout(){ var me=window.ME||{}, url=me.logout_url||''; var who=me.ema
   if(!url){ alert('No sign-out address is configured for this environment'+who+'.\nOn live, Diviyaj sets app_settings.auth_logout_url to the sign-in proxy\'s logout path; the sandbox has no sign-in.'); return; }
   if(!confirm('Sign out of HORIZON'+who+'?'))return; try{ window._hzLoggedOut=1; }catch(e){} location.href=url; }
 try{ window.hzLogout=hzLogout; }catch(e){}
+
+/* v27.616 (P1b, Diviyaj header): gradient avatar badge + account dropdown replaces the bare logout icon.
+   Initials derive from the signed-in email; the menu shows the email and a Sign out action. */
+function _hzInitials(email){ var lp=String(email||'').split('@')[0]||''; var parts=lp.split(/[._-]+/).filter(Boolean);
+  if(!parts.length) return '•'; if(parts.length===1) return parts[0].slice(0,2).toUpperCase();
+  return (parts[0][0]+parts[parts.length-1][0]).toUpperCase(); }
+function hzSetAvatar(){ try{ var b=document.getElementById('hz-av-badge'); if(!b)return; var me=window.ME||{}; b.textContent=_hzInitials(me.email);
+  var btn=document.getElementById('hz-avatar-btn'); if(btn&&me.email) btn.title=String(me.email).replace(/@dockandbay\.com$/i,'@'); }catch(e){} }
+function hzAccountMenu(ev){ try{ ev&&ev.stopPropagation(); }catch(e){}
+  var ex=document.getElementById('hz-account-menu'); if(ex){ ex.remove(); return; }
+  var me=window.ME||{}; var email=me.email?String(me.email).replace(/@dockandbay\.com$/i,'@'):'Not signed in';
+  var m=document.createElement('div'); m.id='hz-account-menu';
+  m.innerHTML='<div class="hz-am-hd">'+email.replace(/[<&]/g,'')+'</div>';
+  var out=document.createElement('button'); out.type='button';
+  out.innerHTML='<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg><span>Sign out</span>';
+  out.onclick=function(){ m.remove(); hzLogout(); };
+  m.appendChild(out); document.body.appendChild(m);
+  var btn=document.getElementById('hz-avatar-btn'), r=btn?btn.getBoundingClientRect():{bottom:52,right:window.innerWidth-8};
+  m.style.top=(r.bottom+6)+'px'; m.style.left=''; m.style.right=Math.max(8,window.innerWidth-r.right)+'px';
+  var close=function(e){ if(m.contains(e.target)||(btn&&btn.contains(e.target)))return; m.remove(); document.removeEventListener('mousedown',close,true); };
+  setTimeout(function(){ document.addEventListener('mousedown',close,true); },0); }
+try{ window.hzAccountMenu=hzAccountMenu; window.hzSetAvatar=hzSetAvatar; }catch(e){}
+try{ if(document.readyState!=='loading') hzSetAvatar(); else document.addEventListener('DOMContentLoaded',hzSetAvatar); }catch(e){}
 /* ── Mobile drawer navigation (phone only; CSS gates visibility) ────────────
    Mirrors the top-nav view buttons (DEMAND / SUPPLY / BUY / FBA / REPORTS) and,
    when SUPPLY is active, lists its sections via the window.__supplyNav bridge

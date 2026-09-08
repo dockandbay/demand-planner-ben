@@ -1,3 +1,6 @@
+## v27.616 Header P1b: gradient account avatar + account menu; SVG refresh/help icons (Ben)
+- P1b of Diviyaj's "Premium Polish" header brief. Replaced the bare sign-out icon with a round gradient avatar badge (linear-gradient(135deg,#2361d8,#5aa6ea)) showing the signed-in user's initials; clicking it opens a small account dropdown (email + Sign out) instead of firing logout straight away. Added a thin divider before the avatar. Converted the Refresh and Help buttons from glyphs to clean 15px SVG line icons matching the theme icon. Icon buttons (.hz-ico) refined to 32px, transparent at rest with a subtle hover, per the canvas. Initials fill in once /api/me resolves (hzSetAvatar hook in fetchMe). No behaviour change to logout, refresh, help or theme actions.
+
 ## v27.615 Demand Metrics: As-of picker is now a MONTH picker (1st-of-month snapshot) (Ben)
 - The historical As-of control is a month picker; choosing a month uses that month's snapshot (the nearest inventory snapshot on/before the 1st). The header still shows the exact resolved snapshot date.
 
