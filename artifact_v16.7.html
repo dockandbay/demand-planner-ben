@@ -10759,6 +10759,40 @@ function renderKeyAccountsView(body){
       res.style.color='var(--pos)'; res.textContent='✓ Imported '+skus.length+' SKU'+(skus.length>1?'s':'')+' into '+month+(unresolved.length?' · '+unresolved.length+' skipped':''); reload(); });   // v27.579: one batched write
   }
 }
+// P2 Performance v2 (Diviyaj canvas): the In-stock tab renders KPI cards + an in-stock-rate-by-market table with
+// rate bars, in place of the generic KPI table. Same /api/kpi/in-stock data (rows incl Total 3PL / Total FBA).
+function _kpiRateCol(p){ return p<30?'var(--neg)':p<70?'var(--amber)':'var(--pos)'; }
+function _kpiInStockCanvas(j){
+  var rows=(j&&j.rows)||[]; function nf(n){ return Number(n||0).toLocaleString('en-GB'); }
+  function tot(t){ return rows.filter(function(r){return r.channel==='Total '+t;})[0]||{skus:0,instock:0,a_skus:0,a_instock:0,pct:0,a_pct:0}; }
+  var t3=tot('3PL'), tf=tot('FBA');
+  function card(label,a,b,pct){ var col=_kpiRateCol(pct);
+    return '<div style="background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow);animation:fadeUp .3s ease both">'
+      +'<div style="font-size:10.5px;font-weight:800;letter-spacing:.08em;color:var(--faint)">'+label+'</div>'
+      +'<div style="display:flex;align-items:baseline;gap:9px;margin-top:8px"><span style="font-size:26px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1;color:'+col+'">'+pct+'%</span>'
+      +'<span style="font-size:11.5px;font-weight:600;color:var(--muted);font-variant-numeric:tabular-nums">'+nf(a)+' / '+nf(b)+'</span></div>'
+      +'<div style="height:5px;border-radius:99px;background:var(--line2);margin-top:12px;overflow:hidden"><div style="height:100%;width:'+pct+'%;border-radius:99px;background:'+col+'"></div></div></div>'; }
+  var kpis='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px;margin-bottom:14px">'
+    +card('3PL IN-STOCK',t3.instock,t3.skus,t3.pct)+card('FBA IN-STOCK',tf.instock,tf.skus,tf.pct)
+    +card('A-TIER 3PL',t3.a_instock,t3.a_skus,t3.a_pct)+card('A-TIER FBA',tf.a_instock,tf.a_skus,tf.a_pct)+'</div>';
+  var dmHead='font-size:10px;font-weight:800;letter-spacing:.07em;color:var(--faint);text-align:right;padding:6px 8px';
+  var gc='minmax(92px,1.1fr) 70px 76px minmax(150px,2fr) 26px 70px 76px 84px';
+  var hd='<div></div><div style="'+dmHead+'">SKUS</div><div style="'+dmHead+'">IN STOCK</div><div style="'+dmHead+';text-align:left;padding-left:10px">RATE</div>'
+    +'<div></div><div style="'+dmHead+'">A SKUS</div><div style="'+dmHead+'">A IN STOCK</div><div style="'+dmHead+'">A RATE</div>';
+  var rowsH=rows.map(function(r){ var tt=r.type==='TOTAL', col=_kpiRateCol(r.pct), acol=_kpiRateCol(r.a_pct);
+    var bt='1px solid '+(tt?'var(--line)':'var(--line2)'), bg=tt?'background:var(--hover);':'';
+    var cell='font-size:12.5px;font-weight:'+(tt?800:600)+';text-align:right;padding:9px 8px;font-variant-numeric:tabular-nums;border-top:'+bt+';'+bg;
+    return '<div style="font-size:12.5px;font-weight:'+(tt?800:700)+';padding:9px 0;border-top:'+bt+';'+bg+'">'+tHesc(r.channel)+'</div>'
+      +'<div style="'+cell+'">'+nf(r.skus)+'</div><div style="'+cell+'">'+nf(r.instock)+'</div>'
+      +'<div style="display:flex;align-items:center;gap:9px;padding:9px 8px 9px 10px;border-top:'+bt+';'+bg+'"><div style="flex:1;height:7px;border-radius:99px;background:var(--line2);overflow:hidden;min-width:70px"><div style="height:100%;width:'+r.pct+'%;border-radius:99px;background:'+col+'"></div></div><span style="font-size:12px;font-weight:800;min-width:38px;text-align:right;font-variant-numeric:tabular-nums;color:'+col+'">'+r.pct+'%</span></div>'
+      +'<div style="height:100%;border-top:'+bt+';border-left:1px solid var(--line2);'+bg+'"></div>'
+      +'<div style="'+cell+'">'+nf(r.a_skus)+'</div><div style="'+cell+'">'+nf(r.a_instock)+'</div>'
+      +'<div style="'+cell+';color:'+acol+';font-weight:800">'+r.a_pct+'%</div>'; }).join('');
+  var tableCard='<div style="background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);animation:fadeUp .35s ease both;overflow:hidden">'
+    +'<div style="display:flex;align-items:baseline;gap:10px;padding:16px 22px 4px;flex-wrap:wrap"><span style="font-size:13.5px;font-weight:800">In-stock rate by market</span><span style="font-size:11px;font-weight:600;color:var(--faint)">active products with on-hand stock above the threshold · A = A-tier (market_tier)</span></div>'
+    +'<div style="overflow-x:auto;padding:8px 22px 20px"><div style="display:grid;grid-template-columns:'+gc+';align-items:center;min-width:820px">'+hd+rowsH+'</div></div></div>';
+  return kpis+tableCard;
+}
 function renderKpisView(body,hashBase){
   hashBase=hashBase||['reports','performance','demand-metrics'];   // now lives under REPORTS ▸ Performance ▸ Demand Metrics (was DEMAND ▸ KPIs)
   var subTabs=[['instock','In Stock'],['slowmoving','Slow moving'],['inventory','Inventory cover'],['stockout','Stockout risk'],['discontinued','Discontinued']];   // 'accuracy' removed — it duplicated DEMAND ▸ Analysis ▸ Accuracy (same renderAccuracyView), which is the canonical home
@@ -10823,7 +10857,9 @@ function renderKpisView(body,hashBase){
         return '<tr style="border-bottom:1px solid var(--line2);'+(tot?'font-weight:700;background:var(--hover)':'')+'">'+cfg.cols.map(function(c,i){
           var col=''; if(c.t==='pct'&&r[c.k]!=null){ var v=r[c.k]; col=';font-weight:600;color:'+(c.inv?(v<=20?'var(--pos)':v<=50?'var(--amber)':'var(--neg)'):(v>=80?'var(--pos)':v>=50?'var(--amber)':'var(--neg)')); }
           return '<td style="padding:4px 12px;text-align:'+(i===0?'left':'right')+col+'">'+fmt(r[c.k],c.t)+'</td>'; }).join('')+'</tr>'; }).join('');
-      tbl.innerHTML='<table style="border-collapse:collapse;font-size:12px;max-width:860px;width:100%"><thead>'+head+'</thead><tbody>'+bodyH+'</tbody></table>'
+      tbl.innerHTML=(KPI_SUB==='instock')
+        ? _kpiInStockCanvas(j)+((cfg.note||j.note)?'<div style="font-size:11px;color:var(--faint);margin-top:8px">'+(j.note?j.note+'. ':'')+(cfg.note||'')+'</div>':'')
+        : '<table style="border-collapse:collapse;font-size:12px;max-width:860px;width:100%"><thead>'+head+'</thead><tbody>'+bodyH+'</tbody></table>'
         +((cfg.note||j.note)?'<div style="font-size:11px;color:var(--faint);margin-top:6px">'+(j.note?j.note+'. ':'')+(cfg.note||'')+'</div>':'');
       var matrix=[cfg.cols.map(function(c){return c.h;})].concat(j.rows.map(function(r){return cfg.cols.map(function(c){return r[c.k]==null?'':r[c.k];});}));
       var fname=cfg.file(j)+'.csv';

@@ -1,3 +1,6 @@
+## v27.619 P2 Performance v2: Demand-metrics In-stock — KPI cards + rate-by-market table (Ben)
+- REPORTS ▸ Performance ▸ Demand metrics ▸ In stock rebuilt to Diviyaj's Performance v2 canvas. Four KPI cards (3PL in-stock, FBA in-stock, A-tier 3PL, A-tier FBA — big % coloured by rate <30 red / <70 amber / else green, with a/b fraction + progress bar) sit above an "In-stock rate by market" card: a grid with rate bars and a divided A-tier block (A SKUs / A in stock / A rate). Same /api/kpi/in-stock data (rows incl Total 3PL / Total FBA), so the As-of month picker, thresholds, Core/Seasonal split, CSV + Copy all keep working. Only the In-stock tab changed; Slow moving / Inventory cover / Stockout risk / Discontinued keep the generic table. First slice of Performance v2 (Ben: Demand metrics first); Supply-metrics pipeline + scoreboard to follow.
+
 ## v27.618 P2 DEMAND plan: canvas grid-card frame (Ben)
 - Plan v2, visual-polish-only per Ben (layout + toggles kept as-is). The DEMAND plan grid wrapper (.tw) already carried a 1px border + 6px radius; brought it up to the canvas card treatment (12px radius + soft --shadow). Overflow / sticky-column / sticky-header behaviour untouched (no repeat of the v27.614 sticky work). Cosmetic only.
 
