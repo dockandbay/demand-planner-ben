@@ -1450,6 +1450,7 @@ var CALC_MEMO={};
 // makes that overlay stale; this flag (set on edit) tells BP.render() to rebuild the demand before recomputing,
 // instead of only refreshing on BUY-tab entry.
 var BUY_FC_STALE=false;
+var DEMAND_BUILT=false;   // set true once buildLiveDemand() has completed a full pass. The buy overlay builds synchronously at load (buildLiveBpOverlay) while buildLiveDemand() runs async afterwards, so the buy render must not compute set shares / read demand_sets before the first demand build has settled (else a new set can grab an oversized subcat share and over-explode into components — self-heals on the next build). render() gates on this.
 // Dynamic month anchor: current/partial month = latest 2026 month that has actuals in the data.
 // Advances automatically when fresh data is embedded — no hardcoded month to edit each cycle.
 (function(){
@@ -2606,6 +2607,12 @@ function render(){
   for(const k in BUY_CACHE)delete BUY_CACHE[k];
   // Rebuild the demand overlay if a forecast edit made it stale, so buy quantities reflect the latest forecast
   // (was only refreshed on BUY-tab entry). Gated on the flag so settings/filter re-renders stay cheap.
+  // Hardening (Ben): the buy overlay builds synchronously at load, but buildLiveDemand() (which computes set
+  // shares and writes demand_sets onto components) runs async afterwards. If the buy is rendered before that
+  // first pass settles, a new in-scope set (no forecast/no LY) can take an oversized subcat share and
+  // over-explode into its components — the "COOL-CAB-3SET flashes huge, clears when you visit DEMAND" symptom.
+  // Force one demand build up front so shares are always settled before any buy quantity is computed.
+  try{ if((typeof DEMAND_BUILT==='undefined'||!DEMAND_BUILT) && typeof buildLiveDemand==='function'){ buildLiveDemand(); } }catch(e){}
   try{ if(typeof BUY_FC_STALE!=='undefined' && BUY_FC_STALE && typeof buildLiveDemand==='function'){ buildLiveDemand(); BUY_FC_STALE=false; } }catch(e){}
   // First demand-plan render: build the prepack cover once so the rail "PP" badge shows without opening the buy plan.
   try{ if(!_PP_COVER_INIT && typeof PREPACK_MAP==='object' && Object.keys(PREPACK_MAP).length && typeof buildLiveDemand==='function'){ buildLiveDemand(); _PP_COVER_INIT=true; } }catch(e){}
@@ -7236,7 +7243,7 @@ function runoffAlloc(sku,co,extra){ var key=sku+'|'+co+(extra?'|X':''); if(RUNOF
     try{ fu=(calc(p.s,co,ch)||{}).fu||{}; }catch(e){}
     try{ var all=filteredSkus(p.s,co,ch,true)||[]; if(all.indexOf(sku)<0)all=all.concat([sku]); sh=(buildSkuShares(all,co,ch,RUNOFF_LYYM)||{})[sku]||0; }catch(e){}
     st[ch]={sales:sales,hasLY:skuHasLY(sales),fu:fu,sh:sh,fc:{}}; res.alloc[ch]={}; res.out[ch]={}; res.cap[ch]={}; });
-  function raw(ch,m){ var x=st[ch]; var fo=skuOutFC(sku,co,ch,m); if(fo!=null)return fo; if(x.hasLY){ var lyM=(parseInt(m.slice(0,4),10)-1)+'_'+m.slice(5,7); return (lyM<=CUR_YTD_END)?(x.sales[lyM]||0):(x.fc[lyM]||0); } return Math.round((x.fu[m]||0)*x.sh/(isSet?Math.max(1,_setSize(sku)):1)); }   // sets: cascade is item-equivalent → boxes
+  function raw(ch,m){ var x=st[ch]; var fo=skuOutFC(sku,co,ch,m); if(fo!=null)return isSet?fo/Math.max(1,_setSize(sku)):fo; if(x.hasLY){ var lyM=(parseInt(m.slice(0,4),10)-1)+'_'+m.slice(5,7); return (lyM<=CUR_YTD_END)?(x.sales[lyM]||0):(x.fc[lyM]||0); } return Math.round((x.fu[m]||0)*x.sh/(isSet?Math.max(1,_setSize(sku)):1)); }   // sets: everything here is BOXES — override stored item-equiv ÷setSize, LY actuals already boxes, cascade ÷setSize. runoffAlloc's pool math + buy explosion both need boxes (display consumers ×setSize back to item-equiv).
   FM_CALC.forEach(function(m){ var ms=m.slice(0,4)+'-'+m.slice(5,7)+'-01', live=(m>=CUR_MONTH);
     var rw={}; chs.forEach(function(ch){ var r=raw(ch,m); if(p.lyo||(launchDate&&ms<launchDate))r=0; rw[ch]=Math.max(0,Math.round(r)); });
     var runoff=live&&((discDate&&ms>discDate)||setCon);   // v27.545: a set with a run-off component is capped in every live month
@@ -7270,10 +7277,10 @@ function skuMonthlyMap(sku,co,ch,months,subcatFU,share,invOH){
     if(discDate||launchDate){
       var monthStart=m.slice(0,4)+'-'+m.slice(5,7)+'-01';
       if(launchDate&&monthStart<launchDate){ base=0; }
-      else if(discDate&&monthStart>discDate){ var raw=Math.round((subcatFU[m]||0)*share); var _RA=runoffAlloc(sku,co); if(_RA.alloc[ch]&&_RA.alloc[ch][m]!=null){ base=_RA.alloc[ch][m]; } else { base=Math.max(0,Math.min(raw,rem)); rem=Math.max(0,rem-base); } }   // v27.534 shared country pool
+      else if(discDate&&monthStart>discDate){ var raw=Math.round((subcatFU[m]||0)*share); var _RA=runoffAlloc(sku,co); if(_RA.alloc[ch]&&_RA.alloc[ch][m]!=null){ base=_RA.alloc[ch][m]*(p.vt==='SET'?Math.max(1,_setSize(sku)):1); } else { base=Math.max(0,Math.min(raw,rem)); rem=Math.max(0,rem-base); } }   // v27.534 shared country pool (runoffAlloc is BOXES for a set → ×setSize back to item-equiv, matching this fn's normal path)
       else { var fo3=skuOutFC(sku,co,ch,m); base=(fo3!=null)?fo3:Math.round((subcatFU[m]||0)*share); }
     } else { var foB=skuOutFC(sku,co,ch,m); base=(foB!=null)?foB:Math.round((subcatFU[m]||0)*share); }
-    if(p.vt==='SET'&&m>=CUR_MONTH&&setHasConstrainedComps(sku,co)){ var _RS=runoffAlloc(sku,co); if(_RS.alloc[ch]&&_RS.alloc[ch][m]!=null)base=_RS.alloc[ch][m]; }   // v27.545
+    if(p.vt==='SET'&&m>=CUR_MONTH&&setHasConstrainedComps(sku,co)){ var _RS=runoffAlloc(sku,co); if(_RS.alloc[ch]&&_RS.alloc[ch][m]!=null)base=_RS.alloc[ch][m]*Math.max(1,_setSize(sku)); }   // v27.545 (runoffAlloc BOXES → ×setSize back to item-equiv)
     out[m]=base;
   });
   return out;
@@ -8273,9 +8280,9 @@ function subcatSkuEffTotals(s,co,ch){
       var raw=(_fo!=null)?_fo:Math.round((FU[m]||0)*(shares[sku]||0));
       var v, isDisc=(disc&&ms>disc);
       if(lch&&ms<lch){v=0;}
-      else if(isDisc){ var _RA2=runoffAlloc(sku,co); if(_RA2.alloc[ch]&&_RA2.alloc[ch][m]!=null){ v=_RA2.alloc[ch][m]; } else if(rem<=0){v=0;} else {v=Math.max(0,Math.min(raw,rem));rem=Math.max(0,rem-v);} }   // v27.534 shared pool; discontinued always keep their stock rundown (not zeroed)
+      else if(isDisc){ var _RA2=runoffAlloc(sku,co); if(_RA2.alloc[ch]&&_RA2.alloc[ch][m]!=null){ v=_RA2.alloc[ch][m]*sz; } else if(rem<=0){v=0;} else {v=Math.max(0,Math.min(raw,rem));rem=Math.max(0,rem-v);} }   // v27.534 shared pool; discontinued always keep their stock rundown (not zeroed). sz=setSize for a set (runoffAlloc BOXES → item-equiv, matches raw/setUnit basis below)
       else{v=raw;}
-      if(isSet&&m>=CUR_MONTH&&!isDisc&&setHasConstrainedComps(sku,co)){ var _RS=runoffAlloc(sku,co); if(_RS.alloc[ch]&&_RS.alloc[ch][m]!=null)v=_RS.alloc[ch][m]; }   // v27.554: sets follow their components here too (matches the rows)
+      if(isSet&&m>=CUR_MONTH&&!isDisc&&setHasConstrainedComps(sku,co)){ var _RS=runoffAlloc(sku,co); if(_RS.alloc[ch]&&_RS.alloc[ch][m]!=null)v=_RS.alloc[ch][m]*sz; }   // v27.554: sets follow their components here too (matches the rows). runoffAlloc BOXES → ×setSize to item-equiv
       if(!(isDisc&&DIS)){ tot[m]=(tot[m]||0)+v;   // when disregarding, the gap basis is ACTIVE-only vs the subcat target (discontinued excluded)
         if(isSet){ setUnit[m]=(setUnit[m]||0)+v; setBox[m]=(setBox[m]||0)+Math.round(v/sz); } else { mastU[m]=(mastU[m]||0)+v; } }
       if(isDisc){ discTot[m]=(discTot[m]||0)+v; } else { actTot[m]=(actTot[m]||0)+v; }
@@ -8475,11 +8482,11 @@ function insertInlineSkuRows(s,co,ch,afterTr){
       else { raw=Math.round((subcatFU[m]||0)*share); }                           // new SKU → subcat cascade × share
       if(launchDate&&ms<launchDate){skuFC[m]=0;}
       else if(discDate&&ms>discDate){ var _RA=runoffAlloc(sku,co);   // v27.534: shared country pool across channels
-        if(_RA.alloc[ch]&&_RA.alloc[ch][m]!=null){ skuFC[m]=_RA.alloc[ch][m]; skuRundown[m]=true; if(_RA.out[ch]&&_RA.out[ch][m])skuDiscOut[m]=true; }
+        if(_RA.alloc[ch]&&_RA.alloc[ch][m]!=null){ skuFC[m]=_RA.alloc[ch][m]*(p.vt==='SET'?Math.max(1,_setSize(sku)):1); skuRundown[m]=true; if(_RA.out[ch]&&_RA.out[ch][m])skuDiscOut[m]=true; }   // runoffAlloc BOXES → ×setSize to item-equiv (matches this row's normal path)
         else { if(rem<=0){skuFC[m]=0;skuRundown[m]=true;skuDiscOut[m]=true;return;} var c=Math.max(0,Math.min(raw,rem));skuFC[m]=c;rem=Math.max(0,rem-c);skuRundown[m]=true; }
       }
       else{skuFC[m]=raw;}
-      if(p.vt==='SET'&&m>=CUR_MONTH&&!(discDate&&ms>discDate)&&!(launchDate&&ms<launchDate)&&setHasConstrainedComps(sku,co)){ var _RS=runoffAlloc(sku,co); if(_RS.alloc[ch]&&_RS.alloc[ch][m]!=null){ skuFC[m]=_RS.alloc[ch][m]; skuRundown[m]=true; if(_RS.out[ch]&&_RS.out[ch][m])skuDiscOut[m]=true; } }   // v27.545: a set only sells what its run-off components can still build
+      if(p.vt==='SET'&&m>=CUR_MONTH&&!(discDate&&ms>discDate)&&!(launchDate&&ms<launchDate)&&setHasConstrainedComps(sku,co)){ var _RS=runoffAlloc(sku,co); if(_RS.alloc[ch]&&_RS.alloc[ch][m]!=null){ skuFC[m]=_RS.alloc[ch][m]*Math.max(1,_setSize(sku)); skuRundown[m]=true; if(_RS.out[ch]&&_RS.out[ch][m])skuDiscOut[m]=true; } }   // v27.545: a set only sells what its run-off components can still build (runoffAlloc BOXES → ×setSize to item-equiv)
     });
     // Anomaly flags for this SKU's forecast
     var skuAF=anomalyFlags(skuFC,s,co,ch);
@@ -10362,22 +10369,23 @@ function renderSummaryView(body){
       var mths=c.single?[c.single]:(c.m?[c.m]:(c.months||[])), ly=0, lyU=0; mths.forEach(function(m){ ly+=((_lyRev[sub]&&_lyRev[sub][m])||0); lyU+=((_lyUnits[sub]&&_lyUnits[sub][m])||0); });   // month cols carry .m (not .months) → guard so MONTH group doesn't blank
       var ph=(inh!=null)?('↳'+(inh>=0?'+':'')+inh+'%'):'0%';
       var isGbp=(gbpStored!=null), v='', bg='', ttxt='', cellTgt=0;
-      if(isGbp){ v='£'+Math.round(gbpStored).toLocaleString(); bg='background:#B3EBF2';   // £ absolute → light blue
+      var _R=(typeof cvR==='function')?(cvR(Y)||1):1, _S=(_symC||'£');   // £→selected-display-currency rate for this FY + its symbol (Ben: target cells must follow the currency picker, not always show £)
+      if(isGbp){ v=_S+Math.round(gbpStored*_R).toLocaleString(); bg='background:#B3EBF2';   // absolute target → light blue (shown in the selected currency; stored GBP)
         var impPct=ly>0?Math.round((gbpStored/ly-1)*100):null; cellTgt=gbpStored;
         ttxt=(impPct==null?'new':((impPct>=0?'+':'')+impPct+'%'))+_uTxt(gbpStored,sub); }
       else if(gStored!=null){ v=(Number(gStored)>=0?'+':'')+Number(gStored)+'%'; bg='background:var(--pos-bg)';   // % growth → light green
-        var tgt=ly*(1+Number(gStored)/100); cellTgt=tgt; ttxt=(ly>0?('£'+Math.round(tgt).toLocaleString()):'')+_uTxt(tgt,sub); }
+        var tgt=ly*(1+Number(gStored)/100); cellTgt=tgt; ttxt=(ly>0?(_S+Math.round(tgt*_R).toLocaleString()):'')+_uTxt(tgt,sub); }
       else { var eff=(inh!=null?inh:0), tgt2=ly*(1+eff/100); cellTgt=tgt2; if(imp!=null)bg='background:var(--amber-bg)'; else if(inh!=null)bg='background:var(--pos-bg)';   // implied (balances to market total) → pale yellow; level-inherited → green
-        ttxt=(ly>0?('£'+Math.round(tgt2).toLocaleString()):'')+_uTxt(tgt2,sub); }
+        ttxt=(ly>0?(_S+Math.round(tgt2*_R).toLocaleString()):'')+_uTxt(tgt2,sub); }
       // Part A: run-off subcat → cap this period's target at what remaining stock allows (units), back-out £ via last-year £/unit.
       var _roCapped=false;
       if(_roStockU&&_roStockU[sub]>0){ var _luC=0,_capC=0; mths.forEach(function(m){ _luC+=(_roLyU[sub][m]||0); _capC+=(_roCapU[sub][m]||0); });
         var _effNet=(_luC>0)?(ly/_luC):0, _tgtU=(_effNet>0)?(cellTgt/_effNet):0;
         if(_effNet>0&&_tgtU>_capC+0.5){ cellTgt=_capC*_effNet; _roCapped=true; }
-        ttxt=(ly>0?('£'+Math.round(cellTgt).toLocaleString()):'')+((_effNet>0)?(' · '+Math.round(cellTgt/_effNet).toLocaleString()+'u'):'');
+        ttxt=(ly>0?(_S+Math.round(cellTgt*_R).toLocaleString()):'')+((_effNet>0)?(' · '+Math.round(cellTgt/_effNet).toLocaleString()+'u'):'');
         if(_roCapped)ttxt='<span title="Discontinued sub-category — target capped to '+Math.round(_capC).toLocaleString()+' units this period ('+Math.round(_roStockU[sub]).toLocaleString()+' units of stock left in total). Last-year basis would be higher; can\'t sell more than is left." style="color:var(--amber);cursor:help;font-weight:800">&#9888;</span> '+ttxt; }
       if(lockConflict)ttxt='<span title="Target conflict: the locked category targets for this period together exceed what the market-total budget allows — the remaining (untyped) categories get floored at −100% / forced negative even though the market total is a positive or flat growth. Lower a locked category’s growth (this one or another), or raise the market total." style="color:var(--neg);cursor:help;font-weight:800">⚠</span> '+ttxt;
-      return '<td class="ecell" style="padding:2px 4px;border:1px solid var(--line);text-align:right'+(lockConflict?';background:#fff1f1':((_roStockU&&_roStockU[sub]>0)?';background:#FFF3E6':''))+'"><input class="tgin" data-sub="'+encodeURIComponent(sub)+'" data-fy="'+Y+'" data-lvl="'+lvl+'" data-idx="'+idx+'" data-ly="'+Math.round(ly)+'" data-lyu="'+Math.round(lyU)+'" data-inh="'+(inh!=null?inh:'')+'" data-net="'+_tgtNet(sub)+'" value="'+v+'" placeholder="'+ph+'" title="Type a % growth vs last year (e.g. 40) OR a revenue target in the SELECTED currency (e.g. 120000 or €120000 — the currency picker wins over any symbol you type; stored in GBP at the FY rate) OR a units target (e.g. 100u → converted at this subcategory’s price; units beat everything). Blank = inherit." style="'+bg+'"><div class="ttgt tgt-hov" data-sub="'+encodeURIComponent(sub)+'" data-mths="'+mths.join(',')+'" data-tgt="'+Math.round(cellTgt)+'" data-ly="'+Math.round(ly)+'" data-net="'+_tgtNet(sub)+'" style="font-size:9px;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums;margin-top:1px;cursor:help">'+ttxt+'</div></td>'; }
+      return '<td class="ecell" style="padding:2px 4px;border:1px solid var(--line);text-align:right'+(lockConflict?';background:#fff1f1':((_roStockU&&_roStockU[sub]>0)?';background:#FFF3E6':''))+'"><input class="tgin" data-sub="'+encodeURIComponent(sub)+'" data-fy="'+Y+'" data-lvl="'+lvl+'" data-idx="'+idx+'" data-ly="'+Math.round(ly)+'" data-lyu="'+Math.round(lyU)+'" data-inh="'+(inh!=null?inh:'')+'" data-net="'+_tgtNet(sub)+'" value="'+v+'" placeholder="'+ph+'" title="Type a % growth vs last year (e.g. 40) OR a revenue target in the SELECTED currency (e.g. 120000 or €120000 — the currency picker wins over any symbol you type; stored in GBP at the FY rate) OR a units target (e.g. 100u → converted at this subcategory’s price; units beat everything). Blank = inherit." style="'+bg+'"><div class="ttgt tgt-hov" data-sub="'+encodeURIComponent(sub)+'" data-mths="'+mths.join(',')+'" data-tgt="'+Math.round(cellTgt)+'" data-ly="'+Math.round(ly)+'" data-net="'+_tgtNet(sub)+'" data-rt="'+_R+'" style="font-size:9px;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums;margin-top:1px;cursor:help">'+ttxt+'</div></td>'; }
     // ── Category totals (Ben): group subcats under their parent CATEGORY and roll up LY→target for BOTH units and
     //    revenue, from each subcat's set target growth. Metric-independent (reads raw actuals a[m]=[units,£]); revenue
     //    converted to display currency per FY. Untyped subcats: read tab holds flat (matches the summary target cells);
@@ -10520,6 +10528,7 @@ function renderSummaryView(body){
             }).catch(function(){}); }; });
       // Hover the £ target under a cell → breakdown: current forecast vs target (units / ASP / revenue), with from→to deltas.
       function _tgtHovHtml(el){ var sub=decodeURIComponent(el.dataset.sub||''), tgt=Number(el.dataset.tgt)||0;
+        var _rt=Number(el.dataset.rt)||1, _sy=(_symC||'£');   // GBP→selected-currency rate for this cell's FY (Ben: follow the picker, not always £)
         // Baseline = LAST-YEAR ACTUALS (data-ly is prior-year revenue, already blended with LY forecast for
         // any incomplete months — the "August" case). NOT the current forecast. ASP = the same net £/unit the
         // under-cell figure uses, so the unit counts match. Growth shown = LY-actual → target.
@@ -10532,8 +10541,8 @@ function renderSummaryView(body){
         var LT='padding:1px 10px 1px 0;color:var(--faint);text-align:left', VT='text-align:left';
         return '<div style="font-weight:700;margin-bottom:4px;text-align:left">'+esc(sub||'Market total')+'</div>'
           +'<table style="font-size:11px;border-collapse:collapse;color:var(--line);text-align:left"><tr><td style="'+LT+'">Units</td><td style="'+VT+'">'+uCell+'</td></tr>'
-          +'<tr><td style="'+LT+'">ASP</td><td style="'+VT+'">£'+(asp?asp.toFixed(2):'—')+'</td></tr>'
-          +'<tr><td style="'+LT+'">Revenue</td><td style="'+VT+'">£'+f(lyRev)+' → £'+f(tgt)+' <span style="color:'+rC+'">('+(rD>=0?'+':'')+'£'+f(rD)+')</span></td></tr>'
+          +'<tr><td style="'+LT+'">ASP</td><td style="'+VT+'">'+(asp?(_sy+(asp*_rt).toFixed(2)):'—')+'</td></tr>'
+          +'<tr><td style="'+LT+'">Revenue</td><td style="'+VT+'">'+_sy+f(lyRev*_rt)+' → '+_sy+f(tgt*_rt)+' <span style="color:'+rC+'">('+(rD>=0?'+':'')+_sy+f(rD*_rt)+')</span></td></tr>'
           +(gp!=null?'<tr><td style="'+LT+'">Growth</td><td style="'+VT+';color:'+(gp>=0?'#86efac':'#fca5a5')+'">'+(gp>=0?'+':'')+gp+'%</td></tr>':'')+'</table>'
           +'<div style="color:var(--faint);margin-top:4px;font-size:9px;text-align:left">last-year actuals → target</div>'; }
       var _tgtHideT=null, _tgtShowT=null;
@@ -15908,7 +15917,7 @@ function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={};   //
           var ovMap=FC_OUTPUTS[setSku+'|'+skuWh(co,ch)+'|'+ch]||{}, chFC={};
           LIVE_FC_MONTHS.forEach(function(fym){
             var ms=fym.slice(0,4)+'-'+fym.slice(5,7)+'-01', raw;
-            if(ovMap[fym]!=null){ raw=ovMap[fym]; }                                          // saved override wins
+            if(ovMap[fym]!=null){ raw=ovMap[fym]/_sz; }                                       // saved override wins (stored item-equiv/exploded → ÷setSize = BOXES before component explosion, matching the cascade path below; fixes active-set over-buy)
             else if(s2HasLY){ var lyM=(parseInt(fym.slice(0,4),10)-1)+'_'+fym.slice(5,7); raw=(lyM<=CUR_YTD_END)?(s2sales[lyM]||0):(chFC[lyM]||0); }   // continuing set → last-year chain
             else { raw=(subcatFU[fym]||0)*share/_sz; }                                       // new set → subcat cascade × share (item-equiv, Sets%-sized) ÷ setSize = BOXES
             var fc;
@@ -15966,6 +15975,7 @@ function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={};   //
     // (v27.544 pass 2 retired in v27.545: runoffAlloc() now folds set demand into a discontinued component's pool itself, and the explosion loop above takes only the allowed share)
   })();
   BP_DATA.demand_source='Live: forecast_outputs (SKU) + PLAN cascade';
+  DEMAND_BUILT=true;   // shares + set explosion have settled at least once (buy render gates on this)
 }
 
 // ===== LIVE PREORDER / KEY-ACCOUNT REFRESH (Airtable MCP) =====
