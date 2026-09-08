@@ -6693,7 +6693,7 @@
     // L2 groups are scoped by CONFIG_CTX: 'supply' (SUPPLY ▸ CONFIG) vs 'admin' (the ⚙ cog CONFIG section).
     var L2;
     if(CONFIG_CTX==='supply'){ L2=[['suppliers','Suppliers'],['batches','Batches'],['productions','Productions'],['keyaccounts','Key accounts'],['portal','Portal'],['portalusers','Portal users'],['mfgbom','BOM'],['branches','Branches'],['freight','Freight rates'],['tax','Import tax'],['products','Products'],['barcodegen','Barcodes'],['duty','Import duty'],['consignees','Consignees']]; }   // flat (Supply chain group removed); Ben's order + duty/consignees appended
-    else { L2=[['export-uploads','Exports & uploads'],['suggestions','Suggestions']]; if(ME&&ME.is_admin)L2.unshift(['admin','Admin']); }   // 'demand' group moved to DEMAND ▸ Config; 'Product' moved to PRODUCT ▸ Config
+    else { L2=[['export-uploads','Exports & uploads'],['suggestions','Suggestions'],['coghlans-sftp','Coghlans SFTP']]; if(ME&&ME.is_admin)L2.unshift(['admin','Admin']); }   // 'demand' group moved to DEMAND ▸ Config; 'Product' moved to PRODUCT ▸ Config; Coghlans SFTP browser (Ben)
     if(CONFIG_SUB==='forecast-export')CONFIG_SUB='export-uploads';   // legacy slug redirect
     if((CONFIG_SUB==='email-notifications'||CONFIG_SUB==='permissions'||CONFIG_SUB==='email-log'||CONFIG_SUB==='admin-general'||CONFIG_SUB==='exchange-rates'||CONFIG_SUB==='channels')&&!(ME&&ME.is_admin))CONFIG_SUB='export-uploads';   // guard: non-admins can't land on admin-only tabs (General/email-notifications now admin-only)
     function reload(){ delete cache['config']; selectSection('config'); }   // refresh after a rate add (keeps sub-tab)
@@ -6990,6 +6990,42 @@
     function showSub(){ var b=document.getElementById('config-body');
       // CONFIG sub-tabs: a dispatch map (one handler per sub) instead of a 16-branch if/else chain.
       var SUBS={};
+      // Coghlans SFTP browser (Ben, 2026-09-08): read-only folder/file listing over the Webshare static-IP proxy.
+      SUBS['coghlans-sftp']=function(){
+        var CUR=(SUBS._sftpPath||'/');
+        b.innerHTML='<div class="annot"><b>CONFIG ▸ Coghlans SFTP.</b> Browse the Coghlans SFTP server (read-only) via the Webshare static IP. Click a folder to open it, or type a path and press Go.</div>'
+          +'<div class="bar" style="gap:6px;flex-wrap:wrap"><button class="save-btn light" id="sftp-up" title="up one level">↑ Up</button><input class="fci" id="sftp-path" value="'+esc(CUR)+'" style="flex:1;min-width:220px;text-align:left" placeholder="/"><button class="save-btn" id="sftp-go">Go</button><button class="save-btn light" id="sftp-refresh" title="reload">↻</button><span class="count" id="sftp-count" style="margin-left:8px"></span></div>'
+          +'<div id="sftp-crumbs" style="margin:2px 0 8px;font-size:12px;color:var(--muted)"></div>'
+          +'<div id="sftp-list"><div class="count">Loading…</div></div>';
+        function fmtSize(n){ n=Number(n)||0; if(n<1024)return n+' B'; if(n<1048576)return (n/1024).toFixed(1)+' KB'; if(n<1073741824)return (n/1048576).toFixed(1)+' MB'; return (n/1073741824).toFixed(2)+' GB'; }
+        function crumbHtml(p){ var parts=String(p||'/').split('/').filter(Boolean), acc='', out='<span class="lnk-btn sftp-crumb" data-p="/" style="color:var(--blue);cursor:pointer">/</span>';
+          parts.forEach(function(seg){ acc+='/'+seg; out+=' <span style="color:var(--faint)">/</span> <span class="lnk-btn sftp-crumb" data-p="'+esc(acc)+'" style="color:var(--blue);cursor:pointer">'+esc(seg)+'</span>'; }); return out; }
+        function bindCrumbs(){ document.querySelectorAll('#sftp-crumbs .sftp-crumb').forEach(function(el){ el.onclick=function(){ load(el.dataset.p); }; }); }
+        function load(p){ p=p||'/'; CUR=p; SUBS._sftpPath=p; var pin=document.getElementById('sftp-path'); if(pin)pin.value=p;
+          var cb=document.getElementById('sftp-crumbs'); if(cb){ cb.innerHTML=crumbHtml(p); bindCrumbs(); }
+          var L=document.getElementById('sftp-list'); if(!L)return; L.innerHTML='<div class="count">Loading '+esc(p)+' …</div>';
+          fetch('/api/config/coghlans-sftp/list?path='+encodeURIComponent(p)).then(function(r){return r.json();}).then(function(j){
+            var cc=document.getElementById('sftp-count');
+            if(!j||j.ready===false){ L.innerHTML='<div class="annot" style="border-left:3px solid var(--amber);background:var(--amber-bg)">'+esc((j&&j.error)||'Coghlans SFTP is not configured yet.')+'</div>'; if(cc)cc.textContent=''; return; }
+            if(j.error){ L.innerHTML='<div style="color:var(--neg);padding:8px 2px">'+esc(j.error)+'</div>'; if(cc)cc.textContent=''; return; }
+            var e=(j.entries||[]); if(cc)cc.textContent=e.length+' item'+(e.length===1?'':'s');
+            L.innerHTML='<div class="tw" style="max-height:64vh;overflow:auto"><table class="pay-tbl" style="width:100%"><thead><tr><th class="l">Name</th><th class="l">Size</th><th class="l">Modified</th></tr></thead><tbody>'
+              +(e.length?e.map(function(x){ var isDir=(x.type==='d'), isLink=(x.type==='l');
+                var icon=isDir?'📁':isLink?'🔗':'📄';
+                var nm=isDir?('<button class="lnk-btn sftp-dir" data-n="'+esc(x.name)+'" style="color:var(--blue);background:none;border:none;cursor:pointer;padding:0;font-weight:600">'+icon+' '+esc(x.name)+'</button>'):(icon+' '+esc(x.name));
+                var when=''; try{ if(x.modifyTime)when=fd(new Date(x.modifyTime).toISOString().slice(0,10)); }catch(_){}
+                return '<tr><td class="l">'+nm+'</td><td class="l">'+(isDir?'—':fmtSize(x.size))+'</td><td class="l">'+esc(when)+'</td></tr>'; }).join('')
+                :'<tr><td colspan="3" class="l mut" style="padding:8px">empty folder</td></tr>')
+              +'</tbody></table></div>';
+            L.querySelectorAll('.sftp-dir').forEach(function(btn){ btn.onclick=function(){ var base=CUR.replace(/\/+$/,''); load(base+'/'+btn.dataset.n); }; });
+          }).catch(function(err){ L.innerHTML='<div style="color:var(--neg);padding:8px 2px">Failed to reach the SFTP server: '+esc(err&&err.message||err)+'</div>'; });
+        }
+        var goB=document.getElementById('sftp-go'); if(goB)goB.onclick=function(){ load((document.getElementById('sftp-path').value||'/').trim()); };
+        var rfB=document.getElementById('sftp-refresh'); if(rfB)rfB.onclick=function(){ load(CUR); };
+        var upB=document.getElementById('sftp-up'); if(upB)upB.onclick=function(){ var q=CUR.replace(/\/+$/,''); load(q.substring(0,q.lastIndexOf('/'))||'/'); };
+        var pin=document.getElementById('sftp-path'); if(pin)pin.onkeydown=function(ev){ if(ev.key==='Enter'){ ev.preventDefault(); load((this.value||'/').trim()); } };
+        load(CUR);
+      };
       SUBS['general']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/app-settings').then(function(r){return r.json();}).then(function(s){ s=s||{};
           var FIELDS=[['escalation_supply_chain','Supply chain','Default recipients for escalations (any PO/shipment that isn’t Direct-to-Client).'],

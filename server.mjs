@@ -11,6 +11,7 @@ import { readFileSync, appendFile } from 'fs';
 import pg from 'pg';
 import { buildInvoice, buildDtcPackingList } from './invoice.mjs';
 import { buildAsnLabelsPdf } from './asnpdf.mjs';
+import { coghlansSftpList, coghlansSftpReady } from './coghlans_sftp.mjs';
 
 // pdf.js (bundled by pdf-parse) constructs DOMMatrix while extracting text from some invoice PDFs (e.g. US Geneva —
 // fonts / transforms). It's a browser API absent in the Node/serverless runtime → "DOMMatrix is not defined". Provide
@@ -7500,6 +7501,17 @@ app.get('/api/me', async (req, res) => { try { const me = await permsFor(req);
 app.get('/api/config/permissions', async (req, res) => { const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
   try { const r = await pool.query('SELECT email, supply_edit, demand_edit, product_edit, is_admin, coalesce(landing_page,\'\') landing_page, to_char(updated_at,\'YYYY-MM-DD HH24:MI\') updated_at, updated_by FROM planner.app_permissions ORDER BY email'); res.json(r.rows); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+// ── Coghlans SFTP browser (Ben, 2026-09-08): read-only folder/file listing over the Webshare static-IP HTTP proxy. ──
+// Config-level access (supply OR demand edit, or admin). Connection params come from env (see coghlans_sftp.mjs); the
+// password is never in git. Returns { ready, configured } when not set up so the UI can prompt instead of erroring.
+app.get('/api/config/coghlans-sftp/list', async (req, res) => {
+  const me = await permsFor(req);
+  if (!(me.supply_edit || me.demand_edit || me.is_admin)) return res.status(403).json({ error: 'not permitted' });
+  if (!coghlansSftpReady()) return res.json({ ready: false, error: 'Coghlans SFTP is not configured yet — set COGHLANS_SFTP_PASSWORD (and confirm the Webshare proxy port/auth) in the environment.' });
+  const dir = typeof req.query.path === 'string' && req.query.path ? req.query.path : '/';
+  try { const out = await coghlansSftpList(dir); res.json({ ready: true, ...out }); }
+  catch (e) { log500(e); res.status(e && e.notConfigured ? 200 : 502).json({ ready: !e.notConfigured, error: (e && e.message) || String(e), path: dir }); }
+});
 // ── Recently-received POs feed (populated by n8n) → auto-complete + timeline + supply-planner email. ──
 // Idempotent: each row processed once. Action ONLY when a not-yet-COMPLETE PO is received (Ben): already-COMPLETE
 // or PO-not-found → no action, just mark processed. Sandbox has no RESEND_API_KEY → the email logs, doesn't send.

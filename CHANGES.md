@@ -1,3 +1,9 @@
+## v27.604 CONFIG ▸ Coghlans SFTP browser (Ben)
+- New ⚙ CONFIG header "Coghlans SFTP" (#/config/coghlans-sftp): a read-only folder/file browser for the Coghlans SFTP server. Breadcrumb + Up + path bar + folder click-through; files show size + modified date.
+- Server: GET /api/config/coghlans-sftp/list?path=… (config-level auth). SFTP-over-SSH is tunnelled through the Webshare static-IP HTTP proxy via HTTP CONNECT, socket handed to ssh2-sftp-client (new dep). Helper in coghlans_sftp.mjs; all connection params from env (never committed). Read-only (list only). Graceful "not configured" state when the password/env is unset.
+- NEW ENV VARS (Diviyaj to wire; set locally in .env): COGHLANS_SFTP_HOST(=152.67.109.140), COGHLANS_SFTP_PORT(=22), COGHLANS_SFTP_USER(=dok), COGHLANS_SFTP_PASSWORD(required), WEBSHARE_PROXY_HOST(=104.165.164.165), WEBSHARE_PROXY_PORT(=80?), WEBSHARE_PROXY_USER/PASSWORD(if the proxy needs Basic auth). OPEN: confirm the Webshare proxy PORT + whether it needs auth, and the SFTP host port.
+- NEW DEP: ssh2-sftp-client.
+
 ## v27.603 Auto-update: DATA changes no longer reload a backgrounded tab (Ben)
 - The buy plan was "constantly refreshing on idle": apply() reloaded a BACKGROUNDED tab for both code and data changes, and pendingData is set constantly (n8n refreshes source data) with a 30s retry — so every time you tabbed away it silently reloaded, and you returned to a reset page (scroll/state lost).
 - Now a backgrounded tab reloads ONLY for a new DEPLOY (pendingCode). A DATA change just busts the section cache + marks the buy overlay stale so the next render/navigation shows fresh numbers — no reload. Visible tabs already never reloaded.
