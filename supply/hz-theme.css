@@ -18,8 +18,8 @@
   --ink:#101828; --ink-soft:#344054; --muted:#5b6b83; --faint:#8b98ad;
   /* semantic */
   --blue:#2361d8; --blue-soft:#eaf1fd; --blue-ink:#1a4fb5;
-  --pos:#118a4e; --pos-bg:#e8f6ee;
-  --neg:#d23227; --neg-bg:#fdeeec; --neg-cell:#fbdcd8;
+  --pos:#118a4e; --pos-bg:#e8f6ee; --pos-bd:#bfe3cd;
+  --neg:#d23227; --neg-bg:#fdeeec; --neg-cell:#fbdcd8; --neg-bd:#f5c6c2;
   --amber:#b45309; --amber-bg:#fdf3d7;
   --prod:#f5b83d; --prod-bg:#fdeec8;
   --violet:#7048c9; --violet-bg:#f1ebfc;
@@ -42,8 +42,8 @@
   --line:#25334e; --line2:#1d2a41;
   --ink:#e8eef8; --ink-soft:#c4d0e4; --muted:#a3b2c9; --faint:#76889f;
   --blue:#4d8bf5; --blue-soft:#1a2c4f; --blue-ink:#8ab4ff;
-  --pos:#3ecb80; --pos-bg:#123322;
-  --neg:#f0645a; --neg-bg:#3a1512; --neg-cell:#4a1a15;
+  --pos:#3ecb80; --pos-bg:#123322; --pos-bd:#1d4832;
+  --neg:#f0645a; --neg-bg:#3a1512; --neg-cell:#4a1a15; --neg-bd:#57231f;
   --amber:#e8a83f; --amber-bg:#332507;
   --prod:#f5b83d; --prod-bg:#33280a;
   --violet:#a78bfa; --violet-bg:#261c40;
@@ -54,6 +54,7 @@
 }
 
 html body{font-family:var(--font);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
+@keyframes fadeUp{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}   /* P2 (Diviyaj): card entrance for Demand Actions + DTC mismatch */
 
 /* ── App shell: 52px navy header (was a grey rounded bar) ─────────────────────────────────────────────── */
 #app #view-tabs-row{display:flex;align-items:center;gap:2px;height:52px;padding:0 20px;background:var(--nav);border-radius:0;margin:-8px -10px 6px}
