@@ -1,3 +1,6 @@
+## v27.614 DEMAND plan: sticky SKU/Stock columns no longer transparent in light mode (Ben)
+- The light-theme --row-alt token was defined as a circular var(--row-alt) → it resolved to TRANSPARENT, so the sticky SKU (col 1) cells on expanded SKU rows went see-through and the scrolling data showed under them. Set it to a real light tint (#f6f8fb). Also extended the inline-row rule to the Stock column (td.stk2) so both frozen columns stay solid. Dark mode was already fine.
+
 ## v27.613 Create POs: tier top-up message shortened to a tooltip (Ben)
 - The between-tiers hint is now just the checkbox: "＋ order extra 460 as China stock for $7.85/unit" (or "(FREE)" when the extra units are free). The full trade-off text ("40 units cost $8.50/unit. The extra 460 to reach 500 ($7.90/unit) cost $3,610.00 — $7.85/unit") moved to the hover tooltip.
 
