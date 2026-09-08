@@ -263,11 +263,11 @@ body{font-family:var(--font,system-ui,-apple-system,sans-serif);font-size:12px;c
 .status{font-size:11px;color:var(--faint);flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
 .tw{overflow-x:auto;max-height:calc(100vh - 184px);overflow-y:auto;border:1px solid var(--line);border-radius:6px;padding-bottom:16px}   /* bottom gap so the horizontal scrollbar sits below the data and never clips the last row (esp. when filtered to few SKUs) */
 table{border-collapse:collapse;font-size:11px;table-layout:fixed}
-thead th{position:sticky;top:0;z-index:20;background:var(--band);padding:3px 4px;font-weight:500;font-size:10px;color:var(--muted);border-bottom:2px solid #d5d5d5;white-space:nowrap;overflow:hidden;text-align:right;vertical-align:bottom}
+thead th{position:sticky;top:0;z-index:20;background:var(--band);padding:3px 4px;font-weight:500;font-size:10px;color:var(--muted);border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden;text-align:right;vertical-align:bottom}   /* v27.601 sticky header underline = standard grey 1pt (was 2px #d5d5d5); tokenised for dark mode */
 thead th.lft{text-align:left}
-thead th.stk{position:sticky;left:0;z-index:21;background:var(--band);text-align:left;width:160px;min-width:160px;max-width:160px}
-thead th.stk2{position:sticky;left:160px;z-index:21;background:var(--band);text-align:right;width:96px;min-width:96px;max-width:96px;border-right:2px solid #b0b0ae}
-thead tr.grp th{top:0;padding:2px 4px;font-size:8.5px;font-weight:700;background:var(--card);border-bottom:0;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;height:16px;box-sizing:border-box;line-height:1.1}
+thead th.stk{position:sticky;left:0;z-index:21;background:var(--band);text-align:left;width:160px;min-width:160px;max-width:160px;border-right:1px solid var(--line)}
+thead th.stk2{position:sticky;left:160px;z-index:21;background:var(--band);text-align:right;width:96px;min-width:96px;max-width:96px;border-right:1px solid var(--line)}   /* v27.601 sticky-column edges = standard grey 1pt (was 2px #b0b0ae) */
+thead tr.grp th{top:0;padding:2px 4px;font-size:8.5px;font-weight:700;background:var(--card);border-bottom:1px solid var(--line);color:var(--muted);text-transform:uppercase;letter-spacing:.03em;height:16px;box-sizing:border-box;line-height:1.1}   /* v27.601 FY-grouping row underline = standard grey 1pt (was 0) */
 thead tr.grp th.stk{background:var(--card)}
 thead tr.grp th.stk2{background:var(--card)}
 thead tr.sub th{top:16px;background:var(--band)}
@@ -345,8 +345,8 @@ td.has-rail{position:relative}
 .cell-rail .cf-pp{color:var(--pos);font-size:7.5px;letter-spacing:-.5px;cursor:help}
 #fc-note-pop{position:absolute;z-index:100050;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 30px rgba(15,23,42,.18);padding:10px 12px;width:300px;font-size:12px;color:var(--nav);text-align:left}
 #fc-note-tip{position:fixed;z-index:100060;max-width:300px;background:var(--nav);color:#fff;font-size:11px;line-height:1.5;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none;display:none;text-align:left}
-td.stk{position:sticky;left:0;z-index:6;background:var(--card);text-align:left;width:160px;min-width:160px;max-width:160px}
-td.stk2{position:sticky;left:160px;z-index:6;background:var(--card);text-align:right;width:96px;min-width:96px;max-width:96px;border-right:2px solid #b0b0ae}
+td.stk{position:sticky;left:0;z-index:6;background:var(--card);text-align:left;width:160px;min-width:160px;max-width:160px;border-right:1px solid var(--line)}
+td.stk2{position:sticky;left:160px;z-index:6;background:var(--card);text-align:right;width:96px;min-width:96px;max-width:96px;border-right:1px solid var(--line)}   /* v27.601 sticky-column edges = standard grey 1pt (was 2px #b0b0ae) */
 .nm{padding:3px 4px 3px 14px;display:flex;align-items:flex-start;gap:3px;white-space:normal;font-size:11px}
 .nmc{padding:3px 6px;font-style:italic;color:var(--muted);font-size:11px;white-space:nowrap}
 .chbg{font-size:9px;padding:0 3px;background:#efefef;border-radius:2px;color:var(--faint);flex-shrink:0}

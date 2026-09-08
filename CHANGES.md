@@ -1,3 +1,6 @@
+## v27.601 DEMAND plan: sticky column & header borders = standard grey 1pt (Ben)
+- The frozen SKU (col 1) and Stock (col 2) columns and the sticky header rows used hardcoded 2px off-greys (#b0b0ae / #d5d5d5). Set them all to 1px var(--line) (the standard grey token): the two sticky columns get a clean 1pt right edge, the header underline drops to 1pt, and the FY-grouping row gains a 1pt underline. Tokenised so they also read correctly in dark mode.
+
 ## v27.600 Summary ▸ Target recs: "Apply everywhere" popup now opens (Ben)
 - The button threw a ReferenceError before showing its modal: trecApplyEverywhere used fyLbl(x.fy) — but fyLbl is a LOCAL inside renderTargetRecs, not a global — so whenever there were open recommendations (map runs fyLbl) the handler crashed and no popup appeared. Swapped to the global fyLabel (identical logic). One-line fix.
 
