@@ -15908,7 +15908,7 @@ function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={};   //
           var ovMap=FC_OUTPUTS[setSku+'|'+skuWh(co,ch)+'|'+ch]||{}, chFC={};
           LIVE_FC_MONTHS.forEach(function(fym){
             var ms=fym.slice(0,4)+'-'+fym.slice(5,7)+'-01', raw;
-            if(ovMap[fym]!=null){ raw=ovMap[fym]; }                                          // saved override wins
+            if(ovMap[fym]!=null){ raw=ovMap[fym]/_sz; }                                       // saved override wins (stored item-equiv/exploded → ÷setSize = BOXES before component explosion, matching the cascade path below; fixes active-set over-buy)
             else if(s2HasLY){ var lyM=(parseInt(fym.slice(0,4),10)-1)+'_'+fym.slice(5,7); raw=(lyM<=CUR_YTD_END)?(s2sales[lyM]||0):(chFC[lyM]||0); }   // continuing set → last-year chain
             else { raw=(subcatFU[fym]||0)*share/_sz; }                                       // new set → subcat cascade × share (item-equiv, Sets%-sized) ÷ setSize = BOXES
             var fc;

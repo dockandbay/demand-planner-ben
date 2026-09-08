@@ -1,3 +1,9 @@
+## v27.594 Buy plan: active-set saved overrides no longer over-explode (Ben)
+- A set's stored forecast is **item-equiv (exploded)** everywhere — smoothing writes it that way, the plan display reads it that way, and the earlier SS27 ÷size live correction brought them to correct item-equiv. But the **buy's set-explosion override path** (`raw=ovMap[fym]`) consumed that item-equiv value **as if it were boxes**, then multiplied by component quantities → **over-buy by exactly setSize** on any set with a saved/smoothed forecast.
+- Fix (one line): the active-set override path now **÷setSize → BOXES before component explosion**, matching the new-set cascade path directly below it. Display and stored data are unchanged (combined exploded number + tooltip stays as-is); only the buy's explosion input is corrected.
+- Verified by before/after buy-plan snapshot: **UK 401,745→399,185 (−2,560), US 135,387→133,957 (−1,430); EU/AU/CA byte-identical.** Every changed SKU is a beach-towel **set component** (`TOWLB-CAB-*`/`TOWLB-SUM-*`), all downward. 0 JS errors.
+- **Still open (needs Ben's decision, not shipped):** the **run-off/discontinued set** path (`runoffAlloc.raw`, ~artifact:7239) has the same item-equiv-vs-boxes ambiguity, but its output is a **dual consumer** (buy wants boxes, display via `skuMonthlyMap` wants item-equiv) — a small refactor rather than a one-liner.
+
 ## v27.593 Xero Compare: flag the invoice-TOTAL mismatch, not just the due (Ben)
 - The report compared **outstanding due** amounts, so PO-1712945 (Horizon total £2,208.80 vs Xero total £2,288.80, Δ £80) surfaced only an FX/due variance. It now also compares **Horizon's invoice total** (`supplier_invoice_total`) against **Xero's total** (paid + unpaid = `net_gbp`) and **headlines "⚠ Totals differ — Horizon X vs Xero Y (Δ Z)"** in the Issue column — flagged **even when the outstanding due is within 5%** (a payment/credit can mask a real total mismatch).
 
