@@ -10887,14 +10887,24 @@ app.post('/api/supply/buyplan-skus', async (req, res) => {
   const items = (Array.isArray(req.body && req.body.items) ? req.body.items : []).filter(it => it && it.sku && Number(it.qty) > 0);
   if (!items.length) return res.json({ skus: [] });
   try {
-    const map = await buyplanSkuMeta(items.map(it => String(it.sku).toUpperCase()));
+    const skuList = items.map(it => String(it.sku).toUpperCase());
+    const map = await buyplanSkuMeta(skuList);
     const ctry = String((req.body && req.body.country) || '').toUpperCase();
     const discFor = m => ctry === 'AU' ? (m.disc_au || m.disc || '') : ctry === 'CA' ? (m.disc_ca || m.disc || '') : (m.disc || '');
+    // ⑥ Already-on-order visibility: open PRODUCTION/FUTURE/READY-TO-SHIP PO qty per SKU (not yet inbound), + whether any is a China-stock PO — so you don't over-order.
+    const inprod = {};
+    try {
+      (await pool.query(`SELECT upper(l.sku) sku, sum(l.qty::numeric)::int qty,
+          bool_or(upper(coalesce(p.branch,'')) LIKE '%CHINA%') china
+        FROM planner.purchase_order_lines l JOIN planner.purchase_orders p ON p.po = l.po
+        WHERE upper(l.sku) = ANY($1) AND upper(coalesce(p.status,'')) IN ('FUTURE','PRODUCTION','READY TO SHIP')
+        GROUP BY 1`, [skuList])).rows.forEach(r => { inprod[r.sku] = { qty: Number(r.qty) || 0, china: !!r.china }; });
+    } catch (e) { /* visibility only — never block PO creation */ }
     res.json({ skus: items.map(it => { const sku = String(it.sku).toUpperCase(), m = map[sku] || { options: [] };
       const pl = m.pl || {};   // { supplierName: [{efp, scope, currency, tiers}] }  (client resolves by chosen production)
       return { sku, qty: Math.round(Number(it.qty)), pallet_qty: m.pallet_qty || 0, category: m.category || '', main_code: m.main_code || null,
         main_name: m.main_name || '', options: (m.options || []).map(o => ({ code: o.code, name: o.name })), moq: (m.moq || null), pl,
-        release_window: m.rw || '', carton_qty: m.carton_qty || 0, discontinue: discFor(m) }; }) });
+        release_window: m.rw || '', carton_qty: m.carton_qty || 0, inprod: inprod[sku] || { qty: 0, china: false }, discontinue: discFor(m) }; }) });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Formatted XLSX of the Create-PO preview: "Summary" tab (SKUs by category × country) + "Purchase Orders" tab

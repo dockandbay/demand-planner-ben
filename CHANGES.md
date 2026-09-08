@@ -1,3 +1,7 @@
+## v27.608 Create POs: in-production visibility in Total (Ben, slice 6)
+- ⑥ Each SKU row now flags what is **already on open POs** so you do not over-order: a red ⚑ note under the Total ("⚑ 3,000 in prod", + "· CN" when any is a China-stock PO). Counts open FUTURE / PRODUCTION / READY-TO-SHIP PO lines (not yet inbound).
+- Server: /api/supply/buyplan-skus returns an inprod {qty, china} per SKU (open PO lines by status; China identified by branch). Visibility only — never blocks PO creation.
+
 ## v27.607 Create POs: China-stock column, CA excluded by default, carton as a note (Ben, slice 3)
 - ② New editable **🏭 CN stock column** (after the country columns): auto-fills each SKU with its China-stock holding qty (MOQ shortfall + any opted-in tier top-up), and you can type to override (bold = manual, amber = auto). Feeds the China Stock holding PO. Auto figure refreshes live as order qtys change.
 - **CA is now excluded by default** from the Create-PO grid (out of scope) — a new **Include CA** checkbox opts it back in.
