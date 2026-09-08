@@ -1,3 +1,7 @@
+## v27.588 New-set forecast: sets% is a share of EXPLODED units, not boxes (Ben)
+- Brand-new set SKUs (SS27, no history) were over-forecast ~7–8× (every SS27 set >100/mo vs a ~24/mo historical typical). Cause: `buildSkuShares` computed the sets%-reservation `(setsPct/(1−setsPct))×mastersBase` — already in **exploded** units — but assigned it as a **box** quantity, which the plan/buy then re-exploded ×BOM (a double-count). Now divided by the set's BOM size, so after re-explosion the new-set pool lands at **setsPct% of the sub-category's exploded total** (e.g. 45% maxes at 45%). Masters conserve the sub-category total.
+- Forecast/buy-affecting (sets explode into components) — verify with a buy-plan before/after. Client-side (`artifact_v16.7.html`).
+
 ## v27.587 Demand plan: 2027 "last year" column uses the actual, not the stale prior-year forecast (Ben)
 - The sub-category **LY column** for 2027 cells anchored on the prior-year **forecast** (`fu`), so where the prior-year month is already a completed **actual** it showed the old forecast (e.g. Towel-Beach CORE UK DTC Jul: LY shown **11,801**) instead of the true **exploded actual (14,377)** — while the +5% growth target correctly used the actual (×1.05 = 15,096). Now a completed prior-year month anchors LY on its **actual, exploded** (like-for-like with the ·dot tooltip and the growth base); genuinely-future prior-year months keep forecast-on-forecast (`isFcLy`). **Display-only** (the LY figure + growth %); forecast values and the buy plan are unchanged.
 

@@ -7144,8 +7144,11 @@ function buildSkuShares(skus,co,ch,lyMonths){
   skus.forEach(function(sku){
     if(annualisedTotals[sku]!==0)return;
     if(SKUM[sku]&&SKUM[sku].vt==='SET'){
-      // brand-new set (no LY/recent): sized so all new sets ≈ Sets% of the sub-category's master base. Sets%=0 ⇒ 0.
-      annualisedTotals[sku]=(_setsPct>0&&_mastersBase>0&&_setsPct<100)?((_setsPct/100)/(1-_setsPct/100)*_mastersBase/Math.max(_newSets,1)):0;
+      // brand-new set (no LY/recent): sized so all new sets ≈ Sets% of the sub-category's EXPLODED total (Ben, v27.588).
+      // The reservation (setsPct/(1−setsPct))×mastersBase is already in EXPLODED units (masters box=exploded); assigning it
+      // as a BOX quantity here and then re-exploding it ×BOM was a double-count that put every SS27 set >100. Divide by this
+      // set's BOM size so, after the plan/buy re-explode ×size, the whole new-set pool lands at setsPct% of exploded units.
+      annualisedTotals[sku]=(_setsPct>0&&_mastersBase>0&&_setsPct<100)?(((_setsPct/100)/(1-_setsPct/100)*_mastersBase/Math.max(_newSets,1))/Math.max(1,_setSize(sku))):0;
     } else {
       var t=SKUM[sku]&&SKUM[sku].ti||'C';
       annualisedTotals[sku]=(tierAvg[t]||globalAvg||1)*(tierW[t]||1)/2;
