@@ -1,3 +1,7 @@
+## v27.591 Dark mode: DEMAND plan state-cell edges + total columns (Ben)
+- Plan state cells kept **hardcoded light borders** that didn't flip in dark: discontinued (pink `#f3b6b0`, read as harsh red), no-stock (`#fca5a5`), anomaly hi/lo (`#f59e0b`/`#e5e5e5`), current-month-first (`#93c5fd`), SKU-row hairline (`#cfcfcf`), category-total + year-total borders (`#d0d0ce`/`#a8a29e`). All tokenised (`--neg`/`--amber`/`--line`/`--blue`/`--faint`).
+- **Total columns** (`td.totu`) used `--faint` (a mid-grey text token) as background → a light-grey block in dark; added a dark-only override to render them as a dark band (`--band`). Light theme unchanged.
+
 ## v27.590 Dark mode: selected pills & dark surfaces use --nav, not --ink (Ben)
 - Selected/active pills (Buy, Supply, Scenario), the chosen-filter dropdown (`.sel-on`), `.save-btn.dark`, tooltips, grand-total rows, `.planbtn` and exec year-total headers all used `background:var(--ink)` — the **text** token (dark in light, but **light in dark**) — so in dark they turned light with white text (invisible). Remapped every `--ink`/`--ink-soft` background → `--nav`/`--nav-2` (dark in both themes). Active pills keep their `--ink` border, which renders as a **light highlighted outline in dark** — the "dark button + highlighted outline" you asked for. Light theme unchanged (`--nav` ≈ `--ink`).
 
