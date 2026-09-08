@@ -14358,8 +14358,7 @@ app.get('/api/kpi/in-stock', async (req, res) => {
         coalesce(available_au_dtc,false) au3, coalesce(available_au_fba,false) auf, coalesce(available_ca_fba,false) caf,
         coalesce(discontinue_date_final,'') disc, coalesce(discontinue_date_au_final,'') disc_au, coalesce(discontinue_date_ca,'') disc_ca
       FROM planner.products`)).rows;
-    const inv = {}; (await pool.query(`SELECT sku, warehouse, coalesce(available,0) a FROM planner.v_product_inventory`)).rows
-      .forEach(r => { (inv[r.sku] = inv[r.sku] || {})[r.warehouse] = Number(r.a) || 0; });
+    const _ohIS = await kpiOnhand(String(req.query.asof || '')); const inv = _ohIS.onhand;   // live, or nearest snapshot ≤ asof (Ben)
     const today = new Date().toISOString().slice(0, 10);
     const dpast = s => { const m = /^(\d{4}-\d{2}-\d{2})/.exec(s || ''); return !!(m && m[1] < today); };   // discontinued = a past date
     const discontinued = (p, mk) => dpast(mk === 'AU' ? (p.disc_au || p.disc) : mk === 'CA' ? (p.disc_ca || p.disc) : p.disc);
@@ -14375,7 +14374,7 @@ app.get('/api/kpi/in-stock', async (req, res) => {
     });
     const tot = type => { const r = rows.filter(x => x.type === type); const s = k => r.reduce((a, x) => a + x[k], 0);
       return { channel: 'Total ' + type, type: 'TOTAL', skus: s('skus'), instock: s('instock'), pct: s('skus') ? Math.round(s('instock') / s('skus') * 100) : 0, a_skus: s('a_skus'), a_instock: s('a_instock'), a_pct: s('a_skus') ? Math.round(s('a_instock') / s('a_skus') * 100) : 0 }; };
-    res.json({ ok: true, t3pl: T3, tfba: TF, group: grp || 'All', rows: rows.filter(r => r.type === '3PL').concat([tot('3PL')], rows.filter(r => r.type === 'FBA'), [tot('FBA')]) });
+    res.json({ ok: true, t3pl: T3, tfba: TF, group: grp || 'All', asof: _ohIS.resolved, rows: rows.filter(r => r.type === '3PL').concat([tot('3PL')], rows.filter(r => r.type === 'FBA'), [tot('FBA')]) });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // market × channel → inventory warehouse (3PL stock serves DTC+B2B; FBA stock serves FBA)
@@ -14391,11 +14390,26 @@ const KPI_WH = [['US 3PL', 'US', 'us_3pl', '3PL'], ['UK 3PL', 'UK', 'uk_3pl', '3
 const BI_TTL_MS = 30000;
 let _kpiBaseCache = null, _biProjCache = null;
 function invalidateBiCache() { _kpiBaseCache = null; _biProjCache = null; }
-async function kpiBase() {
+async function kpiBase(asof) {
+  if (asof) return _kpiBaseCompute(asof);   // historical point-in-time (Ben) → uncached, on-demand
   if (_kpiBaseCache && Date.now() - _kpiBaseCache.at < BI_TTL_MS) return _kpiBaseCache.p;
   const p = _kpiBaseCompute(); _kpiBaseCache = { at: Date.now(), p };
   p.catch(() => { if (_kpiBaseCache && _kpiBaseCache.p === p) _kpiBaseCache = null; });   // drop on failure so next call retries
   return p;
+}
+// Historical point-in-time on-hand for the KPIs: live (v_product_inventory) or the NEAREST inventory_snapshots ≤ asof (Ben).
+async function kpiOnhand(asof) {
+  const onhand = {};
+  if (!asof || !/^\d{4}-\d{2}-\d{2}$/.test(asof)) {
+    (await pool.query(`SELECT sku, warehouse, coalesce(available,0) a FROM planner.v_product_inventory`)).rows
+      .forEach(r => { (onhand[r.sku] = onhand[r.sku] || {})[r.warehouse] = Number(r.a) || 0; });
+    return { onhand, resolved: null };
+  }
+  let resolved = (await pool.query(`SELECT to_char(max(snapshot_date),'YYYY-MM-DD') d FROM planner.inventory_snapshots WHERE snapshot_date <= $1`, [asof])).rows[0]?.d
+    || (await pool.query(`SELECT to_char(min(snapshot_date),'YYYY-MM-DD') d FROM planner.inventory_snapshots`)).rows[0]?.d;   // before the earliest → use earliest
+  if (resolved) (await pool.query(`SELECT sku, warehouse, coalesce(available,0) a FROM planner.inventory_snapshots WHERE snapshot_date = $1`, [resolved])).rows
+    .forEach(r => { (onhand[r.sku] = onhand[r.sku] || {})[r.warehouse] = Number(r.a) || 0; });
+  return { onhand, resolved };
 }
 async function biProjection() {
   if (_biProjCache && Date.now() - _biProjCache.at < BI_TTL_MS) return _biProjCache.p;
@@ -14403,7 +14417,7 @@ async function biProjection() {
   p.catch(() => { if (_biProjCache && _biProjCache.p === p) _biProjCache = null; });
   return p;
 }
-async function _kpiBaseCompute() {
+async function _kpiBaseCompute(asof) {
   const prods = {};
   (await pool.query(`SELECT sku, coalesce(in_planning_scope,false) act, coalesce(market_tier,'') tier, coalesce(core_seasonal,'') cs,
       coalesce(nullif(subcategory_name_final,''), subcategory, '') subcat,
@@ -14412,12 +14426,11 @@ async function _kpiBaseCompute() {
       coalesce(nullif(launch_date_au_final,''),nullif(launch_date_au,'')) lch_au, nullif(launch_date_ca_retail,'') lch_ca,
       coalesce(cogs_uk_3pl_final,0) cogs_UK, coalesce(cogs_us_3pl_final,0) cogs_US, coalesce(cogs_eu_3pl_final,0) cogs_EU, coalesce(cogs_au_3pl_final,0) cogs_AU, coalesce(cogs_ca_3pl_final,0) cogs_CA
     FROM planner.products`)).rows.forEach(r => { prods[r.sku] = r; });
-  const onhand = {}; (await pool.query(`SELECT sku, warehouse, coalesce(available,0) a FROM planner.v_product_inventory`)).rows
-    .forEach(r => { (onhand[r.sku] = onhand[r.sku] || {})[r.warehouse] = Number(r.a) || 0; });
+  const _oh = await kpiOnhand(asof); const onhand = _oh.onhand;   // live, or nearest snapshot ≤ asof (Ben)
   const dem = {}; (await pool.query(`SELECT sku, warehouse, sum(units) u FROM planner.forecast_outputs
       WHERE month >= date_trunc('month',current_date) AND month < date_trunc('month',current_date) + interval '12 months' GROUP BY sku, warehouse`)).rows
     .forEach(r => { (dem[r.sku] = dem[r.sku] || {})[r.warehouse] = Number(r.u) || 0; });
-  return { prods, onhand, dem };
+  return { prods, onhand, dem, asofResolved: _oh.resolved };
 }
 const kpiToday = () => new Date().toISOString().slice(0, 10);
 const kpiDpast = s => { const m = /^(\d{4}-\d{2}-\d{2})/.exec(s || ''); return !!(m && m[1] < kpiToday()); };
@@ -15353,7 +15366,7 @@ const kpiTotals = (rows, keys) => { const out = { TOTAL3: { channel: 'Total 3PL'
 app.get('/api/kpi/slow-moving', async (req, res) => {
   const cover = Number(req.query.cover); const COV = isFinite(cover) && cover > 0 ? cover : 6; const grp = kpiGroup(req.query.group);
   try {
-    const { prods, onhand, dem } = await kpiBase();
+    const _b = await kpiBase(String(req.query.asof || '')); const { prods, onhand, dem } = _b;
     const rows = KPI_WH.map(([label, co, wh, ct]) => { let skus = 0, units = 0, value = 0, slow = 0, sUnits = 0, sValue = 0;
       for (const sku in prods) { const p = prods[sku]; if (!p.act || kpiDisc(p, co)) continue; if (grp && p.cs !== grp) continue;
         const oh = (onhand[sku] || {})[wh] || 0; if (oh <= 0) continue; const d12 = (dem[sku] || {})[wh] || 0;
@@ -15361,7 +15374,7 @@ app.get('/api/kpi/slow-moving', async (req, res) => {
         skus++; units += oh; value += val; if (covM > COV) { slow++; sUnits += oh; sValue += Math.round(val); } }
       return { channel: label, type: ct, slow_skus: slow, slow_units: sUnits, slow_value: sValue, stocked_skus: skus }; });
     const t = kpiTotals(rows, ['slow_skus', 'slow_units', 'slow_value', 'stocked_skus']);
-    res.json({ ok: true, cover: COV, group: grp || 'All', rows: rows.filter(r => r.type === '3PL').concat([t.TOTAL3], rows.filter(r => r.type === 'FBA'), [t.TOTALF]) });
+    res.json({ ok: true, cover: COV, group: grp || 'All', asof: _b.asofResolved, rows: rows.filter(r => r.type === '3PL').concat([t.TOTAL3], rows.filter(r => r.type === 'FBA'), [t.TOTALF]) });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
@@ -15369,7 +15382,7 @@ app.get('/api/kpi/slow-moving', async (req, res) => {
 app.get('/api/kpi/inventory-cover', async (req, res) => {
   const grp = kpiGroup(req.query.group);
   try {
-    const { prods, onhand, dem } = await kpiBase();
+    const _b = await kpiBase(String(req.query.asof || '')); const { prods, onhand, dem } = _b;
     const rows = KPI_WH.map(([label, co, wh, ct]) => { let units = 0, value = 0, d12 = 0;
       for (const sku in prods) { const p = prods[sku]; if (!p.act || kpiDisc(p, co)) continue; if (grp && p.cs !== grp) continue;
         const oh = (onhand[sku] || {})[wh] || 0; units += oh; value += oh * (Number(p['cogs_' + co.toLowerCase()]) || 0); d12 += (dem[sku] || {})[wh] || 0; }
@@ -15378,7 +15391,7 @@ app.get('/api/kpi/inventory-cover', async (req, res) => {
     const t = kpiTotals(rows, ['units', 'value']);
     ['TOTAL3', 'TOTALF'].forEach(k => { const sub = rows.filter(r => r.type === (k === 'TOTAL3' ? '3PL' : 'FBA')); const md = sub.reduce((a, r) => a + r.monthly_demand, 0);
       t[k].monthly_demand = md; t[k].months_cover = md > 0 ? Math.round(t[k].units / md * 10) / 10 : null; });
-    res.json({ ok: true, group: grp || 'All', rows: rows.filter(r => r.type === '3PL').concat([t.TOTAL3], rows.filter(r => r.type === 'FBA'), [t.TOTALF]) });
+    res.json({ ok: true, group: grp || 'All', asof: _b.asofResolved, rows: rows.filter(r => r.type === '3PL').concat([t.TOTAL3], rows.filter(r => r.type === 'FBA'), [t.TOTALF]) });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
@@ -15388,7 +15401,7 @@ app.get('/api/kpi/stockout-risk', async (req, res) => {
   try {
     const prods = {}; (await pool.query(`SELECT sku, coalesce(in_planning_scope,false) act, coalesce(core_seasonal,'') cs, coalesce(market_tier,'') tier,
         coalesce(discontinue_date_final,'') disc, coalesce(discontinue_date_au_final,'') disc_au, coalesce(discontinue_date_ca,'') disc_ca FROM planner.products`)).rows.forEach(r => { prods[r.sku] = r; });
-    const onhand = {}; (await pool.query(`SELECT sku, warehouse, coalesce(available,0) a FROM planner.v_product_inventory`)).rows.forEach(r => { (onhand[r.sku] = onhand[r.sku] || {})[r.warehouse] = Number(r.a) || 0; });
+    const _ohSO = await kpiOnhand(String(req.query.asof || '')); const onhand = _ohSO.onhand;   // live, or nearest snapshot ≤ asof (Ben)
     // first N months of demand per sku/warehouse
     const demN = {}; (await pool.query(`SELECT sku, warehouse, sum(units) u FROM planner.forecast_outputs
         WHERE month >= date_trunc('month',current_date) AND month < date_trunc('month',current_date) + ($1||' months')::interval GROUP BY sku, warehouse`, [N])).rows
@@ -15400,7 +15413,7 @@ app.get('/api/kpi/stockout-risk', async (req, res) => {
       return { channel: label, type: ct, at_risk_skus: atRisk, units_short: unitsShort, with_demand: active, pct: active ? Math.round(atRisk / active * 100) : 0 }; });
     const t = kpiTotals(rows, ['at_risk_skus', 'units_short', 'with_demand']);
     ['TOTAL3', 'TOTALF'].forEach(k => { t[k].pct = t[k].with_demand ? Math.round(t[k].at_risk_skus / t[k].with_demand * 100) : 0; });
-    res.json({ ok: true, within: N, group: grp || 'All', rows: rows.filter(r => r.type === '3PL').concat([t.TOTAL3], rows.filter(r => r.type === 'FBA'), [t.TOTALF]) });
+    res.json({ ok: true, within: N, group: grp || 'All', asof: _ohSO.resolved, rows: rows.filter(r => r.type === '3PL').concat([t.TOTAL3], rows.filter(r => r.type === 'FBA'), [t.TOTALF]) });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 

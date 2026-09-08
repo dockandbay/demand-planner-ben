@@ -1,3 +1,8 @@
+## v27.611 Demand Metrics: historical point-in-time (As-of date) (Ben)
+- REPORTS ▸ Performance ▸ Demand Metrics — the four stock metrics (In Stock, Slow moving, Inventory cover, Stockout risk) now take an **"As of" date**. Stock is sourced from the **nearest inventory_snapshots on or before that date** (fortnightly series); the header shows "◷ stock as of DD-MMM-YY" (the resolved snapshot) or "no snapshot on/before that date". Blank = live, with a ✕ live reset.
+- Server: kpiOnhand(asof) helper (live v_product_inventory, or the nearest snapshot); threaded through kpiBase/_kpiBaseCompute and all 4 KPI endpoints, which now return the resolved asof. Historical requests bypass the KPI cache.
+- NOTE: stock is point-in-time; demand/velocity (the cover & stockout denominators) is still CURRENT forecast — so historical cover/stockout use as-of stock ÷ current demand. Trailing-to-date demand can be a follow-up if wanted.
+
 ## v27.610 Create POs: add-to-existing-PO (Ben, slice 5 — redesign complete)
 - ③ **Destination toggle** in STEP 2: "New PO(s)" (default) or **Add to existing**. Choosing Add-to-existing shows a picker of open **FUTURE / PRODUCTION / READY-TO-SHIP** POs (masters excluded); the create button becomes "Add to PO-…" and adds the ticked SKU lines to that PO (reuses /api/supply/po-line; China top-up + per-market split are disabled in this mode).
 - New endpoint GET /api/supply/open-pos. FIX: registered it + the Save-Project list GET **before the /api/supply/:section catch-all** (single-segment GETs were being swallowed as "unknown section" — this also fixes the Save Project list).

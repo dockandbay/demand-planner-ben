@@ -4636,7 +4636,7 @@ var FC_INITIAL={}; // populated at end of init() after all IV overlays — diff 
 let SKU_VIEW=null;
 let VIEW_MODE='planning'; // 'planning' | 'exec'
 let REPORT_VIEW='ex'; // REPORTS sub-tab: 'ex' (Exec Summary) | 'slow' (Slow Moving) | 'af' (Auto Forecast)
-let KPI_SUB='instock', KPI_T3PL=5, KPI_TFBA=5, KPI_GRP='', KPI_COVER=6, KPI_WITHIN=3, KPI_ACCM=3; // DEMAND ▸ KPIs state
+let KPI_SUB='instock', KPI_T3PL=5, KPI_TFBA=5, KPI_GRP='', KPI_COVER=6, KPI_WITHIN=3, KPI_ACCM=3, KPI_ASOF=''; // DEMAND ▸ KPIs state (KPI_ASOF = historical point-in-time date; '' = live)
 let KPI_ACC_LEVEL='cc', KPI_ACC_LAG=1; // Forecast-accuracy view: drill level (cc|category|sku) + lag (months forecast made before target)
 let DEMAND_VIEW='plan'; // DEMAND sub-tab: 'plan' (the demand plan) | 'targets' (sell-through targets) | 'actions'
 var EXC_MKT='all', EXC_CH='all', EXC_GRAIN='sku', EXC_SUBTAB='fclt', EXC_SEV='all', EXC_MINDELTA=0, EXC_COLLAPSED=new Set();   // DEMAND ▸ Exceptions filters (default show all, grouped tree by Country ▸ Channel ▸ Subcategory; EXC_COLLAPSED = minimised group keys)
@@ -10804,13 +10804,17 @@ function renderKpisView(body,hashBase){
   var cfg=CFG[KPI_SUB]||CFG.instock;
   kb.innerHTML='<div style="display:flex;gap:14px;align-items:center;margin-bottom:10px;flex-wrap:wrap">'
     +'<div style="font-size:13px;font-weight:700">'+cfg.title+'</div>'+(cfg.controls||'')
+    +(['instock','slowmoving','inventory','stockout'].indexOf(KPI_SUB)>=0?'<label style="font-size:12px;color:var(--muted);border-left:1px solid var(--line);padding-left:10px" title="See these metrics at a point in time — stock is sourced from the nearest inventory snapshot on or before this date. Blank = live.">As of <input type="date" id="kpi-asof" value="'+KPI_ASOF+'" max="'+new Date().toISOString().slice(0,10)+'" style="padding:3px 6px;border:1px solid #cbd5e1;border-radius:4px"></label>'+(KPI_ASOF?' <button id="kpi-asof-clr" title="back to live" style="font-size:11px;padding:3px 8px;border-radius:5px;cursor:pointer;border:1px solid var(--line);background:var(--card)">✕ live</button>':'')+' <span id="kpi-asof-note" style="font-size:11px;color:var(--amber);font-weight:600"></span>':'')
     +'<span style="margin-left:auto;display:flex;gap:6px"><button id="kpi-csv" style="font-size:11px;padding:3px 10px;border-radius:5px;cursor:pointer;border:1px solid var(--line);background:var(--card)">&#8595; CSV</button><button id="kpi-copy" style="font-size:11px;padding:3px 10px;border-radius:5px;cursor:pointer;border:1px solid var(--line);background:var(--card)">&#9106; Copy</button></span>'
     +'</div><div id="kpi-tbl"><div style="color:var(--faint);font-size:12px">Loading…</div></div>';
   kb.querySelectorAll('.kpi-grp').forEach(function(b){ b.onclick=function(){ KPI_GRP=b.dataset.g; renderKpisView(body); }; });
+  (function(){ var _af=document.getElementById('kpi-asof'); if(_af)_af.onchange=function(){ KPI_ASOF=this.value||''; renderKpisView(body,hashBase); };   // historical point-in-time (Ben)
+    var _afc=document.getElementById('kpi-asof-clr'); if(_afc)_afc.onclick=function(){ KPI_ASOF=''; renderKpisView(body,hashBase); }; })();
   function fmt(v,t){ if(v==null||v==='')return '—'; if(t==='money')return '£'+Number(v).toLocaleString(); if(t==='pct')return v+'%'; if(t==='num')return Number(v).toLocaleString(); return v; }
   function load(){
-    fetch(cfg.url()).then(function(r){return r.json();}).then(function(j){
+    fetch(cfg.url()+(KPI_ASOF?'&asof='+encodeURIComponent(KPI_ASOF):'')).then(function(r){return r.json();}).then(function(j){
       var tbl=document.getElementById('kpi-tbl'); if(!tbl)return;
+      try{ var _an=document.getElementById('kpi-asof-note'); if(_an){ var _dmy=function(s){ var m=/^(\d{4})-(\d{2})-(\d{2})/.exec(s||''); return m?(m[3]+'-'+['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][+m[2]-1]+'-'+m[1].slice(2)):''; }; _an.textContent=KPI_ASOF?((j&&j.asof)?('◷ stock as of '+_dmy(j.asof)):'no snapshot on/before that date'):''; } }catch(e){}   // historical: show the resolved snapshot date (Ben)
       if(!j||!j.ok){ tbl.innerHTML='<div style="color:var(--neg);font-size:12px">Failed to load.</div>'; return; }
       var th='padding:5px 12px;text-align:right', thl='padding:5px 12px;text-align:left';
       var head='<tr style="background:var(--band);font-size:11px;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)">'+cfg.cols.map(function(c,i){return '<th style="'+(i===0?thl:th)+'">'+c.h+'</th>';}).join('')+'</tr>';
