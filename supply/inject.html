@@ -11107,11 +11107,26 @@
       +'<div class="mut tiny" style="font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);margin-bottom:4px">POs with open actions</div>'
       +'<div id="oa-po-list" data-lazy="pos"><div class="mut tiny" style="padding:4px 0">Loading POs…</div></div></div>';
     var supTot=(cur.supplier_pos||0)+(cur.supplier_dtc||0);
-    var h='<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:10px"><div style="font-weight:700;font-size:15px;color:var(--nav)">Open actions scoreboard</div>'
+    // Canvas (Performance v2): dark scoreboard card — big number + "vs last wk" delta chip + 12-week area trend + waiting-on-supplier sub-tile.
+    function _oaTrend(vals){ vals=vals.map(Number); if(vals.length<2)return ''; var mn=Math.min.apply(null,vals),mx=Math.max.apply(null,vals),rng=(mx-mn)||1;
+      var px=function(i){return (i/(vals.length-1))*292+4;}, py=function(v){return 82-((v-mn)/rng)*70;};
+      var line='M'+vals.map(function(v,i){return px(i).toFixed(1)+','+py(v).toFixed(1);}).join(' L');
+      return '<svg viewBox="0 0 300 90" style="width:100%;height:auto;display:block"><defs><linearGradient id="oatg" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stop-color="#5aa6ea" stop-opacity=".45"></stop><stop offset="100%" stop-color="#5aa6ea" stop-opacity="0"></stop></linearGradient></defs>'
+        +'<path d="'+line+' L'+px(vals.length-1).toFixed(1)+',90 L4,90 Z" fill="url(#oatg)"></path><path d="'+line+'" fill="none" stroke="#5aa6ea" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"></path>'
+        +'<circle cx="'+px(vals.length-1).toFixed(1)+'" cy="'+py(vals[vals.length-1]).toFixed(1)+'" r="3.5" fill="#fff"></circle></svg>'; }
+    var _tv=chrono.map(function(r){return Number(r.total_our)||0;}); _tv=_tv.slice(-11).concat([Number(cur.total_our)||0]);
+    var _prev=chrono.length?(Number(chrono[chrono.length-1].total_our)||0):(Number(cur.total_our)||0), _d=(Number(cur.total_our)||0)-_prev;
+    var _dChip=(_d===0?'◆ flat':((_d<0?'▼ '+Math.abs(_d):'▲ +'+_d)+' vs last wk')), _dSty=(_d<=0?'color:#7ee2a8;background:rgba(17,138,78,.25)':'color:#fca5a5;background:rgba(220,38,38,.25)');
+    var h='<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:12px"><div style="font-weight:700;font-size:15px;color:var(--ink)">Open actions scoreboard</div>'
       +'<span class="mut tiny">weekly snapshot — Thursday 11:59 GMT (via n8n) · click a metric for its full trend</span></div>'
-      +'<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px">'
-        +'<div style="background:var(--nav);color:#fff;border-radius:8px;padding:12px 18px"><div style="font-size:30px;font-weight:800">'+(cur.total_our||0)+'</div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--line);margin-top:3px">Total our open actions</div></div>'
-        +'<div style="background:var(--amber-bg);border:1px solid #fed7aa;border-radius:8px;padding:12px 18px"><div style="font-size:30px;font-weight:800;color:var(--amber)">'+supTot+'</div><div style="font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--amber);margin-top:3px">Waiting on supplier</div></div></div>'
+      +'<div style="background:var(--nav);border-radius:16px;padding:20px 22px;box-shadow:var(--shadow);margin-bottom:14px;max-width:420px">'
+        +'<div style="font-size:11px;font-weight:800;letter-spacing:.09em;color:var(--nav-dim)">OPEN ACTIONS SCOREBOARD</div>'
+        +'<div style="display:flex;align-items:baseline;gap:12px;margin-top:10px"><span style="font-size:44px;font-weight:800;color:#fff;line-height:1;font-variant-numeric:tabular-nums">'+(cur.total_our||0)+'</span>'
+          +(_tv.length>=2?'<span style="font-size:12px;font-weight:800;'+_dSty+';padding:3px 9px;border-radius:999px">'+_dChip+'</span>':'')+'</div>'
+        +'<div style="font-size:11px;font-weight:700;color:var(--nav-dim);margin-top:6px">TOTAL OUR OPEN ACTIONS</div>'
+        +(_tv.length>=2?'<div style="margin-top:14px">'+_oaTrend(_tv)+'<div style="display:flex;justify-content:space-between;margin-top:6px"><span style="font-size:9.5px;font-weight:700;color:var(--nav-dim)">-'+(_tv.length-1)+'wk</span><span style="font-size:9.5px;font-weight:700;color:var(--nav-dim)">weekly trend</span><span style="font-size:9.5px;font-weight:700;color:#fff">now</span></div></div>':'')
+        +'<div style="display:flex;align-items:center;gap:10px;margin-top:16px;background:rgba(255,255,255,.06);border-radius:10px;padding:10px 14px"><span style="font-size:20px;font-weight:800;color:#ffc861;font-variant-numeric:tabular-nums">'+supTot+'</span><span style="font-size:11px;font-weight:700;color:var(--nav-dim);letter-spacing:.04em">WAITING ON SUPPLIER</span></div>'
+      +'</div>'
       +metricRow('total_our','Total our open actions','var(--nav)',poExtra)
       +'<div class="mut tiny" style="margin:12px 0 4px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)">Our actions</div>'
       +METS.map(function(m){return metricRow(m[0],m[1]);}).join('')
