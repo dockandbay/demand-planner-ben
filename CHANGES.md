@@ -1,3 +1,6 @@
+## v27.600 Summary ▸ Target recs: "Apply everywhere" popup now opens (Ben)
+- The button threw a ReferenceError before showing its modal: trecApplyEverywhere used fyLbl(x.fy) — but fyLbl is a LOCAL inside renderTargetRecs, not a global — so whenever there were open recommendations (map runs fyLbl) the handler crashed and no popup appeared. Swapped to the global fyLabel (identical logic). One-line fix.
+
 ## v27.599 Summary & targets: target cells + tooltips follow the currency picker (Ben)
 - On a non-GBP market with the LOCAL currency picked, the main summary cells already showed the local currency (via mf/_symC), but the **Edit-targets cells, their inline tooltips, and the hover breakdown** still displayed the stored **GBP value with a hardcoded £** — so a target read as £ while everything around it read as, e.g., A$ ("not sure if it is GBP or AUD").
 - Fixed: target displays now convert the stored GBP by the FY rate (cvR) and use the picker symbol (_symC), matching the already-correct live-edit path. Applied to ecell (absolute/%/implied/run-off), the inline ttxt, and the hover ASP/Revenue breakdown (via a new data-rt on the cell). Values stay stored in GBP; only the display follows the picker. GBP markets unchanged (rate 1, £).
