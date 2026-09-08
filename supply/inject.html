@@ -11117,9 +11117,6 @@
             +'<tr>'+chrono.map(function(r){return '<td style="padding:2px 7px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600">'+(r[key]==null?'':r[key])+'</td>';}).join('')+'</tr>'
           +'</tbody></table></div>'+(extra||'')+'</div></div>';
     }
-    var poExtra='<div style="margin-top:12px;border-top:1px solid var(--hover);padding-top:8px">'
-      +'<div class="mut tiny" style="font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--muted);margin-bottom:4px">POs with open actions</div>'
-      +'<div id="oa-po-list" data-lazy="pos"><div class="mut tiny" style="padding:4px 0">Loading POs…</div></div></div>';
     var supTot=(cur.supplier_pos||0)+(cur.supplier_dtc||0);
     // Canvas (Performance v2): dark scoreboard card — big number + "vs last wk" delta chip + 12-week area trend + waiting-on-supplier sub-tile.
     function _oaTrend(vals){ vals=vals.map(Number); if(vals.length<2)return ''; var mn=Math.min.apply(null,vals),mx=Math.max.apply(null,vals),rng=(mx-mn)||1;
@@ -11131,25 +11128,51 @@
     var _tv=chrono.map(function(r){return Number(r.total_our)||0;}); _tv=_tv.slice(-11).concat([Number(cur.total_our)||0]);
     var _prev=chrono.length?(Number(chrono[chrono.length-1].total_our)||0):(Number(cur.total_our)||0), _d=(Number(cur.total_our)||0)-_prev;
     var _dChip=(_d===0?'◆ flat':((_d<0?'▼ '+Math.abs(_d):'▲ +'+_d)+' vs last wk')), _dSty=(_d<=0?'color:#7ee2a8;background:rgba(17,138,78,.25)':'color:#fca5a5;background:rgba(220,38,38,.25)');
-    var h='<div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:12px"><div style="font-weight:700;font-size:15px;color:var(--ink)">Open actions scoreboard</div>'
-      +'<span class="mut tiny">weekly snapshot — Thursday 11:59 GMT (via n8n) · click a metric for its full trend</span></div>'
-      +'<div style="background:var(--nav);border-radius:16px;padding:20px 22px;box-shadow:var(--shadow);margin-bottom:14px;max-width:420px">'
+    // LEFT: dark scoreboard card (caption sits at its foot, per the by-category brief).
+    var scoreCard='<div style="background:var(--nav);border-radius:16px;padding:20px 22px;box-shadow:var(--shadow);position:sticky;top:8px">'
         +'<div style="font-size:11px;font-weight:800;letter-spacing:.09em;color:var(--nav-dim)">OPEN ACTIONS SCOREBOARD</div>'
         +'<div style="display:flex;align-items:baseline;gap:12px;margin-top:10px"><span style="font-size:44px;font-weight:800;color:#fff;line-height:1;font-variant-numeric:tabular-nums">'+(cur.total_our||0)+'</span>'
           +(_tv.length>=2?'<span style="font-size:12px;font-weight:800;'+_dSty+';padding:3px 9px;border-radius:999px">'+_dChip+'</span>':'')+'</div>'
         +'<div style="font-size:11px;font-weight:700;color:var(--nav-dim);margin-top:6px">TOTAL OUR OPEN ACTIONS</div>'
         +(_tv.length>=2?'<div style="margin-top:14px">'+_oaTrend(_tv)+'<div style="display:flex;justify-content:space-between;margin-top:6px"><span style="font-size:9.5px;font-weight:700;color:var(--nav-dim)">-'+(_tv.length-1)+'wk</span><span style="font-size:9.5px;font-weight:700;color:var(--nav-dim)">weekly trend</span><span style="font-size:9.5px;font-weight:700;color:#fff">now</span></div></div>':'')
         +'<div style="display:flex;align-items:center;gap:10px;margin-top:16px;background:rgba(255,255,255,.06);border-radius:10px;padding:10px 14px"><span style="font-size:20px;font-weight:800;color:#ffc861;font-variant-numeric:tabular-nums">'+supTot+'</span><span style="font-size:11px;font-weight:700;color:var(--nav-dim);letter-spacing:.04em">WAITING ON SUPPLIER</span></div>'
-      +'</div>'
-      +metricRow('total_our','Total our open actions','var(--nav)',poExtra)
-      +'<div class="mut tiny" style="margin:12px 0 4px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)">Our actions</div>'
-      +METS.map(function(m){return metricRow(m[0],m[1]);}).join('')
-      +'<div class="mut tiny" style="margin:12px 0 4px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)">Waiting on supplier</div>'
+        +'<div style="font-size:10.5px;color:var(--nav-dim);margin-top:12px">Weekly snapshot · Thursday 11:59 GMT (via n8n)</div>'
+      +'</div>';
+    // RIGHT: "Our actions · by category" — composition bar + per-category rows (5 mini bars: 4 grey snapshots + live in the row colour, delta chip vs last wk), click a row for its 52-week trend.
+    var CATCOL={po_actions:'#2361d8',order_plan:'#5aa6ea',shipments:'#7c3aed',manufacturing:'#b45309',samples:'#118a4e',payments_overdue:'#d23227',dtc_mismatch:'#8b98ad'};
+    var compTotal=METS.reduce(function(a,m){return a+(Number(cur[m[0]])||0);},0)||1;
+    var compBar='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:0 16px 12px"><div style="flex:1;display:flex;height:12px;border-radius:99px;overflow:hidden;min-width:200px">'
+      +METS.filter(function(m){return (Number(cur[m[0]])||0)>0;}).map(function(m){return '<div title="'+esc(m[1])+': '+(cur[m[0]]||0)+'" style="width:'+((Number(cur[m[0]])||0)/compTotal*100).toFixed(1)+'%;background:'+(CATCOL[m[0]]||'var(--blue)')+';border-right:1.5px solid var(--card)"></div>';}).join('')
+      +'</div><span class="mut tiny" style="white-space:nowrap">what makes up the '+(cur.total_our||0)+' today</span></div>';
+    function catRow(key,label){
+      var series=chrono.map(function(r){return Number(r[key])||0;}), last4=series.slice(-4), cur0=(cur[key]!=null?cur[key]:0), col=CATCOL[key]||'var(--blue)';
+      var bars5=last4.concat([cur0]), mx=Math.max.apply(null,bars5.concat([1]));
+      var prev=chrono.length?(Number(chrono[chrono.length-1][key])||0):cur0, dd=cur0-prev;
+      var chip=(dd===0?'◆ flat':((dd<0?'▼ '+dd:'▲ +'+dd)+' vs last wk')), chipSty=(dd===0?'color:var(--faint);background:var(--line2)':dd<0?'color:var(--pos);background:var(--pos-bg)':'color:var(--neg);background:var(--neg-bg)');
+      var expId='oa-exp-'+key;
+      var sparks=bars5.map(function(v,i){return '<div style="flex:1;max-width:16px;border-radius:2px 2px 0 0;background:'+(i===4?col:'var(--dim2)')+';height:'+Math.max(6,v/mx*100)+'%"></div>';}).join('');
+      return '<div style="border-top:1px solid var(--line2)">'
+        +'<div class="oa-hd" data-exp="'+expId+'" style="display:grid;grid-template-columns:minmax(150px,1.6fr) 52px 92px minmax(120px,1.4fr);gap:14px;align-items:center;padding:10px 16px;cursor:pointer">'
+          +'<div><div style="font-size:12.5px;font-weight:800;color:var(--ink)">'+label+'</div><div class="mut tiny" style="font-weight:400;line-height:1.4;margin-top:2px;text-wrap:pretty">'+(_OA_DESC[key]||'')+'</div></div>'
+          +'<div style="font-size:22px;font-weight:800;text-align:right;font-variant-numeric:tabular-nums;color:'+(cur0===0?'var(--faint)':'var(--ink)')+'">'+cur0+'</div>'
+          +'<div style="display:flex;align-items:flex-end;gap:3px;height:30px">'+sparks+'</div>'
+          +'<div style="display:flex;align-items:center;gap:8px;justify-content:flex-end;flex-wrap:wrap"><span style="font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:999px;white-space:nowrap;'+chipSty+'">'+chip+'</span><span class="mut tiny" style="font-variant-numeric:tabular-nums;white-space:nowrap">4wk '+(last4.length?last4.join(' · '):'—')+'</span></div>'
+        +'</div>'
+        +'<div id="'+expId+'" style="display:none;padding:0 16px 10px;border-top:1px dashed var(--line)"><div style="margin:8px 0 4px">'+_oaSpark(series,Math.max(120,series.length*16),36,col)+'</div>'
+          +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:10px"><tbody><tr>'+chrono.map(function(r){return '<td style="padding:2px 7px;text-align:right;color:var(--faint);white-space:nowrap">'+esc(_ddmmm(r.week_ending))+'</td>';}).join('')+'</tr><tr>'+chrono.map(function(r){return '<td style="padding:2px 7px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600">'+(r[key]==null?'':r[key])+'</td>';}).join('')+'</tr></tbody></table></div></div></div>';
+    }
+    var poFoot='<div style="border-top:1px solid var(--line2)"><div class="oa-hd" data-exp="oa-exp-pos" style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px 16px"><span class="oa-caret" style="color:var(--faint);font-size:10px;width:10px">▸</span><span style="font-size:12px;font-weight:700;color:var(--ink-soft)">POs with open actions</span></div><div id="oa-exp-pos" style="display:none;padding:0 16px 12px"><div id="oa-po-list" data-lazy="pos"><div class="mut tiny" style="padding:4px 0">Loading POs…</div></div></div></div>';
+    var catCard='<div style="background:var(--card);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden">'
+      +'<div style="display:flex;align-items:baseline;gap:10px;padding:16px 16px 10px;flex-wrap:wrap"><span style="font-size:13.5px;font-weight:800">Our actions · by category</span><span class="mut tiny">adds up to the total · click a row for its full trend</span></div>'
+      +compBar+METS.map(function(m){return catRow(m[0],m[1]);}).join('')+poFoot+'</div>';
+    var grid='<div style="display:grid;grid-template-columns:minmax(280px,340px) minmax(0,1fr);gap:14px;align-items:start">'+scoreCard+catCard+'</div>';
+    var h=grid
+      +'<div class="mut tiny" style="margin:16px 0 4px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)">Waiting on supplier</div>'
       +SUP.map(function(m){return metricRow(m[0],m[1],'var(--amber)');}).join('')
       +'<div class="mut tiny" style="margin:12px 0 4px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)">Opportunities <span style="font-weight:400;text-transform:none;letter-spacing:0">(tracked separately — not counted in the total)</span></div>'
       +metricRow('reallocations','Reallocation options','var(--amber)');
     if(!hist.length)h+='<div class="mut tiny" style="margin-top:6px">No weekly snapshots yet — the first is captured next Thursday (via n8n).</div>';
-    el.innerHTML='<div style="max-width:820px">'+h+'</div>';
+    el.innerHTML='<div style="max-width:1400px">'+h+'</div>';
     el.querySelectorAll('.oa-hd').forEach(function(hd){ hd.onclick=function(){ var t=document.getElementById(hd.dataset.exp); if(!t)return; var open=t.style.display!=='none'; t.style.display=open?'none':'block'; var cc=hd.querySelector('.oa-caret'); if(cc)cc.textContent=open?'▸':'▾';
       if(!open){ var pl=t.querySelector('[data-lazy="pos"]'); if(pl && !pl.dataset.loaded){ pl.dataset.loaded='1'; pl.innerHTML='<div class="mut tiny" style="padding:6px 0">Loading POs…</div>'; fetch('/api/supply/action-metrics/pos').then(function(r){return r.json();}).then(function(j){ _renderOaPoList(pl,(j&&j.pos)||[]); }).catch(function(){ pl.dataset.loaded=''; pl.innerHTML='<div style="color:var(--neg);font-size:12px;padding:6px 0">Failed to load</div>'; }); } }
     }; });
