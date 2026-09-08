@@ -6229,7 +6229,9 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   const ik=s+'|'+co+'|'+ch+'|'+fym;
   const stored=IV[ik];
   // LY ref: forecast-on-forecast years (2027+) anchor on the prior-year forecast; everything else on the prior-year actual.
-  const ly_u=y>=2027?(fu[ym(y-1,mo)]||0):(a[ym(y-1,mo)]?a[ym(y-1,mo)][0]:0);
+  const _pm=ym(y-1,mo);
+  const _pmAct=(typeof isActualMonth==='function'&&isActualMonth(_pm)&&a[_pm]);   // v27.587: prior-year month is a COMPLETED ACTUAL → anchor LY on it (like-for-like with the exploded ·dot + the growth target), not the stale prior-year forecast. Only genuinely-future prior-year months keep forecast-on-forecast.
+  const ly_u=_pmAct?(a[_pm][0]||0):(y>=2027?(fu[_pm]||0):(a[_pm]?a[_pm][0]:0));
   const fcv=fu[fym]||0;
   const isActual=isActualMonth(fym);
 
@@ -6280,7 +6282,7 @@ function makeFCTd(s,co,ch,fym,fu,a,extraCls,aflags,reasons,skuEff,varWin){
   const isPct=_ps0&&!_ps0.lit;
   const gv=IV[gk(s,co,ch)];
   const is27=fym.startsWith('2027');
-  const isFcLy=y>=2027; // forecast month whose LY ref is itself a forecast
+  const isFcLy=y>=2027&&!_pmAct; // v27.587: forecast-on-forecast ONLY when the LY ref is itself still a forecast; a completed prior-year actual explodes like an actual
   var anom=aflags&&aflags[fym]?(' anomaly-'+aflags[fym].type):'';  const td=document.createElement('td');td.className='fctd hz-fc'+extraCls+(is27?' y27':y>=2028?' y28':'')+anom;
   // per-cell forecast note key + "N" badge (dbl-click the cell to add/view notes)
   var _nk=((typeof SKUM!=='undefined'&&SKUM[s])?'sku':'subcat')+'|'+s+'|'+co+'|'+ch+'|'+fym; td.dataset.nk=_nk;
