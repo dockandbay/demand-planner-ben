@@ -14646,7 +14646,7 @@ function renderInventoryMetrics(host){
 // account config. Upload/list/delete invoice files for a chosen month; edit per-3PL storage/other cost accounts;
 // view the region×channel account map. Parse + Cin7 order matching land in a later phase.
 var TPL3=[['uk_ilg','UK ILG'],['us_geneva','US Geneva'],['eu_ifulfilment','EU iFulfilment'],['au_coghlans','AU Coghlans']];
-var TPL3_STATE={tpl:'uk_ilg',period:'',mode:'invoices'};
+var TPL3_STATE={tpl:'uk_ilg',period:'',mode:'invoices',fcgrain:'month'};
 function render3plInvoice(body){
   try{ var _h3=(location.hash||'').replace(/^#\/?/,'').split('/'); if(_h3[0]==='reports'&&_h3[1]==='3pl-invoicing'&&_h3[2]){ var _sub=_h3[2].replace(/-/g,'_'); if(TPL3.some(function(t){return t[0]===_sub;}))TPL3_STATE.tpl=_sub; } }catch(e){}   // deep-link: #/reports/3pl-invoicing/<tpl>
   function e(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
@@ -14937,7 +14937,8 @@ function render3plInvoice(body){
     var curKey=mkeys[0];
     function _fD(s){ var p=String(s||'').slice(0,10).split('-'); return p.length<3?String(s||''):(p[2]+'-'+(MON[+p[1]-1]||p[1])+'-'+p[0].slice(2)); }   // 'YYYY-MM-DD' → dd-Mmm-yy (dateDMY is BP-IIFE-local)
     // ── GOODS OUT (a): forecast ORDERS = DTC+TIK units × ship-bag ratio (0.449) + B2B units ÷ 25 avg-units/order ──
-    var orders={}; mkeys.forEach(function(m){orders[m]=0;});
+    var B2B_UPO=Math.max(1,parseFloat(localStorage.getItem('tpl_b2b_upo'))||30);   // B2B units per order (savable, default 30; Ben) — was a hardcoded 25
+    var orders={}, dtcOrd={}, b2bOrd={}; mkeys.forEach(function(m){orders[m]=0;dtcOrd[m]=0;b2bOrd[m]=0;});
     var subs={}; Object.keys(SKUM).forEach(function(k){ var p=SKUM[k]; if(p&&p.s)subs[p.s]=1; });
     Object.keys(subs).forEach(function(sub){
       ['DTC','TIK','B2B'].forEach(function(ch){
@@ -14946,10 +14947,12 @@ function render3plInvoice(body){
           var u=fu[m]||0;
           if(m===curKey){ try{ u=curMonthForecast(sub,MKT,ch)||0; }catch(e3){} }   // current month = full-month forecast (matches the plan)
           if(!u)return;
-          orders[m]+=(ch==='B2B')?(u/25):(u*SB_RATIO);
+          var o=(ch==='B2B')?(u/B2B_UPO):(u*SB_RATIO);
+          orders[m]+=o; if(ch==='B2B')b2bOrd[m]+=o; else dtcOrd[m]+=o;   // DTC = DTC+TIK
         });
       });
     });
+    if(TPL3_STATE.fcgrain==='week'){ _draw3plWeekly(b,tplName,dtcOrd,b2bOrd,mkeys,B2B_UPO); return; }   // Weekly EU-iFulfilment view — orders only (skips goods-in/transfers)
     // ── GOODS IN (a): KNOWN inbound — server shipments (open POs grouped under their master SHIPMENT: units, container
     // count, effective delivery date; overdue past-dated inbound is clamped to the current month). Bucketed by month. ──
     var ginK={},ginCont={},ginShips={}; mkeys.forEach(function(m){ginK[m]=0;ginCont[m]=0;ginShips[m]=[];});
@@ -14987,7 +14990,7 @@ function render3plInvoice(body){
     function cell(v,ph){ return '<td style="'+TD+(ph?';color:var(--line)':'')+'">'+(v==null?'<span title="next phase">—</span>':fmt(v))+'</td>'; }
     var html='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">'
       +'<div style="font-weight:700;font-size:14px">'+e(tplName)+' — next 6 months <span style="font-weight:400;color:var(--faint);font-size:12px">estimated goods in / goods out</span></div>'
-      +'<div style="display:flex;gap:6px"><button id="f3-dl" class="pill catpill" style="font-size:11px">⬇ Download CSV</button><button id="f3-cp" class="pill catpill" style="font-size:11px">⧉ Copy for email</button></div></div>'
+      +'<div style="display:flex;gap:6px;align-items:center">'+_f3GrainToggle()+'<button id="f3-dl" class="pill catpill" style="font-size:11px">⬇ Download CSV</button><button id="f3-cp" class="pill catpill" style="font-size:11px">⧉ Copy for email</button></div></div>'
       +'<table style="border-collapse:collapse;font-size:12px;min-width:760px">'
       +'<thead>'
         +'<tr><th style="'+TH+';text-align:left" rowspan="2">Month</th>'
@@ -15012,7 +15015,7 @@ function render3plInvoice(body){
     });
     html+='</tbody></table>'
       +'<div style="font-size:10px;color:var(--faint);margin-top:8px;max-width:680px;line-height:1.5">'
-      +'<b>Goods out · orders</b> = (DTC + TikTok units × 0.449 ship-bags/unit) + (B2B units ÷ 25 units/order), rounded to the nearest 500 (nearest 100 under 500). '
+      +'<b>Goods out · orders</b> = (DTC + TikTok units × 0.449 ship-bags/unit) + (B2B units ÷ '+B2B_UPO+' units/order), rounded to the nearest 500 (nearest 100 under 500). <span style="color:var(--blue-ink)">Switch to Weekly for the per-ISO-week DTC/B2B order split (EU iFulfilment format).</span> '
       +'<b>Goods out · Amazon transfers</b> = the buy-plan 3PL→FBA transfer per SKU, summed per month (same rounding). '
       +'<b>Known PO\'s</b> = open POs landing that month, grouped under their master shipment (click ▸ for shipment IDs + delivery dates). Containers = pallets ÷ 20 (40ft-equiv); a sub-pallet or -AIR consignment shows 0 + an <b>air</b> tag. Overdue past-dated inbound counts in the current month. '
       +'<b>Est Forecast</b> = the buy plan\'s recommended future 3PL replenishment, shown in the month it LANDS (order month + the ~lead time), incremental to the known POs; containers estimated from the known units-per-container. <b>Total</b> = known + Est Forecast.</div>';
@@ -15020,6 +15023,43 @@ function render3plInvoice(body){
     b.querySelectorAll('.f3-exp').forEach(function(x){ x.onclick=function(){ var ri=this.dataset.r, op=this.getAttribute('data-open')==='1'; b.querySelectorAll('.f3-det-'+ri).forEach(function(row){ row.style.display=op?'none':''; }); this.innerHTML=op?'&#9656;':'&#9662;'; this.setAttribute('data-open',op?'0':'1'); }; });
     var _dl=b.querySelector('#f3-dl'); if(_dl)_dl.onclick=function(){ _f3Download(tplName,rows); };
     var _cp=b.querySelector('#f3-cp'); if(_cp)_cp.onclick=function(){ _f3CopyEmail(tplName,rows,this); };
+    _f3WireGrain(b);
+  }
+  // ── Monthly ⇆ Weekly grain toggle (Ben) ──
+  function _f3GrainToggle(){ var g=TPL3_STATE.fcgrain||'month'; function bt(v,l){ return '<button class="pill catpill f3-grain'+(g===v?' active':'')+'" data-grain="'+v+'" style="font-size:11px">'+l+'</button>'; } return '<span style="display:inline-flex;gap:3px;margin-right:6px">'+bt('month','Monthly')+bt('week','Weekly')+'</span>'; }
+  function _f3WireGrain(b){ b.querySelectorAll('.f3-grain').forEach(function(x){ x.onclick=function(){ TPL3_STATE.fcgrain=this.dataset.grain; draw3plForecast(b); }; }); }
+  // ISO-8601 week (year + week no.) for a Date; Monday of a Date
+  function _isoWeekOf(dt){ var d=new Date(Date.UTC(dt.getFullYear(),dt.getMonth(),dt.getDate())); var day=(d.getUTCDay()+6)%7; d.setUTCDate(d.getUTCDate()-day+3); var firstThu=new Date(Date.UTC(d.getUTCFullYear(),0,4)); var fd=(firstThu.getUTCDay()+6)%7; var w=1+Math.round(((d-firstThu)/86400000-3+fd)/7); return {y:d.getUTCFullYear(),w:w}; }
+  function _mondayOf(dt){ var d=new Date(dt.getFullYear(),dt.getMonth(),dt.getDate()); var day=(d.getDay()+6)%7; d.setDate(d.getDate()-day); return d; }
+  // Weekly EU-iFulfilment view: monthly order forecast day-prorated into ISO weeks, DTC + B2B split.
+  function _draw3plWeekly(b,tplName,dtcOrd,b2bOrd,mkeys,B2B_UPO){
+    var m0=mkeys[0].split('_'), mN=mkeys[mkeys.length-1].split('_');
+    var start=new Date(+m0[0],+m0[1]-1,1), endM=new Date(+mN[0],+mN[1],0);   // 1st of first month .. last day of last month
+    var dRate={}; mkeys.forEach(function(m){ var pp=m.split('_'); var dim=new Date(+pp[0],+pp[1],0).getDate(); dRate[m]={dtc:(dtcOrd[m]||0)/dim,b2b:(b2bOrd[m]||0)/dim}; });
+    var weeks=[], cur=_mondayOf(start);
+    while(cur<=endM){ var dtc=0,b2b=0; for(var i=0;i<7;i++){ var day=new Date(cur.getFullYear(),cur.getMonth(),cur.getDate()+i); if(day<start||day>endM)continue; var mk=day.getFullYear()+'_'+((day.getMonth()+1<10?'0':'')+(day.getMonth()+1)); var rr=dRate[mk]; if(rr){ dtc+=rr.dtc; b2b+=rr.b2b; } }
+      var iso=_isoWeekOf(cur); weeks.push({y:iso.y,w:iso.w,wc:new Date(cur),dtc:Math.round(dtc),b2b:Math.round(b2b)}); cur=new Date(cur.getFullYear(),cur.getMonth(),cur.getDate()+7); }
+    function _wc(d){ return (d.getDate()<10?'0':'')+d.getDate()+'/'+((d.getMonth()+1)<10?'0':'')+(d.getMonth()+1)+'/'+d.getFullYear(); }
+    var TH='padding:6px 10px;text-align:right;font-size:10px;color:var(--muted);text-transform:uppercase;border-bottom:2px solid var(--line);white-space:nowrap';
+    var TD='padding:6px 10px;text-align:right;font-variant-numeric:tabular-nums;border-bottom:1px solid var(--line2)';
+    var html='<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:8px">'
+      +'<div style="font-weight:700;font-size:14px">'+e(tplName)+' — weekly orders forecast <span style="font-weight:400;color:var(--faint);font-size:12px">DTC + B2B, order-based (EU iFulfilment format)</span></div>'
+      +'<div style="display:flex;gap:6px;align-items:center">'+_f3GrainToggle()
+      +'<label style="font-size:11px;color:var(--muted);display:inline-flex;align-items:center;gap:4px">B2B units/order <input id="f3-b2bupo" type="number" min="1" value="'+B2B_UPO+'" style="width:52px;font-size:12px;padding:2px 5px;border:1px solid var(--line);border-radius:5px;text-align:right;background:var(--card);color:var(--ink)"></label>'
+      +'<button id="f3-wdl" class="pill catpill" style="font-size:11px">⬇ CSV</button><button id="f3-wcb" class="pill catpill" style="font-size:11px">⧉ Copy</button><button id="f3-wcp" class="pill catpill" style="font-size:11px">✉ Email</button></div></div>'
+      +'<table style="border-collapse:collapse;font-size:12px;min-width:520px"><thead><tr>'
+      +'<th style="'+TH+';text-align:left">Year</th><th style="'+TH+'">ISO Week</th><th style="'+TH+';text-align:left">Week Commencing</th><th style="'+TH+'">DTC</th><th style="'+TH+'">B2B</th></tr></thead><tbody>'
+      +weeks.map(function(w){ return '<tr><td style="'+TD+';text-align:left">'+w.y+'</td><td style="'+TD+'">'+w.w+'</td><td style="'+TD+';text-align:left">'+_wc(w.wc)+'</td><td style="'+TD+'">'+fmt(w.dtc)+'</td><td style="'+TD+'">'+fmt(w.b2b)+'</td></tr>'; }).join('')
+      +'</tbody></table>'
+      +'<div style="font-size:10px;color:var(--faint);margin-top:8px;max-width:660px;line-height:1.5">Weekly <b>orders</b> = the monthly forecast day-prorated across ISO weeks. <b>DTC</b> = (DTC + TikTok units) × 0.449 ship-bags/unit. <b>B2B</b> = B2B units ÷ '+B2B_UPO+' units/order (editable above, saved). Covers the next 6 forecast months.</div>';
+    b.innerHTML=html; _f3WireGrain(b);
+    var upo=b.querySelector('#f3-b2bupo'); if(upo)upo.onchange=function(){ var v=Math.max(1,parseFloat(this.value)||30); try{localStorage.setItem('tpl_b2b_upo',String(v));}catch(e){} draw3plForecast(b); };
+    function _wcsv(){ return ['Year,ISO Week,Week Commencing,DTC,B2B'].concat(weeks.map(function(w){ return [w.y,w.w,_wc(w.wc),w.dtc,w.b2b].join(','); })).join('\n'); }
+    var wdl=b.querySelector('#f3-wdl'); if(wdl)wdl.onclick=function(){ var blob=new Blob([_wcsv()],{type:'text/csv'}), url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download=(tplName.replace(/[^a-z0-9]+/ig,'_')+'_weekly_orders.csv'); document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){URL.revokeObjectURL(url);},1000); };
+    var wcb=b.querySelector('#f3-wcb'); if(wcb)wcb.onclick=function(){ var self=this; var txt='Year\tISO Week\tWeek Commencing\tDTC\tB2B\n'+weeks.map(function(w){return w.y+'\t'+w.w+'\t'+_wc(w.wc)+'\t'+w.dtc+'\t'+w.b2b;}).join('\n'); var done=function(){ self.textContent='✓ Copied'; setTimeout(function(){self.textContent='⧉ Copy';},1200); }; try{ if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(txt).then(done,function(){var ta=document.createElement('textarea');ta.value=txt;ta.style.cssText='position:fixed;left:-9999px';document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();done();}); } else { var ta=document.createElement('textarea');ta.value=txt;ta.style.cssText='position:fixed;left:-9999px';document.body.appendChild(ta);ta.select();document.execCommand('copy');ta.remove();done(); } }catch(e){ self.textContent='copy failed'; } };
+    var wcp=b.querySelector('#f3-wcp'); if(wcp)wcp.onclick=function(){ var self=this; var THs='padding:5px 10px;border:1px solid #d0d7de;background:#f0f6ff;text-align:right;font-family:Arial,sans-serif;font-size:12px', TDs='padding:5px 10px;border:1px solid #d0d7de;text-align:right;font-family:Arial,sans-serif;font-size:13px';
+      var h='<div style="font-family:Arial,sans-serif"><p style="font-size:14px;font-weight:bold;margin:0 0 6px">'+e(tplName)+' — weekly orders forecast (DTC / B2B)</p><table style="border-collapse:collapse"><thead><tr><th style="'+THs+';text-align:left">Year</th><th style="'+THs+'">ISO Week</th><th style="'+THs+';text-align:left">Week Commencing</th><th style="'+THs+'">DTC</th><th style="'+THs+'">B2B</th></tr></thead><tbody>'+weeks.map(function(w){return '<tr><td style="'+TDs+';text-align:left">'+w.y+'</td><td style="'+TDs+'">'+w.w+'</td><td style="'+TDs+';text-align:left">'+_wc(w.wc)+'</td><td style="'+TDs+'">'+fmt(w.dtc)+'</td><td style="'+TDs+'">'+fmt(w.b2b)+'</td></tr>';}).join('')+'</tbody></table></div>';
+      var div=document.createElement('div'); div.contentEditable='true'; div.style.cssText='position:fixed;left:-9999px;top:0;opacity:0'; div.innerHTML=h; document.body.appendChild(div); var rng=document.createRange(); rng.selectNodeContents(div); var sel=window.getSelection(); sel.removeAllRanges(); sel.addRange(rng); var ok=false; try{ok=document.execCommand('copy');}catch(e){} sel.removeAllRanges(); div.remove(); self.textContent=ok?'✓ Copied':'copy failed'; setTimeout(function(){self.textContent='✉ Email';},1200); };
   }
   function _f3Download(tplName,rows){
     var head=['Month','Known POs (units)','Known POs (containers)','Est Forecast (units)','Est Forecast (containers)','Goods in total','Orders','Amazon transfers (units)'];

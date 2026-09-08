@@ -1,3 +1,7 @@
+## v27.592 3PL Invoicing ▸ Forecast: weekly EU-iFulfilment view + savable B2B units/order (Ben)
+- Added a **Monthly ⇆ Weekly** toggle to the 3PL & Invoicing ▸ Forecast view (all 4 3PLs). **Weekly** renders the EU-iFulfilment format — **Year · ISO Week · Week Commencing · DTC · B2B**, order-based: the monthly forecast **day-prorated across ISO weeks**, with **DTC = (DTC+TikTok units) × 0.449** ship-bags/unit and **B2B = B2B units ÷ units-per-order**. Exports: **CSV · copy-to-clipboard · copy-to-email**.
+- **B2B units/order** is now a **savable inline field** (localStorage), **default 30** (was a hardcoded 25); editable in the weekly view and applied to the monthly Orders column too. No data/schema change.
+
 ## v27.591 Dark mode: DEMAND plan state-cell edges + total columns (Ben)
 - Plan state cells kept **hardcoded light borders** that didn't flip in dark: discontinued (pink `#f3b6b0`, read as harsh red), no-stock (`#fca5a5`), anomaly hi/lo (`#f59e0b`/`#e5e5e5`), current-month-first (`#93c5fd`), SKU-row hairline (`#cfcfcf`), category-total + year-total borders (`#d0d0ce`/`#a8a29e`). All tokenised (`--neg`/`--amber`/`--line`/`--blue`/`--faint`).
 - **Total columns** (`td.totu`) used `--faint` (a mid-grey text token) as background → a light-grey block in dark; added a dark-only override to render them as a dark band (`--band`). Light theme unchanged.
