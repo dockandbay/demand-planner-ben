@@ -12619,11 +12619,12 @@
     function tierAvail(s){ var t=plTiersOf(s); if(!t||t.length<2)return null; var qty=rowTotal(s); if(!(qty>0))return null;
       var moq=moqOf(s); if(moq&&qty<moq)return null;   // below MOQ → handled by the MOQ top-up instead
       var cur=null,next=null; t.forEach(function(x){ var mq=Number(x.min_qty)||1; if(mq<=qty&&(!cur||mq>(Number(cur.min_qty)||1)))cur=x; if(mq>qty&&(!next||mq<(Number(next.min_qty)||1)))next=x; });
-      if(!cur||!next)return null; var extra=(Number(next.min_qty)||1)-qty; return extra>0?{extra:extra,nextMin:Number(next.min_qty)||1}:null; }
+      if(!cur||!next)return null; var nextMin=Number(next.min_qty)||1, extra=nextMin-qty; if(!(extra>0))return null; var delta=(nextMin*Number(next.unit_cost))-(qty*Number(cur.unit_cost)); return {extra:extra,nextMin:nextMin,perUnit:delta/extra,sym:curSym(plCcyOf(s))}; }
     function tierTopUps(){ var out=[]; Object.keys(REC[MODE]).forEach(function(s){ if(!hasCode(s)||!TIERTOP[s])return; var a=tierAvail(s); if(a)out.push({sku:s,qty:a.extra,supplier_code:supOf(s)||''}); }); return out; }
     // Tier-box HTML = the hint text + (when a top-up is available) a checkbox to order the extra as China stock.
-    function tierBoxHtml(s){ var hint=tierHint(s); if(!hint)return ''; var a=tierAvail(s);
-      return esc(hint)+(a?('<label style="display:block;margin-top:3px;cursor:pointer;font-weight:700"><input type="checkbox" class="bpm-tiertop" data-s="'+esc(s)+'"'+(TIERTOP[s]?' checked':'')+' style="vertical-align:middle;margin-right:3px">＋ order extra '+a.extra.toLocaleString()+' as China stock</label>'):''); }
+    function tierBoxHtml(s){ var a=tierAvail(s); if(!a)return ''; var hint=tierHint(s);   // Ben: short checkbox label; full trade-off text as the tooltip
+      var pu=(a.perUnit<=0)?'FREE':(a.sym+Math.abs(a.perUnit).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})+'/unit');
+      return '<label title="'+esc(hint)+'" style="display:block;cursor:help;font-weight:700"><input type="checkbox" class="bpm-tiertop" data-s="'+esc(s)+'"'+(TIERTOP[s]?' checked':'')+' style="vertical-align:middle;margin-right:3px">＋ order extra '+a.extra.toLocaleString()+' as China stock'+(a.perUnit<=0?' (FREE)':(' for '+pu))+'</label>'; }
     var ov=document.createElement('div'); ov.id='bp-po-modal-multi';
     ov.style.cssText='position:fixed;inset:0;background:var(--card);z-index:200000;display:flex;flex-direction:column;padding:10px 14px;overflow:hidden';   // full-SCREEN feature (Ben), not a dimmed modal — opaque page surface, edge-to-edge
     ov.innerHTML='<div class="pomodal" style="width:100%;max-width:none;flex:1 1 auto;display:flex;flex-direction:column;overflow:hidden;opacity:0;transition:opacity .12s ease">'

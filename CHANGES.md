@@ -1,3 +1,6 @@
+## v27.613 Create POs: tier top-up message shortened to a tooltip (Ben)
+- The between-tiers hint is now just the checkbox: "＋ order extra 460 as China stock for $7.85/unit" (or "(FREE)" when the extra units are free). The full trade-off text ("40 units cost $8.50/unit. The extra 460 to reach 500 ($7.90/unit) cost $3,610.00 — $7.85/unit") moved to the hover tooltip.
+
 ## v27.612 Create POs: Save Project — frozen numbers, click-to-apply moves, auto-save (Ben)
 - Opening a saved project now shows the **numbers as saved** — unedited cells no longer jump to the moved live recommendation. The project stores a **frozen rec baseline** (set once, preserved on auto-save).
 - Each cell whose **live recommendation has moved** since save shows a small amber **"↻ now N"** under it — **click to apply** the new number (tooltip: now N, was M when saved).
