@@ -1,3 +1,7 @@
+## v27.603 Auto-update: DATA changes no longer reload a backgrounded tab (Ben)
+- The buy plan was "constantly refreshing on idle": apply() reloaded a BACKGROUNDED tab for both code and data changes, and pendingData is set constantly (n8n refreshes source data) with a 30s retry — so every time you tabbed away it silently reloaded, and you returned to a reset page (scroll/state lost).
+- Now a backgrounded tab reloads ONLY for a new DEPLOY (pendingCode). A DATA change just busts the section cache + marks the buy overlay stale so the next render/navigation shows fresh numbers — no reload. Visible tabs already never reloaded.
+
 ## v27.602 Payments Due: PAY optimistically drops the row from Outstanding (Ben)
 - Clicking PAY only painted the amount/date input cells; it never updated the row data model (r.paid) or re-filtered, so paid items lingered in the Outstanding list until a slow ~10s cache refresh — and a mid-flight redraw could repaint them as unpaid (no date). Rapid clicks made it worse.
 - Now PAY marks the row paid in the data (amt_val/dt_val/paid/overdue) and re-draws immediately, so it drops out of Outstanding at once and the nav badge updates. The write still runs in the background; on failure the row data is reverted and re-drawn. Same single-request POST as before.

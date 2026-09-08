@@ -14555,7 +14555,16 @@
     }catch(e){}
     location.reload(); }
   function apply(){ if(!pendingCode && !pendingData)return;
-    if(document.hidden){ safeReload(); return; }   // backgrounded → reload silently (invisible; saves first). Applies code OR data.
+    if(document.hidden){
+      if(pendingCode){ safeReload(); return; }   // a NEW DEPLOY needs the new JS/HTML → reload the backgrounded tab (rare)
+      // DATA only (Ben): do NOT reload even while backgrounded. n8n refreshes the source data constantly, so a silent
+      // reload every time you tab away was resetting the buy plan (scroll/state) on return — it read as "constantly
+      // refreshing on idle". Instead just drop the cached section data so the NEXT render/navigation shows fresh
+      // numbers; no reload. (Visible tabs already never reload — see below.)
+      try{ if(window.__hzBustSupplyCache)window.__hzBustSupplyCache(); }catch(e){}
+      try{ if(typeof BUY_FC_STALE!=='undefined')BUY_FC_STALE=true; }catch(e){}
+      pendingData=false; return;
+    }
     /* Visible tab: NEVER force a reload — not code, not data, not even while idle (Ben: idle auto-refresh is
        disruptive — you lose scroll/position mid-task). A newer deploy is applied at the NEXT navigation
        (hashchange, below) or once the tab is backgrounded; DATA likewise. No banner, no surprise reload. — Ben */ }
