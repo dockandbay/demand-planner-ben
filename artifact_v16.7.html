@@ -11,7 +11,7 @@ body{font-family:var(--font,system-ui,-apple-system,sans-serif);font-size:12px;c
 .wrap{padding:8px 10px}
 .pill{padding:3px 8px;font-size:10px;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:4px;white-space:nowrap;line-height:1.4}
 .pill:hover{background:var(--hover);color:var(--ink-soft)}
-.pill.active{background:var(--ink);color:#fff;border-color:var(--ink)}
+.pill.active{background:var(--nav);color:#fff;border-color:var(--ink)}
 .pill.priority.active{background:var(--blue);border-color:var(--blue);color:#fff}
 .pill.priority{font-weight:600}
 /* ── phone (≤640px): render at device width, stop whole-page side-scroll, let nav wrap ── */
@@ -157,7 +157,7 @@ body{font-family:var(--font,system-ui,-apple-system,sans-serif);font-size:12px;c
 .exec-tw thead th.grp-th{background:var(--band);border-bottom:2px solid #b0b0ae;text-align:center;font-size:10.5px;color:var(--ink)}
 .exec-tw thead th.year-26{background:#dde6f5}
 .exec-tw thead th.year-27{background:#e6dbf3;border-left:3px solid var(--violet)}
-.exec-tw thead th.yr-total-th{background:var(--ink);color:#fff;border-left:2px solid var(--muted);min-width:84px}
+.exec-tw thead th.yr-total-th{background:var(--nav);color:#fff;border-left:2px solid var(--muted);min-width:84px}
 .exec-tw thead th.yr-26-total{background:var(--blue)}
 .exec-tw thead th.yr-27-total{background:var(--violet)}
 .exec-tw thead th.lbl-col{position:sticky;left:0;z-index:5;background:var(--band);text-align:left;min-width:130px}
@@ -182,9 +182,9 @@ body{font-family:var(--font,system-ui,-apple-system,sans-serif);font-size:12px;c
 .exec-tw tbody td.yr-total .exec-units{color:#fff}
 .exec-tw tbody td.yr-total .exec-rev{color:var(--blue-soft)}
 .exec-tw tbody td.yr-27-total .exec-rev{color:#e9d5ff}
-.exec-tw tbody tr.total-row td{background:var(--ink) !important;color:#fff;font-weight:700;border-top:2px solid var(--muted)}
-.exec-tw tbody tr.total-row td.lbl-col{background:var(--ink) !important;color:#fff;cursor:default}
-.exec-tw tbody tr.total-row td.lbl-col:hover{background:var(--ink) !important}
+.exec-tw tbody tr.total-row td{background:var(--nav) !important;color:#fff;font-weight:700;border-top:2px solid var(--muted)}
+.exec-tw tbody tr.total-row td.lbl-col{background:var(--nav) !important;color:#fff;cursor:default}
+.exec-tw tbody tr.total-row td.lbl-col:hover{background:var(--nav) !important}
 .exec-tw tbody tr.total-row td.yr-26-total{background:var(--blue) !important}
 .exec-tw tbody tr.total-row td.yr-27-total{background:var(--violet) !important}
 .exec-tw tbody tr.total-row .exec-units{color:#fff}
@@ -344,7 +344,7 @@ td.has-rail{position:relative}
 .cell-rail .cf-r{color:var(--neg);cursor:pointer}
 .cell-rail .cf-pp{color:var(--pos);font-size:7.5px;letter-spacing:-.5px;cursor:help}
 #fc-note-pop{position:absolute;z-index:100050;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 30px rgba(15,23,42,.18);padding:10px 12px;width:300px;font-size:12px;color:var(--nav);text-align:left}
-#fc-note-tip{position:fixed;z-index:100060;max-width:300px;background:var(--ink);color:#fff;font-size:11px;line-height:1.5;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none;display:none;text-align:left}
+#fc-note-tip{position:fixed;z-index:100060;max-width:300px;background:var(--nav);color:#fff;font-size:11px;line-height:1.5;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none;display:none;text-align:left}
 td.stk{position:sticky;left:0;z-index:6;background:var(--card);text-align:left;width:160px;min-width:160px;max-width:160px}
 td.stk2{position:sticky;left:160px;z-index:6;background:var(--card);text-align:right;width:96px;min-width:96px;max-width:96px;border-right:2px solid #b0b0ae}
 .nm{padding:3px 4px 3px 14px;display:flex;align-items:flex-start;gap:3px;white-space:normal;font-size:11px}
@@ -441,7 +441,7 @@ td.sku-fc.fc-nostock .sku-fc-v{color:var(--neg)}
 .sku-loading{padding:20px;text-align:center;color:var(--faint);font-size:12px}
 .anomaly-dot{display:inline-block;width:4px;height:4px;border-radius:50%;margin-right:2px;vertical-align:middle}
 .anom-wrap{display:inline-block;width:100%}
-#anom-tooltip{display:none;position:fixed;width:190px;background:var(--ink);color:var(--hover);font-size:10px;border-radius:5px;padding:7px 9px;z-index:9999;line-height:1.6;white-space:normal;box-shadow:0 3px 12px rgba(0,0,0,.5);pointer-events:none}
+#anom-tooltip{display:none;position:fixed;width:190px;background:var(--nav);color:var(--hover);font-size:10px;border-radius:5px;padding:7px 9px;z-index:9999;line-height:1.6;white-space:normal;box-shadow:0 3px 12px rgba(0,0,0,.5);pointer-events:none}
 #anom-tooltip::after{content:'';position:absolute;top:100%;left:50%;transform:translateX(-50%);border:5px solid transparent;border-top-color:var(--ink)}
 .anom-lbl{color:var(--faint);font-size:9px}
 .anom-val{color:#fff;font-weight:600}
@@ -496,7 +496,7 @@ tr.cat-tot td.totu.yH1,tr.cat-tot td.totu.yH2{background:var(--band)}
 tr.cat-tot td.totr.y26{background:var(--band)}
 tr.cat-tot td.totr.y27{background:var(--band)}
 tr.cat-tot td.totr.y28{background:var(--band)}
-tr.grand-tot td{background:var(--ink) !important;color:#fff !important;font-weight:700;font-size:11px}
+tr.grand-tot td{background:var(--nav) !important;color:#fff !important;font-weight:700;font-size:11px}
 tr.grand-tot td.totu.y26{background:var(--blue);color:#fff;border-left:2px solid #60a5fa}
 tr.grand-tot td.totu.y27{background:var(--violet);color:#fff;border-left:2px solid #a78bfa}
 tr.grand-tot td.totu.y28{background:#0f766e;color:#fff;border-left:2px solid #5eead4}
@@ -505,14 +505,14 @@ tr.grand-tot td.totu.yH2{background:#57534e;color:#fff;border-left:2px solid #a8
 tr.grand-tot td.totr.y26{background:#065f46;color:#fff}
 tr.grand-tot td.totr.y27{background:#4c1d95;color:#fff}
 tr.grand-tot td.totr.y28{background:#134e4a;color:#fff}
-tr.grand-tot td.stk{background:var(--ink);color:#fff}
+tr.grand-tot td.stk{background:var(--nav);color:#fff}
 
 /* ===== BUY PLAN CSS (scoped under #buy-wrap, re-ported from working artifact v6.0-p5) ===== */
 #buy-wrap .wrap{padding:8px 10px}
 #buy-wrap .pill{padding:3px 8px;font-size:10px;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:4px;white-space:nowrap;line-height:1.6}
 #tip .pill,#stp .pill,#csp .pill,#bup .pill{padding:3px 6px;font-size:9px}
 #buy-wrap .pill:hover{background:var(--hover);color:var(--ink-soft)}
-#buy-wrap .pill.active{background:var(--ink);color:#fff;border-color:var(--ink)}
+#buy-wrap .pill.active{background:var(--nav);color:#fff;border-color:var(--ink)}
 #buy-wrap .cpill{font-size:9px !important;padding:2px 6px !important;line-height:1.5}
 #buy-wrap .pill-lbl{font-size:11px;color:var(--faint);white-space:nowrap;width:82px;flex-shrink:0}
 /* SKU table */
@@ -579,7 +579,7 @@ tr.grand-tot td.stk{background:var(--ink);color:#fff}
 #buy-wrap .tp.on{background:var(--blue);color:#fff;border-color:var(--blue)}
 #buy-wrap .mts{display:flex;gap:3px;margin-bottom:8px}
 #buy-wrap .mt{font-size:11px;padding:3px 12px;cursor:pointer;border:1px solid var(--line);border-radius:4px;background:var(--card);color:var(--muted)}
-#buy-wrap .mt.active{background:var(--ink);color:#fff;border-color:var(--ink)}
+#buy-wrap .mt.active{background:var(--nav);color:#fff;border-color:var(--ink)}
 #buy-wrap .mt:hover:not(.active){background:var(--hover)}
 /* Stock cards */
 #buy-wrap .scs{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px}
@@ -679,9 +679,9 @@ tr.grand-tot td.stk{background:var(--ink);color:#fff}
 #buy-wrap .tip-wrap{position:relative;display:inline-block;width:100%;cursor:default}
 #buy-wrap .tip-wrap.inb-tip{cursor:pointer}
 #buy-wrap .tip-wrap.inb-tip > span{border-bottom:1px dotted currentColor}
-#buy-wrap .tip-wrap .tip-box{display:none;position:absolute;bottom:calc(100% + 4px);left:50%;transform:translateX(-50%);background:var(--ink);color:#f0f0f0;font-size:10px;padding:5px 8px;border-radius:4px;white-space:normal;max-width:320px;width:max-content;word-break:break-word;z-index:999;pointer-events:none;line-height:1.6;text-align:left;box-shadow:0 2px 8px rgba(0,0,0,.25)}
+#buy-wrap .tip-wrap .tip-box{display:none;position:absolute;bottom:calc(100% + 4px);left:50%;transform:translateX(-50%);background:var(--nav);color:#f0f0f0;font-size:10px;padding:5px 8px;border-radius:4px;white-space:normal;max-width:320px;width:max-content;word-break:break-word;z-index:999;pointer-events:none;line-height:1.6;text-align:left;box-shadow:0 2px 8px rgba(0,0,0,.25)}
 #buy-wrap .tip-wrap:hover .tip-box{display:block}
-#buy-wrap .tip-wrap.pinned .tip-box{display:block;background:var(--ink);border:1px solid var(--blue);pointer-events:auto}
+#buy-wrap .tip-wrap.pinned .tip-box{display:block;background:var(--nav);border:1px solid var(--blue);pointer-events:auto}
 #buy-wrap .status-bar{font-size:11px;color:var(--faint)}
 /* ===== END BUY PLAN CSS ===== */
 .subtot-row td.smoothable{cursor:pointer}
@@ -959,7 +959,7 @@ tr.grand-tot td.stk{background:var(--ink);color:#fff}
       <button onclick="closeFcLogic()" style="margin-left:auto;border:none;background:var(--line2);border-radius:6px;width:26px;height:26px;cursor:pointer;font-size:18px;line-height:1">&times;</button>
     </div>
     <div style="color:var(--muted);margin-bottom:10px">Every SKU × market × channel × month cell is either a real actual or a calculated forecast. The demand plan and the buy plan use the <b>same</b> forecast, so they always agree.</div>
-    <div style="margin:0 0 12px"><a href="#/config/contribmodel" onclick="try{closeFcLogic()}catch(e){}" style="display:inline-block;font-size:12px;font-weight:600;color:var(--violet);background:var(--violet-bg);border:1px solid #ddd6fe;border-radius:6px;padding:6px 11px;text-decoration:none">&#9635; Edit the Contribution model &mdash; CONFIG &#9656; Demand &#9656;</a></div>
+    <div style="margin:0 0 12px"><a href="#/demand/config/contribmodel" onclick="try{closeFcLogic()}catch(e){}" style="display:inline-block;font-size:12px;font-weight:600;color:var(--violet);background:var(--violet-bg);border:1px solid #ddd6fe;border-radius:6px;padding:6px 11px;text-decoration:none">&#9635; Edit the Contribution model &mdash; CONFIG &#9656; Demand &#9656;</a></div>
     <div style="display:flex;flex-direction:column;gap:13px">
       <div>
         <div style="font-weight:700;color:var(--ink)">1 &middot; Actuals vs forecast</div>
@@ -10459,7 +10459,7 @@ function renderSummaryView(body){
         var rws=[]; for(var r=1;r<lines.length;r++){ var cells=_parseCsvLine(lines[r]); var lbl=(cells[0]||'').trim(); var sub=(lbl==='(market total)'||lbl==='')?'':lbl;
           for(var i=1;i<cells.length;i++){ var m=hmap[i-1]; if(!m)continue; var raw=String(cells[i]||'').replace(/[^0-9.\-]/g,''); rws.push({country:co,channel:ch,fy:m.fy,subcategory:sub,level:m.level,idx:m.idx,growth_pct:raw}); } }
         if(msgEl){ msgEl.style.color='#64748b'; msgEl.textContent='Saving '+rws.length+' cells…'; }
-        fetch('/api/demand-revenue-targets/periods/bulk',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({rows:rws})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); if(msgEl){msgEl.style.color='#166534';msgEl.textContent='Imported '+(j.saved||0)+' targets.';} SUMM_TGT_KEY=''; renderSummaryView(body); }).catch(function(er){ if(msgEl){msgEl.style.color='#dc2626';msgEl.textContent='Import failed: '+(er.message||er);} }); }
+        fetch('/api/demand-revenue-targets/periods/bulk',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({rows:rws})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); if(msgEl){msgEl.style.color='#166534';msgEl.textContent='Imported '+(j.saved||0)+' targets.';} SUMM_TGT_KEY=''; TREC_KEY=''; renderSummaryView(body); }).catch(function(er){ if(msgEl){msgEl.style.color='#dc2626';msgEl.textContent='Import failed: '+(er.message||er);} }); }
       if(tools)tools.innerHTML=''
         +'<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 8px"><button id="tgt-dl" style="border:1px solid var(--line);background:var(--hover);color:var(--ink-soft);border-radius:6px;padding:4px 11px;font-size:11px;cursor:pointer;font-weight:700;font-family:inherit">⬇ Download template (all subcategories)</button><button id="tgt-imp" style="border:1px solid var(--line);background:var(--hover);color:var(--ink-soft);border-radius:6px;padding:4px 11px;font-size:11px;cursor:pointer;font-weight:700;font-family:inherit">⬆ Import targets</button><span id="tgt-msg" style="font-size:11px;color:var(--faint)"></span></div>'
         +'<div id="tgt-imp-box" style="display:none;margin:0 0 8px"><textarea id="tgt-imp-text" placeholder="Paste the filled template CSV here (same Month/Quarter/Half level you downloaded)…" style="width:100%;max-width:820px;height:90px;font-size:11px;font-family:ui-monospace,Menlo,monospace;border:1px solid var(--line);border-radius:6px;padding:6px;box-sizing:border-box"></textarea><div style="margin-top:4px"><button id="tgt-imp-save" style="border:1px solid var(--violet);background:var(--violet);color:#fff;border-radius:6px;padding:4px 12px;font-size:11px;cursor:pointer;font-weight:700;font-family:inherit">Save imported targets</button></div></div>'
@@ -10504,6 +10504,7 @@ function renderSummaryView(body){
             .then(function(r){return r.json();}).then(function(){ var k=tgKey(+inp.dataset.fy,sub,inp.dataset.lvl,+inp.dataset.idx);
               if(p.gbp!=null){ SUMM_TGT_GBP[k]=p.gbp; if(_unitG!=null)SUMM_TGT[k]=_unitG; else if(lyv>0)SUMM_TGT[k]=Math.round((p.gbp/lyv-1)*1000)/10; else delete SUMM_TGT[k]; }
               else { delete SUMM_TGT_GBP[k]; if(p.pct!=null)SUMM_TGT[k]=p.pct; else delete SUMM_TGT[k]; }
+              TREC_KEY='';   // v27.589: a saved target invalidates the Target-recommendations cache so recs recompute against it immediately (was stale until a full reload)
               // Capture where the user CURRENTLY is BEFORE the redraw — the async save may resolve after they've
               // tabbed to another target cell. Restore focus there (preserving in-progress text + caret); never yank
               // the cursor back to the just-edited cell. If focus has left the grid entirely, leave it alone.
@@ -10535,7 +10536,7 @@ function renderSummaryView(body){
           +(gp!=null?'<tr><td style="'+LT+'">Growth</td><td style="'+VT+';color:'+(gp>=0?'#86efac':'#fca5a5')+'">'+(gp>=0?'+':'')+gp+'%</td></tr>':'')+'</table>'
           +'<div style="color:var(--faint);margin-top:4px;font-size:9px;text-align:left">last-year actuals → target</div>'; }
       var _tgtHideT=null, _tgtShowT=null;
-      function _tgtTipShow(el){ var t=document.getElementById('tgt-hov-tip'); if(!t){ t=document.createElement('div'); t.id='tgt-hov-tip'; t.style.cssText='position:fixed;z-index:100070;max-width:320px;background:var(--ink);color:#fff;padding:8px 11px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);text-align:left;user-select:text'; document.body.appendChild(t);
+      function _tgtTipShow(el){ var t=document.getElementById('tgt-hov-tip'); if(!t){ t=document.createElement('div'); t.id='tgt-hov-tip'; t.style.cssText='position:fixed;z-index:100070;max-width:320px;background:var(--nav);color:#fff;padding:8px 11px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);text-align:left;user-select:text'; document.body.appendChild(t);
           t.addEventListener('mouseenter',function(){ if(_tgtHideT){clearTimeout(_tgtHideT);_tgtHideT=null;} }); t.addEventListener('mouseleave',_tgtTipHide); }
         if(_tgtHideT){clearTimeout(_tgtHideT);_tgtHideT=null;}
         try{ t.innerHTML=_tgtHovHtml(el); }catch(e){ return; } t.style.display='block';

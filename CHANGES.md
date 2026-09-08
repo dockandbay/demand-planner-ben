@@ -1,3 +1,11 @@
+## v27.590 Dark mode: selected pills & dark surfaces use --nav, not --ink (Ben)
+- Selected/active pills (Buy, Supply, Scenario), the chosen-filter dropdown (`.sel-on`), `.save-btn.dark`, tooltips, grand-total rows, `.planbtn` and exec year-total headers all used `background:var(--ink)` — the **text** token (dark in light, but **light in dark**) — so in dark they turned light with white text (invisible). Remapped every `--ink`/`--ink-soft` background → `--nav`/`--nav-2` (dark in both themes). Active pills keep their `--ink` border, which renders as a **light highlighted outline in dark** — the "dark button + highlighted outline" you asked for. Light theme unchanged (`--nav` ≈ `--ink`).
+
+## v27.589 Queue quick-wins: contribution link · target-recs cache · plan sticky borders (Ben)
+- **Contribution-model link** on the ▣ Forecast-logic panel now points to `#/demand/config/contribmodel` (was the stale `#/config/contribmodel`).
+- **Target recommendations refresh on save** ("lanyards" cache bug): saving a target (per-cell POST `/periods` or bulk import) now invalidates the recs cache (`TREC_KEY`) so `computeTargetRecs` recomputes against it immediately — previously it stayed stale until a full reload.
+- **DEMAND plan sticky borders:** sticky column edges (SKU `.stk`, Stock `.stk2`) + sticky header rows (FY grouping + month/year) now use the standard grey **1pt** border (`--line`); the SKU column was a lighter `--line2`.
+
 ## v27.588 New-set forecast: sets% is a share of EXPLODED units, not boxes (Ben)
 - Brand-new set SKUs (SS27, no history) were over-forecast ~7–8× (every SS27 set >100/mo vs a ~24/mo historical typical). Cause: `buildSkuShares` computed the sets%-reservation `(setsPct/(1−setsPct))×mastersBase` — already in **exploded** units — but assigned it as a **box** quantity, which the plan/buy then re-exploded ×BOM (a double-count). Now divided by the set's BOM size, so after re-explosion the new-set pool lands at **setsPct% of the sub-category's exploded total** (e.g. 45% maxes at 45%). Masters conserve the sub-category total.
 - Forecast/buy-affecting (sets explode into components) — verify with a buy-plan before/after. Client-side (`artifact_v16.7.html`).

@@ -474,7 +474,7 @@ body .pv-btn.ghost{color:var(--nav-dim);border-color:rgba(255,255,255,.18)} body
 #app tr.grand-tot td.fctd.hz-fc,#app tr.grand-tot td.fctd.hz-cur,#app tr.grand-tot td.totu,#app tr.grand-tot td.ptot-h,#app tr.grand-tot td.ptot-q{background:#16213a!important;border-left-color:#2a3550!important}
 #app tr.grand-tot .fcrev,#app tr.grand-tot .fcly{color:var(--nav-dim)}
 /* 6 · sub-category name cell */
-#app td.stk{box-shadow:1px 0 0 var(--line2)} #app td.stk2{border-right:1px solid var(--line)}
+#app td.stk{box-shadow:1px 0 0 var(--line)} #app td.stk2{border-right:1px solid var(--line)}
 #app td.stk .hz-subname{font-size:12.5px;font-weight:700;color:var(--ink)}
 #app .sku-toggle{font-size:10px;padding:0 5px;border:1px solid var(--line);border-radius:5px;background:var(--card);color:var(--muted);cursor:pointer;line-height:1.6;font-family:inherit}
 #app .sku-toggle:hover{border-color:var(--faint);color:var(--ink)}
@@ -765,3 +765,7 @@ body header.pv-top .pv-lang button:hover{color:#fff}
 /* ═══ v27.567: DEMAND plan — both header rows (column titles + period/month row) on a very light grey instead of white (Ben) ═══ */
 #app #main-hdr th,#app #main-hdr tr.sub th,#app #main-hdr th.stk,#app #main-hdr th.stk2,#app #main-hdr tr.sub th.stk,#app #main-hdr tr.sub th.stk2{background:var(--hdr-tint)!important}
 #app #main-hdr th.hz-cur-hdr{background:var(--hdr-cur)!important}
+/* v27.589 (Ben): demand-plan sticky COLUMN edges (SKU=.stk, Stock=.stk2) + sticky HEADER rows (FY grouping + month/year) = standard grey, 1pt */
+#app #main-hdr th.stk,#app #tw thead th.stk{box-shadow:1px 0 0 var(--line)}
+#app #main-hdr th.stk2,#app #tw thead th.stk2{border-right:1px solid var(--line)}
+#app #main-hdr th{border-bottom:1px solid var(--line)!important}
