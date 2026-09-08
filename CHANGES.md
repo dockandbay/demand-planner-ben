@@ -1,3 +1,9 @@
+## v27.612 Create POs: Save Project — frozen numbers, click-to-apply moves, auto-save (Ben)
+- Opening a saved project now shows the **numbers as saved** — unedited cells no longer jump to the moved live recommendation. The project stores a **frozen rec baseline** (set once, preserved on auto-save).
+- Each cell whose **live recommendation has moved** since save shows a small amber **"↻ now N"** under it — **click to apply** the new number (tooltip: now N, was M when saved).
+- **Auto-save**: once a project is open, any change to a number, tick, supplier, tier top-up or China qty auto-saves it (debounced, delegated so it survives redraws; shows "Auto-saved ✓ HH:MM").
+- **Leave guard**: closing with an unsaved build (no project open) prompts to save first; an open project is already auto-saved, so no prompt.
+
 ## v27.611 Demand Metrics: historical point-in-time (As-of date) (Ben)
 - REPORTS ▸ Performance ▸ Demand Metrics — the four stock metrics (In Stock, Slow moving, Inventory cover, Stockout risk) now take an **"As of" date**. Stock is sourced from the **nearest inventory_snapshots on or before that date** (fortnightly series); the header shows "◷ stock as of DD-MMM-YY" (the resolved snapshot) or "no snapshot on/before that date". Blank = live, with a ✕ live reset.
 - Server: kpiOnhand(asof) helper (live v_product_inventory, or the nearest snapshot); threaded through kpiBase/_kpiBaseCompute and all 4 KPI endpoints, which now return the resolved asof. Historical requests bypass the KPI cache.
