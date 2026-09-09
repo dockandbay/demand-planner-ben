@@ -1,3 +1,11 @@
+## v27.641 HORIZON version badge — consistent across the whole site (Ben)
+- The version badge was **dark orange on DEMAND** but **light orange on SUPPLY, flashing dark→light on load**. Cause: two competing `.ver` rules — inject.html (golden `--prod`) vs hz-theme.css (light `--amber-bg`), the latter higher-specificity so it won *after* load (a colour + size flash).
+- **Fix — full sweep, everything now = golden `--prod` bg + `--nav` dark text, 2px 8px / 10px:**
+  - hz-theme.css:109 & :150 (SUPPLY / SCENARIO / PRODUCT / CONFIG) `--amber-bg`/`--amber` → `--prod`/`--nav` (removes the flash — now agrees with inject.html:152).
+  - artifact:12275 / 13177 / 14705 (BUY&MOVE / other views / REPORTS) badge text `--ink` → `--nav` — in **dark mode** `--ink` was near-white (white text on the gold badge) while DEMAND/SUPPLY were dark; now all dark.
+  - `.hz-verspin` loading overlay `rgba(251,191,36,.96)` → `--prod`, so no colour shift while loading.
+- Already-consistent (unchanged): DEMAND `#ver` inline, mobile `#hz-ver`, inject.html:152 — all `--prod`. Verified 0 `--ink` badges remain; 0 JS errors on load.
+
 ## v27.640 DEMAND Summary/targets: category grouping + richer edit cells (Ben)
 - **Summary (read) tab** now groups sub-categories by their category grouping (Priority → Beach → Bags → Home → Other), with group-header rows — matching the **Edit targets** tab and the DEMAND plan's category picker (was flat-alphabetical). Category totals (if ticked) nest inside each group.
 - **Edit targets** grid: each period × sub-cat cell now shows context under the input — an **LY** line (last-year units + revenue) and an **FC** line (current forecast units + revenue, with forecast-vs-LY %), above the existing **TGT** line (target £/units/%). Values honour the selected currency; money shown compact (£12.3k). Read-only display; no change to stored targets or the buy.

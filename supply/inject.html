@@ -153,7 +153,7 @@
 /* Global "loading" spinner — a subtle overlay ON the version badge (desktop .ver / #ver, mobile #hz-ver), driven by
    in-flight fetch activity. One consistent indicator instead of per-container "Loading…" rows that flash on swap. */
 #hz-ver,#ver{position:relative}
-.hz-verspin{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:4px;border-radius:6px;background:rgba(251,191,36,.96);z-index:6;pointer-events:none;font-size:8.5px;font-weight:800;color:var(--nav);letter-spacing:.02em;overflow:hidden}
+.hz-verspin{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;gap:4px;border-radius:6px;background:var(--prod);z-index:6;pointer-events:none;font-size:8.5px;font-weight:800;color:var(--nav);letter-spacing:.02em;overflow:hidden}   /* v27.641: match the --prod badge exactly (was #fbbf24) so there is no colour shift while loading */
 .hz-verspin::before{content:'';width:9px;height:9px;border:2px solid rgba(15,23,42,.3);border-top-color:var(--nav);border-radius:50%;animation:hzspin .7s linear infinite;flex:0 0 auto}
 @keyframes hzspin{to{transform:rotate(360deg)}}
 /* PRODUCT ▸ DASHBOARD: matrix table on desktop, card layout on mobile (toggled at 640px). */

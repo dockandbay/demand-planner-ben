@@ -106,7 +106,7 @@ html body{font-family:var(--font);background:var(--bg);color:var(--ink);-webkit-
 #app #product-root #product-subnav .stab.active{color:var(--ink);box-shadow:inset 0 -2.5px 0 var(--nav);font-weight:700}
 :is(#app,#pv-wrap) #supply-root .ex-badge,:is(#app,#pv-wrap) #supply-root .rtab-count{background:var(--neg);color:#fff;font-size:10px;font-weight:800;line-height:1.4;height:auto;min-width:0;padding:1px 7px;border-radius:999px;vertical-align:baseline;margin-left:6px}
 /* version badge (amber pill, right of the L2 row) */
-:is(#app,#pv-wrap) #supply-root .ver,#app #scenario-root .ver,#app #product-root .ver{margin-left:auto;background:var(--amber-bg);color:var(--amber);border-radius:var(--r-sm);padding:5px 12px;font-size:11px;font-weight:800;letter-spacing:.05em;line-height:1.2}
+:is(#app,#pv-wrap) #supply-root .ver,#app #scenario-root .ver,#app #product-root .ver{margin-left:auto;background:var(--prod);color:var(--nav);border-radius:6px;padding:2px 8px;font-size:10px;font-weight:800;letter-spacing:.02em;line-height:1.2;position:relative;flex:0 0 auto}   /* v27.641: unified HORIZON version badge = golden --prod (matches DEMAND #ver + mobile #hz-ver + inject.html); was --amber-bg which caused the dark→light flash on load */
 /* Level-3 tabs (PO sub-sections etc.): blue underline, bolder */
 :is(#app,#pv-wrap) #supply-root .rtab,#app #product-root .rtab,#app .d3tab{font-weight:700;font-size:10px;letter-spacing:.05em;color:var(--faint);border-bottom-color:transparent;box-shadow:none}
 :is(#app,#pv-wrap) #supply-root .rtab:hover,#app #product-root .rtab:hover,#app .d3tab:hover{color:var(--blue)}
@@ -147,7 +147,7 @@ body header.pv-top{background:var(--nav)}
 :is(#app,#pv-wrap) #supply-root #config-subs .rtab{padding:13px 13px 11px;font-size:12px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);border-bottom-color:transparent;box-shadow:none}
 :is(#app,#pv-wrap) #supply-root #config-subs .rtab:hover{color:var(--ink)}
 :is(#app,#pv-wrap) #supply-root #config-subs .rtab.active{color:var(--ink);box-shadow:inset 0 -2.5px 0 var(--nav);border-bottom-color:transparent}
-:is(#app,#pv-wrap) #supply-root #config-subs .ver{margin-left:auto;background:var(--amber-bg);color:var(--amber);border-radius:var(--r-sm);padding:5px 12px;font-size:11px;font-weight:800;letter-spacing:.05em;line-height:1.2}
+:is(#app,#pv-wrap) #supply-root #config-subs .ver{margin-left:auto;background:var(--prod);color:var(--nav);border-radius:6px;padding:2px 8px;font-size:10px;font-weight:800;letter-spacing:.02em;line-height:1.2;position:relative;flex:0 0 auto}   /* v27.641: unified golden --prod badge (see above) */
 
 /* ═══ U2 primitives, slice 1 (v27.475): pills, buttons, inputs, badges to the design ═══════════════════════════ */
 /* Pills / segmented filters: 8px radius, navy when active (design). Density kept one step below the design (11px) so the
