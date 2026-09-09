@@ -53,7 +53,7 @@
   --blue-wash:#0f1b30; --fy27:#13233f; --fy28:#1c1836; --band:#16202f;
 }
 
-html body{font-family:var(--font);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}
+html body{margin:0;font-family:var(--font);background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased}   /* v27.652: kill the default 8px body margin — it showed as a white line above the dark HORIZON bar (Diviyaj) */
 @keyframes fadeUp{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}   /* P2 (Diviyaj): card entrance for Demand Actions + DTC mismatch */
 
 /* ── App shell: 52px navy header (was a grey rounded bar) ─────────────────────────────────────────────── */

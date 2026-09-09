@@ -1,3 +1,6 @@
+## v27.652 Remove white line above the HORIZON bar (Diviyaj note)
+- The dark HORIZON top bar had a thin white strip above it. Cause: `body` had no margin reset, so the browser's default 8px body margin showed above `#app` — the `#view-tabs-row{margin:-8px…}` bleed only cancels the `.wrap` padding, not the body margin. Fix: `margin:0` on `body` (hz-theme.css `html body` — loaded in production — and the artifact's own `body` as a fallback). The bar now sits flush at the top (and full-bleed to the sides). Desktop + mobile verified; 0 JS errors.
+
 ## v27.651 Mobile Phase 4: DEMAND Summary as KPI cards on phone (Ben)
 - On phones the **read Summary tab** now renders as a stacked list of **per-sub-category KPI cards** (grouped Priority → Beach → Bags → Home → Other, like the table) instead of the wide 60-column table. Each card shows, for the **current FY**: **Units** last-year → forecast with growth %, and **Revenue** last-year → forecast with growth %.
 - Read-only, phone-gated (`max-width:640px`). Desktop keeps the full table; the Edit-targets and range views are unchanged everywhere. In `renderSummaryView` (a view renderer, not in the buy path) → no buy impact.
