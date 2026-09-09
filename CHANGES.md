@@ -1,3 +1,8 @@
+## v27.646 Mobile: actually un-stick the plan stock column on phone (Ben)
+- v27.644 only un-stuck the class-based `.stk2` header/rows, but the **SKU-row and subtotal stock cells set `position:sticky;left:208px` inline** (no `.stk2` class), so they stayed pinned. Now the phone rule also targets those inline cells.
+- Key gotcha: browsers serialize inline `left:208px` → **`left: 208px` (with a space)**, so an attribute match on `left:208px` returns false; the rule matches both serialisations. Verified in jsdom: `[style*="left: 208px"]` matches, `[style*="left:208px"]` does not.
+- Phone-gated; desktop keeps both columns sticky. 0 JS errors.
+
 ## v27.645 Mobile Phase 2: compact the DEMAND filter panel on phone (Ben)
 - On phones the DEMAND filter panel is tighter: the SKU search drops to its **own full-width line** (was a fixed 210px box mid-row), the Active/18m/All pills get **bigger tap targets**, and row gaps are reduced — so the panel isn't a full screen when opened. Phone-gated CSS; desktop unchanged.
 - Note: Actions is already card-based (v27.617) and Exceptions is a grouped tree-table (kept as a sideways-scroll grid on phone rather than force-carded), so the "cards" half of Phase 2 is a no-op / deferred.
