@@ -467,6 +467,13 @@
 #supply-root .rtab{background:transparent;border:none;padding:6px 14px;font-size:12px;font-weight:500;cursor:pointer;color:#7c93b8;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit}
 #supply-root .rtab:hover{color:#2563eb}
 #supply-root .rtab.active{color:#2563eb;border-bottom-color:#3b82f6;font-weight:600}
+/* v27.638 — L2 tab bar (Purchase Orders / Shipment Plan / Deposits / …): a full-width light-grey band under the black
+   L1 brand bar. Active/hover are neutral dark (slate) — light blue stays reserved for the L3 sub-tabs (PO detail,
+   product detail). Full-bleed to the #pv-wrap padding edge (−16px). */
+#supply-root #pp-tabs{display:flex;flex-wrap:wrap;align-items:center;gap:2px;background:#f6f8fa;border-bottom:1px solid #e5e7eb;margin:0 -16px 12px;padding:2px 16px 0}
+#supply-root #pp-tabs .rtab{color:#475569;font-weight:600;font-size:12px;border-bottom:2px solid transparent}
+#supply-root #pp-tabs .rtab:hover{color:#0f172a}
+#supply-root #pp-tabs .rtab.active{color:#0f172a;border-bottom-color:#0f172a;font-weight:700}
 #supply-root #op-status,#supply-root #op-country{display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center}
 #supply-root .flt{border:1px solid #d0d0d0;border-radius:4px;padding:4px 9px;font-size:11px;font-family:inherit;width:230px}
 #supply-root .save-btn{font-size:11px;padding:4px 12px;cursor:pointer;border:1px solid #ccc;border-radius:4px;background:#fff;font-weight:600;font-family:inherit}
@@ -630,7 +637,7 @@
    stay reachable instead of wrapping/overlapping. */
 @media (max-width:640px){
   #supply-root .bar{flex-wrap:wrap}
-  #supply-root #pp-tabs{display:flex!important;flex:1 1 100%;width:100%;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 0 8px;border-bottom:1px solid #e5e7eb}
+  #supply-root #pp-tabs{display:flex!important;flex:1 1 100%;width:100%;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -16px 8px;padding:2px 16px 0;background:#f6f8fa;border-bottom:1px solid #e5e7eb}
   #supply-root #pp-tabs::-webkit-scrollbar{height:0}
   #supply-root #pp-tabs .rtab{flex:0 0 auto;padding:9px 13px;font-size:13px;white-space:nowrap;border-bottom-width:3px}
   /* compact MANAGE → "M", but keep the first column wide enough to show the action-count badge */

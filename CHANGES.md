@@ -1,3 +1,8 @@
+## v27.638 Supplier portal: L2 tab bar as a full-width light-grey band (Ben)
+- The level-2 tabs (Purchase Orders / Shipment Plan / Deposits / Payments / Productions / Sample shipments / Quality Control / Product / Specifications) now sit on a **full-width light-grey band** (`#f6f8fa`, full-bleed to the `#pv-wrap` edge), directly under the black L1 brand bar — a clear 3-level hierarchy.
+- Active/hover on L2 are now **neutral dark (slate)**, not blue. Light blue stays **reserved for the L3 sub-tabs** (PO detail, product detail), per Ben.
+- portal-view.js `STYLE`: added a desktop `#supply-root #pp-tabs` band rule + `.rtab` colour overrides; updated the mobile rule to the same band + full-bleed. CSS-only, no buy/data impact.
+
 ## v27.637 Set-aware smoothing — two-totals fix (Ben)
 - **The bug:** smoothing a set sub-category (e.g. MIXNMATCH) inflated its forecast (50 → 72). A set SKU's row is a BOX that explodes to box×setSize garments, but the sub-cat CELL is shown in EXPLODED units. The old water-fill forced `Σbox == raw forecast`, so the exploded row-sum came out at `raw × setSize` — over the cell.
 - **The fix:** `computeSmoothAlloc` now runs its water-fill in EXPLODED space for any sub-cat containing sets (cur/cap/floor × setSize; target = the exploded cell `expFc().E`), then converts allocations back to whole boxes with a largest-remainder pass that **never overshoots** the cell (so component demand is never inflated). Result: exploded row-sum == the cell (MIXNMATCH 100 → 100; verified with mixed 2/3/4-SET sizes, 34 boxes = exactly 100 exploded).
