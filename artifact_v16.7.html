@@ -265,8 +265,8 @@ body{font-family:var(--font,system-ui,-apple-system,sans-serif);font-size:12px;c
 table{border-collapse:collapse;font-size:11px;table-layout:fixed}
 thead th{position:sticky;top:0;z-index:20;background:var(--band);padding:3px 4px;font-weight:500;font-size:10px;color:var(--muted);border-bottom:1px solid var(--line);white-space:nowrap;overflow:hidden;text-align:right;vertical-align:bottom}   /* v27.601 sticky header underline = standard grey 1pt (was 2px #d5d5d5); tokenised for dark mode */
 thead th.lft{text-align:left}
-thead th.stk{position:sticky;left:0;z-index:21;background:var(--band);text-align:left;width:160px;min-width:160px;max-width:160px;border-right:1px solid var(--line)}
-thead th.stk2{position:sticky;left:160px;z-index:21;background:var(--band);text-align:right;width:96px;min-width:96px;max-width:96px;border-right:1px solid var(--line)}   /* v27.601 sticky-column edges = standard grey 1pt (was 2px #b0b0ae) */
+thead th.stk{position:sticky;left:0;z-index:21;background:var(--band);text-align:left;width:208px;min-width:208px;max-width:208px;border-right:1px solid var(--line)}   /* v27.631: col-1 +30% (160→208) for longer SKUs / variant image */
+thead th.stk2{position:sticky;left:208px;z-index:21;background:var(--band);text-align:right;width:96px;min-width:96px;max-width:96px;border-right:1px solid var(--line)}   /* v27.601 sticky-column edges = standard grey 1pt (was 2px #b0b0ae) */
 thead tr.grp th{top:0;padding:2px 4px;font-size:8.5px;font-weight:700;background:var(--card);border-bottom:1px solid var(--line);color:var(--muted);text-transform:uppercase;letter-spacing:.03em;height:16px;box-sizing:border-box;line-height:1.1}   /* v27.601 FY-grouping row underline = standard grey 1pt (was 0) */
 thead tr.grp th.stk{background:var(--card)}
 thead tr.grp th.stk2{background:var(--card)}
@@ -345,8 +345,8 @@ td.has-rail{position:relative}
 .cell-rail .cf-pp{color:var(--pos);font-size:7.5px;letter-spacing:-.5px;cursor:help}
 #fc-note-pop{position:absolute;z-index:100050;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 30px rgba(15,23,42,.18);padding:10px 12px;width:300px;font-size:12px;color:var(--nav);text-align:left}
 #fc-note-tip{position:fixed;z-index:100060;max-width:300px;background:var(--nav);color:#fff;font-size:11px;line-height:1.5;padding:7px 9px;border-radius:6px;box-shadow:0 4px 16px rgba(0,0,0,.3);pointer-events:none;display:none;text-align:left}
-td.stk{position:sticky;left:0;z-index:6;background:var(--card);text-align:left;width:160px;min-width:160px;max-width:160px;border-right:1px solid var(--line)}
-td.stk2{position:sticky;left:160px;z-index:6;background:var(--card);text-align:right;width:96px;min-width:96px;max-width:96px;border-right:1px solid var(--line)}   /* v27.601 sticky-column edges = standard grey 1pt (was 2px #b0b0ae) */
+td.stk{position:sticky;left:0;z-index:6;background:var(--card);text-align:left;width:208px;min-width:208px;max-width:208px;border-right:1px solid var(--line)}   /* v27.631: col-1 +30% (160→208) */
+td.stk2{position:sticky;left:208px;z-index:6;background:var(--card);text-align:right;width:96px;min-width:96px;max-width:96px;border-right:1px solid var(--line)}   /* v27.601 sticky-column edges = standard grey 1pt (was 2px #b0b0ae) */
 .nm{padding:3px 4px 3px 14px;display:flex;align-items:flex-start;gap:3px;white-space:normal;font-size:11px}
 .nmc{padding:3px 6px;font-style:italic;color:var(--muted);font-size:11px;white-space:nowrap}
 .chbg{font-size:9px;padding:0 3px;background:#efefef;border-radius:2px;color:var(--faint);flex-shrink:0}
@@ -844,8 +844,8 @@ tr.grand-tot td.stk{background:var(--nav);color:#fff}
         <div style="display:flex;align-items:flex-start;gap:8px;flex-wrap:wrap;margin-bottom:12px">
           <span class="pill-lbl" style="width:80px" title="Row / column layout options for the plan grid">Layout</span>
           <div style="display:flex;flex-direction:column;gap:6px">
+            <label style="font-size:12px;color:var(--ink-soft);cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Show the variant image next to each SKU (hover to enlarge)"><input type="checkbox" id="disp-varimg" onchange="setShowVariantImg(this.checked)"> &#128247; Variant image</label>
             <label style="font-size:12px;color:var(--ink-soft);cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Show a total row at the foot of each category"><input type="checkbox" id="disp-cattot" onchange="setShowCatTot(this.checked)"> Category totals</label>
-            <label style="font-size:12px;color:var(--ink-soft);cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Show the variant image next to each SKU (hover to enlarge)"><input type="checkbox" id="disp-varimg" onchange="setShowVariantImg(this.checked)"> Variant image</label>
             <label style="font-size:12px;color:var(--ink-soft);cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Show quarter (3-month) sum-total columns inside each expanded financial year"><input type="checkbox" id="disp-qtr" onchange="setShowQtr(this.checked)"> Quarter totals</label>
             <label style="font-size:12px;color:var(--ink-soft);cursor:pointer;display:inline-flex;align-items:center;gap:6px" title="Show half-year (6-month) sum-total columns inside each expanded financial year"><input type="checkbox" id="disp-half" onchange="setShowHalf(this.checked)"> Half-year totals</label>
             <label style="font-size:12px;color:var(--ink-soft);display:inline-flex;align-items:center;gap:6px" title="Show/hide build-on-fly SET SKUs in the SKU-level view (display only)">Sets <select id="disp-sets" onchange="setSetsView(this.value)" style="font-size:11px;padding:2px 6px;border:1px solid #cbd5e1;border-radius:4px;background:var(--card);cursor:pointer"><option value="show">Show</option><option value="hide">Hide</option><option value="only">Only</option></select></label>
@@ -8547,7 +8547,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         // Sticky stock col: SKU 3PL + FBA on-hand (two lines, like the subcat rows) + channel inbound.
         var wh3=ctry+'_3pl', whF=ctry+'_fba';
         var oh3=(p.inv&&p.inv[wh3])||0, ohF=(p.inv&&p.inv[whF])||0, sOo=p.oo&&p.oo[wh]||0;
-        td.style.cssText='position:sticky;left:160px;background:var(--hover);border-bottom:1px solid #f0f0ee;border-right:2px solid #b0b0ae;padding:2px 5px;text-align:right;font-size:9px;line-height:1.25;font-variant-numeric:tabular-nums;z-index:1';
+        td.style.cssText='position:sticky;left:208px;background:var(--hover);border-bottom:1px solid #f0f0ee;border-right:2px solid #b0b0ae;padding:2px 5px;text-align:right;font-size:9px;line-height:1.25;font-variant-numeric:tabular-nums;z-index:1';
         if(p.vt==='SET'){
           // SETS: 3PL inventory ONLY (a set's FBA stock is built from 3PL; sets aren't held at FBA and aren't inbound) + a SET badge on the 3PL line.
           td.innerHTML='<div style="white-space:nowrap;color:'+(oh3<0?'var(--neg)':'var(--ink-soft)')+';font-weight:600"><span style="font-size:7px;font-weight:700;color:var(--violet);background:var(--violet-bg);border-radius:3px;padding:0 4px;margin-right:4px;vertical-align:middle" title="Build-on-fly SET — 3PL inventory only (built from components)">SET</span><span style="opacity:.55;font-weight:400">3PL:</span> '+fn(oh3)+'</div>';
@@ -9101,7 +9101,7 @@ function insertInlineSkuRows(s,co,ch,afterTr){
     } else if(ci3===1){
       // Sticky stock total (OH / inbound) for the subcategory
       var stkSub=stockFor(s,co,ch);
-      std.style.cssText='position:sticky;left:160px;z-index:1;background:var(--line);border-right:2px solid #b0b0ae;border-bottom:2px solid #b0b0ae;padding:2px 5px;text-align:right;font-size:9px;font-weight:700;line-height:1.25;font-variant-numeric:tabular-nums';
+      std.style.cssText='position:sticky;left:208px;z-index:1;background:var(--line);border-right:2px solid #b0b0ae;border-bottom:2px solid #b0b0ae;padding:2px 5px;text-align:right;font-size:9px;font-weight:700;line-height:1.25;font-variant-numeric:tabular-nums';
       std.innerHTML='<div style="color:var(--ink-soft)">'+fn(stkSub.oh)+'</div>'+inbDiv(stkSub.inb, inbEntries(_skuSetForSubcat(s,co,ch),co,ch), 'var(--faint)');
     } else {
       std.style.cssText='background:var(--line);border-bottom:2px solid #b0b0ae';
@@ -9228,7 +9228,7 @@ function buildBody(){
     // col1: sticky stock total across all categories in scope
     var all3=0,allF=0;DATA.forEach(function(r){if(r.co!==CUR)return;if(CF&&r.ch!==CF)return;var st=stockFor(r.s,CUR,r.ch);all3+=st.oh3;allF+=st.ohF;});
     var gstk=document.createElement('td');gstk.className='stk2';
-    gstk.style.cssText='position:sticky;left:160px;z-index:1;background:var(--nav);border-right:2px solid #b0b0ae';
+    gstk.style.cssText='position:sticky;left:208px;z-index:1;background:var(--nav);border-right:2px solid #b0b0ae';
     gstk.innerHTML=stock2Line(all3,allF,'#fff',true);
     gtr.appendChild(gstk);
     gtStack(fn(gt24u),fr(gt24r),'','sep2');
@@ -9374,7 +9374,7 @@ function _makeCatTotRow(cat){
     // col1: sticky stock total for this category
     var cat3=0,catF=0;allR.forEach(function(r){var st=stockFor(r.s,CUR,r.ch);cat3+=st.oh3;catF+=st.ohF;});
     var cstk=document.createElement('td');cstk.className='stk2';
-    cstk.style.cssText='position:sticky;left:160px;z-index:1;background:var(--band);border-right:2px solid #b0b0ae';
+    cstk.style.cssText='position:sticky;left:208px;z-index:1;background:var(--band);border-right:2px solid #b0b0ae';
     cstk.innerHTML=stock2Line(cat3,catF,'var(--ink-soft)',true);
     totr.appendChild(cstk);
     tStack(fn(c24u),fr(c24r),'','sep2');
@@ -13271,7 +13271,9 @@ function openTrendGapsPopout(){ var d=document.getElementById('tg-drawer');
 var TREC_FY=null, TREC_ALL={}, TREC_GBP={}, TREC_KEY='';   // TREC_ALL[co|ch][fy|sub|level|idx] = growth_pct; TREC_GBP = same key → absolute target_gbp (new categories with no LY base)
 function trecPrevY(m){ return (+m.slice(0,4)-1)+'_'+m.slice(5,7); }
 function trecMonFyIdx(m){ var mo=+m.slice(5,7),y=+m.slice(0,4); return {Y:(mo>=3?y:y-1), idx:(mo>=3?mo-2:mo+10)}; }
-function trecResolve(Y,sub,mIdx,co,ch,febShift){ var M=TREC_ALL[(co||CUR)+'|'+(ch||CF)]; if(!M)return null; var k; k=Y+'|'+sub+'|month|'+mIdx; if(M[k]!=null)return Number(M[k]); k=Y+'|'+sub+'|quarter|'+Math.ceil(mIdx/3); if(M[k]!=null)return Number(M[k]); k=Y+'|'+sub+'|half|'+(febShift?(mIdx<=7?1:2):Math.ceil(mIdx/6)); if(M[k]!=null)return Number(M[k]); return null; }
+function trecResolve(Y,sub,mIdx,co,ch,febShift){ var M=TREC_ALL[(co||CUR)+'|'+(ch||CF)]; if(!M)return null; var k; k=Y+'|'+sub+'|month|'+mIdx; if(M[k]!=null)return Number(M[k]); k=Y+'|'+sub+'|quarter|'+Math.ceil(mIdx/3); if(M[k]!=null)return Number(M[k]); k=Y+'|'+sub+'|half|'+(febShift?(mIdx<=7?1:2):Math.ceil(mIdx/6)); if(M[k]!=null)return Number(M[k]);
+  if(sub!==''){ var og=trecResolve(Y,'',mIdx,co,ch,febShift); if(og!=null)return og; }   // v27.631: fall back to the OVERALL (all-categories, sub='') target so categories inheriting it are also in scope for recommendations (matches the summary's overall→sub inheritance)
+  return null; }
 // Absolute GBP period target (for new categories with no growth% base). Returns {gbp, lo, hi} where lo..hi is the
 // fiscal-month-index span the target covers (month=1, quarter=3, half=6), so it can be spread across those months.
 function trecResolveGBP(Y,sub,mIdx,co,ch,febShift){ var M=TREC_GBP[(co||CUR)+'|'+(ch||CF)]; if(!M)return null; var k;

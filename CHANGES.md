@@ -1,3 +1,8 @@
+## v27.631 Demand plan: target-rec overall inheritance + Display-Settings tweaks (Ben)
+- **Target recommendations bug (Ben, US DTC):** setting an overall H2 target (e.g. 50% at the all-categories level) plus an explicit one (Tea Towels 100%) only generated recommendations for Tea Towels; every other category *displayed* the inherited 50% but got no rec. Root cause: `trecResolve` only checked sub-specific target keys with no fallback to the overall (`sub=''`) target. Added the overall fallback (sub-specific wins; else inherit overall), so every inheriting category is now in scope for recommendations — matching the summary's display inheritance. Verified: explicit 100% wins, others inherit 50%, months with no overall target still return null (no spurious rec).
+- **Display Settings:** moved "Variant image" to the top of the Layout list (above Category totals) with a 📷 icon.
+- **Column 1 width +30%** (160 → 208px) on the demand plan so longer SKUs show, especially with the variant image on; sticky stock column (col-2) shifted to match (CSS + the 4 JS-inline row types).
+
 ## v27.630 Buy v2 slice 1: filter toolbar as a card (Ben)
 - First safe slice of the Buy v2 canvas rebuild. The buy filter row (#bp-filters) now sits in a canvas card (var(--card) bg, rounded, soft shadow), matching the grid card frame (v27.628) so the page reads as toolbar-card + grid-card like the canvas. Chrome/CSS only — no scaffold markup, no pill wiring, no BP engine touched. Verified buyplanItems byte-identical before/after (all 5 markets, per-SKU), 0 JS errors. **Remaining Buy v2** (the grouped/collapsible CSS-grid row layout) is a core-render rebuild — to be done in careful snapshotted slices with Ben's review, not a single rewrite.
 
