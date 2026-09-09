@@ -11937,14 +11937,14 @@
   function _favToggle(){ var s=_favSlug(); if(!s)return; var i=_favIdx(s);
     if(i>=0){ HZ_FAVES.splice(i,1); } else { if(HZ_FAVES.length>=5)return; HZ_FAVES.push({slug:s,label:_favLabel()}); }
     _favSave(); renderFaves(); }
-  function _favRename(slug){ var i=_favIdx(slug); if(i<0)return; var nn=prompt('Rename this favourite (shown only to you):',HZ_FAVES[i].label||''); if(nn==null)return; nn=String(nn).trim().slice(0,40); if(!nn)return; HZ_FAVES[i].label=nn; _favSave(); renderFaves(); }
+  function _favRename(slug){ var i=_favIdx(slug); if(i<0)return; var nn=prompt('Rename this favourite — or clear the box to REMOVE it (shown only to you):',HZ_FAVES[i].label||''); if(nn==null)return; nn=String(nn).trim().slice(0,40); if(!nn){ HZ_FAVES.splice(i,1); _favSave(); renderFaves(); return; }   /* v27.635: blank name removes the favourite (remove + rename in one dialog) */ HZ_FAVES[i].label=nn; _favSave(); renderFaves(); }
   function ensureFaves(){ var row=document.getElementById('view-tabs-row'); if(!row)return;
     var chips=document.getElementById('hz-fav-chips'); if(!chips){ chips=document.createElement('span'); chips.id='hz-fav-chips'; 
       var act=document.getElementById('act-btn'); if(act)row.insertBefore(chips,act); else row.appendChild(chips); }
     var star=document.getElementById('hz-fav-star'); if(!star){ star=document.createElement('button'); star.id='hz-fav-star'; star.className='hz-ico'; star.onclick=function(e){ e.stopPropagation(); if(!star.disabled)_favToggle(); }; row.appendChild(star); }
     renderFaves(); }
   function renderFaves(){ var chips=document.getElementById('hz-fav-chips'), star=document.getElementById('hz-fav-star'); if(!chips||!star)return;
-    chips.innerHTML=HZ_FAVES.map(function(f){ return '<span class="hz-fav-chip" data-slug="'+esc(f.slug)+'" title="'+esc(f.slug)+' — click to open · double-click to rename"">★ '+esc(f.label||f.slug)+'</span>'; }).join('');   // plain link like the other top-bar items (no badge/✕/truncation) — remove via un-starring the page
+    chips.innerHTML=HZ_FAVES.map(function(f){ return '<span class="hz-fav-chip" data-slug="'+esc(f.slug)+'" title="'+esc(f.slug)+' — click to open · double-click to rename or remove"">★ '+esc(f.label||f.slug)+'</span>'; }).join('');   // plain link like the other top-bar items (no badge/✕/truncation) — remove via un-starring the page
     chips.querySelectorAll('.hz-fav-chip').forEach(function(c){ c.onclick=function(){ _favGo(c.dataset.slug); }; c.ondblclick=function(e){ e.stopPropagation(); _favRename(c.dataset.slug); }; });
     var s=_favSlug(); if(!s){ star.style.display='none'; return; } star.style.display='';
     var isFav=_favIdx(s)>=0, atMax=HZ_FAVES.length>=5;

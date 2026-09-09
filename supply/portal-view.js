@@ -988,14 +988,14 @@
       var confirmBar=needConfirm?('<div style="margin:0 0 10px;padding:8px 11px;border-radius:6px;font-size:12px;box-sizing:border-box;'+(confirmed?'background:var(--pos-bg);border:1px solid var(--pos-bg)':'background:var(--amber-bg);border:1px solid #fcd34d')+'">'
         +(confirmed
           ? '<div style="margin-bottom:8px">✓ <b>Order confirmed</b> on '+esc(p.supplier_confirmed)+(p.supplier_confirmed_by?' · '+esc(p.supplier_confirmed_by):'')+'</div><button class="save-btn light pp-confirm" data-po="'+po+'" data-v="0">Withdraw confirmation</button>'
-          : '<div style="margin-bottom:8px">⏳ <b>'+(_chgs.length?'A change has been made. Please re-confirm this order.':'Please confirm this order.')+'</b> Review the SKUs &amp; quantities (ORDER PLAN tab) and the dates, amend anything that\'s wrong, then confirm.</div><button class="save-btn pp-confirm" data-po="'+po+'" data-v="1" style="background:var(--pos);color:#fff;border-color:var(--pos)">✓ Confirm order</button>')
+          : '<div style="margin-bottom:8px">⏳ <b>'+(_chgs.length?'A change has been made. Please re-confirm this order.':'Please confirm this order.')+'</b> Review the SKUs &amp; quantities (ORDER PLAN tab) and the dates, amend anything that\'s wrong, then confirm.</div><button class="save-btn pp-confirm" data-po="'+po+'" data-v="1" style="background:var(--pos);color:#fff;border:0;font-weight:800;font-size:14px;padding:9px 20px;border-radius:9px;box-shadow:0 6px 16px -6px rgba(17,138,78,.55)">✓ Confirm order</button>')
         +'</div>'):'';
       // The same confirm / re-confirm prompt + button also sits at the top of the ORDER PLAN tab (Ben). Yellow
       // prompt only — once confirmed it disappears from BOTH tabs (the card re-renders on confirm). Withdraw
       // stays on the TIMELINE banner only.
       var confirmOP=(needConfirm && !confirmed)?('<div style="margin:0 0 10px;padding:8px 11px;border-radius:6px;font-size:12px;box-sizing:border-box;background:var(--amber-bg);border:1px solid #fcd34d">'
         +'<div style="margin-bottom:8px">⏳ <b>'+(_chgs.length?'A change has been made. Please re-confirm this order.':'Please confirm this order.')+'</b> Review the SKUs &amp; quantities and the dates below, amend anything that\'s wrong, then confirm.</div>'
-        +'<button class="save-btn pp-confirm" data-po="'+po+'" data-v="1" style="background:var(--pos);color:#fff;border-color:var(--pos)">✓ Confirm order</button></div>'):'';
+        +'<button class="save-btn pp-confirm" data-po="'+po+'" data-v="1" style="background:var(--pos);color:#fff;border:0;font-weight:800;font-size:14px;padding:9px 20px;border-radius:9px;box-shadow:0 6px 16px -6px rgba(17,138,78,.55)">✓ Confirm order</button></div>'):'';
       skus=confirmOP+'<div class="sect-h" style="font-size:15px;margin:0 0 8px">Step 1 — Confirm order plan <span class="mut tiny" style="font-weight:400">(SKU · qty · your cost)</span></div>'+skus;
       // ---- TIMELINE: production status + status + notes (Dock & Bay notes show as 'new' until you mark them read) ----
       var unreadInt=notes.filter(function(n){return n.author_kind==='internal'&&!n.read;}).length;

@@ -1,3 +1,9 @@
+## v27.635 Portal + favourites UI fixes (Ben)
+- **Portal CONFIRM ORDER button** was very faint → now a strong solid-green primary (bold, larger, shadow), at both render sites (portal-view.js).
+- **Favourites (top bar)**: chips are smaller and wrap onto 2 rows to save header space (hz-theme.css #hz-fav-chips flex-wrap + .hz-fav-chip 10px).
+- **Favourite double-click**: the rename dialog now also removes — clear the box to remove the favourite (rename + remove in one dialog); tooltip updated.
+- **SUPPLY ▸ CONFIG ▸ Portal "view as supplier"** showed the portal nav as run-together text ("ORDERS158FINANCESAMPLESPRODUCT") — the section-nav (#pp-secs/.pp-sec) and L3-tab (#pp-tabs .rtab) CSS was scoped to `#pv-wrap` only, but the config preview mounts under `#app`. Broadened those 25 selectors to `:is(#pv-wrap,#app) #supply-root …` (ids exist only in the portal, so no leak). Verified 0 JS errors; portal-view.js syntax-checked.
+
 ## v27.634 Smoothing: guard against set-category inflation (safe interim) (Ben)
 - Bug: smoothing a pure **set** sub-category (e.g. MIXNMATCH, UK DTC) inflated the forecast (50 → ~72) — the water-fill lands the exploded sub-cat target onto box-basis SKU values (the two-totals model that reconciles set boxes vs exploded units is designed but not built). Safe interim: `computeSmoothAlloc` now returns no allocation for pure set sub-cats (all SKUs in that co/ch are sets), and the manual smooth click shows a clear "not supported for set categories yet" message. Prevents the inflation on every path (manual, auto-smooth, preview). Mixed sub-cats (masters + a few sets) are unaffected. Verified: buyplanItems byte-identical to the pre-change baseline (guard only blocks the wrong smoothing action; no default-buy change), 0 JS errors. **Proper fix** (set-aware / two-totals smoothing so it lands on 50) remains a scoped careful task with before/after buy snapshots.
 
