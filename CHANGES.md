@@ -1,3 +1,8 @@
+## v27.640 DEMAND Summary/targets: category grouping + richer edit cells (Ben)
+- **Summary (read) tab** now groups sub-categories by their category grouping (Priority → Beach → Bags → Home → Other), with group-header rows — matching the **Edit targets** tab and the DEMAND plan's category picker (was flat-alphabetical). Category totals (if ticked) nest inside each group.
+- **Edit targets** grid: each period × sub-cat cell now shows context under the input — an **LY** line (last-year units + revenue) and an **FC** line (current forecast units + revenue, with forecast-vs-LY %), above the existing **TGT** line (target £/units/%). Values honour the selected currency; money shown compact (£12.3k). Read-only display; no change to stored targets or the buy.
+- Verified: Summary grouping renders 5 groups (probe); app loads with 0 JS errors. (Edit-tab cell context is a visual check — the edit grid doesn't render in jsdom, a known SPA limitation.)
+
 ## v27.639 Supplier portal: L2 band flush to L1 + bilingual labels inline (Ben)
 - Removed the white gap between the dark L1 brand bar and the grey L2 tab band — `#pv-wrap` top padding → 0 and `#supply-root` top padding → 0, so the L2 band sits flush under the black bar.
 - Bilingual menu labels (China suppliers): 中文 now shows **inline after** the English, not stacked below (ample width). Standalone portal: added `#supply-root .pp-bi` row rules in portal-view.js `STYLE`. Admin embed: hz-theme.css `.pp-bi` switched `flex-direction:column` → `row`.
