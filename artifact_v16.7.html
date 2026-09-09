@@ -8022,8 +8022,14 @@ function _setCapTip(cn){
   return head+'\n'+lines.join('\n');
 }
 var SMOOTH_FALLBACK={};   // v27.546: months where smoothing had to use run-off SKUs because no active SKU exists (key co|ch|subcat|month)
+// A sub-category whose SKUs sold in this co/ch are ALL sets (e.g. MIXNMATCH). Smoothing such a sub-cat mixes the
+// exploded sub-cat target with box-basis SKU values and inflates the total (the two-totals model is designed but not
+// built), so smoothing is guarded off for these until it lands. Mixed sub-cats (masters + a few sets) are unaffected.
+function _isPureSetSubcat(s,co,ch){ try{ if(typeof SKUM==='undefined')return false; var ctry=String(co).toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':ch==='TIK'?'t':'b', any=false;
+  for(var sku in SKUM){ var p=SKUM[sku]; if(!p||p.s!==s)continue; var av=(p.av||{})[ctry]||''; if(av.indexOf(chKey)<0)continue; if(p.vt!=='SET')return false; any=true; } return any; }catch(e){ return false; } }
 function computeSmoothAlloc(s,co,ch,m,opts){
   opts=opts||{};
+  if(!opts._retry && _isPureSetSubcat(s,co,ch)) return {};   // v27.634: no smoothing for pure set sub-cats (two-totals unbuilt) → return no allocation so it can't inflate the forecast
   // protectLeaders: when true, apply tier-aware floors so historically-strong SKUs
   // (high share of subcat × country × channel sales over ALL available history) get
   // pulled up to at least floorFactor × their historical share × tier target. The
@@ -9081,7 +9087,9 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         var lnk=document.createElement('div');lnk.textContent='smooth';
         lnk.style.cssText='margin-top:1px;font-size:7px;line-height:1.2;font-weight:500;font-style:italic;color:var(--faint)';
         std.appendChild(lnk);
-        std.onclick=function(e){e.stopPropagation();var o={};o[m]=computeSmoothAlloc(s,co,ch,m,{protectLeaders:SMOOTH_LEADER});
+        std.onclick=function(e){e.stopPropagation();
+          if(_isPureSetSubcat(s,co,ch)){ _smoothSearchTip(e.clientX,e.clientY,'Smoothing isn’t supported for set categories yet — the two-totals model that keeps set boxes and exploded units consistent is still to build (it would otherwise inflate the total). Edit the set SKUs directly for now.'); return; }   // v27.634 set-subcat smoothing guard
+          var o={};o[m]=computeSmoothAlloc(s,co,ch,m,{protectLeaders:SMOOTH_LEADER});
           if(!o[m]||!Object.keys(o[m]).length){ _smoothSearchTip(e.clientX,e.clientY,'Nothing to smooth for '+m.replace('_','-')+': every SKU here is pre-launch or has no run-off stock left, so no line can carry the sub-category forecast.'); return; }   // v27.546
           SMOOTH_PREVIEW={pk:parentKey,fy:null,months:o};reExpand();};
       }
