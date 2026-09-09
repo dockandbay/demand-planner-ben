@@ -1,3 +1,8 @@
+## v27.651 Mobile Phase 4: DEMAND Summary as KPI cards on phone (Ben)
+- On phones the **read Summary tab** now renders as a stacked list of **per-sub-category KPI cards** (grouped Priority → Beach → Bags → Home → Other, like the table) instead of the wide 60-column table. Each card shows, for the **current FY**: **Units** last-year → forecast with growth %, and **Revenue** last-year → forecast with growth %.
+- Read-only, phone-gated (`max-width:640px`). Desktop keeps the full table; the Edit-targets and range views are unchanged everywhere. In `renderSummaryView` (a view renderer, not in the buy path) → no buy impact.
+- Verified: phone probe renders 31 cards (no table) with correct live figures; desktop render 0 JS errors.
+
 ## v27.650 Mobile bottom sheet: actuals months are read-only (Ben)
 - Opening the sheet on **a month of actuals** (`isActualMonth`) no longer offers **Override / Smooth / Do-not-smooth** — actuals are recorded sales and shouldn't be edited. The Forecast stat is relabelled **Actual**, and a note reads "Actuals month — recorded sales, nothing to edit." **Add note** and Close remain. (The subcat actual cell carries `data-rk`, so it did open the sheet with editable controls.)
 - Forecast months are unchanged (override + smooth + do-not-smooth as before).

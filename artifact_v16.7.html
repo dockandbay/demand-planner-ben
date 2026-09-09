@@ -10647,6 +10647,27 @@ function renderSummaryView(body){
     var _gOrder=(CAT_GROUPING&&Object.keys(CAT_GROUPING).length)?catGroups().map(function(g){return g[0];}):['Priority','Beach','Bags','Home'];
     var _byG={}; subs.forEach(function(s){ var gp=(CAT_GROUPING&&CAT_GROUPING[_subcatParent(s)])||'Other'; (_byG[gp]=_byG[gp]||[]).push(s); });
     var _gList=_gOrder.filter(function(g){return _byG[g];}); Object.keys(_byG).sort().forEach(function(g){ if(_gList.indexOf(g)<0)_gList.push(g); });
+    // v27.651 mobile Phase 4 — on a phone, the read Summary is a stacked list of KPI cards (one per sub-category,
+    // current FY: units LY→forecast + growth, revenue LY→forecast + growth), grouped like the table. Read-only; the
+    // wide table stays on desktop and for the Edit-targets / range views.
+    if(window.matchMedia&&window.matchMedia('(max-width:640px)').matches){
+      var _fyM=fyMonths(CUR_FY_START), _sy2=(_symC||'£'), _fyLbl=fyLabel(CUR_FY_START);
+      function _fySum(s){ var sd=subData(s), fcU=0,lyU=0,fcR=0,lyR=0; _fyM.forEach(function(m){ var u=(sd.valU&&sd.valU[m])||0, lu=(sd.lyU&&sd.lyU[m])||0, pmm=pa(m); fcU+=u; lyU+=lu; fcR+=u*(getASP(co,ch,s,pmm.y,pmm.mo)||0); lyR+=lu*(getASP(co,ch,s,pmm.y-1,pmm.mo)||0); }); return {fcU:fcU,lyU:lyU,fcR:Math.round(fcR),lyR:Math.round(lyR)}; }
+      function _pct(a,b){ return b>0?Math.round((a-b)/b*100):null; }
+      function _gc(p){ return p==null?'var(--faint)':p>0?'var(--pos)':p<0?'var(--neg)':'var(--muted)'; }
+      function _gtag(p){ return p==null?'':'<span style="color:'+_gc(p)+';font-weight:800">'+(p>0?'+':'')+p+'%</span>'; }
+      var ch1='<div style="font-size:11px;color:var(--muted);margin:0 0 10px">'+e(co)+' · '+e(ch)+' · '+e(_fyLbl)+' — units and revenue, last year → forecast</div>';
+      _gList.forEach(function(gp){ ch1+='<div style="font-weight:800;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-soft);margin:14px 0 6px">'+e(gp)+'</div>';
+        _byG[gp].forEach(function(s){ var t=_fySum(s), gU=_pct(t.fcU,t.lyU), gR=_pct(t.fcR,t.lyR);
+          ch1+='<div style="border:1px solid var(--line);border-radius:11px;padding:11px 13px;margin-bottom:8px;background:var(--card)">'
+            +'<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:7px"><div style="font-weight:700;font-size:14px">'+e(s)+'</div>'+(gU!=null?'<div style="font-size:14px">'+_gtag(gU)+'</div>':'')+'</div>'
+            +'<div style="display:flex;gap:18px;font-size:12px;font-variant-numeric:tabular-nums">'
+              +'<div><div style="color:var(--faint);font-size:9.5px;text-transform:uppercase;letter-spacing:.03em">Units</div><b>'+fn(t.lyU)+'</b> <span style="color:var(--faint)">→</span> <b>'+fn(t.fcU)+'</b></div>'
+              +'<div><div style="color:var(--faint);font-size:9.5px;text-transform:uppercase;letter-spacing:.03em">Revenue '+(gR!=null?_gtag(gR):'')+'</div><b>'+_sy2+fn(t.lyR)+'</b> <span style="color:var(--faint)">→</span> <b>'+_sy2+fn(t.fcR)+'</b></div>'
+            +'</div></div>'; }); });
+      host.innerHTML=ch1; try{fitHost();}catch(e){}
+      return;
+    }
     _gList.forEach(function(gp){
       bodyH+='<tr class="grp"><td class="lbl grp-lbl" colspan="'+_span+'">'+e(gp)+'</td></tr>';
       if(SUMM_CAT_TOT){ var _byCc={}; _byG[gp].forEach(function(s){ var cat=_subcatParent(s)||'(uncategorised)'; (_byCc[cat]=_byCc[cat]||[]).push(s); });
