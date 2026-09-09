@@ -1,3 +1,9 @@
+## v27.636 Supplier portal brand bar + level-1 menu moved into it (Ben)
+- **HORIZON branding** added to the portal header: the sunset logo mark + "HORIZON" wordmark now lead the dark top bar, followed by a divider, "DOCK & BAY", then the supplier name (e.g. Lixin / XR Textile). Logo reuses the main-app `.hz-brand` SVG (clip id renamed `pvhzmark` to avoid any embed collision).
+- **Level-1 section menu** (ORDERS / FINANCE / SAMPLES / PRODUCT) moved OUT of the content area and UP into the dark brand bar — white-on-black, active = white pill, red action-count badges preserved. On the standalone portal this also fixes the run-together `#pp-secs` menu (portal.html injects no `.pp-sec` CSS; hz-theme.css isn't loaded there), so it's now fully styled.
+- The admin **CONFIG ▸ Portal preview** (no `.pv-top`) keeps the menu inline above the tabs, styled by hz-theme.css, unchanged (v27.635).
+- portal.html: `.pv-brand`/`.pv-div`/`.pv-ver` + `header.pv-top #pp-secs` dark-bar styles; header HTML adds logo + divider; `.pv-top` now `flex-wrap` so the menu wraps under the branding on narrow phones. portal-view.js: gated move of `#pp-secs` into `.pv-top` before the spacer.
+
 ## v27.635 Portal + favourites UI fixes (Ben)
 - **Portal CONFIRM ORDER button** was very faint → now a strong solid-green primary (bold, larger, shadow), at both render sites (portal-view.js).
 - **Favourites (top bar)**: chips are smaller and wrap onto 2 rows to save header space (hz-theme.css #hz-fav-chips flex-wrap + .hz-fav-chip 10px).

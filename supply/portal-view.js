@@ -755,7 +755,12 @@
       var _secRow=document.createElement('div'); _secRow.id='pp-secs';
       _secRow.innerHTML=PP_SECS.map(function(s){ return '<span class="pp-sec" data-sec="'+s[0]+'">'+s[1]+'</span>'; }).join('');
       var _bar=tabsEl.parentNode;   // the flex top bar: move both nav rows OUT of it so they stack (v27.502)
-      _bar.parentNode.insertBefore(_secRow, _bar); _bar.parentNode.insertBefore(tabsEl, _bar);
+      // v27.636: on the standalone portal the level-1 section menu moves UP into the dark brand bar (.pv-top),
+      // sitting after the supplier name / before the spacer, white-on-black. The admin config preview has no
+      // .pv-top → the menu stays inline above the tabs (styled by hz-theme.css) exactly as before.
+      var _pvTop=document.querySelector('.pv-top');
+      if(_pvTop){ var _sp=_pvTop.querySelector('.sp'); if(_sp)_pvTop.insertBefore(_secRow,_sp); else _pvTop.appendChild(_secRow); _bar.parentNode.insertBefore(tabsEl, _bar); }
+      else { _bar.parentNode.insertBefore(_secRow, _bar); _bar.parentNode.insertBefore(tabsEl, _bar); }
       // tag + reorder the tabs so each section's tabs sit together in section order
       var _order=[]; tabsEl.querySelectorAll('.rtab[data-pt]').forEach(function(t){ t.dataset.sec=PP_SEC[t.dataset.pt]||'orders'; _order.push(t); });
       _order.sort(function(a,b){ var ia=PP_TAB_ORDER.indexOf(a.dataset.pt), ib=PP_TAB_ORDER.indexOf(b.dataset.pt); return (ia<0?99:ia)-(ib<0?99:ib); });

@@ -6,10 +6,21 @@
 <title>Dock &amp; Bay — Supplier Portal</title>
 <style>
   body{margin:0;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:#0f172a;background:#fff;font-size:13px}
-  header.pv-top{background:#0f172a;color:#fff;padding:10px 16px;display:flex;align-items:center;gap:12px}
+  header.pv-top{background:#0f172a;color:#fff;padding:10px 16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap;row-gap:6px}
   header.pv-top h1{font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:#cbd5e1;margin:0;font-weight:700}
   header.pv-top .sup{font-size:15px;font-weight:700}
   header.pv-top .sp{flex:1}
+  /* HORIZON brand mark (reuses the main-app sunset logo) */
+  header.pv-top .pv-brand{display:inline-flex;align-items:center;gap:7px;font-weight:800;letter-spacing:.13em;font-size:13px;color:#fff}
+  header.pv-top .pv-brand svg{display:block;flex:0 0 auto}
+  header.pv-top .pv-div{width:1px;height:20px;background:#334155;flex:0 0 auto}
+  header.pv-top .pv-ver{font-size:10px;opacity:.5}
+  /* level-1 section menu, moved up into the dark bar (white text) */
+  header.pv-top #pp-secs{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:none;border:0;margin:0;padding:0;overflow:visible}
+  header.pv-top #pp-secs .pp-sec{padding:6px 12px;font-size:12px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#cbd5e1;cursor:pointer;white-space:nowrap;border-radius:7px;transition:background .15s,color .15s}
+  header.pv-top #pp-secs .pp-sec:hover{color:#fff;background:rgba(255,255,255,.09)}
+  header.pv-top #pp-secs .pp-sec.active{color:#0f172a;background:#fff}
+  header.pv-top #pp-secs .pp-sec-n{display:inline-block;margin-left:6px;background:#ef4444;color:#fff;font-size:10px;font-weight:800;line-height:1.4;padding:1px 7px;border-radius:999px;vertical-align:middle;letter-spacing:0}
   .pv-btn{border:0;border-radius:8px;padding:7px 13px;font-weight:600;cursor:pointer;font-size:13px;background:#2563eb;color:#fff}
   .pv-btn.ghost{background:transparent;color:#cbd5e1;border:1px solid #475569}
   .pp-inbox-lbl{display:none}                        /* "Inbox" word: desktop only */
@@ -84,8 +95,11 @@
   function showPortal(me){
     var realSup=(me.suppliers||[]).join(', ')||'Supplier';
     var sup=ANON_NAME||realSup;
-    root.innerHTML='<header class="pv-top"><h1>Dock &amp; Bay</h1><span class="sup">'+esc(sup)+'</span><span class="sp"></span>'
-      +'<span style="font-size:10px;opacity:.5;margin-right:10px" title="app version — tell Ben this if something looks stale">__APP_VERSION__</span>'
+    root.innerHTML='<header class="pv-top">'
+      +'<span class="pv-brand"><svg width="28" height="19" viewBox="3 7 54 35" aria-hidden="true"><defs><clipPath id="pvhzmark"><circle cx="30" cy="27" r="18"></circle></clipPath></defs><g clip-path="url(#pvhzmark)"><rect x="9" y="9" width="42" height="5.6" fill="#ffd23f"></rect><rect x="9" y="16.4" width="42" height="5.6" fill="#ffb12c"></rect><rect x="9" y="23.8" width="42" height="5.6" fill="#ff8a24"></rect><rect x="9" y="31.2" width="42" height="7" fill="#ff5630"></rect></g><path d="M6 38.5 Q30 32.5 54 38.5" fill="none" stroke="#5aa6ea" stroke-width="4.5" stroke-linecap="round"></path></svg><span>HORIZON</span></span>'
+      +'<span class="pv-div"></span>'
+      +'<h1>Dock &amp; Bay</h1><span class="sup">'+esc(sup)+'</span><span class="sp"></span>'
+      +'<span class="pv-ver" title="app version — tell Ben this if something looks stale">__APP_VERSION__</span>'
       +'</header><div id="pv-wrap"><div id="pv"></div></div>';   // Sign out removed — sessions expire on their own
     var s=document.createElement('script'); s.src='/portal-view.js?v='+Date.now();   // cache-bust: always fetch the latest portal-view.js (tunnels/proxies were serving stale CSS + JS)
     s.onload=function(){
