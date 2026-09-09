@@ -1,3 +1,6 @@
+## v27.654 Summary & targets: currency pill selects immediately (Ben)
+- On the Summary, switching to US (or EU/AU) and clicking the local-currency pill (e.g. USD) didn't visibly select — the change only showed after switching tabs. Cause: the pill called `setDispCcy()`, which re-renders the **plan**, not the Summary you're on. Now the Summary's currency pill sets + persists `SUMM_CCY` (same global setting/key) and re-renders the **Summary** (like its other pills) + refreshes the DEMAND nav pill. Verified: on US, clicking USD flips the active pill to USD immediately; 0 JS errors. Display-only, no buy impact.
+
 ## v27.653 Mobile Phase 4: DEMAND Trends filter bar collapses on phone (Ben)
 - On phones the wide **Trends** filter bar (Country / Group / Categories / View / Months / Min units / toggles / Compare) now sits behind the shared **⚙ Filters** button (`mobileFilterCollapse`), so it isn't a full-screen wall. The four panel tabs (Channel mix / Type mix / Multi-year / Plan sanity) and the panel content stay visible. The panels themselves already suit a phone — KPI stat boxes wrap and the tables scroll sideways.
 - Phone-gated (desktop shows the full bar); Trends is a report view (not in the buy path). Verified: ⚙ Filters toggle appears with the controls inside it, tabs stay visible; 0 JS errors.

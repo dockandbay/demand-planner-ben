@@ -10345,7 +10345,8 @@ function renderSummaryView(body){
   body.querySelectorAll('.sm-co').forEach(function(b){ b.onclick=function(){ CUR=b.dataset.c; renderSummaryView(body); try{refreshDispCcy();}catch(e){} }; });   // market change → update the nav currency toggle's local-currency label
   body.querySelectorAll('.sm-ch').forEach(function(b){ b.onclick=function(){ CF=b.dataset.c; renderSummaryView(body); try{refreshDispCcy();}catch(e){} }; });
   body.querySelectorAll('.sm-metric').forEach(function(b){ b.onclick=function(){ SUMM_METRIC=b.dataset.m; try{localStorage.setItem('summ_metric',SUMM_METRIC);}catch(e){} renderSummaryView(body); }; });
-  body.querySelectorAll('.sm-ccy').forEach(function(b){ b.onclick=function(){ setDispCcy(b.dataset.m); }; });   // v27.560: bound to the global GBP/LOCAL setting (re-renders DEMAND incl. this report + the main pill)
+  body.querySelectorAll('.sm-ccy').forEach(function(b){ b.onclick=function(){ SUMM_CCY=b.dataset.m; try{localStorage.setItem('disp_ccy',SUMM_CCY);}catch(e){}   // v27.654: set + persist the global currency, then re-render THIS Summary (setDispCcy re-rendered only the plan, so the pill didn't select until you switched tabs) + refresh the DEMAND nav pill
+    renderSummaryView(body); try{ refreshDispCcy(); }catch(e){} }; });
   body.querySelectorAll('.sm-group').forEach(function(b){ b.onclick=function(){ SUMM_GROUP=b.dataset.g; try{localStorage.setItem('summ_group',SUMM_GROUP);}catch(e){} renderSummaryView(body); }; });
   var _tu=body.querySelector('#sm-tgtunits'); if(_tu)_tu.onchange=function(){ SUMM_TGT_UNITS=this.checked; try{localStorage.setItem('summ_tgt_units',SUMM_TGT_UNITS?'1':'');}catch(e){} renderSummaryView(body); };   // v27.576
   var _ct=body.querySelector('#sm-cattot'); if(_ct)_ct.onchange=function(){ SUMM_CAT_TOT=this.checked; try{localStorage.setItem('summ_cattot',SUMM_CAT_TOT?'1':'');}catch(e){} renderSummaryView(body); };
