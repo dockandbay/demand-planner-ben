@@ -47,6 +47,9 @@ body{font-family:var(--font,system-ui,-apple-system,sans-serif);font-size:12px;c
   #app #filters-row2{gap:5px !important;row-gap:6px}
   #app #filters-row2 #plan-sku-qry{flex:1 1 100% !important;width:100% !important;box-sizing:border-box;order:9;font-size:13px;padding:8px 11px}
   #app #filters-row2 .pill.catpill{padding:6px 13px}
+  /* v27.647 mobile Phase 4 — DEMAND Summary & targets: narrow + wrap the sticky sub-category name column (230px is too
+     wide on a phone) so more period columns fit, matching the plan's narrow name column. */
+  #smc td.lbl,#smc th.lbl{min-width:112px !important;max-width:150px;white-space:normal !important;word-break:break-word}
   #hz-topbar{display:flex !important}
   body.supply-on #hz-search{display:block}                /* search only useful inside SUPPLY */
   /* BUY / FBA plan (shared scaffold): collapse filters behind the "Filters" button, make the grid scroll,

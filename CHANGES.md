@@ -1,3 +1,7 @@
+## v27.647 Mobile Phase 4: narrow the Summary name column on phone (Ben)
+- DEMAND Summary & targets already pins its sub-category name column, but at `min-width:230px` — too wide on a phone. On phones it's now narrowed to ~112px and wraps, so more period columns are reachable (matches the plan's narrow name column). Phone-gated; desktop unchanged. 0 JS errors.
+- First slice of Phase 4 (Summary/Trends phone). Fuller read-only phone layouts (KPI tiles + charts) still to come.
+
 ## v27.646 Mobile: actually un-stick the plan stock column on phone (Ben)
 - v27.644 only un-stuck the class-based `.stk2` header/rows, but the **SKU-row and subtotal stock cells set `position:sticky;left:208px` inline** (no `.stk2` class), so they stayed pinned. Now the phone rule also targets those inline cells.
 - Key gotcha: browsers serialize inline `left:208px` → **`left: 208px` (with a space)**, so an attribute match on `left:208px` returns false; the rule matches both serialisations. Verified in jsdom: `[style*="left: 208px"]` matches, `[style*="left:208px"]` does not.
