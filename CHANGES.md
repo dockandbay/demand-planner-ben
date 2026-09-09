@@ -1,3 +1,9 @@
+## v27.643 Mobile: DEMAND plan cell bottom sheet (Option A, phase 3b) (Ben)
+- On phones, tapping a plan cell now opens a **bottom sheet** with **Forecast (+ growth%), Last year, Revenue, Growth**, plus an **Override** field and a **Smooth month** action (and Close). This surfaces the per-cell revenue that the plan-lite grid hides, and replaces fiddly inline editing on a phone.
+- Phone-gated: on phones the plan's inline text inputs are `pointer-events:none` and a capture-phase tap handler opens the sheet; **desktop is unchanged** (taps still edit inline; the handler early-returns off-phone).
+- Reuses the **exact desktop write paths** so the buy behaves identically to a desktop edit: Override = `parseInput` → `IV[s|co|ch|fym]` → `refreshRow` + change log (same as the cell input's change handler); Smooth = `computeSmoothAlloc` + `applySmoothAlloc`. Sub-category cells get the override field; SKU cells show read + smooth (SKU overrides stay desktop-only for now).
+- Verified: sheet opens with correct live data (Tea Towel Oct-26 UK/DTC: FC 2,500 +21%, LY 2,068, rev £27,491), override/save/smooth present, close works; **buy byte-identical across all markets**; 0 JS errors. On-device touch/visual is yours to confirm.
+
 ## v27.642 Mobile: DEMAND plan-lite grid (Option A, phase 3a) (Ben)
 - On phones (≤640px) the DEMAND plan grid now drops the optional **quarter/half total columns** (extra width nobody scrolls to on a phone) and the **per-cell revenue line**, so each month cell reads as forecast + growth on two lines and more months fit on screen.
 - Scoped to the plan table (`#t`) only — desktop and the buy plan are untouched (display-only CSS, phone-gated).

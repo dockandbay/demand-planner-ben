@@ -14,6 +14,11 @@ body{font-family:var(--font,system-ui,-apple-system,sans-serif);font-size:12px;c
 .pill.active{background:var(--nav);color:#fff;border-color:var(--ink)}
 .pill.priority.active{background:var(--blue);border-color:var(--blue);color:#fff}
 .pill.priority{font-weight:600}
+/* Mobile M4 (Option A) plan cell bottom-sheet (v27.643) — off-screen until opened; only ever opened on phones. */
+#hz-cs-back{position:fixed;inset:0;background:rgba(0,0,0,.34);z-index:100059;opacity:0;pointer-events:none;transition:opacity .2s}
+#hz-cs-back.open{opacity:1;pointer-events:auto}
+#hz-cs{position:fixed;left:0;right:0;bottom:0;z-index:100060;background:var(--card);color:var(--ink);border-top:1px solid var(--line);border-radius:16px 16px 0 0;box-shadow:0 -12px 36px rgba(0,0,0,.3);transform:translateY(110%);transition:transform .24s cubic-bezier(.4,0,.2,1);padding:12px 16px calc(18px + env(safe-area-inset-bottom));max-height:76vh;overflow:auto}
+#hz-cs.open{transform:none}
 /* ── phone (≤640px): render at device width, stop whole-page side-scroll, let nav wrap ── */
 @media (max-width:640px){
   html,body{overflow-x:hidden}
@@ -28,6 +33,8 @@ body{font-family:var(--font,system-ui,-apple-system,sans-serif);font-size:12px;c
      (#t); desktop and the buy plan are untouched (display-only CSS). */
   #t td.ptot-q,#t th.ptot-q,#t td.ptot-h,#t th.ptot-h{display:none !important}
   #t .fcrev{display:none !important}
+  #t td input[type="text"]{pointer-events:none}   /* v27.643: phone edits go through the tap→bottom-sheet, not the inline input */
+  #t td[class]:has([data-rk],[data-k]){cursor:pointer}
   #hz-topbar{display:flex !important}
   body.supply-on #hz-search{display:block}                /* search only useful inside SUPPLY */
   /* BUY / FBA plan (shared scaffold): collapse filters behind the "Filters" button, make the grid scroll,
@@ -14561,6 +14568,69 @@ function mobileFilterCollapse(container){
   }catch(e){}
 }
 if(typeof window!=='undefined')window.mobileFilterCollapse=mobileFilterCollapse;   // shared with the SUPPLY/Scenario module
+// ── Mobile M4 (Option A): tap a DEMAND plan cell on a phone → bottom sheet with LY / forecast / revenue, an override
+//    field and a Smooth-month action. Phone only (desktop taps still edit inline). Reuses the EXACT desktop write
+//    paths — IV override + refreshRow (identical to the cell input's change handler) and computeSmoothAlloc +
+//    applySmoothAlloc — so the buy plan behaves exactly as if edited on desktop. v27.643
+function _cse(x){ return String(x==null?'':x).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+function _csStat(lab,val){ return '<div style="background:var(--hover);border:1px solid var(--line2);border-radius:9px;padding:8px 10px"><div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;margin-bottom:2px">'+lab+'</div><div style="font-weight:800;font-size:15px">'+val+'</div></div>'; }
+function _csEls(){ if(!document.getElementById('hz-cs-back')){ var b=document.createElement('div'); b.id='hz-cs-back'; b.addEventListener('click',closeCellSheet); document.body.appendChild(b);
+    var s=document.createElement('div'); s.id='hz-cs'; document.body.appendChild(s); }
+  return {back:document.getElementById('hz-cs-back'), sheet:document.getElementById('hz-cs')}; }
+function closeCellSheet(){ var s=document.getElementById('hz-cs'), b=document.getElementById('hz-cs-back'); if(s)s.classList.remove('open'); if(b)b.classList.remove('open'); }
+function openCellSheet(td){ try{
+  var idEl=td.querySelector('[data-rk],[data-k]'); if(!idEl)return;
+  var rk=idEl.dataset.rk||idEl.dataset.k, p=(rk||'').split('|'); if(p.length<4)return;
+  var name=p[0],co=p[1],ch=p[2],fym=p[3], isSku=!!idEl.dataset.k;
+  var pm=pa(fym), lyKey=(pm.y-1)+'_'+fym.slice(5,7), sub=name, fc=0, ly=0;
+  if(!isSku){ var fu=(calc(name,co,ch).fu)||{}; fc=Math.round((fym===CUR_MONTH)?curMonthForecast(name,co,ch):(fu[fym]||0));
+    var a=ga(co,ch,name)||{}; ly=Math.round(expAct(name,co,ch,lyKey,a[lyKey]?(a[lyKey][0]||0):0).E); }
+  else { var tr=td.closest('tr'), pkk=tr&&tr.getAttribute('data-parentkey'); if(pkk)sub=pkk.split('|')[0];
+    var fo=skuOutFC(name,co,ch,fym); fc=Math.round(fo!=null?fo:0); var ssv=skuSales(name,co,ch)||{}; ly=Math.round(ssv[lyKey]||0); }
+  var growth=ly>0?Math.round((fc-ly)/ly*100):null;
+  var asp=getASP(co,ch,sub,pm.y,pm.mo)||0, fyS=(typeof fyStartOf==='function'?fyStartOf(fym):pm.y), rt=(typeof dispRate==='function'?(dispRate(fyS)||1):1), rev=Math.round(fc*asp*rt);
+  var sym=(typeof dispSym==='function'?(dispSym()||'£'):'£');
+  var MON=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'], mlab=MON[pm.mo-1]+" '"+fym.slice(2,4);
+  var gtag=growth==null?'':('<span style="font-weight:800;color:'+(growth>0?'var(--pos)':growth<0?'var(--neg)':'var(--muted)')+'">'+(growth>0?'+':'')+growth+'%</span>');
+  var curOv=(!isSku)?(IV[name+'|'+co+'|'+ch+'|'+fym]||''):'';
+  var els=_csEls(), s=els.sheet;
+  s.innerHTML='<div style="width:36px;height:4px;border-radius:3px;background:var(--line);margin:0 auto 12px"></div>'
+    +'<div style="font-weight:800;font-size:15px;margin-bottom:2px">'+_cse(sub)+(isSku?(' · '+_cse(name)):'')+'</div>'
+    +'<div style="font-size:12px;color:var(--muted);margin-bottom:12px">'+mlab+' · '+_cse(co)+' · '+_cse(ch)+(isSku?' · SKU':'')+'</div>'
+    +'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px">'
+      +_csStat('Forecast',fn(fc)+(gtag?(' <span style="font-size:11px">'+gtag+'</span>'):''))
+      +_csStat('Last year',fn(ly))+_csStat('Revenue',sym+fn(rev))+_csStat('Growth',growth==null?'—':((growth>0?'+':'')+growth+'%'))
+    +'</div>'
+    +(!isSku?('<label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px">Override <span style="opacity:.7">— a number, a % (e.g. 40), or &#39;12 for literal units</span></label>'
+      +'<input id="hz-cs-ov" type="text" value="'+_cse(curOv)+'" placeholder="'+(growth!=null?((growth>0?'+':'')+growth+'%'):'—')+'" style="width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid var(--line);border-radius:9px;font-size:16px;margin-bottom:12px;font-family:inherit">'):'<div style="font-size:11px;color:var(--faint);margin-bottom:12px">SKU-level overrides: edit on desktop. Smooth distributes the sub-category forecast across its SKUs.</div>')
+    +'<div style="display:flex;gap:8px">'
+      +(!isSku?'<button id="hz-cs-save" style="flex:1;padding:12px;border:0;border-radius:10px;background:var(--pos);color:#fff;font-weight:800;font-size:14px;cursor:pointer;font-family:inherit">Save override</button>':'')
+      +'<button id="hz-cs-smooth" style="flex:1;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--hover);color:var(--ink);font-weight:800;font-size:14px;cursor:pointer;font-family:inherit">Smooth month</button>'
+      +'<button id="hz-cs-close" style="flex:0 0 auto;padding:12px 15px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--muted);font-weight:700;font-size:14px;cursor:pointer;font-family:inherit">Close</button>'
+    +'</div>';
+  els.back.classList.add('open'); s.classList.add('open');
+  var _q=function(id){return s.querySelector(id);};
+  if(_q('#hz-cs-close'))_q('#hz-cs-close').onclick=closeCellSheet;
+  if(_q('#hz-cs-save'))_q('#hz-cs-save').onclick=function(){ var raw=(_q('#hz-cs-ov')||{}).value, oldU=fc;
+    try{ if(typeof undoMark==='function')undoMark(); if(typeof markDirty==='function')markDirty(); }catch(e){}
+    var v=parseInput(raw); IV[name+'|'+co+'|'+ch+'|'+fym]=(v==null?'':(typeof v==='string'?v:String(v)));
+    try{ refreshRow(name,co,ch); }catch(e){}
+    try{ var newU=Math.round(((calc(name,co,ch).fu)||{})[fym]||0); if(newU!==oldU&&typeof bufferChange==='function')bufferChange('subcat',name,co,ch,fym,'changed',oldU,newU); }catch(e){}
+    closeCellSheet(); try{ renderMain(); }catch(e){} };
+  if(_q('#hz-cs-smooth'))_q('#hz-cs-smooth').onclick=function(){
+    try{ if(typeof undoMark==='function')undoMark(); if(typeof markDirty==='function')markDirty();
+      var vals=computeSmoothAlloc(sub,co,ch,fym,{protectLeaders:(typeof SMOOTH_LEADER!=='undefined'?SMOOTH_LEADER:true)})||{};
+      var chg=applySmoothAlloc(co,ch,fym,vals)||[]; if(typeof logChangesBulk==='function'&&chg&&chg.length)logChangesBulk(chg);
+      try{ BUY_FC_STALE=true; }catch(e){} }catch(e){}
+    closeCellSheet(); try{ renderMain(); }catch(e){} };
+}catch(e){} }
+if(typeof document!=='undefined'){ document.addEventListener('click',function(ev){ try{
+  if(!(window.matchMedia&&window.matchMedia('(max-width:640px)').matches))return;   // phone only
+  var t=ev.target; if(!t||!t.closest)return; if(t.closest('#hz-cs'))return;
+  var td=t.closest('#t td'); if(!td||!td.querySelector('[data-rk],[data-k]'))return;   // a forecast cell
+  if(t.closest('.sku-toggle,button,a,.std'))return;   // let inline toggles/links work
+  ev.preventDefault(); ev.stopPropagation(); openCellSheet(td);
+}catch(e){} },true); }
 // ── STOCK AVAILABILITY report (REPORTS ▸ Stock Availability, and the top-right "SA" drawer) ──────────────
 // Country pills; all SKUs grouped by category; Status/Type/Launch/Disc (like the buy plan); SOH 3PL/FBA/AWD;
 // and the next 2 inbound deliveries to that market (qty · date · reference). All from client-side globals.
