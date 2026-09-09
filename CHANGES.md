@@ -1,3 +1,6 @@
+## v27.644 Mobile: un-stick the plan's stock column on phone (Ben)
+- On phones the DEMAND plan's **stock column (col 2, `.stk2`) was sticky** as well as the name column, eating horizontal space. Now only the name column (col 1, `.stk`) stays pinned on phone; the stock column scrolls with the table. Phone-gated (`#t th.stk2/td.stk2 → position:static`); desktop keeps both sticky.
+
 ## v27.643 Mobile: DEMAND plan cell bottom sheet (Option A, phase 3b) (Ben)
 - On phones, tapping a plan cell now opens a **bottom sheet** with **Forecast (+ growth%), Last year, Revenue, Growth**, plus an **Override** field and a **Smooth month** action (and Close). This surfaces the per-cell revenue that the plan-lite grid hides, and replaces fiddly inline editing on a phone.
 - Phone-gated: on phones the plan's inline text inputs are `pointer-events:none` and a capture-phase tap handler opens the sheet; **desktop is unchanged** (taps still edit inline; the handler early-returns off-phone).

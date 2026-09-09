@@ -35,6 +35,7 @@ body{font-family:var(--font,system-ui,-apple-system,sans-serif);font-size:12px;c
   #t .fcrev{display:none !important}
   #t td input[type="text"]{pointer-events:none}   /* v27.643: phone edits go through the tap→bottom-sheet, not the inline input */
   #t td[class]:has([data-rk],[data-k]){cursor:pointer}
+  #t thead th.stk2,#t td.stk2{position:static !important;left:auto !important}   /* v27.644: on a phone only the name column (col 1) stays pinned — the stock column (col 2) scrolls with the table (Ben) */
   #hz-topbar{display:flex !important}
   body.supply-on #hz-search{display:block}                /* search only useful inside SUPPLY */
   /* BUY / FBA plan (shared scaffold): collapse filters behind the "Filters" button, make the grid scroll,
