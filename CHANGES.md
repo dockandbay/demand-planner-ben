@@ -1,3 +1,9 @@
+## v27.642 Mobile: DEMAND plan-lite grid (Option A, phase 3a) (Ben)
+- On phones (≤640px) the DEMAND plan grid now drops the optional **quarter/half total columns** (extra width nobody scrolls to on a phone) and the **per-cell revenue line**, so each month cell reads as forecast + growth on two lines and more months fit on screen.
+- Scoped to the plan table (`#t`) only — desktop and the buy plan are untouched (display-only CSS, phone-gated).
+- This is the readable-grid half of Option A. The interactive half (tap a cell → bottom sheet with LY / mtd / revenue / override / smooth) is the next slice — it needs on-device review.
+- Builds on v27.573 (phone Filters toggle, full nav drawer, narrow name column). Verified: 0 JS errors on load.
+
 ## v27.641 HORIZON version badge — consistent across the whole site (Ben)
 - The version badge was **dark orange on DEMAND** but **light orange on SUPPLY, flashing dark→light on load**. Cause: two competing `.ver` rules — inject.html (golden `--prod`) vs hz-theme.css (light `--amber-bg`), the latter higher-specificity so it won *after* load (a colour + size flash).
 - **Fix — full sweep, everything now = golden `--prod` bg + `--nav` dark text, 2px 8px / 10px:**

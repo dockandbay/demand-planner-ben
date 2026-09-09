@@ -23,6 +23,11 @@ body{font-family:var(--font,system-ui,-apple-system,sans-serif);font-size:12px;c
   /* L2 sub-nav lives in the hamburger on phone (Ben) — not on the page. Every top view's L2 is mirrored in #hz-drawer. */
   #demand-tabs,#buymove-tabs,#scenario-subnav,#supply-subnav,#config-subs,#report-tabs,#product-subnav{display:none !important}
   #ver,.ver{display:none !important}                      /* sub-nav HORIZON version badge is redundant on phone — the top bar (#hz-ver) already shows it */
+  /* v27.642 DEMAND plan lite (phone): drop the optional quarter/half total columns (extra width nobody scrolls to on a
+     phone) and the per-cell revenue line, so each month cell reads as forecast + growth on two lines. Plan table only
+     (#t); desktop and the buy plan are untouched (display-only CSS). */
+  #t td.ptot-q,#t th.ptot-q,#t td.ptot-h,#t th.ptot-h{display:none !important}
+  #t .fcrev{display:none !important}
   #hz-topbar{display:flex !important}
   body.supply-on #hz-search{display:block}                /* search only useful inside SUPPLY */
   /* BUY / FBA plan (shared scaffold): collapse filters behind the "Filters" button, make the grid scroll,
