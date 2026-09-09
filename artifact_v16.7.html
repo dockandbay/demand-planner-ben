@@ -8022,14 +8022,13 @@ function _setCapTip(cn){
   return head+'\n'+lines.join('\n');
 }
 var SMOOTH_FALLBACK={};   // v27.546: months where smoothing had to use run-off SKUs because no active SKU exists (key co|ch|subcat|month)
-// A sub-category whose SKUs sold in this co/ch are ALL sets (e.g. MIXNMATCH). Smoothing such a sub-cat mixes the
-// exploded sub-cat target with box-basis SKU values and inflates the total (the two-totals model is designed but not
-// built), so smoothing is guarded off for these until it lands. Mixed sub-cats (masters + a few sets) are unaffected.
-function _isPureSetSubcat(s,co,ch){ try{ if(typeof SKUM==='undefined')return false; var ctry=String(co).toLowerCase(), chKey=ch==='DTC'?'d':ch==='FBA'?'f':ch==='ZAL'?'z':ch==='TIK'?'t':'b', any=false;
-  for(var sku in SKUM){ var p=SKUM[sku]; if(!p||p.s!==s)continue; var av=(p.av||{})[ctry]||''; if(av.indexOf(chKey)<0)continue; if(p.vt!=='SET')return false; any=true; } return any; }catch(e){ return false; } }
+// v27.637 — Set-aware smoothing (two-totals fix). A set SKU's row is a BOX unit that explodes to box×setSize garments,
+// while the sub-category forecast CELL is shown in EXPLODED units (expFc().E). Smoothing therefore runs its water-fill
+// in EXPLODED space (cur/cap/floor × setSize, target = the exploded cell) and divides each allocation back to boxes on
+// write — so the exploded row-sum equals the cell (e.g. MIXNMATCH stays 50, no longer inflates to 72). Sub-cats with no
+// sets (every setSize=1) take the identical box-basis path as before, byte-for-byte. (Replaces the v27.634 guard.)
 function computeSmoothAlloc(s,co,ch,m,opts){
   opts=opts||{};
-  if(!opts._retry && _isPureSetSubcat(s,co,ch)) return {};   // v27.634: no smoothing for pure set sub-cats (two-totals unbuilt) → return no allocation so it can't inflate the forecast
   // protectLeaders: when true, apply tier-aware floors so historically-strong SKUs
   // (high share of subcat × country × channel sales over ALL available history) get
   // pulled up to at least floorFactor × their historical share × tier target. The
@@ -8072,7 +8071,7 @@ function computeSmoothAlloc(s,co,ch,m,opts){
         if(bf>0) cur=bf;
       }
     }
-    return {sku:sku,cur:cur,cap:cap,floor:0,frozen:frozen,alloc:null};
+    return {sku:sku,cur:cur,cap:cap,floor:0,frozen:frozen,alloc:null,sz:(p.vt==='SET'?Math.max(1,_setSize(sku)):1)};
   });
 
   // Do-not-smooth locks (SKU-level): hold a locked SKU-cell at its current value — freeze it (so it
@@ -8173,6 +8172,17 @@ function computeSmoothAlloc(s,co,ch,m,opts){
     }
   }
 
+  // v27.637 — Set-aware pass: for a sub-cat containing sets, run the water-fill in EXPLODED units so its exploded
+  // row-sum lands on the exploded cell (expFc().E), then divide each allocation back to boxes on write. cur/cap/floor
+  // scale by setSize; masters (sz=1) are untouched. No sets → identical to the pre-fix box-basis path.
+  var _hasSet=items.some(function(it){return (it.sz||1)>1;});
+  if(_hasSet){
+    var _fcv=(m===CUR_MONTH)?curMonthForecast(s,co,ch):(FU[m]||0);
+    var _lockE=0; items.forEach(function(it){ if(it.locked)_lockE+=Math.max(0,it.cur)*(it.sz||1); });
+    target=Math.max(0, Math.round((expFc(s,co,ch,m,_fcv,ga(co,ch,s))||{E:_fcv}).E) - _lockE);   // exploded sub-cat target (the displayed cell)
+    items.forEach(function(it){ var z=it.sz||1; if(z<=1)return; it.cur=it.cur*z; if(it.cap!==Infinity)it.cap=it.cap*z; it.floor=it.floor*z; });
+  }
+
   // Capped proportional water-fill toward target, with optional floor enforcement.
   // Order of locking: (1) cap=0 → alloc=0; (2) iterate: lock items whose proportional
   // scaling would push them above cap or below floor, then re-scale the remainder.
@@ -8214,10 +8224,24 @@ function computeSmoothAlloc(s,co,ch,m,opts){
   }
   // Record any SETS the A-player cap actually held down this month (final alloc sits at the box ceiling), so the
   // gap-analysis tooltip / smooth review can explain "capped to A-player X units → excess moved to masters".
-  var _capNote=(function(){ var arr=items.filter(function(it){ return it.aPlayerCap!=null && SKUM[it.sku]&&SKUM[it.sku].vt==='SET' && it.alloc>=it.aPlayerCap && it.aPlayerCap<Infinity; }); return arr.length?{maxA:_maxAUnits, sets:arr.map(function(it){return {sku:it.sku, cap:it.alloc, sz:Math.max(1,_setSize(it.sku))};})}:null; })();
+  var _capNote=(function(){ var arr=items.filter(function(it){ var _ab=it.alloc/(it.sz||1); return it.aPlayerCap!=null && SKUM[it.sku]&&SKUM[it.sku].vt==='SET' && _ab>=it.aPlayerCap && it.aPlayerCap<Infinity; }); return arr.length?{maxA:_maxAUnits, sets:arr.map(function(it){return {sku:it.sku, cap:Math.round(it.alloc/(it.sz||1)), sz:Math.max(1,_setSize(it.sku))};})}:null; })();
   if(_capNote)SET_CAP_NOTES[co+'|'+ch+'|'+s+'|'+m]=_capNote; else delete SET_CAP_NOTES[co+'|'+ch+'|'+s+'|'+m];
   var out={};
-  items.forEach(function(it){ if(it.frozen)return; out[it.sku]=it.alloc; });
+  if(_hasSet){
+    // v27.637 — Integer-box rounding under the exploded target. Set boxes come in whole units of different sizes
+    // (2/3/4-SET), so dividing each exploded allocation by its size and rounding independently drifts the exploded
+    // row-sum off the cell (e.g. MIXNMATCH 100 → 128). Instead floor every SKU to whole boxes, then hand out the
+    // remaining exploded budget one box at a time to the largest fractional remainders, ONLY while a whole box still
+    // fits under target — so Σ(box×setSize) ≤ the exploded cell and the component buy is never inflated.
+    var act=items.filter(function(it){return !it.frozen;});
+    act.forEach(function(it){ var z=it.sz||1; var bx=it.alloc/z; it._fb=Math.floor(bx); it._rem=bx-it._fb; });
+    var budget=target - act.reduce(function(sm,it){return sm+it._fb*(it.sz||1);},0);   // exploded units left to place
+    act.slice().sort(function(a,b){return b._rem-a._rem;}).forEach(function(it){ var z=it.sz||1;
+      if(z<=budget){ var capBox=(it.cap===Infinity)?Infinity:Math.floor(it.cap/z); if(it._fb+1<=capBox){ it._fb+=1; budget-=z; } } });
+    act.forEach(function(it){ out[it.sku]=Math.max(0,it._fb); });
+  } else {
+    items.forEach(function(it){ if(it.frozen)return; out[it.sku]=it.alloc; });
+  }
   return out;
 }
 // Write a precomputed allocation map (sku -> units) as overrides for month m.
@@ -9088,7 +9112,6 @@ function insertInlineSkuRows(s,co,ch,afterTr){
         lnk.style.cssText='margin-top:1px;font-size:7px;line-height:1.2;font-weight:500;font-style:italic;color:var(--faint)';
         std.appendChild(lnk);
         std.onclick=function(e){e.stopPropagation();
-          if(_isPureSetSubcat(s,co,ch)){ _smoothSearchTip(e.clientX,e.clientY,'Smoothing isn’t supported for set categories yet — the two-totals model that keeps set boxes and exploded units consistent is still to build (it would otherwise inflate the total). Edit the set SKUs directly for now.'); return; }   // v27.634 set-subcat smoothing guard
           var o={};o[m]=computeSmoothAlloc(s,co,ch,m,{protectLeaders:SMOOTH_LEADER});
           if(!o[m]||!Object.keys(o[m]).length){ _smoothSearchTip(e.clientX,e.clientY,'Nothing to smooth for '+m.replace('_','-')+': every SKU here is pre-launch or has no run-off stock left, so no line can carry the sub-category forecast.'); return; }   // v27.546
           SMOOTH_PREVIEW={pk:parentKey,fy:null,months:o};reExpand();};
