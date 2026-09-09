@@ -11610,6 +11610,9 @@
         var completion = editing
           ? dateField(s.completion_required,{cls:'samp-fld', attrs:'data-field="completion_date_required"', width:'120px'})
           : '<span class="tiny"'+(s.overdue?' style="color:var(--neg);font-weight:700"':'')+'>'+(s.completion_required?fd(s.completion_required):'—')+'</span>';
+        var supExp = editing   // v27.657 (Ben): supplier expected completion date is editable admin-side too (saves to supplier_expected_completion via /api/supply/sample/:id)
+          ? dateField(s.supplier_expected,{cls:'samp-fld', attrs:'data-field="supplier_expected_completion"', width:'120px'})
+          : '<span class="tiny">'+(s.supplier_expected?fd(s.supplier_expected):'—')+'</span>';
         var _stu=carrierTrackUrl(s.carrier,s.tracking_code);   // dynamic tracking link: DHL / FedEx / UPS / SF Express
         var tracking = editing ? fld('tracking_code',s.tracking_code,150,'tracking') : '<span class="tiny">'+(s.tracking_code?(_stu?'<a href="'+_stu+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:700" title="track with '+esc(s.carrier||'carrier')+' ↗">'+esc(s.tracking_code)+' ↗</a>':esc(s.tracking_code)):'<span class="mut">—</span>')+'</span>';
         var carrier  = editing ? (fld('carrier',s.carrier,120,'carrier').replace('class="fci txt samp-fld"','class="fci txt samp-fld" list="samp-carrierlist"')) : '<span class="tiny">'+(s.carrier?esc(s.carrier):'<span class="mut">—</span>')+'</span>';
@@ -11649,7 +11652,7 @@
                   : _acc ? '<span class="tool-badge bg-green">✓ Approved</span>'+(s.accepted_at?' <span class="mut tiny">'+fd(s.accepted_at)+'</span>':'')
                   : '<span class="tool-badge bg-amber">Awaiting supplier approval</span>';
                 return '<div class="cli-row"><div class="cli-lbl">Supplier approval</div><div class="cli-val">'+b+'</div></div>'; })()
-            +'<div class="cli-row"><div class="cli-lbl">Supplier expected</div><div class="cli-val">'+(s.supplier_expected?fd(s.supplier_expected):'<span class="mut">—</span>')+'</div></div>'
+            +'<div class="cli-row"><div class="cli-lbl">Supplier expected</div><div class="cli-val">'+supExp+'</div></div>'
             +'<div class="cli-row"><div class="cli-lbl">Supplier status</div><div class="cli-val">'+(function(){ var _ps=s.production_status?prodStatusLabel(s.production_status):''; if(!_ps)return '<span class="mut">—</span>'; var _c=/ship/i.test(_ps)?['var(--pos-bg)','var(--pos)']:/plan|produc/i.test(_ps)?['#ffedd5','var(--amber)']:['var(--hover)','var(--muted)']; return '<span style="font-size:13px;font-weight:700;padding:3px 13px;border-radius:12px;background:'+_c[0]+';color:'+_c[1]+'">'+esc(_ps)+'</span>'; })()+'</div></div>'
             +'<div class="cli-row"><div class="cli-lbl">Our status</div><div class="cli-val">'+statusCtl+_sMk('supplier_shipped')+'</div></div>'
             +(setShip?'<div>'+setShip+'</div>':'')

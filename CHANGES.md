@@ -1,3 +1,6 @@
+## v27.657 Samples: supplier completion date editable admin-side too (Ben)
+- In the admin sample detail drawer (SUPPLY ▸ Samples), the "Supplier expected" completion date was **read-only** — now it's an editable date field, auto-saving to `supplier_expected_completion` via `/api/supply/sample/:id` (the endpoint already whitelisted the field and its comment even says "supplier expected"; the client just never exposed it). Same `.samp-fld` auto-save path as the Requested Completion Date. inject.html only; no server/migration change, no buy impact.
+
 ## v27.656 Order Plan table: wide enough for the REJECT button (Ben)
 - On a PO's Order Plan (`…/order-plan`) the last column (Confirm = Accept + ✕ Reject) was getting clipped. Widened the table wrapper `max-width` 1000 → 1240px and the Confirm column `min-width` 90 → 175px so both buttons show. `orderPlanPanel` in inject.html; display-only, no logic/buy change.
 
