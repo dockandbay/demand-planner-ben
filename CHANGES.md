@@ -1,3 +1,7 @@
+## v27.645 Mobile Phase 2: compact the DEMAND filter panel on phone (Ben)
+- On phones the DEMAND filter panel is tighter: the SKU search drops to its **own full-width line** (was a fixed 210px box mid-row), the Active/18m/All pills get **bigger tap targets**, and row gaps are reduced — so the panel isn't a full screen when opened. Phone-gated CSS; desktop unchanged.
+- Note: Actions is already card-based (v27.617) and Exceptions is a grouped tree-table (kept as a sideways-scroll grid on phone rather than force-carded), so the "cards" half of Phase 2 is a no-op / deferred.
+
 ## v27.644 Mobile: un-stick the plan's stock column on phone (Ben)
 - On phones the DEMAND plan's **stock column (col 2, `.stk2`) was sticky** as well as the name column, eating horizontal space. Now only the name column (col 1, `.stk`) stays pinned on phone; the stock column scrolls with the table. Phone-gated (`#t th.stk2/td.stk2 → position:static`); desktop keeps both sticky.
 

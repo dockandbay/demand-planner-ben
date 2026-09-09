@@ -36,6 +36,12 @@ body{font-family:var(--font,system-ui,-apple-system,sans-serif);font-size:12px;c
   #t td input[type="text"]{pointer-events:none}   /* v27.643: phone edits go through the tap→bottom-sheet, not the inline input */
   #t td[class]:has([data-rk],[data-k]){cursor:pointer}
   #t thead th.stk2,#t td.stk2{position:static !important;left:auto !important}   /* v27.644: on a phone only the name column (col 1) stays pinned — the stock column (col 2) scrolls with the table (Ben) */
+  /* v27.645 mobile Phase 2 — compact the DEMAND filter panel: SKU search on its own full-width line, tighter rows,
+     bigger tap targets on the Active/18m/All pills, so the panel isn't a full screen when opened. */
+  #app .mob-filt-panel{gap:6px !important}
+  #app #filters-row2{gap:5px !important;row-gap:6px}
+  #app #filters-row2 #plan-sku-qry{flex:1 1 100% !important;width:100% !important;box-sizing:border-box;order:9;font-size:13px;padding:8px 11px}
+  #app #filters-row2 .pill.catpill{padding:6px 13px}
   #hz-topbar{display:flex !important}
   body.supply-on #hz-search{display:block}                /* search only useful inside SUPPLY */
   /* BUY / FBA plan (shared scaffold): collapse filters behind the "Filters" button, make the grid scroll,
