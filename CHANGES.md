@@ -1,3 +1,8 @@
+## v27.650 Mobile bottom sheet: actuals months are read-only (Ben)
+- Opening the sheet on **a month of actuals** (`isActualMonth`) no longer offers **Override / Smooth / Do-not-smooth** — actuals are recorded sales and shouldn't be edited. The Forecast stat is relabelled **Actual**, and a note reads "Actuals month — recorded sales, nothing to edit." **Add note** and Close remain. (The subcat actual cell carries `data-rk`, so it did open the sheet with editable controls.)
+- Forecast months are unchanged (override + smooth + do-not-smooth as before).
+- Verified: actual-month sheet has no override/save/smooth/lock (has Add note + Close, says "Actual"); forecast-month sheet still fully editable; buy byte-identical; 0 JS errors.
+
 ## v27.649 Mobile bottom sheet: Do-not-smooth tick (SKU) + Add note (both) (Ben)
 - **SKU sheet**: the "Smooth month" button is replaced by a **"Do not smooth"** tickbox — toggles the SKU-cell's `SMOOTH_LOCKS[nk]` lock (held fixed when the sub-category is smoothed), persisted via `saveSmoothLocks()` + cell-rail refresh + change log, exactly like the desktop note-popup lock / bulk-lock.
 - **Both sheets** now have an **Add note** button → opens the proven cell-note popup (`openFcNotePopup`) on the tapped cell (same notes as double-clicking on desktop). Sub-cat sheet keeps Smooth month.
