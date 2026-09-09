@@ -1,3 +1,6 @@
+## v27.633 Create Production PO's: "alt recommendation" filter (Ben)
+- Added a "↻ alt recommendation (N)" filter tickbox to the Create-PO modal: shows only items whose live recommendation differs from the chosen quantity (the "↻ now N" hint). Generalised that hint so it now appears whenever chosen ≠ recommended on any shown country (was saved-project-only), with a tooltip that adapts (saved-project vs plain chosen-vs-recommended) and click-to-apply the recommended number. Display/filter only — no buy engine touched.
+
 ## v27.632 Demand plan: SKU filter no longer persists (independent of buy/FBA) (Ben)
 - The demand-plan SKU search was persisted to localStorage (hzPlanFilters, 1h) and restored at boot, so it "stuck" across sessions/navigation and read as linked to the buy/FBA plans. The demand plan now always starts with an empty, independent SKU filter (dropped skuq from hzPlanSave + hzPlanRestore). Country/channel/category (CUR/CF/SEL) persistence kept. NOTE: demand (PLAN_SKU_QRY) and buy/FBA (#qry / hzBuyFilters) were already separate variables + storage keys — no cross-read existed; buy↔FBA share the one #buy-wrap grid and keep their own persistence, as agreed. If any specific cross-over remains, need exact repro steps.
 
