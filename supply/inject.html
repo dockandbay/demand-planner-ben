@@ -11597,7 +11597,7 @@
           ? '<div style="margin-top:2px">'+PURP.map(function(p){return '<label style="margin-right:10px;font-size:11px;white-space:nowrap"><input type="checkbox" class="samp-purpose" value="'+p+'"'+(((s.purpose||[]).indexOf(p)>=0)?' checked':'')+'> '+p+'</label>';}).join('')+'</div>'
           : '<div class="tiny">'+esc((s.purpose||[]).join(', ')||'—')+'</div>';
         var notes = editing
-          ? '<textarea class="fci samp-fld" data-field="notes" rows="2" style="width:240px;text-align:left">'+esc(s.notes||'')+'</textarea>'
+          ? '<textarea class="fci samp-fld" data-field="notes" rows="6" style="width:100%;box-sizing:border-box;text-align:left;min-height:120px;resize:vertical">'+esc(s.notes||'')+'</textarea>'
           : '<div class="tiny" style="white-space:pre-wrap;background:var(--hover);border:1px solid var(--line2);border-radius:6px;padding:6px;max-width:260px">'+(s.notes?esc(s.notes):'<span class="mut">—</span>')+'</div>';
         var skus = editing
           ? '<div class="samp-lines"></div>'
@@ -11636,9 +11636,10 @@
         function tb(k,label){ return '<button class="rtab samp-tab'+(curTab===k?' active':'')+'" data-st="'+k+'">'+label+'</button>'; }
         function panel(k,html){ return '<div class="samp-panel" data-st="'+k+'"'+(curTab===k?'':' style="display:none"')+'>'+html+'</div>'; }
         var _scard='border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--card)';
-        var detailsPanel='<div class="samp-details-grid" style="display:grid;gap:14px;align-items:start">'
+        // v27.658 (Ben): two explicit columns so SKUs sits DIRECTLY under Other details (not aligned to the tall
+        // Status card). Left = Recipient / 2nd recipient / Status & Fulfilment; Right = Other details (Notes) / SKUs.
+        var _colL='<div style="display:grid;gap:14px;align-items:start;min-width:0">'
           +'<div style="'+_scard+'"><div class="sect-h">Recipient &amp; address</div>'+recip+'</div>'
-          +'<div style="'+_scard+'"><div class="sect-h">Other details</div>'+L('Purpose')+purpose+L('Notes')+notes+'</div>'   // sits right after Recipient so the two are together (Ben)
           +((s.recipient_company_2||s.tracking_code_2||s.address_line1_2)?'<div style="'+_scard+'"><div class="sect-h">Second recipient &amp; tracking <span class="mut tiny" style="font-weight:400">(supplier-added)</span></div>'
             +'<div class="tiny" style="line-height:1.65"><b>'+esc(s.recipient_company_2||'—')+'</b>'+(((s.first_name_2||'')+' '+(s.last_name_2||'')).trim()?'<br>'+esc(((s.first_name_2||'')+' '+(s.last_name_2||'')).trim()):'')+([s.address_line1_2,s.address_line2_2,s.city_2,s.region_2,s.postcode_2,s.country_2].filter(Boolean).length?'<br>'+esc([s.address_line1_2,s.address_line2_2,s.city_2,s.region_2,s.postcode_2,s.country_2].filter(Boolean).join(', ')):'')+(s.phone_2?'<br>☏ '+esc(s.phone_2):'')+'</div>'
             +'<div class="cli-row" style="margin-top:6px"><div class="cli-lbl">2nd tracking</div><div class="cli-val"><span class="tiny">'+(s.tracking_code_2?((carrierTrackUrl(s.carrier_2,s.tracking_code_2)?'<a href="'+carrierTrackUrl(s.carrier_2,s.tracking_code_2)+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:700">'+esc(s.tracking_code_2)+' ↗</a>':esc(s.tracking_code_2))+(s.carrier_2?' <span class="mut tiny">'+esc(s.carrier_2)+'</span>':'')):'<span class="mut">—</span>')+'</span></div></div></div>':'')
@@ -11658,8 +11659,12 @@
             +(setShip?'<div>'+setShip+'</div>':'')
             +(dateExc?'<div style="color:var(--neg);font-weight:700;font-size:11px;margin-top:4px">⚠ Overdue — completion / supplier-expected date has passed'+_sMk('date_overdue')+'</div>':'')
             +'<div style="margin-top:10px">'+actBtn+' <button class="save-btn light samp-del" data-id="'+id+'" style="color:var(--neg)">Delete</button></div></div>'
+          +'</div>';   // ← close left column
+        var _colR='<div style="display:grid;gap:14px;align-items:start;min-width:0">'   // right column: Other details (Notes) then SKUs directly under it (Ben)
+          +'<div style="'+_scard+'"><div class="sect-h">Other details</div>'+L('Purpose')+purpose+L('Notes')+notes+'</div>'
           +'<div style="'+_scard+'"><div class="sect-h">SKUs &amp; quantities</div>'+skus+'</div>'
           +'</div>';
+        var detailsPanel='<div class="samp-details-grid" style="display:grid;gap:14px;align-items:start">'+_colL+_colR+'</div>';
         var attachPanel='<div class="tiny" style="margin-bottom:6px">'+((d.attachments||[]).map(function(a){return '<span style="display:inline-block;margin:0 12px 4px 0"><a href="/api/supply/portal-attachment/'+a.id+'" target="_blank" rel="noopener">'+esc(a.filename||'file')+'</a> <a class="samp-att-rm" data-aid="'+a.id+'" title="remove" style="color:var(--neg);cursor:pointer">×</a></span>';}).join('')||'<span class="mut">no attachments yet</span>')+'</div>'
           +'<div><input type="file" class="samp-att-file" style="font-size:11px"> <button class="save-btn samp-att-up">Upload attachment</button></div>';
         var chargesPanel='<div class="tw"><table><thead><tr><th class="l">Status</th><th class="l">Freight</th><th class="l">Product</th><th class="l">Total</th><th class="l">Description</th><th class="l"></th></tr></thead><tbody>'+charges+'</tbody></table></div>'

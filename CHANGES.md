@@ -1,3 +1,8 @@
+## v27.658 Samples detail: SKUs under Other details + bigger Notes box (Ben)
+- Sample detail drawer laid out as **two explicit columns** so **SKUs & quantities sits directly under Other details** (instead of aligning to the tall Status & Fulfilment card, which left a gap). Left column = Recipient / 2nd recipient / Status & Fulfilment; right column = Other details (with Notes) / SKUs. Still 2-col desktop, 1-col on phone.
+- **Notes** textarea enlarged: `rows` 2 → 6, full-width, `min-height:120px`, vertically resizable.
+- inject.html only; no server/migration, no buy impact. 0 JS errors.
+
 ## v27.657 Samples: supplier completion date editable admin-side too (Ben)
 - In the admin sample detail drawer (SUPPLY ▸ Samples), the "Supplier expected" completion date was **read-only** — now it's an editable date field, auto-saving to `supplier_expected_completion` via `/api/supply/sample/:id` (the endpoint already whitelisted the field and its comment even says "supplier expected"; the client just never exposed it). Same `.samp-fld` auto-save path as the Requested Completion Date. inject.html only; no server/migration change, no buy impact.
 
