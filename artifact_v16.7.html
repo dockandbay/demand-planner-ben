@@ -9550,12 +9550,12 @@ function fillPlanRwSel(){ var sel=document.getElementById('plan-rw-sel'); if(!se
 // page keeps your view. Saved on each plan render; restored in init() before the first render (syncTabs +
 // renderCatControl then redraw the pills from the restored state).
 function hzPlanSave(){ try{ if(typeof VIEW_MODE!=='undefined'&&VIEW_MODE!=='planning')return;
-  localStorage.setItem('hzPlanFilters', JSON.stringify({ t:Date.now(), CUR:CUR, CF:CF, SEL:Array.from(SEL||[]), skuq:PLAN_SKU_QRY||'' })); }catch(e){} }
+  localStorage.setItem('hzPlanFilters', JSON.stringify({ t:Date.now(), CUR:CUR, CF:CF, SEL:Array.from(SEL||[]) })); }catch(e){} }   // v27.632: SKU search no longer persisted — the demand-plan SKU filter is independent, never carried between plans (Ben)
 function hzPlanRestore(){ try{ var raw=localStorage.getItem('hzPlanFilters'); if(!raw)return; var f=JSON.parse(raw);
   if(!f||(Date.now()-(f.t||0))>3600000)return;   // 1-hour TTL
   if(f.CUR)CUR=f.CUR; if(f.CF)CF=f.CF;
   if(Array.isArray(f.SEL)&&f.SEL.length)SEL=new Set(f.SEL);
-  if(typeof f.skuq==='string'){ PLAN_SKU_QRY=f.skuq; var _si=document.getElementById('plan-sku-qry'); if(_si)_si.value=f.skuq; } }catch(e){} }
+  PLAN_SKU_QRY=''; }catch(e){} }   // v27.632: always start the demand plan with an empty, independent SKU filter (never restore/carry it)
 
 function setPlanActiveStart(v){SKU_FILTER.startDate=v||'';renderMain();}
 function setPlanActiveEnd(v){SKU_FILTER.endDate=v||'';renderMain();}
