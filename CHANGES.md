@@ -1,3 +1,7 @@
+## v27.639 Supplier portal: L2 band flush to L1 + bilingual labels inline (Ben)
+- Removed the white gap between the dark L1 brand bar and the grey L2 tab band — `#pv-wrap` top padding → 0 and `#supply-root` top padding → 0, so the L2 band sits flush under the black bar.
+- Bilingual menu labels (China suppliers): 中文 now shows **inline after** the English, not stacked below (ample width). Standalone portal: added `#supply-root .pp-bi` row rules in portal-view.js `STYLE`. Admin embed: hz-theme.css `.pp-bi` switched `flex-direction:column` → `row`.
+
 ## v27.638 Supplier portal: L2 tab bar as a full-width light-grey band (Ben)
 - The level-2 tabs (Purchase Orders / Shipment Plan / Deposits / Payments / Productions / Sample shipments / Quality Control / Product / Specifications) now sit on a **full-width light-grey band** (`#f6f8fa`, full-bleed to the `#pv-wrap` edge), directly under the black L1 brand bar — a clear 3-level hierarchy.
 - Active/hover on L2 are now **neutral dark (slate)**, not blue. Light blue stays **reserved for the L3 sub-tabs** (PO detail, product detail), per Ben.

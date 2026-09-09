@@ -436,7 +436,7 @@
         next();
       });
     }); }
-  var STYLE=`#supply-root{display:none;font-size:12px;color:#1a1a1a;padding-top:4px;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+  var STYLE=`#supply-root{display:none;font-size:12px;color:#1a1a1a;padding-top:0;-webkit-text-size-adjust:100%;text-size-adjust:100%}
 #supply-root .stab{background:transparent;border:none;padding:6px 13px;font-size:12px;font-weight:500;cursor:pointer;color:#888;border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit}
 #supply-root .stab:hover{color:#1a1a1a}
 #supply-root .stab.active{color:#1a1a1a;border-bottom-color:#1a1a1a;font-weight:600}
@@ -474,6 +474,9 @@
 #supply-root #pp-tabs .rtab{color:#475569;font-weight:600;font-size:12px;border-bottom:2px solid transparent}
 #supply-root #pp-tabs .rtab:hover{color:#0f172a}
 #supply-root #pp-tabs .rtab.active{color:#0f172a;border-bottom-color:#0f172a;font-weight:700}
+/* v27.639 — bilingual menu labels (China suppliers): show 中文 INLINE after the English, not stacked below (ample width). */
+#supply-root .pp-bi{display:inline-flex;flex-direction:row;align-items:baseline;gap:5px}
+#supply-root .pp-bi .pp-zh{font-size:10px;font-weight:500;letter-spacing:0;text-transform:none;color:#94a3b8}
 #supply-root #op-status,#supply-root #op-country{display:inline-flex;flex-wrap:wrap;gap:6px;align-items:center}
 #supply-root .flt{border:1px solid #d0d0d0;border-radius:4px;padding:4px 9px;font-size:11px;font-family:inherit;width:230px}
 #supply-root .save-btn{font-size:11px;padding:4px 12px;cursor:pointer;border:1px solid #ccc;border-radius:4px;background:#fff;font-weight:600;font-family:inherit}
