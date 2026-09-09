@@ -1,3 +1,7 @@
+## v27.628 Buy v2: grid-card frame + buy-plan popup selected-cell contrast (Ben)
+- **Buy v2 (chrome only, no buy engine touched):** the buy grid wrapper (#buy-wrap .tw) gets the canvas card frame (12px radius + soft shadow), matching the demand plan (v27.618) and the Buy v2 canvas. The full toolbar/grouped-grid rebuild is deliberately left as a larger dedicated task (crown-jewel, buy-logic-coupled page).
+- **Buy-plan popup follow-up to v27.626:** clicking a strong-red cell adds `.cellsel` which forces `background:var(--blue-soft)` (near-white), leaving the white text invisible (white-on-white). Selected `red-dk`/`clo-dk` cells now use dark-red text on the light selection background. CSS only.
+
 ## v27.627 P2 Inventory v2 panels: dark-mode fixes (Ben)
 - Follow-on to the v27.624 pill fix. Fixed the genuine dark-mode breakers in the BUY & MOVE ▸ INVENTORY panels: the FBA-Aged filter pills (`_fpill`) were hardcoded white-on-dark-text (same class of bug as the market pills) → tokenised (selected var(--nav)/white, rest card bg + line border + muted); the 3PL "Manage" report cards + the "not in product list" toggle used `background:#fff` / `#fff7ed` (white/orange in dark mode) → var(--card) / var(--amber-bg). Ran the token codemod over the panel renderers (renderInvStatus, fbaListTbl) mapping 5 more hard-coded hex → tokens. NOTE: the remaining scattered `#e5e7eb`/`#cbd5e1` light borders/greys are an app-wide residual (subtle in dark mode), a separate codemod task — not inventory-specific. Verified: panels render, 0 JS errors.
 
