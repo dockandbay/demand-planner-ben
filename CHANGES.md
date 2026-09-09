@@ -1,3 +1,8 @@
+## v27.655 Urgent Buy report: exclude SETS (Ben) — SERVER change
+- The Urgent Buy report (SUPPLY ▸ Reports ▸ Urgent Buy, `/api/supply/bi/projection`) was listing build-on-fly **set** SKUs (e.g. GIFT-BOX-HOME-CHRYBMB-SET). A set is never bought directly (it explodes into its component SKUs), so it must not appear. `_biProjectionCompute` now skips any SKU with `variant_type='SET'` (plus any `set_bom` output SKU for safety). `variant_type` is the reliable flag — some sets have 0 `set_bom` rows.
+- Also drops sets from the URGENT BUY critical-count badge (it's set from the same rows).
+- **server.mjs change — needs a server restart on deploy (no migration).** Verified against sandbox: 235 set SKUs, projection returns 864 rows with 0 sets remaining (was including them).
+
 ## v27.654 Summary & targets: currency pill selects immediately (Ben)
 - On the Summary, switching to US (or EU/AU) and clicking the local-currency pill (e.g. USD) didn't visibly select — the change only showed after switching tabs. Cause: the pill called `setDispCcy()`, which re-renders the **plan**, not the Summary you're on. Now the Summary's currency pill sets + persists `SUMM_CCY` (same global setting/key) and re-renders the **Summary** (like its other pills) + refreshes the DEMAND nav pill. Verified: on US, clicking USD flips the active pill to USD immediately; 0 JS errors. Display-only, no buy impact.
 

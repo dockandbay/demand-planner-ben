@@ -14482,9 +14482,16 @@ async function _biProjectionCompute() {
     FROM planner.products`)).rows
     .forEach(r => { const pl = Number(r.pl) || 0; lead[r.sku] = { UK: pl + (Number(r.uk) || 0), US: pl + (Number(r.us) || 0), EU: pl + (Number(r.eu) || 0), AU: pl + (Number(r.au) || 0), CA: pl + (Number(r.ca) || 0) }; });
   const WK_PER_MO = 4.345, DEF_WK = 12;
+  // Exclude build-on-fly SETS — a set is never bought directly (it explodes into its component SKUs), so it must not
+  // appear in urgent buy (Ben: GIFT-BOX-HOME-CHRYBMB-SET etc.). variant_type='SET' is the reliable flag (some sets have
+  // no set_bom rows); also fold in any set_bom output SKU for safety.
+  const setSkus = new Set();
+  (await pool.query(`SELECT sku FROM planner.products WHERE upper(coalesce(variant_type,''))='SET'`)).rows.forEach(r => setSkus.add(r.sku));
+  (await pool.query(`SELECT DISTINCT output_sku FROM planner.set_bom`)).rows.forEach(r => setSkus.add(r.output_sku));
   const rows = [];
   for (const sku of Object.keys(prods)) {
     const p = prods[sku]; if (!p.act) continue;
+    if (setSkus.has(sku)) continue;   // SETS never buy directly — hide from urgent buy
     const oh = {}, dm = {}, twNum = {}, twDen = {};   // twNum/twDen → demand-weighted target weeks per country
     // Urgent buy = the buy plan's "target stock on hand" = 3PL Target Units (cover × weekly 3PL demand), so scope to the
     // 3PL pool (_3pl + _nongrs). A SKU with no 3PL demand/target (e.g. DTC-unavailable, FBA-only) then has target 0 and
