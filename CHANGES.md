@@ -1,3 +1,6 @@
+## v27.659 White line above the HORIZON bar — actual fix (Diviyaj/Ben)
+- v27.652 (body margin:0) wasn't enough: the dark `#view-tabs-row` bar is nested inside a **flex wrapper** div, which neutralises the bar's `margin-top:-8px`, so `#app`'s 8px `padding-top` showed as a white strip above the bar. Fix: dropped the bar's dead `-8px` top (→ `margin:0 -10px 6px`) and pull the wrapper up instead — tagged it `.hz-topwrap` and added `@media (min-width:641px){#app .hz-topwrap{margin-top:-8px}}`, so the bar sits flush to the top. Desktop-only (phone uses the fixed `#hz-topbar` + `.wrap` padding-top:52px). 0 JS errors.
+
 ## v27.658 Samples detail: SKUs under Other details + bigger Notes box (Ben)
 - Sample detail drawer laid out as **two explicit columns** so **SKUs & quantities sits directly under Other details** (instead of aligning to the tall Status & Fulfilment card, which left a gap). Left column = Recipient / 2nd recipient / Status & Fulfilment; right column = Other details (with Notes) / SKUs. Still 2-col desktop, 1-col on phone.
 - **Notes** textarea enlarged: `rows` 2 → 6, full-width, `min-height:120px`, vertically resizable.
@@ -12,7 +15,7 @@
 ## v27.655 Urgent Buy report: exclude SETS (Ben) — SERVER change
 - The Urgent Buy report (SUPPLY ▸ Reports ▸ Urgent Buy, `/api/supply/bi/projection`) was listing build-on-fly **set** SKUs (e.g. GIFT-BOX-HOME-CHRYBMB-SET). A set is never bought directly (it explodes into its component SKUs), so it must not appear. `_biProjectionCompute` now skips any SKU with `variant_type='SET'` (plus any `set_bom` output SKU for safety). `variant_type` is the reliable flag — some sets have 0 `set_bom` rows.
 - Also drops sets from the URGENT BUY critical-count badge (it's set from the same rows).
-- **server.mjs change — needs a server restart on deploy (no migration).** Verified against sandbox: 235 set SKUs, projection returns 864 rows with 0 sets remaining (was including them).
+- **server.mjs change — needs a server restart on deploy (no migration).** Behaviour verified (SET variants excluded, MASTER gift boxes kept). **Magnitude (Diviyaj, sandbox):** report **1,129 → 876 rows**, URGENT BUY critical count **84 → 46**. Sandbox has ~996 SET-flagged SKUs + 287 `set_bom` outputs; prod has ~265 in-scope set SKUs of 949, so expect a similar/bigger drop — the change is correct, not a break. (An earlier note's "235 set SKUs / 864 rows" was a mis-count.)
 
 ## v27.654 Summary & targets: currency pill selects immediately (Ben)
 - On the Summary, switching to US (or EU/AU) and clicking the local-currency pill (e.g. USD) didn't visibly select — the change only showed after switching tabs. Cause: the pill called `setDispCcy()`, which re-renders the **plan**, not the Summary you're on. Now the Summary's currency pill sets + persists `SUMM_CCY` (same global setting/key) and re-renders the **Summary** (like its other pills) + refreshes the DEMAND nav pill. Verified: on US, clicking USD flips the active pill to USD immediately; 0 JS errors. Display-only, no buy impact.
