@@ -1,3 +1,7 @@
+## v27.653 Mobile Phase 4: DEMAND Trends filter bar collapses on phone (Ben)
+- On phones the wide **Trends** filter bar (Country / Group / Categories / View / Months / Min units / toggles / Compare) now sits behind the shared **⚙ Filters** button (`mobileFilterCollapse`), so it isn't a full-screen wall. The four panel tabs (Channel mix / Type mix / Multi-year / Plan sanity) and the panel content stay visible. The panels themselves already suit a phone — KPI stat boxes wrap and the tables scroll sideways.
+- Phone-gated (desktop shows the full bar); Trends is a report view (not in the buy path). Verified: ⚙ Filters toggle appears with the controls inside it, tabs stay visible; 0 JS errors.
+
 ## v27.652 Remove white line above the HORIZON bar (Diviyaj note)
 - The dark HORIZON top bar had a thin white strip above it. Cause: `body` had no margin reset, so the browser's default 8px body margin showed above `#app` — the `#view-tabs-row{margin:-8px…}` bleed only cancels the `.wrap` padding, not the body margin. Fix: `margin:0` on `body` (hz-theme.css `html body` — loaded in production — and the artifact's own `body` as a fallback). The bar now sits flush at the top (and full-bleed to the sides). Desktop + mobile verified; 0 JS errors.
 

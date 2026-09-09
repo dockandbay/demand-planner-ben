@@ -10022,6 +10022,7 @@ function renderTrendsView(body){
     if(TRENDS_PANEL==='type-mix'){ _trendsTypeMix(host); return; }
     host.innerHTML=''; }
   drawPanel();
+  try{ if(typeof mobileFilterCollapse==='function')mobileFilterCollapse(body); }catch(e){}   // v27.653 phone: Trends filter bar behind the shared ⚙ Filters button (panels + tabs stay visible)
 }
 // Trends filters shared: category-group match (planner.categories.grouping via CAT_GROUPING) + exclude discontinued
 // (is_active=false) categories from the trend analysis. Unmapped is governed by its own toggle, not these.
