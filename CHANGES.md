@@ -1,3 +1,6 @@
+## v27.656 Order Plan table: wide enough for the REJECT button (Ben)
+- On a PO's Order Plan (`…/order-plan`) the last column (Confirm = Accept + ✕ Reject) was getting clipped. Widened the table wrapper `max-width` 1000 → 1240px and the Confirm column `min-width` 90 → 175px so both buttons show. `orderPlanPanel` in inject.html; display-only, no logic/buy change.
+
 ## v27.655 Urgent Buy report: exclude SETS (Ben) — SERVER change
 - The Urgent Buy report (SUPPLY ▸ Reports ▸ Urgent Buy, `/api/supply/bi/projection`) was listing build-on-fly **set** SKUs (e.g. GIFT-BOX-HOME-CHRYBMB-SET). A set is never bought directly (it explodes into its component SKUs), so it must not appear. `_biProjectionCompute` now skips any SKU with `variant_type='SET'` (plus any `set_bom` output SKU for safety). `variant_type` is the reliable flag — some sets have 0 `set_bom` rows.
 - Also drops sets from the URGENT BUY critical-count badge (it's set from the same rows).
