@@ -1,3 +1,8 @@
+## v27.648 Mobile: bottom sheet now works for SKU cells too (Ben)
+- The plan cell bottom sheet now opens on **SKU rows** as well as sub-category rows, with a working **Override** field. Previously SKU cells didn't open the sheet at all (the handler only matched `[data-rk]`/`[data-k]`, but SKU inline cells identify by `input[data-ovkey]`).
+- SKU sheet shows "Sub-cat · SKU", the effective forecast (override, else the base cascade from the cell's `data-ly`), LY, revenue, growth; Override writes via the **exact desktop path** (`skuCommitOv(ovkey, raw, base)` — supports a units figure or a % of the base — then `refreshRow`), and Smooth still distributes the sub-category across its SKUs.
+- Verified: SKU sheet opens with correct live data (TEATWL-MD-2SETC-SS27 · FC 137 · £1,887 · override field present) and sub-cat cells unchanged; **buy byte-identical**; 0 JS errors.
+
 ## v27.647 Mobile Phase 4: narrow the Summary name column on phone (Ben)
 - DEMAND Summary & targets already pins its sub-category name column, but at `min-width:230px` — too wide on a phone. On phones it's now narrowed to ~112px and wraps, so more period columns are reachable (matches the plan's narrow name column). Phone-gated; desktop unchanged. 0 JS errors.
 - First slice of Phase 4 (Summary/Trends phone). Fuller read-only phone layouts (KPI tiles + charts) still to come.
