@@ -14601,6 +14601,7 @@ function openCellSheet(td){ try{
   var p=(rk||'').split('|'); if(p.length<4)return;
   var name=p[0],co=p[1],ch=p[2],fym=p[3];
   var pm=pa(fym), lyKey=(pm.y-1)+'_'+fym.slice(5,7), sub=name, fc=0, ly=0, skuOvKey='', skuBase=0, skuCurOv='';
+  var nk=(td.dataset&&td.dataset.nk)||((isSku?'sku':'subcat')+'|'+name+'|'+co+'|'+ch+'|'+fym);   // note + do-not-smooth key
   if(!isSku){ var fu=(calc(name,co,ch).fu)||{}; fc=Math.round((fym===CUR_MONTH)?curMonthForecast(name,co,ch):(fu[fym]||0));
     var a=ga(co,ch,name)||{}; ly=Math.round(expAct(name,co,ch,lyKey,a[lyKey]?(a[lyKey][0]||0):0).E); }
   else { var tr=td.closest('tr'), pkk=tr&&tr.getAttribute('data-parentkey'); if(pkk)sub=pkk.split('|')[0];
@@ -14625,14 +14626,21 @@ function openCellSheet(td){ try{
     +'</div>'
     +'<label style="display:block;font-size:11px;color:var(--muted);margin-bottom:4px">Override <span style="opacity:.7">— '+ovHint+'</span></label>'
     +'<input id="hz-cs-ov" type="text" value="'+_cse(ovVal)+'" placeholder="'+_cse(ovPh)+'" style="width:100%;box-sizing:border-box;padding:11px 12px;border:1px solid var(--line);border-radius:9px;font-size:16px;margin-bottom:12px;font-family:inherit">'
-    +'<div style="display:flex;gap:8px">'
-      +'<button id="hz-cs-save" style="flex:1;padding:12px;border:0;border-radius:10px;background:var(--pos);color:#fff;font-weight:800;font-size:14px;cursor:pointer;font-family:inherit">Save override</button>'
-      +'<button id="hz-cs-smooth" style="flex:1;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--hover);color:var(--ink);font-weight:800;font-size:14px;cursor:pointer;font-family:inherit">Smooth month</button>'
-      +'<button id="hz-cs-close" style="flex:0 0 auto;padding:12px 15px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--muted);font-weight:700;font-size:14px;cursor:pointer;font-family:inherit">Close</button>'
+    +(isSku?('<label style="display:flex;align-items:center;gap:9px;padding:11px 12px;margin-bottom:10px;border:1px solid var(--line);border-radius:9px;cursor:pointer;font-size:13px;font-weight:700;color:var(--ink)"><input type="checkbox" id="hz-cs-lock" '+(SMOOTH_LOCKS[nk]?'checked':'')+' style="width:18px;height:18px;flex:0 0 auto">Do not smooth <span style="opacity:.6;font-weight:400;font-size:11px">— held fixed when this sub-category is smoothed</span></label>'):'')
+    +'<div style="display:flex;gap:8px;flex-wrap:wrap">'
+      +'<button id="hz-cs-save" style="flex:1 1 46%;padding:12px;border:0;border-radius:10px;background:var(--pos);color:#fff;font-weight:800;font-size:14px;cursor:pointer;font-family:inherit">Save override</button>'
+      +(isSku?'':'<button id="hz-cs-smooth" style="flex:1 1 46%;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--hover);color:var(--ink);font-weight:800;font-size:14px;cursor:pointer;font-family:inherit">Smooth month</button>')
+      +'<button id="hz-cs-note" style="flex:1 1 46%;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);font-weight:800;font-size:14px;cursor:pointer;font-family:inherit">Add note</button>'
+      +'<button id="hz-cs-close" style="flex:1 1 46%;padding:12px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--muted);font-weight:700;font-size:14px;cursor:pointer;font-family:inherit">Close</button>'
     +'</div>';
   els.back.classList.add('open'); s.classList.add('open');
   var _q=function(id){return s.querySelector(id);};
   if(_q('#hz-cs-close'))_q('#hz-cs-close').onclick=closeCellSheet;
+  if(_q('#hz-cs-lock'))_q('#hz-cs-lock').onchange=function(){   // do-not-smooth lock (same as the note popup's lock + the desktop bulk lock)
+    try{ if(typeof SMOOTH_LOCKS==='undefined')window.SMOOTH_LOCKS={}; if(this.checked)SMOOTH_LOCKS[nk]=true; else delete SMOOTH_LOCKS[nk];
+      if(typeof saveSmoothLocks==='function')saveSmoothLocks(); if(typeof refreshCellRail==='function')refreshCellRail(nk);
+      if(typeof logChange==='function')logChange(isSku?'sku':'subcat',name,co,ch,fym,this.checked?'locked':'unlocked',null,null); }catch(e){} };
+  if(_q('#hz-cs-note'))_q('#hz-cs-note').onclick=function(){ closeCellSheet(); try{ openFcNotePopup(td); }catch(e){} };   // reuse the proven cell-note popup on the tapped cell
   if(_q('#hz-cs-save'))_q('#hz-cs-save').onclick=function(){ var raw=(_q('#hz-cs-ov')||{}).value, oldU=fc;
     if(isSku){ try{ skuCommitOv(skuOvKey, raw, skuBase); }catch(e){}   // same path as the desktop SKU input (skuCommitOv handles undo/dirty + % vs base)
       try{ refreshRow(sub,co,ch); }catch(e){} try{ BUY_FC_STALE=true; }catch(e){} }

@@ -1,3 +1,8 @@
+## v27.649 Mobile bottom sheet: Do-not-smooth tick (SKU) + Add note (both) (Ben)
+- **SKU sheet**: the "Smooth month" button is replaced by a **"Do not smooth"** tickbox — toggles the SKU-cell's `SMOOTH_LOCKS[nk]` lock (held fixed when the sub-category is smoothed), persisted via `saveSmoothLocks()` + cell-rail refresh + change log, exactly like the desktop note-popup lock / bulk-lock.
+- **Both sheets** now have an **Add note** button → opens the proven cell-note popup (`openFcNotePopup`) on the tapped cell (same notes as double-clicking on desktop). Sub-cat sheet keeps Smooth month.
+- Verified: sub-cat sheet = Save/Smooth/Add note (no lock); SKU sheet = Save/Do-not-smooth/Add note (no smooth); buy byte-identical; 0 JS errors.
+
 ## v27.648 Mobile: bottom sheet now works for SKU cells too (Ben)
 - The plan cell bottom sheet now opens on **SKU rows** as well as sub-category rows, with a working **Override** field. Previously SKU cells didn't open the sheet at all (the handler only matched `[data-rk]`/`[data-k]`, but SKU inline cells identify by `input[data-ovkey]`).
 - SKU sheet shows "Sub-cat · SKU", the effective forecast (override, else the base cascade from the cell's `data-ly`), LY, revenue, growth; Override writes via the **exact desktop path** (`skuCommitOv(ovkey, raw, base)` — supports a units figure or a % of the base — then `refreshRow`), and Smooth still distributes the sub-category across its SKUs.
