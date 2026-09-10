@@ -9921,6 +9921,7 @@
     var bits=ean13Pattern(code);
     // barcode anchored near the bottom, just above the address block (not floating mid-label)
     var by=Math.max(y, H-230);   // barcode sits higher so its digits don't overlap the address block at the bottom
+    if(r.pn){ el.push(svgText(cx,by-16,String(r.pn),{size:22,bold:true,anchor:'middle',ls:1.5})); }   // v27.660: custom part number, printed just above the barcode (Ben)
     if(bits){ var m=4.5,bw=95*m,bx=(W-bw)/2,nH=85,gExt=22; el.push(eanBars(code,bx,by,m,nH,gExt)); var dbl=by+nH+30,c=String(code).replace(/\D/g,''); if(c.length===12)c='0'+c;
       el.push(svgText(bx-8,dbl,c[0],{size:30,anchor:'end'}));
       el.push(svgText(bx+24*m,dbl,c.slice(1,7),{size:30,anchor:'middle',ls:2}));
@@ -10009,6 +10010,7 @@
     if(kind==='carton' && r.grs_material){ var gy=afterSku+30; wrapLines(r.grs_material,72).slice(0,4).forEach(function(ln){ el.push(svgText(40,gy,ln,{size:9,fill:'#444'})); gy+=12; }); }
     // barcode
     var m=5,bx=(W-95*m)/2,byc=232,nH=80,gExt=20,H=355;
+    if(r.pn){ el.push(svgText(W/2,byc-13,String(r.pn),{size:19,bold:true,anchor:'middle',ls:1.5})); }   // v27.660: custom part number, printed just above the barcode (Ben)
     var bars=eanBars(code,bx,byc,m,nH,gExt);
     if(bars){ el.push(bars); var dbl=byc+nH+30, c=String(code).replace(/\D/g,''); if(c.length===12)c='0'+c;
       el.push(svgText(bx-8,dbl,c[0],{size:33,anchor:'end'}));
@@ -10434,7 +10436,7 @@
       // untouched fields are blanked so bcDownloadAll (per-kind) generates ONLY the ticked barcode(s).
       function bcItems(skus){ var sk={}; rows.forEach(function(r){ sk[r.sku]=r; }); var out=[];
         skus.forEach(function(s){ var r=sk[s], o=state.map[s]; if(!r||!o)return; var cl=Object.assign({},r);
-          cl.product_barcode=o.types.product?String(o.num):''; cl.carton_barcode=o.types.carton?String(o.num):''; cl.inner_barcode=o.types.inner?String(o.num):'';
+          cl.product_barcode=o.types.product?String(o.num):''; cl.carton_barcode=o.types.carton?String(o.num):''; cl.inner_barcode=o.types.inner?String(o.num):''; cl.pn=o.pn||'';   // v27.660: part number onto the label row
           if(cl.product_barcode||cl.carton_barcode||cl.inner_barcode)out.push(cl); }); return out; }
       function bcDownload(skus,btn){ offerParseFirst(); var items=bcItems(skus); var msg=dr.querySelector('#bcx-msg');
         if(!items.length){ if(msg){msg.style.color='var(--amber)';msg.textContent='nothing to download — check the SKU is in view and a barcode is ticked';} return; }
@@ -10448,6 +10450,7 @@
         var rowsH=keys.map(function(s){ var o=state.map[s], match=!!sk[s];
           return '<tr><td style="text-align:left;padding:3px 6px;white-space:nowrap" class="bc-mono">'+esc(s)+(match?'':' <span style="color:var(--amber)" title="not in the current view">⚠</span>')+'</td>'
             +'<td style="text-align:left;padding:3px 6px"><input class="bcx-num" data-sku="'+esc(s)+'" value="'+esc(o.num)+'" style="width:135px;font:12px ui-monospace,Menlo,monospace;'+_bd+'"></td>'
+            +'<td style="text-align:left;padding:3px 6px"><input class="bcx-pn" data-sku="'+esc(s)+'" value="'+esc(o.pn||'')+'" placeholder="—" title="Optional part number — printed on its own line just above the barcode (e.g. 33-55667)" style="width:105px;font:12px ui-monospace,Menlo,monospace;'+_bd+'"></td>'
             +'<td style="text-align:left;padding:3px 6px;white-space:nowrap">'+ck(s,'product')+ck(s,'carton')+ck(s,'inner')+'</td>'
             +'<td style="text-align:left;padding:3px 6px;white-space:nowrap"><a class="bcx-dl1" data-sku="'+esc(s)+'" title="download this SKU only" style="cursor:pointer;color:var(--violet);font-weight:700">⤓</a> <a class="bcx-rm" data-sku="'+esc(s)+'" title="remove" style="cursor:pointer;color:var(--faint);margin-left:8px">✕</a></td></tr>'; }).join('');
         var matched=keys.filter(function(s){return sk[s];}).length;
@@ -10466,7 +10469,7 @@
             +'<div class="mut tiny" style="margin-top:3px">Suppliers of a linked PO get <b>⤓ Download custom barcodes</b> on that PO in the portal (only these custom numbers, for the PO\'s SKUs).</div></div></div>'
           +'<textarea id="bcx-paste" placeholder="TOWEL-LG-NAVY, 5061011699999&#10;TOWEL-LG-CORAL, 0123456789012" style="width:100%;height:80px;box-sizing:border-box;font:12px ui-monospace,Menlo,monospace;border:1px solid var(--line);border-radius:6px;padding:7px;text-align:left"></textarea>'
           +'<div style="margin:6px 0"><button type="button" class="save-btn" id="bcx-parse">Parse / add</button> <button type="button" class="save-btn light" id="bcx-clearmap" style="margin-left:4px">Clear list</button> <span class="mut tiny" style="margin-left:6px">'+keys.length+' override'+(keys.length===1?'':'s')+' · '+matched+' matched</span></div>'
-          +'<div class="tw" style="max-height:300px;overflow:auto;border:1px solid var(--line2);border-radius:6px"><table style="font-size:12px;width:100%;border-collapse:collapse"><thead><tr>'+th('SKU')+th('Custom number')+th('Barcodes')+th('',56)+'</tr></thead><tbody>'+(rowsH||'<tr><td colspan="4" style="text-align:left;padding:6px;color:var(--faint)">No overrides yet — paste above and Parse / add.</td></tr>')+'</tbody></table></div>'
+          +'<div class="tw" style="max-height:300px;overflow:auto;border:1px solid var(--line2);border-radius:6px"><table style="font-size:12px;width:100%;border-collapse:collapse"><thead><tr>'+th('SKU')+th('Custom number')+th('Part no.')+th('Barcodes')+th('',56)+'</tr></thead><tbody>'+(rowsH||'<tr><td colspan="5" style="text-align:left;padding:6px;color:var(--faint)">No overrides yet — paste above and Parse / add.</td></tr>')+'</tbody></table></div>'
           +'<div style="margin-top:14px;display:flex;gap:8px;align-items:center"><button type="button" class="save-btn" id="bcx-dlall" style="background:var(--violet);color:#fff;border-color:var(--violet);font-weight:700">⤓ Download all ('+matched+')</button><span class="mut tiny">or ⤓ per row · '+esc(st.dlfmt==='png'?'Individual PNG':'A4 print mould')+' (toolbar setting)</span></div>';
         dr.querySelector('#bcx-close').onclick=function(){ close(); };
         dr.querySelector('#bcx-clearmap').onclick=function(){ state.map={}; draw(projects); };
@@ -10487,6 +10490,7 @@
           dr.querySelectorAll('.bcx-pochip .inb-po').forEach(function(a){ a.onclick=function(e){ e.preventDefault(); if(typeof openPODrawer==='function')openPODrawer(a.dataset.po); }; });
         })();
         dr.querySelectorAll('.bcx-num').forEach(function(el){ el.oninput=function(){ if(state.map[el.dataset.sku])state.map[el.dataset.sku].num=el.value.trim(); }; });
+        dr.querySelectorAll('.bcx-pn').forEach(function(el){ el.oninput=function(){ if(state.map[el.dataset.sku])state.map[el.dataset.sku].pn=el.value.trim(); }; });   // v27.660: part number per SKU
         dr.querySelectorAll('.bcx-tick').forEach(function(el){ el.onchange=function(){ var o=state.map[el.dataset.sku]; if(o)o.types[el.dataset.t]=el.checked; }; });
         dr.querySelectorAll('.bcx-rm').forEach(function(a){ a.onclick=function(){ delete state.map[a.dataset.sku]; draw(projects); }; });
         dr.querySelectorAll('.bcx-dl1').forEach(function(a){ a.onclick=function(){ bcDownload([a.dataset.sku], a); }; });

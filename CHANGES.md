@@ -1,3 +1,10 @@
+## v27.660 Customise barcodes: optional part number per SKU, printed above the barcode (Ben) — SERVER change
+- Each SKU in a Customise-barcode project can now carry an optional **part number** (e.g. `33-55667`), printed on its own line **directly above the barcode** on the product, carton and inner labels.
+- **Entry:** a "Part no." input column beside each SKU's custom number in the Customise editor (blank = nothing prints; existing projects unchanged).
+- **Stored** on the project's per-SKU override in the existing `barcode_projects.overrides` **jsonb** (`{num, types, pn}`) — **no migration** (same mechanism the per-SKU `types` use). Round-trip verified: save → reload keeps the part number.
+- **Rendered** in `buildLabelSVG` (product) + `buildCartonSVG` (carton/inner), bold, centred, just above the bars. Server `barcode-project` save captures `pn`; the label-data custom-project path carries `pn` onto the row so portal "Download custom barcodes" gets it too.
+- **server.mjs + inject.html — needs a server restart on deploy (no migration).** Verified: real sandbox label (TOWLB-SUM-LG-MIAMI / EAN 5061011623379) renders the part number above the barcode; 0 JS errors.
+
 ## v27.659 White line above the HORIZON bar — actual fix (Diviyaj/Ben)
 - v27.652 (body margin:0) wasn't enough: the dark `#view-tabs-row` bar is nested inside a **flex wrapper** div, which neutralises the bar's `margin-top:-8px`, so `#app`'s 8px `padding-top` showed as a white strip above the bar. Fix: dropped the bar's dead `-8px` top (→ `margin:0 -10px 6px`) and pull the wrapper up instead — tagged it `.hz-topwrap` and added `@media (min-width:641px){#app .hz-topwrap{margin-top:-8px}}`, so the bar sits flush to the top. Desktop-only (phone uses the fixed `#hz-topbar` + `.wrap` padding-top:52px). 0 JS errors.
 

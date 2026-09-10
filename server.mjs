@@ -10554,11 +10554,11 @@ app.post('/api/supply/barcode-project', async (req, res) => {
   // overrides: { sku: {num, types:{product,carton,inner}} }. Legacy { sku: barcode } is accepted (→ product).
   const ov = {}; const src = (b.overrides && typeof b.overrides === 'object') ? b.overrides : {};
   Object.keys(src).forEach(k => { const sku = String(k).trim(), v = src[k]; if (!sku || v == null) return;
-    let num, types;
-    if (typeof v === 'object') { num = String(v.num || '').trim(); const t = v.types || {}; types = { product: !!t.product, carton: !!t.carton, inner: !!t.inner }; }
+    let num, types, pn = '';
+    if (typeof v === 'object') { num = String(v.num || '').trim(); const t = v.types || {}; types = { product: !!t.product, carton: !!t.carton, inner: !!t.inner }; pn = String(v.pn || '').trim().slice(0, 32); }
     else { num = String(v).trim(); types = { product: true, carton: false, inner: false }; }
     if (!num) return; if (!types.product && !types.carton && !types.inner) types.product = true;
-    ov[sku] = { num: num.slice(0, 48), types }; });
+    ov[sku] = { num: num.slice(0, 48), types }; if (pn) ov[sku].pn = pn; });   // v27.660: optional part number per SKU (jsonb — no migration)
   const batch = (b.batch == null ? '' : String(b.batch)).trim() || null;
   const pos = [...new Set((Array.isArray(b.pos) ? b.pos : []).map(x => String(x || '').trim().slice(0, 40)).filter(Boolean))];   // v27.570: linked POs (mig 268)
   try {
@@ -16595,9 +16595,9 @@ app.get('/api/portal/label-data', portalAuth, async (req, res) => {
     if (proj) {   // same rule as the admin Customise drawer (bcItems): custom number on the ticked type(s), other types blanked, unmatched SKUs dropped
       const out = [];
       rows.forEach(r => { const v = proj.overrides[r.sku]; if (v == null) return;
-        let num, t; if (typeof v === 'object') { num = String(v.num || ''); t = v.types || {}; } else { num = String(v); t = { product: true }; }
+        let num, t, pn = ''; if (typeof v === 'object') { num = String(v.num || ''); t = v.types || {}; pn = v.pn ? String(v.pn) : ''; } else { num = String(v); t = { product: true }; }
         if (!num) return; if (!t.product && !t.carton && !t.inner) t = { product: true };
-        const cl = Object.assign({}, r, { product_barcode: t.product ? num : '', carton_barcode: t.carton ? num : '', inner_barcode: t.inner ? num : '', custom_project: proj.name });
+        const cl = Object.assign({}, r, { product_barcode: t.product ? num : '', carton_barcode: t.carton ? num : '', inner_barcode: t.inner ? num : '', pn: pn, custom_project: proj.name });   // v27.660: part number rides onto the label row
         out.push(cl); });
       return res.json(out);
     }
