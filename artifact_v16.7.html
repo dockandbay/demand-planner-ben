@@ -14698,7 +14698,7 @@ var SA_WHF={UK:'uk_fba',US:'us_fba',EU:'eu_fba',AU:'au_fba',CA:'ca_fba'};
 function saEsc(s){ return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function saFmt(n){ var r=Math.round(Number(n)||0); return r?r.toLocaleString():'0'; }
 function saDate(d){ if(!d)return ''; var m=String(d).slice(0,10).match(/^(\d{4})-(\d{2})-(\d{2})/); if(!m)return String(d).slice(0,10); var mn=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return m[3]+'-'+mn[+m[2]-1]+'-'+m[1].slice(2); }
-function saStatus(lch,disc){ var t=new Date().toISOString().slice(0,10); if(disc&&String(disc).slice(0,10)<=t)return 'DISC'; if(lch&&String(lch).slice(0,10)>t)return 'FUTURE'; return 'ACTIVE'; }
+function saStatus(lch,disc,pst){ var t=new Date().toISOString().slice(0,10); if(disc&&String(disc).slice(0,10)<=t)return 'DISC'; if((pst||'')==='CLOSED')return 'CLOSED'; if(lch&&String(lch).slice(0,10)>t)return 'FUTURE'; return 'ACTIVE'; }
 function saSkuMatch(sku,q){ if(!q)return true; var toks=q.split(/[\s,]+/).filter(Boolean); if(!toks.length)return true; var s=sku.toLowerCase(); return toks.some(function(t){return s.indexOf(t)>=0;}); }
 function saInbound(sku,mkt){ var whs=[SA_WH3[mkt],SA_WHF[mkt]].filter(Boolean),out=[];
   whs.forEach(function(wh){ var k=sku+'|'+wh;
@@ -14717,10 +14717,10 @@ function saRows(mkt){ var co=mkt.toLowerCase(),wh3=SA_WH3[mkt],whF=SA_WHF[mkt],r
     var inb=saInbound(sku,mkt);
     if(!av && !(s3||sf||aw) && !inb.length)return;   // not present in this market
     var lch=(p.lch||{})[co]||'',disc=(p.disc||{})[co]||'';
-    rows.push({sku:sku,cat:p.c||'(uncategorised)',ti:p.ti||'',cs:(p.cs==='S'?'Seasonal':p.cs==='C'?'Core':(p.csf||'')),st:saStatus(lch,disc),lch:lch,disc:disc,s3:s3,sf:sf,aw:aw,inb:inb}); });
+    rows.push({sku:sku,cat:p.c||'(uncategorised)',ti:p.ti||'',cs:(p.cs==='S'?'Seasonal':p.cs==='C'?'Core':(p.csf||'')),st:saStatus(lch,disc,p.st),lch:lch,disc:disc,s3:s3,sf:sf,aw:aw,inb:inb}); });
   rows.sort(function(a,b){ return a.cat<b.cat?-1:a.cat>b.cat?1:(a.sku<b.sku?-1:1); });
   return rows; }
-function saStatusBadge(st){ var c=st==='DISC'?['var(--hover)','var(--muted)']:st==='FUTURE'?['var(--amber-bg)','var(--amber)']:['var(--pos-bg)','var(--pos)']; return '<span style="background:'+c[0]+';color:'+c[1]+';font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px">'+st+'</span>'; }
+function saStatusBadge(st){ var c=st==='DISC'?['var(--hover)','var(--muted)']:st==='CLOSED'?['var(--neg-bg)','var(--neg)']:st==='FUTURE'?['var(--amber-bg)','var(--amber)']:['var(--pos-bg)','var(--pos)']; return '<span style="background:'+c[0]+';color:'+c[1]+';font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px">'+st+'</span>'; }
 function saInbCell(x){ if(!x)return '<td class="sa-inb" style="text-align:right;color:var(--faint)">—</td>';
   return '<td class="sa-inb" style="text-align:right;white-space:nowrap;line-height:1.35">'
     +'<div style="font-weight:700">'+saFmt(x.qty)+'</div>'

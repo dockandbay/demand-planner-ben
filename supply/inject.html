@@ -3692,7 +3692,9 @@
       out+=rBadge('s','Supplier risk (supplier not in the SKU’s allowed list)',sMis&&!l.supplier_risk_approved,sMis&&l.supplier_risk_approved,psku);
       var dd=pickDisc(_poCtry,{dis:l.dis,disAu:l.dis_au,disCa:l.dis_ca}), dMis=!_poLocked && !!dd && !!_poDeliv && String(_poDeliv)>String(dd);
       out+=rBadge('d','Discontinued (arrives after the discontinue date)',dMis&&!l.discontinue_approved,dMis&&l.discontinue_approved,psku);
-      out+=rBadge('c','Country risk (SKU not released in '+((_poCtry||'').toUpperCase())+')',l.not_avail_market&&!l.country_risk_approved,l.not_avail_market&&l.country_risk_approved,psku);
+      var _closed=(String(l.st||'').toUpperCase()==='CLOSED'), _cRisk=(l.not_avail_market||_closed);
+      var _cLabel=_closed?'Closed product (SKU is CLOSED in the source system'+(l.not_avail_market?' and not released in '+((_poCtry||'').toUpperCase()):'')+')':'Country risk (SKU not released in '+((_poCtry||'').toUpperCase())+')';
+      out+=rBadge('c',_cLabel,_cRisk&&!l.country_risk_approved,_cRisk&&l.country_risk_approved,psku);
       return out; }
     function row(sku,orderQty,est,lcr,added,lineObj){ lcr=lcr||{};
       var sup=(lcr.actual_cost!=null&&lcr.actual_cost!=='')?Number(lcr.actual_cost):null;

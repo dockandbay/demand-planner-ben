@@ -578,7 +578,8 @@ async function buildSKURAW() {
 // we only need to supply the product meta + SOH + launch/disc here.
 async function buildSAEXTRA() {
   const [prods, inv, pcs, inbSkus, poSkus] = await Promise.all([
-    pool.query(`SELECT sku, product_name n, subcategory s, category c, market_tier ti, core_seasonal cs
+    pool.query(`SELECT sku, product_name n, subcategory s, category c, market_tier ti, core_seasonal cs,
+                       upper(coalesce(nullif(btrim(status),''),'')) st
                 FROM planner.products WHERE NOT in_planning_scope AND sku NOT IN (${NON_SKU_LIST})`),
     pool.query(`SELECT sku, warehouse wh, available::int qty FROM planner.v_product_inventory WHERE available <> 0`),
     pool.query(`SELECT sku, co, lch, disc FROM (
@@ -605,7 +606,7 @@ async function buildSAEXTRA() {
   for (const r of prods.rows) {
     if (!signal.has(r.sku)) continue;
     p[r.sku] = { n: r.n, s: r.s, c: r.c, ti: r.ti, cs: r.cs === 'Seasonal' ? 'S' : 'C',
-                 csf: r.cs || '', rep: r.rep || '', av: {}, disc: {}, lch: {}, inv: {}, oo: {}, oos: true };
+                 csf: r.cs || '', rep: r.rep || '', st: r.st || '', av: {}, disc: {}, lch: {}, inv: {}, oo: {}, oos: true };
   }
   for (const r of inv.rows) if (p[r.sku]) p[r.sku].inv[r.wh] = r.qty;
   for (const r of pcs.rows) if (p[r.sku]) { if (r.lch) p[r.sku].lch[r.co] = r.lch; if (r.disc) p[r.sku].disc[r.co] = r.disc; }
@@ -12107,6 +12108,7 @@ app.get('/api/supply/po-detail/:po', async (req, res) => {
                     coalesce(pol.country_risk_approved,false) country_risk_approved,
                     coalesce(sl.supplier_multiple_all,'') sm,
                     nullif(sl.discontinue_date_final,'') dis, nullif(sl.discontinue_date_au_final,'') dis_au, nullif(sl.discontinue_date_ca,'') dis_ca,
+                    upper(coalesce(nullif(btrim(sl.status),''),'')) st,
                     -- default unit cost from planner.products for the PO's supplier (cost_<lowercased supplier code>,
                     -- e.g. LX to cost_lx, XR to cost_xr), falling back to the general cost. Used as the order-plan Est.
                     -- cost when the line itself has no cost_price. (New suppliers auto-map via their code.)
