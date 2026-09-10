@@ -1,3 +1,8 @@
+## v27.661 Supplier portal: native confirm() → in-page confirm sheet (Ben)
+- The portal's browser `confirm()` dialogs are replaced by a styled **in-page confirm sheet** (`_ppConfirm`, promise-based) — matches the portal, keyboard/Escape/backdrop dismiss, red primary for destructive actions available. 15 of the 16 `confirm()` sites converted (delete file/attachment/document, remove SKU/document, submit document, confirm/withdraw order, escalate shipment, email note) — their click handlers are now `async` and `await` the sheet.
+- The one remaining native `confirm` is `confirmNoBatch` (a "no batch selected — download anyway?" guard inside the barcode download pipeline, which is synchronous end-to-end); converting it means making that whole pipeline async — deferred as it's a rare edge, not a user-action confirm.
+- portal-view.js only; no server/migration. Verified: `_ppConfirm` resolves true on Confirm / false on Cancel; syntax clean (no await-outside-async); 0 JS errors.
+
 ## v27.660 Customise barcodes: optional part number per SKU, printed above the barcode (Ben) — SERVER change
 - Each SKU in a Customise-barcode project can now carry an optional **part number** (e.g. `33-55667`), printed on its own line **directly above the barcode** on the product, carton and inner labels.
 - **Entry:** a "Part no." input column beside each SKU's custom number in the Customise editor (blank = nothing prints; existing projects unchanged).

@@ -11,6 +11,37 @@
       el.className=(kind==='ok')?'ok':'err'; el.textContent=String(msg==null?'':msg); el.classList.add('on'); clearTimeout(_toastT); _toastT=setTimeout(function(){ el.classList.remove('on'); }, kind==='ok'?2600:4200); }
     catch(e){ try{ window.alert(msg); }catch(_){} } }
   try{ window.ppNotice=ppNotice; }catch(e){}
+  // v27.661: in-page confirm sheet (replaces native confirm()). Returns a Promise<boolean>; handlers await it.
+  var _ppcResolve=null;
+  function _ppConfirm(message, opts){ opts=opts||{};
+    if(!document.getElementById('pv-confirm-style')){ var st=document.createElement('style'); st.id='pv-confirm-style';
+      st.textContent='#pv-confirm-back{position:fixed;inset:0;background:rgba(15,23,42,.42);z-index:100080;display:flex;align-items:center;justify-content:center;padding:20px;opacity:0;pointer-events:none;transition:opacity .16s}'
+        +'#pv-confirm-back.on{opacity:1;pointer-events:auto}'
+        +'#pv-confirm-box{background:#fff;color:#0f172a;border-radius:14px;box-shadow:0 18px 50px -12px rgba(15,23,42,.5);max-width:400px;width:100%;padding:20px 22px;transform:translateY(8px);transition:transform .16s;font-family:system-ui,-apple-system,sans-serif}'
+        +'#pv-confirm-back.on #pv-confirm-box{transform:none}'
+        +'#pv-confirm-box .pvc-msg{font-size:14.5px;line-height:1.5;margin-bottom:18px}'
+        +'#pv-confirm-box .pvc-btns{display:flex;gap:10px;justify-content:flex-end}'
+        +'#pv-confirm-box .pvc-btns button{font-size:14px;font-weight:700;padding:9px 18px;border-radius:9px;cursor:pointer;font-family:inherit;border:1px solid #d0d7e2}'
+        +'#pv-confirm-box .pvc-cancel{background:#fff;color:#475569}'
+        +'#pv-confirm-box .pvc-ok{background:#2563eb;color:#fff;border-color:#2563eb}'
+        +'#pv-confirm-box .pvc-ok.danger{background:#dc2626;border-color:#dc2626}';
+      document.head.appendChild(st); }
+    return new Promise(function(resolve){
+      var back=document.getElementById('pv-confirm-back');
+      if(!back){ back=document.createElement('div'); back.id='pv-confirm-back';
+        back.innerHTML='<div id="pv-confirm-box" role="dialog" aria-modal="true"><div class="pvc-msg"></div><div class="pvc-btns"><button type="button" class="pvc-cancel"></button><button type="button" class="pvc-ok"></button></div></div>';
+        document.body.appendChild(back);
+        back.addEventListener('click',function(e){ if(e.target===back)_ppcDone(false); });
+        document.addEventListener('keydown',function(e){ if(back.classList.contains('on')&&e.key==='Escape')_ppcDone(false); }); }
+      back.querySelector('.pvc-msg').textContent=String(message==null?'':message);
+      var ok=back.querySelector('.pvc-ok'), cancel=back.querySelector('.pvc-cancel');
+      ok.textContent=opts.okLabel||'Confirm'; cancel.textContent=opts.cancelLabel||'Cancel';
+      ok.className='pvc-ok'+(opts.danger?' danger':'');
+      _ppcResolve=resolve; ok.onclick=function(){ _ppcDone(true); }; cancel.onclick=function(){ _ppcDone(false); };
+      back.classList.add('on'); setTimeout(function(){ try{ ok.focus(); }catch(e){} },30);
+    }); }
+  function _ppcDone(v){ var back=document.getElementById('pv-confirm-back'); if(back)back.classList.remove('on'); var r=_ppcResolve; _ppcResolve=null; if(r)r(!!v); }
+  try{ window._ppConfirm=_ppConfirm; }catch(e){}
   // ── EN / 中文 (v27.508, China-based suppliers only; DRAFT glossary): a post-render sweep swaps exact UI strings (text nodes,
   //    placeholders, titles) inside the portal. Data (SKU names, notes, refs, numbers, dates) is never touched. Originals are kept
   //    so switching back is instant. Renderers are unchanged; anything new just needs a glossary entry.
@@ -803,9 +834,9 @@
           return r.blob().then(function(b){ var u=URL.createObjectURL(b); var a=document.createElement('a'); a.href=u; a.download=fn; document.body.appendChild(a); a.click(); setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(u); },120); }); })
         .then(function(){ if(btn){ btn.disabled=false; btn.textContent=t; } })
         .catch(function(e){ if(btn){ btn.disabled=false; btn.textContent=t; } ppNotice('Could not generate the invoice: '+(e&&e.message||e)); }); }
-    if(!rootEl._invBound){ rootEl._invBound=1; rootEl.addEventListener('click', function(e){
+    if(!rootEl._invBound){ rootEl._invBound=1; rootEl.addEventListener('click', async function(e){
       var fb=e.target.closest('.sp-fob-flag');   // FOB timeline "Flag" — delegated so it survives the note-list re-render
-      if(fb){ e.preventDefault(); if(!EP.escalate)return; var msg=fb.dataset.msg||''; if(!msg)return; if(!confirm('Email this note to the supply planner?'))return; fb.disabled=true; fb.textContent='Sending…';
+      if(fb){ e.preventDefault(); if(!EP.escalate)return; var msg=fb.dataset.msg||''; if(!msg)return; if(!(await _ppConfirm('Email this note to the supply planner?')))return; fb.disabled=true; fb.textContent='Sending…';
         postJSON(EP.escalate,{kind:'po',ref:fb.dataset.po,message:msg,initiator:'supplier'},function(j){ fb.textContent='✓ Escalated'; if(j&&j.sandbox)ppNotice('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); return; }
       var b=e.target.closest('.pp-ship-inv,.pp-po-inv'); if(!b)return; e.preventDefault();
       if(b.classList.contains('pp-ship-inv')) dlInvoice((EP.shipmentInvoice||'/api/invoice/shipment/')+encodeURIComponent(b.dataset.ref), b);
@@ -1590,13 +1621,13 @@
                 +'<div class="tiny" style="font-weight:600;margin-bottom:3px">Timeline</div>'
                 +((notes&&notes.length)?tlDesc(notes).map(function(n){ var flag=(EP.escalate&&n.id===recentSupId)?'<button class="save-btn light sp-flag-note" data-ref="'+esc(ref)+'" data-msg="'+esc(n.body)+'" title="email this note to the supply planner" style="flex:0 0 auto;color:var(--neg);border-color:var(--neg-cell);white-space:nowrap">⚑ Escalate</button>':'';
                   return '<div style="margin:6px 0;max-width:640px;display:flex;gap:8px;align-items:flex-start">'+(flag?'<div style="flex:0 0 auto;min-width:60px">'+flag+'</div>':'')+'<div style="flex:1"><span class="mut" style="font-size:10.5px">'+esc(n.created_at)+' · '+(n.author_kind==='supplier'?'You':'Dock &amp; Bay')+'</span><div class="tl-msg">'+esc(n.body)+'</div>'+hzTlAttHtml(n,EP.attachmentBase||'/api/portal/attachment/')+'</div></div>';}).join(''):'<div class="mut tiny">No timeline entries yet.</div>');
-              var _se=box.querySelector('.sp-esc-ship'); if(_se)_se.onclick=function(){ if(!confirm('Escalate this shipment to Dock & Bay by email?'))return;
+              var _se=box.querySelector('.sp-esc-ship'); if(_se)_se.onclick=async function(){ if(!(await _ppConfirm('Escalate this shipment to Dock & Bay by email?')))return;
                 _se.disabled=true; _se.textContent='Sending…';
                 postJSON(EP.escalate,{kind:'shipment',ref:ref,message:'Escalation requested for shipment '+ref,initiator:'supplier',set_escalated:true,post_note:true},function(j){ _se.textContent='✓ Escalated';
                   var ent=(_ppData.shipmentPlan||[]).filter(function(x){return x.shipment_ref===ref;})[0]; if(ent)ent.escalated=true; setShipBadge&&setShipBadge();   // reflect the new escalated status (filterable)
                   ppShipTimeline(ref);   // re-render so the "<user> escalated this shipment" note appears on the timeline
                   if(j&&j.sandbox)ppNotice('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); };
-              var _fn=box.querySelector('.sp-flag-note'); if(_fn)_fn.onclick=function(){ var msg=_fn.dataset.msg||''; if(!msg)return; if(!confirm('Email this note to the supply planner?'))return; _fn.disabled=true; _fn.textContent='Sending…';
+              var _fn=box.querySelector('.sp-flag-note'); if(_fn)_fn.onclick=async function(){ var msg=_fn.dataset.msg||''; if(!msg)return; if(!(await _ppConfirm('Email this note to the supply planner?')))return; _fn.disabled=true; _fn.textContent='Sending…';
                 postJSON(EP.escalate,{kind:'shipment',ref:_fn.dataset.ref,message:msg,initiator:'supplier'},function(j){ _fn.textContent='✓ Escalated'; if(j&&j.sandbox)ppNotice('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); };
               // opening the timeline marks Dock&Bay notes read → clears this shipment's notification
               var ent=(_ppData.shipmentPlan||[]).filter(function(x){return x.shipment_ref===ref;})[0];
@@ -1771,7 +1802,7 @@
                 hzTlSend(_satt,v,function(bodyTxt,attId,next){ postJSON(EP.sampleNote,{id:id,body:bodyTxt,author_kind:EP.sampleNoteAuthorKind,author_email:EP.sampleNoteAuthorEmail,attachment_id:attId||null},next); },function(){ np.disabled=false; inp.value=''; ppSampleTimeline(id); }); }; }
             var af=scope.querySelector('.ps-att-file'), au=scope.querySelector('.ps-att-up');
             if(au)au.onclick=function(){ var f=af&&af.files&&af.files[0]; if(!f){ppNotice('Choose a file to upload.');return;} au.disabled=true; var rd=new FileReader(); rd.onload=function(){ postJSON(EP.sampleAttachment,{id:id,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result)},function(){ reload(); }); }; rd.readAsDataURL(f); };
-            scope.querySelectorAll('.ps-att-rm').forEach(function(b){ b.onclick=function(){ if(!confirm('Remove this attachment?'))return; postJSON(EP.sampleAttachmentRemove,{att_id:b.dataset.aid},function(){ reload(); }); }; });
+            scope.querySelectorAll('.ps-att-rm').forEach(function(b){ b.onclick=async function(){ if(!(await _ppConfirm('Remove this attachment?')))return; postJSON(EP.sampleAttachmentRemove,{att_id:b.dataset.aid},function(){ reload(); }); }; });
             ppSampleTimeline(id); }
           function ppSampleTimeline(id){ var box=body.querySelector('.samp-tl[data-id="'+id+'"]'); if(!box)return;
             var _s=(_ppData.samples||[]).filter(function(x){return String(x.id)===String(id);})[0], sref=_s?_s.ref:'';
@@ -1784,7 +1815,7 @@
                               : ((EP.escalate&&sref&&!dnb&&n.id===recentSupId)?'<button class="save-btn light samp-esc-note" data-ref="'+esc(sref)+'" data-msg="'+esc(n.body)+'" title="email this note to the supply planner" style="flex:0 0 auto;color:var(--neg);border-color:var(--neg-cell);white-space:nowrap">⚑ Escalate</button>':'');
                 return '<div style="font-size:12.5px;line-height:1.5;text-align:left;margin:4px 0;max-width:640px;display:flex;gap:10px;align-items:flex-start'+(nu?';background:#fff7ed;border:1px solid #fdba74;border-radius:6px;padding:6px 9px':'')+'">'+(ctrl?'<div style="flex:0 0 auto;min-width:74px">'+ctrl+'</div>':'')+'<div style="flex:1"><span class="mut" style="font-size:12px">'+esc(n.created_at)+' · '+who+'</span>'+(nu?' <span style="background:var(--neg);color:#fff;border-radius:8px;font-size:10.5px;font-weight:700;padding:0 5px">new</span>':'')+'<br>'+esc(n.body)+hzTlAttHtml(n,EP.attachmentBase||'/api/portal/attachment/')+'</div></div>'; }).join(''):'<div class="mut" style="font-size:12px">No timeline entries yet.</div>';
               box.querySelectorAll('.ps-note-read').forEach(function(b){ b.onclick=function(){ postJSON(EP.sampleNoteReadBase+b.dataset.id,{read:true},function(){ var s=(_ppData.samples||[]).filter(function(x){return String(x.id)===String(id);})[0]; if(s&&s.unread_dnb>0)s.unread_dnb--; setSampBadge(); ppSampleTimeline(id); }); }; });
-              var _se=box.querySelector('.samp-esc-note'); if(_se)_se.onclick=function(){ var msg=_se.dataset.msg||''; if(!msg)return; if(!confirm('Email this note to the supply planner?'))return; _se.disabled=true; _se.textContent='Sending…';
+              var _se=box.querySelector('.samp-esc-note'); if(_se)_se.onclick=async function(){ var msg=_se.dataset.msg||''; if(!msg)return; if(!(await _ppConfirm('Email this note to the supply planner?')))return; _se.disabled=true; _se.textContent='Sending…';
                 postJSON(EP.escalate,{kind:'sample',ref:_se.dataset.ref,message:msg,initiator:'supplier'},function(j){ _se.textContent='✓ Escalated'; if(j&&j.sandbox)ppNotice('Sandbox: no email key configured, nothing sent. On live this routes to the internal recipients in CONFIG ▸ General settings.'); }); };
             }).catch(function(){}); }
           function ppSampleNewForm(){ var box=document.getElementById('samp-newform'); if(box.dataset.open==='1'){box.dataset.open='';box.innerHTML='';return;} box.dataset.open='1';
@@ -1997,7 +2028,7 @@
                 postJSON(EP.productSample+'/'+id+'/assign',body,function(j){ if(j&&j.error){ppNotice(j.error);return;} var s=list.filter(function(x){return String(x.id)===String(id);})[0]; if(s){ if(val==='not_shipped'){ s.shipments=[]; s.not_shipped=true; } else if(val){ var sr=SRS.filter(function(x){return String(x.id)===String(val);})[0]; s.shipments=sr?[{id:sr.id,ref:sr.ref,carrier:sr.carrier,tracking:sr.tracking}]:[]; s.not_shipped=false; } else { s.shipments=[]; s.not_shipped=false; } } paint(); }); }
               function linkShip(id,srId){ if(!srId)return; postJSON(EP.productSample+'/'+id+'/assign',{mode:'link',sample_request_id:srId},function(j){ if(j&&j.error){ppNotice(j.error);return;} var s=list.filter(function(x){return String(x.id)===String(id);})[0]; if(s){ var sr=SRS.filter(function(x){return String(x.id)===String(srId);})[0]; s.shipments=s.shipments||[]; if(sr&&!s.shipments.some(function(sh){return String(sh.id)===String(sr.id);})) s.shipments.push({id:sr.id,ref:sr.ref,carrier:sr.carrier,tracking:sr.tracking}); s.not_shipped=false; } paint(); }); }
               function unlinkShip(id,srId){ postJSON(EP.productSample+'/'+id+'/assign',{mode:'unlink',sample_request_id:srId},function(j){ if(j&&j.error){ppNotice(j.error);return;} var s=list.filter(function(x){return String(x.id)===String(id);})[0]; if(s){ s.shipments=(s.shipments||[]).filter(function(sh){return String(sh.id)!==String(srId);}); } paint(); }); }
-              function newShipmentFor(id){ if(!confirm('Create a new sample shipment with this sample on it? It will appear in the Shipments box for this sample — add the address & tracking later in the Samples tab.'))return; postJSON(EP.sampleCreate,{dev_samples:[{id:id,qty:1}]},function(j){ if(j&&j.error){ppNotice(j.error);return;} ppProdSamples(box, ref); }); }   // stay on the product page; refresh so the new shipment shows in this sample's Shipments box
+              async function newShipmentFor(id){ if(!(await _ppConfirm('Create a new sample shipment with this sample on it? It will appear in the Shipments box for this sample — add the address & tracking later in the Samples tab.')))return; postJSON(EP.sampleCreate,{dev_samples:[{id:id,qty:1}]},function(j){ if(j&&j.error){ppNotice(j.error);return;} ppProdSamples(box, ref); }); }   // stay on the product page; refresh so the new shipment shows in this sample's Shipments box
               function paint(){
               var nextV=list.reduce(function(m,s){return Math.max(m,s.version||0);},0)+1, nextRef=ref+'_v'+nextV;   // shown read-only on the add form
               var rows=list.slice().reverse().map(function(s){ var ph=(s.photos||[]).map(function(p){ var url=(EP.attachImgBase||'/api/supply/portal-attachment/')+p.id, canDel=p.uploader_kind==='supplier';
@@ -2060,7 +2091,7 @@
                 inp.onblur=function(){ setTimeout(function(){ menu.style.display='none'; inp.value=ps2ShipLabel(inp.dataset.val); },200); };
                 menu.onmousedown=function(e){ var opt=e.target.closest&&e.target.closest('.pp-ship-opt'); if(!opt)return; e.preventDefault(); var v=opt.getAttribute('data-val')||''; if(v==='__close__'){ menu.style.display='none'; inp.value=ps2ShipLabel(inp.dataset.val); return; } inp.dataset.val=v; inp.value=ps2ShipLabel(v); menu.style.display='none'; }; })();
               box.querySelectorAll('.pp-samp-img').forEach(function(im){ im.onclick=function(){ ppImgZoom(im.dataset.src); }; });
-              box.querySelectorAll('.pp-samp-fdel').forEach(function(a){ a.onclick=function(){ if(!confirm('Delete this file?'))return; postJSON(EP.productSamplePhoto+'/'+a.dataset.id+'/delete',{},function(j){ if(j&&j.error){ppNotice(j.error);return;} var s=list.filter(function(x){return String(x.id)===String(a.dataset.sid);})[0]; if(s)s.photos=(s.photos||[]).filter(function(p){return String(p.id)!==String(a.dataset.id);}); paint(); }); }; });   // silent delete
+              box.querySelectorAll('.pp-samp-fdel').forEach(function(a){ a.onclick=async function(){ if(!(await _ppConfirm('Delete this file?')))return; postJSON(EP.productSamplePhoto+'/'+a.dataset.id+'/delete',{},function(j){ if(j&&j.error){ppNotice(j.error);return;} var s=list.filter(function(x){return String(x.id)===String(a.dataset.sid);})[0]; if(s)s.photos=(s.photos||[]).filter(function(p){return String(p.id)!==String(a.dataset.id);}); paint(); }); }; });   // silent delete
               box.querySelectorAll('.pp-samp-meta-edit').forEach(function(a){ a.onclick=function(){ var pnl=box.querySelector('.pp-samp-meta[data-id="'+a.dataset.id+'"]'); if(pnl)pnl.style.display=(pnl.style.display==='none'?'':'none'); }; });
               box.querySelectorAll('.pp-meta-save').forEach(function(btn){ btn.onclick=function(){ var id=btn.dataset.id, pnl=box.querySelector('.pp-samp-meta[data-id="'+id+'"]'); if(!pnl)return;
                 var sizes=Array.prototype.slice.call(pnl.querySelectorAll('.pp-meta-size:checked')).map(function(c){return c.value;});
@@ -2283,7 +2314,7 @@
                 return '<tr><td class="l">'+esc(d.doc_type||'')+'</td><td class="l"><a href="/api/portal/quality-doc/'+d.id+'" target="_blank" rel="noopener">'+esc(d.filename||'file')+'</a></td><td class="l">'+esc(d.po||'')+'</td><td class="l">'+(d.prod_no?'P'+esc(d.prod_no):'')+'</td><td class="l">'+esc(d.batch_id||'')+'</td><td class="l mut tiny">'+esc(d.created_at||'')+'</td><td class="l">'+del+'</td></tr>'; }).join('');
               var el=document.getElementById('pq-list'); if(!el)return;
               el.innerHTML='<div class="tw"><table style="width:max-content;min-width:100%"><thead><tr><th class="l">Type</th><th class="l">File</th><th class="l">PO</th><th class="l">Prod</th><th class="l">Batch</th><th class="l">Uploaded</th><th class="l"></th></tr></thead><tbody>'+(body||'<tr><td colspan="7" class="mut tiny">No documents uploaded yet.</td></tr>')+'</tbody></table></div>';
-              Array.prototype.forEach.call(el.querySelectorAll('.pq-del'),function(b){ b.onclick=function(){ var id=b.getAttribute('data-id'); if(!window.confirm('Delete this document? Files can only be deleted within 24 hours of uploading.'))return; b.disabled=true; b.textContent='…'; fetch('/api/portal/quality-doc/'+id,{method:'DELETE'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ b.disabled=false; b.textContent='Delete'; window.alert(j.error); return; } load(); }).catch(function(){ b.disabled=false; b.textContent='Delete'; }); }; });
+              Array.prototype.forEach.call(el.querySelectorAll('.pq-del'),function(b){ b.onclick=async function(){ var id=b.getAttribute('data-id'); if(!(await _ppConfirm('Delete this document? Files can only be deleted within 24 hours of uploading.')))return; b.disabled=true; b.textContent='…'; fetch('/api/portal/quality-doc/'+id,{method:'DELETE'}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ b.disabled=false; b.textContent='Delete'; window.alert(j.error); return; } load(); }).catch(function(){ b.disabled=false; b.textContent='Delete'; }); }; });
             }).catch(function(){ var el=document.getElementById('pq-list'); if(el)el.innerHTML='<div class="mut tiny">Could not load.</div>'; }); }
             // Step 3 — upload (flash prod/batch red if none chosen)
             if(up)up.onclick=function(){
@@ -2366,7 +2397,7 @@
                   t=setTimeout(function(){ postJSON(EP.submit,{po:inp.dataset.po,supplier_id:_sid,submitted_by:by,completion_date:v},function(){ inp.style.borderColor='#16a34a';
                     (_ppData.subsByPo=_ppData.subsByPo||{}); (_ppData.subsByPo[inp.dataset.po]=_ppData.subsByPo[inp.dataset.po]||[]).push({kind:'completion_date',value:v,status:'pending'}); }); },800); }; });
               // FOB cards: escalate the ORDER (no shipment record) to Dock & Bay by email
-              body.querySelectorAll('.sp-esc-fob').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Escalate this shipment to Dock & Bay by email?'))return; var po=btn.dataset.po;
+              body.querySelectorAll('.sp-esc-fob').forEach(function(btn){ btn.onclick=async function(){ if(!(await _ppConfirm('Escalate this shipment to Dock & Bay by email?')))return; var po=btn.dataset.po;
                 var msg='Escalation requested for '+po;
                 btn.disabled=true; btn.textContent='Sending…';
                 postJSON(EP.escalate,{kind:'po',ref:po,message:msg,initiator:'supplier',post_note:true},function(j){ btn.textContent='✓ Escalated';
@@ -2598,9 +2629,9 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
               scope.querySelectorAll('.pp-shiplabel').forEach(function(btn){ btn.onclick=function(){ dlShipsWith(btn.dataset.po, btn, EP.shipsWith); }; });   // SHIPS WITH shipment label (per-PO, barcodes & labels tab)
               scope.querySelectorAll('.pp-airlabel').forEach(function(btn){ btn.onclick=function(){ dlShipsWith(btn.dataset.po, btn, EP.shipsWith, true); }; });   // AIR FREIGHT label (master of an air shipment)
               // PO confirmation: supplier confirms (or withdraws) acceptance of the order's SKUs / qty / dates
-              scope.querySelectorAll('.pp-confirm').forEach(function(btn){ btn.onclick=function(){ var v=btn.dataset.v==='1';
-                if(v && !confirm('Confirm this order? You’re accepting the SKUs, quantities and dates as shown.'))return;
-                if(!v && !confirm('Withdraw your confirmation of this order?'))return;
+              scope.querySelectorAll('.pp-confirm').forEach(function(btn){ btn.onclick=async function(){ var v=btn.dataset.v==='1';
+                if(v && !(await _ppConfirm('Confirm this order? You’re accepting the SKUs, quantities and dates as shown.')))return;
+                if(!v && !(await _ppConfirm('Withdraw your confirmation of this order?')))return;
                 var po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); btn.disabled=true; postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,po_confirmed:v},function(){ var p=_ppData.pos.filter(function(x){return x.po===po;})[0]; if(p){ p.supplier_confirmed=v?(by||'confirmed'):null; p.supplier_confirmed_by=v?by:null; }
                   // on confirm, re-snapshot approved lines locally (server does the same) so "changes since you approved" + the ORDER PLAN (1) badge clear immediately on both tabs
                   if(v){ var snap={}; (_ppData.lb[po]||[]).forEach(function(l){ snap[l.sku]=Number(l.qty)||0; }); _ppData.approvedByPo=_ppData.approvedByPo||{}; _ppData.approvedByPo[po]=snap; }
@@ -2626,8 +2657,8 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                   var detRow=btn.closest('tr'), m=detRow&&detRow.id&&detRow.id.match(/^pp-(\d+)$/);
                   if(m)adjBadge(body.querySelector('.pp-exp[data-i="'+m[1]+'"]'), delta);
                 }); }; });
-              scope.querySelectorAll('.pp-esc-note').forEach(function(btn){ btn.onclick=function(){ var msg=btn.dataset.msg||''; if(!msg)return;
-                if(!confirm('Email this note to the supply planner?'))return; btn.disabled=true; var t=btn.textContent; btn.textContent='Sending…';
+              scope.querySelectorAll('.pp-esc-note').forEach(function(btn){ btn.onclick=async function(){ var msg=btn.dataset.msg||''; if(!msg)return;
+                if(!(await _ppConfirm('Email this note to the supply planner?')))return; btn.disabled=true; var t=btn.textContent; btn.textContent='Sending…';
                 postJSON(EP.escalate,{kind:'po',ref:btn.dataset.po,message:msg,initiator:'supplier'},function(j){ btn.textContent='✓ Escalated';
                   if(j&&j.sandbox)ppNotice('Sandbox: no email key configured, so nothing was sent. On live this routes to the internal recipients set in CONFIG ▸ General settings.'); }); }; });
               scope.querySelectorAll('.pp-cd-grid').forEach(function(inp){ var t;
@@ -2744,7 +2775,7 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                   postJSON(EP.lineCost,{po:po,sku:r.sku,amended_qty:(r.qty||null),actual_cost:(r.price||null),is_added:(isAdded?true:undefined),submitted_by:by},function(j){
                     if(!(j&&j.error)){ applied++; (_ppData.costsByPo[po]=_ppData.costsByPo[po]||{})[r.sku]={amended_qty:(r.qty!==''?Number(r.qty):null),actual_cost:(r.price!==''?Number(r.price):null),is_added:isAdded}; }
                     next(); }); })(); }; });
-              scope.querySelectorAll('.pp-rm').forEach(function(b){ b.onclick=function(){ if(!confirm('Remove '+b.dataset.sku+' from this order?'))return; var po=b.dataset.po, sku=b.dataset.sku, row=b.closest('tr[id^="pp-"]');
+              scope.querySelectorAll('.pp-rm').forEach(function(b){ b.onclick=async function(){ if(!(await _ppConfirm('Remove '+b.dataset.sku+' from this order?')))return; var po=b.dataset.po, sku=b.dataset.sku, row=b.closest('tr[id^="pp-"]');
                 postJSON(EP.lineRemove,{po:po,sku:sku},function(){  if(_ppData.costsByPo[po])delete _ppData.costsByPo[po][sku]; rerenderRow(row,po); }); }; });
               // crossdock shipped quantity per SKU → save + re-render (updates the open-action badge), no full reload
               scope.querySelectorAll('.pp-xqty').forEach(function(inp){ inp.onchange=function(){ var po=inp.dataset.po, sku=inp.dataset.sku, v=inp.value.trim(), row=inp.closest('tr[id^="pp-"]');
@@ -2812,10 +2843,10 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                   (_ppData.docsByPo=_ppData.docsByPo||{}); (_ppData.docsByPo[po]=_ppData.docsByPo[po]||[]).unshift({id:j.id,filename:f.name,category:cat,uploaded_at:'',approval_status:'draft'});
                   rerenderRow(row,po,'invoice'); }); }; rd.readAsDataURL(f); }; });
               // remove a supplier document
-              scope.querySelectorAll('.pp-doc-rm').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Remove this document?'))return; var id=btn.dataset.id, po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]');
+              scope.querySelectorAll('.pp-doc-rm').forEach(function(btn){ btn.onclick=async function(){ if(!(await _ppConfirm('Remove this document?')))return; var id=btn.dataset.id, po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]');
                 postJSON(EP.docRemove,{id:id},function(){ if(po&&_ppData.docsByPo&&_ppData.docsByPo[po])_ppData.docsByPo[po]=_ppData.docsByPo[po].filter(function(d){return String(d.id)!==String(id);}); rerenderRow(row,po,'invoice'); }); }; });
               // submit a document for Dock & Bay approval
-              scope.querySelectorAll('.pp-doc-submit').forEach(function(btn){ btn.onclick=function(){ if(btn.disabled)return; if(!confirm('Submit this document to Dock & Bay for approval?'))return; var id=btn.dataset.id, po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); var _t=btn.textContent; btn.disabled=true; btn.textContent='Submitting…';
+              scope.querySelectorAll('.pp-doc-submit').forEach(function(btn){ btn.onclick=async function(){ if(btn.disabled)return; if(!(await _ppConfirm('Submit this document to Dock & Bay for approval?')))return; var id=btn.dataset.id, po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); var _t=btn.textContent; btn.disabled=true; btn.textContent='Submitting…';
                 postJSON(EP.docSubmit,{att_id:id},function(j){ if(j&&j.error){ppNotice(j.error);btn.disabled=false;btn.textContent=_t;return;}
                   if(_ppData.docsByPo&&_ppData.docsByPo[po])_ppData.docsByPo[po].forEach(function(d){ if(String(d.id)===String(id)){ d.approval_status='submitted'; d.review_notes=''; } });
                   rerenderRow(row,po,'invoice');   // row now shows the ⏳ "Submitted, awaiting approval" badge (no submit button)
