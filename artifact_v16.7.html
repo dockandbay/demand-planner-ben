@@ -2544,7 +2544,7 @@ function buildBuPills(){
     if(val!==BU_SEL)b.style.opacity='.55';
     bup.appendChild(b); });
 }
-function initUI(){
+function initUI(skipRender){
   const cp=document.getElementById('ctr');
   const FLAGS={'UK':'\u{1F1EC}\u{1F1E7}','US':'\u{1F1FA}\u{1F1F8}','EU':'\u{1F1EA}\u{1F1FA}','AU':'\u{1F1E6}\u{1F1FA}','CA':'\u{1F1E8}\u{1F1E6}'};
   MKTS.forEach(m=>{
@@ -2618,7 +2618,7 @@ function initUI(){
       });
     } else if(cartpWrap){ cartpWrap.style.display='none'; }
   }
-  _bindTb();render();
+  _bindTb();if(!skipRender)render();
 }
 
 function updateTrfHeaders(){
@@ -16423,7 +16423,11 @@ function renderBuyView(mode,scaffoldOnly){
   // scaffoldOnly: build the buy grid ONLY to host the SKU popup (#ov), invisibly — used when opening the
   // buy-plan popup from the DEMAND plan / SUPPLY, so the buy grid never flashes over the current view.
   // Feed the buy plan from the live forecast before rendering (independent of Airtable save).
-  try{buildLiveDemand();}catch(e){console.error('buildLiveDemand failed',e);}
+  // Only rebuild the demand overlay when it's actually stale — the first build hasn't settled (DEMAND_BUILT),
+  // or a forecast edit has happened since (BUY_FC_STALE). Otherwise reuse the overlay already built at load.
+  // This is what made opening the "Plan ▸" popup from the DEMAND plan slow: it forced a full ~3s demand rebuild
+  // on every open even when nothing had changed. The grid's own render() gates on these same flags (v27.663).
+  try{ if((typeof DEMAND_BUILT==='undefined'||!DEMAND_BUILT) || (typeof BUY_FC_STALE!=='undefined'&&BUY_FC_STALE)){ buildLiveDemand(); try{BUY_FC_STALE=false;}catch(e){} } }catch(e){console.error('buildLiveDemand failed',e);}
   var origTw=document.getElementById('tw');
   if(origTw&&!scaffoldOnly)origTw.style.display='none';   // scaffoldOnly: leave the demand table visible behind the popup
   var execWrap=document.getElementById('exec-wrap');
@@ -16444,7 +16448,12 @@ function renderBuyView(mode,scaffoldOnly){
   if(BP.restoreFilters)BP.restoreFilters();
   // Build pills, bind table clicks, and render the buy list. initUI() reads the freshly
   // injected (empty) pill containers, so rebuilding on each BUY/FBA-tab entry is correct.
-  BP.initUI();
+  // scaffoldOnly: the grid is hidden (height:0) and only hosts the SKU popup — skip the full-grid
+  // render (~2s of DOM for ~700 rows nobody sees). open_() computes the single SKU on its own. (v27.663)
+  BP.initUI(scaffoldOnly);
+  // The skipped render() is also where the memoized buy cache is normally cleared. Clear it here so the SKU
+  // popup recomputes against the freshest demand overlay (e.g. right after a forecast edit). (v27.663)
+  if(scaffoldOnly){ try{ if(window.BP&&BP.BUY_CACHE)Object.keys(BP.BUY_CACHE).forEach(function(k){delete BP.BUY_CACHE[k];}); }catch(e){} }
   // Complex Rules badge: the scaffold ships the button hardcoded "(0)"; sync the real count now that the
   // button exists (it was only refreshed on panel-expand before, so the count looked wrong until you opened it).
   try{ if(window.CR&&CR.updateBtn)CR.updateBtn(); }catch(e){}

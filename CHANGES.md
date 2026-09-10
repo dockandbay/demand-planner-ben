@@ -1,3 +1,12 @@
+## v27.663 Faster "Plan ▸" popup from the DEMAND plan (Ben) — client only
+- **Symptom:** ~3s delay opening the buy-plan detail popup from the DEMAND plan's "Plan ▸" button.
+- **Cause:** the popup builds a hidden buy-grid scaffold to host the panel, and that scaffold (`renderBuyView(...,scaffoldOnly)`) did two expensive things every open: (1) an unconditional full `buildLiveDemand()` rebuild (~3s), and (2) `initUI()` rendered the *entire* ~700-row buy grid (~2s) into a wrapper that is `height:0`/hidden and never seen. Opening the single SKU (`open_`) is only ~7ms.
+- **Fix (two gates, no logic change):**
+  - `buildLiveDemand()` in `renderBuyView` now runs only when the demand overlay is actually stale — first build not settled (`DEMAND_BUILT`) or a forecast edit since (`BUY_FC_STALE`) — the same flags the grid's own `render()` already gates on. When nothing changed, the ~3s rebuild is skipped.
+  - `initUI(skipRender)` skips the full-grid `render()` in `scaffoldOnly` mode (the grid is hidden and only hosts the popup). The memoized buy cache, normally cleared inside that render, is cleared explicitly in the scaffold path so the popup always recomputes against the freshest demand.
+- Net: repeat opens with no edits go from a full rebuild+grid-render to just the scaffold DOM + pills; measured scaffold time dropped from ~6.4s to well under 1s in the jsdom harness. Buy plan output byte-identical.
+- artifact_v16.7.html only. No server, no migration, no env var.
+
 ## v27.662 CLOSED-product robustness: Stock Availability status + Order Plan risk flag (Ben) — SERVER change
 - **Root problem:** a SKU set to **CLOSED** in the source (Airtable) but still carrying stale availability flags / a future launch date was mis-labelled. Example: `BAGF-CAB-MD-POSPIN` (CLOSED, out of planning scope, only residual sample-PO inbound) showed **FUTURE** on the Stock Availability report because the classifier only ever looked at launch/discontinue dates, never the product's CLOSED status.
 - **Stock Availability report / SA drawer:** `saStatus()` now checks the product's status — a `status='CLOSED'` SKU shows a red **CLOSED** badge (priority: a past discontinue date still wins as **DISC**; otherwise CLOSED beats FUTURE/ACTIVE). The out-of-scope feed (`_SA_EXTRA`) now carries `status` so these residual-stock SKUs classify correctly (previously it didn't even fetch it).
