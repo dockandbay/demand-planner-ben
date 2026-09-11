@@ -2706,6 +2706,7 @@ function render(){
   var _th=document.getElementById('bp-trf-help-btn'); if(_th)_th.style.display=(BP_VIEW==='transfer')?'':'none';
   var _thp=document.getElementById('trf-help'); if(_thp&&BP_VIEW!=='transfer')_thp.style.display='none';
   var _fhp=document.getElementById('fba-help'); if(_fhp&&BP_VIEW!=='fba')_fhp.style.display='none';
+  var _acp=document.getElementById('awdcalc-panel'); if(_acp&&BP_VIEW!=='fba')_acp.style.display='none';   // AWD-vs-FBA calculator: FBA view only
   var _vdl=document.getElementById('bp-view-dl'); if(_vdl)_vdl.style.display=(BP_VIEW==='fba'||BP_VIEW==='transfer')?'inline-flex':'none';
   var _tbx=document.getElementById('fba-trf-box'); if(_tbx)_tbx.style.display=(BP_VIEW==='fba')?'inline-flex':'none';   // in-flight branch-transfer overlay box (FBA only)
   if(BP_VIEW==='fba')_fbaTrfOnView();
@@ -4567,6 +4568,44 @@ var BUY_SCAFFOLD=`<div class="wrap">
   <div>&bull; <b>Minimum size:</b> if the recommended quantity is under 20% of the next 60 days of FBA demand, send nothing &mdash; wait until a fuller, full-carton shipment is worthwhile.</div>
   <div>&bull; <b>Override:</b> type a quantity in the Override column to set the transfer manually (session only, not yet saved). It supersedes the recommendation.</div>
   <div>&bull; <b>FBA target weeks:</b> sets how many weeks of FBA cover a shipment aims for (default 8). Use the 12 preset to build a larger one-off shipment, then revert to 8.</div>
+  <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line)">
+    <button type="button" id="awdcalc-open" onclick="awdcalcToggle()" style="font-size:11px;font-weight:700;padding:4px 12px;border:1px solid var(--violet);border-radius:4px;background:var(--violet-bg);color:var(--violet);cursor:pointer">&#129518; AWD vs FBA Savings Calculator</button>
+    <span style="font-size:10px;color:var(--muted);margin-left:8px">Estimate the per-unit saving of shipping direct-to-AWD vs direct-to-FBA.</span>
+  </div>
+</div>
+<div id="awdcalc-panel" style="display:none;margin:4px 0 8px;padding:12px 16px;background:var(--card);border:1px solid var(--violet);border-left:3px solid var(--violet);border-radius:6px;font-size:11px;color:var(--ink-soft);max-width:900px">
+  <style>
+    #awdcalc-panel .awdc-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:2px 0}
+    #awdcalc-panel .awdc-row input{width:80px;font-size:11px;padding:2px 5px;border:1px solid var(--line);border-radius:3px;background:var(--hover);color:var(--ink);text-align:right}
+  </style>
+  <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+    <b style="color:var(--violet);font-size:13px">&#129518; AWD vs FBA Savings Calculator</b>
+    <span style="font-size:10px;color:var(--muted)">Same units, direct from supplier: AWD vs FBA. Rates are saved in this browser.</span>
+    <span style="margin-left:auto;cursor:pointer;color:var(--neg);font-weight:700" title="Close" onclick="awdcalcToggle()">&#10005;</span>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+    <div>
+      <div style="font-weight:700;color:var(--nav);margin-bottom:5px">Fee inputs ($) &mdash; from your Amazon fee report</div>
+      <div class="awdc-row"><span>FBA inbound placement /unit</span><input id="awdc-place" type="number" step="0.01" value="0.30" oninput="awdcalcCompute()"></div>
+      <div class="awdc-row"><span>FBA storage /ft&sup3;/mo (Jan&ndash;Sep)</span><input id="awdc-fbaoff" type="number" step="0.01" value="0.87" oninput="awdcalcCompute()"></div>
+      <div class="awdc-row"><span>FBA storage /ft&sup3;/mo (Oct&ndash;Dec)</span><input id="awdc-fbapeak" type="number" step="0.01" value="2.40" oninput="awdcalcCompute()"></div>
+      <div class="awdc-row"><span>AWD storage /ft&sup3;/mo</span><input id="awdc-awdstor" type="number" step="0.01" value="0.48" oninput="awdcalcCompute()"></div>
+      <div class="awdc-row"><span>AWD processing /unit</span><input id="awdc-proc" type="number" step="0.01" value="0.30" oninput="awdcalcCompute()"></div>
+      <div class="awdc-row"><span>AWD&rarr;FBA transfer /unit</span><input id="awdc-trans" type="number" step="0.01" value="0.27" oninput="awdcalcCompute()"></div>
+      <div class="awdc-row"><span>Low-inventory fee avoided /unit</span><input id="awdc-lowinv" type="number" step="0.01" value="0.00" oninput="awdcalcCompute()"></div>
+    </div>
+    <div>
+      <div style="font-weight:700;color:var(--nav);margin-bottom:5px">Holding &amp; volume</div>
+      <div class="awdc-row"><span>Avg months held (total)</span><input id="awdc-months" type="number" step="0.1" value="2" oninput="awdcalcCompute()"></div>
+      <div class="awdc-row"><span>&mdash; of which in peak (Oct&ndash;Dec)</span><input id="awdc-peakmonths" type="number" step="0.1" value="0.5" oninput="awdcalcCompute()"></div>
+      <div class="awdc-row"><span>Cube /unit (ft&sup3;)</span><input id="awdc-cube" type="number" step="0.001" value="0.047" oninput="awdcalcCompute()"></div>
+      <div class="awdc-row"><span>Units</span><input id="awdc-units" type="number" step="1" value="77832" oninput="awdcalcCompute()"></div>
+      <div style="font-size:9.5px;color:var(--muted);margin-top:5px;line-height:1.4">Cube default = blended avg of a towel-mix carton (from our carton dims); edit for your set. Units default = US AWD direct 2026 to date.</div>
+      <div style="margin-top:6px"><button type="button" onclick="awdcalcReset()" style="font-size:10px;padding:2px 8px;border:1px solid var(--line);border-radius:3px;background:var(--hover);color:var(--nav);cursor:pointer">Reset rates</button></div>
+    </div>
+  </div>
+  <div id="awdc-out" style="margin-top:10px;padding-top:8px;border-top:1px solid var(--line)"></div>
+  <div style="font-size:9.5px;color:var(--muted);margin-top:8px;line-height:1.4">The dollar defaults are illustrative placeholders &mdash; replace them with your real Amazon fee-schedule figures. Net saving = placement avoided + storage saved (FBA vs AWD, peak-weighted) + low-inventory avoided &minus; AWD processing &minus; AWD&rarr;FBA transfer.</div>
 </div>
 <div id="buy-help" style="display:none;margin:4px 0 8px;padding:10px 14px;background:var(--hover);border:1px solid var(--line);border-left:3px solid var(--blue);border-radius:4px;font-size:11px;line-height:1.55;color:var(--ink-soft);max-width:900px">
   <div style="font-weight:700;color:var(--nav);margin-bottom:4px">How the buy plan works</div>
@@ -4640,6 +4679,52 @@ var BUY_SCAFFOLD=`<div class="wrap">
     <div class="pb" id="pb"></div>
   </div>
 </div>`;
+// ── AWD vs FBA Savings Calculator (FBA view, under "FBA Transfer Logic") ─────────────────────────
+// Compares shipping the SAME units direct-from-supplier into AWD vs straight into FBA. Fee rates are
+// user-supplied (illustrative defaults) and saved in localStorage. Storage saving nets FBA (peak-weighted)
+// against AWD over the holding period; cube/unit comes from our carton dims (blended default, editable).
+var AWDC_KEYS=['awdc-place','awdc-fbaoff','awdc-fbapeak','awdc-awdstor','awdc-proc','awdc-trans','awdc-lowinv','awdc-months','awdc-peakmonths','awdc-cube','awdc-units'];
+var AWDC_DEFAULTS={'awdc-place':'0.30','awdc-fbaoff':'0.87','awdc-fbapeak':'2.40','awdc-awdstor':'0.48','awdc-proc':'0.30','awdc-trans':'0.27','awdc-lowinv':'0.00','awdc-months':'2','awdc-peakmonths':'0.5','awdc-cube':'0.047','awdc-units':'77832'};
+// persist the fee/holding rates only — units + cube are per-analysis, not remembered
+var AWDC_PERSIST=['awdc-place','awdc-fbaoff','awdc-fbapeak','awdc-awdstor','awdc-proc','awdc-trans','awdc-lowinv','awdc-months','awdc-peakmonths'];
+function awdcalcToggle(){ var p=document.getElementById('awdcalc-panel'); if(!p)return; var show=(p.style.display==='none'||!p.style.display); if(show){ awdcalcLoadSaved(); } p.style.display=show?'block':'none'; if(show){ awdcalcCompute(); p.scrollIntoView({behavior:'smooth',block:'nearest'}); } }
+function awdcalcLoadSaved(){ try{ var raw=localStorage.getItem('awdCalcRates'); if(!raw)return; var o=JSON.parse(raw); AWDC_PERSIST.forEach(function(k){ if(o[k]!=null){ var el=document.getElementById(k); if(el)el.value=o[k]; } }); }catch(e){} }
+function awdcalcSaveRates(){ try{ var o={}; AWDC_PERSIST.forEach(function(k){ var el=document.getElementById(k); if(el)o[k]=el.value; }); localStorage.setItem('awdCalcRates',JSON.stringify(o)); }catch(e){} }
+function awdcalcReset(){ AWDC_PERSIST.forEach(function(k){ var el=document.getElementById(k); if(el)el.value=AWDC_DEFAULTS[k]; }); awdcalcCompute(); }
+function _awdcN(id){ var el=document.getElementById(id); return el?(parseFloat(el.value)||0):0; }
+function _awdcMoney(x){ return (x<0?'−$':'$')+Math.abs(x).toFixed(2); }
+function _awdcMoney0(x){ return (x<0?'−$':'$')+Math.abs(Math.round(x)).toLocaleString(); }
+function awdcalcCompute(){
+  var out=document.getElementById('awdc-out'); if(!out)return;
+  var place=_awdcN('awdc-place'), fbaOff=_awdcN('awdc-fbaoff'), fbaPeak=_awdcN('awdc-fbapeak'), awdStor=_awdcN('awdc-awdstor'),
+      proc=_awdcN('awdc-proc'), trans=_awdcN('awdc-trans'), lowinv=_awdcN('awdc-lowinv'),
+      months=_awdcN('awdc-months'), peakM=_awdcN('awdc-peakmonths'), cube=_awdcN('awdc-cube'), units=_awdcN('awdc-units');
+  if(peakM>months)peakM=months; var offM=Math.max(months-peakM,0);
+  var fbaStorage=cube*(fbaOff*offM + fbaPeak*peakM);   // what FBA storage would cost over the hold
+  var awdStorage=cube*awdStor*months;                  // AWD storage over the same hold
+  var storageSaved=fbaStorage-awdStorage;
+  var net=place + storageSaved + lowinv - proc - trans;
+  var total=net*units;
+  window._awdcLast={net:net,total:total,units:units};
+  var rows=[
+    ['+ FBA inbound placement avoided', place],
+    ['+ Storage saved ('+offM.toFixed(1)+'mo off-peak + '+peakM.toFixed(1)+'mo peak FBA, less AWD '+months.toFixed(1)+'mo)', storageSaved],
+    ['+ Low-inventory fee avoided', lowinv],
+    ['− AWD processing', -proc],
+    ['− AWD→FBA transfer', -trans]
+  ];
+  var html='<div style="display:grid;grid-template-columns:1fr auto;gap:2px 16px;max-width:540px">';
+  rows.forEach(function(r){ html+='<div>'+r[0]+'</div><div style="text-align:right;font-variant-numeric:tabular-nums;color:'+(r[1]<0?'var(--neg)':(r[1]>0?'var(--pos)':'var(--muted)'))+'">'+_awdcMoney(r[1])+' /u</div>'; });
+  html+='</div>';
+  html+='<div style="display:flex;justify-content:space-between;max-width:540px;margin-top:6px;padding-top:6px;border-top:1px solid var(--line);font-weight:800;font-size:13px"><span>NET SAVING / UNIT</span><span style="color:'+(net<0?'var(--neg)':'var(--pos)')+'">'+_awdcMoney(net)+'</span></div>';
+  html+='<div style="display:flex;justify-content:space-between;max-width:540px;margin-top:4px;font-weight:800;font-size:15px"><span>TOTAL &times; '+Math.round(units).toLocaleString()+' units</span><span style="color:'+(total<0?'var(--neg)':'var(--pos)')+'">'+_awdcMoney0(total)+'</span></div>';
+  html+='<div style="margin-top:8px"><button type="button" onclick="awdcalcCopy()" style="font-size:10px;padding:3px 10px;border:1px solid var(--blue);border-radius:3px;background:var(--blue-soft);color:var(--blue);cursor:pointer;font-weight:600">Copy summary</button></div>';
+  out.innerHTML=html;
+  awdcalcSaveRates();
+}
+function awdcalcCopy(){ try{ var L=window._awdcLast||{net:0,total:0,units:0};
+  var t='AWD vs FBA saving: '+ (L.net<0?'-$':'$')+Math.abs(L.net).toFixed(2)+'/unit × '+Math.round(L.units).toLocaleString()+' units = '+(L.total<0?'-$':'$')+Math.abs(Math.round(L.total)).toLocaleString();
+  if(navigator.clipboard&&navigator.clipboard.writeText){ navigator.clipboard.writeText(t); } }catch(e){} }
 const ABBR={
   'Towel - Beach':'Twl-Beach','Hair Wrap':'Hair Wrap','Picnic Blanket':'Picnic','Tea Towel':'Tea Towel',
   'Beach Pillow':'Bch Pillow','Cooling':'Cooling','Eye Mask':'Eye Mask','Gift Box':'Gift Box',

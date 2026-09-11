@@ -1,3 +1,9 @@
+## v27.664 AWD vs FBA Savings Calculator in the FBA view (Ben) — client only
+- New calculator under **BUY & MOVE ▸ FBA ▸ ⓘ FBA Transfer Logic** — a "🧮 AWD vs FBA Savings Calculator" button in that panel toggles an inline calculator.
+- Replaces the flat "$0.50/unit" guess with a transparent per-unit model: **net saving = FBA inbound placement avoided + storage saved (FBA peak-weighted vs AWD, over the holding period) + low-inventory fee avoided − AWD processing − AWD→FBA transfer**, then × units.
+- Inputs: the fee rates (illustrative defaults — user replaces with their Amazon fee-report figures; **fee/holding rates saved to localStorage**), months held + peak split, **cube/unit** (default 0.047 ft³ = blended avg of a towel-mix carton, from our `us_carton_*` dims; editable), and a units box (default = US AWD direct-2026 to date). Live recompute on every keystroke; "Copy summary" + "Reset rates".
+- FBA-view only (hidden on Buy/Transfer, mirroring the FBA Transfer Logic panel). No server, no migration, no buy-plan impact.
+
 ## v27.663 Faster "Plan ▸" popup from the DEMAND plan (Ben) — client only
 - **Symptom:** ~3s delay opening the buy-plan detail popup from the DEMAND plan's "Plan ▸" button.
 - **Cause:** the popup builds a hidden buy-grid scaffold to host the panel, and that scaffold (`renderBuyView(...,scaffoldOnly)`) did two expensive things every open: (1) an unconditional full `buildLiveDemand()` rebuild (~3s), and (2) `initUI()` rendered the *entire* ~700-row buy grid (~2s) into a wrapper that is `height:0`/hidden and never seen. Opening the single SKU (`open_`) is only ~7ms.
