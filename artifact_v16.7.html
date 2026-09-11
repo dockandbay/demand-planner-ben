@@ -2874,13 +2874,14 @@ function bpSaveFilters(){ try{
   var bu={}; try{ var o=JSON.parse(localStorage.getItem('hzBuyFilters')||'null'); if(o&&o.bu)bu=o.bu; }catch(e){}
   bu[BP_VIEW]=BU_SEL;
   var qi=document.getElementById('qry');
-  localStorage.setItem('hzBuyFilters',JSON.stringify({ti:[...TI_SEL],st:[...ST_SEL],cs:[...CS_SEL],bu:bu,qry:qi?qi.value:'',ts:Date.now()}));
+  localStorage.setItem('hzBuyFilters',JSON.stringify({ti:[...TI_SEL],st:[...ST_SEL],cs:[...CS_SEL],sc:[...SC_SEL],bu:bu,qry:qi?qi.value:'',ts:Date.now()}));   // v27.675: sc = the buy plan's OWN category filter (independent of the demand plan)
 }catch(e){} }
 function bpRestoreFilters(){ try{
   var o=JSON.parse(localStorage.getItem('hzBuyFilters')||'null'); if(!o||!o.ts||Date.now()-o.ts>3600000)return;
   if(Array.isArray(o.ti)&&o.ti.length)TI_SEL=new Set(o.ti);
   if(Array.isArray(o.st)&&o.st.length)ST_SEL=new Set(o.st);
   if(Array.isArray(o.cs)&&o.cs.length)CS_SEL=new Set(o.cs);
+  if(Array.isArray(o.sc)&&o.sc.length)SC_SEL=new Set(o.sc);   // v27.675: restore the buy plan's OWN category filter (independent of the demand plan's SEL)
   if(o.bu&&o.bu[BP_VIEW]!=null)BU_SEL=o.bu[BP_VIEW];   // per-view buy-type
   var qi=document.getElementById('qry'); if(qi&&typeof o.qry==='string')qi.value=o.qry;
 }catch(e){} }
@@ -16538,7 +16539,7 @@ function renderBuyView(mode,scaffoldOnly){
   // Set the buy/FBA view before building so headers + rows render the right columns.
   if(BP.setView)BP.setView(mode);
   // Synergy: carry the country + category selection over from the PLAN tab.
-  BP.setFilters(CUR,[...SEL]);
+  BP.setFilters(CUR);   // v27.675 (Ben): carry ONLY the country over from the PLAN tab — NOT the category selection. The buy plan keeps its OWN category filter (SC_SEL), persisted via bpSaveFilters/bpRestoreFilters, independent of the demand plan.
   // Restore the Buy/FBA-specific filters (tier/status/core-seasonal/buy-type + SKU query) from the
   // last hour, so returning to the page remembers them. Runs after setFilters (country/category from
   // the plan) and before initUI so the pills build in the restored state.
