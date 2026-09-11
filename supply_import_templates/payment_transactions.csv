@@ -1,0 +1,2 @@
+payment_date,payment_run_ref,transaction_reference,transaction_type,transaction_amount,transaction_supplier,invoice_reference,deposit_ref,paid_currency,paid_amount
+2026-03-01,RUN-2026-03-01,PO-56UKLX1,Deposit,14475,Lixin,,DEP-LX-2026Q1,CNY,104220

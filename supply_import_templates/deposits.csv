@@ -1,0 +1,2 @@
+reference,is_deposit,supplier_name,prod_no,country,description,amount,date_due,date_paid,estimated_pay_date,xero_fx,xero_account_code,status,production_contract
+DEP-LX-2026Q1,true,Lixin,P56,UK,Q1 2026 deposit pool,30000,2026-02-15,2026-02-14,,0.00,2010,paid,P56 contract

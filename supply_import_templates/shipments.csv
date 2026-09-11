@@ -1,0 +1,2 @@
+shipment_ref,master_po,carrier,carrier_ref,mode,departure_date,landing_date,arrival_date,delivery_date,status,cost_manual,tracked_delivery_date,tracked_source,notes
+SHIP-56UK-01,PO-56UKLX1,Flexport,FLEX-ABC123,sea,2026-04-10,2026-05-18,2026-05-18,2026-05-25,Active,,,,Consolidated UK 40ft
