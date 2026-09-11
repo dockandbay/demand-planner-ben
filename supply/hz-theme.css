@@ -504,6 +504,13 @@ body .pv-btn.ghost{color:var(--nav-dim);border-color:rgba(255,255,255,.18)} body
 :root.om-dark #app tr.sub-row:hover td:not(.stk):not(.stk2),
 :root.om-dark #app tr.sku-inline:hover td:not(:first-child):not(.stk){box-shadow:inset 0 0 0 999px rgba(255,255,255,.055)}
 
+/* v27.667 (Ben): dark-mode SELECTED pills. The light-theme active style (background var(--nav)) is DARKER than the
+   card in dark mode, so a selected filter pill reads as a near-invisible hole. Give active pills a lighter dark fill
+   plus a highlighted blue outline so the selection is obvious ("dark buttons with a highlighted outline"). Higher
+   specificity than the artifact's .pill.active / #buy-wrap .pill.active rules; #buy-wrap sits under #app so both the
+   top-level filter pills and the Buy/FBA/Transfer pills are covered. */
+:root.om-dark #app .pill.active{ background:var(--nav-2); color:var(--nav-ink); border-color:var(--blue); box-shadow:inset 0 0 0 1px var(--blue) }
+
 /* v27.502: the old top bar is empty once the nav rows moved out of it */
 #pv-wrap #supply-root .bar:empty{display:none;margin:0}
 
