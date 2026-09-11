@@ -8732,7 +8732,7 @@
         +'</ol></div>'
       +'<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'
         +'<div id="xc-drop" title="Drag the Xero XLSX here, or click to choose" style="display:inline-flex;align-items:center;gap:8px;border:1.5px dashed #93c5fd;border-radius:8px;padding:8px 12px;background:var(--hover)"><span style="font-size:15px;color:var(--blue)">⬆</span><input type="file" id="xc-file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" style="font-size:12px"></div>'
-        +'<button class="save-btn" id="xc-go" style="background:var(--blue-soft);color:var(--blue-ink);border:1px solid #93c5fd;font-weight:600">Analyse</button><label style="font-size:12px;color:var(--muted);cursor:pointer"><input type="checkbox" id="xc-allrows"> show all Approved rows (not just issues)</label><span id="xc-msg" style="font-size:12px"></span></div>'
+        +'<button class="save-btn" id="xc-go" style="background:var(--blue-soft);color:var(--blue-ink);border:1px solid #93c5fd;font-weight:600">Analyse</button><label style="font-size:12px;color:var(--muted);cursor:pointer"><input type="checkbox" id="xc-allrows"> show matching rows too (not just issues)</label><span id="xc-msg" style="font-size:12px"></span></div>'
       +'<div id="xc-result"></div>';
     var _rows=null, _cf=null, _period='', _pbs=[];   // last upload is stored SERVER-SIDE (shared across the team, kept 1 week) — /api/supply/xero-compare/*  ·  _pbs = payments-by-supplier (per-PO final invoice total)
     var go=b.querySelector('#xc-go'), fileI=b.querySelector('#xc-file'), msg=b.querySelector('#xc-msg');

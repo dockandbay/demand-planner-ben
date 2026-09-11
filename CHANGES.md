@@ -1,3 +1,7 @@
+## v27.669 Xero Compare: make the "show matching" toggle discoverable (Ben) — client only
+- Ben reported the "show matching items" toggle had disappeared. It hadn't — it's the `#xc-allrows` checkbox, but it was labelled "show all Approved rows (not just issues)" so it wasn't recognisable. Relabelled to **"show matching rows too (not just issues)"**.
+- Note (already in the pending package, above live v27.582): the **totals-mismatch flag** ("⚠ Totals differ — Horizon £X vs Xero £Y (Δ £Z)", the real "PO total doesn't match" case) was added in v27.593, and the report body is otherwise intact (regression check: nothing else removed). Both land for Ben on the next deploy.
+
 ## v27.668 Supplier portal: buttons render white on live (missing theme tokens) — fallback tokens (Ben)
 - **Symptom (live only):** portal buttons that use design tokens (`Confirm order`, `Add attachment`, etc.) render **white** on the live portal but green/blue in sandbox. Root cause: those buttons use `background:var(--pos)` / `var(--blue)`; the token definitions come from the external `/hz-theme.css` (injected via `HZ_THEME_LINK`), and on the live portal that stylesheet isn't taking effect — so `var(--pos)` is invalid → the button falls back to white.
 - **Fix:** baked the base light-palette tokens into `portal.html`'s own `<style>` as a **zero-specificity fallback** (`:where(:root){…}`). When `/hz-theme.css` loads, its `:root` wins (no drift); when it doesn't, the portal still has every token, so the buttons render correctly. `portal.html` only — no server/migration.
