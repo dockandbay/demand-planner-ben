@@ -1,3 +1,7 @@
+## v27.677 REVERT the v27.666 header-based auth bypass (Diviyaj security review) — SERVER
+- v27.666 let a request pass the `PLANNER_KEY` gate if it carried a forwarded auth email (`authUser`/`x-*-email` header). **That is only safe behind a header-stripping proxy — prod has none, and Vercel passes client headers through, so anyone could spoof the header and claim an identity** (Diviyaj). Reverted to cookie/key-only (pre-v27.666 behaviour). Sandbox has no `PLANNER_KEY` so it never bit there.
+- The correct fix (already live, ported by Diviyaj) is a **valid signed login cookie** passing the gate — never a header. **TODO: mirror that here** (need the cookie name + verification from Diviyaj) so the next port merges cleanly. server.mjs only.
+
 ## v27.676 Supplier-portal preview: deep link by supplier CODE (Ben, part of #7) — client only
 - The SUPPLY ▸ CONFIG ▸ Portal "preview as supplier" deep link now accepts the **supplier code** as well as the name (e.g. `#/supply/config/portal/bl` for ACME Ltd, code BL), and the app now **generates** code-based URLs (short, stable, shareable) instead of the lowercased name. Manually-typed name links still resolve.
 - The **sub-tab in the URL** (Ben's `…/portal/<code>/shipmentplan`) is a follow-up: the portal view carries its own internal hash router (`ppApplyHash`), so surfacing its inner tab in the admin preview URL needs coordinating the two routers — deferred. inject.html only.

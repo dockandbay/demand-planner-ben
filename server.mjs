@@ -766,11 +766,15 @@ app.use((req, res, next) => {
   if (!GATE) return next();                       // open locally
   if (req.path.startsWith('/api/')) {             // APIs: header or cookie
     if (req.get('x-planner-key') === GATE || cookieVal(req, 'pk') === GATE) return next();
-    if (authUser(req)) return next();   // v27.666: SSO/proxy-authenticated (a forwarded auth email) → allowed even without the shared access-key cookie. Per-user rights are still enforced downstream by permsFor + the edit-permission guard. Fixes permissioned users (e.g. SUPPLY/admin) getting a blanket "unauthorised" on writes when their pk cookie is missing/expired while their SSO session is valid.
+    // v27.677: REVERTED the v27.666 header-based bypass. Prod has no auth proxy and Vercel passes client
+    // headers through, so trusting a forwarded x-*-email header let anyone spoof an identity (Diviyaj). The
+    // correct fix is a valid SIGNED LOGIN COOKIE passing the gate (never a header) — Diviyaj ported that upstream.
+    // MIRROR IT HERE once the cookie name + verification are shared, so the next port merges cleanly. Until then
+    // this stays cookie/key-only, matching pre-v27.666 behaviour (safe; the sandbox has no GATE so it never bites).
     return res.status(401).json({ error: 'unauthorised' });
   }
   const supplied = req.query.key || cookieVal(req, 'pk');
-  if (supplied === GATE || authUser(req)) {   // v27.666: SSO-authenticated users don't also need the shared access key to load the app
+  if (supplied === GATE) {
     if (req.query.key) res.setHeader('Set-Cookie', `pk=${encodeURIComponent(GATE)}; Path=/; Max-Age=2592000; SameSite=Lax`);
     return next();
   }
