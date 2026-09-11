@@ -2044,6 +2044,7 @@ const BUY_LBL=AFTER20?`${MN[_CUR_M]} + ${PROJ[2].lbl}`:`${MN[_CUR_M]}`;
 
 let CUR='UK',SC_SEL=new Set(['ALL']),TI_SEL=new Set(['ALL']),ST_SEL=new Set(['ACTIVE','FUTURE']),CS_SEL=new Set(['ALL']),BU_SEL='ALL',RW_SEL='ALL';   // RW_SEL = Release Window filter (BUY/FBA)
 let FBA_CARTON_MODE='FULL';  // FBA transfer sizing (default FULL = whole cartons, per the agreed rules): 'FULL' = whole cartons only | 'ANY' = full shortfall, no rounding | 'PARTIAL' = raw shortfall with floor
+var BP_CAT_COLLAPSED={};   // v27.673 Buy v2 slice 2: collapsed category sections (per-category, persists across re-renders). Display-only.
 let BP_VIEW='buy'; // 'buy' (Buy 3PL/Urgent/FBA + 3PL transfer opps) | 'fba' (Transfer-to-FBA + FBA inbound)
 let PSKU=null,PMKT='UK';
 
@@ -2764,15 +2765,19 @@ function render(){
   const COLS_EFF=COLS-(_MERGE?2:0);   // mobile FBA merges 2 column pairs → 2 fewer columns
   if(!vis.length){h='<tr><td colspan="'+COLS_EFF+'" class="nd">No SKUs match filters</td></tr>';}
   else gk.forEach(sc=>{
-    const _catNm=`${sc} <span style="font-weight:400;color:var(--faint)">(${grp[sc].length})</span>`;
+    // v27.673 Buy v2 slice 2: collapse caret + per-category BUY total (sum of already-computed buy qtys — the buy calc is untouched; getBuyQtys is memoised so this doesn't recompute).
+    var _catBuyN=0; if(BP_VIEW==='buy'){ grp[sc].forEach(function(_s){ try{ var _q=getBuyQtys(_s.s,CUR); _catBuyN+=(_q.b3||0)+(_q.b3u||0)+(_q.bf||0); }catch(e){} }); }
+    var _catCol=!!BP_CAT_COLLAPSED[sc];
+    var _catTot=(BP_VIEW==='buy'&&_catBuyN>0)?` <span style="font-weight:600;color:var(--blue)">· buy ${fmt(_catBuyN)}</span>`:'';
+    const _catNm=`<span class="sch-caret" style="display:inline-block;width:12px;color:var(--faint)">${_catCol?'▸':'▾'}</span>${sc} <span style="font-weight:400;color:var(--faint)">(${grp[sc].length})</span>${_catTot}`;
     const _catEsc=String(sc).replace(/&/g,'&amp;').replace(/"/g,'&quot;');
     if(BP_VIEW==='fba'){
       // category header: name spans up to the Ship column, the per-category "select all" sits in the Ship column itself
       var _nameCol=(9+_extra)-(_MERGE?2:0);
       var _allTk=grp[sc].length>0 && grp[sc].every(function(x){return FBA_TICK[x.s+'|'+CUR];});   // Ship column index: 10 lead (incl. Release Window) + extra SOH cols − mobile merge (2 fewer)
-      h+=`<tr class="sch"><td colspan="${_nameCol}">${_catNm}</td><td style="text-align:center;border-left:2px solid #000"><span class="cat-selall" data-cat="${_catEsc}" title="Tick / untick all ${_catEsc} rows for shipping" style="cursor:pointer;color:var(--faint);font-weight:400;font-size:8px;white-space:nowrap">${_allTk?'select none':'select all'}</span></td><td colspan="5"></td></tr>`;
+      h+=`<tr class="sch sch-toggle" data-cat="${_catEsc}" style="cursor:pointer" title="click to collapse / expand this category"><td colspan="${_nameCol}">${_catNm}</td><td style="text-align:center;border-left:2px solid #000"><span class="cat-selall" data-cat="${_catEsc}" title="Tick / untick all ${_catEsc} rows for shipping" style="cursor:pointer;color:var(--faint);font-weight:400;font-size:8px;white-space:nowrap">${_allTk?'select none':'select all'}</span></td><td colspan="5"></td></tr>`;
     } else {
-      h+=`<tr class="sch"><td colspan="${COLS_EFF}">${_catNm}</td></tr>`;
+      h+=`<tr class="sch sch-toggle" data-cat="${_catEsc}" style="cursor:pointer" title="click to collapse / expand this category"><td colspan="${COLS_EFF}">${_catNm}</td></tr>`;
     }
     grp[sc].forEach(s=>{
       const md=s.ms[CUR]||{};
@@ -2826,7 +2831,7 @@ function render(){
         <td class="bq${b3uAir>0&&urgTip?' tip120':''}"${b3uAir>0&&urgTip?` data-tip="${urgTip}"`:''}>${b3uAir>0?`<span class="bq-v" style="color:var(--neg);font-weight:700">${fmt(b3uAir)}</span>`:`<span class="bq-nil">—</span>`}</td>
         <td class="bq">${bf>0?`<span class="bq-fba">${fmt(bf)}</span>`:`<span class="bq-nil">—</span>`}</td>`;   // inter-market Trf columns removed from BUY (now the TRANSFER tab)
       }
-      h+=`<tr class="sr">
+      h+=`<tr class="sr" data-scat="${_catEsc}"${_catCol?' style="display:none"':''}>
         <td class="stk"><div class="snm"><button class="ob" data-sku="${s.s}">Plan \u25b8</button><span class="${tc}">${s.ti}</span><span class="scode">${s.s}</span>${(typeof CHINA_STOCK!=='undefined'&&CHINA_STOCK[s.s]>0)?`<span class="cn-stk tip120" data-tip="China stock: ${CHINA_STOCK[s.s].toLocaleString()} units held (un-allocated MOQ top-up) \u2014 available to allocate to a market / DTC order" style="margin-left:5px;font-size:8px;font-weight:700;color:var(--amber);background:var(--amber-bg);border:1px solid var(--prod);border-radius:3px;padding:0 3px;white-space:nowrap">\u{1F3ED} ${CHINA_STOCK[s.s].toLocaleString()}</span>`:''}${BP_VIEW==='transfer'?trfChips(s.s):''}</div></td>
         ${_MERGE
           ? `<td style="padding:2px 6px;font-size:10px;line-height:1.3"><span class="${sc2}">${st}</span><br>${s.cs?`<span class="cs-${s.cs.toLowerCase().replace('-','')}" title="${s.cs}">${s.cs==='Seasonal'?'S':'C'}</span>`:'<span style="color:var(--faint)">—</span>'}</td>`
@@ -2880,7 +2885,7 @@ function bpRestoreFilters(){ try{
   var qi=document.getElementById('qry'); if(qi&&typeof o.qry==='string')qi.value=o.qry;
 }catch(e){} }
 
-function _bindTb(){var _tb=document.getElementById('tb');if(_tb){_tb.addEventListener('click',function(e){var ca=e.target.closest('.cat-selall');if(ca){var cat=ca.dataset.cat;var _tks=Array.prototype.slice.call(document.querySelectorAll('#tb .fba-tick')).filter(function(tk){return tk.dataset.cat===cat;});var _on=_tks.length>0&&_tks.every(function(tk){return FBA_TICK[tk.dataset.sku+'|'+CUR];});_tks.forEach(function(tk){if(_on)delete FBA_TICK[tk.dataset.sku+'|'+CUR];else FBA_TICK[tk.dataset.sku+'|'+CUR]=true;});render();updateFbaSelBox();return;}var b=e.target.closest('.ob');if(b)open_(b.dataset.sku);});_tb.addEventListener('change',function(e){var inp=e.target.closest('.fba-ov');if(inp){var v=inp.value.trim();FBA_OV[inp.dataset.sku+'|'+CUR]=v;var _cp=(PD[inp.dataset.sku]&&PD[inp.dataset.sku].cp)||0;inp.title=(v&&/[cr]$/i.test(v))?('= '+fbaResolveQty(v,_cp)+' units ('+v+')'):'';updateFbaSelBox();return;}var tk=e.target.closest('.fba-tick');if(tk){if(tk.checked)FBA_TICK[tk.dataset.sku+'|'+CUR]=true;else delete FBA_TICK[tk.dataset.sku+'|'+CUR];updateFbaSelBox();}});}}
+function _bindTb(){var _tb=document.getElementById('tb');if(_tb){_tb.addEventListener('click',function(e){var ca=e.target.closest('.cat-selall');if(ca){var cat=ca.dataset.cat;var _tks=Array.prototype.slice.call(document.querySelectorAll('#tb .fba-tick')).filter(function(tk){return tk.dataset.cat===cat;});var _on=_tks.length>0&&_tks.every(function(tk){return FBA_TICK[tk.dataset.sku+'|'+CUR];});_tks.forEach(function(tk){if(_on)delete FBA_TICK[tk.dataset.sku+'|'+CUR];else FBA_TICK[tk.dataset.sku+'|'+CUR]=true;});render();updateFbaSelBox();return;}var _sh=e.target.closest('.sch-toggle');if(_sh){var _cat=_sh.dataset.cat;BP_CAT_COLLAPSED[_cat]=!BP_CAT_COLLAPSED[_cat];var _col=BP_CAT_COLLAPSED[_cat];var _cr=_sh.querySelector('.sch-caret');if(_cr)_cr.textContent=_col?'▸':'▾';var _t=document.getElementById('tb');if(_t)Array.prototype.forEach.call(_t.querySelectorAll('tr.sr'),function(r){if(r.dataset.scat===_cat)r.style.display=_col?'none':'';});return;}var b=e.target.closest('.ob');if(b)open_(b.dataset.sku);});_tb.addEventListener('change',function(e){var inp=e.target.closest('.fba-ov');if(inp){var v=inp.value.trim();FBA_OV[inp.dataset.sku+'|'+CUR]=v;var _cp=(PD[inp.dataset.sku]&&PD[inp.dataset.sku].cp)||0;inp.title=(v&&/[cr]$/i.test(v))?('= '+fbaResolveQty(v,_cp)+' units ('+v+')'):'';updateFbaSelBox();return;}var tk=e.target.closest('.fba-tick');if(tk){if(tk.checked)FBA_TICK[tk.dataset.sku+'|'+CUR]=true;else delete FBA_TICK[tk.dataset.sku+'|'+CUR];updateFbaSelBox();}});}}
 
 // CSV download
 // Release Window dropdown filter (BUY + FBA views): populate from the release windows present in the current

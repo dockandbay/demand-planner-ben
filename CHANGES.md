@@ -1,3 +1,7 @@
+## v27.673 Buy v2 — Slice 2: collapsible category sections + per-category buy total (Ben) — client only
+- On the BUY grid, each category header is now **click-to-collapse/expand** (▾/▸ caret; per-category collapse state persists across re-renders) and shows the **category's total buy** (`· buy N`, sum of the SKUs' scheduled + urgent + FBA buy) alongside the existing SKU count.
+- **Display-only:** the buy engine (project / getBuyQtys / buyplanItems) is untouched — the header total is just a sum of already-computed, memoised buy quantities, and collapse only toggles row visibility. **Buy output verified byte-identical** across UK/US/EU/AU/CA. First step of the approved Buy v2 grouped-layout rebuild (mockup approved; slices to follow). artifact only.
+
 ## v27.672 SUG-0041: PO Client/FBA delivery-contact fields (zera@ / Ben) — SERVER + MIGRATION
 - New fields on the PO ▸ **Client/FBA** tab, sitting under **Final delivery address**: **Consignee**, **Contact person**, **Contact number**, **Freight forwarder details** (multiline). All editable, auto-saving via the existing PO patch endpoint.
 - **Migration `271_po_client_fba_fields.sql`** (additive, nullable text: `po_consignee`, `po_contact_person`, `po_contact_number`, `po_freight_forwarder`) — applied to sandbox; **Diviyaj runs 271 on live**.
