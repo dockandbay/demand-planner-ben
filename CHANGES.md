@@ -1,3 +1,7 @@
+## v27.671 PRODUCT grid: drop Category column (#9) + sortable headers (#12) (Ben) — client only
+- **#9:** removed the **Category** column — redundant with the category group header (which already shows category + count). Colspans and the row cell adjusted; category is still editable via the picker in the detail drawer.
+- **#12:** column headers are now **click-to-sort** (Ref / Season / Supplier / Sizes / Stage / Age / Sample shipment), cycling **off → ascending → descending → off**. A sort **flattens the season/category grouping** (per your steer) and sorts the whole list by that column; clear the sort to return to the grouped view. The active header shows ▲/▼. inject.html only; no buy impact.
+
 ## v27.670 PRODUCT grid: season/category group labels stay visible on horizontal scroll (Ben) — client only
 - PRODUCT redesign remainder (#11). The grid groups rows by season → category with full-width header rows; scrolling the wide table sideways scrolled the season/category label out of view. Wrapped each group label in a zero-risk inner `position:sticky;left` span so the label (caret + name + count) stays pinned at the left as you scroll horizontally. The ⤓ Report button is unchanged. inject.html only; no buy impact.
 
