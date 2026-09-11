@@ -1,3 +1,8 @@
+## v27.672 SUG-0041: PO Client/FBA delivery-contact fields (zera@ / Ben) — SERVER + MIGRATION
+- New fields on the PO ▸ **Client/FBA** tab, sitting under **Final delivery address**: **Consignee**, **Contact person**, **Contact number**, **Freight forwarder details** (multiline). All editable, auto-saving via the existing PO patch endpoint.
+- **Migration `271_po_client_fba_fields.sql`** (additive, nullable text: `po_consignee`, `po_contact_person`, `po_contact_number`, `po_freight_forwarder`) — applied to sandbox; **Diviyaj runs 271 on live**.
+- server.mjs: added the 4 columns to `PO_ROWS_SQL` (drawer read), the PO-patch whitelist, and `PO_COSMETIC_FIELDS` (edits don't trigger a grid recompute). inject.html: 4 rows on the Client/FBA tab. No buy impact.
+
 ## v27.671 PRODUCT grid: drop Category column (#9) + sortable headers (#12) (Ben) — client only
 - **#9:** removed the **Category** column — redundant with the category group header (which already shows category + count). Colspans and the row cell adjusted; category is still editable via the picker in the detail drawer.
 - **#12:** column headers are now **click-to-sort** (Ref / Season / Supplier / Sizes / Stage / Age / Sample shipment), cycling **off → ascending → descending → off**. A sort **flattens the season/category grouping** (per your steer) and sorts the whole list by that column; clear the sort to return to the grouped view. The active header shows ▲/▼. inject.html only; no buy impact.

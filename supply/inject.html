@@ -3445,6 +3445,10 @@
           if(fp)parts.push('<a href="tel:'+esc(fp.replace(/[^+0-9]/g,''))+'">'+esc(fp)+'</a>');
           return cliRow('Forwarder <span class="mut tiny">(from key account)</span>', parts.join(' &nbsp;·&nbsp; ')); })()
       +cliRow('Final delivery address <span class="mut tiny">(shown on crossdock labels)</span>',txtIn(ep,'final_delivery_address',r.final_delivery_address,440,true))
+      +cliRow('Consignee',txtIn(ep,'po_consignee',r.po_consignee,440))   // SUG-0041 (Ben) — delivery-contact details, under the final address
+      +cliRow('Contact person',txtIn(ep,'po_contact_person',r.po_contact_person,300))
+      +cliRow('Contact number',txtIn(ep,'po_contact_number',r.po_contact_number,220))
+      +cliRow('Freight forwarder details',txtIn(ep,'po_freight_forwarder',r.po_freight_forwarder,440,true))
       +cliRow('Crossdock SKUs <span class="mut tiny">(CROSSDOCK/PREORDER)</span>',crossdockPicker(r.po,xdList))
       // Crossdock destination exception: crossdock SKUs must ship to a real market (UK/US/EU/AU/CA). If this PO
       // carries crossdock SKUs but its ship-to resolves to OT (DIRECT / other non-market), flag it here.

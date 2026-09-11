@@ -11689,6 +11689,7 @@ app.post('/api/supply/po/:po', async (req, res) => {
     batch_id: 'text', branch: 'text', erp_po: 'text', notes: 'text', container_size: 'text',
     country_code: 'text', client: 'text', client_requirements: 'text', sales_order_ref: 'text', client_deadline_date: 'date', asn_numbers: 'text',
     client_po_ref: 'text', dispatch_order_ref: 'text', final_delivery_address: 'text', crossdock_skus: 'text', branch_delivery_notes: 'text',
+    po_consignee: 'text', po_contact_person: 'text', po_contact_number: 'text', po_freight_forwarder: 'text',   // SUG-0041: Client/FBA delivery-contact fields (migration 271)
     // Packing & Labelling (Client/FBA tab → supplier portal "Direct to Client details") — migration 086
     pack_polybags: 'boolean', pack_polybags_notes: 'text', pack_dnb_barcodes: 'boolean', pack_dnb_barcodes_notes: 'text',
     pack_rfid_barcodes: 'boolean', pack_rfid_barcodes_notes: 'text', pack_dnb_carton: 'boolean', pack_dnb_carton_notes: 'text',
@@ -14883,7 +14884,7 @@ app.post('/api/supply/bi/erp-compare/ignore', async (req, res) => {
 // one skips the recomputed-row query in the save response (client just repaints the cell it already changed).
 // Deliberately small/conservative: anything touching DtC approval (pack_*, sales/client refs), dates, amounts,
 // %, deposit, shipment, branch, status, prod#/batch is NOT here, so those still refresh the row.
-const PO_COSMETIC_FIELDS = new Set(['client', 'dispatch_order_ref', 'final_delivery_address', 'branch_delivery_notes', 'notes', 'custom_dev_ref', 'confirmed_in_3pl']);   // confirmed_in_3pl: cosmetic (no grid recompute) so its save doesn't re-render + untick the box; still logged (see extraFn)
+const PO_COSMETIC_FIELDS = new Set(['client', 'dispatch_order_ref', 'final_delivery_address', 'branch_delivery_notes', 'notes', 'custom_dev_ref', 'confirmed_in_3pl', 'po_consignee', 'po_contact_person', 'po_contact_number', 'po_freight_forwarder']);   // + SUG-0041 Client/FBA contact fields (no grid recompute)   // confirmed_in_3pl: cosmetic (no grid recompute) so its save doesn't re-render + untick the box; still logged (see extraFn)
 // PO audit log (migration 158): fields whose edits are recorded on the timeline as a "record of change".
 const PO_TRACK = { status: 'Status', end_production_overide: 'Production end date', shipment_ref: 'Shipment assignment',
   deposit_ref: 'Deposit assignment',
@@ -15133,6 +15134,10 @@ const PO_ROWS_SQL = `
             to_char(supplier_confirmed_at,'YYYY-MM-DD') supplier_confirmed, coalesce(supplier_confirmed_by,'') supplier_confirmed_by,
             approved_lines,   -- snapshot of SKUs/qtys at supplier approval → CONFIG portal preview builds approvedByPo for the "changes since you approved" diff (parity with /api/portal/bootstrap)
             coalesce(dispatch_order_ref,'') dispatch_order_ref, coalesce(final_delivery_address,'') final_delivery_address,
+            coalesce((SELECT px.po_consignee         FROM planner.purchase_orders px WHERE px.po=calc4.po),'') po_consignee,          -- SUG-0041 Client/FBA contact fields (subquery — calc4 doesn't forward these new columns, like custom_dev_ref)
+            coalesce((SELECT px.po_contact_person    FROM planner.purchase_orders px WHERE px.po=calc4.po),'') po_contact_person,
+            coalesce((SELECT px.po_contact_number    FROM planner.purchase_orders px WHERE px.po=calc4.po),'') po_contact_number,
+            coalesce((SELECT px.po_freight_forwarder FROM planner.purchase_orders px WHERE px.po=calc4.po),'') po_freight_forwarder,
             coalesce(crossdock_skus,'') crossdock_skus,
             coalesce(dtc_custom,false) dtc_custom, coalesce(dtc_key_account,false) dtc_key_account,
             coalesce((SELECT pcd.custom_dev_ref FROM planner.purchase_orders pcd WHERE pcd.po=calc4.po),'') custom_dev_ref,   -- custom-order product developments (CSV of product_dev_items.ref); subquery since calc4 doesn't forward the column
