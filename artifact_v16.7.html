@@ -9823,6 +9823,13 @@ function render(){
   var _pt=document.getElementById('plan-tools');
   if(_pt)_pt.style.display=(VIEW_MODE==='planning')?'':'none';
   if(typeof planRevBtnSync==='function')planRevBtnSync(); // floating "Revenue vs target" button on the plan
+  // v27.674: ALWAYS rescue the status note (#st) + HORIZON badge (#ver) back into #statusbar BEFORE any L2-nav
+  // container is torn down below. #ver is a single element relocated into whichever L2 row is active; the
+  // buymove-tabs / report-tabs teardowns removed their container WITHOUT rescuing it first, so #ver (a child) was
+  // DELETED — and every later view then had no badge to place (Ben: badge gone on buy-move/buy + demand/actions).
+  // The receiving view's nav (demand 12414 / buymove 13317 / reports 14927) re-appends + re-styles it.
+  (function(){ var _sbX=document.getElementById('statusbar'); if(!_sbX)return;
+    ['st','ver'].forEach(function(id){ var el=document.getElementById(id); if(el&&el.parentNode!==_sbX){ if(id==='st'){el.removeAttribute('style');el.className='status';} else {el.removeAttribute('style');} _sbX.appendChild(el); } }); })();
   // leaving DEMAND — return the relocated tools to the main bar, then tear down the sub-tab bar + body
   if(VIEW_MODE!=='planning'){
     var vtr=document.getElementById('view-tabs-row');
