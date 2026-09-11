@@ -9924,6 +9924,7 @@
     // barcode anchored near the bottom, just above the address block (not floating mid-label)
     var by=Math.max(y, H-230);   // barcode sits higher so its digits don't overlap the address block at the bottom
     if(r.pn){ el.push(svgText(cx,by-16,String(r.pn),{size:22,bold:true,anchor:'middle',ls:1.5})); }   // v27.660: custom part number, printed just above the barcode (Ben)
+    if(r.desc){ var _cdl=wrapLines(String(r.desc),48).slice(0,2); var _cdy=by-(r.pn?42:16)-(_cdl.length-1)*17; _cdl.forEach(function(ln){ el.push(svgText(cx,_cdy,ln,{size:16,anchor:'middle'})); _cdy+=17; }); }   // v27.665: product description, above the part number (Ben)
     if(bits){ var m=4.5,bw=95*m,bx=(W-bw)/2,nH=85,gExt=22; el.push(eanBars(code,bx,by,m,nH,gExt)); var dbl=by+nH+30,c=String(code).replace(/\D/g,''); if(c.length===12)c='0'+c;
       el.push(svgText(bx-8,dbl,c[0],{size:30,anchor:'end'}));
       el.push(svgText(bx+24*m,dbl,c.slice(1,7),{size:30,anchor:'middle',ls:2}));
@@ -10002,7 +10003,7 @@
     el.push(svgText(40,ty,sizeName,{size:18,fill:'#111'}));
     el.push(svgText(40,ty+26,(kind==='carton'?('BOX OF '+(r.carton_qty||'?')+' x '):kind==='inner'?'INNER · ':'')+r.sku,{size:18,bold:true}));
     var afterSku=ty+26;
-    if(kind==='product' && opts.rrp){ var rt=(r.uk_rt!=null&&r.uk_rt!=='')?Number(r.uk_rt).toFixed(2):''; if(rt)el.push(svgText(40,afterSku+27,rt,{size:18,bold:true})); }
+    if(kind==='product' && opts.rrp){ var _rm=(opts.rmkt&&opts.rmkt!=='All')?opts.rmkt:'UK'; var _rc=RRP_MKTS.filter(function(m){return m[0]===_rm;})[0]||RRP_MKTS[0]; var _rv=r[_rc[1]]; var rt=(_rv!=null&&_rv!=='')?(_rc[2]+Number(_rv).toFixed(2)):''; if(rt)el.push(svgText(40,afterSku+27,'RRP '+rt,{size:18,bold:true})); }   // v27.665: RRP for the chosen market (was hardcoded UK)
     // right block: swatch + size circle + batch / date of production
     var swX=440,swY=15,swW=120;
     if(kind==='product' && opts.swatchUri) el.push('<image x="'+swX+'" y="'+swY+'" width="'+swW+'" height="'+swW+'" preserveAspectRatio="xMidYMid slice" href="'+opts.swatchUri+'" xlink:href="'+opts.swatchUri+'"/>');
@@ -10013,6 +10014,7 @@
     // barcode
     var m=5,bx=(W-95*m)/2,byc=232,nH=80,gExt=20,H=355;
     if(r.pn){ el.push(svgText(W/2,byc-13,String(r.pn),{size:19,bold:true,anchor:'middle',ls:1.5})); }   // v27.660: custom part number, printed just above the barcode (Ben)
+    if(r.desc){ var _dl=wrapLines(String(r.desc),44).slice(0,2); var _dy=byc-(r.pn?35:13)-(_dl.length-1)*16; _dl.forEach(function(ln){ el.push(svgText(W/2,_dy,ln,{size:14,anchor:'middle'})); _dy+=16; }); }   // v27.665: product description, above the part number (Ben)
     var bars=eanBars(code,bx,byc,m,nH,gExt);
     if(bars){ el.push(bars); var dbl=byc+nH+30, c=String(code).replace(/\D/g,''); if(c.length===12)c='0'+c;
       el.push(svgText(bx-8,dbl,c[0],{size:33,anchor:'end'}));
@@ -10094,7 +10096,7 @@
   // fetch a same-origin image URL → data URI (keeps the rasterised canvas un-tainted)
   function fetchImgDataUri(url){ return fetch(url).then(function(resp){ if(!resp.ok)throw 0; return resp.blob(); }).then(function(blob){ return new Promise(function(res){ var fr=new FileReader(); fr.onload=function(){res(fr.result);}; fr.onerror=function(){res('');}; fr.readAsDataURL(blob); }); }).catch(function(){ return ''; }); }
   // gather the data-URI assets a label needs (swatch / GRS logo / D&B logo), then call cb(opts)
-  function bcGatherAssets(kind,r,batch,rrp,cb){ var opts={batch:batch,rrp:rrp}, jobs=[];
+  function bcGatherAssets(kind,r,batch,rrp,cb,rmkt){ var opts={batch:batch,rrp:rrp,rmkt:rmkt||'UK'}, jobs=[];
     if(r.swatch_url) jobs.push(fetchImgDataUri('/api/supply/img?url='+encodeURIComponent(r.swatch_url)).then(function(u){opts.swatchUri=u;}));
     if(kind!=='product'){ jobs.push(fetchImgDataUri('/api/supply/asset/grs').then(function(u){opts.grsUri=u;})); jobs.push(fetchImgDataUri('/api/supply/asset/db').then(function(u){opts.dbUri=u;})); }
     jobs.push(fetchImgDataUri('/api/supply/asset/gotham-book').then(function(u){opts.fontBook=u;}));
@@ -10104,10 +10106,10 @@
   function confirmNoBatch(batch){ return batch ? true : window.confirm('No BATCH selected — the label’s BATCH and DATE OF PRODUCTION will be blank. Download anyway?'); }
   // code (optional): render THIS supplier's variant (its short code on the label + appended to the filename). When
   // code is passed the batch-confirm is skipped (the multi-supplier caller confirmed once for the whole fan-out).
-  function bcMakeLabel(kind,r,batch,rrp,code){ if(!r||(!code&&!confirmNoBatch(batch)))return;
+  function bcMakeLabel(kind,r,batch,rrp,code,rmkt){ if(!r||(!code&&!confirmNoBatch(batch)))return;
     var rr=code?Object.assign({},r,{supplier_code:code}):r, suf=code?('-'+zipSafe(code)):'';
     bcGatherAssets(kind,rr,batch,rrp,function(opts){
-    rasterizeSVG(buildLabelSVG(kind,rr,opts),2,function(blob){ if(!blob){ alert('Could not render label PNG'); return; } bcDownloadBlob(kindPrefix(kind)+r.sku+suf+'_label.png',blob); }); }); }
+    rasterizeSVG(buildLabelSVG(kind,rr,opts),2,function(blob){ if(!blob){ alert('Could not render label PNG'); return; } bcDownloadBlob(kindPrefix(kind)+r.sku+suf+'_label.png',blob); }); },rmkt); }
   // ---- A4 merge sheet (PDF) — exact cell rects from the PSD molds (px @ 300 DPI, page 2480×3505) ----
   var MOLD_4=[[1256,59,1178,1652],[49,60,1178,1652],[1251,1738,1178,1652],[44,1739,1178,1652]];
   var MOLD_36=[[76,89,564,370],[663,89,564,370],[1253,89,564,370],[1840,89,564,370],[76,461,564,370],[663,461,564,370],[1253,461,564,370],[1840,461,564,370],[76,830,564,370],[663,830,564,370],[1253,830,564,370],[1840,830,564,370],[76,1200,564,370],[663,1200,564,370],[1253,1200,564,370],[1840,1200,564,370],[76,1569,564,370],[663,1569,564,370],[1253,1569,564,370],[1840,1569,564,370],[76,1941,564,370],[663,1941,564,370],[1253,1941,564,370],[1840,1941,564,370],[76,2310,564,370],[663,2310,564,370],[1253,2310,564,370],[1840,2310,564,370],[76,2680,564,370],[663,2680,564,370],[1253,2680,564,370],[1840,2680,564,370],[76,3049,564,370],[663,3049,564,370],[1253,3049,564,370],[1840,3049,564,370]];
@@ -10131,11 +10133,11 @@
     var xo=len, xref='xref\n0 6\n0000000000 65535 f \n'; for(var i=1;i<=5;i++)xref+=pad(off[i])+' 00000 n \n';
     push(xref); push('trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n'+xo+'\n%%EOF');
     var out=new Uint8Array(len),o=0; parts.forEach(function(u){ out.set(u,o); o+=u.length; }); return out; }
-  function bcMakeSheet(kind,r,batch,rrp,code){ if(!r||(!code&&!confirmNoBatch(batch)))return; var cells=kind==='product'?MOLD_36:MOLD_4;
+  function bcMakeSheet(kind,r,batch,rrp,code,rmkt){ if(!r||(!code&&!confirmNoBatch(batch)))return; var cells=kind==='product'?MOLD_36:MOLD_4;
     var rr=code?Object.assign({},r,{supplier_code:code}):r, suf=code?('-'+zipSafe(code)):'';
     bcGatherAssets(kind,rr,batch,rrp,function(opts){ rasterizeSVGCanvas(buildLabelSVG(kind,rr,opts),2.5,function(cv){ if(!cv){ alert('Could not render label'); return; }
       cv.toBlob(function(jb){ if(!jb){ alert('Could not encode label'); return; } jb.arrayBuffer().then(function(ab){
-        var pdf=pdfA4(new Uint8Array(ab),cv.width,cv.height,cells); bcDownloadBlob(kindPrefix(kind)+r.sku+suf+'_A4.pdf', new Blob([pdf],{type:'application/pdf'})); }); },'image/jpeg',0.92); }); }); }
+        var pdf=pdfA4(new Uint8Array(ab),cv.width,cv.height,cells); bcDownloadBlob(kindPrefix(kind)+r.sku+suf+'_A4.pdf', new Blob([pdf],{type:'application/pdf'})); }); },'image/jpeg',0.92); }); },rmkt); }
   // Multi-page A4 PDF: one page per {jpeg,imgW,imgH}, same cell layout — for a consolidated (no-zip) batch download.
   function pdfA4Multi(pages,cells){ var enc=new TextEncoder(), parts=[], off=[], len=0, P=0.24, pageW=2480*P, pageH=3505*P;
     function push(x){ var u=(x instanceof Uint8Array)?x:enc.encode(x); parts.push(u); len+=u.length; }
@@ -10246,7 +10248,7 @@
     var jobs=[fetchImgDataUri('/api/supply/asset/gotham-book'),fetchImgDataUri('/api/supply/asset/gotham-bold')];
     if(needCI){ jobs.push(fetchImgDataUri('/api/supply/asset/grs')); jobs.push(fetchImgDataUri('/api/supply/asset/db')); }
     Promise.all(jobs).then(function(a){
-      var base={batch:batch,rrp:rrp,fontBook:a[0],fontBold:a[1]}; if(needCI){ base.grsUri=a[2]; base.dbUri=a[3]; }
+      var base={batch:batch,rrp:rrp,rmkt:(opts.rmkt||'UK'),fontBook:a[0],fontBold:a[1]}; if(needCI){ base.grsUri=a[2]; base.dbUri=a[3]; }
       preloadFonts(base).then(function(){ var files=[], i=0;
         function next(){ if(i>=items.length) return finish();
           if(prog.cancelled()){ prog.done(); return; } var r=items[i++]; prog.tick(i,items.length);
@@ -10405,9 +10407,9 @@
     // name the ZIP from the active filters: <base>[_A4]_by_<supplier|supplier><_batch | _P<prod>>.zip
     function bcZipName(base){ var a4=st.dlfmt==='a4';
       return base+(a4?'_A4':'')+(st.sup!=='All'?'_by_'+zipSafe(st.sup):'_by_supplier')+(st.batch?'_'+zipSafe(st.batch):(st.prod!=='All'?'_P'+zipSafe(st.prod):''))+'.zip'; }
-    document.getElementById('bc-dlall-prod').onclick=function(){ bcDownloadAll(cur, st.batch?batchBy[st.batch]:null, st.rrp, this, ['product'], bcZipName('product_barcodes'), {fmt:st.dlfmt, onlySup:st.sup!=='All'?st.sup:null, codes:CODES}); };
-    document.getElementById('bc-dlall-cart').onclick=function(){ bcDownloadAll(cur, st.batch?batchBy[st.batch]:null, st.rrp, this, ['carton','inner'], bcZipName('carton_inner_barcodes'), {fmt:st.dlfmt, onlySup:st.sup!=='All'?st.sup:null, codes:CODES}); };
-    document.getElementById('bc-dlall-all').onclick=function(){ bcDownloadAll(cur, st.batch?batchBy[st.batch]:null, st.rrp, this, ['product','carton','inner'], bcZipName('product_carton_inner_barcodes'), {fmt:st.dlfmt, onlySup:st.sup!=='All'?st.sup:null, codes:CODES}); };
+    document.getElementById('bc-dlall-prod').onclick=function(){ bcDownloadAll(cur, st.batch?batchBy[st.batch]:null, st.rrp, this, ['product'], bcZipName('product_barcodes'), {fmt:st.dlfmt, onlySup:st.sup!=='All'?st.sup:null, codes:CODES, rmkt:st.rmkt}); };
+    document.getElementById('bc-dlall-cart').onclick=function(){ bcDownloadAll(cur, st.batch?batchBy[st.batch]:null, st.rrp, this, ['carton','inner'], bcZipName('carton_inner_barcodes'), {fmt:st.dlfmt, onlySup:st.sup!=='All'?st.sup:null, codes:CODES, rmkt:st.rmkt}); };
+    document.getElementById('bc-dlall-all').onclick=function(){ bcDownloadAll(cur, st.batch?batchBy[st.batch]:null, st.rrp, this, ['product','carton','inner'], bcZipName('product_carton_inner_barcodes'), {fmt:st.dlfmt, onlySup:st.sup!=='All'?st.sup:null, codes:CODES, rmkt:st.rmkt}); };
     document.getElementById('bc-mkt').onchange=function(){ st.rmkt=this.value; if(st.rrp)apply(); };
     // ── Customise drawer: import SKU,barcode overrides, save/load as projects, apply to grid + downloads ──
     document.getElementById('bc-customise').onclick=function(){ openBcCustomise(); };
@@ -10416,11 +10418,12 @@
       bg.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.4);z-index:9000;display:flex;justify-content:flex-end';
       var dr=document.createElement('div'); dr.style.cssText='width:720px;max-width:96vw;height:100%;background:var(--card);box-shadow:-8px 0 30px rgba(0,0,0,.2);overflow:auto;padding:16px 18px;box-sizing:border-box';
       bg.appendChild(dr); (document.getElementById('supply-root')||document.body).appendChild(bg);
-      function _bcNorm(m){ var o={}; Object.keys(m||{}).forEach(function(s){ var v=m[s]; if(v==null)return;
-        if(typeof v==='object'){ var t=v.types||{}; o[s]={num:String(v.num||''),types:{product:!!t.product,carton:!!t.carton,inner:!!t.inner}}; if(!o[s].types.product&&!o[s].types.carton&&!o[s].types.inner)o[s].types.product=true; }
-        else { o[s]={num:String(v),types:{product:true,carton:false,inner:false}}; } }); return o; }
-      var state={id:_bcOv.id, name:_bcOv.name, batch:_bcOv.batch||'', map:_bcNorm(_bcOv.map||{}), pos:(_bcOv.pos||[]).slice()};   // v27.570: pos = linked purchase orders
-      function snap(){ return JSON.stringify({n:state.name||'',b:state.batch||'',m:state.map,p:state.pos}); }
+      function _bcNorm(m){ var o={}; Object.keys(m||{}).forEach(function(s){ if(String(s).slice(0,2)==='__')return; var v=m[s]; if(v==null)return;   // reserved __* keys (e.g. __rrp) are project-level, not SKUs
+        if(typeof v==='object'){ var t=v.types||{}; o[s]={num:String(v.num||''),types:{product:!!t.product,carton:!!t.carton,inner:!!t.inner},pn:String(v.pn||''),desc:String(v.desc||'')}; if(!o[s].types.product&&!o[s].types.carton&&!o[s].types.inner)o[s].types.product=true; }
+        else { o[s]={num:String(v),types:{product:true,carton:false,inner:false},pn:'',desc:''}; } }); return o; }   // v27.665: carry pn + desc through the reload normaliser
+      var _rawmap0=_bcOv.map||{}, _r0=_rawmap0.__rrp||{};
+      var state={id:_bcOv.id, name:_bcOv.name, batch:_bcOv.batch||'', map:_bcNorm(_rawmap0), pos:(_bcOv.pos||[]).slice(), rrp:!!_r0.show, rmkt:(_r0.mkt||st.rmkt||'UK')};   // v27.570 pos; v27.665 RRP toggle + market (persisted in __rrp)
+      function snap(){ return JSON.stringify({n:state.name||'',b:state.batch||'',m:state.map,p:state.pos,rr:!!state.rrp,rm:state.rmkt||'UK'}); }
       var _saved=snap();
       function dirty(){ return (Object.keys(state.map).length>0||state.pos.length>0) && snap()!==_saved; }
       function parseBox(){ var ta=dr.querySelector('#bcx-paste'); if(!ta)return 0; var n=0;
@@ -10430,7 +10433,7 @@
       function doSave(cb){ var msg=dr.querySelector('#bcx-msg'), nmEl=dr.querySelector('#bcx-name'), nm=(nmEl&&nmEl.value.trim())||state.name;
         offerParseFirst();
         if(!nm){ if(msg){msg.style.color='var(--neg)';msg.textContent='name required to save';} if(nmEl)nmEl.focus(); return; }
-        state.name=nm; shipPost('/api/supply/barcode-project',{id:state.id||undefined,name:nm,batch:state.batch||null,overrides:state.map,pos:state.pos},function(j){ if(j&&j.error){ if(msg){msg.style.color='var(--neg)';msg.textContent=j.error;} return; } state.id=j.id; _saved=snap(); if(msg){msg.style.color='var(--pos)';msg.textContent='saved ✓';} if(cb){cb();}else{ loadProjects(); } }); }
+        state.name=nm; shipPost('/api/supply/barcode-project',{id:state.id||undefined,name:nm,batch:state.batch||null,overrides:state.map,pos:state.pos,rrp:!!state.rrp,rmkt:state.rmkt||'UK'},function(j){ if(j&&j.error){ if(msg){msg.style.color='var(--neg)';msg.textContent=j.error;} return; } state.id=j.id; _saved=snap(); if(msg){msg.style.color='var(--pos)';msg.textContent='saved ✓';} if(cb){cb();}else{ loadProjects(); } }); }
       function close(force){ if(!force && dirty()){ if(confirm('You have unsaved changes to this barcode project. Save before closing?')){ doSave(function(){ bg.remove(); }); return; } } bg.remove(); }
       bg.onclick=function(e){ if(e.target===bg)close(); };
       var _bd='border:1px solid var(--line);border-radius:5px;padding:4px 7px;background:var(--card)';   // explicit border (drawer is outside #supply-root, so scoped .fci styling doesn't reach it)
@@ -10438,11 +10441,11 @@
       // untouched fields are blanked so bcDownloadAll (per-kind) generates ONLY the ticked barcode(s).
       function bcItems(skus){ var sk={}; rows.forEach(function(r){ sk[r.sku]=r; }); var out=[];
         skus.forEach(function(s){ var r=sk[s], o=state.map[s]; if(!r||!o)return; var cl=Object.assign({},r);
-          cl.product_barcode=o.types.product?String(o.num):''; cl.carton_barcode=o.types.carton?String(o.num):''; cl.inner_barcode=o.types.inner?String(o.num):''; cl.pn=o.pn||'';   // v27.660: part number onto the label row
+          cl.product_barcode=o.types.product?String(o.num):''; cl.carton_barcode=o.types.carton?String(o.num):''; cl.inner_barcode=o.types.inner?String(o.num):''; cl.pn=o.pn||''; cl.desc=o.desc||'';   // v27.660 part number + v27.665 description onto the label row
           if(cl.product_barcode||cl.carton_barcode||cl.inner_barcode)out.push(cl); }); return out; }
       function bcDownload(skus,btn){ offerParseFirst(); var items=bcItems(skus); var msg=dr.querySelector('#bcx-msg');
         if(!items.length){ if(msg){msg.style.color='var(--amber)';msg.textContent='nothing to download — check the SKU is in view and a barcode is ticked';} return; }
-        try{ bcDownloadAll(items, state.batch?batchBy[state.batch]:null, st.rrp, btn, ['product','carton','inner'], ((state.name||'custom').replace(/[^\w\-]+/g,'_'))+'_barcodes', {fmt:st.dlfmt, codes:CODES}); }
+        try{ bcDownloadAll(items, state.batch?batchBy[state.batch]:null, state.rrp, btn, ['product','carton','inner'], ((state.name||'custom').replace(/[^\w\-]+/g,'_'))+'_barcodes', {fmt:st.dlfmt, codes:CODES, rmkt:state.rmkt}); }
         catch(e){ if(msg){msg.style.color='var(--neg)';msg.textContent='download failed: '+(e&&e.message||e);} } }
       function draw(projects){
         var sk={}; rows.forEach(function(r){ sk[r.sku]=r; });
@@ -10452,6 +10455,7 @@
         var rowsH=keys.map(function(s){ var o=state.map[s], match=!!sk[s];
           return '<tr><td style="text-align:left;padding:3px 6px;white-space:nowrap" class="bc-mono">'+esc(s)+(match?'':' <span style="color:var(--amber)" title="not in the current view">⚠</span>')+'</td>'
             +'<td style="text-align:left;padding:3px 6px"><input class="bcx-num" data-sku="'+esc(s)+'" value="'+esc(o.num)+'" style="width:135px;font:12px ui-monospace,Menlo,monospace;'+_bd+'"></td>'
+            +'<td style="text-align:left;padding:3px 6px"><input class="bcx-desc" data-sku="'+esc(s)+'" value="'+esc(o.desc||'')+'" placeholder="—" title="Optional product description — printed above the part number on the label" style="width:160px;font:12px system-ui,Arial,sans-serif;'+_bd+'"></td>'
             +'<td style="text-align:left;padding:3px 6px"><input class="bcx-pn" data-sku="'+esc(s)+'" value="'+esc(o.pn||'')+'" placeholder="—" title="Optional part number — printed on its own line just above the barcode (e.g. 33-55667)" style="width:105px;font:12px ui-monospace,Menlo,monospace;'+_bd+'"></td>'
             +'<td style="text-align:left;padding:3px 6px;white-space:nowrap">'+ck(s,'product')+ck(s,'carton')+ck(s,'inner')+'</td>'
             +'<td style="text-align:left;padding:3px 6px;white-space:nowrap"><a class="bcx-dl1" data-sku="'+esc(s)+'" title="download this SKU only" style="cursor:pointer;color:var(--violet);font-weight:700">⤓</a> <a class="bcx-rm" data-sku="'+esc(s)+'" title="remove" style="cursor:pointer;color:var(--faint);margin-left:8px">✕</a></td></tr>'; }).join('');
@@ -10465,13 +10469,17 @@
           +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px"><span class="pill-lbl">Batch</span>'
             +'<select id="bcx-batch" style="width:auto;'+_bd+'"><option value="">— none —</option>'+batches.slice().sort(function(a,b){var da=a.batch_date||'',db=b.batch_date||''; if(da!==db)return da<db?1:-1; return String(a.batch)<String(b.batch)?1:-1;}).map(function(b2){return '<option value="'+esc(b2.batch)+'"'+(b2.batch===state.batch?' selected':'')+'>'+esc(b2.batch)+(b2.batch_date?' · '+esc(b2.batch_date):'')+'</option>';}).join('')+'</select>'
             +'<span class="mut tiny">saved with the project — prints BATCH + production date on the labels</span></div>'
+          +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:10px"><span class="pill-lbl">RRP</span>'
+            +'<label style="cursor:pointer;font-size:12px;font-weight:600;white-space:nowrap"><input type="checkbox" id="bcx-rrp"'+(state.rrp?' checked':'')+' style="vertical-align:middle;margin-right:4px">Show RRP on label</label>'
+            +'<span class="pill-lbl" style="margin-left:6px">Market</span><select id="bcx-rmkt" style="width:auto;'+_bd+'">'+RRP_MKTS.map(function(m){return '<option'+(m[0]===state.rmkt?' selected':'')+'>'+m[0]+'</option>';}).join('')+'</select>'
+            +'<span class="mut tiny">prints that market\'s RRP on the product label</span></div>'
           +'<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:10px;flex-wrap:wrap"><span class="pill-lbl" style="margin-top:5px">Purchase orders</span><div style="flex:1 1 320px;min-width:240px">'
             +'<div id="bcx-pos" style="display:flex;flex-wrap:wrap;gap:4px;margin-bottom:'+(state.pos.length?'6px':'0')+'">'+state.pos.map(function(p){ return '<span class="bcx-pochip" style="display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:700;background:var(--violet-bg);color:var(--violet);border:1px solid #d8b4fe;border-radius:10px;padding:1px 8px"><a class="inb-po" data-po="'+esc(p)+'" style="color:inherit;cursor:pointer">'+esc(p)+'</a><a class="bcx-porm" data-po="'+esc(p)+'" title="unlink" style="cursor:pointer;font-weight:900">×</a></span>'; }).join('')+'</div>'
             +'<span style="position:relative;display:block"><input id="bcx-poq" placeholder="search PO / supplier / production / batch to link…" autocomplete="off" style="width:100%;box-sizing:border-box;text-align:left;'+_bd+'"><div id="bcx-pomenu" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:50;background:var(--card);border:1px solid var(--line);border-radius:6px;max-height:240px;overflow:auto;box-shadow:0 8px 22px rgba(15,23,42,.14)"></div></span>'
             +'<div class="mut tiny" style="margin-top:3px">Suppliers of a linked PO get <b>⤓ Download custom barcodes</b> on that PO in the portal (only these custom numbers, for the PO\'s SKUs).</div></div></div>'
           +'<textarea id="bcx-paste" placeholder="TOWEL-LG-NAVY, 5061011699999&#10;TOWEL-LG-CORAL, 0123456789012" style="width:100%;height:80px;box-sizing:border-box;font:12px ui-monospace,Menlo,monospace;border:1px solid var(--line);border-radius:6px;padding:7px;text-align:left"></textarea>'
           +'<div style="margin:6px 0"><button type="button" class="save-btn" id="bcx-parse">Parse / add</button> <button type="button" class="save-btn light" id="bcx-clearmap" style="margin-left:4px">Clear list</button> <span class="mut tiny" style="margin-left:6px">'+keys.length+' override'+(keys.length===1?'':'s')+' · '+matched+' matched</span></div>'
-          +'<div class="tw" style="max-height:300px;overflow:auto;border:1px solid var(--line2);border-radius:6px"><table style="font-size:12px;width:100%;border-collapse:collapse"><thead><tr>'+th('SKU')+th('Custom number')+th('Part no.')+th('Barcodes')+th('',56)+'</tr></thead><tbody>'+(rowsH||'<tr><td colspan="5" style="text-align:left;padding:6px;color:var(--faint)">No overrides yet — paste above and Parse / add.</td></tr>')+'</tbody></table></div>'
+          +'<div class="tw" style="max-height:300px;overflow:auto;border:1px solid var(--line2);border-radius:6px"><table style="font-size:12px;width:100%;border-collapse:collapse"><thead><tr>'+th('SKU')+th('Custom number')+th('Description')+th('Part no.')+th('Barcodes')+th('',56)+'</tr></thead><tbody>'+(rowsH||'<tr><td colspan="6" style="text-align:left;padding:6px;color:var(--faint)">No overrides yet — paste above and Parse / add.</td></tr>')+'</tbody></table></div>'
           +'<div style="margin-top:14px;display:flex;gap:8px;align-items:center"><button type="button" class="save-btn" id="bcx-dlall" style="background:var(--violet);color:#fff;border-color:var(--violet);font-weight:700">⤓ Download all ('+matched+')</button><span class="mut tiny">or ⤓ per row · '+esc(st.dlfmt==='png'?'Individual PNG':'A4 print mould')+' (toolbar setting)</span></div>';
         dr.querySelector('#bcx-close').onclick=function(){ close(); };
         dr.querySelector('#bcx-clearmap').onclick=function(){ state.map={}; draw(projects); };
@@ -10493,12 +10501,15 @@
         })();
         dr.querySelectorAll('.bcx-num').forEach(function(el){ el.oninput=function(){ if(state.map[el.dataset.sku])state.map[el.dataset.sku].num=el.value.trim(); }; });
         dr.querySelectorAll('.bcx-pn').forEach(function(el){ el.oninput=function(){ if(state.map[el.dataset.sku])state.map[el.dataset.sku].pn=el.value.trim(); }; });   // v27.660: part number per SKU
+        dr.querySelectorAll('.bcx-desc').forEach(function(el){ el.oninput=function(){ if(state.map[el.dataset.sku])state.map[el.dataset.sku].desc=el.value; }; });   // v27.665: product description per SKU
+        var _rrpEl=dr.querySelector('#bcx-rrp'); if(_rrpEl)_rrpEl.onchange=function(){ state.rrp=this.checked; };
+        var _rmktEl=dr.querySelector('#bcx-rmkt'); if(_rmktEl)_rmktEl.onchange=function(){ state.rmkt=this.value; };
         dr.querySelectorAll('.bcx-tick').forEach(function(el){ el.onchange=function(){ var o=state.map[el.dataset.sku]; if(o)o.types[el.dataset.t]=el.checked; }; });
         dr.querySelectorAll('.bcx-rm').forEach(function(a){ a.onclick=function(){ delete state.map[a.dataset.sku]; draw(projects); }; });
         dr.querySelectorAll('.bcx-dl1').forEach(function(a){ a.onclick=function(){ bcDownload([a.dataset.sku], a); }; });
         dr.querySelector('#bcx-dlall').onclick=function(){ bcDownload(Object.keys(state.map), this); };
-        dr.querySelector('#bcx-proj').onchange=function(){ var id=this.value; if(!id){ state.id=null; state.name=''; state.batch=''; state.map={}; state.pos=[]; _saved=snap(); draw(projects); return; }
-          fetch('/api/supply/barcode-project/'+id).then(function(r){return r.json();}).then(function(j){ if(j&&!j.error){ state.id=j.id; state.name=j.name; state.batch=j.batch||''; state.map=_bcNorm(j.overrides||{}); state.pos=Array.isArray(j.pos)?j.pos.slice():[]; _saved=snap(); } draw(projects); }); };
+        dr.querySelector('#bcx-proj').onchange=function(){ var id=this.value; if(!id){ state.id=null; state.name=''; state.batch=''; state.map={}; state.pos=[]; state.rrp=false; _saved=snap(); draw(projects); return; }
+          fetch('/api/supply/barcode-project/'+id).then(function(r){return r.json();}).then(function(j){ if(j&&!j.error){ state.id=j.id; state.name=j.name; state.batch=j.batch||''; state.map=_bcNorm(j.overrides||{}); state.pos=Array.isArray(j.pos)?j.pos.slice():[]; var _r=(j.overrides&&j.overrides.__rrp)||{}; state.rrp=!!_r.show; state.rmkt=_r.mkt||state.rmkt||'UK'; _saved=snap(); } draw(projects); }); };
         dr.querySelector('#bcx-save').onclick=function(){ doSave(); };
         var _del=dr.querySelector('#bcx-del'); if(_del)_del.onclick=function(){ if(!confirm('Delete project "'+state.name+'"?'))return; shipPost('/api/supply/barcode-project/'+state.id+'/delete',{},function(){ state.id=null; state.name=''; state.batch=''; state.map={}; state.pos=[]; _saved=snap(); loadProjects(); }); };
       }
@@ -10511,8 +10522,8 @@
       // multi-supplier SKU → download ONE file per supplier (each with its own code on the label + in the filename); else single, unchanged
       var sn=String(r.supplier_multiple||'').split(',').map(function(s){return s.trim();}).filter(Boolean), codeList=[];
       if(sn.length>1)sn.forEach(function(nm){ var c=CODES[nm.toLowerCase().trim()]||''; if(c&&codeList.indexOf(c)<0)codeList.push(c); });
-      if(codeList.length>1){ if(!confirmNoBatch(batch))return; codeList.forEach(function(c){ if(png)bcMakeLabel(kind,r,batch,st.rrp,c); else bcMakeSheet(kind,r,batch,st.rrp,c); }); }
-      else { if(png)bcMakeLabel(kind,r,batch,st.rrp); else bcMakeSheet(kind,r,batch,st.rrp); } }; }
+      if(codeList.length>1){ if(!confirmNoBatch(batch))return; codeList.forEach(function(c){ if(png)bcMakeLabel(kind,r,batch,st.rrp,c,st.rmkt); else bcMakeSheet(kind,r,batch,st.rrp,c,st.rmkt); }); }
+      else { if(png)bcMakeLabel(kind,r,batch,st.rrp,null,st.rmkt); else bcMakeSheet(kind,r,batch,st.rrp,null,st.rmkt); } }; }
   function bcTable(rows,opts){ opts=opts||{}; if(!rows.length)return '<div class="count">No rows.</div>';
     var rrpCols = opts.rrp ? (opts.rmkt==='All' ? RRP_MKTS : RRP_MKTS.filter(function(m){return m[0]===opts.rmkt;})) : [];
     var head='<div class="tw"><table class="bc-tbl"><thead><tr><th class="l">labels</th><th class="l" style="width:30px"></th><th class="l" style="min-width:280px">sku</th><th class="l">name</th><th class="l">size</th><th class="l">category</th><th class="l">supplier (multiple)</th>'

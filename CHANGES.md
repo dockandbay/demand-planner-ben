@@ -1,3 +1,9 @@
+## v27.665 Customise barcodes: product description + per-market RRP tick (Ben) — SERVER change
+- **Product description** — a new per-SKU free-text field in the Customise-barcodes editor, printed on the label **above the part number** (product + carton/inner labels). Wraps to 2 lines. Stored per-SKU in the `barcode_projects.overrides` jsonb as `desc` (no migration, same mechanism as `pn`).
+- **Show RRP tick + market** — a "Show RRP on label" checkbox + market picker (UK/US/EU) in the Customise editor; when on, the product label prints that market's RRP (`uk_rt`/`us_rt`/`eu_rt` with £/$/€). Persisted per project in a reserved `__rrp` key in the overrides jsonb (no migration). **Also fixes a latent bug:** the label RRP was hardcoded to UK regardless of the market selector — now the chosen market is threaded through the whole download path (single + bulk, toolbar + drawer) and honoured.
+- Also fixed: `pn`/`desc` now survive the editor's reload normaliser (were dropped from the on-screen table on project reopen, though `pn` still saved).
+- Files: `supply/inject.html` (renderers `buildLabelSVG`/`buildCartonSVG`, download plumbing, editor) + `server.mjs` (barcode-project save captures `desc` + `__rrp`; portal label-data emits `desc`). No migration, no env var, no buy-plan impact.
+
 ## v27.664 AWD vs FBA Savings Calculator in the FBA view (Ben) — client only
 - New calculator under **BUY & MOVE ▸ FBA ▸ ⓘ FBA Transfer Logic** — a "🧮 AWD vs FBA Savings Calculator" button in that panel toggles an inline calculator.
 - Replaces the flat "$0.50/unit" guess with a transparent per-unit model: **net saving = FBA inbound placement avoided + storage saved (FBA peak-weighted vs AWD, over the holding period) + low-inventory fee avoided − AWD processing − AWD→FBA transfer**, then × units.
