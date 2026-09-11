@@ -1,3 +1,6 @@
+## v27.670 PRODUCT grid: season/category group labels stay visible on horizontal scroll (Ben) — client only
+- PRODUCT redesign remainder (#11). The grid groups rows by season → category with full-width header rows; scrolling the wide table sideways scrolled the season/category label out of view. Wrapped each group label in a zero-risk inner `position:sticky;left` span so the label (caret + name + count) stays pinned at the left as you scroll horizontally. The ⤓ Report button is unchanged. inject.html only; no buy impact.
+
 ## v27.669 Xero Compare: make the "show matching" toggle discoverable (Ben) — client only
 - Ben reported the "show matching items" toggle had disappeared. It hadn't — it's the `#xc-allrows` checkbox, but it was labelled "show all Approved rows (not just issues)" so it wasn't recognisable. Relabelled to **"show matching rows too (not just issues)"**.
 - Note (already in the pending package, above live v27.582): the **totals-mismatch flag** ("⚠ Totals differ — Horizon £X vs Xero £Y (Δ £Z)", the real "PO total doesn't match" case) was added in v27.593, and the report body is otherwise intact (regression check: nothing else removed). Both land for Ben on the next deploy.
