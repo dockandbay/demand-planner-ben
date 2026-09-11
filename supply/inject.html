@@ -7764,7 +7764,8 @@
       SUBS['portal']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/supply/suppliers').then(function(r){return r.json();}).then(function(sups){
           var supById={}; sups.forEach(function(s){supById[s.name]=s.id;});
-          if(_pendingPortalSup){ var _want=_pendingPortalSup.toLowerCase(); _pendingPortalSup=null; var _mm=sups.filter(function(s){return (s.name||'').toLowerCase()===_want;})[0]; if(_mm)PORTAL_SUP=_mm.name; }   // #/config/portal/<name> deep link
+          try{ window._ppSupCode={}; sups.forEach(function(s){ if(s.code)window._ppSupCode[s.name]=s.code; }); }catch(e){}   // v27.676: name→code map so the portal-preview deep link can be by supplier CODE (e.g. #/supply/config/portal/xr)
+          if(_pendingPortalSup){ var _want=_pendingPortalSup.toLowerCase(); _pendingPortalSup=null; var _mm=sups.filter(function(s){return (s.name||'').toLowerCase()===_want || (s.code||'').toLowerCase()===_want;})[0]; if(_mm)PORTAL_SUP=_mm.name; }   // #/supply/config/portal/<code|name> deep link (v27.676: match code OR name)
           var opts='<option value="">— choose a supplier —</option>'+sups.map(function(s){return '<option value="'+esc(s.name)+'"'+(PORTAL_SUP===s.name?' selected':'')+'>'+esc(s.name)+'</option>';}).join('');
           b.innerHTML='<div class="sect-h" style="display:flex;align-items:center;flex-wrap:wrap;gap:8px 14px">'
               +'<span class="pill-lbl" style="white-space:nowrap;text-transform:none;flex:0 0 auto">Preview as supplier</span>'
@@ -10593,8 +10594,8 @@
     else if(current==='purchase-orders') writeHash(['supply','purchase-orders'].concat(poSub&&(PO_SUB_KEYS.indexOf(poSub)>=0||poSub==='edi-labels')?[poSub]:[]));   // include 'plan' so PLAN has its own deep link; edi-labels = hidden page deep link
     else if(current==='payments') writeHash(['supply','payments'].concat(poSub&&PAY_SUB_KEYS.indexOf(poSub)>=0&&poSub!=='paydue'?[poSub]:[]));
     else if(current==='config'){
-      if(CONFIG_CTX==='supply') writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['supply','config','portal',encodeURIComponent(PORTAL_SUP.toLowerCase())]:['supply','config',CONFIG_SUB]);   // SUPPLY ▸ CONFIG → #/supply/config/<item>
-      else writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['config','portal',encodeURIComponent(PORTAL_SUP.toLowerCase())]:(['email-notifications','admin-general','exchange-rates','channels','permissions','email-log'].indexOf(CONFIG_SUB)>=0?['config','admin',CONFIG_SUB]:(['contribmodel','buyplan','runoffsubs'].indexOf(CONFIG_SUB)>=0?['config','demand',CONFIG_SUB]:['config',CONFIG_SUB])));   // Admin → #/config/admin/<item>, Demand → #/config/demand/<item>
+      if(CONFIG_CTX==='supply') writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['supply','config','portal',encodeURIComponent(((window._ppSupCode&&window._ppSupCode[PORTAL_SUP])||PORTAL_SUP).toLowerCase())]:['supply','config',CONFIG_SUB]);   // SUPPLY ▸ CONFIG → #/supply/config/<item>
+      else writeHash(CONFIG_SUB==='portal'&&PORTAL_SUP?['config','portal',encodeURIComponent(((window._ppSupCode&&window._ppSupCode[PORTAL_SUP])||PORTAL_SUP).toLowerCase())]:(['email-notifications','admin-general','exchange-rates','channels','permissions','email-log'].indexOf(CONFIG_SUB)>=0?['config','admin',CONFIG_SUB]:(['contribmodel','buyplan','runoffsubs'].indexOf(CONFIG_SUB)>=0?['config','demand',CONFIG_SUB]:['config',CONFIG_SUB])));   // Admin → #/config/admin/<item>, Demand → #/config/demand/<item>
     }
     else if(current==='actions') writeHash(['supply','actions'].concat(actSub&&actSub!=='actions'?[actSub]:[]));   // ACTIONS ▸ Recommendations / ERP Compare deep-link
     else if(current) writeHash(['supply',current]); }

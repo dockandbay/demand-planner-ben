@@ -1,3 +1,7 @@
+## v27.676 Supplier-portal preview: deep link by supplier CODE (Ben, part of #7) — client only
+- The SUPPLY ▸ CONFIG ▸ Portal "preview as supplier" deep link now accepts the **supplier code** as well as the name (e.g. `#/supply/config/portal/bl` for ACME Ltd, code BL), and the app now **generates** code-based URLs (short, stable, shareable) instead of the lowercased name. Manually-typed name links still resolve.
+- The **sub-tab in the URL** (Ben's `…/portal/<code>/shipmentplan`) is a follow-up: the portal view carries its own internal hash router (`ppApplyHash`), so surfacing its inner tab in the admin preview URL needs coordinating the two routers — deferred. inject.html only.
+
 ## v27.675 Buy plan category filter no longer shared from the demand plan (Ben) — client only
 - The buy plan was inheriting the **demand plan's category selection** every time you opened it: `renderBuyView` called `BP.setFilters(CUR, [...SEL])`, overwriting the buy's own category set (`SC_SEL`) with the demand plan's `SEL`. Now it carries **only the country** — the buy plan keeps its **own** category filter, persisted separately (`hzBuyFilters.sc`, 1h TTL, like the buy's tier/status/core-seasonal filters). Changing categories in the demand plan no longer changes the buy plan (and vice-versa).
 - Display/scope only — the buy engine (`project`) is per-SKU and unaffected: **buy output byte-identical** across UK/US/EU/AU/CA. artifact only.
