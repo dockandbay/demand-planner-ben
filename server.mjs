@@ -4915,7 +4915,11 @@ app.get('/api/supply/:section', async (req, res, next) => {
           UNION ALL
           SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(supplier_name,'(none)'),
             coalesce(nullif(reference,''), description, ''), round(amount,2), 'Deposit', '', 'deposit',
-            CASE WHEN upper(coalesce(country,''))='AU' THEN '620.00 AU' ELSE xero_account_code END, ${SUPC('supplier_name')}, coalesce(prod_no,'')
+            CASE WHEN upper(coalesce(country,''))='AU' THEN '620.00 AU'
+              ELSE coalesce(nullif(xero_account_code,''),
+                (SELECT pn.xero_account_code FROM planner.prod_numbers pn
+                   WHERE regexp_replace(upper(coalesce(pn.prod_no,'')),'^P','')=regexp_replace(upper(coalesce(deposits.prod_no,'')),'^P','')
+                     AND coalesce(pn.xero_account_code,'')<>'' LIMIT 1)) END, ${SUPC('supplier_name')}, coalesce(prod_no,'')
           FROM planner.deposits WHERE is_deposit=true AND date_paid IS NOT NULL AND round(coalesce(amount,0))<>0 AND ${KIND('supplier_name')}
           UNION ALL
           SELECT to_char(date_paid,'YYYY-MM-DD'), coalesce(supplier_name,'(none)'),
