@@ -1,3 +1,9 @@
+## v27.684 PRODUCT: supplier filter on the grid, Pantone name in chips, timeline autocorrect (Ben) — CLIENT
+- **#1 Supplier filter** — PRODUCT grid toolbar gains a **Supplier** dropdown, populated only from suppliers that have products in the grid (like the Season/Category filters). Feeds `_passBase`, the reset, the count and the dirty-state; a stale supplier selection self-clears if it no longer has products.
+- **#5 Pantone name** — Pantone chips (`hzPanChip`, used in the timeline preview + saved notes) now show the colour **name** inline after the TCX code (e.g. "PANTONE 2758 C Twilight Blue"), not just the number. Name was already in the chip data; no server change.
+- **#4 Timeline autocorrect** — the product-timeline compose box (`#pt-in`) gains `autocorrect="on"` alongside its existing spellcheck.
+- inject.html only, no server/migration, no buy impact.
+
 ## v27.683 Buy popup: current-month "DTC demand (sets)" nets actuals-to-date (Ben) — CLIENT
 - **Issue (Ben):** on the buy popup, the current (part-way) month's **DTC demand (sets)** line showed the **full-month** set forecast, reading like an actual (e.g. TOWLH-CLB-XL-MIDNFIZ UK Sep = 25 from set forecasts, when real actuals are lower).
 - **Cause:** the set-explosion (`artifact_v16.7.html`) netted the current month's set forecast by the set's actuals-to-date **only in the prepack pass** (gated on prepack stock). Non-prepack sets kept the whole current-month forecast, which explodes onto components and shows in the sets line.

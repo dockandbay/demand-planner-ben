@@ -13789,7 +13789,7 @@
         +tbl('By season','Season',d.bySeason)+tbl('By category','Category',d.byCategory)+tbl('By supplier','Supplier',d.bySupplier)
         +rejectSection(d.reject||{});
     }).catch(function(e){ c.innerHTML='<div style="color:var(--neg)">Failed: '+esc(e.message||e)+'</div>'; }); }
-  var _prodFilt={type:'Product Development',season:'',status:'dev_actions',q:'',category:'',stage:''};   // Type defaults to Product Development; stage = active stage-pill filter (overrides status when set)
+  var _prodFilt={type:'Product Development',season:'',status:'dev_actions',q:'',category:'',stage:'',supplier:''};   // Type defaults to Product Development; stage = active stage-pill filter (overrides status when set); supplier = filter to one supplier that has products in the grid
   var _prodSort={col:'',dir:1};   // v27.671 (#12): column sort. When set, flattens the season/category grouping and sorts by the column (off → asc → desc → off).
   var _pgSeasonCollapsed={}, _pgCatCollapsed={};   // PRODUCT grid group collapse state — persists across redraws
   var _prodCfgTab='season';   // PRODUCT ▸ Config active L3 sub-tab: season | cats | tags | phrases
@@ -13909,6 +13909,8 @@
       _prodRows=rows;
       var seasons=[]; rows.forEach(function(r){ if(r.season&&seasons.indexOf(r.season)<0)seasons.push(r.season); }); seasons.sort();
       var cats=[]; rows.forEach(function(r){ if(r.category&&cats.indexOf(r.category)<0)cats.push(r.category); }); cats.sort();
+      var sups=[]; rows.forEach(function(r){ if(r.supplier&&sups.indexOf(r.supplier)<0)sups.push(r.supplier); }); sups.sort();   // suppliers that actually have products in the grid (Ben #1)
+      if(_prodFilt.supplier && sups.indexOf(_prodFilt.supplier)<0)_prodFilt.supplier='';   // clear a stale supplier filter if it no longer has any products
       var STAT=[['dev_actions','In development + open actions'],['unapproved','Not approved'],['','All'],['in_development','In development'],['approved','Approved'],['dropped','Rejected']];
       var selDark=function(v){ return 'text-align:left'+(v?';background:var(--nav);color:#fff;font-weight:600':''); };   // dark chip when a filter is set
       var fb=document.getElementById('pg-filters');
@@ -13919,6 +13921,7 @@
         +'<span style="display:flex;align-items:center;gap:5px"><span style="color:var(--muted);font-size:11px">Type</span><select class="fci" id="pg-type" style="'+selDark(_prodFilt.type)+'"><option value="Product Development"'+(_prodFilt.type==='Product Development'?' selected':'')+'>Product Development</option><option value="Custom Order"'+(_prodFilt.type==='Custom Order'?' selected':'')+'>Custom Order</option><option value=""'+(_prodFilt.type===''?' selected':'')+'>All</option></select></span>'
         +'<span style="display:flex;align-items:center;gap:5px"><span style="color:var(--muted);font-size:11px">Season</span><select class="fci" id="pg-season" style="'+selDark(_prodFilt.season)+'"><option value="">All</option>'+seasons.map(function(s){return '<option value="'+esc(s)+'"'+(s===_prodFilt.season?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>'
         +'<span style="display:flex;align-items:center;gap:5px"><span style="color:var(--muted);font-size:11px">Category</span><select class="fci" id="pg-cat" style="'+selDark(_prodFilt.category)+'"><option value="">All</option>'+cats.map(function(cc){return '<option value="'+esc(cc)+'"'+(cc===_prodFilt.category?' selected':'')+'>'+esc(cc)+'</option>';}).join('')+'</select></span>'
+        +'<span style="display:flex;align-items:center;gap:5px"><span style="color:var(--muted);font-size:11px">Supplier</span><select class="fci" id="pg-supplier" style="'+selDark(_prodFilt.supplier)+'"><option value="">All</option>'+sups.map(function(sp){return '<option value="'+esc(sp)+'"'+(sp===_prodFilt.supplier?' selected':'')+'>'+esc(sp)+'</option>';}).join('')+'</select></span>'
         +'<span style="display:flex;align-items:center;gap:5px"><span style="color:var(--muted);font-size:11px">Status</span><select class="fci" id="pg-status" style="'+selDark(_prodFilt.status)+'">'+STAT.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===_prodFilt.status?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></span>'
         +'<span id="pg-count" style="color:var(--faint);font-size:11px"></span>'
         +'<span style="display:inline-flex;align-items:center;gap:5px;margin-left:auto"><span style="color:var(--muted);font-size:11px">Swatch</span><span style="display:inline-flex">'+[['sm','S'],['md','M'],['lg','L']].map(function(o){return '<button class="pg-swsize'+(_pgSwatchSize===o[0]?' active':'')+'" data-s="'+o[0]+'" title="'+({sm:'Small',md:'Medium',lg:'Large'}[o[0]])+' swatches">'+o[1]+'</button>';}).join('')+'</span></span>'+'</div>';
@@ -13931,13 +13934,13 @@
       // that stage and clears the (hidden-by-default) Status filter, so a click on "Approved for bulk" actually shows it.
       function renderStagePills(counts){ var box=document.getElementById('pg-stagepills'); if(!box)return;
         var opts='<option value="">All stages</option>'+STAGE_META.map(function(m){ var st=m[0], n=counts[st]||0; return '<option value="'+st+'"'+(_prodFilt.stage===st?' selected':'')+'>'+esc(m[1])+' ('+n+')</option>'; }).join('');   // v27.488: dropdown replaces the stage pills (Ben)
-        var dirty=(_prodFilt.stage||_prodFilt.season||_prodFilt.category||_prodFilt.q||(_prodFilt.status&&_prodFilt.status!=='dev_actions')||_prodFilt.type!=='Product Development');
+        var dirty=(_prodFilt.stage||_prodFilt.season||_prodFilt.category||_prodFilt.supplier||_prodFilt.q||(_prodFilt.status&&_prodFilt.status!=='dev_actions')||_prodFilt.type!=='Product Development');
         box.innerHTML='<span style="display:inline-flex;align-items:center;gap:5px"><span style="color:var(--muted);font-size:11px">Stage</span><select class="fci" id="pg-stage" style="'+selDark(_prodFilt.stage)+'">'+opts+'</select></span>'
           +(dirty?' <a class="pg-reset" title="clear all filters" style="font-size:11px;color:var(--amber);cursor:pointer;font-weight:600;margin-left:8px;text-decoration:underline">Reset filters</a>':'');
         var _stSel=box.querySelector('#pg-stage'); if(_stSel)_stSel.onchange=function(){ _prodFilt.stage=_stSel.value||''; if(_prodFilt.stage)_prodFilt.status=''; var ss=document.getElementById('pg-status'); if(ss){ ss.value=_prodFilt.status; ss.setAttribute('style',selDark(_prodFilt.status)); } draw(); };
-        var rb=box.querySelector('.pg-reset'); if(rb)rb.onclick=function(){ _prodFilt={type:'Product Development',season:'',status:'',q:'',category:'',stage:''};
+        var rb=box.querySelector('.pg-reset'); if(rb)rb.onclick=function(){ _prodFilt={type:'Product Development',season:'',status:'',q:'',category:'',stage:'',supplier:''};
           var setSel=function(id,val){ var s=document.getElementById(id); if(s){ s.value=val; s.setAttribute('style',selDark(val)); } };
-          setSel('pg-type','Product Development'); setSel('pg-season',''); setSel('pg-cat',''); setSel('pg-status',''); var qi=document.getElementById('pg-q'); if(qi)qi.value=''; draw(); }; }
+          setSel('pg-type','Product Development'); setSel('pg-season',''); setSel('pg-cat',''); setSel('pg-supplier',''); setSel('pg-status',''); var qi=document.getElementById('pg-q'); if(qi)qi.value=''; draw(); }; }
       function draw(){
         var q=_prodFilt.q.trim().toLowerCase();
         var expandAll=!!(_prodFilt.category || q || _prodFilt.stage);   // a category / search / stage filter forces groups open so results are visible (doesn't wipe manual collapse state)
@@ -13945,6 +13948,7 @@
           if(_prodFilt.type && (r.type||'Product Development')!==_prodFilt.type)return false;
           if(_prodFilt.season && r.season!==_prodFilt.season)return false;
           if(_prodFilt.category && r.category!==_prodFilt.category)return false;
+          if(_prodFilt.supplier && r.supplier!==_prodFilt.supplier)return false;
           if(q){ var hay=((r.ref||'')+' '+(r.colour_name||'')+' '+(r.supplier||'')+' '+(r.description||'')).toLowerCase(); if(hay.indexOf(q)<0)return false; }
           return true; };
         var base=rows.filter(_passBase);
@@ -13961,7 +13965,7 @@
         var g=document.getElementById('pg-grid');
         if(!rows.length){ g.innerHTML='<div style="text-align:center;padding:44px 16px;color:var(--muted)"><div style="font-size:30px;margin-bottom:8px">📦</div><div style="font-weight:600;color:var(--ink-soft);margin-bottom:12px">No product developments yet</div><button class="save-btn" id="pg-empty-new" style="background:var(--blue-soft);color:var(--blue-ink);border:1px solid #93c5fd;font-weight:700">+ New product</button></div>'; var eb=g.querySelector('#pg-empty-new'); if(eb)eb.onclick=openProductNew; return; }
         if(!f.length){ g.innerHTML='<div style="text-align:center;padding:40px 16px;color:var(--muted)"><div style="font-size:26px;margin-bottom:8px">🔍</div><div style="font-weight:600;color:var(--ink-soft);margin-bottom:6px">No products match these filters</div><a id="pg-empty-reset" style="font-size:12px;color:var(--amber);cursor:pointer;font-weight:600;text-decoration:underline">Reset filters</a></div>';
-          var rb=g.querySelector('#pg-empty-reset'); if(rb)rb.onclick=function(){ _prodFilt={type:'Product Development',season:'',status:'',q:'',category:'',stage:''}; var setSel=function(id,val){var s=document.getElementById(id); if(s){s.value=val; s.setAttribute('style',selDark(val));}}; setSel('pg-type','Product Development'); setSel('pg-season',''); setSel('pg-cat',''); setSel('pg-status',''); var qi=document.getElementById('pg-q'); if(qi)qi.value=''; draw(); }; return; }
+          var rb=g.querySelector('#pg-empty-reset'); if(rb)rb.onclick=function(){ _prodFilt={type:'Product Development',season:'',status:'',q:'',category:'',stage:'',supplier:''}; var setSel=function(id,val){var s=document.getElementById(id); if(s){s.value=val; s.setAttribute('style',selDark(val));}}; setSel('pg-type','Product Development'); setSel('pg-season',''); setSel('pg-cat',''); setSel('pg-supplier',''); setSel('pg-status',''); var qi=document.getElementById('pg-q'); if(qi)qi.value=''; draw(); }; return; }
         function _stageRank(s){ for(var _i=0;_i<STAGE_META.length;_i++){ if(STAGE_META[_i][0]===s)return _i; } return 99; }
         function _prodCmp(a,b){ var c=_prodSort.col, d=_prodSort.dir, va,vb;
           if(c==='ref'){ va=((a.colour_name||'')+' '+(a.ref||'')).toLowerCase(); vb=((b.colour_name||'')+' '+(b.ref||'')).toLowerCase(); }
@@ -14087,6 +14091,7 @@
       document.getElementById('pg-type').onchange=function(){ _prodFilt.type=this.value; _pgDark(this); draw(); };
       document.getElementById('pg-season').onchange=function(){ _prodFilt.season=this.value; _pgDark(this); draw(); };
       document.getElementById('pg-cat').onchange=function(){ _prodFilt.category=this.value; _pgDark(this); draw(); };
+      var _pgSup=document.getElementById('pg-supplier'); if(_pgSup)_pgSup.onchange=function(){ _prodFilt.supplier=this.value; _pgDark(this); draw(); };
       document.getElementById('pg-status').onchange=function(){ _prodFilt.status=this.value; _prodFilt.stage=''; _pgDark(this); draw(); };   // choosing a Status clears any active stage pill
       document.getElementById('pg-q').oninput=debounce(function(){ _prodFilt.q=this.value; draw(); },250);   // debounce: don't re-filter+re-render the whole grid on every keystroke
       draw();
@@ -14204,7 +14209,7 @@
   function loadRejectReasons(cb){ if(_rejReasons)return cb(_rejReasons); pget('/api/product/reject-reasons').then(function(d){ _rejReasons=(d&&d.reasons)||[]; cb(_rejReasons); }).catch(function(){ cb([]); }); }
   // ── v27.530 shared composer helpers (timeline compose box + sample feedback boxes) ─────────────────────────
   function hzPanCard(p){ return '<div style="display:flex;align-items:center;gap:9px;max-width:320px;border:1px solid var(--line);border-radius:7px;padding:5px 9px;background:var(--card);margin:4px 0 0"><span style="width:34px;height:34px;border-radius:5px;border:1px solid rgba(0,0,0,.12);background:'+esc(p.hex||'var(--line)')+';flex:0 0 auto"></span><div style="line-height:1.3"><div style="font-size:11px;font-weight:700;color:var(--nav)">PANTONE '+esc(p.code||'')+'</div><div style="font-size:10px;color:var(--muted)">'+esc(p.name||'')+(p.hex?' · ≈'+esc(p.hex):'')+(p.book?' · '+esc(p.book):'')+'</div></div></div>'; }
-  function hzPanChip(p){ return '<span class="pan-hover" style="position:relative;display:inline-flex;align-items:center;gap:4px;background:var(--hover);border:1px solid var(--line);border-radius:5px;padding:0 6px;font-weight:700;font-size:10px;line-height:16px;vertical-align:middle;white-space:nowrap;cursor:default"><span style="width:11px;height:11px;border-radius:2px;border:1px solid rgba(0,0,0,.18);background:'+esc(p.hex||'var(--line)')+'"></span>PANTONE '+esc(p.code||'')+'<span class="pan-hovercard" style="display:none;position:absolute;z-index:200060;left:0;top:100%;margin-top:2px">'+hzPanCard(p)+'</span></span>'; }
+  function hzPanChip(p){ return '<span class="pan-hover" style="position:relative;display:inline-flex;align-items:center;gap:4px;background:var(--hover);border:1px solid var(--line);border-radius:5px;padding:0 6px;font-weight:700;font-size:10px;line-height:16px;vertical-align:middle;white-space:nowrap;cursor:default"><span style="width:11px;height:11px;border-radius:2px;border:1px solid rgba(0,0,0,.18);background:'+esc(p.hex||'var(--line)')+'"></span>PANTONE '+esc(p.code||'')+(p.name?' <span style="font-weight:400;color:var(--muted)">'+esc(p.name)+'</span>':'')+'<span class="pan-hovercard" style="display:none;position:absolute;z-index:200060;left:0;top:100%;margin-top:2px">'+hzPanCard(p)+'</span></span>'; }
   // message text → html with every "🎨 <code>" token swapped for its colour chip (used for saved notes AND the live preview)
   function hzPanBodyHtml(text,pans){ var h=esc(text||''); (pans||[]).forEach(function(p){ var tok=esc('🎨 '+p.code); if(h.indexOf(tok)>=0)h=h.split(tok).join(hzPanChip(p)); }); return h.replace(/\n/g,'<br>'); }
   // live preview under a compose box: shows the message with real swatches while typing (Ben: colour, not the 🎨 emoji). Hidden until a Pantone is in the text.
@@ -14705,7 +14710,7 @@
       var list=_items.length?_items.map(function(x){return x.h;}).join(''):'<div class="mut tiny" style="padding:6px 0">'+(anyFilt?'No messages with the selected tag'+(usedIds.filter(function(id){return FILT[id];}).length>1?'s':'')+'.':'No timeline entries yet.')+'</div>';
       var _compChips=ACTTAGS.map(function(t){ return '<span class="pt-tagchip" data-id="'+t.id+'" style="cursor:pointer;display:inline-block;font-size:10px;font-weight:700;border-radius:5px;padding:2px 9px;margin:0 4px 4px 0;border:1px solid '+esc(t.colour||'var(--muted)')+';color:'+esc(t.colour||'var(--muted)')+';background:var(--card)">'+esc(t.name||'')+'</span>'; }).join('');
       var compose='<div style="margin-top:6px;max-width:640px">'
-        +'<div style="position:relative"><textarea class="fci" id="pt-in" rows="2" spellcheck="true" lang="en-GB" autocapitalize="sentences" placeholder="Add a note…  ('+(SNIPS.length?'/ phrase · ':'')+'/p Pantone)" style="width:100%;box-sizing:border-box;min-height:38px;text-align:left"></textarea>'
+        +'<div style="position:relative"><textarea class="fci" id="pt-in" rows="2" spellcheck="true" autocorrect="on" autocapitalize="sentences" lang="en-GB" placeholder="Add a note…  ('+(SNIPS.length?'/ phrase · ':'')+'/p Pantone)" style="width:100%;box-sizing:border-box;min-height:38px;text-align:left"></textarea>'
           +'<div id="pt-picker" style="display:none;position:absolute;left:6px;right:6px;top:calc(100% - 2px);z-index:60;background:var(--card);border:1px solid var(--line);border-radius:6px;box-shadow:0 6px 20px rgba(15,23,42,.14);max-height:200px;overflow:auto"></div></div>'
         +'<div id="pt-prev" style="display:none;margin:4px 0 0;font-size:12px;line-height:1.5"></div>'
         +(ACTTAGS.length?'<div style="margin:5px 0 2px"><span class="mut tiny" style="margin-right:4px">Tags:</span>'+_compChips+'</div>':'')
