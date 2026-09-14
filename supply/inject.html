@@ -7465,6 +7465,14 @@
               +lblBlk('Forwarder phone','', kaInp('forwarder_phone', fieldOf(r,'forwarder_phone'),'+44 …','tel'))
               +'</div>'
               +'<div style="border-top:1px solid var(--line2);margin:2px 0 14px"></div>'
+              +'<div style="font-weight:700;font-size:13px;color:var(--ink-soft);margin-bottom:10px">Consignee &amp; delivery contacts <span class="mut tiny" style="font-weight:400">— default onto this client\'s POs (Client/FBA tab) when the key account is applied</span></div>'
+              +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px">'
+              +lblBlk('Consignee','', kaInp('consignee', fieldOf(r,'consignee'),'consignee…'))
+              +lblBlk('Contact person','', kaInp('contact_person', fieldOf(r,'contact_person'),'name…'))
+              +lblBlk('Contact number','', kaInp('contact_number', fieldOf(r,'contact_number'),'+44 …','tel'))
+              +'</div>'
+              +'<div style="margin-top:12px">'+lblBlk('Freight forwarder details','', ta('freight_forwarder', fieldOf(r,'freight_forwarder'),'forwarder company / contact / booking ref…'))+'</div>'
+              +'<div style="border-top:1px solid var(--line2);margin:2px 0 14px"></div>'
               +'<div style="font-weight:700;font-size:13px;color:var(--ink-soft);margin-bottom:10px">Packing &amp; labelling</div>'
               +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;margin-bottom:14px">'+PACK.map(function(p){return packBox(r,p);}).join('')+'</div>'
               +'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px">'

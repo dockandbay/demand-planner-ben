@@ -5387,6 +5387,7 @@ const KA_FIELDS = {
   name: 'text', client_requirements: 'text', address: 'text', pack_pallet_notes: 'text', pack_other_notes: 'text',
   carton_label_format: 'text', seller_entity: 'text',
   forwarder_name: 'text', forwarder_email: 'text', forwarder_phone: 'text',
+  consignee: 'text', contact_person: 'text', contact_number: 'text', freight_forwarder: 'text',   // SUG-0041 reuse: default onto a PO's Client/FBA tab when the key account is applied (mig 272)
   pack_polybags: 'boolean', pack_polybags_notes: 'text', pack_dnb_barcodes: 'boolean', pack_dnb_barcodes_notes: 'text',
   pack_rfid_barcodes: 'boolean', pack_rfid_barcodes_notes: 'text', pack_dnb_carton: 'boolean', pack_dnb_carton_notes: 'text',
   pack_client_carton: 'boolean', pack_client_carton_notes: 'text',
@@ -5415,12 +5416,15 @@ app.post('/api/supply/po/:po/apply-key-account', async (req, res) => {
       pack_polybags=coalesce($4,false), pack_polybags_notes=$5, pack_dnb_barcodes=coalesce($6,false), pack_dnb_barcodes_notes=$7,
       pack_rfid_barcodes=coalesce($8,false), pack_rfid_barcodes_notes=$9, pack_dnb_carton=coalesce($10,false), pack_dnb_carton_notes=$11,
       pack_client_carton=coalesce($12,false), pack_client_carton_notes=$13, pack_pallet_notes=$14, pack_other_notes=$15,
+      po_consignee=$16, po_contact_person=$17, po_contact_number=$18, po_freight_forwarder=$19,
       dtc_key_account=true, dtc_accepted_at=NULL, dtc_accepted_by=NULL, updated_at=now()
-      WHERE po=$16`,
+      WHERE po=$20`,
       [ka.name, ka.client_requirements, ka.address,
        ka.pack_polybags, ka.pack_polybags_notes, ka.pack_dnb_barcodes, ka.pack_dnb_barcodes_notes,
        ka.pack_rfid_barcodes, ka.pack_rfid_barcodes_notes, ka.pack_dnb_carton, ka.pack_dnb_carton_notes,
-       ka.pack_client_carton, ka.pack_client_carton_notes, ka.pack_pallet_notes, ka.pack_other_notes, req.params.po]);
+       ka.pack_client_carton, ka.pack_client_carton_notes, ka.pack_pallet_notes, ka.pack_other_notes,
+       ka.consignee, ka.contact_person, ka.contact_number, ka.freight_forwarder,   // SUG-0041 reuse (mig 272)
+       req.params.po]);
     res.json({ ok: true });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -5430,7 +5434,8 @@ app.post('/api/supply/po/:po/create-key-account', async (req, res) => {
   try {
     const p = (await pool.query(`SELECT coalesce(client,'') client, client_requirements, final_delivery_address,
       pack_polybags, pack_polybags_notes, pack_dnb_barcodes, pack_dnb_barcodes_notes, pack_rfid_barcodes, pack_rfid_barcodes_notes,
-      pack_dnb_carton, pack_dnb_carton_notes, pack_client_carton, pack_client_carton_notes, pack_pallet_notes, pack_other_notes
+      pack_dnb_carton, pack_dnb_carton_notes, pack_client_carton, pack_client_carton_notes, pack_pallet_notes, pack_other_notes,
+      po_consignee, po_contact_person, po_contact_number, po_freight_forwarder
       FROM planner.purchase_orders WHERE po=$1`, [req.params.po])).rows[0];
     if (!p) return res.status(404).json({ error: 'PO not found' });
     const name = (p.client || '').trim();
@@ -5440,11 +5445,11 @@ app.post('/api/supply/po/:po/create-key-account', async (req, res) => {
     const r = await pool.query(`INSERT INTO planner.key_accounts
       (name, client_requirements, address, pack_polybags, pack_polybags_notes, pack_dnb_barcodes, pack_dnb_barcodes_notes,
        pack_rfid_barcodes, pack_rfid_barcodes_notes, pack_dnb_carton, pack_dnb_carton_notes, pack_client_carton, pack_client_carton_notes,
-       pack_pallet_notes, pack_other_notes)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
+       pack_pallet_notes, pack_other_notes, consignee, contact_person, contact_number, freight_forwarder)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19) RETURNING id`,
       [name, p.client_requirements, p.final_delivery_address, p.pack_polybags, p.pack_polybags_notes, p.pack_dnb_barcodes, p.pack_dnb_barcodes_notes,
        p.pack_rfid_barcodes, p.pack_rfid_barcodes_notes, p.pack_dnb_carton, p.pack_dnb_carton_notes, p.pack_client_carton, p.pack_client_carton_notes,
-       p.pack_pallet_notes, p.pack_other_notes]);
+       p.pack_pallet_notes, p.pack_other_notes, p.po_consignee, p.po_contact_person, p.po_contact_number, p.po_freight_forwarder]);
     await pool.query(`UPDATE planner.purchase_orders SET dtc_key_account=true, updated_at=now() WHERE po=$1`, [req.params.po]);
     res.json({ ok: true, id: r.rows[0].id, name });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
