@@ -4879,15 +4879,22 @@ app.get('/api/supply/:section', async (req, res, next) => {
         //   • OTHER payments (planner.deposits is_deposit=false)
         // NOTE: PO *starting deposits* are deliberately EXCLUDED — they are a drawdown/allocation against a
         // register deposit, not a separate cash payment. The register entry is the real payment.
-        // Xero AccountCode per PO line: AU delivery → always '620.00 AU'; else the deposit the PO is
+        // Xero AccountCode per PO line: AU → always '620.00 AU'; else the deposit the PO is
         // assigned to (deposits.xero_account_code by deposit_ref); else the production's code
         // (prod_numbers.xero_account_code by prod_no). supplier_code = suppliers.code (the 2-letter code).
-        // AU delivery → always '620.00 AU'. Otherwise prefer the assigned deposit's Xero code, but fall
-        // back to the production-number code (prod_numbers.xero_account_code, e.g. P56 → '620.36 P56') when
-        // the PO has no deposit — the 'NO DEPOSIT' sentinel or a deposit with no code must NOT swallow the
-        // line into a blank (previously the non-empty sentinel took the deposit branch and returned null).
+        // AU is ONE account across all periods (never split by period). A PO is AU when EITHER its own
+        // delivery country resolves to 'AU' OR the deposit it is funded from is an AU deposit
+        // (deposits.country='AU', e.g. P56-AU-XR1). The deposit-country test is what catches AU orders
+        // whose PO country_code arrives as 'OT'/blank (AU Direct-to-Client comes through that way) — without
+        // it they leaked to the period account via the assigned deposit's own code (e.g. PO-1697839 → P56).
+        // Otherwise prefer the assigned deposit's Xero code, but fall back to the production-number code
+        // (prod_numbers.xero_account_code, e.g. P56 → '620.36 P56') when the PO has no deposit — the
+        // 'NO DEPOSIT' sentinel or a deposit with no code must NOT swallow the line into a blank.
         const ACCT = `CASE
             WHEN upper(coalesce(nullif(o.country_code,''),(SELECT br.country_code FROM planner.branches br WHERE br.name=o.branch),''))='AU' THEN '620.00 AU'
+            WHEN upper(coalesce((SELECT d.country FROM planner.deposits d
+                 WHERE d.reference=o.deposit_ref AND coalesce(o.deposit_ref,'')<>'' AND upper(o.deposit_ref)<>'NO DEPOSIT'
+                 ORDER BY d.id LIMIT 1),''))='AU' THEN '620.00 AU'
             ELSE coalesce(
               (SELECT d.xero_account_code FROM planner.deposits d
                  WHERE d.reference=o.deposit_ref AND coalesce(o.deposit_ref,'')<>'' AND upper(o.deposit_ref)<>'NO DEPOSIT'
