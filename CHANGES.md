@@ -1,3 +1,7 @@
+## v27.682 Sales Planning scenario: multi-SKU green filter box (Ben) — CLIENT
+- Added a **green multi-line SKU filter box** to SCENARIO ▸ Sales Planning (`#/demand/scenario/salesplan`). Paste one SKU per line (or comma-separated) to narrow the report to those SKUs; blank shows all. Matches partial codes too (a base code pulls all its variants), and a **Clear** button resets it.
+- Filters client-side on the already-loaded data (instant, no reload) and flows through the row count, grouping and **CSV export** (all respect the filter). inject.html `renderSalesPlan` only; `SP_STATE.skuq` added to `spFilt`. No server change, no buy impact.
+
 ## v27.681 B2B scenario: "Coverable — expedite production" is now date- & market-aware (Ben) — SERVER + CLIENT
 - **Problem (Ben):** the B2B scenario (`#/demand/scenario/b2b`) marked a line "Coverable — expedite production" whenever open in-production units existed, ignoring both **when** they could land and **which market** they were for. e.g. TOWLB-CAB-LG-NAVY-R UK by 1-Oct showed 5,278 "coverable" from POs all dated 20-Nov, 2,800 of which were US/EU-bound — not actually coverable.
 - **Fix:** a production PO now counts toward cover **only if it is in the order's market AND can be expedited to LAND by the required-by date**. Earliest expedited land = today + the supplier's `expedited_production_weeks` (CONFIG ▸ Suppliers) + the market's air lead (`branches.air_lead_time_days`), computed server-side per PO (`exped_land`, `po_market`). The blanket "≤4wk usually feasible" assumption is gone.
