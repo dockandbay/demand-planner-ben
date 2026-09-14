@@ -16269,6 +16269,13 @@ function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={};   //
           });
           cfc[ch]=chFC; cact[ch]=(s2sales[CUR_MONTH]||0);   // stash for the prepack netting (per-channel display + partial current month)
         });
+        // Current month is PARTIAL: net the set's own actuals-to-date off the current-month set forecast so only the
+        // REMAINING forecast explodes onto components — a set that has sold N units this month shouldn't also inject a
+        // full-month forecast on top. Applies to ALL sets (previously only the prepack pass did this, so non-prepack
+        // sets showed the whole current-month forecast in the "DTC demand (sets)" line). setFC[CUR_MONTH] is then
+        // already net when the prepack pass runs below. v27.683.
+        if(setFC[CUR_MONTH]!=null){ var _setActMtd=chans.reduce(function(a,ch){return a+(cact[ch]||0);},0);
+          if(_setActMtd>0) setFC[CUR_MONTH]=Math.max(0,setFC[CUR_MONTH]-_setActMtd); }
         // PREPACK netting (prepack feature): a mapped prepack's (PP-…) on-hand stock fulfils this set's demand
         // directly, so draw it down against setFC month-by-month (carried forward). Only the UNCOVERED remainder
         // explodes into components below — while prepack stock fully covers a month, that month buys 0 components.
@@ -16283,7 +16290,7 @@ function buildLiveDemand(){ RUNOFF_MEMO={}; SETDEM_MEMO={}; ASPADJ_MEMO={};   //
             // Current month is PARTIAL: the actuals already shipped, so drop them from the demand to build AND net the
             // prepack against the REMAINING forecast only (forecast − actuals-to-date). Per channel so the rail badge on
             // a DTC (or FBA) cell shows that channel's number, matching the grid (not the DTC+FBA combined total).
-            if(fym===CUR_MONTH){ var actTot=chans.reduce(function(a,ch){return a+(cact[ch]||0);},0); if(actTot>0)setFC[fym]=Math.max(0,(setFC[fym]||0)-actTot); }
+            // (current-month actuals already netted off setFC[CUR_MONTH] above, before this prepack pass — v27.683)
             chans.forEach(function(ch){ if(rem2<=0)return;
               var d=(cfc[ch]||{})[fym]||0;
               if(fym===CUR_MONTH)d=Math.max(0,d-(cact[ch]||0));       // remaining this partial month
