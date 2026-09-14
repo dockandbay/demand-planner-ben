@@ -12452,7 +12452,18 @@
       // Stock-source toggle: fulfil from on-hand+inbound only, in-production only, or a mix. In-production =
       // OPEN Production-status POs carrying this SKU (Direct-to-Client excluded server-side) that could be expedited.
       var prodPOs=(d.production||[]), prodQty=prodPOs.reduce(function(s,pp){return s+(Number(pp.qty)||0);},0);
-      var gStock=(st.src==='inproduction')?0:giveable, gProd=(st.src==='onhand')?0:prodQty;
+      // Date-aware, market-aware production feasibility. A production PO only counts toward cover if it is in
+      // THIS market AND can be expedited to LAND on/before the required-by date (exped_land = today + supplier
+      // expedited-production weeks + market air lead, server-computed). The rest are shown for visibility, not
+      // counted: in-market-but-late (lands after the date) and cross-market (redirect is an option, not a promise).
+      var mkt=(co||'').toLowerCase(), reqBy=orderDate||'';
+      var prodFeasQty=0, feasLand='', prodLateQty=0, lateLand='', prodCrossQty=0, crossLand='';
+      prodPOs.forEach(function(pp){ var q=Number(pp.qty)||0; if(q<=0)return; var land=pp.exped_land||'';
+        var inMkt=((pp.po_market||'')===mkt), feas=inMkt&&(!reqBy||(land&&land<=reqBy));
+        if(feas){ prodFeasQty+=q; if(land&&(!feasLand||land>feasLand))feasLand=land; }
+        else if(inMkt){ prodLateQty+=q; if(land&&(!lateLand||land<lateLand))lateLand=land; }
+        else { prodCrossQty+=q; if(land&&(!crossLand||land<crossLand))crossLand=land; } });
+      var gStock=(st.src==='inproduction')?0:giveable, gProd=(st.src==='onhand')?0:prodFeasQty;
       var fromStock=Math.min(qty,gStock), fromProd=Math.min(Math.max(0,qty-fromStock),gProd);
       var ful=fromStock+fromProd, short=Math.max(0,qty-ful);
       var coverAfter=vel>0?((projAtDate-fromStock)/vel/7):999;   // own-channel cover impact is only from physical stock given
@@ -12462,15 +12473,19 @@
       var nextTxt=d.next_inbound_date?units(d.next_inbound_qty)+' '+fd(d.next_inbound_date):'';
       var rec,cls;
       if(short>0){ rec='Short '+units(short); cls='bg-red'; nShort++; }
-      else if(fromProd>0){ rec='Coverable — expedite production'; cls='bg-amber'; nOK++; }
+      else if(fromProd>0){ rec='Coverable — expedite'+(feasLand?' by '+fd(feasLand):' production'); cls='bg-amber'; nOK++; }
       else if(coverAfter<2){ rec='Hold — would stock out'; cls='bg-red'; nOOS++; }
       else if(coverAfter<keepW){ rec='Caution — '+coverAfter.toFixed(0)+'wk cover left'; cls='bg-amber'; nTight++; }
       else { rec='Give ✓ — '+(coverAfter>=999?'no sales':coverAfter.toFixed(0)+'wk left'); cls='bg-green'; nOK++; }
       // proposed actions + in-production source detail (rendered in the recommendation cell, which wraps)
       var acts=[];
       if(fromStock>0 && (fromProd>0||short>0)) acts.push('Ship '+units(fromStock)+' from stock');
-      if(fromProd>0) acts.push('⚡ Expedite '+units(fromProd)+' from production (≤4wk usually feasible)');
-      if(short>0) acts.push('🏭 Make more &amp; expedite '+units(short)+(air!=null?' <span class="mut">(or rush air '+sym+fmInt(air)+')</span>':''));
+      if(fromProd>0) acts.push('⚡ Expedite '+units(fromProd)+' from production — lands ~'+(feasLand?fd(feasLand):'in time'));
+      if(prodLateQty>0) acts.push('🕒 '+units(prodLateQty)+' more in production but earliest ~'+(lateLand?fd(lateLand):'later')+' (after the required date) — move the date to use it');
+      if(prodCrossQty>0) acts.push('↔ Option: redirect up to '+units(prodCrossQty)+' from other-market production'+(crossLand?' (earliest ~'+fd(crossLand)+')':'')+' — not guaranteed');
+      if(short>0){ var coveredByProd=Math.min(short,prodLateQty+prodCrossQty);
+        if(coveredByProd>=short && short>0) acts.push('🏭 Rush the '+units(short)+' shortfall by air'+(air!=null?' '+sym+fmInt(air):'')+', or move the required date to use in-production units');
+        else acts.push('🏭 Make more &amp; expedite '+units(short)+(air!=null?' <span class="mut">(or rush air '+sym+fmInt(air)+')</span>':'')); }
       var prodDetail = prodPOs.length ? '<div class="tiny mut" style="margin-top:3px">In production ('+units(prodQty)+'): '+prodPOs.slice(0,4).map(function(pp){ return '<button class="lnk-btn b2b-prod-po" data-po="'+esc(pp.po)+'" style="color:var(--blue);background:none;border:none;padding:0;cursor:pointer">'+esc(pp.po)+'</button>'+(pp.branch?' <span style="opacity:.7">'+esc(pp.branch)+'</span>':'')+' ×'+units(pp.qty)+(pp.date?' · '+fd(pp.date):''); }).join('<br>')+(prodPOs.length>4?'<br>+'+(prodPOs.length-4)+' more':'')+'</div>' : (st.src!=='onhand'?'<div class="tiny mut" style="margin-top:3px">No open production POs for this SKU.</div>':'');
       var availSub='now '+units(avail)+(expSold>0?' − '+units(expSold)+' sold':'')+(inbBy>0?' + '+units(inbBy)+' in':'');
       return '<tr><td class="l" style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis"><b>'+esc(d.sku)+'</b></td>'
@@ -12518,7 +12533,7 @@
       +'<div class="kpi"><div class="l">Net after air</div><div class="v"'+(net<0?' style="color:var(--neg)"':'')+'>'+csym+fmInt(net)+'</div></div></div>';
     document.getElementById('b2b-out').innerHTML=verdict+kpi
       +'<div class="tw"><table style="table-layout:fixed"><colgroup><col style="width:160px"><col style="width:240px"><col style="width:46px"><col style="width:132px"><col style="width:58px"><col style="width:52px"><col style="width:48px"><col style="width:46px"><col style="width:44px"><col style="width:56px"><col style="width:64px"><col style="width:58px"><col style="width:62px"></colgroup><thead><tr><th class="l">SKU</th><th class="l">Recommendation</th><th>Req</th><th>Avail @ '+(orderDate?fd(orderDate):'date')+'</th><th>Keep</th><th>Fulfil</th><th>Short</th><th>Cover</th><th>Wt kg</th><th>Air</th><th>Wholesale</th><th>Revenue</th><th>Margin</th></tr></thead><tbody>'+rowsH+'</tbody></table></div>'
-      +'<div class="mut tiny" style="margin-top:4px"><b>Avail @ date</b> = on-hand today − own-channel sales between now and the required-by date + inbound landing by then (so a later date both sells down stock and lands more inbound). <b>Keep</b> = '+keepW+'wk of own-channel cover (velocity × '+keepW+'wk) held back before giving to B2B. <b>Fulfil</b> = min(requested, avail @date − keep); <b>Short</b> = the rest, rushed by air. Wholesale = 50% of ex-VAT retail (UK/EU ÷1.2). Air = short × unit weight × '+sym+rate+'/kg. Margin = (wholesale − market COGS, 3PL final; else avg PO cost) × qty; net after air in '+sym+'. <b>Fulfil from</b> switches whether stock, in-production POs (open Production status, Direct-to-Client excluded — expeditable, ≤4wk usually feasible), or both count toward Fulfil.</div>';
+      +'<div class="mut tiny" style="margin-top:4px"><b>Avail @ date</b> = on-hand today − own-channel sales between now and the required-by date + inbound landing by then (so a later date both sells down stock and lands more inbound). <b>Keep</b> = '+keepW+'wk of own-channel cover (velocity × '+keepW+'wk) held back before giving to B2B. <b>Fulfil</b> = min(requested, avail @date − keep); <b>Short</b> = the rest, rushed by air. Wholesale = 50% of ex-VAT retail (UK/EU ÷1.2). Air = short × unit weight × '+sym+rate+'/kg. Margin = (wholesale − market COGS, 3PL final; else avg PO cost) × qty; net after air in '+sym+'. <b>Fulfil from</b> switches whether stock, in-production POs, or both count toward Fulfil. A production PO counts only if it is in this market AND can be expedited to LAND by the required-by date (today + the supplier\'s expedited-production weeks from CONFIG ▸ Suppliers + market air lead). Production that would land later, or sits in another market, is listed as an option with its earliest realistic date — visibility, not a promise.</div>';
     document.querySelectorAll('#b2b-out .b2b-prod-po').forEach(function(x){ x.onclick=function(){ if(typeof openPODrawer==='function')openPODrawer(x.dataset.po,'oplan'); else gotoPO(x.dataset.po,'oplan'); }; }); }
   // Download the B2B allocation report as an A4 (landscape) print-to-PDF.
   function b2bPDF(st){ var out=document.getElementById('b2b-out'); if(!out||!out.innerHTML.trim()){ alert('Run an analysis first.'); return; }

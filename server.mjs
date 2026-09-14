@@ -12759,9 +12759,18 @@ app.post('/api/scenario/b2b', async (req, res) => {
         -- Direct-to-Client POs (their units are already committed). Any market — branch shown so a redirect is visible.
         coalesce((SELECT json_agg(json_build_object('po',po2.po,'qty',l2.qty::int,'branch',coalesce(po2.branch,''),
              'supplier',coalesce(po2.supplier_name,''),'prod_no',coalesce(po2.prod_no,''),
-             'date', to_char(coalesce(po2.delivery_date_overide,po2.landing_date_overide,po2.end_production_overide),'YYYY-MM-DD'))
+             'date', to_char(coalesce(po2.delivery_date_overide,po2.landing_date_overide,po2.end_production_overide),'YYYY-MM-DD'),
+             -- market of the PO's branch, and the earliest date this PO could realistically LAND in the ORDER's
+             -- market if expedited: today + supplier expedited-production weeks + target-market air lead. The client
+             -- only counts a PO toward cover when it is in-market AND exped_land <= the required-by date.
+             'po_market', lower(coalesce(brp.country_code,'')),
+             'exped_weeks', s2.expedited_production_weeks,
+             'exped_land', to_char(CURRENT_DATE + ((coalesce(s2.expedited_production_weeks,4)*7)::numeric
+                 + coalesce((SELECT min(air_lead_time_days) FROM planner.branches WHERE lower(country_code)=$2),7))::int, 'YYYY-MM-DD'))
              ORDER BY coalesce(po2.delivery_date_overide,po2.landing_date_overide,po2.end_production_overide) NULLS LAST)
            FROM planner.purchase_order_lines l2 JOIN planner.purchase_orders po2 ON po2.po=l2.po
+             LEFT JOIN planner.suppliers s2 ON lower(trim(s2.name))=lower(trim(po2.supplier_name))
+             LEFT JOIN planner.branches brp ON brp.name=po2.branch
            WHERE l2.sku=p.sku AND coalesce(l2.qty,0)>0 AND coalesce(po2.status,'') ILIKE 'production%'
              AND coalesce(po2.branch,'') NOT ILIKE '%direct to client%'
              AND coalesce(po2.branch,'') NOT ILIKE '%jlew%' AND coalesce(po2.branch,'') NOT ILIKE '%next%'), '[]'::json) production
