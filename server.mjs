@@ -6922,10 +6922,12 @@ app.get('/api/supply/sample/:id/contents', async (req, res) => {
 // (forward-only). Pass {received:false} to un-mark (does not walk stages back).
 app.post('/api/supply/sample/:id/received', async (req, res) => {
   try {
-    const id = req.params.id, receive = (req.body || {}).received !== false;
-    await pool.query(receive
-      ? `UPDATE planner.sample_requests SET received_at=now(), status=CASE WHEN upper(coalesce(status,''))='CANCELLED' THEN status ELSE 'COMPLETED' END, updated_at=now() WHERE id=$1::bigint`   // v27.569: received ⇒ COMPLETED (Ben); cancelled stays cancelled
-      : `UPDATE planner.sample_requests SET received_at=NULL, updated_at=now() WHERE id=$1::bigint`, [id]);
+    const id = req.params.id, b = req.body || {}, receive = b.received !== false;
+    // v27.687 (Ben #7): accept an explicit received date (YYYY-MM-DD) so the actual date can be set/corrected;
+    // falls back to now() when none is given (unchanged behaviour for the plain "Mark received" click).
+    const dt = (b.date && /^\d{4}-\d{2}-\d{2}$/.test(b.date)) ? (b.date + 'T12:00:00Z') : null;
+    if (receive) await pool.query(`UPDATE planner.sample_requests SET received_at=$2::timestamptz, status=CASE WHEN upper(coalesce(status,''))='CANCELLED' THEN status ELSE 'COMPLETED' END, updated_at=now() WHERE id=$1::bigint`, [id, dt || new Date().toISOString()]);
+    else await pool.query(`UPDATE planner.sample_requests SET received_at=NULL, updated_at=now() WHERE id=$1::bigint`, [id]);
     const advanced = [];
     if (receive) {
       const refs = (await pool.query(`
