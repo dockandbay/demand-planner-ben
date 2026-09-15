@@ -3578,6 +3578,7 @@ app.get('/api/supply/sample-detail/:id', async (req, res) => {
     const id = req.params.id;
     const s = (await pool.query(`SELECT id, ref, supplier_id, coalesce(supplier_name,'') supplier_name,
       coalesce(recipients,'[]'::jsonb) recipients, coalesce(internal_stakeholders,'[]'::jsonb) internal_stakeholders,
+      coalesce(fulfilment_source,'supplier') fulfilment_source, coalesce(fulfilment_po,'') fulfilment_po,
       coalesce(recipient_company,'') recipient_company, coalesce(first_name,'') first_name, coalesce(last_name,'') last_name,
       coalesce(address_line1,'') address_line1, coalesce(address_line2,'') address_line2, coalesce(city,'') city,
       coalesce(region,'') region, coalesce(postcode,'') postcode, coalesce(country,'') country, coalesce(phone,'') phone,
@@ -4343,6 +4344,7 @@ app.get('/api/supply/:section', async (req, res, next) => {
       case 'samples':   // SUPPLY ▸ Samples grid — all sample requests + open/overdue/charge flags
         return res.json(await q(`SELECT s.id, s.ref, coalesce(s.supplier_name,'') supplier_name,
           coalesce(s.recipient_company,'') recipient_company, coalesce(s.internal_stakeholders,'[]'::jsonb) internal_stakeholders,
+          coalesce(s.fulfilment_source,'supplier') fulfilment_source, coalesce(s.fulfilment_po,'') fulfilment_po,
           trim(coalesce(s.first_name,'')||' '||coalesce(s.last_name,'')) recipient_name,
           coalesce(s.city,'') city, coalesce(s.country,'') country,
           coalesce(s.address_line1,'') address_line1, coalesce(s.address_line2,'') address_line2,
@@ -14017,6 +14019,7 @@ const SAMPLE_FIELDS = { supplier_id:'bigint', supplier_name:'text', recipient_co
   last_name:'text', address_line1:'text', address_line2:'text', city:'text', region:'text', postcode:'text',
   country:'text', phone:'text', notify_emails:'text', completion_date_required:'date', purpose:'text[]', notes:'text', status:'text',
   supplier_expected_completion:'date', tracking_code:'text', carrier:'text', production_status:'text',
+  fulfilment_source:'text', fulfilment_po:'text',   // v27.692 (Ben): supplier | warehouse | po (+ linked PO ref)
   // Second recipient + second tracking (migration 167) — a sample can ship to two destinations.
   recipient_company_2:'text', first_name_2:'text', last_name_2:'text', address_line1_2:'text', address_line2_2:'text',
   city_2:'text', region_2:'text', postcode_2:'text', country_2:'text', phone_2:'text', carrier_2:'text', tracking_code_2:'text' };
@@ -14050,11 +14053,12 @@ app.post('/api/supply/sample-create', async (req, res) => {
     if (b.supplier_name && b.supplier_name.trim()) await client.query(   // keep the supplier picker a real dropdown
       `INSERT INTO planner.suppliers(name,kind) SELECT $1,'supplier' WHERE NOT EXISTS (SELECT 1 FROM planner.suppliers WHERE lower(trim(name))=lower(trim($1)))`, [b.supplier_name.trim()]);
     const ins = await client.query(`INSERT INTO planner.sample_requests
-      (supplier_id, supplier_name, recipient_company, first_name, last_name, address_line1, address_line2, city, region, postcode, country, phone, completion_date_required, purpose, notes, created_by, notify_emails, recipients, internal_stakeholders, status)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19::jsonb,'FUTURE') RETURNING id`,
+      (supplier_id, supplier_name, recipient_company, first_name, last_name, address_line1, address_line2, city, region, postcode, country, phone, completion_date_required, purpose, notes, created_by, notify_emails, recipients, internal_stakeholders, fulfilment_source, fulfilment_po, status)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19::jsonb,$20,$21,'FUTURE') RETURNING id`,
       [b.supplier_id||null, b.supplier_name||null, b.recipient_company||null, b.first_name||null, b.last_name||null,
        b.address_line1||null, b.address_line2||null, b.city||null, b.region||null, b.postcode||null, b.country||null, b.phone||null,
-       b.completion_date_required||null, Array.isArray(b.purpose)?b.purpose:null, b.notes||null, createdByUser||null, b.notify_emails||null, sampleRecipientsJson(b.recipients), sampleStakeholdersJson(b.internal_stakeholders)]);   // new samples start FUTURE — D&B-only until moved to PRODUCTION
+       b.completion_date_required||null, Array.isArray(b.purpose)?b.purpose:null, b.notes||null, createdByUser||null, b.notify_emails||null, sampleRecipientsJson(b.recipients), sampleStakeholdersJson(b.internal_stakeholders),
+       (['supplier','warehouse','po'].includes(b.fulfilment_source)?b.fulfilment_source:'supplier'), (b.fulfilment_source==='po'?((b.fulfilment_po||'').trim()||null):null)]);   // new samples start FUTURE — D&B-only until moved to PRODUCTION
     const id = ins.rows[0].id, ref = 'SR-' + id;
     await client.query(`UPDATE planner.sample_requests SET ref=$1 WHERE id=$2`, [ref, id]);
     for (const l of (Array.isArray(b.lines)?b.lines:[])) { if (!l || !l.sku) continue;
@@ -16116,6 +16120,7 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
         FROM planner.sample_requests s
         WHERE (coalesce(s.supplier_name,'')=ANY($1) OR coalesce(s.supplier_id,-1)=ANY($2))
           AND upper(coalesce(s.status,'')) <> 'FUTURE'   -- FUTURE samples are D&B-only; the supplier sees it once it moves to PRODUCTION
+          AND coalesce(s.fulfilment_source,'supplier') NOT IN ('warehouse','po')   -- v27.692 (Ben): warehouse/PO-fulfilled samples are internal-only, hidden from the supplier portal
         ORDER BY s.created_at DESC`, [names, ids.length ? ids : [-1]]) : [];
     // Payments for this supplier — DERIVED from the same source-of-truth as the admin Payments Report (PO
     // completion + balance milestones, the deposit register, and Other payments), NOT the payment_transactions

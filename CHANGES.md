@@ -1,3 +1,8 @@
+## v27.692 Samples: fulfilment source (warehouse / DTC PO) hidden from the portal (Ben) — SERVER + CLIENT + MIGRATION
+- A sample now has a **Fulfilment** source: **Supplier** (default — makes & ships, shows on the supplier portal), **From warehouse** (D&B ships from stock), or **From a Direct-to-Client PO** (linked to a real PO via a searchable picker, `/api/supply/po-search`).
+- **Warehouse- and PO-fulfilled samples are hidden from the supplier portal** but fully **tracked in SUPPLY ▸ Samples** — the grid shows a **🏭 warehouse** / **📦 <PO>** badge (the PO badge deep-links to the PO drawer), and the detail view has an inline fulfilment editor.
+- **Migration `275_sample_fulfilment_source.sql`** — adds `fulfilment_source text DEFAULT 'supplier'` + `fulfilment_po text` (additive; sandbox applied, **Diviyaj runs 275 on live**). server: create/detail/grid-read wired, `SAMPLE_FIELDS` edit whitelist, and the portal samples query now excludes `fulfilment_source IN ('warehouse','po')`. Verified create→read (grid + DB). No buy impact.
+
 ## v27.691 Samples: internal stakeholders + "My samples" filter (Ben) — SERVER + CLIENT + MIGRATION
 - **Internal stakeholders** — the New-sample form (and the sample detail) gains an **Internal stakeholders** section (under "Email when shipped") to pick **any Horizon user** (type-ahead from a datalist of all users) as a follower. Stored as an email array; sanitised (lower-cased, deduped, validated, cap 50).
 - **⭐ My samples pill** — SUPPLY ▸ Samples grid gains a **My samples** filter that shows only samples where the logged-in user (`window.ME.email`) is an internal stakeholder.

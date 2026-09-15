@@ -11451,7 +11451,7 @@
       var chCell=[ch,acc,rej].filter(Boolean).join('<br>')||'<span class="mut">—</span>';
       var reqDate=r.completion_required?('<span'+(r.overdue?' style="color:var(--neg);font-weight:700"':'')+'>'+fd(r.completion_required)+'</span>'):'<span class="mut">—</span>';
       return '<tr><td class="l"><button class="planbtn samp-exp" data-id="'+r.id+'" data-ref="'+esc(r.ref||'')+'" data-i="'+i+'">PLAN</button>'+actFlag+'</td>'
-        +'<td class="l"><b>'+esc(r.ref||'')+'</b></td>'
+        +'<td class="l"><b>'+esc(r.ref||'')+'</b>'+(r.fulfilment_source==='warehouse'?' <span class="tool-badge" style="background:var(--l3-bg);color:var(--blue-ink);font-size:9px" title="fulfilled from warehouse — not on the supplier portal">🏭 warehouse</span>':(r.fulfilment_source==='po'?' <span class="tool-badge inb-po" data-po="'+esc(r.fulfilment_po||'')+'" style="background:var(--l3-bg);color:var(--blue-ink);font-size:9px;cursor:'+(r.fulfilment_po?'pointer':'default')+'" title="fulfilled via a Direct-to-Client PO — not on the supplier portal">📦 '+esc(r.fulfilment_po||'PO')+'</span>':''))+'</td>'
         +'<td class="l">'+sampleStatusChip(_sampNormStatus(r.status))+(r.production_status?'<div class="mut tiny" style="margin-top:2px">supplier: '+esc(prodStatusLabel(r.production_status))+'</div>':'')+'</td>'
         +'<td class="l">'+esc(r.supplier_name||'—')+'</td>'
         +'<td class="l">'+esc(r.recipient_company||'')+(r.recipient_name?' <span class="mut tiny">'+esc(r.recipient_name)+'</span>':'')+'</td>'
@@ -11472,6 +11472,7 @@
       box.innerHTML='<div class="sect-h">New sample request</div><div class="cli-form" style="max-width:740px;border:1px solid var(--line);border-radius:10px;padding:14px 16px;background:var(--card)">'
         +H('Supplier &amp; recipient')
         +R('Supplier','<span style="position:relative;display:inline-block"><input class="fci txt sf-supplier" autocomplete="off" placeholder="assign supplier — type to search…" style="width:240px"><div class="sf-supresults"></div></span>')
+        +R('Fulfilment','<select class="fci sf-fulsource" style="width:300px"><option value="supplier">Supplier — makes &amp; ships (shows on portal)</option><option value="warehouse">From warehouse — D&amp;B ships from stock</option><option value="po">From a Direct-to-Client PO</option></select><div class="sf-po-wrap" style="display:none;margin-top:5px;position:relative"><input class="fci txt sf-po-search" placeholder="🔍 link a PO — ref / client / supplier…" autocomplete="off" style="width:300px"><div class="sf-po-results"></div><div class="sf-po-sel" style="margin-top:3px;font-size:11px"></div></div><div class="mut tiny" style="margin-top:2px">Warehouse / PO samples are tracked here but <b>hidden from the supplier portal</b>.</div>')
         +R('Find past address','<input class="fci txt sf-addrsearch" placeholder="search recipient / company…" style="width:240px"><div class="sf-addrmatches"></div>')
         +R('Recipient company','<input class="fci txt sf-recipient_company" style="width:240px">')
         +R('Name','<input class="fci txt sf-first_name" placeholder="first" style="width:115px"> <input class="fci txt sf-last_name" placeholder="last" style="width:115px">')
@@ -11510,6 +11511,13 @@
       loadHzUsers(function(us){ var dl=box.querySelector('#sf-stake-dl'); if(dl)dl.innerHTML=(us||[]).map(function(u){ return '<option value="'+esc(u.email)+'">'+esc(u.handle||u.email)+'</option>'; }).join(''); });
       var _stIn=box.querySelector('.sf-stake-in'); if(_stIn)_stIn.onchange=function(){ var v=(this.value||'').trim().toLowerCase(); if(v&&/.+@.+\..+/.test(v)&&stakes.indexOf(v)<0){ stakes.push(v); renderStakes(); } this.value=''; };
       renderStakes();
+      // v27.692 (Ben): fulfilment source — supplier (portal) / warehouse / linked Direct-to-Client PO (searchable).
+      var fulPo=null;
+      (function(){ var sel=box.querySelector('.sf-fulsource'), wrap=box.querySelector('.sf-po-wrap'), si=box.querySelector('.sf-po-search'), rb=box.querySelector('.sf-po-results'), selDiv=box.querySelector('.sf-po-sel');
+        if(sel)sel.onchange=function(){ if(wrap)wrap.style.display=(sel.value==='po')?'':'none'; if(sel.value!=='po'){ fulPo=null; if(selDiv)selDiv.innerHTML=''; } };
+        function setPo(po){ fulPo=po||null; if(selDiv){ selDiv.innerHTML=fulPo?('<span style="background:var(--pos-bg);color:var(--pos);border:1px solid var(--pos);border-radius:8px;padding:1px 8px;font-weight:700">✓ '+esc(fulPo)+'</span> <a class="sf-po-clr" style="cursor:pointer;color:var(--neg);margin-left:6px">clear</a>'):''; var cl=selDiv.querySelector('.sf-po-clr'); if(cl)cl.onclick=function(){ setPo(null); }; } if(rb)rb.innerHTML=''; if(si&&fulPo)si.value=''; }
+        if(si)si.oninput=debounce(function(){ var q=si.value.trim(); if(q.length<2){ if(rb)rb.innerHTML=''; return; } fetch('/api/supply/po-search?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(ms){ if(!rb)return; if(!Array.isArray(ms)||!ms.length){ rb.innerHTML='<div class="mut tiny">no matching PO</div>'; return; } rb.innerHTML='<div style="position:absolute;z-index:30;min-width:300px;border:1px solid var(--line);border-radius:6px;max-height:180px;overflow:auto;background:var(--card);box-shadow:0 8px 22px rgba(15,23,42,.15)">'+ms.map(function(p,i){ return '<div class="sf-po-pick" data-i="'+i+'" style="padding:4px 8px;cursor:pointer;font-size:11px;border-bottom:1px solid var(--hover)"><b>'+esc(p.po)+'</b> <span class="mut">'+esc([p.supplier_name,p.branch,p.status].filter(Boolean).join(' · '))+'</span></div>'; }).join('')+'</div>'; rb.querySelectorAll('.sf-po-pick').forEach(function(el){ el.onclick=function(){ setPo(ms[el.dataset.i].po); }; }); }).catch(function(){}); },250);
+      })();
       function renderLines(){ var w=box.querySelector('.sf-lines'); if(!lines.length){ w.innerHTML='<div class="mut tiny" style="padding:2px 0">No SKUs added yet — search above, or paste from a spreadsheet.</div>'; return; }
         w.innerHTML=lines.map(function(l,i){return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:3px"><input class="fci txt sf-lsku" data-i="'+i+'" placeholder="SKU" value="'+esc(l.sku)+'" style="width:200px"><input class="fci sf-lqty" data-i="'+i+'" placeholder="qty" value="'+esc(l.qty)+'" style="width:60px;text-align:left">'+(l.dev?' <span class="tool-badge bg-blue" style="font-size:9px">dev</span>':'')+' <a class="sf-lrm" data-i="'+i+'" style="color:var(--neg);cursor:pointer">×</a>'+(l.dev?' <a class="sf-lgo" data-ref="'+esc(String(l.sku).replace(/_v\d+$/,''))+'" title="open this product\x27s tab" style="color:var(--blue);cursor:pointer;font-size:11px;text-decoration:none">↗ product</a>':'')+'</div>';}).join('');
         w.querySelectorAll('.sf-lsku').forEach(function(x){x.onchange=function(){lines[x.dataset.i].sku=x.value;};});
@@ -11575,6 +11583,7 @@
           completion_date_required:(V('completion')?(parseDateLoose(V('completion'))||null):null), notes:V('notes')||null,
           recipients:recips.map(function(s){return String(s||'').trim();}).filter(Boolean),
           internal_stakeholders:stakes,
+          fulfilment_source:(box.querySelector('.sf-fulsource')||{}).value||'supplier', fulfilment_po:fulPo,
           lines:lines.filter(function(l){return l.sku&&l.sku.trim();}).map(function(l){return {sku:l.sku.trim(),qty:Number(l.qty)||0};}) };
         btn.disabled=true; shipPost('/api/supply/sample-create',body,function(j){ if(j&&j.error){alert('Failed: '+j.error);btn.disabled=false;return;} box.dataset.open=''; box.innerHTML=''; if(j&&j.ref){ _pendingSampleRef=j.ref; st.f='all'; } reload(); if(j&&j.ref)_sampToast('✓ '+j.ref+' created'); }); };
       bindDatePickers();
@@ -11657,6 +11666,8 @@
         if(_recArr.length) recip += L('Recipients')+'<div class="tiny" style="line-height:1.45">'+_recArr.map(function(t){ return '<div style="border-left:2px solid var(--line2);padding:1px 0 1px 7px;margin-top:4px;white-space:pre-wrap">'+esc(t)+'</div>'; }).join('')+'</div>';
         // v27.691 (Ben): internal stakeholders — editable inline (pills + add from any Horizon user) → ⭐ My samples.
         recip += L('Internal stakeholders')+'<div class="samp-stakes-wrap"></div>';
+        // v27.692 (Ben): fulfilment source — supplier / warehouse / linked DTC PO (editable inline).
+        recip += L('Fulfilment')+'<div class="samp-ful-wrap"></div>';
         var purpose = editing
           ? '<div style="margin-top:2px">'+PURP.map(function(p){return '<label style="margin-right:10px;font-size:11px;white-space:nowrap"><input type="checkbox" class="samp-purpose" value="'+p+'"'+(((s.purpose||[]).indexOf(p)>=0)?' checked':'')+'> '+p+'</label>';}).join('')+'</div>'
           : '<div class="tiny">'+esc((s.purpose||[]).join(', ')||'—')+'</div>';
@@ -11783,6 +11794,15 @@
               loadHzUsers(function(us){ var dl=wrap.querySelector('#samp-st-dl'); if(dl)dl.innerHTML=(us||[]).map(function(u){ return '<option value="'+esc(u.email)+'">'+esc(u.handle||u.email)+'</option>'; }).join(''); });
               wrap.querySelectorAll('.samp-st-rm').forEach(function(a){ a.onclick=function(){ _dst.splice(parseInt(a.dataset.i,10),1); draw(); saveSt(); }; });
               var inp=wrap.querySelector('.samp-st-in'); if(inp)inp.onchange=function(){ var v=(this.value||'').trim().toLowerCase(); this.value=''; if(v&&/.+@.+\..+/.test(v)&&_dst.indexOf(v)<0){ _dst.push(v); draw(); saveSt(); } }; }
+            draw(); })();
+          // v27.692 (Ben): fulfilment source editor — supplier / warehouse / linked DTC PO (saves inline).
+          (function(){ var wrap=box.querySelector('.samp-ful-wrap'); if(!wrap)return; var src=s.fulfilment_source||'supplier', po=s.fulfilment_po||'';
+            function save(){ s.fulfilment_source=src; s.fulfilment_po=po; shipPost(ep,{fulfilment_source:src,fulfilment_po:(src==='po'?po:'')},function(){}); }
+            function draw(){ wrap.innerHTML='<select class="fci samp-ful-src" style="width:290px;font-size:11px"><option value="supplier"'+(src==='supplier'?' selected':'')+'>Supplier — shows on portal</option><option value="warehouse"'+(src==='warehouse'?' selected':'')+'>From warehouse — hidden from portal</option><option value="po"'+(src==='po'?' selected':'')+'>Direct-to-Client PO — hidden from portal</option></select>'+(src==='po'?'<div style="margin-top:4px;position:relative">'+(po?'<span style="background:var(--pos-bg);color:var(--pos);border:1px solid var(--pos);border-radius:8px;padding:1px 8px;font-weight:700;font-size:11px">📦 '+esc(po)+'</span> <a class="samp-ful-poclr" style="cursor:pointer;color:var(--neg);font-size:10px;margin-left:6px">change</a>':'<input class="fci txt samp-ful-posearch" placeholder="🔍 link a PO…" autocomplete="off" style="width:270px"><div class="samp-ful-pores"></div>')+'</div>':'');
+              var sel=wrap.querySelector('.samp-ful-src'); if(sel)sel.onchange=function(){ src=sel.value; if(src!=='po')po=''; save(); draw(); };
+              var clr=wrap.querySelector('.samp-ful-poclr'); if(clr)clr.onclick=function(){ po=''; draw(); };
+              var si=wrap.querySelector('.samp-ful-posearch'), rb=wrap.querySelector('.samp-ful-pores');
+              if(si)si.oninput=debounce(function(){ var q=si.value.trim(); if(q.length<2){ if(rb)rb.innerHTML=''; return; } fetch('/api/supply/po-search?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(ms){ if(!rb)return; if(!Array.isArray(ms)||!ms.length){ rb.innerHTML='<div class="mut tiny">no matching PO</div>'; return; } rb.innerHTML='<div style="position:absolute;z-index:30;min-width:280px;border:1px solid var(--line);border-radius:6px;max-height:170px;overflow:auto;background:var(--card);box-shadow:0 8px 22px rgba(15,23,42,.15)">'+ms.map(function(p,i){ return '<div class="samp-ful-pick" data-i="'+i+'" style="padding:4px 8px;cursor:pointer;font-size:11px;border-bottom:1px solid var(--hover)"><b>'+esc(p.po)+'</b> <span class="mut">'+esc([p.supplier_name,p.branch,p.status].filter(Boolean).join(' · '))+'</span></div>'; }).join('')+'</div>'; rb.querySelectorAll('.samp-ful-pick').forEach(function(el){ el.onclick=function(){ po=ms[el.dataset.i].po; save(); draw(); }; }); }).catch(function(){}); },250); }
             draw(); })();
           box.querySelectorAll('.samp-purpose').forEach(function(cb){ cb.onchange=function(){ var arr=Array.prototype.map.call(box.querySelectorAll('.samp-purpose:checked'),function(x){return x.value;}); s.purpose=arr; shipPost(ep,{purpose:arr},function(){}); }; });
           renderSlines();
