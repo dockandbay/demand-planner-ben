@@ -14132,6 +14132,9 @@ app.post('/api/supply/sample/:id', async (req, res) => {   // patch fields (admi
   // v27.690 (Ben #2): recipients is jsonb — update it explicitly (the generic patch below handles the flat fields).
   if (b.recipients !== undefined) { try { await pool.query(`UPDATE planner.sample_requests SET recipients=$2::jsonb WHERE id=$1::bigint`, [id, sampleRecipientsJson(b.recipients)]); } catch (e) { log500(e); } }
   if (b.internal_stakeholders !== undefined) { try { await pool.query(`UPDATE planner.sample_requests SET internal_stakeholders=$2::jsonb WHERE id=$1::bigint`, [id, sampleStakeholdersJson(b.internal_stakeholders)]); } catch (e) { log500(e); } }   // v27.691 (Ben)
+  // v27.694 (Ben fix): a jsonb-only save (recipients / internal_stakeholders) has no flat SAMPLE_FIELDS to patch —
+  // the explicit updates above already applied, so return OK instead of letting patch() 400 with "no editable fields".
+  if (!Object.keys(b).some(k => SAMPLE_FIELDS[k] !== undefined)) { try { invalidateSupplyCaches(); } catch (e) {} return res.json({ ok: true }); }
   // Detect a transition INTO shipped so we can email the notify-stakeholders (read prior state before the update).
   let _pre = null;
   if (b.status && /ship|complete/i.test(String(b.status))) {

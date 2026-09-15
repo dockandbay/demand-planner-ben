@@ -11667,10 +11667,6 @@
         // v27.690 (Ben #2): show the free-text recipients (name · phone · address) captured at creation.
         var _recArr=Array.isArray(s.recipients)?s.recipients:[];
         if(_recArr.length) recip += L('Recipients')+'<div class="tiny" style="line-height:1.45">'+_recArr.map(function(t){ return '<div style="border-left:2px solid var(--line2);padding:1px 0 1px 7px;margin-top:4px;white-space:pre-wrap">'+esc(t)+'</div>'; }).join('')+'</div>';
-        // v27.691 (Ben): internal stakeholders — editable inline (pills + add from any Horizon user) → ⭐ My samples.
-        recip += L('Internal stakeholders')+'<div class="samp-stakes-wrap"></div>';
-        // v27.692 (Ben): fulfilment source — supplier / warehouse / linked DTC PO (editable inline).
-        recip += L('Fulfilment')+'<div class="samp-ful-wrap"></div>';
         var purpose = editing
           ? '<div style="margin-top:2px">'+PURP.map(function(p){return '<label style="margin-right:10px;font-size:11px;white-space:nowrap"><input type="checkbox" class="samp-purpose" value="'+p+'"'+(((s.purpose||[]).indexOf(p)>=0)?' checked':'')+'> '+p+'</label>';}).join('')+'</div>'
           : '<div class="tiny">'+esc((s.purpose||[]).join(', ')||'—')+'</div>';
@@ -11739,7 +11735,7 @@
             +'<div style="margin-top:10px">'+actBtn+' <button class="save-btn light samp-del" data-id="'+id+'" style="color:var(--neg)">Delete</button></div></div>'
           +'</div>';   // ← close left column
         var _colR='<div style="display:grid;gap:14px;align-items:start;min-width:0">'   // right column: Other details (Notes) then SKUs directly under it (Ben)
-          +'<div style="'+_scard+'"><div class="sect-h">Other details</div>'+L('Purpose')+purpose+L('Notes')+notes+'</div>'
+          +'<div style="'+_scard+'"><div class="sect-h">Other details</div>'+L('Fulfilment')+'<div class="samp-ful-wrap"></div>'+L('Internal stakeholders')+'<div class="samp-stakes-wrap"></div>'+L('Purpose')+purpose+L('Notes')+notes+'</div>'
           +'<div style="'+_scard+'"><div class="sect-h">SKUs &amp; quantities</div>'+skus+'</div>'
           +'</div>';
         var detailsPanel='<div class="samp-details-grid" style="display:grid;gap:14px;align-items:start">'+_colL+_colR+'</div>';

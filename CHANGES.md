@@ -1,3 +1,8 @@
+## v27.694 Fix: stakeholder save error + move Fulfilment/stakeholders to Other details in the detail (Ben) — SERVER + CLIENT
+- **Fix "no editable fields"** — adding a stakeholder on the sample **detail** posted only `internal_stakeholders` (a jsonb field, not in the flat `SAMPLE_FIELDS` whitelist), so after the explicit update `patch()` 400'd with "no editable fields". `/api/supply/sample/:id` now returns `{ok:true}` when the body has only jsonb fields (recipients / internal_stakeholders) — the explicit updates already applied.
+- **Detail layout** — moved **Fulfilment** and **Internal stakeholders** out of the "Recipient & address" card to the **top of the "Other details" card** (matching the create form).
+- server.mjs + inject.html. No migration, no buy impact.
+
 ## v27.693 Samples form polish: search-style stakeholder picker + richer PO link (Ben) — SERVER + CLIENT
 - **Stakeholder picker** — swapped the big datalist for a **slick search filter** (type → matching users in a dropdown → click to add), like the PO search. Applies to both the New-sample form and the sample detail.
 - **PO link shows more** — the fulfilment-PO search results and the selected chip now show the PO's **status · supplier · likely ship date · arrival date** (`po-search` enriched with `ship_date` = supplier_ship_date/end-production, `arrival_date` = delivery/landing override). The detail view fetches the linked PO's meta on load.
