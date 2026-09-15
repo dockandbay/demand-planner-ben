@@ -3559,7 +3559,9 @@ app.get('/api/supply/paperstore-labels/:po', async (req, res) => {
 app.get('/api/supply/po-search', async (req, res) => {
   const q = String(req.query.q || '').trim();
   try { const rows = (await pool.query(`SELECT po, coalesce(supplier_name,'') supplier_name, coalesce(country_code,'') country, coalesce(branch,'') branch, coalesce(status,'') status,
-        coalesce(batch_id,'') batch_id, coalesce(prod_no,'') prod_no, to_char(start_production,'YYYY-MM-DD') order_date
+        coalesce(batch_id,'') batch_id, coalesce(prod_no,'') prod_no, to_char(start_production,'YYYY-MM-DD') order_date,
+        to_char(coalesce(supplier_ship_date, end_production_overide),'YYYY-MM-DD') ship_date,
+        to_char(coalesce(delivery_date_overide, landing_date_overide),'YYYY-MM-DD') arrival_date
       FROM planner.purchase_orders
       WHERE $1 = '' OR po ILIKE '%'||$1||'%' OR supplier_name ILIKE '%'||$1||'%' OR coalesce(prod_no,'') ILIKE '%'||$1||'%' OR coalesce(batch_id,'') ILIKE '%'||$1||'%' OR coalesce(client,'') ILIKE '%'||$1||'%'
       ORDER BY created_at DESC NULLS LAST, po DESC LIMIT 40`, [q])).rows;

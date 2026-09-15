@@ -1,3 +1,9 @@
+## v27.693 Samples form polish: search-style stakeholder picker + richer PO link (Ben) — SERVER + CLIENT
+- **Stakeholder picker** — swapped the big datalist for a **slick search filter** (type → matching users in a dropdown → click to add), like the PO search. Applies to both the New-sample form and the sample detail.
+- **PO link shows more** — the fulfilment-PO search results and the selected chip now show the PO's **status · supplier · likely ship date · arrival date** (`po-search` enriched with `ship_date` = supplier_ship_date/end-production, `arrival_date` = delivery/landing override). The detail view fetches the linked PO's meta on load.
+- **Layout** — moved **Fulfilment** and **Internal stakeholders** to the top of the form's **"Other details"** section (Ben).
+- inject.html + `po-search` SELECT only. No migration, no buy impact.
+
 ## v27.692 Samples: fulfilment source (warehouse / DTC PO) hidden from the portal (Ben) — SERVER + CLIENT + MIGRATION
 - A sample now has a **Fulfilment** source: **Supplier** (default — makes & ships, shows on the supplier portal), **From warehouse** (D&B ships from stock), or **From a Direct-to-Client PO** (linked to a real PO via a searchable picker, `/api/supply/po-search`).
 - **Warehouse- and PO-fulfilled samples are hidden from the supplier portal** but fully **tracked in SUPPLY ▸ Samples** — the grid shows a **🏭 warehouse** / **📦 <PO>** badge (the PO badge deep-links to the PO drawer), and the detail view has an inline fulfilment editor.
