@@ -11430,12 +11430,16 @@
       var rd=new FileReader(); rd.onload=function(){ fetch('/api/supply/quality-doc',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({doc_type:document.getElementById('qc-type').value, filename:f.name, mime:f.type||'application/octet-stream', data_base64:String(rd.result), prod_no:prod||null, batch_id:batch||null, po:po||null, supplier_name:document.getElementById('qc-sup').value.trim()||null})}).then(function(r){return r.json();}).then(function(j){ btn.disabled=false; if(j&&j.error){ msg.textContent='Error: '+j.error; return; } msg.textContent='Uploaded ✓'; ['qc-prod','qc-batch','qc-po','qc-sup'].forEach(function(id){document.getElementById(id).value='';}); document.getElementById('qc-file').value=''; draw(); }).catch(function(e){ btn.disabled=false; msg.textContent='Upload failed'; }); }; rd.readAsDataURL(f); };
     draw();
   }
+  // v27.691 (Ben): Horizon users for the sample internal-stakeholders picker (cached for the session).
+  var _hzUsers=null;
+  function loadHzUsers(cb){ if(_hzUsers){cb(_hzUsers);return;} fetch('/api/supply/all-users').then(function(r){return r.json();}).then(function(d){ _hzUsers=Array.isArray(d)?d:[]; cb(_hzUsers); }).catch(function(){ cb([]); }); }
+  function _isMySample(r){ var me=((window.ME&&ME.email)||'').toLowerCase(); if(!me)return false; var a=r&&r.internal_stakeholders; return (Array.isArray(a)?a:[]).some(function(x){return String(x).toLowerCase()===me;}); }
   function renderSamples(data){ var c=document.getElementById('supply-content'); var _tk=_navToken; fetchLookups(function(){ if(_tk!==_navToken)return; samplesInner(data,c); }); }
   function samplesInner(rows,c){
     var st={f:(_pendingSampleRef?'all':'open'),q:''};   // when deep-linking/navigating to a specific sample, show 'all' so it's not filtered out
     function cur(){ return rows.filter(function(r){ if(st.q){ var hay=((r.ref||'')+' '+(r.supplier_name||'')+' '+(r.recipient_company||'')+' '+(r.recipient_name||'')+' '+Object.keys(r.cur_lines||{}).join(' ')).toLowerCase(); if(hay.indexOf(st.q)<0)return false; }   // includes the sample's SKUs
-      if(st.f==='all')return true; if(st.f==='completed')return _sampNormStatus(r.status)==='COMPLETED'; return r.is_open; }); }   // OPEN = future/production (+ anything with an action, via is_open); COMPLETED = completed; ALL = everything
-    var FILT=[['open','Open'],['completed','Completed'],['all','All']];
+      if(st.f==='all')return true; if(st.f==='mine')return _isMySample(r); if(st.f==='completed')return _sampNormStatus(r.status)==='COMPLETED'; return r.is_open; }); }   // OPEN = future/production; MINE = I'm an internal stakeholder; COMPLETED = completed; ALL = everything
+    var FILT=[['open','Open'],['completed','Completed'],['all','All'],['mine','⭐ My samples']];
     function rowHTML(r,i){
       var _sa=sampActions(r);   // active (non-snoozed) exceptions → red count badge + snooze popover
       var actFlag=_sa.length?' <button class="samp-act-badge ex-badge" style="cursor:pointer;border:none" data-ref="'+esc(r.ref||'')+'" data-allacts="'+esc(sampActionsAll(r).join(','))+'" data-note="'+esc(_sa.length+' action item'+(_sa.length>1?'s':'')+' — '+_sa.map(function(k){return (SAMP_ACT_LABEL[k]||k).split(' — ')[0];}).join('; ')+' (click to snooze / open)')+'">'+_sa.length+'</button>':'';
@@ -11486,7 +11490,8 @@
         +R('Completion required', dateField('',{cls:'sf-completion', width:'130px'}))
         +R('Purpose',purp)
         +R('Notes','<textarea class="fci sf-notes" rows="2" style="width:320px;text-align:left"></textarea>')
-        +R('Email when shipped <span class="mut tiny">(stakeholders)</span>','<input class="fci txt sf-notify_emails" placeholder="email, email… (comma-separated)" style="width:320px"><div class="sf-notify-err mut tiny" style="color:var(--neg);margin-top:2px"></div>')
+        +R('Email when shipped','<input class="fci txt sf-notify_emails" placeholder="email, email… (comma-separated)" style="width:320px"><div class="sf-notify-err mut tiny" style="color:var(--neg);margin-top:2px"></div>')
+        +R('Internal stakeholders <span class="mut tiny">(→ ⭐ My samples)</span>','<div class="sf-stakes-pills" style="margin-bottom:3px"></div><input class="fci txt sf-stake-in" list="sf-stake-dl" placeholder="add a Horizon user — name / email…" autocomplete="off" style="width:300px"><datalist id="sf-stake-dl"></datalist><div class="mut tiny" style="margin-top:2px">Selected Horizon users see this sample under the <b>⭐ My samples</b> filter.</div>')
         +'<div style="margin-top:12px;border-top:1px solid var(--line2);padding-top:10px"><button class="save-btn sf-save" style="background:var(--pos);border-color:var(--pos);color:#fff;font-weight:700">Create sample request</button> <button class="save-btn light sf-cancel">Cancel</button></div></div>';
       var lines=[];
       // v27.690 (Ben #2): repeatable free-text recipients (name · international phone · full address).
@@ -11498,6 +11503,13 @@
         w.querySelectorAll('.sf-recip-rm').forEach(function(a){ a.onclick=function(){ recips.splice(parseInt(a.dataset.i,10),1); renderRecips(); }; }); }
       var _recAdd=box.querySelector('.sf-recip-add'); if(_recAdd)_recAdd.onclick=function(){ recips.push(''); renderRecips(); var ts=box.querySelectorAll('.sf-recip'); if(ts.length)ts[ts.length-1].focus(); };
       renderRecips();
+      // v27.691 (Ben): internal stakeholders (Horizon users) — pick from any user; they get the ⭐ My samples filter.
+      var stakes=[];
+      function renderStakes(){ var w=box.querySelector('.sf-stakes-pills'); if(!w)return; w.innerHTML=stakes.map(function(e,i){ return '<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;background:var(--hover);border:1px solid var(--line);border-radius:10px;padding:1px 8px;margin:0 4px 3px 0">'+esc(e)+'<a class="sf-stake-rm" data-i="'+i+'" title="remove" style="cursor:pointer;color:var(--neg);font-weight:800">×</a></span>'; }).join('');
+        w.querySelectorAll('.sf-stake-rm').forEach(function(a){ a.onclick=function(){ stakes.splice(parseInt(a.dataset.i,10),1); renderStakes(); }; }); }
+      loadHzUsers(function(us){ var dl=box.querySelector('#sf-stake-dl'); if(dl)dl.innerHTML=(us||[]).map(function(u){ return '<option value="'+esc(u.email)+'">'+esc(u.handle||u.email)+'</option>'; }).join(''); });
+      var _stIn=box.querySelector('.sf-stake-in'); if(_stIn)_stIn.onchange=function(){ var v=(this.value||'').trim().toLowerCase(); if(v&&/.+@.+\..+/.test(v)&&stakes.indexOf(v)<0){ stakes.push(v); renderStakes(); } this.value=''; };
+      renderStakes();
       function renderLines(){ var w=box.querySelector('.sf-lines'); if(!lines.length){ w.innerHTML='<div class="mut tiny" style="padding:2px 0">No SKUs added yet — search above, or paste from a spreadsheet.</div>'; return; }
         w.innerHTML=lines.map(function(l,i){return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:3px"><input class="fci txt sf-lsku" data-i="'+i+'" placeholder="SKU" value="'+esc(l.sku)+'" style="width:200px"><input class="fci sf-lqty" data-i="'+i+'" placeholder="qty" value="'+esc(l.qty)+'" style="width:60px;text-align:left">'+(l.dev?' <span class="tool-badge bg-blue" style="font-size:9px">dev</span>':'')+' <a class="sf-lrm" data-i="'+i+'" style="color:var(--neg);cursor:pointer">×</a>'+(l.dev?' <a class="sf-lgo" data-ref="'+esc(String(l.sku).replace(/_v\d+$/,''))+'" title="open this product\x27s tab" style="color:var(--blue);cursor:pointer;font-size:11px;text-decoration:none">↗ product</a>':'')+'</div>';}).join('');
         w.querySelectorAll('.sf-lsku').forEach(function(x){x.onchange=function(){lines[x.dataset.i].sku=x.value;};});
@@ -11562,6 +11574,7 @@
           postcode:V('postcode')||null, country:(V('country')||'').toUpperCase()||null, phone:V('phone')||null,
           completion_date_required:(V('completion')?(parseDateLoose(V('completion'))||null):null), notes:V('notes')||null,
           recipients:recips.map(function(s){return String(s||'').trim();}).filter(Boolean),
+          internal_stakeholders:stakes,
           lines:lines.filter(function(l){return l.sku&&l.sku.trim();}).map(function(l){return {sku:l.sku.trim(),qty:Number(l.qty)||0};}) };
         btn.disabled=true; shipPost('/api/supply/sample-create',body,function(j){ if(j&&j.error){alert('Failed: '+j.error);btn.disabled=false;return;} box.dataset.open=''; box.innerHTML=''; if(j&&j.ref){ _pendingSampleRef=j.ref; st.f='all'; } reload(); if(j&&j.ref)_sampToast('✓ '+j.ref+' created'); }); };
       bindDatePickers();
@@ -11642,6 +11655,8 @@
         // v27.690 (Ben #2): show the free-text recipients (name · phone · address) captured at creation.
         var _recArr=Array.isArray(s.recipients)?s.recipients:[];
         if(_recArr.length) recip += L('Recipients')+'<div class="tiny" style="line-height:1.45">'+_recArr.map(function(t){ return '<div style="border-left:2px solid var(--line2);padding:1px 0 1px 7px;margin-top:4px;white-space:pre-wrap">'+esc(t)+'</div>'; }).join('')+'</div>';
+        // v27.691 (Ben): internal stakeholders — editable inline (pills + add from any Horizon user) → ⭐ My samples.
+        recip += L('Internal stakeholders')+'<div class="samp-stakes-wrap"></div>';
         var purpose = editing
           ? '<div style="margin-top:2px">'+PURP.map(function(p){return '<label style="margin-right:10px;font-size:11px;white-space:nowrap"><input type="checkbox" class="samp-purpose" value="'+p+'"'+(((s.purpose||[]).indexOf(p)>=0)?' checked':'')+'> '+p+'</label>';}).join('')+'</div>'
           : '<div class="tiny">'+esc((s.purpose||[]).join(', ')||'—')+'</div>';
@@ -11761,6 +11776,14 @@
               fetch('/api/supply/sample-addresses?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(ms){ if(!ms||!ms.length){mb.innerHTML='<div class="mut tiny">no matches</div>';return;}
                 mb.innerHTML='<div style="position:absolute;z-index:30;min-width:240px;border:1px solid var(--line);border-radius:6px;max-height:160px;overflow:auto;background:var(--card);margin-top:3px;box-shadow:0 8px 22px rgba(15,23,42,.15)">'+ms.map(function(a,i){return '<div class="samp-addrpick" data-i="'+i+'" style="padding:4px 8px;cursor:pointer;font-size:11px;border-bottom:1px solid var(--hover)">'+esc(a.recipient_company||'')+' · '+esc(((a.first_name||'')+' '+(a.last_name||'')).trim())+' <span class="mut">'+esc([a.city,a.country].filter(Boolean).join(', '))+'</span></div>';}).join('')+'</div>';
                 mb.querySelectorAll('.samp-addrpick').forEach(function(el){ el.onclick=function(){ var a=ms[el.dataset.i], body={}; ['recipient_company','first_name','last_name','address_line1','address_line2','city','region','postcode','country','phone'].forEach(function(k){ body[k]=a[k]||''; s[k]=a[k]||''; }); mb.innerHTML=''; as.value=''; shipPost(ep,body,function(){ paint(); }); }; }); }).catch(function(){}); },250); })();
+          // v27.691 (Ben): internal stakeholders editor — pills + add from any Horizon user; saves to the sample.
+          (function(){ var wrap=box.querySelector('.samp-stakes-wrap'); if(!wrap)return; var _dst=(Array.isArray(s.internal_stakeholders)?s.internal_stakeholders.slice():[]);
+            function saveSt(){ s.internal_stakeholders=_dst.slice(); shipPost(ep,{internal_stakeholders:_dst},function(){}); }
+            function draw(){ wrap.innerHTML='<div style="line-height:1.6">'+(_dst.length?_dst.map(function(e,i){ return '<span style="display:inline-flex;align-items:center;gap:4px;font-size:11px;background:var(--hover);border:1px solid var(--line);border-radius:10px;padding:1px 8px;margin:0 4px 3px 0">⭐ '+esc(e)+'<a class="samp-st-rm" data-i="'+i+'" title="remove" style="cursor:pointer;color:var(--neg);font-weight:800">×</a></span>'; }).join(''):'<span class="mut tiny">none</span>')+'</div><input class="fci txt samp-st-in" list="samp-st-dl" placeholder="add a Horizon user…" autocomplete="off" style="width:240px;margin-top:3px"><datalist id="samp-st-dl"></datalist>';
+              loadHzUsers(function(us){ var dl=wrap.querySelector('#samp-st-dl'); if(dl)dl.innerHTML=(us||[]).map(function(u){ return '<option value="'+esc(u.email)+'">'+esc(u.handle||u.email)+'</option>'; }).join(''); });
+              wrap.querySelectorAll('.samp-st-rm').forEach(function(a){ a.onclick=function(){ _dst.splice(parseInt(a.dataset.i,10),1); draw(); saveSt(); }; });
+              var inp=wrap.querySelector('.samp-st-in'); if(inp)inp.onchange=function(){ var v=(this.value||'').trim().toLowerCase(); this.value=''; if(v&&/.+@.+\..+/.test(v)&&_dst.indexOf(v)<0){ _dst.push(v); draw(); saveSt(); } }; }
+            draw(); })();
           box.querySelectorAll('.samp-purpose').forEach(function(cb){ cb.onchange=function(){ var arr=Array.prototype.map.call(box.querySelectorAll('.samp-purpose:checked'),function(x){return x.value;}); s.purpose=arr; shipPost(ep,{purpose:arr},function(){}); }; });
           renderSlines();
           // add SKUs via the SAME multi-select search picker as "add new sample" (search → tick + qty → + Add selected)

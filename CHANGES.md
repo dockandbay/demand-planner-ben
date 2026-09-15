@@ -1,3 +1,8 @@
+## v27.691 Samples: internal stakeholders + "My samples" filter (Ben) — SERVER + CLIENT + MIGRATION
+- **Internal stakeholders** — the New-sample form (and the sample detail) gains an **Internal stakeholders** section (under "Email when shipped") to pick **any Horizon user** (type-ahead from a datalist of all users) as a follower. Stored as an email array; sanitised (lower-cased, deduped, validated, cap 50).
+- **⭐ My samples pill** — SUPPLY ▸ Samples grid gains a **My samples** filter that shows only samples where the logged-in user (`window.ME.email`) is an internal stakeholder.
+- **Migration `274_sample_internal_stakeholders.sql`** — adds `internal_stakeholders jsonb NOT NULL DEFAULT '[]'` to `planner.sample_requests` (additive; sandbox applied, **Diviyaj runs 274 on live**). New endpoint `GET /api/supply/all-users` (all app_permissions emails). server: create/detail/grid-read/edit wired. Verified round-trip (create with stakeholders → sanitised → shown in detail + grid). No buy impact.
+
 ## v27.690 Sample requests: multiple free-text recipients (Ben #2) — SERVER + CLIENT + MIGRATION
 - **#2** — a sample request can now record **multiple recipients**, each a **plain multi-line text box** (hint: name · international phone number · full address), added under the recipient country. The New-sample form gains a "Recipients" section with **+ add recipient** and a **×** per box; the detail view lists them.
 - **Migration `273_sample_request_recipients.sql`** — adds `recipients jsonb NOT NULL DEFAULT '[]'` to `planner.sample_requests` (additive; applied to sandbox, **Diviyaj runs 273 on live**). The existing single structured recipient + shared `country` are unchanged.
