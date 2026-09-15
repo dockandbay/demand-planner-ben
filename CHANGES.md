@@ -1,3 +1,8 @@
+## v27.690 Sample requests: multiple free-text recipients (Ben #2) — SERVER + CLIENT + MIGRATION
+- **#2** — a sample request can now record **multiple recipients**, each a **plain multi-line text box** (hint: name · international phone number · full address), added under the recipient country. The New-sample form gains a "Recipients" section with **+ add recipient** and a **×** per box; the detail view lists them.
+- **Migration `273_sample_request_recipients.sql`** — adds `recipients jsonb NOT NULL DEFAULT '[]'` to `planner.sample_requests` (additive; applied to sandbox, **Diviyaj runs 273 on live**). The existing single structured recipient + shared `country` are unchanged.
+- server.mjs: `sample-create` inserts recipients, `sample-detail` returns them, `sample/:id` edit updates the jsonb explicitly. inject.html: create-form section + detail display. Verified round-trip (create 2 recipients → read back multi-line intact). No buy impact.
+
 ## v27.689 Sample batch review: collapsible products + past-sample section (Ben #9) — SERVER + CLIENT
 - **#9** — the batch review is now organised as **collapsible product groups**: a full-width header row (caret · swatch · ref · name · stage · "N on batch · M past") replaces the old rowspan Product cell. Click a product header to fold it; **Minimise all / Expand all** buttons fold/unfold everything at once.
 - **Off-batch samples** — a product's other sample versions (not on this shipment) now appear, hidden behind **"▸ show N past samples not on this batch"** and each labelled **"⚠ past sample — not on this batch"** with an open ↗ link. Server returns them flagged `on_batch:false` (was: filtered out).

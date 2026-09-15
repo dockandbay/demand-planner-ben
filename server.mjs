@@ -3577,6 +3577,7 @@ app.get('/api/supply/sample-detail/:id', async (req, res) => {
   try {
     const id = req.params.id;
     const s = (await pool.query(`SELECT id, ref, supplier_id, coalesce(supplier_name,'') supplier_name,
+      coalesce(recipients,'[]'::jsonb) recipients,
       coalesce(recipient_company,'') recipient_company, coalesce(first_name,'') first_name, coalesce(last_name,'') last_name,
       coalesce(address_line1,'') address_line1, coalesce(address_line2,'') address_line2, coalesce(city,'') city,
       coalesce(region,'') region, coalesce(postcode,'') postcode, coalesce(country,'') country, coalesce(phone,'') phone,
@@ -14017,6 +14018,9 @@ const SAMPLE_FIELDS = { supplier_id:'bigint', supplier_name:'text', recipient_co
   // Second recipient + second tracking (migration 167) — a sample can ship to two destinations.
   recipient_company_2:'text', first_name_2:'text', last_name_2:'text', address_line1_2:'text', address_line2_2:'text',
   city_2:'text', region_2:'text', postcode_2:'text', country_2:'text', phone_2:'text', carrier_2:'text', tracking_code_2:'text' };
+// v27.690 (Ben #2): sanitise the free-text recipients array (each = a plain multi-line block: name · phone · address).
+function sampleRecipientsJson(v){ if(!Array.isArray(v)) return '[]';
+  return JSON.stringify(v.map(x => String(x == null ? '' : x).trim()).filter(Boolean).slice(0, 20).map(x => x.slice(0, 2000))); }
 // When tracking is newly set on a sample, drop a timeline note announcing the shipment (an unread
 // notification for the other side). Posted as the supplier (the shipment event).
 async function maybeShippedNote(sampleId, body, authorKind, email){
@@ -14041,11 +14045,11 @@ app.post('/api/supply/sample-create', async (req, res) => {
     if (b.supplier_name && b.supplier_name.trim()) await client.query(   // keep the supplier picker a real dropdown
       `INSERT INTO planner.suppliers(name,kind) SELECT $1,'supplier' WHERE NOT EXISTS (SELECT 1 FROM planner.suppliers WHERE lower(trim(name))=lower(trim($1)))`, [b.supplier_name.trim()]);
     const ins = await client.query(`INSERT INTO planner.sample_requests
-      (supplier_id, supplier_name, recipient_company, first_name, last_name, address_line1, address_line2, city, region, postcode, country, phone, completion_date_required, purpose, notes, created_by, notify_emails, status)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,'FUTURE') RETURNING id`,
+      (supplier_id, supplier_name, recipient_company, first_name, last_name, address_line1, address_line2, city, region, postcode, country, phone, completion_date_required, purpose, notes, created_by, notify_emails, recipients, status)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,'FUTURE') RETURNING id`,
       [b.supplier_id||null, b.supplier_name||null, b.recipient_company||null, b.first_name||null, b.last_name||null,
        b.address_line1||null, b.address_line2||null, b.city||null, b.region||null, b.postcode||null, b.country||null, b.phone||null,
-       b.completion_date_required||null, Array.isArray(b.purpose)?b.purpose:null, b.notes||null, createdByUser||null, b.notify_emails||null]);   // new samples start FUTURE — D&B-only until moved to PRODUCTION
+       b.completion_date_required||null, Array.isArray(b.purpose)?b.purpose:null, b.notes||null, createdByUser||null, b.notify_emails||null, sampleRecipientsJson(b.recipients)]);   // new samples start FUTURE — D&B-only until moved to PRODUCTION
     const id = ins.rows[0].id, ref = 'SR-' + id;
     await client.query(`UPDATE planner.sample_requests SET ref=$1 WHERE id=$2`, [ref, id]);
     for (const l of (Array.isArray(b.lines)?b.lines:[])) { if (!l || !l.sku) continue;
@@ -14114,6 +14118,8 @@ async function sendSampleShippedEmail(ref, emails, tracking, carrier, recipient,
 app.post('/api/supply/sample/:id', async (req, res) => {   // patch fields (admin edits + supplier expected/tracking/carrier)
   const b = req.body || {}, id = req.params.id;
   await logSampleFieldChanges(id, b, authUser(req) || 'Dock & Bay');   // record of change (D&B side)
+  // v27.690 (Ben #2): recipients is jsonb — update it explicitly (the generic patch below handles the flat fields).
+  if (b.recipients !== undefined) { try { await pool.query(`UPDATE planner.sample_requests SET recipients=$2::jsonb WHERE id=$1::bigint`, [id, sampleRecipientsJson(b.recipients)]); } catch (e) { log500(e); } }
   // Detect a transition INTO shipped so we can email the notify-stakeholders (read prior state before the update).
   let _pre = null;
   if (b.status && /ship|complete/i.test(String(b.status))) {

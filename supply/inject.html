@@ -11476,6 +11476,8 @@
         +R('City / Region','<input class="fci txt sf-city" placeholder="city" style="width:145px"> <input class="fci txt sf-region" placeholder="region" style="width:145px">')
         +R('Postcode / Country','<input class="fci txt sf-postcode" placeholder="postcode" style="width:115px"> <input class="fci txt sf-country" placeholder="country" style="width:90px">')
         +R('Phone','<input class="fci txt sf-phone" style="width:180px">')
+        +H('Recipients')
+        +R('Recipients <span class="mut tiny">(add one or more)</span>','<div class="sf-recips"></div><button class="save-btn light sf-recip-add" type="button" style="margin-top:4px">+ add recipient</button><div class="mut tiny" style="margin-top:3px">Each box is one recipient — include <b>name · international phone number · full address</b>.</div>')
         +H('SKUs')
         +R('SKUs','<input class="fci txt sf-skusearch" placeholder="search this supplier’s SKUs — sku / product / colour / season (SS27)…" style="width:360px"><div class="sf-skuresults" style="margin:4px 0"></div>'
           +'<div class="sf-lines"></div>'
@@ -11487,6 +11489,15 @@
         +R('Email when shipped <span class="mut tiny">(stakeholders)</span>','<input class="fci txt sf-notify_emails" placeholder="email, email… (comma-separated)" style="width:320px"><div class="sf-notify-err mut tiny" style="color:var(--neg);margin-top:2px"></div>')
         +'<div style="margin-top:12px;border-top:1px solid var(--line2);padding-top:10px"><button class="save-btn sf-save" style="background:var(--pos);border-color:var(--pos);color:#fff;font-weight:700">Create sample request</button> <button class="save-btn light sf-cancel">Cancel</button></div></div>';
       var lines=[];
+      // v27.690 (Ben #2): repeatable free-text recipients (name · international phone · full address).
+      var recips=[];
+      function renderRecips(){ var w=box.querySelector('.sf-recips'); if(!w)return;
+        if(!recips.length){ w.innerHTML='<div class="mut tiny" style="padding:2px 0">No recipients added yet.</div>'; return; }
+        w.innerHTML=recips.map(function(r,i){ return '<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:5px"><textarea class="fci sf-recip" data-i="'+i+'" rows="3" placeholder="Name&#10;International phone number&#10;Full address" style="width:340px;text-align:left;resize:vertical">'+esc(r)+'</textarea><a class="sf-recip-rm" data-i="'+i+'" title="remove recipient" style="color:var(--neg);cursor:pointer;font-weight:800;margin-top:4px">×</a></div>'; }).join('');
+        w.querySelectorAll('.sf-recip').forEach(function(t){ t.oninput=function(){ recips[t.dataset.i]=t.value; }; });
+        w.querySelectorAll('.sf-recip-rm').forEach(function(a){ a.onclick=function(){ recips.splice(parseInt(a.dataset.i,10),1); renderRecips(); }; }); }
+      var _recAdd=box.querySelector('.sf-recip-add'); if(_recAdd)_recAdd.onclick=function(){ recips.push(''); renderRecips(); var ts=box.querySelectorAll('.sf-recip'); if(ts.length)ts[ts.length-1].focus(); };
+      renderRecips();
       function renderLines(){ var w=box.querySelector('.sf-lines'); if(!lines.length){ w.innerHTML='<div class="mut tiny" style="padding:2px 0">No SKUs added yet — search above, or paste from a spreadsheet.</div>'; return; }
         w.innerHTML=lines.map(function(l,i){return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:3px"><input class="fci txt sf-lsku" data-i="'+i+'" placeholder="SKU" value="'+esc(l.sku)+'" style="width:200px"><input class="fci sf-lqty" data-i="'+i+'" placeholder="qty" value="'+esc(l.qty)+'" style="width:60px;text-align:left">'+(l.dev?' <span class="tool-badge bg-blue" style="font-size:9px">dev</span>':'')+' <a class="sf-lrm" data-i="'+i+'" style="color:var(--neg);cursor:pointer">×</a>'+(l.dev?' <a class="sf-lgo" data-ref="'+esc(String(l.sku).replace(/_v\d+$/,''))+'" title="open this product\x27s tab" style="color:var(--blue);cursor:pointer;font-size:11px;text-decoration:none">↗ product</a>':'')+'</div>';}).join('');
         w.querySelectorAll('.sf-lsku').forEach(function(x){x.onchange=function(){lines[x.dataset.i].sku=x.value;};});
@@ -11550,6 +11561,7 @@
           address_line1:V('address_line1')||null, address_line2:V('address_line2')||null, city:V('city')||null, region:V('region')||null,
           postcode:V('postcode')||null, country:(V('country')||'').toUpperCase()||null, phone:V('phone')||null,
           completion_date_required:(V('completion')?(parseDateLoose(V('completion'))||null):null), notes:V('notes')||null,
+          recipients:recips.map(function(s){return String(s||'').trim();}).filter(Boolean),
           lines:lines.filter(function(l){return l.sku&&l.sku.trim();}).map(function(l){return {sku:l.sku.trim(),qty:Number(l.qty)||0};}) };
         btn.disabled=true; shipPost('/api/supply/sample-create',body,function(j){ if(j&&j.error){alert('Failed: '+j.error);btn.disabled=false;return;} box.dataset.open=''; box.innerHTML=''; if(j&&j.ref){ _pendingSampleRef=j.ref; st.f='all'; } reload(); if(j&&j.ref)_sampToast('✓ '+j.ref+' created'); }); };
       bindDatePickers();
@@ -11627,6 +11639,9 @@
             +'<div style="margin-bottom:3px">'+fld('phone',s.phone,150,'phone')+'</div>'
             +'<div style="margin-bottom:3px">'+fld('notify_emails',s.notify_emails,240,'📧 email when shipped (comma-separated)')+'</div>'
           : '<div class="tiny" style="line-height:1.65"><b>'+esc(s.recipient_company||'—')+'</b>'+(((s.first_name||'')+' '+(s.last_name||'')).trim()?'<br>'+esc(((s.first_name||'')+' '+(s.last_name||'')).trim()):'')+(addr?'<br>'+esc(addr):'')+(s.phone?'<br>☏ '+esc(s.phone):'')+(s.notify_emails?'<br><span class="mut">📧 shipped-notify: '+esc(s.notify_emails)+'</span>':'')+'</div>';
+        // v27.690 (Ben #2): show the free-text recipients (name · phone · address) captured at creation.
+        var _recArr=Array.isArray(s.recipients)?s.recipients:[];
+        if(_recArr.length) recip += L('Recipients')+'<div class="tiny" style="line-height:1.45">'+_recArr.map(function(t){ return '<div style="border-left:2px solid var(--line2);padding:1px 0 1px 7px;margin-top:4px;white-space:pre-wrap">'+esc(t)+'</div>'; }).join('')+'</div>';
         var purpose = editing
           ? '<div style="margin-top:2px">'+PURP.map(function(p){return '<label style="margin-right:10px;font-size:11px;white-space:nowrap"><input type="checkbox" class="samp-purpose" value="'+p+'"'+(((s.purpose||[]).indexOf(p)>=0)?' checked':'')+'> '+p+'</label>';}).join('')+'</div>'
           : '<div class="tiny">'+esc((s.purpose||[]).join(', ')||'—')+'</div>';
