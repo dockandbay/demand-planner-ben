@@ -7225,7 +7225,9 @@ app.get('/api/product/batch-review/:id', async (req, res) => {
         productSampleList(ref, { skipFeedbackNotes: true }),
       ]);
       const it = itR.rows[0], comps = compsR.rows;
-      const samples = samplesAll.filter(x => ids.has(String(x.id)));
+      // v27.689 (Ben #9): keep the product's OTHER sample versions too, flagged on_batch=false, so the review can
+      // show them collapsed as "past sample not on this batch" for context (was: filtered out entirely).
+      const samples = samplesAll.map(x => Object.assign(x, { on_batch: ids.has(String(x.id)) }));
       const j = (it && it.j) || {};
       return { ref, name: j.description || '', colour_name: j.colour_name || '', supplier: j.supplier || '', stage: j.stage || '', season: j.season || '', category: j.category || '', status: j.status || '', product_type: j.type || '',
         components: comps.map(c => ({ key: c.dimension || ('c' + c.id), name: c.name })), samples };

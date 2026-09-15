@@ -1,3 +1,8 @@
+## v27.689 Sample batch review: collapsible products + past-sample section (Ben #9) — SERVER + CLIENT
+- **#9** — the batch review is now organised as **collapsible product groups**: a full-width header row (caret · swatch · ref · name · stage · "N on batch · M past") replaces the old rowspan Product cell. Click a product header to fold it; **Minimise all / Expand all** buttons fold/unfold everything at once.
+- **Off-batch samples** — a product's other sample versions (not on this shipment) now appear, hidden behind **"▸ show N past samples not on this batch"** and each labelled **"⚠ past sample — not on this batch"** with an open ↗ link. Server returns them flagged `on_batch:false` (was: filtered out).
+- All existing per-aspect feedback / sign-off / reject-reason / upload wiring is unchanged (same element classes). server.mjs + inject.html, no migration, no buy impact.
+
 ## v27.688 Sample batch review: faster load + product swatch (Ben #8 + part of #9) — SERVER + CLIENT
 - **#8 Performance** — `/api/product/batch-review/:id` was an N+1: it looped every product serially, 3 queries each, and `productSampleList` ran a per-sample `supplier_notes` body-`LIKE` scan (`feedback_notes`) the batch view never uses. Now: `productSampleList` takes `{skipFeedbackNotes}` (drops the LIKE scan for batch), the three per-product lookups run concurrently, and products fan out in parallel (pg pool queues, so it's throughput-bound). Warm load ~2.1s → ~1.3s on the sandbox pooler (bigger win on prod's faster DB), and much less DB CPU.
 - **#9 (part) Swatch** — the batch-review Product cell now shows the product **swatch image** to the left of the ref/name (reuses `/api/product/swatch/<ref>`, hidden if none).
