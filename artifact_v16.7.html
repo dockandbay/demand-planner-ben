@@ -15130,6 +15130,7 @@ function render3plInvoice(body){
         if(h.freight!=null||h.fulfilment!=null||h.total!=null){ html+='<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;margin:2px 0 6px">'
           +(h.freight!=null?'<span>Freight (Shipping Fee): <b>'+fmt(h.freight)+'</b></span>':'')
           +(h.fulfilment!=null?'<span>Fulfilment (Excl Shipping): <b>'+fmt(h.fulfilment)+'</b></span>':'')
+          +(h.consumables!=null?'<span title="iFulfilment Consumables Cost column. From the Aug-26 export it already sits inside Total Excl Shipping, so it is not added again; older exports kept it outside and it is added to the sheet total + each order\'s fulfilment.">Consumables: <b>'+fmt(h.consumables)+'</b> <span class="mut">('+(h.consumablesInside===true?'inside Excl Shipping — not added again':(h.consumablesInside===false?'outside — added to total':'layout unrecognised — added'))+')</span></span>':'')   // v27.696
           +(h.total!=null?'<span>Total: <b>'+fmt(h.total)+'</b></span>':'')+'</div>'; }
         var nums=(sh.columns||[]).filter(function(c){return c.numeric;});
         if(nums.length){ html+='<table style="border-collapse:collapse;font-size:11px;margin-bottom:2px"><tbody>';

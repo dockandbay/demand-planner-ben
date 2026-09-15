@@ -8802,6 +8802,24 @@ function _tplNum(v) {
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
 }
+// iFulfilment's order sheet carries a separate "Consumables Cost" column. Up to Jul-26 it sat OUTSIDE "Total Excl
+// Shipping" / "Total Cost" (so v27.258 folded it in); from the Aug-26 export it is INSIDE "Total Excl Shipping",
+// and folding again double-counts it (Aug-26: +€1,340.78 vs INV-192928). Decide per sheet from the column sums:
+//   Σ(other fee cols) + Σconsumables == Σ"Total Excl Shipping" → inside  (true;  do NOT fold)
+//   Σ(other fee cols)                == Σ"Total Excl Shipping" → outside (false; fold as before)
+// Returns null when the layout can't be recognised → callers keep the legacy fold.
+// `headers` = raw header cells; `sumOf(lowerName)` = numeric column sum (null when absent/non-numeric).
+function _tplConsumablesInside(headers, sumOf) {
+  const H = (headers || []).map(h => String(h == null ? '' : h).trim().toLowerCase()).filter(Boolean);
+  const excl = sumOf('total excl shipping'), con = sumOf('consumables cost');
+  if (excl == null || con == null) return null;
+  const fees = H.filter(h => /fee|charge|cost|storage|duty|labour|labels|consumables/.test(h) && !/^total\b|^shipping fee$|^consumables cost$/.test(h));
+  let fs = 0; fees.forEach(h => { fs += sumOf(h) || 0; });
+  const tol = Math.max(0.05, Math.abs(excl) * 1e-6);
+  if (Math.abs(fs + con - excl) <= tol) return true;
+  if (Math.abs(fs - excl) <= tol) return false;
+  return null;
+}
 function _tplGridSummary(name, grid) {
   let hr = 0, best = -1;   // header = the fullest row in the first dozen (handles multi-row-header 3PL sheets)
   for (let i = 0; i < Math.min(12, grid.length); i++) {
@@ -8833,15 +8851,19 @@ function _tplGridSummary(name, grid) {
   const totCol = find('total cost') || find('total') || find('total ($)') || cols.find(c => /^total\b/i.test(c.name));
   const frCol = find('shipping fee') || find('carrier cost ($)') || find('carrier cost');
   const fuCol = find('total excl shipping') || find('fulfilment cost ($)') || find('fulfillment cost ($)') || find('fulfilment cost');
-  // iFulfilment's "Total Cost" = Shipping + Total Excl Shipping and EXCLUDES the separately-billed "Consumables
-  // Cost" column. Fold it into the sheet total so the reconcile grand total ties to the invoice + matches the
-  // per-order fulfilment booking. Fires only on the order sheet (has both a freight col + a consumables cost col).
+  // iFulfilment "Consumables Cost": fold into the sheet total ONLY when the export keeps it outside "Total Excl
+  // Shipping" (Jul-26 and earlier). From Aug-26 it is already inside → no fold (see _tplConsumablesInside).
+  // Fires only on the order sheet (has both a freight col + a consumables cost col).
   const conCol = find('consumables cost');
-  let totalHi = (totCol || {}).sum ?? null;
-  if (totalHi != null && conCol && frCol) totalHi += conCol.sum;
+  let totalHi = (totCol || {}).sum ?? null, conInside = null;
+  if (totalHi != null && conCol && frCol) {
+    conInside = _tplConsumablesInside(headers, nm => { const c = find(nm); return (c && c.numeric) ? c.sum : null; });
+    if (conInside !== true) totalHi += conCol.sum;
+  }
   return {
     name, headerRow: hr + 1, dataRows: data.length, columns: cols, currencies, currency,
-    highlights: { freight: (frCol || {}).sum ?? null, fulfilment: (fuCol || {}).sum ?? null, total: totalHi }
+    highlights: { freight: (frCol || {}).sum ?? null, fulfilment: (fuCol || {}).sum ?? null, total: totalHi,
+      consumables: conCol ? conCol.sum : null, consumablesInside: conInside }
   };
 }
 // Some 3PLs (e.g. Coghlans) list small cost lines ONLY on a summary "Invoice" recap sheet — Support fee,
@@ -8999,26 +9021,32 @@ async function _tplOrderRows(buf, isCsv, tpl, period) {
   const REF = ['reference', 'customer ref', 'customer reference', 'customerref', 'order ref'];
   const FRT = ['shipping fee', 'carrier cost ($)', 'carrier cost', 'freight'];
   const FUL = ['total excl shipping', 'fulfilment cost ($)', 'fulfillment cost ($)', 'fulfilment cost', 'fulfillment cost'];
-  // iFulfilment bills a separate "Consumables Cost" column that sits OUTSIDE "Total Excl Shipping" (and outside
-  // "Total Cost" = Shipping + Total Excl Shipping). It's a real per-order fulfilment charge on the invoice, so
-  // fold it into fulfilment here. Exact-match only → fires on iFulfilment; other 3PLs (no such column) unchanged.
+  // iFulfilment bills a separate "Consumables Cost" column. It is a real per-order fulfilment charge, so it is added
+  // to each order's fulfilment ONLY when the export keeps it OUTSIDE "Total Excl Shipping" (Jul-26 and earlier);
+  // from Aug-26 it is already inside that column → adding again double-counts (see _tplConsumablesInside).
+  // Exact-match only → fires on iFulfilment; other 3PLs (no such column) unchanged.
   const CON = ['consumables cost'];
   const idxOf = (hs, cands) => { for (const cnd of cands) { const ix = hs.indexOf(cnd); if (ix >= 0) return ix; } return -1; };
   for (const { grid } of grids) {
-    let hr = -1, ri = -1, si = -1, fi = -1, ci = -1;
+    let hr = -1, ri = -1, si = -1, fi = -1, ci = -1, hs0 = null;
     for (let i = 0; i < Math.min(20, grid.length); i++) {
       const hs = (grid[i] || []).map(x => String(x == null ? '' : x).trim().toLowerCase());
       const r = idxOf(hs, REF), s = idxOf(hs, FRT);
-      if (r >= 0 && s >= 0) { hr = i; ri = r; si = s; fi = idxOf(hs, FUL); ci = idxOf(hs, CON); break; }
+      if (r >= 0 && s >= 0) { hr = i; ri = r; si = s; fi = idxOf(hs, FUL); ci = idxOf(hs, CON); hs0 = hs; break; }
     }
     if (hr < 0) continue;
-    const out = [];
+    const rows = [];
     for (let r = hr + 1; r < grid.length; r++) {
       const row = grid[r] || []; const k = (row[0] != null ? String(row[0]).trim() : '');
       if (k === '' || /^total/i.test(k)) continue;
-      out.push({ reference: (ri >= 0 && row[ri] != null) ? String(row[ri]).trim() : '', shipping: _tplNum(row[si]) || 0, fulfilment: (fi >= 0 ? (_tplNum(row[fi]) || 0) : 0) + (ci >= 0 ? (_tplNum(row[ci]) || 0) : 0) });
+      rows.push(row);
     }
-    return out;
+    let addCon = ci >= 0;
+    if (ci >= 0 && fi >= 0) {
+      const inside = _tplConsumablesInside(hs0, nm => { const ix = hs0.indexOf(nm); if (ix < 0) return null; let s = 0, n = 0; rows.forEach(row => { const v = _tplNum(row[ix]); if (v != null) { s += v; n++; } }); return n ? s : null; });
+      if (inside === true) addCon = false;
+    }
+    return rows.map(row => ({ reference: (ri >= 0 && row[ri] != null) ? String(row[ri]).trim() : '', shipping: _tplNum(row[si]) || 0, fulfilment: (fi >= 0 ? (_tplNum(row[fi]) || 0) : 0) + (addCon ? (_tplNum(row[ci]) || 0) : 0) }));
   }
   return [];
 }
