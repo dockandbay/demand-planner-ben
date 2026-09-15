@@ -1,0 +1,65 @@
+issue,sku,subcategory,category,status,variant_type,in_planning_scope,market_tier,core_seasonal,release_window,launch_uk,note
+A_variant_type_null,TEATWL-MD-3SET-BAKDIL,,,ACTIVE,(null),false,C,,AW26,2026-09-01,multipack/prepack - set variant_type (SET or prepack) + in_planning_scope
+A_variant_type_null,TEATWL-MD-3SET-BIGDILL,,,ACTIVE,(null),false,C,,AW26,2026-09-01,multipack/prepack - set variant_type (SET or prepack) + in_planning_scope
+A_variant_type_null,TEATWL-MD-3SET-GRNSAUC,,,ACTIVE,(null),false,C,,AW26,2026-09-01,multipack/prepack - set variant_type (SET or prepack) + in_planning_scope
+A_variant_type_null,TEATWL-MD-3SET-MTCHCRSH,,,ACTIVE,(null),false,C,,AW26,2026-09-01,multipack/prepack - set variant_type (SET or prepack) + in_planning_scope
+A_variant_type_null,TEATWL-MD-3SET-STRWPOP,,,ACTIVE,(null),false,C,,AW26,2026-09-01,multipack/prepack - set variant_type (SET or prepack) + in_planning_scope
+A_variant_type_null,TEATWL-MD-3SET-SWTSAUC,,,ACTIVE,(null),false,C,,AW26,2026-09-01,multipack/prepack - set variant_type (SET or prepack) + in_planning_scope
+A_variant_type_null,TEATWL-MD-3SET-XTRSAUC,,,ACTIVE,(null),false,C,,AW26,2026-09-01,multipack/prepack - set variant_type (SET or prepack) + in_planning_scope
+A_variant_type_null,TEATWL-MD-5SET-KITCH,,,ACTIVE,(null),false,C,,AW26,2026-09-01,multipack/prepack - set variant_type (SET or prepack) + in_planning_scope
+A_variant_type_null,TEATWL-MD-6SET-PCKMX,,,ACTIVE,(null),false,C,,AW26,2026-09-01,multipack/prepack - set variant_type (SET or prepack) + in_planning_scope
+A_variant_type_null,TEATWL-MD-6SET-STRWMTCH,,,ACTIVE,(null),false,C,,AW26,2026-09-01,multipack/prepack - set variant_type (SET or prepack) + in_planning_scope
+A_variant_type_null,TOWLH-CLB-3SET-MIDFIZ,,,ACTIVE,(null),false,C,,AW26,2026-09-01,multipack/prepack - set variant_type (SET or prepack) + in_planning_scope
+A_variant_type_null,TOWLH-CLB-6SET-MIDFIZ,,,ACTIVE,(null),false,C,,AW26,2026-09-01,multipack/prepack - set variant_type (SET or prepack) + in_planning_scope
+A_variant_type_null,TOWLH-CLB-LG-4SET-FIZPAIR,,,ACTIVE,(null),false,C,,AW26,2026-09-01,multipack/prepack - set variant_type (SET or prepack) + in_planning_scope
+A_variant_type_null,TOWLH-CLB-XL-4SET-FIZPAIR,,,ACTIVE,(null),false,C,,AW26,2026-09-01,multipack/prepack - set variant_type (SET or prepack) + in_planning_scope
+A_variant_type_null,TOWLH-DES-3SET-BOHMDRM,,,ACTIVE,(null),false,C,,AW26,2026-09-01,multipack/prepack - set variant_type (SET or prepack) + in_planning_scope
+A_variant_type_null,HAIRW-SUE-GRTFRM,Hair Wrap CORE,Hair Wrap,ACTIVE,(null),false,C,,SS27,2027-02-01,set variant_type=MASTER + in_planning_scope=true
+A_variant_type_null,PONCHK-CAB-MD-YELL,Poncho - Kids,Poncho - Kids,ACTIVE,(null),false,C,,SS27,2027-02-01,set variant_type=MASTER + in_planning_scope=true
+A_variant_type_null,PONCHK-CAB-SM-YELL,Poncho - Kids,Poncho - Kids,ACTIVE,(null),false,C,,SS27,2027-02-01,set variant_type=MASTER + in_planning_scope=true
+A_variant_type_null,TEATWL-MD-2SET-FRUVEG,Tea Towel,Tea Towel,ACTIVE,(null),false,C,,SS27,2027-02-01,multipack/prepack - set variant_type (SET or prepack) + in_planning_scope
+A_variant_type_null,TEATWL-MD-2SET-RNROO,Tea Towel,Tea Towel,ACTIVE,(null),false,C,,SS27,2027-02-01,multipack/prepack - set variant_type (SET or prepack) + in_planning_scope
+A_variant_type_null,TEATWL-MD-3SET-SETTAB,Tea Towel,Tea Towel,ACTIVE,(null),false,C,,SS27,2027-02-01,multipack/prepack - set variant_type (SET or prepack) + in_planning_scope
+A_variant_type_null,TOWLB-DES-LG-BONDIBY,Towel - Beach CORE,Towel - Beach,ACTIVE,(null),false,C,,SS27,2027-02-01,set variant_type=MASTER + in_planning_scope=true
+A_variant_type_null,TOWLB-DES-XL-BONDIBY,Towel - Beach CORE,Towel - Beach,ACTIVE,(null),false,C,,SS27,2027-02-01,set variant_type=MASTER + in_planning_scope=true
+B_master_out_of_scope,BAGTOI-MD-CACTMNTN,Bag - Toiletry,Bag - Toiletry,ACTIVE,MASTER,false,C,Seasonal,AW26,2026-09-01,MASTER but excluded - set in_planning_scope=true
+B_master_out_of_scope,EYEMASK-DES-CACTMNTN,Eye Mask,Eye Mask,ACTIVE,MASTER,false,C,,AW26,2026-09-01,MASTER but excluded - set in_planning_scope=true
+B_master_out_of_scope,HAIRW-SUE-CACTMNTN,Hair Wrap CORE,Hair Wrap,ACTIVE,MASTER,false,C,,AW26,2026-09-01,MASTER but excluded - set in_planning_scope=true
+B_master_out_of_scope,BAGF-DES-MD-GYOW,Bag - Foldable,Bag - Foldable,ACTIVE,MASTER,false,C,Seasonal,SS27,2027-02-01,MASTER but excluded - set in_planning_scope=true
+B_master_out_of_scope,BAGF-SUM-MD-OCEAN,Bag - Foldable,Bag - Foldable,ACTIVE,MASTER,false,C,Seasonal,SS27,2027-02-01,MASTER but excluded - set in_planning_scope=true
+B_master_out_of_scope,TOWLB-CAB-LG-BROWN,Towel - Beach CORE,Towel - Beach,ACTIVE,MASTER,false,C,,SS27,2027-02-01,MASTER but excluded - set in_planning_scope=true
+B_master_out_of_scope,TOWLB-CAB-XL-BROWN,Towel - Beach CORE,Towel - Beach,ACTIVE,MASTER,false,C,,SS27,2027-02-01,MASTER but excluded - set in_planning_scope=true
+B_master_out_of_scope,DB-WL-BAGBCH,Bag - Beach,Bag - Beach,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-BAGCOOL,Bag - Cooling,Bag - Cooling,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-BAGDRY-MD,Bag - Dry MD,Bag - Dry MD,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-BAGDRY-XS,Bag - Dry XS,Bag - Dry XS,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-BAGF,Bag - Foldable,Bag - Foldable,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-BAGTOI,Bag - Toiletry,Bag - Toiletry,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-COOL,Cooling,Cooling,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-HAIRW-HOM,Hair Wrap CORE,Hair Wrap,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-HAIRW-SUE,Hair Wrap CORE,Hair Wrap,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-MAKUP,Makeup Remover,Makeup Remover,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-PICNIC-LG,Picnic Blanket,Picnic Blanket,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-PICNIC-XL,Picnic Blanket,Picnic Blanket,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-PONCHA-LG,Poncho - Adults,Poncho - Adults,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-PONCHA-MD,Poncho - Adults,Poncho - Adults,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-PONCHK-MD,Poncho - Kids,Poncho - Kids,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-PONCHK-SM,Poncho - Kids,Poncho - Kids,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-TEATWL,Tea Towel,Tea Towel,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-TOWLB-LG,Towel - Beach CORE,Towel - Beach,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-TOWLB-MD,Towel - Beach CORE,Towel - Beach,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-TOWLB-XL,Towel - Beach CORE,Towel - Beach,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,PP-TOWLB-DES-XL-4SETA,Towel - Beach CORE,Towel - Beach,ACTIVE,MASTER,false,C,,,,MASTER but excluded - set in_planning_scope=true
+B_master_out_of_scope,DB-WL-DOGTWL-LG,Towel - Dog,Towel - Dog,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-DOGTWL-MD,Towel - Dog,Towel - Dog,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-TOWLH-LG,Towel - Home,Towel - Home,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-TOWLH-SM,Towel - Home,Towel - Home,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-TOWLH-XL,Towel - Home,Towel - Home,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-HEADW,,,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DB-WL-ROBE,,,ACTIVE,MASTER,false,C,,,,white-label sample placeholder - verify if intentionally excluded
+B_master_out_of_scope,DILLARDS-STAND-POSTER,,,ACTIVE,MASTER,false,C,,,,POS stand - likely intentionally excluded
+B_master_out_of_scope,DILLARDS-STAND-SINGLE,,,ACTIVE,MASTER,false,C,,,,POS stand - likely intentionally excluded
+B_master_out_of_scope,DILLARDS-STAND-TIER1,,,ACTIVE,MASTER,false,C,,,,POS stand - likely intentionally excluded
+B_master_out_of_scope,DILLARDS-STAND-TIER2,,,ACTIVE,MASTER,false,C,,,,POS stand - likely intentionally excluded
+B_master_out_of_scope,DILLARDS-STAND-TIER3,,,ACTIVE,MASTER,false,C,,,,POS stand - likely intentionally excluded
+B_master_out_of_scope,DILLARDS-STAND-TIER4,,,ACTIVE,MASTER,false,C,,,,POS stand - likely intentionally excluded
