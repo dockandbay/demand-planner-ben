@@ -848,9 +848,33 @@
   function esc(s){return String(s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});}
   function shortUser(s){return String(s==null?'':s).replace(/@dockandbay\.com\b/gi,'@');}  // ben@dockandbay.com → ben@ (display only)
 
+  // hzUpload(file, opts) — shared uploader. Files ≤3MB go inline as base64 (unchanged path); larger files upload DIRECT to
+  // Supabase Storage via a signed URL (clears Vercel's ~4.5MB body cap) and return a storage_path instead. Resolves to an
+  // object to merge into your POST body: {filename,mime,byte_size} plus either {<field>:b64} or {storage_path,storage_sig}.
+  function hzUpload(file, opts){
+    opts = opts || {};
+    var field = opts.field || 'data_base64';
+    var category = opts.category || 'misc';
+    var signUrl = opts.signUrl || '/api/storage/sign-upload';
+    var INLINE_MAX = 3*1024*1024;
+    if(!file) return Promise.reject(new Error('no file'));
+    var meta = { filename: file.name||'file', mime: file.type||'application/octet-stream', byte_size: file.size };
+    if(file.size <= INLINE_MAX){
+      return new Promise(function(res,rej){
+        var r=new FileReader();
+        r.onload=function(){ var o={}; for(var k in meta)o[k]=meta[k]; o[field]=String(r.result).replace(/^data:[^;]+;base64,/,''); res(o); };
+        r.onerror=function(){ rej(r.error||new Error('could not read file')); };
+        r.readAsDataURL(file);
+      });
+    }
+    return fetch(signUrl,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({category:category,filename:meta.filename,mime:meta.mime,byte_size:meta.byte_size})})
+      .then(function(r){ return r.text().then(function(t){ var j; try{j=t?JSON.parse(t):{};}catch(_){j={};} if(!r.ok||!j.upload_url) throw new Error((j&&j.error)||('could not start upload ('+r.status+')')); return j; }); })
+      .then(function(j){ return fetch(j.upload_url,{method:'PUT',headers:{'content-type':meta.mime},body:file}).then(function(pr){ if(!pr.ok) throw new Error('storage upload failed ('+pr.status+')'); var o={}; for(var k in meta)o[k]=meta[k]; o.storage_path=j.storage_path; o.storage_sig=j.storage_sig; return o; }); });
+  }
+
   // ── v27.571: timeline attachments — drop box + chips under a composer textarea; files upload ONE AT A TIME (4MB cap each),
   // the first rides on the message note, any others post as their own "📎 name" notes. Shared by PO / shipment / sample timelines.
-  var HZ_TL_MAX=4*1024*1024;
+  var HZ_TL_MAX=100*1024*1024;
   function hzTlAttHtml(n,base){ if(!n||!n.attachment_id)return ''; var u=base+encodeURIComponent(n.attachment_id), nm=n.attachment_name||'attachment', img=/^image\//i.test(String(n.attachment_mime||''));
     return '<div style="margin-top:4px;text-align:left">'+(img?'<a href="'+u+'" target="_blank" rel="noopener"><img src="'+u+'" alt="'+esc(nm)+'" title="'+esc(nm)+'" style="max-width:180px;max-height:140px;border-radius:5px;border:1px solid var(--line);display:block"></a>':'')+'<a href="'+u+'" target="_blank" rel="noopener" style="font-size:11px;color:var(--blue);text-decoration:none">📎 '+esc(nm)+'</a></div>'; }
   function hzTlAttach(ta,opts){ opts=opts||{}; if(!ta)return null; if(ta._hzAtt)return ta._hzAtt; var files=[], notice=opts.notice||function(m){ alert(m); };
@@ -859,14 +883,14 @@
     (opts.after||ta).insertAdjacentElement('afterend',box);
     var inp=box.querySelector('input'), fl=box.querySelector('.hz-tl-flist'), fm=box.querySelector('.hz-tl-fmsg');
     function draw(){ fl.innerHTML=files.map(function(f,i){ return '<span style="display:inline-flex;align-items:center;gap:4px;font-size:10.5px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:1px 8px">📎 '+esc(f.name)+' <span class="mut">'+(f.size>=1048576?(f.size/1048576).toFixed(1)+'MB':Math.max(1,Math.round(f.size/1024))+'KB')+'</span> <a data-i="'+i+'" style="cursor:pointer;color:var(--neg);font-weight:800">×</a></span>'; }).join(''); fl.querySelectorAll('a[data-i]').forEach(function(a){ a.onclick=function(){ files.splice(parseInt(a.dataset.i,10),1); draw(); }; }); }
-    function add(list){ var skipped=[]; Array.prototype.slice.call(list||[]).forEach(function(f){ if(f.size>HZ_TL_MAX){ skipped.push(f.name); return; } files.push(f); }); draw(); if(skipped.length)notice(skipped.join(', ')+' skipped: over the 4MB per-file limit'); }
+    function add(list){ var skipped=[]; Array.prototype.slice.call(list||[]).forEach(function(f){ if(f.size>HZ_TL_MAX){ skipped.push(f.name); return; } files.push(f); }); draw(); if(skipped.length)notice(skipped.join(', ')+' skipped: over the 100MB per-file limit'); }
     inp.onchange=function(){ add(inp.files); inp.value=''; };
     [ta,box].forEach(function(el){ el.addEventListener('dragover',function(e){ e.preventDefault(); el.style.outline='2px dashed var(--blue)'; el.style.outlineOffset='-2px'; }); el.addEventListener('dragleave',function(){ el.style.outline=''; }); el.addEventListener('drop',function(e){ e.preventDefault(); el.style.outline=''; if(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files.length)add(e.dataTransfer.files); }); });
     var api={ count:function(){ return files.length; }, clear:function(){ files=[]; draw(); fm.textContent=''; },
-      uploadAll:function(cb){ var ids=[], i=0, list=files.slice(); (function one(){ if(i>=list.length){ fm.textContent=''; cb(ids); return; } var f=list[i++]; fm.textContent='uploading '+f.name+' ('+i+'/'+list.length+')…'; var rd=new FileReader(); rd.onload=function(){ opts.upload(f,String(rd.result),function(id,err){ if(id)ids.push({id:id,name:f.name}); else if(err)notice(f.name+': '+err); one(); }); }; rd.onerror=function(){ one(); }; rd.readAsDataURL(f); })(); } };
+      uploadAll:function(cb){ var ids=[], i=0, list=files.slice(); (function one(){ if(i>=list.length){ fm.textContent=''; cb(ids); return; } var f=list[i++]; fm.textContent='uploading '+f.name+' ('+i+'/'+list.length+')…'; hzUpload(f,{field:'data_base64',category:'timeline'}).then(function(fields){ opts.upload(f, fields, function(id,err){ if(id)ids.push({id:id,name:f.name}); else if(err)notice(f.name+': '+err); one(); }); }).catch(function(e){ notice(f.name+': '+(e&&e.message||'upload failed')); one(); }); })(); } };
     ta._hzAtt=api; return api; }
   function hzTlSend(att,text,postOne,done){ function run(ids){ var first=ids.shift(); if(!text&&!first){ done(); return; } postOne(text||('📎 '+first.name), first?first.id:null, function(){ (function extra(){ if(!ids.length){ if(att)att.clear(); done(); return; } var x=ids.shift(); postOne('📎 '+x.name, x.id, extra); })(); }); } if(att&&att.count())att.uploadAll(run); else run([]); }
-  function hzTlUploader(kind,ref,extra){ return function(f,b64,cb){ var body=Object.assign({kind:kind,ref:ref,filename:f.name,mime:f.type||'application/octet-stream',data_base64:b64},extra||{}); fetch('/api/supply/timeline-attachment',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){ return r.text().then(function(t){ try{ return t?JSON.parse(t):{}; }catch(_){ return {error:'Server error ('+r.status+')'}; } }); }).then(function(j){ cb(j&&j.id||null, j&&j.error||null); }).catch(function(e){ cb(null, e&&e.message||'upload failed'); }); }; }
+  function hzTlUploader(kind,ref,extra){ return function(f,fields,cb){ var body=Object.assign({kind:kind,ref:ref},fields,extra||{}); fetch('/api/supply/timeline-attachment',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){ return r.text().then(function(t){ try{ return t?JSON.parse(t):{}; }catch(_){ return {error:'Server error ('+r.status+')'}; } }); }).then(function(j){ cb(j&&j.id||null, j&&j.error||null); }).catch(function(e){ cb(null, e&&e.message||'upload failed'); }); }; }
   function shortNotes(arr){ (arr||[]).forEach(function(n){ if(n){ if(n.body)n.body=shortUser(n.body); if(n.author_email)n.author_email=shortUser(n.author_email); } }); return arr; }  // shorten user emails in timeline bodies/authors
   function isNum(v){return v!==''&&v!=null&&!isNaN(Number(v))&&/^-?[\d.]+$/.test(String(v));}
   function money(v){return v==null||v===''?'':Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});}
@@ -3984,17 +4008,15 @@
     })();
     // Client/FBA file attachment upload (#12) — base64 into portal_attachments with category='client'
     document.querySelectorAll('#podet-'+i+' .cli-attach').forEach(function(inp){ inp.onchange=function(){ var f=inp.files&&inp.files[0]; if(!f)return;
-      var rd=new FileReader(); rd.onload=function(){ inp.value='';   // clear so the same file can be re-picked; upload runs in the background
-        bgUpload('/api/supply/portal-upload',{po:inp.dataset.po,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),category:'client',uploaded_by:'client-tab'}, f.name, function(){ poRefetchPanel(po,i); }); };
-      rd.readAsDataURL(f); }; });
+      hzUpload(f,{field:'data_base64',category:'portal'}).then(function(up){ inp.value='';   // clear so the same file can be re-picked; upload runs in the background
+        bgUpload('/api/supply/portal-upload',Object.assign({po:inp.dataset.po,category:'client',uploaded_by:'client-tab'},up), f.name, function(){ poRefetchPanel(po,i); }); }).catch(function(e){ alert('Upload failed: '+(e&&e.message||e)); }); }; });
     document.querySelectorAll('#podet-'+i+' .po-go-ship').forEach(function(b){ b.onclick=function(){ if(b.dataset.ref)gotoShipment(b.dataset.ref); }; });
     // DOCUMENTS tab: delete any doc / upload a doc (held in the DB)
     document.querySelectorAll('#podet-'+i+' .podoc-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete document “'+(b.dataset.name||'')+'” from PO '+b.dataset.po+'? This cannot be undone.'))return; b.disabled=true;
       fetch('/api/supply/po-doc-delete',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:b.dataset.id})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error)throw new Error(j.error); poRefetchPanel(po,i); }).catch(function(e){ b.disabled=false; alert('Delete failed: '+(e.message||e)); }); }; });
     document.querySelectorAll('#podet-'+i+' .podoc-up').forEach(function(b){ b.onclick=function(){ var inp=document.querySelector('#podet-'+i+' .podoc-file[data-po="'+CSS.escape(b.dataset.po)+'"]'); var f=inp&&inp.files&&inp.files[0]; if(!f){alert('Choose a file to upload.');return;}
-      var rd=new FileReader(); rd.onload=function(){ if(inp)inp.value='';
-        bgUpload('/api/supply/po-doc-upload',{po:b.dataset.po,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:'admin'}, f.name, function(){ poRefetchPanel(po,i); }); };
-      rd.readAsDataURL(f); }; });
+      hzUpload(f,{field:'data_base64',category:'po'}).then(function(up){ if(inp)inp.value='';
+        bgUpload('/api/supply/po-doc-upload',Object.assign({po:b.dataset.po,uploaded_by:'admin'},up), f.name, function(){ poRefetchPanel(po,i); }); }).catch(function(e){ alert('Upload failed: '+(e&&e.message||e)); }); }; });
     // DOCUMENTS tab: approve / reject a supplier-submitted document (with optional / required notes). Posts a
     // timeline note back to the supplier and refreshes the panel.
     document.querySelectorAll('#podet-'+i+' .podoc-approve').forEach(function(b){ b.onclick=function(){ var n=prompt('Approve this document? Add an optional note for the supplier:','')||''; if(n===null)return; b.disabled=true;
@@ -4007,9 +4029,8 @@
     // SHIPMENTS tab: category-specific pre-shipment doc uploads (carton/pallet barcodes, IDN pallet labels)
     document.querySelectorAll('#podet-'+i+' .shdoc-up').forEach(function(b){ b.onclick=function(){ var cat=b.dataset.category;
       var inp=document.querySelector('#podet-'+i+' .shdoc-file[data-po="'+CSS.escape(b.dataset.po)+'"][data-category="'+cat+'"]'); var f=inp&&inp.files&&inp.files[0]; if(!f){alert('Choose a file to upload.');return;}
-      var rd=new FileReader(); rd.onload=function(){ if(inp)inp.value='';
-        bgUpload('/api/supply/po-doc-upload',{po:b.dataset.po,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:'admin',category:cat}, f.name, function(){ poRefetchPanel(po,i); }); };
-      rd.readAsDataURL(f); }; });
+      hzUpload(f,{field:'data_base64',category:'po'}).then(function(up){ if(inp)inp.value='';
+        bgUpload('/api/supply/po-doc-upload',Object.assign({po:b.dataset.po,uploaded_by:'admin',category:cat},up), f.name, function(){ poRefetchPanel(po,i); }); }).catch(function(e){ alert('Upload failed: '+(e&&e.message||e)); }); }; });
     // free-text client fields — save verbatim (commas allowed) on blur
     document.querySelectorAll('#podet-'+i+' .txtin').forEach(function(inp){ inp.onchange=function(){
       if(inp.classList.contains('dateinp')){ var _r=(inp.value||'').trim(), _i=_r?parseDateLoose(_r):''; if(_r&&!_i){ inp.classList.add('err'); return; } inp.classList.remove('err'); inp.value=_i; }
@@ -4094,8 +4115,8 @@
       var fin=root.querySelector('.inv-parse-file'), f=fin&&fin.files&&fin.files[0], out=root.querySelector('.inv-parse-out');
       if(!f){ out.innerHTML='<span class="mut tiny">Choose an Excel (.xlsx) invoice first.</span>'; return; }
       btn.disabled=true; out.innerHTML='<span class="mut tiny">Parsing…</span>';
-      var rd=new FileReader(); rd.onload=function(){ var b64=String(rd.result);
-        fetch('/api/supply/portal-parse-invoice',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,data_base64:b64})}).then(function(r){return r.json();}).then(function(j){ btn.disabled=false;
+      hzUpload(f,{field:'data_base64',category:'invoice'}).then(function(up){
+        fetch('/api/supply/portal-parse-invoice',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.assign({po:po},up))}).then(function(r){return r.json();}).then(function(j){ btn.disabled=false;
           if(!j||j.error||j.ok===false){ out.innerHTML='<span style="color:var(--neg);font-size:11px">'+esc((j&&j.error)||'Could not parse the file.')+'</span>'; return; }
           var t=j.totals, diff=j.lines.filter(function(l){return l.status!=='match';});
           var drows=diff.map(function(l){
@@ -4121,7 +4142,7 @@
           // write the parsed invoice total into the PO's Final invoice amount
           function setFinalInvoice(cb){ fetch('/api/supply/po/'+encodeURIComponent(po),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({supplier_invoice_total:String(t.value)})}).then(function(r){return r.json();}).then(function(x){ if(x&&x.error)throw new Error(x.error); cb&&cb(); }).catch(function(e){ alert('Could not set the final invoice amount: '+(e.message||e)); }); }
           var ab=out.querySelector('.inv-parse-apply'); if(ab)ab.onclick=function(){ ab.disabled=true; ab.textContent='Applying…';
-            fetch('/api/supply/portal-invoice-apply',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,data_base64:b64,submitted_by:'PO PLAN'})}).then(function(r){return r.json();}).then(function(rr){
+            fetch('/api/supply/portal-invoice-apply',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.assign({po:po,submitted_by:'PO PLAN'},up))}).then(function(r){return r.json();}).then(function(rr){
               if(!rr||rr.error){ alert('Apply failed: '+((rr&&rr.error)||'')); ab.disabled=false; ab.textContent='Apply'; return; }
               setFinalInvoice(function(){
                 var rt=document.getElementById('podet-'+i), ot=rt&&rt.querySelector('.potab[data-pt="oplan"]'); if(ot)ot.click();   // land on ORDER PLAN, then refetch keeps that tab
@@ -4130,8 +4151,8 @@
               .catch(function(e){ ab.disabled=false; ab.textContent='Apply'; alert('Apply failed: '+(e.message||e)); }); };
           var cxb=out.querySelector('.inv-parse-cancel'); if(cxb)cxb.onclick=function(){ out.innerHTML='<div class="mut tiny">Parsed invoice discarded — nothing applied.</div>'; };   // reject/cancel: drop the parse without touching the order plan
           var sb=out.querySelector('.inv-set-final'); if(sb)sb.onclick=function(){ sb.disabled=true; sb.textContent='Setting…'; setFinalInvoice(function(){ invalidateDerived(); poRefetchPanel(po,i); alert('Final invoice amount set to '+money(t.value)+'.'); }); }; })
-          .catch(function(e){ btn.disabled=false; out.innerHTML='<span style="color:var(--neg);font-size:11px">'+esc(e.message||'parse failed')+'</span>'; }); };
-      rd.readAsDataURL(f); }; });
+          .catch(function(e){ btn.disabled=false; out.innerHTML='<span style="color:var(--neg);font-size:11px">'+esc(e.message||'parse failed')+'</span>'; }); }).catch(function(e){ btn.disabled=false; out.innerHTML='<span style="color:var(--neg);font-size:11px">'+esc(e&&e.message||'upload failed')+'</span>'; });
+      }; });
     // order plan — final cost price per line: live-recompute line + order totals, save on change
     document.querySelectorAll('#podet-'+i+' .opfin').forEach(function(inp){
       function recalc(){ var box=document.getElementById('podet-'+i); if(!box)return; var tot=0,tq=0;
@@ -7815,7 +7836,7 @@
             ban.innerHTML='';
             if(!window.DBPortalView){ mt.innerHTML='<div class="count" style="color:var(--neg)">portal view not loaded</div>'; return; }
             window.DBPortalView.mount({ root:mt, supplierName:name, by:'preview (acting as '+name+')', sid:supById[name],
-              ep:{ lineCost:'/api/supply/portal-line-cost', lineRemove:'/api/supply/portal-line-remove', crossdockQty:'/api/supply/crossdock-qty', addlCost:'/api/supply/additional-cost', addlCostRemove:'/api/supply/additional-cost-remove', note:'/api/supply/portal-note', notesBase:'/api/supply/portal-notes/', noteReadBase:'/api/supply/note-read/', escalate:'/api/supply/escalate', submit:'/api/supply/portal-submit', upload:'/api/supply/portal-upload', labelData:'/api/supply/label-data', shipsWith:'/api/supply/ships-with/', shipmentInvoice:'/api/invoice/shipment/', poInvoice:'/api/invoice/po/', parseInvoice:'/api/supply/portal-parse-invoice', invoiceApply:'/api/supply/portal-invoice-apply', docRemove:'/api/supply/portal-attachment-remove', attachmentBase:'/api/supply/portal-attachment/', shipmentEscalate:'/api/supply/shipment/', shipmentNotesBase:'/api/supply/shipment-notes?ref=', shipmentNote:'/api/supply/shipment-note', shipmentCharge:'/api/supply/shipment-charge', shipmentChargesBase:'/api/supply/shipment-charges/', shipmentUpdate:'/api/supply/shipment/', dtcAccept:'/api/supply/dtc-accept', docSubmit:'', recentActivity:'', unreadMessages:'', sampleAccept:'/api/supply/sample-accept', sampleUpdate:'/api/supply/sample-update', sampleNote:'/api/supply/sample-note', sampleNoteAuthorKind:'supplier', sampleNoteAuthorEmail:'D&B', sampleNotesBase:'/api/supply/sample-notes?id=', sampleNoteReadBase:'/api/supply/sample-note-read/', sampleCharge:'/api/supply/sample-charge', sampleCreate:'/api/supply/sample-create', sampleAttachment:'/api/supply/sample-attachment', sampleAttachmentRemove:'/api/supply/sample-attachment-remove', timelineAttachment:'/api/supply/timeline-attachment', productNotesBase:'/api/product/notes/', productNote:'/api/product/note', productNotesRead:'/api/product/notes-read', productSamplesBase:'/api/product/samples/', productSample:'/api/product/sample', productSamplePhoto:'/api/product/sample-photo', productSwatchBase:'/api/product/swatch/', attachImgBase:'/api/supply/portal-attachment/', productOpenSamples:'/api/product/open-samples', productSkus:'/api/product/skus', sampleContentsBase:'/api/supply/sample/' },
+              ep:{ signUpload:'/api/storage/sign-upload', lineCost:'/api/supply/portal-line-cost', lineRemove:'/api/supply/portal-line-remove', crossdockQty:'/api/supply/crossdock-qty', addlCost:'/api/supply/additional-cost', addlCostRemove:'/api/supply/additional-cost-remove', note:'/api/supply/portal-note', notesBase:'/api/supply/portal-notes/', noteReadBase:'/api/supply/note-read/', escalate:'/api/supply/escalate', submit:'/api/supply/portal-submit', upload:'/api/supply/portal-upload', labelData:'/api/supply/label-data', shipsWith:'/api/supply/ships-with/', shipmentInvoice:'/api/invoice/shipment/', poInvoice:'/api/invoice/po/', parseInvoice:'/api/supply/portal-parse-invoice', invoiceApply:'/api/supply/portal-invoice-apply', docRemove:'/api/supply/portal-attachment-remove', attachmentBase:'/api/supply/portal-attachment/', shipmentEscalate:'/api/supply/shipment/', shipmentNotesBase:'/api/supply/shipment-notes?ref=', shipmentNote:'/api/supply/shipment-note', shipmentCharge:'/api/supply/shipment-charge', shipmentChargesBase:'/api/supply/shipment-charges/', shipmentUpdate:'/api/supply/shipment/', dtcAccept:'/api/supply/dtc-accept', docSubmit:'', recentActivity:'', unreadMessages:'', sampleAccept:'/api/supply/sample-accept', sampleUpdate:'/api/supply/sample-update', sampleNote:'/api/supply/sample-note', sampleNoteAuthorKind:'supplier', sampleNoteAuthorEmail:'D&B', sampleNotesBase:'/api/supply/sample-notes?id=', sampleNoteReadBase:'/api/supply/sample-note-read/', sampleCharge:'/api/supply/sample-charge', sampleCreate:'/api/supply/sample-create', sampleAttachment:'/api/supply/sample-attachment', sampleAttachmentRemove:'/api/supply/sample-attachment-remove', timelineAttachment:'/api/supply/timeline-attachment', productNotesBase:'/api/product/notes/', productNote:'/api/product/note', productNotesRead:'/api/product/notes-read', productSamplesBase:'/api/product/samples/', productSample:'/api/product/sample', productSamplePhoto:'/api/product/sample-photo', productSwatchBase:'/api/product/swatch/', attachImgBase:'/api/supply/portal-attachment/', productOpenSamples:'/api/product/open-samples', productSkus:'/api/product/skus', sampleContentsBase:'/api/supply/sample/' },
               bc:{ sheets:bcDownloadSheets, crossdock:bcDownloadCrossdock, placeholder:false },
               getData:function(){ return loadPortalData(name); },
               onChange:function(){ invalidateDerived(); }   // a portal write (e.g. creating a shipment) must refresh the admin grids
@@ -8260,7 +8281,7 @@
       var staged=[]; if(S.csv)staged.push({file:S.csv,kind:'csv'}); S.pdfs.forEach(function(f){ staged.push({file:f,kind:'pdf'}); });
       if(!staged.length){ status.textContent=S.projectId?'Add new files (steps 1–2) to save.':'Add files first (steps 1–2).'; return; }
       status.textContent='Saving…';
-      function doUpload(pid){ Promise.all(staged.map(function(s){ return fileToB64(s.file).then(function(b){return {kind:s.kind,filename:s.file.name,b64:b};}); })).then(function(fs){
+      function doUpload(pid){ Promise.all(staged.map(function(s){ return hzUpload(s.file,{field:'b64',category:'edi'}).then(function(up){ return Object.assign({kind:s.kind},up); }); })).then(function(fs){
           return fetch('/api/supply/edi-projects/'+pid+'/files',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({files:fs})}); }).then(function(r){return r.json();})
           .then(function(){ S.projectId=pid; S.csv=null; S.pdfs=[]; c.querySelector('#edi-csv-n').textContent='no file chosen'; c.querySelector('#edi-pdf-n').textContent='no files chosen'; status.textContent='Saved ✓'; loadProject(pid); loadProjectList(); })
           .catch(function(e){ status.textContent='Failed: '+(e.message||e); }); }
@@ -8270,7 +8291,7 @@
     // collect files for parse: staged (in memory) + any saved project files (fetched on demand)
     function collectFiles(){ var out={csv:null,pdfs:[]}; var chain=Promise.resolve();
       if(S.csv)chain=chain.then(function(){ return fileToB64(S.csv).then(function(b){ out.csv={name:S.csv.name,b64:b}; }); });
-      S.pdfs.forEach(function(f){ chain=chain.then(function(){ return fileToB64(f).then(function(b){ out.pdfs.push({name:f.name,b64:b}); }); }); });
+      S.pdfs.forEach(function(f){ chain=chain.then(function(){ return hzUpload(f,{field:'b64',category:'edi'}).then(function(up){ out.pdfs.push(Object.assign({name:f.name},up)); }); }); });
       (S.savedFiles||[]).forEach(function(sf){ chain=chain.then(function(){ return fetch('/api/supply/edi-projects/'+S.projectId+'/files/'+sf.id).then(function(r){return r.json();}).then(function(r){ if(r&&r.b64){ if(sf.kind==='csv'){ if(!out.csv)out.csv={name:sf.filename,b64:r.b64}; } else out.pdfs.push({name:sf.filename,b64:r.b64}); } }); }); });
       return chain.then(function(){ return out; }); }
     // Cin7 sales-order CSV — needs the ASN CSV only (from step 1, or the loaded project)
@@ -8309,7 +8330,7 @@
     function _b64len(s){ return s?s.length:0; }
     function _ediBatchPdfs(csvB64,pdfs){ var csvBytes=_b64len(csvB64), budget=EDI_SAFE_BYTES-csvBytes-400;   // 400 = JSON key overhead
       var batches=[], rejected=[], cur=[], curSize=0;
-      pdfs.forEach(function(p){ var sz=_b64len(p.b64)+(p.name?p.name.length:0)+40;
+      pdfs.forEach(function(p){ var sz=(p.storage_path?(String(p.storage_path).length+String(p.storage_sig||'').length):_b64len(p.b64))+(p.name?p.name.length:0)+40;   // storage-path PDFs ride out-of-body → ~0 bytes toward the request cap
         if(sz>budget){ rejected.push({name:p.name||'(unnamed)', mb:_ediMB(sz+csvBytes)}); return; }   // too big even alone with the CSV
         if(curSize+sz>budget && cur.length){ batches.push(cur); cur=[]; curSize=0; }
         cur.push(p); curSize+=sz; });
@@ -8770,15 +8791,15 @@
         fetch('/api/supply/payments-by-supplier').then(function(r){return r.json();}).catch(function(){return [];})   // per-PO final invoice total (supplier_invoice_total)
       ]).then(function(res){ _cf=res[0]; _pbs=Array.isArray(res[1])?res[1]:[]; analyse(); }).catch(function(e){ setMsg('Failed: '+(e.message||e),1); }); }
     go.onclick=function(){ var f=fileI.files&&fileI.files[0]; if(!f){ setMsg('Choose the XLSX export first.',1); return; }
-      setMsg('Reading…'); go.disabled=true; var fname=f.name; var rd=new FileReader();
-      rd.onload=function(){ var b64=String(rd.result).replace(/^data:[^;]+;base64,/,'');
-        fetch('/api/supply/xero-parse',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({data_base64:b64})}).then(function(r){return r.json();})
+      setMsg('Reading…'); go.disabled=true; var fname=f.name;
+      hzUpload(f,{field:'data_base64',category:'xero'}).then(function(up){
+        fetch('/api/supply/xero-parse',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(up)}).then(function(r){return r.json();})
           .then(function(j){ if(j&&j.error)throw new Error(j.error); _rows=j.rows||[]; _period=j.period_end||'';
-            try{ fetch('/api/supply/xero-compare/save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({rows:_rows,filename:fname,period:_period,file_b64:b64})}); }catch(e){}   // store the snapshot + the ORIGINAL xlsx (base64) server-side (shared, kept 1 week) so it can be re-downloaded
+            try{ fetch('/api/supply/xero-compare/save',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({rows:_rows,filename:fname,period:_period,file_b64:up.data_base64||''})}); }catch(e){}   // store the snapshot + the ORIGINAL xlsx (base64) server-side (shared, kept 1 week) so it can be re-downloaded
             var bn=b.querySelector('#xc-banner'); if(bn)bn.remove(); return compareNow(); })
           .then(function(){ go.disabled=false; })
-          .catch(function(e){ go.disabled=false; setMsg('Failed: '+(e.message||e),1); }); };
-      rd.readAsDataURL(f); };
+          .catch(function(e){ go.disabled=false; setMsg('Failed: '+(e.message||e),1); }); })
+        .catch(function(e){ go.disabled=false; setMsg('Failed: '+(e.message||e),1); }); };
     b.querySelector('#xc-allrows').onchange=function(){ if(_rows&&_cf)analyse(); };
     // auto-load the SHARED last upload if < 1 week old — each visit/refresh re-runs the compare against fresh Horizon data
     fetch('/api/supply/xero-compare/latest').then(function(r){return r.json();}).then(function(s){
@@ -9673,11 +9694,11 @@
       var fi=document.createElement('input'); fi.type='file'; fi.style.display='none'; document.body.appendChild(fi);
       fi.onchange=function(){ var f=fi.files&&fi.files[0]; if(!f){document.body.removeChild(fi);return;}
         var o=btn.textContent; btn.disabled=true; btn.textContent='…';
-        var rd=new FileReader(); rd.onload=function(){
-          fetch('/api/supply/remittance',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({run_key:btn.dataset.rk,supplier_name:btn.dataset.sup,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result)})})
+        hzUpload(f,{field:'data_base64',category:'remittance'}).then(function(up){
+          fetch('/api/supply/remittance',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.assign({run_key:btn.dataset.rk,supplier_name:btn.dataset.sup},up))})
             .then(function(r){return r.json();}).then(function(j){ document.body.removeChild(fi); if(j&&j.error){btn.disabled=false;btn.textContent=o;return alert(j.error);} payRefreshState(); })
-            .catch(function(e){ document.body.removeChild(fi); btn.disabled=false; btn.textContent=o; alert('Upload failed: '+(e.message||e)); }); };
-        rd.readAsDataURL(f); };
+            .catch(function(e){ document.body.removeChild(fi); btn.disabled=false; btn.textContent=o; alert('Upload failed: '+(e.message||e)); }); })
+          .catch(function(e){ document.body.removeChild(fi); btn.disabled=false; btn.textContent=o; alert('Upload failed: '+(e&&e.message||e)); }); };
       fi.click(); }; });
     b.querySelectorAll('.pr-remit-del').forEach(function(btn){ btn.onclick=function(){ if(!confirm('Remove this remittance?'))return;
       fetch('/api/supply/remittance/'+btn.dataset.id+'/delete',{method:'POST'}).then(function(r){return r.json();}).then(function(){ payRefreshState(); }); }; });
@@ -11427,7 +11448,7 @@
       var prod=document.getElementById('qc-prod').value.trim(), batch=document.getElementById('qc-batch').value.trim(), po=document.getElementById('qc-po').value.trim();
       if(!(prod||batch||po)){ msg.textContent='Assign at least one of PROD# / Batch / PO.'; return; }
       var btn=this; btn.disabled=true; msg.textContent='Uploading…';
-      var rd=new FileReader(); rd.onload=function(){ fetch('/api/supply/quality-doc',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({doc_type:document.getElementById('qc-type').value, filename:f.name, mime:f.type||'application/octet-stream', data_base64:String(rd.result), prod_no:prod||null, batch_id:batch||null, po:po||null, supplier_name:document.getElementById('qc-sup').value.trim()||null})}).then(function(r){return r.json();}).then(function(j){ btn.disabled=false; if(j&&j.error){ msg.textContent='Error: '+j.error; return; } msg.textContent='Uploaded ✓'; ['qc-prod','qc-batch','qc-po','qc-sup'].forEach(function(id){document.getElementById(id).value='';}); document.getElementById('qc-file').value=''; draw(); }).catch(function(e){ btn.disabled=false; msg.textContent='Upload failed'; }); }; rd.readAsDataURL(f); };
+      hzUpload(f,{field:'data_base64',category:'quality'}).then(function(up){ fetch('/api/supply/quality-doc',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.assign({doc_type:document.getElementById('qc-type').value, prod_no:prod||null, batch_id:batch||null, po:po||null, supplier_name:document.getElementById('qc-sup').value.trim()||null},up))}).then(function(r){return r.json();}).then(function(j){ btn.disabled=false; if(j&&j.error){ msg.textContent='Error: '+j.error; return; } msg.textContent='Uploaded ✓'; ['qc-prod','qc-batch','qc-po','qc-sup'].forEach(function(id){document.getElementById(id).value='';}); document.getElementById('qc-file').value=''; draw(); }).catch(function(e){ btn.disabled=false; msg.textContent='Upload failed'; }); }).catch(function(e){ btn.disabled=false; msg.textContent='Upload failed'; }); };
     draw();
   }
   // v27.691 (Ben): Horizon users for the sample internal-stakeholders picker (cached for the session).
@@ -11766,7 +11787,7 @@
         var db=box.querySelector('.samp-done'); if(db)db.onclick=function(){ db.disabled=true;   // ✓ Done also persists the SKU lines (fields already auto-save on change)
           shipPost('/api/supply/sample/'+id+'/lines',{lines:slines.filter(function(l){return l.sku&&String(l.sku).trim();}).map(function(l){return {sku:String(l.sku).trim(),qty:Number(l.qty)||0};})},function(){ editing=false; paint(); }); };   // silent: re-render this drawer in place, keep it open (no grid reload / no tab close)
         var af=box.querySelector('.samp-att-file'), au=box.querySelector('.samp-att-up');
-        if(au)au.onclick=function(){ var f=af&&af.files&&af.files[0]; if(!f){alert('Choose a file to upload.');return;} au.disabled=true; var rd=new FileReader(); rd.onload=function(){ shipPost('/api/supply/portal-upload',{po:s.ref,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),category:'sample',uploaded_by:'PO PLAN'},function(j){ if(j&&j.error){alert(j.error);au.disabled=false;return;} loadSampleDetail(id,i); }); }; rd.readAsDataURL(f); };
+        if(au)au.onclick=function(){ var f=af&&af.files&&af.files[0]; if(!f){alert('Choose a file to upload.');return;} au.disabled=true; hzUpload(f,{field:'data_base64',category:'sample'}).then(function(up){ shipPost('/api/supply/portal-upload',Object.assign({po:s.ref,category:'sample',uploaded_by:'PO PLAN'},up),function(j){ if(j&&j.error){alert(j.error);au.disabled=false;return;} loadSampleDetail(id,i); }); }).catch(function(e){ alert('Upload failed: '+(e&&e.message||e)); au.disabled=false; }); };
         box.querySelectorAll('.samp-att-rm').forEach(function(b){ b.onclick=function(){ if(!confirm('Remove this attachment?'))return; shipPost('/api/supply/portal-attachment-remove',{id:b.dataset.aid},function(){ loadSampleDetail(id,i); }); }; });
         box.querySelectorAll('.samp-del').forEach(function(b){ b.onclick=function(){ if(!confirm('Delete this sample request?'))return; shipPost('/api/supply/sample/'+b.dataset.id+'/delete',{},function(){ if(i==='DRAWER'){ if(typeof closeSampleDrawer==='function')closeSampleDrawer(); } if(_sampleReload)_sampleReload(); }); }; });
         var _ss=box.querySelector('.samp-setship'); if(_ss)_ss.onclick=function(){ _ss.disabled=true; shipPost('/api/supply/sample/'+id,{status:'SHIPPED'},function(j){ if(j&&j.error){alert(j.error);_ss.disabled=false;return;} s.status='SHIPPED'; _sampGridSync('SHIPPED'); loadSampleDetail(id,i); }); };   // re-render THIS card in place (Our status → SHIPPED, button clears) — not _sampleReload, which would collapse the open card
@@ -13250,7 +13271,7 @@
       function upFiles(sid,asp,files){ files=Array.prototype.slice.call(files||[]); if(!files.length)return; var t=q('.pbr-fb',sid,asp), msg=q('.pbr-upmsg',sid,asp), ref=t?t.dataset.ref:'', i=0, names=[];
         function one(){ if(i>=files.length){ if(msg){ msg.textContent=names.length+' file'+(names.length===1?'':'s')+' attached'; setTimeout(function(){ msg.textContent=''; },3000); } try{ _prodJsonBust(ref); }catch(e){} save(sid,asp,false,{force:true,fileName:names[names.length-1]||''}); return; }
           var f=files[i++]; if(f.size>10*1024*1024){ if(msg)msg.textContent=f.name+' skipped (over 10MB)'; one(); return; } if(msg)msg.textContent='uploading '+f.name+'…';
-          var rd=new FileReader(); rd.onload=function(){ shipPost('/api/product/sample/'+sid+'/photo',{filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:(window.ME&&ME.email)||'',aspect:asp},function(jr){ if(jr&&jr.id){ _att[sid+'|'+asp]=jr.id; names.push(f.name); var _fl=q('.pbr-files',sid,asp); if(_fl)_fl.insertAdjacentHTML('beforeend',hzFileChip({id:jr.id,filename:f.name,mime:f.type})); } one(); }); }; rd.readAsDataURL(f); }
+          hzUpload(f,{field:'data_base64',category:'samples'}).then(function(up){ shipPost('/api/product/sample/'+sid+'/photo',Object.assign({uploaded_by:(window.ME&&ME.email)||'',aspect:asp},up),function(jr){ if(jr&&jr.id){ _att[sid+'|'+asp]=jr.id; names.push(f.name); var _fl=q('.pbr-files',sid,asp); if(_fl)_fl.insertAdjacentHTML('beforeend',hzFileChip({id:jr.id,filename:f.name,mime:f.type})); } one(); }); }).catch(function(e){ if(msg)msg.textContent=f.name+': '+(e&&e.message||'upload failed'); one(); }); }
         one(); }
       body.querySelectorAll('.pbr-up').forEach(function(inp){ inp.onchange=function(){ upFiles(inp.dataset.id,inp.dataset.aspect,inp.files); inp.value=''; }; });
       body.querySelectorAll('.pbr-fbcell').forEach(function(cell){ cell.addEventListener('dragover',function(e){ e.preventDefault(); cell.style.outline='2px dashed var(--blue)'; cell.style.outlineOffset='-4px'; }); cell.addEventListener('dragleave',function(){ cell.style.outline=''; }); cell.addEventListener('drop',function(e){ e.preventDefault(); cell.style.outline=''; if(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files.length)upFiles(cell.dataset.id,cell.dataset.aspect,e.dataTransfer.files); }); });
@@ -13437,10 +13458,9 @@
         (function up(i){ if(i>=_spFiles.length)return renderProductSpecs(c);
           save.textContent='Saving '+(i+1)+'/'+_spFiles.length+'…';
           var file=_spFiles[i], body={}; for(var k in shared)body[k]=shared[k];
-          body.spec_type=file._type||defType; body.filename=file.name; body.mime=file.type||'application/octet-stream';
-          var fr=new FileReader(); fr.onload=function(){ body.data_base64=String(fr.result).replace(/^data:[^;]+;base64,/,'');
-            shipPost('/api/product/specs',body,function(r){ if(r&&r.error){ alert('Save failed on '+file.name+': '+r.error); save.disabled=false; save.textContent='Save specification'; return; } up(i+1); }); };
-          fr.readAsDataURL(file);
+          body.spec_type=file._type||defType;
+          hzUpload(file,{field:'data_base64',category:'specs'}).then(function(fields){ for(var fk in fields)body[fk]=fields[fk];
+            shipPost('/api/product/specs',body,function(r){ if(r&&r.error){ alert('Save failed on '+file.name+': '+r.error); save.disabled=false; save.textContent='Save specification'; return; } up(i+1); }); }).catch(function(e){ alert('Save failed on '+file.name+': '+(e&&e.message||e)); save.disabled=false; save.textContent='Save specification'; });
         })(0);
       };
       // list controls: search, type pills, view toggle
@@ -14450,7 +14470,7 @@
               shipPost('/api/product/note/upsert-feedback',{ref:ref,prefix:_pfx,body:_pfx+' '+(_txt||('📎 '+names[names.length-1])),author_email:(window.ME&&ME.email)||'',tags:_tg,pantone:_pan,attachment_id:lastId},function(jn){ var ind=body.querySelector('.ps-tl-ind[data-id="'+id+'"][data-aspect="'+asp+'"]'); if(ind&&jn)ind.textContent=(jn.updated?'updated on timeline ':'added to timeline ')+(jn.at||''); }); }catch(e){} }
             return; }
           var f=files[i++]; if(f.size>10*1024*1024){ if(msg)msg.textContent=f.name+' skipped (over 10MB)'; one(); return; } if(msg)msg.textContent='uploading '+f.name+'…';
-          var rd=new FileReader(); rd.onload=function(){ shipPost('/api/product/sample/'+id+'/photo',{filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:(window.ME&&ME.email)||'',aspect:asp},function(jr){ if(jr&&jr.id){ lastId=jr.id; names.push(f.name); if(lst)lst.insertAdjacentHTML('beforeend',hzFileChip({id:jr.id,filename:f.name,mime:f.type})); } one(); }); }; rd.readAsDataURL(f); }
+          hzUpload(f,{field:'data_base64',category:'samples'}).then(function(up){ shipPost('/api/product/sample/'+id+'/photo',Object.assign({uploaded_by:(window.ME&&ME.email)||'',aspect:asp},up),function(jr){ if(jr&&jr.id){ lastId=jr.id; names.push(f.name); if(lst)lst.insertAdjacentHTML('beforeend',hzFileChip({id:jr.id,filename:f.name,mime:f.type})); } one(); }); }).catch(function(e){ if(msg)msg.textContent=f.name+': '+(e&&e.message||'upload failed'); one(); }); }
         one(); }
       body.querySelectorAll('.ps-fb-up').forEach(function(inp){ inp.onchange=function(){ psUpFiles(inp.dataset.id,inp.dataset.aspect,inp.files); inp.value=''; }; });
       body.querySelectorAll('.ps-fbcell').forEach(function(cell){ cell.addEventListener('dragover',function(e){ e.preventDefault(); cell.style.outline='2px dashed var(--blue)'; cell.style.outlineOffset='-4px'; }); cell.addEventListener('dragleave',function(){ cell.style.outline=''; }); cell.addEventListener('drop',function(e){ e.preventDefault(); cell.style.outline=''; if(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files.length)psUpFiles(cell.dataset.id,cell.dataset.aspect,e.dataTransfer.files); }); });
@@ -14458,10 +14478,10 @@
       body.querySelectorAll('.ps-up').forEach(function(inp){ inp.onchange=function(){ var id=inp.dataset.id, files=Array.prototype.slice.call(inp.files||[]), strip=body.querySelector('.ps-photos[data-id="'+id+'"]'), msg=body.querySelector('.ps-up-msg[data-id="'+id+'"]'); if(!files.length)return; var i=0, done=0;
         function one(){ if(i>=files.length){ if(msg){ msg.textContent=done+' file'+(done===1?'':'s')+' added'; setTimeout(function(){ msg.textContent=''; },2600); } inp.value=''; _prodJsonBust(ref); return; }
           var f=files[i++]; if(f.size>10*1024*1024){ if(msg)msg.textContent=f.name+' skipped (over 10MB)'; one(); return; } if(msg)msg.textContent='uploading '+f.name+'…';
-          var rd=new FileReader(); rd.onload=function(){ shipPost('/api/product/sample/'+id+'/photo',{filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:(window.ME&&ME.email)||''},function(j){ done++; if(strip&&j&&j.id){ var url='/api/supply/portal-attachment/'+j.id;
+          hzUpload(f,{field:'data_base64',category:'samples'}).then(function(up){ shipPost('/api/product/sample/'+id+'/photo',Object.assign({uploaded_by:(window.ME&&ME.email)||''},up),function(j){ done++; if(strip&&j&&j.id){ var url='/api/supply/portal-attachment/'+j.id;
               if(/^image\//i.test(f.type||'')){ var im=document.createElement('img'); im.className='psamp-img'; im.dataset.src=url; im.src=url; im.title=f.name; im.style.cssText='width:60px;height:60px;object-fit:cover;border-radius:6px;border:1px solid var(--line);margin:2px;cursor:zoom-in'; im.onclick=function(){ openImgZoom(url); }; strip.appendChild(im); }
               else { var a=document.createElement('a'); a.href=url; a.target='_blank'; a.rel='noopener'; a.style.cssText='display:inline-block;margin:2px;padding:5px 9px;border:1px solid var(--line);border-radius:6px;font-size:11px;color:var(--blue);text-decoration:underline'; a.textContent='📄 '+f.name; strip.appendChild(a); } }
-            one(); }); }; rd.readAsDataURL(f); }
+            one(); }); }).catch(function(e){ if(msg)msg.textContent=f.name+': '+(e&&e.message||'upload failed'); one(); }); }
         one(); }; });
       body.querySelectorAll('.samp-open').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); (typeof openSampleDrawer==="function"?openSampleDrawer(a.dataset.ref):gotoSample(a.dataset.ref)); }; });   // sample-shipment ref -> editable drawer (was: navigate to SUPPLY Samples)
       var _pns=body.querySelector('.prod-newsamp'); if(_pns)_pns.onclick=function(){ var _d=_prodDetail; _newSampleForProduct((_d&&_d.item&&_d.item.supplier)||'', _prodSeedSku(_d, ref)); };
@@ -14656,7 +14676,7 @@
       scope.querySelectorAll('.pm-comp-appsamp').forEach(function(el){ if(el._b)return; el._b=1; el.onchange=function(){ var sd=sizeDimObj(el.dataset.id,el.dataset.dim); if(sd)sd.approved_sample_id=el.value||null;
         shipPost('/api/product/size/'+el.dataset.id+'/dimension',{dimension:el.dataset.dim,approved_sample_id:el.value||''},function(j){ if(j&&j.error){alert('Failed: '+j.error);return;} reRender(); }); }; });
       function _uploadCompFiles(id,dim,files,cb){ var list=Array.prototype.slice.call(files||[]).filter(function(f){return f.size<=10*1024*1024;}), i=0;
-        (function up(){ if(i>=list.length){ if(cb)cb(); return; } var f=list[i++]; var rd=new FileReader(); rd.onload=function(){ shipPost('/api/product/component-file',{size_id:id,dimension:dim,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:(window.ME&&ME.email)||''},function(){ up(); }); }; rd.readAsDataURL(f); })(); }
+        (function up(){ if(i>=list.length){ if(cb)cb(); return; } var f=list[i++]; hzUpload(f,{field:'data_base64',category:'product-dim'}).then(function(fields){ shipPost('/api/product/component-file',Object.assign({size_id:id,dimension:dim,uploaded_by:(window.ME&&ME.email)||''},fields),function(){ up(); }); }).catch(function(){ up(); }); })(); }
       scope.querySelectorAll('.pm-comp-file').forEach(function(inp){ if(inp._b)return; inp._b=1; inp.onchange=function(){ if(inp.files.length)_uploadCompFiles(inp.dataset.id,inp.dataset.dim,inp.files,reloadSizes); }; });
       // Drag & drop files onto a component's Files cell to attach them (same as the "+ file" picker).
       scope.querySelectorAll('.pm-fcell').forEach(function(cell){ if(cell._b)return; cell._b=1;
@@ -14737,7 +14757,7 @@
       if(!ok.length){m.style.color='var(--neg)';m.textContent='all files over 10MB — skipped';return;}
       m.style.color='var(--muted)'; m.textContent='uploading '+ok.length+' file'+(ok.length>1?'s':'')+'…'; var i=0;
       (function up(){ if(i>=ok.length){ m.style.color='var(--pos)'; m.textContent='uploaded'+(skipped?' ('+skipped+' skipped — over 10MB)':''); refreshDocs(); return; }
-        var f=ok[i++]; var rd=new FileReader(); rd.onload=function(){ shipPost('/api/product/doc',{ref:ref,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:(window.ME&&ME.email)||''},function(j){ if(j&&j.error){m.style.color='var(--neg)';m.textContent=j.error;return;} up(); }); }; rd.readAsDataURL(f); })(); }
+        var f=ok[i++]; hzUpload(f,{field:'data_base64',category:'product-docs'}).then(function(fields){ shipPost('/api/product/doc',Object.assign({ref:ref,uploaded_by:(window.ME&&ME.email)||''},fields),function(j){ if(j&&j.error){m.style.color='var(--neg)';m.textContent=j.error;return;} up(); }); }).catch(function(e){ m.style.color='var(--neg)'; m.textContent=(e&&e.message)||'upload failed'; }); })(); }
     body.querySelector('#pdoc-up').onclick=function(){ uploadDocFiles(body.querySelector('#pdoc-file').files); };
     // Drag & drop multiple files onto the upload box.
     (function(){ var dz=body.querySelector('#pdoc-drop'); if(!dz)return;
@@ -14836,7 +14856,7 @@
       function addFiles(list){ Array.prototype.slice.call(list||[]).forEach(function(f){ if(f.size>10*1024*1024){ alert(f.name+' is over 10MB'); return; } _files.push(f); }); drawFiles(); }
       var _pf=body.querySelector('#pt-files'); if(_pf)_pf.onchange=function(){ addFiles(_pf.files); _pf.value=''; };
       var _pta=body.querySelector('#pt-in'); if(_pta){ _pta.addEventListener('dragover',function(e){ e.preventDefault(); _pta.style.outline='2px dashed var(--blue)'; }); _pta.addEventListener('dragleave',function(){ _pta.style.outline=''; }); _pta.addEventListener('drop',function(e){ e.preventDefault(); _pta.style.outline=''; if(e.dataTransfer&&e.dataTransfer.files)addFiles(e.dataTransfer.files); }); }
-      function uploadAll(cb){ var ids=[], i=0; (function one(){ if(i>=_files.length){ cb(ids); return; } var f=_files[i++]; var rd=new FileReader(); rd.onload=function(){ shipPost('/api/product/doc',{ref:ref,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result),uploaded_by:(window.ME&&ME.email)||''},function(jr){ if(jr&&jr.id)ids.push({id:jr.id,name:f.name}); one(); }); }; rd.readAsDataURL(f); })(); }
+      function uploadAll(cb){ var ids=[], i=0; (function one(){ if(i>=_files.length){ cb(ids); return; } var f=_files[i++]; hzUpload(f,{field:'data_base64',category:'product-docs'}).then(function(fields){ shipPost('/api/product/doc',Object.assign({ref:ref,uploaded_by:(window.ME&&ME.email)||''},fields),function(jr){ if(jr&&jr.id)ids.push({id:jr.id,name:f.name}); one(); }); }).catch(function(){ one(); }); })(); }
       body.querySelector('#pt-post').onclick=function(){ var t=body.querySelector('#pt-in').value.trim(); if(!t&&!_files.length)return; var tags=Object.keys(_sel).filter(function(id){return _sel[id];}).map(Number);
         var pantone=Object.keys(_panPicked).filter(function(code){ return t.indexOf('🎨 '+code)>=0; }).map(function(code){ return _panPicked[code]; });   // only cards whose token survives in the text
         var pb=body.querySelector('#pt-post'), pm=body.querySelector('#pt-postmsg'); pb.disabled=true; if(pm&&_files.length)pm.textContent='uploading '+_files.length+' file'+(_files.length===1?'':'s')+'…';

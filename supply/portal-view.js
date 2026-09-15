@@ -842,9 +842,33 @@
       if(b.classList.contains('pp-ship-inv')) dlInvoice((EP.shipmentInvoice||'/api/invoice/shipment/')+encodeURIComponent(b.dataset.ref), b);
       else dlInvoice((EP.poInvoice||'/api/invoice/po/')+encodeURIComponent(b.dataset.po), b); }); }
 
+  // hzUpload(file, opts) — shared uploader. Files ≤3MB go inline as base64 (unchanged path); larger files upload DIRECT to
+  // Supabase Storage via a signed URL (clears Vercel's ~4.5MB body cap) and return a storage_path instead. Resolves to an
+  // object to merge into your POST body: {filename,mime,byte_size} plus either {<field>:b64} or {storage_path,storage_sig}.
+  function hzUpload(file, opts){
+    opts = opts || {};
+    var field = opts.field || 'data_base64';
+    var category = opts.category || 'misc';
+    var signUrl = opts.signUrl || '/api/storage/sign-upload';
+    var INLINE_MAX = 3*1024*1024;
+    if(!file) return Promise.reject(new Error('no file'));
+    var meta = { filename: file.name||'file', mime: file.type||'application/octet-stream', byte_size: file.size };
+    if(file.size <= INLINE_MAX){
+      return new Promise(function(res,rej){
+        var r=new FileReader();
+        r.onload=function(){ var o={}; for(var k in meta)o[k]=meta[k]; o[field]=String(r.result).replace(/^data:[^;]+;base64,/,''); res(o); };
+        r.onerror=function(){ rej(r.error||new Error('could not read file')); };
+        r.readAsDataURL(file);
+      });
+    }
+    return fetch(signUrl,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({category:category,filename:meta.filename,mime:meta.mime,byte_size:meta.byte_size})})
+      .then(function(r){ return r.text().then(function(t){ var j; try{j=t?JSON.parse(t):{};}catch(_){j={};} if(!r.ok||!j.upload_url) throw new Error((j&&j.error)||('could not start upload ('+r.status+')')); return j; }); })
+      .then(function(j){ return fetch(j.upload_url,{method:'PUT',headers:{'content-type':meta.mime},body:file}).then(function(pr){ if(!pr.ok) throw new Error('storage upload failed ('+pr.status+')'); var o={}; for(var k in meta)o[k]=meta[k]; o.storage_path=j.storage_path; o.storage_sig=j.storage_sig; return o; }); });
+  }
+
   // ── v27.571: timeline attachments — drop box + chips under a composer textarea; files upload ONE AT A TIME (4MB cap each),
   // the first rides on the message note, any others post as their own "📎 name" notes. Shared by PO / shipment / sample timelines.
-  var HZ_TL_MAX=4*1024*1024;
+  var HZ_TL_MAX=100*1024*1024;
   function hzTlAttHtml(n,base){ if(!n||!n.attachment_id)return ''; var u=base+encodeURIComponent(n.attachment_id), nm=n.attachment_name||'attachment', img=/^image\//i.test(String(n.attachment_mime||''));
     return '<div style="margin-top:4px;text-align:left">'+(img?'<a href="'+u+'" target="_blank" rel="noopener"><img src="'+u+'" alt="'+esc(nm)+'" title="'+esc(nm)+'" style="max-width:180px;max-height:140px;border-radius:5px;border:1px solid var(--line);display:block"></a>':'')+'<a href="'+u+'" target="_blank" rel="noopener" style="font-size:11px;color:var(--blue);text-decoration:none">📎 '+esc(nm)+'</a></div>'; }
   function hzTlAttach(ta,opts){ opts=opts||{}; if(!ta)return null; if(ta._hzAtt)return ta._hzAtt; var files=[], notice=opts.notice||ppNotice;
@@ -853,14 +877,14 @@
     (opts.after||ta).insertAdjacentElement('afterend',box);
     var inp=box.querySelector('input'), fl=box.querySelector('.hz-tl-flist'), fm=box.querySelector('.hz-tl-fmsg');
     function draw(){ fl.innerHTML=files.map(function(f,i){ return '<span style="display:inline-flex;align-items:center;gap:4px;font-size:10.5px;background:#fff;border:1px solid var(--line);border-radius:10px;padding:1px 8px">📎 '+esc(f.name)+' <span class="mut">'+(f.size>=1048576?(f.size/1048576).toFixed(1)+'MB':Math.max(1,Math.round(f.size/1024))+'KB')+'</span> <a data-i="'+i+'" style="cursor:pointer;color:var(--neg);font-weight:800">×</a></span>'; }).join(''); fl.querySelectorAll('a[data-i]').forEach(function(a){ a.onclick=function(){ files.splice(parseInt(a.dataset.i,10),1); draw(); }; }); }
-    function add(list){ var skipped=[]; Array.prototype.slice.call(list||[]).forEach(function(f){ if(f.size>HZ_TL_MAX){ skipped.push(f.name); return; } files.push(f); }); draw(); if(skipped.length)notice(skipped.join(', ')+' skipped: over the 4MB per-file limit'); }
+    function add(list){ var skipped=[]; Array.prototype.slice.call(list||[]).forEach(function(f){ if(f.size>HZ_TL_MAX){ skipped.push(f.name); return; } files.push(f); }); draw(); if(skipped.length)notice(skipped.join(', ')+' skipped: over the 100MB per-file limit'); }
     inp.onchange=function(){ add(inp.files); inp.value=''; };
     [ta,box].forEach(function(el){ el.addEventListener('dragover',function(e){ e.preventDefault(); el.style.outline='2px dashed var(--blue)'; el.style.outlineOffset='-2px'; }); el.addEventListener('dragleave',function(){ el.style.outline=''; }); el.addEventListener('drop',function(e){ e.preventDefault(); el.style.outline=''; if(e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files.length)add(e.dataTransfer.files); }); });
     var api={ count:function(){ return files.length; }, clear:function(){ files=[]; draw(); fm.textContent=''; },
-      uploadAll:function(cb){ var ids=[], i=0, list=files.slice(); (function one(){ if(i>=list.length){ fm.textContent=''; cb(ids); return; } var f=list[i++]; fm.textContent='uploading '+f.name+' ('+i+'/'+list.length+')…'; var rd=new FileReader(); rd.onload=function(){ opts.upload(f,String(rd.result),function(id,err){ if(id)ids.push({id:id,name:f.name}); else if(err)notice(f.name+': '+err); one(); }); }; rd.onerror=function(){ one(); }; rd.readAsDataURL(f); })(); } };
+      uploadAll:function(cb){ var ids=[], i=0, list=files.slice(); (function one(){ if(i>=list.length){ fm.textContent=''; cb(ids); return; } var f=list[i++]; fm.textContent='uploading '+f.name+' ('+i+'/'+list.length+')…'; hzUpload(f,{field:'data_base64',category:'timeline',signUrl:(EP.signUpload||'/api/storage/sign-upload')}).then(function(fields){ opts.upload(f, fields, function(id,err){ if(id)ids.push({id:id,name:f.name}); else if(err)notice(f.name+': '+err); one(); }); }).catch(function(e){ notice(f.name+': '+(e&&e.message||'upload failed')); one(); }); })(); } };
     ta._hzAtt=api; return api; }
   function hzTlSend(att,text,postOne,done){ function run(ids){ var first=ids.shift(); if(!text&&!first){ done(); return; } postOne(text||('📎 '+first.name), first?first.id:null, function(){ (function extra(){ if(!ids.length){ if(att)att.clear(); done(); return; } var x=ids.shift(); postOne('📎 '+x.name, x.id, extra); })(); }); } if(att&&att.count())att.uploadAll(run); else run([]); }
-  function hzTlUploader(kind,ref,extra){ return function(f,b64,cb){ var body=Object.assign({kind:kind,ref:ref,filename:f.name,mime:f.type||'application/octet-stream',data_base64:b64},extra||{}); fetch((EP.timelineAttachment||'/api/portal/timeline-attachment'),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){ return r.text().then(function(t){ try{ return t?JSON.parse(t):{}; }catch(_){ return {error:'Server error ('+r.status+')'}; } }); }).then(function(j){ cb(j&&j.id||null, j&&j.error||null); }).catch(function(e){ cb(null, e&&e.message||'upload failed'); }); }; }
+  function hzTlUploader(kind,ref,extra){ return function(f,fields,cb){ var body=Object.assign({kind:kind,ref:ref},fields,extra||{}); fetch((EP.timelineAttachment||'/api/portal/timeline-attachment'),{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r){ return r.text().then(function(t){ try{ return t?JSON.parse(t):{}; }catch(_){ return {error:'Server error ('+r.status+')'}; } }); }).then(function(j){ cb(j&&j.id||null, j&&j.error||null); }).catch(function(e){ cb(null, e&&e.message||'upload failed'); }); }; }
     function postJSON(ep,b2,cb){ fetch(ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b2)})
       .then(function(r){ return r.text().then(function(t){ try{ return t?JSON.parse(t):{}; }catch(_){ return r.ok?{}:{error:'Server error ('+r.status+')'}; } }); })   // tolerate empty / non-JSON (e.g. a 404 HTML page) — don't throw the cryptic Safari parse error
       .then(function(j){ if(j&&j.error){ppNotice(j.error);return;} cb&&cb(j); }).catch(function(e){ ppNotice('Failed: '+(e&&e.message||e)); }); }
@@ -1801,7 +1825,7 @@
               np.onclick=function(){ var inp=_sin; var v=(inp.value||'').trim(); if(!v&&!(_satt&&_satt.count()))return; np.disabled=true;
                 hzTlSend(_satt,v,function(bodyTxt,attId,next){ postJSON(EP.sampleNote,{id:id,body:bodyTxt,author_kind:EP.sampleNoteAuthorKind,author_email:EP.sampleNoteAuthorEmail,attachment_id:attId||null},next); },function(){ np.disabled=false; inp.value=''; ppSampleTimeline(id); }); }; }
             var af=scope.querySelector('.ps-att-file'), au=scope.querySelector('.ps-att-up');
-            if(au)au.onclick=function(){ var f=af&&af.files&&af.files[0]; if(!f){ppNotice('Choose a file to upload.');return;} au.disabled=true; var rd=new FileReader(); rd.onload=function(){ postJSON(EP.sampleAttachment,{id:id,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result)},function(){ reload(); }); }; rd.readAsDataURL(f); };
+            if(au)au.onclick=function(){ var f=af&&af.files&&af.files[0]; if(!f){ppNotice('Choose a file to upload.');return;} au.disabled=true; hzUpload(f,{field:'data_base64',category:'sample',signUrl:(EP.signUpload||'/api/storage/sign-upload')}).then(function(up){ postJSON(EP.sampleAttachment,Object.assign({id:id},up),function(){ reload(); }); }).catch(function(e){ ppNotice('Upload failed: '+(e&&e.message||e)); au.disabled=false; }); };
             scope.querySelectorAll('.ps-att-rm').forEach(function(b){ b.onclick=async function(){ if(!(await _ppConfirm('Remove this attachment?')))return; postJSON(EP.sampleAttachmentRemove,{att_id:b.dataset.aid},function(){ reload(); }); }; });
             ppSampleTimeline(id); }
           function ppSampleTimeline(id){ var box=body.querySelector('.samp-tl[data-id="'+id+'"]'); if(!box)return;
@@ -1968,7 +1992,7 @@
               var fi=box.querySelector('.pp-doc-file'), msg=box.querySelector('.pp-doc-msg'); if(fi)fi.onchange=function(){ var all=Array.prototype.slice.call(fi.files); if(!all.length)return; var skipped=all.filter(function(f){return f.size>10*1024*1024;}).length, ok=all.filter(function(f){return f.size<=10*1024*1024;});
                 if(!ok.length){ msg.style.color='#dc2626'; msg.textContent='all files over 10MB — skipped'; return; }
                 msg.style.color='#64748b'; msg.textContent='Uploading '+ok.length+' file'+(ok.length>1?'s':'')+'…'; var i=0;
-                (function up(){ if(i>=ok.length){ if(skipped){ msg.style.color='#b45309'; msg.textContent=skipped+' file'+(skipped>1?'s':'')+' skipped — over 10MB'; setTimeout(function(){ ppProdDocs(box,ref); },900); } else ppProdDocs(box,ref); return; } var f=ok[i++]; var rd=new FileReader(); rd.onload=function(){ postJSON(EP.productDoc,{ref:ref,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result)},function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;return;} up(); }); }; rd.readAsDataURL(f); })(); };
+                (function up(){ if(i>=ok.length){ if(skipped){ msg.style.color='#b45309'; msg.textContent=skipped+' file'+(skipped>1?'s':'')+' skipped — over 10MB'; setTimeout(function(){ ppProdDocs(box,ref); },900); } else ppProdDocs(box,ref); return; } var f=ok[i++]; hzUpload(f,{field:'data_base64',category:'product-docs',signUrl:(EP.signUpload||'/api/storage/sign-upload')}).then(function(fields){ postJSON(EP.productDoc,Object.assign({ref:ref},fields),function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;return;} up(); }); }).catch(function(e){ msg.style.color='#dc2626'; msg.textContent=(e&&e.message)||'upload failed'; }); })(); };
             }).catch(function(e){ box.innerHTML='<div style="color:var(--neg);text-align:left">Failed: '+esc(e&&e.message||e)+'</div>'; }); }
           // Compact single-label PDF for one sample version: ref (incl _vN), colourway, supplier, date.
           function dlSampleLabel(opts){ try{ opts=opts||{}; var ref=String(opts.ref||''), S=2, W=500, H=320;
@@ -2100,7 +2124,7 @@
               box.querySelectorAll('.pp-samp-file').forEach(function(fi){ fi.onchange=function(){ var id=fi.dataset.id, all=Array.prototype.slice.call(fi.files); if(!all.length)return; var msg=box.querySelector('.pp-samp-msg[data-id="'+id+'"]'); var skipped=all.filter(function(f){return f.size>10*1024*1024;}).length, ok=all.filter(function(f){return f.size<=10*1024*1024;});
                 if(!ok.length){ if(msg){msg.style.color='#dc2626';msg.textContent='over 10MB — skipped';} return; }
                 if(msg){msg.style.color='#64748b';msg.textContent='Uploading…';} var i=0;
-                (function up(){ if(i>=ok.length){ if(skipped&&msg){msg.style.color='#b45309';msg.textContent=skipped+' skipped — over 10MB';} paint(); return; } var f=ok[i++]; var rd=new FileReader(); rd.onload=function(){ postJSON(EP.productSamplePhoto,{sample_id:id,filename:f.name,mime:f.type||'application/octet-stream',data_base64:String(rd.result)},function(j){ if(j&&j.error){ if(msg){msg.style.color='#dc2626';msg.textContent=j.error;} return; } if(j&&j.id){ var s=list.filter(function(x){return String(x.id)===String(id);})[0]; if(s){ s.photos=s.photos||[]; s.photos.push({id:j.id,filename:f.name,mime:f.type||'application/octet-stream',uploader_kind:'supplier'}); } } up(); }); }; rd.readAsDataURL(f); })(); }; });   // silent
+                (function up(){ if(i>=ok.length){ if(skipped&&msg){msg.style.color='#b45309';msg.textContent=skipped+' skipped — over 10MB';} paint(); return; } var f=ok[i++]; hzUpload(f,{field:'data_base64',category:'samples',signUrl:(EP.signUpload||'/api/storage/sign-upload')}).then(function(fields){ postJSON(EP.productSamplePhoto,Object.assign({sample_id:id},fields),function(j){ if(j&&j.error){ if(msg){msg.style.color='#dc2626';msg.textContent=j.error;} return; } if(j&&j.id){ var s=list.filter(function(x){return String(x.id)===String(id);})[0]; if(s){ s.photos=s.photos||[]; s.photos.push({id:j.id,filename:f.name,mime:f.type||'application/octet-stream',uploader_kind:'supplier'}); } } up(); }); }).catch(function(e){ if(msg){msg.style.color='#dc2626';msg.textContent=(e&&e.message)||'upload failed';} up(); }); })(); }; });   // silent
               var _addb=box.querySelector('.pp-add-sample'), _form=box.querySelector('.pp-sample-form'); if(_addb)_addb.onclick=function(){ _form.style.display=(_form.style.display!=='none')?'none':''; };   // no auto-focus on the date input (it auto-opens the mobile picker); date defaults to today, opens on tap
               var sv=box.querySelector('.ps2-save'); sv.onclick=function(){ var msg=box.querySelector('.ps2-msg');
                 var col=box.querySelector('.ps2-col').checked, qual=box.querySelector('.ps2-qual').checked;
@@ -2113,7 +2137,7 @@
                 var shipv=((box.querySelector('.ps2-ship-inp')||{}).dataset||{}).val||'', mkNew=(shipv==='__new__'), shipFields=shipv==='not_shipped'?{not_shipped:true}:((shipv&&!mkNew)?{sample_request_id:shipv}:{});   // v27.529: __new__ = create a shipment for this sample right after it is created
                 postJSON(EP.productSample,Object.assign({item_ref:ref,sample_date:box.querySelector('.ps2-date').value,colour_verified:true,quality_verified:true,description:box.querySelector('.ps2-desc').value,sampled_aspects:aspects,sample_sizes:sizes},shipFields),function(j){ if(j&&j.error){msg.style.color='#dc2626';msg.textContent=j.error;sv.disabled=false;return;}
                   var files=box.querySelector('.ps2-photos').files, i=0;
-                  function up(){ if(i>=files.length){ ppProdSamples(box,ref); return; } var f=files[i++]; if(f.size>10*1024*1024){ up(); return; } var rd=new FileReader(); rd.onload=function(){ postJSON(EP.productSamplePhoto,{sample_id:j.id,filename:f.name,mime:f.type||'image/jpeg',data_base64:String(rd.result)},function(){ up(); }); }; rd.readAsDataURL(f); }
+                  function up(){ if(i>=files.length){ ppProdSamples(box,ref); return; } var f=files[i++]; if(f.size>10*1024*1024){ up(); return; } hzUpload(f,{field:'data_base64',category:'samples',signUrl:(EP.signUpload||'/api/storage/sign-upload')}).then(function(fields){ postJSON(EP.productSamplePhoto,Object.assign({sample_id:j.id},fields,{mime:f.type||'image/jpeg'}),function(){ up(); }); }).catch(function(){ up(); }); }
                   if(mkNew){ msg.textContent='Creating shipment…'; postJSON(EP.sampleCreate,{dev_samples:[{id:j.id,qty:1}]},function(sj){ if(sj&&sj.error)ppNotice(sj.error); else ppNotice('Shipment '+(sj.ref||'')+' created with this sample — add address & tracking in SAMPLES','ok'); up(); }); }
                   else up(); }); };
               }
@@ -2323,7 +2347,7 @@
               var prod=prodEl?prodEl.value.trim():'', batch=batchEl?batchEl.value.trim():'', po=poEl?poEl.value.trim():'';
               if(!(prod||batch)){ if(msg)msg.textContent='Choose a production or batch.'; flashReq(); return; }
               up.disabled=true; up.style.background='#cbd5e1'; up.style.cursor='not-allowed'; if(msg)msg.textContent='Uploading…';
-              var f=_file, rd=new FileReader(); rd.onload=function(){ fetch('/api/portal/quality-doc',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({doc_type:typeEl.value, filename:f.name, mime:f.type||'application/octet-stream', data_base64:String(rd.result), prod_no:prod||null, batch_id:batch||null, po:po||null})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ if(msg)msg.textContent='Error: '+j.error; refreshBtn(); return; } if(msg)msg.textContent='Uploaded ✓'; setFile(null); if(typeEl)typeEl.value=''; if(prodEl)prodEl.value=''; if(batchEl)batchEl.value=''; if(poEl)poEl.value=''; refreshBtn(); load(); }).catch(function(){ if(msg)msg.textContent='Upload failed'; refreshBtn(); }); }; rd.readAsDataURL(f); };
+              var f=_file; hzUpload(f,{field:'data_base64',category:'quality',signUrl:(EP.signUpload||'/api/storage/sign-upload')}).then(function(up){ fetch('/api/portal/quality-doc',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.assign({doc_type:typeEl.value, prod_no:prod||null, batch_id:batch||null, po:po||null},up))}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ if(msg)msg.textContent='Error: '+j.error; refreshBtn(); return; } if(msg)msg.textContent='Uploaded ✓'; setFile(null); if(typeEl)typeEl.value=''; if(prodEl)prodEl.value=''; if(batchEl)batchEl.value=''; if(poEl)poEl.value=''; refreshBtn(); load(); }).catch(function(){ if(msg)msg.textContent='Upload failed'; refreshBtn(); }); }).catch(function(){ if(msg)msg.textContent='Upload failed'; refreshBtn(); }); };
             load(); refreshBtn();
           }
           // SUG-0019 P3: PRODUCT ▸ Specifications — files grouped by type; "confirm" items need the supplier's acknowledgement.
@@ -2740,10 +2764,10 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                 var fin=pick('pp-inv-parse-file',po), f=fin&&fin.files&&fin.files[0], out=pick('pp-inv-parse-out',po), row=btn.closest('tr[id^="pp-"]');
                 if(!f){ out.innerHTML='<span class="mut tiny">Choose an Excel (.xlsx) file first.</span>'; return; }
                 btn.disabled=true; out.innerHTML='<span class="mut tiny">Parsing…</span>';
-                var rd=new FileReader(); rd.onload=function(){ var b64=rd.result;
-                  postJSON(EP.parseInvoice,{po:po,data_base64:b64},function(j){ btn.disabled=false;
+                hzUpload(f,{field:'data_base64',category:'invoice',signUrl:(EP.signUpload||'/api/storage/sign-upload')}).then(function(up){
+                  postJSON(EP.parseInvoice,Object.assign({po:po},up),function(j){ btn.disabled=false;
                     if(!j||j.error||j.ok===false){ out.innerHTML='<span style="color:var(--neg);font-size:12px">'+esc((j&&j.error)||'Could not parse the file.')+'</span>'; return; }
-                    _invFiles[po]=b64; var t=j.totals, diff=j.lines.filter(function(l){return l.status!=='match';});
+                    _invFiles[po]=up; var t=j.totals, diff=j.lines.filter(function(l){return l.status!=='match';});
                     var rows=diff.map(function(l){ return '<tr><td class="l">'+esc(l.sku)+'</td><td class="l">'+(l.status==='new'?'<span class="tool-badge bg-amber" style="font-size:10.5px">NEW</span>':'<span class="mut tiny">changed</span>')+'</td>'
                       +'<td style="text-align:right">'+(l.cur_qty==null?'—':units(l.cur_qty))+' → <b>'+units(l.inv_qty)+'</b></td>'
                       +'<td style="text-align:right">'+(l.cur_cost==null?'—':'$'+money(l.cur_cost))+' → <b>'+(l.inv_price==null?'—':'$'+money(l.inv_price))+'</b></td></tr>'; }).join('');
@@ -2752,12 +2776,12 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                         +'<button class="save-btn pp-inv-apply" data-po="'+esc(po)+'" style="margin-top:6px">Apply '+(t.changed+t.neu)+' change(s) to my order plan</button>'
                         :'<span class="mut tiny">Everything matches your order plan — nothing to change.</span>');
                     var ab=out.querySelector('.pp-inv-apply'); if(ab)ab.onclick=function(){ ab.disabled=true; ab.textContent='Applying…';
-                      postJSON(EP.invoiceApply,{po:po,data_base64:_invFiles[po],submitted_by:by},function(r){
+                      postJSON(EP.invoiceApply,Object.assign({po:po,submitted_by:by},_invFiles[po]),function(r){
                         if(!r||r.error){ ppNotice('Apply failed: '+((r&&r.error)||'')); ab.disabled=false; ab.textContent='Apply'; return; }
                         diff.forEach(function(l){ (_ppData.costsByPo[po]=_ppData.costsByPo[po]||{})[l.sku]={amended_qty:l.inv_qty,actual_cost:l.inv_price,is_added:(l.status==='new')}; });
                         ppNotice('Applied to your order plan: '+r.applied+' line(s)'+(r.added?' ('+r.added+' new)':'')+'. Review the qty & cost below, then confirm the order — Dock & Bay will approve the change.');
-                        rerenderRow(row,po,'orderplan'); }); }; }); };
-                rd.readAsDataURL(f); }; });
+                        rerenderRow(row,po,'orderplan'); }); }; }); }).catch(function(e){ btn.disabled=false; out.innerHTML='<span style="color:var(--neg);font-size:12px">'+esc(e&&e.message||'upload failed')+'</span>'; });
+                 }; });
               // Paste-from-spreadsheet (SKU · Qty · Price) → apply each row via lineCost (→ Dock & Bay to approve).
               scope.querySelectorAll('.pp-paste-op-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]');
                 var ta=scope.querySelector('.pp-paste-op[data-po="'+CSS.escape(po)+'"]'), msg=scope.querySelector('.pp-paste-op-msg[data-po="'+CSS.escape(po)+'"]');
@@ -2834,14 +2858,14 @@ scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(
                 var calc=Number(inp.dataset.calc)||0, v=Number(String(inp.value||'').replace(/,/g,''))||0; w.style.display=(inp.value!==''&&Math.abs(v-calc)>0.01)?'':'none'; }; });
               scope.querySelectorAll('.pp-inv-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]'); var _rawv=(pick('pp-inv',po).value||'').trim(); var val=_rawv.replace(/[^0-9.\-]/g,''); if(_rawv!==''&&!/^-?[0-9]+(\.[0-9]+)?$/.test(val)){ ppNotice('Invoice amount must be a number (no currency symbols or letters).'); return; } var fin=pick('pp-inv-file',po); var f=fin&&fin.files[0]; if(!val&&!f)return; btn.disabled=true;
                 var go=function(attId){ postJSON(EP.submit,{po:po,supplier_id:sid,submitted_by:by,invoice_value:val||null,invoice_attachment_id:attId||null},function(){ (_ppData.subsByPo[po]=_ppData.subsByPo[po]||[]).push({kind:'invoice_value',value:val,status:'pending',submitted_at:new Date().toISOString().slice(0,10)}); refreshRow(row,po); }); };
-                if(f){ var rd=new FileReader(); rd.onload=function(){ postJSON(EP.upload,{po:po,supplier_id:sid,filename:f.name,mime:f.type,data_base64:rd.result,uploaded_by:by},function(j){ go(j.id); }); }; rd.readAsDataURL(f); } else go(null); }; });
+                if(f){ hzUpload(f,{field:'data_base64',category:'po',signUrl:(EP.signUpload||'/api/storage/sign-upload')}).then(function(up){ postJSON(EP.upload,Object.assign({po:po,supplier_id:sid,uploaded_by:by},up),function(j){ go(j.id); }); }).catch(function(e){ ppNotice('Upload failed: '+(e&&e.message||e)); btn.disabled=false; }); } else go(null); }; });
               // upload a typed document (Commercial Invoice / Packing List / …) → store + show in the Documents list
               scope.querySelectorAll('.pp-doc-go').forEach(function(btn){ btn.onclick=function(){ var po=btn.dataset.po;
                 var typeEl=pick('pp-doc-type',po), fin=pick('pp-doc-file',po), f=fin&&fin.files&&fin.files[0];
                 if(!f){ ppNotice('Choose a file to upload.'); return; } var cat=typeEl?typeEl.value:'Other'; var row=btn.closest('tr[id^="pp-"]'); btn.disabled=true;
-                var rd=new FileReader(); rd.onload=function(){ postJSON(EP.upload,{po:po,supplier_id:sid,filename:f.name,mime:f.type,data_base64:rd.result,uploaded_by:by,category:cat},function(j){
+                hzUpload(f,{field:'data_base64',category:'po',signUrl:(EP.signUpload||'/api/storage/sign-upload')}).then(function(up){ postJSON(EP.upload,Object.assign({po:po,supplier_id:sid,uploaded_by:by,category:cat},up),function(j){
                   (_ppData.docsByPo=_ppData.docsByPo||{}); (_ppData.docsByPo[po]=_ppData.docsByPo[po]||[]).unshift({id:j.id,filename:f.name,category:cat,uploaded_at:'',approval_status:'draft'});
-                  rerenderRow(row,po,'invoice'); }); }; rd.readAsDataURL(f); }; });
+                  rerenderRow(row,po,'invoice'); }); }).catch(function(e){ ppNotice('Upload failed: '+(e&&e.message||e)); btn.disabled=false; }); }; });
               // remove a supplier document
               scope.querySelectorAll('.pp-doc-rm').forEach(function(btn){ btn.onclick=async function(){ if(!(await _ppConfirm('Remove this document?')))return; var id=btn.dataset.id, po=btn.dataset.po, row=btn.closest('tr[id^="pp-"]');
                 postJSON(EP.docRemove,{id:id},function(){ if(po&&_ppData.docsByPo&&_ppData.docsByPo[po])_ppData.docsByPo[po]=_ppData.docsByPo[po].filter(function(d){return String(d.id)!==String(id);}); rerenderRow(row,po,'invoice'); }); }; });

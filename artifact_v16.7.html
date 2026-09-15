@@ -1034,6 +1034,29 @@ const TODAY=new Date().toISOString().slice(0,10);
 // buildSkuShares to scale the placeholder share of a SKU with no sales history
 // and no replacement. Default 3/2/1; adjustable in the Help panel.
 var TIER_W={A:3,B:2,C:1};
+// hzUpload(file, opts) — shared uploader. Files ≤3MB go inline as base64 (unchanged path); larger files upload DIRECT to
+// Supabase Storage via a signed URL (clears Vercel's ~4.5MB body cap) and return a storage_path instead. Resolves to an
+// object to merge into your POST body: {filename,mime,byte_size} plus either {<field>:b64} or {storage_path,storage_sig}.
+function hzUpload(file, opts){
+  opts = opts || {};
+  var field = opts.field || 'data_base64';
+  var category = opts.category || 'misc';
+  var signUrl = opts.signUrl || '/api/storage/sign-upload';
+  var INLINE_MAX = 3*1024*1024;
+  if(!file) return Promise.reject(new Error('no file'));
+  var meta = { filename: file.name||'file', mime: file.type||'application/octet-stream', byte_size: file.size };
+  if(file.size <= INLINE_MAX){
+    return new Promise(function(res,rej){
+      var r=new FileReader();
+      r.onload=function(){ var o={}; for(var k in meta)o[k]=meta[k]; o[field]=String(r.result).replace(/^data:[^;]+;base64,/,''); res(o); };
+      r.onerror=function(){ rej(r.error||new Error('could not read file')); };
+      r.readAsDataURL(file);
+    });
+  }
+  return fetch(signUrl,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({category:category,filename:meta.filename,mime:meta.mime,byte_size:meta.byte_size})})
+    .then(function(r){ return r.text().then(function(t){ var j; try{j=t?JSON.parse(t):{};}catch(_){j={};} if(!r.ok||!j.upload_url) throw new Error((j&&j.error)||('could not start upload ('+r.status+')')); return j; }); })
+    .then(function(j){ return fetch(j.upload_url,{method:'PUT',headers:{'content-type':meta.mime},body:file}).then(function(pr){ if(!pr.ok) throw new Error('storage upload failed ('+pr.status+')'); var o={}; for(var k in meta)o[k]=meta[k]; o.storage_path=j.storage_path; o.storage_sig=j.storage_sig; return o; }); });
+}
 // sendPrompt exists in Claude.ai artifact sandbox; graceful fallback otherwise
 function openHelp(){var e=document.getElementById('help-ov');if(e)e.style.display='flex';syncTierW();}
 function closeHelp(){var e=document.getElementById('help-ov');if(e)e.style.display='none';}
@@ -11908,12 +11931,12 @@ function renderSsmBacktestView(body){
     dropEl.ondrop=function(e){ e.preventDefault(); dropEl.style.borderColor='var(--line)'; dropEl.style.background='#fff'; var f=e.dataTransfer&&e.dataTransfer.files&&e.dataTransfer.files[0]; if(f)setFile(f); }; }
   if(upBtn)upBtn.onclick=function(){ var f=_btFile; var dt=dateEl&&dateEl.value;
     if(!f){upMsg.style.color='var(--neg)';upMsg.textContent='Choose or drop a file.';return;} if(!dt){upMsg.style.color='var(--neg)';upMsg.textContent='Set the snapshot date.';return;}
-    upMsg.style.color='var(--muted)';upMsg.textContent='Uploading…'; var rd=new FileReader();
-    rd.onload=function(){ var b64=String(rd.result).replace(/^data:[^;]+;base64,/,'');
-      fetch('/api/demand/inventory-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({snapshot_date:dt,filename:f.name,data_base64:b64})})
+    upMsg.style.color='var(--muted)';upMsg.textContent='Uploading…';
+    hzUpload(f,{field:'data_base64',category:'inventory'}).then(function(up){
+      fetch('/api/demand/inventory-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.assign({snapshot_date:dt},up))})
         .then(function(r){return r.json();}).then(function(j){ if(j&&j.ok){ upMsg.style.color='var(--pos)'; upMsg.innerHTML='Saved '+esc(j.date)+' — '+fn(j.rows)+' rows / '+fn(j.units)+'u across '+j.warehouses.length+' warehouses.'; setFile(null); if(fileEl)fileEl.value=''; if(dateEl)dateEl.value=''; load(); } else { upMsg.style.color='var(--neg)'; upMsg.textContent='Error: '+((j&&j.error)||'failed'); } })   // clear the upload details on success (Ben) — ready for the next month
-        .catch(function(){ upMsg.style.color='var(--neg)'; upMsg.textContent='Upload failed.'; }); };
-    rd.readAsDataURL(f); };
+        .catch(function(){ upMsg.style.color='var(--neg)'; upMsg.textContent='Upload failed.'; }); })
+      .catch(function(){ upMsg.style.color='var(--neg)'; upMsg.textContent='Upload failed.'; }); };
   var _st={from:'',to:'',target:''};   // backtest window + target-service, driven by the controls
   function load(){ var bb=body.querySelector('#bt-body'); if(bb)bb.innerHTML='<div class="mut" style="font-size:12px;padding:10px 2px">Loading backtest…</div>';
     var qs=[]; if(_st.from)qs.push('from='+encodeURIComponent(_st.from)); if(_st.to)qs.push('to='+encodeURIComponent(_st.to)); if(_st.target)qs.push('target='+encodeURIComponent(_st.target));
@@ -12507,7 +12530,7 @@ function _zalRender(wrap,d){
     +doneBadge+'<span id="zal-up-msg" class="mut tiny"></span></div>';
   function wireUpload(){ var fileEl=wrap.querySelector('#zal-stock-file');
     if(fileEl)fileEl.onchange=function(){ var f=this.files[0]; if(!f)return; var msg=wrap.querySelector('#zal-up-msg'); msg.style.color='var(--muted)'; msg.textContent='Uploading…';
-      var rd=new FileReader(); rd.onload=function(){ var b64=String(rd.result).split(',')[1]||''; fetch('/api/supply/zalando/stock-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({filename:f.name,content_base64:b64})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){msg.style.color='var(--neg)';msg.textContent=j.error;return;} msg.style.color='var(--pos)'; msg.textContent='✓ '+(j.count||0)+' SKUs updated'; renderZalando(); }).catch(function(e){msg.style.color='var(--neg)';msg.textContent='Failed: '+((e&&e.message)||e);}); }; rd.readAsDataURL(f); }; }
+      hzUpload(f,{field:'content_base64',category:'zalando'}).then(function(up){ fetch('/api/supply/zalando/stock-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(up)}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){msg.style.color='var(--neg)';msg.textContent=j.error;return;} msg.style.color='var(--pos)'; msg.textContent='✓ '+(j.count||0)+' SKUs updated'; renderZalando(); }).catch(function(e){msg.style.color='var(--neg)';msg.textContent='Failed: '+((e&&e.message)||e);}); }).catch(function(e){msg.style.color='var(--neg)';msg.textContent='Failed: '+((e&&e.message)||e);}); }; }
   var title='<div style="font-weight:700;font-size:15px;margin-bottom:2px">Zalando &mdash; send-to-Zalando</div>';
   // (4) no fresh stock file → warning + upload box only; no forecast/analysis (stale = expired after 7 days)
   if(!hasStock){
@@ -12544,7 +12567,7 @@ function _zalRender(wrap,d){
   _ZAL_ROWS=rows; _zalFilter(wrap); _zalUpdTotal();   // (2) re-apply SKU filter + refresh ticked total after (re)render
   var fileEl=wrap.querySelector('#zal-stock-file');
   if(fileEl)fileEl.onchange=function(){ var f=this.files[0]; if(!f)return; var msg=wrap.querySelector('#zal-up-msg'); msg.style.color='var(--muted)'; msg.textContent='Uploading…';
-    var rd=new FileReader(); rd.onload=function(){ var b64=String(rd.result).split(',')[1]||''; fetch('/api/supply/zalando/stock-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({filename:f.name,content_base64:b64})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){msg.style.color='var(--neg)';msg.textContent=j.error;return;} msg.style.color='var(--pos)'; msg.textContent='✓ '+(j.count||0)+' SKUs updated'; renderZalando(); }).catch(function(e){msg.style.color='var(--neg)';msg.textContent='Failed: '+((e&&e.message)||e);}); }; rd.readAsDataURL(f); };
+    hzUpload(f,{field:'content_base64',category:'zalando'}).then(function(up){ fetch('/api/supply/zalando/stock-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(up)}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){msg.style.color='var(--neg)';msg.textContent=j.error;return;} msg.style.color='var(--pos)'; msg.textContent='✓ '+(j.count||0)+' SKUs updated'; renderZalando(); }).catch(function(e){msg.style.color='var(--neg)';msg.textContent='Failed: '+((e&&e.message)||e);}); }).catch(function(e){msg.style.color='var(--neg)';msg.textContent='Failed: '+((e&&e.message)||e);}); };
   wrap.querySelectorAll('.zal-cov').forEach(function(b){ b.onclick=function(){ ZAL_COVER=+this.dataset.n; _zalRender(wrap,d); }; });
   var qEl=wrap.querySelector('#zal-q'); if(qEl)qEl.oninput=function(){ ZAL_Q=this.value; _zalFilter(wrap); };   // (2) live SKU filter
   wrap.querySelectorAll('.zal-ov').forEach(function(inp){ inp.onchange=function(){ var v=this.value.trim(); if(v==='')delete ZAL_OV[this.dataset.sku]; else ZAL_OV[this.dataset.sku]=v; _zalUpdTotal(); }; });
@@ -14545,11 +14568,12 @@ function renderKlaviyoBisView(body){
           +'<div class="mut" style="font-size:10px;color:var(--faint);margin-top:6px">or drag &amp; drop a file onto this box</div>'
         +'</div></div>'; }).join('');
     function doKbUp(f,mk){ if(!f||!mk)return; var stat=boxes.querySelector('.kb-stat[data-mk="'+mk+'"]'); if(stat){stat.style.color='var(--muted)';stat.textContent='Uploading…';}
-      var rd=new FileReader(); rd.onload=function(){ var b64=String(rd.result).split(',')[1]||''; var isCsv=/\.csv$/i.test(f.name);
-        fetch('/api/klaviyo-bis/upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({market:mk,filename:f.name,content_base64:b64,is_csv:isCsv})})
+      var isCsv=/\.csv$/i.test(f.name);
+      hzUpload(f,{field:'content_base64',category:'klaviyo'}).then(function(up){
+        fetch('/api/klaviyo-bis/upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(Object.assign({market:mk,is_csv:isCsv},up))})
           .then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ if(stat){stat.style.color='var(--neg)';stat.textContent=j.error;} return; }
             if(stat){stat.style.color='var(--pos)';stat.textContent='✓ '+(j.n_skus||0)+' SKUs, '+(j.total_subs||0)+' subs';} load(); })
-          .catch(function(){ if(stat){stat.style.color='var(--neg)';stat.textContent='Failed';} }); }; rd.readAsDataURL(f); }
+          .catch(function(){ if(stat){stat.style.color='var(--neg)';stat.textContent='Failed';} }); }).catch(function(){ if(stat){stat.style.color='var(--neg)';stat.textContent='Failed';} }); }
     boxes.querySelectorAll('.kb-file').forEach(function(inp){ inp.onchange=function(){ doKbUp(this.files[0], this.dataset.mk); }; });
     boxes.querySelectorAll('.kb-drop').forEach(function(dz){ var mk=dz.dataset.mk;   // SUG-0026: drag-and-drop as well as file-select
       dz.addEventListener('dragover',function(e){ e.preventDefault(); dz.style.outline='2px dashed '+col(mk); dz.style.outlineOffset='-2px'; });
@@ -15217,18 +15241,13 @@ function render3plInvoice(body){
         +'<div id="tpl-map-out"></div><div id="tpl-parse"></div>'
       +'</div>';
     var fi=b.querySelector('#tpl-file'), up=b.querySelector('#tpl-up'), msg=b.querySelector('#tpl-upmsg'), drop=b.querySelector('#tpl-drop');
-    // Upload ONE file → Promise. Gzips in the browser (CompressionStream) to stay under Vercel's ~4.5MB body cap; server gunzips.
+    // Upload ONE file → Promise. Files ≤3MB ride inline as base64; larger ones upload direct to Supabase Storage (hzUpload).
     function uploadOne(f){ return new Promise(function(resolve,reject){
-      var base={tpl:TPL3_STATE.tpl,period:TPL3_STATE.period,filename:f.name,mime:f.type||'application/octet-stream',uploaded_by:(window.ME&&ME.email)||''};
+      var base={tpl:TPL3_STATE.tpl,period:TPL3_STATE.period,uploaded_by:(window.ME&&ME.email)||''};
       function send(payload){ fetch('/api/supply/tpl/upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)})
-        .then(function(r){ if(!r.ok){ return r.text().then(function(t){ var big=(r.status===413)||/too large|request entity/i.test(t||''); throw new Error(big?(f.name+' is '+(f.size/1048576).toFixed(1)+'MB, still too large after compression (~4.5MB cap) — export as CSV'):('upload failed '+r.status)); }); } return r.json(); })
+        .then(function(r){ if(!r.ok){ return r.text().then(function(t){ var big=(r.status===413)||/too large|request entity/i.test(t||''); throw new Error(big?(f.name+' is '+(f.size/1048576).toFixed(1)+'MB, still too large (~4.5MB cap) — export as CSV'):('upload failed '+r.status)); }); } return r.json(); })
         .then(function(j){ if(j&&j.error)throw new Error(j.error); resolve(); }).catch(reject); }
-      function rawUpload(){ var rd=new FileReader(); rd.onload=function(){ base.data_base64=String(rd.result); base.gzip=false; send(base); }; rd.onerror=reject; rd.readAsDataURL(f); }
-      if(typeof CompressionStream!=='undefined' && f.arrayBuffer){
-        f.arrayBuffer().then(function(ab){ var stream=new Blob([ab]).stream().pipeThrough(new CompressionStream('gzip')); return new Response(stream).arrayBuffer(); })
-          .then(function(comp){ var bytes=new Uint8Array(comp), bin='', CH=0x8000; for(var i=0;i<bytes.length;i+=CH){ bin+=String.fromCharCode.apply(null, bytes.subarray(i,i+CH)); } base.data_base64=btoa(bin); base.gzip=true; send(base); })
-          .catch(function(){ rawUpload(); }); }
-      else rawUpload();
+      hzUpload(f,{field:'data_base64',category:'tpl'}).then(function(up){ send(Object.assign({},base,up)); }).catch(reject);
     }); }
     // Accepts one file, a FileList, or an array — uploads them SEQUENTIALLY, then reloads once (multi drag-and-drop, Ben).
     function doUpload(files){ var list=(files&&files.length!=null)?Array.prototype.slice.call(files):(files?[files]:[]);

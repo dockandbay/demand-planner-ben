@@ -722,7 +722,101 @@ const _reqStore = new AsyncLocalStorage();
 function log500(e) { try { const s = _reqStore.getStore(); const r = s && s.req;
   console.error('[500] ' + ((r && r.method) || '?') + ' ' + ((r && (r.originalUrl || r.url)) || '?') + ' — ' + ((e && e.stack) || (e && e.message) || e)); } catch (_) { /* logging must never throw */ } }
 app.use((req, res, next) => _reqStore.run({ req }, next));   // wrap every request so log500 can find it
-app.use(express.json({ limit: '25mb' }));   // 25mb: document/invoice uploads arrive as base64 JSON (~33% inflation). NOTE for Diviyaj: Vercel serverless caps the request body at ~4.5MB regardless — large doc uploads need direct-to-storage (Supabase signed URL) on live; this limit only helps local/self-hosted.
+app.use(express.json({ limit: '25mb' }));   // 25mb: small document/invoice uploads still arrive as base64 JSON (~33% inflation). Vercel caps the request body at ~4.5MB, so anything over STORAGE_INLINE_MAX goes direct-to-Storage instead (see the Supabase Storage block below); this limit only covers the inline path.
+
+// ── Supabase Storage — large uploads (> STORAGE_INLINE_MAX) go straight to Storage, bypassing Vercel's ~4.5MB body cap ──
+// Small files keep the base64-in-JSON → Postgres bytea path unchanged. Large files: the client asks /api/storage/sign-upload
+// for a one-shot signed URL, PUTs the bytes directly to Supabase Storage, then posts { storage_path, storage_sig } back to
+// the real endpoint (which saves the path instead of bytea). Downloads of stored files 302-redirect to a short-lived signed
+// URL, so bytes skip the function both ways. Old bytea rows are untouched and still serve exactly as before.
+// Env (set by Diviyaj on prod; Ben's .env for sandbox): SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY. Bucket is private.
+const SUPABASE_URL = (process.env.SUPABASE_URL || '').replace(/\/+$/, '');
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
+const STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'horizon-uploads';
+const STORAGE_ENABLED = !!(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
+const STORAGE_INLINE_MAX = 3 * 1024 * 1024;    // ≤3MB raw ⇒ base64 payload ≤~4MB, safely under Vercel's ~4.5MB body cap; larger ⇒ direct-to-Storage
+const STORAGE_MAX = 100 * 1024 * 1024;         // hard ceiling for a single direct upload (bucket file-size limit should match)
+if (!STORAGE_ENABLED) console.warn('[storage] SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set — large (>3MB) uploads will be rejected until configured');
+// HMAC so a client can't attach an arbitrary/forged storage path to a record (matters for the multi-tenant portal):
+// sign-upload issues (path, sig); the follow-up notify must present the same pair. Keyed off the service secret — no new env.
+const _storageHmacKey = crypto.createHash('sha256').update('hz-storage|' + SUPABASE_SERVICE_ROLE_KEY).digest();
+function storageSig(p) { return crypto.createHmac('sha256', _storageHmacKey).update(String(p)).digest('base64url'); }
+function storageSigOk(p, sig) { try { const a = Buffer.from(storageSig(p)), b = Buffer.from(String(sig || '')); return a.length === b.length && crypto.timingSafeEqual(a, b); } catch (_) { return false; } }
+function _sbHeaders() { return { apikey: SUPABASE_SERVICE_ROLE_KEY, Authorization: 'Bearer ' + SUPABASE_SERVICE_ROLE_KEY }; }
+const _sbEncPath = p => String(p).split('/').map(encodeURIComponent).join('/');
+// Build a foldered object key: <category>/<yyyy-mm>/<uuid>-<safe filename>. Server-controlled — the client never picks the path.
+function storageKey(category, filename) {
+  const cat = String(category || 'misc').replace(/[^a-z0-9_-]/gi, '').toLowerCase() || 'misc';
+  const ym = new Date().toISOString().slice(0, 7);
+  const safe = String(filename || 'file').replace(/[^A-Za-z0-9._-]/g, '_').slice(-80) || 'file';
+  return cat + '/' + ym + '/' + crypto.randomUUID() + '-' + safe;
+}
+// One-shot signed upload URL for `path`. Returns { uploadUrl (absolute), path }. Client PUTs the raw bytes to uploadUrl.
+async function storageSignUpload(path) {
+  const r = await fetch(SUPABASE_URL + '/storage/v1/object/upload/sign/' + STORAGE_BUCKET + '/' + _sbEncPath(path), { method: 'POST', headers: _sbHeaders() });
+  if (!r.ok) throw new Error('storage sign-upload ' + r.status + ' ' + (await r.text().catch(() => '')));
+  const j = await r.json();   // { url: 'object/upload/sign/<bucket>/<path>?token=…' }
+  return { uploadUrl: SUPABASE_URL + '/storage/v1/' + String(j.url || '').replace(/^\/+/, ''), path };
+}
+// Short-lived signed download URL (absolute). `filename` forces a Content-Disposition attachment with that name.
+async function storageSignDownload(path, { expiresIn = 3600, filename } = {}) {
+  const r = await fetch(SUPABASE_URL + '/storage/v1/object/sign/' + STORAGE_BUCKET + '/' + _sbEncPath(path),
+    { method: 'POST', headers: { ..._sbHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ expiresIn }) });
+  if (!r.ok) throw new Error('storage sign-download ' + r.status + ' ' + (await r.text().catch(() => '')));
+  const j = await r.json();   // { signedURL: '/object/sign/<bucket>/<path>?token=…' }
+  let u = SUPABASE_URL + '/storage/v1/' + String(j.signedURL || j.signedUrl || '').replace(/^\/+/, '');
+  if (filename) u += (u.includes('?') ? '&' : '?') + 'download=' + encodeURIComponent(filename);
+  return u;
+}
+async function storageDelete(path) {
+  if (!STORAGE_ENABLED || !path) return;
+  try { await fetch(SUPABASE_URL + '/storage/v1/object/' + STORAGE_BUCKET + '/' + _sbEncPath(path), { method: 'DELETE', headers: _sbHeaders() }); } catch (_) { /* best-effort */ }
+}
+// Pull a stored object's bytes back to the server (for parse-only endpoints that receive a large file, parse it, and discard it).
+async function storageFetch(path) {
+  const r = await fetch(SUPABASE_URL + '/storage/v1/object/' + STORAGE_BUCKET + '/' + _sbEncPath(path), { headers: _sbHeaders() });
+  if (!r.ok) throw new Error('storage fetch ' + r.status + ' ' + (await r.text().catch(() => '')));
+  return Buffer.from(await r.arrayBuffer());
+}
+// For a parse-only endpoint: return the file bytes whether they arrived inline (base64) or via Storage (storage_path + sig).
+async function resolveUploadBytes(b, opt) { const u = resolveUpload(b, opt); return u.buf || await storageFetch(u.storagePath); }
+// Resolve an incoming upload from a request body: either a large file already in Storage (storage_path + valid sig) or an
+// inline base64 body. Returns { storagePath, buf, byteSize } with exactly one of storagePath/buf set. Throws {status,message}.
+function resolveUpload(b, { base64Field = 'data_base64', maxInline = STORAGE_INLINE_MAX } = {}) {
+  b = b || {};
+  if (b.storage_path) {
+    if (!STORAGE_ENABLED) throw Object.assign(new Error('storage not configured'), { status: 503 });
+    if (!storageSigOk(b.storage_path, b.storage_sig)) throw Object.assign(new Error('bad storage signature'), { status: 400 });
+    return { storagePath: String(b.storage_path), buf: null, byteSize: Number(b.byte_size) || null };
+  }
+  const raw = b[base64Field];
+  if (!raw) throw Object.assign(new Error(base64Field + ' or storage_path required'), { status: 400 });
+  const buf = Buffer.from(String(raw).replace(/^data:[^;]+;base64,/, ''), 'base64');
+  if (!buf.length) throw Object.assign(new Error('empty file'), { status: 400 });
+  if (buf.length > maxInline) throw Object.assign(new Error('file exceeds ' + Math.round(maxInline / 1048576) + 'MB inline limit — use direct upload'), { status: 413 });
+  return { storagePath: null, buf, byteSize: buf.length };
+}
+// Serve a stored file: 302 to a signed URL when it lives in Storage, else stream the bytea `data`. `row` needs {storage_path?, data?, filename?, mime?}.
+async function serveStored(res, row, { filename, mime } = {}) {
+  const fn = filename || (row && row.filename) || 'file';
+  if (row && row.storage_path) { try { return res.redirect(302, await storageSignDownload(row.storage_path, { filename: fn })); } catch (e) { log500(e); return res.status(502).json({ error: 'storage fetch failed' }); } }
+  res.setHeader('Content-Type', (mime || (row && row.mime)) || 'application/octet-stream');
+  res.setHeader('Content-Disposition', 'attachment; filename="' + String(fn).replace(/"/g, '') + '"');
+  res.send(row && row.data);
+}
+// Client asks for a signed upload URL for a large file, PUTs straight to Storage, then posts {storage_path,storage_sig} back to the real endpoint.
+async function signUploadHandler(req, res) {
+  if (!STORAGE_ENABLED) return res.status(503).json({ error: 'large-file storage is not configured on this server' });
+  const b = req.body || {}, size = Number(b.byte_size || 0);
+  if (size && size > STORAGE_MAX) return res.status(413).json({ error: 'file exceeds ' + Math.round(STORAGE_MAX / 1048576) + 'MB' });
+  try {
+    const path = storageKey(b.category, b.filename);
+    const { uploadUrl } = await storageSignUpload(path);
+    res.json({ ok: true, upload_url: uploadUrl, storage_path: path, storage_sig: storageSig(path) });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+}
+app.post('/api/storage/sign-upload', signUploadHandler);                    // admin app — planner-key/cookie gated (Gate 1)
+app.post('/api/portal/storage/sign-upload', portalAuth, signUploadHandler); // supplier portal — magic-link session (suppliers have no planner key, so they need this /api/portal/* route)
 // Supplier-entered money fields can arrive with thousands separators / currency symbols (e.g. "3,262.35" or
 // "$1,200"). Strip everything but digits/dot/minus, then validate — returns a clean numeric string, or null if
 // it isn't a number. Guarantees a stray comma never reaches a ::numeric cast (which 500'd the PO/cashflow
@@ -1237,8 +1331,8 @@ app.post('/api/demand/inventory-upload', async (req, res) => {
     const b = req.body || {};
     const date = String(b.snapshot_date || '').slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'snapshot_date (YYYY-MM-DD) required' });
-    if (!b.data_base64) return res.status(400).json({ error: 'data_base64 (the Cin7 export) required' });
-    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
+    if (!b.data_base64 && !b.storage_path) return res.status(400).json({ error: 'data_base64 (the Cin7 export) required' });
+    let buf; try { buf = await resolveUploadBytes(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
     const isCsv = /\.csv$/i.test(b.filename || '') || /csv/i.test(b.content_type || '');
     const raw = [];
     if (isCsv) {
@@ -2790,7 +2884,10 @@ async function _ediParse(csvText, pdfs) {
   const { PDFDocument } = await import('pdf-lib');
   const items = []; let skippedNoSscc = 0;
   for (const f of pdfs) {
-    const buf = Buffer.from(String(f.b64 || f.base64 || ''), 'base64'); if (!buf.length) continue;
+    if (!f || (!f.b64 && !f.base64 && !f.storage_path)) continue;
+    // Each label PDF arrives inline (b64) or already in Storage (storage_path + sig) — the big files go direct-to-Storage.
+    let buf; try { buf = await resolveUploadBytes({ data_base64: f.b64 || f.base64, storage_path: f.storage_path, storage_sig: f.storage_sig }, { maxInline: 20 * 1024 * 1024 }); } catch (e) { continue; }
+    if (!buf.length) continue;
     let src, doc;
     try { src = await PDFDocument.load(buf, { ignoreEncryption: true }); } catch (e) { continue; }
     try { doc = await pdfjs.getDocument({ data: new Uint8Array(buf), useSystemFonts: true }).promise; } catch (e) { continue; }
@@ -2991,11 +3088,14 @@ app.post('/api/supply/edi-projects/:id/files', async (req, res) => {
     if (!ex) return res.status(404).json({ error: 'project not found' });
     const by = authUser(req) || null; const out = [];
     for (const f of files) {
-      const buf = Buffer.from(String(f.b64 || '').replace(/^data:[^;]+;base64,/, ''), 'base64'); if (!buf.length) continue;
+      // Each file arrives inline (f.b64) or already in Storage (f.storage_path + f.storage_sig). Skip empties.
+      if (!f || (!f.b64 && !f.storage_path)) continue;
+      let up; try { up = resolveUpload({ data_base64: f.b64, storage_path: f.storage_path, storage_sig: f.storage_sig, byte_size: f.byte_size }, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+      if (!up.storagePath && !up.buf.length) continue;
       const kind = (String(f.kind || '').toLowerCase() === 'csv') ? 'csv' : 'pdf';
-      const r = await pool.query(`INSERT INTO planner.edi_project_files (project_id, kind, filename, mime, byte_size, data, uploaded_by)
-        VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, kind, filename, byte_size, uploaded_by, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at`,
-        [req.params.id, kind, f.filename || (kind + '-file'), kind === 'csv' ? 'text/csv' : 'application/pdf', buf.length, buf, by]);
+      const r = await pool.query(`INSERT INTO planner.edi_project_files (project_id, kind, filename, mime, byte_size, data, storage_path, uploaded_by)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id, kind, filename, byte_size, uploaded_by, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at`,
+        [req.params.id, kind, f.filename || (kind + '-file'), kind === 'csv' ? 'text/csv' : 'application/pdf', up.byteSize, up.buf, up.storagePath, by]);
       out.push(r.rows[0]);
     }
     await pool.query(`UPDATE planner.edi_projects SET updated_at=now() WHERE id=$1`, [req.params.id]);
@@ -3004,9 +3104,10 @@ app.post('/api/supply/edi-projects/:id/files', async (req, res) => {
 });
 app.get('/api/supply/edi-projects/:id/files/:fid', async (req, res) => {
   try {
-    const r = (await pool.query(`SELECT kind, filename, encode(data,'base64') b64 FROM planner.edi_project_files WHERE id=$1 AND project_id=$2`, [req.params.fid, req.params.id])).rows[0];
+    const r = (await pool.query(`SELECT kind, filename, storage_path, CASE WHEN storage_path IS NULL THEN encode(data,'base64') END b64 FROM planner.edi_project_files WHERE id=$1 AND project_id=$2`, [req.params.fid, req.params.id])).rows[0];
     if (!r) return res.status(404).json({ error: 'not found' });
-    res.set('Cache-Control', 'no-store').json({ ok: true, kind: r.kind, filename: r.filename, b64: r.b64 });
+    const url = r.storage_path ? await storageSignDownload(r.storage_path, { filename: r.filename }) : null;   // large files: client follows the signed URL
+    res.set('Cache-Control', 'no-store').json({ ok: true, kind: r.kind, filename: r.filename, b64: r.b64, url });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.delete('/api/supply/edi-projects/:id/files/:fid', async (req, res) => {
@@ -3429,11 +3530,12 @@ app.post('/api/supply/crossdock-note', async (req, res) => {
 // Read-only (no DB write); the compare against Horizon happens client-side off the cashflow lines.
 app.post('/api/supply/xero-parse', async (req, res) => {
   try {
-    const b64 = String((req.body || {}).data_base64 || '').replace(/^data:[^;]+;base64,/, '');
-    if (!b64) return res.status(400).json({ error: 'data_base64 required' });
+    const b = req.body || {};
+    if (!b.data_base64 && !b.storage_path) return res.status(400).json({ error: 'data_base64 required' });
+    let fileBuf; try { fileBuf = await resolveUploadBytes(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
     const ExcelJS = (await import('exceljs')).default;
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load(Buffer.from(b64, 'base64'));
+    await wb.xlsx.load(fileBuf);
     const ws = wb.worksheets[0];
     if (!ws) return res.json({ rows: [] });
     const txt = (c) => { const v = c && c.value; if (v == null) return ''; if (typeof v === 'object') { if (v.result != null) return String(v.result); if (v.text != null) return String(v.text); if (Array.isArray(v.richText)) return v.richText.map(t => t.text).join(''); return ''; } return String(v); };
@@ -3478,7 +3580,7 @@ app.get('/api/supply/xero-compare/latest', async (req, res) => {
   try {
     const r = (await pool.query(`SELECT rows, coalesce(filename,'') filename, coalesce(period,'') period,
         coalesce(uploaded_by,'') uploaded_by, to_char(uploaded_at AT TIME ZONE 'UTC','YYYY-MM-DD"T"HH24:MI:SS"Z"') uploaded_at,
-        (nullif(file_b64,'') IS NOT NULL) has_file
+        (nullif(file_b64,'') IS NOT NULL OR storage_path IS NOT NULL) has_file
       FROM planner.xero_compare_snapshot WHERE id=1 AND uploaded_at > now() - interval '7 days'`)).rows[0];
     res.set('Cache-Control', 'no-store').json(r ? { ok: true, rows: r.rows, filename: r.filename, period: r.period, uploaded_by: r.uploaded_by, uploaded_at: r.uploaded_at, has_file: !!r.has_file } : { ok: true, rows: null });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -3486,10 +3588,16 @@ app.get('/api/supply/xero-compare/latest', async (req, res) => {
 app.post('/api/supply/xero-compare/save', async (req, res) => {
   try {
     const b = req.body || {}; if (!Array.isArray(b.rows)) return res.status(400).json({ error: 'rows required' });
-    await pool.query(`INSERT INTO planner.xero_compare_snapshot (id, rows, filename, period, uploaded_by, uploaded_at, file_b64)
-        VALUES (1, $1::jsonb, $2, $3, $4, now(), $5)
-      ON CONFLICT (id) DO UPDATE SET rows=EXCLUDED.rows, filename=EXCLUDED.filename, period=EXCLUDED.period, uploaded_by=EXCLUDED.uploaded_by, uploaded_at=now(), file_b64=EXCLUDED.file_b64`,
-      [JSON.stringify(b.rows), String(b.filename || ''), String(b.period || ''), authUser(req) || '', (b.file_b64 ? String(b.file_b64) : null)]);
+    // The original XLSX is optional: kept inline as base64 text (file_b64), or in Storage (storage_path) for large files.
+    let fileB64Val = null, filePathVal = null;
+    if (b.file_b64 || b.storage_path) {
+      let up; try { up = resolveUpload(b, { base64Field: 'file_b64', maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+      if (up.storagePath) filePathVal = up.storagePath; else fileB64Val = up.buf.toString('base64');
+    }
+    await pool.query(`INSERT INTO planner.xero_compare_snapshot (id, rows, filename, period, uploaded_by, uploaded_at, file_b64, storage_path)
+        VALUES (1, $1::jsonb, $2, $3, $4, now(), $5, $6)
+      ON CONFLICT (id) DO UPDATE SET rows=EXCLUDED.rows, filename=EXCLUDED.filename, period=EXCLUDED.period, uploaded_by=EXCLUDED.uploaded_by, uploaded_at=now(), file_b64=EXCLUDED.file_b64, storage_path=EXCLUDED.storage_path`,
+      [JSON.stringify(b.rows), String(b.filename || ''), String(b.period || ''), authUser(req) || '', fileB64Val, filePathVal]);
     res.json({ ok: true });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -3500,9 +3608,10 @@ app.post('/api/supply/xero-compare/clear', async (req, res) => {
 // Download the ORIGINAL uploaded XLSX for the current Xero Compare snapshot (stored as base64 on upload).
 app.get('/api/supply/xero-compare/file', async (req, res) => {
   try {
-    const r = (await pool.query(`SELECT coalesce(filename,'xero-compare.xlsx') filename, file_b64
+    const r = (await pool.query(`SELECT coalesce(filename,'xero-compare.xlsx') filename, file_b64, storage_path
       FROM planner.xero_compare_snapshot WHERE id=1 AND uploaded_at > now() - interval '7 days'`)).rows[0];
-    if (!r || !r.file_b64) return res.status(404).send('No uploaded file stored for the current snapshot.');
+    if (!r || (!r.file_b64 && !r.storage_path)) return res.status(404).send('No uploaded file stored for the current snapshot.');
+    if (r.storage_path) return res.redirect(302, await storageSignDownload(r.storage_path, { filename: String(r.filename || 'xero-compare.xlsx').replace(/[\r\n"]/g, '') }));
     const buf = Buffer.from(r.file_b64, 'base64');
     const name = String(r.filename || 'xero-compare.xlsx').replace(/[\r\n"]/g, '');
     res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
@@ -5602,8 +5711,9 @@ app.post('/api/klaviyo-bis/upload', async (req, res) => {
   try {
     const b = req.body || {}; const market = String(b.market || '').trim().toUpperCase();
     if (['UK', 'US', 'EU', 'AU'].indexOf(market) < 0) return res.status(400).json({ error: 'market must be UK / US / EU / AU' });
-    const b64 = String(b.content_base64 || '').replace(/^data:[^;]+;base64,/, ''); if (!b64) return res.status(400).json({ error: 'file required' });
-    const buf = Buffer.from(b64, 'base64'); const fname = String(b.filename || '');
+    if (!b.content_base64 && !b.storage_path) return res.status(400).json({ error: 'file required' });
+    let buf; try { buf = await resolveUploadBytes(b, { base64Field: 'content_base64', maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+    const fname = String(b.filename || '');
     // → array of {sku, queued, last}. Header-driven so column order doesn't matter.
     let recs = [];
     const norm = h => String(h == null ? '' : h).trim().toLowerCase();
@@ -6577,16 +6687,15 @@ app.post('/api/product/size/:id/dimension', async (req, res) => {
 // Upload a versioned file to a size's component (ensures the component row exists first). Returns the new file id.
 app.post('/api/product/component-file', async (req, res) => {
   const b = req.body || {}, sizeId = b.size_id, dim = (b.dimension || '').trim();
-  if (!sizeId || !PROD_COMPONENTS.includes(dim) || !b.data_base64) return res.status(400).json({ error: 'size_id + dimension + data_base64 required' });
+  if (!sizeId || !PROD_COMPONENTS.includes(dim) || (!b.data_base64 && !b.storage_path)) return res.status(400).json({ error: 'size_id + dimension + data_base64/storage_path required' });
+  let up; try { up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   try {
     await pool.query(`INSERT INTO planner.product_dev_size_dimensions (size_id, dimension) VALUES ($1,$2) ON CONFLICT (size_id, dimension) DO NOTHING`, [sizeId, dim]);
     const row = (await pool.query(`SELECT id FROM planner.product_dev_size_dimensions WHERE size_id=$1 AND dimension=$2`, [sizeId, dim])).rows[0];
-    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
-    if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: 'file exceeds 10MB' });
     const v = (b.version === '' || b.version == null) ? null : parseInt(b.version, 10) || null;
-    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, uploaded_by, category, uploader_kind, version)
-      VALUES ($1,$2,$3,$4,$5,$6,'product_dim','internal',$7) RETURNING id`,
-      ['PDIM-' + row.id, b.filename || 'file', b.mime || 'application/octet-stream', buf.length, buf, (b.uploaded_by || '').trim() || null, v]);
+    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category, uploader_kind, version)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,'product_dim','internal',$8) RETURNING id`,
+      ['PDIM-' + row.id, b.filename || 'file', b.mime || 'application/octet-stream', up.byteSize, up.buf, up.storagePath, (b.uploaded_by || '').trim() || null, v]);
     res.json({ ok: true, id: r.rows[0].id });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -6611,17 +6720,17 @@ app.post('/api/product/swatch', async (req, res) => {
 });
 app.post('/api/product/doc', async (req, res) => {
   const b = req.body || {}, ref = (b.ref || '').trim();
-  if (!ref || !b.data_base64) return res.status(400).json({ error: 'ref and data_base64 required' });
-  try { const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
-    if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: 'file exceeds 10MB' });
-    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, uploaded_by, category) VALUES ($1,$2,$3,$4,$5,$6,'product') RETURNING id`,
-      [ref, b.filename || 'document', b.mime || 'application/octet-stream', buf.length, buf, (b.uploaded_by || '').trim() || null]);
-    res.json({ ok: true, id: r.rows[0].id, byte_size: buf.length }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  if (!ref || (!b.data_base64 && !b.storage_path)) return res.status(400).json({ error: 'ref and data_base64/storage_path required' });
+  let up; try { up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+  try {
+    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category) VALUES ($1,$2,$3,$4,$5,$6,$7,'product') RETURNING id`,
+      [ref, b.filename || 'document', b.mime || 'application/octet-stream', up.byteSize, up.buf, up.storagePath, (b.uploaded_by || '').trim() || null]);
+    res.json({ ok: true, id: r.rows[0].id, byte_size: up.byteSize }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/product/doc/:id', async (req, res) => {
-  try { const r = (await pool.query(`SELECT filename, mime, data FROM planner.portal_attachments WHERE id=$1 AND category='product'`, [req.params.id])).rows[0];
+  try { const r = (await pool.query(`SELECT filename, mime, data, storage_path FROM planner.portal_attachments WHERE id=$1 AND category='product'`, [req.params.id])).rows[0];
     if (!r) return res.status(404).send('not found');
-    res.setHeader('Content-Type', r.mime || 'application/octet-stream'); res.setHeader('Content-Disposition', 'attachment; filename="' + (r.filename || 'document').replace(/"/g, '') + '"'); res.send(r.data);
+    return serveStored(res, r);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/doc/:id/delete', async (req, res) => {
@@ -6715,17 +6824,16 @@ app.post('/api/product/specs/:id/approval', async (req, res) => {   // admin ove
 app.post('/api/product/specs', async (req, res) => {
   const b = req.body || {}, st = String(b.spec_type || '').trim(), scope = (b.scope_type || 'all').trim();
   if (!st) return res.status(400).json({ error: 'spec_type required' });
-  if (!b.data_base64) return res.status(400).json({ error: 'file required' });
+  if (!b.data_base64 && !b.storage_path) return res.status(400).json({ error: 'file required' });
+  let up; try { up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   try {
-    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
-    if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: 'file exceeds 10MB' });
     const when = (b.effective_when || 'production').trim(), stock = (b.effective_stock || 'useup').trim();
     const effMode = (when === 'production') ? 'production' : ('immediate_' + stock);   // legacy combined value
     const scat = (b.scope_category || '').trim() || null, ssize = (b.scope_size || '').trim() || null, sskus = (b.scope_skus || '').trim() || null;
     const r = await pool.query(`INSERT INTO planner.product_specs
-      (spec_type, filename, mime, data, scope_type, scope_category, scope_size, scope_skus, effective_mode, effective_when, effective_stock, effective_prod_no, confirm_with_supplier, confirm_suppliers, uploaded_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING id`,
-      [st, b.filename || 'file', b.mime || 'application/octet-stream', buf,
+      (spec_type, filename, mime, data, storage_path, scope_type, scope_category, scope_size, scope_skus, effective_mode, effective_when, effective_stock, effective_prod_no, confirm_with_supplier, confirm_suppliers, uploaded_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING id`,
+      [st, b.filename || 'file', b.mime || 'application/octet-stream', up.buf, up.storagePath,
        scope, scat, ssize, sskus,
        effMode, when, stock, (b.effective_prod_no || '').trim() || null,
        !!b.confirm_with_supplier, (b.confirm_with_supplier && b.confirm_suppliers) ? String(b.confirm_suppliers).trim() || null : null, internalAuthor(req, b.uploaded_by)]);
@@ -6760,8 +6868,9 @@ app.post('/api/product/specs/:id/delete', async (req, res) => {
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/product/spec-file/:id', async (req, res) => {
-  try { const r = (await pool.query(`SELECT filename, mime, data FROM planner.product_specs WHERE id=$1`, [req.params.id])).rows[0];
+  try { const r = (await pool.query(`SELECT filename, mime, data, storage_path FROM planner.product_specs WHERE id=$1`, [req.params.id])).rows[0];
     if (!r) return res.status(404).send('not found');
+    if (r.storage_path) return res.redirect(302, await storageSignDownload(r.storage_path));   // inline view (no download= param)
     res.setHeader('Content-Type', r.mime || 'application/octet-stream');
     res.setHeader('Content-Disposition', 'inline; filename="' + (r.filename || 'file').replace(/"/g, '') + '"'); res.send(r.data);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -7193,10 +7302,9 @@ async function createProductSample(b, by) {
   return { id: r.rows[0].id, version: v, ref: itemRef + '_v' + v };
 }
 async function insertProductSamplePhoto(sampleId, b, by, kind) {
-  const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
-  if (buf.length > 10 * 1024 * 1024) throw new Error('file exceeds 10MB');
-  const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, uploaded_by, category, uploader_kind, aspect)
-    VALUES ($1,$2,$3,$4,$5,$6,'product_sample',$7,$8) RETURNING id`, ['PSAMPLE-' + sampleId, b.filename || 'photo', b.mime || 'image/jpeg', buf.length, buf, by || null, kind || 'internal', (b.aspect ? String(b.aspect).slice(0, 80) : null)]);   // v27.569: aspect = sampled component the file belongs to (mig 267)
+  const up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 });   // throws {status,message} on bad/oversized/forged input
+  const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category, uploader_kind, aspect)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,'product_sample',$8,$9) RETURNING id`, ['PSAMPLE-' + sampleId, b.filename || 'photo', b.mime || 'image/jpeg', up.byteSize, up.buf, up.storagePath, by || null, kind || 'internal', (b.aspect ? String(b.aspect).slice(0, 80) : null)]);   // v27.569: aspect = sampled component the file belongs to (mig 267)
   return r.rows[0].id;
 }
 // v27.551 PRODUCT ▸ Sample batch review: one sample shipment (SR) → every development sample on it, grouped by product, with the
@@ -7416,13 +7524,13 @@ app.get('/api/portal/product-sample/:id/card.pdf', portalAuth, async (req, res) 
 });
 app.post('/api/product/sample-photo', async (req, res) => {   // body-based (sample_id in body) — matches the portal shape; used by the admin "preview as supplier"
   const b = req.body || {}, id = b.sample_id;
-  if (!id || !b.data_base64) return res.status(400).json({ error: 'sample_id + data_base64 required' });
+  if (!id || (!b.data_base64 && !b.storage_path)) return res.status(400).json({ error: 'sample_id + data_base64/storage_path required' });
   try { res.json({ ok: true, id: await insertProductSamplePhoto(id, b, (b.uploaded_by || '').trim() || null) }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+  catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/product/sample/:id/photo', async (req, res) => {
-  if (!(req.body && req.body.data_base64)) return res.status(400).json({ error: 'data_base64 required' });
+  if (!(req.body && (req.body.data_base64 || req.body.storage_path))) return res.status(400).json({ error: 'data_base64/storage_path required' });
   try { res.json({ ok: true, id: await insertProductSamplePhoto(req.params.id, req.body, (req.body.uploaded_by || '').trim() || null) }); }
-  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/note-read/:id', async (req, res) => {
   try {
@@ -7901,12 +8009,10 @@ app.post('/api/supply/report-note/:id/delete', async (req, res) => {
 // shipment ref / sample SR ref) and category 'timeline'; the note carrying it points at attachment_id (mig 269).
 const TL_ATT_MAX = 4 * 1024 * 1024;
 async function tlAttachInsert(ref, b, by, uploaderKind) {
-  const buf = Buffer.from(String(b.data_base64 || '').replace(/^data:[^;]+;base64,/, ''), 'base64');
-  if (!buf.length) throw Object.assign(new Error('data_base64 required'), { status: 400 });
-  if (buf.length > TL_ATT_MAX) throw Object.assign(new Error('file exceeds 4MB'), { status: 413 });
-  const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, uploaded_by, category, uploader_kind) VALUES ($1,$2,$3,$4,$5,$6,'timeline',$7) RETURNING id`,
-    [ref, String(b.filename || 'file').slice(0, 200), b.mime || 'application/octet-stream', buf.length, buf, by || null, uploaderKind]);
-  return { id: r.rows[0].id, filename: b.filename || 'file', mime: b.mime || '', byte_size: buf.length };
+  const up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 });   // throws {status,message}
+  const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category, uploader_kind) VALUES ($1,$2,$3,$4,$5,$6,$7,'timeline',$8) RETURNING id`,
+    [ref, String(b.filename || 'file').slice(0, 200), b.mime || 'application/octet-stream', up.byteSize, up.buf, up.storagePath, by || null, uploaderKind]);
+  return { id: r.rows[0].id, filename: b.filename || 'file', mime: b.mime || '', byte_size: up.byteSize };
 }
 async function tlAttachRef(b) {   // kind + ref (or sample_id for the sample timeline) → the ref the file is keyed on
   const kind = ['po', 'shipment', 'sample'].includes(b.kind) ? b.kind : 'po';
@@ -7922,12 +8028,12 @@ app.post('/api/supply/timeline-attachment', async (req, res) => {
 });
 app.post('/api/supply/portal-upload', async (req, res) => {
   const b = req.body || {};
-  if (!b.po || !b.data_base64) return res.status(400).json({ error: 'po and data_base64 required' });
+  if (!b.po || (!b.data_base64 && !b.storage_path)) return res.status(400).json({ error: 'po and data_base64/storage_path required' });
+  let up; try { up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   try {
-    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
-    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, supplier_id, filename, mime, byte_size, data, uploaded_by, category)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, [b.po, b.supplier_id || null, b.filename || 'invoice', b.mime || 'application/octet-stream', buf.length, buf, b.uploaded_by || null, b.category || 'invoice']);
-    res.json({ id: r.rows[0].id, byte_size: buf.length });
+    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, supplier_id, filename, mime, byte_size, data, storage_path, uploaded_by, category)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, [b.po, b.supplier_id || null, b.filename || 'invoice', b.mime || 'application/octet-stream', up.byteSize, up.buf, up.storagePath, b.uploaded_by || null, b.category || 'invoice']);
+    res.json({ id: r.rows[0].id, byte_size: up.byteSize });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Remove a supplier-uploaded document. (Won't remove Client/FBA docs — those are managed admin-side.)
@@ -7954,27 +8060,27 @@ app.post('/api/supply/po-doc-category', async (req, res) => {
 // Admin PO ▸ DOCUMENTS tab: upload a document against a PO (held in the DB, like all other uploads).
 app.post('/api/supply/po-doc-upload', async (req, res) => {
   const b = req.body || {};
-  if (!b.po || !b.data_base64) return res.status(400).json({ error: 'po and data_base64 required' });
+  if (!b.po || (!b.data_base64 && !b.storage_path)) return res.status(400).json({ error: 'po and data_base64/storage_path required' });
+  let up; try { up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   try {
-    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
-    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, uploaded_by, category)
-      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`, [b.po, b.filename || 'document', b.mime || 'application/octet-stream', buf.length, buf, b.uploaded_by || 'admin', b.category || 'document']);
-    res.json({ id: r.rows[0].id, byte_size: buf.length });
+    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, [b.po, b.filename || 'document', b.mime || 'application/octet-stream', up.byteSize, up.buf, up.storagePath, b.uploaded_by || 'admin', b.category || 'document']);
+    res.json({ id: r.rows[0].id, byte_size: up.byteSize });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── SUPPLY ▸ Quality Control (migration 160): test reports / GRS certs etc., stored in-DB, mapped to prod/batch/PO.
 // Admin upload (supply-edit gated by the global write guard). Requires at least one of prod_no / batch_id / po.
 app.post('/api/supply/quality-doc', async (req, res) => {
   const b = req.body || {};
-  if (!b.doc_type || !b.data_base64) return res.status(400).json({ error: 'doc_type and data_base64 required' });
+  if (!b.doc_type || (!b.data_base64 && !b.storage_path)) return res.status(400).json({ error: 'doc_type and data_base64/storage_path required' });
   if (!(b.prod_no || b.batch_id || b.po)) return res.status(400).json({ error: 'assign at least one of production / batch / PO' });
+  let up; try { up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   try {
-    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
-    const r = await pool.query(`INSERT INTO planner.quality_docs (doc_type, filename, mime, byte_size, data, prod_no, batch_id, po, supplier_name, uploaded_by, uploader_kind)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'admin') RETURNING id`,
-      [String(b.doc_type), b.filename || 'document', b.mime || 'application/octet-stream', buf.length, buf,
+    const r = await pool.query(`INSERT INTO planner.quality_docs (doc_type, filename, mime, byte_size, data, storage_path, prod_no, batch_id, po, supplier_name, uploaded_by, uploader_kind)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'admin') RETURNING id`,
+      [String(b.doc_type), b.filename || 'document', b.mime || 'application/octet-stream', up.byteSize, up.buf, up.storagePath,
        b.prod_no || null, b.batch_id || null, b.po || null, b.supplier_name || null, authUser(req) || 'admin']);
-    res.json({ id: r.rows[0].id, byte_size: buf.length });
+    res.json({ id: r.rows[0].id, byte_size: up.byteSize });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/quality-doc/:id/delete', async (req, res) => {
@@ -7983,11 +8089,9 @@ app.post('/api/supply/quality-doc/:id/delete', async (req, res) => {
 });
 app.get('/api/supply/quality-doc/:id', async (req, res) => {
   try {
-    const r = (await pool.query(`SELECT filename, mime, data FROM planner.quality_docs WHERE id=$1`, [req.params.id])).rows[0];
+    const r = (await pool.query(`SELECT filename, mime, data, storage_path FROM planner.quality_docs WHERE id=$1`, [req.params.id])).rows[0];
     if (!r) return res.status(404).json({ error: 'not found' });
-    res.setHeader('Content-Type', r.mime || 'application/octet-stream');
-    res.setHeader('Content-Disposition', 'attachment; filename="' + String(r.filename || 'document').replace(/"/g, '') + '"');
-    res.send(r.data);
+    return serveStored(res, r);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
@@ -7999,23 +8103,21 @@ const REMIT_DELAY_MS = 5 * 60 * 1000;
 // Upload a remittance file against a payment run (base64 in the body, like quality-doc).
 app.post('/api/supply/remittance', async (req, res) => {
   const b = req.body || {};
-  if (!b.run_key || !b.data_base64) return res.status(400).json({ error: 'run_key and data_base64 required' });
+  if (!b.run_key || (!b.data_base64 && !b.storage_path)) return res.status(400).json({ error: 'run_key and data_base64/storage_path required' });
+  let up; try { up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   try {
-    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
-    const r = await pool.query(`INSERT INTO planner.payment_remittances (run_key, supplier_name, filename, mime, byte_size, data, uploaded_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-      [String(b.run_key), b.supplier_name || null, b.filename || 'remittance', b.mime || 'application/octet-stream', buf.length, buf, authUser(req) || 'admin']);
-    res.json({ id: r.rows[0].id, byte_size: buf.length });
+    const r = await pool.query(`INSERT INTO planner.payment_remittances (run_key, supplier_name, filename, mime, byte_size, data, storage_path, uploaded_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+      [String(b.run_key), b.supplier_name || null, b.filename || 'remittance', b.mime || 'application/octet-stream', up.byteSize, up.buf, up.storagePath, authUser(req) || 'admin']);
+    res.json({ id: r.rows[0].id, byte_size: up.byteSize });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // (List endpoints /api/supply/remittances + /api/supply/payment-emails are served by the /api/supply/:section switch above.)
 app.get('/api/supply/remittance/:id', async (req, res) => {
   try {
-    const r = (await pool.query(`SELECT filename, mime, data FROM planner.payment_remittances WHERE id=$1`, [req.params.id])).rows[0];
+    const r = (await pool.query(`SELECT filename, mime, data, storage_path FROM planner.payment_remittances WHERE id=$1`, [req.params.id])).rows[0];
     if (!r) return res.status(404).json({ error: 'not found' });
-    res.setHeader('Content-Type', r.mime || 'application/octet-stream');
-    res.setHeader('Content-Disposition', 'attachment; filename="' + String(r.filename || 'remittance').replace(/"/g, '') + '"');
-    res.send(r.data);
+    return serveStored(res, r);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/remittance/:id/delete', async (req, res) => {
@@ -8053,7 +8155,7 @@ app.post('/api/supply/payment-notify/:id/cancel', async (req, res) => {
 // (Status list /api/supply/payment-emails is served by the /api/supply/:section switch above.)
 // Build + send one queued paid-notification. Attaches the remittance(s) for the run if any exist.
 async function sendPaymentNotify(row) {
-  const rem = (await pool.query(`SELECT filename, mime, data FROM planner.payment_remittances WHERE run_key=$1 ORDER BY uploaded_at`, [row.run_key])).rows;
+  const rem = (await pool.query(`SELECT filename, mime, data, storage_path FROM planner.payment_remittances WHERE run_key=$1 ORDER BY uploaded_at`, [row.run_key])).rows;
   const money = (row.amount != null) ? (Number(row.amount).toLocaleString('en-GB', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) : '';
   const amtLine = money ? ('<b>' + escHtml(money) + ' ' + escHtml(row.currency || '') + '</b>') : 'your payment';
   const dateLine = row.pay_date ? (' on <b>' + escHtml(row.pay_date) + '</b>') : '';
@@ -8063,7 +8165,7 @@ async function sendPaymentNotify(row) {
     + '<p>This is to confirm that Dock &amp; Bay has made a payment of ' + amtLine + dateLine + '.</p>'
     + (hasRem ? '<p><b>Remittance attached.</b></p>' : '')
     + '<p>Thank you,<br>Dock &amp; Bay Accounts</p></div>';
-  const attachments = rem.map(a => ({ filename: a.filename || 'remittance', content: Buffer.from(a.data).toString('base64') }));
+  const attachments = await Promise.all(rem.map(async a => ({ filename: a.filename || 'remittance', content: (a.storage_path ? await storageFetch(a.storage_path) : Buffer.from(a.data)).toString('base64') })));
   const subj = 'Payment made — Dock & Bay' + (money ? (' (' + money + ' ' + (row.currency || '') + ')') : '');
   return sendResendEmail({ to: row.to_emails.split(',').map(s => s.trim()).filter(Boolean), subject: subj, html,
     kind: 'payment-remittance', ref: row.run_key, by: row.created_by, attachments });
@@ -8247,9 +8349,9 @@ function parseInvoiceXlsx(buf) {
 // Parse an uploaded supplier invoice and PREVIEW it against the PO's current order plan (no DB write).
 app.post('/api/supply/portal-parse-invoice', async (req, res) => {
   const b = req.body || {};
-  if (!b.data_base64) return res.status(400).json({ error: 'data_base64 required' });
+  if (!b.data_base64 && !b.storage_path) return res.status(400).json({ error: 'data_base64 required' });
   try {
-    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^,]*,/, ''), 'base64');
+    const buf = await resolveUploadBytes(b, { maxInline: 20 * 1024 * 1024 });
     const parsed = parseInvoiceXlsx(buf);
     if (!parsed.lines.length) return res.json({ ok: false, error: 'No invoice line items found — need a sheet with SKU / Q’TY (PCS) / Unit Price columns.' });
     const po = b.po || parsed.po;
@@ -8275,10 +8377,10 @@ app.post('/api/supply/portal-parse-invoice', async (req, res) => {
 // transaction. The supplier then reviews/confirms in the portal; the planner approves the order-plan change (existing flow).
 app.post('/api/supply/portal-invoice-apply', async (req, res) => {
   const b = req.body || {}; const by = b.submitted_by || 'portal';
-  if (!b.data_base64) return res.status(400).json({ error: 'data_base64 required' });
+  if (!b.data_base64 && !b.storage_path) return res.status(400).json({ error: 'data_base64 required' });
   let parsed;
-  try { parsed = parseInvoiceXlsx(Buffer.from(String(b.data_base64).replace(/^data:[^,]*,/, ''), 'base64')); }
-  catch (e) { return res.status(400).json({ error: 'Could not parse the file: ' + e.message }); }
+  try { parsed = parseInvoiceXlsx(await resolveUploadBytes(b, { maxInline: 20 * 1024 * 1024 })); }
+  catch (e) { return res.status(e.status || 400).json({ error: 'Could not parse the file: ' + e.message }); }
   const po = b.po || parsed.po;
   if (!po) return res.status(400).json({ error: 'no PO (none supplied and none detected in the file)' });
   if (!parsed.lines.length) return res.status(400).json({ error: 'No invoice line items found in the file.' });
@@ -8559,8 +8661,9 @@ app.post('/api/supply/submission/:id/dismiss', async (req, res) => {
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/portal-attachment/:id', async (req, res) => {
-  try { const r = (await pool.query(`SELECT filename, mime, data FROM planner.portal_attachments WHERE id=$1`, [req.params.id])).rows[0];
+  try { const r = (await pool.query(`SELECT filename, mime, data, storage_path FROM planner.portal_attachments WHERE id=$1`, [req.params.id])).rows[0];
     if (!r) return res.status(404).send('not found');
+    if (r.storage_path) return res.redirect(302, await storageSignDownload(r.storage_path));   // inline view (no download= param)
     res.setHeader('Content-Type', r.mime || 'application/octet-stream');
     res.setHeader('Content-Disposition', 'inline; filename="' + (r.filename || 'file').replace(/"/g, '') + '"');
     res.send(r.data);
@@ -8634,22 +8737,22 @@ app.get('/api/supply/tpl/goods-in', async (req, res) => {
 });
 app.post('/api/supply/tpl/upload', async (req, res) => {
   const b = req.body || {};
-  if (!TPL_KEYS.includes(b.tpl) || !b.period || !b.data_base64) return res.status(400).json({ error: 'tpl, period and data_base64 required' });
+  if (!TPL_KEYS.includes(b.tpl) || !b.period || (!b.data_base64 && !b.storage_path)) return res.status(400).json({ error: 'tpl, period and data_base64/storage_path required' });
+  let up; try { up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   try {
-    const raw = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
-    const buf = b.gzip ? zlib.gunzipSync(raw) : raw;   // client gzips to beat Vercel's ~4.5MB body cap; store the ORIGINAL bytes
-    const r = await pool.query(`INSERT INTO planner.tpl_invoice_files (tpl, period, filename, content_type, content, byte_size, uploaded_by)
-      VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-      [b.tpl, b.period, b.filename || 'invoice', b.mime || 'application/octet-stream', buf, buf.length, b.uploaded_by || null]);
-    res.json({ ok: true, id: r.rows[0].id, byte_size: buf.length });
+    // Inline path: client may gzip the base64 (to beat Vercel's ~4.5MB cap) — gunzip to the ORIGINAL bytes. Storage path: no gzip.
+    const buf = up.storagePath ? null : (b.gzip ? zlib.gunzipSync(up.buf) : up.buf);
+    const byteSize = up.storagePath ? up.byteSize : buf.length;
+    const r = await pool.query(`INSERT INTO planner.tpl_invoice_files (tpl, period, filename, content_type, content, storage_path, byte_size, uploaded_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+      [b.tpl, b.period, b.filename || 'invoice', b.mime || 'application/octet-stream', buf, up.storagePath, byteSize, b.uploaded_by || null]);
+    res.json({ ok: true, id: r.rows[0].id, byte_size: byteSize });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/supply/tpl/file/:id', async (req, res) => {
-  try { const r = (await pool.query(`SELECT filename, content_type, content FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
+  try { const r = (await pool.query(`SELECT filename, content_type, content, storage_path FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
     if (!r) return res.status(404).send('not found');
-    res.setHeader('Content-Type', r.content_type || 'application/octet-stream');
-    res.setHeader('Content-Disposition', 'attachment; filename="' + (r.filename || 'invoice').replace(/"/g, '') + '"');
-    res.send(r.content);
+    return serveStored(res, { storage_path: r.storage_path, data: r.content, filename: r.filename, mime: r.content_type });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/supply/tpl/file/:id/delete', async (req, res) => {
@@ -9620,7 +9723,7 @@ app.get('/api/supply/inventory-awd/status', async (_req, res) => {
 });
 app.post('/api/supply/inventory-awd/import', async (req, res) => {
   const b = req.body || {}; let text = String(b.csv || '');
-  if (b.csv_base64) { try { text = Buffer.from(String(b.csv_base64).split(',').pop(), 'base64').toString('utf8'); } catch (e) {} }
+  if (b.csv_base64 || b.storage_path) { try { text = (await resolveUploadBytes(b, { base64Field: 'csv_base64', maxInline: 20 * 1024 * 1024 })).toString('utf8'); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); } }
   if (!text.trim()) return res.json({ error: 'Empty file' });
   try { const parsed = awdParse(text);
     if (!parsed) return res.json({ error: 'Empty report' });
@@ -9654,7 +9757,7 @@ app.post('/api/supply/inventory-fba/import', async (req, res) => {
   const b = req.body || {}, mkt = String(b.market || '').toUpperCase();
   if (INVFBA_MKTS.indexOf(mkt) < 0) return res.json({ market: mkt, error: 'Unknown market' });
   let text = String(b.csv || '');
-  if (b.csv_base64) { try { text = Buffer.from(String(b.csv_base64).split(',').pop(), 'base64').toString('utf8'); } catch (e) {} }
+  if (b.csv_base64 || b.storage_path) { try { text = (await resolveUploadBytes(b, { base64Field: 'csv_base64', maxInline: 20 * 1024 * 1024 })).toString('utf8'); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); } }
   if (!text.trim()) return res.json({ market: mkt, error: 'Empty file' });
   try {
     const parsed = invFbaParse(text);
@@ -10466,8 +10569,9 @@ app.get('/api/supply/zalando/data', async (req, res) => {   // /data suffix: sin
 // Upload the combined Zalando stock file (csv/xls/xlsx). Flexible: finds the header row with a "Sku" + "…sellable_stock" column.
 app.post('/api/supply/zalando/stock-upload', async (req, res) => {
   try {
-    const b = req.body || {}; const buf = b.content_base64 ? Buffer.from(String(b.content_base64), 'base64') : null; const fn = String(b.filename || '');
-    if (!buf) return res.status(400).json({ error: 'no file supplied' });
+    const b = req.body || {}; const fn = String(b.filename || '');
+    if (!b.content_base64 && !b.storage_path) return res.status(400).json({ error: 'no file supplied' });
+    let buf; try { buf = await resolveUploadBytes(b, { base64Field: 'content_base64', maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
     let grid = [];
     if (/\.csv$/i.test(fn)) { const parse = l => { const o = []; let c = '', q = false; for (let i = 0; i < l.length; i++) { const ch = l[i]; if (ch === '"') { if (q && l[i + 1] === '"') { c += '"'; i++; } else q = !q; } else if (ch === ',' && !q) { o.push(c); c = ''; } else c += ch; } o.push(c); return o; }; grid = String(buf.toString('utf8')).split(/\r?\n/).filter(l => l.length).map(parse); }
     else { const ExcelJS = (await import('exceljs')).default; const wb = new ExcelJS.Workbook(); await wb.xlsx.load(buf); const ws = wb.worksheets[0]; if (ws) ws.eachRow({ includeEmpty: false }, r => { const a = []; r.eachCell({ includeEmpty: true }, (c, col) => { a[col - 1] = _tplCellVal(c); }); grid.push(a); }); }
@@ -14177,11 +14281,11 @@ app.post('/api/supply/sample-charge', async (req, res) => {
       VALUES ('sample',$1,$2,$3,$4,$5,$6) RETURNING id`, [s.ref, s.supplier_name, Number(b.freight_cost)||0, Number(b.product_cost)||0, b.description||null, b.created_by||'preview']); res.json({ ok:true, id: r.rows[0].id }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/supply/sample-attachment', async (req, res) => {   // admin/preview upload to a sample (body {id})
-  const b = req.body || {}; if(!b.id || !b.data_base64) return res.status(400).json({ error: 'id and data_base64 required' });
+  const b = req.body || {}; if(!b.id || (!b.data_base64 && !b.storage_path)) return res.status(400).json({ error: 'id and data_base64/storage_path required' });
+  let up; try { up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   try { const s = (await pool.query(`SELECT ref FROM planner.sample_requests WHERE id=$1::bigint`, [b.id])).rows[0]; if(!s) return res.status(404).json({ error: 'sample not found' });
-    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
-    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, uploaded_by, category) VALUES ($1,$2,$3,$4,$5,$6,'sample') RETURNING id`,
-      [s.ref, b.filename||'attachment', b.mime||'application/octet-stream', buf.length, buf, b.uploaded_by||'PO PLAN']); res.json({ ok:true, id: r.rows[0].id }); }
+    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category) VALUES ($1,$2,$3,$4,$5,$6,$7,'sample') RETURNING id`,
+      [s.ref, b.filename||'attachment', b.mime||'application/octet-stream', up.byteSize, up.buf, up.storagePath, b.uploaded_by||'PO PLAN']); res.json({ ok:true, id: r.rows[0].id }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/supply/sample-attachment-remove', async (req, res) => {
   const id = req.body && req.body.att_id;
@@ -15937,26 +16041,24 @@ app.get('/api/portal/quality-docs', portalAuth, async (req, res) => {
 });
 app.post('/api/portal/quality-doc', portalAuth, async (req, res) => {
   const b = req.body || {};
-  if (!b.doc_type || !b.data_base64) return res.status(400).json({ error: 'doc_type and file required' });
+  if (!b.doc_type || (!b.data_base64 && !b.storage_path)) return res.status(400).json({ error: 'doc_type and file required' });
   if (!(b.prod_no || b.batch_id || b.po)) return res.status(400).json({ error: 'assign at least one of production / batch / PO' });
   const sup = (req.portal.suppliers || [])[0] || null;   // scope to the logged-in supplier
+  let up; try { up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   try {
-    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
-    const r = await pool.query(`INSERT INTO planner.quality_docs (doc_type, filename, mime, byte_size, data, prod_no, batch_id, po, supplier_name, uploaded_by, uploader_kind)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'supplier') RETURNING id`,
-      [String(b.doc_type), b.filename || 'document', b.mime || 'application/octet-stream', buf.length, buf,
+    const r = await pool.query(`INSERT INTO planner.quality_docs (doc_type, filename, mime, byte_size, data, storage_path, prod_no, batch_id, po, supplier_name, uploaded_by, uploader_kind)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'supplier') RETURNING id`,
+      [String(b.doc_type), b.filename || 'document', b.mime || 'application/octet-stream', up.byteSize, up.buf, up.storagePath,
        b.prod_no || null, b.batch_id || null, b.po || null, sup, req.portal.email || null]);
-    res.json({ id: r.rows[0].id, byte_size: buf.length });
+    res.json({ id: r.rows[0].id, byte_size: up.byteSize });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/portal/quality-doc/:id', portalAuth, async (req, res) => {
   try {
     const sups = (req.portal.suppliers || []).map(s => String(s).toLowerCase());
-    const r = (await pool.query(`SELECT filename, mime, data, lower(coalesce(supplier_name,'')) sn FROM planner.quality_docs WHERE id=$1`, [req.params.id])).rows[0];
+    const r = (await pool.query(`SELECT filename, mime, data, storage_path, lower(coalesce(supplier_name,'')) sn FROM planner.quality_docs WHERE id=$1`, [req.params.id])).rows[0];
     if (!r || (sups.length && r.sn && sups.indexOf(r.sn) < 0)) return res.status(404).json({ error: 'not found' });
-    res.setHeader('Content-Type', r.mime || 'application/octet-stream');
-    res.setHeader('Content-Disposition', 'attachment; filename="' + String(r.filename || 'document').replace(/"/g, '') + '"');
-    res.send(r.data);
+    return serveStored(res, r);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Supplier may delete their OWN QC upload within 24h of uploading it (mistake window). Scoped to their supplier + uploader_kind='supplier'.
@@ -16014,8 +16116,9 @@ app.post('/api/portal/sample-note-delete/:id', portalAuth, (req, res) =>
 // Serve an uploaded invoice/doc — only if its PO belongs to the session's supplier.
 app.get('/api/portal/attachment/:id', portalAuth, async (req, res) => {
   try {
-    const r = (await pool.query(`SELECT po, filename, mime, data FROM planner.portal_attachments WHERE id=$1`, [req.params.id])).rows[0];
+    const r = (await pool.query(`SELECT po, filename, mime, data, storage_path FROM planner.portal_attachments WHERE id=$1`, [req.params.id])).rows[0];
     if (!r || !(await portalOwnsPO(req, r.po) || await portalOwnsSampleRef(req, r.po) || await portalOwnsShipmentRef(req, r.po))) return res.status(403).send('forbidden');   // v27.571: shipment-timeline files are keyed by shipment ref
+    if (r.storage_path) return res.redirect(302, await storageSignDownload(r.storage_path));   // inline view (no download= param)
     res.setHeader('Content-Type', r.mime || 'application/octet-stream');
     res.setHeader('Content-Disposition', 'inline; filename="' + (r.filename || 'file').replace(/"/g, '') + '"');
     res.send(r.data);
@@ -16233,12 +16336,13 @@ app.post('/api/portal/spec-approve', portalAuth, async (req, res) => {
 // Serve a spec file to a supplier — only if the spec is relevant to (directed at / covers a product of) their account.
 app.get('/api/portal/spec-file/:id', portalAuth, async (req, res) => {
   try {
-    const s = (await pool.query(`SELECT filename, mime, data, scope_type, coalesce(scope_category,'') scope_category, coalesce(scope_size,'') scope_size, coalesce(scope_skus,'') scope_skus, confirm_with_supplier, coalesce(confirm_suppliers,'') confirm_suppliers FROM planner.product_specs WHERE id=$1 AND active`, [req.params.id])).rows[0];
+    const s = (await pool.query(`SELECT filename, mime, data, storage_path, scope_type, coalesce(scope_category,'') scope_category, coalesce(scope_size,'') scope_size, coalesce(scope_skus,'') scope_skus, confirm_with_supplier, coalesce(confirm_suppliers,'') confirm_suppliers FROM planner.product_specs WHERE id=$1 AND active`, [req.params.id])).rows[0];
     if (!s) return res.status(404).send('not found');
     const directed = s.confirm_with_supplier && s.confirm_suppliers.split(',').map(x => x.trim()).some(n => req.portal.suppliers.indexOf(n) >= 0);
     let ok = directed;
     if (!ok) { const ss = await specSupplierSet(s); ok = req.portal.suppliers.some(n => ss.has(n)); }
     if (!ok) return res.status(403).send('forbidden');
+    if (s.storage_path) return res.redirect(302, await storageSignDownload(s.storage_path));   // inline view (no download= param)
     res.setHeader('Content-Type', s.mime || 'application/octet-stream');
     res.setHeader('Content-Disposition', 'inline; filename="' + (s.filename || 'file').replace(/"/g, '') + '"'); res.send(s.data);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -16366,14 +16470,14 @@ app.post('/api/portal/product-sample/:id/assign', portalAuth, async (req, res) =
     res.json({ ok: true });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/product-sample-photo', portalAuth, async (req, res) => { const b = req.body || {}, id = b.sample_id;
-  if (!b.data_base64 || !id) return res.status(400).json({ error: 'sample_id + data_base64 required' });
+  if ((!b.data_base64 && !b.storage_path) || !id) return res.status(400).json({ error: 'sample_id + data_base64/storage_path required' });
   try { const sr = (await pool.query(`SELECT item_ref, version FROM planner.product_dev_samples WHERE id=$1`, [id])).rows[0];
     if (!sr || !(await portalOwnsProduct(req, sr.item_ref))) return res.status(403).json({ error: 'not your sample' });
     const attId = await insertProductSamplePhoto(id, b, req.portal.email || null, 'supplier');
     // timeline note → admin PRODUCT ✉ unread
     await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, attachment_id) VALUES ($1,$2,'supplier',$3,$4)`,
       [sr.item_ref, req.portal.email || null, 'Supplier uploaded a file to sample v' + sr.version + ': ' + (b.filename || 'file'), attId]);
-    res.json({ ok: true, id: attId }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+    res.json({ ok: true, id: attId }); } catch (e) { if (e.status) return res.status(e.status).json({ error: e.message }); log500(e); res.status(500).json({ error: e.message }); } });
 // Supplier deletes a file they uploaded to a sample (only their own uploads on their own sample).
 app.post('/api/portal/product-sample-photo/:id/delete', portalAuth, async (req, res) => {
   try { const a = (await pool.query(`SELECT po, coalesce(uploader_kind,'internal') uploader_kind FROM planner.portal_attachments WHERE id=$1 AND category='product_sample'`, [req.params.id])).rows[0];
@@ -16385,13 +16489,13 @@ app.post('/api/portal/product-sample-photo/:id/delete', portalAuth, async (req, 
     res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // Supplier uploads a document/photo directly into a product's Documents list (category='product', uploader_kind='supplier').
 app.post('/api/portal/product-doc', portalAuth, async (req, res) => { const b = req.body || {}, ref = (b.ref || '').trim();
-  if (!ref || !b.data_base64) return res.status(400).json({ error: 'ref + data_base64 required' });
+  if (!ref || (!b.data_base64 && !b.storage_path)) return res.status(400).json({ error: 'ref + data_base64/storage_path required' });
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
-  try { const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
-    if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: 'file exceeds 10MB' });
-    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, uploaded_by, category, uploader_kind)
-      VALUES ($1,$2,$3,$4,$5,$6,'product','supplier') RETURNING id`,
-      [ref, b.filename || 'document', b.mime || 'application/octet-stream', buf.length, buf, req.portal.email || null]);
+  let up; try { up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+  try {
+    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category, uploader_kind)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,'product','supplier') RETURNING id`,
+      [ref, b.filename || 'document', b.mime || 'application/octet-stream', up.byteSize, up.buf, up.storagePath, req.portal.email || null]);
     await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, attachment_id) VALUES ($1,$2,'supplier',$3,$4)`,
       [ref, req.portal.email || null, 'Supplier uploaded a document: ' + (b.filename || 'document'), r.rows[0].id]);
     res.json({ ok: true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
@@ -16427,11 +16531,10 @@ async function portalOwnsSampleRef(req, ref){ if(!ref) return false;
   return (s.supplier_name && names.indexOf(s.supplier_name)>=0) || (s.supplier_id!=null && ids.indexOf(Number(s.supplier_id))>=0); }
 app.post('/api/portal/sample-attachment', portalAuth, async (req, res) => {   // supplier uploads an attachment to a sample
   const b = req.body || {};
-  try { const s = await portalOwnsSample(req, b.id); if(!s) return res.status(403).json({ error: 'not your sample' }); if(!b.data_base64) return res.status(400).json({ error: 'data_base64 required' });
-    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
-    if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: 'file exceeds 10MB' });   // M7: cap like the other upload routes
-    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, supplier_id, filename, mime, byte_size, data, uploaded_by, category)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,'sample') RETURNING id`, [s.ref, (req.portal.supplierIds||[])[0]||null, b.filename||'attachment', b.mime||'application/octet-stream', buf.length, buf, req.portal.email||'supplier']);
+  try { const s = await portalOwnsSample(req, b.id); if(!s) return res.status(403).json({ error: 'not your sample' }); if(!b.data_base64 && !b.storage_path) return res.status(400).json({ error: 'data_base64/storage_path required' });
+    let up; try { up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
+    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, supplier_id, filename, mime, byte_size, data, storage_path, uploaded_by, category)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'sample') RETURNING id`, [s.ref, (req.portal.supplierIds||[])[0]||null, b.filename||'attachment', b.mime||'application/octet-stream', up.byteSize, up.buf, up.storagePath, req.portal.email||'supplier']);
     res.json({ ok:true, id: r.rows[0].id }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/sample-attachment-remove', portalAuth, async (req, res) => {
@@ -16786,15 +16889,14 @@ app.post('/api/portal/escalate', portalAuth, async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/portal/upload', portalAuth, async (req, res) => {
-  const b = req.body || {}; if (!b.po || !b.data_base64) return res.status(400).json({ error: 'po and data_base64 required' });
+  const b = req.body || {}; if (!b.po || (!b.data_base64 && !b.storage_path)) return res.status(400).json({ error: 'po and data_base64/storage_path required' });
   if (!await portalOwnsPO(req, b.po)) return portalDeny(res);
+  let up; try { up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   try {
-    const buf = Buffer.from(String(b.data_base64).replace(/^data:[^;]+;base64,/, ''), 'base64');
-    if (buf.length > 10 * 1024 * 1024) return res.status(413).json({ error: 'file exceeds 10MB' });   // M7: cap like the other upload routes
     const sid = req.portal.supplierIds[0] || null;
-    const r = await pool.query(`INSERT INTO planner.portal_attachments (po,supplier_id,filename,mime,byte_size,data,uploaded_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
-      [b.po, sid, b.filename || 'invoice', b.mime || 'application/octet-stream', buf.length, buf, req.portal.email]);
-    res.json({ id: r.rows[0].id, byte_size: buf.length });
+    const r = await pool.query(`INSERT INTO planner.portal_attachments (po,supplier_id,filename,mime,byte_size,data,storage_path,uploaded_by) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+      [b.po, sid, b.filename || 'invoice', b.mime || 'application/octet-stream', up.byteSize, up.buf, up.storagePath, req.portal.email]);
+    res.json({ id: r.rows[0].id, byte_size: up.byteSize });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // #A supplier enters the pallet count on the portal PO card — same purchase_orders.pallets_override field the admin
