@@ -75,10 +75,14 @@
 #product-root{--p-ink:var(--nav);--p-mut:var(--muted);--p-line:#e6e9ef;--p-bg:var(--hover);--p-acc:#4f46e5}
 /* sub-nav: keep HORIZON's standard .stab style (consistent with SUPPLY / SCENARIO) — no bespoke restyle */
 /* filter bar */
-#product-root #pg-filters{gap:8px;align-items:center;margin-bottom:14px}
-#product-root #pg-filters .fci{border:1px solid #d5dae3;border-radius:9px;padding:7px 11px;font-size:12px;background:var(--card);color:var(--nav)}
+#product-root #pg-filters{gap:6px 8px;align-items:center;margin-bottom:10px}
+#product-root #pg-filt-panel{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;flex:1}
+#product-root #pg-filters .fci{border:1px solid #d5dae3;border-radius:7px;padding:4px 8px;font-size:11px;background:var(--card);color:var(--nav)}
 #product-root #pg-filters .fci:focus{outline:none;border-color:var(--p-acc);box-shadow:0 0 0 3px rgba(79,70,229,.12)}
-#product-root #pg-count{margin-left:auto}
+/* compact each "Label ▸ select" filter group (v27.686, Ben): smaller label, tighter gap, so more fit per row */
+#product-root #pg-filt-panel > span{gap:3px !important}
+#product-root #pg-filt-panel > span > span:first-child{font-size:10px !important;letter-spacing:.01em;white-space:nowrap}
+#product-root #pg-count{margin-left:4px;white-space:nowrap}
 /* desktop list refinements */
 #product-root .pg-desktop .tw{border:1px solid var(--p-line);border-radius:12px;background:var(--card)}
 #product-root table.pg-tbl td{padding:9px 12px;border-bottom:1px solid #d8dde7}
@@ -13914,7 +13918,7 @@
       var STAT=[['dev_actions','In development + open actions'],['unapproved','Not approved'],['','All'],['in_development','In development'],['approved','Approved'],['dropped','Rejected']];
       var selDark=function(v){ return 'text-align:left'+(v?';background:var(--nav);color:#fff;font-weight:600':''); };   // dark chip when a filter is set
       var fb=document.getElementById('pg-filters');
-      fb.innerHTML='<input class="fci" id="pg-q" value="'+esc(_prodFilt.q)+'" placeholder="🔍 search ref / colour / supplier / description…" style="width:300px;text-align:left">'
+      fb.innerHTML='<input class="fci" id="pg-q" value="'+esc(_prodFilt.q)+'" placeholder="🔍 search ref / colour / supplier…" style="width:190px;text-align:left">'
         +'<button class="save-btn pg-filt-toggle" id="pg-filt-toggle" type="button">⚙ Filters</button>'   // phone only (v27.488): the selects collapse behind this
         +'<div class="pg-filt-panel" id="pg-filt-panel">'
         +'<button class="save-btn outline-blue" id="pg-new">+ New product</button>'
@@ -14684,7 +14688,7 @@
         var ctrl=(!sup && n.id===recentOwnId)?'<button class="save-btn light prod-esc" data-msg="'+esc(n.body||'')+'" title="Escalate this message to the supplier (emails their portal user)" style="color:var(--neg);border-color:var(--neg-cell);white-space:nowrap">⚑ Escalate</button>':'';
         var _au='/api/supply/portal-attachment/'+encodeURIComponent(n.attachment_id||'');
         var dl=n.attachment_id?('<div style="margin-top:4px">'+(/^image\//i.test(String(n.attachment_mime||''))?'<img class="tl-att-img" data-src="'+_au+'" src="'+_au+'" title="'+esc(n.attachment_name||'')+'" style="max-width:160px;max-height:120px;border-radius:6px;border:1px solid var(--line);display:block;margin-bottom:3px;cursor:zoom-in">':'')+'<a href="'+_au+'" target="_blank" rel="noopener" style="font-size:12px;color:var(--blue);text-decoration:none;font-weight:600">⬇ '+esc(n.attachment_name||'Download file')+'</a></div>'):'';   // v27.558: image attachments show a thumbnail
-        var _tgBadges=(n.tags||[]).map(tagBadge).join('');
+        var _tgBadges=(n.tags||[]).map(function(id){ var t=TAGMAP[id]; if(!t)return ''; return '<span style="display:inline-flex;align-items:center;gap:3px;font-size:9px;font-weight:700;color:#fff;background:'+esc(t.colour||'var(--muted)')+';border-radius:4px;padding:1px 7px;margin:0 4px 0 0">'+esc(t.name||'')+(!sup?'<a class="pt-tagrm" data-noteid="'+n.id+'" data-id="'+id+'" title="remove this tag" style="cursor:pointer;color:#fff;opacity:.75;font-weight:800;line-height:1">×</a>':'')+'</span>'; }).join('');   // v27.685: removable tag badges on D&B messages (Ben #6)
         var _retag=(!sup&&ACTTAGS.length)?('<a class="pt-retag" data-id="'+n.id+'" style="cursor:pointer;color:var(--faint);font-size:10px;margin-left:'+(_tgBadges?'6px':'0')+'" title="add / edit tags">🏷 tag</a>'
           +'<div class="pt-retag-box" data-id="'+n.id+'" style="display:none;margin-top:4px">'+ACTTAGS.map(function(t){ var on=(n.tags||[]).map(String).indexOf(String(t.id))>=0; return '<span class="pt-retag-chip" data-noteid="'+n.id+'" data-id="'+t.id+'" style="cursor:pointer;display:inline-block;font-size:10px;font-weight:700;border-radius:5px;padding:2px 9px;margin:0 4px 4px 0;border:1px solid '+esc(t.colour||'var(--muted)')+';'+(on?('background:'+esc(t.colour||'var(--muted)')+';color:#fff'):('background:var(--card);color:'+esc(t.colour||'var(--muted)')))+'">'+esc(t.name||'')+'</span>'; }).join('')+'</div>'):'';
         var tg=(_tgBadges||_retag)?'<div style="margin-top:4px">'+_tgBadges+_retag+'</div>':'';
@@ -14713,7 +14717,7 @@
         +'<div style="position:relative"><textarea class="fci" id="pt-in" rows="2" spellcheck="true" autocorrect="on" autocapitalize="sentences" lang="en-GB" placeholder="Add a note…  ('+(SNIPS.length?'/ phrase · ':'')+'/p Pantone)" style="width:100%;box-sizing:border-box;min-height:38px;text-align:left"></textarea>'
           +'<div id="pt-picker" style="display:none;position:absolute;left:6px;right:6px;top:calc(100% - 2px);z-index:60;background:var(--card);border:1px solid var(--line);border-radius:6px;box-shadow:0 6px 20px rgba(15,23,42,.14);max-height:200px;overflow:auto"></div></div>'
         +'<div id="pt-prev" style="display:none;margin:4px 0 0;font-size:12px;line-height:1.5"></div>'
-        +(ACTTAGS.length?'<div style="margin:5px 0 2px"><span class="mut tiny" style="margin-right:4px">Tags:</span>'+_compChips+'</div>':'')
+        +'<div style="margin:5px 0 2px"><span class="mut tiny" style="margin-right:4px">Tags:</span>'+_compChips+'<span class="pt-tagnew" title="Create a new tag" style="cursor:pointer;display:inline-block;font-size:10px;font-weight:700;border-radius:5px;padding:2px 9px;margin:0 4px 4px 0;border:1px dashed var(--muted);color:var(--muted);background:var(--card)">+ new tag</span></div>'
         +'<div class="mut tiny" style="margin:4px 0 2px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span>Type <b>/</b> for a reusable phrase · <b>/p</b> for a Pantone colour · drop photos / documents on the box or</span><label style="cursor:pointer;color:var(--blue);font-weight:600">📎 add files<input type="file" id="pt-files" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ai,.zip" style="display:none"></label></div><div id="pt-filelist" style="display:flex;flex-wrap:wrap;gap:6px;margin:2px 0"></div>'
         +'<div style="margin-top:5px"><button class="save-btn" id="pt-post" style="background:var(--blue);color:#fff;border-color:var(--blue)">Post</button> <span id="pt-postmsg" class="mut tiny"></span></div></div>'
         +'<div class="mut tiny" style="margin:4px 2px 12px">To escalate to the supplier, post the message then use ⚑ Escalate on it.</div>';
@@ -14722,6 +14726,11 @@
       // compose tag selection
       var _sel={};
       body.querySelectorAll('.pt-tagchip').forEach(function(ch){ ch.onclick=function(){ var id=ch.dataset.id, t=TAGMAP[id]; _sel[id]=!_sel[id]; if(_sel[id]){ ch.style.background=t.colour||'var(--muted)'; ch.style.color='#fff'; } else { ch.style.background='#fff'; ch.style.color=t.colour||'var(--muted)'; } }; });
+      // v27.685 (Ben #6): create a brand-new tag inline from the composer (persists via /api/product/timeline-tag), select it, and bust the config cache so it appears in the list next render.
+      var _tnew=body.querySelector('.pt-tagnew'); if(_tnew)_tnew.onclick=function(){ var nm=(prompt('New tag name:')||'').trim(); if(!nm)return; shipPost('/api/product/timeline-tag',{name:nm,colour:'#64748b',active:true},function(j){ if(j&&j.error){alert(j.error);return;} var id=j&&j.id; if(!id)return; var t={id:id,name:nm,colour:'#64748b',active:true}; ACTTAGS.push(t); TAGMAP[id]=t; _sel[id]=true; try{ delete _prodJsonCache['/api/product/timeline-config']; }catch(e){}
+        var chip=document.createElement('span'); chip.className='pt-tagchip'; chip.setAttribute('data-id',id); chip.setAttribute('style','cursor:pointer;display:inline-block;font-size:10px;font-weight:700;border-radius:5px;padding:2px 9px;margin:0 4px 4px 0;border:1px solid '+t.colour+';background:'+t.colour+';color:#fff'); chip.textContent=t.name;
+        chip.onclick=function(){ _sel[id]=!_sel[id]; if(_sel[id]){ chip.style.background=t.colour; chip.style.color='#fff'; } else { chip.style.background='#fff'; chip.style.color=t.colour; } };
+        _tnew.parentNode.insertBefore(chip,_tnew); }); };
       // Pantone colours picked while composing (code → full colour); inserted inline into the note text as a
       // "🎨 <code>" token so the reference lives IN the message. On post we send the ones still present in the text.
       var _panPicked={};
@@ -14737,6 +14746,10 @@
         var n=notes.filter(function(x){return String(x.id)===String(nid);})[0]; if(!n)return; n.tags=(n.tags||[]).map(Number);
         var i=n.tags.indexOf(tid); if(i>=0)n.tags.splice(i,1); else n.tags.push(tid);
         shipPost('/api/product/note/'+nid+'/tags',{tags:n.tags},function(j){ if(j&&j.error){alert(j.error);return;} renderProdTimeline(body,ref,{quiet:true}); setTimeout(function(){ try{_prodJsonBust(ref);}catch(e){} },400); }); }; });   // v27.549: tags already changed in memory → quiet redraw, refresh cache after
+      // v27.685 (Ben #6): the little × on a tag badge removes that tag from the message (added-by-mistake fix).
+      body.querySelectorAll('.pt-tagrm').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); e.preventDefault(); var nid=a.dataset.noteid, tid=Number(a.dataset.id);
+        var n=notes.filter(function(x){return String(x.id)===String(nid);})[0]; if(!n)return; n.tags=(n.tags||[]).map(Number); var i=n.tags.indexOf(tid); if(i>=0)n.tags.splice(i,1);
+        shipPost('/api/product/note/'+nid+'/tags',{tags:n.tags},function(j){ if(j&&j.error){alert(j.error);return;} renderProdTimeline(body,ref,{quiet:true}); setTimeout(function(){ try{_prodJsonBust(ref);}catch(e){} },400); }); }; });
       // v27.558: files queued on the compose box (📎 or drag-and-drop) → uploaded on Post as product documents and attached to the message(s)
       var _files=[]; function drawFiles(){ var fl=body.querySelector('#pt-filelist'); if(!fl)return; fl.innerHTML=_files.map(function(f,i){ return '<span style="display:inline-flex;align-items:center;gap:4px;font-size:10.5px;background:var(--hover);border:1px solid var(--line);border-radius:10px;padding:1px 8px">📎 '+esc(f.name)+' <a data-i="'+i+'" class="pt-frm" style="cursor:pointer;color:var(--neg);font-weight:800">×</a></span>'; }).join(''); fl.querySelectorAll('.pt-frm').forEach(function(a){ a.onclick=function(){ _files.splice(parseInt(a.dataset.i,10),1); drawFiles(); }; }); }
       function addFiles(list){ Array.prototype.slice.call(list||[]).forEach(function(f){ if(f.size>10*1024*1024){ alert(f.name+' is over 10MB'); return; } _files.push(f); }); drawFiles(); }

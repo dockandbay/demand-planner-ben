@@ -1,3 +1,8 @@
+## v27.685 PRODUCT: timeline tag add/remove + tidier grid filter bar (Ben) — CLIENT
+- **#6 Timeline tags** — the composer's Tags row gains a **"+ new tag"** chip: type a name and it's created (`/api/product/timeline-tag`), selected, and added to the list (config cache busted so it persists). On a posted D&B message, each tag badge now has a little **×** to remove a tag added by mistake (posts the reduced set to `/api/product/note/:id/tags`).
+- **Filter bar tidy-up (Ben, mid-request)** — the PRODUCT grid filter bar was crowded after the new Supplier filter. Compacted the field controls (smaller padding/font/radius), shrank the filter-group labels, tightened the gaps, made the panel a wrapping flex row, and narrowed the search box — so more filters fit per row.
+- inject.html only, no server/migration, no buy impact.
+
 ## v27.684 PRODUCT: supplier filter on the grid, Pantone name in chips, timeline autocorrect (Ben) — CLIENT
 - **#1 Supplier filter** — PRODUCT grid toolbar gains a **Supplier** dropdown, populated only from suppliers that have products in the grid (like the Season/Category filters). Feeds `_passBase`, the reset, the count and the dirty-state; a stale supplier selection self-clears if it no longer has products.
 - **#5 Pantone name** — Pantone chips (`hzPanChip`, used in the timeline preview + saved notes) now show the colour **name** inline after the TCX code (e.g. "PANTONE 2758 C Twilight Blue"), not just the number. Name was already in the chip data; no server change.
