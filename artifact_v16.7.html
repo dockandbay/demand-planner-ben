@@ -2349,7 +2349,8 @@ function fbaTransferSized(sku,mkt,capUnits){
   const fbw=parseInt(document.getElementById('fbw')?.value)||8;
   const targetMonths=Math.max(1,Math.round(fbw/4.33));
   const target=fbaFwdDemand(md,targetMonths);
-  const need=Math.max(0,target-(iF+oof+awd+_fbaPendingOf(sku,mkt)));   // FBA shortfall vs target — includes in-flight branch transfers not yet inbound (overlay)
+  const fbaHave=(iF+oof+awd+_fbaPendingOf(sku,mkt));                   // current FBA-side cover: on-hand + open orders + AWD + in-flight transfers
+  const need=Math.max(0,target-fbaHave);                              // FBA shortfall vs target
   if(need<=0)return 0;
   let base=Math.min(need,Math.max(capUnits,0));
   if(base<=0)return 0;
@@ -2365,6 +2366,10 @@ function fbaTransferSized(sku,mkt,capUnits){
     if(fullQty>0)return 0;                                            // carton-filler → send under FULL, not here
     const q=Math.round(base); return q<0.2*d60?0:q;                   // sub-carton straggler: send the raw partial
   }
+  // A (Ben v27.686): a SKU with ZERO FBA cover shouldn't be left with nothing when the transferable amount is under
+  // one carton. Seed it with a partial of ~1 month of FBA demand (capped by what's transferable), so a launch/empty
+  // SKU gets stock now without over-shipping into next month's needs. Only fires when FBA is genuinely empty.
+  if(fbaHave<=0 && fullQty<=0 && base>0){ const seed=Math.min(Math.round(base),Math.round(fbaFwdDemand(md,1))); if(seed>0)return seed; }
   if(fullQty<=0)return 0;                                             // FULL: too small for a whole carton
   if(fullQty<0.2*d60)return 0;                                        // below the 20% forward-demand floor
   return fullQty;
@@ -2376,16 +2381,36 @@ function fbaTransferSized(sku,mkt,capUnits){
 //  - Amazon-only SKUs (FBA available, DTC not): exempt from the 50% cap (3PL only feeds Amazon)
 //  - carton rounding off next-90-day FBA demand; skip if <70% of a carton
 //  - skip if the result is <20% of next-60-day FBA demand (defer to a fuller shipment)
+// Near-term 3PL inbound arriving LATER THIS month (day > today) — the SAME lines the buy sim credits to the running
+// 3PL pool during the current-month "Remaining" pass, so counting them here keeps fbaTransferRec's cap consistent
+// with the stock the transfer actually draws from. (Ben C, v27.686)
+function nearTerm3plInbound(md){
+  var cy=TODAY.getFullYear()+'-'+String(TODAY.getMonth()+1).padStart(2,'0'), dd=String(TODAY.getDate()).padStart(2,'0'), s=0;
+  (md.inb||[]).forEach(function(x){ if((x.wh||'').includes('fba'))return; var e=x.eta; if(e&&e.slice(0,7)===cy&&e.slice(8,10)>dd)s+=(Number(x.qty)||0); });
+  return s;
+}
+// Days until the next SUBSTANTIAL 3PL replenishment (>= half a month of website demand) — used to shorten the
+// website hold-back: it only needs to bridge to the next real top-up, not a flat 4 weeks. (Ben B, v27.686)
+function daysToNext3plReplen(md){
+  var web=webFwdDemand(md,1)||1, best=null;
+  (md.inb||[]).forEach(function(x){ if((x.wh||'').includes('fba'))return; if(!x.eta)return; if((Number(x.qty)||0)<0.5*web)return;
+    var d=(new Date(x.eta+'T00:00:00')-TODAY)/86400000; if(d>=0&&(best==null||d<best))best=d; });
+  return best;
+}
 function fbaTransferRec(sku,mkt){
   const pd=PD[sku];const md=pd&&pd.mkts&&pd.mkts[mkt];if(!md)return 0;
   const ch=md.ch||[];
   const amazonOnly=ch.includes('FBA')&&!ch.includes('DTC');
-  const i3=Math.max(md.i3||0,0);
+  const near3=nearTerm3plInbound(md);                 // C: firm-dated 3PL stock landing this month, already in the sim's running pool
+  const i3=Math.max((md.i3||0)+near3,0);
   // Website protection (Hybrid): dual-channel SKUs never transfer more than 50% of 3PL AND never draw 3PL
-  // below TRF_MIN_3PL_WKS of website (DTC+B2B) cover. Amazon-only SKUs are exempt (3PL only feeds Amazon).
+  // below the website (DTC+B2B) cover that must bridge to the next 3PL replenishment. Amazon-only SKUs are exempt.
   let cap;
   if(amazonOnly){ cap=i3; }
-  else { const minCover3PL=Math.round(webFwdDemand(md,1)*TRF_MIN_3PL_WKS/4.33); // ~4 wks of website demand held back
+  else {
+    const nextDays=daysToNext3plReplen(md);            // B: reserve only until the next real top-up (capped at TRF_MIN_3PL_WKS)
+    const reserveWks=(nextDays!=null)?Math.min(TRF_MIN_3PL_WKS,Math.max(0,nextDays/7)):TRF_MIN_3PL_WKS;
+    const minCover3PL=Math.round(webFwdDemand(md,1)*reserveWks/4.33);
     cap=Math.min(Math.floor(0.5*i3),Math.max(0,i3-minCover3PL)); }
   return fbaTransferSized(sku,mkt,cap);
 }
@@ -3408,11 +3433,17 @@ function project(md,pd,ple,mkt,tfOverride,skuKey){
   const hasFBA=(md.ch||[]).includes('FBA');
 
   const _firstFwdKey=(function(){ for(var _i=0;_i<PROJ.length;_i++){ if(!PROJ[_i].isActual&&!PROJ[_i].isForecast) return PROJ[_i].key; } return null; })();
+  const _curYm=TODAY.getFullYear()+'-'+String(TODAY.getMonth()+1).padStart(2,'0'), _todayDD=String(TODAY.getDate()).padStart(2,'0');
   const ib3={},ibF={};
   (md.inb||[]).forEach(s=>{
     if(!s.eta&&!s.poEta)return;
     let k=inbEffEta(s).key;                              // effective arrival month (past → PO-grid date → this month)
-    if(_firstFwdKey&&k<_firstFwdKey)k=_firstFwdKey;      // clamp into a month the forward projection actually reads, so overdue stock is counted (no phantom stockout)
+    // Inbound with a firm ETA lands by its DATE (Ben, v27.686): a shipment arriving LATER THIS month stays in the
+    // current month, where the Remaining pass credits it by day — NOT pushed up to the next forward month. Only
+    // genuinely-overdue / already-elapsed inbound is still clamped forward so it's counted (no phantom stockout).
+    // Forward-month bucketing is for BUYS, not for inbound that already has a clear date.
+    const _dayFuture=(s.eta&&s.eta.slice(0,7)===_curYm&&s.eta.slice(8,10)>_todayDD);
+    if(_firstFwdKey&&k<_firstFwdKey&&!_dayFuture)k=_firstFwdKey;
     if((s.wh||'').includes('fba')){if(!ibF[k])ibF[k]=[];ibF[k].push(s);}
     else{if(!ib3[k])ib3[k]=[];ib3[k].push(s);}
   });
