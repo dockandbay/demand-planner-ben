@@ -1,3 +1,9 @@
+## v27.688 Sample batch review: faster load + product swatch (Ben #8 + part of #9) — SERVER + CLIENT
+- **#8 Performance** — `/api/product/batch-review/:id` was an N+1: it looped every product serially, 3 queries each, and `productSampleList` ran a per-sample `supplier_notes` body-`LIKE` scan (`feedback_notes`) the batch view never uses. Now: `productSampleList` takes `{skipFeedbackNotes}` (drops the LIKE scan for batch), the three per-product lookups run concurrently, and products fan out in parallel (pg pool queues, so it's throughput-bound). Warm load ~2.1s → ~1.3s on the sandbox pooler (bigger win on prod's faster DB), and much less DB CPU.
+- **#9 (part) Swatch** — the batch-review Product cell now shows the product **swatch image** to the left of the ref/name (reuses `/api/product/swatch/<ref>`, hidden if none).
+- **#9 remaining (minimise-all + collapse off-batch samples)** — that's a non-trivial restructure of the rowspan table; being handled as a focused follow-up (see note to Ben).
+- server.mjs + inject.html, no migration, no buy impact.
+
 ## v27.687 PRODUCT samples: editable received date + collapsible top sample card (Ben) — SERVER + CLIENT
 - **#7 Received date** — the sample "Received" date is now **editable**: click the ✓ dd-mmm-yy on the product page's linked-sample-requests table to set/correct it via a date picker. `/api/supply/sample/:id/received` now accepts an optional `date` (YYYY-MM-DD), falling back to `now()` for the plain "Mark received" click. (The dd-mmm-yy display already existed; this makes the actual date settable — no new column, `received_at` is reused.)
 - **#3a Sample card** — the most-recent sample card is now **collapsible** like the others (it had no caret / couldn't be minimised); removed the background differential so all cards read consistently.

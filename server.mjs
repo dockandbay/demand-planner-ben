@@ -7126,7 +7126,13 @@ app.post('/api/product/timeline-snippet/:id/delete', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.product_timeline_snippets WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── Product SAMPLE VERSIONS (v1/v2…) — supplier-created in the portal; visible in the main app (migration 130) ──
-async function productSampleList(itemRef) {
+async function productSampleList(itemRef, opts) {
+  opts = opts || {};
+  // feedback_notes runs a supplier_notes body-LIKE scan per sample — heavy, and only the Samples tab uses it. The
+  // batch-review pass passes {skipFeedbackNotes:true} to drop it (v27.688, Ben #8 perf).
+  const _fbNotes = opts.skipFeedbackNotes ? `'[]'::json feedback_notes` :
+    `coalesce((SELECT json_agg(json_build_object('body',n.body,'at',to_char(n.created_at,'DD-Mon-YY HH24:MI')) ORDER BY n.created_at DESC)
+      FROM planner.supplier_notes n WHERE n.po=ps.item_ref AND n.author_kind='internal' AND n.body LIKE 'Feedback on '||ps.item_ref||'\_v'||ps.version||' %'),'[]'::json) feedback_notes`;
   const rows = (await pool.query(`SELECT ps.id, ps.version, (ps.item_ref||'_v'||ps.version) ref, to_char(ps.sample_date,'YYYY-MM-DD') sample_date,
     ps.colour_verified, ps.quality_verified, coalesce(ps.description,'') description, coalesce(ps.created_by,'') created_by,
     coalesce(ps.sampled_aspects,'{}') sampled_aspects, coalesce(ps.sample_sizes,'{}') sample_sizes,
@@ -7141,8 +7147,7 @@ async function productSampleList(itemRef) {
       FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id),'[]'::json) aspect_feedback,
     coalesce((SELECT json_agg(json_build_object('aspect',rr.aspect,'reason_id',rr.reason_id) ORDER BY rr.aspect)
       FROM planner.product_sample_reject_reasons rr WHERE rr.sample_id=ps.id),'[]'::json) reject_reasons,
-    coalesce((SELECT json_agg(json_build_object('body',n.body,'at',to_char(n.created_at,'DD-Mon-YY HH24:MI')) ORDER BY n.created_at DESC)
-      FROM planner.supplier_notes n WHERE n.po=ps.item_ref AND n.author_kind='internal' AND n.body LIKE 'Feedback on '||ps.item_ref||'\_v'||ps.version||' %'),'[]'::json) feedback_notes
+    ${_fbNotes}
     FROM planner.product_dev_samples ps
     WHERE ps.item_ref=$1 AND coalesce(ps.dimension,'product')='product' ORDER BY ps.version`, [itemRef])).rows;
   if (rows.length) {
@@ -7209,15 +7214,22 @@ app.get('/api/product/batch-review/:id', async (req, res) => {
     if (!sr) return res.status(404).json({ error: 'sample shipment not found' });
     const links = (await pool.query(`SELECT ls.dev_sample_id, ds.item_ref FROM planner.sample_request_dev_samples ls JOIN planner.product_dev_samples ds ON ds.id=ls.dev_sample_id WHERE ls.sample_request_id=$1::bigint`, [id])).rows;
     const ids = new Set(links.map(l => String(l.dev_sample_id))), refs = [...new Set(links.map(l => l.item_ref))].sort();
-    const items = [];
-    for (const ref of refs) {
-      const it = (await pool.query(`SELECT to_jsonb(i) j FROM planner.product_dev_items i WHERE i.ref=$1`, [ref])).rows[0];
-      const comps = (await pool.query(`SELECT id, name, dimension FROM planner.product_dev_components WHERE item_ref=$1 ORDER BY sort, id`, [ref])).rows;
-      const samples = (await productSampleList(ref)).filter(x => ids.has(String(x.id)));
+    // v27.688 (Ben #8): fan out per-product work concurrently (the pg pool queues beyond its max, so this is
+    // throughput-bound, not exhaustion), run each product's three lookups concurrently, and skip
+    // productSampleList's heavy supplier_notes LIKE scan (feedback_notes) which the batch view doesn't use.
+    // Kills the per-product N+1 serial cost. Promise.all preserves the sorted ref order.
+    const items = await Promise.all(refs.map(async (ref) => {
+      const [itR, compsR, samplesAll] = await Promise.all([
+        pool.query(`SELECT to_jsonb(i) j FROM planner.product_dev_items i WHERE i.ref=$1`, [ref]),
+        pool.query(`SELECT id, name, dimension FROM planner.product_dev_components WHERE item_ref=$1 ORDER BY sort, id`, [ref]),
+        productSampleList(ref, { skipFeedbackNotes: true }),
+      ]);
+      const it = itR.rows[0], comps = compsR.rows;
+      const samples = samplesAll.filter(x => ids.has(String(x.id)));
       const j = (it && it.j) || {};
-      items.push({ ref, name: j.description || '', colour_name: j.colour_name || '', supplier: j.supplier || '', stage: j.stage || '', season: j.season || '', category: j.category || '', status: j.status || '', product_type: j.type || '',
-        components: comps.map(c => ({ key: c.dimension || ('c' + c.id), name: c.name })), samples });
-    }
+      return { ref, name: j.description || '', colour_name: j.colour_name || '', supplier: j.supplier || '', stage: j.stage || '', season: j.season || '', category: j.category || '', status: j.status || '', product_type: j.type || '',
+        components: comps.map(c => ({ key: c.dimension || ('c' + c.id), name: c.name })), samples };
+    }));
     res.json({ sr, items });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
