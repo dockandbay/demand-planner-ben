@@ -1,3 +1,10 @@
+## v27.724 FIX: sample escalate found no portal users when supplier_id was null (Ben) — SERVER
+- **Bug:** escalating a sample from the timeline emailed nobody and the UI said "No active portal users for this supplier", even for suppliers that clearly have users (reported for **Lixin**, which has 3 active users).
+- **Cause:** `sample_requests` carried `supplier_name` only, with `supplier_id` **NULL** (true for all 9 live rows), and `escalateCore` resolved recipients by `supplier_id` alone → 0 emails → `sent:0` → that UI message.
+- **Fix:** `escalateCore` now falls back to resolving the supplier **by name** (`sample_requests.supplier_name` → `suppliers.id`) when `supplier_id` is null. Fixes **every existing row with no data change**.
+- Also: **admin sample-create** now sets `supplier_id` from the picked name (the supplier upsert guarantees the row), so new samples are linked properly. (Portal create already set it from the session.)
+- Verified in sandbox: SR-18 (Lixin) old = 0 recipients, new = 1 (`factory@lixin.test`).
+
 ## v27.723 P2b DHL tracking: pills on PO-drawer shipments + Samples card, + auto-fill observer (Ben) — CLIENT
 - **Auto-fill observer:** any surface can now just drop a `.hz-trkpill` placeholder; one small debounced `MutationObserver` populates it from the cache after paint, so no per-surface fill call is needed. It bails instantly when nothing is pending, and filled pills lose `data-trk`, so it cannot loop.
 - Pills added: **PO drawer ▸ Shipments** (read-only Carrier/tracking row + the self-shipment tracking rows) and the **SUPPLY ▸ Samples card** tracking field. DHL carriers only.

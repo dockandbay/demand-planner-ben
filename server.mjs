@@ -5994,7 +5994,9 @@ async function escalateCore({ initiator, kind, ref, message, user, supplierId, s
   if (initiator === 'internal') {
     audience = 'portal'; let sid = supplierId;
     if (!sid) {
-      if (kind === 'sample') sid = (await pool.query(`SELECT supplier_id FROM planner.sample_requests WHERE ref=$1`, [ref])).rows[0]?.supplier_id;
+      if (kind === 'sample') { const sr = (await pool.query(`SELECT supplier_id, supplier_name FROM planner.sample_requests WHERE ref=$1`, [ref])).rows[0];
+        sid = sr && sr.supplier_id;
+        if (!sid && sr && sr.supplier_name) sid = (await pool.query(`SELECT id FROM planner.suppliers WHERE lower(name)=lower($1)`, [sr.supplier_name])).rows[0]?.id; }   // v27.724: samples often carry supplier_name only (supplier_id null) — resolve by name so escalate still finds the supplier's portal users
       else if (kind === 'shipment') sid = (await pool.query(`SELECT po.supplier_id FROM planner.shipments sh JOIN planner.purchase_orders po ON po.po=coalesce(sh.master_po,sh.shipment_ref) WHERE sh.shipment_ref=$1`, [ref])).rows[0]?.supplier_id;
       else sid = (await pool.query(`SELECT supplier_id FROM planner.purchase_orders WHERE po=$1`, [ref])).rows[0]?.supplier_id;
     }
@@ -14687,10 +14689,12 @@ app.post('/api/supply/sample-create', async (req, res) => {
     await client.query('BEGIN');
     if (b.supplier_name && b.supplier_name.trim()) await client.query(   // keep the supplier picker a real dropdown
       `INSERT INTO planner.suppliers(name,kind) SELECT $1,'supplier' WHERE NOT EXISTS (SELECT 1 FROM planner.suppliers WHERE lower(trim(name))=lower(trim($1)))`, [b.supplier_name.trim()]);
+    let supId = b.supplier_id || null;   // v27.724: link the sample to the supplier id (the picker sends a name) so escalate/notify can resolve the portal users; the upsert above guarantees the row exists
+    if (!supId && b.supplier_name && b.supplier_name.trim()) supId = (await client.query(`SELECT id FROM planner.suppliers WHERE lower(trim(name))=lower(trim($1))`, [b.supplier_name.trim()])).rows[0]?.id || null;
     const ins = await client.query(`INSERT INTO planner.sample_requests
       (supplier_id, supplier_name, recipient_company, first_name, last_name, address_line1, address_line2, city, region, postcode, country, phone, completion_date_required, purpose, notes, created_by, notify_emails, recipients, internal_stakeholders, fulfilment_source, fulfilment_po, status)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18::jsonb,$19::jsonb,$20,$21,'FUTURE') RETURNING id`,
-      [b.supplier_id||null, b.supplier_name||null, b.recipient_company||null, b.first_name||null, b.last_name||null,
+      [supId, b.supplier_name||null, b.recipient_company||null, b.first_name||null, b.last_name||null,
        b.address_line1||null, b.address_line2||null, b.city||null, b.region||null, b.postcode||null, b.country||null, b.phone||null,
        b.completion_date_required||null, Array.isArray(b.purpose)?b.purpose:null, b.notes||null, createdByUser||null, b.notify_emails||null, sampleRecipientsJson(b.recipients), sampleStakeholdersJson(b.internal_stakeholders),
        (['supplier','warehouse','po'].includes(b.fulfilment_source)?b.fulfilment_source:'supplier'), (b.fulfilment_source==='po'?((b.fulfilment_po||'').trim()||null):null)]);   // new samples start FUTURE — D&B-only until moved to PRODUCTION
