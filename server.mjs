@@ -8543,7 +8543,7 @@ function unzipXlsx(buf) {
 // with SKU + a Q'TY (PCS) column + a Unit Price column, then reads the line items below it.
 function parseInvoiceXlsx(buf) {
   const f = unzipXlsx(buf);
-  const dec = s => String(s).replace(/&amp;/g, '&').replace(/&#10;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"');
+  const dec = s => String(s).replace(/&amp;/g, '&').replace(/&#10;/g, ' ').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;|&#39;/g, "'");   // v27.707: &apos; (Excel writes "Q'TY" this way) was left encoded → header never matched
   const ss = [];
   const ssXml = f['xl/sharedStrings.xml'] ? f['xl/sharedStrings.xml'].toString('utf8') : '';
   for (const m of ssXml.matchAll(/<si>([\s\S]*?)<\/si>/g)) { ss.push(dec([...m[1].matchAll(/<t[^>]*>([\s\S]*?)<\/t>/g)].map(x => x[1]).join('')).trim()); }
@@ -8562,21 +8562,35 @@ function parseInvoiceXlsx(buf) {
     let hr, sc, qc, pc;
     for (const rn of rns) { const e = Object.entries(rows[rn]);
       const sk = e.find(([k, v]) => /^sku$/i.test(v)); if (!sk) continue;
-      const qt = e.find(([k, v]) => /q'?ty/i.test(v) && /pcs/i.test(v));
+      const qt = e.find(([k, v]) => /q['’‘]?ty/i.test(v) && /pcs/i.test(v));   // v27.707: straight, curly or no apostrophe
       const pr = e.find(([k, v]) => /unit\s*price/i.test(v));
       if (sk && qt && pr) { hr = rn; sc = +sk[0]; qc = +qt[0]; pc = +pr[0]; break; } }
     if (!hr) continue;   // not the invoice sheet
     let po = ''; for (const rn of rns) { const c = rows[rn]; for (const k in c) { if (/invoice\s*no/i.test(c[k])) po = (c[+k + 1] || '').trim(); } if (po) break; }
-    const lines = [];
+    const raw = [];
     for (const rn of rns) { if (rn <= hr) continue; const c = rows[rn];
       const sku = (c[sc] || '').trim(), qty = Number(c[qc]), price = Number(c[pc]);
-      if (sku && /^[A-Za-z0-9][\w\-\.]*$/.test(sku) && qty > 0) lines.push({ sku, qty, price: isFinite(price) && price > 0 ? price : null }); }
-    return { po, lines };
+      if (sku && /^[A-Za-z0-9][\w\-\.]*$/.test(sku) && qty > 0) raw.push({ sku, qty, price: isFinite(price) && price > 0 ? price : null, row: rn }); }
+    // v27.707 (Ben, PO-57USLX4): a SKU can appear on SEVERAL invoice lines (e.g. 40 + 70 + 100). Previously the last line
+    // silently won on apply. Now duplicate SKUs are SUMMED into one line (unit price kept when identical, else the
+    // qty-weighted average, flagged price_mixed) and reported in `duplicates` so every surface can warn loudly.
+    const bySku = {}, order = [];
+    raw.forEach(l => { const k = l.sku.toUpperCase(); if (!bySku[k]) { bySku[k] = { sku: l.sku, qty: 0, val: 0, priced: 0, parts: [] }; order.push(k); }
+      const g = bySku[k]; g.qty += l.qty; g.parts.push({ qty: l.qty, price: l.price, row: l.row }); if (l.price != null) { g.val += l.qty * l.price; g.priced += l.qty; } });
+    const duplicates = [];
+    const lines = order.map(k => { const g = bySku[k];
+      let price = null, mixed = false;
+      if (g.priced > 0) { const ps = g.parts.filter(p => p.price != null).map(p => p.price); mixed = ps.some(p => Math.abs(p - ps[0]) > 0.00001); price = mixed ? Math.round(g.val / g.priced * 10000) / 10000 : ps[0]; }
+      if (g.parts.length > 1) duplicates.push({ sku: g.sku, lines: g.parts.map(p => p.qty), prices: g.parts.map(p => p.price), qty: g.qty, price, price_mixed: mixed, rows: g.parts.map(p => p.row) });
+      return { sku: g.sku, qty: g.qty, price, dup: g.parts.length > 1, dup_lines: g.parts.length > 1 ? g.parts.map(p => p.qty) : null, price_mixed: mixed }; });
+    return { po, lines, duplicates };
   }
-  return { po: '', lines: [] };
+  return { po: '', lines: [], duplicates: [] };
 }
+// One-line human summary of duplicate invoice SKUs — shared by the preview, the apply note, the record of change and the email.
+function invoiceDupSummary(dups) { return (dups || []).map(d => d.sku + ': ' + d.lines.join(' + ') + ' = ' + d.qty + (d.price_mixed ? ' (mixed unit prices → weighted avg ' + d.price + ')' : '')).join('; '); }
 // Parse an uploaded supplier invoice and PREVIEW it against the PO's current order plan (no DB write).
-app.post('/api/supply/portal-parse-invoice', async (req, res) => {
+const _invoiceParseHandler = async (req, res) => {   // v27.707: shared by the admin route and the supplier-portal route below
   const b = req.body || {};
   if (!b.data_base64 && !b.storage_path) return res.status(400).json({ error: 'data_base64 required' });
   try {
@@ -8589,7 +8603,7 @@ app.post('/api/supply/portal-parse-invoice', async (req, res) => {
     const lines = parsed.lines.map(l => { const cur = planBy[l.sku.toUpperCase()];
       const cq = cur ? Number(cur.qty) : null, cc = cur ? Number(cur.cost_price) : null;
       const status = !cur ? 'new' : ((cq !== l.qty || (l.price != null && cc !== l.price)) ? 'changed' : 'match');
-      return { sku: l.sku, inv_qty: l.qty, inv_price: l.price, cur_qty: cq, cur_cost: cc, status }; });
+      return { sku: l.sku, inv_qty: l.qty, inv_price: l.price, cur_qty: cq, cur_cost: cc, status, dup: !!l.dup, dup_lines: l.dup_lines || null, price_mixed: !!l.price_mixed }; });
     // plan SKUs NOT on the invoice → propose qty 0 (they weren't shipped/invoiced)
     const invSkus = new Set(parsed.lines.map(l => l.sku.toUpperCase()));
     const removed = plan.filter(l => !invSkus.has(String(l.sku).toUpperCase()) && Number(l.qty) > 0)
@@ -8598,13 +8612,15 @@ app.post('/api/supply/portal-parse-invoice', async (req, res) => {
     res.json({ ok: true, po_detected: parsed.po,
       totals: { count: lines.length, qty: lines.reduce((s, r) => s + r.inv_qty, 0), value: Math.round(lines.reduce((s, r) => s + r.inv_qty * (r.inv_price || 0), 0) * 100) / 100,
         matched: lines.filter(r => r.status !== 'new').length, changed: lines.filter(r => r.status === 'changed').length, neu: lines.filter(r => r.status === 'new').length, removed: removed.length },
-      lines: allLines });
+      lines: allLines,
+      duplicates: parsed.duplicates || [], duplicate_summary: invoiceDupSummary(parsed.duplicates) });   // v27.707 duplicate SKU lines (summed) → warn on every surface
   } catch (e) { res.status(400).json({ error: 'Could not parse the file: ' + e.message }); }
-});
+};
+app.post('/api/supply/portal-parse-invoice', _invoiceParseHandler);
 // Apply a parsed supplier invoice to the PO's order plan as portal overrides (amended_qty / actual_cost). Re-parses
 // the file server-side (single source of truth), writes only CHANGED + NEW lines (new SKUs flagged is_added), in a
 // transaction. The supplier then reviews/confirms in the portal; the planner approves the order-plan change (existing flow).
-app.post('/api/supply/portal-invoice-apply', async (req, res) => {
+const _invoiceApplyHandler = async (req, res) => {   // v27.707: shared by the admin route and the supplier-portal route below
   const b = req.body || {}; const by = b.submitted_by || 'portal';
   if (!b.data_base64 && !b.storage_path) return res.status(400).json({ error: 'data_base64 required' });
   let parsed;
@@ -8643,9 +8659,45 @@ app.post('/api/supply/portal-invoice-apply', async (req, res) => {
       applied++; zeroed++;
     }
     await client.query('COMMIT');
-    res.json({ ok: true, po, applied, added, unchanged, zeroed, total: parsed.lines.length });
+    // v27.707: duplicate SKU lines were SUMMED — warn loudly everywhere (timeline note both sides, record of change, pending
+    // admin banner, email to D&B). Best-effort; never fails the apply.
+    const dups = parsed.duplicates || [];
+    if (dups.length) { const summary = invoiceDupSummary(dups);
+      try { await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`, [po, by, '⚠ Invoice had duplicate SKU lines — ' + summary + '. The quantities were SUMMED into the order plan — please check the totals against the invoice.']); } catch (e) {}
+      try { await pool.query(`INSERT INTO planner.po_change_log (po,event,detail,changed_by) VALUES ($1,'Invoice duplicates',$2,$3)`, [po, summary, by]); } catch (e) {}
+      try { const sid = (await pool.query(`SELECT supplier_id FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0]?.supplier_id || null;
+        await pool.query(`UPDATE planner.supplier_submissions SET status='superseded' WHERE po=$1 AND kind='invoice_duplicates' AND status='pending'`, [po]);
+        await pool.query(`INSERT INTO planner.supplier_submissions (supplier_id, po, kind, value, status, submitted_by) VALUES ($1,$2,'invoice_duplicates',$3,'pending',$4)`, [sid, po, JSON.stringify({ summary, duplicates: dups, by, at: new Date().toISOString() }), by]); } catch (e) {}
+      try { let emails = []; try { const s = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='invoice_submit_notify'`)).rows[0]; emails = _emails(s ? s.value : ''); } catch (e) {} if (!emails.length) emails = ['zera@dockandbay.com', 'ben@dockandbay.com'];
+        const supName = await poSupplierName(po); const link = PLANNER_URL + '/#/supply/purchase-orders/' + encodeURIComponent(po) + '/order-plan';
+        const html = '<p style="color:#b45309"><b>⚠ Duplicate SKU lines on the invoice for ' + po + '</b> (' + escHtml(supName) + ').</p><p>The same SKU appeared on more than one invoice line. HORIZON <b>summed</b> them into the order plan — please check:</p><ul>' + dups.map(d => '<li><b>' + escHtml(d.sku) + '</b>: ' + d.lines.join(' + ') + ' = <b>' + d.qty + '</b>' + (d.price_mixed ? ' <i>(mixed unit prices → weighted average ' + d.price + ')</i>' : '') + '</li>').join('') + '</ul><p>Applied by: ' + escHtml(by || 'portal') + '</p><p><a href="' + link + '">Open the Order plan for ' + po + '</a></p>';
+        await sendResendEmail({ to: emails, subject: '⚠ Duplicate SKU lines on invoice — ' + po + ' (' + supName + ')', html, kind: 'invoice-notify', ref: po, replyTo: by }); } catch (e) {} }
+    res.json({ ok: true, po, applied, added, unchanged, zeroed, total: parsed.lines.length, duplicates: dups, duplicate_summary: invoiceDupSummary(dups) });
   } catch (e) { await client.query('ROLLBACK').catch(() => {}); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
+};
+app.post('/api/supply/portal-invoice-apply', _invoiceApplyHandler);
+// v27.707: the REAL supplier portal had no route for these (only the admin "view as supplier" preview did) — portal-scoped
+// twins: magic-link auth, PO must belong to the supplier, submitted_by forced to the portal user.
+app.post('/api/portal/parse-invoice', portalAuth, async (req, res) => {
+  const po = String((req.body || {}).po || '').trim(); if (!po) return res.status(400).json({ error: 'po required' });
+  if (!await portalOwnsPO(req, po)) return res.status(403).json({ error: 'that PO is not on your account' });
+  return _invoiceParseHandler(req, res);
+});
+app.post('/api/portal/invoice-apply', portalAuth, async (req, res) => {
+  const po = String((req.body || {}).po || '').trim(); if (!po) return res.status(400).json({ error: 'po required' });
+  if (!await portalOwnsPO(req, po)) return res.status(403).json({ error: 'that PO is not on your account' });
+  req.body.submitted_by = req.portal.email || 'portal';
+  return _invoiceApplyHandler(req, res);
+});
+// v27.707 — pending "duplicate SKU lines on the invoice" warning for the admin Order plan tab (dismiss = applied).
+app.get('/api/supply/po/:po/invoice-duplicates', async (req, res) => {
+  try { const r = (await pool.query(`SELECT id, value, submitted_by, to_char(submitted_at,'YYYY-MM-DD HH24:MI') at FROM planner.supplier_submissions WHERE po=$1 AND kind='invoice_duplicates' AND status='pending' ORDER BY id DESC LIMIT 1`, [req.params.po])).rows[0];
+    if (!r) return res.json({ pending: null }); let v = {}; try { v = JSON.parse(r.value || '{}'); } catch (e) { v = { summary: r.value }; }
+    res.json({ pending: { id: r.id, summary: v.summary || '', duplicates: v.duplicates || [], by: r.submitted_by, at: r.at } }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/supply/po/:po/invoice-duplicates/dismiss', async (req, res) => {
+  try { await pool.query(`UPDATE planner.supplier_submissions SET status='applied', applied_by=$2, applied_at=now() WHERE po=$1 AND kind='invoice_duplicates' AND status='pending'`, [req.params.po, authUser(req) || 'PO PLAN']); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Manufacturing: accept (sign off) a component's shortage/overage between finished-bundle demand and the mfg POs.
 app.post('/api/supply/manufacturing-accept', async (req, res) => {

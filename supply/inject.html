@@ -3840,7 +3840,8 @@
         +[['all','All barcodes'],['product','Product barcodes'],['carton','Carton + Inner barcodes']].map(function(o,ix){ return '<div class="op-bc-opt" data-k="'+o[0]+'" style="padding:9px 13px;cursor:pointer;font-size:12px;white-space:nowrap'+(ix?';border-top:1px solid var(--line)':'')+'">'+o[1]+'</div>'; }).join('')
         +'</span></span>';   // v27.697 Download barcodes ▾ (Ben) — reuses bcDownloadAll / label-data?po= (batch stamped from this PO)
     var _csv='SKU,Qty\n'+(lines||[]).map(function(l){ return '"'+String(l.sku).replace(/"/g,'""')+'",'+(Number(l.qty)||0); }).join('\n');
-    return '<div class="sect-h">Order plan — agree the final cost price per line '
+    return '<div class="op-dupwarn" data-po="'+esc(po)+'"></div>'   // v27.707 pending "duplicate SKU lines on invoice" banner (filled async)
+      +'<div class="sect-h">Order plan — agree the final cost price per line '
       +'<button class="lnk-btn op-goto" data-po="'+esc(po)+'" style="margin-left:8px" title="open the full ORDER PLAN filtered to this PO">↗ open in full order plan</button>'
       +' <button class="save-btn light op-csv" data-po="'+esc(po)+'" data-csv="'+encodeURIComponent(_csv)+'" title="download SKU + Qty as CSV">⤓ CSV</button>'
       +opBtns
@@ -4181,10 +4182,12 @@
             var badge = l.status==='new' ? '<span class="tool-badge bg-amber" style="font-size:9px">NEW</span>'
                       : l.status==='removed' ? '<span class="tool-badge bg-red" style="font-size:9px" title="on the order plan but not on this invoice — proposed to 0">not on invoice</span>'
                       : '<span class="mut tiny">changed</span>';
+            if(l.dup)badge+=' <span class="tool-badge" style="font-size:9px;background:#fef3c7;color:#92400e;border:1px solid #f59e0b" title="this SKU was on '+(l.dup_lines||[]).length+' invoice lines ('+(l.dup_lines||[]).join(' + ')+') — summed">Σ '+(l.dup_lines||[]).length+' lines</span>';   // v27.707
             return '<tr><td class="l">'+esc(l.sku)+'</td><td class="l">'+badge+'</td>'
               +'<td style="text-align:right;white-space:nowrap">'+q+'</td>'
               +'<td style="text-align:right;white-space:nowrap">'+p+'</td></tr>'; }).join('');
-          out.innerHTML='<div style="margin-bottom:6px;font-size:13px">'+(j.po_detected?'<b>'+esc(j.po_detected)+'</b> · ':'')+t.count+' lines · invoice total <b>'+money(t.value)+'</b> — <b>'+t.changed+'</b> changed, <b>'+t.neu+'</b> new'+(t.removed?', <b>'+t.removed+'</b> not on invoice → 0':'')+', '+(t.matched-t.changed)+' already match.</div>'
+          var dupBox=(j.duplicates&&j.duplicates.length)?'<div class="inv-dupwarn" style="margin:0 0 8px;padding:9px 12px;border-radius:8px;background:#fef3c7;border:2px solid #f59e0b;color:#7c2d12;font-size:12px"><div style="font-weight:800;font-size:13px">⚠ Duplicate SKU codes on this invoice — quantities have been ADDED UP</div><ul style="margin:4px 0 0 16px;padding:0">'+j.duplicates.map(function(d){ return '<li><b>'+esc(d.sku)+'</b>: '+d.lines.join(' + ')+' = <b>'+units(d.qty)+'</b>'+(d.price_mixed?' <i>(mixed unit prices → weighted average '+money(d.price)+')</i>':'')+'</li>'; }).join('')+'</ul><div style="margin-top:4px">Please check these totals against the invoice before applying. The summed quantity is what goes to the order plan.</div></div>':'';   // v27.707
+          out.innerHTML=dupBox+'<div style="margin-bottom:6px;font-size:13px">'+(j.po_detected?'<b>'+esc(j.po_detected)+'</b> · ':'')+t.count+' lines · invoice total <b>'+money(t.value)+'</b> — <b>'+t.changed+'</b> changed, <b>'+t.neu+'</b> new'+(t.removed?', <b>'+t.removed+'</b> not on invoice → 0':'')+', '+(t.matched-t.changed)+' already match.</div>'
             +(diff.length?'<div class="tw" style="max-height:240px;overflow:auto"><table style="font-size:11px;width:100%"><thead><tr><th class="l" style="width:50%">SKU</th><th class="l">Status</th><th style="text-align:right">Qty</th><th style="text-align:right">Price</th></tr></thead><tbody>'+drows+'</tbody></table></div>'
               +'<button class="save-btn inv-parse-apply" style="margin-top:6px;background:var(--pos-bg);border:1px solid var(--pos);color:var(--pos);font-weight:700">Apply '+(t.changed+t.neu+(t.removed||0))+' change(s) + set invoice total → Order Plan (to confirm)</button>'
               +' <button class="save-btn light inv-parse-cancel" style="margin-top:6px" title="discard this parsed invoice — nothing is applied to the order plan">✕ Cancel</button>'
@@ -4364,6 +4367,13 @@
     document.querySelectorAll('#podet-'+i+' .oprisk-undo').forEach(function(b){ b.onclick=function(){ _poRiskPost(b.dataset.ps,b.dataset.field,false,b); }; });
     document.querySelectorAll('#podet-'+i+' .op-erp-up-panel').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po); }; });
     document.querySelectorAll('#podet-'+i+' .op-cin7-full').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po, true); }; });   // open the Cin7 pop, force the full-override push (result + any price discrepancies show IN the pop)
+    // v27.707: pending "duplicate SKU lines on the supplier invoice" warning at the top of the Order plan tab (dismissable)
+    document.querySelectorAll('#podet-'+i+' .op-dupwarn').forEach(function(box){ var _po=box.dataset.po; fetch('/api/supply/po/'+encodeURIComponent(_po)+'/invoice-duplicates').then(function(r){return r.json();}).then(function(j){ var p=j&&j.pending; if(!p)return;
+        box.innerHTML='<div style="margin:0 0 10px;padding:10px 14px;border-radius:8px;background:#fef2f2;border:2px solid #ef4444;color:#7f1d1d;font-size:12px;display:flex;gap:12px;align-items:flex-start"><div style="flex:1"><div style="font-weight:800;font-size:13px">⚠ The supplier invoice had duplicate SKU codes — quantities were added up into this order plan</div>'
+          +'<ul style="margin:4px 0 0 16px;padding:0">'+(p.duplicates||[]).map(function(d){ return '<li><b>'+esc(d.sku)+'</b>: '+(d.lines||[]).join(' + ')+' = <b>'+units(d.qty)+'</b>'+(d.price_mixed?' <i>(mixed unit prices → weighted average '+money(d.price)+')</i>':'')+'</li>'; }).join('')+'</ul>'
+          +'<div class="mut tiny" style="margin-top:4px;color:#7f1d1d">Applied '+esc(fd(String(p.at||'').slice(0,10)))+' by '+esc(shortUser(p.by||'portal'))+' — check the summed quantities against the invoice, then dismiss.</div></div>'
+          +'<button class="save-btn op-dupwarn-x" style="flex:0 0 auto;border-color:#ef4444;color:#7f1d1d;background:#fff">Checked — dismiss</button></div>';
+        var x=box.querySelector('.op-dupwarn-x'); if(x)x.onclick=function(){ x.disabled=true; fetch('/api/supply/po/'+encodeURIComponent(_po)+'/invoice-duplicates/dismiss',{method:'POST',headers:{'content-type':'application/json'},body:'{}'}).then(function(){ box.innerHTML=''; }); }; }).catch(function(){}); });
     document.querySelectorAll('#podet-'+i+' .op-bc-dl').forEach(function(b){ var menu=b.parentNode&&b.parentNode.querySelector('.op-bc-menu'); if(!menu)return;   // v27.697 Download barcodes ▾
       b.onclick=function(e){ e.stopPropagation(); menu.style.display=(menu.style.display==='none'?'':'none'); };
       document.addEventListener('click',function(){ menu.style.display='none'; });
