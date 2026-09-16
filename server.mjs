@@ -6365,6 +6365,10 @@ const REQS_JSON_SQL = `coalesce((SELECT json_agg(json_build_object('id',rq.id,'r
       'samples',(SELECT count(*) FROM planner.product_dev_samples ps WHERE ps.request_id=rq.id)::int,
       'samples_received',(SELECT count(*) FROM planner.product_dev_samples ps WHERE ps.request_id=rq.id AND ps.received_at IS NOT NULL)::int) ORDER BY rq.id)
       FROM planner.product_dev_requests rq WHERE rq.item_id=i.id),'[]'::json)`;
+// v27.713 (mig 280): a size×component row is spec-linked when its own sampling_mode says so, else when the
+// component it belongs to defaults to spec_linked. Spec-linked rows never count as pending sampling work.
+// Expects `sd` (product_dev_size_dimensions) and `i` (product_dev_items) in scope.
+const SD_NOT_SPEC_SQL = `coalesce(sd.sampling_mode,(SELECT c2.sampling_mode FROM planner.product_dev_components c2 WHERE c2.item_ref=i.ref AND (c2.dimension=sd.dimension OR ('comp:'||c2.id)=sd.dimension) LIMIT 1),'sampled')<>'spec_linked'`;
 function applyDerivedStage(row) { const d = deriveProductStage(row.requests, row.stage_override); row.stage = d.stage; row.stage_overridden = d.overridden; return row; }
 // Recompute a product's stored approval status from its (derived / overridden) stage — called after any request change.
 async function recomputeProductStatus(client, itemId) {
@@ -6516,11 +6520,11 @@ app.get('/api/product/items', async (_req, res) => {
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved')::int sizes_approved,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved' AND coalesce(s.mapped_sku,'')='')::int sizes_unmapped,
       -- required components with approval still pending/rejected (per size × component)
-      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='product'   AND sd.required AND coalesce(sd.approval_status,'pending') NOT IN ('approved','approved_with_comments') AND EXISTS (SELECT 1 FROM planner.product_dev_requests rq JOIN planner.product_dev_request_components rc ON rc.request_id=rq.id JOIN planner.product_dev_components c ON c.id=rc.component_id WHERE rq.item_id=i.id AND rq.stage='sample_in_review' AND (c.dimension=sd.dimension OR ('comp:'||c.id)=sd.dimension)))::int comp_product,
-      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='packaging' AND sd.required AND coalesce(sd.approval_status,'pending') NOT IN ('approved','approved_with_comments') AND EXISTS (SELECT 1 FROM planner.product_dev_requests rq JOIN planner.product_dev_request_components rc ON rc.request_id=rq.id JOIN planner.product_dev_components c ON c.id=rc.component_id WHERE rq.item_id=i.id AND rq.stage='sample_in_review' AND (c.dimension=sd.dimension OR ('comp:'||c.id)=sd.dimension)))::int comp_packaging,
-      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='labels'    AND sd.required AND coalesce(sd.approval_status,'pending') NOT IN ('approved','approved_with_comments') AND EXISTS (SELECT 1 FROM planner.product_dev_requests rq JOIN planner.product_dev_request_components rc ON rc.request_id=rq.id JOIN planner.product_dev_components c ON c.id=rc.component_id WHERE rq.item_id=i.id AND rq.stage='sample_in_review' AND (c.dimension=sd.dimension OR ('comp:'||c.id)=sd.dimension)))::int comp_labels,
-      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='polybag'   AND sd.required AND coalesce(sd.approval_status,'pending') NOT IN ('approved','approved_with_comments') AND EXISTS (SELECT 1 FROM planner.product_dev_requests rq JOIN planner.product_dev_request_components rc ON rc.request_id=rq.id JOIN planner.product_dev_components c ON c.id=rc.component_id WHERE rq.item_id=i.id AND rq.stage='sample_in_review' AND (c.dimension=sd.dimension OR ('comp:'||c.id)=sd.dimension)))::int comp_polybag,
-      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='other'     AND sd.required AND coalesce(sd.approval_status,'pending') NOT IN ('approved','approved_with_comments') AND EXISTS (SELECT 1 FROM planner.product_dev_requests rq JOIN planner.product_dev_request_components rc ON rc.request_id=rq.id JOIN planner.product_dev_components c ON c.id=rc.component_id WHERE rq.item_id=i.id AND rq.stage='sample_in_review' AND (c.dimension=sd.dimension OR ('comp:'||c.id)=sd.dimension)))::int comp_other,
+      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='product'   AND sd.required AND ${SD_NOT_SPEC_SQL} AND coalesce(sd.approval_status,'pending') NOT IN ('approved','approved_with_comments') AND EXISTS (SELECT 1 FROM planner.product_dev_requests rq JOIN planner.product_dev_request_components rc ON rc.request_id=rq.id JOIN planner.product_dev_components c ON c.id=rc.component_id WHERE rq.item_id=i.id AND rq.stage='sample_in_review' AND (c.dimension=sd.dimension OR ('comp:'||c.id)=sd.dimension)))::int comp_product,
+      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='packaging' AND sd.required AND ${SD_NOT_SPEC_SQL} AND coalesce(sd.approval_status,'pending') NOT IN ('approved','approved_with_comments') AND EXISTS (SELECT 1 FROM planner.product_dev_requests rq JOIN planner.product_dev_request_components rc ON rc.request_id=rq.id JOIN planner.product_dev_components c ON c.id=rc.component_id WHERE rq.item_id=i.id AND rq.stage='sample_in_review' AND (c.dimension=sd.dimension OR ('comp:'||c.id)=sd.dimension)))::int comp_packaging,
+      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='labels'    AND sd.required AND ${SD_NOT_SPEC_SQL} AND coalesce(sd.approval_status,'pending') NOT IN ('approved','approved_with_comments') AND EXISTS (SELECT 1 FROM planner.product_dev_requests rq JOIN planner.product_dev_request_components rc ON rc.request_id=rq.id JOIN planner.product_dev_components c ON c.id=rc.component_id WHERE rq.item_id=i.id AND rq.stage='sample_in_review' AND (c.dimension=sd.dimension OR ('comp:'||c.id)=sd.dimension)))::int comp_labels,
+      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='polybag'   AND sd.required AND ${SD_NOT_SPEC_SQL} AND coalesce(sd.approval_status,'pending') NOT IN ('approved','approved_with_comments') AND EXISTS (SELECT 1 FROM planner.product_dev_requests rq JOIN planner.product_dev_request_components rc ON rc.request_id=rq.id JOIN planner.product_dev_components c ON c.id=rc.component_id WHERE rq.item_id=i.id AND rq.stage='sample_in_review' AND (c.dimension=sd.dimension OR ('comp:'||c.id)=sd.dimension)))::int comp_polybag,
+      (SELECT count(*) FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id WHERE s.item_id=i.id AND sd.dimension='other'     AND sd.required AND ${SD_NOT_SPEC_SQL} AND coalesce(sd.approval_status,'pending') NOT IN ('approved','approved_with_comments') AND EXISTS (SELECT 1 FROM planner.product_dev_requests rq JOIN planner.product_dev_request_components rc ON rc.request_id=rq.id JOIN planner.product_dev_components c ON c.id=rc.component_id WHERE rq.item_id=i.id AND rq.stage='sample_in_review' AND (c.dimension=sd.dimension OR ('comp:'||c.id)=sd.dimension)))::int comp_other,
       -- status misaligned: every size is approved but the item status isn't 'approved' (still in development / rejected)
       (CASE WHEN i.status<>'approved'
               AND (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id)>0
@@ -6555,8 +6559,8 @@ app.get('/api/product/dashboard', async (req, res) => {
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id)::int sizes,
       coalesce((SELECT json_object_agg(dimension, json_build_object('req',req,'appr',appr)) FROM (
         SELECT sd.dimension,
-               count(*) FILTER (WHERE sd.required)::int req,
-               count(*) FILTER (WHERE sd.required AND coalesce(sd.approval_status,'pending')='approved')::int appr
+               count(*) FILTER (WHERE sd.required AND ${SD_NOT_SPEC_SQL})::int req,
+               count(*) FILTER (WHERE sd.required AND ${SD_NOT_SPEC_SQL} AND coalesce(sd.approval_status,'pending')='approved')::int appr
         FROM planner.product_dev_size_dimensions sd JOIN planner.product_dev_sizes s ON s.id=sd.size_id
         WHERE s.item_id=i.id GROUP BY sd.dimension) t),'{}'::json) comps,
       coalesce((SELECT json_agg(json_build_object(
@@ -6603,7 +6607,7 @@ app.get('/api/product/item/:ref', async (req, res) => {
     // Round 2 — sample files + component rows in parallel (each depends on round 1 ids)
     const [sfR, dimsR] = await Promise.all([
       samples.length ? pool.query(`SELECT po, id, filename, coalesce(mime,'') mime FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_sample' ORDER BY uploaded_at`, [samples.map(s => 'PSAMPLE-' + s.id)]) : Promise.resolve({ rows: [] }),
-      sizes.length ? pool.query(`SELECT id, size_id, dimension, required, coalesce(approval_status,'pending') approval_status, coalesce(description,'') description, coalesce(packaging_type,'') packaging_type, approved_sample_id FROM planner.product_dev_size_dimensions WHERE size_id = ANY($1)`, [sizes.map(s => s.id)]) : Promise.resolve({ rows: [] }),
+      sizes.length ? pool.query(`SELECT id, size_id, dimension, required, coalesce(approval_status,'pending') approval_status, coalesce(description,'') description, coalesce(packaging_type,'') packaging_type, approved_sample_id, sampling_mode, spec_id FROM planner.product_dev_size_dimensions WHERE size_id = ANY($1)`, [sizes.map(s => s.id)]) : Promise.resolve({ rows: [] }),
     ]);
     { const byV = {}; sfR.rows.forEach(f => { (byV[f.po] = byV[f.po] || []).push({ id: f.id, filename: f.filename, mime: f.mime }); }); samples.forEach(s => { s.files = byV['PSAMPLE-' + s.id] || []; }); }
     const dims = dimsR.rows;
@@ -6676,7 +6680,7 @@ app.get('/api/product/item/:ref/sizes', async (req, res) => {
         FROM planner.product_dev_samples ps WHERE ps.item_ref=$1 ORDER BY ps.dimension, ps.version`, [ref]),
     ]);
     const sizes = sizesR.rows, samples = samplesR.rows;
-    const dimsR = sizes.length ? await pool.query(`SELECT id, size_id, dimension, required, coalesce(approval_status,'pending') approval_status, coalesce(description,'') description, coalesce(packaging_type,'') packaging_type, approved_sample_id FROM planner.product_dev_size_dimensions WHERE size_id = ANY($1)`, [sizes.map(s => s.id)]) : { rows: [] };
+    const dimsR = sizes.length ? await pool.query(`SELECT id, size_id, dimension, required, coalesce(approval_status,'pending') approval_status, coalesce(description,'') description, coalesce(packaging_type,'') packaging_type, approved_sample_id, sampling_mode, spec_id FROM planner.product_dev_size_dimensions WHERE size_id = ANY($1)`, [sizes.map(s => s.id)]) : { rows: [] };
     const dims = dimsR.rows;
     if (dims.length) {
       const dfR = await pool.query(`SELECT po, id, filename, coalesce(mime,'') mime, version, coalesce(uploaded_by,'') uploaded_by, coalesce(uploader_kind,'internal') uploader_kind, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments WHERE po = ANY($1) AND category='product_dim' ORDER BY version NULLS LAST, uploaded_at`, [dims.map(d => 'PDIM-' + d.id)]);
@@ -6868,13 +6872,17 @@ app.post('/api/product/design-version', async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 const PROD_COMPONENTS = ['product', 'packaging', 'labels', 'polybag', 'other'];
-// Upsert a size's component state (description / required / approval status / packaging type / approved version).
+// v27.713: a size×component key is a legacy aspect name OR 'comp:<component id>' (net-new catalogue components, mig 262)
+const isProdDim = (dim) => PROD_COMPONENTS.includes(dim) || /^comp:\d+$/.test(dim);
+// Upsert a size's component state (description / required / approval status / packaging type / approved version /
+// v27.713 sampling_mode + spec_id — sampled vs spec-linked is decided per size × component, mig 280).
 app.post('/api/product/size/:id/dimension', async (req, res) => {
   const b = req.body || {}, sizeId = req.params.id, dim = (b.dimension || '').trim();
-  if (!PROD_COMPONENTS.includes(dim)) return res.status(400).json({ error: 'valid dimension required' });
+  if (!isProdDim(dim)) return res.status(400).json({ error: 'valid dimension required' });
+  if ('sampling_mode' in b && b.sampling_mode !== '' && b.sampling_mode != null && !['sampled', 'spec_linked'].includes(b.sampling_mode)) return res.status(400).json({ error: 'sampling_mode must be sampled | spec_linked' });
   const params = [sizeId, dim], fields = [];
-  for (const k of ['required', 'approved_sample_id', 'packaging_type', 'description', 'approval_status']) {
-    if (k in b) { params.push(b[k] === '' ? null : b[k]); fields.push(`${k}=$${params.length}${k === 'approved_sample_id' ? '::bigint' : k === 'required' ? '::boolean' : ''}`); }
+  for (const k of ['required', 'approved_sample_id', 'packaging_type', 'description', 'approval_status', 'sampling_mode', 'spec_id']) {
+    if (k in b) { params.push(b[k] === '' ? null : b[k]); fields.push(`${k}=$${params.length}${(k === 'approved_sample_id' || k === 'spec_id') ? '::bigint' : k === 'required' ? '::boolean' : ''}`); }
   }
   try {
     await pool.query(`INSERT INTO planner.product_dev_size_dimensions (size_id, dimension) VALUES ($1,$2) ON CONFLICT (size_id, dimension) DO NOTHING`, [sizeId, dim]);
@@ -6885,7 +6893,7 @@ app.post('/api/product/size/:id/dimension', async (req, res) => {
 // Upload a versioned file to a size's component (ensures the component row exists first). Returns the new file id.
 app.post('/api/product/component-file', async (req, res) => {
   const b = req.body || {}, sizeId = b.size_id, dim = (b.dimension || '').trim();
-  if (!sizeId || !PROD_COMPONENTS.includes(dim) || (!b.data_base64 && !b.storage_path)) return res.status(400).json({ error: 'size_id + dimension + data_base64/storage_path required' });
+  if (!sizeId || !isProdDim(dim) || (!b.data_base64 && !b.storage_path)) return res.status(400).json({ error: 'size_id + dimension + data_base64/storage_path required' });
   let up; try { up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   try {
     await pool.query(`INSERT INTO planner.product_dev_size_dimensions (size_id, dimension) VALUES ($1,$2) ON CONFLICT (size_id, dimension) DO NOTHING`, [sizeId, dim]);
