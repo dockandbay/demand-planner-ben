@@ -1,3 +1,7 @@
+## v27.711 PRODUCT URL: `#/product/products` for the PRODUCTS tab (Ben) — CLIENT
+- The PRODUCTS tab (renamed from PLAN in v27.709) now writes `#/product/products`; `#/product/plan` and old bookmarks still resolve to it. `#/product/<ref>` product links unchanged.
+- Also fixed: the unmapped-SKU count badge refresh (`prodPlanBadge`) was rewriting the tab label back to "PLAN".
+
 ## v27.710 Swatch: new upload shows immediately (enlarge showed the old image) + auto-swatch hint placement (Ben) — CLIENT
 - **Bug:** after uploading a swatch on Master data, the small swatch and "click to enlarge" still showed the previous image (blank when the previous one was an auto thumbnail). The swatch image is cached immutable per URL (`?t=updated_at`), and the re-render reused the cached product detail with the OLD updated_at → same URL → browser served the old bytes.
 - **Fix:** the swatch upload busts the product-detail and grid caches before re-rendering, so the URL changes and the new swatch loads everywhere. The v27.708 "auto swatch" hint now sits under the swatch controls instead of between the file input and the zoom icon.

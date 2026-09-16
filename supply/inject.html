@@ -10744,7 +10744,8 @@
     else if(seg[0]==='demand'){ if(typeof DEMAND_VIEW!=='undefined'){ if(seg[1]==='scenario'){ DEMAND_VIEW='scenario'; if(seg[2])scenCurrent=seg[2]; } else if((seg[1]==='inputs'||seg[1]==='analysis'||seg[1]==='config')&&seg[2])DEMAND_VIEW=seg[2]; else if(seg[1]==='exceptions'){ DEMAND_VIEW='exceptions'; if(seg[2]&&typeof EXC_SUBTAB!=='undefined')window.EXC_SUBTAB=seg[2]; } else if(seg[1])DEMAND_VIEW=seg[1]; } var _db=document.querySelector('#view-tabs-row .view-toggle[data-view="planning"]'); if(_db)_db.click(); }   // #/demand/scenario/<key> + #/demand/inputs|analysis/<slug> + #/demand/exceptions/<slug> deep-links (legacy #/demand/<slug> still resolves)
     else if(seg[0]==='reports'){ if(seg[1]&&typeof REPORT_VIEW!=='undefined')REPORT_VIEW=seg[1]; var _rb=document.querySelector('#view-tabs-row .view-toggle[data-view="exec"]'); if(_rb)_rb.click(); }
     else if(seg[0]==='product'){ if(typeof showProduct==='function'){ showProduct();
-      var _prodSubs={plan:1,sampling:1,batch:1,dashboard:1,range:1,specs:1,reports:1,config:1};   // v27.704 sampling
+      var _prodSubs={plan:1,products:1,sampling:1,batch:1,dashboard:1,range:1,specs:1,reports:1,config:1};   // v27.704 sampling; v27.711 'products' = URL slug of the PRODUCTS tab
+      if(seg[1]==='products')seg[1]='plan';   // v27.711: #/product/products → the PRODUCTS tab (internal key 'plan'; old #/product/plan still works)
       if(seg[1]&&!_prodSubs[seg[1]]){ _pendingProdRef=decodeURIComponent(seg[1]); if(seg[2])_pendingProdTab=decodeURIComponent(seg[2]); selectProductSub('plan'); }   // #/product/<ref>[/<tab>]
       else if(seg[1]==='config'&&seg[2]){ try{_prodCfgTab=decodeURIComponent(seg[2]);}catch(e){} selectProductSub('config'); }   // #/product/config/<season|cats|tags|phrases>
       else if(seg[1]==='batch'){ if(seg[2]){ _batchSR=decodeURIComponent(seg[2]); try{ localStorage.setItem('hzBatchSR',_batchSR); }catch(e){} } selectProductSub('batch'); }   // v27.569: #/product/batch/<sample shipment id>
@@ -13233,7 +13234,7 @@
     var pb=document.getElementById('product-btn'); if(pb)pb.classList.remove('active'); }
   function selectProductSub(k){ PRODUCT_SUB=k; _prodDetailBox=null;
     document.querySelectorAll('#product-subnav .stab').forEach(function(b){b.classList.toggle('active',b.dataset.k===k||(b.dataset.k==='plan'&&(k==='range'||k==='dashboard')));});   // v27.703 Range / Dashboard are views of PLAN
-    try{ writeHash(['product',k]); }catch(e){}
+    try{ writeHash(['product',k==='plan'?'products':k]); }catch(e){}   // v27.711: URL slug is "products" (internal key stays 'plan'; #/product/plan still resolves)
     var c=document.getElementById('product-content'); if(!c)return;
     if(k==='reports') return renderProductReports(c);
     if(k==='range') return renderProductRange(c);
@@ -13988,7 +13989,7 @@
     setTimeout(function(){ document.addEventListener('mousedown',out,true); },0);
     m.querySelectorAll('.snz-opt').forEach(function(o){ o.onmouseenter=function(){o.style.background='#eff6ff';}; o.onmouseleave=function(){o.style.background='';};
       o.onclick=function(){ close(); snoozeKeySet(key,parseInt(o.dataset.d,10),after); }; }); }
-  function prodPlanBadge(n){ var b=document.querySelector('#product-subnav .stab[data-k="plan"]'); if(b)b.innerHTML='PLAN'+(n>0?' <span class="ex-badge" style="background:var(--neg);color:#fff" title="'+n+' approved size(s) need a SKU mapping">'+n+'</span>':''); }
+  function prodPlanBadge(n){ var b=document.querySelector('#product-subnav .stab[data-k="plan"]'); if(b)b.innerHTML='PRODUCTS'+(n>0?' <span class="ex-badge" style="background:var(--neg);color:#fff" title="'+n+' approved size(s) need a SKU mapping">'+n+'</span>':''); }
   // Colour the size-approval dropdown: pending = orange, approved = green, rejected = red.
   function szApprovalStyle(v){ return v==='approved'?'background:var(--pos-bg);color:var(--pos);font-weight:700':v==='rejected'?'background:var(--neg-bg);color:var(--neg);font-weight:700':'background:var(--amber-bg);color:var(--amber);font-weight:600'; }
   // Red "N map SKU" reminder (+ snooze) shown on a product row when it has approved sizes with no planner SKU yet.
@@ -14347,12 +14348,12 @@
         g.querySelectorAll('.pgm-card').forEach(function(card){ card.onclick=function(){ var i=card.dataset.i, ref=card.dataset.ref, det=document.getElementById('pgmdet-'+i), open=det.style.display!=='none';
           g.querySelectorAll('.pg-mdet').forEach(function(d){ if(d!==det){ d.style.display='none'; d.innerHTML=''; } });
           g.querySelectorAll('.pgm-card.open').forEach(function(cc){ if(cc!==card)cc.classList.remove('open'); });
-          if(open){ det.style.display='none'; det.innerHTML=''; card.classList.remove('open'); _prodDetailBox=null; try{writeHash(['product','plan']);}catch(_){} return; }
+          if(open){ det.style.display='none'; det.innerHTML=''; card.classList.remove('open'); _prodDetailBox=null; try{writeHash(['product','products']);}catch(_){} return; }
           det.style.display=''; card.classList.add('open'); _prodDetailTab='master'; renderProductDetail(ref, det, rows.filter(function(x){return x.ref===ref;})[0]); }; });
         g.querySelectorAll('.pg-open').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var i=b.dataset.i, ref=b.dataset.ref, row=document.getElementById('pgdet-'+i), datarow=b.closest('tr'), open=row.style.display!=='none';
           g.querySelectorAll('.pg-detrow').forEach(function(dr){ if(dr!==row){ dr.style.display='none'; var dd=dr.querySelector('.pg-det'); if(dd)dd.innerHTML=''; } });
           g.querySelectorAll('tr.pg-openrow').forEach(function(tr){ if(tr!==datarow)tr.classList.remove('pg-openrow'); });
-          if(open){ row.style.display='none'; row.querySelector('.pg-det').innerHTML=''; datarow.classList.remove('pg-openrow'); _prodDetailBox=null; try{writeHash(['product','plan']);}catch(_){} return; }
+          if(open){ row.style.display='none'; row.querySelector('.pg-det').innerHTML=''; datarow.classList.remove('pg-openrow'); _prodDetailBox=null; try{writeHash(['product','products']);}catch(_){} return; }
           row.style.display=''; datarow.classList.add('pg-openrow'); _prodDetailTab='master'; renderProductDetail(ref, row.querySelector('.pg-det'), rows.filter(function(x){return x.ref===ref;})[0]); }; });
         // Direction A #3: the whole product row opens/toggles its detail. Interactive cells (pickers, stage chip,
         // sample link, OPEN button, swatch) stopPropagation, so a click on them does its own thing; the guard below
