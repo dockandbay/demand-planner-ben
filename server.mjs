@@ -2425,6 +2425,8 @@ app.get('/api/supply/label-data', async (req, res) => {
     // Stamp batch + production date on each row (from ?batch, else the PO's batch_id) → label prints BATCH / DATE.
     let batchCode = batch || null;
     if (!batchCode && po) { try { batchCode = (await pool.query(`SELECT batch_id FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0]?.batch_id || null; } catch (e) {} }
+    // v27.697: ?batch_po=<PO> (portal "view as supplier" preview + production-level downloads) → stamp that PO's batch.
+    if (!batchCode && req.query.batch_po) { try { batchCode = (await pool.query(`SELECT batch_id FROM planner.purchase_orders WHERE po=$1`, [String(req.query.batch_po)])).rows[0]?.batch_id || null; } catch (e) {} }
     if (batchCode) {
       let bd = null;
       try { bd = (await pool.query(`SELECT to_char(batch_date,'YYYY-MM-DD') d FROM planner.batches WHERE batch=$1`, [batchCode])).rows[0]?.d || null; } catch (e) {}
@@ -16795,6 +16797,12 @@ app.get('/api/portal/label-data', portalAuth, async (req, res) => {
     // Resolve the batch from the explicit ?batch, else from the single PO's batch_id.
     let batchCode = batch || (proj && proj.batch) || null;
     if (!batchCode && po) { try { batchCode = (await pool.query(`SELECT batch_id FROM planner.purchase_orders WHERE po=$1`, [po])).rows[0]?.batch_id || null; } catch (e) {} }
+    // v27.697: the PO card's "Download barcodes for <production>" passes ?batch_po=<that PO> → stamp THAT PO's batch
+    // (Ben: the batch number must come from the PO; ?prod alone never stamped one → BATCH / DATE OF PRODUCTION blank).
+    // Fallback for a bare ?prod: the single batch shared by this supplier's POs in the production, if unambiguous.
+    const batchPo = req.query.batch_po ? String(req.query.batch_po) : '';
+    if (!batchCode && batchPo && await portalOwnsPO(req, batchPo)) { try { batchCode = (await pool.query(`SELECT batch_id FROM planner.purchase_orders WHERE po=$1`, [batchPo])).rows[0]?.batch_id || null; } catch (e) {} }
+    if (!batchCode && prod && !po) { try { const bs = (await pool.query(`SELECT DISTINCT batch_id FROM planner.purchase_orders WHERE prod_no=$1 AND supplier_name = ANY($2) AND coalesce(batch_id,'')<>''`, [prod, names])).rows.map(r => r.batch_id); if (bs.length === 1) batchCode = bs[0]; } catch (e) {} }
     if (batchCode) {
       let bd = null;
       try { bd = (await pool.query(`SELECT to_char(batch_date,'YYYY-MM-DD') d FROM planner.batches WHERE batch=$1`, [batchCode])).rows[0]?.d || null; } catch (e) {}

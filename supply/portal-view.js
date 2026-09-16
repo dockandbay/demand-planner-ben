@@ -212,7 +212,7 @@
     var l1=(nm && nm.indexOf(r.sku)>=0) ? nm.slice(0,nm.indexOf(r.sku)).trim() : (kind==='carton'?('BOX OF '+(r.carton_qty||'?')+'  x'):'INNER  x');
     var boxSku=(kind==='carton'?'BOX-':'INNER-')+r.sku, sizeName=lblSizeName(r), circle=lblCircle(r,sizeName), batch=opts.batch;
     var y=26;
-    if(opts.dbUri){ var lw=150, lh=Math.round(lw*916/1488); el.push('<image x="'+(cx-lw/2)+'" y="'+y+'" width="'+lw+'" height="'+lh+'" href="'+opts.dbUri+'" xlink:href="'+opts.dbUri+'"/>'); y+=lh+16; }
+    if(opts.dbUri){ var lw=150, lh=Math.round(lw*916/1488); el.push('<image x="'+(cx-lw/2)+'" y="'+y+'" width="'+lw+'" height="'+lh+'" href="'+opts.dbUri+'" xlink:href="'+opts.dbUri+'"/>'); y+=lh+32; }   // more gap below the logo before the "BOX OF n x" header
     else { el.push(svgText(cx,y+26,'DOCK & BAY',{size:30,bold:true,anchor:'middle',ls:0.5})); y+=48; }
     el.push(svgText(cx,y,l1,{size:21,bold:true,anchor:'middle'})); y+=27;
     el.push(svgText(cx,y,r.sku,{size:21,bold:true,anchor:'middle'})); y+=27;
@@ -232,6 +232,8 @@
     var bits=ean13Pattern(code);
     // barcode anchored near the bottom, just above the address block (not floating mid-label)
     var by=Math.max(y, H-230);   // barcode sits higher so its digits don't overlap the address block at the bottom
+    if(r.pn){ el.push(svgText(cx,by-16,String(r.pn),{size:22,bold:true,anchor:'middle',ls:1.5})); }   // v27.660: custom part number, printed just above the barcode (Ben)
+    if(r.desc){ var _cdl=wrapLines(String(r.desc),48).slice(0,2); var _cdy=by-(r.pn?42:16)-(_cdl.length-1)*17; _cdl.forEach(function(ln){ el.push(svgText(cx,_cdy,ln,{size:16,anchor:'middle'})); _cdy+=17; }); }   // v27.665: product description, above the part number (Ben)
     if(bits){ var m=4.5,bw=95*m,bx=(W-bw)/2,nH=85,gExt=22; el.push(eanBars(code,bx,by,m,nH,gExt)); var dbl=by+nH+30,c=String(code).replace(/\D/g,''); if(c.length===12)c='0'+c;
       el.push(svgText(bx-8,dbl,c[0],{size:30,anchor:'end'}));
       el.push(svgText(bx+24*m,dbl,c.slice(1,7),{size:30,anchor:'middle',ls:2}));
@@ -299,6 +301,7 @@
       });
     }).catch(function(){ if(btn){btn.textContent=orig;btn.disabled=false;} ppNotice('Could not load ships-with data'); }); }
   // v2 barcode label — product (landscape) matches the OUTPUT artwork; carton/inner go to buildCartonSVG
+  var RRP_MKTS=[['UK','uk_rt','£'],['US','us_rt','$'],['EU','eu_rt','€']];   // v27.697 mirrors admin (per-market RRP on product labels)
   function buildLabelSVG(kind,r,opts){ opts=opts||{};
     if(kind==='crossdock') return buildCrossdockSVG(r,opts);
     if(kind!=='product') return buildCartonSVG(kind,r,opts);
@@ -310,16 +313,18 @@
     el.push(svgText(40,ty,sizeName,{size:18,fill:'#111'}));
     el.push(svgText(40,ty+26,(kind==='carton'?('BOX OF '+(r.carton_qty||'?')+' x '):kind==='inner'?'INNER · ':'')+r.sku,{size:18,bold:true}));
     var afterSku=ty+26;
-    if(kind==='product' && opts.rrp){ var rt=(r.uk_rt!=null&&r.uk_rt!=='')?Number(r.uk_rt).toFixed(2):''; if(rt)el.push(svgText(40,afterSku+27,rt,{size:18,bold:true})); }
+    if(kind==='product' && opts.rrp){ var _rm=(opts.rmkt&&opts.rmkt!=='All')?opts.rmkt:'UK'; var _rc=RRP_MKTS.filter(function(m){return m[0]===_rm;})[0]||RRP_MKTS[0]; var _rv=r[_rc[1]]; var rt=(_rv!=null&&_rv!=='')?(_rc[2]+Number(_rv).toFixed(2)):''; if(rt)el.push(svgText(40,afterSku+27,'RRP '+rt,{size:18,bold:true})); }   // v27.665: RRP for the chosen market (was hardcoded UK)
     // right block: swatch + size circle + batch / date of production
     var swX=440,swY=15,swW=120;
     if(kind==='product' && opts.swatchUri) el.push('<image x="'+swX+'" y="'+swY+'" width="'+swW+'" height="'+swW+'" preserveAspectRatio="xMidYMid slice" href="'+opts.swatchUri+'" xlink:href="'+opts.swatchUri+'"/>');
     if(circle){ el.push('<circle cx="405" cy="50" r="30" fill="#111"/>'); el.push(svgText(405,58,circle,{size:circle.length>1?20:25,bold:true,fill:'#fff',anchor:'middle'})); }
-    if(batch){ var by=swY+swW+24; el.push(svgText(swX+swW/2,by,'BATCH '+batch.batch+(r.supplier_code?'  '+r.supplier_code:''),{size:12,anchor:'middle'})); el.push(svgText(swX+swW/2,by+15,'DATE OF PRODUCTION:',{size:12,bold:true,anchor:'middle'})); el.push(svgText(swX+swW/2,by+30,batch.batch_date?fd(batch.batch_date):'',{size:12,bold:true,anchor:'middle'})); }
+    if(batch){ var by=swY+swW+24; el.push(svgText(swX+swW/2,by,'BATCH '+batch.batch+(r.supplier_code?'  '+r.supplier_code:''),{size:12,anchor:'middle'})); el.push(svgText(swX+swW/2,by+15,'DATE OF PRODUCTION:',{size:11,bold:true,anchor:'middle'})); el.push(svgText(swX+swW/2,by+30,batch.batch_date?fd(batch.batch_date):'',{size:12,bold:true,anchor:'middle'})); }
     // carton: GRS material text (icon artwork still TODO)
     if(kind==='carton' && r.grs_material){ var gy=afterSku+30; wrapLines(r.grs_material,72).slice(0,4).forEach(function(ln){ el.push(svgText(40,gy,ln,{size:9,fill:'#444'})); gy+=12; }); }
     // barcode
     var m=5,bx=(W-95*m)/2,byc=232,nH=80,gExt=20,H=355;
+    if(r.pn){ el.push(svgText(W/2,byc-13,String(r.pn),{size:19,bold:true,anchor:'middle',ls:1.5})); }   // v27.660: custom part number, printed just above the barcode (Ben)
+    if(r.desc){ var _dl=wrapLines(String(r.desc),44).slice(0,2); var _dy=byc-(r.pn?35:13)-(_dl.length-1)*16; _dl.forEach(function(ln){ el.push(svgText(W/2,_dy,ln,{size:14,anchor:'middle'})); _dy+=16; }); }   // v27.665: product description, above the part number (Ben)
     var bars=eanBars(code,bx,byc,m,nH,gExt);
     if(bars){ el.push(bars); var dbl=byc+nH+30, c=String(code).replace(/\D/g,''); if(c.length===12)c='0'+c;
       el.push(svgText(bx-8,dbl,c[0],{size:33,anchor:'end'}));
@@ -1211,7 +1216,7 @@
       var barcodesLabels='<div class="sect-h">Barcodes &amp; Labels</div><div style="max-width:640px;font-size:12px">'
         +blRow('Barcodes for this PO','<button class="save-btn pp-dl-po" data-po="'+po+'">⤓ Download barcodes for PO</button>')
         +(p.barcode_projects||[]).map(function(bp){ return blRow('Custom barcodes · '+esc(bp.name),'<button class="save-btn pp-dl-custom" data-po="'+po+'" data-pid="'+bp.id+'" data-name="'+esc(bp.name)+'" style="background:#f3e8ff;color:#6b21a8;border-color:#d8b4fe">⤓ Download custom barcodes</button><div class="tiny mut" style="margin-top:3px">'+bp.n+' custom number'+(bp.n===1?'':'s')+(bp.batch?' · batch '+esc(bp.batch):'')+' · this project\'s custom numbers only (standard barcodes are under ⤓ Download barcodes for PO)</div>'); }).join('')   // v27.570
-        +(p.prod_no?blRow('Barcodes for production '+esc(p.prod_no),'<button class="save-btn pp-dl-prod" data-prod="'+esc(p.prod_no)+'">⤓ Download barcodes for '+esc(p.prod_no)+'</button>'):'')
+        +(p.prod_no?blRow('Barcodes for production '+esc(p.prod_no),'<button class="save-btn pp-dl-prod" data-prod="'+esc(p.prod_no)+'" data-po="'+po+'" title="all your SKUs in production '+esc(p.prod_no)+' — BATCH + date of production from this PO">⤓ Download barcodes for '+esc(p.prod_no)+'</button>'):'')
         +(p.shipment&&!p.ship_other_supplier&&p.po!==p.ships_with_master_po?blRow('Shipment labels','<button class="save-btn pp-shiplabel" data-po="'+po+'">⤓ Download shipment labels</button> <span class="mut tiny">SHIPS WITH master label for shipment '+esc(p.shipment)+'</span>'):'')   /* riders only — the shipment master never gets a SHIPS WITH label */
         +(p.ship_other_supplier?blRow('Ship To pallet labels','<button class="save-btn pp-shiplabel" data-po="'+po+'">⤓ Download Ship To Pallet Labels</button> <span class="mut tiny">this PO ships under another supplier’s PO</span>'):'')
         +((p.shipment&&p.po===p.ships_with_master_po&&/air/i.test(p.ship_mode||''))?blRow('Air freight labels','<button class="save-btn pp-airlabel" data-po="'+po+'">⤓ Download air freight labels</button> <span class="mut tiny">master of air shipment '+esc(p.shipment)+'</span>'):'')   /* master of an AIR shipment — ships-with label without the ships-with section */
@@ -2648,7 +2653,7 @@
               function ppDl(url,zipname,btn){ if(BC.placeholder){BC.note();return;} btn.disabled=true; fetch(url).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false; if(rows&&rows.error){ppNotice(rows.error);return;} if(!rows||!rows.length){ppNotice('No barcodes found for this');return;} BC.sheets(rows,['product','carton'],zipname,btn); }).catch(function(){ppNotice('Could not load barcodes');btn.disabled=false;}); }
 scope.querySelectorAll('.pp-dl-po').forEach(function(btn){ btn.onclick=function(){ ppDl(EP.labelData+'?po='+encodeURIComponent(btn.dataset.po), btn.dataset.po+'_barcodes.zip', btn); }; });
 scope.querySelectorAll('.pp-dl-custom').forEach(function(btn){ btn.onclick=function(){ if(BC.placeholder){BC.note();return;} btn.disabled=true; fetch(EP.labelData+'?po='+encodeURIComponent(btn.dataset.po)+'&project='+encodeURIComponent(btn.dataset.pid)).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false; if(rows&&rows.error){ppNotice(rows.error);return;} if(!rows||!rows.length){ppNotice('This project has no custom barcodes for your SKUs');return;} BC.sheets(rows,['product','carton','inner'],btn.dataset.po+'_'+String(btn.dataset.name||'custom').replace(/[^\w\-]+/g,'_')+'_custom_barcodes.zip',btn); }).catch(function(){ppNotice('Could not load custom barcodes');btn.disabled=false;}); }; });   // v27.570: project-linked custom numbers only
-scope.querySelectorAll('.pp-dl-prod').forEach(function(btn){ btn.onclick=function(){ ppDl(EP.labelData+'?prod='+encodeURIComponent(btn.dataset.prod)+'&supplier='+encodeURIComponent(STATE.supplierName), btn.dataset.prod+'_barcodes.zip', btn); }; });
+scope.querySelectorAll('.pp-dl-prod').forEach(function(btn){ btn.onclick=function(){ ppDl(EP.labelData+'?prod='+encodeURIComponent(btn.dataset.prod)+'&supplier='+encodeURIComponent(STATE.supplierName)+(btn.dataset.po?'&batch_po='+encodeURIComponent(btn.dataset.po):''), btn.dataset.prod+'_barcodes.zip', btn); }; });   // v27.697 batch_po → server stamps THIS PO's batch + production date on the labels
 scope.querySelectorAll('.pp-dl-cd').forEach(function(btn){ btn.onclick=function(){ if(BC.placeholder){BC.note();return;} btn.disabled=true; fetch(EP.labelData+'?skus='+encodeURIComponent(btn.dataset.skus)).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false; if(!rows||!rows.length||rows.error){ppNotice('No crossdock barcodes found');return;} BC.crossdock(rows,btn.dataset.po,btn.dataset.do,btn.dataset.client,btn.dataset.address,btn,btn.dataset.po+'_crossdock_labels.zip'); }).catch(function(){ppNotice('Could not load crossdock labels');btn.disabled=false;}); }; });
               scope.querySelectorAll('.pp-shiplabel').forEach(function(btn){ btn.onclick=function(){ dlShipsWith(btn.dataset.po, btn, EP.shipsWith); }; });   // SHIPS WITH shipment label (per-PO, barcodes & labels tab)
               scope.querySelectorAll('.pp-airlabel').forEach(function(btn){ btn.onclick=function(){ dlShipsWith(btn.dataset.po, btn, EP.shipsWith, true); }; });   // AIR FREIGHT label (master of an air shipment)
