@@ -1,3 +1,7 @@
+## v27.722 PRODUCT: Timeline moved onto SAMPLING (inline), removed from the product detail (Ben) — CLIENT
+- On PRODUCT ▸ SAMPLING, clicking a request's **Timeline** count now expands the timeline thread **inline on the row** (compose + full history, reusing `renderProdTimeline`), instead of jumping into the Products detail drawer. Click again to collapse; opening another row's timeline collapses the first.
+- The **Timeline tab is removed from the product detail drawer** (now Master / Size & variants / Requests / Samples / Documents). The timeline is the per-product supplier thread and belongs with SAMPLING. Deep link `#/product/<ref>/timeline` still resolves via the existing handler.
+
 ## v27.721 P2b DHL tracking: pills on the SUPPLY Shipments grid (Ben) — CLIENT
 - **SUPPLY ▸ Purchase Orders ▸ Shipments** grid: the Carrier-ref cell shows a DHL tracking pill (● In transit · ETA / ● Delivered / ▲ Exception) next to the ↗ link, read from the cache. DHL carriers only.
 - Fills after the full grid paint **and** after the in-place single-row patch (`patchShipRow`), so a live status update keeps the pill correct without a full re-render.

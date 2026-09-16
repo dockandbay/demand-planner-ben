@@ -13398,7 +13398,11 @@
         g.innerHTML=html+'</tbody></table>';
         hzFillTrackPills(g);   // v27.720: populate DHL tracking pills in the Shipment cells from the cache
         g.querySelectorAll('.smp-openreq').forEach(function(a){ a.onclick=function(){ _prodDetailTab='requests'; _prodHighlightReq=Number(a.dataset.rid); openProductDrawer(a.dataset.ref,null,'requests'); }; });
-        g.querySelectorAll('.smp-tl').forEach(function(a){ a.onclick=function(){ openProductDrawer(a.dataset.ref,null,'timeline'); }; });
+        g.querySelectorAll('.smp-tl').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); var ref=a.dataset.ref, tr=a.closest('tr');   // v27.722 (Ben): timeline lives on SAMPLING — expand inline here, no jump to the Products drawer
+          var ex=g.querySelector('tr.smp-tlexp'); if(ex){ var same=ex.getAttribute('data-ref')===ref; ex.remove(); if(same)return; }
+          var exp=document.createElement('tr'); exp.className='smp-tlexp'; exp.setAttribute('data-ref',ref);
+          exp.innerHTML='<td colspan="'+ths.length+'"><div class="smp-tlbox" style="padding:8px 8px;background:var(--hover);border-radius:8px"><div class="mut">Loading timeline…</div></div></td>';
+          tr.parentNode.insertBefore(exp,tr.nextSibling); renderProdTimeline(exp.querySelector('.smp-tlbox'),ref); }; });
         g.querySelectorAll('img.smp-sw').forEach(function(im){ im.onclick=function(){ openImgZoom(im.dataset.src); }; });
         g.querySelectorAll('.smp-link').forEach(function(a){ a.onclick=function(){ openProductDrawer(a.dataset.ref,null,'samples'); }; });
         g.querySelectorAll('.samp-open').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); (typeof openSampleDrawer==='function'?openSampleDrawer(a.dataset.ref):gotoSample(a.dataset.ref)); }; });
@@ -14669,7 +14673,7 @@
     var _u=Number(d.unread_supplier)||0;
     var _mAct=d._sizesLoaded?prodDetailActs(d):(seed?prodOpenActs(seed).n:0);   // seed's action count until the real sizes land
     var _nReq=((it&&it.requests)||[]).length;
-    var tabs=[['master','Master data'],['sizes','Size &amp; variants'+(_mAct?' <span class="ex-badge">'+_mAct+'</span>':'')],['requests','Requests'+(_nReq?' <span class="ex-badge" style="background:var(--nav)">'+_nReq+'</span>':'')],['samples','Samples'],['timeline','Timeline'+(_u?' <span class="ex-badge">'+_u+'</span>':'')],['documents','Documents']];   // v27.703 Requests tab
+    var tabs=[['master','Master data'],['sizes','Size &amp; variants'+(_mAct?' <span class="ex-badge">'+_mAct+'</span>':'')],['requests','Requests'+(_nReq?' <span class="ex-badge" style="background:var(--nav)">'+_nReq+'</span>':'')],['samples','Samples'],['documents','Documents']];   /* v27.722 (Ben): Timeline moved to Product ▸ SAMPLING (inline on the row); tab removed from the product detail. Deep link #/product/<ref>/timeline still resolves via the handler below. */   // v27.703 Requests tab
     // Full-page mode → the full header with Back. Full header vs the compact strip below.
     var header=inline?'':('<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px"><button class="save-btn light" id="pd-back">← Back</button>'
       +(it.has_swatch?'<img src="/api/product/swatch/'+encodeURIComponent(it.ref)+'?t='+encodeURIComponent(it.updated_at)+'" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">':'')
