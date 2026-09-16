@@ -3731,6 +3731,21 @@
   function erpDevLines(lines,erpMeta){ erpMeta=erpMeta||{}; if(erpMeta.complete)return [];
     return (lines||[]).filter(function(l){ return l.qty_pending; }); }
   var OP_EDIT=null;   // po currently in ORDER PLAN edit mode (qty editable + add SKUs); null = view mode
+  // v27.706 (Ben): a burst of record-of-change rows written by ONE user within a short window about the SAME subject (the text before
+  // the first ":" — e.g. "Order plan") collapses into one entry listing each change. Input rows {event, detail, created_at, changed_by}
+  // (any order); output keeps single rows untouched and adds {head, items[], n} on merged ones (newest timestamp of the burst).
+  function hzGroupChanges(list, windowSec){ windowSec=windowSec||180; var rows=(list||[]).slice().sort(function(a,b){ return String(a.created_at||'').localeCompare(String(b.created_at||'')); });
+    function ts(s){ var t=new Date(String(s||'').replace(' ','T')).getTime(); return isNaN(t)?0:t; }
+    function head(c){ var ev=String(c.event||''); var i=ev.indexOf(':'); return (i>0&&!c.detail)?ev.slice(0,i).trim():(c.detail?ev.trim():''); }
+    function tail(c){ var ev=String(c.event||''); if(c.detail)return String(c.detail); var i=ev.indexOf(':'); return i>0?ev.slice(i+1).trim():ev; }
+    var out=[], cur=null;
+    rows.forEach(function(c){ var h=head(c), by=String(c.changed_by||'').toLowerCase();
+      if(cur&&h&&cur.head===h&&cur.by===by&&Math.abs(ts(c.created_at)-cur.lastTs)<=windowSec*1000){ cur.items.push(tail(c)); cur.lastTs=ts(c.created_at); cur.created_at=c.created_at; return; }
+      cur={head:h, by:by, items:[tail(c)], lastTs:ts(c.created_at), created_at:c.created_at, changed_by:c.changed_by, event:c.event, detail:c.detail, id:c.id}; out.push(cur); });
+    return out.map(function(g){ if(g.items.length<2){ return {id:g.id, event:g.event, detail:g.detail, created_at:g.created_at, changed_by:g.changed_by}; } return {id:g.id, event:g.head+': '+g.items.length+' changes', detail:'', head:g.head, items:g.items, n:g.items.length, created_at:g.created_at, changed_by:g.changed_by}; }); }
+  try{ window.hzGroupChanges=hzGroupChanges; }catch(e){}   // jsdom harness hook
+  // shared renderer for a (possibly grouped) record-of-change card — used by the PO, shipment and product timelines
+  function hzChangeBodyHtml(c){ if(c.items&&c.items.length>1){ return '<b>'+esc(c.head)+'</b> <span class="mut">— '+c.items.length+' changes</span><ul style="margin:3px 0 0 14px;padding:0">'+c.items.map(function(t){ return '<li style="margin:1px 0">'+esc(t)+'</li>'; }).join('')+'</ul>'; } return '<b>'+esc(c.event||'')+'</b>'+(c.detail?': '+esc(c.detail):''); }
   var ROC_HIDDEN=(function(){try{var v=JSON.parse(localStorage.getItem('hzHideRocSet')||'[]');return Array.isArray(v)?v:[];}catch(e){return [];}})();   // PO/shipment refs whose "record of change" is hidden — PER-PO, persisted per user
   function rocIsHidden(k){ return ROC_HIDDEN.indexOf(String(k))>=0; }
   function rocSetHidden(k,on){ k=String(k); var i=ROC_HIDDEN.indexOf(k); if(on&&i<0)ROC_HIDDEN.push(k); else if(!on&&i>=0)ROC_HIDDEN.splice(i,1); try{localStorage.setItem('hzHideRocSet',JSON.stringify(ROC_HIDDEN));}catch(e){} }
@@ -3882,9 +3897,11 @@
         +'</div>'; }
     // Record-of-change entries (status / dates / shipment / payment / ERP upload) render distinctly and interleave with notes by time.
     function fmtChangeTime(s){ s=String(s||''); var d=s.slice(0,10), t=s.slice(11,16); return (d?fd(d):s)+(t?' '+t:''); }
-    function renderChange(c){ return '<div class="tl-change" style="font-size:11px;margin:3px 0;max-width:640px;padding:4px 8px;background:var(--hover);border:1px solid var(--line);border-left:3px solid var(--faint);border-radius:5px'+(rocIsHidden(po)?';display:none':'')+'"><span class="mut tiny">🕓 '+esc(fmtChangeTime(c.created_at))+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span> <span class="ex-badge" style="background:var(--line);color:var(--muted)">record of change</span><br><span style="color:var(--ink-soft)"><b>'+esc(c.event)+'</b>'+(c.detail?': '+esc(c.detail):'')+'</span></div>'; }
+    function renderChange(c){ var items=c.items||null;
+      var body=items?('<b>'+esc(c.head)+'</b> <span class="mut">— '+items.length+' changes</span><ul style="margin:3px 0 0 14px;padding:0;color:var(--ink-soft)">'+items.map(function(t){ return '<li style="margin:1px 0">'+esc(t)+'</li>'; }).join('')+'</ul>'):('<b>'+esc(c.event)+'</b>'+(c.detail?': '+esc(c.detail):''));
+      return '<div class="tl-change" style="font-size:11px;margin:3px 0;max-width:640px;padding:4px 8px;background:var(--hover);border:1px solid var(--line);border-left:3px solid var(--faint);border-radius:5px'+(rocIsHidden(po)?';display:none':'')+'"><span class="mut tiny">🕓 '+esc(fmtChangeTime(c.created_at))+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span> <span class="ex-badge" style="background:var(--line);color:var(--muted)">record of change</span><br><span style="color:var(--ink-soft)">'+body+'</span></div>'; }   // v27.706: grouped entries render as one card with a bullet list
     var _tlItems=tlDesc(notes).map(function(n){ return {ts:tlTs(n.created_at)+'~'+('000000'+String(n.id||'')).slice(-6), h:renderNote(n)}; })
-      .concat(((d&&d.changes)||[]).map(function(c){ return {ts:tlTs(c.created_at)+'~000000', h:renderChange(c)}; }));
+      .concat(hzGroupChanges((d&&d.changes)||[]).map(function(c){ return {ts:tlTs(c.created_at)+'~000000', h:renderChange(c)}; }));   // v27.706 (Ben): burst of same-subject changes by one user → one entry
     _tlItems.sort(function(a,b){ return b.ts.localeCompare(a.ts); });   // newest first, notes + changes interleaved (normalised ts)
     var list=_tlItems.length?_tlItems.map(function(x){return x.h;}).join(''):'<div class="mut tiny">No timeline activity yet.</div>';
     var compose='<div class="po-compose-row" style="display:flex;gap:16px;flex-wrap:wrap;margin:2px 0 8px">'
@@ -5958,7 +5975,7 @@
   // On the admin side (authorKind 'internal') supplier notes carry a read/unread toggle + 'new' badge, like the PO timeline.
   function loadShipTimeline(ref, authorKind, getBase, postEp){ var box=document.querySelector('.sp-timeline[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(ref):ref)+'"]'); if(!box)return;
     var admin=(authorKind||'internal')==='internal';
-    function renderShipChange(c){ return '<div class="tl-change tiny" style="margin:2px 0;max-width:640px;padding:3px 8px;background:var(--hover);border:1px solid var(--line);border-left:3px solid var(--faint);border-radius:5px'+(rocIsHidden(ref)?';display:none':'')+'"><span class="mut">🕓 '+esc(c.created_at)+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span> <span class="ex-badge" style="background:var(--line);color:var(--muted)">record of change</span> — <b>'+esc(c.event)+'</b>'+(c.detail?': '+esc(c.detail):'')+'</div>'; }
+    function renderShipChange(c){ return '<div class="tl-change tiny" style="margin:2px 0;max-width:640px;padding:3px 8px;background:var(--hover);border:1px solid var(--line);border-left:3px solid var(--faint);border-radius:5px'+(rocIsHidden(ref)?';display:none':'')+'"><span class="mut">🕓 '+esc(c.created_at)+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span> <span class="ex-badge" style="background:var(--line);color:var(--muted)">record of change</span> — '+hzChangeBodyHtml(c)+'</div>'; }   // v27.706 grouped bursts
     Promise.all([fetch(getBase+encodeURIComponent(ref)).then(function(r){return r.json();}), admin?fetch('/api/supply/shipment-changes?ref='+encodeURIComponent(ref)).then(function(r){return r.json();}).catch(function(){return [];}):Promise.resolve([])]).then(function(_tl){ var notes=_tl[0], _changes=_tl[1]||[];
       shortNotes(notes);
       var unread=0;
@@ -5971,7 +5988,7 @@
           +(ctrl?'<div style="flex:0 0 auto;min-width:70px">'+ctrl+'</div>':'')
           +'<div style="flex:1">'+'<span class="mut">'+esc(n.created_at)+' · '+(sup?'Supplier':(n.author_email&&n.author_email!=='Dock & Bay'?esc(shortUser(n.author_email)):'D&amp;B'))+'</span>'+(nu?' <span class="ex-badge">new</span>':'')+' — '+esc(n.body)+hzTlAttHtml(n,'/api/supply/portal-attachment/')+'</div>'
           +'</div>'}; }):[];
-      (_changes||[]).forEach(function(c){ _items.push({ts:String(c.created_at||'')+'~0', h:renderShipChange(c)}); });
+      hzGroupChanges(_changes||[]).forEach(function(c){ _items.push({ts:String(c.created_at||'')+'~0', h:renderShipChange(c)}); });   // v27.706
       _items.sort(function(a,b){ return b.ts.localeCompare(a.ts); });
       var list=_items.length?_items.map(function(x){return x.h;}).join(''):'<div class="mut tiny">No timeline entries yet.</div>';
       var compose='<div style="font-weight:600;font-size:12px;margin-bottom:4px">Add timeline note</div>'
@@ -11922,8 +11939,8 @@
         var _nc=String(n.created_at||''), _nw=(_nc.slice(0,10)?fd(_nc.slice(0,10)):_nc)+(_nc.slice(11,16)?' '+_nc.slice(11,16):'');
         return '<div style="font-size:13px;line-height:1.5;text-align:left;margin:4px 0;max-width:640px;display:flex;gap:10px;align-items:flex-start'+(nu?';background:var(--amber-bg);border:1px solid #fdba74;border-radius:6px;padding:6px 9px':'')+'">'+(ctrl?'<div style="flex:0 0 auto;min-width:70px">'+ctrl+'</div>':'')+'<div style="flex:1"><span class="mut" style="font-size:11px">'+esc(_nw)+' · '+who+'</span>'+(nu?' <span class="ex-badge">new</span>':'')+'<br>'+esc(n.body)+hzTlAttHtml(n,'/api/supply/portal-attachment/')+'</div></div>'; }
       function _changeRow(c){ var _ca=String(c.changed_at||''), _cw=(_ca.slice(0,10)?fd(_ca.slice(0,10)):_ca)+(_ca.slice(11,16)?' '+_ca.slice(11,16):'');
-        return '<div class="tl-change" style="font-size:12px;margin:4px 0;max-width:640px;padding:5px 9px;background:var(--hover);border:1px solid var(--line);border-left:3px solid var(--faint);border-radius:6px'+(_hid?';display:none':'')+'"><span class="ex-badge" style="background:var(--line);color:var(--muted);margin-right:6px">record of change</span><span class="mut" style="font-size:11px">'+esc(_cw)+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span><br><span style="color:var(--ink-soft)"><b>'+esc(c.event)+'</b>'+(c.detail?': '+esc(c.detail):'')+'</span></div>'; }
-      var _items=[]; (notes||[]).forEach(function(n){ _items.push({t:String(n.created_at||''),h:_noteRow(n)}); }); _changes.forEach(function(c){ _items.push({t:String(c.changed_at||''),h:_changeRow(c)}); });
+        return '<div class="tl-change" style="font-size:12px;margin:4px 0;max-width:640px;padding:5px 9px;background:var(--hover);border:1px solid var(--line);border-left:3px solid var(--faint);border-radius:6px'+(_hid?';display:none':'')+'"><span class="ex-badge" style="background:var(--line);color:var(--muted);margin-right:6px">record of change</span><span class="mut" style="font-size:11px">'+esc(_cw)+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span><br><span style="color:var(--ink-soft)">'+hzChangeBodyHtml(c)+'</span></div>'; }   // v27.706 grouped bursts
+      var _items=[]; (notes||[]).forEach(function(n){ _items.push({t:String(n.created_at||''),h:_noteRow(n)}); }); hzGroupChanges((_changes||[]).map(function(c){ return Object.assign({},c,{created_at:c.changed_at}); })).forEach(function(c){ c.changed_at=c.created_at; _items.push({t:String(c.changed_at||''),h:_changeRow(c)}); });   // v27.706 grouped bursts
       _items.sort(function(a,b){ return tlTs(b.t).localeCompare(tlTs(a.t)); });   // newest-first (sortable key; dd-Mmm-yy sorted by day otherwise)
       var list=_items.length?_items.map(function(x){return x.h;}).join(''):'<div class="mut" style="font-size:12px">No timeline entries yet.</div>';
       box.innerHTML='<div style="display:flex;gap:6px;align-items:flex-start;margin-bottom:8px"><textarea class="fci ssp-in" rows="2" placeholder="Add a note…" style="flex:1;max-width:520px;text-align:left"></textarea><button class="save-btn ssp-post">Post</button></div>'+list;
@@ -15113,7 +15130,7 @@
           +(ctrl?'<div style="flex:0 0 auto;display:flex;flex-direction:column;gap:3px;align-items:flex-start;min-width:78px">'+ctrl+'</div>':'')
           +'<div style="flex:1"><span class="mut tiny">'+esc(_fmt(n.created_at))+' · '+who+'</span>'+(isNew?' <span class="ex-badge">new</span>':'')+'<br><span style="color:var(--ink);white-space:pre-wrap">'+bodyH+'</span>'+dl+tg+pc+'</div>'
           +'</div>'; }
-      function _changeRow(c){ return '<div class="tl-change" style="font-size:11px;margin:3px 0;max-width:640px;padding:5px 8px;background:var(--hover);border:1px solid var(--line);border-left:3px solid var(--faint);border-radius:5px'+(_hid?';display:none':'')+'"><span class="ex-badge" style="background:var(--line);color:var(--muted);margin-right:6px">record of change</span><span class="mut tiny">'+esc(_fmt(c.changed_at))+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span><br><span style="color:var(--ink-soft)"><b>'+esc(c.event)+'</b>'+(c.detail?': '+esc(c.detail):'')+'</span></div>'; }
+      function _changeRow(c){ return '<div class="tl-change" style="font-size:11px;margin:3px 0;max-width:640px;padding:5px 8px;background:var(--hover);border:1px solid var(--line);border-left:3px solid var(--faint);border-radius:5px'+(_hid?';display:none':'')+'"><span class="ex-badge" style="background:var(--line);color:var(--muted);margin-right:6px">record of change</span><span class="mut tiny">'+esc(_fmt(c.changed_at))+(c.changed_by?' · '+esc(shortUser(c.changed_by)):'')+'</span><br><span style="color:var(--ink-soft)">'+hzChangeBodyHtml(c)+'</span></div>'; }   // v27.706 grouped bursts
       // used-tag filter bar (Phase 3): chips for the tags actually applied on THIS product; multi-select
       var usedCount={}; notes.forEach(function(n){ (n.tags||[]).forEach(function(id){ if(TAGMAP[id])usedCount[id]=(usedCount[id]||0)+1; }); });
       var usedIds=Object.keys(usedCount), anyFilt=usedIds.some(function(id){return FILT[id];});
@@ -15121,7 +15138,7 @@
         +usedIds.map(function(id){ var t=TAGMAP[id], on=!!FILT[id]; return '<span class="pt-filt" data-id="'+id+'" style="cursor:pointer;font-size:10px;font-weight:700;border-radius:5px;padding:2px 9px;border:1px solid '+esc(t.colour||'var(--muted)')+';'+(on?('background:'+esc(t.colour||'var(--muted)')+';color:#fff'):('background:var(--card);color:'+esc(t.colour||'var(--muted)')))+'">'+esc(t.name||'')+' <span style="opacity:.7">'+usedCount[id]+'</span></span>'; }).join('')
         +(anyFilt?' <a class="pt-filt-clear" style="cursor:pointer;font-size:10px;color:var(--muted);text-decoration:underline">clear</a>':'')+'</div>'):'';
       var _items=[]; notes.forEach(function(n){ if(anyFilt){ if(!(n.tags||[]).some(function(id){return FILT[id];}))return; } _items.push({t:String(n.created_at||''),h:_noteRow(n)}); });
-      if(!anyFilt){ changes.forEach(function(c){ _items.push({t:String(c.changed_at||''),h:_changeRow(c)}); }); }   // tag filter shows tagged messages only
+      if(!anyFilt){ hzGroupChanges(changes.map(function(c){ return Object.assign({},c,{created_at:c.changed_at}); })).forEach(function(c){ c.changed_at=c.created_at; _items.push({t:String(c.changed_at||''),h:_changeRow(c)}); }); }   // tag filter shows tagged messages only; v27.706 grouped bursts
       _items.sort(function(a,b){ return tlTs(b.t).localeCompare(tlTs(a.t)); });   // newest-first (sortable key; dd-Mmm-yy sorted by day otherwise)
       var list=_items.length?_items.map(function(x){return x.h;}).join(''):'<div class="mut tiny" style="padding:6px 0">'+(anyFilt?'No messages with the selected tag'+(usedIds.filter(function(id){return FILT[id];}).length>1?'s':'')+'.':'No timeline entries yet.')+'</div>';
       var _compChips=ACTTAGS.map(function(t){ return '<span class="pt-tagchip" data-id="'+t.id+'" style="cursor:pointer;display:inline-block;font-size:10px;font-weight:700;border-radius:5px;padding:2px 9px;margin:0 4px 4px 0;border:1px solid '+esc(t.colour||'var(--muted)')+';color:'+esc(t.colour||'var(--muted)')+';background:var(--card)">'+esc(t.name||'')+'</span>'; }).join('');

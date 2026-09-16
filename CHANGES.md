@@ -1,3 +1,7 @@
+## v27.706 Timelines: bursts of record-of-change entries merge into one card (Ben) — CLIENT
+- **Ask (Ben, PO-58EULX1):** five "Order plan: POLYBAG … added — qty 50" cards at 04:20 by the same user should read as one.
+- **Fix (render-time, so history tidies too):** `hzGroupChanges()` collapses consecutive record-of-change rows by the **same user**, on the **same subject** (the event, e.g. "Order plan" / "Status" — the text before the first ":"), within **3 minutes** into one card: "🕓 10-Sep-26 04:20 · zera@ · record of change — **Order plan** — 5 changes" followed by a bullet per line ("POLYBAG 210*350+50mm added — qty 50", …). Single changes render exactly as before. Applied to the **PO drawer timeline**, the **shipment drawer timeline** and the **PRODUCT timeline** (shared `hzChangeBodyHtml`). Nothing changes in the database.
+
 ## v27.705 Supplier portal ▸ Productions: TOTAL column + totals row (Ben) — CLIENT (portal)
 - The batch order-plan pivot (SKUs × POs) gains a bold **Total** column right after Size = that SKU's units across every PO in the batch, and a **TOTAL** footer row (per-PO totals + grand total). The caption now reads "N POs · M SKUs · U units in batch …". The XLSX download carries the same Total column + totals row. portal-view.js only.
 
