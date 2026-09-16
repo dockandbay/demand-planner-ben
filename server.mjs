@@ -6318,19 +6318,151 @@ const PROD_STAGE_DECIDED = new Set(['approved', 'approved_with_comments', 'rejec
 const prodStageRank = (s) => { const i = PROD_STAGES.indexOf(s); return i < 0 ? 0 : i; };
 const prodStatusFromStage = (stage) => (stage === 'approved' || stage === 'approved_with_comments') ? 'approved' : (stage === 'stop_development' ? 'dropped' : 'in_development');
 // Forward-only auto-advance off a supplier event: never moves backwards, never overrides a D&B decision.
-async function prodStageAdvance(itemRef, target) {
+// v27.702 (mig 278): the stage that moves is the development REQUEST's, never the product's (item.stage is the manual override).
+// opts: {requestId} | {sampleId} (→ that sample's request) | {supplierNames} (→ that supplier's requests) | nothing (→ every
+// undecided request on the item). The product's stored status is recomputed from its requests afterwards.
+async function prodStageAdvance(itemRef, target, opts) {
+  opts = opts || {};
   try {
-    const cur = (await pool.query(`SELECT coalesce(stage,'sample_development') stage FROM planner.product_dev_items WHERE ref=$1`, [itemRef])).rows[0];
-    if (!cur || PROD_STAGE_DECIDED.has(cur.stage)) return;
-    if (prodStageRank(target) <= prodStageRank(cur.stage)) return;
-    await pool.query(`UPDATE planner.product_dev_items SET stage=$2, status=$3, updated_at=now() WHERE ref=$1`, [itemRef, target, prodStatusFromStage(target)]);
+    const it = (await pool.query(`SELECT id FROM planner.product_dev_items WHERE ref=$1`, [itemRef])).rows[0]; if (!it) return;
+    let ids = [];
+    if (opts.requestId) ids = [Number(opts.requestId)];
+    else if (opts.sampleId) { const s = (await pool.query(`SELECT request_id FROM planner.product_dev_samples WHERE id=$1`, [opts.sampleId])).rows[0]; if (s && s.request_id) ids = [Number(s.request_id)]; }
+    else if (Array.isArray(opts.supplierNames) && opts.supplierNames.length) ids = (await pool.query(`SELECT id FROM planner.product_dev_requests WHERE item_id=$1 AND supplier_name = ANY($2)`, [it.id, opts.supplierNames])).rows.map(r => Number(r.id));
+    if (!ids.length && !opts.requestId && !opts.sampleId) ids = (await pool.query(`SELECT id FROM planner.product_dev_requests WHERE item_id=$1`, [it.id])).rows.map(r => Number(r.id));
+    for (const rid of ids) {
+      const cur = (await pool.query(`SELECT stage FROM planner.product_dev_requests WHERE id=$1 AND item_id=$2`, [rid, it.id])).rows[0];
+      if (!cur || PROD_STAGE_DECIDED.has(cur.stage)) continue;
+      if (prodStageRank(target) <= prodStageRank(cur.stage)) continue;
+      await pool.query(`UPDATE planner.product_dev_requests SET stage=$2, updated_at=now() WHERE id=$1`, [rid, target]);
+    }
+    await recomputeProductStatus(null, it.id);
   } catch (e) { /* best-effort — never block the sample event */ }
 }
+// ── PRODUCT split P1 (v27.702, mig 278) — development REQUESTS ─────────────────────────────────────────────────────────
+// Product stage is DERIVED from its requests (item.stage = optional manual override). Rule: ignore stopped requests;
+// all live requests approved → approved (approved_with_comments if any carry comments); else the most advanced stage.
+const REQ_RANK = { sample_development: 1, sample_shipped: 2, sample_in_review: 3 };
+function deriveProductStage(reqs, override) {
+  if (override && PROD_STAGES.includes(override)) return { stage: override, overridden: true };
+  const list = Array.isArray(reqs) ? reqs : [];
+  if (!list.length) return { stage: 'sample_development', overridden: false };
+  const live = list.filter(r => r.stage !== 'stop_development');
+  if (!live.length) return { stage: 'stop_development', overridden: false };
+  if (live.every(r => r.stage === 'approved' || r.stage === 'approved_with_comments')) return { stage: live.every(r => r.stage === 'approved') ? 'approved' : 'approved_with_comments', overridden: false };
+  let best = 'sample_development', b = 0; live.forEach(r => { const k = REQ_RANK[r.stage] || 0; if (k > b) { b = k; best = r.stage; } });
+  return { stage: best, overridden: false };
+}
+// SQL fragment: this item's requests as JSON (components named, samples counted) — used by items / detail / dashboard reads
+const REQS_JSON_SQL = `coalesce((SELECT json_agg(json_build_object('id',rq.id,'ref',rq.ref,'supplier_name',rq.supplier_name,'supplier_code',coalesce(rq.supplier_code,''),
+      'stage',rq.stage,'approval_method',rq.approval_method,'recipient_countries',coalesce(rq.recipient_countries,''),'dev_start',to_char(rq.dev_start,'YYYY-MM-DD'),
+      'size_ids',rq.size_ids,'internal_stakeholders',rq.internal_stakeholders,'notify_emails',rq.notify_emails,'notes',coalesce(rq.notes,''),'created_at',to_char(rq.created_at,'YYYY-MM-DD'),
+      'components',coalesce((SELECT json_agg(json_build_object('id',c.id,'name',c.name,'dimension',coalesce(c.dimension,'')) ORDER BY c.sort,c.id) FROM planner.product_dev_request_components rc JOIN planner.product_dev_components c ON c.id=rc.component_id WHERE rc.request_id=rq.id),'[]'::json),
+      'samples',(SELECT count(*) FROM planner.product_dev_samples ps WHERE ps.request_id=rq.id)::int,
+      'samples_received',(SELECT count(*) FROM planner.product_dev_samples ps WHERE ps.request_id=rq.id AND ps.received_at IS NOT NULL)::int) ORDER BY rq.id)
+      FROM planner.product_dev_requests rq WHERE rq.item_id=i.id),'[]'::json)`;
+function applyDerivedStage(row) { const d = deriveProductStage(row.requests, row.stage_override); row.stage = d.stage; row.stage_overridden = d.overridden; return row; }
+// Recompute a product's stored approval status from its (derived / overridden) stage — called after any request change.
+async function recomputeProductStatus(client, itemId) {
+  const c = client || pool;
+  const it = (await c.query(`SELECT i.id, i.stage stage_override, ${REQS_JSON_SQL} requests FROM planner.product_dev_items i WHERE i.id=$1`, [itemId])).rows[0];
+  if (!it) return null;
+  const d = deriveProductStage(it.requests, it.stage_override), st = prodStatusFromStage(d.stage);
+  await c.query(`UPDATE planner.product_dev_items SET status=$2, approved_at=CASE WHEN $2='approved' THEN coalesce(approved_at, now()) ELSE NULL END, updated_at=now() WHERE id=$1`, [itemId, st]);
+  return d.stage;
+}
+// Ref minting (Ben 16-Sep): product = SEASON-TYPE-COLOURWAY (TYPE = category code; custom orders CUST-…); request = <product ref>-<supplier code>.
+function _slugRef(s, max) { return String(s || '').toUpperCase().replace(/&/g, 'AND').replace(/[^A-Z0-9]+/g, '').slice(0, max || 14) || 'X'; }
+async function _uniqueRef(client, table, base) { let ref = base, n = 2; while ((await client.query(`SELECT 1 FROM planner.${table} WHERE ref=$1`, [ref])).rowCount) { ref = base + '-' + (n++); } return ref; }
+async function _supplierCodeFor(client, name) { const sr = (await client.query(`SELECT id, code FROM planner.suppliers WHERE name=$1`, [name])).rows[0];
+  return { id: sr ? sr.id : null, code: (sr && sr.code && sr.code.trim()) ? sr.code.trim().toUpperCase().replace(/[^A-Z0-9]/g, '') : String(name || '').toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3) }; }
+app.get('/api/product/item/:ref/requests', async (req, res) => {
+  try { const r = await pool.query(`SELECT i.id, i.stage stage_override, ${REQS_JSON_SQL} requests FROM planner.product_dev_items i WHERE i.ref=$1`, [req.params.ref]);
+    if (!r.rowCount) return res.status(404).json({ error: 'not found' }); const row = r.rows[0]; const d = deriveProductStage(row.requests, row.stage_override);
+    res.json({ requests: row.requests, stage: d.stage, stage_overridden: d.overridden }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Create a request: {item_ref, supplier_name, component_ids[], size_ids[], approval_method, recipient_countries, dev_start, internal_stakeholders[], notify_emails[], notes}
+app.post('/api/product/request', async (req, res) => {
+  const b = req.body || {}, itemRef = String(b.item_ref || '').trim(), sup = String(b.supplier_name || '').trim();
+  if (!itemRef || !sup) return res.status(400).json({ error: 'item_ref and supplier_name required' });
+  const comps = (Array.isArray(b.component_ids) ? b.component_ids : []).map(Number).filter(Boolean);
+  if (!comps.length) return res.status(400).json({ error: 'pick at least one component' });
+  const client = await pool.connect();
+  try {
+    const it = (await client.query(`SELECT id, ref FROM planner.product_dev_items WHERE ref=$1`, [itemRef])).rows[0]; if (!it) return res.status(404).json({ error: 'product not found' });
+    const owned = (await client.query(`SELECT id FROM planner.product_dev_components WHERE item_ref=$1 AND id = ANY($2)`, [itemRef, comps])).rows.map(r => Number(r.id));
+    if (owned.length !== comps.length) return res.status(400).json({ error: 'component not on this product' });
+    const sc = await _supplierCodeFor(client, sup);
+    await client.query('BEGIN');
+    const ref = await _uniqueRef(client, 'product_dev_requests', String(b.ref || '').trim() || (it.ref + '-' + sc.code));
+    const emails = a => (Array.isArray(a) ? a : []).map(x => String(x || '').trim().toLowerCase()).filter(x => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x)).filter((x, i, arr) => arr.indexOf(x) === i).slice(0, 50);
+    const ins = await client.query(`INSERT INTO planner.product_dev_requests (ref, item_id, supplier_id, supplier_name, supplier_code, stage, approval_method, recipient_countries, dev_start, size_ids, internal_stakeholders, notify_emails, notes, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::date,$10,$11::jsonb,$12::jsonb,$13,$14) RETURNING id, ref`,
+      [ref, it.id, sc.id, sup, sc.code, PROD_STAGES.includes(b.stage) ? b.stage : 'sample_development', b.approval_method === 'photo' ? 'photo' : 'samples', String(b.recipient_countries || 'UK').trim() || 'UK', b.dev_start || null,
+       (Array.isArray(b.size_ids) ? b.size_ids : []).map(Number).filter(Boolean), JSON.stringify(emails(b.internal_stakeholders)), JSON.stringify(emails(b.notify_emails)), String(b.notes || '').trim() || null, authUser(req) || (b.created_by || null)]);
+    const rid = ins.rows[0].id;
+    for (const cid of owned) await client.query(`INSERT INTO planner.product_dev_request_components (request_id, component_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [rid, cid]);
+    // per-component default supplier follows the assignment so the Sizes & Variants chooser reads the same story
+    await client.query(`UPDATE planner.product_dev_components SET supplier=$2 WHERE id = ANY($1) AND coalesce(supplier,'')=''`, [owned, sup]);
+    const names = (await client.query(`SELECT name FROM planner.product_dev_components WHERE id = ANY($1) ORDER BY sort, id`, [owned])).rows.map(r => r.name);
+    const who = shortUser(authUser(req) || b.created_by || '') || 'A user';
+    await client.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`, [it.ref, authUser(req) || null, who + ' created development request ' + ins.rows[0].ref + ' for ' + sup + ' — ' + names.join(', ')]);
+    await recomputeProductStatus(client, it.id);
+    await client.query('COMMIT');
+    try { await logProductChange(it.ref, 'Development request ' + ins.rows[0].ref + ' → ' + sup + ' (' + names.join(', ') + ')', null, authUser(req) || 'Dock & Bay'); } catch (e) {}
+    try { _portalCache.clear(); _portalInflight.clear(); } catch (e) {}
+    res.json({ ok: true, id: rid, ref: ins.rows[0].ref });
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); log500(e); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
+// Update a request: any of ref, stage, approval_method, recipient_countries, dev_start, size_ids, internal_stakeholders, notify_emails, notes, component_ids (replace-all)
+app.post('/api/product/request/:id', async (req, res) => {
+  const b = req.body || {}, id = Number(req.params.id); if (!id) return res.status(400).json({ error: 'bad id' });
+  const client = await pool.connect();
+  try {
+    const rq = (await client.query(`SELECT r.*, i.ref item_ref FROM planner.product_dev_requests r JOIN planner.product_dev_items i ON i.id=r.item_id WHERE r.id=$1`, [id])).rows[0]; if (!rq) return res.status(404).json({ error: 'not found' });
+    const sets = [], vals = []; let i = 1; const log = [];
+    const emails = a => (Array.isArray(a) ? a : []).map(x => String(x || '').trim().toLowerCase()).filter(x => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(x)).filter((x, k, arr) => arr.indexOf(x) === k).slice(0, 50);
+    if ('ref' in b) { const nr = String(b.ref || '').trim(); if (!nr) return res.status(400).json({ error: 'ref cannot be blank' }); if (nr !== rq.ref) { if ((await client.query(`SELECT 1 FROM planner.product_dev_requests WHERE ref=$1 AND id<>$2`, [nr, id])).rowCount) return res.status(400).json({ error: 'that request ref is already used' }); sets.push(`ref=$${i++}`); vals.push(nr); log.push('Request ref → ' + nr); } }
+    if ('stage' in b) { const st = PROD_STAGES.includes(b.stage) ? b.stage : 'sample_development'; sets.push(`stage=$${i++}`); vals.push(st); log.push('Request ' + rq.ref + ' stage → ' + st); }
+    if ('approval_method' in b) { sets.push(`approval_method=$${i++}`); vals.push(b.approval_method === 'photo' ? 'photo' : 'samples'); log.push('Approval method → ' + (b.approval_method === 'photo' ? 'photo' : 'samples')); }
+    if ('recipient_countries' in b) { sets.push(`recipient_countries=$${i++}`); vals.push(String(b.recipient_countries || 'UK').trim() || 'UK'); log.push('Recipient country → ' + String(b.recipient_countries || 'UK')); }
+    if ('dev_start' in b) { sets.push(`dev_start=$${i++}::date`); vals.push(b.dev_start || null); log.push('Development start → ' + (b.dev_start || 'cleared')); }
+    if ('size_ids' in b) { sets.push(`size_ids=$${i++}`); vals.push((Array.isArray(b.size_ids) ? b.size_ids : []).map(Number).filter(Boolean)); }
+    if ('internal_stakeholders' in b) { sets.push(`internal_stakeholders=$${i++}::jsonb`); vals.push(JSON.stringify(emails(b.internal_stakeholders))); }
+    if ('notify_emails' in b) { sets.push(`notify_emails=$${i++}::jsonb`); vals.push(JSON.stringify(emails(b.notify_emails))); }
+    if ('notes' in b) { sets.push(`notes=$${i++}`); vals.push(String(b.notes || '').trim() || null); }
+    await client.query('BEGIN');
+    if (sets.length) { vals.push(id); await client.query(`UPDATE planner.product_dev_requests SET ${sets.join(',')}, updated_at=now() WHERE id=$${i}`, vals); }
+    if (Array.isArray(b.component_ids)) { const comps = b.component_ids.map(Number).filter(Boolean);
+      const owned = (await client.query(`SELECT id FROM planner.product_dev_components WHERE item_ref=$1 AND id = ANY($2)`, [rq.item_ref, comps])).rows.map(r => Number(r.id));
+      if (!owned.length) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'pick at least one component' }); }
+      await client.query(`DELETE FROM planner.product_dev_request_components WHERE request_id=$1`, [id]);
+      for (const cid of owned) await client.query(`INSERT INTO planner.product_dev_request_components (request_id, component_id) VALUES ($1,$2) ON CONFLICT DO NOTHING`, [id, cid]); log.push('Request ' + rq.ref + ' components updated'); }
+    const stage = await recomputeProductStatus(client, rq.item_id);
+    await client.query('COMMIT');
+    for (const l of log) { try { await logProductChange(rq.item_ref, l, null, authUser(req) || 'Dock & Bay'); } catch (e) {} }
+    try { _portalCache.clear(); _portalInflight.clear(); } catch (e) {}
+    res.json({ ok: true, product_stage: stage });
+  } catch (e) { await client.query('ROLLBACK').catch(() => {}); log500(e); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
+app.post('/api/product/request/:id/delete', async (req, res) => {
+  const id = Number(req.params.id); if (!id) return res.status(400).json({ error: 'bad id' });
+  try { const rq = (await pool.query(`SELECT r.ref, r.item_id, r.supplier_name, i.ref item_ref, (SELECT count(*) FROM planner.product_dev_samples s WHERE s.request_id=r.id)::int n FROM planner.product_dev_requests r JOIN planner.product_dev_items i ON i.id=r.item_id WHERE r.id=$1`, [id])).rows[0];
+    if (!rq) return res.status(404).json({ error: 'not found' }); if (rq.n > 0 && !(req.body || {}).force) return res.status(400).json({ error: 'this request has ' + rq.n + ' sample version' + (rq.n === 1 ? '' : 's') + ' — remove them first or pass force' });
+    await pool.query(`DELETE FROM planner.product_dev_requests WHERE id=$1`, [id]); await recomputeProductStatus(null, rq.item_id);
+    try { await logProductChange(rq.item_ref, 'Development request ' + rq.ref + ' (' + rq.supplier_name + ') deleted', null, authUser(req) || 'Dock & Bay'); } catch (e) {}
+    try { _portalCache.clear(); _portalInflight.clear(); } catch (e) {}
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/product/items', async (_req, res) => {
   try {
     await ensureCategoryColours();   // v27.698: categories always carry a colour by the time the grid reads them
     const r = await pool.query(`SELECT i.id, i.ref, coalesce(i.type,'Product Development') type, coalesce(i.season,'') season, coalesce(i.category,'') category,
       coalesce((SELECT c.colour_hex FROM planner.categories c WHERE c.category=i.category LIMIT 1),'') category_colour,
+      ${REQS_JSON_SQL} requests, i.stage stage_override,
+      coalesce((SELECT json_agg(json_build_object('id',c.id,'name',c.name,'dimension',coalesce(c.dimension,''),'supplier',coalesce(c.supplier,''),'sampling_mode',coalesce(c.sampling_mode,'sampled')) ORDER BY c.sort,c.id) FROM planner.product_dev_components c WHERE c.item_ref=i.ref),'[]'::json) components,
       coalesce(i.colour_name,'') colour_name, coalesce(i.bulk_colour_name,'') bulk_colour_name, coalesce(i.stage,'sample_development') stage,
       coalesce(i.supplier,'') supplier, coalesce(i.description,'') description, i.status, (i.swatch IS NOT NULL) has_swatch,
       to_char(i.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
@@ -6364,13 +6496,14 @@ app.get('/api/product/items', async (_req, res) => {
           'version', ps.version, 'date', to_char(ps.sample_date,'YYYY-MM-DD'), 'notes', coalesce(ps.photography_notes,'')) ORDER BY ps.version)
         FROM planner.product_dev_samples ps WHERE ps.item_ref=i.ref AND ps.approved_for_photography),'[]'::json) photo
       FROM planner.product_dev_items i ORDER BY i.created_at DESC`);
-    res.json(r.rows);
+    res.json(r.rows.map(applyDerivedStage));   // v27.702: stage derived from requests (override honoured)
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // PRODUCT ▸ DASHBOARD — approval matrix: one row per product with per-component-type {required, approved} counts.
 app.get('/api/product/dashboard', async (req, res) => {
   try {
     const r = await pool.query(`SELECT i.ref, coalesce(i.season,'') season, coalesce(i.category,'') category,
+      coalesce((SELECT c.colour_hex FROM planner.categories c WHERE c.category=i.category LIMIT 1),'') category_colour, ${REQS_JSON_SQL} requests, i.stage stage_override,
       coalesce(i.colour_name,'') colour_name, coalesce(i.bulk_colour_name,'') bulk_colour_name, coalesce(i.stage,'sample_development') stage, i.status, (i.swatch IS NOT NULL) has_swatch,
       to_char(i.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id)::int sizes,
@@ -6386,7 +6519,7 @@ app.get('/api/product/dashboard', async (req, res) => {
         FROM planner.product_dev_samples ps WHERE ps.item_ref=i.ref AND ps.approved_for_photography),'[]'::json) photo,
       (SELECT count(*) FROM planner.product_dev_samples ps WHERE ps.item_ref=i.ref)::int sample_count
       FROM planner.product_dev_items i ORDER BY i.category, i.ref`);
-    res.json(r.rows);
+    res.json(r.rows.map(applyDerivedStage));   // v27.702
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/product/item/:ref', async (req, res) => {
@@ -6395,8 +6528,10 @@ app.get('/api/product/item/:ref', async (req, res) => {
     // Round 1 — item + sizes + docs + samples + unread all in parallel (sizes uses a subquery so it needn't wait on item)
     const [itemR, sizesR, docsR, samplesR, unreadR, compsR] = await Promise.all([
       pool.query(`SELECT id, ref, coalesce(type,'Product Development') type, coalesce(season,'') season, coalesce(category,'') category,
-        coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(bulk_colour_name,'') bulk_colour_name, coalesce(stage,'sample_development') stage, coalesce(description,'') description, coalesce(recipient_countries,'UK') recipient_countries,
+        coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(bulk_colour_name,'') bulk_colour_name, coalesce(stage,'sample_development') stage, stage stage_override, coalesce(description,'') description, coalesce(recipient_countries,'UK') recipient_countries,
         coalesce(supplier,'') supplier, coalesce(supplier_code,'') supplier_code,
+        (SELECT ${REQS_JSON_SQL.replace(/\bi\.id\b/g, 'product_dev_items.id')}) requests,
+        coalesce((SELECT c.colour_hex FROM planner.categories c WHERE c.category=product_dev_items.category LIMIT 1),'') category_colour,
         status, (swatch IS NOT NULL) has_swatch, coalesce(created_by,'') created_by,
         to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at,
         to_char(dev_start_override,'YYYY-MM-DD') dev_start_override, to_char(approved_at,'YYYY-MM-DD HH24:MI') approved_at,
@@ -6416,7 +6551,7 @@ app.get('/api/product/item/:ref', async (req, res) => {
       pool.query(`SELECT count(*)::int n FROM planner.supplier_notes WHERE po=$1 AND author_kind='supplier' AND read_at IS NULL`, [ref]),
       pool.query(`SELECT id, component_type_id, name, coalesce(supplier,'') supplier, coalesce(sampling_mode,'sampled') sampling_mode, spec_id, dimension, sort FROM planner.product_dev_components WHERE item_ref=$1 ORDER BY sort, id`, [ref]),
     ]);
-    const item = itemR.rows[0];
+    const item = itemR.rows[0]; if (item) applyDerivedStage(item);   // v27.702 stage derived from requests
     if (!item) return res.status(404).json({ error: 'not found' });
     const sizes = sizesR.rows, docs = docsR.rows, samples = samplesR.rows, unread_supplier = unreadR.rows[0].n, components = compsR.rows;
     // Round 2 — sample files + component rows in parallel (each depends on round 1 ids)
@@ -6442,8 +6577,10 @@ app.get('/api/product/item/:ref/core', async (req, res) => {
   try {
     const [itemR, unreadR] = await Promise.all([
       pool.query(`SELECT id, ref, coalesce(type,'Product Development') type, coalesce(season,'') season, coalesce(category,'') category,
-        coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(bulk_colour_name,'') bulk_colour_name, coalesce(stage,'sample_development') stage, coalesce(description,'') description, coalesce(recipient_countries,'UK') recipient_countries,
+        coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(bulk_colour_name,'') bulk_colour_name, coalesce(stage,'sample_development') stage, stage stage_override, coalesce(description,'') description, coalesce(recipient_countries,'UK') recipient_countries,
         coalesce(supplier,'') supplier, coalesce(supplier_code,'') supplier_code,
+        (SELECT ${REQS_JSON_SQL.replace(/\bi\.id\b/g, 'product_dev_items.id')}) requests,
+        coalesce((SELECT c.colour_hex FROM planner.categories c WHERE c.category=product_dev_items.category LIMIT 1),'') category_colour,
         status, (swatch IS NOT NULL) has_swatch, coalesce(created_by,'') created_by,
         to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at,
         to_char(dev_start_override,'YYYY-MM-DD') dev_start_override, to_char(approved_at,'YYYY-MM-DD HH24:MI') approved_at,
@@ -6451,7 +6588,7 @@ app.get('/api/product/item/:ref/core', async (req, res) => {
         FROM planner.product_dev_items WHERE ref=$1`, [ref]),
       pool.query(`SELECT count(*)::int n FROM planner.supplier_notes WHERE po=$1 AND author_kind='supplier' AND read_at IS NULL`, [ref]),
     ]);
-    const item = itemR.rows[0]; if (!item) return res.status(404).json({ error: 'not found' });
+    const item = itemR.rows[0]; if (!item) return res.status(404).json({ error: 'not found' }); applyDerivedStage(item);
     res.json({ item, unread_supplier: unreadR.rows[0].n });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -6525,7 +6662,8 @@ app.post('/api/product/item', async (req, res) => {
       supCode = (sr && sr.code && sr.code.trim()) ? sr.code.trim().toUpperCase() : supplier.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3); }
     await client.query('BEGIN');
     const seq = (await client.query(`SELECT coalesce(max(seq_in_group),0)+1 n FROM planner.product_dev_items WHERE coalesce(season,'')=$1 AND category_code=$2`, [season, code])).rows[0].n;
-    const ref = (isCustom ? 'CUST' : season) + '-' + code + (supCode ? '-' + supCode : '') + '-' + String(seq).padStart(2, '0');
+    // v27.702 (Ben): ref = SEASON-TYPE-COLOURWAY (TYPE = category code; custom orders CUST-…), clash → "-2"; an explicit b.ref wins. Editable later via /rename.
+    const ref = await _uniqueRef(client, 'product_dev_items', String(b.ref || '').trim() || ((isCustom ? 'CUST' : season) + '-' + code + '-' + _slugRef(b.colour_name || b.description || ('P' + seq), 14)));
     const ins = await client.query(`INSERT INTO planner.product_dev_items (ref, type, season, category, category_code, seq_in_group, colour_name, bulk_colour_name, description, supplier, supplier_code, created_by, approval_method)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`, [ref, type, season || null, category, code, seq, (b.colour_name || '').trim() || null, (b.bulk_colour_name || '').trim() || null, (b.description || '').trim() || null, supplier || null, supCode, (b.created_by || '').trim() || null, (b.approval_method || '').trim() || null]);
     const id = ins.rows[0].id, sizes = Array.isArray(b.sizes) ? b.sizes : [];
@@ -6549,10 +6687,11 @@ app.post('/api/product/item/:ref', async (req, res) => {
   const b = req.body || {}, ref = req.params.ref, sets = [], vals = []; let i = 1;
   const allow = { type: 'text', colour_name: 'text', bulk_colour_name: 'text', description: 'text', status: 'text', season: 'text', category: 'text', dev_start_override: 'date', recipient_countries: 'text', approval_method: 'text' };
   // STAGE is the driver — normalise it, then derive APPROVAL (.status) from the terminal stage so the two never diverge.
+  // v27.702: item.stage is now the manual OVERRIDE (null = derived from its requests). '' / null clears the override;
+  // the stored status is recomputed after the update either way (recomputeProductStatus).
   if ('stage' in b) {
-    const st = PROD_STAGES.includes(b.stage) ? b.stage : 'sample_development';
+    const st = PROD_STAGES.includes(b.stage) ? b.stage : null;
     sets.push(`stage=$${i}`); vals.push(st); i++;
-    if (!('status' in b)) b.status = prodStatusFromStage(st);   // let the shared status handling below run
   }
   for (const k of Object.keys(allow)) { if (k in b) { sets.push(`${k}=$${i}${allow[k] === 'date' ? '::date' : ''}`); vals.push(b[k] === '' ? null : b[k]); i++; } }
   // stamp / clear the approval time when status changes (drives Reports' time-to-approve)
@@ -6572,6 +6711,7 @@ app.post('/api/product/item/:ref', async (req, res) => {
     if (!sets.length) return res.json({ ok: true });
     vals.push(ref);
     await pool.query(`UPDATE planner.product_dev_items SET ${sets.join(',')}, updated_at=now() WHERE ref=$${i}`, vals);
+    if ('stage' in b) { try { const _iid = (await pool.query(`SELECT id FROM planner.product_dev_items WHERE ref=$1`, [ref])).rows[0]?.id; if (_iid) await recomputeProductStatus(null, _iid); } catch (e) {} }   // v27.702 derived status
     // Record of change (PRODUCT ▸ Timeline) — one entry per field the D&B user just changed.
     { const _stageLbl = { sample_development: 'Sample development', sample_shipped: 'Sample shipped', sample_in_review: 'Sample in review', approved: 'Approved for bulk', approved_with_comments: 'Approved for bulk (with comments)', stop_development: 'Stop development' };
       const _plbl = { type: 'Type', colour_name: 'Development colour name', bulk_colour_name: 'Bulk colour name', stage: 'Stage', description: 'Description', season: 'Season', category: 'Category', dev_start_override: 'Development start', recipient_countries: 'Recipient country', approval_method: 'Approval method', supplier: 'Supplier' };
@@ -6996,7 +7136,7 @@ async function linkSampleToShipment(devSampleId, srId, by) {
     VALUES ($1::bigint,$2,1,$3) ON CONFLICT (sample_request_id, dev_sample_id) DO NOTHING`, [srId, devSampleId, by || null]);
   await pool.query(`UPDATE planner.product_dev_samples SET not_shipped=false WHERE id=$1`, [devSampleId]);
   // sample attached to a shipment → the product's stage advances to "sample shipped" (forward-only)
-  try { const it = (await pool.query(`SELECT item_ref FROM planner.product_dev_samples WHERE id=$1`, [devSampleId])).rows[0]; if (it) await prodStageAdvance(it.item_ref, 'sample_shipped'); } catch (e) { /* best-effort */ }
+  try { const it = (await pool.query(`SELECT item_ref FROM planner.product_dev_samples WHERE id=$1`, [devSampleId])).rows[0]; if (it) await prodStageAdvance(it.item_ref, 'sample_shipped', { sampleId: devSampleId }); } catch (e) { /* best-effort */ }
 }
 async function unlinkSampleFromShipment(devSampleId, srId) {
   if (!srId) return;
@@ -7058,7 +7198,10 @@ app.post('/api/supply/sample/:id/received', async (req, res) => {
           UNION
           SELECT ds.item_ref ref FROM planner.sample_request_dev_samples ls JOIN planner.product_dev_samples ds ON ds.id=ls.dev_sample_id WHERE ls.sample_request_id=$1::bigint
         ) x WHERE coalesce(ref,'') <> ''`, [id])).rows.map(r => r.ref);
-      for (const ref of refs) { try { await prodStageAdvance(ref, 'sample_in_review'); advanced.push(ref); } catch (e) { /* best-effort */ } }
+      // v27.702: the dev samples riding this shipment are now RECEIVED (SAMPLING grid tick), and only the shipping supplier's requests advance
+      try { await pool.query(`UPDATE planner.product_dev_samples SET received_at=coalesce(received_at,$2::timestamptz) WHERE id IN (SELECT dev_sample_id FROM planner.sample_request_dev_samples WHERE sample_request_id=$1::bigint)`, [id, dt || new Date().toISOString()]); } catch (e) {}
+      const _srSup = (await pool.query(`SELECT supplier_name FROM planner.sample_requests WHERE id=$1::bigint`, [id])).rows[0];
+      for (const ref of refs) { try { await prodStageAdvance(ref, 'sample_in_review', (_srSup && _srSup.supplier_name) ? { supplierNames: [_srSup.supplier_name] } : {}); advanced.push(ref); } catch (e) { /* best-effort */ } }
     }
     res.json({ ok: true, received: receive, advanced });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -7328,14 +7471,21 @@ async function createProductSample(b, by) {
   const sizes = (Array.isArray(b.sample_sizes) ? b.sample_sizes : []).map(s => String(s)).filter(s => validSizes.includes(s));
   if (validSizes.length && !sizes.length) throw new Error('select at least one size variant');
   const status = ['in_development', 'completed', 'cancelled'].includes(b.supplier_status) ? b.supplier_status : 'in_development';
-  const v = (await pool.query(`SELECT coalesce(max(version),0)+1 n FROM planner.product_dev_samples WHERE item_ref=$1`, [itemRef])).rows[0].n;
-  const r = await pool.query(`INSERT INTO planner.product_dev_samples (item_ref, version, sample_date, colour_verified, quality_verified, description, created_by, sampled_aspects, sample_sizes, supplier_status, not_shipped)
-    VALUES ($1,$2,$3,true,true,$4,$5,$6,$7,$8,$9) RETURNING id`, [itemRef, v, (b.sample_date || '').trim() || null, (b.description || '').trim() || null, by || null, aspects, sizes, status, !!b.not_shipped]);
+  // v27.702 (mig 278): a sample version belongs to a development REQUEST. Resolve it: explicit b.request_id (must be this item's),
+  // else the request of the submitting supplier (portal passes supplier_names), else the item's only request. Versions number per request.
+  let requestId = null;
+  { const reqs = (await pool.query(`SELECT r.id, r.supplier_name FROM planner.product_dev_requests r JOIN planner.product_dev_items i ON i.id=r.item_id WHERE i.ref=$1 ORDER BY r.id`, [itemRef])).rows;
+    if (b.request_id && reqs.some(r => Number(r.id) === Number(b.request_id))) requestId = Number(b.request_id);
+    else if (Array.isArray(b.supplier_names) && b.supplier_names.length) { const m = reqs.filter(r => b.supplier_names.includes(r.supplier_name)); if (m.length === 1) requestId = Number(m[0].id); else if (m.length > 1 && b.component) { /* several requests for this supplier: pick by component if given */ const byComp = (await pool.query(`SELECT rc.request_id FROM planner.product_dev_request_components rc JOIN planner.product_dev_components c ON c.id=rc.component_id WHERE rc.request_id = ANY($1) AND (c.dimension=$2 OR ('comp:'||c.id)=$2) LIMIT 1`, [m.map(r => Number(r.id)), String(b.component)])).rows[0]; requestId = byComp ? Number(byComp.request_id) : Number(m[0].id); } else if (m.length > 1) requestId = Number(m[0].id); }
+    else if (reqs.length === 1) requestId = Number(reqs[0].id); }
+  const v = (await pool.query(`SELECT coalesce(max(version),0)+1 n FROM planner.product_dev_samples WHERE item_ref=$1 AND ($2::bigint IS NULL OR request_id=$2)`, [itemRef, requestId])).rows[0].n;
+  const r = await pool.query(`INSERT INTO planner.product_dev_samples (item_ref, version, sample_date, colour_verified, quality_verified, description, created_by, sampled_aspects, sample_sizes, supplier_status, not_shipped, request_id)
+    VALUES ($1,$2,$3,true,true,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, [itemRef, v, (b.sample_date || '').trim() || null, (b.description || '').trim() || null, by || null, aspects, sizes, status, !!b.not_shipped, requestId]);
   // optional shipment assignment at creation (assign to an SR, or leave for later)
   if (b.sample_request_id || b.not_shipped) await assignSampleToShipment(r.rows[0].id, b.sample_request_id || null, !!b.not_shipped, by);
   // supplier note → shows on the product timeline + the admin ✉ bell
   await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'supplier',$3)`, [itemRef, by || null, 'Sample v' + v + ' submitted (colour + quality verified)']);
-  await prodStageAdvance(itemRef, 'sample_in_review');   // supplier submitted a sample → ball is now with D&B
+  await prodStageAdvance(itemRef, 'sample_in_review', requestId ? { requestId } : (Array.isArray(b.supplier_names) ? { supplierNames: b.supplier_names } : {}));   // supplier submitted a sample → that REQUEST is now with D&B
   return { id: r.rows[0].id, version: v, ref: itemRef + '_v' + v };
 }
 async function insertProductSamplePhoto(sampleId, b, by, kind) {
@@ -16341,7 +16491,7 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
         to_char(i.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
         (SELECT count(*)::int FROM planner.product_dev_sizes s WHERE s.item_id=i.id) sizes,
         (SELECT count(*)::int FROM planner.supplier_notes n WHERE n.po=i.ref AND n.author_kind='internal' AND n.read_at IS NULL) unread_dnb
-      FROM planner.product_dev_items i WHERE i.supplier = ANY($1) ORDER BY i.created_at DESC`, [names]) : [];
+      FROM planner.product_dev_items i WHERE i.supplier = ANY($1) OR EXISTS (SELECT 1 FROM planner.product_dev_requests r WHERE r.item_id=i.id AND r.supplier_name = ANY($1)) ORDER BY i.created_at DESC`, [names]) : [];   // v27.702: requests grant portal visibility
     // Documents the supplier has for their POs (excl. admin-managed client/FBA docs) with approval status →
     // powers the Documents list + the "submit for approval" workflow in the portal.
     const _pokeys = pos.map(p => p.po);
@@ -16474,7 +16624,7 @@ app.get('/api/portal/unread-messages', portalAuth, async (req, res) => {
 });
 // ── PORTAL PRODUCT (supplier-scoped): timeline view + comment on their assigned product-dev items ──
 async function portalOwnsProduct(req, ref) { if (!ref || !req.portal.suppliers.length) return false;
-  return (await pool.query(`SELECT 1 FROM planner.product_dev_items WHERE ref=$1 AND supplier = ANY($2)`, [ref, req.portal.suppliers])).rowCount > 0; }
+  return (await pool.query(`SELECT 1 FROM planner.product_dev_items i WHERE i.ref=$1 AND (i.supplier = ANY($2) OR EXISTS (SELECT 1 FROM planner.product_dev_requests r WHERE r.item_id=i.id AND r.supplier_name = ANY($2)))`, [ref, req.portal.suppliers])).rowCount > 0; }   // v27.702: a development REQUEST for this supplier also grants access
 app.get('/api/portal/product-notes/:ref', portalAuth, async (req, res) => { const ref = decodeURIComponent(req.params.ref || '');
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
   try { res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
@@ -16506,7 +16656,7 @@ app.get('/api/portal/product-components/:ref', portalAuth, async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 app.post('/api/portal/product-sample', portalAuth, async (req, res) => { const b = req.body || {}, ref = (b.item_ref || '').trim();
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
-  try { res.json({ ok: true, ...(await createProductSample(b, req.portal.email || null)) }); } catch (e) { res.status(400).json({ error: e.message }); } });
+  try { res.json({ ok: true, ...(await createProductSample(Object.assign({}, b, { supplier_names: req.portal.suppliers }), req.portal.email || null)) }); } catch (e) { res.status(400).json({ error: e.message }); } });   // v27.702: portal sample → the submitting supplier's request
 // Supplier sets the manual lifecycle status of a sample version (in_development / completed / cancelled — 'shipped' is derived).
 app.post('/api/portal/product-sample/:id/status', portalAuth, async (req, res) => { const id = req.params.id, st = ((req.body || {}).supplier_status || '').trim();
   if (!['in_development', 'completed', 'cancelled'].includes(st)) return res.status(400).json({ error: 'invalid status' });
