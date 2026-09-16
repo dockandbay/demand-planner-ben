@@ -14427,7 +14427,9 @@
       setSelectionRange:function(a){ syncPans(); render(getText()); setCaret(a); syncToTa(true); }, focus:function(){ ed.focus(); }, blur:function(){ ed.blur(); },
       addEventListener:function(t,f,o){ ed.addEventListener(t,f,o); }, removeEventListener:function(t,f,o){ ed.removeEventListener(t,f,o); }, getBoundingClientRect:function(){ return ed.getBoundingClientRect(); }, get parentNode(){ return ed.parentNode; }, get style(){ return ed.style; } };
     // wire: picker on the shim; input → sync + chip any newly-known token; blur → 'change' if the text moved; paste → plain text; drag events → the textarea's handlers
-    if(pick)hzSlashPicker(shim,pick,{snips:opts.snips||[],picked:picked,fixed:opts.fixed!==false,onChange:function(){ syncToTa(true); if(opts.onChange)try{opts.onChange();}catch(e){} }});
+    // onChange fires AFTER hzSlashPicker has recorded the pick in `picked` (ins() sets picked[code] last) → that is the moment a
+    // brand-new code can chip: re-sync PANS, re-render at the same caret. (v27.701: first pick of a new colour stayed a raw token.)
+    if(pick)hzSlashPicker(shim,pick,{snips:opts.snips||[],picked:picked,fixed:opts.fixed!==false,onChange:function(){ var before=Object.keys(PANS).length; syncPans(); if(Object.keys(PANS).length!==before){ var off=caretOffset(); render(getText()); setCaret(off); } syncToTa(true); if(opts.onChange)try{opts.onChange();}catch(e){} }});
     var _focusText=null;
     ed.addEventListener('focus',function(){ _focusText=getText(); });
     ed.addEventListener('input',function(){ syncToTa(true); resolveUnknown(); });
