@@ -1,3 +1,9 @@
+## v27.720 P2b DHL tracking: pills on the SAMPLING Shipment cell (Ben) — CLIENT
+- Reusable `hzTrackPillHtml` / `hzFillTrackPills` helper: reads the server cache (`GET /api/tracking/status`), never DHL directly. Drop a placeholder `<span class="hz-trkpill" data-trk="NUMBER">` next to a DHL number, then fill it after paint. Exposed on `window` for render probes.
+- **SAMPLING grid Shipment cell** shows a DHL tracking pill next to the tracking number: ● In transit · ETA dd-mmm-yy / ● Delivered dd-mmm-yy / ▲ Exception (hover = status + last event). DHL carriers only; stays empty until the cache has a row (i.e. once `DHL_API_KEY` is live on the server).
+- Render-probed end-to-end against seeded cache rows: transit + delivered pills render with correct dates; no leftover placeholders.
+- Next (v27.721): pills on SUPPLY ▸ Samples card + drawer, portal Samples, and the bulk shipment surfaces (Shipments grid + PO drawer Shipments tab), plus the delivered → one-click "mark received" nudge.
+
 ## v27.719 P2b DHL tracking: CONFIG ▸ Admin ▸ DHL tracking panel (Ben) — CLIENT
 - New admin sub-tab **CONFIG ▸ Admin ▸ DHL tracking**: enabled toggle, refresh interval (hours), in-transit interval, "stop N days after delivery", **Save settings**, and **↻ Run poll now** (forces a refresh, shows polled/skipped counts).
 - **Key-present indicator** reads `key_present` from the server env: green "API key present" or amber "API key not set: tracking stays inert" — no key is ever entered or shown in the UI.
