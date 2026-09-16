@@ -6100,6 +6100,7 @@
       document.getElementById('sup-grid').innerHTML=shipTable(shown)
         +(shown.length<f.length?'<div style="margin:8px 0;text-align:center"><button class="save-btn light" id="ship-showall">Show all '+f.length+' &darr;</button></div>':'');
       var sa=document.getElementById('ship-showall'); if(sa)sa.onclick=function(){ _shipShowAll=true; view(); };
+      hzFillTrackPills(document.getElementById('sup-grid'));   // v27.721: DHL pills on the Carrier-ref cells
       bindShipExpand(); bindEdits(); bindShipStars(); bindShipActBadge();
       if(_pendingShip){ var want=_pendingShip; _pendingShip=null; setTimeout(function(){ expandPending('#sup-grid .po-exp[data-ref]',want); },30); } }
     // patch ONE shipment row in place (+ refresh its open expand, keeping the sub-tab) — no full grid re-render
@@ -6111,7 +6112,7 @@
         if(!btn||!s){ view(); return; }
         var i=btn.dataset.i, tr=btn.closest('tr'), tmp=document.createElement('tbody'); tmp.innerHTML=shipRowHtml(s,i);   // shipRowHtml updates shipBy[ref]
         var exOpen=(function(){var e=document.getElementById('shipexp-'+i);return e&&e.style.display!=='none';})();
-        var nm=tmp.querySelector('tr'); if(nm&&tr&&tr.parentNode){ tr.parentNode.replaceChild(nm,tr); }
+        var nm=tmp.querySelector('tr'); if(nm&&tr&&tr.parentNode){ tr.parentNode.replaceChild(nm,tr); } if(nm)hzFillTrackPills(nm);   // v27.721: re-fill DHL pill after in-place row patch
         if(exOpen&&nm){ nm.classList.add('row-open'); var eb=nm.querySelector('.po-exp'); if(eb)eb.classList.add('open'); }   // keep the open-row highlight after an in-place patch
         bindShipExpand(); bindEdits(); bindShipStars(); bindShipActBadge();
         var ex=document.getElementById('shipexp-'+i);   // if this row is expanded, refresh the panel keeping the active sub-tab
@@ -6260,7 +6261,7 @@
         +'<td class="l">'+(s.branch?esc(s.branch):'<span class="mut">—</span>')+((/direct to client/i.test(s.branch||'')&&s.master_client)?'<div class="mut tiny">'+esc(s.master_client)+'</div>':'')+'</td>'
         +'<td>'+esc(s.po_count)+'</td><td>'+esc(s.suppliers)+'</td><td'+((s.over_pallets&&!shipComplete(s)&&!shipShipping(s))?' style="color:var(--neg);font-weight:700" title="over one 20-pallet container — split the shipment"':'')+'>'+esc(s.pallets||0)+'</td>'
         +'<td class="l">'+carrierSel(ep,s.carrier,s.mode_eff==='fob')+'</td>'
-        +'<td class="l">'+carrierRefInput(ep,s.carrier_ref,s.mode_eff==='fob')+fxl+'</td>'
+        +'<td class="l">'+carrierRefInput(ep,s.carrier_ref,s.mode_eff==='fob')+fxl+((s.carrier_ref&&/dhl/i.test(s.carrier||''))?' <span class="hz-trkpill" data-trk="'+esc(s.carrier_ref)+'"></span>':'')+'</td>'
         +'<td class="l">'+shipDate(s.departure,s.departure_src)+'</td><td class="l">'+shipDate(s.landing,s.landing_src)+'</td><td class="l">'+shipDate(s.arrival,s.arrival_src)+'</td>'
         +(function(){var fr=shipFreight(s);return '<td>'+(fr.c==null?'<span class="mut">—</span>':money(fr.c))+(fr.src?'<span class="src '+(fr.src==='FLEX'?'fx':'m')+'">'+fr.src+'</span>':'')+'</td>';})()+'</tr>'; }
   function shipTable(rows){ if(!rows.length)return '<div class="count">No shipments in this filter.</div>';

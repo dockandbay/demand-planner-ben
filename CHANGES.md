@@ -1,3 +1,9 @@
+## v27.721 P2b DHL tracking: pills on the SUPPLY Shipments grid (Ben) — CLIENT
+- **SUPPLY ▸ Purchase Orders ▸ Shipments** grid: the Carrier-ref cell shows a DHL tracking pill (● In transit · ETA / ● Delivered / ▲ Exception) next to the ↗ link, read from the cache. DHL carriers only.
+- Fills after the full grid paint **and** after the in-place single-row patch (`patchShipRow`), so a live status update keeps the pill correct without a full re-render.
+- The poller already writes `shipments.tracked_delivery_date` + `tracked_source='dhl'` for these numbers (v27.718), so the existing arrival logic and this pill share one source.
+- Reuses the v27.720 helper. Next (v27.722): PO drawer Shipments tab, SUPPLY ▸ Samples card + drawer, portal Samples, and the delivered → one-click "mark received" nudge.
+
 ## v27.720 P2b DHL tracking: pills on the SAMPLING Shipment cell (Ben) — CLIENT
 - Reusable `hzTrackPillHtml` / `hzFillTrackPills` helper: reads the server cache (`GET /api/tracking/status`), never DHL directly. Drop a placeholder `<span class="hz-trkpill" data-trk="NUMBER">` next to a DHL number, then fill it after paint. Exposed on `window` for render probes.
 - **SAMPLING grid Shipment cell** shows a DHL tracking pill next to the tracking number: ● In transit · ETA dd-mmm-yy / ● Delivered dd-mmm-yy / ▲ Exception (hover = status + last event). DHL carriers only; stays empty until the cache has a row (i.e. once `DHL_API_KEY` is live on the server).
