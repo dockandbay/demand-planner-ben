@@ -13876,6 +13876,13 @@
   function hzInkFor(hex){ var m=/^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(hex||'')); if(!m)return '#111'; var L=0.2126*parseInt(m[1],16)+0.7152*parseInt(m[2],16)+0.0722*parseInt(m[3],16); return L>150?'#111':'#fff'; }   // relative-luminance text colour so pastels read dark, jewels read white
   function hzCatBadge(name,hex,opts){ opts=opts||{}; name=String(name||'').trim(); if(!name)return ''; var bg=/^#[0-9a-f]{6}$/i.test(String(hex||''))?hex:'var(--line)'; var ink=/^#/.test(bg)?hzInkFor(bg):'var(--ink-soft)';
     return '<span class="hz-catbadge" title="'+esc(name)+'" style="display:inline-block;background:'+bg+';color:'+ink+';font-size:'+(opts.size||10)+'px;font-weight:700;line-height:1;padding:'+(opts.pad||'3px 8px')+';border-radius:999px;white-space:nowrap;letter-spacing:.02em;vertical-align:middle;'+(opts.style||'')+'">'+esc(name)+'</span>'; }
+  // v27.708 P3: ~240px PNG thumbnail of a document rendered in the ADMIN browser at upload — images via canvas, PDFs via the
+  // self-hosted pdf.js (/vendor/pdfjs). Resolves null on anything else / any failure (the upload still goes ahead).
+  function hzDocThumb(file){ return new Promise(function(resolve){ try{ var MAX=240, done=false; var fin=function(v){ if(!done){ done=true; resolve(v); } }; setTimeout(function(){ fin(null); },12000);
+      var toPng=function(src,w,h){ var s=Math.min(1,MAX/Math.max(w,h)); var cv=document.createElement('canvas'); cv.width=Math.max(1,Math.round(w*s)); cv.height=Math.max(1,Math.round(h*s)); var cx=cv.getContext('2d'); cx.fillStyle='#fff'; cx.fillRect(0,0,cv.width,cv.height); cx.drawImage(src,0,0,cv.width,cv.height); return cv.toDataURL('image/png'); };
+      if(/^image\//i.test(file.type||'')){ var url=URL.createObjectURL(file), im=new Image(); im.onload=function(){ try{ fin(toPng(im,im.naturalWidth,im.naturalHeight)); }catch(e){ fin(null); } URL.revokeObjectURL(url); }; im.onerror=function(){ URL.revokeObjectURL(url); fin(null); }; im.src=url; return; }
+      if(/pdf$/i.test(file.type||'')||/\.pdf$/i.test(file.name||'')){ file.arrayBuffer().then(function(ab){ return import('/vendor/pdfjs/pdf.min.mjs').then(function(lib){ try{ lib.GlobalWorkerOptions.workerSrc='/vendor/pdfjs/pdf.worker.min.mjs'; }catch(e){} return lib.getDocument({data:ab}).promise; }); }).then(function(pdf){ return pdf.getPage(1); }).then(function(page){ var vp=page.getViewport({scale:1}); var s=MAX/Math.max(vp.width,vp.height); var v2=page.getViewport({scale:s}); var cv=document.createElement('canvas'); cv.width=Math.ceil(v2.width); cv.height=Math.ceil(v2.height); var cx=cv.getContext('2d'); cx.fillStyle='#fff'; cx.fillRect(0,0,cv.width,cv.height); return page.render({canvasContext:cx,viewport:v2}).promise.then(function(){ fin(cv.toDataURL('image/png')); }); }).catch(function(){ fin(null); }); return; }
+      fin(null); }catch(e){ resolve(null); } }); }
   function hzCatColourOf(rows,cat){ for(var i=0;i<(rows||[]).length;i++){ if((rows[i].category||'')===cat&&rows[i].category_colour)return rows[i].category_colour; } return ''; }   // colour from the items payload (category_colour) for a group header
   function prodStageChipHtml(v){ var own=stageMeta(v)[2]; var ownTxt=(own==='Supplier'||own==='D&B')?('with '+own):own; return prodStageChip(v)+'<span class="pg-stage-own2">'+esc(ownTxt)+'</span>'; }
   function prodStageOwner(v){ return stageMeta(v)[2]; }
@@ -14949,7 +14956,7 @@
     var catOpts=cats.map(function(o){return '<option value="'+esc(o.category)+'"'+(o.category===it.category?' selected':'')+'>'+esc(o.category)+(o.code?' ('+esc(o.code)+')':'')+'</option>';}).join('');
     var statOpts=PROD_ITEM_STAT.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===it.status?' selected':'')+'>'+o[1]+'</option>';}).join('');
     var swUrl='/api/product/swatch/'+encodeURIComponent(it.ref)+'?t='+encodeURIComponent(it.updated_at||'');
-    var swatchVal='<input type="file" id="pm-swatch" accept="image/png,image/jpeg" style="font-size:12px"> <span id="pm-sw-msg" style="font-size:11px"></span>'
+    var swatchVal='<input type="file" id="pm-swatch" accept="image/png,image/jpeg" style="font-size:12px"> <span id="pm-sw-msg" style="font-size:11px"></span>'+(it.swatch_auto&&it.has_swatch?'<div class="mut tiny" style="margin-top:3px">auto — showing the thumbnail of the <b>latest</b> document (Documents tab); upload a swatch here to override</div>':(it.swatch_auto?'<div class="mut tiny" style="margin-top:3px">no swatch yet — upload one, or add a document (its thumbnail becomes the swatch automatically)</div>':''))   // v27.708
       +(it.has_swatch?' <img class="pm-swatch-zoom" data-src="'+swUrl+'" src="'+swUrl+'" style="width:36px;height:36px;object-fit:cover;border-radius:5px;border:1px solid #e5e7eb;cursor:zoom-in;vertical-align:middle" title="click to enlarge"> <a href="'+swUrl+'" download title="download swatch" style="color:var(--blue);text-decoration:none;font-size:15px;vertical-align:middle">⬇</a>':'')
       +'<div id="pm-swatch-paste" tabindex="0" style="margin-top:6px;border:1px dashed #cbd5e1;border-radius:6px;padding:8px 11px;font-size:11px;color:var(--faint);max-width:340px;cursor:text">…or click here and paste an image (⌘/Ctrl+V)</div>';
     var _typeVal=(it.type==='Custom Order')?'Custom Order':'Product Development';
@@ -15067,13 +15074,17 @@
     function thumb(mime,att,pad){ return isImg(mime)?'<td style="padding:'+pad+'"><img class="pdoc-img" data-src="'+att+'" src="'+att+'" style="width:38px;height:38px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;cursor:zoom-in" title="click to enlarge"></td>':'<td style="padding:'+pad+';color:#cbd5e1;text-align:center;font-size:16px">📄</td>'; }
     function dlLink(href,fn){ return '<a href="'+href+'" download title="Download '+esc(fn)+'" style="color:var(--blue);text-decoration:underline;word-break:break-word">'+esc(fn)+'</a> <span style="color:var(--faint)" title="download">⤓</span>'; }
     function thead(cols){ return '<thead><tr>'+cols.map(function(c){return '<th style="text-align:left;padding:2px 8px 4px 0;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);border-bottom:1px solid #eef2f7;white-space:nowrap">'+c+'</th>';}).join('')+'</tr></thead>'; }
-    function adRow(x){ var att='/api/supply/portal-attachment/'+x.id, dl='/api/product/doc/'+x.id;
-      return '<tr>'+thumb(x.mime,att,'5px 8px 5px 0')
-        +'<td style="padding:5px 8px">'+dlLink(dl,x.filename)+'</td>'
+    function adRow(x){ var att='/api/supply/portal-attachment/'+x.id, dl='/api/product/doc/'+x.id; var admin=(x.uploader_kind||'internal')!=='supplier';
+      var th=isImg(x.mime)?thumb(x.mime,att,'5px 8px 5px 0'):(x.has_thumb?'<td style="padding:5px 8px 5px 0"><img class="pdoc-img" data-src="/api/product/doc/'+x.id+'/thumb" src="/api/product/doc/'+x.id+'/thumb" style="width:38px;height:38px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb;cursor:zoom-in" title="page 1 thumbnail — click to enlarge"></td>':thumb(x.mime,att,'5px 8px 5px 0'));   // v27.708 PDF page-1 thumb
+      return '<tr'+(x.is_latest&&admin?' style="background:var(--blue-soft)"':'')+'>'+th
+        +'<td style="padding:5px 8px">'+dlLink(dl,x.filename)+(x.is_latest&&admin?' <span class="ex-badge" style="background:var(--nav);color:#fff" title="the product\'s main spec file — its thumbnail is the swatch when none is uploaded">latest</span>':'')+'</td>'
+        +'<td style="padding:5px 8px;color:var(--faint);white-space:nowrap">'+(x.version?'v'+x.version:'—')+'</td>'   // v27.708 audit: version
+        +'<td style="padding:5px 8px;color:var(--faint);white-space:nowrap">'+esc(x.uploader_kind==='supplier'?'supplier':(x.uploaded_by?shortUser(x.uploaded_by):'Dock & Bay'))+'</td>'   // v27.708 audit: who
         +'<td style="padding:5px 8px;color:var(--faint);white-space:nowrap">'+Math.max(1,Math.round((x.byte_size||0)/1024))+' KB</td>'
         +'<td style="padding:5px 8px;color:var(--faint);white-space:nowrap">'+dt(x.uploaded_at)+'</td>'
+        +'<td style="padding:5px 8px;text-align:center">'+(admin?'<input type="radio" class="pdoc-latest" name="pdoc-latest-'+esc(ref)+'" data-id="'+x.id+'"'+(x.is_latest?' checked':'')+' title="make this the latest version (main spec file)">':'')+'</td>'   // v27.708 latest pick
         +'<td style="padding:5px 8px;text-align:center"><a class="pdoc-del" data-id="'+x.id+'" title="Delete document" style="color:var(--neg);cursor:pointer;padding:2px 6px;border-radius:4px">✕</a></td></tr>'; }
-    function tbl(list,empty){ return '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;max-width:680px">'+thead(['','File','Size','Uploaded',''])+'<tbody>'+(list.length?list.map(adRow).join(''):'<tr><td colspan="5" style="color:var(--faint);padding:8px 2px">'+empty+'</td></tr>')+'</tbody></table></div>'; }
+    function tbl(list,empty){ return '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;max-width:760px">'+thead(['','File','Ver','By','Size','Uploaded','Latest',''])+'<tbody>'+(list.length?list.map(adRow).join(''):'<tr><td colspan="5" style="color:var(--faint);padding:8px 2px">'+empty+'</td></tr>')+'</tbody></table></div>'; }
     // Size/variant component uploads (managed in Master data) — surfaced here read-only for reference.
     var compFiles=[]; (d.sizes||[]).forEach(function(s){ (s.dimensions||[]).forEach(function(dm){ (dm.files||[]).forEach(function(f){ compFiles.push({sz:s.size_label,dim:dm.dimension,f:f}); }); }); });
     function cfRow(x){ var att='/api/supply/portal-attachment/'+x.f.id;
@@ -15088,14 +15099,17 @@
       +'<div style="font-weight:700;font-size:13px;margin:4px 0 5px">Uploaded by Dock &amp; Bay</div>'+tbl(dnb,'No documents uploaded by Dock &amp; Bay yet.')
       +'<div style="font-weight:700;font-size:13px;margin:16px 0 5px">Size / component files <span style="font-weight:400;font-size:10px;background:var(--line2);color:var(--muted);border-radius:4px;padding:1px 6px;vertical-align:middle">read-only — manage in Master data</span></div>'+cfTbl(compFiles)
       +'<div style="font-weight:700;font-size:13px;margin:16px 0 5px">Uploaded by supplier</div>'+tbl(sup,'Nothing uploaded by the supplier yet.');
-    function refreshDocs(){ prodItemInvalidate(ref); renderProdDocs(body,ref); }   // re-fetch docs + re-render
+    function refreshDocs(){ prodItemInvalidate(ref); try{ pgetClear(); }catch(e){} renderProdDocs(body,ref); }   // re-fetch docs + re-render
+    // v27.708: pick the latest version → one radio per product; swatch (when none uploaded) follows this file's thumbnail
+    body.querySelectorAll('.pdoc-latest').forEach(function(rb){ rb.onchange=function(){ if(!rb.checked)return; shipPost('/api/product/doc/'+rb.dataset.id+'/latest',{latest:true},function(j){ if(j&&j.error){alert(j.error);return;} refreshDocs(); }); }; });
     function uploadDocFiles(files){ var m=body.querySelector('#pdoc-msg');
       if(!files||!files.length){m.style.color='var(--neg)';m.textContent='choose a file';return;}
       var list=Array.prototype.slice.call(files), skipped=list.filter(function(f){return f.size>10*1024*1024;}).length, ok=list.filter(function(f){return f.size<=10*1024*1024;});
       if(!ok.length){m.style.color='var(--neg)';m.textContent='all files over 10MB — skipped';return;}
       m.style.color='var(--muted)'; m.textContent='uploading '+ok.length+' file'+(ok.length>1?'s':'')+'…'; var i=0;
       (function up(){ if(i>=ok.length){ m.style.color='var(--pos)'; m.textContent='uploaded'+(skipped?' ('+skipped+' skipped — over 10MB)':''); refreshDocs(); return; }
-        var f=ok[i++]; hzUpload(f,{field:'data_base64',category:'product-docs'}).then(function(fields){ shipPost('/api/product/doc',Object.assign({ref:ref,uploaded_by:(window.ME&&ME.email)||''},fields),function(j){ if(j&&j.error){m.style.color='var(--neg)';m.textContent=j.error;return;} up(); }); }).catch(function(e){ m.style.color='var(--neg)'; m.textContent=(e&&e.message)||'upload failed'; }); })(); }
+        var f=ok[i++], _th=null; hzDocThumb(f).then(function(th){ _th=th; return hzUpload(f,{field:'data_base64',category:'product-docs'}); }).then(function(fields){ if(_th)fields.thumb_base64=_th;   // v27.708 thumbnail rides along → auto swatch
+          shipPost('/api/product/doc',Object.assign({ref:ref,uploaded_by:(window.ME&&ME.email)||''},fields),function(j){ if(j&&j.error){m.style.color='var(--neg)';m.textContent=j.error;return;} up(); }); }).catch(function(e){ m.style.color='var(--neg)'; m.textContent=(e&&e.message)||'upload failed'; }); })(); }
     body.querySelector('#pdoc-up').onclick=function(){ uploadDocFiles(body.querySelector('#pdoc-file').files); };
     // Drag & drop multiple files onto the upload box.
     (function(){ var dz=body.querySelector('#pdoc-drop'); if(!dz)return;

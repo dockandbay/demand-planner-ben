@@ -110,6 +110,7 @@ async function shutdown() { if (_shuttingDown) return; _shuttingDown = true;
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 import path from 'path';
+import { fileURLToPath } from 'url';
 import crypto from 'node:crypto';
 import zlib from 'node:zlib';
 function loadHTML() {
@@ -856,7 +857,7 @@ function cookieVal(req, name) {
 app.use((req, res, next) => {
   // Supplier portal has its own magic-link/session auth — it must NOT require the planner key.
   if (req.path === '/portal' || req.path === '/portal-view.js' || req.path === '/api/version' || req.path.startsWith('/api/portal/')
-      || req.path === '/hz-theme.css' || req.path.startsWith('/fonts/')) return next();   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
+      || req.path === '/hz-theme.css' || req.path.startsWith('/fonts/') || req.path.startsWith('/vendor/')) return next();   // v27.708 /vendor/pdfjs (self-hosted pdf.js for doc thumbnails)   // theme + self-hosted fonts: shared by the app AND the portal   // /api/version: public probe (version + data ts only) for the auto-update poll, incl. the portal
   if (!GATE) return next();                       // open locally
   if (req.path.startsWith('/api/')) {             // APIs: header or cookie
     if (req.get('x-planner-key') === GATE || cookieVal(req, 'pk') === GATE) return next();
@@ -2382,6 +2383,9 @@ app.get('/fonts/:name', (req, res) => {
   catch (e) { res.status(404).end(); }
 });
 const HZ_THEME_LINK = () => '<link rel="stylesheet" href="/hz-theme.css?v=' + APP_VERSION + '">';
+// v27.708: self-hosted pdf.js (already a dependency) for ADMIN-side document thumbnails (PDF page 1 → PNG → auto swatch).
+// Gate-bypassed like /fonts. On Vercel the dependency ships in the bundle; if the folder is missing this route simply 404s.
+try { app.use('/vendor/pdfjs', express.static(fileURLToPath(new URL('./node_modules/pdfjs-dist/build/', import.meta.url)), { maxAge: '365d', immutable: true })); } catch (e) { console.warn('[vendor/pdfjs] not mounted:', e.message); }
 
 // Static brand asset for the carton/inner labels — the Global Recycled Standard logo (same-origin so it can be
 // embedded into the rasterised label PNG without tainting the canvas).
@@ -6461,7 +6465,7 @@ app.get('/api/product/sampling', async (_req, res) => {
   try {
     await ensureCategoryColours();
     const r = await pool.query(`SELECT rq.id, rq.ref, rq.item_id, i.ref item_ref, coalesce(i.colour_name,'') colour_name, coalesce(i.bulk_colour_name,'') bulk_colour_name,
-        coalesce(i.season,'') season, coalesce(i.category,'') category, coalesce(i.type,'Product Development') type, (i.swatch IS NOT NULL) has_swatch,
+        coalesce(i.season,'') season, coalesce(i.category,'') category, coalesce(i.type,'Product Development') type, (i.swatch IS NOT NULL OR EXISTS (SELECT 1 FROM planner.portal_attachments _a WHERE _a.po=i.ref AND _a.category='product' AND coalesce(_a.uploader_kind,'internal')<>'supplier' AND _a.thumb IS NOT NULL)) has_swatch,
         to_char(i.updated_at,'YYYY-MM-DD HH24:MI') item_updated_at,
         coalesce((SELECT c.colour_hex FROM planner.categories c WHERE c.category=i.category LIMIT 1),'') category_colour,
         rq.supplier_name, coalesce(rq.supplier_code,'') supplier_code, rq.stage, rq.approval_method, coalesce(rq.recipient_countries,'') recipient_countries,
@@ -6506,7 +6510,7 @@ app.get('/api/product/items', async (_req, res) => {
       ${REQS_JSON_SQL} requests, i.stage stage_override,
       coalesce((SELECT json_agg(json_build_object('id',c.id,'name',c.name,'dimension',coalesce(c.dimension,''),'supplier',coalesce(c.supplier,''),'sampling_mode',coalesce(c.sampling_mode,'sampled')) ORDER BY c.sort,c.id) FROM planner.product_dev_components c WHERE c.item_ref=i.ref),'[]'::json) components,
       coalesce(i.colour_name,'') colour_name, coalesce(i.bulk_colour_name,'') bulk_colour_name, coalesce(i.stage,'sample_development') stage,
-      coalesce(i.supplier,'') supplier, coalesce(i.description,'') description, i.status, (i.swatch IS NOT NULL) has_swatch,
+      coalesce(i.supplier,'') supplier, coalesce(i.description,'') description, i.status, (i.swatch IS NOT NULL OR EXISTS (SELECT 1 FROM planner.portal_attachments _a WHERE _a.po=i.ref AND _a.category='product' AND coalesce(_a.uploader_kind,'internal')<>'supplier' AND _a.thumb IS NOT NULL)) has_swatch,
       to_char(i.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id)::int sizes,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved')::int sizes_approved,
@@ -6546,7 +6550,7 @@ app.get('/api/product/dashboard', async (req, res) => {
   try {
     const r = await pool.query(`SELECT i.ref, coalesce(i.season,'') season, coalesce(i.category,'') category,
       coalesce((SELECT c.colour_hex FROM planner.categories c WHERE c.category=i.category LIMIT 1),'') category_colour, ${REQS_JSON_SQL} requests, i.stage stage_override,
-      coalesce(i.colour_name,'') colour_name, coalesce(i.bulk_colour_name,'') bulk_colour_name, coalesce(i.stage,'sample_development') stage, i.status, (i.swatch IS NOT NULL) has_swatch,
+      coalesce(i.colour_name,'') colour_name, coalesce(i.bulk_colour_name,'') bulk_colour_name, coalesce(i.stage,'sample_development') stage, i.status, (i.swatch IS NOT NULL OR EXISTS (SELECT 1 FROM planner.portal_attachments _a WHERE _a.po=i.ref AND _a.category='product' AND coalesce(_a.uploader_kind,'internal')<>'supplier' AND _a.thumb IS NOT NULL)) has_swatch,
       to_char(i.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id)::int sizes,
       coalesce((SELECT json_object_agg(dimension, json_build_object('req',req,'appr',appr)) FROM (
@@ -6574,7 +6578,7 @@ app.get('/api/product/item/:ref', async (req, res) => {
         coalesce(supplier,'') supplier, coalesce(supplier_code,'') supplier_code,
         (SELECT ${REQS_JSON_SQL.replace(/\bi\.id\b/g, 'product_dev_items.id')}) requests,
         coalesce((SELECT c.colour_hex FROM planner.categories c WHERE c.category=product_dev_items.category LIMIT 1),'') category_colour,
-        status, (swatch IS NOT NULL) has_swatch, coalesce(created_by,'') created_by,
+        status, (swatch IS NOT NULL OR EXISTS (SELECT 1 FROM planner.portal_attachments _a WHERE _a.po=product_dev_items.ref AND _a.category='product' AND coalesce(_a.uploader_kind,'internal')<>'supplier' AND _a.thumb IS NOT NULL)) has_swatch, (swatch IS NULL) swatch_auto, coalesce(created_by,'') created_by,
         to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at,
         to_char(dev_start_override,'YYYY-MM-DD') dev_start_override, to_char(approved_at,'YYYY-MM-DD HH24:MI') approved_at,
         coalesce(approval_method,'') approval_method
@@ -6623,7 +6627,7 @@ app.get('/api/product/item/:ref/core', async (req, res) => {
         coalesce(supplier,'') supplier, coalesce(supplier_code,'') supplier_code,
         (SELECT ${REQS_JSON_SQL.replace(/\bi\.id\b/g, 'product_dev_items.id')}) requests,
         coalesce((SELECT c.colour_hex FROM planner.categories c WHERE c.category=product_dev_items.category LIMIT 1),'') category_colour,
-        status, (swatch IS NOT NULL) has_swatch, coalesce(created_by,'') created_by,
+        status, (swatch IS NOT NULL OR EXISTS (SELECT 1 FROM planner.portal_attachments _a WHERE _a.po=product_dev_items.ref AND _a.category='product' AND coalesce(_a.uploader_kind,'internal')<>'supplier' AND _a.thumb IS NOT NULL)) has_swatch, (swatch IS NULL) swatch_auto, coalesce(created_by,'') created_by,
         to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at,
         to_char(dev_start_override,'YYYY-MM-DD') dev_start_override, to_char(approved_at,'YYYY-MM-DD HH24:MI') approved_at,
         coalesce(approval_method,'') approval_method
@@ -6638,8 +6642,13 @@ app.get('/api/product/item/:ref/core', async (req, res) => {
 // this. One indexed query instead → the tab loads fast (esp. on the remote sandbox pooler ~330ms/query).
 app.get('/api/product/item/:ref/docs', async (req, res) => {
   try {
-    const docs = (await pool.query(`SELECT id, filename, mime, byte_size, coalesce(uploaded_by,'') uploaded_by, coalesce(uploader_kind,'internal') uploader_kind, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments WHERE po=$1 AND category='product' ORDER BY uploaded_at DESC`, [req.params.ref])).rows;
-    res.json({ docs });
+    const docs = (await pool.query(`SELECT id, filename, mime, byte_size, coalesce(uploaded_by,'') uploaded_by, coalesce(uploader_kind,'internal') uploader_kind, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at,
+        version, is_latest, (thumb IS NOT NULL) has_thumb FROM planner.portal_attachments WHERE po=$1 AND category='product' ORDER BY uploaded_at DESC`, [req.params.ref])).rows;
+    // v27.708: exactly one internal doc is "latest" — the explicit pick, else the newest internal upload
+    const internal = docs.filter(d => d.uploader_kind !== 'supplier'); const explicit = internal.find(d => d.is_latest === true);
+    const latestId = explicit ? explicit.id : (internal[0] ? internal[0].id : null);
+    docs.forEach(d => { d.is_latest = (d.id === latestId); d.latest_explicit = !!explicit; });
+    res.json({ docs, latest_id: latestId });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Record of change (PRODUCT ▸ Timeline). Light — its own endpoint so the timeline can merge it with the notes.
@@ -6680,7 +6689,10 @@ app.get('/api/product/item/:ref/sizes', async (req, res) => {
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/product/swatch/:ref', async (req, res) => {
-  try { const r = (await pool.query(`SELECT swatch, swatch_mime FROM planner.product_dev_items WHERE ref=$1`, [req.params.ref])).rows[0];
+  try { let r = (await pool.query(`SELECT swatch, swatch_mime FROM planner.product_dev_items WHERE ref=$1`, [req.params.ref])).rows[0];
+    if (r && !r.swatch) {   // v27.708: no uploaded swatch → the latest ADMIN file's thumbnail (explicit "latest" pick first, else newest with a thumb)
+      const t = (await pool.query(`SELECT thumb, thumb_mime FROM planner.portal_attachments WHERE po=$1 AND category='product' AND coalesce(uploader_kind,'internal')<>'supplier' AND thumb IS NOT NULL ORDER BY (is_latest IS TRUE) DESC, uploaded_at DESC LIMIT 1`, [req.params.ref])).rows[0];
+      if (t) r = { swatch: t.thumb, swatch_mime: t.thumb_mime || 'image/png' }; }
     if (!r || !r.swatch) return res.status(404).end();
     // The client always requests with ?t=<updated_at>, so a re-uploaded swatch is a new URL — safe to cache hard.
     // (Was 'no-cache', which forced a full re-download of the image on every render → the Product grid felt slow.)
@@ -6909,9 +6921,28 @@ app.post('/api/product/doc', async (req, res) => {
   if (!ref || (!b.data_base64 && !b.storage_path)) return res.status(400).json({ error: 'ref and data_base64/storage_path required' });
   let up; try { up = resolveUpload(b, { maxInline: 20 * 1024 * 1024 }); } catch (e) { return res.status(e.status || 400).json({ error: e.message }); }
   try {
-    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category) VALUES ($1,$2,$3,$4,$5,$6,$7,'product') RETURNING id`,
-      [ref, b.filename || 'document', b.mime || 'application/octet-stream', up.byteSize, up.buf, up.storagePath, (b.uploaded_by || '').trim() || null]);
-    res.json({ ok: true, id: r.rows[0].id, byte_size: up.byteSize }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+    // v27.708 (mig 279): version = running number per product; optional thumb (PNG rendered client-side) feeds the auto swatch
+    let thumb = null, thumbMime = null;
+    if (b.thumb_base64) { try { thumb = Buffer.from(String(b.thumb_base64).replace(/^data:[^;]+;base64,/, ''), 'base64'); if (thumb.length > 400 * 1024) thumb = null; else thumbMime = /^data:image\/jpeg/i.test(String(b.thumb_base64)) ? 'image/jpeg' : 'image/png'; } catch (e) { thumb = null; } }
+    const v = (await pool.query(`SELECT coalesce(max(version),0)+1 n FROM planner.portal_attachments WHERE po=$1 AND category='product' AND coalesce(uploader_kind,'internal')<>'supplier'`, [ref])).rows[0].n;
+    const r = await pool.query(`INSERT INTO planner.portal_attachments (po, filename, mime, byte_size, data, storage_path, uploaded_by, category, version, thumb, thumb_mime) VALUES ($1,$2,$3,$4,$5,$6,$7,'product',$8,$9,$10) RETURNING id`,
+      [ref, b.filename || 'document', b.mime || 'application/octet-stream', up.byteSize, up.buf, up.storagePath, (b.uploaded_by || '').trim() || null, v, thumb, thumbMime]);
+    try { await pool.query(`UPDATE planner.product_dev_items SET updated_at=now() WHERE ref=$1`, [ref]); } catch (e) {}   // busts the ?t= swatch cache when the auto swatch changes
+    res.json({ ok: true, id: r.rows[0].id, byte_size: up.byteSize, version: v, has_thumb: !!thumb }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/product/doc/:id/thumb', async (req, res) => {   // v27.708 the small PNG rendered at upload (shown in the Documents tab; also the auto swatch)
+  try { const r = (await pool.query(`SELECT thumb, thumb_mime FROM planner.portal_attachments WHERE id=$1 AND category='product'`, [req.params.id])).rows[0];
+    if (!r || !r.thumb) return res.status(404).end(); res.setHeader('Content-Type', r.thumb_mime || 'image/png'); res.setHeader('Cache-Control', 'public, max-age=31536000, immutable'); res.end(r.thumb);
+  } catch (e) { log500(e); res.status(500).end(); }
+});
+// v27.708: pick the "latest version" (main spec file) explicitly — one per product; blank = newest upload is latest.
+app.post('/api/product/doc/:id/latest', async (req, res) => {
+  try { const d = (await pool.query(`SELECT po FROM planner.portal_attachments WHERE id=$1 AND category='product'`, [req.params.id])).rows[0]; if (!d) return res.status(404).json({ error: 'not found' });
+    await pool.query(`UPDATE planner.portal_attachments SET is_latest=NULL WHERE po=$1 AND category='product'`, [d.po]);
+    if ((req.body || {}).latest !== false) await pool.query(`UPDATE planner.portal_attachments SET is_latest=true WHERE id=$1`, [req.params.id]);
+    await pool.query(`UPDATE planner.product_dev_items SET updated_at=now() WHERE ref=$1`, [d.po]);
+    try { await logProductChange(d.po, 'Latest version → ' + ((await pool.query(`SELECT filename FROM planner.portal_attachments WHERE id=$1`, [req.params.id])).rows[0] || {}).filename, null, authUser(req) || 'Dock & Bay'); } catch (e) {}
+    res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.get('/api/product/doc/:id', async (req, res) => {
   try { const r = (await pool.query(`SELECT filename, mime, data, storage_path FROM planner.portal_attachments WHERE id=$1 AND category='product'`, [req.params.id])).rows[0];
@@ -16581,7 +16612,7 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
     const productEnabled = names.length ? (await q(`SELECT 1 FROM planner.suppliers WHERE name = ANY($1) AND include_product_dev LIMIT 1`, [names])).length > 0 : false;
     const products = (productEnabled && names.length) ? await q(`
       SELECT i.ref, coalesce(i.season,'') season, coalesce(i.category,'') category, coalesce(i.colour_name,'') colour_name,
-        coalesce(i.supplier,'') supplier, coalesce(i.description,'') description, i.status, (i.swatch IS NOT NULL) has_swatch,
+        coalesce(i.supplier,'') supplier, coalesce(i.description,'') description, i.status, (i.swatch IS NOT NULL OR EXISTS (SELECT 1 FROM planner.portal_attachments _a WHERE _a.po=i.ref AND _a.category='product' AND coalesce(_a.uploader_kind,'internal')<>'supplier' AND _a.thumb IS NOT NULL)) has_swatch,
         to_char(i.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
         (SELECT count(*)::int FROM planner.product_dev_sizes s WHERE s.item_id=i.id) sizes,
         (SELECT count(*)::int FROM planner.supplier_notes n WHERE n.po=i.ref AND n.author_kind='internal' AND n.read_at IS NULL) unread_dnb
