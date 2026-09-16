@@ -1,3 +1,6 @@
+## v27.716 SAMPLING: Stage and Age merged (Ben) — CLIENT
+- One **Stage · age** column: the stage select on top (full width), the age pill underneath ("12d since change", amber ≥14d, red ≥30d). Frees the width Age was wasting; sample columns start one column earlier.
+
 ## v27.715 SAMPLING columns (Ben) — CLIENT
 - Second column renamed **Colour / Type**: colour way + the coloured **category** badge (moved out of the Product · request column, which keeps ref + components). The Development / Custom order badge now sits under the supplier name in the Supplier column.
 
