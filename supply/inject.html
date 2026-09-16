@@ -263,6 +263,13 @@
 #product-root #pcfg-subs-l3 .rtab.active{color:var(--blue);border-bottom-color:var(--blue);font-weight:600}
 /* inline Pantone chip → reveal the large swatch card on hover */
 .pan-hover:hover .pan-hovercard{display:block!important}
+/* v27.700 rich compose editor (contenteditable over a hidden textarea) + inline Pantone chips */
+.hz-rc{outline:none;background:var(--card);color:var(--ink)}
+.hz-rc:focus{border-color:var(--blue);box-shadow:0 0 0 2px var(--blue-soft)}
+.hz-rc[data-empty="1"]:before{content:attr(data-placeholder);color:var(--faint);pointer-events:none}
+.hz-rc-chip{display:inline-flex;align-items:center;gap:5px;background:var(--hover);border:1px solid var(--line);border-radius:5px;padding:0 7px 0 5px;font-weight:700;font-size:11px;line-height:18px;vertical-align:baseline;white-space:nowrap;margin:0 1px;user-select:all;-webkit-user-select:all}
+.hz-rc-sw{width:12px;height:12px;border-radius:3px;border:1px solid rgba(0,0,0,.18);display:inline-block;flex:0 0 auto}
+.hz-rc-nm{font-weight:400;color:var(--muted);margin-left:2px}
 /* Opened PO detail lives inside the wide, horizontally-scrolling PO grid — pin its sub-tab strip to the left
    so PAYMENTS/DATES/etc stay fixed while the grid scrolls sideways (desktop). */
 /* The expanded PO detail panel (.po-detail-wrap) is pinned to the left of the horizontally-scrolling grid via
@@ -13278,7 +13285,7 @@
       var _pbrExp=body.querySelector('.pbr-expall'); if(_pbrExp)_pbrExp.onclick=function(){ var seen={}; body.querySelectorAll('.pbr-phead').forEach(function(h){ if(seen[h.dataset.ref])return; seen[h.dataset.ref]=1; _pbrSetProd(h.dataset.ref,false); }); };
       body.querySelectorAll('.pbr-img').forEach(function(im){ im.onclick=function(){ openImgZoom(im.dataset.src); }; });
       body.querySelectorAll('.pbr-tag').forEach(function(ch){ ch.onclick=function(){ var sid=ch.dataset.sid, id=ch.dataset.id; _tags[sid][id]=!_tags[sid][id]; var on=_tags[sid][id], col=ch.dataset.col||'var(--muted)'; ch.style.background=on?col:'#fff'; ch.style.color=on?'#fff':col; }; });
-      body.querySelectorAll('.pbr-fb').forEach(function(t){ t.dataset.last=t.value; var sid=t.dataset.id, asp=t.dataset.aspect, pk=body.querySelector('.pbr-pick[data-id="'+sid+'"][data-aspect="'+asp+'"]'), pv=body.querySelector('.pbr-prev[data-id="'+sid+'"][data-aspect="'+asp+'"]'); if(pk)hzSlashPicker(t,pk,{snips:SNIPS,picked:_pan[sid],fixed:true,onChange:function(){ hzPanPreview(t,pv,_pan[sid]); }}); });
+      body.querySelectorAll('.pbr-fb').forEach(function(t){ t.dataset.last=t.value; var sid=t.dataset.id, asp=t.dataset.aspect, pk=body.querySelector('.pbr-pick[data-id="'+sid+'"][data-aspect="'+asp+'"]'), pv=body.querySelector('.pbr-prev[data-id="'+sid+'"][data-aspect="'+asp+'"]'); if(pk)hzRichCompose(t,pk,{snips:SNIPS,picked:_pan[sid],fixed:true}); if(pv)pv.style.display='none'; });   // v27.700 rich compose (inline Pantone chips)
       function q(cls,sid,asp){ return body.querySelector(cls+'[data-id="'+sid+'"][data-aspect="'+asp+'"]'); }
       function reasonsOf(sid,asp){ var out=[]; body.querySelectorAll('.pbr-rpill[data-id="'+sid+'"][data-aspect="'+asp+'"]').forEach(function(p){ out.push(Number(p.dataset.rid)); }); return out; }
       function decOf(sid,asp){ var s=q('select.pbr-dec',sid,asp); return s?s.value:'pending'; }
@@ -14378,6 +14385,61 @@
     ta.addEventListener('input',function(){ draw(); if(opts.onChange)try{opts.onChange();}catch(e){} });
     ta.addEventListener('keydown',function(e){ if(pick.style.display==='none')return; if(e.key==='ArrowDown'){ e.preventDefault(); pIdx=Math.min(pItems.length-1,pIdx+1); hl(); } else if(e.key==='ArrowUp'){ e.preventDefault(); pIdx=Math.max(0,pIdx-1); hl(); } else if(e.key==='Enter'&&pItems.length){ e.preventDefault(); ins(pIdx); } else if(e.key==='Escape'){ e.preventDefault(); closeP(); } });
     ta.addEventListener('blur',function(){ setTimeout(closeP,140); }); }
+  // v27.700 RICH COMPOSE (Ben, Pantone "option B"): the textarea stays as the VALUE STORE — every existing post/save path keeps reading
+  // ta.value / ta.dataset.last and listening for 'input'/'change' — but it is hidden behind a contenteditable editor that renders each
+  // "🎨 <code>" token as an inline chip (real swatch + PANTONE code + name). Editor→text serialisation keeps the exact token format, so
+  // note/feedback bodies and the server are unchanged. hzSlashPicker is reused untouched through a small textarea-shaped shim.
+  // API: ta._hzRc = { getText(), setText(text), refresh(), editor }.
+  function hzRichCompose(ta,pick,opts){ opts=opts||{}; if(!ta)return null; if(ta._hzRc)return ta._hzRc; var picked=opts.picked||{}; var PANS={};
+    function syncPans(){ Object.keys(picked).forEach(function(c){ if(picked[c])PANS[c]=picked[c]; }); }
+    var ed=document.createElement('div'); ed.className='hz-rc fci'; ed.contentEditable='true'; ed.spellcheck=true; ed.setAttribute('lang',ta.getAttribute('lang')||'en-GB'); ed.setAttribute('data-placeholder',ta.getAttribute('placeholder')||'');
+    ed.style.cssText='width:100%;box-sizing:border-box;min-height:'+Math.max(38,(parseInt(ta.getAttribute('rows'),10)||2)*19+14)+'px;text-align:left;white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere;cursor:text;line-height:1.5'+(ta.style.fontSize?';font-size:'+ta.style.fontSize:'')+(ta.style.resize?';resize:'+ta.style.resize+';overflow:auto':'');
+    ta.style.display='none'; ta.parentNode.insertBefore(ed,ta.nextSibling);
+    function chipHtml(code){ var p=PANS[code]||{code:code}; return '<span class="hz-rc-chip pan-hover" contenteditable="false" data-code="'+esc(code)+'" title="PANTONE '+esc(code)+(p.name?' — '+esc(p.name):'')+'"><span class="hz-rc-sw" style="background:'+esc(p.hex||'var(--line)')+'"></span>PANTONE '+esc(code)+(p.name?'<span class="hz-rc-nm">'+esc(p.name)+'</span>':'')+'</span>'; }
+    // text → editor DOM: known Pantone tokens become chips (longest code first so "19-4052 TCX" wins over "19-4052"), newlines → <br>
+    function render(text){ var codes=Object.keys(PANS).sort(function(a,b){return b.length-a.length;}); var h='', i=0, s=String(text||'');
+      while(i<s.length){ var at=s.indexOf('🎨 ',i); if(at<0){ h+=esc(s.slice(i)); break; } h+=esc(s.slice(i,at)); var rest=s.slice(at+3), hit=null; for(var k=0;k<codes.length;k++){ if(rest.indexOf(codes[k])===0){ hit=codes[k]; break; } } if(hit){ h+=chipHtml(hit); i=at+3+hit.length; } else { h+=esc('🎨 '); i=at+3; } }
+      ed.innerHTML=h.replace(/\n/g,'<br>'); mark(); }
+    // editor DOM → text: chips → "🎨 <code>", <br>/block → "\n"
+    function ser(node){ var out=''; var kids=node.childNodes; for(var i=0;i<kids.length;i++){ var n=kids[i];
+      if(n.nodeType===3){ out+=n.nodeValue; continue; } if(n.nodeType!==1)continue;
+      if(n.classList&&n.classList.contains('hz-rc-chip')){ out+='🎨 '+(n.getAttribute('data-code')||''); continue; }
+      var tag=n.tagName; if(tag==='BR'){ out+='\n'; continue; }
+      var block=(tag==='DIV'||tag==='P'); if(block&&out&&!/\n$/.test(out))out+='\n'; out+=ser(n); } return out; }
+    function getText(){ return ser(ed).replace(/ /g,' ').replace(/\n+$/,''); }
+    function mark(){ var empty=!getText().length; ed.setAttribute('data-empty',empty?'1':'0'); }
+    // caret ⇄ text offset (chips count as their token length)
+    function caretOffset(){ var sel=window.getSelection(); if(!sel||!sel.rangeCount||!ed.contains(sel.anchorNode))return getText().length; var r=sel.getRangeAt(0).cloneRange(); r.collapse(true); var pre=document.createRange(); pre.selectNodeContents(ed); pre.setEnd(r.startContainer,r.startOffset); var tmp=document.createElement('div'); tmp.appendChild(pre.cloneContents()); return ser(tmp).replace(/ /g,' ').length; }
+    function setCaret(off){ var pos=0, done=false; function walk(node){ var kids=node.childNodes; for(var i=0;i<kids.length&&!done;i++){ var n=kids[i];
+        if(n.nodeType===3){ var L=n.nodeValue.length; if(pos+L>=off){ place(n,off-pos); return; } pos+=L; continue; } if(n.nodeType!==1)continue;
+        if(n.classList&&n.classList.contains('hz-rc-chip')){ var tl=3+(n.getAttribute('data-code')||'').length; if(pos+tl>=off){ placeAfter(n); return; } pos+=tl; continue; }
+        if(n.tagName==='BR'){ if(pos+1>=off){ placeAfter(n); return; } pos+=1; continue; } var block=(n.tagName==='DIV'||n.tagName==='P'); if(block&&pos>0){ if(pos+1>=off){ place(n,0); return; } pos+=1; } walk(n); } }
+      function place(n,o){ var r=document.createRange(); r.setStart(n,o); r.collapse(true); var s=window.getSelection(); s.removeAllRanges(); s.addRange(r); done=true; }
+      function placeAfter(n){ var r=document.createRange(); r.setStartAfter(n); r.collapse(true); var s=window.getSelection(); s.removeAllRanges(); s.addRange(r); done=true; }
+      walk(ed); if(!done){ var r=document.createRange(); r.selectNodeContents(ed); r.collapse(false); var s=window.getSelection(); s.removeAllRanges(); s.addRange(r); } }
+    function syncToTa(fireInput){ var t=getText(); if(ta.value!==t){ ta.value=t; if(fireInput!==false)ta.dispatchEvent(new Event('input',{bubbles:true})); } mark(); }
+    // unknown "🎨 <code>" tokens (e.g. saved feedback whose colour card isn't in `picked`) → look the code up once so it can chip
+    var _looked={}; function resolveUnknown(){ var t=getText(), re=/🎨 ([0-9A-Za-z][0-9A-Za-z-]*(?: (?:TCX|TPG|TPX|CP|UP|XGC|C|U))?)/g, m, todo=[]; while((m=re.exec(t))){ var c=m[1]; if(!PANS[c]&&!_looked[c]){ _looked[c]=1; todo.push(c); } }
+      todo.forEach(function(c){ fetch('/api/product/pantone/search?q='+encodeURIComponent(c)).then(function(r){return r.json();}).then(function(rows){ var hit=(Array.isArray(rows)?rows:[]).filter(function(p){return String(p.code||'').toUpperCase()===c.toUpperCase();})[0]; if(!hit)return; PANS[hit.code]=picked[hit.code]={code:hit.code,name:hit.name,hex:hit.hex,book:hit.book}; var off=caretOffset(), focused=(document.activeElement===ed); render(getText()); if(focused)setCaret(off); }).catch(function(){}); }); }
+    // textarea-shaped shim so hzSlashPicker (value / selectionStart / setSelectionRange / focus / events / rect) drives the editor
+    var shim={ get value(){ return getText(); }, set value(v){ var off=caretOffset(); render(v); syncToTa(false); setCaret(Math.min(off,String(v).length)); },
+      get selectionStart(){ return caretOffset(); }, get selectionEnd(){ return caretOffset(); },
+      setSelectionRange:function(a){ syncPans(); render(getText()); setCaret(a); syncToTa(true); }, focus:function(){ ed.focus(); }, blur:function(){ ed.blur(); },
+      addEventListener:function(t,f,o){ ed.addEventListener(t,f,o); }, removeEventListener:function(t,f,o){ ed.removeEventListener(t,f,o); }, getBoundingClientRect:function(){ return ed.getBoundingClientRect(); }, get parentNode(){ return ed.parentNode; }, get style(){ return ed.style; } };
+    // wire: picker on the shim; input → sync + chip any newly-known token; blur → 'change' if the text moved; paste → plain text; drag events → the textarea's handlers
+    if(pick)hzSlashPicker(shim,pick,{snips:opts.snips||[],picked:picked,fixed:opts.fixed!==false,onChange:function(){ syncToTa(true); if(opts.onChange)try{opts.onChange();}catch(e){} }});
+    var _focusText=null;
+    ed.addEventListener('focus',function(){ _focusText=getText(); });
+    ed.addEventListener('input',function(){ syncToTa(true); resolveUnknown(); });
+    ed.addEventListener('blur',function(){ syncToTa(true); if(_focusText!==null&&_focusText!==getText()){ _focusText=null; ta.dispatchEvent(new Event('change',{bubbles:true})); } });
+    ed.addEventListener('paste',function(e){ var txt=(e.clipboardData||window.clipboardData).getData('text/plain'); if(txt==null)return; e.preventDefault(); if(document.queryCommandSupported&&document.queryCommandSupported('insertText'))document.execCommand('insertText',false,txt); else { var sel=window.getSelection(); if(sel&&sel.rangeCount){ var r=sel.getRangeAt(0); r.deleteContents(); r.insertNode(document.createTextNode(txt)); r.collapse(false); } } syncToTa(true); });
+    ['dragover','dragleave','drop'].forEach(function(t){ ed.addEventListener(t,function(e){ ed.style.outline=(t==='dragover')?'2px dashed var(--blue)':''; var ev=null; try{ ev=new DragEvent(t,{bubbles:false,cancelable:true,dataTransfer:e.dataTransfer}); }catch(x){} if(ev){ ta.dispatchEvent(ev); if(ev.defaultPrevented)e.preventDefault(); } }); });
+    ed.addEventListener('click',function(e){ if(e.target&&e.target.classList&&e.target.classList.contains('hz-rc-sw'))return; });
+    // initial content from the textarea's current value (saved feedback etc.)
+    syncPans(); render(ta.value||''); mark(); resolveUnknown();
+    var api={ editor:ed, getText:getText, setText:function(v){ syncPans(); render(v); syncToTa(true); }, refresh:function(){ syncPans(); var off=caretOffset(); render(ta.value||''); setCaret(off); mark(); } };
+    ta._hzRc=api; return api; }
+  try{ window.hzRichCompose=hzRichCompose; }catch(e){}   // exposed for the jsdom harness (scripts/dev) — not used by page code
   // v27.552: initial timeline indicator for a sample × component ("on timeline dd-Mmm-yy hh:mm" when a matching note exists; "saved …" from the feedback record)
   // v27.569: one uploaded file as a small chip (thumbnail for images, 📎 for documents), linking to the stored attachment
   function hzFileChip(p){ var url='/api/supply/portal-attachment/'+p.id, img=/^image\//i.test(String(p.mime||'')); return '<a class="hz-fchip" href="'+url+'" target="_blank" rel="noopener" title="'+esc(p.filename||'file')+'" style="display:inline-flex;align-items:center;gap:5px;max-width:230px;font-size:10.5px;padding:2px 7px 2px 3px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--ink-soft);text-decoration:none">'+(img?'<img src="'+url+'" style="width:20px;height:20px;object-fit:cover;border-radius:3px;flex:0 0 auto">':'<span>📎</span>')+'<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(p.filename||'file')+'</span></a>'; }
@@ -14454,7 +14516,7 @@
       function _reasonBox(id,aspect){ return body.querySelector('.ps-reason-box[data-id="'+id+'"][data-aspect="'+aspect+'"]'); }
       function _aspReasons(id,aspect){ var out=[]; body.querySelectorAll('.ps-reason-pill[data-id="'+id+'"][data-aspect="'+aspect+'"]').forEach(function(p){ out.push(Number(p.dataset.rid)); }); return out; }
       // v27.530: slash picker + Pantone preview on every feedback box; tag chips per sample card
-      body.querySelectorAll('.ps-aspect-fb').forEach(function(t){ t.dataset.last=t.value; var sid=String(t.dataset.id); _fbPan[sid]=_fbPan[sid]||{}; var pk=body.querySelector('.ps-fb-pick[data-id="'+sid+'"][data-aspect="'+t.dataset.aspect+'"]'), pv=body.querySelector('.ps-fb-prev[data-id="'+sid+'"][data-aspect="'+t.dataset.aspect+'"]'); if(pk)hzSlashPicker(t,pk,{snips:SNIPS,picked:_fbPan[sid],fixed:true,onChange:function(){ hzPanPreview(t,pv,_fbPan[sid]); }}); });   // fixed: table rows below must not cover the menu (v27.547)
+      body.querySelectorAll('.ps-aspect-fb').forEach(function(t){ t.dataset.last=t.value; var sid=String(t.dataset.id); _fbPan[sid]=_fbPan[sid]||{}; var pk=body.querySelector('.ps-fb-pick[data-id="'+sid+'"][data-aspect="'+t.dataset.aspect+'"]'), pv=body.querySelector('.ps-fb-prev[data-id="'+sid+'"][data-aspect="'+t.dataset.aspect+'"]'); if(pk)hzRichCompose(t,pk,{snips:SNIPS,picked:_fbPan[sid],fixed:true}); if(pv)pv.style.display='none'; });   // v27.700 rich compose (inline Pantone chips; preview strip retired); fixed: table rows below must not cover the menu (v27.547)
       body.querySelectorAll('.ps-fb-tagchip').forEach(function(ch){ ch.onclick=function(){ var sid=String(ch.dataset.sid), id=ch.dataset.id; _fbTags[sid]=_fbTags[sid]||{}; _fbTags[sid][id]=!_fbTags[sid][id]; var on=_fbTags[sid][id], col=ch.dataset.col||'var(--muted)'; ch.style.background=on?col:'#fff'; ch.style.color=on?'#fff':col; }; });
       function _saveAspect(id,aspect,feedback,decision,msg,flow,reasons){ if(msg){msg.style.color='var(--faint)';msg.textContent='saving…';}
         var _awEl=body.querySelector('.ps-awc[data-id="'+id+'"][data-aspect="'+aspect+'"]'); shipPost('/api/product/sample/'+id+'/aspect',{aspect:aspect,feedback:feedback,decision:decision,reject_reasons:reasons||[],awc_comment:_awEl?_awEl.value:''},function(j){ if(msg){ if(j&&j.error){msg.style.color='var(--neg)';msg.textContent=j.error;} else {msg.style.color='var(--pos)';msg.textContent=(flow&&j&&j.flowed)?('✓ → '+j.flowed+' size'+(j.flowed===1?'':'s')):'✓ saved';setTimeout(function(){msg.textContent='';},2400);} }
@@ -14872,7 +14934,7 @@
       var _panPicked={};
       // slash-command picker: "/" = saved phrase, "/p <query>" = Pantone colour search
       (function(){ var ta=body.querySelector('#pt-in'), pick=body.querySelector('#pt-picker'), prev=body.querySelector('#pt-prev'); if(!ta||!pick)return;   // v27.530: shared picker + live Pantone preview
-        hzSlashPicker(ta,pick,{snips:SNIPS,picked:_panPicked,fixed:true,onChange:function(){ hzPanPreview(ta,prev,_panPicked); }}); })();   // fixed (v27.548): the phrase / Pantone list must sit above the notes below the compose box
+        hzRichCompose(ta,pick,{snips:SNIPS,picked:_panPicked,fixed:true}); if(prev)prev.style.display='none'; })();   // v27.700 rich compose: chips render INLINE (option B) so the preview strip is retired; fixed (v27.548): the phrase / Pantone list must sit above the notes below the compose box
       // filter chip handlers
       body.querySelectorAll('.pt-filt').forEach(function(ch){ ch.onclick=function(){ var id=ch.dataset.id; FILT[id]=!FILT[id]; if(!FILT[id])delete FILT[id]; renderProdTimeline(body,ref,{quiet:true}); }; });
       var _fclr=body.querySelector('.pt-filt-clear'); if(_fclr)_fclr.onclick=function(){ Object.keys(FILT).forEach(function(k){delete FILT[k];}); renderProdTimeline(body,ref,{quiet:true}); };
