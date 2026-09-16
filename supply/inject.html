@@ -6796,8 +6796,8 @@
     // when active, expands a level-3 row of its member config tabs.
     var SC_KEYS=['duty','freight','tax','suppliers','branches','consignees','batches','productions','mfgbom','products','barcodegen'];
     var SC_LABEL={duty:'Import duty',freight:'Freight rates',tax:'Import tax',suppliers:'Suppliers',branches:'Branches',consignees:'Consignees',batches:'Batches',productions:'Productions',mfgbom:'BOM',products:'Products',barcodegen:'Barcodes'};
-    var ADM_KEYS=['email-notifications','admin-general','exchange-rates','channels','permissions','email-log'];
-    var ADM_LABEL={'email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels',permissions:'Permissions','email-log':'Email log'};
+    var ADM_KEYS=['email-notifications','admin-general','exchange-rates','channels','dhl-tracking','permissions','email-log'];
+    var ADM_LABEL={'email-notifications':'Email notifications','admin-general':'General','exchange-rates':'Exchange rates',channels:'Channels','dhl-tracking':'DHL tracking',permissions:'Permissions','email-log':'Email log'};
     var DM_KEYS=['contribmodel','buyplan','runoffsubs'];   // CONFIG ▸ Demand group (SETS contribution model + buy-plan logic + run-off subcats)
     var DM_LABEL={contribmodel:'Contribution model',buyplan:'Buy plan logic',runoffsubs:'Discontinued sub-categories'};
     // Supply chain sits second (next to General settings); it expands to the level-3 members below / nested.
@@ -7799,6 +7799,50 @@
             if(!/^[A-Z]{2}$/.test(code)){ err.textContent='Country code = 2 letters.'; return; }
             if(!label){ err.textContent='Country label required.'; return; }
             fetch('/api/config/country',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({code:code,label:label,sort:99})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ err.textContent=j.error; return; } showSub(); }).catch(function(e){ err.textContent=(e&&e.message)||'failed'; }); };
+        }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };
+      SUBS['dhl-tracking']=function(){ b.innerHTML='<div class="count">Loading…</div>';
+        fetch('/api/tracking/config').then(function(resp){return resp.json();}).then(function(d){
+          if(!d||d.error){ b.innerHTML='<div class="count" style="color:var(--neg)">'+esc((d&&d.error)||'load failed')+'</div>'; return; }
+          var c=d.config||{};
+          var keyPill=c.key_present
+            ? '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:12px;background:#e6f7ec;color:#1a7f37;border:1px solid #7fbf95">● API key present</span>'
+            : '<span style="display:inline-block;padding:3px 10px;border-radius:12px;font-size:12px;background:#fff6e6;color:#b8860b;border:1px solid #e0b34a">● API key not set: tracking stays inert until DHL_API_KEY is on the server</span>';
+          b.innerHTML='<div class="annot"><b>CONFIG ▸ Admin ▸ DHL tracking.</b> Live delivery status (ETA / in transit / delivered) is pulled from the <b>DHL Unified Shipment Tracking API</b> for every DHL tracking number on samples and bulk shipments, and cached server-side. The key lives in the server environment (<code>DHL_API_KEY</code>), never here. A schedule (n8n on live, a background timer locally) refreshes the cache; pages only ever read it, never DHL directly.</div>'
+            +'<div style="margin:4px 0 16px">'+keyPill+'</div>'
+            +'<div style="display:grid;grid-template-columns:240px 1fr;gap:10px 12px;align-items:center;font-size:13px;max-width:580px">'
+              +'<label>Enabled</label><div><label style="font-size:13px"><input type="checkbox" id="dt-enabled"'+(c.enabled!==false?' checked':'')+'> poll DHL for tracking updates</label></div>'
+              +'<label>Refresh interval (hours)</label><input class="flt" id="dt-interval" type="number" min="1" step="1" value="'+esc(String(c.interval_hours||6))+'" style="width:100px">'
+              +'<label>While in transit (hours)</label><input class="flt" id="dt-transit" type="number" min="1" step="1" value="'+esc(String(c.transit_interval_hours||1))+'" style="width:100px">'
+              +'<label>Stop polling N days after delivery</label><input class="flt" id="dt-stop" type="number" min="0" step="1" value="'+esc(String(c.stop_days!=null?c.stop_days:7))+'" style="width:100px">'
+            +'</div>'
+            +'<div style="margin-top:16px;display:flex;gap:8px;align-items:center"><button class="tool-badge bg-blue" id="dt-save" style="cursor:pointer;border:none">Save settings</button>'
+              +'<button class="tool-badge bg-green" id="dt-poll" style="cursor:pointer;border:none" title="Refresh the cache now from DHL">↻ Run poll now</button>'
+              +'<span id="dt-msg" style="font-size:12px"></span></div>'
+            +'<div class="sect-h" style="margin-top:24px">Test a tracking number</div>'
+            +'<div class="mut tiny" style="margin:0 0 8px;max-width:560px">A one-off live lookup against DHL. It does not write the cache. Needs DHL_API_KEY on this server.</div>'
+            +'<div class="bar" style="gap:8px"><input class="flt" id="dt-num" placeholder="DHL tracking number" style="width:280px"><button class="tool-badge bg-blue" id="dt-test" style="cursor:pointer;border:none">Test lookup</button></div>'
+            +'<div id="dt-result" style="margin-top:10px;font-size:12px"></div>';
+          function msg(el,txt,ok){ el.style.color=ok?'var(--pos)':'var(--neg)'; el.textContent=txt; if(ok)setTimeout(function(){if(el)el.textContent='';},1800); }
+          document.getElementById('dt-save').onclick=function(){ var m=document.getElementById('dt-msg');
+            var payload={ enabled:document.getElementById('dt-enabled').checked,
+              interval_hours:document.getElementById('dt-interval').value,
+              transit_interval_hours:document.getElementById('dt-transit').value,
+              stop_days:document.getElementById('dt-stop').value };
+            fetch('/api/tracking/config',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(payload)}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ msg(m,j.error,false); return; } msg(m,'Saved ✓',true); }).catch(function(e){ msg(m,(e&&e.message)||'failed',false); }); };
+          document.getElementById('dt-poll').onclick=function(){ var m=document.getElementById('dt-msg'); var btn=this; btn.disabled=true; msg(m,'Polling…',true);
+            fetch('/api/tracking/poll?force=1',{method:'POST'}).then(function(r){return r.json();}).then(function(j){ btn.disabled=false; if(j&&j.error){ msg(m,j.error,false); return; } if(j.note){ msg(m,j.note,true); return; } msg(m,'Polled '+(j.polled||0)+' of '+(j.numbers||0)+' (skipped '+(j.skipped||0)+(j.errors?', '+j.errors+' errors':'')+')',true); }).catch(function(e){ btn.disabled=false; msg(m,(e&&e.message)||'failed',false); }); };
+          document.getElementById('dt-test').onclick=function(){ var out=document.getElementById('dt-result'); var num=(document.getElementById('dt-num').value||'').trim(); if(!num){ out.innerHTML='<span style="color:var(--neg)">Enter a tracking number.</span>'; return; }
+            out.textContent='Looking up…';
+            fetch('/api/tracking/test',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({number:num})}).then(function(r){return r.json();}).then(function(j){
+              if(j&&j.error){ out.innerHTML='<span style="color:var(--neg)">'+esc(j.error)+'</span>'; return; }
+              if(j&&j.key_present===false){ out.innerHTML='<span style="color:#b8860b">'+esc(j.note||'DHL_API_KEY not set on this server')+'</span>'; return; }
+              var rr=(j&&j.result)||{};
+              out.innerHTML='<div style="padding:10px;border:1px solid var(--line);border-radius:8px;max-width:560px">'
+                +'<div><b>'+esc(rr.status_text||rr.status_code||'—')+'</b> <span class="mut">('+esc(rr.status_code||'')+')</span></div>'
+                +'<div class="mut" style="margin-top:4px">'+(rr.eta?'ETA '+esc(rr.eta):'')+(rr.delivered_at?' · delivered '+esc(String(rr.delivered_at).slice(0,10)):'')+'</div>'
+                +(rr.last_event?'<div style="margin-top:4px">'+esc(rr.last_event)+'</div>':'')
+                +'</div>';
+            }).catch(function(e){ out.innerHTML='<span style="color:var(--neg)">'+esc((e&&e.message)||'failed')+'</span>'; }); };
         }).catch(function(e){ b.innerHTML='<div class="count">'+esc(String(e))+'</div>'; }); };
       SUBS['permissions']=function(){ b.innerHTML='<div class="count">Loading…</div>';
         fetch('/api/config/permissions').then(function(r){return r.json();}).then(function(rows){

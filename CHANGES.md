@@ -1,3 +1,9 @@
+## v27.719 P2b DHL tracking: CONFIG ▸ Admin ▸ DHL tracking panel (Ben) — CLIENT
+- New admin sub-tab **CONFIG ▸ Admin ▸ DHL tracking**: enabled toggle, refresh interval (hours), in-transit interval, "stop N days after delivery", **Save settings**, and **↻ Run poll now** (forces a refresh, shows polled/skipped counts).
+- **Key-present indicator** reads `key_present` from the server env: green "API key present" or amber "API key not set: tracking stays inert" — no key is ever entered or shown in the UI.
+- **Test a tracking number:** paste a DHL number → live single lookup (`POST /api/tracking/test`), shows status / ETA / delivered / last event. Never writes the cache; needs the key on the server.
+- Wired to the v27.718 routes (`GET`/`POST /api/tracking/config`, `/poll`, `/test`). Render-probed: all 9 controls render, values load from live config, 0 JS errors.
+
 ## v27.718 P2b DHL tracking: cache table + poller core (Ben) — SERVER + mig 281
 - **New `planner.carrier_tracking`** (mig 281): one row per tracking number, shared by sample shipments (`sample_requests.tracking_code[_2]`) and bulk shipments (`shipments.carrier_ref`). Columns: status_code / status_text / eta / delivered_at / last_event / events (jsonb) / last_polled_at / source_table / source_id.
 - **Poller** `pollTracking()` reads every DHL number in Horizon, refreshes stale ones from the **DHL Unified Shipment Tracking API** (`api-eu.dhl.com/track/shipments`, `DHL-API-Key` header), and upserts the cache. Honours the config refresh interval (6h default, hourly while in transit), stops N days after delivery, throttles to <=1 req/sec, caps 200 calls/run. Bulk shipments get `tracked_delivery_date` + `tracked_source='dhl'` so existing arrival logic picks them up unchanged.
