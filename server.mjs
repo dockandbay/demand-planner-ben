@@ -911,6 +911,8 @@ function requiredCap(method, p) {
   if (p.startsWith('/api/product/')) return 'product';        // PRODUCT module writes → 'product' capability
   if (p.startsWith('/api/supply/zalando/')) return null;      // Zalando stock upload / send-file — open to all (no edit rights needed)
   if (p.startsWith('/api/supply/received-pos/')) return null; // n8n system trigger — processes the received-POs feed (acts only on rows n8n wrote)
+  if (p.startsWith('/api/tracking/')) return null;            // DHL tracking: poller (secret-gated in handler), read-only status, and admin-checked test/config
+
   if (p.startsWith('/api/klaviyo-bis/')) return null;         // Klaviyo BIS upload — allowed with read-only permission (Ben)
   if (method === 'POST' && p === '/api/supply/quality-doc') return null;   // Quality Control file upload (+ its metafields) — allowed with read-only permission (Ben); delete stays gated
   if (method === 'POST' && (p === '/api/supply/cache/invalidate' || p === '/api/supply/actions/invalidate')) return null;   // clears server caches only — harmless, no data write
@@ -7992,6 +7994,185 @@ app.post('/api/supply/received-pos/process', async (req, res) => {
   if (secret && req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
   try { res.json({ ok: true, ...(await processReceivedPos()) }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+
+// ── DHL / carrier tracking (P2b, v27.718) ────────────────────────────────────
+// One cache table (planner.carrier_tracking, mig 281) shared by sample shipments and bulk shipments.
+// A server-side poller refreshes it from the DHL Unified Shipment Tracking API; the UI only ever reads
+// the cache (never calls DHL per page view). Everything here is INERT without process.env.DHL_API_KEY,
+// so the sandbox / local dev makes no external calls. The key stays in env, never in the DB or git.
+
+// Config lives in app_settings.dhl_tracking (value is TEXT, so JSON-encoded). key_present comes from env.
+async function getDhlConfig() {
+  let cfg = {};
+  try {
+    const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='dhl_tracking'`)).rows[0];
+    if (r && r.value) cfg = typeof r.value === 'string' ? JSON.parse(r.value) : r.value;
+  } catch (_) { /* missing / malformed = defaults */ }
+  return {
+    enabled: cfg.enabled !== false,                                                      // default on (still inert without a key)
+    interval_hours: Number(cfg.interval_hours) > 0 ? Number(cfg.interval_hours) : 6,      // default refresh every 6h
+    transit_interval_hours: Number(cfg.transit_interval_hours) > 0 ? Number(cfg.transit_interval_hours) : 1, // hourly while in transit
+    stop_days: Number(cfg.stop_days) >= 0 ? Number(cfg.stop_days) : 7,                    // stop polling N days after delivery
+    key_present: !!process.env.DHL_API_KEY,
+  };
+}
+
+// Single live lookup against DHL. Returns null when no key is configured (caller decides what that means).
+// DHL statusCode is normalised lower-case: pre-transit | transit | delivered | failure | unknown.
+async function dhlLookupOne(number) {
+  const key = process.env.DHL_API_KEY;
+  if (!key) return null;
+  const url = 'https://api-eu.dhl.com/track/shipments?trackingNumber=' + encodeURIComponent(number);
+  const r = await fetch(url, { headers: { 'DHL-API-Key': key, Accept: 'application/json' } });
+  if (r.status === 404) return { number, status_code: 'unknown', status_text: 'Not found', eta: null, delivered_at: null, last_event: null, events: [] };
+  if (!r.ok) { const e = new Error('DHL HTTP ' + r.status); e.code = r.status; throw e; }
+  const j = await r.json().catch(() => ({}));
+  const s = (j.shipments || [])[0];
+  if (!s) return { number, status_code: 'unknown', status_text: 'No data', eta: null, delivered_at: null, last_event: null, events: [] };
+  const code = String((s.status && s.status.statusCode) || 'unknown').toLowerCase();
+  const ev = Array.isArray(s.events) ? s.events : [];
+  return {
+    number,
+    status_code: code,
+    status_text: (s.status && (s.status.description || s.status.status)) || '',
+    eta: s.estimatedTimeOfDelivery ? String(s.estimatedTimeOfDelivery).slice(0, 10) : null,
+    delivered_at: code === 'delivered' ? ((s.status && s.status.timestamp) || null) : null,
+    last_event: (ev[0] && ev[0].description) || (s.status && s.status.description) || '',
+    events: ev,
+  };
+}
+
+// Every DHL tracking number in Horizon: sample shipments (two carrier/tracking slots) + bulk shipments.
+async function collectTrackingNumbers() {
+  const out = [], seen = new Set();
+  const push = (number, source_table, source_id) => {
+    const n = String(number || '').trim();
+    if (!n || seen.has(n)) return;                                   // first source wins; write-back keys on the number anyway
+    seen.add(n); out.push({ number: n, carrier: 'DHL', source_table, source_id: String(source_id) });
+  };
+  const sr = (await pool.query(`
+    SELECT id, carrier, tracking_code, carrier_2, tracking_code_2 FROM planner.sample_requests
+    WHERE (carrier ILIKE 'dhl%' AND coalesce(tracking_code,'') <> '')
+       OR (carrier_2 ILIKE 'dhl%' AND coalesce(tracking_code_2,'') <> '')`)).rows;
+  for (const r of sr) {
+    if (/^dhl/i.test(r.carrier || '') && r.tracking_code) push(r.tracking_code, 'sample_requests', r.id);
+    if (/^dhl/i.test(r.carrier_2 || '') && r.tracking_code_2) push(r.tracking_code_2, 'sample_requests', r.id);
+  }
+  const sh = (await pool.query(`
+    SELECT shipment_ref, carrier_ref FROM planner.shipments
+    WHERE carrier ILIKE 'dhl%' AND coalesce(carrier_ref,'') <> ''`)).rows;
+  for (const r of sh) push(r.carrier_ref, 'shipments', r.shipment_ref);
+  return out;
+}
+
+async function upsertTracking(n, res) {
+  await pool.query(`
+    INSERT INTO planner.carrier_tracking
+      (tracking_number, carrier, status_code, status_text, eta, delivered_at, last_event, events, last_polled_at, source_table, source_id, updated_at)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb, now(), $9, $10, now())
+    ON CONFLICT (tracking_number) DO UPDATE SET
+      carrier=excluded.carrier, status_code=excluded.status_code, status_text=excluded.status_text,
+      eta=excluded.eta, delivered_at=excluded.delivered_at, last_event=excluded.last_event,
+      events=excluded.events, last_polled_at=now(),
+      source_table=coalesce(planner.carrier_tracking.source_table, excluded.source_table),
+      source_id=coalesce(planner.carrier_tracking.source_id, excluded.source_id),
+      updated_at=now()`,
+    [n.number, n.carrier || 'DHL', res.status_code, res.status_text, res.eta, res.delivered_at, res.last_event, JSON.stringify(res.events || []), n.source_table, n.source_id]);
+  // Bulk shipments: DHL is the first automatic tracked_source, so the existing arrival logic picks it up unchanged.
+  if (n.source_table === 'shipments') {
+    const eff = res.delivered_at ? String(res.delivered_at).slice(0, 10) : (res.eta || null);
+    if (eff) await pool.query(`UPDATE planner.shipments SET tracked_delivery_date=$1, tracked_source='dhl', updated_at=now() WHERE carrier_ref=$2 AND carrier ILIKE 'dhl%'`, [eff, n.number]);
+  }
+}
+
+// The poller. Honours the configured refresh interval per number (hourly while in transit), stops N days
+// after delivery, throttles to <=1 req/sec, and caps calls per run to protect the free-plan daily quota.
+let _dhlPollBusy = false;
+async function pollTracking(opts = {}) {
+  const cfg = await getDhlConfig();
+  if (!cfg.key_present) return { ok: true, numbers: 0, polled: 0, skipped: 0, note: 'DHL_API_KEY not set' };
+  if (!opts.force && !cfg.enabled) return { ok: true, numbers: 0, polled: 0, skipped: 0, note: 'disabled' };
+  if (_dhlPollBusy) return { ok: true, note: 'already running' };
+  _dhlPollBusy = true;
+  const MAX = Number(opts.max) > 0 ? Number(opts.max) : 200;
+  try {
+    const nums = await collectTrackingNumbers();
+    const cache = {};
+    if (nums.length) {
+      const rows = (await pool.query(`SELECT tracking_number, status_code, delivered_at, last_polled_at FROM planner.carrier_tracking WHERE tracking_number = ANY($1)`, [nums.map(n => n.number)])).rows;
+      for (const r of rows) cache[r.tracking_number] = r;
+    }
+    const now = Date.now();
+    let polled = 0, skipped = 0, errors = 0, delivered = 0;
+    for (const n of nums) {
+      if (polled >= MAX) { skipped++; continue; }
+      const c = cache[n.number];
+      if (!opts.force && c && c.last_polled_at) {
+        if (c.status_code === 'delivered' && c.delivered_at &&
+            (now - new Date(c.delivered_at).getTime()) / 86400000 > cfg.stop_days) { skipped++; continue; }
+        const inTransit = c.status_code === 'transit' || c.status_code === 'pre-transit';
+        const need = inTransit ? cfg.transit_interval_hours : cfg.interval_hours;
+        if ((now - new Date(c.last_polled_at).getTime()) / 3600000 < need) { skipped++; continue; }
+      }
+      let res;
+      try { res = await dhlLookupOne(n.number); }
+      catch (e) { errors++; if (e.code === 429) break; continue; }   // rate limited: stop this run, try next tick
+      if (!res) { skipped++; continue; }
+      await upsertTracking(n, res);
+      polled++; if (res.status_code === 'delivered') delivered++;
+      await new Promise(r => setTimeout(r, 1100));                    // <=1 req/sec (free plan)
+    }
+    return { ok: true, numbers: nums.length, polled, skipped, errors, delivered };
+  } finally { _dhlPollBusy = false; }
+}
+
+// Poller endpoint — n8n schedule calls this (webhook-secret gated, same pattern as received-pos).
+app.post('/api/tracking/poll', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET;
+  if (secret && req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
+  try { res.json(await pollTracking({ force: req.query.force === '1' })); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Admin test button (CONFIG): live single lookup, never writes the cache.
+app.post('/api/tracking/test', async (req, res) => {
+  const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
+  const number = String((req.body || {}).number || '').trim();
+  if (!number) return res.status(400).json({ error: 'tracking number required' });
+  if (!process.env.DHL_API_KEY) return res.json({ ok: false, key_present: false, note: 'DHL_API_KEY not set on this server' });
+  try { res.json({ ok: true, key_present: true, result: await dhlLookupOne(number) }); }
+  catch (e) { res.status(502).json({ ok: false, error: e.message }); }
+});
+// Read-only cache for the UI pills. numbers=comma,list. Never triggers DHL.
+app.get('/api/tracking/status', async (req, res) => {
+  const nums = String(req.query.numbers || '').split(',').map(s => s.trim()).filter(Boolean);
+  if (!nums.length) return res.json({ ok: true, tracking: {} });
+  try {
+    const rows = (await pool.query(`SELECT tracking_number, carrier, status_code, status_text, to_char(eta,'YYYY-MM-DD') eta, delivered_at, last_event, last_polled_at FROM planner.carrier_tracking WHERE tracking_number = ANY($1)`, [nums])).rows;
+    const out = {}; for (const r of rows) out[r.tracking_number] = r;
+    res.set('Cache-Control', 'no-store').json({ ok: true, tracking: out });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Config get/set (CONFIG ▸ Admin ▸ Integrations ▸ DHL tracking).
+app.get('/api/tracking/config', async (req, res) => {
+  try { res.set('Cache-Control', 'no-store').json({ ok: true, config: await getDhlConfig() }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/tracking/config', async (req, res) => {
+  const me = await permsFor(req); if (!me.is_admin) return res.status(403).json({ error: 'admin only' });
+  const b = req.body || {};
+  const cfg = {
+    enabled: b.enabled !== false,
+    interval_hours: Number(b.interval_hours) > 0 ? Number(b.interval_hours) : 6,
+    transit_interval_hours: Number(b.transit_interval_hours) > 0 ? Number(b.transit_interval_hours) : 1,
+    stop_days: Number(b.stop_days) >= 0 ? Number(b.stop_days) : 7,
+  };
+  try {
+    await pool.query(`INSERT INTO planner.app_settings(key,value,updated_by,updated_at) VALUES('dhl_tracking',$1,$2,now())
+        ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_by=excluded.updated_by, updated_at=now()`,
+      [JSON.stringify(cfg), me.email || 'sandbox']);
+    res.json({ ok: true, config: { ...cfg, key_present: !!process.env.DHL_API_KEY } });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 
 // ── Modular channel registry (CONFIG ▸ Admin ▸ Channels) — Phase 1. Reads open; writes admin-only. ──
@@ -17334,6 +17515,12 @@ app.post('/api/portal/submit', portalAuth, async (req, res) => {
 
 // Local dev: listen. On Vercel (serverless) the platform imports `app` instead.
 if (!process.env.VERCEL) {
+  // DHL tracking in-app poller (long-lived server only; on Vercel the n8n schedule hits /api/tracking/poll).
+  // Inert without DHL_API_KEY. Runs hourly; the poller itself honours per-number staleness vs the config interval.
+  if (!process.env.VERCEL) {
+    const tick = () => getDhlConfig().then(c => (c.enabled && c.key_present) ? pollTracking({ reason: 'timer' }) : null).catch(() => {});
+    setTimeout(() => { tick(); setInterval(tick, 60 * 60 * 1000).unref?.(); }, 60 * 1000).unref?.();
+  }
   app.listen(8124, () => console.log('rehost (live DATA + FC_CURRENT + save) on :8124'));
 }
 export default app;
