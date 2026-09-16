@@ -6328,7 +6328,9 @@ async function prodStageAdvance(itemRef, target) {
 }
 app.get('/api/product/items', async (_req, res) => {
   try {
+    await ensureCategoryColours();   // v27.698: categories always carry a colour by the time the grid reads them
     const r = await pool.query(`SELECT i.id, i.ref, coalesce(i.type,'Product Development') type, coalesce(i.season,'') season, coalesce(i.category,'') category,
+      coalesce((SELECT c.colour_hex FROM planner.categories c WHERE c.category=i.category LIMIT 1),'') category_colour,
       coalesce(i.colour_name,'') colour_name, coalesce(i.bulk_colour_name,'') bulk_colour_name, coalesce(i.stage,'sample_development') stage,
       coalesce(i.supplier,'') supplier, coalesce(i.description,'') description, i.status, (i.swatch IS NOT NULL) has_swatch,
       to_char(i.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
@@ -7086,10 +7088,43 @@ app.post('/api/product/escalate', async (req, res) => {
     res.json({ ok: true, sent: sent.sent || 0, emails, sandbox: !!sent.sandbox });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v27.698 (mig 277) — per-category display colour. Palette = Ben's "20 lovely colours" board (one duplicate #008080
+// removed → 19), ordered so neighbouring categories land on contrasting hues. ensureCategoryColours() fills any
+// category with no colour_hex (least-used palette colour first) so n8n-added categories are coloured automatically;
+// a hand-picked colour (PRODUCT ▸ Config ▸ Categories) is never overwritten.
+const CAT_PALETTE = ['#FF7F50', '#008080', '#FFDB58', '#800080', '#32CD32', '#E0115F', '#ADD8E6', '#DAA520', '#000080', '#FF00FF',
+  '#6B8E23', '#FFD1DC', '#FFBF00', '#CD5C5C', '#BDFCC9', '#B7410E', '#E6E6FA', '#F5DEB3', '#FFFACD'];
+let _catColoursChecked = 0;
+async function ensureCategoryColours(force) {
+  if (!force && Date.now() - _catColoursChecked < 60000) return;   // cheap guard: at most one scan a minute
+  _catColoursChecked = Date.now();
+  try {
+    const rows = (await pool.query(`SELECT category, colour_hex FROM planner.categories ORDER BY category`)).rows;
+    const missing = rows.filter(r => !/^#[0-9a-fA-F]{6}$/.test(String(r.colour_hex || '')));
+    if (!missing.length) return;
+    const used = {}; rows.forEach(r => { const h = String(r.colour_hex || '').toUpperCase(); if (h) used[h] = (used[h] || 0) + 1; });
+    for (const r of missing) {   // least-used palette colour, ties broken by palette order
+      let pick = CAT_PALETTE[0], best = Infinity;
+      CAT_PALETTE.forEach(h => { const n = used[h] || 0; if (n < best) { best = n; pick = h; } });
+      used[pick] = (used[pick] || 0) + 1;
+      await pool.query(`UPDATE planner.categories SET colour_hex=$2 WHERE category=$1 AND coalesce(colour_hex,'')=''`, [r.category, pick]);
+    }
+  } catch (e) { console.error('[category colours]', e.message); }
+}
 app.get('/api/product/config', async (_req, res) => {
-  try { const seasons = (await pool.query(`SELECT code, coalesce(label,'') label, active, sort FROM planner.seasons ORDER BY sort, code`)).rows;
-    const categories = (await pool.query(`SELECT category, coalesce(code,'') code FROM planner.categories WHERE coalesce(is_active,true) ORDER BY category`)).rows;
-    res.json({ seasons, categories }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try { await ensureCategoryColours();
+    const seasons = (await pool.query(`SELECT code, coalesce(label,'') label, active, sort FROM planner.seasons ORDER BY sort, code`)).rows;
+    const categories = (await pool.query(`SELECT category, coalesce(code,'') code, coalesce(colour_hex,'') colour_hex FROM planner.categories WHERE coalesce(is_active,true) ORDER BY category`)).rows;
+    res.json({ seasons, categories, palette: CAT_PALETTE }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/category-colour', async (req, res) => {   // v27.698 hand-pick a category colour (blank = re-auto-assign)
+  const b = req.body || {}, category = (b.category || '').trim(), hex = String(b.colour_hex || '').trim().toUpperCase();
+  if (!category) return res.status(400).json({ error: 'category required' });
+  if (hex && !/^#[0-9A-F]{6}$/.test(hex)) return res.status(400).json({ error: 'colour must be #RRGGBB' });
+  try { await pool.query(`UPDATE planner.categories SET colour_hex=$2 WHERE category=$1`, [category, hex || null]);
+    if (!hex) await ensureCategoryColours(true);
+    const row = (await pool.query(`SELECT coalesce(colour_hex,'') colour_hex FROM planner.categories WHERE category=$1`, [category])).rows[0];
+    res.json({ ok: true, colour_hex: row ? row.colour_hex : hex }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/season', async (req, res) => {
   const b = req.body || {}, code = (b.code || '').trim().toUpperCase();
