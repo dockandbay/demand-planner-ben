@@ -13169,7 +13169,7 @@
   function ensureProductRoot(){ if(document.getElementById('product-root'))return;
     var app=document.getElementById('app')||document.body; if(!app)return;
     var el=document.createElement('div'); el.id='product-root';
-    el.innerHTML='<div id="product-subnav"><button class="stab" data-k="plan">PLAN</button><button class="stab" data-k="batch">SAMPLE BATCH REVIEW</button><button class="stab" data-k="dashboard">DASHBOARD</button><button class="stab" data-k="range">RANGE PLAN</button><button class="stab" data-k="specs">SPECIFICATIONS</button><button class="stab" data-k="reports">REPORTS</button><button class="stab" data-k="config">CONFIG</button><span class="ver">HORIZON __APP_VERSION__</span></div><div id="product-content"></div>';
+    el.innerHTML='<div id="product-subnav"><button class="stab" data-k="plan">PLAN</button><button class="stab" data-k="batch">SAMPLE BATCH REVIEW</button><button class="stab" data-k="specs">SPECIFICATIONS</button><button class="stab" data-k="reports">REPORTS</button><button class="stab" data-k="config">CONFIG</button><span class="ver">HORIZON __APP_VERSION__</span></div><div id="product-content"></div>';
     app.appendChild(el);
     el.querySelectorAll('.stab').forEach(function(b){ b.onclick=function(){ selectProductSub(b.dataset.k); }; }); }
   function showProduct(){ ensureProductRoot(); pgetWarm(); if(typeof hideSupply==='function')hideSupply(); if(typeof hideScenario==='function')hideScenario();
@@ -13183,7 +13183,7 @@
     var r=document.getElementById('product-root'); if(r)r.style.display='none';
     var pb=document.getElementById('product-btn'); if(pb)pb.classList.remove('active'); }
   function selectProductSub(k){ PRODUCT_SUB=k; _prodDetailBox=null;
-    document.querySelectorAll('#product-subnav .stab').forEach(function(b){b.classList.toggle('active',b.dataset.k===k);});
+    document.querySelectorAll('#product-subnav .stab').forEach(function(b){b.classList.toggle('active',b.dataset.k===k||(b.dataset.k==='plan'&&(k==='range'||k==='dashboard')));});   // v27.703 Range / Dashboard are views of PLAN
     try{ writeHash(['product',k]); }catch(e){}
     var c=document.getElementById('product-content'); if(!c)return;
     if(k==='reports') return renderProductReports(c);
@@ -13571,12 +13571,12 @@
         var cats={}; f.forEach(function(r){ var k=r.category||'—'; (cats[k]=cats[k]||[]).push(r); });
         var catKeys=Object.keys(cats).sort();
         var _rvt=function(k,lbl){ return '<button class="pr-view" data-v="'+k+'" style="background:'+(_rangeView===k?'var(--nav)':'#fff')+';color:'+(_rangeView===k?'#fff':'var(--muted)')+';border:1px solid '+(_rangeView===k?'var(--nav)':'var(--line)')+';font-size:11px;font-weight:600;padding:4px 11px;cursor:pointer">'+lbl+'</button>'; };
-        var bar='<div class="bar" style="align-items:center;gap:10px;flex-wrap:wrap"><span style="display:inline-flex">'+_rvt('normal','Normal')+_rvt('photography','📸 Photography')+'</span>'
+        var bar='<div class="bar" style="align-items:center;gap:10px;flex-wrap:wrap">'+hzProdViewSel('range')+'<span style="display:inline-flex">'+_rvt('normal','Normal')+_rvt('photography','📸 Photography')+'</span>'
           +'<span style="color:var(--muted);font-size:11px">Season</span><select class="fci" id="pr-season" style="text-align:left;width:100px">'+seasons.map(function(s){return '<option value="'+esc(s)+'"'+(s===_rangeSeason?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select>'
           +'<label style="font-size:12px;display:flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" id="pr-appr"'+(_rangeApprovedOnly?' checked':'')+'> Approved only</label>'
           +'<button class="save-btn" id="pr-pdf" title="Open a printable PDF of this range" style="background:var(--blue-soft);color:var(--blue-ink);border-color:#93c5fd">⤓ PDF</button>'
           +'<span class="count" style="margin-left:auto">'+f.length+' product'+(f.length===1?'':'s')+' · '+catKeys.length+' categor'+(catKeys.length===1?'y':'ies')+'</span></div>';
-        c.innerHTML=bar+groupsHtml(catKeys,cats,false);
+        c.innerHTML=bar+groupsHtml(catKeys,cats,false); wireProdViewSel(c);
         var ss=document.getElementById('pr-season'); if(ss)ss.onchange=function(){ _rangeSeason=this.value; draw(); };
         c.querySelectorAll('.pr-view').forEach(function(b){ b.onclick=function(){ _rangeView=b.dataset.v; draw(); }; });
         var ap=document.getElementById('pr-appr'); if(ap)ap.onchange=function(){ _rangeApprovedOnly=this.checked; draw(); };
@@ -13616,7 +13616,7 @@
         var approvedN=f.filter(function(r){ return r.status==='approved'; }).length;   // v27.489 KPI tiles (design)
         function kpi(ic,cls,v,l){ return '<div class="hz-kpi"><span class="hz-kpi-ic '+cls+'">'+ic+'</span><div><div class="hz-kpi-v">'+Number(v||0).toLocaleString()+'</div><div class="hz-kpi-l">'+l+'</div></div></div>'; }
         var kpis='<div class="hz-kpis db-kpis">'+kpi('▦','blue',f.length,'Products'+(_dashSeason==='__all'?'':' · '+esc(_dashSeason)))+kpi('✓','pos',approvedN,'Approved')+kpi('!','neg',exCount,'Exceptions')+kpi('📸','amber',photoDone,'Photo-approved')+'</div>';
-        var bar='<div class="bar db-bar"><span class="db-views">'+_vt('components','Components')+_vt('photography','📸 Photography')+'</span>'
+        var bar='<div class="bar db-bar">'+hzProdViewSel('dashboard')+'<span class="db-views">'+_vt('components','Components')+_vt('photography','📸 Photography')+'</span>'
           +'<span class="pill-lbl">Season</span><select class="fci" id="db-season" style="text-align:left;width:120px"><option value="__all"'+(_dashSeason==='__all'?' selected':'')+'>All seasons</option>'+seasons.map(function(s){return '<option value="'+esc(s)+'"'+(s===_dashSeason?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select>'
           +'<span class="count" style="margin-left:auto">'+f.length+' product'+(f.length===1?'':'s')+(_dashView==='photography'?' · <span class="db-pos">'+photoDone+' photo-approved</span>':(exCount?' · <span class="db-neg">'+exCount+' exception'+(exCount===1?'':'s')+'</span>':''))+'</span></div>';
         function wireDash(){ var s=document.getElementById('db-season'); if(s)s.onchange=function(){ _dashSeason=this.value; draw(); };
@@ -13740,7 +13740,7 @@
   // Grid STAGE cell: coloured dropdown + a tiny owner sub-label ("with Supplier" / "with D&B" / "Done" / "Stopped").
   function prodStageSelHtml(ref,val){ var m=stageMeta(val), own=m[2];
     var ownTxt=(own==='Supplier'||own==='D&B')?('with '+own):own;
-    return '<div class="pg-stage-wrap"><select class="fci pg-stage-sel" data-ref="'+esc(ref)+'" style="'+prodStageStyle(val)+'">'+STAGE_META.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select><div class="pg-stage-owner" data-ref="'+esc(ref)+'">'+esc(ownTxt)+'</div></div>'; }
+    return '<div class="pg-stage-wrap"><select class="fci pg-stage-sel" data-ref="'+esc(ref)+'" style="'+prodStageStyle(val)+'"><option value=""'+(!val?' selected':'')+'>Auto — from its requests</option>'+STAGE_META.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+o[1]+' (override)</option>';}).join('')+'</select><div class="pg-stage-owner" data-ref="'+esc(ref)+'">'+esc(val?ownTxt:'derived')+'</div></div>'; }   // v27.703: product stage = derived unless overridden ('' = auto)
   // Grid APPROVAL cell: read-only pill, derived from stage (this is the field PIM / Buy Plan / POs read).
   function prodApprovalPill(stage){ return '<span class="pg-approval-pill">'+prodStatusChip(prodStatusFromStage(stage))+'</span>'; }
   // Colour shown in the grid: "Bulk colour name (Development colour name)" when a bulk name exists, else whichever exists.
@@ -13757,7 +13757,7 @@
   // A product's first mapped SKU (so a new sample request links back via the line SKU), else the product ref.
   function _prodSeedSku(d,ref){ try{ var sz=(d&&d.sizes)||[]; for(var i=0;i<sz.length;i++){ if(sz[i]&&sz[i].mapped_sku&&String(sz[i].mapped_sku).trim())return String(sz[i].mapped_sku).trim(); } }catch(e){} return ref; }
   // "Add to new sample request" — create a sample request pre-linked to this product, then open it in SUPPLY ▸ Samples.
-  function _newSampleForProduct(sup, sku){ if(!sup){ alert('This product has no supplier set — add one on Master data first.'); return; }
+  function _newSampleForProduct(sup, sku){ if(!sup){ alert('This product has no development request yet — create one on the Requests tab (that is where the supplier is assigned).'); return; }   // v27.703
     shipPost('/api/supply/sample-create',{supplier_name:sup, created_by:(window.ME&&ME.email)||'', lines: sku?[{sku:sku, qty:1}]:[]},function(j){ if(j&&j.error){ alert('Failed: '+j.error); return; } if(j&&j.ref&&typeof gotoSample==='function')gotoSample(j.ref); }); }
   // bound straight to the master-data fields via /api/product/item/<ref>. kind = supplier | season | category.
   function prodPickBtn(ref,field,val,kind){ return '<button class="cell-pick prod-cell-pick" data-ref="'+esc(ref)+'" data-field="'+field+'" data-kind="'+kind+'" title="'+esc(val||'')+'">'+(val?esc(val):'<span class="mut">— <span style="background:var(--neg-bg);color:var(--neg);font-weight:700;border-radius:3px;padding:0 3px">set</span></span>')+' ▾</button>'; }
@@ -14051,7 +14051,7 @@
       _prodRows=rows;
       var seasons=[]; rows.forEach(function(r){ if(r.season&&seasons.indexOf(r.season)<0)seasons.push(r.season); }); seasons.sort();
       var cats=[]; rows.forEach(function(r){ if(r.category&&cats.indexOf(r.category)<0)cats.push(r.category); }); cats.sort();
-      var sups=[]; rows.forEach(function(r){ if(r.supplier&&sups.indexOf(r.supplier)<0)sups.push(r.supplier); }); sups.sort();   // suppliers that actually have products in the grid (Ben #1)
+      var sups=[]; rows.forEach(function(r){ (r.requests||[]).forEach(function(q){ if(q.supplier_name&&sups.indexOf(q.supplier_name)<0)sups.push(q.supplier_name); }); if(r.supplier&&sups.indexOf(r.supplier)<0)sups.push(r.supplier); }); sups.sort();   // v27.703: suppliers come from the development REQUESTS (legacy item supplier kept for old rows)
       if(_prodFilt.supplier && sups.indexOf(_prodFilt.supplier)<0)_prodFilt.supplier='';   // clear a stale supplier filter if it no longer has any products
       var STAT=[['dev_actions','In development + open actions'],['unapproved','Not approved'],['','All'],['in_development','In development'],['approved','Approved'],['dropped','Rejected']];
       var selDark=function(v){ return 'text-align:left'+(v?';background:var(--nav);color:#fff;font-weight:600':''); };   // dark chip when a filter is set
@@ -14060,6 +14060,7 @@
         +'<button class="save-btn pg-filt-toggle" id="pg-filt-toggle" type="button">⚙ Filters</button>'   // phone only (v27.488): the selects collapse behind this
         +'<div class="pg-filt-panel" id="pg-filt-panel">'
         +'<button class="save-btn outline-blue" id="pg-new">+ New product</button>'
+        +hzProdViewSel('plan')   // v27.703: Grid / Range plan / Dashboard are one page (Ben)
         +'<span style="display:flex;align-items:center;gap:5px"><span style="color:var(--muted);font-size:11px">Type</span><select class="fci" id="pg-type" style="'+selDark(_prodFilt.type)+'"><option value="Product Development"'+(_prodFilt.type==='Product Development'?' selected':'')+'>Product Development</option><option value="Custom Order"'+(_prodFilt.type==='Custom Order'?' selected':'')+'>Custom Order</option><option value=""'+(_prodFilt.type===''?' selected':'')+'>All</option></select></span>'
         +'<span style="display:flex;align-items:center;gap:5px"><span style="color:var(--muted);font-size:11px">Season</span><select class="fci" id="pg-season" style="'+selDark(_prodFilt.season)+'"><option value="">All</option>'+seasons.map(function(s){return '<option value="'+esc(s)+'"'+(s===_prodFilt.season?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>'
         +'<span style="display:flex;align-items:center;gap:5px"><span style="color:var(--muted);font-size:11px">Category</span><select class="fci" id="pg-cat" style="'+selDark(_prodFilt.category)+'"><option value="">All</option>'+cats.map(function(cc){return '<option value="'+esc(cc)+'"'+(cc===_prodFilt.category?' selected':'')+'>'+esc(cc)+'</option>';}).join('')+'</select></span>'
@@ -14067,7 +14068,7 @@
         +'<span style="display:flex;align-items:center;gap:5px"><span style="color:var(--muted);font-size:11px">Status</span><select class="fci" id="pg-status" style="'+selDark(_prodFilt.status)+'">'+STAT.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===_prodFilt.status?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></span>'
         +'<span id="pg-count" style="color:var(--faint);font-size:11px"></span>'
         +'<span style="display:inline-flex;align-items:center;gap:5px;margin-left:auto"><span style="color:var(--muted);font-size:11px">Swatch</span><span style="display:inline-flex">'+[['sm','S'],['md','M'],['lg','L']].map(function(o){return '<button class="pg-swsize'+(_pgSwatchSize===o[0]?' active':'')+'" data-s="'+o[0]+'" title="'+({sm:'Small',md:'Medium',lg:'Large'}[o[0]])+' swatches">'+o[1]+'</button>';}).join('')+'</span></span>'+'</div>';
-      document.getElementById('pg-new').onclick=openProductNew;
+      document.getElementById('pg-new').onclick=openProductNew; wireProdViewSel(fb);
       var _pft=document.getElementById('pg-filt-toggle'); if(_pft)_pft.onclick=function(){ var on=fb.classList.toggle('open'); var sp=document.getElementById('pg-stagepills'); if(sp)sp.classList.toggle('open',on); _pft.textContent=on?'⚙ Filters ▴':'⚙ Filters'; };
       fb.querySelectorAll('.pg-swsize').forEach(function(bt){ bt.onclick=function(){ _pgSwatchSize=bt.dataset.s; try{localStorage.setItem('pgSwatchSize',_pgSwatchSize);}catch(e){} fb.querySelectorAll('.pg-swsize').forEach(function(x){ x.classList.toggle('active',x.dataset.s===_pgSwatchSize); }); var g=document.getElementById('pg-grid'); if(g){ g.classList.remove('pg-sw-sm','pg-sw-md','pg-sw-lg'); g.classList.add('pg-sw-'+_pgSwatchSize); } }; });
       wireProdTopSearch();
@@ -14090,8 +14091,8 @@
           if(_prodFilt.type && (r.type||'Product Development')!==_prodFilt.type)return false;
           if(_prodFilt.season && r.season!==_prodFilt.season)return false;
           if(_prodFilt.category && r.category!==_prodFilt.category)return false;
-          if(_prodFilt.supplier && r.supplier!==_prodFilt.supplier)return false;
-          if(q){ var hay=((r.ref||'')+' '+(r.colour_name||'')+' '+(r.supplier||'')+' '+(r.description||'')).toLowerCase(); if(hay.indexOf(q)<0)return false; }
+          if(_prodFilt.supplier && r.supplier!==_prodFilt.supplier && !(r.requests||[]).some(function(x){return x.supplier_name===_prodFilt.supplier;}))return false;   // v27.703 requests carry the suppliers
+          if(q){ var hay=((r.ref||'')+' '+(r.colour_name||'')+' '+(r.supplier||'')+' '+(r.requests||[]).map(function(x){return x.supplier_name+' '+x.supplier_code+' '+x.ref;}).join(' ')+' '+(r.description||'')).toLowerCase(); if(hay.indexOf(q)<0)return false; }
           return true; };
         var base=rows.filter(_passBase);
         var stageCounts={}; STAGE_META.forEach(function(m){stageCounts[m[0]]=0;}); base.forEach(function(r){ if(stageCounts[r.stage]!=null)stageCounts[r.stage]++; });
@@ -14113,6 +14114,7 @@
           if(c==='ref'){ va=((a.colour_name||'')+' '+(a.ref||'')).toLowerCase(); vb=((b.colour_name||'')+' '+(b.ref||'')).toLowerCase(); }
           else if(c==='season'){ va=String(a.season||'').toLowerCase(); vb=String(b.season||'').toLowerCase(); }
           else if(c==='supplier'){ va=String(a.supplier||'').toLowerCase(); vb=String(b.supplier||'').toLowerCase(); }
+          else if(c==='category'){ va=String(a.category||'').toLowerCase(); vb=String(b.category||'').toLowerCase(); }   // v27.703
           else if(c==='sizes'){ va=Number(a.sizes_approved)||0; vb=Number(b.sizes_approved)||0; }
           else if(c==='stage'){ va=_stageRank(a.stage); vb=_stageRank(b.stage); }
           else if(c==='age'){ va=String(a.updated_at||''); vb=String(b.updated_at||''); }   // older (smaller updated_at) sorts first ascending = highest age
@@ -14125,7 +14127,7 @@
         var seasonCount={}, catCount={}; f.forEach(function(r){ var sk=r.season||'', ck=(r.season||'')+'|'+(r.category||''); seasonCount[sk]=(seasonCount[sk]||0)+1; catCount[ck]=(catCount[ck]||0)+1; });
         var _pgSeason=null, _pgCat=null;
         var _tbl='<div class="pg-desktop"><div class="tw"><table class="pg-tbl"><thead><tr>'
-          +[['',''],['Ref','ref'],['Season','season'],['Supplier','supplier'],['Sizes','sizes'],['Stage','stage']].map(function(c){ if(!c[1])return '<th></th>'; var act=_prodSort.col===c[1]; return '<th class="pg-sort" data-sort="'+c[1]+'" title="click to sort" style="cursor:pointer;user-select:none'+(act?';color:var(--blue)':'')+'">'+c[0]+(act?(_prodSort.dir>0?' ▲':' ▼'):'')+'</th>'; }).join('')+'</tr></thead><tbody>'   // v27.671 Category dropped (#9); v27.671 sortable headers (#12); v27.698 Age + Sample shipment dropped (Ben: not needed on the product grid — they live on SAMPLING)
+          +[['',''],['Ref','ref'],['Category','category'],['Sizes','sizes'],['Stage','stage'],['Requests — per component (supplier · stage)','']].map(function(c){ if(!c[1])return '<th'+(c[0]?' class="l"':'')+'>'+c[0]+'</th>'; var act=_prodSort.col===c[1]; return '<th class="pg-sort" data-sort="'+c[1]+'" title="click to sort" style="cursor:pointer;user-select:none'+(act?';color:var(--blue)':'')+'">'+c[0]+(act?(_prodSort.dir>0?' ▲':' ▼'):'')+'</th>'; }).join('')+'</tr></thead><tbody>'   // v27.703 P1: Season + Supplier columns gone (season = group header; supplier lives on the REQUEST); Category badge + Requests-per-component columns (mockup A)
           +f.map(function(r,i){
             var sw=r.has_swatch?'<img class="pg-swatch2 pg-swatch-zoom" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at)+'" title="click to enlarge" style="cursor:zoom-in">':'<span class="pg-swatch2 none">n/a</span>';
             var sKey=r.season||'', cKey=r.category||'', hdr='';
@@ -14134,11 +14136,11 @@
             if(!_flat && cKey!==_pgCat){ _pgCat=cKey; hdr+='<tr class="pg-cathdr" data-season="'+esc(sKey)+'" data-cat="'+esc(cKey)+'"><td colspan="6" style="cursor:pointer;background:var(--line2);'+(_cc?'border-left:6px solid '+_cc+';':'')+'font-weight:600;font-size:12px;letter-spacing:.02em;color:var(--muted);padding:4px 10px"><span style="position:sticky;left:10px;display:inline-flex;align-items:center;gap:8px;vertical-align:middle"><span class="pg-caret" style="display:inline-block;width:13px">▾</span>'+(cKey?hzCatBadge(cKey,_cc,{size:11,pad:'4px 11px'}):'— no category —')+' <span style="font-weight:400;color:var(--faint)">('+catCount[sKey+'|'+cKey]+')</span></span><span class="pg-genreport" data-season="'+esc(sKey)+'" data-cat="'+esc(cKey)+'" title="Generate a printable PDF report for this category in this season" style="float:right;font-size:10px;font-weight:600;color:var(--blue-ink);background:var(--blue-soft);border:1px solid #93c5fd;border-radius:5px;padding:1px 8px;cursor:pointer">⤓ Report</span></td></tr>'; }
             return hdr+'<tr class="pg-datarow" data-season="'+esc(sKey)+'" data-cat="'+esc(cKey)+'">'
               +'<td><span style="display:inline-flex;align-items:center;gap:7px">'+sw+'<button class="planbtn pg-open" data-ref="'+esc(r.ref)+'" data-i="'+i+'">OPEN</button></span></td>'
-              +'<td><div class="pg-colour" data-ref="'+esc(r.ref)+'">'+prodColourDisplay(r)+'</div><div class="pg-ref" data-ref="'+esc(r.ref)+'" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'+esc(r.ref)+(cKey?hzCatBadge(cKey,_cc):'')+prodComboBadge(r)+'</div></td>'   // v27.698 category badge on every row (visible when sorted/flat too)
-              +'<td>'+prodPickBtn(r.ref,'season',r.season,'season')+'</td>'
-              +'<td>'+prodPickBtn(r.ref,'supplier',r.supplier,'supplier')+'</td>'
+              +'<td><div class="pg-colour" data-ref="'+esc(r.ref)+'">'+prodColourDisplay(r)+'</div><div class="pg-ref" data-ref="'+esc(r.ref)+'" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">'+esc(r.ref)+prodComboBadge(r)+'</div></td>'
+              +'<td class="l">'+(cKey?hzCatBadge(cKey,_cc,{size:11,pad:'4px 11px'}):'<span class="mut">—</span>')+'</td>'   // v27.703 category badge column (mockup A)
               +'<td>'+r.sizes_approved+'/'+r.sizes+'</td>'
-              +'<td class="pg-stage-cell" data-ref="'+esc(r.ref)+'"><span class="pg-stagechip" data-ref="'+esc(r.ref)+'" tabindex="0" title="Approval: '+esc(prodStatusFromStage(r.stage)==='approved'?'Approved':prodStatusFromStage(r.stage)==='dropped'?'Rejected':'In development')+' — click to change stage">'+prodStageChipHtml(r.stage)+'</span><span class="pg-stageedit" data-ref="'+esc(r.ref)+'" style="display:none">'+prodStageSelHtml(r.ref,r.stage)+'</span></td></tr>'
+              +'<td class="pg-stage-cell" data-ref="'+esc(r.ref)+'"><span class="pg-stagechip" data-ref="'+esc(r.ref)+'" tabindex="0" title="'+(r.stage_overridden?'Manual override — ':'Derived from its development requests — ')+'Approval: '+esc(prodStatusFromStage(r.stage)==='approved'?'Approved':prodStatusFromStage(r.stage)==='dropped'?'Rejected':'In development')+' — click to override">'+prodStageChipHtml(r.stage)+(r.stage_overridden?' <span class="pg-ovr" title="stage set by hand (overrides the requests)">ⓘ overridden</span>':'')+'</span><span class="pg-stageedit" data-ref="'+esc(r.ref)+'" style="display:none">'+prodStageSelHtml(r.ref,r.stage_overridden?r.stage:'')+'</span></td>'
+              +'<td class="l pg-reqcell" data-ref="'+esc(r.ref)+'">'+prodRequestsCell(r)+'</td></tr>'   // v27.703 requests per component
               +'<tr class="pg-detrow" id="pgdet-'+i+'" data-season="'+esc(r.season||'')+'" data-cat="'+esc(r.category||'')+'" style="display:none"><td colspan="6"><div class="pg-det"></div></td></tr>';
           }).join('')+'</tbody></table></div></div>';
         // MOBILE: a card per product, grouped by season → category; tap a card to open its detail inline.
@@ -14149,7 +14151,8 @@
           var sw=r.has_swatch?'<img class="pgm-sw" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at||'')+'">':'<span class="pgm-sw none"></span>';
           return hdr+'<div class="pgm-card" data-ref="'+esc(r.ref)+'" data-i="'+i+'"'+(r.category_colour?' style="border-left:4px solid '+r.category_colour+'"':'')+'>'
             +'<div class="pgm-top">'+sw+'<div class="pgm-meta"><div class="pgm-colour">'+prodColourDisplay(r)+'</div><div class="pgm-ref">'+esc(r.ref)+' '+(cKey?hzCatBadge(cKey,r.category_colour,{size:9,pad:'2px 7px'}):'')+prodComboBadge(r)+'</div></div>'+'<span class="pgm-stage-chip">'+prodStageChip(r.stage)+'</span></div>'
-            +'<div class="pgm-sub"><span>Sizes '+r.sizes_approved+'/'+r.sizes+'</span><span>'+esc(prodStageOwner(r.stage))+'</span>'+(r.latest_shipment?'<span>📦 '+esc(r.latest_shipment.ref)+'</span>':'')+'</div>'
+            +'<div class="pgm-sub"><span>Sizes '+r.sizes_approved+'/'+r.sizes+'</span><span>'+esc(prodStageOwner(r.stage))+(r.stage_overridden?' · overridden':'')+'</span></div>'
+            +'<div class="pgm-reqs" style="margin-top:6px">'+prodRequestsCell(r,{compact:true})+'</div>'   // v27.703
             +'</div><div class="pg-mdet" id="pgmdet-'+i+'" style="display:none"></div>';
         }).join('');
         g.innerHTML=_tbl+'<div class="pg-mobile">'+mob+'</div>';
@@ -14200,6 +14203,7 @@
         // is a belt-and-braces so a click that lands on any control never toggles the row.
         g.querySelectorAll('tr.pg-datarow').forEach(function(dr){ dr.style.cursor='pointer'; dr.onclick=function(e){ if(e.target&&e.target.closest&&e.target.closest('button,select,input,a,.pg-stagechip,.prod-cell-pick,.pg-stageedit'))return; var b=dr.querySelector('.pg-open'); if(b)b.click(); }; });
         g.querySelectorAll('.prod-cell-pick').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openProdCellPick(b); }; });
+        wireProdRequestChips(g);   // v27.703 request chips + [+] per component
         g.querySelectorAll('.samp-open').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); (typeof openSampleDrawer==="function"?openSampleDrawer(a.dataset.ref):gotoSample(a.dataset.ref)); }; });   // sample-shipment ref -> editable drawer (was: navigate to SUPPLY Samples)
         // Single count badge (like the PO grid): fast 120ms tooltip explains the actions; click opens the product (snooze lives inside).
         g.querySelectorAll('.pg-actbadge').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var pb=g.querySelector('.pg-open[data-ref="'+(window.CSS&&CSS.escape?CSS.escape(b.dataset.ref):b.dataset.ref)+'"]'); if(pb)pb.click(); }; });
@@ -14243,23 +14247,21 @@
       +pRow('Type','<select class="fci" id="pn-type" style="width:210px"><option value="Product Development">Product Development</option><option value="Custom Order">Custom Order</option></select> <span id="pn-type-hint" style="color:var(--faint);font-size:11px;margin-left:6px">Reference prefix is the <b>season code</b></span>')
       +'<div id="pn-season-row">'+pRow('Season','<input class="fci" id="pn-season" list="pn-seasonlist" style="width:200px" placeholder="search season… (e.g. SS27)">')+'</div>'
       +pRow('Category','<input class="fci" id="pn-cat" list="pn-catlist" style="width:280px" placeholder="search category…">')
-      +pRow('Supplier','<span class="pn-sup-box" style="display:inline-block;min-width:220px;border:1px solid var(--line);border-radius:5px;padding:4px 8px">'+prodPickBtn('','supplier','','supplier')+'</span> <span style="color:var(--faint);font-size:11px;margin-left:6px">code goes in the reference</span>')
       +pRow('Development colour name','<input class="fci" id="pn-colour" style="width:360px" placeholder="e.g. Ibiza Glow — comma-separate to create several at once"><div style="color:var(--faint);font-size:11px;margin-top:2px">The sampling / development colour. Multiple names separated by commas each create their own product (same season, category &amp; sizes). Bulk colour name is set later on Master data.</div>')
       +pRow('Sizes','<input class="fci" id="pn-sizes" style="width:280px" placeholder="comma-separated, e.g. S, M, L, XL">')
       +pRow('Description','<textarea class="fci" id="pn-desc" rows="3" style="width:100%" placeholder="detailed description…"></textarea>')
-      +pRow('Approval method','<select class="fci" id="pn-approval" style="width:210px"><option value="">— not set —</option><option value="photo">Approval by photo</option><option value="samples">Send samples</option></select> <span style="color:var(--faint);font-size:11px;margin-left:6px">how sign-off happens — shown to the supplier</span>')
+      +'<div class="mut tiny" style="margin:4px 0 8px">Reference = <b>season · type · colour way</b> (e.g. SS27-TOWEL-CLASSICBLUE), editable later. Suppliers, approval method and recipient country are set per <b>development request</b> after the product exists.</div>'   // v27.703 P1: supplier / approval moved to the request
       +'<div style="margin-top:12px"><button class="save-btn" id="pn-save" style="background:var(--blue);color:#fff;border-color:var(--blue)">Create</button> <button class="save-btn light" id="pn-cancel">Cancel</button> <span id="pn-msg" style="font-size:12px;margin-left:8px"></span></div></div>';
     document.getElementById('pn-cancel').onclick=function(){ selectProductSub('plan'); };
     var _pnType=document.getElementById('pn-type'), _pnSeasonRow=document.getElementById('pn-season-row');
     if(_pnType)_pnType.onchange=function(){ var _cu=(this.value==='Custom Order'); if(_pnSeasonRow)_pnSeasonRow.style.display=_cu?'none':'';
       var _h=document.getElementById('pn-type-hint'); if(_h)_h.innerHTML=_cu?'Custom Order → no season, reference prefix is <b>CUST-</b>':'Reference prefix is the <b>season code</b>'; };   // custom orders have no season; hint follows the type (Ben, v27.480)
-    var pnSupplier=''; var _pns=c.querySelector('.pn-sup-box .prod-cell-pick'); if(_pns)_pns.onclick=function(e){ e.stopPropagation(); openProdCellPick(_pns,null,function(val){ pnSupplier=val||''; _pns.innerHTML = pnSupplier?esc(pnSupplier)+' ▾':'<span class="mut">— <span style="background:var(--neg-bg);color:var(--neg);font-weight:700;border-radius:3px;padding:0 3px">set</span></span> ▾'; }); };
     document.getElementById('pn-save').onclick=function(){ var btn=this, msg=document.getElementById('pn-msg');
       var type=(document.getElementById('pn-type')||{}).value||'Product Development', isCustom=(type==='Custom Order');
       var season=isCustom?'':document.getElementById('pn-season').value, cat=document.getElementById('pn-cat').value;
       if(!cat||(!isCustom&&!season)){ msg.style.color='var(--neg)'; msg.textContent=isCustom?'Category required.':'Season and category required.'; return; }
       var sizes=document.getElementById('pn-sizes').value.split(',').map(function(s){return s.trim();}).filter(Boolean);
-      var desc=document.getElementById('pn-desc').value, supplier=pnSupplier, approval=document.getElementById('pn-approval').value;
+      var desc=document.getElementById('pn-desc').value;
       var colours=document.getElementById('pn-colour').value.split(',').map(function(s){return s.trim();}).filter(Boolean);
       if(!colours.length)colours=[''];   // no colour → still create one product
       btn.disabled=true; msg.style.color='var(--muted)'; msg.textContent=colours.length>1?('Creating '+colours.length+' products…'):'Creating…';
@@ -14267,7 +14269,7 @@
       // sequential (not parallel) so the per-(season,category) counter increments cleanly without a race
       (function next(){
         if(i>=colours.length){ if(created.length===1){ _prodDetailTab='master'; selectProductSub('plan'); var _newRef=created[0]; setTimeout(function(){ renderProductDetail(_newRef); },0); } else { selectProductSub('plan'); } return; }   // go to PLAN then open the new item's detail (mirrors the grid/dashboard open pattern; also avoids rendering into the stale new-product form box)
-        shipPost('/api/product/item',{type:type,season:season,category:cat,supplier:supplier,colour_name:colours[i],description:desc,sizes:sizes,approval_method:approval,created_by:(window.ME&&ME.email)||''},function(j){
+        shipPost('/api/product/item',{type:type,season:season,category:cat,colour_name:colours[i],description:desc,sizes:sizes,created_by:(window.ME&&ME.email)||''},function(j){
           if(j&&j.error){ msg.style.color='var(--neg)'; msg.textContent='Failed on “'+(colours[i]||'(no colour)')+'”: '+j.error; btn.disabled=false; return; }
           if(j&&j.ref)created.push(j.ref); i++; msg.textContent='Created '+created.length+' of '+colours.length+'…'; next(); });
       })(); }; }); }); }
@@ -14287,11 +14289,104 @@
       fetch('/api/product/item/'+encodeURIComponent(ref)+'/sizes').then(function(r){return r.json();}).then(function(sd){ if(box!==_prodDetailBox)return; _prodDetail.sizes=(sd&&sd.sizes)||[]; _prodDetail.samples=(sd&&sd.samples)||[]; _prodDetail.components=(sd&&sd.components)||[]; _prodDetail._sizesLoaded=true; _prodItemCache[ref]={t:Date.now(),d:_prodDetail};
         if(_prodDetailTab==='master'){ var _b=box.querySelector('.pd-body'); if(_b)renderProdMaster(_b,_prodDetail); } else renderProdDetailShell(box,_prodDetail,seed); }).catch(function(){});
     }).catch(function(e){ box.innerHTML='<div style="color:var(--neg)">Failed: '+esc(e.message||e)+'</div>'; }); }
+  // ── v27.703 PRODUCT split P1 slice 2 — development REQUESTS on the client ─────────────────────────────────────────────
+  // A request = one supplier × chosen components (× sizes) with its own stage. Chips: "CODE ● stage" coloured by stage.
+  function prodRequestChip(q,ref){ var m=stageMeta(q.stage||'sample_development'); return '<span class="pg-reqchip" data-ref="'+esc(ref)+'" data-rid="'+q.id+'" title="'+esc(q.ref)+' · '+esc(q.supplier_name)+' · '+esc(m[1])+(q.components&&q.components.length?' · '+esc(q.components.map(function(c){return c.name;}).join(', ')):'')+(q.samples?' · '+q.samples+' sample'+(q.samples===1?'':'s')+' ('+(q.samples_received||0)+' received)':'')+'" style="display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:700;padding:2px 8px 2px 6px;border-radius:999px;background:'+m[3]+';color:'+m[4]+';cursor:pointer;white-space:nowrap;line-height:1.4"><span style="font-family:ui-monospace,Menlo,monospace">'+esc(q.supplier_code||q.supplier_name)+'</span><span style="opacity:.55">●</span><span style="font-weight:600">'+esc(m[1])+'</span>'+(q.samples?'<span style="opacity:.7;font-weight:500">·&nbsp;'+(q.samples_received||0)+'/'+q.samples+'</span>':'')+'</span>'; }
+  // Grid cell: one line per sampled component → its request chips + a [+] that starts a request for THAT component.
+  function prodRequestsCell(r,opts){ opts=opts||{}; var comps=(r.components||[]), reqs=(r.requests||[]);
+    if(!comps.length){ return (reqs.length?reqs.map(function(q){return prodRequestChip(q,r.ref);}).join(' '):'<span class="mut tiny">no components yet</span>')+' <a class="pg-req-add" data-ref="'+esc(r.ref)+'" data-cid="" title="new development request" style="font-size:11px;font-weight:800;color:var(--blue);cursor:pointer;margin-left:4px">+</a>'; }
+    var lines=comps.map(function(c){ var mine=reqs.filter(function(q){ return (q.components||[]).some(function(x){return String(x.id)===String(c.id);}); });
+      if((c.sampling_mode||'sampled')==='spec_linked') return '<div class="pg-reqline" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:1px 0"><span class="pg-reqcomp" style="font-size:10.5px;color:var(--muted);min-width:'+(opts.compact?'0':'74px')+'">'+esc(c.name)+':</span><span class="mut tiny">spec-linked · no sampling</span></div>';
+      return '<div class="pg-reqline" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:1px 0"><span class="pg-reqcomp" style="font-size:10.5px;color:var(--muted);min-width:'+(opts.compact?'0':'74px')+'">'+esc(c.name)+':</span>'+(mine.length?mine.map(function(q){return prodRequestChip(q,r.ref);}).join(''):'<span class="mut tiny">no request</span>')+'<a class="pg-req-add" data-ref="'+esc(r.ref)+'" data-cid="'+c.id+'" title="new development request for '+esc(c.name)+'" style="font-size:11px;font-weight:800;color:var(--blue);cursor:pointer;margin-left:2px">+</a></div>'; });
+    var orphan=reqs.filter(function(q){ return !(q.components||[]).length; });
+    if(orphan.length) lines.push('<div class="pg-reqline" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:1px 0"><span class="pg-reqcomp mut" style="font-size:10.5px">(no component):</span>'+orphan.map(function(q){return prodRequestChip(q,r.ref);}).join('')+'</div>');
+    return lines.join(''); }
+  // Wire chips + [+] inside any container (grid, cards, master data).
+  function wireProdRequestChips(scope){ scope.querySelectorAll('.pg-reqchip').forEach(function(ch){ ch.onclick=function(e){ e.stopPropagation(); _prodDetailTab='requests'; _prodHighlightReq=Number(ch.dataset.rid)||null; openProductDrawer(ch.dataset.ref,null,'requests'); }; });
+    scope.querySelectorAll('.pg-req-add').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); openRequestForm(a.dataset.ref,{component_ids:a.dataset.cid?[Number(a.dataset.cid)]:[]}); }; }); }
+  var _prodHighlightReq=null;
+  // View switcher (Ben: Grid / Range / Dashboard are one page with a dropdown)
+  function hzProdViewSel(cur){ return '<span style="display:inline-flex;align-items:center;gap:5px"><span style="color:var(--muted);font-size:11px">View</span><select class="fci hz-prod-view" style="text-align:left;font-weight:600;background:var(--nav);color:#fff;border-color:var(--nav)">'+[['plan','Grid'],['range','Range plan'],['dashboard','Dashboard']].map(function(v){return '<option value="'+v[0]+'"'+(v[0]===cur?' selected':'')+'>'+v[1]+'</option>';}).join('')+'</select></span>'; }
+  function wireProdViewSel(){ /* delegated below — kept as a no-op hook for call sites */ }
+  document.addEventListener('change',function(e){ var t=e.target; if(t&&t.classList&&t.classList.contains('hz-prod-view'))selectProductSub(t.value); });   // one delegated handler covers Plan / Range / Dashboard bars
+  // Requests tab: every request on the product — inline-editable stage / approval / country / dev start / sizes / stakeholders / emails / components, + delete, + "+ Development request".
+  function renderProdRequests(body,ref){ body.innerHTML='<div style="color:var(--faint)">Loading…</div>';
+    Promise.all([fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}), fetch('/api/product/component-types').then(function(r){return r.json();}).catch(function(){return {suppliers:[]};}), fetch('/api/supply/all-users').then(function(r){return r.json();}).catch(function(){return [];})]).then(function(a){ var d=a[0]||{}, it=d.item||{}, comps=d.components||[], sizes=d.sizes||[], reqs=it.requests||[]; var SUPS=(a[1]&&a[1].suppliers)||[]; var USERS=(Array.isArray(a[2])?a[2]:(a[2]&&a[2].users)||[]).map(function(u){return typeof u==='string'?u:(u.email||'');}).filter(Boolean);
+      var STG=STAGE_META.map(function(m){return m[0];}); function m_(s){ return stageMeta(s||'sample_development'); }
+      var head='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px"><div style="font-weight:700;font-size:13px">Development requests <span class="mut" style="font-weight:400;font-size:11px">— one per supplier × component set; product stage is '+(it.stage_overridden?'<b>overridden</b>':'derived from these')+'</span></div><button class="save-btn pr-new" style="background:var(--blue);color:#fff;border-color:var(--blue);margin-left:auto">+ Development request</button></div>';
+      if(!reqs.length){ body.innerHTML=head+'<div style="text-align:center;padding:30px 14px;color:var(--muted);border:1px dashed var(--line);border-radius:10px"><div style="font-size:26px;margin-bottom:6px">🧵</div>No development request yet — assign a supplier to one or more components to start sampling.</div>'; body.querySelector('.pr-new').onclick=function(){ openRequestForm(ref,{}); }; return; }
+      var rowsHtml=reqs.map(function(q){ var m=m_(q.stage); var hl=(_prodHighlightReq&&Number(_prodHighlightReq)===Number(q.id));
+        var compBoxes=comps.map(function(c){ var on=(q.components||[]).some(function(x){return String(x.id)===String(c.id);}); return '<label style="display:inline-flex;align-items:center;gap:3px;font-size:11px;margin:0 8px 3px 0;cursor:pointer;opacity:'+((c.sampling_mode||'sampled')==='spec_linked'?'.5':'1')+'"><input type="checkbox" class="pr-comp" data-rid="'+q.id+'" value="'+c.id+'"'+(on?' checked':'')+'> '+esc(c.name)+((c.sampling_mode||'sampled')==='spec_linked'?' <span class="mut">(spec)</span>':'')+'</label>'; }).join('');
+        var sizeBoxes=sizes.map(function(s){ var on=!(q.size_ids||[]).length||(q.size_ids||[]).some(function(x){return String(x)===String(s.id);}); return '<label style="display:inline-flex;align-items:center;gap:3px;font-size:11px;margin:0 8px 3px 0;cursor:pointer"><input type="checkbox" class="pr-size" data-rid="'+q.id+'" value="'+s.id+'"'+(on?' checked':'')+'> '+esc(s.size_label)+'</label>'; }).join('')||'<span class="mut tiny">no sizes on the product</span>';
+        var rc=String(q.recipient_countries||'UK').toUpperCase().split(',').map(function(x){return x.trim();});
+        var cBoxes=['UK','US','AU','DIRECT'].map(function(cc){ return '<label style="display:inline-flex;align-items:center;gap:3px;font-size:11px;margin:0 8px 0 0;cursor:pointer"><input type="checkbox" class="pr-cty" data-rid="'+q.id+'" value="'+cc+'"'+(rc.indexOf(cc)>=0?' checked':'')+'> '+(cc==='DIRECT'?'Direct to Client':cc)+'</label>'; }).join('');
+        return '<div class="pr-card" data-rid="'+q.id+'" style="border:1px solid '+(hl?'var(--blue)':'var(--line)')+';border-left:6px solid '+m[3]+';border-radius:10px;padding:10px 12px;margin-bottom:10px;background:var(--card)'+(hl?';box-shadow:0 0 0 3px var(--blue-soft)':'')+'">'
+          +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><input class="fci pr-ref" data-rid="'+q.id+'" value="'+esc(q.ref)+'" title="request reference — editable" style="width:250px;font-family:ui-monospace,Menlo,monospace;font-weight:700"><span style="font-weight:600">'+esc(q.supplier_name)+'</span>'+prodStageChip(q.stage)
+          +'<select class="fci pr-stage" data-rid="'+q.id+'" style="'+prodStageStyle(q.stage)+'">'+STG.map(function(s){return '<option value="'+s+'"'+(s===q.stage?' selected':'')+'>'+stageMeta(s)[1]+'</option>';}).join('')+'</select>'
+          +'<span class="mut tiny">'+(q.samples||0)+' sample'+((q.samples||0)===1?'':'s')+' · '+(q.samples_received||0)+' received · created '+esc(fd(q.created_at||''))+'</span>'
+          +'<a class="pr-del" data-rid="'+q.id+'" data-n="'+(q.samples||0)+'" style="margin-left:auto;color:var(--neg);cursor:pointer;font-size:11px">delete</a><span class="pr-msg tiny" data-rid="'+q.id+'" style="min-width:70px"></span></div>'
+          +'<div style="display:grid;grid-template-columns:110px 1fr;gap:4px 10px;margin-top:8px;font-size:12px;align-items:center">'
+          +'<span class="mut tiny">Components</span><span>'+compBoxes+'</span>'
+          +'<span class="mut tiny">Sizes</span><span>'+sizeBoxes+'</span>'
+          +'<span class="mut tiny">Approval</span><span><select class="fci pr-appr" data-rid="'+q.id+'" style="width:190px"><option value="samples"'+(q.approval_method!=='photo'?' selected':'')+'>Send samples</option><option value="photo"'+(q.approval_method==='photo'?' selected':'')+'>Approval by photo</option></select></span>'
+          +'<span class="mut tiny">Recipient country</span><span>'+cBoxes+'</span>'
+          +'<span class="mut tiny">Development start</span><span><input type="date" class="fci pr-dev" data-rid="'+q.id+'" value="'+esc(q.dev_start||'')+'" style="width:150px"></span>'
+          +'<span class="mut tiny">Stakeholders</span><span><input class="fci pr-stake" data-rid="'+q.id+'" list="pr-userlist" value="'+esc((q.internal_stakeholders||[]).join(', '))+'" placeholder="emails, comma-separated" style="width:100%;max-width:520px"></span>'
+          +'<span class="mut tiny">Notify emails</span><span><input class="fci pr-notify" data-rid="'+q.id+'" value="'+esc((q.notify_emails||[]).join(', '))+'" placeholder="emails, comma-separated — emailed on ship / receive" style="width:100%;max-width:520px"></span>'
+          +'<span class="mut tiny">Notes</span><span><input class="fci pr-notes" data-rid="'+q.id+'" value="'+esc(q.notes||'')+'" style="width:100%;max-width:520px"></span>'
+          +'</div></div>'; }).join('');
+      body.innerHTML=head+'<datalist id="pr-userlist">'+USERS.map(function(u){return '<option value="'+esc(u)+'">';}).join('')+'</datalist>'+rowsHtml+'<div class="mut tiny">Changes save on edit. Deleting a request that has sample versions asks for confirmation.</div>';
+      _prodHighlightReq=null;
+      body.querySelector('.pr-new').onclick=function(){ openRequestForm(ref,{}); };
+      function msgOf(rid){ return body.querySelector('.pr-msg[data-rid="'+rid+'"]'); }
+      function save(rid,payload,after){ var m=msgOf(rid); if(m){ m.style.color='var(--muted)'; m.textContent='saving…'; } shipPost('/api/product/request/'+rid,payload,function(j){ if(m){ if(j&&j.error){ m.style.color='var(--neg)'; m.textContent=j.error; } else { m.style.color='var(--pos)'; m.textContent='✓ saved'; setTimeout(function(){ m.textContent=''; },2000); } } try{ prodItemInvalidate(ref); pgetClear(); }catch(e){} if(after)after(j); }); }
+      function emails(v){ return String(v||'').split(/[,;\s]+/).map(function(x){return x.trim();}).filter(Boolean); }
+      body.querySelectorAll('.pr-ref').forEach(function(el){ el.onchange=function(){ save(el.dataset.rid,{ref:el.value}); }; });
+      body.querySelectorAll('.pr-stage').forEach(function(el){ el.onchange=function(){ el.setAttribute('style',prodStageStyle(el.value)); save(el.dataset.rid,{stage:el.value},function(){ renderProdRequests(body,ref); }); }; });
+      body.querySelectorAll('.pr-appr').forEach(function(el){ el.onchange=function(){ save(el.dataset.rid,{approval_method:el.value}); }; });
+      body.querySelectorAll('.pr-dev').forEach(function(el){ el.onchange=function(){ save(el.dataset.rid,{dev_start:el.value||''}); }; });
+      body.querySelectorAll('.pr-stake').forEach(function(el){ el.onchange=function(){ save(el.dataset.rid,{internal_stakeholders:emails(el.value)}); }; });
+      body.querySelectorAll('.pr-notify').forEach(function(el){ el.onchange=function(){ save(el.dataset.rid,{notify_emails:emails(el.value)}); }; });
+      body.querySelectorAll('.pr-notes').forEach(function(el){ el.onchange=function(){ save(el.dataset.rid,{notes:el.value}); }; });
+      body.querySelectorAll('.pr-cty').forEach(function(cb){ cb.onchange=function(){ var rid=cb.dataset.rid, vals=[]; body.querySelectorAll('.pr-cty[data-rid="'+rid+'"]:checked').forEach(function(x){vals.push(x.value);}); if(!vals.length){ cb.checked=true; vals=[cb.value]; } save(rid,{recipient_countries:vals.join(',')}); }; });
+      body.querySelectorAll('.pr-comp').forEach(function(cb){ cb.onchange=function(){ var rid=cb.dataset.rid, vals=[]; body.querySelectorAll('.pr-comp[data-rid="'+rid+'"]:checked').forEach(function(x){vals.push(Number(x.value));}); if(!vals.length){ cb.checked=true; vals=[Number(cb.value)]; alert('A request needs at least one component.'); return; } save(rid,{component_ids:vals}); }; });
+      body.querySelectorAll('.pr-size').forEach(function(cb){ cb.onchange=function(){ var rid=cb.dataset.rid, all=body.querySelectorAll('.pr-size[data-rid="'+rid+'"]'), on=[]; all.forEach(function(x){ if(x.checked)on.push(Number(x.value)); }); save(rid,{size_ids:on.length===all.length?[]:on}); }; });   // all ticked = every size (stored as empty)
+      body.querySelectorAll('.pr-del').forEach(function(a){ a.onclick=function(){ var n=Number(a.dataset.n)||0; if(!confirm('Delete this development request'+(n?' and its '+n+' sample version'+(n===1?'':'s'):'')+'?'))return; shipPost('/api/product/request/'+a.dataset.rid+'/delete',{force:true},function(j){ if(j&&j.error){alert(j.error);return;} try{ prodItemInvalidate(ref); pgetClear(); }catch(e){} renderProdRequests(body,ref); }); }; });
+    }).catch(function(e){ body.innerHTML='<div style="color:var(--neg)">Failed: '+esc(e.message||e)+'</div>'; }); }
+  // "+ Development request" — modal: supplier · components (pre-ticked from [+]) · sizes · approval · country · dev start · stakeholders · notify emails
+  function openRequestForm(ref,opts){ opts=opts||{}; closeShPop&&0;
+    Promise.all([fetch('/api/product/item/'+encodeURIComponent(ref)).then(function(r){return r.json();}), fetch('/api/product/component-types').then(function(r){return r.json();}).catch(function(){return {suppliers:[]};}), fetch('/api/supply/all-users').then(function(r){return r.json();}).catch(function(){return [];})]).then(function(a){ var d=a[0]||{}, it=d.item||{}, comps=d.components||[], sizes=d.sizes||[]; var SUPS=(a[1]&&a[1].suppliers)||[]; var USERS=(Array.isArray(a[2])?a[2]:(a[2]&&a[2].users)||[]).map(function(u){return typeof u==='string'?u:(u.email||'');}).filter(Boolean);
+      var pre=(opts.component_ids||[]).map(String); var defSup=''; comps.forEach(function(c){ if(pre.indexOf(String(c.id))>=0&&c.supplier&&!defSup)defSup=c.supplier; });
+      var ov=document.createElement('div'); ov.id='pr-form-ov'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:200050;display:flex;align-items:flex-start;justify-content:center;padding:6vh 12px;overflow:auto';
+      ov.innerHTML='<div style="background:var(--card);border-radius:12px;box-shadow:0 18px 60px rgba(0,0,0,.35);width:100%;max-width:640px;padding:16px 18px;text-align:left">'
+        +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><div style="font-weight:800;font-size:15px">+ Development request</div><span class="mut" style="font-size:12px">'+esc(ref)+' · '+esc(prodColourDisplay(it))+'</span><a id="prf-x" style="margin-left:auto;cursor:pointer;font-size:18px;color:var(--muted)">×</a></div>'
+        +'<div style="display:grid;grid-template-columns:130px 1fr;gap:8px 10px;font-size:12px;align-items:center">'
+        +'<span class="mut tiny">Supplier</span><span><input class="fci" id="prf-sup" list="prf-suplist" value="'+esc(defSup)+'" placeholder="search supplier…" style="width:100%;max-width:340px"><datalist id="prf-suplist">'+SUPS.map(function(s){return '<option value="'+esc(s)+'">';}).join('')+'</datalist> <span id="prf-ref" class="mut tiny" style="margin-left:6px"></span></span>'
+        +'<span class="mut tiny">Components</span><span>'+(comps.length?comps.map(function(c){ var spec=(c.sampling_mode||'sampled')==='spec_linked'; return '<label style="display:inline-flex;align-items:center;gap:3px;margin:0 10px 4px 0;cursor:pointer;opacity:'+(spec?'.5':'1')+'"><input type="checkbox" class="prf-comp" value="'+c.id+'"'+(pre.indexOf(String(c.id))>=0?' checked':'')+(spec?' title="spec-linked — no sampling"':'')+'> '+esc(c.name)+(c.supplier?' <span class="mut">(default '+esc(c.supplier)+')</span>':'')+'</label>'; }).join(''):'<span class="mut tiny">this product has no components yet — add them on Size &amp; variants first</span>')+'</span>'
+        +'<span class="mut tiny">Sizes</span><span>'+(sizes.length?sizes.map(function(s){return '<label style="display:inline-flex;align-items:center;gap:3px;margin:0 10px 4px 0;cursor:pointer"><input type="checkbox" class="prf-size" value="'+s.id+'" checked> '+esc(s.size_label)+'</label>';}).join('')+'<span class="mut tiny">(all ticked = every size)</span>':'<span class="mut tiny">no sizes on the product</span>')+'</span>'
+        +'<span class="mut tiny">Approval</span><span><select class="fci" id="prf-appr" style="width:190px"><option value="samples">Send samples</option><option value="photo">Approval by photo</option></select></span>'
+        +'<span class="mut tiny">Recipient country</span><span>'+['UK','US','AU','DIRECT'].map(function(cc){return '<label style="display:inline-flex;align-items:center;gap:3px;margin:0 10px 0 0;cursor:pointer"><input type="checkbox" class="prf-cty" value="'+cc+'"'+(cc==='UK'?' checked':'')+'> '+(cc==='DIRECT'?'Direct to Client':cc)+'</label>';}).join('')+'</span>'
+        +'<span class="mut tiny">Development start</span><span><input type="date" class="fci" id="prf-dev" value="'+new Date().toISOString().slice(0,10)+'" style="width:150px"></span>'
+        +'<span class="mut tiny">Stakeholders</span><span><input class="fci" id="prf-stake" list="prf-userlist" value="'+esc((window.ME&&ME.email)||'')+'" placeholder="emails, comma-separated" style="width:100%;max-width:520px"><datalist id="prf-userlist">'+USERS.map(function(u){return '<option value="'+esc(u)+'">';}).join('')+'</datalist></span>'
+        +'<span class="mut tiny">Notify emails</span><span><input class="fci" id="prf-notify" placeholder="emails, comma-separated — emailed when samples ship / arrive" style="width:100%;max-width:520px"></span>'
+        +'<span class="mut tiny">Notes</span><span><input class="fci" id="prf-notes" placeholder="optional" style="width:100%;max-width:520px"></span>'
+        +'</div><div style="margin-top:14px;display:flex;gap:8px;align-items:center"><button class="save-btn" id="prf-save" style="background:var(--blue);color:#fff;border-color:var(--blue)">Create request</button><button class="save-btn light" id="prf-cancel">Cancel</button><span id="prf-msg" style="font-size:12px"></span></div></div>';
+      document.body.appendChild(ov); var close=function(){ ov.remove(); }; ov.querySelector('#prf-x').onclick=close; ov.querySelector('#prf-cancel').onclick=close; ov.onclick=function(e){ if(e.target===ov)close(); };
+      var supIn=ov.querySelector('#prf-sup'), refHint=ov.querySelector('#prf-ref'); function hint(){ var s=supIn.value.trim(); refHint.textContent=s?('→ '+ref+'-'+s.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,3)+'  (code from the supplier record; editable after)'):''; } supIn.oninput=hint; hint(); if(!defSup)supIn.focus();
+      ov.querySelector('#prf-save').onclick=function(){ var msg=ov.querySelector('#prf-msg'); var sup=supIn.value.trim(); var cids=[]; ov.querySelectorAll('.prf-comp:checked').forEach(function(x){cids.push(Number(x.value));}); var sz=[], all=ov.querySelectorAll('.prf-size'); ov.querySelectorAll('.prf-size:checked').forEach(function(x){sz.push(Number(x.value));}); var cty=[]; ov.querySelectorAll('.prf-cty:checked').forEach(function(x){cty.push(x.value);});
+        if(!sup){ msg.style.color='var(--neg)'; msg.textContent='Pick a supplier.'; return; } if(!cids.length){ msg.style.color='var(--neg)'; msg.textContent='Tick at least one component.'; return; }
+        var em=function(v){ return String(v||'').split(/[,;\s]+/).map(function(x){return x.trim();}).filter(Boolean); };
+        this.disabled=true; msg.style.color='var(--muted)'; msg.textContent='Creating…';
+        shipPost('/api/product/request',{item_ref:ref,supplier_name:sup,component_ids:cids,size_ids:(sz.length===all.length?[]:sz),approval_method:ov.querySelector('#prf-appr').value,recipient_countries:cty.join(',')||'UK',dev_start:ov.querySelector('#prf-dev').value||null,internal_stakeholders:em(ov.querySelector('#prf-stake').value),notify_emails:em(ov.querySelector('#prf-notify').value),notes:ov.querySelector('#prf-notes').value,created_by:(window.ME&&ME.email)||''},function(j){ if(j&&j.error){ msg.style.color='var(--neg)'; msg.textContent=j.error; ov.querySelector('#prf-save').disabled=false; return; }
+          close(); try{ prodItemInvalidate(ref); pgetClear(); }catch(e){} _prodHighlightReq=j.id||null;
+          var pc=document.getElementById('product-content'); if(PRODUCT_SUB==='plan'&&pc&&!_prodDetailBox){ renderProductPlan(pc); } else if(typeof _prodDetail!=='undefined'&&_prodDetail&&_prodDetail.item&&_prodDetail.item.ref===ref){ _prodDetailTab='requests'; renderProductDetail(ref); } else { renderProductPlan(pc); }
+          if(opts.after)try{opts.after(j);}catch(e){} }); }; }).catch(function(e){ alert('Could not open the request form: '+(e.message||e)); }); }
   function renderProdDetailShell(c,d,seed){ var it=d.item; var inline=(c!==document.getElementById('product-content'));
     if(_prodDetailTab==='components')_prodDetailTab='sizes';   // Components folded into Sizes & Variants (v27.455) — redirect old link/hash before the tab bar renders
     var _u=Number(d.unread_supplier)||0;
     var _mAct=d._sizesLoaded?prodDetailActs(d):(seed?prodOpenActs(seed).n:0);   // seed's action count until the real sizes land
-    var tabs=[['master','Master data'],['sizes','Size &amp; variants'+(_mAct?' <span class="ex-badge">'+_mAct+'</span>':'')],['samples','Samples'],['timeline','Timeline'+(_u?' <span class="ex-badge">'+_u+'</span>':'')],['documents','Documents']];
+    var _nReq=((it&&it.requests)||[]).length;
+    var tabs=[['master','Master data'],['sizes','Size &amp; variants'+(_mAct?' <span class="ex-badge">'+_mAct+'</span>':'')],['requests','Requests'+(_nReq?' <span class="ex-badge" style="background:var(--nav)">'+_nReq+'</span>':'')],['samples','Samples'],['timeline','Timeline'+(_u?' <span class="ex-badge">'+_u+'</span>':'')],['documents','Documents']];   // v27.703 Requests tab
     // Full-page mode → the full header with Back. Full header vs the compact strip below.
     var header=inline?'':('<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px"><button class="save-btn light" id="pd-back">← Back</button>'
       +(it.has_swatch?'<img src="/api/product/swatch/'+encodeURIComponent(it.ref)+'?t='+encodeURIComponent(it.updated_at)+'" style="width:56px;height:56px;object-fit:cover;border-radius:8px;border:1px solid #e5e7eb">':'')
@@ -14307,6 +14402,7 @@
     if(_prodDetailTab==='documents')return renderProdDocs(body,it.ref);
     if(_prodDetailTab==='components'){ _prodDetailTab='sizes'; }   // Components folded into Sizes & Variants (v27.455) — redirect any old link/hash
     if(_prodDetailTab==='samples')return renderProdSamplesTab(body,it.ref);
+    if(_prodDetailTab==='requests')return renderProdRequests(body,it.ref);   // v27.703
     if(_prodDetailTab==='sizes')return renderProdMaster(body,d,'sizes');
     if(!d._coreLoaded && d._partial){ body.innerHTML='<div class="pd-skel">'+Array(5).join('x').split('x').map(function(){return '<div class="pd-skel-row"></div>';}).join('')+'</div>'; return; }   // master fields wait on the tiny core call
     renderProdMaster(body,d); }
@@ -14583,7 +14679,7 @@
             one(); }); }).catch(function(e){ if(msg)msg.textContent=f.name+': '+(e&&e.message||'upload failed'); one(); }); }
         one(); }; });
       body.querySelectorAll('.samp-open').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); (typeof openSampleDrawer==="function"?openSampleDrawer(a.dataset.ref):gotoSample(a.dataset.ref)); }; });   // sample-shipment ref -> editable drawer (was: navigate to SUPPLY Samples)
-      var _pns=body.querySelector('.prod-newsamp'); if(_pns)_pns.onclick=function(){ var _d=_prodDetail; _newSampleForProduct((_d&&_d.item&&_d.item.supplier)||'', _prodSeedSku(_d, ref)); };
+      var _pns=body.querySelector('.prod-newsamp'); if(_pns)_pns.onclick=function(){ var _d=_prodDetail; var _rq=(_d&&_d.item&&_d.item.requests)||[]; _newSampleForProduct((_rq[0]&&_rq[0].supplier_name)||(_d&&_d.item&&_d.item.supplier)||'', _prodSeedSku(_d, ref)); };   // v27.703 supplier from the first development request
       // Sample REQUESTS (SR-nn) linked to this product — admin-created, may include this product's SKUs / dev samples.
       var _srBox=body.querySelector('#prod-sr-list'); if(_srBox){ fetch('/api/product/'+encodeURIComponent(ref)+'/sample-requests').then(function(r){return r.json();}).then(function(sr){ sr=Array.isArray(sr)?sr:[];
         if(!sr.length){ _srBox.innerHTML='<div class="mut tiny" style="padding:2px 0">No sample requests linked to this product yet.</div>'; return; }
@@ -14713,18 +14809,12 @@
       +pRow('Type','<select class="fci pm-field pm-fld" data-f="type" id="pm-type"><option value="Product Development"'+(_typeVal==='Product Development'?' selected':'')+'>Product Development</option><option value="Custom Order"'+(_typeVal==='Custom Order'?' selected':'')+'>Custom Order</option></select>')
       +'<div id="pm-season-row"'+(_typeVal==='Custom Order'?' style="display:none"':'')+'>'+pRow('Season','<select class="fci pm-field pm-fld" data-f="season" id="pm-season">'+seasonOpts+'</select>')+'</div>'
       +pRow('Category','<select class="fci pm-field pm-fld" data-f="category" id="pm-cat">'+catOpts+'</select>')
-      +pRow('Supplier','<span class="pm-sup-pick" style="display:inline-block;min-width:200px;border:1px solid var(--line);border-radius:5px;padding:4px 8px">'+prodPickBtn(it.ref,'supplier',it.supplier,'supplier')+'</span> <span style="color:var(--faint);font-size:11px;margin-left:6px">ref keeps its original code'+(it.supplier_code?' ('+esc(it.supplier_code)+')':'')+'</span>')
+      +pRow('Suppliers','<span style="display:inline-flex;gap:6px;flex-wrap:wrap;align-items:center">'+((it.requests||[]).length?(it.requests||[]).map(function(q){ return prodRequestChip(q,it.ref); }).join(''):'<span class="mut tiny">no development request yet</span>')+' <a class="pm-goto-reqs" style="font-size:11px;color:var(--blue);cursor:pointer;text-decoration:underline">manage on the Requests tab →</a></span>')   // v27.703 supplier lives on the REQUEST
       +_mhd('Colour &amp; swatch')+pRow('Development colour name','<input class="fci pm-field pm-fld" data-f="colour_name" id="pm-colour" value="'+esc(it.colour_name)+'"> <span class="mut tiny">the sampling / development colour</span>')
       +pRow('Bulk colour name','<input class="fci pm-field pm-fld" data-f="bulk_colour_name" id="pm-bulkcolour" value="'+esc(it.bulk_colour_name||'')+'"> <span class="mut tiny">production colour — when set, the grid shows “Bulk (Development)”</span>')
       +pRow('Swatch',swatchVal)
-      +_mhd('Workflow')+pRow('Stage','<select class="fci pm-field pm-fld" data-f="stage" id="pm-stage" style="'+prodStageStyle(it.stage||'sample_development')+'">'+STAGE_META.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===(it.stage||'sample_development')?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select> <span class="mut tiny">→ Approval: </span><span id="pm-appr-derived">'+prodStatusChip(prodStatusFromStage(it.stage||'sample_development'))+'</span>'+((d.sizes&&d.sizes.length&&d.sizes.every(function(s){return s.approval_status==='approved';})&&prodStatusFromStage(it.stage||'sample_development')!=='approved')?prodActMark(it.ref,'status'):'')+(it.approved_at?' <span class="mut tiny" style="margin-left:6px">approved '+esc(fd(it.approved_at))+'</span>':''))
-      +pRow('Recipient country', (function(){ var rc=String(it.recipient_countries||'UK').toUpperCase(); function ck(cc){ return rc.split(',').map(function(x){return x.trim();}).indexOf(cc)>=0; }
-        return '<label style="margin-right:14px;cursor:pointer"><input type="checkbox" class="pm-rec" value="UK"'+(ck('UK')?' checked':'')+'> UK</label>'
-          +'<label style="margin-right:14px;cursor:pointer"><input type="checkbox" class="pm-rec" value="US"'+(ck('US')?' checked':'')+'> US</label>'
-          +'<label style="margin-right:14px;cursor:pointer"><input type="checkbox" class="pm-rec" value="AU"'+(ck('AU')?' checked':'')+'> AU</label>'
-          +'<label style="cursor:pointer"><input type="checkbox" class="pm-rec" value="DIRECT"'+(ck('DIRECT')?' checked':'')+'> Direct to Client</label> <span class="mut tiny" style="margin-left:6px">who receives this product — a change notifies the supplier</span>'; })())
-      +pRow('Approval method','<select class="fci pm-fld" data-f="approval_method" style="width:210px"><option value="">— not set —</option><option value="photo"'+(it.approval_method==='photo'?' selected':'')+'>Approval by photo</option><option value="samples"'+(it.approval_method==='samples'?' selected':'')+'>Send samples</option></select> <span class="mut tiny">how sign-off happens — shown to the supplier in the portal'+(it.approval_method==='samples'?' (samples go to the recipient country above)':'')+'</span>')
-      +pRow('Development started','<input type="date" class="fci pm-fld" data-f="dev_start_override" value="'+esc(it.dev_start_override||'')+'" style="width:150px"> <span class="mut tiny">override — blank = created '+esc(fd(it.created_at))+' (used for time-to-approve)</span>')
+      +_mhd('Workflow')+pRow('Stage','<span style="display:inline-flex;align-items:center;gap:8px;flex-wrap:wrap">'+prodStageChip(it.stage||'sample_development')+'<span class="mut tiny">'+(it.stage_overridden?'manual override':'derived from its development requests')+'</span></span> <select class="fci pm-field pm-fld" data-f="stage" id="pm-stage" style="'+(it.stage_overridden?prodStageStyle(it.stage):'')+'"><option value=""'+(!it.stage_overridden?' selected':'')+'>Auto — from requests</option>'+STAGE_META.map(function(o){return '<option value="'+o[0]+'"'+(it.stage_overridden&&o[0]===it.stage?' selected':'')+'>'+o[1]+' (override)</option>';}).join('')+'</select> <span class="mut tiny">→ Approval: </span><span id="pm-appr-derived">'+prodStatusChip(prodStatusFromStage(it.stage||'sample_development'))+'</span>'+((d.sizes&&d.sizes.length&&d.sizes.every(function(s){return s.approval_status==='approved';})&&prodStatusFromStage(it.stage||'sample_development')!=='approved')?prodActMark(it.ref,'status'):'')+(it.approved_at?' <span class="mut tiny" style="margin-left:6px">approved '+esc(fd(it.approved_at))+'</span>':''))
+      // v27.703: Recipient country / Approval method / Development started moved to the development REQUEST (Requests tab)
       +_mhd('Description')+pRow('Description','<textarea class="fci pm-fld" data-f="description" id="pm-desc" rows="3" style="width:100%;max-width:620px;box-sizing:border-box">'+esc(it.description)+'</textarea>')
       +_mhd('Reference')+pRow('Reference','<input class="fci" id="pm-ref" value="'+esc(it.ref)+'" style="width:220px;font-family:ui-monospace,monospace"> <button class="save-btn" id="pm-ref-save">Rename</button> <span id="pm-ref-msg" style="font-size:11px;margin-left:4px"></span><div style="font-size:11px;color:var(--faint);margin-top:3px">Renaming updates this product everywhere (samples, timeline, documents). Must be unique.</div>')
       +'<div style="font-size:11px;color:var(--faint);margin:2px 0 12px">Changes save automatically. <span id="pm-msg" style="margin-left:6px"></span></div>'
