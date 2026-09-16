@@ -1,3 +1,8 @@
+## v27.712 Product detail polish (Ben) — SERVER + CLIENT
+- **Master data:** the DESCRIPTION and REFERENCE sections no longer repeat their label as a row label; the WORKFLOW header is gone (Stage sits under Details).
+- **Size & variants ▸ Components:** component column ~40% wider so names + labels fit; no "= product supplier" option any more (each component names its own supplier); changing Sampling / adding / removing rebuilds the grid **in place** (no Loading… flash); **+ Add component** is a single button → picker with every catalogue component not yet on the product (tick several) plus a "new component type" box (added to the catalogue and the product in one go).
+- **Component actions only when in review:** the per-size component "action" mark (and the grid/drawer action counts) now appear only while a development request covering that component is at **Sample in review** — while samples are still being made nothing is pending on D&B (Ben: One size / Product body showed an action although nothing was approved). Server `comp_*` counts carry the same rule.
+
 ## v27.711 PRODUCT URL: `#/product/products` for the PRODUCTS tab (Ben) — CLIENT
 - The PRODUCTS tab (renamed from PLAN in v27.709) now writes `#/product/products`; `#/product/plan` and old bookmarks still resolve to it. `#/product/<ref>` product links unchanged.
 - Also fixed: the unmapped-SKU count badge refresh (`prodPlanBadge`) was rewriting the tab label back to "PLAN".
