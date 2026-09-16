@@ -1,3 +1,6 @@
+## v27.709 PRODUCT L2 tab renamed PLAN → PRODUCTS (Ben) — CLIENT
+- The first PRODUCT tab now reads **PRODUCTS** (it lists the product development items; Grid / Range plan / Dashboard are its views). Hashes unchanged (`#/product/plan`, `#/product/<ref>`), phone drawer label follows.
+
 ## v27.708 PRODUCT split P3 — files audit trail, "latest version" pick, swatch inherited from the latest spec file (Ben) — SERVER + CLIENT + MIGRATION 279
 - **Documents tab (admin):** every D&B file now shows **version** (running number per product), **who** uploaded it and when, and a **Latest** radio; the latest row is tinted with a "latest" badge. Default latest = the newest upload; picking another file makes it explicit (record of change "Latest version → file"). PDFs show a **page-1 thumbnail** next to the filename.
 - **Swatch inheritance (decision 3):** when no swatch is uploaded, the product's swatch is the **thumbnail of the latest admin document** — everywhere the swatch shows (grid, cards, drawer header, Range plan, Dashboard, SAMPLING, batch review). Uploading a swatch always wins; Master data ▸ Swatch says "auto — showing the latest document's thumbnail" or "no swatch yet". Portal uploads never feed it.
