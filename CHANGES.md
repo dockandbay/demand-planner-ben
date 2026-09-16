@@ -1,3 +1,9 @@
+## v27.714 SAMPLING grid layout + Batch review as a view of SAMPLING (Ben) — CLIENT
+- **Batch review folds into SAMPLING:** the SAMPLE BATCH REVIEW L2 tab is gone; SAMPLING now has a **Sample requests | Batch review** toggle (remembered per browser). Batch review is the same page as before (enter a sample shipment, review every development sample on it). Old `#/product/batch/<sr>` links and the sample drawer's "batch review" shortcut still land on it.
+- **Swatch sizes S / M / L** on the SAMPLING filter bar (remembered), and **hover any swatch to enlarge** (240px preview follows the cursor; click still opens the full-size overlay). The same hover-enlarge now works on the PRODUCTS grid.
+- **New "Colour way · type" column** after Product · request: bulk colour (dev colour) + a Development / Custom order badge. The product column keeps ref, category badge and components.
+- **Stage column ~50% wider** (select fills it); **sample tick cells slimmer** (22px ticks, 44px columns) so 6-8 sample versions fit without squeezing the rest — the number of S-columns still follows the longest request.
+
 ## v27.713 Sampled vs spec-linked per SIZE × COMPONENT + Sample requests column (Ben) — MIGRATION 280 + SERVER + CLIENT
 - **Migration 280** `280_size_component_sampling.sql`: `product_dev_size_dimensions.sampling_mode` ('sampled' | 'spec_linked' | NULL = inherit the component default) + `spec_id`. No backfill needed — NULL keeps today's behaviour.
 - **Size & variants grid:** each size × component row has its own **Sampled / Spec-linked** select (under the component name). A spec-linked row shows **no spec linked** with an **A** action until you **link a spec** (picker over PRODUCT ▸ Specifications) or **upload a spec** (type + file, filed under Specifications scoped to this product only, then linked). Linked rows show → Spec #n with change / unlink. One size can be spec-linked while another size of the same component is sampled.

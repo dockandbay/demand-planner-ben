@@ -275,8 +275,22 @@
 #product-root .smp-tbl th{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--card);position:sticky;top:0;z-index:2}
 #product-root .smp-tbl td{padding:7px 8px;border-bottom:1px solid var(--line2);vertical-align:middle}
 #product-root .smp-row:hover td{background:var(--hover)}
-#product-root .smp-scell{text-align:center;min-width:64px}
-#product-root .smp-tick{width:28px;height:28px;border:2px solid var(--line);border-radius:7px;display:inline-flex;align-items:center;justify-content:center;font-weight:900;font-size:16px;line-height:1;cursor:pointer;background:var(--card);color:transparent;transition:background .15s,border-color .15s;user-select:none}
+#product-root .smp-scell{text-align:center;min-width:44px;padding-left:3px !important;padding-right:3px !important}   /* v27.714: slimmer so 6-8 sample versions fit */
+#product-root .smp-tbl th.smp-scell{padding-left:3px;padding-right:3px}
+#product-root .smp-stage{min-width:200px}
+#product-root .smp-stage .smp-stage-sel{width:100%;min-width:190px}
+#product-root #smp-grid .pg-swatch2{width:40px;height:40px;border-radius:7px}
+#product-root #smp-grid.smp-sw-sm .pg-swatch2{width:26px;height:26px;border-radius:5px}
+#product-root #smp-grid.smp-sw-lg .pg-swatch2{width:76px;height:76px;border-radius:10px}
+#product-root #smp-grid img.pg-swatch2{cursor:zoom-in}
+#product-root .smp-type{display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;padding:1px 7px;border-radius:999px;background:var(--line2);color:var(--muted);white-space:nowrap}
+#product-root .smp-type.custom{background:var(--amber-bg);color:#92400e}
+.hz-hoverzoom{position:fixed;z-index:200070;pointer-events:none;width:240px;height:240px;object-fit:cover;border-radius:12px;border:3px solid #fff;box-shadow:0 14px 44px rgba(0,0,0,.38);background:#fff}
+#product-root .smp-viewpill{background:var(--card);border:1px solid var(--line);color:var(--muted);font-size:11px;font-weight:700;padding:4px 12px;cursor:pointer;line-height:1}
+#product-root .smp-viewpill:first-child{border-radius:6px 0 0 6px}
+#product-root .smp-viewpill:last-child{border-radius:0 6px 6px 0;border-left:none}
+#product-root .smp-viewpill.active{background:var(--nav);color:#fff;border-color:var(--nav)}
+#product-root .smp-tick{width:22px;height:22px;border:2px solid var(--line);border-radius:6px;display:inline-flex;align-items:center;justify-content:center;font-weight:900;font-size:13px;line-height:1;cursor:pointer;background:var(--card);color:transparent;transition:background .15s,border-color .15s;user-select:none}
 #product-root .smp-tick.on{background:#16a34a;border-color:#16a34a;color:#fff}
 #product-root .smp-tick.sub{border-color:var(--amber);border-style:dashed}
 #product-root .smp-tick.none{border-color:var(--line2);cursor:default;opacity:.55}
@@ -13219,7 +13233,7 @@
   function ensureProductRoot(){ if(document.getElementById('product-root'))return;
     var app=document.getElementById('app')||document.body; if(!app)return;
     var el=document.createElement('div'); el.id='product-root';
-    el.innerHTML='<div id="product-subnav"><button class="stab" data-k="plan">PRODUCTS</button><button class="stab" data-k="sampling">SAMPLING</button><button class="stab" data-k="batch">SAMPLE BATCH REVIEW</button><button class="stab" data-k="specs">SPECIFICATIONS</button><button class="stab" data-k="reports">REPORTS</button><button class="stab" data-k="config">CONFIG</button><span class="ver">HORIZON __APP_VERSION__</span></div><div id="product-content"></div>';
+    el.innerHTML='<div id="product-subnav"><button class="stab" data-k="plan">PRODUCTS</button><button class="stab" data-k="sampling">SAMPLING</button><button class="stab" data-k="specs">SPECIFICATIONS</button><button class="stab" data-k="reports">REPORTS</button><button class="stab" data-k="config">CONFIG</button><span class="ver">HORIZON __APP_VERSION__</span></div><div id="product-content"></div>';
     app.appendChild(el);
     el.querySelectorAll('.stab').forEach(function(b){ b.onclick=function(){ selectProductSub(b.dataset.k); }; }); }
   function showProduct(){ ensureProductRoot(); pgetWarm(); if(typeof hideSupply==='function')hideSupply(); if(typeof hideScenario==='function')hideScenario();
@@ -13232,7 +13246,8 @@
     document.body.classList.remove('supply-on');
     var r=document.getElementById('product-root'); if(r)r.style.display='none';
     var pb=document.getElementById('product-btn'); if(pb)pb.classList.remove('active'); }
-  function selectProductSub(k){ PRODUCT_SUB=k; _prodDetailBox=null;
+  function selectProductSub(k){ if(k==='batch'){ _smpView='batch'; k='sampling'; }   // v27.714: Sample batch review is a VIEW of SAMPLING (old #/product/batch/<sr> links still land there)
+    PRODUCT_SUB=k; _prodDetailBox=null;
     document.querySelectorAll('#product-subnav .stab').forEach(function(b){b.classList.toggle('active',b.dataset.k===k||(b.dataset.k==='plan'&&(k==='range'||k==='dashboard')));});   // v27.703 Range / Dashboard are views of PLAN
     try{ writeHash(['product',k==='plan'?'products':k]); }catch(e){}   // v27.711: URL slug is "products" (internal key stays 'plan'; #/product/plan still resolves)
     var c=document.getElementById('product-content'); if(!c)return;
@@ -13241,7 +13256,6 @@
     if(k==='specs') return renderProductSpecs(c);
     if(k==='config') return renderProductConfig(c);
     if(k==='dashboard') return renderProductDashboard(c);
-    if(k==='batch') return renderProductBatchReview(c);   // v27.551
     if(k==='sampling') return renderProductSampling(c);   // v27.704 P2
     renderProductPlan(c); }
   // ── v27.551 SAMPLE BATCH REVIEW (Ben): pick a sample shipment → every development sample on it in one table; feedback,
@@ -13252,17 +13266,23 @@
   //    (decision + feedback per component, reject reasons, photos); Age = days since the request last moved; Shipment cell
   //    = the latest sample shipment (carrier + tracking; DHL live status lands in P2b).
   var _smpFilt={supplier:'',stage:'',season:'',category:'',q:'',mine:false,overdue:false}; var _smpOpen=null;   // {rid,sid}
+  var _smpView=(function(){ try{ return localStorage.getItem('smpView')||'requests'; }catch(e){ return 'requests'; } })();   // v27.714: 'requests' | 'batch' (Sample batch review as a view of SAMPLING)
+  var _smpSwSize=(function(){ try{ return localStorage.getItem('smpSwatchSize')||'md'; }catch(e){ return 'md'; } })();   // v27.714: SAMPLING swatch size sm | md | lg
   function _smpDM(iso){ if(!iso)return ''; var s=String(iso).slice(0,10), d=new Date(s+'T00:00:00'); if(isNaN(d.getTime()))return s; var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return String(d.getDate()).padStart(2,'0')+'-'+M[d.getMonth()]; }
   function _smpAge(ts){ if(!ts)return null; var t=new Date(String(ts).replace(' ','T')).getTime(); if(!t)return null; return Math.max(0,Math.round((Date.now()-t)/86400000)); }
   function _smpAspectKey(cp){ var d=String(cp.dimension||''); return (['product','packaging','labels','polybag','other'].indexOf(d)>=0)?d:('c'+cp.id); }
+  function smpViewPills(){ return '<span style="display:inline-flex" title="Sample requests grid, or review every development sample on one sample shipment (batch)">'+[['requests','Sample requests'],['batch','Batch review']].map(function(o){return '<button class="smp-viewpill'+(_smpView===o[0]?' active':'')+'" data-v="'+o[0]+'">'+o[1]+'</button>';}).join('')+'</span>'; }
+  function wireSmpViewPills(c,scope){ scope.querySelectorAll('.smp-viewpill').forEach(function(b){ b.onclick=function(){ if(_smpView===b.dataset.v)return; _smpView=b.dataset.v; try{ localStorage.setItem('smpView',_smpView); }catch(e){} renderProductSampling(c); }; }); }
   function renderProductSampling(c){ if(!c)return;
-    c.innerHTML='<div id="smp-filters" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"></div><div id="smp-grid" class="tw"><div style="color:var(--faint)">Loading…</div></div>';
+    if(_smpView==='batch'){   // v27.714 (Ben): Sample batch review is a view of SAMPLING — enter a sample shipment (batch) and review every sample on it
+      c.innerHTML='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'+smpViewPills()+'</div><div id="smp-batch"></div>'; wireSmpViewPills(c,c); renderProductBatchReview(c.querySelector('#smp-batch')); return; }
+    c.innerHTML='<div id="smp-filters" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"></div><div id="smp-grid" class="tw smp-sw-'+_smpSwSize+'"><div style="color:var(--faint)">Loading…</div></div>';
     fetch('/api/product/sampling').then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
       var uniq=function(k){ var o={}; rows.forEach(function(r){ if(r[k])o[r[k]]=1; }); return Object.keys(o).sort(); };
       var sups=uniq('supplier_name'), seasons=uniq('season').reverse(), cats=uniq('category'); var me=((window.ME&&ME.email)||'').toLowerCase();
       var selDark=function(v){ return 'text-align:left'+(v?';background:var(--nav);color:#fff;font-weight:600':''); };
       var fb=c.querySelector('#smp-filters');
-      fb.innerHTML='<input class="fci" id="smp-q" value="'+esc(_smpFilt.q)+'" placeholder="🔍 product / request / supplier…" style="width:200px;text-align:left">'
+      fb.innerHTML=smpViewPills()+'<input class="fci" id="smp-q" value="'+esc(_smpFilt.q)+'" placeholder="🔍 product / request / supplier…" style="width:200px;text-align:left">'
         +'<span style="display:flex;align-items:center;gap:5px"><span class="mut" style="font-size:11px">Supplier</span><select class="fci" id="smp-sup" style="'+selDark(_smpFilt.supplier)+'"><option value="">All</option>'+sups.map(function(s){return '<option'+(s===_smpFilt.supplier?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>'
         +'<span style="display:flex;align-items:center;gap:5px"><span class="mut" style="font-size:11px">Stage</span><select class="fci" id="smp-stage" style="'+selDark(_smpFilt.stage)+'"><option value="">All</option>'+STAGE_META.map(function(m){return '<option value="'+m[0]+'"'+(m[0]===_smpFilt.stage?' selected':'')+'>'+esc(m[1])+'</option>';}).join('')+'</select></span>'
         +'<span style="display:flex;align-items:center;gap:5px"><span class="mut" style="font-size:11px">Season</span><select class="fci" id="smp-season" style="'+selDark(_smpFilt.season)+'"><option value="">All</option>'+seasons.map(function(s){return '<option'+(s===_smpFilt.season?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>'
@@ -13270,7 +13290,11 @@
         +'<label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="smp-mine"'+(_smpFilt.mine?' checked':'')+'> Mine</label>'
         +'<label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer" title="a submitted sample not yet received, or nothing moved for 14+ days"><input type="checkbox" id="smp-overdue"'+(_smpFilt.overdue?' checked':'')+'> Overdue</label>'
         +'<span id="smp-count" class="mut" style="font-size:11px"></span>'
-        +'<button class="save-btn" id="smp-new" style="margin-left:auto;background:var(--blue);color:#fff;border-color:var(--blue)">+ Development request</button>';
+        +'<span style="display:inline-flex;align-items:center;gap:5px;margin-left:auto"><span style="color:var(--muted);font-size:11px">Swatch</span><span style="display:inline-flex">'+[['sm','S'],['md','M'],['lg','L']].map(function(o){return '<button class="pg-swsize smp-swsize'+(_smpSwSize===o[0]?' active':'')+'" data-s="'+o[0]+'" title="'+({sm:'Small',md:'Medium',lg:'Large'}[o[0]])+' swatches">'+o[1]+'</button>';}).join('')+'</span></span>'
+        +'<button class="save-btn" id="smp-new" style="background:var(--blue);color:#fff;border-color:var(--blue)">+ Development request</button>';
+      wireSmpViewPills(c,fb);
+      fb.querySelectorAll('.smp-swsize').forEach(function(bt){ bt.onclick=function(){ _smpSwSize=bt.dataset.s; try{ localStorage.setItem('smpSwatchSize',_smpSwSize); }catch(e){} fb.querySelectorAll('.smp-swsize').forEach(function(x){ x.classList.toggle('active',x.dataset.s===_smpSwSize); }); var g=c.querySelector('#smp-grid'); if(g){ g.classList.remove('smp-sw-sm','smp-sw-md','smp-sw-lg'); g.classList.add('smp-sw-'+_smpSwSize); } }; });
+      hzHoverZoom(c.querySelector('#smp-grid'),'img.pg-swatch2');   // v27.714: hover a swatch → enlarged preview (click still opens the product)
       var bind=function(id,k,ev){ var el=fb.querySelector('#'+id); if(el)el[ev||'onchange']=function(){ _smpFilt[k]=(el.type==='checkbox')?el.checked:el.value; draw(); }; };
       bind('smp-sup','supplier'); bind('smp-stage','stage'); bind('smp-season','season'); bind('smp-cat','category'); bind('smp-mine','mine'); bind('smp-overdue','overdue'); bind('smp-q','q','oninput');
       fb.querySelector('#smp-new').onclick=function(){ pget('/api/product/items').then(function(items){ items=Array.isArray(items)?items:[]; var ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:200050;display:flex;align-items:flex-start;justify-content:center;padding:10vh 12px';
@@ -13286,15 +13310,16 @@
         var maxV=4; f.forEach(function(r){ maxV=Math.max(maxV,(r.samples||[]).length); });
         var g=c.querySelector('#smp-grid');
         if(!f.length){ g.innerHTML='<div style="text-align:center;padding:44px 16px;color:var(--muted)"><div style="font-size:30px;margin-bottom:8px">🧵</div>'+(rows.length?'No requests match these filters.':'No development requests yet — create one from a product\'s [+] on PLAN, or with the button above.')+'</div>'; return; }
-        var ths=['','Product · request','Supplier','Stage','Age']; for(var k=1;k<=maxV;k++)ths.push('S'+k); ths.push('Timeline','Shipment · tracking');
-        var html='<table class="smp-tbl"><thead><tr>'+ths.map(function(h,i){ return '<th'+(i>=5&&i<5+maxV?' style="text-align:center"':'')+'>'+h+'</th>'; }).join('')+'</tr></thead><tbody>';
-        f.forEach(function(r){ var sw=r.has_swatch?'<img class="pg-swatch2" src="/api/product/swatch/'+encodeURIComponent(r.item_ref)+'?t='+encodeURIComponent(r.item_updated_at||'')+'" style="width:34px;height:34px;object-fit:cover;border-radius:6px;border:1px solid var(--line)">':'<span class="pg-swatch2 none" style="width:34px;height:34px;display:inline-block;border-radius:6px;border:1px dashed var(--line)"></span>';
+        var ths=['','Product · request','Colour way · type','Supplier','Stage','Age']; for(var k=1;k<=maxV;k++)ths.push('S'+k); ths.push('Timeline','Shipment · tracking');   // v27.714: colour way + type in their own column; Stage wider
+        var html='<table class="smp-tbl"><thead><tr>'+ths.map(function(h,i){ return '<th'+(i>=6&&i<6+maxV?' class="smp-scell" style="text-align:center"':(h==='Stage'?' class="smp-stage"':''))+'>'+h+'</th>'; }).join('')+'</tr></thead><tbody>';
+        f.forEach(function(r){ var sw=r.has_swatch?'<img class="pg-swatch2 smp-sw" data-src="/api/product/swatch/'+encodeURIComponent(r.item_ref)+'?t='+encodeURIComponent(r.item_updated_at||'')+'" src="/api/product/swatch/'+encodeURIComponent(r.item_ref)+'?t='+encodeURIComponent(r.item_updated_at||'')+'" style="object-fit:cover;border:1px solid var(--line)" title="hover to enlarge · click to open">':'<span class="pg-swatch2 none" style="display:inline-block;border:1px dashed var(--line)"></span>';
           var comps=(r.components||[]); var compTxt=comps.length?comps.map(function(x){return x.name;}).join(' · '):'(no component)';
           var age=_smpAge(r.updated_at), ageCls=age==null?'':(age>=30?' late':(age>=14?' warn':''));
           var cells='<td class="l" style="width:40px">'+sw+'</td>'
-            +'<td class="l"><div style="font-weight:700;font-family:ui-monospace,Menlo,monospace;font-size:12px"><a class="smp-openreq" data-ref="'+esc(r.item_ref)+'" data-rid="'+r.id+'" style="cursor:pointer;color:var(--ink)">'+esc(r.ref)+'</a></div><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:3px">'+(r.category?hzCatBadge(r.category,r.category_colour):'')+'<span class="mut" style="font-size:11px">'+prodColourDisplay(r)+' · '+esc(compTxt)+'</span></div></td>'
+            +'<td class="l"><div style="font-weight:700;font-family:ui-monospace,Menlo,monospace;font-size:12px"><a class="smp-openreq" data-ref="'+esc(r.item_ref)+'" data-rid="'+r.id+'" style="cursor:pointer;color:var(--ink)">'+esc(r.ref)+'</a></div><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:3px">'+(r.category?hzCatBadge(r.category,r.category_colour):'')+'<span class="mut" style="font-size:11px">'+esc(compTxt)+'</span></div></td>'
+            +'<td class="l"><div style="font-size:12px;font-weight:600">'+prodColourDisplay(r)+'</div><div style="margin-top:3px"><span class="smp-type'+(/custom/i.test(r.type||'')?' custom':'')+'">'+esc(/custom/i.test(r.type||'')?'Custom order':'Development')+'</span></div></td>'
             +'<td class="l">'+esc(r.supplier_name)+(r.supplier_code?' <span class="mut tiny">'+esc(r.supplier_code)+'</span>':'')+'</td>'
-            +'<td class="l"><select class="fci smp-stage-sel" data-rid="'+r.id+'" data-ref="'+esc(r.item_ref)+'" style="font-size:11px;'+prodStageStyle(r.stage)+'">'+STAGE_META.map(function(m){return '<option value="'+m[0]+'"'+(m[0]===r.stage?' selected':'')+'>'+esc(m[1])+'</option>';}).join('')+'</select></td>'
+            +'<td class="l smp-stage"><select class="fci smp-stage-sel" data-rid="'+r.id+'" data-ref="'+esc(r.item_ref)+'" style="font-size:11px;'+prodStageStyle(r.stage)+'">'+STAGE_META.map(function(m){return '<option value="'+m[0]+'"'+(m[0]===r.stage?' selected':'')+'>'+esc(m[1])+'</option>';}).join('')+'</select></td>'
             +'<td class="l"><span class="smp-age'+ageCls+'" title="days since this request last changed (updated '+esc(fd(String(r.updated_at||'').slice(0,10)))+')">'+(age==null?'—':age+'d')+'</span></td>';
           for(var k=1;k<=maxV;k++){ var s=(r.samples||[])[k-1]; if(!s){ cells+='<td class="smp-scell"><span class="smp-tick none" title="no sample '+k+' yet"></span></td>'; continue; }
             var rec=!!s.received_at; var sub=_smpDM(s.sample_date||s.created_at);
@@ -13306,6 +13331,7 @@
         g.innerHTML=html+'</tbody></table>';
         g.querySelectorAll('.smp-openreq').forEach(function(a){ a.onclick=function(){ _prodDetailTab='requests'; _prodHighlightReq=Number(a.dataset.rid); openProductDrawer(a.dataset.ref,null,'requests'); }; });
         g.querySelectorAll('.smp-tl').forEach(function(a){ a.onclick=function(){ openProductDrawer(a.dataset.ref,null,'timeline'); }; });
+        g.querySelectorAll('img.smp-sw').forEach(function(im){ im.onclick=function(){ openImgZoom(im.dataset.src); }; });
         g.querySelectorAll('.smp-link').forEach(function(a){ a.onclick=function(){ openProductDrawer(a.dataset.ref,null,'samples'); }; });
         g.querySelectorAll('.samp-open').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); (typeof openSampleDrawer==='function'?openSampleDrawer(a.dataset.ref):gotoSample(a.dataset.ref)); }; });
         g.querySelectorAll('.smp-stage-sel').forEach(function(sel){ sel.onchange=function(){ var v=sel.value; sel.setAttribute('style','font-size:11px;'+prodStageStyle(v)); shipPost('/api/product/request/'+sel.dataset.rid,{stage:v},function(j){ if(j&&j.error){alert(j.error);return;} var r=rows.filter(function(x){return String(x.id)===sel.dataset.rid;})[0]; if(r)r.stage=v; try{ prodItemInvalidate(sel.dataset.ref); pgetClear(); }catch(e){} }); }; });
@@ -13905,6 +13931,12 @@
     if(bulk&&dev)return esc(bulk)+' <span class="mut" style="font-weight:400">('+esc(dev)+')</span>';
     return esc(bulk||dev||'—'); }
   // Click-to-zoom overlay for an image (swatch enlarge on the product grid).
+  // v27.714: hover an image inside `container` (matching `sel`) → a fixed 240px preview follows the cursor; gone on mouseout.
+  function hzHoverZoom(container,sel){ if(!container||container._hz)return; container._hz=1; var pv=null;
+    function place(e){ if(!pv)return; var x=e.clientX+22, y=e.clientY-120, W=window.innerWidth, H=window.innerHeight; if(x+250>W)x=e.clientX-262; if(y<8)y=8; if(y+250>H)y=H-250; pv.style.left=x+'px'; pv.style.top=y+'px'; }
+    container.addEventListener('mouseover',function(e){ var im=e.target.closest&&e.target.closest(sel); if(!im||!(im.dataset.src||im.src))return; if(pv)pv.remove(); pv=document.createElement('img'); pv.className='hz-hoverzoom'; pv.src=im.dataset.src||im.src; document.body.appendChild(pv); place(e); });
+    container.addEventListener('mousemove',function(e){ if(pv&&e.target.closest&&e.target.closest(sel))place(e); });
+    container.addEventListener('mouseout',function(e){ var im=e.target.closest&&e.target.closest(sel); if(im&&pv){ pv.remove(); pv=null; } }); }
   function openImgZoom(src){ if(!src)return; var ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:200060;display:flex;align-items:center;justify-content:center;padding:24px;cursor:zoom-out';
     ov.innerHTML='<img src="'+esc(src)+'" style="max-width:92vw;max-height:92vh;border-radius:10px;box-shadow:0 12px 46px rgba(0,0,0,.55)">';
     ov.onclick=function(){ ov.remove(); }; document.body.appendChild(ov); }
@@ -14335,6 +14367,7 @@
         }).join('');
         g.innerHTML=_tbl+'<div class="pg-mobile">'+mob+'</div>';
         g.classList.remove('pg-sw-sm','pg-sw-md','pg-sw-lg'); g.classList.add('pg-sw-'+_pgSwatchSize);   // apply chosen swatch size
+        hzHoverZoom(g,'img.pg-swatch2');   // v27.714: hover-enlarge swatches here too
         // group collapse/expand — season collapses its categories + rows; category collapses its rows. Closes any open detail in a collapsed group.
         function pgApplyCollapse(){
           var scol=function(s){ return !expandAll && _pgSeasonCollapsed[s]; }, ccol=function(s,c){ return !expandAll && _pgCatCollapsed[s+'|'+c]; };
