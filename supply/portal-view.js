@@ -1470,12 +1470,15 @@
       var bp=prodBatchPOs(); if(!bp.length) return sel+'<div class="count">No purchase orders in that batch.</div>';
       var d=prodPivotData(bp);
       if(!d.skus.length) return sel+'<div class="count">No SKUs ordered in that batch.</div>';
-      var th='<th class="l" style="position:sticky;left:0;background:var(--hover);z-index:3;min-width:190px">SKU</th><th class="l">EAN</th><th class="l">Size</th>'+d.poList.map(function(po){return '<th style="text-align:right;min-width:70px">'+esc(po)+'</th>';}).join('');
-      var body=d.skus.map(function(sku){ var a=d.attr[sku]||{};
-        return '<tr><td class="l" style="position:sticky;left:0;background:#fff;z-index:1;font-weight:600;white-space:nowrap;min-width:190px">'+esc(sku)+'</td><td class="l" style="white-space:nowrap"><span class="mut">'+esc(a.ean||'')+'</span></td><td class="l" style="white-space:nowrap"><span class="mut">'+esc(a.size_long||'')+'</span></td>'
+      // v27.705 (Ben): TOTAL column after Size = the SKU's units across every PO in the batch; footer row = per-PO totals + grand total
+      var th='<th class="l" style="position:sticky;left:0;background:var(--hover);z-index:3;min-width:190px">SKU</th><th class="l">EAN</th><th class="l">Size</th><th style="text-align:right;min-width:76px;font-weight:800">Total</th>'+d.poList.map(function(po){return '<th style="text-align:right;min-width:70px">'+esc(po)+'</th>';}).join('');
+      var poTot={}, grand=0;
+      var body=d.skus.map(function(sku){ var a=d.attr[sku]||{}; var rowTot=0; d.poList.forEach(function(po){ var q=Number(d.qmap[sku+'|'+po])||0; rowTot+=q; poTot[po]=(poTot[po]||0)+q; }); grand+=rowTot;
+        return '<tr><td class="l" style="position:sticky;left:0;background:#fff;z-index:1;font-weight:600;white-space:nowrap;min-width:190px">'+esc(sku)+'</td><td class="l" style="white-space:nowrap"><span class="mut">'+esc(a.ean||'')+'</span></td><td class="l" style="white-space:nowrap"><span class="mut">'+esc(a.size_long||'')+'</span></td><td style="text-align:right;font-weight:800;background:var(--hover)">'+(rowTot?units(rowTot):'<span class="mut">—</span>')+'</td>'
           +d.poList.map(function(po){ var q=d.qmap[sku+'|'+po]; return '<td style="text-align:right">'+(q?units(q):'<span class="mut">—</span>')+'</td>'; }).join('')+'</tr>'; }).join('');
-      return sel+'<div class="mut tiny" style="margin:2px 0 8px">'+bp.length+' PO'+(bp.length>1?'s':'')+' · '+d.skus.length+' SKU'+(d.skus.length>1?'s':'')+' in batch '+esc(PORTAL_PROD_BATCH)+'</div>'
-        +'<div class="tw" style="max-height:calc(100vh - 220px)"><table class="pp-tbl"><thead><tr>'+th+'</tr></thead><tbody>'+body+'</tbody></table></div>'; }
+      var foot='<tr style="font-weight:800;border-top:2px solid var(--line)"><td class="l" style="position:sticky;left:0;background:var(--hover);z-index:1">TOTAL</td><td></td><td></td><td style="text-align:right;background:var(--hover)">'+units(grand)+'</td>'+d.poList.map(function(po){ return '<td style="text-align:right">'+(poTot[po]?units(poTot[po]):'<span class="mut">—</span>')+'</td>'; }).join('')+'</tr>';
+      return sel+'<div class="mut tiny" style="margin:2px 0 8px">'+bp.length+' PO'+(bp.length>1?'s':'')+' · '+d.skus.length+' SKU'+(d.skus.length>1?'s':'')+' · '+units(grand)+' units in batch '+esc(PORTAL_PROD_BATCH)+'</div>'
+        +'<div class="tw" style="max-height:calc(100vh - 220px)"><table class="pp-tbl"><thead><tr>'+th+'</tr></thead><tbody>'+body+'</tbody><tfoot>'+foot+'</tfoot></table></div>'; }
     function prodBatchBarcodeDl(kind,btn){ if(!PORTAL_PROD_BATCH)return; if(BC.placeholder){BC.note();return;} var orig=btn.textContent; btn.disabled=true; btn.textContent='Preparing…';
       fetch(EP.labelData+'?batch='+encodeURIComponent(PORTAL_PROD_BATCH)+'&supplier='+encodeURIComponent(STATE.supplierName)).then(function(r){return r.json();}).then(function(rows){ btn.disabled=false; btn.textContent=orig;
         if(rows&&rows.error){ppNotice(rows.error);return;} if(!rows||!rows.length){ppNotice('No '+kind+' barcodes found for batch '+PORTAL_PROD_BATCH);return;}
@@ -1485,7 +1488,7 @@
       var d=prodPivotData(bp), poList=d.poList; if(!d.skus.length){ ppNotice('No SKUs ordered in that batch.'); return; }
       var pmeta={}; bp.forEach(function(p){ pmeta[p.po]={co:p.country||'',branch:p.branch||'',sw:(p.ships_with?p.ships_with+(p.ships_with_supplier?' — '+p.ships_with_supplier:''):''),pe:p.prod_end||'',client:p.client||'',so:p.sales_order_ref||''}; });
       var CO_STYLE={UK:1,US:2,AU:3,EU:4};
-      var LEFT=7, pad=function(v){ var a=new Array(LEFT-1); for(var i=0;i<a.length;i++)a[i]=''; return [v].concat(a); };
+      var LEFT=8, pad=function(v){ var a=new Array(LEFT-1); for(var i=0;i<a.length;i++)a[i]=''; return [v].concat(a); };   // v27.705: 8 fixed cols (Total after Size)
       var boldL=function(arr){ return arr.map(function(v){ return {v:(v&&typeof v==='object'&&'v' in v)?v.v:v, s:5}; }); };
       var ctr=function(v){ return {v:v==null?'':v, s:6}; };
       var metaRow=function(lbl,fn){ return pad(lbl).concat(poList.map(function(po){ return ctr(fn(po)); })); };
@@ -1497,11 +1500,13 @@
       grid.push(metaRow('Production end', function(po){return pmeta[po].pe;}));
       grid.push(metaRow('Client (DTC)', function(po){return pmeta[po].client;}));
       grid.push(metaRow('DTC sales order ref', function(po){return pmeta[po].so;}));
-      grid.push(boldL(['SKU','EAN','Carton qty','Release window','Product title','Size','Colour']).concat(poList.map(function(){return {v:'QTY', s:7};})));
-      d.skus.forEach(function(sku){ var a=d.attr[sku]||{};
-        grid.push([sku, a.ean||'', a.carton_qty||'', a.release_window||'', a.product_name||'', a.size_long||'', a.colour||'']
+      grid.push(boldL(['SKU','EAN','Carton qty','Release window','Product title','Size','Total','Colour']).concat(poList.map(function(){return {v:'QTY', s:7};})));
+      var _poTot={}, _grand=0;
+      d.skus.forEach(function(sku){ var a=d.attr[sku]||{}; var rowTot=0; poList.forEach(function(po){ var q=Number(d.qmap[sku+'|'+po])||0; rowTot+=q; _poTot[po]=(_poTot[po]||0)+q; }); _grand+=rowTot;
+        grid.push([sku, a.ean||'', a.carton_qty||'', a.release_window||'', a.product_name||'', a.size_long||'', {v:rowTot||'', s:5}, a.colour||'']
           .concat(poList.map(function(po){ var q=d.qmap[sku+'|'+po]; return ctr(q?q:''); }))); });
-      var colDefs=[30,15,10,18,34,26,18].map(function(w,i){ return {min:i+1,max:i+1,width:w}; }); colDefs.push({min:8, max:7+poList.length, width:12.6});
+      grid.push(boldL(['TOTAL','','','','','',_grand,'']).concat(poList.map(function(po){ return {v:_poTot[po]||'', s:7}; })));   // v27.705 totals row
+      var colDefs=[30,15,10,18,34,26,12,18].map(function(w,i){ return {min:i+1,max:i+1,width:w}; }); colDefs.push({min:9, max:8+poList.length, width:12.6});
       var bytes=buildXlsx('Order Plan', grid, {x:1,y:8}, colDefs);   // freeze col A + rows 1-8 (7 meta rows + SKU header)
       var blob=new Blob([bytes],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
       var url=URL.createObjectURL(blob), a=document.createElement('a'); a.href=url; a.download='OrderPlan_'+String(PORTAL_PROD_BATCH).replace(/[^A-Za-z0-9_-]/g,'_')+'_'+new Date().toISOString().slice(0,10)+'.xlsx'; document.body.appendChild(a); a.click();
