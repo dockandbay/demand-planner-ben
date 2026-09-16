@@ -1041,6 +1041,11 @@
     fetch('/api/tracking/status?numbers='+encodeURIComponent(list.join(','))).then(function(r){return r.json();}).then(function(j){ var t=(j&&j.tracking)||{};
       ph.forEach(function(el){ var n=(el.getAttribute('data-trk')||'').trim(); el.removeAttribute('data-trk'); var html=hzTrackPillHtml(t[n]); if(html)el.innerHTML=html; }); }).catch(function(){}); }
   try{ window.hzTrackPillHtml=hzTrackPillHtml; window.hzFillTrackPills=hzFillTrackPills; }catch(e){}   // exposed for jsdom render probes
+  // Auto-fill (v27.723): any surface can just drop a .hz-trkpill placeholder — a single debounced observer
+  // populates it after paint, so no per-surface fill call is needed. The scan bails instantly when there are
+  // no pending placeholders; filled pills lose data-trk (never re-fetched), so this cannot loop.
+  (function(){ var pend=null; function scan(){ pend=null; try{ hzFillTrackPills(document); }catch(e){} }
+    try{ new MutationObserver(function(){ if(pend)return; pend=setTimeout(scan,200); }).observe(document.documentElement,{childList:true,subtree:true}); }catch(e){} })();
   // coloured shipment-mode badge (sea / air / fob) — used on the PO grid next to the shipment
   function poModeBadge(m){ m=String(m||'').toLowerCase(); var mp={sea:['var(--blue-soft)','var(--blue-ink)'],air:['var(--neg-bg)','var(--neg)'],fob:['var(--violet-bg)','var(--violet)']}; var x=mp[m]; return x?'<span style="display:inline-block;font-size:9px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;padding:2px 7px;border-radius:5px;background:'+x[0]+';color:'+x[1]+';vertical-align:middle">'+m+'</span>':''; }
   // FLEX source badge that links to the Flexport shipment when a flex id is known; otherwise the plain badge
@@ -1776,7 +1781,7 @@
     if(otherMaster){
       shipBlock=row('Shipment','<button class="ship-open" data-ref="'+esc(r.shipment)+'">🚢 '+esc(r.shipment)+'</button> <button class="ship-pick" data-po="'+esc(po)+'">▾ change</button> <span class="mut tiny">mode &amp; dates inherit from this shipment</span>')
         +row('Mode','<span style="color:var(--ink-soft);font-weight:600">'+esc((sh.mode||'—').toUpperCase())+'</span>')
-        +((sh.carrier&&sh.carrier_ref)?row('Carrier / tracking',esc(sh.carrier)+' · '+carrierTrackLinkInj(sh.carrier,sh.carrier_ref)):'')
+        +((sh.carrier&&sh.carrier_ref)?row('Carrier / tracking',esc(sh.carrier)+' · '+carrierTrackLinkInj(sh.carrier,sh.carrier_ref)+((/dhl/i.test(sh.carrier||'')&&sh.carrier_ref)?' <span class="hz-trkpill" data-trk="'+esc(sh.carrier_ref)+'"></span>':'')):'')
         +(curMode==='fob'?'':shViewDate('Departure','departure_date','eff_departure')+shViewDate('Landing','landing_date','eff_landing')+shViewDate('Arrival','arrival_date','eff_arrival')+shViewDate('Completion','delivery_date','eff_completion'));
     } else {
       // When it IS a shipment (self), offer only the modes (no "— not a shipment"); a non-shipment gets the blank gate.
@@ -1798,14 +1803,14 @@
         detail=row('FOB','<span class="mut tiny">Factory pickup — no transit or freight details.'+(r.prod_end?' Production ends <b>'+esc(fd(r.prod_end))+'</b>.':'')+'</span>')
           +'<div class="po-trk-wrap">'
           +row('Carrier <span class="mut tiny">(if supplier ships it)</span>',carrierSel(shipEp,sh.carrier,false))
-          +row('Tracking / carrier ref',carrierRefInput(shipEp,sh.carrier_ref,false)+' <span class="po-trk-link" style="margin-left:6px;font-size:12px">'+(_trkUf?'<a href="'+_trkUf+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:600" title="track ↗">track '+esc(sh.carrier||'')+' ↗</a>':'')+'</span>')
+          +row('Tracking / carrier ref',carrierRefInput(shipEp,sh.carrier_ref,false)+' <span class="po-trk-link" style="margin-left:6px;font-size:12px">'+(_trkUf?'<a href="'+_trkUf+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:600" title="track ↗">track '+esc(sh.carrier||'')+' ↗</a>':'')+'</span>'+((/dhl/i.test(sh.carrier||'')&&sh.carrier_ref)?' <span class="hz-trkpill" data-trk="'+esc(sh.carrier_ref)+'"></span>':''))
           +'</div>'
           +shEditDate('Ship date <span class="mut tiny">(factory pickup / handover)</span>','departure_date','eff_departure');   // FOB still has a ship/pickup date — editable + persists here (was hidden, so it looked lost after saving)
       } else if(selfShip && (curMode==='sea'||curMode==='air')){
         var _trkU=carrierTrackUrl(sh.carrier,sh.carrier_ref);
         detail='<div class="po-trk-wrap">'
           +row('Carrier',carrierSel(shipEp,sh.carrier,false))
-          +row('Tracking / carrier ref',carrierRefInput(shipEp,sh.carrier_ref,false)+' <span class="po-trk-link" style="margin-left:6px;font-size:12px">'+(_trkU?'<a href="'+_trkU+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:600" title="track ↗">track '+esc(sh.carrier||'')+' ↗</a>':'')+'</span>')
+          +row('Tracking / carrier ref',carrierRefInput(shipEp,sh.carrier_ref,false)+' <span class="po-trk-link" style="margin-left:6px;font-size:12px">'+(_trkU?'<a href="'+_trkU+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:600" title="track ↗">track '+esc(sh.carrier||'')+' ↗</a>':'')+'</span>'+((/dhl/i.test(sh.carrier||'')&&sh.carrier_ref)?' <span class="hz-trkpill" data-trk="'+esc(sh.carrier_ref)+'"></span>':''))
           +'</div>'
           +shEditDate('Departure','departure_date','eff_departure')+shEditDate('Landing','landing_date','eff_landing')+shEditDate('Arrival','arrival_date','eff_arrival')+shEditDate('Completion','delivery_date','eff_completion')
           +row('Freight cost <span class="mut tiny">(manual — blank = auto from rates)</span>','<input class="fci" data-ep="'+shipEp+'" data-field="cost_manual" value="'+esc(sh.cost_manual!=null?sh.cost_manual:'')+'" style="width:120px">');
@@ -11868,6 +11873,7 @@
           : '<span class="tiny">'+(s.supplier_expected?fd(s.supplier_expected):'—')+'</span>';
         var _stu=carrierTrackUrl(s.carrier,s.tracking_code);   // dynamic tracking link: DHL / FedEx / UPS / SF Express
         var tracking = editing ? fld('tracking_code',s.tracking_code,150,'tracking') : '<span class="tiny">'+(s.tracking_code?(_stu?'<a href="'+_stu+'" target="_blank" rel="noopener" style="color:var(--blue);text-decoration:underline;font-weight:700" title="track with '+esc(s.carrier||'carrier')+' ↗">'+esc(s.tracking_code)+' ↗</a>':esc(s.tracking_code)):'<span class="mut">—</span>')+'</span>';
+        if(!editing && s.tracking_code && /dhl/i.test(s.carrier||'')) tracking += ' <span class="hz-trkpill" data-trk="'+esc(s.tracking_code)+'"></span>';   // v27.723: DHL tracking pill on the sample card (auto-filled by the observer)
         var carrier  = editing ? (fld('carrier',s.carrier,120,'carrier').replace('class="fci txt samp-fld"','class="fci txt samp-fld" list="samp-carrierlist"')) : '<span class="tiny">'+(s.carrier?esc(s.carrier):'<span class="mut">—</span>')+'</span>';
         var _us=_sampNorm(s.status);   // our status normalised from s.status (NOT the detail endpoint's supplier-progress status_calc, which never matches PLANNED/SHIPPED/CANCELLED)
         var _sActsAll=sampActionsAll(s);   // all matched exceptions (incl. snoozed) → inline Ⓐ markers next to the item that carries each one

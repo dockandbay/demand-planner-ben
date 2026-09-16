@@ -1,3 +1,9 @@
+## v27.723 P2b DHL tracking: pills on PO-drawer shipments + Samples card, + auto-fill observer (Ben) — CLIENT
+- **Auto-fill observer:** any surface can now just drop a `.hz-trkpill` placeholder; one small debounced `MutationObserver` populates it from the cache after paint, so no per-surface fill call is needed. It bails instantly when nothing is pending, and filled pills lose `data-trk`, so it cannot loop.
+- Pills added: **PO drawer ▸ Shipments** (read-only Carrier/tracking row + the self-shipment tracking rows) and the **SUPPLY ▸ Samples card** tracking field. DHL carriers only.
+- Verified end-to-end: the observer auto-fills an injected placeholder from a seeded cache row (in transit + ETA), 0 boot errors.
+- Remaining P2b: **portal Samples** (separate `portal-view.js`) + delivered → one-click **"mark received"** (v27.724).
+
 ## v27.722 PRODUCT: Timeline moved onto SAMPLING (inline), removed from the product detail (Ben) — CLIENT
 - On PRODUCT ▸ SAMPLING, clicking a request's **Timeline** count now expands the timeline thread **inline on the row** (compose + full history, reusing `renderProdTimeline`), instead of jumping into the Products detail drawer. Click again to collapse; opening another row's timeline collapses the first.
 - The **Timeline tab is removed from the product detail drawer** (now Master / Size & variants / Requests / Samples / Documents). The timeline is the per-product supplier thread and belongs with SAMPLING. Deep link `#/product/<ref>/timeline` still resolves via the existing handler.
