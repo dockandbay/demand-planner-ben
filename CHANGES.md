@@ -1,3 +1,7 @@
+## v27.717 SAMPLING: sample tabs descend from their tick columns + deep links (Ben) — CLIENT
+- Expanding a sample: the **S1 / S2 …** tabs now hang directly under their tick-box columns (widths measured from the row above), so the open tab reads as a continuation of the tick you clicked. "full review in the product ↗" sits at the right.
+- **Deep link** `#/product/sampling/<request ref>/S<n>` (e.g. `#/product/sampling/SS27-TOWEL-CLASSICBLUE-BL/S1`) opens SAMPLING on that request with sample n expanded, clears any filters hiding it, scrolls to and briefly outlines the row. Opening / switching / collapsing a sample keeps the URL in step, so the address bar is always shareable.
+
 ## v27.716 SAMPLING: Stage and Age merged (Ben) — CLIENT
 - One **Stage · age** column: the stage select on top (full width), the age pill underneath ("12d since change", amber ≥14d, red ≥30d). Frees the width Age was wasting; sample columns start one column earlier.
 
