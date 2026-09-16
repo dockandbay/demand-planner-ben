@@ -6456,6 +6456,48 @@ app.post('/api/product/request/:id/delete', async (req, res) => {
     try { _portalCache.clear(); _portalInflight.clear(); } catch (e) {}
     res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// ── v27.704 SAMPLING page (P2) — every development request with its sample versions, shipment + timeline counters ──
+app.get('/api/product/sampling', async (_req, res) => {
+  try {
+    await ensureCategoryColours();
+    const r = await pool.query(`SELECT rq.id, rq.ref, rq.item_id, i.ref item_ref, coalesce(i.colour_name,'') colour_name, coalesce(i.bulk_colour_name,'') bulk_colour_name,
+        coalesce(i.season,'') season, coalesce(i.category,'') category, coalesce(i.type,'Product Development') type, (i.swatch IS NOT NULL) has_swatch,
+        to_char(i.updated_at,'YYYY-MM-DD HH24:MI') item_updated_at,
+        coalesce((SELECT c.colour_hex FROM planner.categories c WHERE c.category=i.category LIMIT 1),'') category_colour,
+        rq.supplier_name, coalesce(rq.supplier_code,'') supplier_code, rq.stage, rq.approval_method, coalesce(rq.recipient_countries,'') recipient_countries,
+        to_char(rq.dev_start,'YYYY-MM-DD') dev_start, rq.internal_stakeholders, rq.notify_emails, coalesce(rq.notes,'') notes,
+        to_char(rq.created_at,'YYYY-MM-DD') created_at, to_char(rq.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
+        coalesce((SELECT json_agg(json_build_object('id',c.id,'name',c.name,'dimension',coalesce(c.dimension,''),'sampling_mode',coalesce(c.sampling_mode,'sampled')) ORDER BY c.sort,c.id)
+          FROM planner.product_dev_request_components rc JOIN planner.product_dev_components c ON c.id=rc.component_id WHERE rc.request_id=rq.id),'[]'::json) components,
+        coalesce((SELECT json_agg(json_build_object('id',ps.id,'version',ps.version,'sample_date',to_char(ps.sample_date,'YYYY-MM-DD'),'created_at',to_char(ps.created_at,'YYYY-MM-DD'),
+            'received_at',to_char(ps.received_at,'YYYY-MM-DD'),'description',coalesce(ps.description,''),'supplier_status',coalesce(ps.supplier_status,'in_development'),
+            'approved',(SELECT count(*) FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id AND af.decision IN ('approved','approved_with_comments'))::int,
+            'rejected',(SELECT count(*) FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id AND af.decision IN ('rejected_new_sample','stop_development'))::int,
+            'feedback',(SELECT count(*) FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id AND coalesce(af.feedback,'')<>'')::int,
+            'shipment',(SELECT json_build_object('id',sr.id,'ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,''),'status',coalesce(sr.status,''),
+                'received_at',to_char(sr.received_at,'YYYY-MM-DD'),'expected',to_char(sr.supplier_expected_completion,'YYYY-MM-DD'))
+              FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id WHERE l.dev_sample_id=ps.id ORDER BY sr.created_at DESC LIMIT 1)
+          ) ORDER BY ps.version) FROM planner.product_dev_samples ps WHERE ps.request_id=rq.id AND coalesce(ps.dimension,'product')='product'),'[]'::json) samples,
+        (SELECT count(*) FROM planner.supplier_notes n WHERE n.po=i.ref)::int notes,
+        (SELECT count(*) FROM planner.supplier_notes n WHERE n.po=i.ref AND n.author_kind='supplier' AND n.read_at IS NULL)::int unread_supplier
+      FROM planner.product_dev_requests rq JOIN planner.product_dev_items i ON i.id=rq.item_id
+      ORDER BY i.season DESC NULLS LAST, i.category, i.ref, rq.id`);
+    res.json(r.rows);
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Tick / un-tick a sample version as RECEIVED (SAMPLING grid). Receiving advances that sample's request to "sample in review"
+// (forward-only, never past a D&B decision); un-receiving never walks a stage back. {received:true|false, date?:YYYY-MM-DD}
+app.post('/api/product/sample/:id/received', async (req, res) => {
+  try {
+    const id = Number(req.params.id), b = req.body || {}; if (!id) return res.status(400).json({ error: 'bad id' });
+    const s = (await pool.query(`SELECT item_ref, request_id, version FROM planner.product_dev_samples WHERE id=$1`, [id])).rows[0]; if (!s) return res.status(404).json({ error: 'not found' });
+    const receive = b.received !== false; const dt = (b.date && /^\d{4}-\d{2}-\d{2}$/.test(b.date)) ? (b.date + 'T12:00:00Z') : new Date().toISOString();
+    await pool.query(`UPDATE planner.product_dev_samples SET received_at=$2 WHERE id=$1`, [id, receive ? dt : null]);
+    if (receive) await prodStageAdvance(s.item_ref, 'sample_in_review', s.request_id ? { requestId: s.request_id } : { sampleId: id });
+    try { await logProductChange(s.item_ref, 'Sample v' + s.version + (receive ? ' received ' + dt.slice(0, 10) : ' un-received'), null, authUser(req) || 'Dock & Bay'); } catch (e) {}
+    res.json({ ok: true, received_at: receive ? dt.slice(0, 10) : null });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.get('/api/product/items', async (_req, res) => {
   try {
     await ensureCategoryColours();   // v27.698: categories always carry a colour by the time the grid reads them
