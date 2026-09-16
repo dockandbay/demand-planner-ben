@@ -1,3 +1,6 @@
+## v27.715 SAMPLING columns (Ben) — CLIENT
+- Second column renamed **Colour / Type**: colour way + the coloured **category** badge (moved out of the Product · request column, which keeps ref + components). The Development / Custom order badge now sits under the supplier name in the Supplier column.
+
 ## v27.714 SAMPLING grid layout + Batch review as a view of SAMPLING (Ben) — CLIENT
 - **Batch review folds into SAMPLING:** the SAMPLE BATCH REVIEW L2 tab is gone; SAMPLING now has a **Sample requests | Batch review** toggle (remembered per browser). Batch review is the same page as before (enter a sample shipment, review every development sample on it). Old `#/product/batch/<sr>` links and the sample drawer's "batch review" shortcut still land on it.
 - **Swatch sizes S / M / L** on the SAMPLING filter bar (remembered), and **hover any swatch to enlarge** (240px preview follows the cursor; click still opens the full-size overlay). The same hover-enlarge now works on the PRODUCTS grid.
