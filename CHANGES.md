@@ -1,3 +1,7 @@
+## v27.742 Fulfil ERP: order-plan "not required in Cin7" tickbox (Ben) — CLIENT
+- Order plan toolbar (next to **Push to ERP (full)**): a **not required in Cin7** checkbox. Ticking it → `POST /api/supply/po/:po/cin7-not-required {value:true}`, which persists `planner.purchase_orders.cin7_not_required` (mig 283) and suppresses Cin7 drift/update actions for that PO. Fulfil is unaffected — every PO is still required in Fulfil.
+- Checked state initialises from `window._erpGridStatus` (the grid-status map). On toggle the client updates that map and re-runs `fillErpFulfil()`, so the PO grid's **Cin7** cell immediately switches to **n/a** (and back). Verified end-to-end on PO-60UKBE1: tick → DB true + grid cell n/a; untick → DB false + cell restored.
+
 ## v27.741 Fulfil ERP: PO grid Cin7 + Fulfil columns + Push to Fulfil (Ben) — SERVER + CLIENT
 - PO grid: the ERP column is now **two** — **Cin7** (the existing status/push) and a new **Fulfil** column, filled from `/api/supply/fulfil/grid-status`: **✓ in Fulfil** (green) / **⬆ Push to Fulfil** (blue, missing) / **⬆ Update h/f** (amber, line-count mismatch). A `cin7_not_required` PO shows **n/a** in the Cin7 cell. (colspans + hz-stack mobile labels updated for the added column.)
 - **Push to Fulfil** button → `POST /api/supply/po/:po/cin7-lines?erp=fulfil` (new `?erp=` override forces the target regardless of Active ERP, for the two-button model). Verified: pushed PO-60UKBE1 → Fulfil id 244, cell → ✓ in Fulfil.

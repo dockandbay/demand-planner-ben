@@ -3005,7 +3005,7 @@
     return head+tbl; }
   // v27.741: Fulfil column — fill each row's Fulfil drift status from /api/supply/fulfil/grid-status; grey the Cin7 cell for POs marked not-required-in-Cin7.
   function fillErpFulfil(){ if(!document.querySelector('#sup-grid .po-fulfil[data-po]'))return;
-    fetch('/api/supply/fulfil/grid-status').then(function(r){return r.json();}).then(function(j){ var st=(j&&j.status)||{};
+    fetch('/api/supply/fulfil/grid-status').then(function(r){return r.json();}).then(function(j){ var st=(j&&j.status)||{}; try{ window._erpGridStatus=st; }catch(e){}   // shared with the order-plan "not required in Cin7" tickbox
       document.querySelectorAll('#sup-grid .po-fulfil[data-po]').forEach(function(el){ var po=el.getAttribute('data-po'), s=st[po];
         if(!s){ el.innerHTML='<span class="mut tiny">—</span>'; return; }
         if(s.in_fulfil){ var mm=Number(s.fulfil_lines)!==Number(s.horizon_lines);
@@ -3920,6 +3920,7 @@
     var opBtns=editing
       ? '<button class="lnk-btn op-add-row" data-po="'+esc(po)+'" style="margin-left:8px">＋ Add SKU</button> <button class="save-btn op-paste" data-po="'+esc(po)+'" style="margin-left:4px;background:var(--blue-soft);border:1px solid #93c5fd;color:var(--blue)" title="paste a SKU + qty block from Excel / Google Sheets (2 columns)">⧉ Paste SKU,Qty</button> <button class="save-btn op-save" data-po="'+esc(po)+'" style="margin-left:4px;background:var(--pos-bg);border:1px solid var(--pos);color:var(--pos);font-weight:700">✓ Save</button> <button class="save-btn light op-cancel">Cancel</button>'
       : '<button class="save-btn op-edit" data-po="'+esc(po)+'" style="margin-left:8px">✎ Edit qty / add SKU</button> <button class="save-btn light op-copy" data-copy="'+copyData+'" style="margin-left:4px" title="copy this PO&rsquo;s SKUs + quantities to the clipboard (tab-separated)">⧉ Copy SKU + Qty</button> <button class="save-btn op-cin7-full" data-po="'+esc(po)+'" style="margin-left:4px;background:var(--pos);color:#fff;border-color:#0a8" title="push ALL of this PO&rsquo;s SKUs, quantities and prices to Cin7 — full override for exact alignment (live write)">⬆ Push to ERP (full)</button>'
+        +'<label style="margin-left:8px;font-size:11px;cursor:pointer;white-space:nowrap" title="tick to mark this PO as NOT required in Cin7 — suppresses Cin7 drift &amp; update actions for it. It is still required in Fulfil."><input type="checkbox" class="op-cin7-nr" data-po="'+esc(po)+'"'+((((window._erpGridStatus||{})[po]||{}).cin7_not_required)?' checked':'')+' style="vertical-align:middle;margin-right:3px">not required in Cin7</label>'
         +'<span style="position:relative;display:inline-block;margin-left:4px"><button class="save-btn light op-bc-dl" data-po="'+esc(po)+'" title="download this PO&rsquo;s barcode labels as A4 print sheets — BATCH + date of production from this PO (same generator as SUPPLY &rsaquo; Barcodes)">⤓ Download barcodes ▾</button>'
         +'<span class="op-bc-menu" style="display:none;position:absolute;left:0;top:100%;z-index:50;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:220px;text-align:left">'
         +[['all','All barcodes'],['product','Product barcodes'],['carton','Carton + Inner barcodes']].map(function(o,ix){ return '<div class="op-bc-opt" data-k="'+o[0]+'" style="padding:9px 13px;cursor:pointer;font-size:12px;white-space:nowrap'+(ix?';border-top:1px solid var(--line)':'')+'">'+o[1]+'</div>'; }).join('')
@@ -4452,6 +4453,13 @@
     document.querySelectorAll('#podet-'+i+' .oprisk-undo').forEach(function(b){ b.onclick=function(){ _poRiskPost(b.dataset.ps,b.dataset.field,false,b); }; });
     document.querySelectorAll('#podet-'+i+' .op-erp-up-panel').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po); }; });
     document.querySelectorAll('#podet-'+i+' .op-cin7-full').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po, true); }; });   // open the Cin7 pop, force the full-override push (result + any price discrepancies show IN the pop)
+    // v27.742: "not required in Cin7" tickbox — suppresses Cin7 drift/update actions for this PO (still required in Fulfil). Persists via /api/supply/po/:po/cin7-not-required, then re-greys the grid Cin7 cell.
+    document.querySelectorAll('#podet-'+i+' .op-cin7-nr').forEach(function(cb){ cb.onchange=function(){ var _po=cb.dataset.po, _v=cb.checked; cb.disabled=true;
+        fetch('/api/supply/po/'+encodeURIComponent(_po)+'/cin7-not-required',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({value:_v})})
+          .then(function(r){return r.json();}).then(function(j){ cb.disabled=false; if(!j||j.ok!==true){ cb.checked=!_v; return; }
+            try{ if(!window._erpGridStatus)window._erpGridStatus={}; if(!window._erpGridStatus[_po])window._erpGridStatus[_po]={}; window._erpGridStatus[_po].cin7_not_required=_v; }catch(e){}
+            try{ if(typeof fillErpFulfil==='function') fillErpFulfil(); }catch(e){}
+          }).catch(function(){ cb.disabled=false; cb.checked=!_v; }); }; });
     // v27.707: pending "duplicate SKU lines on the supplier invoice" warning at the top of the Order plan tab (dismissable)
     document.querySelectorAll('#podet-'+i+' .op-dupwarn').forEach(function(box){ var _po=box.dataset.po; fetch('/api/supply/po/'+encodeURIComponent(_po)+'/invoice-duplicates').then(function(r){return r.json();}).then(function(j){ var p=j&&j.pending; if(!p)return;
         box.innerHTML='<div style="margin:0 0 10px;padding:10px 14px;border-radius:8px;background:#fef2f2;border:2px solid #ef4444;color:#7f1d1d;font-size:12px;display:flex;gap:12px;align-items:flex-start"><div style="flex:1"><div style="font-weight:800;font-size:13px">⚠ The supplier invoice had duplicate SKU codes — quantities were added up into this order plan</div>'
