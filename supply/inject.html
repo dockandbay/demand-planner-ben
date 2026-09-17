@@ -284,8 +284,11 @@
 /* v27.732 (Ben): tighten the gap between the swatch cell and PRODUCT column 1 */
 #product-root .smp-tbl td:first-child,#product-root .smp-tbl th:first-child{padding-right:0}
 #product-root .smp-tbl td:nth-child(2),#product-root .smp-tbl th:nth-child(2){padding-left:4px}
-#product-root .smp-mtab{font-size:11px;font-weight:600;border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:6px;padding:4px 11px;cursor:pointer}
-#product-root .smp-mtab.active{background:var(--nav);color:#fff;border-color:var(--nav)}
+/* v27.733 (Ben): MANAGE tabs use the shared .po-subnav / .rtab tab UI (same as the PO drawer, shipment drawer, samples card) */
+#product-root .po-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:var(--l3-bg);border:1px solid var(--blue-soft);border-radius:6px;padding:2px 5px;margin:0 0 10px}
+#product-root .po-subnav .rtab{background:transparent;border:none;padding:6px 14px;font-size:12px;font-weight:500;cursor:pointer;color:var(--faint);border-bottom:2px solid transparent;letter-spacing:.01em;font-family:inherit;white-space:nowrap;flex:0 0 auto}
+#product-root .po-subnav .rtab:hover{color:var(--blue)}
+#product-root .po-subnav .rtab.active{color:var(--blue);border-bottom-color:var(--blue);font-weight:600}
 #product-root #smp-grid .pg-swatch2{width:40px;height:40px;border-radius:7px}
 #product-root #smp-grid.smp-sw-sm .pg-swatch2{width:26px;height:26px;border-radius:5px}
 #product-root #smp-grid.smp-sw-lg .pg-swatch2{width:76px;height:76px;border-radius:10px}
@@ -13515,7 +13518,7 @@
         var samples=r.samples||[];
         var tabDefs=[['master','Master data'],['timeline','Timeline']].concat(samples.map(function(s,i){ return ['s'+i,'S'+(i+1)+(s.received_at?' ✓':'')]; }));
         var exp=document.createElement('tr'); exp.className='smp-mexp'; exp.dataset.rid=r.id;
-        exp.innerHTML='<td colspan="'+ncols+'"><div style="padding:8px 8px;background:var(--hover);border-radius:8px"><div style="display:flex;gap:5px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:10px">'+tabDefs.map(function(t,i){ return '<button class="smp-mtab'+(i===0?' active':'')+'" data-t="'+t[0]+'">'+esc(t[1])+'</button>'; }).join('')+'</div><div class="smp-mbody"><div class="mut" style="padding:8px 2px">Loading…</div></div></div></td>';
+        exp.innerHTML='<td colspan="'+ncols+'"><div style="padding:8px 8px;background:var(--hover);border-radius:8px"><div class="po-subnav">'+tabDefs.map(function(t,i){ return '<button class="rtab smp-mtab'+(i===0?' active':'')+'" data-t="'+t[0]+'">'+esc(t[1])+'</button>'; }).join('')+'</div><div class="smp-mbody"><div class="mut" style="padding:8px 2px">Loading…</div></div></div></td>';
         tr.parentNode.insertBefore(exp, tr.nextSibling);
         var body=exp.querySelector('.smp-mbody');
         Promise.all([fetch('/api/product/item/'+encodeURIComponent(r.item_ref)).then(function(x){return x.json();}), fetch('/api/product/reject-reasons').then(function(x){return x.json();}).catch(function(){return {reasons:[]};}), pget('/api/product/timeline-config').catch(function(){return {snippets:[]};})]).then(function(a){

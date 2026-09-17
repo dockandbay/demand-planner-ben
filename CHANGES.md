@@ -1,3 +1,6 @@
+## v27.733 SAMPLING: MANAGE tabs use the shared tab UI (Ben) — CLIENT
+- The MANAGE panel tabs (Master data · Timeline · S1…) now use the standard `.po-subnav` / `.rtab` underline-tab UI — the same as the PO drawer, shipment drawer and samples card — instead of the custom rounded buttons.
+
 ## v27.732 SAMPLING grid: MANAGE button black/white; tighten swatch→column-1 gap (Ben) — CLIENT
 - The **⚙ Manage** button is now black background / white text.
 - Removed the white space between the swatch cell and the PRODUCT column (swatch cell padding-right 0, product cell padding-left 4px).
