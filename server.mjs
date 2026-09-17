@@ -2516,6 +2516,15 @@ async function fulfilFetch(method, path, body) {
   if (!r.ok) { const e = new Error('Fulfil ' + r.status + ': ' + String(t).slice(0, 300)); e.status = r.status; throw e; }
   return j;
 }
+// v27.751: fetch against an EXPLICIT Fulfil env config (not the app's Active-ERP env) — used by the id-seeder so a
+// dry-run/seed against 'live' never depends on or changes the CONFIG Active-ERP setting.
+async function fulfilFetchCfg(cfg, method, path, body) {
+  if (!cfg || !cfg.configured) { const e = new Error('Fulfil ' + (cfg && cfg.env) + ' API not configured'); e.code = 'NO_FULFIL_CFG'; throw e; }
+  const r = await fetch(cfg.base + path, { method, headers: { 'X-API-KEY': cfg.apiKey, 'Content-Type': 'application/json' }, body: body != null ? JSON.stringify(body) : undefined });
+  const t = await r.text().catch(() => ''); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) {}
+  if (!r.ok) { const e = new Error('Fulfil ' + r.status + ': ' + String(t).slice(0, 300)); e.status = r.status; throw e; }
+  return j;
+}
 // find a Fulfil purchase order id by its reference (PO number); null if not present
 async function fulfilFindPO(reference) {
   const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[[FULFIL_MAP.ref, '=', reference]], 0, 1, null, ['id', FULFIL_MAP.ref]]);
@@ -2735,6 +2744,40 @@ app.get('/api/supply/fulfil/grid-status', async (req, res) => {
       WHERE po.status IN ('PRODUCTION','SHIPPING','READY TO SHIP')`)).rows;
     const out = {}; rows.forEach(r => { out[r.po] = { in_fulfil: r.in_fulfil, fulfil_state: r.fulfil_state, fulfil_lines: r.fulfil_lines, horizon_lines: r.horizon_lines, cin7_not_required: r.cin7_not_required }; });
     res.set('Cache-Control', 'no-store').json({ ok: true, status: out });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v27.751: seed suppliers.fulfil_id / branches.fulfil_id from the Fulfil tenant, so the PO push uses the stored id
+// (authoritative + skips the name lookup + handles name mismatches). Resolves supplier name → party.party and branch
+// name → stock.location (type=warehouse), both by EXACT name. Ids are env-specific — `env` (sandbox|live, default the
+// Active-ERP env) picks which tenant to read; `apply:true` writes (else a dry run returns the match table only).
+// Only rows with a resolved id are written — an unmatched name keeps its existing value (never nulled).
+app.post('/api/supply/fulfil/seed-ids', async (req, res) => {
+  const b = req.body || {};
+  const env = (b.env === 'live' || req.query.env === 'live') ? 'live' : ((b.env === 'sandbox' || req.query.env === 'sandbox') ? 'sandbox' : await activeFulfilEnv());
+  const apply = b.apply === true || req.query.apply === 'true';
+  try {
+    const cfg = fulfilConfigFor(env);
+    if (!cfg.configured) return res.status(400).json({ error: 'Fulfil ' + env + ' API not configured (set FULFIL_' + env.toUpperCase() + '_SUBDOMAIN + _API_KEY).' });
+    const supNames = (await pool.query(`SELECT name FROM planner.suppliers WHERE coalesce(active,true) AND coalesce(name,'')<>'' ORDER BY name`)).rows.map(r => r.name);
+    const brNames = (await pool.query(`SELECT name FROM planner.branches WHERE coalesce(name,'')<>'' ORDER BY name`)).rows.map(r => r.name);
+    // resolve by exact name (paginated search_read is capped at 500; both lists are well under that)
+    const parties = supNames.length ? await fulfilFetchCfg(cfg, 'PUT', '/model/' + FULFIL_MAP.partyModel + '/search_read', [[['name', 'in', supNames]], 0, 500, null, ['id', 'name']]) : [];
+    const locs = await fulfilFetchCfg(cfg, 'PUT', '/model/' + FULFIL_MAP.whModel + '/search_read', [[['type', '=', 'warehouse']], 0, 500, null, ['id', 'name', 'code']]);
+    const pmap = {}; (parties || []).forEach(p => { pmap[p.name] = p.id; });
+    const lmap = {}; (locs || []).forEach(l => { lmap[l.name] = l.id; });
+    const suppliers = supNames.map(n => ({ name: n, fulfil_id: (pmap[n] != null ? String(pmap[n]) : null) }));
+    const branches = brNames.map(n => ({ name: n, fulfil_id: (lmap[n] != null ? String(lmap[n]) : null) }));
+    const applied = { suppliers: 0, branches: 0 };
+    if (apply) {
+      for (const s of suppliers) if (s.fulfil_id != null) { await pool.query(`UPDATE planner.suppliers SET fulfil_id=$2 WHERE name=$1`, [s.name, s.fulfil_id]); applied.suppliers++; }
+      for (const br of branches) if (br.fulfil_id != null) { await pool.query(`UPDATE planner.branches SET fulfil_id=$2 WHERE name=$1`, [br.name, br.fulfil_id]); applied.branches++; }
+    }
+    res.json({
+      ok: true, env, apply, applied,
+      suppliers, branches,
+      unmatched: { suppliers: suppliers.filter(x => x.fulfil_id == null).map(x => x.name), branches: branches.filter(x => x.fulfil_id == null).map(x => x.name) },
+      note: apply ? 'Applied (only matched rows written; unmatched kept their existing value).' : 'Dry run — nothing written. POST {apply:true} (or ?apply=true) to write.'
+    });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // v27.740: toggle "not required in Cin7" for one PO (order-plan tickbox). Suppresses Cin7 drift/actions; Fulfil unaffected.
