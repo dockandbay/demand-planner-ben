@@ -912,6 +912,7 @@ function requiredCap(method, p) {
   if (p.startsWith('/api/supply/zalando/')) return null;      // Zalando stock upload / send-file — open to all (no edit rights needed)
   if (p.startsWith('/api/supply/received-pos/')) return null; // n8n system trigger — processes the received-POs feed (acts only on rows n8n wrote)
   if (p.startsWith('/api/tracking/')) return null;            // DHL tracking: poller (secret-gated in handler), read-only status, and admin-checked test/config
+  if (p === '/api/supply/fulfil/import-pos') return null;     // n8n Fulfil-PO import (webhook-secret gated in the handler)
 
   if (p.startsWith('/api/klaviyo-bis/')) return null;         // Klaviyo BIS upload — allowed with read-only permission (Ben)
   if (method === 'POST' && p === '/api/supply/quality-doc') return null;   // Quality Control file upload (+ its metafields) — allowed with read-only permission (Ben); delete stays gated
@@ -2653,13 +2654,76 @@ async function fulfilPushLines(po, completion) {
     const ids = (existing || []).map(r => r.id);
     if (ids.length) await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + fulfilId, { [FULFIL_MAP.linesField]: [['delete', ids]] });
     await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + fulfilId, { [FULFIL_MAP.linesField]: [['create', lineDicts]] });
+    try { await fulfilMirrorOne(fulfilId, 'push'); } catch (e) { /* mirror best-effort */ }   // v27.738: keep the drift mirror fresh on push
     return { ok: true, action: 'update', fulfil_id: fulfilId, lines: lineDicts.length, resolution };
   }
   // CREATE: Fulfil v2 create → POST list of dicts, returns created ids.
   const created = await fulfilFetch('POST', '/model/' + FULFIL_MAP.poModel, [headerPayload]);
-  const newId = Array.isArray(created) ? created[0] : (created && created.id);
+  const newId = Array.isArray(created) ? (created[0] && (typeof created[0] === 'object' ? created[0].id : created[0])) : (created && created.id);
+  try { await fulfilMirrorOne(newId, 'push'); } catch (e) { /* mirror best-effort */ }   // v27.738
   return { ok: true, action: 'create', fulfil_id: newId, lines: lineDicts.length, resolution };
 }
+// ── v27.738: Fulfil PO MIRROR (drift) — import Fulfil POs into planner.fulfil_purchase_orders (mig 282) ──
+function _fulfilNum(v) { if (v == null) return null; if (typeof v === 'object' && v.decimal != null) return Number(v.decimal); const n = Number(v); return Number.isFinite(n) ? n : null; }
+function _fulfilLineMap(l) { return { sku: l['product.code'] || null, qty: Number(l.quantity) || 0, unit_price: _fulfilNum(l.unit_price) }; }
+async function _fulfilMirrorUpsert(p, lines, source) {
+  await pool.query(`INSERT INTO planner.fulfil_purchase_orders (po,fulfil_id,state,party_name,currency,warehouse_code,total_amount,line_count,lines,last_synced_at,source,updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,now(),$10,now())
+      ON CONFLICT (po) DO UPDATE SET fulfil_id=excluded.fulfil_id,state=excluded.state,party_name=excluded.party_name,currency=excluded.currency,
+        warehouse_code=excluded.warehouse_code,total_amount=excluded.total_amount,line_count=excluded.line_count,lines=excluded.lines,last_synced_at=now(),source=excluded.source,updated_at=now()`,
+    [p.reference, p.id, p.state || null, p['party.name'] || null, p['currency.code'] || null, p['warehouse.code'] || null, _fulfilNum(p.total_amount), lines.length, JSON.stringify(lines), source || 'cron']);
+}
+// Mirror ONE Fulfil PO by id (used after a push so the drift table is fresh without waiting for the next import).
+async function fulfilMirrorOne(fulfilId, source) {
+  if (!fulfilId) return;
+  const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['id', '=', fulfilId]], 0, 1, null, ['id', 'reference', 'state', 'party.name', 'currency.code', 'warehouse.code', 'total_amount']]);
+  const p = Array.isArray(rows) && rows[0]; if (!p || !p.reference) return;
+  const lr = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.lineModel + '/search_read', [[['purchase', '=', fulfilId]], 0, 5000, null, ['product.code', 'quantity', 'unit_price']]);
+  await _fulfilMirrorUpsert(p, (lr || []).map(_fulfilLineMap), source || 'push');
+}
+// Import EVERY Fulfil PO into the mirror (cron: n8n later, or the in-app timer / this endpoint). One lines call for all POs.
+async function fulfilSearchAll(model, domain, fields) {   // v27.738: Fulfil caps page size at 500 — paginate.
+  const PAGE = 500; let off = 0, out = [];
+  for (;;) { const rows = await fulfilFetch('PUT', '/model/' + model + '/search_read', [domain, off, PAGE, null, fields]); const arr = Array.isArray(rows) ? rows : []; out = out.concat(arr); if (arr.length < PAGE) break; off += PAGE; if (off > 50000) break; }
+  return out;
+}
+async function fulfilImportPOs() {
+  const cfg = fulfilConfigFor(await activeFulfilEnv());
+  if (!cfg.configured) { const e = new Error('Fulfil ' + cfg.env + ' API not configured'); e.code = 'NO_FULFIL_CFG'; throw e; }
+  const list = await fulfilSearchAll(FULFIL_MAP.poModel, [['reference', '!=', null]], ['id', 'reference', 'state', 'party.name', 'currency.code', 'warehouse.code', 'total_amount']);
+  const ids = list.map(p => p.id);
+  const byPo = {};
+  for (let i = 0; i < ids.length; i += 200) {   // lines in batches of 200 POs (each batch paginated at 500 rows)
+    const batch = ids.slice(i, i + 200); if (!batch.length) continue;
+    const lr = await fulfilSearchAll(FULFIL_MAP.lineModel, [['purchase', 'in', batch]], ['purchase', 'product.code', 'quantity', 'unit_price']);
+    lr.forEach(l => { (byPo[l.purchase] = byPo[l.purchase] || []).push(_fulfilLineMap(l)); });
+  }
+  let n = 0; for (const p of list) { if (!p.reference) continue; await _fulfilMirrorUpsert(p, byPo[p.id] || [], 'cron'); n++; }
+  return { ok: true, imported: n, env: cfg.env };
+}
+// Cron trigger (n8n, webhook-secret gated like received-pos). Also runs on an in-app !VERCEL timer (see app.listen).
+app.post('/api/supply/fulfil/import-pos', async (req, res) => {
+  const secret = process.env.N8N_WEBHOOK_SECRET;
+  if (secret && req.get('x-webhook-secret') !== secret) return res.status(401).json({ error: 'unauthorized' });
+  try { res.json(await fulfilImportPOs()); }
+  catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: e.message }); }
+});
+// Drift: every Horizon PO should be in Fulfil. Compares planner.purchase_orders to the mirror — missing + mismatches.
+app.get('/api/supply/fulfil/drift', async (req, res) => {
+  try {
+    const rows = (await pool.query(`SELECT po.po, coalesce(po.supplier_name,'') supplier, coalesce(po.branch,'') branch,
+        (m.po IS NOT NULL) in_fulfil, m.state fulfil_state, m.currency fulfil_currency, coalesce(m.line_count,0) fulfil_lines,
+        to_char(m.last_synced_at,'YYYY-MM-DD HH24:MI') synced,
+        (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=po.po AND coalesce(l.qty,0)>0)::int horizon_lines
+      FROM planner.purchase_orders po LEFT JOIN planner.fulfil_purchase_orders m ON m.po=po.po
+      ORDER BY po.po DESC`)).rows;
+    const drift = rows.map(r => { const issues = [];
+      if (!r.in_fulfil) issues.push('missing from Fulfil');
+      else if (r.horizon_lines !== r.fulfil_lines) issues.push('line count ' + r.horizon_lines + ' (Horizon) vs ' + r.fulfil_lines + ' (Fulfil)');
+      return { ...r, issues }; }).filter(r => r.issues.length);
+    res.json({ ok: true, total: rows.length, in_fulfil: rows.filter(r => r.in_fulfil).length, missing: rows.filter(r => !r.in_fulfil).length, drift });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // Supplier-submitted actual cost prices (portal order plan). Read all (small table); filtered client-side by PO.
 app.get('/api/supply/portal-line-costs', async (req, res) => {
   try { res.json((await pool.query(`SELECT po, sku, actual_cost, amended_qty, coalesce(is_added,false) is_added, final_cost,
@@ -17625,6 +17689,9 @@ if (!process.env.VERCEL) {
   if (!process.env.VERCEL) {
     const tick = () => getDhlConfig().then(c => (c.enabled && c.key_present) ? pollTracking({ reason: 'timer' }) : null).catch(() => {});
     setTimeout(() => { tick(); setInterval(tick, 60 * 60 * 1000).unref?.(); }, 60 * 1000).unref?.();
+    // v27.738: Fulfil PO mirror import (drift). Inert unless the Fulfil env is configured. n8n hits /api/supply/fulfil/import-pos in prod.
+    const fimport = () => fulfilImportPOs().catch(() => {});
+    setTimeout(() => { fimport(); setInterval(fimport, 6 * 60 * 60 * 1000).unref?.(); }, 90 * 1000).unref?.();
   }
   app.listen(8124, () => console.log('rehost (live DATA + FC_CURRENT + save) on :8124'));
 }

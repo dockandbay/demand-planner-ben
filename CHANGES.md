@@ -1,3 +1,8 @@
+## v27.738 Fulfil ERP: PO mirror + drift (import + update-on-push) (Ben) — SERVER + mig 282
+- New **`planner.fulfil_purchase_orders`** (mig 282) mirrors every Fulfil PO (state / party / currency / warehouse / total / line_count / lines jsonb).
+- `fulfilImportPOs()` imports ALL Fulfil POs (paginated at Fulfil's 500-row cap) → `POST /api/supply/fulfil/import-pos` (webhook-secret gated; n8n cron in future) + a `!VERCEL` in-app timer (6h). A successful Horizon→Fulfil push also upserts that PO's mirror row (`source='push'`).
+- `GET /api/supply/fulfil/drift` compares `planner.purchase_orders` to the mirror — flags POs **missing from Fulfil** + line-count mismatches. First sandbox run: **1375 Horizon POs, 54 in Fulfil, 1321 missing**; imported 171 Fulfil POs.
+
 ## v27.737 Fulfil ERP: PO invoice address = supplier address (Ben) — SERVER
 - Fulfil requires `invoice_address` on a purchase order. The push now sets it to the **supplier's Fulfil party address**: use the party's existing address if present, else **create one on the party from the Horizon supplier address** (address_1/2, city, state, country, postcode) and use it. New resolvers: `fulfilFindPartyAddress` (read-only), `fulfilCreatePartyAddress`, `fulfilResolveCountry`.
 - Verified: **PO-77AUXR1 created in the sandbox (id 243)** with invoice_address = XR Textile's Suzhou/China address; also confirmed currency USD, 3 lines.

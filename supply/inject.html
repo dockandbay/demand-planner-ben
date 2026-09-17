@@ -1053,7 +1053,7 @@
   // no pending placeholders; filled pills lose data-trk (never re-fetched), so this cannot loop.
   (function(){ var pend=null; function scan(){ pend=null; try{ hzFillTrackPills(document); }catch(e){} }
     try{ new MutationObserver(function(){ if(pend)return; pend=setTimeout(scan,200); }).observe(document.documentElement,{childList:true,subtree:true}); }catch(e){} })();
-  // DHL tracking LOG (v27.727): a filled pill is clickable → overlay with status + delivery date + every cached event.
+  // (v27.727) DHL tracking LOG: a filled pill is clickable → overlay with status + delivery date + every cached event.
   function hzTrkStamp(ts){ if(!ts)return ''; try{ var d=new Date(ts); if(isNaN(d.getTime()))return String(ts).slice(0,16).replace('T',' '); var mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; function p(x){return String(x).length<2?'0'+x:''+x;} return d.getDate()+'-'+mo[d.getMonth()]+'-'+String(d.getFullYear()).slice(2)+' '+p(d.getHours())+':'+p(d.getMinutes()); }catch(e){ return String(ts); } }
   function hzTrackLogHtml(r){ if(!r)return '<div class="mut" style="padding:10px 2px">No tracking detail cached yet — it will appear after the next DHL poll.</div>';
     var code=String(r.status_code||'').toLowerCase();
