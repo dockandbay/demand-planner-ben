@@ -1,3 +1,8 @@
+## v27.745 PRODUCT split P4b: QR + short code on the sample card (Ben) — SERVER
+- The sample card PDF (admin + portal `card.pdf`) now prints a **QR** top-right with the **short code** beneath it. `ensureShortCode` runs first so a printed card always carries one.
+- QR encodes the **portal** scan URL (`PORTAL_URL/#/product/scan/<code>`) so a supplier's phone camera opens their own sample record; the in-app scanners (admin + portal) extract the 3-char code from it regardless. Drawn with a **new dependency-free QR encoder** `lib/qrcode.mjs` (Nayuki byte-mode port, no CDN, China-safe) as filled modules.
+- Verified: the encoder round-trips through the browser's `BarcodeDetector` (the same decoder the scanner uses) on the exact portal URL → decodes to code `2Q1`; the generated card PDF contains the QR (549 fill ops = white quiet-zone + modules) and is a valid PDF.
+
 ## v27.744 PRODUCT split P4a: sample short code + scan resolver (Ben) — SERVER + mig 284
 - Every `product_dev_samples` row gets a 3-char Crockford-base32 `short_code` (mig 284 backfills existing rows; `ensureShortCode` assigns lazily for new samples and at card-generation). Crockford alphabet (no I L O U) so it reads cleanly on paper.
 - `GET /api/product/scan/:code` (admin) + `GET /api/portal/scan/:code` (portal, ownership-guarded) resolve a scanned/typed code → the phone sample-card payload: item ref / version / received state / sample date / colour + swatch URL / the request's components as aspect tabs / current aspect feedback / photos. Codes normalise to uppercase; unknown code → 404; a supplier can only resolve their own sample.

@@ -7946,7 +7946,8 @@ app.get('/api/portal/product-swatch/:ref', portalAuth, async (req, res) => {
 });
 
 async function sampleCardPdf(sampleId) {
-    const sr = (await pool.query(`SELECT ps.id, ps.version, to_char(ps.sample_date,'YYYY-MM-DD') sample_date, ps.item_ref,
+    await ensureShortCode(sampleId);   // v27.745: a printed card always carries a QR / short code
+    const sr = (await pool.query(`SELECT ps.id, ps.version, to_char(ps.sample_date,'YYYY-MM-DD') sample_date, ps.item_ref, coalesce(ps.short_code,'') short_code,
       coalesce((SELECT json_agg(json_build_object('aspect',af.aspect,'feedback',af.feedback,'decision',af.decision,'awc',coalesce(af.awc_comment,'')) ORDER BY af.aspect)
         FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id),'[]'::json) aspect_feedback
       FROM planner.product_dev_samples ps WHERE ps.id=$1::bigint`, [sampleId])).rows[0];
@@ -7973,7 +7974,25 @@ async function sampleCardPdf(sampleId) {
     const fmtd = d => { const m = /(\d{4})-(\d{2})-(\d{2})/.exec(String(d || '')); return m ? (m[3] + '-' + _MON[+m[2] - 1] + '-' + m[1].slice(2)) : ''; };
     const T = (s, x, yy, sz, f, c) => page.drawText(san(s), { x, y: yy, size: sz, font: f || F, color: c || ink });
     let y = PH - M - 8;
-    T('SAMPLE - ' + (it.ref || ''), M, y, 17, B); y -= 30;   // left-aligned header, ref in the title (removed from the body)
+    T('SAMPLE - ' + (it.ref || ''), M, y, 17, B);
+    // v27.745 (P4b): QR + short code top-right. Scanning it (native camera or the in-app scanner) opens the sample
+    // record; the in-app scanner also extracts the 3-char code from the URL. QR encodes the PORTAL scan URL so a
+    // supplier's phone lands on their own sample record. Drawn as filled modules (offline encoder, no CDN).
+    if (sr.short_code) {
+      try {
+        const { qrMatrix } = await import('./lib/qrcode.mjs');
+        const scanUrl = PORTAL_URL + '/#/product/scan/' + sr.short_code;
+        const qm = qrMatrix(scanUrl, 'M');
+        const QZ = 4, mods = qm.size, cell = 78 / (mods + 2 * QZ);   // ~78pt QR incl quiet zone
+        const qx = PW - M - (mods + 2 * QZ) * cell, qy = PH - M - (mods + 2 * QZ) * cell + 6;
+        page.drawRectangle({ x: qx, y: qy, width: (mods + 2 * QZ) * cell, height: (mods + 2 * QZ) * cell, color: rgb(1, 1, 1) });
+        for (let ry = 0; ry < mods; ry++) for (let rx = 0; rx < mods; rx++) if (qm.modules[ry][rx])
+          page.drawRectangle({ x: qx + (rx + QZ) * cell, y: qy + (mods + QZ - 1 - ry) * cell, width: cell + 0.3, height: cell + 0.3, color: ink });
+        const codeW = B.widthOfTextAtSize(sr.short_code, 13);
+        T(sr.short_code, qx + ((mods + 2 * QZ) * cell - codeW) / 2, qy - 13, 13, B, ink);
+      } catch (e) { /* QR is best-effort — the card still prints without it */ }
+    }
+    y -= 30;   // left-aligned header, ref in the title (removed from the body)
     const rows = [['SUPPLIER', it.supplier], ['SEASON', it.season], ['PRODUCT TYPE', it.category], ['COLOUR NAME', it.colour_name || it.bulk_colour_name], ['SAMPLE VERSION', sr.version != null ? ('v' + sr.version) : ''], ['DATE OF SAMPLE', fmtd(sr.sample_date)]];
     rows.forEach(r => { T(r[0], M, y, 11, B, rgb(0.2, 0.25, 0.32)); T(r[1] || '-', M + 150, y, 12, F); page.drawLine({ start: { x: M + 150, y: y - 4 }, end: { x: PW - M, y: y - 4 }, thickness: 0.5, color: line }); y -= 24; });
     y -= 12;
