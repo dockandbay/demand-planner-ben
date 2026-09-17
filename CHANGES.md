@@ -1,3 +1,7 @@
+## v27.737 Fulfil ERP: PO invoice address = supplier address (Ben) — SERVER
+- Fulfil requires `invoice_address` on a purchase order. The push now sets it to the **supplier's Fulfil party address**: use the party's existing address if present, else **create one on the party from the Horizon supplier address** (address_1/2, city, state, country, postcode) and use it. New resolvers: `fulfilFindPartyAddress` (read-only), `fulfilCreatePartyAddress`, `fulfilResolveCountry`.
+- Verified: **PO-77AUXR1 created in the sandbox (id 243)** with invoice_address = XR Textile's Suzhou/China address; also confirmed currency USD, 3 lines.
+
 ## v27.736 Fulfil ERP: PO create into the sandbox works end-to-end (Ben) — SERVER
 - **Verified the Fulfil sandbox** with a fresh API key: auth is the **`X-API-KEY` header** (the old key was expired; the temporary Bearer experiment reverted — Bearer is not used).
 - `purchase.line` requires **`unit`** (UOM) and **`unit_price`**: the line now carries the product's purchase UOM (`fulfilResolveProducts` → `{id, uom}`) and a numeric price (null → 0 for a costless line; real POs carry the actual price).

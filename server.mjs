@@ -2493,12 +2493,13 @@ app.get('/api/supply/erp-status', async (req, res) => {
 const FULFIL_LINES_SEND = true;   // v27.736: verified against the sandbox 17-Sep (PO-78AUWK1 resolved cleanly) — real create/update enabled. SANDBOX only until live keys are set.
 const FULFIL_MAP = {
   poModel: 'purchase.purchase', lineModel: 'purchase.line', partyModel: 'party.party',
-  productModel: 'product.product', whModel: 'stock.location', currencyModel: 'currency.currency',
+  productModel: 'product.product', whModel: 'stock.location', currencyModel: 'currency.currency', addressModel: 'party.address', countryModel: 'country.country',
   ref: 'reference',                 // PO number field on purchase.purchase  (verified: reference exists, search_read ok)
   party: 'party',                   // supplier party (id) — REQUIRED to create a PO
   company: 'company',               // company (id) — sandbox has one: id 1 (Dock & Bay Ltd)
   currency: 'currency',             // currency (id) — resolved by ISO code (sandbox: USD=143)
   warehouse: 'warehouse',           // receiving warehouse (id) — resolved by code (ILG/IFULFILLMENT/G10/COGHLANS)
+  invoiceAddress: 'invoice_address', // v27.737: required on purchase.purchase — the supplier's party address
   deliveryDate: 'delivery_date',    // planner completion date maps here — set per line (verify on first real push)
   linesField: 'lines',              // one2many on purchase.purchase; created inline via Tryton ["create",[...]]
   line: { product: 'product', productCode: 'code', unit: 'unit', qty: 'quantity', price: 'unit_price', desc: 'description', deliveryDate: 'delivery_date' },   // v27.736: 'unit' (UOM) is required on purchase.line
@@ -2545,6 +2546,30 @@ async function fulfilResolveWarehouse(code) {
   const r = await fulfilSearchOne(FULFIL_MAP.whModel, [['type', '=', 'warehouse'], ['code', '=', code]], ['id', 'code']);
   return r ? r.id : null;
 }
+// v27.737: country by 2-letter code, else by name (Horizon suppliers.country may hold either).
+async function fulfilResolveCountry(code) {
+  const c = String(code || '').trim(); if (!c) return null;
+  let r = await fulfilSearchOne(FULFIL_MAP.countryModel, [['code', '=', c.toUpperCase()]], ['id', 'code']);
+  if (!r && c.length > 2) r = await fulfilSearchOne(FULFIL_MAP.countryModel, [['name', '=', c]], ['id']);
+  return r ? r.id : null;
+}
+// v27.737: the supplier party's invoice address in Fulfil (an 'invoice' one, else any). Read-only → null if none.
+async function fulfilFindPartyAddress(partyId) {
+  if (!partyId) return null;
+  const addrs = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.addressModel + '/search_read', [[['party', '=', partyId]], 0, 50, null, ['id', 'invoice']]);
+  if (!Array.isArray(addrs) || !addrs.length) return null;
+  return (addrs.find(a => a.invoice) || addrs[0]).id;
+}
+// v27.737: create an invoice address on the Fulfil party from the Horizon supplier address (used when the party has none).
+async function fulfilCreatePartyAddress(partyId, sup) {
+  const street = [sup && sup.address_1, sup && sup.address_2].filter(Boolean).join(', ') || null;
+  const countryId = await fulfilResolveCountry(sup && sup.country);
+  const created = await fulfilFetch('POST', '/model/' + FULFIL_MAP.addressModel, [{
+    party: partyId, invoice: true, street, city: (sup && sup.city) || null, zip: (sup && sup.postcode) || null, country: countryId || null,
+  }]);
+  const id = Array.isArray(created) ? (created[0] && (created[0].id != null ? created[0].id : created[0])) : (created && created.id);
+  return id || null;
+}
 // SKU → product id (by product code). Returns a map of found codes; missing codes are reported by the caller.
 async function fulfilResolveProducts(skus) {
   const uniq = Array.from(new Set(skus.filter(Boolean)));
@@ -2566,7 +2591,9 @@ async function fulfilPushLines(po, completion) {
       nullif(trim(coalesce(b.fulfil_id,'')),'') branch_fulfil_id
     FROM planner.purchase_orders po LEFT JOIN planner.branches b ON b.name=po.branch WHERE po.po=$1`, [po])).rows[0] || {};
   const supName = poRow.supplier || '';
-  const supRow = (await pool.query(`SELECT coalesce(default_currency,'USD') c, nullif(trim(coalesce(fulfil_id,'')),'') fulfil_id FROM planner.suppliers WHERE name=$1`, [supName])).rows[0] || {};
+  const supRow = (await pool.query(`SELECT coalesce(default_currency,'USD') c, nullif(trim(coalesce(fulfil_id,'')),'') fulfil_id,
+      coalesce(address_1,'') address_1, coalesce(address_2,'') address_2, coalesce(city,'') city, coalesce(state,'') state, coalesce(country,'') country, coalesce(postcode,'') postcode
+    FROM planner.suppliers WHERE name=$1`, [supName])).rows[0] || {};
   const curCode = supRow.c || 'USD';
   if (!lines.length) return { ok: false, error: 'PO ' + po + ' has no line quantities to push.' };
 
@@ -2583,12 +2610,14 @@ async function fulfilPushLines(po, completion) {
   const storedWhId = /^\d+$/.test(String(poRow.branch_fulfil_id || '')) ? parseInt(poRow.branch_fulfil_id, 10) : null;
   const whCode = String(poRow.warehouse || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
   const warehouseId = storedWhId || (whCode ? await fulfilResolveWarehouse(whCode) : null);
+  const existingAddr = partyId ? await fulfilFindPartyAddress(partyId) : null;   // v27.737: existing Fulfil invoice address on the party (null → will create from the Horizon supplier address on write)
   const prodMap = await fulfilResolveProducts(lines.map(l => l.sku));
   const missingSkus = lines.map(l => l.sku).filter(s => !(String(s) in prodMap));
 
   // Pre-flight resolution report — surfaces exactly what's missing before any write.
   const resolution = { supplier: supName, party_id: partyId, party_source: storedPartyId ? 'suppliers.fulfil_id' : 'name-lookup', currency: curCode, currency_id: currencyId,
     branch: poRow.warehouse || '', warehouse_id: warehouseId, warehouse_source: storedWhId ? 'branches.fulfil_id' : (warehouseId ? 'code-match' : 'unresolved'),
+    invoice_address_id: existingAddr, invoice_address_source: existingAddr ? 'fulfil-party' : (partyId ? 'will-create-from-horizon' : 'no-party'),
     products_found: Object.keys(prodMap).length, products_total: lines.length, missing_skus: missingSkus };
   const problems = [];
   if (!fulfilId && !partyId) problems.push('supplier "' + supName + '" is not a party in Fulfil (create it / import suppliers first)');
@@ -2605,7 +2634,7 @@ async function fulfilPushLines(po, completion) {
   }; });
   const headerPayload = {
     [FULFIL_MAP.ref]: po, [FULFIL_MAP.party]: partyId, [FULFIL_MAP.company]: FULFIL_MAP.defaultCompany,
-    [FULFIL_MAP.currency]: currencyId, [FULFIL_MAP.warehouse]: warehouseId,
+    [FULFIL_MAP.currency]: currencyId, [FULFIL_MAP.warehouse]: warehouseId, [FULFIL_MAP.invoiceAddress]: existingAddr,
     [FULFIL_MAP.linesField]: [['create', lineDicts]],
   };
 
@@ -2615,6 +2644,8 @@ async function fulfilPushLines(po, completion) {
       action: fulfilId ? 'update' : 'create', fulfil_id: fulfilId, resolution, problems, would_send: headerPayload };
   }
   if (problems.length) { const e = new Error('Fulfil push blocked: ' + problems.join('; ')); e.code = 'FULFIL_UNRESOLVED'; throw e; }
+  // v27.737: a create needs an invoice address = the supplier's party address; make one from the Horizon address if the party has none.
+  if (!fulfilId && !headerPayload[FULFIL_MAP.invoiceAddress] && partyId) headerPayload[FULFIL_MAP.invoiceAddress] = await fulfilCreatePartyAddress(partyId, supRow);
 
   if (fulfilId) {
     // UPDATE: replace the existing PO's lines and refresh the delivery date. (delete existing + create fresh)
