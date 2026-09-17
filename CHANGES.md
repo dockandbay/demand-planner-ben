@@ -1,3 +1,8 @@
+## v27.748 PRODUCT split P4d: scanner → sample card + auto-receive toggle (Ben) — CLIENT
+- The **barcode scanner** now recognises a **sample-card QR** (a scan URL) or a typed **3-char short code** and opens the phone sample card instead of a SKU lookup (`_sampleScanCode` → `hzScanCardOpen`). Long numeric product/carton/inner barcodes never collide, so normal barcode scanning is unchanged. The `qr_code` format was already enabled on the camera detector.
+- New **"auto-mark samples received on scan"** toggle in the scanner (per-user, `localStorage`, **OFF by default** per the decided behaviour). When on, scanning a sample marks it received; it never un-receives an already-received sample (guarded on `!received_at`).
+- Verified in the browser: scanner + typed `2Q1` → phone card opens; auto-receive OFF leaves the sample unreceived; auto-receive ON marks it received (`2026-09-17`) and persists the toggle; a second scan wouldn't un-receive. Test state reset.
+
 ## v27.747 PRODUCT split P4c (portal): supplier phone sample card (Ben) — CLIENT (portal)
 - Scanning a sample-card QR on a **supplier's phone** (or hitting `#/product/scan/<code>` in the portal) opens a **view-focused sample card** (`ppScanCardOpen`): large clear **swatch**, identity, receipt status, **Dock & Bay's review** per component (read-only decisions + feedback), photos, and an **Open full record ↗** button to the portal product page. This is what the QR encodes (portal URL), so a supplier's native camera lands here.
 - Ownership-guarded: `/api/portal/scan/:code` only resolves the caller's own sample. Verified live in the portal as supplier **Lixin** — their sample `2Q1` renders with the real 512×467 swatch; other suppliers' codes (RQS/RDN/9A1) return **403**.

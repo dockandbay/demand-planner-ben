@@ -10545,18 +10545,24 @@
   // ── v27.561 Barcode scanner (Ben): camera (BarcodeDetector where supported) + typed / USB-scanner input → SKU card ──
   var _bscState={stream:null,timer:null,last:'',lastAt:0,hist:[]};
   function closeBarcodeScanner(){ try{ if(_bscState.timer)clearInterval(_bscState.timer); }catch(e){} _bscState.timer=null; try{ if(_bscState.stream)_bscState.stream.getTracks().forEach(function(t){t.stop();}); }catch(e){} _bscState.stream=null; var ov=document.getElementById('bsc-ov'); if(ov&&ov.parentNode)ov.parentNode.removeChild(ov); document.body.style.overflow=''; }
+  // v27.748 (P4d): scanned/typed value → a sample short code, if it is one. Accepts a scan URL (…/product/scan/A31)
+  // or a bare 3-char Crockford code. Product/carton/inner barcodes are long numeric strings, so they never collide.
+  function _sampleScanCode(v){ v=String(v||'').trim(); var m=/\/product\/scan\/([0-9A-Za-z]{3})(?:$|[/?#])/.exec(v); if(m)return m[1].toUpperCase(); if(/^[0-9A-Za-z]{3}$/.test(v)&&/[A-Za-z]/.test(v))return v.toUpperCase(); return null; }
+  function _bscAutoRecv(){ try{ return localStorage.getItem('hzSampleAutoReceive')==='1'; }catch(e){ return false; } }
   function openBarcodeScanner(){ closeBarcodeScanner(); var ph=isPhone();
     var ov=document.createElement('div'); ov.id='bsc-ov'; ov.style.cssText='position:fixed;inset:0;z-index:200080;background:rgba(15,23,42,.55);display:flex;align-items:'+(ph?'stretch':'flex-start')+';justify-content:center;padding:'+(ph?'0':'40px 16px');
     ov.innerHTML='<div id="bsc-box" style="background:var(--card);border-radius:'+(ph?'0':'12px')+';width:'+(ph?'100%':'min(920px,100%)')+';max-height:'+(ph?'100%':'calc(100vh - 80px)')+';overflow:auto;box-shadow:0 20px 60px rgba(0,0,0,.35);display:flex;flex-direction:column">'
       +'<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--card);z-index:2"><b style="font-size:14px">📷 Barcode scanner</b><span id="bsc-status" class="mut tiny"></span><button id="bsc-x" aria-label="Close" style="margin-left:auto;width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--card);font-size:15px;cursor:pointer">✕</button></div>'
       +'<div style="display:flex;gap:14px;padding:12px 14px;flex-wrap:wrap;align-items:flex-start">'
         +'<div style="flex:0 1 360px;min-width:260px"><div id="bsc-cam" style="position:relative;background:#111;border-radius:10px;overflow:hidden;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;color:#cbd5e1;font-size:12px;text-align:center;padding:10px">Starting camera…</div>'
-          +'<div style="margin-top:8px;display:flex;gap:6px;align-items:center"><input id="bsc-in" class="fci" autocomplete="off" placeholder="scan with a USB / Bluetooth scanner or type a barcode, then Enter" style="flex:1;font-size:13px;padding:8px 10px"><button id="bsc-go" class="save-btn" style="font-size:12px">Look up</button></div>'
+          +'<div style="margin-top:8px;display:flex;gap:6px;align-items:center"><input id="bsc-in" class="fci" autocomplete="off" placeholder="scan a barcode or sample-card QR, or type a barcode / 3-char sample code, then Enter" style="flex:1;font-size:13px;padding:8px 10px"><button id="bsc-go" class="save-btn" style="font-size:12px">Look up</button></div>'
+          +'<label style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);cursor:pointer" title="when on, scanning a sample-card QR marks that sample received automatically (it never un-receives one already received)"><input type="checkbox" id="bsc-autorecv"'+(_bscAutoRecv()?' checked':'')+' style="margin:0">auto-mark samples received on scan</label>'
           +'<div id="bsc-hist" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px"></div></div>'
         +'<div id="bsc-res" style="flex:1 1 380px;min-width:280px"><div class="mut" style="font-size:12px;padding:10px 0">Point the camera at a product, carton or inner barcode, or type one. Numbers saved in a Customise project resolve to their SKU too.</div></div>'
       +'</div></div>';
     document.body.appendChild(ov); document.body.style.overflow='hidden';
     ov.querySelector('#bsc-x').onclick=closeBarcodeScanner; ov.addEventListener('click',function(e){ if(e.target===ov)closeBarcodeScanner(); });
+    var _arChk=ov.querySelector('#bsc-autorecv'); if(_arChk)_arChk.onchange=function(){ try{ localStorage.setItem('hzSampleAutoReceive',_arChk.checked?'1':'0'); }catch(e){} };
     var inp=ov.querySelector('#bsc-in'), res=ov.querySelector('#bsc-res'), status=ov.querySelector('#bsc-status'), cam=ov.querySelector('#bsc-cam'), hist=ov.querySelector('#bsc-hist');
     function drawHist(){ hist.innerHTML=_bscState.hist.slice(0,8).map(function(h){ return '<span class="bsc-h" data-c="'+esc(h.code)+'" style="cursor:pointer;font-size:10.5px;border:1px solid var(--line);border-radius:10px;padding:2px 8px;background:var(--hover)">'+esc(h.sku||h.code)+'</span>'; }).join(''); hist.querySelectorAll('.bsc-h').forEach(function(x){ x.onclick=function(){ lookup(x.dataset.c,true); }; }); }
     function money(ccy,v){ if(v==null||isNaN(v))return '<span class="mut">—</span>'; var sym={GBP:'£',USD:'$',EUR:'€',AUD:'A$',CAD:'C$'}[ccy]||''; return sym+Number(v).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
@@ -10584,6 +10590,7 @@
           +'</div></div></div>'
         +'<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:12px"><div style="flex:1 1 220px"><div style="font-size:11px;font-weight:700;color:var(--ink-soft);margin-bottom:3px">Prices</div>'+prices+'</div><div style="flex:2 1 300px"><div style="font-size:11px;font-weight:700;color:var(--ink-soft);margin-bottom:3px">Inventory</div>'+inv+'</div></div>'; }
     function lookup(code,quiet){ code=String(code||'').trim(); if(!code)return; var now=Date.now(); if(!quiet&&code===_bscState.last&&now-_bscState.lastAt<2500)return; _bscState.last=code; _bscState.lastAt=now;
+      var _sc=_sampleScanCode(code); if(_sc){ var _ar=ov.querySelector('#bsc-autorecv'); closeBarcodeScanner(); hzScanCardOpen(_sc,{autoReceive:_ar?_ar.checked:_bscAutoRecv()}); return; }   // v27.748: a sample-card QR / short code opens the phone sample card (not a SKU lookup)
       status.textContent='looking up '+code+'…'; res.innerHTML='<div class="hz-skel"><i></i><i></i><i></i></div>';
       fetch('/api/supply/barcode-lookup?code='+encodeURIComponent(code)).then(function(r){return r.json();}).then(function(d){
         if(!d||!d.found){ status.textContent=''; res.innerHTML='<div style="padding:10px;border:1px solid var(--amber);background:var(--amber-bg);border-radius:8px;font-size:12px"><b>'+esc(code)+'</b> is not a known product, carton or inner barcode, and no Customise project uses it.</div>'; try{ navigator.vibrate&&navigator.vibrate([60,60,60]); }catch(e){} return; }
@@ -10606,7 +10613,7 @@
   // ── v27.746 (P4c) Phone SAMPLE CARD (Ben) — opened by scanning a sample-card QR or typing its short code.
   // Mobile-first full-screen: clear swatch, identity, "Mark received", per-component decision + feedback + reject
   // reasons, and camera photo capture. Writes through the same endpoints the SAMPLING review uses.
-  function hzScanCardOpen(code){ code=String(code||'').trim().toUpperCase();
+  function hzScanCardOpen(code,opts){ code=String(code||'').trim().toUpperCase(); opts=opts||{};
     try{ closeBarcodeScanner(); }catch(e){}
     var old=document.getElementById('scc-ov'); if(old)old.remove();
     var ov=document.createElement('div'); ov.id='scc-ov';
@@ -10624,7 +10631,10 @@
                   fetch('/api/product/reject-reasons').then(function(r){return r.json();}).catch(function(){return {reasons:[]};}) ])
       .then(function(a){ var d=a[0]||{}, REASONS=(a[1]&&a[1].reasons)||[];
         if(!d.ok||!d.sample){ body.innerHTML='<div style="padding:18px;border:1px solid var(--amber);background:var(--amber-bg);border-radius:8px;font-size:13px">No sample matches code <b>'+esc(code)+'</b>. Check the code and try again.</div>'; return; }
-        hzScanCardRender(body, d.sample, REASONS, close);
+        var s=d.sample;
+        // v27.748 (P4d): auto-mark-received on first scan (opt-in toggle). Never un-receives an already-received sample.
+        if(opts.autoReceive && !s.received_at){ fetch('/api/product/sample/'+s.id+'/received',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({received:true})}).then(function(r){return r.json();}).then(function(j){ if(j&&!j.error)s.received_at=j.received_at||s.received_at; try{ navigator.vibrate&&navigator.vibrate(40); }catch(e){} hzScanCardRender(body,s,REASONS,close); }).catch(function(){ hzScanCardRender(body,s,REASONS,close); }); }
+        else hzScanCardRender(body, s, REASONS, close);
       }).catch(function(e){ body.innerHTML='<div style="color:var(--neg);padding:16px">Failed to load: '+esc(e&&e.message||e)+'</div>'; });
   }
   function hzScanCardRender(body, s, REASONS, close){
