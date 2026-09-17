@@ -10864,7 +10864,7 @@
       if(seg[1]&&!_prodSubs[seg[1]]){ _pendingProdRef=decodeURIComponent(seg[1]); if(seg[2])_pendingProdTab=decodeURIComponent(seg[2]); selectProductSub('plan'); }   // #/product/<ref>[/<tab>]
       else if(seg[1]==='config'&&seg[2]){ try{_prodCfgTab=decodeURIComponent(seg[2]);}catch(e){} selectProductSub('config'); }   // #/product/config/<season|cats|tags|phrases>
       else if(seg[1]==='batch'){ if(seg[2]){ _batchSR=decodeURIComponent(seg[2]); try{ localStorage.setItem('hzBatchSR',_batchSR); }catch(e){} } selectProductSub('batch'); }   // v27.569: #/product/batch/<sample shipment id>
-      else if(seg[1]==='sampling'&&seg[2]){ _smpDeep={ref:decodeURIComponent(seg[2]),v:(seg[3]||'S1')}; _smpView='requests'; selectProductSub('sampling'); }   // v27.717: #/product/sampling/<request ref>/S<n> opens that request's sample n inline
+      else if(seg[1]==='sampling'&&seg[2]){ _smpDeep={ref:decodeURIComponent(seg[2]),tab:(seg[3]||'master-data')}; _smpView='requests'; selectProductSub('sampling'); }   // v27.735: #/product/sampling/<ref>/<tab> opens the MANAGE panel on that tab (master-data | timeline | S1..)
       else { if(seg[2])_pendingProdRef=decodeURIComponent(seg[2]); selectProductSub(seg[1]||'plan'); } } }   // #/product/<plan|dashboard|range|specs|reports|config>[/<ref>]
     else if(seg[0]==='buy-move'||seg[0]==='buy'||seg[0]==='fba'){
       // BUY & MOVE group. New URLs: #/buy-move/<buy|fba|transfer>. Legacy #/buy/<ctry>, #/fba/<ctry> still work.
@@ -13369,7 +13369,7 @@
   //    (decision + feedback per component, reject reasons, photos); Age = days since the request last moved; Shipment cell
   //    = the latest sample shipment (carrier + tracking; DHL live status lands in P2b).
   var _smpFilt={supplier:'',stage:'',season:'',category:'',q:'',mine:false,overdue:false}; var _smpOpen=null;   // {rid,sid}
-  var _smpDeep=null, _smpScroll=null;   // v27.717: pending deep link {ref:<request ref>, v:'S2'}
+  var _smpDeep=null, _smpScroll=null, _smpManagePending=null;   // v27.717/v27.735: pending deep link → open the MANAGE panel {rid, tab}
   function smpHash(r,idx){ try{ writeHash(r?['product','sampling',r.ref,'S'+idx]:['product','sampling']); }catch(e){} }
   var _smpView=(function(){ try{ return localStorage.getItem('smpView')||'requests'; }catch(e){ return 'requests'; } })();   // v27.714: 'requests' | 'batch' (Sample batch review as a view of SAMPLING)
   var _smpSwSize=(function(){ try{ return localStorage.getItem('smpSwatchSize')||'md'; }catch(e){ return 'md'; } })();   // v27.714: SAMPLING swatch size sm | md | lg
@@ -13408,8 +13408,8 @@
           ov.querySelector('#smp-pick-go').onclick=go; inp.onkeydown=function(e){ if(e.key==='Enter')go(); }; ov.querySelector('#smp-pick-x').onclick=function(){ ov.remove(); }; ov.onclick=function(e){ if(e.target===ov)ov.remove(); }; }); };
       function overdue(r){ if((r.samples||[]).some(function(s){return !s.received_at&&s.supplier_status!=='cancelled';}))return true; var a=_smpAge(r.updated_at); return a!=null&&a>=14&&['approved','approved_with_comments','stop_development'].indexOf(r.stage)<0; }
       function draw(){
-        if(_smpDeep){ var dl=_smpDeep; _smpDeep=null; var rr=rows.filter(function(x){ return String(x.ref).toLowerCase()===String(dl.ref).toLowerCase(); })[0];
-          if(rr){ var vi=parseInt(String(dl.v).replace(/^s/i,''),10)||1, smv=(rr.samples||[])[vi-1]; _smpOpen=smv?{rid:String(rr.id),sid:String(smv.id)}:null; if(smv)smpHash(rr,vi); _smpFilt={supplier:'',stage:'',season:'',category:'',q:'',mine:false,overdue:false}; ['smp-sup','smp-stage','smp-season','smp-cat'].forEach(function(id){ var el=fb.querySelector('#'+id); if(el){ el.value=''; el.setAttribute('style',selDark('')); } }); var qi=fb.querySelector('#smp-q'); if(qi)qi.value=''; ['smp-mine','smp-overdue'].forEach(function(id){ var el=fb.querySelector('#'+id); if(el)el.checked=false; }); _smpScroll=String(rr.id); } }
+        if(_smpDeep){ var dl=_smpDeep; _smpDeep=null; var rr=rows.filter(function(x){ var a=String(x.ref).toLowerCase(), b=String(x.item_ref||'').toLowerCase(), qq=String(dl.ref).toLowerCase(); return a===qq||b===qq; })[0];   // v27.735: match request ref OR product item_ref
+          if(rr){ _smpFilt={supplier:'',stage:'',season:'',category:'',q:'',mine:false,overdue:false}; ['smp-sup','smp-stage','smp-season','smp-cat'].forEach(function(id){ var el=fb.querySelector('#'+id); if(el){ el.value=''; el.setAttribute('style',selDark('')); } }); var qi=fb.querySelector('#smp-q'); if(qi)qi.value=''; ['smp-mine','smp-overdue'].forEach(function(id){ var el=fb.querySelector('#'+id); if(el)el.checked=false; }); _smpScroll=String(rr.id); _smpManagePending={rid:String(rr.id), tab:dl.tab}; } }
         var q=_smpFilt.q.trim().toLowerCase();
         var f=rows.filter(function(r){ if(_smpFilt.supplier&&r.supplier_name!==_smpFilt.supplier)return false; if(_smpFilt.stage&&r.stage!==_smpFilt.stage)return false; if(_smpFilt.season&&r.season!==_smpFilt.season)return false; if(_smpFilt.category&&r.category!==_smpFilt.category)return false;
           if(_smpFilt.mine&&!(r.internal_stakeholders||[]).some(function(e){return String(e).toLowerCase()===me;}))return false; if(_smpFilt.overdue&&!overdue(r))return false;
@@ -13452,6 +13452,7 @@
         g.querySelectorAll('.smp-sdate').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); var rid=a.dataset.rid, sid=a.dataset.sid; var r=rows.filter(function(x){return String(x.id)===rid;})[0]; if(!r)return; var tr=a.closest('tr'); var open=g.querySelector('tr.smp-exp[data-rid="'+rid+'"]'); if(open&&open.dataset.sid===sid){ open.remove(); _smpOpen=null; smpHash(null); return; } if(open)open.remove(); _smpOpen={rid:rid,sid:sid}; smpHash(r,(r.samples||[]).map(function(x){return String(x.id);}).indexOf(String(sid))+1); smpExpand(tr,r,sid,ths.length); }; });
         if(_smpOpen){ var r0=f.filter(function(x){return String(x.id)===String(_smpOpen.rid);})[0]; var tr0=g.querySelector('tr.smp-row[data-rid="'+_smpOpen.rid+'"]'); if(r0&&tr0&&(r0.samples||[]).some(function(s){return String(s.id)===String(_smpOpen.sid);}))smpExpand(tr0,r0,_smpOpen.sid,ths.length); else _smpOpen=null; }
         if(_smpScroll){ var trS=g.querySelector('tr.smp-row[data-rid="'+_smpScroll+'"]'); _smpScroll=null; if(trS){ try{ trS.scrollIntoView({block:'center'}); }catch(e){} trS.style.outline='2px solid var(--blue)'; setTimeout(function(){ trS.style.outline=''; },2200); } }
+        if(_smpManagePending){ var mp=_smpManagePending; _smpManagePending=null; var mtr=g.querySelector('tr.smp-row[data-rid="'+mp.rid+'"]'); var mr=f.filter(function(x){return String(x.id)===mp.rid;})[0]; if(mtr&&mr)setTimeout(function(){ smpManage(mtr, mr, ths.length, mp.tab); },0); }   // v27.735: open MANAGE on the deep-linked tab
       }
       // Inline expansion: tabs = this request's sample versions; panel = per-component decision + feedback (rich compose) + reasons + photos
       function smpExpand(tr,r,sid,ncols){ var exp=document.createElement('tr'); exp.className='smp-exp'; exp.dataset.rid=r.id; exp.dataset.sid=sid; exp.innerHTML='<td colspan="'+ncols+'"><div class="mut" style="padding:6px 2px">Loading sample…</div></td>'; tr.parentNode.insertBefore(exp,tr.nextSibling);
@@ -13528,9 +13529,12 @@
             return '<a href="'+dl+'" target="_blank" rel="noopener" title="'+esc(x.filename||'')+(x.version?' · v'+x.version:'')+'" style="text-decoration:none;color:var(--ink);text-align:center;width:76px;display:block">'+th+'<div class="tiny" style="margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(x.filename||'file')+'</div>'+(x.version?'<div class="mut tiny">v'+x.version+'</div>':'')+'</a>'; }).join('')+'</div>';
         }).catch(function(){ fc.innerHTML='<span class="mut tiny">Could not load files.</span>'; });
       }
+      // v27.735: deep-link tab slug <-> internal tab key (master-data|timeline|S1.. <-> master|timeline|s0..).
+      function _smpTabSlug(t){ if(t==='timeline')return 'timeline'; var m=/^s(\d+)$/.exec(t); return m?('S'+(parseInt(m[1],10)+1)):'master-data'; }
+      function _smpSlugToTab(slug){ slug=String(slug||'').toLowerCase(); if(slug==='timeline')return 'timeline'; var m=/^s(\d+)$/.exec(slug); if(m)return 's'+Math.max(0,parseInt(m[1],10)-1); return 'master'; }
       // v27.730: MANAGE panel — inline tabbed workspace for a request: Master data · Timeline · one tab per sample.
-      function smpManage(tr, r, ncols){ var g=c.querySelector('#smp-grid');
-        var open=g.querySelector('tr.smp-mexp[data-rid="'+r.id+'"]'); if(open){ open.remove(); return; }
+      function smpManage(tr, r, ncols, initialTab){ var g=c.querySelector('#smp-grid');
+        var open=g.querySelector('tr.smp-mexp[data-rid="'+r.id+'"]'); if(open){ open.remove(); try{ writeHash(['product','sampling']); }catch(e){} return; }   // v27.735: closing clears the deep-link tab from the URL
         var ex=g.querySelector('tr.smp-mexp'); if(ex)ex.remove();
         var samples=r.samples||[];
         var tabDefs=[['master','Master data'],['timeline','Timeline']].concat(samples.map(function(s,i){ return ['s'+i,'S'+(i+1)+(s.received_at?' ✓':'')]; }));
@@ -13540,12 +13544,12 @@
         var body=exp.querySelector('.smp-mbody');
         Promise.all([fetch('/api/product/item/'+encodeURIComponent(r.item_ref)).then(function(x){return x.json();}), fetch('/api/product/reject-reasons').then(function(x){return x.json();}).catch(function(){return {reasons:[]};}), pget('/api/product/timeline-config').catch(function(){return {snippets:[]};})]).then(function(a){
           var d=a[0]||{}, REASONS=(a[1]&&a[1].reasons)||[], SNIPS=((a[2]&&a[2].snippets)||[]).filter(function(x){return x.active!==false;});
-          function show(t){ if(!document.body.contains(exp))return; exp.querySelectorAll('.smp-mtab').forEach(function(b){ b.classList.toggle('active', b.dataset.t===t); }); body.innerHTML='';
+          function show(t){ if(!document.body.contains(exp))return; exp.querySelectorAll('.smp-mtab').forEach(function(b){ b.classList.toggle('active', b.dataset.t===t); }); body.innerHTML=''; try{ writeHash(['product','sampling', r.ref, _smpTabSlug(t)]); }catch(e){}   // v27.735: URL follows the open tab
             if(t==='master'){ _smpMasterReadonly(body, d); }
             else if(t==='timeline'){ renderProdTimeline(body, r.item_ref); }
             else { var idx=parseInt(t.slice(1),10)||0; var rs=(r.samples||[])[idx]; var sm=(d.samples||[]).filter(function(s){ return String(s.id)===String(rs&&rs.id); })[0]; if(sm){ _smpReviewInto(body, r, sm, rs, REASONS, SNIPS); } else { body.innerHTML='<div class="mut" style="padding:8px">No sample submitted for this version yet.</div>'; } } }
           exp.querySelectorAll('.smp-mtab').forEach(function(b){ b.onclick=function(){ show(b.dataset.t); }; });
-          show('master');
+          show(initialTab?_smpSlugToTab(initialTab):'master');
         }).catch(function(e){ body.innerHTML='<div style="color:var(--neg);padding:8px">Failed: '+esc(e.message||e)+'</div>'; });
       }
       draw();

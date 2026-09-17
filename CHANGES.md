@@ -1,3 +1,7 @@
+## v27.735 SAMPLING: deep links to the MANAGE panel + tab (Ben) — CLIENT
+- `#/product/sampling/<ref>/<tab>` opens the MANAGE panel on that tab — tab ∈ **master-data · timeline · S1 · S2…** — where `<ref>` matches the request ref **or** the product item_ref (e.g. `.../SS27-HAIRW-LOVELYHAIR/S1` opens the LX request's Sample 1). Scrolls to + outlines the row.
+- The **URL follows the open tab** as you switch, and clears back to `#/product/sampling` when the panel closes. Supersedes the v27.717 inline-sample deep link.
+
 ## v27.734 SAMPLING: MANAGE "Master data" tab is read-only PRODUCT master + files + product link (Ben) — CLIENT
 - The MANAGE **Master data** tab is the PRODUCT master, so it now renders **read-only** (Type / Season / Category / Colour way / Bulk colour / Approval / Description) with a **"Open product ↗"** link (opens the product detail to edit) and a read-only **Files** grid (thumbnails + download), instead of the editable `renderProdMaster` form.
 
