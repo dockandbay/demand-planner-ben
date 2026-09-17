@@ -279,6 +279,10 @@
 #product-root .smp-tbl th.smp-scell{padding-left:3px;padding-right:3px}
 #product-root .smp-stage{min-width:220px}
 #product-root .smp-stage .smp-stage-sel{width:100%;min-width:210px;max-width:100%}
+#product-root .smp-manage{font-size:10px;font-weight:700;border:1px solid var(--line);background:var(--card);color:var(--nav);border-radius:5px;padding:2px 9px;cursor:pointer;white-space:nowrap}
+#product-root .smp-manage:hover{background:var(--hover)}
+#product-root .smp-mtab{font-size:11px;font-weight:600;border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:6px;padding:4px 11px;cursor:pointer}
+#product-root .smp-mtab.active{background:var(--nav);color:#fff;border-color:var(--nav)}
 #product-root #smp-grid .pg-swatch2{width:40px;height:40px;border-radius:7px}
 #product-root #smp-grid.smp-sw-sm .pg-swatch2{width:26px;height:26px;border-radius:5px}
 #product-root #smp-grid.smp-sw-lg .pg-swatch2{width:76px;height:76px;border-radius:10px}
@@ -13408,7 +13412,7 @@
         f.forEach(function(r){ var sw=r.has_swatch?'<img class="pg-swatch2 smp-sw" data-src="/api/product/swatch/'+encodeURIComponent(r.item_ref)+'?t='+encodeURIComponent(r.item_updated_at||'')+'" src="/api/product/swatch/'+encodeURIComponent(r.item_ref)+'?t='+encodeURIComponent(r.item_updated_at||'')+'" style="object-fit:cover;border:1px solid var(--line)" title="hover to enlarge · click to open">':'<span class="pg-swatch2 none" style="display:inline-block;border:1px dashed var(--line)"></span>';
           var comps=(r.components||[]); var compTxt=comps.length?comps.map(function(x){return x.name;}).join(' · '):'(no component)';
           var cells='<td class="l" style="width:40px">'+sw+'</td>'
-            +'<td class="l"><div style="font-weight:700;font-family:ui-monospace,Menlo,monospace;font-size:12px"><a class="smp-openreq" data-ref="'+esc(r.item_ref)+'" data-rid="'+r.id+'" style="cursor:pointer;color:var(--ink)">'+esc(r.ref)+'</a></div><div class="mut" style="font-size:11px;margin-top:3px">'+esc(compTxt)+'</div></td>'
+            +'<td class="l"><div style="font-weight:700;font-family:ui-monospace,Menlo,monospace;font-size:12px"><a class="smp-openreq" data-ref="'+esc(r.item_ref)+'" data-rid="'+r.id+'" style="cursor:pointer;color:var(--ink)">'+esc(r.ref)+'</a></div><div class="mut" style="font-size:11px;margin-top:3px">'+esc(compTxt)+'</div><div style="margin-top:5px"><button class="smp-manage" data-rid="'+r.id+'" title="Manage this request: master data, timeline, and each sample in tabs">⚙ Manage</button></div></td>'
             +'<td class="l"><div style="font-size:12px;font-weight:600">'+prodColourDisplay(r)+'</div><div style="margin-top:3px">'+(r.category?hzCatBadge(r.category,r.category_colour):'<span class="mut tiny">no category</span>')+'</div></td>'   // v27.715 (Ben): Colour / Type = colour way + category badge
             +'<td class="l">'+esc(r.supplier_name)+(r.supplier_code?' <span class="mut tiny">'+esc(r.supplier_code)+'</span>':'')+'<div style="margin-top:3px"><span class="smp-type'+(/custom/i.test(r.type||'')?' custom':'')+'">'+esc(/custom/i.test(r.type||'')?'Custom order':'Development')+'</span></div></td>'
             +'<td class="l smp-stage"><select class="fci smp-stage-sel" data-rid="'+r.id+'" data-ref="'+esc(r.item_ref)+'" style="font-size:11px;'+prodStageStyle(r.stage)+'">'+STAGE_META.map(function(m){return '<option value="'+m[0]+'"'+(m[0]===r.stage?' selected':'')+'>'+esc(m[1])+'</option>';}).join('')+'</select></td>';
@@ -13422,6 +13426,7 @@
         g.innerHTML=html+'</tbody></table>';
         hzFillTrackPills(g);   // v27.720: populate DHL tracking pills in the Shipment cells from the cache
         g.querySelectorAll('.smp-openreq').forEach(function(a){ a.onclick=function(){ _prodDetailTab='requests'; _prodHighlightReq=Number(a.dataset.rid); openProductDrawer(a.dataset.ref,null,'requests'); }; });
+        g.querySelectorAll('.smp-manage').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var r=f.filter(function(x){return String(x.id)===b.dataset.rid;})[0]; if(r)smpManage(b.closest('tr'), r, ths.length); }; });   // v27.730: MANAGE → inline tabbed panel
         g.querySelectorAll('.smp-tl').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); var ref=a.dataset.ref, tr=a.closest('tr');   // v27.722 (Ben): timeline lives on SAMPLING — expand inline here, no jump to the Products drawer
           var ex=g.querySelector('tr.smp-tlexp'); if(ex){ var same=ex.getAttribute('data-ref')===ref; ex.remove(); if(same)return; }
           var exp=document.createElement('tr'); exp.className='smp-tlexp'; exp.setAttribute('data-ref',ref);
@@ -13470,6 +13475,51 @@
               try{ prodItemInvalidate(r.item_ref); }catch(e){} var s0=(r.samples||[]).filter(function(x){return String(x.id)===String(sm.id);})[0]; if(s0){ var dAll=Array.prototype.slice.call(td.querySelectorAll('.smp-dec')).map(function(x){return x.value;}); s0.approved=dAll.filter(function(v){return v==='approved'||v==='approved_with_comments';}).length; s0.rejected=dAll.filter(function(v){return v==='rejected_new_sample'||v==='stop_development';}).length; } }); }
           td.querySelectorAll('.smp-save').forEach(function(b){ b.onclick=function(){ save(b.dataset.key); }; });
         }).catch(function(e){ exp.querySelector('td').innerHTML='<div style="color:var(--neg);padding:6px 2px">Failed: '+esc(e.message||e)+'</div>'; }); }
+      // v27.730: render ONE sample's review (head + per-component decision/feedback/photos + save) into any container.
+      // Mirrors smpExpand's body so the MANAGE panel's per-sample tabs behave identically, without touching the tick-aligned inline expander.
+      function _smpReviewInto(host, r, sm, rs, REASONS, SNIPS){ rs=rs||{}; var td=host;
+        var head='<div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12px;margin-bottom:4px"><b>'+esc(r.ref)+' · Sample '+sm.version+'</b><span class="mut">submitted '+esc(fd(sm.sample_date||sm.created_at||''))+'</span>'+(rs.received_at?'<span style="color:#16a34a;font-weight:700">✓ received '+esc(fd(rs.received_at))+'</span>':'<span style="color:var(--amber);font-weight:700">not received</span>')+(sm.description?'<span class="mut">— '+esc(sm.description)+'</span>':'')+(rs.shipment?'<span class="mut">📦 '+esc(rs.shipment.ref)+'</span>':'')+'</div>';
+        var comps=(r.components||[]).filter(function(cp){return (cp.sampling_mode||'sampled')!=='spec_linked';}); if(!comps.length)comps=[{id:0,name:'Product',dimension:'product'}];
+        var afMap={}; (sm.aspect_feedback||[]).forEach(function(x){ afMap[x.aspect]=x; }); var rrMap={}; (sm.reject_reasons||[]).forEach(function(x){ (rrMap[x.aspect]=rrMap[x.aspect]||[]).push(Number(x.reason_id)); });
+        var body=comps.map(function(cp){ var key=_smpAspectKey(cp), af=afMap[key]||{}, dec=_stageVal(af.decision), rej=(dec==='rejected_new_sample'||dec==='stop_development'), picked=rrMap[key]||[];
+          return '<div class="smp-comp" data-key="'+esc(key)+'"><div><div style="font-weight:700">'+esc(cp.name)+'</div>'+(af.updated_at?'<div class="mut tiny">saved '+esc(af.updated_at)+(af.updated_by?' · '+esc(String(af.updated_by).replace(/@.*/,'@')):'')+'</div>':'<div class="mut tiny">no decision yet</div>')+'</div>'
+            +'<div><select class="fci smp-dec" data-key="'+esc(key)+'" style="font-size:11px;width:100%;'+prodStageStyle(dec)+'">'+_compStageOpts(dec)+'</select>'
+            +'<div class="smp-reasons" data-key="'+esc(key)+'" style="display:'+(rej?'':'none')+';margin-top:6px">'+(REASONS.length?REASONS.map(function(z){return '<label style="display:block;font-size:11px;cursor:pointer"><input type="checkbox" class="smp-rr" data-key="'+esc(key)+'" value="'+z.id+'"'+(picked.indexOf(Number(z.id))>=0?' checked':'')+'> '+esc(z.name)+'</label>';}).join(''):'<span class="mut tiny">no reject reasons configured</span>')+'</div>'
+            +'<textarea class="fci smp-awc" data-key="'+esc(key)+'" rows="2" placeholder="comments for this approval…" style="display:'+(dec==='approved_with_comments'?'':'none')+';width:100%;box-sizing:border-box;margin-top:6px;font-size:11px">'+esc(af.awc_comment||'')+'</textarea></div>'
+            +'<div><textarea class="fci smp-fb" data-key="'+esc(key)+'" rows="3" placeholder="Feedback — / phrase · /p Pantone" style="width:100%;box-sizing:border-box;font-size:12px">'+esc(af.feedback||'')+'</textarea><div class="smp-pick" data-key="'+esc(key)+'" style="display:none"></div><div style="display:flex;gap:8px;align-items:center;margin-top:4px"><button class="save-btn smp-save" data-key="'+esc(key)+'" style="font-size:11px;padding:3px 12px">Save</button><span class="smp-msg tiny" data-key="'+esc(key)+'"></span></div></div></div>'; }).join('');
+        var photos=(sm.photos||[]).length?'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">'+(sm.photos||[]).map(function(p){ var u='/api/supply/portal-attachment/'+p.id; return /^image\//i.test(p.mime||'')?'<a href="'+u+'" target="_blank" rel="noopener"><img src="'+u+'" title="'+esc(p.filename)+'" style="width:54px;height:54px;object-fit:cover;border-radius:6px;border:1px solid var(--line)"></a>':'<a href="'+u+'" target="_blank" rel="noopener" style="font-size:11px;color:var(--blue);text-decoration:underline">📎 '+esc(p.filename)+'</a>'; }).join('')+'</div>':'';
+        td.innerHTML='<div style="padding:4px 2px 8px">'+head+body+photos+'</div>';
+        var PAN={}; td.querySelectorAll('.smp-fb').forEach(function(ta){ var key=ta.dataset.key; PAN[key]={}; var pk=td.querySelector('.smp-pick[data-key="'+key+'"]'); hzRichCompose(ta,pk,{snips:SNIPS,picked:PAN[key],fixed:true}); });
+        td.querySelectorAll('.smp-dec').forEach(function(sel){ sel.onchange=function(){ var key=sel.dataset.key, v=sel.value; sel.setAttribute('style','font-size:11px;width:100%;'+prodStageStyle(v)); var rb=td.querySelector('.smp-reasons[data-key="'+key+'"]'); if(rb)rb.style.display=(v==='rejected_new_sample'||v==='stop_development')?'':'none'; var aw=td.querySelector('.smp-awc[data-key="'+key+'"]'); if(aw)aw.style.display=(v==='approved_with_comments')?'':'none'; }; });
+        function save(key){ var sel=td.querySelector('.smp-dec[data-key="'+key+'"]'), ta=td.querySelector('.smp-fb[data-key="'+key+'"]'), msg=td.querySelector('.smp-msg[data-key="'+key+'"]'), aw=td.querySelector('.smp-awc[data-key="'+key+'"]'); var dec=sel.value, rs2=[]; td.querySelectorAll('.smp-rr[data-key="'+key+'"]:checked').forEach(function(x){rs2.push(Number(x.value));});
+          if((dec==='rejected_new_sample'||dec==='stop_development')&&!rs2.length){ msg.style.color='var(--amber)'; msg.textContent='⚠ pick a reject reason'; return; }
+          msg.style.color='var(--muted)'; msg.textContent='saving…'; var txt=String(ta.value||'').trim();
+          shipPost('/api/product/sample/'+sm.id+'/aspect',{aspect:key,feedback:ta.value,decision:dec,reject_reasons:rs2,awc_comment:aw?aw.value:''},function(j){ if(j&&j.error){ msg.style.color='var(--neg)'; msg.textContent=j.error; return; } msg.style.color='var(--pos)'; msg.textContent=(j&&j.flowed)?('✓ → '+j.flowed+' size'+(j.flowed===1?'':'s')):'✓ saved'; setTimeout(function(){ msg.textContent=''; },2400);
+            var cpName=(comps.filter(function(cp){return _smpAspectKey(cp)===key;})[0]||{}).name||key; var pk=PAN[key]||{}; var pans=Object.keys(pk).filter(function(code){return txt.indexOf('🎨 '+code)>=0;}).map(function(code){return pk[code];});
+            if(txt){ var pfx='Feedback on '+r.item_ref+'_v'+sm.version+' · '+cpName+':'; shipPost('/api/product/note/upsert-feedback',{ref:r.item_ref,prefix:pfx,body:pfx+' '+txt,author_email:(window.ME&&ME.email)||'',tags:[],pantone:pans},function(){ try{ _prodJsonBust(r.item_ref); }catch(e){} }); }
+            try{ prodItemInvalidate(r.item_ref); }catch(e){} }); }
+        td.querySelectorAll('.smp-save').forEach(function(b){ b.onclick=function(){ save(b.dataset.key); }; });
+      }
+      // v27.730: MANAGE panel — inline tabbed workspace for a request: Master data · Timeline · one tab per sample.
+      function smpManage(tr, r, ncols){ var g=c.querySelector('#smp-grid');
+        var open=g.querySelector('tr.smp-mexp[data-rid="'+r.id+'"]'); if(open){ open.remove(); return; }
+        var ex=g.querySelector('tr.smp-mexp'); if(ex)ex.remove();
+        var samples=r.samples||[];
+        var tabDefs=[['master','Master data'],['timeline','Timeline']].concat(samples.map(function(s,i){ return ['s'+i,'S'+(i+1)+(s.received_at?' ✓':'')]; }));
+        var exp=document.createElement('tr'); exp.className='smp-mexp'; exp.dataset.rid=r.id;
+        exp.innerHTML='<td colspan="'+ncols+'"><div style="padding:8px 8px;background:var(--hover);border-radius:8px"><div style="display:flex;gap:5px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:8px;margin-bottom:10px">'+tabDefs.map(function(t,i){ return '<button class="smp-mtab'+(i===0?' active':'')+'" data-t="'+t[0]+'">'+esc(t[1])+'</button>'; }).join('')+'</div><div class="smp-mbody"><div class="mut" style="padding:8px 2px">Loading…</div></div></div></td>';
+        tr.parentNode.insertBefore(exp, tr.nextSibling);
+        var body=exp.querySelector('.smp-mbody');
+        Promise.all([fetch('/api/product/item/'+encodeURIComponent(r.item_ref)).then(function(x){return x.json();}), fetch('/api/product/reject-reasons').then(function(x){return x.json();}).catch(function(){return {reasons:[]};}), pget('/api/product/timeline-config').catch(function(){return {snippets:[]};})]).then(function(a){
+          var d=a[0]||{}, REASONS=(a[1]&&a[1].reasons)||[], SNIPS=((a[2]&&a[2].snippets)||[]).filter(function(x){return x.active!==false;});
+          function show(t){ if(!document.body.contains(exp))return; exp.querySelectorAll('.smp-mtab').forEach(function(b){ b.classList.toggle('active', b.dataset.t===t); }); body.innerHTML='';
+            if(t==='master'){ try{ _prodDetail=d; _prodDetailBox=body; _prodDetailTab='master'; renderProdMaster(body,d); }catch(e){ body.innerHTML='<div class="mut" style="padding:8px">Master data unavailable here.</div>'; } }
+            else if(t==='timeline'){ renderProdTimeline(body, r.item_ref); }
+            else { var idx=parseInt(t.slice(1),10)||0; var rs=(r.samples||[])[idx]; var sm=(d.samples||[]).filter(function(s){ return String(s.id)===String(rs&&rs.id); })[0]; if(sm){ _smpReviewInto(body, r, sm, rs, REASONS, SNIPS); } else { body.innerHTML='<div class="mut" style="padding:8px">No sample submitted for this version yet.</div>'; } } }
+          exp.querySelectorAll('.smp-mtab').forEach(function(b){ b.onclick=function(){ show(b.dataset.t); }; });
+          show('master');
+        }).catch(function(e){ body.innerHTML='<div style="color:var(--neg);padding:8px">Failed: '+esc(e.message||e)+'</div>'; });
+      }
       draw();
     }).catch(function(e){ c.querySelector('#smp-grid').innerHTML='<div style="color:var(--neg)">Failed: '+esc(e.message||e)+'</div>'; }); }
   function renderProductBatchReview(c){

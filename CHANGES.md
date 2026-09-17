@@ -1,3 +1,8 @@
+## v27.730 SAMPLING: MANAGE button — inline tabbed workspace per request (Ben) — CLIENT
+- Each SAMPLING request row gets a **⚙ Manage** button (like the PO grid's expander) → an **inline tabbed panel**: **Master data · Timeline · one tab per sample (S1, S2, …)**.
+- Master reuses `renderProdMaster`, Timeline reuses `renderProdTimeline`, and each **S-tab** shows that sample's full review (per-component decision / feedback / reject reasons / photos / save) via `_smpReviewInto` — a standalone mirror of the inline sample expander (kept separate so the tick-aligned expander is untouched).
+- (repair) Restored `package.json` — a v27.729 in-place edit had truncated it to empty (the write-open evaluated before the read); version now 27.730.
+
 ## v27.729 FIX: sample received record-of-change uses dd-mmm-yy (Ben) — SERVER
 - The product record-of-change line "Sample vN received …" logged the date as ISO (2026-09-16); now `ddMonYy(dt)` → **16-Sep-26**, matching the dd-mmm-yy UI standard.
 
