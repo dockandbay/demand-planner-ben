@@ -1,3 +1,7 @@
+## v27.746 PRODUCT split P4c: phone sample card (admin) (Ben) — CLIENT
+- New route `#/product/scan/<code>` opens a **mobile-first full-screen sample card** (`hzScanCardOpen`): large clear **swatch**, identity (ref/version/colour/supplier/season/type/date), a big **✓ Mark received** button, per-component **Review** (decision dropdown + reject reasons + approved-with-comments + feedback, Save), and **📷 Add photo** (camera capture). Writes go through the existing `/received`, `/aspect` and `/photo` endpoints — the same ones the SAMPLING grid review uses.
+- Verified in the browser at `#/product/scan/2Q1`: card renders with the real 512×467 swatch, Mark-received persists `received_at` and flips the card, undo reverts. (Portal phone card + scanner wiring follow in P4c-portal / P4d.)
+
 ## v27.745 PRODUCT split P4b: QR + short code on the sample card (Ben) — SERVER
 - The sample card PDF (admin + portal `card.pdf`) now prints a **QR** top-right with the **short code** beneath it. `ensureShortCode` runs first so a printed card always carries one.
 - QR encodes the **portal** scan URL (`PORTAL_URL/#/product/scan/<code>`) so a supplier's phone camera opens their own sample record; the in-app scanners (admin + portal) extract the 3-char code from it regardless. Drawn with a **new dependency-free QR encoder** `lib/qrcode.mjs` (Nayuki byte-mode port, no CDN, China-safe) as filled modules.
