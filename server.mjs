@@ -2507,6 +2507,9 @@ const FULFIL_MAP = {
   // Defaults discovered read-only from the sandbox (2026-07): single company, USD currency present.
   // Warehouse defaults to ILG unless the PO's destination maps to one of the codes above.
   defaultCompany: 1, defaultWarehouseCode: 'ILG',
+  // v27.754 (Ben): every PO is RECEIVED at China Port; the Horizon branch is the FINAL destination, written as a metafield.
+  chinaPortCode: 'CHP',                 // stock.location code — id differs per tenant (live 198 / sandbox 211), resolved by code
+  finalDestMetafield: 'final_destination', // metafield.field code defined on purchase.purchase (live id 66 / sandbox 76)
 };
 async function fulfilFetch(method, path, body) {
   const cfg = fulfilConfigFor(await activeFulfilEnv());
@@ -2563,6 +2566,34 @@ async function fulfilResolveCountry(code) {
   if (!r && c.length > 2) r = await fulfilSearchOne(FULFIL_MAP.countryModel, [['name', '=', c]], ['id']);
   return r ? r.id : null;
 }
+// v27.754 (Ben): every Fulfil PO is RECEIVED at China Port (stock.location code CHP). The id differs per tenant
+// (live 198 / sandbox 211) so it is resolved by code against the active env and cached per env.
+const _chinaPortCache = {};
+async function fulfilResolveChinaPort() {
+  const env = await activeFulfilEnv();
+  if (_chinaPortCache[env]) return _chinaPortCache[env];
+  const r = await fulfilSearchOne(FULFIL_MAP.whModel, [['type', '=', 'warehouse'], ['code', '=', FULFIL_MAP.chinaPortCode]], ['id', 'code']);
+  if (r && r.id) _chinaPortCache[env] = r.id;
+  return r ? r.id : null;
+}
+// v27.754 (Ben): the Horizon branch (the FINAL 3PL destination after China Port) is written to the PO's `final_destination`
+// METAFIELD. Fulfil metafields are rows in metafield.value {field:<metafield.field id>, resource:'purchase.purchase,<id>',
+// value_char}; the record's own `metafields` json is derived and rejects direct writes (E1031). The definition must exist
+// in the tenant (live id 66 / sandbox 76) — resolved by code. Upsert: update the existing value row, else create one.
+async function fulfilFindMetafieldDef(code) {
+  return fulfilSearchOne('metafield.field', [['code', '=', code], ['model_name', '=', FULFIL_MAP.poModel]], ['id', 'code']);
+}
+async function fulfilUpsertMetafield(poId, code, value) {
+  if (!poId || !code) return null;
+  const def = await fulfilFindMetafieldDef(code);
+  if (!def) { const e = new Error('Fulfil metafield "' + code + '" is not defined on ' + FULFIL_MAP.poModel + ' in this tenant'); e.code = 'FULFIL_NO_METAFIELD'; throw e; }
+  const res = FULFIL_MAP.poModel + ',' + poId, val = value == null ? '' : String(value);
+  const existing = await fulfilFetch('PUT', '/model/metafield.value/search_read', [[['field', '=', def.id], ['resource', '=', res]], 0, 1, null, ['id']]);
+  const cur = Array.isArray(existing) && existing[0];
+  if (cur) { await fulfilFetch('PUT', '/model/metafield.value/' + cur.id, { value_char: val }); return cur.id; }
+  const made = await fulfilFetch('POST', '/model/metafield.value', [{ field: def.id, resource: res, value_char: val }]);
+  return Array.isArray(made) && made[0] ? made[0].id : null;
+}
 // v27.737: the supplier party's invoice address in Fulfil (an 'invoice' one, else any). Read-only → null if none.
 async function fulfilFindPartyAddress(partyId) {
   if (!partyId) return null;
@@ -2614,25 +2645,27 @@ async function fulfilPushLines(po, completion) {
   const storedPartyId = /^\d+$/.test(String(supRow.fulfil_id || '')) ? parseInt(supRow.fulfil_id, 10) : null;
   const partyId = storedPartyId || (await fulfilResolveParty(supName));
   const currencyId = await fulfilResolveCurrency(curCode);
-  // Warehouse: prefer the Fulfil stock.location id stored on the branch (planner.branches.fulfil_id) — the authoritative
-  // link (branch names don't match Fulfil codes 1:1). Else try to match by code. No silent default: an unresolved
-  // branch is flagged in the pre-flight so it never writes to the wrong warehouse.
-  const storedWhId = /^\d+$/.test(String(poRow.branch_fulfil_id || '')) ? parseInt(poRow.branch_fulfil_id, 10) : null;
-  const whCode = String(poRow.warehouse || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
-  const warehouseId = storedWhId || (whCode ? await fulfilResolveWarehouse(whCode) : null);
+  // v27.754 (Ben): EVERY PO is received at CHINA PORT in Fulfil. The Horizon branch is the FINAL destination and goes on
+  // the PO as the `final_destination` metafield (fulfilUpsertMetafield), not as the warehouse. Both resolved per env.
+  const finalDestination = String(poRow.warehouse || '').trim();
+  const warehouseId = await fulfilResolveChinaPort();
+  const fdDef = await fulfilFindMetafieldDef(FULFIL_MAP.finalDestMetafield);   // pre-flight: the metafield must be defined in this tenant
   const existingAddr = partyId ? await fulfilFindPartyAddress(partyId) : null;   // v27.737: existing Fulfil invoice address on the party (null → will create from the Horizon supplier address on write)
   const prodMap = await fulfilResolveProducts(lines.map(l => l.sku));
   const missingSkus = lines.map(l => l.sku).filter(s => !(String(s) in prodMap));
 
   // Pre-flight resolution report — surfaces exactly what's missing before any write.
   const resolution = { supplier: supName, party_id: partyId, party_source: storedPartyId ? 'suppliers.fulfil_id' : 'name-lookup', currency: curCode, currency_id: currencyId,
-    branch: poRow.warehouse || '', warehouse_id: warehouseId, warehouse_source: storedWhId ? 'branches.fulfil_id' : (warehouseId ? 'code-match' : 'unresolved'),
+    branch: finalDestination, final_destination: finalDestination, final_destination_metafield: fdDef ? 'defined' : 'MISSING',
+    warehouse_id: warehouseId, warehouse_source: warehouseId ? ('china-port(' + FULFIL_MAP.chinaPortCode + ')') : 'unresolved',
     invoice_address_id: existingAddr, invoice_address_source: existingAddr ? 'fulfil-party' : (partyId ? 'will-create-from-horizon' : 'no-party'),
     products_found: Object.keys(prodMap).length, products_total: lines.length, missing_skus: missingSkus };
   const problems = [];
   if (!fulfilId && !partyId) problems.push('supplier "' + supName + '" is not a party in Fulfil (create it / import suppliers first)');
   if (!currencyId) problems.push('currency ' + curCode + ' not found in Fulfil');
-  if (!warehouseId) problems.push('branch "' + (poRow.warehouse || '') + '" has no Fulfil warehouse — set its Fulfil ERP ID in CONFIG ▸ Branches');
+  if (!warehouseId) problems.push('Fulfil receiving warehouse "China Port" (code ' + FULFIL_MAP.chinaPortCode + ') not found in this tenant');
+  if (!fdDef) problems.push('Fulfil metafield "' + FULFIL_MAP.finalDestMetafield + '" is not defined on purchase orders in this tenant — define it in Fulfil settings first');
+  if (!finalDestination) problems.push('PO has no Horizon branch to write as the final destination');
   if (missingSkus.length) problems.push(missingSkus.length + ' SKU(s) not in Fulfil catalog: ' + missingSkus.slice(0, 8).join(', ') + (missingSkus.length > 8 ? '…' : ''));
 
   const lineDicts = lines.map(l => { const pm = prodMap[String(l.sku)] || {}; return {
@@ -2662,13 +2695,15 @@ async function fulfilPushLines(po, completion) {
     const existing = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.lineModel + '/search_read', [[['purchase', '=', fulfilId]], 0, 500, null, ['id']]);
     const ids = (existing || []).map(r => r.id);
     if (ids.length) await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + fulfilId, { [FULFIL_MAP.linesField]: [['delete', ids]] });
-    await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + fulfilId, { [FULFIL_MAP.linesField]: [['create', lineDicts]] });
+    await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + fulfilId, { [FULFIL_MAP.linesField]: [['create', lineDicts]], [FULFIL_MAP.warehouse]: warehouseId });   // v27.754: an existing PO is corrected to China Port too
+    await fulfilUpsertMetafield(fulfilId, FULFIL_MAP.finalDestMetafield, finalDestination);   // v27.754: final destination = Horizon branch
     try { await fulfilMirrorOne(fulfilId, 'push'); } catch (e) { /* mirror best-effort */ }   // v27.738: keep the drift mirror fresh on push
     return { ok: true, action: 'update', fulfil_id: fulfilId, lines: lineDicts.length, resolution };
   }
   // CREATE: Fulfil v2 create → POST list of dicts, returns created ids.
   const created = await fulfilFetch('POST', '/model/' + FULFIL_MAP.poModel, [headerPayload]);
   const newId = Array.isArray(created) ? (created[0] && (typeof created[0] === 'object' ? created[0].id : created[0])) : (created && created.id);
+  await fulfilUpsertMetafield(newId, FULFIL_MAP.finalDestMetafield, finalDestination);   // v27.754: final destination = Horizon branch (definition pre-flighted above)
   try { await fulfilMirrorOne(newId, 'push'); } catch (e) { /* mirror best-effort */ }   // v27.738
   return { ok: true, action: 'create', fulfil_id: newId, lines: lineDicts.length, resolution };
 }
