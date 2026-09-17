@@ -1,3 +1,7 @@
+## v27.726 P2b DHL tracking: pills on the supplier portal Samples (Ben) — SERVER + CLIENT
+- New **supplier-scoped** endpoint `GET /api/portal/tracking-status` (portalAuth): returns cache rows only for tracking numbers on the signed-in supplier's **own** samples/shipments (never the admin `/api/tracking/status`). 401 without a session.
+- `portal-view.js`: the same pill helper + auto-fill observer, pointed at the portal endpoint; a DHL pill shows next to the sample tracking code. The status word sits in a `.pp-trkword` span and is localised via `PP_ZH` (运输中 / 已送达 / …).
+
 ## v27.725 P2b DHL tracking: poller hardening for real-world data (Ben) — SERVER
 - **Validated live** against the real DHL Unified API (Ben's key): a real number returned Delivered 24-Jul with full events, and the shipment write-back set `tracked_delivery_date` + `tracked_source='dhl'`. End-to-end chain confirmed.
 - `collectTrackingNumbers` now **splits comma-separated `carrier_ref`s, strips internal spaces, and keeps only plausible tracking numbers** (>=8 alphanumeric chars containing a digit) so junk like "AIR" / mode words / blanks never hit DHL. In sandbox this cut 134 raw shipment refs to 3 pollable.

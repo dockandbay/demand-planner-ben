@@ -17113,6 +17113,32 @@ app.post('/api/portal/sample-update', portalAuth, async (req, res) => {   // sup
     await logSampleFieldChanges(s.id, b, req.portal.email || 'supplier');   // record of change (supplier side)
     patch(res, 'planner.sample_requests', 'id', s.id, { supplier_expected_completion:'date', tracking_code:'text', carrier:'text', production_status:'text' }, b, 'bigint'); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+// v27.726: read-only DHL tracking status for the supplier portal — SCOPED to numbers on the signed-in
+// supplier's own samples/shipments (never the admin /api/tracking/status). Reads the cache only.
+app.get('/api/portal/tracking-status', portalAuth, async (req, res) => {
+  const nums = String(req.query.numbers || '').split(',').map(s => s.trim()).filter(Boolean).slice(0, 50);
+  if (!nums.length) return res.json({ ok: true, tracking: {} });
+  try {
+    const sups = (req.portal.suppliers || []).map(x => String(x).toLowerCase());
+    const ids = (req.portal.supplierIds || []);
+    const owned = new Set();
+    // this supplier's own sample tracking numbers (supplier_id OR name — supplier_id is often null)
+    (await pool.query(`SELECT tracking_code, tracking_code_2 FROM planner.sample_requests
+        WHERE (supplier_id = ANY($1) OR lower(supplier_name) = ANY($2))
+          AND (tracking_code = ANY($3) OR tracking_code_2 = ANY($3))`,
+      [ids.length ? ids : [-1], sups.length ? sups : [''], nums])).rows.forEach(r => { if (r.tracking_code) owned.add(r.tracking_code); if (r.tracking_code_2) owned.add(r.tracking_code_2); });
+    // and this supplier's shipment carrier refs (shipment -> master PO -> supplier)
+    (await pool.query(`SELECT sh.carrier_ref FROM planner.shipments sh
+        JOIN planner.purchase_orders po ON po.po = coalesce(sh.master_po, sh.shipment_ref)
+        WHERE lower(po.supplier_name) = ANY($1) AND sh.carrier_ref = ANY($2)`,
+      [sups.length ? sups : [''], nums])).rows.forEach(r => { if (r.carrier_ref) owned.add(r.carrier_ref); });
+    const allow = nums.filter(n => owned.has(n));
+    if (!allow.length) return res.json({ ok: true, tracking: {} });
+    const rows = (await pool.query(`SELECT tracking_number, carrier, status_code, status_text, to_char(eta,'YYYY-MM-DD') eta, delivered_at, last_event FROM planner.carrier_tracking WHERE tracking_number = ANY($1)`, [allow])).rows;
+    const out = {}; for (const r of rows) out[r.tracking_number] = r;
+    res.set('Cache-Control', 'no-store').json({ ok: true, tracking: out });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.post('/api/portal/sample-note', portalAuth, async (req, res) => {
   const b = req.body || {};
   try { const s = await portalOwnsSample(req, b.id); if(!s) return res.status(403).json({ error: 'not your sample' }); if(!b.body) return res.status(400).json({ error: 'body required' });
