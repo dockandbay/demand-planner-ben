@@ -2511,7 +2511,10 @@ const FULFIL_MAP = {
   // v27.754 (Ben): every PO is RECEIVED at China Port; the Horizon branch is the FINAL destination, written as a metafield.
   chinaPortCode: 'CHP',                 // stock.location code — id differs per tenant (live 198 / sandbox 211), resolved by code
   finalDestMetafield: 'final_destination', // metafield.field code defined on purchase.purchase (live id 66 / sandbox 76)
+  comment: 'comment',                   // v27.760 (Ben): PO header comment field (Text) — carries the final destination in plain sight too
 };
+// v27.760 (Ben): the final destination goes on the metafield (mandatory) AND the PO comment (human-readable). One source of the wording.
+function fulfilFinalDestComment(branch) { return 'Destination 3PL after China Port: ' + String(branch || '').trim(); }
 async function fulfilFetch(method, path, body) {
   const cfg = fulfilConfigFor(await activeFulfilEnv());
   if (!cfg.configured) { const e = new Error('Fulfil ' + cfg.env + ' API not configured (set FULFIL_' + cfg.env.toUpperCase() + '_SUBDOMAIN + FULFIL_' + cfg.env.toUpperCase() + '_API_KEY). No write performed.'); e.code = 'NO_FULFIL_CFG'; throw e; }
@@ -2657,7 +2660,7 @@ async function fulfilPushLines(po, completion) {
 
   // Pre-flight resolution report — surfaces exactly what's missing before any write.
   const resolution = { supplier: supName, party_id: partyId, party_source: storedPartyId ? 'suppliers.fulfil_id' : 'name-lookup', currency: curCode, currency_id: currencyId,
-    branch: finalDestination, final_destination: finalDestination, final_destination_metafield: fdDef ? 'defined' : 'MISSING',
+    branch: finalDestination, final_destination: finalDestination, final_destination_metafield: fdDef ? 'defined' : 'MISSING', final_destination_comment: fulfilFinalDestComment(finalDestination),
     warehouse_id: warehouseId, warehouse_source: warehouseId ? ('china-port(' + FULFIL_MAP.chinaPortCode + ')') : 'unresolved',
     invoice_address_id: existingAddr, invoice_address_source: existingAddr ? 'fulfil-party' : (partyId ? 'will-create-from-horizon' : 'no-party'),
     products_found: Object.keys(prodMap).length, products_total: lines.length, missing_skus: missingSkus };
@@ -2679,6 +2682,7 @@ async function fulfilPushLines(po, completion) {
   const headerPayload = {
     [FULFIL_MAP.ref]: po, [FULFIL_MAP.party]: partyId, [FULFIL_MAP.company]: FULFIL_MAP.defaultCompany,
     [FULFIL_MAP.currency]: currencyId, [FULFIL_MAP.warehouse]: warehouseId, [FULFIL_MAP.invoiceAddress]: existingAddr,
+    [FULFIL_MAP.comment]: fulfilFinalDestComment(finalDestination),   // v27.760: final destination in the comment too (metafield stays authoritative)
     [FULFIL_MAP.linesField]: [['create', lineDicts]],
   };
 
@@ -2696,8 +2700,8 @@ async function fulfilPushLines(po, completion) {
     const existing = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.lineModel + '/search_read', [[['purchase', '=', fulfilId]], 0, 500, null, ['id']]);
     const ids = (existing || []).map(r => r.id);
     if (ids.length) await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + fulfilId, { [FULFIL_MAP.linesField]: [['delete', ids]] });
-    await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + fulfilId, { [FULFIL_MAP.linesField]: [['create', lineDicts]], [FULFIL_MAP.warehouse]: warehouseId });   // v27.754: an existing PO is corrected to China Port too
-    await fulfilUpsertMetafield(fulfilId, FULFIL_MAP.finalDestMetafield, finalDestination);   // v27.754: final destination = Horizon branch
+    await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + fulfilId, { [FULFIL_MAP.linesField]: [['create', lineDicts]], [FULFIL_MAP.warehouse]: warehouseId, [FULFIL_MAP.comment]: fulfilFinalDestComment(finalDestination) });   // v27.754: China Port + v27.760: final-dest comment
+    await fulfilUpsertMetafield(fulfilId, FULFIL_MAP.finalDestMetafield, finalDestination);   // v27.754: final destination = Horizon branch (metafield authoritative)
     try { await fulfilMirrorOne(fulfilId, 'push'); } catch (e) { /* mirror best-effort */ }   // v27.738: keep the drift mirror fresh on push
     return { ok: true, action: 'update', fulfil_id: fulfilId, lines: lineDicts.length, resolution };
   }
