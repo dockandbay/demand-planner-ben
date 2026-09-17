@@ -6988,6 +6988,7 @@ app.post('/api/product/design-version', async (req, res) => {
     const v = (await pool.query(`SELECT coalesce(max(version),0)+1 n FROM planner.product_dev_samples WHERE item_ref=$1 AND coalesce(dimension,'product')=$2`, [ref, dim])).rows[0].n;
     const r = await pool.query(`INSERT INTO planner.product_dev_samples (item_ref, version, dimension, description, created_by)
       VALUES ($1,$2,$3,$4,$5) RETURNING id`, [ref, v, dim, (b.description || '').trim() || null, shortUser(authUser(req)) || null]);
+    try { await ensureShortCode(r.rows[0].id); } catch (e) {}   // v27.744: assign the QR / phone-scan short code up front
     res.json({ ok: true, id: r.rows[0].id, version: v });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -7682,6 +7683,7 @@ async function createProductSample(b, by) {
   const v = (await pool.query(`SELECT coalesce(max(version),0)+1 n FROM planner.product_dev_samples WHERE item_ref=$1 AND ($2::bigint IS NULL OR request_id=$2)`, [itemRef, requestId])).rows[0].n;
   const r = await pool.query(`INSERT INTO planner.product_dev_samples (item_ref, version, sample_date, colour_verified, quality_verified, description, created_by, sampled_aspects, sample_sizes, supplier_status, not_shipped, request_id)
     VALUES ($1,$2,$3,true,true,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, [itemRef, v, (b.sample_date || '').trim() || null, (b.description || '').trim() || null, by || null, aspects, sizes, status, !!b.not_shipped, requestId]);
+  try { await ensureShortCode(r.rows[0].id); } catch (e) {}   // v27.744: assign the QR / phone-scan short code up front
   // optional shipment assignment at creation (assign to an SR, or leave for later)
   if (b.sample_request_id || b.not_shipped) await assignSampleToShipment(r.rows[0].id, b.sample_request_id || null, !!b.not_shipped, by);
   // supplier note → shows on the product timeline + the admin ✉ bell
@@ -7854,6 +7856,95 @@ app.post('/api/product/sample/:id/delete', async (req, res) => {
 });
 // Printable SAMPLE card as a downloadable PDF (Content-Disposition: attachment → downloads, doesn't render a tab).
 // v27.553: ONE sample-card generator for admin and supplier portal (same layout, boxed). Returns {bytes, filename} or null.
+// ── PRODUCT split P4: per-sample short code + QR / phone-scan flow (v27.744) ──
+// 3-char Crockford base32 (no I L O U, unambiguous on paper). mig 284 backfilled every existing row; this
+// assigns lazily for any row that still lacks one (called at card-generation and after a sample insert).
+const SHORT_CODE_ALPH = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+function genShortCode() { let s = ''; for (let i = 0; i < 3; i++) s += SHORT_CODE_ALPH[Math.floor(Math.random() * 32)]; return s; }
+async function ensureShortCode(sampleId) {
+  if (!sampleId) return null;
+  const cur = (await pool.query(`SELECT short_code FROM planner.product_dev_samples WHERE id=$1`, [sampleId])).rows[0];
+  if (!cur) return null;
+  if (cur.short_code) return cur.short_code;
+  for (let attempt = 0; attempt < 25; attempt++) {
+    const code = genShortCode();
+    try {
+      const r = await pool.query(`UPDATE planner.product_dev_samples SET short_code=$2 WHERE id=$1 AND short_code IS NULL RETURNING short_code`, [sampleId, code]);
+      if (r.rows[0]) return r.rows[0].short_code;
+      // someone assigned it between the read and the write — return whatever is there now
+      const now = (await pool.query(`SELECT short_code FROM planner.product_dev_samples WHERE id=$1`, [sampleId])).rows[0];
+      if (now && now.short_code) return now.short_code;
+    } catch (e) { if (!/unique/i.test(e.message || '')) throw e; /* collision → retry */ }
+  }
+  return null;
+}
+// Resolve a scanned/typed short code → the phone sample card payload. Read-only; the phone card writes through
+// the existing /received, /aspect and /photo endpoints. `ctx` ('admin'|'portal') picks the swatch + photo URL
+// space (portal ones are ownership-guarded routes). Component aspect keys read as their component name.
+async function sampleScanPayload(code, ctx) {
+  ctx = ctx === 'portal' ? 'portal' : 'admin';
+  const c = String(code || '').trim().toUpperCase();
+  if (!/^[0-9A-Z]{3}$/.test(c)) return null;
+  const s = (await pool.query(`SELECT ps.id, ps.item_ref, ps.version, coalesce(ps.dimension,'product') dimension, ps.short_code,
+      to_char(ps.received_at,'YYYY-MM-DD') received_at, to_char(ps.sample_date,'YYYY-MM-DD') sample_date,
+      coalesce(ps.description,'') description, ps.request_id,
+      coalesce((SELECT json_agg(json_build_object('aspect',af.aspect,'feedback',coalesce(af.feedback,''),'decision',coalesce(af.decision,''),'awc_comment',coalesce(af.awc_comment,'')) ORDER BY af.aspect)
+        FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id),'[]'::json) aspect_feedback,
+      coalesce((SELECT json_agg(json_build_object('id',a.id,'filename',coalesce(a.filename,''),'aspect',coalesce(a.aspect,'')) ORDER BY a.uploaded_at)
+        FROM planner.portal_attachments a WHERE a.po=('PSAMPLE-'||ps.id) AND a.category='product_sample'),'[]'::json) photos
+    FROM planner.product_dev_samples ps WHERE ps.short_code=$1`, [c])).rows[0];
+  if (!s) return null;
+  const it = (await pool.query(`SELECT coalesce(supplier,'') supplier, coalesce(season,'') season, coalesce(category,'') category,
+      coalesce(colour_name,'') colour_name, coalesce(bulk_colour_name,'') bulk_colour_name
+    FROM planner.product_dev_items WHERE ref=$1`, [s.item_ref])).rows[0] || {};
+  // Aspect options for this sample = the components covered by its request (fallback: 'product'). Names resolve
+  // component keys (c<id>) to labels so the phone card shows readable aspect tabs.
+  const CL = { product: 'Product', packaging: 'Packaging', labels: 'Labels/wraps', polybag: 'Polybags', other: 'Other components' };
+  let aspects = [{ key: 'product', label: 'Product' }];
+  if (s.request_id) {
+    const comps = (await pool.query(`SELECT c.id, coalesce(c.name,'') name, coalesce(c.dimension,'') dimension
+      FROM planner.product_dev_request_components rc JOIN planner.product_dev_components c ON c.id=rc.component_id
+      WHERE rc.request_id=$1 ORDER BY c.sort, c.id`, [s.request_id])).rows;
+    if (comps.length) aspects = comps.map(c => ({ key: 'c' + c.id, label: c.name || CL[c.dimension] || c.dimension || 'Component' }));
+  }
+  const photoBase = ctx === 'portal' ? '/api/portal/attachment/' : '/api/supply/portal-attachment/';
+  const swatchUrl = ctx === 'portal'
+    ? ('/api/portal/product-swatch/' + encodeURIComponent(s.item_ref))
+    : ('/api/product/swatch/' + encodeURIComponent(s.item_ref));
+  return {
+    id: Number(s.id), short_code: s.short_code, item_ref: s.item_ref, version: s.version, dimension: s.dimension,
+    ref: s.item_ref + '_v' + s.version, received_at: s.received_at, sample_date: s.sample_date, description: s.description,
+    supplier: it.supplier, season: it.season, category: it.category, colour_name: it.colour_name || it.bulk_colour_name,
+    swatch_url: swatchUrl, aspects, aspect_feedback: s.aspect_feedback || [],
+    photos: (s.photos || []).map(p => ({ id: p.id, filename: p.filename, aspect: p.aspect, url: photoBase + p.id }))
+  };
+}
+app.get('/api/product/scan/:code', async (req, res) => {
+  try { const p = await sampleScanPayload(req.params.code, 'admin'); if (!p) return res.status(404).json({ error: 'no sample for that code' }); res.json({ ok: true, sample: p }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Supplier portal: the SAME scan, ownership-guarded — a supplier who scans their own sample card on a phone
+// gets the sample record (swatch image + received state + their feedback). Portal writes still go through the
+// portal's own guarded endpoints (see the portal phone card). No key/short code leaks another supplier's sample.
+app.get('/api/portal/scan/:code', portalAuth, async (req, res) => {
+  try {
+    const p = await sampleScanPayload(req.params.code, 'portal'); if (!p) return res.status(404).json({ error: 'no sample for that code' });
+    if (!(await portalOwnsProductSample(req, p.id))) return res.status(403).json({ error: 'not your sample' });
+    res.json({ ok: true, sample: p });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// Portal swatch (ownership-guarded) — same image the admin swatch route serves, so the portal phone card can show a clear swatch.
+app.get('/api/portal/product-swatch/:ref', portalAuth, async (req, res) => {
+  const ref = decodeURIComponent(req.params.ref || '');
+  if (!(await portalOwnsProduct(req, ref))) return res.status(403).end();
+  try { let r = (await pool.query(`SELECT swatch, swatch_mime FROM planner.product_dev_items WHERE ref=$1`, [ref])).rows[0];
+    if (r && !r.swatch) { const t = (await pool.query(`SELECT thumb, thumb_mime FROM planner.portal_attachments WHERE po=$1 AND category='product' AND coalesce(uploader_kind,'internal')<>'supplier' AND thumb IS NOT NULL ORDER BY (is_latest IS TRUE) DESC, uploaded_at DESC LIMIT 1`, [ref])).rows[0];
+      if (t) r = { swatch: t.thumb, swatch_mime: t.thumb_mime || 'image/png' }; }
+    if (!r || !r.swatch) return res.status(404).end();
+    res.setHeader('Content-Type', r.swatch_mime || 'image/png'); res.setHeader('Cache-Control', 'private, max-age=3600'); res.end(r.swatch);
+  } catch (e) { log500(e); res.status(500).end(); }
+});
+
 async function sampleCardPdf(sampleId) {
     const sr = (await pool.query(`SELECT ps.id, ps.version, to_char(ps.sample_date,'YYYY-MM-DD') sample_date, ps.item_ref,
       coalesce((SELECT json_agg(json_build_object('aspect',af.aspect,'feedback',af.feedback,'decision',af.decision,'awc',coalesce(af.awc_comment,'')) ORDER BY af.aspect)

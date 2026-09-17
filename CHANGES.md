@@ -1,3 +1,9 @@
+## v27.744 PRODUCT split P4a: sample short code + scan resolver (Ben) — SERVER + mig 284
+- Every `product_dev_samples` row gets a 3-char Crockford-base32 `short_code` (mig 284 backfills existing rows; `ensureShortCode` assigns lazily for new samples and at card-generation). Crockford alphabet (no I L O U) so it reads cleanly on paper.
+- `GET /api/product/scan/:code` (admin) + `GET /api/portal/scan/:code` (portal, ownership-guarded) resolve a scanned/typed code → the phone sample-card payload: item ref / version / received state / sample date / colour + swatch URL / the request's components as aspect tabs / current aspect feedback / photos. Codes normalise to uppercase; unknown code → 404; a supplier can only resolve their own sample.
+- New `GET /api/portal/product-swatch/:ref` (ownership-guarded) serves the same swatch image the admin route does, so the portal phone card can show a clear swatch.
+- Verified in the sandbox: code `2Q1` → SS27-HAIRW-LOVELYHAIR v1 with aspect "Product body"; lowercase resolves; bad code 404s.
+
 ## v27.743 Fulfil ERP: two explicit push buttons (Cin7 / Fulfil), deterministic target (Ben) — CLIENT
 - **Two-button model** (Ben's call: no auto dual-write during the parallel run — each ERP is pushed explicitly). `erpUploadInert(po, forceFull, erp)` is now target-aware: `erp` ('cin7' default, or 'fulfil') forces `?erp=<erp>` on the `cin7-lines` / `cin7-date` fetches, so a push always hits the chosen ERP regardless of the Active-ERP setting.
   - Previously the Cin7-labelled pop sent no `?erp=`, so server-side it fell back to Active-ERP — which in the sandbox is **fulfil**, silently redirecting a "push to Cin7" to Fulfil. Now Cin7 is Cin7 and Fulfil is Fulfil.
