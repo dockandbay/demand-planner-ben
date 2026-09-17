@@ -3017,27 +3017,32 @@
     }).catch(function(){}); }
   function fulfilPushPO(po, btn){ var t=btn?btn.textContent:''; if(btn){ btn.disabled=true; btn.textContent='Pushing…'; }
     fetch('/api/supply/po/'+encodeURIComponent(po)+'/cin7-lines?erp=fulfil',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ if(btn){btn.disabled=false;btn.textContent=t;} alert('Fulfil push failed: '+j.error); return; } fillErpFulfil(); }).catch(function(){ if(btn){btn.disabled=false;btn.textContent=t;} alert('Fulfil push failed'); }); }
-  function erpUploadInert(po,forceFull){ closeShPop&&closeShPop();
+  function erpUploadInert(po,forceFull,erp){ closeShPop&&closeShPop();
+    // v27.743: two-button ERP model — `erp` picks the target ('cin7' default, or 'fulfil'). Both fetches force ?erp=<erp>
+    // so the push is deterministic regardless of the Active-ERP setting (in sandbox Active-ERP=fulfil, which used to
+    // silently redirect this Cin7-labelled pop). EN = display name, _eq = query suffix.
+    var EN=(erp==='fulfil')?'Fulfil':'Cin7', _eq='?erp='+(erp==='fulfil'?'fulfil':'cin7');
     // What's actually out of sync decides which buttons show: only the DATE differs → just the date button;
     // line items differ (qty/not-in-ERP) → show both (lines + date), plus the manual CSV/copy fallback.
     var _r=poBy[po]||{};
     // Button visibility is drift-based and PRICE-AGNOSTIC (price is never a drift factor): SKU/qty drift shows
     // the lines button; a date drift shows the date button. Lines drift also surfaces the date button.
     var linesPending=(_r.erp_total>0&&!(_r.erp_in>0))||_r.erp_pending>0;
-    var datePending=_r.erp_date_pending>0 && !poComplete(_r);
-    var showLines=linesPending||forceFull, showDate=datePending||linesPending;   // forceFull (Push to Cin7 full) always offers the lines override
+    // Date drift is computed against Cin7 only — Fulfil has no Horizon date-drift signal, so the Fulfil pop shows lines only.
+    var datePending=(erp!=='fulfil') && _r.erp_date_pending>0 && !poComplete(_r);
+    var showLines=(erp==='fulfil')?true:(linesPending||forceFull), showDate=(erp==='fulfil')?false:(datePending||linesPending);   // forceFull (Push full) always offers the lines override; Fulfil = lines only
     var manualBlk=showLines
-      ? '<div class="mut" style="margin-bottom:12px;font-size:13px">Push the revised order plan to Cin7 (SKUs, quantities &amp; prices — full override), or export it to enter manually:</div>'
+      ? '<div class="mut" style="margin-bottom:12px;font-size:13px">Push the revised order plan to '+EN+' (SKUs, quantities &amp; prices — full override), or export it to enter manually:</div>'
         +'<div style="display:flex;gap:8px;align-items:center;margin-bottom:4px"><button class="save-btn" id="erp-dl" style="background:var(--blue);color:#fff;border-color:#2563eb">⬇ Download CSV</button><button class="save-btn" id="erp-cp">⧉ Copy to clipboard</button></div>'
-      : '<div class="mut" style="margin-bottom:12px;font-size:13px">The completed-at-warehouse date differs from the Cin7 delivery date. Push the updated date:</div>';
+      : '<div class="mut" style="margin-bottom:12px;font-size:13px">The completed-at-warehouse date differs from the '+EN+' delivery date. Push the updated date:</div>';
     var bg=document.createElement('div'); bg.id='erp-bg'; bg.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100000;display:flex;align-items:flex-start;justify-content:center;padding:60px 12px';
     bg.innerHTML='<div style="background:var(--card);border-radius:10px;max-width:460px;width:100%;padding:18px;font-family:Arial,Helvetica,sans-serif">'
-      +'<div style="font-weight:700;font-size:15px;margin-bottom:6px">Update ERP'+(po?(' — '+esc(po)):'')+'</div>'
+      +'<div style="font-weight:700;font-size:15px;margin-bottom:6px">Update '+EN+(po?(' — '+esc(po)):'')+'</div>'
       +manualBlk
       +'<div style="margin-top:12px;border-top:1px solid #eee;padding-top:12px;display:flex;flex-direction:column;gap:8px">'
-        +(showDate?'<div><button class="save-btn" id="erp-cin7" style="background:var(--pos);color:#fff;border-color:#0b6">📅 Update ERP Date</button>'
-            +' <span class="mut tiny">Cin7 EstimatedDeliveryDate: <b>'+(_r.erp_final_delivery?fd(_r.erp_final_delivery):'—')+'</b> &rarr; <b>'+(_r.checkin?fd(_r.checkin):'—')+'</b> (this PO&rsquo;s completion date) &middot; live write</span></div>':'')
-        +(showLines?'<div><button class="save-btn" id="erp-cin7-lines" style="background:var(--pos);color:#fff;border-color:#0a8">📦 Update / Create ERP PO (SKUs / Qty / Price)</button> <span class="mut tiny">updates the Cin7 PO, or creates it if not in Cin7 — price = approved supplier final cost, else standard (live write)</span></div>':'')
+        +(showDate?'<div><button class="save-btn" id="erp-cin7" style="background:var(--pos);color:#fff;border-color:#0b6">📅 Update '+EN+' Date</button>'
+            +' <span class="mut tiny">'+EN+' EstimatedDeliveryDate: <b>'+(_r.erp_final_delivery?fd(_r.erp_final_delivery):'—')+'</b> &rarr; <b>'+(_r.checkin?fd(_r.checkin):'—')+'</b> (this PO&rsquo;s completion date) &middot; live write</span></div>':'')
+        +(showLines?'<div><button class="save-btn" id="erp-cin7-lines" style="background:var(--pos);color:#fff;border-color:#0a8">📦 Update / Create '+EN+' PO (SKUs / Qty / Price)</button> <span class="mut tiny">updates the '+EN+' PO, or creates it if not in '+EN+' — price = approved supplier final cost, else standard (live write)</span></div>':'')
       +'</div>'
       +'<div class="mut tiny" id="erp-msg" style="margin-top:10px"></div>'
       +'<div style="margin-top:10px;text-align:right"><button class="save-btn light" id="erp-x">Close</button></div></div>';
@@ -3059,22 +3064,22 @@
     // #14 — push this PO's Completion date to Cin7 as EstimatedDeliveryDate (live write, gated server-side on CIN7_AUTH)
     var _cdBtn=bg.querySelector('#erp-cin7'); if(_cdBtn)_cdBtn.onclick=function(){ var r=poBy[po]||{}; var comp=r.checkin;
       if(!comp){ msg.textContent='No Completion date on this PO to send to Cin7.'; return; }
-      if(!confirm('Update the Cin7 PO EstimatedDeliveryDate to this PO\'s Completion date ('+comp+')?\n\nThis writes to the LIVE Cin7 ERP.'))return;
-      msg.textContent='Updating Cin7…';
-      fetch('/api/supply/po/'+encodeURIComponent(po)+'/cin7-date',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({completion_date:comp})}).then(function(r){return r.json();}).then(function(j){
+      if(!confirm('Update the '+EN+' PO EstimatedDeliveryDate to this PO\'s Completion date ('+comp+')?\n\nThis writes to the LIVE '+EN+' ERP.'))return;
+      msg.textContent='Updating '+EN+'…';
+      fetch('/api/supply/po/'+encodeURIComponent(po)+'/cin7-date'+_eq,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({completion_date:comp})}).then(function(r){return r.json();}).then(function(j){
         if(j&&j.error){ msg.innerHTML='<span style="color:var(--neg)">'+esc(j.error)+'</span>'; return; }
-        msg.innerHTML='<span style="color:var(--pos);font-weight:700">✓ Cin7 successfully updated</span> ('+esc(j.estimatedDeliveryDate||comp)+')'+(j.erp_mirror_updated?' · ERP mirror synced':'');
+        msg.innerHTML='<span style="color:var(--pos);font-weight:700">✓ '+EN+' successfully updated</span> ('+esc(j.estimatedDeliveryDate||comp)+')'+(j.erp_mirror_updated?' · ERP mirror synced':'');
         invalidateDerived(); delete cache['purchase-orders']; selectSection('purchase-orders');   // clear the "Date ≠ ERP" flag in real time
       }).catch(function(e){ msg.innerHTML='<span style="color:var(--neg)">Failed: '+esc(e.message||e)+'</span>'; }); };
     // #14b — push SKU / qty / price line items to Cin7 (price = approved supplier final, else standard)
     var _clBtn=bg.querySelector('#erp-cin7-lines'); if(_clBtn)_clBtn.onclick=function(){
       var comp=(poBy[po]||{}).checkin||'';
-      if(!confirm('Push this PO\'s SKUs, quantities and prices to Cin7?\n\nIf the PO already exists in Cin7 it is updated; otherwise a NEW Cin7 PO is created. Price = the approved supplier final cost where there is one, otherwise the standard cost. This writes to the LIVE Cin7 ERP.'))return;
-      msg.textContent='Sending to Cin7…';
-      fetch('/api/supply/po/'+encodeURIComponent(po)+'/cin7-lines',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({completion_date:comp})}).then(function(r){return r.json();}).then(function(j){
+      if(!confirm('Push this PO\'s SKUs, quantities and prices to '+EN+'?\n\nIf the PO already exists in '+EN+' it is updated; otherwise a NEW '+EN+' PO is created. Price = the approved supplier final cost where there is one, otherwise the standard cost. This writes to the LIVE '+EN+' ERP.'))return;
+      msg.textContent='Sending to '+EN+'…';
+      fetch('/api/supply/po/'+encodeURIComponent(po)+'/cin7-lines'+_eq,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({completion_date:comp})}).then(function(r){return r.json();}).then(function(j){
         if(j&&j.error){ msg.innerHTML='<span style="color:var(--neg)">'+esc(j.error)+'</span>'+cin7TraceHtml(j.cin7_trace); return; }
         var _tc=(Number(j.total_cost)||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
-        msg.innerHTML='<span style="color:var(--pos);font-weight:700">✓ Cin7 PO '+(j.mode==='created'?'created':'updated')+'</span> — '+esc(j.lines)+' line(s)'+(j.approved?' ('+esc(j.approved)+' at approved supplier price)':'')+cin7ValMsg(j.validation)+(j.erp_mirror_updated?' · ERP mirror synced':'')
+        msg.innerHTML='<span style="color:var(--pos);font-weight:700">✓ '+EN+' PO '+(j.mode==='created'?'created':'updated')+'</span> — '+esc(j.lines)+' line(s)'+(j.approved?' ('+esc(j.approved)+' at approved supplier price)':'')+cin7ValMsg(j.validation)+(j.erp_mirror_updated?' · ERP mirror synced':'')
           +'<div style="margin-top:4px;font-weight:700">TOTAL COST: '+esc(j.currency||'')+' '+_tc+' &nbsp;·&nbsp; TOTAL UNITS: '+units(j.total_units)+'</div>'
           +cin7TraceHtml(j.cin7_trace);
         invalidateDerived(); delete cache['purchase-orders']; selectSection('purchase-orders');   // clear the ERP drift flags in real time
@@ -3919,7 +3924,8 @@
     var addRowHtml=editing?'<tr class="op-addrow"><td class="l"><input class="op-add-sku" data-po="'+esc(po)+'" readonly placeholder="click to pick SKU…" style="width:220px;cursor:pointer;background:var(--card)" autocomplete="off"></td><td class="l"></td><td style="text-align:right"><input class="op-add-qty" placeholder="qty" style="width:74px;text-align:right" inputmode="numeric"></td><td colspan="5" class="mut tiny">new line — added as proposed (not in ERP until you Upload)</td></tr>':'';
     var opBtns=editing
       ? '<button class="lnk-btn op-add-row" data-po="'+esc(po)+'" style="margin-left:8px">＋ Add SKU</button> <button class="save-btn op-paste" data-po="'+esc(po)+'" style="margin-left:4px;background:var(--blue-soft);border:1px solid #93c5fd;color:var(--blue)" title="paste a SKU + qty block from Excel / Google Sheets (2 columns)">⧉ Paste SKU,Qty</button> <button class="save-btn op-save" data-po="'+esc(po)+'" style="margin-left:4px;background:var(--pos-bg);border:1px solid var(--pos);color:var(--pos);font-weight:700">✓ Save</button> <button class="save-btn light op-cancel">Cancel</button>'
-      : '<button class="save-btn op-edit" data-po="'+esc(po)+'" style="margin-left:8px">✎ Edit qty / add SKU</button> <button class="save-btn light op-copy" data-copy="'+copyData+'" style="margin-left:4px" title="copy this PO&rsquo;s SKUs + quantities to the clipboard (tab-separated)">⧉ Copy SKU + Qty</button> <button class="save-btn op-cin7-full" data-po="'+esc(po)+'" style="margin-left:4px;background:var(--pos);color:#fff;border-color:#0a8" title="push ALL of this PO&rsquo;s SKUs, quantities and prices to Cin7 — full override for exact alignment (live write)">⬆ Push to ERP (full)</button>'
+      : '<button class="save-btn op-edit" data-po="'+esc(po)+'" style="margin-left:8px">✎ Edit qty / add SKU</button> <button class="save-btn light op-copy" data-copy="'+copyData+'" style="margin-left:4px" title="copy this PO&rsquo;s SKUs + quantities to the clipboard (tab-separated)">⧉ Copy SKU + Qty</button> <button class="save-btn op-cin7-full" data-po="'+esc(po)+'" style="margin-left:4px;background:var(--pos);color:#fff;border-color:#0a8" title="push ALL of this PO&rsquo;s SKUs, quantities and prices to Cin7 — full override for exact alignment (live write)">⬆ Push to Cin7 (full)</button>'
+        +' <button class="save-btn op-fulfil-full" data-po="'+esc(po)+'" style="margin-left:4px;background:var(--blue);color:#fff;border-color:#2563eb" title="push ALL of this PO&rsquo;s SKUs, quantities and prices to Fulfil — creates the Fulfil PO if missing, else updates it (full override)">⬆ Push to Fulfil (full)</button>'
         +'<label style="margin-left:8px;font-size:11px;cursor:pointer;white-space:nowrap" title="tick to mark this PO as NOT required in Cin7 — suppresses Cin7 drift &amp; update actions for it. It is still required in Fulfil."><input type="checkbox" class="op-cin7-nr" data-po="'+esc(po)+'"'+((((window._erpGridStatus||{})[po]||{}).cin7_not_required)?' checked':'')+' style="vertical-align:middle;margin-right:3px">not required in Cin7</label>'
         +'<span style="position:relative;display:inline-block;margin-left:4px"><button class="save-btn light op-bc-dl" data-po="'+esc(po)+'" title="download this PO&rsquo;s barcode labels as A4 print sheets — BATCH + date of production from this PO (same generator as SUPPLY &rsaquo; Barcodes)">⤓ Download barcodes ▾</button>'
         +'<span class="op-bc-menu" style="display:none;position:absolute;left:0;top:100%;z-index:50;background:var(--card);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:220px;text-align:left">'
@@ -4452,7 +4458,8 @@
     document.querySelectorAll('#podet-'+i+' .oprisk-approve').forEach(function(b){ b.onclick=function(){ _poRiskPost(b.dataset.ps,b.dataset.field,true,b); }; });
     document.querySelectorAll('#podet-'+i+' .oprisk-undo').forEach(function(b){ b.onclick=function(){ _poRiskPost(b.dataset.ps,b.dataset.field,false,b); }; });
     document.querySelectorAll('#podet-'+i+' .op-erp-up-panel').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po); }; });
-    document.querySelectorAll('#podet-'+i+' .op-cin7-full').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po, true); }; });   // open the Cin7 pop, force the full-override push (result + any price discrepancies show IN the pop)
+    document.querySelectorAll('#podet-'+i+' .op-cin7-full').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po, true, 'cin7'); }; });   // Cin7 pop, force the full-override push (result + any price discrepancies show IN the pop)
+    document.querySelectorAll('#podet-'+i+' .op-fulfil-full').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.po, true, 'fulfil'); }; });   // v27.743: Fulfil pop, force the full-override push (create/update the Fulfil PO)
     // v27.742: "not required in Cin7" tickbox — suppresses Cin7 drift/update actions for this PO (still required in Fulfil). Persists via /api/supply/po/:po/cin7-not-required, then re-greys the grid Cin7 cell.
     document.querySelectorAll('#podet-'+i+' .op-cin7-nr').forEach(function(cb){ cb.onchange=function(){ var _po=cb.dataset.po, _v=cb.checked; cb.disabled=true;
         fetch('/api/supply/po/'+encodeURIComponent(_po)+'/cin7-not-required',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({value:_v})})
