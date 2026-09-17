@@ -820,10 +820,34 @@ body header.pv-top .pv-lang button:hover{color:#fff}
 #app #product-root .smp-viewpill:last-child{border-radius:0 var(--r-sm) var(--r-sm) 0;border-left:none}
 #app #product-root .smp-viewpill.active{background:var(--nav);color:var(--nav-ink);border-color:var(--nav)}
 #app #product-root .smp-tick{width:22px;height:22px;border:2px solid var(--line);border-radius:6px;display:inline-flex;align-items:center;justify-content:center;font-weight:900;font-size:13px;line-height:1;cursor:pointer;background:var(--card);color:transparent;transition:background .15s,border-color .15s;user-select:none}
+/* v27.758 design slice 2 — the tick carries the state (colour), the date is one faint line, the status word lives in the
+   tooltip and the MANAGE tab, and a small blue superscript counts notes + feedback on that version. Keys from _smpStatus(). */
 #app #product-root .smp-tick.on{background:var(--pos);border-color:var(--pos);color:#fff}
+#app #product-root .smp-tick.on.k-rv{background:var(--amber);border-color:var(--amber)}
+#app #product-root .smp-tick.on.k-rj{background:var(--neg);border-color:var(--neg)}
 #app #product-root .smp-tick.sub{border-color:var(--amber);border-style:dashed}
+#app #product-root .smp-tick.sub.k-tr{border-color:var(--violet)}
 #app #product-root .smp-tick.none{border-color:var(--line2);cursor:default;opacity:.55}
 #app #product-root .smp-tick:hover:not(.none){box-shadow:0 0 0 3px var(--blue-soft)}
-#app #product-root .smp-sdate{display:block;font-size:9.5px;color:var(--muted);margin-top:2px;white-space:nowrap;cursor:pointer}
+#app #product-root .smp-scell{position:relative}
+#app #product-root .smp-tickwrap{position:relative;display:inline-block;line-height:0}
+#app #product-root .smp-n{position:absolute;top:-6px;right:-8px;min-width:14px;height:14px;padding:0 3px;border-radius:999px;background:var(--blue);color:#fff;font-size:9px;line-height:14px;font-weight:700;text-align:center;cursor:pointer;box-shadow:0 0 0 1.5px var(--card)}
+#app #product-root .smp-sdate{display:block;font-size:9px;color:var(--faint);margin-top:3px;white-space:nowrap;cursor:pointer;line-height:1.1}
 #app #product-root .smp-sdate.sub{color:var(--amber);font-weight:600}
+#app #product-root .smp-sdate.k-tr{color:var(--violet)}
+/* MANAGE panel as a board card (3px --blue rail, L3-tinted header carrying ref · meta · tabs) */
+#app #product-root .smp-mcard{border:1px solid var(--line);border-left:3px solid var(--blue);border-radius:var(--r-md);background:var(--card);overflow:hidden;box-shadow:var(--shadow)}
+#app #product-root .smp-mhd{display:flex;align-items:center;gap:12px;padding:6px 12px;background:var(--l3-bg);border-bottom:1px solid var(--line);flex-wrap:wrap}
+#app #product-root .smp-mttl{font-weight:800;font-size:13px;font-family:ui-monospace,Menlo,monospace;color:var(--ink)}
+#app #product-root .smp-mmeta{white-space:nowrap}
+#app #product-root .smp-mhd .po-subnav{margin:0 0 0 auto;background:transparent;border:none;padding:0}
+#app #product-root .smp-mhd .po-subnav .rtab{padding:9px 10px 8px}
+#app #product-root .smp-mbody{padding:10px 12px}
+#app #product-root .smp-dot{display:inline-block;width:7px;height:7px;border-radius:999px;margin-right:5px;vertical-align:1px;background:var(--faint)}
+#app #product-root .smp-dot.k-ok{background:var(--pos)}
+#app #product-root .smp-dot.k-rv{background:var(--amber)}
+#app #product-root .smp-dot.k-rj{background:var(--neg)}
+#app #product-root .smp-dot.k-tr{background:var(--violet)}
+#app #product-root .smp-dot.k-wt{background:transparent;border:1.5px dashed var(--faint);width:6px;height:6px}
+#app #product-root .smp-mexp>td{padding:6px 8px 12px !important;background:var(--hover)}
 #app #product-root .smp-comp{display:grid;grid-template-columns:150px 200px 1fr;gap:8px 12px;align-items:start;padding:8px 0;border-top:1px solid var(--line2)}

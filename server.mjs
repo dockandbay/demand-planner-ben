@@ -6681,6 +6681,7 @@ app.get('/api/product/sampling', async (_req, res) => {
             'approved',(SELECT count(*) FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id AND af.decision IN ('approved','approved_with_comments'))::int,
             'rejected',(SELECT count(*) FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id AND af.decision IN ('rejected_new_sample','stop_development'))::int,
             'feedback',(SELECT count(*) FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id AND coalesce(af.feedback,'')<>'')::int,
+            'notes_n',(SELECT count(*) FROM planner.supplier_notes n WHERE n.sample_id=ps.id)::int,
             'shipment',(SELECT json_build_object('id',sr.id,'ref',sr.ref,'carrier',coalesce(sr.carrier,''),'tracking',coalesce(sr.tracking_code,''),'status',coalesce(sr.status,''),
                 'received_at',to_char(sr.received_at,'YYYY-MM-DD'),'expected',to_char(sr.supplier_expected_completion,'YYYY-MM-DD'))
               FROM planner.sample_request_dev_samples l JOIN planner.sample_requests sr ON sr.id=l.sample_request_id WHERE l.dev_sample_id=ps.id ORDER BY sr.created_at DESC LIMIT 1)
