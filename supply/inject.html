@@ -279,8 +279,11 @@
 #product-root .smp-tbl th.smp-scell{padding-left:3px;padding-right:3px}
 #product-root .smp-stage{min-width:220px}
 #product-root .smp-stage .smp-stage-sel{width:100%;min-width:210px;max-width:100%}
-#product-root .smp-manage{font-size:10px;font-weight:700;border:1px solid var(--line);background:var(--card);color:var(--nav);border-radius:5px;padding:2px 9px;cursor:pointer;white-space:nowrap}
-#product-root .smp-manage:hover{background:var(--hover)}
+#product-root .smp-manage{font-size:10px;font-weight:700;border:1px solid #111;background:#111;color:#fff;border-radius:5px;padding:2px 9px;cursor:pointer;white-space:nowrap}
+#product-root .smp-manage:hover{background:#000;border-color:#000}
+/* v27.732 (Ben): tighten the gap between the swatch cell and PRODUCT column 1 */
+#product-root .smp-tbl td:first-child,#product-root .smp-tbl th:first-child{padding-right:0}
+#product-root .smp-tbl td:nth-child(2),#product-root .smp-tbl th:nth-child(2){padding-left:4px}
 #product-root .smp-mtab{font-size:11px;font-weight:600;border:1px solid var(--line);background:var(--card);color:var(--muted);border-radius:6px;padding:4px 11px;cursor:pointer}
 #product-root .smp-mtab.active{background:var(--nav);color:#fff;border-color:var(--nav)}
 #product-root #smp-grid .pg-swatch2{width:40px;height:40px;border-radius:7px}

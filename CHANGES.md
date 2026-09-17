@@ -1,3 +1,7 @@
+## v27.732 SAMPLING grid: MANAGE button black/white; tighten swatch→column-1 gap (Ben) — CLIENT
+- The **⚙ Manage** button is now black background / white text.
+- Removed the white space between the swatch cell and the PRODUCT column (swatch cell padding-right 0, product cell padding-left 4px).
+
 ## v27.731 P2b DHL tracking: "mark received" from the delivered tracking log (Ben) — SERVER + CLIENT
 - When a DHL number belongs to a development sample's shipment, `GET /api/tracking/detail` now returns that sample + its received state.
 - In the tracking log, if the status is **Delivered** and the sample isn't received yet, a one-click **✓ Mark sample received** button appears (admin only; never automatic) → marks the sample received (`/api/product/sample/:id/received`) and refreshes the SAMPLING grid.
