@@ -1,3 +1,8 @@
+## v27.731 P2b DHL tracking: "mark received" from the delivered tracking log (Ben) — SERVER + CLIENT
+- When a DHL number belongs to a development sample's shipment, `GET /api/tracking/detail` now returns that sample + its received state.
+- In the tracking log, if the status is **Delivered** and the sample isn't received yet, a one-click **✓ Mark sample received** button appears (admin only; never automatic) → marks the sample received (`/api/product/sample/:id/received`) and refreshes the SAMPLING grid.
+- Completes the P2b "delivered → mark received" scope item.
+
 ## v27.730 SAMPLING: MANAGE button — inline tabbed workspace per request (Ben) — CLIENT
 - Each SAMPLING request row gets a **⚙ Manage** button (like the PO grid's expander) → an **inline tabbed panel**: **Master data · Timeline · one tab per sample (S1, S2, …)**.
 - Master reuses `renderProdMaster`, Timeline reuses `renderProdTimeline`, and each **S-tab** shows that sample's full review (per-component decision / feedback / reject reasons / photos / save) via `_smpReviewInto` — a standalone mirror of the inline sample expander (kept separate so the tick-aligned expander is untouched).

@@ -8171,7 +8171,15 @@ app.get('/api/tracking/detail', async (req, res) => {
   if (!number) return res.status(400).json({ error: 'number required' });
   try {
     const r = (await pool.query(`SELECT tracking_number, carrier, status_code, status_text, to_char(eta,'YYYY-MM-DD') eta, delivered_at, last_event, last_polled_at, events FROM planner.carrier_tracking WHERE tracking_number=$1`, [number])).rows[0];
-    res.set('Cache-Control', 'no-store').json({ ok: true, row: r || null });
+    // v27.731: if this number is on a development sample's shipment, surface the sample + its received state so the
+    // log can offer a one-click "mark received" when DHL says delivered (never auto — consistent with the SR flow).
+    let sample = null;
+    try { const sr = (await pool.query(`SELECT ps.id, ps.version, ps.item_ref, ps.received_at FROM planner.sample_requests s
+        JOIN planner.sample_request_dev_samples l ON l.sample_request_id=s.id
+        JOIN planner.product_dev_samples ps ON ps.id=l.dev_sample_id
+        WHERE $1 IN (s.tracking_code, s.tracking_code_2) ORDER BY ps.id DESC LIMIT 1`, [number])).rows[0];
+      if (sr) sample = { id: sr.id, version: sr.version, item_ref: sr.item_ref, received: !!sr.received_at }; } catch (e) {}
+    res.set('Cache-Control', 'no-store').json({ ok: true, row: r || null, sample });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Config get/set (CONFIG ▸ Admin ▸ Integrations ▸ DHL tracking).
