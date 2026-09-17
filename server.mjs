@@ -7232,8 +7232,9 @@ app.post('/api/product/note', async (req, res) => {
   const tags = Array.isArray(b.tags) ? b.tags.map(x => Number(x)).filter(x => Number.isFinite(x)) : [];
   const pantone = cleanPantone(b.pantone);
   const att = (b.attachment_id != null && String(b.attachment_id).trim() !== '') ? Number(b.attachment_id) : null;   // v27.558: optional file on the message (portal_attachments id, uploaded via /api/product/doc)
-  try { const r = await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, tags, pantone, attachment_id) VALUES ($1,$2,'internal',$3,$4::jsonb,$5::jsonb,$6) RETURNING id`,
-    [ref, internalAuthor(req, b.author_email), String(b.body).trim(), JSON.stringify(tags), JSON.stringify(pantone), att]);
+  const sampleId = (b.sample_id != null && String(b.sample_id).trim() !== '' && Number.isFinite(Number(b.sample_id))) ? Number(b.sample_id) : null;   // v27.750 (P6): /s chip → link this note to a specific development sample
+  try { const r = await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body, tags, pantone, attachment_id, sample_id) VALUES ($1,$2,'internal',$3,$4::jsonb,$5::jsonb,$6,$7) RETURNING id`,
+    [ref, internalAuthor(req, b.author_email), String(b.body).trim(), JSON.stringify(tags), JSON.stringify(pantone), att, sampleId]);
     res.json({ ok: true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // v27.550: sample FEEDBACK notes are one-per-(sample × component) on the timeline. Re-saving feedback rewrites that note
@@ -7616,9 +7617,11 @@ async function productSampleList(itemRef, opts) {
   opts = opts || {};
   // feedback_notes runs a supplier_notes body-LIKE scan per sample — heavy, and only the Samples tab uses it. The
   // batch-review pass passes {skipFeedbackNotes:true} to drop it (v27.688, Ben #8 perf).
+  // v27.750 (P6): a note surfaces on a sample's thread when it is linked to that sample (sample_id, from the /s chip)
+  // OR carries the legacy "Feedback on REF_vN · …" prefix (kept for back-compat).
   const _fbNotes = opts.skipFeedbackNotes ? `'[]'::json feedback_notes` :
     `coalesce((SELECT json_agg(json_build_object('body',n.body,'at',to_char(n.created_at,'DD-Mon-YY HH24:MI')) ORDER BY n.created_at DESC)
-      FROM planner.supplier_notes n WHERE n.po=ps.item_ref AND n.author_kind='internal' AND n.body LIKE 'Feedback on '||ps.item_ref||'\_v'||ps.version||' %'),'[]'::json) feedback_notes`;
+      FROM planner.supplier_notes n WHERE n.po=ps.item_ref AND n.author_kind='internal' AND (n.sample_id=ps.id OR n.body LIKE 'Feedback on '||ps.item_ref||'\_v'||ps.version||' %')),'[]'::json) feedback_notes`;
   const rows = (await pool.query(`SELECT ps.id, ps.version, (ps.item_ref||'_v'||ps.version) ref, to_char(ps.sample_date,'YYYY-MM-DD') sample_date,
     ps.colour_verified, ps.quality_verified, coalesce(ps.description,'') description, coalesce(ps.created_by,'') created_by,
     coalesce(ps.sampled_aspects,'{}') sampled_aspects, coalesce(ps.sample_sizes,'{}') sample_sizes,

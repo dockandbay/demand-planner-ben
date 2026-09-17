@@ -14984,6 +14984,12 @@
     function hl(){ pick.querySelectorAll('.pt-pi').forEach(function(el,i){ el.style.background=(i===pIdx?'var(--blue-soft)':''); }); }
     function wire(){ pick.querySelectorAll('.pt-pi').forEach(function(el){ el.onmousedown=function(e){ e.preventDefault(); ins(parseInt(el.dataset.i,10)); }; el.onmouseenter=function(){ pIdx=parseInt(el.dataset.i,10); hl(); }; }); }
     function draw(){ var tk=tokenAt(); if(!tk){ closeP(); return; }
+      // v27.750 (P6): /s [query] → tag a development sample version (needs opts.samples). "/s", "/sample", "/s v2"…
+      var sm=(opts.samples&&opts.samples.length)?tk.q.match(/^s(?:ample)?(?:\s+(.*))?$/i):null;
+      if(sm){ mode='samp'; var qs=(sm[1]||'').toLowerCase(); pItems=opts.samples.filter(function(x){ return !qs||String(x.label).toLowerCase().indexOf(qs)>=0||String('v'+x.version).indexOf(qs)>=0; });
+        if(!pItems.length){ closeP(); return; } if(pIdx<0||pIdx>=pItems.length)pIdx=0;
+        pick.innerHTML=pItems.map(function(x,i){ return '<div class="pt-pi" data-i="'+i+'" style="padding:6px 9px;font-size:12px;cursor:pointer;border-bottom:1px solid var(--hover);white-space:nowrap;'+(i===pIdx?'background:var(--blue-soft)':'')+'">🧪 <b>'+esc(x.label)+'</b>'+(x.received?' <span style="color:#16a34a;font-size:10px">✓ received</span>':' <span class="mut tiny">not received</span>')+'</div>'; }).join('');
+        place(); pick.style.display=''; wire(); return; }
       var pm=tk.q.match(/^p(?:antone)?\s+(.*)$/i);
       if(pm){ mode='pan'; var q=pm[1]||'', my=++seq;
         fetch('/api/product/pantone/search?q='+encodeURIComponent(q)).then(function(r){return r.json();}).then(function(rows){ if(my!==seq||!tokenAt())return; rows=Array.isArray(rows)?rows:[]; pItems=rows;
@@ -14996,7 +15002,8 @@
       pick.innerHTML=pItems.map(function(x,i){ return '<div class="pt-pi" data-i="'+i+'" style="padding:6px 9px;font-size:12px;cursor:pointer;border-bottom:1px solid var(--hover);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'+(i===pIdx?'background:var(--blue-soft)':'')+'">'+esc(x.body)+'</div>'; }).join('');
       place(); pick.style.display=''; wire(); }
     function ins(i){ var tk=tokenAt(), it=pItems[i]; if(!tk||!it)return; var v=ta.value;
-      if(mode==='pan'){ var tokn='🎨 '+it.code; ta.value=v.slice(0,tk.start)+tokn+' '+v.slice(tk.end); var cp=tk.start+tokn.length+1; ta.focus(); ta.setSelectionRange(cp,cp); closeP(); picked[it.code]={code:it.code,name:it.name,hex:it.hex,book:it.book}; }
+      if(mode==='samp'){ var tokn='🧪 v'+it.version; ta.value=v.slice(0,tk.start)+tokn+' '+v.slice(tk.end); var cp=tk.start+tokn.length+1; ta.focus(); ta.setSelectionRange(cp,cp); closeP(); if(opts.samplesPicked)opts.samplesPicked[it.version]=it.id; }   // v27.750 (P6): record version→sample id so the post can link it
+      else if(mode==='pan'){ var tokn='🎨 '+it.code; ta.value=v.slice(0,tk.start)+tokn+' '+v.slice(tk.end); var cp=tk.start+tokn.length+1; ta.focus(); ta.setSelectionRange(cp,cp); closeP(); picked[it.code]={code:it.code,name:it.name,hex:it.hex,book:it.book}; }
       else { ta.value=v.slice(0,tk.start)+it.body+v.slice(tk.end); var cp2=tk.start+String(it.body).length; ta.focus(); ta.setSelectionRange(cp2,cp2); closeP(); }
       if(opts.onChange)try{opts.onChange();}catch(e){} }
     ta.addEventListener('input',function(){ draw(); if(opts.onChange)try{opts.onChange();}catch(e){} });
@@ -15046,7 +15053,7 @@
     // wire: picker on the shim; input → sync + chip any newly-known token; blur → 'change' if the text moved; paste → plain text; drag events → the textarea's handlers
     // onChange fires AFTER hzSlashPicker has recorded the pick in `picked` (ins() sets picked[code] last) → that is the moment a
     // brand-new code can chip: re-sync PANS, re-render at the same caret. (v27.701: first pick of a new colour stayed a raw token.)
-    if(pick)hzSlashPicker(shim,pick,{snips:opts.snips||[],picked:picked,fixed:opts.fixed!==false,onChange:function(){ var before=Object.keys(PANS).length; syncPans(); if(Object.keys(PANS).length!==before){ var off=caretOffset(); render(getText()); setCaret(off); } syncToTa(true); if(opts.onChange)try{opts.onChange();}catch(e){} }});
+    if(pick)hzSlashPicker(shim,pick,{snips:opts.snips||[],picked:picked,samples:opts.samples||null,samplesPicked:opts.samplesPicked||null,fixed:opts.fixed!==false,onChange:function(){ var before=Object.keys(PANS).length; syncPans(); if(Object.keys(PANS).length!==before){ var off=caretOffset(); render(getText()); setCaret(off); } syncToTa(true); if(opts.onChange)try{opts.onChange();}catch(e){} }});
     var _focusText=null;
     ed.addEventListener('focus',function(){ _focusText=getText(); });
     ed.addEventListener('input',function(){ syncToTa(true); resolveUnknown(); });
@@ -15508,8 +15515,11 @@
   // Mirrors the PO timeline (timelinePanel): newest-first cards, Escalate sits on YOUR latest message (not the compose box), compose posts at the bottom.
   function renderProdTimeline(body,ref,opts){ opts=opts||{}; if(!opts.quiet)body.innerHTML='<div style="color:var(--faint)">Loading…</div>';   // v27.549: quiet = redraw in place (retag / filter / post), no Loading flash
     renderProdTimeline._filt=renderProdTimeline._filt||{};   // per-ref tag filter, persists across the re-render on post
-    Promise.all([_prodCachedJson('/api/product/notes/'+encodeURIComponent(ref)),_prodCachedJson('/api/product/item/'+encodeURIComponent(ref)+'/changes'),_prodCachedJson('/api/product/timeline-config')]).then(function(_r){
+    Promise.all([_prodCachedJson('/api/product/notes/'+encodeURIComponent(ref)),_prodCachedJson('/api/product/item/'+encodeURIComponent(ref)+'/changes'),_prodCachedJson('/api/product/timeline-config'),_prodCachedJson('/api/product/samples/'+encodeURIComponent(ref)).catch(function(){return [];})]).then(function(_r){
       var notes=Array.isArray(_r[0])?_r[0]:[], changes=(_r[1]&&_r[1].change_log)||[], _hid=rocIsHidden(ref);
+      // v27.750 (P6): sample versions for the /s chip (product-dimension only), newest label first
+      var _smpList=(Array.isArray(_r[3])?_r[3]:[]).map(function(s){ return { id:s.id, version:s.version, label:'Sample '+s.version, received:!!s.received_at }; });
+      var _smpByVer={}; _smpList.forEach(function(s){ _smpByVer[s.version]=s.id; });
       var cfg=_r[2]||{tags:[],snippets:[]}, CFGTAGS=cfg.tags||[], SNIPS=(cfg.snippets||[]).filter(function(s){return s.active!==false;});
       var ACTTAGS=CFGTAGS.filter(function(t){return t.active!==false;}), TAGMAP={}; CFGTAGS.forEach(function(t){TAGMAP[t.id]=t;});
       var FILT=renderProdTimeline._filt[ref]=renderProdTimeline._filt[ref]||{};
@@ -15556,7 +15566,7 @@
           +'<div id="pt-picker" style="display:none;position:absolute;left:6px;right:6px;top:calc(100% - 2px);z-index:60;background:var(--card);border:1px solid var(--line);border-radius:6px;box-shadow:0 6px 20px rgba(15,23,42,.14);max-height:200px;overflow:auto"></div></div>'
         +'<div id="pt-prev" style="display:none;margin:4px 0 0;font-size:12px;line-height:1.5"></div>'
         +'<div style="margin:5px 0 2px"><span class="mut tiny" style="margin-right:4px">Tags:</span>'+_compChips+'<span class="pt-tagnew" title="Create a new tag" style="cursor:pointer;display:inline-block;font-size:10px;font-weight:700;border-radius:5px;padding:2px 9px;margin:0 4px 4px 0;border:1px dashed var(--muted);color:var(--muted);background:var(--card)">+ new tag</span></div>'
-        +'<div class="mut tiny" style="margin:4px 0 2px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span>Type <b>/</b> for a reusable phrase · <b>/p</b> for a Pantone colour · drop photos / documents on the box or</span><label style="cursor:pointer;color:var(--blue);font-weight:600">📎 add files<input type="file" id="pt-files" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ai,.zip" style="display:none"></label></div><div id="pt-filelist" style="display:flex;flex-wrap:wrap;gap:6px;margin:2px 0"></div>'
+        +'<div class="mut tiny" style="margin:4px 0 2px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span>Type <b>/</b> for a reusable phrase · <b>/p</b> for a Pantone colour'+(_smpList.length?' · <b>/s</b> to tag a sample version':'')+' · drop photos / documents on the box or</span><label style="cursor:pointer;color:var(--blue);font-weight:600">📎 add files<input type="file" id="pt-files" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ai,.zip" style="display:none"></label></div><div id="pt-filelist" style="display:flex;flex-wrap:wrap;gap:6px;margin:2px 0"></div>'
         +'<div style="margin-top:5px"><button class="save-btn" id="pt-post" style="background:var(--blue);color:#fff;border-color:var(--blue)">Post</button> <span id="pt-postmsg" class="mut tiny"></span></div></div>'
         +'<div class="mut tiny" style="margin:4px 2px 12px">To escalate to the supplier, post the message then use ⚑ Escalate on it.</div>';
       body.innerHTML='<div class="sect-h">Timeline <span class="mut tiny">— message thread for this product; record of change is admin-only</span> <label style="font-size:11px;font-weight:400;margin-left:8px;cursor:pointer;white-space:nowrap"><input type="checkbox" class="prod-hide-chg"'+(_hid?' checked':'')+' style="vertical-align:middle;margin-right:3px">hide record of change</label></div>'+compose+filterBar+list;
@@ -15573,8 +15583,9 @@
       // "🎨 <code>" token so the reference lives IN the message. On post we send the ones still present in the text.
       var _panPicked={};
       // slash-command picker: "/" = saved phrase, "/p <query>" = Pantone colour search
+      var _smpPicked={};   // v27.750 (P6): version→sample id, populated as the user inserts /s chips
       (function(){ var ta=body.querySelector('#pt-in'), pick=body.querySelector('#pt-picker'), prev=body.querySelector('#pt-prev'); if(!ta||!pick)return;   // v27.530: shared picker + live Pantone preview
-        hzRichCompose(ta,pick,{snips:SNIPS,picked:_panPicked,fixed:true}); if(prev)prev.style.display='none'; })();   // v27.700 rich compose: chips render INLINE (option B) so the preview strip is retired; fixed (v27.548): the phrase / Pantone list must sit above the notes below the compose box
+        hzRichCompose(ta,pick,{snips:SNIPS,picked:_panPicked,samples:_smpList,samplesPicked:_smpPicked,fixed:true}); if(prev)prev.style.display='none'; })();   // v27.700 rich compose: chips render INLINE (option B) so the preview strip is retired; v27.750: /s sample tags
       // filter chip handlers
       body.querySelectorAll('.pt-filt').forEach(function(ch){ ch.onclick=function(){ var id=ch.dataset.id; FILT[id]=!FILT[id]; if(!FILT[id])delete FILT[id]; renderProdTimeline(body,ref,{quiet:true}); }; });
       var _fclr=body.querySelector('.pt-filt-clear'); if(_fclr)_fclr.onclick=function(){ Object.keys(FILT).forEach(function(k){delete FILT[k];}); renderProdTimeline(body,ref,{quiet:true}); };
@@ -15598,7 +15609,8 @@
         var pantone=Object.keys(_panPicked).filter(function(code){ return t.indexOf('🎨 '+code)>=0; }).map(function(code){ return _panPicked[code]; });   // only cards whose token survives in the text
         var pb=body.querySelector('#pt-post'), pm=body.querySelector('#pt-postmsg'); pb.disabled=true; if(pm&&_files.length)pm.textContent='uploading '+_files.length+' file'+(_files.length===1?'':'s')+'…';
         uploadAll(function(ids){ var first=ids.shift(); var bodyTxt=t||(first?'📎 '+first.name:''); var email=(window.ME&&ME.email)||'';
-          shipPost('/api/product/note',{ref:ref,body:bodyTxt,author_email:email,tags:tags,pantone:pantone,attachment_id:first?first.id:null},function(){
+          var _sampMatch=/🧪 v(\d+)/.exec(bodyTxt), _sampId=_sampMatch?(_smpByVer[_sampMatch[1]]||null):null;   // v27.750 (P6): /s chip → link the note to that sample version
+          shipPost('/api/product/note',{ref:ref,body:bodyTxt,author_email:email,tags:tags,pantone:pantone,attachment_id:first?first.id:null,sample_id:_sampId},function(){
             (function extra(){ if(!ids.length){ _files=[]; _prodJsonBust(ref); renderProdTimeline(body,ref,{quiet:true}); return; } var x=ids.shift(); shipPost('/api/product/note',{ref:ref,body:'📎 '+x.name,author_email:email,tags:tags,pantone:[],attachment_id:x.id},function(){ extra(); }); })(); }); }); };
       body.querySelectorAll('.tl-att-img').forEach(function(im){ im.onclick=function(){ openImgZoom(im.dataset.src); }; });
       var eb=body.querySelector('.prod-esc'); if(eb)eb.onclick=function(){ var msg=eb.dataset.msg||''; if(!msg){alert('No message to escalate.');return;} if(!confirm('Escalate this message for '+ref+' to the supplier (emails their portal user)?'))return; eb.disabled=true; var t=eb.textContent; eb.textContent='Sending…'; shipPost('/api/product/escalate',{ref:ref,message:msg},function(j){ if(j&&j.error){alert(j.error);eb.disabled=false;eb.textContent=t;return;} alert(j&&j.sent?('Escalated — emailed '+j.emails.join(', ')):(j&&j.note)||'Escalated (no recipients configured).'); renderProdTimeline(body,ref); }); };
