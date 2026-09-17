@@ -1,3 +1,8 @@
+## v27.747 PRODUCT split P4c (portal): supplier phone sample card (Ben) — CLIENT (portal)
+- Scanning a sample-card QR on a **supplier's phone** (or hitting `#/product/scan/<code>` in the portal) opens a **view-focused sample card** (`ppScanCardOpen`): large clear **swatch**, identity, receipt status, **Dock & Bay's review** per component (read-only decisions + feedback), photos, and an **Open full record ↗** button to the portal product page. This is what the QR encodes (portal URL), so a supplier's native camera lands here.
+- Ownership-guarded: `/api/portal/scan/:code` only resolves the caller's own sample. Verified live in the portal as supplier **Lixin** — their sample `2Q1` renders with the real 512×467 swatch; other suppliers' codes (RQS/RDN/9A1) return **403**.
+- zh: card phrases added to `PP_ZH`; the portal's existing translation observer localises the overlay.
+
 ## v27.746 PRODUCT split P4c: phone sample card (admin) (Ben) — CLIENT
 - New route `#/product/scan/<code>` opens a **mobile-first full-screen sample card** (`hzScanCardOpen`): large clear **swatch**, identity (ref/version/colour/supplier/season/type/date), a big **✓ Mark received** button, per-component **Review** (decision dropdown + reject reasons + approved-with-comments + feedback, Save), and **📷 Add photo** (camera capture). Writes go through the existing `/received`, `/aspect` and `/photo` endpoints — the same ones the SAMPLING grid review uses.
 - Verified in the browser at `#/product/scan/2Q1`: card renders with the real 512×467 swatch, Mark-received persists `received_at` and flips the card, undo reverts. (Portal phone card + scanner wiring follow in P4c-portal / P4d.)
