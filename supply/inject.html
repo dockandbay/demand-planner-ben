@@ -2610,7 +2610,7 @@
       var _sc=document.getElementById('sup-count'); if(_sc)_sc.textContent='';   // PO count line removed (Ben) — guard kept in case the element returns
       // Load-more lives INSIDE the grid table (footer row) so it's in the same scroll box as the rows — no second
       // scroll to reach it. Sticky-left keeps the buttons visible when the wide grid is scrolled sideways.
-      var _footRow=(shown.length<f.length)?'<tr class="po-loadmore-row"><td colspan="19" style="text-align:center;padding:10px;background:var(--hover);border-top:1px solid var(--line);position:sticky;left:0"><span class="mut" style="font-size:12px">Showing '+shown.length+' of '+f.length+'</span> <button class="save-btn light" id="po-loadmore" style="margin-left:8px">Load '+Math.min(PO_PAGE,f.length-shown.length)+' more &darr;</button> <button class="save-btn light" id="po-showall" style="margin-left:6px">Show all '+f.length+'</button></td></tr>':'';
+      var _footRow=(shown.length<f.length)?'<tr class="po-loadmore-row"><td colspan="20" style="text-align:center;padding:10px;background:var(--hover);border-top:1px solid var(--line);position:sticky;left:0"><span class="mut" style="font-size:12px">Showing '+shown.length+' of '+f.length+'</span> <button class="save-btn light" id="po-loadmore" style="margin-left:8px">Load '+Math.min(PO_PAGE,f.length-shown.length)+' more &darr;</button> <button class="save-btn light" id="po-showall" style="margin-left:6px">Show all '+f.length+'</button></td></tr>':'';
       document.getElementById('sup-grid').innerHTML=poTable(shown,q?'status':state.grp,_footRow);   // a search spans all statuses → group under status sub-labels (Production ▸ Shipping ▸ Ready to ship ▸ Future ▸ Complete)
       var lm=document.getElementById('po-loadmore'); if(lm)lm.onclick=function(){ _poLimit+=PO_PAGE; view(); };
       var sa=document.getElementById('po-showall'); if(sa)sa.onclick=function(){ _poShowAll=true; view(); };
@@ -2622,7 +2622,7 @@
         // if the target PO is past the render cap it isn't in the DOM yet — reveal all rows and retry so the
         // direct PO actually opens (links from Shipments / Deposits / Cash flow / Actions all rely on this)
         if(!expandPending('#sup-grid .po-exp[data-po]',want) && !_poShowAll){ _poShowAll=true; view(); setTimeout(function(){ expandPending('#sup-grid .po-exp[data-po]',want); },30); } },30); }
-      document.querySelectorAll('#sup-grid .erp-up').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.up); }; }); }
+      document.querySelectorAll('#sup-grid .erp-up').forEach(function(b){ b.onclick=function(){ erpUploadInert(b.dataset.up); }; }); fillErpFulfil(); }
     // refresh the grid IN PLACE after an assign (deposit / shipment / supplier / branch / …) — re-fetch the PO
     // rows and re-render only #sup-grid, so filters + scroll position are kept (no full section reload / jump).
     function refreshGrid(){ invalidateDerived(); delete cache['purchase-orders']; var sy=window.scrollY;
@@ -3003,6 +3003,20 @@
         +det.map(function(d){return '<tr style="color:var(--neg)"><td class="l">'+esc(d.sku)+'</td><td>'+money(d.plan)+'</td><td>'+money(d.cin7)+'</td></tr>';}).join('')
         +'</tbody></table></div>' : '';
     return head+tbl; }
+  // v27.741: Fulfil column — fill each row's Fulfil drift status from /api/supply/fulfil/grid-status; grey the Cin7 cell for POs marked not-required-in-Cin7.
+  function fillErpFulfil(){ if(!document.querySelector('#sup-grid .po-fulfil[data-po]'))return;
+    fetch('/api/supply/fulfil/grid-status').then(function(r){return r.json();}).then(function(j){ var st=(j&&j.status)||{};
+      document.querySelectorAll('#sup-grid .po-fulfil[data-po]').forEach(function(el){ var po=el.getAttribute('data-po'), s=st[po];
+        if(!s){ el.innerHTML='<span class="mut tiny">—</span>'; return; }
+        if(s.in_fulfil){ var mm=Number(s.fulfil_lines)!==Number(s.horizon_lines);
+          el.innerHTML=mm?('<button class="po-fpush tool-badge bg-amber" data-po="'+esc(po)+'" title="in Fulfil but line count differs ('+s.horizon_lines+' Horizon vs '+s.fulfil_lines+' Fulfil) — re-push">⬆ Update '+s.horizon_lines+'/'+s.fulfil_lines+'</button>')
+            :('<span class="tool-badge bg-green" title="in Fulfil'+(s.fulfil_state?' · '+esc(s.fulfil_state):'')+'">✓ in Fulfil</span>'); }
+        else { el.innerHTML='<button class="po-fpush tool-badge bg-blue" data-po="'+esc(po)+'" title="not in Fulfil — create it">⬆ Push to Fulfil</button>'; } });
+      document.querySelectorAll('#sup-grid .po-cin7[data-po]').forEach(function(el){ var s=st[el.getAttribute('data-po')]; if(s&&s.cin7_not_required)el.innerHTML='<span class="mut tiny" title="marked not required in Cin7 (order plan)">n/a</span>'; });
+      document.querySelectorAll('#sup-grid .po-fpush').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){ fulfilPushPO(b.dataset.po, b); }; });
+    }).catch(function(){}); }
+  function fulfilPushPO(po, btn){ var t=btn?btn.textContent:''; if(btn){ btn.disabled=true; btn.textContent='Pushing…'; }
+    fetch('/api/supply/po/'+encodeURIComponent(po)+'/cin7-lines?erp=fulfil',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ if(btn){btn.disabled=false;btn.textContent=t;} alert('Fulfil push failed: '+j.error); return; } fillErpFulfil(); }).catch(function(){ if(btn){btn.disabled=false;btn.textContent=t;} alert('Fulfil push failed'); }); }
   function erpUploadInert(po,forceFull){ closeShPop&&closeShPop();
     // What's actually out of sync decides which buttons show: only the DATE differs → just the date button;
     // line items differ (qty/not-in-ERP) → show both (lines + date), plus the manual CSV/copy fallback.
@@ -3124,7 +3138,8 @@
     else if(datePending) erpCell='<button class="erp-up tool-badge bg-amber" data-up="'+esc(r.po)+'" style="'+erpStyle+'" title="completed-at-warehouse '+esc(r.checkin||'?')+' ≠ ERP final delivery '+esc(r.erp_final_delivery||'?')+'">Update date</button>';
     else erpCell='<span class="tool-badge bg-green" title="planned quantities match the ERP">✓ in sync</span>';
     return '<tr'+ga+'><td class="l" style="white-space:nowrap"><button class="planbtn po-exp" data-po="'+esc(r.po)+'" data-i="'+i+'">PLAN</button><button class="fav-star'+(r.starred?' on':'')+'" data-star-po="'+esc(r.po)+'" title="Focus / favourite">'+(r.starred?'★':'☆')+'</button>'+noteFlag+'</td>'+pocell
-      +'<td class="l">'+erpCell+'</td>'
+      +'<td class="l po-cin7" data-po="'+esc(r.po)+'">'+erpCell+'</td>'
+      +'<td class="l"><span class="po-fulfil" data-po="'+esc(r.po)+'"><span class="mut tiny">…</span></span></td>'
       +'<td class="l po-supcell">'+cellPickBtn(r.po,'/api/supply/po/'+encodeURIComponent(r.po)+'/supplier','supplier_name',r.supplier_name,'supplier')+'</td>'
       +'<td class="l">'+cellPickBtn(r.po,ep,'country_code',cgridLabel(r.country),'country')+(r.country_src==='branch'&&r.country?'<div class="mut tiny" style="margin-top:1px" title="inherited from branch country">(branch)</div>':'')+'</td>'
       +'<td class="l">'+cellPickBtn(r.po,ep,'branch',r.branch,'branch')+'</td>'
@@ -3144,12 +3159,12 @@
       +'<td class="l">'+cellPickBtn(r.po,ep,'prod_no',r.prod_no,'prod')+'</td>'
       +'<td class="l">'+cellPickBtn(r.po,ep,'batch_id',r.batch_id,'batch')+'</td>'
       +'</tr>'
-      +'<tr class="exp-row"'+ga+' id="poexp-'+i+'" style="display:none"><td colspan="19"><div id="podet-'+i+'" class="count"><div class="hz-skel" aria-label="Loading"><i></i><i></i><i></i></div></div></td></tr>'; }   // v27.543: shimmer, no Loading text
+      +'<tr class="exp-row"'+ga+' id="poexp-'+i+'" style="display:none"><td colspan="20"><div id="podet-'+i+'" class="count"><div class="hz-skel" aria-label="Loading"><i></i><i></i><i></i></div></div></td></tr>'; }   // v27.543: shimmer, no Loading text
   function poTable(rows,groupBy,footerHtml){ if(!rows.length)return '<div class="count">No POs in this filter.</div>';
     var _visPo={}; rows.forEach(function(r){ _visPo[String(r.po)]=1; });
     var _isMasterRow=function(r){ return !r.shipment || r.is_master || r.po===r.shipment; };
     var indentFor=function(r){ return !_isMasterRow(r) && !!_visPo[String(r.shipment||'')]; };   // indent a shipment member ONLY when its master PO is also visible in the current (filtered) grid — otherwise the └ dangles
-    var head=lookupDatalists()+'<div class="tw"><table class="po-tbl hz-stack po-cards"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">ERP</th><th class="l">Supplier</th><th class="l">Ship to</th><th class="l">Branch</th><th class="l">Direct</th><th class="l">Status</th><th class="l">Shipment</th><th class="l">Deposit ref</th><th class="l">Start</th><th class="l">End</th><th class="l">Ship</th><th class="l">Arrival/Delivery</th><th class="l">Completion</th><th>Value est</th><th>Pallets</th><th class="l">PROD#</th><th class="l">Batch</th></tr></thead><tbody>';
+    var head=lookupDatalists()+'<div class="tw"><table class="po-tbl hz-stack po-cards"><thead><tr><th class="l"></th><th class="l">PO</th><th class="l">Cin7</th><th class="l">Fulfil</th><th class="l">Supplier</th><th class="l">Ship to</th><th class="l">Branch</th><th class="l">Direct</th><th class="l">Status</th><th class="l">Shipment</th><th class="l">Deposit ref</th><th class="l">Start</th><th class="l">End</th><th class="l">Ship</th><th class="l">Arrival/Delivery</th><th class="l">Completion</th><th>Value est</th><th>Pallets</th><th class="l">PROD#</th><th class="l">Batch</th></tr></thead><tbody>';
     var body='';
     if(!groupBy||groupBy==='none'){ rows.forEach(function(r,i){ body+=poRowHtml(r,i,false,null); }); }
     else if(groupBy==='status'){
@@ -3160,7 +3175,7 @@
       var sseq=SORDER.filter(function(s){return smap[s];}).concat(sextra.sort());
       var si=0;
       sseq.forEach(function(s){ var list=smap[s]; list.sort(function(a,b){ var na=poProdNo(a),nb=poProdNo(b); return (na!==nb?nb-na:(a.po<b.po?-1:a.po>b.po?1:0)); });   // within a status: PROD# descending
-        body+='<tr class="grp-row cat-hdr"><td colspan="19">'+esc(s)+' <span style="opacity:.55;font-weight:600">('+list.length+')</span></td></tr>';
+        body+='<tr class="grp-row cat-hdr"><td colspan="20">'+esc(s)+' <span style="opacity:.55;font-weight:600">('+list.length+')</span></td></tr>';
         list.forEach(function(r){ body+=poRowHtml(r,si++,false,null); });
       });
     }
@@ -3193,7 +3208,7 @@
       order.forEach(function(k){ var list=groups[k];
         list.sort(function(a,b){ var ka=shipKey(a), kb=shipKey(b); if(ka!==kb)return ka<kb?-1:1; var ra=isMasterRow(a)?0:1, rb=isMasterRow(b)?0:1; return ra-rb || (a.po<b.po?-1:a.po>b.po?1:0); });   // cluster by shipment, master first, then alphabetical
         var gkey=k||'none', cnt=list.length;
-        body+='<tr class="grp-row cat-hdr po-grp" data-grp="'+esc(gkey)+'"><td colspan="19" style="cursor:pointer;user-select:none" title="click to expand / collapse this production"><span class="po-grp-car">▾</span> '+(k?('P# '+esc(k)):'No production number')+' — '+cnt+" PO"+(cnt>1?"'s":"")+'</td></tr>';
+        body+='<tr class="grp-row cat-hdr po-grp" data-grp="'+esc(gkey)+'"><td colspan="20" style="cursor:pointer;user-select:none" title="click to expand / collapse this production"><span class="po-grp-car">▾</span> '+(k?('P# '+esc(k)):'No production number')+' — '+cnt+" PO"+(cnt>1?"'s":"")+'</td></tr>';
         list.forEach(function(r){ body+=poRowHtml(r,i++,indentFor(r),gkey); });   // consolidated members indented under their master PO (only when the master is also in view)
       });
     }

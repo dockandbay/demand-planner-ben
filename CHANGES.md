@@ -1,3 +1,7 @@
+## v27.741 Fulfil ERP: PO grid Cin7 + Fulfil columns + Push to Fulfil (Ben) — SERVER + CLIENT
+- PO grid: the ERP column is now **two** — **Cin7** (the existing status/push) and a new **Fulfil** column, filled from `/api/supply/fulfil/grid-status`: **✓ in Fulfil** (green) / **⬆ Push to Fulfil** (blue, missing) / **⬆ Update h/f** (amber, line-count mismatch). A `cin7_not_required` PO shows **n/a** in the Cin7 cell. (colspans + hz-stack mobile labels updated for the added column.)
+- **Push to Fulfil** button → `POST /api/supply/po/:po/cin7-lines?erp=fulfil` (new `?erp=` override forces the target regardless of Active ERP, for the two-button model). Verified: pushed PO-60UKBE1 → Fulfil id 244, cell → ✓ in Fulfil.
+
 ## v27.740 Fulfil ERP: per-PO grid status + "not required in Cin7" flag (Ben) — SERVER + mig 283
 - `planner.purchase_orders.cin7_not_required` (mig 283) — the order-plan tickbox; suppresses Cin7 drift/actions for that PO (Fulfil unaffected — every PO still required in Fulfil).
 - `GET /api/supply/fulfil/grid-status` — per active PO: `in_fulfil`, `fulfil_state`, `fulfil_lines` vs `horizon_lines`, `cin7_not_required` (client merges into the PO grid's Cin7 + Fulfil columns).

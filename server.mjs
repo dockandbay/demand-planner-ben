@@ -12058,7 +12058,8 @@ app.post('/api/supply/po/:po/cin7-date', async (req, res) => {
   const po = req.params.po;
   const completion = ((req.body && req.body.completion_date) || '').trim();
   if (!completion) return res.status(400).json({ error: 'completion_date required' });
-  if (await activeErp() === 'fulfil') {   // same process, Fulfil target
+  const _erpDate = (req.query.erp === 'cin7' || req.query.erp === 'fulfil') ? req.query.erp : await activeErp();   // v27.741: ?erp= forces the target (2-button model)
+  if (_erpDate === 'fulfil') {   // same process, Fulfil target
     try { const out = await fulfilSyncDate(po, completion);
       if (out.ok) { logPoChange(po, 'Uploaded to ERP', 'delivery date → ' + completion + ' (Fulfil)', authUser(req)); return res.json(out); }
       return res.status(out.missing ? 404 : 502).json({ error: out.error }); }
@@ -12101,7 +12102,8 @@ app.post('/api/supply/po/:po/cin7-date', async (req, res) => {
 app.post('/api/supply/po/:po/cin7-lines', async (req, res) => {
   const po = req.params.po;
   const completion = ((req.body && req.body.completion_date) || '').trim();
-  if (await activeErp() === 'fulfil') {   // same process, Fulfil target (create-if-absent) — DRY-RUN until FULFIL_LINES_SEND
+  const _erpLines = (req.query.erp === 'cin7' || req.query.erp === 'fulfil') ? req.query.erp : await activeErp();   // v27.741: ?erp= forces the target (2-button model)
+  if (_erpLines === 'fulfil') {   // same process, Fulfil target (create-if-absent)
     try { return res.json(await fulfilPushLines(po, completion)); }
     catch (e) { return res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 502).json({ error: e.message }); }
   }
