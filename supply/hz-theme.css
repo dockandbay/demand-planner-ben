@@ -813,6 +813,10 @@ body header.pv-top .pv-lang button:hover{color:#fff}
 #app #product-root #smp-grid.smp-sw-lg .pg-swatch2{width:76px;height:76px;border-radius:var(--r-md)}
 #app #product-root #smp-grid img.pg-swatch2{cursor:zoom-in}
 #app #product-root .smp-type{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;padding:1px 7px;border-radius:999px;background:var(--line2);color:var(--muted);white-space:nowrap}
+/* v27.761 (Ben): supplier acceptance chip on the SAMPLING grid row */
+#app #product-root .smp-acc{display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.02em;padding:1px 7px;border-radius:999px;white-space:nowrap}
+#app #product-root .smp-acc.ok{background:var(--pos-bg);color:var(--pos)}
+#app #product-root .smp-acc.pend{background:var(--amber-bg);color:var(--amber)}
 #app #product-root .smp-type.custom{background:var(--amber-bg);color:var(--amber)}
 #app .hz-hoverzoom{position:fixed;z-index:200070;pointer-events:none;width:240px;height:240px;object-fit:cover;border-radius:var(--r-lg);border:3px solid var(--card);box-shadow:var(--shadow),0 14px 44px rgba(0,0,0,.38);background:var(--card)}
 #app #product-root .smp-viewpill{background:var(--card);border:1px solid var(--line);color:var(--muted);font-size:11px;font-weight:700;padding:4px 12px;cursor:pointer;line-height:1}

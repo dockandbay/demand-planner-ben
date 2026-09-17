@@ -6676,6 +6676,7 @@ app.get('/api/product/sampling', async (_req, res) => {
         to_char(i.updated_at,'YYYY-MM-DD HH24:MI') item_updated_at,
         coalesce((SELECT c.colour_hex FROM planner.categories c WHERE c.category=i.category LIMIT 1),'') category_colour,
         rq.supplier_name, coalesce(rq.supplier_code,'') supplier_code, rq.stage, rq.approval_method, coalesce(rq.recipient_countries,'') recipient_countries,
+        to_char(rq.supplier_accepted_at,'YYYY-MM-DD') supplier_accepted_at, coalesce(rq.supplier_accepted_by,'') supplier_accepted_by,   -- v27.761: supplier acceptance of the dev request
         to_char(rq.dev_start,'YYYY-MM-DD') dev_start, rq.internal_stakeholders, rq.notify_emails, coalesce(rq.notes,'') notes,
         to_char(rq.created_at,'YYYY-MM-DD') created_at, to_char(rq.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
         coalesce((SELECT json_agg(json_build_object('id',c.id,'name',c.name,'dimension',coalesce(c.dimension,''),'sampling_mode',coalesce(c.sampling_mode,'sampled')) ORDER BY c.sort,c.id)
@@ -17150,7 +17151,11 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
         coalesce((SELECT string_agg(DISTINCT r.supplier_name, ', ' ORDER BY r.supplier_name) FROM planner.product_dev_requests r WHERE r.item_id=i.id),'') supplier, coalesce(i.description,'') description, i.status, (i.swatch IS NOT NULL OR EXISTS (SELECT 1 FROM planner.portal_attachments _a WHERE _a.po=i.ref AND _a.category='product' AND coalesce(_a.uploader_kind,'internal')<>'supplier' AND _a.thumb IS NOT NULL)) has_swatch,   -- v27.749 (P5): supplier derived from requests
         to_char(i.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
         (SELECT count(*)::int FROM planner.product_dev_sizes s WHERE s.item_id=i.id) sizes,
-        (SELECT count(*)::int FROM planner.supplier_notes n WHERE n.po=i.ref AND n.author_kind='internal' AND n.read_at IS NULL) unread_dnb
+        (SELECT count(*)::int FROM planner.supplier_notes n WHERE n.po=i.ref AND n.author_kind='internal' AND n.read_at IS NULL) unread_dnb,
+        -- v27.761: development-request acceptance (whole-product grain, scoped to THIS supplier). dev_unaccepted>0 = open action.
+        (SELECT count(*)::int FROM planner.product_dev_requests r WHERE r.item_id=i.id AND r.supplier_name = ANY($1) AND r.supplier_accepted_at IS NULL) dev_unaccepted,
+        to_char((SELECT max(r.supplier_accepted_at) FROM planner.product_dev_requests r WHERE r.item_id=i.id AND r.supplier_name = ANY($1)),'YYYY-MM-DD') dev_accepted_at,
+        coalesce((SELECT r.supplier_accepted_by FROM planner.product_dev_requests r WHERE r.item_id=i.id AND r.supplier_name = ANY($1) AND r.supplier_accepted_at IS NOT NULL ORDER BY r.supplier_accepted_at DESC LIMIT 1),'') dev_accepted_by
       FROM planner.product_dev_items i WHERE EXISTS (SELECT 1 FROM planner.product_dev_requests r WHERE r.item_id=i.id AND r.supplier_name = ANY($1)) ORDER BY i.created_at DESC`, [names]) : [];   // v27.749 (P5): a development REQUEST grants portal visibility (item-level supplier column dropped)
     // Documents the supplier has for their POs (excl. admin-managed client/FBA docs) with approval status →
     // powers the Documents list + the "submit for approval" workflow in the portal.
@@ -17299,6 +17304,23 @@ app.post('/api/portal/product-notes-read', portalAuth, async (req, res) => { con
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
   try { await pool.query(`UPDATE planner.supplier_notes SET read_at=now() WHERE po=$1 AND author_kind='internal' AND read_at IS NULL`, [ref]); res.json({ ok: true }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
+// v27.761 (Ben): supplier ACCEPTS a product development request. Whole-product grain — marks every request this supplier
+// holds for the item as accepted. Plain acknowledgement (no gating). Recorded on the timeline AND the change log.
+app.post('/api/portal/product-accept', portalAuth, async (req, res) => { const ref = ((req.body || {}).ref || '').trim();
+  if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
+  try {
+    const by = req.portal.email || 'supplier';
+    const upd = await pool.query(`UPDATE planner.product_dev_requests r
+        SET supplier_accepted_at=now(), supplier_accepted_by=$3, updated_at=now()
+        FROM planner.product_dev_items i
+        WHERE r.item_id=i.id AND i.ref=$1 AND r.supplier_name = ANY($2) AND r.supplier_accepted_at IS NULL
+        RETURNING r.id, r.supplier_name`, [ref, req.portal.suppliers, by]);
+    if (!upd.rowCount) return res.json({ ok: true, already: true });   // idempotent: nothing left to accept
+    const supName = upd.rows[0].supplier_name || (req.portal.suppliers[0] || 'Supplier');
+    try { await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'supplier',$3)`, [ref, by, 'Accepted the development request']); } catch (e) { /* timeline best-effort */ }
+    try { await logProductChange(ref, 'Development request accepted by ' + supName, null, by); } catch (e) { /* change-log best-effort */ }
+    res.json({ ok: true, accepted: upd.rowCount, accepted_at: new Date().toISOString().slice(0, 10) });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); } });
 // PORTAL product-sample versions (supplier-created, scoped to their assigned products)
 app.get('/api/portal/product-samples/:ref', portalAuth, async (req, res) => { const ref = decodeURIComponent(req.params.ref || '');
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
