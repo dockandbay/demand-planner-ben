@@ -8165,6 +8165,15 @@ app.get('/api/tracking/status', async (req, res) => {
     res.set('Cache-Control', 'no-store').json({ ok: true, tracking: out });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v27.727: full tracking detail for ONE number (status + all cached events) — powers the click-to-open tracking log.
+app.get('/api/tracking/detail', async (req, res) => {
+  const number = String(req.query.number || '').trim();
+  if (!number) return res.status(400).json({ error: 'number required' });
+  try {
+    const r = (await pool.query(`SELECT tracking_number, carrier, status_code, status_text, to_char(eta,'YYYY-MM-DD') eta, delivered_at, last_event, last_polled_at, events FROM planner.carrier_tracking WHERE tracking_number=$1`, [number])).rows[0];
+    res.set('Cache-Control', 'no-store').json({ ok: true, row: r || null });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // Config get/set (CONFIG ▸ Admin ▸ Integrations ▸ DHL tracking).
 app.get('/api/tracking/config', async (req, res) => {
   try { res.set('Cache-Control', 'no-store').json({ ok: true, config: await getDhlConfig() }); }
@@ -17137,6 +17146,22 @@ app.get('/api/portal/tracking-status', portalAuth, async (req, res) => {
     const rows = (await pool.query(`SELECT tracking_number, carrier, status_code, status_text, to_char(eta,'YYYY-MM-DD') eta, delivered_at, last_event FROM planner.carrier_tracking WHERE tracking_number = ANY($1)`, [allow])).rows;
     const out = {}; for (const r of rows) out[r.tracking_number] = r;
     res.set('Cache-Control', 'no-store').json({ ok: true, tracking: out });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v27.727: full tracking detail for ONE number — scoped to a number on the signed-in supplier's own records.
+app.get('/api/portal/tracking-detail', portalAuth, async (req, res) => {
+  const number = String(req.query.number || '').trim();
+  if (!number) return res.json({ ok: true, row: null });
+  try {
+    const sups = (req.portal.suppliers || []).map(x => String(x).toLowerCase());
+    const ids = (req.portal.supplierIds || []);
+    const owns = (await pool.query(`SELECT 1 FROM planner.sample_requests WHERE (supplier_id = ANY($1) OR lower(supplier_name) = ANY($2)) AND $3 IN (tracking_code, tracking_code_2) LIMIT 1`,
+        [ids.length ? ids : [-1], sups.length ? sups : [''], number])).rows[0]
+      || (await pool.query(`SELECT 1 FROM planner.shipments sh JOIN planner.purchase_orders po ON po.po = coalesce(sh.master_po, sh.shipment_ref) WHERE lower(po.supplier_name) = ANY($1) AND sh.carrier_ref = $2 LIMIT 1`,
+        [sups.length ? sups : [''], number])).rows[0];
+    if (!owns) return res.json({ ok: true, row: null });
+    const r = (await pool.query(`SELECT tracking_number, carrier, status_code, status_text, to_char(eta,'YYYY-MM-DD') eta, delivered_at, last_event, last_polled_at, events FROM planner.carrier_tracking WHERE tracking_number=$1`, [number])).rows[0];
+    res.set('Cache-Control', 'no-store').json({ ok: true, row: r || null });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/portal/sample-note', portalAuth, async (req, res) => {

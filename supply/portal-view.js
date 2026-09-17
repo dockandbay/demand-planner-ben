@@ -117,9 +117,27 @@
   function hzFillTrackPills(root){ root=root||document; var ph=[].slice.call(root.querySelectorAll('.hz-trkpill[data-trk]')); if(!ph.length)return;
     var seen={}; ph.forEach(function(el){ var n=(el.getAttribute('data-trk')||'').trim(); if(n)seen[n]=1; }); var list=Object.keys(seen); if(!list.length)return;
     fetch('/api/portal/tracking-status?numbers='+encodeURIComponent(list.join(',')),{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(j){ var t=(j&&j.tracking)||{};
-      ph.forEach(function(el){ var n=(el.getAttribute('data-trk')||'').trim(); el.removeAttribute('data-trk'); var html=hzTrackPillHtml(t[n]); if(html){ el.innerHTML=html; if(typeof ppTranslate==='function'&&PP_LANG==='zh'){ try{ ppTranslate(el); }catch(e){} } } }); }).catch(function(){}); }
+      ph.forEach(function(el){ var n=(el.getAttribute('data-trk')||'').trim(); el.removeAttribute('data-trk'); var html=hzTrackPillHtml(t[n]); if(html){ el.innerHTML=html; el.setAttribute('data-num',n); el.style.cursor='pointer'; el.title='Open the DHL tracking log'; if(typeof ppTranslate==='function'&&PP_LANG==='zh'){ try{ ppTranslate(el); }catch(e){} } } }); }).catch(function(){}); }
   (function(){ var pend=null; function scan(){ pend=null; try{ hzFillTrackPills(document); }catch(e){} }
     try{ new MutationObserver(function(){ if(pend)return; pend=setTimeout(scan,200); }).observe(document.documentElement,{childList:true,subtree:true}); }catch(e){} })();
+  // DHL tracking LOG (v27.727, portal): a filled pill opens an overlay with status + delivery date + every event.
+  function hzTrkStamp(ts){ if(!ts)return ''; try{ var d=new Date(ts); if(isNaN(d.getTime()))return String(ts).slice(0,16).replace('T',' '); var mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; function p(x){return String(x).length<2?'0'+x:''+x;} return d.getDate()+'-'+mo[d.getMonth()]+'-'+String(d.getFullYear()).slice(2)+' '+p(d.getHours())+':'+p(d.getMinutes()); }catch(e){ return String(ts); } }
+  function hzTrackLogHtml(r){ if(!r)return '<div class="mut" style="padding:10px 2px">No tracking detail yet.</div>';
+    var code=String(r.status_code||'').toLowerCase();
+    var keyLine=code==='delivered'?('Delivered '+esc(hzTrkDate(r.delivered_at))):(r.eta?('Estimated delivery '+esc(hzTrkDate(r.eta))):'No delivery estimate yet');
+    var ev=Array.isArray(r.events)?r.events:[];
+    var rows=ev.map(function(e){ var lo=e.location||null; var loc=lo?(lo.addressLocality||lo.countryCode||(typeof lo==='string'?lo:'')):'';
+      return '<div style="display:flex;gap:10px;padding:6px 0;border-top:1px solid var(--hover)"><div class="mut" style="min-width:118px;font-size:11px">'+esc(hzTrkStamp(e.timestamp))+'</div><div style="flex:1"><div style="font-weight:600;font-size:12px">'+esc(e.description||e.status||e.statusCode||'')+'</div>'+(loc?'<div class="mut tiny">'+esc(loc)+'</div>':'')+'</div></div>'; }).join('')||'<div class="mut" style="padding:8px 0">No events recorded yet.</div>';
+    return '<div style="min-width:300px;max-width:440px"><div style="font-weight:700;font-size:13px">'+esc(r.carrier||'DHL')+' · '+esc(r.tracking_number||'')+'</div>'
+      +'<div style="margin:7px 0 10px">'+hzTrackPillHtml(r)+'</div><div style="font-weight:700;font-size:12px">'+esc(keyLine)+'</div>'
+      +(r.last_polled_at?'<div class="mut tiny" style="margin-bottom:10px">updated '+esc(hzTrkStamp(r.last_polled_at))+'</div>':'<div style="margin-bottom:10px"></div>')
+      +'<div style="font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--faint);margin-bottom:2px">Tracking events</div>'+rows+'</div>'; }
+  function hzTrackLogOpen(number){ if(!number)return;
+    var bg=document.createElement('div'); bg.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.4);z-index:200060;display:flex;align-items:center;justify-content:center;padding:20px';
+    bg.innerHTML='<div style="background:var(--card);border-radius:12px;max-height:82vh;overflow:auto;padding:16px 18px;box-shadow:0 20px 60px rgba(15,23,42,.3)"><div class="mut">Loading tracking…</div></div>';
+    document.body.appendChild(bg); bg.onclick=function(e){ if(e.target===bg)bg.remove(); }; var box=bg.firstChild;
+    fetch('/api/portal/tracking-detail?number='+encodeURIComponent(number),{credentials:'same-origin'}).then(function(r){return r.json();}).then(function(j){ box.innerHTML=hzTrackLogHtml(j&&j.row)+'<div style="text-align:right;margin-top:12px"><button class="save-btn light" id="hztl-x">Close</button></div>'; if(typeof ppTranslate==='function'&&PP_LANG==='zh'){ try{ ppTranslate(box); }catch(e){} } var x=box.querySelector('#hztl-x'); if(x)x.onclick=function(){ bg.remove(); }; }).catch(function(){ box.innerHTML='<div class="mut">Could not load tracking.</div>'; }); }
+  document.addEventListener('click',function(e){ var el=e.target&&e.target.closest?e.target.closest('.hz-trkpill[data-num]'):null; if(el){ e.preventDefault(); e.stopPropagation(); hzTrackLogOpen(el.getAttribute('data-num')); } }, true);
   // Direct-to-Client details apply when the PO branch is Direct to Client (incl. B2B JLEW/NEXT) OR a
   // client sales ref is set — otherwise the DtC tab + approval workflow do not show.
   function ppIsDtc(p){ var b=(p&&p.branch||'').toLowerCase();

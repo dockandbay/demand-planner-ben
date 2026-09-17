@@ -1,3 +1,8 @@
+## v27.727 P2b DHL tracking: clickable tracking LOG — status + all events + delivery date (Ben) — SERVER + CLIENT
+- **Every DHL pill is now clickable** (SAMPLING / product samples · Shipments grid · PO drawer Shipments sub-tab · Samples card · supplier portal) → opens a **tracking log** overlay: carrier + number, the status pill, the **key delivery date** (Delivered dd-mmm-yy, or Estimated delivery dd-mmm-yy), and the **full cached event history** (timestamp · description · location, newest first).
+- New on-demand detail endpoints: `GET /api/tracking/detail?number=` (admin) and `GET /api/portal/tracking-detail?number=` (supplier-scoped). Events are fetched only on click, so the grid status endpoint stays light.
+- Render-probed: the log shows the delivery line, all events, and locations.
+
 ## v27.726 P2b DHL tracking: pills on the supplier portal Samples (Ben) — SERVER + CLIENT
 - New **supplier-scoped** endpoint `GET /api/portal/tracking-status` (portalAuth): returns cache rows only for tracking numbers on the signed-in supplier's **own** samples/shipments (never the admin `/api/tracking/status`). 401 without a session.
 - `portal-view.js`: the same pill helper + auto-fill observer, pointed at the portal endpoint; a DHL pill shows next to the sample tracking code. The status word sits in a `.pp-trkword` span and is localised via `PP_ZH` (运输中 / 已送达 / …).
