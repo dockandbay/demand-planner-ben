@@ -1,3 +1,6 @@
+## v27.739 Fulfil ERP: drift only for active POs (Ben) — SERVER
+- The drift compare now only includes Horizon POs in **PRODUCTION / SHIPPING / READY TO SHIP** (not COMPLETE / FUTURE / DELIVERED) — completed POs don't need to be in Fulfil. Sandbox: **167 active POs, 47 in Fulfil, 120 missing** (was 1375/54/1321).
+
 ## v27.738 Fulfil ERP: PO mirror + drift (import + update-on-push) (Ben) — SERVER + mig 282
 - New **`planner.fulfil_purchase_orders`** (mig 282) mirrors every Fulfil PO (state / party / currency / warehouse / total / line_count / lines jsonb).
 - `fulfilImportPOs()` imports ALL Fulfil POs (paginated at Fulfil's 500-row cap) → `POST /api/supply/fulfil/import-pos` (webhook-secret gated; n8n cron in future) + a `!VERCEL` in-app timer (6h). A successful Horizon→Fulfil push also upserts that PO's mirror row (`source='push'`).

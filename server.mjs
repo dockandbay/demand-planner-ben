@@ -2716,6 +2716,7 @@ app.get('/api/supply/fulfil/drift', async (req, res) => {
         to_char(m.last_synced_at,'YYYY-MM-DD HH24:MI') synced,
         (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=po.po AND coalesce(l.qty,0)>0)::int horizon_lines
       FROM planner.purchase_orders po LEFT JOIN planner.fulfil_purchase_orders m ON m.po=po.po
+      WHERE po.status IN ('PRODUCTION','SHIPPING','READY TO SHIP')   -- v27.739 (Ben): only active POs need to be in Fulfil (not COMPLETE/FUTURE/DELIVERED)
       ORDER BY po.po DESC`)).rows;
     const drift = rows.map(r => { const issues = [];
       if (!r.in_fulfil) issues.push('missing from Fulfil');
