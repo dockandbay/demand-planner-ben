@@ -1,3 +1,6 @@
+## v27.734 SAMPLING: MANAGE "Master data" tab is read-only PRODUCT master + files + product link (Ben) — CLIENT
+- The MANAGE **Master data** tab is the PRODUCT master, so it now renders **read-only** (Type / Season / Category / Colour way / Bulk colour / Approval / Description) with a **"Open product ↗"** link (opens the product detail to edit) and a read-only **Files** grid (thumbnails + download), instead of the editable `renderProdMaster` form.
+
 ## v27.733 SAMPLING: MANAGE tabs use the shared tab UI (Ben) — CLIENT
 - The MANAGE panel tabs (Master data · Timeline · S1…) now use the standard `.po-subnav` / `.rtab` underline-tab UI — the same as the PO drawer, shipment drawer and samples card — instead of the custom rounded buttons.
 

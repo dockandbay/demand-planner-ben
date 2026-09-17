@@ -13511,6 +13511,23 @@
             try{ prodItemInvalidate(r.item_ref); }catch(e){} }); }
         td.querySelectorAll('.smp-save').forEach(function(b){ b.onclick=function(){ save(b.dataset.key); }; });
       }
+      // v27.734 (Ben): the MANAGE "Master data" tab is the PRODUCT master — show it READ-ONLY (edit via "Open product ↗"), including files.
+      function _smpMasterReadonly(host, d){ var it=(d&&d.item)||{};
+        function fld(label,val){ return val?('<div class="mut">'+esc(label)+'</div><div style="font-weight:600">'+esc(val)+'</div>'):''; }
+        var grid=fld('Type',it.type)+fld('Season',it.season)+fld('Category',it.category)+fld('Colour way',it.colour_name)+fld('Bulk colour',it.bulk_colour_name)+fld('Approval',it.approval_method);
+        host.innerHTML='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--faint)">Product master data <span style="text-transform:none;font-weight:400">· read-only</span></div><a class="smp-openprod" style="color:var(--blue);text-decoration:underline;cursor:pointer;font-weight:600;font-size:12px">Open product ↗</a></div>'
+          +'<div style="display:grid;grid-template-columns:150px 1fr;gap:6px 12px;font-size:12px;max-width:560px">'+grid+'</div>'
+          +(it.description?'<div style="margin-top:12px;font-size:12px;max-width:560px"><div class="mut" style="font-size:9px;text-transform:uppercase;letter-spacing:.03em">Description</div><div style="white-space:pre-wrap;margin-top:2px">'+esc(it.description)+'</div></div>':'')
+          +'<div style="margin-top:16px"><div style="font-size:10px;text-transform:uppercase;letter-spacing:.03em;color:var(--faint);margin-bottom:6px">Files</div><div class="smp-mfiles"><div class="mut tiny">Loading files…</div></div></div>';
+        var op=host.querySelector('.smp-openprod'); if(op)op.onclick=function(){ if(typeof openProductDrawer==='function')openProductDrawer(it.ref,null,'master'); };
+        var fc=host.querySelector('.smp-mfiles');
+        _prodCachedJson('/api/product/item/'+encodeURIComponent(it.ref)+'/docs').then(function(dd){ var docs=(dd&&dd.docs)||[]; if(!docs.length){ fc.innerHTML='<span class="mut tiny">No files uploaded.</span>'; return; }
+          function isImg(m){ return /^image\//i.test(String(m||'')); }
+          fc.innerHTML='<div style="display:flex;gap:12px;flex-wrap:wrap">'+docs.map(function(x){ var dl='/api/product/doc/'+x.id;
+            var th=isImg(x.mime)?'<img src="/api/supply/portal-attachment/'+x.id+'" style="width:56px;height:56px;object-fit:cover;border:1px solid var(--line);border-radius:6px">':(x.has_thumb?'<img src="/api/product/doc/'+x.id+'/thumb" style="width:56px;height:56px;object-fit:cover;border:1px solid var(--line);border-radius:6px">':'<div style="width:56px;height:56px;border:1px solid var(--line);border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:22px;color:#cbd5e1">📄</div>');
+            return '<a href="'+dl+'" target="_blank" rel="noopener" title="'+esc(x.filename||'')+(x.version?' · v'+x.version:'')+'" style="text-decoration:none;color:var(--ink);text-align:center;width:76px;display:block">'+th+'<div class="tiny" style="margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(x.filename||'file')+'</div>'+(x.version?'<div class="mut tiny">v'+x.version+'</div>':'')+'</a>'; }).join('')+'</div>';
+        }).catch(function(){ fc.innerHTML='<span class="mut tiny">Could not load files.</span>'; });
+      }
       // v27.730: MANAGE panel — inline tabbed workspace for a request: Master data · Timeline · one tab per sample.
       function smpManage(tr, r, ncols){ var g=c.querySelector('#smp-grid');
         var open=g.querySelector('tr.smp-mexp[data-rid="'+r.id+'"]'); if(open){ open.remove(); return; }
@@ -13524,7 +13541,7 @@
         Promise.all([fetch('/api/product/item/'+encodeURIComponent(r.item_ref)).then(function(x){return x.json();}), fetch('/api/product/reject-reasons').then(function(x){return x.json();}).catch(function(){return {reasons:[]};}), pget('/api/product/timeline-config').catch(function(){return {snippets:[]};})]).then(function(a){
           var d=a[0]||{}, REASONS=(a[1]&&a[1].reasons)||[], SNIPS=((a[2]&&a[2].snippets)||[]).filter(function(x){return x.active!==false;});
           function show(t){ if(!document.body.contains(exp))return; exp.querySelectorAll('.smp-mtab').forEach(function(b){ b.classList.toggle('active', b.dataset.t===t); }); body.innerHTML='';
-            if(t==='master'){ try{ _prodDetail=d; _prodDetailBox=body; _prodDetailTab='master'; renderProdMaster(body,d); }catch(e){ body.innerHTML='<div class="mut" style="padding:8px">Master data unavailable here.</div>'; } }
+            if(t==='master'){ _smpMasterReadonly(body, d); }
             else if(t==='timeline'){ renderProdTimeline(body, r.item_ref); }
             else { var idx=parseInt(t.slice(1),10)||0; var rs=(r.samples||[])[idx]; var sm=(d.samples||[]).filter(function(s){ return String(s.id)===String(rs&&rs.id); })[0]; if(sm){ _smpReviewInto(body, r, sm, rs, REASONS, SNIPS); } else { body.innerHTML='<div class="mut" style="padding:8px">No sample submitted for this version yet.</div>'; } } }
           exp.querySelectorAll('.smp-mtab').forEach(function(b){ b.onclick=function(){ show(b.dataset.t); }; });
