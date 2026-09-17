@@ -1,3 +1,8 @@
+## v27.756 Mirror Diviyaj's prod hotfixes (Ben) — SERVER + vercel.json
+- **Planner-key gate exemptions for the n8n webhooks:** `POST /api/supply/fulfil/import-pos` and `POST /api/tracking/poll` are now exempt from the planner-key gate (they authenticate with `x-webhook-secret` inside the handler). Without this the n8n crons were 401'd before reaching the handler; Diviyaj applied the same fix on prod during the v27.755 deploy.
+- **`lib/**` added to `vercel.json` includeFiles** so `lib/qrcode.mjs` (sample-card QR) ships in the serverless bundle (also applied by Diviyaj on prod).
+- Context: v27.755 is live on prod (deploy dpl_52Ne8Uxb2eUiJt5WxGncPc4GNsJs), migrations 282-286 applied, Fulfil supplier ids seeded (10/10), DHL tracking live (18 polled, 11 delivered). Fulfil push stays inert until go-live; n8n crons written, not yet enabled.
+
 ## v27.755 PRODUCT design slice 1: SAMPLING onto the theme (tokens, unified tabs, dark-mode) (Ben) — CLIENT + THEME
 - **SAMPLING CSS moved from inject.html's `<style>` into `supply/hz-theme.css`** (the single source of truth for tokens). 27 `.smp-*` rules re-homed with 2-id `#app #product-root` specificity per the theme convention; the retired inline-expander rules (`.smp-exp/.smp-tabs/.smp-tab`) dropped.
 - **Tokenised:** MANAGE button `#111/#000` → `--nav/--nav-2/--nav-ink`; received tick `#16a34a` → `--pos`; custom badge `#92400e` → `--amber`; hover-zoom `#fff` → `--card`; timeline sample badge/chips `#7c3aed` → `--violet`; unread-supplier note `#fff7ed/#fdba74` → `--amber-bg/--amber`. Off-scale 5-7px radii snapped to `--r-sm/--r-md` (22px ticks and the small swatch keep 6px deliberately). Result: SAMPLING/MANAGE/timeline now follow **dark mode** (`om-dark`) and read as one system with the PO grid.
