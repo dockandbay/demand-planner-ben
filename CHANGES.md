@@ -1,3 +1,7 @@
+## v27.728 SAMPLING grid: remove Age; Stage dropdown never clips (Ben) — CLIENT
+- **Age removed** from the SAMPLING grid (the "Stage · age" column is now just **Stage**; the age pill + its dead CSS are gone). `_smpAge` stays (still used by the Overdue filter).
+- **Stage dropdown widened** so the longest label ("Rejected — new sample", bold) plus the arrow never gets cut off: column min-width 200→220px, select min-width 190→210px (+max-width:100%).
+
 ## v27.727 P2b DHL tracking: clickable tracking LOG — status + all events + delivery date (Ben) — SERVER + CLIENT
 - **Every DHL pill is now clickable** (SAMPLING / product samples · Shipments grid · PO drawer Shipments sub-tab · Samples card · supplier portal) → opens a **tracking log** overlay: carrier + number, the status pill, the **key delivery date** (Delivered dd-mmm-yy, or Estimated delivery dd-mmm-yy), and the **full cached event history** (timestamp · description · location, newest first).
 - New on-demand detail endpoints: `GET /api/tracking/detail?number=` (admin) and `GET /api/portal/tracking-detail?number=` (supplier-scoped). Events are fetched only on click, so the grid status endpoint stays light.

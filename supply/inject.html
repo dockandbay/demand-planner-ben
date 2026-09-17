@@ -277,8 +277,8 @@
 #product-root .smp-row:hover td{background:var(--hover)}
 #product-root .smp-scell{text-align:center;min-width:44px;padding-left:3px !important;padding-right:3px !important}   /* v27.714: slimmer so 6-8 sample versions fit */
 #product-root .smp-tbl th.smp-scell{padding-left:3px;padding-right:3px}
-#product-root .smp-stage{min-width:200px}
-#product-root .smp-stage .smp-stage-sel{width:100%;min-width:190px}
+#product-root .smp-stage{min-width:220px}
+#product-root .smp-stage .smp-stage-sel{width:100%;min-width:210px;max-width:100%}
 #product-root #smp-grid .pg-swatch2{width:40px;height:40px;border-radius:7px}
 #product-root #smp-grid.smp-sw-sm .pg-swatch2{width:26px;height:26px;border-radius:5px}
 #product-root #smp-grid.smp-sw-lg .pg-swatch2{width:76px;height:76px;border-radius:10px}
@@ -305,9 +305,6 @@
 #product-root .smp-exp td{padding-top:0}
 #product-root .smp-tab .smp-tabtick{color:#16a34a;margin-left:4px}
 #product-root .smp-comp{display:grid;grid-template-columns:150px 200px 1fr;gap:8px 12px;align-items:start;padding:8px 0;border-top:1px solid var(--line2)}
-#product-root .smp-age{font-weight:700;font-size:11px;padding:2px 8px;border-radius:999px;background:var(--line2);color:var(--muted)}
-#product-root .smp-age.warn{background:var(--amber-bg);color:var(--amber)}
-#product-root .smp-age.late{background:var(--neg-bg);color:var(--neg)}
 /* Opened PO detail lives inside the wide, horizontally-scrolling PO grid — pin its sub-tab strip to the left
    so PAYMENTS/DATES/etc stay fixed while the grid scrolls sideways (desktop). */
 /* The expanded PO detail panel (.po-detail-wrap) is pinned to the left of the horizontally-scrolling grid via
@@ -13406,16 +13403,15 @@
         var maxV=4; f.forEach(function(r){ maxV=Math.max(maxV,(r.samples||[]).length); });
         var g=c.querySelector('#smp-grid');
         if(!f.length){ g.innerHTML='<div style="text-align:center;padding:44px 16px;color:var(--muted)"><div style="font-size:30px;margin-bottom:8px">🧵</div>'+(rows.length?'No requests match these filters.':'No development requests yet — create one from a product\'s [+] on PLAN, or with the button above.')+'</div>'; return; }
-        var ths=['','Product · request','Colour / Type','Supplier','Stage · age']; /* v27.716 (Ben): Stage + Age merged (select on top, age badge underneath) */ for(var k=1;k<=maxV;k++)ths.push('S'+k); ths.push('Timeline','Shipment · tracking');   // v27.714: colour way + type in their own column; Stage wider
-        var html='<table class="smp-tbl"><thead><tr>'+ths.map(function(h,i){ return '<th'+(i>=5&&i<5+maxV?' class="smp-scell" style="text-align:center"':(h==='Stage · age'?' class="smp-stage"':''))+'>'+h+'</th>'; }).join('')+'</tr></thead><tbody>';
+        var ths=['','Product · request','Colour / Type','Supplier','Stage']; /* v27.726 (Ben): Age removed from the grid; Stage is its own column, widened so the dropdown never clips */ for(var k=1;k<=maxV;k++)ths.push('S'+k); ths.push('Timeline','Shipment · tracking');   // v27.714: colour way + type in their own column; Stage wider
+        var html='<table class="smp-tbl"><thead><tr>'+ths.map(function(h,i){ return '<th'+(i>=5&&i<5+maxV?' class="smp-scell" style="text-align:center"':(h==='Stage'?' class="smp-stage"':''))+'>'+h+'</th>'; }).join('')+'</tr></thead><tbody>';
         f.forEach(function(r){ var sw=r.has_swatch?'<img class="pg-swatch2 smp-sw" data-src="/api/product/swatch/'+encodeURIComponent(r.item_ref)+'?t='+encodeURIComponent(r.item_updated_at||'')+'" src="/api/product/swatch/'+encodeURIComponent(r.item_ref)+'?t='+encodeURIComponent(r.item_updated_at||'')+'" style="object-fit:cover;border:1px solid var(--line)" title="hover to enlarge · click to open">':'<span class="pg-swatch2 none" style="display:inline-block;border:1px dashed var(--line)"></span>';
           var comps=(r.components||[]); var compTxt=comps.length?comps.map(function(x){return x.name;}).join(' · '):'(no component)';
-          var age=_smpAge(r.updated_at), ageCls=age==null?'':(age>=30?' late':(age>=14?' warn':''));
           var cells='<td class="l" style="width:40px">'+sw+'</td>'
             +'<td class="l"><div style="font-weight:700;font-family:ui-monospace,Menlo,monospace;font-size:12px"><a class="smp-openreq" data-ref="'+esc(r.item_ref)+'" data-rid="'+r.id+'" style="cursor:pointer;color:var(--ink)">'+esc(r.ref)+'</a></div><div class="mut" style="font-size:11px;margin-top:3px">'+esc(compTxt)+'</div></td>'
             +'<td class="l"><div style="font-size:12px;font-weight:600">'+prodColourDisplay(r)+'</div><div style="margin-top:3px">'+(r.category?hzCatBadge(r.category,r.category_colour):'<span class="mut tiny">no category</span>')+'</div></td>'   // v27.715 (Ben): Colour / Type = colour way + category badge
             +'<td class="l">'+esc(r.supplier_name)+(r.supplier_code?' <span class="mut tiny">'+esc(r.supplier_code)+'</span>':'')+'<div style="margin-top:3px"><span class="smp-type'+(/custom/i.test(r.type||'')?' custom':'')+'">'+esc(/custom/i.test(r.type||'')?'Custom order':'Development')+'</span></div></td>'
-            +'<td class="l smp-stage"><select class="fci smp-stage-sel" data-rid="'+r.id+'" data-ref="'+esc(r.item_ref)+'" style="font-size:11px;'+prodStageStyle(r.stage)+'">'+STAGE_META.map(function(m){return '<option value="'+m[0]+'"'+(m[0]===r.stage?' selected':'')+'>'+esc(m[1])+'</option>';}).join('')+'</select><div style="margin-top:4px"><span class="smp-age'+ageCls+'" title="days since this request last changed (updated '+esc(fd(String(r.updated_at||'').slice(0,10)))+')">'+(age==null?'—':age+'d')+(age!=null?' since change':'')+'</span></div></td>';
+            +'<td class="l smp-stage"><select class="fci smp-stage-sel" data-rid="'+r.id+'" data-ref="'+esc(r.item_ref)+'" style="font-size:11px;'+prodStageStyle(r.stage)+'">'+STAGE_META.map(function(m){return '<option value="'+m[0]+'"'+(m[0]===r.stage?' selected':'')+'>'+esc(m[1])+'</option>';}).join('')+'</select></td>';
           for(var k=1;k<=maxV;k++){ var s=(r.samples||[])[k-1]; if(!s){ cells+='<td class="smp-scell"><span class="smp-tick none" title="no sample '+k+' yet"></span></td>'; continue; }
             var rec=!!s.received_at; var sub=_smpDM(s.sample_date||s.created_at);
             cells+='<td class="smp-scell"><span class="smp-tick'+(rec?' on':' sub')+'" data-sid="'+s.id+'" data-rid="'+r.id+'" data-rec="'+(rec?'1':'0')+'" title="'+(rec?'received '+esc(fd(s.received_at))+' — click to un-receive':'submitted '+esc(fd(s.sample_date||s.created_at))+' — click when received')+'">'+(rec?'✓':'')+'</span><span class="smp-sdate'+(rec?'':' sub')+'" data-sid="'+s.id+'" data-rid="'+r.id+'" title="'+esc(s.description||'')+' — click to review">'+(rec?_smpDM(s.received_at):'sub. '+sub)+(s.approved||s.rejected?' <span style="color:'+(s.rejected?'var(--neg)':'#16a34a')+'">'+(s.rejected?'✕'+s.rejected:'✓'+s.approved)+'</span>':'')+'</span></td>'; }
