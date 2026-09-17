@@ -1,3 +1,9 @@
+## v27.753 SAMPLING + timeline polish (Ben) — SERVER + CLIENT
+- **No more duplicate sample review.** Clicking a sample on the SAMPLING grid now opens the **MANAGE panel on that sample's sub-tab** (S1/S2/S3) instead of a separate inline pop-down that duplicated the same review. The inline `smpExpand` is retired.
+- **Sample status under each tick** — each sample cell now shows a colour-coded status word (Rejected / Approved / In review / Awaiting) beneath the tick + date, derived from the component decisions + receipt. Clicking it also opens the review.
+- **Retro-tag a sample version on a past timeline message** — the **🏷 tag** menu on a D&B message now also lists the sample versions; picking one sets `supplier_notes.sample_id` (new `POST /api/product/note/:id/sample`) so the message surfaces on that sample's review thread, and the message shows a **🧪 v_N_** badge (× to untag). Complements the compose-time `/s` chip (v27.750).
+- **Timeline compose hint moved into the box** — the "Type / for a reusable phrase · /p Pantone · /s tag a sample · drop/attach files" guidance is now the input placeholder; the separate helper line is gone (the 📎 add-files control stays).
+
 ## v27.752 Storage: env-configurable upload ceiling + round-trip verified (Ben) — SERVER
 - `STORAGE_MAX` is now driven by **`STORAGE_MAX_MB`** (default 100) so it can match each environment's Supabase Storage bucket/global limit (sandbox 50, prod 100).
 - **Large-file upload path verified end-to-end** (the test that had been blocked pending the sandbox key): sign-upload → 10MB `PUT` direct to Storage (200) → fetched back byte-perfect (md5 match). Confirmed the Supabase contract the code assumed — signed-upload is a plain PUT with `Content-Type` (token in the URL, no auth header), sign-download returns `signedURL`. Sandbox bucket is 50MB (Free-tier global ceiling); prod set `STORAGE_MAX_MB=100` + raise the prod global limit.

@@ -7255,7 +7255,8 @@ app.get('/api/product/spec-file/:id', async (req, res) => {
 app.get('/api/product/notes/:ref', async (req, res) => {
   try { const r = await pool.query(`SELECT n.id, n.author_kind, coalesce(n.author_email,'') author_email, n.body,
     to_char(n.created_at,'DD-Mon-YY HH24:MI') created_at, n.read_at IS NOT NULL read,
-    n.attachment_id, coalesce(a.filename,'') attachment_name, coalesce(a.mime,'') attachment_mime, coalesce(n.tags,'[]'::jsonb) tags, coalesce(n.pantone,'[]'::jsonb) pantone
+    n.attachment_id, coalesce(a.filename,'') attachment_name, coalesce(a.mime,'') attachment_mime, coalesce(n.tags,'[]'::jsonb) tags, coalesce(n.pantone,'[]'::jsonb) pantone,
+    n.sample_id, (SELECT ps.version FROM planner.product_dev_samples ps WHERE ps.id=n.sample_id) sample_version
     FROM planner.supplier_notes n LEFT JOIN planner.portal_attachments a ON a.id=n.attachment_id
     WHERE n.po=$1 ORDER BY n.created_at`, [req.params.ref]);
     res.json(r.rows); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
@@ -7317,6 +7318,17 @@ app.post('/api/product/note/:id/tags', async (req, res) => {
   const tags = Array.isArray((req.body || {}).tags) ? req.body.tags.map(x => Number(x)).filter(x => Number.isFinite(x)) : [];
   try { await pool.query(`UPDATE planner.supplier_notes SET tags=$2::jsonb WHERE id=$1::bigint AND author_kind='internal'`, [req.params.id, JSON.stringify(tags)]);
     res.json({ ok: true, tags }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v27.753 (P6, Ben): tag an EXISTING timeline note to a sample version (retro-tag from the "🏷 tag" menu). null clears it.
+app.post('/api/product/note/:id/sample', async (req, res) => {
+  const b = req.body || {}, sid = (b.sample_id === null || b.sample_id === '' || b.sample_id == null) ? null : Number(b.sample_id);
+  if (sid !== null && !Number.isFinite(sid)) return res.status(400).json({ error: 'bad sample_id' });
+  try {
+    const r = await pool.query(`UPDATE planner.supplier_notes SET sample_id=$2 WHERE id=$1::bigint RETURNING sample_id`, [req.params.id, sid]);
+    if (!r.rows.length) return res.status(404).json({ error: 'note not found' });
+    const version = sid ? (await pool.query(`SELECT version FROM planner.product_dev_samples WHERE id=$1`, [sid])).rows[0]?.version : null;
+    res.json({ ok: true, sample_id: sid, sample_version: version != null ? version : null });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/notes-read', async (req, res) => {   // mark this product's internal (D&B) timeline notes read
   const ref = ((req.body || {}).ref || '').trim();
