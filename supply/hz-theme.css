@@ -789,3 +789,41 @@ body header.pv-top .pv-lang button:hover{color:#fff}
 #app #main-hdr th.stk,#app #tw thead th.stk{box-shadow:1px 0 0 var(--line)}
 #app #main-hdr th.stk2,#app #tw thead th.stk2{border-right:1px solid var(--line)}
 #app #main-hdr th{border-bottom:1px solid var(--line)!important}
+
+/* ── PRODUCT ▸ SAMPLING (v27.755 design slice 1) — moved here from inject.html and put on the tokens so it follows dark
+   mode and matches the rest of Horizon. 2-id selectors (#app #product-root) per the theme's specificity convention.
+   The MANAGE panel tab strip now uses the system L3 tab language (10px uppercase, letter-spaced; hover/active inset
+   underline come from the shared .rtab rules above). Retired inline-expander rules (.smp-exp/.smp-tabs/.smp-tab) are gone. */
+#app #product-root .smp-tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}
+#app #product-root .smp-tbl th{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--card);position:sticky;top:0;z-index:2}
+#app #product-root .smp-tbl td{padding:7px 8px;border-bottom:1px solid var(--line2);vertical-align:middle}
+#app #product-root .smp-row:hover td{background:var(--hover)}
+#app #product-root .smp-scell{text-align:center;min-width:44px;padding-left:3px !important;padding-right:3px !important}
+#app #product-root .smp-tbl th.smp-scell{padding-left:3px;padding-right:3px}
+#app #product-root .smp-stage{min-width:220px}
+#app #product-root .smp-stage .smp-stage-sel{width:100%;min-width:210px;max-width:100%}
+#app #product-root .smp-manage{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;border:1px solid var(--nav);background:var(--nav);color:var(--nav-ink);border-radius:var(--r-sm);padding:3px 10px;cursor:pointer;white-space:nowrap}
+#app #product-root .smp-manage:hover{background:var(--nav-2);border-color:var(--nav-2)}
+#app #product-root .smp-tbl td:first-child,#app #product-root .smp-tbl th:first-child{padding-right:0}
+#app #product-root .smp-tbl td:nth-child(2),#app #product-root .smp-tbl th:nth-child(2){padding-left:4px}
+#app #product-root .po-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:var(--l3-bg);border:1px solid var(--blue-soft);border-radius:var(--r-sm);padding:2px 5px;margin:0 0 10px}
+#app #product-root .po-subnav .rtab{background:transparent;border:none;padding:11px 13px 9px;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;cursor:pointer;color:var(--faint);font-family:inherit;white-space:nowrap;flex:0 0 auto}
+#app #product-root #smp-grid .pg-swatch2{width:40px;height:40px;border-radius:var(--r-sm)}
+#app #product-root #smp-grid.smp-sw-sm .pg-swatch2{width:26px;height:26px;border-radius:6px}
+#app #product-root #smp-grid.smp-sw-lg .pg-swatch2{width:76px;height:76px;border-radius:var(--r-md)}
+#app #product-root #smp-grid img.pg-swatch2{cursor:zoom-in}
+#app #product-root .smp-type{display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;padding:1px 7px;border-radius:999px;background:var(--line2);color:var(--muted);white-space:nowrap}
+#app #product-root .smp-type.custom{background:var(--amber-bg);color:var(--amber)}
+#app .hz-hoverzoom{position:fixed;z-index:200070;pointer-events:none;width:240px;height:240px;object-fit:cover;border-radius:var(--r-lg);border:3px solid var(--card);box-shadow:var(--shadow),0 14px 44px rgba(0,0,0,.38);background:var(--card)}
+#app #product-root .smp-viewpill{background:var(--card);border:1px solid var(--line);color:var(--muted);font-size:11px;font-weight:700;padding:4px 12px;cursor:pointer;line-height:1}
+#app #product-root .smp-viewpill:first-child{border-radius:var(--r-sm) 0 0 var(--r-sm)}
+#app #product-root .smp-viewpill:last-child{border-radius:0 var(--r-sm) var(--r-sm) 0;border-left:none}
+#app #product-root .smp-viewpill.active{background:var(--nav);color:var(--nav-ink);border-color:var(--nav)}
+#app #product-root .smp-tick{width:22px;height:22px;border:2px solid var(--line);border-radius:6px;display:inline-flex;align-items:center;justify-content:center;font-weight:900;font-size:13px;line-height:1;cursor:pointer;background:var(--card);color:transparent;transition:background .15s,border-color .15s;user-select:none}
+#app #product-root .smp-tick.on{background:var(--pos);border-color:var(--pos);color:#fff}
+#app #product-root .smp-tick.sub{border-color:var(--amber);border-style:dashed}
+#app #product-root .smp-tick.none{border-color:var(--line2);cursor:default;opacity:.55}
+#app #product-root .smp-tick:hover:not(.none){box-shadow:0 0 0 3px var(--blue-soft)}
+#app #product-root .smp-sdate{display:block;font-size:9.5px;color:var(--muted);margin-top:2px;white-space:nowrap;cursor:pointer}
+#app #product-root .smp-sdate.sub{color:var(--amber);font-weight:600}
+#app #product-root .smp-comp{display:grid;grid-template-columns:150px 200px 1fr;gap:8px 12px;align-items:start;padding:8px 0;border-top:1px solid var(--line2)}
