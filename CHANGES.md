@@ -1,3 +1,8 @@
+## v27.740 Fulfil ERP: per-PO grid status + "not required in Cin7" flag (Ben) — SERVER + mig 283
+- `planner.purchase_orders.cin7_not_required` (mig 283) — the order-plan tickbox; suppresses Cin7 drift/actions for that PO (Fulfil unaffected — every PO still required in Fulfil).
+- `GET /api/supply/fulfil/grid-status` — per active PO: `in_fulfil`, `fulfil_state`, `fulfil_lines` vs `horizon_lines`, `cin7_not_required` (client merges into the PO grid's Cin7 + Fulfil columns).
+- `POST /api/supply/po/:po/cin7-not-required` — toggle the flag.
+
 ## v27.739 Fulfil ERP: drift only for active POs (Ben) — SERVER
 - The drift compare now only includes Horizon POs in **PRODUCTION / SHIPPING / READY TO SHIP** (not COMPLETE / FUTURE / DELIVERED) — completed POs don't need to be in Fulfil. Sandbox: **167 active POs, 47 in Fulfil, 120 missing** (was 1375/54/1321).
 

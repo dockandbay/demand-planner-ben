@@ -2725,6 +2725,25 @@ app.get('/api/supply/fulfil/drift', async (req, res) => {
     res.json({ ok: true, total: rows.length, in_fulfil: rows.filter(r => r.in_fulfil).length, missing: rows.filter(r => !r.in_fulfil).length, drift });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v27.740: per-PO ERP status for the grid — in Fulfil (mirror) + line match + the cin7_not_required flag. Client merges by po.
+app.get('/api/supply/fulfil/grid-status', async (req, res) => {
+  try {
+    const rows = (await pool.query(`SELECT po.po, coalesce(po.cin7_not_required,false) cin7_not_required,
+        (m.po IS NOT NULL) in_fulfil, m.state fulfil_state, coalesce(m.line_count,0) fulfil_lines,
+        (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=po.po AND coalesce(l.qty,0)>0)::int horizon_lines
+      FROM planner.purchase_orders po LEFT JOIN planner.fulfil_purchase_orders m ON m.po=po.po
+      WHERE po.status IN ('PRODUCTION','SHIPPING','READY TO SHIP')`)).rows;
+    const out = {}; rows.forEach(r => { out[r.po] = { in_fulfil: r.in_fulfil, fulfil_state: r.fulfil_state, fulfil_lines: r.fulfil_lines, horizon_lines: r.horizon_lines, cin7_not_required: r.cin7_not_required }; });
+    res.set('Cache-Control', 'no-store').json({ ok: true, status: out });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v27.740: toggle "not required in Cin7" for one PO (order-plan tickbox). Suppresses Cin7 drift/actions; Fulfil unaffected.
+app.post('/api/supply/po/:po/cin7-not-required', async (req, res) => {
+  const b = req.body || {};
+  try { await pool.query(`UPDATE planner.purchase_orders SET cin7_not_required=$2, updated_at=now() WHERE po=$1`, [req.params.po, !!b.value]);
+    res.json({ ok: true, cin7_not_required: !!b.value }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // Supplier-submitted actual cost prices (portal order plan). Read all (small table); filtered client-side by PO.
 app.get('/api/supply/portal-line-costs', async (req, res) => {
   try { res.json((await pool.query(`SELECT po, sku, actual_cost, amended_qty, coalesce(is_added,false) is_added, final_cost,
