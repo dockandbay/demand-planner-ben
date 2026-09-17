@@ -736,7 +736,7 @@ const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const STORAGE_BUCKET = process.env.SUPABASE_STORAGE_BUCKET || 'horizon-uploads';
 const STORAGE_ENABLED = !!(SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY);
 const STORAGE_INLINE_MAX = 3 * 1024 * 1024;    // ≤3MB raw ⇒ base64 payload ≤~4MB, safely under Vercel's ~4.5MB body cap; larger ⇒ direct-to-Storage
-const STORAGE_MAX = 100 * 1024 * 1024;         // hard ceiling for a single direct upload (bucket file-size limit should match)
+const STORAGE_MAX = Math.round((Number(process.env.STORAGE_MAX_MB) || 100) * 1024 * 1024);   // hard ceiling for a single direct upload; set STORAGE_MAX_MB to match the bucket's file-size limit (sandbox 50, prod 100)
 if (!STORAGE_ENABLED) console.warn('[storage] SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set — large (>3MB) uploads will be rejected until configured');
 // HMAC so a client can't attach an arbitrary/forged storage path to a record (matters for the multi-tenant portal):
 // sign-upload issues (path, sig); the follow-up notify must present the same pair. Keyed off the service secret — no new env.
