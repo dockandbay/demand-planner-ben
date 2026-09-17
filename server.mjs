@@ -8034,6 +8034,8 @@ async function dhlLookupOne(number) {
   if (!s) return { number, status_code: 'unknown', status_text: 'No data', eta: null, delivered_at: null, last_event: null, events: [] };
   const code = String((s.status && s.status.statusCode) || 'unknown').toLowerCase();
   const ev = Array.isArray(s.events) ? s.events : [];
+  const evTrim = ev.slice(0, 25).map(e => ({ timestamp: e.timestamp, statusCode: e.statusCode, status: e.status, description: e.description,
+    location: (e.location && e.location.address) ? e.location.address : (e.location || null) }));   // v27.725: drop pieceIds etc. — a multi-piece delivery returns 50KB+ of events
   return {
     number,
     status_code: code,
@@ -8041,29 +8043,37 @@ async function dhlLookupOne(number) {
     eta: s.estimatedTimeOfDelivery ? String(s.estimatedTimeOfDelivery).slice(0, 10) : null,
     delivered_at: code === 'delivered' ? ((s.status && s.status.timestamp) || null) : null,
     last_event: (ev[0] && ev[0].description) || (s.status && s.status.description) || '',
-    events: ev,
+    events: evTrim,
   };
 }
 
 // Every DHL tracking number in Horizon: sample shipments (two carrier/tracking slots) + bulk shipments.
 async function collectTrackingNumbers() {
   const out = [], seen = new Set();
-  const push = (number, source_table, source_id) => {
-    const n = String(number || '').trim();
-    if (!n || seen.has(n)) return;                                   // first source wins; write-back keys on the number anyway
-    seen.add(n); out.push({ number: n, carrier: 'DHL', source_table, source_id: String(source_id) });
+  const push = (raw, source_table, source_id) => {
+    // v27.725: split comma-lists, strip internal spaces, keep only plausible tracking numbers
+    // (>=8 chars, alphanumeric, has a digit) so junk like 'AIR' / mode words / blanks never hit DHL.
+    for (const n of String(raw || '').split(',').map(x => x.replace(/\s+/g, ''))
+        .filter(x => x.length >= 8 && x.length <= 40 && /\d/.test(x) && /^[A-Za-z0-9]+$/.test(x))) {
+      if (seen.has(n)) continue; seen.add(n); out.push({ number: n, carrier: 'DHL', source_table, source_id: String(source_id) });
+    }
   };
+  // samples: skip ones already received (Ben: don't poll delivered/complete items)
   const sr = (await pool.query(`
     SELECT id, carrier, tracking_code, carrier_2, tracking_code_2 FROM planner.sample_requests
-    WHERE (carrier ILIKE 'dhl%' AND coalesce(tracking_code,'') <> '')
-       OR (carrier_2 ILIKE 'dhl%' AND coalesce(tracking_code_2,'') <> '')`)).rows;
+    WHERE received_at IS NULL AND (
+         (carrier ILIKE 'dhl%' AND coalesce(tracking_code,'') <> '')
+      OR (carrier_2 ILIKE 'dhl%' AND coalesce(tracking_code_2,'') <> ''))`)).rows;
   for (const r of sr) {
-    if (/^dhl/i.test(r.carrier || '') && r.tracking_code) push(r.tracking_code, 'sample_requests', r.id);
-    if (/^dhl/i.test(r.carrier_2 || '') && r.tracking_code_2) push(r.tracking_code_2, 'sample_requests', r.id);
+    if (/^dhl/i.test(r.carrier || '')) push(r.tracking_code, 'sample_requests', r.id);
+    if (/^dhl/i.test(r.carrier_2 || '')) push(r.tracking_code_2, 'sample_requests', r.id);
   }
+  // bulk shipments: skip arrived / complete / cancelled (Ben: don't poll completed items)
   const sh = (await pool.query(`
     SELECT shipment_ref, carrier_ref FROM planner.shipments
-    WHERE carrier ILIKE 'dhl%' AND coalesce(carrier_ref,'') <> ''`)).rows;
+    WHERE carrier ILIKE 'dhl%' AND coalesce(carrier_ref,'') <> ''
+      AND arrival_date IS NULL
+      AND coalesce(lower(status),'') NOT IN ('complete','completed','delivered','arrived','closed','cancelled')`)).rows;
   for (const r of sh) push(r.carrier_ref, 'shipments', r.shipment_ref);
   return out;
 }

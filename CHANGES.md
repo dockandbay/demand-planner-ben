@@ -1,3 +1,9 @@
+## v27.725 P2b DHL tracking: poller hardening for real-world data (Ben) — SERVER
+- **Validated live** against the real DHL Unified API (Ben's key): a real number returned Delivered 24-Jul with full events, and the shipment write-back set `tracked_delivery_date` + `tracked_source='dhl'`. End-to-end chain confirmed.
+- `collectTrackingNumbers` now **splits comma-separated `carrier_ref`s, strips internal spaces, and keeps only plausible tracking numbers** (>=8 alphanumeric chars containing a digit) so junk like "AIR" / mode words / blanks never hit DHL. In sandbox this cut 134 raw shipment refs to 3 pollable.
+- **Skips numbers on completed items** (Ben): shipments that are arrived/complete/cancelled or have an `arrival_date`, and samples already received (`received_at`). Saves quota and stops re-polling done items.
+- **Stored events trimmed** to essentials (timestamp/statusCode/status/description/location) and capped at 25 — one multi-piece delivery was 55 KB of pieceIds, now ~1.3 KB.
+
 ## v27.724 FIX: sample escalate found no portal users when supplier_id was null (Ben) — SERVER
 - **Bug:** escalating a sample from the timeline emailed nobody and the UI said "No active portal users for this supplier", even for suppliers that clearly have users (reported for **Lixin**, which has 3 active users).
 - **Cause:** `sample_requests` carried `supplier_name` only, with `supplier_id` **NULL** (true for all 9 live rows), and `escalateCore` resolved recipients by `supplier_id` alone → 0 emails → `sent:0` → that UI message.
