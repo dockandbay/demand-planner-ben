@@ -2490,7 +2490,7 @@ app.get('/api/supply/erp-status', async (req, res) => {
 // Safety: with no keys set (FULFIL_<ENV>_SUBDOMAIN/_API_KEY) every op throws NO_FULFIL_CFG and NOTHING sends.
 // The line/create push is a DRY-RUN for now (builds + returns the intended payload, does not POST a blind live
 // create) until the mapping is validated on the sandbox — then FULFIL_LINES_SEND flips it to a real write.
-const FULFIL_LINES_SEND = false;   // flip true once the create/line payload is verified against the sandbox catalog
+const FULFIL_LINES_SEND = true;   // v27.736: verified against the sandbox 17-Sep (PO-78AUWK1 resolved cleanly) — real create/update enabled. SANDBOX only until live keys are set.
 const FULFIL_MAP = {
   poModel: 'purchase.purchase', lineModel: 'purchase.line', partyModel: 'party.party',
   productModel: 'product.product', whModel: 'stock.location', currencyModel: 'currency.currency',
@@ -2501,7 +2501,7 @@ const FULFIL_MAP = {
   warehouse: 'warehouse',           // receiving warehouse (id) — resolved by code (ILG/IFULFILLMENT/G10/COGHLANS)
   deliveryDate: 'delivery_date',    // planner completion date maps here — set per line (verify on first real push)
   linesField: 'lines',              // one2many on purchase.purchase; created inline via Tryton ["create",[...]]
-  line: { product: 'product', productCode: 'code', qty: 'quantity', price: 'unit_price', desc: 'description', deliveryDate: 'delivery_date' },
+  line: { product: 'product', productCode: 'code', unit: 'unit', qty: 'quantity', price: 'unit_price', desc: 'description', deliveryDate: 'delivery_date' },   // v27.736: 'unit' (UOM) is required on purchase.line
   // Defaults discovered read-only from the sandbox (2026-07): single company, USD currency present.
   // Warehouse defaults to ILG unless the PO's destination maps to one of the codes above.
   defaultCompany: 1, defaultWarehouseCode: 'ILG',
@@ -2509,7 +2509,7 @@ const FULFIL_MAP = {
 async function fulfilFetch(method, path, body) {
   const cfg = fulfilConfigFor(await activeFulfilEnv());
   if (!cfg.configured) { const e = new Error('Fulfil ' + cfg.env + ' API not configured (set FULFIL_' + cfg.env.toUpperCase() + '_SUBDOMAIN + FULFIL_' + cfg.env.toUpperCase() + '_API_KEY). No write performed.'); e.code = 'NO_FULFIL_CFG'; throw e; }
-  const r = await fetch(cfg.base + path, { method, headers: { 'X-API-KEY': cfg.apiKey, 'Content-Type': 'application/json' }, body: body != null ? JSON.stringify(body) : undefined });
+  const r = await fetch(cfg.base + path, { method, headers: { 'X-API-KEY': cfg.apiKey, 'Content-Type': 'application/json' }, body: body != null ? JSON.stringify(body) : undefined });   // Fulfil /api/v2 auth = X-API-KEY header (verified 17-Sep against the sandbox with a fresh key: search_read → 200)
   const t = await r.text().catch(() => ''); let j = null; try { j = t ? JSON.parse(t) : null; } catch (e) {}
   if (!r.ok) { const e = new Error('Fulfil ' + r.status + ': ' + String(t).slice(0, 300)); e.status = r.status; throw e; }
   return j;
@@ -2550,8 +2550,8 @@ async function fulfilResolveProducts(skus) {
   const uniq = Array.from(new Set(skus.filter(Boolean)));
   const out = {};
   if (!uniq.length) return out;
-  const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.productModel + '/search_read', [[['code', 'in', uniq]], 0, uniq.length, null, ['id', 'code']]);
-  (rows || []).forEach(r => { if (r && r.code != null) out[String(r.code)] = r.id; });
+  const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.productModel + '/search_read', [[['code', 'in', uniq]], 0, uniq.length, null, ['id', 'code', 'purchase_uom', 'default_uom']]);
+  (rows || []).forEach(r => { if (r && r.code != null) out[String(r.code)] = { id: r.id, uom: r.purchase_uom || r.default_uom || 1 }; });   // v27.736: carry the product's purchase UOM for the required line 'unit'
   return out;
 }
 // push line items (SKU / qty / price) + delivery date to Fulfil; create the PO if absent. Gathers the SAME planner
@@ -2596,12 +2596,13 @@ async function fulfilPushLines(po, completion) {
   if (!warehouseId) problems.push('branch "' + (poRow.warehouse || '') + '" has no Fulfil warehouse — set its Fulfil ERP ID in CONFIG ▸ Branches');
   if (missingSkus.length) problems.push(missingSkus.length + ' SKU(s) not in Fulfil catalog: ' + missingSkus.slice(0, 8).join(', ') + (missingSkus.length > 8 ? '…' : ''));
 
-  const lineDicts = lines.map(l => ({
-    [FULFIL_MAP.line.product]: prodMap[String(l.sku)] || null,
+  const lineDicts = lines.map(l => { const pm = prodMap[String(l.sku)] || {}; return {
+    [FULFIL_MAP.line.product]: pm.id || null,
+    [FULFIL_MAP.line.unit]: pm.uom || 1,
     [FULFIL_MAP.line.qty]: Number(l.qty) || 0,
-    [FULFIL_MAP.line.price]: l.price == null ? null : Number(l.price),
+    [FULFIL_MAP.line.price]: l.price == null ? 0 : Number(l.price),   // v27.736: unit_price is required on purchase.line — a line with no cost posts as 0 (real POs carry the actual price)
     [FULFIL_MAP.line.deliveryDate]: completion ? String(completion).slice(0, 10) : null,
-  }));
+  }; });
   const headerPayload = {
     [FULFIL_MAP.ref]: po, [FULFIL_MAP.party]: partyId, [FULFIL_MAP.company]: FULFIL_MAP.defaultCompany,
     [FULFIL_MAP.currency]: currencyId, [FULFIL_MAP.warehouse]: warehouseId,

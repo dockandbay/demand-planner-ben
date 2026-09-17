@@ -1,3 +1,10 @@
+## v27.736 Fulfil ERP: PO create into the sandbox works end-to-end (Ben) — SERVER
+- **Verified the Fulfil sandbox** with a fresh API key: auth is the **`X-API-KEY` header** (the old key was expired; the temporary Bearer experiment reverted — Bearer is not used).
+- `purchase.line` requires **`unit`** (UOM) and **`unit_price`**: the line now carries the product's purchase UOM (`fulfilResolveProducts` → `{id, uom}`) and a numeric price (null → 0 for a costless line; real POs carry the actual price).
+- Flipped `FULFIL_LINES_SEND=true` (real create/update enabled). **Created PO-78AUWK1 in the Fulfil sandbox** — id 242 (draft): party Weierken, **currency USD**, warehouse AUCOGHLANS, BAGDRY-XS-WYWH ×200, delivery 15-Dec-26. Ben's currency-on-create requirement confirmed.
+- **SANDBOX-only** — no `FULFIL_LIVE_*` keys; on prod the Fulfil push stays inert unless Active ERP = Fulfil AND live keys are set. (Cin7 remains the live ERP.)
+- Still TODO for Ben's full brief: parallel dual-write (Cin7 + Fulfil) and the two Cin7/Fulfil buttons.
+
 ## v27.735 SAMPLING: deep links to the MANAGE panel + tab (Ben) — CLIENT
 - `#/product/sampling/<ref>/<tab>` opens the MANAGE panel on that tab — tab ∈ **master-data · timeline · S1 · S2…** — where `<ref>` matches the request ref **or** the product item_ref (e.g. `.../SS27-HAIRW-LOVELYHAIR/S1` opens the LX request's Sample 1). Scrolls to + outlines the row.
 - The **URL follows the open tab** as you switch, and clears back to `#/product/sampling` when the panel closes. Supersedes the v27.717 inline-sample deep link.
