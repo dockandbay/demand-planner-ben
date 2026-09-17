@@ -6506,7 +6506,7 @@ app.post('/api/product/sample/:id/received', async (req, res) => {
     const receive = b.received !== false; const dt = (b.date && /^\d{4}-\d{2}-\d{2}$/.test(b.date)) ? (b.date + 'T12:00:00Z') : new Date().toISOString();
     await pool.query(`UPDATE planner.product_dev_samples SET received_at=$2 WHERE id=$1`, [id, receive ? dt : null]);
     if (receive) await prodStageAdvance(s.item_ref, 'sample_in_review', s.request_id ? { requestId: s.request_id } : { sampleId: id });
-    try { await logProductChange(s.item_ref, 'Sample v' + s.version + (receive ? ' received ' + dt.slice(0, 10) : ' un-received'), null, authUser(req) || 'Dock & Bay'); } catch (e) {}
+    try { await logProductChange(s.item_ref, 'Sample v' + s.version + (receive ? ' received ' + ddMonYy(dt) : ' un-received'), null, authUser(req) || 'Dock & Bay'); } catch (e) {}   // v27.729: dd-mmm-yy in the record-of-change (was ISO)
     res.json({ ok: true, received_at: receive ? dt.slice(0, 10) : null });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });

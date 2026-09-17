@@ -1,3 +1,6 @@
+## v27.729 FIX: sample received record-of-change uses dd-mmm-yy (Ben) — SERVER
+- The product record-of-change line "Sample vN received …" logged the date as ISO (2026-09-16); now `ddMonYy(dt)` → **16-Sep-26**, matching the dd-mmm-yy UI standard.
+
 ## v27.728 SAMPLING grid: remove Age; Stage dropdown never clips (Ben) — CLIENT
 - **Age removed** from the SAMPLING grid (the "Stage · age" column is now just **Stage**; the age pill + its dead CSS are gone). `_smpAge` stays (still used by the Overdue filter).
 - **Stage dropdown widened** so the longest label ("Rejected — new sample", bold) plus the arrow never gets cut off: column min-width 200→220px, select min-width 190→210px (+max-width:100%).
