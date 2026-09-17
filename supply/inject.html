@@ -15367,10 +15367,6 @@
       if(_pmType&&_pmSeasonRow)_pmType.addEventListener('change',function(){ _pmSeasonRow.style.display=(this.value==='Custom Order')?'none':''; }); })();
     body.querySelectorAll('.pm-fld').forEach(function(el){ el.onchange=function(){ var msg=body.querySelector('#pm-msg'); if(msg){msg.style.color='var(--muted)';msg.textContent='Saving…';}
       var payload={}; payload[el.dataset.f]=el.value; shipPost('/api/product/item/'+encodeURIComponent(it.ref),payload,function(j){ if(msg){ if(j&&j.error){msg.style.color='var(--neg)';msg.textContent=j.error;} else { msg.style.color='var(--pos)'; msg.textContent='Saved ✓'; setTimeout(function(){ if(msg)msg.textContent=''; },1200); _pmFlash(el); prodSyncGridCell(it.ref,el.dataset.f,el.value); _prodJsonBust(it.ref); } } _prodCfg=null; }); }; });
-    body.querySelectorAll('.pm-rec').forEach(function(cb){ cb.onchange=function(){ var vals=[]; body.querySelectorAll('.pm-rec:checked').forEach(function(x){ vals.push(x.value); });
-      if(!vals.length){ cb.checked=true; vals=[cb.value]; }   // at least one recipient country
-      var msg=body.querySelector('#pm-msg'); if(msg){msg.style.color='var(--muted)';msg.textContent='Saving…';}
-      shipPost('/api/product/item/'+encodeURIComponent(it.ref),{recipient_countries:vals.join(',')},function(j){ if(msg){ if(j&&j.error){msg.style.color='var(--neg)';msg.textContent=j.error;} else { msg.style.color='var(--pos)'; msg.textContent='Saved ✓ — supplier notified'; setTimeout(function(){ if(msg)msg.textContent=''; },1600); } } _prodCfg=null; }); }; });
     var _spk=body.querySelector('.pm-sup-pick .prod-cell-pick'); if(_spk)_spk.onclick=function(e){ e.stopPropagation(); openProdCellPick(_spk,function(){ renderProductDetail(it.ref); }); };
     (function(){ var rb=body.querySelector('#pm-ref-save'), ri=body.querySelector('#pm-ref'), rm=body.querySelector('#pm-ref-msg'); if(!rb||!ri)return;
       rb.onclick=function(){ var nv=ri.value.trim(); rm.style.color='var(--muted)'; if(!nv){rm.style.color='var(--neg)';rm.textContent='Reference required';return;} if(nv===it.ref){rm.textContent='';return;}
@@ -15379,7 +15375,7 @@
           if(typeof renderProductPlan==='function'&&document.getElementById('pg-grid')){ renderProductPlan(document.getElementById('product-content')); _pendingProdRef=nv; }
           else { renderProductDetail(nv); } }); }; })();
     var _pmDel=body.querySelector('#pm-del'); if(_pmDel)_pmDel.onclick=function(){ if(!confirm('Delete '+it.ref+'? This removes its sizes, documents and timeline.'))return; shipPost('/api/product/item/'+encodeURIComponent(it.ref)+'/delete',{},function(){ selectProductSub('plan'); }); };   // #pm-del only in master mode — guard so sizes mode doesn't throw
-    var _pmNs=body.querySelector('#pm-newsamp'); if(_pmNs)_pmNs.onclick=function(){ _newSampleForProduct(it.supplier||'', _prodSeedSku(d, it.ref)); };   // create a sample request pre-linked to this product
+    var _pmNs=body.querySelector('#pm-newsamp'); if(_pmNs)_pmNs.onclick=function(){ _newSampleForProduct((((it.requests||[])[0])||{}).supplier_name||'', _prodSeedSku(d, it.ref)); };   // v27.749 (P5): seed from the first development request's supplier (it.supplier is now an aggregate across requests)
     var _pmAddSz=body.querySelector('#pm-addsz'); if(_pmAddSz)_pmAddSz.onclick=function(){ var v=body.querySelector('#pm-newsz').value.trim(); if(!v)return; shipPost('/api/product/size',{ref:it.ref,size_label:v},function(){ renderProductDetail(it.ref); }); };   // #pm-addsz only in sizes mode — guard so master mode doesn't throw (was the "Cannot set properties of null" bug)
     // Silent per-row updates — an approval / mapped-SKU / approved-sample change re-renders JUST that row (no tab flash).
     function szObj(id){ return (d.sizes||[]).filter(function(x){return String(x.id)===String(id);})[0]; }

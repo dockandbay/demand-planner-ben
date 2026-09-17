@@ -6634,7 +6634,7 @@ app.get('/api/product/items', async (_req, res) => {
       ${REQS_JSON_SQL} requests, i.stage stage_override,
       coalesce((SELECT json_agg(json_build_object('id',c.id,'name',c.name,'dimension',coalesce(c.dimension,''),'supplier',coalesce(c.supplier,''),'sampling_mode',coalesce(c.sampling_mode,'sampled')) ORDER BY c.sort,c.id) FROM planner.product_dev_components c WHERE c.item_ref=i.ref),'[]'::json) components,
       coalesce(i.colour_name,'') colour_name, coalesce(i.bulk_colour_name,'') bulk_colour_name, coalesce(i.stage,'sample_development') stage,
-      coalesce(i.supplier,'') supplier, coalesce(i.description,'') description, i.status, (i.swatch IS NOT NULL OR EXISTS (SELECT 1 FROM planner.portal_attachments _a WHERE _a.po=i.ref AND _a.category='product' AND coalesce(_a.uploader_kind,'internal')<>'supplier' AND _a.thumb IS NOT NULL)) has_swatch,
+      coalesce((SELECT string_agg(DISTINCT r.supplier_name, ', ' ORDER BY r.supplier_name) FROM planner.product_dev_requests r WHERE r.item_id=i.id),'') supplier, coalesce(i.description,'') description, i.status, (i.swatch IS NOT NULL OR EXISTS (SELECT 1 FROM planner.portal_attachments _a WHERE _a.po=i.ref AND _a.category='product' AND coalesce(_a.uploader_kind,'internal')<>'supplier' AND _a.thumb IS NOT NULL)) has_swatch,   -- v27.749 (P5): supplier derived from requests
       to_char(i.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id)::int sizes,
       (SELECT count(*) FROM planner.product_dev_sizes s WHERE s.item_id=i.id AND s.approval_status='approved')::int sizes_approved,
@@ -6698,14 +6698,14 @@ app.get('/api/product/item/:ref', async (req, res) => {
     // Round 1 — item + sizes + docs + samples + unread all in parallel (sizes uses a subquery so it needn't wait on item)
     const [itemR, sizesR, docsR, samplesR, unreadR, compsR] = await Promise.all([
       pool.query(`SELECT id, ref, coalesce(type,'Product Development') type, coalesce(season,'') season, coalesce(category,'') category,
-        coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(bulk_colour_name,'') bulk_colour_name, coalesce(stage,'sample_development') stage, stage stage_override, coalesce(description,'') description, coalesce(recipient_countries,'UK') recipient_countries,
-        coalesce(supplier,'') supplier, coalesce(supplier_code,'') supplier_code,
+        coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(bulk_colour_name,'') bulk_colour_name, coalesce(stage,'sample_development') stage, stage stage_override, coalesce(description,'') description, coalesce((SELECT r.recipient_countries FROM planner.product_dev_requests r WHERE r.item_id=product_dev_items.id ORDER BY r.id LIMIT 1),'UK') recipient_countries,
+        coalesce((SELECT string_agg(DISTINCT r.supplier_name, ', ' ORDER BY r.supplier_name) FROM planner.product_dev_requests r WHERE r.item_id=product_dev_items.id),'') supplier, coalesce((SELECT string_agg(DISTINCT r.supplier_code, ', ') FROM planner.product_dev_requests r WHERE r.item_id=product_dev_items.id AND coalesce(r.supplier_code,'')<>''),'') supplier_code,   -- v27.749 (P5): derived from the development requests (item-level supplier/… columns dropped, mig 285)
         (SELECT ${REQS_JSON_SQL.replace(/\bi\.id\b/g, 'product_dev_items.id')}) requests,
         coalesce((SELECT c.colour_hex FROM planner.categories c WHERE c.category=product_dev_items.category LIMIT 1),'') category_colour,
         status, (swatch IS NOT NULL OR EXISTS (SELECT 1 FROM planner.portal_attachments _a WHERE _a.po=product_dev_items.ref AND _a.category='product' AND coalesce(_a.uploader_kind,'internal')<>'supplier' AND _a.thumb IS NOT NULL)) has_swatch, (swatch IS NULL) swatch_auto, coalesce(created_by,'') created_by,
         to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at,
-        to_char(dev_start_override,'YYYY-MM-DD') dev_start_override, to_char(approved_at,'YYYY-MM-DD HH24:MI') approved_at,
-        coalesce(approval_method,'') approval_method
+        to_char((SELECT min(r.dev_start) FROM planner.product_dev_requests r WHERE r.item_id=product_dev_items.id),'YYYY-MM-DD') dev_start_override, to_char(approved_at,'YYYY-MM-DD HH24:MI') approved_at,
+        coalesce((SELECT r.approval_method FROM planner.product_dev_requests r WHERE r.item_id=product_dev_items.id ORDER BY r.id LIMIT 1),'') approval_method
         FROM planner.product_dev_items WHERE ref=$1`, [ref]),
       pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort, coalesce(mapped_sku,'') mapped_sku, approved_sample_id
         FROM planner.product_dev_sizes WHERE item_id=(SELECT id FROM planner.product_dev_items WHERE ref=$1) ORDER BY sort, id`, [ref]),
@@ -6747,14 +6747,14 @@ app.get('/api/product/item/:ref/core', async (req, res) => {
   try {
     const [itemR, unreadR] = await Promise.all([
       pool.query(`SELECT id, ref, coalesce(type,'Product Development') type, coalesce(season,'') season, coalesce(category,'') category,
-        coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(bulk_colour_name,'') bulk_colour_name, coalesce(stage,'sample_development') stage, stage stage_override, coalesce(description,'') description, coalesce(recipient_countries,'UK') recipient_countries,
-        coalesce(supplier,'') supplier, coalesce(supplier_code,'') supplier_code,
+        coalesce(category_code,'') category_code, coalesce(colour_name,'') colour_name, coalesce(bulk_colour_name,'') bulk_colour_name, coalesce(stage,'sample_development') stage, stage stage_override, coalesce(description,'') description, coalesce((SELECT r.recipient_countries FROM planner.product_dev_requests r WHERE r.item_id=product_dev_items.id ORDER BY r.id LIMIT 1),'UK') recipient_countries,
+        coalesce((SELECT string_agg(DISTINCT r.supplier_name, ', ' ORDER BY r.supplier_name) FROM planner.product_dev_requests r WHERE r.item_id=product_dev_items.id),'') supplier, coalesce((SELECT string_agg(DISTINCT r.supplier_code, ', ') FROM planner.product_dev_requests r WHERE r.item_id=product_dev_items.id AND coalesce(r.supplier_code,'')<>''),'') supplier_code,   -- v27.749 (P5): derived from the development requests (item-level supplier/… columns dropped, mig 285)
         (SELECT ${REQS_JSON_SQL.replace(/\bi\.id\b/g, 'product_dev_items.id')}) requests,
         coalesce((SELECT c.colour_hex FROM planner.categories c WHERE c.category=product_dev_items.category LIMIT 1),'') category_colour,
         status, (swatch IS NOT NULL OR EXISTS (SELECT 1 FROM planner.portal_attachments _a WHERE _a.po=product_dev_items.ref AND _a.category='product' AND coalesce(_a.uploader_kind,'internal')<>'supplier' AND _a.thumb IS NOT NULL)) has_swatch, (swatch IS NULL) swatch_auto, coalesce(created_by,'') created_by,
         to_char(created_at,'YYYY-MM-DD HH24:MI') created_at, to_char(updated_at,'YYYY-MM-DD HH24:MI') updated_at,
-        to_char(dev_start_override,'YYYY-MM-DD') dev_start_override, to_char(approved_at,'YYYY-MM-DD HH24:MI') approved_at,
-        coalesce(approval_method,'') approval_method
+        to_char((SELECT min(r.dev_start) FROM planner.product_dev_requests r WHERE r.item_id=product_dev_items.id),'YYYY-MM-DD') dev_start_override, to_char(approved_at,'YYYY-MM-DD HH24:MI') approved_at,
+        coalesce((SELECT r.approval_method FROM planner.product_dev_requests r WHERE r.item_id=product_dev_items.id ORDER BY r.id LIMIT 1),'') approval_method
         FROM planner.product_dev_items WHERE ref=$1`, [ref]),
       pool.query(`SELECT count(*)::int n FROM planner.supplier_notes WHERE po=$1 AND author_kind='supplier' AND read_at IS NULL`, [ref]),
     ]);
@@ -6842,8 +6842,9 @@ app.post('/api/product/item', async (req, res) => {
     const seq = (await client.query(`SELECT coalesce(max(seq_in_group),0)+1 n FROM planner.product_dev_items WHERE coalesce(season,'')=$1 AND category_code=$2`, [season, code])).rows[0].n;
     // v27.702 (Ben): ref = SEASON-TYPE-COLOURWAY (TYPE = category code; custom orders CUST-…), clash → "-2"; an explicit b.ref wins. Editable later via /rename.
     const ref = await _uniqueRef(client, 'product_dev_items', String(b.ref || '').trim() || ((isCustom ? 'CUST' : season) + '-' + code + '-' + _slugRef(b.colour_name || b.description || ('P' + seq), 14)));
-    const ins = await client.query(`INSERT INTO planner.product_dev_items (ref, type, season, category, category_code, seq_in_group, colour_name, bulk_colour_name, description, supplier, supplier_code, created_by, approval_method)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id`, [ref, type, season || null, category, code, seq, (b.colour_name || '').trim() || null, (b.bulk_colour_name || '').trim() || null, (b.description || '').trim() || null, supplier || null, supCode, (b.created_by || '').trim() || null, (b.approval_method || '').trim() || null]);
+    // v27.749 (P5): supplier / supplier_code / approval_method live on the development REQUEST now, not the item.
+    const ins = await client.query(`INSERT INTO planner.product_dev_items (ref, type, season, category, category_code, seq_in_group, colour_name, bulk_colour_name, description, created_by)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING id`, [ref, type, season || null, category, code, seq, (b.colour_name || '').trim() || null, (b.bulk_colour_name || '').trim() || null, (b.description || '').trim() || null, (b.created_by || '').trim() || null]);
     const id = ins.rows[0].id, sizes = Array.isArray(b.sizes) ? b.sizes : [];
     const _szRows = sizes.map((s, k) => ({ sl: String(s || '').trim(), k })).filter(r => r.sl);   // keep raw index as sort (blanks leave gaps, as before)
     if (_szRows.length) {   // single multi-row insert (was N+1 per size)
@@ -6863,7 +6864,7 @@ app.post('/api/product/item', async (req, res) => {
 });
 app.post('/api/product/item/:ref', async (req, res) => {
   const b = req.body || {}, ref = req.params.ref, sets = [], vals = []; let i = 1;
-  const allow = { type: 'text', colour_name: 'text', bulk_colour_name: 'text', description: 'text', status: 'text', season: 'text', category: 'text', dev_start_override: 'date', recipient_countries: 'text', approval_method: 'text' };
+  const allow = { type: 'text', colour_name: 'text', bulk_colour_name: 'text', description: 'text', status: 'text', season: 'text', category: 'text' };   // v27.749 (P5): dev_start_override / recipient_countries / approval_method / supplier moved to the development request
   // STAGE is the driver — normalise it, then derive APPROVAL (.status) from the terminal stage so the two never diverge.
   // v27.702: item.stage is now the manual OVERRIDE (null = derived from its requests). '' / null clears the override;
   // the stored status is recomputed after the update either way (recomputeProductStatus).
@@ -6875,29 +6876,16 @@ app.post('/api/product/item/:ref', async (req, res) => {
   // stamp / clear the approval time when status changes (drives Reports' time-to-approve)
   if ('status' in b) sets.push(b.status === 'approved' ? 'approved_at=coalesce(approved_at, now())' : 'approved_at=NULL');
   try {
-    // Recipient country change → drop a supplier-visible note on the product timeline (SUG-0005).
-    let _recNote = null;
-    if ('recipient_countries' in b) {
-      const norm = (s) => String(s || '').split(',').map(x => x.trim().toUpperCase()).filter(Boolean).sort().join(',');
-      const old = (await pool.query(`SELECT coalesce(recipient_countries,'UK') rc FROM planner.product_dev_items WHERE ref=$1`, [ref])).rows[0]?.rc || 'UK';
-      if (norm(old) !== norm(b.recipient_countries)) _recNote = String(b.recipient_countries || 'UK');
-    }
-    if ('supplier' in b) { const sup = (b.supplier || '').trim() || null; let supCode = null;
-      if (sup) { const sr = (await pool.query(`SELECT code FROM planner.suppliers WHERE name=$1`, [sup])).rows[0];
-        supCode = (sr && sr.code && sr.code.trim()) ? sr.code.trim().toUpperCase() : sup.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3); }
-      sets.push(`supplier=$${i}`); vals.push(sup); i++; sets.push(`supplier_code=$${i}`); vals.push(supCode); i++; }
     if (!sets.length) return res.json({ ok: true });
     vals.push(ref);
     await pool.query(`UPDATE planner.product_dev_items SET ${sets.join(',')}, updated_at=now() WHERE ref=$${i}`, vals);
     if ('stage' in b) { try { const _iid = (await pool.query(`SELECT id FROM planner.product_dev_items WHERE ref=$1`, [ref])).rows[0]?.id; if (_iid) await recomputeProductStatus(null, _iid); } catch (e) {} }   // v27.702 derived status
     // Record of change (PRODUCT ▸ Timeline) — one entry per field the D&B user just changed.
     { const _stageLbl = { sample_development: 'Sample development', sample_shipped: 'Sample shipped', sample_in_review: 'Sample in review', approved: 'Approved for bulk', approved_with_comments: 'Approved for bulk (with comments)', stop_development: 'Stop development' };
-      const _plbl = { type: 'Type', colour_name: 'Development colour name', bulk_colour_name: 'Bulk colour name', stage: 'Stage', description: 'Description', season: 'Season', category: 'Category', dev_start_override: 'Development start', recipient_countries: 'Recipient country', approval_method: 'Approval method', supplier: 'Supplier' };
+      const _plbl = { type: 'Type', colour_name: 'Development colour name', bulk_colour_name: 'Bulk colour name', stage: 'Stage', description: 'Description', season: 'Season', category: 'Category' };   // v27.749 (P5): dev-start / recipient / approval / supplier changes are logged on the development request now
       if ('stage' in b) b.stage = _stageLbl[b.stage] || b.stage;   // log the stage by its friendly label
       const _pby = authUser(req) || 'Dock & Bay';
       for (const k of Object.keys(_plbl)) { if (k in b) { const v = String(b[k] == null ? '' : b[k]).trim(); await logProductChange(ref, _plbl[k] + (v ? (' → ' + (v.length > 80 ? v.slice(0, 80) + '…' : v)) : ' cleared'), null, _pby); } } }
-    if (_recNote) { const label = _recNote.split(',').map(x => x.trim()).filter(Boolean).join(' and ') || 'UK';
-      try { await pool.query(`INSERT INTO planner.supplier_notes (po, author_kind, author_email, body) VALUES ($1,'internal',$2,$3)`, [ref, authUser(req) || null, 'Recipient country updated to ' + label]); } catch (e) { /* note best-effort */ } }
     res.json({ ok: true });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -6933,9 +6921,9 @@ app.post('/api/product/item/:ref/delete', async (req, res) => {
 app.get('/api/product/reports', async (_req, res) => {
   try {
     const rows = (await pool.query(`SELECT
-        coalesce(nullif(i.season,''),'—') season, coalesce(nullif(i.category,''),'—') category, coalesce(nullif(i.supplier,''),'—') supplier,
+        coalesce(nullif(i.season,''),'—') season, coalesce(nullif(i.category,''),'—') category, coalesce(nullif((SELECT string_agg(DISTINCT r.supplier_name, ', ' ORDER BY r.supplier_name) FROM planner.product_dev_requests r WHERE r.item_id=i.id),''),'—') supplier,
         i.status,
-        CASE WHEN i.status='approved' AND i.approved_at IS NOT NULL THEN (i.approved_at::date - coalesce(i.dev_start_override, i.created_at::date)) END approve_days,
+        CASE WHEN i.status='approved' AND i.approved_at IS NOT NULL THEN (i.approved_at::date - coalesce((SELECT min(r.dev_start) FROM planner.product_dev_requests r WHERE r.item_id=i.id), i.created_at::date)) END approve_days,   -- v27.749 (P5): supplier + dev-start derived from requests
         (SELECT count(*) FROM planner.product_dev_samples s WHERE s.item_ref=i.ref)::int samples
       FROM planner.product_dev_items i`)).rows;
     const roll = (g, r) => { g.products++; g.samples += r.samples;
@@ -6949,7 +6937,7 @@ app.get('/api/product/reports', async (_req, res) => {
     const o = Object.assign(mk(), { key: 'overall' }); rows.forEach(r => roll(o, r));
     // Sample-rejection metrics: why samples are rejected, sliced by supplier / season / product type.
     const rj = (await pool.query(`SELECT sr.name reason,
-        coalesce(nullif(i.supplier,''),'—') supplier, coalesce(nullif(i.season,''),'—') season, coalesce(nullif(i.category,''),'—') category
+        coalesce(nullif((SELECT r.supplier_name FROM planner.product_dev_requests r WHERE r.id=ps.request_id),''),'—') supplier, coalesce(nullif(i.season,''),'—') season, coalesce(nullif(i.category,''),'—') category
       FROM planner.product_sample_reject_reasons rr
       JOIN planner.sample_reject_reasons sr ON sr.id=rr.reason_id
       JOIN planner.product_dev_samples ps ON ps.id=rr.sample_id
@@ -7298,9 +7286,9 @@ app.post('/api/product/notes-read', async (req, res) => {   // mark this product
 async function openSampleCandidates(suppliers) {   // dev-sample versions whose parent product is still in development ("open")
   const scoped = Array.isArray(suppliers);
   return (await pool.query(`SELECT ps.id, ps.item_ref, (ps.item_ref||'_v'||ps.version) ref, ps.version,
-      coalesce(i.colour_name,'') colour_name, coalesce(i.supplier,'') supplier
+      coalesce(i.colour_name,'') colour_name, coalesce((SELECT string_agg(DISTINCT r.supplier_name, ', ' ORDER BY r.supplier_name) FROM planner.product_dev_requests r WHERE r.item_id=i.id),'') supplier
     FROM planner.product_dev_samples ps JOIN planner.product_dev_items i ON i.ref=ps.item_ref
-    WHERE i.status='in_development' ${scoped ? 'AND i.supplier = ANY($1)' : ''}
+    WHERE i.status='in_development' ${scoped ? 'AND EXISTS (SELECT 1 FROM planner.product_dev_requests r WHERE r.item_id=i.id AND r.supplier_name = ANY($1))' : ''}
     ORDER BY i.updated_at DESC, ps.version DESC`, scoped ? [suppliers] : [])).rows;
 }
 async function supplierSkuCandidates(suppliers, q, includeDev) {   // bulk SKUs, scoped to a supplier via products.supplier_multiple_all; optionally also product-development items
@@ -7313,7 +7301,7 @@ async function supplierSkuCandidates(suppliers, q, includeDev) {   // bulk SKUs,
   if (!includeDev) return skuRows;
   // also search the PRODUCT development grid (planner.product_dev_items) — its ref acts as the "sku"
   const dp = []; const dw = [`coalesce(i.status,'') <> 'dropped'`];
-  if (scoped) { dp.push(suppliers); dw.push(`i.supplier = ANY($${dp.length})`); }
+  if (scoped) { dp.push(suppliers); dw.push(`EXISTS (SELECT 1 FROM planner.product_dev_requests r WHERE r.item_id=i.id AND r.supplier_name = ANY($${dp.length}))`); }
   if (q) { dp.push('%' + q + '%'); const p = '$' + dp.length;
     dw.push(`(i.ref ILIKE ${p} OR coalesce(i.colour_name,'') ILIKE ${p} OR coalesce(i.description,'') ILIKE ${p} OR coalesce(i.season,'') ILIKE ${p} OR coalesce(i.category,'') ILIKE ${p})`); }
   const devRows = (await pool.query(`SELECT i.ref sku,
@@ -7422,9 +7410,9 @@ app.post('/api/product/escalate', async (req, res) => {
     // post the escalation onto the product timeline (the supplier sees it on the portal)
     await pool.query(`INSERT INTO planner.supplier_notes (po, author_email, author_kind, body) VALUES ($1,$2,'internal',$3)`, [ref, authUser(req) || null, user + ' escalated: ' + message]).catch(() => {});
     // email the PRODUCT's supplier's active portal user(s) — escalate goes to the supplier (like the PO/shipment timeline)
-    const sup = (await pool.query(`SELECT coalesce(supplier,'') supplier FROM planner.product_dev_items WHERE ref=$1`, [ref])).rows[0];
-    const sid = (sup && sup.supplier) ? (await pool.query(`SELECT id FROM planner.suppliers WHERE lower(name)=lower($1)`, [sup.supplier])).rows[0]?.id : null;
-    const emails = sid ? (await pool.query(`SELECT DISTINCT lower(email) e FROM planner.supplier_portal_users WHERE supplier_id=$1 AND active=true AND coalesce(email,'')<>''`, [sid])).rows.map(x => x.e) : [];
+    // v27.749 (P5): the product's supplier(s) now live on its development requests → email every request supplier's active portal users.
+    const supNames = (await pool.query(`SELECT DISTINCT lower(r.supplier_name) s FROM planner.product_dev_requests r JOIN planner.product_dev_items i ON i.id=r.item_id WHERE i.ref=$1 AND coalesce(r.supplier_name,'')<>''`, [ref])).rows.map(x => x.s);
+    const emails = supNames.length ? (await pool.query(`SELECT DISTINCT lower(u.email) e FROM planner.supplier_portal_users u JOIN planner.suppliers s ON s.id=u.supplier_id WHERE lower(s.name)=ANY($1) AND u.active=true AND coalesce(u.email,'')<>''`, [supNames])).rows.map(x => x.e) : [];
     if (!emails.length) return res.json({ ok: true, sent: 0, emails: [], note: 'no active portal users for this supplier to email — the escalation note is still on the timeline' });
     const link = PORTAL_URL + '#/product/' + encodeURIComponent(ref);
     const html = '<p><b>' + _eh(user) + '</b> escalated product <b>' + _eh(ref) + '</b>:</p><blockquote style="border-left:3px solid #cbd5e1;margin:0;padding:4px 12px;color:#334155;white-space:pre-wrap">' + _eh(message) + '</blockquote>'
@@ -7550,7 +7538,7 @@ app.get('/api/product/item/:ref/components', async (req, res) => {
   try {
     const [comps, item, cat, sups, dstat] = await Promise.all([
       pool.query(`SELECT c.id, c.component_type_id, c.name, coalesce(c.supplier,'') supplier, coalesce(c.sampling_mode,'sampled') sampling_mode, c.spec_id, c.dimension, c.sort FROM planner.product_dev_components c WHERE c.item_ref=$1 ORDER BY c.sort, c.id`, [ref]),
-      pool.query(`SELECT coalesce(supplier,'') supplier FROM planner.product_dev_items WHERE ref=$1`, [ref]),
+      pool.query(`SELECT coalesce((SELECT string_agg(DISTINCT r.supplier_name, ', ' ORDER BY r.supplier_name) FROM planner.product_dev_requests r WHERE r.item_id=product_dev_items.id),'') supplier FROM planner.product_dev_items WHERE ref=$1`, [ref]),
       pool.query(`SELECT id, name, coalesce(default_supplier,'') default_supplier, coalesce(sampling_mode,'sampled') sampling_mode FROM planner.component_types WHERE active ORDER BY sort, id`),
       pool.query(`SELECT name FROM planner.suppliers WHERE coalesce(kind,'supplier')='supplier' AND coalesce(active,true) ORDER BY name`),
       // per-aspect (legacy) approval + file rollup for this product, so a migrated component shows its real status/files
@@ -7725,7 +7713,7 @@ app.get('/api/product/batch-review/:id', async (req, res) => {
     // Kills the per-product N+1 serial cost. Promise.all preserves the sorted ref order.
     const items = await Promise.all(refs.map(async (ref) => {
       const [itR, compsR, samplesAll] = await Promise.all([
-        pool.query(`SELECT to_jsonb(i) j FROM planner.product_dev_items i WHERE i.ref=$1`, [ref]),
+        pool.query(`SELECT to_jsonb(i) j, coalesce((SELECT string_agg(DISTINCT r.supplier_name, ', ' ORDER BY r.supplier_name) FROM planner.product_dev_requests r WHERE r.item_id=i.id),'') supplier FROM planner.product_dev_items i WHERE i.ref=$1`, [ref]),
         pool.query(`SELECT id, name, dimension FROM planner.product_dev_components WHERE item_ref=$1 ORDER BY sort, id`, [ref]),
         productSampleList(ref, { skipFeedbackNotes: true }),
       ]);
@@ -7734,7 +7722,7 @@ app.get('/api/product/batch-review/:id', async (req, res) => {
       // show them collapsed as "past sample not on this batch" for context (was: filtered out entirely).
       const samples = samplesAll.map(x => Object.assign(x, { on_batch: ids.has(String(x.id)) }));
       const j = (it && it.j) || {};
-      return { ref, name: j.description || '', colour_name: j.colour_name || '', supplier: j.supplier || '', stage: j.stage || '', season: j.season || '', category: j.category || '', status: j.status || '', product_type: j.type || '',
+      return { ref, name: j.description || '', colour_name: j.colour_name || '', supplier: (it && it.supplier) || '', stage: j.stage || '', season: j.season || '', category: j.category || '', status: j.status || '', product_type: j.type || '',
         components: comps.map(c => ({ key: c.dimension || ('c' + c.id), name: c.name })), samples };
     }));
     res.json({ sr, items });
@@ -7894,7 +7882,7 @@ async function sampleScanPayload(code, ctx) {
         FROM planner.portal_attachments a WHERE a.po=('PSAMPLE-'||ps.id) AND a.category='product_sample'),'[]'::json) photos
     FROM planner.product_dev_samples ps WHERE ps.short_code=$1`, [c])).rows[0];
   if (!s) return null;
-  const it = (await pool.query(`SELECT coalesce(supplier,'') supplier, coalesce(season,'') season, coalesce(category,'') category,
+  const it = (await pool.query(`SELECT coalesce((SELECT string_agg(DISTINCT r.supplier_name, ', ' ORDER BY r.supplier_name) FROM planner.product_dev_requests r WHERE r.item_id=product_dev_items.id),'') supplier, coalesce(season,'') season, coalesce(category,'') category,
       coalesce(colour_name,'') colour_name, coalesce(bulk_colour_name,'') bulk_colour_name
     FROM planner.product_dev_items WHERE ref=$1`, [s.item_ref])).rows[0] || {};
   // Aspect options for this sample = the components covered by its request (fallback: 'product'). Names resolve
@@ -7952,7 +7940,7 @@ async function sampleCardPdf(sampleId) {
         FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id),'[]'::json) aspect_feedback
       FROM planner.product_dev_samples ps WHERE ps.id=$1::bigint`, [sampleId])).rows[0];
     if (!sr) return null;
-    const it = (await pool.query(`SELECT ref, coalesce(supplier,'') supplier, coalesce(season,'') season, coalesce(category,'') category,
+    const it = (await pool.query(`SELECT ref, coalesce((SELECT string_agg(DISTINCT r.supplier_name, ', ' ORDER BY r.supplier_name) FROM planner.product_dev_requests r WHERE r.item_id=product_dev_items.id),'') supplier, coalesce(season,'') season, coalesce(category,'') category,
       coalesce(colour_name,'') colour_name, coalesce(bulk_colour_name,'') bulk_colour_name, to_char(approved_at,'YYYY-MM-DD') approved_at
       FROM planner.product_dev_items WHERE ref=$1`, [sr.item_ref])).rows[0] || {};
     const CL = { product: 'Product', packaging: 'Packaging', labels: 'Labels/wraps', polybag: 'Polybags', other: 'Other components' };
@@ -17060,11 +17048,11 @@ app.get('/api/portal/bootstrap', portalAuth, async (req, res) => {
     const productEnabled = names.length ? (await q(`SELECT 1 FROM planner.suppliers WHERE name = ANY($1) AND include_product_dev LIMIT 1`, [names])).length > 0 : false;
     const products = (productEnabled && names.length) ? await q(`
       SELECT i.ref, coalesce(i.season,'') season, coalesce(i.category,'') category, coalesce(i.colour_name,'') colour_name,
-        coalesce(i.supplier,'') supplier, coalesce(i.description,'') description, i.status, (i.swatch IS NOT NULL OR EXISTS (SELECT 1 FROM planner.portal_attachments _a WHERE _a.po=i.ref AND _a.category='product' AND coalesce(_a.uploader_kind,'internal')<>'supplier' AND _a.thumb IS NOT NULL)) has_swatch,
+        coalesce((SELECT string_agg(DISTINCT r.supplier_name, ', ' ORDER BY r.supplier_name) FROM planner.product_dev_requests r WHERE r.item_id=i.id),'') supplier, coalesce(i.description,'') description, i.status, (i.swatch IS NOT NULL OR EXISTS (SELECT 1 FROM planner.portal_attachments _a WHERE _a.po=i.ref AND _a.category='product' AND coalesce(_a.uploader_kind,'internal')<>'supplier' AND _a.thumb IS NOT NULL)) has_swatch,   -- v27.749 (P5): supplier derived from requests
         to_char(i.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
         (SELECT count(*)::int FROM planner.product_dev_sizes s WHERE s.item_id=i.id) sizes,
         (SELECT count(*)::int FROM planner.supplier_notes n WHERE n.po=i.ref AND n.author_kind='internal' AND n.read_at IS NULL) unread_dnb
-      FROM planner.product_dev_items i WHERE i.supplier = ANY($1) OR EXISTS (SELECT 1 FROM planner.product_dev_requests r WHERE r.item_id=i.id AND r.supplier_name = ANY($1)) ORDER BY i.created_at DESC`, [names]) : [];   // v27.702: requests grant portal visibility
+      FROM planner.product_dev_items i WHERE EXISTS (SELECT 1 FROM planner.product_dev_requests r WHERE r.item_id=i.id AND r.supplier_name = ANY($1)) ORDER BY i.created_at DESC`, [names]) : [];   // v27.749 (P5): a development REQUEST grants portal visibility (item-level supplier column dropped)
     // Documents the supplier has for their POs (excl. admin-managed client/FBA docs) with approval status →
     // powers the Documents list + the "submit for approval" workflow in the portal.
     const _pokeys = pos.map(p => p.po);
@@ -17191,13 +17179,13 @@ app.get('/api/portal/unread-messages', portalAuth, async (req, res) => {
         UNION ALL
         SELECT 'product', n.po, n.id, coalesce(n.author_email,''), n.body, n.created_at
           FROM planner.supplier_notes n JOIN planner.product_dev_items pdi ON pdi.ref=n.po
-          WHERE n.author_kind='internal' AND n.read_at IS NULL AND pdi.supplier = ANY($1)
+          WHERE n.author_kind='internal' AND n.read_at IS NULL AND EXISTS (SELECT 1 FROM planner.product_dev_requests r WHERE r.item_id=pdi.id AND r.supplier_name = ANY($1))
       ) z ORDER BY created_at DESC NULLS LAST LIMIT 40`, [names])).rows);
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── PORTAL PRODUCT (supplier-scoped): timeline view + comment on their assigned product-dev items ──
 async function portalOwnsProduct(req, ref) { if (!ref || !req.portal.suppliers.length) return false;
-  return (await pool.query(`SELECT 1 FROM planner.product_dev_items i WHERE i.ref=$1 AND (i.supplier = ANY($2) OR EXISTS (SELECT 1 FROM planner.product_dev_requests r WHERE r.item_id=i.id AND r.supplier_name = ANY($2)))`, [ref, req.portal.suppliers])).rowCount > 0; }   // v27.702: a development REQUEST for this supplier also grants access
+  return (await pool.query(`SELECT 1 FROM planner.product_dev_items i WHERE i.ref=$1 AND EXISTS (SELECT 1 FROM planner.product_dev_requests r WHERE r.item_id=i.id AND r.supplier_name = ANY($2))`, [ref, req.portal.suppliers])).rowCount > 0; }   // v27.749 (P5): ownership via development REQUESTS only (item-level supplier column dropped)
 app.get('/api/portal/product-notes/:ref', portalAuth, async (req, res) => { const ref = decodeURIComponent(req.params.ref || '');
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
   try { res.json((await pool.query(`SELECT id, author_kind, coalesce(author_email,'') author_email, body,
@@ -17221,8 +17209,7 @@ app.get('/api/portal/product-samples/:ref', portalAuth, async (req, res) => { co
 app.get('/api/portal/product-components/:ref', portalAuth, async (req, res) => { const ref = decodeURIComponent(req.params.ref || '');
   if (!(await portalOwnsProduct(req, ref))) return res.status(403).json({ error: 'not your product' });
   try { const sups = (req.portal.suppliers || []).map(x => String(x).toLowerCase().trim());
-    const item = (await pool.query(`SELECT coalesce(supplier,'') supplier FROM planner.product_dev_items WHERE ref=$1`, [ref])).rows[0] || {};
-    const prodMine = sups.includes(String(item.supplier || '').toLowerCase().trim());
+    const prodMine = (await pool.query(`SELECT 1 FROM planner.product_dev_requests r JOIN planner.product_dev_items i ON i.id=r.item_id WHERE i.ref=$1 AND lower(r.supplier_name)=ANY($2) LIMIT 1`, [ref, sups])).rowCount > 0;   // v27.749 (P5): "my product" = I own a development request on it (item-level supplier dropped)
     const comps = (await pool.query(`SELECT id, name, coalesce(supplier,'') supplier, dimension, coalesce(sampling_mode,'sampled') sampling_mode FROM planner.product_dev_components WHERE item_ref=$1 ORDER BY sort, id`, [ref])).rows;
     const mine = comps.filter(c => c.sampling_mode !== 'spec_linked' && (c.supplier ? sups.includes(c.supplier.toLowerCase().trim()) : prodMine));
     res.json({ components: mine.map(c => ({ key: c.dimension || ('c' + c.id), name: c.name, dimension: c.dimension || null })), total: comps.length });
