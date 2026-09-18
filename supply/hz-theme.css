@@ -873,6 +873,19 @@ body header.pv-top .pv-lang button:hover{color:#fff}
 #app #product-root .smp-tickwrap{position:relative;display:inline-block;line-height:0}
 #app #product-root .smp-n{position:absolute;top:-6px;right:-8px;min-width:14px;height:14px;padding:0 3px;border-radius:999px;background:var(--blue);color:#fff;font-size:9px;line-height:14px;font-weight:700;text-align:center;cursor:pointer;box-shadow:0 0 0 1.5px var(--card)}
 #app #product-root .smp-sdate{display:block;font-size:9px;color:var(--faint);margin-top:3px;white-space:nowrap;cursor:pointer;line-height:1.1}
+/* v27.773 (Ben): SAMPLING ▸ Reports — big metric tiles, section headers, KPI/pivot tables */
+#app #product-root .pr-kpis{display:flex;gap:14px;flex-wrap:wrap;margin:2px 0 6px}
+#app #product-root .pr-kpi{flex:1 1 220px;min-width:200px;border:1px solid var(--line);border-left:3px solid var(--blue);border-radius:var(--r-md);background:var(--card);box-shadow:var(--shadow);padding:14px 18px}
+#app #product-root .pr-kpi-v{font-size:34px;font-weight:800;line-height:1;letter-spacing:-.02em;color:var(--ink)}
+#app #product-root .pr-kpi-l{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);margin-top:6px}
+#app #product-root .pr-kpi-s{font-size:11px;color:var(--faint);margin-top:2px}
+#app #product-root .pr-sec-h{font-weight:800;font-size:13px;margin:22px 0 8px;color:var(--ink)}
+#app #product-root .pr-tbl{border-collapse:separate;border-spacing:0;font-size:12px;width:max-content;min-width:100%;font-variant-numeric:tabular-nums}
+#app #product-root .pr-tbl th{font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);text-align:center;padding:6px 12px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--card)}
+#app #product-root .pr-tbl th.l{text-align:left}
+#app #product-root .pr-tbl td{padding:6px 12px;border-bottom:1px solid var(--line2);text-align:center;white-space:nowrap}
+#app #product-root .pr-tbl td.l{text-align:left}
+#app #product-root .pr-tbl tbody tr:hover td{background:var(--hover)}
 /* v27.770 (Ben): per-sample shipment ref + tracking under the tick (replaces the old Shipment column) */
 #app #product-root .smp-cellship{font-size:9px;line-height:1.35;margin-top:3px;white-space:nowrap}
 #app #product-root .smp-cellship a{color:var(--blue);font-weight:700;text-decoration:none;cursor:pointer}

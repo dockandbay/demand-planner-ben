@@ -7062,6 +7062,46 @@ app.get('/api/product/reports', async (_req, res) => {
     res.json({ overall: fin(o), bySeason: groupBy(r => r.season), byCategory: groupBy(r => r.category), bySupplier: groupBy(r => r.supplier), reject });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v27.773 (Ben): SAMPLING ▸ Reports — big metrics (products / samples in progress), a Type×Season pivot of samples in
+// progress, and a Supplier×Season KPI table (avg samples per request; avg samples to approve / to reject) with a
+// per-supplier request detail for the popout + PDF. "In progress" = the product is still in_development.
+app.get('/api/product/reports/sampling', async (_req, res) => {
+  try {
+    const rows = (await pool.query(`
+      SELECT r.id, coalesce(nullif(r.supplier_name,''),'—') supplier,
+        coalesce(nullif(i.season,''),'—') season, coalesce(nullif(i.category,''),'—') type,
+        i.ref item_ref, coalesce(i.colour_name,'') colour, coalesce(i.status,'in_development') status,
+        (SELECT count(*) FROM planner.product_dev_samples s WHERE s.request_id=r.id)::int samples,
+        to_char(r.dev_start,'YYYY-MM-DD') dev_start
+      FROM planner.product_dev_requests r JOIN planner.product_dev_items i ON i.id=r.item_id`)).rows;
+    const inProg = r => r.status === 'in_development';
+    const itemsAll = new Set(rows.map(r => r.item_ref)), itemsIP = new Set(rows.filter(inProg).map(r => r.item_ref));
+    const big = { products_in_progress: itemsIP.size, products_total: itemsAll.size,
+      samples_in_progress: rows.filter(inProg).reduce((a, r) => a + (r.samples || 0), 0),
+      samples_total: rows.reduce((a, r) => a + (r.samples || 0), 0), requests_total: rows.length };
+    // Type × Season pivot of samples in progress
+    const seasons = [], types = [], cells = {};
+    rows.filter(inProg).forEach(r => { if (seasons.indexOf(r.season) < 0) seasons.push(r.season); if (types.indexOf(r.type) < 0) types.push(r.type);
+      cells[r.type + '||' + r.season] = (cells[r.type + '||' + r.season] || 0) + (r.samples || 0); });
+    seasons.sort((a, b) => String(b).localeCompare(String(a))); types.sort();
+    // Supplier × Season KPIs
+    const sg = {};
+    rows.forEach(r => { const k = r.supplier + '||' + r.season; const g = sg[k] || (sg[k] = { supplier: r.supplier, season: r.season, requests: 0, samples: 0, approved: 0, rejected: 0, _app: 0, _rej: 0 });
+      g.requests++; g.samples += r.samples || 0;
+      if (r.status === 'approved') { g.approved++; g._app += r.samples || 0; }
+      else if (r.status === 'dropped') { g.rejected++; g._rej += r.samples || 0; } });
+    const supplierSeason = Object.values(sg).map(g => ({ supplier: g.supplier, season: g.season, requests: g.requests, samples: g.samples,
+      avg_per_request: g.requests ? Math.round(g.samples / g.requests * 10) / 10 : 0,
+      approved: g.approved, rejected: g.rejected,
+      avg_to_approve: g.approved ? Math.round(g._app / g.approved * 10) / 10 : null,
+      avg_to_reject: g.rejected ? Math.round(g._rej / g.rejected * 10) / 10 : null }))
+      .sort((a, b) => String(b.season).localeCompare(String(a.season)) || String(a.supplier).localeCompare(String(b.supplier)));
+    // per supplier×season request detail (for the popout / PDF)
+    const detail = {}; rows.forEach(r => { const k = r.supplier + '||' + r.season; (detail[k] = detail[k] || []).push({ item_ref: r.item_ref, colour: r.colour, type: r.type, samples: r.samples, outcome: r.status, dev_start: r.dev_start }); });
+    Object.keys(detail).forEach(k => detail[k].sort((a, b) => String(a.item_ref).localeCompare(String(b.item_ref))));
+    res.json({ big, typeSeason: { seasons, types, cells }, supplierSeason, detail });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.post('/api/product/size', async (req, res) => {
   const b = req.body || {}, ref = (b.ref || '').trim(), label = (b.size_label || '').trim();
   if (!ref || !label) return res.status(400).json({ error: 'ref and size_label required' });

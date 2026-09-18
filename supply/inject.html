@@ -14472,41 +14472,47 @@
       b.addEventListener('mouseleave',function(){ clearTimeout(b._t); hideNoteTip(); }); });
     root.querySelectorAll('.pact-snz-btn').forEach(function(x){ if(x._b)return; x._b=1; x.onclick=function(e){ e.stopPropagation(); openProdSnzMenu(x, after); }; });
     root.querySelectorAll('.pact-snz').forEach(function(x){ if(x._b)return; x._b=1; x.onclick=function(e){ e.stopPropagation(); snoozeKeySet(x.dataset.key,0,after); }; }); }
-  function renderProductReports(c){ c.innerHTML='<div style="color:var(--faint)">Loading…</div>';
-    pget('/api/product/reports').then(function(d){ if(!d||d.error){ c.innerHTML='<div style="color:var(--neg)">Failed: '+esc((d&&d.error)||'error')+'</div>'; return; }
-      var o=d.overall||{};
-      function card(lbl,val){ return '<div style="border:1px solid var(--line);border-radius:8px;padding:9px 14px;min-width:120px"><div style="font-size:11px;color:var(--muted)">'+lbl+'</div><div style="font-size:20px;font-weight:700">'+val+'</div></div>'; }
-      function num(v){ return v==null?'—':v; }
-      function tbl(title,dimLabel,rows){ var head=['Products','Sample versions','Approved','Avg samples to approve','Avg days to approve'];
-        return '<div style="margin-top:18px"><div style="font-weight:700;font-size:13px;margin-bottom:6px">'+title+'</div>'
-          +'<table style="border-collapse:collapse;font-size:12px"><thead><tr><th style="text-align:left;padding:5px 14px 5px 0;border-bottom:2px solid var(--line)">'+dimLabel+'</th>'
-          +head.map(function(h){return '<th style="text-align:left;padding:5px 14px;border-bottom:2px solid var(--line);white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
-          +((rows&&rows.length)?rows.map(function(g){return '<tr><td style="padding:4px 14px 4px 0;border-bottom:1px solid var(--hover)">'+esc(g.key)+'</td>'
-            +[g.products,g.samples,g.approved,num(g.avg_samples),(g.avg_days==null?'—':g.avg_days+'d')].map(function(v){return '<td style="text-align:left;padding:4px 14px;border-bottom:1px solid var(--hover)">'+v+'</td>';}).join('')+'</tr>';}).join(''):'<tr><td colspan="6" style="padding:6px 0;color:var(--faint)">No data.</td></tr>')
-          +'</tbody></table></div>'; }
-      function miniTbl(title,dimLabel,rows){ return '<div style="min-width:220px"><div style="font-weight:600;font-size:12px;margin-bottom:5px">'+title+'</div>'
-          +'<table style="border-collapse:collapse;font-size:12px;width:100%"><thead><tr><th style="text-align:left;padding:4px 12px 4px 0;border-bottom:2px solid var(--line)">'+dimLabel+'</th><th style="text-align:right;padding:4px 0;border-bottom:2px solid var(--line)">Rejections</th></tr></thead><tbody>'
-          +((rows&&rows.length)?rows.map(function(g){return '<tr><td style="padding:3px 12px 3px 0;border-bottom:1px solid var(--hover)">'+esc(g.key)+'</td><td style="text-align:right;padding:3px 0;border-bottom:1px solid var(--hover);font-weight:600">'+g.count+'</td></tr>';}).join(''):'<tr><td colspan="2" style="padding:5px 0;color:var(--faint)">None.</td></tr>')
-          +'</tbody></table></div>'; }
-      function rejectSection(rj){ var total=rj.total||0;
-        var reasonTbl='<div style="margin-top:8px"><table style="border-collapse:collapse;font-size:12px"><thead><tr>'
-          +['Reason','Count','Top suppliers','Seasons'].map(function(h){return '<th style="text-align:left;padding:5px 14px 5px 0;border-bottom:2px solid var(--line);white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
-          +((rj.byReason&&rj.byReason.length)?rj.byReason.map(function(g){return '<tr><td style="padding:4px 14px 4px 0;border-bottom:1px solid var(--hover);font-weight:600">'+esc(g.key)+'</td>'
-            +'<td style="padding:4px 14px 4px 0;border-bottom:1px solid var(--hover);font-weight:700">'+g.count+'</td>'
-            +'<td style="padding:4px 14px 4px 0;border-bottom:1px solid var(--hover);color:var(--muted)">'+esc(g.suppliers||'—')+'</td>'
-            +'<td style="padding:4px 14px 4px 0;border-bottom:1px solid var(--hover);color:var(--muted)">'+esc(g.seasons||'—')+'</td></tr>';}).join(''):'<tr><td colspan="4" style="padding:6px 0;color:var(--faint)">No sample rejections tagged yet.</td></tr>')
-          +'</tbody></table></div>';
-        return '<div style="margin-top:24px;padding-top:14px;border-top:2px solid var(--line)"><div style="font-weight:700;font-size:14px;margin-bottom:2px">Sample rejections <span style="color:var(--faint);font-weight:400;font-size:12px">('+total+' reason tag'+(total===1?'':'s')+')</span></div>'
-          +'<div class="mut tiny" style="margin-bottom:8px">Why sample aspects were rejected. Tagged at rejection in the Samples tab; a rejection can carry more than one reason.</div>'
-          +reasonTbl
-          +'<div style="display:flex;gap:26px;flex-wrap:wrap;margin-top:16px">'+miniTbl('By supplier','Supplier',rj.bySupplier)+miniTbl('By season','Season',rj.bySeason)+miniTbl('By product type','Category',rj.byCategory)+'</div></div>'; }
-      c.innerHTML='<div style="font-weight:700;font-size:13px;margin-bottom:8px">Overview</div><div style="display:flex;gap:10px;flex-wrap:wrap">'
-          +card('Products',o.products||0)+card('Sample versions',o.samples||0)+card('Approved',o.approved||0)
-          +card('Avg samples to approve',num(o.avg_samples))+card('Avg days to approve',o.avg_days==null?'—':o.avg_days+'d')+'</div>'
-        +'<div class="mut tiny" style="margin-top:6px">“Avg samples/days to approve” are measured over <b>approved</b> products only. Time-to-approve runs from the product’s development-start date (the <i>Development started</i> override on Master data, else its creation date) to approval.</div>'
-        +tbl('By season','Season',d.bySeason)+tbl('By category','Category',d.byCategory)+tbl('By supplier','Supplier',d.bySupplier)
-        +rejectSection(d.reject||{});
+  // v27.773 (Ben): SAMPLING ▸ Reports — big metrics, Type×Season pivot of samples in progress, Supplier×Season KPI table
+  // (avg samples/request, avg samples to approve / to reject) with a per-supplier detail popout + PDF.
+  function renderProductReports(c){ c.innerHTML='<div class="hz-skel" aria-label="Loading"><i></i><i></i><i></i></div>';
+    pget('/api/product/reports/sampling').then(function(d){ if(!d||d.error){ c.innerHTML='<div style="color:var(--neg)">Failed: '+esc((d&&d.error)||'error')+'</div>'; return; }
+      var big=d.big||{}, ts=d.typeSeason||{seasons:[],types:[],cells:{}}, ss=d.supplierSeason||[], detail=d.detail||{};
+      function kpi(v,lbl,sub){ return '<div class="pr-kpi"><div class="pr-kpi-v">'+v+'</div><div class="pr-kpi-l">'+esc(lbl)+'</div>'+(sub?'<div class="pr-kpi-s">'+esc(sub)+'</div>':'')+'</div>'; }
+      var tiles='<div class="pr-kpis">'
+        +kpi(big.products_in_progress||0,'Products in progress',(big.products_total||0)+' total')
+        +kpi(big.samples_in_progress||0,'Samples in progress',(big.samples_total||0)+' total · '+(big.requests_total||0)+' requests')+'</div>';
+      var piv='<div class="pr-sec-h">Samples in progress — by type × season</div>';
+      if(ts.types.length){ piv+='<div class="tw" style="overflow:auto"><table class="pr-tbl"><thead><tr><th class="l">Type \\ Season</th>'+ts.seasons.map(function(s){return '<th>'+esc(s)+'</th>';}).join('')+'<th>Total</th></tr></thead><tbody>';
+        ts.types.forEach(function(t){ var rt=0; piv+='<tr><td class="l">'+esc(t)+'</td>'+ts.seasons.map(function(s){ var v=ts.cells[t+'||'+s]||0; rt+=v; return '<td>'+(v||'<span class="mut">—</span>')+'</td>'; }).join('')+'<td style="font-weight:800">'+rt+'</td></tr>'; });
+        piv+='<tr style="font-weight:800;border-top:2px solid var(--line)"><td class="l">Total</td>'+ts.seasons.map(function(s){ var col=0; ts.types.forEach(function(t){ col+=ts.cells[t+'||'+s]||0; }); return '<td>'+col+'</td>'; }).join('')+'<td>'+(big.samples_in_progress||0)+'</td></tr></tbody></table></div>'; }
+      else piv+='<div class="mut tiny" style="padding:8px 0">No samples in progress.</div>';
+      var sup='<div class="pr-sec-h">Supplier performance — by season</div>'
+        +'<div class="tw" style="overflow:auto"><table class="pr-tbl"><thead><tr>'+['Supplier','Season','Requests','Avg samples / request','Approved (avg to approve)','Rejected (avg to reject)',''].map(function(h,i){return '<th'+(i<2?' class="l"':'')+'>'+h+'</th>';}).join('')+'</tr></thead><tbody>';
+      if(ss.length){ ss.forEach(function(g){ sup+='<tr><td class="l" style="font-weight:600">'+esc(g.supplier)+'</td><td class="l">'+esc(g.season)+'</td><td>'+g.requests+'</td><td style="font-weight:700">'+g.avg_per_request+'</td>'
+        +'<td>'+g.approved+(g.avg_to_approve!=null?' <span class="mut">('+g.avg_to_approve+')</span>':'')+'</td><td>'+g.rejected+(g.avg_to_reject!=null?' <span class="mut">('+g.avg_to_reject+')</span>':'')+'</td>'
+        +'<td><a class="pr-detail" data-k="'+esc(g.supplier+'||'+g.season)+'" style="color:var(--blue);cursor:pointer;text-decoration:underline;font-size:11px;white-space:nowrap">Detail ↗</a></td></tr>'; }); }
+      else sup+='<tr><td colspan="7" class="mut" style="padding:8px 0">No data.</td></tr>';
+      sup+='</tbody></table></div>';
+      c.innerHTML=tiles+piv+sup;
+      c.querySelectorAll('.pr-detail').forEach(function(a){ a.onclick=function(){ _prReportDetail(a.dataset.k, detail[a.dataset.k]||[]); }; });
     }).catch(function(e){ c.innerHTML='<div style="color:var(--neg)">Failed: '+esc(e.message||e)+'</div>'; }); }
+  function _prOutcome(o){ return o==='approved'?'<span style="color:var(--smp-ok);font-weight:700">Approved</span>':o==='dropped'?'<span style="color:var(--smp-rj);font-weight:700">Rejected</span>':'<span style="color:var(--smp-dev)">In progress</span>'; }
+  function _prReportDetail(key, rows){ var p=String(key).split('||'), sup=p[0], sea=p[1]||'';
+    var ov=document.createElement('div'); ov.className='hz-drawer-overlay'; ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.42);z-index:200060;display:flex;justify-content:flex-end';
+    var body=rows.length?rows.map(function(r){ return '<tr><td class="l" style="font-weight:600">'+esc(r.item_ref)+'</td><td class="l">'+esc(r.colour||'')+'</td><td class="l">'+esc(r.type||'')+'</td><td style="text-align:center;font-weight:700">'+r.samples+'</td><td>'+_prOutcome(r.outcome)+'</td><td class="l">'+esc(r.dev_start||'')+'</td></tr>'; }).join(''):'<tr><td colspan="6" class="mut" style="padding:8px">No requests.</td></tr>';
+    var totS=rows.reduce(function(a,r){return a+(r.samples||0);},0);
+    ov.innerHTML='<div style="background:var(--card);height:100%;width:min(700px,95vw);box-shadow:-8px 0 30px rgba(0,0,0,.25);overflow:auto;padding:18px 20px;box-sizing:border-box"><div class="bar" style="justify-content:space-between;align-items:center;margin-bottom:2px"><div style="font-weight:800;font-size:15px">'+esc(sup)+' <span class="mut" style="font-weight:400">· '+esc(sea)+'</span></div><button class="save-btn light pr-x">✕ Close</button></div>'
+      +'<div class="mut tiny" style="margin:2px 0 10px">'+rows.length+' request'+(rows.length===1?'':'s')+' · '+totS+' samples</div>'
+      +'<div style="margin-bottom:10px"><button class="save-btn pr-pdf" style="background:var(--blue);color:#fff;border-color:var(--blue)">⤓ Download PDF</button></div>'
+      +'<table class="pr-tbl" style="width:100%"><thead><tr>'+['Product','Colour','Type','Samples','Outcome','Dev start'].map(function(h,i){return '<th'+(i===3||i===4?'':' class="l"')+'>'+h+'</th>';}).join('')+'</tr></thead><tbody>'+body+'</tbody></table></div>';
+    document.body.appendChild(ov);
+    ov.querySelector('.pr-x').onclick=function(){ ov.remove(); }; ov.onclick=function(e){ if(e.target===ov)ov.remove(); };
+    ov.querySelector('.pr-pdf').onclick=function(){ _prReportPDF(sup,sea,rows); }; }
+  function _prReportPDF(sup,sea,rows){ var w=window.open('','_blank'); if(!w){ alert('Allow pop-ups to generate the report.'); return; }
+    var body=rows.map(function(r){ var oc=r.outcome==='approved'?'Approved':r.outcome==='dropped'?'Rejected':'In progress'; return '<tr><td>'+esc(r.item_ref)+'</td><td>'+esc(r.colour||'')+'</td><td>'+esc(r.type||'')+'</td><td style="text-align:center">'+r.samples+'</td><td>'+oc+'</td><td>'+esc(r.dev_start||'')+'</td></tr>'; }).join('');
+    var totS=rows.reduce(function(a,r){return a+(r.samples||0);},0), title='Sampling report · '+esc(sup)+' · '+esc(sea);
+    w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>'+title+'</title><style>body{font-family:system-ui,Arial,sans-serif;margin:24px;color:#101828}h1{font-size:18px;margin:0 0 2px}.s{color:#5b6b83;font-size:12px;margin-bottom:14px}table{border-collapse:collapse;width:100%;font-size:12px}th,td{text-align:left;padding:6px 10px;border-bottom:1px solid #e5e9f0}th{background:#f4f6f9}</style></head><body><h1>'+title+'</h1><div class="s">'+rows.length+' requests · '+totS+' samples · generated '+esc(fd(new Date().toISOString().slice(0,10)))+'</div><table><thead><tr><th>Product</th><th>Colour</th><th>Type</th><th>Samples</th><th>Outcome</th><th>Dev start</th></tr></thead><tbody>'+body+'</tbody></table><scr'+'ipt>window.onload=function(){setTimeout(function(){try{window.print();}catch(e){}},400);};</scr'+'ipt></body></html>');
+    w.document.close(); }
   var _prodFilt={type:'Product Development',season:'',status:'dev_actions',q:'',category:'',stage:'',supplier:''};   // Type defaults to Product Development; stage = active stage-pill filter (overrides status when set); supplier = filter to one supplier that has products in the grid
   var _prodSort={col:'',dir:1};   // v27.671 (#12): column sort. When set, flattens the season/category grouping and sorts by the column (off → asc → desc → off).
   var _pgSeasonCollapsed={}, _pgCatCollapsed={};   // PRODUCT grid group collapse state — persists across redraws
