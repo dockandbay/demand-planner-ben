@@ -2512,6 +2512,9 @@ const FULFIL_MAP = {
   chinaPortCode: 'CHP',                 // stock.location code — id differs per tenant (live 198 / sandbox 211), resolved by code
   finalDestMetafield: 'final_destination', // metafield.field code defined on purchase.purchase (live id 66 / sandbox 76)
   comment: 'comment',                   // v27.760 (Ben): PO header comment field (Text) — carries the final destination in plain sight too
+  incoterm: 'incoterm',                 // v27.764 (Ben): always FOB (selection value is uppercase 'FOB')
+  reqShipDate: 'requested_shipping_date',   // v27.764 (Ben): = Horizon production end date
+  reqDelivDate: 'requested_delivery_date',  // v27.764 (Ben): = Horizon estimated delivery-to-warehouse (landing) date — the ERP date-sync field
 };
 // v27.760 (Ben): the final destination goes on the metafield (mandatory) AND the PO comment (human-readable). One source of the wording.
 function fulfilFinalDestComment(branch) { return 'Destination 3PL after China Port: ' + String(branch || '').trim(); }
@@ -2629,13 +2632,31 @@ async function fulfilResolveProducts(skus) {
 // with a clear message if any are missing — so a create is never attempted with an unresolved SKU/supplier.
 // DRY-RUN until FULFIL_LINES_SEND=true (returns the resolved payload for review); then it performs the real write.
 async function fulfilPushLines(po, completion) {
-  const lines = (await pool.query(`SELECT l.sku, l.qty,
-      coalesce((SELECT c.final_cost FROM planner.portal_line_costs c WHERE c.po=l.po AND c.sku=l.sku AND c.final_cost IS NOT NULL AND c.confirmed_at IS NOT NULL), l.cost_price) price
-    FROM planner.purchase_order_lines l WHERE l.po=$1 AND coalesce(l.qty,0)>0 ORDER BY l.sku`, [po])).rows;
+  // v27.764 (Ben): resolve the PO's dates here so the push carries them. prod_end = production end date;
+  // est_delivery = estimated delivery-to-warehouse (landing) — SAME calc as the SUPPLY PO view: shipment actuals ▸
+  // landing/delivery override ▸ (prod_end + 7 ship days + branch SEA transit). Sea basis matches the PO grid.
   const poRow = (await pool.query(`SELECT coalesce(po.supplier_name,'') supplier, coalesce(po.branch,'') warehouse,
-      nullif(trim(coalesce(b.fulfil_id,'')),'') branch_fulfil_id
-    FROM planner.purchase_orders po LEFT JOIN planner.branches b ON b.name=po.branch WHERE po.po=$1`, [po])).rows[0] || {};
+      nullif(trim(coalesce(b.fulfil_id,'')),'') branch_fulfil_id,
+      to_char(coalesce(po.end_production_overide, po.start_production + (coalesce(sup.production_days,0)||' days')::interval)::date,'YYYY-MM-DD') prod_end,
+      to_char(coalesce(sh.arrival_date, sh.delivery_date, sh.landing_date, po.delivery_date_overide, po.landing_date_overide,
+        (coalesce(po.end_production_overide, po.start_production + (coalesce(sup.production_days,0)||' days')::interval)::date
+         + interval '7 days' + (coalesce(b.sea_lead_time_days,0)||' days')::interval)::date),'YYYY-MM-DD') est_delivery
+    FROM planner.purchase_orders po
+    LEFT JOIN planner.suppliers sup ON sup.id=po.supplier_id
+    LEFT JOIN planner.branches b ON b.name=po.branch
+    LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
+    WHERE po.po=$1`, [po])).rows[0] || {};
   const supName = poRow.supplier || '';
+  // v27.764 (Ben): price fallback — confirmed supplier cost ▸ the line's own cost ▸ the SKU's most recent priced line
+  // (same supplier first, then any supplier). Lets a blank line still push the last agreed cost instead of 0.
+  const lines = (await pool.query(`SELECT l.sku, l.qty,
+      coalesce(
+        (SELECT c.final_cost FROM planner.portal_line_costs c WHERE c.po=l.po AND c.sku=l.sku AND c.final_cost IS NOT NULL AND c.confirmed_at IS NOT NULL),
+        l.cost_price,
+        (SELECT x.cost_price FROM planner.purchase_order_lines x JOIN planner.purchase_orders xo ON xo.po=x.po WHERE x.sku=l.sku AND coalesce(x.cost_price,0)>0 AND xo.supplier_name=$2 ORDER BY xo.start_production DESC NULLS LAST, x.po DESC LIMIT 1),
+        (SELECT x.cost_price FROM planner.purchase_order_lines x JOIN planner.purchase_orders xo ON xo.po=x.po WHERE x.sku=l.sku AND coalesce(x.cost_price,0)>0 ORDER BY xo.start_production DESC NULLS LAST, x.po DESC LIMIT 1)
+      ) price
+    FROM planner.purchase_order_lines l WHERE l.po=$1 AND coalesce(l.qty,0)>0 ORDER BY l.sku`, [po, supName])).rows;
   const supRow = (await pool.query(`SELECT coalesce(default_currency,'USD') c, nullif(trim(coalesce(fulfil_id,'')),'') fulfil_id,
       coalesce(address_1,'') address_1, coalesce(address_2,'') address_2, coalesce(city,'') city, coalesce(state,'') state, coalesce(country,'') country, coalesce(postcode,'') postcode
     FROM planner.suppliers WHERE name=$1`, [supName])).rows[0] || {};
@@ -2661,6 +2682,7 @@ async function fulfilPushLines(po, completion) {
   // Pre-flight resolution report — surfaces exactly what's missing before any write.
   const resolution = { supplier: supName, party_id: partyId, party_source: storedPartyId ? 'suppliers.fulfil_id' : 'name-lookup', currency: curCode, currency_id: currencyId,
     branch: finalDestination, final_destination: finalDestination, final_destination_metafield: fdDef ? 'defined' : 'MISSING', final_destination_comment: fulfilFinalDestComment(finalDestination),
+    incoterm: 'FOB', requested_shipping_date: poRow.prod_end || null, requested_delivery_date: poRow.est_delivery || null,
     warehouse_id: warehouseId, warehouse_source: warehouseId ? ('china-port(' + FULFIL_MAP.chinaPortCode + ')') : 'unresolved',
     invoice_address_id: existingAddr, invoice_address_source: existingAddr ? 'fulfil-party' : (partyId ? 'will-create-from-horizon' : 'no-party'),
     products_found: Object.keys(prodMap).length, products_total: lines.length, missing_skus: missingSkus };
@@ -2676,13 +2698,16 @@ async function fulfilPushLines(po, completion) {
     [FULFIL_MAP.line.product]: pm.id || null,
     [FULFIL_MAP.line.unit]: pm.uom || 1,
     [FULFIL_MAP.line.qty]: Number(l.qty) || 0,
-    [FULFIL_MAP.line.price]: l.price == null ? 0 : Number(l.price),   // v27.736: unit_price is required on purchase.line — a line with no cost posts as 0 (real POs carry the actual price)
-    [FULFIL_MAP.line.deliveryDate]: completion ? String(completion).slice(0, 10) : null,
+    [FULFIL_MAP.line.price]: l.price == null ? '0' : String(Math.round(Number(l.price) * 10000) / 10000),   // v27.736: unit_price required (0 if none) · v27.764: send as a clean decimal STRING rounded to 4dp — a JSON float (e.g. 3.92) is parsed by Fulfil as full-precision Decimal and rejected (digits limit)
+    [FULFIL_MAP.line.deliveryDate]: poRow.est_delivery || (completion ? String(completion).slice(0, 10) : null),   // v27.764: line delivery = est delivery-to-warehouse
   }; });
   const headerPayload = {
     [FULFIL_MAP.ref]: po, [FULFIL_MAP.party]: partyId, [FULFIL_MAP.company]: FULFIL_MAP.defaultCompany,
     [FULFIL_MAP.currency]: currencyId, [FULFIL_MAP.warehouse]: warehouseId, [FULFIL_MAP.invoiceAddress]: existingAddr,
     [FULFIL_MAP.comment]: fulfilFinalDestComment(finalDestination),   // v27.760: final destination in the comment too (metafield stays authoritative)
+    [FULFIL_MAP.incoterm]: 'FOB',                                     // v27.764 (Ben): always FOB
+    [FULFIL_MAP.reqShipDate]: poRow.prod_end || null,                // v27.764: production end date
+    [FULFIL_MAP.reqDelivDate]: poRow.est_delivery || null,           // v27.764: estimated delivery-to-warehouse (ERP date-sync field)
     [FULFIL_MAP.linesField]: [['create', lineDicts]],
   };
 
@@ -2700,7 +2725,7 @@ async function fulfilPushLines(po, completion) {
     const existing = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.lineModel + '/search_read', [[['purchase', '=', fulfilId]], 0, 500, null, ['id']]);
     const ids = (existing || []).map(r => r.id);
     if (ids.length) await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + fulfilId, { [FULFIL_MAP.linesField]: [['delete', ids]] });
-    await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + fulfilId, { [FULFIL_MAP.linesField]: [['create', lineDicts]], [FULFIL_MAP.warehouse]: warehouseId, [FULFIL_MAP.comment]: fulfilFinalDestComment(finalDestination) });   // v27.754: China Port + v27.760: final-dest comment
+    await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + fulfilId, { [FULFIL_MAP.linesField]: [['create', lineDicts]], [FULFIL_MAP.warehouse]: warehouseId, [FULFIL_MAP.comment]: fulfilFinalDestComment(finalDestination), [FULFIL_MAP.incoterm]: 'FOB', [FULFIL_MAP.reqShipDate]: poRow.prod_end || null, [FULFIL_MAP.reqDelivDate]: poRow.est_delivery || null });   // v27.754: China Port + v27.760: comment + v27.764: FOB + ship/delivery dates
     await fulfilUpsertMetafield(fulfilId, FULFIL_MAP.finalDestMetafield, finalDestination);   // v27.754: final destination = Horizon branch (metafield authoritative)
     try { await fulfilMirrorOne(fulfilId, 'push'); } catch (e) { /* mirror best-effort */ }   // v27.738: keep the drift mirror fresh on push
     return { ok: true, action: 'update', fulfil_id: fulfilId, lines: lineDicts.length, resolution };
