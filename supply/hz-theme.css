@@ -890,12 +890,13 @@ body header.pv-top .pv-lang button:hover{color:#fff}
 #app #product-root .smp-facts b{font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);line-height:1.7}
 #app #product-root .smp-facts span{min-width:0;overflow-wrap:anywhere}
 @media (max-width:640px){ #app #product-root .smp-tlgrid{grid-template-columns:1fr} #app #product-root .smp-scell{min-width:0}
-  /* SAMPLING card on phones (hz-stack): multi-line cells keep their lines stacked beside the label instead of sharing one flex row;
-     the stage select drops its desktop minimum; tick + date sit together; empty S-slots are hidden to save height */
-  #app #product-root table.smp-tbl[data-stack] td.l{display:block;position:relative !important;padding-left:40% !important;min-height:18px}   /* !important: the generic stack rule forces static to defeat sticky cells */
-  #app #product-root table.smp-tbl[data-stack] td.l::before{position:absolute;left:0;top:4px;width:38%;flex:none}
+  /* SAMPLING card on phones (hz-stack) — v27.768 (Ben): label ON TOP (small, subtle), data FULL WIDTH beneath it, not a
+     40% left gutter that ate half the screen. Each field reads as a tiny caption + full-width value. */
+  #app #product-root table.smp-tbl[data-stack] td.l{display:block !important;position:static !important;padding-left:0 !important;padding-right:0 !important;min-height:0}
+  #app #product-root table.smp-tbl[data-stack] td.l::before{position:static;display:block;flex:none;width:auto;content:attr(data-l);font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);margin:0 0 1px;line-height:1.3}
+  #app #product-root table.smp-tbl[data-stack] td.l[data-l=""]::before{display:none}
   #app #product-root table.smp-tbl[data-stack] td.l>*{display:block;min-width:0;margin-top:0}
-  #app #product-root table.smp-tbl[data-stack] td.l>*+*{margin-top:3px}
+  #app #product-root table.smp-tbl[data-stack] td.l>*+*{margin-top:2px}
   #app #product-root table.smp-tbl[data-stack] td.smp-stage .smp-stage-sel{min-width:0;max-width:100%}
   /* Ben (18-Sep): sample slots S1..S4 sit in ONE row on phones (label above each tick, date under), not four stacked label rows */
   #app #product-root table.smp-tbl[data-stack] td.smp-scell{display:inline-flex;flex-direction:column;align-items:center;justify-content:flex-start;gap:3px;width:auto !important;min-width:56px;margin:2px 10px 4px 0;padding:4px 0 !important;vertical-align:top}
