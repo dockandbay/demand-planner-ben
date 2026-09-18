@@ -896,8 +896,9 @@ body header.pv-top .pv-lang button:hover{color:#fff}
 #app #product-root .smp-cellship{font-size:9px;line-height:1.35;margin-top:3px;white-space:nowrap}
 #app #product-root .smp-cellship a{color:var(--blue);font-weight:700;text-decoration:none;cursor:pointer}
 #app #product-root .smp-cellship a:hover{text-decoration:underline}
-#app #product-root .smp-celltrk,#app #product-root .smp-celldel{display:block;margin-top:1px}
-#app #product-root .smp-celldel{color:var(--smp-ok);font-weight:600}
+#app #product-root .smp-cellship-top{white-space:nowrap}
+#app #product-root .smp-celltrk{display:block;margin-top:1px}
+#app #product-root .smp-celldel{color:var(--smp-ok);font-weight:600;margin-left:5px;cursor:default}   /* v27.775: inline with SR, no date (date on hover) */
 #app #product-root .smp-sdate.sub{color:var(--amber);font-weight:600}
 /* MANAGE panel as a board card (3px --blue rail, L3-tinted header carrying ref · meta · tabs) */
 #app #product-root .smp-mcard{border:1px solid var(--line);border-left:3px solid var(--blue);border-radius:var(--r-md);background:var(--card);overflow:hidden;box-shadow:var(--shadow)}

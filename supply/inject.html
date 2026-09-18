@@ -996,16 +996,17 @@
   // never DHL directly. Drop a placeholder <span class="hz-trkpill" data-trk="NUMBER"></span> next to a DHL number,
   // then call hzFillTrackPills(root) after paint to populate it. Stays empty until the cache has a row for it.
   function hzTrkDate(s){ if(!s)return ''; s=String(s).slice(0,10); var p=s.split('-'); if(p.length!==3)return s; var mo=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return p[2]+'-'+(mo[(+p[1])-1]||p[1])+'-'+p[0].slice(2); }
-  function hzTrackPillHtml(t){ if(!t||!t.status_code)return ''; var code=String(t.status_code).toLowerCase();
+  function hzTrackPillHtml(t, compact){ if(!t||!t.status_code)return ''; var code=String(t.status_code).toLowerCase();
     var M={ 'delivered':['#e6f7ec','#1a7f37','Delivered'], 'transit':['#e7effc','#1d4ed8','In transit'], 'pre-transit':['#fff6e6','#b8860b','Pre-transit'], 'failure':['#fdeaea','#c02626','Exception'], 'unknown':['#f0f0f2','#6b7280','Unknown'] };
     var m=M[code]||M['unknown']; var mark=code==='failure'?'▲':'●';
-    var when=code==='delivered'?(t.delivered_at?' '+hzTrkDate(t.delivered_at):''):(t.eta?' · ETA '+hzTrkDate(t.eta):'');
-    var title=(t.status_text||m[2])+(t.last_event?' · '+t.last_event:'');
+    var datePart=code==='delivered'?(t.delivered_at?' '+hzTrkDate(t.delivered_at):''):(t.eta?' · ETA '+hzTrkDate(t.eta):'');
+    var when=compact?'':datePart;   // v27.775 (Ben): compact = status word only, date + detail on hover
+    var title=(t.status_text||m[2])+(datePart?' ·'+datePart:'')+(t.last_event?' · '+t.last_event:'');
     return '<span title="'+esc(title)+'" style="display:inline-block;padding:1px 7px;border-radius:10px;font-size:10px;font-weight:600;white-space:nowrap;background:'+m[0]+';color:'+m[1]+'">'+mark+' '+esc(m[2])+esc(when)+'</span>'; }
   function hzFillTrackPills(root){ root=root||document; var ph=[].slice.call(root.querySelectorAll('.hz-trkpill[data-trk]')); if(!ph.length)return;
     var seen={}; ph.forEach(function(el){ var n=(el.getAttribute('data-trk')||'').trim(); if(n)seen[n]=1; }); var list=Object.keys(seen); if(!list.length)return;
     fetch('/api/tracking/status?numbers='+encodeURIComponent(list.join(','))).then(function(r){return r.json();}).then(function(j){ var t=(j&&j.tracking)||{};
-      ph.forEach(function(el){ var n=(el.getAttribute('data-trk')||'').trim(); el.removeAttribute('data-trk'); var html=hzTrackPillHtml(t[n]); if(html){ el.innerHTML=html; el.setAttribute('data-num',n); el.style.cursor='pointer'; el.title='Open the DHL tracking log'; } }); }).catch(function(){}); }
+      ph.forEach(function(el){ var n=(el.getAttribute('data-trk')||'').trim(); var compact=el.getAttribute('data-compact')==='1'; el.removeAttribute('data-trk'); var html=hzTrackPillHtml(t[n], compact); if(html){ el.innerHTML=html; el.setAttribute('data-num',n); el.style.cursor='pointer'; if(!compact)el.title='Open the DHL tracking log'; } }); }).catch(function(){}); }
   try{ window.hzTrackPillHtml=hzTrackPillHtml; window.hzFillTrackPills=hzFillTrackPills; }catch(e){}   // exposed for jsdom render probes
   // Auto-fill (v27.723): any surface can just drop a .hz-trkpill placeholder — a single debounced observer
   // populates it after paint, so no per-surface fill call is needed. The scan bails instantly when there are
@@ -13554,7 +13555,12 @@
               +(_n?'<span class="smp-n" data-sid="'+s.id+'" data-rid="'+r.id+'" title="'+_n+(_n===1?' note / feedback':' notes / feedback')+' on this version — click to review">'+_n+'</span>':'')+'</span>'
               +'<span class="smp-sdate'+(rec?'':' sub')+' k-'+_st.k+'" data-sid="'+s.id+'" data-rid="'+r.id+'" title="'+esc(_st.t)+_dec+(s.description?' · '+esc(s.description):'')+' — click to review">'+(rec?_smpDM(s.received_at):'sub. '+sub)+'</span>'
               // v27.770 (Ben): sample's shipment ref (opens the sample drawer) + tracking link under the tick, if it exists
-              +(function(){ var sh=s.shipment; if(!sh||!sh.ref)return ''; return '<div class="smp-cellship"><a class="samp-open" data-ref="'+esc(sh.ref)+'" title="open this sample shipment">📦 '+esc(sh.ref)+'</a>'+(sh.tracking?'<span class="smp-celltrk">'+carrierTrackLinkInj(sh.carrier,sh.tracking)+((/dhl/i.test(sh.carrier||''))?' <span class="hz-trkpill" data-trk="'+esc(sh.tracking)+'"></span>':'')+'</span>':'')+(sh.received_at?'<span class="smp-celldel" title="delivered '+esc(fd(sh.received_at))+'">● delivered</span>':'')+'</div>'; })()+'</td>'; }
+              // v27.775 (Ben): SR + a compact "● Delivered" badge on ONE line (date on hover); tracking number ↗ on the next line (opens DHL detail)
+              +(function(){ var sh=s.shipment; if(!sh||!sh.ref)return '';
+                var badge=(sh.tracking&&/dhl/i.test(sh.carrier||''))?' <span class="hz-trkpill" data-trk="'+esc(sh.tracking)+'" data-compact="1"></span>'
+                  :(sh.received_at?' <span class="smp-celldel" title="Delivered '+esc(fd(sh.received_at))+'">● Delivered</span>':'');
+                return '<div class="smp-cellship"><span class="smp-cellship-top"><a class="samp-open" data-ref="'+esc(sh.ref)+'" title="open this sample shipment">📦 '+esc(sh.ref)+'</a>'+badge+'</span>'
+                  +(sh.tracking?'<span class="smp-celltrk">'+carrierTrackLinkInj(sh.carrier,sh.tracking)+'</span>':'')+'</div>'; })()+'</td>'; }
           cells+='<td class="l"><a class="smp-tl" data-ref="'+esc(r.item_ref)+'" style="cursor:pointer;color:var(--blue);font-weight:600;text-decoration:underline">'+(r.notes||0)+'</a>'+(r.unread_supplier?' <span class="ex-badge" title="unread supplier messages">'+r.unread_supplier+'</span>':'')+'</td>';   // v27.770: Shipment column removed — per-sample SR/tracking now sits under each tick
           html+='<tr class="smp-row" data-rid="'+r.id+'" data-season="'+esc(r.season||'')+'" data-cat="'+esc(r.category||'')+'">'+cells+'</tr>'; });
         g.innerHTML=html+'</tbody></table>';
@@ -14519,7 +14525,7 @@
   var _prodFilt={type:'Product Development',season:'',status:'dev_actions',q:'',category:'',stage:'',supplier:''};   // Type defaults to Product Development; stage = active stage-pill filter (overrides status when set); supplier = filter to one supplier that has products in the grid
   var _prodSort={col:'',dir:1};   // v27.671 (#12): column sort. When set, flattens the season/category grouping and sorts by the column (off → asc → desc → off).
   var _pgSeasonCollapsed={}, _pgCatCollapsed={};   // PRODUCT grid group collapse state — persists across redraws
-  var _pgTab={season:null,type:''}, _pgTree={season:null,type:null};   // v27.766 (Ben): PRODUCTS grid tabs/tree layout state (shares app_settings.sampling_group_mode)
+  var _pgTab={season:'__all__',type:''}, _pgTree={season:null,type:null};   // v27.766/775 (Ben): PRODUCTS grid tabs/tree state; season tabs default to ALL
   var _prodCfgTab='season';   // PRODUCT ▸ Config active L3 sub-tab: season | cats | tags | phrases
   // PRODUCT ▸ CONFIG — seasons, category codes, timeline tags/badges, timeline quick phrases. Lives in the PRODUCT
   // module (moved here from the ⚙ CONFIG ▸ Product panel). `b` = the container to render into.
@@ -14664,7 +14670,7 @@
         +'<button class="save-btn outline-blue" id="pg-new">+ New product</button>'
         +hzProdViewSel('plan')   // v27.703: Grid / Range plan / Dashboard are one page (Ben)
         +'<span style="display:flex;align-items:center;gap:5px"><span style="color:var(--muted);font-size:11px">Type</span><select class="fci" id="pg-type" style="'+selDark(_prodFilt.type)+'"><option value="Product Development"'+(_prodFilt.type==='Product Development'?' selected':'')+'>Product Development</option><option value="Custom Order"'+(_prodFilt.type==='Custom Order'?' selected':'')+'>Custom Order</option><option value=""'+(_prodFilt.type===''?' selected':'')+'>All</option></select></span>'
-        +'<span style="display:flex;align-items:center;gap:5px"><span style="color:var(--muted);font-size:11px">Season</span><select class="fci" id="pg-season" style="'+selDark(_prodFilt.season)+'"><option value="">All</option>'+seasons.map(function(s){return '<option value="'+esc(s)+'"'+(s===_prodFilt.season?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>'
+        /* v27.775 (Ben): Season filter removed — the season tabs / grouping cover it */
         +'<span style="display:flex;align-items:center;gap:5px"><span style="color:var(--muted);font-size:11px">Category</span><select class="fci" id="pg-cat" style="'+selDark(_prodFilt.category)+'"><option value="">All</option>'+cats.map(function(cc){return '<option value="'+esc(cc)+'"'+(cc===_prodFilt.category?' selected':'')+'>'+esc(cc)+'</option>';}).join('')+'</select></span>'
         +'<span style="display:flex;align-items:center;gap:5px"><span style="color:var(--muted);font-size:11px">Supplier</span><select class="fci" id="pg-supplier" style="'+selDark(_prodFilt.supplier)+'"><option value="">All</option>'+sups.map(function(sp){return '<option value="'+esc(sp)+'"'+(sp===_prodFilt.supplier?' selected':'')+'>'+esc(sp)+'</option>';}).join('')+'</select></span>'
         +'<span style="display:flex;align-items:center;gap:5px"><span style="color:var(--muted);font-size:11px">Status</span><select class="fci" id="pg-status" style="'+selDark(_prodFilt.status)+'">'+STAT.map(function(o){return '<option value="'+o[0]+'"'+(o[0]===_prodFilt.status?' selected':'')+'>'+o[1]+'</option>';}).join('')+'</select></span>'
@@ -14798,18 +14804,20 @@
             _dg.querySelectorAll('tr.pg-seasonhdr, tr.pg-cathdr').forEach(function(h){ h.remove(); });
             g.querySelectorAll('.pg-mobile .pgm-shdr, .pg-mobile .pgm-chdr').forEach(function(h){ h.style.display='none'; });   // v27.767 (Ben): mobile group headers replaced by the tabs/tree nav
             var _seas=[]; f.forEach(function(r){ var s=r.season||''; if(_seas.indexOf(s)<0)_seas.push(s); });
-            var _typesOf=function(s){ var o=[]; f.forEach(function(r){ if((r.season||'')===s){ var t=r.category||''; if(o.indexOf(t)<0)o.push(t); } }); return o; };
-            var _cntS=function(s){ return f.filter(function(r){return (r.season||'')===s;}).length; };
-            var _cntT=function(s,t){ return f.filter(function(r){return (r.season||'')===s && (r.category||'')===t;}).length; };
+            var _ALL='__all__';   // v27.775 (Ben): first season tab = ALL (all seasons)
+            var _typesOf=function(s){ var all=(s===_ALL); var o=[]; f.forEach(function(r){ if(all||(r.season||'')===s){ var t=r.category||''; if(o.indexOf(t)<0)o.push(t); } }); return o; };
+            var _cntS=function(s){ return s===_ALL?f.length:f.filter(function(r){return (r.season||'')===s;}).length; };
+            var _cntT=function(s,t){ return f.filter(function(r){return (s===_ALL||(r.season||'')===s) && (r.category||'')===t;}).length; };
+            var _match=function(s,cs,ct,t){ return (s===_ALL||cs===s) && (!t||ct===t); };
             var _show=function(s,t){ _dg.querySelectorAll('tr.pg-detrow').forEach(function(dr){ dr.style.display='none'; var d=dr.querySelector('.pg-det'); if(d)d.innerHTML=''; });
-              _dg.querySelectorAll('tr.pg-datarow').forEach(function(row){ row.style.display=((row.dataset.season||'')===s && (!t||(row.dataset.cat||'')===t))?'':'none'; });
+              _dg.querySelectorAll('tr.pg-datarow').forEach(function(row){ row.style.display=_match(s,row.dataset.season||'',row.dataset.cat||'',t)?'':'none'; });
               // v27.767 (Ben): filter the MOBILE cards too (close any open mobile detail on branch switch)
               g.querySelectorAll('.pg-mobile .pg-mdet').forEach(function(d){ d.style.display='none'; d.innerHTML=''; });
-              g.querySelectorAll('.pg-mobile .pgm-card').forEach(function(c){ c.style.display=((c.dataset.season||'')===s && (!t||(c.dataset.cat||'')===t))?'':'none'; }); };
+              g.querySelectorAll('.pg-mobile .pgm-card').forEach(function(c){ c.style.display=_match(s,c.dataset.season||'',c.dataset.cat||'',t)?'':'none'; }); };
             if(_smpGroupMode==='tabs'){
-              if(_seas.indexOf(_pgTab.season)<0){ _pgTab.season=_seas[0]||''; _pgTab.type=''; }
+              if(_pgTab.season!==_ALL && _seas.indexOf(_pgTab.season)<0){ _pgTab.season=_ALL; _pgTab.type=''; }
               if(_pgTab.type && _typesOf(_pgTab.season).indexOf(_pgTab.type)<0)_pgTab.type='';
-              var bar='<div class="smp-modebar"><div class="smp-tabs">'+_seas.map(function(s){return '<button class="smp-stab'+(s===_pgTab.season?' on':'')+'" data-s="'+esc(s)+'">'+esc(s||'— no season —')+' <span class="smp-tabn">'+_cntS(s)+'</span></button>';}).join('')+'</div>'
+              var bar='<div class="smp-modebar"><div class="smp-tabs"><button class="smp-stab'+(_pgTab.season===_ALL?' on':'')+'" data-s="'+_ALL+'">All <span class="smp-tabn">'+f.length+'</span></button>'+_seas.map(function(s){return '<button class="smp-stab'+(s===_pgTab.season?' on':'')+'" data-s="'+esc(s)+'">'+esc(s||'— no season —')+' <span class="smp-tabn">'+_cntS(s)+'</span></button>';}).join('')+'</div>'
                 +'<div class="smp-pills"><button class="smp-pill'+(_pgTab.type===''?' on':'')+'" data-t="">All types <span class="smp-tabn">'+_cntS(_pgTab.season)+'</span></button>'+_typesOf(_pgTab.season).map(function(t){return '<button class="smp-pill'+(_pgTab.type===t?' on':'')+'" data-t="'+esc(t)+'">'+esc(t||'— no type —')+' <span class="smp-tabn">'+_cntT(_pgTab.season,t)+'</span></button>';}).join('')+'</div></div>';
               g.insertBefore((function(){var d=document.createElement('div');d.innerHTML=bar;return d.firstChild;})(), _dg);
               g.querySelectorAll('.smp-stab').forEach(function(b){ b.onclick=function(){ _pgTab.season=b.dataset.s; _pgTab.type=''; draw(); }; });
@@ -14872,7 +14880,7 @@
       _prodDraw=draw;
       var _pgDark=function(el){ el.setAttribute('style','text-align:left'+(el.value?';background:var(--nav);color:#fff;font-weight:600':'')); };
       document.getElementById('pg-type').onchange=function(){ _prodFilt.type=this.value; _pgDark(this); draw(); };
-      document.getElementById('pg-season').onchange=function(){ _prodFilt.season=this.value; _pgDark(this); draw(); };
+      _prodFilt.season='';   // v27.775 (Ben): Season filter removed — the season tabs / grouping cover it
       document.getElementById('pg-cat').onchange=function(){ _prodFilt.category=this.value; _pgDark(this); draw(); };
       var _pgSup=document.getElementById('pg-supplier'); if(_pgSup)_pgSup.onchange=function(){ _prodFilt.supplier=this.value; _pgDark(this); draw(); };
       document.getElementById('pg-status').onchange=function(){ _prodFilt.status=this.value; _prodFilt.stage=''; _pgDark(this); draw(); };   // choosing a Status clears any active stage pill
