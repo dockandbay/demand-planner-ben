@@ -8356,6 +8356,7 @@ async function getDhlConfig() {
     interval_hours: Number(cfg.interval_hours) > 0 ? Number(cfg.interval_hours) : 6,      // default refresh every 6h
     transit_interval_hours: Number(cfg.transit_interval_hours) > 0 ? Number(cfg.transit_interval_hours) : 1, // hourly while in transit
     stop_days: Number(cfg.stop_days) >= 0 ? Number(cfg.stop_days) : 7,                    // stop polling N days after delivery
+    auto_package_received: cfg.auto_package_received === true,                            // v27.770 (Ben): on 'delivered', auto-set the sample shipment received (default off)
     key_present: !!process.env.DHL_API_KEY,
   };
 }
@@ -8435,6 +8436,12 @@ async function upsertTracking(n, res) {
   if (n.source_table === 'shipments') {
     const eff = res.delivered_at ? String(res.delivered_at).slice(0, 10) : (res.eta || null);
     if (eff) await pool.query(`UPDATE planner.shipments SET tracked_delivery_date=$1, tracked_source='dhl', updated_at=now() WHERE carrier_ref=$2 AND carrier ILIKE 'dhl%'`, [eff, n.number]);
+  }
+  // v27.770 (Ben): a DELIVERED sample shipment → auto-set the SR received_at (→ status "Package received") when the CONFIG toggle is on.
+  if (n.source_table === 'sample_requests' && res.status_code === 'delivered' && res.delivered_at) {
+    try { const cfg = await getDhlConfig(); if (cfg.auto_package_received) {
+      await pool.query(`UPDATE planner.sample_requests SET received_at=$2::timestamptz, updated_at=now() WHERE id=$1::bigint AND received_at IS NULL`, [n.source_id, res.delivered_at]);
+    } } catch (e) { /* auto-mark best-effort */ }
   }
 }
 
@@ -8535,6 +8542,7 @@ app.post('/api/tracking/config', async (req, res) => {
     interval_hours: Number(b.interval_hours) > 0 ? Number(b.interval_hours) : 6,
     transit_interval_hours: Number(b.transit_interval_hours) > 0 ? Number(b.transit_interval_hours) : 1,
     stop_days: Number(b.stop_days) >= 0 ? Number(b.stop_days) : 7,
+    auto_package_received: !!b.auto_package_received,   // v27.770 (Ben): on DHL 'delivered', auto-set the sample shipment received → status 'Package received'
   };
   try {
     await pool.query(`INSERT INTO planner.app_settings(key,value,updated_by,updated_at) VALUES('dhl_tracking',$1,$2,now())

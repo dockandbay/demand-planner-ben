@@ -873,6 +873,12 @@ body header.pv-top .pv-lang button:hover{color:#fff}
 #app #product-root .smp-tickwrap{position:relative;display:inline-block;line-height:0}
 #app #product-root .smp-n{position:absolute;top:-6px;right:-8px;min-width:14px;height:14px;padding:0 3px;border-radius:999px;background:var(--blue);color:#fff;font-size:9px;line-height:14px;font-weight:700;text-align:center;cursor:pointer;box-shadow:0 0 0 1.5px var(--card)}
 #app #product-root .smp-sdate{display:block;font-size:9px;color:var(--faint);margin-top:3px;white-space:nowrap;cursor:pointer;line-height:1.1}
+/* v27.770 (Ben): per-sample shipment ref + tracking under the tick (replaces the old Shipment column) */
+#app #product-root .smp-cellship{font-size:9px;line-height:1.35;margin-top:3px;white-space:nowrap}
+#app #product-root .smp-cellship a{color:var(--blue);font-weight:700;text-decoration:none;cursor:pointer}
+#app #product-root .smp-cellship a:hover{text-decoration:underline}
+#app #product-root .smp-celltrk,#app #product-root .smp-celldel{display:block;margin-top:1px}
+#app #product-root .smp-celldel{color:var(--smp-ok);font-weight:600}
 #app #product-root .smp-sdate.sub{color:var(--amber);font-weight:600}
 /* MANAGE panel as a board card (3px --blue rail, L3-tinted header carrying ref · meta · tabs) */
 #app #product-root .smp-mcard{border:1px solid var(--line);border-left:3px solid var(--blue);border-radius:var(--r-md);background:var(--card);overflow:hidden;box-shadow:var(--shadow)}
