@@ -824,6 +824,27 @@ body header.pv-top .pv-lang button:hover{color:#fff}
   #app #product-root table.smp-tbl[data-stack] tr.smp-seasonhdr,#app #product-root table.smp-tbl[data-stack] tr.smp-cathdr{display:block;margin:8px 0 4px;border:0;box-shadow:none;padding:0}
   #app #product-root table.smp-tbl[data-stack] tr.smp-seasonhdr>td,#app #product-root table.smp-tbl[data-stack] tr.smp-cathdr>td{display:block;border-radius:6px;position:static}
 }
+/* v27.763 (Ben): alternative SAMPLING grouping layouts — season tabs + type pills, and the season/type tree rail */
+#app #product-root #smp-grid.smp-nogscroll{overflow:visible;max-height:none}
+#app #product-root .smp-tblscroll{overflow-x:auto;-webkit-overflow-scrolling:touch;min-width:0}
+#app #product-root .smp-modebar{margin:0 0 10px}
+#app #product-root .smp-tabs{display:flex;gap:4px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:8px}
+#app #product-root .smp-stab{font-size:12.5px;font-weight:700;padding:7px 14px;border:1px solid transparent;border-bottom:none;border-radius:8px 8px 0 0;background:transparent;color:var(--muted);cursor:pointer;font-family:inherit;margin-bottom:-1px}
+#app #product-root .smp-stab.on{color:var(--ink);background:var(--card);border-color:var(--line)}
+#app #product-root .smp-pills{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:4px}
+#app #product-root .smp-pill{font-size:11px;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid var(--line);background:var(--card);color:var(--muted);cursor:pointer;font-family:inherit}
+#app #product-root .smp-pill.on{background:var(--blue);border-color:var(--blue);color:#fff}
+#app #product-root .smp-tabn{font-weight:500;opacity:.75;margin-left:4px}
+#app #product-root .smp-stab.on .smp-tabn{color:var(--blue-ink);opacity:1}
+#app #product-root .smp-pill.on .smp-tabn{color:#fff}
+#app #product-root .smp-treewrap{display:flex;gap:14px;align-items:flex-start}
+#app #product-root .smp-rail{flex:0 0 200px;max-width:200px;border:1px solid var(--line);border-radius:var(--r-md);background:var(--card);padding:6px;font-size:12px;position:sticky;top:8px}
+#app #product-root .smp-treewrap .smp-tblscroll{flex:1 1 auto}
+#app #product-root .smp-rs{font-weight:800;text-transform:uppercase;font-size:10.5px;letter-spacing:.05em;color:var(--ink-soft);padding:8px 8px 4px}
+#app #product-root .smp-rt{display:flex;justify-content:space-between;gap:8px;padding:6px 10px;border-radius:7px;cursor:pointer;color:var(--muted)}
+#app #product-root .smp-rt:hover{background:var(--hover)}
+#app #product-root .smp-rt.on{background:var(--blue-soft);color:var(--blue-ink);font-weight:700}
+@media(max-width:640px){ #app #product-root .smp-treewrap{flex-direction:column} #app #product-root .smp-rail{flex-basis:auto;max-width:none;width:100%;position:static} }
 /* v27.761 (Ben): supplier acceptance chip on the SAMPLING grid row */
 #app #product-root .smp-acc{display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.02em;padding:1px 7px;border-radius:999px;white-space:nowrap}
 #app #product-root .smp-acc.ok{background:var(--pos-bg);color:var(--pos)}

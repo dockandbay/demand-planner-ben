@@ -13442,6 +13442,7 @@
   //    = the latest sample shipment (carrier + tracking; DHL live status lands in P2b).
   var _smpFilt={supplier:'',stage:'',season:'',category:'',q:'',mine:false,overdue:false}; var _smpOpen=null;   // {rid,sid}
   var _smpSeasonCollapsed={}, _smpCatCollapsed={};   // v27.762 (Ben): SAMPLING grid season/type grouping collapse state
+  var _smpGroupMode='inline', _smpTab={season:null,type:''}, _smpTree={season:null,type:null};   // v27.763 (Ben): grouping layout (inline | tabs | tree), set in CONFIG ▸ Product
   var _smpDeep=null, _smpScroll=null, _smpManagePending=null;   // v27.717/v27.735: pending deep link → open the MANAGE panel {rid, tab}
   function smpHash(r,idx){ try{ writeHash(r?['product','sampling',r.ref,'S'+idx]:['product','sampling']); }catch(e){} }
   var _smpView=(function(){ try{ return localStorage.getItem('smpView')||'requests'; }catch(e){ return 'requests'; } })();   // v27.714: 'requests' | 'batch' (Sample batch review as a view of SAMPLING)
@@ -13459,7 +13460,8 @@
     if(_smpView==='batch'){   // v27.714 (Ben): Sample batch review is a view of SAMPLING — enter a sample shipment (batch) and review every sample on it
       c.innerHTML='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'+smpViewPills()+'</div><div id="smp-batch"></div>'; wireSmpViewPills(c,c); renderProductBatchReview(c.querySelector('#smp-batch')); return; }
     c.innerHTML='<div id="smp-filters" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"></div><div id="smp-grid" class="tw smp-sw-'+_smpSwSize+'"><div class="hz-skel" aria-label="Loading"><i></i><i></i><i></i></div></div>';
-    fetch('/api/product/sampling').then(function(r){return r.json();}).then(function(rows){ rows=Array.isArray(rows)?rows:[];
+    Promise.all([fetch('/api/product/sampling').then(function(r){return r.json();}), fetch('/api/app-settings').then(function(r){return r.json();}).catch(function(){return {};})]).then(function(_res){ var rows=_res[0]; rows=Array.isArray(rows)?rows:[];
+      var _st=_res[1]||{}; _smpGroupMode=(_st.sampling_group_mode==='tabs'||_st.sampling_group_mode==='tree')?_st.sampling_group_mode:'inline';   // v27.763 (Ben): CONFIG-set grouping layout
       var uniq=function(k){ var o={}; rows.forEach(function(r){ if(r[k])o[r[k]]=1; }); return Object.keys(o).sort(); };
       var sups=uniq('supplier_name'), seasons=uniq('season').reverse(), cats=uniq('category'); var me=((window.ME&&ME.email)||'').toLowerCase();
       var selDark=function(v){ return 'text-align:left'+(v?';background:var(--nav);color:#fff;font-weight:600':''); };
@@ -13538,6 +13540,37 @@
         g.querySelectorAll('tr.smp-seasonhdr').forEach(function(h){ h.onclick=function(){ var s=h.dataset.season; _smpSeasonCollapsed[s]=!_smpSeasonCollapsed[s]; _smpApplyCollapse(); }; });
         g.querySelectorAll('tr.smp-cathdr').forEach(function(h){ h.onclick=function(){ var kk=h.dataset.season+'|'+h.dataset.cat; _smpCatCollapsed[kk]=!_smpCatCollapsed[kk]; _smpApplyCollapse(); }; });
         _smpApplyCollapse();
+        // v27.763 (Ben): alternative grouping layouts (CONFIG ▸ Product) — reuse the rendered rows, swap the navigation chrome.
+        if((_smpGroupMode||'inline')!=='inline'){
+          var _tbl=g.querySelector('table.smp-tbl');
+          g.querySelectorAll('tr.smp-seasonhdr, tr.smp-cathdr').forEach(function(h){ h.remove(); });   // headers replaced by tabs / tree nav
+          var _seas=[]; f.forEach(function(r){ var s=r.season||''; if(_seas.indexOf(s)<0)_seas.push(s); });
+          var _typesOf=function(s){ var o=[]; f.forEach(function(r){ if((r.season||'')===s){ var t=r.category||''; if(o.indexOf(t)<0)o.push(t); } }); return o; };
+          var _cntS=function(s){ return f.filter(function(r){return (r.season||'')===s;}).length; };
+          var _cntT=function(s,t){ return f.filter(function(r){return (r.season||'')===s && (r.category||'')===t;}).length; };
+          var _showBranch=function(s,t){ g.querySelectorAll('tr.smp-row, tr.smp-mexp').forEach(function(row){ row.style.display=((row.dataset.season||'')===s && (!t||(row.dataset.cat||'')===t))?'':'none'; }); };
+          g.classList.add('smp-nogscroll');
+          if(_smpGroupMode==='tabs'){
+            if(_seas.indexOf(_smpTab.season)<0){ _smpTab.season=_seas[0]||''; _smpTab.type=''; }
+            if(_smpTab.type && _typesOf(_smpTab.season).indexOf(_smpTab.type)<0)_smpTab.type='';
+            var bar='<div class="smp-modebar"><div class="smp-tabs">'+_seas.map(function(s){return '<button class="smp-stab'+(s===_smpTab.season?' on':'')+'" data-s="'+esc(s)+'">'+esc(s||'— no season —')+' <span class="smp-tabn">'+_cntS(s)+'</span></button>';}).join('')+'</div>'
+              +'<div class="smp-pills"><button class="smp-pill'+(_smpTab.type===''?' on':'')+'" data-t="">All types <span class="smp-tabn">'+_cntS(_smpTab.season)+'</span></button>'+_typesOf(_smpTab.season).map(function(t){return '<button class="smp-pill'+(_smpTab.type===t?' on':'')+'" data-t="'+esc(t)+'">'+esc(t||'— no type —')+' <span class="smp-tabn">'+_cntT(_smpTab.season,t)+'</span></button>';}).join('')+'</div></div>';
+            var wrap=document.createElement('div'); wrap.className='smp-tblscroll'; g.insertBefore(wrap,_tbl); wrap.appendChild(_tbl);
+            g.insertAdjacentHTML('afterbegin', bar);
+            g.querySelectorAll('.smp-stab').forEach(function(b){ b.onclick=function(){ _smpTab.season=b.dataset.s; _smpTab.type=''; draw(); }; });
+            g.querySelectorAll('.smp-pill').forEach(function(b){ b.onclick=function(){ _smpTab.type=b.dataset.t; draw(); }; });
+            _showBranch(_smpTab.season, _smpTab.type);
+          } else {   // tree
+            if(_seas.indexOf(_smpTree.season)<0){ _smpTree.season=_seas[0]||''; _smpTree.type=_typesOf(_smpTree.season)[0]||''; }
+            if(_typesOf(_smpTree.season).indexOf(_smpTree.type)<0)_smpTree.type=_typesOf(_smpTree.season)[0]||'';
+            var rail='<div class="smp-rail">'+_seas.map(function(s){ return '<div class="smp-rs">'+esc(s||'— no season —')+'</div>'+_typesOf(s).map(function(t){ var on=(s===_smpTree.season&&t===_smpTree.type); return '<div class="smp-rt'+(on?' on':'')+'" data-s="'+esc(s)+'" data-t="'+esc(t)+'"><span>'+esc(t||'— no type —')+'</span><span class="smp-tabn">'+_cntT(s,t)+'</span></div>'; }).join(''); }).join('')+'</div>';
+            var tw=document.createElement('div'); tw.className='smp-treewrap'; g.insertBefore(tw,_tbl);
+            tw.insertAdjacentHTML('afterbegin', rail);
+            var sc=document.createElement('div'); sc.className='smp-tblscroll'; tw.appendChild(sc); sc.appendChild(_tbl);
+            g.querySelectorAll('.smp-rt').forEach(function(n){ n.onclick=function(){ _smpTree.season=n.dataset.s; _smpTree.type=n.dataset.t; draw(); }; });
+            _showBranch(_smpTree.season, _smpTree.type);
+          }
+        }
         g.querySelectorAll('.smp-openreq').forEach(function(a){ a.onclick=function(){ _prodDetailTab='requests'; _prodHighlightReq=Number(a.dataset.rid); openProductDrawer(a.dataset.ref,null,'requests'); }; });
         g.querySelectorAll('.smp-manage').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var r=f.filter(function(x){return String(x.id)===b.dataset.rid;})[0]; if(r)smpManage(b.closest('tr'), r, ths.length); }; });   // v27.730: MANAGE → inline tabbed panel
         g.querySelectorAll('.smp-tl').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); var ref=a.dataset.ref, tr=a.closest('tr');   // v27.722 (Ben): timeline lives on SAMPLING — expand inline here, no jump to the Products drawer
@@ -14447,7 +14480,7 @@
   // PRODUCT ▸ CONFIG — seasons, category codes, timeline tags/badges, timeline quick phrases. Lives in the PRODUCT
   // module (moved here from the ⚙ CONFIG ▸ Product panel). `b` = the container to render into.
   function renderProductConfig(b){ b.innerHTML='<div class="count" style="padding:10px 2px;color:var(--faint)">Loading…</div>';
-    Promise.all([pget('/api/product/config'),fetch('/api/product/timeline-config').then(function(r){return r.json();}).catch(function(){return {tags:[],snippets:[]};}),pget('/api/product/component-types').catch(function(){return {types:[],suppliers:[]};}),fetch('/api/product/reject-reasons?all=1').then(function(r){return r.json();}).catch(function(){return {reasons:[]};})]).then(function(_cfg){ var d=_cfg[0]||{seasons:[],categories:[]}; var _tl=_cfg[1]||{tags:[],snippets:[]}; d.tags=_tl.tags||[]; d.snippets=_tl.snippets||[]; var _ct=_cfg[2]||{types:[],suppliers:[]}; d.componentTypes=_ct.types||[]; d.suppliers=_ct.suppliers||[]; d.rejectReasons=(_cfg[3]&&_cfg[3].reasons)||[];
+    Promise.all([pget('/api/product/config'),fetch('/api/product/timeline-config').then(function(r){return r.json();}).catch(function(){return {tags:[],snippets:[]};}),pget('/api/product/component-types').catch(function(){return {types:[],suppliers:[]};}),fetch('/api/product/reject-reasons?all=1').then(function(r){return r.json();}).catch(function(){return {reasons:[]};}),fetch('/api/app-settings').then(function(r){return r.json();}).catch(function(){return {};})]).then(function(_cfg){ var d=_cfg[0]||{seasons:[],categories:[]}; var _tl=_cfg[1]||{tags:[],snippets:[]}; d.tags=_tl.tags||[]; d.snippets=_tl.snippets||[]; var _ct=_cfg[2]||{types:[],suppliers:[]}; d.componentTypes=_ct.types||[]; d.suppliers=_ct.suppliers||[]; d.rejectReasons=(_cfg[3]&&_cfg[3].reasons)||[]; d.groupMode=(function(v){return (v==='tabs'||v==='tree')?v:'inline';})((_cfg[4]||{}).sampling_group_mode);
       function autoCat(name){ return String(name||'').toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,5)||'PROD'; }   // mirrors server _prodCatCode
       function draw(){
         var seasonRows=(d.seasons||[]).map(function(s){ return '<tr data-code="'+esc(s.code)+'"><td class="l" style="padding:4px 8px;font-weight:700;font-family:ui-monospace,Menlo,monospace">'+esc(s.code)+'</td>'
@@ -14504,11 +14537,19 @@
           +'<div class="tw"><table class="samp-tbl" style="font-size:12px"><thead><tr><th class="l">Reason</th><th class="l">Sort</th><th class="l">Active</th><th></th></tr></thead><tbody>'+rrRows+rrAddRow+'</tbody></table></div>';
         SEC.phrases='<div class="sect-h">Timeline quick phrases <button class="save-btn" id="pcsnip-new" style="margin-left:8px;font-size:11px;padding:3px 10px">+ Add phrase</button> <span class="mut tiny" style="font-weight:400">— type <b>/</b> in a product timeline box to insert one</span></div>'
           +'<div class="tw"><table class="samp-tbl" style="font-size:12px"><thead><tr><th class="l">Phrase</th><th class="l">Sort</th><th class="l">Active</th><th></th></tr></thead><tbody>'+(snipRows||'<tr><td colspan="4" class="count">no phrases yet</td></tr>')+'</tbody></table></div>';
-        var TABS=[['season','Season / release'],['cats','Categories'],['components','Components'],['rejectreasons','Reject reasons'],['tags','Timeline tags & badges'],['phrases','Timeline quick phrases']];
+        var TABS=[['season','Season / release'],['cats','Categories'],['components','Components'],['rejectreasons','Reject reasons'],['tags','Timeline tags & badges'],['phrases','Timeline quick phrases'],['layout','Grid layout']];
+        // v27.763 (Ben): SAMPLING grid grouping layout — team-wide (app_settings.sampling_group_mode)
+        var _lmodes=[['inline','Inline headers','Collapsible Season → Type headers down one scrolling grid. Best for scanning everything at once.'],['tabs','Season tabs + Type pills','A tab per season with a Type pill row. Two taps to any Season × Type slice; nothing scrolls off.'],['tree','Season / Type tree','A Season → Type outline on the left, the grid on the right. Scales to many seasons without a long scroll.']];
+        SEC.layout='<div class="sect-h">SAMPLING grid layout</div><div class="annot" style="margin-bottom:12px">How the SAMPLING grid groups products by Season and Type. Applies for everyone.</div>'
+          +'<div style="display:flex;flex-direction:column;gap:10px;max-width:560px">'+_lmodes.map(function(m){ var on=(d.groupMode===m[0]); return '<label class="pcfg-lmode" data-mode="'+m[0]+'" style="display:flex;gap:11px;align-items:flex-start;padding:11px 13px;border:1px solid '+(on?'var(--blue)':'var(--line)')+';border-radius:var(--r-md);cursor:pointer;background:'+(on?'var(--blue-soft)':'var(--card)')+'"><input type="radio" name="pcfg-lmode" value="'+m[0]+'"'+(on?' checked':'')+' style="margin-top:2px"><span><span style="font-weight:700;font-size:13px">'+esc(m[1])+'</span><span style="display:block;color:var(--muted);font-size:12px;margin-top:2px">'+esc(m[2])+'</span></span></label>'; }).join('')+'</div>'
+          +'<div class="mut tiny" id="pcfg-lmode-saved" style="margin-top:10px">&nbsp;</div>';
         if(!SEC[_prodCfgTab])_prodCfgTab='season';
         var nav='<div id="pcfg-subs-l3">'+TABS.map(function(t){ return '<span class="rtab pcfg-tab'+(t[0]===_prodCfgTab?' active':'')+'" data-k="'+t[0]+'">'+esc(t[1])+'</span>'; }).join('')+'</div>';
         b.innerHTML=nav+SEC[_prodCfgTab];
         b.querySelectorAll('.pcfg-tab').forEach(function(t){ t.onclick=function(){ _prodCfgTab=t.dataset.k; try{writeHash(['product','config',t.dataset.k]);}catch(e){} draw(); }; });
+        // v27.763: save the SAMPLING grid layout mode (team-wide) and reflect it immediately
+        b.querySelectorAll('.pcfg-lmode input').forEach(function(inp){ inp.onchange=function(){ var mode=inp.value; d.groupMode=mode; _smpGroupMode=mode;
+          fetch('/api/app-settings',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({key:'sampling_group_mode',value:mode})}).then(function(r){return r.json();}).then(function(j){ var sv=b.querySelector('#pcfg-lmode-saved'); if(sv)sv.textContent=(j&&j.error)?('Save failed: '+j.error):'Saved — the SAMPLING grid now uses this layout for everyone.'; draw(); }).catch(function(e){ var sv=b.querySelector('#pcfg-lmode-saved'); if(sv)sv.textContent='Save failed: '+(e&&e.message||e); }); }; });
         var _snew=b.querySelector('#pcfg-snew'); if(_snew)_snew.onclick=function(){ var code=(prompt('New season code (e.g. SS29):')||'').trim().toUpperCase(); if(!code)return; shipPost('/api/product/season',{code:code,active:true},function(){ d.seasons.push({code:code,label:'',active:true,sort:null}); draw(); }); };
         b.querySelectorAll('.pcfg-s').forEach(function(el){ el.onchange=function(){ var code=el.dataset.code, row=(d.seasons||[]).filter(function(x){return x.code===code;})[0]||{code:code};
           row[el.dataset.f]= el.dataset.f==='active'?(el.value==='true'):(el.dataset.f==='sort'?(el.value===''?null:parseInt(el.value,10)):el.value);
