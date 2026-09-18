@@ -475,6 +475,7 @@
 .shpop-h{padding:8px 10px;border-bottom:1px solid var(--line2);font-size:11px;color:var(--muted)}
 .shpop input.shpop-q{width:calc(100% - 16px);margin:6px 8px;padding:4px 6px;border:1px solid var(--line);border-radius:4px;font:inherit}
 .shpop-opt{padding:6px 10px;cursor:pointer;border-bottom:1px solid #f3f3f1}.shpop-opt:hover{background:var(--blue-soft)}
+.shpop-opt.shpop-opt-dis{cursor:default;opacity:.55}.shpop-opt.shpop-opt-dis:hover{background:transparent}.shpop-opt.shpop-opt-dis b{text-decoration:line-through}
 .shpop-opt.master{color:var(--violet);font-weight:600}.shpop-opt.unassign{color:var(--neg)}
 /* Mobile: render pickers as a bottom sheet (positioned dropdowns clip / glitch behind the grid on iOS). */
 .shpop-bd{position:fixed;inset:0;background:rgba(15,23,42,.35);z-index:100000}
@@ -2023,7 +2024,10 @@
     fetch('/api/supply/crossdock-report').then(function(r){return r.json();}).then(function(j){ _xdReport=(j&&j.rows)?j:{rows:[],expected:[]}; cb(_xdReport); }).catch(function(){ _xdReport={rows:[],expected:[]}; cb(_xdReport); }); }
   function openXdPick(btn, curList, onPick, country){ closeShPop();
     var co=String(country||'').toUpperCase(), wh=XD_WH_BY_CO[co];
-    var full=crossdockList.filter(function(s){return curList.indexOf(s)<0;}).slice().sort();
+    // v27.765 (Ben): keep already-added SKUs in the list but render them disabled ("already on this PO") instead of
+    // dropping them — typing one that's already on the order should show it as found-but-unselectable, not "no matching SKU".
+    var already={}; (curList||[]).forEach(function(s){ already[s]=1; });
+    var full=crossdockList.slice().sort();
     var warn = cgridLabel(country)==='OT'
       ? '<div style="margin:4px 6px 2px;padding:6px 9px;background:var(--neg-bg);border:1px solid #fca5a5;color:var(--neg);border-radius:5px;font-size:11px;line-height:1.35">⚠ Ship-to is <b>Other</b> — set the PO&rsquo;s Ship-to to the actual delivery country (UK / US / EU / AU / CA) so crossdock routes to the right 3PL.</div>'
       : (co==='CA' ? '<div class="mut tiny" style="margin:4px 8px">No CA 3PL in the crossdock report — showing all crossdock SKUs.</div>' : '');
@@ -2044,16 +2048,17 @@
       function natCmp(a,b){ return String(a).localeCompare(String(b), undefined, {numeric:true, sensitivity:'base'}); }
       // ONE flat list in numeric/alphabetical order — the on-hand / applied SKUs are NOT hoisted to the top; they
       // just carry their notes inline. Includes any report SKU that isn't in the master crossdock list.
-      var union={}; full.forEach(function(n){union[n]=1;}); if(wh)Object.keys(m).forEach(function(n){ if(curList.indexOf(n)<0)union[n]=1; });
+      var union={}; full.forEach(function(n){union[n]=1;}); if(wh)Object.keys(m).forEach(function(n){ union[n]=1; }); (curList||[]).forEach(function(n){ union[n]=1; });   // v27.765: always include already-added SKUs (shown disabled), even for an OT PO with no 3PL list
       var allList=Object.keys(union).sort(natCmp);
       function render(q){ q=(q||'').trim().toLowerCase();
         var ms=allList.filter(function(n){return !q||n.toLowerCase().indexOf(q)>=0;});
-        var html= ms.length ? ms.slice(0,q?120:60).map(function(n){ var x=wh?m[n]:null, notes=x?noteFor(x):[];
-            return '<div class="shpop-opt" data-v="'+esc(n)+'"><b>'+esc(n)+'</b>'+(notes.length?'<div class="mut tiny" style="line-height:1.35;margin-top:1px">'+notes.map(esc).join(' &middot; ')+'</div>':'')+'</div>'; }).join('')
+        var html= ms.length ? ms.slice(0,q?120:60).map(function(n){ var x=wh?m[n]:null, notes=x?noteFor(x):[]; var dis=!!already[n];   // v27.765: already on this PO → disabled row
+            if(dis)notes.unshift('already on this PO');
+            return '<div class="shpop-opt'+(dis?' shpop-opt-dis':'')+'" data-v="'+esc(n)+'"'+(dis?' aria-disabled="true"':'')+'><b>'+esc(n)+'</b>'+(dis?' <span class="mut tiny" style="font-weight:600">✓ added</span>':'')+(notes.length?'<div class="mut tiny" style="line-height:1.35;margin-top:1px">'+notes.map(esc).join(' &middot; ')+'</div>':'')+'</div>'; }).join('')
           : '<div class="count" style="padding:8px">no matching SKU</div>';
         if(!q && allList.length>60)html+='<div class="mut tiny" style="padding:5px 10px">'+(allList.length-60)+' more — type to search…</div>';
         var l=document.getElementById('shpop-list'); if(!l)return; l.innerHTML=html;
-        l.querySelectorAll('.shpop-opt').forEach(function(o){ o.onclick=function(){ closeShPop(); onPick(o.dataset.v); }; }); }
+        l.querySelectorAll('.shpop-opt:not(.shpop-opt-dis)').forEach(function(o){ o.onclick=function(){ closeShPop(); onPick(o.dataset.v); }; }); }
       render(''); var qi=pop.querySelector('.shpop-q'); if(qi){ qi.oninput=function(){render(this.value);}; qi.focus(); } }
     if(wh) loadXdReport(build); else build({rows:[],expected:[]}); }
   // ORDER PLAN add-SKU picker — same searchable popover UX as the batch/crossdock cell picker, scoped to the
