@@ -13462,8 +13462,18 @@
   function _smpDM(iso){ if(!iso)return ''; var s=String(iso).slice(0,10), d=new Date(s+'T00:00:00'); if(isNaN(d.getTime()))return s; var M=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']; return String(d.getDate()).padStart(2,'0')+'-'+M[d.getMonth()]; }
   // v27.753 (Ben): per-sample status shown under its tick. Derived from the component decisions + receipt.
   // k = state key the SAMPLING tick + MANAGE tab dot are styled by (hz-theme .smp-tick.k-*, .smp-dot.k-*) — v27.758 design slice 2
-  function _smpStatus(s){ if((s.rejected||0)>0)return {t:'Rejected',c:'var(--neg)',k:'rj'}; if((s.approved||0)>0)return {t:'Approved',c:'var(--pos)',k:'ok'}; if(s.received_at)return {t:'In review',c:'var(--amber)',k:'rv'};
-    if(s.shipment&&s.shipment.tracking&&!s.shipment.received_at)return {t:'In transit',c:'var(--violet)',k:'tr'}; return {t:'Awaiting',c:'var(--faint)',k:'wt'}; }
+  // v27.769 (Ben): sample lifecycle + tick colours — Development(blue) → Shipped(orange) → Package received(light purple) →
+  // In review(dark purple, = the RECEIVED tick) → Approved(green) / Rejected(dark red) / Stop development(bright red).
+  function _smpStatus(s){ s=s||{};
+    if((s.stopped||0)>0)return {t:'Stop development',k:'stop'};
+    if((s.rejected||0)>0)return {t:'Rejected',k:'rj'};
+    if((s.approved||0)>0)return {t:'Approved',k:'ok'};
+    if(s.received_at)return {t:'In review',k:'rv'};
+    var sh=s.shipment;
+    if(sh&&sh.received_at)return {t:'Package received',k:'pkg'};
+    if((sh&&(sh.tracking||sh.ref))||String(s.supplier_status||'')==='shipped')return {t:'Shipped',k:'shp'};
+    return {t:'In development',k:'dev'}; }
+  function _smpGlyph(k){ return (k==='rj'||k==='stop')?'✕':(k==='rv'||k==='ok'||k==='pkg')?'✓':''; }   // filled states carry a glyph; dev/shipped are hollow (open) circles coloured by state
   function _smpAge(ts){ if(!ts)return null; var t=new Date(String(ts).replace(' ','T')).getTime(); if(!t)return null; return Math.max(0,Math.round((Date.now()-t)/86400000)); }
   function _smpAspectKey(cp){ var d=String(cp.dimension||''); return (['product','packaging','labels','polybag','other'].indexOf(d)>=0)?d:('c'+cp.id); }
   function smpViewPills(){ return '<span style="display:inline-flex" title="Sample requests grid, or review every development sample on one sample shipment (batch)">'+[['requests','Sample requests'],['batch','Batch review']].map(function(o){return '<button class="smp-viewpill'+(_smpView===o[0]?' active':'')+'" data-v="'+o[0]+'">'+o[1]+'</button>';}).join('')+'</span>'; }
@@ -13535,7 +13545,7 @@
             // v27.758 (design slice 2): tick carries the state (k-* class → colour), ✕ glyph when rejected; status word + decision counts live in the tooltip;
             // blue superscript = notes + feedback on this version (click → MANAGE S-tab); date is one faint 9px line. Tick click still toggles received (unchanged).
             var _n=(s.feedback||0)+(s.notes_n||0), _dec=(s.approved||s.rejected)?' · '+(s.rejected?s.rejected+' rejected':s.approved+' approved'):'';
-            cells+='<td class="smp-scell"><span class="smp-tickwrap"><span class="smp-tick'+(rec?' on':' sub')+' k-'+_st.k+'" data-sid="'+s.id+'" data-rid="'+r.id+'" data-rec="'+(rec?'1':'0')+'" title="'+esc(_st.t)+_dec+' · '+(rec?'received '+esc(fd(s.received_at))+' — click to un-receive':'sent '+esc(fd(s.sample_date||s.created_at))+' — click when received')+'">'+(rec?(_st.k==='rj'?'✕':'✓'):'')+'</span>'
+            cells+='<td class="smp-scell"><span class="smp-tickwrap"><span class="smp-tick k-'+_st.k+'" data-sid="'+s.id+'" data-rid="'+r.id+'" data-rec="'+(rec?'1':'0')+'" title="'+esc(_st.t)+_dec+' · '+(rec?'received '+esc(fd(s.received_at))+' — click to un-receive':'sent '+esc(fd(s.sample_date||s.created_at))+' — click when received')+'">'+_smpGlyph(_st.k)+'</span>'
               +(_n?'<span class="smp-n" data-sid="'+s.id+'" data-rid="'+r.id+'" title="'+_n+(_n===1?' note / feedback':' notes / feedback')+' on this version — click to review">'+_n+'</span>':'')+'</span>'
               +'<span class="smp-sdate'+(rec?'':' sub')+' k-'+_st.k+'" data-sid="'+s.id+'" data-rid="'+r.id+'" title="'+esc(_st.t)+_dec+(s.description?' · '+esc(s.description):'')+' — click to review">'+(rec?_smpDM(s.received_at):'sub. '+sub)+'</span></td>'; }
           var lastShip=null; (r.samples||[]).forEach(function(s){ if(s.shipment)lastShip=s.shipment; });
@@ -13595,7 +13605,16 @@
         g.querySelectorAll('.samp-open').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); (typeof openSampleDrawer==='function'?openSampleDrawer(a.dataset.ref):gotoSample(a.dataset.ref)); }; });
         g.querySelectorAll('.smp-stage-sel').forEach(function(sel){ sel.onchange=function(){ var v=sel.value; sel.setAttribute('style','font-size:12px;'+prodStageStyle(v)); shipPost('/api/product/request/'+sel.dataset.rid,{stage:v},function(j){ if(j&&j.error){alert(j.error);return;} var r=rows.filter(function(x){return String(x.id)===sel.dataset.rid;})[0]; if(r)r.stage=v; try{ prodItemInvalidate(sel.dataset.ref); pgetClear(); }catch(e){} }); }; });
         g.querySelectorAll('.smp-tick:not(.none)').forEach(function(t){ t.onclick=function(e){ e.stopPropagation(); var rec=t.dataset.rec==='1'; if(rec&&!confirm('Un-mark this sample as received?'))return;
-          var sid=t.dataset.sid, rid=t.dataset.rid; t.style.opacity='.5'; shipPost('/api/product/sample/'+sid+'/received',{received:!rec},function(j){ t.style.opacity=''; if(j&&j.error){alert(j.error);return;} var r=rows.filter(function(x){return String(x.id)===rid;})[0]; var s=r&&(r.samples||[]).filter(function(x){return String(x.id)===sid;})[0]; if(s)s.received_at=j.received_at||null; if(!rec&&r&&['sample_development','sample_shipped'].indexOf(r.stage)>=0)r.stage='sample_in_review'; try{ if(r)prodItemInvalidate(r.item_ref); pgetClear(); }catch(e2){} draw(); }); }; });
+          var sid=t.dataset.sid, rid=t.dataset.rid; t.style.opacity='.5'; shipPost('/api/product/sample/'+sid+'/received',{received:!rec},function(j){ t.style.opacity=''; if(j&&j.error){alert(j.error);return;}
+            var r=rows.filter(function(x){return String(x.id)===rid;})[0]; var s=r&&(r.samples||[]).filter(function(x){return String(x.id)===sid;})[0]; if(!s){ draw(); return; }
+            // v27.769 (Ben): update the tick, date, stage + MANAGE dot IN PLACE — no full grid redraw (was jarring on receive)
+            s.received_at=j.received_at||null; var recNew=!!s.received_at, st=_smpStatus(s);
+            t.dataset.rec=recNew?'1':'0'; t.className='smp-tick k-'+st.k; t.textContent=_smpGlyph(st.k);
+            t.title=st.t+' · '+(recNew?'received '+fd(s.received_at)+' — click to un-receive':'sent '+fd(s.sample_date||s.created_at)+' — click when received');
+            var cell=t.closest('.smp-scell'), dt=cell&&cell.querySelector('.smp-sdate'); if(dt){ dt.className='smp-sdate '+(recNew?'':'sub')+' k-'+st.k; dt.textContent=recNew?_smpDM(s.received_at):'sub. '+_smpDM(s.sample_date||s.created_at); }
+            if(recNew&&r&&['sample_development','sample_shipped'].indexOf(r.stage)>=0){ r.stage='sample_in_review'; var ssel=t.closest('tr').querySelector('.smp-stage-sel'); if(ssel){ ssel.value='sample_in_review'; ssel.setAttribute('style','font-size:12px;'+prodStageStyle('sample_in_review')); } }
+            var mexp=g.querySelector('tr.smp-mexp[data-rid="'+rid+'"]'); if(mexp){ var idx=(r.samples||[]).map(function(x){return String(x.id);}).indexOf(String(sid)); var dot=mexp.querySelector('.smp-mtab[data-t="s'+idx+'"] .smp-dot'); if(dot)dot.className='smp-dot k-'+st.k; }
+            try{ if(r)prodItemInvalidate(r.item_ref); pgetClear(); }catch(e2){} }); }; });
         // v27.753 (Ben): clicking a sample opens the MANAGE panel on that sample's sub-tab (was a duplicate inline pop-down alongside the MANAGE tabs). Switches the tab if MANAGE is already open for the row.
         g.querySelectorAll('.smp-sdate, .smp-n').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); var rid=a.dataset.rid, sid=a.dataset.sid; var r=rows.filter(function(x){return String(x.id)===rid;})[0]; if(!r)return; var tr=a.closest('tr'); var idx=(r.samples||[]).map(function(x){return String(x.id);}).indexOf(String(sid)); if(idx<0)idx=0;
           var mopen=g.querySelector('tr.smp-mexp[data-rid="'+rid+'"]'); if(mopen){ var t=mopen.querySelector('.smp-mtab[data-t="s'+idx+'"]'); if(t){ t.click(); return; } mopen.remove(); }
@@ -15657,7 +15676,7 @@
       // used-tag filter bar (Phase 3): chips for the tags actually applied on THIS product; multi-select
       var usedCount={}; notes.forEach(function(n){ (n.tags||[]).forEach(function(id){ if(TAGMAP[id])usedCount[id]=(usedCount[id]||0)+1; }); });
       var usedIds=Object.keys(usedCount), anyFilt=usedIds.some(function(id){return FILT[id];});
-      var filterBar=usedIds.length?('<div style="margin:2px 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center"><span class="mut tiny" style="margin-right:2px">Filter:</span>'
+      var filterBar=usedIds.length?('<div class="pt-tagsrow" style="margin:2px 0 8px;display:flex;flex-wrap:wrap;gap:5px;align-items:center"><span class="mut tiny" style="margin-right:2px">Filter:</span>'
         +usedIds.map(function(id){ var t=TAGMAP[id], on=!!FILT[id]; return '<span class="pt-filt" data-id="'+id+'" style="cursor:pointer;font-size:10px;font-weight:700;border-radius:5px;padding:2px 9px;border:1px solid '+esc(t.colour||'var(--muted)')+';'+(on?('background:'+esc(t.colour||'var(--muted)')+';color:#fff'):('background:var(--card);color:'+esc(t.colour||'var(--muted)')))+'">'+esc(t.name||'')+' <span style="opacity:.7">'+usedCount[id]+'</span></span>'; }).join('')
         +(anyFilt?' <a class="pt-filt-clear" style="cursor:pointer;font-size:10px;color:var(--muted);text-decoration:underline">clear</a>':'')+'</div>'):'';
       var _items=[]; notes.forEach(function(n){ if(anyFilt){ if(!(n.tags||[]).some(function(id){return FILT[id];}))return; } _items.push({t:String(n.created_at||''),h:_noteRow(n)}); });
@@ -15665,11 +15684,11 @@
       _items.sort(function(a,b){ return tlTs(b.t).localeCompare(tlTs(a.t)); });   // newest-first (sortable key; dd-Mmm-yy sorted by day otherwise)
       var list=_items.length?_items.map(function(x){return x.h;}).join(''):'<div class="mut tiny" style="padding:6px 0">'+(anyFilt?'No messages with the selected tag'+(usedIds.filter(function(id){return FILT[id];}).length>1?'s':'')+'.':'No timeline entries yet.')+'</div>';
       var _compChips=ACTTAGS.map(function(t){ return '<span class="pt-tagchip" data-id="'+t.id+'" style="cursor:pointer;display:inline-block;font-size:10px;font-weight:700;border-radius:5px;padding:2px 9px;margin:0 4px 4px 0;border:1px solid '+esc(t.colour||'var(--muted)')+';color:'+esc(t.colour||'var(--muted)')+';background:var(--card)">'+esc(t.name||'')+'</span>'; }).join('');
-      var compose='<div style="margin-top:6px;max-width:640px">'
+      var compose='<div class="pt-compose" style="margin-top:6px;max-width:640px">'
         +'<div style="position:relative"><textarea class="fci" id="pt-in" rows="2" spellcheck="true" autocorrect="on" autocapitalize="sentences" lang="en-GB" placeholder="Add a note…  Type / for a reusable phrase · /p for a Pantone colour'+(_smpList.length?' · /s to tag a sample version':'')+' · drop photos / documents on the box or add files" style="width:100%;box-sizing:border-box;min-height:52px;text-align:left"></textarea>'
           +'<div id="pt-picker" style="display:none;position:absolute;left:6px;right:6px;top:calc(100% - 2px);z-index:60;background:var(--card);border:1px solid var(--line);border-radius:6px;box-shadow:0 6px 20px rgba(15,23,42,.14);max-height:200px;overflow:auto"></div></div>'
         +'<div id="pt-prev" style="display:none;margin:4px 0 0;font-size:12px;line-height:1.5"></div>'
-        +'<div style="margin:5px 0 2px"><span class="mut tiny" style="margin-right:4px">Tags:</span>'+_compChips+'<span class="pt-tagnew" title="Create a new tag" style="cursor:pointer;display:inline-block;font-size:10px;font-weight:700;border-radius:5px;padding:2px 9px;margin:0 4px 4px 0;border:1px dashed var(--muted);color:var(--muted);background:var(--card)">+ new tag</span></div>'
+        +'<div class="pt-tagsrow" style="margin:5px 0 2px"><span class="mut tiny" style="margin-right:4px">Tags:</span>'+_compChips+'<span class="pt-tagnew" title="Create a new tag" style="cursor:pointer;display:inline-block;font-size:10px;font-weight:700;border-radius:5px;padding:2px 9px;margin:0 4px 4px 0;border:1px dashed var(--muted);color:var(--muted);background:var(--card)">+ new tag</span></div>'
         +'<div class="mut tiny" style="margin:4px 0 2px"><label style="cursor:pointer;color:var(--blue);font-weight:600">📎 add files<input type="file" id="pt-files" multiple accept="image/*,.pdf,.doc,.docx,.xls,.xlsx,.ai,.zip" style="display:none"></label></div><div id="pt-filelist" style="display:flex;flex-wrap:wrap;gap:6px;margin:2px 0"></div>'
         +'<div style="margin-top:5px"><button class="save-btn" id="pt-post" style="background:var(--blue);color:#fff;border-color:var(--blue)">Post</button> <span id="pt-postmsg" class="mut tiny"></span></div></div>'
         +'<div class="mut tiny" style="margin:4px 2px 12px">To escalate to the supplier, post the message then use ⚑ Escalate on it.</div>';

@@ -856,21 +856,24 @@ body header.pv-top .pv-lang button:hover{color:#fff}
 #app #product-root .smp-viewpill:last-child{border-radius:0 var(--r-sm) var(--r-sm) 0;border-left:none}
 #app #product-root .smp-viewpill.active{background:var(--nav);color:var(--nav-ink);border-color:var(--nav)}
 #app #product-root .smp-tick{width:22px;height:22px;border:2px solid var(--line);border-radius:6px;display:inline-flex;align-items:center;justify-content:center;font-weight:900;font-size:13px;line-height:1;cursor:pointer;background:var(--card);color:transparent;transition:background .15s,border-color .15s;user-select:none}
-/* v27.758 design slice 2 — the tick carries the state (colour), the date is one faint line, the status word lives in the
-   tooltip and the MANAGE tab, and a small blue superscript counts notes + feedback on that version. Keys from _smpStatus(). */
-#app #product-root .smp-tick.on{background:var(--pos);border-color:var(--pos);color:#fff}
-#app #product-root .smp-tick.on.k-rv{background:var(--amber);border-color:var(--amber)}
-#app #product-root .smp-tick.on.k-rj{background:var(--neg);border-color:var(--neg)}
-#app #product-root .smp-tick.sub{border-color:var(--amber);border-style:dashed}
-#app #product-root .smp-tick.sub.k-tr{border-color:var(--violet)}
-#app #product-root .smp-tick.none{border-color:var(--line2);cursor:default;opacity:.55}
+/* v27.769 (Ben) — sample lifecycle colours. Hollow (open circle, coloured border) = not yet received: Development(blue),
+   Shipped(orange). Filled = received/decided: Package received(light purple), In review(dark purple), Approved(green),
+   Rejected(dark red), Stop development(bright red). Colour tokens: --smp-blue/orange/lpurple/dpurple/green/dred/bred. */
+#app #product-root{--smp-dev:#2361d8;--smp-shp:#e8892b;--smp-pkg:#b79ce8;--smp-rv:#6b3fbf;--smp-ok:#118a4e;--smp-rj:#c0271d;--smp-stop:#ff2020}
+#app #product-root .smp-tick.k-dev{background:transparent;border-color:var(--smp-dev);color:var(--smp-dev)}
+#app #product-root .smp-tick.k-shp{background:transparent;border-color:var(--smp-shp);color:var(--smp-shp)}
+#app #product-root .smp-tick.k-pkg{background:var(--smp-pkg);border-color:var(--smp-pkg);color:#fff}
+#app #product-root .smp-tick.k-rv{background:var(--smp-rv);border-color:var(--smp-rv);color:#fff}
+#app #product-root .smp-tick.k-ok{background:var(--smp-ok);border-color:var(--smp-ok);color:#fff}
+#app #product-root .smp-tick.k-rj{background:var(--smp-rj);border-color:var(--smp-rj);color:#fff}
+#app #product-root .smp-tick.k-stop{background:var(--smp-stop);border-color:var(--smp-stop);color:#fff}
+#app #product-root .smp-tick.none{background:transparent;border-color:var(--line2);border-style:dashed;border-radius:999px;cursor:default;opacity:.6;color:transparent}   /* empty slot = open uncoloured circle */
 #app #product-root .smp-tick:hover:not(.none){box-shadow:0 0 0 3px var(--blue-soft)}
 #app #product-root .smp-scell{position:relative}
 #app #product-root .smp-tickwrap{position:relative;display:inline-block;line-height:0}
 #app #product-root .smp-n{position:absolute;top:-6px;right:-8px;min-width:14px;height:14px;padding:0 3px;border-radius:999px;background:var(--blue);color:#fff;font-size:9px;line-height:14px;font-weight:700;text-align:center;cursor:pointer;box-shadow:0 0 0 1.5px var(--card)}
 #app #product-root .smp-sdate{display:block;font-size:9px;color:var(--faint);margin-top:3px;white-space:nowrap;cursor:pointer;line-height:1.1}
 #app #product-root .smp-sdate.sub{color:var(--amber);font-weight:600}
-#app #product-root .smp-sdate.k-tr{color:var(--violet)}
 /* MANAGE panel as a board card (3px --blue rail, L3-tinted header carrying ref · meta · tabs) */
 #app #product-root .smp-mcard{border:1px solid var(--line);border-left:3px solid var(--blue);border-radius:var(--r-md);background:var(--card);overflow:hidden;box-shadow:var(--shadow)}
 #app #product-root .smp-mhd{display:flex;align-items:center;gap:12px;padding:6px 12px;background:var(--l3-bg);border-bottom:1px solid var(--line);flex-wrap:wrap}
@@ -878,10 +881,13 @@ body header.pv-top .pv-lang button:hover{color:#fff}
 #app #product-root .smp-mhd .po-subnav .rtab{padding:9px 10px 8px}
 #app #product-root .smp-mbody{padding:10px 12px}
 #app #product-root .smp-dot{display:inline-block;width:7px;height:7px;border-radius:999px;margin-right:5px;vertical-align:1px;background:var(--faint)}
-#app #product-root .smp-dot.k-ok{background:var(--pos)}
-#app #product-root .smp-dot.k-rv{background:var(--amber)}
-#app #product-root .smp-dot.k-rj{background:var(--neg)}
-#app #product-root .smp-dot.k-tr{background:var(--violet)}
+#app #product-root .smp-dot.k-dev{background:var(--smp-dev)}
+#app #product-root .smp-dot.k-shp{background:var(--smp-shp)}
+#app #product-root .smp-dot.k-pkg{background:var(--smp-pkg)}
+#app #product-root .smp-dot.k-rv{background:var(--smp-rv)}
+#app #product-root .smp-dot.k-ok{background:var(--smp-ok)}
+#app #product-root .smp-dot.k-rj{background:var(--smp-rj)}
+#app #product-root .smp-dot.k-stop{background:var(--smp-stop)}
 #app #product-root .smp-dot.k-wt{background:transparent;border:1.5px dashed var(--faint);width:6px;height:6px}
 #app #product-root .smp-mexp>td{padding:6px 8px 12px !important;background:var(--hover)}
 /* v27.759 design slice 3 — MANAGE ▸ Timeline: thread on the left, compact facts card on the right (stacks on phones) */
@@ -890,6 +896,10 @@ body header.pv-top .pv-lang button:hover{color:#fff}
 #app #product-root .smp-facts b{font-weight:700;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);line-height:1.7}
 #app #product-root .smp-facts span{min-width:0;overflow-wrap:anywhere}
 @media (max-width:640px){ #app #product-root .smp-tlgrid{grid-template-columns:1fr} #app #product-root .smp-scell{min-width:0}
+  /* v27.769 (Ben): timeline compose full screen width; tag rows on ONE line, horizontally scrollable */
+  #app #product-root .pt-compose{max-width:none !important}
+  #app #product-root .pt-tagsrow{flex-wrap:nowrap !important;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap;padding-bottom:2px}
+  #app #product-root .pt-tagsrow>*{flex:0 0 auto}
   /* SAMPLING card on phones (hz-stack) — v27.768 (Ben): label ON TOP (small, subtle), data FULL WIDTH beneath it, not a
      40% left gutter that ate half the screen. Each field reads as a tiny caption + full-width value. */
   #app #product-root table.smp-tbl[data-stack] td.l{display:block !important;position:static !important;padding-left:0 !important;padding-right:0 !important;min-height:0}
