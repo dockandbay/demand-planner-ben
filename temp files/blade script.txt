@@ -1,0 +1,149 @@
+function get_blade_inventory() {
+  
+  get_blade_variations();
+  
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const authSheet = ss.getSheetByName('BLADE_AUTH');
+  const outputSheet = ss.getSheetByName('BLADE_STOCK');
+
+  if (!outputSheet) {
+    Logger.log('❌ Sheet "BLADE_STOCK" not found.');
+    return;
+  }
+
+  const requestBody = authSheet.getRange('A2').getValue().toString().trim();
+  const token = authSheet.getRange('D2').getValue().toString().trim();
+
+  if (!requestBody || !token) {
+    Logger.log('❌ Missing request body or access token.');
+    return;
+  }
+
+  const url = 'https://public-api.bladepro.io/v1/products/variations/stocks';
+
+  const options = {
+    method: 'put',
+    contentType: 'application/json',
+    headers: {
+      'Access-Token': token
+    },
+    payload: requestBody,
+    muteHttpExceptions: true
+  };
+
+  try {
+    const response = UrlFetchApp.fetch(url, options);
+    const code = response.getResponseCode();
+    const body = response.getContentText();
+
+    if (code !== 200) {
+      Logger.log(`❌ Blade stock fetch failed. Status: ${code}`);
+      Logger.log(body);
+      return;
+    }
+
+    const json = JSON.parse(body);
+    const stocks = json.data || [];
+
+    if (stocks.length === 0) {
+      Logger.log('ℹ️ No stock data returned.');
+      return;
+    }
+
+    // Extract all keys from all rows to build dynamic headers
+    const headers = Array.from(new Set(stocks.flatMap(item => Object.keys(item))));
+    const rows = stocks.map(item => headers.map(key => item[key] ?? ''));
+
+    // Clear from column B onwards only
+    const maxRows = outputSheet.getMaxRows();
+    const maxCols = outputSheet.getMaxColumns();
+    if (maxCols > 1) {
+      outputSheet.getRange(1, 2, maxRows, maxCols - 1).clearContent();
+    }
+
+    // Write headers and rows starting from column B
+    outputSheet.getRange(1, 2, 1, headers.length).setValues([headers]);
+    outputSheet.getRange(2, 2, rows.length, headers.length).setValues(rows);
+
+    Logger.log(`✅ Exported ${rows.length} stock records to "BLADE_STOCK_NEW".`);
+
+  } catch (e) {
+    Logger.log('❌ Error during Blade stock request: ' + e.message);
+  }
+}
+
+
+
+function get_blade_variations() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const authSheet = ss.getSheetByName('BLADE_AUTH');
+  const outputSheet = ss.getSheetByName('BLADE_VARIATIONS');
+
+  if (!outputSheet) {
+    Logger.log('❌ Sheet "BLADE_VARIATIONS" not found.');
+    return;
+  }
+
+  const token = authSheet.getRange('D2').getValue().toString().trim();
+  if (!token) {
+    Logger.log('❌ Missing access token.');
+    return;
+  }
+
+  const baseUrl = 'https://public-api.bladepro.io/v1/products/variations/stock_availability?expand=*';
+  let page = 1;
+  const allRows = [];
+
+  while (true) {
+    const url = `${baseUrl}&page=${page}`;
+    const options = {
+      method: 'get',
+      contentType: 'application/json',
+      headers: {
+        'Access-Token': token
+      },
+      muteHttpExceptions: true
+    };
+
+    const response = UrlFetchApp.fetch(url, options);
+    const code = response.getResponseCode();
+    if (code !== 200) {
+      Logger.log(`❌ API call failed on page ${page}. Status: ${code}`);
+      break;
+    }
+
+    const json = JSON.parse(response.getContentText());
+    const data = json.data || [];
+    if (data.length === 0) break;
+
+    for (const item of data) {
+      allRows.push([
+        item.id || '',
+        item.sku || '',
+        item.barcode || ''
+      ]);
+    }
+
+    page++;
+  }
+
+  if (allRows.length === 0) {
+    Logger.log('ℹ️ No stock availability data found.');
+    return;
+  }
+
+  // Write header and data
+  outputSheet.clearContents();
+  outputSheet.getRange(1, 1, 1, 3).setValues([['id', 'sku', 'barcode']]);
+  outputSheet.getRange(2, 1, allRows.length, 3).setValues(allRows);
+
+  Logger.log(`✅ Exported ${allRows.length} variation records to "BLADE_VARIATIONS".`);
+}
+
+
+
+Bladge auth 
+https://public-api.bladepro.io/v1/auth/login
+{"username":"app_6777fa0f3cfdd1.01954814","password":"xxxx"}
+Content-type application/json
+(Tell me how to put password into env file)
