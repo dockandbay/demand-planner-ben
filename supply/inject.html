@@ -13476,6 +13476,9 @@
     if((sh&&(sh.tracking||sh.ref))||String(s.supplier_status||'')==='shipped')return {t:'Shipped',k:'shp'};
     return {t:'In development',k:'dev'}; }
   function _smpGlyph(k){ return (k==='rj'||k==='stop')?'✕':(k==='rv'||k==='ok'||k==='pkg')?'✓':''; }   // filled states carry a glyph; dev/shipped are hollow (open) circles coloured by state
+  // v27.774 (Ben): sample tick colour legend — the key to the 7-state lifecycle colours
+  function smpTickLegend(){ var L=[['dev','In development'],['shp','Shipped'],['pkg','Package received'],['rv','In review'],['ok','Approved'],['rj','Rejected'],['stop','Stop development']];
+    return '<div class="smp-legend"><span class="smp-legend-lbl">Sample status:</span>'+L.map(function(x){ return '<span class="smp-leg-item"><span class="smp-tick smp-leg k-'+x[0]+'">'+_smpGlyph(x[0])+'</span>'+esc(x[1])+'</span>'; }).join('')+'</div>'; }
   function _smpAge(ts){ if(!ts)return null; var t=new Date(String(ts).replace(' ','T')).getTime(); if(!t)return null; return Math.max(0,Math.round((Date.now()-t)/86400000)); }
   function _smpAspectKey(cp){ var d=String(cp.dimension||''); return (['product','packaging','labels','polybag','other'].indexOf(d)>=0)?d:('c'+cp.id); }
   function smpViewPills(){ return '<span style="display:inline-flex" title="Sample requests grid, or review every development sample on one sample shipment (batch)">'+[['requests','Sample requests'],['batch','Batch review']].map(function(o){return '<button class="smp-viewpill'+(_smpView===o[0]?' active':'')+'" data-v="'+o[0]+'">'+o[1]+'</button>';}).join('')+'</span>'; }
@@ -13483,7 +13486,7 @@
   function renderProductSampling(c){ if(!c)return;
     if(_smpView==='batch'){   // v27.714 (Ben): Sample batch review is a view of SAMPLING — enter a sample shipment (batch) and review every sample on it
       c.innerHTML='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'+smpViewPills()+'</div><div id="smp-batch"></div>'; wireSmpViewPills(c,c); renderProductBatchReview(c.querySelector('#smp-batch')); return; }
-    c.innerHTML='<div id="smp-filters" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"></div><div id="smp-grid" class="tw smp-sw-'+_smpSwSize+'"><div class="hz-skel" aria-label="Loading"><i></i><i></i><i></i></div></div>';
+    c.innerHTML='<div id="smp-filters" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"></div>'+smpTickLegend()+'<div id="smp-grid" class="tw smp-sw-'+_smpSwSize+'"><div class="hz-skel" aria-label="Loading"><i></i><i></i><i></i></div></div>';
     Promise.all([fetch('/api/product/sampling').then(function(r){return r.json();}), fetch('/api/app-settings').then(function(r){return r.json();}).catch(function(){return {};})]).then(function(_res){ var rows=_res[0]; rows=Array.isArray(rows)?rows:[];
       var _st=_res[1]||{}; _smpGroupMode=(_st.sampling_group_mode==='tabs'||_st.sampling_group_mode==='tree')?_st.sampling_group_mode:'inline';   // v27.763 (Ben): CONFIG-set grouping layout
       var uniq=function(k){ var o={}; rows.forEach(function(r){ if(r[k])o[r[k]]=1; }); return Object.keys(o).sort(); };
