@@ -794,7 +794,7 @@ body header.pv-top .pv-lang button:hover{color:#fff}
    mode and matches the rest of Horizon. 2-id selectors (#app #product-root) per the theme's specificity convention.
    The MANAGE panel tab strip now uses the system L3 tab language (10px uppercase, letter-spaced; hover/active inset
    underline come from the shared .rtab rules above). Retired inline-expander rules (.smp-exp/.smp-tabs/.smp-tab) are gone. */
-#app #product-root .smp-tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:12px}
+#app #product-root .smp-tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:12px;table-layout:auto}   /* v27.776 (Ben): auto layout so columns size to content (swatch cell tracks the swatch; ref fits on one row) — the app base sets fixed */
 #app #product-root .smp-tbl th{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--card);position:sticky;top:0;z-index:2}
 #app #product-root .smp-tbl td{padding:7px 8px;border-bottom:1px solid var(--line2);vertical-align:middle}
 #app #product-root .smp-row:hover td{background:var(--hover)}
@@ -805,6 +805,10 @@ body header.pv-top .pv-lang button:hover{color:#fff}
 #app #product-root .smp-manage{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;border:1px solid var(--nav);background:var(--nav);color:var(--nav-ink);border-radius:var(--r-sm);padding:3px 10px;cursor:pointer;white-space:nowrap}
 #app #product-root .smp-manage:hover{background:var(--nav-2);border-color:var(--nav-2)}
 #app #product-root .smp-tbl td:first-child,#app #product-root .smp-tbl th:first-child{padding-right:0}
+/* v27.776 (Ben): swatch cell tracks the swatch size (shrink-to-fit, no wasted width); ref on one row */
+#app #product-root .smp-tbl td.smp-swcell{width:1%;white-space:nowrap;padding-left:6px !important;padding-right:6px !important;text-align:center}
+#app #product-root .smp-tbl td.smp-refcell{min-width:150px}
+#app #product-root .smp-refcell .smp-ref{font-weight:700;font-family:ui-monospace,Menlo,monospace;font-size:12px;white-space:nowrap}
 #app #product-root .smp-tbl td:nth-child(2),#app #product-root .smp-tbl th:nth-child(2){padding-left:4px}
 #app #product-root .po-subnav{display:flex;gap:2px;align-items:center;flex-wrap:wrap;background:var(--l3-bg);border:1px solid var(--blue-soft);border-radius:var(--r-sm);padding:2px 5px;margin:0 0 10px}
 #app #product-root .po-subnav .rtab{background:transparent;border:none;padding:11px 13px 9px;font-size:10px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;cursor:pointer;color:var(--faint);font-family:inherit;white-space:nowrap;flex:0 0 auto}
