@@ -14390,7 +14390,7 @@
     setTimeout(function(){ document.addEventListener('mousedown',out,true); },0);
     m.querySelectorAll('.snz-opt').forEach(function(o){ o.onmouseenter=function(){o.style.background='#eff6ff';}; o.onmouseleave=function(){o.style.background='';};
       o.onclick=function(){ close(); snoozeKeySet(key,parseInt(o.dataset.d,10),after); }; }); }
-  function prodPlanBadge(n){ var b=document.querySelector('#product-subnav .stab[data-k="plan"]'); if(b)b.innerHTML='PRODUCTS'+(n>0?' <span class="ex-badge" style="background:var(--neg);color:#fff" title="'+n+' approved size(s) need a SKU mapping">'+n+'</span>':''); }
+  function prodPlanBadge(n){ var b=document.querySelector('#product-subnav .stab[data-k="plan"]'); if(b)b.innerHTML='PRODUCTS'; }   /* v27.767 (Ben): PRODUCTS tab shows just the label, no count badge */
   // Colour the size-approval dropdown: pending = orange, approved = green, rejected = red.
   function szApprovalStyle(v){ return v==='approved'?'background:var(--pos-bg);color:var(--pos);font-weight:700':v==='rejected'?'background:var(--neg-bg);color:var(--neg);font-weight:700':'background:var(--amber-bg);color:var(--amber);font-weight:600'; }
   // Red "N map SKU" reminder (+ snooze) shown on a product row when it has approved sizes with no planner SKU yet.
@@ -14717,10 +14717,10 @@
         // MOBILE: a card per product, grouped by season → category; tap a card to open its detail inline.
         var _mS=null,_mC=null;
         var mob=f.map(function(r,i){ var sKey=r.season||'', cKey=r.category||'', hdr='';
-          if(sKey!==_mS){ _mS=sKey; _mC=null; hdr+='<div class="pgm-shdr">'+esc(sKey||'— no season —')+' <span style="font-weight:500;opacity:.6">'+seasonCount[sKey]+'</span></div>'; }
-          if(cKey!==_mC){ _mC=cKey; hdr+='<div class="pgm-chdr" style="display:flex;align-items:center;gap:8px">'+esc(cKey||'— no category —')+' <span style="opacity:.6">· '+catCount[sKey+'|'+cKey]+'</span></div>'; }   // v27.762 (Ben): no colour in the grouping (colour is in the category badge column)
+          if(sKey!==_mS){ _mS=sKey; _mC=null; hdr+='<div class="pgm-shdr" data-season="'+esc(sKey)+'">'+esc(sKey||'— no season —')+' <span style="font-weight:500;opacity:.6">'+seasonCount[sKey]+'</span></div>'; }
+          if(cKey!==_mC){ _mC=cKey; hdr+='<div class="pgm-chdr" data-season="'+esc(sKey)+'" data-cat="'+esc(cKey)+'" style="display:flex;align-items:center;gap:8px">'+esc(cKey||'— no category —')+' <span style="opacity:.6">· '+catCount[sKey+'|'+cKey]+'</span></div>'; }   // v27.762 (Ben): no colour in thegrouping (colour is in the category badge column)
           var sw=r.has_swatch?'<img class="pgm-sw" src="/api/product/swatch/'+encodeURIComponent(r.ref)+'?t='+encodeURIComponent(r.updated_at||'')+'">':'<span class="pgm-sw none"></span>';
-          return hdr+'<div class="pgm-card" data-ref="'+esc(r.ref)+'" data-i="'+i+'"'+(r.category_colour?' style="border-left:4px solid '+r.category_colour+'"':'')+'>'
+          return hdr+'<div class="pgm-card" data-ref="'+esc(r.ref)+'" data-i="'+i+'" data-season="'+esc(r.season||'')+'" data-cat="'+esc(r.category||'')+'"'+(r.category_colour?' style="border-left:4px solid '+r.category_colour+'"':'')+'>'
             +'<div class="pgm-top">'+sw+'<div class="pgm-meta"><div class="pgm-colour">'+prodColourDisplay(r)+'</div><div class="pgm-ref">'+esc(r.ref)+' '+(cKey?hzCatBadge(cKey,r.category_colour,{size:9,pad:'2px 7px'}):'')+prodComboBadge(r)+'</div></div>'+'<span class="pgm-stage-chip">'+prodStageChip(r.stage)+'</span></div>'
             +'<div class="pgm-sub"><span>Sizes '+r.sizes_approved+'/'+r.sizes+'</span><span>'+esc(prodStageOwner(r.stage))+(r.stage_overridden?' · overridden':'')+'</span></div>'
             +'<div class="pgm-reqs" style="margin-top:6px">'+prodRequestsCell(r,{compact:true})+'</div>'   // v27.703
@@ -14765,12 +14765,16 @@
           var _dg=g.querySelector('.pg-desktop'), _tbl=_dg&&_dg.querySelector('table');
           if(_tbl){
             _dg.querySelectorAll('tr.pg-seasonhdr, tr.pg-cathdr').forEach(function(h){ h.remove(); });
+            g.querySelectorAll('.pg-mobile .pgm-shdr, .pg-mobile .pgm-chdr').forEach(function(h){ h.style.display='none'; });   // v27.767 (Ben): mobile group headers replaced by the tabs/tree nav
             var _seas=[]; f.forEach(function(r){ var s=r.season||''; if(_seas.indexOf(s)<0)_seas.push(s); });
             var _typesOf=function(s){ var o=[]; f.forEach(function(r){ if((r.season||'')===s){ var t=r.category||''; if(o.indexOf(t)<0)o.push(t); } }); return o; };
             var _cntS=function(s){ return f.filter(function(r){return (r.season||'')===s;}).length; };
             var _cntT=function(s,t){ return f.filter(function(r){return (r.season||'')===s && (r.category||'')===t;}).length; };
             var _show=function(s,t){ _dg.querySelectorAll('tr.pg-detrow').forEach(function(dr){ dr.style.display='none'; var d=dr.querySelector('.pg-det'); if(d)d.innerHTML=''; });
-              _dg.querySelectorAll('tr.pg-datarow').forEach(function(row){ row.style.display=((row.dataset.season||'')===s && (!t||(row.dataset.cat||'')===t))?'':'none'; }); };
+              _dg.querySelectorAll('tr.pg-datarow').forEach(function(row){ row.style.display=((row.dataset.season||'')===s && (!t||(row.dataset.cat||'')===t))?'':'none'; });
+              // v27.767 (Ben): filter the MOBILE cards too (close any open mobile detail on branch switch)
+              g.querySelectorAll('.pg-mobile .pg-mdet').forEach(function(d){ d.style.display='none'; d.innerHTML=''; });
+              g.querySelectorAll('.pg-mobile .pgm-card').forEach(function(c){ c.style.display=((c.dataset.season||'')===s && (!t||(c.dataset.cat||'')===t))?'':'none'; }); };
             if(_smpGroupMode==='tabs'){
               if(_seas.indexOf(_pgTab.season)<0){ _pgTab.season=_seas[0]||''; _pgTab.type=''; }
               if(_pgTab.type && _typesOf(_pgTab.season).indexOf(_pgTab.type)<0)_pgTab.type='';
