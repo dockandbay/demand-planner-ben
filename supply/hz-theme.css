@@ -813,6 +813,17 @@ body header.pv-top .pv-lang button:hover{color:#fff}
 #app #product-root #smp-grid.smp-sw-lg .pg-swatch2{width:76px;height:76px;border-radius:var(--r-md)}
 #app #product-root #smp-grid img.pg-swatch2{cursor:zoom-in}
 #app #product-root .smp-type{display:inline-block;font-size:10px;font-weight:800;letter-spacing:.03em;text-transform:uppercase;padding:1px 7px;border-radius:999px;background:var(--line2);color:var(--muted);white-space:nowrap}
+/* v27.762 (Ben): SAMPLING grid grouping — season → type, no colour, larger text, clear collapsible carets (mirrors the PRODUCT grid) */
+#app #product-root .smp-seasonhdr>td{cursor:pointer;background:var(--line);border-top:2px solid var(--faint);font-weight:800;font-size:13.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--ink-soft);padding:8px 12px;position:sticky;left:0}
+#app #product-root .smp-cathdr>td{cursor:pointer;background:var(--line2);font-weight:700;font-size:12.5px;color:var(--muted);padding:6px 12px 6px 28px;position:sticky;left:0}
+#app #product-root .smp-seasonhdr:hover>td{background:var(--line2)}
+#app #product-root .smp-cathdr:hover>td{background:var(--hover)}
+#app #product-root .smp-gcaret{display:inline-block;width:18px;text-align:center;font-size:12px;color:var(--muted);margin-right:6px}
+#app #product-root .smp-gcount{font-weight:500;color:var(--faint)}
+@media(max-width:640px){
+  #app #product-root table.smp-tbl[data-stack] tr.smp-seasonhdr,#app #product-root table.smp-tbl[data-stack] tr.smp-cathdr{display:block;margin:8px 0 4px;border:0;box-shadow:none;padding:0}
+  #app #product-root table.smp-tbl[data-stack] tr.smp-seasonhdr>td,#app #product-root table.smp-tbl[data-stack] tr.smp-cathdr>td{display:block;border-radius:6px;position:static}
+}
 /* v27.761 (Ben): supplier acceptance chip on the SAMPLING grid row */
 #app #product-root .smp-acc{display:inline-block;font-size:9.5px;font-weight:800;letter-spacing:.02em;padding:1px 7px;border-radius:999px;white-space:nowrap}
 #app #product-root .smp-acc.ok{background:var(--pos-bg);color:var(--pos)}
@@ -842,9 +853,7 @@ body header.pv-top .pv-lang button:hover{color:#fff}
 /* MANAGE panel as a board card (3px --blue rail, L3-tinted header carrying ref · meta · tabs) */
 #app #product-root .smp-mcard{border:1px solid var(--line);border-left:3px solid var(--blue);border-radius:var(--r-md);background:var(--card);overflow:hidden;box-shadow:var(--shadow)}
 #app #product-root .smp-mhd{display:flex;align-items:center;gap:12px;padding:6px 12px;background:var(--l3-bg);border-bottom:1px solid var(--line);flex-wrap:wrap}
-#app #product-root .smp-mttl{font-weight:800;font-size:13px;font-family:ui-monospace,Menlo,monospace;color:var(--ink)}
-#app #product-root .smp-mmeta{white-space:nowrap}
-#app #product-root .smp-mhd .po-subnav{margin:0 0 0 auto;background:transparent;border:none;padding:0}
+#app #product-root .smp-mhd .po-subnav{margin:0;background:transparent;border:none;padding:0}   /* v27.762 (Ben): tabs left */
 #app #product-root .smp-mhd .po-subnav .rtab{padding:9px 10px 8px}
 #app #product-root .smp-mbody{padding:10px 12px}
 #app #product-root .smp-dot{display:inline-block;width:7px;height:7px;border-radius:999px;margin-right:5px;vertical-align:1px;background:var(--faint)}
