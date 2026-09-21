@@ -12994,7 +12994,7 @@ function fulfilUnwrap(v) { if (v && typeof v === 'object') { if (v.__class__ ===
 // Read one Fulfil PO (header + lines + final-destination metafield) by its purchase.purchase id.
 async function fulfilReadPoById(pid) {
   const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read',
-    [[['id', '=', pid]], 0, 1, null, ['id', 'number', 'reference', 'party', 'party.name', 'currency.code', 'warehouse', 'warehouse.code', 'company', 'state', 'purchase_date', 'requested_delivery_date']]);
+    [[['id', '=', pid]], 0, 1, null, ['id', 'number', 'reference', 'party', 'party.name', 'currency.code', 'warehouse', 'warehouse.code', 'company', 'state', 'purchase_date', 'requested_delivery_date', 'total_amount']]);
   const p = Array.isArray(rows) && rows[0]; if (!p) return null;
   const lineRows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.lineModel + '/search_read',
     [[['purchase', '=', pid]], 0, 500, null, ['product.code', 'description', 'quantity', 'unit_price']]);
@@ -13025,7 +13025,7 @@ async function fulfilReadPoById(pid) {
   return { fulfil_id: p.id, po: p.number || p.reference, number: p.number, reference: p.reference, party_id: p.party,
     supplier_name: p['party.name'] || null, currency: p['currency.code'] || null, warehouse: p['warehouse.code'] || null,
     company_id, company: company_id ? fulfilCompanyName(company_id) : null, country_code: company_id ? fulfilCountryForCompany(company_id) : null,
-    state: p.state, purchase_date: fulfilUnwrap(p.purchase_date), delivery: fulfilUnwrap(p.requested_delivery_date) || fulfilUnwrap(p.purchase_date), branch, lines };
+    state: p.state, purchase_date: fulfilUnwrap(p.purchase_date), delivery: fulfilUnwrap(p.requested_delivery_date) || fulfilUnwrap(p.purchase_date), total_amount: _fulfilNum(p.total_amount), branch, lines };
 }
 // Write one read Fulfil PO into the planner (mirrors the Cin7 import: the import IS the ERP truth, so qty=erp_qty,
 // cost=erp_cost, nothing "proposed"; the erp mirror rows are written so it reads fully in-sync with no phantom drift).
@@ -13034,10 +13034,15 @@ async function importFulfilPoToPlanner(po, req) {
   if (po.party_id) { const s = await pool.query('SELECT id,name FROM planner.suppliers WHERE fulfil_id=$1 LIMIT 1', [String(po.party_id)]); if (s.rows[0]) { supplier_id = s.rows[0].id; supplier_name = s.rows[0].name; } }
   if (!supplier_id && po.supplier_name) { const s = await pool.query('SELECT id,name FROM planner.suppliers WHERE name=$1 LIMIT 1', [po.supplier_name]); if (s.rows[0]) { supplier_id = s.rows[0].id; supplier_name = s.rows[0].name; } }
   const ref = po.po;
-  const cc = po.country_code || null;   // v27.778 (Ben): from the Fulfil company — AU company → 'AU', UK company → 'UK'
+  // v27.783 (Ben): SHIP-TO COUNTRY defaults from the BRANCH (its region), not the company. The company (UK entity vs AU
+  // entity) still drives the Fulfil push routing, but a UK-company PO can ship to US/EU/UK etc — the branch says where.
+  // Fall back to the company-derived country only when the branch has no country_code.
+  let cc = po.country_code || null;
+  if (po.branch) { const bc = await pool.query("SELECT nullif(trim(country_code),'') cc FROM planner.branches WHERE name=$1 LIMIT 1", [po.branch]); if (bc.rows[0] && bc.rows[0].cc) cc = bc.rows[0].cc; }
+  const startDate = po.purchase_date || null;   // v27.783 (Ben): Horizon start date = Fulfil Purchase Date
   const exists = (await pool.query('SELECT 1 FROM planner.purchase_orders WHERE po=$1', [ref])).rowCount > 0;
-  if (exists) { await pool.query('UPDATE planner.purchase_orders SET supplier_name=$2, supplier_id=$3, branch=coalesce($4,branch), country_code=coalesce($5,country_code), delivery_date_overide=coalesce($6::date, delivery_date_overide), updated_at=now() WHERE po=$1', [ref, supplier_name, supplier_id, po.branch, cc, po.delivery]); }
-  else { await pool.query("INSERT INTO planner.purchase_orders (po, supplier_name, supplier_id, branch, country_code, status, delivery_date_overide) VALUES ($1,$2,$3,$4,$5,'PRODUCTION',$6::date)", [ref, supplier_name, supplier_id, po.branch, cc, po.delivery]); }
+  if (exists) { await pool.query('UPDATE planner.purchase_orders SET supplier_name=$2, supplier_id=$3, branch=coalesce($4,branch), country_code=coalesce($5,country_code), start_production=coalesce($6::date, start_production), delivery_date_overide=coalesce($7::date, delivery_date_overide), updated_at=now() WHERE po=$1', [ref, supplier_name, supplier_id, po.branch, cc, startDate, po.delivery]); }
+  else { await pool.query("INSERT INTO planner.purchase_orders (po, supplier_name, supplier_id, branch, country_code, status, start_production, delivery_date_overide) VALUES ($1,$2,$3,$4,$5,'PRODUCTION',$6::date,$7::date)", [ref, supplier_name, supplier_id, po.branch, cc, startDate, po.delivery]); }
   await pool.query('DELETE FROM planner.purchase_order_lines WHERE po=$1', [ref]);
   await pool.query('DELETE FROM planner.erp_purchase_order_lines WHERE po=$1', [ref]);
   for (const l of po.lines) {
@@ -13046,8 +13051,14 @@ async function importFulfilPoToPlanner(po, req) {
   }
   await pool.query('DELETE FROM planner.erp_purchase_orders WHERE po=$1', [ref]);
   await pool.query("INSERT INTO planner.erp_purchase_orders (po, erp_po_id, supplier_name, status, synced_at) VALUES ($1,$2,$3,'open',now())", [ref, String(po.fulfil_id), supplier_name]);
+  // v27.783 (Ben): write the Fulfil drift MIRROR (keyed by the Horizon PO number) so the grid's Fulfil column reads
+  // "in sync" straight after an import — otherwise it showed "Push to Fulfil" until the next mirror-import cron run.
+  await pool.query(`INSERT INTO planner.fulfil_purchase_orders (po,fulfil_id,state,party_name,currency,warehouse_code,total_amount,line_count,lines,last_synced_at,source,updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,now(),'import',now())
+      ON CONFLICT (po) DO UPDATE SET fulfil_id=excluded.fulfil_id,state=excluded.state,party_name=excluded.party_name,currency=excluded.currency,warehouse_code=excluded.warehouse_code,total_amount=excluded.total_amount,line_count=excluded.line_count,lines=excluded.lines,last_synced_at=now(),source='import',updated_at=now()`,
+    [ref, po.fulfil_id, po.state || null, po.supplier_name || null, po.currency || null, po.warehouse || null, (po.total_amount != null ? po.total_amount : null), po.lines.length, JSON.stringify(po.lines.map(l => ({ sku: l.sku, qty: l.qty, unit_price: l.cost })))]);
   if (!exists) await notePoCreated(pool, ref, authUser(req));
-  return { po: ref, lines: po.lines.length, supplier_name, branch: po.branch, country_code: cc, company: po.company, currency: po.currency, fulfil_id: po.fulfil_id, exists };
+  return { po: ref, lines: po.lines.length, supplier_name, branch: po.branch, country_code: cc, start_production: startDate, company: po.company, currency: po.currency, fulfil_id: po.fulfil_id, exists };
 }
 app.post('/api/supply/po-import-fulfil', async (req, res) => {
   const b = req.body || {}, mode = (b.mode === 'sale') ? 'sale' : 'po', value = (b.value || '').trim(), confirm = !!b.confirm;
