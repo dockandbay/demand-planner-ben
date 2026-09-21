@@ -10276,7 +10276,7 @@ app.post('/api/supply/tpl/push-actuals/:id', async (req, res) => {
     for (const k of Object.keys(byShip)) { const a = byShip[k]; const md = (a.model === 'stock.shipment.internal') ? defs.internal : defs.out;
       if (md.freight) await fulfilUpsertShipmentNumeric(a.model, a.id, md.freight, a.freight);
       if (md.process) await fulfilUpsertShipmentNumeric(a.model, a.id, md.process, a.process);
-      await fulfilAddShipmentNote(a.model, a.id, 'Added fulfilment costs from 3PL invoice reconciliation from ' + tplName + ': Freight $' + a.freight.toFixed(2) + ', Processing $' + a.process.toFixed(2));
+      await fulfilAddShipmentNote(a.model, a.id, 'Horizon upload - Added fulfilment costs from 3PL invoice reconciliation from ' + tplName + ': Freight $' + a.freight.toFixed(2) + ', Processing $' + a.process.toFixed(2));
       if (a.model === 'stock.shipment.internal') pushedTransfer++; else pushedCust++; }
     res.json({ ok: true, env: cfg.env, total, offset, processed_to: end, done: end >= total, next_offset: end >= total ? null : end,
       customer_shipments_pushed: pushedCust, transfers_pushed: pushedTransfer, unresolved, unresolved_refs: unref });
