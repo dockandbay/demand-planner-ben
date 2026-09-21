@@ -11167,7 +11167,8 @@
     var dt=new Date(2000+parseInt(m[3],10),mo,parseInt(m[1],10),m[4]?+m[4]:0,m[5]?+m[5]:0);
     return (Date.now()-dt.getTime())>4*24*3600*1000; }catch(e){ return false; } }
   function renderDtcMismatch(d){ var b=biBody(); d=d||{orders:[],counts:{}}; var counts=d.counts||{};
-    b.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:var(--nav)">DTC mismatch</div>'
+    b.innerHTML='<div id="dtc-fulfil-align"></div>'
+      +'<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:var(--nav)">DTC mismatch</div>'
       +'<div class="mut tiny" style="margin-bottom:10px;max-width:840px">Open Direct-to-Client sales orders (not void, not dispatched) reconciled against their purchase orders (mapped by sales order ref). Flags orders with <b>no PO</b> or a <b>SKU / quantity mismatch</b>. Add a note or <b>accept</b> a discrepancy to clear it from the count.</div>'
       +'<div class="bar" style="gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"><button class="save-btn" id="dtc-import" style="background:var(--blue);color:#fff;border:0;font-weight:800;box-shadow:0 6px 16px -6px rgba(35,97,216,.6)">&#8635; Import sales orders</button><span id="dtc-impmsg" class="mut tiny"></span>'
         +'<span style="margin-left:auto;display:inline-flex;gap:12px;align-items:center">'+_dtcPill('Issues',counts.issues||0,'var(--neg)')+_dtcPill('Accepted',counts.accepted||0,'var(--muted)')+_dtcPill('OK',counts.ok||0,'var(--pos)')+_dtcPill('Unmapped POs',counts.unmapped_pos||0,'var(--amber)')+'<button id="dtc-grouped-only" title="Show only order groups where one or more POs span multiple sales orders" style="font-size:11px;padding:2px 10px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--violet);cursor:pointer;white-space:nowrap">&#8862; Grouped SOs <b data-dtcpill="Grouped" style="color:var(--violet)">'+((d.groups||[]).filter(function(g){return g.grouped;}).length)+'</b></button><button id="dtc-hide-acc" style="font-size:11px;padding:2px 10px;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--muted);cursor:pointer;white-space:nowrap">Hide accepted</button></span></div>'
@@ -11198,6 +11199,35 @@
     var _hb=document.getElementById('dtc-hide-acc'); if(_hb)_hb.onclick=function(){ _dtcHideAcc=!_dtcHideAcc; try{localStorage.setItem('dtcHideAcc',_dtcHideAcc?'1':'0');}catch(e){} _dtcApplyHideAcc(); };
     try{ _dtcApplyHideAcc(); }catch(e){}
     try{ refreshDtcBadge(); }catch(e){}
+    try{ renderDtcFulfilAlign(); }catch(e){}
+  }
+  // v27.797: DTC ↔ Fulfil alignment — standalone read-only exception panel. Fulfil is the source of truth;
+  // Horizon flags divergence only (never writes). For each Horizon PO↔SO mapping we show Fulfil's ACTUAL linked
+  // sale side-by-side. po-not-in-fulfil / no-fulfil-sale-link are unambiguous exceptions; linked rows are shown
+  // both-sides for eyeball comparison (the SO identifiers differ between systems, so no auto-verdict).
+  function renderDtcFulfilAlign(){ var host=document.getElementById('dtc-fulfil-align'); if(!host)return;
+    host.innerHTML='<div class="mut tiny" style="padding:8px 0">Loading Fulfil alignment…</div>';
+    fetch('/api/supply/dtc/fulfil-alignment').then(function(r){return r.json();}).then(function(j){
+      if(!j||j.ok===false){ host.innerHTML='<div class="mut tiny" style="padding:8px 0">Fulfil alignment unavailable'+(j&&j.error?': '+j.error:'')+'</div>'; return; }
+      var rows=j.rows||[]; var LBL={'po-not-in-fulfil':['PO not in Fulfil','var(--neg)'],'no-fulfil-sale-link':['No Fulfil sale link','var(--amber)'],'linked-in-fulfil':['Linked in Fulfil','var(--pos)'],'fulfil-not-configured':['Fulfil not configured','var(--muted)']};
+      var exc=rows.filter(function(x){return x.status==='po-not-in-fulfil'||x.status==='no-fulfil-sale-link';}).length;
+      var esc=function(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});};
+      var h='<div style="border:1px solid var(--line);border-radius:8px;padding:12px 14px;margin:2px 0 16px;background:var(--card)">'
+        +'<div style="font-weight:700;font-size:14px;color:var(--nav);display:flex;align-items:center;gap:10px;flex-wrap:wrap">Fulfil alignment <span class="mut tiny" style="font-weight:400">(env: '+esc(j.env||'')+')</span>'
+        +(exc?'<span style="font-size:11px;font-weight:800;background:var(--neg);color:#fff;padding:2px 9px;border-radius:10px">'+exc+' exception'+(exc>1?'s':'')+'</span>':'<span style="font-size:11px;font-weight:800;background:var(--pos);color:#fff;padding:2px 9px;border-radius:10px">no exceptions</span>')+'</div>'
+        +'<div class="mut tiny" style="margin:4px 0 10px;max-width:840px">Horizon PO↔SO mappings checked against Fulfil’s actual PO→sale link. Fulfil is the source of truth; Horizon flags divergence only. Linked rows show both sides for review (the SO reference differs between systems).</div>';
+      if(!rows.length){ h+='<div class="mut tiny">No linked PO↔SO mappings in Horizon to check.</div></div>'; host.innerHTML=h; return; }
+      h+='<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;min-width:640px"><thead><tr style="text-align:left;color:var(--muted);border-bottom:1px solid var(--line)">'
+        +'<th style="padding:5px 12px 5px 0">PO</th><th style="padding:5px 12px">Horizon SO ref</th><th style="padding:5px 12px">Fulfil SO ref</th><th style="padding:5px 12px">Fulfil client</th><th style="padding:5px 12px">Status</th></tr></thead><tbody>';
+      rows.forEach(function(x){ var lb=LBL[x.status]||[x.status,'var(--muted)'];
+        h+='<tr style="border-bottom:1px solid var(--line)"><td style="padding:5px 12px 5px 0;font-weight:700">'+esc(x.po)+'</td>'
+          +'<td style="padding:5px 12px">'+esc(x.horizon_so)+'</td>'
+          +'<td style="padding:5px 12px">'+(x.fulfil_so?esc(x.fulfil_so):'<span class="mut">—</span>')+'</td>'
+          +'<td style="padding:5px 12px">'+(x.fulfil_client?esc(x.fulfil_client):'<span class="mut">—</span>')+'</td>'
+          +'<td style="padding:5px 12px"><span style="font-weight:700;color:'+lb[1]+'">'+esc(lb[0])+'</span></td></tr>';
+      });
+      h+='</tbody></table></div></div>'; host.innerHTML=h;
+    }).catch(function(e){ host.innerHTML='<div class="mut tiny" style="padding:8px 0">Fulfil alignment error: '+(e&&e.message||e)+'</div>'; });
   }
   // Report-level internal timeline notes (@-mention → email a teammate a link to this report). Reuses the PO
   // note infra: ensureTeam/_team for handle→email, noteBodyHtml for @bolding, showMentionEmail (sandbox preview).
