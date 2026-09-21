@@ -11289,6 +11289,26 @@ app.post('/api/supply/dtc/unmap', async (req, res) => {
   try { await pool.query(`DELETE FROM planner.dtc_po_so_map WHERE po=$1 AND sales_order_ref=$2`, [po, ref]); res.json({ ok: true }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v27.797 (Ben): DTC ↔ Fulfil alignment (READ ONLY — Fulfil is the source of truth; Horizon flags divergence, never writes).
+// For each Horizon PO↔SO mapping (dtc_po_so_map), show the Fulfil PO's ACTUAL linked sale so misalignment is visible.
+app.get('/api/supply/dtc/fulfil-alignment', async (req, res) => {
+  try {
+    const maps = (await pool.query(`SELECT po, sales_order_ref FROM planner.dtc_po_so_map WHERE link=true ORDER BY po`)).rows;
+    const cfg = fulfilConfigFor(await activeFulfilEnv());
+    const rows = [];
+    for (const m of maps) {
+      let fpId = null, fpRef = null, sale = null, status = 'fulfil-not-configured';
+      if (cfg.configured) {
+        let r = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['number', '=', m.po]], 0, 1, null, ['id', 'reference']]);
+        if (!r.length) r = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['reference', '=', m.po]], 0, 1, null, ['id', 'reference']]);
+        if (r.length) { fpId = r[0].id; fpRef = r[0].reference; sale = await fulfilSaleForPo(fpId, fpRef); status = sale ? 'linked-in-fulfil' : 'no-fulfil-sale-link'; }
+        else status = 'po-not-in-fulfil';
+      }
+      rows.push({ po: m.po, horizon_so: m.sales_order_ref, fulfil_po_id: fpId, fulfil_so: sale ? sale.ref : null, fulfil_client: sale ? sale.client : null, status });
+    }
+    res.json({ ok: true, env: cfg.env, rows });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // Accept / note an unmapped-PO row (the reverse DTC view) — mig 222
 app.post('/api/supply/dtc/po-review', async (req, res) => {
   const b = req.body || {}; const po = String(b.po || '').trim();

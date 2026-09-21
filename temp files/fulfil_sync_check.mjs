@@ -1,0 +1,45 @@
+import "dotenv/config";
+import pg from "pg";
+const T=setTimeout(()=>{console.error("TIMEOUT");process.exit(1)},110000);
+const sub=process.env.FULFIL_LIVE_SUBDOMAIN, key=process.env.FULFIL_LIVE_API_KEY;
+const base="https://"+sub+".fulfil.io/api/v2";
+async function ff(model,domain,fields){ let out=[],off=0; for(;;){ const r=await fetch(base+"/model/"+model+"/search_read",{method:"PUT",headers:{"X-API-KEY":key,"Content-Type":"application/json"},body:JSON.stringify([domain,off,500,null,fields])}); const t=await r.text(); if(!r.ok)throw new Error(model+" "+r.status+" "+t.slice(0,200)); const rows=JSON.parse(t); out=out.concat(rows); if(rows.length<500)break; off+=500; if(off>20000)break;} return out; }
+const pos=await ff("purchase.purchase",[["reference","!=",null]],["id","reference","state"]);
+const ids=pos.map(p=>p.id); const byId={}; pos.forEach(p=>byId[p.id]={ref:String(p.reference),state:p.state,lines:{}});
+for(let i=0;i<ids.length;i+=200){ const batch=ids.slice(i,i+200); const lr=await ff("purchase.line",[["purchase","in",batch]],["purchase","product.code","quantity"]); lr.forEach(l=>{ var o=byId[l.purchase]; if(!o)return; var sku=l["product.code"]||"(no-sku)"; o.lines[sku]=(o.lines[sku]||0)+(Number(l.quantity)||0); }); }
+const fulByRef={}; Object.values(byId).forEach(o=>{ fulByRef[o.ref]=o; });
+var cs=(process.env.LIVE_DATABASE_URL||"").trim().replace(/^["']|["']$/g,"");
+var m=cs.match(/^postgres(?:ql)?:\/\/([^:]+):(.*)@([^:\/]+):(\d+)\/(.+)$/);
+if(!m)throw new Error("could not parse LIVE_DATABASE_URL");
+const c=new pg.Client({host:m[3],port:Number(m[4]),user:m[1],password:m[2],database:m[5],ssl:{rejectUnauthorized:false}}); await c.connect();
+const hp=(await c.query("SELECT po, coalesce(status,'') status, coalesce(supplier_name,'') supplier FROM planner.purchase_orders")).rows;
+const hl=(await c.query("SELECT po, sku, coalesce(qty,0) qty FROM planner.purchase_order_lines WHERE coalesce(qty,0)>0")).rows;
+await c.end();
+const hByPo={}; hp.forEach(r=>hByPo[r.po]={status:r.status,supplier:r.supplier,lines:{}});
+hl.forEach(r=>{ if(hByPo[r.po])hByPo[r.po].lines[r.sku]=(hByPo[r.po].lines[r.sku]||0)+Number(r.qty); });
+const ACTIVE=new Set(["PRODUCTION","SHIPPING","READY TO SHIP"]);
+const fulRefs=Object.keys(fulByRef), hRefs=Object.keys(hByPo);
+const inFulNotHz=fulRefs.filter(r=>!hByPo[r]);
+const activeHz=hRefs.filter(r=>ACTIVE.has(hByPo[r].status));
+const activeMissingFul=activeHz.filter(r=>!fulByRef[r]);
+const matched=fulRefs.filter(r=>hByPo[r]);
+let qtyOk=0, qtyDiff=[];
+matched.forEach(r=>{ const f=fulByRef[r].lines, h=hByPo[r].lines; const skus=new Set([...Object.keys(f),...Object.keys(h)]); let diff=[]; skus.forEach(s=>{ if((f[s]||0)!==(h[s]||0))diff.push(s+": fulfil "+(f[s]||0)+" vs horizon "+(h[s]||0)); }); if(diff.length)qtyDiff.push({po:r,status:hByPo[r].status,diffs:diff.slice(0,4)}); else qtyOk++; });
+console.log("LIVE FULFIL POs:",fulRefs.length,"| PROD HORIZON POs:",hRefs.length,"(active:",activeHz.length+")");
+console.log("Matched by ref:",matched.length,"| lines in sync:",qtyOk,"| lines differ:",qtyDiff.length);
+console.log("In Fulfil, NOT in Horizon:",inFulNotHz.length, inFulNotHz.slice(0,15).join(", "));
+console.log("ACTIVE Horizon, NOT in Fulfil:",activeMissingFul.length, activeMissingFul.slice(0,20).join(", "));
+console.log("--- qty/line mismatches (first 12):");
+qtyDiff.slice(0,12).forEach(d=>console.log("  "+d.po+" ["+d.status+"] "+d.diffs.join(" | ")));
+// full report file
+import fs from "fs";
+var out="HORIZON ↔ FULFIL (LIVE) PO SYNC — "+new Date().toISOString().slice(0,16).replace('T',' ')+"\n";
+out+="Read-only compare: live Fulfil purchase orders vs production Horizon purchase_orders.\n\n";
+out+="TOTALS\n  Live Fulfil POs: "+fulRefs.length+"\n  Prod Horizon POs: "+hRefs.length+" (active: "+activeHz.length+")\n  Matched by reference: "+matched.length+"\n  Lines fully in sync: "+qtyOk+"\n  Lines differ: "+qtyDiff.length+"\n\n";
+out+="ACTIVE HORIZON POs NOT YET IN FULFIL ("+activeMissingFul.length+") — these still need pushing:\n"+activeMissingFul.map(r=>"  "+r+"  ["+hByPo[r].status+"]  "+hByPo[r].supplier).join("\n")+"\n\n";
+out+="IN FULFIL, NOT IN HORIZON ("+inFulNotHz.length+"):\n"+inFulNotHz.map(r=>"  "+r).join("\n")+"\n\n";
+out+="MATCHED POs WITH LINE DIFFERENCES ("+qtyDiff.length+"):\n";
+qtyDiff.forEach(d=>{ const f=fulByRef[d.po].lines, h=hByPo[d.po].lines; const skus=[...new Set([...Object.keys(f),...Object.keys(h)])].sort(); out+="  "+d.po+" ["+d.status+"]\n"; skus.forEach(s=>{ if((f[s]||0)!==(h[s]||0))out+="      "+s+": fulfil "+(f[s]||0)+" | horizon "+(h[s]||0)+"\n"; }); });
+var p="/private/tmp/claude-501/-Users-home-Documents-CLAUDE/eba7a72b-dc05-45ef-82ed-044c48052b28/scratchpad/fulfil-sync-report.txt";
+fs.writeFileSync(p,out); console.log("\nfull report:",p);
+clearTimeout(T); process.exit(0);

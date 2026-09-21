@@ -1,0 +1,219 @@
+[
+  {
+    "src_month": "2026-01",
+    "tgt_month": null,
+    "cost_center": "(unmatched)",
+    "orders": 6,
+    "amt": 159.19
+  },
+  {
+    "src_month": "2026-01",
+    "tgt_month": "2026-01",
+    "cost_center": "COGS - AU - Amazon",
+    "orders": 6,
+    "amt": 73.29
+  },
+  {
+    "src_month": "2026-01",
+    "tgt_month": "2026-01",
+    "cost_center": "COGS - AU - Shopify",
+    "orders": 306,
+    "amt": 4612.45
+  },
+  {
+    "src_month": "2026-02",
+    "tgt_month": null,
+    "cost_center": "(unmatched)",
+    "orders": 36,
+    "amt": 970.15
+  },
+  {
+    "src_month": "2026-02",
+    "tgt_month": "2026-02",
+    "cost_center": "COGS - AU - Amazon",
+    "orders": 25,
+    "amt": 311.35
+  },
+  {
+    "src_month": "2026-02",
+    "tgt_month": "2026-02",
+    "cost_center": "COGS - AU - Shopify",
+    "orders": 1291,
+    "amt": 19518.77
+  },
+  {
+    "src_month": "2026-03",
+    "tgt_month": null,
+    "cost_center": "(unmatched)",
+    "orders": 17,
+    "amt": 775.42
+  },
+  {
+    "src_month": "2026-03",
+    "tgt_month": "2026-03",
+    "cost_center": "COGS - AU - Amazon",
+    "orders": 39,
+    "amt": 481.32
+  },
+  {
+    "src_month": "2026-03",
+    "tgt_month": "2026-03",
+    "cost_center": "COGS - AU - Shopify",
+    "orders": 964,
+    "amt": 14635.92
+  },
+  {
+    "src_month": "2026-04",
+    "tgt_month": null,
+    "cost_center": "(unmatched)",
+    "orders": 10,
+    "amt": 246.37
+  },
+  {
+    "src_month": "2026-04",
+    "tgt_month": "2026-03",
+    "cost_center": "COGS - AU - Amazon",
+    "orders": 6,
+    "amt": 79.89
+  },
+  {
+    "src_month": "2026-04",
+    "tgt_month": "2026-03",
+    "cost_center": "COGS - AU - Shopify",
+    "orders": 104,
+    "amt": 1649.77
+  },
+  {
+    "src_month": "2026-04",
+    "tgt_month": "2026-04",
+    "cost_center": "COGS - AU - Amazon",
+    "orders": 20,
+    "amt": 277.21
+  },
+  {
+    "src_month": "2026-04",
+    "tgt_month": "2026-04",
+    "cost_center": "COGS - AU - Shopify",
+    "orders": 588,
+    "amt": 8875.24
+  },
+  {
+    "src_month": "2026-05",
+    "tgt_month": null,
+    "cost_center": "(unmatched)",
+    "orders": 11,
+    "amt": 320.92
+  },
+  {
+    "src_month": "2026-05",
+    "tgt_month": "2026-04",
+    "cost_center": "COGS - AU - Amazon",
+    "orders": 3,
+    "amt": 58.71
+  },
+  {
+    "src_month": "2026-05",
+    "tgt_month": "2026-04",
+    "cost_center": "COGS - AU - Shopify",
+    "orders": 155,
+    "amt": 2339.78
+  },
+  {
+    "src_month": "2026-05",
+    "tgt_month": "2026-05",
+    "cost_center": "COGS - AU - Amazon",
+    "orders": 23,
+    "amt": 265.05
+  },
+  {
+    "src_month": "2026-05",
+    "tgt_month": "2026-05",
+    "cost_center": "COGS - AU - Shopify",
+    "orders": 927,
+    "amt": 13588.03
+  },
+  {
+    "src_month": "2026-06",
+    "tgt_month": null,
+    "cost_center": "(unmatched)",
+    "orders": 10,
+    "amt": 372.87
+  },
+  {
+    "src_month": "2026-06",
+    "tgt_month": "2026-06",
+    "cost_center": "COGS - AU - Amazon",
+    "orders": 55,
+    "amt": 795.84
+  },
+  {
+    "src_month": "2026-06",
+    "tgt_month": "2026-06",
+    "cost_center": "COGS - AU - Shopify",
+    "orders": 1207,
+    "amt": 18254.68
+  },
+  {
+    "src_month": "2026-07",
+    "tgt_month": null,
+    "cost_center": "(unmatched)",
+    "orders": 11,
+    "amt": 274.74
+  },
+  {
+    "src_month": "2026-07",
+    "tgt_month": "2026-07",
+    "cost_center": "COGS - AU - Amazon",
+    "orders": 89,
+    "amt": 1159.68
+  },
+  {
+    "src_month": "2026-07",
+    "tgt_month": "2026-07",
+    "cost_center": "COGS - AU - Shopify",
+    "orders": 1038,
+    "amt": 15154.84
+  },
+  {
+    "src_month": "2026-08",
+    "tgt_month": null,
+    "cost_center": "(unmatched)",
+    "orders": 16,
+    "amt": 462.18
+  },
+  {
+    "src_month": "2026-08",
+    "tgt_month": "2026-08",
+    "cost_center": "COGS - AU - Amazon",
+    "orders": 74,
+    "amt": 1015.12
+  },
+  {
+    "src_month": "2026-08",
+    "tgt_month": "2026-08",
+    "cost_center": "COGS - AU - Shopify",
+    "orders": 1011,
+    "amt": 15575.64
+  },
+  {
+    "src_month": "2026-09",
+    "tgt_month": null,
+    "cost_center": "(unmatched)",
+    "orders": 158,
+    "amt": 2614.22
+  },
+  {
+    "src_month": "2026-09",
+    "tgt_month": "2026-08",
+    "cost_center": "COGS - AU - Amazon",
+    "orders": 5,
+    "amt": 83.19
+  },
+  {
+    "src_month": "2026-09",
+    "tgt_month": "2026-08",
+    "cost_center": "COGS - AU - Shopify",
+    "orders": 104,
+    "amt": 1495.46
+  }
+]
