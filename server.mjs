@@ -16109,23 +16109,38 @@ app.post('/api/supply/bi/erp-compare/ignore', async (req, res) => {
 // names a sale, e.g. SO49664) and that sale's company. Queried LIVE from Fulfil, not the mirror: native sale-linked POs
 // share one `reference` (the sale number) so the reference-keyed mirror (planner.fulfil_purchase_orders) can't hold them
 // individually. Sandbox has ~176 POs, so one paginated read is cheap.
-async function fulfilCompareRows() {
-  const cfg = fulfilConfigFor(await activeFulfilEnv());
+// The Fulfil API portion (all open POs + the linked-sale lookup) is the slow part (~2 network round-trips to the Fulfil
+// REST API, ~3s cold) — cache it briefly so repeat loads are instant. The cheap planner/ignored filtering below runs
+// fresh on every request, so Import/Ignore reflect immediately. ?refresh=1 forces a re-fetch.
+let _fulfilCmpCache = { env: null, at: 0, pos: null, saleMap: null };
+async function fulfilCompareApiData(force) {
+  const env = await activeFulfilEnv();
+  if (!force && _fulfilCmpCache.pos && _fulfilCmpCache.env === env && (Date.now() - _fulfilCmpCache.at) < 120000) return _fulfilCmpCache;
+  const cfg = fulfilConfigFor(env);
   if (!cfg.configured) { const e = new Error('Fulfil ' + cfg.env + ' API not configured'); e.code = 'NO_FULFIL_CFG'; throw e; }
   const pos = await fulfilSearchAll(FULFIL_MAP.poModel, [['state', 'not in', ['cancel', 'done']]],
     ['id', 'number', 'reference', 'state', 'party.name', 'company.rec_name', 'currency.code', 'warehouse.code', 'total_amount', 'purchase_date']);
-  const plannerPOs = new Set((await pool.query('SELECT po FROM planner.purchase_orders')).rows.map(r => r.po));
-  const suppliers = new Set((await pool.query("SELECT lower(trim(name)) n FROM planner.suppliers WHERE coalesce(kind,'supplier')='supplier'")).rows.map(r => r.n));
-  const ignored = new Set((await pool.query('SELECT po FROM planner.fulfil_compare_ignored')).rows.map(r => r.po));
-  const cand = pos.filter(p => { const key = p.number || p.reference; if (!key) return false; if (plannerPOs.has(key)) return false;
-    return suppliers.has(String(p['party.name'] || '').trim().toLowerCase()); });
-  // batch-resolve the linked sales orders (a `reference` that names a sale) → sale company + client
-  const saleRefs = Array.from(new Set(cand.map(p => p.reference).filter(r => r && /^SO/i.test(r))));
+  const saleRefs = Array.from(new Set(pos.map(p => p.reference).filter(r => r && /^SO/i.test(r))));
   const saleMap = {};
   if (saleRefs.length) {
     const sales = await fulfilFetch('PUT', '/model/sale.sale/search_read', [[['number', 'in', saleRefs]], 0, 500, null, ['number', 'company.rec_name', 'party.name', 'state']]);
     (sales || []).forEach(s => { saleMap[s.number] = { company: s['company.rec_name'] || null, client: s['party.name'] || null, state: s.state || null }; });
   }
+  _fulfilCmpCache = { env, at: Date.now(), pos, saleMap };
+  return _fulfilCmpCache;
+}
+async function fulfilCompareRows(force) {
+  const { pos, saleMap } = await fulfilCompareApiData(force);
+  const [poR, supR, igR] = await Promise.all([   // parallel — 3 sequential remote-pooler queries were ~1s; one round-trip instead
+    pool.query('SELECT po FROM planner.purchase_orders'),
+    pool.query("SELECT lower(trim(name)) n FROM planner.suppliers WHERE coalesce(kind,'supplier')='supplier'"),
+    pool.query('SELECT po FROM planner.fulfil_compare_ignored'),
+  ]);
+  const plannerPOs = new Set(poR.rows.map(r => r.po));
+  const suppliers = new Set(supR.rows.map(r => r.n));
+  const ignored = new Set(igR.rows.map(r => r.po));
+  const cand = pos.filter(p => { const key = p.number || p.reference; if (!key) return false; if (plannerPOs.has(key)) return false;
+    return suppliers.has(String(p['party.name'] || '').trim().toLowerCase()); });
   const cleanCo = v => String(v || '').replace(/^\[[A-Z]{2}\]\s*/, '').trim() || null;   // "[UK] Dock & Bay Ltd" → "Dock & Bay Ltd"
   return cand.map(p => {
     const key = p.number || p.reference;
@@ -16141,7 +16156,8 @@ async function fulfilCompareRows() {
   }).sort((a, b) => (a.ignored - b.ignored) || String(a.supplier_name || '').localeCompare(String(b.supplier_name || '')) || String(a.po).localeCompare(String(b.po)));
 }
 app.get('/api/supply/bi/fulfil-compare', async (req, res) => {
-  try { const rows = await fulfilCompareRows(); res.json({ ok: true, count: rows.filter(r => !r.ignored).length, rows }); }
+  try { const force = req.query.refresh === '1' || req.query.refresh === 'true';
+    const rows = await fulfilCompareRows(force); res.json({ ok: true, count: rows.filter(r => !r.ignored).length, cached: !force && (Date.now() - _fulfilCmpCache.at) > 50, rows }); }
   catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 500).json({ error: e.message }); }
 });
 app.post('/api/supply/bi/fulfil-compare/ignore', async (req, res) => {

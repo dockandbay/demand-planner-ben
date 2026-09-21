@@ -11592,7 +11592,7 @@
         +'<td class="l" style="white-space:nowrap">'+(isIgnored
             ? '<button class="save-btn light fulc-unignore" data-po="'+esc(r.po)+'">↩ Un-ignore</button>'
             : '<button class="save-btn fulc-import" data-po="'+esc(r.po)+'" style="background:var(--pos);color:#fff;border-color:#0a8">⬆ Import to Horizon</button> <button class="save-btn light fulc-ignore" data-po="'+esc(r.po)+'">Ignore</button>')+'</td></tr>'; }).join('');
-      return '<div class="tw"><table class="erpc-tbl"><thead><tr><th class="l">PO</th><th class="l">Fulfil id</th><th class="l">Supplier</th><th class="l">Company</th><th class="l">Sales order</th><th class="l">SO company</th><th class="l">Branch</th><th class="l">State</th><th>Value</th><th class="l">Order date</th><th class="l"></th></tr></thead><tbody>'+body+'</tbody></table></div>';
+      return '<div class="tw" style="overflow-x:auto;max-width:100%"><table class="erpc-tbl"><thead><tr><th class="l">PO</th><th class="l">Fulfil id</th><th class="l">Supplier</th><th class="l">Company</th><th class="l">Sales order</th><th class="l">SO company</th><th class="l">Branch</th><th class="l">State</th><th>Value</th><th class="l">Order date</th><th class="l"></th></tr></thead><tbody>'+body+'</tbody></table></div>';
     }
     var htmlOut=head;
     if(!active.length) htmlOut+='<div class="count">Nothing to reconcile — every open Fulfil PO for your suppliers is already in the planner (or ignored). ✓</div>';
@@ -11626,7 +11626,7 @@
         +'<td class="l">'+(isIgnored
             ? '<button class="save-btn light erpc-unignore" data-po="'+esc(r.po)+'">↩ Un-ignore</button>'
             : '<button class="save-btn light erpc-ignore" data-po="'+esc(r.po)+'">Ignore</button>')+'</td></tr>'; }).join('');
-      return '<div class="tw"><table class="erpc-tbl"><thead><tr><th class="l">PO</th><th class="l">ERP id</th><th class="l">Supplier</th><th class="l">Branch</th><th class="l">ERP status</th><th class="l">Order date</th><th>Value</th><th class="l">ERP delivery</th><th class="l">Synced</th><th class="l"></th></tr></thead><tbody>'+body+'</tbody></table></div>';
+      return '<div class="tw" style="overflow-x:auto;max-width:100%"><table class="erpc-tbl"><thead><tr><th class="l">PO</th><th class="l">ERP id</th><th class="l">Supplier</th><th class="l">Branch</th><th class="l">ERP status</th><th class="l">Order date</th><th>Value</th><th class="l">ERP delivery</th><th class="l">Synced</th><th class="l"></th></tr></thead><tbody>'+body+'</tbody></table></div>';
     }
     var htmlOut=head;
     if(!active.length) htmlOut+='<div class="count">Nothing to reconcile — every open ERP PO for your suppliers is already in the planner (or ignored). ✓</div>';
