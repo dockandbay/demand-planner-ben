@@ -13060,6 +13060,26 @@ async function importFulfilPoToPlanner(po, req) {
   if (!exists) await notePoCreated(pool, ref, authUser(req));
   return { po: ref, lines: po.lines.length, supplier_name, branch: po.branch, country_code: cc, start_production: startDate, company: po.company, currency: po.currency, fulfil_id: po.fulfil_id, exists };
 }
+// Resolve every Fulfil purchase order linked to a sales order. Fulfil links them two ways in practice (both seen on the
+// sandbox): (1) the PO's `reference` is set to the sale number (SO49664 → PO155/PO156); and (2) the sale's procurement
+// chain — sale.line.purchase_request → purchase.request.purchase_line.purchase (SO49667 → PO158, whose own reference is
+// unrelated, e.g. "PO1234"). The `sales` field on purchase.purchase is NOT searchable, so we walk the request chain.
+// Returns a de-duped list of purchase.purchase ids.
+async function fulfilPoIdsForSale(saleNumber) {
+  const ids = new Set();
+  const byRef = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['reference', '=', saleNumber]], 0, 200, null, ['id']]);
+  (byRef || []).forEach(r => ids.add(r.id));
+  const sale = await fulfilSearchOne('sale.sale', [['number', '=', saleNumber]], ['id']);
+  if (sale) {
+    const slines = await fulfilFetch('PUT', '/model/sale.line/search_read', [[['sale', '=', sale.id]], 0, 500, null, ['purchase_request']]);
+    const prIds = Array.from(new Set((slines || []).map(l => l.purchase_request).filter(Boolean)));
+    if (prIds.length) {
+      const prs = await fulfilFetch('PUT', '/model/purchase.request/search_read', [[['id', 'in', prIds]], 0, 500, null, ['purchase_line.purchase']]);
+      (prs || []).forEach(pr => { const pid = pr['purchase_line.purchase']; if (pid) ids.add(pid); });
+    }
+  }
+  return Array.from(ids);
+}
 app.post('/api/supply/po-import-fulfil', async (req, res) => {
   const b = req.body || {}, mode = (b.mode === 'sale') ? 'sale' : 'po', value = (b.value || '').trim(), confirm = !!b.confirm;
   const wanted = Array.isArray(b.pos) ? b.pos.map(String) : null;
@@ -13069,8 +13089,7 @@ app.post('/api/supply/po-import-fulfil', async (req, res) => {
   try {
     let poIds = [];
     if (mode === 'sale') {
-      const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['reference', '=', value]], 0, 200, null, ['id']]);
-      poIds = (rows || []).map(r => r.id);
+      poIds = await fulfilPoIdsForSale(value);
       if (!poIds.length) return res.status(404).json({ error: 'No Fulfil purchase orders are linked to sales order "' + value + '".' });
     } else {
       let rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['number', '=', value]], 0, 1, null, ['id']]);
