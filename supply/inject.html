@@ -9279,14 +9279,19 @@
       // typing, so the row STAYS on screen (no re-filter) until the next manual refresh — matching manual entry.
       document.querySelectorAll('#pdue-wrap .pdue-pay').forEach(function(b){ b.onclick=function(){
         // Save amount + date in ONE request (was two racing change events → the PO could end up with only one field).
-        // OPTIMISTIC (Ben): mark the row PAID in the data model and re-draw immediately, so it drops out of Outstanding
-        // at once and rapid clicks don't leave paid items lingering (with no date) until the slow ~10s cache refresh.
-        // The write runs in the background; on failure we revert the row's data and re-draw, so nothing is silently lost.
+        // v27.791 (Ben): IN PLACE — mark the row paid in the data (for the nav badge) but DO NOT draw(). The row stays
+        // where it is, showing the assigned amount + payment date and a "paid" badge; it only drops out / re-sorts on the
+        // user's next re-navigation or manual refresh. Background write; on failure we revert + draw() so nothing is lost.
         var iso=localToday(); var body={}; body[b.dataset.af]=b.dataset.amt; body[b.dataset.df]=iso;
         var r=rows.filter(function(x){ return x.ep===b.dataset.ep && x.amt_field===b.dataset.af; })[0];
         var prev=r?{amt_val:r.amt_val,dt_val:r.dt_val,paid:r.paid,overdue:r.overdue}:null;
-        if(r){ r.amt_val=b.dataset.amt; r.dt_val=iso; r.paid=true; r.overdue=false;   // flip to paid in the data → pass()/draw() re-filter instantly
-          _navCounts.paydue=rows.filter(function(x){return x.overdue;}).length; updateNavBadges(); draw(); }
+        if(r){ r.amt_val=b.dataset.amt; r.dt_val=iso; r.paid=true; r.overdue=false;
+          _navCounts.paydue=rows.filter(function(x){return x.overdue;}).length; updateNavBadges(); }   // NB: no draw() — see above
+        var host=b.closest('tr'); if(!host){ var n=b.parentNode; while(n && n.nodeType===1 && n!==document.body && !(n.querySelector&&n.querySelector('[data-field="'+b.dataset.af+'"]'))) n=n.parentNode; host=(n&&n!==document.body)?n:null; }
+        if(host){ var amtI=host.querySelector('.fci[data-field="'+b.dataset.af+'"]'); if(amtI)amtI.value=b.dataset.amt;
+          var dtI=host.querySelector('[data-field="'+b.dataset.df+'"]'); if(dtI){ try{ dtI.value=fd(iso); }catch(e){ dtI.value=iso; } }
+          if(host.tagName==='TR')host.style.opacity='.6';
+          b.outerHTML='<span class="tool-badge bg-green" title="marked paid — stays here until you re-open or refresh Payments">paid</span>'; }
         fetch(b.dataset.ep,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).then(function(r2){return r2.json();})
           .then(function(j){ if(j&&j.error)throw new Error(j.error);
             if(j&&j.row&&j.row.po){ poBy[j.row.po]=j.row; }   // keep the PO row fresh so opening the PO shows the payment
@@ -9856,7 +9861,7 @@
       var rk=payRunKey(r), rem=PAY_REMIT[rk]||[], em=PAY_EMAILS[rk];
       var remHtml = rem.length
         ? '<span class="tool-badge bg-green" title="'+esc(rem.length>1?(rem.length+' files'):rem[0].filename)+'">📎 attached</span> <a class="lnk-btn" href="/api/supply/remittance/'+rem[0].id+'" title="download remittance">⬇</a> <button class="lnk-btn pr-remit-del" data-id="'+rem[0].id+'" title="remove remittance">✕</button>'
-        : '<button class="save-btn light pr-remit-up" data-rk="'+esc(rk)+'" data-sup="'+esc(r.supplier)+'" title="Upload a remittance">⬆ Remittance</button>';
+        : ((em&&em.status==='sent') ? '<span class="mut tiny" title="paid confirmation already emailed — remittance upload closed">✉ emailed</span>' : '<button class="save-btn light pr-remit-up" data-rk="'+esc(rk)+'" data-sup="'+esc(r.supplier)+'" title="Upload a remittance">⬆ Remittance</button>');
       // Paid email sends automatically + immediately on paid — no button, no delay (Ben). Just reflect the outcome.
       var notifyHtml;
       if(em && em.status==='sent'){ notifyHtml='<span class="tool-badge bg-green" title="Paid confirmation emailed '+esc(em.sent_at||'')+'">✉ emailed</span>'; }
@@ -9895,7 +9900,7 @@
       var rk=payRunKey(r), rem=PAY_REMIT[rk]||[], em=PAY_EMAILS[rk];
       var remHtml = rem.length
         ? '<span class="tool-badge bg-green" title="'+esc(rem.length>1?(rem.length+' files'):rem[0].filename)+'">📎 attached</span> <a class="lnk-btn" href="/api/supply/remittance/'+rem[0].id+'" title="download remittance">⬇</a> <button class="lnk-btn pr-remit-del" data-id="'+rem[0].id+'" title="remove remittance">✕</button>'
-        : '<button class="save-btn light pr-remit-up" data-rk="'+esc(rk)+'" data-sup="'+esc(r.supplier)+'" title="Upload a remittance — it gets attached to the paid email">⬆ Remittance</button>';
+        : ((em&&em.status==='sent') ? '<span class="mut tiny" title="paid confirmation already emailed — remittance upload closed (it can only be attached before the paid email sends)">✉ emailed</span>' : '<button class="save-btn light pr-remit-up" data-rk="'+esc(rk)+'" data-sup="'+esc(r.supplier)+'" title="Upload a remittance — it gets attached to the paid email">⬆ Remittance</button>');
       // Paid-confirmation email now sends AUTOMATICALLY + IMMEDIATELY when a run is marked paid (bank amount + currency, or Paid USD) — no button, no 5-min delay (Ben). We just reflect the send outcome.
       var notifyHtml;
       if(em && em.status==='sent'){ notifyHtml='<span class="tool-badge bg-green" title="Paid confirmation emailed '+esc(em.sent_at||'')+' → '+esc(em.to_emails||'')+'">✉ emailed</span>'; }

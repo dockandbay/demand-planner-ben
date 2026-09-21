@@ -15317,7 +15317,7 @@ function render3plInvoice(body){
       return '<td class="l" style="padding:4px 9px;text-align:left;white-space:nowrap;'+(f==='label'?'font-weight:600':'')+'">'+(m[f]?e(m[f]):'<span style="color:var(--faint)">—</span>')+'</td>'; };
     // group rows by region (Ben)
     var _grp={}, _gord=[]; map.forEach(function(m){ var rg=m.region||'(no region)'; if(!_grp[rg]){_grp[rg]=[];_gord.push(rg);} _grp[rg].push(m); });
-    var mapRows=_gord.map(function(rg){ return '<tr style="background:var(--band)"><td colspan="'+AMC.length+'" style="padding:5px 9px;font-weight:800;font-size:10px;text-transform:uppercase;color:var(--nav);letter-spacing:.04em">'+e(rg)+' <span style="font-weight:400;color:var(--faint)">('+_grp[rg].length+')</span></td></tr>'
+    var mapRows=_gord.map(function(rg){ return '<tr style="background:var(--band)"><td colspan="'+AMC.length+'" class="l" style="padding:5px 9px;font-weight:800;font-size:10px;text-transform:uppercase;color:var(--nav);letter-spacing:.04em;text-align:left">'+e(rg)+' <span style="font-weight:400;color:var(--faint)">('+_grp[rg].length+')</span></td></tr>'
       +_grp[rg].map(function(m){ return '<tr>'+AMC.map(function(c){return amCell(m,c);}).join('')+'</tr>'; }).join(''); }).join('');
     b.innerHTML='<div style="font-size:13px;font-weight:700;margin-bottom:4px">'+e(TPL3.filter(function(t){return t[0]===TPL3_STATE.tpl;})[0][1])+' — storage &amp; other cost accounts</div>'
       +'<div style="font-size:11px;color:var(--faint);margin-bottom:8px">Xero account for this 3PL’s storage and other (non-order) charges. Saved on change.</div>'
