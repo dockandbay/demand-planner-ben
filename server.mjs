@@ -9612,7 +9612,8 @@ app.get('/api/supply/tpl/data', async (req, res) => {
       FROM planner.tpl_cost_accounts WHERE tpl=$1 ORDER BY cost_type`, [tpl])).rows;
     const map = (await pool.query(`SELECT label, coalesce(region,'') region, coalesce(channel,'') channel,
       coalesce(cogs_account,'') cogs_account, coalesce(sales_account,'') sales_account,
-      coalesce(fulfilment_account,'') fulfilment_account, coalesce(cost_of_sales_account,'') cost_of_sales_account
+      coalesce(fulfilment_account,'') fulfilment_account, coalesce(cost_of_sales_account,'') cost_of_sales_account,
+      coalesce(fulfil_channel,'') fulfil_channel
       FROM planner.tpl_account_map ORDER BY region NULLS LAST, channel NULLS LAST, label`)).rows;
     const cin7_summary = /^\d{4}-\d{2}$/.test(period) ? await tplCin7Summary(period, tpl) : null;
     res.json({ ok: true, files, cost_accounts: cost, account_map: map, cin7_summary });
@@ -9700,7 +9701,7 @@ app.post('/api/supply/tpl/cost-account', async (req, res) => {
 // Edit a single account-map cell (region×channel → COGS/Sales/Fulfilment/Cost of Sales), keyed by label.
 app.post('/api/supply/tpl/account-map', async (req, res) => {
   const b = req.body || {};
-  const FIELDS = { cogs_account: 1, sales_account: 1, fulfilment_account: 1, cost_of_sales_account: 1 };   // whitelist → safe to interpolate
+  const FIELDS = { cogs_account: 1, sales_account: 1, fulfilment_account: 1, cost_of_sales_account: 1, fulfil_channel: 1 };   // whitelist → safe to interpolate (fulfil_channel: v27.788 Ben — maps a Fulfil channel name to this account row)
   if (!b.label || !FIELDS[b.field]) return res.status(400).json({ error: 'label + valid field required' });
   try {
     const r = await pool.query(`UPDATE planner.tpl_account_map SET ${b.field}=$2 WHERE label=$1`, [b.label, (String(b.value == null ? '' : b.value).trim()) || null]);
@@ -10119,6 +10120,38 @@ async function _tplIlgAllocate(period) {
     autoOther: { orders: unmappedRefs.size, total: Math.round(shipUnmapped * 100) / 100, refs: [...unmappedRefs].slice(0, 100) },
     invoicesSeen: seen, channelsCovered: [...channels], missing };
 }
+// v27.788 (Ben): FULFIL sales-order side of the 3PL invoice mapping. Import the orders named on the invoice (by
+// reference) into planner.tpl_fulfil_orders, and map a Fulfil CHANNEL → the account row's cost centre via
+// tpl_account_map.fulfil_channel. Source of truth per order: a Cin7 invoice date wins; else Fulfil (esp. if shipped).
+const TPL_FULFIL_SHIPPED = new Set(['sent', 'done', 'packed']);
+async function importFulfilOrdersByRefs(refs, period) {
+  const uniq = Array.from(new Set((refs || []).filter(Boolean)));
+  if (!uniq.length) return {};
+  const cfg = fulfilConfigFor(await activeFulfilEnv());
+  if (!cfg.configured) return {};
+  const found = [];
+  for (let i = 0; i < uniq.length; i += 400) {   // Fulfil caps page size at 500; chunk the reference IN-list
+    const chunk = uniq.slice(i, i + 400);
+    const rows = await fulfilFetch('PUT', '/model/sale.sale/search_read', [[['reference', 'in', chunk]], 0, 500, null, ['id', 'number', 'reference', 'channel.name', 'channel', 'shipment_state', 'invoice_state', 'total_amount', 'company.rec_name', 'warehouse.code']]);
+    (rows || []).forEach(s => { if (s.reference) found.push(s); });
+  }
+  for (const s of found) {
+    await pool.query(`INSERT INTO planner.tpl_fulfil_orders (reference,fulfil_id,number,channel_name,channel_id,shipment_state,invoice_state,total,company,warehouse_code,period,imported_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now())
+      ON CONFLICT (reference) DO UPDATE SET fulfil_id=excluded.fulfil_id,number=excluded.number,channel_name=excluded.channel_name,channel_id=excluded.channel_id,shipment_state=excluded.shipment_state,invoice_state=excluded.invoice_state,total=excluded.total,company=excluded.company,warehouse_code=excluded.warehouse_code,period=excluded.period,imported_at=now()`,
+      [s.reference, s.id, s.number || null, s['channel.name'] || null, s.channel || null, s.shipment_state || null, s.invoice_state || null, _fulfilNum(s.total_amount), s['company.rec_name'] || null, s['warehouse.code'] || null, period || null]);
+  }
+  const byRef = {};
+  found.forEach(s => { byRef[s.reference] = { channel: s['channel.name'] || null, shipment_state: s.shipment_state || null, shipped: TPL_FULFIL_SHIPPED.has(String(s.shipment_state || '').toLowerCase()) }; });
+  return byRef;
+}
+// Fulfil channel name → cost-centre string (the account row's cogs_name — same vocabulary tpl_cin7_orders.cost_center uses).
+async function _tplFulfilChannelCC() {
+  const rows = (await pool.query("SELECT lower(trim(fulfil_channel)) fc, coalesce(nullif(cogs_name,''), label) cc FROM planner.tpl_account_map WHERE coalesce(fulfil_channel,'')<>''")).rows;
+  const m = {};
+  rows.forEach(r => { String(r.fc || '').split(',').map(x => x.trim()).filter(Boolean).forEach(c => { m[c] = r.cc; }); });
+  return m;
+}
 app.post('/api/supply/tpl/map/:id', async (req, res) => {
   try {
     const row = (await pool.query(`SELECT filename, content_type, content, tpl, period FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
@@ -10135,13 +10168,30 @@ app.post('/api/supply/tpl/map/:id', async (req, res) => {
     let dbrows = [];
     try { dbrows = (await pool.query(`SELECT reference, customer_order_no, coalesce(nullif(cost_center,''), member_cost_center) cc FROM planner.tpl_cin7_orders WHERE reference = ANY($1) OR customer_order_no = ANY($1)`, [needCin7])).rows; }
     catch (e) { dbrows = []; }
-    if (needCin7.length && !dbrows.length) return res.json({ ok: false, error: 'No imported Cin7 orders match this invoice yet — run "Import Cin7 orders" for the period first (previous-month manual fetch).', imported_matched: 0 });
+    // (v27.788) No hard block when Cin7 has nothing — a Fulfil-migrated 3PL (e.g. AU Coghlans) resolves via Fulfil below.
     const byRef = {}, byCon = {};
     dbrows.forEach(r => { const cc = String(r.cc || '').trim(); if (r.reference) byRef[r.reference] = cc; if (r.customer_order_no) byCon[r.customer_order_no] = cc; });
-    const refCC = {}; let ruleFba = 0, ruleTrf = 0;
-    refs.forEach(ref => { const ov = _tplRefOverride(ref, tpl0); if (ov) { refCC[ref] = ov; if (/^OTHER/.test(ov)) ruleTrf++; else ruleFba++; } else refCC[ref] = (byRef[ref] != null) ? byRef[ref] : (byCon[ref] != null ? byCon[ref] : null); });
+    // v27.788 (Ben): Fulfil fallback + source-of-truth. Refs not resolved by a rule or Cin7 → look them up in Fulfil
+    // (imported into tpl_fulfil_orders by reference) and map the CHANNEL → cost centre via tpl_account_map.fulfil_channel.
+    const cin7HasRef = ref => (byRef[ref] != null) || (byCon[ref] != null);
+    const needFulfil = refs.filter(ref => !_tplRefOverride(ref, tpl0) && !cin7HasRef(ref));
+    let fulfilByRef = {}, chanCC = {};
+    try { fulfilByRef = await importFulfilOrdersByRefs(needFulfil, row.period); chanCC = await _tplFulfilChannelCC(); }
+    catch (e) { fulfilByRef = {}; chanCC = {}; }
+    const refCC = {}, refSrc = {}; let ruleFba = 0, ruleTrf = 0;
+    const src = { cin7: { orders: 0, refs: [] }, fulfil: { orders: 0, shipped: 0, refs: [] }, contention: { orders: 0, refs: [] }, unresolved: { orders: 0, refs: [] } };
+    refs.forEach(ref => {
+      const ov = _tplRefOverride(ref, tpl0);
+      const inCin7 = cin7HasRef(ref), fo = fulfilByRef[ref] || null;
+      if (ov) { refCC[ref] = ov; refSrc[ref] = 'rule'; if (/^OTHER/.test(ov)) ruleTrf++; else ruleFba++; }
+      else if (inCin7) { refCC[ref] = (byRef[ref] != null) ? byRef[ref] : byCon[ref]; refSrc[ref] = 'cin7'; if (src.cin7.refs.length < 200) src.cin7.refs.push(ref); src.cin7.orders++; }
+      else if (fo) { refCC[ref] = fo.channel ? (chanCC[String(fo.channel).toLowerCase()] || null) : null; refSrc[ref] = 'fulfil'; src.fulfil.orders++; if (fo.shipped) src.fulfil.shipped++; if (src.fulfil.refs.length < 200) src.fulfil.refs.push(ref); }
+      else { refCC[ref] = null; refSrc[ref] = 'none'; src.unresolved.orders++; if (src.unresolved.refs.length < 200) src.unresolved.refs.push(ref); }
+      // contention = the order exists in BOTH Cin7 (invoiced) AND Fulfil — ambiguous which system shipped it
+      if (inCin7 && fo) { src.contention.orders++; if (src.contention.refs.length < 200) src.contention.refs.push(ref); }
+    });
     const summary = _tplAggregateAccounts(orders, refCC);
-    res.json({ ok: true, imported_matched: dbrows.length, ruleAssigned: { fba: ruleFba, trf: ruleTrf }, ...summary });
+    res.json({ ok: true, imported_matched: dbrows.length, fulfil_matched: Object.keys(fulfilByRef).length, ruleAssigned: { fba: ruleFba, trf: ruleTrf }, source_analysis: src, ...summary });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // 3PL invoice — MANUAL Cin7 sales-order import for the previous month (by InvoiceDate). Populates
