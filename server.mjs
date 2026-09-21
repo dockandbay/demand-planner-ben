@@ -10150,9 +10150,16 @@ async function importFulfilOrdersByRefs(refs, period) {
   if (!uniq.length) return {};
   const cfg = fulfilConfigFor(await activeFulfilEnv());
   if (!cfg.configured) return {};
+  const byRef = {};
+  // v27.792 (Ben): a Coghlans invoice line references either a normal order (AU-141343) OR a "CS" CUSTOMER SHIPMENT
+  // number (CS39783). A sale reference resolves via sale.sale; a CS number resolves via stock.shipment.out → its
+  // linked sale's channel (a shipment means it shipped through this 3PL).
+  const saleRefs = uniq.filter(r => !/^CS\d/i.test(r));
+  const csRefs = uniq.filter(r => /^CS\d/i.test(r));
+  // (a) normal order references → sale.sale
   const found = [];
-  for (let i = 0; i < uniq.length; i += 400) {   // Fulfil caps page size at 500; chunk the reference IN-list
-    const chunk = uniq.slice(i, i + 400);
+  for (let i = 0; i < saleRefs.length; i += 400) {   // Fulfil caps page size at 500; chunk the reference IN-list
+    const chunk = saleRefs.slice(i, i + 400); if (!chunk.length) continue;
     const rows = await fulfilFetch('PUT', '/model/sale.sale/search_read', [[['reference', 'in', chunk]], 0, 500, null, ['id', 'number', 'reference', 'channel.name', 'channel', 'shipment_state', 'invoice_state', 'total_amount', 'company.rec_name', 'warehouse.code']]);
     (rows || []).forEach(s => { if (s.reference) found.push(s); });
   }
@@ -10162,8 +10169,32 @@ async function importFulfilOrdersByRefs(refs, period) {
       ON CONFLICT (reference) DO UPDATE SET fulfil_id=excluded.fulfil_id,number=excluded.number,channel_name=excluded.channel_name,channel_id=excluded.channel_id,shipment_state=excluded.shipment_state,invoice_state=excluded.invoice_state,total=excluded.total,company=excluded.company,warehouse_code=excluded.warehouse_code,period=excluded.period,imported_at=now()`,
       [s.reference, s.id, s.number || null, s['channel.name'] || null, s.channel || null, s.shipment_state || null, s.invoice_state || null, _fulfilNum(s.total_amount), s['company.rec_name'] || null, s['warehouse.code'] || null, period || null]);
   }
-  const byRef = {};
   found.forEach(s => { byRef[s.reference] = { channel: s['channel.name'] || null, shipment_state: s.shipment_state || null, shipped: TPL_FULFIL_SHIPPED.has(String(s.shipment_state || '').toLowerCase()) }; });
+  // (b) CS customer-shipment numbers → the linked sale's channel
+  if (csRefs.length) {
+    const shipments = [];
+    for (let i = 0; i < csRefs.length; i += 400) {
+      const chunk = csRefs.slice(i, i + 400); if (!chunk.length) continue;
+      const rows = await fulfilFetch('PUT', '/model/stock.shipment.out/search_read', [[['number', 'in', chunk]], 0, 500, null, ['number', 'sales', 'order_references']]);
+      (rows || []).forEach(sh => { if (sh.number) shipments.push(sh); });
+    }
+    const saleIds = Array.from(new Set(shipments.flatMap(sh => Array.isArray(sh.sales) ? sh.sales : []).filter(Boolean)));
+    const saleById = {};
+    for (let i = 0; i < saleIds.length; i += 400) {
+      const chunk = saleIds.slice(i, i + 400); if (!chunk.length) continue;
+      const rows = await fulfilFetch('PUT', '/model/sale.sale/search_read', [[['id', 'in', chunk]], 0, 500, null, ['id', 'number', 'reference', 'channel.name', 'total_amount', 'company.rec_name']]);
+      (rows || []).forEach(s => { saleById[s.id] = s; });
+    }
+    for (const sh of shipments) {
+      const sid = (Array.isArray(sh.sales) && sh.sales[0]) || null, sale = sid ? saleById[sid] : null;
+      const chan = sale ? (sale['channel.name'] || null) : null;
+      await pool.query(`INSERT INTO planner.tpl_fulfil_orders (reference,fulfil_id,number,channel_name,shipment_state,total,company,period,imported_at)
+        VALUES ($1,$2,$3,$4,'done',$5,$6,$7,now())
+        ON CONFLICT (reference) DO UPDATE SET fulfil_id=excluded.fulfil_id,number=excluded.number,channel_name=excluded.channel_name,shipment_state=excluded.shipment_state,total=excluded.total,company=excluded.company,period=excluded.period,imported_at=now()`,
+        [sh.number, sid, sale ? (sale.number || sale.reference) : (sh.order_references || null), chan, sale ? _fulfilNum(sale.total_amount) : null, sale ? sale['company.rec_name'] : null, period || null]);
+      byRef[sh.number] = { channel: chan, shipment_state: 'done', shipped: true };
+    }
+  }
   return byRef;
 }
 // Fulfil channel name → cost-centre string (the account row's cogs_name — same vocabulary tpl_cin7_orders.cost_center uses).
