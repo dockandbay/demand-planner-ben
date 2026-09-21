@@ -47,6 +47,12 @@ if (typeof globalThis.DOMMatrix === 'undefined') {
 // caps at 15 clients and serverless instances exhaust it. Locally, keep 5432 + a larger pool.
 let CONN = process.env.DATABASE_URL || '';
 if (process.env.VERCEL || process.env.USE_TXN_POOLER) CONN = CONN.replace(':5432/', ':6543/');   // USE_TXN_POOLER: local dev escape hatch when the session pooler (cap 15) is exhausted
+// v27.799 (review item 9): on Vercel (prod) refuse to boot silently mis-configured. Without PLANNER_KEY the access gate
+// (GATE, ~L852) disables and the app serves open; without DATABASE_URL / N8N_WEBHOOK_SECRET the DB and n8n webhooks fail.
+if (process.env.VERCEL) {
+  const _missingEnv = ['DATABASE_URL', 'PLANNER_KEY', 'N8N_WEBHOOK_SECRET'].filter(k => !String(process.env[k] || '').trim());
+  if (_missingEnv.length) { console.error('[FATAL] Missing required prod env: ' + _missingEnv.join(', ') + ' — refusing to start.'); throw new Error('Missing required prod env: ' + _missingEnv.join(', ')); }
+}
 // Environment marker: show a SANDBOX banner unless we're pointed at the PRODUCTION Supabase (ref oolwklahstnvocaugryg).
 // Keyed off the real prod DB ref so it's correct wherever it runs — live never shows it, any non-prod DB does.
 const IS_SANDBOX = !String(CONN).includes('oolwklahstnvocaugryg');
@@ -2467,7 +2473,13 @@ function fulfilConfigFor(env) {
   return { env, subdomain, apiKey, base: subdomain ? ('https://' + subdomain + '.fulfil.io/api/v2') : '', configured: !!(subdomain && apiKey) };
 }
 async function activeErp() { try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='erp_integration'`)).rows[0]; return (r && r.value === 'fulfil') ? 'fulfil' : 'cin7'; } catch (e) { return 'cin7'; } }
-async function activeFulfilEnv() { try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='fulfil_env'`)).rows[0]; return (r && r.value === 'live') ? 'live' : 'sandbox'; } catch (e) { return 'sandbox'; } }
+// v27.799 (review item 7): memoize with a 10s TTL — this was a DB round-trip on EVERY fulfilFetch (push-actuals fires
+// ~120/chunk). The ERP toggle is rare, so a config flip takes effect within 10s.
+let _fulfilEnvCache = { v: null, t: 0 };
+async function activeFulfilEnv() {
+  const now = Date.now();
+  if (_fulfilEnvCache.v && (now - _fulfilEnvCache.t) < 10000) return _fulfilEnvCache.v;
+  try { const r = (await pool.query(`SELECT value FROM planner.app_settings WHERE key='fulfil_env'`)).rows[0]; const v = (r && r.value === 'live') ? 'live' : 'sandbox'; _fulfilEnvCache = { v, t: now }; return v; } catch (e) { return _fulfilEnvCache.v || 'sandbox'; } }
 // PO archive cutoff (CONFIG ▸ Admin ▸ General). Returns the production number below which COMPLETE POs are archived
 // (hidden from the admin PO grid + Order Plan by default), or null when archiving is off. Never affects the supplier
 // portal or cashflow. app_settings key 'po_archive_before_prod'.
@@ -2492,7 +2504,10 @@ app.get('/api/supply/erp-status', async (req, res) => {
 // Safety: with no keys set (FULFIL_<ENV>_SUBDOMAIN/_API_KEY) every op throws NO_FULFIL_CFG and NOTHING sends.
 // The line/create push is a DRY-RUN for now (builds + returns the intended payload, does not POST a blind live
 // create) until the mapping is validated on the sandbox — then FULFIL_LINES_SEND flips it to a real write.
-const FULFIL_LINES_SEND = true;   // v27.736: verified against the sandbox 17-Sep (PO-78AUWK1 resolved cleanly) — real create/update enabled. SANDBOX only until live keys are set.
+// v27.799 (Ben, review item 5): env-driven, defaults ON so sandbox testing is unchanged. A separate FULFIL_LIVE_WRITES
+// flag (checked per-request in fulfilPushLines against the active env) is REQUIRED before any write lands on LIVE Fulfil
+// — hard-rule #2 safety gate, so flipping the active ERP to live cannot silently create/update real POs.
+const FULFIL_LINES_SEND = process.env.FULFIL_LINES_SEND != null ? String(process.env.FULFIL_LINES_SEND).toLowerCase() === 'true' : true;
 const FULFIL_MAP = {
   poModel: 'purchase.purchase', lineModel: 'purchase.line', partyModel: 'party.party',
   productModel: 'product.product', whModel: 'stock.location', currencyModel: 'currency.currency', addressModel: 'party.address', countryModel: 'country.country',
@@ -2721,9 +2736,13 @@ async function fulfilPushLines(po, completion) {
     [FULFIL_MAP.linesField]: [['create', lineDicts]],
   };
 
-  if (!FULFIL_LINES_SEND) {
-    return { ok: problems.length === 0, dry_run: true,
-      note: problems.length ? 'Not ready to push — resolve the issues below (usually: import the catalog/supplier into the Fulfil sandbox), then re-run.' : 'All references resolved. Flip FULFIL_LINES_SEND=true to perform the real ' + (fulfilId ? 'update' : 'create') + '.',
+  // v27.799 (review item 5): block real writes to LIVE Fulfil unless FULFIL_LIVE_WRITES=true. Sandbox is unaffected.
+  const _activeEnv = await activeFulfilEnv();
+  const _liveBlocked = _activeEnv === 'live' && String(process.env.FULFIL_LIVE_WRITES || '').toLowerCase() !== 'true';
+  if (!FULFIL_LINES_SEND || _liveBlocked) {
+    return { ok: problems.length === 0, dry_run: true, live_blocked: _liveBlocked,
+      note: _liveBlocked ? 'LIVE Fulfil writes are DISABLED (go-live safety gate) — set FULFIL_LIVE_WRITES=true to enable real ' + (fulfilId ? 'updates' : 'creates') + '. Payload below is what would be sent.'
+        : (problems.length ? 'Not ready to push — resolve the issues below (usually: import the catalog/supplier into the Fulfil sandbox), then re-run.' : 'All references resolved. Set FULFIL_LINES_SEND=true to perform the real ' + (fulfilId ? 'update' : 'create') + '.'),
       action: fulfilId ? 'update' : 'create', fulfil_id: fulfilId, resolution, problems, would_send: headerPayload };
   }
   if (problems.length) { const e = new Error('Fulfil push blocked: ' + problems.join('; ')); e.code = 'FULFIL_UNRESOLVED'; throw e; }
@@ -5989,19 +6008,22 @@ app.post('/api/klaviyo-bis/upload', async (req, res) => {
     const bySku = {};
     recs.forEach(r => { if (!r.sku) return; const d = r.last ? new Date(String(r.last)) : null; if (d && !isNaN(d.getTime()) && d < cut) return; const q = Math.max(0, Math.round(r.queued || 0)); if (q <= 0) return; const k = r.sku.toUpperCase(); bySku[k] = (bySku[k] || 0) + q; });
     const skus = Object.keys(bySku); const totalSubs = skus.reduce((a, s) => a + bySku[s], 0);
-    await pool.query('BEGIN');
+    // v27.799 (review item 4): run the transaction on ONE checked-out client — on the Vercel txn pooler each pool.query
+    // can land on a different backend, so BEGIN/DELETE/INSERT/COMMIT must share a session or the writes aren't atomic.
+    const kc = await pool.connect();
     try {
-      await pool.query(`DELETE FROM planner.klaviyo_bis WHERE market=$1`, [market]);
+      await kc.query('BEGIN');
+      await kc.query(`DELETE FROM planner.klaviyo_bis WHERE market=$1`, [market]);
       if (skus.length) {   // single multi-row insert (was N+1 per SKU)
         const vals = skus.map((_, i) => `($${i * 3 + 1},$${i * 3 + 2},$${i * 3 + 3},now())`).join(',');
-        await pool.query(`INSERT INTO planner.klaviyo_bis (sku,market,subs,updated_at) VALUES ${vals}`, skus.flatMap(s => [s, market, bySku[s]]));
+        await kc.query(`INSERT INTO planner.klaviyo_bis (sku,market,subs,updated_at) VALUES ${vals}`, skus.flatMap(s => [s, market, bySku[s]]));
       }
-      await pool.query(`INSERT INTO planner.klaviyo_bis_uploads (market,filename,uploaded_by,uploaded_at,n_skus,total_subs)
+      await kc.query(`INSERT INTO planner.klaviyo_bis_uploads (market,filename,uploaded_by,uploaded_at,n_skus,total_subs)
           VALUES ($1,$2,$3,now(),$4,$5)
         ON CONFLICT (market) DO UPDATE SET filename=EXCLUDED.filename, uploaded_by=EXCLUDED.uploaded_by, uploaded_at=now(), n_skus=EXCLUDED.n_skus, total_subs=EXCLUDED.total_subs`,
         [market, fname, authUser(req) || '', skus.length, totalSubs]);
-      await pool.query('COMMIT');
-    } catch (e) { await pool.query('ROLLBACK'); throw e; }
+      await kc.query('COMMIT');
+    } catch (e) { try { await kc.query('ROLLBACK'); } catch (_) {} throw e; } finally { kc.release(); }
     res.json({ ok: true, market, n_skus: skus.length, total_subs: totalSubs });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -10163,11 +10185,15 @@ async function importFulfilOrdersByRefs(refs, period) {
     const rows = await fulfilFetch('PUT', '/model/sale.sale/search_read', [[['reference', 'in', chunk]], 0, 500, null, ['id', 'number', 'reference', 'channel.name', 'channel', 'shipment_state', 'invoice_state', 'total_amount', 'company.rec_name', 'warehouse.code']]);
     (rows || []).forEach(s => { if (s.reference) found.push(s); });
   }
-  for (const s of found) {
+  // v27.799 (review item 6): one multi-row upsert (was per-sale). Dedupe by reference for the ON CONFLICT.
+  const uniqF = [...new Map(found.map(s => [s.reference, s])).values()];
+  if (uniqF.length) {
+    const FC = 11;
+    const vals = uniqF.map((_, j) => '(' + Array.from({ length: FC }, (_, k) => '$' + (j * FC + k + 1)).join(',') + ',now())').join(',');
+    const params = uniqF.flatMap(s => [s.reference, s.id, s.number || null, s['channel.name'] || null, s.channel || null, s.shipment_state || null, s.invoice_state || null, _fulfilNum(s.total_amount), s['company.rec_name'] || null, s['warehouse.code'] || null, period || null]);
     await pool.query(`INSERT INTO planner.tpl_fulfil_orders (reference,fulfil_id,number,channel_name,channel_id,shipment_state,invoice_state,total,company,warehouse_code,period,imported_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,now())
-      ON CONFLICT (reference) DO UPDATE SET fulfil_id=excluded.fulfil_id,number=excluded.number,channel_name=excluded.channel_name,channel_id=excluded.channel_id,shipment_state=excluded.shipment_state,invoice_state=excluded.invoice_state,total=excluded.total,company=excluded.company,warehouse_code=excluded.warehouse_code,period=excluded.period,imported_at=now()`,
-      [s.reference, s.id, s.number || null, s['channel.name'] || null, s.channel || null, s.shipment_state || null, s.invoice_state || null, _fulfilNum(s.total_amount), s['company.rec_name'] || null, s['warehouse.code'] || null, period || null]);
+      VALUES ${vals}
+      ON CONFLICT (reference) DO UPDATE SET fulfil_id=excluded.fulfil_id,number=excluded.number,channel_name=excluded.channel_name,channel_id=excluded.channel_id,shipment_state=excluded.shipment_state,invoice_state=excluded.invoice_state,total=excluded.total,company=excluded.company,warehouse_code=excluded.warehouse_code,period=excluded.period,imported_at=now()`, params);
   }
   found.forEach(s => { byRef[s.reference] = { channel: s['channel.name'] || null, shipment_state: s.shipment_state || null, shipped: TPL_FULFIL_SHIPPED.has(String(s.shipment_state || '').toLowerCase()) }; });
   // (b) CS customer-shipment numbers → the linked sale's channel
@@ -10185,14 +10211,17 @@ async function importFulfilOrdersByRefs(refs, period) {
       const rows = await fulfilFetch('PUT', '/model/sale.sale/search_read', [[['id', 'in', chunk]], 0, 500, null, ['id', 'number', 'reference', 'channel.name', 'total_amount', 'company.rec_name']]);
       (rows || []).forEach(s => { saleById[s.id] = s; });
     }
-    for (const sh of shipments) {
-      const sid = (Array.isArray(sh.sales) && sh.sales[0]) || null, sale = sid ? saleById[sid] : null;
-      const chan = sale ? (sale['channel.name'] || null) : null;
-      await pool.query(`INSERT INTO planner.tpl_fulfil_orders (reference,fulfil_id,number,channel_name,shipment_state,total,company,period,imported_at)
-        VALUES ($1,$2,$3,$4,'done',$5,$6,$7,now())
-        ON CONFLICT (reference) DO UPDATE SET fulfil_id=excluded.fulfil_id,number=excluded.number,channel_name=excluded.channel_name,shipment_state=excluded.shipment_state,total=excluded.total,company=excluded.company,period=excluded.period,imported_at=now()`,
-        [sh.number, sid, sale ? (sale.number || sale.reference) : (sh.order_references || null), chan, sale ? _fulfilNum(sale.total_amount) : null, sale ? sale['company.rec_name'] : null, period || null]);
+    // v27.799 (review item 6): one multi-row upsert (was per-shipment). shipment_state is the literal 'done'.
+    const shipRows = shipments.map(sh => { const sid = (Array.isArray(sh.sales) && sh.sales[0]) || null, sale = sid ? saleById[sid] : null; const chan = sale ? (sale['channel.name'] || null) : null;
       byRef[sh.number] = { channel: chan, shipment_state: 'done', shipped: true };
+      return { ref: sh.number, sid, number: sale ? (sale.number || sale.reference) : (sh.order_references || null), chan, total: sale ? _fulfilNum(sale.total_amount) : null, company: sale ? sale['company.rec_name'] : null }; });
+    const uniqS = [...new Map(shipRows.map(r => [r.ref, r])).values()];
+    if (uniqS.length) {
+      const vals = uniqS.map((_, j) => { const b = j * 7; return '($' + (b + 1) + ',$' + (b + 2) + ',$' + (b + 3) + ',$' + (b + 4) + ",'done',$" + (b + 5) + ',$' + (b + 6) + ',$' + (b + 7) + ',now())'; }).join(',');
+      const params = uniqS.flatMap(r => [r.ref, r.sid, r.number, r.chan, r.total, r.company, period || null]);
+      await pool.query(`INSERT INTO planner.tpl_fulfil_orders (reference,fulfil_id,number,channel_name,shipment_state,total,company,period,imported_at)
+        VALUES ${vals}
+        ON CONFLICT (reference) DO UPDATE SET fulfil_id=excluded.fulfil_id,number=excluded.number,channel_name=excluded.channel_name,shipment_state=excluded.shipment_state,total=excluded.total,company=excluded.company,period=excluded.period,imported_at=now()`, params);
     }
   }
   return byRef;
@@ -10262,20 +10291,29 @@ app.post('/api/supply/tpl/push-actuals/:id', async (req, res) => {
     if (!defs.out.freight && !defs.out.process && !defs.internal.freight && !defs.internal.process) return res.status(400).json({ error: 'None of the FULFIL_/TRANSFER_FULFIL_ actual-cost metafields are defined in this Fulfil env.' });
     const isCsv = /\.csv$/i.test(row.filename || '') || /csv/i.test(row.content_type || '');
     const orders = await _tplOrderRows(row.content, isCsv, row.tpl, row.period);
-    const total = orders.length;
+    // v27.799 (review items 3+4): aggregate the WHOLE invoice by reference first (local, cheap) so a reference whose lines
+    // straddle a chunk boundary gets its FULL cost, not one chunk's partial. Then chunk over the UNIQUE references (each
+    // written exactly once). Residual: two DIFFERENT refs mapping to one shipment in different chunks still uses replace
+    // semantics — rare, and dwarfed by the fixed same-ref-split case.
+    const refAgg = new Map();
+    for (const o of orders) { if (!o || !o.reference) continue; const a = refAgg.get(o.reference) || { freight: 0, process: 0 }; a.freight += Number(o.shipping) || 0; a.process += Number(o.fulfilment) || 0; refAgg.set(o.reference, a); }
+    const uniqRefs = [...refAgg.keys()];
+    const total = uniqRefs.length;
     const offset = Math.max(0, Number(req.body && req.body.offset) || 0);
     const limit = Math.max(1, Number(req.body && req.body.limit) || 40);
     const end = Math.min(total, offset + limit);
     const byShip = {}, shipCache = {}; let unresolved = 0; const unref = [];
-    for (let i = offset; i < end; i++) { const o = orders[i]; if (!o || !o.reference) continue;
-      const sh = await fulfilShipmentForRef(o.reference, shipCache);
-      if (!sh.id) { unresolved++; if (unref.length < 50) unref.push(o.reference); continue; }
-      const k = sh.model + ',' + sh.id; const a = byShip[k] || (byShip[k] = { model: sh.model, id: sh.id, freight: 0, process: 0 }); a.freight += Number(o.shipping) || 0; a.process += Number(o.fulfilment) || 0; }
+    for (let i = offset; i < end; i++) { const ref = uniqRefs[i];
+      const sh = await fulfilShipmentForRef(ref, shipCache);
+      if (!sh.id) { unresolved++; if (unref.length < 50) unref.push(ref); continue; }
+      const ra = refAgg.get(ref) || { freight: 0, process: 0 };
+      const k = sh.model + ',' + sh.id; const a = byShip[k] || (byShip[k] = { model: sh.model, id: sh.id, freight: 0, process: 0 }); a.freight += ra.freight; a.process += ra.process; }
     let pushedCust = 0, pushedTransfer = 0;
     const tplName = TPL_DISPLAY[row.tpl] || row.tpl || 'the 3PL';
     for (const k of Object.keys(byShip)) { const a = byShip[k]; const md = (a.model === 'stock.shipment.internal') ? defs.internal : defs.out;
-      if (md.freight) await fulfilUpsertShipmentNumeric(a.model, a.id, md.freight, a.freight);
-      if (md.process) await fulfilUpsertShipmentNumeric(a.model, a.id, md.process, a.process);
+      if (a.freight <= 0 && a.process <= 0) continue;   // nothing to record — don't write 0 (would wipe a value a prior invoice set)
+      if (md.freight && a.freight > 0) await fulfilUpsertShipmentNumeric(a.model, a.id, md.freight, a.freight);
+      if (md.process && a.process > 0) await fulfilUpsertShipmentNumeric(a.model, a.id, md.process, a.process);
       await fulfilAddShipmentNote(a.model, a.id, 'Horizon upload - Added fulfilment costs from 3PL invoice reconciliation from ' + tplName + ': Freight $' + a.freight.toFixed(2) + ', Processing $' + a.process.toFixed(2));
       if (a.model === 'stock.shipment.internal') pushedTransfer++; else pushedCust++; }
     res.json({ ok: true, env: cfg.env, total, offset, processed_to: end, done: end >= total, next_offset: end >= total ? null : end,
@@ -10387,12 +10425,15 @@ app.post('/api/supply/tpl/cin7-import', async (req, res) => {
       if (r.status >= 400) { let eb = ''; try { eb = (await r.text()).slice(0, 200); } catch (e) {} await setLog(runId, imported, calls, 'error', 'Cin7 HTTP ' + r.status + ' ' + eb); return res.json({ ok: false, error: 'Cin7 fetch failed (HTTP ' + r.status + '). Imported ' + imported + ' before failure.', period, imported }); }
       let arr = []; try { arr = await r.json(); } catch (e) { arr = []; }
       if (!Array.isArray(arr) || !arr.length) { done = true; break; }
-      for (const o of arr) {
-        await pool.query(`INSERT INTO planner.tpl_cin7_orders (cin7_id, reference, customer_order_no, cost_center, member_cost_center, invoice_date, branch_id, total, freight_total, period, imported_at)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now()) ON CONFLICT (cin7_id) DO UPDATE SET reference=excluded.reference, customer_order_no=excluded.customer_order_no, cost_center=excluded.cost_center, member_cost_center=excluded.member_cost_center, invoice_date=excluded.invoice_date, branch_id=excluded.branch_id, total=excluded.total, freight_total=excluded.freight_total, period=excluded.period, imported_at=now()`,
-          [o.id, o.reference || null, o.customerOrderNo || null, o.costCenter || null, o.memberCostCenter || null, (o.invoiceDate ? String(o.invoiceDate).slice(0, 10) : null), o.branchId || null, o.total != null ? Number(o.total) : null, o.freightTotal != null ? Number(o.freightTotal) : null, period]);
-        imported++;
-      }
+      // v27.799 (review item 6): one multi-row upsert per page (was 250 serial round-trips). Dedupe by id so the
+      // multi-row ON CONFLICT can't hit the same row twice in one statement.
+      const uniq = [...new Map(arr.map(o => [o.id, o])).values()];
+      const CC = 10;
+      const vals = uniq.map((_, j) => '(' + Array.from({ length: CC }, (_, k) => '$' + (j * CC + k + 1)).join(',') + ',now())').join(',');
+      const params = uniq.flatMap(o => [o.id, o.reference || null, o.customerOrderNo || null, o.costCenter || null, o.memberCostCenter || null, (o.invoiceDate ? String(o.invoiceDate).slice(0, 10) : null), o.branchId || null, o.total != null ? Number(o.total) : null, o.freightTotal != null ? Number(o.freightTotal) : null, period]);
+      await pool.query(`INSERT INTO planner.tpl_cin7_orders (cin7_id, reference, customer_order_no, cost_center, member_cost_center, invoice_date, branch_id, total, freight_total, period, imported_at)
+        VALUES ${vals} ON CONFLICT (cin7_id) DO UPDATE SET reference=excluded.reference, customer_order_no=excluded.customer_order_no, cost_center=excluded.cost_center, member_cost_center=excluded.member_cost_center, invoice_date=excluded.invoice_date, branch_id=excluded.branch_id, total=excluded.total, freight_total=excluded.freight_total, period=excluded.period, imported_at=now()`, params);
+      imported += uniq.length;
       if (arr.length < 250) { done = true; break; }
       page++;
     }
@@ -10431,14 +10472,24 @@ app.post('/api/supply/dtc/import', async (req, res) => {
       if (r.status >= 400) { let eb = ''; try { eb = (await r.text()).slice(0, 200); } catch (e) {} await setLog(runId, imported, calls, 'error', 'Cin7 HTTP ' + r.status + ' ' + eb); return res.json({ ok: false, error: 'Cin7 fetch failed (HTTP ' + r.status + '). ' + eb, imported }); }
       let arr = []; try { arr = await r.json(); } catch (e) { arr = []; }
       if (!Array.isArray(arr) || !arr.length) { bi++; page = 1; continue; }
-      for (const o of arr) {
-        await pool.query(`INSERT INTO planner.dtc_sales_orders (cin7_id,reference,customer_order_no,branch_id,branch_name,company,stage,status,is_void,dispatched_date,invoice_date,created_date,modified_date,total,imported_at)
-          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now()) ON CONFLICT (cin7_id) DO UPDATE SET reference=excluded.reference,customer_order_no=excluded.customer_order_no,branch_name=excluded.branch_name,company=excluded.company,stage=excluded.stage,status=excluded.status,is_void=excluded.is_void,dispatched_date=excluded.dispatched_date,invoice_date=excluded.invoice_date,modified_date=excluded.modified_date,total=excluded.total,imported_at=now()`,
-          [o.id, o.reference || null, o.customerOrderNo || null, o.branchId || null, DTC_BRANCHES[bid], o.company || null, o.stage || null, o.status || null, !!o.isVoid, _dOnly(o.dispatchedDate), _dOnly(o.invoiceDate), o.createdDate || null, o.modifiedDate || null, o.total != null ? Number(o.total) : null]);
-        await pool.query(`DELETE FROM planner.dtc_sales_order_lines WHERE so_cin7_id=$1`, [o.id]);
-        for (const li of (o.lineItems || [])) { if (!li || !li.code) continue; await pool.query(`INSERT INTO planner.dtc_sales_order_lines (so_cin7_id,code,name,qty,barcode) VALUES ($1,$2,$3,$4,$5)`, [o.id, li.code, li.name || null, li.qty != null ? Number(li.qty) : 0, li.barcode || null]); }
-        imported++;
+      // v27.799 (review item 6): batch the page's writes — one orders upsert, one lines DELETE (ANY), one lines INSERT
+      // (was ~500 serial round-trips/page). Dedupe orders by id for the multi-row ON CONFLICT.
+      const uniqO = [...new Map(arr.map(o => [o.id, o])).values()];
+      const OC = 14;
+      const oVals = uniqO.map((_, j) => '(' + Array.from({ length: OC }, (_, k) => '$' + (j * OC + k + 1)).join(',') + ',now())').join(',');
+      const oParams = uniqO.flatMap(o => [o.id, o.reference || null, o.customerOrderNo || null, o.branchId || null, DTC_BRANCHES[bid], o.company || null, o.stage || null, o.status || null, !!o.isVoid, _dOnly(o.dispatchedDate), _dOnly(o.invoiceDate), o.createdDate || null, o.modifiedDate || null, o.total != null ? Number(o.total) : null]);
+      await pool.query(`INSERT INTO planner.dtc_sales_orders (cin7_id,reference,customer_order_no,branch_id,branch_name,company,stage,status,is_void,dispatched_date,invoice_date,created_date,modified_date,total,imported_at)
+        VALUES ${oVals} ON CONFLICT (cin7_id) DO UPDATE SET reference=excluded.reference,customer_order_no=excluded.customer_order_no,branch_name=excluded.branch_name,company=excluded.company,stage=excluded.stage,status=excluded.status,is_void=excluded.is_void,dispatched_date=excluded.dispatched_date,invoice_date=excluded.invoice_date,modified_date=excluded.modified_date,total=excluded.total,imported_at=now()`, oParams);
+      await pool.query(`DELETE FROM planner.dtc_sales_order_lines WHERE so_cin7_id = ANY($1)`, [uniqO.map(o => o.id)]);
+      const lineRows = [];
+      for (const o of uniqO) for (const li of (o.lineItems || [])) { if (!li || !li.code) continue; lineRows.push([o.id, li.code, li.name || null, li.qty != null ? Number(li.qty) : 0, li.barcode || null]); }
+      for (let i = 0; i < lineRows.length; i += 2000) {
+        const lc = lineRows.slice(i, i + 2000); if (!lc.length) continue;
+        const LC = 5;
+        const lVals = lc.map((_, j) => '(' + Array.from({ length: LC }, (_, k) => '$' + (j * LC + k + 1)).join(',') + ')').join(',');
+        await pool.query(`INSERT INTO planner.dtc_sales_order_lines (so_cin7_id,code,name,qty,barcode) VALUES ${lVals}`, lc.flat());
       }
+      imported += uniqO.length;
       if (arr.length < 100) { bi++; page = 1; } else page++;
     }
     if (bi >= branches.length) done = true;
@@ -11295,17 +11346,40 @@ app.get('/api/supply/dtc/fulfil-alignment', async (req, res) => {
   try {
     const maps = (await pool.query(`SELECT po, sales_order_ref FROM planner.dtc_po_so_map WHERE link=true ORDER BY po`)).rows;
     const cfg = fulfilConfigFor(await activeFulfilEnv());
-    const rows = [];
-    for (const m of maps) {
-      let fpId = null, fpRef = null, sale = null, status = 'fulfil-not-configured';
-      if (cfg.configured) {
-        let r = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['number', '=', m.po]], 0, 1, null, ['id', 'reference']]);
-        if (!r.length) r = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['reference', '=', m.po]], 0, 1, null, ['id', 'reference']]);
-        if (r.length) { fpId = r[0].id; fpRef = r[0].reference; sale = await fulfilSaleForPo(fpId, fpRef); status = sale ? 'linked-in-fulfil' : 'no-fulfil-sale-link'; }
-        else status = 'po-not-in-fulfil';
-      }
-      rows.push({ po: m.po, horizon_so: m.sales_order_ref, fulfil_po_id: fpId, fulfil_so: sale ? sale.ref : null, fulfil_client: sale ? sale.client : null, status });
+    if (!cfg.configured) return res.json({ ok: true, env: cfg.env, rows: maps.map(m => ({ po: m.po, horizon_so: m.sales_order_ref, fulfil_po_id: null, fulfil_so: null, fulfil_client: null, status: 'fulfil-not-configured' })) });
+    // v27.799 (review item 7/perf #1): batch the Fulfil lookups — was 2-5 sequential calls PER mapping (timed out at scale).
+    const allPos = [...new Set(maps.map(m => m.po))];
+    const poById = {};   // fulfil PO id → {po, reference}
+    const byNum = await fulfilSearchAll(FULFIL_MAP.poModel, [['number', 'in', allPos]], ['id', 'number', 'reference']);
+    (byNum || []).forEach(p => { poById[p.id] = { po: p.number, reference: p.reference }; });
+    const foundPos = new Set((byNum || []).map(p => p.number));
+    const missNum = allPos.filter(p => !foundPos.has(p));
+    if (missNum.length) { const byRef = await fulfilSearchAll(FULFIL_MAP.poModel, [['reference', 'in', missNum]], ['id', 'number', 'reference']); (byRef || []).forEach(p => { poById[p.id] = { po: p.reference, reference: p.reference }; foundPos.add(p.reference); }); }
+    // po id → sale, resolved in two batched steps: (a) direct SO-number reference, (b) the purchase-request chain.
+    const poSale = {};   // fulfil PO id → {ref, client}
+    const poIds = Object.keys(poById).map(Number);
+    const directNums = [...new Set(Object.values(poById).map(p => p.reference).filter(r => r && /^SO/i.test(r)))];
+    const reqs = poIds.length ? await fulfilSearchAll('purchase.request', [['purchase_line.purchase', 'in', poIds]], ['id', 'purchase_line.purchase']) : [];
+    const reqToPo = {}; const reqIds = [];
+    (reqs || []).forEach(r => { const pid = r['purchase_line.purchase']; if (pid) { reqToPo[r.id] = pid; reqIds.push(r.id); } });
+    if (reqIds.length) {
+      const slines = await fulfilSearchAll('sale.line', [['purchase_request', 'in', reqIds]], ['purchase_request', 'sale.number', 'sale.party.name']);
+      (slines || []).forEach(sl => { const pid = reqToPo[sl.purchase_request]; if (pid && sl['sale.number'] && !poSale[pid]) poSale[pid] = { ref: sl['sale.number'], client: sl['sale.party.name'] || null }; });
     }
+    // fill any PO whose reference IS the SO number but had no request chain, via one sale.sale batch on the direct numbers
+    const needDirect = poIds.filter(pid => !poSale[pid] && poById[pid].reference && /^SO/i.test(poById[pid].reference));
+    if (needDirect.length) {
+      const sales = await fulfilSearchAll('sale.sale', [['number', 'in', [...new Set(needDirect.map(pid => poById[pid].reference))]]], ['number', 'party.name']);
+      const saleByNum = {}; (sales || []).forEach(s => { saleByNum[s.number] = { ref: s.number, client: s['party.name'] || null }; });
+      needDirect.forEach(pid => { const sm = saleByNum[poById[pid].reference]; if (sm) poSale[pid] = sm; });
+    }
+    const poIdByName = {}; Object.entries(poById).forEach(([id, p]) => { poIdByName[p.po] = Number(id); });
+    const rows = maps.map(m => {
+      const fpId = poIdByName[m.po];
+      if (fpId == null) return { po: m.po, horizon_so: m.sales_order_ref, fulfil_po_id: null, fulfil_so: null, fulfil_client: null, status: 'po-not-in-fulfil' };
+      const sale = poSale[fpId] || null;
+      return { po: m.po, horizon_so: m.sales_order_ref, fulfil_po_id: fpId, fulfil_so: sale ? sale.ref : null, fulfil_client: sale ? sale.client : null, status: sale ? 'linked-in-fulfil' : 'no-fulfil-sale-link' };
+    });
     res.json({ ok: true, env: cfg.env, rows });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -11361,11 +11435,15 @@ app.post('/api/supply/tpl/cin7-sweep/:id', async (req, res) => {
         calls++;
         if (r.status >= 400) throw new Error('Cin7 HTTP ' + r.status);
         let arr = []; try { arr = await r.json(); } catch (e) { arr = []; }
-        if (Array.isArray(arr)) for (const o of arr) {
+        if (Array.isArray(arr) && arr.length) {
+          // v27.799 (review item 6): one multi-row upsert per Cin7 page (was per-order). Dedupe by id for ON CONFLICT.
+          const uniq = [...new Map(arr.map(o => [o.id, o])).values()];
+          const CC = 10;
+          const vals = uniq.map((_, j) => '(' + Array.from({ length: CC }, (_, k) => '$' + (j * CC + k + 1)).join(',') + ',now())').join(',');
+          const params = uniq.flatMap(o => [o.id, o.reference || null, o.customerOrderNo || null, o.costCenter || null, o.memberCostCenter || null, (o.invoiceDate ? String(o.invoiceDate).slice(0, 10) : null), o.branchId || null, o.total != null ? Number(o.total) : null, o.freightTotal != null ? Number(o.freightTotal) : null, (o.invoiceDate ? String(o.invoiceDate).slice(0, 7) : null)]);
           await pool.query(`INSERT INTO planner.tpl_cin7_orders (cin7_id, reference, customer_order_no, cost_center, member_cost_center, invoice_date, branch_id, total, freight_total, period, imported_at)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,now()) ON CONFLICT (cin7_id) DO UPDATE SET reference=excluded.reference, customer_order_no=excluded.customer_order_no, cost_center=excluded.cost_center, member_cost_center=excluded.member_cost_center, invoice_date=excluded.invoice_date, branch_id=excluded.branch_id, total=excluded.total, freight_total=excluded.freight_total, period=excluded.period, imported_at=now()`,
-            [o.id, o.reference || null, o.customerOrderNo || null, o.costCenter || null, o.memberCostCenter || null, (o.invoiceDate ? String(o.invoiceDate).slice(0, 10) : null), o.branchId || null, o.total != null ? Number(o.total) : null, o.freightTotal != null ? Number(o.freightTotal) : null, (o.invoiceDate ? String(o.invoiceDate).slice(0, 7) : null)]);
-          fetched++;
+            VALUES ${vals} ON CONFLICT (cin7_id) DO UPDATE SET reference=excluded.reference, customer_order_no=excluded.customer_order_no, cost_center=excluded.cost_center, member_cost_center=excluded.member_cost_center, invoice_date=excluded.invoice_date, branch_id=excluded.branch_id, total=excluded.total, freight_total=excluded.freight_total, period=excluded.period, imported_at=now()`, params);
+          fetched += uniq.length;
         }
       }
     };
@@ -11704,8 +11782,13 @@ app.post('/api/supply/fba-transfers/refresh', async (req, res) => {
     // Union both ERPs, then collapse duplicates on the Amazon FBA shipment id (FBAxxxxx). Key = fba:<id>|sku when we
     // can read an FBA id (cross-ERP dedupe, Fulfil wins on a tie); otherwise <source>:<id>|sku (kept as its own row).
     const merged = new Map();   // dedupe key → row
+    const _refNorm = (s) => String(s || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
     const addRow = (row) => {
-      const dk = row._fbaId ? ('fba:' + row._fbaId + '|' + row.sku) : (row.source + ':' + row.cin7_id + '|' + row.sku);
+      // v27.799 (review item 1, Ben): dedupe cross-ERP on the FBA shipment id when present; else on the NORMALISED
+      // reference (covers AWD + any transfer with no literal "FBA" token, which the FBA-id key alone missed → double-count);
+      // else keep as its own row. Fulfil wins a tie.
+      const refN = _refNorm(row.reference);
+      const dk = row._fbaId ? ('fba:' + row._fbaId + '|' + row.sku) : (refN ? ('ref:' + refN + '|' + row.sku) : (row.source + ':' + row.cin7_id + '|' + row.sku));
       const ex = merged.get(dk);
       if (ex && !(row.source === 'fulfil' && ex.source === 'cin7')) return;   // keep existing unless the newcomer is Fulfil overriding a Cin7 dup
       merged.set(dk, row);
@@ -11759,19 +11842,30 @@ app.post('/api/supply/fba-transfers/refresh', async (req, res) => {
       }
     }
     // ── Rebuild the cache from the merged set (full refresh), then prune landed/received ─────
-    let lines = 0;
-    await pool.query(`DELETE FROM planner.fba_pending_transfers`);
-    for (const row of merged.values()) {
-      await pool.query(`INSERT INTO planner.fba_pending_transfers (cin7_id,sku,qty,reference,source_branch_id,dest_branch_id,market,pool,warehouse,stage,eta,created_date,dispatched_date,received_date,source,imported_at)
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now())
-        ON CONFLICT (cin7_id,sku) DO UPDATE SET qty=excluded.qty,reference=excluded.reference,stage=excluded.stage,eta=excluded.eta,dispatched_date=excluded.dispatched_date,received_date=excluded.received_date,source=excluded.source,imported_at=now()`,
-        [row.cin7_id, row.sku, row.qty, row.reference, row.source_branch_id, row.dest_branch_id, row.market, row.pool, row.warehouse, row.stage, row.eta, row.created_date, row.dispatched_date, row.received_date, row.source]);
-      lines++;
-    }
-    // prune anything that has since landed in the normal inbound feed (same reference) or been received
-    const pr = await pool.query(`DELETE FROM planner.fba_pending_transfers WHERE received_date IS NOT NULL OR (reference IS NOT NULL AND reference IN (SELECT DISTINCT reference FROM planner.inbound_shipments WHERE reference IS NOT NULL))`);
-    await pool.query(`INSERT INTO planner.app_settings (key,value,updated_at) VALUES ('fba_transfers_last_run',$1,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_at=now()`, [new Date().toISOString()]);
-    res.json({ ok: true, transfers: cin7Shipments + fulfilShipments, cin7_shipments: cin7Shipments, fulfil_shipments: fulfilShipments, lines, pruned: pr.rowCount, cin7_calls: cin7Calls, fulfil_calls: fulfilCalls });
+    // v27.799 (review items 2+6): the delete + re-insert now runs in ONE transaction on a checked-out client, and the
+    // inserts are batched multi-row — the old per-row loop on the autocommit pool could leave the table empty/partial if
+    // any insert threw mid-loop (FBA cover → 0 → over-buying), and was hundreds of serial round-trips.
+    let lines = 0, pruned = 0;
+    const all = [...merged.values()];
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(`DELETE FROM planner.fba_pending_transfers`);
+      const COLS = 15;
+      for (let i = 0; i < all.length; i += 500) {
+        const chunk = all.slice(i, i + 500); if (!chunk.length) continue;
+        const vals = chunk.map((_, j) => '(' + Array.from({ length: COLS }, (_, k) => '$' + (j * COLS + k + 1)).join(',') + ',now())').join(',');
+        const params = chunk.flatMap(r => [r.cin7_id, r.sku, r.qty, r.reference, r.source_branch_id, r.dest_branch_id, r.market, r.pool, r.warehouse, r.stage, r.eta, r.created_date, r.dispatched_date, r.received_date, r.source]);
+        await client.query(`INSERT INTO planner.fba_pending_transfers (cin7_id,sku,qty,reference,source_branch_id,dest_branch_id,market,pool,warehouse,stage,eta,created_date,dispatched_date,received_date,source,imported_at) VALUES ${vals} ON CONFLICT (cin7_id,sku) DO NOTHING`, params);
+        lines += chunk.length;
+      }
+      // prune anything that has since landed in the normal inbound feed (same reference) or been received
+      const pr = await client.query(`DELETE FROM planner.fba_pending_transfers WHERE received_date IS NOT NULL OR (reference IS NOT NULL AND reference IN (SELECT DISTINCT reference FROM planner.inbound_shipments WHERE reference IS NOT NULL))`);
+      pruned = pr.rowCount;
+      await client.query(`INSERT INTO planner.app_settings (key,value,updated_at) VALUES ('fba_transfers_last_run',$1,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_at=now()`, [new Date().toISOString()]);
+      await client.query('COMMIT');
+    } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} throw e; } finally { client.release(); }
+    res.json({ ok: true, transfers: cin7Shipments + fulfilShipments, cin7_shipments: cin7Shipments, fulfil_shipments: fulfilShipments, lines, pruned, cin7_calls: cin7Calls, fulfil_calls: fulfilCalls });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── Zalando: baked per-SKU forecast + uploaded stock-on-hand (planner.zalando_stock). Feeds the BUY & MOVE ▸ Zalando tab.
