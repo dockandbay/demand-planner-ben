@@ -522,6 +522,8 @@
 #supply-root #bc-settings>*{display:inline-block;vertical-align:middle}
 #supply-root #bc-dlall-prod,#supply-root #bc-dlall-cart{float:right;margin-left:8px}   /* sit top-right, above the grid's "labels" column */
 #supply-root .pill{padding:3px 9px;font-size:10px;cursor:pointer;border:1px solid #d0d0d0;background:#fff;color:#666;border-radius:4px;white-space:nowrap;font-weight:600}
+#supply-root .pp-filt-wrap{display:contents}   /* v27.801: desktop — transparent wrapper, filters lay out exactly as before */
+#supply-root .pp-filt-btn{display:none}        /* v27.801: the phone-only Filter toggle */
 #supply-root .pill:hover{background:#f5f5f5;color:#333}
 #supply-root .pill.active{background:#1a1a1a;color:#fff;border-color:#1a1a1a}
 #supply-root .pill-lbl{font-size:11px;color:#444;font-weight:600}
@@ -714,10 +716,35 @@
   #supply-root #pp-tabs .rtab{flex:0 0 auto;padding:9px 13px;font-size:13px;white-space:nowrap;border-bottom-width:3px}
   /* v27.800 (Ben): on the standalone portal the level-1 section pills (#pp-secs) live INSIDE the dark brand bar, so the
      theme's #supply-root #pp-secs rules don't reach them. Bilingual labels (ORDERS订单…) don't fit a phone width, so make
-     the row a single horizontally-scrollable strip — the same treatment as #pp-tabs above — instead of wrapping/clipping. */
+     the row a single horizontally-scrollable strip (the same treatment as #pp-tabs above) instead of wrapping/clipping. */
   body header.pv-top #pp-secs{flex:1 1 100%;width:100%;display:flex;flex-wrap:nowrap;align-items:center;gap:2px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
   body header.pv-top #pp-secs::-webkit-scrollbar{height:0}
   body header.pv-top #pp-secs .pp-sec{flex:0 0 auto}
+  /* v27.801 (Ben): compact phone header — Inbox badge up into the brand row (right side), EN/中文 shares the pills row,
+     desktop spacer hidden, tighter side padding and pill padding. The bar collapses from 3 lines to 2. */
+  body header.pv-top{padding:0 12px;gap:10px;row-gap:6px}
+  body header.pv-top #pp-notif{order:1;margin-left:auto!important}
+  body header.pv-top #pp-secs{order:2;flex:1 1 calc(100% - 110px);width:auto;min-width:0}   /* flex breaks lines on the UNSHRUNK basis. auto (~490px of pills) claimed a line alone and pushed EN/中文 to a 3rd row; 0 let it squeeze onto the brand row as a 54px strip. calc(100% - 110px) can never fit on row 1, so the strip always starts row 2, leaves the toggle's width beside it, then grows into the rest. */
+  body header.pv-top .pv-lang{order:2;flex:0 0 auto;margin-right:0}
+  body header.pv-top .sp{display:none}
+  body header.pv-top #pp-secs .pp-sec{padding:4px 8px;font-size:11px}
+  /* v27.801 (Ben): PO filters on phones — search + Filter button on one row; everything else in a pop-down panel. */
+  #supply-root .pp-po-bar .pp-po-q{flex:1 1 auto;min-width:0;width:auto!important;min-height:36px;box-sizing:border-box}   /* match the 36px Filter button beside it */
+  :is(#pv-wrap,#app) #supply-root .pp-filt-btn{display:inline-flex;align-items:center;flex:0 0 auto;padding:0 12px;font-size:11px;min-height:36px;box-sizing:border-box;line-height:1.3}   /* 2-id prefix beats the theme's #pv-wrap #supply-root .pill{min-height:36px}; 36px border-box matches the search input height */
+  #supply-root .pp-po-bar .pp-filt-wrap{display:none}
+  #supply-root .pp-po-bar.pp-filt-open .pp-filt-wrap{display:flex;flex:1 1 100%;flex-wrap:wrap;gap:6px;padding:8px;background:#fff;border:1px solid var(--line);border-radius:8px;box-sizing:border-box}
+  /* :is(#pv-wrap,#app) prefix = 2 ids, so these beat the theme's #pv-wrap #supply-root .pill{min-height:36px} touch rule
+     (hz-theme.css ~532) that made every pill 46px tall. 30px keeps them tappable while cutting the padding Ben asked for. */
+  :is(#pv-wrap,#app) #supply-root .pp-filt-wrap .pill{padding:5px 10px;font-size:11px;min-height:30px;box-sizing:border-box;line-height:1.3}   /* border-box: once the panel opens these become flex items and min-height applies, so under content-box 30 became 30+10+2=42px */
+  :is(#pv-wrap,#app) #supply-root .pp-filt-wrap select.fci{min-height:30px;padding-top:4px;padding-bottom:4px}
+  :is(#pv-wrap,#app) #supply-root .pp-filt-wrap .fci{max-width:100%}
+  /* v27.801 (Ben): MANAGE on the PO card was meant to sit top-RIGHT (right:10px), but with left:auto + width:auto the
+     absolute cell fell back to its STATIC (left) position and right was ignored as over-constrained, so the button
+     covered the start of the PO number. A definite width lets right resolve. Title right-padding trimmed to fit the
+     compact M (was 110px reserved for the full MANAGE label). NOTE: this CSS sits inside a JS template literal, so
+     never use backticks in these comments. */
+  #supply-root table.pp-pos[data-stack] tbody tr:not([id]):not(.pp-grp) td:first-child{width:max-content!important;left:auto!important;right:10px!important;top:8px!important}
+  #supply-root table.pp-pos[data-stack] tbody td[data-ci="1"]{padding-right:60px!important}
   /* compact MANAGE → "M", but keep the first column wide enough to show the action-count badge */
   #supply-root .pp-grp-cnt{display:none}   /* mobile: production group header shows just "P# 56", not the "— N PO's" count */
   #supply-root .pp-exp .mng-txt{display:none}
@@ -872,9 +899,7 @@
     rootEl.innerHTML='<div class="bar" style="align-items:center"><span id="pp-tabs" style="display:none"><span class="rtab active" data-pt="pos">Purchase Orders <span id="pp-pos-badge"></span></span><span class="rtab" data-pt="shipmentplan">Shipment Plan <span id="pp-ship-badge"></span></span><span class="rtab" data-pt="deposits">Deposits</span><span class="rtab" data-pt="payments">Payments</span><span class="rtab" data-pt="productions">Productions <span id="pp-prodn-badge"></span></span><span class="rtab" data-pt="samples">Sample shipments <span id="pp-samp-badge"></span></span><span class="rtab" data-pt="quality">Quality Control</span><span class="rtab" data-pt="product" id="pp-prod-tab" style="display:none">Product <span id="pp-prod-badge"></span></span><span class="rtab" data-pt="specs" id="pp-spec-tab" style="display:none">Specifications <span id="pp-spec-badge"></span></span></span>'
       +'<span id="pp-notif" style="margin-left:auto;display:none;gap:6px;align-items:center;position:relative;white-space:nowrap">'
         +'<button id="pp-unread-btn" class="save-btn light" title="Unread messages from Dock &amp; Bay" style="position:relative"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><rect x="2" y="4" width="20" height="16" rx="2"></rect><path d="m2 7 10 6L22 7"></path></svg><span class="pp-inbox-lbl">Inbox </span><span id="pp-unread-n">0</span></button>'
-        +'<button id="pp-recent-btn" class="save-btn light" title="Recent changes"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" style="vertical-align:-2px;margin-right:4px"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l4 2"></path></svg>Recent</button>'
         +'<div id="pp-unread-drop" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;z-index:120;background:#fff;color:var(--nav);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:280px;max-width:360px;max-height:60vh;overflow:auto;text-align:left"></div>'
-        +'<div id="pp-recent-drop" style="display:none;position:absolute;right:0;top:100%;margin-top:4px;z-index:120;background:#fff;color:var(--nav);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(15,23,42,.18);min-width:300px;max-width:380px;max-height:60vh;overflow:auto;text-align:left"></div>'
       +'</span></div><div id="pp-banner"></div><div id="pp-body"><div class="pp-skel" aria-label="Loading"><i></i><i></i><i></i><i></i><i></i></div></div>';
     var tabsEl=document.getElementById('pp-tabs'), body=document.getElementById('pp-body');
     // ── Grouped navigation (Ben, v27.493): five sections over the existing tabs. The original .rtab[data-pt] tabs and their
@@ -2333,7 +2358,7 @@
             var n=((_ppData&&_ppData.products)||[]).reduce(function(a,p){return a+(Number(p.unread_dnb)||0)+(Number(p.dev_unaccepted)>0?1:0);},0);   // v27.761: unaccepted dev requests count as open actions
             var bg=document.getElementById('pp-prod-badge'); if(bg)bg.innerHTML=n?'<span style="background:var(--neg);color:#fff;border-radius:8px;font-size:10.5px;font-weight:700;padding:0 5px">'+n+'</span>':''; }
           // ---- top-right: unread D&B messages + recent changes -----------------------------------------
-          function closeNotif(){ var a=document.getElementById('pp-unread-drop'),b=document.getElementById('pp-recent-drop'); if(a)a.style.display='none'; if(b)b.style.display='none'; }
+          function closeNotif(){ var a=document.getElementById('pp-unread-drop'); if(a)a.style.display='none'; }   // v27.801: Recent drop-down removed (Ben)
           function computeUnread(){ var items=[];
             var nb=(_ppData&&_ppData.notesByPo)||{};
             // Only count POs the supplier can actually see. notesByPo is scoped by supplier and includes notes on
@@ -2407,9 +2432,7 @@
             if(ud && ud.style.display!=='none') loadUnread(ud);   // an already-open Inbox stays fresh; otherwise it loads on open
             if(!wrap._wired){ wrap._wired=1;
               document.getElementById('pp-unread-btn').onclick=function(e){ e.stopPropagation(); var d=document.getElementById('pp-unread-drop'), r=document.getElementById('pp-recent-drop'); if(r)r.style.display='none'; if(d.style.display!=='none'){ d.style.display='none'; return; } d.style.display='block'; loadUnread(d); };
-              document.getElementById('pp-recent-btn').onclick=function(e){ e.stopPropagation(); var d=document.getElementById('pp-recent-drop'), u=document.getElementById('pp-unread-drop'); if(u)u.style.display='none'; if(d.style.display!=='none'){ d.style.display='none'; return; } d.style.display='block'; loadRecent(d); };
               document.getElementById('pp-unread-drop').onclick=function(e){ e.stopPropagation(); };
-              document.getElementById('pp-recent-drop').onclick=function(e){ e.stopPropagation(); };
               document.addEventListener('click', closeNotif); } }
           // Portal ▸ Quality Control — supplier uploads test reports / GRS certs etc. (stored in-DB), assigned to prod/batch/PO.
           function ppQuality(){
@@ -2698,15 +2721,21 @@
             function _distinct(key){ var s={}; _ppData.pos.forEach(function(p){ var v=(p[key]==null?'':String(p[key])).trim(); if(v)s[v]=1; }); return Object.keys(s).sort(); }
             var _prods=_distinct('prod_no'), _ctrys=_distinct('country'), _brs=_distinct('branch');
             function _fSel(cls,cur,label,opts){ return opts.length?('<select class="fci '+cls+'" style="width:auto;max-width:150px;text-align:left"><option value="">'+label+'</option>'+opts.map(function(o){return '<option'+(o===cur?' selected':'')+'>'+esc(o)+'</option>';}).join('')+'</select>'):''; }
-            var pillBar='<div class="bar" style="gap:5px;flex-wrap:wrap;align-items:center">'
+            // v27.801 (Ben, phones): search stays visible; every other control lives in a "Filter" pop-down. Desktop is
+            // untouched: .pp-filt-wrap is display:contents there and the button is hidden (CSS, ≤640px). Open state is kept
+            // on window._ppFiltOpen so a filter tap (which re-renders) doesn't slam the panel shut.
+            var _nFilt=(PORTAL_PO_PROD?1:0)+(PORTAL_PO_CTRY?1:0)+(PORTAL_PO_BR?1:0)+(PORTAL_PO_EXC?1:0)+(window.__ppInclArch?1:0);
+            var pillBar='<div class="bar pp-po-bar'+(window._ppFiltOpen?' pp-filt-open':'')+'" style="gap:5px;flex-wrap:wrap;align-items:center">'
               +'<input class="fci pp-po-q" placeholder="search PO / client…" value="'+esc(PORTAL_PO_Q)+'" style="width:170px;text-align:left">'
+              +'<span class="pill pp-filt-btn'+(_nFilt?' active':'')+'" title="Show / hide filters">⚙ Filter'+(_nFilt?' · '+_nFilt:'')+'</span>'
+              +'<div class="pp-filt-wrap">'
               +_fSel('pp-po-prod',PORTAL_PO_PROD,'All productions',_prods)
               +_fSel('pp-po-ctry',PORTAL_PO_CTRY,'All countries',_ctrys)
               +_fSel('pp-po-br',PORTAL_PO_BR,'All branches',_brs)
               +'<span class="pill'+(PORTAL_PO_EXC?' active':'')+'" data-poexc="1" style="'+(PORTAL_PO_EXC?'background:var(--neg);color:#fff;border-color:var(--neg)':'color:var(--neg)')+'" title="show every PO with an open action, across all statuses">⚠ Show all exceptions</span>'
               +'<span class="pill pp-arch'+(window.__ppInclArch?' active':'')+'" data-pparch="1" title="Archived = completed POs before the production cutoff, hidden by default to keep the portal fast. Toggle to include them." style="'+(window.__ppInclArch?'background:var(--ink-soft);color:#fff;border-color:var(--ink-soft)':'')+'">🗄 '+(window.__ppInclArch?'Hide archived':'Show archived')+'</span>'
               +(ordered.length?ordered.map(function(s){var dim=(pq||PORTAL_PO_EXC);return '<span class="pill'+(PORTAL_PO_ST[s]?' active':'')+(dim?' ':'')+'" data-st="'+esc(s)+'"'+(dim?' style="opacity:.4"':'')+'>'+esc(s)+'</span>';}).join(''):'<span class="mut tiny">no orders</span>')
-              +(PORTAL_PO_EXC?'<span class="mut tiny">showing exceptions — all statuses</span>':'')+'</div>';
+              +(PORTAL_PO_EXC?'<span class="mut tiny">showing exceptions — all statuses</span>':'')+'</div></div>';   // closes .pp-filt-wrap then .pp-po-bar
             // a PO/client search OVERRIDES the status pills; the dropdown filters (production / country / branch) always AND on top
             var shown=_ppData.pos.filter(function(p){
               if(/future/i.test(p.status||'')) return false;   // never show FUTURE POs in the portal
@@ -2728,6 +2757,7 @@
             var _pr=body.querySelector('.pp-po-prod'); if(_pr)_pr.onchange=function(){ PORTAL_PO_PROD=this.value; _ppShowAllPO=false; renderPP(); };
             var _ct=body.querySelector('.pp-po-ctry'); if(_ct)_ct.onchange=function(){ PORTAL_PO_CTRY=this.value; _ppShowAllPO=false; renderPP(); };
             var _br=body.querySelector('.pp-po-br'); if(_br)_br.onchange=function(){ PORTAL_PO_BR=this.value; _ppShowAllPO=false; renderPP(); };
+            var _fb=body.querySelector('.pp-filt-btn'); if(_fb)_fb.onclick=function(){ window._ppFiltOpen=!window._ppFiltOpen; var b=_fb.closest('.pp-po-bar'); if(b)b.classList.toggle('pp-filt-open',!!window._ppFiltOpen); };   // v27.801: toggle the phone filter panel in place (no re-render)
             var pqi=body.querySelector('.pp-po-q'); if(pqi)pqi.oninput=debounce(function(){ PORTAL_PO_Q=pqi.value; _ppShowAllPO=false; var foc=document.activeElement===pqi; renderPP(); if(foc){ var n=body.querySelector('.pp-po-q'); if(n){ n.focus(); n.setSelectionRange(n.value.length,n.value.length); } } },350);
             if(_ppOpenPO){ var _ob=body.querySelector('.pp-exp[data-po="'+((window.CSS&&CSS.escape)?CSS.escape(_ppOpenPO):_ppOpenPO)+'"]'); _ppOpenPO=null; if(_ob)setTimeout(function(){_ob.click();},0); }   // came from a Shipment Plan PO link → auto-open it
             body.querySelectorAll('.pp-exp').forEach(function(btn){ btn.onclick=function(){ var i=btn.dataset.i, ex=document.getElementById('pp-'+i); if(!ex)return;

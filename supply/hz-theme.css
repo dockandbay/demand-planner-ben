@@ -344,7 +344,7 @@ html body:has(#app.product-active){background:var(--card)}
 
 /* ═══ U5 supplier portal, slice 1 (v27.487): same tokens and primitives as the app (via :is(#app,#pv-wrap) above) + portal shell ═══ */
 #pv-wrap{padding:0 20px 18px}
-body header.pv-top{min-height:52px;padding:0 20px;gap:14px}   /* v27.800 (Ben): was a hard height:52px — on a phone the bar wraps to 3 lines (brand / section pills / lang+Inbox) and the fixed height let lines 2-3 overflow UNDER #pv-wrap (section pills clipped, Inbox line drawn over the search box). min-height keeps desktop pixel-identical and lets the bar grow when it wraps. */
+body header.pv-top{min-height:52px;padding:0 20px;gap:14px}   /* v27.800 (Ben): was a hard height:52px; on a phone the bar wraps to 3 lines (brand / section pills / lang+Inbox) and the fixed height let lines 2-3 overflow UNDER #pv-wrap (section pills clipped, Inbox line drawn over the search box). min-height keeps desktop pixel-identical and lets the bar grow when it wraps. */
 body header.pv-top h1{font-size:12px;letter-spacing:.09em;color:var(--nav-dim)}
 body header.pv-top .sup{font-size:15px;font-weight:800;letter-spacing:.01em}
 body .pv-btn{border-radius:var(--r-sm);font-weight:700;font-size:12.5px;padding:7px 14px}
