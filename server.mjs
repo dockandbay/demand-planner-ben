@@ -10229,6 +10229,12 @@ async function fulfilUpsertShipmentNumeric(model, shipmentId, defId, value) {
   if (Array.isArray(ex) && ex[0]) await fulfilFetch('PUT', '/model/metafield.value/' + ex[0].id, { value_numeric: v });
   else await fulfilFetch('POST', '/model/metafield.value', [{ field: defId, resource: res, value_numeric: v }]);
 }
+// v27.794 (Ben): a timeline note on the shipment recording the reconciliation. Fulfil's note stream is ir.note
+// (message + resource). Best-effort — a failed note never fails the cost push.
+const TPL_DISPLAY = { uk_ilg: 'UK ILG', us_geneva: 'US Geneva', eu_ifulfilment: 'EU iFulfilment', au_coghlans: 'AU Coghlans' };
+async function fulfilAddShipmentNote(model, id, text) {
+  try { await fulfilFetch('POST', '/model/ir.note', [{ resource: model + ',' + id, message: text }]); } catch (e) { /* note is best-effort */ }
+}
 // resolve an invoice reference → { model, id }. CS…→ customer shipment; FBA/TRF/IS…→ internal transfer (by reference
 // then number); any other order ref (AU-…) → the sale's customer shipment. Cached per call.
 async function fulfilShipmentForRef(ref, cache) {
@@ -10266,9 +10272,11 @@ app.post('/api/supply/tpl/push-actuals/:id', async (req, res) => {
       if (!sh.id) { unresolved++; if (unref.length < 50) unref.push(o.reference); continue; }
       const k = sh.model + ',' + sh.id; const a = byShip[k] || (byShip[k] = { model: sh.model, id: sh.id, freight: 0, process: 0 }); a.freight += Number(o.shipping) || 0; a.process += Number(o.fulfilment) || 0; }
     let pushedCust = 0, pushedTransfer = 0;
+    const tplName = TPL_DISPLAY[row.tpl] || row.tpl || 'the 3PL';
     for (const k of Object.keys(byShip)) { const a = byShip[k]; const md = (a.model === 'stock.shipment.internal') ? defs.internal : defs.out;
       if (md.freight) await fulfilUpsertShipmentNumeric(a.model, a.id, md.freight, a.freight);
       if (md.process) await fulfilUpsertShipmentNumeric(a.model, a.id, md.process, a.process);
+      await fulfilAddShipmentNote(a.model, a.id, 'Added fulfilment costs from 3PL invoice reconciliation from ' + tplName + ': Freight $' + a.freight.toFixed(2) + ', Processing $' + a.process.toFixed(2));
       if (a.model === 'stock.shipment.internal') pushedTransfer++; else pushedCust++; }
     res.json({ ok: true, env: cfg.env, total, offset, processed_to: end, done: end >= total, next_offset: end >= total ? null : end,
       customer_shipments_pushed: pushedCust, transfers_pushed: pushedTransfer, unresolved, unresolved_refs: unref });
