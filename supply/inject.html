@@ -2505,7 +2505,8 @@
         return '<div class="bar" id="po-impexp-bar" style="display:none;gap:8px;flex-wrap:wrap">'
           +'<button class="save-btn" id="po-new" style="'+lb+'">+ New PO</button>'
           +'<button class="save-btn" id="po-upload" style="'+lb+'">⬆ Upload POs</button>'
-          +'<button class="save-btn" id="po-import-cin7" style="'+lb+'" title="import a purchase order from Cin7 by its PO number — brings in supplier, branch, SKUs &amp; quantities">⬆ Import PO from ERP</button>'
+          +'<button class="save-btn" id="po-import-cin7" style="'+lb+'" title="import a purchase order from Cin7 by its PO number — brings in supplier, branch, SKUs &amp; quantities">⬆ Import from Cin7</button>'
+          +'<button class="save-btn" id="po-import-fulfil" style="'+lb+'" title="import a purchase order from Fulfil — by PO number, or every PO linked to a sales order — brings in supplier, branch, SKUs, quantities &amp; prices">⬆ Import Fulfil PO</button>'
           +'<button class="save-btn" id="po-merge" style="'+lb+'" title="merge one PO&rsquo;s SKUs &amp; quantities into another, then delete the merged-from PO">⛙ Merge PO&rsquo;s</button>'
           +'<button class="save-btn" id="po-master" style="'+lb+'" title="consolidate several POs (one supplier) under a single MASTER PO — the master goes to the ERP, the children stay for planning only">⛃ Create master PO</button>'
           +'<button class="save-btn" id="po-csv" style="'+lb+'">⬇ Export CSV</button>'
@@ -2737,6 +2738,7 @@
     document.getElementById('po-new').onclick=openPoCreate;
     document.getElementById('po-upload').onclick=openPoUpload;
     var _impBtn=document.getElementById('po-import-cin7'); if(_impBtn)_impBtn.onclick=openPoImportCin7;
+    var _fimpBtn=document.getElementById('po-import-fulfil'); if(_fimpBtn)_fimpBtn.onclick=openPoImportFulfil;
     var _mrgBtn=document.getElementById('po-merge'); if(_mrgBtn)_mrgBtn.onclick=openPoMerge;
     var _mstBtn=document.getElementById('po-master'); if(_mstBtn)_mstBtn.onclick=openMasterCreate;
     // BULK Cin7 date sync — every ACTIVE PO whose completed-at-warehouse date differs from Cin7 (same condition as
@@ -2810,6 +2812,47 @@
         selectSection('purchase-orders'); }).catch(function(e){ prev.innerHTML='<span style="color:var(--neg)">Failed: '+esc(e.message||e)+'</span>'; goBtn.disabled=false; goBtn.textContent='Import'; }); };
     bg.onclick=function(e){ if(e.target===bg)bg.parentNode.removeChild(bg); };
     document.getElementById('po-imp-cancel').onclick=function(){ bg.parentNode.removeChild(bg); };
+    setTimeout(function(){ ref.focus(); },0);
+  }
+  // v27.778 (Ben): Import a PO from Fulfil — by PO number, OR by sales order (imports every PO linked to that SO).
+  // Fulfil links a sale's generated POs via the PO's `reference` = the sale number (e.g. SO49664 → PO155 + PO156).
+  function openPoImportFulfil(){ var bg=document.createElement('div'); bg.className='pomodal-bg';
+    bg.innerHTML='<div class="pomodal"><div style="font-weight:600;font-size:14px;margin-bottom:6px">Import PO from Fulfil</div>'
+      +'<div class="mut tiny" style="margin-bottom:8px">Look up by a Fulfil <b>purchase order number</b>, or by a <b>sales order</b> to import every purchase order linked to it. We bring in the supplier, branch, SKUs, quantities &amp; prices. Existing POs have their lines overwritten from Fulfil.</div>'
+      +'<div style="display:flex;gap:14px;margin-bottom:8px;font-size:12px">'
+        +'<label style="cursor:pointer"><input type="radio" name="fimp-mode" value="po" checked style="margin-right:5px;vertical-align:middle">Purchase order number</label>'
+        +'<label style="cursor:pointer"><input type="radio" name="fimp-mode" value="sale" style="margin-right:5px;vertical-align:middle">Sales order (all linked POs)</label></div>'
+      +'<div style="display:flex;gap:6px;align-items:center"><input id="fimp-ref" type="text" placeholder="e.g. PO156" style="flex:1;font-size:13px;padding:5px 8px;border:1px solid #d0d0d0;border-radius:6px"><button class="save-btn" id="fimp-check">Check Fulfil</button></div>'
+      +'<div id="fimp-prev" style="margin:8px 0;font-size:12px;max-height:340px;overflow:auto">&nbsp;</div>'
+      +'<div style="display:flex;align-items:center;margin-top:8px"><span style="margin-left:auto"></span><button class="save-btn light" id="fimp-cancel">Cancel</button> <button class="save-btn dark" id="fimp-go" style="margin-left:6px;display:none">Import</button></div></div>';
+    document.body.appendChild(bg);
+    var ref=document.getElementById('fimp-ref'), prev=document.getElementById('fimp-prev'), goBtn=document.getElementById('fimp-go');
+    function curMode(){ var r=bg.querySelector('input[name="fimp-mode"]:checked'); return r?r.value:'po'; }
+    bg.querySelectorAll('input[name="fimp-mode"]').forEach(function(r){ r.onchange=function(){ ref.placeholder=(curMode()==='sale')?'e.g. SO49664':'e.g. PO156'; prev.innerHTML='&nbsp;'; goBtn.style.display='none'; ref.focus(); }; });
+    function doCheck(){ var v=(ref.value||'').trim(); if(!v){prev.textContent='Enter a number.';return;} var mode=curMode(); prev.textContent='Checking Fulfil…'; goBtn.style.display='none';
+      fetch('/api/supply/po-import-fulfil',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mode:mode,value:v})}).then(function(x){return x.json();}).then(function(j){
+        if(j&&j.error){ prev.innerHTML='<span style="color:var(--neg)">'+esc(j.error)+'</span>'; return; }
+        var list=j.preview||[]; if(!list.length){ prev.innerHTML='<span style="color:var(--neg)">Nothing found.</span>'; return; }
+        var head=(mode==='sale')?('<div style="margin-bottom:6px">Sales order <b>'+esc(v)+'</b> &rarr; '+list.length+' linked purchase order'+(list.length>1?'s':'')+':</div>'):'';
+        prev.innerHTML=head+list.map(function(p){
+          return '<div style="background:var(--hover);border:1px solid var(--line);border-radius:6px;padding:8px;margin-bottom:6px">'
+            +(mode==='sale'?'<label style="cursor:pointer;display:block"><input type="checkbox" class="fimp-pick" data-po="'+esc(p.po)+'" checked style="margin-right:6px;vertical-align:middle">':'')
+            +'<b>'+esc(p.po)+'</b>'+(p.reference&&p.reference!==p.po?' <span class="mut tiny">('+esc(p.reference)+')</span>':'')+(p.exists?' <span style="color:var(--amber)">· already in planner — lines will be overwritten</span>':'')+(mode==='sale'?'</label>':'')
+            +'<div class="mut tiny" style="margin-top:2px">Company: <b>'+esc(p.company||'—')+'</b> · Supplier: <b>'+esc(p.supplier_name||'—')+'</b> · Branch: <b>'+esc(p.branch||'—')+'</b> · Currency: '+esc(p.currency||'—')+(p.delivery?' · Delivery: '+esc(p.delivery):'')+'</div>'
+            +'<div class="mut tiny" style="margin-top:3px">'+p.line_count+' line(s): '+esc((p.lines||[]).slice(0,8).map(function(l){return l.sku+'×'+l.qty;}).join(', '))+(p.line_count>8?' …':'')+'</div></div>'; }).join('');
+        goBtn.style.display=''; goBtn.textContent=(mode==='sale'&&list.length>1)?'Import selected':'Import'; }).catch(function(e){ prev.innerHTML='<span style="color:var(--neg)">Failed: '+esc(e.message||e)+'</span>'; }); }
+    document.getElementById('fimp-check').onclick=doCheck;
+    ref.onkeydown=function(e){ if(e.key==='Enter')doCheck(); };
+    goBtn.onclick=function(){ var v=(ref.value||'').trim(), mode=curMode(), pos=null;
+      if(mode==='sale'){ pos=[].map.call(bg.querySelectorAll('.fimp-pick:checked'),function(c){return c.getAttribute('data-po');}); if(!pos.length){ prev.innerHTML='<span style="color:var(--neg)">Select at least one PO to import.</span>'; return; } }
+      goBtn.disabled=true; goBtn.textContent='Importing…';
+      fetch('/api/supply/po-import-fulfil',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mode:mode,value:v,confirm:true,pos:pos})}).then(function(x){return x.json();}).then(function(j){
+        if(j&&j.error){ prev.innerHTML='<span style="color:var(--neg)">'+esc(j.error)+'</span>'; goBtn.disabled=false; goBtn.textContent='Import'; return; }
+        bg.parentNode.removeChild(bg); invalidateDerived(); delete cache['purchase-orders'];
+        var impPo=(j&&j.po)||v; _poState={f:{production:1},q:impPo,act:{},ctry:{},grp:'production',sup:'',prod:'',batch:'',branch:''};   // filter the grid to the imported PO(s)
+        selectSection('purchase-orders'); }).catch(function(e){ prev.innerHTML='<span style="color:var(--neg)">Failed: '+esc(e.message||e)+'</span>'; goBtn.disabled=false; goBtn.textContent='Import'; }); };
+    bg.onclick=function(e){ if(e.target===bg)bg.parentNode.removeChild(bg); };
+    document.getElementById('fimp-cancel').onclick=function(){ bg.parentNode.removeChild(bg); };
     setTimeout(function(){ ref.focus(); },0);
   }
   // ORDER PLAN paste: paste a 2-column SKU / qty block from Excel or Sheets. SKUs not in our list are skipped;
