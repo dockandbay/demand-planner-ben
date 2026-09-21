@@ -1,3 +1,30 @@
+## v27.800 to v27.802 Supplier portal on mobile (Ben): CLIENT only
+
+Three client-only versions from Ben's phone review of the supplier portal. **No migrations, no env vars, no server routes changed** (package.json version bumps only). Deploy is a straight pull; nothing to run.
+
+### Files
+`supply/hz-theme.css`, `supply/portal.html`, `supply/portal-view.js`, `package.json`.
+
+### v27.800 Portal header was pinned at 52px
+- **Root cause:** `hz-theme.css` set `body header.pv-top{height:52px}`, sized for the desktop one-line brand bar. On a phone the bar wraps to three lines (brand / section pills / language + Inbox) and the fixed height let lines 2 and 3 overflow under `#pv-wrap`: section pills clipped, the Inbox line drawn over the search box.
+- **Fix:** `height:52px` to `min-height:52px` (desktop pixel-identical, the bar grows when it wraps). `#pp-secs` becomes a horizontally scrollable strip on phones, mirroring the existing `#pp-tabs` treatment. Note that on the standalone portal `#pp-secs` lives inside the dark brand bar, so the theme's `#supply-root #pp-secs` rules do not reach it; the portal-specific rules target `body header.pv-top #pp-secs`.
+
+### v27.801 Portal mobile polish (six items from Ben)
+- Recent button and drop-down removed, handlers too.
+- App version in tiny type directly under the HORIZON logo (`.pv-brand` is now a column containing `.pv-brand-row`).
+- Inbox badge moved into the brand row, right side (flex `order` on phones).
+- Section pill padding `6px 12px` to `4px 9px` (8px on phones); header side padding 20 to 12px on phones.
+- PO filters on phones: search stays visible, every other control moves into a **Filter** pop-down with an active-filter count; open state is kept on `window._ppFiltOpen` so a filter tap (which re-renders) does not close it. Desktop untouched: `.pp-filt-wrap` is `display:contents` and the button is hidden above 640px. Was 10 controls over 5 rows (250px), now one 50px row.
+- MANAGE on the PO card was meant to sit top-right (`position:absolute; right:10px`) but with `left:auto` and `width:auto` the cell took its static left position and covered the start of the PO number. `width:max-content` lets `right` resolve; the title's reserved `padding-right` trimmed 110 to 60px for the compact M.
+
+### v27.802 Hotfix: section menu invisible on the phone
+- v27.801 squeezed the EN/中文 toggle onto the pills row using `flex-basis: calc(100% - 110px)`. It rendered in Chrome at 360 to 500px but the menu vanished on Ben's phone (iOS Safari). Reverted `#pp-secs` to `flex:1 1 100%`, the v27.800 layout the phone is known to render; EN/中文 sits on its own compact row. The header is one line taller than v27.801 as a result.
+
+### Notes for prod
+- **Caching:** `hz-theme.css` is linked with `?v=APP_VERSION` and served `no-cache`; `portal-view.js` is fetched with `?v=Date.now()`. Phones pick up the new CSS on a normal reload; no manual cache purge needed.
+- **Template-literal CSS:** the portal CSS in `supply/portal-view.js` sits inside a JS template literal, so comments there must never contain backticks. A stray pair broke the portal script for a few seconds during this work and was caught by `node --check`. Run `node --check supply/portal-view.js` before deploying any portal change.
+- **Safari:** none of this was verified on iOS Safari directly (Chrome at 360 to 500px plus a desktop-breakpoint emulation). If suppliers report header layout issues on iPhone, the flex rules in the `(max-width:640px)` block of `portal-view.js` are the first place to look.
+
 ## v27.777–799 Fulfil migration batch + technical-review fixes (Ben) — SERVER + CLIENT + migrations
 
 Deploy package for Diviyaj covering everything since the v27.756–776 note. Read the **GO-LIVE / DEPLOY** block first.
