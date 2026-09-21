@@ -16156,11 +16156,24 @@ async function fulfilCompareApiData(force) {
     const sales = await fulfilFetch('PUT', '/model/sale.sale/search_read', [[['number', 'in', saleRefs]], 0, 500, null, ['number', 'company.rec_name', 'party.name', 'state']]);
     (sales || []).forEach(s => { saleMap[s.number] = { company: s['company.rec_name'] || null, client: s['party.name'] || null, state: s.state || null }; });
   }
-  _fulfilCmpCache = { env, at: Date.now(), pos, saleMap };
+  // Reverse chain PO → purchase.request → sale.line → sale, so POs linked to a sale that DON'T carry the sale number in
+  // `reference` (e.g. PO158 → SO49667, reference "PO1234") still show their sales order. Batched over all fetched POs.
+  const poSaleMap = {};
+  const allPoIds = pos.map(p => p.id).filter(Boolean);
+  if (allPoIds.length) {
+    const reqs = await fulfilSearchAll('purchase.request', [['purchase_line.purchase', 'in', allPoIds]], ['id', 'purchase_line.purchase']);   // fulfilSearchAll paginates — Fulfil caps page size at 500
+    const reqToPo = {}, reqIds = [];
+    (reqs || []).forEach(r => { const pid = r['purchase_line.purchase']; if (pid) { reqToPo[r.id] = pid; reqIds.push(r.id); } });
+    if (reqIds.length) {
+      const slines = await fulfilSearchAll('sale.line', [['purchase_request', 'in', reqIds]], ['purchase_request', 'sale.number', 'sale.company.rec_name', 'sale.party.name']);
+      (slines || []).forEach(sl => { const pid = reqToPo[sl.purchase_request]; if (pid && sl['sale.number'] && !poSaleMap[pid]) poSaleMap[pid] = { number: sl['sale.number'], company: sl['sale.company.rec_name'] || null, client: sl['sale.party.name'] || null }; });
+    }
+  }
+  _fulfilCmpCache = { env, at: Date.now(), pos, saleMap, poSaleMap };
   return _fulfilCmpCache;
 }
 async function fulfilCompareRows(force) {
-  const { pos, saleMap } = await fulfilCompareApiData(force);
+  const { pos, saleMap, poSaleMap } = await fulfilCompareApiData(force);
   const [poR, supR, igR] = await Promise.all([   // parallel — 3 sequential remote-pooler queries were ~1s; one round-trip instead
     pool.query('SELECT po FROM planner.purchase_orders'),
     pool.query("SELECT lower(trim(name)) n FROM planner.suppliers WHERE coalesce(kind,'supplier')='supplier'"),
@@ -16174,8 +16187,11 @@ async function fulfilCompareRows(force) {
   const cleanCo = v => String(v || '').replace(/^\[[A-Z]{2}\]\s*/, '').trim() || null;   // "[UK] Dock & Bay Ltd" → "Dock & Bay Ltd"
   return cand.map(p => {
     const key = p.number || p.reference;
-    const sale = (p.reference && /^SO/i.test(p.reference)) ? p.reference : null;
-    const sm = sale ? (saleMap[sale] || {}) : {};
+    // sale via the PO reference (SO49664 style) OR via the purchase-request chain (SO49667 → PO158 style)
+    const refSale = (p.reference && /^SO/i.test(p.reference)) ? p.reference : null;
+    const chain = (poSaleMap || {})[p.id] || null;
+    const sale = refSale || (chain ? chain.number : null);
+    const sm = refSale ? (saleMap[refSale] || {}) : (chain || {});
     const wh = String(p['warehouse.code'] || '');
     return { po: key, fulfil_id: p.id, number: p.number, reference: p.reference,
       supplier_name: p['party.name'] || null, company: cleanCo(p['company.rec_name']), currency: p['currency.code'] || null,
