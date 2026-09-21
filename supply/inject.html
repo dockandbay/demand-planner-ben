@@ -506,6 +506,8 @@
 #supply-root .act-tbl{width:100%;border-collapse:collapse;font-size:12px}
 /* v27.781 (Ben): ERP/Fulfil compare tables fill the width and show ALL columns (no horizontal scroll on desktop);
    long cells wrap. Mobile keeps its own scrolling/sticky layout (media block below). */
+#supply-root .po-fpush{border:none;cursor:pointer}   /* v27.782 (Ben): Fulfil-column Push/Update buttons — no border (match the Cin7-column badges) */
+#supply-root .tw:has(> table.erpc-tbl){max-height:none;overflow:visible}   /* v27.782 (Ben): compare tables show ALL rows — no inner vertical scroll (the page scrolls) */
 #supply-root .erpc-tbl{width:100%;table-layout:auto;border-collapse:collapse;font-size:12px}
 #supply-root .erpc-tbl th,#supply-root .erpc-tbl td{white-space:normal;word-break:break-word;vertical-align:top}
 /* DESKTOP fixed column widths: tiny severity dot; ref wide enough for ~20 chars (then wraps); narrower Fix;
