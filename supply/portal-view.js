@@ -712,6 +712,12 @@
   #supply-root #pp-tabs{display:flex!important;flex:1 1 100%;width:100%;flex-wrap:nowrap;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 -16px 8px;padding:2px 16px 0;background:#f6f8fa;border-bottom:1px solid #e5e7eb}
   #supply-root #pp-tabs::-webkit-scrollbar{height:0}
   #supply-root #pp-tabs .rtab{flex:0 0 auto;padding:9px 13px;font-size:13px;white-space:nowrap;border-bottom-width:3px}
+  /* v27.800 (Ben): on the standalone portal the level-1 section pills (#pp-secs) live INSIDE the dark brand bar, so the
+     theme's #supply-root #pp-secs rules don't reach them. Bilingual labels (ORDERS订单…) don't fit a phone width, so make
+     the row a single horizontally-scrollable strip — the same treatment as #pp-tabs above — instead of wrapping/clipping. */
+  body header.pv-top #pp-secs{flex:1 1 100%;width:100%;display:flex;flex-wrap:nowrap;align-items:center;gap:2px;overflow-x:auto;-webkit-overflow-scrolling:touch;scrollbar-width:none}
+  body header.pv-top #pp-secs::-webkit-scrollbar{height:0}
+  body header.pv-top #pp-secs .pp-sec{flex:0 0 auto}
   /* compact MANAGE → "M", but keep the first column wide enough to show the action-count badge */
   #supply-root .pp-grp-cnt{display:none}   /* mobile: production group header shows just "P# 56", not the "— N PO's" count */
   #supply-root .pp-exp .mng-txt{display:none}
