@@ -11677,37 +11677,101 @@ app.get('/api/supply/tpl/cin7-log', async (req, res) => {
 // 48h (dest branch in the FBA/AWD set) into planner.fba_pending_transfers, then prunes any that have since landed
 // in inbound_shipments (matched by reference) or been received — so the table = in-flight, not-yet-inbound.
 const FBA_TRANSFER_BRANCH = { 5052: { market: 'uk', pool: 'fba' }, 5056: { market: 'us', pool: 'fba' }, 16289: { market: 'au', pool: 'fba' }, 27816: { market: 'us', pool: 'awd' }, 10879: { market: 'eu', pool: 'fba' } };
+// v27.798 (Ben): classify a Fulfil destination location name → {market,pool}. Amazon FBA locations are named
+// "Amazon FBA - XX - …"; AWD is the "US AWD" warehouse. Only Horizon-tracked markets (uk/us/au/eu) are kept.
+const _FBA_EU_COUNTRIES = new Set(['DE', 'FR', 'IT', 'ES', 'NL', 'PL', 'SE', 'BE', 'IE', 'AT', 'FI', 'DK', 'PT', 'CZ', 'GR', 'LU', 'SK', 'SI', 'EE', 'LV', 'LT', 'HR', 'BG', 'RO', 'HU', 'CY', 'MT']);
+function _fbaFulfilDestMeta(name) {
+  const s = String(name || '');
+  if (/AWD/i.test(s)) return { market: 'us', pool: 'awd' };   // "US AWD"
+  const m = /Amazon FBA\s*-\s*([A-Za-z]{2})/i.exec(s); if (!m) return null;
+  const cc = m[1].toUpperCase();
+  if (cc === 'US') return { market: 'us', pool: 'fba' };
+  if (cc === 'UK' || cc === 'GB') return { market: 'uk', pool: 'fba' };
+  if (cc === 'AU') return { market: 'au', pool: 'fba' };
+  if (_FBA_EU_COUNTRIES.has(cc)) return { market: 'eu', pool: 'fba' };
+  return null;   // CA/JP/MX/AE/… — not tracked by Horizon
+}
+// Normalise the Amazon FBA shipment id from a reference (the FBAxxxxx string) — the cross-ERP dedupe key.
+function _fbaShipId(ref) { const m = /FBA[A-Z0-9]{4,}/i.exec(String(ref || '')); return m ? m[0].toUpperCase() : null; }
 app.post('/api/supply/fba-transfers/refresh', async (req, res) => {
   try {
-    const auth = cin7Auth(); if (!auth) return res.json({ ok: false, error: 'Cin7 is not configured in this environment (no CIN7 credentials).' });
-    const since = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString().slice(0, 19) + 'Z';   // 30d window: a branch transfer can be in transit far longer than 48h; the prune drops any that have landed
-    let page = 1, calls = 0, kept = 0, lines = 0;
-    for (; ;) {
-      const where = encodeURIComponent("CreatedDate>='" + since + "'");
-      const url = 'https://api.cin7.com/api/v1/BranchTransfers?rows=250&page=' + page + '&fields=id,reference,sourceBranchId,destinationBranchId,stage,approvalDate,createdDate,dispatchedDate,receivedDate,estimatedDeliveryDate,isApproved,lineItems&where=' + where;
-      const r = await cin7Fetch(url, { method: 'GET', headers: { Authorization: auth, 'content-type': 'application/json' } }); calls++;
-      if (r.status >= 400) return res.json({ ok: false, error: 'Cin7 HTTP ' + r.status });
-      let arr = []; try { arr = await r.json(); } catch (e) { arr = []; }
-      if (!Array.isArray(arr) || !arr.length) break;
-      for (const t of arr) {
-        const meta = FBA_TRANSFER_BRANCH[t.destinationBranchId]; if (!meta || !t.isApproved) continue;
-        const wh = meta.market + '_' + meta.pool, bySku = {};
-        (t.lineItems || []).forEach(li => { const sku = String(li.code || '').trim(); if (!sku) return; bySku[sku] = (bySku[sku] || 0) + (Number(li.qty) || 0); });
-        kept++;
-        for (const sku in bySku) {
-          await pool.query(`INSERT INTO planner.fba_pending_transfers (cin7_id,sku,qty,reference,source_branch_id,dest_branch_id,market,pool,warehouse,stage,eta,created_date,dispatched_date,received_date,imported_at)
-            VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,now())
-            ON CONFLICT (cin7_id,sku) DO UPDATE SET qty=excluded.qty,reference=excluded.reference,stage=excluded.stage,eta=excluded.eta,dispatched_date=excluded.dispatched_date,received_date=excluded.received_date,imported_at=now()`,
-            [t.id, sku, bySku[sku], t.reference || null, t.sourceBranchId || null, t.destinationBranchId || null, meta.market, meta.pool, wh, t.stage || null, ((d => d ? String(d).slice(0, 10) : null)(t.estimatedDeliveryDate || t.approvalDate)), t.createdDate || null, t.dispatchedDate || null, t.receivedDate || null]);
-          lines++;
+    const auth = cin7Auth();
+    const fcfg = fulfilConfigFor(await activeFulfilEnv());
+    if (!auth && !fcfg.configured) return res.json({ ok: false, error: 'Neither Cin7 nor Fulfil is configured in this environment.' });
+    const since = new Date(Date.now() - 30 * 24 * 3600 * 1000);   // 30d window: a transfer can be in transit far longer than 48h; the prune drops any that have landed
+    const sinceCin7 = since.toISOString().slice(0, 19) + 'Z';
+    const sinceIso = since.toISOString().slice(0, 10);
+    // Union both ERPs, then collapse duplicates on the Amazon FBA shipment id (FBAxxxxx). Key = fba:<id>|sku when we
+    // can read an FBA id (cross-ERP dedupe, Fulfil wins on a tie); otherwise <source>:<id>|sku (kept as its own row).
+    const merged = new Map();   // dedupe key → row
+    const addRow = (row) => {
+      const dk = row._fbaId ? ('fba:' + row._fbaId + '|' + row.sku) : (row.source + ':' + row.cin7_id + '|' + row.sku);
+      const ex = merged.get(dk);
+      if (ex && !(row.source === 'fulfil' && ex.source === 'cin7')) return;   // keep existing unless the newcomer is Fulfil overriding a Cin7 dup
+      merged.set(dk, row);
+    };
+    let cin7Calls = 0, fulfilCalls = 0, cin7Shipments = 0, fulfilShipments = 0;
+    // ── Cin7 BranchTransfers ──────────────────────────────────────────────────────────────
+    if (auth) {
+      let page = 1;
+      for (; ;) {
+        const where = encodeURIComponent("CreatedDate>='" + sinceCin7 + "'");
+        const url = 'https://api.cin7.com/api/v1/BranchTransfers?rows=250&page=' + page + '&fields=id,reference,sourceBranchId,destinationBranchId,stage,approvalDate,createdDate,dispatchedDate,receivedDate,estimatedDeliveryDate,isApproved,lineItems&where=' + where;
+        const r = await cin7Fetch(url, { method: 'GET', headers: { Authorization: auth, 'content-type': 'application/json' } }); cin7Calls++;
+        if (r.status >= 400) return res.json({ ok: false, error: 'Cin7 HTTP ' + r.status });
+        let arr = []; try { arr = await r.json(); } catch (e) { arr = []; }
+        if (!Array.isArray(arr) || !arr.length) break;
+        for (const t of arr) {
+          const meta = FBA_TRANSFER_BRANCH[t.destinationBranchId]; if (!meta || !t.isApproved) continue;
+          const wh = meta.market + '_' + meta.pool, bySku = {}, fbaId = _fbaShipId(t.reference);
+          (t.lineItems || []).forEach(li => { const sku = String(li.code || '').trim(); if (!sku) return; bySku[sku] = (bySku[sku] || 0) + (Number(li.qty) || 0); });
+          cin7Shipments++;
+          const eta = ((d => d ? String(d).slice(0, 10) : null)(t.estimatedDeliveryDate || t.approvalDate));
+          for (const sku in bySku) addRow({ source: 'cin7', cin7_id: t.id, sku, qty: bySku[sku], reference: t.reference || null, _fbaId: fbaId, source_branch_id: t.sourceBranchId || null, dest_branch_id: t.destinationBranchId || null, market: meta.market, pool: meta.pool, warehouse: wh, stage: t.stage || null, eta, created_date: t.createdDate || null, dispatched_date: t.dispatchedDate || null, received_date: t.receivedDate || null });
         }
+        if (arr.length < 250) break; page++; if (page > 20) break;
       }
-      if (arr.length < 250) break; page++; if (page > 20) break;
+    }
+    // ── Fulfil internal shipments into Amazon FBA / AWD ────────────────────────────────────
+    if (fcfg.configured) {
+      // in-flight = not yet received/done and not cancelled/draft
+      const domain = [['create_date', '>=', { __class__: 'datetime', iso_string: since.toISOString().slice(0, 19) }], ['state', 'in', ['waiting', 'assigned', 'packed', 'shipped']],
+        ['OR', ['to_location.name', 'ilike', 'Amazon FBA%'], ['to_location.name', 'ilike', '%AWD%']]];
+      const ships = await fulfilSearchAll('stock.shipment.internal', domain, ['id', 'number', 'reference', 'state', 'to_location.name', 'planned_date', 'create_date', 'effective_date', 'moves']);
+      fulfilCalls += Math.max(1, Math.ceil(ships.length / 500));
+      // batch-resolve moves → sku+qty
+      const allMoveIds = []; ships.forEach(s => (Array.isArray(s.moves) ? s.moves : []).forEach(id => allMoveIds.push(id)));
+      const moveById = new Map();
+      for (let i = 0; i < allMoveIds.length; i += 500) {
+        const batch = allMoveIds.slice(i, i + 500); if (!batch.length) continue;
+        const mv = await fulfilFetch('PUT', '/model/stock.move/search_read', [[['id', 'in', batch]], 0, 500, null, ['id', 'product.code', 'quantity']]); fulfilCalls++;
+        (Array.isArray(mv) ? mv : []).forEach(m => moveById.set(m.id, { sku: m['product.code'], qty: _fulfilNum(m.quantity) || 0 }));
+      }
+      for (const s of ships) {
+        const meta = _fbaFulfilDestMeta(s['to_location.name']); if (!meta) continue;
+        const wh = meta.market + '_' + meta.pool, bySku = {}, fbaId = _fbaShipId(s.reference) || _fbaShipId(s.number);
+        (Array.isArray(s.moves) ? s.moves : []).forEach(id => { const mm = moveById.get(id); if (!mm || !mm.sku) return; bySku[mm.sku] = (bySku[mm.sku] || 0) + (mm.qty || 0); });
+        if (!Object.keys(bySku).length) continue;
+        fulfilShipments++;
+        const eta = fulfilUnwrap(s.planned_date) || null;
+        const created = fulfilUnwrap(s.create_date) || null;
+        for (const sku in bySku) addRow({ source: 'fulfil', cin7_id: -Math.abs(s.id), sku, qty: bySku[sku], reference: s.reference || s.number || null, _fbaId: fbaId, source_branch_id: null, dest_branch_id: null, market: meta.market, pool: meta.pool, warehouse: wh, stage: s.state || null, eta, created_date: created ? created + 'T00:00:00Z' : null, dispatched_date: null, received_date: null });
+      }
+    }
+    // ── Rebuild the cache from the merged set (full refresh), then prune landed/received ─────
+    let lines = 0;
+    await pool.query(`DELETE FROM planner.fba_pending_transfers`);
+    for (const row of merged.values()) {
+      await pool.query(`INSERT INTO planner.fba_pending_transfers (cin7_id,sku,qty,reference,source_branch_id,dest_branch_id,market,pool,warehouse,stage,eta,created_date,dispatched_date,received_date,source,imported_at)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,now())
+        ON CONFLICT (cin7_id,sku) DO UPDATE SET qty=excluded.qty,reference=excluded.reference,stage=excluded.stage,eta=excluded.eta,dispatched_date=excluded.dispatched_date,received_date=excluded.received_date,source=excluded.source,imported_at=now()`,
+        [row.cin7_id, row.sku, row.qty, row.reference, row.source_branch_id, row.dest_branch_id, row.market, row.pool, row.warehouse, row.stage, row.eta, row.created_date, row.dispatched_date, row.received_date, row.source]);
+      lines++;
     }
     // prune anything that has since landed in the normal inbound feed (same reference) or been received
     const pr = await pool.query(`DELETE FROM planner.fba_pending_transfers WHERE received_date IS NOT NULL OR (reference IS NOT NULL AND reference IN (SELECT DISTINCT reference FROM planner.inbound_shipments WHERE reference IS NOT NULL))`);
     await pool.query(`INSERT INTO planner.app_settings (key,value,updated_at) VALUES ('fba_transfers_last_run',$1,now()) ON CONFLICT (key) DO UPDATE SET value=excluded.value, updated_at=now()`, [new Date().toISOString()]);
-    res.json({ ok: true, transfers: kept, lines, pruned: pr.rowCount, cin7_calls: calls });
+    res.json({ ok: true, transfers: cin7Shipments + fulfilShipments, cin7_shipments: cin7Shipments, fulfil_shipments: fulfilShipments, lines, pruned: pr.rowCount, cin7_calls: cin7Calls, fulfil_calls: fulfilCalls });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // ── Zalando: baked per-SKU forecast + uploaded stock-on-hand (planner.zalando_stock). Feeds the BUY & MOVE ▸ Zalando tab.
@@ -11747,7 +11811,7 @@ app.post('/api/supply/zalando/stock-upload', async (req, res) => {
 // reference isn't already in inbound_shipments (defensive — the refresh also prunes them).
 app.get('/api/supply/fba-transfers/list', async (req, res) => {
   try {
-    const rows = (await pool.query(`SELECT cin7_id, sku, qty, reference, market, pool, warehouse, stage,
+    const rows = (await pool.query(`SELECT cin7_id, sku, qty, reference, market, pool, warehouse, stage, coalesce(source,'cin7') source,
         to_char(eta,'YYYY-MM-DD') eta, to_char(created_date,'YYYY-MM-DD') created, to_char(dispatched_date,'YYYY-MM-DD') dispatched
       FROM planner.fba_pending_transfers t
       WHERE received_date IS NULL AND (reference IS NULL OR NOT EXISTS (SELECT 1 FROM planner.inbound_shipments i WHERE i.reference=t.reference))
