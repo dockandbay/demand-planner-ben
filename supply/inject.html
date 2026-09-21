@@ -2531,7 +2531,8 @@
           +'<button class="save-btn" id="po-merge" style="'+lb+'" title="merge one PO&rsquo;s SKUs &amp; quantities into another, then delete the merged-from PO">⛙ Merge PO&rsquo;s</button>'
           +'<button class="save-btn" id="po-master" style="'+lb+'" title="consolidate several POs (one supplier) under a single MASTER PO — the master goes to the ERP, the children stay for planning only">⛃ Create master PO</button>'
           +'<button class="save-btn" id="po-csv" style="'+lb+'">⬇ Export CSV</button>'
-          +'<button class="save-btn" id="po-cin7-dates" style="'+lb+'" title="push the planner completion date to Cin7 EstimatedDeliveryDate for every ACTIVE PO whose date differs from Cin7 — complete POs are skipped (live write)">📅 Sync ERP dates</button>'
+          +'<button class="save-btn" id="po-cin7-dates" style="'+lb+'" title="push the planner completion date to Cin7 EstimatedDeliveryDate for every ACTIVE PO whose date differs from Cin7 — complete POs are skipped (live write)">📅 Sync Cin7 Dates</button>'
+          +'<button class="save-btn" id="po-fulfil-dates" style="'+lb+'" title="push the planner delivery-to-warehouse date to the Fulfil requested delivery date for every ACTIVE PO whose date differs from Fulfil — complete POs are skipped (live write)">📅 Sync Fulfil Dates</button>'
           +'</div>'; })()
       +'<div class="bar" id="po-ctry">'
       +'<span class="po-filt-ship">'+CTRYP.map(function(a){return '<span class="pill'+(state.ctry[a[0]]?' active':'')+'" data-c="'+a[0]+'">'+(CFLAG[a[0]]?CFLAG[a[0]]+' ':'')+a[1]+'</span>';}).join('')+'</span>'
@@ -2780,6 +2781,23 @@
           invalidateDerived(); delete cache['purchase-orders']; selectSection('purchase-orders');
           alert(msg); })
         .catch(function(e){ btn.disabled=false; btn.textContent=orig; alert('Cin7 sync failed: '+(e.message||e)); }); };
+    // v27.796 (Ben): Sync Fulfil Dates — the Fulfil equivalent. Every ACTIVE PO whose Fulfil requested-delivery date
+    // differs (≥3 days) from the planner delivery-to-warehouse date → push the planner date to Fulfil. Silent refresh.
+    var fdb=document.getElementById('po-fulfil-dates'); if(fdb)fdb.onclick=function(){ var btn=this; var st=window._erpGridStatus||{};
+      var cand=Object.keys(st).map(function(po){ var s=st[po], r=poBy[po]||{}; if(!s||!s.in_fulfil||!s.fulfil_req_delivery)return null; if(poComplete(r))return null;
+        var hz=r.delivery||r.checkin||''; if(!hz)return null; var da=Date.parse(String(s.fulfil_req_delivery).slice(0,10)), db=Date.parse(String(hz).slice(0,10));
+        if(isNaN(da)||isNaN(db)||Math.abs(da-db)/86400000<3)return null; return {po:po, date:String(hz).slice(0,10)}; }).filter(Boolean);
+      if(!cand.length){ alert('No active POs have a Fulfil delivery-date mismatch — nothing to sync.\n\n(If the Fulfil column hasn’t loaded yet, wait a moment and try again.)'); return; }
+      if(!confirm('Update '+cand.length+' Fulfil PO delivery date'+(cand.length>1?'s':'')+' to match the planner delivery-to-warehouse date?\n\n• ACTIVE POs only — complete POs are skipped\n\nThis is a LIVE write to Fulfil.'))return;
+      btn.disabled=true; var orig=btn.textContent; btn.textContent='Syncing… ('+cand.length+')';
+      fetch('/api/supply/fulfil-dates-sync',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({pos:cand})})
+        .then(function(r){return r.json();}).then(function(j){ btn.disabled=false; btn.textContent=orig;
+          if(j&&j.error){ alert('Fulfil date sync failed: '+j.error); return; }
+          var msg='✓ Fulfil dates synced: '+(j.updated||0)+' updated'+(j.skipped?', '+j.skipped+' skipped':'')+'.';
+          if(j.skippedDetail&&j.skippedDetail.length) msg+='\n\nSkipped:\n'+j.skippedDetail.map(function(s){return '• '+s.po+' — '+s.reason;}).join('\n');
+          try{ fillErpFulfil(); }catch(e){}   // silent refresh of the Fulfil column (no full re-render)
+          alert(msg); })
+        .catch(function(e){ btn.disabled=false; btn.textContent=orig; alert('Fulfil date sync failed: '+(e.message||e)); }); };
     view(); }
   // Bulk PO upload — paste CSV/TSV (optional header). Recognised cols: PO, Supplier, Ship to, Branch, Status,
   // Start, SKU, Qty. SKU + Qty are optional; repeat the PO on multiple lines to add multiple SKU/qty lines.

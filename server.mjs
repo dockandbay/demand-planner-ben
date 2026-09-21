@@ -12857,6 +12857,29 @@ app.get('/api/supply/po/:po/cin7-verify', async (req, res) => {
 // body: { pos: [{ po, completion_date }] }. Server RE-VALIDATES: only ACTIVE (non-complete) POs that exist in Cin7
 // are touched (a complete PO is skipped — its date no longer needs pushing). Each PO's CURRENT approval state is
 // read and echoed so the bulk update never flips a draft to approved. One batched PUT. LIVE write — gated on creds.
+// v27.796 (Ben): bulk Fulfil date sync — the Fulfil twin of cin7-dates-sync. Body {pos:[{po,date}]}. For each PO,
+// set the Fulfil requested_delivery_date to the planner date. Resolves the Fulfil PO by number then reference (native
+// imported POs carry the number; Horizon-pushed POs carry the Horizon ref in reference). Also refreshes the mirror date.
+app.post('/api/supply/fulfil-dates-sync', async (req, res) => {
+  const pos = (req.body && req.body.pos) || [];
+  if (!Array.isArray(pos) || !pos.length) return res.status(400).json({ error: 'no pos' });
+  const cfg = fulfilConfigFor(await activeFulfilEnv());
+  if (!cfg.configured) return res.status(501).json({ error: 'Fulfil ' + cfg.env + ' API not configured.' });
+  let updated = 0; const skipped = [];
+  for (const it of pos) {
+    const po = String((it && it.po) || '').trim(), date = String((it && it.date) || '').slice(0, 10);
+    if (!po || !date) { skipped.push({ po: po || '?', reason: 'missing po or date' }); continue; }
+    try {
+      let rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['number', '=', po]], 0, 1, null, ['id']]);
+      if (!rows.length) rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['reference', '=', po]], 0, 1, null, ['id']]);
+      if (!rows.length) { skipped.push({ po, reason: 'not in Fulfil' }); continue; }
+      await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/' + rows[0].id, { [FULFIL_MAP.reqDelivDate]: date });
+      await pool.query('UPDATE planner.fulfil_purchase_orders SET requested_delivery_date=$2::date, updated_at=now() WHERE po=$1', [po, date]);
+      updated++;
+    } catch (e) { skipped.push({ po, reason: String(e.message || e).slice(0, 120) }); }
+  }
+  res.json({ ok: true, updated, skipped: skipped.length, skippedDetail: skipped.slice(0, 50) });
+});
 app.post('/api/supply/cin7-dates-sync', async (req, res) => {
   if (await activeErp() === 'fulfil') return res.status(501).json({ error: 'Fulfil is the active ERP — the Fulfil push is not wired yet, so no write was performed. Switch Active ERP to Cin7 in CONFIG ▸ General settings to push to Cin7.' });
   const auth = cin7Auth();
