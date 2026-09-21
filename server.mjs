@@ -10204,6 +10204,76 @@ async function _tplFulfilChannelCC() {
   rows.forEach(r => { String(r.fc || '').split(',').map(x => x.trim()).filter(Boolean).forEach(c => { m[c] = r.cc; }); });
   return m;
 }
+// v27.793 (Ben): push ACTUAL 3PL costs (ex-tax) onto Fulfil shipments as numeric metafields. Two shipment kinds:
+//  • CUSTOMER shipment (stock.shipment.out): FULFIL_FREIGHT_ACT / FULFIL_PROCESS_ACT (CS numbers + normal orders).
+//  • INTERNAL transfer (stock.shipment.internal): TRANSFER_FULFIL_FREIGHT_ACT / TRANSFER_FULFIL_PROCESS_ACT (FBA/TRF
+//    branch transfers — the invoice ref matches the internal shipment's reference or number).
+// Freight = the invoice carrier/freight cost; process = the fulfilment/processing cost.
+const _fulfilShipActDefs = {};
+async function fulfilShipmentActualDefs() {
+  const env = await activeFulfilEnv(); if (_fulfilShipActDefs[env]) return _fulfilShipActDefs[env];
+  const rows = await fulfilFetch('PUT', '/model/metafield.field/search_read', [[['code', 'in', ['FULFIL_FREIGHT_ACT', 'FULFIL_PROCESS_ACT', 'TRANSFER_FULFIL_FREIGHT_ACT', 'TRANSFER_FULFIL_PROCESS_ACT']]], 0, 10, null, ['id', 'code', 'model_name']]);
+  const d = { out: {}, internal: {} };
+  (rows || []).forEach(r => {
+    if (r.code === 'FULFIL_FREIGHT_ACT') d.out.freight = r.id; else if (r.code === 'FULFIL_PROCESS_ACT') d.out.process = r.id;
+    else if (r.code === 'TRANSFER_FULFIL_FREIGHT_ACT') d.internal.freight = r.id; else if (r.code === 'TRANSFER_FULFIL_PROCESS_ACT') d.internal.process = r.id;
+  });
+  _fulfilShipActDefs[env] = d; return d;
+}
+// upsert a numeric metafield value on a shipment (2dp, sent as a decimal STRING like the PO price push). `model` =
+// stock.shipment.out (customer) or stock.shipment.internal (transfer).
+async function fulfilUpsertShipmentNumeric(model, shipmentId, defId, value) {
+  if (!defId || shipmentId == null || value == null) return;
+  const res = model + ',' + shipmentId, v = String(Math.round(Number(value) * 100) / 100);
+  const ex = await fulfilFetch('PUT', '/model/metafield.value/search_read', [[['field', '=', defId], ['resource', '=', res]], 0, 1, null, ['id']]);
+  if (Array.isArray(ex) && ex[0]) await fulfilFetch('PUT', '/model/metafield.value/' + ex[0].id, { value_numeric: v });
+  else await fulfilFetch('POST', '/model/metafield.value', [{ field: defId, resource: res, value_numeric: v }]);
+}
+// resolve an invoice reference → { model, id }. CS…→ customer shipment; FBA/TRF/IS…→ internal transfer (by reference
+// then number); any other order ref (AU-…) → the sale's customer shipment. Cached per call.
+async function fulfilShipmentForRef(ref, cache) {
+  if (cache && ref in cache) return cache[ref];
+  let out = { model: null, id: null };
+  if (/^CS\d/i.test(ref)) { const sh = await fulfilFetch('PUT', '/model/stock.shipment.out/search_read', [[['number', '=', ref]], 0, 1, null, ['id']]); if (Array.isArray(sh) && sh[0]) out = { model: 'stock.shipment.out', id: sh[0].id }; }
+  else if (/^(FBA|TRF|IS)/i.test(ref)) {
+    let sh = await fulfilFetch('PUT', '/model/stock.shipment.internal/search_read', [[['reference', '=', ref]], 0, 1, null, ['id']]);
+    if (!(Array.isArray(sh) && sh[0])) sh = await fulfilFetch('PUT', '/model/stock.shipment.internal/search_read', [[['number', '=', ref]], 0, 1, null, ['id']]);
+    if (Array.isArray(sh) && sh[0]) out = { model: 'stock.shipment.internal', id: sh[0].id };
+  } else { const s = await fulfilSearchOne('sale.sale', [['reference', '=', ref]], ['id', 'shipments']); if (s && Array.isArray(s.shipments) && s.shipments.length) out = { model: 'stock.shipment.out', id: s.shipments[0] }; }
+  if (cache) cache[ref] = out; return out;
+}
+// Push per-shipment actuals from a parsed 3PL invoice. CHUNKED/RESUMABLE: each call processes `limit` order rows from
+// `offset` (a whole-invoice push is hundreds of sequential Fulfil writes → would time out), returns a cursor the client
+// re-POSTs until done. `limit` defaults to 40 (~120 Fulfil calls, safe under the timeout). Each order line maps to one
+// shipment, so chunking by order rarely splits a shipment across calls.
+app.post('/api/supply/tpl/push-actuals/:id', async (req, res) => {
+  try {
+    const row = (await pool.query(`SELECT filename, content_type, content, tpl, period FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
+    if (!row) return res.status(404).json({ error: 'not found' });
+    const cfg = fulfilConfigFor(await activeFulfilEnv());
+    if (!cfg.configured) return res.status(501).json({ error: 'Fulfil ' + cfg.env + ' API not configured.' });
+    const defs = await fulfilShipmentActualDefs();
+    if (!defs.out.freight && !defs.out.process && !defs.internal.freight && !defs.internal.process) return res.status(400).json({ error: 'None of the FULFIL_/TRANSFER_FULFIL_ actual-cost metafields are defined in this Fulfil env.' });
+    const isCsv = /\.csv$/i.test(row.filename || '') || /csv/i.test(row.content_type || '');
+    const orders = await _tplOrderRows(row.content, isCsv, row.tpl, row.period);
+    const total = orders.length;
+    const offset = Math.max(0, Number(req.body && req.body.offset) || 0);
+    const limit = Math.max(1, Number(req.body && req.body.limit) || 40);
+    const end = Math.min(total, offset + limit);
+    const byShip = {}, shipCache = {}; let unresolved = 0; const unref = [];
+    for (let i = offset; i < end; i++) { const o = orders[i]; if (!o || !o.reference) continue;
+      const sh = await fulfilShipmentForRef(o.reference, shipCache);
+      if (!sh.id) { unresolved++; if (unref.length < 50) unref.push(o.reference); continue; }
+      const k = sh.model + ',' + sh.id; const a = byShip[k] || (byShip[k] = { model: sh.model, id: sh.id, freight: 0, process: 0 }); a.freight += Number(o.shipping) || 0; a.process += Number(o.fulfilment) || 0; }
+    let pushedCust = 0, pushedTransfer = 0;
+    for (const k of Object.keys(byShip)) { const a = byShip[k]; const md = (a.model === 'stock.shipment.internal') ? defs.internal : defs.out;
+      if (md.freight) await fulfilUpsertShipmentNumeric(a.model, a.id, md.freight, a.freight);
+      if (md.process) await fulfilUpsertShipmentNumeric(a.model, a.id, md.process, a.process);
+      if (a.model === 'stock.shipment.internal') pushedTransfer++; else pushedCust++; }
+    res.json({ ok: true, env: cfg.env, total, offset, processed_to: end, done: end >= total, next_offset: end >= total ? null : end,
+      customer_shipments_pushed: pushedCust, transfers_pushed: pushedTransfer, unresolved, unresolved_refs: unref });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 app.post('/api/supply/tpl/map/:id', async (req, res) => {
   try {
     const row = (await pool.query(`SELECT filename, content_type, content, tpl, period FROM planner.tpl_invoice_files WHERE id=$1`, [req.params.id])).rows[0];
