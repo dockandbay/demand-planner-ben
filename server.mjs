@@ -12991,6 +12991,25 @@ app.post('/api/supply/po-import-cin7', async (req, res) => {
 //            = the sale number (verified on sandbox: SO49664 → PO155 (id 245) + PO156 (id 246)).
 // Fulfil v2 wraps scalars: {__class__:'Decimal',decimal:'3.60000'} / {__class__:'date',iso_string:'2026-09-22'}.
 function fulfilUnwrap(v) { if (v && typeof v === 'object') { if (v.__class__ === 'Decimal') return Number(v.decimal); if (v.__class__ === 'date' || v.__class__ === 'datetime') return String(v.iso_string || '').slice(0, 10); } return v; }
+// v27.787 (Ben): the sale linked to a PO → {ref, client, ship_date}. Two link styles (both on the sandbox): the PO's
+// `reference` is the sale number (SO49664 → PO155/156), OR the procurement chain purchase.request → sale.line → sale
+// (SO49667 → PO158). Ship date = the sale's requested shipping start (else end, else sale_date). Null if no linked sale.
+async function fulfilSaleForPo(pid, reference) {
+  let saleNumber = (reference && /^SO/i.test(reference)) ? reference : null;
+  if (!saleNumber) {
+    const reqs = await fulfilFetch('PUT', '/model/purchase.request/search_read', [[['purchase_line.purchase', '=', pid]], 0, 100, null, ['id']]);
+    const reqIds = (reqs || []).map(r => r.id);
+    if (reqIds.length) {
+      const sl = await fulfilFetch('PUT', '/model/sale.line/search_read', [[['purchase_request', 'in', reqIds]], 0, 100, null, ['sale.number']]);
+      saleNumber = (sl || []).map(x => x['sale.number']).filter(Boolean)[0] || null;
+    }
+  }
+  if (!saleNumber) return null;
+  const s = await fulfilSearchOne('sale.sale', [['number', '=', saleNumber]], ['number', 'party.name', 'shipping_start_date', 'shipping_end_date', 'sale_date']);
+  if (!s) return { ref: saleNumber, client: null, ship_date: null };
+  const ship = fulfilUnwrap(s.shipping_start_date) || fulfilUnwrap(s.shipping_end_date) || fulfilUnwrap(s.sale_date) || null;
+  return { ref: s.number || saleNumber, client: s['party.name'] || null, ship_date: ship };
+}
 // Read one Fulfil PO (header + lines + final-destination metafield) by its purchase.purchase id.
 async function fulfilReadPoById(pid) {
   const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read',
@@ -13022,14 +13041,17 @@ async function fulfilReadPoById(pid) {
     }
   }
   const company_id = Number(p.company) || null;
+  const sale = await fulfilSaleForPo(p.id, p.reference);   // v27.787 (Ben): linked sales order → client/FBA fields
   return { fulfil_id: p.id, po: p.number || p.reference, number: p.number, reference: p.reference, party_id: p.party,
     supplier_name: p['party.name'] || null, currency: p['currency.code'] || null, warehouse: p['warehouse.code'] || null,
     company_id, company: company_id ? fulfilCompanyName(company_id) : null, country_code: company_id ? fulfilCountryForCompany(company_id) : null,
+    sale_ref: sale ? sale.ref : null, sale_client: sale ? sale.client : null, sale_ship_date: sale ? sale.ship_date : null,
     state: p.state, purchase_date: fulfilUnwrap(p.purchase_date), delivery: fulfilUnwrap(p.requested_delivery_date) || fulfilUnwrap(p.purchase_date), total_amount: _fulfilNum(p.total_amount), branch, lines };
 }
 // Write one read Fulfil PO into the planner (mirrors the Cin7 import: the import IS the ERP truth, so qty=erp_qty,
 // cost=erp_cost, nothing "proposed"; the erp mirror rows are written so it reads fully in-sync with no phantom drift).
-async function importFulfilPoToPlanner(po, req) {
+async function importFulfilPoToPlanner(po, req, opts) {
+  opts = opts || {};
   let supplier_id = null, supplier_name = po.supplier_name;
   if (po.party_id) { const s = await pool.query('SELECT id,name FROM planner.suppliers WHERE fulfil_id=$1 LIMIT 1', [String(po.party_id)]); if (s.rows[0]) { supplier_id = s.rows[0].id; supplier_name = s.rows[0].name; } }
   if (!supplier_id && po.supplier_name) { const s = await pool.query('SELECT id,name FROM planner.suppliers WHERE name=$1 LIMIT 1', [po.supplier_name]); if (s.rows[0]) { supplier_id = s.rows[0].id; supplier_name = s.rows[0].name; } }
@@ -13040,9 +13062,26 @@ async function importFulfilPoToPlanner(po, req) {
   let cc = po.country_code || null;
   if (po.branch) { const bc = await pool.query("SELECT nullif(trim(country_code),'') cc FROM planner.branches WHERE name=$1 LIMIT 1", [po.branch]); if (bc.rows[0] && bc.rows[0].cc) cc = bc.rows[0].cc; }
   const startDate = po.purchase_date || null;   // v27.783 (Ben): Horizon start date = Fulfil Purchase Date
+  // v27.787 (Ben): pull the linked SALES ORDER into the Client/FBA fields — sales_order_ref + client + the sale's ship
+  // date (→ client deadline). If the sale's client matches a KEY ACCOUNT (by name), use the key-account name and tag it.
+  const salesOrderRef = po.sale_ref || null;
+  const clientDeadline = po.sale_ship_date || null;
+  let client = po.sale_client || null, dtcKeyAccount = null;   // dtc_key_account is BOOLEAN — true only when the client matches a key account (else null → keep existing)
+  if (client) { const ka = await pool.query("SELECT name FROM planner.key_accounts WHERE lower(trim(name))=lower(trim($1)) LIMIT 1", [client]); if (ka.rows[0]) { dtcKeyAccount = true; client = ka.rows[0].name; } }
+  // v27.787 (Ben): optional import SETTINGS — production number + batch (batch pulls its date from planner.batches).
+  const prodNo = (opts.prod_no != null && String(opts.prod_no).trim() !== '') ? String(opts.prod_no).trim() : null;
+  let batchId = (opts.batch != null && String(opts.batch).trim() !== '') ? String(opts.batch).trim() : null, batchDate = null;
+  if (batchId) { const bd = await pool.query('SELECT to_char(batch_date,\'YYYY-MM-DD\') d FROM planner.batches WHERE batch=$1 LIMIT 1', [batchId]); if (bd.rows[0]) batchDate = bd.rows[0].d; }
   const exists = (await pool.query('SELECT 1 FROM planner.purchase_orders WHERE po=$1', [ref])).rowCount > 0;
-  if (exists) { await pool.query('UPDATE planner.purchase_orders SET supplier_name=$2, supplier_id=$3, branch=coalesce($4,branch), country_code=coalesce($5,country_code), start_production=coalesce($6::date, start_production), delivery_date_overide=coalesce($7::date, delivery_date_overide), updated_at=now() WHERE po=$1', [ref, supplier_name, supplier_id, po.branch, cc, startDate, po.delivery]); }
-  else { await pool.query("INSERT INTO planner.purchase_orders (po, supplier_name, supplier_id, branch, country_code, status, start_production, delivery_date_overide) VALUES ($1,$2,$3,$4,$5,'PRODUCTION',$6::date,$7::date)", [ref, supplier_name, supplier_id, po.branch, cc, startDate, po.delivery]); }
+  if (exists) { await pool.query(`UPDATE planner.purchase_orders SET supplier_name=$2, supplier_id=$3, branch=coalesce($4,branch),
+      country_code=coalesce($5,country_code), start_production=coalesce($6::date, start_production), delivery_date_overide=coalesce($7::date, delivery_date_overide),
+      sales_order_ref=coalesce($8,sales_order_ref), client=coalesce($9,client), dtc_key_account=coalesce($10::boolean,dtc_key_account), client_deadline_date=coalesce($11::date,client_deadline_date),
+      prod_no=coalesce($12,prod_no), batch_id=coalesce($13,batch_id), batch_date=coalesce($14::date,batch_date), updated_at=now() WHERE po=$1`,
+    [ref, supplier_name, supplier_id, po.branch, cc, startDate, po.delivery, salesOrderRef, client, dtcKeyAccount, clientDeadline, prodNo, batchId, batchDate]); }
+  else { await pool.query(`INSERT INTO planner.purchase_orders (po, supplier_name, supplier_id, branch, country_code, status, start_production, delivery_date_overide,
+      sales_order_ref, client, dtc_key_account, client_deadline_date, prod_no, batch_id, batch_date)
+      VALUES ($1,$2,$3,$4,$5,'PRODUCTION',$6::date,$7::date,$8,$9,coalesce($10::boolean,false),$11::date,$12,$13,$14::date)`,
+    [ref, supplier_name, supplier_id, po.branch, cc, startDate, po.delivery, salesOrderRef, client, dtcKeyAccount, clientDeadline, prodNo, batchId, batchDate]); }
   await pool.query('DELETE FROM planner.purchase_order_lines WHERE po=$1', [ref]);
   await pool.query('DELETE FROM planner.erp_purchase_order_lines WHERE po=$1', [ref]);
   for (const l of po.lines) {
@@ -13099,12 +13138,21 @@ app.post('/api/supply/po-import-fulfil', async (req, res) => {
     }
     const pos = [];
     for (const pid of poIds) { const p = await fulfilReadPoById(pid); if (p) { p.exists = (await pool.query('SELECT 1 FROM planner.purchase_orders WHERE po=$1', [p.po])).rowCount > 0; pos.push(p); } }
-    if (!confirm) return res.json({ found: true, mode, sale: mode === 'sale' ? value : null,
-      preview: pos.map(p => ({ po: p.po, fulfil_id: p.fulfil_id, reference: p.reference, supplier_name: p.supplier_name, branch: p.branch, company: p.company, country_code: p.country_code, currency: p.currency, delivery: p.delivery, line_count: p.lines.length, lines: p.lines.slice(0, 20), exists: p.exists })) });
+    if (!confirm) {
+      // flag which sale clients match a key account (so the preview can show it will be linked as the client)
+      const clients = Array.from(new Set(pos.map(p => (p.sale_client || '').trim().toLowerCase()).filter(Boolean)));
+      const kaSet = new Set();
+      if (clients.length) { const ka = await pool.query("SELECT lower(trim(name)) n FROM planner.key_accounts WHERE lower(trim(name)) = ANY($1)", [clients]); ka.rows.forEach(r => kaSet.add(r.n)); }
+      return res.json({ found: true, mode, sale: mode === 'sale' ? value : null,
+        preview: pos.map(p => ({ po: p.po, fulfil_id: p.fulfil_id, reference: p.reference, supplier_name: p.supplier_name, branch: p.branch, company: p.company, country_code: p.country_code, currency: p.currency, delivery: p.delivery,
+          sale_ref: p.sale_ref, sale_client: p.sale_client, sale_ship_date: p.sale_ship_date, sale_client_key_account: !!(p.sale_client && kaSet.has(String(p.sale_client).trim().toLowerCase())),
+          line_count: p.lines.length, lines: p.lines.slice(0, 20), exists: p.exists })) });
+    }
     const toImport = wanted ? pos.filter(p => wanted.includes(p.po)) : pos;
     if (!toImport.length) return res.status(400).json({ error: 'No POs selected to import.' });
+    const opts = { prod_no: b.prod_no, batch: b.batch };   // v27.787 (Ben): optional import settings applied to every PO
     const results = [];
-    for (const p of toImport) results.push(await importFulfilPoToPlanner(p, req));
+    for (const p of toImport) results.push(await importFulfilPoToPlanner(p, req, opts));
     if (typeof invalidateSupplyCaches === 'function') invalidateSupplyCaches();
     res.json({ ok: true, imported: results.length, pos: results, po: results[0] && results[0].po });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
