@@ -724,8 +724,8 @@
      desktop spacer hidden, tighter side padding and pill padding. The bar collapses from 3 lines to 2. */
   body header.pv-top{padding:0 12px;gap:10px;row-gap:6px}
   body header.pv-top #pp-notif{order:1;margin-left:auto!important}
-  body header.pv-top #pp-secs{order:2;flex:1 1 calc(100% - 110px);width:auto;min-width:0}   /* flex breaks lines on the UNSHRUNK basis. auto (~490px of pills) claimed a line alone and pushed EN/中文 to a 3rd row; 0 let it squeeze onto the brand row as a 54px strip. calc(100% - 110px) can never fit on row 1, so the strip always starts row 2, leaves the toggle's width beside it, then grows into the rest. */
-  body header.pv-top .pv-lang{order:2;flex:0 0 auto;margin-right:0}
+  body header.pv-top #pp-secs{order:2;flex:1 1 100%;width:100%}   /* v27.802 hotfix (Ben: menu invisible on the phone). The v27.801 calc(100% - 110px) basis that squeezed EN/中文 onto this row rendered in Chrome but not on the phone (iOS Safari). Plain full-width row = the v27.800 layout the phone is known to render. No calc, no min-width:0 here. */
+  body header.pv-top .pv-lang{order:3;flex:0 0 auto;margin-right:0}   /* own compact row under the pills */
   body header.pv-top .sp{display:none}
   body header.pv-top #pp-secs .pp-sec{padding:4px 8px;font-size:11px}
   /* v27.801 (Ben): PO filters on phones — search + Filter button on one row; everything else in a pop-down panel. */
