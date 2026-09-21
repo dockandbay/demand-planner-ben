@@ -1,3 +1,45 @@
+## v27.777–799 Fulfil migration batch + technical-review fixes (Ben) — SERVER + CLIENT + migrations
+
+Deploy package for Diviyaj covering everything since the v27.756–776 note. Read the **GO-LIVE / DEPLOY** block first.
+
+### GO-LIVE / DEPLOY steps (in order)
+1. **Apply migrations** (all additive / rollback-safe, none drop data):
+   - `288_fulfil_compare_ignored.sql` — Fulfil-compare "ignore" list (mirrors erp_compare_ignored).
+   - `289_tpl_fulfil_orders.sql` — 3PL-invoice Fulfil sales-order table.
+   - `290_fulfil_mirror_req_delivery.sql` — requested_delivery_date on the PO drift mirror.
+   - `291_fba_pending_transfers_source.sql` — `source` column on the FBA in-flight cache.
+   - `292_perf_indexes.sql` — indexes on hot 3PL/DTC/FBA lookup columns. On large prod tables prefer `CREATE INDEX CONCURRENTLY` (same columns; can't run inside a txn).
+2. **Seed the Fulfil channel map on LIVE:** `seed_fulfil_channels_2026-09-21.sql` (channel names are identical sandbox↔live; idempotent). ROTW Amazon marketplaces intentionally left unmapped → OTHER COSTS.
+3. **Fulfil live keys + ids:** set `FULFIL_LIVE_SUBDOMAIN` / `FULFIL_LIVE_API_KEY`; run `POST /api/supply/fulfil/seed-ids?env=live&apply=true` once to seed live party/warehouse ids.
+4. **Env vars (Vercel):**
+   - `FULFIL_LIVE_WRITES` — **NEW safety gate (default OFF).** While unset/false, PO pushes to LIVE Fulfil are dry-run only. Set `=true` ONLY when you're ready for real live PO create/update. Sandbox writes are unaffected.
+   - `FULFIL_LINES_SEND` — now env-overridable (default ON). Leave unset for normal behaviour.
+   - **Startup now hard-fails on Vercel if `PLANNER_KEY`, `DATABASE_URL`, or `N8N_WEBHOOK_SECRET` are missing** (review item 9) — confirm all three are set before deploy, or the function refuses to boot.
+5. **n8n crons** (unchanged from before, still required in prod — no in-app timer on Vercel): DHL `/api/tracking/poll`, Fulfil PO mirror `/api/supply/fulfil/import-pos`.
+
+### Repo reorg (pull note)
+Working dir consolidated to 10 top-level folders (api, archive, docs, lib, migrations, scripts, supply, templates, tests, _local). **Runtime paths unchanged** except: `invoice.mjs`, `asnpdf.mjs`, `coghlans_sftp.mjs` moved into `lib/` (the 3 server.mjs imports updated to `./lib/…`; Vercel bundles via import-tracing so no `includeFiles` change needed). ~230 business-data/analysis/scratch files untracked and relocated under a gitignored `_local/` (root cause: `.gitignore` had `temp/*` but the dir was `temp files/` with a space).
+
+### Features (v27.777–798)
+- **v27.778–785 Fulfil PO import + company routing + compare report:** import a PO from Fulfil by PO number or by linked sales order (purchase-request chain), company routing (country AU→company 3, else company 1; immutable at create), branch→ship-to-country, start-date/mirror, key-account client match, prod#/batch settings. New "Fulfil compare" report above the renamed "Cin7 compare".
+- **v27.788–792 3PL invoicing on Fulfil:** import Fulfil sales orders into the invoice feature; `fulfil_channel` mapping in the account map; Cin7-invoice-date = shipment source-of-truth else Fulfil; source-analysis box; Coghlans "CS" customer-shipment resolution.
+- **v27.789–791 grid/UX:** PO-grid Fulfil column mirrors Cin7 (in sync / update lines / update date); account-map reorder + region grouping + edit/add; payments Pay in-place (no re-sort); remittance hidden once emailed.
+- **v27.793–796 push actuals + dates:** push actual freight/processing (ex-tax) onto Fulfil shipment metafields (customer `FULFIL_*_ACT`, transfer `TRANSFER_FULFIL_*_ACT`) with a reconciliation timeline note; "Sync Cin7 Dates" + new "Sync Fulfil Dates".
+- **v27.797 DTC↔Fulfil alignment:** read-only exception panel — Horizon PO↔SO mappings vs Fulfil's actual PO→sale link (Fulfil is source of truth, Horizon flags only).
+- **v27.798 FBA in-flight union:** `fba-transfers/refresh` now unions Cin7 BranchTransfers + Fulfil internal shipments into Amazon FBA/AWD, deduped on the Amazon FBA shipment id.
+
+### v27.799 technical-review fixes (correctness / safety / perf)
+- **Correctness:** FBA dedupe falls back to normalised reference for AWD/ref-less rows (was double-counting → inflated cover); `fba-transfers/refresh` delete+reinsert now in one transaction + batched (was non-transactional — a mid-loop failure could wipe FBA cover); push-actuals aggregates the whole invoice by reference then chunks over unique refs and skips 0-writes (was undercounting split shipments + zero-wiping a prior invoice's value); klaviyo-bis transaction moved onto a checked-out client (was non-atomic on the txn pooler).
+- **Safety:** the `FULFIL_LIVE_WRITES` gate above.
+- **Perf:** batched the per-row insert loops (dtc/import, tpl/cin7-import, importFulfilOrdersByRefs, tpl/cin7-sweep, fba-refresh); `dtc/fulfil-alignment` batched into ~4 IN-list Fulfil calls (was N+1); `activeFulfilEnv()` memoized 10s (was a DB read on every Fulfil call); `292_perf_indexes.sql`.
+
+### Deferred (NOT in this deploy — flagged for later)
+- Retire the "Cin7 compare" report + Cin7 touchpoints once Fulfil is source of truth (Ben: ~end of that week).
+- Delete 7 orphan endpoints (0 references) — verify intent first.
+- Externalise the large static client JS for browser caching (page is currently `no-store`); collapse the ~15 serial `app_settings` reads on `/`.
+- Modularise the 18k-line server.mjs (Fulfil → 3PL → supply into lib/routers), staged.
+- Two design questions to confirm: (a) Fulfil company/entity is inferred from branch-derived ship-to country — safe today (create-only) but conflates entity with destination for an AU-company PO shipping outside AU; (b) the Fulfil date-drift flag compares `r.delivery` while the push writes `est_delivery` (possible flip-flop).
+
 ## v27.756 Mirror Diviyaj's prod hotfixes (Ben) — SERVER + vercel.json
 - **Planner-key gate exemptions for the n8n webhooks:** `POST /api/supply/fulfil/import-pos` and `POST /api/tracking/poll` are now exempt from the planner-key gate (they authenticate with `x-webhook-secret` inside the handler). Without this the n8n crons were 401'd before reaching the handler; Diviyaj applied the same fix on prod during the v27.755 deploy.
 - **`lib/**` added to `vercel.json` includeFiles** so `lib/qrcode.mjs` (sample-card QR) ships in the serverless bundle (also applied by Diviyaj on prod).
