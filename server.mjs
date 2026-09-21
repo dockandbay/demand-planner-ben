@@ -9616,7 +9616,7 @@ app.get('/api/supply/tpl/data', async (req, res) => {
       FROM planner.tpl_invoice_files WHERE tpl=$1 AND ($2='' OR period=$2) ORDER BY uploaded_at DESC`, [tpl, period])).rows;
     const cost = (await pool.query(`SELECT cost_type, coalesce(account_code,'') account_code, coalesce(account_name,'') account_name
       FROM planner.tpl_cost_accounts WHERE tpl=$1 ORDER BY cost_type`, [tpl])).rows;
-    const map = (await pool.query(`SELECT label, coalesce(region,'') region, coalesce(channel,'') channel,
+    const map = (await pool.query(`SELECT id, label, coalesce(region,'') region, coalesce(channel,'') channel,
       coalesce(cogs_account,'') cogs_account, coalesce(sales_account,'') sales_account,
       coalesce(fulfilment_account,'') fulfilment_account, coalesce(cost_of_sales_account,'') cost_of_sales_account,
       coalesce(fulfil_channel,'') fulfil_channel
@@ -9707,13 +9707,28 @@ app.post('/api/supply/tpl/cost-account', async (req, res) => {
 // Edit a single account-map cell (region×channel → COGS/Sales/Fulfilment/Cost of Sales), keyed by label.
 app.post('/api/supply/tpl/account-map', async (req, res) => {
   const b = req.body || {};
-  const FIELDS = { cogs_account: 1, sales_account: 1, fulfilment_account: 1, cost_of_sales_account: 1, fulfil_channel: 1 };   // whitelist → safe to interpolate (fulfil_channel: v27.788 Ben — maps a Fulfil channel name to this account row)
-  if (!b.label || !FIELDS[b.field]) return res.status(400).json({ error: 'label + valid field required' });
+  // v27.790 (Ben): all fields editable (incl label/region/channel). Key by id when given (lets label be renamed), else label.
+  const FIELDS = { label: 1, region: 1, channel: 1, cogs_account: 1, sales_account: 1, fulfilment_account: 1, cost_of_sales_account: 1, fulfil_channel: 1 };
+  if (!FIELDS[b.field] || (b.id == null && !b.label)) return res.status(400).json({ error: 'id-or-label + valid field required' });
+  const val = (String(b.value == null ? '' : b.value).trim()) || null;
+  if (b.field === 'label' && !val) return res.status(400).json({ error: 'label cannot be blank' });
   try {
-    const r = await pool.query(`UPDATE planner.tpl_account_map SET ${b.field}=$2 WHERE label=$1`, [b.label, (String(b.value == null ? '' : b.value).trim()) || null]);
-    if (!r.rowCount) return res.status(404).json({ error: 'label not found' });
+    const r = (b.id != null)
+      ? await pool.query(`UPDATE planner.tpl_account_map SET ${b.field}=$2 WHERE id=$1`, [b.id, val])
+      : await pool.query(`UPDATE planner.tpl_account_map SET ${b.field}=$2 WHERE label=$1`, [b.label, val]);
+    if (!r.rowCount) return res.status(404).json({ error: 'row not found' });
     res.json({ ok: true });
-  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  } catch (e) { log500(e); res.status(e.code === '23505' ? 409 : 500).json({ error: e.code === '23505' ? 'that label already exists' : e.message }); }
+});
+// v27.790 (Ben): add a new account-map row (label unique). Region/channel/accounts/fulfil_channel optional, editable after.
+app.post('/api/supply/tpl/account-map-create', async (req, res) => {
+  const b = req.body || {}, label = (b.label || '').trim();
+  if (!label) return res.status(400).json({ error: 'label required' });
+  try {
+    const r = await pool.query(`INSERT INTO planner.tpl_account_map (label, region, channel) VALUES ($1,$2,$3) RETURNING id`,
+      [label, (b.region || '').trim() || null, (b.channel || '').trim() || null]);
+    res.json({ ok: true, id: r.rows[0].id });
+  } catch (e) { log500(e); res.status(e.code === '23505' ? 409 : 500).json({ error: e.code === '23505' ? 'that label already exists' : e.message }); }
 });
 // 3PL invoice — Phase 1: parse an uploaded file and return the sum of every numeric field per sheet.
 // Generic (works for any 3PL export): finds each sheet's header row, then sums numeric columns. Named

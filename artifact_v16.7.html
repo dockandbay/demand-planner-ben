@@ -15310,24 +15310,36 @@ function render3plInvoice(body){
       return '<tr><td class="l" style="padding:5px 10px;font-weight:600;text-transform:capitalize">'+ct+'</td>'
         +'<td class="l" style="padding:5px 10px"><input class="tpl-ca" data-ct="'+ct+'" data-f="account_code" value="'+e(r.account_code)+'" placeholder="account code" style="width:120px;padding:4px 7px;border:1px solid var(--line);border-radius:5px;font-size:12px"></td>'
         +'<td class="l" style="padding:5px 10px"><input class="tpl-ca" data-ct="'+ct+'" data-f="account_name" value="'+e(r.account_name)+'" placeholder="account name" style="width:260px;padding:4px 7px;border:1px solid var(--line);border-radius:5px;font-size:12px"></td></tr>'; }
-    var amInp=function(m,f){ return '<td style="padding:3px 6px;text-align:left"><input class="tpl-am" data-label="'+e(m.label)+'" data-f="'+f+'" value="'+e(m[f]||'')+'" placeholder="—" style="width:130px;padding:3px 6px;border:1px solid var(--line);border-radius:4px;font-size:11px"></td>'; };
-    var mapRows=map.map(function(m){ return '<tr><td class="l" style="padding:4px 9px;font-weight:600;white-space:nowrap;text-align:left">'+e(m.label)+'</td>'
-      +'<td class="l" style="padding:4px 9px;text-align:left">'+e(m.region)+'</td><td class="l" style="padding:4px 9px;text-align:left">'+e(m.channel)+'</td>'
-      +amInp(m,'cogs_account')+amInp(m,'sales_account')+amInp(m,'fulfilment_account')+amInp(m,'cost_of_sales_account')+amInp(m,'fulfil_channel')+'</tr>'; }).join('');
+    var _cfgEdit=!!window._tplCfgEdit;   // v27.790 (Ben): read-only until Edit; then all fields editable + Add row
+    // column order (Ben): Fulfil channel BEFORE the account columns
+    var AMC=[['label','Label','150px'],['region','Region','70px'],['channel','Channel','140px'],['fulfil_channel','Fulfil channel','150px'],['cogs_account','COGS','110px'],['sales_account','Sales','110px'],['fulfilment_account','Fulfilment','110px'],['cost_of_sales_account','Cost of Sales','120px']];
+    var amCell=function(m,c){ var f=c[0]; if(_cfgEdit){ return '<td style="padding:3px 6px;text-align:left"><input class="tpl-am" data-id="'+e(String(m.id))+'" data-f="'+f+'" value="'+e(m[f]||'')+'" placeholder="—" style="width:'+c[2]+';padding:3px 6px;border:1px solid var(--line);border-radius:4px;font-size:11px"></td>'; }
+      return '<td class="l" style="padding:4px 9px;text-align:left;white-space:nowrap;'+(f==='label'?'font-weight:600':'')+'">'+(m[f]?e(m[f]):'<span style="color:var(--faint)">—</span>')+'</td>'; };
+    // group rows by region (Ben)
+    var _grp={}, _gord=[]; map.forEach(function(m){ var rg=m.region||'(no region)'; if(!_grp[rg]){_grp[rg]=[];_gord.push(rg);} _grp[rg].push(m); });
+    var mapRows=_gord.map(function(rg){ return '<tr style="background:var(--band)"><td colspan="'+AMC.length+'" style="padding:5px 9px;font-weight:800;font-size:10px;text-transform:uppercase;color:var(--nav);letter-spacing:.04em">'+e(rg)+' <span style="font-weight:400;color:var(--faint)">('+_grp[rg].length+')</span></td></tr>'
+      +_grp[rg].map(function(m){ return '<tr>'+AMC.map(function(c){return amCell(m,c);}).join('')+'</tr>'; }).join(''); }).join('');
     b.innerHTML='<div style="font-size:13px;font-weight:700;margin-bottom:4px">'+e(TPL3.filter(function(t){return t[0]===TPL3_STATE.tpl;})[0][1])+' — storage &amp; other cost accounts</div>'
       +'<div style="font-size:11px;color:var(--faint);margin-bottom:8px">Xero account for this 3PL’s storage and other (non-order) charges. Saved on change.</div>'
       +'<div class="tw" style="margin-bottom:22px"><table style="border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--band);font-size:10px;text-transform:uppercase;color:var(--muted)">'
         +['Cost type','Account code','Account name'].map(function(h){return '<th class="l" style="padding:5px 10px;text-align:left">'+h+'</th>';}).join('')+'</tr></thead><tbody>'+costRow('storage')+costRow('returns')+costRow('inbound')+costRow('other')+'</tbody></table></div>'
-      +'<div style="font-size:13px;font-weight:700;margin-bottom:4px">Account map <span style="font-weight:400;color:var(--faint);font-size:11px">(region × channel → COGS / Sales / Fulfilment / Cost of Sales — editable, saved on change. <b>Fulfil channel</b> = the Fulfil sales channel name, e.g. dockandbay-au, that maps to this row as we migrate off Cin7.)</span></div>'
+      +'<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px;flex-wrap:wrap"><span style="font-size:13px;font-weight:700">Account map</span>'
+        +'<button id="tpl-am-edit" class="save-btn" style="font-size:11px;padding:3px 10px">'+(_cfgEdit?'✓ Done':'✎ Edit')+'</button>'
+        +(_cfgEdit?'<button id="tpl-am-add" class="save-btn" style="font-size:11px;padding:3px 10px;background:var(--pos-bg);border:1px solid var(--pos);color:var(--pos)">＋ Add row</button>':'')
+        +'<span style="font-weight:400;color:var(--faint);font-size:11px">grouped by region · <b>Fulfil channel</b> = the Fulfil sales channel (e.g. dockandbay-au) that maps to this row'+(_cfgEdit?' · editing: all fields save on change':'')+'</span></div>'
       +'<div class="tw" style="max-height:52vh;overflow:auto"><table style="border-collapse:collapse;font-size:11px;width:max-content"><thead><tr style="background:var(--band);position:sticky;top:0;font-size:10px;text-transform:uppercase;color:var(--muted)">'
-        +['Label','Region','Channel','COGS','Sales','Fulfilment','Cost of Sales','Fulfil channel'].map(function(h){return '<th class="l" style="padding:5px 9px;text-align:left;white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'+mapRows+'</tbody></table></div>';
+        +AMC.map(function(c){return '<th class="l" style="padding:5px 9px;text-align:left;white-space:nowrap">'+e(c[1])+'</th>';}).join('')+'</tr></thead><tbody>'+mapRows+'</tbody></table></div>';
     b.querySelectorAll('.tpl-ca').forEach(function(inp){ inp.onchange=function(){ var ct=inp.dataset.ct;
       var code=b.querySelector('.tpl-ca[data-ct="'+ct+'"][data-f="account_code"]').value, name=b.querySelector('.tpl-ca[data-ct="'+ct+'"][data-f="account_name"]').value;
       inp.style.borderColor='var(--faint)';
       fetch('/api/supply/tpl/cost-account',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({tpl:TPL3_STATE.tpl,cost_type:ct,account_code:code,account_name:name})})
         .then(function(r){return r.json();}).then(function(j){ inp.style.borderColor=(j&&j.error)?'var(--neg)':'var(--pos)'; setTimeout(function(){inp.style.borderColor='var(--line)';},900); }); }; });
+    function _reloadCfg(){ fetch('/api/supply/tpl/data?tpl='+encodeURIComponent(TPL3_STATE.tpl)+'&period='+encodeURIComponent(TPL3_STATE.period||'')).then(function(r){return r.json();}).then(function(nd){ if(nd&&nd.ok)drawConfig(b,nd); }); }
+    var _eb=b.querySelector('#tpl-am-edit'); if(_eb)_eb.onclick=function(){ window._tplCfgEdit=!window._tplCfgEdit; _reloadCfg(); };
+    var _ab=b.querySelector('#tpl-am-add'); if(_ab)_ab.onclick=function(){ var lbl=prompt('New account-map row — label (e.g. "US - TikTok"):'); if(!lbl||!lbl.trim())return; var rg=prompt('Region (optional, e.g. US):')||''; var chn=prompt('Channel (optional, e.g. TikTok):')||'';
+      fetch('/api/supply/tpl/account-map-create',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({label:lbl.trim(),region:rg.trim(),channel:chn.trim()})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert('Add failed: '+j.error);return;} window._tplCfgEdit=true; _reloadCfg(); }).catch(function(){alert('Add failed');}); };
     b.querySelectorAll('.tpl-am').forEach(function(inp){ inp.onchange=function(){ inp.style.borderColor='var(--faint)';
-      fetch('/api/supply/tpl/account-map',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({label:inp.dataset.label,field:inp.dataset.f,value:inp.value})})
+      fetch('/api/supply/tpl/account-map',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:inp.dataset.id,field:inp.dataset.f,value:inp.value})})
         .then(function(r){return r.json();}).then(function(j){ inp.style.borderColor=(j&&j.error)?'var(--neg)':'var(--pos)'; setTimeout(function(){inp.style.borderColor='var(--line)';},900); }).catch(function(){ inp.style.borderColor='var(--neg)'; }); }; });
   }
   function draw3plForecast(b){ b.innerHTML='<div style="color:var(--faint);font-size:12px">Building 6-month forecast…</div>';
