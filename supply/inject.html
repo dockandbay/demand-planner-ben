@@ -3045,12 +3045,24 @@
   // v27.741: Fulfil column — fill each row's Fulfil drift status from /api/supply/fulfil/grid-status; grey the Cin7 cell for POs marked not-required-in-Cin7.
   function fillErpFulfil(){ if(!document.querySelector('#sup-grid .po-fulfil[data-po]'))return;
     fetch('/api/supply/fulfil/grid-status').then(function(r){return r.json();}).then(function(j){ var st=(j&&j.status)||{}; try{ window._erpGridStatus=st; }catch(e){}   // shared with the order-plan "not required in Cin7" tickbox
+      // v27.789 (Ben): Fulfil column mirrors the Cin7 column — 3 states (in sync / update lines / update date), plus
+      // "update both". Drift detail on hover. Lines drift = qty-level vs the Fulfil mirror; date drift = the Fulfil
+      // requested delivery date vs Horizon's effective delivery-to-warehouse date (what the push sends).
+      var _fdrift=function(a,b){ if(!a||!b)return false; var da=Date.parse(String(a).slice(0,10)), db=Date.parse(String(b).slice(0,10)); if(isNaN(da)||isNaN(db))return false; return Math.abs(da-db)/86400000 >= 3; };   // ≥3-day gap = material
       document.querySelectorAll('#sup-grid .po-fulfil[data-po]').forEach(function(el){ var po=el.getAttribute('data-po'), s=st[po];
         if(!s){ el.innerHTML='<span class="mut tiny">—</span>'; return; }
-        if(s.in_fulfil){ var mm=Number(s.fulfil_lines)!==Number(s.horizon_lines);
-          el.innerHTML=mm?('<button class="po-fpush tool-badge bg-amber" data-po="'+esc(po)+'" title="in Fulfil but line count differs ('+s.horizon_lines+' Horizon vs '+s.fulfil_lines+' Fulfil) — re-push">⬆ Update '+s.horizon_lines+'/'+s.fulfil_lines+'</button>')
-            :('<span class="tool-badge bg-green" title="in Fulfil'+(s.fulfil_state?' · '+esc(s.fulfil_state):'')+'">✓ in Fulfil</span>'); }
-        else { el.innerHTML='<button class="po-fpush tool-badge bg-blue" data-po="'+esc(po)+'" title="not in Fulfil — create it">⬆ Push to Fulfil</button>'; } });
+        var r=(typeof poBy!=='undefined'&&poBy[po])||{};
+        var hzDate=r.delivery||r.checkin||'';   // effective delivery-to-warehouse date the Fulfil push sends
+        var linesPending=(Number(s.fulfil_lines_pending)>0)||(s.in_fulfil && Number(s.fulfil_lines)!==Number(s.horizon_lines));
+        var datePending=!!(s.in_fulfil && s.fulfil_req_delivery && hzDate && _fdrift(s.fulfil_req_delivery,hzDate));
+        var estyle='cursor:pointer;border:none';
+        var lineTip=s.in_fulfil?((Number(s.fulfil_lines_pending)||0)+' order-plan line(s) differ from Fulfil (qty)'):'not in Fulfil yet — pushing creates the PO';
+        var dateTip='Fulfil delivery date '+esc(fd(s.fulfil_req_delivery))+' ≠ Horizon '+esc(fd(hzDate))+' (this PO’s delivery-to-warehouse date)';
+        if(linesPending && datePending) el.innerHTML='<button class="po-fpush tool-badge bg-purple" data-po="'+esc(po)+'" data-fup="both" style="'+estyle+'" title="'+lineTip+'; also '+dateTip.toLowerCase()+'">Update both</button>';
+        else if(linesPending) el.innerHTML='<button class="po-fpush tool-badge bg-blue" data-po="'+esc(po)+'" data-fup="lines" style="'+estyle+'" title="'+lineTip+'">Update lines</button>';
+        else if(datePending) el.innerHTML='<button class="po-fpush tool-badge bg-amber" data-po="'+esc(po)+'" data-fup="date" style="'+estyle+'" title="'+dateTip+'">Update date</button>';
+        else if(s.in_fulfil) el.innerHTML='<span class="tool-badge bg-green" title="order-plan lines &amp; delivery date match Fulfil'+(s.fulfil_state?' · '+esc(s.fulfil_state):'')+'">✓ in sync</span>';
+        else el.innerHTML='<button class="po-fpush tool-badge bg-blue" data-po="'+esc(po)+'" data-fup="lines" style="'+estyle+'" title="'+lineTip+'">Update lines</button>'; });
       document.querySelectorAll('#sup-grid .po-cin7[data-po]').forEach(function(el){ var s=st[el.getAttribute('data-po')]; if(s&&s.cin7_not_required)el.innerHTML='<span class="mut tiny" title="marked not required in Cin7 (order plan)">n/a</span>'; });
       document.querySelectorAll('#sup-grid .po-fpush').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(){ fulfilPushPO(b.dataset.po, b); }; });
     }).catch(function(){}); }

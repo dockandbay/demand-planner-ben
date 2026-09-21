@@ -2751,18 +2751,19 @@ async function fulfilPushLines(po, completion) {
 function _fulfilNum(v) { if (v == null) return null; if (typeof v === 'object' && v.decimal != null) return Number(v.decimal); const n = Number(v); return Number.isFinite(n) ? n : null; }
 function _fulfilLineMap(l) { return { sku: l['product.code'] || null, qty: Number(l.quantity) || 0, unit_price: _fulfilNum(l.unit_price) }; }
 async function _fulfilMirrorUpsert(p, lines, source) {
-  await pool.query(`INSERT INTO planner.fulfil_purchase_orders (po,fulfil_id,state,party_name,currency,warehouse_code,total_amount,line_count,lines,last_synced_at,source,updated_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,now(),$10,now())
+  const reqDeliv = (p.requested_delivery_date != null && typeof p.requested_delivery_date === 'object') ? fulfilUnwrap(p.requested_delivery_date) : (p.requested_delivery_date || null);
+  await pool.query(`INSERT INTO planner.fulfil_purchase_orders (po,fulfil_id,state,party_name,currency,warehouse_code,total_amount,line_count,lines,requested_delivery_date,last_synced_at,source,updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::date,now(),$11,now())
       ON CONFLICT (po) DO UPDATE SET fulfil_id=excluded.fulfil_id,state=excluded.state,party_name=excluded.party_name,currency=excluded.currency,
-        warehouse_code=excluded.warehouse_code,total_amount=excluded.total_amount,line_count=excluded.line_count,lines=excluded.lines,last_synced_at=now(),source=excluded.source,updated_at=now()`,
-    [p.reference, p.id, p.state || null, p['party.name'] || null, p['currency.code'] || null, p['warehouse.code'] || null, _fulfilNum(p.total_amount), lines.length, JSON.stringify(lines), source || 'cron']);
+        warehouse_code=excluded.warehouse_code,total_amount=excluded.total_amount,line_count=excluded.line_count,lines=excluded.lines,requested_delivery_date=excluded.requested_delivery_date,last_synced_at=now(),source=excluded.source,updated_at=now()`,
+    [p.reference, p.id, p.state || null, p['party.name'] || null, p['currency.code'] || null, p['warehouse.code'] || null, _fulfilNum(p.total_amount), lines.length, JSON.stringify(lines), reqDeliv, source || 'cron']);
 }
 // Mirror ONE Fulfil PO by id (used after a push so the drift table is fresh without waiting for the next import).
 async function fulfilMirrorOne(fulfilId, source) {
   if (!fulfilId) return;
-  const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['id', '=', fulfilId]], 0, 1, null, ['id', 'reference', 'state', 'party.name', 'currency.code', 'warehouse.code', 'total_amount']]);
+  const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read', [[['id', '=', fulfilId]], 0, 1, null, ['id', 'reference', 'state', 'party.name', 'currency.code', 'warehouse.code', 'total_amount', 'requested_delivery_date']]);
   const p = Array.isArray(rows) && rows[0]; if (!p || !p.reference) return;
-  const lr = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.lineModel + '/search_read', [[['purchase', '=', fulfilId]], 0, 5000, null, ['product.code', 'quantity', 'unit_price']]);
+  const lr = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.lineModel + '/search_read', [[['purchase', '=', fulfilId]], 0, 500, null, ['product.code', 'quantity', 'unit_price']]);   // page size cap 500
   await _fulfilMirrorUpsert(p, (lr || []).map(_fulfilLineMap), source || 'push');
 }
 // Import EVERY Fulfil PO into the mirror (cron: n8n later, or the in-app timer / this endpoint). One lines call for all POs.
@@ -2774,7 +2775,7 @@ async function fulfilSearchAll(model, domain, fields) {   // v27.738: Fulfil cap
 async function fulfilImportPOs() {
   const cfg = fulfilConfigFor(await activeFulfilEnv());
   if (!cfg.configured) { const e = new Error('Fulfil ' + cfg.env + ' API not configured'); e.code = 'NO_FULFIL_CFG'; throw e; }
-  const list = await fulfilSearchAll(FULFIL_MAP.poModel, [['reference', '!=', null]], ['id', 'reference', 'state', 'party.name', 'currency.code', 'warehouse.code', 'total_amount']);
+  const list = await fulfilSearchAll(FULFIL_MAP.poModel, [['reference', '!=', null]], ['id', 'reference', 'state', 'party.name', 'currency.code', 'warehouse.code', 'total_amount', 'requested_delivery_date']);
   const ids = list.map(p => p.id);
   const byPo = {};
   for (let i = 0; i < ids.length; i += 200) {   // lines in batches of 200 POs (each batch paginated at 500 rows)
@@ -2814,10 +2815,15 @@ app.get('/api/supply/fulfil/grid-status', async (req, res) => {
   try {
     const rows = (await pool.query(`SELECT po.po, coalesce(po.cin7_not_required,false) cin7_not_required,
         (m.po IS NOT NULL) in_fulfil, m.state fulfil_state, coalesce(m.line_count,0) fulfil_lines,
-        (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=po.po AND coalesce(l.qty,0)>0)::int horizon_lines
+        to_char(m.requested_delivery_date,'YYYY-MM-DD') fulfil_req_delivery,
+        (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=po.po AND coalesce(l.qty,0)>0)::int horizon_lines,
+        -- v27.789 (Ben): qty-level lines drift vs the Fulfil mirror (not in Fulfil → every line counts). Mirrors the Cin7 erp_pending.
+        (CASE WHEN m.po IS NULL THEN (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=po.po AND coalesce(l.qty,0)>0)
+              ELSE (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=po.po AND coalesce(l.qty,0)>0
+                      AND coalesce(l.qty,0) IS DISTINCT FROM coalesce((SELECT (x->>'qty')::numeric FROM jsonb_array_elements(m.lines) x WHERE x->>'sku'=l.sku LIMIT 1),0)) END)::int fulfil_lines_pending
       FROM planner.purchase_orders po LEFT JOIN planner.fulfil_purchase_orders m ON m.po=po.po
       WHERE po.status IN ('PRODUCTION','SHIPPING','READY TO SHIP')`)).rows;
-    const out = {}; rows.forEach(r => { out[r.po] = { in_fulfil: r.in_fulfil, fulfil_state: r.fulfil_state, fulfil_lines: r.fulfil_lines, horizon_lines: r.horizon_lines, cin7_not_required: r.cin7_not_required }; });
+    const out = {}; rows.forEach(r => { out[r.po] = { in_fulfil: r.in_fulfil, fulfil_state: r.fulfil_state, fulfil_lines: r.fulfil_lines, horizon_lines: r.horizon_lines, fulfil_req_delivery: r.fulfil_req_delivery, fulfil_lines_pending: r.fulfil_lines_pending, cin7_not_required: r.cin7_not_required }; });
     res.set('Cache-Control', 'no-store').json({ ok: true, status: out });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
@@ -13142,10 +13148,10 @@ async function importFulfilPoToPlanner(po, req, opts) {
   await pool.query("INSERT INTO planner.erp_purchase_orders (po, erp_po_id, supplier_name, status, synced_at) VALUES ($1,$2,$3,'open',now())", [ref, String(po.fulfil_id), supplier_name]);
   // v27.783 (Ben): write the Fulfil drift MIRROR (keyed by the Horizon PO number) so the grid's Fulfil column reads
   // "in sync" straight after an import — otherwise it showed "Push to Fulfil" until the next mirror-import cron run.
-  await pool.query(`INSERT INTO planner.fulfil_purchase_orders (po,fulfil_id,state,party_name,currency,warehouse_code,total_amount,line_count,lines,last_synced_at,source,updated_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,now(),'import',now())
-      ON CONFLICT (po) DO UPDATE SET fulfil_id=excluded.fulfil_id,state=excluded.state,party_name=excluded.party_name,currency=excluded.currency,warehouse_code=excluded.warehouse_code,total_amount=excluded.total_amount,line_count=excluded.line_count,lines=excluded.lines,last_synced_at=now(),source='import',updated_at=now()`,
-    [ref, po.fulfil_id, po.state || null, po.supplier_name || null, po.currency || null, po.warehouse || null, (po.total_amount != null ? po.total_amount : null), po.lines.length, JSON.stringify(po.lines.map(l => ({ sku: l.sku, qty: l.qty, unit_price: l.cost })))]);
+  await pool.query(`INSERT INTO planner.fulfil_purchase_orders (po,fulfil_id,state,party_name,currency,warehouse_code,total_amount,line_count,lines,requested_delivery_date,last_synced_at,source,updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::date,now(),'import',now())
+      ON CONFLICT (po) DO UPDATE SET fulfil_id=excluded.fulfil_id,state=excluded.state,party_name=excluded.party_name,currency=excluded.currency,warehouse_code=excluded.warehouse_code,total_amount=excluded.total_amount,line_count=excluded.line_count,lines=excluded.lines,requested_delivery_date=excluded.requested_delivery_date,last_synced_at=now(),source='import',updated_at=now()`,
+    [ref, po.fulfil_id, po.state || null, po.supplier_name || null, po.currency || null, po.warehouse || null, (po.total_amount != null ? po.total_amount : null), po.lines.length, JSON.stringify(po.lines.map(l => ({ sku: l.sku, qty: l.qty, unit_price: l.cost }))), po.delivery || null]);
   if (!exists) await notePoCreated(pool, ref, authUser(req));
   return { po: ref, lines: po.lines.length, supplier_name, branch: po.branch, country_code: cc, start_production: startDate, company: po.company, currency: po.currency, fulfil_id: po.fulfil_id, exists };
 }
