@@ -16111,7 +16111,7 @@ const ERP_COMPARE_SQL = `
     AND EXISTS (SELECT 1 FROM planner.suppliers s
                 WHERE lower(trim(s.name)) = lower(trim(e.supplier_name))
                   AND coalesce(s.kind,'supplier') = 'supplier')         -- product supplier in the planner
-  ORDER BY (i.po IS NOT NULL), e.supplier_name NULLS LAST, e.po`;
+  ORDER BY (i.po IS NOT NULL), e.po`;   // v27.785 (Ben): alphabetical by PO
 // active (non-ignored) count — drives the open-actions item
 async function erpCompareActiveCount() {
   try { return (await pool.query(`SELECT count(*)::int c FROM (${ERP_COMPARE_SQL}) z WHERE NOT z.ignored`)).rows[0].c; }
@@ -16183,7 +16183,7 @@ async function fulfilCompareRows(force) {
       warehouse_code: wh || null, branch: wh ? (wh.toUpperCase() === FULFIL_MAP.chinaPortCode ? 'Direct to Client' : wh) : null,
       order_date: fulfilUnwrap(p.purchase_date), sale_ref: sale, sale_company: cleanCo(sm.company), sale_client: sm.client || null,
       ignored: ignored.has(key) };
-  }).sort((a, b) => (a.ignored - b.ignored) || String(a.supplier_name || '').localeCompare(String(b.supplier_name || '')) || String(a.po).localeCompare(String(b.po)));
+  }).sort((a, b) => (a.ignored - b.ignored) || String(a.po).localeCompare(String(b.po)));   // v27.785 (Ben): alphabetical by PO
 }
 app.get('/api/supply/bi/fulfil-compare', async (req, res) => {
   try { const force = req.query.refresh === '1' || req.query.refresh === 'true';

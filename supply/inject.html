@@ -507,7 +507,12 @@
 /* v27.781 (Ben): ERP/Fulfil compare tables fill the width and show ALL columns (no horizontal scroll on desktop);
    long cells wrap. Mobile keeps its own scrolling/sticky layout (media block below). */
 #supply-root .po-fpush{border:none;cursor:pointer}   /* v27.782 (Ben): Fulfil-column Push/Update buttons — no border (match the Cin7-column badges) */
-#supply-root .tw:has(> table.erpc-tbl){max-height:none;overflow:visible}   /* v27.782 (Ben): compare tables show ALL rows — no inner vertical scroll (the page scrolls) */
+/* v27.785 (Ben): DESKTOP ONLY — compare tables show ALL rows (no height cap, no inner scroll; the page scrolls).
+   Scoped to desktop so it never touches the MOBILE sticky/scroll layout below (forcing overflow:visible there breaks
+   the sticky columns and makes cells overflow the card). Explicit class, not :has(), so no cap leaks back. */
+@media (min-width:641px){
+  #supply-root .tw-compare{max-height:none!important;overflow:visible!important}
+}
 #supply-root .erpc-tbl{width:100%;table-layout:auto;border-collapse:collapse;font-size:12px}
 #supply-root .erpc-tbl th,#supply-root .erpc-tbl td{white-space:normal;word-break:break-word;vertical-align:top}
 /* DESKTOP fixed column widths: tiny severity dot; ref wide enough for ~20 chars (then wraps); narrower Fix;
@@ -11597,7 +11602,7 @@
         +'<td class="l"><div style="display:flex;flex-direction:column;gap:4px;align-items:stretch">'+(isIgnored
             ? '<button class="save-btn light fulc-unignore" data-po="'+esc(r.po)+'">↩ Un-ignore</button>'
             : '<button class="save-btn fulc-import" data-po="'+esc(r.po)+'" style="background:var(--pos);color:#fff;border-color:#0a8">⬆ Import to Horizon</button><button class="save-btn light fulc-ignore" data-po="'+esc(r.po)+'">Ignore</button>')+'</div></td></tr>'; }).join('');
-      return '<div class="tw"><table class="erpc-tbl"><thead><tr><th class="l">PO</th><th class="l">Fulfil id</th><th class="l">Supplier</th><th class="l">Company</th><th class="l">Sales order</th><th class="l">Branch</th><th class="l">State</th><th>Value</th><th class="l">Order date</th><th class="l">Action</th></tr></thead><tbody>'+body+'</tbody></table></div>';
+      return '<div class="tw tw-compare"><table class="erpc-tbl"><thead><tr><th class="l">PO</th><th class="l">Fulfil id</th><th class="l">Supplier</th><th class="l">Company</th><th class="l">Sales order</th><th class="l">Branch</th><th class="l">State</th><th>Value</th><th class="l">Order date</th><th class="l">Action</th></tr></thead><tbody>'+body+'</tbody></table></div>';
     }
     var htmlOut=head;
     if(!active.length) htmlOut+='<div class="count">Nothing to reconcile — every open Fulfil PO for your suppliers is already in the planner (or ignored). ✓</div>';
@@ -11631,7 +11636,7 @@
         +'<td class="l">'+(isIgnored
             ? '<button class="save-btn light erpc-unignore" data-po="'+esc(r.po)+'">↩ Un-ignore</button>'
             : '<button class="save-btn light erpc-ignore" data-po="'+esc(r.po)+'">Ignore</button>')+'</td></tr>'; }).join('');
-      return '<div class="tw"><table class="erpc-tbl"><thead><tr><th class="l">PO</th><th class="l">ERP id</th><th class="l">Supplier</th><th class="l">Branch</th><th class="l">ERP status</th><th class="l">Order date</th><th>Value</th><th class="l">ERP delivery</th><th class="l">Synced</th><th class="l"></th></tr></thead><tbody>'+body+'</tbody></table></div>';
+      return '<div class="tw tw-compare"><table class="erpc-tbl"><thead><tr><th class="l">PO</th><th class="l">ERP id</th><th class="l">Supplier</th><th class="l">Branch</th><th class="l">ERP status</th><th class="l">Order date</th><th>Value</th><th class="l">ERP delivery</th><th class="l">Synced</th><th class="l"></th></tr></thead><tbody>'+body+'</tbody></table></div>';
     }
     var htmlOut=head;
     if(!active.length) htmlOut+='<div class="count">Nothing to reconcile — every open ERP PO for your suppliers is already in the planner (or ignored). ✓</div>';
