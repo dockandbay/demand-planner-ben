@@ -1309,6 +1309,7 @@
   var actSub='actions';   // Actions section sub-tab: 'actions' | 'recommendations' | 'erp-compare'
   var _actHost=null;   // when set (BI & Reports Actions/Recommendations/ERP Compare tab), render the Actions view into this container WITHOUT its own sub-nav (the reports L3 provides the tabs)
   var _actErpCount=null;   // ERP-compare "to review" count for the sub-tab badge (lazy)
+  var _erpcHideIgnored=true;   // v27.779 (Ben): "Hide ignored" toggle on the ERP COMPARE tab — default ON; shared by the Fulfil + Cin7 compare sections
   // Which PO detail sub-tab an action should deep-link to (payment issues → PAYMENTS, date issues → DATES,
   // shipping → SHIPMENTS, ERP/order-plan → ORDER PLAN). Null → the default (first) tab.
   var ACT_POTAB={ 'Deposit not paid':'pay','Deposit over-assigned':'pay','Payment invalid':'pay','Payment overdue':'pay','Supplier invoice':'pay','Unpaid — last month':'pay','Aged payment':'pay',
@@ -1358,10 +1359,19 @@
       sb.innerHTML='<div class="mut tiny" style="margin:6px 0 8px;color:var(--violet)">Advisory — from the forecast / expedite engine. Not blocking.</div>'
         +'<div class="tw" style="max-width:900px"><table class="act-tbl">'+actHead()+'<tbody>'+open.map(actRow).join('')+'</tbody></table></div>';
       bindActFix(); bindLifecycle(statBar,sevBar,view); }
-    function renderErpTab(sb){ sb.innerHTML='<div class="count" style="padding:10px 2px">Loading ERP compare…</div>';
+    function renderErpTab(sb){
+      // v27.779 (Ben): two stacked compare reports on this tab — Fulfil compare ABOVE, Cin7 compare below — plus a
+      // shared "Hide ignored" toggle (default on). Each section fetches independently so one being unavailable
+      // (e.g. Fulfil not configured) doesn't block the other.
+      sb.innerHTML='<label style="display:inline-flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin:2px 0 12px"><input type="checkbox" id="erpc-hideign"'+(_erpcHideIgnored?' checked':'')+'> Hide ignored</label>'
+        +'<div id="fulfilc-sec"><div class="count" style="padding:10px 2px">Loading Fulfil compare…</div></div>'
+        +'<div id="cin7c-sec" style="margin-top:26px;border-top:1px solid var(--line);padding-top:16px"><div class="count" style="padding:10px 2px">Loading Cin7 compare…</div></div>';
+      var _hi=document.getElementById('erpc-hideign'); if(_hi)_hi.onchange=function(){ _erpcHideIgnored=_hi.checked; renderErpTab(sb); };
+      fetch('/api/supply/bi/fulfil-compare').then(function(r){return r.json();}).then(function(d){ var el=document.getElementById('fulfilc-sec'); if(el)renderFulfilCompare(d, el, function(){ renderErpTab(sb); }); })
+        .catch(function(){ var el=document.getElementById('fulfilc-sec'); if(el)el.innerHTML='<div style="font-weight:700;font-size:14px;margin:2px 0 3px">Fulfil compare</div><div class="mut tiny">Fulfil compare unavailable — the Fulfil API is not configured for this environment.</div>'; });
       fetch('/api/supply/bi/erp-compare').then(function(r){return r.json();}).then(function(d){ _actErpCount=(d&&typeof d.count==='number')?d.count:((d&&d.rows||[]).filter(function(x){return !x.ignored;}).length);
         var badge=document.querySelector('#act-subnav .act-subtab[data-as="erp-compare"]'); if(badge)badge.innerHTML='⬆ ERP COMPARE'+(_actErpCount>0?' <span class="ex-badge">'+_actErpCount+'</span>':'');
-        renderErpCompare(d, sb, function(){ renderErpTab(sb); }); }).catch(function(){ sb.innerHTML='<div style="color:var(--neg)">Could not load ERP compare.</div>'; }); }
+        var el=document.getElementById('cin7c-sec'); if(el)renderErpCompare(d, el, function(){ renderErpTab(sb); }); }).catch(function(){ var el=document.getElementById('cin7c-sec'); if(el)el.innerHTML='<div style="color:var(--neg)">Could not load Cin7 compare.</div>'; }); }
     // KPI tiles (design "Horizon Supply"): open actions · high priority · payment issues · done. Counts come from the loaded set.
     function kpiBar(){ var k=document.getElementById('act-kpis'); if(!k)return;
       var open=_acts.filter(function(r){return stOf(r)==='open';}), hi=open.filter(function(r){return r.severity==='high';}).length,
@@ -11561,11 +11571,47 @@
   }
 
   // ERP COMPARE — open/draft ERP POs missing from the planner (supplier must be a planner product supplier)
+  // v27.779 (Ben): Fulfil compare — open Fulfil POs missing from the planner, with the linked sales order + its company,
+  // an Ignore toggle, and an "Import to Horizon" button (reuses the po-import-fulfil flow). Rendered above Cin7 compare.
+  function renderFulfilCompare(d,_cont,_re){ var b=_cont; if(!b)return; d=d||{}; var all=d.rows||[];
+    var active=all.filter(function(r){return !r.ignored;}), ignored=all.filter(function(r){return r.ignored;});
+    var head='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:var(--ink)">Fulfil compare — open Fulfil POs missing from the planner</div>'
+      +'<div class="mut tiny" style="margin-bottom:12px">Open purchase orders in <b>Fulfil</b> that are <b>not</b> in your PURCHASE ORDERS list — limited to POs whose supplier is a supplier in the planner. Shows any linked Fulfil <b>sales order</b> &amp; its company. <b>'+active.length+'</b> to review'+(ignored.length?' · '+ignored.length+' ignored':'')+'.</div>';
+    function tbl(list,isIgnored){
+      var body=list.map(function(r){ return '<tr'+(isIgnored?' style="opacity:.55"':'')+'>'
+        +'<td class="l"><b>'+esc(r.po)+'</b></td>'
+        +'<td class="l">'+esc(r.fulfil_id||'—')+'</td>'
+        +'<td class="l">'+esc(r.supplier_name||'—')+'</td>'
+        +'<td class="l">'+esc(r.company||'—')+'</td>'
+        +'<td class="l">'+(r.sale_ref?('<b>'+esc(r.sale_ref)+'</b>'+(r.sale_client?' <span class="mut tiny">'+esc(r.sale_client)+'</span>':'')):'<span class="mut">—</span>')+'</td>'
+        +'<td class="l">'+esc(r.sale_company||'—')+'</td>'
+        +'<td class="l">'+esc(r.branch||'—')+'</td>'
+        +'<td class="l"><span class="tool-badge '+(isIgnored?'bg-neutral':'bg-amber')+'">'+esc(r.state||'—')+'</span></td>'
+        +'<td>'+((r.total_value!=null&&r.total_value!=='')?esc((r.currency?r.currency+' ':'')+r.total_value):'<span class="mut">—</span>')+'</td>'
+        +'<td class="l">'+esc(r.order_date||'—')+'</td>'
+        +'<td class="l" style="white-space:nowrap">'+(isIgnored
+            ? '<button class="save-btn light fulc-unignore" data-po="'+esc(r.po)+'">↩ Un-ignore</button>'
+            : '<button class="save-btn fulc-import" data-po="'+esc(r.po)+'" style="background:var(--pos);color:#fff;border-color:#0a8">⬆ Import to Horizon</button> <button class="save-btn light fulc-ignore" data-po="'+esc(r.po)+'">Ignore</button>')+'</td></tr>'; }).join('');
+      return '<div class="tw"><table class="erpc-tbl"><thead><tr><th class="l">PO</th><th class="l">Fulfil id</th><th class="l">Supplier</th><th class="l">Company</th><th class="l">Sales order</th><th class="l">SO company</th><th class="l">Branch</th><th class="l">State</th><th>Value</th><th class="l">Order date</th><th class="l"></th></tr></thead><tbody>'+body+'</tbody></table></div>';
+    }
+    var htmlOut=head;
+    if(!active.length) htmlOut+='<div class="count">Nothing to reconcile — every open Fulfil PO for your suppliers is already in the planner (or ignored). ✓</div>';
+    else htmlOut+=tbl(active,false);
+    if(ignored.length && !_erpcHideIgnored) htmlOut+='<div class="sect-h" style="margin-top:16px">Ignored ('+ignored.length+') <span class="mut tiny">— un-ignore to bring back</span></div>'+tbl(ignored,true);
+    else if(ignored.length) htmlOut+='<div class="mut tiny" style="margin-top:8px">'+ignored.length+' ignored (hidden — untick “Hide ignored” to show).</div>';
+    b.innerHTML=htmlOut;
+    function setIgnore(po,ig){ fetch('/api/supply/bi/fulfil-compare/ignore',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,ignore:ig})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} if(_re)_re(); }).catch(function(){alert('Could not update');}); }
+    b.querySelectorAll('.fulc-ignore').forEach(function(x){ x.onclick=function(){ setIgnore(x.dataset.po,true); }; });
+    b.querySelectorAll('.fulc-unignore').forEach(function(x){ x.onclick=function(){ setIgnore(x.dataset.po,false); }; });
+    b.querySelectorAll('.fulc-import').forEach(function(x){ x.onclick=function(){ var po=x.dataset.po;
+      if(!confirm('Import Fulfil PO '+po+' into Horizon?\n\nBrings in the supplier, company (→ ship-to country), branch, SKUs, quantities & prices. If it already exists its lines are overwritten from Fulfil.'))return;
+      x.disabled=true; x.textContent='Importing…';
+      fetch('/api/supply/po-import-fulfil',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({mode:'po',value:po,confirm:true})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ alert('Import failed: '+j.error); x.disabled=false; x.textContent='⬆ Import to Horizon'; return; } invalidateDerived(); delete cache['purchase-orders']; if(_re)_re(); }).catch(function(e){ alert('Import failed: '+(e.message||e)); x.disabled=false; x.textContent='⬆ Import to Horizon'; }); }; }); }
   function renderErpCompare(d,_cont,_re){ var b=_cont||biBody(); d=d||{}; var all=d.rows||[];
     var active=all.filter(function(r){return !r.ignored;}), ignored=all.filter(function(r){return r.ignored;});
     _erpcCount=active.length; paintErpcBadge(); try{ paintReportsL2Badge(); }catch(e){}   // keep the sub-nav counter in sync (incl. after ignore / un-ignore)
-    var head='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:var(--ink)">ERP compare — open ERP POs missing from the planner</div>'
-      +'<div class="mut tiny" style="margin-bottom:12px">Open/draft purchase orders in the ERP (Cin7) that are <b>not</b> in your PURCHASE ORDERS list — limited to POs whose supplier is a supplier in the planner (freight / internal / test vendors like Flexport &amp; HMRC are excluded). <b>'+active.length+'</b> to review'+(ignored.length?' · '+ignored.length+' ignored':'')+'.</div>';
+    var head='<div style="font-weight:700;font-size:14px;margin:2px 0 3px;color:var(--ink)">Cin7 compare — open Cin7 POs missing from the planner</div>'
+      +'<div class="mut tiny" style="margin-bottom:12px">Open/draft purchase orders in <b>Cin7</b> that are <b>not</b> in your PURCHASE ORDERS list — limited to POs whose supplier is a supplier in the planner (freight / internal / test vendors like Flexport &amp; HMRC are excluded). <b>'+active.length+'</b> to review'+(ignored.length?' · '+ignored.length+' ignored':'')+'.</div>';
     function tbl(list,isIgnored){
       var body=list.map(function(r){ return '<tr'+(isIgnored?' style="opacity:.55"':'')+'>'
         +'<td class="l"><b>'+esc(r.po)+'</b></td>'
@@ -11585,7 +11631,8 @@
     var htmlOut=head;
     if(!active.length) htmlOut+='<div class="count">Nothing to reconcile — every open ERP PO for your suppliers is already in the planner (or ignored). ✓</div>';
     else htmlOut+=tbl(active,false);
-    if(ignored.length) htmlOut+='<div class="sect-h" style="margin-top:16px">Ignored ('+ignored.length+') <span class="mut tiny">— excluded from the actions count; un-ignore to bring back</span></div>'+tbl(ignored,true);
+    if(ignored.length && !_erpcHideIgnored) htmlOut+='<div class="sect-h" style="margin-top:16px">Ignored ('+ignored.length+') <span class="mut tiny">— excluded from the actions count; un-ignore to bring back</span></div>'+tbl(ignored,true);
+    else if(ignored.length) htmlOut+='<div class="mut tiny" style="margin-top:8px">'+ignored.length+' ignored (hidden — untick “Hide ignored” to show).</div>';
     b.innerHTML=htmlOut;
     function setIgnore(po,ig){ fetch('/api/supply/bi/erp-compare/ignore',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({po:po,ignore:ig})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){alert(j.error);return;} if(_re)_re(); else selectReport('erp-compare'); }).catch(function(){alert('Could not update');}); }
     b.querySelectorAll('.erpc-ignore').forEach(function(x){ x.onclick=function(){ setIgnore(x.dataset.po,true); }; });

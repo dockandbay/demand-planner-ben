@@ -12994,7 +12994,7 @@ function fulfilUnwrap(v) { if (v && typeof v === 'object') { if (v.__class__ ===
 // Read one Fulfil PO (header + lines + final-destination metafield) by its purchase.purchase id.
 async function fulfilReadPoById(pid) {
   const rows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.poModel + '/search_read',
-    [[['id', '=', pid]], 0, 1, null, ['id', 'number', 'reference', 'party', 'party.name', 'currency.code', 'warehouse.code', 'company', 'state', 'purchase_date', 'requested_delivery_date']]);
+    [[['id', '=', pid]], 0, 1, null, ['id', 'number', 'reference', 'party', 'party.name', 'currency.code', 'warehouse', 'warehouse.code', 'company', 'state', 'purchase_date', 'requested_delivery_date']]);
   const p = Array.isArray(rows) && rows[0]; if (!p) return null;
   const lineRows = await fulfilFetch('PUT', '/model/' + FULFIL_MAP.lineModel + '/search_read',
     [[['purchase', '=', pid]], 0, 500, null, ['product.code', 'description', 'quantity', 'unit_price']]);
@@ -13007,6 +13007,20 @@ async function fulfilReadPoById(pid) {
     if (def) { const mv = await fulfilFetch('PUT', '/model/metafield.value/search_read', [[['field', '=', def.id], ['resource', '=', FULFIL_MAP.poModel + ',' + pid]], 0, 1, null, ['value_char']]);
       if (Array.isArray(mv) && mv[0] && mv[0].value_char) branch = String(mv[0].value_char).replace(/^Destination 3PL after China Port:\s*/i, '').trim() || null; } }
   catch (e) {}
+  // v27.779 (Ben): if final_destination is blank, derive the Horizon branch from the Fulfil warehouse. China Port (CHP)
+  // means shipped DIRECT TO CLIENT; any other warehouse maps to the Horizon branch that carries that stock.location id.
+  if (!branch) {
+    const wcode = String(p['warehouse.code'] || '').toUpperCase();
+    if (wcode === String(FULFIL_MAP.chinaPortCode).toUpperCase()) branch = 'Direct to Client';
+    else if (p.warehouse) {
+      // Match the Fulfil stock.location id → planner branch. Some branches share a fulfil_id (e.g. UK ILG + EU ILG both 16),
+      // so disambiguate by the warehouse code's leading region token (UK/EU/US/AU/CA) before falling back to any match.
+      const region = wcode.slice(0, 2);
+      let br = await pool.query('SELECT name FROM planner.branches WHERE fulfil_id=$1 AND upper(name) LIKE $2 ORDER BY name LIMIT 1', [String(p.warehouse), region + '%']);
+      if (!br.rows[0]) br = await pool.query('SELECT name FROM planner.branches WHERE fulfil_id=$1 ORDER BY name LIMIT 1', [String(p.warehouse)]);
+      if (br.rows[0]) branch = br.rows[0].name;
+    }
+  }
   const company_id = Number(p.company) || null;
   return { fulfil_id: p.id, po: p.number || p.reference, number: p.number, reference: p.reference, party_id: p.party,
     supplier_name: p['party.name'] || null, currency: p['currency.code'] || null, warehouse: p['warehouse.code'] || null,
@@ -16086,6 +16100,55 @@ app.post('/api/supply/bi/erp-compare/ignore', async (req, res) => {
     if (b.ignore === false) await pool.query(`DELETE FROM planner.erp_compare_ignored WHERE po=$1`, [b.po]);
     else await pool.query(`INSERT INTO planner.erp_compare_ignored (po, ignored_by) VALUES ($1,$2)
       ON CONFLICT (po) DO UPDATE SET ignored_by=excluded.ignored_by, ignored_at=now()`, [b.po, b.by || 'admin']);
+    res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// ===================== Fulfil COMPARE (v27.779, Ben) =====================
+// Open Fulfil purchase orders NOT in the planner (identity = number, else reference), limited to product suppliers —
+// the Fulfil twin of the Cin7 ERP compare. Additionally surfaces the linked SALES ORDER (the PO's `reference` when it
+// names a sale, e.g. SO49664) and that sale's company. Queried LIVE from Fulfil, not the mirror: native sale-linked POs
+// share one `reference` (the sale number) so the reference-keyed mirror (planner.fulfil_purchase_orders) can't hold them
+// individually. Sandbox has ~176 POs, so one paginated read is cheap.
+async function fulfilCompareRows() {
+  const cfg = fulfilConfigFor(await activeFulfilEnv());
+  if (!cfg.configured) { const e = new Error('Fulfil ' + cfg.env + ' API not configured'); e.code = 'NO_FULFIL_CFG'; throw e; }
+  const pos = await fulfilSearchAll(FULFIL_MAP.poModel, [['state', 'not in', ['cancel', 'done']]],
+    ['id', 'number', 'reference', 'state', 'party.name', 'company.rec_name', 'currency.code', 'warehouse.code', 'total_amount', 'purchase_date']);
+  const plannerPOs = new Set((await pool.query('SELECT po FROM planner.purchase_orders')).rows.map(r => r.po));
+  const suppliers = new Set((await pool.query("SELECT lower(trim(name)) n FROM planner.suppliers WHERE coalesce(kind,'supplier')='supplier'")).rows.map(r => r.n));
+  const ignored = new Set((await pool.query('SELECT po FROM planner.fulfil_compare_ignored')).rows.map(r => r.po));
+  const cand = pos.filter(p => { const key = p.number || p.reference; if (!key) return false; if (plannerPOs.has(key)) return false;
+    return suppliers.has(String(p['party.name'] || '').trim().toLowerCase()); });
+  // batch-resolve the linked sales orders (a `reference` that names a sale) → sale company + client
+  const saleRefs = Array.from(new Set(cand.map(p => p.reference).filter(r => r && /^SO/i.test(r))));
+  const saleMap = {};
+  if (saleRefs.length) {
+    const sales = await fulfilFetch('PUT', '/model/sale.sale/search_read', [[['number', 'in', saleRefs]], 0, 500, null, ['number', 'company.rec_name', 'party.name', 'state']]);
+    (sales || []).forEach(s => { saleMap[s.number] = { company: s['company.rec_name'] || null, client: s['party.name'] || null, state: s.state || null }; });
+  }
+  const cleanCo = v => String(v || '').replace(/^\[[A-Z]{2}\]\s*/, '').trim() || null;   // "[UK] Dock & Bay Ltd" → "Dock & Bay Ltd"
+  return cand.map(p => {
+    const key = p.number || p.reference;
+    const sale = (p.reference && /^SO/i.test(p.reference)) ? p.reference : null;
+    const sm = sale ? (saleMap[sale] || {}) : {};
+    const wh = String(p['warehouse.code'] || '');
+    return { po: key, fulfil_id: p.id, number: p.number, reference: p.reference,
+      supplier_name: p['party.name'] || null, company: cleanCo(p['company.rec_name']), currency: p['currency.code'] || null,
+      total_value: _fulfilNum(p.total_amount), state: p.state || null,
+      warehouse_code: wh || null, branch: wh ? (wh.toUpperCase() === FULFIL_MAP.chinaPortCode ? 'Direct to Client' : wh) : null,
+      order_date: fulfilUnwrap(p.purchase_date), sale_ref: sale, sale_company: cleanCo(sm.company), sale_client: sm.client || null,
+      ignored: ignored.has(key) };
+  }).sort((a, b) => (a.ignored - b.ignored) || String(a.supplier_name || '').localeCompare(String(b.supplier_name || '')) || String(a.po).localeCompare(String(b.po)));
+}
+app.get('/api/supply/bi/fulfil-compare', async (req, res) => {
+  try { const rows = await fulfilCompareRows(); res.json({ ok: true, count: rows.filter(r => !r.ignored).length, rows }); }
+  catch (e) { log500(e); res.status(e.code === 'NO_FULFIL_CFG' ? 501 : 500).json({ error: e.message }); }
+});
+app.post('/api/supply/bi/fulfil-compare/ignore', async (req, res) => {
+  const b = req.body || {}; if (!b.po) return res.status(400).json({ error: 'po required' });
+  try {
+    if (b.ignore === false) await pool.query('DELETE FROM planner.fulfil_compare_ignored WHERE po=$1', [b.po]);
+    else await pool.query(`INSERT INTO planner.fulfil_compare_ignored (po, ignored_by) VALUES ($1,$2) ON CONFLICT (po) DO UPDATE SET ignored_by=excluded.ignored_by, ignored_at=now()`, [b.po, b.by || 'admin']);
     res.json({ ok: true });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
