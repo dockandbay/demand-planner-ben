@@ -3,16 +3,20 @@ create_user_readonly.txt
 node_modules
 *.bak
 .vercel
+.DS_Store
+
+# v27.799 (Ben): local-only working bucket — scratch/probes, analysis, business-data dumps, logs. NEVER committed.
+_local/
 
 # Raw production-data dump — local re-seed convenience only; never commit business data.
 planner_seed.sql
 *_seed.sql
 
-# Handoff data package (deliverable for Diviyaj — contains a full data dump; not repo content)
-handoff/
-handoff.zip
-final po migration files/
-po-erp-migration-for-diviyaj.zip
+# Handoff / data packages (deliverables for Diviyaj — full data dumps; not repo content). v27.799: now under archive/.
+archive/handoff/
+archive/handoff.zip
+archive/final po migration files/
+archive/po-erp-migration-for-diviyaj.zip
 .claude/
 server.log
 /log
@@ -37,10 +41,8 @@ cin7-calls.jsonl
 files/
 *.mov
 *.dmg
-mockups/
-# All scratch/throwaway files live in temp/ (harness probes, logs, one-off scripts). Keep the folder, ignore its contents.
-temp/*
-!temp/.gitkeep
+templates/mockups/
+# v27.799: all scratch/throwaway (harness probes, logs, one-off scripts) now lives under _local/ (ignored above).
 
 # runtime logs (cloudflared tunnel, dev server) — never track
 *.log

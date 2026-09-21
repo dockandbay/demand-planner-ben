@@ -9,9 +9,9 @@ import express from 'express';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { readFileSync, appendFile } from 'fs';
 import pg from 'pg';
-import { buildInvoice, buildDtcPackingList } from './invoice.mjs';
-import { buildAsnLabelsPdf } from './asnpdf.mjs';
-import { coghlansSftpList, coghlansSftpReady } from './coghlans_sftp.mjs';
+import { buildInvoice, buildDtcPackingList } from './lib/invoice.mjs';
+import { buildAsnLabelsPdf } from './lib/asnpdf.mjs';
+import { coghlansSftpList, coghlansSftpReady } from './lib/coghlans_sftp.mjs';
 
 // pdf.js (bundled by pdf-parse) constructs DOMMatrix while extracting text from some invoice PDFs (e.g. US Geneva —
 // fonts / transforms). It's a browser API absent in the Node/serverless runtime → "DOMMatrix is not defined". Provide
