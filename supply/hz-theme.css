@@ -930,12 +930,12 @@ body header.pv-top .pv-lang button:hover{color:#fff}
 #app #product-root .smp-new-short{display:none}
 #app #product-root .smp-tbreak{display:none}
 @media (max-width:640px){
-  #app #product-root #smp-filters #smp-count{order:1;margin-left:auto;font-weight:600}                 /* row 1, right, in line with the view pills */
+  #app #product-root #smp-filters #smp-count{display:none}                                              /* v27.826 (Ben): drop the count on mobile */
+  #app #product-root #smp-filters #smp-new{order:1;margin-left:auto}                                    /* v27.826: New up to row 1, right, in line with the view pills */
   #app #product-root #smp-filters .smp-tbreak{display:block;flex:1 0 100%;height:0;margin:0;order:2}    /* force wrap to row 2 (invisible) */
-  #app #product-root #smp-filters .smp-qwrap{order:3;flex:1 1 auto;min-width:120px}
+  #app #product-root #smp-filters .smp-qwrap{order:3;flex:1 1 auto;min-width:0}                         /* v27.826: search fills row 2 */
   #app #product-root #smp-filters .smp-qwrap input{width:100%;max-width:none}
-  #app #product-root #smp-filters .smp-filt-toggle{order:4}
-  #app #product-root #smp-filters #smp-new{order:5;margin-left:auto}                                    /* row 2, right (where swatch size sat) */
+  #app #product-root #smp-filters .smp-filt-toggle{order:4;flex:0 0 auto}
   #app #product-root #smp-filters .smp-filtgrp{order:99}
   #app #product-root .smp-new-long{display:none}
   #app #product-root .smp-new-short{display:inline}
