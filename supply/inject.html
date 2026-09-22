@@ -14762,17 +14762,19 @@
           +'</div><div id="pwb-msg" class="mut tiny" style="margin-bottom:8px">&nbsp;</div>'
         +'<div id="pwb-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px">'
           +rows.map(function(r){ var svg=eanBarcodeSVG(r.barcode)||''; var asn=r.status==='assigned';
-            var badge=asn?('<span class="pill" style="color:var(--muted);font-size:9px" title="assigned '+(r.assigned_at||'')+'">assigned'+(r.assigned_ref?(' · '+esc(r.assigned_ref)):'')+'</span>'):'<span class="pill" style="color:var(--pos);border-color:var(--pos);font-size:9px">free</span>';
-            return '<label class="pwb-cell" data-bc="'+r.barcode+'" style="border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--card);display:flex;flex-direction:column;gap:5px;cursor:pointer">'
-              +'<div style="display:flex;justify-content:space-between;align-items:center;gap:6px"><label style="display:inline-flex;gap:5px;align-items:center;font:600 11px ui-monospace,monospace"><input type="checkbox" class="pwb-ck" value="'+r.barcode+'">'+r.barcode+'</label>'+badge+'</div>'
+            // v27.809 (Ben): short status chip only (was 'assigned · <long ref>' which overflowed the cell under the next one).
+            var badge=asn?('<span class="pill" style="color:var(--muted);font-size:9px" title="assigned '+(r.assigned_at||'')+'">assigned</span>'):'<span class="pill" style="color:var(--pos);border-color:var(--pos);font-size:9px">free</span>';
+            return '<label class="pwb-cell" data-bc="'+r.barcode+'" style="border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--card);display:flex;flex-direction:column;gap:5px;cursor:pointer;min-width:0">'
+              +'<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;min-width:0"><label style="display:inline-flex;gap:5px;align-items:center;font:600 11px ui-monospace,monospace;min-width:0"><input type="checkbox" class="pwb-ck" value="'+r.barcode+'">'+r.barcode+'</label>'+badge+'</div>'
               +'<img src="data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg)+'" style="width:100%;height:56px;object-fit:contain;background:#fff;border:1px solid var(--line2);border-radius:4px" alt="'+r.barcode+'">'
-              +(asn&&r.assigned_sku?('<div class="mut tiny" style="text-align:left">SKU '+esc(r.assigned_sku)+(r.colour_name?(' · '+esc(r.colour_name)):'')+'</div>'):'')
+              +(asn&&r.assigned_ref?('<a class="pwb-openprod" data-ref="'+esc(r.assigned_ref)+'" title="open '+esc(r.assigned_ref)+'" style="font-size:10px;color:var(--blue);text-decoration:underline;cursor:pointer;word-break:break-all;text-align:left;line-height:1.35">▸ '+esc(r.product_name||r.assigned_ref)+'</a>'+(r.assigned_sku?('<div class="mut tiny" style="text-align:left;word-break:break-all">SKU '+esc(r.assigned_sku)+(r.colour_name?(' · '+esc(r.colour_name)):'')+'</div>'):'')):'')
               +'</label>'; }).join('')
         +'</div>';
       var grid=host.querySelector('#pwb-grid'), dlBtn=host.querySelector('#pwb-dl'), msg=host.querySelector('#pwb-msg');
       function selCount(){ return host.querySelectorAll('.pwb-ck:checked').length; }
       function sync(){ var n=selCount(); dlBtn.disabled=!n; dlBtn.textContent='⬇ Download selected'+(n?(' ('+n+')'):''); }
       grid.addEventListener('change',function(e){ if(e.target&&e.target.classList.contains('pwb-ck')){ var cell=e.target.closest('.pwb-cell'); if(cell)cell.style.borderColor=e.target.checked?'var(--blue)':'var(--line)'; sync(); } });
+      grid.querySelectorAll('.pwb-openprod').forEach(function(a){ a.onclick=function(e){ e.preventDefault(); e.stopPropagation(); var ref=a.dataset.ref; if(ref)location.hash='#/product/'+encodeURIComponent(ref); }; });   // v27.809 (Ben): open the assigned product (its detail drawer)
       host.querySelector('#pwb-selall').onclick=function(){ host.querySelectorAll('.pwb-cell').forEach(function(c){ if(c.querySelector('.pill') && /free/.test(c.querySelector('.pill').textContent)){ var ck=c.querySelector('.pwb-ck'); ck.checked=true; c.style.borderColor='var(--blue)'; } }); sync(); };
       // v27.804 (Ben): download each barcode as its OWN file (no zip). The browser may prompt to "allow multiple
       // downloads" the first time when several are selected — that's expected. Files are staggered slightly so none drop.
@@ -15702,7 +15704,7 @@
           :('<span style="color:var(--amber);font-size:11px;font-weight:700">no spec linked</span> <span class="mut tiny">'+_lnk+'</span>');
         return '<tr class="pm-comprow" style="background:var(--card)">'
           +'<td style="padding:4px 8px 4px 16px;font-size:12px;font-weight:700;color:var(--ink-soft);white-space:nowrap"><span style="font-size:11px;color:var(--muted);margin-right:5px" title="spec-linked, no sampling">◈</span>'+compLbl(dim)+compModeSel(s,dim,true)+'</td>'
-          +'<td style="padding:2px 8px 2px 28px"><textarea class="fci pm-comp-desc" data-id="'+s.id+'" data-dim="'+dim+'" rows="2" placeholder="description…" style="width:50%;min-width:120px;font-size:11px;box-sizing:border-box;resize:vertical;font-family:inherit;vertical-align:top">'+esc(sd.description||'')+'</textarea></td>'
+          +'<td style="padding:2px 8px 2px 28px"><textarea class="fci pm-comp-desc" data-id="'+s.id+'" data-dim="'+dim+'" rows="2" placeholder="/ phrase · /p Pantone · description…" style="width:100%;min-width:220px;font-size:11px;box-sizing:border-box;resize:vertical;font-family:inherit;vertical-align:top">'+esc(sd.description||'')+'</textarea></td>'
           +'<td style="padding:2px 8px;text-align:left;white-space:nowrap"><span class="mut tiny">—</span></td>'
           +'<td style="padding:2px 8px;text-align:left"><span style="color:var(--muted);font-size:11px">no sampling</span></td>'
           +'<td style="padding:2px 8px;text-align:left">'+compReqCell(s,dim,true)+'</td>'
@@ -15724,7 +15726,7 @@
       else if(req){ _lblIcon='<span style="font-size:12px;color:var(--prod);margin-right:5px" title="'+esc(stageMeta(appr)[1])+'">●</span>'; }
       return '<tr class="pm-comprow" style="background:var(--card);'+(req?'':'opacity:.6')+'">'
         +'<td style="padding:4px 8px 4px 16px;font-size:12px;font-weight:700;color:'+_lblFg+';white-space:nowrap">'+_lblIcon+compLbl(dim)+compModeSel(s,dim,false)+'</td>'
-        +'<td style="padding:2px 8px 2px 28px"><textarea class="fci pm-comp-desc" data-id="'+s.id+'" data-dim="'+dim+'" rows="2" placeholder="description…" style="width:50%;min-width:120px;font-size:11px;box-sizing:border-box;resize:vertical;font-family:inherit;vertical-align:top">'+esc(sd.description||'')+'</textarea></td>'
+        +'<td style="padding:2px 8px 2px 28px"><textarea class="fci pm-comp-desc" data-id="'+s.id+'" data-dim="'+dim+'" rows="2" placeholder="/ phrase · /p Pantone · description…" style="width:100%;min-width:220px;font-size:11px;box-sizing:border-box;resize:vertical;font-family:inherit;vertical-align:top">'+esc(sd.description||'')+'</textarea></td>'
         +'<td style="padding:2px 8px;text-align:left;white-space:nowrap">'+reqCell+'</td>'
         +'<td style="padding:2px 8px;text-align:left">'+(req?apprCell:'<span class="mut tiny">—</span>')+'</td>'
         +'<td style="padding:2px 8px;text-align:left">'+(req?compReqCell(s,dim,false):'<span class="mut tiny">—</span>')+'</td>'
@@ -15733,7 +15735,7 @@
         +'<td style="padding:2px 8px">'+compSampleCell(s,dim)+'</td></tr>'; }
     // v27.807 (Ben): the size header is now a READ-ONLY grouping row — size label, approval, barcode + SKU are all edited
     // in the SIZES master grid above. This just labels which size the component rows below belong to.
-    function szHdr(s){ var ap=s.approval_status, apc=ap==='approved'?['var(--pos-bg)','var(--pos)','Approved']:ap==='rejected'?['var(--neg-bg)','var(--neg)','Rejected']:['var(--line2)','var(--muted)','Pending'];
+    function szHdr(s){ var ap=s.approval_status, apc=ap==='approved'?['var(--pos-bg)','var(--pos)','Approved']:ap==='rejected'?['var(--neg-bg)','var(--neg)','Rejected']:['var(--amber-bg)','var(--amber)','Pending'];
       return '<tr class="pm-szhdr" data-id="'+s.id+'"><td colspan="8" style="padding:7px 8px 7px 12px;border-top:1px solid #cbd5e1;background:#e2e8f0;white-space:nowrap"><span style="display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap">'
         +'<span style="font-weight:700;color:var(--muted);font-size:10px;letter-spacing:.04em">SIZE</span><b style="font-size:12px">'+esc(s.size_label||'—')+'</b>'
         +'<span style="font-size:10px;font-weight:700;padding:1px 8px;border-radius:10px;background:'+apc[0]+';color:'+apc[1]+'">'+apc[2]+'</span>'
@@ -15786,14 +15788,14 @@
         var bcSel=function(s){ var cur=s.barcode||''; var o='<option value="">— none —</option>'; if(cur)o+='<option value="'+esc(cur)+'" selected>'+esc(cur)+'</option>'; freeCodes.forEach(function(c){ o+='<option value="'+esc(c)+'">'+esc(c)+'</option>'; }); return '<select class="fci szm-bc" data-id="'+s.id+'" style="font-family:ui-monospace,Menlo,monospace;font-size:11px;max-width:170px">'+o+'</select>'; };
         var apSel=function(s){ return '<select class="fci szm-ap" data-id="'+s.id+'" style="'+szApprovalStyle(s.approval_status)+'"><option value="pending"'+(s.approval_status==='pending'?' selected':'')+'>Pending</option><option value="approved"'+(s.approval_status==='approved'?' selected':'')+'>Approved</option><option value="rejected"'+(s.approval_status==='rejected'?' selected':'')+'>Rejected</option></select>'; };
         var rows=sizes.map(function(s){ return '<tr>'
-          +'<td style="padding:4px 8px"><input class="fci szm-lbl" data-id="'+s.id+'" value="'+esc(s.size_label||'')+'" placeholder="e.g. Large" style="width:150px;font-weight:700"></td>'
+          +'<td style="padding:4px 8px"><input class="fci szm-lbl" data-id="'+s.id+'" value="'+esc(s.size_label||'')+'" placeholder="e.g. Large (Age 3 to 5) 66x49cm" style="width:100%;min-width:300px;font-weight:700"></td>'
           +'<td style="padding:4px 8px">'+bcSel(s)+'</td>'
           +'<td style="padding:4px 8px"><button class="cell-pick szm-sku" data-id="'+s.id+'" data-sku="'+esc(s.mapped_sku||'')+'" title="map to a real planner SKU">'+(s.mapped_sku?'<b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.mapped_sku)+'</b>':'<span class="mut">— pick ▾</span>')+'</button></td>'
           +'<td style="padding:4px 8px"><input class="fci szm-wsku" data-id="'+s.id+'" value="'+esc(s.working_sku||'')+'" placeholder="working sku…" style="width:150px;font-family:ui-monospace,Menlo,monospace;font-size:11px"></td>'
           +'<td style="padding:4px 8px">'+apSel(s)+'</td>'
           +'<td style="padding:4px 8px;white-space:nowrap">'+(s.working_sku?'<button class="save-btn szm-pim" data-id="'+s.id+'" title="push this working SKU (+ barcode + colourway) into the PIM waiting room" style="font-size:10px;padding:2px 8px;margin-right:8px;background:var(--violet-bg);color:var(--violet);border-color:var(--violet)">⤴ Push to PIM</button>':'')+'<a class="szm-del" data-id="'+s.id+'" title="remove size (releases its barcode)" style="color:var(--neg);cursor:pointer;font-weight:700">✕</a></td></tr>'; }).join('');
         host.innerHTML='<div style="font-weight:700;font-size:13px;margin:0 0 6px">Sizes <span class="mut" style="font-weight:400;font-size:11px">— add a size, assign a workshop barcode, map a real SKU or set a working SKU</span></div>'
-          +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px"><thead><tr>'+['Size','Barcode','Real SKU','Working SKU','Approval',''].map(function(h){return '<th style="text-align:left;padding:2px 8px 5px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);border-bottom:1px solid var(--line2)">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+          +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;width:100%;min-width:900px"><thead><tr>'+['Size','Barcode','Real SKU','Working SKU','Approval',''].map(function(h){return '<th style="text-align:left;padding:2px 8px 5px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);border-bottom:1px solid var(--line2)">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
           +(rows||'<tr><td colspan="6" class="mut tiny" style="padding:6px 8px">No sizes yet — add one below.</td></tr>')+'</tbody></table></div>'
           +'<div style="margin-top:8px"><input class="fci" id="szm-newsz" placeholder="add size…" style="width:150px"> <button class="save-btn" id="szm-addsz">+ Add size</button></div>';
         var reloadTab=function(){ fetch('/api/product/item/'+encodeURIComponent(it.ref)+'/sizes').then(function(r){return r.json();}).then(function(sd){ if(sd&&!sd.error){ d.sizes=sd.sizes||[]; d.components=sd.components||d.components; d.samples=sd.samples||d.samples; if(_prodDetail&&_prodDetail.item&&_prodDetail.item.ref===it.ref)_prodDetail.sizes=d.sizes; } renderSizesMaster(); reRender(); }).catch(function(){ renderSizesMaster(); reRender(); }); };
@@ -15835,6 +15837,12 @@
       scope.querySelectorAll('.pm-sku-pick').forEach(function(b){ if(b._b)return; b._b=1; b.onclick=function(e){ e.stopPropagation(); openSkuPick(b,function(val){ var id=b.dataset.id, so=szObj(id); if(so)so.mapped_sku=(val||''); reRender(); }); }; });
       // Component controls: description, required (+ packaging type), approval status, versioned files
       scope.querySelectorAll('.pm-comp-desc').forEach(function(el){ if(el._b)return; el._b=1; el.onchange=function(){ var sd=sizeDimObj(el.dataset.id,el.dataset.dim); if(sd)sd.description=el.value; var _e=el; shipPost('/api/product/size/'+el.dataset.id+'/dimension',{dimension:el.dataset.dim,description:el.value},function(){ _pmFlash(_e); }); }; });
+      // v27.809 (Ben): rich compose on the description cells — "/" saved phrase, "/p" Pantone (chips render inline; blur fires
+      // the change handler above so it still saves). Snippets loaded once and cached on window._prodDescSnips.
+      (function(){ var tas=scope.querySelectorAll('.pm-comp-desc'); if(!tas.length||typeof hzRichCompose!=='function')return;
+        var attach=function(snips){ tas.forEach(function(ta){ if(ta._hzRc)return; var pk=document.createElement('div'); pk.style.display='none'; document.body.appendChild(pk); try{ hzRichCompose(ta,pk,{snips:snips||[],picked:{},fixed:true}); }catch(e){} }); };
+        if(window._prodDescSnips)attach(window._prodDescSnips);
+        else fetch('/api/product/timeline-config').then(function(r){return r.json();}).then(function(tlc){ window._prodDescSnips=((tlc&&tlc.snippets)||[]).filter(function(x){return x.active!==false;}); attach(window._prodDescSnips); }).catch(function(){ attach([]); }); })();
       scope.querySelectorAll('.pm-comp-req').forEach(function(el){ if(el._b)return; el._b=1; el.onchange=function(){ var sd=sizeDimObj(el.dataset.id,el.dataset.dim); if(sd)sd.required=el.checked;
         shipPost('/api/product/size/'+el.dataset.id+'/dimension',{dimension:el.dataset.dim,required:el.checked},function(j){ if(j&&j.error){alert('Failed: '+j.error);return;} reRender(); }); }; });
       scope.querySelectorAll('.pm-comp-type').forEach(function(el){ if(el._b)return; el._b=1; el.onchange=function(){ var sd=sizeDimObj(el.dataset.id,el.dataset.dim); if(sd)sd.packaging_type=el.value; shipPost('/api/product/size/'+el.dataset.id+'/dimension',{dimension:el.dataset.dim,packaging_type:el.value},function(){}); }; });
