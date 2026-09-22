@@ -6856,7 +6856,7 @@ app.get('/api/product/item/:ref', async (req, res) => {
         to_char((SELECT min(r.dev_start) FROM planner.product_dev_requests r WHERE r.item_id=product_dev_items.id),'YYYY-MM-DD') dev_start_override, to_char(approved_at,'YYYY-MM-DD HH24:MI') approved_at,
         coalesce((SELECT r.approval_method FROM planner.product_dev_requests r WHERE r.item_id=product_dev_items.id ORDER BY r.id LIMIT 1),'') approval_method
         FROM planner.product_dev_items WHERE ref=$1`, [ref]),
-      pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort, coalesce(mapped_sku,'') mapped_sku, approved_sample_id
+      pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort, coalesce(mapped_sku,'') mapped_sku, approved_sample_id, coalesce(barcode,'') barcode, coalesce(working_sku,'') working_sku
         FROM planner.product_dev_sizes WHERE item_id=(SELECT id FROM planner.product_dev_items WHERE ref=$1) ORDER BY sort, id`, [ref]),
       pool.query(`SELECT id, filename, mime, byte_size, coalesce(uploaded_by,'') uploaded_by, coalesce(uploader_kind,'internal') uploader_kind, to_char(uploaded_at,'YYYY-MM-DD HH24:MI') uploaded_at FROM planner.portal_attachments WHERE po=$1 AND category='product' ORDER BY uploaded_at DESC`, [ref]),
       pool.query(`SELECT ps.id, ps.version, coalesce(ps.dimension,'product') dimension,
@@ -6936,7 +6936,7 @@ app.get('/api/product/item/:ref/sizes', async (req, res) => {
   const ref = req.params.ref;
   try {
     const [sizesR, compsR, samplesR] = await Promise.all([
-      pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort, coalesce(mapped_sku,'') mapped_sku, approved_sample_id
+      pool.query(`SELECT id, coalesce(size_label,'') size_label, approval_status, sort, coalesce(mapped_sku,'') mapped_sku, approved_sample_id, coalesce(barcode,'') barcode, coalesce(working_sku,'') working_sku
         FROM planner.product_dev_sizes WHERE item_id=(SELECT id FROM planner.product_dev_items WHERE ref=$1) ORDER BY sort, id`, [ref]),
       pool.query(`SELECT id, component_type_id, name, coalesce(supplier,'') supplier, coalesce(sampling_mode,'sampled') sampling_mode, spec_id, dimension, sort FROM planner.product_dev_components WHERE item_ref=$1 ORDER BY sort, id`, [ref]),
       pool.query(`SELECT ps.id, ps.version, coalesce(ps.dimension,'product') dimension,
@@ -7149,7 +7149,36 @@ app.post('/api/product/size', async (req, res) => {
     res.json({ ok: true, id: r.rows[0].id }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/size/:id', (req, res) =>
-  patch(res, 'planner.product_dev_sizes', 'id', req.params.id, { size_label: 'text', approval_status: 'text', mapped_sku: 'text', approved_sample_id: 'bigint' }, req.body, 'bigint'));
+  patch(res, 'planner.product_dev_sizes', 'id', req.params.id, { size_label: 'text', approval_status: 'text', mapped_sku: 'text', working_sku: 'text', approved_sample_id: 'bigint' }, req.body, 'bigint'));
+// Product SIZES master (phase 2): claim / release a Workshop-pool barcode (mig 293) for a size. Transactional so the
+// pool's status stays in sync — one barcode ↔ one size. Body {barcode:'<ean>'} to claim (frees the size's old code first),
+// or {barcode:null|''} to release. A code already assigned to ANOTHER size is rejected.
+app.post('/api/product/size/:id/barcode', async (req, res) => {
+  const sizeId = req.params.id; const bc = (req.body && req.body.barcode != null) ? String(req.body.barcode).trim() : '';
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const sz = (await client.query(`SELECT s.id, coalesce(s.barcode,'') cur, coalesce(s.mapped_sku,'') mapped_sku, coalesce(s.working_sku,'') working_sku, i.ref
+      FROM planner.product_dev_sizes s JOIN planner.product_dev_items i ON i.id=s.item_id WHERE s.id=$1::bigint`, [sizeId])).rows[0];
+    if (!sz) { await client.query('ROLLBACK'); return res.status(404).json({ error: 'size not found' }); }
+    if (bc) {
+      const pool0 = (await client.query(`SELECT status, assigned_size_id FROM planner.product_workshop_barcodes WHERE barcode=$1`, [bc])).rows[0];
+      if (!pool0) { await client.query('ROLLBACK'); return res.status(400).json({ error: 'barcode ' + bc + ' is not in the workshop pool' }); }
+      if (pool0.status === 'assigned' && String(pool0.assigned_size_id) !== String(sizeId)) { await client.query('ROLLBACK'); return res.status(409).json({ error: 'barcode ' + bc + ' is already assigned to another size' }); }
+    }
+    // free the size's current barcode (if changing/clearing)
+    if (sz.cur && sz.cur !== bc) await client.query(`UPDATE planner.product_workshop_barcodes SET status='free', assigned_size_id=NULL, assigned_ref=NULL, assigned_sku=NULL, assigned_by=NULL, assigned_at=NULL WHERE barcode=$1`, [sz.cur]);
+    if (bc) {
+      const sku = sz.mapped_sku || sz.working_sku || null;
+      await client.query(`UPDATE planner.product_workshop_barcodes SET status='assigned', assigned_size_id=$2::bigint, assigned_ref=$3, assigned_sku=$4, assigned_by=$5, assigned_at=now() WHERE barcode=$1`,
+        [bc, sizeId, sz.ref, sku, authUser(req)]);
+    }
+    await client.query(`UPDATE planner.product_dev_sizes SET barcode=$2 WHERE id=$1::bigint`, [sizeId, bc || null]);
+    await client.query('COMMIT');
+    res.json({ ok: true, barcode: bc || null });
+  } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} log500(e); res.status(500).json({ error: e.message }); }
+  finally { client.release(); }
+});
 // SKU picker source for mapping an approved size → a planner SKU (full searchable list).
 app.get('/api/product/skus', async (_req, res) => {
   try { const rows = (await pool.query(`SELECT sku,
@@ -7211,7 +7240,11 @@ app.post('/api/product/component-file/:id', async (req, res) => {   // assign / 
   try { await pool.query(`UPDATE planner.portal_attachments SET version=$2 WHERE id=$1 AND category='product_dim'`, [req.params.id, vv]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/size/:id/delete', async (req, res) => {
-  try { await pool.query(`DELETE FROM planner.product_dev_sizes WHERE id=$1`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+  try {
+    // phase 2: release any workshop barcode this size claimed back into the free pool before deleting the size.
+    await pool.query(`UPDATE planner.product_workshop_barcodes SET status='free', assigned_size_id=NULL, assigned_ref=NULL, assigned_sku=NULL, assigned_by=NULL, assigned_at=NULL WHERE assigned_size_id=$1::bigint`, [req.params.id]);
+    await pool.query(`DELETE FROM planner.product_dev_sizes WHERE id=$1`, [req.params.id]); res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 app.post('/api/product/swatch', async (req, res) => {
   const b = req.body || {}, ref = (b.ref || '').trim(), mime = b.mime || 'image/png';
