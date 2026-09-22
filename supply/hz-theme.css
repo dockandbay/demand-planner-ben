@@ -879,6 +879,8 @@ body header.pv-top .pv-lang button:hover{color:#fff}
 #app #product-root .smp-legend{display:flex;flex-wrap:wrap;align-items:center;gap:12px;margin:0 0 12px;padding:7px 12px;background:var(--hover);border:1px solid var(--line2);border-radius:var(--r-sm);font-size:11px;color:var(--muted)}
 #app #product-root .smp-legend-lbl{font-weight:700;text-transform:uppercase;letter-spacing:.04em;font-size:10px;color:var(--faint)}
 #app #product-root .smp-leg-item{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+/* v27.818 (Ben): the SAMPLE STATUS legend is desktop-only chrome — hide it on mobile to reclaim space */
+@media (max-width:640px){ #app #product-root .smp-legend{display:none} }
 #app #product-root .smp-tick.smp-leg{width:15px;height:15px;font-size:9px;border-width:2px;cursor:default}
 #app #product-root .smp-tick.smp-leg:hover{box-shadow:none}
 #app #product-root .smp-tick:hover:not(.none){box-shadow:0 0 0 3px var(--blue-soft)}

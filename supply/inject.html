@@ -10709,22 +10709,24 @@
     ov.querySelector('#scc-x').onclick=close;
     var body=ov.querySelector('#scc-body');
     Promise.all([ fetch('/api/product/scan/'+encodeURIComponent(code)).then(function(r){return r.json();}),
-                  fetch('/api/product/reject-reasons').then(function(r){return r.json();}).catch(function(){return {reasons:[]};}) ])
-      .then(function(a){ var d=a[0]||{}, REASONS=(a[1]&&a[1].reasons)||[];
+                  fetch('/api/product/reject-reasons').then(function(r){return r.json();}).catch(function(){return {reasons:[]};}),
+                  fetch('/api/product/timeline-config').then(function(r){return r.json();}).catch(function(){return {snippets:[]};}) ])   // v27.818 (Ben): reusable phrases (/) for the feedback box on mobile
+      .then(function(a){ var d=a[0]||{}, REASONS=(a[1]&&a[1].reasons)||[], SNIPS=((a[2]&&a[2].snippets)||[]).filter(function(x){return x.active!==false;});
         if(!d.ok||!d.sample){ body.innerHTML='<div style="padding:18px;border:1px solid var(--amber);background:var(--amber-bg);border-radius:8px;font-size:13px">No sample matches code <b>'+esc(code)+'</b>. Check the code and try again.</div>'; return; }
         var s=d.sample;
         // v27.748 (P4d): auto-mark-received on first scan (opt-in toggle). Never un-receives an already-received sample.
-        if(opts.autoReceive && !s.received_at){ fetch('/api/product/sample/'+s.id+'/received',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({received:true})}).then(function(r){return r.json();}).then(function(j){ if(j&&!j.error)s.received_at=j.received_at||s.received_at; try{ navigator.vibrate&&navigator.vibrate(40); }catch(e){} hzScanCardRender(body,s,REASONS,close); }).catch(function(){ hzScanCardRender(body,s,REASONS,close); }); }
-        else hzScanCardRender(body, s, REASONS, close);
+        if(opts.autoReceive && !s.received_at){ fetch('/api/product/sample/'+s.id+'/received',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({received:true})}).then(function(r){return r.json();}).then(function(j){ if(j&&!j.error)s.received_at=j.received_at||s.received_at; try{ navigator.vibrate&&navigator.vibrate(40); }catch(e){} hzScanCardRender(body,s,REASONS,close,SNIPS); }).catch(function(){ hzScanCardRender(body,s,REASONS,close,SNIPS); }); }
+        else hzScanCardRender(body, s, REASONS, close, SNIPS);
       }).catch(function(e){ body.innerHTML='<div style="color:var(--neg);padding:16px">Failed to load: '+esc(e&&e.message||e)+'</div>'; });
   }
-  function hzScanCardRender(body, s, REASONS, close){
+  function hzScanCardRender(body, s, REASONS, close, SNIPS){
     var recvHtml=s.received_at
       ? '<div style="display:flex;align-items:center;gap:10px;background:var(--pos-bg,#ecfdf5);border:1px solid var(--pos,#10b981);border-radius:10px;padding:12px 14px"><span style="font-size:20px">✓</span><div style="flex:1"><div style="font-weight:700;color:var(--pos,#059669)">Received</div><div class="mut tiny">'+esc(s.received_at)+'</div></div><button id="scc-unrecv" class="mut tiny" style="background:none;border:1px solid var(--line);border-radius:6px;padding:5px 9px;cursor:pointer">undo</button></div>'
       : '<button id="scc-recv" style="width:100%;background:var(--pos,#10b981);color:#fff;border:none;border-radius:10px;padding:15px;font-size:16px;font-weight:800;cursor:pointer">✓ Mark received</button>';
+    // v27.818 (Ben): small swatch, top-left — was a full-width 280px hero (too big on mobile)
     var swatch=s.swatch_url
-      ? '<img id="scc-sw" src="'+esc(s.swatch_url)+'" alt="swatch" style="width:100%;max-height:280px;object-fit:cover;border-radius:12px;border:1px solid var(--line);background:var(--hover)" onerror="this.style.display=\'none\'">'
-      : '<div style="width:100%;height:160px;border-radius:12px;background:var(--hover);border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:12px">no swatch</div>';
+      ? '<img id="scc-sw" src="'+esc(s.swatch_url)+'" alt="swatch" style="width:76px;height:76px;object-fit:cover;border-radius:10px;border:1px solid var(--line);background:var(--hover);flex:0 0 auto" onerror="this.style.display=\'none\'">'
+      : '<div style="width:76px;height:76px;border-radius:10px;background:var(--hover);border:1px solid var(--line);flex:0 0 auto;display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:10px">no swatch</div>';
     var idRows=[['Colour',s.colour_name],['Supplier',s.supplier],['Season',s.season],['Type',s.category],['Sample date',s.sample_date]].filter(function(r){return r[1];});
     var aspects=(s.aspects&&s.aspects.length)?s.aspects:[{key:'product',label:'Product'}];
     var afMap={}; (s.aspect_feedback||[]).forEach(function(x){ afMap[x.aspect]=x; });
@@ -10733,8 +10735,8 @@
         +'<div style="font-weight:700;margin-bottom:8px">'+esc(ap.label)+'</div>'
         +'<select class="fci scc-dec" style="width:100%;font-size:14px;padding:8px;'+prodStageStyle(dec)+'">'+_compStageOpts(dec)+'</select>'
         +'<div class="scc-reasons" style="display:'+(rej?'':'none')+';margin-top:8px">'+(REASONS.length?REASONS.map(function(z){return '<label style="display:block;font-size:13px;cursor:pointer;padding:3px 0"><input type="checkbox" class="scc-rr" value="'+z.id+'" style="vertical-align:middle;margin-right:6px">'+esc(z.name)+'</label>';}).join(''):'<span class="mut tiny">no reject reasons configured</span>')+'</div>'
-        +'<textarea class="fci scc-awc" rows="2" placeholder="comments for this approval…" style="display:'+(dec==='approved_with_comments'?'':'none')+';width:100%;box-sizing:border-box;margin-top:8px;font-size:13px;padding:8px">'+esc(af.awc_comment||'')+'</textarea>'
-        +'<textarea class="fci scc-fb" rows="2" placeholder="feedback…" style="width:100%;box-sizing:border-box;margin-top:8px;font-size:13px;padding:8px">'+esc(af.feedback||'')+'</textarea>'
+        +'<textarea class="fci scc-awc" rows="2" placeholder="comments for this approval…" style="display:'+(dec==='approved_with_comments'?'':'none')+';width:100%;box-sizing:border-box;margin-top:8px;font-size:13px;padding:8px;text-align:left">'+esc(af.awc_comment||'')+'</textarea>'
+        +'<textarea class="fci scc-fb" rows="2" placeholder="Feedback. Type / for a reusable phrase · /p for a Pantone colour" style="width:100%;box-sizing:border-box;margin-top:8px;font-size:13px;padding:8px;text-align:left">'+esc(af.feedback||'')+'</textarea>'
         +'<div style="display:flex;align-items:center;gap:10px;margin-top:8px"><button class="scc-save" style="background:var(--nav);color:#fff;border:none;border-radius:7px;padding:9px 16px;font-size:13px;font-weight:700;cursor:pointer">Save</button><span class="scc-msg mut tiny"></span></div>'
         +'</div>';
     }).join('');
@@ -10742,10 +10744,12 @@
       +'<div id="scc-photos" style="display:flex;gap:8px;flex-wrap:wrap">'+(s.photos||[]).map(function(p){return '<img src="'+esc(p.url)+'" style="width:76px;height:76px;object-fit:cover;border-radius:8px;border:1px solid var(--line)">';}).join('')+'</div>'
       +'<label style="display:inline-flex;align-items:center;gap:8px;margin-top:10px;background:var(--hover);border:1px solid var(--line);border-radius:8px;padding:10px 14px;font-size:14px;font-weight:600;cursor:pointer">📷 Add photo<input id="scc-photo-in" type="file" accept="image/*" capture="environment" style="display:none"></label>'
       +'<span id="scc-photo-msg" class="mut tiny" style="margin-left:10px"></span></div>';
-    body.innerHTML='<div style="font-size:18px;font-weight:800">'+esc(s.item_ref)+' <span class="mut" style="font-weight:600;font-size:14px">v'+esc(s.version)+'</span></div>'
-      +'<div style="margin:10px 0">'+swatch+'</div>'
-      +(idRows.length?('<div style="display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:13px;margin-bottom:14px">'+idRows.map(function(r){return '<span class="mut">'+esc(r[0])+'</span><b>'+esc(r[1])+'</b>';}).join('')+'</div>'):'')
-      +'<div style="margin-bottom:6px">'+recvHtml+'</div>'
+    // v27.818 (Ben): swatch small top-left, title + identity beside it
+    body.innerHTML='<div style="display:flex;gap:12px;align-items:flex-start">'+swatch
+      +'<div style="flex:1;min-width:0"><div style="font-size:18px;font-weight:800">'+esc(s.item_ref)+' <span class="mut" style="font-weight:600;font-size:14px">v'+esc(s.version)+'</span></div>'
+      +(idRows.length?('<div style="display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:13px;margin-top:8px">'+idRows.map(function(r){return '<span class="mut">'+esc(r[0])+'</span><b>'+esc(r[1])+'</b>';}).join('')+'</div>'):'')
+      +'</div></div>'
+      +'<div style="margin:12px 0 6px">'+recvHtml+'</div>'
       +'<div style="font-weight:700;margin-top:16px">Review</div>'+aspHtml+photoHtml;
     // received toggle
     function postRecv(recv){ fetch('/api/product/sample/'+s.id+'/received',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({received:recv})}).then(function(r){return r.json();}).then(function(j){ if(j&&j.error){ alert(j.error); return; } s.received_at=j.received_at||null; try{ navigator.vibrate&&navigator.vibrate(40); }catch(e){} hzScanCardRender(body,s,REASONS,close); }).catch(function(e){ alert('Failed: '+(e&&e.message||e)); }); }
@@ -10761,6 +10765,10 @@
         save.disabled=true; msg.style.color=''; msg.textContent='saving…';
         fetch('/api/product/sample/'+s.id+'/aspect',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({aspect:key,feedback:fb.value,decision:dec,reject_reasons:rs,awc_comment:awc.style.display!=='none'?awc.value:''})}).then(function(r){return r.json();}).then(function(j){ save.disabled=false; if(j&&j.error){ msg.style.color='var(--neg)'; msg.textContent=j.error; return; } msg.style.color='var(--pos)'; msg.textContent=(j&&j.flowed)?('✓ → '+j.flowed+' size'+(j.flowed===1?'':'s')):'✓ saved'; setTimeout(function(){ msg.textContent=''; },2400); }).catch(function(e){ save.disabled=false; msg.style.color='var(--neg)'; msg.textContent=(e&&e.message||e); }); };
     });
+    // v27.818 (Ben): reusable phrases (/) + Pantone (/p) in the feedback box on mobile — same rich compose as the desktop review
+    if(typeof hzRichCompose==='function'){ body.querySelectorAll('.scc-fb').forEach(function(ta){ if(ta._hzRc)return; var pk=document.createElement('div'); pk.style.display='none'; document.body.appendChild(pk); try{ hzRichCompose(ta,pk,{snips:SNIPS||[],picked:{},fixed:true}); }catch(e){} }); }
+    // v27.818 (Ben): keep the focused field visible above the mobile keyboard (was hidden behind it)
+    body.querySelectorAll('textarea, input, .hz-rc').forEach(function(el){ el.addEventListener('focus',function(){ setTimeout(function(){ try{ el.scrollIntoView({block:'center',behavior:'smooth'}); }catch(e){} },300); }); });
     // photo capture
     var pin=body.querySelector('#scc-photo-in'), pmsg=body.querySelector('#scc-photo-msg');
     if(pin)pin.onchange=function(){ var f=pin.files&&pin.files[0]; if(!f)return; if(f.size>20*1024*1024){ pmsg.style.color='var(--neg)'; pmsg.textContent='too large (max 20MB)'; return; } pmsg.style.color=''; pmsg.textContent='uploading…';
