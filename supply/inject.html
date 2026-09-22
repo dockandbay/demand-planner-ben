@@ -2785,7 +2785,7 @@
     // differs (≥3 days) from the planner delivery-to-warehouse date → push the planner date to Fulfil. Silent refresh.
     var fdb=document.getElementById('po-fulfil-dates'); if(fdb)fdb.onclick=function(){ var btn=this; var st=window._erpGridStatus||{};
       var cand=Object.keys(st).map(function(po){ var s=st[po], r=poBy[po]||{}; if(!s||!s.in_fulfil||!s.fulfil_req_delivery)return null; if(poComplete(r))return null;
-        var hz=r.delivery||r.checkin||''; if(!hz)return null; var da=Date.parse(String(s.fulfil_req_delivery).slice(0,10)), db=Date.parse(String(hz).slice(0,10));
+        var hz=s.push_req_delivery||r.delivery||r.checkin||''; if(!hz)return null; var da=Date.parse(String(s.fulfil_req_delivery).slice(0,10)), db=Date.parse(String(hz).slice(0,10));   /* v27.836 (Ben): sync writes the exact push date (est_delivery), so a sync + a push agree — no flip-flop */
         if(isNaN(da)||isNaN(db)||Math.abs(da-db)/86400000<3)return null; return {po:po, date:String(hz).slice(0,10)}; }).filter(Boolean);
       if(!cand.length){ alert('No active POs have a Fulfil delivery-date mismatch — nothing to sync.\n\n(If the Fulfil column hasn’t loaded yet, wait a moment and try again.)'); return; }
       if(!confirm('Update '+cand.length+' Fulfil PO delivery date'+(cand.length>1?'s':'')+' to match the planner delivery-to-warehouse date?\n\n• ACTIVE POs only — complete POs are skipped\n\nThis is a LIVE write to Fulfil.'))return;
@@ -3070,7 +3070,7 @@
       document.querySelectorAll('#sup-grid .po-fulfil[data-po]').forEach(function(el){ var po=el.getAttribute('data-po'), s=st[po];
         if(!s){ el.innerHTML='<span class="mut tiny">—</span>'; return; }
         var r=(typeof poBy!=='undefined'&&poBy[po])||{};
-        var hzDate=r.delivery||r.checkin||'';   // effective delivery-to-warehouse date the Fulfil push sends
+        var hzDate=s.push_req_delivery||r.delivery||r.checkin||'';   // v27.836 (Ben): compare against the EXACT date the push writes (est_delivery, computed server-side in grid-status) so the flag never flip-flops vs the grid's r.delivery
         var linesPending=(Number(s.fulfil_lines_pending)>0)||(s.in_fulfil && Number(s.fulfil_lines)!==Number(s.horizon_lines));
         var datePending=!!(s.in_fulfil && s.fulfil_req_delivery && hzDate && _fdrift(s.fulfil_req_delivery,hzDate));
         var estyle='cursor:pointer;border:none';

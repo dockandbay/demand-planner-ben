@@ -2842,14 +2842,22 @@ app.get('/api/supply/fulfil/grid-status', async (req, res) => {
     const rows = (await pool.query(`SELECT po.po, coalesce(po.cin7_not_required,false) cin7_not_required,
         (m.po IS NOT NULL) in_fulfil, m.state fulfil_state, coalesce(m.line_count,0) fulfil_lines,
         to_char(m.requested_delivery_date,'YYYY-MM-DD') fulfil_req_delivery,
+        -- v27.836 (Ben): the EXACT date the push writes (est_delivery, same calc as fulfilPushLines), so the drift flag + date-sync
+        -- compare the Fulfil mirror against what a push would actually set, not the grid's r.delivery (which diverged → flip-flop).
+        to_char(coalesce(sh.arrival_date, sh.delivery_date, sh.landing_date, po.delivery_date_overide, po.landing_date_overide,
+          (coalesce(po.end_production_overide, po.start_production + (coalesce(sup.production_days,0)||' days')::interval)::date
+           + interval '7 days' + (coalesce(b.sea_lead_time_days,0)||' days')::interval)::date),'YYYY-MM-DD') push_req_delivery,
         (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=po.po AND coalesce(l.qty,0)>0)::int horizon_lines,
         -- v27.789 (Ben): qty-level lines drift vs the Fulfil mirror (not in Fulfil → every line counts). Mirrors the Cin7 erp_pending.
         (CASE WHEN m.po IS NULL THEN (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=po.po AND coalesce(l.qty,0)>0)
               ELSE (SELECT count(*) FROM planner.purchase_order_lines l WHERE l.po=po.po AND coalesce(l.qty,0)>0
                       AND coalesce(l.qty,0) IS DISTINCT FROM coalesce((SELECT (x->>'qty')::numeric FROM jsonb_array_elements(m.lines) x WHERE x->>'sku'=l.sku LIMIT 1),0)) END)::int fulfil_lines_pending
       FROM planner.purchase_orders po LEFT JOIN planner.fulfil_purchase_orders m ON m.po=po.po
+      LEFT JOIN planner.suppliers sup ON sup.id=po.supplier_id
+      LEFT JOIN planner.branches b ON b.name=po.branch
+      LEFT JOIN planner.shipments sh ON sh.shipment_ref=po.shipment_ref
       WHERE po.status IN ('PRODUCTION','SHIPPING','READY TO SHIP')`)).rows;
-    const out = {}; rows.forEach(r => { out[r.po] = { in_fulfil: r.in_fulfil, fulfil_state: r.fulfil_state, fulfil_lines: r.fulfil_lines, horizon_lines: r.horizon_lines, fulfil_req_delivery: r.fulfil_req_delivery, fulfil_lines_pending: r.fulfil_lines_pending, cin7_not_required: r.cin7_not_required }; });
+    const out = {}; rows.forEach(r => { out[r.po] = { in_fulfil: r.in_fulfil, fulfil_state: r.fulfil_state, fulfil_lines: r.fulfil_lines, horizon_lines: r.horizon_lines, fulfil_req_delivery: r.fulfil_req_delivery, push_req_delivery: r.push_req_delivery, fulfil_lines_pending: r.fulfil_lines_pending, cin7_not_required: r.cin7_not_required }; });
     res.set('Cache-Control', 'no-store').json({ ok: true, status: out });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
