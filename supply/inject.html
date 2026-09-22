@@ -10636,7 +10636,7 @@
       +'<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--card);z-index:2"><b style="font-size:14px">📷 Barcode scanner</b><span id="bsc-status" class="mut tiny"></span><button id="bsc-x" aria-label="Close" style="margin-left:auto;width:34px;height:34px;border-radius:50%;border:1px solid var(--line);background:var(--card);font-size:15px;cursor:pointer">✕</button></div>'
       +'<div style="display:flex;gap:14px;padding:12px 14px;flex-wrap:wrap;align-items:flex-start">'
         +'<div style="flex:0 1 360px;min-width:260px"><div id="bsc-cam" style="position:relative;background:#111;border-radius:10px;overflow:hidden;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center;color:#cbd5e1;font-size:12px;text-align:center;padding:10px">Starting camera…</div>'
-          +'<div style="margin-top:8px;display:flex;gap:6px;align-items:center"><input id="bsc-in" class="fci" autocomplete="off" placeholder="scan a barcode or sample-card QR, or type a barcode / 3-char sample code, then Enter" style="flex:1;font-size:13px;padding:8px 10px"><button id="bsc-go" class="save-btn" style="font-size:12px">Look up</button></div>'
+          +'<div style="margin-top:8px;display:flex;gap:6px;align-items:center"><input id="bsc-in" class="fci" autocomplete="off" placeholder="scan a barcode or sample-card QR, or type a barcode / 3-char sample code, then Enter" style="flex:1;font-size:13px;padding:8px 10px;text-align:left"><button id="bsc-go" class="save-btn" style="font-size:12px">Look up</button></div>'   /* v27.828 (Ben): left-align the entry */
           +'<label style="margin-top:8px;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);cursor:pointer" title="when on, scanning a sample-card QR marks that sample received automatically (it never un-receives one already received)"><input type="checkbox" id="bsc-autorecv"'+(_bscAutoRecv()?' checked':'')+' style="margin:0">auto-mark samples received on scan</label>'
           +'<div id="bsc-hist" style="margin-top:8px;display:flex;flex-wrap:wrap;gap:5px"></div></div>'
         +'<div id="bsc-res" style="flex:1 1 380px;min-width:280px"><div class="mut" style="font-size:12px;padding:10px 0">Point the camera at a product, carton or inner barcode, or type one. Numbers saved in a Customise project resolve to their SKU too.</div></div>'
@@ -10680,16 +10680,26 @@
       }).catch(function(e){ status.textContent=''; res.innerHTML='<div style="color:var(--neg);font-size:12px">Lookup failed: '+esc(e&&e.message||e)+'</div>'; }); }
     inp.onkeydown=function(e){ if(e.key==='Enter'){ e.preventDefault(); lookup(inp.value,true); inp.select(); } }; ov.querySelector('#bsc-go').onclick=function(){ lookup(inp.value,true); inp.select(); };
     setTimeout(function(){ try{ inp.focus(); }catch(e){} },50);
-    // camera
+    // camera — BarcodeDetector where available (Chrome/Edge on desktop/Android: all formats), else jsQR decodes QR codes
+    // from the frame (iOS Safari & iOS Chrome are both WebKit and have no BarcodeDetector). v27.828 (Ben)
     var hasDet=('BarcodeDetector' in window), hasCam=!!(navigator.mediaDevices&&navigator.mediaDevices.getUserMedia);
-    if(!hasCam){ cam.textContent='No camera access in this browser — use a USB scanner or type the barcode below.'; return; }
-    if(!hasDet){ cam.innerHTML='This browser cannot decode barcodes from the camera (Safari / Firefox). Use Chrome or Edge for live scanning, or a USB / Bluetooth scanner or type the barcode below.'; return; }
+    if(!hasCam){ cam.textContent='No camera access in this browser — use a USB scanner or type the code below.'; return; }
+    // jsQR fallback loop — decode sample-card QR codes from the video (product/EAN barcodes need BarcodeDetector or a USB scanner)
+    function _bscQrLoop(v){ function start(){ if(!window.jsQR){ status.textContent='camera on — type the code if it won’t scan'; return; }
+        var cv=document.createElement('canvas'), ctx=cv.getContext('2d',{willReadFrequently:true}), busy=false;
+        _bscState.timer=setInterval(function(){ if(busy||!v.videoWidth||!window.jsQR)return; busy=true;
+          try{ var w=v.videoWidth, h=v.videoHeight; if(w>640){ h=Math.round(h*640/w); w=640; } cv.width=w; cv.height=h; ctx.drawImage(v,0,0,w,h); var im=ctx.getImageData(0,0,w,h); var q=window.jsQR(im.data,w,h,{inversionAttempts:'dontInvert'}); if(q&&q.data){ var c=String(q.data).trim(); if(c)lookup(c,false); } }catch(e){}
+          busy=false; },300); }
+      if(res){ res.innerHTML='<div class="mut" style="font-size:12px;padding:10px 0">Hold a <b>sample-card QR</b> in the frame to open that sample. (Live product-barcode scanning needs Chrome/Edge on a computer or a USB scanner — otherwise type the barcode.)</div>'; }
+      if(window.jsQR){ start(); return; }
+      var s=document.createElement('script'); s.src='/vendor/jsqr.js'; s.onload=start; s.onerror=function(){ status.textContent='QR scanning could not load — type the code below'; }; document.head.appendChild(s); }
     navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false}).then(function(stream){ _bscState.stream=stream;
       cam.innerHTML='<video id="bsc-video" autoplay muted playsinline style="width:100%;height:100%;object-fit:cover"></video><div style="position:absolute;left:12%;right:12%;top:38%;height:24%;border:2px solid rgba(255,255,255,.85);border-radius:8px;box-shadow:0 0 0 2000px rgba(0,0,0,.25);pointer-events:none"></div>';
-      var v=cam.querySelector('#bsc-video'); v.srcObject=stream; status.textContent='camera on — hold a barcode in the frame';
-      var det; try{ det=new window.BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf','qr_code']}); }catch(e){ det=new window.BarcodeDetector(); }
-      var busy=false; _bscState.timer=setInterval(function(){ if(busy||!v.videoWidth)return; busy=true; det.detect(v).then(function(codes){ busy=false; if(codes&&codes.length){ var c=(codes[0].rawValue||'').trim(); if(c)lookup(c,false); } }).catch(function(){ busy=false; }); },320);
-    }).catch(function(e){ cam.innerHTML='Camera not available ('+esc(e&&e.message||e)+'). Use a USB scanner or type the barcode below.'; });
+      var v=cam.querySelector('#bsc-video'); v.srcObject=stream; status.textContent='camera on — hold a '+(hasDet?'barcode':'sample-card QR')+' in the frame';
+      if(hasDet){ var det; try{ det=new window.BarcodeDetector({formats:['ean_13','ean_8','upc_a','upc_e','code_128','code_39','itf','qr_code']}); }catch(e){ det=new window.BarcodeDetector(); }
+        var busy=false; _bscState.timer=setInterval(function(){ if(busy||!v.videoWidth)return; busy=true; det.detect(v).then(function(codes){ busy=false; if(codes&&codes.length){ var c=(codes[0].rawValue||'').trim(); if(c)lookup(c,false); } }).catch(function(){ busy=false; }); },320);
+      } else { _bscQrLoop(v); }
+    }).catch(function(e){ cam.innerHTML='Camera not available ('+esc(e&&e.message||e)+'). Use a USB scanner or type the code below.'; });
   }
   // ── v27.746 (P4c) Phone SAMPLE CARD (Ben) — opened by scanning a sample-card QR or typing its short code.
   // Mobile-first full-screen: clear swatch, identity, "Mark received", per-component decision + feedback + reject

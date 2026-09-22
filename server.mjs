@@ -2396,6 +2396,13 @@ const HZ_THEME_LINK = () => '<link rel="stylesheet" href="/hz-theme.css?v=' + AP
 // v27.708: self-hosted pdf.js (already a dependency) for ADMIN-side document thumbnails (PDF page 1 → PNG → auto swatch).
 // Gate-bypassed like /fonts. On Vercel the dependency ships in the bundle; if the folder is missing this route simply 404s.
 try { app.use('/vendor/pdfjs', express.static(fileURLToPath(new URL('./node_modules/pdfjs-dist/build/', import.meta.url)), { maxAge: '365d', immutable: true })); } catch (e) { console.warn('[vendor/pdfjs] not mounted:', e.message); }
+// v27.828 (Ben): vendored jsQR — camera QR decoding for iOS (Safari/Chrome are both WebKit, which has no BarcodeDetector).
+// Lets the barcode scanner read sample-card QR codes on a phone. Gate-bypassed like /vendor/pdfjs (see the no-key list).
+app.get('/vendor/jsqr.js', (_req, res) => {
+  try { res.setHeader('content-type', 'application/javascript; charset=utf-8'); res.setHeader('cache-control', 'public, max-age=31536000, immutable');
+    res.end(readFileSync(new URL('./supply/vendor/jsqr.min.js', import.meta.url))); }
+  catch (e) { res.status(404).end(); }
+});
 
 // Static brand asset for the carton/inner labels — the Global Recycled Standard logo (same-origin so it can be
 // embedded into the rasterised label PNG without tainting the canvas).
