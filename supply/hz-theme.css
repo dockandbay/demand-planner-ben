@@ -921,6 +921,20 @@ body header.pv-top .pv-lang button:hover{color:#fff}
 #app #product-root .smpc-tl{margin-left:auto;border:0;background:none;font:inherit;font-size:12px;color:var(--muted);font-weight:700;cursor:pointer;display:inline-flex;align-items:center;gap:4px}
 #app #product-root .smpc-unread{background:var(--neg);color:#fff;border-radius:999px;font-size:10px;font-weight:800;padding:0 6px;line-height:16px;min-width:16px;text-align:center;display:inline-block}
 #app #product-root .smpc-manage{border:1px solid var(--nav);background:var(--nav);color:#fff;border-radius:8px;font-size:11px;font-weight:800;letter-spacing:.03em;padding:6px 12px;cursor:pointer}
+
+/* v27.822 (Ben): SAMPLING filters behind a "⚙ Filters" button on mobile (matches the SUPPLY grids). Desktop shows them
+   inline (the wrapper is display:contents so its children flow in the toolbar flex); the toggle button is phone-only. */
+#app #product-root .smp-filt-toggle{display:none}
+#app #product-root .smp-filtgrp{display:contents}
+@media (max-width:640px){
+  #app #product-root .smp-filt-toggle{display:inline-flex;align-items:center;background:var(--hover);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:7px 13px;font-size:12px;font-weight:700;cursor:pointer}
+  #app #product-root .smp-filt-toggle.active{background:var(--blue-soft);border-color:var(--blue);color:var(--blue-ink)}
+  #app #product-root #smp-filters .smp-filtgrp{display:none}
+  #app #product-root #smp-filters.filters-open .smp-filtgrp{display:flex;flex-wrap:wrap;gap:9px 12px;width:100%;order:99;margin-top:2px;padding:12px;background:var(--hover);border:1px solid var(--line);border-radius:10px}
+  #app #product-root #smp-filters.filters-open .smp-filtgrp .fci{min-height:34px}
+  #app #product-root #smp-filters.filters-open .smp-actfilt{width:100%;flex-wrap:wrap}
+  #app #product-root .smp-swsize-wrap{display:none}   /* swatch size is irrelevant with the card layout */
+}
 #app #product-root .smp-tick.smp-leg{width:15px;height:15px;font-size:9px;border-width:2px;cursor:default}
 #app #product-root .smp-tick.smp-leg:hover{box-shadow:none}
 #app #product-root .smp-tick:hover:not(.none){box-shadow:0 0 0 3px var(--blue-soft)}
