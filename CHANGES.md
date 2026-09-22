@@ -1,3 +1,50 @@
+## v27.803 to v27.834 deploy note (Ben): product + sampling + mobile, plus two demand-engine fixes
+
+Everything since the v27.800 to v27.802 portal note. Read the **FULFIL LIVE WRITES** action block first: it is the outstanding go-live item and Ben wants it actioned.
+
+### ACTION FOR DIVIYAJ: turn on Fulfil LIVE writes (still gated OFF on prod)
+
+Live PO writes to Fulfil are deliberately blocked by a safety gate (added in v27.799). Nothing in this batch changes the gate; it is called out here because it is the open go-live action. Right now, Push to Fulfil in LIVE runs DRY RUN only: it returns the resolved payload and writes nothing. Sandbox is unaffected.
+
+To enable real live writes, in this order:
+
+1. **Pre-flight, do this BEFORE flipping the gate: confirm the branch to company mapping.** In Fulfil the company/entity is inferred from the branch's ship-to country and is immutable once a PO is created. A PO on the AU entity that ships outside AU would be created under the wrong company. Verify the branch to company mapping is correct for every branch we push to.
+2. **Env var:** set `FULFIL_LIVE_WRITES=true` on the Production Vercel project (Ben added this earlier; please confirm it is set for the Production environment, not only Preview). Leave `FULFIL_LINES_SEND` unset or `true` (it defaults ON).
+3. **Live keys + active env:** `FULFIL_LIVE_SUBDOMAIN` and `FULFIL_LIVE_API_KEY` must be set (from the v27.777 note), and the app's active ERP / Fulfil env must be `live`.
+4. **Redeploy** so the env var takes effect (env changes need a fresh deploy).
+5. **Verify + one supervised create:** `GET /api/supply/erp-status` should return `fulfil_env: "live"`. Do ONE supervised live PO create and watch the push trace: it should return a real create, not `dry_run` / `live_blocked`. Only then open it up more widely.
+
+Gate logic for reference (server.mjs approx line 2746): a live write is blocked unless the active env is `live` AND `FULFIL_LIVE_WRITES=true`. A blocked push returns `{ dry_run:true, live_blocked:true, note:"...set FULFIL_LIVE_WRITES=true..." }`, so it is easy to confirm the gate state from a test push.
+
+### Migrations to apply (all additive, rollback-safe, none drop data)
+
+- `293_product_workshop_barcodes.sql`: barcode pool table plus 106 GS1 codes seeded.
+- `294_product_dev_sizes_barcode_working_sku.sql`: barcode and working_sku columns on product_dev_sizes.
+- `295_product_pim_waiting_room.sql`: approved-products waiting-room staging table.
+- `296_product_dev_requests_recipient_addresses.sql`: recipient_addresses jsonb column.
+- `297_product_dev_requests_action_owner.sql`: action_owner text column.
+
+(288 to 292 were in the prior note.)
+
+### New file that MUST ship in the bundle
+
+- `supply/vendor/jsqr.min.js` (vendored jsQR, approx 250 KB), served at `/vendor/jsqr.js`. Powers iOS camera QR scanning of sample cards (WebKit has no BarcodeDetector). Ensure `supply/vendor/` is included in the Vercel build. No new env var.
+
+### Rebuild note
+
+`artifact_v16.7.html` (the demand planner) changed (v27.831 to v27.834). It is read once at startup, so it updates only on a fresh deploy (Vercel does this automatically). `supply/inject.html` and `hz-theme.css` are served fresh per request.
+
+### Two demand-engine changes that MOVE NUMBERS (heads-up, no data migration)
+
+- **FBA transfers: Full + Partial now reconcile with Any (v27.834).** Removed a 20%-of-forward-demand floor and an empty-FBA seed from the Full and Partial carton modes so they partition Any exactly. This changes the FBA transfer recommendation set and quantities under Full and Partial (more small transfers now surface). It fixes SKUs being missed when Full and Partial are cleared separately, which was driving OOS. The Any mode is unchanged.
+- **Klaviyo BIS grouped by status (v27.831 to v27.833).** Display-only grouping (Active, Discontinued incl. phase out, Closed) per market, derived from product status plus per-market availability. No data change.
+
+### Everything else in this batch (client only, straight pull)
+
+Product Workshop Barcodes, the SIZES master grid, Push to PIM plus the approved-products waiting room, development-request stakeholders / recipient addresses / action-owner, sample-card QR plus print, and the full mobile SAMPLING pass (card layout, filters behind a button, barcode scan folded into search, tap a sample chip to open the receive card). New server routes added, all planner-key gated with no new env: the product barcode / size / PIM endpoints, `GET /api/product/sample/:id/card`, and `/vendor/jsqr.js`.
+
+---
+
 ## v27.800 to v27.802 Supplier portal on mobile (Ben): CLIENT only
 
 Three client-only versions from Ben's phone review of the supplier portal. **No migrations, no env vars, no server routes changed** (package.json version bumps only). Deploy is a straight pull; nothing to run.
