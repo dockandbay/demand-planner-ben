@@ -10679,6 +10679,7 @@
         _bscState.hist=[{code:code,sku:d.sku}].concat(_bscState.hist.filter(function(h){return h.code!==code;})).slice(0,8); drawHist(); try{ navigator.vibrate&&navigator.vibrate(40); }catch(e){}
       }).catch(function(e){ status.textContent=''; res.innerHTML='<div style="color:var(--neg);font-size:12px">Lookup failed: '+esc(e&&e.message||e)+'</div>'; }); }
     inp.onkeydown=function(e){ if(e.key==='Enter'){ e.preventDefault(); lookup(inp.value,true); inp.select(); } }; ov.querySelector('#bsc-go').onclick=function(){ lookup(inp.value,true); inp.select(); };
+    inp.oninput=function(){ var v=String(inp.value||'').trim(); if(/^[0-9A-Za-z]{3}$/.test(v) && _sampleScanCode(v)){ lookup(v,false); } };   // v27.829 (Ben): a complete 3-char sample code auto-looks-up on the 3rd character — no Look up click needed
     setTimeout(function(){ try{ inp.focus(); }catch(e){} },50);
     // camera — BarcodeDetector where available (Chrome/Edge on desktop/Android: all formats), else jsQR decodes QR codes
     // from the frame (iOS Safari & iOS Chrome are both WebKit and have no BarcodeDetector). v27.828 (Ben)
