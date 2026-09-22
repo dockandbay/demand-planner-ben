@@ -8207,6 +8207,13 @@ app.get('/api/product/scan/:code', async (req, res) => {
   try { const p = await sampleScanPayload(req.params.code, 'admin'); if (!p) return res.status(404).json({ error: 'no sample for that code' }); res.json({ ok: true, sample: p }); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// v27.824 (Ben): open the phone receive/review card by SAMPLE ID (mobile SAMPLING taps a sample chip). Ensures the sample
+// has a short code (generating one if it never had a printed card), then returns the same payload as the scan route.
+app.get('/api/product/sample/:id/card', async (req, res) => {
+  try { const code = await ensureShortCode(req.params.id); if (!code) return res.status(404).json({ error: 'sample not found' });
+    const p = await sampleScanPayload(code, 'admin'); if (!p) return res.status(404).json({ error: 'sample not found' }); res.json({ ok: true, sample: p }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // Supplier portal: the SAME scan, ownership-guarded — a supplier who scans their own sample card on a phone
 // gets the sample record (swatch image + received state + their feedback). Portal writes still go through the
 // portal's own guarded endpoints (see the portal phone card). No key/short code leaks another supplier's sample.
