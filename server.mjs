@@ -2666,7 +2666,7 @@ async function fulfilPushLines(po, completion) {
   // est_delivery = estimated delivery-to-warehouse (landing) — SAME calc as the SUPPLY PO view: shipment actuals ▸
   // landing/delivery override ▸ (prod_end + 7 ship days + branch SEA transit). Sea basis matches the PO grid.
   const poRow = (await pool.query(`SELECT coalesce(po.supplier_name,'') supplier, coalesce(po.branch,'') warehouse,
-      coalesce(po.country_code,'') country_code,
+      upper(coalesce(nullif(trim(po.country_code),''), nullif(trim(b.country_code),''), '')) country_code,   -- v27.835 (Diviyaj/Ben): PO country_code is often blank; fall back to the branch's country (matches every other country read in this file). Company is DERIVED from this and is IMMUTABLE at create, so a blank AU-branch country_code was creating the PO under company 1 instead of 3 (prod PO-416). Never drop the branch fallback here.
       nullif(trim(coalesce(b.fulfil_id,'')),'') branch_fulfil_id,
       to_char(coalesce(po.end_production_overide, po.start_production + (coalesce(sup.production_days,0)||' days')::interval)::date,'YYYY-MM-DD') prod_end,
       to_char(coalesce(sh.arrival_date, sh.delivery_date, sh.landing_date, po.delivery_date_overide, po.landing_date_overide,
