@@ -860,6 +860,66 @@
         try{ if(PP_LANG==='zh'&&typeof ppTranslate==='function')ppTranslate(ov); }catch(e){}
       }).catch(function(e){ body.innerHTML='<div style="color:#dc2626;padding:16px">Failed to load: '+esc(e&&e.message||e)+'</div>'; });
     }
+    // v27.817 (Ben): "Add samples via QR code" — a scanner overlay for the supplier portal. Scan a printed sample-card QR
+    // (camera, where supported) or type its 3-char code; each resolved development sample is handed to onPick(sample, done)
+    // to add to the batch. Reuses the portal-scoped /api/portal/scan/:code resolver (supplier-ownership enforced server-side).
+    function _ppScanCode(v){ v=String(v||'').trim(); var m=v.match(/\/product\/scan\/([0-9A-Za-z]{3})(?:$|[\/?#])/i); if(m)return m[1].toUpperCase();
+      if(/^[0-9A-Za-z]{3}$/.test(v)&&/[A-Za-z]/.test(v))return v.toUpperCase(); return null; }   // bare 3-char code must carry a letter (never collides with a numeric product barcode)
+    function ppScanAddOpen(onPick, opts){ opts=opts||{};
+      var old=document.getElementById('pp-sa-ov'); if(old)old.remove();
+      var det=null, stream=null, timer=null, lastCode='', lastAt=0, busy=false, addedIds={}, addedN=0;
+      var ov=document.createElement('div'); ov.id='pp-sa-ov';
+      ov.style.cssText='position:fixed;inset:0;z-index:100060;background:#0b1220;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:env(safe-area-inset-top,0) 0 env(safe-area-inset-bottom,0)';
+      ov.innerHTML='<div style="max-width:520px;margin:0 auto;min-height:100%;background:#fff;box-shadow:0 0 40px rgba(0,0,0,.25)">'
+        +'<div style="display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid #e5e7eb;position:sticky;top:0;background:#fff;z-index:2">'
+          +'<b style="font-size:14px">⌗ <span class="pp-i18n">Add samples via QR code</span></b>'
+          +'<button id="pp-sa-x" aria-label="Close" style="margin-left:auto;border:1px solid #e5e7eb;background:var(--pos,#16a34a);color:#fff;border-radius:9px;padding:8px 16px;font-size:13px;font-weight:700;cursor:pointer">Done</button></div>'
+        +'<div style="padding:14px">'
+          +'<div id="pp-sa-camwrap" style="position:relative;border-radius:12px;overflow:hidden;background:#000;aspect-ratio:4/3;display:flex;align-items:center;justify-content:center">'
+            +'<video id="pp-sa-vid" playsinline muted style="width:100%;height:100%;object-fit:cover"></video>'
+            +'<div style="position:absolute;inset:16% 12%;border:2px solid rgba(255,255,255,.85);border-radius:14px;box-shadow:0 0 0 9999px rgba(0,0,0,.18)"></div></div>'
+          +'<div id="pp-sa-status" class="mut" style="font-size:12px;margin:8px 2px;text-align:center;min-height:16px"></div>'
+          +'<div style="display:flex;gap:8px;align-items:center;margin-top:4px"><input id="pp-sa-in" autocomplete="off" autocapitalize="characters" maxlength="3" placeholder="Type 3-char code (e.g. 9A1)" style="flex:1;min-width:0;font-size:16px;font-family:ui-monospace,Menlo,monospace;text-transform:uppercase;letter-spacing:.14em;padding:11px 12px;border:1px solid #cbd5e1;border-radius:9px;text-align:center"><button id="pp-sa-go" style="background:#2563eb;color:#fff;border:none;border-radius:9px;padding:11px 16px;font-size:14px;font-weight:700;cursor:pointer">Look up</button></div>'
+          +'<div id="pp-sa-msg" style="font-size:12.5px;margin-top:8px;min-height:16px"></div>'
+          +'<div style="font-weight:700;font-size:12px;color:#6b7280;margin:14px 0 4px"><span class="pp-i18n">Added to this batch</span> <span id="pp-sa-n">0</span></div>'
+          +'<div id="pp-sa-list" style="display:flex;flex-direction:column;gap:6px"><div class="mut" style="font-size:12px">Nothing scanned yet.</div></div>'
+        +'</div></div>';
+      document.body.appendChild(ov); document.body.style.overflow='hidden';
+      var video=ov.querySelector('#pp-sa-vid'), statusEl=ov.querySelector('#pp-sa-status'), inp=ov.querySelector('#pp-sa-in'), msg=ov.querySelector('#pp-sa-msg'), listEl=ov.querySelector('#pp-sa-list'), nEl=ov.querySelector('#pp-sa-n');
+      function stopCam(){ if(timer){clearInterval(timer);timer=null;} if(stream){try{stream.getTracks().forEach(function(t){t.stop();});}catch(e){} stream=null;} }
+      function close(){ stopCam(); try{ ov.remove(); }catch(e){} document.body.style.overflow=''; if(opts.onClose)try{ opts.onClose(); }catch(e){} }
+      ov.querySelector('#pp-sa-x').onclick=close;
+      function flash(text,colour){ msg.style.color=colour||'#111827'; msg.textContent=text; }
+      function addRow(s){ if(listEl.querySelector('.pp-sa-empty-none'))listEl.innerHTML=''; if(!listEl._init){ listEl.innerHTML=''; listEl._init=1; }
+        var row=document.createElement('div'); row.style.cssText='display:flex;align-items:center;gap:9px;border:1px solid #e5e7eb;border-radius:9px;padding:7px 9px;background:#f0fdf4';
+        row.innerHTML=(s.swatch_url?'<img src="'+esc(s.swatch_url)+'" style="width:34px;height:34px;object-fit:cover;border-radius:6px;border:1px solid #e5e7eb" onerror="this.style.display=\'none\'">':'')
+          +'<div style="flex:1;min-width:0"><b style="font-family:ui-monospace,Menlo,monospace;font-size:12.5px">'+esc(s.ref||s.item_ref)+'</b>'+(s.colour_name?'<div class="mut tiny">'+esc(s.colour_name)+'</div>':'')+'</div>'
+          +'<span style="font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#059669;font-weight:700">'+esc(s.short_code||'')+'</span><span style="color:#16a34a;font-weight:800">✓</span>';
+        listEl.insertBefore(row, listEl.firstChild); }
+      function resolve(code){ if(busy)return; busy=true; inp.value=''; flash('Looking up '+code+'…','#6b7280');
+        fetch('/api/portal/scan/'+encodeURIComponent(code)).then(function(r){return r.json();}).then(function(d){ busy=false;
+          if(!d||!d.ok||!d.sample){ flash('No sample of yours matches code '+code+'.','#b45309'); return; }
+          var s=d.sample;
+          onPick(s, function(status,extra){
+            if(status==='added'){ addedIds[String(s.id)]=1; addedN++; nEl.textContent=addedN; addRow(s); flash('Added '+(s.ref||s.item_ref)+'.','#16a34a'); }
+            else if(status==='dup'){ flash((s.ref||s.item_ref)+' is already on this batch.','#6b7280'); }
+            else { flash('Could not add: '+(extra||status||'error'),'#dc2626'); }
+          });
+        }).catch(function(e){ busy=false; flash('Lookup failed: '+(e&&e.message||e),'#dc2626'); }); }
+      function tryRaw(raw){ var c=_ppScanCode(raw); if(!c)return; var now=Date.now(); if(c===lastCode&&now-lastAt<2600)return; lastCode=c; lastAt=now; resolve(c); }
+      inp.addEventListener('keydown',function(e){ if(e.key==='Enter'){ e.preventDefault(); var c=_ppScanCode(inp.value); if(c)resolve(c); else flash('A sample code is 3 characters (letters + numbers).','#b45309'); } });
+      ov.querySelector('#pp-sa-go').onclick=function(){ var c=_ppScanCode(inp.value); if(c)resolve(c); else flash('A sample code is 3 characters (letters + numbers).','#b45309'); };
+      // camera (progressive enhancement) — degrades to typed entry where unsupported
+      var camwrap=ov.querySelector('#pp-sa-camwrap');
+      if(!('BarcodeDetector' in window)||!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){ camwrap.style.display='none'; statusEl.textContent='Camera scanning is not available on this device — type the 3-character code below.'; setTimeout(function(){ try{ inp.focus(); }catch(e){} },60); }
+      else { statusEl.textContent='Point the camera at a sample-card QR code…';
+        navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}},audio:false}).then(function(st){ if(!document.body.contains(ov)){ try{st.getTracks().forEach(function(t){t.stop();});}catch(e){} return; } stream=st; video.srcObject=st; var pl=video.play(); if(pl&&pl.catch)pl.catch(function(){});
+          try{ det=new window.BarcodeDetector({formats:['qr_code','code_128','ean_13','ean_8','code_39']}); }catch(e){ try{ det=new window.BarcodeDetector(); }catch(e2){ det=null; } }
+          if(!det){ camwrap.style.display='none'; statusEl.textContent='Camera scanning is not available — type the 3-character code below.'; return; }
+          timer=setInterval(function(){ if(!det||video.readyState<2)return; det.detect(video).then(function(codes){ if(codes&&codes.length)tryRaw(codes[0].rawValue); }).catch(function(){}); },320);
+        }).catch(function(){ camwrap.style.display='none'; statusEl.textContent='Camera unavailable (permission blocked?) — type the 3-character code below.'; try{ inp.focus(); }catch(e){} });
+      }
+    }
     function ppApplyHash(){ var h=(location.hash||'').replace(/^#\/?/,''); if(!h)return false; var parts=h.split('/'); var tab, ref;
       if(parts[0]==='product'&&parts[1]==='scan'&&parts[2]){ ppScanCardOpen(decodeURIComponent(parts[2])); return true; }   // v27.747 (P4c portal): QR / short-code → the supplier phone sample card
       if(PP_SEC_KEYS.indexOf(parts[0])>=0){   // #/<section>[/<tab>[/<ref>]] — section-only → that section's default tab (v27.500)
@@ -1844,7 +1904,8 @@
                 +'<div style="min-width:220px">'+lbl('Contents')
                   +'<div class="tiny" style="line-height:1.7"><div style="font-weight:600;color:var(--muted);margin-bottom:2px">Bulk SKUs</div>'+skuList
                   +'<div style="font-weight:600;color:var(--muted);margin:6px 0 2px">Product development</div>'+devList
-                  +'<button class="save-btn samp-add-contents" style="margin-top:7px;font-size:12px;background:var(--blue);color:#fff;border-color:var(--blue)">+ Add contents</button></div>'
+                  +'<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:7px"><button class="save-btn samp-add-contents" style="font-size:12px;background:var(--blue);color:#fff;border-color:var(--blue)">+ Add contents</button>'
+                  +'<button class="save-btn samp-scan-qr" title="Scan the QR on a printed sample card, or type its 3-character code, to add that sample" style="font-size:12px;background:#0f172a;color:#fff;border-color:#0f172a">⌗ Add via QR code</button></div></div>'
                   +'<div class="samp-picker" style="margin-top:7px"></div></div>'
                 +'<div style="min-width:190px">'+lbl('Purpose')+'<div class="tiny" style="margin-bottom:10px">'+esc((s.purpose||[]).join(', ')||'—')+'</div>'+lbl('Notes')+'<div class="tiny" style="white-space:pre-wrap;background:var(--hover);border:1px solid var(--line2);border-radius:6px;padding:7px 9px;min-width:170px;max-width:300px">'+(s.notes?esc(s.notes):'<span class="mut">—</span>')+'</div></div>'
               +'</div>'
@@ -1958,6 +2019,13 @@
                   function afterDev(){ if(!skus.length){ loadContents(); return; } saveLines(newLines); }
                   if(devs.length){ postJSON(EP.sampleContentsBase+id+'/dev-samples',{dev_samples:newDevs},function(j){ if(j&&j.error){ppNotice(j.error);return;} afterDev(); }); } else afterDev(); });
               } else { pk.style.display='none'; pk.innerHTML=''; } };
+            var scanb=scope.querySelector('.samp-scan-qr'); if(scanb)scanb.onclick=function(){   // v27.817 (Ben): scan / type a sample-card code → add that dev sample to this shipment
+              var working=(sampById(id).dev_samples||[]).map(function(d){return {id:d.id,qty:d.qty||1};});
+              ppScanAddOpen(function(sample, done){
+                if(working.some(function(x){return String(x.id)===String(sample.id);})){ done('dup'); return; }
+                var next=working.concat([{id:sample.id,qty:1}]);
+                postJSON(EP.sampleContentsBase+id+'/dev-samples',{dev_samples:next},function(j){ if(j&&j.error){ done('err',j.error); return; } working=next; done('added'); });
+              }, { onClose:function(){ loadContents(); } }); };
             var ac=scope.querySelector('.samp-accept'); if(ac)ac.onclick=function(){ ac.disabled=true; postJSON(EP.sampleAccept,{id:id},function(j){ if(j&&j.error){ppNotice(j.error);ac.disabled=false;return;} var s=sampById(id); if(s){ s.accepted=true; s.change_requested=false; if(!s.tracking_code && s.status_calc!=='Shipped' && s.status_calc!=='Charge to review') s.status_calc='In production'; } refreshSampleCard(id); }); };
             var save=scope.querySelector('.samp-save'); if(save)save.onclick=function(){ var ps=scope.querySelector('.samp-prod'),ex=scope.querySelector('.samp-exp'),tk=scope.querySelector('.samp-trk'),cr=scope.querySelector('.samp-car');
               var ev=(ex&&ex.value)||null,pv=(ps&&ps.value)||null,tv=(tk&&tk.value)||null,cv=(cr&&cr.value)||null;
@@ -2004,7 +2072,8 @@
               +'<div style="margin-top:6px">'+purp+'</div>'
               +'<div style="margin-top:6px"><textarea class="fci snf-notes" rows="2" placeholder="Notes" style="width:320px;text-align:left"></textarea></div>'
               +'<div style="margin-top:8px;font-weight:700;font-size:12px;color:var(--muted)">Contents</div><div class="snf-contents" style="margin:3px 0"></div>'
-              +'<button class="save-btn snf-addc" style="font-size:12px;background:var(--blue);color:#fff;border-color:var(--blue)">+ Add contents</button><div class="snf-picker" style="margin-top:7px"></div>'
+              +'<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="save-btn snf-addc" style="font-size:12px;background:var(--blue);color:#fff;border-color:var(--blue)">+ Add contents</button>'
+              +'<button class="save-btn snf-scan-qr" title="Scan the QR on a printed sample card, or type its 3-character code, to add that sample" style="font-size:12px;background:#0f172a;color:#fff;border-color:#0f172a">⌗ Add via QR code</button></div><div class="snf-picker" style="margin-top:7px"></div>'
               +'<div style="margin-top:10px"><button class="save-btn snf-save" style="background:var(--pos);color:#fff;border-color:var(--pos)">Create</button> <button class="save-btn snf-cancel">Cancel</button> <span class="snf-msg mut tiny"></span></div></div>';
             function drawContents(){ var el=box.querySelector('.snf-contents');
               var sk=col.lines.map(function(l,ix){return '<div style="display:flex;gap:6px;align-items:center;font-size:12px;padding:1px 0"><b>'+units(l.qty)+'</b> × '+esc(l.sku)+'<a class="snf-rmk" data-i="'+ix+'" style="color:var(--neg);cursor:pointer;margin-left:6px">✕</a></div>';}).join('');
@@ -2016,6 +2085,9 @@
             box.querySelector('.snf-addc').onclick=function(){ var pk=box.querySelector('.snf-picker'); if(pk.style.display==='none'||!pk.innerHTML){ pk.style.display='';
               sampContentsPicker(pk, col, function(devs, skus){ devs.forEach(function(d){ if(!col.dev_samples.some(function(x){return String(x.id)===String(d.id);}))col.dev_samples.push(d); });
                 skus.forEach(function(s){ if(!col.lines.some(function(x){return x.sku===s.sku;}))col.lines.push(s); }); drawContents(); }); } else { pk.style.display='none'; pk.innerHTML=''; } };
+            box.querySelector('.snf-scan-qr').onclick=function(){ ppScanAddOpen(function(sample, done){   // v27.817 (Ben): scan / type a sample-card code → add to the new shipment's contents
+              if(col.dev_samples.some(function(x){return String(x.id)===String(sample.id);})){ done('dup'); return; }
+              col.dev_samples.push({id:sample.id,qty:1,ref:sample.ref,colour_name:sample.colour_name}); drawContents(); done('added'); }); };
             box.querySelector('.snf-cancel').onclick=function(){box.dataset.open='';box.innerHTML='';};
             box.querySelector('.snf-save').onclick=function(){ var btn=this, msg=box.querySelector('.snf-msg'); function V(k){var f=box.querySelector('.snf-'+k);return f?f.value.trim():'';}
               var purpose=Array.prototype.map.call(box.querySelectorAll('.snf-purpose:checked'),function(x){return x.value;});
