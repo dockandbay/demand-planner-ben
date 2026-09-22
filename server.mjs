@@ -7986,8 +7986,10 @@ async function insertProductSamplePhoto(sampleId, b, by, kind) {
 app.get('/api/product/batch-review-list', async (_req, res) => {
   try { res.json((await pool.query(`SELECT s.id, s.ref, coalesce(s.supplier_name,'') supplier_name, coalesce(s.recipient_company,'') recipient_company,
       trim(coalesce(s.first_name,'')||' '||coalesce(s.last_name,'')) recipient_name, coalesce(s.status,'') status, coalesce(s.carrier,'') carrier, coalesce(s.tracking_code,'') tracking,
-      to_char(s.created_at,'YYYY-MM-DD') created, to_char(s.supplier_expected_completion,'YYYY-MM-DD') expected, to_char(s.received_at,'YYYY-MM-DD') received, count(ls.dev_sample_id)::int n_dev
+      to_char(s.created_at,'YYYY-MM-DD') created, to_char(s.supplier_expected_completion,'YYYY-MM-DD') expected, to_char(s.received_at,'YYYY-MM-DD') received, count(ls.dev_sample_id)::int n_dev,
+      coalesce(string_agg(DISTINCT ds.short_code, ' ') FILTER (WHERE coalesce(ds.short_code,'')<>''),'') codes   /* v27.816 (Ben): sample-card QR short codes on this batch — searchable in the picker */
     FROM planner.sample_requests s JOIN planner.sample_request_dev_samples ls ON ls.sample_request_id=s.id
+    LEFT JOIN planner.product_dev_samples ds ON ds.id=ls.dev_sample_id
     GROUP BY s.id ORDER BY s.id DESC`)).rows); }
   catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
