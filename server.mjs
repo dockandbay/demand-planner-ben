@@ -6745,7 +6745,7 @@ app.get('/api/product/sampling', async (_req, res) => {
         to_char(rq.created_at,'YYYY-MM-DD') created_at, to_char(rq.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
         coalesce((SELECT json_agg(json_build_object('id',c.id,'name',c.name,'dimension',coalesce(c.dimension,''),'sampling_mode',coalesce(c.sampling_mode,'sampled')) ORDER BY c.sort,c.id)
           FROM planner.product_dev_request_components rc JOIN planner.product_dev_components c ON c.id=rc.component_id WHERE rc.request_id=rq.id),'[]'::json) components,
-        coalesce((SELECT json_agg(json_build_object('id',ps.id,'version',ps.version,'sample_date',to_char(ps.sample_date,'YYYY-MM-DD'),'created_at',to_char(ps.created_at,'YYYY-MM-DD'),
+        coalesce((SELECT json_agg(json_build_object('id',ps.id,'version',ps.version,'short_code',coalesce(ps.short_code,''),'sample_date',to_char(ps.sample_date,'YYYY-MM-DD'),'created_at',to_char(ps.created_at,'YYYY-MM-DD'),
             'received_at',to_char(ps.received_at,'YYYY-MM-DD'),'description',coalesce(ps.description,''),'supplier_status',coalesce(ps.supplier_status,'in_development'),
             'approved',(SELECT count(*) FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id AND af.decision IN ('approved','approved_with_comments'))::int,
             'rejected',(SELECT count(*) FROM planner.product_sample_aspect_feedback af WHERE af.sample_id=ps.id AND af.decision='rejected_new_sample')::int,
