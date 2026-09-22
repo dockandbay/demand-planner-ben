@@ -14722,7 +14722,7 @@
             +'<label style="font-size:12px"><input type="radio" name="pwb-fmt" value="jpg"> JPG</label>'
             +'<select class="fci" id="pwb-size" style="text-align:left"><option value="452">452 px</option><option value="678" selected>678 px</option><option value="1000">1000 px</option><option value="1500">1500 px</option></select>'
             +'<button class="save-btn" id="pwb-selall" style="font-size:11px">Select free</button>'
-            +'<button class="save-btn" id="pwb-dl" style="background:var(--pos-bg);color:var(--pos);border-color:var(--pos)" disabled>⬇ Download selected (.zip)</button></span>'
+            +'<button class="save-btn" id="pwb-dl" style="background:var(--pos-bg);color:var(--pos);border-color:var(--pos)" disabled>⬇ Download selected</button></span>'
           +'</div><div id="pwb-msg" class="mut tiny" style="margin-bottom:8px">&nbsp;</div>'
         +'<div id="pwb-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px">'
           +rows.map(function(r){ var svg=eanBarcodeSVG(r.barcode)||''; var asn=r.status==='assigned';
@@ -14735,14 +14735,19 @@
         +'</div>';
       var grid=host.querySelector('#pwb-grid'), dlBtn=host.querySelector('#pwb-dl'), msg=host.querySelector('#pwb-msg');
       function selCount(){ return host.querySelectorAll('.pwb-ck:checked').length; }
-      function sync(){ var n=selCount(); dlBtn.disabled=!n; dlBtn.textContent='⬇ Download selected'+(n?(' ('+n+')'):'')+' (.zip)'; }
+      function sync(){ var n=selCount(); dlBtn.disabled=!n; dlBtn.textContent='⬇ Download selected'+(n?(' ('+n+')'):''); }
       grid.addEventListener('change',function(e){ if(e.target&&e.target.classList.contains('pwb-ck')){ var cell=e.target.closest('.pwb-cell'); if(cell)cell.style.borderColor=e.target.checked?'var(--blue)':'var(--line)'; sync(); } });
       host.querySelector('#pwb-selall').onclick=function(){ host.querySelectorAll('.pwb-cell').forEach(function(c){ if(c.querySelector('.pill') && /free/.test(c.querySelector('.pill').textContent)){ var ck=c.querySelector('.pwb-ck'); ck.checked=true; c.style.borderColor='var(--blue)'; } }); sync(); };
+      // v27.804 (Ben): download each barcode as its OWN file (no zip). The browser may prompt to "allow multiple
+      // downloads" the first time when several are selected — that's expected. Files are staggered slightly so none drop.
       dlBtn.onclick=function(){ var picks=[...host.querySelectorAll('.pwb-ck:checked')].map(function(x){return x.value;}); if(!picks.length)return;
         var fmtR=host.querySelector('input[name=pwb-fmt]:checked'), f=(fmtR&&fmtR.value==='jpg')?{mime:'image/jpeg',ext:'jpg'}:{mime:'image/png',ext:'png'};
-        var w=parseInt((host.querySelector('#pwb-size')||{}).value,10)||678; msg.textContent='Rendering '+picks.length+' barcode'+(picks.length===1?'':'s')+'…'; dlBtn.disabled=true;
-        var files=[]; var jobs=picks.map(function(code){ return new Promise(function(res){ var svg=eanBarcodeSVG(code); if(!svg)return res(); svgToImg(svg,w,f.mime,function(bl){ if(bl&&bl.arrayBuffer){ bl.arrayBuffer().then(function(ab){ files.push({name:code+'.'+f.ext,data:new Uint8Array(ab)}); res(); },function(){res();}); } else res(); }); }); });
-        Promise.all(jobs).then(function(){ if(!files.length){ msg.textContent='Nothing to download.'; dlBtn.disabled=false; return; } var blob=makeZipStore(files); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='workshop_barcodes.zip'; document.body.appendChild(a); a.click(); setTimeout(function(){ try{URL.revokeObjectURL(a.href);}catch(e){} a.remove(); },1200); msg.textContent='Downloaded '+files.length+' '+f.ext.toUpperCase()+' barcode'+(files.length===1?'':'s')+' at '+w+'px.'; dlBtn.disabled=false; }); };
+        var w=parseInt((host.querySelector('#pwb-size')||{}).value,10)||678; msg.textContent='Rendering '+picks.length+' barcode'+(picks.length===1?'':'s')+'…'+(picks.length>1?' (your browser may ask to allow multiple downloads)':''); dlBtn.disabled=true;
+        var items=[]; var jobs=picks.map(function(code){ return new Promise(function(res){ var svg=eanBarcodeSVG(code); if(!svg)return res(); svgToImg(svg,w,f.mime,function(bl){ if(bl)items.push({name:code+'.'+f.ext,blob:bl}); res(); }); }); });
+        Promise.all(jobs).then(function(){ if(!items.length){ msg.textContent='Nothing to download.'; dlBtn.disabled=false; return; }
+          var i=0; (function next(){ if(i>=items.length){ msg.textContent='Downloaded '+items.length+' '+f.ext.toUpperCase()+' file'+(items.length===1?'':'s')+' at '+w+'px.'; dlBtn.disabled=false; return; }
+            var it=items[i++]; var a=document.createElement('a'); a.href=URL.createObjectURL(it.blob); a.download=it.name; document.body.appendChild(a); a.click();
+            setTimeout(function(){ try{URL.revokeObjectURL(a.href);}catch(e){} a.remove(); },1500); setTimeout(next,250); })(); }); };
     }).catch(function(e){ host.innerHTML='<div style="color:var(--neg)">Barcodes failed to load: '+(e&&e.message||e)+'</div>'; });
   }
   // PRODUCT ▸ CONFIG — seasons, category codes, timeline tags/badges, timeline quick phrases. Lives in the PRODUCT
