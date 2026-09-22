@@ -14553,7 +14553,13 @@ function renderKlaviyoBisView(body){
   //   Active = no discontinued date · Discontinued (incl. phase out) = discontinued date today/in the future · Closed = date has passed.
   var TDY=new Date().toISOString().slice(0,10);
   function bisStatus(sku,mkt){ var p=(typeof SKUM!=='undefined')?SKUM[sku]:null; var k=String(mkt).toLowerCase();
-    var dd=(p&&p.disc&&p.disc[k])?String(p.disc[k]).slice(0,10):''; if(!dd)return 'active'; return (dd<TDY)?'closed':'disc'; }
+    if(!p)return 'closed';                                        // out of planning scope (withdrawn / long-discontinued) → not sold
+    if(!(p.av&&p.av[k]))return 'closed';                          // not available in THIS market → not sold here (Ben: TOWLB-ANI-XL-LEOPD isn't sold in US)
+    var st=String(p.st||'').toUpperCase();
+    if(st==='ACTIVE')return 'active';                             // products.status ACTIVE → Active (discontinue_date_final is a season/review date, NOT the discontinuation)
+    var dd=(p.disc&&p.disc[k])?String(p.disc[k]).slice(0,10):''; // PHASE OUT / LAST SEASON → Discontinued while within the date; Closed once that market's discontinue date passes
+    if(dd&&dd<TDY)return 'closed';
+    return 'disc'; }
   var BIS_GRP=[['active','Active','var(--pos)','var(--pos-bg)'],['disc','Discontinued','var(--amber)','var(--amber-bg)'],['closed','Closed','var(--muted)','var(--hover)']];
   var BIS_STLBL={active:'Active',disc:'Discontinued',closed:'Closed'};
   body.innerHTML='<div style="max-width:1000px">'
@@ -14592,7 +14598,7 @@ function renderKlaviyoBisView(body){
     var mtot={UK:0,US:0,EU:0,AU:0}, msku={UK:0,US:0,EU:0,AU:0}, gtot=0;
     DROWS.forEach(function(r){ MK.forEach(function(m){ if(r[m]>0){mtot[m]+=r[m];msku[m]++;} }); gtot+=r.total; });
     var chips=MK.map(function(m){ return '<span style="display:inline-block;background:'+col(m)+';color:var(--ink);font-weight:700;border-radius:5px;padding:3px 9px;font-size:11px;margin-right:6px">'+m+': '+msku[m]+' SKUs · '+mtot[m].toLocaleString()+' subs</span>'; }).join('');
-    var head='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px"><div style="font-weight:700;font-size:14px">Analysis summary <span class="mut tiny">— back-in-stock subscribers by SKU, grouped by status (Active · Discontinued incl. phase-out · Closed) from each market&rsquo;s discontinued date · '+DROWS.length+' SKUs · '+gtot.toLocaleString()+' total</span></div>'
+    var head='<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:8px"><div style="font-weight:700;font-size:14px">Analysis summary <span class="mut tiny">— back-in-stock subscribers by SKU, grouped by status (Active · Discontinued incl. phase-out · Closed) — by each market&rsquo;s availability + product status · '+DROWS.length+' SKUs · '+gtot.toLocaleString()+' total</span></div>'
       +'<button id="kb-dl" class="save-btn" style="margin-left:auto;background:var(--pos-bg);border:1px solid var(--pos);color:var(--pos);font-weight:700">&#8595; Download CSV</button></div>'
       +'<div style="margin-bottom:8px">'+chips+'</div>';
     // per-country columns (each its own SKU + QTY list, sorted by that market's subs) — mirrors the upload sheet's BIS_REPORT_FILTERED
