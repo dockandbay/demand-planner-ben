@@ -13736,8 +13736,8 @@
       var sups=uniq('supplier_name'), seasons=uniq('season').reverse(), cats=uniq('category'); var me=((window.ME&&ME.email)||'').toLowerCase();
       var selDark=function(v){ return 'text-align:left'+(v?';background:var(--nav);color:#fff;font-weight:600':''); };
       var fb=c.querySelector('#smp-filters');
-      fb.innerHTML=smpViewPills()+'<input class="fci" id="smp-q" value="'+esc(_smpFilt.q)+'" placeholder="🔍 product / request / supplier / code…" style="width:200px;text-align:left">'
-        +'<button class="save-btn" id="smp-scan" title="scan a sample-card QR, or type its 3-char code, to open / receive the sample" style="background:var(--nav);color:#fff;border-color:var(--nav)">⌨ Enter sample code</button>'   /* v27.814 (Ben): desktop receive-by-code */
+      fb.innerHTML=smpViewPills()+'<span class="smp-qwrap" style="position:relative;display:inline-block"><input class="fci" id="smp-q" value="'+esc(_smpFilt.q)+'" placeholder="🔍 product / request / supplier / code…" style="width:220px;max-width:66vw;text-align:left;padding-right:36px">'
+        +'<button id="smp-scan" class="smp-qscan" title="Scan a sample-card QR / barcode, or just type the 3-char code above" style="position:absolute;right:3px;top:50%;transform:translateY(-50%);border:0;background:none;cursor:pointer;font-size:17px;line-height:1;padding:3px 6px">📷</button></span>'   /* v27.821 (Ben): scan launcher folded into the search box (search already matches the 3-char code) */
         +'<span style="display:flex;align-items:center;gap:5px"><span class="mut" style="font-size:12px">Supplier</span><select class="fci" id="smp-sup" style="'+selDark(_smpFilt.supplier)+'"><option value="">All</option>'+sups.map(function(s){return '<option'+(s===_smpFilt.supplier?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>'
         +'<span style="display:flex;align-items:center;gap:5px"><span class="mut" style="font-size:12px">Stage</span><select class="fci" id="smp-stage" style="'+selDark(_smpFilt.stage)+'"><option value="">All</option>'+STAGE_META.map(function(m){return '<option value="'+m[0]+'"'+(m[0]===_smpFilt.stage?' selected':'')+'>'+esc(m[1])+'</option>';}).join('')+'</select></span>'
         +'<span style="display:flex;align-items:center;gap:5px"><span class="mut" style="font-size:12px">Season</span><select class="fci" id="smp-season" style="'+selDark(_smpFilt.season)+'"><option value="">All</option>'+seasons.map(function(s){return '<option'+(s===_smpFilt.season?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>'
@@ -13861,8 +13861,9 @@
             _showBranch(_smpTree.season, _smpTree.type);
           }
         }
-        g.querySelectorAll('.smp-openreq').forEach(function(a){ a.onclick=function(){ _prodDetailTab='requests'; _prodHighlightReq=Number(a.dataset.rid); openProductDrawer(a.dataset.ref,null,'requests'); }; });
-        g.querySelectorAll('.smp-manage').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var r=f.filter(function(x){return String(x.id)===b.dataset.rid;})[0]; if(r)smpManage(b.closest('tr'), r, ths.length); }; });   // v27.730: MANAGE → inline tabbed panel
+        g.querySelectorAll('.smp-openreq').forEach(function(a){ a.onclick=function(){ try{ _prodDetailTab='requests'; _prodHighlightReq=Number(a.dataset.rid); openProductDrawer(a.dataset.ref,null,'requests'); }catch(err){ try{ alert('Could not open this product: '+(err&&err.message||err)); }catch(_){} } }; });   // v27.821: surface any error instead of failing silently (mobile)
+        function _smpScrollPanel(rid){ if(!isMob)return; var mx=g.querySelector('tr.smp-mexp[data-rid="'+rid+'"]'); if(mx)setTimeout(function(){ try{ mx.scrollIntoView({block:'start',behavior:'smooth'}); }catch(_){} },60); }   // v27.821 (Ben): the MANAGE panel opens below the card — bring it into view on mobile
+        g.querySelectorAll('.smp-manage').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var r=f.filter(function(x){return String(x.id)===b.dataset.rid;})[0]; if(!r)return; try{ smpManage(b.closest('tr'), r, ths.length); _smpScrollPanel(r.id); }catch(err){ try{ alert('Could not open Manage: '+(err&&err.message||err)); }catch(_){} } }; });   // v27.730: MANAGE → inline tabbed panel; v27.821: mobile scroll-to + error surface
         g.querySelectorAll('.smp-actbadge').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var rid=b.dataset.rid, r=rows.filter(function(x){return String(x.id)===rid;})[0]; if(!r)return;   // v27.815 (Ben): cycle action owner — auto → D&B → Supplier → No action → auto
           var cur=_smpManualOwner(r), next=cur==null?'db':cur==='db'?'supplier':cur==='supplier'?'none':'';
           shipPost('/api/product/request/'+rid,{action_owner:next},function(j){ if(j&&j.error){alert(j.error);return;} r.action_owner=next||null; draw(); }); }; });
@@ -13892,8 +13893,8 @@
           smpManage(tr, r, ths.length, 'S'+(idx+1)); }; });
         // v27.820 (Ben): mobile — tap a sample chip → open MANAGE on that sample's tab (same as .smp-sdate on desktop)
         g.querySelectorAll('.smpc-samp').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); var rid=a.dataset.rid, sid=a.dataset.sid; var r=rows.filter(function(x){return String(x.id)===rid;})[0]; if(!r)return; var tr=a.closest('tr'); var idx=(r.samples||[]).map(function(x){return String(x.id);}).indexOf(String(sid)); if(idx<0)idx=0;
-          var mopen=g.querySelector('tr.smp-mexp[data-rid="'+rid+'"]'); if(mopen){ var t=mopen.querySelector('.smp-mtab[data-t="s'+idx+'"]'); if(t){ t.click(); return; } mopen.remove(); }
-          smpManage(tr, r, ths.length, 'S'+(idx+1)); }; });
+          try{ var mopen=g.querySelector('tr.smp-mexp[data-rid="'+rid+'"]'); if(mopen){ var t=mopen.querySelector('.smp-mtab[data-t="s'+idx+'"]'); if(t){ t.click(); _smpScrollPanel(rid); return; } mopen.remove(); }
+            smpManage(tr, r, ths.length, 'S'+(idx+1)); _smpScrollPanel(rid); }catch(err){ try{ alert('Could not open this sample: '+(err&&err.message||err)); }catch(_){} } }; });
         if(_smpScroll){ var trS=g.querySelector('tr.smp-row[data-rid="'+_smpScroll+'"]'); _smpScroll=null; if(trS){ try{ trS.scrollIntoView({block:'center'}); }catch(e){} trS.style.outline='2px solid var(--blue)'; setTimeout(function(){ trS.style.outline=''; },2200); } }
         if(_smpManagePending){ var mp=_smpManagePending; _smpManagePending=null; var mtr=g.querySelector('tr.smp-row[data-rid="'+mp.rid+'"]'); var mr=f.filter(function(x){return String(x.id)===mp.rid;})[0]; if(mtr&&mr)setTimeout(function(){ smpManage(mtr, mr, ths.length, mp.tab); },0); }   // v27.735: open MANAGE on the deep-linked tab
       }
