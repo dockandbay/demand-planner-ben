@@ -8254,6 +8254,7 @@ async function sampleCardPdf(sampleId) {
     const fmtd = d => { const m = /(\d{4})-(\d{2})-(\d{2})/.exec(String(d || '')); return m ? (m[3] + '-' + _MON[+m[2] - 1] + '-' + m[1].slice(2)) : ''; };
     const T = (s, x, yy, sz, f, c) => page.drawText(san(s), { x, y: yy, size: sz, font: f || F, color: c || ink });
     let y = PH - M - 8;
+    let qrLeft = null, qrBottom = null;   // v27.813 (Ben): so the field underlines can stop before the QR (no overlap)
     T('SAMPLE - ' + (it.ref || ''), M, y, 17, B);
     // v27.745 (P4b): QR + short code top-right. Scanning it (native camera or the in-app scanner) opens the sample
     // record; the in-app scanner also extracts the 3-char code from the URL. QR encodes the PORTAL scan URL so a
@@ -8265,6 +8266,7 @@ async function sampleCardPdf(sampleId) {
         const qm = qrMatrix(scanUrl, 'M');
         const QZ = 4, mods = qm.size, cell = 78 / (mods + 2 * QZ);   // ~78pt QR incl quiet zone
         const qx = PW - M - (mods + 2 * QZ) * cell, qy = PH - M - (mods + 2 * QZ) * cell + 6;
+        qrLeft = qx; qrBottom = qy - 16;   // v27.813: QR left edge + its bottom (incl the short-code caption)
         page.drawRectangle({ x: qx, y: qy, width: (mods + 2 * QZ) * cell, height: (mods + 2 * QZ) * cell, color: rgb(1, 1, 1) });
         for (let ry = 0; ry < mods; ry++) for (let rx = 0; rx < mods; rx++) if (qm.modules[ry][rx])
           page.drawRectangle({ x: qx + (rx + QZ) * cell, y: qy + (mods + QZ - 1 - ry) * cell, width: cell + 0.3, height: cell + 0.3, color: ink });
@@ -8274,7 +8276,7 @@ async function sampleCardPdf(sampleId) {
     }
     y -= 30;   // left-aligned header, ref in the title (removed from the body)
     const rows = [['SUPPLIER', it.supplier], ['SEASON', it.season], ['PRODUCT TYPE', it.category], ['COLOUR NAME', it.colour_name || it.bulk_colour_name], ['SAMPLE VERSION', sr.version != null ? ('v' + sr.version) : ''], ['DATE OF SAMPLE', fmtd(sr.sample_date)]];
-    rows.forEach(r => { T(r[0], M, y, 11, B, rgb(0.2, 0.25, 0.32)); T(r[1] || '-', M + 150, y, 12, F); page.drawLine({ start: { x: M + 150, y: y - 4 }, end: { x: PW - M, y: y - 4 }, thickness: 0.5, color: line }); y -= 24; });
+    rows.forEach(r => { T(r[0], M, y, 11, B, rgb(0.2, 0.25, 0.32)); T(r[1] || '-', M + 150, y, 12, F); var _lineEnd = (qrLeft != null && (y - 4) > qrBottom) ? (qrLeft - 8) : (PW - M); page.drawLine({ start: { x: M + 150, y: y - 4 }, end: { x: _lineEnd, y: y - 4 }, thickness: 0.5, color: line }); y -= 24; });   // v27.813: rows in the QR's vertical band stop their underline before it
     y -= 12;
     T('STATUS' + (reviewed ? '' : '  (not yet reviewed)'), M, y, 11, B, rgb(0.2, 0.25, 0.32)); y -= 20;
     const box = (x, on, label) => { page.drawRectangle({ x, y: y - 2, width: 12, height: 12, borderColor: ink, borderWidth: 1 }); if (on) T('X', x + 2.6, y, 11, B); T(label, x + 18, y, 11, F); return x + 18 + F.widthOfTextAtSize(san(label), 11) + 22; };
