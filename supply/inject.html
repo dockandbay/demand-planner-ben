@@ -14685,7 +14685,7 @@
           +rows.map(function(x){ return '<tr style="border-bottom:1px solid var(--line2)">'
             +'<td style="padding:4px 12px 4px 0;font-weight:700;font-family:ui-monospace,Menlo,monospace">'+esc(x.working_sku)+'</td>'
             +'<td style="padding:4px 12px 4px 0;font-family:ui-monospace,Menlo,monospace">'+(x.barcode?esc(x.barcode):'<span class="mut">—</span>')+'</td>'
-            +'<td style="padding:4px 12px 4px 0">'+esc(x.product_name||x.item_ref)+' <span class="mut tiny">'+esc(x.item_ref)+'</span></td>'
+            +'<td style="padding:4px 12px 4px 0"><a class="pim-openprod" data-ref="'+esc(x.item_ref)+'" title="open '+esc(x.item_ref)+'" style="color:var(--blue);text-decoration:underline;cursor:pointer">'+esc(x.product_name||x.item_ref)+'</a> <span class="mut tiny">'+esc(x.item_ref)+'</span></td>'
             +'<td style="padding:4px 12px 4px 0">'+esc(x.colourway||'—')+'</td>'
             +'<td style="padding:4px 12px 4px 0">'+esc(x.size_label||'—')+'</td>'
             +'<td style="padding:4px 12px 4px 0">'+esc(x.category||'—')+'</td>'
@@ -14696,6 +14696,7 @@
           : '<div class="count" style="padding:20px 2px;color:var(--muted)">Nothing in the waiting room yet. Push a size’s working SKU from a product’s <b>Sizes</b> grid.</div>');
       c.querySelectorAll('.pim-inpim').forEach(function(b){ b.onclick=function(){ shipPost('/api/product/pim-waiting-room/'+b.dataset.id+'/status',{status:'in_pim'},function(j){ if(j&&j.error){alert(j.error);return;} renderPimWaitingRoom(c); }); }; });
       c.querySelectorAll('.pim-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Remove this from the waiting room?'))return; shipPost('/api/product/pim-waiting-room/'+a.dataset.id+'/delete',{},function(j){ if(j&&j.error){alert(j.error);return;} renderPimWaitingRoom(c); }); }; });
+      c.querySelectorAll('.pim-openprod').forEach(function(a){ a.onclick=function(e){ e.preventDefault(); var ref=a.dataset.ref; if(ref)location.hash='#/product/'+encodeURIComponent(ref); }; });   // v27.812 (Ben): open the product detail
     }).catch(function(e){ c.innerHTML='<div style="color:var(--neg)">Failed: '+(e&&e.message||e)+'</div>'; });
   }
   function renderProductReports(c){ c.innerHTML='<div class="hz-skel" aria-label="Loading"><i></i><i></i><i></i></div>';
@@ -15234,7 +15235,7 @@
         var rc=String(q.recipient_countries||'UK').toUpperCase().split(',').map(function(x){return x.trim();});
         var cBoxes=['UK','US','AU','DIRECT'].map(function(cc){ return '<label style="display:inline-flex;align-items:center;gap:3px;font-size:11px;margin:0 8px 0 0;cursor:pointer"><input type="checkbox" class="pr-cty" data-rid="'+q.id+'" value="'+cc+'"'+(rc.indexOf(cc)>=0?' checked':'')+'> '+(cc==='DIRECT'?'Direct to Client':cc)+'</label>'; }).join('');
         return '<div class="pr-card" data-rid="'+q.id+'" style="border:1px solid '+(hl?'var(--blue)':'var(--line)')+';border-left:6px solid '+m[3]+';border-radius:10px;padding:10px 12px;margin-bottom:10px;background:var(--card)'+(hl?';box-shadow:0 0 0 3px var(--blue-soft)':'')+'">'
-          +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><input class="fci pr-ref" data-rid="'+q.id+'" value="'+esc(q.ref)+'" title="request reference — editable" style="width:250px;font-family:ui-monospace,Menlo,monospace;font-weight:700"><span style="font-weight:600">'+esc(q.supplier_name)+'</span>'+prodStageChip(q.stage)
+          +'<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="font-weight:800;font-size:16px;margin-right:2px">'+esc(q.supplier_name||'Supplier')+'</span><input class="fci pr-ref" data-rid="'+q.id+'" value="'+esc(q.ref)+'" title="request reference — editable" style="width:230px;font-family:ui-monospace,Menlo,monospace;font-weight:600;font-size:11px">'+prodStageChip(q.stage)
           +'<select class="fci pr-stage" data-rid="'+q.id+'" style="'+prodStageStyle(q.stage)+';width:auto;min-width:150px;max-width:210px">'+STG.map(function(s){return '<option value="'+s+'"'+(s===q.stage?' selected':'')+'>'+stageMeta(s)[1]+'</option>';}).join('')+'</select>'   /* v27.811 (Ben): keep it inline on the top row after the status badge, not full width */
           +'<span class="mut tiny">'+(q.samples||0)+' sample'+((q.samples||0)===1?'':'s')+' · '+(q.samples_received||0)+' received · created '+esc(fd(q.created_at||''))+'</span>'
           +'<a class="pr-del" data-rid="'+q.id+'" data-n="'+(q.samples||0)+'" style="margin-left:auto;color:var(--neg);cursor:pointer;font-size:11px">delete</a><span class="pr-msg tiny" data-rid="'+q.id+'" style="min-width:70px"></span></div>'
@@ -15243,6 +15244,7 @@
           +'<span class="mut tiny">Sizes</span><span>'+sizeBoxes+'</span>'
           +'<span class="mut tiny">Approval</span><span><select class="fci pr-appr" data-rid="'+q.id+'" style="width:190px"><option value="samples"'+(q.approval_method!=='photo'?' selected':'')+'>Send samples</option><option value="photo"'+(q.approval_method==='photo'?' selected':'')+'>Approval by photo</option></select></span>'
           +'<span class="mut tiny">Recipient country</span><span>'+cBoxes+'</span>'
+          +'<span class="mut tiny">Recipient address</span><span><div class="pr-addrs" data-rid="'+q.id+'" data-addrs="'+esc(JSON.stringify((q.recipient_addresses&&q.recipient_addresses.length)?q.recipient_addresses:['']))+'"></div></span>'   /* v27.812 (Ben): one or more delivery addresses */
           +'<span class="mut tiny">Development start</span><span><input type="date" class="fci pr-dev" data-rid="'+q.id+'" value="'+esc(q.dev_start||'')+'" style="width:150px"></span>'
           +'<span class="mut tiny">Stakeholders</span><span><div class="pr-stakes-wrap" data-rid="'+q.id+'" data-stakes="'+esc(JSON.stringify(q.internal_stakeholders||[]))+'"></div></span>'   /* v27.810 (Ben): pills + Horizon-user picker, same as the sample-request Internal stakeholders */
           +'<span class="mut tiny">Notify emails</span><span><input class="fci pr-notify" data-rid="'+q.id+'" value="'+esc((q.notify_emails||[]).join(', '))+'" placeholder="emails, comma-separated — emailed on ship / receive" style="width:100%;max-width:520px"></span>'
@@ -15268,6 +15270,14 @@
           if(inp)inp.oninput=function(){ var qq=(inp.value||'').trim().toLowerCase(); if(!qq){ closeR(); return; } loadHzUsers(function(us){ var m=(us||[]).filter(function(u){ return _dst.indexOf(u.email)<0 && ((u.email||'').toLowerCase().indexOf(qq)>=0 || (u.handle||'').toLowerCase().indexOf(qq)>=0); }).slice(0,8); if(!rb)return; if(!m.length){ rb.innerHTML='<div class="mut tiny" style="padding:3px 2px">no matching user</div>'; return; } rb.innerHTML='<div style="position:absolute;z-index:30;min-width:240px;border:1px solid var(--line);border-radius:6px;max-height:180px;overflow:auto;background:var(--card);box-shadow:0 8px 22px rgba(15,23,42,.15)">'+m.map(function(u){ return '<div class="prst-pick" data-e="'+esc(u.email)+'" style="padding:4px 8px;cursor:pointer;font-size:11px;border-bottom:1px solid var(--hover)"><b>'+esc(u.handle||'')+'</b> <span class="mut">'+esc(u.email)+'</span></div>'; }).join('')+'</div>'; rb.querySelectorAll('.prst-pick').forEach(function(el){ el.onclick=function(){ if(_dst.indexOf(el.dataset.e)<0){ _dst.push(el.dataset.e); saveSt(); } drawStk(); }; }); }); };
           if(inp)inp.onblur=function(){ setTimeout(closeR,180); }; }
         drawStk(); });
+      // v27.812 (Ben): Recipient address — one or more free-text delivery addresses (default one), under Recipient country.
+      body.querySelectorAll('.pr-addrs').forEach(function(wrap){ var rid=wrap.dataset.rid; var _addrs=[]; try{ _addrs=JSON.parse(wrap.dataset.addrs||'[]'); }catch(e){ _addrs=[]; } if(!Array.isArray(_addrs)||!_addrs.length)_addrs=[''];
+        function saveA(){ save(rid,{recipient_addresses:_addrs.map(function(x){return String(x).trim();}).filter(Boolean)}); }
+        function drawA(){ wrap.innerHTML=_addrs.map(function(a,i){ return '<div style="display:flex;gap:6px;align-items:center;margin-bottom:4px"><input class="fci pra-in" data-i="'+i+'" value="'+esc(a||'')+'" placeholder="delivery address…" style="width:100%;max-width:480px"><a class="pra-rm" data-i="'+i+'" title="remove address" style="color:var(--neg);cursor:pointer;font-weight:800'+(_addrs.length<=1?';visibility:hidden':'')+'">×</a></div>'; }).join('')+'<a class="pra-add" style="font-size:11px;color:var(--blue);cursor:pointer;text-decoration:underline">+ add address</a>';
+          wrap.querySelectorAll('.pra-in').forEach(function(el){ el.onchange=function(){ _addrs[parseInt(el.dataset.i,10)]=el.value; saveA(); }; });
+          wrap.querySelectorAll('.pra-rm').forEach(function(a){ a.onclick=function(){ _addrs.splice(parseInt(a.dataset.i,10),1); if(!_addrs.length)_addrs=['']; drawA(); saveA(); }; });
+          var add=wrap.querySelector('.pra-add'); if(add)add.onclick=function(){ _addrs.push(''); drawA(); var ins=wrap.querySelectorAll('.pra-in'); if(ins.length)ins[ins.length-1].focus(); }; }
+        drawA(); });
       body.querySelectorAll('.pr-notify').forEach(function(el){ el.onchange=function(){ save(el.dataset.rid,{notify_emails:emails(el.value)}); }; });
       body.querySelectorAll('.pr-notes').forEach(function(el){ el.onchange=function(){ save(el.dataset.rid,{notes:el.value}); }; });
       body.querySelectorAll('.pr-cty').forEach(function(cb){ cb.onchange=function(){ var rid=cb.dataset.rid, vals=[]; body.querySelectorAll('.pr-cty[data-rid="'+rid+'"]:checked').forEach(function(x){vals.push(x.value);}); if(!vals.length){ cb.checked=true; vals=[cb.value]; } save(rid,{recipient_countries:vals.join(',')}); }; });

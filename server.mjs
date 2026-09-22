@@ -6625,7 +6625,7 @@ function deriveProductStage(reqs, override) {
 }
 // SQL fragment: this item's requests as JSON (components named, samples counted) — used by items / detail / dashboard reads
 const REQS_JSON_SQL = `coalesce((SELECT json_agg(json_build_object('id',rq.id,'ref',rq.ref,'supplier_name',rq.supplier_name,'supplier_code',coalesce(rq.supplier_code,''),
-      'stage',rq.stage,'approval_method',rq.approval_method,'recipient_countries',coalesce(rq.recipient_countries,''),'dev_start',to_char(rq.dev_start,'YYYY-MM-DD'),
+      'stage',rq.stage,'approval_method',rq.approval_method,'recipient_countries',coalesce(rq.recipient_countries,''),'recipient_addresses',coalesce(rq.recipient_addresses,'[]'::jsonb),'dev_start',to_char(rq.dev_start,'YYYY-MM-DD'),
       'size_ids',rq.size_ids,'internal_stakeholders',rq.internal_stakeholders,'notify_emails',rq.notify_emails,'notes',coalesce(rq.notes,''),'created_at',to_char(rq.created_at,'YYYY-MM-DD'),
       'components',coalesce((SELECT json_agg(json_build_object('id',c.id,'name',c.name,'dimension',coalesce(c.dimension,'')) ORDER BY c.sort,c.id) FROM planner.product_dev_request_components rc JOIN planner.product_dev_components c ON c.id=rc.component_id WHERE rc.request_id=rq.id),'[]'::json),
       'samples',(SELECT count(*) FROM planner.product_dev_samples ps WHERE ps.request_id=rq.id)::int,
@@ -6701,6 +6701,7 @@ app.post('/api/product/request/:id', async (req, res) => {
     if ('stage' in b) { const st = PROD_STAGES.includes(b.stage) ? b.stage : 'sample_development'; sets.push(`stage=$${i++}`); vals.push(st); log.push('Request ' + rq.ref + ' stage → ' + st); }
     if ('approval_method' in b) { sets.push(`approval_method=$${i++}`); vals.push(b.approval_method === 'photo' ? 'photo' : 'samples'); log.push('Approval method → ' + (b.approval_method === 'photo' ? 'photo' : 'samples')); }
     if ('recipient_countries' in b) { sets.push(`recipient_countries=$${i++}`); vals.push(String(b.recipient_countries || 'UK').trim() || 'UK'); log.push('Recipient country → ' + String(b.recipient_countries || 'UK')); }
+    if ('recipient_addresses' in b) { const addrs = (Array.isArray(b.recipient_addresses) ? b.recipient_addresses : []).map(x => String(x || '').trim()).filter(Boolean).slice(0, 20); sets.push(`recipient_addresses=$${i++}::jsonb`); vals.push(JSON.stringify(addrs)); log.push('Recipient addresses → ' + addrs.length); }
     if ('dev_start' in b) { sets.push(`dev_start=$${i++}::date`); vals.push(b.dev_start || null); log.push('Development start → ' + (b.dev_start || 'cleared')); }
     if ('size_ids' in b) { sets.push(`size_ids=$${i++}`); vals.push((Array.isArray(b.size_ids) ? b.size_ids : []).map(Number).filter(Boolean)); }
     if ('internal_stakeholders' in b) { sets.push(`internal_stakeholders=$${i++}::jsonb`); vals.push(JSON.stringify(emails(b.internal_stakeholders))); }
