@@ -926,6 +926,20 @@ body header.pv-top .pv-lang button:hover{color:#fff}
    inline (the wrapper is display:contents so its children flow in the toolbar flex); the toggle button is phone-only. */
 /* v27.823 (Ben): the search-box scan icon picks up the accent on hover/focus */
 #app #product-root .smp-qscan:hover,#app #product-root .smp-qscan:focus{color:var(--blue)}
+/* v27.825 (Ben): desktop keeps the long label + no line-break; both flip on mobile below */
+#app #product-root .smp-new-short{display:none}
+#app #product-root .smp-tbreak{display:none}
+@media (max-width:640px){
+  #app #product-root #smp-filters #smp-count{order:1;margin-left:auto;font-weight:600}                 /* row 1, right, in line with the view pills */
+  #app #product-root #smp-filters .smp-tbreak{display:block;flex:1 0 100%;height:0;margin:0;order:2}    /* force wrap to row 2 (invisible) */
+  #app #product-root #smp-filters .smp-qwrap{order:3;flex:1 1 auto;min-width:120px}
+  #app #product-root #smp-filters .smp-qwrap input{width:100%;max-width:none}
+  #app #product-root #smp-filters .smp-filt-toggle{order:4}
+  #app #product-root #smp-filters #smp-new{order:5;margin-left:auto}                                    /* row 2, right (where swatch size sat) */
+  #app #product-root #smp-filters .smp-filtgrp{order:99}
+  #app #product-root .smp-new-long{display:none}
+  #app #product-root .smp-new-short{display:inline}
+}
 #app #product-root .smp-filt-toggle{display:none}
 #app #product-root .smp-filtgrp{display:contents}
 @media (max-width:640px){
@@ -935,7 +949,7 @@ body header.pv-top .pv-lang button:hover{color:#fff}
   #app #product-root #smp-filters.filters-open .smp-filtgrp{display:flex;flex-wrap:wrap;gap:9px 12px;width:100%;order:99;margin-top:2px;padding:12px;background:var(--hover);border:1px solid var(--line);border-radius:10px}
   #app #product-root #smp-filters.filters-open .smp-filtgrp .fci{min-height:34px}
   #app #product-root #smp-filters.filters-open .smp-actfilt{width:100%;flex-wrap:wrap}
-  #app #product-root .smp-swsize-wrap{display:none}   /* swatch size is irrelevant with the card layout */
+  #app #product-root .smp-swsize-wrap{display:none!important}   /* swatch size is irrelevant with the card layout (beats the inline display) */
 }
 #app #product-root .smp-tick.smp-leg{width:15px;height:15px;font-size:9px;border-width:2px;cursor:default}
 #app #product-root .smp-tick.smp-leg:hover{box-shadow:none}
