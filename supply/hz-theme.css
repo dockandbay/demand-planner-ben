@@ -798,10 +798,13 @@ body header.pv-top .pv-lang button:hover{color:#fff}
 #app #product-root .smp-tbl th{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--faint);text-align:left;padding:6px 8px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--card);position:sticky;top:0;z-index:2}
 #app #product-root .smp-tbl td{padding:7px 8px;border-bottom:1px solid var(--line2);vertical-align:middle}
 #app #product-root .smp-row:hover td{background:var(--hover)}
-#app #product-root .smp-scell{text-align:center;min-width:44px;padding-left:3px !important;padding-right:3px !important}
+/* v27.815 (Ben): S1..Sn columns share one fixed width + centred so they line up regardless of per-sample content */
+#app #product-root .smp-scell{text-align:center;width:96px;min-width:96px;max-width:96px;padding-left:3px !important;padding-right:3px !important;vertical-align:top}
 #app #product-root .smp-tbl th.smp-scell{padding-left:3px;padding-right:3px}
-#app #product-root .smp-stage{min-width:220px}
-#app #product-root .smp-stage .smp-stage-sel{width:100%;min-width:210px;max-width:100%}
+#app #product-root .smp-scell .smp-cellship{max-width:90px;margin-left:auto;margin-right:auto}
+/* v27.815 (Ben): STAGE column trimmed to the width of its longest option ("Rejected — new sample") — was 220px */
+#app #product-root .smp-stage{width:176px;min-width:176px;max-width:176px}
+#app #product-root .smp-stage .smp-stage-sel{width:100%;min-width:0;max-width:100%}
 #app #product-root .smp-manage{font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;border:1px solid var(--nav);background:var(--nav);color:var(--nav-ink);border-radius:var(--r-sm);padding:3px 10px;cursor:pointer;white-space:nowrap}
 #app #product-root .smp-manage:hover{background:var(--nav-2);border-color:var(--nav-2)}
 #app #product-root .smp-tbl td:first-child,#app #product-root .smp-tbl th:first-child{padding-right:0}

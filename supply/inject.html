@@ -13631,7 +13631,7 @@
   //    received (small dd-mmm date under it); clicking the version label expands the row into per-sample TABS for review
   //    (decision + feedback per component, reject reasons, photos); Age = days since the request last moved; Shipment cell
   //    = the latest sample shipment (carrier + tracking; DHL live status lands in P2b).
-  var _smpFilt={supplier:'',stage:'',season:'',category:'',q:'',mine:false,overdue:false}; var _smpOpen=null;   // {rid,sid}
+  var _smpFilt={supplier:'',stage:'',season:'',category:'',q:'',mine:false,overdue:false,action:''}; var _smpOpen=null;   // {rid,sid}   // v27.815: action = action-owner filter ('' | db | supplier | none)
   var _smpSeasonCollapsed={}, _smpCatCollapsed={};   // v27.762 (Ben): SAMPLING grid season/type grouping collapse state
   var _smpGroupMode='inline', _smpTab={season:null,type:''}, _smpTree={season:null,type:null};   // v27.763 (Ben): grouping layout (inline | tabs | tree), set in CONFIG ▸ Product
   var _smpDeep=null, _smpScroll=null, _smpManagePending=null;   // v27.717/v27.735: pending deep link → open the MANAGE panel {rid, tab}
@@ -13660,6 +13660,27 @@
   function _smpAspectKey(cp){ var d=String(cp.dimension||''); return (['product','packaging','labels','polybag','other'].indexOf(d)>=0)?d:('c'+cp.id); }
   function smpViewPills(){ return '<span style="display:inline-flex" title="Sample requests grid, or review every development sample on one sample shipment (batch)">'+[['requests','Sample requests'],['batch','Batch review']].map(function(o){return '<button class="smp-viewpill'+(_smpView===o[0]?' active':'')+'" data-v="'+o[0]+'">'+o[1]+'</button>';}).join('')+'</span>'; }
   function wireSmpViewPills(c,scope){ scope.querySelectorAll('.smp-viewpill').forEach(function(b){ b.onclick=function(){ if(_smpView===b.dataset.v)return; _smpView=b.dataset.v; try{ localStorage.setItem('smpView',_smpView); }catch(e){} renderProductSampling(c); }; }); }
+  // v27.815 (Ben): ACTION OWNER — whose court the ball is in on a development request. Product team want it obvious whether
+  // the next move is D&B's or the supplier's. Auto-derived from the request state, overridable per request (product_dev_requests.action_owner).
+  //   Rules (Ben): supplier just sent / hasn't been reviewed → D&B action (receive + review); D&B gave the last feedback and
+  //   a resample is due → Supplier action; approved / dropped → No action. A manual override wins until cleared back to auto.
+  function deriveAction(r){
+    if(['approved','approved_with_comments','stop_development'].indexOf(r.stage)>=0)return 'none';
+    if(Number(r.unread_supplier)>0)return 'db';                                   // supplier messaged, unread → D&B
+    var sm=(r.samples||[]); if(!sm.length)return 'supplier';                       // no sample yet → waiting on supplier
+    var last=sm.slice().sort(function(a,b){ return (b.version||0)-(a.version||0); })[0]; if(!last)return 'supplier';
+    if((last.approved||0)>0)return 'none';                                        // latest sample approved
+    if(!last.received_at)return 'db';                                            // sample sent / in transit → D&B to receive
+    var reviewed=(Number(last.rejected)>0)||(Number(last.stopped)>0)||Number(last.feedback||0)>0;
+    return reviewed ? 'supplier' : 'db';                                          // reviewed w/ feedback → supplier resamples; received-unreviewed → D&B
+  }
+  function _smpManualOwner(r){ var o=r&&r.action_owner; return (o==='db'||o==='supplier'||o==='none')?o:null; }
+  function effAction(r){ return _smpManualOwner(r)||deriveAction(r); }
+  function smpActBadge(r){ var ea=effAction(r), manual=!!_smpManualOwner(r);
+    var m={db:['▸ D&B','var(--blue)','#fff'],supplier:['▸ Supplier','var(--amber)','#7c2d12'],none:['— No action','var(--line)','var(--muted)']}[ea], solid=ea!=='none';
+    return '<button class="smp-actbadge" data-rid="'+r.id+'" title="Action owner: '+(manual?'set manually':'auto-derived')+' — click to change (D&B → Supplier → No action → Auto)" '
+      +'style="font-size:10px;font-weight:700;border:1px solid '+(solid?m[1]:'var(--line)')+';background:'+(solid?m[1]:'transparent')+';color:'+m[2]+';border-radius:10px;padding:1px 8px;cursor:pointer;line-height:1.6;white-space:nowrap">'
+      +m[0]+(manual?'':' <span style="opacity:.55;font-weight:600">auto</span>')+'</button>'; }
   function renderProductSampling(c){ if(!c)return;
     if(_smpView==='batch'){   // v27.714 (Ben): Sample batch review is a view of SAMPLING — enter a sample shipment (batch) and review every sample on it
       c.innerHTML='<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">'+smpViewPills()+'</div><div id="smp-batch"></div>'; wireSmpViewPills(c,c); renderProductBatchReview(c.querySelector('#smp-batch')); return; }
@@ -13678,6 +13699,7 @@
         +'<span style="display:flex;align-items:center;gap:5px"><span class="mut" style="font-size:12px">Category</span><select class="fci" id="smp-cat" style="'+selDark(_smpFilt.category)+'"><option value="">All</option>'+cats.map(function(s){return '<option'+(s===_smpFilt.category?' selected':'')+'>'+esc(s)+'</option>';}).join('')+'</select></span>'
         +'<label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer"><input type="checkbox" id="smp-mine"'+(_smpFilt.mine?' checked':'')+'> Mine</label>'
         +'<label style="font-size:12px;display:flex;align-items:center;gap:4px;cursor:pointer" title="a submitted sample not yet received, or nothing moved for 14+ days"><input type="checkbox" id="smp-overdue"'+(_smpFilt.overdue?' checked':'')+'> Overdue</label>'
+        +'<span class="smp-actfilt" title="Whose court the ball is in — D&B to review / Supplier to resample / no action needed" style="display:inline-flex;gap:4px;align-items:center">'+[['','All'],['db','D&B action'],['supplier','Supplier action'],['none','No action']].map(function(o){ var on=_smpFilt.action===o[0]; return '<button class="smp-actpill" data-a="'+o[0]+'" style="font-size:11px;padding:3px 9px;border-radius:12px;border:1px solid var(--line);cursor:pointer;background:'+(on?'var(--nav)':'var(--card)')+';color:'+(on?'#fff':'var(--ink)')+'">'+o[1]+'</button>'; }).join('')+'</span>'   /* v27.815 (Ben): action-owner filter pills */
         +'<span id="smp-count" class="mut" style="font-size:12px"></span>'
         +'<span style="display:inline-flex;align-items:center;gap:5px;margin-left:auto"><span style="color:var(--muted);font-size:12px">Swatch</span><span style="display:inline-flex">'+[['sm','S'],['md','M'],['lg','L']].map(function(o){return '<button class="pg-swsize smp-swsize'+(_smpSwSize===o[0]?' active':'')+'" data-s="'+o[0]+'" title="'+({sm:'Small',md:'Medium',lg:'Large'}[o[0]])+' swatches">'+o[1]+'</button>';}).join('')+'</span></span>'
         +'<button class="save-btn" id="smp-new" style="background:var(--blue);color:#fff;border-color:var(--blue)">+ Development request</button>';
@@ -13687,6 +13709,7 @@
       var bind=function(id,k,ev){ var el=fb.querySelector('#'+id); if(el)el[ev||'onchange']=function(){ _smpFilt[k]=(el.type==='checkbox')?el.checked:el.value; draw(); }; };
       bind('smp-sup','supplier'); bind('smp-stage','stage'); bind('smp-season','season'); bind('smp-cat','category'); bind('smp-mine','mine'); bind('smp-overdue','overdue'); bind('smp-q','q','oninput');
       var _smpScan=fb.querySelector('#smp-scan'); if(_smpScan)_smpScan.onclick=function(){ if(typeof openBarcodeScanner==='function')openBarcodeScanner(); };   // v27.814 (Ben): scan QR / type 3-char code → open + receive the sample
+      fb.querySelectorAll('.smp-actpill').forEach(function(b){ b.onclick=function(){ _smpFilt.action=b.dataset.a; fb.querySelectorAll('.smp-actpill').forEach(function(x){ var on=x.dataset.a===_smpFilt.action; x.style.background=on?'var(--nav)':'var(--card)'; x.style.color=on?'#fff':'var(--ink)'; }); draw(); }; });   // v27.815 (Ben): action-owner filter
       fb.querySelector('#smp-new').onclick=function(){ pget('/api/product/items').then(function(items){ items=Array.isArray(items)?items:[]; var ov=document.createElement('div'); ov.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.45);z-index:200050;display:flex;align-items:flex-start;justify-content:center;padding:10vh 12px';
           ov.innerHTML='<div style="background:var(--card);border-radius:12px;box-shadow:0 18px 60px rgba(0,0,0,.35);width:100%;max-width:460px;padding:16px 18px;text-align:left"><div style="font-weight:800;font-size:15px;margin-bottom:8px">Which product?</div><input class="fci" id="smp-pick" list="smp-picklist" placeholder="search ref / colour way…" style="width:100%"><datalist id="smp-picklist">'+items.map(function(it){return '<option value="'+esc(it.ref)+'">'+esc(prodColourDisplay(it).replace(/<[^>]+>/g,''))+'</option>';}).join('')+'</datalist><div style="margin-top:12px;display:flex;gap:8px"><button class="save-btn" id="smp-pick-go" style="background:var(--blue);color:#fff;border-color:var(--blue)">Next →</button><button class="save-btn light" id="smp-pick-x">Cancel</button></div></div>';
           document.body.appendChild(ov); var inp=ov.querySelector('#smp-pick'); inp.focus(); var go=function(){ var ref=inp.value.trim(); if(!items.some(function(it){return it.ref===ref;})){ inp.style.borderColor='var(--neg)'; return; } ov.remove(); openRequestForm(ref,{after:function(){ renderProductSampling(c); }}); };
@@ -13694,10 +13717,11 @@
       function overdue(r){ if((r.samples||[]).some(function(s){return !s.received_at&&s.supplier_status!=='cancelled';}))return true; var a=_smpAge(r.updated_at); return a!=null&&a>=14&&['approved','approved_with_comments','stop_development'].indexOf(r.stage)<0; }
       function draw(){
         if(_smpDeep){ var dl=_smpDeep; _smpDeep=null; var rr=rows.filter(function(x){ var a=String(x.ref).toLowerCase(), b=String(x.item_ref||'').toLowerCase(), qq=String(dl.ref).toLowerCase(); return a===qq||b===qq; })[0];   // v27.735: match request ref OR product item_ref
-          if(rr){ _smpFilt={supplier:'',stage:'',season:'',category:'',q:'',mine:false,overdue:false}; ['smp-sup','smp-stage','smp-season','smp-cat'].forEach(function(id){ var el=fb.querySelector('#'+id); if(el){ el.value=''; el.setAttribute('style',selDark('')); } }); var qi=fb.querySelector('#smp-q'); if(qi)qi.value=''; ['smp-mine','smp-overdue'].forEach(function(id){ var el=fb.querySelector('#'+id); if(el)el.checked=false; }); _smpScroll=String(rr.id); _smpManagePending={rid:String(rr.id), tab:dl.tab}; } }
+          if(rr){ _smpFilt={supplier:'',stage:'',season:'',category:'',q:'',mine:false,overdue:false,action:''}; ['smp-sup','smp-stage','smp-season','smp-cat'].forEach(function(id){ var el=fb.querySelector('#'+id); if(el){ el.value=''; el.setAttribute('style',selDark('')); } }); var qi=fb.querySelector('#smp-q'); if(qi)qi.value=''; ['smp-mine','smp-overdue'].forEach(function(id){ var el=fb.querySelector('#'+id); if(el)el.checked=false; }); _smpScroll=String(rr.id); _smpManagePending={rid:String(rr.id), tab:dl.tab}; } }
         var q=_smpFilt.q.trim().toLowerCase();
         var f=rows.filter(function(r){ if(_smpFilt.supplier&&r.supplier_name!==_smpFilt.supplier)return false; if(_smpFilt.stage&&r.stage!==_smpFilt.stage)return false; if(_smpFilt.season&&r.season!==_smpFilt.season)return false; if(_smpFilt.category&&r.category!==_smpFilt.category)return false;
           if(_smpFilt.mine&&!(r.internal_stakeholders||[]).some(function(e){return String(e).toLowerCase()===me;}))return false; if(_smpFilt.overdue&&!overdue(r))return false;
+          if(_smpFilt.action&&effAction(r)!==_smpFilt.action)return false;   // v27.815 (Ben): action-owner filter
           if(q){ var hay=(r.ref+' '+r.item_ref+' '+r.colour_name+' '+r.bulk_colour_name+' '+r.supplier_name+' '+r.supplier_code+' '+r.category+' '+(r.components||[]).map(function(x){return x.name;}).join(' ')
             +' '+(r.samples||[]).map(function(x){return (r.item_ref+'_v'+x.version)+' '+(x.short_code||'');}).join(' ')).toLowerCase();   /* v27.814 (Ben): also match sample version refs (…_v1) and QR short codes */
             if(hay.indexOf(q)<0)return false; } return true; });
@@ -13726,7 +13750,7 @@
             +'<td class="l smp-refcell"><div class="smp-ref"><a class="smp-openreq" data-ref="'+esc(r.item_ref)+'" data-rid="'+r.id+'" style="cursor:pointer;color:var(--ink)">'+esc(r.ref)+'</a></div><div style="margin-top:4px">'+acc+'</div><div style="margin-top:5px"><button class="smp-manage" data-rid="'+r.id+'" title="Manage this request: master data, timeline, and each sample in tabs">⚙ Manage</button></div></td>'
             +'<td class="l"><div style="font-size:12px;font-weight:600">'+esc(oneColour)+'</div>'+(compTxt?'<div class="mut" style="font-size:11px;margin-top:2px">'+esc(compTxt)+'</div>':'')+'<div style="margin-top:3px">'+(r.category?hzCatBadge(r.category,r.category_colour):'<span class="mut tiny">no category</span>')+'</div></td>'   // v27.776 (Ben): single colour + component under it + category badge
             +'<td class="l">'+esc(r.supplier_name)+(r.supplier_code?' <span class="mut tiny">'+esc(r.supplier_code)+'</span>':'')+'<div style="margin-top:3px"><span class="smp-type'+(/custom/i.test(r.type||'')?' custom':'')+'">'+esc(/custom/i.test(r.type||'')?'Custom order':'Development')+'</span></div></td>'
-            +'<td class="l smp-stage"><select class="fci smp-stage-sel" data-rid="'+r.id+'" data-ref="'+esc(r.item_ref)+'" style="font-size:12px;'+prodStageStyle(r.stage)+'">'+STAGE_META.map(function(m){return '<option value="'+m[0]+'"'+(m[0]===r.stage?' selected':'')+'>'+esc(m[1])+'</option>';}).join('')+'</select></td>';
+            +'<td class="l smp-stage"><select class="fci smp-stage-sel" data-rid="'+r.id+'" data-ref="'+esc(r.item_ref)+'" style="font-size:12px;'+prodStageStyle(r.stage)+'">'+STAGE_META.map(function(m){return '<option value="'+m[0]+'"'+(m[0]===r.stage?' selected':'')+'>'+esc(m[1])+'</option>';}).join('')+'</select><div style="margin-top:5px">'+smpActBadge(r)+'</div></td>';
           for(var k=1;k<=maxV;k++){ var s=(r.samples||[])[k-1]; if(!s){ cells+='<td class="smp-scell"><span class="smp-tick none" title="no sample '+k+' yet"></span></td>'; continue; }
             var rec=!!s.received_at; var sub=_smpDM(s.sample_date||s.created_at);
             var _st=_smpStatus(s);
@@ -13788,6 +13812,9 @@
         }
         g.querySelectorAll('.smp-openreq').forEach(function(a){ a.onclick=function(){ _prodDetailTab='requests'; _prodHighlightReq=Number(a.dataset.rid); openProductDrawer(a.dataset.ref,null,'requests'); }; });
         g.querySelectorAll('.smp-manage').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var r=f.filter(function(x){return String(x.id)===b.dataset.rid;})[0]; if(r)smpManage(b.closest('tr'), r, ths.length); }; });   // v27.730: MANAGE → inline tabbed panel
+        g.querySelectorAll('.smp-actbadge').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); var rid=b.dataset.rid, r=rows.filter(function(x){return String(x.id)===rid;})[0]; if(!r)return;   // v27.815 (Ben): cycle action owner — auto → D&B → Supplier → No action → auto
+          var cur=_smpManualOwner(r), next=cur==null?'db':cur==='db'?'supplier':cur==='supplier'?'none':'';
+          shipPost('/api/product/request/'+rid,{action_owner:next},function(j){ if(j&&j.error){alert(j.error);return;} r.action_owner=next||null; draw(); }); }; });
         g.querySelectorAll('.smp-tl').forEach(function(a){ a.onclick=function(e){ e.stopPropagation(); var ref=a.dataset.ref, tr=a.closest('tr');   // v27.722 (Ben): timeline lives on SAMPLING — expand inline here, no jump to the Products drawer
           var ex=g.querySelector('tr.smp-tlexp'); if(ex){ var same=ex.getAttribute('data-ref')===ref; ex.remove(); if(same)return; }
           var exp=document.createElement('tr'); exp.className='smp-tlexp'; exp.setAttribute('data-ref',ref);

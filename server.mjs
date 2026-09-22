@@ -6707,6 +6707,7 @@ app.post('/api/product/request/:id', async (req, res) => {
     if ('internal_stakeholders' in b) { sets.push(`internal_stakeholders=$${i++}::jsonb`); vals.push(JSON.stringify(emails(b.internal_stakeholders))); }
     if ('notify_emails' in b) { sets.push(`notify_emails=$${i++}::jsonb`); vals.push(JSON.stringify(emails(b.notify_emails))); }
     if ('notes' in b) { sets.push(`notes=$${i++}`); vals.push(String(b.notes || '').trim() || null); }
+    if ('action_owner' in b) { const ao = ['db', 'supplier', 'none'].indexOf(b.action_owner) >= 0 ? b.action_owner : null; sets.push(`action_owner=$${i++}`); vals.push(ao); log.push('Action owner → ' + (ao || 'auto')); }   // v27.815 (Ben): '' / invalid → NULL (auto-derive)
     await client.query('BEGIN');
     if (sets.length) { vals.push(id); await client.query(`UPDATE planner.product_dev_requests SET ${sets.join(',')}, updated_at=now() WHERE id=$${i}`, vals); }
     if (Array.isArray(b.component_ids)) { const comps = b.component_ids.map(Number).filter(Boolean);
@@ -6740,7 +6741,8 @@ app.get('/api/product/sampling', async (_req, res) => {
         to_char(i.updated_at,'YYYY-MM-DD HH24:MI') item_updated_at,
         coalesce((SELECT c.colour_hex FROM planner.categories c WHERE c.category=i.category LIMIT 1),'') category_colour,
         rq.supplier_name, coalesce(rq.supplier_code,'') supplier_code, rq.stage, rq.approval_method, coalesce(rq.recipient_countries,'') recipient_countries,
-        to_char(rq.supplier_accepted_at,'YYYY-MM-DD') supplier_accepted_at, coalesce(rq.supplier_accepted_by,'') supplier_accepted_by,   -- v27.761: supplier acceptance of the dev request
+        coalesce(rq.action_owner,'') action_owner,   -- v27.815 (Ben): manual action-owner override ('' = auto-derive)
+        to_char(rq.supplier_accepted_at,'YYYY-MM-DD') supplier_accepted_at, coalesce(rq.supplier_accepted_by,'') supplier_accepted_by,   -- v27.761: supplieracceptance of the dev request
         to_char(rq.dev_start,'YYYY-MM-DD') dev_start, rq.internal_stakeholders, rq.notify_emails, coalesce(rq.notes,'') notes,
         to_char(rq.created_at,'YYYY-MM-DD') created_at, to_char(rq.updated_at,'YYYY-MM-DD HH24:MI') updated_at,
         coalesce((SELECT json_agg(json_build_object('id',c.id,'name',c.name,'dimension',coalesce(c.dimension,''),'sampling_mode',coalesce(c.sampling_mode,'sampled')) ORDER BY c.sort,c.id)
