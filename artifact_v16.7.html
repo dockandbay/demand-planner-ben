@@ -2386,17 +2386,12 @@ function fbaTransferSized(sku,mkt,capUnits){
   // ANY = send everything, but carton-round the whole-carton part (Amazon ships in cartons) — so a 589 need with
   // full cartons shows 560, not 589. Sub-carton stragglers (no full carton) still send the raw amount.
   if(FBA_CARTON_MODE==='ANY')return fullQty>0?fullQty:Math.round(base);
-  if(FBA_CARTON_MODE==='PARTIAL'){
-    if(fullQty>0)return 0;                                            // carton-filler → send under FULL, not here
-    const q=Math.round(base); return q<0.2*d60?0:q;                   // sub-carton straggler: send the raw partial
-  }
-  // A (Ben v27.686): a SKU with ZERO FBA cover shouldn't be left with nothing when the transferable amount is under
-  // one carton. Seed it with a partial of ~1 month of FBA demand (capped by what's transferable), so a launch/empty
-  // SKU gets stock now without over-shipping into next month's needs. Only fires when FBA is genuinely empty.
-  if(fbaHave<=0 && fullQty<=0 && base>0){ const seed=Math.min(Math.round(base),Math.round(fbaFwdDemand(md,1))); if(seed>0)return seed; }
-  if(fullQty<=0)return 0;                                             // FULL: too small for a whole carton
-  if(fullQty<0.2*d60)return 0;                                        // below the 20% forward-demand floor
-  return fullQty;
+  // v27.834 (Ben, Option A): FULL and PARTIAL now PARTITION ANY exactly — every SKU that ANY shows appears under one
+  // of them (FULL = whole-carton amount, PARTIAL = sub-carton straggler), never both, never neither. The old 20%-of-d60
+  // floor + empty-FBA seed diverged from ANY and hid ~16 small-but-real transfers, so clearing Full and Partial
+  // separately (as Ben & Nicole do) skipped them → OOS. Now Full + Partial === Any, at the same per-line quantities.
+  if(FBA_CARTON_MODE==='PARTIAL')return fullQty>0?0:Math.round(base);  // sub-carton straggler (whole cartons go under FULL)
+  return fullQty>0?fullQty:0;                                          // FULL: the whole-carton amount
 }
 // Recommended units to transfer 3PL -> FBA now, per the agreed rules:
 //  - size the shipment to forecast FBA demand over the FBA-target weeks (from the demand plan)
