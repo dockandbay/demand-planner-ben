@@ -13852,7 +13852,7 @@
         g.querySelectorAll('tr.smp-cathdr').forEach(function(h){ h.onclick=function(){ var kk=h.dataset.season+'|'+h.dataset.cat; _smpCatCollapsed[kk]=!_smpCatCollapsed[kk]; _smpApplyCollapse(); }; });
         _smpApplyCollapse();
         // v27.763 (Ben): alternative grouping layouts (CONFIG ▸ Product) — reuse the rendered rows, swap the navigation chrome.
-        if(!isMob && (_smpGroupMode||'inline')!=='inline'){   // v27.820: mobile keeps the simple season/type grouping
+        if((_smpGroupMode||'inline')!=='inline'){   // v27.830 (Ben): SAMPLING follows the CONFIG grid layout on mobile too — same as the PRODUCTS grid (was gated to desktop in v27.820)
           var _tbl=g.querySelector('table.smp-tbl');
           g.querySelectorAll('tr.smp-seasonhdr, tr.smp-cathdr').forEach(function(h){ h.remove(); });   // headers replaced by tabs / tree nav
           var _seas=[]; f.forEach(function(r){ var s=r.season||''; if(_seas.indexOf(s)<0)_seas.push(s); });
@@ -15039,7 +15039,7 @@
       var STAT=[['dev_actions','In development + open actions'],['unapproved','Not approved'],['','All'],['in_development','In development'],['approved','Approved'],['dropped','Rejected']];
       var selDark=function(v){ return 'text-align:left'+(v?';background:var(--nav);color:#fff;font-weight:600':''); };   // dark chip when a filter is set
       var fb=document.getElementById('pg-filters');
-      fb.innerHTML='<button class="save-btn outline-blue" id="pg-new" style="font-weight:700">+ NEW</button>'   // v27.805 (Ben): always-visible, first, out of the collapsible Filters panel
+      fb.innerHTML='<button class="save-btn" id="pg-new" style="font-weight:700;background:var(--blue);color:#fff;border-color:var(--blue)">+ NEW</button>'   // v27.805 (Ben): always-visible, first, out of the collapsible Filters panel; v27.830: blue fill like the SAMPLING "New" button
         +'<input class="fci" id="pg-q" value="'+esc(_prodFilt.q)+'" placeholder="🔍 search ref / colour / supplier…" style="width:190px;text-align:left">'
         +'<button class="save-btn pg-filt-toggle" id="pg-filt-toggle" type="button">⚙ Filters</button>'   // phone only (v27.488): the selects collapse behind this
         +'<div class="pg-filt-panel" id="pg-filt-panel">'
