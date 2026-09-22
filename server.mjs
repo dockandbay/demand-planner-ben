@@ -7711,6 +7711,20 @@ app.post('/api/product/component-type', async (req, res) => {
 app.post('/api/product/component-type/:id/delete', async (req, res) => {
   try { await pool.query(`UPDATE planner.component_types SET active=false WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
+// Product Workshop Barcodes (mig 293, Ben) — the fixed pool of real GS1 EAN-13s for the design/product team. Read-only
+// list here (seeded via migration); assignment happens from the product Sizes grid (phase 2). Rendered/printed client-side.
+app.get('/api/product/workshop-barcodes', async (_req, res) => {
+  try {
+    const rows = (await pool.query(`SELECT b.barcode, b.seq, b.status, b.assigned_ref, b.assigned_sku,
+        b.assigned_size_id, to_char(b.assigned_at,'YYYY-MM-DD') assigned_at, coalesce(b.assigned_by,'') assigned_by,
+        i.description AS product_name, i.colour_name
+      FROM planner.product_workshop_barcodes b
+      LEFT JOIN planner.product_dev_items i ON i.ref = b.assigned_ref
+      ORDER BY b.seq, b.barcode`)).rows;
+    const free = rows.filter(r => r.status !== 'assigned').length;
+    res.json({ ok: true, total: rows.length, free, assigned: rows.length - free, rows });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // Sample reject reasons (mig 264) — the defined, editable list tagged when a sample aspect is rejected. Powers the
 // mandatory reason picker in the Samples tab + the rejection metrics report.
 app.get('/api/product/reject-reasons', async (req, res) => {

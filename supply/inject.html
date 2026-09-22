@@ -14704,6 +14704,47 @@
   var _pgSeasonCollapsed={}, _pgCatCollapsed={};   // PRODUCT grid group collapse state — persists across redraws
   var _pgTab={season:'__all__',type:''}, _pgTree={season:null,type:null};   // v27.766/775 (Ben): PRODUCTS grid tabs/tree state; season tabs default to ALL
   var _prodCfgTab='season';   // PRODUCT ▸ Config active L3 sub-tab: season | cats | tags | phrases
+  // v27.803 (Ben): PRODUCT ▸ CONFIG ▸ Workshop barcodes — a fixed pool of real GS1 EAN-13s for the design team. Lists the
+  // pool with a live barcode preview + free/assigned status, and prints any selection as a zip (reusing the barcode-gen
+  // EAN-13 SVG renderer). Assignment to a product size happens on the Sizes grid (phase 2); this screen is view + print.
+  function renderWorkshopBarcodes(b){ var host=b.querySelector('#pwb-host'); if(!host)return;
+    fetch('/api/product/workshop-barcodes').then(function(r){return r.json();}).then(function(d){
+      if(!d||d.ok===false){ host.innerHTML='<div style="color:var(--neg)">Could not load barcodes'+(d&&d.error?': '+d.error:'')+'</div>'; return; }
+      var rows=d.rows||[];
+      host.innerHTML='<div class="annot" style="margin-bottom:10px"><b>Product workshop barcodes.</b> A fixed pool of <b>'+d.total+'</b> real GS1 EAN-13 barcodes reserved for the design/product team. Assign one to a size on a product’s <b>Sizes</b> grid; tick any here and print them as a zip.</div>'
+        +'<div class="bar" style="align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px">'
+          +'<span style="display:inline-flex;gap:10px;align-items:center">'
+            +'<span class="pill" style="color:var(--pos);border-color:var(--pos)">'+d.free+' free</span>'
+            +'<span class="pill" style="color:var(--muted)">'+d.assigned+' assigned</span>'
+            +'<span class="pill">'+d.total+' total</span></span>'
+          +'<span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center">'
+            +'<label style="font-size:12px"><input type="radio" name="pwb-fmt" value="png" checked> PNG</label>'
+            +'<label style="font-size:12px"><input type="radio" name="pwb-fmt" value="jpg"> JPG</label>'
+            +'<select class="fci" id="pwb-size" style="text-align:left"><option value="452">452 px</option><option value="678" selected>678 px</option><option value="1000">1000 px</option><option value="1500">1500 px</option></select>'
+            +'<button class="save-btn" id="pwb-selall" style="font-size:11px">Select free</button>'
+            +'<button class="save-btn" id="pwb-dl" style="background:var(--pos-bg);color:var(--pos);border-color:var(--pos)" disabled>⬇ Download selected (.zip)</button></span>'
+          +'</div><div id="pwb-msg" class="mut tiny" style="margin-bottom:8px">&nbsp;</div>'
+        +'<div id="pwb-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px">'
+          +rows.map(function(r){ var svg=eanBarcodeSVG(r.barcode)||''; var asn=r.status==='assigned';
+            var badge=asn?('<span class="pill" style="color:var(--muted);font-size:9px" title="assigned '+(r.assigned_at||'')+'">assigned'+(r.assigned_ref?(' · '+esc(r.assigned_ref)):'')+'</span>'):'<span class="pill" style="color:var(--pos);border-color:var(--pos);font-size:9px">free</span>';
+            return '<label class="pwb-cell" data-bc="'+r.barcode+'" style="border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--card);display:flex;flex-direction:column;gap:5px;cursor:pointer">'
+              +'<div style="display:flex;justify-content:space-between;align-items:center;gap:6px"><label style="display:inline-flex;gap:5px;align-items:center;font:600 11px ui-monospace,monospace"><input type="checkbox" class="pwb-ck" value="'+r.barcode+'">'+r.barcode+'</label>'+badge+'</div>'
+              +'<img src="data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg)+'" style="width:100%;height:56px;object-fit:contain;background:#fff;border:1px solid var(--line2);border-radius:4px" alt="'+r.barcode+'">'
+              +(asn&&r.assigned_sku?('<div class="mut tiny" style="text-align:left">SKU '+esc(r.assigned_sku)+(r.colour_name?(' · '+esc(r.colour_name)):'')+'</div>'):'')
+              +'</label>'; }).join('')
+        +'</div>';
+      var grid=host.querySelector('#pwb-grid'), dlBtn=host.querySelector('#pwb-dl'), msg=host.querySelector('#pwb-msg');
+      function selCount(){ return host.querySelectorAll('.pwb-ck:checked').length; }
+      function sync(){ var n=selCount(); dlBtn.disabled=!n; dlBtn.textContent='⬇ Download selected'+(n?(' ('+n+')'):'')+' (.zip)'; }
+      grid.addEventListener('change',function(e){ if(e.target&&e.target.classList.contains('pwb-ck')){ var cell=e.target.closest('.pwb-cell'); if(cell)cell.style.borderColor=e.target.checked?'var(--blue)':'var(--line)'; sync(); } });
+      host.querySelector('#pwb-selall').onclick=function(){ host.querySelectorAll('.pwb-cell').forEach(function(c){ if(c.querySelector('.pill') && /free/.test(c.querySelector('.pill').textContent)){ var ck=c.querySelector('.pwb-ck'); ck.checked=true; c.style.borderColor='var(--blue)'; } }); sync(); };
+      dlBtn.onclick=function(){ var picks=[...host.querySelectorAll('.pwb-ck:checked')].map(function(x){return x.value;}); if(!picks.length)return;
+        var fmtR=host.querySelector('input[name=pwb-fmt]:checked'), f=(fmtR&&fmtR.value==='jpg')?{mime:'image/jpeg',ext:'jpg'}:{mime:'image/png',ext:'png'};
+        var w=parseInt((host.querySelector('#pwb-size')||{}).value,10)||678; msg.textContent='Rendering '+picks.length+' barcode'+(picks.length===1?'':'s')+'…'; dlBtn.disabled=true;
+        var files=[]; var jobs=picks.map(function(code){ return new Promise(function(res){ var svg=eanBarcodeSVG(code); if(!svg)return res(); svgToImg(svg,w,f.mime,function(bl){ if(bl&&bl.arrayBuffer){ bl.arrayBuffer().then(function(ab){ files.push({name:code+'.'+f.ext,data:new Uint8Array(ab)}); res(); },function(){res();}); } else res(); }); }); });
+        Promise.all(jobs).then(function(){ if(!files.length){ msg.textContent='Nothing to download.'; dlBtn.disabled=false; return; } var blob=makeZipStore(files); var a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='workshop_barcodes.zip'; document.body.appendChild(a); a.click(); setTimeout(function(){ try{URL.revokeObjectURL(a.href);}catch(e){} a.remove(); },1200); msg.textContent='Downloaded '+files.length+' '+f.ext.toUpperCase()+' barcode'+(files.length===1?'':'s')+' at '+w+'px.'; dlBtn.disabled=false; }); };
+    }).catch(function(e){ host.innerHTML='<div style="color:var(--neg)">Barcodes failed to load: '+(e&&e.message||e)+'</div>'; });
+  }
   // PRODUCT ▸ CONFIG — seasons, category codes, timeline tags/badges, timeline quick phrases. Lives in the PRODUCT
   // module (moved here from the ⚙ CONFIG ▸ Product panel). `b` = the container to render into.
   function renderProductConfig(b){ b.innerHTML='<div class="count" style="padding:10px 2px;color:var(--faint)">Loading…</div>';
@@ -14764,15 +14805,18 @@
           +'<div class="tw"><table class="samp-tbl" style="font-size:12px"><thead><tr><th class="l">Reason</th><th class="l">Sort</th><th class="l">Active</th><th></th></tr></thead><tbody>'+rrRows+rrAddRow+'</tbody></table></div>';
         SEC.phrases='<div class="sect-h">Timeline quick phrases <button class="save-btn" id="pcsnip-new" style="margin-left:8px;font-size:11px;padding:3px 10px">+ Add phrase</button> <span class="mut tiny" style="font-weight:400">— type <b>/</b> in a product timeline box to insert one</span></div>'
           +'<div class="tw"><table class="samp-tbl" style="font-size:12px"><thead><tr><th class="l">Phrase</th><th class="l">Sort</th><th class="l">Active</th><th></th></tr></thead><tbody>'+(snipRows||'<tr><td colspan="4" class="count">no phrases yet</td></tr>')+'</tbody></table></div>';
-        var TABS=[['season','Season / release'],['cats','Categories'],['components','Components'],['rejectreasons','Reject reasons'],['tags','Timeline tags & badges'],['phrases','Timeline quick phrases'],['layout','Grid layout']];
+        var TABS=[['season','Season / release'],['cats','Categories'],['components','Components'],['workshop-barcodes','Workshop barcodes'],['rejectreasons','Reject reasons'],['tags','Timeline tags & badges'],['phrases','Timeline quick phrases'],['layout','Grid layout']];
         // v27.763 (Ben): SAMPLING grid grouping layout — team-wide (app_settings.sampling_group_mode)
         var _lmodes=[['inline','Inline headers','Collapsible Season → Type headers down one scrolling grid. Best for scanning everything at once.'],['tabs','Season tabs + Type pills','A tab per season with a Type pill row. Two taps to any Season × Type slice; nothing scrolls off.'],['tree','Season / Type tree','A Season → Type outline on the left, the grid on the right. Scales to many seasons without a long scroll.']];
         SEC.layout='<div class="sect-h">PRODUCT &amp; SAMPLING grid layout</div><div class="annot" style="margin-bottom:12px">How the PRODUCTS and SAMPLING grids group products by Season and Type. Applies for everyone.</div>'
           +'<div style="display:flex;flex-direction:column;gap:10px;max-width:560px">'+_lmodes.map(function(m){ var on=(d.groupMode===m[0]); return '<label class="pcfg-lmode" data-mode="'+m[0]+'" style="display:flex;gap:11px;align-items:flex-start;padding:11px 13px;border:1px solid '+(on?'var(--blue)':'var(--line)')+';border-radius:var(--r-md);cursor:pointer;background:'+(on?'var(--blue-soft)':'var(--card)')+'"><input type="radio" name="pcfg-lmode" value="'+m[0]+'"'+(on?' checked':'')+' style="margin-top:2px"><span><span style="font-weight:700;font-size:13px">'+esc(m[1])+'</span><span style="display:block;color:var(--muted);font-size:12px;margin-top:2px">'+esc(m[2])+'</span></span></label>'; }).join('')+'</div>'
           +'<div class="mut tiny" id="pcfg-lmode-saved" style="margin-top:10px">&nbsp;</div>';
+        // v27.803 (Ben): Product Workshop Barcodes — a fixed pool of real GS1 EAN-13s for the design team. Filled async.
+        SEC['workshop-barcodes']='<div id="pwb-host"><div class="count" style="padding:10px 2px">Loading barcodes…</div></div>';
         if(!SEC[_prodCfgTab])_prodCfgTab='season';
         var nav='<div id="pcfg-subs-l3">'+TABS.map(function(t){ return '<span class="rtab pcfg-tab'+(t[0]===_prodCfgTab?' active':'')+'" data-k="'+t[0]+'">'+esc(t[1])+'</span>'; }).join('')+'</div>';
         b.innerHTML=nav+SEC[_prodCfgTab];
+        if(_prodCfgTab==='workshop-barcodes'){ try{ renderWorkshopBarcodes(b); }catch(e){ var h=b.querySelector('#pwb-host'); if(h)h.innerHTML='<div style="color:var(--neg)">Barcodes failed to load: '+(e&&e.message||e)+'</div>'; } }
         b.querySelectorAll('.pcfg-tab').forEach(function(t){ t.onclick=function(){ _prodCfgTab=t.dataset.k; try{writeHash(['product','config',t.dataset.k]);}catch(e){} draw(); }; });
         // v27.763: save the SAMPLING grid layout mode (team-wide) and reflect it immediately
         b.querySelectorAll('.pcfg-lmode input').forEach(function(inp){ inp.onchange=function(){ var mode=inp.value; d.groupMode=mode; _smpGroupMode=mode;
