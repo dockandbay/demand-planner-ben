@@ -14854,6 +14854,7 @@
   // v27.803 (Ben): PRODUCT ▸ CONFIG ▸ Workshop barcodes — a fixed pool of real GS1 EAN-13s for the design team. Lists the
   // pool with a live barcode preview + free/assigned status, and prints any selection as a zip (reusing the barcode-gen
   // EAN-13 SVG renderer). Assignment to a product size happens on the Sizes grid (phase 2); this screen is view + print.
+  var _pwbHideUsed=false;   // v27.837 (Ben): "Hide used" toggle state — persists across the view's re-renders
   function renderWorkshopBarcodes(b){ var host=b.querySelector('#pwb-host'); if(!host)return;
     fetch('/api/product/workshop-barcodes').then(function(r){return r.json();}).then(function(d){
       if(!d||d.ok===false){ host.innerHTML='<div style="color:var(--neg)">Could not load barcodes'+(d&&d.error?': '+d.error:'')+'</div>'; return; }
@@ -14863,7 +14864,9 @@
           +'<span style="display:inline-flex;gap:10px;align-items:center">'
             +'<span class="pill" style="color:var(--pos);border-color:var(--pos)">'+d.free+' free</span>'
             +'<span class="pill" style="color:var(--muted)">'+d.assigned+' assigned</span>'
-            +'<span class="pill">'+d.total+' total</span></span>'
+            +'<span class="pill" style="color:var(--amber);border-color:var(--amber)">'+(d.used||0)+' used</span>'   /* v27.837 (Ben): manually marked used */
+            +'<span class="pill">'+d.total+' total</span>'
+            +'<label style="font-size:12px;display:inline-flex;align-items:center;gap:4px;cursor:pointer;margin-left:4px" title="hide barcodes that are assigned or manually marked used — show only free ones"><input type="checkbox" id="pwb-hideused"'+(_pwbHideUsed?' checked':'')+'> Hide used</label></span>'
           +'<span style="margin-left:auto;display:inline-flex;gap:8px;align-items:center">'
             +'<label style="font-size:12px"><input type="radio" name="pwb-fmt" value="png" checked> PNG</label>'
             +'<label style="font-size:12px"><input type="radio" name="pwb-fmt" value="jpg"> JPG</label>'
@@ -14872,13 +14875,16 @@
             +'<button class="save-btn" id="pwb-dl" style="background:var(--pos-bg);color:var(--pos);border-color:var(--pos)" disabled>⬇ Download selected</button></span>'
           +'</div><div id="pwb-msg" class="mut tiny" style="margin-bottom:8px">&nbsp;</div>'
         +'<div id="pwb-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px">'
-          +rows.map(function(r){ var svg=eanBarcodeSVG(r.barcode)||''; var asn=r.status==='assigned';
-            // v27.809 (Ben): short status chip only (was 'assigned · <long ref>' which overflowed the cell under the next one).
-            var badge=asn?('<span class="pill" style="color:var(--muted);font-size:9px" title="assigned '+(r.assigned_at||'')+'">assigned</span>'):'<span class="pill" style="color:var(--pos);border-color:var(--pos);font-size:9px">free</span>';
-            return '<label class="pwb-cell" data-bc="'+r.barcode+'" style="border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--card);display:flex;flex-direction:column;gap:5px;cursor:pointer;min-width:0">'
+          +rows.map(function(r){ var svg=eanBarcodeSVG(r.barcode)||''; var asn=r.status==='assigned', usd=r.status==='used';
+            // v27.809 (Ben): short status chip only. v27.837: 'used' (manual) state + mark used/free.
+            var badge=asn?('<span class="pill" style="color:var(--muted);font-size:9px" title="assigned '+(r.assigned_at||'')+'">assigned</span>')
+              :usd?('<span class="pill" style="color:var(--amber);border-color:var(--amber);font-size:9px" title="manually marked used '+(r.assigned_at||'')+'">used</span>')
+              :'<span class="pill" style="color:var(--pos);border-color:var(--pos);font-size:9px">free</span>';
+            return '<label class="pwb-cell" data-bc="'+r.barcode+'" data-status="'+esc(r.status)+'" style="border:1px solid var(--line);border-radius:8px;padding:8px;background:var(--card);display:flex;flex-direction:column;gap:5px;cursor:pointer;min-width:0">'
               +'<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;min-width:0"><label style="display:inline-flex;gap:5px;align-items:center;font:600 11px ui-monospace,monospace;min-width:0"><input type="checkbox" class="pwb-ck" value="'+r.barcode+'">'+r.barcode+'</label>'+badge+'</div>'
               +'<img src="data:image/svg+xml;charset=utf-8,'+encodeURIComponent(svg)+'" style="width:100%;height:56px;object-fit:contain;background:#fff;border:1px solid var(--line2);border-radius:4px" alt="'+r.barcode+'">'
-              +(asn&&r.assigned_ref?('<a class="pwb-openprod" data-ref="'+esc(r.assigned_ref)+'" title="open '+esc(r.assigned_ref)+'" style="font-size:10px;color:var(--blue);text-decoration:underline;cursor:pointer;word-break:break-all;text-align:left;line-height:1.35">▸ '+esc(r.product_name||r.assigned_ref)+'</a>'+(r.assigned_sku?('<div class="mut tiny" style="text-align:left;word-break:break-all">SKU '+esc(r.assigned_sku)+(r.colour_name?(' · '+esc(r.colour_name)):'')+'</div>'):'')):'')
+              +(asn&&r.assigned_ref?('<a class="pwb-openprod" data-ref="'+esc(r.assigned_ref)+'" title="open '+esc(r.assigned_ref)+'" style="font-size:10px;color:var(--blue);text-decoration:underline;cursor:pointer;word-break:break-all;text-align:left;line-height:1.35">▸ '+esc(r.assigned_ref)+'</a>'+(r.assigned_sku?('<div class="mut tiny" style="text-align:left;word-break:break-all">SKU '+esc(r.assigned_sku)+(r.colour_name?(' · '+esc(r.colour_name)):'')+'</div>'):''))
+                :('<a class="pwb-use" data-bc="'+r.barcode+'" data-used="'+(usd?'0':'1')+'" title="'+(usd?'release this barcode back to free':'mark this barcode as used (consumed outside the app, not on a product)')+'" style="font-size:10px;color:'+(usd?'var(--blue)':'var(--muted)')+';text-decoration:underline;cursor:pointer;text-align:left">'+(usd?'↩ mark free':'✓ mark used')+'</a>'))
               +'</label>'; }).join('')
         +'</div>';
       var grid=host.querySelector('#pwb-grid'), dlBtn=host.querySelector('#pwb-dl'), msg=host.querySelector('#pwb-msg');
@@ -14886,6 +14892,11 @@
       function sync(){ var n=selCount(); dlBtn.disabled=!n; dlBtn.textContent='⬇ Download selected'+(n?(' ('+n+')'):''); }
       grid.addEventListener('change',function(e){ if(e.target&&e.target.classList.contains('pwb-ck')){ var cell=e.target.closest('.pwb-cell'); if(cell)cell.style.borderColor=e.target.checked?'var(--blue)':'var(--line)'; sync(); } });
       grid.querySelectorAll('.pwb-openprod').forEach(function(a){ a.onclick=function(e){ e.preventDefault(); e.stopPropagation(); var ref=a.dataset.ref; if(ref)location.hash='#/product/'+encodeURIComponent(ref); }; });   // v27.809 (Ben): open the assigned product (its detail drawer)
+      grid.querySelectorAll('.pwb-use').forEach(function(a){ a.onclick=function(e){ e.preventDefault(); e.stopPropagation(); var bc=a.dataset.bc, used=a.dataset.used==='1'; a.textContent='…';   // v27.837 (Ben): mark a free barcode used / release a used one
+        shipPost('/api/product/workshop-barcode/'+encodeURIComponent(bc)+'/used',{used:used},function(j){ if(j&&j.error)alert(j.error); renderWorkshopBarcodes(b); }); }; });
+      function applyPwbHide(){ host.querySelectorAll('.pwb-cell').forEach(function(c){ c.style.display=(_pwbHideUsed && c.dataset.status!=='free')?'none':''; }); }   // v27.837 (Ben): Hide used → only free barcodes
+      var _hu=host.querySelector('#pwb-hideused'); if(_hu)_hu.onchange=function(){ _pwbHideUsed=_hu.checked; applyPwbHide(); };
+      applyPwbHide();
       host.querySelector('#pwb-selall').onclick=function(){ host.querySelectorAll('.pwb-cell').forEach(function(c){ if(c.querySelector('.pill') && /free/.test(c.querySelector('.pill').textContent)){ var ck=c.querySelector('.pwb-ck'); ck.checked=true; c.style.borderColor='var(--blue)'; } }); sync(); };
       // v27.804 (Ben): download each barcode as its OWN file (no zip). The browser may prompt to "allow multiple
       // downloads" the first time when several are selected — that's expected. Files are staggered slightly so none drop.

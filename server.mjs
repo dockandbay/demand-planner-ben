@@ -7812,8 +7812,24 @@ app.get('/api/product/workshop-barcodes', async (_req, res) => {
       FROM planner.product_workshop_barcodes b
       LEFT JOIN planner.product_dev_items i ON i.ref = b.assigned_ref
       ORDER BY b.seq, b.barcode`)).rows;
-    const free = rows.filter(r => r.status !== 'assigned').length;
-    res.json({ ok: true, total: rows.length, free, assigned: rows.length - free, rows });
+    const free = rows.filter(r => r.status === 'free').length;
+    const assigned = rows.filter(r => r.status === 'assigned').length;
+    const used = rows.filter(r => r.status === 'used').length;   // v27.837 (Ben): manually marked used (not tied to a product)
+    res.json({ ok: true, total: rows.length, free, assigned, used, rows });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+// v27.837 (Ben): manually mark a pool barcode 'used' (consumed outside the app) or release it back to 'free'. Never
+// touches an 'assigned' barcode — that must be freed from its size on the product's Sizes grid first.
+app.post('/api/product/workshop-barcode/:barcode/used', async (req, res) => {
+  try {
+    const bc = String(req.params.barcode || '').trim();
+    const used = (req.body && req.body.used) === true;
+    const cur = (await pool.query(`SELECT status FROM planner.product_workshop_barcodes WHERE barcode=$1`, [bc])).rows[0];
+    if (!cur) return res.status(404).json({ error: 'no such barcode' });
+    if (cur.status === 'assigned') return res.status(400).json({ error: 'barcode is assigned to a product — free it from the size first' });
+    const next = used ? 'used' : 'free';
+    await pool.query(`UPDATE planner.product_workshop_barcodes SET status=$2, assigned_at=CASE WHEN $2='used' THEN now() ELSE NULL END WHERE barcode=$1 AND status<>'assigned'`, [bc, next]);
+    res.json({ ok: true, barcode: bc, status: next });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
 // Sample reject reasons (mig 264) — the defined, editable list tagged when a sample aspect is rejected. Powers the
