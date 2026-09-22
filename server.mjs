@@ -7189,12 +7189,14 @@ app.post('/api/product/size/:id/push-pim', async (req, res) => {
         coalesce(nullif(i.bulk_colour_name,''), i.colour_name, '') colourway
       FROM planner.product_dev_sizes s JOIN planner.product_dev_items i ON i.id=s.item_id WHERE s.id=$1::bigint`, [req.params.id])).rows[0];
     if (!s) return res.status(404).json({ error: 'size not found' });
-    if (!s.working_sku) return res.status(400).json({ error: 'this size has no working SKU to push — set a working SKU first' });
+    // v27.811 (Ben): a size can be pushed WITHOUT a working SKU or barcode — it goes in under the product development ref
+    // (the dev "SKU") so the PIM request still carries an identity. Barcode is optional.
+    const sku = s.working_sku || s.ref;
     await pool.query(`INSERT INTO planner.product_pim_waiting_room (size_id,item_ref,working_sku,barcode,colourway,size_label,product_name,category,status,pushed_by,pushed_at)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'waiting',$9,now())
       ON CONFLICT (size_id) DO UPDATE SET item_ref=excluded.item_ref, working_sku=excluded.working_sku, barcode=excluded.barcode, colourway=excluded.colourway,
         size_label=excluded.size_label, product_name=excluded.product_name, category=excluded.category, status='waiting', pushed_by=excluded.pushed_by, pushed_at=now()`,
-      [s.id, s.ref, s.working_sku, s.barcode || null, s.colourway || null, s.size_label || null, s.product_name || null, s.category || null, authUser(req)]);
+      [s.id, s.ref, sku, s.barcode || null, s.colourway || null, s.size_label || null, s.product_name || null, s.category || null, authUser(req)]);
     res.json({ ok: true });
   } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
 });
