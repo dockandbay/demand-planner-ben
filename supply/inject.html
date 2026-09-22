@@ -13616,7 +13616,7 @@
     document.querySelectorAll('#product-subnav .stab').forEach(function(b){b.classList.toggle('active',b.dataset.k===k||(b.dataset.k==='plan'&&(k==='range'||k==='dashboard')));});   // v27.703 Range / Dashboard are views of PLAN
     try{ writeHash(['product',k==='plan'?'products':k]); }catch(e){}   // v27.711: URL slug is "products" (internal key stays 'plan'; #/product/plan still resolves)
     var c=document.getElementById('product-content'); if(!c)return;
-    if(k==='reports') return renderProductReports(c);
+    if(k==='reports') return renderProductReportsTab(c);
     if(k==='range') return renderProductRange(c);
     if(k==='specs') return renderProductSpecs(c);
     if(k==='config') return renderProductConfig(c);
@@ -14660,6 +14660,42 @@
     root.querySelectorAll('.pact-snz').forEach(function(x){ if(x._b)return; x._b=1; x.onclick=function(e){ e.stopPropagation(); snoozeKeySet(x.dataset.key,0,after); }; }); }
   // v27.773 (Ben): SAMPLING ▸ Reports — big metrics, Type×Season pivot of samples in progress, Supplier×Season KPI table
   // (avg samples/request, avg samples to approve / to reject) with a per-supplier detail popout + PDF.
+  // v27.808 (Ben): PRODUCT ▸ REPORTS now has a sub-nav — Sampling (existing) + PIM waiting room (new). The dispatcher
+  // renders the tabs into `c` and delegates the body to the right renderer, so the existing sampling report is untouched.
+  function renderProductReportsTab(c){ if(typeof window._prodRepTab==='undefined')window._prodRepTab='sampling';
+    var TABS=[['sampling','Sampling'],['waiting','Approved products waiting room']];
+    c.innerHTML='<div id="prodrep-subnav" style="display:flex;gap:2px;margin-bottom:14px;border-bottom:1px solid var(--line);padding-bottom:0">'+TABS.map(function(t){ return '<span class="rtab prodrep-tab'+(t[0]===window._prodRepTab?' active':'')+'" data-k="'+t[0]+'">'+esc(t[1])+'</span>'; }).join('')+'</div><div id="prodrep-body"></div>';
+    c.querySelectorAll('.prodrep-tab').forEach(function(t){ t.onclick=function(){ window._prodRepTab=t.dataset.k; renderProductReportsTab(c); }; });
+    var body=c.querySelector('#prodrep-body');
+    if(window._prodRepTab==='waiting') return renderPimWaitingRoom(body);
+    return renderProductReports(body);
+  }
+  // Approved products waiting room — the SKUs pushed from a size's working SKU, held for PIM entry (no Airtable write).
+  function renderPimWaitingRoom(c){ c.innerHTML='<div class="count" style="padding:10px 2px">Loading waiting room…</div>';
+    fetch('/api/product/pim-waiting-room').then(function(r){return r.json();}).then(function(d){
+      if(!d||d.ok===false){ c.innerHTML='<div style="color:var(--neg)">Failed'+(d&&d.error?': '+d.error:'')+'</div>'; return; }
+      var rows=d.rows||[];
+      var stCh=function(st){ var m=({waiting:['var(--amber-bg)','var(--amber)','Waiting'],in_pim:['var(--pos-bg)','var(--pos)','In PIM'],dropped:['var(--line2)','var(--muted)','Dropped']})[st]||['var(--line2)','var(--muted)',st]; return '<span style="font-size:10px;font-weight:700;padding:1px 8px;border-radius:10px;background:'+m[0]+';color:'+m[1]+'">'+m[2]+'</span>'; };
+      c.innerHTML='<div style="font-weight:700;font-size:14px;margin:0 0 3px">Approved products waiting room</div>'
+        +'<div class="mut tiny" style="margin-bottom:10px;max-width:760px">New-product requests pushed from a product size’s working SKU — a Horizon staging list (SKU + barcode + colourway) held for entry into the PIM. Nothing is written to Airtable automatically.</div>'
+        +'<div class="bar" style="margin-bottom:8px"><span class="pill" style="color:var(--amber);border-color:var(--amber)">'+d.waiting+' waiting</span></div>'
+        +(rows.length? '<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px;min-width:820px"><thead><tr>'+['Working SKU','Barcode','Product','Colourway','Size','Category','Pushed','Status',''].map(function(h){return '<th style="text-align:left;padding:3px 12px 5px 0;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);border-bottom:1px solid var(--line2);white-space:nowrap">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
+          +rows.map(function(x){ return '<tr style="border-bottom:1px solid var(--line2)">'
+            +'<td style="padding:4px 12px 4px 0;font-weight:700;font-family:ui-monospace,Menlo,monospace">'+esc(x.working_sku)+'</td>'
+            +'<td style="padding:4px 12px 4px 0;font-family:ui-monospace,Menlo,monospace">'+(x.barcode?esc(x.barcode):'<span class="mut">—</span>')+'</td>'
+            +'<td style="padding:4px 12px 4px 0">'+esc(x.product_name||x.item_ref)+' <span class="mut tiny">'+esc(x.item_ref)+'</span></td>'
+            +'<td style="padding:4px 12px 4px 0">'+esc(x.colourway||'—')+'</td>'
+            +'<td style="padding:4px 12px 4px 0">'+esc(x.size_label||'—')+'</td>'
+            +'<td style="padding:4px 12px 4px 0">'+esc(x.category||'—')+'</td>'
+            +'<td style="padding:4px 12px 4px 0" class="mut tiny">'+esc(x.pushed_at||'')+(x.pushed_by?' · '+esc(x.pushed_by):'')+'</td>'
+            +'<td style="padding:4px 12px 4px 0">'+stCh(x.status)+'</td>'
+            +'<td style="padding:4px 0;white-space:nowrap">'+(x.status!=='in_pim'?'<button class="save-btn pim-inpim" data-id="'+x.id+'" style="font-size:10px;padding:2px 7px">Mark in PIM</button> ':'')+'<a class="pim-del" data-id="'+x.id+'" title="remove from waiting room" style="color:var(--neg);cursor:pointer;font-weight:700;margin-left:6px">✕</a></td></tr>'; }).join('')
+          +'</tbody></table></div>'
+          : '<div class="count" style="padding:20px 2px;color:var(--muted)">Nothing in the waiting room yet. Push a size’s working SKU from a product’s <b>Sizes</b> grid.</div>');
+      c.querySelectorAll('.pim-inpim').forEach(function(b){ b.onclick=function(){ shipPost('/api/product/pim-waiting-room/'+b.dataset.id+'/status',{status:'in_pim'},function(j){ if(j&&j.error){alert(j.error);return;} renderPimWaitingRoom(c); }); }; });
+      c.querySelectorAll('.pim-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Remove this from the waiting room?'))return; shipPost('/api/product/pim-waiting-room/'+a.dataset.id+'/delete',{},function(j){ if(j&&j.error){alert(j.error);return;} renderPimWaitingRoom(c); }); }; });
+    }).catch(function(e){ c.innerHTML='<div style="color:var(--neg)">Failed: '+(e&&e.message||e)+'</div>'; });
+  }
   function renderProductReports(c){ c.innerHTML='<div class="hz-skel" aria-label="Loading"><i></i><i></i><i></i></div>';
     pget('/api/product/reports/sampling').then(function(d){ if(!d||d.error){ c.innerHTML='<div style="color:var(--neg)">Failed: '+esc((d&&d.error)||'error')+'</div>'; return; }
       var big=d.big||{}, ts=d.typeSeason||{seasons:[],types:[],cells:{}}, ss=d.supplierSeason||[], detail=d.detail||{};
@@ -15755,7 +15791,7 @@
           +'<td style="padding:4px 8px"><button class="cell-pick szm-sku" data-id="'+s.id+'" data-sku="'+esc(s.mapped_sku||'')+'" title="map to a real planner SKU">'+(s.mapped_sku?'<b style="font-family:ui-monospace,Menlo,monospace">'+esc(s.mapped_sku)+'</b>':'<span class="mut">— pick ▾</span>')+'</button></td>'
           +'<td style="padding:4px 8px"><input class="fci szm-wsku" data-id="'+s.id+'" value="'+esc(s.working_sku||'')+'" placeholder="working sku…" style="width:150px;font-family:ui-monospace,Menlo,monospace;font-size:11px"></td>'
           +'<td style="padding:4px 8px">'+apSel(s)+'</td>'
-          +'<td style="padding:4px 8px"><a class="szm-del" data-id="'+s.id+'" title="remove size (releases its barcode)" style="color:var(--neg);cursor:pointer;font-weight:700">✕</a></td></tr>'; }).join('');
+          +'<td style="padding:4px 8px;white-space:nowrap">'+(s.working_sku?'<button class="save-btn szm-pim" data-id="'+s.id+'" title="push this working SKU (+ barcode + colourway) into the PIM waiting room" style="font-size:10px;padding:2px 8px;margin-right:8px;background:var(--violet-bg);color:var(--violet);border-color:var(--violet)">⤴ Push to PIM</button>':'')+'<a class="szm-del" data-id="'+s.id+'" title="remove size (releases its barcode)" style="color:var(--neg);cursor:pointer;font-weight:700">✕</a></td></tr>'; }).join('');
         host.innerHTML='<div style="font-weight:700;font-size:13px;margin:0 0 6px">Sizes <span class="mut" style="font-weight:400;font-size:11px">— add a size, assign a workshop barcode, map a real SKU or set a working SKU</span></div>'
           +'<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:12px"><thead><tr>'+['Size','Barcode','Real SKU','Working SKU','Approval',''].map(function(h){return '<th style="text-align:left;padding:2px 8px 5px;font-size:10px;text-transform:uppercase;letter-spacing:.04em;color:var(--faint);border-bottom:1px solid var(--line2)">'+h+'</th>';}).join('')+'</tr></thead><tbody>'
           +(rows||'<tr><td colspan="6" class="mut tiny" style="padding:6px 8px">No sizes yet — add one below.</td></tr>')+'</tbody></table></div>'
@@ -15769,6 +15805,7 @@
         host.querySelectorAll('.szm-sku').forEach(function(b){ b.onclick=function(e){ e.stopPropagation(); openSkuPick(b,function(val){ var so=szObj(b.dataset.id); if(so)so.mapped_sku=(val||''); renderSizesMaster(); reRender(); }); }; });   // openSkuPick persists mapped_sku itself
         host.querySelectorAll('.szm-bc').forEach(function(el){ el.onchange=function(){ var id=el.dataset.id, bc=el.value; el.disabled=true; shipPost('/api/product/size/'+id+'/barcode',{barcode:bc},function(j){ el.disabled=false; if(j&&j.error){ alert(j.error); renderSizesMaster(); return; } var so=szObj(id); if(so)so.barcode=bc; renderSizesMaster(); reRender(); }); }; });   // claims/releases a pool barcode → re-render to refresh the free list
         host.querySelectorAll('.szm-del').forEach(function(a){ a.onclick=function(){ if(!confirm('Remove this size? Its barcode is released back to the pool.'))return; shipPost('/api/product/size/'+a.dataset.id+'/delete',{},function(j){ if(j&&j.error){alert(j.error);return;} reloadTab(); }); }; });
+        host.querySelectorAll('.szm-pim').forEach(function(b){ b.onclick=function(){ b.disabled=true; var _t=b.textContent; b.textContent='Pushing…'; shipPost('/api/product/size/'+b.dataset.id+'/push-pim',{},function(j){ b.disabled=false; if(j&&j.error){ b.textContent=_t; alert(j.error); return; } b.textContent='✓ In waiting room'; b.style.background='var(--pos-bg)'; b.style.color='var(--pos)'; b.style.borderColor='var(--pos)'; setTimeout(function(){ if(b){ b.textContent=_t; b.style.background='var(--violet-bg)'; b.style.color='var(--violet)'; b.style.borderColor='var(--violet)'; } },2200); }); }; });   // v27.808 (Ben): push working SKU → PIM waiting room
       }).catch(function(){ host.innerHTML='<div class="mut tiny" style="color:var(--neg)">Could not load sizes.</div>'; });
     }
     (function(){ var _pmType=body.querySelector('#pm-type'), _pmSeasonRow=body.querySelector('#pm-season-row');   // Custom Order → hide the Season field (in addition to the generic .pm-fld save below)

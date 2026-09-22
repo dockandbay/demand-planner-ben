@@ -7179,6 +7179,44 @@ app.post('/api/product/size/:id/barcode', async (req, res) => {
   } catch (e) { try { await client.query('ROLLBACK'); } catch (_) {} log500(e); res.status(500).json({ error: e.message }); }
   finally { client.release(); }
 });
+// Approved products waiting room (mig 295, phase 3): push a SIZE with a working SKU into the Horizon PIM waiting room —
+// a staging list of new-product requests (SKU + barcode + colourway). NO Airtable write; this is an in-Horizon report.
+// Upserts one row per source size (re-pushing refreshes it). Requires the size to have a working_sku.
+app.post('/api/product/size/:id/push-pim', async (req, res) => {
+  try {
+    const s = (await pool.query(`SELECT s.id, coalesce(s.size_label,'') size_label, coalesce(s.working_sku,'') working_sku, coalesce(s.barcode,'') barcode,
+        i.ref, coalesce(i.description,'') product_name, coalesce(i.category,'') category,
+        coalesce(nullif(i.bulk_colour_name,''), i.colour_name, '') colourway
+      FROM planner.product_dev_sizes s JOIN planner.product_dev_items i ON i.id=s.item_id WHERE s.id=$1::bigint`, [req.params.id])).rows[0];
+    if (!s) return res.status(404).json({ error: 'size not found' });
+    if (!s.working_sku) return res.status(400).json({ error: 'this size has no working SKU to push — set a working SKU first' });
+    await pool.query(`INSERT INTO planner.product_pim_waiting_room (size_id,item_ref,working_sku,barcode,colourway,size_label,product_name,category,status,pushed_by,pushed_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'waiting',$9,now())
+      ON CONFLICT (size_id) DO UPDATE SET item_ref=excluded.item_ref, working_sku=excluded.working_sku, barcode=excluded.barcode, colourway=excluded.colourway,
+        size_label=excluded.size_label, product_name=excluded.product_name, category=excluded.category, status='waiting', pushed_by=excluded.pushed_by, pushed_at=now()`,
+      [s.id, s.ref, s.working_sku, s.barcode || null, s.colourway || null, s.size_label || null, s.product_name || null, s.category || null, authUser(req)]);
+    res.json({ ok: true });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.get('/api/product/pim-waiting-room', async (_req, res) => {
+  try {
+    const rows = (await pool.query(`SELECT id, size_id, coalesce(item_ref,'') item_ref, coalesce(working_sku,'') working_sku, coalesce(barcode,'') barcode,
+        coalesce(colourway,'') colourway, coalesce(size_label,'') size_label, coalesce(product_name,'') product_name, coalesce(category,'') category,
+        status, coalesce(pushed_by,'') pushed_by, to_char(pushed_at,'YYYY-MM-DD') pushed_at, coalesce(notes,'') notes
+      FROM planner.product_pim_waiting_room ORDER BY (status='waiting') DESC, pushed_at DESC, id DESC`)).rows;
+    res.json({ ok: true, rows, waiting: rows.filter(r => r.status === 'waiting').length });
+  } catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/pim-waiting-room/:id/status', async (req, res) => {
+  const st = (req.body && req.body.status) || '';
+  if (['waiting', 'in_pim', 'dropped'].indexOf(st) < 0) return res.status(400).json({ error: 'status must be waiting | in_pim | dropped' });
+  try { await pool.query(`UPDATE planner.product_pim_waiting_room SET status=$2 WHERE id=$1::bigint`, [req.params.id, st]); res.json({ ok: true }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
+app.post('/api/product/pim-waiting-room/:id/delete', async (req, res) => {
+  try { await pool.query(`DELETE FROM planner.product_pim_waiting_room WHERE id=$1::bigint`, [req.params.id]); res.json({ ok: true }); }
+  catch (e) { log500(e); res.status(500).json({ error: e.message }); }
+});
 // SKU picker source for mapping an approved size → a planner SKU (full searchable list).
 app.get('/api/product/skus', async (_req, res) => {
   try { const rows = (await pool.query(`SELECT sku,
