@@ -924,6 +924,8 @@ body header.pv-top .pv-lang button:hover{color:#fff}
 
 /* v27.822 (Ben): SAMPLING filters behind a "⚙ Filters" button on mobile (matches the SUPPLY grids). Desktop shows them
    inline (the wrapper is display:contents so its children flow in the toolbar flex); the toggle button is phone-only. */
+/* v27.823 (Ben): the search-box scan icon picks up the accent on hover/focus */
+#app #product-root .smp-qscan:hover,#app #product-root .smp-qscan:focus{color:var(--blue)}
 #app #product-root .smp-filt-toggle{display:none}
 #app #product-root .smp-filtgrp{display:contents}
 @media (max-width:640px){
